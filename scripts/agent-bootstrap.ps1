@@ -90,7 +90,28 @@ if ($current -ne $Branch) {
 
 $fetch = Invoke-Git @("fetch", "--quiet", "origin", $Branch)
 if ($fetch.Code -ne 0) {
-    Write-Host "Bootstrap   : git fetch failed; starting with local code" -ForegroundColor Yellow
+    # GitHub CLI may already be authenticated even when Git Credential Manager is
+    # not configured for this private repository. Repair the credential helper once
+    # and retry so the unattended agent can continue receiving GPT queue updates.
+    $gh = Get-Command gh -ErrorAction SilentlyContinue
+    if ($gh) {
+        $oldPreference = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        try {
+            & gh auth status --hostname github.com *> $null
+            if ($LASTEXITCODE -eq 0) {
+                & gh auth setup-git --hostname github.com *> $null
+                if ($LASTEXITCODE -eq 0) {
+                    $fetch = Invoke-Git @("fetch", "--quiet", "origin", $Branch)
+                }
+            }
+        } finally {
+            $ErrorActionPreference = $oldPreference
+        }
+    }
+}
+if ($fetch.Code -ne 0) {
+    Write-Host "Bootstrap   : git fetch failed after credential repair; starting with local code" -ForegroundColor Yellow
     exit 0
 }
 
@@ -110,7 +131,90 @@ $ahead = [int]$parts[0]
 $behind = [int]$parts[1]
 
 if ($ahead -gt 0 -and $behind -gt 0) {
-    Write-Host "Bootstrap   : local/remote diverged (ahead $ahead, behind $behind); no merge" -ForegroundColor Red
+    # A drained old single-task queue may race with a newly published GPT rolling
+    # batch and create one local control-only commit. That commit contains no
+    # business work and must not strand the agent forever.
+    $messages = (Invoke-Git @("log", "--format=%s", "origin/$Branch..HEAD")).Text -split "\r?\n" | Where-Object { $_ }
+    $localOnlyPaths = Get-Paths @("-c", "core.quotepath=false", "diff", "--name-only", "origin/$Branch...HEAD")
+    $safePaths = @('.ai/PROJECT_STATE.json', '.ai/audit.jsonl')
+    $safeControlOnly = $null -ne $localOnlyPaths -and $localOnlyPaths.Count -gt 0
+    foreach ($path in $localOnlyPaths) {
+        if ($path -notin $safePaths) { $safeControlOnly = $false; break }
+    }
+    $safeMessages = $messages.Count -gt 0
+    foreach ($message in $messages) {
+        if ($message -notmatch '^chore: (automation queue drained|request rolling queue replenishment)if ($ahead -gt 0) {
+    Write-Host "Bootstrap   : local ahead by $ahead commit(s); no pull needed" -ForegroundColor Yellow
+    exit 0
+}
+if ($behind -eq 0) {
+    Write-Host "Bootstrap   : up to date" -ForegroundColor Green
+    Repair-DeferredBrowserFailedHead
+    exit 0
+}
+
+$localStatus = Invoke-Git @("-c", "core.quotepath=false", "status", "--porcelain", "--untracked-files=all")
+if ($localStatus.Code -ne 0) {
+    Write-Host "Bootstrap   : unable to inspect local changes" -ForegroundColor Red
+    exit 0
+}
+
+$localPaths = @()
+foreach ($line in ($localStatus.Text -split "\r?\n")) {
+    if ([string]::IsNullOrWhiteSpace($line) -or $line.Length -lt 4) { continue }
+    $payload = $line.Substring(3).Trim()
+    if ($payload -match " -> ") {
+        Write-Host "Bootstrap   : rename/copy detected; no automatic merge" -ForegroundColor Yellow
+        exit 0
+    }
+    if ($payload) { $localPaths += $payload.Replace("\", "/") }
+}
+$localPaths = @($localPaths | Sort-Object -Unique)
+
+$incomingPaths = Get-Paths @("-c", "core.quotepath=false", "diff", "--name-only", "HEAD..origin/$Branch")
+if ($null -eq $incomingPaths) {
+    Write-Host "Bootstrap   : unable to inspect incoming paths" -ForegroundColor Red
+    exit 0
+}
+
+if ($localPaths.Count -gt 0) {
+    $set = @{}
+    foreach ($path in $localPaths) { $set[$path] = $true }
+    $conflicts = @($incomingPaths | Where-Object { $set.ContainsKey($_) })
+    if ($conflicts.Count -gt 0) {
+        $sample = ($conflicts | Select-Object -First 4) -join ", "
+        Write-Host "Bootstrap   : remote update overlaps local work; merge skipped" -ForegroundColor Yellow
+        Write-Host "              $sample" -ForegroundColor DarkYellow
+        exit 0
+    }
+}
+
+$merge = Invoke-Git @("merge", "--ff-only", "--quiet", "origin/$Branch")
+if ($merge.Code -ne 0) {
+    Write-Host "Bootstrap   : safe fast-forward failed; local work preserved" -ForegroundColor Red
+    exit 0
+}
+
+Write-Host "Bootstrap   : updated $behind commit(s); local task work preserved" -ForegroundColor Green
+Repair-DeferredBrowserFailedHead
+exit 0
+) {
+            $safeMessages = $false
+            break
+        }
+    }
+    $worktree = Invoke-Git @("status", "--porcelain")
+    if ($safeControlOnly -and $safeMessages -and [string]::IsNullOrWhiteSpace($worktree.Text)) {
+        $backupRef = "refs/backup/rolling-recovery-" + (Get-Date -Format "yyyyMMddHHmmss")
+        $null = Invoke-Git @("update-ref", $backupRef, "HEAD")
+        $reset = Invoke-Git @("reset", "--hard", "origin/$Branch")
+        if ($reset.Code -eq 0) {
+            Write-Host "Bootstrap   : discarded stale queue-drained control commit; rolling batch restored" -ForegroundColor Green
+            Repair-DeferredBrowserFailedHead
+            exit 0
+        }
+    }
+    Write-Host "Bootstrap   : local/remote diverged (ahead $ahead, behind $behind); business-safe auto-recovery not applicable" -ForegroundColor Red
     exit 0
 }
 if ($ahead -gt 0) {
