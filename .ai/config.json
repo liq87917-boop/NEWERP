@@ -8,6 +8,11 @@
   "auto_commit": true,
   "auto_push": false,
   "human_gate": true,
+  "pipeline": {
+    "lock_file": ".ai/pipeline.lock",
+    "push_retry_attempts": 3,
+    "continue_until_queue_empty": true
+  },
   "security_baseline_decision": ".ai/decisions/SECURITY_BASELINE_APPROVED.json",
   "cline_command": "C:\\Users\\Admin\\AppData\\Roaming\\npm\\cline.cmd",
   "protected_paths": [
@@ -15,7 +20,7 @@
     "checkpoints/**", "user_input_files/**", "logs/**", "**/*.sql",
     "src/ERP.Infrastructure/Data/SchemaUpgrader.cs", "src/ERP.Infrastructure/Data/SeedData*.cs"
   ],
-  "ignored_change_paths": [".ai/logs/**", ".ai/results/**", "**/bin/**", "**/obj/**"],
+  "ignored_change_paths": [".ai/logs/**", ".ai/results/**", ".ai/pipeline.lock", "**/bin/**", "**/obj/**"],
   "orchestrator_paths": [".ai/PROJECT_STATE.json", ".ai/tasks/**", ".ai/results/**", ".ai/decisions/**", ".ai/audit.jsonl"],
   "validation_profiles": {
     "safe": [

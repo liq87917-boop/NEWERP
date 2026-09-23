@@ -13,6 +13,7 @@ logs/
 .ai/logs/*
 !.ai/logs/.gitkeep
 .ai/results/*-validation.json
+.ai/pipeline.lock
 *.tmp
 __pycache__/
 *.py[cod]
