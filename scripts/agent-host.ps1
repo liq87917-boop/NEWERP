@@ -386,6 +386,9 @@ function Get-AgentMode {
     if ((Test-RecoverablePathGuard $State $Head) -or (Test-RecoverableInterruptedTask $State $Head) -or (Test-RecoverableBrowserFailure $State $Head) -or (Test-RecoverableDeferredFailedHead $State $Head)) {
         return 'READY'
     }
+    if ($State -and $State.phase -eq 'replenishing') {
+        return 'REPLENISH'
+    }
     if ($State -and $State.phase -in @('blocked', 'human_attention', 'waiting_human_gate', 'push_pending')) {
         return 'ATTENTION'
     }
@@ -437,6 +440,7 @@ function Get-StatusLines {
     $modeColor = 'Gray'
     if ($mode -eq 'RUNNING') { $modeColor = 'Green' }
     elseif ($mode -eq 'READY') { $modeColor = 'Cyan' }
+    elseif ($mode -eq 'REPLENISH') { $modeColor = 'DarkCyan' }
     elseif ($mode -eq 'PAUSED') { $modeColor = 'Yellow' }
     elseif ($mode -eq 'ATTENTION') { $modeColor = 'Red' }
 
@@ -524,12 +528,14 @@ function Get-StatusLines {
     $lines += New-StatusLine ' Local runner' 'Cyan'
     if ($pipelineProcess -and -not $pipelineProcess.HasExited) {
         $lines += New-StatusLine (" Pipeline   : running (PID {0})" -f $pipelineProcess.Id) 'Green'
+    } elseif ($State -and $State.phase -eq 'replenishing') {
+        $lines += New-StatusLine ' Pipeline   : rolling queue replenishment watch (agent remains active)' 'DarkCyan'
     } elseif ($null -ne $lastPipelineExit) {
         $pipelineColor = 'Gray'
         if ($lastPipelineExit -ne 0) { $pipelineColor = 'Red' }
         $lines += New-StatusLine (" Pipeline   : stopped, last exit={0} at {1}" -f $lastPipelineExit, $lastPipelineEndedAt) $pipelineColor
     } else {
-        $lines += New-StatusLine ' Pipeline   : waiting'
+        $lines += New-StatusLine ' Pipeline   : waiting for runnable task'
     }
 
     if ((Test-RecoverablePathGuard $State $Head) -or (Test-RecoverableInterruptedTask $State $Head) -or (Test-RecoverableBrowserFailure $State $Head) -or (Test-RecoverableDeferredFailedHead $State $Head)) {
