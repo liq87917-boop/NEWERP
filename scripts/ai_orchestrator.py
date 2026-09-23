@@ -78,6 +78,19 @@ def path_violations(task: dict[str, Any], config: dict[str, Any], paths: list[st
 def set_state(state: dict[str, Any], **updates: Any) -> None:
     state.update(updates); state["updated_at"] = utc_now(); save_json(STATE_PATH, state)
 
+def checkpoint_control_files(message: str) -> None:
+    if not git_available(): return
+    config = load_json(CONFIG_PATH)
+    paths = changed_paths()
+    unexpected = [p for p in paths if not matches(p, config["ignored_change_paths"]) and not matches(p, config.get("orchestrator_paths", []))]
+    if unexpected:
+        raise RuntimeError("Refusing to checkpoint Human Gate with unrelated changes: " + ", ".join(unexpected))
+    control = [p for p in paths if matches(p, config.get("orchestrator_paths", []))]
+    if not control: return
+    subprocess.run(["git", "add", "--", *control], cwd=ROOT, check=True)
+    if subprocess.run(["git", "commit", "-m", message], cwd=ROOT).returncode != 0:
+        raise RuntimeError("Human Gate checkpoint failed")
+
 def status() -> int:
     config, state = load_json(CONFIG_PATH), load_json(STATE_PATH)
     tasks = pending_tasks(config)
@@ -92,12 +105,14 @@ def approve(task_id: str, actor: str, note: str) -> int:
     save_json(path, task)
     decision = {"task": task_id, "decision": "approved", "actor": actor, "note": note, "at": utc_now()}
     save_json(DECISIONS_DIR / f"{task_id}-approved.json", decision); audit("human_gate_approved", **decision)
+    checkpoint_control_files(f"{task_id}: approve Human Gate")
     print(f"Approved {task_id}"); return 0
 
 def approve_baseline(actor: str, note: str) -> int:
     decision = {"decision": "approved", "scope": "security_baseline", "actor": actor, "note": note, "at": utc_now()}
     save_json(DECISIONS_DIR / "SECURITY_BASELINE_APPROVED.json", decision)
     audit("security_baseline_approved", **decision)
+    checkpoint_control_files("chore: approve repository security baseline")
     print("Approved security baseline"); return 0
 
 def build_prompt(task: dict[str, Any], attempt: int, previous_error: str) -> str:
