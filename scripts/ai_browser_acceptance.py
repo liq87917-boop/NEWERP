@@ -79,6 +79,7 @@ def main() -> int:
     env["ERP_AI_EVIDENCE_DIR"] = str(evidence_dir)
     env["ERP_AI_ACCEPTANCE_TASK"] = args.task
     env["ERP_AI_EDGE_BINARY"] = str(edge)
+    env["ERP_AI_TEST_RUN"] = "1"
     env["ASPNETCORE_ENVIRONMENT"] = "Development"
 
     test_filter = acceptance.get("test_filter") or "Collection=UiTests"
