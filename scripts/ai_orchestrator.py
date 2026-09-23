@@ -101,6 +101,11 @@ def validate_task(task: dict[str, Any], config: dict[str, Any]) -> None:
         raise ValueError("Browser-completed tasks require browser_acceptance.scenarios")
 
 
+def browser_acceptance_is_deferred(config: dict[str, Any]) -> bool:
+    """Return True while feature development intentionally defers real-browser/UI acceptance."""
+    return bool(config.get("completion_policy", {}).get("defer_browser_during_development", False))
+
+
 def gate_is_approved(task: dict[str, Any]) -> bool:
     gate = task.get("human_gate", {})
     level = str(gate.get("level", "L1")).upper()
@@ -191,11 +196,11 @@ def recoverable_interrupted_task(config: dict[str, Any], state: dict[str, Any]) 
 
 
 def recoverable_browser_failure_task(config: dict[str, Any], state: dict[str, Any]) -> tuple[Path, dict[str, Any]] | None:
-    """Give a failed real-browser task a bounded autonomous recovery cycle.
+    """Recover a task that was previously failed only by real-browser acceptance.
 
-    Browser acceptance failures are actionable engineering failures, not Human Gates.
-    If the existing dirty tree is still within the task guard, allow up to two extra
-    recovery cycles so Cline can inspect the concrete browser log and repair the UI.
+    When browser/UI acceptance is deferred for the feature-development phase, an
+    existing browser failure must be recoverable regardless of the historical retry
+    count so the task can be re-evaluated using core engineering validation only.
     """
     if state.get("phase") != "human_attention":
         return None
@@ -213,7 +218,7 @@ def recoverable_browser_failure_task(config: dict[str, Any], state: dict[str, An
     task = load_json(path)
     if task.get("status") != "failed":
         return None
-    if int(task.get("browser_recovery_cycles", 0) or 0) >= 2:
+    if not browser_acceptance_is_deferred(config) and int(task.get("browser_recovery_cycles", 0) or 0) >= 2:
         return None
     try:
         validate_task(task, config)
@@ -407,10 +412,26 @@ def run_next(dry_run: bool) -> int:
         if validation.returncode != 0:
             previous_error = f"Engineering validation failed with code {validation.returncode}."; audit("validation_failed", task=task["id"], attempt=attempt); continue
         task["status"] = "code_ready"; save_json(task_path, task)
-        set_state(state, phase="browser_acceptance", current_task=task["id"], finish_reason="code_ready_not_complete")
-
         completion_mode = task.get("completion_mode", config.get("completion_policy", {}).get("default_mode", "browser"))
-        if completion_mode == "browser":
+        browser_deferred = completion_mode == "browser" and browser_acceptance_is_deferred(config)
+        if browser_deferred:
+            browser_manifest = {
+                "status": "deferred",
+                "reason": "Real-browser/UI acceptance is deferred until FINAL-UI-ACCEPTANCE.",
+                "deferred_at": utc_now(),
+            }
+            set_state(
+                state,
+                phase="developing",
+                current_task=task["id"],
+                browser_acceptance={"status": "deferred"},
+                finish_reason="core_validated_browser_deferred",
+            )
+            audit("browser_acceptance_deferred", task=task["id"])
+        else:
+            set_state(state, phase="browser_acceptance", current_task=task["id"], finish_reason="code_ready_not_complete")
+
+        if completion_mode == "browser" and not browser_deferred:
             browser_code, browser_manifest, browser_log = run_browser_acceptance(task)
             if browser_code == 20:
                 task["status"] = "blocked"; save_json(task_path, task)
@@ -433,7 +454,11 @@ def run_next(dry_run: bool) -> int:
         if not business_changes:
             previous_error = "Task produced no checkpointable business changes."; task["status"] = "in_progress"; save_json(task_path, task); continue
         task["status"] = "completed"; save_json(task_path, task)
-        normalized = "browser_accepted" if completion_mode == "browser" else "control_plane_validated"
+        normalized = (
+            "browser_deferred"
+            if completion_mode == "browser" and browser_deferred
+            else ("browser_accepted" if completion_mode == "browser" else "control_plane_validated")
+        )
         result = {
             "task": task["id"], "status": "completed", "execution_outcome": "completed",
             "normalized_finish_reason": normalized, "cline_exit_code": cline_code,
@@ -457,7 +482,7 @@ def run_next(dry_run: bool) -> int:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="NEWERP guarded browser-completion orchestrator")
+    parser = argparse.ArgumentParser(description="NEWERP guarded task orchestrator with deferrable browser acceptance")
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("status"); runner = sub.add_parser("run-next"); runner.add_argument("--dry-run", action="store_true")
     approval = sub.add_parser("approve"); approval.add_argument("task_id"); approval.add_argument("--by", required=True); approval.add_argument("--note", required=True)
