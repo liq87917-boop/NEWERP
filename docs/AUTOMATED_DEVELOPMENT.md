@@ -46,7 +46,7 @@ Runner 每次只执行一个任务。Cline 修改完成后先跑工程验证，�
 
 队列目标大小为 3：保持当前任务和最多两个后续任务，后续任务必须声明依赖。自动补充的任务不能绕过队首失败或 Human Gate。
 
-当前尚未配置 Git remote，所以 `.ai/config.json` 中 `auto_push` 保持为 `false`。配置 remote 并确认分支保护后才能启用。
+Git remote 已配置，`.ai/config.json` 中 `auto_push` 已启用。普通任务在本机工程验证与真实 Edge 验收通过并提交 checkpoint 后会自动 push；push 失败会进入 `push_pending`，只重试同步，不会重新执行已经完成的开发和浏览器验收。
 
 ## Human Gate
 
@@ -67,9 +67,9 @@ Runner 每次只执行一个任务。Cline 修改完成后先跑工程验证，�
 
 ## CI 分层
 
-Push 和 pull request 默认只运行 Release build 与 `ERP.UnitTests`。数据库集成测试和 UI 测试只能通过 `workflow_dispatch` 手动开启，并分别绑定 `erp-integration`、`erp-ui` GitHub Environment。
+Pull request 默认只运行 Release build 与 `ERP.UnitTests`，用于快速代码审查。Push 到 `main`、`master` 或 `develop` 后会在 Build & Unit Tests 成功后自动运行数据库集成测试和真实 Edge UI Smoke Tests，并分别使用 `erp-integration`、`erp-ui` GitHub Environment。
 
-在 GitHub 中为这两个 Environment 配置 required reviewers，并使用测试环境专用 secrets；不要配置生产数据库或生产 OSS 凭据。
+`workflow_dispatch` 仍保留，用于人工重跑或单独验证；共享测试环境使用 workflow-level concurrency 串行化，避免多个任务同时操作同一测试数据库。两个 Environment 只能使用测试环境专用 secrets，不得配置生产数据库或生产 OSS 凭据。
 
 ## 新任务建议
 
