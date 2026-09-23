@@ -9,6 +9,7 @@ $ErrorActionPreference = 'Stop'
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $root = Split-Path -Parent $scriptDir
 $statePath = Join-Path $root '.ai\PROJECT_STATE.json'
+$configPath = Join-Path $root '.ai\config.json'
 $tasksDir = Join-Path $root '.ai\tasks'
 $logsDir = Join-Path $root '.ai\logs'
 $pipelineScript = Join-Path $scriptDir 'run-pipeline.ps1'
@@ -334,6 +335,16 @@ function Test-RecoverableInterruptedTask {
     return $Head.status -in @('in_progress', 'code_ready')
 }
 
+function Test-BrowserAcceptanceDeferred {
+    if (-not (Test-Path $configPath)) { return $false }
+    try {
+        $config = Get-Content $configPath -Raw -Encoding UTF8 | ConvertFrom-Json
+        return ($null -ne $config.completion_policy -and $config.completion_policy.defer_browser_during_development -eq $true)
+    } catch {
+        return $false
+    }
+}
+
 function Test-RecoverableBrowserFailure {
     param($State, $Head)
 
@@ -344,6 +355,11 @@ function Test-RecoverableBrowserFailure {
     $blockerText = [string]$State.blocker
     if (-not $blockerText.StartsWith('Real-browser acceptance failed')) { return $false }
     $cycles = 0
+    if (Test-BrowserAcceptanceDeferred) {
+        # Browser/UI is non-blocking during feature development. Recover an
+        # existing browser-only failure even if its old recovery budget ended.
+        return $true
+    }
     if ($Head.PSObject.Properties.Name -contains 'browser_recovery_cycles') {
         $cycles = [int]$Head.browser_recovery_cycles
     }
