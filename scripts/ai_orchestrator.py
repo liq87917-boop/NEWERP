@@ -88,6 +88,36 @@ def next_task(config: dict[str, Any]) -> tuple[Path, dict[str, Any]] | None:
     return None
 
 
+def normalize_failed_head_for_deferred_browser(config: dict[str, Any], state: dict[str, Any]) -> tuple[Path, dict[str, Any]] | None:
+    """Turn a stale failed queue head into retry when browser/UI is globally deferred.
+
+    This intentionally ignores historical phase/blocker wording. The task is not
+    marked completed here; it must still pass the configured core engineering
+    validation before completion.
+    """
+    if not browser_acceptance_is_deferred(config):
+        return None
+    for path, task in all_tasks(config):
+        if task.get("status") in TERMINAL_STATUSES:
+            continue
+        if task.get("status") != "failed":
+            return None
+        task["status"] = "retry"
+        task["attempts"] = 0
+        save_json(path, task)
+        set_state(
+            state,
+            phase="ready",
+            current_task=task.get("id"),
+            blocker=None,
+            finish_reason="failed_head_normalized_for_deferred_browser",
+            browser_acceptance={"status": "deferred"},
+        )
+        audit("failed_head_normalized_for_deferred_browser", task=task.get("id"))
+        return path, task
+    return None
+
+
 def validate_task(task: dict[str, Any], config: dict[str, Any]) -> None:
     required = {"id", "title", "status", "description", "acceptance_criteria", "allowed_paths", "validation_profile", "human_gate"}
     missing = sorted(required - task.keys())
@@ -361,15 +391,24 @@ def run_next(dry_run: bool) -> int:
     recovered = recover_push_pending(config, state)
     if recovered is not None: return recovered
 
+    normalized_failed_head = normalize_failed_head_for_deferred_browser(config, state)
+    if normalized_failed_head is not None:
+        state = load_json(STATE_PATH)
+
     resume_existing = False
     resume_reason: str | None = None
-    item = recoverable_path_guard_task(config, state)
+    item = normalized_failed_head
     if item is not None:
-        resume_existing = True
-        resume_reason = "path_guard_recovered"
-        audit("path_guard_recovery_started", task=item[1]["id"], changed_paths=changed_paths())
+        resume_existing = bool(changed_paths())
+        resume_reason = "failed_head_normalized_for_deferred_browser"
     else:
-        item = recoverable_interrupted_task(config, state)
+        item = recoverable_path_guard_task(config, state)
+        if item is not None:
+            resume_existing = True
+            resume_reason = "path_guard_recovered"
+            audit("path_guard_recovery_started", task=item[1]["id"], changed_paths=changed_paths())
+        else:
+            item = recoverable_interrupted_task(config, state)
         if item is not None:
             resume_existing = True
             resume_reason = "interrupted_task_recovered"
