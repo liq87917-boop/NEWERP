@@ -3,30 +3,28 @@
   "controller": "gpt_conversation",
   "phase": "idle",
   "current_task": null,
-  "last_completed_task": "ERP-003",
-  "last_reviewed_task": "ERP-003",
+  "last_completed_task": "ERP-004",
+  "last_reviewed_task": "ERP-004",
   "blocker": null,
   "external_actions": [
-    "Rotate the previously exposed SQL Server credential at the database provider.",
-    "Rotate the previously exposed OSS access key at the cloud provider.",
-    "Configure GitHub environments erp-integration and erp-ui with required reviewers and test-only secrets before enabling high-risk CI jobs.",
-    "Add a Git remote when the destination repository is chosen; auto_push remains disabled until then."
+    "Rotate any previously exposed SQL Server credential at the database provider if rotation has not already been completed.",
+    "Rotate any previously exposed OSS access key at the cloud provider if rotation has not already been completed."
   ],
   "validation": {
-    "profile": "safe",
+    "profile": "full_ci",
     "status": "passed",
-    "checked_at": "2026-09-23T02:52:57Z",
-    "summary": "Automation contract tests passed; Release build passed with 0 warnings/errors; 165 unit tests passed. ERP-003 is an explicit control-plane task, so browser acceptance was not used to claim a business completion."
+    "checked_at": "2026-09-23T03:55:30Z",
+    "summary": "ERP-004 autonomous push/full-CI change validated by GitHub Actions run 35815680034: Build & Unit Tests passed, Approved SQL Integration Tests passed, and Approved UI Smoke Tests passed for commit 94929ee3dd3a65badf0a2c85914089a8d0468106."
   },
   "cline_exit_code": null,
   "conversation_control": {
     "mode": "gpt_file_backed",
     "paused": false,
     "pause_reason": null,
-    "last_intent": "install_browser_completion_pipeline",
+    "last_intent": "enable_autonomous_push_and_full_ci",
     "last_actor": "GPT",
     "queue_target_size": 3,
-    "updated_at": "2026-09-23T02:52:57Z"
+    "updated_at": "2026-09-23T03:55:30Z"
   },
   "completion_policy": {
     "default_mode": "browser",
@@ -34,9 +32,15 @@
     "cline_success_is_only": "code_ready"
   },
   "browser_acceptance": {
-    "status": "not_run_for_control_plane_task",
-    "note": "ERP-003 changes only the automation control plane; future business tasks require real Edge acceptance."
+    "status": "ci_ui_smoke_passed_for_control_plane_task",
+    "note": "ERP-004 changes the automation control plane. The approved GitHub Actions UI smoke job passed; future business tasks still require real Edge acceptance evidence under the task completion policy."
+  },
+  "human_gates": {
+    "production_database_changes": "required",
+    "production_oss_changes": "required",
+    "production_deployment_or_release": "required",
+    "irreversible_data_operations": "required"
   },
   "finish_reason": "queue_empty",
-  "updated_at": "2026-09-23T02:52:57Z"
+  "updated_at": "2026-09-23T03:55:30Z"
 }
