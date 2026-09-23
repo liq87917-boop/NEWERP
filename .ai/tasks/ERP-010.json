@@ -1,0 +1,52 @@
+{
+  "id": "ERP-010",
+  "title": "Add Quotation/PI to Sales Order prefill",
+  "status": "pending",
+  "risk_level": "medium",
+  "description": "Complete the audited downstream conversion gap without touching legacy sales-order stored procedures: add Quotation -> Sales Order and Proforma Invoice -> Sales Order prefill/create flows on the existing EF sales-order path introduced by ERP-008. Preserve source traceability and reuse existing sales/order conventions. Production database, deployment and irreversible actions remain out of scope.",
+  "acceptance_criteria": [
+    "Quotation and Proforma Invoice each expose a user-visible action that creates or prefills a Sales Order on the EF sales-order workflow.",
+    "Customer, currency, trade/payment terms, destination, Consignee/Notify/marks and sellable detail lines are mapped deterministically; quantities, prices and totals are revalidated server-side.",
+    "The created Sales Order preserves source quotation/PI traceability using the ERP-008 source fields and does not silently overwrite an existing order.",
+    "Repeated conversion is idempotent or explicitly guarded so accidental double-clicks do not create duplicate downstream documents.",
+    "Unit/integration tests cover both source types, field mapping, duplicate protection and invalid source states; existing safe validation remains green.",
+    "Real Edge acceptance covers Quotation -> Sales Order and PI -> Sales Order with saved/reopened values and no JS/API errors."
+  ],
+  "allowed_paths": [
+    "src/ERP.Domain/**",
+    "src/ERP.Application/**",
+    "src/ERP.Api/Controllers/**",
+    "src/ERP.Api/wwwroot/**",
+    "src/ERP.UnitTests/**",
+    "src/ERP.IntegrationTests/**",
+    "docs/**",
+    ".ai/**"
+  ],
+  "depends_on": [
+    "ERP-007",
+    "ERP-008"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "browser",
+  "browser_acceptance": {
+    "required": true,
+    "scenarios": [
+      "Convert an approved Quotation to a Sales Order, reopen it and verify source traceability plus mapped header/detail values.",
+      "Convert an approved PI to a Sales Order and verify mapped values, totals and source PI traceability.",
+      "Attempt the same conversion twice and verify duplicate downstream creation is prevented."
+    ],
+    "test_filter": "Collection=UiTests",
+    "minimum_screenshots": 2
+  },
+  "human_gate": {
+    "required": true,
+    "level": "L2",
+    "status": "approved",
+    "reason": "User explicitly requested continuous NEWERP feature development. This task is limited to application code and test data; production database/deployment/irreversible actions remain separately gated."
+  },
+  "attempts": 0,
+  "created_at": "2026-09-23T12:00:00Z"
+}
