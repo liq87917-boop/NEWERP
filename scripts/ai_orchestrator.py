@@ -161,6 +161,35 @@ def recoverable_path_guard_task(config: dict[str, Any], state: dict[str, Any]) -
     return path, task
 
 
+def recoverable_interrupted_task(config: dict[str, Any], state: dict[str, Any]) -> tuple[Path, dict[str, Any]] | None:
+    """Resume an interrupted local task without discarding its existing work.
+
+    The agent owns the local pipeline process. If that process disappears while the
+    durable state still says developing/browser_acceptance, we may safely validate
+    the existing dirty tree again only when every changed path is still inside the
+    task guard. This turns console/process crashes into resumable work instead of a
+    permanent manual stop.
+    """
+    if state.get("phase") not in {"developing", "browser_acceptance"}:
+        return None
+    task_id = state.get("current_task")
+    if not task_id:
+        return None
+    path = TASKS_DIR / f"{task_id}.json"
+    if not path.exists():
+        return None
+    task = load_json(path)
+    if task.get("status") not in {"in_progress", "code_ready"}:
+        return None
+    try:
+        validate_task(task, config)
+    except ValueError:
+        return None
+    if not changed_paths() or path_violations(task, config):
+        return None
+    return path, task
+
+
 def set_state(state: dict[str, Any], **updates: Any) -> None:
     state.update(updates); state["updated_at"] = utc_now(); save_json(STATE_PATH, state)
 
@@ -227,9 +256,11 @@ def build_prompt(task: dict[str, Any], attempt: int, previous_error: str) -> str
 
 def run_browser_acceptance(task: dict[str, Any]) -> tuple[int, dict[str, Any] | None, str]:
     command = [sys.executable, str(ROOT / "scripts" / "ai_browser_acceptance.py"), "--task", task["id"]]
-    completed = subprocess.run(command, cwd=ROOT, text=True, capture_output=True)
+    completed = subprocess.run(command, cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=False)
+    stdout = (completed.stdout or b"").decode("utf-8", errors="replace")
+    stderr = (completed.stderr or b"").decode("utf-8", errors="replace")
     log_path = LOGS_DIR / f"{task['id']}-browser-acceptance.log"
-    log_path.write_text((completed.stdout or "") + (completed.stderr or ""), encoding="utf-8")
+    log_path.write_text(stdout + stderr, encoding="utf-8")
     manifests = sorted((AI_DIR / "evidence" / task["id"]).glob("*/manifest.json"))
     manifest = load_json(manifests[-1]) if manifests else None
     return completed.returncode, manifest, str(log_path.relative_to(ROOT))
@@ -259,16 +290,24 @@ def run_next(dry_run: bool) -> int:
     if recovered is not None: return recovered
 
     resume_existing = False
+    resume_reason: str | None = None
     item = recoverable_path_guard_task(config, state)
     if item is not None:
         resume_existing = True
+        resume_reason = "path_guard_recovered"
         audit("path_guard_recovery_started", task=item[1]["id"], changed_paths=changed_paths())
     else:
-        try:
-            item = next_task(config)
-        except ValueError as exc:
-            set_state(state, phase="blocked", blocker=str(exc), finish_reason="queue_head_blocked")
-            audit("queue_head_blocked", reason=str(exc)); return 10
+        item = recoverable_interrupted_task(config, state)
+        if item is not None:
+            resume_existing = True
+            resume_reason = "interrupted_task_recovered"
+            audit("interrupted_task_recovery_started", task=item[1]["id"], phase=state.get("phase"), changed_paths=changed_paths())
+        else:
+            try:
+                item = next_task(config)
+            except ValueError as exc:
+                set_state(state, phase="blocked", blocker=str(exc), finish_reason="queue_head_blocked")
+                audit("queue_head_blocked", reason=str(exc)); return 10
     if item is None: print("No runnable task."); return 0
     task_path, task = item
     try: validate_task(task, config)
@@ -290,13 +329,13 @@ def run_next(dry_run: bool) -> int:
 
     task["status"] = "in_progress"; save_json(task_path, task)
     if resume_existing:
-        set_state(state, phase="developing", current_task=task["id"], blocker=None, finish_reason="path_guard_recovered")
-        audit("path_guard_recovered", task=task["id"], changed_paths=changed_paths())
+        set_state(state, phase="developing", current_task=task["id"], blocker=None, finish_reason=resume_reason)
+        audit(resume_reason or "existing_work_recovered", task=task["id"], changed_paths=changed_paths())
     else:
         set_state(state, phase="developing", current_task=task["id"], blocker=None, finish_reason=None)
         audit("task_started", task=task["id"])
 
-    previous_error = "Recovered existing work after a Path Guard false positive; validate the current working tree before asking Cline to change it again." if resume_existing else ""
+    previous_error = "Recovered existing local work after an interrupted/guarded run; validate the current working tree before asking Cline to change it again." if resume_existing else ""
     cline_code: int | None = 0 if resume_existing else None
     cline_raw_reason: str | None = "path_guard_recovered_existing_work" if resume_existing else None
     browser_manifest: dict[str, Any] | None = None
