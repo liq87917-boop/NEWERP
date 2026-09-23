@@ -45,6 +45,7 @@ $selfRestartRequested = $false
 $screenInitialized = $false
 $lastScreen = @()
 $lastScreenWidth = 0
+$lastScreenHeight = 0
 $screenFallbackSignature = $null
 $originalForeground = $null
 try { $originalForeground = [Console]::ForegroundColor } catch {}
@@ -393,7 +394,10 @@ function Fit-ConsoleText {
     )
 
     if ($null -eq $Text) { $Text = '' }
-    $usable = [Math]::Max(20, $Width - 1)
+    # Never render wider than the actual console. The previous minimum width of
+    # 20 columns caused automatic line wrapping when the user resized the window
+    # narrower than that, which corrupted all cursor-positioned rows.
+    $usable = [Math]::Max(1, $Width - 1)
     if ($Text.Length -gt $usable) {
         if ($usable -le 3) { return $Text.Substring(0, $usable) }
         return $Text.Substring(0, $usable - 3) + '...'
@@ -563,39 +567,47 @@ function Write-Status {
     }
 
     try {
-        $width = [Console]::WindowWidth
-        if ($width -lt 40) { $width = 80 }
-        $height = [Math]::Max($lines.Count, $script:lastScreen.Count)
+        # Always use the real console dimensions. Never substitute an artificial
+        # larger width: writing wider than WindowWidth makes cmd.exe wrap lines,
+        # which destroys cursor-positioned dashboard rendering after a resize.
+        $width = [Math]::Max(2, [Console]::WindowWidth)
+        $windowHeight = [Math]::Max(3, [Console]::WindowHeight)
 
-        # Clear only once at startup. Never Clear-Host on each refresh: that caused
-        # the visible flashing in the agent DOS window.
-        if (-not $script:screenInitialized) {
+        $resized = $script:screenInitialized -and (
+            $script:lastScreenWidth -ne $width -or
+            $script:lastScreenHeight -ne $windowHeight
+        )
+
+        # Clear once at startup, and once per actual resize. Normal refreshes stay
+        # incremental and do not flash. A full redraw on resize removes wrapped
+        # fragments and stale rows left by the old console geometry.
+        if (-not $script:screenInitialized -or $resized) {
             try { [Console]::Clear() } catch { Clear-Host }
             try { [Console]::CursorVisible = $false } catch {}
             $script:screenInitialized = $true
             $script:lastScreen = @()
             $script:lastScreenWidth = $width
+            $script:lastScreenHeight = $windowHeight
         }
 
-        # A resize changes the amount of padding required. Repaint the fixed area
-        # without clearing the whole terminal.
-        if ($script:lastScreenWidth -ne $width) {
-            $blank = ' ' * [Math]::Max(20, $width - 1)
-            for ($i = 0; $i -lt $height; $i++) {
-                [Console]::SetCursorPosition(0, $i)
-                [Console]::Write($blank)
-            }
-            $script:lastScreen = @()
-            $script:lastScreenWidth = $width
+        # Keep drawing inside the visible window. If the user makes the window
+        # very short, show a compact footer rather than scrolling the viewport and
+        # making the dashboard appear scrambled.
+        $maxRows = [Math]::Max(1, $windowHeight - 1)
+        $visibleLines = @($lines | Select-Object -First $maxRows)
+        if ($lines.Count -gt $maxRows -and $maxRows -ge 1) {
+            $hidden = $lines.Count - $maxRows + 1
+            $visibleLines[$maxRows - 1] = New-StatusLine (" ... {0} more row(s); enlarge window height to view ..." -f $hidden) 'DarkGray'
         }
+        $height = [Math]::Max($visibleLines.Count, $script:lastScreen.Count)
 
         $current = @()
         for ($i = 0; $i -lt $height; $i++) {
             $text = ''
             $colorName = 'Gray'
-            if ($i -lt $lines.Count) {
-                $text = [string]$lines[$i].Text
-                $colorName = [string]$lines[$i].Color
+            if ($i -lt $visibleLines.Count) {
+                $text = [string]$visibleLines[$i].Text
+                $colorName = [string]$visibleLines[$i].Color
             }
 
             $rendered = Fit-ConsoleText $text $width
@@ -618,7 +630,7 @@ function Write-Status {
         }
 
         $script:lastScreen = $current
-        $cursorRow = [Math]::Min([Math]::Max(0, $lines.Count), [Console]::BufferHeight - 1)
+        $cursorRow = [Math]::Min([Math]::Max(0, $visibleLines.Count), $windowHeight - 1)
         [Console]::SetCursorPosition(0, $cursorRow)
     } catch {
         # Last-resort mode: avoid repeated full-screen redraws. Emit a compact status
