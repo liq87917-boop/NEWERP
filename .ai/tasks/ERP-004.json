@@ -1,0 +1,41 @@
+{
+  "id": "ERP-004",
+  "title": "Enable autonomous push and full CI validation",
+  "status": "completed",
+  "risk_level": "medium",
+  "description": "Enable automatic push after accepted tasks and automatically run build/unit, approved SQL integration, and real Edge UI smoke validation on pushes to protected development branches, while retaining manual rerun support and production/irreversible Human Gates.",
+  "acceptance_criteria": [
+    "Accepted local tasks can automatically push through the configured Git remote.",
+    "Push to main, master, or develop automatically runs SQL integration and Edge UI smoke tests after build/unit success.",
+    "erp-integration and erp-ui remain isolated GitHub Environments using test-only secrets.",
+    "Shared test-environment workflow runs are serialized.",
+    "Production database, production OSS, deployment, release, and irreversible data operations remain Human-Gated.",
+    "GitHub Actions run 35815680034 completes successfully for commit 94929ee3dd3a65badf0a2c85914089a8d0468106."
+  ],
+  "allowed_paths": [
+    ".ai/config.json",
+    ".github/workflows/build.yml",
+    "docs/AUTOMATED_DEVELOPMENT.md",
+    ".ai/PROJECT_STATE.json",
+    ".ai/tasks/ERP-004.json",
+    ".ai/results/ERP-004.json",
+    ".ai/audit.jsonl"
+  ],
+  "validation_profile": "full_ci",
+  "depends_on": ["ERP-003"],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "completion_mode": "control_plane",
+  "browser_acceptance": {
+    "required": false,
+    "note": "Control-plane change was validated by the CI UI smoke job against the approved test environment."
+  },
+  "human_gate": {
+    "required": false,
+    "status": "ai_reviewed",
+    "level": "L2",
+    "reason": "Automation control-plane change only; production and irreversible operations remain gated."
+  },
+  "attempts": 1,
+  "completed_at": "2026-09-23T03:55:30Z"
+}
