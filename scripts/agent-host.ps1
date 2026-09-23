@@ -41,6 +41,7 @@ $lastSyncMessage = 'not synced yet'
 $lastCiText = 'GitHub CLI not checked'
 $lastCiAt = Get-Date '2000-01-01'
 $lastRecoveryAttemptKey = $null
+$selfRestartRequested = $false
 $screenInitialized = $false
 $lastScreen = @()
 $lastScreenWidth = 0
@@ -238,13 +239,22 @@ function Sync-Repository {
 
         $merge = Invoke-Git @('merge', '--ff-only', '--quiet', "origin/$($GitInfo.Branch)")
         if ($merge[0] -eq 0) {
+            if ($incomingPaths -contains 'scripts/agent-host.ps1' -or $incomingPaths -contains 'start_agent.bat') {
+                $script:selfRestartRequested = $true
+            }
             return "updated $behind remote commit(s), preserved $($localPaths.Count) local change(s)"
         }
         return 'safe dirty-tree fast-forward failed; local work preserved'
     }
 
+    $incomingPaths = Get-IncomingPaths $GitInfo.Branch
     $merge = Invoke-Git @('merge', '--ff-only', '--quiet', "origin/$($GitInfo.Branch)")
-    if ($merge[0] -eq 0) { return "updated from origin/$($GitInfo.Branch) ($behind commit(s))" }
+    if ($merge[0] -eq 0) {
+        if ($null -ne $incomingPaths -and ($incomingPaths -contains 'scripts/agent-host.ps1' -or $incomingPaths -contains 'start_agent.bat')) {
+            $script:selfRestartRequested = $true
+        }
+        return "updated from origin/$($GitInfo.Branch) ($behind commit(s))"
+    }
     return 'git merge --ff-only failed'
 }
 
@@ -419,11 +429,11 @@ function Get-StatusLines {
             $blockerParts = @($blockerText -split "\r?\n" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
             if ($blockerParts.Count -gt 0) {
                 $lines += New-StatusLine (" Blocker    : {0}" -f $blockerParts[0]) 'Red'
-                foreach ($part in ($blockerParts | Select-Object -Skip 1 -First 4)) {
+                foreach ($part in ($blockerParts | Select-Object -Skip 1 -First 2)) {
                     $lines += New-StatusLine ("              > {0}" -f $part.Trim()) 'DarkRed'
                 }
-                if ($blockerParts.Count -gt 5) {
-                    $lines += New-StatusLine ("              > ... {0} more line(s)" -f ($blockerParts.Count - 5)) 'DarkRed'
+                if ($blockerParts.Count -gt 3) {
+                    $lines += New-StatusLine ("              > ... {0} more line(s)" -f ($blockerParts.Count - 3)) 'DarkRed'
                 }
             }
         }
@@ -439,7 +449,12 @@ function Get-StatusLines {
     if ($Tasks.Count -eq 0) {
         $lines += New-StatusLine ' (empty)'
     } else {
-        $visible = @($Tasks | Select-Object -Last 8)
+        # Keep the dashboard inside the visible console window. Completed history
+        # is already summarized above; the queue should focus on active/future work.
+        $visible = @($Tasks | Where-Object { $_.status -notin @('completed', 'deferred', 'skipped') } | Select-Object -First 5)
+        if ($visible.Count -eq 0) {
+            $visible = @($Tasks | Select-Object -Last 2)
+        }
         foreach ($task in $visible) {
             $marker = ' '
             if ($Head -and $task.id -eq $Head.id) { $marker = '>' }
@@ -478,10 +493,10 @@ function Get-StatusLines {
     $lines += New-StatusLine ' Recent runner output' 'Cyan'
     $tail = @()
     if (Test-Path $outLog) {
-        $tail += Get-Content $outLog -Tail 6 -ErrorAction SilentlyContinue
+        $tail += Get-Content $outLog -Tail 3 -ErrorAction SilentlyContinue
     }
     if (Test-Path $errLog) {
-        $errTail = Get-Content $errLog -Tail 3 -ErrorAction SilentlyContinue
+        $errTail = Get-Content $errLog -Tail 2 -ErrorAction SilentlyContinue
         foreach ($line in $errTail) {
             if ($line) { $tail += "[stderr] $line" }
         }
@@ -659,6 +674,10 @@ try {
 
         Write-Status $state $tasks $head $gitInfo
         if ($Once) { break }
+        if ($script:selfRestartRequested) {
+            try { [Console]::CursorVisible = $true } catch {}
+            exit 75
+        }
         Start-Sleep -Seconds ([Math]::Max(1, $RefreshSeconds))
     }
 }
