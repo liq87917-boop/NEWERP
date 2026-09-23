@@ -12,7 +12,11 @@
 
 ## 日常运行
 
-你可以直接在 GPT 对话中说“创建任务”“继续”“暂停”“批准 ERP-NNN”或“重试 ERP-NNN”。GPT 会把意图写入 `.ai/control/`，再操作项目内的任务和队列；对话不是唯一状态来源，Git 中的控制文件才是可恢复事实源。
+本机推荐直接双击仓库根目录的 `start_agent.bat`。它会打开一个常驻的 NEWERP AI Agent 控制台，自动刷新项目 phase、当前任务、最近完成任务、任务队列、Git 分支与同步状态、验证结果、浏览器验收状态、阻塞原因和最近 runner 输出。控制台默认每 30 秒在工作区干净且没有任务运行时检查远端；如果 main/master/develop 有新的任务提交，会使用 fast-forward 拉取。发现可自动执行的 pending/retry 任务后，会在后台启动 `scripts/run-pipeline.ps1`，任务通过后由 orchestrator 自动 commit/push。关闭控制台会同时停止它启动的本地 pipeline 子进程。
+
+控制台不会打印 Secret。若本机安装并登录了 GitHub CLI (`gh`)，还会显示最新 Build & Test 状态；没有安装 `gh` 不影响本地 Agent 执行。
+
+你也可以直接在 GPT 对话中说“创建任务”“继续”“暂停”“批准 ERP-NNN”或“重试 ERP-NNN”。GPT 会把意图写入 `.ai/control/`，再操作项目内的任务和队列；对话不是唯一状态来源，Git 中的控制文件才是可恢复事实源。
 
 1. 从 `.ai/tasks/_TEMPLATE.json` 复制并建立一个 `ERP-NNN.json`，或让 GPT 创建。
 2. 写明验收标准、允许修改的路径、验证 profile 与风险等级。
