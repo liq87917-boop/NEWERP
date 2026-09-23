@@ -49,7 +49,10 @@ def git_available() -> bool:
 
 
 def git_lines(*args: str) -> list[str]:
-    result = run(["git", *args])
+    # Force Git to emit real UTF-8 paths instead of C-style quoted/octal names.
+    # Without this, Chinese filenames such as docs/报价单与PI设计方案.md are returned
+    # as "\\346\\212..." and fail the allowed_paths guard even when explicitly allowed.
+    result = run(["git", "-c", "core.quotepath=false", *args])
     if result.returncode != 0: raise RuntimeError(result.stderr.strip() or "Git command failed")
     return [line.strip().replace("\\", "/") for line in result.stdout.splitlines() if line.strip()]
 
