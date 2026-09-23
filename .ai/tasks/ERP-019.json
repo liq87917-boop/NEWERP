@@ -1,0 +1,50 @@
+{
+  "id": "ERP-019",
+  "title": "Automate trade-document generation and export",
+  "status": "pending",
+  "risk_level": "low",
+  "description": "Close the audited Trade Document Center usability gap using existing persisted fields: add generation/prefill actions from Sales Orders and Container Loading Lists, prevent duplicate generated document sets, and provide practical Excel export for document-center records. Do not introduce a new production schema in this task.",
+  "acceptance_criteria": [
+    "Users can generate/prefill Trade Document Center records from a Sales Order and from a Container Loading List using existing document fields.",
+    "Generated records carry source order/container references, customer/port/amount data where available, and preserve manual editability before approval.",
+    "Duplicate generation from the same source and document type is guarded or made idempotent.",
+    "Document-center list/detail supports Excel export using the existing export conventions.",
+    "Unit/integration tests cover both source paths, mapping, duplicate protection and export; existing safe validation remains green.",
+    "Real Edge acceptance covers one Sales Order source and one Container Loading source with generated records visible in Document Center."
+  ],
+  "allowed_paths": [
+    "src/ERP.Application/**",
+    "src/ERP.Api/Controllers/**",
+    "src/ERP.Api/wwwroot/**",
+    "src/ERP.UnitTests/**",
+    "src/ERP.IntegrationTests/**",
+    "docs/**",
+    ".ai/**"
+  ],
+  "depends_on": [
+    "ERP-008"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "browser",
+  "browser_acceptance": {
+    "required": true,
+    "scenarios": [
+      "Generate a trade-document record from a Sales Order and verify mapped source/order/customer data.",
+      "Generate a trade-document record from a Container Loading List and verify container/port/source data.",
+      "Repeat one generation action and verify no unintended duplicate record set is created."
+    ],
+    "test_filter": "Collection=UiTests",
+    "minimum_screenshots": 2
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Uses existing document-center schema and application paths only."
+  },
+  "attempts": 0,
+  "created_at": "2026-09-23T12:00:03Z"
+}
