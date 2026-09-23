@@ -333,6 +333,22 @@ function Test-RecoverableInterruptedTask {
     return $Head.status -in @('in_progress', 'code_ready')
 }
 
+function Test-RecoverableBrowserFailure {
+    param($State, $Head)
+
+    if (-not $State -or -not $Head) { return $false }
+    if ($State.phase -ne 'human_attention') { return $false }
+    if ($State.finish_reason -ne 'attempts_exhausted') { return $false }
+    if ($Head.status -ne 'failed') { return $false }
+    $blockerText = [string]$State.blocker
+    if (-not $blockerText.StartsWith('Real-browser acceptance failed')) { return $false }
+    $cycles = 0
+    if ($Head.PSObject.Properties.Name -contains 'browser_recovery_cycles') {
+        $cycles = [int]$Head.browser_recovery_cycles
+    }
+    return $cycles -lt 2
+}
+
 function Get-AgentMode {
     param($State, $Head, $GitInfo)
 
@@ -342,7 +358,7 @@ function Get-AgentMode {
     if ($pipelineProcess -and -not $pipelineProcess.HasExited) {
         return 'RUNNING'
     }
-    if ((Test-RecoverablePathGuard $State $Head) -or (Test-RecoverableInterruptedTask $State $Head)) {
+    if ((Test-RecoverablePathGuard $State $Head) -or (Test-RecoverableInterruptedTask $State $Head) -or (Test-RecoverableBrowserFailure $State $Head)) {
         return 'READY'
     }
     if ($State -and $State.phase -in @('blocked', 'human_attention', 'waiting_human_gate', 'push_pending')) {
@@ -488,7 +504,7 @@ function Get-StatusLines {
         $lines += New-StatusLine ' Pipeline   : waiting'
     }
 
-    if ((Test-RecoverablePathGuard $State $Head) -or (Test-RecoverableInterruptedTask $State $Head)) {
+    if ((Test-RecoverablePathGuard $State $Head) -or (Test-RecoverableInterruptedTask $State $Head) -or (Test-RecoverableBrowserFailure $State $Head)) {
         $recoveryState = 'eligible'
         if ($null -ne $lastPipelineExit -and $lastPipelineExit -ne 0) {
             $recoveryState = "last recovery exited $lastPipelineExit"
@@ -500,13 +516,21 @@ function Get-StatusLines {
     $lines += New-StatusLine ''
     $lines += New-StatusLine ' Recent runner output' 'Cyan'
     $tail = @()
-    if (Test-Path $outLog) {
-        $tail += Get-Content $outLog -Tail 3 -Encoding UTF8 -ErrorAction SilentlyContinue
+    $browserLog = $null
+    if ($State -and [string]$State.blocker -match 'see\s+([^;]+ERP-\d+-browser-acceptance\.log)') {
+        $browserLog = Join-Path $root $Matches[1]
     }
-    if (Test-Path $errLog) {
-        $errTail = Get-Content $errLog -Tail 2 -Encoding UTF8 -ErrorAction SilentlyContinue
-        foreach ($line in $errTail) {
-            if ($line) { $tail += "[stderr] $line" }
+    if ($browserLog -and (Test-Path $browserLog)) {
+        $tail += Get-Content $browserLog -Tail 5 -Encoding UTF8 -ErrorAction SilentlyContinue
+    } else {
+        if (Test-Path $outLog) {
+            $tail += Get-Content $outLog -Tail 3 -Encoding UTF8 -ErrorAction SilentlyContinue
+        }
+        if (Test-Path $errLog) {
+            $errTail = Get-Content $errLog -Tail 2 -Encoding UTF8 -ErrorAction SilentlyContinue
+            foreach ($line in $errTail) {
+                if ($line) { $tail += "[stderr] $line" }
+            }
         }
     }
     if ($tail.Count -eq 0) {
@@ -663,7 +687,8 @@ try {
 
         $recoverPathGuard = Test-RecoverablePathGuard $state $head
         $recoverInterrupted = Test-RecoverableInterruptedTask $state $head
-        $recoverExisting = $recoverPathGuard -or $recoverInterrupted
+        $recoverBrowser = Test-RecoverableBrowserFailure $state $head
+        $recoverExisting = $recoverPathGuard -or $recoverInterrupted -or $recoverBrowser
         $recoveryKey = $null
         if ($recoverExisting) {
             $recoveryKey = "$($head.id)|$($gitInfo.Sha)|$($state.phase)|$([string]$state.blocker)"
