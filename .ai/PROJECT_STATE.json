@@ -21,8 +21,8 @@
     "pause_reason": null,
     "last_intent": "continuous_rolling_development",
     "last_actor": "GPT",
-    "queue_target_size": 4,
-    "updated_at": "2026-09-23T05:23:00Z"
+    "queue_target_size": 3,
+    "updated_at": "2026-09-23T14:32:20Z"
   },
   "completion_policy": {
     "default_mode": "browser",
@@ -39,10 +39,10 @@
     "irreversible_data_operations": "required"
   },
   "finish_reason": "browser_deferred",
-  "updated_at": "2026-09-23T12:49:32.668266Z",
+  "updated_at": "2026-09-23T14:32:20Z",
   "rolling_queue": {
     "enabled": true,
-    "batch_size": 4,
+    "batch_size": 3,
     "low_watermark": 2,
     "acceptance_interval_seconds": 3600,
     "replenishment_owner": "GPT",
