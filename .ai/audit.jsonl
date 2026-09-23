@@ -12,3 +12,5 @@
 {"at":"2026-09-23T05:23:00Z","event":"task_queued","task":"ERP-006","actor":"GPT","summary":"Repository-wide functional gap audit and durable backlog."}
 {"at":"2026-09-23T05:23:00Z","event":"task_queued","task":"ERP-007","actor":"GPT","summary":"Complete Proforma Invoice workflow; test-only schema validation approved at L2."}
 {"at":"2026-09-23T05:23:00Z","event":"task_queued","task":"ERP-008","actor":"GPT","summary":"Complete sales/purchase order traceability and foreign-trade fields; test-only schema validation approved at L2."}
+{"at": "2026-09-23T05:31:43.424871Z", "event": "task_started", "task": "ERP-006"}
+{"at": "2026-09-23T05:36:36.167713Z", "event": "task_completed", "task": "ERP-006", "status": "completed", "execution_outcome": "completed", "normalized_finish_reason": "control_plane_validated", "cline_exit_code": 0, "cline_finish_reason_raw": "completed", "attempts": 1, "browser_acceptance": null, "finished_at": "2026-09-23T05:36:36.166344Z"}

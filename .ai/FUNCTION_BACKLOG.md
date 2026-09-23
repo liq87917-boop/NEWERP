@@ -1,30 +1,134 @@
-# NEWERP 全功能完成 Backlog
+# NEWERP 全功能完成 Backlog（ERP-006 审计版）
 
 > 目标：按用户 2026-09-23 的明确要求，持续完成仓库内已经定义、规划或留有业务入口的功能；以代码、测试、真实 Edge 验收和 GitHub 全 CI 作为完成标准。生产数据库、生产 OSS、正式部署/发布和不可逆数据操作继续保留 Human Gate。
+>
+> 本版由 **ERP-006「全仓功能审计」** 重写：状态、缺口与证据来自对 `docs/`、Domain/Application/Infrastructure/Api/wwwroot、单元/集成/UI 测试、`SchemaUpgrader.cs` 与 `deploy/init5~16.sql`（只读）的逐项比对，**取代**此前基于文件名与文档描述的初筛，避免后续任务重复实现已经可用的功能。
 
-## 已检测到已有代码/能力（仍需 ERP-006 逐项验证）
-- 基础 ERP 主链：询价、销售订单、采购订单、入库、出库、库存、收货计划、订柜、预装柜、装柜、财务申请/付款/收款/结算/客诉、系统权限、报表。
-- 阶段 0 菜单迁移逻辑：工作台、客户与市场、供应商与采购、商品中心，以及库存/出运/财务/询报价/订单中心重命名。
-- 扩展能力：报价单、供应商比价、费用单、应收账龄、出口退税、单证中心、客户跟进、样品管理、库存预警、采购成本/柜量/退税/业务员提成等报表。
-- 自动开发控制层：本机 Agent、真实 Edge 验收、自动 push、GitHub Build/Unit/SQL/UI 全 CI。
+## 0. 审计范围、方法与证据基线
 
-## 明确缺失或不完整（按现有文档和代码结构初筛）
-1. **PI（Proforma Invoice）完整闭环**：实体/表、报价单转 PI、PI 审核/销审、打印、菜单/页面。
-2. **销售订单外贸字段补齐**：客户 PO 号、合同号、价格条款、目的港文本、Consignee/Notify、唛头、关联报价/PI、出口方式、佣金比例、业务性质、分批出货、验货/包装要求。
-3. **采购订单归属与执行字段**：客户、销售订单、代垫、交期确认、税率/含税、到货进度、验货状态、合同号、结算进度。
-4. **PI → 销售订单预填/转换**、报价有效期提醒与报价成交率分析。
-5. **拼柜/多客户装柜模型与费用分摊闭环**，以及装柜字段：LCL/FCL、B/L、SO、ETD/ETA/ATD/ATA、拖车/报关、查验放行、利用率等。
-6. **代理费/佣金结算单**、应付账款、供应商/客户对账。
-7. **库存业务单据**：盘点、调拨、退货；库存周转/呆滞分析。
-8. **物流跟踪**。
-9. **发票管理、附件中心**。
-10. **审批流、数据范围权限、业务模式菜单可见性完善**。
-11. **生产管理**：BOM、生产任务、委外、领料/退料、产成品入库、生产看板、库存成本。
-12. **报表扩充**：出口销售、佣金汇总、应付账龄、库存周转、生产/成本等。
-13. **移动端/扫码等增强项**（在核心闭环完成后处理）。
+| 项 | 内容 |
+|---|---|
+| 审计任务 | ERP-006（`completion_mode: control_plane`，只读审计；未改动业务行为、SQL、生产数据） |
+| 判定办法 | 每个功能须同时具备：实体或表 DDL、API 端点、持久化路径、前端页面与菜单、测试或交付验证记录；缺一不得判为 complete |
+| 证据基线 | `dotnet test src\ERP.UnitTests -c Release` = **165/165 通过、0 失败、0 跳过**（2026-09-23 本次实测，Release 编译通过） |
+| 未执行项 | 未连接 SQL Server、未运行 `ERP.IntegrationTests`/UI/Selenium、未启动 API、未执行任何 `.sql`/部署/seed（遵守 `.clinerules` 与 Human Gate） |
+| 持久化口径 | 表结构结论取自 `SchemaUpgrader.cs`（启动幂等升级）与 `deploy/init5~16.sql` 脚本本体；生产库真实数据状态不在本次验证范围 |
+| 菜单/页面口径 | 菜单码取自 `deploy/init*.sql` + `SchemaUpgrader.cs` 的幂等插入；页面注册核对 `app.js`、`modules*.js`、`BILL_CONFIG`/`BILL_CODE_MAP`、`EXPORT_MENU_MAP`、`REPORTS`、`print-design.js`、`dingtalk.js`、`users.js`、`roles.js` |
 
-## 执行规则
-- ERP-006 必须完整比对 docs、Domain、Application、Infrastructure、API、wwwroot、测试和菜单/SchemaUpgrader，给每一项标记：verified-complete / partial / missing / decision-required。
-- 每次队列保持最多 3 个可执行任务；后续由 GPT 依据本 Backlog 与 ERP-006 审计结果滚动补充。
-- 每个业务任务默认需要真实 Edge 验收；涉及 SQL 的变更只对 NEWERP_TEST 自动验证。
-- 不因“已有文件/Controller”就判定功能完成；必须验证 API、页面、持久化、状态流、权限、测试和用户可见流程。
+## 1. 状态定义
+
+| 状态 | 含义 | 判定门槛 |
+|---|---|---|
+| verified-complete | 用户可用且闭环 | 实体 + DDL + API + 页面 + 菜单 + 测试/交付记录齐备，无已知硬缺口 |
+| partial | 部分可用 | 已有真实代码与入口，但缺少验收标准中的关键环节 |
+| missing | 未实现 | 无实体、无 API、无页面或无菜单 |
+| decision-required | 待决策 | 业务规则或范围未定，拆分任务前需用户确认 |
+
+## 2. 模块状态总表（Gap Matrix）
+
+| # | 模块 / 功能 | 状态 | 代码与菜单证据 | 关键缺口 | 风险 |
+|---|---|---|---|---|---|
+| 1 | 系统设置（用户/角色/权限/参数/用户参数/单据号规则/客户端限制/日志/打印设计/钉钉配置与记录） | verified-complete | `SeedData.Menus.cs:14-22`；`SysUserController`、`RoleController`、`MenuController`、`ParameterController`、`UserParameterController`、`SysSimpleControllers`、`PrintTemplateController`、`DingTalkController`、`Services/FollowUpReminderService.cs` | 无 | low |
+| 2 | 主数据（客户/供应商/员工/仓库/费用科目/商品/数据字典） | verified-complete（字段已补齐） | `BaseCustomer.cs:63-113`（业务性质/币种/结算方式/贸易条款/目的港/Consignee/Notify/默认唛头/账期/佣金比例/等级/信用状态/来源）；`BaseSupplier.cs:58-91`（类型/档口位置/主营/结算/开票/税率/交期/返点/微信）；`BaseOtherInfo.cs:82-143`（装箱单位/装箱数/单位换算/外箱四边/体积重/英文报关品名/退税率/品牌/认证/客户与工厂货号/MOQ/含税/安全库存上下限）；`SchemaUpgrader.cs:280-322,552-553`；字典 14 类 `modules.js:173-203` | 客户「指定货代」；商品颜色/尺码 SKU 变体、多供应商供货关系、图片资料库页面（3 图字段已有） | low |
+| 3 | 询价单（CRUD/提交/审核/导出） | verified-complete | `InquiryController`、`bill-config.js:36`、`bill-export.js:5`、菜单 `inquiry-new`/`inquiry-export` | 询价单侧无一键转报价（现由报价单 `from-inquiry` 反向带出客户与明细） | low |
+| 4 | 报价单 Quotation | **partial** | `Quotation.cs`/`Detail`（`SortNo` 替代保留字 `LineNo`）、`ErpDbContext.Entities.cs:62-63`、`QuotationController.cs`（分页/详情/`from-inquiry`/`approve`/`unaudit`/新增/修改+后端重算）、`SchemaUpgrader.cs:707-777`、`init16.sql`、菜单 `quotation`(`/sales/quotation`) 、`modules.js:451-501`（主子表 `detailFields`）、字轨 `DocumentType.Quotation=17` | ① 无「转 PI」端点/按钮（全仓无 `to-pi`）；② 无 `/{id}/print`，`BILL_CONFIG`/`BILL_CODE_MAP` 未注册 quotation → **报价单没有打印预览/直接打印/打印设计**；③ 无报价→销售订单带入；④ 无报价版本号（多轮议价）；⑤ 无有效期到期提醒与成交率分析；⑥ 无 `QuotationController` 单元测试 | medium |
+| 5 | 供应商比价 PurchaseQuote | verified-complete | `PurchaseQuote.cs`（比价批次/多供应商/是否选中/为客户询价）、`PurchaseQuoteController`、菜单 `purchase-quote`(`init10.sql`) | `IsSelected` 选中后无「生成采购订单」下游动作 | low-medium |
+| 6 | 销售订单（外销合同） | partial（ERP-008 已批准） | `SalesOrder.cs:10-63`、`modules-doc.js:56-72`、`sp_Biz_SalesOrder`(`BillProcController` Bills 目录) | 缺：客户 PO 号、合同号、价格条款、目的港文本、Consignee/Notify、唛头、来源报价/PI、出口方式(0110/1039/9610/9710)、佣金比例、业务性质、分批出货、验货/包装要求、附件；另缺订单变更申请与订单执行跟踪时间轴 | medium |
+| 7 | 采购订单 | partial（ERP-008 已批准） | `PurchaseOrder.cs`、`modules-doc.js:73-87`、`sp_Biz_PurchaseOrder` | 缺：归属客户、归属销售订单、代垫、供应商交期确认、税率/含税、到货进度、验货状态、合同号、结算进度；加列需 DROP/CREATE 存储过程 | medium-high |
+| 8 | 采购入库 / 销售出库 / 库存查询 | verified-complete | `Logistics.cs`、`StockInController`/`StockOutController`/`StockController`、审核后联动 `Stocks`、`modules-doc2.js:3-29` | 多单位换算未参与出入库计算（`BaseProduct.UnitsPerPackage` 仅实体 + 导入模板）；无库位/批次成本 | low-medium |
+| 9 | 库存动作单据（盘点/调拨/退货）+ 库存成本 | missing | 仅有 `stock-alert` 报表与 `MinStock/MaxStock`；`docs/部署交付文档.md:817,858,910,953,995,1057` 与 `docs/菜单与业务流程优化建议-20260918.md:44,247` 反复列为待办 | 全部缺失，需与 `Stocks` 联动并做变更窗口 | medium-high |
+| 10 | 装柜/出运主链（收货计划/订柜/预装柜/装柜清单） | verified-complete | `Container1.cs`/`Container2.cs`、`ContainerControllers`、`ContainerPreLoadingController`、`ContainerLoadingListController`、`bill-config3.js:60-118` | 无 | low |
+| 11 | 装柜外贸与物流跟踪字段 | missing | `ContainerBooking`/`ContainerPreLoading*`/`ContainerLoading*` 无相关列；`docs/部署交付文档.md:854` 说明因走存储过程而暂缓 | LCL/FCL、B/L、SO、ETD/ETA/ATD/ATA、拖车/报关行、查验放行、目的/中转港；装载率仅报表侧(`reports.js:37-48`，40HQ 68m³ 基准) | medium-high |
+| 12 | 一柜多客户拼柜与费用分摊 | partial | 分摊已可用：`expense-allocate.js`（拼柜/整柜/散货 × 体积/重量/箱数/金额）、`ExpenseBillController.cs:29-93`（预览+生成+重复防护）、`FinanceExpense.cs:50-73`（RefType/RefNo/CustomerId/AllocationBase/AllocationRatio/AllocatedAmount 落库） | `ContainerLoadingList.CustomerId` 仍为单客户，无「柜→多客户」主子表；分摊结果不回写装柜/结算；无分摊批次与来源行留痕 | medium |
+| 13 | 单证中心 | partial | `TradeDocument.cs`（9 类单证/4 态/关联报关单号·柜号·订单号/金额/港口/份数）、`TradeDocumentController`、菜单 `doc-center`(`init11.sql`)、`modules.js:336-379` | 手工台账；无「由装柜清单/销售订单自动生成」，无 Excel/PDF 版式导出（附件仍为 `FileNote` 文本） | low-medium |
+| 14 | 费用单（出口杂费台账） | verified-complete | `FinanceExpense`、`ExpenseBillController`、菜单 `expense-bill`(`init8.sql`)、`modules.js:238-260` | 与装柜结算单/付款单无金额联动（`BillNo` 为文本字段） | low |
+| 15 | 应收账款与账龄 | verified-complete | `api/reports/ar-aging`、`ReportService.Ar.cs`、`reports.js:20-34`、菜单 `ar-aging`(`init9.sql`) | 无收款自动核销（收付款与订单/柜之间无核销明细），无信用额度占用与信用状态自动风控 | medium |
+| 16 | 应付账款 / 供应商对账 / 客户对账 | missing | 全仓无实体、无端点、无菜单；`docs/部署交付文档.md:203`、`docs/菜单与业务流程优化建议-20260918.md:248` 列为缺失 | 全部缺失（档口月结对账仍靠 Excel） | medium |
+| 17 | 代理费 / 佣金结算单 | missing | 现有 `sales-commission` 是**业务员提成表**（`ReportService.Extra3.cs`：系统参数 `SalesCommissionRate` × 订单毛利），与「按柜/客户收代理费、明佣暗佣」不是同一功能 | 代理模式主要收入单据缺失 | medium-high |
+| 18 | 出口退税台账 + 退税汇总 | verified-complete | `BaseTaxRefund`/`TaxRefundController`、菜单 `tax-refund`(`init7.sql`) 与 `tax-refund-summary`(`init12.sql`)、`reports.js:59-70` | 与供应商开票/发票管理无联动 | low-medium |
+| 19 | 发票管理（专票/普票/出口发票） | missing | 无实体、无端点、无菜单 | 缺失 | medium |
+| 20 | 附件中心 | missing | 仅商品 3 张图 + 单证 `FileNote` 文本（`TradeDocument.cs:71-73`） | 合同/PO/验货报告/单证扫描件无统一挂靠 | low-medium |
+| 21 | 审批流（金额阈值/多级） | missing | 现状为 `DocumentControllerBase` 单级审核状态机（草稿→已审核/销审） | 缺失，风控不足 | medium |
+| 22 | 数据范围权限（业务员仅见自己客户） | missing | `src` 内无 `DataScope` 实现；权限仅「角色-菜单」(`SysRoleMenu`) | 缺失 | medium |
+| 23 | 业务模式开关 `BizMode` | partial / decision-required | 参数已种子化（`init6.sql:130-132`，默认 `Hybrid`），但 `src` 无任何消费方；用户已确认「两种模式都有、用角色权限区分」（`docs/部署交付文档.md:632`） | 菜单可见性与按模式必填规则未实现；按用户答复建议**不做**按模式隐藏菜单，参数保留为预留 | low |
+| 24 | 数据字典 | verified-complete | `BaseOtherInfo` + `other-info` 页面 14 类 InfoType（Currency/ExchangeRate/Port/Forwarder/CustomsBroker/ShippingMark/Package/TradeTerm/Settlement/TransportMode/ExpenseType/ExportMode/Certification/Brand，`modules.js:173-203`） | 汇率为文本字典，无每日汇率表/锁汇/汇兑损益 | low |
+| 25 | 报表中心 | verified-complete（14 张） | `ReportController` 14 个 `[HttpGet]`；`reports.js` 14 个 `REPORTS` 键；菜单 = 原 7 张 + `ar-aging`/`container-stats`/`purchase-cost`/`tax-refund-summary`/`stock-alert`/`sales-commission`/`follow-up-due` | 仍缺报表：佣金/代理费汇总、应付账龄、库存周转与呆滞、生产/成本、报价成交率 | low-medium |
+| 26 | 客户 CRM 跟进 + 到期提醒 | verified-complete | `CustomerFollowUp`/`CustomerFollowUpController`、`Services/FollowUpReminderService.cs`（后台 + 钉钉推送）、`follow-up-due` 报表与菜单 | 无客户价格协议、无报价转化漏斗 | low |
+| 27 | 样品管理 | verified-complete | `Sample`/`SampleController`、菜单 `sample`、`modules.js:412-450` | 无 | low |
+| 28 | 生产管理（BOM/生产任务/委外/领料/产成品入库/看板） | missing + decision-required | 全仓无相关实体、端点、菜单；`docs/菜单与业务流程优化建议-20260918.md:191,261,309` 明确列为"完全没有" | 需先确认工序粒度（是否有车间/工序/工价）；用户已答「工贸一体 + 代理采购都有」→ 在范围内但需细化设计后单独立项 | high |
+| 29 | 移动端 / 扫码出入库 | missing | 无相关代码；`docs/菜单与业务流程优化建议-20260918.md:266,310` 列为阶段 4 增强 | 缺失，暂缓 | medium |
+| 30 | 自动开发控制层（队列/门禁/Edge 验收/CI） | verified-complete | `.ai/**`、`scripts/ai_pipeline.py`、`ai_orchestrator.py`、`ai_browser_acceptance.py`、`agent-host.ps1`、`tests/automation/test_pipeline_contracts.py`、GitHub Build/Unit/SQL/UI 全 CI（ERP-005 已 `full_ci_validated`，run 35816664437） | 无 | low |
+
+### 2.1 总表口径说明
+- 判为 verified-complete 的模块均同时具备实体/DDL、API 端点、前端页面与菜单、测试或交付验证记录（如 `docs/部署交付文档.md` 的逐批验证章节）。
+- 报价单、销售订单、采购订单、装柜、拼柜、单证中心等判为 partial 的模块**已经有真实可用入口**，后续任务只补缺口，不得重写已有可用链路。
+- 「已交付」不等于「已用户验收」：业务任务的最终完成仍以真实 Edge 验收 + 证据清单为准（`.ai/MASTER_PLAN.md`）。
+
+## 3. 代码存在但未接通 / 用户不可达 / 未持久化 清单
+
+| # | 项 | 证据 | 影响 | 处理建议 |
+|---|---|---|---|---|
+| 3.1 | 商品多单位与箱规字段未参与业务计算 | `BaseOtherInfo.cs:82-108` 定义 `PackageUnit/UnitsPerPackage/UnitConversion/Outer*/VolumeWeight`；`src` 内唯一引用是 `BaseDataIoController.cs:86`（导入模板表头映射） | 报价、采购、出入库、装柜仍按单一单位人工换算 | 需业务确认换算口径后，在装柜/出入库（或报价明细）引入换算 |
+| 3.2 | 报价单未接入「打印三件套」 | `bill-v2.js:13-31` 的 `BILL_CODE_MAP` 与 `bill-config.js`/`bill-config2.js`/`bill-config3.js` 均无 `quotation`，而其余 16 种单据均有 | 报价单无打印预览/直接打印/打印设计，用户只能截图或另存 | 与 ERP-007 一并补注册（同时覆盖 PI） |
+| 3.3 | 报价单缺少文档承诺的端点 | `QuotationController.cs` 仅有分页/详情/`from-inquiry`/`approve`/`unaudit`/`Create`/`Update`；`docs/报价单与PI设计方案.md:105-108` 承诺 `to-pi`/`to-order`/`print` | 设计文档与实现不一致，用户点击路径不存在 | ERP-007（PI）+ 后续 prefill 任务 |
+| 3.4 | 系统参数 `BizMode` 无消费方 | 仅 `init6.sql:130-132` 插入 | 参数形同虚设，且容易误导后续任务重复实现"按模式隐藏菜单" | 明确标记为预留；如需按模式隐藏再单独立项 |
+| 3.5 | 比价「选中」无下游动作 | `PurchaseQuote.cs:74-75` `IsSelected` + `Status` | 选中供应商后无法一键生成采购订单 | 可并入采购订单增强任务（非必需） |
+| 3.6 | 费用分摊与结算/收款无关联 | `FinanceExpense.BillNo` 为文本；装柜/散货结算实体无费用明细子表 | 柜成本不能自动归集到结算与毛利，分摊结果只落在费用单 | 拼柜方案任务中建立关联 |
+| 3.7 | 分摊无批次与来源行留痕 | `ExpenseBillController.cs:49-52` 仅按「柜号+费用类型+日期」防重复 | 无法回溯"哪些行按什么权重算出这个比例" | 拼柜方案任务中补分摊批次表 |
+| 3.8 | 单证附件仍是文本 | `TradeDocument.cs:71-73` `FileNote` | 单证扫描件无处存放 | 附件中心任务 |
+| 3.9 | 菜单可达性核对结论 | 逐码比对 36 个菜单码（`deploy/init*.sql` + `SchemaUpgrader.cs`）与页面注册（`modules*.js`/`BILL_CONFIG`/`EXPORT_MENU_MAP`/`REPORTS`/`print-design.js`/`dingtalk.js`/`users.js`/`roles.js`） | **本次未发现菜单指向未配置页面的死链**；风险集中在 3.2/3.3（报价单打印与转 PI）与 PI 整体缺失 | 保持；后续新增菜单必须同时补页面注册 |
+
+## 4. 文档失真清单（识别结果，本次未修改 docs）
+
+| # | 文档与位置 | 失真点 | 实际情况 |
+|---|---|---|---|
+| 4.1 | `docs/技术方案说明书.md:190` | 「测试命令 `dotnet test`（当前 43 个用例全部通过）」 | 本次实测 **165/165 通过**（Release、`ERP.UnitTests`） |
+| 4.2 | `docs/技术方案说明书.md`（目录结构与接口清单） | 未包含阶段 1~3 模块（费用单、退税台账、单证中心、供应商比价、CRM 跟进、样品、报价单）与 `tests/automation`、`.ai/`、`scripts/ai_*.py` | 这些模块均已交付并在菜单中可见 |
+| 4.3 | `docs/报价单与PI设计方案.md:3` | 「已按建议默认值实施批次 1」+ §5 列出 `GET /api/sales/quotations/{id}/print`、`POST .../to-order`；§6 称「`BILL_CONFIG` 注册两个单据类型 → 自动获得打印预览/直接打印/打印设计」 | 报价单打印端点与 `BILL_CONFIG` 注册**均未实现**；`to-order` 属批次 3 未做；§4 称 `ProformaInvoice=18` 字轨"幂等插入"，实际脚本只插入 17（`init16.sql:118`） |
+| 4.4 | `docs/部署交付文档.md:813-817, 854-859, 909-910, 952-953, 993-996, 1054-1057` | 多段"下一批/下一阶段"清单仍把**已交付**项列为待办：费用单、应收账龄、单证中心、供应商比价、样品管理、客户跟进+钉钉提醒、退税台账、柜量/采购成本/退税汇总/库存预警报表 | 这些均已在 `init8`~`init13`、`SchemaUpgrader` 中落地并有菜单；仅 **PI、库存动作单据、采购单归属字段、物流跟踪字段** 仍未完成 → 需标注"已完成"，否则会重复开发 |
+| 4.5 | `docs/数据库设计说明书.md`（仅到"第四阶段"） | 未记录 `BaseTaxRefunds`、`FinanceExpenses`、`PurchaseQuotes`、`TradeDocuments`、`CustomerFollowUps`、`Samples`、`Quotations/QuotationDetails` 及主数据新增列（客户 13 列 / 供应商 9 列 / 商品 16+ 列） | 这些表与列均已存在（`SchemaUpgrader.cs:280-322,328,380,454,507,597,653,711,747`、`init7~init16.sql`） |
+| 4.6 | `docs/菜单与业务流程优化建议-20260918.md`（仍标"待确认稿"） | §1.1「共 53 项菜单、8 个一级分组」与 §2 蓝图中大量 P0/P1 项未标注落地状态（阶段 0 菜单重构、阶段 1 主数据字段、报价单、费用单、账龄、比价、单证、样品、CRM、退税等） | 阶段 0/1/2 大部分已落地；若继续按原稿"建议"开发将重复实现 |
+| 4.7 | `docs/报价单与PI设计方案.md` §7 批次表 | 批次 1 标注"转 PI 按钮（PI 未上线前按钮隐藏）" | 界面上并无"隐藏的转 PI 按钮"代码；实为未实现，应明确标注"批次 2 待做" |
+
+## 5. 建议任务边界（滚动队列，供 GPT 创建任务时引用）
+
+### 5.1 队列就绪性结论
+- **ERP-007（PI 完整闭环）与 ERP-008（销售/采购订单字段与追溯）依赖已满足**：二者 `depends_on` 均指向已完成/本任务，`allowed_paths` 已覆盖所需文件（实体、`IErpDbContext`、`ErpDbContext*`、`SchemaUpgrader.cs`、Controllers、`wwwroot/**`、测试、`.ai/**`）。
+- 两任务的 Human Gate 状态均为 `approved`（L2，仅允许代码级变更 + 只对 NEWERP_TEST 验证；生产库/生产部署仍另需批准）。
+- 两者 `completion_mode` 均为 `browser`：ERP-007/008 必须在 `Collection=UiTests` 中新增 Selenium 场景并产出截图证据（现有 `UiSmokeTests` 仅 4 例登录场景，`UiTestFixture` 已提供 `CaptureEvidence`）。
+
+### 5.2 已入队任务的范围复核
+
+| 任务 | 复核结论 | 建议补充点（不改任务本体，由执行者按验收标准吸收） |
+|---|---|---|
+| ERP-007 PI 闭环 | 范围正确、可作为 PI 实现模板参照报价单的既有模式（EF 主子表 + `DocumentControllerBase` + `SchemaUpgrader` 幂等建表 + 菜单幂等插入 + `modules.js` 主子表页面） | ① 字轨需同时补 `DocumentType.ProformaInvoice=18` 与编号规则（`init16.sql` 只插入了 17）；② IErpDbContext/ErpDbContext 需挂载 PI DbSet；③ 建议把「报价单打印注册」（见 3.2）一并纳入，否则会留下"PI 能打印、报价单不能打印"的不一致；④ **ERP-007 的 `allowed_paths` 不含 `deploy/**`**，因此生产上线脚本（如 `init17.sql`）与本机生产库执行必须另开受门禁任务，本任务只产出代码与 `SchemaUpgrader` 幂等升级 |
+| ERP-008 订单追溯 | 范围正确，与总表第 6/7 行缺口一致 | ① 销售订单走 `sp_Biz_SalesOrder`、采购订单走 `sp_Biz_PurchaseOrder`（`BillProcController` Bills 目录 + `deploy/init4.sql`），加列需 DROP/CREATE 存储过程 → 只能对 NEWERP_TEST 验证，生产库变更需变更窗口 + 回滚脚本；② 页面字段需同步 `modules-doc.js` 的 `fields/columns`（否则保存不生效）；③ 历史数据须给默认值（可空字段），避免老单据打不开 |
+
+### 5.3 建议新增任务（按依赖与风险排序）
+
+| 建议 ID | 目标与边界 | depends_on | 风险 / 门禁 | 完成模式 |
+|---|---|---|---|---|
+| ERP-009 | 报价单打印与报价有效期治理：补 `GET /api/sales/quotations/{id}/print`、在 `BILL_CONFIG`/`BILL_CODE_MAP` 注册 `quotation`、报价有效期到期提醒报表（复用报表框架，零 DB 改动）、报价成交率分析 | ERP-007 | low / L1 | browser |
+| ERP-010 | 报价/PI → 销售订单「带入预填」（不改存储过程），销售订单留痕来源报价单/PI | ERP-007, ERP-008 | medium / L2 | browser |
+| ERP-011 | 装柜外贸字段与物流跟踪：LCL/FCL、B/L、SO、ETD/ETA/ATD/ATA、拖车/报关行、查验放行、目的/中转港 | ERP-008 | **high（装柜单据走存储过程 + 结构变更，需变更窗口、备份与回滚脚本）** / L3 | browser |
+| ERP-012 | 拼柜方案与费用分摊闭环：新增「柜 → 多客户」主子模型 + 分摊批次留痕，分摊结果回写装柜/结算与费用单关联（保留现有按体积/重量/箱数/金额 + 手工覆盖） | ERP-011 | high / L3 | browser |
+| ERP-013 | 库存动作单据与成本：盘点单、调拨单、退货入库/出库、与 `Stocks` 联动、移动加权/批次成本 | ERP-011 | high / L3 | browser |
+| ERP-014 | 财务补口：应付账款、供应商对账、客户对账、发票管理（专票/普票/出口发票）、收款自动核销、汇兑损益、金额阈值审批流 | ERP-008 | medium-high / L2-L3 | browser |
+| ERP-015 | 生产管理（BOM/生产任务/委外/领料/产成品入库/生产看板/库存成本）—— 立项前需确认工序粒度（是否有车间/工序/工价） | 无（并行） | **decision-required**；实现风险 high | browser |
+| ERP-016 | 增强项：数据范围权限（业务员仅见自己客户）、附件中心、移动端/扫码 | ERP-014 | medium / L2 | browser |
+| ERP-017 | 文档补正（§4 清单 4.1~4.7）：技术方案说明书测试与结构、报价单/PI 设计文档完成度标注、部署交付文档已完成项标注、数据库设计说明书补齐新增表与列、菜单建议稿落地状态 | 无 | low / L1（可 control_plane） | control_plane |
+
+## 6. 执行规则（保持有效）
+
+- 队列目标大小 3；队首非终态任务控制推进，禁止隐式跳过；`depends_on` 变更前必须重新校验依赖图。
+- 不因「已有文件/Controller/菜单」判为完成：必须同时验证 API、页面、持久化、状态流、权限、测试与用户可见流程（本 Backlog 已按此口径给出初判状态）。
+- 业务任务默认 `completion_mode: browser`：真实 Edge + TRX + 截图 + SHA-256 清单齐备才算 `completed`；Cline 正常退出仅代表 `code_ready`。
+- 涉及 SQL/存储过程/SchemaUpgrader/SeedData 的改动只允许代码级修改，并且只对 NEWERP_TEST 自动验证；生产数据库、生产 OSS、正式部署/发布与不可逆数据操作继续保留 Human Gate。
+- 每个 partial/missing 任务开工前先读本 Backlog §2 证据列，避免重复实现已可用的链路（尤其费用分摊、应收账龄、单证中心、CRM、样品、退税台账、14 张报表）。
+- 新增菜单必须同时补页面注册（`modules*.js` 或 `BILL_CONFIG`/`EXPORT_MENU_MAP`/`REPORTS`），避免出现"该功能开发中"死链。
+- 每次任务完成后更新本 Backlog：把已验证项从 partial/missing 升级，并在 §5.3 调整下一批建议任务。
+- ERP-006 本身不修改 `PROJECT_STATE.json`、任务 JSON、`audit.jsonl` 与结果文件——这些由 orchestrator 拥有并写入。
+
+
+
+
