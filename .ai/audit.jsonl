@@ -3,3 +3,4 @@
 {"at":"2026-09-23T01:37:42Z","event":"security_baseline_approved","scope":"local_repository_security_baseline","actor":"user","note":"Repository copies sanitized; external credential rotation remains required."}
 {"at":"2026-09-23T01:37:42Z","event":"task_completed","task":"ERP-001","status":"completed","validation":"safe"}
 {"at": "2026-09-23T01:47:35.117941Z", "event": "waiting_human_gate", "task": "ERP-002"}
+{"at": "2026-09-23T02:19:54.834857Z", "event": "task_deferred", "task": "ERP-002", "actor": "user", "note": "User requested deferring credential and administrator-password work to prioritize the full automation pipeline."}

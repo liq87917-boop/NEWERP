@@ -1,7 +1,7 @@
 {
   "id": "ERP-002",
   "title": "Remove the shared default administrator password",
-  "status": "pending",
+  "status": "deferred",
   "risk_level": "high",
   "description": "Replace the hard-coded initial administrator password with a one-time bootstrap secret supplied through a protected environment variable, without silently changing existing administrator accounts.",
   "acceptance_criteria": [
@@ -24,8 +24,11 @@
   "validation_profile": "safe",
   "human_gate": {
     "required": true,
-    "status": "pending",
-    "reason": "This changes administrator bootstrap behavior and a protected SeedData path; approve the rollout and recovery plan before execution."
+    "status": "deferred",
+    "reason": "This changes administrator bootstrap behavior and a protected SeedData path; approve the rollout and recovery plan before execution.",
+    "deferred_by": "user",
+    "deferred_at": "2026-09-23T02:19:54.831758Z",
+    "note": "User requested deferring credential and administrator-password work to prioritize the full automation pipeline."
   },
   "attempts": 0
 }
