@@ -118,6 +118,40 @@ def path_violations(task: dict[str, Any], config: dict[str, Any]) -> list[str]:
     return violations
 
 
+def recoverable_path_guard_task(config: dict[str, Any], state: dict[str, Any]) -> tuple[Path, dict[str, Any]] | None:
+    """Return a failed task whose existing dirty work can be safely resumed.
+
+    This recovery is intentionally narrow: it only applies when the previous stop
+    reason was Path Guard, the task is still the current failed task, and the
+    *current* path guard now reports zero violations. This lets us recover from
+    control-plane false positives (for example quoted Unicode filenames) without
+    weakening the guard for genuinely out-of-scope changes.
+    """
+    if state.get("phase") != "human_attention":
+        return None
+    if state.get("finish_reason") != "attempts_exhausted":
+        return None
+    blocker = str(state.get("blocker") or "")
+    if not blocker.startswith("Path guard failed:"):
+        return None
+    task_id = state.get("current_task")
+    if not task_id:
+        return None
+    path = TASKS_DIR / f"{task_id}.json"
+    if not path.exists():
+        return None
+    task = load_json(path)
+    if task.get("status") != "failed":
+        return None
+    try:
+        validate_task(task, config)
+    except ValueError:
+        return None
+    if path_violations(task, config):
+        return None
+    return path, task
+
+
 def set_state(state: dict[str, Any], **updates: Any) -> None:
     state.update(updates); state["updated_at"] = utc_now(); save_json(STATE_PATH, state)
 
@@ -214,11 +248,18 @@ def run_next(dry_run: bool) -> int:
     config, state = load_json(CONFIG_PATH), load_json(STATE_PATH)
     recovered = recover_push_pending(config, state)
     if recovered is not None: return recovered
-    try:
-        item = next_task(config)
-    except ValueError as exc:
-        set_state(state, phase="blocked", blocker=str(exc), finish_reason="queue_head_blocked")
-        audit("queue_head_blocked", reason=str(exc)); return 10
+
+    resume_existing = False
+    item = recoverable_path_guard_task(config, state)
+    if item is not None:
+        resume_existing = True
+        audit("path_guard_recovery_started", task=item[1]["id"], changed_paths=changed_paths())
+    else:
+        try:
+            item = next_task(config)
+        except ValueError as exc:
+            set_state(state, phase="blocked", blocker=str(exc), finish_reason="queue_head_blocked")
+            audit("queue_head_blocked", reason=str(exc)); return 10
     if item is None: print("No runnable task."); return 0
     task_path, task = item
     try: validate_task(task, config)
@@ -234,26 +275,42 @@ def run_next(dry_run: bool) -> int:
         set_state(state, phase="waiting_human_gate", current_task=task["id"], blocker=task.get("human_gate", {}).get("reason", "Human Gate approval required"))
         audit("waiting_human_gate", task=task["id"]); return 6
     if config.get("require_git", True) and not git_available(): return 4
-    if config.get("require_clean_worktree", True) and changed_paths():
+    if config.get("require_clean_worktree", True) and changed_paths() and not resume_existing:
         set_state(state, phase="blocked", current_task=task["id"], blocker="Working tree is not clean", finish_reason="dirty_worktree"); return 5
     if dry_run: print(build_prompt(task, 1, "")); return 0
 
     task["status"] = "in_progress"; save_json(task_path, task)
-    set_state(state, phase="developing", current_task=task["id"], blocker=None, finish_reason=None); audit("task_started", task=task["id"])
-    previous_error = ""; cline_code: int | None = None; cline_raw_reason: str | None = None
+    if resume_existing:
+        set_state(state, phase="developing", current_task=task["id"], blocker=None, finish_reason="path_guard_recovered")
+        audit("path_guard_recovered", task=task["id"], changed_paths=changed_paths())
+    else:
+        set_state(state, phase="developing", current_task=task["id"], blocker=None, finish_reason=None)
+        audit("task_started", task=task["id"])
+
+    previous_error = "Recovered existing work after a Path Guard false positive; validate the current working tree before asking Cline to change it again." if resume_existing else ""
+    cline_code: int | None = 0 if resume_existing else None
+    cline_raw_reason: str | None = "path_guard_recovered_existing_work" if resume_existing else None
     browser_manifest: dict[str, Any] | None = None
-    for attempt in range(1, int(task.get("max_attempts", config["max_attempts"])) + 1):
+    max_attempts = int(task.get("max_attempts", config["max_attempts"]))
+    start_attempt = max(1, min(int(task.get("attempts", 0) or 1), max_attempts))
+    validate_existing_first = resume_existing
+
+    for attempt in range(start_attempt, max_attempts + 1):
         task["attempts"] = attempt; save_json(task_path, task)
-        log_path = LOGS_DIR / f"{task['id']}-attempt-{attempt}.jsonl"; LOGS_DIR.mkdir(parents=True, exist_ok=True)
-        command = [config["cline_command"], "--json", "--auto-approve", "true", "--cwd", str(ROOT), "--timeout", str(config["cline_timeout_seconds"]), build_prompt(task, attempt, previous_error)]
-        with log_path.open("w", encoding="utf-8") as log:
-            cline_code = subprocess.run(command, cwd=ROOT, text=True, stdout=log, stderr=subprocess.STDOUT).returncode
-        cline_raw_reason = parse_cline_finish_reason(log_path)
-        violations = path_violations(task, config)
-        if violations:
-            previous_error = "Path guard failed:\n" + "\n".join(violations); audit("path_guard_failed", task=task["id"], violations=violations); break
-        if cline_code != 0:
-            previous_error = f"Cline exited with code {cline_code}; raw reason={cline_raw_reason}"; audit("cline_failed", task=task["id"], attempt=attempt); continue
+        if validate_existing_first:
+            validate_existing_first = False
+            audit("path_guard_recovery_validation_started", task=task["id"], attempt=attempt)
+        else:
+            log_path = LOGS_DIR / f"{task['id']}-attempt-{attempt}.jsonl"; LOGS_DIR.mkdir(parents=True, exist_ok=True)
+            command = [config["cline_command"], "--json", "--auto-approve", "true", "--cwd", str(ROOT), "--timeout", str(config["cline_timeout_seconds"]), build_prompt(task, attempt, previous_error)]
+            with log_path.open("w", encoding="utf-8") as log:
+                cline_code = subprocess.run(command, cwd=ROOT, text=True, stdout=log, stderr=subprocess.STDOUT).returncode
+            cline_raw_reason = parse_cline_finish_reason(log_path)
+            violations = path_violations(task, config)
+            if violations:
+                previous_error = "Path guard failed:\n" + "\n".join(violations); audit("path_guard_failed", task=task["id"], violations=violations); break
+            if cline_code != 0:
+                previous_error = f"Cline exited with code {cline_code}; raw reason={cline_raw_reason}"; audit("cline_failed", task=task["id"], attempt=attempt); continue
 
         validation = subprocess.run([sys.executable, str(ROOT / "scripts" / "ai_validate.py"), "--profile", task["validation_profile"], "--task", task["id"]], cwd=ROOT)
         if validation.returncode != 0:
