@@ -1,7 +1,7 @@
 {
   "id": "ERP-009",
   "title": "Implement inventory movement documents and stock costing foundation",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "medium-high",
   "description": "Implement the next audited missing inventory batch after ERP-008: stock count/adjustment, warehouse transfer, sales return and purchase return documents with auditable stock movements and a safe inventory-cost foundation. Follow existing document conventions and validate schema changes only against NEWERP_TEST; production database/data operations remain gated.",
   "acceptance_criteria": [
@@ -24,7 +24,9 @@
     "docs/**",
     ".ai/**"
   ],
-  "depends_on": ["ERP-008"],
+  "depends_on": [
+    "ERP-008"
+  ],
   "auto_start": true,
   "requires_human_approval": false,
   "max_attempts": 3,
@@ -46,6 +48,6 @@
     "status": "approved",
     "reason": "User requested full-project completion; implementation and NEWERP_TEST validation are allowed while production database, production deployment and irreversible operations remain separately gated."
   },
-  "attempts": 0,
+  "attempts": 2,
   "created_at": "2026-09-23T06:19:00Z"
 }

@@ -118,6 +118,13 @@ public sealed class InventoryService : IInventoryService
                 cancellationToken);
         if (stock is not null) return stock;
 
+        // 同一次工作单元内（如同一张单据的多行明细）必须复用同一行库存：新建行在 SaveChanges 之前
+        // 查数据库查不到，否则会为「同一仓库 + 同一商品」插入第二行，导致库存被拆成多行、
+        // 结存快照断裂，后续出库还可能在单行上误判库存不足。
+        stock = _db.Stocks.Local.FirstOrDefault(s =>
+            s.WarehouseId == warehouseId && s.ProductId == productId && !s.IsDeleted);
+        if (stock is not null) return stock;
+
         stock = new Stock
         {
             WarehouseId = warehouseId,
@@ -180,11 +187,23 @@ public sealed class InventoryService : IInventoryService
 
         // 成本单价缺省取当前加权平均成本（出库计价基准）
         var cost = unitCost > 0 ? unitCost : stock.AverageCost;
+
+        // 成本下限保护：
+        // 1) 出库成本不得超过该库存行的账面金额，否则库存金额会被冲成负数，
+        //    且「Σ 流水金额 = Stocks.TotalCost」的核对关系被破坏（销审也无法精确还原）；
+        // 2) 出库把库存清零时按账面余额一次性核减，避免「 6 位成本 × 数量 → 4 位金额」取整残留：
+        //    残留会被 AverageOf 直接归零，同样造成账实不符。
+        // 两种情况都按实际核减金额折算回单价，保证流水金额 = 库存金额变动。
         var amount = RoundAmount(quantity * cost);
+        if (amount > stock.TotalCost || quantity >= stock.Quantity)
+        {
+            amount = Math.Max(0m, stock.TotalCost);
+            cost = RoundCost(amount / quantity);
+        }
 
         stock.Quantity -= quantity;
         stock.AvailableQuantity = Math.Max(0m, stock.AvailableQuantity - quantity);
-        stock.TotalCost = Math.Max(0m, RoundAmount(stock.TotalCost - amount));
+        stock.TotalCost = RoundAmount(stock.TotalCost - amount);
         stock.AverageCost = AverageOf(stock);
         stock.UpdatedAt = DateTime.Now;
 
@@ -220,9 +239,17 @@ public sealed class InventoryService : IInventoryService
                     throw BusinessException.RuleConflict(
                         $"商品 [{movement.ProductName}] 当前库存 {stock.Quantity} 不足以冲销 {movement.Quantity}，" +
                         "该入库已被后续业务占用，无法销审");
+
+                // 账面金额不足以扣回该笔入库金额时同样拒绝：否则库存金额被扣成负数，
+                // 「Σ 流水金额 = Stocks.TotalCost」的核对关系也会被破坏（销审无法精确还原）。
+                if (movement.Amount > stock.TotalCost)
+                    throw BusinessException.RuleConflict(
+                        $"商品 [{movement.ProductName}] 当前库存金额 {stock.TotalCost} 不足以冲销入库金额 " +
+                        $"{movement.Amount}，该入库成本已被后续业务占用，无法销审");
+
                 stock.Quantity -= movement.Quantity;
                 stock.AvailableQuantity = Math.Max(0m, stock.AvailableQuantity - movement.Quantity);
-                stock.TotalCost = Math.Max(0m, RoundAmount(stock.TotalCost - movement.Amount));
+                stock.TotalCost = RoundAmount(stock.TotalCost - movement.Amount);
             }
             else
             {

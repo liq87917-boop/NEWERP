@@ -561,6 +561,113 @@ public class InventoryMovementTests
     }
 
 
+    [Fact]
+    public async Task 成本_出库成本超过账面金额_按账面金额核减且销审精确还原()
+    {
+        using var db = TestDbFactory.Create();
+        SeedStock(db, WarehouseA, Product1, quantity: 10m, totalCost: 30m);      // 账面均价 3
+        var service = new InventoryService(db);
+        var context = Context(WarehouseA, Product1);
+
+        // 显式成本（10）高于账面均价：只能按账面金额 30 核减，库存金额不得为负
+        var movement = await service.DecreaseAsync(context, 4m, 10m);
+        await db.SaveChangesAsync();
+
+        var stock = db.Stocks.Single();
+        Assert.Equal(-30m, movement.Amount);                                     // 流水金额 = 库存金额实际变动
+        Assert.Equal(30m, db.StockMovements.Sum(m => -m.Amount));                 // 流水金额 = 库存金额核减额
+        Assert.Equal(0m, stock.TotalCost);                                       // 账面金额见底即 0，不出现负库存金额
+        Assert.Equal(6m, stock.Quantity);
+
+        // 销审冲销：按流水金额精确还原到原账面金额（不得被放大）
+        await service.ReverseAsync(InventoryDocumentHelper.StockAdjustmentType, 1L, "测试冲销");
+        await db.SaveChangesAsync();
+
+        stock = db.Stocks.Single();
+        Assert.Equal(10m, stock.Quantity);
+        Assert.Equal(30m, stock.TotalCost);
+    }
+
+    [Fact]
+    public async Task 销售退货_同一商品多行_只生成一条库存行且结存快照连续()
+    {
+        using var db = TestDbFactory.Create();
+        var ctl = NewSalesReturnController(db);
+        // 该仓库 + 该商品此前没有任何库存行：两行明细必须落到同一库存行上
+        var result = await ctl.Create(new SalesReturn
+        {
+            ReturnDate = DateTime.Today,
+            CustomerName = "客户A",
+            WarehouseId = WarehouseA,
+            ReturnReason = "质量",
+            Remark = "INV_TEST",
+            Details = new List<SalesReturnDetail>
+            {
+                new() { ProductId = Product1, ProductName = "P1", Quantity = 4m, UnitPrice = 25m, UnitCost = 8m },
+                new() { ProductId = Product1, ProductName = "P1", Quantity = 6m, UnitPrice = 25m, UnitCost = 8m }
+            }
+        });
+        var id = CreatedId(result);
+        await ctl.Submit(id);
+        await ctl.Approve(id);
+
+        var stock = Assert.Single(db.Stocks.Where(s => s.WarehouseId == WarehouseA && s.ProductId == Product1));
+        Assert.Equal(10m, stock.Quantity);                                       // 4 + 6 合并到同一库存行
+        Assert.Equal(80m, stock.TotalCost);
+        Assert.Equal(8m, stock.AverageCost);
+
+        var movements = db.StockMovements.OrderBy(m => m.Id).ToList();
+        Assert.Equal(2, movements.Count);
+        Assert.Equal(4m, movements[0].BalanceQuantity);                           // 结存快照按真实库存连续
+        Assert.Equal(10m, movements[1].BalanceQuantity);
+    }
+
+    [Fact]
+    public async Task 销审_入库成本已被后续业务占用_拒绝销审且库存不变()
+    {
+        using var db = TestDbFactory.Create();
+        var service = new InventoryService(db);
+        await service.IncreaseAsync(Context(WarehouseA, Product1, 1L), 5m, 20m);       // 入库 5 × 20 = 100
+        await db.SaveChangesAsync();
+        await service.IncreaseAsync(Context(WarehouseA, Product1, 2L), 5m, 1m);        // 入库 5 × 1 → 数量 10、金额 105
+        await db.SaveChangesAsync();
+        await service.DecreaseAsync(Context(WarehouseA, Product1, 3L), 5m, 0m);        // 按均价 10.5 核减 52.5
+        await db.SaveChangesAsync();
+
+        var stock = db.Stocks.Single();
+        Assert.Equal(5m, stock.Quantity);
+        Assert.Equal(52.5m, stock.TotalCost);
+
+        // 数量够（5 ≥ 5）但账面金额不足以扣回第一笔入库金额（100 > 52.5）→ 拒绝销审，库存不变
+        var ex = await Assert.ThrowsAsync<BusinessException>(() =>
+            service.ReverseAsync(InventoryDocumentHelper.StockAdjustmentType, 1L, "测试冲销"));
+        Assert.Equal(ErrorCodes.RuleConflict, ex.Code);
+        Assert.Equal(5m, stock.Quantity);
+        Assert.Equal(52.5m, stock.TotalCost);
+        Assert.False(db.StockMovements.Single(m => m.SourceDocId == 1L).IsReversed);
+    }
+
+    [Fact]
+    public async Task 成本_出库清零库存_按账面余额核减不留残额()
+    {
+        using var db = TestDbFactory.Create();
+        var service = new InventoryService(db);
+        var context = Context(WarehouseA, Product2);
+
+        await service.IncreaseAsync(context, 1000m, 0.0003334m);        // 金额 0.3334，6 位均价 0.000333
+        await db.SaveChangesAsync();
+        Assert.Equal(0.3334m, db.Stocks.Single().TotalCost);
+
+        var movement = await service.DecreaseAsync(context, 1000m, 0m); // 清零：必须核减全部账面余额
+        await db.SaveChangesAsync();
+
+        var stock = db.Stocks.Single();
+        Assert.Equal(0m, stock.Quantity);
+        Assert.Equal(0m, stock.TotalCost);
+        Assert.Equal(-0.3334m, movement.Amount);                        // 不留 0.0004 残额
+        Assert.Equal(0m, db.StockMovements.Sum(m => m.Amount));         // Σ 流水金额 = 库存余额（已清零）
+    }
+
     // ==================== 测试辅助 ====================
 
     private static StockAdjustmentController NewAdjustmentController(ErpDbContext db)
@@ -575,10 +682,10 @@ public class InventoryMovementTests
     private static PurchaseReturnController NewPurchaseReturnController(ErpDbContext db)
         => new(db, new DocumentNumberService(db), new InventoryService(db));
 
-    private static InventoryMovementContext Context(long warehouseId, long productId) => new()
+    private static InventoryMovementContext Context(long warehouseId, long productId, long sourceDocId = 1L) => new()
     {
         SourceDocType = InventoryDocumentHelper.StockAdjustmentType,
-        SourceDocId = 1,
+        SourceDocId = sourceDocId,
         SourceDocNo = "PD-TEST",
         MovementType = InventoryMovementType.Adjustment,
         WarehouseId = warehouseId,
