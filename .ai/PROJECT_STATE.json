@@ -1,7 +1,7 @@
 {
   "project": "NEWERP",
   "controller": "gpt_conversation",
-  "phase": "idle",
+  "phase": "ready",
   "current_task": null,
   "last_completed_task": "ERP-005",
   "last_reviewed_task": "ERP-005",
@@ -21,10 +21,10 @@
     "mode": "gpt_file_backed",
     "paused": false,
     "pause_reason": null,
-    "last_intent": "add_persistent_local_agent_status_console",
+    "last_intent": "complete_all_project_functions",
     "last_actor": "GPT",
     "queue_target_size": 3,
-    "updated_at": "2026-09-23T04:07:42Z"
+    "updated_at": "2026-09-23T05:23:00Z"
   },
   "completion_policy": {
     "default_mode": "browser",
@@ -32,8 +32,8 @@
     "cline_success_is_only": "code_ready"
   },
   "browser_acceptance": {
-    "status": "ci_ui_smoke_passed_for_control_plane_task",
-    "note": "ERP-005 changes the local automation control plane/status host. The Agent console smoke test and approved GitHub Actions UI smoke job passed; future business tasks still require real Edge acceptance evidence under the task completion policy."
+    "status": "waiting_for_business_tasks",
+    "note": "ERP-006 audit is queued, followed by ERP-007 and ERP-008 business tasks. Each business task requires real Edge acceptance."
   },
   "human_gates": {
     "production_database_changes": "required",
@@ -41,6 +41,6 @@
     "production_deployment_or_release": "required",
     "irreversible_data_operations": "required"
   },
-  "finish_reason": "queue_empty",
-  "updated_at": "2026-09-23T04:07:42Z"
+  "finish_reason": "task_queued",
+  "updated_at": "2026-09-23T05:23:00Z"
 }
