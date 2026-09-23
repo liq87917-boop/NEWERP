@@ -1,0 +1,26 @@
+{
+  "id": "ERP-023",
+  "title": "Apply product unit conversion to stock in and out",
+  "status": "pending",
+  "risk_level": "medium",
+  "description": "Close the audited inventory multi-unit calculation gap by applying the existing BaseProduct.UnitsPerPackage metadata to purchasing stock-in and sales stock-out quantity calculations. Keep stock base-unit semantics explicit and backward compatible; no production schema change.",
+  "acceptance_criteria": [
+    "Stock-in and stock-out services/controllers use a documented base-unit rule and existing UnitsPerPackage when package-unit quantities are supplied.",
+    "Products without conversion metadata preserve existing quantity behavior.",
+    "Invalid zero/negative conversion factors are rejected or safely ignored according to one documented rule.",
+    "Inventory balances and movement quantities remain internally consistent and reversible under unaudit/cancel paths.",
+    "Unit/integration tests cover package conversion, base-unit behavior, invalid metadata and reversal; safe validation passes.",
+    "Browser/UI acceptance is recorded as deferred during development according to project policy."
+  ],
+  "allowed_paths": ["src/ERP.Domain/**","src/ERP.Application/**","src/ERP.Api/Controllers/**","src/ERP.Api/wwwroot/**","src/ERP.UnitTests/**","src/ERP.IntegrationTests/**","docs/**",".ai/**"],
+  "depends_on": ["ERP-009"],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "browser",
+  "browser_acceptance": {"required": true, "scenarios": ["Post stock-in with package conversion and verify base-unit inventory.","Post stock-out with package conversion and verify balance/reversal consistency."], "test_filter": "Collection=UiTests", "minimum_screenshots": 2},
+  "human_gate": {"required": false, "level": "L2", "status": "not_required", "reason": "Uses existing UnitsPerPackage metadata and application logic only; no production database/deployment action."},
+  "attempts": 0,
+  "created_at": "2026-09-23T13:04:03Z"
+}
