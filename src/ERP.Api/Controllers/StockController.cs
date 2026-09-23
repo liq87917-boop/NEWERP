@@ -1,6 +1,7 @@
 using ERP.Application.Common;
 using ERP.Application.Interfaces;
 using ERP.Domain.Entities;
+using ERP.Domain.Enums;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -54,11 +55,47 @@ public class StockController : ControllerBase
             Quantity = s.Quantity,
             AvailableQuantity = s.AvailableQuantity,
             LockedQuantity = s.LockedQuantity,
+            AverageCost = s.AverageCost,
+            TotalCost = s.TotalCost,
             UpdatedAt = s.UpdatedAt
         }).ToList();
 
         return Ok(ApiResponse<PagedResult<StockView>>.Success(
             new PagedResult<StockView> { Items = items, Total = total, Page = query.Page, PageSize = query.PageSize }));
+    }
+
+    /// <summary>
+    /// 库存流水查询（ERP-009）：按单据 / 仓库 / 商品 / 移动类型追溯每一次库存变动。
+    /// keyword 匹配来源单据号 / 商品编码 / 商品名称 / 仓库名称。
+    /// </summary>
+    [HttpGet("movements")]
+    public async Task<IActionResult> GetMovements([FromQuery] PageQuery query, [FromQuery] long? warehouseId,
+        [FromQuery] long? productId, [FromQuery] string? sourceDocNo,
+        [FromQuery] InventoryMovementType? movementType)
+    {
+        query.Normalize();
+        var source = _db.StockMovements.AsNoTracking().Where(m => !m.IsDeleted);
+        if (warehouseId.HasValue) source = source.Where(m => m.WarehouseId == warehouseId.Value);
+        if (productId.HasValue) source = source.Where(m => m.ProductId == productId.Value);
+        if (movementType.HasValue) source = source.Where(m => m.MovementType == movementType.Value);
+        if (!string.IsNullOrWhiteSpace(sourceDocNo)) source = source.Where(m => m.SourceDocNo == sourceDocNo);
+        if (!string.IsNullOrWhiteSpace(query.Keyword))
+        {
+            var kw = query.Keyword;
+            source = source.Where(m => m.SourceDocNo.Contains(kw) || m.ProductCode.Contains(kw)
+                                       || m.ProductName.Contains(kw) || m.WarehouseName.Contains(kw));
+        }
+
+        var total = await source.CountAsync();
+        var items = await source.OrderByDescending(m => m.Id)
+            .Skip((query.Page - 1) * query.PageSize).Take(query.PageSize).ToListAsync();
+        return Ok(ApiResponse<PagedResult<StockMovement>>.Success(new PagedResult<StockMovement>
+        {
+            Items = items,
+            Total = total,
+            Page = query.Page,
+            PageSize = query.PageSize
+        }));
     }
 
     /// <summary>库存汇总（用于库存预警等）</summary>
@@ -86,5 +123,9 @@ public class StockView
     public decimal Quantity { get; set; }
     public decimal AvailableQuantity { get; set; }
     public decimal LockedQuantity { get; set; }
+    /// <summary>加权平均成本单价（ERP-009 新增）</summary>
+    public decimal AverageCost { get; set; }
+    /// <summary>库存金额（数量 × 加权平均成本）</summary>
+    public decimal TotalCost { get; set; }
     public DateTime? UpdatedAt { get; set; }
 }

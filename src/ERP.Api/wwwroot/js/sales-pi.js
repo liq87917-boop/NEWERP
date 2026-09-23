@@ -17,6 +17,24 @@ const SALES_DOC_PRINT = {
       'shippingTerms', 'leadTime', 'currency', 'exchangeRate', 'totalAmount', 'totalAmountCny',
       'depositRatio', 'depositAmount', 'salesmanName'],
   },
+  /* ERP-008：销售订单（外销合同）打印——外贸合同条款与来源追溯字段一并输出 */
+  'sales-order': {
+    title: '销售订单（外销合同）', api: '/api/sales-orders', noKey: 'orderNo',
+    detailColumns: 'order',
+    fields: ['orderNo', 'orderDate', 'customerPoNo', 'contractNo', 'tradeTerms', 'destinationPort',
+      'consignee', 'notifyParty', 'shippingMarks', 'sourceQuotationNo', 'sourcePiNo', 'exportMode', 'businessNature',
+      'commissionRatio', 'splitShipment', 'inspectionRequirement', 'packagingRequirement',
+      'currency', 'exchangeRate', 'totalAmount', 'depositRatio', 'depositAmount',
+      'paymentTerms', 'deliveryDate', 'shippingMethod', 'remark'],
+  },
+  'purchase-order': {
+    title: '采购订单', api: '/api/purchase-orders', noKey: 'orderNo',
+    detailColumns: 'order',
+    fields: ['orderNo', 'orderDate', 'supplierId', 'contractNo', 'owningCustomerName',
+      'owningSalesOrderNo', 'advanceOnBehalf', 'supplierConfirmedDate', 'taxRate', 'taxIncluded',
+      'arrivalProgress', 'qcStatus', 'settlementProgress', 'currency', 'exchangeRate', 'totalAmount',
+      'paymentTerms', 'deliveryDate', 'remark'],
+  },
 };
 
 /* 明细打印列（行号 / 商品 / 规格 / 数量 / 单价 / 金额 / 起订量 / 备注） */
@@ -33,11 +51,32 @@ const SALES_DOC_DETAIL_COLUMNS = [
   { key: 'remark', label: '备注', width: '120px' },
 ];
 
-/* 单行文本打印格式化：日期 / 金额按单据习惯输出，其余原样 */
+/* ERP-008：销售订单 / 采购订单明细打印列（订单明细无商品编码与起订量，改为商品名称 / 规格 / 单位 / 数量 / 单价 / 金额 / 备注） */
+const SALES_ORDER_DETAIL_COLUMNS = [
+  { key: 'productId', label: '商品ID', width: '70px' },
+  { key: 'productName', label: '商品名称', width: '190px' },
+  { key: 'spec', label: '规格', width: '140px' },
+  { key: 'unit', label: '单位', width: '60px' },
+  { key: 'quantity', label: '数量', width: '80px', num: true },
+  { key: 'unitPrice', label: '单价', width: '80px', num: true },
+  { key: 'amount', label: '金额', width: '100px', num: true },
+  { key: 'remark', label: '备注', width: '120px' },
+];
+const SALES_DOC_DETAIL_SETS = { order: SALES_ORDER_DETAIL_COLUMNS };
+
+/* 取单据的明细打印列（未声明 detailColumns 的沿用报价单 / PI 明细列） */
+function salesDocDetailColumns(cfg) {
+  return (cfg && cfg.detailColumns && SALES_DOC_DETAIL_SETS[cfg.detailColumns]) || SALES_DOC_DETAIL_COLUMNS;
+}
+
+/* 单行文本打印格式化：日期 / 金额 / 布尔按单据习惯输出，其余原样 */
 function salesDocPrintValue(key, value) {
   if (value === null || value === undefined || value === '') return '';
-  if (['quotationDate', 'piDate', 'validUntil'].includes(key)) return fmtDate(value);
+  if (['quotationDate', 'piDate', 'validUntil', 'orderDate', 'deliveryDate', 'supplierConfirmedDate'].includes(key))
+    return fmtDate(value);
   if (['totalAmount', 'totalAmountCny', 'depositAmount'].includes(key)) return fmtMoney(value);
+  if (['splitShipment', 'advanceOnBehalf', 'taxIncluded'].includes(key))
+    return (value === true || String(value).toLowerCase() === 'true') ? '是' : '否';
   return String(value);
 }
 
@@ -57,8 +96,9 @@ function buildSalesDocPrintHtml(code, cfg, tpl, doc) {
   const details = doc.details || [];
   let detailHtml = '';
   if (tpl.ShowDetailTable !== false) {
-    const head = SALES_DOC_DETAIL_COLUMNS.map(c => `<th style="width:${c.width}">${c.label}</th>`).join('');
-    const body = details.map(d => `<tr>${SALES_DOC_DETAIL_COLUMNS.map(c => {
+    const detailColumns = salesDocDetailColumns(cfg);
+    const head = detailColumns.map(c => `<th style="width:${c.width}">${c.label}</th>`).join('');
+    const body = details.map(d => `<tr>${detailColumns.map(c => {
       const raw = d[c.key];
       const text = c.num ? fmtMoney(raw) : (raw === null || raw === undefined ? '' : String(raw));
       return `<td class="${c.num ? 'num' : ''}">${escapeHtml(text)}</td>`;
@@ -71,8 +111,17 @@ function buildSalesDocPrintHtml(code, cfg, tpl, doc) {
   const depositText = (doc.depositAmount || doc.depositRatio)
     ? `　｜　定金比例 ${escapeHtml(String(doc.depositRatio || 0))}%，定金金额 ${currency} ${fmtMoney(doc.depositAmount)}`
     : '';
-  const totals = `<div class="print-remark"><b>合计：</b>${currency} ${fmtMoney(doc.totalAmount)}
-    ／ 折人民币 ${fmtMoney(doc.totalAmountCny)}${depositText}</div>`;
+  const totals = `<div class="print-remark"><b>合计：</b>${currency} ${fmtMoney(doc.totalAmount)}${doc.totalAmountCny ? ` ／ 折人民币 ${fmtMoney(doc.totalAmountCny)}` : ''}${depositText}</div>`;
+
+  // 销售订单专属：唛头与验货 / 包装要求（合同条款固定区）
+  let orderBlock = '';
+  if (code === 'sales-order' && (doc.shippingMarks || doc.inspectionRequirement || doc.packagingRequirement)) {
+    orderBlock = `<div class="print-remark">
+      ${doc.shippingMarks ? `<div><b>唛头 Shipping Marks：</b>${salesDocMultiline(doc.shippingMarks)}</div>` : ''}
+      ${doc.inspectionRequirement ? `<div style="margin-top:4px"><b>验货要求：</b>${salesDocMultiline(doc.inspectionRequirement)}</div>` : ''}
+      ${doc.packagingRequirement ? `<div style="margin-top:4px"><b>包装要求：</b>${salesDocMultiline(doc.packagingRequirement)}</div>` : ''}
+    </div>`;
+  }
 
   // PI 专属：唛头与银行信息（多行文本，打印模板固定区）
   let piBlock = '';
@@ -120,6 +169,7 @@ function buildSalesDocPrintHtml(code, cfg, tpl, doc) {
     ${detailHtml}
     ${totals}
     ${piBlock}
+    ${orderBlock}
     ${remarkHtml}
     <div class="print-sign"><span>制单人：____________</span><span>审核人：____________</span><span>客户确认：____________</span></div>
     <div class="print-footer"><span>${escapeHtml(tpl.FooterText || '')}</span><span>共 1 页</span></div>

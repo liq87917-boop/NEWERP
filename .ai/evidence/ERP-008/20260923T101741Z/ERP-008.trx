@@ -1,0 +1,153 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TestRun id="89d06f4f-3f2d-4cda-b599-72db09e8a68f" name="Admin@ADMIN-TIAN 2026-09-23 18:17:52" runUser="ADMIN-TIAN\Admin" xmlns="http://microsoft.com/schemas/VisualStudio/TeamTest/2010">
+  <Times creation="2026-09-23T18:17:52.9129014+08:00" queuing="2026-09-23T18:17:52.9129018+08:00" start="2026-09-23T18:17:45.0962600+08:00" finish="2026-09-23T18:19:16.5813254+08:00" />
+  <TestSettings name="default" id="6f3267d4-00fb-4034-8789-91eca1bd7bc4">
+    <Deployment runDeploymentRoot="Admin_ADMIN-TIAN_2026-09-23_18_17_52" />
+  </TestSettings>
+  <Results>
+    <UnitTestResult executionId="e1e01b1f-8372-4d53-b5df-4817df3271b5" testId="f57a92bc-ca4e-ff26-7ebc-76ba7904a9b5" testName="ERP.IntegrationTests.UiSmokeTests.错误密码_提示登录错误且不跳转" computerName="ADMIN-TIAN" duration="00:00:06.2166123" startTime="2026-09-23T18:19:02.5043664+08:00" endTime="2026-09-23T18:19:02.5043667+08:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="e1e01b1f-8372-4d53-b5df-4817df3271b5" />
+    <UnitTestResult executionId="12ba751b-49ae-4896-8b04-b498af48e0b9" testId="10664b30-4e7b-eaf2-7f44-4dc0901004fb" testName="ERP.IntegrationTests.PiWorkflowUiTests.报价单转PI_并可在PI列表与编辑页核对复制内容" computerName="ADMIN-TIAN" duration="00:00:14.2465344" startTime="2026-09-23T18:18:56.2872420+08:00" endTime="2026-09-23T18:18:56.2872422+08:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="12ba751b-49ae-4896-8b04-b498af48e0b9" />
+    <UnitTestResult executionId="6f165164-9a11-48ab-9e62-7ed08037353a" testId="f60fc0d2-90c7-d4f3-c3f0-f9edfcea3ca3" testName="ERP.IntegrationTests.OrderTraceabilityUiTests.订单列表与导出菜单_渲染追溯列且导出接口可用" computerName="ADMIN-TIAN" duration="00:00:00.9770116" startTime="2026-09-23T18:17:53.8557138+08:00" endTime="2026-09-23T18:17:53.8557140+08:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Failed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="6f165164-9a11-48ab-9e62-7ed08037353a">
+      <Output>
+        <ErrorInfo>
+          <Message>System.Collections.Generic.KeyNotFoundException : The given key was not present in the dictionary.</Message>
+          <StackTrace>   at System.Text.Json.JsonElement.GetProperty(String propertyName)&#xD;
+   at ERP.IntegrationTests.OrderTraceabilityUiTests.ApiData(String method, String path, String bodyJson) in D:\VSCodeProject\NEWERP\src\ERP.IntegrationTests\OrderTraceabilityUiTests.cs:line 339&#xD;
+   at ERP.IntegrationTests.OrderTraceabilityUiTests.CreateSalesOrderViaApi(String tag, Int64 customerId) in D:\VSCodeProject\NEWERP\src\ERP.IntegrationTests\OrderTraceabilityUiTests.cs:line 386&#xD;
+   at ERP.IntegrationTests.OrderTraceabilityUiTests.订单列表与导出菜单_渲染追溯列且导出接口可用() in D:\VSCodeProject\NEWERP\src\ERP.IntegrationTests\OrderTraceabilityUiTests.cs:line 243&#xD;
+   at System.RuntimeMethodHandle.InvokeMethod(Object target, Void** arguments, Signature sig, Boolean isConstructor)&#xD;
+   at System.Reflection.MethodBaseInvoker.InvokeWithNoArgs(Object obj, BindingFlags invokeAttr)</StackTrace>
+        </ErrorInfo>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="507fbb3b-8a6e-4942-9ced-44c3c15ea5f8" testId="fe51c273-19f8-73a4-12cb-6a34ac51420d" testName="ERP.IntegrationTests.OrderTraceabilityUiTests.采购订单_保存并重新打开_归属客户与采购执行字段回显一致" computerName="ADMIN-TIAN" duration="00:00:08.4534020" startTime="2026-09-23T18:18:02.3096266+08:00" endTime="2026-09-23T18:18:02.3096268+08:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Failed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="507fbb3b-8a6e-4942-9ced-44c3c15ea5f8">
+      <Output>
+        <ErrorInfo>
+          <Message>System.Collections.Generic.KeyNotFoundException : The given key was not present in the dictionary.</Message>
+          <StackTrace>   at System.Text.Json.JsonElement.GetProperty(String propertyName)&#xD;
+   at ERP.IntegrationTests.OrderTraceabilityUiTests.ApiData(String method, String path, String bodyJson) in D:\VSCodeProject\NEWERP\src\ERP.IntegrationTests\OrderTraceabilityUiTests.cs:line 339&#xD;
+   at ERP.IntegrationTests.OrderTraceabilityUiTests.CreateSalesOrderViaApi(String tag, Int64 customerId) in D:\VSCodeProject\NEWERP\src\ERP.IntegrationTests\OrderTraceabilityUiTests.cs:line 386&#xD;
+   at ERP.IntegrationTests.OrderTraceabilityUiTests.采购订单_保存并重新打开_归属客户与采购执行字段回显一致() in D:\VSCodeProject\NEWERP\src\ERP.IntegrationTests\OrderTraceabilityUiTests.cs:line 150&#xD;
+   at System.RuntimeMethodHandle.InvokeMethod(Object target, Void** arguments, Signature sig, Boolean isConstructor)&#xD;
+   at System.Reflection.MethodBaseInvoker.InvokeWithNoArgs(Object obj, BindingFlags invokeAttr)</StackTrace>
+        </ErrorInfo>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="60faab08-ebc8-4dc5-8949-0313d8b7f308" testId="56e4301d-8f2f-500a-1144-cebd278baab2" testName="ERP.IntegrationTests.UiSmokeTests.正确密码_进入主界面_可见菜单与用户名" computerName="ADMIN-TIAN" duration="00:00:06.4464672" startTime="2026-09-23T18:19:08.9502337+08:00" endTime="2026-09-23T18:19:08.9502341+08:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="60faab08-ebc8-4dc5-8949-0313d8b7f308" />
+    <UnitTestResult executionId="81581520-569f-4765-82b6-7d971ac25b68" testId="7ea48406-df77-db1e-5d03-0fe79e369aff" testName="ERP.IntegrationTests.OrderTraceabilityUiTests.销售订单_保存并重新打开_外贸合同与来源追溯字段回显一致" computerName="ADMIN-TIAN" duration="00:00:02.0191301" startTime="2026-09-23T18:17:52.8820019+08:00" endTime="2026-09-23T18:17:52.8820319+08:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Failed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="81581520-569f-4765-82b6-7d971ac25b68">
+      <Output>
+        <ErrorInfo>
+          <Message>销售订单页面未加载 /js/sales-pi.js（前端脚本过期）：请先重新构建并启动 ERP.Api 再运行浏览器验收</Message>
+          <StackTrace>   at ERP.IntegrationTests.OrderTraceabilityUiTests.销售订单_保存并重新打开_外贸合同与来源追溯字段回显一致() in D:\VSCodeProject\NEWERP\src\ERP.IntegrationTests\OrderTraceabilityUiTests.cs:line 41&#xD;
+   at System.RuntimeMethodHandle.InvokeMethod(Object target, Void** arguments, Signature sig, Boolean isConstructor)&#xD;
+   at System.Reflection.MethodBaseInvoker.InvokeWithNoArgs(Object obj, BindingFlags invokeAttr)</StackTrace>
+        </ErrorInfo>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="1776dabe-533a-49d1-bfc3-caddbebe52fa" testId="d4822faa-f877-71c6-796c-c7a279ec25e0" testName="ERP.IntegrationTests.UiSmokeTests.打开首页_默认显示登录页" computerName="ADMIN-TIAN" duration="00:00:02.0638918" startTime="2026-09-23T18:19:15.5506366+08:00" endTime="2026-09-23T18:19:15.5506369+08:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="1776dabe-533a-49d1-bfc3-caddbebe52fa" />
+    <UnitTestResult executionId="3975e7be-241b-4019-a1a5-368c3a41c2bd" testId="46755b34-3525-8d65-58d7-f3d2465f2609" testName="ERP.IntegrationTests.UiSmokeTests.退出登录_回到登录页" computerName="ADMIN-TIAN" duration="00:00:04.5346181" startTime="2026-09-23T18:19:13.4855014+08:00" endTime="2026-09-23T18:19:13.4855017+08:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="3975e7be-241b-4019-a1a5-368c3a41c2bd" />
+    <UnitTestResult executionId="a41da175-f531-401c-aa61-eb565170073a" testId="89d8399c-b94b-e026-2e0d-adfdf33b2b9b" testName="ERP.IntegrationTests.PiWorkflowUiTests.PI草稿修改_审核后禁改_销审恢复_并渲染打印预览" computerName="ADMIN-TIAN" duration="00:00:39.7294197" startTime="2026-09-23T18:18:42.0413102+08:00" endTime="2026-09-23T18:18:42.0413104+08:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="a41da175-f531-401c-aa61-eb565170073a" />
+  </Results>
+  <TestDefinitions>
+    <UnitTest name="ERP.IntegrationTests.UiSmokeTests.退出登录_回到登录页" storage="d:\vscodeproject\newerp\src\erp.integrationtests\bin\debug\net8.0\erp.integrationtests.dll" id="46755b34-3525-8d65-58d7-f3d2465f2609">
+      <Execution id="3975e7be-241b-4019-a1a5-368c3a41c2bd" />
+      <TestMethod codeBase="D:\VSCodeProject\NEWERP\src\ERP.IntegrationTests\bin\Debug\net8.0\ERP.IntegrationTests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="ERP.IntegrationTests.UiSmokeTests" name="退出登录_回到登录页" />
+    </UnitTest>
+    <UnitTest name="ERP.IntegrationTests.UiSmokeTests.正确密码_进入主界面_可见菜单与用户名" storage="d:\vscodeproject\newerp\src\erp.integrationtests\bin\debug\net8.0\erp.integrationtests.dll" id="56e4301d-8f2f-500a-1144-cebd278baab2">
+      <Execution id="60faab08-ebc8-4dc5-8949-0313d8b7f308" />
+      <TestMethod codeBase="D:\VSCodeProject\NEWERP\src\ERP.IntegrationTests\bin\Debug\net8.0\ERP.IntegrationTests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="ERP.IntegrationTests.UiSmokeTests" name="正确密码_进入主界面_可见菜单与用户名" />
+    </UnitTest>
+    <UnitTest name="ERP.IntegrationTests.OrderTraceabilityUiTests.订单列表与导出菜单_渲染追溯列且导出接口可用" storage="d:\vscodeproject\newerp\src\erp.integrationtests\bin\debug\net8.0\erp.integrationtests.dll" id="f60fc0d2-90c7-d4f3-c3f0-f9edfcea3ca3">
+      <Execution id="6f165164-9a11-48ab-9e62-7ed08037353a" />
+      <TestMethod codeBase="D:\VSCodeProject\NEWERP\src\ERP.IntegrationTests\bin\Debug\net8.0\ERP.IntegrationTests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="ERP.IntegrationTests.OrderTraceabilityUiTests" name="订单列表与导出菜单_渲染追溯列且导出接口可用" />
+    </UnitTest>
+    <UnitTest name="ERP.IntegrationTests.OrderTraceabilityUiTests.销售订单_保存并重新打开_外贸合同与来源追溯字段回显一致" storage="d:\vscodeproject\newerp\src\erp.integrationtests\bin\debug\net8.0\erp.integrationtests.dll" id="7ea48406-df77-db1e-5d03-0fe79e369aff">
+      <Execution id="81581520-569f-4765-82b6-7d971ac25b68" />
+      <TestMethod codeBase="D:\VSCodeProject\NEWERP\src\ERP.IntegrationTests\bin\Debug\net8.0\ERP.IntegrationTests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="ERP.IntegrationTests.OrderTraceabilityUiTests" name="销售订单_保存并重新打开_外贸合同与来源追溯字段回显一致" />
+    </UnitTest>
+    <UnitTest name="ERP.IntegrationTests.OrderTraceabilityUiTests.采购订单_保存并重新打开_归属客户与采购执行字段回显一致" storage="d:\vscodeproject\newerp\src\erp.integrationtests\bin\debug\net8.0\erp.integrationtests.dll" id="fe51c273-19f8-73a4-12cb-6a34ac51420d">
+      <Execution id="507fbb3b-8a6e-4942-9ced-44c3c15ea5f8" />
+      <TestMethod codeBase="D:\VSCodeProject\NEWERP\src\ERP.IntegrationTests\bin\Debug\net8.0\ERP.IntegrationTests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="ERP.IntegrationTests.OrderTraceabilityUiTests" name="采购订单_保存并重新打开_归属客户与采购执行字段回显一致" />
+    </UnitTest>
+    <UnitTest name="ERP.IntegrationTests.UiSmokeTests.错误密码_提示登录错误且不跳转" storage="d:\vscodeproject\newerp\src\erp.integrationtests\bin\debug\net8.0\erp.integrationtests.dll" id="f57a92bc-ca4e-ff26-7ebc-76ba7904a9b5">
+      <Execution id="e1e01b1f-8372-4d53-b5df-4817df3271b5" />
+      <TestMethod codeBase="D:\VSCodeProject\NEWERP\src\ERP.IntegrationTests\bin\Debug\net8.0\ERP.IntegrationTests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="ERP.IntegrationTests.UiSmokeTests" name="错误密码_提示登录错误且不跳转" />
+    </UnitTest>
+    <UnitTest name="ERP.IntegrationTests.UiSmokeTests.打开首页_默认显示登录页" storage="d:\vscodeproject\newerp\src\erp.integrationtests\bin\debug\net8.0\erp.integrationtests.dll" id="d4822faa-f877-71c6-796c-c7a279ec25e0">
+      <Execution id="1776dabe-533a-49d1-bfc3-caddbebe52fa" />
+      <TestMethod codeBase="D:\VSCodeProject\NEWERP\src\ERP.IntegrationTests\bin\Debug\net8.0\ERP.IntegrationTests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="ERP.IntegrationTests.UiSmokeTests" name="打开首页_默认显示登录页" />
+    </UnitTest>
+    <UnitTest name="ERP.IntegrationTests.PiWorkflowUiTests.PI草稿修改_审核后禁改_销审恢复_并渲染打印预览" storage="d:\vscodeproject\newerp\src\erp.integrationtests\bin\debug\net8.0\erp.integrationtests.dll" id="89d8399c-b94b-e026-2e0d-adfdf33b2b9b">
+      <Execution id="a41da175-f531-401c-aa61-eb565170073a" />
+      <TestMethod codeBase="D:\VSCodeProject\NEWERP\src\ERP.IntegrationTests\bin\Debug\net8.0\ERP.IntegrationTests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="ERP.IntegrationTests.PiWorkflowUiTests" name="PI草稿修改_审核后禁改_销审恢复_并渲染打印预览" />
+    </UnitTest>
+    <UnitTest name="ERP.IntegrationTests.PiWorkflowUiTests.报价单转PI_并可在PI列表与编辑页核对复制内容" storage="d:\vscodeproject\newerp\src\erp.integrationtests\bin\debug\net8.0\erp.integrationtests.dll" id="10664b30-4e7b-eaf2-7f44-4dc0901004fb">
+      <Execution id="12ba751b-49ae-4896-8b04-b498af48e0b9" />
+      <TestMethod codeBase="D:\VSCodeProject\NEWERP\src\ERP.IntegrationTests\bin\Debug\net8.0\ERP.IntegrationTests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="ERP.IntegrationTests.PiWorkflowUiTests" name="报价单转PI_并可在PI列表与编辑页核对复制内容" />
+    </UnitTest>
+  </TestDefinitions>
+  <TestEntries>
+    <TestEntry testId="f57a92bc-ca4e-ff26-7ebc-76ba7904a9b5" executionId="e1e01b1f-8372-4d53-b5df-4817df3271b5" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="10664b30-4e7b-eaf2-7f44-4dc0901004fb" executionId="12ba751b-49ae-4896-8b04-b498af48e0b9" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="f60fc0d2-90c7-d4f3-c3f0-f9edfcea3ca3" executionId="6f165164-9a11-48ab-9e62-7ed08037353a" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="fe51c273-19f8-73a4-12cb-6a34ac51420d" executionId="507fbb3b-8a6e-4942-9ced-44c3c15ea5f8" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="56e4301d-8f2f-500a-1144-cebd278baab2" executionId="60faab08-ebc8-4dc5-8949-0313d8b7f308" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="7ea48406-df77-db1e-5d03-0fe79e369aff" executionId="81581520-569f-4765-82b6-7d971ac25b68" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="d4822faa-f877-71c6-796c-c7a279ec25e0" executionId="1776dabe-533a-49d1-bfc3-caddbebe52fa" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="46755b34-3525-8d65-58d7-f3d2465f2609" executionId="3975e7be-241b-4019-a1a5-368c3a41c2bd" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="89d8399c-b94b-e026-2e0d-adfdf33b2b9b" executionId="a41da175-f531-401c-aa61-eb565170073a" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+  </TestEntries>
+  <TestLists>
+    <TestList name="列表中未列出的结果" id="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestList name="所有已加载的结果" id="19431567-8539-422a-85d7-44ee4e166bda" />
+  </TestLists>
+  <ResultSummary outcome="Failed">
+    <Counters total="9" executed="9" passed="6" failed="3" error="0" timeout="0" aborted="0" inconclusive="0" passedButRunAborted="0" notRunnable="0" notExecuted="0" disconnected="0" warning="0" completed="0" inProgress="0" pending="0" />
+    <Output>
+      <StdOut>[xUnit.net 00:00:00.00] xUnit.net VSTest Adapter v2.8.2+699d445a1a (64-bit .NET 8.0.14)&#xD;
+[xUnit.net 00:00:00.05]   Discovering: ERP.IntegrationTests&#xD;
+[xUnit.net 00:00:00.09]   Discovered:  ERP.IntegrationTests&#xD;
+[xUnit.net 00:00:00.09]   Starting:    ERP.IntegrationTests&#xD;
+[��ʵ����� UI ����] Ŀ��ⰲȫ�������У����ݣ���ʽ�������������ģ���ERP_AI_TEST_RUN=1 �� ASPNETCORE_ENVIRONMENT=Development��&#xD;
+Starting msedgedriver 153.0.4234.48 (cf31d6623d8718e7a3c3e181e55e59c1aae57a73) on port 52029&#xD;
+To submit feedback, report a bug, or suggest new features, please visit https://github.com/MicrosoftEdge/EdgeWebDriver&#xD;
+Only local connections are allowed.&#xD;
+Please see https://aka.ms/WebDriverSecurity for suggestions on keeping Microsoft Edge WebDriver safe.&#xD;
+msedgedriver was started successfully on port 52029.&#xD;
+[xUnit.net 00:00:07.47]       销售订单页面未加载 /js/sales-pi.js（前端脚本过期）：请先重新构建并启动 ERP.Api 再运行浏览器验收&#xD;
+[xUnit.net 00:00:07.47]       Stack Trace:&#xD;
+[xUnit.net 00:00:07.47]         D:\VSCodeProject\NEWERP\src\ERP.IntegrationTests\OrderTraceabilityUiTests.cs(41,0): at ERP.IntegrationTests.OrderTraceabilityUiTests.销售订单_保存并重新打开_外贸合同与来源追溯字段回显一致()&#xD;
+[xUnit.net 00:00:07.47]            at System.RuntimeMethodHandle.InvokeMethod(Object target, Void** arguments, Signature sig, Boolean isConstructor)&#xD;
+[xUnit.net 00:00:07.47]            at System.Reflection.MethodBaseInvoker.InvokeWithNoArgs(Object obj, BindingFlags invokeAttr)&#xD;
+[xUnit.net 00:00:08.44]       System.Collections.Generic.KeyNotFoundException : The given key was not present in the dictionary.&#xD;
+[xUnit.net 00:00:08.44]       Stack Trace:&#xD;
+[xUnit.net 00:00:08.45]            at System.Text.Json.JsonElement.GetProperty(String propertyName)&#xD;
+[xUnit.net 00:00:08.45]         D:\VSCodeProject\NEWERP\src\ERP.IntegrationTests\OrderTraceabilityUiTests.cs(339,0): at ERP.IntegrationTests.OrderTraceabilityUiTests.ApiData(String method, String path, String bodyJson)&#xD;
+[xUnit.net 00:00:08.45]         D:\VSCodeProject\NEWERP\src\ERP.IntegrationTests\OrderTraceabilityUiTests.cs(386,0): at ERP.IntegrationTests.OrderTraceabilityUiTests.CreateSalesOrderViaApi(String tag, Int64 customerId)&#xD;
+[xUnit.net 00:00:08.45]         D:\VSCodeProject\NEWERP\src\ERP.IntegrationTests\OrderTraceabilityUiTests.cs(243,0): at ERP.IntegrationTests.OrderTraceabilityUiTests.订单列表与导出菜单_渲染追溯列且导出接口可用()&#xD;
+[xUnit.net 00:00:08.45]            at System.RuntimeMethodHandle.InvokeMethod(Object target, Void** arguments, Signature sig, Boolean isConstructor)&#xD;
+[xUnit.net 00:00:08.45]            at System.Reflection.MethodBaseInvoker.InvokeWithNoArgs(Object obj, BindingFlags invokeAttr)&#xD;
+[xUnit.net 00:00:16.90]       System.Collections.Generic.KeyNotFoundException : The given key was not present in the dictionary.&#xD;
+[xUnit.net 00:00:16.90]       Stack Trace:&#xD;
+[xUnit.net 00:00:16.90]            at System.Text.Json.JsonElement.GetProperty(String propertyName)&#xD;
+[xUnit.net 00:00:16.90]         D:\VSCodeProject\NEWERP\src\ERP.IntegrationTests\OrderTraceabilityUiTests.cs(339,0): at ERP.IntegrationTests.OrderTraceabilityUiTests.ApiData(String method, String path, String bodyJson)&#xD;
+[xUnit.net 00:00:16.90]         D:\VSCodeProject\NEWERP\src\ERP.IntegrationTests\OrderTraceabilityUiTests.cs(386,0): at ERP.IntegrationTests.OrderTraceabilityUiTests.CreateSalesOrderViaApi(String tag, Int64 customerId)&#xD;
+[xUnit.net 00:00:16.90]         D:\VSCodeProject\NEWERP\src\ERP.IntegrationTests\OrderTraceabilityUiTests.cs(150,0): at ERP.IntegrationTests.OrderTraceabilityUiTests.采购订单_保存并重新打开_归属客户与采购执行字段回显一致()&#xD;
+[xUnit.net 00:00:16.90]            at System.RuntimeMethodHandle.InvokeMethod(Object target, Void** arguments, Signature sig, Boolean isConstructor)&#xD;
+[xUnit.net 00:00:16.90]            at System.Reflection.MethodBaseInvoker.InvokeWithNoArgs(Object obj, BindingFlags invokeAttr)&#xD;
+[xUnit.net 00:01:31.12]   Finished:    ERP.IntegrationTests&#xD;
+</StdOut>
+    </Output>
+    <RunInfos>
+      <RunInfo computerName="ADMIN-TIAN" outcome="Error" timestamp="2026-09-23T18:17:52.8798482+08:00">
+        <Text>[xUnit.net 00:00:07.47]     ERP.IntegrationTests.OrderTraceabilityUiTests.销售订单_保存并重新打开_外贸合同与来源追溯字段回显一致 [FAIL]</Text>
+      </RunInfo>
+      <RunInfo computerName="ADMIN-TIAN" outcome="Error" timestamp="2026-09-23T18:17:53.8555396+08:00">
+        <Text>[xUnit.net 00:00:08.44]     ERP.IntegrationTests.OrderTraceabilityUiTests.订单列表与导出菜单_渲染追溯列且导出接口可用 [FAIL]</Text>
+      </RunInfo>
+      <RunInfo computerName="ADMIN-TIAN" outcome="Error" timestamp="2026-09-23T18:18:02.3092360+08:00">
+        <Text>[xUnit.net 00:00:16.90]     ERP.IntegrationTests.OrderTraceabilityUiTests.采购订单_保存并重新打开_归属客户与采购执行字段回显一致 [FAIL]</Text>
+      </RunInfo>
+    </RunInfos>
+  </ResultSummary>
+</TestRun>

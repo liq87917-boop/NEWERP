@@ -41,6 +41,50 @@ public class PurchaseOrder : BaseEntity
     /// <summary>起运港 Id</summary>
     public long? PortId { get; set; }
 
+    // ============ 采购执行与结算追溯（ERP-008 新增：代理出口归属与采购执行进度，全部可空/带默认值以兼容历史单据） ============
+
+    /// <summary>归属客户 Id（代理出口：该采购单为哪个客户的销售订单备货）</summary>
+    public long? OwningCustomerId { get; set; }
+
+    /// <summary>归属客户名称（冗余，列表与报表免关联）</summary>
+    [MaxLength(200)]
+    public string OwningCustomerName { get; set; } = string.Empty;
+
+    /// <summary>归属销售订单 Id（采购单 → 销售订单追溯）</summary>
+    public long? OwningSalesOrderId { get; set; }
+
+    /// <summary>归属销售订单号（冗余）</summary>
+    [MaxLength(50)]
+    public string OwningSalesOrderNo { get; set; } = string.Empty;
+
+    /// <summary>是否代垫货款（代理出口时由公司代客户垫付供应商货款）</summary>
+    public bool AdvanceOnBehalf { get; set; }
+
+    /// <summary>供应商确认交期（与订单交货日期区分：订单交期为要求，此处为供应商回签）</summary>
+    public DateTime? SupplierConfirmedDate { get; set; }
+
+    /// <summary>税率（%，0~100；含税报价时用于价税分离）</summary>
+    public decimal TaxRate { get; set; }
+
+    /// <summary>是否含税单价（true = 单价已含税）</summary>
+    public bool TaxIncluded { get; set; }
+
+    /// <summary>到货进度（未到货 / 部分到货 / 已到货）</summary>
+    [MaxLength(50)]
+    public string ArrivalProgress { get; set; } = string.Empty;
+
+    /// <summary>验货状态（未验货 / 验货中 / 合格 / 不合格 / 免验）</summary>
+    [MaxLength(30)]
+    public string QcStatus { get; set; } = string.Empty;
+
+    /// <summary>采购合同号</summary>
+    [MaxLength(50)]
+    public string ContractNo { get; set; } = string.Empty;
+
+    /// <summary>结算进度（未结算 / 部分结算 / 已结算）</summary>
+    [MaxLength(50)]
+    public string SettlementProgress { get; set; } = string.Empty;
+
     /// <summary>单据状态</summary>
     public DocumentStatus Status { get; set; } = DocumentStatus.Pending;
 

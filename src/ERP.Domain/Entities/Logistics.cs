@@ -187,4 +187,16 @@ public class Stock : BaseEntity
 
     /// <summary>锁定数量（已占用待出库）</summary>
     public decimal LockedQuantity { get; set; }
+
+    /// <summary>
+    /// 移动加权平均成本单价（ERP-009：库存成本基准）。
+    /// 由库存流水按「移动加权平均法」维护，保留 6 位小数；无库存时为 0。
+    /// </summary>
+    public decimal AverageCost { get; set; }
+
+    /// <summary>
+    /// 库存金额（= 数量 × 加权平均成本；出库按该金额核减，保留 4 位小数）。
+    /// 与 <see cref="AverageCost"/>、库存流水中的 BalanceAmount 三者互相校验，保证估价可追溯。
+    /// </summary>
+    public decimal TotalCost { get; set; }
 }

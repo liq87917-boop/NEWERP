@@ -1,4 +1,48 @@
 /* ============ 系统设置 + 询价 + 订单模块 ============ */
+/* ERP-008：销售订单 / 采购订单选项集（与后端字符串字段口径一致，保存时按原值写入） */
+const TRADE_TERM_OPTS = [
+  { value: '', label: '（未指定）' },
+  { value: 'FOB', label: 'FOB 离岸价' }, { value: 'CIF', label: 'CIF 到岸价' },
+  { value: 'CFR', label: 'CFR 成本加运费' }, { value: 'EXW', label: 'EXW 工厂交货' },
+  { value: 'DDP', label: 'DDP 完税后交货' }, { value: '其他', label: '其他' },
+];
+const EXPORT_MODE_OPTS = [
+  { value: '', label: '（未指定）' },
+  { value: '0110', label: '0110 一般贸易' }, { value: '1039', label: '1039 市场采购' },
+  { value: '9610', label: '9610 跨境电商' }, { value: '9710', label: '9710 跨境电商 B2B' },
+];
+const BUSINESS_NATURE_OPTS = [
+  { value: '', label: '（未指定）' },
+  { value: '自营出口', label: '自营出口' }, { value: '代理出口', label: '代理出口' },
+  { value: '内销', label: '内销' },
+];
+const YES_NO_OPTS = [{ value: 'false', label: '否' }, { value: 'true', label: '是' }];
+const ARRIVAL_PROGRESS_OPTS = [
+  { value: '', label: '（未指定）' },
+  { value: '未到货', label: '未到货' }, { value: '部分到货', label: '部分到货' }, { value: '已到货', label: '已到货' },
+];
+const QC_STATUS_OPTS = [
+  { value: '', label: '（未指定）' },
+  { value: '未验货', label: '未验货' }, { value: '验货中', label: '验货中' },
+  { value: '合格', label: '合格' }, { value: '不合格', label: '不合格' }, { value: '免验', label: '免验' },
+];
+const SETTLEMENT_PROGRESS_OPTS = [
+  { value: '', label: '（未指定）' },
+  { value: '未结算', label: '未结算' }, { value: '部分结算', label: '部分结算' }, { value: '已结算', label: '已结算' },
+];
+/* 订单明细列（销售订单 / 采购订单共用；金额 = 数量 × 单价 自动计算） */
+const ORDER_DETAIL_FIELDS = [
+  { key: 'productId', label: '商品ID', type: 'number', width: '90px' },
+  { key: 'productName', label: '商品名称', width: '180px' },
+  { key: 'spec', label: '规格', width: '120px' },
+  { key: 'unit', label: '单位', width: '70px' },
+  { key: 'quantity', label: '数量', type: 'number', width: '90px' },
+  { key: 'unitPrice', label: '单价', type: 'number', width: '90px' },
+  { key: 'amount', label: '金额', type: 'number', width: '100px', readonly: true },
+  { key: 'remark', label: '备注', width: '130px' },
+];
+const ORDER_DETAIL_AMOUNT = { qty: 'quantity', price: 'unitPrice', amount: 'amount', totalId: 'detail-total' };
+
 Object.assign(MODULES, {
   'sys-parameter': {
     title: '系统参数', api: '/api/sys/parameters',
@@ -53,36 +97,96 @@ Object.assign(MODULES, {
       { key: 'remark', label: '备注', type: 'textarea' },
     ],
   },
+  /* 销售订单（外销合同）：EF 主子表接口（/api/sales-orders），承载 ERP-008 补齐的外贸合同 /
+     运输 / 来源追溯字段；页面按主子表编辑，保存后可在账单与打印中直接使用。 */
   'sales-order': {
-    title: '销售订单', api: '/api/sales-orders', canSubmit: true,
+    title: '销售订单（外销合同）', api: '/api/sales-orders', canSubmit: true,
     columns: [
       { key: 'orderNo', label: '订单号' }, { key: 'orderDate', label: '日期', type: 'date' },
-      { key: 'customerId', label: '客户Id' }, { key: 'totalAmount', label: '总额', type: 'money' },
+      { key: 'customerPoNo', label: '客户 PO 号' }, { key: 'contractNo', label: '合同号' },
+      { key: 'tradeTerms', label: '价格条款' }, { key: 'destinationPort', label: '目的港' },
+      { key: 'totalAmount', label: '总额', type: 'money' },
       { key: 'depositAmount', label: '定金', type: 'money' }, { key: 'status', label: '状态', status: true },
     ],
     fields: [
-      { key: 'orderDate', label: '订单日期', type: 'date' }, { key: 'customerId', label: '客户Id', type: 'number' },
-      { key: 'salesmanId', label: '业务员Id', type: 'number' },
-      { key: 'currency', label: '币种', type: 'select', options: CURRENCY_OPTS },
-      { key: 'exchangeRate', label: '汇率', type: 'number', default: 1 },
+      { key: 'orderDate', label: '订单日期', type: 'date' },
+      { key: 'customerId', label: '客户', type: 'ref', ref: 'customer' },
+      { key: 'salesmanId', label: '业务员', type: 'ref', ref: 'employee' },
+      { key: 'customerPoNo', label: '客户 PO 号' },
+      { key: 'contractNo', label: '外销合同号' },
+      { key: 'tradeTerms', label: '价格条款', type: 'select', options: TRADE_TERM_OPTS },
+      { key: 'destinationPort', label: '目的港（文本）' },
+      { key: 'portId', label: '目的港 Id（港口字典，可留空）', type: 'number' },
+      { key: 'consignee', label: '收货人 Consignee（提单用）', type: 'textarea' },
+      { key: 'notifyParty', label: '通知人 Notify Party（提单用）', type: 'textarea' },
+      { key: 'shippingMarks', label: '唛头 Shipping Marks', type: 'textarea' },
+      { key: 'sourceQuotationId', label: '来源报价单 ID（报价转订单回填）', type: 'number' },
+      { key: 'sourceQuotationNo', label: '来源报价单号' },
+      { key: 'sourcePiId', label: '来源形式发票 PI ID', type: 'number' },
+      { key: 'sourcePiNo', label: '来源 PI 号' },
+      { key: 'exportMode', label: '出口方式', type: 'select', options: EXPORT_MODE_OPTS },
+      { key: 'businessNature', label: '业务性质', type: 'select', options: BUSINESS_NATURE_OPTS },
+      { key: 'commissionRatio', label: '佣金/回佣比例(%)', type: 'number', default: 0 },
+      { key: 'splitShipment', label: '是否分批出货', type: 'select', valueType: 'bool', options: YES_NO_OPTS },
+      { key: 'inspectionRequirement', label: '验货要求（SGS / 客户验货 / 免验）', type: 'textarea' },
+      { key: 'packagingRequirement', label: '包装要求（如 12 pcs/箱）', type: 'textarea' },
+      { key: 'currency', label: '币种', type: 'select', options: CURRENCY_NAME_OPTS },
+      { key: 'exchangeRate', label: '汇率', type: 'number', default: 7.2 },
       { key: 'depositRatio', label: '定金比例(%)', type: 'number', default: 30 },
-      { key: 'paymentTerms', label: '付款条件' }, { key: 'deliveryDate', label: '交货日期', type: 'date' },
-      { key: 'shippingMethod', label: '运输方式' }, { key: 'remark', label: '备注', type: 'textarea' },
+      { key: 'paymentTerms', label: '付款条件' },
+      { key: 'deliveryDate', label: '交货日期', type: 'date' },
+      { key: 'shippingMethod', label: '运输方式' },
+      { key: 'remark', label: '备注', type: 'textarea' },
     ],
+    /* 行操作：打印预览（打印模板按 billType=sales-order，含客户 PO / 合同 / 唛头等新字段） */
+    rowActions: [
+      { label: '打印预览', icon: '🖨', title: '按打印模板预览该销售订单（含客户 PO / 合同 / 唛头等）', onclick: 'previewSalesDocPrint' },
+    ],
+    detailKey: 'details',
+    detailTitle: '订单商品明细（数量 × 单价 = 金额，自动算合计）',
+    detailAmount: ORDER_DETAIL_AMOUNT,
+    detailFields: ORDER_DETAIL_FIELDS,
   },
+  /* 采购订单：EF 主子表接口（/api/purchase-orders），承载 ERP-008 补齐的归属客户 / 归属销售订单 /
+     代垫 / 供应商确认交期 / 税率与含税 / 到货与结算进度字段 */
   'purchase-order': {
     title: '采购订单', api: '/api/purchase-orders', canSubmit: true,
     columns: [
       { key: 'orderNo', label: '采购单号' }, { key: 'orderDate', label: '日期', type: 'date' },
-      { key: 'supplierId', label: '供应商Id' }, { key: 'totalAmount', label: '总额', type: 'money' }, { key: 'status', label: '状态', status: true },
+      { key: 'supplierId', label: '供应商Id' }, { key: 'contractNo', label: '采购合同号' },
+      { key: 'owningCustomerName', label: '归属客户' }, { key: 'owningSalesOrderNo', label: '归属销售订单' },
+      { key: 'arrivalProgress', label: '到货进度' }, { key: 'settlementProgress', label: '结算进度' },
+      { key: 'totalAmount', label: '总额', type: 'money' }, { key: 'status', label: '状态', status: true },
     ],
     fields: [
-      { key: 'orderDate', label: '订单日期', type: 'date' }, { key: 'supplierId', label: '供应商Id', type: 'number' },
-      { key: 'buyerId', label: '采购员Id', type: 'number' },
-      { key: 'currency', label: '币种', type: 'select', options: CURRENCY_OPTS },
+      { key: 'orderDate', label: '订单日期', type: 'date' },
+      { key: 'supplierId', label: '供应商', type: 'ref', ref: 'supplier' },
+      { key: 'buyerId', label: '采购员', type: 'ref', ref: 'employee' },
+      { key: 'contractNo', label: '采购合同号' },
+      { key: 'owningCustomerId', label: '归属客户', type: 'ref', ref: 'customer' },
+      { key: 'owningCustomerName', label: '归属客户名称（冗余，可留空）' },
+      { key: 'owningSalesOrderId', label: '归属销售订单 ID', type: 'number' },
+      { key: 'owningSalesOrderNo', label: '归属销售订单号' },
+      { key: 'advanceOnBehalf', label: '是否代垫货款', type: 'select', valueType: 'bool', options: YES_NO_OPTS },
+      { key: 'currency', label: '币种', type: 'select', options: CURRENCY_NAME_OPTS },
       { key: 'exchangeRate', label: '汇率', type: 'number', default: 1 },
-      { key: 'paymentTerms', label: '付款条件' }, { key: 'deliveryDate', label: '交货日期', type: 'date' },
+      { key: 'taxRate', label: '税率(%)', type: 'number', default: 0 },
+      { key: 'taxIncluded', label: '单价是否含税', type: 'select', valueType: 'bool', options: YES_NO_OPTS },
+      { key: 'paymentTerms', label: '付款条件' },
+      { key: 'deliveryDate', label: '订单交货日期', type: 'date' },
+      { key: 'supplierConfirmedDate', label: '供应商确认交期', type: 'date' },
+      { key: 'arrivalProgress', label: '到货进度', type: 'select', options: ARRIVAL_PROGRESS_OPTS },
+      { key: 'qcStatus', label: '验货状态', type: 'select', options: QC_STATUS_OPTS },
+      { key: 'settlementProgress', label: '结算进度', type: 'select', options: SETTLEMENT_PROGRESS_OPTS },
+      { key: 'portId', label: '起运港 Id（港口字典，可留空）', type: 'number' },
       { key: 'remark', label: '备注', type: 'textarea' },
     ],
+    rowActions: [
+      { label: '打印预览', icon: '🖨', title: '按打印模板预览该采购订单（含归属客户 / 执行进度等）', onclick: 'previewSalesDocPrint' },
+    ],
+    detailKey: 'details',
+    detailTitle: '采购商品明细（数量 × 单价 = 金额，自动算合计）',
+    detailAmount: ORDER_DETAIL_AMOUNT,
+    detailFields: ORDER_DETAIL_FIELDS,
   },
 });

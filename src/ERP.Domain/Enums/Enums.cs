@@ -81,8 +81,47 @@ public enum DocumentType
     Quotation = 17,
 
     /// <summary>形式发票 PI</summary>
-    ProformaInvoice = 18
+    ProformaInvoice = 18,
 
+    /// <summary>库存盘点/调整单（ERP-009 新增）</summary>
+    StockAdjustment = 19,
+
+    /// <summary>仓库调拨单（ERP-009 新增）</summary>
+    StockTransfer = 20,
+
+    /// <summary>销售退货单（ERP-009 新增）</summary>
+    SalesReturn = 21,
+
+    /// <summary>采购退货单（ERP-009 新增）</summary>
+    PurchaseReturn = 22
+
+}
+
+/// <summary>
+/// 库存移动类型（ERP-009）：库存流水的业务来源，与「方向」配合还原每一次库存变动
+/// </summary>
+public enum InventoryMovementType
+{
+    /// <summary>采购入库</summary>
+    PurchaseIn = 1,
+
+    /// <summary>销售出库</summary>
+    SalesOut = 2,
+
+    /// <summary>库存盘点/调整</summary>
+    Adjustment = 3,
+
+    /// <summary>调拨出库（调出仓）</summary>
+    TransferOut = 4,
+
+    /// <summary>调拨入库（调入仓）</summary>
+    TransferIn = 5,
+
+    /// <summary>销售退货入库</summary>
+    SalesReturn = 6,
+
+    /// <summary>采购退货出库</summary>
+    PurchaseReturn = 7
 }
 
 /// <summary>

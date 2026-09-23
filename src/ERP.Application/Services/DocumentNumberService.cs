@@ -39,7 +39,11 @@ public class DocumentNumberService : IDocumentNumberService
         [DocumentType.Receipt] = "SK",
         [DocumentType.Complaint] = "KS",
         [DocumentType.Quotation] = "QT",
-        [DocumentType.ProformaInvoice] = "PI"
+        [DocumentType.ProformaInvoice] = "PI",
+        [DocumentType.StockAdjustment] = "PD",
+        [DocumentType.StockTransfer] = "DB",
+        [DocumentType.SalesReturn] = "XTH",
+        [DocumentType.PurchaseReturn] = "CTH"
     };
 
     /// <summary>生成单据号</summary>
@@ -108,6 +112,10 @@ public class DocumentNumberService : IDocumentNumberService
             DocumentType.Receipt => await _db.FinanceReceipts.CountAsync(o => !o.IsDeleted),
             DocumentType.Complaint => await _db.FinanceComplaints.CountAsync(o => !o.IsDeleted),
             DocumentType.Quotation => await _db.Quotations.CountAsync(o => !o.IsDeleted),
+            DocumentType.StockAdjustment => await _db.StockAdjustments.CountAsync(o => !o.IsDeleted),
+            DocumentType.StockTransfer => await _db.StockTransfers.CountAsync(o => !o.IsDeleted),
+            DocumentType.SalesReturn => await _db.SalesReturns.CountAsync(o => !o.IsDeleted),
+            DocumentType.PurchaseReturn => await _db.PurchaseReturns.CountAsync(o => !o.IsDeleted),
             _ => 0
         };
     }

@@ -83,6 +83,11 @@ function renderTable(mod, data) {
       if (c.status) return `<td>${statusHtml(v)}</td>`;
       if (c.type === 'money') return `<td class="text-right">${fmtMoney(v)}</td>`;
       if (c.type === 'date') return `<td>${fmtDate(v)}</td>`;
+      /* 枚举 / 布尔映射列：把后端枚举值（数字或布尔）渲染为业务文案，未知值原样显示 */
+      if (c.type === 'map') {
+        const hit = (c.options || []).find(o => String(o.value) === String(v));
+        return `<td>${hit ? hit.label : (v ?? '')}</td>`;
+      }
       if (c.type === 'image') return `<td>${v ? `<img class="thumb-img" src="${escapeHtml(v)}" onclick="showLightbox(this.src)">` : ''}</td>`;
       return `<td>${v ?? ''}</td>`;
     }).join('');
@@ -234,7 +239,11 @@ async function saveForm(id) {
     if (f.type === 'number') v = v === '' ? 0 : Number(v);
     if (f.type === 'ref') v = v === '' ? null : Number(v);
     if (f.type === 'parent') v = v === '' ? null : Number(v);
-    if (f.type === 'date' && v) v = v + 'T00:00:00';
+    /* 日期字段：留空时提交 null（而非空串），避免服务端把 "" 反序列化为 DateTime? 时报错；
+       有值时补时间部分，保持原有口径 */
+    if (f.type === 'date') v = v ? v + 'T00:00:00' : null;
+    /* 布尔字段（下拉选择 是/否）：统一转成真正的布尔值提交，避免服务端反序列化把 "true" 当字符串 */
+    if (f.valueType === 'bool') v = (v === true || String(v).toLowerCase() === 'true');
     if (f.valueType === 'number' && v !== '') v = Number(v);
     body[f.key] = v;
   });
@@ -300,6 +309,19 @@ async function removeRow(id) {
 async function changeStatus(id, action) {
   try { await api(`${CURRENT_MODULE.api}/${id}/${action}`, 'POST'); toast('操作成功'); loadList(); }
   catch (err) { toast(err.message, 'error'); }
+}
+
+/* 销审（退回待提交）：仅已审核单据可用；库存单据（盘点 / 调拨 / 退货）销审会先冲销库存流水，
+   因此必须二次确认，避免误操作把已入库/出库的库存还原。 */
+async function unauditRow(id) {
+  const mod = CURRENT_MODULE;
+  if (!mod || !mod.api) return;
+  if (!confirm('确认销审该单据？已产生的库存流水将被冲销（库存同步还原）。')) return;
+  try {
+    await api(`${mod.api}/${id}/unaudit`, 'POST');
+    toast('已销审');
+    if (CURRENT_LOADER) CURRENT_LOADER(); else loadList();
+  } catch (err) { toast(err.message, 'error'); }
 }
 
 /* ============ 图片字段渲染与上传/预览/下载 ============ */
@@ -555,8 +577,12 @@ let DETAIL_ROWS = [];
 function detailSectionHtml(mod) {
   if (!mod.detailFields || !mod.detailFields.length) return '';
   const heads = mod.detailFields.map(f => `<th${f.width ? ` style="width:${f.width}"` : ''}>${f.label}</th>`).join('');
-  const amountCol = mod.detailAmount && mod.detailAmount.amount
-    ? `<div style="margin-top:8px;text-align:right;font-size:14px">合计：<b id="detail-total">0.00</b></div>` : '';
+  /* 合计行：普通主子表显示「数量 × 单价」合计；盘点单（detailDiff）显示差异金额合计 */
+  const totalId = (mod.detailDiff && mod.detailDiff.totalId) || (mod.detailAmount && mod.detailAmount.totalId) || 'detail-total';
+  const hasTotal = (mod.detailAmount && mod.detailAmount.amount) || (mod.detailDiff && mod.detailDiff.amount);
+  const totalLabel = mod.detailDiff ? '差异合计：' : '合计：';
+  const amountCol = hasTotal
+    ? `<div style="margin-top:8px;text-align:right;font-size:14px">${totalLabel}<b id="${totalId}">0.00</b></div>` : '';
   return `<div style="margin-top:16px">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
       <b style="font-size:14px">${mod.detailTitle || '明细'}</b>
@@ -622,11 +648,25 @@ function detailSet(index, key, value) {
     if (el) el.value = row[a.amount];
     detailRecalc();
   }
+  /* 盘点差异（detailDiff）：差异 = 实盘 - 账面，差异金额 = 差异 × 成本单价（后端审核时会再复核一次） */
+  if (mod.detailDiff && (key === mod.detailDiff.from || key === mod.detailDiff.to || key === mod.detailDiff.unitCost)) {
+    const a = mod.detailDiff;
+    const row = DETAIL_ROWS[index];
+    const diff = Number(row[a.to] || 0) - Number(row[a.from] || 0);
+    row[a.diff] = Math.round(diff * 10000) / 10000;
+    const amt = Math.round(row[a.diff] * Number(row[a.unitCost] || 0) * 10000) / 10000;
+    row[a.amount] = amt;
+    const diffEl = document.getElementById(`d_${index}_${a.diff}`);
+    if (diffEl) diffEl.value = row[a.diff];
+    const amountEl = document.getElementById(`d_${index}_${a.amount}`);
+    if (amountEl) amountEl.value = row[a.amount];
+    detailRecalc();
+  }
 }
 
 function detailRecalc() {
   const mod = CURRENT_MODULE;
-  const a = mod.detailAmount;
+  const a = mod.detailAmount && mod.detailAmount.amount ? mod.detailAmount : (mod.detailDiff || null);
   if (!a || !a.amount) return;
   const total = DETAIL_ROWS.reduce((s, r) => s + Number(r[a.amount] || 0), 0);
   const el = document.getElementById(a.totalId || 'detail-total');

@@ -11,8 +11,9 @@ function bizStatusHtml(status) {
 
 /* 菜单编码 -> 单据类型映射 */
 const BILL_CODE_MAP = {
-  'sales-order': 'sales-order',
-  'purchase-order': 'purchase-order',
+  /* ERP-008：销售订单 / 采购订单改由 EF 主子表页面承载（modules-doc.js 的 'sales-order' / 'purchase-order'
+     模块 + /api/sales-orders、/api/purchase-orders），以便保存与打印外贸合同、来源追溯与采购执行字段。
+     SP 版单据页（BILL_CONFIG 中的同名配置）保留给历史数据排查/回滚参考，不再从菜单进入。 */
   'inquiry-new': 'inquiry',
   'stock-in': 'stock-in',
   'stock-out': 'stock-out',

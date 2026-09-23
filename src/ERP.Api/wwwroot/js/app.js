@@ -310,6 +310,9 @@ const CODE_ICON = {
   order: 'cart', 'sales-order': 'clipboard', 'sales-order-export': 'download',
   'purchase-order': 'clipboard', 'purchase-order-export': 'download',
   logistics: 'truck', 'stock-in': 'package-plus', 'stock-out': 'package-minus', 'stock-query': 'boxes',
+  /* ERP-009 新增：库存盘点调整 / 仓库调拨 / 销售退货 / 采购退货 / 库存流水 */
+  'stock-adjustment': 'clipboard-check', 'stock-transfer': 'truck',
+  'sales-return': 'package-minus', 'purchase-return': 'package-plus', 'stock-movement': 'scroll',
   container: 'container', 'receiving-plan': 'calendar', booking: 'anchor',
   'pre-loading': 'container', 'loading-list': 'clipboard-check',
   finance: 'landmark', 'deposit-apply': 'file-text', 'payment-apply': 'file-text',

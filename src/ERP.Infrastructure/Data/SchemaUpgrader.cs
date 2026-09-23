@@ -888,5 +888,374 @@ IF NOT EXISTS (SELECT 1 FROM db_owner.SysParameters WHERE ParamKey = N'PI_BankIn
     INSERT INTO db_owner.SysParameters (ParamKey, ParamValue, ParamName, Description, IsSystem, CreatedAt, IsDeleted)
     VALUES (N'PI_BankInfo', N'', N'PI 银行信息（默认）', N'转 PI 时自动带入的收款银行信息（Beneficiary / Bank / Account / SWIFT，多行文本）；PI 单据上可逐单覆盖', 0, GETDATE(), 0);");
 
+        // 22. 阶段 3：销售订单 / 采购订单追溯字段（ERP-008 幂等补齐）
+        // 说明：销售订单与采购订单由 EF 主子表承载（db_owner.SalesOrders / db_owner.PurchaseOrders），
+        //       建表由 EF EnsureCreated 完成，此处只做「缺列补齐」，并用 OBJECT_ID 兜底防止表缺失时中断启动。
+        //       新列一律带默认值（空串 / 0 / 0 位），历史单据可正常打开、列表与打印不受影响。
+        await db.Database.ExecuteSqlRawAsync(@"
+IF OBJECT_ID('db_owner.SalesOrders') IS NOT NULL
+BEGIN
+    IF COL_LENGTH('db_owner.SalesOrders', 'CustomerPoNo') IS NULL             ALTER TABLE db_owner.SalesOrders ADD CustomerPoNo NVARCHAR(50) NOT NULL DEFAULT N'';
+    IF COL_LENGTH('db_owner.SalesOrders', 'ContractNo') IS NULL               ALTER TABLE db_owner.SalesOrders ADD ContractNo NVARCHAR(50) NOT NULL DEFAULT N'';
+    IF COL_LENGTH('db_owner.SalesOrders', 'TradeTerms') IS NULL               ALTER TABLE db_owner.SalesOrders ADD TradeTerms NVARCHAR(50) NOT NULL DEFAULT N'';
+    IF COL_LENGTH('db_owner.SalesOrders', 'DestinationPort') IS NULL          ALTER TABLE db_owner.SalesOrders ADD DestinationPort NVARCHAR(100) NOT NULL DEFAULT N'';
+    IF COL_LENGTH('db_owner.SalesOrders', 'Consignee') IS NULL                ALTER TABLE db_owner.SalesOrders ADD Consignee NVARCHAR(300) NOT NULL DEFAULT N'';
+    IF COL_LENGTH('db_owner.SalesOrders', 'NotifyParty') IS NULL              ALTER TABLE db_owner.SalesOrders ADD NotifyParty NVARCHAR(300) NOT NULL DEFAULT N'';
+    IF COL_LENGTH('db_owner.SalesOrders', 'ShippingMarks') IS NULL            ALTER TABLE db_owner.SalesOrders ADD ShippingMarks NVARCHAR(500) NOT NULL DEFAULT N'';
+    IF COL_LENGTH('db_owner.SalesOrders', 'SourceQuotationId') IS NULL        ALTER TABLE db_owner.SalesOrders ADD SourceQuotationId BIGINT NULL;
+    IF COL_LENGTH('db_owner.SalesOrders', 'SourceQuotationNo') IS NULL        ALTER TABLE db_owner.SalesOrders ADD SourceQuotationNo NVARCHAR(50) NOT NULL DEFAULT N'';
+    IF COL_LENGTH('db_owner.SalesOrders', 'SourcePiId') IS NULL               ALTER TABLE db_owner.SalesOrders ADD SourcePiId BIGINT NULL;
+    IF COL_LENGTH('db_owner.SalesOrders', 'SourcePiNo') IS NULL               ALTER TABLE db_owner.SalesOrders ADD SourcePiNo NVARCHAR(50) NOT NULL DEFAULT N'';
+    IF COL_LENGTH('db_owner.SalesOrders', 'ExportMode') IS NULL               ALTER TABLE db_owner.SalesOrders ADD ExportMode NVARCHAR(20) NOT NULL DEFAULT N'';
+    IF COL_LENGTH('db_owner.SalesOrders', 'CommissionRatio') IS NULL          ALTER TABLE db_owner.SalesOrders ADD CommissionRatio DECIMAL(18,4) NOT NULL DEFAULT 0;
+    IF COL_LENGTH('db_owner.SalesOrders', 'BusinessNature') IS NULL           ALTER TABLE db_owner.SalesOrders ADD BusinessNature NVARCHAR(20) NOT NULL DEFAULT N'';
+    IF COL_LENGTH('db_owner.SalesOrders', 'SplitShipment') IS NULL            ALTER TABLE db_owner.SalesOrders ADD SplitShipment BIT NOT NULL DEFAULT 0;
+    IF COL_LENGTH('db_owner.SalesOrders', 'InspectionRequirement') IS NULL    ALTER TABLE db_owner.SalesOrders ADD InspectionRequirement NVARCHAR(500) NOT NULL DEFAULT N'';
+    IF COL_LENGTH('db_owner.SalesOrders', 'PackagingRequirement') IS NULL     ALTER TABLE db_owner.SalesOrders ADD PackagingRequirement NVARCHAR(500) NOT NULL DEFAULT N'';
+END
+
+IF OBJECT_ID('db_owner.PurchaseOrders') IS NOT NULL
+BEGIN
+    IF COL_LENGTH('db_owner.PurchaseOrders', 'OwningCustomerId') IS NULL      ALTER TABLE db_owner.PurchaseOrders ADD OwningCustomerId BIGINT NULL;
+    IF COL_LENGTH('db_owner.PurchaseOrders', 'OwningCustomerName') IS NULL    ALTER TABLE db_owner.PurchaseOrders ADD OwningCustomerName NVARCHAR(200) NOT NULL DEFAULT N'';
+    IF COL_LENGTH('db_owner.PurchaseOrders', 'OwningSalesOrderId') IS NULL    ALTER TABLE db_owner.PurchaseOrders ADD OwningSalesOrderId BIGINT NULL;
+    IF COL_LENGTH('db_owner.PurchaseOrders', 'OwningSalesOrderNo') IS NULL    ALTER TABLE db_owner.PurchaseOrders ADD OwningSalesOrderNo NVARCHAR(50) NOT NULL DEFAULT N'';
+    IF COL_LENGTH('db_owner.PurchaseOrders', 'AdvanceOnBehalf') IS NULL       ALTER TABLE db_owner.PurchaseOrders ADD AdvanceOnBehalf BIT NOT NULL DEFAULT 0;
+    IF COL_LENGTH('db_owner.PurchaseOrders', 'SupplierConfirmedDate') IS NULL ALTER TABLE db_owner.PurchaseOrders ADD SupplierConfirmedDate DATETIME2 NULL;
+    IF COL_LENGTH('db_owner.PurchaseOrders', 'TaxRate') IS NULL               ALTER TABLE db_owner.PurchaseOrders ADD TaxRate DECIMAL(18,4) NOT NULL DEFAULT 0;
+    IF COL_LENGTH('db_owner.PurchaseOrders', 'TaxIncluded') IS NULL           ALTER TABLE db_owner.PurchaseOrders ADD TaxIncluded BIT NOT NULL DEFAULT 0;
+    IF COL_LENGTH('db_owner.PurchaseOrders', 'ArrivalProgress') IS NULL       ALTER TABLE db_owner.PurchaseOrders ADD ArrivalProgress NVARCHAR(50) NOT NULL DEFAULT N'';
+    IF COL_LENGTH('db_owner.PurchaseOrders', 'QcStatus') IS NULL              ALTER TABLE db_owner.PurchaseOrders ADD QcStatus NVARCHAR(30) NOT NULL DEFAULT N'';
+    IF COL_LENGTH('db_owner.PurchaseOrders', 'ContractNo') IS NULL            ALTER TABLE db_owner.PurchaseOrders ADD ContractNo NVARCHAR(50) NOT NULL DEFAULT N'';
+    IF COL_LENGTH('db_owner.PurchaseOrders', 'SettlementProgress') IS NULL    ALTER TABLE db_owner.PurchaseOrders ADD SettlementProgress NVARCHAR(50) NOT NULL DEFAULT N'';
+END");
+
+        // 23. 阶段 4：库存单据（盘点/调拨/退货）+ 库存流水（ERP-009 幂等补齐）
+        // 说明：四张库存单据主/明细表由 EF 主子表承载（DbSet 属性名即表名），此处以 IF NOT EXISTS 补齐；
+        //       库存流水 StockMovements 是「已审核单据改库存恰好一次」与库存估价的成本基准，
+        //       销审不删流水、只追加红字流水（IsReversal / ReversalOfMovementId / IsReversed）。
+        await db.Database.ExecuteSqlRawAsync(@"
+IF OBJECT_ID('db_owner.StockMovements') IS NULL
+BEGIN
+    CREATE TABLE db_owner.StockMovements (
+        Id BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+        MovementDate DATETIME2 NOT NULL DEFAULT GETDATE(),
+        MovementType INT NOT NULL DEFAULT 0,
+        SourceDocType NVARCHAR(50) NOT NULL DEFAULT N'',
+        SourceDocId BIGINT NOT NULL DEFAULT 0,
+        SourceDocNo NVARCHAR(50) NOT NULL DEFAULT N'',
+        WarehouseId BIGINT NOT NULL DEFAULT 0,
+        WarehouseName NVARCHAR(100) NOT NULL DEFAULT N'',
+        ProductId BIGINT NULL,
+        ProductCode NVARCHAR(50) NOT NULL DEFAULT N'',
+        ProductName NVARCHAR(200) NOT NULL DEFAULT N'',
+        Spec NVARCHAR(200) NOT NULL DEFAULT N'',
+        Unit NVARCHAR(20) NOT NULL DEFAULT N'',
+        Direction INT NOT NULL DEFAULT 1,
+        Quantity DECIMAL(18,4) NOT NULL DEFAULT 0,
+        UnitCost DECIMAL(18,6) NOT NULL DEFAULT 0,
+        Amount DECIMAL(18,4) NOT NULL DEFAULT 0,
+        BalanceQuantity DECIMAL(18,4) NOT NULL DEFAULT 0,
+        BalanceAmount DECIMAL(18,4) NOT NULL DEFAULT 0,
+        BalanceAverageCost DECIMAL(18,6) NOT NULL DEFAULT 0,
+        IsReversal BIT NOT NULL DEFAULT 0,
+        ReversalOfMovementId BIGINT NULL,
+        IsReversed BIT NOT NULL DEFAULT 0,
+        Remark NVARCHAR(500) NOT NULL DEFAULT N'',
+        CreatedAt DATETIME2 NOT NULL DEFAULT GETDATE(),
+        CreatedBy BIGINT NULL,
+        UpdatedAt DATETIME2 NULL,
+        UpdatedBy BIGINT NULL,
+        IsDeleted BIT NOT NULL DEFAULT 0,
+        RowVersion ROWVERSION NOT NULL
+    );
+END
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_StockMovements_SourceDoc' AND object_id = OBJECT_ID('db_owner.StockMovements'))
+    CREATE INDEX IX_StockMovements_SourceDoc ON db_owner.StockMovements(SourceDocType, SourceDocId);
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'IX_StockMovements_Warehouse_Product' AND object_id = OBJECT_ID('db_owner.StockMovements'))
+    CREATE INDEX IX_StockMovements_Warehouse_Product ON db_owner.StockMovements(WarehouseId, ProductId);");
+
+        // 23.1 库存盘点/调整单主表 + 明细
+        await db.Database.ExecuteSqlRawAsync(@"
+IF OBJECT_ID('db_owner.StockAdjustments') IS NULL
+BEGIN
+    CREATE TABLE db_owner.StockAdjustments (
+        Id BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+        AdjustmentNo NVARCHAR(50) NOT NULL,
+        AdjustmentDate DATETIME2 NOT NULL DEFAULT GETDATE(),
+        WarehouseId BIGINT NOT NULL DEFAULT 0,
+        WarehouseName NVARCHAR(100) NOT NULL DEFAULT N'',
+        AdjustType NVARCHAR(20) NOT NULL DEFAULT N'',
+        TotalDiffQuantity DECIMAL(18,4) NOT NULL DEFAULT 0,
+        TotalDiffAmount DECIMAL(18,4) NOT NULL DEFAULT 0,
+        Status INT NOT NULL DEFAULT 0,
+        Remark NVARCHAR(500) NOT NULL DEFAULT N'',
+        CreatedAt DATETIME2 NOT NULL DEFAULT GETDATE(),
+        CreatedBy BIGINT NULL,
+        UpdatedAt DATETIME2 NULL,
+        UpdatedBy BIGINT NULL,
+        IsDeleted BIT NOT NULL DEFAULT 0,
+        RowVersion ROWVERSION NOT NULL
+    );
+END
+
+IF OBJECT_ID('db_owner.StockAdjustmentDetails') IS NULL
+BEGIN
+    CREATE TABLE db_owner.StockAdjustmentDetails (
+        Id BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+        StockAdjustmentId BIGINT NOT NULL DEFAULT 0,
+        AdjustmentNo NVARCHAR(50) NOT NULL DEFAULT N'',
+        SortNo INT NOT NULL DEFAULT 0,
+        ProductId BIGINT NULL,
+        ProductCode NVARCHAR(50) NOT NULL DEFAULT N'',
+        ProductName NVARCHAR(200) NOT NULL DEFAULT N'',
+        Spec NVARCHAR(200) NOT NULL DEFAULT N'',
+        Unit NVARCHAR(20) NOT NULL DEFAULT N'',
+        BookQuantity DECIMAL(18,4) NOT NULL DEFAULT 0,
+        ActualQuantity DECIMAL(18,4) NOT NULL DEFAULT 0,
+        DiffQuantity DECIMAL(18,4) NOT NULL DEFAULT 0,
+        UnitCost DECIMAL(18,6) NOT NULL DEFAULT 0,
+        DiffAmount DECIMAL(18,4) NOT NULL DEFAULT 0,
+        Remark NVARCHAR(500) NOT NULL DEFAULT N'',
+        CreatedAt DATETIME2 NOT NULL DEFAULT GETDATE(),
+        CreatedBy BIGINT NULL,
+        UpdatedAt DATETIME2 NULL,
+        UpdatedBy BIGINT NULL,
+        IsDeleted BIT NOT NULL DEFAULT 0,
+        RowVersion ROWVERSION NOT NULL
+    );
+END");
+
+        // 23.2 仓库调拨单主表 + 明细
+        await db.Database.ExecuteSqlRawAsync(@"
+IF OBJECT_ID('db_owner.StockTransfers') IS NULL
+BEGIN
+    CREATE TABLE db_owner.StockTransfers (
+        Id BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+        TransferNo NVARCHAR(50) NOT NULL,
+        TransferDate DATETIME2 NOT NULL DEFAULT GETDATE(),
+        FromWarehouseId BIGINT NOT NULL DEFAULT 0,
+        FromWarehouseName NVARCHAR(100) NOT NULL DEFAULT N'',
+        ToWarehouseId BIGINT NOT NULL DEFAULT 0,
+        ToWarehouseName NVARCHAR(100) NOT NULL DEFAULT N'',
+        TotalQuantity DECIMAL(18,4) NOT NULL DEFAULT 0,
+        TotalAmount DECIMAL(18,4) NOT NULL DEFAULT 0,
+        Status INT NOT NULL DEFAULT 0,
+        Remark NVARCHAR(500) NOT NULL DEFAULT N'',
+        CreatedAt DATETIME2 NOT NULL DEFAULT GETDATE(),
+        CreatedBy BIGINT NULL,
+        UpdatedAt DATETIME2 NULL,
+        UpdatedBy BIGINT NULL,
+        IsDeleted BIT NOT NULL DEFAULT 0,
+        RowVersion ROWVERSION NOT NULL
+    );
+END
+
+IF OBJECT_ID('db_owner.StockTransferDetails') IS NULL
+BEGIN
+    CREATE TABLE db_owner.StockTransferDetails (
+        Id BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+        StockTransferId BIGINT NOT NULL DEFAULT 0,
+        TransferNo NVARCHAR(50) NOT NULL DEFAULT N'',
+        SortNo INT NOT NULL DEFAULT 0,
+        ProductId BIGINT NULL,
+        ProductCode NVARCHAR(50) NOT NULL DEFAULT N'',
+        ProductName NVARCHAR(200) NOT NULL DEFAULT N'',
+        Spec NVARCHAR(200) NOT NULL DEFAULT N'',
+        Unit NVARCHAR(20) NOT NULL DEFAULT N'',
+        Quantity DECIMAL(18,4) NOT NULL DEFAULT 0,
+        UnitCost DECIMAL(18,6) NOT NULL DEFAULT 0,
+        Amount DECIMAL(18,4) NOT NULL DEFAULT 0,
+        BatchNo NVARCHAR(50) NOT NULL DEFAULT N'',
+        Remark NVARCHAR(500) NOT NULL DEFAULT N'',
+        CreatedAt DATETIME2 NOT NULL DEFAULT GETDATE(),
+        CreatedBy BIGINT NULL,
+        UpdatedAt DATETIME2 NULL,
+        UpdatedBy BIGINT NULL,
+        IsDeleted BIT NOT NULL DEFAULT 0,
+        RowVersion ROWVERSION NOT NULL
+    );
+END");
+
+        // 23.3 销售退货单主表 + 明细
+        await db.Database.ExecuteSqlRawAsync(@"
+IF OBJECT_ID('db_owner.SalesReturns') IS NULL
+BEGIN
+    CREATE TABLE db_owner.SalesReturns (
+        Id BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+        ReturnNo NVARCHAR(50) NOT NULL,
+        ReturnDate DATETIME2 NOT NULL DEFAULT GETDATE(),
+        CustomerId BIGINT NULL,
+        CustomerName NVARCHAR(200) NOT NULL DEFAULT N'',
+        WarehouseId BIGINT NOT NULL DEFAULT 0,
+        WarehouseName NVARCHAR(100) NOT NULL DEFAULT N'',
+        SourceStockOutId BIGINT NULL,
+        SourceStockOutNo NVARCHAR(50) NOT NULL DEFAULT N'',
+        ReturnReason NVARCHAR(200) NOT NULL DEFAULT N'',
+        TotalQuantity DECIMAL(18,4) NOT NULL DEFAULT 0,
+        TotalAmount DECIMAL(18,4) NOT NULL DEFAULT 0,
+        Status INT NOT NULL DEFAULT 0,
+        Remark NVARCHAR(500) NOT NULL DEFAULT N'',
+        CreatedAt DATETIME2 NOT NULL DEFAULT GETDATE(),
+        CreatedBy BIGINT NULL,
+        UpdatedAt DATETIME2 NULL,
+        UpdatedBy BIGINT NULL,
+        IsDeleted BIT NOT NULL DEFAULT 0,
+        RowVersion ROWVERSION NOT NULL
+    );
+END
+
+IF OBJECT_ID('db_owner.SalesReturnDetails') IS NULL
+BEGIN
+    CREATE TABLE db_owner.SalesReturnDetails (
+        Id BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+        SalesReturnId BIGINT NOT NULL DEFAULT 0,
+        ReturnNo NVARCHAR(50) NOT NULL DEFAULT N'',
+        SortNo INT NOT NULL DEFAULT 0,
+        ProductId BIGINT NULL,
+        ProductCode NVARCHAR(50) NOT NULL DEFAULT N'',
+        ProductName NVARCHAR(200) NOT NULL DEFAULT N'',
+        Spec NVARCHAR(200) NOT NULL DEFAULT N'',
+        Unit NVARCHAR(20) NOT NULL DEFAULT N'',
+        Quantity DECIMAL(18,4) NOT NULL DEFAULT 0,
+        UnitPrice DECIMAL(18,4) NOT NULL DEFAULT 0,
+        Amount DECIMAL(18,4) NOT NULL DEFAULT 0,
+        UnitCost DECIMAL(18,6) NOT NULL DEFAULT 0,
+        Remark NVARCHAR(500) NOT NULL DEFAULT N'',
+        CreatedAt DATETIME2 NOT NULL DEFAULT GETDATE(),
+        CreatedBy BIGINT NULL,
+        UpdatedAt DATETIME2 NULL,
+        UpdatedBy BIGINT NULL,
+        IsDeleted BIT NOT NULL DEFAULT 0,
+        RowVersion ROWVERSION NOT NULL
+    );
+END");
+
+        // 23.4 采购退货单主表 + 明细
+        await db.Database.ExecuteSqlRawAsync(@"
+IF OBJECT_ID('db_owner.PurchaseReturns') IS NULL
+BEGIN
+    CREATE TABLE db_owner.PurchaseReturns (
+        Id BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+        ReturnNo NVARCHAR(50) NOT NULL,
+        ReturnDate DATETIME2 NOT NULL DEFAULT GETDATE(),
+        SupplierId BIGINT NULL,
+        SupplierName NVARCHAR(200) NOT NULL DEFAULT N'',
+        WarehouseId BIGINT NOT NULL DEFAULT 0,
+        WarehouseName NVARCHAR(100) NOT NULL DEFAULT N'',
+        SourceStockInId BIGINT NULL,
+        SourceStockInNo NVARCHAR(50) NOT NULL DEFAULT N'',
+        ReturnReason NVARCHAR(200) NOT NULL DEFAULT N'',
+        TotalQuantity DECIMAL(18,4) NOT NULL DEFAULT 0,
+        TotalAmount DECIMAL(18,4) NOT NULL DEFAULT 0,
+        Status INT NOT NULL DEFAULT 0,
+        Remark NVARCHAR(500) NOT NULL DEFAULT N'',
+        CreatedAt DATETIME2 NOT NULL DEFAULT GETDATE(),
+        CreatedBy BIGINT NULL,
+        UpdatedAt DATETIME2 NULL,
+        UpdatedBy BIGINT NULL,
+        IsDeleted BIT NOT NULL DEFAULT 0,
+        RowVersion ROWVERSION NOT NULL
+    );
+END
+
+IF OBJECT_ID('db_owner.PurchaseReturnDetails') IS NULL
+BEGIN
+    CREATE TABLE db_owner.PurchaseReturnDetails (
+        Id BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+        PurchaseReturnId BIGINT NOT NULL DEFAULT 0,
+        ReturnNo NVARCHAR(50) NOT NULL DEFAULT N'',
+        SortNo INT NOT NULL DEFAULT 0,
+        ProductId BIGINT NULL,
+        ProductCode NVARCHAR(50) NOT NULL DEFAULT N'',
+        ProductName NVARCHAR(200) NOT NULL DEFAULT N'',
+        Spec NVARCHAR(200) NOT NULL DEFAULT N'',
+        Unit NVARCHAR(20) NOT NULL DEFAULT N'',
+        Quantity DECIMAL(18,4) NOT NULL DEFAULT 0,
+        UnitPrice DECIMAL(18,4) NOT NULL DEFAULT 0,
+        Amount DECIMAL(18,4) NOT NULL DEFAULT 0,
+        UnitCost DECIMAL(18,6) NOT NULL DEFAULT 0,
+        Remark NVARCHAR(500) NOT NULL DEFAULT N'',
+        CreatedAt DATETIME2 NOT NULL DEFAULT GETDATE(),
+        CreatedBy BIGINT NULL,
+        UpdatedAt DATETIME2 NULL,
+        UpdatedBy BIGINT NULL,
+        IsDeleted BIT NOT NULL DEFAULT 0,
+        RowVersion ROWVERSION NOT NULL
+    );
+END");
+
+        // 23.5 库存表补充成本列（移动加权平均成本单价 6 位、库存金额 4 位；历史数据默认 0 不影响现有功能）
+        await db.Database.ExecuteSqlRawAsync(@"
+IF OBJECT_ID('db_owner.Stocks') IS NOT NULL
+BEGIN
+    IF COL_LENGTH('db_owner.Stocks', 'AverageCost') IS NULL ALTER TABLE db_owner.Stocks ADD AverageCost DECIMAL(18,6) NOT NULL DEFAULT 0;
+    IF COL_LENGTH('db_owner.Stocks', 'TotalCost') IS NULL   ALTER TABLE db_owner.Stocks ADD TotalCost DECIMAL(18,4) NOT NULL DEFAULT 0;
+END");
+
+        // 23.6 库存单据菜单（挂在「库存管理」分组下，与采购入库 / 销售出库 / 库存查询同级）+ 幂等授权
+        await db.Database.ExecuteSqlRawAsync(@"
+IF NOT EXISTS (SELECT 1 FROM db_owner.SysMenus WHERE MenuCode = N'stock-adjustment' AND IsDeleted = 0)
+BEGIN
+    DECLARE @pLog1 BIGINT = (SELECT TOP 1 Id FROM db_owner.SysMenus WHERE MenuCode = N'logistics' AND IsDeleted = 0);
+    IF @pLog1 IS NOT NULL
+        INSERT INTO db_owner.SysMenus (ParentId, MenuName, MenuCode, Path, Icon, SortOrder, MenuType, PermissionCode, CreatedAt, IsDeleted)
+        VALUES (@pLog1, N'库存盘点调整', N'stock-adjustment', N'/logistics/stock-adjustment', N'clipboard-check', 40, 2, N'logistics:stock-adjustment', GETDATE(), 0);
+END
+IF NOT EXISTS (SELECT 1 FROM db_owner.SysMenus WHERE MenuCode = N'stock-transfer' AND IsDeleted = 0)
+BEGIN
+    DECLARE @pLog2 BIGINT = (SELECT TOP 1 Id FROM db_owner.SysMenus WHERE MenuCode = N'logistics' AND IsDeleted = 0);
+    IF @pLog2 IS NOT NULL
+        INSERT INTO db_owner.SysMenus (ParentId, MenuName, MenuCode, Path, Icon, SortOrder, MenuType, PermissionCode, CreatedAt, IsDeleted)
+        VALUES (@pLog2, N'仓库调拨', N'stock-transfer', N'/logistics/stock-transfer', N'truck', 50, 2, N'logistics:stock-transfer', GETDATE(), 0);
+END
+IF NOT EXISTS (SELECT 1 FROM db_owner.SysMenus WHERE MenuCode = N'sales-return' AND IsDeleted = 0)
+BEGIN
+    DECLARE @pLog3 BIGINT = (SELECT TOP 1 Id FROM db_owner.SysMenus WHERE MenuCode = N'logistics' AND IsDeleted = 0);
+    IF @pLog3 IS NOT NULL
+        INSERT INTO db_owner.SysMenus (ParentId, MenuName, MenuCode, Path, Icon, SortOrder, MenuType, PermissionCode, CreatedAt, IsDeleted)
+        VALUES (@pLog3, N'销售退货', N'sales-return', N'/logistics/sales-return', N'package-minus', 60, 2, N'logistics:sales-return', GETDATE(), 0);
+END
+IF NOT EXISTS (SELECT 1 FROM db_owner.SysMenus WHERE MenuCode = N'purchase-return' AND IsDeleted = 0)
+BEGIN
+    DECLARE @pLog4 BIGINT = (SELECT TOP 1 Id FROM db_owner.SysMenus WHERE MenuCode = N'logistics' AND IsDeleted = 0);
+    IF @pLog4 IS NOT NULL
+        INSERT INTO db_owner.SysMenus (ParentId, MenuName, MenuCode, Path, Icon, SortOrder, MenuType, PermissionCode, CreatedAt, IsDeleted)
+        VALUES (@pLog4, N'采购退货', N'purchase-return', N'/logistics/purchase-return', N'package-plus', 70, 2, N'logistics:purchase-return', GETDATE(), 0);
+END
+IF NOT EXISTS (SELECT 1 FROM db_owner.SysMenus WHERE MenuCode = N'stock-movement' AND IsDeleted = 0)
+BEGIN
+    DECLARE @pLog5 BIGINT = (SELECT TOP 1 Id FROM db_owner.SysMenus WHERE MenuCode = N'logistics' AND IsDeleted = 0);
+    IF @pLog5 IS NOT NULL
+        INSERT INTO db_owner.SysMenus (ParentId, MenuName, MenuCode, Path, Icon, SortOrder, MenuType, PermissionCode, CreatedAt, IsDeleted)
+        VALUES (@pLog5, N'库存流水', N'stock-movement', N'/logistics/stock-movement', N'scroll', 80, 2, N'logistics:stock-movement', GETDATE(), 0);
+END
+
+INSERT INTO db_owner.SysRoleMenus (RoleId, MenuId, CreatedAt, IsDeleted)
+SELECT DISTINCT rm.RoleId, m.Id, GETDATE(), 0
+FROM db_owner.SysRoleMenus rm
+JOIN db_owner.SysMenus m ON m.MenuCode IN
+    (N'stock-adjustment', N'stock-transfer', N'sales-return', N'purchase-return', N'stock-movement')
+    AND m.IsDeleted = 0
+WHERE rm.IsDeleted = 0
+  AND rm.MenuId = m.ParentId
+  AND NOT EXISTS (SELECT 1 FROM db_owner.SysRoleMenus x
+                  WHERE x.RoleId = rm.RoleId AND x.MenuId = m.Id AND x.IsDeleted = 0);
+
+IF NOT EXISTS (SELECT 1 FROM db_owner.SysDocumentNumberRules WHERE DocumentType = 19 AND IsDeleted = 0)
+    INSERT INTO db_owner.SysDocumentNumberRules (DocumentType, RuleCode, RuleName, Prefix, DateFormat, SerialLength, Separator, CurrentSequence, YearlyReset, Remark, CreatedAt, IsDeleted)
+    VALUES (19, N'PD', N'库存盘点调整单', N'PD', N'yyyyMMdd', 4, N'', 0, 1, N'库存盘点/调整单（ERP-009）', GETDATE(), 0);
+IF NOT EXISTS (SELECT 1 FROM db_owner.SysDocumentNumberRules WHERE DocumentType = 20 AND IsDeleted = 0)
+    INSERT INTO db_owner.SysDocumentNumberRules (DocumentType, RuleCode, RuleName, Prefix, DateFormat, SerialLength, Separator, CurrentSequence, YearlyReset, Remark, CreatedAt, IsDeleted)
+    VALUES (20, N'DB', N'仓库调拨单', N'DB', N'yyyyMMdd', 4, N'', 0, 1, N'仓库调拨单（ERP-009）', GETDATE(), 0);
+IF NOT EXISTS (SELECT 1 FROM db_owner.SysDocumentNumberRules WHERE DocumentType = 21 AND IsDeleted = 0)
+    INSERT INTO db_owner.SysDocumentNumberRules (DocumentType, RuleCode, RuleName, Prefix, DateFormat, SerialLength, Separator, CurrentSequence, YearlyReset, Remark, CreatedAt, IsDeleted)
+    VALUES (21, N'XTH', N'销售退货单', N'XTH', N'yyyyMMdd', 4, N'', 0, 1, N'销售退货单（ERP-009）', GETDATE(), 0);
+IF NOT EXISTS (SELECT 1 FROM db_owner.SysDocumentNumberRules WHERE DocumentType = 22 AND IsDeleted = 0)
+    INSERT INTO db_owner.SysDocumentNumberRules (DocumentType, RuleCode, RuleName, Prefix, DateFormat, SerialLength, Separator, CurrentSequence, YearlyReset, Remark, CreatedAt, IsDeleted)
+    VALUES (22, N'CTH', N'采购退货单', N'CTH', N'yyyyMMdd', 4, N'', 0, 1, N'采购退货单（ERP-009）', GETDATE(), 0);");
+
     }
 }

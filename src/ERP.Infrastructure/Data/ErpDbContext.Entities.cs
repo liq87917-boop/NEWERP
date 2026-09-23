@@ -25,6 +25,17 @@ public partial class ErpDbContext
     public DbSet<StockOutDetail> StockOutDetails => Set<StockOutDetail>();
     public DbSet<Stock> Stocks => Set<Stock>();
 
+    // ============ 库存单据与库存流水（ERP-009 新增） ============
+    public DbSet<StockAdjustment> StockAdjustments => Set<StockAdjustment>();
+    public DbSet<StockAdjustmentDetail> StockAdjustmentDetails => Set<StockAdjustmentDetail>();
+    public DbSet<StockTransfer> StockTransfers => Set<StockTransfer>();
+    public DbSet<StockTransferDetail> StockTransferDetails => Set<StockTransferDetail>();
+    public DbSet<SalesReturn> SalesReturns => Set<SalesReturn>();
+    public DbSet<SalesReturnDetail> SalesReturnDetails => Set<SalesReturnDetail>();
+    public DbSet<PurchaseReturn> PurchaseReturns => Set<PurchaseReturn>();
+    public DbSet<PurchaseReturnDetail> PurchaseReturnDetails => Set<PurchaseReturnDetail>();
+    public DbSet<StockMovement> StockMovements => Set<StockMovement>();
+
     // ============ 装柜管理 ============
     public DbSet<ContainerReceivingPlan> ContainerReceivingPlans => Set<ContainerReceivingPlan>();
     public DbSet<ContainerBooking> ContainerBookings => Set<ContainerBooking>();

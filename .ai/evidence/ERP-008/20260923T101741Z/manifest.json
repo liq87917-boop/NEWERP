@@ -1,0 +1,109 @@
+{
+  "task": "ERP-008",
+  "status": "failed",
+  "started_at": "2026-09-23T10:17:41.484633Z",
+  "finished_at": "2026-09-23T10:19:16.718221Z",
+  "browser": {
+    "name": "Microsoft Edge",
+    "binary": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
+    "real_browser": true,
+    "headless": true
+  },
+  "scenarios": [
+    "Login in Microsoft Edge, create/edit a sales order, fill the new foreign-trade/source fields, save and reopen it to verify round-trip persistence.",
+    "Create/edit a purchase order, link it to customer and sales order, fill procurement execution fields, save and reopen it to verify persistence.",
+    "Open print/export or the relevant document preview and verify the added business fields do not break rendering or API calls."
+  ],
+  "test_filter": "Collection=UiTests",
+  "build_exit_code": 0,
+  "test_exit_code": 1,
+  "screenshot_count": 14,
+  "minimum_screenshots": 2,
+  "artifacts": [
+    {
+      "path": ".ai/evidence/ERP-008/20260923T101741Z/browser-test.log",
+      "sha256": "653bbc9afc50e6ad776fe9bd118566f8f4b963a6cd5b3833fa7c23fbe568abce",
+      "bytes": 18108
+    },
+    {
+      "path": ".ai/evidence/ERP-008/20260923T101741Z/ERP-008.trx",
+      "sha256": "a53697bf8738863816d283018cb6fa1d94d0b43460117b21387313a60a0aba8b",
+      "bytes": 21829
+    },
+    {
+      "path": ".ai/evidence/ERP-008/20260923T101741Z/browser-session.json",
+      "sha256": "1d4d77ffdc49459db6b6a7e3797b5c2039a3a6b5f82639583f1bb36f5c51bc93",
+      "bytes": 164
+    },
+    {
+      "path": ".ai/evidence/ERP-008/20260923T101741Z/01-pi-list-draft.png",
+      "sha256": "9e82bcba641401a93992ee6c7d5935d40e1a296d39ce16e601f61bc0db1d7134",
+      "bytes": 140342
+    },
+    {
+      "path": ".ai/evidence/ERP-008/20260923T101741Z/02-pi-edited-draft-saved.png",
+      "sha256": "ef32884788bdccf5744003de9076956470cc6a9201103c22401ae4aedd9e9302",
+      "bytes": 127957
+    },
+    {
+      "path": ".ai/evidence/ERP-008/20260923T101741Z/03-pi-approved-edit-rejected.png",
+      "sha256": "41ba7eaf15f6bc91588aeb79f0881a2311bc6090f734048f31b61f55aa5ed32b",
+      "bytes": 139835
+    },
+    {
+      "path": ".ai/evidence/ERP-008/20260923T101741Z/04-pi-unaudited-edit-restored.png",
+      "sha256": "74d24bd482cc56c4459faa63b38e0b3f495e7a466a146f33744f48da7a0c298c",
+      "bytes": 127976
+    },
+    {
+      "path": ".ai/evidence/ERP-008/20260923T101741Z/05-pi-print-preview.png",
+      "sha256": "b6e0d1f33d481dee1e044136e5c204dcc5839a09c31df92c81414fac2873301c",
+      "bytes": 211143
+    },
+    {
+      "path": ".ai/evidence/ERP-008/20260923T101741Z/06-pi-voided.png",
+      "sha256": "5ca244a919160a8d67c70db4a9872c4f8ef49345731c881e1fab60f613af3833",
+      "bytes": 129083
+    },
+    {
+      "path": ".ai/evidence/ERP-008/20260923T101741Z/07-quotation-list-ready.png",
+      "sha256": "1602d2d72bfa1a4a9a1dbf7898cd79fb3d31f03c05b45ffdaaad8424467306c3",
+      "bytes": 139764
+    },
+    {
+      "path": ".ai/evidence/ERP-008/20260923T101741Z/08-quotation-converted-to-pi.png",
+      "sha256": "08e0d68ea9d63a9e83d0a8a4e613c0a604b8c81ea536930dbc0461cfde560cee",
+      "bytes": 128054
+    },
+    {
+      "path": ".ai/evidence/ERP-008/20260923T101741Z/09-pi-list-with-generated-pi.png",
+      "sha256": "0f6a82d6254618c9231a71a97faf756822b1784c767a4fb8147a10011560f0e4",
+      "bytes": 130801
+    },
+    {
+      "path": ".ai/evidence/ERP-008/20260923T101741Z/10-pi-edit-form-with-copied-lines.png",
+      "sha256": "b8eda00ec293bd1035f26a9d5dd4b50e7a1b9eb7a09599f36736f40cb3be98c8",
+      "bytes": 141047
+    },
+    {
+      "path": ".ai/evidence/ERP-008/20260923T101741Z/11-invalid-password-rejected.png",
+      "sha256": "21551224010a09dc363b7d8bc720f41bd2da251c705970a39bcc839f9ee5360c",
+      "bytes": 1314353
+    },
+    {
+      "path": ".ai/evidence/ERP-008/20260923T101741Z/12-admin-dashboard-visible.png",
+      "sha256": "37c32253a768e5aa724bac6b96975350e30b5612c43afeb002ab2ba244515e88",
+      "bytes": 436861
+    },
+    {
+      "path": ".ai/evidence/ERP-008/20260923T101741Z/13-logout-returned-to-login.png",
+      "sha256": "06a1f6e4163cc011fbd1200b66e298e9fa63d68c47085b2fe8678a3436361bb5",
+      "bytes": 1371073
+    },
+    {
+      "path": ".ai/evidence/ERP-008/20260923T101741Z/14-login-page-visible.png",
+      "sha256": "64f7b288af737b427219dc2801b9730fe2b0a919df72689c7443b631a03f5238",
+      "bytes": 1329966
+    }
+  ]
+}

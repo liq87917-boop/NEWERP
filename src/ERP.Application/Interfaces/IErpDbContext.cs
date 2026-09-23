@@ -79,6 +79,26 @@ public interface IErpDbContext
     DbSet<StockOutDetail> StockOutDetails { get; }
     DbSet<Stock> Stocks { get; }
 
+    // ============ 库存单据与库存流水（ERP-009 新增） ============
+    /// <summary>库存盘点/调整单</summary>
+    DbSet<StockAdjustment> StockAdjustments { get; }
+    DbSet<StockAdjustmentDetail> StockAdjustmentDetails { get; }
+
+    /// <summary>仓库调拨单</summary>
+    DbSet<StockTransfer> StockTransfers { get; }
+    DbSet<StockTransferDetail> StockTransferDetails { get; }
+
+    /// <summary>销售退货单</summary>
+    DbSet<SalesReturn> SalesReturns { get; }
+    DbSet<SalesReturnDetail> SalesReturnDetails { get; }
+
+    /// <summary>采购退货单</summary>
+    DbSet<PurchaseReturn> PurchaseReturns { get; }
+    DbSet<PurchaseReturnDetail> PurchaseReturnDetails { get; }
+
+    /// <summary>库存流水（可审计移动记录，库存估价成本基准）</summary>
+    DbSet<StockMovement> StockMovements { get; }
+
     // ============ 装柜管理 ============
     DbSet<ContainerReceivingPlan> ContainerReceivingPlans { get; }
     DbSet<ContainerBooking> ContainerBookings { get; }

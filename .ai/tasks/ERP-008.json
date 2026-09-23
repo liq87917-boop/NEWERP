@@ -1,7 +1,7 @@
 {
   "id": "ERP-008",
   "title": "Complete sales and purchase order traceability",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "medium",
   "description": "Close the documented Phase-1 order gaps: enrich SalesOrder with foreign-trade contract/shipping fields and source quotation/PI traceability; enrich PurchaseOrder with customer/sales-order ownership and procurement execution/settlement fields. Update persistence, APIs, UI, import/export/print behavior and tests without changing production data.",
   "acceptance_criteria": [
@@ -51,6 +51,6 @@
     "status": "approved",
     "reason": "User explicitly requested completion of all project functions. Schema changes are restricted to code and NEWERP_TEST validation; production deployment/database operations remain separately gated."
   },
-  "attempts": 0,
+  "attempts": 1,
   "created_at": "2026-09-23T05:23:00Z"
 }

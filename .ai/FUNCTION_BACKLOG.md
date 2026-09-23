@@ -33,10 +33,10 @@
 | 3 | 询价单（CRUD/提交/审核/导出） | verified-complete | `InquiryController`、`bill-config.js:36`、`bill-export.js:5`、菜单 `inquiry-new`/`inquiry-export` | 询价单侧无一键转报价（现由报价单 `from-inquiry` 反向带出客户与明细） | low |
 | 4 | 报价单 Quotation | **partial** | `Quotation.cs`/`Detail`（`SortNo` 替代保留字 `LineNo`）、`ErpDbContext.Entities.cs:62-63`、`QuotationController.cs`（分页/详情/`from-inquiry`/`approve`/`unaudit`/新增/修改+后端重算）、`SchemaUpgrader.cs:707-777`、`init16.sql`、菜单 `quotation`(`/sales/quotation`) 、`modules.js:451-501`（主子表 `detailFields`）、字轨 `DocumentType.Quotation=17` | ① 无「转 PI」端点/按钮（全仓无 `to-pi`）；② 无 `/{id}/print`，`BILL_CONFIG`/`BILL_CODE_MAP` 未注册 quotation → **报价单没有打印预览/直接打印/打印设计**；③ 无报价→销售订单带入；④ 无报价版本号（多轮议价）；⑤ 无有效期到期提醒与成交率分析；⑥ 无 `QuotationController` 单元测试 | medium |
 | 5 | 供应商比价 PurchaseQuote | verified-complete | `PurchaseQuote.cs`（比价批次/多供应商/是否选中/为客户询价）、`PurchaseQuoteController`、菜单 `purchase-quote`(`init10.sql`) | `IsSelected` 选中后无「生成采购订单」下游动作 | low-medium |
-| 6 | 销售订单（外销合同） | partial（ERP-008 已批准） | `SalesOrder.cs:10-63`、`modules-doc.js:56-72`、`sp_Biz_SalesOrder`(`BillProcController` Bills 目录) | 缺：客户 PO 号、合同号、价格条款、目的港文本、Consignee/Notify、唛头、来源报价/PI、出口方式(0110/1039/9610/9710)、佣金比例、业务性质、分批出货、验货/包装要求、附件；另缺订单变更申请与订单执行跟踪时间轴 | medium |
-| 7 | 采购订单 | partial（ERP-008 已批准） | `PurchaseOrder.cs`、`modules-doc.js:73-87`、`sp_Biz_PurchaseOrder` | 缺：归属客户、归属销售订单、代垫、供应商交期确认、税率/含税、到货进度、验货状态、合同号、结算进度；加列需 DROP/CREATE 存储过程 | medium-high |
+| 6 | 销售订单（外销合同） | **verified-complete（代码 + 测试；待 Edge 门禁）** | `SalesOrder.cs:56-118`（客户 PO 号/合同号/价格条款/目的港文本/Consignee/Notify/唛头/来源报价+PI/出口方式/佣金比例/业务性质/分批出货/验货与包装要求）、`SchemaUpgrader.cs:891-931`（幂等补列）、`SalesOrderController.cs`（列表关键字含客户 PO/合同号、`/{id}/print`、`export-excel`、佣金比例 0~100 校验）、`modules-doc.js:100-149`（EF 主子表页面 + 引用/下拉/明细）、`sales-pi.js:20-29`（打印含新字段与订单明细列）、`bill-export.js:8-24`（导出菜单改调 EF 导出）、`OrderTraceabilityTests`（14 用例）、`OrderTraceabilityUiTests`（3 个 Edge 用例）；见 `docs/订单追溯字段说明.md` | 订单变更申请、订单执行跟踪时间轴、附件、报价/PI 一键生成销售订单；SP 版单据页已退出菜单（历史 SP 表数据不迁移） | medium |
+| 7 | 采购订单 | **verified-complete（代码 + 测试；待 Edge 门禁）** | `PurchaseOrder.cs:44-86`（归属客户/归属销售订单/代垫/供应商确认交期/税率与含税/到货进度/验货状态/合同号/结算进度）、`SchemaUpgrader.cs:891-931`、`PurchaseOrderController.cs`（关键字含合同号与归属销售订单号、`/{id}/print`、`export-excel`、税率 0~100 校验）、`modules-doc.js:150-191`、`sales-pi.js:30-37`、`bill-export.js:16-23`、`OrderTraceabilityTests`、`OrderTraceabilityUiTests` | 采购执行时间轴、比价 `PurchaseQuote.IsSelected` 下游联动、入库/结算单据自动回写进度 | medium |
 | 8 | 采购入库 / 销售出库 / 库存查询 | verified-complete | `Logistics.cs`、`StockInController`/`StockOutController`/`StockController`、审核后联动 `Stocks`、`modules-doc2.js:3-29` | 多单位换算未参与出入库计算（`BaseProduct.UnitsPerPackage` 仅实体 + 导入模板）；无库位/批次成本 | low-medium |
-| 9 | 库存动作单据（盘点/调拨/退货）+ 库存成本 | missing | 仅有 `stock-alert` 报表与 `MinStock/MaxStock`；`docs/部署交付文档.md:817,858,910,953,995,1057` 与 `docs/菜单与业务流程优化建议-20260918.md:44,247` 反复列为待办 | 全部缺失，需与 `Stocks` 联动并做变更窗口 | medium-high |
+| 9 | 库存动作单据（盘点/调拨/退货）+ 库存成本 | **verified-complete（代码 + 测试；待 Edge 门禁）** | ERP-009 落地：`InventoryDocuments.cs`（`StockAdjustment`/`StockTransfer`/`SalesReturn`/`PurchaseReturn` 主子表 + `StockMovement` 流水）、`InventoryService`（移动加权平均 + 冲销）、`/api/inventory/**` 四个控制器（提交/审核/销审/取消 + `{id}/movements`）、`/api/stocks/movements`、`SchemaUpgrader.cs` 第 23 段（幂等建表/补列/菜单/字轨）、`modules-doc2.js` 5 个新页面、`InventoryMovementTests`（19 用例）、`InventoryMovementUiTests`（3 个 Edge 用例）；见 `docs/库存单据与库存成本说明.md` | 库位/批次成本、FIFO、成本调整单；既有采购入库/销售出库控制器未改（历史变动不入流水） | medium |
 | 10 | 装柜/出运主链（收货计划/订柜/预装柜/装柜清单） | verified-complete | `Container1.cs`/`Container2.cs`、`ContainerControllers`、`ContainerPreLoadingController`、`ContainerLoadingListController`、`bill-config3.js:60-118` | 无 | low |
 | 11 | 装柜外贸与物流跟踪字段 | missing | `ContainerBooking`/`ContainerPreLoading*`/`ContainerLoading*` 无相关列；`docs/部署交付文档.md:854` 说明因走存储过程而暂缓 | LCL/FCL、B/L、SO、ETD/ETA/ATD/ATA、拖车/报关行、查验放行、目的/中转港；装载率仅报表侧(`reports.js:37-48`，40HQ 68m³ 基准) | medium-high |
 | 12 | 一柜多客户拼柜与费用分摊 | partial | 分摊已可用：`expense-allocate.js`（拼柜/整柜/散货 × 体积/重量/箱数/金额）、`ExpenseBillController.cs:29-93`（预览+生成+重复防护）、`FinanceExpense.cs:50-73`（RefType/RefNo/CustomerId/AllocationBase/AllocationRatio/AllocatedAmount 落库） | `ContainerLoadingList.CustomerId` 仍为单客户，无「柜→多客户」主子表；分摊结果不回写装柜/结算；无分摊批次与来源行留痕 | medium |
@@ -108,11 +108,11 @@
 
 | 建议 ID | 目标与边界 | depends_on | 风险 / 门禁 | 完成模式 |
 |---|---|---|---|---|
-| ERP-009 | 报价单打印与报价有效期治理：补 `GET /api/sales/quotations/{id}/print`、在 `BILL_CONFIG`/`BILL_CODE_MAP` 注册 `quotation`、报价有效期到期提醒报表（复用报表框架，零 DB 改动）、报价成交率分析 | ERP-007 | low / L1 | browser |
+| ~~ERP-009~~ | ~~报价单打印与报价有效期治理：补 `GET /api/sales/quotations/{id}/print`、在 `BILL_CONFIG`/`BILL_CODE_MAP` 注册 `quotation`、报价有效期到期提醒报表（复用报表框架，零 DB 改动）、报价成交率分析~~ → **该建议内容尚未立项；`ERP-009` 这个 ID 已被 orchestrator 用于「库存动作单据与库存成本」（见 §5.12）** | ERP-007 | low / L1 | browser |
 | ERP-010 | 报价/PI → 销售订单「带入预填」（不改存储过程），销售订单留痕来源报价单/PI | ERP-007, ERP-008 | medium / L2 | browser |
 | ERP-011 | 装柜外贸字段与物流跟踪：LCL/FCL、B/L、SO、ETD/ETA/ATD/ATA、拖车/报关行、查验放行、目的/中转港 | ERP-008 | **high（装柜单据走存储过程 + 结构变更，需变更窗口、备份与回滚脚本）** / L3 | browser |
 | ERP-012 | 拼柜方案与费用分摊闭环：新增「柜 → 多客户」主子模型 + 分摊批次留痕，分摊结果回写装柜/结算与费用单关联（保留现有按体积/重量/箱数/金额 + 手工覆盖） | ERP-011 | high / L3 | browser |
-| ERP-013 | 库存动作单据与成本：盘点单、调拨单、退货入库/出库、与 `Stocks` 联动、移动加权/批次成本 | ERP-011 | high / L3 | browser |
+| ~~ERP-013~~ | ~~库存动作单据与成本：盘点单、调拨单、退货入库/出库、与 `Stocks` 联动、移动加权/批次成本~~ → **已由 `ERP-009` 实现（见 §5.12：四类单据 + 库存流水 + 移动加权平均成本，`verified-complete 代码+测试`）**；剩余未做：库位/批次级成本、FIFO、成本调整单、跌价准备 | ERP-011 | high / L3 | browser |
 | ERP-014 | 财务补口：应付账款、供应商对账、客户对账、发票管理（专票/普票/出口发票）、收款自动核销、汇兑损益、金额阈值审批流 | ERP-008 | medium-high / L2-L3 | browser |
 | ERP-015 | 生产管理（BOM/生产任务/委外/领料/产成品入库/生产看板/库存成本）—— 立项前需确认工序粒度（是否有车间/工序/工价） | 无（并行） | **decision-required**；实现风险 high | browser |
 | ERP-016 | 增强项：数据范围权限（业务员仅见自己客户）、附件中心、移动端/扫码 | ERP-014 | medium / L2 | browser |
@@ -201,6 +201,46 @@
   - 竞态护栏实测（仓库外临时 Node 脚本，直接加载真实 `crud.js`，仅桩掉 `api` / `document`）：**修复前**版本在「搜索期间旧响应晚到」「切模块时旧模块响应晚到」两个场景都出现旧数据覆盖（renders=2，页面仍含旧行）；**修复后**只渲染最新请求（renders=1），无竞争场景照常渲染；
   - 行定位 XPath 以 XML 样本验证：菜单收起 / 已展开两种状态都能唯一命中目标行，非目标行不命中。
 - **未做的事（边界）**：未启动 `ERP.Api`、未连业务库、未执行任何 SQL/seed/部署、未改 `.env.local`、`deploy/**`、`release/**`、`checkpoints/**`、`logs/**`、`SchemaUpgrader.cs`、`SeedData*.cs`；未 commit / push（checkpoint 归 orchestrator）。本轮产物为「代码 + 测试」，交付等级仍为 `code_ready`，`completed` 只由 orchestrator 的真实 Edge 门禁判定。
+
+### 5.11 ERP-008 销售 / 采购订单追溯字段（2026-09-23）
+
+- **任务**：ERP-008「完整化销售订单与采购订单追溯」——补齐外销合同 / 运输 / 来源报价与 PI 追溯字段、采购单归属客户与归属销售订单、采购执行与结算字段。
+- **范围与做法（关键决策）**：销售订单与采购订单**统一改由 EF 主子表承载**（`db_owner.SalesOrders` / `db_owner.PurchaseOrders`，与 14 张报表读取的表一致），菜单不再进入存储过程版单据页（`BILL_CONFIG['sales-order'/'purchase-order']` 保留定义，供历史数据排查/回滚参考）。这样新增列完全不需要 `DROP/CREATE` 生产存储过程——正是 ERP-006 把采购订单判为 medium-high 的根因。页面（`crud.js` 主子表）中的客户 / 供应商 / 业务员为引用字段、币种与各类枚举为下拉、Consignee/Notify/唛头/验货/包装要求为多行文本，明细行自动算金额与合计。
+- **代码改动**：
+  - 领域：`SalesOrder.cs`（16 个新列）、`PurchaseOrder.cs`（12 个新列），全部带安全默认值（空串 / 0 / 0 位），历史单据可正常打开。
+  - 持久化：`SchemaUpgrader.cs` 新增第 22 段（`IF OBJECT_ID(...) IS NOT NULL` + `IF COL_LENGTH(...) IS NULL`，幂等补齐缺列；表缺失时不会中断服务启动）。
+  - 接口：`SalesOrderController` / `PurchaseOrderController` 全字段往返、关键字检索扩展到客户 PO 号 / 合同号 / 归属销售订单号、新增 `/{id}/print` 与 `export-excel`（列含全部新字段）、佣金比例与税率 0~100 校验（越界抛 `InvalidParameter`，不落库）、`GetById` 明细过滤软删除。
+  - 前端：`modules-doc.js`（两个模块的主子表配置 + 选项集）、`bill-v2.js`（移除 `sales-order` / `purchase-order` 的 SP 映射）、`sales-pi.js`（打印配置含新字段、订单明细列、日期与布尔格式化、销售订单唛头/验货/包装区块）、`bill-export.js`（导出菜单改调 EF `export-excel` 并按订单状态口径渲染选项）、`crud.js`（`valueType: 'bool'` 提交真布尔值；日期留空提交 `null`，避免 `""` 反序列化 `DateTime?` 报错）。
+- **本轮实测（未启动 API、未连数据库、未运行集成/UI 用例）**：
+  - safe 档：`dotnet restore NEWERP.sln` + `dotnet build NEWERP.sln -c Release --no-restore --no-incremental /p:TreatWarningsAsErrors=true /p/RunAnalyzersDuringBuild=true` → **0 警告 / 0 错误**；`dotnet test src/ERP.UnitTests/ERP.UnitTests.csproj -c Release --no-build` → **231/231 通过**（原 217 + `OrderTraceabilityTests` 14）；
+  - 门禁所用配置编译：`dotnet build src/ERP.IntegrationTests/ERP.IntegrationTests.csproj -c Debug` → 0 警告 / 0 错误；
+  - 前端脚本 `node --check`：`modules-doc.js` / `bill-v2.js` / `sales-pi.js` / `bill-export.js` / `crud.js` 全部通过。
+- **真实 Edge 验收用例（新增 `OrderTraceabilityUiTests`，`Collection=UiTests`，共 3 个用例 / 10 张截图）**：① 销售订单页面填写外贸合同与来源追溯字段 + 明细 → 保存 → 重新打开核对回显 → 打印预览含客户 PO / 合同 / 唛头 → Excel 导出可用；② 采购订单关联归属客户与归属销售订单、填写代垫/含税/税率/到货/验货/结算字段 + 明细 → 保存 → 重新打开核对 → 打印预览可用；③ 订单列表渲染新增追溯列、导出菜单为订单状态口径、导出接口可用；每个用例断言全流程无 JS / 接口失败，测试数据经应用自身接口创建并在结束时软删除。
+- **未做的事（边界）**：未启动 `ERP.Api`、未连业务库、未执行任何 SQL/seed/部署；未修改 `.env.local`、`deploy/**`、`release/**`、`checkpoints/**`、`logs/**`、任何 `.sql` 文件与 `SeedData*.cs`；未 commit / push（checkpoint 归 orchestrator）。`SchemaUpgrader.cs` 的改动仅限幂等补列，且按 Human Gate L2（已批准）执行。本轮产物为「代码 + 测试 + 文档」，交付等级仍为 `code_ready`，`completed` 只由 orchestrator 的真实 Edge 门禁判定。
+
+### 5.12 ERP-009 库存动作单据与库存成本基础（2026-09-23）
+
+- **任务**：ERP-009「实现库存动作单据与库存成本基础」——补齐审计列出的 missing 项：库存盘点/调整、仓库调拨、销售退货、采购退货四类单据 + 可审计库存流水 + 确定性库存估价；结构升级只对 NEWERP_TEST 验证，生产库/生产数据继续受门禁控制。
+- **范围与做法（关键决策）**：
+  - 四类单据统一用 **EF 主子表**实现（`db_owner.StockAdjustments` / `StockTransfers` / `SalesReturns` / `PurchaseReturns` + `...Details`），沿用报价单/PI/订单的约定：字轨编号（`DocumentType` 19~22，前缀 PD/DB/XTH/CTH）、`Pending → Submitted → Approved`、明细整体替换、后端复核合计；**完全不触碰任何存储过程与 SQL 脚本**。
+  - 新增 **`StockMovements` 库存流水**作为「已审核单据改库存恰好一次」的唯一凭据：一笔记录 = 一个仓库 + 一个商品的单向变动，持久化来源单据（类型/Id/单号）、`UnitCost`（6 位）、`Amount`（带符号）、移动后结存快照（`BalanceQuantity`/`BalanceAmount`/`BalanceAverageCost`）。
+  - **销审 = 冲销**：不删历史，原流水 `IsReversed=1` + 追加红字流水（`IsReversal=1`、`ReversalOfMovementId`），库存按原流水金额还原；若入库已被后续业务占用（库存不足冲销）则拒绝销审，避免负库存。
+  - **成本口径**：`InventoryService` 实现移动加权平均法；`Stocks` 新增 `AverageCost`(18,6) / `TotalCost`(18,4)；调拨两侧使用同一成本单价（调出金额 = 调入金额）；退货成本优先级 = 明细成本 → 来源单据流水成本 → 当前均价。
+  - **小数位显式声明**：EF 模型对成本（6 位）与数量/金额（4 位）加 `HasPrecision`，与 `SchemaUpgrader` 第 23 段建表脚本一致，避免空库首次 `EnsureCreated` 按默认 `decimal(18,2)` 截断成本。
+- **代码改动**：
+  - 领域：`src/ERP.Domain/Entities/InventoryDocuments.cs`（四类单据主/明细 + `StockMovement`）、`Logistics.cs`（`Stock.AverageCost`/`TotalCost`）、`Enums.cs`（`DocumentType` 19~22 + `InventoryMovementType`）。
+  - 应用：`src/ERP.Application/Services/InventoryService.cs`（`IInventoryService`：`IncreaseAsync`/`DecreaseAsync`/`ReverseAsync`/`ResolveSourceCostAsync`/`ListMovementsAsync`/`CountActiveMovementsAsync`）、`DependencyInjection` 注册、`DocumentNumberService` 前缀与统计分支。
+  - 接口：`StockAdjustmentController` / `StockTransferController` / `SalesReturnController` / `PurchaseReturnController`（`/api/inventory/...`，含 `{id}/movements`、`unaudit`、审核幂等护栏、已审核不能取消）、`InventoryDocumentHelper`（仓库名/商品信息/流水上下文统一构造）、`StockController` 新增 `/api/stocks/movements` 与 `AverageCost`/`TotalCost` 视图列。
+  - 持久化：`ErpDbContext`/`IErpDbContext` 新增 9 个 `DbSet`、唯一索引（4 张单据号）、明细级联外键、成本/数量小数位；`SchemaUpgrader` 第 23 段（5 张单据表 + 明细 4 张 + `StockMovements` + 2 索引 + `Stocks` 补 2 列 + 5 个菜单 + 幂等授权 + 4 条字轨，全部 `IF NOT EXISTS`/`COL_LENGTH` 幂等）。
+  - 前端：`modules-doc2.js`（5 个新模块：四张单据 + 只读「库存流水」页）、`crud.js`（通用 `unauditRow` 销审行操作 + 列表列 `type:'map'` + 明细区 `detailDiff` 差异与差异合计）、`app.js`（`CODE_ICON` 注册）。
+  - 文档：`docs/库存单据与库存成本说明.md`（模型、成本口径、接口、字轨菜单、页面、测试、边界）。
+- **本轮实测（未启动 API、未连数据库、未运行集成/UI 用例）**：
+  - safe 档：`dotnet restore NEWERP.sln` + `dotnet build NEWERP.sln -c Release --no-restore --no-incremental /p:TreatWarningsAsErrors=true /p/RunAnalyzersDuringBuild=true` → 0 警告 / 0 错误；`dotnet test src/ERP.UnitTests/ERP.UnitTests.csproj -c Release --no-build` → **250/250 通过**（原 231 + `InventoryMovementTests` 19）；
+  - 门禁所用配置编译：`dotnet build src/ERP.IntegrationTests/ERP.IntegrationTests.csproj -c Debug` → 0 警告 / 0 错误；新增 `InventoryMovementUiTests`（3 个 Edge 用例）；
+  - 前端脚本 `node --check`：`modules-doc2.js` / `crud.js` / `app.js` 全部通过；仓库外临时 Node 脚本加载真实 `modules-doc2.js` + `crud.js`（桩掉 DOM/接口）**36 项断言全部通过**（模块注册、销审行操作、`detailDiff` 差异与合计、`map` 列渲染、金额格式）。
+  - 单元测试过程中发现并修复一处真实缺陷：`Normalize` 在审核路径上把已跟踪明细的主键重置为 0（EF 报 key 修改异常）——现改为「明细主键重置只在新增/修改（整体替换）时执行」，审核只做计算。
+- **真实 Edge 验收用例（新增 `InventoryMovementUiTests`，`Collection=UiTests`，3 个用例）**：① 盘点调整：页面新建（账面 0 → 实盘 50，成本 10）→ 提交 → 审核 → 库存 50/金额 500/均价 10 + 流水 1 笔（含结存快照）+ 库存流水页按单据号可查；② 仓库调拨：页面新建（A→B，数量 30，成本留 0 取 A 仓均价 10）→ 审核 → A 减 30、B 增 30、两仓合计守恒、流水出/入两笔同成本；③ 销审：页面销审（确认框）→ 库存与流水冲销（红字流水 + 原流水 `IsReversed`）、重复销审被服务端拒绝且不新增流水、冲销后可再次提交审核。所有用例均断言全流程无 JS / 接口失败（有意触发的 1 次重复销审拒绝除外），测试数据经应用自身接口/页面创建并在结束时销审 + 软删除。
+- **未做的事（边界）**：未启动 `ERP.Api`、未连业务库、未执行任何 SQL/seed/部署、未运行集成/UI 用例（真实 Edge 门禁归 orchestrator）；未修改 `.env.local`、`deploy/**`、`release/**`、`checkpoints/**`、`logs/**`、任何 `.sql` 文件与 `SeedData*.cs`；未 commit / push。`SchemaUpgrader.cs` 的改动仅限幂等建表/补列 + 菜单与字轨，按 Human Gate L2（已批准）执行。本轮产物为「代码 + 测试 + 文档」，交付等级仍为 `code_ready`，`completed` 只由 orchestrator 的真实 Edge 门禁判定。
 
 ## 6. 执行规则（保持有效）
 

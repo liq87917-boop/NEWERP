@@ -1,11 +1,33 @@
 /* ============ 单据导出模块（询价单/销售订单/采购订单导出） ============ */
 
-/* 导出菜单编码 -> 单据类型（BILL_CODE_MAP 映射） */
+/* 导出菜单编码 -> 单据类型（BILL_CODE_MAP 映射）
+   ERP-008：销售订单 / 采购订单改用 EF 主子表接口的 Excel 导出（api），
+   使导出的列包含外贸合同、来源追溯与采购执行进度字段；其余仍走存储过程版单据导出。 */
 const EXPORT_MENU_MAP = {
   'inquiry-export': { billType: 'inquiry', title: '询价单导出', dateField: 'InquiryDate' },
-  'sales-order-export': { billType: 'sales-order', title: '销售订单导出', dateField: 'OrderDate' },
-  'purchase-order-export': { billType: 'purchase-order', title: '采购订单导出', dateField: 'OrderDate' },
+  'sales-order-export': {
+    api: '/api/sales-orders/export-excel', title: '销售订单导出',
+    statusOptions: [
+      { value: '', label: '全部状态' }, { value: 'Pending', label: '待提交' },
+      { value: 'Submitted', label: '已提交' }, { value: 'Approved', label: '已审核' },
+      { value: 'Cancelled', label: '已取消' },
+    ],
+  },
+  'purchase-order-export': {
+    api: '/api/purchase-orders/export-excel', title: '采购订单导出',
+    statusOptions: [
+      { value: '', label: '全部状态' }, { value: 'Pending', label: '待提交' },
+      { value: 'Submitted', label: '已提交' }, { value: 'Approved', label: '已审核' },
+      { value: 'Cancelled', label: '已取消' },
+    ],
+  },
 };
+
+/* 存储过程单据导出菜单的状态选项（1=保存 / 2=已审核 / -1=已作废） */
+const LEGACY_EXPORT_STATUS_OPTS = [
+  { value: '', label: '全部状态' }, { value: '1', label: '保存' },
+  { value: '2', label: '已审核' }, { value: '-1', label: '已作废' },
+];
 
 /* 当前导出菜单编码 */
 let EXPORT_CURRENT_CODE = '';
@@ -33,10 +55,8 @@ function renderBillExport(code) {
         <div class="form-item">
           <label>单据状态</label>
           <select id="ex-status">
-            <option value="">全部状态</option>
-            <option value="1">保存</option>
-            <option value="2">已审核</option>
-            <option value="-1">已作废</option>
+            ${(cfg.statusOptions || LEGACY_EXPORT_STATUS_OPTS)
+              .map(o => `<option value="${o.value}">${o.label}</option>`).join('')}
           </select>
         </div>
         <div class="form-item">
@@ -57,16 +77,16 @@ async function doExport() {
   const status = document.getElementById('ex-status').value;
   const keyword = document.getElementById('ex-keyword').value.trim();
 
-  const qs = new URLSearchParams({ dateField: cfg.dateField });
+  /* EF 主子表单据（销售订单 / 采购订单）：直接调用模块的 Excel 导出接口（列含 ERP-008 新增字段） */
+  const qs = cfg.api ? new URLSearchParams() : new URLSearchParams({ dateField: cfg.dateField });
   if (start) qs.set('start', start + 'T00:00:00');
   if (end) qs.set('end', end + 'T23:59:59');
   if (status) qs.set('status', status);
   if (keyword) qs.set('keyword', keyword);
 
+  const url = cfg.api ? `${cfg.api}?${qs.toString()}` : `/api/v2/bills/${cfg.billType}/export?${qs.toString()}`;
   try {
-    const resp = await fetch(`/api/v2/bills/${cfg.billType}/export?${qs.toString()}`, {
-      headers: { Authorization: 'Bearer ' + TOKEN },
-    });
+    const resp = await fetch(url, { headers: { Authorization: 'Bearer ' + TOKEN } });
     if (!resp.ok) {
       let msg = '导出失败';
       try { msg = (await resp.json()).message || msg; } catch (e) { /* 忽略解析失败 */ }

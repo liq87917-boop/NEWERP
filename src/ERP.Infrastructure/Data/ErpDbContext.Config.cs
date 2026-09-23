@@ -55,8 +55,56 @@ public partial class ErpDbContext
         // ============ 单据号唯一索引（阶段 3：形式发票 PI 使用 EF 主子表） ============
         modelBuilder.Entity<ProformaInvoice>().HasIndex(x => x.PiNo).IsUnique();
 
+        // ============ 单据号唯一索引（ERP-009：库存单据使用 EF 主子表） ============
+        modelBuilder.Entity<StockAdjustment>().HasIndex(x => x.AdjustmentNo).IsUnique();
+        modelBuilder.Entity<StockTransfer>().HasIndex(x => x.TransferNo).IsUnique();
+        modelBuilder.Entity<SalesReturn>().HasIndex(x => x.ReturnNo).IsUnique();
+        modelBuilder.Entity<PurchaseReturn>().HasIndex(x => x.ReturnNo).IsUnique();
+
         // ============ 库存唯一约束（仓库 + 商品） ============
         modelBuilder.Entity<Stock>().HasIndex(s => new { s.WarehouseId, s.ProductId }).IsUnique();
+
+        // ============ ERP-009 库存成本与库存单据小数位（显式声明） ============
+        // 说明：成本单价 6 位小数、数量与金额 4 位小数，与 SchemaUpgrader 第 23 段的建表脚本保持一致。
+        //       若依赖 EF 默认 decimal(18,2)，空库首次 EnsureCreated 建表会把成本单价截断到 2 位，
+        //       导致加权平均成本不再等于「库存金额 / 库存数量」，估价与流水无法互相核对。
+        modelBuilder.Entity<Stock>().Property(x => x.AverageCost).HasPrecision(18, 6);
+        modelBuilder.Entity<Stock>().Property(x => x.TotalCost).HasPrecision(18, 4);
+
+        modelBuilder.Entity<StockMovement>().Property(x => x.UnitCost).HasPrecision(18, 6);
+        modelBuilder.Entity<StockMovement>().Property(x => x.BalanceAverageCost).HasPrecision(18, 6);
+        modelBuilder.Entity<StockMovement>().Property(x => x.Quantity).HasPrecision(18, 4);
+        modelBuilder.Entity<StockMovement>().Property(x => x.Amount).HasPrecision(18, 4);
+        modelBuilder.Entity<StockMovement>().Property(x => x.BalanceQuantity).HasPrecision(18, 4);
+        modelBuilder.Entity<StockMovement>().Property(x => x.BalanceAmount).HasPrecision(18, 4);
+
+        modelBuilder.Entity<StockAdjustment>().Property(x => x.TotalDiffQuantity).HasPrecision(18, 4);
+        modelBuilder.Entity<StockAdjustment>().Property(x => x.TotalDiffAmount).HasPrecision(18, 4);
+        modelBuilder.Entity<StockAdjustmentDetail>().Property(x => x.BookQuantity).HasPrecision(18, 4);
+        modelBuilder.Entity<StockAdjustmentDetail>().Property(x => x.ActualQuantity).HasPrecision(18, 4);
+        modelBuilder.Entity<StockAdjustmentDetail>().Property(x => x.DiffQuantity).HasPrecision(18, 4);
+        modelBuilder.Entity<StockAdjustmentDetail>().Property(x => x.UnitCost).HasPrecision(18, 6);
+        modelBuilder.Entity<StockAdjustmentDetail>().Property(x => x.DiffAmount).HasPrecision(18, 4);
+
+        modelBuilder.Entity<StockTransfer>().Property(x => x.TotalQuantity).HasPrecision(18, 4);
+        modelBuilder.Entity<StockTransfer>().Property(x => x.TotalAmount).HasPrecision(18, 4);
+        modelBuilder.Entity<StockTransferDetail>().Property(x => x.Quantity).HasPrecision(18, 4);
+        modelBuilder.Entity<StockTransferDetail>().Property(x => x.UnitCost).HasPrecision(18, 6);
+        modelBuilder.Entity<StockTransferDetail>().Property(x => x.Amount).HasPrecision(18, 4);
+
+        modelBuilder.Entity<SalesReturn>().Property(x => x.TotalQuantity).HasPrecision(18, 4);
+        modelBuilder.Entity<SalesReturn>().Property(x => x.TotalAmount).HasPrecision(18, 4);
+        modelBuilder.Entity<SalesReturnDetail>().Property(x => x.Quantity).HasPrecision(18, 4);
+        modelBuilder.Entity<SalesReturnDetail>().Property(x => x.UnitPrice).HasPrecision(18, 4);
+        modelBuilder.Entity<SalesReturnDetail>().Property(x => x.Amount).HasPrecision(18, 4);
+        modelBuilder.Entity<SalesReturnDetail>().Property(x => x.UnitCost).HasPrecision(18, 6);
+
+        modelBuilder.Entity<PurchaseReturn>().Property(x => x.TotalQuantity).HasPrecision(18, 4);
+        modelBuilder.Entity<PurchaseReturn>().Property(x => x.TotalAmount).HasPrecision(18, 4);
+        modelBuilder.Entity<PurchaseReturnDetail>().Property(x => x.Quantity).HasPrecision(18, 4);
+        modelBuilder.Entity<PurchaseReturnDetail>().Property(x => x.UnitPrice).HasPrecision(18, 4);
+        modelBuilder.Entity<PurchaseReturnDetail>().Property(x => x.Amount).HasPrecision(18, 4);
+        modelBuilder.Entity<PurchaseReturnDetail>().Property(x => x.UnitCost).HasPrecision(18, 6);
 
         // ============ 明细外键级联删除 ============
         modelBuilder.Entity<InquiryDetail>()
@@ -92,6 +140,24 @@ public partial class ErpDbContext
         modelBuilder.Entity<ProformaInvoiceDetail>()
             .HasOne<ProformaInvoice>().WithMany(o => o.Details)
             .HasForeignKey(d => d.PiId).OnDelete(DeleteBehavior.Cascade);
+
+        // ERP-009 库存单据明细：外键命名符合约定（<主表实体>Id），此处显式声明级联删除，
+        // 与既有单据（入库/出库/装柜）保持一致：主表被物理删除时明细一并清理
+        modelBuilder.Entity<StockAdjustmentDetail>()
+            .HasOne<StockAdjustment>().WithMany(o => o.Details)
+            .HasForeignKey(d => d.StockAdjustmentId).OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<StockTransferDetail>()
+            .HasOne<StockTransfer>().WithMany(o => o.Details)
+            .HasForeignKey(d => d.StockTransferId).OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<SalesReturnDetail>()
+            .HasOne<SalesReturn>().WithMany(o => o.Details)
+            .HasForeignKey(d => d.SalesReturnId).OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<PurchaseReturnDetail>()
+            .HasOne<PurchaseReturn>().WithMany(o => o.Details)
+            .HasForeignKey(d => d.PurchaseReturnId).OnDelete(DeleteBehavior.Cascade);
     }
 
     /// <summary>保存变更：自动填充审计字段</summary>

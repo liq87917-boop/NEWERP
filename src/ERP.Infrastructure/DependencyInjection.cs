@@ -50,6 +50,8 @@ public static class DependencyInjection
         services.AddScoped<IAuthService, AuthService>();
         services.AddScoped<IDocumentNumberService, DocumentNumberService>();
         services.AddScoped<IReportService, ReportService>();
+        // 库存移动与成本服务（ERP-009：库存单据审核/销审统一经此维护库存与流水）
+        services.AddScoped<IInventoryService, InventoryService>();
 
         // 通用 CRUD 服务（开放泛型注册）
         services.AddScoped(typeof(IGenericService<>), typeof(GenericService<>));
