@@ -1,0 +1,51 @@
+{
+  "id": "ERP-009",
+  "title": "Implement inventory movement documents and stock costing foundation",
+  "status": "pending",
+  "risk_level": "medium-high",
+  "description": "Implement the next audited missing inventory batch after ERP-008: stock count/adjustment, warehouse transfer, sales return and purchase return documents with auditable stock movements and a safe inventory-cost foundation. Follow existing document conventions and validate schema changes only against NEWERP_TEST; production database/data operations remain gated.",
+  "acceptance_criteria": [
+    "Stock count/adjustment, warehouse transfer, sales return and purchase return have persisted main/detail documents, numbering, CRUD, approve/unaudit rules, menus and usable web forms.",
+    "Approved documents update Stocks exactly once using auditable movement records; unaudit safely reverses the movement and rejects unsafe state transitions.",
+    "Warehouse transfer preserves total quantity while moving inventory between warehouses; returns preserve source-document traceability where a source is supplied.",
+    "Inventory costing has an explicit persisted movement-cost basis sufficient for deterministic stock valuation without retroactively mutating production data.",
+    "Schema upgrade is idempotent and is exercised only against NEWERP_TEST; no production SQL or irreversible data operation is executed.",
+    "Unit/integration tests cover quantity conservation, duplicate approval protection, reversal, insufficient stock and cost calculations; existing tests remain green.",
+    "Real Microsoft Edge acceptance covers at least one stock adjustment and one warehouse transfer end-to-end with no JS/API errors and captures screenshots."
+  ],
+  "allowed_paths": [
+    "src/ERP.Domain/**",
+    "src/ERP.Application/**",
+    "src/ERP.Infrastructure/**",
+    "src/ERP.Api/Controllers/**",
+    "src/ERP.Api/wwwroot/**",
+    "src/ERP.UnitTests/**",
+    "src/ERP.IntegrationTests/**",
+    "docs/**",
+    ".ai/**"
+  ],
+  "depends_on": ["ERP-008"],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "browser",
+  "browser_acceptance": {
+    "required": true,
+    "scenarios": [
+      "Login in Microsoft Edge, create a stock adjustment/count document, approve it and verify the resulting stock quantity and movement history.",
+      "Create a warehouse transfer between two warehouses, approve it and verify source decreases, destination increases and total quantity is conserved.",
+      "Unaudit a reversible test document and verify stock/movement reversal without duplicate effects."
+    ],
+    "test_filter": "Collection=UiTests",
+    "minimum_screenshots": 2
+  },
+  "human_gate": {
+    "required": true,
+    "level": "L2",
+    "status": "approved",
+    "reason": "User requested full-project completion; implementation and NEWERP_TEST validation are allowed while production database, production deployment and irreversible operations remain separately gated."
+  },
+  "attempts": 0,
+  "created_at": "2026-09-23T06:19:00Z"
+}
