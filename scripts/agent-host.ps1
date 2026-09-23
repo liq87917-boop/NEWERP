@@ -1,6 +1,8 @@
 param(
     [int]$RefreshSeconds = 2,
-    [int]$SyncSeconds = 30
+    [int]$SyncSeconds = 30,
+    [switch]$Once,
+    [switch]$NoExecute
 )
 
 $ErrorActionPreference = 'Stop'
@@ -400,7 +402,7 @@ try {
         $recoverPush = $false
         if ($state -and $state.phase -eq 'push_pending') { $recoverPush = $true }
 
-        if (-not $pipelineProcess -and -not $paused -and -not $gitInfo.Dirty) {
+        if (-not $NoExecute -and -not $pipelineProcess -and -not $paused -and -not $gitInfo.Dirty -and $gitInfo.Branch -in $managedBranches) {
             if ($recoverPush -or (Test-TaskRunnable $head)) {
                 try {
                     $pipelineProcess = Start-Pipeline
@@ -413,6 +415,7 @@ try {
         }
 
         Write-Status $state $tasks $head $gitInfo
+        if ($Once) { break }
         Start-Sleep -Seconds ([Math]::Max(1, $RefreshSeconds))
     }
 }
