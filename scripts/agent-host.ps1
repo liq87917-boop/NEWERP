@@ -345,6 +345,18 @@ function Test-BrowserAcceptanceDeferred {
     }
 }
 
+function Test-RecoverableDeferredFailedHead {
+    param($State, $Head)
+
+    if (-not $State -or -not $Head) { return $false }
+    if (-not (Test-BrowserAcceptanceDeferred)) { return $false }
+    if ($State.phase -ne 'blocked' -or $State.finish_reason -ne 'queue_head_blocked') { return $false }
+    if ($Head.status -ne 'failed') { return $false }
+    if ($Head.PSObject.Properties.Name -contains 'browser_deferred_recovery_done' -and $Head.browser_deferred_recovery_done -eq $true) { return $false }
+    $blockerText = [string]$State.blocker
+    return $blockerText -eq ("{0} status=failed stops queue" -f $Head.id)
+}
+
 function Test-RecoverableBrowserFailure {
     param($State, $Head)
 
@@ -375,7 +387,7 @@ function Get-AgentMode {
     if ($pipelineProcess -and -not $pipelineProcess.HasExited) {
         return 'RUNNING'
     }
-    if ((Test-RecoverablePathGuard $State $Head) -or (Test-RecoverableInterruptedTask $State $Head) -or (Test-RecoverableBrowserFailure $State $Head)) {
+    if ((Test-RecoverablePathGuard $State $Head) -or (Test-RecoverableInterruptedTask $State $Head) -or (Test-RecoverableBrowserFailure $State $Head) -or (Test-RecoverableDeferredFailedHead $State $Head)) {
         return 'READY'
     }
     if ($State -and $State.phase -in @('blocked', 'human_attention', 'waiting_human_gate', 'push_pending')) {
