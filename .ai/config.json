@@ -8,7 +8,7 @@
   "auto_commit": true,
   "auto_push": true,
   "human_gate": true,
-  "queue_target_size": 3,
+  "queue_target_size": 4,
   "supported_human_gates": [
     "L1",
     "L2",
@@ -127,5 +127,14 @@
         "normal"
       ]
     ]
+  },
+  "rolling_queue": {
+    "enabled": true,
+    "batch_size": 4,
+    "low_watermark": 2,
+    "acceptance_interval_seconds": 3600,
+    "replenishment_owner": "GPT",
+    "empty_phase": "replenishing",
+    "keep_agent_alive": true
   }
 }
