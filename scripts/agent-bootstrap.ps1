@@ -16,6 +16,54 @@ function Invoke-Git {
     }
 }
 
+function Repair-DeferredBrowserFailedHead {
+    $configPath = Join-Path $root '.ai\config.json'
+    $statePath = Join-Path $root '.ai\PROJECT_STATE.json'
+    $tasksDir = Join-Path $root '.ai\tasks'
+
+    if (-not (Test-Path $configPath) -or -not (Test-Path $statePath)) { return }
+    try {
+        $config = Get-Content $configPath -Raw -Encoding UTF8 | ConvertFrom-Json
+        if ($null -eq $config.completion_policy -or $config.completion_policy.defer_browser_during_development -ne $true) { return }
+
+        $state = Get-Content $statePath -Raw -Encoding UTF8 | ConvertFrom-Json
+        if ($state.phase -ne 'blocked' -or $state.finish_reason -ne 'queue_head_blocked' -or -not $state.current_task) { return }
+
+        $taskId = [string]$state.current_task
+        $expectedBlocker = "$taskId status=failed stops queue"
+        if ([string]$state.blocker -ne $expectedBlocker) { return }
+
+        $taskPath = Join-Path $tasksDir ("{0}.json" -f $taskId)
+        if (-not (Test-Path $taskPath)) { return }
+        $task = Get-Content $taskPath -Raw -Encoding UTF8 | ConvertFrom-Json
+        if ($task.status -ne 'failed') { return }
+
+        # Convert only this stale queue-blocking state into an interrupted-task
+        # recovery state. Core validation still decides whether the task completes.
+        $task.status = 'in_progress'
+        $task.attempts = 0
+        if ($task.PSObject.Properties.Name -contains 'browser_deferred_recovery_done') {
+            $task.browser_deferred_recovery_done = $true
+        } else {
+            $task | Add-Member -NotePropertyName browser_deferred_recovery_done -NotePropertyValue $true
+        }
+
+        $state.phase = 'developing'
+        $state.blocker = $null
+        $state.finish_reason = 'deferred_browser_bootstrap_recovery'
+        $state.browser_acceptance = [pscustomobject]@{ status = 'deferred' }
+        $state.updated_at = [DateTime]::UtcNow.ToString('o')
+
+        $taskJson = $task | ConvertTo-Json -Depth 30
+        $stateJson = $state | ConvertTo-Json -Depth 30
+        [System.IO.File]::WriteAllText($taskPath, $taskJson + [Environment]::NewLine, [System.Text.UTF8Encoding]::new($false))
+        [System.IO.File]::WriteAllText($statePath, $stateJson + [Environment]::NewLine, [System.Text.UTF8Encoding]::new($false))
+        Write-Host "Bootstrap   : recovered $taskId from stale browser-blocked failed state" -ForegroundColor Cyan
+    } catch {
+        Write-Host ("Bootstrap   : deferred-browser state repair skipped: " + $_.Exception.Message) -ForegroundColor Yellow
+    }
+}
+
 function Get-Paths {
     param([string[]]$Args)
     $r = Invoke-Git $Args
@@ -71,6 +119,7 @@ if ($ahead -gt 0) {
 }
 if ($behind -eq 0) {
     Write-Host "Bootstrap   : up to date" -ForegroundColor Green
+    Repair-DeferredBrowserFailedHead
     exit 0
 }
 
@@ -117,4 +166,5 @@ if ($merge.Code -ne 0) {
 }
 
 Write-Host "Bootstrap   : updated $behind commit(s); local task work preserved" -ForegroundColor Green
+Repair-DeferredBrowserFailedHead
 exit 0
