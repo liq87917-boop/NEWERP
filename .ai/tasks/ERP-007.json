@@ -1,0 +1,57 @@
+{
+  "id": "ERP-007",
+  "title": "Complete Proforma Invoice workflow",
+  "status": "pending",
+  "risk_level": "medium",
+  "description": "Implement the documented Proforma Invoice (PI) batch end-to-end: PI main/detail persistence, numbering, quotation-to-PI conversion, CRUD, audit/unaudit/void behavior consistent with project conventions, list/edit UI, menu entry, printing/template integration, and regression tests. Changes to SchemaUpgrader are code changes validated only against NEWERP_TEST; production deployment remains gated.",
+  "acceptance_criteria": [
+    "ProformaInvoice and detail are persisted with PI number/date, source quotation, customer/contact, consignee/notify party, shipping marks, bank info, trade/payment/shipping terms, currency/exchange rate, totals, deposit ratio/amount, salesman, status, remark and line items.",
+    "Quotation can be converted to a PI exactly once per intended conversion rule, copying business fields/details and recording source quotation; invalid source status is rejected with a clear business error.",
+    "PI supports create/read/update plus approve and unaudit with server-side amount recalculation and safe status validation.",
+    "PI appears in the intended menu and is usable from the web UI; list, edit, quotation-to-PI action and printing work in Microsoft Edge.",
+    "Document number rules include PI without breaking existing numbering.",
+    "Unit/integration tests cover conversion, amount/deposit calculation, invalid state and persistence; existing tests remain green.",
+    "Real Edge acceptance captures at least quotation -> PI -> open PI -> print preview flow and passes before completion."
+  ],
+  "allowed_paths": [
+    "src/ERP.Domain/Entities/**",
+    "src/ERP.Domain/Enums/**",
+    "src/ERP.Application/Interfaces/**",
+    "src/ERP.Infrastructure/Data/ErpDbContext*.cs",
+    "src/ERP.Infrastructure/Data/SchemaUpgrader.cs",
+    "src/ERP.Infrastructure/Data/SeedData.Rules.cs",
+    "src/ERP.Api/Controllers/**",
+    "src/ERP.Api/wwwroot/**",
+    "src/ERP.UnitTests/**",
+    "src/ERP.IntegrationTests/**",
+    "docs/报价单与PI设计方案.md",
+    ".ai/**"
+  ],
+  "depends_on": [
+    "ERP-006"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "browser",
+  "browser_acceptance": {
+    "required": true,
+    "scenarios": [
+      "Login in Microsoft Edge and open the quotation list; create or use a valid quotation and execute 转 PI.",
+      "Open the generated PI and verify copied customer, terms, currency, line items, totals and deposit values.",
+      "Edit a draft PI, save, approve, verify approved PI cannot be edited until unaudit, then unaudit and verify editing is restored.",
+      "Open PI print preview and verify the document renders without console errors or failed API requests."
+    ],
+    "test_filter": "Collection=UiTests",
+    "minimum_screenshots": 2
+  },
+  "human_gate": {
+    "required": true,
+    "level": "L2",
+    "status": "approved",
+    "reason": "User explicitly requested completion of all project functions. Schema changes are restricted to code and NEWERP_TEST validation; production deployment/database operations remain separately gated."
+  },
+  "attempts": 0,
+  "created_at": "2026-09-23T05:23:00Z"
+}

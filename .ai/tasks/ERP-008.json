@@ -1,0 +1,56 @@
+{
+  "id": "ERP-008",
+  "title": "Complete sales and purchase order traceability",
+  "status": "pending",
+  "risk_level": "medium",
+  "description": "Close the documented Phase-1 order gaps: enrich SalesOrder with foreign-trade contract/shipping fields and source quotation/PI traceability; enrich PurchaseOrder with customer/sales-order ownership and procurement execution/settlement fields. Update persistence, APIs, UI, import/export/print behavior and tests without changing production data.",
+  "acceptance_criteria": [
+    "Sales orders support customer PO no, contract no, trade terms, destination port text, consignee, notify party, shipping marks, source quotation/PI, export mode, commission ratio, business nature, split-shipment flag, inspection requirements and packaging requirements.",
+    "Purchase orders support owning customer, owning sales order, advance-on-behalf flag, supplier confirmed delivery date, tax rate/tax-included mode, arrival progress, QC status, contract no and settlement progress.",
+    "Create/update/detail/list and relevant export/print paths preserve the new fields; existing records remain readable with safe defaults.",
+    "Web forms expose the fields with appropriate references/selects and can save/reload them in Microsoft Edge.",
+    "Schema upgrade is idempotent and verified only against NEWERP_TEST; production database remains untouched.",
+    "Tests cover new persistence/round-trip behavior and source linkage; existing build/unit/integration/UI tests remain green.",
+    "Real Edge acceptance verifies one sales order and one purchase order can save/reload the new fields without JS/API errors."
+  ],
+  "allowed_paths": [
+    "src/ERP.Domain/Entities/SalesOrder.cs",
+    "src/ERP.Domain/Entities/PurchaseOrder.cs",
+    "src/ERP.Application/Interfaces/**",
+    "src/ERP.Infrastructure/Data/ErpDbContext*.cs",
+    "src/ERP.Infrastructure/Data/SchemaUpgrader.cs",
+    "src/ERP.Api/Controllers/SalesOrderController.cs",
+    "src/ERP.Api/Controllers/PurchaseOrderController.cs",
+    "src/ERP.Api/wwwroot/**",
+    "src/ERP.UnitTests/**",
+    "src/ERP.IntegrationTests/**",
+    "docs/**",
+    ".ai/**"
+  ],
+  "depends_on": [
+    "ERP-007"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "browser",
+  "browser_acceptance": {
+    "required": true,
+    "scenarios": [
+      "Login in Microsoft Edge, create/edit a sales order, fill the new foreign-trade/source fields, save and reopen it to verify round-trip persistence.",
+      "Create/edit a purchase order, link it to customer and sales order, fill procurement execution fields, save and reopen it to verify persistence.",
+      "Open print/export or the relevant document preview and verify the added business fields do not break rendering or API calls."
+    ],
+    "test_filter": "Collection=UiTests",
+    "minimum_screenshots": 2
+  },
+  "human_gate": {
+    "required": true,
+    "level": "L2",
+    "status": "approved",
+    "reason": "User explicitly requested completion of all project functions. Schema changes are restricted to code and NEWERP_TEST validation; production deployment/database operations remain separately gated."
+  },
+  "attempts": 0,
+  "created_at": "2026-09-23T05:23:00Z"
+}

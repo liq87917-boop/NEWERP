@@ -1,0 +1,43 @@
+{
+  "id": "ERP-006",
+  "title": "Audit all remaining product functions",
+  "status": "pending",
+  "risk_level": "medium",
+  "description": "Perform a repository-wide functional audit against all project docs and the actual Domain/Application/Infrastructure/API/wwwroot/tests implementation. Produce a durable, prioritized gap matrix that distinguishes verified-complete, partial, missing and decision-required features, then update FUNCTION_BACKLOG.md so subsequent GPT/Cline tasks can finish the whole product without duplicating already-working functionality.",
+  "acceptance_criteria": [
+    "Audit all documented business modules and every current menu/API/page family, not only TODO comments.",
+    "Map each roadmap item from docs/菜单与业务流程优化建议-20260918.md and docs/报价单与PI设计方案.md to concrete code, database, UI and test evidence.",
+    "Update .ai/FUNCTION_BACKLOG.md with verified-complete / partial / missing / decision-required status, dependencies, risk and suggested ERP task boundaries.",
+    "Identify stale documentation where features are already implemented and identify code that exists but is not user-reachable or not persisted.",
+    "Do not modify production data or business behavior in this audit task.",
+    "Leave the queue ready for ERP-007 and ERP-008."
+  ],
+  "allowed_paths": [
+    ".ai/FUNCTION_BACKLOG.md",
+    "docs/**",
+    ".ai/PROJECT_STATE.json",
+    ".ai/tasks/ERP-006.json",
+    ".ai/results/ERP-006.json",
+    ".ai/audit.jsonl"
+  ],
+  "depends_on": [
+    "ERP-005"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "control_plane",
+  "browser_acceptance": {
+    "required": false,
+    "note": "Repository-wide audit/control task; no user-facing behavior is claimed complete."
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L2",
+    "status": "ai_reviewed",
+    "reason": "Read/audit and durable planning only; no production or irreversible operation."
+  },
+  "attempts": 0,
+  "created_at": "2026-09-23T05:23:00Z"
+}
