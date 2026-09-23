@@ -2,6 +2,8 @@
 # 外贸 ERP 系统 · 开发环境一键启动脚本
 # 用法：在项目根目录执行  powershell -ExecutionPolicy Bypass -File .\start-dev.ps1
 # 作用：校验 SDK → 还原依赖 → 以 Development 环境启动 WebAPI（http://localhost:5000）
+param([switch]$ValidateEnvironmentOnly)
+
 # ============================================================
 
 $ErrorActionPreference = 'Stop'
@@ -14,6 +16,65 @@ Set-Location -Path $PSScriptRoot
 
 $projectPath = 'src\ERP.Api\ERP.Api.csproj'
 $listenUrl   = 'http://localhost:5000'
+
+# 从仅供本机使用的 .env.local 加载密钥。只输出变量名，不输出变量值。
+$envFile = Join-Path $PSScriptRoot '.env.local'
+if (-not (Test-Path -LiteralPath $envFile -PathType Leaf)) {
+    Write-Host '[错误] 未找到 .env.local。请复制 .env.example 为 .env.local 并填写轮换后的本地开发密钥。' -ForegroundColor Red
+    exit 1
+}
+
+$loadedEnvNames = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+$lineNumber = 0
+foreach ($rawLine in Get-Content -LiteralPath $envFile -Encoding UTF8) {
+    $lineNumber++
+    $line = $rawLine.Trim()
+    if ([string]::IsNullOrWhiteSpace($line) -or $line.StartsWith('#')) { continue }
+    $separator = $line.IndexOf('=')
+    if ($separator -le 0) {
+        Write-Host "[错误] .env.local 第 $lineNumber 行格式无效，应为 NAME=value。" -ForegroundColor Red
+        exit 1
+    }
+    $name = $line.Substring(0, $separator).Trim()
+    $value = $line.Substring($separator + 1)
+    if ($name -notmatch '^[A-Za-z_][A-Za-z0-9_]*$') {
+        Write-Host "[错误] .env.local 第 $lineNumber 行变量名无效：$name" -ForegroundColor Red
+        exit 1
+    }
+    if (-not $loadedEnvNames.Add($name)) {
+        Write-Host "[错误] .env.local 存在重复变量：$name" -ForegroundColor Red
+        exit 1
+    }
+    if ([string]::IsNullOrWhiteSpace($value) -or $value -match '<[^>]+>') {
+        Write-Host "[错误] .env.local 变量尚未填写：$name" -ForegroundColor Red
+        exit 1
+    }
+    Set-Item -Path "Env:$name" -Value $value
+}
+
+$requiredEnvNames = @(
+    'ERP_ConnectionStrings__Default',
+    'ERP_Jwt__Key',
+    'ERP_Oss__AccessKeyId',
+    'ERP_Oss__AccessKeySecret',
+    'ERP_Oss__Bucket',
+    'ERP_Oss__Endpoint'
+)
+foreach ($name in $requiredEnvNames) {
+    if (-not $loadedEnvNames.Contains($name)) {
+        Write-Host "[错误] .env.local 缺少必填变量：$name" -ForegroundColor Red
+        exit 1
+    }
+}
+if ($env:ERP_Jwt__Key.Length -lt 32) {
+    Write-Host '[错误] ERP_Jwt__Key 必须至少为 32 个字符。' -ForegroundColor Red
+    exit 1
+}
+Write-Host "[信息] 已从 .env.local 安全加载 $($loadedEnvNames.Count) 个环境变量（值不显示）。" -ForegroundColor Green
+if ($ValidateEnvironmentOnly) {
+    Write-Host '[信息] .env.local 校验通过；未启动 API。' -ForegroundColor Green
+    exit 0
+}
 
 Write-Host '================ 外贸 ERP 系统 开发环境启动 ================' -ForegroundColor Cyan
 

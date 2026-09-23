@@ -16,6 +16,8 @@
 4. 预览发送给 Cline 的完整任务：`scripts/run-ai.ps1 -DryRun`。
 5. 执行下一个任务：`scripts/run-ai.ps1`。
 
+本地启动使用根目录的 `.env.local`。填写轮换后的开发密钥后运行 `start-dev.ps1`，脚本会校验格式、必填项和 JWT 长度，再把变量加载到当前 API 子进程；变量值不会写入控制台或 Git。
+
 Runner 每次只执行一个任务。成功后写入结果与审计记录并创建 Git commit；失败会把验证结果反馈给 Cline，最多尝试三次。超过上限、违反路径边界或 checkpoint 失败时会停止并进入 Human Gate。
 
 当前尚未配置 Git remote，所以 `.ai/config.json` 中 `auto_push` 保持为 `false`。配置 remote 并确认分支保护后才能启用。
