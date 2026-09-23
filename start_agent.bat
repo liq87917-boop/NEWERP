@@ -14,6 +14,7 @@ echo  Loading project status...
 echo.
 
 :run
+powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\agent-bootstrap.ps1"
 powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\agent-host.ps1"
 set "EXITCODE=%ERRORLEVEL%"
 
