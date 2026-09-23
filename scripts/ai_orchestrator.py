@@ -217,13 +217,13 @@ def recoverable_deferred_failed_head(config: dict[str, Any], state: dict[str, An
     if not path.exists():
         return None
     task = load_json(path)
-    if task.get("status") != "failed" or task.get("browser_deferred_recovery_done") is True:
+    if task.get("status") != "failed":
         return None
     try:
         validate_task(task, config)
     except ValueError:
         return None
-    if not changed_paths() or path_violations(task, config):
+    if path_violations(task, config):
         return None
     return path, task
 
@@ -388,7 +388,7 @@ def run_next(dry_run: bool) -> int:
                 if item is not None:
                     resume_existing = True
                     resume_reason = "deferred_browser_failed_head_recovered"
-                    item[1]["browser_deferred_recovery_done"] = True
+                    item[1]["status"] = "retry"
                     item[1]["attempts"] = 0
                     save_json(item[0], item[1])
                     audit("deferred_browser_failed_head_recovery_started", task=item[1]["id"], changed_paths=changed_paths())
