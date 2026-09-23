@@ -190,6 +190,40 @@ def recoverable_interrupted_task(config: dict[str, Any], state: dict[str, Any]) 
     return path, task
 
 
+def recoverable_browser_failure_task(config: dict[str, Any], state: dict[str, Any]) -> tuple[Path, dict[str, Any]] | None:
+    """Give a failed real-browser task a bounded autonomous recovery cycle.
+
+    Browser acceptance failures are actionable engineering failures, not Human Gates.
+    If the existing dirty tree is still within the task guard, allow up to two extra
+    recovery cycles so Cline can inspect the concrete browser log and repair the UI.
+    """
+    if state.get("phase") != "human_attention":
+        return None
+    if state.get("finish_reason") != "attempts_exhausted":
+        return None
+    blocker = str(state.get("blocker") or "")
+    if not blocker.startswith("Real-browser acceptance failed"):
+        return None
+    task_id = state.get("current_task")
+    if not task_id:
+        return None
+    path = TASKS_DIR / f"{task_id}.json"
+    if not path.exists():
+        return None
+    task = load_json(path)
+    if task.get("status") != "failed":
+        return None
+    if int(task.get("browser_recovery_cycles", 0) or 0) >= 2:
+        return None
+    try:
+        validate_task(task, config)
+    except ValueError:
+        return None
+    if not changed_paths() or path_violations(task, config):
+        return None
+    return path, task
+
+
 def set_state(state: dict[str, Any], **updates: Any) -> None:
     state.update(updates); state["updated_at"] = utc_now(); save_json(STATE_PATH, state)
 
@@ -303,11 +337,20 @@ def run_next(dry_run: bool) -> int:
             resume_reason = "interrupted_task_recovered"
             audit("interrupted_task_recovery_started", task=item[1]["id"], phase=state.get("phase"), changed_paths=changed_paths())
         else:
-            try:
-                item = next_task(config)
-            except ValueError as exc:
-                set_state(state, phase="blocked", blocker=str(exc), finish_reason="queue_head_blocked")
-                audit("queue_head_blocked", reason=str(exc)); return 10
+            item = recoverable_browser_failure_task(config, state)
+            if item is not None:
+                resume_existing = True
+                resume_reason = "browser_failure_recovered"
+                item[1]["browser_recovery_cycles"] = int(item[1].get("browser_recovery_cycles", 0) or 0) + 1
+                item[1]["attempts"] = 0
+                save_json(item[0], item[1])
+                audit("browser_failure_recovery_started", task=item[1]["id"], cycle=item[1]["browser_recovery_cycles"], changed_paths=changed_paths())
+            else:
+                try:
+                    item = next_task(config)
+                except ValueError as exc:
+                    set_state(state, phase="blocked", blocker=str(exc), finish_reason="queue_head_blocked")
+                    audit("queue_head_blocked", reason=str(exc)); return 10
     if item is None: print("No runnable task."); return 0
     task_path, task = item
     try: validate_task(task, config)
@@ -375,7 +418,15 @@ def run_next(dry_run: bool) -> int:
                 audit("browser_infrastructure_blocked", task=task["id"], log=browser_log); return 20
             if browser_code != 0:
                 task["status"] = "in_progress"; save_json(task_path, task)
-                previous_error = f"Real-browser acceptance failed with code {browser_code}; see {browser_log}. Cline output alone is not completion."
+                log_text = ""
+                browser_log_path = ROOT / browser_log
+                if browser_log_path.exists():
+                    log_text = browser_log_path.read_text(encoding="utf-8", errors="replace")[-7000:]
+                previous_error = (
+                    f"Real-browser acceptance failed with code {browser_code}; see {browser_log}. "
+                    "Cline output alone is not completion.\n\n"
+                    f"Browser acceptance log tail:\n{log_text}"
+                )
                 audit("browser_acceptance_failed", task=task["id"], attempt=attempt, manifest=browser_manifest); continue
 
         business_changes = [path for path in changed_paths() if not matches(path, config["ignored_change_paths"]) and not matches(path, config.get("orchestrator_paths", []))]
