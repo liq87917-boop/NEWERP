@@ -348,12 +348,9 @@ function Test-BrowserAcceptanceDeferred {
 function Test-RecoverableDeferredFailedHead {
     param($State, $Head)
 
-    if (-not $State -or -not $Head) { return $false }
+    if (-not $Head) { return $false }
     if (-not (Test-BrowserAcceptanceDeferred)) { return $false }
-    if ($State.phase -ne 'blocked' -or $State.finish_reason -ne 'queue_head_blocked') { return $false }
-    if ($Head.status -ne 'failed') { return $false }
-    $blockerText = [string]$State.blocker
-    return $blockerText -eq ("{0} status=failed stops queue" -f $Head.id)
+    return $Head.status -eq 'failed'
 }
 
 function Test-RecoverableBrowserFailure {
