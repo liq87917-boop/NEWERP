@@ -1,7 +1,7 @@
 {
   "id": "ERP-023",
   "title": "Apply product unit conversion to stock in and out",
-  "status": "pending",
+  "status": "backlog",
   "risk_level": "medium",
   "description": "Close the audited inventory multi-unit calculation gap by applying the existing BaseProduct.UnitsPerPackage metadata to purchasing stock-in and sales stock-out quantity calculations. Keep stock base-unit semantics explicit and backward compatible; no production schema change.",
   "acceptance_criteria": [
@@ -14,7 +14,7 @@
   ],
   "allowed_paths": ["src/ERP.Domain/**","src/ERP.Application/**","src/ERP.Api/Controllers/**","src/ERP.Api/wwwroot/**","src/ERP.UnitTests/**","src/ERP.IntegrationTests/**","docs/**",".ai/**"],
   "depends_on": ["ERP-009"],
-  "auto_start": true,
+  "auto_start": false,
   "requires_human_approval": false,
   "max_attempts": 3,
   "validation_profile": "safe",
