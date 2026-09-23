@@ -50,11 +50,20 @@ def git_available() -> bool:
 
 def git_lines(*args: str) -> list[str]:
     # Force Git to emit real UTF-8 paths instead of C-style quoted/octal names.
-    # Without this, Chinese filenames such as docs/报价单与PI设计方案.md are returned
-    # as "\\346\\212..." and fail the allowed_paths guard even when explicitly allowed.
-    result = run(["git", "-c", "core.quotepath=false", *args])
-    if result.returncode != 0: raise RuntimeError(result.stderr.strip() or "Git command failed")
-    return [line.strip().replace("\\", "/") for line in result.stdout.splitlines() if line.strip()]
+    # Use explicit byte pipes here instead of the generic run() helper because
+    # local recovery must never depend on a console host's stdout redirection state.
+    result = subprocess.run(
+        ["git", "-c", "core.quotepath=false", *args],
+        cwd=ROOT,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=False,
+    )
+    stdout = (result.stdout or b"").decode("utf-8", errors="replace")
+    stderr = (result.stderr or b"").decode("utf-8", errors="replace")
+    if result.returncode != 0:
+        raise RuntimeError(stderr.strip() or "Git command failed")
+    return [line.strip().replace("\\", "/") for line in stdout.splitlines() if line.strip()]
 
 
 def changed_paths() -> list[str]:
