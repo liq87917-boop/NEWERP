@@ -194,7 +194,7 @@ function Sync-Repository {
     }
 
     $env:GIT_TERMINAL_PROMPT = '0'
-    $fetch = Invoke-Git @('fetch', '--quiet', 'origin', $GitInfo.Branch)
+    $fetch = Invoke-Git @('fetch', '--quiet', 'origin', ('+refs/heads/{0}:refs/remotes/origin/{0}' -f $GitInfo.Branch))
     if ($fetch[0] -ne 0) {
         return 'git fetch failed'
     }
