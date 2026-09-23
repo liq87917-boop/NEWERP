@@ -39,6 +39,12 @@ $lastSyncAt = Get-Date '2000-01-01'
 $lastSyncMessage = 'not synced yet'
 $lastCiText = 'GitHub CLI not checked'
 $lastCiAt = Get-Date '2000-01-01'
+$screenInitialized = $false
+$lastScreen = @()
+$lastScreenWidth = 0
+$screenFallbackSignature = $null
+$originalForeground = $null
+try { $originalForeground = [Console]::ForegroundColor } catch {}
 
 function Invoke-Git {
     param([string[]]$Arguments)
@@ -257,9 +263,33 @@ function Get-AgentMode {
     return 'IDLE'
 }
 
-function Write-Status {
+function New-StatusLine {
+    param(
+        [string]$Text = '',
+        [string]$Color = 'Gray'
+    )
+    return [pscustomobject]@{ Text = $Text; Color = $Color }
+}
+
+function Fit-ConsoleText {
+    param(
+        [string]$Text,
+        [int]$Width
+    )
+
+    if ($null -eq $Text) { $Text = '' }
+    $usable = [Math]::Max(20, $Width - 1)
+    if ($Text.Length -gt $usable) {
+        if ($usable -le 3) { return $Text.Substring(0, $usable) }
+        return $Text.Substring(0, $usable - 3) + '...'
+    }
+    return $Text.PadRight($usable)
+}
+
+function Get-StatusLines {
     param($State, [object[]]$Tasks, $Head, $GitInfo)
 
+    $lines = @()
     $mode = Get-AgentMode $State $Head $GitInfo
     $modeColor = 'Gray'
     if ($mode -eq 'RUNNING') { $modeColor = 'Green' }
@@ -267,54 +297,56 @@ function Write-Status {
     elseif ($mode -eq 'PAUSED') { $modeColor = 'Yellow' }
     elseif ($mode -eq 'ATTENTION') { $modeColor = 'Red' }
 
-    Clear-Host
-    Write-Host '============================================================' -ForegroundColor DarkCyan
-    Write-Host ' NEWERP AI AGENT' -ForegroundColor Cyan -NoNewline
-    Write-Host "   [$mode]" -ForegroundColor $modeColor
-    Write-Host '============================================================' -ForegroundColor DarkCyan
-    Write-Host (" Local time : {0}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'))
-    Write-Host (" Repository : {0}" -f $root)
-    Write-Host (" Git        : {0} @ {1}" -f $GitInfo.Branch, $GitInfo.Sha)
+    $lines += New-StatusLine '============================================================' 'DarkCyan'
+    $lines += New-StatusLine (" NEWERP AI AGENT   [{0}]" -f $mode) $modeColor
+    $lines += New-StatusLine '============================================================' 'DarkCyan'
+    $lines += New-StatusLine (" Local time : {0}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'))
+
+    $lines += New-StatusLine (" Repository : {0}" -f $root)
+    $lines += New-StatusLine (" Git        : {0} @ {1}" -f $GitInfo.Branch, $GitInfo.Sha)
+
     $gitState = 'clean'
     if ($GitInfo.Dirty) { $gitState = 'DIRTY' }
     $syncText = ''
     if ($null -ne $GitInfo.Ahead -and $null -ne $GitInfo.Behind) {
         $syncText = " | ahead $($GitInfo.Ahead), behind $($GitInfo.Behind)"
     }
-    Write-Host (" Worktree   : {0}{1}" -f $gitState, $syncText)
-    Write-Host (" Auto sync  : {0}" -f $lastSyncMessage)
-    Write-Host (" GitHub CI  : {0}" -f $lastCiText)
+    $gitColor = 'Gray'
+    if ($GitInfo.Dirty) { $gitColor = 'Red' }
+    $lines += New-StatusLine (" Worktree   : {0}{1}" -f $gitState, $syncText) $gitColor
+    $lines += New-StatusLine (" Auto sync  : {0}" -f $lastSyncMessage)
+    $lines += New-StatusLine (" GitHub CI  : {0}" -f $lastCiText)
 
-    Write-Host ''
-    Write-Host ' Project state' -ForegroundColor Cyan
+    $lines += New-StatusLine ''
+    $lines += New-StatusLine ' Project state' 'Cyan'
     if ($State) {
-        Write-Host (" Phase      : {0}" -f $State.phase)
+        $lines += New-StatusLine (" Phase      : {0}" -f $State.phase)
         $currentTask = '-'
         if ($State.current_task) { $currentTask = $State.current_task }
         $lastCompleted = '-'
         if ($State.last_completed_task) { $lastCompleted = $State.last_completed_task }
-        Write-Host (" Current    : {0}" -f $currentTask)
-        Write-Host (" Completed  : {0}" -f $lastCompleted)
+        $lines += New-StatusLine (" Current    : {0}" -f $currentTask)
+        $lines += New-StatusLine (" Completed  : {0}" -f $lastCompleted)
         if ($State.validation) {
-            Write-Host (" Validation : {0} / {1}" -f $State.validation.profile, $State.validation.status)
+            $lines += New-StatusLine (" Validation : {0} / {1}" -f $State.validation.profile, $State.validation.status)
         }
         if ($State.browser_acceptance) {
-            Write-Host (" Browser    : {0}" -f $State.browser_acceptance.status)
+            $lines += New-StatusLine (" Browser    : {0}" -f $State.browser_acceptance.status)
         }
         if ($State.blocker) {
-            Write-Host (" Blocker    : {0}" -f $State.blocker) -ForegroundColor Red
+            $lines += New-StatusLine (" Blocker    : {0}" -f $State.blocker) 'Red'
         }
         if ($State.conversation_control -and $State.conversation_control.paused -eq $true) {
-            Write-Host (" Pause      : {0}" -f $State.conversation_control.pause_reason) -ForegroundColor Yellow
+            $lines += New-StatusLine (" Pause      : {0}" -f $State.conversation_control.pause_reason) 'Yellow'
         }
     } else {
-        Write-Host ' PROJECT_STATE.json is missing or invalid.' -ForegroundColor Red
+        $lines += New-StatusLine ' PROJECT_STATE.json is missing or invalid.' 'Red'
     }
 
-    Write-Host ''
-    Write-Host ' Queue' -ForegroundColor Cyan
+    $lines += New-StatusLine ''
+    $lines += New-StatusLine ' Queue' 'Cyan'
     if ($Tasks.Count -eq 0) {
-        Write-Host ' (empty)'
+        $lines += New-StatusLine ' (empty)'
     } else {
         $visible = @($Tasks | Select-Object -Last 8)
         foreach ($task in $visible) {
@@ -326,23 +358,23 @@ function Write-Status {
             elseif ($task.status -in @('pending', 'retry', 'code_ready')) { $color = 'Cyan' }
             elseif ($task.status -in @('failed', 'blocked')) { $color = 'Red' }
             elseif ($task.status -eq 'deferred') { $color = 'DarkYellow' }
-            Write-Host $line -ForegroundColor $color
+            $lines += New-StatusLine $line $color
         }
     }
 
-    Write-Host ''
-    Write-Host ' Local runner' -ForegroundColor Cyan
+    $lines += New-StatusLine ''
+    $lines += New-StatusLine ' Local runner' 'Cyan'
     if ($pipelineProcess -and -not $pipelineProcess.HasExited) {
-        Write-Host (" Pipeline   : running (PID {0})" -f $pipelineProcess.Id) -ForegroundColor Green
+        $lines += New-StatusLine (" Pipeline   : running (PID {0})" -f $pipelineProcess.Id) 'Green'
     } elseif ($null -ne $lastPipelineExit) {
-        Write-Host (" Pipeline   : stopped, last exit={0} at {1}" -f $lastPipelineExit, $lastPipelineEndedAt)
+        $lines += New-StatusLine (" Pipeline   : stopped, last exit={0} at {1}" -f $lastPipelineExit, $lastPipelineEndedAt)
     } else {
-        Write-Host ' Pipeline   : waiting'
+        $lines += New-StatusLine ' Pipeline   : waiting'
     }
-    Write-Host ' Secrets    : hidden (never printed by this console)'
+    $lines += New-StatusLine ' Secrets    : hidden (never printed by this console)'
 
-    Write-Host ''
-    Write-Host ' Recent runner output' -ForegroundColor Cyan
+    $lines += New-StatusLine ''
+    $lines += New-StatusLine ' Recent runner output' 'Cyan'
     $tail = @()
     if (Test-Path $outLog) {
         $tail += Get-Content $outLog -Tail 6 -ErrorAction SilentlyContinue
@@ -354,13 +386,109 @@ function Write-Status {
         }
     }
     if ($tail.Count -eq 0) {
-        Write-Host ' (no runner output yet)'
+        $lines += New-StatusLine ' (no runner output yet)'
     } else {
-        foreach ($line in $tail) { Write-Host (" " + $line) }
+        foreach ($line in $tail) {
+            $lines += New-StatusLine (" " + $line)
+        }
     }
 
-    Write-Host ''
-    Write-Host (" Auto refresh: {0}s | Remote sync: {1}s | Ctrl+C closes agent and child pipeline" -f $RefreshSeconds, $SyncSeconds) -ForegroundColor DarkGray
+    $lines += New-StatusLine ''
+    $lines += New-StatusLine (" Incremental refresh: {0}s | Remote sync: {1}s | Ctrl+C closes agent and child pipeline" -f $RefreshSeconds, $SyncSeconds) 'DarkGray'
+    return $lines
+}
+
+function Write-Status {
+    param($State, [object[]]$Tasks, $Head, $GitInfo)
+
+    $lines = @(Get-StatusLines $State $Tasks $Head $GitInfo)
+
+    # CI/log redirection does not have a stable interactive cursor. In that case
+    # print once normally; interactive DOS/PowerShell windows use incremental redraw.
+    $redirected = $false
+    try { $redirected = [Console]::IsOutputRedirected } catch {}
+    if ($Once -or $redirected) {
+        foreach ($item in $lines) {
+            Write-Host $item.Text -ForegroundColor $item.Color
+        }
+        return
+    }
+
+    try {
+        $width = [Console]::WindowWidth
+        if ($width -lt 40) { $width = 80 }
+        $height = [Math]::Max($lines.Count, $script:lastScreen.Count)
+
+        # Clear only once at startup. Never Clear-Host on each refresh: that caused
+        # the visible flashing in the agent DOS window.
+        if (-not $script:screenInitialized) {
+            Clear-Host
+            try { [Console]::CursorVisible = $false } catch {}
+            $script:screenInitialized = $true
+            $script:lastScreen = @()
+            $script:lastScreenWidth = $width
+        }
+
+        # A resize changes the amount of padding required. Repaint the fixed area
+        # without clearing the whole terminal.
+        if ($script:lastScreenWidth -ne $width) {
+            $blank = ' ' * [Math]::Max(20, $width - 1)
+            for ($i = 0; $i -lt $height; $i++) {
+                [Console]::SetCursorPosition(0, $i)
+                [Console]::Write($blank)
+            }
+            $script:lastScreen = @()
+            $script:lastScreenWidth = $width
+        }
+
+        $current = @()
+        for ($i = 0; $i -lt $height; $i++) {
+            $text = ''
+            $colorName = 'Gray'
+            if ($i -lt $lines.Count) {
+                $text = [string]$lines[$i].Text
+                $colorName = [string]$lines[$i].Color
+            }
+
+            $rendered = Fit-ConsoleText $text $width
+            $signature = "$colorName|$rendered"
+            $oldSignature = $null
+            if ($i -lt $script:lastScreen.Count) {
+                $oldSignature = $script:lastScreen[$i]
+            }
+
+            if ($signature -ne $oldSignature) {
+                [Console]::SetCursorPosition(0, $i)
+                $oldColor = [Console]::ForegroundColor
+                try {
+                    [Console]::ForegroundColor = [Enum]::Parse([ConsoleColor], $colorName, $true)
+                } catch {}
+                [Console]::Write($rendered)
+                try { [Console]::ForegroundColor = $oldColor } catch {}
+            }
+            $current += $signature
+        }
+
+        $script:lastScreen = $current
+        $cursorRow = [Math]::Min([Math]::Max(0, $lines.Count), [Console]::BufferHeight - 1)
+        [Console]::SetCursorPosition(0, $cursorRow)
+    } catch {
+        # Last-resort mode: avoid repeated full-screen redraws. Emit a compact status
+        # line only when meaningful state changes, so even unusual console hosts do not flash.
+        $mode = Get-AgentMode $State $Head $GitInfo
+        $headId = '-'
+        $headStatus = '-'
+        if ($Head) {
+            $headId = $Head.id
+            $headStatus = $Head.status
+        }
+        $signature = "$mode|$($State.phase)|$headId|$headStatus|$($GitInfo.Branch)|$($GitInfo.Sha)|$lastSyncMessage|$lastCiText"
+        if ($signature -ne $script:screenFallbackSignature) {
+            Write-Host ("[{0}] {1} | task {2}/{3} | git {4}@{5} | {6}" -f
+                (Get-Date -Format 'HH:mm:ss'), $mode, $headId, $headStatus, $GitInfo.Branch, $GitInfo.Sha, $lastSyncMessage)
+            $script:screenFallbackSignature = $signature
+        }
+    }
 }
 
 Set-Location $root
@@ -425,6 +553,12 @@ finally {
             Stop-Process -Id $pipelineProcess.Id -Force -ErrorAction SilentlyContinue
         } catch {}
     }
+    try {
+        if (-not $Once -and -not [Console]::IsOutputRedirected) {
+            [Console]::CursorVisible = $true
+            if ($null -ne $originalForeground) { [Console]::ForegroundColor = $originalForeground }
+        }
+    } catch {}
     try { $mutex.ReleaseMutex() } catch {}
     try { $mutex.Dispose() } catch {}
 }
