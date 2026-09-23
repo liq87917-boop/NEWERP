@@ -325,6 +325,14 @@ function Test-RecoverablePathGuard {
     return $blockerText.StartsWith('Path guard failed:')
 }
 
+function Test-RecoverableInterruptedTask {
+    param($State, $Head)
+
+    if (-not $State -or -not $Head) { return $false }
+    if ($State.phase -notin @('developing', 'browser_acceptance')) { return $false }
+    return $Head.status -in @('in_progress', 'code_ready')
+}
+
 function Get-AgentMode {
     param($State, $Head, $GitInfo)
 
@@ -334,7 +342,7 @@ function Get-AgentMode {
     if ($pipelineProcess -and -not $pipelineProcess.HasExited) {
         return 'RUNNING'
     }
-    if (Test-RecoverablePathGuard $State $Head) {
+    if ((Test-RecoverablePathGuard $State $Head) -or (Test-RecoverableInterruptedTask $State $Head)) {
         return 'READY'
     }
     if ($State -and $State.phase -in @('blocked', 'human_attention', 'waiting_human_gate', 'push_pending')) {
@@ -480,7 +488,7 @@ function Get-StatusLines {
         $lines += New-StatusLine ' Pipeline   : waiting'
     }
 
-    if (Test-RecoverablePathGuard $State $Head) {
+    if ((Test-RecoverablePathGuard $State $Head) -or (Test-RecoverableInterruptedTask $State $Head)) {
         $recoveryState = 'eligible'
         if ($null -ne $lastPipelineExit -and $lastPipelineExit -ne 0) {
             $recoveryState = "last recovery exited $lastPipelineExit"
@@ -493,10 +501,10 @@ function Get-StatusLines {
     $lines += New-StatusLine ' Recent runner output' 'Cyan'
     $tail = @()
     if (Test-Path $outLog) {
-        $tail += Get-Content $outLog -Tail 3 -ErrorAction SilentlyContinue
+        $tail += Get-Content $outLog -Tail 3 -Encoding UTF8 -ErrorAction SilentlyContinue
     }
     if (Test-Path $errLog) {
-        $errTail = Get-Content $errLog -Tail 2 -ErrorAction SilentlyContinue
+        $errTail = Get-Content $errLog -Tail 2 -Encoding UTF8 -ErrorAction SilentlyContinue
         foreach ($line in $errTail) {
             if ($line) { $tail += "[stderr] $line" }
         }
@@ -538,7 +546,7 @@ function Write-Status {
         # Clear only once at startup. Never Clear-Host on each refresh: that caused
         # the visible flashing in the agent DOS window.
         if (-not $script:screenInitialized) {
-            Clear-Host
+            try { [Console]::Clear() } catch { Clear-Host }
             try { [Console]::CursorVisible = $false } catch {}
             $script:screenInitialized = $true
             $script:lastScreen = @()
@@ -654,18 +662,20 @@ try {
         if ($state -and $state.phase -eq 'push_pending') { $recoverPush = $true }
 
         $recoverPathGuard = Test-RecoverablePathGuard $state $head
+        $recoverInterrupted = Test-RecoverableInterruptedTask $state $head
+        $recoverExisting = $recoverPathGuard -or $recoverInterrupted
         $recoveryKey = $null
-        if ($recoverPathGuard) {
-            $recoveryKey = "$($head.id)|$($gitInfo.Sha)|$([string]$state.blocker)"
+        if ($recoverExisting) {
+            $recoveryKey = "$($head.id)|$($gitInfo.Sha)|$($state.phase)|$([string]$state.blocker)"
         }
 
-        $canStartWithDirty = $recoverPathGuard -and ($lastRecoveryAttemptKey -ne $recoveryKey)
+        $canStartWithDirty = $recoverExisting -and ($lastRecoveryAttemptKey -ne $recoveryKey)
         $worktreeAllowsStart = (-not $gitInfo.Dirty) -or $canStartWithDirty
 
         if (-not $NoExecute -and -not $pipelineProcess -and -not $paused -and $worktreeAllowsStart -and $gitInfo.Branch -in $managedBranches) {
-            if ($recoverPush -or $recoverPathGuard -or (Test-TaskRunnable $head)) {
+            if ($recoverPush -or $recoverExisting -or (Test-TaskRunnable $head)) {
                 try {
-                    if ($recoverPathGuard) {
+                    if ($recoverExisting) {
                         $lastRecoveryAttemptKey = $recoveryKey
                         $pipelineProcess = Start-Pipeline -RecoverPathGuard
                     } else {
