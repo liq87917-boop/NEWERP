@@ -535,7 +535,7 @@ function Get-StatusLines {
         $lines += New-StatusLine ' Pipeline   : waiting'
     }
 
-    if ((Test-RecoverablePathGuard $State $Head) -or (Test-RecoverableInterruptedTask $State $Head) -or (Test-RecoverableBrowserFailure $State $Head)) {
+    if ((Test-RecoverablePathGuard $State $Head) -or (Test-RecoverableInterruptedTask $State $Head) -or (Test-RecoverableBrowserFailure $State $Head) -or (Test-RecoverableDeferredFailedHead $State $Head)) {
         $recoveryState = 'eligible'
         if ($null -ne $lastPipelineExit -and $lastPipelineExit -ne 0) {
             $recoveryState = "last recovery exited $lastPipelineExit"
@@ -727,7 +727,8 @@ try {
         $recoverPathGuard = Test-RecoverablePathGuard $state $head
         $recoverInterrupted = Test-RecoverableInterruptedTask $state $head
         $recoverBrowser = Test-RecoverableBrowserFailure $state $head
-        $recoverExisting = $recoverPathGuard -or $recoverInterrupted -or $recoverBrowser
+        $recoverDeferredFailedHead = Test-RecoverableDeferredFailedHead $state $head
+        $recoverExisting = $recoverPathGuard -or $recoverInterrupted -or $recoverBrowser -or $recoverDeferredFailedHead
         $recoveryKey = $null
         if ($recoverExisting) {
             $recoveryKey = "$($head.id)|$($gitInfo.Sha)|$($state.phase)|$([string]$state.blocker)"
