@@ -1,0 +1,26 @@
+{
+  "id": "ERP-021",
+  "title": "Add Inquiry to Quotation conversion",
+  "status": "pending",
+  "risk_level": "low",
+  "description": "Close the audited Inquiry usability gap by adding a direct Inquiry -> Quotation prefill/create action on the existing Quotation EF workflow. Reuse the current quotation from-inquiry mapping and add duplicate protection without production schema changes.",
+  "acceptance_criteria": [
+    "Inquiry UI exposes a direct Convert/Create Quotation action.",
+    "Customer and inquiry detail values are mapped through the authoritative existing quotation from-inquiry rules and totals are revalidated server-side.",
+    "Invalid inquiry states are rejected and repeated conversion cannot silently create duplicate quotations.",
+    "Source inquiry traceability remains visible using existing fields/conventions without a production schema migration.",
+    "Unit/integration tests cover mapping, invalid state and duplicate protection; safe validation passes.",
+    "Browser/UI acceptance is recorded as deferred during development according to project policy."
+  ],
+  "allowed_paths": ["src/ERP.Application/**","src/ERP.Api/Controllers/**","src/ERP.Api/wwwroot/**","src/ERP.UnitTests/**","src/ERP.IntegrationTests/**","docs/**",".ai/**"],
+  "depends_on": ["ERP-007"],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "browser",
+  "browser_acceptance": {"required": true, "scenarios": ["Convert an inquiry to quotation and verify customer/detail mapping.","Repeat conversion and verify duplicate prevention."], "test_filter": "Collection=UiTests", "minimum_screenshots": 2},
+  "human_gate": {"required": false, "level": "L1", "status": "not_required", "reason": "Uses existing Inquiry/Quotation application schema and mapping."},
+  "attempts": 0,
+  "created_at": "2026-09-23T13:04:01Z"
+}
