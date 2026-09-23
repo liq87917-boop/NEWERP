@@ -624,6 +624,13 @@ try {
         $head = Get-QueueHead $tasks
         $gitInfo = Get-GitInfo
 
+        # Paint local state before any network operation. Git fetch or GitHub CLI
+        # can take time on Windows; without this the DOS window looked completely
+        # blank even though the agent process was alive.
+        if (-not $script:screenInitialized) {
+            Write-Status $state $tasks $head $gitInfo
+        }
+
         if (((Get-Date) - $lastSyncAt).TotalSeconds -ge $SyncSeconds) {
             $lastSyncMessage = Sync-Repository $gitInfo
             $lastSyncAt = Get-Date
