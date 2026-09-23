@@ -24,6 +24,12 @@
 
 仅重试 Git push：`py -3 scripts/ai_pipeline.py retry-push`。push 恢复不会重新执行已经完成的开发和测试。
 
+新任务可直接创建，无需手工编号：
+
+`scripts/new-ai-task.ps1 -Title "任务标题" -Description "目标和边界" -AcceptanceCriteria "验收条件1","验收条件2" -AllowedPaths "src/ERP.Application/**","src/ERP.UnitTests/**" -ValidationProfile safe -Risk low`
+
+系统会选择下一个 `ERP-NNN`，写入任务 JSON、更新项目状态、记录审计并创建 Git checkpoint；高风险 profile 或受保护路径会自动要求 Human Gate。使用 `py -3 scripts/ai_pipeline.py queue` 查看全部任务状态。
+
 本地启动使用根目录的 `.env.local`。填写轮换后的开发密钥后运行 `start-dev.ps1`，脚本会校验格式、必填项和 JWT 长度，再把变量加载到当前 API 子进程；变量值不会写入控制台或 Git。
 
 Runner 每次只执行一个任务。成功后写入结果与审计记录并创建 Git commit；失败会把验证结果反馈给 Cline，最多尝试三次。超过上限、违反路径边界或 checkpoint 失败时会停止并进入 Human Gate。

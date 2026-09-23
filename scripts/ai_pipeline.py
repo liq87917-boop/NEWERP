@@ -63,6 +63,48 @@ def active_tasks() -> list[tuple[Path, dict[str, Any]]]:
     return [(path, task) for path, task in task_entries() if task.get("status") in ACTIVE_STATUSES]
 
 
+def queue_status() -> int:
+    rows = [{"id": task.get("id"), "status": task.get("status"), "risk": task.get("risk_level"), "title": task.get("title")} for _, task in task_entries()]
+    print(json.dumps(rows, ensure_ascii=False, indent=2)); return 0
+
+
+def create_task(title: str, description: str, acceptance: list[str], allowed: list[str], profile: str, risk: str) -> int:
+    with pipeline_lock():
+        config = load_json(CONFIG_PATH)
+        if profile not in config.get("validation_profiles", {}):
+            print(f"Unknown validation profile: {profile}", file=sys.stderr); return 2
+        numbers = []
+        for _, task in task_entries():
+            try: numbers.append(int(str(task["id"]).split("-")[-1]))
+            except (KeyError, ValueError): pass
+        task_id = f"{config['task_prefix']}-{max(numbers, default=0) + 1:03d}"
+        sensitive_tokens = ("appsettings", "seeddata", "schemaupgrader", ".sql", ".env", "deploy", "release", "user_input_files")
+        protected = any(any(token in path.lower() for token in sensitive_tokens) for path in allowed)
+        gate_required = risk == "high" or profile in {"integration", "ui"} or protected
+        task = {
+            "id": task_id,
+            "title": title,
+            "status": "pending",
+            "risk_level": risk,
+            "description": description,
+            "acceptance_criteria": acceptance,
+            "allowed_paths": allowed,
+            "validation_profile": profile,
+            "human_gate": {
+                "required": gate_required,
+                "status": "pending" if gate_required else "not_required",
+                "reason": "Automatically required by risk/profile/path policy." if gate_required else ""
+            },
+            "attempts": 0,
+            "created_at": utc_now()
+        }
+        path = TASKS_DIR / f"{task_id}.json"; save_json(path, task)
+        state = load_json(STATE_PATH); state.update({"phase": "ready", "current_task": None, "blocker": None, "finish_reason": "task_queued", "updated_at": utc_now()})
+        save_json(STATE_PATH, state); audit("task_created", task=task_id, risk=risk, validation_profile=profile, human_gate=gate_required)
+        git_checkpoint(f"{task_id}: queue {title}", [str(path.relative_to(ROOT)), str(STATE_PATH.relative_to(ROOT)), str(AUDIT_PATH.relative_to(ROOT))])
+        print(json.dumps({"task": task_id, "human_gate_required": gate_required, "path": str(path)}, ensure_ascii=False, indent=2)); return 0
+
+
 @contextlib.contextmanager
 def pipeline_lock() -> Iterator[None]:
     config = load_json(CONFIG_PATH)
@@ -212,12 +254,19 @@ def main() -> int:
     sub.add_parser("resume")
     sub.add_parser("retry-push")
     sub.add_parser("self-test")
+    sub.add_parser("queue")
+    cp = sub.add_parser("create")
+    cp.add_argument("--title", required=True); cp.add_argument("--description", required=True)
+    cp.add_argument("--accept", action="append", required=True); cp.add_argument("--allow", action="append", required=True)
+    cp.add_argument("--profile", default="safe"); cp.add_argument("--risk", choices=["low", "medium", "high"], default="low")
     dp = sub.add_parser("defer"); dp.add_argument("task_id"); dp.add_argument("--by", required=True); dp.add_argument("--note", required=True)
     rp = sub.add_parser("retry"); rp.add_argument("task_id"); rp.add_argument("--by", required=True); rp.add_argument("--note", required=True)
     args = parser.parse_args()
     if args.command in {"run", "resume"}: return run_all()
     if args.command == "retry-push": return retry_push()
     if args.command == "self-test": return self_test()
+    if args.command == "queue": return queue_status()
+    if args.command == "create": return create_task(args.title, args.description, args.accept, args.allow, args.profile, args.risk)
     if args.command == "defer": return defer_task(args.task_id, args.by, args.note)
     return retry_task(args.task_id, args.by, args.note)
 
