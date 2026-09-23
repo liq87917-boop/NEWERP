@@ -156,14 +156,37 @@ function Get-GitInfo {
     }
 }
 
+function Get-LocalChangedPaths {
+    $result = Invoke-Git @('-c', 'core.quotepath=false', 'status', '--porcelain', '--untracked-files=all')
+    if ($result[0] -ne 0) { return $null }
+
+    $paths = @()
+    foreach ($line in ($result[1] -split "\r?\n")) {
+        if ([string]::IsNullOrWhiteSpace($line) -or $line.Length -lt 4) { continue }
+        $payload = $line.Substring(3).Trim()
+        # Rename/copy porcelain records need two-path conflict analysis. Stay fail-closed.
+        if ($payload -match ' -> ') { return $null }
+        if ($payload) { $paths += $payload.Replace('\', '/') }
+    }
+    return @($paths | Sort-Object -Unique)
+}
+
+function Get-IncomingPaths {
+    param([string]$Branch)
+
+    $result = Invoke-Git @('-c', 'core.quotepath=false', 'diff', '--name-only', "HEAD..origin/$Branch")
+    if ($result[0] -ne 0) { return $null }
+    return @(($result[1] -split "\r?\n") |
+        ForEach-Object { $_.Trim().Replace('\', '/') } |
+        Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+        Sort-Object -Unique)
+}
+
 function Sync-Repository {
     param($GitInfo)
 
     if ($pipelineProcess -and -not $pipelineProcess.HasExited) {
         return 'sync skipped: pipeline running'
-    }
-    if ($GitInfo.Dirty) {
-        return 'sync skipped: working tree has changes'
     }
     if ($GitInfo.Branch -notin $managedBranches) {
         return "sync skipped: unmanaged branch $($GitInfo.Branch)"
@@ -185,18 +208,44 @@ function Sync-Repository {
     $ahead = [int]$parts[0]
     $behind = [int]$parts[1]
 
-    if ($ahead -eq 0 -and $behind -gt 0) {
-        $pull = Invoke-Git @('pull', '--ff-only', '--quiet', 'origin', $GitInfo.Branch)
-        if ($pull[0] -eq 0) { return "updated from origin/$($GitInfo.Branch) ($behind commit(s))" }
-        return 'git pull --ff-only failed'
-    }
     if ($ahead -gt 0 -and $behind -gt 0) {
         return "local/remote diverged: ahead $ahead, behind $behind"
     }
     if ($ahead -gt 0) {
         return "local ahead by $ahead commit(s); pipeline push will sync"
     }
-    return 'up to date'
+    if ($behind -eq 0) {
+        return 'up to date'
+    }
+
+    # A task can legitimately leave a dirty tree while waiting for guarded recovery.
+    # Permit fast-forwarding remote control-plane fixes only when none of the incoming
+    # paths overlap the local dirty paths. Git itself remains the final fail-closed check.
+    if ($GitInfo.Dirty) {
+        $localPaths = Get-LocalChangedPaths
+        $incomingPaths = Get-IncomingPaths $GitInfo.Branch
+        if ($null -eq $localPaths -or $null -eq $incomingPaths) {
+            return 'sync skipped: dirty tree could not be compared safely'
+        }
+
+        $localSet = @{}
+        foreach ($path in $localPaths) { $localSet[$path] = $true }
+        $conflicts = @($incomingPaths | Where-Object { $localSet.ContainsKey($_) })
+        if ($conflicts.Count -gt 0) {
+            $sample = ($conflicts | Select-Object -First 3) -join ', '
+            return "sync skipped: remote overlaps local changes ($sample)"
+        }
+
+        $merge = Invoke-Git @('merge', '--ff-only', '--quiet', "origin/$($GitInfo.Branch)")
+        if ($merge[0] -eq 0) {
+            return "updated $behind remote commit(s), preserved $($localPaths.Count) local change(s)"
+        }
+        return 'safe dirty-tree fast-forward failed; local work preserved'
+    }
+
+    $merge = Invoke-Git @('merge', '--ff-only', '--quiet', "origin/$($GitInfo.Branch)")
+    if ($merge[0] -eq 0) { return "updated from origin/$($GitInfo.Branch) ($behind commit(s))" }
+    return 'git merge --ff-only failed'
 }
 
 function Start-Pipeline {
