@@ -1,0 +1,70 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TestRun id="b70682fa-6f1c-42d5-8412-223210612e0b" name="Admin@ADMIN-TIAN 2026-09-23 18:05:28" runUser="ADMIN-TIAN\Admin" xmlns="http://microsoft.com/schemas/VisualStudio/TeamTest/2010">
+  <Times creation="2026-09-23T18:05:28.2906833+08:00" queuing="2026-09-23T18:05:28.2906837+08:00" start="2026-09-23T18:04:50.6319622+08:00" finish="2026-09-23T18:05:56.2423419+08:00" />
+  <TestSettings name="default" id="2542cd97-9acd-466c-b9e7-40c75dc3798c">
+    <Deployment runDeploymentRoot="Admin_ADMIN-TIAN_2026-09-23_18_05_28" />
+  </TestSettings>
+  <Results>
+    <UnitTestResult executionId="869b49b5-d9a6-41a1-8f13-61add9004733" testId="10664b30-4e7b-eaf2-7f44-4dc0901004fb" testName="ERP.IntegrationTests.PiWorkflowUiTests.报价单转PI_并可在PI列表与编辑页核对复制内容" computerName="ADMIN-TIAN" duration="00:00:11.1293849" startTime="2026-09-23T18:05:39.3695036+08:00" endTime="2026-09-23T18:05:39.3695038+08:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="869b49b5-d9a6-41a1-8f13-61add9004733" />
+    <UnitTestResult executionId="34370b3e-6e5c-4fb1-a59d-badca5385f0d" testId="89d8399c-b94b-e026-2e0d-adfdf33b2b9b" testName="ERP.IntegrationTests.PiWorkflowUiTests.PI草稿修改_审核后禁改_销审恢复_并渲染打印预览" computerName="ADMIN-TIAN" duration="00:00:32.0547835" startTime="2026-09-23T18:05:28.2410555+08:00" endTime="2026-09-23T18:05:28.2410773+08:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="34370b3e-6e5c-4fb1-a59d-badca5385f0d" />
+    <UnitTestResult executionId="2832742b-6600-4596-a735-9963a42ba02b" testId="56e4301d-8f2f-500a-1144-cebd278baab2" testName="ERP.IntegrationTests.UiSmokeTests.正确密码_进入主界面_可见菜单与用户名" computerName="ADMIN-TIAN" duration="00:00:03.6681716" startTime="2026-09-23T18:05:49.6821994+08:00" endTime="2026-09-23T18:05:49.6821996+08:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="2832742b-6600-4596-a735-9963a42ba02b" />
+    <UnitTestResult executionId="5391b34d-dea4-40ef-8f0e-9c8357b38e0a" testId="d4822faa-f877-71c6-796c-c7a279ec25e0" testName="ERP.IntegrationTests.UiSmokeTests.打开首页_默认显示登录页" computerName="ADMIN-TIAN" duration="00:00:01.7341287" startTime="2026-09-23T18:05:55.6757878+08:00" endTime="2026-09-23T18:05:55.6757881+08:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="5391b34d-dea4-40ef-8f0e-9c8357b38e0a" />
+    <UnitTestResult executionId="b5546e4e-10e2-4b67-9fc7-127679511a8c" testId="f57a92bc-ca4e-ff26-7ebc-76ba7904a9b5" testName="ERP.IntegrationTests.UiSmokeTests.错误密码_提示登录错误且不跳转" computerName="ADMIN-TIAN" duration="00:00:06.6424125" startTime="2026-09-23T18:05:46.0137788+08:00" endTime="2026-09-23T18:05:46.0137791+08:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="b5546e4e-10e2-4b67-9fc7-127679511a8c" />
+    <UnitTestResult executionId="2df6ee9d-15fb-4692-9bc4-4776cf22d553" testId="46755b34-3525-8d65-58d7-f3d2465f2609" testName="ERP.IntegrationTests.UiSmokeTests.退出登录_回到登录页" computerName="ADMIN-TIAN" duration="00:00:04.2589164" startTime="2026-09-23T18:05:53.9734915+08:00" endTime="2026-09-23T18:05:53.9734920+08:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="2df6ee9d-15fb-4692-9bc4-4776cf22d553" />
+  </Results>
+  <TestDefinitions>
+    <UnitTest name="ERP.IntegrationTests.UiSmokeTests.退出登录_回到登录页" storage="d:\vscodeproject\newerp\src\erp.integrationtests\bin\debug\net8.0\erp.integrationtests.dll" id="46755b34-3525-8d65-58d7-f3d2465f2609">
+      <Execution id="2df6ee9d-15fb-4692-9bc4-4776cf22d553" />
+      <TestMethod codeBase="D:\VSCodeProject\NEWERP\src\ERP.IntegrationTests\bin\Debug\net8.0\ERP.IntegrationTests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="ERP.IntegrationTests.UiSmokeTests" name="退出登录_回到登录页" />
+    </UnitTest>
+    <UnitTest name="ERP.IntegrationTests.UiSmokeTests.正确密码_进入主界面_可见菜单与用户名" storage="d:\vscodeproject\newerp\src\erp.integrationtests\bin\debug\net8.0\erp.integrationtests.dll" id="56e4301d-8f2f-500a-1144-cebd278baab2">
+      <Execution id="2832742b-6600-4596-a735-9963a42ba02b" />
+      <TestMethod codeBase="D:\VSCodeProject\NEWERP\src\ERP.IntegrationTests\bin\Debug\net8.0\ERP.IntegrationTests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="ERP.IntegrationTests.UiSmokeTests" name="正确密码_进入主界面_可见菜单与用户名" />
+    </UnitTest>
+    <UnitTest name="ERP.IntegrationTests.UiSmokeTests.错误密码_提示登录错误且不跳转" storage="d:\vscodeproject\newerp\src\erp.integrationtests\bin\debug\net8.0\erp.integrationtests.dll" id="f57a92bc-ca4e-ff26-7ebc-76ba7904a9b5">
+      <Execution id="b5546e4e-10e2-4b67-9fc7-127679511a8c" />
+      <TestMethod codeBase="D:\VSCodeProject\NEWERP\src\ERP.IntegrationTests\bin\Debug\net8.0\ERP.IntegrationTests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="ERP.IntegrationTests.UiSmokeTests" name="错误密码_提示登录错误且不跳转" />
+    </UnitTest>
+    <UnitTest name="ERP.IntegrationTests.UiSmokeTests.打开首页_默认显示登录页" storage="d:\vscodeproject\newerp\src\erp.integrationtests\bin\debug\net8.0\erp.integrationtests.dll" id="d4822faa-f877-71c6-796c-c7a279ec25e0">
+      <Execution id="5391b34d-dea4-40ef-8f0e-9c8357b38e0a" />
+      <TestMethod codeBase="D:\VSCodeProject\NEWERP\src\ERP.IntegrationTests\bin\Debug\net8.0\ERP.IntegrationTests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="ERP.IntegrationTests.UiSmokeTests" name="打开首页_默认显示登录页" />
+    </UnitTest>
+    <UnitTest name="ERP.IntegrationTests.PiWorkflowUiTests.PI草稿修改_审核后禁改_销审恢复_并渲染打印预览" storage="d:\vscodeproject\newerp\src\erp.integrationtests\bin\debug\net8.0\erp.integrationtests.dll" id="89d8399c-b94b-e026-2e0d-adfdf33b2b9b">
+      <Execution id="34370b3e-6e5c-4fb1-a59d-badca5385f0d" />
+      <TestMethod codeBase="D:\VSCodeProject\NEWERP\src\ERP.IntegrationTests\bin\Debug\net8.0\ERP.IntegrationTests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="ERP.IntegrationTests.PiWorkflowUiTests" name="PI草稿修改_审核后禁改_销审恢复_并渲染打印预览" />
+    </UnitTest>
+    <UnitTest name="ERP.IntegrationTests.PiWorkflowUiTests.报价单转PI_并可在PI列表与编辑页核对复制内容" storage="d:\vscodeproject\newerp\src\erp.integrationtests\bin\debug\net8.0\erp.integrationtests.dll" id="10664b30-4e7b-eaf2-7f44-4dc0901004fb">
+      <Execution id="869b49b5-d9a6-41a1-8f13-61add9004733" />
+      <TestMethod codeBase="D:\VSCodeProject\NEWERP\src\ERP.IntegrationTests\bin\Debug\net8.0\ERP.IntegrationTests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="ERP.IntegrationTests.PiWorkflowUiTests" name="报价单转PI_并可在PI列表与编辑页核对复制内容" />
+    </UnitTest>
+  </TestDefinitions>
+  <TestEntries>
+    <TestEntry testId="10664b30-4e7b-eaf2-7f44-4dc0901004fb" executionId="869b49b5-d9a6-41a1-8f13-61add9004733" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="89d8399c-b94b-e026-2e0d-adfdf33b2b9b" executionId="34370b3e-6e5c-4fb1-a59d-badca5385f0d" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="56e4301d-8f2f-500a-1144-cebd278baab2" executionId="2832742b-6600-4596-a735-9963a42ba02b" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="d4822faa-f877-71c6-796c-c7a279ec25e0" executionId="5391b34d-dea4-40ef-8f0e-9c8357b38e0a" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="f57a92bc-ca4e-ff26-7ebc-76ba7904a9b5" executionId="b5546e4e-10e2-4b67-9fc7-127679511a8c" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="46755b34-3525-8d65-58d7-f3d2465f2609" executionId="2df6ee9d-15fb-4692-9bc4-4776cf22d553" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+  </TestEntries>
+  <TestLists>
+    <TestList name="列表中未列出的结果" id="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestList name="所有已加载的结果" id="19431567-8539-422a-85d7-44ee4e166bda" />
+  </TestLists>
+  <ResultSummary outcome="Completed">
+    <Counters total="6" executed="6" passed="6" failed="0" error="0" timeout="0" aborted="0" inconclusive="0" passedButRunAborted="0" notRunnable="0" notExecuted="0" disconnected="0" warning="0" completed="0" inProgress="0" pending="0" />
+    <Output>
+      <StdOut>[xUnit.net 00:00:00.00] xUnit.net VSTest Adapter v2.8.2+699d445a1a (64-bit .NET 8.0.14)&#xD;
+[xUnit.net 00:00:00.04]   Discovering: ERP.IntegrationTests&#xD;
+[xUnit.net 00:00:00.07]   Discovered:  ERP.IntegrationTests&#xD;
+[xUnit.net 00:00:00.07]   Starting:    ERP.IntegrationTests&#xD;
+[��ʵ����� UI ����] Ŀ��ⰲȫ�������У����ݣ���ʽ�������������ģ���ERP_AI_TEST_RUN=1 �� ASPNETCORE_ENVIRONMENT=Development��&#xD;
+Starting msedgedriver 153.0.4234.48 (cf31d6623d8718e7a3c3e181e55e59c1aae57a73) on port 65078&#xD;
+To submit feedback, report a bug, or suggest new features, please visit https://github.com/MicrosoftEdge/EdgeWebDriver&#xD;
+Only local connections are allowed.&#xD;
+Please see https://aka.ms/WebDriverSecurity for suggestions on keeping Microsoft Edge WebDriver safe.&#xD;
+msedgedriver was started successfully on port 65078.&#xD;
+[xUnit.net 00:01:05.26]   Finished:    ERP.IntegrationTests&#xD;
+</StdOut>
+    </Output>
+  </ResultSummary>
+</TestRun>

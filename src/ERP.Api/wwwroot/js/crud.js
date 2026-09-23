@@ -1,5 +1,6 @@
 function renderModule(mod) {
   CURRENT_MODULE = mod;
+  __listRequestSeq++;                   // 作废在途的上一模块列表响应（含树形模块），避免旧数据覆盖新页面
   if (mod.tree) { renderTreeModule(mod); return; }
   CURRENT_LOADER = loadList;
   CURRENT_PAGE = 1;
@@ -55,10 +56,17 @@ function searchList() {
   loadList();
 }
 
+/* 列表请求序号：切换模块 / 搜索 / 翻页 / 操作后刷新都会各自发起请求，响应不保证按发起顺序返回。
+   旧响应若晚到，会把过期数据覆盖到列表上，并使页面里已渲染的行元素失效
+   （真实浏览器验收中表现为 stale element reference）。因此只允许最后一次发出的请求渲染结果。 */
+let __listRequestSeq = 0;
+
 async function loadList() {
   const mod = CURRENT_MODULE;
   const qs = `page=${CURRENT_PAGE}&pageSize=${PAGE_SIZE}${CURRENT_KEYWORD ? '&keyword=' + encodeURIComponent(CURRENT_KEYWORD) : ''}`;
+  const seq = ++__listRequestSeq;
   const data = await api(`${mod.api}?${qs}`);
+  if (seq !== __listRequestSeq) return;     // 过期响应：已有更新的请求（新模块 / 新关键字 / 新页码）
   window.__moduleRows = data.items || [];   // 供打印预览使用当前页数据
   renderTable(mod, data);
   renderPagination(data);
@@ -78,7 +86,7 @@ function renderTable(mod, data) {
       if (c.type === 'image') return `<td>${v ? `<img class="thumb-img" src="${escapeHtml(v)}" onclick="showLightbox(this.src)">` : ''}</td>`;
       return `<td>${v ?? ''}</td>`;
     }).join('');
-    const subActions = mod.canSubmit ? submitActions(row) : '';
+    const subActions = (mod.canSubmit ? submitActions(row) : '') + customRowActions(mod, row);
     const actions = mod.readonly ? '' : `<td>
       <div class="row-actions">
         <button class="btn btn-neutral btn-sm" onclick="openForm(${row.id})">编辑</button>
@@ -101,6 +109,18 @@ function submitActions(row) {
   if (row.status === 'Submitted' || row.status === 1) html += `<button class="row-menu-item" onclick="changeStatus(${row.id},'approve')"><span class="rmi-ico">🟠</span><span class="rmi-txt">审核</span></button>`;
   if (row.status !== 'Cancelled' && row.status !== 5) html += `<button class="row-menu-item" onclick="changeStatus(${row.id},'cancel')"><span class="rmi-ico">🚫</span><span class="rmi-txt">取消</span></button>`;
   return html;
+}
+
+/* 模块自定义行操作（模块声明 rowActions 时生效，与工具栏 extraActions 同一风格）
+   配置：rowActions: [{ label, icon, title, onclick, statuses? }]
+   - onclick 为全局函数名，渲染时生成 onclick="fn(行Id)"；函数内可用 CURRENT_MODULE_CODE 判断当前单据
+   - statuses 可选：仅当行状态命中时显示（状态取接口返回的枚举名，如 'Approved'） */
+function customRowActions(mod, row) {
+  return (mod.rowActions || [])
+    .filter(a => !a.statuses || a.statuses.some(s => String(s) === String(row.status)))
+    .map(a => `<button class="row-menu-item" onclick="${a.onclick}(${row.id})" title="${a.title || ''}">` +
+      `<span class="rmi-ico">${a.icon || '•'}</span><span class="rmi-txt">${a.label}</span></button>`)
+    .join('');
 }
 
 function renderPagination(data) {

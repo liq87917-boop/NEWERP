@@ -1,0 +1,113 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TestRun id="b35b4673-011b-419d-b69e-6832f2cc255a" name="Admin@ADMIN-TIAN 2026-09-23 17:59:17" runUser="ADMIN-TIAN\Admin" xmlns="http://microsoft.com/schemas/VisualStudio/TeamTest/2010">
+  <Times creation="2026-09-23T17:59:17.0626876+08:00" queuing="2026-09-23T17:59:17.0626879+08:00" start="2026-09-23T17:58:36.3072022+08:00" finish="2026-09-23T17:59:46.3753407+08:00" />
+  <TestSettings name="default" id="29b59676-3ade-4420-915c-a32f13a37184">
+    <Deployment runDeploymentRoot="Admin_ADMIN-TIAN_2026-09-23_17_59_17" />
+  </TestSettings>
+  <Results>
+    <UnitTestResult executionId="e5f354eb-692f-470a-aa46-3df4ea3748f3" testId="89d8399c-b94b-e026-2e0d-adfdf33b2b9b" testName="ERP.IntegrationTests.PiWorkflowUiTests.PI草稿修改_审核后禁改_销审恢复_并渲染打印预览" computerName="ADMIN-TIAN" duration="00:00:32.4901095" startTime="2026-09-23T17:59:17.0235358+08:00" endTime="2026-09-23T17:59:17.0235607+08:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Failed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="e5f354eb-692f-470a-aa46-3df4ea3748f3">
+      <Output>
+        <ErrorInfo>
+          <Message>OpenQA.Selenium.StaleElementReferenceException : stale element reference: stale element not found in the current frame
+  (Session info: MicrosoftEdge=153.0.4234.48); For documentation on this error, please visit: https://www.selenium.dev/documentation/webdriver/troubleshooting/errors#stale-element-reference-exception</Message>
+          <StackTrace>   at OpenQA.Selenium.WebDriver.UnpackAndThrowOnError(Response errorResponse, String commandToExecute)&#xD;
+   at OpenQA.Selenium.WebDriver.ExecuteAsync(String driverCommandToExecute, Dictionary`2 parameters)&#xD;
+   at OpenQA.Selenium.WebDriver.InternalExecute(String driverCommandToExecute, Dictionary`2 parameters)&#xD;
+   at OpenQA.Selenium.WebElement.get_Displayed()&#xD;
+   at ERP.IntegrationTests.PiWorkflowUiTests.&lt;&gt;c.&lt;ClickRowMenuAction&gt;b__24_2(IWebElement b) in D:\VSCodeProject\NEWERP\src\ERP.IntegrationTests\PiWorkflowUiTests.cs:line 407&#xD;
+   at System.Linq.Enumerable.TryGetFirst[TSource](IEnumerable`1 source, Func`2 predicate, Boolean&amp; found)&#xD;
+   at System.Linq.Enumerable.FirstOrDefault[TSource](IEnumerable`1 source, Func`2 predicate)&#xD;
+   at ERP.IntegrationTests.PiWorkflowUiTests.&lt;&gt;c__DisplayClass24_0.&lt;ClickRowMenuAction&gt;b__1(IWebDriver d) in D:\VSCodeProject\NEWERP\src\ERP.IntegrationTests\PiWorkflowUiTests.cs:line 406&#xD;
+   at OpenQA.Selenium.Support.UI.DefaultWait`1.Until[TResult](Func`2 condition, CancellationToken token)&#xD;
+   at OpenQA.Selenium.Support.UI.DefaultWait`1.Until[TResult](Func`2 condition)&#xD;
+   at ERP.IntegrationTests.PiWorkflowUiTests.ClickRowMenuAction(Int64 id, String functionName) in D:\VSCodeProject\NEWERP\src\ERP.IntegrationTests\PiWorkflowUiTests.cs:line 406&#xD;
+   at ERP.IntegrationTests.PiWorkflowUiTests.PI草稿修改_审核后禁改_销审恢复_并渲染打印预览() in D:\VSCodeProject\NEWERP\src\ERP.IntegrationTests\PiWorkflowUiTests.cs:line 179&#xD;
+   at System.RuntimeMethodHandle.InvokeMethod(Object target, Void** arguments, Signature sig, Boolean isConstructor)&#xD;
+   at System.Reflection.MethodBaseInvoker.InvokeWithNoArgs(Object obj, BindingFlags invokeAttr)</StackTrace>
+        </ErrorInfo>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="ec622658-1503-41fe-81fe-504d95b98b97" testId="46755b34-3525-8d65-58d7-f3d2465f2609" testName="ERP.IntegrationTests.UiSmokeTests.退出登录_回到登录页" computerName="ADMIN-TIAN" duration="00:00:03.7756293" startTime="2026-09-23T17:59:44.3720419+08:00" endTime="2026-09-23T17:59:44.3720422+08:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="ec622658-1503-41fe-81fe-504d95b98b97" />
+    <UnitTestResult executionId="92e01768-6245-46bc-bffa-16f569c966b3" testId="56e4301d-8f2f-500a-1144-cebd278baab2" testName="ERP.IntegrationTests.UiSmokeTests.正确密码_进入主界面_可见菜单与用户名" computerName="ADMIN-TIAN" duration="00:00:03.7358544" startTime="2026-09-23T17:59:40.5963191+08:00" endTime="2026-09-23T17:59:40.5963193+08:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="92e01768-6245-46bc-bffa-16f569c966b3" />
+    <UnitTestResult executionId="3494708c-94d8-4595-8d2d-10c36180cb59" testId="f57a92bc-ca4e-ff26-7ebc-76ba7904a9b5" testName="ERP.IntegrationTests.UiSmokeTests.错误密码_提示登录错误且不跳转" computerName="ADMIN-TIAN" duration="00:00:08.8957669" startTime="2026-09-23T17:59:36.8603020+08:00" endTime="2026-09-23T17:59:36.8603025+08:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="3494708c-94d8-4595-8d2d-10c36180cb59" />
+    <UnitTestResult executionId="6abbdf83-9748-4402-9283-cfde8d1cfe5f" testId="d4822faa-f877-71c6-796c-c7a279ec25e0" testName="ERP.IntegrationTests.UiSmokeTests.打开首页_默认显示登录页" computerName="ADMIN-TIAN" duration="00:00:01.4512505" startTime="2026-09-23T17:59:45.8247220+08:00" endTime="2026-09-23T17:59:45.8247225+08:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="6abbdf83-9748-4402-9283-cfde8d1cfe5f" />
+    <UnitTestResult executionId="4f29d964-241f-4c3a-a201-5af03b86c268" testId="10664b30-4e7b-eaf2-7f44-4dc0901004fb" testName="ERP.IntegrationTests.PiWorkflowUiTests.报价单转PI_并可在PI列表与编辑页核对复制内容" computerName="ADMIN-TIAN" duration="00:00:10.9480097" startTime="2026-09-23T17:59:27.9636611+08:00" endTime="2026-09-23T17:59:27.9636614+08:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Passed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="4f29d964-241f-4c3a-a201-5af03b86c268" />
+  </Results>
+  <TestDefinitions>
+    <UnitTest name="ERP.IntegrationTests.UiSmokeTests.退出登录_回到登录页" storage="d:\vscodeproject\newerp\src\erp.integrationtests\bin\debug\net8.0\erp.integrationtests.dll" id="46755b34-3525-8d65-58d7-f3d2465f2609">
+      <Execution id="ec622658-1503-41fe-81fe-504d95b98b97" />
+      <TestMethod codeBase="D:\VSCodeProject\NEWERP\src\ERP.IntegrationTests\bin\Debug\net8.0\ERP.IntegrationTests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="ERP.IntegrationTests.UiSmokeTests" name="退出登录_回到登录页" />
+    </UnitTest>
+    <UnitTest name="ERP.IntegrationTests.UiSmokeTests.正确密码_进入主界面_可见菜单与用户名" storage="d:\vscodeproject\newerp\src\erp.integrationtests\bin\debug\net8.0\erp.integrationtests.dll" id="56e4301d-8f2f-500a-1144-cebd278baab2">
+      <Execution id="92e01768-6245-46bc-bffa-16f569c966b3" />
+      <TestMethod codeBase="D:\VSCodeProject\NEWERP\src\ERP.IntegrationTests\bin\Debug\net8.0\ERP.IntegrationTests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="ERP.IntegrationTests.UiSmokeTests" name="正确密码_进入主界面_可见菜单与用户名" />
+    </UnitTest>
+    <UnitTest name="ERP.IntegrationTests.UiSmokeTests.错误密码_提示登录错误且不跳转" storage="d:\vscodeproject\newerp\src\erp.integrationtests\bin\debug\net8.0\erp.integrationtests.dll" id="f57a92bc-ca4e-ff26-7ebc-76ba7904a9b5">
+      <Execution id="3494708c-94d8-4595-8d2d-10c36180cb59" />
+      <TestMethod codeBase="D:\VSCodeProject\NEWERP\src\ERP.IntegrationTests\bin\Debug\net8.0\ERP.IntegrationTests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="ERP.IntegrationTests.UiSmokeTests" name="错误密码_提示登录错误且不跳转" />
+    </UnitTest>
+    <UnitTest name="ERP.IntegrationTests.UiSmokeTests.打开首页_默认显示登录页" storage="d:\vscodeproject\newerp\src\erp.integrationtests\bin\debug\net8.0\erp.integrationtests.dll" id="d4822faa-f877-71c6-796c-c7a279ec25e0">
+      <Execution id="6abbdf83-9748-4402-9283-cfde8d1cfe5f" />
+      <TestMethod codeBase="D:\VSCodeProject\NEWERP\src\ERP.IntegrationTests\bin\Debug\net8.0\ERP.IntegrationTests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="ERP.IntegrationTests.UiSmokeTests" name="打开首页_默认显示登录页" />
+    </UnitTest>
+    <UnitTest name="ERP.IntegrationTests.PiWorkflowUiTests.PI草稿修改_审核后禁改_销审恢复_并渲染打印预览" storage="d:\vscodeproject\newerp\src\erp.integrationtests\bin\debug\net8.0\erp.integrationtests.dll" id="89d8399c-b94b-e026-2e0d-adfdf33b2b9b">
+      <Execution id="e5f354eb-692f-470a-aa46-3df4ea3748f3" />
+      <TestMethod codeBase="D:\VSCodeProject\NEWERP\src\ERP.IntegrationTests\bin\Debug\net8.0\ERP.IntegrationTests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="ERP.IntegrationTests.PiWorkflowUiTests" name="PI草稿修改_审核后禁改_销审恢复_并渲染打印预览" />
+    </UnitTest>
+    <UnitTest name="ERP.IntegrationTests.PiWorkflowUiTests.报价单转PI_并可在PI列表与编辑页核对复制内容" storage="d:\vscodeproject\newerp\src\erp.integrationtests\bin\debug\net8.0\erp.integrationtests.dll" id="10664b30-4e7b-eaf2-7f44-4dc0901004fb">
+      <Execution id="4f29d964-241f-4c3a-a201-5af03b86c268" />
+      <TestMethod codeBase="D:\VSCodeProject\NEWERP\src\ERP.IntegrationTests\bin\Debug\net8.0\ERP.IntegrationTests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="ERP.IntegrationTests.PiWorkflowUiTests" name="报价单转PI_并可在PI列表与编辑页核对复制内容" />
+    </UnitTest>
+  </TestDefinitions>
+  <TestEntries>
+    <TestEntry testId="89d8399c-b94b-e026-2e0d-adfdf33b2b9b" executionId="e5f354eb-692f-470a-aa46-3df4ea3748f3" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="46755b34-3525-8d65-58d7-f3d2465f2609" executionId="ec622658-1503-41fe-81fe-504d95b98b97" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="56e4301d-8f2f-500a-1144-cebd278baab2" executionId="92e01768-6245-46bc-bffa-16f569c966b3" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="f57a92bc-ca4e-ff26-7ebc-76ba7904a9b5" executionId="3494708c-94d8-4595-8d2d-10c36180cb59" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="d4822faa-f877-71c6-796c-c7a279ec25e0" executionId="6abbdf83-9748-4402-9283-cfde8d1cfe5f" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="10664b30-4e7b-eaf2-7f44-4dc0901004fb" executionId="4f29d964-241f-4c3a-a201-5af03b86c268" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+  </TestEntries>
+  <TestLists>
+    <TestList name="列表中未列出的结果" id="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestList name="所有已加载的结果" id="19431567-8539-422a-85d7-44ee4e166bda" />
+  </TestLists>
+  <ResultSummary outcome="Failed">
+    <Counters total="6" executed="6" passed="5" failed="1" error="0" timeout="0" aborted="0" inconclusive="0" passedButRunAborted="0" notRunnable="0" notExecuted="0" disconnected="0" warning="0" completed="0" inProgress="0" pending="0" />
+    <Output>
+      <StdOut>[xUnit.net 00:00:00.00] xUnit.net VSTest Adapter v2.8.2+699d445a1a (64-bit .NET 8.0.14)&#xD;
+[xUnit.net 00:00:00.04]   Discovering: ERP.IntegrationTests&#xD;
+[xUnit.net 00:00:00.07]   Discovered:  ERP.IntegrationTests&#xD;
+[xUnit.net 00:00:00.07]   Starting:    ERP.IntegrationTests&#xD;
+[��ʵ����� UI ����] Ŀ��ⰲȫ�������У����ݣ���ʽ�������������ģ���ERP_AI_TEST_RUN=1 �� ASPNETCORE_ENVIRONMENT=Development��&#xD;
+Starting msedgedriver 153.0.4234.48 (cf31d6623d8718e7a3c3e181e55e59c1aae57a73) on port 50585&#xD;
+To submit feedback, report a bug, or suggest new features, please visit https://github.com/MicrosoftEdge/EdgeWebDriver&#xD;
+Only local connections are allowed.&#xD;
+Please see https://aka.ms/WebDriverSecurity for suggestions on keeping Microsoft Edge WebDriver safe.&#xD;
+msedgedriver was started successfully on port 50585.&#xD;
+[xUnit.net 00:00:40.41]       OpenQA.Selenium.StaleElementReferenceException : stale element reference: stale element not found in the current frame
+  (Session info: MicrosoftEdge=153.0.4234.48); For documentation on this error, please visit: https://www.selenium.dev/documentation/webdriver/troubleshooting/errors#stale-element-reference-exception&#xD;
+[xUnit.net 00:00:40.41]       Stack Trace:&#xD;
+[xUnit.net 00:00:40.41]            at OpenQA.Selenium.WebDriver.UnpackAndThrowOnError(Response errorResponse, String commandToExecute)&#xD;
+[xUnit.net 00:00:40.41]            at OpenQA.Selenium.WebDriver.ExecuteAsync(String driverCommandToExecute, Dictionary`2 parameters)&#xD;
+[xUnit.net 00:00:40.41]            at OpenQA.Selenium.WebDriver.InternalExecute(String driverCommandToExecute, Dictionary`2 parameters)&#xD;
+[xUnit.net 00:00:40.41]            at OpenQA.Selenium.WebElement.get_Displayed()&#xD;
+[xUnit.net 00:00:40.41]         D:\VSCodeProject\NEWERP\src\ERP.IntegrationTests\PiWorkflowUiTests.cs(407,0): at ERP.IntegrationTests.PiWorkflowUiTests.&lt;&gt;c.&lt;ClickRowMenuAction&gt;b__24_2(IWebElement b)&#xD;
+[xUnit.net 00:00:40.41]            at System.Linq.Enumerable.TryGetFirst[TSource](IEnumerable`1 source, Func`2 predicate, Boolean&amp; found)&#xD;
+[xUnit.net 00:00:40.41]            at System.Linq.Enumerable.FirstOrDefault[TSource](IEnumerable`1 source, Func`2 predicate)&#xD;
+[xUnit.net 00:00:40.41]         D:\VSCodeProject\NEWERP\src\ERP.IntegrationTests\PiWorkflowUiTests.cs(406,0): at ERP.IntegrationTests.PiWorkflowUiTests.&lt;&gt;c__DisplayClass24_0.&lt;ClickRowMenuAction&gt;b__1(IWebDriver d)&#xD;
+[xUnit.net 00:00:40.41]            at OpenQA.Selenium.Support.UI.DefaultWait`1.Until[TResult](Func`2 condition, CancellationToken token)&#xD;
+[xUnit.net 00:00:40.41]            at OpenQA.Selenium.Support.UI.DefaultWait`1.Until[TResult](Func`2 condition)&#xD;
+[xUnit.net 00:00:40.41]         D:\VSCodeProject\NEWERP\src\ERP.IntegrationTests\PiWorkflowUiTests.cs(406,0): at ERP.IntegrationTests.PiWorkflowUiTests.ClickRowMenuAction(Int64 id, String functionName)&#xD;
+[xUnit.net 00:00:40.41]         D:\VSCodeProject\NEWERP\src\ERP.IntegrationTests\PiWorkflowUiTests.cs(179,0): at ERP.IntegrationTests.PiWorkflowUiTests.PI草稿修改_审核后禁改_销审恢复_并渲染打印预览()&#xD;
+[xUnit.net 00:00:40.41]            at System.RuntimeMethodHandle.InvokeMethod(Object target, Void** arguments, Signature sig, Boolean isConstructor)&#xD;
+[xUnit.net 00:00:40.41]            at System.Reflection.MethodBaseInvoker.InvokeWithNoArgs(Object obj, BindingFlags invokeAttr)&#xD;
+[xUnit.net 00:01:09.72]   Finished:    ERP.IntegrationTests&#xD;
+</StdOut>
+    </Output>
+    <RunInfos>
+      <RunInfo computerName="ADMIN-TIAN" outcome="Error" timestamp="2026-09-23T17:59:17.0173182+08:00">
+        <Text>[xUnit.net 00:00:40.41]     ERP.IntegrationTests.PiWorkflowUiTests.PI草稿修改_审核后禁改_销审恢复_并渲染打印预览 [FAIL]</Text>
+      </RunInfo>
+    </RunInfos>
+  </ResultSummary>
+</TestRun>

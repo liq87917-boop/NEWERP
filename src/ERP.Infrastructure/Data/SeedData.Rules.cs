@@ -60,7 +60,9 @@ public static partial class SeedData
             (DocumentType.ContainerSettlement, "ZJ", "装柜结算单", "ZJ"),
             (DocumentType.BulkSettlement, "SJ", "散货结算单", "SJ"),
             (DocumentType.Receipt, "SK", "收款单", "SK"),
-            (DocumentType.Complaint, "KS", "客诉单", "KS")
+            (DocumentType.Complaint, "KS", "客诉单", "KS"),
+            // 阶段 3：形式发票 PI 字轨（报价单 QT 由 SchemaUpgrader 幂等补齐，保持历史库升级一致）
+            (DocumentType.ProformaInvoice, "PI", "形式发票 PI", "PI")
         };
 
         foreach (var (type, code, name, prefix) in defaults)

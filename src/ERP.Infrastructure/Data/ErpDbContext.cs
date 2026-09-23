@@ -61,4 +61,8 @@ public partial class ErpDbContext : DbContext, IErpDbContext
     /// <summary>报价单主表 / 明细（阶段 3 新增）</summary>
     public DbSet<Quotation> Quotations => Set<Quotation>();
     public DbSet<QuotationDetail> QuotationDetails => Set<QuotationDetail>();
+
+    /// <summary>形式发票 PI 主表 / 明细（阶段 3 新增：报价单 → PI → 销售订单）</summary>
+    public DbSet<ProformaInvoice> ProformaInvoices => Set<ProformaInvoice>();
+    public DbSet<ProformaInvoiceDetail> ProformaInvoiceDetails => Set<ProformaInvoiceDetail>();
 }

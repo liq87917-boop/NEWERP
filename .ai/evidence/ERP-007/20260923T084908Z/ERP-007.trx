@@ -1,0 +1,156 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TestRun id="24ae16f3-1882-4ad1-b670-d924e137bb46" name="Admin@ADMIN-TIAN 2026-09-23 16:49:12" runUser="ADMIN-TIAN\Admin" xmlns="http://microsoft.com/schemas/VisualStudio/TeamTest/2010">
+  <Times creation="2026-09-23T16:49:12.5460749+08:00" queuing="2026-09-23T16:49:12.5460750+08:00" start="2026-09-23T16:49:12.0284656+08:00" finish="2026-09-23T16:49:12.5568079+08:00" />
+  <TestSettings name="default" id="b2dbb5ae-cd4b-4728-95df-5c81939fe27d">
+    <Deployment runDeploymentRoot="Admin_ADMIN-TIAN_2026-09-23_16_49_12" />
+  </TestSettings>
+  <Results>
+    <UnitTestResult executionId="8eb8d786-792b-47fb-be64-3b5c94857e8a" testId="d4822faa-f877-71c6-796c-c7a279ec25e0" testName="ERP.IntegrationTests.UiSmokeTests.打开首页_默认显示登录页" computerName="ADMIN-TIAN" duration="00:00:00.0010000" startTime="2026-09-23T16:49:12.4649806+08:00" endTime="2026-09-23T16:49:12.4649806+08:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Failed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="8eb8d786-792b-47fb-be64-3b5c94857e8a">
+      <Output>
+        <ErrorInfo>
+          <Message>System.InvalidOperationException : 真实浏览器 UI 验收 已中止：验收目标数据库与部署配置 deploy\appsettings.Production.json 指向同一个实例与库。为避免把验收数据（建表 / 菜单授权 / 系统参数 / 测试单据）写入业务库，请先让 ERP_ConnectionStrings__Default 指向专用测试库（例如 NEWERP_TEST）；若确认要在该库执行验收，请先取得 Human Gate 批准并在运行进程内显式设置 ERP_AI_ALLOW_HIGH_RISK_TESTS=APPROVED。</Message>
+          <StackTrace>   at ERP.IntegrationTests.TestDatabaseSafetyGuard.EnsureApprovedTarget(String connectionString, String runName) in D:\VSCodeProject\NEWERP\src\ERP.IntegrationTests\TestDatabaseSafetyGuard.cs:line 51&#xD;
+   at ERP.IntegrationTests.UiTestFixture.InitializeAsync() in D:\VSCodeProject\NEWERP\src\ERP.IntegrationTests\UiTestFixture.cs:line 30</StackTrace>
+        </ErrorInfo>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="a58e27d1-20aa-4355-af20-87c941d5b6d8" testId="56e4301d-8f2f-500a-1144-cebd278baab2" testName="ERP.IntegrationTests.UiSmokeTests.正确密码_进入主界面_可见菜单与用户名" computerName="ADMIN-TIAN" duration="00:00:00.0010000" startTime="2026-09-23T16:49:12.4646972+08:00" endTime="2026-09-23T16:49:12.4646973+08:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Failed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="a58e27d1-20aa-4355-af20-87c941d5b6d8">
+      <Output>
+        <ErrorInfo>
+          <Message>System.InvalidOperationException : 真实浏览器 UI 验收 已中止：验收目标数据库与部署配置 deploy\appsettings.Production.json 指向同一个实例与库。为避免把验收数据（建表 / 菜单授权 / 系统参数 / 测试单据）写入业务库，请先让 ERP_ConnectionStrings__Default 指向专用测试库（例如 NEWERP_TEST）；若确认要在该库执行验收，请先取得 Human Gate 批准并在运行进程内显式设置 ERP_AI_ALLOW_HIGH_RISK_TESTS=APPROVED。</Message>
+          <StackTrace>   at ERP.IntegrationTests.TestDatabaseSafetyGuard.EnsureApprovedTarget(String connectionString, String runName) in D:\VSCodeProject\NEWERP\src\ERP.IntegrationTests\TestDatabaseSafetyGuard.cs:line 51&#xD;
+   at ERP.IntegrationTests.UiTestFixture.InitializeAsync() in D:\VSCodeProject\NEWERP\src\ERP.IntegrationTests\UiTestFixture.cs:line 30</StackTrace>
+        </ErrorInfo>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="52f2f2a9-aa53-44b6-8098-8cb28c90bc37" testId="10664b30-4e7b-eaf2-7f44-4dc0901004fb" testName="ERP.IntegrationTests.PiWorkflowUiTests.报价单转PI_并可在PI列表与编辑页核对复制内容" computerName="ADMIN-TIAN" duration="00:00:00.0010000" startTime="2026-09-23T16:49:12.4641638+08:00" endTime="2026-09-23T16:49:12.4641639+08:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Failed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="52f2f2a9-aa53-44b6-8098-8cb28c90bc37">
+      <Output>
+        <ErrorInfo>
+          <Message>System.InvalidOperationException : 真实浏览器 UI 验收 已中止：验收目标数据库与部署配置 deploy\appsettings.Production.json 指向同一个实例与库。为避免把验收数据（建表 / 菜单授权 / 系统参数 / 测试单据）写入业务库，请先让 ERP_ConnectionStrings__Default 指向专用测试库（例如 NEWERP_TEST）；若确认要在该库执行验收，请先取得 Human Gate 批准并在运行进程内显式设置 ERP_AI_ALLOW_HIGH_RISK_TESTS=APPROVED。</Message>
+          <StackTrace>   at ERP.IntegrationTests.TestDatabaseSafetyGuard.EnsureApprovedTarget(String connectionString, String runName) in D:\VSCodeProject\NEWERP\src\ERP.IntegrationTests\TestDatabaseSafetyGuard.cs:line 51&#xD;
+   at ERP.IntegrationTests.UiTestFixture.InitializeAsync() in D:\VSCodeProject\NEWERP\src\ERP.IntegrationTests\UiTestFixture.cs:line 30</StackTrace>
+        </ErrorInfo>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="8a020adf-f0e2-4f83-bd60-abd2f277370a" testId="f57a92bc-ca4e-ff26-7ebc-76ba7904a9b5" testName="ERP.IntegrationTests.UiSmokeTests.错误密码_提示登录错误且不跳转" computerName="ADMIN-TIAN" duration="00:00:00.0010000" startTime="2026-09-23T16:49:12.4645606+08:00" endTime="2026-09-23T16:49:12.4645607+08:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Failed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="8a020adf-f0e2-4f83-bd60-abd2f277370a">
+      <Output>
+        <ErrorInfo>
+          <Message>System.InvalidOperationException : 真实浏览器 UI 验收 已中止：验收目标数据库与部署配置 deploy\appsettings.Production.json 指向同一个实例与库。为避免把验收数据（建表 / 菜单授权 / 系统参数 / 测试单据）写入业务库，请先让 ERP_ConnectionStrings__Default 指向专用测试库（例如 NEWERP_TEST）；若确认要在该库执行验收，请先取得 Human Gate 批准并在运行进程内显式设置 ERP_AI_ALLOW_HIGH_RISK_TESTS=APPROVED。</Message>
+          <StackTrace>   at ERP.IntegrationTests.TestDatabaseSafetyGuard.EnsureApprovedTarget(String connectionString, String runName) in D:\VSCodeProject\NEWERP\src\ERP.IntegrationTests\TestDatabaseSafetyGuard.cs:line 51&#xD;
+   at ERP.IntegrationTests.UiTestFixture.InitializeAsync() in D:\VSCodeProject\NEWERP\src\ERP.IntegrationTests\UiTestFixture.cs:line 30</StackTrace>
+        </ErrorInfo>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="b9b5b690-8ac7-42a9-b983-6aab40a16674" testId="89d8399c-b94b-e026-2e0d-adfdf33b2b9b" testName="ERP.IntegrationTests.PiWorkflowUiTests.PI草稿修改_审核后禁改_销审恢复_并渲染打印预览" computerName="ADMIN-TIAN" duration="00:00:00.0010000" startTime="2026-09-23T16:49:12.4621306+08:00" endTime="2026-09-23T16:49:12.4621416+08:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Failed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="b9b5b690-8ac7-42a9-b983-6aab40a16674">
+      <Output>
+        <ErrorInfo>
+          <Message>System.InvalidOperationException : 真实浏览器 UI 验收 已中止：验收目标数据库与部署配置 deploy\appsettings.Production.json 指向同一个实例与库。为避免把验收数据（建表 / 菜单授权 / 系统参数 / 测试单据）写入业务库，请先让 ERP_ConnectionStrings__Default 指向专用测试库（例如 NEWERP_TEST）；若确认要在该库执行验收，请先取得 Human Gate 批准并在运行进程内显式设置 ERP_AI_ALLOW_HIGH_RISK_TESTS=APPROVED。</Message>
+          <StackTrace>   at ERP.IntegrationTests.TestDatabaseSafetyGuard.EnsureApprovedTarget(String connectionString, String runName) in D:\VSCodeProject\NEWERP\src\ERP.IntegrationTests\TestDatabaseSafetyGuard.cs:line 51&#xD;
+   at ERP.IntegrationTests.UiTestFixture.InitializeAsync() in D:\VSCodeProject\NEWERP\src\ERP.IntegrationTests\UiTestFixture.cs:line 30</StackTrace>
+        </ErrorInfo>
+      </Output>
+    </UnitTestResult>
+    <UnitTestResult executionId="8ad106a6-ac07-49c1-8ee8-5f250fb96325" testId="46755b34-3525-8d65-58d7-f3d2465f2609" testName="ERP.IntegrationTests.UiSmokeTests.退出登录_回到登录页" computerName="ADMIN-TIAN" duration="00:00:00.0010000" startTime="2026-09-23T16:49:12.4648254+08:00" endTime="2026-09-23T16:49:12.4648255+08:00" testType="13cdc9d9-ddb5-4fa4-a97d-d965ccfc6d4b" outcome="Failed" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" relativeResultsDirectory="8ad106a6-ac07-49c1-8ee8-5f250fb96325">
+      <Output>
+        <ErrorInfo>
+          <Message>System.InvalidOperationException : 真实浏览器 UI 验收 已中止：验收目标数据库与部署配置 deploy\appsettings.Production.json 指向同一个实例与库。为避免把验收数据（建表 / 菜单授权 / 系统参数 / 测试单据）写入业务库，请先让 ERP_ConnectionStrings__Default 指向专用测试库（例如 NEWERP_TEST）；若确认要在该库执行验收，请先取得 Human Gate 批准并在运行进程内显式设置 ERP_AI_ALLOW_HIGH_RISK_TESTS=APPROVED。</Message>
+          <StackTrace>   at ERP.IntegrationTests.TestDatabaseSafetyGuard.EnsureApprovedTarget(String connectionString, String runName) in D:\VSCodeProject\NEWERP\src\ERP.IntegrationTests\TestDatabaseSafetyGuard.cs:line 51&#xD;
+   at ERP.IntegrationTests.UiTestFixture.InitializeAsync() in D:\VSCodeProject\NEWERP\src\ERP.IntegrationTests\UiTestFixture.cs:line 30</StackTrace>
+        </ErrorInfo>
+      </Output>
+    </UnitTestResult>
+  </Results>
+  <TestDefinitions>
+    <UnitTest name="ERP.IntegrationTests.UiSmokeTests.退出登录_回到登录页" storage="d:\vscodeproject\newerp\src\erp.integrationtests\bin\debug\net8.0\erp.integrationtests.dll" id="46755b34-3525-8d65-58d7-f3d2465f2609">
+      <Execution id="8ad106a6-ac07-49c1-8ee8-5f250fb96325" />
+      <TestMethod codeBase="D:\VSCodeProject\NEWERP\src\ERP.IntegrationTests\bin\Debug\net8.0\ERP.IntegrationTests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="ERP.IntegrationTests.UiSmokeTests" name="退出登录_回到登录页" />
+    </UnitTest>
+    <UnitTest name="ERP.IntegrationTests.UiSmokeTests.正确密码_进入主界面_可见菜单与用户名" storage="d:\vscodeproject\newerp\src\erp.integrationtests\bin\debug\net8.0\erp.integrationtests.dll" id="56e4301d-8f2f-500a-1144-cebd278baab2">
+      <Execution id="a58e27d1-20aa-4355-af20-87c941d5b6d8" />
+      <TestMethod codeBase="D:\VSCodeProject\NEWERP\src\ERP.IntegrationTests\bin\Debug\net8.0\ERP.IntegrationTests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="ERP.IntegrationTests.UiSmokeTests" name="正确密码_进入主界面_可见菜单与用户名" />
+    </UnitTest>
+    <UnitTest name="ERP.IntegrationTests.UiSmokeTests.错误密码_提示登录错误且不跳转" storage="d:\vscodeproject\newerp\src\erp.integrationtests\bin\debug\net8.0\erp.integrationtests.dll" id="f57a92bc-ca4e-ff26-7ebc-76ba7904a9b5">
+      <Execution id="8a020adf-f0e2-4f83-bd60-abd2f277370a" />
+      <TestMethod codeBase="D:\VSCodeProject\NEWERP\src\ERP.IntegrationTests\bin\Debug\net8.0\ERP.IntegrationTests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="ERP.IntegrationTests.UiSmokeTests" name="错误密码_提示登录错误且不跳转" />
+    </UnitTest>
+    <UnitTest name="ERP.IntegrationTests.UiSmokeTests.打开首页_默认显示登录页" storage="d:\vscodeproject\newerp\src\erp.integrationtests\bin\debug\net8.0\erp.integrationtests.dll" id="d4822faa-f877-71c6-796c-c7a279ec25e0">
+      <Execution id="8eb8d786-792b-47fb-be64-3b5c94857e8a" />
+      <TestMethod codeBase="D:\VSCodeProject\NEWERP\src\ERP.IntegrationTests\bin\Debug\net8.0\ERP.IntegrationTests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="ERP.IntegrationTests.UiSmokeTests" name="打开首页_默认显示登录页" />
+    </UnitTest>
+    <UnitTest name="ERP.IntegrationTests.PiWorkflowUiTests.PI草稿修改_审核后禁改_销审恢复_并渲染打印预览" storage="d:\vscodeproject\newerp\src\erp.integrationtests\bin\debug\net8.0\erp.integrationtests.dll" id="89d8399c-b94b-e026-2e0d-adfdf33b2b9b">
+      <Execution id="b9b5b690-8ac7-42a9-b983-6aab40a16674" />
+      <TestMethod codeBase="D:\VSCodeProject\NEWERP\src\ERP.IntegrationTests\bin\Debug\net8.0\ERP.IntegrationTests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="ERP.IntegrationTests.PiWorkflowUiTests" name="PI草稿修改_审核后禁改_销审恢复_并渲染打印预览" />
+    </UnitTest>
+    <UnitTest name="ERP.IntegrationTests.PiWorkflowUiTests.报价单转PI_并可在PI列表与编辑页核对复制内容" storage="d:\vscodeproject\newerp\src\erp.integrationtests\bin\debug\net8.0\erp.integrationtests.dll" id="10664b30-4e7b-eaf2-7f44-4dc0901004fb">
+      <Execution id="52f2f2a9-aa53-44b6-8098-8cb28c90bc37" />
+      <TestMethod codeBase="D:\VSCodeProject\NEWERP\src\ERP.IntegrationTests\bin\Debug\net8.0\ERP.IntegrationTests.dll" adapterTypeName="executor://xunit/VsTestRunner2/netcoreapp" className="ERP.IntegrationTests.PiWorkflowUiTests" name="报价单转PI_并可在PI列表与编辑页核对复制内容" />
+    </UnitTest>
+  </TestDefinitions>
+  <TestEntries>
+    <TestEntry testId="d4822faa-f877-71c6-796c-c7a279ec25e0" executionId="8eb8d786-792b-47fb-be64-3b5c94857e8a" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="56e4301d-8f2f-500a-1144-cebd278baab2" executionId="a58e27d1-20aa-4355-af20-87c941d5b6d8" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="10664b30-4e7b-eaf2-7f44-4dc0901004fb" executionId="52f2f2a9-aa53-44b6-8098-8cb28c90bc37" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="f57a92bc-ca4e-ff26-7ebc-76ba7904a9b5" executionId="8a020adf-f0e2-4f83-bd60-abd2f277370a" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="89d8399c-b94b-e026-2e0d-adfdf33b2b9b" executionId="b9b5b690-8ac7-42a9-b983-6aab40a16674" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestEntry testId="46755b34-3525-8d65-58d7-f3d2465f2609" executionId="8ad106a6-ac07-49c1-8ee8-5f250fb96325" testListId="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+  </TestEntries>
+  <TestLists>
+    <TestList name="列表中未列出的结果" id="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestList name="所有已加载的结果" id="19431567-8539-422a-85d7-44ee4e166bda" />
+  </TestLists>
+  <ResultSummary outcome="Failed">
+    <Counters total="6" executed="6" passed="0" failed="6" error="0" timeout="0" aborted="0" inconclusive="0" passedButRunAborted="0" notRunnable="0" notExecuted="0" disconnected="0" warning="0" completed="0" inProgress="0" pending="0" />
+    <Output>
+      <StdOut>[xUnit.net 00:00:00.00] xUnit.net VSTest Adapter v2.8.2+699d445a1a (64-bit .NET 8.0.14)&#xD;
+[xUnit.net 00:00:00.05]   Discovering: ERP.IntegrationTests&#xD;
+[xUnit.net 00:00:00.08]   Discovered:  ERP.IntegrationTests&#xD;
+[xUnit.net 00:00:00.08]   Starting:    ERP.IntegrationTests&#xD;
+[xUnit.net 00:00:00.11]       System.InvalidOperationException : 真实浏览器 UI 验收 已中止：验收目标数据库与部署配置 deploy\appsettings.Production.json 指向同一个实例与库。为避免把验收数据（建表 / 菜单授权 / 系统参数 / 测试单据）写入业务库，请先让 ERP_ConnectionStrings__Default 指向专用测试库（例如 NEWERP_TEST）；若确认要在该库执行验收，请先取得 Human Gate 批准并在运行进程内显式设置 ERP_AI_ALLOW_HIGH_RISK_TESTS=APPROVED。&#xD;
+[xUnit.net 00:00:00.11]       Stack Trace:&#xD;
+[xUnit.net 00:00:00.11]         D:\VSCodeProject\NEWERP\src\ERP.IntegrationTests\TestDatabaseSafetyGuard.cs(51,0): at ERP.IntegrationTests.TestDatabaseSafetyGuard.EnsureApprovedTarget(String connectionString, String runName)&#xD;
+[xUnit.net 00:00:00.11]         D:\VSCodeProject\NEWERP\src\ERP.IntegrationTests\UiTestFixture.cs(30,0): at ERP.IntegrationTests.UiTestFixture.InitializeAsync()&#xD;
+[xUnit.net 00:00:00.11]       System.InvalidOperationException : 真实浏览器 UI 验收 已中止：验收目标数据库与部署配置 deploy\appsettings.Production.json 指向同一个实例与库。为避免把验收数据（建表 / 菜单授权 / 系统参数 / 测试单据）写入业务库，请先让 ERP_ConnectionStrings__Default 指向专用测试库（例如 NEWERP_TEST）；若确认要在该库执行验收，请先取得 Human Gate 批准并在运行进程内显式设置 ERP_AI_ALLOW_HIGH_RISK_TESTS=APPROVED。&#xD;
+[xUnit.net 00:00:00.11]       Stack Trace:&#xD;
+[xUnit.net 00:00:00.11]         D:\VSCodeProject\NEWERP\src\ERP.IntegrationTests\TestDatabaseSafetyGuard.cs(51,0): at ERP.IntegrationTests.TestDatabaseSafetyGuard.EnsureApprovedTarget(String connectionString, String runName)&#xD;
+[xUnit.net 00:00:00.11]         D:\VSCodeProject\NEWERP\src\ERP.IntegrationTests\UiTestFixture.cs(30,0): at ERP.IntegrationTests.UiTestFixture.InitializeAsync()&#xD;
+[xUnit.net 00:00:00.11]       System.InvalidOperationException : 真实浏览器 UI 验收 已中止：验收目标数据库与部署配置 deploy\appsettings.Production.json 指向同一个实例与库。为避免把验收数据（建表 / 菜单授权 / 系统参数 / 测试单据）写入业务库，请先让 ERP_ConnectionStrings__Default 指向专用测试库（例如 NEWERP_TEST）；若确认要在该库执行验收，请先取得 Human Gate 批准并在运行进程内显式设置 ERP_AI_ALLOW_HIGH_RISK_TESTS=APPROVED。&#xD;
+[xUnit.net 00:00:00.11]       Stack Trace:&#xD;
+[xUnit.net 00:00:00.11]         D:\VSCodeProject\NEWERP\src\ERP.IntegrationTests\TestDatabaseSafetyGuard.cs(51,0): at ERP.IntegrationTests.TestDatabaseSafetyGuard.EnsureApprovedTarget(String connectionString, String runName)&#xD;
+[xUnit.net 00:00:00.11]         D:\VSCodeProject\NEWERP\src\ERP.IntegrationTests\UiTestFixture.cs(30,0): at ERP.IntegrationTests.UiTestFixture.InitializeAsync()&#xD;
+[xUnit.net 00:00:00.11]       System.InvalidOperationException : 真实浏览器 UI 验收 已中止：验收目标数据库与部署配置 deploy\appsettings.Production.json 指向同一个实例与库。为避免把验收数据（建表 / 菜单授权 / 系统参数 / 测试单据）写入业务库，请先让 ERP_ConnectionStrings__Default 指向专用测试库（例如 NEWERP_TEST）；若确认要在该库执行验收，请先取得 Human Gate 批准并在运行进程内显式设置 ERP_AI_ALLOW_HIGH_RISK_TESTS=APPROVED。&#xD;
+[xUnit.net 00:00:00.11]       Stack Trace:&#xD;
+[xUnit.net 00:00:00.11]         D:\VSCodeProject\NEWERP\src\ERP.IntegrationTests\TestDatabaseSafetyGuard.cs(51,0): at ERP.IntegrationTests.TestDatabaseSafetyGuard.EnsureApprovedTarget(String connectionString, String runName)&#xD;
+[xUnit.net 00:00:00.11]         D:\VSCodeProject\NEWERP\src\ERP.IntegrationTests\UiTestFixture.cs(30,0): at ERP.IntegrationTests.UiTestFixture.InitializeAsync()&#xD;
+[xUnit.net 00:00:00.11]       System.InvalidOperationException : 真实浏览器 UI 验收 已中止：验收目标数据库与部署配置 deploy\appsettings.Production.json 指向同一个实例与库。为避免把验收数据（建表 / 菜单授权 / 系统参数 / 测试单据）写入业务库，请先让 ERP_ConnectionStrings__Default 指向专用测试库（例如 NEWERP_TEST）；若确认要在该库执行验收，请先取得 Human Gate 批准并在运行进程内显式设置 ERP_AI_ALLOW_HIGH_RISK_TESTS=APPROVED。&#xD;
+[xUnit.net 00:00:00.11]       Stack Trace:&#xD;
+[xUnit.net 00:00:00.11]         D:\VSCodeProject\NEWERP\src\ERP.IntegrationTests\TestDatabaseSafetyGuard.cs(51,0): at ERP.IntegrationTests.TestDatabaseSafetyGuard.EnsureApprovedTarget(String connectionString, String runName)&#xD;
+[xUnit.net 00:00:00.11]         D:\VSCodeProject\NEWERP\src\ERP.IntegrationTests\UiTestFixture.cs(30,0): at ERP.IntegrationTests.UiTestFixture.InitializeAsync()&#xD;
+[xUnit.net 00:00:00.11]       System.InvalidOperationException : 真实浏览器 UI 验收 已中止：验收目标数据库与部署配置 deploy\appsettings.Production.json 指向同一个实例与库。为避免把验收数据（建表 / 菜单授权 / 系统参数 / 测试单据）写入业务库，请先让 ERP_ConnectionStrings__Default 指向专用测试库（例如 NEWERP_TEST）；若确认要在该库执行验收，请先取得 Human Gate 批准并在运行进程内显式设置 ERP_AI_ALLOW_HIGH_RISK_TESTS=APPROVED。&#xD;
+[xUnit.net 00:00:00.11]       Stack Trace:&#xD;
+[xUnit.net 00:00:00.12]         D:\VSCodeProject\NEWERP\src\ERP.IntegrationTests\TestDatabaseSafetyGuard.cs(51,0): at ERP.IntegrationTests.TestDatabaseSafetyGuard.EnsureApprovedTarget(String connectionString, String runName)&#xD;
+[xUnit.net 00:00:00.12]         D:\VSCodeProject\NEWERP\src\ERP.IntegrationTests\UiTestFixture.cs(30,0): at ERP.IntegrationTests.UiTestFixture.InitializeAsync()&#xD;
+[xUnit.net 00:00:00.12]   Finished:    ERP.IntegrationTests&#xD;
+</StdOut>
+    </Output>
+    <RunInfos>
+      <RunInfo computerName="ADMIN-TIAN" outcome="Error" timestamp="2026-09-23T16:49:12.4608653+08:00">
+        <Text>[xUnit.net 00:00:00.11]     ERP.IntegrationTests.PiWorkflowUiTests.PI草稿修改_审核后禁改_销审恢复_并渲染打印预览 [FAIL]</Text>
+      </RunInfo>
+      <RunInfo computerName="ADMIN-TIAN" outcome="Error" timestamp="2026-09-23T16:49:12.4641604+08:00">
+        <Text>[xUnit.net 00:00:00.11]     ERP.IntegrationTests.PiWorkflowUiTests.报价单转PI_并可在PI列表与编辑页核对复制内容 [FAIL]</Text>
+      </RunInfo>
+      <RunInfo computerName="ADMIN-TIAN" outcome="Error" timestamp="2026-09-23T16:49:12.4669468+08:00">
+        <Text>[xUnit.net 00:00:00.11]     ERP.IntegrationTests.UiSmokeTests.错误密码_提示登录错误且不跳转 [FAIL]</Text>
+      </RunInfo>
+      <RunInfo computerName="ADMIN-TIAN" outcome="Error" timestamp="2026-09-23T16:49:12.4705100+08:00">
+        <Text>[xUnit.net 00:00:00.11]     ERP.IntegrationTests.UiSmokeTests.正确密码_进入主界面_可见菜单与用户名 [FAIL]</Text>
+      </RunInfo>
+      <RunInfo computerName="ADMIN-TIAN" outcome="Error" timestamp="2026-09-23T16:49:12.4723172+08:00">
+        <Text>[xUnit.net 00:00:00.11]     ERP.IntegrationTests.UiSmokeTests.退出登录_回到登录页 [FAIL]</Text>
+      </RunInfo>
+      <RunInfo computerName="ADMIN-TIAN" outcome="Error" timestamp="2026-09-23T16:49:12.4757205+08:00">
+        <Text>[xUnit.net 00:00:00.11]     ERP.IntegrationTests.UiSmokeTests.打开首页_默认显示登录页 [FAIL]</Text>
+      </RunInfo>
+    </RunInfos>
+  </ResultSummary>
+</TestRun>

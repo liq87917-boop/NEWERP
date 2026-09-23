@@ -68,6 +68,10 @@ public interface IErpDbContext
     DbSet<Quotation> Quotations { get; }
     DbSet<QuotationDetail> QuotationDetails { get; }
 
+    /// <summary>形式发票 PI（阶段 3 新增：报价单 → PI → 销售订单）</summary>
+    DbSet<ProformaInvoice> ProformaInvoices { get; }
+    DbSet<ProformaInvoiceDetail> ProformaInvoiceDetails { get; }
+
     // ============ 物流管理 ============
     DbSet<StockIn> StockIns { get; }
     DbSet<StockInDetail> StockInDetails { get; }

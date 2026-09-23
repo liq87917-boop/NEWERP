@@ -23,6 +23,7 @@
     <ProjectReference Include="..\ERP.Api\ERP.Api.csproj" />
     <ProjectReference Include="..\ERP.Domain\ERP.Domain.csproj" />
     <ProjectReference Include="..\ERP.Infrastructure\ERP.Infrastructure.csproj" />
+    <ProjectReference Include="..\ERP.IntegrationTests\ERP.IntegrationTests.csproj" />
   </ItemGroup>
 
 </Project>

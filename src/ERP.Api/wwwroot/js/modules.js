@@ -3,6 +3,12 @@ const CURRENCY_OPTS = [
   { value: '1', label: '人民币 CNY' }, { value: '2', label: '美元 USD' },
   { value: '3', label: '欧元 EUR' }, { value: '4', label: '港币 HKD' },
 ];
+/* 币种（枚举名口径）：EF 主子表单据（报价单 / PI）的接口按枚举名返回币种，
+   选项值必须使用枚举名（USD/EUR…）才能正确回显与保存 */
+const CURRENCY_NAME_OPTS = [
+  { value: 'USD', label: 'USD 美元' }, { value: 'CNY', label: 'CNY 人民币' },
+  { value: 'EUR', label: 'EUR 欧元' }, { value: 'HKD', label: 'HKD 港币' },
+];
 const CONTAINER_OPTS = [
   { value: '20', label: '20GP 小柜' }, { value: '40', label: '40GP 平柜' },
   { value: '41', label: '40HQ 高柜' }, { value: '45', label: '45HQ 高柜' }, { value: '0', label: '散货 LCL' },
@@ -475,7 +481,7 @@ const MODULES = {
       { key: 'portOfDestination', label: '目的港' },
       { key: 'paymentTerms', label: '付款方式' },
       { key: 'leadTime', label: '交货期' },
-      { key: 'currency', label: '币种', type: 'select', valueType: 'number', options: CURRENCY_OPTS },
+      { key: 'currency', label: '币种', type: 'select', options: CURRENCY_NAME_OPTS },
       { key: 'exchangeRate', label: '汇率', type: 'number', default: 7.2 },
       { key: 'salesmanId', label: '业务员', type: 'ref', ref: 'employee' },
       { key: 'salesmanName', label: '业务员姓名（可覆盖）' },
@@ -483,9 +489,82 @@ const MODULES = {
       { key: 'inquiryNo', label: '来源询价单号' },
       { key: 'remark', label: '备注', type: 'textarea' },
     ],
+    /* 行操作扩展（crud.js 的 rowActions）：草稿可审核（审核后才能转 PI），已审核可销审与转 PI */
+    rowActions: [
+      { label: '审核', icon: '✅', title: '审核通过（审核后才能转 PI）', onclick: 'quotationApprove', statuses: ['Pending', 'Submitted'] },
+      { label: '销审', icon: '↩️', title: '退回草稿，可继续修改', onclick: 'quotationUnaudit', statuses: ['Approved'] },
+      { label: '转 PI', icon: '📄', title: '把已审核的报价单转为形式发票 PI（同一报价单只能转一次）', onclick: 'quotationToPi', statuses: ['Approved'] },
+      { label: '打印预览', icon: '🖨', title: '按打印模板预览该报价单', onclick: 'previewSalesDocPrint' },
+    ],
     /* 明细（主子表）：数量 × 单价 = 金额，自动算合计；主表与明细一次性保存 */
     detailKey: 'details',
     detailTitle: '报价明细（数量 × 单价 = 金额，自动算合计）',
+    detailAmount: { qty: 'quantity', price: 'unitPrice', amount: 'amount', totalId: 'detail-total' },
+    detailFields: [
+      { key: 'productCode', label: '商品编码', width: '110px' },
+      { key: 'productName', label: '商品名称', width: '170px' },
+      { key: 'spec', label: '规格', width: '130px' },
+      { key: 'unit', label: '单位', width: '70px' },
+      { key: 'quantity', label: '数量', type: 'number', width: '90px' },
+      { key: 'unitPrice', label: '单价', type: 'number', width: '90px' },
+      { key: 'amount', label: '金额', type: 'number', width: '100px', readonly: true },
+      { key: 'moq', label: '起订量', width: '90px' },
+      { key: 'remark', label: '备注', width: '130px' },
+    ],
+  },
+
+  /* 形式发票 PI（阶段 3 新增，挂在「询报价」菜单下；主子表：主表 + PI 明细）
+     业务链：询价单 Inquiry（新建询价单）→ 报价单 Quotation → 形式发票 PI（本单据）→ 销售订单 */
+  'proforma-invoice': {
+    title: '形式发票 PI', api: '/api/sales/proforma-invoices',
+    columns: [
+      { key: 'piNo', label: 'PI 号' }, { key: 'piDate', label: 'PI 日期', type: 'date' },
+      { key: 'customerName', label: '客户' }, { key: 'quotationNo', label: '来源报价单' },
+      { key: 'currency', label: '币种' }, { key: 'totalAmount', label: 'PI 总额', type: 'money' },
+      { key: 'depositRatio', label: '定金比例%' }, { key: 'depositAmount', label: '定金金额', type: 'money' },
+      { key: 'salesmanName', label: '业务员' }, { key: 'status', label: '状态', status: true },
+    ],
+    fields: [
+      { key: 'piNo', label: 'PI 号（留空自动生成）' },
+      { key: 'piDate', label: 'PI 日期', type: 'date' },
+      { key: 'quotationId', label: '来源报价单 ID（由报价单转 PI 自动回填）', type: 'number' },
+      { key: 'quotationNo', label: '来源报价单号' },
+      { key: 'customerId', label: '客户', type: 'ref', ref: 'customer' },
+      { key: 'customerName', label: '客户名称' },
+      { key: 'contactPerson', label: '客户对接人' },
+      { key: 'contactPhone', label: '联系电话' },
+      { key: 'contactEmail', label: '邮箱' },
+      { key: 'consignee', label: '收货人 Consignee', type: 'textarea' },
+      { key: 'notifyParty', label: '通知人 Notify Party', type: 'textarea' },
+      { key: 'shippingMarks', label: '唛头 Shipping Marks', type: 'textarea' },
+      { key: 'bankInfo', label: '银行信息（Beneficiary / Bank / Account / SWIFT）', type: 'textarea' },
+      { key: 'tradeTerms', label: '贸易术语', type: 'select', options: [
+        { value: 'FOB', label: 'FOB 离岸价' }, { value: 'CIF', label: 'CIF 到岸价' },
+        { value: 'CFR', label: 'CFR 成本加运费' }, { value: 'EXW', label: 'EXW 工厂交货' },
+        { value: 'DDP', label: 'DDP 完税后交货' }, { value: '其他', label: '其他' }] },
+      { key: 'portOfLoading', label: '起运港' },
+      { key: 'portOfDestination', label: '目的港' },
+      { key: 'paymentTerms', label: '付款方式' },
+      { key: 'shippingTerms', label: '运输方式 / 条款（如 By sea, FCL）' },
+      { key: 'leadTime', label: '交货期' },
+      { key: 'currency', label: '币种', type: 'select', options: CURRENCY_NAME_OPTS },
+      { key: 'exchangeRate', label: '汇率', type: 'number', default: 7.2 },
+      { key: 'depositRatio', label: '定金比例%（0~100）', type: 'number', default: 30 },
+      { key: 'depositAmount', label: '定金金额（留 0 按比例自动计算）', type: 'number' },
+      { key: 'salesmanId', label: '业务员', type: 'ref', ref: 'employee' },
+      { key: 'salesmanName', label: '业务员姓名（可覆盖）' },
+      { key: 'remark', label: '备注', type: 'textarea' },
+    ],
+    /* 行操作扩展（crud.js 的 rowActions）：草稿可审核/作废，已审核可销审，任何状态可打印预览 */
+    rowActions: [
+      { label: '审核', icon: '✅', title: '审核通过（草稿 → 已审核）', onclick: 'piApprove', statuses: ['Pending', 'Submitted'] },
+      { label: '销审', icon: '↩️', title: '退回草稿，可继续修改', onclick: 'piUnaudit', statuses: ['Approved'] },
+      { label: '作废', icon: '🚫', title: '作废该 PI（已转销售订单不可作废）', onclick: 'piVoid', statuses: ['Pending', 'Submitted', 'Approved'] },
+      { label: '打印预览', icon: '🖨', title: '按打印模板预览该 PI', onclick: 'previewSalesDocPrint' },
+    ],
+    /* 明细（主子表）：数量 × 单价 = 金额，自动算合计；主表与明细一次性保存 */
+    detailKey: 'details',
+    detailTitle: 'PI 商品明细（数量 × 单价 = 金额，自动算合计）',
     detailAmount: { qty: 'quantity', price: 'unitPrice', amount: 'amount', totalId: 'detail-total' },
     detailFields: [
       { key: 'productCode', label: '商品编码', width: '110px' },

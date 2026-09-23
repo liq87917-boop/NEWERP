@@ -23,6 +23,8 @@ public class PrintTemplateController : ControllerBase
         ["customer"] = "客户资料", ["supplier"] = "供应商资料", ["employee"] = "员工资料",
         ["expense-account"] = "费用科目", ["warehouse"] = "仓库资料",
         ["product"] = "商品资料", ["other-info"] = "其他资料",
+        // 阶段 3：EF 主子表单据（报价单 / 形式发票 PI）同样支持打印设计与打印预览
+        ["quotation"] = "报价单", ["proforma-invoice"] = "形式发票 PI",
     };
 
     public PrintTemplateController(IErpDbContext db)

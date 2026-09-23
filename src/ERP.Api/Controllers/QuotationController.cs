@@ -187,6 +187,107 @@ public class QuotationController : DocumentControllerBase<Quotation>
         return Ok(ApiResponse<object>.Success(null, "报价单更新成功"));
     }
 
+    /// <summary>转为 PI：复制主表业务字段与明细 / 回填来源报价单 / 原报价单状态改为「已转 PI」（Completed）</summary>
+    /// <remarks>
+    /// 转换规则（唯一入口，防重复）：
+    /// 1) 报价单必须已审核（草稿 / 已提交先审核），已作废与已转 PI 均被拒绝；
+    /// 2) 同一报价单只允许生成一张 PI（即使状态被人工改回，也由 PI.QuotationId 兜底拦截）；
+    /// 3) 银行信息取系统参数 PI_BankInfo 默认值，收货人 / 通知人 / 唛头取客户资料默认值，PI 上均可再改。
+    /// </remarks>
+    [HttpPost("{id:long}/to-pi")]
+    public async Task<IActionResult> ToProformaInvoice(long id)
+    {
+        var quotation = await Db.Quotations.Include(o => o.Details)
+            .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
+            ?? throw BusinessException.NotFound("报价单不存在");
+
+        var status = GetStatus(quotation);
+        if (status == DocumentStatus.Cancelled)
+            throw BusinessException.RuleConflict("已作废的报价单不能转 PI");
+        if (status == DocumentStatus.Completed)
+            throw BusinessException.RuleConflict("该报价单已转为 PI，不能重复转换");
+        if (status != DocumentStatus.Approved)
+            throw BusinessException.RuleConflict("报价单未审核，请先审核后再转 PI");
+        if (!quotation.Details.Any(d => !d.IsDeleted))
+            throw BusinessException.RuleConflict("报价单无商品明细，不能转 PI");
+
+        var generated = await Db.ProformaInvoices.AsNoTracking()
+            .FirstOrDefaultAsync(o => o.QuotationId == id && !o.IsDeleted);
+        if (generated is not null)
+            throw BusinessException.RuleConflict($"该报价单已转为 PI：{generated.PiNo}");
+
+        BaseCustomer? customer = null;
+        if (quotation.CustomerId > 0)
+            customer = await Db.BaseCustomers.AsNoTracking()
+                .FirstOrDefaultAsync(c => c.Id == quotation.CustomerId && !c.IsDeleted);
+        var bankInfo = await Db.SysParameters.AsNoTracking()
+            .Where(p => !p.IsDeleted && p.ParamKey == "PI_BankInfo")
+            .Select(p => p.ParamValue).FirstOrDefaultAsync() ?? string.Empty;
+
+        var pi = new ProformaInvoice
+        {
+            PiNo = await _noService.GenerateAsync(DocumentType.ProformaInvoice),
+            PiDate = DateTime.Today,
+            QuotationId = quotation.Id,
+            QuotationNo = quotation.QuotationNo,
+            CustomerId = quotation.CustomerId,
+            CustomerName = quotation.CustomerName,
+            ContactPerson = quotation.ContactPerson,
+            ContactPhone = quotation.ContactPhone,
+            ContactEmail = quotation.ContactEmail,
+            Consignee = customer?.Consignee ?? string.Empty,
+            NotifyParty = customer?.NotifyParty ?? string.Empty,
+            ShippingMarks = customer?.DefaultShippingMark ?? string.Empty,
+            BankInfo = bankInfo,
+            TradeTerms = quotation.TradeTerms,
+            PortOfLoading = quotation.PortOfLoading,
+            PortOfDestination = quotation.PortOfDestination,
+            PaymentTerms = quotation.PaymentTerms,
+            LeadTime = quotation.LeadTime,
+            Currency = quotation.Currency,
+            ExchangeRate = quotation.ExchangeRate,
+            // 定金比例：优先客户资料约定值，未维护时按外贸惯例 30%
+            DepositRatio = customer is { DepositRatio: > 0 } ? customer.DepositRatio : 30m,
+            SalesmanId = quotation.SalesmanId,
+            SalesmanName = quotation.SalesmanName,
+            Status = DocumentStatus.Pending,
+            Remark = quotation.Remark,
+            CreatedAt = DateTime.Now,
+            Details = quotation.Details.Where(d => !d.IsDeleted).OrderBy(d => d.SortNo)
+                .Select(d => new ProformaInvoiceDetail
+                {
+                    ProductId = d.ProductId,
+                    ProductCode = d.ProductCode,
+                    ProductName = d.ProductName,
+                    Spec = d.Spec,
+                    Unit = d.Unit,
+                    Quantity = d.Quantity,
+                    UnitPrice = d.UnitPrice,
+                    Moq = d.Moq,
+                    Remark = d.Remark,
+                    CreatedAt = DateTime.Now
+                }).ToList()
+        };
+
+        ProformaInvoiceController.Normalize(pi);
+        Db.ProformaInvoices.Add(pi);
+        SetStatus(quotation, DocumentStatus.Completed);   // 报价单 →「已转 PI」
+        await Db.SaveChangesAsync();
+        return Ok(ApiResponse<object>.Success(new { pi.Id, pi.PiNo, QuotationNo = quotation.QuotationNo },
+            "已生成形式发票 PI"));
+    }
+
+    /// <summary>打印数据（主表 + 明细；打印模板由 /api/sys/print-templates/quotation 提供）</summary>
+    [HttpGet("{id:long}/print")]
+    public async Task<IActionResult> GetPrint(long id)
+    {
+        var entity = await Set.AsNoTracking().Include(o => o.Details)
+            .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
+            ?? throw BusinessException.NotFound("报价单不存在");
+        entity.Details = entity.Details.Where(d => !d.IsDeleted).OrderBy(d => d.SortNo).ToList();
+        return Ok(ApiResponse<Quotation>.Success(entity));
+    }
+
     /// <summary>行号 / 金额 / 合计 / 有效期统一整理（后端复核，防止前端篡改合计）</summary>
     private static void Normalize(Quotation e)
     {

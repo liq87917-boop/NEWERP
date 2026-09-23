@@ -52,6 +52,9 @@ public partial class ErpDbContext
         modelBuilder.Entity<FinanceReceipt>().HasIndex(x => x.ReceiptNo).IsUnique();
         modelBuilder.Entity<FinanceComplaint>().HasIndex(x => x.ComplaintNo).IsUnique();
 
+        // ============ 单据号唯一索引（阶段 3：形式发票 PI 使用 EF 主子表） ============
+        modelBuilder.Entity<ProformaInvoice>().HasIndex(x => x.PiNo).IsUnique();
+
         // ============ 库存唯一约束（仓库 + 商品） ============
         modelBuilder.Entity<Stock>().HasIndex(s => new { s.WarehouseId, s.ProductId }).IsUnique();
 
@@ -83,6 +86,12 @@ public partial class ErpDbContext
         modelBuilder.Entity<ContainerLoadingDetail>()
             .HasOne<ContainerLoadingList>().WithMany(o => o.Details)
             .HasForeignKey(d => d.LoadingListId).OnDelete(DeleteBehavior.Cascade);
+
+        // 形式发票 PI 明细（阶段 3）：外键名为 PiId，不符合 EF 默认命名约定（<主表实体>Id），
+        // 必须显式配置，否则主子表不建立关系（Include 取不到明细、保存时也不会回填外键）
+        modelBuilder.Entity<ProformaInvoiceDetail>()
+            .HasOne<ProformaInvoice>().WithMany(o => o.Details)
+            .HasForeignKey(d => d.PiId).OnDelete(DeleteBehavior.Cascade);
     }
 
     /// <summary>保存变更：自动填充审计字段</summary>

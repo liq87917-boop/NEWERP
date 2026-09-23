@@ -68,4 +68,31 @@ public class DocumentNumberServiceTests
 
         Assert.StartsWith("SO20260819", no);
     }
+
+    [Fact]
+    public async Task GenerateAsync_形式发票PI规则_生成PI号且不影响既有单据号()
+    {
+        using var db = TestDbFactory.Create();
+        db.SysDocumentNumberRules.Add(new SysDocumentNumberRule
+        {
+            DocumentType = DocumentType.ProformaInvoice,
+            RuleCode = "PI",
+            RuleName = "形式发票 PI",
+            Prefix = "PI",
+            DateFormat = "yyyyMMdd",
+            SerialLength = 4,
+            Separator = string.Empty,
+            CurrentSequence = 0,
+            YearlyReset = true
+        });
+        await db.SaveChangesAsync();
+
+        var service = new DocumentNumberService(db);
+        var piNo = await service.GenerateAsync(DocumentType.ProformaInvoice, new DateTime(2026, 9, 23));
+        var soNo = await service.GenerateAsync(DocumentType.SalesOrder, new DateTime(2026, 9, 23));
+
+        Assert.Equal("PI202609230001", piNo);
+        Assert.StartsWith("SO20260923", soNo);          // 既有单据编号规则不受影响
+        Assert.DoesNotContain("PI202609230001", soNo);
+    }
 }

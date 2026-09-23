@@ -10,7 +10,11 @@ namespace ERP.Domain.Entities;
 public class Quotation : BaseEntity
 {
     /// <summary>报价单号（单据字轨生成，如 QT2609180001）</summary>
-    [Required, MaxLength(50)]
+    /// <remarks>
+    /// 允许空串：报价单号由服务端字轨生成（表单提示「留空自动生成」），若此处禁止空串，
+    /// 新增报价单会在到达控制器之前被 [ApiController] 的模型校验拦成 400，导致服务端自动编号永远无法生效。
+    /// </remarks>
+    [Required(AllowEmptyStrings = true), MaxLength(50)]
     public string QuotationNo { get; set; } = string.Empty;
 
     /// <summary>报价日期</summary>

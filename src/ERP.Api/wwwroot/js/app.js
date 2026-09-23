@@ -33,12 +33,18 @@ async function uploadFile(path, formData) {
   return data.data;
 }
 
+/* 提示条自动隐藏定时器：连续提示（例如「已销审」紧接「保存成功」）时必须先清除上一条的定时器，
+   否则上一条的 3 秒定时器会把刚显示出来的第二条提示提前隐藏 —— 用户看不到第二条提示，
+   真实浏览器验收也会因为元素不可见读不到文案而误判失败。 */
+let TOAST_HIDE_TIMER = null;
+
 function toast(msg, type = 'success') {
   const el = document.getElementById('toast');
   el.textContent = msg;
   el.className = 'toast ' + type;
   el.style.display = 'block';
-  setTimeout(() => { el.style.display = 'none'; }, 3000);
+  if (TOAST_HIDE_TIMER) clearTimeout(TOAST_HIDE_TIMER);
+  TOAST_HIDE_TIMER = setTimeout(() => { el.style.display = 'none'; TOAST_HIDE_TIMER = null; }, 3000);
 }
 
 function fmtDate(v) { return v ? String(v).slice(0, 10) : ''; }
@@ -288,6 +294,8 @@ const CODE_ICON = {
   'purchase-quote': 'scale',
   /* 阶段 3 新增：报价单 */
   quotation: 'receipt',
+  /* 阶段 3 新增：形式发票 PI */
+  'proforma-invoice': 'file-text',
   /* 阶段 2 新增：单证中心 */
   'doc-center': 'scroll',
   /* 阶段 2 新增：客户跟进记录 / 业务员提成表 */

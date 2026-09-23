@@ -1,0 +1,35 @@
+{
+  "task": "ERP-007",
+  "status": "failed",
+  "started_at": "2026-09-23T07:41:16.702971Z",
+  "finished_at": "2026-09-23T07:41:20.551565Z",
+  "browser": {
+    "name": "Microsoft Edge",
+    "binary": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
+    "real_browser": true,
+    "headless": true
+  },
+  "scenarios": [
+    "Login in Microsoft Edge and open the quotation list; create or use a valid quotation and execute 转 PI.",
+    "Open the generated PI and verify copied customer, terms, currency, line items, totals and deposit values.",
+    "Edit a draft PI, save, approve, verify approved PI cannot be edited until unaudit, then unaudit and verify editing is restored.",
+    "Open PI print preview and verify the document renders without console errors or failed API requests."
+  ],
+  "test_filter": "Collection=UiTests",
+  "build_exit_code": 0,
+  "test_exit_code": 1,
+  "screenshot_count": 0,
+  "minimum_screenshots": 2,
+  "artifacts": [
+    {
+      "path": ".ai/evidence/ERP-007/20260923T074116Z/browser-test.log",
+      "sha256": "b5cdc422cffa429874899a3c1e9ae2b9f59ba8777bde133068e818b26c74496d",
+      "bytes": 22494
+    },
+    {
+      "path": ".ai/evidence/ERP-007/20260923T074116Z/ERP-007.trx",
+      "sha256": "0ec9072e2673a30d7986b99d756e264ef12d1378d49ac6383ffda940b44db30f",
+      "bytes": 23124
+    }
+  ]
+}

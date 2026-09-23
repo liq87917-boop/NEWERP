@@ -789,5 +789,104 @@ IF NOT EXISTS (SELECT 1 FROM db_owner.SysDocumentNumberRules WHERE DocumentType 
     INSERT INTO db_owner.SysDocumentNumberRules (DocumentType, RuleCode, RuleName, Prefix, DateFormat, SerialLength, Separator, CurrentSequence, YearlyReset, Remark, CreatedAt, IsDeleted)
     VALUES (17, N'QT', N'报价单', N'QT', N'yyyyMMdd', 4, N'', 0, 1, N'报价单（询价单 → 报价单 → PI → 销售订单）', GETDATE(), 0);");
 
+        // 21. 阶段 3：形式发票 PI（报价单 → PI → 销售订单）
+        //     21.1 主子表建表（幂等）；21.2 菜单 + 授权 + 字轨 + 银行信息默认参数
+        // 21.1 形式发票 PI 主子表建表（幂等）
+        await db.Database.ExecuteSqlRawAsync(@"
+IF OBJECT_ID('db_owner.ProformaInvoices') IS NULL
+BEGIN
+    CREATE TABLE db_owner.ProformaInvoices (
+        Id BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+        PiNo NVARCHAR(50) NOT NULL,
+        PiDate DATETIME2 NOT NULL DEFAULT GETDATE(),
+        QuotationId BIGINT NULL,
+        QuotationNo NVARCHAR(50) NOT NULL DEFAULT N'',
+        CustomerId BIGINT NULL,
+        CustomerName NVARCHAR(200) NOT NULL DEFAULT N'',
+        ContactPerson NVARCHAR(50) NOT NULL DEFAULT N'',
+        ContactPhone NVARCHAR(50) NOT NULL DEFAULT N'',
+        ContactEmail NVARCHAR(100) NOT NULL DEFAULT N'',
+        Consignee NVARCHAR(300) NOT NULL DEFAULT N'',
+        NotifyParty NVARCHAR(300) NOT NULL DEFAULT N'',
+        ShippingMarks NVARCHAR(500) NOT NULL DEFAULT N'',
+        BankInfo NVARCHAR(1000) NOT NULL DEFAULT N'',
+        TradeTerms NVARCHAR(50) NOT NULL DEFAULT N'',
+        PortOfLoading NVARCHAR(100) NOT NULL DEFAULT N'',
+        PortOfDestination NVARCHAR(100) NOT NULL DEFAULT N'',
+        PaymentTerms NVARCHAR(200) NOT NULL DEFAULT N'',
+        ShippingTerms NVARCHAR(200) NOT NULL DEFAULT N'',
+        LeadTime NVARCHAR(100) NOT NULL DEFAULT N'',
+        Currency INT NOT NULL DEFAULT 2,
+        ExchangeRate DECIMAL(18,6) NOT NULL DEFAULT 1,
+        TotalAmount DECIMAL(18,4) NOT NULL DEFAULT 0,
+        TotalAmountCny DECIMAL(18,4) NOT NULL DEFAULT 0,
+        DepositRatio DECIMAL(18,4) NOT NULL DEFAULT 0,
+        DepositAmount DECIMAL(18,4) NOT NULL DEFAULT 0,
+        SalesmanId BIGINT NULL,
+        SalesmanName NVARCHAR(50) NOT NULL DEFAULT N'',
+        Status INT NOT NULL DEFAULT 0,
+        Remark NVARCHAR(500) NOT NULL DEFAULT N'',
+        CreatedAt DATETIME2 NOT NULL DEFAULT GETDATE(),
+        CreatedBy BIGINT NULL,
+        UpdatedAt DATETIME2 NULL,
+        UpdatedBy BIGINT NULL,
+        IsDeleted BIT NOT NULL DEFAULT 0,
+        RowVersion ROWVERSION NOT NULL
+    );
+END
+
+IF OBJECT_ID('db_owner.ProformaInvoiceDetails') IS NULL
+BEGIN
+    CREATE TABLE db_owner.ProformaInvoiceDetails (
+        Id BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+        PiId BIGINT NOT NULL DEFAULT 0,
+        PiNo NVARCHAR(50) NOT NULL DEFAULT N'',
+        SortNo INT NOT NULL DEFAULT 0,
+        ProductId BIGINT NULL,
+        ProductCode NVARCHAR(50) NOT NULL DEFAULT N'',
+        ProductName NVARCHAR(200) NOT NULL DEFAULT N'',
+        Spec NVARCHAR(200) NOT NULL DEFAULT N'',
+        Unit NVARCHAR(20) NOT NULL DEFAULT N'',
+        Quantity DECIMAL(18,4) NOT NULL DEFAULT 0,
+        UnitPrice DECIMAL(18,4) NOT NULL DEFAULT 0,
+        Amount DECIMAL(18,4) NOT NULL DEFAULT 0,
+        Moq NVARCHAR(100) NOT NULL DEFAULT N'',
+        Remark NVARCHAR(500) NOT NULL DEFAULT N'',
+        CreatedAt DATETIME2 NOT NULL DEFAULT GETDATE(),
+        CreatedBy BIGINT NULL,
+        UpdatedAt DATETIME2 NULL,
+        UpdatedBy BIGINT NULL,
+        IsDeleted BIT NOT NULL DEFAULT 0,
+        RowVersion ROWVERSION NOT NULL
+    );
+END");
+
+        // 21.2 形式发票 PI 菜单（挂在「询报价」分组下，与报价单同级）+ 幂等授权
+        await db.Database.ExecuteSqlRawAsync(@"
+IF NOT EXISTS (SELECT 1 FROM db_owner.SysMenus WHERE MenuCode = N'proforma-invoice' AND IsDeleted = 0)
+BEGIN
+    DECLARE @pInq2 BIGINT = (SELECT TOP 1 Id FROM db_owner.SysMenus WHERE MenuCode = N'inquiry' AND IsDeleted = 0);
+    IF @pInq2 IS NOT NULL
+        INSERT INTO db_owner.SysMenus (ParentId, MenuName, MenuCode, Path, Icon, SortOrder, MenuType, PermissionCode, CreatedAt, IsDeleted)
+        VALUES (@pInq2, N'形式发票 PI', N'proforma-invoice', N'/sales/proforma-invoice', N'file-text', 20, 2, N'sales:proforma-invoice', GETDATE(), 0);
+END
+
+INSERT INTO db_owner.SysRoleMenus (RoleId, MenuId, CreatedAt, IsDeleted)
+SELECT DISTINCT x.RoleId, m.Id, GETDATE(), 0
+FROM db_owner.SysMenus m
+JOIN db_owner.SysMenus sib ON sib.MenuCode IN (N'inquiry', N'quotation') AND sib.IsDeleted = 0
+JOIN db_owner.SysRoleMenus x ON x.MenuId = sib.Id AND x.IsDeleted = 0
+WHERE m.MenuCode = N'proforma-invoice' AND m.IsDeleted = 0
+  AND NOT EXISTS (SELECT 1 FROM db_owner.SysRoleMenus y
+                  WHERE y.RoleId = x.RoleId AND y.MenuId = m.Id AND y.IsDeleted = 0);
+
+IF NOT EXISTS (SELECT 1 FROM db_owner.SysDocumentNumberRules WHERE DocumentType = 18 AND IsDeleted = 0)
+    INSERT INTO db_owner.SysDocumentNumberRules (DocumentType, RuleCode, RuleName, Prefix, DateFormat, SerialLength, Separator, CurrentSequence, YearlyReset, Remark, CreatedAt, IsDeleted)
+    VALUES (18, N'PI', N'形式发票 PI', N'PI', N'yyyyMMdd', 4, N'', 0, 1, N'形式发票 PI（报价单 → PI → 销售订单）', GETDATE(), 0);
+
+IF NOT EXISTS (SELECT 1 FROM db_owner.SysParameters WHERE ParamKey = N'PI_BankInfo' AND IsDeleted = 0)
+    INSERT INTO db_owner.SysParameters (ParamKey, ParamValue, ParamName, Description, IsSystem, CreatedAt, IsDeleted)
+    VALUES (N'PI_BankInfo', N'', N'PI 银行信息（默认）', N'转 PI 时自动带入的收款银行信息（Beneficiary / Bank / Account / SWIFT，多行文本）；PI 单据上可逐单覆盖', 0, GETDATE(), 0);");
+
     }
 }

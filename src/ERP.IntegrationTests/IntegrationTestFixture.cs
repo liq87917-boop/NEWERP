@@ -47,6 +47,8 @@ public class IntegrationTestFixture : IAsyncLifetime
         }
         builder.AddEnvironmentVariables(prefix: "ERP_");
         Configuration = builder.Build();
+        // 安全护栏：数据库集成测试同样不允许默认写业务库（与部署配置同库时必须人工显式批准）
+        TestDatabaseSafetyGuard.EnsureApprovedTarget(Configuration.GetConnectionString("Default"), "数据库集成测试");
         SpService = new StoredProcedureService(Configuration);
         OssService = new OssStorageService(Configuration);
         return Task.CompletedTask;

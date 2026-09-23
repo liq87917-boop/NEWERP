@@ -1,0 +1,27 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TestRun id="41fd8a6a-c724-45f2-929d-e4c06e2740c3" name="Admin@ADMIN-TIAN 2026-09-23 14:39:26" runUser="ADMIN-TIAN\Admin" xmlns="http://microsoft.com/schemas/VisualStudio/TeamTest/2010">
+  <Times creation="2026-09-23T14:39:26.7888560+08:00" queuing="2026-09-23T14:39:26.7888563+08:00" start="2026-09-23T14:39:26.3040354+08:00" finish="2026-09-23T14:39:26.7891875+08:00" />
+  <TestSettings name="default" id="76077217-c7d8-44db-90da-5538f2bf634f">
+    <Deployment runDeploymentRoot="Admin_ADMIN-TIAN_2026-09-23_14_39_26" />
+  </TestSettings>
+  <TestLists>
+    <TestList name="列表中未列出的结果" id="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestList name="所有已加载的结果" id="19431567-8539-422a-85d7-44ee4e166bda" />
+  </TestLists>
+  <ResultSummary outcome="Completed">
+    <Counters total="0" executed="0" passed="0" failed="0" error="0" timeout="0" aborted="0" inconclusive="0" passedButRunAborted="0" notRunnable="0" notExecuted="0" disconnected="0" warning="0" completed="0" inProgress="0" pending="0" />
+    <Output>
+      <StdOut>[xUnit.net 00:00:00.00] xUnit.net VSTest Adapter v2.8.2+699d445a1a (64-bit .NET 8.0.14)&#xD;
+[xUnit.net 00:00:00.05]   Discovering: ERP.IntegrationTests&#xD;
+[xUnit.net 00:00:00.07]   Discovered:  ERP.IntegrationTests&#xD;
+[xUnit.net 00:00:00.08]   Starting:    ERP.IntegrationTests&#xD;
+[xUnit.net 00:00:00.08]   Finished:    ERP.IntegrationTests&#xD;
+</StdOut>
+    </Output>
+    <RunInfos>
+      <RunInfo computerName="ADMIN-TIAN" outcome="Warning" timestamp="2026-09-23T14:39:26.7459459+08:00">
+        <Text>没有测试匹配 D:\VSCodeProject\NEWERP\src\ERP.IntegrationTests\bin\Debug\net8.0\ERP.IntegrationTests.dll 中的给定用例测试筛选器“Collection=UiTests”</Text>
+      </RunInfo>
+    </RunInfos>
+  </ResultSummary>
+</TestRun>
