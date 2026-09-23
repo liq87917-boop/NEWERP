@@ -1,0 +1,42 @@
+{
+  "id": "ERP-005",
+  "title": "Add persistent local agent status console",
+  "status": "completed",
+  "risk_level": "medium",
+  "description": "Add a persistent local NEWERP AI Agent console that displays durable project/task/Git/CI status, safely fast-forwards clean managed branches, and starts the guarded local pipeline for runnable tasks.",
+  "acceptance_criteria": [
+    "Repository root provides start_agent.bat for launching the persistent local Agent console.",
+    "Console displays project phase, current/completed task, queue, Git sync state, validation/browser status, blocker, runner state, and recent runner output without printing secrets.",
+    "Clean main/master/develop worktrees can fast-forward from origin and automatically start the guarded pipeline for runnable pending/retry tasks.",
+    "Dirty worktrees, paused state, and L3/L4 or explicit human-approval gates prevent unsafe automatic execution.",
+    "CI includes a no-execute one-shot smoke test for the Agent console.",
+    "GitHub Actions run 35816664437 completes successfully for commit 3ab08fec153d125d659b540a9aa220e04dae870b."
+  ],
+  "allowed_paths": [
+    "start_agent.bat",
+    "scripts/agent-host.ps1",
+    ".github/workflows/build.yml",
+    "docs/AUTOMATED_DEVELOPMENT.md",
+    ".ai/PROJECT_STATE.json",
+    ".ai/tasks/ERP-005.json",
+    ".ai/results/ERP-005.json",
+    ".ai/audit.jsonl"
+  ],
+  "validation_profile": "full_ci",
+  "depends_on": ["ERP-004"],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "completion_mode": "control_plane",
+  "browser_acceptance": {
+    "required": false,
+    "note": "Control-plane change was validated by the CI Agent console smoke test and approved UI smoke job against the test environment."
+  },
+  "human_gate": {
+    "required": false,
+    "status": "ai_reviewed",
+    "level": "L2",
+    "reason": "Local automation control-plane/status-host change only; production and irreversible operations remain gated."
+  },
+  "attempts": 1,
+  "completed_at": "2026-09-23T04:07:42Z"
+}

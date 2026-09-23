@@ -1,0 +1,23 @@
+{
+  "task": "ERP-005",
+  "status": "completed",
+  "execution_outcome": "completed",
+  "normalized_finish_reason": "full_ci_validated",
+  "cline_exit_code": null,
+  "cline_finish_reason_raw": null,
+  "attempts": 1,
+  "browser_acceptance": {
+    "source": "github_actions",
+    "job": "Approved UI Smoke Tests",
+    "status": "passed"
+  },
+  "validation": {
+    "commit": "3ab08fec153d125d659b540a9aa220e04dae870b",
+    "github_actions_run": 35816664437,
+    "agent_console_smoke_test": "passed",
+    "build_and_unit_tests": "passed",
+    "sql_integration_tests": "passed",
+    "edge_ui_smoke_tests": "passed"
+  },
+  "finished_at": "2026-09-23T04:07:42Z"
+}
