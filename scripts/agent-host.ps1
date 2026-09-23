@@ -198,7 +198,27 @@ function Sync-Repository {
     $env:GIT_TERMINAL_PROMPT = '0'
     $fetch = Invoke-Git @('fetch', '--quiet', 'origin', $GitInfo.Branch)
     if ($fetch[0] -ne 0) {
-        return 'git fetch failed'
+        # Prefer the already-authenticated GitHub CLI as a credential repair path
+        # for unattended private-repository synchronization.
+        $gh = Get-Command gh -ErrorAction SilentlyContinue
+        if ($gh) {
+            $oldPreference = $ErrorActionPreference
+            $ErrorActionPreference = 'Continue'
+            try {
+                & gh auth status --hostname github.com *> $null
+                if ($LASTEXITCODE -eq 0) {
+                    & gh auth setup-git --hostname github.com *> $null
+                    if ($LASTEXITCODE -eq 0) {
+                        $fetch = Invoke-Git @('fetch', '--quiet', 'origin', $GitInfo.Branch)
+                    }
+                }
+            } finally {
+                $ErrorActionPreference = $oldPreference
+            }
+        }
+    }
+    if ($fetch[0] -ne 0) {
+        return 'git fetch failed after credential repair'
     }
 
     $counts = Invoke-Git @('rev-list', '--left-right', '--count', "HEAD...origin/$($GitInfo.Branch)")
