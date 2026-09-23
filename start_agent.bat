@@ -3,6 +3,15 @@ setlocal
 cd /d "%~dp0"
 chcp 65001 >nul
 title NEWERP AI Agent
+cls
+echo ============================================================
+echo  NEWERP AI AGENT
+echo ============================================================
+echo  Starting local agent...
+echo  Repository: %CD%
+echo.
+echo  Loading project status...
+echo.
 
 :run
 powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\agent-host.ps1"
