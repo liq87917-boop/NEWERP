@@ -1,5 +1,6 @@
 /* ============ 报价单 / 形式发票 PI（EF 主子表单据）业务动作与单据打印 ============ */
-/* 依赖：app.js（api / toast / fmtMoney / fmtDate / escapeHtml）、crud.js（CURRENT_MODULE_CODE / CURRENT_LOADER）、
+/* 依赖：app.js（api / toast / fmtMoney / fmtDate / escapeHtml / navigate / openNavGroup）、
+         crud.js（CURRENT_MODULE_CODE / CURRENT_LOADER / MODULES / REF_APIS / DETAIL_ROWS / openForm / detailRender）、
          bill-print.js（moduleFieldLabels / normalizeTemplate / ensurePrintStyle / PRINT_STYLE / printPageCss / closeModal） */
 
 /* 模块编码 -> 单据打印配置（主表字段打印顺序 + 接口地址） */
@@ -216,6 +217,97 @@ async function quotationToPi(id) {
     if (CURRENT_LOADER) CURRENT_LOADER();
     return result;
   } catch (err) { toast(err.message, 'error'); }
+}
+
+/* ============ 报价单 / PI → 销售订单（带入预填 / 直接生成，ERP-010） ============ */
+
+/* 来源模块 -> 销售订单转换配置（与后端 SalesOrderConversion 的守卫规则一一对应） */
+const SALES_ORDER_SOURCE = {
+  quotation: { api: '/api/sales/quotations', label: '报价单' },
+  'proforma-invoice': { api: '/api/sales/proforma-invoices', label: '形式发票（PI）' },
+};
+
+/* 报价单：直接生成销售订单（服务端守卫：同一报价单仅一张，重复点击返回明确错误） */
+function quotationToOrder(id) { return salesDocToOrder('quotation', id); }
+
+/* 报价单：带入预填（打开销售订单新增表单，核对 / 编辑后再保存） */
+function quotationPrefillOrder(id) { return salesDocPrefillOrder('quotation', id); }
+
+/* PI：直接生成销售订单（来源保留 PI 与其背后的报价单） */
+function piToOrder(id) { return salesDocToOrder('proforma-invoice', id); }
+
+/* PI：带入预填 */
+function piPrefillOrder(id) { return salesDocPrefillOrder('proforma-invoice', id); }
+
+/* 直接生成销售订单：POST {api}/{id}/to-order（落库一次，来源自动留痕） */
+async function salesDocToOrder(code, id) {
+  const cfg = SALES_ORDER_SOURCE[code];
+  if (!cfg) { toast('当前模块不支持转销售订单', 'error'); return; }
+  if (!confirm(`确认按该${cfg.label}生成销售订单？同一${cfg.label}只生成一张，生成后来源自动留痕。`)) return;
+  try {
+    const result = await api(`${cfg.api}/${id}/to-order`, 'POST');
+    toast(`已生成销售订单：${result.orderNo}`);
+    if (CURRENT_LOADER) CURRENT_LOADER();
+    return result;
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+/* 带入预填：按来源单据打开「销售订单 → 新增」表单（字段与明细已带入，保存走销售订单接口做服务端复核） */
+async function salesDocPrefillOrder(code, id) {
+  const cfg = SALES_ORDER_SOURCE[code];
+  if (!cfg) { toast('当前模块不支持带入销售订单', 'error'); return; }
+  if (!confirm(`按该${cfg.label}带入一张新的销售订单？带入后可继续编辑，保存时由服务端复核数量、单价与合计。`)) return;
+  try {
+    const data = await api(`${cfg.api}/${id}/order-prefill`);
+    const mod = MODULES['sales-order'];
+    if (!mod) { toast('销售订单模块未加载', 'error'); return; }
+    gotoModulePage('sales-order', mod.title);   // 切到销售订单页面（同步菜单高亮与标签页）
+    openForm();
+    await fillSalesOrderForm(data.order);
+    toast(`已按${cfg.label}带入，请核对后保存`);
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+/* 切到目标菜单页：与左侧菜单点击同样效果（高亮当前项、必要时展开所属分组） */
+function gotoModulePage(code, name) {
+  const item = document.querySelector(`#sidebar-nav .nav-item.nav-child[data-code="${code}"]`);
+  document.querySelectorAll('.nav-item.nav-child').forEach(x => x.classList.toggle('active', x === item));
+  if (item) {
+    const group = item.closest('.nav-group');
+    if (group && !group.classList.contains('open') && typeof openNavGroup === 'function') openNavGroup(group, true);
+  }
+  navigate(code, name);
+}
+
+/* 把带入的销售订单草稿写入当前新增表单：字段按类型回填、引用字段同步名称、明细走 DETAIL_ROWS */
+async function fillSalesOrderForm(order) {
+  const mod = MODULES['sales-order'];
+  if (!mod || !order) throw new Error('销售订单带入数据为空');
+  (mod.fields || []).forEach(f => {
+    const el = document.getElementById('f_' + f.key);
+    if (!el) return;
+    const v = order[f.key];
+    if (f.valueType === 'bool') { el.value = (v === true || String(v).toLowerCase() === 'true') ? 'true' : 'false'; return; }
+    if (f.type === 'date') { el.value = v ? fmtDate(v) : ''; return; }
+    el.value = (v === null || v === undefined) ? '' : v;
+  });
+  /* 引用字段（客户 / 业务员）：与 crud.js loadIntoForm 同口径，异步补齐搜索框名称 */
+  for (const f of (mod.fields || []).filter(x => x.type === 'ref')) {
+    const box = document.getElementById('f_' + f.key + '_search');
+    const rid = order[f.key];
+    if (!box) continue;
+    if (!rid) { box.value = ''; continue; }
+    try {
+      const ref = REF_APIS[f.ref];
+      const d = await api(`${ref.api}/${rid}`);
+      box.value = d[ref.nameKey] || '';
+    } catch (e) { /* 名称查询失败不影响带入 */ }
+  }
+  /* 明细带入（数量 × 单价 = 金额由服务端在保存时复核） */
+  if (mod.detailFields && mod.detailFields.length) {
+    DETAIL_ROWS = (order[mod.detailKey || 'details'] || []).map(d => Object.assign({}, d));
+    detailRender();
+  }
 }
 
 /* ============ 单据打印（打印预览 / 直接打印，模板复用「样式设计」） ============ */

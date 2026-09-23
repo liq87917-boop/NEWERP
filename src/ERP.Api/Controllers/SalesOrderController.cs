@@ -200,14 +200,19 @@ public class SalesOrderController : DocumentControllerBase<SalesOrder>
             $"SalesOrders_{DateTime.Now:yyyyMMddHHmmss}.xlsx");
     }
 
-    private static void Calculate(SalesOrder entity)
+    /// <summary>
+    /// 合计口径（销售订单唯一权威算法）：总额 = Σ 明细数量×单价，定金金额 = 总额 × 定金比例%。
+    /// 声明为 public：报价单 / PI 转销售订单（ERP-010，<see cref="SalesOrderConversion"/>）复用同一算法，
+    /// 避免带入路径与页面录入路径出现两套口径。
+    /// </summary>
+    public static void Calculate(SalesOrder entity)
     {
         entity.TotalAmount = entity.Details.Sum(d => d.Quantity * d.UnitPrice);
         entity.DepositAmount = entity.TotalAmount * entity.DepositRatio / 100;
     }
 
     /// <summary>业务字段校验（佣金比例 0~100；历史单据不填时为 0，不受影响）</summary>
-    private static void Validate(SalesOrder entity)
+    public static void Validate(SalesOrder entity)
     {
         if (entity.CommissionRatio < 0 || entity.CommissionRatio > 100)
             throw BusinessException.InvalidParameter("佣金比例必须在 0~100 之间");

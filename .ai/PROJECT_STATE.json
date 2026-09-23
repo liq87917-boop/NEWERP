@@ -3,7 +3,7 @@
   "controller": "gpt_conversation",
   "phase": "ready",
   "current_task": null,
-  "last_completed_task": "ERP-009",
+  "last_completed_task": "ERP-010",
   "last_reviewed_task": "ERP-005",
   "blocker": null,
   "external_actions": [
@@ -38,8 +38,8 @@
     "production_deployment_or_release": "required",
     "irreversible_data_operations": "required"
   },
-  "finish_reason": "rolling_batch_queued",
-  "updated_at": "2026-09-23T11:55:45.602380Z",
+  "finish_reason": "browser_deferred",
+  "updated_at": "2026-09-23T12:23:07.578535Z",
   "rolling_queue": {
     "enabled": true,
     "batch_size": 4,

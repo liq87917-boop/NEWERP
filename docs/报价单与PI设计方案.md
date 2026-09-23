@@ -106,9 +106,10 @@
 | PUT | `/api/sales/quotations/{id}` | 修改（事务内先删明细再插入） |
 | POST | `/api/sales/quotations/{id}/audit` / `unaudit` | 审核 / 销审 |
 | POST | `/api/sales/quotations/{id}/to-pi` | **转为 PI**（复制主表 + 明细，回填来源报价单号，原单状态改「已转 PI」） |
-| POST | `/api/sales/quotations/{id}/to-order` | 转为销售订单（第三批，先做带入预填） |
+| GET | `/api/sales/quotations/{id}/order-prefill` | **带入预填销售订单**（ERP-010）：返回未落库的销售订单草稿（不占用单号、不写库），前端切到「销售订单 → 新增」表单继续编辑后按 `/api/sales-orders` 保存 |
+| POST | `/api/sales/quotations/{id}/to-order` | **转为销售订单**（ERP-010）：按已审核报价单生成一张销售订单（EF 主子表路径），来源留痕，同一报价单仅一张 |
 | GET | `/api/sales/quotations/{id}/print` | 打印数据（供打印模板使用） |
-| POST | `/api/sales/proforma-invoices/...` | PI 同上一套（`to-order` 用于 PI → 销售订单） |
+| POST | `/api/sales/proforma-invoices/...` | PI 同上一套；`POST /{id}/to-order`（PI → 销售订单）、`GET /{id}/order-prefill`（带入预填）与报价单同口径 |
 
 ---
 
@@ -120,7 +121,7 @@
 | 列表 | `modules.js` 新增 `quotation`、`proforma-invoice`（列 = 单号 / 日期 / 客户 / 有效期 / 币种 / 金额 / 业务员 / 状态） |
 | 编辑 | 复用主子表单据编辑（明细表格：加行、删行、`数量 × 单价 = 金额`、主表合计自动汇总；后端复核防篡改） |
 | 打印 | `BILL_CONFIG` 注册两个单据类型 → 自动获得「打印预览 / 直接打印 / 打印设计」 |
-| 便捷操作 | 报价单列表工具栏：**转 PI**；PI 列表工具栏：**转销售订单**（`extraActions` 机制） |
+| 便捷操作 | 报价单列表行操作：**转 PI**、**预填销售订单 / 转销售订单**（ERP-010）；PI 列表行操作：**预填销售订单 / 转销售订单**；均由 `rowActions` 机制渲染（`crud.js` 的「更多」菜单） |
 
 ---
 
@@ -137,7 +138,8 @@
 |---|---|
 | **1（已完成）** | 报价单：主子表 + 审核 / 销审 + 打印预览与打印设计 + 从询价单带入明细 + 行操作「转 PI」 |
 | **2（已完成 · ERP-007）** | PI：主子表 + 银行信息（系统参数默认，单据可覆盖）+ 收货人 / 通知人 / 唛头 + 定金比例与金额 + 审核 / 销审 / 作废 + 打印预览 + 报价单转 PI |
-| 3（待做） | PI → 销售订单（带入预填）、报价有效期到期提醒、报价成交率分析 |
+| **3（已完成 · ERP-010）** | 报价单 / PI → 销售订单：**带入预填**（打开销售订单新增表单，可编辑后再保存）+ **直接生成**（服务端守卫，同一来源仅一张，来源报价单 / PI 留痕）；明细数量 / 单价 / 金额 / 合计与定金由服务端复核 |
+| 3（待做 · 已立项 ERP-018） | 报价单打印端点与打印配置、报价有效期到期提醒、报价成交率分析 |
 
 ---
 
@@ -175,6 +177,22 @@
 | 枚举口径 | `Program.cs` 注册 `JsonStringEnumConverter`，状态以 `Pending` / `Approved` / `Cancelled` 等**枚举名**输出，`rowActions.statuses` 与前端币种选项（`CURRENCY_NAME_OPTS`）据此对齐 |
 | 打印 | `PrintTemplateController` 的 `PrintableTitles` 已登记 `quotation` / `proforma-invoice`；未维护模板时返回内置默认模板，不会产生失败请求 |
 
+### 8.3 报价单 / PI → 销售订单（ERP-010 · 已实现）
+
+| 项 | 结论 |
+|---|---|
+| 共享实现 | `src/ERP.Api/Controllers/SalesOrderConversion.cs`：两种来源共用「守卫 + 映射 + 复核」，控制器（`QuotationController` / `ProformaInvoiceController`）只负责取单、生成单号、落库 |
+| 状态守卫 | 报价单：已作废 → 拒绝；已转 PI → 提示「请从 PI 转销售订单」；未审核 → 拒绝；无明细 → 拒绝。PI：已作废 → 拒绝；未审核 → 拒绝；无明细 → 拒绝 |
+| 重复守卫 | 以销售订单的来源字段为准（`SourceQuotationId` / `SourcePiId`，仅统计未删除订单）：同一来源已存在订单时再次「转入预填」或「直接生成」都返回 `RuleConflict` 并给出已生成单号；**只新增、不更新**，绝不覆盖既有销售订单（已软删除的历史订单不阻断重新生成） |
+| 转换后状态 | 报价单 → `Completed`（「已完成」，即已转 PI 或已转销售订单，转 PI 处的提示文案同步改为「已完成转换」）；PI → `Completed`（即「已转销售订单」，与其在审核 / 作废处的既有语义一致） |
+| 主表映射（报价单） | 客户 / 业务员 / 币种 / 汇率 ← 报价单；价格条款 ← 报价单贸易术语（为空回退客户档案）；目的港 ← 报价单目的港（为空回退客户档案）；付款条件 ← 报价单（为空回退客户档案）；收货人 / 通知人 / 唛头 ← 客户档案默认值；定金比例 ← 客户档案（未维护按 30%）；业务性质 / 佣金比例 ← 客户档案（佣金仅取 0~100，越界按未维护）；来源报价单号 ← 报价单 |
+| 主表映射（PI） | 客户 / 业务员 / 币种 / 汇率 ← PI；条款 / 目的港 / 付款条件 ← PI（为空回退客户档案）；**收货人 / 通知人 / 唛头 ← PI 值优先**（为空回退客户档案）；运输方式 ← PI 运输条款；定金比例 ← PI 比例 → PI 定金金额反算 → 客户档案 → 30%；来源 PI **与该 PI 背后的来源报价单一并写入**；报价单/ PI 的文本交期（无对应列）合并进备注并截断到 500 字符 |
+| 明细映射 | 行序按来源 `SortNo`；商品 Id / 名称 / 规格 / 单位 / 数量 / 单价 / 备注逐行复制；**金额按 `数量 × 单价` 服务端重算**；商品编码与起订量在销售订单明细中无对应列（ERP-008 结构），本任务不新增结构，故不带入 |
+| 服务端复核 | 明细数量必须 > 0、单价不得为负、定金比例必须在 0~100（越界抛 `InvalidParameter`）；合计与定金复用销售订单口径 `SalesOrderController.Calculate`（总额 = Σ 数量×单价，定金 = 总额 × 比例%）与 `Validate`（佣金 0~100），预填后经页面保存时同样走这套复核 |
+| 单号 | 预填**不生成**销售订单号（不消耗字轨）；直接生成与页面保存都由 `IDocumentNumberService` 按 `DocumentType.SalesOrder` 发号 |
+| 前端 | `sales-pi.js` 暴露 `quotationToOrder` / `quotationPrefillOrder` / `piToOrder` / `piPrefillOrder`，与 `modules.js` 的 `rowActions`（仅「已审核」可见）一一对应；带入预填经 `gotoModulePage('sales-order')` 切到销售订单页并用 `fillSalesOrderForm` 写入表单（引用字段同步名称、明细写入 `DETAIL_ROWS`） |
+| 测试 | `src/ERP.UnitTests/SalesOrderConversionTests.cs`（18 例：两种来源映射、双来源留痕、定金反算、重复与非法状态守卫、服务端复核、预填不落库、接口路由与前端接线静态断言、预填报文 JSON 契约）；`src/ERP.IntegrationTests/SalesOrderConversionUiTests.cs`（3 个 Edge 场景，`Collection=UiTests`） |
+
 ---
 
 ## 9. 采纳的默认选项（如需改动随时告诉我）
@@ -183,4 +201,4 @@
 |---|---|---|
 | 1 | 编号前缀 | `QT` / `PI`（可在「单据编号规则」页自助修改） |
 | 2 | PI 银行信息 | **系统参数存默认 + PI 可覆盖**（避免重复录入与出错） |
-| 3 | PI → 销售订单 | **带入预填**（不改存储过程）；若需一键生成正式订单，需确认「允许调用现有销售订单存储过程」 |
+| 3 | PI → 销售订单 | **带入预填 + 直接生成**（ERP-010 已实现）：预填返回未落库草稿供人工编辑，直接生成走 EF 销售订单接口并留痕来源；**不调用旧版销售订单存储过程**，`SourceQuotationId/No`、`SourcePiId/No` 由服务端写入 |

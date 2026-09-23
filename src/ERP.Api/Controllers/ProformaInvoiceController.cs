@@ -179,6 +179,55 @@ public class ProformaInvoiceController : DocumentControllerBase<ProformaInvoice>
         return Ok(ApiResponse<object>.Success(null, "PI 已作废"));
     }
 
+    /// <summary>
+    /// 带入预填销售订单（ERP-010）：按 PI 返回一张**未落库**的销售订单草稿
+    /// （收货人 / 通知人 / 唛头 / 运输条款 / 定金口径随 PI，同时保留 PI 背后的来源报价单），
+    /// 前端据此打开「销售订单 → 新增」表单继续编辑后再保存（保存走 <c>POST /api/sales-orders</c>）。
+    /// 守卫与 <see cref="ToSalesOrder"/> 一致：只允许已审核 PI，已作废或已生成销售订单均被拒绝；
+    /// 本接口不占用单据号、不写库。
+    /// </summary>
+    [HttpGet("{id:long}/order-prefill")]
+    public async Task<IActionResult> OrderPrefill(long id)
+    {
+        var pi = await Db.ProformaInvoices.AsNoTracking().Include(o => o.Details)
+            .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
+            ?? throw BusinessException.NotFound("形式发票 PI 不存在");
+
+        var order = await SalesOrderConversion.FromProformaInvoiceAsync(Db, pi);
+        return Ok(ApiResponse<SalesOrderPrefillResult>.Success(new SalesOrderPrefillResult
+        {
+            SourceType = SalesOrderConversion.ProformaInvoiceSourceType,
+            SourceId = pi.Id,
+            SourceNo = pi.PiNo,
+            Order = order
+        }, "已按形式发票 PI 带入销售订单草稿"));
+    }
+
+    /// <summary>
+    /// 转为销售订单（ERP-010）：按已审核 PI 生成一张销售订单（EF 主子表路径，不走旧版存储过程）。
+    /// 守卫：同一 PI 仅生成一张（以销售订单的来源字段为准），只新增单据、绝不覆盖既有订单；
+    /// 生成后 PI 状态置「已完成」（即「已转销售订单」，与该状态在审核 / 作废处的既有语义一致）。
+    /// </summary>
+    [HttpPost("{id:long}/to-order")]
+    public async Task<IActionResult> ToSalesOrder(long id)
+    {
+        var pi = await Db.ProformaInvoices.Include(o => o.Details)
+            .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
+            ?? throw BusinessException.NotFound("形式发票 PI 不存在");
+
+        var order = await SalesOrderConversion.FromProformaInvoiceAsync(Db, pi);
+        order.OrderNo = await _noService.GenerateAsync(DocumentType.SalesOrder);
+        Db.SalesOrders.Add(order);
+        SetStatus(pi, DocumentStatus.Completed);
+        await Db.SaveChangesAsync();
+        return Ok(ApiResponse<SalesOrderConversionResult>.Success(new SalesOrderConversionResult
+        {
+            Id = order.Id,
+            OrderNo = order.OrderNo,
+            SourceNo = pi.PiNo
+        }, "已生成销售订单"));
+    }
+
     /// <summary>打印数据（主表 + 明细；打印模板由 /api/sys/print-templates/proforma-invoice 提供）</summary>
     [HttpGet("{id:long}/print")]
     public async Task<IActionResult> GetPrint(long id)

@@ -494,6 +494,9 @@ const MODULES = {
       { label: '审核', icon: '✅', title: '审核通过（审核后才能转 PI）', onclick: 'quotationApprove', statuses: ['Pending', 'Submitted'] },
       { label: '销审', icon: '↩️', title: '退回草稿，可继续修改', onclick: 'quotationUnaudit', statuses: ['Approved'] },
       { label: '转 PI', icon: '📄', title: '把已审核的报价单转为形式发票 PI（同一报价单只能转一次）', onclick: 'quotationToPi', statuses: ['Approved'] },
+      /* ERP-010：报价单 → 销售订单（带入预填打开销售订单表单 / 直接生成销售订单） */
+      { label: '预填销售订单', icon: '🧾', title: '按报价单带入客户 / 币种 / 贸易与付款条款 / 目的港 / 明细，打开销售订单新增表单（可编辑后再保存）', onclick: 'quotationPrefillOrder', statuses: ['Approved'] },
+      { label: '转销售订单', icon: '📦', title: '按已审核报价单直接生成一张销售订单（来源自动留痕，同一报价单仅一张）', onclick: 'quotationToOrder', statuses: ['Approved'] },
       { label: '打印预览', icon: '🖨', title: '按打印模板预览该报价单', onclick: 'previewSalesDocPrint' },
     ],
     /* 明细（主子表）：数量 × 单价 = 金额，自动算合计；主表与明细一次性保存 */
@@ -560,6 +563,9 @@ const MODULES = {
       { label: '审核', icon: '✅', title: '审核通过（草稿 → 已审核）', onclick: 'piApprove', statuses: ['Pending', 'Submitted'] },
       { label: '销审', icon: '↩️', title: '退回草稿，可继续修改', onclick: 'piUnaudit', statuses: ['Approved'] },
       { label: '作废', icon: '🚫', title: '作废该 PI（已转销售订单不可作废）', onclick: 'piVoid', statuses: ['Pending', 'Submitted', 'Approved'] },
+      /* ERP-010：PI → 销售订单（带入预填打开销售订单表单 / 直接生成销售订单） */
+      { label: '预填销售订单', icon: '🧾', title: '按 PI 带入收货人 / 通知人 / 唛头 / 币种 / 条款 / 明细，打开销售订单新增表单（可编辑后再保存）', onclick: 'piPrefillOrder', statuses: ['Approved'] },
+      { label: '转销售订单', icon: '📦', title: '按已审核 PI 直接生成一张销售订单（来源 PI 与报价单一并留痕，同一 PI 仅一张）', onclick: 'piToOrder', statuses: ['Approved'] },
       { label: '打印预览', icon: '🖨', title: '按打印模板预览该 PI', onclick: 'previewSalesDocPrint' },
     ],
     /* 明细（主子表）：数量 × 单价 = 金额，自动算合计；主表与明细一次性保存 */

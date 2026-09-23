@@ -205,7 +205,7 @@ public class QuotationController : DocumentControllerBase<Quotation>
         if (status == DocumentStatus.Cancelled)
             throw BusinessException.RuleConflict("已作废的报价单不能转 PI");
         if (status == DocumentStatus.Completed)
-            throw BusinessException.RuleConflict("该报价单已转为 PI，不能重复转换");
+            throw BusinessException.RuleConflict("该报价单已完成转换（已转 PI 或已转销售订单），不能重复转换");
         if (status != DocumentStatus.Approved)
             throw BusinessException.RuleConflict("报价单未审核，请先审核后再转 PI");
         if (!quotation.Details.Any(d => !d.IsDeleted))
@@ -275,6 +275,54 @@ public class QuotationController : DocumentControllerBase<Quotation>
         await Db.SaveChangesAsync();
         return Ok(ApiResponse<object>.Success(new { pi.Id, pi.PiNo, QuotationNo = quotation.QuotationNo },
             "已生成形式发票 PI"));
+    }
+
+    /// <summary>
+    /// 带入预填销售订单（ERP-010）：按报价单返回一张**未落库**的销售订单草稿，
+    /// 前端据此打开「销售订单 → 新增」表单继续编辑后再保存（保存走 <c>POST /api/sales-orders</c>，服务端复核数量 / 单价 / 合计）。
+    /// 与 <see cref="ToSalesOrder"/> 共用同一套守卫（见 <see cref="SalesOrderConversion.FromQuotationAsync"/>）：
+    /// 只允许已审核报价单，已作废 / 已转 PI / 已生成销售订单均被拒绝，本接口不占用单据号、不写库。
+    /// </summary>
+    [HttpGet("{id:long}/order-prefill")]
+    public async Task<IActionResult> OrderPrefill(long id)
+    {
+        var quotation = await Db.Quotations.AsNoTracking().Include(o => o.Details)
+            .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
+            ?? throw BusinessException.NotFound("报价单不存在");
+
+        var order = await SalesOrderConversion.FromQuotationAsync(Db, quotation);
+        return Ok(ApiResponse<SalesOrderPrefillResult>.Success(new SalesOrderPrefillResult
+        {
+            SourceType = SalesOrderConversion.QuotationSourceType,
+            SourceId = quotation.Id,
+            SourceNo = quotation.QuotationNo,
+            Order = order
+        }, "已按报价单带入销售订单草稿"));
+    }
+
+    /// <summary>
+    /// 转为销售订单（ERP-010）：按已审核报价单生成一张销售订单（EF 主子表路径，不走旧版存储过程）。
+    /// 守卫：同一报价单仅生成一张（以销售订单的来源字段为准，见 <see cref="SalesOrderConversion"/>），
+    /// 只新增单据、绝不覆盖既有订单；生成后报价单状态置「已完成」（已转 PI 或已转销售订单）。
+    /// </summary>
+    [HttpPost("{id:long}/to-order")]
+    public async Task<IActionResult> ToSalesOrder(long id)
+    {
+        var quotation = await Db.Quotations.Include(o => o.Details)
+            .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
+            ?? throw BusinessException.NotFound("报价单不存在");
+
+        var order = await SalesOrderConversion.FromQuotationAsync(Db, quotation);
+        order.OrderNo = await _noService.GenerateAsync(DocumentType.SalesOrder);
+        Db.SalesOrders.Add(order);
+        SetStatus(quotation, DocumentStatus.Completed);
+        await Db.SaveChangesAsync();
+        return Ok(ApiResponse<SalesOrderConversionResult>.Success(new SalesOrderConversionResult
+        {
+            Id = order.Id,
+            OrderNo = order.OrderNo,
+            SourceNo = quotation.QuotationNo
+        }, "已生成销售订单"));
     }
 
     /// <summary>打印数据（主表 + 明细；打印模板由 /api/sys/print-templates/quotation 提供）</summary>
