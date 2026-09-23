@@ -195,6 +195,39 @@ def recoverable_interrupted_task(config: dict[str, Any], state: dict[str, Any]) 
     return path, task
 
 
+def recoverable_deferred_failed_head(config: dict[str, Any], state: dict[str, Any]) -> tuple[Path, dict[str, Any]] | None:
+    """Recover a queue head left failed by the old browser-blocking policy.
+
+    After the policy switches to deferred browser/UI acceptance, an old failed task
+    may already have been rewritten by queue inspection to phase=blocked with a
+    generic "status=failed stops queue" blocker. Recover that stale state once and
+    re-run core engineering validation against the existing guarded worktree.
+    """
+    if not browser_acceptance_is_deferred(config):
+        return None
+    if state.get("phase") != "blocked" or state.get("finish_reason") != "queue_head_blocked":
+        return None
+    task_id = state.get("current_task")
+    if not task_id:
+        return None
+    blocker = str(state.get("blocker") or "")
+    if blocker != f"{task_id} status=failed stops queue":
+        return None
+    path = TASKS_DIR / f"{task_id}.json"
+    if not path.exists():
+        return None
+    task = load_json(path)
+    if task.get("status") != "failed" or task.get("browser_deferred_recovery_done") is True:
+        return None
+    try:
+        validate_task(task, config)
+    except ValueError:
+        return None
+    if not changed_paths() or path_violations(task, config):
+        return None
+    return path, task
+
+
 def recoverable_browser_failure_task(config: dict[str, Any], state: dict[str, Any]) -> tuple[Path, dict[str, Any]] | None:
     """Recover a task that was previously failed only by real-browser acceptance.
 
@@ -351,11 +384,20 @@ def run_next(dry_run: bool) -> int:
                 save_json(item[0], item[1])
                 audit("browser_failure_recovery_started", task=item[1]["id"], cycle=item[1]["browser_recovery_cycles"], changed_paths=changed_paths())
             else:
-                try:
-                    item = next_task(config)
-                except ValueError as exc:
-                    set_state(state, phase="blocked", blocker=str(exc), finish_reason="queue_head_blocked")
-                    audit("queue_head_blocked", reason=str(exc)); return 10
+                item = recoverable_deferred_failed_head(config, state)
+                if item is not None:
+                    resume_existing = True
+                    resume_reason = "deferred_browser_failed_head_recovered"
+                    item[1]["browser_deferred_recovery_done"] = True
+                    item[1]["attempts"] = 0
+                    save_json(item[0], item[1])
+                    audit("deferred_browser_failed_head_recovery_started", task=item[1]["id"], changed_paths=changed_paths())
+                else:
+                    try:
+                        item = next_task(config)
+                    except ValueError as exc:
+                        set_state(state, phase="blocked", blocker=str(exc), finish_reason="queue_head_blocked")
+                        audit("queue_head_blocked", reason=str(exc)); return 10
     if item is None: print("No runnable task."); return 0
     task_path, task = item
     try: validate_task(task, config)
