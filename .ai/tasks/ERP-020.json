@@ -1,0 +1,26 @@
+{
+  "id": "ERP-020",
+  "title": "Convert selected supplier quote to Purchase Order",
+  "status": "pending",
+  "risk_level": "medium",
+  "description": "Close the audited PurchaseQuote downstream gap: convert a selected supplier comparison row into the existing EF Purchase Order workflow, preserving source traceability and duplicate protection. Do not change production schema or deploy.",
+  "acceptance_criteria": [
+    "A selected PurchaseQuote supplier row exposes a user-visible create/prefill Purchase Order action.",
+    "Supplier, customer/order ownership, currency, tax/price, delivery and product detail values are mapped deterministically and revalidated server-side.",
+    "Only an eligible selected supplier quote can convert; invalid/unselected rows are rejected with a clear message.",
+    "Repeated conversion is idempotent or guarded against duplicate Purchase Orders.",
+    "Unit/integration tests cover mapping, eligibility and duplicate protection; safe validation passes.",
+    "Browser/UI acceptance is recorded as deferred during development according to project policy."
+  ],
+  "allowed_paths": ["src/ERP.Domain/**","src/ERP.Application/**","src/ERP.Api/Controllers/**","src/ERP.Api/wwwroot/**","src/ERP.UnitTests/**","src/ERP.IntegrationTests/**","docs/**",".ai/**"],
+  "depends_on": ["ERP-008"],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "browser",
+  "browser_acceptance": {"required": true, "scenarios": ["Convert an eligible selected supplier quote to a Purchase Order and verify mapped values.","Repeat conversion and verify duplicate prevention."], "test_filter": "Collection=UiTests", "minimum_screenshots": 2},
+  "human_gate": {"required": false, "level": "L2", "status": "not_required", "reason": "Application-code workflow using existing entities; no production database/deployment action."},
+  "attempts": 0,
+  "created_at": "2026-09-23T13:04:00Z"
+}
