@@ -40,7 +40,7 @@ if ($current -ne $Branch) {
     exit 0
 }
 
-$fetch = Invoke-Git @("fetch", "--quiet", "origin", $Branch)
+$fetch = Invoke-Git @("fetch", "--quiet", "origin", ("+refs/heads/{0}:refs/remotes/origin/{0}" -f $Branch))
 if ($fetch.Code -ne 0) {
     Write-Host "Bootstrap   : git fetch failed; starting with local code" -ForegroundColor Yellow
     exit 0
