@@ -148,6 +148,54 @@ public class SalesOrderController : DocumentControllerBase<SalesOrder>
         return Ok(ApiResponse<List<SalesOrder>>.Success(items));
     }
 
+    /// <summary>
+    /// 带入单证预填（ERP-019）：按销售订单返回**未落库**的单证草稿（商业发票 / 装箱单 / 报关单 / 产地证 / 提单），
+    /// 并回传该订单已生成过的单证类型（前端置灰，避免重复生成）。不写库、不占用单证编号流水。
+    /// </summary>
+    [HttpGet("{id:long}/trade-documents/prefill")]
+    public async Task<IActionResult> TradeDocumentPrefill(long id)
+    {
+        var order = await Set.AsNoTracking()
+            .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted, default)
+            ?? throw BusinessException.NotFound("销售订单不存在");
+
+        var customer = await TradeDocumentGeneration.LoadCustomerAsync(Db, order.CustomerId);
+        var drafts = TradeDocumentGeneration.SalesOrderDocTypes
+            .Select(docType => TradeDocumentGeneration.BuildFromSalesOrder(order, customer, docType))
+            .ToList();
+
+        var result = await TradeDocumentGeneration.PrefillAsync(Db,
+            TradeDocumentGeneration.SalesOrderSourceType, order.Id, order.OrderNo,
+            containerNo: null, salesOrderNo: order.OrderNo, loadingListNo: null, drafts: drafts);
+
+        return Ok(ApiResponse<TradeDocPrefillResult>.Success(result, "已按销售订单带入单证草稿"));
+    }
+
+    /// <summary>
+    /// 生成单证（ERP-019）：按销售订单生成单证中心台账记录（默认商业发票 + 装箱单）。
+    /// 守卫：已作废订单拒绝；同一订单 + 同一单证类型只允许一张（重复点击不会产生重复单证）；
+    /// 单证落库状态统一为「待制作」，生成后仍可在单证中心人工修改后再流转。
+    /// </summary>
+    [HttpPost("{id:long}/trade-documents")]
+    public async Task<IActionResult> GenerateTradeDocuments(long id, [FromBody] TradeDocGenerateRequest? request)
+    {
+        var order = await Set.AsNoTracking()
+            .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted, default)
+            ?? throw BusinessException.NotFound("销售订单不存在");
+        if (order.Status == DocumentStatus.Cancelled)
+            throw BusinessException.RuleConflict("已作废的销售订单不能生成单证");
+
+        var customer = await TradeDocumentGeneration.LoadCustomerAsync(Db, order.CustomerId);
+        var result = await TradeDocumentGeneration.GenerateAsync(Db,
+            TradeDocumentGeneration.SalesOrderSourceType, order.Id, order.OrderNo,
+            containerNo: null, salesOrderNo: order.OrderNo, loadingListNo: null,
+            requestedDocTypes: request?.DocTypes,
+            buildDraft: docType => TradeDocumentGeneration.BuildFromSalesOrder(order, customer, docType));
+
+        var numbers = string.Join("、", result.Documents.Select(d => d.DocNo));
+        return Ok(ApiResponse<TradeDocGenerateResult>.Success(result, $"已生成单证：{numbers}"));
+    }
+
     /// <summary>导出列定义（含 ERP-008 外贸合同与追溯字段；Excel 导出菜单「销售订单导出」使用）</summary>
     private static readonly List<(string Key, string Title)> ExcelColumns = new()
     {

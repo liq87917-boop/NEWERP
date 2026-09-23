@@ -341,6 +341,14 @@ const MODULES = {
   /* 单证中心（阶段 2 新增，挂在「出运管理」菜单下） */
   'doc-center': {
     title: '单证中心', api: '/api/trade/documents',
+    /* ERP-019：列表按条件导出 Excel（与销售订单 / 采购订单导出一致的中文列头与 xlsx 附件） */
+    extraActions: [
+      { label: '📤 导出 Excel', onclick: 'openTradeDocExportDialog()', title: '按单证类型 / 状态 / 出具日期 / 关键字导出单证台账为 Excel' },
+    ],
+    /* ERP-019：行操作支持单条单证导出，便于把某一票单证单独发给客户或报关行 */
+    rowActions: [
+      { label: '导出该单证', icon: '📤', title: '仅导出本行单证为 Excel（便于单独归档或发送）', onclick: 'exportTradeDocument' },
+    ],
     columns: [
       { key: 'docNo', label: '单证编号' }, { key: 'docType', label: '单证类型' },
       { key: 'issueDate', label: '出具日期', type: 'date' },
@@ -370,7 +378,8 @@ const MODULES = {
       { key: 'amount', label: '单证金额（发票金额等）', type: 'number' },
       { key: 'currency', label: '币种', type: 'select', options: [
         { value: 'USD', label: 'USD 美元' }, { value: 'CNY', label: 'CNY 人民币' },
-        { value: 'EUR', label: 'EUR 欧元' }, { value: 'HKD', label: 'HKD 港币' }] },
+        { value: 'EUR', label: 'EUR 欧元' }, { value: 'HKD', label: 'HKD 港币' },
+        { value: 'GBP', label: 'GBP 英镑' }, { value: 'JPY', label: 'JPY 日元' }] },
       { key: 'departurePort', label: '起运港' },
       { key: 'destinationPort', label: '目的港' },
       { key: 'issuedBy', label: '制作人 / 出证机构' },

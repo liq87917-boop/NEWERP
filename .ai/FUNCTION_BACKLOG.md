@@ -40,7 +40,7 @@
 | 10 | 装柜/出运主链（收货计划/订柜/预装柜/装柜清单） | verified-complete | `Container1.cs`/`Container2.cs`、`ContainerControllers`、`ContainerPreLoadingController`、`ContainerLoadingListController`、`bill-config3.js:60-118` | 无 | low |
 | 11 | 装柜外贸与物流跟踪字段 | missing | `ContainerBooking`/`ContainerPreLoading*`/`ContainerLoading*` 无相关列；`docs/部署交付文档.md:854` 说明因走存储过程而暂缓 | LCL/FCL、B/L、SO、ETD/ETA/ATD/ATA、拖车/报关行、查验放行、目的/中转港；装载率仅报表侧(`reports.js:37-48`，40HQ 68m³ 基准) | medium-high |
 | 12 | 一柜多客户拼柜与费用分摊 | partial | 分摊已可用：`expense-allocate.js`（拼柜/整柜/散货 × 体积/重量/箱数/金额）、`ExpenseBillController.cs:29-93`（预览+生成+重复防护）、`FinanceExpense.cs:50-73`（RefType/RefNo/CustomerId/AllocationBase/AllocationRatio/AllocatedAmount 落库） | `ContainerLoadingList.CustomerId` 仍为单客户，无「柜→多客户」主子表；分摊结果不回写装柜/结算；无分摊批次与来源行留痕 | medium |
-| 13 | 单证中心 | partial | `TradeDocument.cs`（9 类单证/4 态/关联报关单号·柜号·订单号/金额/港口/份数）、`TradeDocumentController`、菜单 `doc-center`(`init11.sql`)、`modules.js:336-379` | 手工台账；无「由装柜清单/销售订单自动生成」，无 Excel/PDF 版式导出（附件仍为 `FileNote` 文本） | low-medium |
+| 13 | 单证中心 | **verified-complete（ERP-019 补齐自动生成与 Excel 导出；浏览器验收待 FINAL-UI-ACCEPTANCE）** | `TradeDocument.cs`（9 类单证/4 态/关联报关单号·柜号·订单号/金额/港口/份数）、`TradeDocumentController`（+`export-excel`）、`TradeDocumentGeneration.cs`（由销售订单 / 装柜清单带入预填 + 生成 + 重复守卫 + 编号规则）、`SalesOrderController`/`ContainerLoadingListController` 各 `GET {id}/trade-documents/prefill` + `POST {id}/trade-documents`、`trade-doc-gen.js`（生成对话框 / 导出对话框 / 单条导出）、`modules.js`(`doc-center` extraActions+rowActions)、`modules-doc.js`/`modules-doc2.js`（行操作「生成单证」「预填单证」）、菜单 `doc-center`(`init11.sql`)、`TradeDocumentGenerationTests`（21 例）、`TradeDocumentGenerationUiTests`（4 例 Edge）、`docs/单证中心生成与导出说明.md` | ① ~~无「由装柜清单/销售订单自动生成」~~ → **ERP-019 已实现**（两路来源 × 带入预填/直接生成，来源留痕写入 `SalesOrderNo`/`RefNo` + 备注，重复生成守卫：同订单同类型、同柜号同类型）；② ~~无 Excel 导出~~ → **ERP-019 已实现**（列表筛选导出 + 单条导出，沿用 `ExcelExporter`）；③ 单证扫描件附件仍为 `FileNote` 文本（附件中心任务）；④ 无 PDF/版式打印（共享打印设计另立任务）；⑤ 单证明细为单表，无商品明细行 | low-medium |
 | 14 | 费用单（出口杂费台账） | verified-complete | `FinanceExpense`、`ExpenseBillController`、菜单 `expense-bill`(`init8.sql`)、`modules.js:238-260` | 与装柜结算单/付款单无金额联动（`BillNo` 为文本字段） | low |
 | 15 | 应收账款与账龄 | verified-complete | `api/reports/ar-aging`、`ReportService.Ar.cs`、`reports.js:20-34`、菜单 `ar-aging`(`init9.sql`) | 无收款自动核销（收付款与订单/柜之间无核销明细），无信用额度占用与信用状态自动风控 | medium |
 | 16 | 应付账款 / 供应商对账 / 客户对账 | missing | 全仓无实体、无端点、无菜单；`docs/部署交付文档.md:203`、`docs/菜单与业务流程优化建议-20260918.md:248` 列为缺失 | 全部缺失（档口月结对账仍靠 Excel） | medium |
@@ -277,6 +277,28 @@
   - 前端脚本 `node --check`：`sales-pi.js` / `modules.js` 通过；`SalesOrderConversionTests` 中另以静态断言锁定「行操作函数名 ↔ `sales-pi.js` 定义 ↔ 接口路径」与预填报文 JSON 契约（camelCase + 枚举名），防止拼写漂移造成「按钮点了没反应」。
 - **真实 Edge 验收用例（新增 `SalesOrderConversionUiTests`，`Collection=UiTests`，3 个用例）**：① 报价单页「转销售订单」→ 服务端核对来源留痕与映射字段/明细/合计 → 销售订单页重新打开核对回显；② 报价单转 PI → PI 页覆盖收货人/唛头/运输条款后「转销售订单」→ 核对「PI 值优先」映射与 PI + 报价单双来源、PI 状态变「已转销售订单」；③ 报价单页「带入预填销售订单」→ 断言表单已带入且**未落库、来源状态不变** → 再「转销售订单」成功 → 直接调用接口重复转换被拒（`code != 0`、提示已生成订单）且来源仍只有 1 张订单；每个用例断言全流程无 JS / 接口失败（③ 有意触发 1 次重复转换拒绝，按要求单独断言该次失败），测试数据经应用自身接口创建（不直连数据库、不使用生产数据）。
 - **未做的事（边界）**：未启动 `ERP.Api`、未连业务库、未执行任何 SQL/seed/部署、未运行集成/UI 用例（真实 Edge 门禁归 orchestrator）；未修改 `.env.local`、`deploy/**`、`release/**`、`checkpoints/**`、`logs/**`、任何 `.sql` 文件、`SchemaUpgrader.cs` 与 `SeedData*.cs`；未 commit / push。带入后商品编码与起订量不带入（销售订单明细无对应列，本任务不新增结构）、`DeliveryDate` 留空人工填写——已在文档标注。本轮产物为「代码 + 测试 + 文档」，交付等级为 `code_ready`，`completed` 只由 orchestrator 的真实 Edge 门禁判定。
+
+### 5.14 ERP-019 单证中心：由销售订单 / 装柜清单生成单证与 Excel 导出（2026-09-23）
+
+- **任务**：ERP-019「Automate trade-document generation and export」——补齐审计缺口「单证中心只能手工登记、无 Excel 导出」：销售订单与装柜清单各提供**带入预填**与**直接生成**两个用户可见动作，来源留痕、重复守卫、单证中心列表/单条 **Excel 导出**；**不新增任何数据库结构**（`TradeDocument` 实体、`SchemaUpgrader.cs`、`deploy/**`、任何 `.sql`、`SeedData*.cs` 全部未改）。
+- **范围与做法（关键决策）**：
+  - 共享实现 `src/ERP.Api/Controllers/TradeDocumentGeneration.cs`（静态、public，便于单测直接断言）：两路来源共用「守卫 + 映射 + 编号规则 + 落库」，控制器只做取单 / 装载来源上下文 / 调用。
+  - 来源留痕**只用既有字段**（单证台账无来源列）：销售订单 → `SalesOrderNo` + 备注 `来源：销售订单 {订单号}`；装柜清单 → `RefNo`（柜号）+ 备注 `来源：装柜清单 {清单号}`。备注前缀同时是重复生成守卫的判定依据。
+  - 「带入预填」`GET /{id}/trade-documents/prefill` 返回**未落库**草稿（销售订单 5 类 / 装柜清单 4 类）+ 已生成类型；不写库、不占用编号，前端切到单证中心新增表单带入（`gotoModulePage` + `openForm` + `fillTradeDocForm`），用户核对/编辑后按既有 `/api/trade/documents` 保存。
+  - 「直接生成」`POST /{id}/trade-documents`（Body `{ docTypes: [...] }`，为空用来源默认类型：销售订单=商业发票+装箱单，装柜清单=装箱单）一次性落库：只 `Add`、不 `Update`；**批量中任一类型已生成即整体拒绝**（`RuleConflict`，不产生半成品数据），双击/重复点击不会产生重复单证。
+  - 单证编号确定性生成 `{类型前缀}-{来源单号}`（CD/PL/CI/CO/BL/BK/VR/TD），与历史人工台账冲突时自动追加 `-2/-3…`；新生成单证状态固定 `待制作`，生成后仍可在单证中心人工改金额/份数/制作人/状态，**来源留痕保留**（人工可编辑性由单测断言）。
+  - 映射口径：销售订单 → 客户 + 客户档案名称、订单总额、订单币种、目的港（订单文本 → 客户档案）、按类型默认制作人/份数；装柜清单 → 柜号、客户档案币种、港口按「预装柜单 → 订柜信息 → 客户档案」回退、箱数/毛重/体积与唛头写入备注、金额留 0 人工填写。守卫顺序：来源已作废 → 类型合法性 → 重复生成。
+  - Excel 导出 `GET /api/trade/documents/export-excel`（`id` / `keyword` / `docType` / `status` / `start` / `end`）：列表筛选导出与单条导出统一走 `ExcelExporter.ExportRows`（16 个中文列头），文件名 `TradeDocuments_{时间戳}.xlsx` / `TradeDocument_{id}_{时间戳}.xlsx`。
+- **代码改动**：
+  - 接口：`TradeDocumentGeneration.cs`（新增：映射 / 守卫 / 编号 / 预填与生成 + `TradeDocPrefillResult`、`TradeDocGenerateRequest`、`TradeDocGenerateResult`、`TradeDocGeneratedItem`）、`SalesOrderController` 与 `ContainerLoadingListController` 各新增两式、`TradeDocumentController` 注入 `IErpDbContext` 并新增 `export-excel`。
+  - 前端：新增 `trade-doc-gen.js`（来源配置 `TRADE_DOC_SOURCES`、生成/预填对话框、导出对话框、单条导出、xlsx 下载），`modules.js` 单证中心加 `extraActions`（导出 Excel）与 `rowActions`（导出该单证）并补齐币种选项 GBP/JPY，`modules-doc.js` 销售订单、`modules-doc2.js` 装柜清单各加行操作「生成单证」「预填单证」（`statuses: ['Pending','Submitted','Approved']`），`index.html` 注册脚本。
+  - 文档：新增 `docs/单证中心生成与导出说明.md`（映射表、编号规则、接口表、守卫口径、前端入口、导出列、测试与边界）；本节 §5.14 与 §2 #13 状态更新。
+- **本轮实测（未启动 API、未连数据库、未运行集成/UI 用例）**：
+  - safe 档：`dotnet build src/ERP.Api -c Release --no-restore /p:TreatWarningsAsErrors=true /p:RunAnalyzersDuringBuild=true` → **0 警告 / 0 错误**；`dotnet test src/ERP.UnitTests/ERP.UnitTests.csproj -c Release --no-build` → **318/318 通过**（基线 297 + `TradeDocumentGenerationTests` 21）。
+  - 门禁所用配置编译：`dotnet build src/ERP.IntegrationTests/ERP.IntegrationTests.csproj -c Debug` → 0 警告 / 0 错误；新增 `TradeDocumentGenerationUiTests`（4 个 Edge 用例，`Collection=UiTests`）。
+  - 前端脚本 `node --check`：`trade-doc-gen.js` / `modules.js` / `modules-doc.js` / `modules-doc2.js` 通过；单测另以静态断言锁定「行操作函数名 ↔ 脚本定义 ↔ 接口路径」与报文 JSON 契约（camelCase），并在 `index.html` 中确认脚本已注册，避免「按钮点了没反应」。
+- **真实 Edge 验收用例（新增 `TradeDocumentGenerationUiTests`，`Collection=UiTests`，4 个用例）**：① 销售订单页「生成单证」（对话框默认 CI+PL）→ 服务端核对 `CI-{订单号}` / `PL-{订单号}`、客户/金额 250/币种 USD/目的港 HAMBURG/状态待制作/来源备注，并在单证中心列表可见；② 装柜清单页「生成单证」→ 核对 `PL-{清单号}`、`RefNo`=柜号、客户档案币种 EUR、目的港回退 ROTTERDAM、备注含箱数/毛重；③ 再次打开对话框断言已生成类型 `disabled` 且无勾选，随后绕过前端重复调用接口 → `code != 0` 且提示「不能重复生成」，单证仍为 2 张；④ 单证中心「导出 Excel」对话框可用 + 导出接口返回可解析 xlsx（zip 文件头）。测试数据经应用自身接口创建（不直连数据库、不使用生产数据、不执行 SQL）。
+- **未做的事（边界）**：未启动 `ERP.Api`、未连业务库、未执行任何 SQL/seed/部署、未运行集成/UI 用例（真实 Edge 门禁归 orchestrator，按 `defer_browser_during_development` 记为 `browser_deferred`）；未修改 `.env.local`、`deploy/**`、`release/**`、`checkpoints/**`、`logs/**`、任何 `.sql` 文件、`SchemaUpgrader.cs` 与 `SeedData*.cs`；未 commit / push。单证扫描件附件、PDF/版式打印、单证明细行仍为后续独立任务（见 `docs/单证中心生成与导出说明.md` §9）。本轮产物为「代码 + 测试 + 文档」，交付等级为 `code_ready`，`completed` 只由 orchestrator 判定。
 
 ## 6. 执行规则（保持有效）
 

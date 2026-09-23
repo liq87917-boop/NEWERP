@@ -120,6 +120,11 @@ Object.assign(MODULES, {
       { key: 'totalCartons', label: '总箱数', type: 'number' }, { key: 'totalWeight', label: '总毛重(kg)', type: 'number' },
       { key: 'totalVolume', label: '总体积(m³)', type: 'number' },
     ],
+    /* ERP-019：由装柜清单生成单证中心记录（柜号写入「关联柜号/订舱号」，一柜一类单证只生成一张） */
+    rowActions: [
+      { label: '生成单证', icon: '📋', title: '由该装柜清单生成装箱单 / 提单 / 报关单 / 订舱确认等单证中心记录（同一柜号同一类型只生成一张）', onclick: 'generateTradeDocsFromSource', statuses: ['Pending', 'Submitted', 'Approved'] },
+      { label: '预填单证', icon: '📝', title: '按该装柜清单带入单证草稿到单证中心新增表单（不落库，可编辑后再保存）', onclick: 'prefillTradeDocFromSource', statuses: ['Pending', 'Submitted', 'Approved'] },
+    ],
   },
 
   /* ============ ERP-009：库存单据（盘点 / 调拨 / 退货）与库存流水 ============ */

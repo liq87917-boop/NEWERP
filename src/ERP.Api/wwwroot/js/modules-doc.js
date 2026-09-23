@@ -138,9 +138,12 @@ Object.assign(MODULES, {
       { key: 'shippingMethod', label: '运输方式' },
       { key: 'remark', label: '备注', type: 'textarea' },
     ],
-    /* 行操作：打印预览（打印模板按 billType=sales-order，含客户 PO / 合同 / 唛头等新字段） */
+    /* 行操作：打印预览（打印模板按 billType=sales-order，含客户 PO / 合同 / 唛头等新字段）
+       ERP-019：单证中心台账生成——「生成单证」直接落库，「预填单证」带入单证中心新增表单人工核对后再保存 */
     rowActions: [
       { label: '打印预览', icon: '🖨', title: '按打印模板预览该销售订单（含客户 PO / 合同 / 唛头等）', onclick: 'previewSalesDocPrint' },
+      { label: '生成单证', icon: '📋', title: '由该销售订单生成报关单 / 装箱单 / 商业发票 / 产地证 / 提单等单证中心记录（同一类型只生成一张）', onclick: 'generateTradeDocsFromSource', statuses: ['Pending', 'Submitted', 'Approved'] },
+      { label: '预填单证', icon: '📝', title: '按该销售订单带入单证草稿到单证中心新增表单（不落库，可编辑后再保存）', onclick: 'prefillTradeDocFromSource', statuses: ['Pending', 'Submitted', 'Approved'] },
     ],
     detailKey: 'details',
     detailTitle: '订单商品明细（数量 × 单价 = 金额，自动算合计）',

@@ -86,6 +86,52 @@ public class ContainerLoadingListController : DocumentControllerBase<ContainerLo
         return Ok(ApiResponse<object>.Success(null, "装柜清单更新成功"));
     }
 
+    /// <summary>
+    /// 带入单证预填（ERP-019）：按装柜清单返回**未落库**的单证草稿（装箱单 / 提单 / 报关单 / 订舱确认），
+    /// 柜号写入「关联柜号 / 订舱号」，港口按「预装柜单 → 订柜信息 → 客户档案」回退，
+    /// 并回传该柜 / 该清单已生成过的单证类型（前端置灰，避免重复生成）。不写库、不占用单证编号流水。
+    /// </summary>
+    [HttpGet("{id:long}/trade-documents/prefill")]
+    public async Task<IActionResult> TradeDocumentPrefill(long id)
+    {
+        var list = await GetOrThrowAsync(id, "装柜清单不存在");
+        var customer = await TradeDocumentGeneration.LoadCustomerAsync(Db, list.CustomerId);
+        var booking = await TradeDocumentGeneration.LoadBookingAsync(Db, list);
+        var drafts = TradeDocumentGeneration.LoadingListDocTypes
+            .Select(docType => TradeDocumentGeneration.BuildFromLoadingList(list, customer, booking, docType))
+            .ToList();
+
+        var result = await TradeDocumentGeneration.PrefillAsync(Db,
+            TradeDocumentGeneration.LoadingListSourceType, list.Id, list.LoadingListNo,
+            containerNo: list.ContainerNo, salesOrderNo: null, loadingListNo: list.LoadingListNo, drafts: drafts);
+
+        return Ok(ApiResponse<TradeDocPrefillResult>.Success(result, "已按装柜清单带入单证草稿"));
+    }
+
+    /// <summary>
+    /// 生成单证（ERP-019）：按装柜清单生成单证中心台账记录（默认装箱单）。
+    /// 守卫：已作废清单拒绝；同一柜号（或同一装柜清单）+ 同一单证类型只允许一张，
+    /// 重复点击不会产生重复单证；单证落库状态统一为「待制作」，生成后仍可人工修改。
+    /// </summary>
+    [HttpPost("{id:long}/trade-documents")]
+    public async Task<IActionResult> GenerateTradeDocuments(long id, [FromBody] TradeDocGenerateRequest? request)
+    {
+        var list = await GetOrThrowAsync(id, "装柜清单不存在");
+        if (list.Status == DocumentStatus.Cancelled)
+            throw BusinessException.RuleConflict("已作废的装柜清单不能生成单证");
+
+        var customer = await TradeDocumentGeneration.LoadCustomerAsync(Db, list.CustomerId);
+        var booking = await TradeDocumentGeneration.LoadBookingAsync(Db, list);
+        var result = await TradeDocumentGeneration.GenerateAsync(Db,
+            TradeDocumentGeneration.LoadingListSourceType, list.Id, list.LoadingListNo,
+            containerNo: list.ContainerNo, salesOrderNo: null, loadingListNo: list.LoadingListNo,
+            requestedDocTypes: request?.DocTypes,
+            buildDraft: docType => TradeDocumentGeneration.BuildFromLoadingList(list, customer, booking, docType));
+
+        var numbers = string.Join("、", result.Documents.Select(d => d.DocNo));
+        return Ok(ApiResponse<TradeDocGenerateResult>.Success(result, $"已生成单证：{numbers}"));
+    }
+
     private static void Calculate(ContainerLoadingList entity)
     {
         entity.TotalCartons = entity.Details.Sum(d => d.Cartons);

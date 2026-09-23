@@ -1,7 +1,7 @@
 {
   "id": "ERP-019",
   "title": "Automate trade-document generation and export",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "low",
   "description": "Close the audited Trade Document Center usability gap using existing persisted fields: add generation/prefill actions from Sales Orders and Container Loading Lists, prevent duplicate generated document sets, and provide practical Excel export for document-center records. Do not introduce a new production schema in this task.",
   "acceptance_criteria": [
@@ -45,6 +45,6 @@
     "status": "not_required",
     "reason": "Uses existing document-center schema and application paths only."
   },
-  "attempts": 0,
+  "attempts": 1,
   "created_at": "2026-09-23T12:00:03Z"
 }
