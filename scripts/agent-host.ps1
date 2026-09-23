@@ -352,7 +352,6 @@ function Test-RecoverableDeferredFailedHead {
     if (-not (Test-BrowserAcceptanceDeferred)) { return $false }
     if ($State.phase -ne 'blocked' -or $State.finish_reason -ne 'queue_head_blocked') { return $false }
     if ($Head.status -ne 'failed') { return $false }
-    if ($Head.PSObject.Properties.Name -contains 'browser_deferred_recovery_done' -and $Head.browser_deferred_recovery_done -eq $true) { return $false }
     $blockerText = [string]$State.blocker
     return $blockerText -eq ("{0} status=failed stops queue" -f $Head.id)
 }
