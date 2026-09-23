@@ -241,7 +241,7 @@ function Sync-Repository {
 
         $merge = Invoke-Git @('merge', '--ff-only', '--quiet', "origin/$($GitInfo.Branch)")
         if ($merge[0] -eq 0) {
-            if ($incomingPaths -contains 'scripts/agent-host.ps1' -or $incomingPaths -contains 'start_agent.bat') {
+            if ($incomingPaths -contains 'scripts/agent-host.ps1' -or $incomingPaths -contains 'scripts/agent-bootstrap.ps1' -or $incomingPaths -contains 'start_agent.bat') {
                 $script:selfRestartRequested = $true
             }
             return "updated $behind remote commit(s), preserved $($localPaths.Count) local change(s)"
