@@ -1,6 +1,7 @@
 using OpenQA.Selenium;
 using OpenQA.Selenium.Edge;
 using System.Diagnostics;
+using System.Text.Json;
 using Xunit;
 
 namespace ERP.IntegrationTests;
@@ -17,6 +18,7 @@ public class UiTestFixture : IAsyncLifetime
     public const string BaseUrl = "http://localhost:5059";
 
     private Process? _apiProcess;
+    private int _evidenceSequence;
 
     public Task InitializeAsync()
     {
@@ -24,6 +26,7 @@ public class UiTestFixture : IAsyncLifetime
         WaitForApiReady();
         InitEdgeDriver();
         Driver.Navigate().GoToUrl(BaseUrl);
+        WriteBrowserMetadata();
         return Task.CompletedTask;
     }
 
@@ -36,6 +39,35 @@ public class UiTestFixture : IAsyncLifetime
     }
 
     // ============ 私有助手 ============
+
+    public void CaptureEvidence(string scenario)
+    {
+        var evidenceDirectory = Environment.GetEnvironmentVariable("ERP_AI_EVIDENCE_DIR");
+        if (string.IsNullOrWhiteSpace(evidenceDirectory)) return;
+        Directory.CreateDirectory(evidenceDirectory);
+        var safeName = string.Concat(scenario.Select(ch => char.IsLetterOrDigit(ch) || ch is '-' or '_' ? ch : '_'));
+        var sequence = Interlocked.Increment(ref _evidenceSequence);
+        var path = Path.Combine(evidenceDirectory, $"{sequence:00}-{safeName}.png");
+        var screenshot = ((ITakesScreenshot)Driver).GetScreenshot();
+        screenshot.SaveAsFile(path);
+    }
+
+    private void WriteBrowserMetadata()
+    {
+        var evidenceDirectory = Environment.GetEnvironmentVariable("ERP_AI_EVIDENCE_DIR");
+        if (string.IsNullOrWhiteSpace(evidenceDirectory)) return;
+        Directory.CreateDirectory(evidenceDirectory);
+        var capabilities = ((EdgeDriver)Driver).Capabilities;
+        var metadata = new
+        {
+            browser = capabilities.GetCapability("browserName")?.ToString() ?? "MicrosoftEdge",
+            version = capabilities.GetCapability("browserVersion")?.ToString() ?? "unknown",
+            realBrowser = true,
+            headless = true,
+            capturedAt = DateTimeOffset.UtcNow
+        };
+        File.WriteAllText(Path.Combine(evidenceDirectory, "browser-session.json"), JsonSerializer.Serialize(metadata, new JsonSerializerOptions { WriteIndented = true }));
+    }
 
     private static Process StartApi()
     {
@@ -80,7 +112,8 @@ public class UiTestFixture : IAsyncLifetime
         options.AddArgument("--no-sandbox");
         options.AddArgument("--disable-dev-shm-usage");
         options.AddArgument("--window-size=1920,1080");
-        options.BinaryLocation = @"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe";
+        options.BinaryLocation = Environment.GetEnvironmentVariable("ERP_AI_EDGE_BINARY")
+            ?? @"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe";
 
         Driver = new EdgeDriver(options);
         Driver.Manage().Timeouts().ImplicitWait = TimeSpan.FromSeconds(10);

@@ -2,7 +2,9 @@
 
 ## 当前状态
 
-自动化控制层已经安装并通过安全验证。项目具备任务 JSON、状态管理、Cline 执行、路径审计、失败重试、分层验证、Git checkpoint、Human Gate 和审计记录。
+自动化控制层已经升级为 GPT 对话控制。项目具备任务 JSON、状态管理、Cline 执行、路径审计、失败重试、三任务滚动队列、依赖图、Git checkpoint、Human Gate、真实浏览器验收和审计记录。
+
+完成定义已经改变：`Cline` 正常退出只表示 `code_ready`。普通业务任务只有在工程验证通过，并由本机真实 Microsoft Edge 完成任务声明的场景、生成 TRX、浏览器元数据、截图及 SHA-256 清单后，才能写入 `completed`。浏览器环境缺失时任务进入 `blocked`，不会被当作成功，也不会跳过继续执行后续任务。
 
 已确认的技术基线：.NET 8、ASP.NET Core Web API、EF Core 8、SQL Server、xUnit 与 Selenium。Release 编译为 0 警告、0 错误，165 个单元测试通过。
 
@@ -10,13 +12,21 @@
 
 ## 日常运行
 
-1. 从 `.ai/tasks/_TEMPLATE.json` 复制并建立一个 `ERP-NNN.json`。
+你可以直接在 GPT 对话中说“创建任务”“继续”“暂停”“批准 ERP-NNN”或“重试 ERP-NNN”。GPT 会把意图写入 `.ai/control/`，再操作项目内的任务和队列；对话不是唯一状态来源，Git 中的控制文件才是可恢复事实源。
+
+1. 从 `.ai/tasks/_TEMPLATE.json` 复制并建立一个 `ERP-NNN.json`，或让 GPT 创建。
 2. 写明验收标准、允许修改的路径、验证 profile 与风险等级。
 3. 查看状态：`scripts/status-ai.ps1`。
 4. 预览发送给 Cline 的完整任务：`scripts/run-ai.ps1 -DryRun`。
 5. 执行下一个任务：`scripts/run-ai.ps1`。
 
-完整队列使用 `scripts/run-pipeline.ps1`。它会按任务编号连续执行所有 `pending`/`retry` 任务，直到队列清空、遇到 Human Gate 或需要人工处理的失败。中断后使用 `scripts/resume-pipeline.ps1`；运行前可用 `scripts/test-pipeline.ps1` 检查 Git、Cline、.NET、任务 JSON 和保护规则。
+完整队列使用 `scripts/run-pipeline.ps1`。它会按任务编号和 `depends_on` 连续执行所有 `pending`/`retry` 任务，直到队列清空、GPT 暂停、遇到 Human Gate 或需要人工处理的失败。队首任务若处于 blocked/failed/in_progress 或元数据错误，流水线会 fail-closed，绝不会隐式跳到后续任务。中断后使用 `scripts/resume-pipeline.ps1`；运行前可用 `scripts/test-pipeline.ps1` 检查 Git、Cline、.NET、任务 JSON、依赖图、浏览器门禁和保护规则。
+
+GPT 控制状态：`scripts/gpt-control.ps1 -Command status`。
+
+GPT 暂停：`scripts/gpt-control.ps1 -Command pause -Summary "暂停原因"`。
+
+GPT 恢复：`scripts/gpt-control.ps1 -Command resume -Summary "恢复原因"`。
 
 任务延期：`py -3 scripts/ai_pipeline.py defer ERP-NNN --by "姓名" --note "原因"`。
 
@@ -32,7 +42,9 @@
 
 本地启动使用根目录的 `.env.local`。填写轮换后的开发密钥后运行 `start-dev.ps1`，脚本会校验格式、必填项和 JWT 长度，再把变量加载到当前 API 子进程；变量值不会写入控制台或 Git。
 
-Runner 每次只执行一个任务。成功后写入结果与审计记录并创建 Git commit；失败会把验证结果反馈给 Cline，最多尝试三次。超过上限、违反路径边界或 checkpoint 失败时会停止并进入 Human Gate。
+Runner 每次只执行一个任务。Cline 修改完成后先跑工程验证，再跑真实 Edge 验收。浏览器失败会把证据位置反馈给 Cline，最多尝试三次；成功后才写入结果与审计记录并创建 Git commit。超过上限、违反路径边界、浏览器基础设施缺失或 checkpoint 失败时会停止并进入 Human Gate。
+
+队列目标大小为 3：保持当前任务和最多两个后续任务，后续任务必须声明依赖。自动补充的任务不能绕过队首失败或 Human Gate。
 
 当前尚未配置 Git remote，所以 `.ai/config.json` 中 `auto_push` 保持为 `false`。配置 remote 并确认分支保护后才能启用。
 

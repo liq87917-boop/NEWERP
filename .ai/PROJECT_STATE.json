@@ -1,9 +1,10 @@
 {
   "project": "NEWERP",
+  "controller": "gpt_conversation",
   "phase": "idle",
   "current_task": null,
-  "last_completed_task": "ERP-001",
-  "last_reviewed_task": "ERP-001",
+  "last_completed_task": "ERP-003",
+  "last_reviewed_task": "ERP-003",
   "blocker": null,
   "external_actions": [
     "Rotate the previously exposed SQL Server credential at the database provider.",
@@ -14,10 +15,28 @@
   "validation": {
     "profile": "safe",
     "status": "passed",
-    "checked_at": "2026-09-23T01:37:42Z",
-    "summary": "Release build passed with 0 warnings/errors; 165 unit tests passed. Integration and UI tests were intentionally not run."
+    "checked_at": "2026-09-23T02:52:57Z",
+    "summary": "Automation contract tests passed; Release build passed with 0 warnings/errors; 165 unit tests passed. ERP-003 is an explicit control-plane task, so browser acceptance was not used to claim a business completion."
   },
   "cline_exit_code": null,
+  "conversation_control": {
+    "mode": "gpt_file_backed",
+    "paused": false,
+    "pause_reason": null,
+    "last_intent": "install_browser_completion_pipeline",
+    "last_actor": "GPT",
+    "queue_target_size": 3,
+    "updated_at": "2026-09-23T02:52:57Z"
+  },
+  "completion_policy": {
+    "default_mode": "browser",
+    "definition": "real_browser_accepted",
+    "cline_success_is_only": "code_ready"
+  },
+  "browser_acceptance": {
+    "status": "not_run_for_control_plane_task",
+    "note": "ERP-003 changes only the automation control plane; future business tasks require real Edge acceptance."
+  },
   "finish_reason": "queue_empty",
-  "updated_at": "2026-09-23T02:19:55.172563Z"
+  "updated_at": "2026-09-23T02:52:57Z"
 }

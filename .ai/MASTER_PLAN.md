@@ -1,11 +1,15 @@
 # NEWERP AI Master Plan
 
-The pipeline processes `ERP-NNN.json` files in lexical order. A task moves through:
+GPT conversation is the user-facing controller; the repository is the durable source of truth. Each conversation command is recorded in `.ai/control/` and `.ai/audit.jsonl` before it changes queue execution.
 
-`pending -> in_progress -> validation -> completed -> Git checkpoint -> next task`
+The rolling work set targets three tasks. `depends_on` forms a validated acyclic graph, while lexical task order remains deterministic. The first non-terminal task is authoritative: malformed, blocked, failed, in-progress or unapproved work stops the queue. Later tasks are never skipped implicitly.
 
-Failures are returned to Cline for up to the configured maximum attempts. Exhausted attempts, protected paths, high-risk validation and ambiguous recovery stop at Human Gate. `deferred` and `skipped` tasks do not block the queue.
+Business-task lifecycle:
 
-The queue runner is `scripts/run-pipeline.ps1`. It holds an exclusive lock, invokes the single-task orchestrator repeatedly, and stops only when the queue is empty, a Human Gate is reached, or a failure needs attention.
+`pending -> in_progress -> engineering validation -> code_ready -> real Edge acceptance -> completed -> Git checkpoint -> optional push`
 
-Business tasks must remain small, declare narrow `allowed_paths`, use measurable acceptance criteria, and default to the `safe` validation profile.
+`Cline` output and exit status are implementation signals only. They cannot produce `completed`. Real-browser acceptance must produce a passing TRX, browser-session metadata, screenshots and a SHA-256 manifest under `.ai/evidence/ERP-NNN/`.
+
+Browser failures are returned to Cline within the retry budget. Missing browser infrastructure blocks the task. L3/L4 gates always require explicit human approval. Push recovery may rebase and retry the completed checkpoint, but must never rerun implementation or browser acceptance for a task already completed locally.
+
+Only automation control-layer migrations may explicitly use `completion_mode: control_plane`. Every ERP business task defaults to `completion_mode: browser`.

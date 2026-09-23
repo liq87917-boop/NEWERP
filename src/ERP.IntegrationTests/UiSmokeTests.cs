@@ -20,6 +20,7 @@ public class UiSmokeTests
         var loginPage = _fx.Driver.FindElement(By.Id("login-page"));
         Assert.NotNull(loginPage);
         Assert.True(loginPage.Displayed, "登录页应可见");
+        _fx.CaptureEvidence("login-page-visible");
     }
 
     [Fact]
@@ -44,6 +45,7 @@ public class UiSmokeTests
         Assert.True(loginPage.Displayed);
         var appPage = _fx.Driver.FindElement(By.Id("app-page"));
         Assert.False(appPage.Displayed, "错误密码不应跳到主界面");
+        _fx.CaptureEvidence("invalid-password-rejected");
     }
 
     [Fact]
@@ -66,6 +68,7 @@ public class UiSmokeTests
         var headerUser = _fx.Driver.FindElement(By.Id("header-user"));
         Assert.False(string.IsNullOrEmpty(headerUser.Text));
         Assert.Contains("admin", headerUser.Text);
+        _fx.CaptureEvidence("admin-dashboard-visible");
     }
 
     [Fact]
@@ -88,5 +91,6 @@ public class UiSmokeTests
         Assert.True(loginPage.Displayed);
         var appPage = _fx.Driver.FindElement(By.Id("app-page"));
         Assert.False(appPage.Displayed);
+        _fx.CaptureEvidence("logout-returned-to-login");
     }
 }

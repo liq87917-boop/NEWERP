@@ -1,12 +1,23 @@
 {
-  "id": "ERP-001",
+  "id": "ERP-NNN",
   "title": "Short outcome-oriented title",
   "status": "pending",
   "risk_level": "low",
-  "description": "Describe the requested change and its boundaries.",
-  "acceptance_criteria": ["Add measurable acceptance criteria here."],
-  "allowed_paths": ["src/ERP.Application/**", "src/ERP.UnitTests/**"],
+  "description": "Describe the requested user-visible outcome and boundaries.",
+  "acceptance_criteria": ["State a measurable business outcome."],
+  "allowed_paths": ["src/ERP.Application/**", "src/ERP.Api/**", "src/ERP.UnitTests/**", "src/ERP.IntegrationTests/**"],
+  "depends_on": [],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
   "validation_profile": "safe",
-  "human_gate": {"required": false, "status": "not_required", "reason": ""},
+  "completion_mode": "browser",
+  "browser_acceptance": {
+    "required": true,
+    "scenarios": ["Describe the exact workflow a user must complete in Microsoft Edge."],
+    "test_filter": "Collection=UiTests",
+    "minimum_screenshots": 1
+  },
+  "human_gate": {"required": false, "level": "L1", "status": "not_required", "reason": ""},
   "attempts": 0
 }

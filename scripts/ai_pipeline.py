@@ -25,7 +25,10 @@ TASKS_DIR = AI_DIR / "tasks"
 DECISIONS_DIR = AI_DIR / "decisions"
 AUDIT_PATH = AI_DIR / "audit.jsonl"
 ORCHESTRATOR = ROOT / "scripts" / "ai_orchestrator.py"
-ACTIVE_STATUSES = {"pending", "retry"}
+AUTOMATION_TESTS = ROOT / "tests" / "automation"
+RUNNABLE_STATUSES = {"pending", "retry"}
+TERMINAL_STATUSES = {"completed", "deferred", "skipped"}
+SUPPORTED_GATES = {"L1", "L2", "L3", "L4"}
 
 
 def utc_now() -> str:
@@ -59,8 +62,52 @@ def task_entries() -> list[tuple[Path, dict[str, Any]]]:
     return entries
 
 
-def active_tasks() -> list[tuple[Path, dict[str, Any]]]:
-    return [(path, task) for path, task in task_entries() if task.get("status") in ACTIVE_STATUSES]
+def task_dependencies(task: dict[str, Any]) -> list[str]:
+    value = task.get("depends_on", [])
+    if isinstance(value, str): value = [value]
+    if not isinstance(value, list) or any(not isinstance(item, str) or not item.strip() for item in value):
+        raise ValueError(f"{task.get('id')}: depends_on must be a string list")
+    if task.get("id") in value: raise ValueError(f"{task.get('id')}: self dependency")
+    return value
+
+
+def validate_dependency_graph(entries: list[tuple[Path, dict[str, Any]]]) -> None:
+    by_id = {task.get("id"): task for _, task in entries}
+    visiting: set[str] = set(); visited: set[str] = set()
+    def visit(task_id: str) -> None:
+        if task_id in visiting: raise ValueError(f"dependency cycle at {task_id}")
+        if task_id in visited: return
+        visiting.add(task_id)
+        for dependency in task_dependencies(by_id[task_id]):
+            if dependency not in by_id: raise ValueError(f"{task_id}: dependency missing: {dependency}")
+            visit(dependency)
+        visiting.remove(task_id); visited.add(task_id)
+    for task_id in by_id:
+        if not isinstance(task_id, str): raise ValueError("task id must be a string")
+        visit(task_id)
+
+
+def queue_head() -> tuple[tuple[Path, dict[str, Any]] | None, str]:
+    entries = task_entries(); validate_dependency_graph(entries)
+    by_id = {task["id"]: task for _, task in entries}
+    for path, task in entries:
+        status = task.get("status")
+        if status in TERMINAL_STATUSES: continue
+        if status not in RUNNABLE_STATUSES: return None, f"{task['id']} status={status} stops queue"
+        if not isinstance(task.get("auto_start", True), bool): return None, f"{task['id']} auto_start must be bool"
+        if not isinstance(task.get("requires_human_approval", False), bool): return None, f"{task['id']} requires_human_approval must be bool"
+        gate = str(task.get("human_gate", {}).get("level", "L1")).upper()
+        if gate not in SUPPORTED_GATES: return None, f"{task['id']} unknown human gate {gate}"
+        for dependency in task_dependencies(task):
+            dependency_status = by_id[dependency].get("status")
+            if dependency_status != "completed": return None, f"{task['id']} waits for {dependency} status={dependency_status}"
+        gate_status = task.get("human_gate", {}).get("status")
+        approved = gate_status in {"approved", "not_required", "ai_reviewed"}
+        if not task.get("auto_start", True): return None, f"{task['id']} auto_start=false"
+        if (task.get("human_gate", {}).get("required", False) or gate in {"L3", "L4"} or task.get("requires_human_approval", False)) and not approved:
+            return None, f"{task['id']} waits for human_gate={gate}"
+        return (path, task), "ready"
+    return None, "queue_empty"
 
 
 def queue_status() -> int:
@@ -68,7 +115,7 @@ def queue_status() -> int:
     print(json.dumps(rows, ensure_ascii=False, indent=2)); return 0
 
 
-def create_task(title: str, description: str, acceptance: list[str], allowed: list[str], profile: str, risk: str) -> int:
+def create_task(title: str, description: str, acceptance: list[str], allowed: list[str], profile: str, risk: str, depends_on: list[str], gate: str, completion_mode: str, browser_scenarios: list[str]) -> int:
     with pipeline_lock():
         config = load_json(CONFIG_PATH)
         if profile not in config.get("validation_profiles", {}):
@@ -80,7 +127,10 @@ def create_task(title: str, description: str, acceptance: list[str], allowed: li
         task_id = f"{config['task_prefix']}-{max(numbers, default=0) + 1:03d}"
         sensitive_tokens = ("appsettings", "seeddata", "schemaupgrader", ".sql", ".env", "deploy", "release", "user_input_files")
         protected = any(any(token in path.lower() for token in sensitive_tokens) for path in allowed)
-        gate_required = risk == "high" or profile in {"integration", "ui"} or protected
+        gate = gate.upper()
+        if gate not in SUPPORTED_GATES: print(f"Unknown gate: {gate}", file=sys.stderr); return 2
+        if completion_mode == "browser" and not browser_scenarios: browser_scenarios = list(acceptance)
+        gate_required = gate in {"L3", "L4"} or risk == "high" or profile in {"integration", "ui"} or protected
         task = {
             "id": task_id,
             "title": title,
@@ -90,9 +140,20 @@ def create_task(title: str, description: str, acceptance: list[str], allowed: li
             "acceptance_criteria": acceptance,
             "allowed_paths": allowed,
             "validation_profile": profile,
+            "depends_on": depends_on,
+            "auto_start": True,
+            "requires_human_approval": gate in {"L3", "L4"},
+            "completion_mode": completion_mode,
+            "browser_acceptance": {
+                "required": completion_mode == "browser",
+                "scenarios": browser_scenarios,
+                "test_filter": "Collection=UiTests",
+                "minimum_screenshots": 1
+            },
             "human_gate": {
                 "required": gate_required,
                 "status": "pending" if gate_required else "not_required",
+                "level": gate,
                 "reason": "Automatically required by risk/profile/path policy." if gate_required else ""
             },
             "attempts": 0,
@@ -150,10 +211,21 @@ def mark_queue_idle() -> None:
 def run_all() -> int:
     with pipeline_lock():
         while True:
-            tasks = active_tasks()
-            if not tasks:
+            state = load_json(STATE_PATH)
+            conversation = state.get("conversation_control", {})
+            if conversation.get("paused", False):
+                reason = conversation.get("pause_reason") or "paused by GPT conversation control"
+                audit("pipeline_paused", reason=reason)
+                print(f"Pipeline paused: {reason}", file=sys.stderr)
+                return 11
+            try: item, reason = queue_head()
+            except ValueError as exc:
+                print(f"Queue metadata error: {exc}", file=sys.stderr); return 10
+            if item is None and reason == "queue_empty":
                 mark_queue_idle(); print("Automation queue completed."); return 0
-            task_id = tasks[0][1]["id"]
+            if item is None:
+                print(f"Pipeline stopped fail-closed: {reason}", file=sys.stderr); return 10
+            task_id = item[1]["id"]
             print(f"[pipeline] starting {task_id}", flush=True)
             completed = run([sys.executable, str(ORCHESTRATOR), "run-next"])
             if completed.returncode != 0:
@@ -224,13 +296,15 @@ def self_test() -> int:
     try: config = load_json(CONFIG_PATH); checks["config"] = "ok"
     except Exception as exc: print(f"Configuration error: {exc}", file=sys.stderr); return 2
     ids = []
-    allowed_statuses = {"pending", "retry", "in_progress", "completed", "failed", "deferred", "skipped"}
+    allowed_statuses = {"pending", "retry", "in_progress", "code_ready", "blocked", "completed", "failed", "deferred", "skipped"}
     for path, task in task_entries():
         ids.append(task.get("id"))
         if task.get("id") != path.stem: errors.append(f"Task id/file mismatch: {path.name}")
         if task.get("status") not in allowed_statuses: errors.append(f"Invalid status in {path.name}")
         if not task.get("allowed_paths"): errors.append(f"Missing allowed_paths in {path.name}")
     if len(ids) != len(set(ids)): errors.append("Duplicate task ids")
+    try: validate_dependency_graph(task_entries())
+    except ValueError as exc: errors.append(str(exc))
     checks["tasks"] = len(ids)
     checks["git"] = "ok" if run(["git", "rev-parse", "--is-inside-work-tree"], capture=True).returncode == 0 else "missing"
     dirty = run(["git", "status", "--porcelain"], capture=True).stdout.strip()
@@ -242,6 +316,14 @@ def self_test() -> int:
     for required in {"**/*.sql", "deploy/**", "src/ERP.Api/appsettings*.json"}:
         if required not in protected: errors.append(f"Missing protected path: {required}")
     checks["high_risk_profiles"] = sorted({"integration", "ui"}.intersection(config.get("validation_profiles", {})))
+    checks["queue_target_size"] = config.get("queue_target_size", 3)
+    checks["browser_completion_required"] = config.get("completion_policy", {}).get("require_real_browser", False)
+    if not (ROOT / "scripts" / "ai_browser_acceptance.py").exists(): errors.append("Browser acceptance runner missing")
+    if not (ROOT / "scripts" / "gpt_project_control.py").exists(): errors.append("GPT conversation controller missing")
+    if AUTOMATION_TESTS.exists():
+        contract_tests = run([sys.executable, "-m", "unittest", "discover", "-s", str(AUTOMATION_TESTS), "-p", "test_*.py"], capture=True)
+        checks["automation_contract_tests"] = "passed" if contract_tests.returncode == 0 else "failed"
+        if contract_tests.returncode != 0: errors.append((contract_tests.stdout + contract_tests.stderr).strip())
     if checks["git"] != "ok" or checks["cline"] != "ok": errors.append("Required runtime dependency unavailable")
     print(json.dumps({"status": "passed" if not errors else "failed", "checks": checks, "errors": errors}, ensure_ascii=False, indent=2))
     return 0 if not errors else 5
@@ -259,6 +341,9 @@ def main() -> int:
     cp.add_argument("--title", required=True); cp.add_argument("--description", required=True)
     cp.add_argument("--accept", action="append", required=True); cp.add_argument("--allow", action="append", required=True)
     cp.add_argument("--profile", default="safe"); cp.add_argument("--risk", choices=["low", "medium", "high"], default="low")
+    cp.add_argument("--depends-on", action="append", default=[]); cp.add_argument("--gate", choices=["L1", "L2", "L3", "L4"], default="L1")
+    cp.add_argument("--completion-mode", choices=["browser", "control_plane"], default="browser")
+    cp.add_argument("--browser-scenario", action="append", default=[])
     dp = sub.add_parser("defer"); dp.add_argument("task_id"); dp.add_argument("--by", required=True); dp.add_argument("--note", required=True)
     rp = sub.add_parser("retry"); rp.add_argument("task_id"); rp.add_argument("--by", required=True); rp.add_argument("--note", required=True)
     args = parser.parse_args()
@@ -266,7 +351,7 @@ def main() -> int:
     if args.command == "retry-push": return retry_push()
     if args.command == "self-test": return self_test()
     if args.command == "queue": return queue_status()
-    if args.command == "create": return create_task(args.title, args.description, args.accept, args.allow, args.profile, args.risk)
+    if args.command == "create": return create_task(args.title, args.description, args.accept, args.allow, args.profile, args.risk, args.depends_on, args.gate, args.completion_mode, args.browser_scenario)
     if args.command == "defer": return defer_task(args.task_id, args.by, args.note)
     return retry_task(args.task_id, args.by, args.note)
 

@@ -1,0 +1,43 @@
+{
+  "id": "ERP-003",
+  "title": "Install GPT-controlled real-browser completion pipeline",
+  "status": "completed",
+  "risk_level": "medium",
+  "description": "Upgrade the automation control plane with GPT conversation state, a strict dependency queue, real Edge acceptance evidence, normalized runner outcomes and fail-closed recovery without changing ERP business behavior.",
+  "acceptance_criteria": [
+    "Cline success produces code_ready and never directly produces completed.",
+    "Business tasks require real Microsoft Edge acceptance plus TRX, metadata, screenshots and a SHA-256 evidence manifest.",
+    "The first blocked, malformed, gated or failed task stops the queue and later tasks are not skipped.",
+    "GPT pause, resume and intent records survive in versioned project control files.",
+    "Automation contract tests, Release build and unit tests pass."
+  ],
+  "allowed_paths": [
+    ".ai/**",
+    "scripts/ai_*.py",
+    "scripts/gpt-control.ps1",
+    "scripts/new-ai-task.ps1",
+    "docs/AUTOMATED_DEVELOPMENT.md",
+    "src/ERP.IntegrationTests/UiTestFixture.cs",
+    "src/ERP.IntegrationTests/UiSmokeTests.cs",
+    "tests/automation/**"
+  ],
+  "validation_profile": "safe",
+  "depends_on": ["ERP-001"],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "completion_mode": "control_plane",
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": [],
+    "test_filter": "Collection=UiTests",
+    "minimum_screenshots": 1
+  },
+  "human_gate": {
+    "required": false,
+    "status": "ai_reviewed",
+    "level": "L2",
+    "reason": "Control-plane-only migration; no ERP business logic or external system is changed."
+  },
+  "attempts": 1,
+  "completed_at": "2026-09-23T02:52:57Z"
+}

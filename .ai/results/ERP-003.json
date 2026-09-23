@@ -1,0 +1,16 @@
+{
+  "task": "ERP-003",
+  "status": "completed",
+  "execution_outcome": "completed",
+  "normalized_finish_reason": "control_plane_validated",
+  "cline_exit_code": null,
+  "cline_finish_reason_raw": null,
+  "attempts": 1,
+  "browser_acceptance": null,
+  "validation": {
+    "automation_contract_tests": "passed",
+    "release_build": "passed_0_warnings_0_errors",
+    "unit_tests": "passed_165_of_165"
+  },
+  "finished_at": "2026-09-23T02:52:57Z"
+}

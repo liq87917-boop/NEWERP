@@ -8,6 +8,15 @@
   "auto_commit": true,
   "auto_push": false,
   "human_gate": true,
+  "queue_target_size": 3,
+  "supported_human_gates": ["L1", "L2", "L3", "L4"],
+  "completion_policy": {
+    "default_mode": "browser",
+    "require_real_browser": true,
+    "browser": "Microsoft Edge",
+    "minimum_screenshots": 1,
+    "control_plane_exception_requires_explicit_task_field": true
+  },
   "pipeline": {
     "lock_file": ".ai/pipeline.lock",
     "push_retry_attempts": 3,
@@ -20,8 +29,8 @@
     "checkpoints/**", "user_input_files/**", "logs/**", "**/*.sql",
     "src/ERP.Infrastructure/Data/SchemaUpgrader.cs", "src/ERP.Infrastructure/Data/SeedData*.cs"
   ],
-  "ignored_change_paths": [".ai/logs/**", ".ai/results/**", ".ai/pipeline.lock", "**/bin/**", "**/obj/**"],
-  "orchestrator_paths": [".ai/PROJECT_STATE.json", ".ai/tasks/**", ".ai/results/**", ".ai/decisions/**", ".ai/audit.jsonl"],
+  "ignored_change_paths": [".ai/logs/**", ".ai/pipeline.lock", "**/bin/**", "**/obj/**"],
+  "orchestrator_paths": [".ai/PROJECT_STATE.json", ".ai/tasks/**", ".ai/results/**", ".ai/decisions/**", ".ai/evidence/**", ".ai/control/**", ".ai/audit.jsonl"],
   "validation_profiles": {
     "safe": [
       ["dotnet", "restore", "NEWERP.sln"],
