@@ -12,6 +12,7 @@ $statePath = Join-Path $root '.ai\PROJECT_STATE.json'
 $tasksDir = Join-Path $root '.ai\tasks'
 $logsDir = Join-Path $root '.ai\logs'
 $pipelineScript = Join-Path $scriptDir 'run-pipeline.ps1'
+$orchestratorScript = Join-Path $scriptDir 'ai_orchestrator.py'
 $outLog = Join-Path $logsDir 'agent-pipeline.out.log'
 $errLog = Join-Path $logsDir 'agent-pipeline.err.log'
 $managedBranches = @('main', 'master', 'develop')
@@ -39,6 +40,7 @@ $lastSyncAt = Get-Date '2000-01-01'
 $lastSyncMessage = 'not synced yet'
 $lastCiText = 'GitHub CLI not checked'
 $lastCiAt = Get-Date '2000-01-01'
+$lastRecoveryAttemptKey = $null
 $screenInitialized = $false
 $lastScreen = @()
 $lastScreenWidth = 0
@@ -198,15 +200,26 @@ function Sync-Repository {
 }
 
 function Start-Pipeline {
+    param([switch]$RecoverPathGuard)
+
     if (Test-Path $outLog) { Remove-Item $outLog -Force -ErrorAction SilentlyContinue }
     if (Test-Path $errLog) { Remove-Item $errLog -Force -ErrorAction SilentlyContinue }
 
-    $arguments = @(
-        '-NoLogo',
-        '-NoProfile',
-        '-ExecutionPolicy', 'Bypass',
-        '-File', ('"{0}"' -f $pipelineScript)
-    ) -join ' '
+    if ($RecoverPathGuard) {
+        $arguments = @(
+            '-NoLogo',
+            '-NoProfile',
+            '-ExecutionPolicy', 'Bypass',
+            '-Command', ('"& py -3 ''{0}'' run-next; exit $LASTEXITCODE"' -f $orchestratorScript)
+        ) -join ' '
+    } else {
+        $arguments = @(
+            '-NoLogo',
+            '-NoProfile',
+            '-ExecutionPolicy', 'Bypass',
+            '-File', ('"{0}"' -f $pipelineScript)
+        ) -join ' '
+    }
 
     $startArgs = @{
         FilePath = 'powershell.exe'
@@ -242,6 +255,17 @@ function Get-CiText {
     }
 }
 
+function Test-RecoverablePathGuard {
+    param($State, $Head)
+
+    if (-not $State -or -not $Head) { return $false }
+    if ($State.phase -ne 'human_attention') { return $false }
+    if ($State.finish_reason -ne 'attempts_exhausted') { return $false }
+    if ($Head.status -ne 'failed') { return $false }
+    $blockerText = [string]$State.blocker
+    return $blockerText.StartsWith('Path guard failed:')
+}
+
 function Get-AgentMode {
     param($State, $Head, $GitInfo)
 
@@ -250,6 +274,9 @@ function Get-AgentMode {
     }
     if ($pipelineProcess -and -not $pipelineProcess.HasExited) {
         return 'RUNNING'
+    }
+    if (Test-RecoverablePathGuard $State $Head) {
+        return 'READY'
     }
     if ($State -and $State.phase -in @('blocked', 'human_attention', 'waiting_human_gate', 'push_pending')) {
         return 'ATTENTION'
@@ -530,10 +557,24 @@ try {
         $recoverPush = $false
         if ($state -and $state.phase -eq 'push_pending') { $recoverPush = $true }
 
-        if (-not $NoExecute -and -not $pipelineProcess -and -not $paused -and -not $gitInfo.Dirty -and $gitInfo.Branch -in $managedBranches) {
-            if ($recoverPush -or (Test-TaskRunnable $head)) {
+        $recoverPathGuard = Test-RecoverablePathGuard $state $head
+        $recoveryKey = $null
+        if ($recoverPathGuard) {
+            $recoveryKey = "$($head.id)|$($gitInfo.Sha)|$([string]$state.blocker)"
+        }
+
+        $canStartWithDirty = $recoverPathGuard -and ($lastRecoveryAttemptKey -ne $recoveryKey)
+        $worktreeAllowsStart = (-not $gitInfo.Dirty) -or $canStartWithDirty
+
+        if (-not $NoExecute -and -not $pipelineProcess -and -not $paused -and $worktreeAllowsStart -and $gitInfo.Branch -in $managedBranches) {
+            if ($recoverPush -or $recoverPathGuard -or (Test-TaskRunnable $head)) {
                 try {
-                    $pipelineProcess = Start-Pipeline
+                    if ($recoverPathGuard) {
+                        $lastRecoveryAttemptKey = $recoveryKey
+                        $pipelineProcess = Start-Pipeline -RecoverPathGuard
+                    } else {
+                        $pipelineProcess = Start-Pipeline
+                    }
                 } catch {
                     $lastPipelineExit = -1
                     $lastPipelineEndedAt = Get-Date -Format 'HH:mm:ss'
