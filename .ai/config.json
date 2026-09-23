@@ -6,7 +6,7 @@
   "require_git": true,
   "require_clean_worktree": true,
   "auto_commit": true,
-  "auto_push": false,
+  "auto_push": true,
   "human_gate": true,
   "queue_target_size": 3,
   "supported_human_gates": ["L1", "L2", "L3", "L4"],
