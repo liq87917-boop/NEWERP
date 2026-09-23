@@ -9,13 +9,21 @@
   "auto_push": true,
   "human_gate": true,
   "queue_target_size": 3,
-  "supported_human_gates": ["L1", "L2", "L3", "L4"],
+  "supported_human_gates": [
+    "L1",
+    "L2",
+    "L3",
+    "L4"
+  ],
   "completion_policy": {
     "default_mode": "browser",
     "require_real_browser": true,
     "browser": "Microsoft Edge",
     "minimum_screenshots": 1,
-    "control_plane_exception_requires_explicit_task_field": true
+    "control_plane_exception_requires_explicit_task_field": true,
+    "defer_browser_during_development": true,
+    "deferred_status": "browser_deferred",
+    "final_browser_phase": "FINAL-UI-ACCEPTANCE"
   },
   "pipeline": {
     "lock_file": ".ai/pipeline.lock",
@@ -25,20 +33,99 @@
   "security_baseline_decision": ".ai/decisions/SECURITY_BASELINE_APPROVED.json",
   "cline_command": "C:\\Users\\Admin\\AppData\\Roaming\\npm\\cline.cmd",
   "protected_paths": [
-    ".env", ".env.*", "src/ERP.Api/appsettings*.json", "deploy/**", "release/**",
-    "checkpoints/**", "user_input_files/**", "logs/**", "**/*.sql",
-    "src/ERP.Infrastructure/Data/SchemaUpgrader.cs", "src/ERP.Infrastructure/Data/SeedData*.cs"
+    ".env",
+    ".env.*",
+    "src/ERP.Api/appsettings*.json",
+    "deploy/**",
+    "release/**",
+    "checkpoints/**",
+    "user_input_files/**",
+    "logs/**",
+    "**/*.sql",
+    "src/ERP.Infrastructure/Data/SchemaUpgrader.cs",
+    "src/ERP.Infrastructure/Data/SeedData*.cs"
   ],
-  "ignored_change_paths": [".ai/logs/**", ".ai/pipeline.lock", "**/bin/**", "**/obj/**"],
-  "orchestrator_paths": [".ai/PROJECT_STATE.json", ".ai/tasks/**", ".ai/results/**", ".ai/decisions/**", ".ai/evidence/**", ".ai/control/**", ".ai/audit.jsonl"],
+  "ignored_change_paths": [
+    ".ai/logs/**",
+    ".ai/pipeline.lock",
+    "**/bin/**",
+    "**/obj/**"
+  ],
+  "orchestrator_paths": [
+    ".ai/PROJECT_STATE.json",
+    ".ai/tasks/**",
+    ".ai/results/**",
+    ".ai/decisions/**",
+    ".ai/evidence/**",
+    ".ai/control/**",
+    ".ai/audit.jsonl"
+  ],
   "validation_profiles": {
     "safe": [
-      ["dotnet", "restore", "NEWERP.sln"],
-      ["dotnet", "build", "NEWERP.sln", "-c", "Release", "--no-restore", "--no-incremental", "/p:TreatWarningsAsErrors=true", "/p:RunAnalyzersDuringBuild=true"],
-      ["dotnet", "test", "src/ERP.UnitTests/ERP.UnitTests.csproj", "-c", "Release", "--no-build", "--verbosity", "minimal"]
+      [
+        "dotnet",
+        "restore",
+        "NEWERP.sln"
+      ],
+      [
+        "dotnet",
+        "build",
+        "NEWERP.sln",
+        "-c",
+        "Release",
+        "--no-restore",
+        "--no-incremental",
+        "/p:TreatWarningsAsErrors=true",
+        "/p:RunAnalyzersDuringBuild=true"
+      ],
+      [
+        "dotnet",
+        "test",
+        "src/ERP.UnitTests/ERP.UnitTests.csproj",
+        "-c",
+        "Release",
+        "--no-build",
+        "--verbosity",
+        "minimal"
+      ]
     ],
-    "build_only": [["dotnet", "build", "NEWERP.sln", "-c", "Release", "--no-incremental", "/p:TreatWarningsAsErrors=true", "/p:RunAnalyzersDuringBuild=true"]],
-    "integration": [["dotnet", "test", "src/ERP.IntegrationTests/ERP.IntegrationTests.csproj", "-c", "Release", "--filter", "Collection=Integration", "--verbosity", "normal"]],
-    "ui": [["dotnet", "test", "src/ERP.IntegrationTests/ERP.IntegrationTests.csproj", "-c", "Debug", "--filter", "Collection=UiTests", "--verbosity", "normal"]]
+    "build_only": [
+      [
+        "dotnet",
+        "build",
+        "NEWERP.sln",
+        "-c",
+        "Release",
+        "--no-incremental",
+        "/p:TreatWarningsAsErrors=true",
+        "/p:RunAnalyzersDuringBuild=true"
+      ]
+    ],
+    "integration": [
+      [
+        "dotnet",
+        "test",
+        "src/ERP.IntegrationTests/ERP.IntegrationTests.csproj",
+        "-c",
+        "Release",
+        "--filter",
+        "Collection=Integration",
+        "--verbosity",
+        "normal"
+      ]
+    ],
+    "ui": [
+      [
+        "dotnet",
+        "test",
+        "src/ERP.IntegrationTests/ERP.IntegrationTests.csproj",
+        "-c",
+        "Debug",
+        "--filter",
+        "Collection=UiTests",
+        "--verbosity",
+        "normal"
+      ]
+    ]
   }
 }
