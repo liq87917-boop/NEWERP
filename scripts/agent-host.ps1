@@ -428,3 +428,5 @@ finally {
     try { $mutex.ReleaseMutex() } catch {}
     try { $mutex.Dispose() } catch {}
 }
+
+if ($Once) { exit 0 }
