@@ -1,0 +1,187 @@
+/* ============================================================
+ * 日期选择器样式（配合 /js/datepicker.js）
+ * 说明：统一美化日期输入框外观，并提供自定义日历浮层样式，
+ *      全部颜色/圆角/阴影复用系统设计 Token（app.css :root）。
+ * ============================================================ */
+
+/* ============ 日期输入框 ============ */
+/* 未被 JS 接管时的兜底样式（保证 JS 未加载也不难看） */
+input[type="date"],
+input[type="datetime-local"] {
+  height: 40px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 14px;
+  font-family: inherit;
+  color: var(--text-primary);
+  background: #fff;
+}
+input[type="date"]::-webkit-calendar-picker-indicator {
+  opacity: .55;
+  cursor: pointer;
+}
+
+/* JS 接管后的日期输入框（type 已切换为 text） */
+input.erp-date-input,
+.form-item input.erp-date-input,
+.toolbar input.erp-date-input,
+.detail-editor input.erp-date-input {
+  height: 40px;
+  padding-left: 12px;
+  padding-right: 34px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 14px;
+  font-family: inherit;
+  color: var(--text-primary);
+  background-color: #fff;
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  background-size: 17px 17px;
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='4.5' width='18' height='16' rx='3'/%3E%3Cpath d='M8 2.8v3.4M16 2.8v3.4M3 9.6h18'/%3E%3C/svg%3E");
+  cursor: pointer;
+  transition: border-color .16s ease, box-shadow .16s ease;
+}
+/* 表单内铺满一行，工具栏内固定宽度 */
+.form-item input.erp-date-input,
+.side-panel-body input.erp-date-input,
+.modal input.erp-date-input { width: 100%; }
+.toolbar input.erp-date-input { width: 170px; }
+.detail-editor input.erp-date-input {
+  height: 34px; font-size: 13px; border-radius: 4px;
+  padding-right: 30px; background-position: right 8px center; background-size: 15px 15px;
+}
+
+input.erp-date-input::placeholder { color: var(--text-placeholder); }
+input.erp-date-input:hover {
+  border-color: var(--brand-500);
+}
+input.erp-date-input:focus,
+.form-item input.erp-date-input:focus {
+  outline: none;
+  border-color: var(--brand-600);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, .14);
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%232563eb' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='4.5' width='18' height='16' rx='3'/%3E%3Cpath d='M8 2.8v3.4M16 2.8v3.4M3 9.6h18'/%3E%3C/svg%3E");
+}
+input.erp-date-input.is-active {
+  border-color: var(--brand-600);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, .14);
+}
+
+/* ============ 日期区间（报表工具栏） ============ */
+.date-range { display: inline-flex; align-items: center; gap: 8px; }
+.date-range-sep { color: var(--text-muted); font-size: 13px; user-select: none; }
+
+/* ============ 日历浮层 ============ */
+.erp-dp-panel {
+  position: fixed;
+  top: 0; left: 0;
+  width: 296px;
+  min-width: 220px;
+  padding: 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: 0 12px 32px rgba(15, 23, 42, .16);
+  z-index: 1000;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-6px) scale(.98);
+  transform-origin: top left;
+  transition: opacity .16s ease, transform .16s ease, visibility .16s ease;
+  font-size: 13px;
+  color: var(--text-primary);
+  user-select: none;
+}
+.erp-dp-panel.is-open {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0) scale(1);
+}
+
+/* 头部：年月导航 */
+.erp-dp-head {
+  display: flex; align-items: center; gap: 4px;
+  padding-bottom: 8px; margin-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+.erp-dp-nav {
+  width: 28px; height: 28px; flex-shrink: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 0; border-radius: 8px; background: transparent;
+  color: var(--text-muted); cursor: pointer;
+  transition: background .15s ease, color .15s ease;
+}
+.erp-dp-nav:hover { background: #eff6ff; color: var(--brand-600); }
+.erp-dp-nav svg { width: 15px; height: 15px; display: block; }
+.erp-dp-title {
+  flex: 1; height: 28px;
+  border: 0; border-radius: 8px; background: transparent;
+  font-size: 14px; font-weight: 700; font-family: inherit;
+  color: var(--text-primary); cursor: pointer;
+  transition: background .15s ease, color .15s ease;
+}
+.erp-dp-title:hover { background: #eff6ff; color: var(--brand-600); }
+
+/* 星期表头 */
+.erp-dp-weeks {
+  display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px;
+  margin-bottom: 2px;
+}
+.erp-dp-weeks span {
+  height: 28px; display: flex; align-items: center; justify-content: center;
+  color: var(--text-muted); font-size: 12px; font-weight: 600;
+}
+
+/* 日期网格 */
+.erp-dp-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
+.erp-dp-grid.is-block { grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.erp-dp-cell {
+  height: 34px;
+  display: flex; align-items: center; justify-content: center;
+  border: 1px solid transparent; border-radius: 8px;
+  background: transparent; font-family: inherit; font-size: 13px;
+  color: var(--text-primary); cursor: pointer;
+  transition: background .14s ease, color .14s ease, border-color .14s ease;
+}
+.erp-dp-grid.is-block .erp-dp-cell { height: 44px; font-size: 14px; }
+.erp-dp-cell:hover { background: var(--brand-100); color: var(--brand-600); }
+.erp-dp-cell.is-other { color: #cbd5e1; }
+.erp-dp-cell.is-weekend { color: #b45309; }
+.erp-dp-cell.is-other.is-weekend { color: #ddd0bb; }
+.erp-dp-cell.is-today {
+  border-color: var(--brand-500); color: var(--brand-600); font-weight: 700;
+}
+.erp-dp-cell.is-selected,
+.erp-dp-cell.is-selected:hover {
+  background: var(--brand-600); border-color: var(--brand-600);
+  color: #fff; font-weight: 700;
+  box-shadow: 0 4px 10px rgba(37, 99, 235, .28);
+}
+.erp-dp-cell.is-disabled,
+.erp-dp-cell:disabled {
+  color: #e2e8f0; cursor: not-allowed; background: transparent;
+}
+
+/* 页脚：快捷操作 */
+.erp-dp-foot {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border);
+}
+.erp-dp-quick { display: flex; align-items: center; gap: 4px; }
+.erp-dp-link {
+  height: 26px; padding: 0 8px;
+  border: 0; border-radius: 6px; background: transparent;
+  font-family: inherit; font-size: 12px; font-weight: 600;
+  color: var(--brand-600); cursor: pointer;
+  transition: background .15s ease;
+}
+.erp-dp-link:hover { background: #eff6ff; }
+.erp-dp-link.is-muted { color: var(--text-muted); }
+.erp-dp-link.is-muted:hover { background: #f1f5f9; color: var(--danger); }
+
+@media (max-width: 640px) {
+  .erp-dp-panel { width: 272px; }
+  .toolbar input.erp-date-input { width: 148px; }
+}

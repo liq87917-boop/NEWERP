@@ -1,0 +1,10 @@
+# NEWERP safety rules
+
+- This is a .NET 8 ASP.NET Core ERP system using EF Core, SQL Server, xUnit, Selenium and stored procedures.
+- The default safe validation is Release build plus `ERP.UnitTests` only.
+- Do not run `ERP.IntegrationTests`, UI tests, the API, deployment scripts, SQL scripts, schema upgrades, or seed operations without an approved Human Gate.
+- Treat `.env*`, `appsettings*.json`, connection strings, JWT keys and OSS keys as secrets. Never print or copy their values.
+- Do not modify `deploy/`, `release/`, `checkpoints/`, `user_input_files/`, `logs/`, SQL files, `SchemaUpgrader.cs`, or `SeedData*.cs` without an approved Human Gate.
+- Only modify paths listed in the current task JSON. Avoid unrelated cleanup and broad refactors.
+- Never use production credentials or production data for automated validation.
+- Do not commit, push, rewrite history, or delete files; the orchestrator owns checkpoints.

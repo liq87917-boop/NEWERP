@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>外贸 ERP 系统</title>
+  <link rel="stylesheet" href="/css/app.css?v=20260918-10">
+  <link rel="stylesheet" href="/css/components.css?v=20260918-10">
+  <link rel="stylesheet" href="/css/datepicker.css?v=20260918-10">
+  <link rel="stylesheet" href="/css/ui-polish.css?v=20260918-11">
+</head>
+<body>
+  <!-- ============ 登录页（义乌小商品外贸 · 科技感重做）============ -->
+  <div id="login-page" class="login-page">
+    <!-- 动态装饰层：网格 / 扫描线 / 数据流粒子 / 浮动义乌元素 -->
+    <div class="login-bg-grid"></div>
+    <div class="login-bg-scan"></div>
+    <div class="login-bg-particles" id="login-particles"></div>
+    <div class="login-bg-orb login-bg-orb-1"></div>
+    <div class="login-bg-orb login-bg-orb-2"></div>
+    <div class="login-bg-orb login-bg-orb-3"></div>
+
+    <!-- 左侧行业 Banner：义乌国际商贸城 + 数据 ticker -->
+    <aside class="login-banner">
+      <div class="banner-brand">
+        <div class="banner-logo">义</div>
+        <div class="banner-title">
+          <div class="banner-title-zh">义乌外贸 ERP</div>
+          <div class="banner-title-en">YIWU · FOREIGN TRADE ERP</div>
+        </div>
+      </div>
+      <h1 class="banner-headline">
+        <span class="banner-headline-line">连接全球 <b>200+</b> 国家</span>
+        <span class="banner-headline-line">服务 <b>8 万</b> 义乌商户</span>
+        <span class="banner-headline-line">日均 <b>3 万</b> 单出口</span>
+      </h1>
+      <div class="banner-sub">全球最大小商品批发市场 · 饰品 · 玩具 · 袜品 · 文具 · 箱包 · 五金 · 工艺品 · 日用品</div>
+
+      <!-- 实时数据 ticker -->
+      <div class="banner-ticker">
+        <div class="ticker-row"><span class="ticker-dot ocean"></span><span class="ticker-label">今日订单</span><span class="ticker-value" id="tk-orders">--</span></div>
+        <div class="ticker-row"><span class="ticker-dot cargo"></span><span class="ticker-label">在途柜量</span><span class="ticker-value" id="tk-containers">--</span><span class="ticker-unit">TEU</span></div>
+        <div class="ticker-row"><span class="ticker-dot port"></span><span class="ticker-label">活跃客户</span><span class="ticker-value" id="tk-customers">--</span><span class="ticker-unit">家</span></div>
+        <div class="ticker-row"><span class="ticker-dot lc"></span><span class="ticker-label">本月销售额</span><span class="ticker-value" id="tk-sales">--</span><span class="ticker-unit">USD</span></div>
+      </div>
+
+      <!-- 浮动义乌元素（货船 / 集装箱 / 班列） -->
+      <div class="banner-deco banner-deco-ship">🚢</div>
+      <div class="banner-deco banner-deco-train">🚂</div>
+      <div class="banner-deco banner-deco-box">📦</div>
+      <div class="banner-deco banner-deco-globe">🌐</div>
+      <div class="banner-deco banner-deco-anchor">⚓</div>
+
+      <!-- 底部版权 -->
+      <div class="banner-footer">
+        <span>© 2026 Yiwu Foreign Trade ERP</span>
+        <span class="banner-footer-sep">·</span>
+        <span>v1.0.0 · Build #20260918</span>
+        <span class="banner-footer-sep">·</span>
+        <span>浙ICP备 -- 号</span>
+      </div>
+    </aside>
+
+    <!-- 右侧登录卡片 -->
+    <div class="login-card">
+      <!-- HUD 风格四向角 -->
+      <span class="hud-corner hud-tl"></span>
+      <span class="hud-corner hud-tr"></span>
+      <span class="hud-corner hud-bl"></span>
+      <span class="hud-corner hud-br"></span>
+
+      <div class="login-brand">
+        <div class="login-logo" id="login-logo">义乌外贸 ERP 系统</div>
+        <div class="login-sub">YIWU FOREIGN TRADE ERP SYSTEM</div>
+      </div>
+
+      <!-- 登录方式切换 -->
+      <div class="login-tabs">
+        <button type="button" class="login-tab active" data-tab="password">🔑 账号密码</button>
+        <button type="button" class="login-tab" data-tab="qrcode" disabled title="二维码登录（待启用）">📱 扫码登录</button>
+        <button type="button" class="login-tab" data-tab="sms" disabled title="短信登录（待启用）">📨 短信登录</button>
+      </div>
+
+      <form id="login-form" autocomplete="off">
+        <div class="form-item">
+          <label>用户名</label>
+          <div class="input-wrap">
+            <span class="input-icon">👤</span>
+            <input id="login-username" type="text" value="admin" placeholder="请输入用户名" autocomplete="username">
+          </div>
+        </div>
+        <div class="form-item">
+          <label>密码</label>
+          <div class="input-wrap">
+            <span class="input-icon">🔒</span>
+            <input id="login-password" type="password" value="Admin@123" placeholder="请输入密码" autocomplete="current-password">
+            <button type="button" class="input-extra" onclick="togglePasswordVisibility()" title="显示/隐藏密码">👁</button>
+          </div>
+        </div>
+        <div class="login-row">
+          <label class="login-check"><input type="checkbox" id="login-remember" checked> <span>记住我</span></label>
+          <a href="javascript:void(0)" onclick="showToast('请联系系统管理员重置密码', 'info')" class="login-link">忘记密码？</a>
+        </div>
+
+        <button type="submit" class="btn btn-shine btn-block" id="login-btn">
+          <span class="btn-shine-text">登 录</span>
+          <span class="btn-shine-sweep"></span>
+        </button>
+
+        <!-- 快捷登录 -->
+        <div class="login-quick">
+          <span class="login-quick-label">快捷体验：</span>
+          <button type="button" class="login-quick-btn" onclick="quickLogin('admin', 'Admin@123')">👑 管理员</button>
+          <button type="button" class="login-quick-btn" onclick="quickLogin('sales', 'Sales@123')">🛒 销售员</button>
+          <button type="button" class="login-quick-btn" onclick="quickLogin('finance', 'Finance@123')">💰 财务</button>
+        </div>
+
+        <div class="login-error" id="login-error"></div>
+      </form>
+
+      <div class="login-foot">
+        <span>🔒 国密 SM4 加密传输</span>
+        <span class="login-foot-sep">·</span>
+        <span>📡 全球加速节点</span>
+        <span class="login-foot-sep">·</span>
+        <span>🇨🇳 中国 · 义乌</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ 主界面 ============ -->
+  <div id="app-page" class="app-page" style="display:none">
+    <aside class="app-sidebar" id="sidebar">
+      <div class="sidebar-logo" id="sidebar-logo" role="button" tabindex="0" title="返回首页 · 义乌国际商贸城门户">
+        <div class="logo-icon" id="logo-icon">外</div>
+        <div class="logo-text">
+          <div class="logo-title" id="logo-title">外贸 ERP</div>
+          <div class="logo-sub">Foreign Trade ERP</div>
+        </div>
+      </div>
+      <nav class="sidebar-nav" id="sidebar-nav"></nav>
+      <div class="sidebar-footer">
+        <div class="sidebar-company" title="金华市奕鸣科技有限公司">
+          <span class="sc-logo">奕</span>
+          <span class="sc-name">金华市奕鸣科技有限公司</span>
+        </div>
+        <button class="collapse-btn" id="collapse-btn" title="收起菜单">
+          <svg class="collapse-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+        </button>
+      </div>
+    </aside>
+
+    <div class="app-main">
+      <header class="app-header">
+        <div class="header-title" id="header-title">首页</div>
+        <div class="header-right">
+          <span class="tz-badge" title="服务器时区">UTC+8</span>
+          <button class="lang-switch" id="lang-switch" title="切换语言">
+            <span class="lang-flag">🇨🇳</span>
+            <span id="lang-label">中文</span>
+            <span class="caret">▼</span>
+          </button>
+          <span class="dot" title="在线"></span>
+          <button class="theme-toggle" id="theme-toggle" title="切换深色/浅色主题">🌙</button>
+          <span class="header-user" id="header-user"></span>
+          <a href="/swagger" target="_blank" class="header-link">接口文档</a>
+          <button class="btn btn-neutral btn-sm" id="logout-btn">退出</button>
+        </div>
+      </header>
+      <div class="tabs-bar" id="tabs-bar"></div>
+      <main class="page-content" id="content"></main>
+    </div>
+  </div>
+
+  <div id="toast" class="toast"></div>
+  <div id="modal" class="modal-mask" style="display:none"></div>
+
+  <!-- ============ Parallax Side Panel（基础资料新建/编辑） ============ -->
+  <div id="side-panel-mask" class="side-panel-mask" onclick="closePanel()"></div>
+  <div id="side-panel" class="side-panel">
+    <div class="side-panel-header">
+      <h3 id="sp-title">表单</h3>
+      <button class="side-panel-close" onclick="closePanel()" title="关闭">×</button>
+    </div>
+    <div class="side-panel-body" id="sp-body"></div>
+    <div class="side-panel-footer">
+      <button class="btn btn-neutral" onclick="closePanel()">取消</button>
+      <button class="btn btn-primary" id="sp-save-btn">保存</button>
+    </div>
+  </div>
+
+  <script src="/js/icons.js"></script>
+  <script src="/js/icons2.js"></script>
+  <script src="/js/modules.js"></script>
+  <script src="/js/modules-doc.js"></script>
+  <script src="/js/modules-doc2.js"></script>
+  <script src="/js/modules-finance.js"></script>
+  <script src="/js/users.js"></script>
+  <script src="/js/users2.js"></script>
+  <script src="/js/user-permission.js"></script>
+  <script src="/js/user-params.js"></script>
+  <script src="/js/roles.js"></script>
+  <script src="/js/roles2.js"></script>
+  <script src="/js/reports.js"></script>
+  <script src="/js/bill-export.js"></script>
+  <script src="/js/bill-config.js"></script>
+  <script src="/js/bill-config2.js"></script>
+  <script src="/js/bill-config3.js"></script>
+  <script src="/js/bill-v2.js"></script>
+  <script src="/js/bill-edit.js"></script>
+  <script src="/js/bill-print.js"></script>
+  <script src="/js/print-design.js"></script>
+  <script src="/js/pd-grid.js"></script>
+  <script src="/js/dingtalk.js"></script>
+  <script src="/js/row-menu.js"></script>
+  <script src="/js/crud.js"></script>
+  <script src="/js/base-io.js"></script>
+  <script src="/js/datepicker.js"></script>
+  <script src="/js/expense-allocate.js"></script>
+  <script src="/js/app.js"></script>
+</body>
+</html>

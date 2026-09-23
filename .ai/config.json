@@ -1,0 +1,30 @@
+{
+  "project": "NEWERP",
+  "task_prefix": "ERP",
+  "max_attempts": 3,
+  "cline_timeout_seconds": 3600,
+  "require_git": true,
+  "require_clean_worktree": true,
+  "auto_commit": true,
+  "auto_push": false,
+  "human_gate": true,
+  "security_baseline_decision": ".ai/decisions/SECURITY_BASELINE_APPROVED.json",
+  "cline_command": "C:\\Users\\Admin\\AppData\\Roaming\\npm\\cline.cmd",
+  "protected_paths": [
+    ".env", ".env.*", "src/ERP.Api/appsettings*.json", "deploy/**", "release/**",
+    "checkpoints/**", "user_input_files/**", "logs/**", "**/*.sql",
+    "src/ERP.Infrastructure/Data/SchemaUpgrader.cs", "src/ERP.Infrastructure/Data/SeedData*.cs"
+  ],
+  "ignored_change_paths": [".ai/logs/**", ".ai/results/**", "**/bin/**", "**/obj/**"],
+  "orchestrator_paths": [".ai/PROJECT_STATE.json", ".ai/tasks/**", ".ai/results/**", ".ai/decisions/**", ".ai/audit.jsonl"],
+  "validation_profiles": {
+    "safe": [
+      ["dotnet", "restore", "NEWERP.sln"],
+      ["dotnet", "build", "NEWERP.sln", "-c", "Release", "--no-restore", "--no-incremental", "/p:TreatWarningsAsErrors=true", "/p:RunAnalyzersDuringBuild=true"],
+      ["dotnet", "test", "src/ERP.UnitTests/ERP.UnitTests.csproj", "-c", "Release", "--no-build", "--verbosity", "minimal"]
+    ],
+    "build_only": [["dotnet", "build", "NEWERP.sln", "-c", "Release", "--no-incremental", "/p:TreatWarningsAsErrors=true", "/p:RunAnalyzersDuringBuild=true"]],
+    "integration": [["dotnet", "test", "src/ERP.IntegrationTests/ERP.IntegrationTests.csproj", "-c", "Release", "--filter", "Collection=Integration", "--verbosity", "normal"]],
+    "ui": [["dotnet", "test", "src/ERP.IntegrationTests/ERP.IntegrationTests.csproj", "-c", "Debug", "--filter", "Collection=UiTests", "--verbosity", "normal"]]
+  }
+}

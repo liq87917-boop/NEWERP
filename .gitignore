@@ -1,0 +1,34 @@
+# 构建产物
+bin/
+obj/
+deploy/
+artifacts/
+publish/
+release/
+checkpoints/
+
+# 日志与自动化运行产物
+logs/
+*.log
+.ai/logs/*
+!.ai/logs/.gitkeep
+.ai/results/*-validation.json
+*.tmp
+__pycache__/
+*.py[cod]
+
+# IDE
+.vs/
+.idea/
+*.user
+*.suo
+
+# 本地环境配置与密钥
+appsettings.Development.json
+appsettings.Local.json
+.env
+.env.local
+.env.*.local
+
+# 用户输入文件
+user_input_files/

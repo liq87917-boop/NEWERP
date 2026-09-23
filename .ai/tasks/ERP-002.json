@@ -1,0 +1,31 @@
+{
+  "id": "ERP-002",
+  "title": "Remove the shared default administrator password",
+  "status": "pending",
+  "risk_level": "high",
+  "description": "Replace the hard-coded initial administrator password with a one-time bootstrap secret supplied through a protected environment variable, without silently changing existing administrator accounts.",
+  "acceptance_criteria": [
+    "No usable administrator password is present in source, scripts, tests, documentation or browser assets.",
+    "A new installation requires an explicitly supplied one-time bootstrap secret and fails safely when it is missing.",
+    "Existing installations are not overwritten or reset during startup.",
+    "Unit tests cover missing, valid and already-initialized bootstrap cases."
+  ],
+  "allowed_paths": [
+    "src/ERP.Infrastructure/Data/SeedData.cs",
+    "src/ERP.Api/Program.cs",
+    "src/ERP.Api/wwwroot/**",
+    "src/ERP.UnitTests/**",
+    "src/ERP.IntegrationTests/UiSmokeTests.cs",
+    "start-dev.ps1",
+    "tools/smoke-test.ps1",
+    ".env.example",
+    "docs/**"
+  ],
+  "validation_profile": "safe",
+  "human_gate": {
+    "required": true,
+    "status": "pending",
+    "reason": "This changes administrator bootstrap behavior and a protected SeedData path; approve the rollout and recovery plan before execution."
+  },
+  "attempts": 0
+}

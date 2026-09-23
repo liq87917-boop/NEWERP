@@ -1,0 +1,30 @@
+{
+  "id": "ERP-001",
+  "title": "Harden repository baseline and separate high-risk CI tests",
+  "status": "completed",
+  "risk_level": "high",
+  "description": "Remove plaintext credentials from source-controlled configuration, make CI unit-only by default, and prepare a reviewed local Git baseline.",
+  "acceptance_criteria": [
+    "Source-controlled configuration contains placeholders rather than usable credentials.",
+    "Push and pull-request CI runs Release build and ERP.UnitTests only.",
+    "SQL integration and UI tests are manual jobs protected by GitHub environments and secrets.",
+    "A local Git baseline exists without deploy, release, logs, user inputs, bin or obj artifacts."
+  ],
+  "allowed_paths": [
+    ".env.example",
+    ".gitignore",
+    ".github/workflows/build.yml",
+    ".ai/**",
+    "docs/AUTOMATED_DEVELOPMENT.md",
+    "src/ERP.Api/appsettings*.json"
+  ],
+  "validation_profile": "safe",
+  "human_gate": {
+    "required": true,
+    "status": "approved",
+    "approved_by": "user",
+    "approved_at": "2026-09-23T01:37:42Z",
+    "reason": "User explicitly requested implementation of the proposed secure automated workflow."
+  },
+  "attempts": 1
+}

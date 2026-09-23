@@ -1,0 +1,17 @@
+{
+  "id": "ERP-000",
+  "title": "Bootstrap guarded automated development control layer",
+  "status": "completed",
+  "risk_level": "low",
+  "description": "Install the task runner, validation profiles, audit trail, Human Gate and ERP-specific path guards without changing business logic.",
+  "acceptance_criteria": [
+    "Runner refuses to execute without Git when require_git is enabled.",
+    "Safe validation runs only restore, Release build and ERP.UnitTests.",
+    "Database, UI, deployment, SQL, seed, schema and secret-bearing paths require Human Gate approval.",
+    "No ERP business source file is changed by this task."
+  ],
+  "allowed_paths": [".ai/**", ".clinerules", "scripts/ai_*.py", "scripts/*-ai.ps1", "docs/AUTOMATED_DEVELOPMENT.md", ".gitignore"],
+  "validation_profile": "safe",
+  "human_gate": {"required": false, "status": "not_required"},
+  "attempts": 0
+}

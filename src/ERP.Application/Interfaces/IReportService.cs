@@ -1,0 +1,49 @@
+namespace ERP.Application.Interfaces;
+
+/// <summary>
+/// 报表查询服务接口
+/// </summary>
+public interface IReportService
+{
+    /// <summary>商品销量排名榜</summary>
+    Task<List<ReportDtos.ProductSalesRankItem>> GetProductSalesRankingAsync(DateTime start, DateTime end, int top);
+
+    /// <summary>订单利润暂估表</summary>
+    Task<List<ReportDtos.OrderProfitItem>> GetOrderProfitEstimateAsync(DateTime start, DateTime end);
+
+    /// <summary>客户出货量统计表</summary>
+    Task<List<ReportDtos.CustomerShipmentItem>> GetCustomerShipmentStatsAsync(DateTime start, DateTime end);
+
+    /// <summary>业务员产值报表</summary>
+    Task<List<ReportDtos.SalesmanOutputItem>> GetSalesmanOutputAsync(DateTime start, DateTime end);
+
+    /// <summary>资产负债表</summary>
+    Task<ReportDtos.FinancialStatement> GetBalanceSheetAsync(DateTime asOfDate);
+
+    /// <summary>利润表</summary>
+    Task<ReportDtos.FinancialStatement> GetIncomeStatementAsync(DateTime start, DateTime end);
+
+    /// <summary>现金流量表</summary>
+    Task<ReportDtos.FinancialStatement> GetCashFlowStatementAsync(DateTime start, DateTime end);
+
+    /// <summary>应收账款账龄分析（截止日期，按销售订单逐笔）</summary>
+    Task<List<ReportDtos.ArAgingItem>> GetArAgingAsync(DateTime asOfDate);
+
+    /// <summary>柜量与装柜利用率统计（按柜号聚合）</summary>
+    Task<List<ReportDtos.ContainerStatsItem>> GetContainerStatsAsync(DateTime start, DateTime end);
+
+    /// <summary>采购成本分析（按供应商聚合采购订单）</summary>
+    Task<List<ReportDtos.PurchaseCostItem>> GetPurchaseCostAsync(DateTime start, DateTime end);
+
+    /// <summary>退税汇总（按退税期间聚合）</summary>
+    Task<List<ReportDtos.TaxRefundSummaryItem>> GetTaxRefundSummaryAsync();
+
+    /// <summary>库存预警（低于安全库存 / 高于上限）</summary>
+    Task<List<ReportDtos.StockAlertItem>> GetStockAlertAsync();
+
+    /// <summary>业务员提成表（销售额 / 毛利 / 提成额，提成比例取自系统参数）</summary>
+    Task<List<ReportDtos.SalesCommissionItem>> GetSalesCommissionAsync(DateTime start, DateTime end);
+
+    /// <summary>跟进提醒（下次跟进日期已到期或即将到期的记录）</summary>
+    Task<List<ReportDtos.FollowUpDueItem>> GetFollowUpDueAsync(DateTime asOfDate, int aheadDays);
+}

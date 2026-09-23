@@ -1,0 +1,12 @@
+{
+  "id": "ERP-001",
+  "title": "Short outcome-oriented title",
+  "status": "pending",
+  "risk_level": "low",
+  "description": "Describe the requested change and its boundaries.",
+  "acceptance_criteria": ["Add measurable acceptance criteria here."],
+  "allowed_paths": ["src/ERP.Application/**", "src/ERP.UnitTests/**"],
+  "validation_profile": "safe",
+  "human_gate": {"required": false, "status": "not_required", "reason": ""},
+  "attempts": 0
+}

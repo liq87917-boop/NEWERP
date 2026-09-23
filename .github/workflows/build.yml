@@ -1,0 +1,109 @@
+name: Build & Test
+
+on:
+  push:
+    branches: [main, master, develop]
+  pull_request:
+    branches: [main, master, develop]
+  workflow_dispatch:
+    inputs:
+      run_integration:
+        description: Run tests that access the approved SQL test environment
+        type: boolean
+        required: true
+        default: false
+      run_ui:
+        description: Run Selenium UI smoke tests against the approved test environment
+        type: boolean
+        required: true
+        default: false
+
+env:
+  DOTNET_VERSION: 8.0.x
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+
+jobs:
+  build-test:
+    name: Build & Unit Tests
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj') }}
+          restore-keys: ${{ runner.os }}-nuget-
+      - name: Restore
+        run: dotnet restore NEWERP.sln
+      - name: Build Release with analyzers
+        run: dotnet build NEWERP.sln -c Release --no-restore --no-incremental /p:TreatWarningsAsErrors=true /p:RunAnalyzersDuringBuild=true
+      - name: Unit tests only
+        run: dotnet test src/ERP.UnitTests/ERP.UnitTests.csproj -c Release --no-build --verbosity normal --logger "console;verbosity=normal"
+      - name: Publish artifact
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+        run: dotnet publish src/ERP.Api/ERP.Api.csproj -c Release -o ./publish --no-build
+      - name: Upload publish artifact
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ERP.Api-publish
+          path: ./publish
+          if-no-files-found: error
+          retention-days: 14
+
+  integration-test:
+    name: Approved SQL Integration Tests
+    if: github.event_name == 'workflow_dispatch' && inputs.run_integration
+    needs: build-test
+    runs-on: windows-latest
+    timeout-minutes: 20
+    environment: erp-integration
+    env:
+      ERP_ConnectionStrings__Default: ${{ secrets.ERP_TEST_CONNECTION_STRING }}
+      ERP_Jwt__Key: ${{ secrets.ERP_TEST_JWT_KEY }}
+      ERP_Oss__AccessKeyId: ${{ secrets.ERP_TEST_OSS_ACCESS_KEY_ID }}
+      ERP_Oss__AccessKeySecret: ${{ secrets.ERP_TEST_OSS_ACCESS_KEY_SECRET }}
+      ERP_Oss__Bucket: ${{ secrets.ERP_TEST_OSS_BUCKET }}
+      ERP_Oss__Endpoint: ${{ secrets.ERP_TEST_OSS_ENDPOINT }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+      - run: dotnet restore NEWERP.sln
+      - run: dotnet build NEWERP.sln -c Release --no-restore /p:TreatWarningsAsErrors=true
+      - name: Integration collection only
+        run: dotnet test src/ERP.IntegrationTests/ERP.IntegrationTests.csproj -c Release --no-build --filter "Collection=Integration" --verbosity normal
+
+  ui-test:
+    name: Approved UI Smoke Tests
+    if: github.event_name == 'workflow_dispatch' && inputs.run_ui
+    needs: build-test
+    runs-on: windows-latest
+    timeout-minutes: 20
+    environment: erp-ui
+    env:
+      ERP_ConnectionStrings__Default: ${{ secrets.ERP_TEST_CONNECTION_STRING }}
+      ERP_Jwt__Key: ${{ secrets.ERP_TEST_JWT_KEY }}
+      ERP_Oss__AccessKeyId: ${{ secrets.ERP_TEST_OSS_ACCESS_KEY_ID }}
+      ERP_Oss__AccessKeySecret: ${{ secrets.ERP_TEST_OSS_ACCESS_KEY_SECRET }}
+      ERP_Oss__Bucket: ${{ secrets.ERP_TEST_OSS_BUCKET }}
+      ERP_Oss__Endpoint: ${{ secrets.ERP_TEST_OSS_ENDPOINT }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+      - run: dotnet restore NEWERP.sln
+      - run: dotnet build NEWERP.sln -c Debug --no-restore /p:TreatWarningsAsErrors=true
+      - name: UI collection only
+        run: dotnet test src/ERP.IntegrationTests/ERP.IntegrationTests.csproj -c Debug --no-build --filter "Collection=UiTests" --verbosity normal

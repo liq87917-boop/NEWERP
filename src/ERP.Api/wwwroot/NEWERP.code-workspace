@@ -1,0 +1,12 @@
+{
+	"folders": [
+		{
+			"path": "../../.."
+		},
+		{
+			"name": "_qverify",
+			"path": "../../../../_qverify"
+		}
+	],
+	"settings": {}
+}

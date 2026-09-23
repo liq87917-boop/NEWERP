@@ -1,0 +1,23 @@
+{
+  "project": "NEWERP",
+  "phase": "ready",
+  "current_task": null,
+  "last_completed_task": "ERP-001",
+  "last_reviewed_task": "ERP-001",
+  "blocker": null,
+  "external_actions": [
+    "Rotate the previously exposed SQL Server credential at the database provider.",
+    "Rotate the previously exposed OSS access key at the cloud provider.",
+    "Configure GitHub environments erp-integration and erp-ui with required reviewers and test-only secrets before enabling high-risk CI jobs.",
+    "Add a Git remote when the destination repository is chosen; auto_push remains disabled until then."
+  ],
+  "validation": {
+    "profile": "safe",
+    "status": "passed",
+    "checked_at": "2026-09-23T01:37:42Z",
+    "summary": "Release build passed with 0 warnings/errors; 165 unit tests passed. Integration and UI tests were intentionally not run."
+  },
+  "cline_exit_code": null,
+  "finish_reason": "repository_automation_ready",
+  "updated_at": "2026-09-23T01:37:42Z"
+}
