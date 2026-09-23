@@ -295,6 +295,11 @@ function New-StatusLine {
         [string]$Text = '',
         [string]$Color = 'Gray'
     )
+    if ($null -eq $Text) { $Text = '' }
+    # Never allow embedded CR/LF/tab characters into one cursor-positioned row.
+    # Multiline blocker text previously moved the console cursor and left duplicated
+    # headers/queue rows on screen even though the underlying data was correct.
+    $Text = ($Text -replace "\r\n|\n|\r", " | ") -replace "\t", " "
     return [pscustomobject]@{ Text = $Text; Color = $Color }
 }
 
@@ -361,7 +366,17 @@ function Get-StatusLines {
             $lines += New-StatusLine (" Browser    : {0}" -f $State.browser_acceptance.status)
         }
         if ($State.blocker) {
-            $lines += New-StatusLine (" Blocker    : {0}" -f $State.blocker) 'Red'
+            $blockerText = [string]$State.blocker
+            $blockerParts = @($blockerText -split "\r?\n" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+            if ($blockerParts.Count -gt 0) {
+                $lines += New-StatusLine (" Blocker    : {0}" -f $blockerParts[0]) 'Red'
+                foreach ($part in ($blockerParts | Select-Object -Skip 1 -First 4)) {
+                    $lines += New-StatusLine ("              > {0}" -f $part.Trim()) 'DarkRed'
+                }
+                if ($blockerParts.Count -gt 5) {
+                    $lines += New-StatusLine ("              > ... {0} more line(s)" -f ($blockerParts.Count - 5)) 'DarkRed'
+                }
+            }
         }
         if ($State.conversation_control -and $State.conversation_control.paused -eq $true) {
             $lines += New-StatusLine (" Pause      : {0}" -f $State.conversation_control.pause_reason) 'Yellow'
@@ -394,9 +409,19 @@ function Get-StatusLines {
     if ($pipelineProcess -and -not $pipelineProcess.HasExited) {
         $lines += New-StatusLine (" Pipeline   : running (PID {0})" -f $pipelineProcess.Id) 'Green'
     } elseif ($null -ne $lastPipelineExit) {
-        $lines += New-StatusLine (" Pipeline   : stopped, last exit={0} at {1}" -f $lastPipelineExit, $lastPipelineEndedAt)
+        $pipelineColor = 'Gray'
+        if ($lastPipelineExit -ne 0) { $pipelineColor = 'Red' }
+        $lines += New-StatusLine (" Pipeline   : stopped, last exit={0} at {1}" -f $lastPipelineExit, $lastPipelineEndedAt) $pipelineColor
     } else {
         $lines += New-StatusLine ' Pipeline   : waiting'
+    }
+
+    if (Test-RecoverablePathGuard $State $Head) {
+        $recoveryState = 'eligible'
+        if ($null -ne $lastPipelineExit -and $lastPipelineExit -ne 0) {
+            $recoveryState = "last recovery exited $lastPipelineExit"
+        }
+        $lines += New-StatusLine (" Recovery   : {0} (existing work preserved)" -f $recoveryState) 'Yellow'
     }
     $lines += New-StatusLine ' Secrets    : hidden (never printed by this console)'
 
