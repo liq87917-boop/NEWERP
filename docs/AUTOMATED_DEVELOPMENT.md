@@ -2,13 +2,39 @@
 
 ## 当前状态
 
-自动化控制层已经升级为 GPT 对话控制。项目具备任务 JSON、状态管理、Cline 执行、路径审计、失败重试、三任务滚动队列、依赖图、Git checkpoint、Human Gate、真实浏览器验收和审计记录。
+自动化控制层已经升级为 GPT 对话控制。项目具备任务 JSON、状态管理、Cline 执行、路径审计、失败重试、**四任务滚动队列**（`rolling_queue.batch_size = 4`，低水位 2）、依赖图、Git checkpoint、Human Gate、真实浏览器验收和审计记录。
 
 完成定义已经改变：`Cline` 正常退出只表示 `code_ready`。普通业务任务只有在工程验证通过，并由本机真实 Microsoft Edge 完成任务声明的场景、生成 TRX、浏览器元数据、截图及 SHA-256 清单后，才能写入 `completed`。浏览器环境缺失时任务进入 `blocked`，不会被当作成功，也不会跳过继续执行后续任务。
 
-已确认的技术基线：.NET 8、ASP.NET Core Web API、EF Core 8、SQL Server、xUnit 与 Selenium。Release 编译为 0 警告、0 错误，165 个单元测试通过。
+**开发阶段的浏览器验收延后（现行生效）**：`.ai/config.json` 的 `completion_policy.defer_browser_during_development = true`。在功能开发阶段，任务声明的 `completion_mode: browser` 只表示"将来必须通过真实 Edge 验收"；当前以工程验证（Release build + 配置的非浏览器验证档）作为交付门槛，浏览器状态记为 **`browser_deferred`**（写入 `.ai/results/ERP-NNN.json`），**既不算失败、也不算已人工验收**。真实 Edge、`Collection=UiTests`、截图与视觉回归统一延后到 **`FINAL-UI-ACCEPTANCE`** 阶段；此前不得因浏览器未跑而消耗 attempt 或判为 `human_attention`。现有浏览器基础设施（`src/ERP.IntegrationTests`、Selenium、`scripts/ai_browser_acceptance.py`、证据清单）保持原样不动。
+
+已确认的技术基线：.NET 8、ASP.NET Core Web API、EF Core 8、SQL Server、xUnit 与 Selenium。Release 编译为 **0 警告、0 错误**；**272/272** 单元测试通过（2026-09-23 实测：`dotnet build NEWERP.sln -c Release` + `dotnet test src/ERP.UnitTests/ERP.UnitTests.csproj -c Release --no-build`，`ERP.UnitTests` 是默认安全档唯一执行的测试工程）。`ERP.IntegrationTests`（数据库集成 + Edge UI 用例）与 `Collection=UiTests` **不在**默认安全档内，只能在批准的测试环境下运行。
 
 源代码配置中的明文凭据已替换为空值或示例占位符。旧的数据库和 OSS 凭据仍必须在对应服务端轮换，因为本地代码修改不能撤销已经签发的外部凭据。
+
+## 目录与文件职责
+
+| 路径 | 作用 |
+|---|---|
+| `.ai/config.json` | 自动化配置：任务前缀、最大尝试次数、保护路径清单、验证档（`safe` / `build_only` / `integration` / `ui`）、滚动队列参数与完成策略 |
+| `.ai/tasks/ERP-NNN.json` | 任务定义（验收标准、`allowed_paths`、`depends_on`、`validation_profile`、`completion_mode`、Human Gate） |
+| `.ai/results/` | 每个任务的执行结果与归一化 `finish_reason`（含 `browser_deferred`） |
+| `.ai/control/` | GPT 对话控制面状态（暂停/恢复、最近意图），是可恢复的事实源 |
+| `.ai/evidence/ERP-NNN/<run>/` | 浏览器验收证据（TRX、`browser-session.json`、截图、SHA-256 清单） |
+| `.ai/decisions/` | Human Gate 批准记录（如安全基线、延期决策） |
+| `.ai/audit.jsonl` | 追加式审计流水（命令、状态变更、checkpoint） |
+| `.ai/MASTER_PLAN.md` / `GPT_CONTROL_PROTOCOL.md` | 主计划与对话控制协议（队列语义、完成定义） |
+| `.ai/FUNCTION_BACKLOG.md` | ERP-006 全仓审计后的功能缺口矩阵与任务边界建议 |
+| `.ai/prompts/developer.md` | 每次注入 Cline 的开发约束（含浏览器延后与安全边界） |
+| `.ai/pipeline.lock` | pipeline 互斥锁（同机只允许一个 runner） |
+| `scripts/ai_orchestrator.py` | 单任务编排：注入任务、执行 Cline、工程验证、结果与审计、Git checkpoint、push 恢复 |
+| `scripts/ai_pipeline.py` | 队列命令：`queue` / 延期 / 重试 / `retry-push` / 连续执行 |
+| `scripts/ai_validate.py` | 按验证档执行工程验证（默认 `safe` = Release build + `ERP.UnitTests`） |
+| `scripts/ai_browser_acceptance.py` | 真实 Edge 验收驱动（设置 `ASPNETCORE_ENVIRONMENT=Development` 与 `ERP_AI_TEST_RUN=1`，产出证据清单）；延后期间不运行 |
+| `scripts/gpt_project_control.py` / `gpt-control.ps1` | GPT 控制面：暂停 / 恢复 / 状态 |
+| `scripts/run-ai.ps1` / `run-pipeline.ps1` / `resume-pipeline.ps1` / `status-ai.ps1` / `new-ai-task.ps1` / `test-pipeline.ps1` / `agent-host.ps1` / `agent-bootstrap.ps1` | 运行入口、断点续跑、状态查看、建任务、环境自检与常驻控制台 |
+| `tools/*.ps1` | 传统交付辅助脚本（`gen-init4.ps1` / `apply-init4.ps1` / `smoke-test.ps1`） |
+| `docs/` | 交付文档：技术方案、数据库设计、部署交付、订单追溯、库存单据、报价单与 PI、菜单建议、自动化流程 |
 
 ## 日常运行
 
@@ -46,9 +72,9 @@ GPT 恢复：`scripts/gpt-control.ps1 -Command resume -Summary "恢复原因"`�
 
 本地启动使用根目录的 `.env.local`。填写轮换后的开发密钥后运行 `start-dev.ps1`，脚本会校验格式、必填项和 JWT 长度，再把变量加载到当前 API 子进程；变量值不会写入控制台或 Git。
 
-Runner 每次只执行一个任务。Cline 修改完成后先跑工程验证，再跑真实 Edge 验收。浏览器失败会把证据位置反馈给 Cline，最多尝试三次；成功后才写入结果与审计记录并创建 Git commit。超过上限、违反路径边界、浏览器基础设施缺失或 checkpoint 失败时会停止并进入 Human Gate。
+Runner 每次只执行一个任务。Cline 修改完成后先跑工程验证；**开发阶段**浏览器验收按上文延后策略记为 `browser_deferred` 并直接写入结果与审计记录、创建 Git commit；**在 `FINAL-UI-ACCEPTANCE` 阶段（或人工显式重跑 UI 门禁时）**才跑真实 Edge，浏览器失败会把证据位置反馈给 Cline，最多尝试三次。超过上限、违反路径边界、浏览器基础设施缺失（在该阶段内）或 checkpoint 失败时会停止并进入 Human Gate。
 
-队列目标大小为 3：保持当前任务和最多两个后续任务，后续任务必须声明依赖。自动补充的任务不能绕过队首失败或 Human Gate。
+队列目标大小为 **4**（`.ai/config.json` 的 `rolling_queue.batch_size = 4`，低水位 2）：保持当前任务和最多三个后续任务，后续任务必须声明依赖。低水位触发时由 GPT 从 `.ai/FUNCTION_BACKLOG.md` 补充下一批安全任务；自动补充的任务不能绕过队首失败或 Human Gate，队列暂时清空时本地 Agent 进入 `replenishing` 等待新批次，而不是判定项目完成。
 
 Git remote 已配置，`.ai/config.json` 中 `auto_push` 已启用。普通任务在本机工程验证与真实 Edge 验收通过并提交 checkpoint 后会自动 push；push 失败会进入 `push_pending`，只重试同步，不会重新执行已经完成的开发和浏览器验收。
 

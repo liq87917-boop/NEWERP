@@ -15,6 +15,8 @@ The queue is fail-closed. The first non-terminal task controls progress; blocked
 
 `Cline` success means only `code_ready`. A business task becomes `completed` only when engineering validation passes and a real installed Microsoft Edge session passes the declared browser scenarios with a TRX file, browser metadata, screenshots and a SHA-256 evidence manifest. Missing browser infrastructure blocks the task; it does not downgrade acceptance.
 
+While `completion_policy.defer_browser_during_development` is `true` (current development phase), the browser gate is deferred rather than waived: engineering validation (Release build plus the task's configured non-browser profile) is sufficient for the orchestrator to record `completed`, the browser status is recorded as `browser_deferred` in the results file, and the deferred browser scenarios stay attached to the task for the `FINAL-UI-ACCEPTANCE` phase. A deferred browser status must never be reported as `failed`, as `human_attention`, or as an accepted UI.
+
 Only tasks explicitly marked `completion_mode: control_plane` may use non-browser completion, and only for changes to the automation control layer itself. Business logic must use `completion_mode: browser`.
 
 ## Rolling acceptance cadence

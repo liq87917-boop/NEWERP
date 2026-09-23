@@ -1,6 +1,17 @@
 # 报价单（Quotation）与形式发票（PI）设计方案
 
-> 版本：v1（2026-09-18）· 状态：**批次 1 + 批次 2 已实施**（批次 2 形式发票 PI 闭环由 **ERP-007** 于 2026-09-23 交付）· 适用范围：WMERP 外贸 ERP（NEWERP）
+> 版本：v1.1（2026-09-23）· 状态：**批次 1 ~ 批次 3 已实施**（批次 2 形式发票 PI 闭环由 **ERP-007** 交付；批次 3 报价 / PI → 销售订单由 **ERP-010** 交付）· 适用范围：WMERP 外贸 ERP（NEWERP）· 补正任务：**ERP-017**（文档补正）
+>
+> **实现状态图例（唯一口径，全文一致）**
+>
+> | 标记 | 含义 |
+> |---|---|
+> | ✅ **已实现** | 实体 + 持久化 + API + 页面/菜单齐备，并有单元测试或交付验证记录 |
+> | 🧪 **浏览器验收延后** | 代码与测试已就绪，但真实 Edge 验收按 `completion_policy.defer_browser_during_development` 延后到 **FINAL-UI-ACCEPTANCE** 阶段，状态记 `browser_deferred`（**不等于失败**，也不等于已人工验收） |
+> | ⏳ **未实现（已立项）** | 缺口明确且已排入任务队列（如 **ERP-018**、**ERP-019**），本轮**无**对应代码 |
+> | ❌ **未实现（未立项）** | 已知缺口，尚无任务 |
+>
+> 说明：截至 2026-09-23，本链路中只有 **ERP-007**（PI 闭环）完成过真实 Edge 验收（6/6 通过、14 张截图）；**ERP-008 / 009 / 010** 的浏览器验收均为延后状态。
 
 ---
 
@@ -139,7 +150,7 @@
 | **1（已完成）** | 报价单：主子表 + 审核 / 销审 + 打印预览与打印设计 + 从询价单带入明细 + 行操作「转 PI」 |
 | **2（已完成 · ERP-007）** | PI：主子表 + 银行信息（系统参数默认，单据可覆盖）+ 收货人 / 通知人 / 唛头 + 定金比例与金额 + 审核 / 销审 / 作废 + 打印预览 + 报价单转 PI |
 | **3（已完成 · ERP-010）** | 报价单 / PI → 销售订单：**带入预填**（打开销售订单新增表单，可编辑后再保存）+ **直接生成**（服务端守卫，同一来源仅一张，来源报价单 / PI 留痕）；明细数量 / 单价 / 金额 / 合计与定金由服务端复核 |
-| 3（待做 · 已立项 ERP-018） | 报价单打印端点与打印配置、报价有效期到期提醒、报价成交率分析 |
+| **3（部分待做 · 已立项 ERP-018）** | ⏳ 报价有效期到期提醒、报价成交率分析**尚未实现**；报价打印端点 `GET /api/sales/quotations/{id}/print` 已由 **ERP-007** 交付（报价单 / PI 走 `sales-pi.js` 的打印预览 · 直接打印 + 打印模板），故 ERP-018 只需补齐"共享打印三件套注册、有效期治理与成交率报表" |
 
 ---
 
@@ -195,7 +206,43 @@
 
 ---
 
-## 9. 采纳的默认选项（如需改动随时告诉我）
+## 9. 完成度与实现状态清单（ERP-017 补正 · 2026-09-23）
+
+> 本节是判断"做什么、还缺什么"的唯一入口，与 §7 批次表、`.ai/FUNCTION_BACKLOG.md` 保持一致；图例见文首。
+
+### 9.1 已实现（代码 + 单元测试）
+
+| 能力 | 状态 | 证据 |
+|---|---|---|
+| 报价单主子表、审核 / 销审、询价单带入 | ✅ 已实现 | `QuotationController`、`Quotation.cs`、`modules.js` 的 `quotation` 模块、`BillCatalogTests` |
+| 报价单转 PI（同一报价单仅一次） | ✅ 已实现（ERP-007） | `POST /api/sales/quotations/{id}/to-pi`、`QuotationToPiTests` |
+| PI 主子表 + 审核 / 销审 / 作废 + 银行信息 / 收货人 / 通知人 / 唛头 / 定金 | ✅ 已实现（ERP-007） | `ProformaInvoiceController`、`ProformaInvoice.cs`、`ProformaInvoiceControllerTests`（20 例） |
+| 报价单 / PI 打印数据端点 | ✅ 已实现（ERP-007） | `GET /api/sales/quotations/{id}/print`、`GET /api/sales/proforma-invoices/{id}/print`；`PrintTemplateController.PrintableTitles` 已登记 `quotation` / `proforma-invoice` |
+| 报价单 / PI 行操作「打印预览」（按打印模板渲染） | ✅ 已实现（ERP-007） | `sales-pi.js`（`SALES_DOC_PRINT` + `previewSalesDocPrint`）、`modules.js` 的 `rowActions` |
+| 报价单 / PI → 销售订单（带入预填 + 直接生成、来源留痕、重复守卫） | ✅ 已实现（ERP-010） | `SalesOrderConversion.cs`、`SalesOrderConversionTests`（18 例）、§8.3 |
+| 回归测试 | ✅ 272/272 通过（2026-09-23 实测，Release） | `dotnet build NEWERP.sln -c Release`（0 警告 0 错误）+ `dotnet test src/ERP.UnitTests/ERP.UnitTests.csproj -c Release --no-build` |
+
+### 9.2 浏览器验收延后（代码就绪，尚未做真实 Edge 验收）
+
+| 场景 | 状态 |
+|---|---|
+| 报价单 → PI → 打开 PI → 草稿改 / 审核禁改 / 销审恢复 / 打印预览 / 作废 | 🧪 **ERP-007 已完成真实 Edge 验收**（6/6 通过、14 张截图、TRX + `browser-session.json`，2026-09-23） |
+| 报价单 / PI 转销售订单（ERP-010）、订单追溯（ERP-008）、库存单据（ERP-009）等场景 | 🧪 **`browser_deferred`**：按 `completion_policy.defer_browser_during_development` 延后到 **`FINAL-UI-ACCEPTANCE`** 阶段统一执行 `Collection=UiTests`，届时以真实 Edge + TRX + 截图 + SHA-256 清单为准 |
+
+> `browser_deferred` **既不等于已验收，也不等于失败**：既有 UI 用例（`PiWorkflowUiTests`、`SalesOrderConversionUiTests`、`OrderTraceabilityUiTests`、`InventoryMovementUiTests` 等）与浏览器基础设施保持原样，待最终 UI 验收阶段批量执行。
+
+### 9.3 仍缺失
+
+| 缺口 | 状态 | 备注 |
+|---|---|---|
+| 报价有效期到期提醒、报价成交率分析 | ⏳ **ERP-018**（已立项，待执行） | 复用现有报表框架，无需数据库结构变更 |
+| 报价单 / PI 接入 `BILL_CONFIG` / `BILL_CODE_MAP` 的共享打印三件套工具栏（`bill-print.js` / `bill-v2.js`） | ⏳ ERP-018 | 当前两者走 `sales-pi.js` 专用打印路径，**功能可用但入口不统一** |
+| 报价版本号（多轮议价版本留痕） | ❌ 未实现，未立项 | ERP-006 审计缺口④ |
+| 报价单通用 CRUD 的控制器级单元测试 | ◑ 部分覆盖 | 转 PI 与转订单路径已有测试（`QuotationToPiTests` / `SalesOrderConversionTests`），通用 CRUD 未单测 |
+
+---
+
+## 10. 采纳的默认选项（如需改动随时告诉我）
 
 | # | 项 | 采用值 |
 |---|---|---|

@@ -1,0 +1,11 @@
+{
+  "task": "ERP-017",
+  "status": "completed",
+  "execution_outcome": "completed",
+  "normalized_finish_reason": "control_plane_validated",
+  "cline_exit_code": 0,
+  "cline_finish_reason_raw": "completed",
+  "attempts": 1,
+  "browser_acceptance": null,
+  "finished_at": "2026-09-23T12:29:43.290222Z"
+}

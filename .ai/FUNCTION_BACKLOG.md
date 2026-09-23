@@ -31,7 +31,7 @@
 | 1 | 系统设置（用户/角色/权限/参数/用户参数/单据号规则/客户端限制/日志/打印设计/钉钉配置与记录） | verified-complete | `SeedData.Menus.cs:14-22`；`SysUserController`、`RoleController`、`MenuController`、`ParameterController`、`UserParameterController`、`SysSimpleControllers`、`PrintTemplateController`、`DingTalkController`、`Services/FollowUpReminderService.cs` | 无 | low |
 | 2 | 主数据（客户/供应商/员工/仓库/费用科目/商品/数据字典） | verified-complete（字段已补齐） | `BaseCustomer.cs:63-113`（业务性质/币种/结算方式/贸易条款/目的港/Consignee/Notify/默认唛头/账期/佣金比例/等级/信用状态/来源）；`BaseSupplier.cs:58-91`（类型/档口位置/主营/结算/开票/税率/交期/返点/微信）；`BaseOtherInfo.cs:82-143`（装箱单位/装箱数/单位换算/外箱四边/体积重/英文报关品名/退税率/品牌/认证/客户与工厂货号/MOQ/含税/安全库存上下限）；`SchemaUpgrader.cs:280-322,552-553`；字典 14 类 `modules.js:173-203` | 客户「指定货代」；商品颜色/尺码 SKU 变体、多供应商供货关系、图片资料库页面（3 图字段已有） | low |
 | 3 | 询价单（CRUD/提交/审核/导出） | verified-complete | `InquiryController`、`bill-config.js:36`、`bill-export.js:5`、菜单 `inquiry-new`/`inquiry-export` | 询价单侧无一键转报价（现由报价单 `from-inquiry` 反向带出客户与明细） | low |
-| 4 | 报价单 Quotation | **partial** | `Quotation.cs`/`Detail`（`SortNo` 替代保留字 `LineNo`）、`ErpDbContext.Entities.cs:62-63`、`QuotationController.cs`（分页/详情/`from-inquiry`/`approve`/`unaudit`/新增/修改+后端重算）、`SchemaUpgrader.cs:707-777`、`init16.sql`、菜单 `quotation`(`/sales/quotation`) 、`modules.js:451-501`（主子表 `detailFields`）、字轨 `DocumentType.Quotation=17` | ① 无「转 PI」端点/按钮（全仓无 `to-pi`）；② 无 `/{id}/print`，`BILL_CONFIG`/`BILL_CODE_MAP` 未注册 quotation → **报价单没有打印预览/直接打印/打印设计**；③ ~~无报价→销售订单带入~~ → **ERP-010 已实现**（带入预填 + 直接生成，来源留痕 + 重复守卫）；④ 无报价版本号（多轮议价）；⑤ 无有效期到期提醒与成交率分析（ERP-018）；⑥ 无 `QuotationController` 单元测试（`QuotationToPiTests` / `SalesOrderConversionTests` 已覆盖转 PI 与转订单） | medium |
+| 4 | 报价单 Quotation | **partial（转 PI 已由 ERP-007 交付、转销售订单已由 ERP-010 交付；打印注册与有效期治理待 ERP-018）** | `Quotation.cs`/`Detail`（`SortNo` 替代保留字 `LineNo`）、`ErpDbContext.Entities.cs:62-63`、`QuotationController.cs`（分页/详情/`from-inquiry`/`approve`/`unaudit`/新增/修改+后端重算）、`SchemaUpgrader.cs:707-777`、`init16.sql`、菜单 `quotation`(`/sales/quotation`) 、`modules.js:451-501`（主子表 `detailFields`）、字轨 `DocumentType.Quotation=17` | ① ~~无「转 PI」端点/按钮~~ → **ERP-007 已实现**（`POST /{id}/to-pi`）；② ~~无 `/{id}/print`~~ → **ERP-007 已实现**（`GET /{id}/print` + `sales-pi.js` 打印预览）；仍**未**注册 `BILL_CONFIG`/`BILL_CODE_MAP` 共享打印三件套（ERP-018）；③ ~~无报价→销售订单带入~~ → **ERP-010 已实现**（带入预填 + 直接生成，来源留痕 + 重复守卫）；④ 无报价版本号（多轮议价）；⑤ 无有效期到期提醒与成交率分析（ERP-018）；⑥ 无 `QuotationController` 单元测试（`QuotationToPiTests` / `SalesOrderConversionTests` 已覆盖转 PI 与转订单） | medium |
 | 5 | 供应商比价 PurchaseQuote | verified-complete | `PurchaseQuote.cs`（比价批次/多供应商/是否选中/为客户询价）、`PurchaseQuoteController`、菜单 `purchase-quote`(`init10.sql`) | `IsSelected` 选中后无「生成采购订单」下游动作 | low-medium |
 | 6 | 销售订单（外销合同） | **verified-complete（代码 + 测试；待 Edge 门禁）** | `SalesOrder.cs:56-118`（客户 PO 号/合同号/价格条款/目的港文本/Consignee/Notify/唛头/来源报价+PI/出口方式/佣金比例/业务性质/分批出货/验货与包装要求）、`SchemaUpgrader.cs:891-931`（幂等补列）、`SalesOrderController.cs`（列表关键字含客户 PO/合同号、`/{id}/print`、`export-excel`、佣金比例 0~100 校验）、`modules-doc.js:100-149`（EF 主子表页面 + 引用/下拉/明细）、`sales-pi.js:20-29`（打印含新字段与订单明细列）、`bill-export.js:8-24`（导出菜单改调 EF 导出）、`OrderTraceabilityTests`（14 用例）、`OrderTraceabilityUiTests`（3 个 Edge 用例）；见 `docs/订单追溯字段说明.md` | 订单变更申请、订单执行跟踪时间轴、附件、~~报价/PI 一键生成销售订单~~（**ERP-010 已实现**：带入预填 + 直接生成，来源留痕、重复守卫）；SP 版单据页已退出菜单（历史 SP 表数据不迁移） | medium |
 | 7 | 采购订单 | **verified-complete（代码 + 测试；待 Edge 门禁）** | `PurchaseOrder.cs:44-86`（归属客户/归属销售订单/代垫/供应商确认交期/税率与含税/到货进度/验货状态/合同号/结算进度）、`SchemaUpgrader.cs:891-931`、`PurchaseOrderController.cs`（关键字含合同号与归属销售订单号、`/{id}/print`、`export-excel`、税率 0~100 校验）、`modules-doc.js:150-191`、`sales-pi.js:30-37`、`bill-export.js:16-23`、`OrderTraceabilityTests`、`OrderTraceabilityUiTests` | 采购执行时间轴、比价 `PurchaseQuote.IsSelected` 下游联动、入库/结算单据自动回写进度 | medium |
@@ -78,17 +78,32 @@
 | 3.8 | 单证附件仍是文本 | `TradeDocument.cs:71-73` `FileNote` | 单证扫描件无处存放 | 附件中心任务 |
 | 3.9 | 菜单可达性核对结论 | 逐码比对 36 个菜单码（`deploy/init*.sql` + `SchemaUpgrader.cs`）与页面注册（`modules*.js`/`BILL_CONFIG`/`EXPORT_MENU_MAP`/`REPORTS`/`print-design.js`/`dingtalk.js`/`users.js`/`roles.js`） | **本次未发现菜单指向未配置页面的死链**；风险集中在 3.2/3.3（报价单打印与转 PI）与 PI 整体缺失 | 保持；后续新增菜单必须同时补页面注册 |
 
-## 4. 文档失真清单（识别结果，本次未修改 docs）
+## 4. 文档失真清单（识别结果；**已由 ERP-017 于 2026-09-23 全部补正**，见 §4.8）
 
 | # | 文档与位置 | 失真点 | 实际情况 |
 |---|---|---|---|
-| 4.1 | `docs/技术方案说明书.md:190` | 「测试命令 `dotnet test`（当前 43 个用例全部通过）」 | 本次实测 **165/165 通过**（Release、`ERP.UnitTests`） |
+| 4.1 | `docs/技术方案说明书.md:190` | 「测试命令 `dotnet test`（当前 43 个用例全部通过）」 | 本次审计实测 **165/165 通过**（Release、`ERP.UnitTests`）；**ERP-017 复核后为 272/272**（见 §4.8） |
 | 4.2 | `docs/技术方案说明书.md`（目录结构与接口清单） | 未包含阶段 1~3 模块（费用单、退税台账、单证中心、供应商比价、CRM 跟进、样品、报价单）与 `tests/automation`、`.ai/`、`scripts/ai_*.py` | 这些模块均已交付并在菜单中可见 |
 | 4.3 | `docs/报价单与PI设计方案.md:3` | 「已按建议默认值实施批次 1」+ §5 列出 `GET /api/sales/quotations/{id}/print`、`POST .../to-order`；§6 称「`BILL_CONFIG` 注册两个单据类型 → 自动获得打印预览/直接打印/打印设计」 | 报价单打印端点与 `BILL_CONFIG` 注册**均未实现**；`to-order` 属批次 3 未做；§4 称 `ProformaInvoice=18` 字轨"幂等插入"，实际脚本只插入 17（`init16.sql:118`） |
 | 4.4 | `docs/部署交付文档.md:813-817, 854-859, 909-910, 952-953, 993-996, 1054-1057` | 多段"下一批/下一阶段"清单仍把**已交付**项列为待办：费用单、应收账龄、单证中心、供应商比价、样品管理、客户跟进+钉钉提醒、退税台账、柜量/采购成本/退税汇总/库存预警报表 | 这些均已在 `init8`~`init13`、`SchemaUpgrader` 中落地并有菜单；仅 **PI、库存动作单据、采购单归属字段、物流跟踪字段** 仍未完成 → 需标注"已完成"，否则会重复开发 |
 | 4.5 | `docs/数据库设计说明书.md`（仅到"第四阶段"） | 未记录 `BaseTaxRefunds`、`FinanceExpenses`、`PurchaseQuotes`、`TradeDocuments`、`CustomerFollowUps`、`Samples`、`Quotations/QuotationDetails` 及主数据新增列（客户 13 列 / 供应商 9 列 / 商品 16+ 列） | 这些表与列均已存在（`SchemaUpgrader.cs:280-322,328,380,454,507,597,653,711,747`、`init7~init16.sql`） |
 | 4.6 | `docs/菜单与业务流程优化建议-20260918.md`（仍标"待确认稿"） | §1.1「共 53 项菜单、8 个一级分组」与 §2 蓝图中大量 P0/P1 项未标注落地状态（阶段 0 菜单重构、阶段 1 主数据字段、报价单、费用单、账龄、比价、单证、样品、CRM、退税等） | 阶段 0/1/2 大部分已落地；若继续按原稿"建议"开发将重复实现 |
 | 4.7 | `docs/报价单与PI设计方案.md` §7 批次表 | 批次 1 标注"转 PI 按钮（PI 未上线前按钮隐藏）" | 界面上并无"隐藏的转 PI 按钮"代码；实为未实现，应明确标注"批次 2 待做" |
+
+### 4.8 ERP-017 补正结果（2026-09-23）
+
+| 失真项 | 补正动作 | 结果 |
+|---|---|---|
+| 4.1 技术方案说明书测试数字（43 例） | 改为实测值并区分验证档 | ✅ `docs/技术方案说明书.md` §九 现为 **272/272**（Release 实测，2026-09-23），并说明 `ERP.IntegrationTests` / UI 用例不在默认安全档 |
+| 4.2 技术方案说明书目录结构与接口清单 | 重写目录树、补 API 清单 | ✅ §二 覆盖 `.ai/`、`scripts/`、`src/ERP.IntegrationTests`；§五 补询报价 / 订单 / 库存 / 阶段 1~3 模块；新增 §十一 自动化控制层、§十二 文档索引 |
+| 4.3 报价单与 PI 设计文档与实现不一致 | 逐项区分已实现 / 浏览器延后 / 仍缺失 | ✅ `docs/报价单与PI设计方案.md` 新增 §9 完成度清单与文首图例；§5 接口表按 ERP-007 / ERP-010 标注；§7 批次表标注 ERP-018 的剩余范围（打印端点已实现） |
+| 4.4 部署交付文档"下一批"仍列已交付项 | 每段加落地状态标注 + 追加 §32 | ✅ §23.4 / §24.5 / §26.4 / §27.4 / §27.5 / §28.5 / §29.5 / §30.5 全部标注；新增 §32「自动化交付批次 ERP-006 ~ ERP-010 + 文档补正 ERP-017」 |
+| 4.5 数据库设计说明书缺新表与新列 | 追加 §十 ~ §十四 | ✅ 补 `BaseTaxRefunds` / `FinanceExpenses` / `PurchaseQuotes` / `TradeDocuments` / `CustomerFollowUps` / `Samples` / `SysDingTalkLogs` / 报价单与 PI / 库存单据与流水 + 新增列汇总（含 ERP-008 / 009），并明确"不声明生产迁移结论" |
+| 4.6 菜单建议稿未标落地状态 | 增补落地状态对照表 | ✅ `docs/菜单与业务流程优化建议-20260918.md` 新增 §〇 对照表（33 项，✅/◑/❌/⚠️），并标注 §1.1「53 项菜单」描述已过期 |
+| 4.7 报价单"隐藏的转 PI 按钮"表述 | 改为明确状态 | ✅ §7 批次表与 §9 清单明确：转 PI 已于 **ERP-007** 交付；报价有效期与成交率分析为 **ERP-018** 待做 |
+
+> 补正**只改文档**：未改动任何代码、SQL、部署产物与生产数据；验证为 `dotnet build NEWERP.sln -c Release`（0 警告 0 错误）+ `ERP.UnitTests` **272/272**。
+> 同一批次还同步了自动化控制层文档：`docs/AUTOMATED_DEVELOPMENT.md`（四任务滚动队列、目录与文件职责、浏览器延后策略）、`.ai/MASTER_PLAN.md` 与 `.ai/GPT_CONTROL_PROTOCOL.md`（滚动队列规模与 `browser_deferred` 口径）。
 
 ## 5. 建议任务边界（滚动队列，供 GPT 创建任务时引用）
 
