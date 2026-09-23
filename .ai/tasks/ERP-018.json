@@ -1,7 +1,7 @@
 {
   "id": "ERP-018",
   "title": "Complete Quotation printing and validity governance",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "low",
   "description": "Implement the audited Quotation gaps that do not require a production schema change: quotation print endpoint/configuration, print preview/direct print/design registration, validity-due visibility/reminder using the existing quotation validity data, and quotation conversion-rate reporting on the existing report framework.",
   "acceptance_criteria": [
@@ -45,6 +45,6 @@
     "status": "not_required",
     "reason": "No production schema/deployment action is required."
   },
-  "attempts": 0,
+  "attempts": 1,
   "created_at": "2026-09-23T12:00:02Z"
 }

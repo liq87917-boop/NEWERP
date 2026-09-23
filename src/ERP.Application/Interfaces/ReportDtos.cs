@@ -150,6 +150,39 @@ public static class ReportDtos
         public decimal CommissionAmount { get; set; }
     }
 
+    /// <summary>
+    /// 报价成交率分析项（ERP-018，按业务员聚合；计算口径见 <c>docs/报价单与PI设计方案.md</c> §10.3）
+    /// </summary>
+    public class QuotationConversionItem
+    {
+        /// <summary>业务员（报价单未填业务员时归入「未指定业务员」）</summary>
+        public string SalesmanName { get; set; } = string.Empty;
+
+        /// <summary>有效报价单数（分母：期间内未删除、未作废的报价单数）</summary>
+        public int QuotationCount { get; set; }
+
+        /// <summary>已转出报价单数（分子：已转 PI / 已转销售订单 / 状态已完成的报价单数）</summary>
+        public int ConvertedCount { get; set; }
+
+        /// <summary>成交率（%）= 已转出数 ÷ 有效报价数 × 100，保留 2 位；分母为 0 时为 0</summary>
+        public decimal ConversionRate { get; set; }
+
+        /// <summary>已过期且未转出的报价单数（以报表期间结束日为判定基准日）</summary>
+        public int ExpiredCount { get; set; }
+
+        /// <summary>已作废报价单数（不计入分母，单列便于对账）</summary>
+        public int CancelledCount { get; set; }
+
+        /// <summary>有效报价金额合计（原币，仅分母口径报价单）</summary>
+        public decimal TotalAmount { get; set; }
+
+        /// <summary>已转出报价金额合计（原币，仅分子口径报价单）</summary>
+        public decimal ConvertedAmount { get; set; }
+
+        /// <summary>单笔成交平均报价金额（原币）= 已转出金额 ÷ 已转出数，保留 2 位；无成交时为 0</summary>
+        public decimal AvgConvertedAmount { get; set; }
+    }
+
     /// <summary>跟进提醒项（按下次跟进日期到期或即将到期）</summary>
     public class FollowUpDueItem
     {

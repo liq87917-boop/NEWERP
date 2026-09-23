@@ -1,5 +1,7 @@
 using ERP.Application.Common;
+using ERP.Application.DTOs;
 using ERP.Application.Interfaces;
+using ERP.Application.Services;
 using ERP.Domain.Entities;
 using ERP.Domain.Enums;
 using Microsoft.AspNetCore.Mvc;
@@ -325,7 +327,12 @@ public class QuotationController : DocumentControllerBase<Quotation>
         }, "已生成销售订单"));
     }
 
-    /// <summary>打印数据（主表 + 明细；打印模板由 /api/sys/print-templates/quotation 提供）</summary>
+    /// <summary>
+    /// 打印数据（主表 + 有效明细，按行号排序）：与「报价单工作流」完全同一份持久化数据
+    /// （单号 / 客户 / 条款 / 明细行号 · 数量 · 单价 · 金额 / 合计与折人民币 / 有效期），
+    /// 打印预览、直接打印与打印设计共用本端点，服务端**不重算、不落库**，
+    /// 保证打印件与页面显示逐字一致；明细只取未删除行并按 `SortNo` 排序，避免软删除行进入打印件。
+    /// </summary>
     [HttpGet("{id:long}/print")]
     public async Task<IActionResult> GetPrint(long id)
     {
@@ -334,6 +341,72 @@ public class QuotationController : DocumentControllerBase<Quotation>
             ?? throw BusinessException.NotFound("报价单不存在");
         entity.Details = entity.Details.Where(d => !d.IsDeleted).OrderBy(d => d.SortNo).ToList();
         return Ok(ApiResponse<Quotation>.Success(entity));
+    }
+
+    /// <summary>
+    /// 报价单有效期到期提醒（ERP-018）：列出「已过期」与「提醒窗口内即将到期」的报价单，
+    /// 已作废单据不提醒；已转出（已转 PI / 已转销售订单）的单据仍会列出但以 <c>Converted</c> 标记，
+    /// 便于业务员判断是否还需催单。判定口径见 <see cref="QuotationValidityRules"/>，只读现有
+    /// <see cref="Quotation.ValidUntil"/> 字段，**不新增任何数据库结构**。
+    /// </summary>
+    /// <param name="asOfDate">判定基准日（默认今天）</param>
+    /// <param name="aheadDays">提醒窗口天数（默认 7 天；负数按默认值处理）</param>
+    [HttpGet("validity-due")]
+    public async Task<IActionResult> ValidityDue([FromQuery] DateTime? asOfDate,
+        [FromQuery] int aheadDays = QuotationValidityRules.DefaultAheadDays)
+    {
+        var asOf = (asOfDate ?? DateTime.Today).Date;
+        var window = QuotationValidityRules.NormalizeAheadDays(aheadDays);
+
+        var items = await Set.AsNoTracking()
+            .Where(o => !o.IsDeleted && o.Status != DocumentStatus.Cancelled
+                        && o.ValidUntil != null && o.ValidUntil <= asOf.AddDays(window))
+            .ToListAsync();
+
+        var converted = await LoadConvertedQuotationIdsAsync(items.Select(o => o.Id).ToList());
+
+        var result = items
+            .OrderByDescending(o => QuotationValidityRules.UrgencyOf(o.ValidUntil, asOf, window))
+            .ThenBy(o => o.ValidUntil)
+            .ThenBy(o => o.Id)
+            .Select(o => new QuotationValidityItem
+            {
+                Id = o.Id,
+                QuotationNo = o.QuotationNo,
+                CustomerName = o.CustomerName,
+                SalesmanName = o.SalesmanName,
+                QuotationDate = o.QuotationDate,
+                ValidUntil = o.ValidUntil,
+                ValidDays = QuotationValidityRules.DaysRemaining(o.ValidUntil, asOf),
+                ValidityStatus = QuotationValidityRules.StatusOf(o.ValidUntil, asOf, window),
+                ValidityLevel = QuotationValidityRules.LevelOf(o.ValidUntil, asOf, window),
+                TotalAmount = o.TotalAmount,
+                TotalAmountCny = o.TotalAmountCny,
+                Currency = o.Currency,
+                Status = o.Status,
+                Converted = converted.Contains(o.Id) || o.Status == DocumentStatus.Completed
+            })
+            .ToList();
+
+        return Ok(ApiResponse<List<QuotationValidityItem>>.Success(result));
+    }
+
+    /// <summary>已转出报价单 Id 集合（来源外键：已转 PI / 已转销售订单；口径与成交率报表一致）</summary>
+    private async Task<HashSet<long>> LoadConvertedQuotationIdsAsync(List<long> quotationIds)
+    {
+        var converted = new HashSet<long>();
+        if (quotationIds.Count == 0) return converted;
+
+        var piIds = await Db.ProformaInvoices.AsNoTracking()
+            .Where(p => !p.IsDeleted && p.QuotationId != null && quotationIds.Contains(p.QuotationId.Value))
+            .Select(p => p.QuotationId!.Value).ToListAsync();
+        var orderIds = await Db.SalesOrders.AsNoTracking()
+            .Where(o => !o.IsDeleted && o.SourceQuotationId != null && quotationIds.Contains(o.SourceQuotationId.Value))
+            .Select(o => o.SourceQuotationId!.Value).ToListAsync();
+
+        foreach (var id in piIds) converted.Add(id);
+        foreach (var id in orderIds) converted.Add(id);
+        return converted;
     }
 
     /// <summary>行号 / 金额 / 合计 / 有效期统一整理（后端复核，防止前端篡改合计）</summary>

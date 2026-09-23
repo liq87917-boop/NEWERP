@@ -1,6 +1,6 @@
 # 报价单（Quotation）与形式发票（PI）设计方案
 
-> 版本：v1.1（2026-09-23）· 状态：**批次 1 ~ 批次 3 已实施**（批次 2 形式发票 PI 闭环由 **ERP-007** 交付；批次 3 报价 / PI → 销售订单由 **ERP-010** 交付）· 适用范围：WMERP 外贸 ERP（NEWERP）· 补正任务：**ERP-017**（文档补正）
+> 版本：v1.2（2026-09-23）· 状态：**批次 1 ~ 批次 3 已实施**（批次 2 形式发票 PI 闭环由 **ERP-007** 交付；批次 3 报价 / PI → 销售订单由 **ERP-010** 交付；剩余缺口「共享打印三件套注册 / 有效期治理 / 成交率报表」由 **ERP-018** 交付）· 适用范围：WMERP 外贸 ERP（NEWERP）· 补正任务：**ERP-017**（文档补正）、**ERP-018**（打印注册与有效期治理）
 >
 > **实现状态图例（唯一口径，全文一致）**
 >
@@ -119,8 +119,10 @@
 | POST | `/api/sales/quotations/{id}/to-pi` | **转为 PI**（复制主表 + 明细，回填来源报价单号，原单状态改「已转 PI」） |
 | GET | `/api/sales/quotations/{id}/order-prefill` | **带入预填销售订单**（ERP-010）：返回未落库的销售订单草稿（不占用单号、不写库），前端切到「销售订单 → 新增」表单继续编辑后按 `/api/sales-orders` 保存 |
 | POST | `/api/sales/quotations/{id}/to-order` | **转为销售订单**（ERP-010）：按已审核报价单生成一张销售订单（EF 主子表路径），来源留痕，同一报价单仅一张 |
-| GET | `/api/sales/quotations/{id}/print` | 打印数据（供打印模板使用） |
+| GET | `/api/sales/quotations/{id}/print` | 打印数据（主表 + 未删除明细，按 `SortNo` 排序）：**打印预览 / 直接打印 / 打印设计共用**，与报价单工作流保存的数据同源（服务端不重算、不落库，打印件与页面逐字一致） |
+| GET | `/api/sales/quotations/validity-due?asOfDate=&aheadDays=7` | **有效期到期提醒**（ERP-018）：返回已过期与提醒窗口内到期的报价单（已作废、未设置有效期的不提醒），按紧急度（已过期 &gt; 今日到期 &gt; 即将到期）排序；口径见 §10.2 |
 | POST | `/api/sales/proforma-invoices/...` | PI 同上一套；`POST /{id}/to-order`（PI → 销售订单）、`GET /{id}/order-prefill`（带入预填）与报价单同口径 |
+| GET | `/api/reports/quotation-conversion?start=&end=` | **报价成交率分析**（ERP-018，报表框架 `ReportController`）：按业务员聚合，计算口径见 §10.3 |
 
 ---
 
@@ -131,7 +133,9 @@
 | 菜单 | 「询报价」分组下新增 **报价单**、**形式发票 PI**（`SchemaUpgrader` 幂等插入 + 自动授权；生产上线脚本 `deploy/init17.sql` 属受门禁任务，单独产出） |
 | 列表 | `modules.js` 新增 `quotation`、`proforma-invoice`（列 = 单号 / 日期 / 客户 / 有效期 / 币种 / 金额 / 业务员 / 状态） |
 | 编辑 | 复用主子表单据编辑（明细表格：加行、删行、`数量 × 单价 = 金额`、主表合计自动汇总；后端复核防篡改） |
-| 打印 | `BILL_CONFIG` 注册两个单据类型 → 自动获得「打印预览 / 直接打印 / 打印设计」 |
+| 打印 | **ERP-018 已落地**：`bill-config-ef.js` 把 `quotation` / `proforma-invoice` 注册进共享 `BILL_CONFIG`（`ef: true` + `api` + `noKey` + 打印字段中文标签），行操作提供「打印预览 / 直接打印 / 打印设计」（`sales-pi.js` 的 `previewSalesDocPrint` / `printSalesDocDirect` / `designSalesDocPrint` 共用 `GET {api}/{id}/print` 与打印模板）；两类单据**不加入** `BILL_CODE_MAP`（该映射把菜单码路由到存储过程版单据页，EF 单据挂进去会让菜单跳到 SP 页） |
+| 有效期治理 | 列表新增「有效期状态」派生列（`crud.js` 列 `render` 回调 + `sales-pi.js` 的 `quotationValidityBadge`，与后端 `QuotationValidityRules` 同口径）；工具栏「⏰ 有效期提醒」弹窗调用 `GET /api/sales/quotations/validity-due`，按紧急度列出已过期 / 今日到期 / 即将到期的报价单（窗口 7/15/30 天可切换） |
+| 报表入口 | 工具栏「📈 成交率报表」直接渲染报表框架中的「报价成交率分析」（与报表中心同一套渲染与 CSV 导出）；因报表中心菜单由数据库菜单表驱动（本任务不改菜单结构），入口统一放在报价单页 |
 | 便捷操作 | 报价单列表行操作：**转 PI**、**预填销售订单 / 转销售订单**（ERP-010）；PI 列表行操作：**预填销售订单 / 转销售订单**；均由 `rowActions` 机制渲染（`crud.js` 的「更多」菜单） |
 
 ---
@@ -150,7 +154,7 @@
 | **1（已完成）** | 报价单：主子表 + 审核 / 销审 + 打印预览与打印设计 + 从询价单带入明细 + 行操作「转 PI」 |
 | **2（已完成 · ERP-007）** | PI：主子表 + 银行信息（系统参数默认，单据可覆盖）+ 收货人 / 通知人 / 唛头 + 定金比例与金额 + 审核 / 销审 / 作废 + 打印预览 + 报价单转 PI |
 | **3（已完成 · ERP-010）** | 报价单 / PI → 销售订单：**带入预填**（打开销售订单新增表单，可编辑后再保存）+ **直接生成**（服务端守卫，同一来源仅一张，来源报价单 / PI 留痕）；明细数量 / 单价 / 金额 / 合计与定金由服务端复核 |
-| **3（部分待做 · 已立项 ERP-018）** | ⏳ 报价有效期到期提醒、报价成交率分析**尚未实现**；报价打印端点 `GET /api/sales/quotations/{id}/print` 已由 **ERP-007** 交付（报价单 / PI 走 `sales-pi.js` 的打印预览 · 直接打印 + 打印模板），故 ERP-018 只需补齐"共享打印三件套注册、有效期治理与成交率报表" |
+| **3（已完成 · ERP-018）** | 报价单 / PI **共享打印三件套**（注册进 `BILL_CONFIG`：打印预览 / 直接打印 / 打印设计）、**有效期到期提醒**（列表徽标 + ⏰ 弹窗 + `validity-due` 接口）、**报价成交率报表**（`/api/reports/quotation-conversion`，按业务员聚合）全部落地；浏览器验收按开发阶段策略记 `browser_deferred` |
 
 ---
 
@@ -206,7 +210,7 @@
 
 ---
 
-## 9. 完成度与实现状态清单（ERP-017 补正 · 2026-09-23）
+## 9. 完成度与实现状态清单（ERP-018 更新 · 2026-09-23）
 
 > 本节是判断"做什么、还缺什么"的唯一入口，与 §7 批次表、`.ai/FUNCTION_BACKLOG.md` 保持一致；图例见文首。
 
@@ -219,6 +223,9 @@
 | PI 主子表 + 审核 / 销审 / 作废 + 银行信息 / 收货人 / 通知人 / 唛头 / 定金 | ✅ 已实现（ERP-007） | `ProformaInvoiceController`、`ProformaInvoice.cs`、`ProformaInvoiceControllerTests`（20 例） |
 | 报价单 / PI 打印数据端点 | ✅ 已实现（ERP-007） | `GET /api/sales/quotations/{id}/print`、`GET /api/sales/proforma-invoices/{id}/print`；`PrintTemplateController.PrintableTitles` 已登记 `quotation` / `proforma-invoice` |
 | 报价单 / PI 行操作「打印预览」（按打印模板渲染） | ✅ 已实现（ERP-007） | `sales-pi.js`（`SALES_DOC_PRINT` + `previewSalesDocPrint`）、`modules.js` 的 `rowActions` |
+| 报价单 / PI **共享打印三件套**（打印预览 / 直接打印 / 打印设计） | ✅ 已实现（ERP-018） | `bill-config-ef.js`（注册进 `BILL_CONFIG`，`ef: true` + `api`）、`sales-pi.js`（`printSalesDocDirect` / `designSalesDocPrint` 共用 `openSalesDocPrintWindow`）、`modules.js` 行操作、`print-design.js` / `pd-grid.js` 单据清单去重、`QuotationGovernanceTests` |
+| 报价单**有效期治理**（状态分类 + 到期提醒 + 列表徽标） | ✅ 已实现（ERP-018） | `QuotationValidityRules`（五态分类 / 窗口归一化 / 紧急度）、`GET /api/sales/quotations/validity-due`、`sales-pi.js`（`quotationValidityBadge` / `openQuotationValidityReminder`）、`crud.js` 列 `render` 钩子 |
+| **报价成交率报表**（按业务员聚合，口径见 §10.3） | ✅ 已实现（ERP-018） | `ReportService.Quotation.cs`、`GET /api/reports/quotation-conversion`、`reports.js` 的 `quotation-conversion`、`sales-pi.js` 的 `openQuotationConversionReport` |
 | 报价单 / PI → 销售订单（带入预填 + 直接生成、来源留痕、重复守卫） | ✅ 已实现（ERP-010） | `SalesOrderConversion.cs`、`SalesOrderConversionTests`（18 例）、§8.3 |
 | 回归测试 | ✅ 272/272 通过（2026-09-23 实测，Release） | `dotnet build NEWERP.sln -c Release`（0 警告 0 错误）+ `dotnet test src/ERP.UnitTests/ERP.UnitTests.csproj -c Release --no-build` |
 
@@ -228,6 +235,7 @@
 |---|---|
 | 报价单 → PI → 打开 PI → 草稿改 / 审核禁改 / 销审恢复 / 打印预览 / 作废 | 🧪 **ERP-007 已完成真实 Edge 验收**（6/6 通过、14 张截图、TRX + `browser-session.json`，2026-09-23） |
 | 报价单 / PI 转销售订单（ERP-010）、订单追溯（ERP-008）、库存单据（ERP-009）等场景 | 🧪 **`browser_deferred`**：按 `completion_policy.defer_browser_during_development` 延后到 **`FINAL-UI-ACCEPTANCE`** 阶段统一执行 `Collection=UiTests`，届时以真实 Edge + TRX + 截图 + SHA-256 清单为准 |
+| 报价单打印预览/直接打印/打印设计、有效期提醒与成交率报表（ERP-018） | 🧪 **`browser_deferred`**：用例已写入 `src/ERP.IntegrationTests/QuotationGovernanceUiTests.cs`（3 个场景：打印三件套入口、有效期治理徽标 + 提醒弹窗、成交率报表），留待 `FINAL-UI-ACCEPTANCE` 统一执行 |
 
 > `browser_deferred` **既不等于已验收，也不等于失败**：既有 UI 用例（`PiWorkflowUiTests`、`SalesOrderConversionUiTests`、`OrderTraceabilityUiTests`、`InventoryMovementUiTests` 等）与浏览器基础设施保持原样，待最终 UI 验收阶段批量执行。
 
@@ -235,14 +243,53 @@
 
 | 缺口 | 状态 | 备注 |
 |---|---|---|
-| 报价有效期到期提醒、报价成交率分析 | ⏳ **ERP-018**（已立项，待执行） | 复用现有报表框架，无需数据库结构变更 |
-| 报价单 / PI 接入 `BILL_CONFIG` / `BILL_CODE_MAP` 的共享打印三件套工具栏（`bill-print.js` / `bill-v2.js`） | ⏳ ERP-018 | 当前两者走 `sales-pi.js` 专用打印路径，**功能可用但入口不统一** |
 | 报价版本号（多轮议价版本留痕） | ❌ 未实现，未立项 | ERP-006 审计缺口④ |
-| 报价单通用 CRUD 的控制器级单元测试 | ◑ 部分覆盖 | 转 PI 与转订单路径已有测试（`QuotationToPiTests` / `SalesOrderConversionTests`），通用 CRUD 未单测 |
+| 报价单通用 CRUD 的控制器级单元测试 | ◑ 部分覆盖 | 转 PI / 转订单 / 打印数据 / 有效期 / 成交率路径已有测试（`QuotationToPiTests` / `SalesOrderConversionTests` / `QuotationGovernanceTests`），通用 CRUD（分页 / 详情 / 新增 / 修改）未单测 |
+| 报表中心菜单键 `quotation-conversion` | ◑ 未加菜单 | 报表已注册进 `ReportController` 与 `reports.js`，入口在报价单页工具栏「📈 成交率报表」；数据库菜单表由受门禁脚本维护（`SchemaUpgrader` / `deploy/*.sql`），本任务不改结构 |
+| 报价单 / PI 进入 `BILL_CODE_MAP` | ✅ **有意不入** | 该映射把菜单码路由到存储过程版单据页（`/api/v2/bills/*`）；两类单据是 EF 主子表（页面在 `MODULES`），挂进去会让菜单跳到 SP 页并 404。共享打印配置改由 `BILL_CONFIG`（`bill-config-ef.js`）承载 |
 
 ---
 
-## 10. 采纳的默认选项（如需改动随时告诉我）
+## 10. ERP-018：打印注册与有效期治理（2026-09-23 实施）
+
+### 10.1 共享打印三件套注册
+
+| 项 | 做法 |
+|---|---|
+| 注册文件 | `src/ERP.Api/wwwroot/js/bill-config-ef.js`（`Object.assign(BILL_CONFIG, {...})`，在 `index.html` 中紧跟 `bill-config3.js` 之后加载） |
+| 注册内容 | `quotation` / `proforma-invoice`：`billType`、`title`、`ef: true`、`api`（`/api/sales/quotations`、`/api/sales/proforma-invoices`）、`noKey`（`quotationNo` / `piNo`）与打印字段中文标签（`columns` / `fields`） |
+| 收益 | ① `bill-print.js` 的 `billFieldLabels()` 优先取 `BILL_CONFIG` → 打印字段中文标签与其余 16 种单据同口径；② 「样式设计」单据清单把它们归入「业务单据」分组（`print-design.js` / `pd-grid.js` 对已在 `BILL_CONFIG` 的同名单据去重，避免重复出现）；③ `PD_PREFERRED` 补充报价 / PI 常用字段，智能推荐同样生效 |
+| 不做的事 | **不加入 `BILL_CODE_MAP`**（只用于 SP 单据菜单路由）；**不改打印模板存储**（模板仍按 `billType` = 菜单码读写，与 ERP-007 已保存模板完全兼容）；**不新增任何数据库结构** |
+| 入口 | 报价单 / PI 行操作「打印预览 / 直接打印 / 打印设计」（`rowActions` → `previewSalesDocPrint` / `printSalesDocDirect` / `designSalesDocPrint`），数据统一取 `GET {api}/{id}/print` |
+
+### 10.2 有效期治理口径（`QuotationValidityRules`，单一事实来源）
+
+| 项 | 规则 |
+|---|---|
+| 判定基准 | 剩余天数 = `ValidUntil`（取日期） − 基准日（取日期）；基准日默认今天，接口可传 `asOfDate` |
+| 五态分类 | 未设置有效期（`ValidUntil` 为空）/ 已过期（剩余 &lt; 0）/ 今日到期（剩余 = 0）/ 即将到期（0 &lt; 剩余 ≤ 窗口）/ 有效（剩余 &gt; 窗口） |
+| 提醒窗口 | 默认 **7 天**（`DefaultAheadDays`）；入参为负按默认值处理（避免"永不提醒"的隐式行为）；弹窗可切 7 / 15 / 30 天 |
+| 提醒范围 | 已过期 + 窗口内到期；**已作废不提醒**（`Status = Cancelled` 直接排除）、**未设置有效期不提醒**；已转出（已转 PI / 已转销售订单 / 已完成）仍列出但标记 `Converted`，便于判断是否还需催单 |
+| 排序 | 紧急度降序（已过期 3 &gt; 今日到期 2 &gt; 即将到期 1），同级按 `ValidUntil` 升序 |
+| 可见性 | 报价单列表「有效期状态」派生列（`crud.js` 列 `render` 回调 + `sales-pi.js` 的 `quotationValidityBadge`，样式类 `status-danger` / `status-warning` / `status-success` / `status-neutral`，与后端 `ValidityLevel` 一一对应）；工具栏「⏰ 有效期提醒」弹窗列出明细 |
+| 结构影响 | 只读现有 `Quotations.ValidUntil` 与来源外键（`ProformaInvoices.QuotationId`、`SalesOrders.SourceQuotationId`），**不新增列 / 表**；前端徽标与后端同口径（窗口常量两处同步：`QuotationValidityRules.DefaultAheadDays` 与 `sales-pi.js` 的 `QUOTATION_VALIDITY_AHEAD_DAYS`） |
+
+### 10.3 报价成交率计算口径（`GET /api/reports/quotation-conversion`）
+
+| 项 | 规则 |
+|---|---|
+| 统计范围 | `Quotations` 中 `QuotationDate` ∈ [`start`, `end`] 且未软删除的报价单 |
+| 分母「有效报价数」 | 范围内 **未作废**（`Status ≠ Cancelled`）的报价单数；已作废只计入 `cancelledCount`，不参与成交率 |
+| 分子「已转出数」 | 分母中满足任一：存在未删除 `ProformaInvoices.QuotationId`（已转 PI）／存在未删除 `SalesOrders.SourceQuotationId`（已转销售订单）／报价单状态为「已完成」（兜底，覆盖外键回填前的历史数据） |
+| 成交率 | `已转出数 ÷ 有效报价数 × 100`，保留 2 位小数；分母为 0 时按 0 处理（除零保护） |
+| 已过期未成交 | 分母中 `ValidUntil` 早于**报表期间结束日**且未转出的报价单数（与 §10.2 同一分类口径） |
+| 金额口径 | 均为报价单**原币**金额（`totalAmount`）合计，不做汇率折算，避免期间内汇率波动影响可比性；`avgConvertedAmount` = 已转出金额 ÷ 已转出数（保留 2 位，无成交为 0） |
+| 分组与排序 | 按业务员聚合（未填写业务员归入「未指定业务员」），成交率降序 → 报价数降序 → 业务员升序 |
+| 验证 | `QuotationGovernanceTests`（口径 / 边界 / 分母保护 / 期间与软删除过滤 / 状态兜底 / 端点路由），见 `docs/部署交付文档.md` §33 |
+
+---
+
+## 11. 采纳的默认选项（如需改动随时告诉我）
 
 | # | 项 | 采用值 |
 |---|---|---|

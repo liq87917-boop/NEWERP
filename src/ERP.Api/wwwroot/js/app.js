@@ -321,6 +321,7 @@ const CODE_ICON = {
   'product-sales-ranking': 'trending-up', 'order-profit': 'chart-line',
   'customer-shipment': 'pie-chart', 'salesman-output': 'user-round',
   'balance-sheet': 'scale', 'income-statement': 'chart-line', 'cash-flow': 'waves',
+  'quotation-conversion': 'trending-up',
 };
 
 function iconOf(code) {

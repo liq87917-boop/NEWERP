@@ -70,11 +70,11 @@ async function renderTplCenterModule(preCode) {
   window.__pdPreSelect = '';
 }
 
-/* 左侧单据清单 */
+/* 左侧单据清单（ERP-018 去重：EF 主子表单据已登记在 BILL_CONFIG，不再重复出现在基础资料分组） */
 function pcRenderDocList(keyword) {
   const kw = (keyword || '').trim().toLowerCase();
   const docs = Object.keys(BILL_CONFIG || {}).map(k => ({ code: k, name: (BILL_CONFIG[k] || {}).title || k, group: '业务单据', icon: '🧾' }))
-    .concat(Object.keys(MODULES || {}).map(k => ({ code: k, name: (MODULES[k] || {}).title || k, group: '基础资料', icon: '🗂' })))
+    .concat(Object.keys(MODULES || {}).filter(k => !(BILL_CONFIG || {})[k]).map(k => ({ code: k, name: (MODULES[k] || {}).title || k, group: '基础资料', icon: '🗂' })))
     .filter(d => !kw || d.name.toLowerCase().includes(kw) || d.code.toLowerCase().includes(kw));
   const host = document.getElementById('pc-doc-list');
   if (!host) return;

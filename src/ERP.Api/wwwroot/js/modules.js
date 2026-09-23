@@ -460,6 +460,9 @@ const MODULES = {
     columns: [
       { key: 'quotationNo', label: '报价单号' }, { key: 'quotationDate', label: '报价日期', type: 'date' },
       { key: 'customerName', label: '客户' }, { key: 'validUntil', label: '有效期至', type: 'date' },
+      /* ERP-018：有效期治理——列表直接可见「有效期状态」（与后端 QuotationValidityRules 同口径）
+         virtual: true = 派生列（接口不返回该字段），列表打印时跳过，避免出现空列 */
+      { key: 'validityStatus', label: '有效期状态', virtual: true, render: row => quotationValidityBadge(row) },
       { key: 'inquiryNo', label: '来源询价单' }, { key: 'currency', label: '币种' },
       { key: 'totalAmount', label: '报价总额', type: 'money' }, { key: 'totalAmountCny', label: '折人民币', type: 'money' },
       { key: 'salesmanName', label: '业务员' }, { key: 'status', label: '状态', status: true },
@@ -498,6 +501,14 @@ const MODULES = {
       { label: '预填销售订单', icon: '🧾', title: '按报价单带入客户 / 币种 / 贸易与付款条款 / 目的港 / 明细，打开销售订单新增表单（可编辑后再保存）', onclick: 'quotationPrefillOrder', statuses: ['Approved'] },
       { label: '转销售订单', icon: '📦', title: '按已审核报价单直接生成一张销售订单（来源自动留痕，同一报价单仅一张）', onclick: 'quotationToOrder', statuses: ['Approved'] },
       { label: '打印预览', icon: '🖨', title: '按打印模板预览该报价单', onclick: 'previewSalesDocPrint' },
+      /* ERP-018：补齐共享打印三件套——直接打印（不先弹预览）+ 打印设计（跳到样式设计并预选本单据） */
+      { label: '直接打印', icon: '🖨', title: '直接调起浏览器打印该报价单（不用先看预览）', onclick: 'printSalesDocDirect' },
+      { label: '打印设计', icon: '🎨', title: '打开样式设计，为「报价单」配置打印模板（抬头 / 纸张 / 字体 / 字段顺序）', onclick: 'designSalesDocPrint' },
+    ],
+    /* 工具栏扩展按钮（ERP-018：有效期治理与成交率报表的入口，始终可见） */
+    extraActions: [
+      { label: '⏰ 有效期提醒', onclick: 'openQuotationValidityReminder', title: '列出已过期与即将到期（默认未来 7 天）的报价单，按紧急度排序' },
+      { label: '📈 成交率报表', onclick: 'openQuotationConversionReport', title: '按业务员统计报价成交率（已转 PI / 已转销售订单 / 已完成 ÷ 有效报价单）' },
     ],
     /* 明细（主子表）：数量 × 单价 = 金额，自动算合计；主表与明细一次性保存 */
     detailKey: 'details',
@@ -567,6 +578,9 @@ const MODULES = {
       { label: '预填销售订单', icon: '🧾', title: '按 PI 带入收货人 / 通知人 / 唛头 / 币种 / 条款 / 明细，打开销售订单新增表单（可编辑后再保存）', onclick: 'piPrefillOrder', statuses: ['Approved'] },
       { label: '转销售订单', icon: '📦', title: '按已审核 PI 直接生成一张销售订单（来源 PI 与报价单一并留痕，同一 PI 仅一张）', onclick: 'piToOrder', statuses: ['Approved'] },
       { label: '打印预览', icon: '🖨', title: '按打印模板预览该 PI', onclick: 'previewSalesDocPrint' },
+      /* ERP-018：补齐共享打印三件套——直接打印 + 打印设计 */
+      { label: '直接打印', icon: '🖨', title: '直接调起浏览器打印该 PI（不用先看预览）', onclick: 'printSalesDocDirect' },
+      { label: '打印设计', icon: '🎨', title: '打开样式设计，为「形式发票 PI」配置打印模板', onclick: 'designSalesDocPrint' },
     ],
     /* 明细（主子表）：数量 × 单价 = 金额，自动算合计；主表与明细一次性保存 */
     detailKey: 'details',

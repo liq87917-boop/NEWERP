@@ -89,6 +89,8 @@ function renderTable(mod, data) {
         return `<td>${hit ? hit.label : (v ?? '')}</td>`;
       }
       if (c.type === 'image') return `<td>${v ? `<img class="thumb-img" src="${escapeHtml(v)}" onclick="showLightbox(this.src)">` : ''}</td>`;
+      /* 派生列（列声明 render 回调时生效）：用于报价单「有效期状态」这类由整行数据计算的列 */
+      if (typeof c.render === 'function') return `<td>${c.render(row) || ''}</td>`;
       return `<td>${v ?? ''}</td>`;
     }).join('');
     const subActions = (mod.canSubmit ? submitActions(row) : '') + customRowActions(mod, row);

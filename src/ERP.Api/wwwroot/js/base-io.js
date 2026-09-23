@@ -8,9 +8,9 @@ function baseResourceKey() {
   return segments.length ? segments[segments.length - 1] : '';
 }
 
-/* 当前基础资料可打印的列（图片列不参与打印） */
+/* 当前基础资料可打印的列（图片列与派生列（virtual，如报价单「有效期状态」）不参与打印） */
 function basePrintColumns() {
-  return ((CURRENT_MODULE && CURRENT_MODULE.columns) || []).filter(c => c.type !== 'image');
+  return ((CURRENT_MODULE && CURRENT_MODULE.columns) || []).filter(c => c.type !== 'image' && !c.virtual);
 }
 
 /* 打印值格式化（复用单据打印的格式化规则） */

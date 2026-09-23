@@ -46,4 +46,7 @@ public interface IReportService
 
     /// <summary>跟进提醒（下次跟进日期已到期或即将到期的记录）</summary>
     Task<List<ReportDtos.FollowUpDueItem>> GetFollowUpDueAsync(DateTime asOfDate, int aheadDays);
+
+    /// <summary>报价成交率分析（ERP-018，按业务员聚合；分子 = 已转 PI / 已转销售订单 / 状态已完成）</summary>
+    Task<List<ReportDtos.QuotationConversionItem>> GetQuotationConversionAsync(DateTime start, DateTime end);
 }

@@ -25,7 +25,10 @@ let PD = {
 /* 常用字段优先顺序（智能推荐使用） */
 const PD_PREFERRED = ['BillNo', 'OrderDate', 'Date', 'CustomerId', 'CustomerName', 'SupplierName',
   'Currency', 'TotalAmount', 'DepositAmount', 'Status', 'Remark', 'SalesmanName',
-  'customerCode', 'customerName', 'productCode', 'productName', 'spec', 'unit', 'salePrice'];
+  'customerCode', 'customerName', 'productCode', 'productName', 'spec', 'unit', 'salePrice',
+  /* ERP-018：EF 主子表单据（报价单 / 形式发票 PI）的常用字段，智能推荐同样生效 */
+  'quotationNo', 'quotationDate', 'validUntil', 'piNo', 'piDate', 'totalAmountCny',
+  'tradeTerms', 'portOfDestination', 'paymentTerms', 'leadTime', 'depositRatio'];
 
 /* ============ 模块入口 ============ */
 async function renderPrintDesignModule(preCode) {
@@ -71,16 +74,19 @@ async function renderPrintDesignModule(preCode) {
   window.__pdPreSelect = '';     // 预选用完即清空
 }
 
-/* 可打印单据总数 */
+/* 可打印单据总数（去重后：EF 主子表单据同时登记在 BILL_CONFIG 与 MODULES，只算一次） */
 function pdDocCount() {
-  return Object.keys(BILL_CONFIG || {}).length + Object.keys(MODULES || {}).length;
+  return pdDocGroups().length;
 }
 
 /* ============ 左侧：单据清单 ============ */
 function pdDocGroups() {
   const bills = Object.keys(BILL_CONFIG || {})
     .map(k => ({ code: k, name: (BILL_CONFIG[k] || {}).title || k, group: '业务单据', icon: '🧾' }));
+  /* 基础资料分组排除已在 BILL_CONFIG 注册的同名单据（报价单 / PI / 销售订单 / 采购订单），
+     避免同一单据在「业务单据」与「基础资料」下重复出现（ERP-018） */
   const bases = Object.keys(MODULES || {})
+    .filter(k => !(BILL_CONFIG || {})[k])
     .map(k => ({ code: k, name: (MODULES[k] || {}).title || k, group: '基础资料', icon: '🗂' }));
   return bills.concat(bases);
 }

@@ -350,6 +350,11 @@ async function previewSalesDocPrint(oid) {
 function printSalesDoc() {
   const ctx = window.__salesDocPrintContext;
   if (!ctx) { toast('请先打开打印预览', 'error'); return; }
+  openSalesDocPrintWindow(ctx);
+}
+
+/* 新窗口输出并调起浏览器打印（支持模板纸张与字号）：打印预览弹窗的「打印」按钮与「直接打印」共用同一实现 */
+function openSalesDocPrintWindow(ctx) {
   const win = window.open('', '_blank');
   if (!win) { toast('浏览器拦截了打印窗口，请允许弹出窗口后重试', 'error'); return; }
   const html = buildSalesDocPrintHtml(ctx.code, ctx.cfg, ctx.template, ctx.doc);
@@ -363,3 +368,98 @@ function printSalesDoc() {
   win.focus();
   setTimeout(() => { try { win.print(); } catch (e) { /* 用户取消打印 */ } }, 300);
 }
+
+/* ============ ERP-018：直接打印 / 打印设计 / 有效期治理 / 成交率报表 ============ */
+
+/* 直接打印：不先弹预览，按打印模板直接输出并调起浏览器打印（与预览共用同一份打印数据与模板） */
+async function printSalesDocDirect(oid) {
+  const code = CURRENT_MODULE_CODE;
+  if (!SALES_DOC_PRINT[code]) { toast('当前模块不支持单据打印', 'error'); return; }
+  if (!oid) { toast('请先保存单据后再打印', 'error'); return; }
+  ensurePrintStyle();
+  try {
+    openSalesDocPrintWindow(await fetchSalesDocPrintContext(code, oid));
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+/* 打印设计：跳到「样式设计」页并预选当前单据类型（报价单 / 形式发票 PI 已登记进共享 BILL_CONFIG） */
+function designSalesDocPrint() {
+  const code = CURRENT_MODULE_CODE;
+  if (!SALES_DOC_PRINT[code]) { toast('当前模块不支持打印设计', 'error'); return; }
+  gotoPrintDesign(code);
+}
+
+/* 有效期提醒窗口天数（与后端 QuotationValidityRules.DefaultAheadDays 保持一致，改动需同步两处） */
+const QUOTATION_VALIDITY_AHEAD_DAYS = 7;
+
+/* 报价单有效期分类：与后端 QuotationValidityRules 同口径（未设置有效期 / 已过期 / 今日到期 / 即将到期 / 有效） */
+function quotationValidityOf(row) {
+  if (!row || !row.validUntil) return { text: '未设置有效期', level: 'neutral', days: null };
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const due = new Date(row.validUntil); due.setHours(0, 0, 0, 0);
+  const days = Math.round((due.getTime() - today.getTime()) / 86400000);
+  if (days < 0) return { text: '已过期', level: 'danger', days };
+  if (days === 0) return { text: '今日到期', level: 'warning', days };
+  if (days <= QUOTATION_VALIDITY_AHEAD_DAYS) return { text: '即将到期', level: 'warning', days };
+  return { text: '有效', level: 'success', days };
+}
+
+/* 列表「有效期状态」列徽标（modules.js 的派生列通过 crud.js 列 render 回调调用） */
+function quotationValidityBadge(row) {
+  const v = quotationValidityOf(row);
+  const extra = v.days === null ? '' : (v.days < 0 ? `（逾期 ${Math.abs(v.days)} 天）` : (v.days > 0 ? `（剩 ${v.days} 天）` : ''));
+  return `<span class="status status-${v.level}">${v.text}${extra}</span>`;
+}
+
+/* 有效期提醒：列出已过期与提醒窗口内到期的报价单（后端按紧急度排序、已作废不提醒、未设置有效期不提醒） */
+async function openQuotationValidityReminder(aheadDays) {
+  const windowDays = Number(aheadDays) > 0 ? Number(aheadDays) : QUOTATION_VALIDITY_AHEAD_DAYS;
+  try {
+    const data = await api(`/api/sales/quotations/validity-due?aheadDays=${windowDays}`);
+    const items = Array.isArray(data) ? data : (data.items || []);
+    const rows = items.length ? items.map(r => `<tr>
+        <td>${escapeHtml(r.quotationNo || '')}</td>
+        <td>${escapeHtml(r.customerName || '')}</td>
+        <td>${escapeHtml(r.salesmanName || '')}</td>
+        <td>${fmtDate(r.validUntil)}</td>
+        <td class="text-right">${r.validDays === null ? '--' : (r.validDays < 0 ? `逾期 ${Math.abs(r.validDays)} 天` : `剩 ${r.validDays} 天`)}</td>
+        <td><span class="status status-${escapeHtml(r.validityLevel || 'neutral')}">${escapeHtml(r.validityStatus || '')}</span></td>
+        <td class="text-right">${escapeHtml(r.currency || '')} ${fmtMoney(r.totalAmount)}</td>
+        <td>${r.converted ? '<span class="status status-success">已转出</span>' : statusHtml(r.status)}</td>
+      </tr>`).join('')
+      : '<tr><td colspan="8" class="text-center text-muted">提醒窗口内没有需要跟进的报价单 👍</td></tr>';
+    const windowOpts = [7, 15, 30]
+      .map(d => `<option value="${d}" ${d === windowDays ? 'selected' : ''}>未来 ${d} 天内到期</option>`).join('');
+    const modal = document.getElementById('modal');
+    modal.innerHTML = `<div class="modal modal-lg" style="width:1120px;max-width:96vw">
+      <h3>⏰ 报价有效期提醒（共 ${items.length} 张）</h3>
+      <div class="toolbar" style="margin:8px 0">
+        <div class="toolbar-left">
+          <label>提醒窗口：
+            <select id="qv-window" onchange="openQuotationValidityReminder(this.value)">${windowOpts}</select>
+          </label>
+          <span class="text-muted">口径：已过期 / 今日到期 / 即将到期；未设置有效期与已作废的报价单不提醒</span>
+        </div>
+      </div>
+      <div class="table-wrap" style="max-height:52vh;overflow:auto">
+        <table><thead><tr>
+          <th>报价单号</th><th>客户</th><th>业务员</th><th>有效期至</th>
+          <th class="text-right">剩余</th><th>有效期状态</th><th class="text-right">报价总额</th><th>单据状态</th>
+        </tr></thead><tbody>${rows}</tbody></table>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-neutral" onclick="closeModal()">关闭</button>
+        <button class="btn btn-primary" onclick="closeModal();openQuotationConversionReport()">📈 看成交率报表</button>
+      </div>
+    </div>`;
+    modal.style.display = 'flex';
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+/* 成交率报表入口：直接渲染报表框架里的「报价成交率分析」（与报表中心同一套渲染与导出） */
+function openQuotationConversionReport() {
+  const rep = REPORTS['quotation-conversion'];
+  if (!rep) { toast('成交率报表未加载', 'error'); return; }
+  renderReport(rep, rep.title);
+}
+

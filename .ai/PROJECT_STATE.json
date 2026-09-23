@@ -3,7 +3,7 @@
   "controller": "gpt_conversation",
   "phase": "ready",
   "current_task": null,
-  "last_completed_task": "ERP-017",
+  "last_completed_task": "ERP-018",
   "last_reviewed_task": "ERP-005",
   "blocker": null,
   "external_actions": [
@@ -11,7 +11,7 @@
     "Rotate any previously exposed OSS access key at the cloud provider if rotation has not already been completed."
   ],
   "validation": {
-    "profile": "build_only",
+    "profile": "safe",
     "status": "passed"
   },
   "cline_exit_code": 0,
@@ -30,7 +30,7 @@
     "cline_success_is_only": "code_ready"
   },
   "browser_acceptance": {
-    "status": "control_plane_validated"
+    "status": "browser_deferred"
   },
   "human_gates": {
     "production_database_changes": "required",
@@ -38,8 +38,8 @@
     "production_deployment_or_release": "required",
     "irreversible_data_operations": "required"
   },
-  "finish_reason": "control_plane_validated",
-  "updated_at": "2026-09-23T12:29:43.290925Z",
+  "finish_reason": "browser_deferred",
+  "updated_at": "2026-09-23T12:40:40.650922Z",
   "rolling_queue": {
     "enabled": true,
     "batch_size": 4,

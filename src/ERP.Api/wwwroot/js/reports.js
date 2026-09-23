@@ -108,6 +108,22 @@ const REPORTS = {
       { key: 'dueStatus', label: '状态' },
       { key: 'subject', label: '跟进主题' },
     ] },
+
+  /* === ERP-018：报价成交率（询报价 → 形式发票 PI / 销售订单 转化分析） === */
+  'quotation-conversion': { api: '/api/reports/quotation-conversion', title: '报价成交率分析',
+    emoji: '📈', kpi: 'gold',
+    summary: '按业务员：成交率 = 已转出数 ÷ 有效报价数 × 100（已转出 = 已转 PI / 已转销售订单 / 已完成；已作废不计入分母）',
+    columns: [
+      { key: 'salesmanName', label: '业务员' },
+      { key: 'quotationCount', label: '有效报价数', type: 'number' },
+      { key: 'convertedCount', label: '已转出数', type: 'number' },
+      { key: 'conversionRate', label: '成交率%', type: 'number' },
+      { key: 'expiredCount', label: '已过期未成交', type: 'number' },
+      { key: 'cancelledCount', label: '已作废', type: 'number' },
+      { key: 'totalAmount', label: '有效报价金额', type: 'money' },
+      { key: 'convertedAmount', label: '已转出金额', type: 'money' },
+      { key: 'avgConvertedAmount', label: '单笔成交均价', type: 'money' },
+    ] },
 };
 
 async function renderReport(rep, name) {

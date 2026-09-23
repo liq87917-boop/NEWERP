@@ -131,4 +131,12 @@ public class ReportController : ControllerBase
         var result = await _reportService.GetFollowUpDueAsync(asOfDate ?? DateTime.Today, aheadDays);
         return Ok(ApiResponse<List<ReportDtos.FollowUpDueItem>>.Success(result));
     }
+
+    /// <summary>报价成交率分析（ERP-018；按业务员聚合，计算口径见 docs/报价单与PI设计方案.md §10.3）</summary>
+    [HttpGet("quotation-conversion")]
+    public async Task<IActionResult> QuotationConversion([FromQuery] DateTime start, [FromQuery] DateTime end)
+    {
+        var result = await _reportService.GetQuotationConversionAsync(start, end);
+        return Ok(ApiResponse<List<ReportDtos.QuotationConversionItem>>.Success(result));
+    }
 }
