@@ -398,6 +398,7 @@ def run_next(dry_run: bool) -> int:
     resume_existing = False
     resume_reason: str | None = None
     item = normalized_failed_head
+
     if item is not None:
         resume_existing = bool(changed_paths())
         resume_reason = "failed_head_normalized_for_deferred_browser"
@@ -409,34 +410,34 @@ def run_next(dry_run: bool) -> int:
             audit("path_guard_recovery_started", task=item[1]["id"], changed_paths=changed_paths())
         else:
             item = recoverable_interrupted_task(config, state)
-        if item is not None:
-            resume_existing = True
-            resume_reason = "interrupted_task_recovered"
-            audit("interrupted_task_recovery_started", task=item[1]["id"], phase=state.get("phase"), changed_paths=changed_paths())
-        else:
-            item = recoverable_browser_failure_task(config, state)
             if item is not None:
                 resume_existing = True
-                resume_reason = "browser_failure_recovered"
-                item[1]["browser_recovery_cycles"] = int(item[1].get("browser_recovery_cycles", 0) or 0) + 1
-                item[1]["attempts"] = 0
-                save_json(item[0], item[1])
-                audit("browser_failure_recovery_started", task=item[1]["id"], cycle=item[1]["browser_recovery_cycles"], changed_paths=changed_paths())
+                resume_reason = "interrupted_task_recovered"
+                audit("interrupted_task_recovery_started", task=item[1]["id"], phase=state.get("phase"), changed_paths=changed_paths())
             else:
-                item = recoverable_deferred_failed_head(config, state)
+                item = recoverable_browser_failure_task(config, state)
                 if item is not None:
                     resume_existing = True
-                    resume_reason = "deferred_browser_failed_head_recovered"
-                    item[1]["status"] = "retry"
+                    resume_reason = "browser_failure_recovered"
+                    item[1]["browser_recovery_cycles"] = int(item[1].get("browser_recovery_cycles", 0) or 0) + 1
                     item[1]["attempts"] = 0
                     save_json(item[0], item[1])
-                    audit("deferred_browser_failed_head_recovery_started", task=item[1]["id"], changed_paths=changed_paths())
+                    audit("browser_failure_recovery_started", task=item[1]["id"], cycle=item[1]["browser_recovery_cycles"], changed_paths=changed_paths())
                 else:
-                    try:
-                        item = next_task(config)
-                    except ValueError as exc:
-                        set_state(state, phase="blocked", blocker=str(exc), finish_reason="queue_head_blocked")
-                        audit("queue_head_blocked", reason=str(exc)); return 10
+                    item = recoverable_deferred_failed_head(config, state)
+                    if item is not None:
+                        resume_existing = True
+                        resume_reason = "deferred_browser_failed_head_recovered"
+                        item[1]["status"] = "retry"
+                        item[1]["attempts"] = 0
+                        save_json(item[0], item[1])
+                        audit("deferred_browser_failed_head_recovery_started", task=item[1]["id"], changed_paths=changed_paths())
+                    else:
+                        try:
+                            item = next_task(config)
+                        except ValueError as exc:
+                            set_state(state, phase="blocked", blocker=str(exc), finish_reason="queue_head_blocked")
+                            audit("queue_head_blocked", reason=str(exc)); return 10
     if item is None: print("No runnable task."); return 0
     task_path, task = item
     try: validate_task(task, config)
