@@ -200,12 +200,30 @@ def git_checkpoint(message: str, paths: list[str]) -> None:
         if completed.returncode != 0: raise RuntimeError("Could not create pipeline control checkpoint.")
 
 
-def mark_queue_idle() -> None:
+def mark_queue_replenishing() -> None:
+    config = load_json(CONFIG_PATH)
     state = load_json(STATE_PATH)
-    if state.get("phase") == "idle" and state.get("finish_reason") == "queue_empty": return
-    state.update({"phase": "idle", "current_task": None, "blocker": None, "finish_reason": "queue_empty", "updated_at": utc_now()})
-    save_json(STATE_PATH, state); audit("queue_empty")
-    git_checkpoint("chore: automation queue drained", [str(STATE_PATH.relative_to(ROOT)), str(AUDIT_PATH.relative_to(ROOT))])
+    rolling = config.get("rolling_queue", {})
+    if state.get("phase") == "replenishing" and state.get("finish_reason") == "awaiting_gpt_replenishment":
+        return
+    state.update({
+        "phase": rolling.get("empty_phase", "replenishing"),
+        "current_task": None,
+        "blocker": None,
+        "finish_reason": "awaiting_gpt_replenishment",
+        "rolling_queue": {
+            "enabled": bool(rolling.get("enabled", True)),
+            "batch_size": int(rolling.get("batch_size", config.get("queue_target_size", 4))),
+            "low_watermark": int(rolling.get("low_watermark", 2)),
+            "acceptance_interval_seconds": int(rolling.get("acceptance_interval_seconds", 3600)),
+            "replenishment_owner": rolling.get("replenishment_owner", "GPT"),
+            "status": "awaiting_replenishment"
+        },
+        "updated_at": utc_now()
+    })
+    save_json(STATE_PATH, state)
+    audit("queue_replenishment_requested", batch_size=state["rolling_queue"]["batch_size"], low_watermark=state["rolling_queue"]["low_watermark"])
+    git_checkpoint("chore: request rolling queue replenishment", [str(STATE_PATH.relative_to(ROOT)), str(AUDIT_PATH.relative_to(ROOT))])
 
 
 def run_all() -> int:
@@ -222,7 +240,9 @@ def run_all() -> int:
             except ValueError as exc:
                 print(f"Queue metadata error: {exc}", file=sys.stderr); return 10
             if item is None and reason == "queue_empty":
-                mark_queue_idle(); print("Automation queue completed."); return 0
+                mark_queue_replenishing()
+                print("Current rolling batch completed; agent remains alive and waits for GPT replenishment.")
+                return 0
             if item is None:
                 print(f"Pipeline stopped fail-closed: {reason}", file=sys.stderr); return 10
             task_id = item[1]["id"]
