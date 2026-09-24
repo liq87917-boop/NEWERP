@@ -12,8 +12,10 @@ namespace ERP.Application.Interfaces;
 /// 1) 打印字段只取 <see cref="TradeDocument"/> 已落库的字段，键名与实体一致（camelCase，供前端直接取值）；
 /// 2) 台账没有落库的字段一律 Available=false + Value=null，由前端按**空白**渲染，
 ///    绝不按客户 Id 回查客户档案、不按文本匹配推断单证号 / 柜号 / 报关单号，也不把「0」当成有效金额；
-/// 3) 单证为单表台账（无商品明细行），因此打印模型不返回明细：
-///    <see cref="TradeDocumentPrintModel.HasDetailLines"/> 恒为 false，不新增任何明细表结构。
+/// 3) 本打印模型只投影单证**表头**字段（商业发票 / 装箱单的商品明细行已在 ERP-051 落库为
+///    `TradeDocumentItems`，但本模型<strong>不</strong>返回明细行）：
+///    <see cref="TradeDocumentPrintModel.HasDetailLines"/> 在当前实现中恒为 false，
+///    由后续任务 ERP-052 把明细行纳入打印输出；在此之前打印件不输出任何明细行。
 /// </remarks>
 public static class TradeDocumentPrintSemantics
 {

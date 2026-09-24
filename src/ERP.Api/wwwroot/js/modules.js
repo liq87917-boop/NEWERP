@@ -425,6 +425,8 @@ const MODULES = {
        ERP-045：为本单证登记 / 查看附件引用（仅元数据；既有 FileNote 保持原样，不自动导入） */
     rowActions: [
       { label: '导出该单证', icon: '📤', title: '仅导出本行单证为 Excel（便于单独归档或发送）', onclick: 'exportTradeDocument' },
+      /* ERP-051：维护本单证的商品明细行快照（只有商业发票 / 装箱单允许；单证处于待制作 / 已制作时可维护） */
+      { label: '商品明细行', icon: '📦', title: '维护本单证的商品明细行快照：只有商业发票（含单价与金额）与装箱单（含箱数与重量）允许；单证处于待制作 / 已制作时可新增 / 修改 / 删除，提交客户后冻结；行金额由服务端计算，不改写商品资料与来源单据', onclick: 'manageTradeDocumentItems' },
       { label: '打印预览该单证', icon: '🖨', title: '按单证打印模板预览本单证打印效果（空白字段表示台账未登记该值，系统不做推测）', onclick: 'previewTradeDocPrint' },
       { label: '直接打印该单证', icon: '🖨', title: '不弹预览，按打印模板直接输出本单证并调起浏览器打印', onclick: 'printTradeDocDirect' },
       { label: '附件引用', icon: '📎', title: '登记或查看本单证的附件引用元数据（既有「附件说明 / 存放位置」FileNote 保持原样，不自动导入、不当作已授权附件）', onclick: 'openDocumentAttachmentReferencesForCurrentModule' },

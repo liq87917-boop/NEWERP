@@ -40,7 +40,7 @@
 | 10 | 装柜/出运主链（收货计划/订柜/预装柜/装柜清单） | verified-complete | `Container1.cs`/`Container2.cs`、`ContainerControllers`、`ContainerPreLoadingController`、`ContainerLoadingListController`、`bill-config3.js:60-118` | 无 | low |
 | 11 | 装柜外贸与物流跟踪字段 | missing | `ContainerBooking`/`ContainerPreLoading*`/`ContainerLoading*` 无相关列；`docs/部署交付文档.md:854` 说明因走存储过程而暂缓 | LCL/FCL、B/L、SO、ETD/ETA/ATD/ATA、拖车/报关行、查验放行、目的/中转港；装载率仅报表侧(`reports.js:37-48`，40HQ 68m³ 基准) | medium-high |
 | 12 | 一柜多客户拼柜与费用分摊 | partial | 分摊已可用：`expense-allocate.js`（拼柜/整柜/散货 × 体积/重量/箱数/金额）、`ExpenseBillController.cs:29-93`（预览+生成+重复防护）、`FinanceExpense.cs:50-73`（RefType/RefNo/CustomerId/AllocationBase/AllocationRatio/AllocatedAmount 落库） | `ContainerLoadingList.CustomerId` 仍为单客户，无「柜→多客户」主子表；分摊结果不回写装柜/结算；无分摊批次与来源行留痕 | medium |
-| 13 | 单证中心 | **verified-complete（ERP-019 补齐自动生成与 Excel 导出；ERP-030 接入共享打印；浏览器验收待 FINAL-UI-ACCEPTANCE）** | `TradeDocument.cs`（9 类单证/4 态/关联报关单号·柜号·订单号/金额/港口/份数）、`TradeDocumentController`（+`export-excel`）、`TradeDocumentGeneration.cs`（由销售订单 / 装柜清单带入预填 + 生成 + 重复守卫 + 编号规则）、`SalesOrderController`/`ContainerLoadingListController` 各 `GET {id}/trade-documents/prefill` + `POST {id}/trade-documents`、`trade-doc-gen.js`（生成对话框 / 导出对话框 / 单条导出）、`modules.js`(`doc-center` extraActions+rowActions)、`modules-doc.js`/`modules-doc2.js`（行操作「生成单证」「预填单证」）、菜单 `doc-center`(`init11.sql`)、`TradeDocumentGenerationTests`（21 例）、`TradeDocumentGenerationUiTests`（4 例 Edge）、**ERP-030 共享打印**：`TradeDocumentPrintDtos.cs`（打印模型与字段口径）、`TradeDocumentController.GetPrint`、`PrintTemplateController`（`doc-center` 中文标题）、`trade-doc-print.js`、`TradeDocumentPrintTests`（20 例）、`docs/单证中心生成与导出说明.md` | ① ~~无「由装柜清单/销售订单自动生成」~~ → **ERP-019 已实现**（两路来源 × 带入预填/直接生成，来源留痕写入 `SalesOrderNo`/`RefNo` + 备注，重复生成守卫：同订单同类型、同柜号同类型）；② ~~无 Excel 导出~~ → **ERP-019 已实现**（列表筛选导出 + 单条导出，沿用 `ExcelExporter`）；③ 单证扫描件附件仍为 `FileNote` 文本（附件中心任务）；④ ~~无 PDF/版式打印（共享打印设计另立任务）~~ → **ERP-030 已实现**（打印预览 / 直接打印 / 打印设计，复用既有共享打印模板与打印设计；`GET /api/trade/documents/{id}/print` 只读投影既有字段，缺值空白、不臆造；见 `docs/单证中心生成与导出说明.md` §10）；⑤ 单证明细为单表，无商品明细行 | low-medium |
+| 13 | 单证中心 | **verified-complete（ERP-019 补齐自动生成与 Excel 导出；ERP-030 接入共享打印；浏览器验收待 FINAL-UI-ACCEPTANCE）** | `TradeDocument.cs`（9 类单证/4 态/关联报关单号·柜号·订单号/金额/港口/份数）、`TradeDocumentController`（+`export-excel`）、`TradeDocumentGeneration.cs`（由销售订单 / 装柜清单带入预填 + 生成 + 重复守卫 + 编号规则）、`SalesOrderController`/`ContainerLoadingListController` 各 `GET {id}/trade-documents/prefill` + `POST {id}/trade-documents`、`trade-doc-gen.js`（生成对话框 / 导出对话框 / 单条导出）、`modules.js`(`doc-center` extraActions+rowActions)、`modules-doc.js`/`modules-doc2.js`（行操作「生成单证」「预填单证」）、菜单 `doc-center`(`init11.sql`)、`TradeDocumentGenerationTests`（21 例）、`TradeDocumentGenerationUiTests`（4 例 Edge）、**ERP-030 共享打印**：`TradeDocumentPrintDtos.cs`（打印模型与字段口径）、`TradeDocumentController.GetPrint`、`PrintTemplateController`（`doc-center` 中文标题）、`trade-doc-print.js`、`TradeDocumentPrintTests`（20 例）、`docs/单证中心生成与导出说明.md` | ① ~~无「由装柜清单/销售订单自动生成」~~ → **ERP-019 已实现**（两路来源 × 带入预填/直接生成，来源留痕写入 `SalesOrderNo`/`RefNo` + 备注，重复生成守卫：同订单同类型、同柜号同类型）；② ~~无 Excel 导出~~ → **ERP-019 已实现**（列表筛选导出 + 单条导出，沿用 `ExcelExporter`）；③ 单证扫描件附件仍为 `FileNote` 文本（附件中心任务）；④ ~~无 PDF/版式打印（共享打印设计另立任务）~~ → **ERP-030 已实现**（打印预览 / 直接打印 / 打印设计，复用既有共享打印模板与打印设计；`GET /api/trade/documents/{id}/print` 只读投影既有字段，缺值空白、不臆造；见 `docs/单证中心生成与导出说明.md` §10）；⑤ ~~单证明细为单表，无商品明细行~~ → **ERP-051 已交付明细行表**（`TradeDocumentItems`：商业发票 / 装箱单的行级快照，服务端计算行金额、商品引用权威快照与不刷新语义、准备状态可维护 / 冻结状态只读、表头金额差异只提示）；**生成 / 导出 / 打印消费明细行**（销售订单与装柜清单带入明细、Excel 导出列、共享打印明细区）属 ERP-052 | low-medium |
 | 14 | 费用单（出口杂费台账） | verified-complete | `FinanceExpense`、`ExpenseBillController`、菜单 `expense-bill`(`init8.sql`)、`modules.js:238-260` | 与装柜结算单/付款单无金额联动（`BillNo` 为文本字段） | low |
 | 15 | 应收账款与账龄 | verified-complete | `api/reports/ar-aging`、`ReportService.Ar.cs`、`reports.js:20-34`、菜单 `ar-aging`(`init9.sql`) | 无收款自动核销（收付款与订单/柜之间无核销明细），无信用额度占用与信用状态自动风控 | medium |
 | 16 | 应付账款 / 供应商对账 / 客户对账 | missing | 全仓无实体、无端点、无菜单；`docs/部署交付文档.md:203`、`docs/菜单与业务流程优化建议-20260918.md:248` 列为缺失 | 全部缺失（档口月结对账仍靠 Excel） | medium |
@@ -345,6 +345,37 @@
 - **真实 Edge 验收用例（`PurchaseQuoteConversionUiTests` 新增场景 3 / 场景 4，开发阶段记为 `browser_deferred`）**：① 批次页操作后核对：同供应商 + 币种的两行合并为一张订单（2 行明细、`13000 + 3500` 重算合计、`Remark` 含两行来源标记）、不同供应商的行独立成单（1 行明细、2400）、未选中行保持「待比较」且不生成订单，三行 `RefOrderNo` 分别回写各自订单号；② 重复批次转换被服务端拒绝（业务码 != 0、提示「没有可转换」）且订单 / 明细数量不变，只读计划返回 0 组并列出未选中行与已生成行的跳过原因。测试数据经应用自身接口创建（不直连数据库、不使用生产数据、不执行 SQL）。
 - **未做的事（边界）**：未启动 `ERP.Api`、未连业务库、未执行任何 SQL / seed / 部署、未运行集成 / UI 用例（真实 Edge 门禁归 orchestrator，按 `defer_browser_during_development` 记为 `browser_deferred`）；未修改 `.env.local`、`deploy/**`、`release/**`、`checkpoints/**`、`logs/**`、任何 `.sql` 文件、`SchemaUpgrader.cs` 与 `SeedData*.cs`；未 commit / push。不支持跨比价批次合并、不做采购价格审批 / 供应商回写、不做组内单价改写（取最低价等）与文本相似度匹配。本轮产物为「代码 + 测试 + 文档」，交付等级为 `code_ready`，`completed` 只由 orchestrator 判定。
 
+
+### 5.17 ERP-051 单证明细行快照（商业发票 / 装箱单）（2026-09-25）
+
+> 任务：`ERP-051`「Add immutable line-item snapshots to Trade Documents」（依赖 ERP-019，Human Gate L2 `not_required`，`completion_mode: browser` 但本阶段浏览器延后）。
+> 目标：把单证中心从**单表台账**扩展为「单证 + 行级快照证据」，让商业发票与装箱单能逐行登记商品并追溯，同时**不动**商品资料、来源单据与任何相邻业务记录。
+
+- **数据模型**：新增 `TradeDocumentItems`（一行 = 一个商品在制作当时的快照）：
+  `TradeDocumentId`（外键 → `TradeDocuments`；脚本中不含级联动作，EF 侧按 `DeleteBehavior.Cascade` 处理应用层物理删除）、`LineNo`（同单证内未删除行唯一：`UX_TradeDocumentItems_Document_LineNo`）、
+  `ProductId`（0 = 人工录入，**刻意不建**到商品资料的外键）、商品编码 / 中英文名称 / 规格 / 单位快照、
+  `Quantity` / `UnitPrice` DECIMAL(18,4)、`LineAmount` DECIMAL(18,2)、`PackageCount` INT NULL、`NetWeight` / `GrossWeight` DECIMAL(18,4) NULL、
+  `Currency`、`Remark` + 审计基类字段。
+- **允许类型与状态**：只有**商业发票**（含单价与金额）与**装箱单**（含箱数 / 净重 / 毛重，不含价格）允许明细行；
+  只有**待制作 / 已制作**（准备状态）可新增 / 修改 / 删除；已提交客户 / 已使用及任何未知状态一律冻结（fail-closed，既不能删也不能静默替换）。
+- **服务端权威口径**：行金额 = 数量 × 单价（按币种精度 0.5 进位取整，JPY 等 0 位小数），**不接受客户端金额与币种**；
+  数量 > 0 且 ≤ 4 位小数、单价 ≥ 0 且 ≤ 4 位小数、箱数 / 重量非负且有界、毛重不得小于净重、文本有界且为纯文本（拒绝控制字符与 `<` `>`）；
+  未登记的箱数 / 净重 / 毛重保持 `null`（**不臆造为 0**）；行序留空由服务端追加，显式指定不得重复。
+- **快照语义**：引用商品资料时写入商品资料的权威快照；**修改行时商品引用未变化则不刷新**历史快照；
+  商品改名 / 停用 / 软删除后历史行照常可读并给出只读标注；清除引用即转为人工录入文本行。
+- **差异提示**：清单返回行金额合计与「与单证表头金额是否一致」的**提示**（表头金额 0 视为未填写、读取截断时不判定差异），
+  **绝不回写**单证表头；箱数与重量合计只累加登记过该值的行并给出登记行数。
+- **读取有界**：单次 ≤ 200 行（超出标记 `Truncated`），行与商品引用**一次批量装载**（无逐行查询）；历史单证返回空清单且**无任何回填**。
+- **代码改动**：
+  - 实体与模型：`TradeDocumentItem.cs`、`IErpDbContext`/`ErpDbContext`（`TradeDocumentItems`）、`ErpDbContext.Config.cs`（长度 / 精度 / 过滤唯一索引 / 级联外键，ERP-051 段）、`SchemaUpgrader.cs` 第 35 段（幂等建表 + 建索引 + 建外键，**无任何数据改写语句**）；
+  - 应用层：`TradeDocumentItemDtos.cs`（保存请求不含金额 / 币种 / 单证 Id）、`TradeDocumentItemRules.cs`（类型白名单、状态机、精度与纯文本校验、金额计算与差异文案）、`TradeDocumentItemService.cs`（清单 / 新增 / 修改 / 删除，一次批量装载商品引用）；
+  - 接口：`TradeDocumentController` 新增四式 `GET/POST {id}/items`、`PUT/DELETE items/{itemId}`；
+  - 前端：`wwwroot/js/trade-doc-items.js`（弹窗维护 + 合计 + 差异提示 + 冻结只读）、`modules.js`(`doc-center` 行操作「商品明细行」)、`index.html` 注册脚本；
+  - 文档：新增 `docs/单证中心商品明细行说明.md`；`docs/单证中心生成与导出说明.md` §9/§10.5 与 `TradeDocumentPrintDtos.cs` 注释同步标注「明细行已落库、打印 / 导出消费属 ERP-052」；`docs/数据库设计说明书.md` §二十三。
+- **测试与验证**：新增 `ERP.UnitTests/TradeDocumentItemTests.cs`（48 例，含类型白名单 / 冻结状态、金额与币种精度、数量 / 单价 / 箱数 / 重量 / 文本校验、行序与行数上限、商品引用快照与不刷新、差异提示不回写表头、历史单证不回填、读取有界、非变更边界，以及模型 / 幂等结构 / 路由 / 前端接线契约）；
+  safe 档：Release 构建 0 警告 0 错误 + `ERP.UnitTests` **1037/1037 通过**（含本任务 48 例，2026-09-25 本机实测）；未连接 SQL Server、未跑集成 / UI 测试、未启动 API、未执行任何 SQL / 部署 / seed。
+- **未做项（ERP-052 范围）**：由销售订单 / 装柜清单生成单证时带入明细、Excel 导出明细列、共享打印明细区（打印模型 `HasDetailLines` 本轮保持 `false`）；
+  浏览器 / UI 验收按 `browser_deferred` 延后到 `FINAL-UI-ACCEPTANCE`。
 
 ## 6. 执行规则（保持有效）
 

@@ -2065,5 +2065,61 @@ IF NOT EXISTS (SELECT 1 FROM sys.indexes
         ON db_owner.SupplierPaymentAllocations(Status, AllocatedAt)
         WHERE IsDeleted = 0;");
 
+        // 35. 单证明细行快照（ERP-051：商业发票 / 装箱单 的商品明细证据行）
+        //     35.1 只建「单证明细行」一张表 + 一个过滤唯一索引 + 一条外键：不含任何数据改写语句
+        //          （无 UPDATE、INSERT、DELETE 数据操作），既有单证（含无明细的历史单证）不因本段产生任何变化；
+        //     35.2 同一单证内未删除明细行的行序唯一：UX_TradeDocumentItems_Document_LineNo
+        //          （TradeDocumentId + LineNo），过滤 IsDeleted = 0 —— 与 EF 模型同名的并发兜底；
+        //     35.3 商品资料只保存**服务端写入的行快照**（编码 / 中英文名称 / 规格 / 数量 / 单位 / 单价 /
+        //          行金额 / 箱数 / 净重 / 毛重 / 币种），**刻意不建**到商品资料的外键 ——
+        //          商品资料被停用或软删除后历史明细行必须始终可读；
+        //     35.4 明细行与单证主表建立唯一外键「明细 → 单证」（与第 30 / 31 / 33 段同一幂等口径，
+        //          外键不含级联动作：单证主表只做软删除，物理删除仅由应用层按 EF 级联语义执行）；
+        //     35.5 本段不改写单证台账、商品资料、销售订单、采购订单、装柜清单、库存 / 库存流水、发票、
+        //          退税、费用或财务数据，也不为历史单证生成任何明细行。
+        await db.Database.ExecuteSqlRawAsync(@"
+IF OBJECT_ID('db_owner.TradeDocumentItems') IS NULL
+BEGIN
+    CREATE TABLE db_owner.TradeDocumentItems (
+        Id BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+        TradeDocumentId BIGINT NOT NULL,
+        LineNo INT NOT NULL DEFAULT 1,
+        ProductId BIGINT NOT NULL DEFAULT 0,
+        ProductCode NVARCHAR(50) NOT NULL DEFAULT N'',
+        ProductNameCn NVARCHAR(200) NOT NULL DEFAULT N'',
+        ProductNameEn NVARCHAR(200) NOT NULL DEFAULT N'',
+        Spec NVARCHAR(200) NOT NULL DEFAULT N'',
+        Quantity DECIMAL(18,4) NOT NULL DEFAULT 0,
+        Unit NVARCHAR(20) NOT NULL DEFAULT N'',
+        UnitPrice DECIMAL(18,4) NOT NULL DEFAULT 0,
+        LineAmount DECIMAL(18,2) NOT NULL DEFAULT 0,
+        PackageCount INT NULL,
+        NetWeight DECIMAL(18,4) NULL,
+        GrossWeight DECIMAL(18,4) NULL,
+        Currency NVARCHAR(20) NOT NULL DEFAULT N'USD',
+        Remark NVARCHAR(500) NOT NULL DEFAULT N'',
+        CreatedAt DATETIME2 NOT NULL DEFAULT GETDATE(),
+        CreatedBy BIGINT NULL,
+        UpdatedAt DATETIME2 NULL,
+        UpdatedBy BIGINT NULL,
+        IsDeleted BIT NOT NULL DEFAULT 0,
+        RowVersion ROWVERSION NOT NULL
+    );
+END
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes
+               WHERE name = 'UX_TradeDocumentItems_Document_LineNo'
+                 AND object_id = OBJECT_ID('db_owner.TradeDocumentItems'))
+    CREATE UNIQUE INDEX UX_TradeDocumentItems_Document_LineNo
+        ON db_owner.TradeDocumentItems(TradeDocumentId, LineNo)
+        WHERE IsDeleted = 0;
+
+IF NOT EXISTS (SELECT 1 FROM sys.foreign_keys
+               WHERE name = 'FK_TradeDocumentItems_TradeDocument'
+                 AND parent_object_id = OBJECT_ID('db_owner.TradeDocumentItems'))
+    ALTER TABLE db_owner.TradeDocumentItems
+        ADD CONSTRAINT FK_TradeDocumentItems_TradeDocument
+        FOREIGN KEY (TradeDocumentId) REFERENCES db_owner.TradeDocuments(Id);");
+
     }
 }

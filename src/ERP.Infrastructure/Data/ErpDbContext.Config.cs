@@ -595,6 +595,45 @@ public partial class ErpDbContext
 
         // 刻意不建任何外键（与 ERP-045 / ERP-047 一致）：付款单只做软删除，采购订单 / 供应商可能被软删除、
         // 取消或改名 —— 本表只保存服务端快照，历史引用证据必须始终可读，且不参与付款单与采购订单的计算。
+
+        // ============ ERP-051：单证明细行快照（商业发票 / 装箱单 的商品明细证据行） ============
+        // 设计口径：
+        //   1. 明细行是单证的**行级快照证据**：不是第二套商品主数据、不是库存交易、不是报关核定价格、
+        //      也不是退税或税务依据；维护明细行不改写单证表头 / 状态 / 金额，也不改写商品资料、销售订单、
+        //      采购订单、装柜清单、库存与库存流水、发票、退税、费用或财务记录；
+        //   2. 商品资料**刻意不建外键**（商品可能被停用 / 软删除，历史明细行必须始终可读）；
+        //      只保存服务端写入的编码 / 中英文名称 / 规格 / 单位快照，且商品引用未变化时不刷新历史快照；
+        //   3. 行序（LineNo）在**同一单证内**对未删除行唯一：UX_TradeDocumentItems_Document_LineNo
+        //      （TradeDocumentId + LineNo，过滤 IsDeleted = 0）—— 与 SchemaUpgrader 第 35 段同名同过滤条件，
+        //      作为并发兜底（服务端仍先行拒绝重复行序）；
+        //   4. 精度：数量 / 单价 / 净重 / 毛重 DECIMAL(18,4)，行金额 DECIMAL(18,2)（币种精度由服务端取整）；
+        //      与 SchemaUpgrader 第 35 段建表类型一致；
+        //   5. 明细行与单证主表建立外键（EF 侧 `DeleteBehavior.Cascade`：应用层物理删除单证时一并清理明细）；
+        //      数据库脚本中的外键**不含级联动作**（与第 30 / 31 / 33 段同一幂等口径）；
+        //      单证主表本身只做软删除：软删除不触发级联，明细行仍保留可读，但新增 / 修改 / 删除一律被服务端拒绝。
+        modelBuilder.Entity<TradeDocumentItem>().Property(x => x.ProductCode).HasMaxLength(50);
+        modelBuilder.Entity<TradeDocumentItem>().Property(x => x.ProductNameCn).HasMaxLength(200);
+        modelBuilder.Entity<TradeDocumentItem>().Property(x => x.ProductNameEn).HasMaxLength(200);
+        modelBuilder.Entity<TradeDocumentItem>().Property(x => x.Spec).HasMaxLength(200);
+        modelBuilder.Entity<TradeDocumentItem>().Property(x => x.Quantity).HasPrecision(18, 4);
+        modelBuilder.Entity<TradeDocumentItem>().Property(x => x.Unit).HasMaxLength(20);
+        modelBuilder.Entity<TradeDocumentItem>().Property(x => x.UnitPrice).HasPrecision(18, 4);
+        modelBuilder.Entity<TradeDocumentItem>().Property(x => x.LineAmount).HasPrecision(18, 2);
+        modelBuilder.Entity<TradeDocumentItem>().Property(x => x.NetWeight).HasPrecision(18, 4);
+        modelBuilder.Entity<TradeDocumentItem>().Property(x => x.GrossWeight).HasPrecision(18, 4);
+        modelBuilder.Entity<TradeDocumentItem>().Property(x => x.Currency).HasMaxLength(20);
+        modelBuilder.Entity<TradeDocumentItem>().Property(x => x.Remark).HasMaxLength(500);
+
+        // 同一单证内同一行序只能有一条未删除明细行（重复由服务端先行拒绝，索引为并发兜底）
+        modelBuilder.Entity<TradeDocumentItem>()
+            .HasIndex(x => new { x.TradeDocumentId, x.LineNo })
+            .IsUnique().HasDatabaseName("UX_TradeDocumentItems_Document_LineNo")
+            .HasFilter("IsDeleted = 0");
+
+        // 明细行随单证主表物理清理（单证本身只做软删除：软删除不会触发级联，明细仍保留可读）
+        modelBuilder.Entity<TradeDocumentItem>()
+            .HasOne<TradeDocument>().WithMany()
+            .HasForeignKey(x => x.TradeDocumentId).OnDelete(DeleteBehavior.Cascade);
     }
 
     /// <summary>保存变更：自动填充审计字段</summary>

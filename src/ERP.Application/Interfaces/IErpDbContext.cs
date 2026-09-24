@@ -113,6 +113,9 @@ public interface IErpDbContext
     /// <summary>出口单证台账（阶段 2 新增）</summary>
     DbSet<TradeDocument> TradeDocuments { get; }
 
+    /// <summary>单证明细行快照（ERP-051：商业发票 / 装箱单 的商品明细证据行）</summary>
+    DbSet<TradeDocumentItem> TradeDocumentItems { get; }
+
     /// <summary>客户跟进记录（阶段 2 新增）</summary>
     DbSet<CustomerFollowUp> CustomerFollowUps { get; }
 

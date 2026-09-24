@@ -1,7 +1,7 @@
 {
   "id": "ERP-051",
   "title": "Add immutable line-item snapshots to Trade Documents",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "medium",
   "description": "Add bounded line-item snapshots beneath existing Commercial Invoice and Packing List Trade Documents. Lines are document evidence, not a second Product master or inventory transaction. This task supports manual draft maintenance and historical readability but must not infer missing customs values, rewrite source Sales Orders or Container Loading Lists, alter inventory or tax records, execute production SQL, deploy, or release.",
   "acceptance_criteria": [
@@ -51,5 +51,5 @@
     "status": "not_required",
     "reason": "Repository document-line snapshots and non-production test schema only. Production database execution, customs or tax submission, deployment and release remain behind mandatory human gates."
   },
-  "attempts": 0
+  "attempts": 1
 }
