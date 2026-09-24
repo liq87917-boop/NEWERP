@@ -76,7 +76,15 @@ public class PurchaseOrderController : DocumentControllerBase<PurchaseOrder>
         => Ok(ApiResponse<OrderFinanceReconciliationView>.Success(
             await OrderFinanceReconciliation.ForPurchaseOrderAsync(Db, id)));
 
-
+    /// <summary>
+    /// 供应商采购敞口报表（ERP-031，只读派生）：按供应商 + 币种聚合采购订单金额，并复用 ERP-026 的入库 / 结算权威引用口径
+    /// （同一套匹配规则，不引入第二套算法）。链接不唯一或无可用引用时金额为未知（null）并单列为「未链接敞口」，
+    /// 绝不折算为应付余额；不同币种分别汇总，不做汇率换算。
+    /// </summary>
+    [HttpGet("supplier-exposure")]
+    public async Task<IActionResult> SupplierExposure([FromQuery] SupplierPurchaseExposureQuery query)
+        => Ok(ApiResponse<SupplierPurchaseExposureReport>.Success(
+            await SupplierPurchaseExposure.ForQueryAsync(Db, query)));
 
     /// <summary>创建</summary>
     [HttpPost]

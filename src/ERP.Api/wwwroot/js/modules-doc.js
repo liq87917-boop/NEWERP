@@ -190,6 +190,10 @@ Object.assign(MODULES, {
       { key: 'portId', label: '起运港 Id（港口字典，可留空）', type: 'number' },
       { key: 'remark', label: '备注', type: 'textarea' },
     ],
+    /* ERP-031：供应商采购敞口报表入口（工具栏，始终可见；只读派生，不落库，不作为应付账款台账） */
+    extraActions: [
+      { label: '🏭 供应商采购敞口', onclick: 'openSupplierPurchaseExposureReport', title: '按供应商 + 币种查看采购订单金额、链接可用的已结算 / 未结算金额与未链接敞口（复用执行进度 / 财务核对的权威引用口径，未知显示「未知」）' },
+    ],
     rowActions: [
       { label: '执行进度', icon: '📦', title: '查看由入库单派生的已订 / 已收 / 未收数量，以及既有引用可用时的已结算 / 未结算金额', onclick: 'showPurchaseOrderProgress' },
       { label: '执行时间线', icon: '🕘', title: '查看由订单、供应商确认交期与入库记录派生的执行时间线', onclick: 'showOrderTimeline' },

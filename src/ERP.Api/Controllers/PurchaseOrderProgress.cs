@@ -34,6 +34,36 @@ public sealed class PurchaseOrderProgressLine
     public string ReceiptStatus { get; init; } = PurchaseOrderProgress.ReceiptNone;
 }
 
+/// <summary>
+/// 采购订单收货进度汇总（只读派生；「执行进度」与「供应商采购敞口报表」共用同一收货口径）。
+/// </summary>
+public sealed class PurchaseOrderReceiptSummary
+{
+    /// <summary>订单数量合计（订单明细口径）</summary>
+    public decimal OrderedQuantity { get; init; }
+
+    /// <summary>已收数量合计（已审核入库单据口径，含订单外商品）</summary>
+    public decimal ReceivedQuantity { get; init; }
+
+    /// <summary>已冲抵订单明细的已收数量（含超收部分）</summary>
+    public decimal MatchedReceivedQuantity { get; init; }
+
+    /// <summary>订单外商品的已收数量（显式单列）</summary>
+    public decimal UnmatchedReceivedQuantity { get; init; }
+
+    /// <summary>待审核入库数量合计（不计入已收）</summary>
+    public decimal PendingQuantity { get; init; }
+
+    /// <summary>未收数量合计 = Σ 订单行未收数量</summary>
+    public decimal OutstandingQuantity { get; init; }
+
+    /// <summary>整体收货状态：none / partial / complete / over_received</summary>
+    public string ReceiptStatus { get; init; } = PurchaseOrderProgress.ReceiptNone;
+
+    /// <summary>是否命中批量派生上限（true = 以上数量不完整，调用方必须按「未知」呈现，不得当作 0 或全量）</summary>
+    public bool Truncated { get; init; }
+}
+
 /// <summary>订单外商品的入库数量（入库明细商品不在本采购订单明细中，显式单列而不并入订单行）</summary>
 public sealed class PurchaseOrderUnmatchedReceipt
 {
@@ -200,6 +230,15 @@ public static class PurchaseOrderProgress
     /// <summary>单个订单参与派生的集合上限（避免大单据无界加载）</summary>
     private const int DocumentLimit = 200;
 
+    /// <summary>
+    /// 批量派生的单次查询上限（只对一页多张订单的批量路径生效）：命中上限时无法把「被截断的行」归因到具体订单，
+    /// 因此不做静默截断，而是把该页相关订单记为未知（金额 null / 收货数量未知）并说明原因。
+    /// </summary>
+    private const int BatchDocumentCeiling = 2000;
+
+    /// <summary>本次派生的单次查询上限：单张订单沿用既有执行进度的 200 行上限，一页多张订单用批量上限</summary>
+    private static int QueryLimitFor(int orderCount) => orderCount <= 1 ? DocumentLimit : BatchDocumentCeiling;
+
     /// <summary>金额比较容差（与应收账龄同一口径，吸收两位小数舍入）</summary>
     private const decimal AmountTolerance = 0.005m;
 
@@ -244,15 +283,56 @@ public static class PurchaseOrderProgress
     public static Task<PurchaseOrderSettlementProgress> SettlementForOrderAsync(IErpDbContext db, PurchaseOrder order)
         => BuildSettlementAsync(db, order);
 
-    /// <summary>收货进度派生：固定 2 次查询（入库主表 + 明细）</summary>
+    /// <summary>单张订单的收货进度（转调批量派生，保证全项目只有一套收货规则）</summary>
     private static async Task<ReceiptResult> BuildReceiptsAsync(IErpDbContext db, PurchaseOrder order)
+        => (await BuildReceiptsForOrdersAsync(db, new[] { order }))[order.Id];
+
+    /// <summary>
+    /// 批量收货进度汇总（供「供应商采购敞口报表」等只读报表复用同一收货口径；固定 2 次查询，无逐单查库）。
+    /// </summary>
+    public static async Task<Dictionary<long, PurchaseOrderReceiptSummary>> ReceiptSummariesForOrdersAsync(
+        IErpDbContext db, IReadOnlyList<PurchaseOrder> orders)
     {
-        var stockIns = await db.StockIns.AsNoTracking()
-            .Where(s => s.PurchaseOrderId == order.Id && !s.IsDeleted)
-            .OrderBy(s => s.StockInDate).ThenBy(s => s.Id)
-            .Take(DocumentLimit)
-            .Select(s => new { s.Id, s.StockInNo, s.StockInDate, s.Status, s.TotalQuantity })
-            .ToListAsync();
+        ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(orders);
+        var results = await BuildReceiptsForOrdersAsync(db, orders);
+        return results.ToDictionary(kv => kv.Key, kv => new PurchaseOrderReceiptSummary
+        {
+            OrderedQuantity = kv.Value.OrderedQuantity,
+            ReceivedQuantity = kv.Value.ReceivedQuantity,
+            MatchedReceivedQuantity = kv.Value.MatchedReceivedQuantity,
+            UnmatchedReceivedQuantity = kv.Value.UnmatchedReceivedQuantity,
+            PendingQuantity = kv.Value.PendingQuantity,
+            OutstandingQuantity = kv.Value.OutstandingQuantity,
+            ReceiptStatus = kv.Value.ReceiptStatus,
+            Truncated = kv.Value.Truncated,
+        });
+    }
+
+    /// <summary>
+    /// 收货进度批量派生（固定 2 次查询：入库主表 + 入库明细），一页多张订单只查库两次。
+    /// <para>页内每张订单的结果与逐单派生完全一致；单张订单沿用 <see cref="DocumentLimit"/> 上限（与既有执行进度一致），
+    /// 一页多张订单命中 <see cref="BatchDocumentCeiling"/> 上限时无法把截断归因到具体订单，
+    /// 因此整页标记 <see cref="ReceiptResult.Truncated"/>，由调用方以「未知」呈现，绝不静默给出不完整数量。</para>
+    /// </summary>
+    private static async Task<Dictionary<long, ReceiptResult>> BuildReceiptsForOrdersAsync(
+        IErpDbContext db, IReadOnlyList<PurchaseOrder> orders)
+    {
+        var results = new Dictionary<long, ReceiptResult>();
+        if (orders.Count == 0) return results;
+
+        var orderIds = orders.Select(o => o.Id).ToList();
+        var limit = QueryLimitFor(orders.Count);
+        var stockIns = (await db.StockIns.AsNoTracking()
+                .Where(s => s.PurchaseOrderId != null && orderIds.Contains(s.PurchaseOrderId.Value) && !s.IsDeleted)
+                .OrderBy(s => s.StockInDate).ThenBy(s => s.Id)
+                .Take(limit)
+                .Select(s => new { s.Id, s.PurchaseOrderId, s.StockInNo, s.StockInDate, s.Status, s.TotalQuantity })
+                .ToListAsync())
+            .Select(s => new ReceiptStockInRow(s.Id, s.PurchaseOrderId!.Value, s.StockInNo, s.StockInDate,
+                s.Status, s.TotalQuantity))
+            .ToList();
+        var truncated = orders.Count > 1 && stockIns.Count == limit;
 
         var stockInIds = stockIns.Select(s => s.Id).ToList();
         var receiptDetails = stockInIds.Count == 0
@@ -264,6 +344,22 @@ public static class PurchaseOrderProgress
                 .Select(d => new ReceiptDetailRow(d.StockInId, d.ProductId, d.ProductName, d.Quantity))
                 .ToList();
 
+        foreach (var order in orders)
+        {
+            var ownStockInIds = stockIns.Where(s => s.PurchaseOrderId == order.Id).Select(s => s.Id).ToHashSet();
+            results[order.Id] = BuildReceiptResult(order,
+                stockIns.Where(s => s.PurchaseOrderId == order.Id).ToList(),
+                receiptDetails.Where(d => ownStockInIds.Contains(d.StockInId)).ToList(),
+                truncated);
+        }
+
+        return results;
+    }
+
+    /// <summary>逐单收货结果（入参为已批量加载的入库单与明细；规则与既有 ERP-026 完全一致）</summary>
+    private static ReceiptResult BuildReceiptResult(PurchaseOrder order, List<ReceiptStockInRow> stockIns,
+        List<ReceiptDetailRow> receiptDetails, bool truncated)
+    {
         var statusById = stockIns.ToDictionary(s => s.Id, s => s.Status);
         bool Counted(long stockInId) => statusById.TryGetValue(stockInId, out var status)
             && status == DocumentStatus.Approved;
@@ -330,6 +426,7 @@ public static class PurchaseOrderProgress
             PendingQuantity = receiptDetails.Where(d => AwaitingAudit(d.StockInId)).Sum(d => d.Quantity),
             OutstandingQuantity = outstandingQuantity,
             ReceiptStatus = OrderReceiptStatusOf(orderedQuantity, receivedQuantity, outstandingQuantity),
+            Truncated = truncated,
             Lines = lines,
             UnmatchedReceipts = unmatched,
             Documents = stockIns.Select(s => new PurchaseOrderReceiptReference
@@ -343,29 +440,103 @@ public static class PurchaseOrderProgress
         };
     }
 
-    /// <summary>
-    /// 结算进度派生：固定 3 次查询（归属销售订单下的采购订单计数 + 货款申请单 + 付款单）。
-    /// 只在既有引用完整、唯一且币种一致时暴露金额，其余情况一律返回 null（未知）并说明原因。
-    /// </summary>
+    /// <summary>单张订单的结算进度（转调批量派生，保证「执行进度 / 财务核对 / 敞口报表」只有一套权威引用规则）</summary>
     private static async Task<PurchaseOrderSettlementProgress> BuildSettlementAsync(IErpDbContext db, PurchaseOrder order)
+        => (await SettlementForOrdersAsync(db, new[] { order }))[order.Id];
+
+    /// <summary>
+    /// 结算进度批量派生（固定 3 次查询：归属销售订单下的采购订单计数 + 货款申请单 + 付款单），一页多张订单只查库三次。
+    /// <para>与 <see cref="SettlementForOrderAsync"/>、<see cref="ForPurchaseOrderAsync"/> 共用同一套权威引用规则：
+    /// 付款单经「货款申请单」引用本单归属销售订单，且该销售订单下只有本单一张采购订单、付款单供应商与本单一致；
+    /// 只在既有引用完整、唯一且币种一致时暴露金额，其余情况一律返回 null（未知）并说明原因。</para>
+    /// <para>页内每张订单的结果与逐单派生完全一致；命中批量查询上限（<see cref="BatchDocumentCeiling"/>）时不做静默截断，
+    /// 而是把相关订单记为 <see cref="LinkAmbiguous"/>（金额未知）并在原因中说明。</para>
+    /// </summary>
+    public static async Task<Dictionary<long, PurchaseOrderSettlementProgress>> SettlementForOrdersAsync(
+        IErpDbContext db, IReadOnlyList<PurchaseOrder> orders)
     {
-        var owningId = order.OwningSalesOrderId ?? 0;
-        if (owningId <= 0 || order.SupplierId <= 0)
+        ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(orders);
+        var results = new Dictionary<long, PurchaseOrderSettlementProgress>();
+        if (orders.Count == 0) return results;
+        var limit = QueryLimitFor(orders.Count);
+
+        var eligible = new List<PurchaseOrder>();
+        foreach (var order in orders)
         {
-            return new PurchaseOrderSettlementProgress
+            var owningId = order.OwningSalesOrderId ?? 0;
+            if (owningId <= 0 || order.SupplierId <= 0)
             {
-                RecordedProgress = order.SettlementProgress,
-                LinkStatus = LinkUnavailable,
-                LinkReason = owningId <= 0
-                    ? "本单未关联归属销售订单：付款单只记录供应商，货款申请单只引用销售订单，两者都不存在指向本单的既有引用，结算金额未知（不做推断）。"
-                    : "本单未维护供应商：付款单无法按供应商归属到本单，结算金额未知（不做推断）。",
-                OwningSalesOrderId = order.OwningSalesOrderId,
-                OwningSalesOrderNo = order.OwningSalesOrderNo,
-            };
+                results[order.Id] = new PurchaseOrderSettlementProgress
+                {
+                    RecordedProgress = order.SettlementProgress,
+                    LinkStatus = LinkUnavailable,
+                    LinkReason = owningId <= 0
+                        ? "本单未关联归属销售订单：付款单只记录供应商，货款申请单只引用销售订单，两者都不存在指向本单的既有引用，结算金额未知（不做推断）。"
+                        : "本单未维护供应商：付款单无法按供应商归属到本单，结算金额未知（不做推断）。",
+                    OwningSalesOrderId = order.OwningSalesOrderId,
+                    OwningSalesOrderNo = order.OwningSalesOrderNo,
+                };
+                continue;
+            }
+
+            eligible.Add(order);
         }
 
-        var siblingCount = await db.PurchaseOrders.AsNoTracking()
-            .CountAsync(o => !o.IsDeleted && o.OwningSalesOrderId == owningId);
+        if (eligible.Count == 0) return results;
+
+        var owningIds = eligible.Select(o => o.OwningSalesOrderId!.Value).Distinct().ToList();
+        var siblingRows = await db.PurchaseOrders.AsNoTracking()
+            .Where(o => !o.IsDeleted && o.OwningSalesOrderId != null && owningIds.Contains(o.OwningSalesOrderId.Value))
+            .GroupBy(o => o.OwningSalesOrderId!.Value)
+            .Select(g => new { SalesOrderId = g.Key, Count = g.Count() })
+            .ToListAsync();
+        var siblingCounts = siblingRows.ToDictionary(r => r.SalesOrderId, r => r.Count);
+
+
+        var applies = (await db.FinancePaymentApplies.AsNoTracking()
+                .Where(a => !a.IsDeleted && a.SalesOrderId != null && owningIds.Contains(a.SalesOrderId.Value))
+                .OrderBy(a => a.Id)
+                .Take(limit)
+                .Select(a => new { a.Id, a.ApplyNo, a.SalesOrderId })
+                .ToListAsync())
+            .Select(a => new SettlementApplyRow(a.Id, a.ApplyNo, a.SalesOrderId!.Value))
+            .ToList();
+        var appliesTruncated = applies.Count == limit;
+
+        var applyIds = applies.Select(a => a.Id).ToList();
+        var supplierIds = eligible.Select(o => o.SupplierId).Distinct().ToList();
+        var payments = applyIds.Count == 0
+            ? new List<SettlementPaymentRow>()
+            : (await db.FinancePayments.AsNoTracking()
+                    .Where(p => !p.IsDeleted && supplierIds.Contains(p.SupplierId)
+                                && p.PaymentApplyId != null && applyIds.Contains(p.PaymentApplyId.Value))
+                    .OrderBy(p => p.PaymentDate).ThenBy(p => p.Id)
+                    .Take(limit)
+                    .Select(p => new { p.PaymentNo, p.PaymentDate, p.Amount, p.Currency, p.Status, p.PaymentApplyId, p.SupplierId })
+                    .ToListAsync())
+                .Select(p => new SettlementPaymentRow(p.PaymentNo, p.PaymentDate, p.Amount, p.Currency, p.Status,
+                    p.PaymentApplyId!.Value, p.SupplierId))
+                .ToList();
+        var paymentsTruncated = payments.Count == limit;
+
+        foreach (var order in eligible)
+        {
+            var owningId = order.OwningSalesOrderId!.Value;
+            siblingCounts.TryGetValue(owningId, out var siblingCount);
+            results[order.Id] = BuildSettlementResult(order, siblingCount, applies, payments,
+                appliesTruncated || paymentsTruncated, limit);
+        }
+
+        return results;
+    }
+
+    /// <summary>逐单结算结果（入参为已批量加载的货款申请单与付款单；规则与既有 ERP-026 / ERP-028 完全一致）</summary>
+    private static PurchaseOrderSettlementProgress BuildSettlementResult(PurchaseOrder order, int siblingCount,
+        IReadOnlyList<SettlementApplyRow> applies, IReadOnlyList<SettlementPaymentRow> payments, bool truncated,
+        int limit)
+    {
+        var owningId = order.OwningSalesOrderId ?? 0;
         if (siblingCount > 1)
         {
             return new PurchaseOrderSettlementProgress
@@ -378,14 +549,21 @@ public static class PurchaseOrderProgress
             };
         }
 
-        var applies = await db.FinancePaymentApplies.AsNoTracking()
-            .Where(a => !a.IsDeleted && a.SalesOrderId == owningId)
-            .OrderBy(a => a.Id)
-            .Take(DocumentLimit)
-            .Select(a => new { a.Id, a.ApplyNo })
-            .ToListAsync();
+        if (truncated)
+        {
+            return new PurchaseOrderSettlementProgress
+            {
+                RecordedProgress = order.SettlementProgress,
+                LinkStatus = LinkAmbiguous,
+                LinkReason = $"本次派生范围内货款申请单 / 付款单数量达到单次查询上限（{limit} 行），无法确认引用完整性，" +
+                             "结算金额未知（不做推断）；请收窄供应商 / 币种 / 日期筛选或减小每页条数。",
+                OwningSalesOrderId = owningId,
+                OwningSalesOrderNo = order.OwningSalesOrderNo,
+            };
+        }
 
-        if (applies.Count == 0)
+        var orderApplies = applies.Where(a => a.SalesOrderId == owningId).OrderBy(a => a.Id).ToList();
+        if (orderApplies.Count == 0)
         {
             return new PurchaseOrderSettlementProgress
             {
@@ -400,34 +578,28 @@ public static class PurchaseOrderProgress
             };
         }
 
-        var applyIds = applies.Select(a => a.Id).ToList();
-        var applyNoById = applies.ToDictionary(a => a.Id, a => a.ApplyNo);
-        var payments = await db.FinancePayments.AsNoTracking()
-            .Where(p => !p.IsDeleted && p.SupplierId == order.SupplierId
-                        && p.PaymentApplyId != null && applyIds.Contains(p.PaymentApplyId.Value))
-            .OrderBy(p => p.PaymentDate).ThenBy(p => p.Id)
-            .Take(DocumentLimit)
-            .Select(p => new { p.PaymentNo, p.PaymentDate, p.Amount, p.Currency, p.Status, p.PaymentApplyId })
-            .ToListAsync();
+        var orderApplyIds = orderApplies.Select(a => a.Id).ToHashSet();
+        var applyNoById = orderApplies.ToDictionary(a => a.Id, a => a.ApplyNo);
+        var orderPayments = payments
+            .Where(p => p.SupplierId == order.SupplierId && orderApplyIds.Contains(p.PaymentApplyId))
+            .ToList();
 
-        var documents = payments.Select(p => new PurchaseOrderSettlementReference
+        var documents = orderPayments.Select(p => new PurchaseOrderSettlementReference
         {
             PaymentNo = p.PaymentNo,
             PaymentDate = p.PaymentDate,
             Amount = p.Amount,
             Currency = p.Currency.ToString(),
             Status = p.Status.ToString(),
-            PaymentApplyNo = p.PaymentApplyId.HasValue && applyNoById.TryGetValue(p.PaymentApplyId.Value, out var no)
-                ? no
-                : string.Empty,
+            PaymentApplyNo = applyNoById.TryGetValue(p.PaymentApplyId, out var no) ? no : string.Empty,
             Counted = p.Currency == order.Currency && p.Status == DocumentStatus.Approved,
         }).ToList();
 
         var settled = documents.Where(d => d.Counted).Sum(d => d.Amount);
-        var submitted = payments
+        var submitted = orderPayments
             .Where(p => p.Currency == order.Currency && p.Status is DocumentStatus.Pending or DocumentStatus.Submitted)
             .Sum(p => p.Amount);
-        var otherCurrencyCount = payments.Count(p => p.Currency != order.Currency);
+        var otherCurrencyCount = orderPayments.Count(p => p.Currency != order.Currency);
 
         var reason = $"归属销售订单唯一，已按「货款申请单 → 本单归属销售订单」建立引用（同供应商付款单 {documents.Count} 张）；" +
                      "仅已审核且币种与本单一致的付款单计入已结算。";
@@ -492,6 +664,17 @@ public static class PurchaseOrderProgress
     /// <summary>入库明细行的内存投影（查询中不聚合，保证一次取全）</summary>
     private sealed record ReceiptDetailRow(long StockInId, long ProductId, string ProductName, decimal Quantity);
 
+    /// <summary>入库单行的内存投影（批量派生：一次取全本页入库单）</summary>
+    private sealed record ReceiptStockInRow(long Id, long PurchaseOrderId, string StockInNo, DateTime StockInDate,
+        DocumentStatus Status, decimal TotalQuantity);
+
+    /// <summary>货款申请单行的内存投影（批量派生：一次取全本页涉及的货款申请单；Id 用于付款单归属链）</summary>
+    private sealed record SettlementApplyRow(long Id, string ApplyNo, long SalesOrderId);
+
+    /// <summary>付款单行的内存投影（批量派生：一次取全本页涉及的付款单；PaymentApplyId = 货款申请单 Id）</summary>
+    private sealed record SettlementPaymentRow(string PaymentNo, DateTime PaymentDate, decimal Amount, Currency Currency,
+        DocumentStatus Status, long PaymentApplyId, long SupplierId);
+
     /// <summary>收货派生的中间结果</summary>
     private sealed class ReceiptResult
     {
@@ -502,6 +685,10 @@ public static class PurchaseOrderProgress
         public decimal PendingQuantity { get; init; }
         public decimal OutstandingQuantity { get; init; }
         public string ReceiptStatus { get; init; } = ReceiptNone;
+
+        /// <summary>是否命中批量派生上限（一页多张订单时；数量不完整，只能按「未知」呈现）</summary>
+        public bool Truncated { get; init; }
+
         public List<PurchaseOrderProgressLine> Lines { get; init; } = new();
         public List<PurchaseOrderUnmatchedReceipt> UnmatchedReceipts { get; init; } = new();
         public List<PurchaseOrderReceiptReference> Documents { get; init; } = new();
