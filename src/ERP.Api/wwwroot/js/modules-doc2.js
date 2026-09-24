@@ -115,6 +115,13 @@ Object.assign(MODULES, {
       { key: 'inspectionRequired', label: '查验要求', render: row => inspectionRequiredText(row.inspectionRequired) },
       { key: 'status', label: '状态', status: true },
     ],
+    /* ERP-057：出运引用证据（显式源记录 = 本条订柜信息；只登记用户录入的出运证据，不改写本单） */
+    rowActions: [
+      { label: '出运引用', icon: '📦', title: '登记 / 查看本条订柜信息的出运引用证据（出运方式 / S-O / B/L / 港口 / 计划时间 / 承运人 / 货代 / 拖车 / 报关行快照；只写证据，不改写本单、不推进任何状态）', onclick: 'openContainerShipmentReferences' },
+    ],
+    extraActions: [
+      { label: '📦 出运引用', title: '打开装柜出运引用登记册（显式选择订柜信息 / 预装柜单 / 装柜清单作为源记录登记出运证据；不是承运人 / 海关 / 货代确认，也不改写任何装柜单据）', onclick: 'openContainerShipmentReferences()' },
+    ],
     fields: [
       { key: 'bookingDate', label: '订柜日期', type: 'date' },
       { key: 'customerId', label: '客户', type: 'ref', ref: 'customer' },
@@ -153,9 +160,14 @@ Object.assign(MODULES, {
       { key: 'sealNo', label: '封条号' }, { key: 'totalCartons', label: '总箱数', type: 'number' },
       { key: 'totalWeight', label: '总毛重(kg)', type: 'number' }, { key: 'totalVolume', label: '总体积(m³)', type: 'number' },
     ],
-    /* ERP-040：只读查看权威跟踪值（任何状态都可查看；未关联订柜信息时全部显示「未知」） */
+    /* ERP-040：只读查看权威跟踪值（任何状态都可查看；未关联订柜信息时全部显示「未知」）
+       ERP-057：出运引用证据（源记录 = 本条预装柜单；只登记证据，不改写本单） */
     rowActions: [
       { label: '物流跟踪', icon: '🚢', title: '按持久化订柜引用只读查看该柜的外贸与物流跟踪值（未关联订柜信息时显示「未知」）', onclick: 'showShipmentTracking' },
+      { label: '出运引用', icon: '📦', title: '登记 / 查看本条预装柜单的出运引用证据（只写证据，不改写本单、不推进装柜状态）', onclick: 'openContainerShipmentReferences' },
+    ],
+    extraActions: [
+      { label: '📦 出运引用', title: '打开装柜出运引用登记册（显式选择订柜信息 / 预装柜单 / 装柜清单作为源记录登记出运证据；不是承运人 / 海关 / 货代确认，也不改写任何装柜单据）', onclick: 'openContainerShipmentReferences()' },
     ],
   },
   'loading-list': {
@@ -187,6 +199,11 @@ Object.assign(MODULES, {
       { label: '预填单证', icon: '📝', title: '按该装柜清单带入单证草稿到单证中心新增表单（不落库，可编辑后再保存）', onclick: 'prefillTradeDocFromSource', statuses: ['Pending', 'Submitted', 'Approved'] },
       /* ERP-045：登记 / 查看本装柜清单的附件引用（仅元数据；不上传 / 下载 / 预览 / 抓取任何文件，作废保留历史） */
       { label: '附件引用', icon: '📎', title: '登记或查看本装柜清单的附件引用元数据（分类 / 显示名 / 不透明引用标识 / 大小 / 校验和；不上传、不下载、不预览、不抓取文件，作废保留历史且不改写本单）', onclick: 'openDocumentAttachmentReferencesForCurrentModule' },
+      /* ERP-057：出运引用证据（源记录 = 本条装柜清单；只登记证据，不改写本单） */
+      { label: '出运引用', icon: '📦', title: '登记 / 查看本条装柜清单的出运引用证据（只写证据，不改写本单、不改柜号、不推进装柜状态）', onclick: 'openContainerShipmentReferences' },
+    ],
+    extraActions: [
+      { label: '📦 出运引用', title: '打开装柜出运引用登记册（显式选择订柜信息 / 预装柜单 / 装柜清单作为源记录登记出运证据；不是承运人 / 海关 / 货代确认，也不改写任何装柜单据）', onclick: 'openContainerShipmentReferences()' },
     ],
   },
 

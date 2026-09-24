@@ -755,6 +755,84 @@ public partial class ErpDbContext
         modelBuilder.Entity<TradeDocumentItem>()
             .HasOne<TradeDocument>().WithMany()
             .HasForeignKey(x => x.TradeDocumentId).OnDelete(DeleteBehavior.Cascade);
+
+        // ============ ERP-057：装柜出运引用登记（显式源记录关联 + 出运证据快照 + 修订留痕） ============
+        // 设计口径：
+        //   1. 审计结论：装柜链路已有**唯一**的持久化引用关系（ContainerPreLoading.BookingId /
+        //      ContainerLoadingList.PreLoadingId），订柜信息（ContainerBooking）由 ERP-040 承载本套跟踪值的
+        //      权威记录 —— 因此本模块**不**新建出运主数据、**不**在订柜 / 预装柜 / 装柜清单上加列，
+        //      只按显式（SourceType, SourceId）指向一条权威记录登记用户录入的出运证据；
+        //   2. 有效引用唯一：同一条源记录最多 1 条有效引用
+        //      （UX_ContainerShipmentReferences_ActiveSource，过滤 IsDeleted = 0 AND Status <> 2）——
+        //      已作废行保留可读但不占用额度（作废后可重新登记，新旧并存可查）；
+        //   3. 源记录只保存**服务端写入**的快照（单号 / 日期 / 状态 / 柜号），**刻意不建任何外键**：
+        //      源记录被软删除 / 改名后历史证据必须始终可读，只是显式标注不可用；
+        //   4. 出运方式 / 港口 / 计划时间 / 承运人 / 货代 / 拖车 / 报关行快照全部可选：未填写保持空串 / NULL
+        //      （= 未知），绝不由柜型、体积、客户、航线或自由文本推断；
+        //   5. 修订留痕表只追加（唯一索引 UX_ContainerShipmentReferenceRevisions_Reference_Revision 保证
+        //      同一引用内修订号不重复），保存修订前的原值，保证历史证据不被静默改写；
+        //   6. 本模块只写本登记册两张表：不改写源记录与任何下游单据（订单 / 库存 / 单证 / 发票 / 费用 / 结算）。
+        modelBuilder.Entity<ContainerShipmentReference>().Property(x => x.SourceType).HasMaxLength(20);
+        modelBuilder.Entity<ContainerShipmentReference>().Property(x => x.SourceNo).HasMaxLength(50);
+        modelBuilder.Entity<ContainerShipmentReference>().Property(x => x.SourceStatusText).HasMaxLength(30);
+        modelBuilder.Entity<ContainerShipmentReference>().Property(x => x.ContainerNo).HasMaxLength(50);
+        modelBuilder.Entity<ContainerShipmentReference>().Property(x => x.ShipmentMode).HasMaxLength(10);
+        modelBuilder.Entity<ContainerShipmentReference>().Property(x => x.ShippingOrderNo).HasMaxLength(50);
+        modelBuilder.Entity<ContainerShipmentReference>().Property(x => x.BillOfLadingNo).HasMaxLength(50);
+        modelBuilder.Entity<ContainerShipmentReference>().Property(x => x.CarrierName).HasMaxLength(200);
+        modelBuilder.Entity<ContainerShipmentReference>().Property(x => x.ForwarderName).HasMaxLength(200);
+        modelBuilder.Entity<ContainerShipmentReference>().Property(x => x.DeparturePort).HasMaxLength(100);
+        modelBuilder.Entity<ContainerShipmentReference>().Property(x => x.TransitPort).HasMaxLength(100);
+        modelBuilder.Entity<ContainerShipmentReference>().Property(x => x.DestinationPort).HasMaxLength(100);
+        modelBuilder.Entity<ContainerShipmentReference>().Property(x => x.TruckerName).HasMaxLength(200);
+        modelBuilder.Entity<ContainerShipmentReference>().Property(x => x.CustomsBrokerName).HasMaxLength(100);
+        modelBuilder.Entity<ContainerShipmentReference>().Property(x => x.Remark).HasMaxLength(500);
+        modelBuilder.Entity<ContainerShipmentReference>().Property(x => x.LastRevisionReason).HasMaxLength(200);
+        modelBuilder.Entity<ContainerShipmentReference>().Property(x => x.VoidReason).HasMaxLength(500);
+
+        // 同一条源记录最多一条有效出运引用（重复提交由服务端先行拒绝，索引为并发兜底）
+        modelBuilder.Entity<ContainerShipmentReference>()
+            .HasIndex(x => new { x.SourceType, x.SourceId })
+            .IsUnique().HasDatabaseName("UX_ContainerShipmentReferences_ActiveSource")
+            .HasFilter("IsDeleted = 0 AND Status <> 2");
+
+        modelBuilder.Entity<ContainerShipmentReference>().HasIndex(x => new { x.SourceType, x.SourceId, x.Status })
+            .HasDatabaseName("IX_ContainerShipmentReferences_Source_Status")
+            .HasFilter("IsDeleted = 0");
+
+        modelBuilder.Entity<ContainerShipmentReference>().HasIndex(x => new { x.Status, x.RecordedAt })
+            .HasDatabaseName("IX_ContainerShipmentReferences_Status_RecordedAt")
+            .HasFilter("IsDeleted = 0");
+
+        modelBuilder.Entity<ContainerShipmentReference>().HasIndex(x => x.ShipmentMode)
+            .HasDatabaseName("IX_ContainerShipmentReferences_ShipmentMode")
+            .HasFilter("IsDeleted = 0");
+
+        // 修订留痕：同一引用内修订号唯一（只追加，不提供修改 / 删除），供按修订号倒序有界读取
+        modelBuilder.Entity<ContainerShipmentReferenceRevision>().Property(x => x.SourceType).HasMaxLength(20);
+        modelBuilder.Entity<ContainerShipmentReferenceRevision>().Property(x => x.SourceNo).HasMaxLength(50);
+        modelBuilder.Entity<ContainerShipmentReferenceRevision>().Property(x => x.Reason).HasMaxLength(200);
+        modelBuilder.Entity<ContainerShipmentReferenceRevision>().Property(x => x.ShipmentMode).HasMaxLength(10);
+        modelBuilder.Entity<ContainerShipmentReferenceRevision>().Property(x => x.ShippingOrderNo).HasMaxLength(50);
+        modelBuilder.Entity<ContainerShipmentReferenceRevision>().Property(x => x.BillOfLadingNo).HasMaxLength(50);
+        modelBuilder.Entity<ContainerShipmentReferenceRevision>().Property(x => x.CarrierName).HasMaxLength(200);
+        modelBuilder.Entity<ContainerShipmentReferenceRevision>().Property(x => x.ForwarderName).HasMaxLength(200);
+        modelBuilder.Entity<ContainerShipmentReferenceRevision>().Property(x => x.DeparturePort).HasMaxLength(100);
+        modelBuilder.Entity<ContainerShipmentReferenceRevision>().Property(x => x.TransitPort).HasMaxLength(100);
+        modelBuilder.Entity<ContainerShipmentReferenceRevision>().Property(x => x.DestinationPort).HasMaxLength(100);
+        modelBuilder.Entity<ContainerShipmentReferenceRevision>().Property(x => x.TruckerName).HasMaxLength(200);
+        modelBuilder.Entity<ContainerShipmentReferenceRevision>().Property(x => x.CustomsBrokerName)
+            .HasMaxLength(100);
+        modelBuilder.Entity<ContainerShipmentReferenceRevision>().Property(x => x.Remark).HasMaxLength(500);
+
+        modelBuilder.Entity<ContainerShipmentReferenceRevision>()
+            .HasIndex(x => new { x.ContainerShipmentReferenceId, x.RevisionNo })
+            .IsUnique().HasDatabaseName("UX_ContainerShipmentReferenceRevisions_Reference_Revision")
+            .HasFilter("IsDeleted = 0");
+
+        // 刻意不建任何外键、也不建导航属性（与 ERP-045 / ERP-047 / ERP-049 / ERP-053 / ERP-055 一致）：
+        // 源记录可能被软删除、报关行字典项可能被停用 / 删除 —— 本模块只保存服务端快照，
+        // 历史出运证据必须始终可读，也不参与源记录与任何下游单据的计算。
     }
 
     /// <summary>保存变更：自动填充审计字段</summary>

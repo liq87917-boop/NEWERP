@@ -132,6 +132,21 @@ public interface IErpDbContext
     /// </summary>
     DbSet<CustomerSalesInvoiceAllocation> CustomerSalesInvoiceAllocations { get; }
 
+    // ============ 装柜出运引用登记（ERP-057：显式源记录关联 + 出运证据快照 + 修订留痕） ============
+
+    /// <summary>
+    /// 装柜出运引用证据（ERP-057）：显式指向订柜信息 / 预装柜单 / 装柜清单之一（按类型 + Id，绝不按柜号 /
+    /// 单号等自由文本匹配），登记用户录入的出运证据快照；同一源记录最多 1 条有效引用（过滤唯一索引兜底）；
+    /// 不是承运人 / 海关 / 货代确认，也不改写源记录与任何下游单据
+    /// </summary>
+    DbSet<ContainerShipmentReference> ContainerShipmentReferences { get; }
+
+    /// <summary>
+    /// 出运引用修订留痕（ERP-057）：只追加的「修订前原值」快照，记录修订号 / 时间 / 原因，
+    /// 保证历史证据不会被静默改写；不提供修改与删除接口
+    /// </summary>
+    DbSet<ContainerShipmentReferenceRevision> ContainerShipmentReferenceRevisions { get; }
+
     // ============ 询价管理 ============
     DbSet<Inquiry> Inquiries { get; }
     DbSet<InquiryDetail> InquiryDetails { get; }

@@ -2314,5 +2314,133 @@ IF NOT EXISTS (SELECT 1 FROM sys.indexes
         ON db_owner.CustomerSalesInvoiceAllocations(SalesOrderId)
         WHERE IsDeleted = 0;");
 
+        // 38. 装柜出运引用登记（ERP-057：显式源记录关联 + 出运证据快照 + 修订留痕）
+        //     38.1 审计结论：装柜链路已有**唯一**的持久化引用关系（ContainerPreLoading.BookingId /
+        //          ContainerLoadingList.PreLoadingId），订柜信息由 ERP-040 承载本套跟踪值的权威记录；
+        //          因此本段只建「出运引用登记册」两张表，**不新增 / 不修改订柜、预装柜、装柜清单的任何列**
+        //          （段内不做任何既有表的结构修改），也不建立第二套出运主数据；
+        //     38.2 有效引用唯一：UX_ContainerShipmentReferences_ActiveSource
+        //          （SourceType + SourceId），过滤 IsDeleted = 0 AND Status <> 2 ——
+        //          已作废行保留可读但不占用额度（作废后可重新登记，新旧并存可查）；
+        //     38.3 源记录（订柜信息 / 预装柜单 / 装柜清单）与报关行字典项只保存**服务端写入的快照**，
+        //          **刻意不建**任何外键：源记录软删除、报关行字典项停用 / 删除都不影响历史证据可读；
+        //     38.4 出运方式 / 港口 / 计划时间 / 承运人 / 货代 / 拖车 / 报关行快照全部可空或默认空串
+        //          （= 未知），本段不写入任何默认业务值、也不回填任何历史单据；
+        //     38.5 修订留痕表只追加：UX_ContainerShipmentReferenceRevisions_Reference_Revision
+        //          （引用 + 修订号）保证同一引用内修订号不重复，保存修订前的原值；
+        //     38.6 本段只建本模块两张表与其索引，不含任何 UPDATE / INSERT / DELETE 语句，也不改写
+        //          装柜链路、订单、库存、单证、发票、费用与结算数据。
+        await db.Database.ExecuteSqlRawAsync(@"
+IF OBJECT_ID('db_owner.ContainerShipmentReferences') IS NULL
+BEGIN
+    CREATE TABLE db_owner.ContainerShipmentReferences (
+        Id BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+        SourceType NVARCHAR(20) NOT NULL DEFAULT N'',
+        SourceId BIGINT NOT NULL,
+        SourceNo NVARCHAR(50) NOT NULL DEFAULT N'',
+        SourceDate DATETIME2 NOT NULL,
+        SourceStatus INT NOT NULL DEFAULT 0,
+        SourceStatusText NVARCHAR(30) NOT NULL DEFAULT N'',
+        ContainerNo NVARCHAR(50) NOT NULL DEFAULT N'',
+        ShipmentMode NVARCHAR(10) NOT NULL DEFAULT N'',
+        ShippingOrderNo NVARCHAR(50) NOT NULL DEFAULT N'',
+        BillOfLadingNo NVARCHAR(50) NOT NULL DEFAULT N'',
+        CarrierName NVARCHAR(200) NOT NULL DEFAULT N'',
+        ForwarderName NVARCHAR(200) NOT NULL DEFAULT N'',
+        DeparturePort NVARCHAR(100) NOT NULL DEFAULT N'',
+        TransitPort NVARCHAR(100) NOT NULL DEFAULT N'',
+        DestinationPort NVARCHAR(100) NOT NULL DEFAULT N'',
+        PlannedDepartureAt DATETIME2 NULL,
+        PlannedArrivalAt DATETIME2 NULL,
+        TruckerName NVARCHAR(200) NOT NULL DEFAULT N'',
+        CustomsBrokerId BIGINT NULL,
+        CustomsBrokerName NVARCHAR(100) NOT NULL DEFAULT N'',
+        Remark NVARCHAR(500) NOT NULL DEFAULT N'',
+        Status INT NOT NULL DEFAULT 1,
+        RecordedAt DATETIME2 NOT NULL DEFAULT GETDATE(),
+        RevisionNo INT NOT NULL DEFAULT 1,
+        LastRevisedAt DATETIME2 NULL,
+        LastRevisionReason NVARCHAR(200) NOT NULL DEFAULT N'',
+        VoidedAt DATETIME2 NULL,
+        VoidReason NVARCHAR(500) NOT NULL DEFAULT N'',
+        CreatedAt DATETIME2 NOT NULL DEFAULT GETDATE(),
+        CreatedBy BIGINT NULL,
+        UpdatedAt DATETIME2 NULL,
+        UpdatedBy BIGINT NULL,
+        IsDeleted BIT NOT NULL DEFAULT 0,
+        RowVersion ROWVERSION NOT NULL
+    );
+END
+
+IF OBJECT_ID('db_owner.ContainerShipmentReferenceRevisions') IS NULL
+BEGIN
+    CREATE TABLE db_owner.ContainerShipmentReferenceRevisions (
+        Id BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+        ContainerShipmentReferenceId BIGINT NOT NULL,
+        RevisionNo INT NOT NULL,
+        SourceType NVARCHAR(20) NOT NULL DEFAULT N'',
+        SourceId BIGINT NOT NULL,
+        SourceNo NVARCHAR(50) NOT NULL DEFAULT N'',
+        SupersededAt DATETIME2 NOT NULL DEFAULT GETDATE(),
+        Reason NVARCHAR(200) NOT NULL DEFAULT N'',
+        ShipmentMode NVARCHAR(10) NOT NULL DEFAULT N'',
+        ShippingOrderNo NVARCHAR(50) NOT NULL DEFAULT N'',
+        BillOfLadingNo NVARCHAR(50) NOT NULL DEFAULT N'',
+        CarrierName NVARCHAR(200) NOT NULL DEFAULT N'',
+        ForwarderName NVARCHAR(200) NOT NULL DEFAULT N'',
+        DeparturePort NVARCHAR(100) NOT NULL DEFAULT N'',
+        TransitPort NVARCHAR(100) NOT NULL DEFAULT N'',
+        DestinationPort NVARCHAR(100) NOT NULL DEFAULT N'',
+        PlannedDepartureAt DATETIME2 NULL,
+        PlannedArrivalAt DATETIME2 NULL,
+        TruckerName NVARCHAR(200) NOT NULL DEFAULT N'',
+        CustomsBrokerId BIGINT NULL,
+        CustomsBrokerName NVARCHAR(100) NOT NULL DEFAULT N'',
+        Remark NVARCHAR(500) NOT NULL DEFAULT N'',
+        CreatedAt DATETIME2 NOT NULL DEFAULT GETDATE(),
+        CreatedBy BIGINT NULL,
+        UpdatedAt DATETIME2 NULL,
+        UpdatedBy BIGINT NULL,
+        IsDeleted BIT NOT NULL DEFAULT 0,
+        RowVersion ROWVERSION NOT NULL
+    );
+END
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes
+               WHERE name = 'UX_ContainerShipmentReferences_ActiveSource'
+                 AND object_id = OBJECT_ID('db_owner.ContainerShipmentReferences'))
+    CREATE UNIQUE INDEX UX_ContainerShipmentReferences_ActiveSource
+        ON db_owner.ContainerShipmentReferences(SourceType, SourceId)
+        WHERE IsDeleted = 0 AND Status <> 2;
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes
+               WHERE name = 'IX_ContainerShipmentReferences_Source_Status'
+                 AND object_id = OBJECT_ID('db_owner.ContainerShipmentReferences'))
+    CREATE INDEX IX_ContainerShipmentReferences_Source_Status
+        ON db_owner.ContainerShipmentReferences(SourceType, SourceId, Status)
+        WHERE IsDeleted = 0;
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes
+               WHERE name = 'IX_ContainerShipmentReferences_Status_RecordedAt'
+                 AND object_id = OBJECT_ID('db_owner.ContainerShipmentReferences'))
+    CREATE INDEX IX_ContainerShipmentReferences_Status_RecordedAt
+        ON db_owner.ContainerShipmentReferences(Status, RecordedAt)
+        WHERE IsDeleted = 0;
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes
+               WHERE name = 'IX_ContainerShipmentReferences_ShipmentMode'
+                 AND object_id = OBJECT_ID('db_owner.ContainerShipmentReferences'))
+    CREATE INDEX IX_ContainerShipmentReferences_ShipmentMode
+        ON db_owner.ContainerShipmentReferences(ShipmentMode)
+        WHERE IsDeleted = 0;
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes
+               WHERE name = 'UX_ContainerShipmentReferenceRevisions_Reference_Revision'
+                 AND object_id = OBJECT_ID('db_owner.ContainerShipmentReferenceRevisions'))
+    CREATE UNIQUE INDEX UX_ContainerShipmentReferenceRevisions_Reference_Revision
+        ON db_owner.ContainerShipmentReferenceRevisions(ContainerShipmentReferenceId, RevisionNo)
+        WHERE IsDeleted = 0;
+");
+
     }
 }

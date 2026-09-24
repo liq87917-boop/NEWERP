@@ -94,4 +94,12 @@ public partial class ErpDbContext
 
     /// <summary>销项发票证据分摊行（发票 → 销售订单；客户 / 订单快照 + 分摊金额；发票内同一订单唯一由过滤唯一索引兜底）</summary>
     public DbSet<CustomerSalesInvoiceAllocation> CustomerSalesInvoiceAllocations => Set<CustomerSalesInvoiceAllocation>();
+
+    // ============ 装柜出运引用登记（ERP-057：显式源记录关联 + 出运证据快照 + 修订留痕） ============
+    /// <summary>装柜出运引用证据（显式指向订柜信息 / 预装柜单 / 装柜清单之一；同一源记录最多 1 条有效引用）</summary>
+    public DbSet<ContainerShipmentReference> ContainerShipmentReferences => Set<ContainerShipmentReference>();
+
+    /// <summary>出运引用修订留痕（只追加的「修订前原值」快照；不提供修改与删除）</summary>
+    public DbSet<ContainerShipmentReferenceRevision> ContainerShipmentReferenceRevisions
+        => Set<ContainerShipmentReferenceRevision>();
 }

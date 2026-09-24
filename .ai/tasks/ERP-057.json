@@ -1,7 +1,7 @@
 {
   "id": "ERP-057",
   "title": "Add traceable container shipment reference snapshots",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "medium",
   "description": "Add one canonical repository record for explicit shipment references associated with the existing container booking, pre-loading and loading-list chain. First audit and reuse any equivalent persisted relationship already present rather than creating a competing shipment master. Capture only user-recorded operational evidence; do not contact carriers, infer links from text, assert customs status, execute production SQL, deploy, or release.",
   "acceptance_criteria": [
@@ -48,5 +48,5 @@
     "status": "not_required",
     "reason": "Repository-only operational shipment-reference evidence and non-production test schema. Carrier, customs, production database, deployment and release actions remain behind mandatory human gates."
   },
-  "attempts": 0
+  "attempts": 1
 }
