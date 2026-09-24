@@ -18,6 +18,25 @@ const PAYMENT_OPTS = [
   { value: '3', label: '信用证' }, { value: '4', label: '现金' },
 ];
 
+/* ============ 数据字典引用字段（ERP-036：客户「指定货代」） ============
+   引用「其他资料」字典项的字段（如客户指定货代）在字典项被停用 / 删除后，
+   历史引用仍要照常显示，但必须显式标注不可用，不能静默消失、也不能再被新选中。
+   标注文案与服务端 CustomerForwarderRules.UnavailableMark 保持一致。 */
+const REF_UNAVAILABLE_MARK = '（已停用/不可用）';
+
+/* 引用字段的展示文案：可用时只显示名称，不可用时名称 + 显式标注 */
+function refDisplayName(name, available) {
+  if (!name) return '';
+  return available === false ? name + REF_UNAVAILABLE_MARK : name;
+}
+
+/* 引用字段单元格 HTML：值来自服务端（字典项名称快照），必须转义后再拼接标注 */
+function refCellHtml(name, available) {
+  if (!name) return '';
+  const mark = available === false ? `<span class="text-muted">${REF_UNAVAILABLE_MARK}</span>` : '';
+  return `${escapeHtml(name)}${mark}`;
+}
+
 /* ============ 基础资料模块配置 ============ */
 const MODULES = {
   customer: {
@@ -26,7 +45,10 @@ const MODULES = {
       { key: 'customerCode', label: '客户编码' }, { key: 'customerName', label: '客户名称' },
       { key: 'contactPerson', label: '联系人' }, { key: 'phone', label: '电话' },
       { key: 'country', label: '国家' }, { key: 'currency', label: '币种' },
-      { key: 'tradeTerms', label: '贸易条款' }, { key: 'creditLimit', label: '信用额度', type: 'money' },
+      { key: 'tradeTerms', label: '贸易条款' },
+      /* ERP-036：指定货代（主数据指引）。字典项被停用 / 删除后仍显示当时的名称快照，并显式标注不可用 */
+      { key: 'forwarderName', label: '指定货代', render: row => refCellHtml(row.forwarderName, row.forwarderAvailable) },
+      { key: 'creditLimit', label: '信用额度', type: 'money' },
       { key: 'creditDays', label: '账期(天)' }, { key: 'depositRatio', label: '定金比例%' },
     ],
     fields: [
@@ -42,6 +64,8 @@ const MODULES = {
       { key: 'settlementMethod', label: '结算方式（按协商填写，如 T/T 30%+70%、L/C）' },
       { key: 'tradeTerms', label: '贸易条款（FOB / CIF / EXW 等）' },
       { key: 'destinationPort', label: '目的港' },
+      /* ERP-036：指定货代（可选，选项来自「其他资料」中启用的 Forwarder 字典项；留空 = 未指定） */
+      { key: 'forwarderId', label: '指定货代（可留空）', type: 'ref', ref: 'forwarder' },
       { key: 'creditLimit', label: '信用额度', type: 'number' },
       { key: 'creditDays', label: '账期天数（0 或留空=现结）', type: 'number' },
       { key: 'depositRatio', label: '定金比例(%)', type: 'number' },

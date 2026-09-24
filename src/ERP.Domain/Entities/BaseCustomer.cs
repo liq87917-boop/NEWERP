@@ -1,5 +1,6 @@
 using ERP.Domain.Common;
 using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
 
 namespace ERP.Domain.Entities;
 
@@ -115,4 +116,28 @@ public class BaseCustomer : BaseEntity
     /// <summary>备注</summary>
     [MaxLength(500)]
     public string Remark { get; set; } = string.Empty;
+
+    // ============ ERP-036：指定货代（复用「其他资料」数据字典 InfoType=Forwarder，仅作主数据指引） ============
+
+    /// <summary>
+    /// 指定货代 Id（引用 <see cref="BaseOtherInfo"/> 中 <c>InfoType = Forwarder</c> 的字典项；可空，不建外键）。
+    /// <para>仅记录「该客户通常走哪家货代」的指引，不会自动写入订舱 / 装柜 / 报关 / 费用单据，
+    /// 也不授予任何外部货代系统的访问权。</para>
+    /// </summary>
+    public long? ForwarderId { get; set; }
+
+    /// <summary>
+    /// 指定货代名称快照（由服务端按字典项权威写入，客户端提交的自由文本一律不被采信）。
+    /// 保留快照是为了字典项后来被停用 / 删除时，历史客户资料仍能显示当时的货代名称。
+    /// </summary>
+    [MaxLength(100)]
+    public string ForwarderName { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 指定货代引用是否仍可选用（**非持久化列**，读取时由服务端标注）：
+    /// 未指定货代，或指定货代仍是「启用、未删除、类型为 Forwarder」的字典项时为 <c>true</c>；
+    /// 字典项被删除 / 停用 / 改类型后为 <c>false</c>（历史引用照常显示，但不允许再次选用）。
+    /// </summary>
+    [NotMapped]
+    public bool ForwarderAvailable { get; set; } = true;
 }

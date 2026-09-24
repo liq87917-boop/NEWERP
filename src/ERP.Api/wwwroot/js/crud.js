@@ -199,9 +199,18 @@ async function loadIntoForm(id) {
       if (rid) {
         document.getElementById('f_' + f.key).value = rid;
         const ref = REF_APIS[f.ref];
+        const searchEl = document.getElementById('f_' + f.key + '_search');
+        /* 列表 / 详情已返回名称快照的引用（如客户指定货代）：直接回显该快照，
+           字典项被停用 / 删除后仍显示当时的名称并显式标注不可用，而不是静默变空 */
+        if (ref.rowKey && row[ref.rowKey]) {
+          searchEl.value = ref.availableKey
+            ? refDisplayName(row[ref.rowKey], row[ref.availableKey])
+            : row[ref.rowKey];
+          return;
+        }
         try {
           const d = await api(`${ref.api}/${rid}`);
-          document.getElementById('f_' + f.key + '_search').value = d[ref.nameKey] || '';
+          searchEl.value = d[ref.nameKey] || '';
         } catch (e) { /* 忽略名称查询失败 */ }
       }
       return;

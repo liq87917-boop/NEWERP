@@ -1,7 +1,7 @@
 {
   "id": "ERP-036",
   "title": "Add designated freight forwarder to Customer master data",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "medium",
   "description": "Add an optional designated freight-forwarder reference to Customer master data by reusing the existing BaseOtherInfo Forwarder dictionary. The field is master-data guidance only and must not automatically assign or authorize shipment records. Repository schema code and test-database validation are allowed; production database execution and deployment are prohibited.",
   "acceptance_criteria": [
@@ -46,5 +46,5 @@
     "status": "not_required",
     "reason": "Local master-data code and test-database schema only. No production database operation, external forwarding integration, deployment or release is authorized."
   },
-  "attempts": 0
+  "attempts": 2
 }

@@ -1279,5 +1279,16 @@ IF NOT EXISTS (SELECT 1 FROM sys.indexes
         ON db_owner.Quotations(RootQuotationId, RevisionNumber)
         WHERE IsDeleted = 0 AND RootQuotationId IS NOT NULL;");
 
+        // 25. 客户「指定货代」（ERP-036：复用「其他资料」Forwarder 字典项的主数据指引）
+        //     25.1 两列为幂等补齐：ForwarderId 可空（历史客户保持 NULL = 未指定，无需回填）、
+        //          ForwarderName 为服务端写入的名称快照（默认空串，历史客户不受影响）；
+        //     25.2 刻意不建外键：字典项可软删除 / 停用，历史引用必须继续可读；
+        //     25.3 不新增任何单据关联列 —— 指定货代不会自动写入订舱 / 装柜 / 报关 / 费用单据。
+        await db.Database.ExecuteSqlRawAsync(@"
+IF COL_LENGTH('db_owner.BaseCustomers', 'ForwarderId') IS NULL
+    ALTER TABLE db_owner.BaseCustomers ADD ForwarderId BIGINT NULL;
+IF COL_LENGTH('db_owner.BaseCustomers', 'ForwarderName') IS NULL
+    ALTER TABLE db_owner.BaseCustomers ADD ForwarderName NVARCHAR(100) NOT NULL DEFAULT N'';");
+
     }
 }

@@ -25,6 +25,14 @@ const REF_APIS = {
   employee: { api: '/api/base/employees', nameKey: 'employeeName' },
   product: { api: '/api/base/products', nameKey: 'productName' },
   warehouse: { api: '/api/base/warehouses', nameKey: 'warehouseName' },
+  /* ERP-036：客户「指定货代」—— 选项接口只返回启用中、未删除的 Forwarder 字典项（数组形态，见 searchRef）。
+     rowKey / availableKey：编辑回显使用列表 / 详情已返回的名称快照与可用性标注，
+     字典项后来被停用 / 删除时仍显示当时的名称并标注「已停用/不可用」，而不是静默变空。
+     clearOnEmpty：清空搜索框（且不重新选择）即视为清空指定货代，客户资料允许留空。 */
+  forwarder: {
+    api: '/api/base/customers/forwarder-options', nameKey: 'infoName',
+    rowKey: 'forwarderName', availableKey: 'forwarderAvailable', clearOnEmpty: true,
+  },
 };
 
 function escapeHtml(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
@@ -168,15 +176,25 @@ function renderRefFieldReadonly(f) {
   </div>`;
 }
 
-/* 搜索引用字段（模糊匹配） */
+/* 搜索引用字段（模糊匹配）
+   - 分页型基础资料接口（/api/base/customers 等）：按关键字服务端过滤，取前 10 条
+   - 选项型接口（直接返回数组，如客户指定货代选项）：本地点过滤，天然只含当前可选用的字典项
+   - ref.clearOnEmpty 为真时：清空搜索框即视为清空该引用（用于客户指定货代这类可留空字段） */
 async function searchRef(input, key, refType) {
   const ref = REF_APIS[refType];
   const kw = input.value.trim();
   const dd = document.getElementById(`f_${key}_dd`);
-  if (!kw) { dd.style.display = 'none'; return; }
+  if (!kw) {
+    dd.style.display = 'none';
+    if (ref.clearOnEmpty) document.getElementById(`f_${key}`).value = '';
+    return;
+  }
   try {
     const data = await api(`${ref.api}?page=1&pageSize=10&keyword=${encodeURIComponent(kw)}`);
-    dd.innerHTML = (data.items || []).map(item =>
+    const items = Array.isArray(data)
+      ? data.filter(x => String(x[ref.nameKey] ?? '').toLowerCase().includes(kw.toLowerCase())).slice(0, 10)
+      : (data.items || []);
+    dd.innerHTML = items.map(item =>
       `<div class="ref-item" onclick="selectRef('${key}', ${item.id}, '${escapeHtml(item[ref.nameKey])}')">${escapeHtml(item[ref.nameKey])}</div>`
     ).join('') || '<div class="ref-empty">无匹配结果</div>';
     dd.style.display = 'block';

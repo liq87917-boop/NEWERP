@@ -20,9 +20,9 @@ public abstract class BaseCrudController<TEntity> : ControllerBase where TEntity
         Service = service;
     }
 
-    /// <summary>分页查询</summary>
+    /// <summary>分页查询（基础资料可在派生控制器中 override 以补充读取标注）</summary>
     [HttpGet]
-    public async Task<IActionResult> GetPaged([FromQuery] PageQuery query)
+    public virtual async Task<IActionResult> GetPaged([FromQuery] PageQuery query)
     {
         var result = await Service.GetPagedAsync(query);
         return Ok(ApiResponse<PagedResult<TEntity>>.Success(result));
@@ -38,23 +38,23 @@ public abstract class BaseCrudController<TEntity> : ControllerBase where TEntity
 
     /// <summary>根据主键获取</summary>
     [HttpGet("{id:long}")]
-    public async Task<IActionResult> GetById(long id)
+    public virtual async Task<IActionResult> GetById(long id)
     {
         var result = await Service.GetByIdAsync(id);
         return Ok(ApiResponse<TEntity>.Success(result));
     }
 
-    /// <summary>新增</summary>
+    /// <summary>新增（派生控制器可 override 以补充字段级校验，见 CustomerController 的指定货代）</summary>
     [HttpPost]
-    public async Task<IActionResult> Create([FromBody] TEntity entity)
+    public virtual async Task<IActionResult> Create([FromBody] TEntity entity)
     {
         var result = await Service.CreateAsync(entity);
         return Ok(ApiResponse<TEntity>.Success(result, "新增成功"));
     }
 
-    /// <summary>更新</summary>
+    /// <summary>更新（派生控制器可 override 以补充字段级校验，见 CustomerController 的指定货代）</summary>
     [HttpPut("{id:long}")]
-    public async Task<IActionResult> Update(long id, [FromBody] TEntity entity)
+    public virtual async Task<IActionResult> Update(long id, [FromBody] TEntity entity)
     {
         entity.Id = id;
         var result = await Service.UpdateAsync(entity);

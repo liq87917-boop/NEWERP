@@ -1,5 +1,7 @@
 using ERP.Application.Common;
+using ERP.Application.DTOs;
 using ERP.Application.Interfaces;
+using ERP.Application.Services;
 using ERP.Domain.Entities;
 using ERP.Infrastructure.Export;
 using ERP.Infrastructure.Storage;
@@ -7,18 +9,77 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace ERP.Api.Controllers;
 
 /// <summary>
-/// 客户资料控制器
+/// 客户资料控制器（ERP-036：新增可选的「指定货代」主数据指引字段）
 /// </summary>
+/// <remarks>
+/// 复用既有的「其他资料」数据字典（<c>InfoType = Forwarder</c>），不新增任何单据关联：
+/// 指定货代只写客户资料自身的引用 Id + 名称快照两列，不会自动写入订舱 / 装柜 / 报关 / 费用单据，
+/// 也不涉及任何外部货代系统。
+/// </remarks>
 [ApiController]
 [Route("api/base/customers")]
 [Authorize]
 public class CustomerController : BaseCrudController<BaseCustomer>
 {
-    public CustomerController(IGenericService<BaseCustomer> service) : base(service) { }
+    private readonly IErpDbContext _db;
+
+    public CustomerController(IGenericService<BaseCustomer> service, IErpDbContext db) : base(service)
+    {
+        _db = db;
+    }
+
+    /// <summary>指定货代下拉选项（只返回未删除、已启用、类型为 Forwarder 的字典项）</summary>
+    [HttpGet("forwarder-options")]
+    public async Task<IActionResult> GetForwarderOptions()
+    {
+        var options = await CustomerForwarderService.LoadOptionsAsync(_db);
+        return Ok(ApiResponse<List<OtherInfoOptionDto>>.Success(options));
+    }
+
+    /// <summary>分页查询（补充指定货代引用的可用性标注，不写库）</summary>
+    [HttpGet]
+    public override async Task<IActionResult> GetPaged([FromQuery] PageQuery query)
+    {
+        var result = await Service.GetPagedAsync(query);
+        await CustomerForwarderService.AnnotateAsync(_db, result.Items);
+        return Ok(ApiResponse<PagedResult<BaseCustomer>>.Success(result));
+    }
+
+    /// <summary>根据主键获取（补充指定货代引用的可用性标注，不写库）</summary>
+    [HttpGet("{id:long}")]
+    public override async Task<IActionResult> GetById(long id)
+    {
+        var result = await Service.GetByIdAsync(id);
+        await CustomerForwarderService.AnnotateAsync(_db, new[] { result });
+        return Ok(ApiResponse<BaseCustomer>.Success(result));
+    }
+
+    /// <summary>新增客户（指定货代必须是可用的 Forwarder 字典项，名称快照由服务端写入）</summary>
+    [HttpPost]
+    public override async Task<IActionResult> Create([FromBody] BaseCustomer entity)
+    {
+        await CustomerForwarderService.ApplyAsync(_db, entity, stored: null);
+        return await base.Create(entity);
+    }
+
+    /// <summary>
+    /// 更新客户（指定货代必须是可用的 Forwarder 字典项；引用未变更时保留历史引用，不因字典项停用而清空）
+    /// </summary>
+    [HttpPut("{id:long}")]
+    public override async Task<IActionResult> Update(long id, [FromBody] BaseCustomer entity)
+    {
+        entity.Id = id;
+        var stored = await _db.BaseCustomers.AsNoTracking().FirstOrDefaultAsync(c => c.Id == id);
+        // 客户不存在时不先校验货代引用，交由服务层统一报「数据不存在」，避免错误信息错位
+        if (stored is not null)
+            await CustomerForwarderService.ApplyAsync(_db, entity, stored);
+        return await base.Update(id, entity);
+    }
 }
 
 /// <summary>

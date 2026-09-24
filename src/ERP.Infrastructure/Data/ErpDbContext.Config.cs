@@ -34,6 +34,14 @@ public partial class ErpDbContext
         modelBuilder.Entity<BaseProduct>().HasIndex(p => p.ProductCode).IsUnique();
         modelBuilder.Entity<BaseOtherInfo>().HasIndex(o => new { o.InfoType, o.InfoCode }).IsUnique();
 
+        // ============ ERP-036：客户「指定货代」（引用「其他资料」Forwarder 字典项） ============
+        // 设计口径：
+        //   1. 只存引用 Id + 名称快照，**刻意不建外键**：字典项允许被软删除 / 停用，
+        //      历史客户资料必须继续可读（外键会阻止字典项删除或使读取失败）；
+        //   2. ForwarderName 为服务端权威写入的快照，长度与实体 [MaxLength(100)] 一致；
+        //   3. ForwarderAvailable 是 [NotMapped] 的读取标注，不落库（SchemaUpgrader 第 25 段同样只加两列）。
+        modelBuilder.Entity<BaseCustomer>().Property(x => x.ForwarderName).HasMaxLength(100);
+
         // ============ 单据号唯一索引 ============
         modelBuilder.Entity<Inquiry>().HasIndex(x => x.InquiryNo).IsUnique();
         modelBuilder.Entity<SalesOrder>().HasIndex(x => x.OrderNo).IsUnique();
