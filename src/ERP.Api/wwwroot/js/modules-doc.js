@@ -111,6 +111,10 @@ Object.assign(MODULES, {
       { key: 'tradeTerms', label: '价格条款' }, { key: 'destinationPort', label: '目的港' },
       { key: 'totalAmount', label: '总额', type: 'money' },
       { key: 'depositAmount', label: '定金', type: 'money' }, { key: 'status', label: '状态', status: true },
+      /* ERP-054：收款引用证据派生列（virtual，不落库）：ERP-053 有效（未作废）收款引用行的已引用金额 /
+         收款单张数 / 引用行条数；由 sales-order-receipt-evidence.js 按页有界批量取数后渲染（每页一次 / 分批请求，
+         绝不逐行查库），已作废 / 无效 / 无法确认证据只以 ⚠ 提示，绝不计入有效合计，也不当作已收款或应收余额 */
+      { key: 'receiptEvidence', label: '收款引用证据', virtual: true, render: row => salesOrderReceiptEvidenceCellHtml(row) },
     ],
     fields: [
       { key: 'orderDate', label: '订单日期', type: 'date' },
@@ -168,6 +172,8 @@ Object.assign(MODULES, {
       { label: '变更申请', icon: '📝', title: '登记或查看本销售订单的变更申请（来源快照 + 拟议值对照；提交只是登记冻结，系统不批准、不套用，也不改写本单与出库 / 装柜 / 收款 / 库存 / 财务记录）', onclick: 'openSalesOrderChangeRequestsForCurrentModule' },
       /* ERP-053：以本销售订单预筛选收款引用登记册（只显示指向本单的引用行；引用只指向同客户 + 同币种订单） */
       { label: '收款引用', icon: '🧾', title: '打开客户收款引用登记册，并只显示指向本销售订单的引用行（登记「收款单指向哪些销售订单」的引用证据；只写引用证据，不会真的收款、不会结算或核销）', onclick: 'openCustomerReceiptAllocationRegister' },
+      /* ERP-054：本单的收款引用证据只读视图（只按 ERP-053 持久化引用行派生；不是银行入账 / 应收余额 / 核销 / 结算结果） */
+      { label: '收款引用证据', icon: '🧾', title: '查看本销售订单的收款引用证据：有效（未作废）收款引用行的已引用金额、收款单张数与未指向本单金额，以及已作废 / 无效 / 无法确认证据的逐条明细（只读派生；不是银行入账凭证、应收余额、货款核销、客户对账单或结算结果）', onclick: 'showSalesOrderReceiptEvidence' },
     ],
     detailKey: 'details',
     detailTitle: '订单商品明细（数量 × 单价 = 金额，自动算合计）',

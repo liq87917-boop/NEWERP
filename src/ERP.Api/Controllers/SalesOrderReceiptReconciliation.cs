@@ -140,7 +140,11 @@ public static class SalesOrderReceiptReconciliationSemantics
         "系统绝不按客户名、订单号文本、日期或金额相似度把它归到任何销售订单；" +
         "没有权威引用、单据不可用或命中派生上限时金额一律记为未知（null），不用 0 顶替，也不代表已收 / 未收 / 逾期 / 已结清；" +
         "订单默认排除已取消（历史订单需显式选择订单状态筛选才可见，且单列计数、仅作历史参考），软删除订单一律排除；" +
-        "收款证据默认仅统计有效证据（已审核），未审核与历史（已驳回 / 已取消 / 已完成）证据必须显式选择状态筛选才可见，其金额永不并入有效合计。";
+        "收款证据默认仅统计有效证据（已审核），未审核与历史（已驳回 / 已取消 / 已完成）证据必须显式选择状态筛选才可见，其金额永不并入有效合计；" +
+        "ERP-054 另按 ERP-053 的持久化收款引用行（CustomerReceiptAllocations）单独标注「收款引用登记证据」：" +
+        "有效（未作废）已引用金额 / 引用行条数与收款单张数是独立字段，已作废 / 无效（客户 / 币种或快照不一致）/ 无法确认证据单独列出；" +
+        "它与「已关联收款金额」（收款申请单的权威引用）是两类独立证据，绝不相加、不得互相替代；" +
+        "「无收款引用证据」只表示没有登记，绝不等于未收款、已收款、已结清、逾期或欠款。";
 
     /// <summary>范围说明：合计与计数只统计本次返回页的订单，未关联收款证据只列出本页客户</summary>
     public const string ScopeNoteText =
@@ -148,7 +152,9 @@ public static class SalesOrderReceiptReconciliationSemantics
         "分页按客户 + 币种 + 订单日期 + 单据 Id 稳定排序；" +
         "未关联收款证据按本次页面上出现客户的收款单自身客户列与币种列有界读取（订单日期筛选不作用于收款单），" +
         "每张收款单只列出一次、只按自己的币种汇总，绝不与订单金额相加，也不做汇率换算；" +
-        "订单侧汇总与未关联收款证据汇总相互独立，两表不得相加；收款单查询命中单次上限时显式标注「不完整」，不静默截断。";
+        "收款引用登记证据按本页订单 Id 有界聚合（最多 4 次数据集访问，与订单张数 / 行数无关，绝无逐行查库），" +
+        "命中上限时金额与计数一律按「未知」显示，不报部分合计；" +
+        "订单侧汇总、未关联收款证据汇总与收款引用证据相互独立，三表不得相加；收款单查询命中单次上限时显式标注「不完整」，不静默截断。";
 
     /// <summary>与应收账款台账 / 对账单 / 收款授权 / 结算结果 / 账龄表的边界说明（界面与文档同源）</summary>
     public const string LedgerBoundaryText =
@@ -380,6 +386,50 @@ public sealed class SalesOrderReceiptReconciliationOrderRow
     /// <summary>客户级记录是否命中单次查询上限（true = 上述计数不完整）</summary>
     public bool UnattributedReceiptsTruncated { get; init; }
 
+    // ============ 收款引用登记证据（ERP-054：ERP-053 持久化引用行；与上面的收款申请链接证据相互独立） ============
+
+    /// <summary>
+    /// 收款引用登记证据状态：recorded（有有效引用行）/ historical_only（只有历史 / 无效）/ none（无引用行）/ unknown（命中上限）。
+    /// <para>独立于 <see cref="ReceiptCoverageStatus"/>（后者是收款申请单的权威链接口径），两列不得相加、不得互相替代。</para>
+    /// </summary>
+    public string ReceiptAllocationStatus { get; init; } = SalesOrderReceiptEvidenceSemantics.AllocationUnknown;
+
+    /// <summary>收款引用登记证据短标签（有收款引用证据 / 仅有历史无效证据 / 无收款引用证据 / 未知）</summary>
+    public string ReceiptAllocationEvidenceLabel { get; init; } = SalesOrderReceiptEvidenceSemantics.LabelUnknown;
+
+    /// <summary>收款引用登记证据条数（含已作废 / 无效 / 无法确认）；null = 未知（命中上限）</summary>
+    public int? ReceiptAllocationCount { get; init; }
+
+    /// <summary>
+    /// 有效（未作废）收款引用登记金额合计（原币）；null = 未知（命中上限）。
+    /// 它<strong>不是</strong>已收款金额，也<strong>不是</strong>应收余额，与 <see cref="LinkedReceiptAmount"/> 是两类独立证据。
+    /// </summary>
+    public decimal? RecordedReceiptAllocationAmount { get; init; }
+
+    /// <summary>参与有效收款引用证据的收款单张数（按收款单去重）；null = 未知（命中上限）</summary>
+    public int? RecordedReceiptCount { get; init; }
+
+    /// <summary>已作废收款引用登记证据条数（单独列出，绝不并入有效合计）；null = 未知（命中上限）</summary>
+    public int? VoidedReceiptAllocationCount { get; init; }
+
+    /// <summary>无效收款引用登记证据条数（客户 / 币种或快照不一致，绝不换算 / 合并 / 改派）；null = 未知（命中上限）</summary>
+    public int? InvalidReceiptAllocationCount { get; init; }
+
+    /// <summary>无法确认的收款引用登记证据条数（收款单 / 订单不存在或已删除）；null = 未知（命中上限）</summary>
+    public int? UnavailableReceiptAllocationCount { get; init; }
+
+    /// <summary>收款引用登记证据是否命中有界读取上限（true = 上述金额与计数按未知，不报部分合计）</summary>
+    public bool ReceiptAllocationTruncated { get; init; }
+
+    /// <summary>
+    /// 订单金额中未被任何有效收款引用登记证据指向的部分（下限 0；null = 未知 / 订单不可用）。
+    /// 只是「没有有效引用证据指向」的金额，不是应收余额、不是未收款金额。
+    /// </summary>
+    public decimal? UnreferencedOrderAmount { get; init; }
+
+    /// <summary>收款引用登记证据说明（与收款申请链接证据分列，绝不当作应收余额或结算结果）</summary>
+    public string ReceiptAllocationNote { get; init; } = string.Empty;
+
     /// <summary>是否超收（已关联收款金额 &gt; 订单金额，按金额容差判定，需人工核对）</summary>
     public bool OverReceived { get; init; }
 
@@ -490,6 +540,24 @@ public sealed class SalesOrderReceiptReconciliationGroup
 
     /// <summary>已取消订单数（仅在订单状态筛选为 cancelled / all 时大于 0；其金额仅作历史参考）</summary>
     public int CancelledOrderCount { get; init; }
+
+    /// <summary>本分组已登记有效收款引用证据（ERP-053 持久化引用行）的订单数</summary>
+    public int ReceiptAllocationOrderCount { get; init; }
+
+    /// <summary>本分组只有历史 / 无效收款引用证据的订单数</summary>
+    public int HistoricalOnlyReceiptAllocationOrderCount { get; init; }
+
+    /// <summary>本分组没有任何收款引用证据的订单数（证据缺口，不是未收款）</summary>
+    public int NoReceiptAllocationOrderCount { get; init; }
+
+    /// <summary>本分组收款引用证据命中读取上限的订单数</summary>
+    public int UnknownReceiptAllocationOrderCount { get; init; }
+
+    /// <summary>
+    /// 本分组有效（未作废）收款引用登记金额合计（本分组同一币种内）；存在未知行时 null（不给部分合计）。
+    /// 与 <see cref="LinkedReceiptAmount"/> 是两类独立证据，绝不合并、绝不相加。
+    /// </summary>
+    public decimal? RecordedReceiptAllocationAmount { get; init; }
 
     /// <summary>已关联收款金额合计（只汇总金额已知的行）；null = 本分组所有行金额均未知（未知，不是 0）</summary>
     public decimal? LinkedReceiptAmount { get; init; }
@@ -670,6 +738,25 @@ public sealed class SalesOrderReceiptReconciliationReport
     /// <summary>已取消订单数（本页；仅在订单状态筛选为 cancelled / all 时大于 0，其金额仅作历史参考）</summary>
     public int CancelledOrderCount { get; init; }
 
+    // ============ 收款引用登记证据（ERP-054，本页；与收款申请链接证据 / 未关联收款证据相互独立） ============
+    /// <summary>本页已登记有效收款引用证据的订单数</summary>
+    public int ReceiptAllocationOrderCount { get; init; }
+
+    /// <summary>本页只有历史 / 无效收款引用证据的订单数（绝不呈现为已收款 / 已结清）</summary>
+    public int HistoricalOnlyReceiptAllocationOrderCount { get; init; }
+
+    /// <summary>本页没有任何收款引用证据的订单数（证据缺口，不是未收款）</summary>
+    public int NoReceiptAllocationOrderCount { get; init; }
+
+    /// <summary>本页收款引用证据命中读取上限、无法确认的订单数</summary>
+    public int UnknownReceiptAllocationOrderCount { get; init; }
+
+    /// <summary>收款引用证据派生口径说明（与订单视图同源）</summary>
+    public string ReceiptAllocationRule { get; init; } = SalesOrderReceiptEvidenceSemantics.RuleText;
+
+    /// <summary>收款引用证据边界说明（不是银行入账 / 应收余额 / 核销 / 对账单 / 账龄）</summary>
+    public string ReceiptAllocationBoundary { get; init; } = SalesOrderReceiptEvidenceSemantics.BoundaryText;
+
     // ============ 未关联收款证据（本页客户；与订单金额相互独立） ============
     /// <summary>本页列出的未关联收款单张数</summary>
     public int PageUnlinkedReceiptCount { get; init; }
@@ -709,8 +796,12 @@ public sealed class SalesOrderReceiptReconciliationReport
 /// <para><b>未关联收款证据</b>：收款单（<c>FinanceReceipt</c>）只有客户列、没有任何订单级引用，
 /// 因此按本次页面上出现客户的收款单<strong>自身客户列与币种列</strong>有界读取、逐张列出，链接状态恒为 unlinked，
 /// 金额绝不并入订单侧合计，系统绝不按客户名 / 订单号文本 / 日期 / 金额相似度自动匹配到订单。</para>
-/// <para><b>查询有界</b>：固定 12 次数据集访问（订单集合（筛选 / 计数 / 分页共用）+ 本页订单 + 客户名 + 逐单派生的 8 次 + 未关联收款证据 1 次），
-/// 与页大小、订单数、单据数无关，无逐单查库（无 N+1）；全程不写库。</para>
+/// <para><b>收款引用登记证据（ERP-054）</b>：额外按 ERP-053 的持久化引用行（<c>CustomerReceiptAllocations</c>）
+/// 独立标注「收款单指向本订单」的有效已引用金额 / 引用行条数 / 收款单张数，并与已作废 / 无效 / 无法确认证据分桶；
+/// 它与「已关联收款金额」（收款申请单的权威引用）是<strong>两类独立证据</strong>，绝不相加、不得互相替代，
+/// 也不表示已收款、应收余额、核销或结算结果。</para>
+/// <para><b>查询有界</b>：固定 16 次数据集访问（订单集合（筛选 / 计数 / 分页共用）+ 本页订单 + 客户名 + 逐单派生的 8 次 +
+/// 未关联收款证据 1 次 + 收款引用证据聚合 4 次），与页大小、订单数、单据数无关，无逐单查库（无 N+1）；全程不写库。</para>
 /// </summary>
 public static class SalesOrderReceiptReconciliation
 {
@@ -755,7 +846,10 @@ public static class SalesOrderReceiptReconciliation
 
         // 逐单派生：固定 8 次（订单明细 / 出库主表 / 出库明细 / 定金申请 / 货款申请 / 收款单 / 装柜结算 / 散货结算）
         var derived = (await SalesOrderProgress.ForOrdersAsync(db, orders)).ToDictionary(r => r.OrderId);
-        var orderRows = orders.Select(o => MapOrderRow(o, derived[o.Id], customerNames)).ToList();
+
+        // ERP-054：收款引用登记证据（ERP-053 持久化引用行）聚合 —— 与订单视图共用同一套分桶，固定 4 次数据集访问
+        var allocations = await SalesOrderReceiptEvidence.AggregatesForOrdersAsync(db, pageIds);
+        var orderRows = orders.Select(o => MapOrderRow(o, derived[o.Id], customerNames, allocations)).ToList();
 
         // 第 12 次：未关联收款证据（收款单只记录客户，无订单级引用；按本次筛选的客户 / 币种有界读取）
         var unlinked = await LoadUnlinkedReceiptsAsync(db, query, customerIds);
@@ -787,6 +881,14 @@ public static class SalesOrderReceiptReconciliation
             UnshippedOrderCount = orderRows.Count(r => !r.HasApprovedShipment),
             UnknownShipmentOrderCount = orderRows.Count(r => r.ShipmentStatus == SalesOrderProgress.ShipmentUnknown),
             CancelledOrderCount = orderRows.Count(r => r.Status == DocumentStatus.Cancelled.ToString()),
+            ReceiptAllocationOrderCount = orderRows.Count(r =>
+                r.ReceiptAllocationStatus == SalesOrderReceiptEvidenceSemantics.AllocationRecorded),
+            HistoricalOnlyReceiptAllocationOrderCount = orderRows.Count(r =>
+                r.ReceiptAllocationStatus == SalesOrderReceiptEvidenceSemantics.AllocationHistoricalOnly),
+            NoReceiptAllocationOrderCount = orderRows.Count(r =>
+                r.ReceiptAllocationStatus == SalesOrderReceiptEvidenceSemantics.AllocationNone),
+            UnknownReceiptAllocationOrderCount = orderRows.Count(r =>
+                r.ReceiptAllocationStatus == SalesOrderReceiptEvidenceSemantics.AllocationUnknown),
             PageUnlinkedReceiptCount = receiptRows.Count,
             PageUnlinkedReceiptTruncated = unlinked.Truncated,
             UnlinkedReceipts = receiptRows,
@@ -906,12 +1008,24 @@ public static class SalesOrderReceiptReconciliation
 
     /// <summary>报表行：数量未知一律 null（不回落为 0），收款金额未知一律 null（不回落到 0）</summary>
     private static SalesOrderReceiptReconciliationOrderRow MapOrderRow(SalesOrder order,
-        SalesOrderProgressResult progress, IReadOnlyDictionary<long, string> customerNames)
+        SalesOrderProgressResult progress, IReadOnlyDictionary<long, string> customerNames,
+        SalesOrderReceiptEvidenceAggregateSet allocations)
     {
         var shipment = progress.Shipment;
         var finance = progress.Finance;
         var shipmentKnown = !shipment.Truncated;
         var coverage = finance.LinkStatus;
+
+        // ERP-054：收款引用登记证据（ERP-053 持久化引用行）——与收款申请链接证据分开标注、绝不合并
+        var allocation = allocations.Get(order.Id);
+        var allocationTruncated = allocations.Truncated;
+        var hasAllocationRow = !allocationTruncated
+            && (allocation.RecordedRowCount + allocation.VoidedRowCount + allocation.InvalidRowCount
+                + allocation.UnavailableRowCount) > 0;
+        var recordedAllocation = allocationTruncated ? (decimal?)null : allocation.RecordedAmount;
+        var unreferencedOrderAmount = allocationTruncated || order.Status == DocumentStatus.Cancelled
+            ? (decimal?)null
+            : Math.Max(0m, order.TotalAmount - allocation.RecordedAmount);
 
         return new SalesOrderReceiptReconciliationOrderRow
         {
@@ -945,8 +1059,74 @@ public static class SalesOrderReceiptReconciliation
             UnattributedReceiptCount = finance.UnattributedRecordCount,
             UnattributedReceiptsTruncated = finance.UnattributedRecordsTruncated,
             OverReceived = finance.OverReceived,
+            ReceiptAllocationStatus = SalesOrderReceiptEvidenceSemantics.AllocationStatus(
+                allocationTruncated, recordedAllocation, hasAllocationRow),
+            ReceiptAllocationEvidenceLabel = SalesOrderReceiptEvidenceSemantics.EvidenceLabel(
+                allocationTruncated, recordedAllocation, hasAllocationRow),
+            ReceiptAllocationCount = allocationTruncated
+                ? null
+                : allocation.RecordedRowCount + allocation.VoidedRowCount + allocation.InvalidRowCount
+                    + allocation.UnavailableRowCount,
+            RecordedReceiptAllocationAmount = recordedAllocation,
+            RecordedReceiptCount = allocationTruncated ? null : allocation.RecordedReceiptCount,
+            VoidedReceiptAllocationCount = allocationTruncated ? null : allocation.VoidedRowCount,
+            InvalidReceiptAllocationCount = allocationTruncated ? null : allocation.InvalidRowCount,
+            UnavailableReceiptAllocationCount = allocationTruncated ? null : allocation.UnavailableRowCount,
+            ReceiptAllocationTruncated = allocationTruncated,
+            UnreferencedOrderAmount = unreferencedOrderAmount,
+            ReceiptAllocationNote = BuildAllocationNote(allocationTruncated, hasAllocationRow, allocation,
+                order.Status == DocumentStatus.Cancelled),
             Note = BuildOrderNote(shipment, finance),
         };
+    }
+
+    /// <summary>
+    /// 收款引用登记证据行级说明（ERP-054）：与收款申请链接证据分列，逐桶点名历史 / 无效证据，
+    /// 明确「无引用证据」只是登记缺口，绝不等于未收款 / 已收款 / 已结清 / 逾期。
+    /// </summary>
+    private static string BuildAllocationNote(bool truncated, bool hasAllocationRow,
+        SalesOrderReceiptEvidenceAggregate allocation, bool cancelled)
+    {
+        var sb = new System.Text.StringBuilder();
+        if (truncated)
+        {
+            sb.Append(SalesOrderReceiptEvidenceSemantics.TruncatedNote);
+        }
+        else if (allocation.RecordedAmount > 0)
+        {
+            sb.Append($"收款引用证据（ERP-053 持久化引用行）：有效已引用 {allocation.RecordedAmount}"
+                + $"（{allocation.RecordedRowCount} 条引用行 / {allocation.RecordedReceiptCount} 张收款单）；"
+                + $"参与证据的收款单金额快照合计 {allocation.RecordedReceiptAmount}，"
+                + $"其中未指向本订单 {allocation.UnreferencedReceiptAmount}"
+                + "（可能指向其他销售订单，不是银行未到账金额，也不是应收余额）。");
+        }
+        else if (hasAllocationRow)
+        {
+            sb.Append("本订单没有有效收款引用证据：现有引用行都是已作废 / 无效或无法确认，均不计入有效合计；"
+                + "这是收款引用证据缺口，不代表未收款、已收款、已结清或逾期。");
+        }
+        else
+        {
+            sb.Append(SalesOrderReceiptEvidenceSemantics.NoEvidenceNote);
+        }
+
+        if (!truncated)
+        {
+            if (allocation.VoidedRowCount > 0)
+                sb.Append($" 另有已作废历史证据 {allocation.VoidedRowCount} 条（金额 {allocation.VoidedAmount}），不计入有效合计。");
+            if (allocation.InvalidRowCount > 0)
+                sb.Append($" 另有无效历史证据 {allocation.InvalidRowCount} 条（金额 {allocation.InvalidAmount}，客户 / 币种或快照不一致），"
+                    + "不换算、不合并、不改派。");
+            if (allocation.UnavailableRowCount > 0)
+                sb.Append($" 另有无法确认的证据 {allocation.UnavailableRowCount} 条（金额 {allocation.UnavailableAmount}，收款单 / 订单不存在或已删除）。");
+        }
+
+        if (cancelled)
+            sb.Append(" 本订单已取消：收款引用证据与订单金额仅作历史参考，不参与收款确认、逾期或欠款判定。");
+
+        sb.Append(" 该证据与「已关联收款金额」（定金 / 货款申请单的权威引用）是两类独立口径，绝不相加；"
+            + "它不是银行入账金额、不是应收余额、不是货款核销或结算结果，也不得据以催收。");
+        return sb.ToString();
     }
 
     /// <summary>
@@ -1039,6 +1219,10 @@ public static class SalesOrderReceiptReconciliation
 
                 var notes = new List<string>();
                 var cancelled = list.Count(r => r.Status == DocumentStatus.Cancelled.ToString());
+                var allocRecorded = list.Count(r => r.ReceiptAllocationStatus == SalesOrderReceiptEvidenceSemantics.AllocationRecorded);
+                var allocHistoricalOnly = list.Count(r => r.ReceiptAllocationStatus == SalesOrderReceiptEvidenceSemantics.AllocationHistoricalOnly);
+                var allocNone = list.Count(r => r.ReceiptAllocationStatus == SalesOrderReceiptEvidenceSemantics.AllocationNone);
+                var allocUnknown = list.Count(r => r.ReceiptAllocationStatus == SalesOrderReceiptEvidenceSemantics.AllocationUnknown);
                 if (cancelled > 0)
                     notes.Add($"{cancelled} 张已取消订单：仅在显式选择订单状态筛选时可见，其数量 / 金额仅作历史参考，不并入有效订单口径");
                 if (unlinked > 0)
@@ -1047,6 +1231,9 @@ public static class SalesOrderReceiptReconciliation
                     notes.Add($"{partial} 张订单存在他币种 / 未审核收款申请（仅列出、不计入、不换算）");
                 if (coverageUnknown > 0)
                     notes.Add($"{coverageUnknown} 张订单的收款证据命中派生上限（金额不完整，不静默截断）");
+                notes.Add($"收款引用登记证据（ERP-053 持久化引用行）与上面的收款申请链接证据是两类独立证据：" +
+                    $"有效 {allocRecorded} 张 / 仅历史无效 {allocHistoricalOnly} 张 / 无引用证据 {allocNone} 张 / 未知 {allocUnknown} 张" +
+                    "；「无收款引用证据」只表示没有登记，绝不等于未收款或已收款");
                 notes.Add($"仅统计本页「该客户 + {g.Key.Currency}」分组：金额绝不与其它币种合并，也不与未关联收款证据相加");
 
                 var customerName = list.Select(r => r.CustomerName).FirstOrDefault(n => n.Length > 0);
@@ -1065,6 +1252,12 @@ public static class SalesOrderReceiptReconciliation
                     UnlinkedOrderCount = unlinked,
                     UnknownCoverageOrderCount = coverageUnknown,
                     CancelledOrderCount = cancelled,
+                    ReceiptAllocationOrderCount = allocRecorded,
+                    HistoricalOnlyReceiptAllocationOrderCount = allocHistoricalOnly,
+                    NoReceiptAllocationOrderCount = allocNone,
+                    UnknownReceiptAllocationOrderCount = allocUnknown,
+                    RecordedReceiptAllocationAmount = SumKnownMoney(
+                        list.Select(r => r.ReceiptAllocationTruncated ? null : r.RecordedReceiptAllocationAmount)),
                     ShippedOrderCount = list.Count(r => r.HasApprovedShipment),
                     UnshippedOrderCount = list.Count(r => !r.HasApprovedShipment),
                     UnknownShipmentOrderCount = list.Count(r => r.ShipmentStatus == SalesOrderProgress.ShipmentUnknown),

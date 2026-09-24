@@ -102,6 +102,31 @@ public class SalesOrderController : DocumentControllerBase<SalesOrder>
         => Ok(ApiResponse<SalesOrderReceiptReconciliationReport>.Success(
             await SalesOrderReceiptReconciliation.ForQueryAsync(Db, query)));
 
+    /// <summary>
+    /// 单张销售订单的收款引用证据（ERP-054，**只读派生**）：只按 ERP-053 的持久化收款引用行
+    /// （<c>CustomerReceiptAllocations</c>）汇总「收款单指向本订单」的有效（未作废）引用金额、收款单张数与
+    /// 未指向本单 / 订单金额未被引用证据覆盖的上下文；已作废历史证据、无效历史证据（客户 / 币种或快照不一致）
+    /// 与无法确认证据（收款单 / 订单不存在或已删除）一律单独分桶列出，绝不并入有效合计。
+    /// <para>本接口<strong>不是</strong>银行入账凭证、<strong>不是</strong>应收余额或货款核销、<strong>不是</strong>客户对账单，
+    /// 也<strong>不是</strong>账龄表：不判断是否已收款 / 已结清 / 逾期，且<strong>不写库</strong>
+    /// （不改销售订单、收款单、客户信用、发票、库存、装柜单证、佣金或费用退税记录）。</para>
+    /// </summary>
+    [HttpGet("{id:long}/receipt-evidence")]
+    public async Task<IActionResult> ReceiptEvidence(long id)
+        => Ok(ApiResponse<SalesOrderReceiptEvidenceDetail>.Success(
+            await SalesOrderReceiptEvidence.ForOrderAsync(Db, id)));
+
+    /// <summary>
+    /// 一批销售订单的收款引用证据汇总（ERP-054，**只读派生**、有界批量）：列表页按页取 Id 一次请求取回本页汇总，
+    /// 单次最多 200 张订单，绝不逐行查库；命中行数上限时金额与计数按「未知」返回（不用 0 顶替）。
+    /// <para>口径与单张详情一致：只统计有效（未作废）引用行，历史 / 无效 / 无法确认证据单独分桶，
+    /// 绝不并入有效合计，也绝不换算、合并或改派到其他订单。</para>
+    /// </summary>
+    [HttpGet("receipt-evidence-summaries")]
+    public async Task<IActionResult> ReceiptEvidenceSummaries([FromQuery] SalesOrderReceiptEvidenceQuery query)
+        => Ok(ApiResponse<SalesOrderReceiptEvidenceBatch>.Success(
+            await SalesOrderReceiptEvidence.ForOrdersAsync(Db, query)));
+
 
     /// <summary>创建</summary>
     [HttpPost]

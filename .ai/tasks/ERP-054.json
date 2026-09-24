@@ -1,7 +1,7 @@
 {
   "id": "ERP-054",
   "title": "Expose customer-receipt allocation evidence in order reconciliation workflows",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "medium",
   "description": "Extend existing Sales Order and ERP-046 customer order/receipt reconciliation workflows with read-only allocation evidence from ERP-053. Keep ordered, shipped and receipt-reference evidence distinct and do not calculate or claim an accounts-receivable balance, settlement result, due date, aging bucket or Customer credit decision. Do not infer links, mutate source records, execute production SQL, deploy, or release.",
   "acceptance_criteria": [
@@ -50,5 +50,5 @@
     "status": "not_required",
     "reason": "Read-only presentation of repository receipt-reference evidence. No real receipt, production mutation, settlement, credit decision, deployment or release is authorized."
   },
-  "attempts": 0
+  "attempts": 1
 }

@@ -6,6 +6,9 @@
    - 收款单（FinanceReceipt）只记录客户、没有订单级引用 → 一律作为「未关联证据」单独列出（链接状态恒为 unlinked），
      系统绝不按客户名、订单号文本、日期或金额相似度匹配到任何订单；未关联金额只按收款单自身币种单列，绝不并入订单金额；
    - 历史（已驳回 / 已取消 / 已完成）与未审核证据必须显式选择「收款证据状态」才可见，且永不计入有效合计；
+   - ERP-054：订单侧另按 ERP-053 的持久化收款引用行单独标注「收款引用证据」（有效已引用金额 / 引用行条数 /
+     收款单张数），已作废 / 无效 / 无法确认单独列出；它与「已关联收款金额」（收款申请单的权威引用）是两类独立证据，
+     绝不相加、不得互相替代，「无收款引用证据」只表示没有登记，绝不等于未收款或已收款；
    - 本页是运营性订单 / 收款证据核对视图，不是应收账款台账 / 客户对账单 / 收款授权 / 结算结果 / 账龄表（见页脚声明）。
    数据全部走只读接口 GET /api/sales-orders/receipt-reconciliation-report */
 
@@ -30,6 +33,14 @@ const SORR_EVIDENCE_LABELS = {
   active: '有效证据（已审核，计入有效合计）',
   pending: '未审核（仅列出、不计入）',
   historical: '历史证据（仅历史核对、不计入）',
+};
+
+/* 收款引用登记证据状态文案（ERP-054；与后端 SalesOrderReceiptEvidenceSemantics 常量一一对应） */
+const SORR_ALLOC_LABELS = {
+  recorded: '有收款引用证据',
+  historical_only: '仅有历史 / 无效收款引用证据',
+  none: '无收款引用证据',
+  unknown: '未知（超出有界读取上限）',
 };
 
 
@@ -165,7 +176,8 @@ async function loadSalesOrderReceiptReconciliation(page) {
     const rule = document.getElementById('sorr-rule');
     if (rule) {
       rule.textContent = '口径：' + (data.rule || '') + ' ' + (data.scopeNote || '') + ' ' +
-        (data.ledgerBoundary || '');
+        (data.ledgerBoundary || '') + ' 收款引用证据口径（ERP-054）：' + (data.receiptAllocationRule || '') +
+        ' ' + (data.receiptAllocationBoundary || '');
     }
   } catch (e) {
     el.innerHTML = `<div class="empty"><div style="font-size:48px">⚠️</div><div>报表加载失败：${escapeHtml(e.message)}</div></div>`;
@@ -187,6 +199,20 @@ function sorEvidenceHtml(status) {
   const cls = status === 'active' ? 'status-success'
     : (status === 'historical' ? 'status-neutral' : 'status-warning');
   return `<span class="status ${cls}">${escapeHtml(SORR_EVIDENCE_LABELS[status] || status || '')}</span>`;
+}
+
+/* 收款引用登记证据（ERP-054）：状态徽标 + 引用行条数；「无收款引用证据」只是登记缺口，绝不等于未收款 / 已收款 */
+function sorrAllocationHtml(o) {
+  const status = o.receiptAllocationStatus;
+  const cls = status === 'recorded' ? 'status-success'
+    : (status === 'historical_only' ? 'status-warning'
+      : (status === 'unknown' ? 'status-danger' : 'status-neutral'));
+  const label = SORR_ALLOC_LABELS[status] || status || '';
+  const count = (o.receiptAllocationCount === null || o.receiptAllocationCount === undefined)
+    ? '未知' : `${o.receiptAllocationCount} 条引用行`;
+  const title = `${o.receiptAllocationEvidenceLabel || ''} ${o.receiptAllocationNote || ''}`.trim();
+  return `<span class="status ${cls}" title="${escapeHtml(title)}">${escapeHtml(label)}</span>` +
+    `<div class="text-muted">${escapeHtml(count)}</div>`;
 }
 function sorRenderKpi(data) {
   const el = document.getElementById('sorr-kpi');
@@ -211,6 +237,11 @@ function sorRenderKpi(data) {
       <div class="kpi-label">本页币种数（不跨币种汇总）</div>
       <div class="kpi-value">${(data.currencies || []).length}<span class="unit">种</span></div>
       <div class="kpi-delta flat">已有已审核出库单 ${data.shippedOrderCount} 张 · 无出库单 ${data.unshippedOrderCount} 张 · 出货未知 ${data.unknownShipmentOrderCount} 张</div>
+    </div>
+    <div class="kpi-card cargo">
+      <div class="kpi-label">本页收款引用证据（ERP-053 登记，独立证据）</div>
+      <div class="kpi-value">${data.receiptAllocationOrderCount} / ${data.historicalOnlyReceiptAllocationOrderCount} / ${data.noReceiptAllocationOrderCount} / ${data.unknownReceiptAllocationOrderCount}<span class="unit">张</span></div>
+      <div class="kpi-delta flat">有效 / 仅历史无效 / 无引用证据 / 未知：「无收款引用证据」只是登记缺口，绝不等于未收款或已收款</div>
     </div>`;
 }
 
@@ -258,6 +289,8 @@ function sorRenderGroupTable(data) {
       <td class="text-right">${sorMoney(g.uncoveredAmount)}</td>
       <td class="text-right">${sorMoney(g.pendingReceiptAmount)}</td>
       <td>${g.linkedOrderCount} / ${g.partialOrderCount} / ${g.unlinkedOrderCount} / ${g.unknownCoverageOrderCount}</td>
+      <td>${g.receiptAllocationOrderCount} / ${g.historicalOnlyReceiptAllocationOrderCount} / ${g.noReceiptAllocationOrderCount} / ${g.unknownReceiptAllocationOrderCount}</td>
+      <td class="text-right">${sorMoney(g.recordedReceiptAllocationAmount)}</td>
       <td class="text-right">${g.cancelledOrderCount}</td>
       <td>${escapeHtml(g.note || '')}</td>
     </tr>`).join('');
@@ -266,9 +299,12 @@ function sorRenderGroupTable(data) {
       <th class="text-right">已订数量</th><th class="text-right">已出数量</th><th class="text-right">未出数量</th>
       <th class="text-right">已关联收款金额</th><th class="text-right">未覆盖金额</th>
       <th class="text-right">未审核收款（仅单列）</th>
-      <th>已关联 / 部分 / 未关联 / 未知</th><th class="text-right">已取消</th><th>说明</th>
+      <th>已关联 / 部分 / 未关联 / 未知（订单数）</th>
+      <th>收款引用证据：有效 / 仅历史无效 / 无 / 未知（订单数）</th>
+      <th class="text-right">有效收款引用金额（独立证据）</th>
+      <th class="text-right">已取消</th><th>说明</th>
     </tr></thead>
-    <tbody>${rows || '<tr><td colspan="13" class="empty">没有符合筛选条件的「客户 + 币种」分组</td></tr>'}</tbody></table>`;
+    <tbody>${rows || '<tr><td colspan="15" class="empty">没有符合筛选条件的「客户 + 币种」分组</td></tr>'}</tbody></table>`;
 }
 
 /* 本页订单明细（未知一律显示「未知」；未关联 / 未知不得当作未收或逾期） */
@@ -292,6 +328,9 @@ function sorRenderOrderTable(data) {
       <td class="text-right">${sorMoney(o.linkedReceiptAmount)}</td>
       <td class="text-right">${sorMoney(o.pendingReceiptAmount)}</td>
       <td class="text-right">${sorMoney(o.uncoveredAmount)}</td>
+      <td>${sorrAllocationHtml(o)}</td>
+      <td class="text-right">${sorMoney(o.recordedReceiptAllocationAmount)}</td>
+      <td class="text-right">${sorMoney(o.unreferencedOrderAmount)}</td>
       <td class="text-right">${o.otherCurrencyReceiptCount} / ${o.unapprovedReceiptCount} / ${o.unattributedReceiptCount}</td>
       <td>${escapeHtml(o.note || '')}</td>
     </tr>`).join('');
@@ -300,13 +339,16 @@ function sorRenderOrderTable(data) {
       <th class="text-right">订单金额</th>
       <th class="text-right">已订数量</th><th class="text-right">已出数量</th>
       <th class="text-right">待审出库</th><th class="text-right">未出数量</th>
-      <th>收款覆盖</th>
+      <th>收款覆盖（收款申请链接）</th>
       <th class="text-right">已关联收款金额</th><th class="text-right">未审核收款</th>
       <th class="text-right">未覆盖金额（不是应收余额）</th>
+      <th>收款引用证据（ERP-053 登记）</th>
+      <th class="text-right">有效收款引用金额（独立证据）</th>
+      <th class="text-right">引用证据外订单金额（不是应收余额）</th>
       <th class="text-right">他币种 / 未审核 / 客户级（条）</th>
       <th>说明</th>
     </tr></thead>
-    <tbody>${rows || '<tr><td colspan="16" class="empty">没有符合筛选条件的订单（可放宽客户 / 币种 / 日期 / 出货 / 收款链接筛选）</td></tr>'}</tbody></table>`;
+    <tbody>${rows || '<tr><td colspan="19" class="empty">没有符合筛选条件的订单（可放宽客户 / 币种 / 日期 / 出货 / 收款链接筛选）</td></tr>'}</tbody></table>`;
 }
 
 /* 未关联收款证据按币种汇总：只按收款单自身币种汇总，绝不并入订单侧金额 */

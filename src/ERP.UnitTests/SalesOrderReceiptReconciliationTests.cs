@@ -517,7 +517,8 @@ public class SalesOrderReceiptReconciliationTests
         Assert.Equal(1, single.Total);
         // 常数级访问：订单集合（筛选 + 计数 + 分页共用同一查询）+ 本页订单 + 客户名 + 逐单派生 8 次
         // （订单明细 / 出库主表 / 出库明细 / 定金申请 / 货款申请 / 收款单 / 装柜结算 / 散货结算）+ 未关联收款证据 1 次
-        Assert.Equal(12, singleReads);
+        // + ERP-054 收款引用证据聚合 4 次（订单 + 持久化引用行 + 收款单 + 收款单侧有效引用合计）
+        Assert.Equal(16, singleReads);
 
         // 再补 300 张订单（跨多页）：同一报表的数据集访问次数必须保持不变（无逐行查库 / 无 N+1）
         for (var i = 2; i <= 301; i++)
