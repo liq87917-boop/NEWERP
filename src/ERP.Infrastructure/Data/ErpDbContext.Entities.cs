@@ -79,4 +79,8 @@ public partial class ErpDbContext
 
     /// <summary>销售订单变更申请明细（拟议明细行；作为来源明细快照与拟议值的对照来源）</summary>
     public DbSet<SalesOrderChangeRequestDetail> SalesOrderChangeRequestDetails => Set<SalesOrderChangeRequestDetail>();
+
+    // ============ 供应商付款引用登记（ERP-049：付款单 → 采购订单 的引用证据行） ============
+    /// <summary>付款引用行（付款单 / 供应商 / 采购订单快照 + 引用金额 + 作废留痕；有效行唯一性由过滤唯一索引兜底）</summary>
+    public DbSet<SupplierPaymentAllocation> SupplierPaymentAllocations => Set<SupplierPaymentAllocation>();
 }

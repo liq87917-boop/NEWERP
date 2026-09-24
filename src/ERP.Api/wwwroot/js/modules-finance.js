@@ -43,6 +43,11 @@ Object.assign(MODULES, {
       { key: 'paymentMethod', label: '付款方式', type: 'select', options: PAYMENT_OPTS },
       { key: 'bankAccount', label: '银行账户' },
     ],
+    /* ERP-049：付款引用登记入口（工具栏，始终可见；登记「这笔付款指向哪几张采购订单」的引用证据，
+       只允许同供应商 + 同币种且未取消的采购订单；不是付款凭证 / 应付账款核销 / 发票核销 / 税务判断 / 供应商余额） */
+    extraActions: [
+      { label: '💳 付款引用', title: '登记本页付款单指向的采购订单引用证据，并查看付款单侧已引用 / 未引用金额（只写引用证据，不会执行付款、不会结算或核销）', onclick: 'openSupplierPaymentAllocationRegister()' },
+    ],
   },
   'container-settlement': {
     title: '装柜结算单', api: '/api/finance/container-settlements', canSubmit: true,

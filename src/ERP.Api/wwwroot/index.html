@@ -261,6 +261,9 @@
   <script src="/js/sales-order-change-requests.js"></script>
   <!-- ERP-048：采购订单发票证据（列表派生列「发票证据」+ 行操作详情；只读派生，按页有界批量取数，不逐行查库） -->
   <script src="/js/purchase-order-invoice-evidence.js"></script>
+  <!-- ERP-049：供应商付款引用登记册（付款单 → 采购订单 的引用证据；只允许同供应商 + 同币种且未取消的订单，
+       有效行合计不得超过付款单金额，更正走显式作废；不会执行付款 / 结算 / 核销，也不改写付款单与采购订单） -->
+  <script src="/js/supplier-payment-allocations.js"></script>
   <script src="/js/app.js"></script>
 </body>
 </html>

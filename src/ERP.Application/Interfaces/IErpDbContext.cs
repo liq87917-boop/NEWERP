@@ -87,6 +87,15 @@ public interface IErpDbContext
     /// <summary>销售订单变更申请明细（拟议明细行；已提交 / 已取消申请一律只读，不做硬删除）</summary>
     DbSet<SalesOrderChangeRequestDetail> SalesOrderChangeRequestDetails { get; }
 
+    // ============ 供应商付款引用登记（ERP-049：付款单 → 采购订单 的引用证据行） ============
+
+    /// <summary>
+    /// 供应商付款单 → 采购订单 付款引用（分摊）证据行（ERP-049）：只登记「某张既有付款单把多少钱指向了哪几张
+    /// 既有采购订单」，保留付款单 / 供应商 / 订单快照；不是付款凭证、不是应付账款核销、不是发票核销、
+    /// 不是税务判断、也不是供应商余额，且不改写付款单与采购订单
+    /// </summary>
+    DbSet<SupplierPaymentAllocation> SupplierPaymentAllocations { get; }
+
     // ============ 询价管理 ============
     DbSet<Inquiry> Inquiries { get; }
     DbSet<InquiryDetail> InquiryDetails { get; }

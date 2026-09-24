@@ -1992,5 +1992,78 @@ IF NOT EXISTS (SELECT 1 FROM sys.foreign_keys
         ADD CONSTRAINT FK_SalesOrderChangeRequestDetails_Request
         FOREIGN KEY (ChangeRequestId) REFERENCES db_owner.SalesOrderChangeRequests(Id);");
 
+        // 34. 供应商付款引用登记（ERP-049：付款单 → 采购订单 的引用证据行）
+        //     34.1 只建「付款引用行」一张表与其索引：**不含任何 UPDATE / 回填语句**，
+        //          既有付款单、采购订单与供应商不因本段产生任何变化（没有引用数据时行为与历史完全一致）；
+        //     34.2 有效引用行唯一：UX_SupplierPaymentAllocations_PaymentOrder
+        //          （付款单 + 采购订单），过滤 IsDeleted = 0 AND Status <> 2 ——
+        //          已作废行保留可读但不占用额度（作废后可重新登记同一订单的有效引用）；
+        //     34.3 付款单 / 供应商 / 采购订单只保存服务端写入的快照，**刻意不建**任何外键，也不在付款单 /
+        //          采购订单上加列 —— 付款单软删除、订单软删除或取消、供应商停用或改名都不影响历史证据可读；
+        //     34.4 本段只建本模块一张表与其索引，不改写付款单、采购订单、发票与发票关联、库存与库存成本、
+        //          退税、费用或供应商数据，也不执行任何付款 / 记账 / 核销语句。
+        await db.Database.ExecuteSqlRawAsync(@"
+IF OBJECT_ID('db_owner.SupplierPaymentAllocations') IS NULL
+BEGIN
+    CREATE TABLE db_owner.SupplierPaymentAllocations (
+        Id BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+        PaymentId BIGINT NOT NULL,
+        PaymentNo NVARCHAR(50) NOT NULL DEFAULT N'',
+        PaymentDate DATETIME2 NOT NULL,
+        PaymentStatus INT NOT NULL DEFAULT 0,
+        PaymentStatusText NVARCHAR(30) NOT NULL DEFAULT N'',
+        PaymentAmount DECIMAL(18,2) NOT NULL DEFAULT 0,
+        PurchaseOrderId BIGINT NOT NULL,
+        OrderNo NVARCHAR(50) NOT NULL DEFAULT N'',
+        OrderDate DATETIME2 NOT NULL,
+        OrderStatus INT NOT NULL DEFAULT 0,
+        OrderCurrency NVARCHAR(20) NOT NULL DEFAULT N'CNY',
+        SupplierId BIGINT NOT NULL,
+        SupplierCode NVARCHAR(50) NOT NULL DEFAULT N'',
+        SupplierName NVARCHAR(200) NOT NULL DEFAULT N'',
+        AllocatedAmount DECIMAL(18,2) NOT NULL DEFAULT 0,
+        Currency NVARCHAR(20) NOT NULL DEFAULT N'CNY',
+        Remark NVARCHAR(500) NOT NULL DEFAULT N'',
+        Status INT NOT NULL DEFAULT 1,
+        AllocatedAt DATETIME2 NOT NULL DEFAULT GETDATE(),
+        VoidedAt DATETIME2 NULL,
+        VoidReason NVARCHAR(500) NOT NULL DEFAULT N'',
+        CreatedAt DATETIME2 NOT NULL DEFAULT GETDATE(),
+        CreatedBy BIGINT NULL,
+        UpdatedAt DATETIME2 NULL,
+        UpdatedBy BIGINT NULL,
+        IsDeleted BIT NOT NULL DEFAULT 0,
+        RowVersion ROWVERSION NOT NULL
+    );
+END
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes
+               WHERE name = 'UX_SupplierPaymentAllocations_PaymentOrder'
+                 AND object_id = OBJECT_ID('db_owner.SupplierPaymentAllocations'))
+    CREATE UNIQUE INDEX UX_SupplierPaymentAllocations_PaymentOrder
+        ON db_owner.SupplierPaymentAllocations(PaymentId, PurchaseOrderId)
+        WHERE IsDeleted = 0 AND Status <> 2;
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes
+               WHERE name = 'IX_SupplierPaymentAllocations_PaymentId_Status'
+                 AND object_id = OBJECT_ID('db_owner.SupplierPaymentAllocations'))
+    CREATE INDEX IX_SupplierPaymentAllocations_PaymentId_Status
+        ON db_owner.SupplierPaymentAllocations(PaymentId, Status)
+        WHERE IsDeleted = 0;
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes
+               WHERE name = 'IX_SupplierPaymentAllocations_PurchaseOrderId'
+                 AND object_id = OBJECT_ID('db_owner.SupplierPaymentAllocations'))
+    CREATE INDEX IX_SupplierPaymentAllocations_PurchaseOrderId
+        ON db_owner.SupplierPaymentAllocations(PurchaseOrderId)
+        WHERE IsDeleted = 0;
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes
+               WHERE name = 'IX_SupplierPaymentAllocations_Status_AllocatedAt'
+                 AND object_id = OBJECT_ID('db_owner.SupplierPaymentAllocations'))
+    CREATE INDEX IX_SupplierPaymentAllocations_Status_AllocatedAt
+        ON db_owner.SupplierPaymentAllocations(Status, AllocatedAt)
+        WHERE IsDeleted = 0;");
+
     }
 }

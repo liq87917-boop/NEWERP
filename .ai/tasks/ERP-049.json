@@ -1,7 +1,7 @@
 {
   "id": "ERP-049",
   "title": "Add traceable supplier-payment allocations to Purchase Orders",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "medium",
   "description": "Add an explicit allocation register between existing supplier-payment evidence and Purchase Orders so users can record which orders a payment document refers to without creating or executing a payment. Reuse the repository's existing supplier-payment document and Purchase Order records; do not create a second payment master, infer allocations, mark invoices or orders as settled, move funds, execute production SQL, deploy, or release.",
   "acceptance_criteria": [
@@ -51,5 +51,5 @@
     "status": "not_required",
     "reason": "Repository allocation evidence and non-production test schema only. Real payment execution, production database changes, irreversible finance operations, deployment and release remain behind mandatory human gates."
   },
-  "attempts": 0
+  "attempts": 1
 }

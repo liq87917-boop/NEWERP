@@ -548,6 +548,53 @@ public partial class ErpDbContext
         modelBuilder.Entity<PurchaseReturnDetail>()
             .HasOne<PurchaseReturn>().WithMany(o => o.Details)
             .HasForeignKey(d => d.PurchaseReturnId).OnDelete(DeleteBehavior.Cascade);
+
+        // ============ ERP-049：供应商付款引用登记（付款单 → 采购订单 的引用证据行） ============
+        // 设计口径：
+        //   1. 本表只登记**引用证据**：不建应付账款 / 核销 / 账龄 / 税务表，不生成凭证、收付款或结算单，
+        //      也不改写付款单状态 / 金额 / 币种 / 付款方式 / 银行账户与采购订单状态 / 到货进度 / 结算进度；
+        //   2. 有效引用行唯一：同一「付款单 + 采购订单」在**有效**（Status <> 2）记录内唯一
+        //      （UX_SupplierPaymentAllocations_PaymentOrder，过滤 IsDeleted = 0 AND Status <> 2）——
+        //      已作废行保留可读但不占用额度，可重新登记新行；
+        //   3. 付款单 / 供应商 / 采购订单只保存**服务端写入**的快照（单号 / 日期 / 状态 / 金额 / 币种 / 编码名称）；
+        //      **刻意不建**到采购订单与供应商的外键：订单软删除或取消、供应商停用或改名都不影响历史证据可读；
+        //     4. 金额 DECIMAL(18,2)（币种精度最多 2 位，JPY 等 0 位由服务端按币种口径取整），
+        //      与 SchemaUpgrader 第 34 段建表类型一致；
+        //   5. **刻意不建任何外键**（付款单只做软删除；采购订单与供应商可能被软删除 / 取消 / 改名）——
+        //      本表只保存服务端快照，历史引用证据必须始终可读，也不参与付款单与采购订单的计算；
+        //   6. 索引与 SchemaUpgrader 第 34 段同名同过滤条件，供付款单 / 采购订单侧有界检索。
+        modelBuilder.Entity<SupplierPaymentAllocation>().Property(x => x.PaymentNo).HasMaxLength(50);
+        modelBuilder.Entity<SupplierPaymentAllocation>().Property(x => x.PaymentStatusText).HasMaxLength(30);
+        modelBuilder.Entity<SupplierPaymentAllocation>().Property(x => x.PaymentAmount).HasPrecision(18, 2);
+        modelBuilder.Entity<SupplierPaymentAllocation>().Property(x => x.OrderNo).HasMaxLength(50);
+        modelBuilder.Entity<SupplierPaymentAllocation>().Property(x => x.OrderCurrency).HasMaxLength(20);
+        modelBuilder.Entity<SupplierPaymentAllocation>().Property(x => x.SupplierCode).HasMaxLength(50);
+        modelBuilder.Entity<SupplierPaymentAllocation>().Property(x => x.SupplierName).HasMaxLength(200);
+        modelBuilder.Entity<SupplierPaymentAllocation>().Property(x => x.AllocatedAmount).HasPrecision(18, 2);
+        modelBuilder.Entity<SupplierPaymentAllocation>().Property(x => x.Currency).HasMaxLength(20);
+        modelBuilder.Entity<SupplierPaymentAllocation>().Property(x => x.Remark).HasMaxLength(500);
+        modelBuilder.Entity<SupplierPaymentAllocation>().Property(x => x.VoidReason).HasMaxLength(500);
+
+        // 同一张付款单内同一张采购订单只能有一条有效引用行（重复提交由服务端先行拒绝，索引为并发兜底）
+        modelBuilder.Entity<SupplierPaymentAllocation>()
+            .HasIndex(x => new { x.PaymentId, x.PurchaseOrderId })
+            .IsUnique().HasDatabaseName("UX_SupplierPaymentAllocations_PaymentOrder")
+            .HasFilter("IsDeleted = 0 AND Status <> 2");
+
+        modelBuilder.Entity<SupplierPaymentAllocation>().HasIndex(x => new { x.PaymentId, x.Status })
+            .HasDatabaseName("IX_SupplierPaymentAllocations_PaymentId_Status")
+            .HasFilter("IsDeleted = 0");
+
+        modelBuilder.Entity<SupplierPaymentAllocation>().HasIndex(x => x.PurchaseOrderId)
+            .HasDatabaseName("IX_SupplierPaymentAllocations_PurchaseOrderId")
+            .HasFilter("IsDeleted = 0");
+
+        modelBuilder.Entity<SupplierPaymentAllocation>().HasIndex(x => new { x.Status, x.AllocatedAt })
+            .HasDatabaseName("IX_SupplierPaymentAllocations_Status_AllocatedAt")
+            .HasFilter("IsDeleted = 0");
+
+        // 刻意不建任何外键（与 ERP-045 / ERP-047 一致）：付款单只做软删除，采购订单 / 供应商可能被软删除、
+        // 取消或改名 —— 本表只保存服务端快照，历史引用证据必须始终可读，且不参与付款单与采购订单的计算。
     }
 
     /// <summary>保存变更：自动填充审计字段</summary>
