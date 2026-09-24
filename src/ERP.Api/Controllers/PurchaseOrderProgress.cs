@@ -237,6 +237,13 @@ public static class PurchaseOrderProgress
         };
     }
 
+    /// <summary>
+    /// 复用同一权威结算引用链（ERP-028 财务核对）：由调用方传入已加载的采购订单，返回结算引用状态与金额。
+    /// 与 <see cref="ForPurchaseOrderAsync"/> 使用同一派生逻辑，避免「订单执行进度」与「订单财务核对」两处口径分叉。
+    /// </summary>
+    public static Task<PurchaseOrderSettlementProgress> SettlementForOrderAsync(IErpDbContext db, PurchaseOrder order)
+        => BuildSettlementAsync(db, order);
+
     /// <summary>收货进度派生：固定 2 次查询（入库主表 + 明细）</summary>
     private static async Task<ReceiptResult> BuildReceiptsAsync(IErpDbContext db, PurchaseOrder order)
     {

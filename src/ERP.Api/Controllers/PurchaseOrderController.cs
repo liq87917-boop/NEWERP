@@ -67,6 +67,16 @@ public class PurchaseOrderController : DocumentControllerBase<PurchaseOrder>
     public async Task<IActionResult> Progress(long id)
         => Ok(ApiResponse<PurchaseOrderProgressView>.Success(
             await PurchaseOrderProgress.ForPurchaseOrderAsync(Db, id)));
+    /// <summary>
+    /// 财务核对（ERP-028，只读派生）：结算金额复用 ERP-026 的权威引用链（付款单 → 货款申请单 → 本单归属销售订单），
+    /// 并按既有引用字段列出费用单、客诉单、收款单与结算单；无法按权威引用归属的记录仅列出，金额未知为 null（不推断）。
+    /// </summary>
+    [HttpGet("{id:long}/finance-reconciliation")]
+    public async Task<IActionResult> FinanceReconciliation(long id)
+        => Ok(ApiResponse<OrderFinanceReconciliationView>.Success(
+            await OrderFinanceReconciliation.ForPurchaseOrderAsync(Db, id)));
+
+
 
     /// <summary>创建</summary>
     [HttpPost]

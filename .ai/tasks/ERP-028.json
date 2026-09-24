@@ -1,7 +1,7 @@
 {
   "id": "ERP-028",
   "title": "Add read-only order finance reconciliation view",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "medium",
   "description": "Add a read-only reconciliation view that correlates existing Sales/Purchase Orders with existing expense, receipt/payment or settlement records where authoritative references already exist. This task must not create schema, rewrite historical data, or infer links that are not supported by persisted references.",
   "acceptance_criteria": [
@@ -12,15 +12,38 @@
     "Unit/integration tests cover linked, partially linked and unlinked histories; safe validation passes.",
     "Browser/UI acceptance is recorded as deferred during development according to project policy."
   ],
-  "allowed_paths": ["src/ERP.Application/**", "src/ERP.Api/Controllers/**", "src/ERP.Api/wwwroot/**", "src/ERP.UnitTests/**", "src/ERP.IntegrationTests/**", "docs/**", ".ai/**"],
-  "depends_on": ["ERP-022"],
+  "allowed_paths": [
+    "src/ERP.Application/**",
+    "src/ERP.Api/Controllers/**",
+    "src/ERP.Api/wwwroot/**",
+    "src/ERP.UnitTests/**",
+    "src/ERP.IntegrationTests/**",
+    "docs/**",
+    ".ai/**"
+  ],
+  "depends_on": [
+    "ERP-022"
+  ],
   "auto_start": true,
   "requires_human_approval": false,
   "max_attempts": 3,
   "validation_profile": "safe",
   "completion_mode": "browser",
-  "browser_acceptance": {"required": true, "scenarios": ["Open an order with linked finance records and inspect reconciliation.", "Open an order without authoritative finance linkage and verify unknown/unlinked presentation."], "test_filter": "Collection=UiTests", "minimum_screenshots": 2},
-  "human_gate": {"required": false, "level": "L2", "status": "not_required", "reason": "Read-only correlation over existing records; no production schema, data rewrite, deployment or release."},
-  "attempts": 0,
+  "browser_acceptance": {
+    "required": true,
+    "scenarios": [
+      "Open an order with linked finance records and inspect reconciliation.",
+      "Open an order without authoritative finance linkage and verify unknown/unlinked presentation."
+    ],
+    "test_filter": "Collection=UiTests",
+    "minimum_screenshots": 2
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L2",
+    "status": "not_required",
+    "reason": "Read-only correlation over existing records; no production schema, data rewrite, deployment or release."
+  },
+  "attempts": 1,
   "created_at": "2026-09-24T12:17:25Z"
 }

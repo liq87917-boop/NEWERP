@@ -58,6 +58,16 @@ public class SalesOrderController : DocumentControllerBase<SalesOrder>
         => Ok(ApiResponse<List<OrderTimelineEvent>>.Success(
             await OrderExecutionTimeline.ForSalesOrderAsync(Db, id)));
 
+    /// <summary>
+    /// 财务核对（ERP-028，只读派生）：按既有引用字段把本单与定金 / 货款申请单、付款单、费用单、客诉单、
+    /// 收款单与结算单关联；只有「权威引用 + 已审核 + 币种一致」的记录计入金额，其余仅列出，金额未知为 null（不推断）。
+    /// </summary>
+    [HttpGet("{id:long}/finance-reconciliation")]
+    public async Task<IActionResult> FinanceReconciliation(long id)
+        => Ok(ApiResponse<OrderFinanceReconciliationView>.Success(
+            await OrderFinanceReconciliation.ForSalesOrderAsync(Db, id)));
+
+
     /// <summary>创建</summary>
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] SalesOrder entity)
