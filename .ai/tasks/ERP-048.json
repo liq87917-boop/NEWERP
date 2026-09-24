@@ -1,0 +1,53 @@
+{
+  "id": "ERP-048",
+  "title": "Expose invoice evidence summary in Purchase Order workflows",
+  "status": "pending",
+  "risk_level": "low",
+  "description": "Expose a read-only invoice-evidence summary in existing Purchase Order list and detail workflows by reusing ERP-043 persisted allocations and ERP-044 reconciliation semantics. Do not create another invoice schema, infer invoice links, change Purchase Order status, claim payment settlement or payable balance, execute production SQL, deploy, or release.",
+  "acceptance_criteria": [
+    "Purchase Order detail shows recorded non-void allocated invoice amount, remaining uninvoiced amount, invoice count and explicit coverage state using only persisted ERP-043 allocation rows.",
+    "Purchase Order list exposes a bounded invoice-coverage summary without issuing a database query per row.",
+    "Draft and voided invoice evidence is distinguished from active recorded evidence and does not inflate the active invoiced total; historical evidence remains inspectable through an explicit detail view.",
+    "Supplier and currency mismatches are displayed as invalid or unavailable historical evidence and are never silently converted, merged or reassigned.",
+    "Orders with no invoice evidence remain readable and display no evidence or unknown as appropriate rather than paid, settled or overdue.",
+    "The UI clearly labels the values as purchase-invoice evidence and not accounts-payable balance, payment authorization, tax eligibility or settlement status.",
+    "Invoice summaries do not alter Purchase Order status, receipt progress, settlement-progress text, inventory cost, payments, supplier balance, expenses or tax-refund records.",
+    "Queries are bounded and reuse the authoritative amount and currency rules from ERP-043/ERP-044 instead of duplicating reconciliation logic.",
+    "Unit/integration tests cover no evidence, full and partial allocation, multiple invoices, draft and void history, mismatched historical evidence, bounded list queries and non-mutation; safe validation passes.",
+    "Browser/UI acceptance is recorded as deferred during development according to project policy."
+  ],
+  "allowed_paths": [
+    "src/ERP.Application/**",
+    "src/ERP.Api/Controllers/**",
+    "src/ERP.Api/wwwroot/**",
+    "src/ERP.UnitTests/**",
+    "src/ERP.IntegrationTests/**",
+    "docs/**",
+    ".ai/**"
+  ],
+  "depends_on": [
+    "ERP-043",
+    "ERP-044"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "browser",
+  "browser_acceptance": {
+    "required": true,
+    "scenarios": [
+      "Open a Purchase Order with partial recorded invoice allocation and verify the linked amount, remaining uninvoiced amount, count and coverage state match the invoice register.",
+      "Inspect an order with voided or no invoice evidence and verify it is not presented as payable, paid, settled or overdue and that no Purchase Order field is changed."
+    ],
+    "test_filter": "Collection=UiTests",
+    "minimum_screenshots": 2
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Read-only presentation of existing invoice allocations. No production mutation, payable posting, payment, tax action, deployment or release is authorized."
+  },
+  "attempts": 0
+}

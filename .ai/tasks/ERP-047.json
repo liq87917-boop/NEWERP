@@ -1,0 +1,55 @@
+{
+  "id": "ERP-047",
+  "title": "Add immutable Sales Order change-request register",
+  "status": "pending",
+  "risk_level": "medium",
+  "description": "Add an explicit Sales Order change-request register that captures a proposed order snapshot without applying it to the authoritative Sales Order. A request may be drafted, submitted and cancelled for audit and later human review, but this task must not define approval thresholds, approve or apply changes, mutate shipment or finance records, execute production SQL, deploy, or release.",
+  "acceptance_criteria": [
+    "Users can create a draft change request from an existing non-deleted Sales Order, receiving a new request number and a complete proposed header/detail snapshot while the source order remains unchanged.",
+    "The request records the source Sales Order identifier and number, source status, source update timestamp or deterministic snapshot marker, request reason and bounded proposed header/detail values.",
+    "Draft proposed values use the existing authoritative Sales Order validation and server-side amount calculation rules rather than trusting client totals or introducing a second calculation engine.",
+    "Submitting a request freezes its proposed snapshot and records submission time; submitted requests cannot be edited or hard-deleted, and cancellation preserves the original and proposed evidence with a reason.",
+    "The request explicitly reports when the source Sales Order has changed since the captured snapshot, but it does not overwrite, merge or silently refresh the proposal.",
+    "List and detail workflows show source versus proposed values and status Draft, Submitted or Cancelled without presenting any request as approved or applied.",
+    "Creating, editing, submitting or cancelling a request does not change the Sales Order, quotation, stock-out, shipment, receipt, commission, inventory, Trade Document or finance state.",
+    "Existing Sales Orders remain valid without change requests and no request-time or production backfill is performed.",
+    "Repository schema changes are idempotent and validated only through permitted local or test-database paths; applying a request, production schema execution, deployment and release remain outside scope and behind separate governance.",
+    "Unit/integration tests cover snapshot isolation, server recalculation, source-change detection, submit immutability, cancellation history, legacy orders and non-mutation of downstream records; safe validation passes.",
+    "Browser/UI acceptance is recorded as deferred during development according to project policy."
+  ],
+  "allowed_paths": [
+    "src/ERP.Domain/**",
+    "src/ERP.Application/**",
+    "src/ERP.Infrastructure/**",
+    "src/ERP.Api/Controllers/**",
+    "src/ERP.Api/wwwroot/**",
+    "src/ERP.UnitTests/**",
+    "src/ERP.IntegrationTests/**",
+    "docs/**",
+    ".ai/**"
+  ],
+  "depends_on": [
+    "ERP-022"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "browser",
+  "browser_acceptance": {
+    "required": true,
+    "scenarios": [
+      "Create a Sales Order change request, edit proposed header and detail values, and verify calculated totals change only on the proposal while the source order remains unchanged.",
+      "Submit the request, verify it becomes immutable, then inspect source-change detection and cancellation history without any automatic approval or application."
+    ],
+    "test_filter": "Collection=UiTests",
+    "minimum_screenshots": 2
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L2",
+    "status": "not_required",
+    "reason": "Repository-only proposal and audit trail. No request is approved or applied, and no production database action, downstream mutation, deployment or release is authorized."
+  },
+  "attempts": 0
+}

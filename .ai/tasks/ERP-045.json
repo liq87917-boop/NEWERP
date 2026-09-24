@@ -1,0 +1,55 @@
+{
+  "id": "ERP-045",
+  "title": "Add unified business-document attachment reference register",
+  "status": "pending",
+  "risk_level": "medium",
+  "description": "Add a unified metadata-only attachment reference register for existing Sales Orders, Purchase Orders, Container Loading Lists and Trade Documents. It may index an already authorized opaque object or document reference, but it must not upload, download, preview, fetch, overwrite or delete any OSS object, expose credentials, accept executable markup, infer source ownership, migrate legacy FileNote values, execute production SQL, deploy, or release. Actual production storage integration remains a separate human-gated activity.",
+  "acceptance_criteria": [
+    "Users can register bounded attachment-reference metadata against an existing Sales Order, Purchase Order, Container Loading List or Trade Document, including category, safe display name, opaque reference identifier, optional content type, byte size, checksum and notes.",
+    "The server validates the allowlisted parent type and authoritative parent identifier, rejects missing or deleted parents, and stores bounded parent number and type snapshots so historical entries remain identifiable.",
+    "References are treated as opaque metadata: arbitrary URLs, HTML, script, data schemes and filesystem traversal values are rejected or displayed only as unavailable text, and the application never performs a server-side fetch or embeds untrusted markup.",
+    "Creating a reference requires an explicit source-authorization acknowledgement recorded with the metadata; the acknowledgement does not grant storage access or assert that production data has been qualified by the system.",
+    "Users can void an incorrect reference with a reason while preserving its original metadata and history; hard deletion, remote-object deletion and silent replacement are not provided.",
+    "Document detail workflows expose a bounded attachment-reference list and clearly label entries as metadata references rather than proof that a file is available, safe, authentic or authorized for download.",
+    "Existing TradeDocument FileNote values and Product image slots remain unchanged and are not automatically imported, rewritten or treated as authorized attachments.",
+    "Normal list queries are bounded or paged and avoid per-row database queries; creating or voiding a reference does not mutate the parent document, inventory, finance, shipment or approval state.",
+    "Repository schema changes are idempotent and validated only through permitted local or test-database paths; production database and production OSS operations remain behind mandatory human gates.",
+    "Unit/integration tests cover every allowed parent type, invalid parents, bounded metadata, unsafe references, authorization acknowledgement, void history, legacy compatibility and parent non-mutation; safe validation passes.",
+    "Browser/UI acceptance is recorded as deferred during development according to project policy."
+  ],
+  "allowed_paths": [
+    "src/ERP.Domain/**",
+    "src/ERP.Application/**",
+    "src/ERP.Infrastructure/**",
+    "src/ERP.Api/Controllers/**",
+    "src/ERP.Api/wwwroot/**",
+    "src/ERP.UnitTests/**",
+    "src/ERP.IntegrationTests/**",
+    "docs/**",
+    ".ai/**"
+  ],
+  "depends_on": [
+    "ERP-019"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "browser",
+  "browser_acceptance": {
+    "required": true,
+    "scenarios": [
+      "Open an existing Sales Order, register an authorized opaque attachment reference, and verify its bounded metadata appears without uploading, fetching or previewing a file.",
+      "Attempt an unsafe URL or traversal reference and verify it is rejected, then void a valid reference and verify its history remains visible while the parent document is unchanged."
+    ],
+    "test_filter": "Collection=UiTests",
+    "minimum_screenshots": 2
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L2",
+    "status": "not_required",
+    "reason": "Repository metadata and non-production test schema only. Production OSS access, file transfer, credential use, production schema execution, deployment and release are not authorized."
+  },
+  "attempts": 0
+}

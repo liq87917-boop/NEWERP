@@ -1,0 +1,52 @@
+{
+  "id": "ERP-046",
+  "title": "Add read-only customer order and receipt reconciliation report",
+  "status": "pending",
+  "risk_level": "medium",
+  "description": "Add a read-only operational reconciliation report over existing Sales Orders, authoritative shipment progress and receipt links already exposed by ERP-032. The report must distinguish ordered, shipped, linked-receipt, unlinked and unknown evidence without claiming to be an accounts-receivable ledger, customer statement of account, payment allocation engine or aging report. Do not infer links, settle balances, rewrite orders or receipts, execute production SQL, deploy, or release.",
+  "acceptance_criteria": [
+    "The report groups active Sales Order and receipt evidence by Customer and currency and never combines different currencies into one monetary total.",
+    "For each Sales Order, ordered and shipment quantities reuse the authoritative ERP-032 rules, while linked receipt amounts use only persisted authoritative references already supported by that workflow.",
+    "Receipts without an authoritative order reference are shown separately as unlinked evidence and are never matched by Customer name, order number text, date or amount similarity.",
+    "Missing, ambiguous or unavailable receipt coverage is displayed as unknown and is not converted to zero, paid, outstanding or overdue.",
+    "Cancelled or deleted operational records are excluded from active totals but remain available only where an existing historical status filter can represent them without rewriting source data.",
+    "The UI and documentation clearly state that the report is an operational order/receipt reconciliation view, not an accounts-receivable ledger, legal customer statement, payment authorization, settlement result or aging report.",
+    "Users can filter by Customer, currency, order date, shipment state and receipt-linkage state; normal queries are bounded or paged and avoid per-row database queries.",
+    "The report is read-only and does not update Sales Orders, stock-out records, receipts, Customer credit state, inventory, finance records or tax records.",
+    "Unit/integration tests cover multiple Customers and currencies, full and partial shipment, linked and unlinked receipts, unknown coverage, filters, paging and source-record non-mutation; safe validation passes.",
+    "Browser/UI acceptance is recorded as deferred during development according to project policy."
+  ],
+  "allowed_paths": [
+    "src/ERP.Application/**",
+    "src/ERP.Api/Controllers/**",
+    "src/ERP.Api/wwwroot/**",
+    "src/ERP.UnitTests/**",
+    "src/ERP.IntegrationTests/**",
+    "docs/**",
+    ".ai/**"
+  ],
+  "depends_on": [
+    "ERP-032"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "browser",
+  "browser_acceptance": {
+    "required": true,
+    "scenarios": [
+      "Open the customer order/receipt reconciliation report and inspect an order with partial shipment and authoritative partial receipt linkage in one currency.",
+      "Filter for unlinked or unknown receipt evidence and verify it is not presented as paid, outstanding, overdue or automatically matched to an order."
+    ],
+    "test_filter": "Collection=UiTests",
+    "minimum_screenshots": 2
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L2",
+    "status": "not_required",
+    "reason": "Read-only reporting over repository records. No production mutation, receipt settlement, customer credit decision, deployment or release is authorized."
+  },
+  "attempts": 0
+}
