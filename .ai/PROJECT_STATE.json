@@ -1,9 +1,9 @@
 {
   "project": "NEWERP",
   "controller": "gpt_conversation",
-  "phase": "ready",
+  "phase": "replenishing",
   "current_task": null,
-  "last_completed_task": "ERP-023",
+  "last_completed_task": "ERP-024",
   "last_reviewed_task": "ERP-005",
   "blocker": null,
   "external_actions": [
@@ -38,15 +38,15 @@
     "production_deployment_or_release": "required",
     "irreversible_data_operations": "required"
   },
-  "finish_reason": "browser_deferred",
-  "updated_at": "2026-09-24T12:02:01.018156Z",
+  "finish_reason": "awaiting_gpt_replenishment",
+  "updated_at": "2026-09-24T12:05:57.432143Z",
   "rolling_queue": {
     "enabled": true,
     "batch_size": 4,
     "low_watermark": 2,
     "acceptance_interval_seconds": 3600,
     "replenishment_owner": "GPT",
-    "status": "batch_ready"
+    "status": "awaiting_replenishment"
   },
   "last_failed_task": "ERP-021"
 }
