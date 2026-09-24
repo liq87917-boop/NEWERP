@@ -226,6 +226,91 @@ public partial class ErpDbContext
             .HasDatabaseName("IX_ContainerLoadingListParticipants_CustomerId")
             .HasFilter("IsDeleted = 0");
 
+        // ============ ERP-042：装柜费用分摊批次与分摊行（既有费用单之上的留痕层） ============
+        // 设计口径：
+        //   1. 分摊结果仍然是既有 FinanceExpense 行（一参与方一行），本两张表只记录
+        //      「这次分摊是谁、按什么方法 / 基数 / 比例生成的」以及它分摊的来源费用 —— 不建第二套账务引擎；
+        //   2. 有效批次唯一性：同一「来源费用 + 装柜清单 + 分摊方法」最多一条**有效**批次
+        //      （UX_FinanceExpenseAllocationBatches_SourceLive，过滤 Status = 1），作废后可重新生成；
+        //   3. 分摊行在同一批次内对同一参与方不重复（UX_FinanceExpenseAllocationLines_BatchParticipant）；
+        //   4. 金额 2 位小数、比例 4 位小数、汇率 6 位小数，与 SchemaUpgrader 第 30 段的建表类型一致；
+        //   5. FinanceExpense 侧的批次 / 来源列**可空**：历史行保持 NULL，读取侧按留痕分类显式标注，绝不回填。
+        modelBuilder.Entity<FinanceExpenseAllocationBatch>().Property(x => x.BatchNo).HasMaxLength(50);
+        modelBuilder.Entity<FinanceExpenseAllocationBatch>().Property(x => x.SourceExpenseNo).HasMaxLength(50);
+        modelBuilder.Entity<FinanceExpenseAllocationBatch>().Property(x => x.LoadingListNo).HasMaxLength(50);
+        modelBuilder.Entity<FinanceExpenseAllocationBatch>().Property(x => x.ContainerNo).HasMaxLength(50);
+        modelBuilder.Entity<FinanceExpenseAllocationBatch>().Property(x => x.AllocationMethod).HasMaxLength(30);
+        modelBuilder.Entity<FinanceExpenseAllocationBatch>().Property(x => x.BasisKind).HasMaxLength(30);
+        modelBuilder.Entity<FinanceExpenseAllocationBatch>().Property(x => x.Currency).HasMaxLength(20);
+        modelBuilder.Entity<FinanceExpenseAllocationBatch>().Property(x => x.ExchangeRate).HasPrecision(18, 6);
+        modelBuilder.Entity<FinanceExpenseAllocationBatch>().Property(x => x.SourceAmount).HasPrecision(18, 2);
+        modelBuilder.Entity<FinanceExpenseAllocationBatch>().Property(x => x.AllocatedTotal).HasPrecision(18, 2);
+        modelBuilder.Entity<FinanceExpenseAllocationBatch>().Property(x => x.VoidReason).HasMaxLength(500);
+        modelBuilder.Entity<FinanceExpenseAllocationBatch>().Property(x => x.Remark).HasMaxLength(500);
+
+        modelBuilder.Entity<FinanceExpenseAllocationBatch>().HasIndex(x => x.BatchNo)
+            .IsUnique().HasDatabaseName("UX_FinanceExpenseAllocationBatches_BatchNo");
+
+        modelBuilder.Entity<FinanceExpenseAllocationBatch>()
+            .HasIndex(x => new { x.SourceExpenseId, x.LoadingListId, x.AllocationMethod })
+            .IsUnique().HasDatabaseName("UX_FinanceExpenseAllocationBatches_SourceLive")
+            .HasFilter("IsDeleted = 0 AND Status = 1");
+
+        modelBuilder.Entity<FinanceExpenseAllocationBatch>().HasIndex(x => x.LoadingListId)
+            .HasDatabaseName("IX_FinanceExpenseAllocationBatches_LoadingListId")
+            .HasFilter("IsDeleted = 0");
+
+        modelBuilder.Entity<FinanceExpenseAllocationLine>().Property(x => x.BatchNo).HasMaxLength(50);
+        modelBuilder.Entity<FinanceExpenseAllocationLine>().Property(x => x.SourceExpenseNo).HasMaxLength(50);
+        modelBuilder.Entity<FinanceExpenseAllocationLine>().Property(x => x.LoadingListNo).HasMaxLength(50);
+        modelBuilder.Entity<FinanceExpenseAllocationLine>().Property(x => x.ContainerNo).HasMaxLength(50);
+        modelBuilder.Entity<FinanceExpenseAllocationLine>().Property(x => x.CustomerCode).HasMaxLength(50);
+        modelBuilder.Entity<FinanceExpenseAllocationLine>().Property(x => x.CustomerName).HasMaxLength(200);
+        modelBuilder.Entity<FinanceExpenseAllocationLine>().Property(x => x.AllocationMethod).HasMaxLength(30);
+        modelBuilder.Entity<FinanceExpenseAllocationLine>().Property(x => x.BasisKind).HasMaxLength(30);
+        modelBuilder.Entity<FinanceExpenseAllocationLine>().Property(x => x.BasisSource).HasMaxLength(30);
+        modelBuilder.Entity<FinanceExpenseAllocationLine>().Property(x => x.BasisValue).HasPrecision(18, 4);
+        modelBuilder.Entity<FinanceExpenseAllocationLine>().Property(x => x.Ratio).HasPrecision(18, 4);
+        modelBuilder.Entity<FinanceExpenseAllocationLine>().Property(x => x.AllocatedAmount).HasPrecision(18, 2);
+        modelBuilder.Entity<FinanceExpenseAllocationLine>().Property(x => x.AllocatedAmountCny).HasPrecision(18, 2);
+        modelBuilder.Entity<FinanceExpenseAllocationLine>().Property(x => x.Currency).HasMaxLength(20);
+        modelBuilder.Entity<FinanceExpenseAllocationLine>().Property(x => x.ExpenseNo).HasMaxLength(50);
+        modelBuilder.Entity<FinanceExpenseAllocationLine>().Property(x => x.Remark).HasMaxLength(500);
+
+        modelBuilder.Entity<FinanceExpenseAllocationLine>().HasIndex(x => new { x.BatchId, x.ParticipantId })
+            .IsUnique().HasDatabaseName("UX_FinanceExpenseAllocationLines_BatchParticipant")
+            .HasFilter("IsDeleted = 0");
+
+        modelBuilder.Entity<FinanceExpenseAllocationLine>().HasIndex(x => x.SourceExpenseId)
+            .HasDatabaseName("IX_FinanceExpenseAllocationLines_SourceExpenseId")
+            .HasFilter("IsDeleted = 0");
+
+        modelBuilder.Entity<FinanceExpenseAllocationLine>().HasIndex(x => x.ParticipantId)
+            .HasDatabaseName("IX_FinanceExpenseAllocationLines_ParticipantId")
+            .HasFilter("IsDeleted = 0");
+
+        modelBuilder.Entity<FinanceExpenseAllocationLine>()
+            .HasOne<FinanceExpenseAllocationBatch>().WithMany(o => o.Lines)
+            .HasForeignKey(d => d.BatchId).OnDelete(DeleteBehavior.Cascade);
+
+        // 分摊行 → 生成的费用单行：外键仅用于让 EF 在**同一次 SaveChanges** 内回填 ExpenseId
+        // （写入顺序由依赖决定，费用单先于分摊行插入），删除行为为 Restrict —— 费用单只做软删除，
+        // 因此不会影响任何既有删除语义。
+        modelBuilder.Entity<FinanceExpenseAllocationLine>()
+            .HasOne(x => x.Expense).WithMany()
+            .HasForeignKey(x => x.ExpenseId).OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<FinanceExpenseAllocationLine>().HasIndex(x => x.ExpenseId)
+            .HasDatabaseName("IX_FinanceExpenseAllocationLines_ExpenseId");
+
+        // FinanceExpense 侧新增的批次 / 来源留痕列（可空 / 空串）：长度与建表脚本一致，
+        // 批次号建过滤索引便于读取侧一次批量解析批次状态（不做逐行查询）
+        modelBuilder.Entity<FinanceExpense>().Property(x => x.AllocationBatchNo).HasMaxLength(50);
+        modelBuilder.Entity<FinanceExpense>().Property(x => x.AllocationSourceExpenseNo).HasMaxLength(50);
+        modelBuilder.Entity<FinanceExpense>().HasIndex(x => x.AllocationBatchNo)
+            .HasDatabaseName("IX_FinanceExpenses_AllocationBatchNo")
+            .HasFilter("IsDeleted = 0 AND AllocationBatchNo <> N''");
+
         // ============ 明细外键级联删除 ============
         modelBuilder.Entity<InquiryDetail>()
             .HasOne<Inquiry>().WithMany(i => i.Details)

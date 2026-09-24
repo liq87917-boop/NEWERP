@@ -1486,5 +1486,170 @@ IF NOT EXISTS (SELECT 1 FROM sys.indexes
         ON db_owner.ContainerLoadingListParticipants(CustomerId)
         WHERE IsDeleted = 0;");
 
+        // 30. 装柜费用分摊批次与来源留痕（ERP-042：既有费用单之上的留痕层）
+        //     30.1 只做**幂等补齐**：给既有 FinanceExpenses 增加 3 个**可空 / 空串**留痕列
+        //          （AllocationBatchNo / AllocationSourceExpenseId / AllocationSourceExpenseNo）：
+        //          历史费用单这些列保持空 = 「历史分摊（无批次留痕）」或「未分摊」，
+        //          因此**不做任何回填、不改写任何既有金额 / 归属 / 付款状态**；
+        //     30.2 建表为幂等补齐：本表只记录「这次分摊是谁按什么方法 / 基数 / 比例生成的」，
+        //          分摊结果仍写既有 FinanceExpenses 行 —— 不引入第二套账务引擎、不生成凭证 / 收付款 / 结算单；
+        //     30.3 索引与 ErpDbContext 模型同名同过滤条件：
+        //          UX_FinanceExpenseAllocationBatches_BatchNo      —— 批次号唯一；
+        //          UX_FinanceExpenseAllocationBatches_SourceLive   —— 同一「来源费用 + 装柜清单 + 分摊方法」
+        //                                                             最多一条**有效**批次（并发兜底；服务端业务
+        //                                                             口径更严：同一来源费用 + 清单不区分方法只
+        //                                                             允许一条有效批次，作废后可重生成）；
+        //          IX_FinanceExpenseAllocationBatches_LoadingListId —— 按装柜清单有界检索；
+        //          IX_FinanceExpenses_AllocationBatchNo            —— 读取侧按批次号一次批量解析批次状态；
+        //     30.4 批次 / 分摊行不建到装柜清单 / 参与方 / 客户的数据库外键（软删除与停用后历史留痕仍必须可读），
+        //          也不被任何其他单据引用；费用单列的留痕刻意只用快照，避免编辑费用单时被静默清空；
+        //     30.5 本段只加列 / 建本表与其索引，不改写装柜清单、装柜明细、参与方、订柜跟踪值、单证、库存与订单。
+        await db.Database.ExecuteSqlRawAsync(@"
+IF COL_LENGTH('db_owner.FinanceExpenses', 'AllocationBatchNo') IS NULL
+    ALTER TABLE db_owner.FinanceExpenses ADD AllocationBatchNo NVARCHAR(50) NULL;
+
+IF COL_LENGTH('db_owner.FinanceExpenses', 'AllocationSourceExpenseId') IS NULL
+    ALTER TABLE db_owner.FinanceExpenses ADD AllocationSourceExpenseId BIGINT NULL;
+
+IF COL_LENGTH('db_owner.FinanceExpenses', 'AllocationSourceExpenseNo') IS NULL
+    ALTER TABLE db_owner.FinanceExpenses ADD AllocationSourceExpenseNo NVARCHAR(50) NULL;
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes
+               WHERE name = 'IX_FinanceExpenses_AllocationBatchNo'
+                 AND object_id = OBJECT_ID('db_owner.FinanceExpenses'))
+    CREATE INDEX IX_FinanceExpenses_AllocationBatchNo
+        ON db_owner.FinanceExpenses(AllocationBatchNo)
+        WHERE IsDeleted = 0 AND AllocationBatchNo <> N'';
+
+IF OBJECT_ID('db_owner.FinanceExpenseAllocationBatches') IS NULL
+BEGIN
+    CREATE TABLE db_owner.FinanceExpenseAllocationBatches (
+        Id BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+        BatchNo NVARCHAR(50) NOT NULL,
+        SourceExpenseId BIGINT NOT NULL,
+        SourceExpenseNo NVARCHAR(50) NOT NULL DEFAULT N'',
+        LoadingListId BIGINT NOT NULL,
+        LoadingListNo NVARCHAR(50) NOT NULL DEFAULT N'',
+        ContainerNo NVARCHAR(50) NOT NULL DEFAULT N'',
+        AllocationMethod NVARCHAR(30) NOT NULL DEFAULT N'',
+        BasisKind NVARCHAR(30) NOT NULL DEFAULT N'',
+        Currency NVARCHAR(20) NOT NULL DEFAULT N'CNY',
+        ExchangeRate DECIMAL(18,6) NOT NULL DEFAULT 1,
+        SourceAmount DECIMAL(18,2) NOT NULL DEFAULT 0,
+        AllocatedTotal DECIMAL(18,2) NOT NULL DEFAULT 0,
+        LineCount INT NOT NULL DEFAULT 0,
+        Status INT NOT NULL DEFAULT 1,
+        VoidedAt DATETIME2 NULL,
+        VoidReason NVARCHAR(500) NOT NULL DEFAULT N'',
+        Remark NVARCHAR(500) NOT NULL DEFAULT N'',
+        CreatedAt DATETIME2 NOT NULL DEFAULT GETDATE(),
+        CreatedBy BIGINT NULL,
+        UpdatedAt DATETIME2 NULL,
+        UpdatedBy BIGINT NULL,
+        IsDeleted BIT NOT NULL DEFAULT 0,
+        RowVersion ROWVERSION NOT NULL
+    );
+END
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes
+               WHERE name = 'UX_FinanceExpenseAllocationBatches_BatchNo'
+                 AND object_id = OBJECT_ID('db_owner.FinanceExpenseAllocationBatches'))
+    CREATE UNIQUE INDEX UX_FinanceExpenseAllocationBatches_BatchNo
+        ON db_owner.FinanceExpenseAllocationBatches(BatchNo);
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes
+               WHERE name = 'UX_FinanceExpenseAllocationBatches_SourceLive'
+                 AND object_id = OBJECT_ID('db_owner.FinanceExpenseAllocationBatches'))
+    CREATE UNIQUE INDEX UX_FinanceExpenseAllocationBatches_SourceLive
+        ON db_owner.FinanceExpenseAllocationBatches(SourceExpenseId, LoadingListId, AllocationMethod)
+        WHERE IsDeleted = 0 AND Status = 1;
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes
+               WHERE name = 'IX_FinanceExpenseAllocationBatches_LoadingListId'
+                 AND object_id = OBJECT_ID('db_owner.FinanceExpenseAllocationBatches'))
+    CREATE INDEX IX_FinanceExpenseAllocationBatches_LoadingListId
+        ON db_owner.FinanceExpenseAllocationBatches(LoadingListId)
+        WHERE IsDeleted = 0;");
+
+        // 30.6 分摊行表（批次 → 参与方 的逐行留痕）：
+        //      - 只为「由本批次生成的费用单行」和「生成依据」留痕，不参与任何金额计算的口径改写；
+        //      - 同一批次内同一参与方不重复（UX_FinanceExpenseAllocationLines_BatchParticipant）；
+        //      - 唯一外键是「分摊行 → 生成的费用单行」（FK_FinanceExpenseAllocationLines_Expense）：
+        //        仅用于让 EF 在同一次 SaveChanges 内回填 ExpenseId；费用单只做软删除，因此不影响删除语义；
+        //        刻意**不建**到参与方 / 客户 / 装柜清单的外键：参与方停用、客户删除、清单软删后
+        //        历史留痕仍必须可读（这些引用只存编码 / 名称 / 单号快照）；
+        //      - 本段只建本表与其索引，不写任何数据。
+        await db.Database.ExecuteSqlRawAsync(@"
+IF OBJECT_ID('db_owner.FinanceExpenseAllocationLines') IS NULL
+BEGIN
+    CREATE TABLE db_owner.FinanceExpenseAllocationLines (
+        Id BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+        BatchId BIGINT NOT NULL,
+        BatchNo NVARCHAR(50) NOT NULL DEFAULT N'',
+        SourceExpenseId BIGINT NOT NULL,
+        SourceExpenseNo NVARCHAR(50) NOT NULL DEFAULT N'',
+        LoadingListId BIGINT NOT NULL,
+        LoadingListNo NVARCHAR(50) NOT NULL DEFAULT N'',
+        ContainerNo NVARCHAR(50) NOT NULL DEFAULT N'',
+        ParticipantId BIGINT NOT NULL,
+        CustomerId BIGINT NOT NULL,
+        CustomerCode NVARCHAR(50) NOT NULL DEFAULT N'',
+        CustomerName NVARCHAR(200) NOT NULL DEFAULT N'',
+        ParticipantPrimary BIT NOT NULL DEFAULT 0,
+        AllocationMethod NVARCHAR(30) NOT NULL DEFAULT N'',
+        BasisKind NVARCHAR(30) NOT NULL DEFAULT N'',
+        BasisSource NVARCHAR(30) NOT NULL DEFAULT N'',
+        BasisValue DECIMAL(18,4) NOT NULL DEFAULT 0,
+        Ratio DECIMAL(18,4) NOT NULL DEFAULT 0,
+        AllocatedAmount DECIMAL(18,2) NOT NULL DEFAULT 0,
+        AllocatedAmountCny DECIMAL(18,2) NOT NULL DEFAULT 0,
+        Currency NVARCHAR(20) NOT NULL DEFAULT N'CNY',
+        ExpenseId BIGINT NULL,
+        ExpenseNo NVARCHAR(50) NOT NULL DEFAULT N'',
+        SortOrder INT NOT NULL DEFAULT 0,
+        Remark NVARCHAR(500) NOT NULL DEFAULT N'',
+        CreatedAt DATETIME2 NOT NULL DEFAULT GETDATE(),
+        CreatedBy BIGINT NULL,
+        UpdatedAt DATETIME2 NULL,
+        UpdatedBy BIGINT NULL,
+        IsDeleted BIT NOT NULL DEFAULT 0,
+        RowVersion ROWVERSION NOT NULL
+    );
+END
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes
+               WHERE name = 'UX_FinanceExpenseAllocationLines_BatchParticipant'
+                 AND object_id = OBJECT_ID('db_owner.FinanceExpenseAllocationLines'))
+    CREATE UNIQUE INDEX UX_FinanceExpenseAllocationLines_BatchParticipant
+        ON db_owner.FinanceExpenseAllocationLines(BatchId, ParticipantId)
+        WHERE IsDeleted = 0;
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes
+               WHERE name = 'IX_FinanceExpenseAllocationLines_SourceExpenseId'
+                 AND object_id = OBJECT_ID('db_owner.FinanceExpenseAllocationLines'))
+    CREATE INDEX IX_FinanceExpenseAllocationLines_SourceExpenseId
+        ON db_owner.FinanceExpenseAllocationLines(SourceExpenseId)
+        WHERE IsDeleted = 0;
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes
+               WHERE name = 'IX_FinanceExpenseAllocationLines_ParticipantId'
+                 AND object_id = OBJECT_ID('db_owner.FinanceExpenseAllocationLines'))
+    CREATE INDEX IX_FinanceExpenseAllocationLines_ParticipantId
+        ON db_owner.FinanceExpenseAllocationLines(ParticipantId)
+        WHERE IsDeleted = 0;
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes
+               WHERE name = 'IX_FinanceExpenseAllocationLines_ExpenseId'
+                 AND object_id = OBJECT_ID('db_owner.FinanceExpenseAllocationLines'))
+    CREATE INDEX IX_FinanceExpenseAllocationLines_ExpenseId
+        ON db_owner.FinanceExpenseAllocationLines(ExpenseId);
+
+IF NOT EXISTS (SELECT 1 FROM sys.foreign_keys
+               WHERE name = 'FK_FinanceExpenseAllocationLines_Expense'
+                 AND parent_object_id = OBJECT_ID('db_owner.FinanceExpenseAllocationLines'))
+    ALTER TABLE db_owner.FinanceExpenseAllocationLines
+        ADD CONSTRAINT FK_FinanceExpenseAllocationLines_Expense
+        FOREIGN KEY (ExpenseId) REFERENCES db_owner.FinanceExpenses(Id);");
+
     }
 }

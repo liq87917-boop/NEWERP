@@ -50,6 +50,14 @@ public interface IErpDbContext
     /// <summary>费用单（阶段 2 新增：出口杂费台账与分摊）</summary>
     DbSet<FinanceExpense> FinanceExpenses { get; }
 
+    /// <summary>
+    /// 装柜费用分摊批次（ERP-042；既有费用单之上的批次 / 来源留痕，不引入第二套账务引擎）
+    /// </summary>
+    DbSet<FinanceExpenseAllocationBatch> FinanceExpenseAllocationBatches { get; }
+
+    /// <summary>装柜费用分摊行（ERP-042；批次 → 参与方 的逐行留痕与生成费用单引用）</summary>
+    DbSet<FinanceExpenseAllocationLine> FinanceExpenseAllocationLines { get; }
+
     // ============ 询价管理 ============
     DbSet<Inquiry> Inquiries { get; }
     DbSet<InquiryDetail> InquiryDetails { get; }

@@ -1,7 +1,7 @@
 {
   "id": "ERP-042",
   "title": "Add traceable expense allocation batches for multi-customer containers",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "medium",
   "description": "Extend the existing container expense preview and generation workflow so allocations to multi-customer container participants have explicit batch and source lineage. Reuse the existing allocation methods and FinanceExpense records rather than creating a second accounting engine. Do not infer missing bases, post payments, settle receivables or payables, rewrite legacy allocations, execute production SQL, deploy, or release.",
   "acceptance_criteria": [
@@ -51,5 +51,5 @@
     "status": "not_required",
     "reason": "Repository allocation logic and non-production test schema only. Production database execution, real financial settlement, irreversible operations, deployment and release are not authorized."
   },
-  "attempts": 0
+  "attempts": 1
 }

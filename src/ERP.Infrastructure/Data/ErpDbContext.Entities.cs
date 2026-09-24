@@ -54,4 +54,11 @@ public partial class ErpDbContext
     public DbSet<FinanceBulkSettlement> FinanceBulkSettlements => Set<FinanceBulkSettlement>();
     public DbSet<FinanceReceipt> FinanceReceipts => Set<FinanceReceipt>();
     public DbSet<FinanceComplaint> FinanceComplaints => Set<FinanceComplaint>();
+
+    // ============ 装柜费用分摊批次与来源留痕（ERP-042） ============
+    /// <summary>装柜费用分摊批次（既有费用单之上的批次留痕；有效批次唯一性由过滤唯一索引兜底）</summary>
+    public DbSet<FinanceExpenseAllocationBatch> FinanceExpenseAllocationBatches => Set<FinanceExpenseAllocationBatch>();
+
+    /// <summary>装柜费用分摊行（批次 → 参与方；含来源费用 / 装柜清单 / 客户快照与生成费用单引用）</summary>
+    public DbSet<FinanceExpenseAllocationLine> FinanceExpenseAllocationLines => Set<FinanceExpenseAllocationLine>();
 }

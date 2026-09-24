@@ -1,5 +1,6 @@
 using ERP.Domain.Common;
 using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
 
 namespace ERP.Domain.Entities;
 
@@ -90,4 +91,38 @@ public class FinanceExpense : BaseEntity
     /// <summary>备注</summary>
     [MaxLength(500)]
     public string Remark { get; set; } = string.Empty;
+
+    // ============ ERP-042：分摊批次与来源留痕（可空 = 历史 / 未跟踪行，绝不做回填） ============
+    // 口径：
+    //   1. 由「分摊批次」生成的费用单行会写入 AllocationBatchNo（批次号留痕，批次号在批次表唯一）
+    //      以及 AllocationSourceExpenseId / AllocationSourceExpenseNo（它分摊的是哪条柜级来源费用）；
+    //   2. 历史费用单（含旧「拼柜分摊」接口生成的行）这些列为 NULL / 空串：**仍然完全可读**，
+    //      读取侧按 AllocationLineage 显式标注为「历史分摊（无批次留痕）」或「未分摊」，
+    //      并且在任何正常请求中都不会被自动回填写入；
+    //   3. 来源费用单本身不被改写：分摊只新增行，金额 / 归属 / 付款状态保持不变；
+    //   4. 刻意**不加导航属性 / 不建到批次表的数据库外键**：费用单可被软删除、可被通用编辑接口改写，
+    //      留痕只以快照字符串保存，避免编辑时把批次留痕静默清空。
+
+    /// <summary>分摊批次号快照（空串 = 未参与任何分摊批次；非空表示本行由该批次生成，可回溯批次与来源费用）</summary>
+    [MaxLength(50)]
+    public string AllocationBatchNo { get; set; } = string.Empty;
+
+    /// <summary>本行分摊的**来源费用单** Id（可空；来源费用是该柜的柜级总额费用）</summary>
+    public long? AllocationSourceExpenseId { get; set; }
+
+    /// <summary>来源费用单号快照（可空）</summary>
+    [MaxLength(50)]
+    public string AllocationSourceExpenseNo { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 分摊留痕分类（**非持久化列**，读取时由服务端标注，不落库）：
+    /// <c>Batch</c>=批次留痕、<c>Legacy</c>=历史分摊（无批次留痕）、<c>None</c>=未分摊。
+    /// 仅用于界面与报表的显式说明，不改变任何金额口径。
+    /// </summary>
+    [NotMapped]
+    public string AllocationLineage { get; set; } = string.Empty;
+
+    /// <summary>分摊留痕文案（**非持久化列**，含批次号与「有效 / 已作废」或历史说明）</summary>
+    [NotMapped]
+    public string AllocationLineageText { get; set; } = string.Empty;
 }

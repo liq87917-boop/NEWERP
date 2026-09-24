@@ -1,5 +1,7 @@
 using ERP.Application.Common;
+using ERP.Application.DTOs;
 using ERP.Application.Interfaces;
+using ERP.Application.Services;
 using ERP.Domain.Entities;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -90,6 +92,86 @@ public class ExpenseBillController : BaseCrudController<FinanceExpense>
         await _db.SaveChangesAsync();
 
         return Ok(ApiResponse<object>.Success(new { created, items = allocated }, $"已生成 {created} 条费用单"));
+    }
+
+    // ==================== ERP-042：分摊批次与来源留痕（多客户装柜） ====================
+    // 口径：在既有「拼柜分摊」之上补批次与来源留痕 —— 分摊结果仍是本模块既有费用单行，
+    //       只新增批次 / 分摊行两张留痕表；不改写来源费用单、装柜清单与明细、单证、库存与订单，
+    //       也不记账 / 不生成凭证 / 收款 / 付款 / 结算单。
+
+    /// <summary>
+    /// 费用单列表（覆盖基类）：为当前页补写分摊留痕分类与批次状态说明（**只读，不写库**）——
+    /// 「批次留痕：EAB-…（有效 / 已作废批次）」「历史分摊（无批次留痕）」「未分摊」。
+    /// </summary>
+    [HttpGet]
+    public override async Task<IActionResult> GetPaged([FromQuery] PageQuery query)
+    {
+        var result = await Service.GetPagedAsync(query);
+        await ContainerExpenseAllocationService.AnnotateLineageAsync(_db, result.Items);
+        return Ok(ApiResponse<PagedResult<FinanceExpense>>.Success(result));
+    }
+
+    /// <summary>
+    /// 分摊上下文（**只读**）：装柜清单与（含停用的）参与方、持久化装柜总量、
+    /// 该柜费用单的可分摊资格与留痕分类、现存有效 / 已作废批次、支持的方法与余差规则。
+    /// </summary>
+    [HttpGet("allocation-context")]
+    public async Task<IActionResult> GetAllocationContext([FromQuery] long loadingListId)
+    {
+        var context = await ContainerExpenseAllocationService.GetContextAsync(_db, loadingListId);
+        return Ok(ApiResponse<ContainerExpenseAllocationContextDto>.Success(context, "已返回分摊上下文（只读）"));
+    }
+
+    /// <summary>
+    /// 分摊预览（**只读，不写库**）：返回参与方、方法、基数种类与来源、基数值、比例与分摊金额，
+    /// 以及余差归属与边界声明。预览与生成共用同一计算口径，预览所示即生成结果。
+    /// </summary>
+    [HttpPost("allocation-preview")]
+    public async Task<IActionResult> AllocationPreview([FromBody] ContainerExpenseAllocationRequest request)
+    {
+        var preview = await ContainerExpenseAllocationService.PreviewAsync(_db, request);
+        return Ok(ApiResponse<ContainerExpenseAllocationPreviewDto>.Success(preview, "分摊预览完成（未写库）"));
+    }
+
+    /// <summary>
+    /// 生成分摊批次（**事务性**）：一次请求内写入批次 + 逐行留痕 + 既有费用单行；
+    /// 同一「来源费用 + 装柜清单」已有有效批次时拒绝重复生成（不区分方法），失败不留部分行。
+    /// </summary>
+    [HttpPost("allocation-generate")]
+    public async Task<IActionResult> AllocationGenerate([FromBody] ContainerExpenseAllocationRequest request)
+    {
+        var result = await ContainerExpenseAllocationService.GenerateAsync(_db, request);
+        return Ok(ApiResponse<ContainerExpenseAllocationGenerateResultDto>.Success(
+            result, $"已生成分摊批次 {result.BatchNo}（{result.LineCount} 条费用单）"));
+    }
+
+    /// <summary>分摊批次台账（分页，可按来源费用 / 装柜清单 / 状态 / 关键字过滤；含已作废历史）</summary>
+    [HttpGet("allocation-batches")]
+    public async Task<IActionResult> GetAllocationBatches([FromQuery] ContainerExpenseAllocationBatchQuery query)
+    {
+        var result = await ContainerExpenseAllocationService.ListBatchesAsync(_db, query);
+        return Ok(ApiResponse<PagedResult<ContainerExpenseAllocationBatchDto>>.Success(result));
+    }
+
+    /// <summary>单个分摊批次台账（含逐行留痕，只读）</summary>
+    [HttpGet("allocation-batches/{batchId:long}")]
+    public async Task<IActionResult> GetAllocationBatch(long batchId)
+    {
+        var batch = await ContainerExpenseAllocationService.GetBatchAsync(_db, batchId);
+        return Ok(ApiResponse<ContainerExpenseAllocationBatchDto>.Success(batch));
+    }
+
+    /// <summary>
+    /// 作废分摊批次（更正路径）：只改批次状态并记录作废原因 —— 保留批次与分摊行历史，
+    /// 不删除 / 不改写已生成的费用单行与来源费用，也不产生任何收付款 / 记账动作。
+    /// </summary>
+    [HttpPost("allocation-batches/{batchId:long}/void")]
+    public async Task<IActionResult> VoidAllocationBatch(
+        long batchId, [FromBody] ContainerExpenseAllocationVoidRequest? request)
+    {
+        var batch = await ContainerExpenseAllocationService.VoidAsync(_db, batchId, request?.Reason);
+        return Ok(ApiResponse<ContainerExpenseAllocationBatchDto>.Success(
+            batch, $"分摊批次 {batch.BatchNo} 已作废（历史与逐行留痕保留）"));
     }
 
     /// <summary>分摊计算核心：按指定基数计算各客户权重、比例与分摊金额（末行补齐四舍五入差额）</summary>

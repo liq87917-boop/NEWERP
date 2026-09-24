@@ -297,13 +297,22 @@ const MODULES = {
     /* 工具栏扩展：拼柜/整柜费用分摊（一柜多客户，按体积/重量/箱数/金额分摊） */
     extraActions: [
       { label: '📦 拼柜分摊', title: '一柜多客户：按体积/重量/箱数/金额分摊费用并生成费用单', onclick: 'openExpenseAllocate()' },
+      /* ERP-042：分摊批次与来源留痕（分摊结果仍是本模块费用单行，额外记录批次 / 来源 / 基数 / 比例） */
+      { label: '🧾 分摊批次', title: '按装柜清单的多客户参与方分摊柜级来源费用，并记录批次 / 来源 / 基数留痕；可查台账与作废（不记账、不生成收付款单）', onclick: 'openExpenseAllocationBatches()' },
+    ],
+    /* ERP-042：行操作——以该费用单为来源费用打开分摊批次（不可分摊的费用单会在面板中显式说明原因） */
+    rowActions: [
+      { label: '分摊批次', icon: '🧾', title: '以本费用单为柜级来源费用，按装柜清单的启用参与方分摊并留痕（只读预览 + 事务性生成 + 可作废）', onclick: 'openExpenseAllocationBatches' },
     ],
     columns: [
       { key: 'expenseNo', label: '费用单号' }, { key: 'expenseDate', label: '日期', type: 'date' },
       { key: 'expenseType', label: '费用类型' }, { key: 'amount', label: '金额', type: 'money' },
       { key: 'currency', label: '币种' }, { key: 'amountCny', label: '折人民币', type: 'money' },
       { key: 'refType', label: '归属' }, { key: 'refNo', label: '归属单号' },
-      { key: 'allocationBase', label: '分摊基数' }, { key: 'paymentStatus', label: '付款状态' },
+      { key: 'allocationBase', label: '分摊基数' },
+      /* ERP-042：分摊留痕（批次留痕 / 历史分摊（无批次留痕） / 未分摊；读取侧只读标注，不回填） */
+      { key: 'allocationLineage', label: '分摊留痕', render: row => expenseLineageCellHtml(row) },
+      { key: 'paymentStatus', label: '付款状态' },
     ],
     fields: [
       { key: 'expenseNo', label: '费用单号', required: true },
