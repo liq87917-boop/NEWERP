@@ -1,0 +1,51 @@
+{
+  "id": "ERP-037",
+  "title": "Add color and size SKU variants to Product master data",
+  "status": "pending",
+  "risk_level": "medium",
+  "description": "Close the audited Product master-data gap by adding optional color and size SKU variants beneath the existing product record. Existing products without variants must continue to behave as single non-variant products. This task may add repository schema code and validate against non-production test databases, but it must not backfill historical documents, split existing inventory, execute production SQL, deploy, or reinterpret historical product references.",
+  "acceptance_criteria": [
+    "Users can maintain zero or more active SKU variants for an existing product, with a server-validated variant code and optional color and size values; at least one of color or size is required for a variant.",
+    "Variant codes are unique within a product after normalization, and duplicate active color/size combinations within the same product are rejected instead of silently merged.",
+    "Product list or detail workflows expose variant count and a bounded variant-maintenance view without replacing the existing product identity.",
+    "Existing products with no variants remain readable and editable with unchanged behavior and require no production backfill.",
+    "Creating, editing, disabling or deleting a variant does not rewrite historical inquiry, quotation, order, stock or movement lines and does not split or recalculate existing inventory.",
+    "Disabled or historically referenced variants remain readable where an existing persisted reference is available but cannot be newly selected as active master data.",
+    "Repository schema changes are idempotent and are validated only through permitted local or test-database paths; production database execution remains behind the mandatory human gate.",
+    "Unit/integration tests cover create, update, duplicate protection, disable, legacy products without variants and non-mutation of historical product/inventory records; safe validation passes.",
+    "Browser/UI acceptance is recorded as deferred during development according to project policy."
+  ],
+  "allowed_paths": [
+    "src/ERP.Domain/**",
+    "src/ERP.Application/**",
+    "src/ERP.Infrastructure/**",
+    "src/ERP.Api/Controllers/**",
+    "src/ERP.Api/wwwroot/**",
+    "src/ERP.UnitTests/**",
+    "src/ERP.IntegrationTests/**",
+    "docs/**",
+    ".ai/**"
+  ],
+  "depends_on": [],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "browser",
+  "browser_acceptance": {
+    "required": true,
+    "scenarios": [
+      "Open an existing Product, add distinct color and size variants, and verify the variants and count persist in the Product detail workflow.",
+      "Attempt to add a duplicate variant, then disable an existing variant and verify legacy Product data remains readable without changing stock or historical documents."
+    ],
+    "test_filter": "Collection=UiTests",
+    "minimum_screenshots": 2
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L2",
+    "status": "not_required",
+    "reason": "Repository master-data code and non-production test schema only. Production schema execution, historical inventory migration, deployment and release remain prohibited without human approval."
+  },
+  "attempts": 0
+}

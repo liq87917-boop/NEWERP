@@ -1,0 +1,52 @@
+{
+  "id": "ERP-040",
+  "title": "Add authoritative shipment tracking fields to Container Booking",
+  "status": "pending",
+  "risk_level": "medium",
+  "description": "Close the audited container logistics-tracking gap by adding persisted shipment tracking fields to the existing Container Booking as the authoritative record and exposing them read-only from linked pre-loading or loading workflows. Repository schema code and non-production test validation are allowed. Do not call carriers, customs, freight forwarders or external tracking systems; do not execute production SQL, backfill historical shipments, deploy, or release.",
+  "acceptance_criteria": [
+    "Container Booking create, edit, list and detail workflows support optional shipment mode (LCL or FCL), bill-of-lading number, shipping-order number, destination port, transit port, ETD, ETA, ATD, ATA and trucker name.",
+    "An optional customs-broker reference reuses active BaseOtherInfo entries whose InfoType is CustomsBroker, stores a validated name snapshot, rejects arbitrary authoritative free text, and preserves readable historical snapshots when the dictionary entry later becomes unavailable.",
+    "Inspection requirement is stored as an explicit nullable value so unknown, not required and required are distinct; inspection date and customs-release date remain optional and are never inferred from free text.",
+    "Linked pre-loading and loading-list detail workflows display the authoritative Container Booking tracking values without copying or independently editing a second conflicting tracking record.",
+    "When no persisted authoritative booking link or tracking value exists, the UI displays unknown or unavailable rather than matching by container number or other free text.",
+    "Existing bookings and linked documents remain readable without production backfill, and no historical departure, arrival, inspection or release date is invented.",
+    "No save operation automatically mutates freight-forwarder, customs, expense, Trade Document or inventory records and no external tracking request is made.",
+    "Repository schema changes are idempotent and validated only through permitted local or test-database paths; production database execution remains behind the mandatory human gate.",
+    "Unit/integration tests cover LCL/FCL, optional dates, customs-broker validation and historical snapshot behavior, authoritative linked display, missing-link behavior and non-mutation of adjacent modules; safe validation passes.",
+    "Browser/UI acceptance is recorded as deferred during development according to project policy."
+  ],
+  "allowed_paths": [
+    "src/ERP.Domain/**",
+    "src/ERP.Application/**",
+    "src/ERP.Infrastructure/**",
+    "src/ERP.Api/Controllers/**",
+    "src/ERP.Api/wwwroot/**",
+    "src/ERP.UnitTests/**",
+    "src/ERP.IntegrationTests/**",
+    "docs/**",
+    ".ai/**"
+  ],
+  "depends_on": [],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "browser",
+  "browser_acceptance": {
+    "required": true,
+    "scenarios": [
+      "Edit a Container Booking with FCL mode, B/L and SO numbers, ports, schedule dates and an active CustomsBroker dictionary entry, then verify the values persist in list and detail views.",
+      "Open an authoritatively linked loading workflow and verify it shows the Booking tracking values read-only; open an unlinked record and verify no text-based linkage or invented tracking value appears."
+    ],
+    "test_filter": "Collection=UiTests",
+    "minimum_screenshots": 2
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L2",
+    "status": "not_required",
+    "reason": "Repository shipment-tracking code and non-production test schema only. Production database changes, external carrier/customs integrations, deployment and release require separate human approval."
+  },
+  "attempts": 0
+}

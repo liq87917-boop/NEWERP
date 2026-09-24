@@ -1,0 +1,53 @@
+{
+  "id": "ERP-038",
+  "title": "Add multi-supplier sourcing relationships for Products and SKUs",
+  "status": "pending",
+  "risk_level": "medium",
+  "description": "Add explicit master-data relationships that associate an existing Product, or one of its active SKU variants, with multiple existing Suppliers. The relationship is sourcing guidance only. It must not automatically select a supplier, approve a price, create a Purchase Quote or Purchase Order, rewrite historical purchasing records, execute production SQL, or deploy.",
+  "acceptance_criteria": [
+    "Users can associate a Product or active SKU variant with multiple existing Suppliers and maintain supplier item code, purchase unit, minimum order quantity, lead-time days, active state and one optional preferred relationship.",
+    "The server validates Product, optional variant and Supplier references and rejects missing, deleted, inactive or mismatched records for new relationships.",
+    "Only one active preferred Supplier relationship is allowed for the same Product and optional variant; changing the preferred relationship is explicit and transactional rather than dependent on list order.",
+    "Duplicate active relationships for the same Product, optional variant and Supplier are rejected, while disabled historical relationships remain readable.",
+    "Product and Supplier detail workflows expose bounded sourcing lists and clearly distinguish product-level relationships from SKU-specific relationships.",
+    "The relationship does not automatically change Purchase Quote selection, Purchase Order supplier or price, inventory cost, or any historical document.",
+    "Existing Products and Suppliers without sourcing relationships remain valid and require no production backfill.",
+    "Unit/integration tests cover multiple suppliers, preferred uniqueness, invalid references, inactive relationships, SKU ownership validation and non-mutation of purchasing documents; safe validation passes.",
+    "Browser/UI acceptance is recorded as deferred during development according to project policy."
+  ],
+  "allowed_paths": [
+    "src/ERP.Domain/**",
+    "src/ERP.Application/**",
+    "src/ERP.Infrastructure/**",
+    "src/ERP.Api/Controllers/**",
+    "src/ERP.Api/wwwroot/**",
+    "src/ERP.UnitTests/**",
+    "src/ERP.IntegrationTests/**",
+    "docs/**",
+    ".ai/**"
+  ],
+  "depends_on": [
+    "ERP-037"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "browser",
+  "browser_acceptance": {
+    "required": true,
+    "scenarios": [
+      "Open a Product or SKU and associate two existing Suppliers, marking exactly one relationship as preferred.",
+      "Disable a sourcing relationship and verify it remains visible as historical guidance but is not offered as an active choice and does not alter any Purchase Order."
+    ],
+    "test_filter": "Collection=UiTests",
+    "minimum_screenshots": 2
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L2",
+    "status": "not_required",
+    "reason": "Repository master-data relationship code and non-production test schema only; no automatic purchasing, production database action, deployment or release is authorized."
+  },
+  "attempts": 0
+}

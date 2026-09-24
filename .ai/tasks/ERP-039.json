@@ -1,0 +1,49 @@
+{
+  "id": "ERP-039",
+  "title": "Add read-only Product image library over existing image slots",
+  "status": "pending",
+  "risk_level": "low",
+  "description": "Add a user-visible, read-only Product image library over the three image-reference fields already present in Product master data. Reuse persisted references only. Do not upload, replace or delete OSS objects, introduce new storage credentials, perform server-side fetching of arbitrary URLs, add production schema, or deploy.",
+  "acceptance_criteria": [
+    "Users can open a paged Product image library that displays the existing three image slots together with Product code, name and specification.",
+    "Users can filter by Product code or name and distinguish products with images, partially populated image slots and products without images.",
+    "Missing or broken references render a safe placeholder and do not prevent the remaining Product records from loading.",
+    "Only approved local or HTTP/HTTPS reference forms are rendered as images; unsafe schemes and untrusted markup are shown as unavailable text and are never executed.",
+    "The application does not fetch arbitrary image URLs on the server, expose storage credentials, or infer ownership or authorization for an OSS object.",
+    "The library does not upload, overwrite, delete or otherwise mutate production OSS objects and does not rewrite the existing Product image fields.",
+    "The query is bounded or paged and avoids per-product database queries for normal library use.",
+    "Unit/integration tests cover full, partial, empty, broken and unsafe image references, filters, paging and non-mutation; safe validation passes.",
+    "Browser/UI acceptance is recorded as deferred during development according to project policy."
+  ],
+  "allowed_paths": [
+    "src/ERP.Application/**",
+    "src/ERP.Api/Controllers/**",
+    "src/ERP.Api/wwwroot/**",
+    "src/ERP.UnitTests/**",
+    "src/ERP.IntegrationTests/**",
+    "docs/**",
+    ".ai/**"
+  ],
+  "depends_on": [],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "browser",
+  "browser_acceptance": {
+    "required": true,
+    "scenarios": [
+      "Open the Product image library, filter by Product code, and verify all populated image slots are displayed with their Product context.",
+      "Inspect Products with missing, broken and unsafe image references and verify placeholders are shown without script execution or any upload/delete action."
+    ],
+    "test_filter": "Collection=UiTests",
+    "minimum_screenshots": 2
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Read-only presentation of existing Product image references. Production OSS upload, replacement, deletion, credential use, deployment and release remain outside task scope and behind human gates."
+  },
+  "attempts": 0
+}
