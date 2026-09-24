@@ -7,8 +7,9 @@ namespace ERP.Application.Services;
 
 /// <summary>
 /// 供应商采购发票登记的纯规则（ERP-043，无数据库依赖，便于逐条单测）：
-/// 发票类型（普票 / 专票）与发票代码要求、发票号码 / 身份规范化、供应商可用性、
-/// 金额等式与币种精度、状态机（草稿 → 已登记 → 已作废）、关联状态与文案，
+/// 发票类型（普票 / 专票 / 进口）与发票代码要求、发票号码 / 身份规范化、供应商可用性、
+/// 到期日与付款条件（ERP-065：可选、显式、缺失即未知）、金额等式与币种精度、
+/// 状态机（草稿 → 已登记 → 已作废）、关联状态与文案，
 /// 以及「采购订单能否被本发票关联」的权威资格判定（供应商 + 币种一致、非取消）。
 /// <para>边界：本规则只做**校验与计算**，不写库、不改写采购订单 / 库存 / 退税 / 付款 / 供应商数据，
 /// 也不记账、不生成凭证或任何收付款 / 结算单。</para>
@@ -23,8 +24,12 @@ public static class PurchaseInvoiceRules
     /// <summary>增值税专用发票（必须填写发票代码）</summary>
     public const string InvoiceTypeSpecial = "专票";
 
-    /// <summary>支持的发票类型（超出范围一律拒绝，不做隐式兜底）</summary>
-    public static readonly string[] SupportedInvoiceTypes = { InvoiceTypeOrdinary, InvoiceTypeSpecial };
+    /// <summary>进口发票 / 海关进口增值税专用缴款书（票面通常没有发票代码，代码可留空）</summary>
+    public const string InvoiceTypeImport = "进口";
+
+    /// <summary>支持的发票类型（超出范围一律拒绝，不做隐式兜底；客户销项发票与单证商业发票的类型不在此列）</summary>
+    public static readonly string[] SupportedInvoiceTypes =
+        { InvoiceTypeOrdinary, InvoiceTypeSpecial, InvoiceTypeImport };
 
     /// <summary>状态：草稿（可编辑、可维护关联，未形成登记证据）</summary>
     public const int StatusDraft = 0;
@@ -55,6 +60,9 @@ public static class PurchaseInvoiceRules
 
     /// <summary>作废原因长度上限</summary>
     public const int MaxVoidReasonLength = 500;
+
+    /// <summary>付款条件长度上限（ERP-065：付款条件是**有界文本快照**，不做任何解析与推算）</summary>
+    public const int MaxPaymentTermsLength = 200;
 
     /// <summary>单张发票最多关联的采购订单条数（保证视图有界）</summary>
     public const int MaxAllocationsPerInvoice = 50;
@@ -99,17 +107,37 @@ public static class PurchaseInvoiceRules
     public static bool IsSpecialInvoice(string? invoiceType) =>
         string.Equals((invoiceType ?? string.Empty).Trim(), InvoiceTypeSpecial, StringComparison.Ordinal);
 
-    /// <summary>该类型是否必须填写发票代码（专票必填；普票可不填）</summary>
+    /// <summary>该类型是否必须填写发票代码（专票必填；普票与进口票票面无代码时可留空）</summary>
     public static bool RequiresInvoiceCode(string? invoiceType) => IsSpecialInvoice(invoiceType);
 
-    /// <summary>发票代码规范化（去空白 + 长度校验；专票必须非空，普票可为空）</summary>
+    /// <summary>发票类型说明文案（接口、界面与文档同源；未知类型照实回显，不猜测、不兜底）</summary>
+    public static string InvoiceTypeText(string? invoiceType)
+    {
+        var value = (invoiceType ?? string.Empty).Trim();
+        return value switch
+        {
+            InvoiceTypeOrdinary => $"{InvoiceTypeOrdinary}（增值税普通发票）",
+            InvoiceTypeSpecial => $"{InvoiceTypeSpecial}（增值税专用发票）",
+            InvoiceTypeImport => $"{InvoiceTypeImport}（进口发票 / 海关进口增值税专用缴款书）",
+            _ => value
+        };
+    }
+
+    /// <summary>发票代码要求文案（专票必填；普票 / 进口票「票面无代码」时留空，不臆造代码）</summary>
+    public static string InvoiceCodeRequirementText(string? invoiceType)
+        => RequiresInvoiceCode(invoiceType)
+            ? "专票必须填写发票代码"
+            : $"{(invoiceType ?? string.Empty).Trim()} 可不填发票代码（票面无发票代码时留空；系统不臆造代码）";
+
+    /// <summary>发票代码规范化（去空白 + 长度校验；专票必须非空，普票 / 进口票可为空）</summary>
     public static string NormalizeInvoiceCode(string? invoiceCode, string invoiceType)
     {
         var value = (invoiceCode ?? string.Empty).Trim();
         if (value.Length > MaxInvoiceCodeLength)
             throw BusinessException.InvalidParameter($"发票代码长度不能超过 {MaxInvoiceCodeLength} 个字符");
         if (RequiresInvoiceCode(invoiceType) && value.Length == 0)
-            throw BusinessException.InvalidParameter("专票必须填写发票代码（普票可不填）");
+            throw BusinessException.InvalidParameter(
+                "专票必须填写发票代码（普票 / 进口票票面无代码时可留空）");
         return value;
     }
 
@@ -160,6 +188,63 @@ public static class PurchaseInvoiceRules
                 + "（发票币种必须与所关联采购订单的币种一致，系统不做汇率换算）");
         return value;
     }
+
+    // ==================== 1.1 到期日与付款条件（ERP-065：可选、显式、缺失即未知） ====================
+
+    /// <summary>到期日与付款条件口径文案（接口、界面与文档同源）</summary>
+    public const string EvidenceTermsRuleText =
+        "到期日与付款条件是用户显式登记的运营证据：到期日留空 = 未知，付款条件留空 = 未提供；"
+        + "到期日与账期一律不推算：系统不会按供应商默认账期、付款条件文本、发票备注、历史发票或采购订单推算到期日，"
+        + "也不据此判断逾期、账龄、现金折扣、付款义务或结算状态。";
+
+    /// <summary>到期日未知文案（缺省一律「未知」，绝不用开票日期或任何推算值顶替）</summary>
+    public const string UnknownDueDateText =
+        "未知（未提供到期日：系统不按供应商默认账期、付款条件或备注推算）";
+
+    /// <summary>付款条件未提供文案（缺省一律「未提供」，绝不回填供应商默认账期）</summary>
+    public const string UnknownPaymentTermsText =
+        "未提供（未知：不回填、不按供应商默认账期或备注推算）";
+
+    /// <summary>
+    /// 到期日规范化（可选、显式证据）：留空保持 <c>null</c>（未知，不做任何推算）；
+    /// 填写则只保留日期部分，且不得早于开票日期（明显录入错误的到期日直接拒绝，不静默改写）。
+    /// </summary>
+    public static DateTime? NormalizeDueDate(DateTime? dueDate, DateTime invoiceDate)
+    {
+        if (dueDate is null) return null;
+
+        var value = dueDate.Value.Date;
+        if (value < invoiceDate.Date)
+            throw BusinessException.InvalidParameter(
+                $"到期日（{value:yyyy-MM-dd}）不能早于开票日期（{invoiceDate.Date:yyyy-MM-dd}）："
+                + "到期日是用户显式提供的证据，留空表示未知（系统不按默认账期推算）");
+        return value;
+    }
+
+    /// <summary>
+    /// 付款条件规范化（可选、显式证据）：去首尾空白，长度 ≤ <see cref="MaxPaymentTermsLength"/>；
+    /// 留空 = 未提供（绝不回填供应商默认账期，也不解析文本）。
+    /// </summary>
+    public static string NormalizePaymentTerms(string? paymentTerms)
+    {
+        var value = (paymentTerms ?? string.Empty).Trim();
+        if (value.Length > MaxPaymentTermsLength)
+            throw BusinessException.InvalidParameter(
+                $"付款条件长度不能超过 {MaxPaymentTermsLength} 个字符（付款条件只作为有界文本证据保存，不参与任何计算）");
+        return value;
+    }
+
+    /// <summary>到期日展示文案（未填写一律「未知」，绝不显示推算值或开票日期）</summary>
+    public static string DueDateText(DateTime? dueDate)
+        => dueDate is null ? UnknownDueDateText : $"{dueDate.Value:yyyy-MM-dd}（用户显式提供）";
+
+    /// <summary>付款条件展示文案（未填写一律「未提供」，绝不回填供应商默认账期）</summary>
+    public static string PaymentTermsText(string? paymentTerms)
+    {
+        var value = (paymentTerms ?? string.Empty).Trim();
+        return value.Length == 0 ? UnknownPaymentTermsText : value;
+    }
+
     // ==================== 2. 金额等式与币种精度 ====================
 
     /// <summary>

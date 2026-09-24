@@ -335,6 +335,8 @@ public partial class ErpDbContext
         modelBuilder.Entity<PurchaseInvoice>().Property(x => x.GrossAmount).HasPrecision(18, 2);
         modelBuilder.Entity<PurchaseInvoice>().Property(x => x.VoidReason).HasMaxLength(500);
         modelBuilder.Entity<PurchaseInvoice>().Property(x => x.Remark).HasMaxLength(500);
+        // ERP-065：到期日（可空，NULL = 未知）与付款条件（有界文本快照，空串 = 未提供）
+        modelBuilder.Entity<PurchaseInvoice>().Property(x => x.PaymentTerms).HasMaxLength(200);
 
         modelBuilder.Entity<PurchaseInvoice>()
             .HasIndex(x => new

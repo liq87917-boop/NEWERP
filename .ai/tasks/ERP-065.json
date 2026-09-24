@@ -1,7 +1,7 @@
 {
   "id": "ERP-065",
   "title": "Add supplier purchase-invoice evidence register",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "medium",
   "description": "Add one supplier purchase-invoice evidence register for ordinary, special VAT, import and other supported supplier invoice records, with explicit allocations to existing Purchase Orders. Keep these repository records distinct from customer sales invoices and Trade Document commercial invoices. Do not issue or authenticate an invoice, contact a tax platform, infer order links, post accounts payable, execute production SQL, deploy, or release.",
   "acceptance_criteria": [
@@ -50,5 +50,5 @@
     "status": "not_required",
     "reason": "Repository invoice evidence and non-production test schema only. Real invoice issuance or authentication, tax-platform access, accounting posting, production database execution, deployment and release remain behind mandatory human gates."
   },
-  "attempts": 0
+  "attempts": 1
 }

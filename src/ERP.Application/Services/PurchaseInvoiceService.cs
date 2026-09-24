@@ -8,10 +8,11 @@ using Microsoft.EntityFrameworkCore;
 namespace ERP.Application.Services;
 
 /// <summary>
-/// 供应商采购发票登记服务（ERP-043）。职责：
+/// 供应商采购发票登记服务（ERP-043，ERP-065 扩展）。职责：
 /// <list type="number">
 /// <item><b>登记 / 修改</b>（<see cref="CreateAsync"/> / <see cref="UpdateAsync"/>）：只允许操作**草稿**；
-/// 供应商必须存在、未删除且启用，供应商编码 / 名称由服务端写成快照，金额必须满足金额等式与币种精度；</item>
+/// 供应商必须存在、未删除且启用，供应商编码 / 名称由服务端写成快照，金额必须满足金额等式与币种精度；
+/// 到期日与付款条件（ERP-065）是**可选、显式**证据：留空 = 未知 / 未提供，服务端绝不按默认账期或备注推算；</item>
 /// <item><b>唯一身份</b>：同一「供应商 + 发票类型 + 规范化代码 / 号码」在**有效（未作废）**记录内唯一，
 /// 重复请求一律拒绝（不静默合并、不覆盖）；作废记录保留并可读，但不占用身份；</item>
 /// <item><b>关联（分摊）</b>（<see cref="PreviewAllocationsAsync"/> / <see cref="SaveAllocationsAsync"/>）：
@@ -58,6 +59,8 @@ public static class PurchaseInvoiceService
             NetAmount = input.Net,
             TaxAmount = input.Tax,
             GrossAmount = input.Gross,
+            DueDate = input.DueDate,
+            PaymentTerms = input.PaymentTerms,
             Status = PurchaseInvoiceRules.StatusDraft,
             Remark = input.Remark
         };
@@ -110,6 +113,8 @@ public static class PurchaseInvoiceService
         invoice.NetAmount = input.Net;
         invoice.TaxAmount = input.Tax;
         invoice.GrossAmount = input.Gross;
+        invoice.DueDate = input.DueDate;
+        invoice.PaymentTerms = input.PaymentTerms;
         invoice.Remark = input.Remark;
         invoice.UpdatedAt = DateTime.Now;
 
@@ -561,11 +566,14 @@ public static class PurchaseInvoiceService
         decimal Net,
         decimal Tax,
         decimal Gross,
+        DateTime? DueDate,
+        string PaymentTerms,
         string Remark);
 
     /// <summary>
-    /// 校验发票头（类型 / 代码 / 号码 / 日期 / 供应商 / 币种 / 金额等式）：全部通过后才返回权威值；
-    /// 供应商必须存在、未删除且启用（停用 / 删除一律拒绝新增与修改），供应商快照由服务端写入。
+    /// 校验发票头（类型 / 代码 / 号码 / 日期 / 供应商 / 币种 / 金额等式 / 到期日 / 付款条件）：
+    /// 全部通过后才返回权威值；供应商必须存在、未删除且启用（停用 / 删除一律拒绝新增与修改），
+    /// 供应商快照由服务端写入；到期日与付款条件为**可选、显式**证据（留空 = 未知，绝不推算）。
     /// </summary>
     private static async Task<HeaderInput> ValidateHeaderAsync(IErpDbContext db, PurchaseInvoiceSaveDto dto)
     {
@@ -576,6 +584,9 @@ public static class PurchaseInvoiceService
         var remark = PurchaseInvoiceRules.NormalizeRemark(dto.Remark);
         var (net, tax, gross) = PurchaseInvoiceRules.ValidateAmounts(
             dto.NetAmount, dto.TaxAmount, dto.GrossAmount, currency);
+        var invoiceDate = (dto.InvoiceDate ?? DateTime.Today).Date;
+        var dueDate = PurchaseInvoiceRules.NormalizeDueDate(dto.DueDate, invoiceDate);
+        var paymentTerms = PurchaseInvoiceRules.NormalizePaymentTerms(dto.PaymentTerms);
 
         if (dto.SupplierId <= 0) throw BusinessException.InvalidParameter("请选择供应商");
 
@@ -593,12 +604,14 @@ public static class PurchaseInvoiceService
             invoiceNumber,
             PurchaseInvoiceRules.NormalizeIdentityPart(invoiceCode),
             PurchaseInvoiceRules.NormalizeIdentityPart(invoiceNumber),
-            (dto.InvoiceDate ?? DateTime.Today).Date,
+            invoiceDate,
             supplier,
             currency,
             net,
             tax,
             gross,
+            dueDate,
+            paymentTerms,
             remark);
     }
 
@@ -744,7 +757,8 @@ public static class PurchaseInvoiceService
         return new PurchaseInvoiceDto(
             invoice.Id,
             invoice.InvoiceType ?? string.Empty,
-            invoice.InvoiceType ?? string.Empty,
+            PurchaseInvoiceRules.InvoiceTypeText(invoice.InvoiceType),
+            PurchaseInvoiceRules.InvoiceCodeRequirementText(invoice.InvoiceType),
             invoice.InvoiceCode ?? string.Empty,
             invoice.InvoiceNumber ?? string.Empty,
             IdentityOf(invoice),
@@ -768,6 +782,11 @@ public static class PurchaseInvoiceService
             invoice.VoidedAt,
             invoice.VoidReason ?? string.Empty,
             invoice.Remark ?? string.Empty,
+            invoice.DueDate,
+            invoice.DueDate is not null,
+            PurchaseInvoiceRules.DueDateText(invoice.DueDate),
+            invoice.PaymentTerms ?? string.Empty,
+            PurchaseInvoiceRules.PaymentTermsText(invoice.PaymentTerms),
             rows.Count,
             linked,
             unlinked,
@@ -777,6 +796,7 @@ public static class PurchaseInvoiceService
             invoice.UpdatedAt,
             PurchaseInvoiceRules.AmountEquationText,
             PurchaseInvoiceRules.LinkageRuleText,
+            PurchaseInvoiceRules.EvidenceTermsRuleText,
             PurchaseInvoiceRules.BoundaryText,
             rows);
     }

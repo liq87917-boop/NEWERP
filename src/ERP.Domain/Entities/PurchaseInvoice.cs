@@ -5,8 +5,9 @@ using System.ComponentModel.DataAnnotations.Schema;
 namespace ERP.Domain.Entities;
 
 /// <summary>
-/// 供应商采购发票登记（ERP-043）：登记**普通发票（普票）/ 增值税专用发票（专票）**的运营证据，
-/// 并可（可选、显式）把含税总额按权威口径关联到既有采购订单。
+/// 供应商采购发票登记（ERP-043，ERP-065 扩展）：登记**普通发票（普票）/ 增值税专用发票（专票）/
+/// 进口发票（海关进口增值税专用缴款书）**的运营证据，并可（可选、显式）把含税总额按权威口径关联到既有采购订单；
+/// 可选登记**到期日**与**付款条件**作为显式证据（留空 = 未知 / 未提供，系统绝不推算）。
 /// <para>定位：<b>操作性的发票证据台账</b>——它<strong>不是</strong>应付账款台账、<strong>不是</strong>税务申报系统、
 /// <strong>不是</strong>付款授权机制，也不引入第二套账务引擎（不记账、不生成凭证 / 收款 / 付款 / 结算单）。</para>
 /// <para>金额口径（服务端权威校验）：<c>含税总额（价税合计）= 不含税金额（净额）+ 税额</c>，
@@ -22,7 +23,7 @@ namespace ERP.Domain.Entities;
 /// </summary>
 public class PurchaseInvoice : BaseEntity
 {
-    /// <summary>发票类型（普票 / 专票；取值见 <c>PurchaseInvoiceRules.InvoiceTypeOrdinary|InvoiceTypeSpecial</c>）</summary>
+    /// <summary>发票类型（普票 / 专票 / 进口；取值见 <c>PurchaseInvoiceRules.InvoiceTypeOrdinary|InvoiceTypeSpecial|InvoiceTypeImport</c>）</summary>
     [Required, MaxLength(20)]
     public string InvoiceType { get; set; } = "普票";
 
@@ -68,6 +69,20 @@ public class PurchaseInvoice : BaseEntity
 
     /// <summary>含税总额（价税合计，原币；必须大于 0 且等于净额 + 税额）</summary>
     public decimal GrossAmount { get; set; }
+
+    /// <summary>
+    /// 到期日（ERP-065：**可选、显式**证据；<c>null</c> = 未知）。
+    /// <para>只有授权用户显式提交时才落库；服务端**绝不**按供应商默认账期、付款条件、发票备注、
+    /// 历史发票或采购订单推算到期日，也不据此推导逾期 / 账龄。</para>
+    /// </summary>
+    public DateTime? DueDate { get; set; }
+
+    /// <summary>
+    /// 付款条件（ERP-065：**可选、显式**文本快照，长度 ≤ 200；空串 = 未提供）。
+    /// <para>原样保存用户提交的文本证据，服务端不解析、不折算、不回填供应商默认账期。</para>
+    /// </summary>
+    [MaxLength(200)]
+    public string PaymentTerms { get; set; } = string.Empty;
 
     /// <summary>状态（0=草稿，1=已登记，2=已作废；常量见 <c>PurchaseInvoiceRules</c>）</summary>
     public int Status { get; set; }
@@ -122,6 +137,18 @@ public class PurchaseInvoice : BaseEntity
     /// <summary>供应商可用性文案（**非持久化列**：不可用时照实说明，历史快照照常可读）</summary>
     [NotMapped]
     public string SupplierAvailabilityText { get; set; } = string.Empty;
+
+    /// <summary>到期日是否已知（**非持久化列**：只按持久化 <see cref="DueDate"/> 判定；未填写 = 未知，绝不视为当天 / 开票日期）</summary>
+    [NotMapped]
+    public bool DueDateKnown { get; set; }
+
+    /// <summary>到期日展示文案（**非持久化列**：未知时显式说明「未知」并声明不推算）</summary>
+    [NotMapped]
+    public string DueDateText { get; set; } = string.Empty;
+
+    /// <summary>付款条件展示文案（**非持久化列**：未提供时显式说明「未提供」，绝不回填默认账期）</summary>
+    [NotMapped]
+    public string PaymentTermsText { get; set; } = string.Empty;
 
     /// <summary>模块边界声明（**非持久化列**：接口与界面同源，声明这不是应付账款台账 / 税务申报 / 付款授权）</summary>
     [NotMapped]

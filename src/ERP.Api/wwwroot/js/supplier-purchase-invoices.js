@@ -1,15 +1,19 @@
 /* ==================================================================================
-   ========== 供应商采购发票登记册（ERP-043）— 普票 / 专票证据 + 采购订单关联 ==========
+   ========== 供应商采购发票登记册（ERP-043 + ERP-065）— 普票 / 专票 / 进口证据 ==========
    ==================================================================================
-   定位：登记普通发票 / 增值税专用发票的**运营证据**，并可（可选、显式）把含税总额
+   定位：登记普通发票 / 增值税专用发票 / 进口发票（海关进口增值税专用缴款书）的**运营证据**，
+         可（可选、显式）登记到期日与付款条件，并可（可选、显式）把含税总额
          全部或部分关联到**同供应商 + 同币种**的既有采购订单。
    边界（界面侧同样遵守）：
      1. 本登记册不是应付账款台账、不是税务申报系统、也不是付款授权机制；
      2. 登记 / 作废只改本模块两张表：不改写采购订单状态 / 到货进度 / 金额与明细、库存与库存成本、
         退税记录、供应商余额与付款状态，也不生成凭证 / 收款 / 付款 / 结算单；
      3. 金额等式：含税总额 = 不含税金额 + 税额（服务端按币种精度取整后严格校验），界面只做提示；
-     4. 关联只允许同供应商 + 同币种订单：系统不会按单号 / 金额 / 开票日期相似度猜测订单；
-     5. 已登记证据冻结（可作废、可读，不可改写）；作废保留身份 / 金额 / 关联 / 审计历史。
+     4. 到期日与付款条件是**用户显式登记**的证据：留空 = 未知 / 未提供，
+        系统不按供应商默认账期、备注、历史发票或采购订单推算到期日，也不判断逾期 / 账龄；
+     5. 关联只允许同供应商 + 同币种订单：系统不会按单号 / 金额 / 开票日期相似度猜测订单；
+     6. 已登记证据冻结（可作废、可读，不可改写）；作废保留身份 / 金额 / 关联 / 审计历史。
+   与客户销项发票证据、单证中心商业发票**刻意分离**：不转换、不替换、不自动链接。
    文案与服务端 PurchaseInvoiceRules / PurchaseInvoiceService 保持一致。
    ================================================================================== */
 
@@ -31,7 +35,21 @@ let PIR = {
   hint: ''                // 从采购订单行操作进入时的预填提示
 };
 
-const PIR_TYPES = ['普票', '专票'];
+const PIR_TYPES = ['普票', '专票', '进口'];
+/* 发票类型说明与发票代码要求（与服务端 PurchaseInvoiceRules.InvoiceTypeText /
+   InvoiceCodeRequirementText 同源：专票必填代码；普票 / 进口票「票面无代码」时留空，系统不臆造代码） */
+const PIR_TYPE_HINTS = {
+  '普票': '增值税普通发票',
+  '专票': '增值税专用发票',
+  '进口': '进口发票 / 海关进口增值税专用缴款书'
+};
+const PIR_CODE_HINTS = {
+  '普票': '（可不填）',
+  '专票': '*（专票必填）',
+  '进口': '（进口票通常无代码，可留空）'
+};
+function pirCodeHint(type) { return PIR_CODE_HINTS[type] || '（可不填）'; }
+function pirTypeHint(type) { return PIR_TYPE_HINTS[type] || ''; }
 const PIR_CURRENCIES = ['CNY', 'USD', 'EUR', 'HKD', 'GBP', 'JPY'];
 const PIR_STATUSES = [{ value: 0, label: '草稿' }, { value: 1, label: '已登记' }, { value: 2, label: '已作废' }];
 const PIR_LINKAGES = [
@@ -115,7 +133,7 @@ function pirRender() {
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
         <h3 style="margin:0">🧾 供应商采购发票登记册
           <span style="font-size:13px;color:#64748b;font-weight:400;margin-left:10px">
-            普票 / 专票运营证据；含税总额可关联到同供应商同币种采购订单（不是应付账款台账 / 税务申报 / 付款授权）</span></h3>
+            普票 / 专票 / 进口运营证据（可选登记到期日与付款条件）；含税总额可关联到同供应商同币种采购订单（不是应付账款台账 / 税务申报 / 付款授权）</span></h3>
         <button class="btn btn-neutral btn-sm" onclick="closeModal()">✕ 关闭</button>
       </div>
       ${PIR.hint ? `<div style="padding:6px 10px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;color:#1e40af;font-size:13px;margin-bottom:8px">${escapeHtml(PIR.hint)}</div>` : ''}
@@ -157,6 +175,8 @@ function pirListView() {
     <tr>
       <td>${escapeHtml(row.identityText || '')}</td>
       <td>${fmtDate(row.invoiceDate)}</td>
+      <td>${row.dueDateKnown ? fmtDate(row.dueDate) : '<span class="text-muted">到期日未知</span>'}
+        <div class="text-muted">${escapeHtml(row.paymentTermsText || '')}</div></td>
       <td>${escapeHtml(row.supplierName || '')}
         <div class="text-muted">${escapeHtml(row.supplierAvailabilityText || '')}</div></td>
       <td>${escapeHtml(row.currency || '')}</td>
@@ -234,12 +254,12 @@ function pirListTable(rows) {
     <div class="table-wrap" style="max-height:56vh;overflow:auto">
       <table>
         <thead><tr>
-          <th>发票（类型 号码 / 代码）</th><th>开票日期</th><th>供应商</th><th>币种</th>
+          <th>发票（类型 号码 / 代码）</th><th>开票日期</th><th>到期日 / 付款条件</th><th>供应商</th><th>币种</th>
           <th style="text-align:right">不含税</th><th style="text-align:right">税额</th>
           <th style="text-align:right">含税总额</th><th style="text-align:right">已关联</th>
           <th style="text-align:right">未关联</th><th>状态</th><th>关联</th><th>操作</th>
         </tr></thead>
-        <tbody>${rows || '<tr><td colspan="12" style="text-align:center;color:#64748b;padding:18px">暂无发票记录</td></tr>'}</tbody>
+        <tbody>${rows || '<tr><td colspan="13" style="text-align:center;color:#64748b;padding:18px">暂无发票记录</td></tr>'}</tbody>
       </table>
     </div>`;
 }
@@ -280,6 +300,8 @@ function pirOpenForm(id) {
     PIR.form = {
       id: row.id, invoiceType: row.invoiceType, invoiceCode: row.invoiceCode || '',
       invoiceNumber: row.invoiceNumber || '', invoiceDate: fmtDate(row.invoiceDate),
+      /* 到期日 / 付款条件：只回显登记时用户显式提交的值；未登记时保持空 = 未知 / 未提供 */
+      dueDate: fmtDate(row.dueDate), paymentTerms: row.paymentTerms || '',
       supplierId: row.supplierId, currency: row.currency,
       netAmount: row.netAmount, taxAmount: row.taxAmount, grossAmount: row.grossAmount,
       remark: row.remark || ''
@@ -289,6 +311,8 @@ function pirOpenForm(id) {
     PIR.form = {
       id: null, invoiceType: '普票', invoiceCode: '', invoiceNumber: '',
       invoiceDate: todayISO(),
+      /* 到期日 / 付款条件默认为空 = 未知 / 未提供：绝不按供应商默认账期或订单项自动预填 */
+      dueDate: '', paymentTerms: '',
       supplierId: prefill ? prefill.supplierId : '',
       currency: prefill ? prefill.currency : 'CNY',
       netAmount: 0, taxAmount: 0, grossAmount: 0,
@@ -319,8 +343,9 @@ function pirFormView() {
       <div><label class="ea-lb">发票类型 *</label>
         <select id="pir-type" style="width:100%" onchange="PIR.form.invoiceType=this.value;pirRender()">
           ${PIR_TYPES.map(t => `<option value="${t}" ${f.invoiceType === t ? 'selected' : ''}>${t}</option>`).join('')}
-        </select></div>
-      <div><label class="ea-lb">发票代码 ${f.invoiceType === '专票' ? '*（专票必填）' : '（普票可选）'}</label>
+        </select>
+        <div class="text-muted" style="font-size:12px">${escapeHtml(pirTypeHint(f.invoiceType))}</div></div>
+      <div><label class="ea-lb">发票代码 ${pirCodeHint(f.invoiceType)}</label>
         <input id="pir-code" style="width:100%" value="${escapeHtml(f.invoiceCode)}"
           onchange="PIR.form.invoiceCode=this.value"></div>
       <div><label class="ea-lb">发票号码 *</label>
@@ -329,6 +354,14 @@ function pirFormView() {
       <div><label class="ea-lb">开票日期 *</label>
         <input type="date" id="pir-date" style="width:100%" value="${escapeHtml(f.invoiceDate)}"
           onchange="PIR.form.invoiceDate=this.value"></div>
+      <div><label class="ea-lb">到期日（可选）</label>
+        <input type="date" id="pir-due-date" style="width:100%" value="${escapeHtml(f.dueDate)}"
+          onchange="PIR.form.dueDate=this.value">
+        <div class="text-muted" style="font-size:12px">留空 = 未知（系统不按供应商默认账期 / 备注推算）</div></div>
+      <div><label class="ea-lb">付款条件（可选）</label>
+        <input id="pir-payment-terms" style="width:100%" maxlength="200" value="${escapeHtml(f.paymentTerms)}"
+          onchange="PIR.form.paymentTerms=this.value">
+        <div class="text-muted" style="font-size:12px">留空 = 未提供；原样作为文本证据保存（系统不解析账期）</div></div>
       <div><label class="ea-lb">供应商 *（必须存在且启用）</label>
         <select id="pir-supplier" style="width:100%" onchange="PIR.form.supplierId=this.value">
           <option value="">请选择供应商…</option>${supplierOptions}
@@ -354,6 +387,8 @@ function pirFormView() {
     <div style="margin-top:8px;padding:8px 10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;color:#475569;font-size:13px">
       金额等式（服务端权威校验）：<b>含税总额 = 不含税金额 + 税额</b>；三项按币种精度四舍五入（JPY 等无小数币种为 0 位，其余 2 位，0.5 进位）后必须严格相等，
       含税总额必须大于 0；系统不按税率反推金额、不做汇率换算；同一「供应商 + 类型 + 代码 / 号码」的未作废发票不允许重复登记。
+      <div style="margin-top:4px">到期日与付款条件是<b>用户显式登记</b>的证据：到期日留空 = 未知，付款条件留空 = 未提供；
+        系统绝不按供应商默认账期、付款条件文本或备注推算到期日，也不据此判断逾期 / 账龄 / 付款义务（到期日不得早于开票日期）。</div>
     </div>
 
     <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px">
@@ -371,12 +406,18 @@ async function pirSaveForm() {
     toast('专票必须填写发票代码', 'error'); return;
   }
   if (!f.invoiceDate) { toast('请填写开票日期', 'error'); return; }
+  if (f.dueDate && f.dueDate < f.invoiceDate) {
+    toast('到期日不能早于开票日期（留空表示未知，系统不按默认账期推算）', 'error'); return;
+  }
 
   const body = {
     invoiceType: f.invoiceType,
     invoiceCode: f.invoiceCode || '',
     invoiceNumber: f.invoiceNumber,
     invoiceDate: f.invoiceDate + 'T00:00:00',
+    /* 到期日 / 付款条件：留空即提交空值 = 未知 / 未提供（绝不自动补值） */
+    dueDate: f.dueDate ? (f.dueDate + 'T00:00:00') : null,
+    paymentTerms: f.paymentTerms || '',
     supplierId: Number(f.supplierId),
     currency: f.currency,
     netAmount: Number(f.netAmount || 0),
@@ -740,10 +781,13 @@ function pirDetailView() {
       <div>作废时间<div>${inv.voidedAt ? fmtDate(inv.voidedAt) : '（未作废）'}</div></div>
       <div>作废原因<div>${escapeHtml(inv.voidReason || '—')}</div></div>
       <div>备注<div>${escapeHtml(inv.remark || '—')}</div></div>
+      <div>到期日<div>${escapeHtml(inv.dueDateText || '')}</div></div>
+      <div>付款条件<div>${escapeHtml(inv.paymentTermsText || '')}</div></div>
     </div>
 
     <div style="padding:8px 10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;font-size:13px;margin-bottom:8px">
-      <div><b>关联口径</b>：${escapeHtml(inv.linkageRuleText || '')}</div>
+      <div><b>到期日与付款条件</b>：${escapeHtml(inv.evidenceTermsRuleText || '')}</div>
+      <div style="margin-top:4px"><b>关联口径</b>：${escapeHtml(inv.linkageRuleText || '')}</div>
       <div style="margin-top:4px"><b>边界</b>：${escapeHtml(inv.boundaryText || '')}</div>
     </div>
 

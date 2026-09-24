@@ -8,13 +8,13 @@ using Microsoft.AspNetCore.Mvc;
 namespace ERP.Api.Controllers;
 
 /// <summary>
-/// 供应商采购发票登记控制器（ERP-043）：登记普通发票 / 增值税专用发票的**运营证据**，
-/// 并可（可选、显式）把含税总额关联到既有采购订单。
+/// 供应商采购发票登记控制器（ERP-043，ERP-065 扩展）：登记普通发票 / 增值税专用发票 / 进口发票的**运营证据**，
+/// 可（可选、显式）登记到期日与付款条件，并可（可选、显式）把含税总额关联到既有采购订单。
 /// <para>边界（控制器层同样遵守）：本模块<strong>不是</strong>应付账款台账、<strong>不是</strong>税务申报系统、
 /// <strong>不是</strong>付款授权机制；所有接口只读写 <c>PurchaseInvoices</c> / <c>PurchaseInvoiceAllocations</c> 两张表，
 /// <strong>不</strong>改写采购订单状态 / 到货进度 / 金额与明细、库存与库存成本、库存流水、退税记录、
 /// 供应商余额与结算方式、付款状态，也不记账、不生成凭证 / 收款 / 付款 / 结算单；
-/// 生产库结构变更仍由 Human Gate 控制（本控制器不做任何 DDL，建表 / 索引由 SchemaUpgrader 幂等补齐）。</para>
+/// 生产库结构变更仍由 Human Gate 控制（本控制器不做任何 DDL，建表 / 索引 / 加列由 SchemaUpgrader 幂等补齐）。</para>
 /// </summary>
 [ApiController]
 [Route("api/purchase-invoices")]
@@ -59,14 +59,18 @@ public class PurchaseInvoiceController : ControllerBase
 
     /// <summary>
     /// 新增草稿发票：校验发票类型 / 代码 / 号码、供应商（必须存在且启用）、币种与金额等式
-    /// （含税总额 = 不含税金额 + 税额，按币种精度取整后严格相等），并拒绝重复身份。
+    /// （含税总额 = 不含税金额 + 税额，按币种精度取整后严格相等），校验可选到期日（不得早于开票日期；
+    /// 留空 = 未知，不按供应商默认账期推算）与付款条件（有界文本快照），并拒绝重复身份。
     /// </summary>
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] PurchaseInvoiceSaveDto dto)
         => Ok(ApiResponse<PurchaseInvoiceDto>.Success(
             await PurchaseInvoiceService.CreateAsync(_db, dto), "发票草稿已登记"));
 
-    /// <summary>修改草稿发票（已登记 / 已作废拒绝修改；已有采购订单关联时不允许更换供应商或币种）</summary>
+    /// <summary>
+    /// 修改草稿发票（已登记 / 已作废拒绝修改；已有采购订单关联时不允许更换供应商或币种）；
+    /// 到期日与付款条件同样是可选、显式证据（可清空为「未知 / 未提供」，系统不会自动补值）。
+    /// </summary>
     [HttpPut("{id:long}")]
     public async Task<IActionResult> Update(long id, [FromBody] PurchaseInvoiceSaveDto dto)
         => Ok(ApiResponse<PurchaseInvoiceDto>.Success(

@@ -12,12 +12,13 @@ using Xunit;
 namespace ERP.UnitTests;
 
 /// <summary>
-/// 供应商采购发票登记单元测试（ERP-043）。覆盖：普票 / 专票与发票代码要求、金额等式与币种精度、
-/// 供应商存在 / 删除 / 停用校验、重复身份（含规范化）拒绝、草稿编辑与冻结、
+/// 供应商采购发票登记单元测试（ERP-043，ERP-065 扩展）。覆盖：普票 / 专票 / 进口与发票代码要求、
+/// 可选显式到期日与付款条件（留空 = 未知 / 未提供，绝不推算、不得早于开票日期、200 位有界）、
+/// 金额等式与币种精度、供应商存在 / 删除 / 停用校验、重复身份（含规范化）拒绝、草稿编辑与冻结、
 /// 采购订单关联（同供应商 + 同币种、非取消、重复订单、超含税总额、金额必须为正）、
 /// 部分 / 全额关联与未关联金额、整体替换、登记 / 作废与历史保留、登记前关联复核、
-/// 非变更边界（采购订单 / 库存 / 库存流水 / 退税 / 收付款）、台账过滤与分页、
-/// 候选订单派生金额，以及模型 / 幂等结构与前端接线契约。
+/// 非变更边界（采购订单 / 库存 / 库存流水 / 退税 / 收付款）与「与客户销项发票证据 / 单证商业发票刻意分离」、
+/// 台账过滤与分页、候选订单派生金额，以及模型 / 幂等结构与前端接线契约。
 /// 全部使用内存库（TestDbFactory），不连接 SQL Server、不执行任何 SQL / 部署脚本。
 /// </summary>
 public class PurchaseInvoiceTests
@@ -65,7 +66,8 @@ public class PurchaseInvoiceTests
     private static PurchaseInvoiceSaveDto InvoiceDto(
         long supplierId, string invoiceType = "普票", string? code = null, string number = "0001",
         decimal net = 100m, decimal tax = 13m, decimal gross = 113m,
-        string currency = "CNY", DateTime? date = null, string remark = "")
+        string currency = "CNY", DateTime? date = null, string remark = "",
+        DateTime? dueDate = null, string paymentTerms = "")
         => new()
         {
             InvoiceType = invoiceType,
@@ -77,6 +79,8 @@ public class PurchaseInvoiceTests
             NetAmount = net,
             TaxAmount = tax,
             GrossAmount = gross,
+            DueDate = dueDate,
+            PaymentTerms = paymentTerms,
             Remark = remark
         };
 
@@ -177,6 +181,181 @@ public class PurchaseInvoiceTests
         var ex = await AssertBusinessAsync(ErrorCodes.InvalidParameter,
             () => controller.Create(InvoiceDto(supplier.Id, "电子专票")));
         Assert.Contains("不受支持", ex.Message);
+    }
+
+    // ==================== 1.1 进口发票与到期日 / 付款条件（ERP-065） ====================
+
+    [Fact]
+    public async Task 进口发票_可不填发票代码_保存草稿并写入显式到期日与付款条件()
+    {
+        using var db = TestDbFactory.Create();
+        var supplier = SeedSupplier(db, "S001", "海外供应商");
+        var controller = BuildController(db);
+
+        var created = await CreateInvoiceAsync(controller, InvoiceDto(
+            supplier.Id, PurchaseInvoiceRules.InvoiceTypeImport, code: null, number: "HG-2026-0001",
+            net: 1000m, tax: 130m, gross: 1130m,
+            date: new DateTime(2026, 9, 10),
+            dueDate: new DateTime(2026, 10, 10, 18, 30, 0), paymentTerms: "  月结 30 天  "));
+
+        Assert.Equal(PurchaseInvoiceRules.InvoiceTypeImport, created.InvoiceType);
+        Assert.Contains("进口", created.InvoiceTypeText);
+        Assert.Contains("可不填发票代码", created.InvoiceCodeRuleText);
+        Assert.Equal(string.Empty, created.InvoiceCode);
+
+        // 到期日只保留日期部分且为显式证据；付款条件去首尾空白后原样保存
+        Assert.Equal(new DateTime(2026, 10, 10), created.DueDate);
+        Assert.True(created.DueDateKnown);
+        Assert.Contains("2026-10-10", created.DueDateText);
+        Assert.Equal("月结 30 天", created.PaymentTerms);
+        Assert.Equal("月结 30 天", created.PaymentTermsText);
+        Assert.Contains("显式", created.EvidenceTermsRuleText);
+        Assert.Contains("不推算", created.EvidenceTermsRuleText);
+
+        var stored = await db.PurchaseInvoices.AsNoTracking().SingleAsync();
+        Assert.Equal(new DateTime(2026, 10, 10), stored.DueDate);
+        Assert.Equal("月结 30 天", stored.PaymentTerms);
+    }
+
+    [Fact]
+    public async Task 到期日与付款条件留空_保持未知_不按供应商默认账期或备注推算()
+    {
+        using var db = TestDbFactory.Create();
+        var supplier = SeedSupplier(db, "S001", "工厂A");
+        var controller = BuildController(db);
+
+        var created = await CreateInvoiceAsync(controller, InvoiceDto(
+            supplier.Id, "普票", null, "7001", remark: "备注写着「月结 30 天、到期日 2026-10-20」"));
+
+        Assert.Null(created.DueDate);
+        Assert.False(created.DueDateKnown);
+        Assert.Equal(PurchaseInvoiceRules.UnknownDueDateText, created.DueDateText);
+        Assert.Contains("未知", created.DueDateText);
+        Assert.Equal(string.Empty, created.PaymentTerms);
+        Assert.Equal(PurchaseInvoiceRules.UnknownPaymentTermsText, created.PaymentTermsText);
+        Assert.Contains("未提供", created.PaymentTermsText);
+
+        // 持久化列保持空（既没有回填、也没有从备注 / 供应商默认账期推算）
+        var stored = await db.PurchaseInvoices.AsNoTracking().SingleAsync();
+        Assert.Null(stored.DueDate);
+        Assert.Equal(string.Empty, stored.PaymentTerms);
+
+        // 台账与详情同一口径：未知一律显示「未知 / 未提供」
+        var listItem = Assert.Single(AssertOk<PagedResult<PurchaseInvoiceDto>>(
+            await controller.GetPaged(new PurchaseInvoiceQuery())).Items);
+        Assert.False(listItem.DueDateKnown);
+        Assert.Equal(PurchaseInvoiceRules.UnknownPaymentTermsText, listItem.PaymentTermsText);
+        Assert.Equal(created.Id, AssertOk<PurchaseInvoiceDto>(await controller.GetById(created.Id)).Id);
+    }
+
+    [Fact]
+    public async Task 到期日早于开票日期_被拒绝_等于开票日期允许()
+    {
+        using var db = TestDbFactory.Create();
+        var supplier = SeedSupplier(db, "S001", "工厂A");
+        var controller = BuildController(db);
+
+        var ex = await AssertBusinessAsync(ErrorCodes.InvalidParameter, () => controller.Create(InvoiceDto(
+            supplier.Id, "普票", null, "7002",
+            date: new DateTime(2026, 9, 20), dueDate: new DateTime(2026, 9, 19))));
+        Assert.Contains("不能早于开票日期", ex.Message);
+        Assert.Empty(await db.PurchaseInvoices.ToListAsync());
+
+        var sameDay = await CreateInvoiceAsync(controller, InvoiceDto(
+            supplier.Id, "普票", null, "7003",
+            date: new DateTime(2026, 9, 20), dueDate: new DateTime(2026, 9, 20)));
+        Assert.Equal(new DateTime(2026, 9, 20), sameDay.DueDate);
+    }
+
+    [Fact]
+    public async Task 付款条件超过长度上限_被拒绝_边界长度可保存()
+    {
+        using var db = TestDbFactory.Create();
+        var supplier = SeedSupplier(db, "S001", "工厂A");
+        var controller = BuildController(db);
+
+        await AssertBusinessAsync(ErrorCodes.InvalidParameter, () => controller.Create(InvoiceDto(
+            supplier.Id, "普票", null, "7004",
+            paymentTerms: new string('x', PurchaseInvoiceRules.MaxPaymentTermsLength + 1))));
+        Assert.Empty(await db.PurchaseInvoices.ToListAsync());
+
+        var ok = await CreateInvoiceAsync(controller, InvoiceDto(
+            supplier.Id, "普票", null, "7005",
+            paymentTerms: new string('y', PurchaseInvoiceRules.MaxPaymentTermsLength)));
+        Assert.Equal(PurchaseInvoiceRules.MaxPaymentTermsLength, ok.PaymentTerms.Length);
+    }
+
+    [Fact]
+    public async Task 修改草稿_可更新与清空到期日付款条件_登记后冻结()
+    {
+        using var db = TestDbFactory.Create();
+        var supplier = SeedSupplier(db, "S001", "工厂A");
+        var controller = BuildController(db);
+        var invoiceDate = new DateTime(2026, 9, 20);
+
+        var invoice = await CreateInvoiceAsync(controller, InvoiceDto(
+            supplier.Id, "进口", null, "7006", date: invoiceDate,
+            dueDate: new DateTime(2026, 10, 20), paymentTerms: "预付 30%"));
+
+        // 清空 = 回到「未知 / 未提供」（系统不会自动补值）
+        var cleared = AssertOk<PurchaseInvoiceDto>(await controller.Update(invoice.Id, InvoiceDto(
+            supplier.Id, "进口", null, "7006", date: invoiceDate)));
+        Assert.Null(cleared.DueDate);
+        Assert.False(cleared.DueDateKnown);
+        Assert.Equal(string.Empty, cleared.PaymentTerms);
+        Assert.Equal(PurchaseInvoiceRules.UnknownPaymentTermsText, cleared.PaymentTermsText);
+
+        // 重新显式登记
+        var updated = AssertOk<PurchaseInvoiceDto>(await controller.Update(invoice.Id, InvoiceDto(
+            supplier.Id, "进口", null, "7006", date: invoiceDate,
+            dueDate: new DateTime(2026, 12, 1), paymentTerms: "月结 60 天")));
+        Assert.Equal(new DateTime(2026, 12, 1), updated.DueDate);
+        Assert.Equal("月结 60 天", updated.PaymentTerms);
+
+        // 登记后冻结：证据只读，到期日与付款条件不可再被改写
+        AssertOk<PurchaseInvoiceDto>(await controller.Record(invoice.Id));
+        await AssertBusinessAsync(ErrorCodes.RuleConflict, () => controller.Update(invoice.Id, InvoiceDto(
+            supplier.Id, "进口", null, "7006", date: invoiceDate,
+            dueDate: new DateTime(2027, 1, 1), paymentTerms: "月结 90 天")));
+
+        var recorded = AssertOk<PurchaseInvoiceDto>(await controller.GetById(invoice.Id));
+        Assert.True(recorded.IsRecorded);
+        Assert.Equal(new DateTime(2026, 12, 1), recorded.DueDate);
+        Assert.Equal("月结 60 天", recorded.PaymentTerms);
+    }
+
+    [Fact]
+    public async Task 作废_保留到期日付款条件与关联历史()
+    {
+        using var db = TestDbFactory.Create();
+        var supplier = SeedSupplier(db, "S001", "海外供应商");
+        var order = SeedOrder(db, "PO-IMP-1", supplier.Id, totalAmount: 1000m);
+        var controller = BuildController(db);
+
+        var invoice = await CreateInvoiceAsync(controller, InvoiceDto(
+            supplier.Id, PurchaseInvoiceRules.InvoiceTypeImport, null, "HG-IMP-1",
+            net: 1000m, tax: 0m, gross: 1000m, date: new DateTime(2026, 9, 10),
+            dueDate: new DateTime(2026, 11, 10), paymentTerms: "T/T 60 天"));
+        AssertOk<PurchaseInvoiceDto>(await controller.SaveAllocations(invoice.Id, Lines((order.Id, 400m))));
+        AssertOk<PurchaseInvoiceDto>(await controller.Record(invoice.Id));
+
+        var voided = AssertOk<PurchaseInvoiceDto>(await controller.Void(
+            invoice.Id, new PurchaseInvoiceVoidRequest { Reason = "票面到期日录错，供应商重开" }));
+
+        Assert.True(voided.IsVoided);
+        Assert.Equal(new DateTime(2026, 11, 10), voided.DueDate);
+        Assert.Equal("T/T 60 天", voided.PaymentTerms);
+        Assert.Equal(400m, voided.LinkedAmount);
+        Assert.Equal(order.Id, Assert.Single(voided.Allocations).PurchaseOrderId);
+
+        // 已作废历史证据保留可读（软删除标记必须为 false，绝不硬删除）
+        var page = AssertOk<PagedResult<PurchaseInvoiceDto>>(await controller.GetPaged(
+            new PurchaseInvoiceQuery { Status = PurchaseInvoiceRules.StatusVoided }));
+        var historical = Assert.Single(page.Items);
+        Assert.Equal(invoice.Id, historical.Id);
+        Assert.Equal(new DateTime(2026, 11, 10), historical.DueDate);
+        Assert.Equal("T/T 60 天", historical.PaymentTerms);
+        Assert.False((await db.PurchaseInvoices.AsNoTracking().SingleAsync(x => x.Id == invoice.Id)).IsDeleted);
     }
 
     [Theory]
@@ -842,6 +1021,49 @@ public class PurchaseInvoiceTests
         Assert.Equal(0, await db.FinanceExpenses.CountAsync());
     }
 
+    [Fact]
+    public async Task 写入到期日付款条件_不改写订单供应商_且与客户销项发票与单证商业发票刻意分离()
+    {
+        using var db = TestDbFactory.Create();
+        var supplier = SeedSupplier(db, "S001", "工厂A");
+        var order = SeedOrder(db, "PO-1", supplier.Id, totalAmount: 1000m);
+        var controller = BuildController(db);
+
+        var invoice = await CreateInvoiceAsync(controller, InvoiceDto(
+            supplier.Id, PurchaseInvoiceRules.InvoiceTypeImport, "HG-CODE", "HG-2026-77",
+            net: 100m, tax: 13m, gross: 113m, date: new DateTime(2026, 9, 5),
+            dueDate: new DateTime(2026, 10, 5), paymentTerms: "月结 30 天"));
+        AssertOk<PurchaseInvoiceDto>(await controller.SaveAllocations(invoice.Id, Lines((order.Id, 113m))));
+        AssertOk<PurchaseInvoiceDto>(await controller.Record(invoice.Id));
+        AssertOk<PurchaseInvoiceDto>(await controller.Void(
+            invoice.Id, new PurchaseInvoiceVoidRequest { Reason = "以票换票" }));
+
+        // 采购订单与供应商主数据完全未变
+        var orderAfter = await db.PurchaseOrders.AsNoTracking().SingleAsync(o => o.Id == order.Id);
+        Assert.Equal(DocumentStatus.Approved, orderAfter.Status);
+        Assert.Equal("未到货", orderAfter.ArrivalProgress);
+        Assert.Equal("未结算", orderAfter.SettlementProgress);
+        Assert.Equal(1000m, orderAfter.TotalAmount);
+        Assert.False(orderAfter.IsDeleted);
+
+        var supplierAfter = await db.BaseSuppliers.AsNoTracking().SingleAsync(s => s.Id == supplier.Id);
+        Assert.Equal(1, supplierAfter.Status);
+        Assert.Equal("S001", supplierAfter.SupplierCode);
+        Assert.Equal("工厂A", supplierAfter.SupplierName);
+
+        // 与客户销项发票证据 / 单证中心商业发票刻意分离：不产生、不转换、不替换、不自动链接
+        Assert.Empty(await db.CustomerSalesInvoiceEvidences.AsNoTracking().ToListAsync());
+        Assert.Empty(await db.CustomerSalesInvoiceAllocations.AsNoTracking().ToListAsync());
+        Assert.Empty(await db.TradeDocuments.AsNoTracking().ToListAsync());
+        Assert.DoesNotContain("出口发票", PurchaseInvoiceRules.SupportedInvoiceTypes);
+        Assert.Contains("出口发票", CustomerSalesInvoiceEvidenceRules.SupportedInvoiceTypes);
+
+        var invoiceModel = db.Model.FindEntityType(typeof(PurchaseInvoice))!;
+        Assert.DoesNotContain(invoiceModel.GetNavigations(),
+            n => n.ClrType == typeof(CustomerSalesInvoiceEvidence));
+        Assert.DoesNotContain(invoiceModel.GetNavigations(), n => n.ClrType == typeof(TradeDocument));
+    }
+
     // ==================== 5. 台账过滤与分页 ====================
 
     [Fact]
@@ -1004,6 +1226,32 @@ public class PurchaseInvoiceTests
         Assert.Contains("含税总额", PurchaseInvoiceRules.AmountEquationText);
         Assert.Contains("币种都必须与发票一致", PurchaseInvoiceRules.LinkageRuleText);
 
+        // ERP-065：进口发票类型与按类型的发票代码要求（出口发票属于客户销项侧，刻意不受支持）
+        Assert.Equal(PurchaseInvoiceRules.InvoiceTypeImport, PurchaseInvoiceRules.NormalizeInvoiceType(" 进口 "));
+        Assert.Contains(PurchaseInvoiceRules.InvoiceTypeImport, PurchaseInvoiceRules.SupportedInvoiceTypes);
+        Assert.False(PurchaseInvoiceRules.RequiresInvoiceCode(PurchaseInvoiceRules.InvoiceTypeImport));
+        Assert.Equal(string.Empty, PurchaseInvoiceRules.NormalizeInvoiceCode(null, PurchaseInvoiceRules.InvoiceTypeImport));
+        Assert.Contains("专票必须填写发票代码", PurchaseInvoiceRules.InvoiceCodeRequirementText("专票"));
+        Assert.Contains("可不填发票代码", PurchaseInvoiceRules.InvoiceCodeRequirementText("进口"));
+        Assert.Contains("进口", PurchaseInvoiceRules.InvoiceTypeText(PurchaseInvoiceRules.InvoiceTypeImport));
+        Assert.Throws<BusinessException>(() => PurchaseInvoiceRules.NormalizeInvoiceType("出口发票"));
+
+        // ERP-065：到期日只接受显式值（留空 = 未知），付款条件是有界文本证据（留空 = 未提供）
+        Assert.Null(PurchaseInvoiceRules.NormalizeDueDate(null, new DateTime(2026, 9, 1)));
+        Assert.Equal(new DateTime(2026, 9, 30), PurchaseInvoiceRules.NormalizeDueDate(
+            new DateTime(2026, 9, 30, 15, 20, 0), new DateTime(2026, 9, 1)));
+        Assert.Throws<BusinessException>(() => PurchaseInvoiceRules.NormalizeDueDate(
+            new DateTime(2026, 8, 31), new DateTime(2026, 9, 1)));
+        Assert.Equal(string.Empty, PurchaseInvoiceRules.NormalizePaymentTerms("   "));
+        Assert.Equal("月结 30 天", PurchaseInvoiceRules.NormalizePaymentTerms("  月结 30 天 "));
+        Assert.Throws<BusinessException>(() => PurchaseInvoiceRules.NormalizePaymentTerms(
+            new string('x', PurchaseInvoiceRules.MaxPaymentTermsLength + 1)));
+        Assert.Equal(PurchaseInvoiceRules.UnknownDueDateText, PurchaseInvoiceRules.DueDateText(null));
+        Assert.Contains("2026-09-30", PurchaseInvoiceRules.DueDateText(new DateTime(2026, 9, 30)));
+        Assert.Equal(PurchaseInvoiceRules.UnknownPaymentTermsText, PurchaseInvoiceRules.PaymentTermsText(" "));
+        Assert.Contains("显式", PurchaseInvoiceRules.EvidenceTermsRuleText);
+        Assert.Contains("不推算", PurchaseInvoiceRules.EvidenceTermsRuleText);
+
         // 币种精度口径与装柜费用分摊（ERP-042）共用同一权威实现，不允许两套取整规则
         Assert.Equal(ContainerExpenseAllocationRules.PrecisionOf("jpy"), CurrencyAmountRules.PrecisionOf("JPY"));
         Assert.Equal(ContainerExpenseAllocationRules.RoundAmount(2.345m, "CNY"),
@@ -1025,6 +1273,9 @@ public class PurchaseInvoiceTests
         Assert.Equal(50, invoice.FindProperty(nameof(PurchaseInvoice.NormalizedInvoiceNumber))!.GetMaxLength());
         Assert.Equal(200, invoice.FindProperty(nameof(PurchaseInvoice.SupplierName))!.GetMaxLength());
         Assert.Equal(500, invoice.FindProperty(nameof(PurchaseInvoice.VoidReason))!.GetMaxLength());
+        // ERP-065：付款条件必须是 200 位有界文本，到期日必须是可空列（NULL = 未知，绝不回填）
+        Assert.Equal(200, invoice.FindProperty(nameof(PurchaseInvoice.PaymentTerms))!.GetMaxLength());
+        Assert.True(invoice.FindProperty(nameof(PurchaseInvoice.DueDate))!.IsNullable);
 
         var identity = Assert.Single(invoice.GetIndexes(), i => i.IsUnique && i.Properties.Count == 4);
         Assert.Equal("UX_PurchaseInvoices_ActiveIdentity", identity.GetDatabaseName());
@@ -1060,6 +1311,14 @@ public class PurchaseInvoiceTests
         Assert.Contains("IF OBJECT_ID('db_owner.PurchaseInvoices') IS NULL", script);
         Assert.Contains("CREATE TABLE db_owner.PurchaseInvoices", script);
         Assert.Contains("GrossAmount DECIMAL(18,2) NOT NULL DEFAULT 0", script);
+        // ERP-065：建表包含可选到期日（NULL = 未知）与付款条件（有界文本，空串 = 未提供）；
+        // 既有库的加列在第 31 段末尾以 IF COL_LENGTH(...) IS NULL 幂等补齐，且本段 SQL 无回填语句
+        Assert.Contains("DueDate DATETIME2 NULL", script);
+        Assert.Contains("PaymentTerms NVARCHAR(200) NOT NULL DEFAULT N''", script);
+        Assert.Contains("IF COL_LENGTH('db_owner.PurchaseInvoices', 'DueDate') IS NULL", script);
+        Assert.Contains("ALTER TABLE db_owner.PurchaseInvoices ADD DueDate DATETIME2 NULL;", script);
+        Assert.Contains("IF COL_LENGTH('db_owner.PurchaseInvoices', 'PaymentTerms') IS NULL", script);
+        Assert.Contains("ALTER TABLE db_owner.PurchaseInvoices ADD PaymentTerms NVARCHAR(200) NOT NULL DEFAULT N'';", script);
         Assert.Contains("Status INT NOT NULL DEFAULT 0", script);
         Assert.Contains("CREATE UNIQUE INDEX UX_PurchaseInvoices_ActiveIdentity", script);
         Assert.Contains("WHERE IsDeleted = 0 AND Status <> 2;", script);
@@ -1077,6 +1336,13 @@ public class PurchaseInvoiceTests
         Assert.DoesNotContain("UPDATE db_owner", segment);
         Assert.DoesNotContain("INSERT INTO db_owner", segment);
         Assert.DoesNotContain("DELETE FROM db_owner", segment);
+
+        // ERP-065 的加列刻意留在第 31 段内：第 37 段及以后的模块段落有「只建表 / 建索引、不改既有表」的既有契约，
+        // 因此加列不得追加到其后（否则会破坏 CustomerSalesInvoiceEvidenceTests 等既有幂等契约断言）
+        var erp065DueDate = script.IndexOf(
+            "ALTER TABLE db_owner.PurchaseInvoices ADD DueDate", StringComparison.Ordinal);
+        var section37 = script.IndexOf("// 37. 客户销项发票证据登记", StringComparison.Ordinal);
+        Assert.True(erp065DueDate > 0 && section37 > erp065DueDate);
     }
 
     [Fact]
@@ -1097,6 +1363,27 @@ public class PurchaseInvoiceTests
         Assert.Contains("/record", js);
         Assert.Contains("/void", js);
         Assert.Contains("/order-candidates?", js);
+
+        // ERP-065：进口发票类型 + 可选到期日 / 付款条件表单与「未知」语义必须接线到界面与报文
+        Assert.Contains("const PIR_TYPES = ['普票', '专票', '进口']", js);
+        Assert.Contains("pirCodeHint", js);
+        Assert.Contains("id=\"pir-due-date\"", js);
+        Assert.Contains("id=\"pir-payment-terms\"", js);
+        Assert.Contains("dueDate: f.dueDate ? (f.dueDate + 'T00:00:00') : null", js);
+        Assert.Contains("paymentTerms: f.paymentTerms || ''", js);
+        Assert.Contains("evidenceTermsRuleText", js);
+        Assert.Contains("dueDateText", js);
+        Assert.Contains("到期日未知", js);
+
+        Assert.NotNull(typeof(PurchaseInvoiceDto).GetProperty(nameof(PurchaseInvoiceDto.DueDate)));
+        Assert.NotNull(typeof(PurchaseInvoiceDto).GetProperty(nameof(PurchaseInvoiceDto.DueDateKnown)));
+        Assert.NotNull(typeof(PurchaseInvoiceDto).GetProperty(nameof(PurchaseInvoiceDto.DueDateText)));
+        Assert.NotNull(typeof(PurchaseInvoiceDto).GetProperty(nameof(PurchaseInvoiceDto.PaymentTerms)));
+        Assert.NotNull(typeof(PurchaseInvoiceDto).GetProperty(nameof(PurchaseInvoiceDto.PaymentTermsText)));
+        Assert.NotNull(typeof(PurchaseInvoiceDto).GetProperty(nameof(PurchaseInvoiceDto.EvidenceTermsRuleText)));
+        Assert.NotNull(typeof(PurchaseInvoiceDto).GetProperty(nameof(PurchaseInvoiceDto.InvoiceCodeRuleText)));
+        Assert.NotNull(typeof(PurchaseInvoiceSaveDto).GetProperty(nameof(PurchaseInvoiceSaveDto.DueDate)));
+        Assert.NotNull(typeof(PurchaseInvoiceSaveDto).GetProperty(nameof(PurchaseInvoiceSaveDto.PaymentTerms)));
 
         var controller = File.ReadAllText(RepoFile("src", "ERP.Api", "Controllers", "PurchaseInvoiceController.cs"));
         Assert.Contains("[Route(\"api/purchase-invoices\")]", controller);

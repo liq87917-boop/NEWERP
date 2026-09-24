@@ -1660,6 +1660,11 @@ IF NOT EXISTS (SELECT 1 FROM sys.foreign_keys
         //     31.4 唯一外键是「关联行 → 发票」（级联，发票仍只做软删除）；关联行**刻意不建**到采购订单 / 供应商的
         //          外键，也不在采购订单上加任何列 —— 订单软删除 / 取消、供应商停用或改名都不影响历史证据可读；
         //     31.5 本段只建本模块两张表与其索引，不改写采购订单、库存与库存成本、退税、付款与供应商数据。
+        //     31.6 ERP-065 只**追加**两个可选证据列：DueDate（DATETIME2 NULL = 「未知」）与
+        //          PaymentTerms（NVARCHAR(200) NOT NULL DEFAULT N'' = 「未提供」）：新建库由上面的建表语句包含，
+        //          既有库由本段末尾的 IF COL_LENGTH(...) IS NULL 幂等加列补齐（**刻意留在第 31 段内**：
+        //          第 37 段及以后的模块段落有「只建表 / 建索引、不改既有表」的既有契约，加列不得追加到其后）；
+        //          历史行保持 NULL / 空串，不含任何回填，也不改写任何既有列与单据。
         await db.Database.ExecuteSqlRawAsync(@"
 IF OBJECT_ID('db_owner.PurchaseInvoices') IS NULL
 BEGIN
@@ -1678,6 +1683,8 @@ BEGIN
         NetAmount DECIMAL(18,2) NOT NULL DEFAULT 0,
         TaxAmount DECIMAL(18,2) NOT NULL DEFAULT 0,
         GrossAmount DECIMAL(18,2) NOT NULL DEFAULT 0,
+        DueDate DATETIME2 NULL,
+        PaymentTerms NVARCHAR(200) NOT NULL DEFAULT N'',
         Status INT NOT NULL DEFAULT 0,
         RecordedAt DATETIME2 NULL,
         VoidedAt DATETIME2 NULL,
@@ -1763,7 +1770,14 @@ IF NOT EXISTS (SELECT 1 FROM sys.foreign_keys
                  AND parent_object_id = OBJECT_ID('db_owner.PurchaseInvoiceAllocations'))
     ALTER TABLE db_owner.PurchaseInvoiceAllocations
         ADD CONSTRAINT FK_PurchaseInvoiceAllocations_Invoice
-        FOREIGN KEY (PurchaseInvoiceId) REFERENCES db_owner.PurchaseInvoices(Id);");
+        FOREIGN KEY (PurchaseInvoiceId) REFERENCES db_owner.PurchaseInvoices(Id);
+
+IF COL_LENGTH('db_owner.PurchaseInvoices', 'DueDate') IS NULL
+    ALTER TABLE db_owner.PurchaseInvoices ADD DueDate DATETIME2 NULL;
+
+IF COL_LENGTH('db_owner.PurchaseInvoices', 'PaymentTerms') IS NULL
+    ALTER TABLE db_owner.PurchaseInvoices ADD PaymentTerms NVARCHAR(200) NOT NULL DEFAULT N'';
+");
 
         // 32. 业务单据附件引用登记（ERP-045：仅元数据的附件引用册）
         //     32.1 只建「附件引用」一张表与其索引：**不含任何 UPDATE / 回填语句**，

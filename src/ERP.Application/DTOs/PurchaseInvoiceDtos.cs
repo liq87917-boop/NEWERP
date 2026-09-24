@@ -1,8 +1,8 @@
 namespace ERP.Application.DTOs;
 
 /// <summary>
-/// 供应商采购发票登记 / 修改请求（ERP-043）。
-/// <para>客户端只能提交发票本身字段（类型 / 代码 / 号码 / 日期 / 供应商 / 币种 / 三个金额 / 备注）；
+/// 供应商采购发票登记 / 修改请求（ERP-043，ERP-065 扩展）。
+/// <para>客户端只能提交发票本身字段（类型 / 代码 / 号码 / 日期 / 到期日 / 付款条件 / 供应商 / 币种 / 三个金额 / 备注）；
 /// 供应商编码名称快照、规范化身份列、状态与审计字段一律由服务端权威写入。</para>
 /// </summary>
 public sealed class PurchaseInvoiceSaveDto
@@ -33,6 +33,18 @@ public sealed class PurchaseInvoiceSaveDto
 
     /// <summary>含税总额（价税合计，原币；必须等于净额 + 税额且大于 0）</summary>
     public decimal GrossAmount { get; set; }
+
+    /// <summary>
+    /// 到期日（ERP-065，可选、显式证据）：留空 = **未知**（服务端不按供应商默认账期、付款条件或备注推算）；
+    /// 填写时只取日期部分，且不得早于开票日期。
+    /// </summary>
+    public DateTime? DueDate { get; set; }
+
+    /// <summary>
+    /// 付款条件快照（ERP-065，可选、显式证据）：留空 = 未提供；去首尾空白后长度 ≤ 200，
+    /// 原样作为文本证据保存（服务端不解析文本、不折算账期）。
+    /// </summary>
+    public string PaymentTerms { get; set; } = string.Empty;
 
     /// <summary>备注</summary>
     public string Remark { get; set; } = string.Empty;
@@ -137,14 +149,19 @@ public sealed record PurchaseInvoiceAllocationDto(
     string OrderAvailabilityText);
 
 /// <summary>
-/// 供应商采购发票台账 / 详情（ERP-043）：发票身份、金额、状态、已关联 / 未关联金额与关联行。
+/// 供应商采购发票台账 / 详情（ERP-043，ERP-065 扩展）：发票身份、金额、状态、已关联 / 未关联金额与关联行，
+/// 以及**可选、显式**的到期日与付款条件证据。
 /// <para><see cref="LinkedAmount"/> / <see cref="UnlinkedAmount"/> 只按**持久化关联行**计算，
 /// 不会按单号、金额或日期相似度把未关联金额猜测到任何采购订单上。</para>
+/// <para><see cref="DueDate"/> / <see cref="PaymentTerms"/> 只回显**登记时用户显式提交**的值：
+/// 未填写时 <see cref="DueDateKnown"/> 为 false 且 <see cref="DueDateText"/> 明确显示「未知」，
+/// 系统绝不按供应商默认账期、备注或历史发票推算到期日与账期。</para>
 /// </summary>
 public sealed record PurchaseInvoiceDto(
     long Id,
     string InvoiceType,
     string InvoiceTypeText,
+    string InvoiceCodeRuleText,
     string InvoiceCode,
     string InvoiceNumber,
     string IdentityText,
@@ -168,6 +185,11 @@ public sealed record PurchaseInvoiceDto(
     DateTime? VoidedAt,
     string VoidReason,
     string Remark,
+    DateTime? DueDate,
+    bool DueDateKnown,
+    string DueDateText,
+    string PaymentTerms,
+    string PaymentTermsText,
     int AllocationCount,
     decimal LinkedAmount,
     decimal UnlinkedAmount,
@@ -177,6 +199,7 @@ public sealed record PurchaseInvoiceDto(
     DateTime? UpdatedAt,
     string AmountEquationText,
     string LinkageRuleText,
+    string EvidenceTermsRuleText,
     string BoundaryText,
     List<PurchaseInvoiceAllocationDto> Allocations);
 
