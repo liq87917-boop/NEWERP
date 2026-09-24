@@ -13,6 +13,9 @@ namespace ERP.Api.Controllers;
 /// <para>ERP-025：审核 / 取消统一经 <see cref="IInventoryService"/> 记账，库存数量与库存流水
 /// （<see cref="StockMovement"/>）同步落地，跨单据可追溯；本次改造前已审核的历史单据没有流水，
 /// 取消时退化为按明细基础单位原路冲回，保证既有库存台账不被改写。</para>
+/// <para>ERP-033：审核时按入库单持久化的采购订单链接（<see cref="StockIn.PurchaseOrderId"/>）解析
+/// 基础单位成本并带入库存流水，口径见 <see cref="PurchaseStockInCostSource"/>；语义不明确时保持
+/// ERP-025 的移动加权平均兜底，不臆造成本单价、不改写历史流水数量与金额。</para>
 /// </summary>
 [Route("api/stock-ins")]
 public class StockInController : DocumentControllerBase<StockIn>
@@ -124,6 +127,11 @@ public class StockInController : DocumentControllerBase<StockIn>
         if (await _inventory.CountActiveMovementsAsync(InventoryDocumentHelper.StockInType, entity.Id) > 0)
             throw BusinessException.RuleConflict("该入库单已产生库存流水，不能重复审核");
 
+        // ERP-033：成本来源解析。一次加载商品元数据 + 本单链接的采购订单（含明细），逐行纯内存判定，
+        // 不做逐行查库；未链接 / 链接不可用 / 语义不明确时该行成本返回 0（走既有兜底）。
+        var costSource = await PurchaseStockInCostSource.LoadAsync(Db, entity.PurchaseOrderId,
+            entity.Details.Select(d => (long?)d.ProductId));
+
         foreach (var d in entity.Details.Where(d => !d.IsDeleted))
         {
             // 零数量明细（旧版页面允许留空行）不产生库存变动；负数属于数据错误，直接拒绝
@@ -131,15 +139,18 @@ public class StockInController : DocumentControllerBase<StockIn>
                 throw BusinessException.InvalidParameter($"商品 [{d.ProductName}] 的入库数量不能为负数");
             if (d.Quantity == 0) continue;
 
+            var cost = costSource.Resolve(d.ProductId);
             var product = await InventoryDocumentHelper.ResolveProductAsync(Db, d.ProductId, d.ProductName, d.Spec, d.Unit);
             var context = await InventoryDocumentHelper.BuildContextAsync(Db,
                 InventoryDocumentHelper.StockInType, entity.Id, entity.StockInNo,
                 InventoryMovementType.PurchaseIn, entity.WarehouseId, d.ProductId, product.Code, product.Name,
-                product.Spec, product.Unit, entity.StockInDate, MovementRemark(entity));
+                product.Spec, product.Unit, entity.StockInDate, MovementRemark(entity, cost));
 
-            // 成本基准：入库单明细没有成本列（采购价按包装单位计价，直接套用会算错基础单位成本），
-            // 因此按 InventoryService 既有兜底口径计价（当前加权平均成本，首次入库为 0），不臆造成本单价。
-            await _inventory.IncreaseAsync(context, d.Quantity, 0m);
+            // 成本基准（ERP-033）：优先取「权威链接的采购订单唯一兼容明细行单价」——包装单位单价按商品
+            // UnitsPerPackage 折算为基础单位单价，外币单价仅在订单持久化了非占位汇率时换算；
+            // 任一语义不明确（无链接 / 订单未审核 / 订单行缺失、重复、单位不兼容 / 无权威汇率 / 单价不可用）
+            // 都返回 0，交由 InventoryService 既有兜底口径计价（当前加权平均成本，首次入库为 0），不臆造成本单价。
+            await _inventory.IncreaseAsync(context, d.Quantity, cost.UnitCost);
         }
 
         SetStatus(entity, DocumentStatus.Approved);
@@ -179,10 +190,13 @@ public class StockInController : DocumentControllerBase<StockIn>
             await ReverseLegacyStockAsync(entity);
     }
 
-    /// <summary>流水备注：带上来源采购订单 Id，便于按流水反查采购执行情况</summary>
-    private static string MovementRemark(StockIn entity)
+    /// <summary>
+    /// 流水备注：带上来源采购订单 Id 与成本来源（ERP-033），便于按流水反查采购执行情况与成本依据。
+    /// 未链接采购订单时保持 ERP-025 的原文案不变。
+    /// </summary>
+    private static string MovementRemark(StockIn entity, PurchaseStockInCostResolution cost)
         => entity.PurchaseOrderId is > 0
-            ? $"采购入库单审核入库（采购订单 Id {entity.PurchaseOrderId}）"
+            ? $"采购入库单审核入库（采购订单 Id {entity.PurchaseOrderId}，成本来源：{cost.RemarkText}）"
             : "采购入库单审核入库";
 
     private static void Calculate(StockIn entity)

@@ -1,7 +1,7 @@
 {
   "id": "ERP-033",
   "title": "Carry authoritative Purchase Order cost into stock-in movements",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "medium",
   "description": "Close the audited Purchase StockIn cost-source gap by deriving base-unit movement cost from an authoritatively linked Purchase Order line only when product, unit and currency semantics are unambiguous. Preserve the existing weighted-average fallback when evidence is incomplete. Do not rewrite historical inventory, add production schema, invent exchange rates, execute SQL, or touch production data.",
   "acceptance_criteria": [
@@ -45,5 +45,5 @@
     "status": "not_required",
     "reason": "Repository application logic and non-production tests only; no schema execution, historical rewrite, production database access, deployment or release."
   },
-  "attempts": 0
+  "attempts": 1
 }
