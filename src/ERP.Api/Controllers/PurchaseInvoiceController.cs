@@ -44,6 +44,20 @@ public class PurchaseInvoiceController : ControllerBase
             await PurchaseInvoiceService.GetAsync(_db, id)));
 
     /// <summary>
+    /// 供应商采购发票对账报表（ERP-044，**只读派生**）：按「供应商 + 币种」分组核对采购订单与**已登记（未作废）**
+    /// 发票证据 —— 订单侧暴露订单金额 / 已开票金额 / 未开票余额（只按 ERP-043 持久化关联行派生），
+    /// 发票侧把已关联与**未关联**金额分开显示（未关联金额绝不猜测到任何订单）；已作废发票默认排除，
+    /// 需显式选择证据状态筛选才可见，且其金额永不并入有效合计。
+    /// <para>本接口<strong>不是</strong>应付账款台账、<strong>不是</strong>付款授权、<strong>不是</strong>税务申报报表，
+    /// 也<strong>不是</strong>账龄表：不推断账期与到期日、不判断是否已付款，且<strong>不写库</strong>
+    /// （不改发票 / 采购订单 / 收退货进度 / 库存成本 / 付款 / 费用 / 退税记录）。</para>
+    /// </summary>
+    [HttpGet("reconciliation")]
+    public async Task<IActionResult> Reconciliation([FromQuery] SupplierInvoiceReconciliationQuery query)
+        => Ok(ApiResponse<SupplierInvoiceReconciliationReport>.Success(
+            await SupplierInvoiceReconciliation.ForQueryAsync(_db, query)));
+
+    /// <summary>
     /// 新增草稿发票：校验发票类型 / 代码 / 号码、供应商（必须存在且启用）、币种与金额等式
     /// （含税总额 = 不含税金额 + 税额，按币种精度取整后严格相等），并拒绝重复身份。
     /// </summary>

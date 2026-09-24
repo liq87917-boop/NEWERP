@@ -1,7 +1,7 @@
 {
   "id": "ERP-044",
   "title": "Add read-only supplier invoice reconciliation report",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "medium",
   "description": "Add a read-only supplier invoice reconciliation report over existing Purchase Orders and the authoritative invoice allocations introduced by ERP-043. The report must distinguish ordered, invoiced and unlinked evidence without claiming to be an accounts-payable balance or aging ledger. Do not infer links, due dates, tax eligibility or payment settlement, add another invoice schema, mutate finance records, deploy, or release.",
   "acceptance_criteria": [
@@ -50,5 +50,5 @@
     "status": "not_required",
     "reason": "Read-only reporting over repository records. No production mutation, payable posting, payment, tax submission, deployment or release is authorized."
   },
-  "attempts": 0
+  "attempts": 1
 }
