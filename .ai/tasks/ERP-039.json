@@ -1,7 +1,7 @@
 {
   "id": "ERP-039",
   "title": "Add read-only Product image library over existing image slots",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "low",
   "description": "Add a user-visible, read-only Product image library over the three image-reference fields already present in Product master data. Reuse persisted references only. Do not upload, replace or delete OSS objects, introduce new storage credentials, perform server-side fetching of arbitrary URLs, add production schema, or deploy.",
   "acceptance_criteria": [
@@ -45,5 +45,5 @@
     "status": "not_required",
     "reason": "Read-only presentation of existing Product image references. Production OSS upload, replacement, deletion, credential use, deployment and release remain outside task scope and behind human gates."
   },
-  "attempts": 0
+  "attempts": 1
 }

@@ -209,6 +209,13 @@ const MODULES = {
       { key: 'image3', label: '产品图片3', type: 'image' },
       { key: '_batch', label: '批量上传图片', type: 'image-batch' },
     ],
+    /* ERP-039：只读商品图片库入口（图片位 1~3 的浏览与筛选）。
+       只读取商品资料已持久化的图片引用：不上传 / 覆盖 / 删除 OSS 对象、不读取存储凭据、
+       服务端不抓取任何图片地址、不改写商品图片字段。 */
+    extraActions: [
+      { label: '🖼 图片库', onclick: 'openProductImageLibrary()', title: '打开只读商品图片库（图片位 1~3；可按商品编码 / 名称与填充状态筛选，不触达 OSS 与商品图片字段）' },
+    ],
+
     /* ERP-037：颜色 / 尺码 SKU 规格维护（主数据子表，可选）。
        只维护规格自身：不改写历史询价 / 报价 / 订单 / 库存与库存流水，也不拆分已有库存。 */
     /* ERP-038：供应商货源关系维护（主数据关系，可选）。
@@ -216,6 +223,7 @@ const MODULES = {
     rowActions: [
       { label: '颜色/尺码规格', icon: '🎨', title: '维护该商品的颜色 / 尺码 SKU 规格（可选；没有规格即单规格商品，不触达历史单据与库存）', onclick: 'openProductVariants' },
       { label: '供应商货源', icon: '🏭', title: '维护该商品（或其规格）的多供应商货源关系（仅供参考：不自动选供应商、不定价、不改写采购订单与库存）', onclick: 'openProductSuppliers' },
+      { label: '图片库', icon: '🖼', title: '查看该商品的图片位 1~3（只读；不可用引用仅作文本展示，不上传 / 删除 OSS 对象、不改写图片字段）', onclick: 'openProductImageLibrary' },
     ],
   },
   'other-info': {
