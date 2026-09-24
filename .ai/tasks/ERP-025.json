@@ -1,0 +1,26 @@
+{
+  "id": "ERP-025",
+  "title": "Record legacy stock in and out in movement ledger",
+  "status": "pending",
+  "risk_level": "medium",
+  "description": "Close the audited inventory traceability gap by wiring the existing Purchase StockIn and Sales StockOut posting/reversal paths into the already-existing StockMovement ledger. Reuse current inventory services and tables; do not add or alter production schema.",
+  "acceptance_criteria": [
+    "Approved StockIn posts a matching StockMovement using the same base-unit quantity and existing movement conventions.",
+    "Approved StockOut posts a matching StockMovement using the same base-unit quantity and existing movement conventions.",
+    "Unaudit/cancel paths reverse the corresponding movement without double-posting.",
+    "Existing inventory balances remain consistent with movement quantities and repeated operations are idempotently guarded.",
+    "Unit/integration tests cover stock-in, stock-out, reversal and duplicate protection; safe validation passes.",
+    "Browser/UI acceptance is recorded as deferred during development according to project policy."
+  ],
+  "allowed_paths": ["src/ERP.Application/**", "src/ERP.Api/Controllers/**", "src/ERP.UnitTests/**", "src/ERP.IntegrationTests/**", "docs/**", ".ai/**"],
+  "depends_on": ["ERP-023", "ERP-009"],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "browser",
+  "browser_acceptance": {"required": true, "scenarios": ["Post stock-in and inspect movement trace.", "Post stock-out and reverse it, verifying movement consistency."], "test_filter": "Collection=UiTests", "minimum_screenshots": 2},
+  "human_gate": {"required": false, "level": "L2", "status": "not_required", "reason": "Uses existing inventory tables/services only; no production schema or deployment action."},
+  "attempts": 0,
+  "created_at": "2026-09-24T12:17:22Z"
+}
