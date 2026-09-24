@@ -331,11 +331,18 @@ const MODULES = {
         { value: '', label: '否' }, { value: 'true', label: '是（最终选用）' }] },
       { key: 'status', label: '比价状态', type: 'select', options: [
         { value: '待比较', label: '待比较' }, { value: '已选中', label: '已选中' },
-        { value: '已放弃', label: '已放弃' }] },
+        { value: '已放弃', label: '已放弃' },
+        { value: '已转采购订单', label: '已转采购订单（已生成采购订单）' }] },
       { key: 'customerId', label: '为客户询价（代理采购）', type: 'ref', ref: 'customer' },
       { key: 'customerName', label: '客户名称（可覆盖）' },
-      { key: 'refOrderNo', label: '关联销售订单号' },
+      { key: 'refOrderNo', label: '关联销售订单号（转换后为生成的采购单号）' },
       { key: 'remark', label: '选中理由 / 备注', type: 'textarea' },
+    ],
+    /* 行操作（仅在「已选中」的比价行显示；服务端仍会二次校验资格与重复生成）
+       ERP-020：选中行 → 采购订单（带入预填打开采购订单表单 / 直接生成采购订单） */
+    rowActions: [
+      { label: '生成采购订单', icon: '📦', title: '按该选中比价行直接生成一张采购订单（同一比价行只生成一张，来源自动留痕）', onclick: 'purchaseQuoteToOrder', statuses: ['已选中'] },
+      { label: '预填采购订单', icon: '🧾', title: '按该选中比价行带入采购订单草稿到采购订单新增表单（不落库，可编辑后再保存）', onclick: 'purchaseQuotePrefillOrder', statuses: ['已选中'] },
     ],
   },
   /* 单证中心（阶段 2 新增，挂在「出运管理」菜单下） */

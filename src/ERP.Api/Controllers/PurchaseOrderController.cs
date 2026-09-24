@@ -190,13 +190,18 @@ public class PurchaseOrderController : DocumentControllerBase<PurchaseOrder>
             $"PurchaseOrders_{DateTime.Now:yyyyMMddHHmmss}.xlsx");
     }
 
-    private static void Calculate(PurchaseOrder entity)
+    /// <summary>
+    /// 合计口径（采购订单唯一权威算法）：总额 = Σ 明细数量×单价。
+    /// 声明为 public：供应商比价选中行转采购订单（ERP-020，<see cref="PurchaseQuoteConversion" />）
+    /// 复用同一算法，避免带入路径与页面录入路径出现两套口径。
+    /// </summary>
+    public static void Calculate(PurchaseOrder entity)
     {
         entity.TotalAmount = entity.Details.Sum(d => d.Quantity * d.UnitPrice);
     }
 
     /// <summary>业务字段校验（税率 0~100；历史单据不填时为 0，不受影响）</summary>
-    private static void Validate(PurchaseOrder entity)
+    public static void Validate(PurchaseOrder entity)
     {
         if (entity.TaxRate < 0 || entity.TaxRate > 100)
             throw BusinessException.InvalidParameter("税率必须在 0~100 之间");
