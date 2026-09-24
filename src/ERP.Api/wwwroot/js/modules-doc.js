@@ -144,9 +144,11 @@ Object.assign(MODULES, {
     ],
     /* 行操作：打印预览（打印模板按 billType=sales-order，含客户 PO / 合同 / 唛头等新字段）
        ERP-019：单证中心台账生成——「生成单证」直接落库，「预填单证」带入单证中心新增表单人工核对后再保存
-       ERP-032：出货与收款进度（只读派生，数量来自已审核销售出库单，收款链接复用财务核对的既有引用规则） */
+       ERP-032：出货与收款进度（只读派生，数量来自已审核销售出库单，收款链接复用财务核对的既有引用规则）
+       ERP-046：客户订单与收款核对报表（只读派生；收款单无订单级引用 → 单独作为未关联证据列出，绝不自动匹配） */
     extraActions: [
       { label: '🚚 出货 / 财务进度', onclick: 'openSalesOrderShipmentFinanceReport', title: '按客户 + 币种查看订单的已订 / 已出 / 未出数量与收款链接金额（复用出库与财务核对的权威口径，未知显示「未知」；不是应收账款台账）' },
+      { label: '🧾 订单 / 收款核对', onclick: 'openSalesOrderReceiptReconciliationReport', title: '按客户 + 币种核对销售订单与收款证据：已订 / 已出 / 未出数量 + 已关联收款金额 / 未覆盖金额，未关联收款单单独列出（只读派生；不是应收账款台账 / 客户对账单 / 收款授权 / 账龄表）' },
     ],
     rowActions: [
       { label: '出货进度', icon: '🚚', title: '查看由销售出库单派生的已订 / 已出 / 未出数量，以及既有引用可用时的已关联 / 未覆盖收款金额', onclick: 'showSalesOrderProgress' },

@@ -1,7 +1,7 @@
 {
   "id": "ERP-046",
   "title": "Add read-only customer order and receipt reconciliation report",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "medium",
   "description": "Add a read-only operational reconciliation report over existing Sales Orders, authoritative shipment progress and receipt links already exposed by ERP-032. The report must distinguish ordered, shipped, linked-receipt, unlinked and unknown evidence without claiming to be an accounts-receivable ledger, customer statement of account, payment allocation engine or aging report. Do not infer links, settle balances, rewrite orders or receipts, execute production SQL, deploy, or release.",
   "acceptance_criteria": [
@@ -48,5 +48,5 @@
     "status": "not_required",
     "reason": "Read-only reporting over repository records. No production mutation, receipt settlement, customer credit decision, deployment or release is authorized."
   },
-  "attempts": 0
+  "attempts": 1
 }

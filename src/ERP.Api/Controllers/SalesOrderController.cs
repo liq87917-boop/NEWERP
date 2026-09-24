@@ -86,6 +86,21 @@ public class SalesOrderController : DocumentControllerBase<SalesOrder>
         => Ok(ApiResponse<SalesOrderShipmentFinanceReportView>.Success(
             await SalesOrderShipmentFinanceReport.ForQueryAsync(Db, query)));
 
+    /// <summary>
+    /// 客户订单与收款核对报表（ERP-046，**只读派生**、分页有界）：按「客户 + 币种」分组核对销售订单与收款证据 ——
+    /// 订单侧暴露已订 / 已出 / 未出数量与订单金额（完全复用 ERP-032 的权威派生：已审核销售出库单；定金 / 货款申请单的
+    /// SalesOrderId 才是权威收款引用，且只有「已审核 + 同币种」计入已关联收款金额），
+    /// 收款单（<c>FinanceReceipt</c>）只记录客户、没有订单级引用，因此一律作为**未关联证据**单独列出（链接状态恒为 unlinked），
+    /// 系统绝不按客户名 / 订单号文本 / 日期 / 金额相似度把它归到任何销售订单；未知一律记 null（不用 0 顶替）。
+    /// <para>本接口<strong>不是</strong>应收账款台账、<strong>不是</strong>客户对账单、<strong>不是</strong>收款授权或结算结果，
+    /// 也<strong>不是</strong>账龄表：不推算账期与到期日、不判断是否已收讫，且<strong>不写库</strong>
+    /// （不改销售订单、出库单、收款单、收款申请、客户信用、库存、财务与税务记录）。</para>
+    /// </summary>
+    [HttpGet("receipt-reconciliation-report")]
+    public async Task<IActionResult> ReceiptReconciliationReport([FromQuery] SalesOrderReceiptReconciliationQuery query)
+        => Ok(ApiResponse<SalesOrderReceiptReconciliationReport>.Success(
+            await SalesOrderReceiptReconciliation.ForQueryAsync(Db, query)));
+
 
     /// <summary>创建</summary>
     [HttpPost]
