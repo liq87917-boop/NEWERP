@@ -242,6 +242,9 @@
   <!-- ERP-057：装柜出运引用登记册（显式源记录关联 + 出运证据快照 + 修订留痕；只登记用户录入的操作性证据，
        不改写订柜 / 预装柜 / 装柜清单的状态与任何列，也不联系承运人 / 海关 / 货代） -->
   <script src="/js/container-shipment-references.js"></script>
+  <!-- ERP-058：装柜出运里程碑证据登记册（挂 ERP-057 出运引用之下的只追加事件留痕：实际开船 / 到港 / 查验 / 放行；
+       只登记仓库操作性证据，不是承运人 / 海关确认，也不自动推进任何业务状态） -->
+  <script src="/js/container-shipment-milestones.js"></script>
   <script src="/js/loading-list-participants.js"></script>
   <script src="/js/print-design.js"></script>
   <script src="/js/pd-grid.js"></script>

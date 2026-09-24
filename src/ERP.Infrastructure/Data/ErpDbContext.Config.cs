@@ -833,6 +833,46 @@ public partial class ErpDbContext
         // 刻意不建任何外键、也不建导航属性（与 ERP-045 / ERP-047 / ERP-049 / ERP-053 / ERP-055 一致）：
         // 源记录可能被软删除、报关行字典项可能被停用 / 删除 —— 本模块只保存服务端快照，
         // 历史出运证据必须始终可读，也不参与源记录与任何下游单据的计算。
+
+        // ============ ERP-058：装柜出运里程碑证据（挂 ERP-057 出运引用之下的只追加事件留痕） ============
+        // 设计口径：
+        //   1. 审计结论：ERP-057 已建立唯一权威的出运引用登记册，本模块只按显式父出运引用 Id
+        //      在其下追加操作性事件证据 —— 不新建出运 / 跟踪主数据，也不在装柜三单或出运引用上加列；
+        //   2. 重复有效证据唯一：UX_ContainerShipmentMilestones_ActiveIdentity
+        //      （父出运引用 + 事件类型 + 事件时间，过滤 IsDeleted = 0 AND Status <> 2）——
+        //      重复登记由服务端先行拒绝，索引为并发兜底；已作废行保留可读但不占用额度；
+        //   3. 事件时间必填，来源说明 / 备注 / 记录人可选：未填写保持空串（= 未知），
+        //      绝不由计划时间、单据状态或自由文本推断；
+        //   4. 刻意不建任何外键与导航属性：父出运引用被软删除 / 作废后历史里程碑必须始终可读，
+        //      只是显式标注不可用，绝不改派到别的出运引用；
+        //   5. 本模块只写这一张表：不改写父出运引用与任何下游单据（订单 / 库存 / 单证 / 发票 / 费用 / 结算），
+        //      也不轮询任何外部系统。
+        modelBuilder.Entity<ContainerShipmentMilestone>().Property(x => x.EventType).HasMaxLength(20);
+        modelBuilder.Entity<ContainerShipmentMilestone>().Property(x => x.SourceDescription).HasMaxLength(200);
+        modelBuilder.Entity<ContainerShipmentMilestone>().Property(x => x.Notes).HasMaxLength(500);
+        modelBuilder.Entity<ContainerShipmentMilestone>().Property(x => x.RecordedBy).HasMaxLength(100);
+        modelBuilder.Entity<ContainerShipmentMilestone>().Property(x => x.VoidReason).HasMaxLength(500);
+
+        // 同一父记录 + 事件类型 + 事件时间最多一条有效证据（与幂等建表脚本同名同过滤条件）
+        modelBuilder.Entity<ContainerShipmentMilestone>()
+            .HasIndex(x => new { x.ContainerShipmentReferenceId, x.EventType, x.EventAt })
+            .IsUnique().HasDatabaseName("UX_ContainerShipmentMilestones_ActiveIdentity")
+            .HasFilter("IsDeleted = 0 AND Status <> 2");
+
+        modelBuilder.Entity<ContainerShipmentMilestone>()
+            .HasIndex(x => new { x.ContainerShipmentReferenceId, x.Status, x.EventAt })
+            .HasDatabaseName("IX_ContainerShipmentMilestones_Parent_Status_EventAt")
+            .HasFilter("IsDeleted = 0");
+
+        modelBuilder.Entity<ContainerShipmentMilestone>()
+            .HasIndex(x => new { x.EventType, x.EventAt })
+            .HasDatabaseName("IX_ContainerShipmentMilestones_EventType_EventAt")
+            .HasFilter("IsDeleted = 0");
+
+        modelBuilder.Entity<ContainerShipmentMilestone>()
+            .HasIndex(x => new { x.Status, x.RecordedAt })
+            .HasDatabaseName("IX_ContainerShipmentMilestones_Status_RecordedAt")
+            .HasFilter("IsDeleted = 0");
     }
 
     /// <summary>保存变更：自动填充审计字段</summary>

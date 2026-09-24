@@ -2442,5 +2442,71 @@ IF NOT EXISTS (SELECT 1 FROM sys.indexes
         WHERE IsDeleted = 0;
 ");
 
+        // 39. 装柜出运里程碑证据（ERP-058：挂 ERP-057 出运引用之下的只追加操作性事件留痕）
+        //     39.1 审计结论：ERP-057 已建立唯一权威的出运引用登记册，本段只建**里程碑留痕表**，
+        //          按显式的父出运引用 Id 关联；不做任何既有表的结构修改，也不新建出运 / 跟踪主数据；
+        //     39.2 重复有效证据唯一：UX_ContainerShipmentMilestones_ActiveIdentity
+        //          （父出运引用 + 事件类型 + 事件时间），过滤 IsDeleted = 0 AND Status <> 2 ——
+        //          重复登记由服务端先行拒绝，索引只作并发兜底；已作废行保留可读但不占用额度
+        //          （作废后同一父记录 + 类型 + 时间可重新登记）；
+        //     39.3 事件时间必填，来源说明 / 备注 / 记录人可选：未填写保持默认空串（= 未知），
+        //          本段不写入任何默认业务值、也不回填任何历史单据；
+        //     39.4 刻意不建任何外键：父出运引用被软删除 / 作废后历史里程碑必须始终可读，
+        //          只是由服务端显式标注不可用，绝不改派到别的出运引用；
+        //     39.5 本段只建本模块一张表与其索引，不含任何 UPDATE / INSERT / DELETE 语句，也不改写
+        //          父出运引用、装柜链路、订单、库存、单证、发票、费用与结算数据。
+        await db.Database.ExecuteSqlRawAsync(@"
+IF OBJECT_ID('db_owner.ContainerShipmentMilestones') IS NULL
+BEGIN
+    CREATE TABLE db_owner.ContainerShipmentMilestones (
+        Id BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+        ContainerShipmentReferenceId BIGINT NOT NULL,
+        EventType NVARCHAR(20) NOT NULL DEFAULT N'',
+        EventAt DATETIME2 NOT NULL,
+        SourceDescription NVARCHAR(200) NOT NULL DEFAULT N'',
+        Notes NVARCHAR(500) NOT NULL DEFAULT N'',
+        RecordedBy NVARCHAR(100) NOT NULL DEFAULT N'',
+        RecordedAt DATETIME2 NOT NULL DEFAULT GETDATE(),
+        Status INT NOT NULL DEFAULT 1,
+        VoidedAt DATETIME2 NULL,
+        VoidReason NVARCHAR(500) NOT NULL DEFAULT N'',
+        CreatedAt DATETIME2 NOT NULL DEFAULT GETDATE(),
+        CreatedBy BIGINT NULL,
+        UpdatedAt DATETIME2 NULL,
+        UpdatedBy BIGINT NULL,
+        IsDeleted BIT NOT NULL DEFAULT 0,
+        RowVersion ROWVERSION NOT NULL
+    );
+END
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes
+               WHERE name = 'UX_ContainerShipmentMilestones_ActiveIdentity'
+                 AND object_id = OBJECT_ID('db_owner.ContainerShipmentMilestones'))
+    CREATE UNIQUE INDEX UX_ContainerShipmentMilestones_ActiveIdentity
+        ON db_owner.ContainerShipmentMilestones(ContainerShipmentReferenceId, EventType, EventAt)
+        WHERE IsDeleted = 0 AND Status <> 2;
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes
+               WHERE name = 'IX_ContainerShipmentMilestones_Parent_Status_EventAt'
+                 AND object_id = OBJECT_ID('db_owner.ContainerShipmentMilestones'))
+    CREATE INDEX IX_ContainerShipmentMilestones_Parent_Status_EventAt
+        ON db_owner.ContainerShipmentMilestones(ContainerShipmentReferenceId, Status, EventAt)
+        WHERE IsDeleted = 0;
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes
+               WHERE name = 'IX_ContainerShipmentMilestones_EventType_EventAt'
+                 AND object_id = OBJECT_ID('db_owner.ContainerShipmentMilestones'))
+    CREATE INDEX IX_ContainerShipmentMilestones_EventType_EventAt
+        ON db_owner.ContainerShipmentMilestones(EventType, EventAt)
+        WHERE IsDeleted = 0;
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes
+               WHERE name = 'IX_ContainerShipmentMilestones_Status_RecordedAt'
+                 AND object_id = OBJECT_ID('db_owner.ContainerShipmentMilestones'))
+    CREATE INDEX IX_ContainerShipmentMilestones_Status_RecordedAt
+        ON db_owner.ContainerShipmentMilestones(Status, RecordedAt)
+        WHERE IsDeleted = 0;
+");
+
     }
 }

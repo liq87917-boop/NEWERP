@@ -1,7 +1,7 @@
 {
   "id": "ERP-058",
   "title": "Add append-only container shipment milestone evidence",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "medium",
   "description": "Add an append-only operational milestone register beneath the canonical shipment-reference record from ERP-057. Record user-supplied departure, arrival, inspection and customs-release evidence without polling an external service or treating the entries as authoritative carrier or customs confirmation. Do not auto-advance business documents, execute production SQL, deploy, or release.",
   "acceptance_criteria": [
@@ -50,5 +50,5 @@
     "status": "not_required",
     "reason": "Append-only repository evidence only. External carrier or customs access, production database execution, operational authorization, deployment and release remain behind mandatory human gates."
   },
-  "attempts": 0
+  "attempts": 1
 }

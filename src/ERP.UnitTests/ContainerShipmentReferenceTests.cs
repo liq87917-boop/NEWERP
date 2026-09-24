@@ -1090,13 +1090,16 @@ public class ContainerShipmentReferenceTests
             Assert.DoesNotContain("RevisionNo", names);
         }
 
-        // 4) IErpDbContext 中只有一套「出运引用」模型（不存在第二套出运主数据 / 链接表）
+        // 4) IErpDbContext 中只有一套「出运引用」模型（不存在第二套出运主数据 / 链接表）；
+        //    ERP-058 里程碑证据（ContainerShipmentMilestones）挂在本登记册之下，因此
+        //    「Shipment*」数据集 = 出运引用 + 修订留痕 + 里程碑留痕共 3 个，仍然只有一套出运引用模型
         var shipmentSets = typeof(IErpDbContext).GetProperties()
             .Where(p => p.Name.Contains("Shipment", StringComparison.Ordinal))
             .ToList();
-        Assert.Equal(2, shipmentSets.Count);
+        Assert.Equal(3, shipmentSets.Count);
         Assert.Contains(shipmentSets, p => p.Name == "ContainerShipmentReferences");
         Assert.Contains(shipmentSets, p => p.Name == "ContainerShipmentReferenceRevisions");
+        Assert.Contains(shipmentSets, p => p.Name == "ContainerShipmentMilestones");
 
         var referenceSets = typeof(IErpDbContext).GetProperties()
             .Where(p => p.Name.Contains("ShipmentReference", StringComparison.Ordinal)

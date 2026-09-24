@@ -102,4 +102,8 @@ public partial class ErpDbContext
     /// <summary>出运引用修订留痕（只追加的「修订前原值」快照；不提供修改与删除）</summary>
     public DbSet<ContainerShipmentReferenceRevision> ContainerShipmentReferenceRevisions
         => Set<ContainerShipmentReferenceRevision>();
+
+    /// <summary>装柜出运里程碑证据（ERP-058：挂 ERP-057 出运引用之下的只追加事件留痕；只提供显式作废）</summary>
+    public DbSet<ContainerShipmentMilestone> ContainerShipmentMilestones
+        => Set<ContainerShipmentMilestone>();
 }

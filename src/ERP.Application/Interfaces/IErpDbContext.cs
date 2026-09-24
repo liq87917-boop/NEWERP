@@ -147,6 +147,14 @@ public interface IErpDbContext
     /// </summary>
     DbSet<ContainerShipmentReferenceRevision> ContainerShipmentReferenceRevisions { get; }
 
+    /// <summary>
+    /// 装柜出运里程碑证据（ERP-058）：挂在 ERP-057 出运引用记录**之下**的只追加操作性事件留痕
+    /// （实际开船 / 实际到港 / 查验 / 放行），按显式父出运引用 Id 关联，绝不按柜号 / S/O / B/L
+    /// 等自由文本匹配；同一父记录 + 事件类型 + 事件时间不允许重复有效登记，只提供显式作废
+    /// （必填原因，保留原始证据），不是承运人 / 海关确认，也不推进任何业务单据
+    /// </summary>
+    DbSet<ContainerShipmentMilestone> ContainerShipmentMilestones { get; }
+
     // ============ 询价管理 ============
     DbSet<Inquiry> Inquiries { get; }
     DbSet<InquiryDetail> InquiryDetails { get; }

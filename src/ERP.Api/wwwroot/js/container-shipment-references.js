@@ -196,6 +196,7 @@ function csrListView() {
         <button class="btn btn-neutral btn-sm" onclick="csrOpenDetail(${row.id})">详情</button>
         ${row.isRecorded ? `<button class="btn btn-neutral btn-sm" onclick="csrOpenForm(${row.id})">修订</button>` : ''}
         ${row.isRecorded ? `<button class="btn btn-neutral btn-sm" onclick="csrOpenVoid(${row.id})">作废</button>` : ''}
+        <button class="btn btn-neutral btn-sm" onclick="openContainerShipmentMilestones(${row.id})">里程碑</button>
       </td>
     </tr>`).join('');
 
@@ -224,6 +225,7 @@ function csrListView() {
       <div style="display:flex;align-items:flex-end;gap:8px">
         <button class="btn btn-neutral btn-sm" onclick="csrSearch()">查询</button>
         <button class="btn btn-primary btn-sm" onclick="csrOpenForm()">＋ 登记出运引用</button>
+        <button class="btn btn-neutral btn-sm" onclick="openContainerShipmentMilestones()">🛣 里程碑登记册</button>
       </div>
     </div>
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
