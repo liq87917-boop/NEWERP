@@ -1,7 +1,7 @@
 {
   "id": "ERP-059",
   "title": "Expose container shipment evidence timeline and tracking workspace",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "medium",
   "description": "Expose the explicit shipment references from ERP-057 and milestone evidence from ERP-058 in existing container workflows and a bounded read-only tracking workspace. Keep planned dates, actual events and missing evidence separately labeled. Do not infer carrier or customs state, mutate source records, execute production SQL, deploy, or release.",
   "acceptance_criteria": [
@@ -49,5 +49,5 @@
     "status": "not_required",
     "reason": "Read-only presentation of repository shipment evidence. No carrier/customs action, production mutation, deployment or release is authorized."
   },
-  "attempts": 0
+  "attempts": 1
 }

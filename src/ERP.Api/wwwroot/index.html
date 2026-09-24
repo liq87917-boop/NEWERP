@@ -245,6 +245,9 @@
   <!-- ERP-058：装柜出运里程碑证据登记册（挂 ERP-057 出运引用之下的只追加事件留痕：实际开船 / 到港 / 查验 / 放行；
        只登记仓库操作性证据，不是承运人 / 海关确认，也不自动推进任何业务状态） -->
   <script src="/js/container-shipment-milestones.js"></script>
+  <!-- ERP-059：装柜出运证据时间线与跟踪工作台（**只读**：ERP-057 计划值与 ERP-058 里程碑证据分开标注，
+       缺失事件显示「无（未登记）」、未填写计划显示「未知」，已作废证据只进历史视图，时间差只作算术证据） -->
+  <script src="/js/container-shipment-timeline.js"></script>
   <script src="/js/loading-list-participants.js"></script>
   <script src="/js/print-design.js"></script>
   <script src="/js/pd-grid.js"></script>

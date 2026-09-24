@@ -117,6 +117,24 @@ public class ContainerBookingController : DocumentControllerBase<ContainerBookin
         return Ok(ApiResponse<ContainerBooking>.Success(entity));
     }
 
+    /// <summary>
+    /// 出运证据时间线（ERP-059，**只读**）：按本订柜信息的显式源记录 Id 取当前有效出运引用（ERP-057），
+    /// 与 ERP-058 里程碑证据合成时间线 —— 计划时间（ETD / ETA）与实际事件分开标注，缺失事件显示「无 / 未知」，
+    /// 已作废证据只出现在历史视图；不写任何表、不改写本单与出运引用，也不推断任何业务状态。
+    /// </summary>
+    [HttpGet("{id:long}/shipment-timeline")]
+    public async Task<IActionResult> GetShipmentTimeline(
+        long id,
+        [FromQuery] bool includeHistory = true,
+        [FromQuery] int historyTake = ContainerShipmentTimelineRules.MaxHistoryEvents)
+    {
+        var entity = await GetOrThrowAsync(id, "订柜信息不存在");
+        var detail = await ContainerShipmentTimelineService.GetForSourceAsync(
+            Db, ContainerShipmentReferenceRules.SourceTypeBooking, entity.Id, includeHistory, historyTake);
+        return Ok(ApiResponse<ContainerShipmentTimelineDetailDto>.Success(
+            detail, "已按显式源记录返回出运证据时间线（只读：计划与实际分开标注，缺失事件显示「无 / 未知」）"));
+    }
+
     /// <summary>报关行下拉选项（只返回未删除、已启用、类型为 CustomsBroker 的字典项；只读不写库）</summary>
     [HttpGet("customs-broker-options")]
     public async Task<IActionResult> GetCustomsBrokerOptions()

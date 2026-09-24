@@ -100,6 +100,24 @@ public class ContainerPreLoadingController : DocumentControllerBase<ContainerPre
         return Ok(ApiResponse<ContainerShipmentTrackingDto>.Success(tracking, "已按持久化订柜引用返回跟踪信息（只读）"));
     }
 
+    /// <summary>
+    /// 出运证据时间线（ERP-059，**只读**）：按本预装柜单的显式源记录 Id 取当前有效出运引用（ERP-057），
+    /// 与 ERP-058 里程碑证据合成时间线 —— 计划时间（ETD / ETA）与实际事件分开标注，缺失事件显示「无 / 未知」，
+    /// 已作废证据只出现在历史视图；不写任何表、不改写本单与出运引用，也不推断任何业务状态。
+    /// </summary>
+    [HttpGet("{id:long}/shipment-timeline")]
+    public async Task<IActionResult> GetShipmentTimeline(
+        long id,
+        [FromQuery] bool includeHistory = true,
+        [FromQuery] int historyTake = ContainerShipmentTimelineRules.MaxHistoryEvents)
+    {
+        var entity = await GetOrThrowAsync(id, "预装柜单不存在");
+        var detail = await ContainerShipmentTimelineService.GetForSourceAsync(
+            Db, ContainerShipmentReferenceRules.SourceTypePreLoading, entity.Id, includeHistory, historyTake);
+        return Ok(ApiResponse<ContainerShipmentTimelineDetailDto>.Success(
+            detail, "已按显式源记录返回出运证据时间线（只读：计划与实际分开标注，缺失事件显示「无 / 未知」）"));
+    }
+
     private static void Calculate(ContainerPreLoading entity)
     {
         entity.TotalCartons = entity.Details.Sum(d => d.Cartons);

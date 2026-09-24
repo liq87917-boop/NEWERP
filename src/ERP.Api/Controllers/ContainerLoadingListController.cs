@@ -186,6 +186,24 @@ public class ContainerLoadingListController : DocumentControllerBase<ContainerLo
         return Ok(ApiResponse<ContainerShipmentTrackingDto>.Success(tracking, "已按持久化引用链返回跟踪信息（只读）"));
     }
 
+    /// <summary>
+    /// 出运证据时间线（ERP-059，**只读**）：按本装柜清单的显式源记录 Id 取当前有效出运引用（ERP-057），
+    /// 与 ERP-058 里程碑证据合成时间线 —— 计划时间（ETD / ETA）与实际事件分开标注，缺失事件显示「无 / 未知」，
+    /// 已作废证据只出现在历史视图；不写任何表、不改写本单与出运引用，也不推断任何业务状态。
+    /// </summary>
+    [HttpGet("{id:long}/shipment-timeline")]
+    public async Task<IActionResult> GetShipmentTimeline(
+        long id,
+        [FromQuery] bool includeHistory = true,
+        [FromQuery] int historyTake = ContainerShipmentTimelineRules.MaxHistoryEvents)
+    {
+        var entity = await GetOrThrowAsync(id, "装柜清单不存在");
+        var detail = await ContainerShipmentTimelineService.GetForSourceAsync(
+            Db, ContainerShipmentReferenceRules.SourceTypeLoadingList, entity.Id, includeHistory, historyTake);
+        return Ok(ApiResponse<ContainerShipmentTimelineDetailDto>.Success(
+            detail, "已按显式源记录返回出运证据时间线（只读：计划与实际分开标注，缺失事件显示「无 / 未知」）"));
+    }
+
     // ==================== ERP-041：一柜多客户参与方（客户归属清单） ====================
 
     /// <summary>
