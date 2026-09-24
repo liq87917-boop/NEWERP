@@ -1,0 +1,26 @@
+{
+  "id": "ERP-027",
+  "title": "Convert selected Purchase Quote batch lines to Purchase Order",
+  "status": "pending",
+  "risk_level": "medium",
+  "description": "Extend the existing PurchaseQuote conversion so compatible selected lines in the same comparison batch can be consolidated into Purchase Orders using existing PurchaseOrder fields and duplicate guards. Do not add production schema or execute deployment actions.",
+  "acceptance_criteria": [
+    "A comparison batch can convert selected eligible lines using the authoritative existing quote-to-order mapping.",
+    "Lines are grouped only when supplier/currency and other required Purchase Order header values are compatible; incompatible groups remain separate or are rejected explicitly.",
+    "Server-side totals are recalculated and duplicate conversion of source lines is prevented.",
+    "Source traceability remains visible using existing fields/conventions.",
+    "Unit/integration tests cover consolidation, incompatible grouping, duplicate protection and totals; safe validation passes.",
+    "Browser/UI acceptance is recorded as deferred during development according to project policy."
+  ],
+  "allowed_paths": ["src/ERP.Application/**", "src/ERP.Api/Controllers/**", "src/ERP.Api/wwwroot/**", "src/ERP.UnitTests/**", "src/ERP.IntegrationTests/**", "docs/**", ".ai/**"],
+  "depends_on": ["ERP-020"],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "browser",
+  "browser_acceptance": {"required": true, "scenarios": ["Convert compatible selected comparison lines to a Purchase Order.", "Attempt an incompatible or duplicate batch conversion and verify protection."], "test_filter": "Collection=UiTests", "minimum_screenshots": 2},
+  "human_gate": {"required": false, "level": "L2", "status": "not_required", "reason": "Extends existing PurchaseQuote/PurchaseOrder application workflow using current schema only."},
+  "attempts": 0,
+  "created_at": "2026-09-24T12:17:24Z"
+}
