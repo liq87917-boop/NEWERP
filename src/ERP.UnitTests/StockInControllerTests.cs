@@ -11,7 +11,8 @@ using Xunit;
 namespace ERP.UnitTests;
 
 /// <summary>
-/// StockInController 单元测试：Create 汇总 TotalQuantity/Weight/Volume + 重写的 Approve 增加库存（ApplyStockAsync）。
+/// StockInController 单元测试：Create 汇总 TotalQuantity/Weight/Volume + 重写的 Approve 按基础单位增加库存
+/// （ERP-025 起经 InventoryService 记账并写库存流水，流水细节见 StockInOutMovementLedgerTests）。
 /// </summary>
 public class StockInControllerTests
 {
@@ -19,7 +20,7 @@ public class StockInControllerTests
     public async Task Create_正常创建_汇总TotalQuantity_Weight_Volume_Status_Pending()
     {
         using var db = TestDbFactory.Create();
-        var ctl = new StockInController(db, new DocumentNumberService(db));
+        var ctl = new StockInController(db, new DocumentNumberService(db), new InventoryService(db));
 
         var stockIn = new StockIn
         {
@@ -49,7 +50,7 @@ public class StockInControllerTests
     public async Task GetById_不存在_抛NotFound()
     {
         using var db = TestDbFactory.Create();
-        var ctl = new StockInController(db, new DocumentNumberService(db));
+        var ctl = new StockInController(db, new DocumentNumberService(db), new InventoryService(db));
         await Assert.ThrowsAsync<BusinessException>(() => ctl.GetById(999));
     }
 
@@ -58,7 +59,7 @@ public class StockInControllerTests
     {
         using var db = TestDbFactory.Create();
         var (stockIn, _) = SeedStockIn(db, "SI-1", DocumentStatus.Pending);
-        var ctl = new StockInController(db, new DocumentNumberService(db));
+        var ctl = new StockInController(db, new DocumentNumberService(db), new InventoryService(db));
 
         // 审核前：Submitted → Approved + 增加库存
         await ctl.Submit(stockIn.Id);
@@ -77,7 +78,7 @@ public class StockInControllerTests
     {
         using var db = TestDbFactory.Create();
         var (stockIn, _) = SeedStockIn(db, "SI-2", DocumentStatus.Pending);
-        var ctl = new StockInController(db, new DocumentNumberService(db));
+        var ctl = new StockInController(db, new DocumentNumberService(db), new InventoryService(db));
 
         var ex = await Assert.ThrowsAsync<BusinessException>(() => ctl.Approve(stockIn.Id));
         Assert.Equal(ErrorCodes.RuleConflict, ex.Code);
@@ -89,7 +90,7 @@ public class StockInControllerTests
     {
         using var db = TestDbFactory.Create();
         var (stockIn, _) = SeedStockIn(db, "SI-3", DocumentStatus.Pending);
-        var ctl = new StockInController(db, new DocumentNumberService(db));
+        var ctl = new StockInController(db, new DocumentNumberService(db), new InventoryService(db));
 
         await ctl.Delete(stockIn.Id);
         Assert.True(db.StockIns.Single().IsDeleted);

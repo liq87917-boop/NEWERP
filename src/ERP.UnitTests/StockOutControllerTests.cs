@@ -11,7 +11,8 @@ using Xunit;
 namespace ERP.UnitTests;
 
 /// <summary>
-/// StockOutController 单元测试：Create 汇总 + 重写的 Approve 校验库存并扣减。
+/// StockOutController 单元测试：Create 汇总 + 重写的 Approve 校验库存并扣减
+/// （ERP-025 起经 InventoryService 记账并写库存流水，流水细节见 StockInOutMovementLedgerTests）。
 /// </summary>
 public class StockOutControllerTests
 {
@@ -19,7 +20,7 @@ public class StockOutControllerTests
     public async Task Create_正常创建_汇总TotalQuantity_Weight_Volume_Status_Pending_()
     {
         using var db = TestDbFactory.Create();
-        var ctl = new StockOutController(db, new DocumentNumberService(db));
+        var ctl = new StockOutController(db, new DocumentNumberService(db), new InventoryService(db));
 
         var so = new StockOut
         {
@@ -53,7 +54,7 @@ public class StockOutControllerTests
         db.Stocks.Add(new Stock { WarehouseId = 999999L, ProductId = 1, Quantity = 10m, AvailableQuantity = 10m });
 
         var (stockOut, _) = SeedStockOut(db, "SO-1", DocumentStatus.Pending);
-        var ctl = new StockOutController(db, new DocumentNumberService(db));
+        var ctl = new StockOutController(db, new DocumentNumberService(db), new InventoryService(db));
 
         await ctl.Submit(stockOut.Id);
         await ctl.Approve(stockOut.Id);
@@ -71,7 +72,7 @@ public class StockOutControllerTests
         db.Stocks.Add(new Stock { WarehouseId = 999999L, ProductId = 1, Quantity = 5m, AvailableQuantity = 5m });
 
         var (stockOut, _) = SeedStockOut(db, "SO-2", DocumentStatus.Pending);
-        var ctl = new StockOutController(db, new DocumentNumberService(db));
+        var ctl = new StockOutController(db, new DocumentNumberService(db), new InventoryService(db));
 
         await ctl.Submit(stockOut.Id);
         var ex = await Assert.ThrowsAsync<BusinessException>(() => ctl.Approve(stockOut.Id));
@@ -87,7 +88,7 @@ public class StockOutControllerTests
         using var db = TestDbFactory.Create();
         // 没有库存
         var (stockOut, _) = SeedStockOut(db, "SO-3", DocumentStatus.Pending);
-        var ctl = new StockOutController(db, new DocumentNumberService(db));
+        var ctl = new StockOutController(db, new DocumentNumberService(db), new InventoryService(db));
 
         await ctl.Submit(stockOut.Id);
         var ex = await Assert.ThrowsAsync<BusinessException>(() => ctl.Approve(stockOut.Id));
@@ -99,7 +100,7 @@ public class StockOutControllerTests
     public async Task GetById_不存在_抛NotFound()
     {
         using var db = TestDbFactory.Create();
-        var ctl = new StockOutController(db, new DocumentNumberService(db));
+        var ctl = new StockOutController(db, new DocumentNumberService(db), new InventoryService(db));
         await Assert.ThrowsAsync<BusinessException>(() => ctl.GetById(999));
     }
 

@@ -15,7 +15,7 @@ public class StockUnitConversionTests
     {
         using var db = TestDbFactory.Create();
         var product = Product(db, "PCS", "CTN", 12);
-        var controller = new StockInController(db, new DocumentNumberService(db));
+        var controller = new StockInController(db, new DocumentNumberService(db), new InventoryService(db));
         var document = new StockIn
         {
             SupplierId = 1, WarehouseId = 7,
@@ -47,7 +47,7 @@ public class StockUnitConversionTests
         var product = Product(db, "PCS", "BOX", 10);
         db.Stocks.Add(new Stock { WarehouseId = 3, ProductId = product.Id, Quantity = 50, AvailableQuantity = 50 });
         db.SaveChanges();
-        var controller = new StockOutController(db, new DocumentNumberService(db));
+        var controller = new StockOutController(db, new DocumentNumberService(db), new InventoryService(db));
         var document = new StockOut
         {
             CustomerId = 1, WarehouseId = 3,

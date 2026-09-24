@@ -3,14 +3,17 @@
   "controller": "gpt_conversation",
   "phase": "ready",
   "current_task": null,
-  "last_completed_task": "ERP-024",
+  "last_completed_task": "ERP-025",
   "last_reviewed_task": "ERP-005",
   "blocker": null,
   "external_actions": [
     "Rotate any previously exposed SQL Server credential at the database provider if rotation has not already been completed.",
     "Rotate any previously exposed OSS access key at the cloud provider if rotation has not already been completed."
   ],
-  "validation": {"profile": "safe", "status": "passed"},
+  "validation": {
+    "profile": "safe",
+    "status": "passed"
+  },
   "cline_exit_code": 0,
   "conversation_control": {
     "mode": "gpt_file_backed_rolling",
@@ -21,16 +24,22 @@
     "queue_target_size": 4,
     "updated_at": "2026-09-24T12:17:25Z"
   },
-  "completion_policy": {"default_mode": "browser", "definition": "real_browser_accepted", "cline_success_is_only": "code_ready"},
-  "browser_acceptance": {"status": "deferred"},
+  "completion_policy": {
+    "default_mode": "browser",
+    "definition": "real_browser_accepted",
+    "cline_success_is_only": "code_ready"
+  },
+  "browser_acceptance": {
+    "status": "browser_deferred"
+  },
   "human_gates": {
     "production_database_changes": "required",
     "production_oss_changes": "required",
     "production_deployment_or_release": "required",
     "irreversible_data_operations": "required"
   },
-  "finish_reason": "rolling_queue_replenished",
-  "updated_at": "2026-09-24T12:17:25Z",
+  "finish_reason": "browser_deferred",
+  "updated_at": "2026-09-24T12:33:31.673492Z",
   "rolling_queue": {
     "enabled": true,
     "batch_size": 4,
@@ -38,6 +47,11 @@
     "acceptance_interval_seconds": 3600,
     "replenishment_owner": "GPT",
     "status": "ready",
-    "queued_tasks": ["ERP-025", "ERP-026", "ERP-027", "ERP-028"]
+    "queued_tasks": [
+      "ERP-025",
+      "ERP-026",
+      "ERP-027",
+      "ERP-028"
+    ]
   }
 }
