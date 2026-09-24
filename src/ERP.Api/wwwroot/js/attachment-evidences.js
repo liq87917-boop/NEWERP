@@ -1,7 +1,8 @@
 /* ==================================================================================
    ========== 业务单据附件内容证据登记册（ERP-061）— 唯一附件内容册 ==========
    ==================================================================================
-   定位：把用户提供的 PDF / PNG / JPEG 证据挂到**既有**销售订单 / 采购订单（后续任务在同一模型上扩展单证），
+   定位：把用户提供的 PDF / PNG / JPEG 证据挂到**既有**销售订单 / 采购订单（ERP-062 在同一模型上接入出口单证，
+         ERP-063 在同一模型上接入既有验货记录与样品记录），
          由服务端权威保存内容元数据（净化文件名快照 / 媒体类型 / 字节长度 / SHA-256 摘要 / 上传人 / 登记时间）。
    边界（界面侧同样遵守）：
      1. 上传内容一律按**不可信文件**处理：只接受服务端按文件签名判定的 PDF / PNG / JPEG；
@@ -10,7 +11,8 @@
      3. 下载一律带 Bearer 认证请求内容接口，并以「附件」方式保存到本地；界面**不**内联渲染上传内容、
         **不**把内容拼进 DOM、**不**生成任何存储路径或链接（存储键从不返回给界面）；
      4. 更正走显式作废（必填原因）：界面不提供编辑 / 删除 / 替换二进制 / 改派归属；
-     5. 附件证据是用户提供的仓库文件证据，不是报关 / 报税 / 银行 / 承运人 / 客户确认：文案与服务端
+     5. 附件证据是用户提供的仓库文件证据，不是报关 / 报税 / 银行 / 承运人 / 客户确认，
+        也**不**等于验货合格、质量认证、出运许可、样品批准或客户确认：文案与服务端
         AttachmentEvidenceRules / AttachmentEvidenceService 保持一致。
    ================================================================================== */
 
@@ -39,6 +41,8 @@ function aeOwnerTypeOfModule(code) {
     /* ERP-062：单证中心（出口单证）行操作「附件证据」→ 走同一附件证据模型
        （类型编码与 ERP-045 附件引用册的父单据类型完全一致） */
     case 'doc-center': return 'TradeDocument';
+    /* ERP-063：样品管理行操作「附件证据」→ 走同一附件证据模型（归属 = 既有样品台账记录） */
+    case 'sample': return 'Sample';
     default: return '';
   }
 }
@@ -50,6 +54,13 @@ const AE_SUMMARY_MAX_OWNER_IDS = 200;
 /* 列表行操作入口：crud.js 会传入行 Id，归属类型按当前模块编码推断 */
 async function openAttachmentEvidencesForCurrentModule(ownerId) {
   await openAttachmentEvidences(aeOwnerTypeOfModule(CURRENT_MODULE_CODE), ownerId);
+}
+
+/* 采购订单行操作入口（ERP-063）：把证据挂到该采购订单的**验货记录**上（同一附件证据模型，
+   归属类型 QualityInspection，权威记录 = 既有采购订单上的 QC 字段）。
+   验货记录与采购订单是两个**各自独立**的归属类型：同一订单上的两份证据互不共享、互不改派 */
+async function openQualityInspectionEvidencesForCurrentModule(ownerId) {
+  await openAttachmentEvidences('QualityInspection', ownerId);
 }
 
 /* ==================== 打开登记册 ==================== */
@@ -147,6 +158,8 @@ function aeRender() {
         <b>存储</b>：${aeEsc(meta ? meta.storagePolicyText : '')}（当前提供程序：${aeEsc(meta ? meta.storageProviderText : '')}）<br>
         <b>下载</b>：${aeEsc(meta ? meta.downloadPolicyText : '')}
         ${meta && meta.legacyFileNotePolicyText ? '<br><b>历史文本</b>：' + aeEsc(meta.legacyFileNotePolicyText) : ''}
+        ${meta && meta.qualityInspectionEvidenceBoundaryText ? '<br><b>验货记录</b>：' + aeEsc(meta.qualityInspectionEvidenceBoundaryText) : ''}
+        ${meta && meta.sampleEvidenceBoundaryText ? '<br><b>样品记录</b>：' + aeEsc(meta.sampleEvidenceBoundaryText) : ''}
       </div>
       ${AE.upload ? aeUploadFormHtml(ownerTypeOptions, allowed) : ''}
       ${AE.ownerId ? aeFixedOwnerSelect() : ''}
@@ -464,7 +477,8 @@ async function aeConfirmVoid() {
 async function openAttachmentEvidenceSummaryForCurrentPage() {
   const ownerType = aeOwnerTypeOfModule(CURRENT_MODULE_CODE);
   if (!ownerType) {
-    toast('当前模块没有可汇总的附件证据归属类型：请从销售订单 / 采购订单 / 单证中心列表进入', 'error');
+    toast('当前模块没有可汇总的附件证据归属类型：请从销售订单 / 采购订单 / 单证中心 / 样品管理列表进入'
+      + '（验货记录可在登记册里显式选择归属类型后查看）', 'error');
     return;
   }
 
@@ -489,6 +503,17 @@ async function openAttachmentEvidenceSummaryForCurrentPage() {
   } catch (e) {
     toast('附件证据概览加载失败：' + e.message, 'error');
   }
+}
+
+/* 历史「附件说明 / 存放位置」提示（仅出口单证归属）：ERP-062 口径；其它归属类型不显示该提示，
+   避免把单证专属的历史文本口径套到验货记录 / 样品记录 / 订单上 */
+function aeLegacyFileNoteNoticeHtml(ownerType) {
+  if (ownerType !== 'TradeDocument') return '';
+  return `
+      <div style="background:#eff6ff;border:1px solid #bfdbfe;color:#1e3a8a;border-radius:8px;padding:8px 10px;font-size:12px;line-height:1.7;margin-bottom:8px">
+        单证台账既有的「附件说明 / 存放位置」是历史自由文本：系统保持原样可读，不解析成路径、不抓取其中的地址、
+        不转成附件证据，也不在读取时回填（详细口径见登记册内说明）。
+      </div>`;
 }
 
 /* 概览渲染：只显示服务端返回的有界计数与归属可用性；不访问存储、不拼任何存储路径或链接，
@@ -520,10 +545,7 @@ function aeRenderSummary(ownerType, list) {
         计数只表示用户已登记的<strong>仓库附件证据</strong>条数：一次批量查询，不逐行查库、不访问任何存储内容；
         内容只有在显式发起带认证的下载请求时才会被读取。${aeEsc(boundary)}
       </div>
-      <div style="background:#eff6ff;border:1px solid #bfdbfe;color:#1e3a8a;border-radius:8px;padding:8px 10px;font-size:12px;line-height:1.7;margin-bottom:8px">
-        单证台账既有的「附件说明 / 存放位置」是历史自由文本：系统保持原样可读，不解析成路径、不抓取其中的地址、
-        不转成附件证据，也不在读取时回填（详细口径见登记册内说明）。
-      </div>
+      ${aeLegacyFileNoteNoticeHtml(ownerType)}
       <table style="width:100%;border-collapse:collapse;font-size:13px">
         <thead><tr style="background:#f8fafc;text-align:left">
           <th style="padding:6px">单据</th><th style="padding:6px">附件证据</th><th style="padding:6px">操作</th>

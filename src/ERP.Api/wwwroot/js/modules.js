@@ -516,6 +516,16 @@ const MODULES = {
   /* 样品管理（阶段 2 新增，挂在「客户与市场」菜单下） */
   sample: {
     title: '样品管理', api: '/api/crm/samples',
+    /* ERP-063：按当前页样品一次批量查看仓库附件证据计数（有界摘要：不逐行查库、不读取任何存储内容） */
+    extraActions: [
+      { label: '📎 附件证据概览', onclick: 'openAttachmentEvidenceSummaryForCurrentPage()', title: '按当前页样品一次批量查看仓库附件证据条数（有效 / 已作废）与归属可用性：只显示有界计数，不逐行查库、不访问任何存储内容；内容需在登记册里显式发起带认证的下载' },
+    ],
+    /* ERP-063：本样品记录的图片 / 报告等仓库附件证据（走 ERP-061 同一附件证据模型：
+       内容按不可信文件处理，摘要 / 长度 / 存储键由服务端生成，作废必填原因并保留原始元数据与历史；
+       不新建样品主数据，也不把上传当作样品批准、客户确认或打样完成报告） */
+    rowActions: [
+      { label: '附件证据', icon: '📎', title: '上传或查看本样品记录的附件内容证据（PDF / PNG / JPEG，服务端按文件签名复核；下载以附件方式返回，作废必填原因并保留原始文件名 / 摘要 / 历史；不改写样品台账，也不把上传当作样品批准或客户确认）', onclick: 'openAttachmentEvidencesForCurrentModule' },
+    ],
     columns: [
       { key: 'sampleNo', label: '样品编号' }, { key: 'sampleDate', label: '样品日期', type: 'date' },
       { key: 'customerName', label: '客户' }, { key: 'productName', label: '样品名称' },

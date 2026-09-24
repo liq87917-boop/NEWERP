@@ -4,7 +4,8 @@ using System.Text;
 namespace ERP.Application.Services;
 
 /// <summary>
-/// 业务单据附件内容证据的纯规则（ERP-061 建立；ERP-062 在同一模型上接入出口单证）：
+/// 业务单据附件内容证据的纯规则（ERP-061 建立；ERP-062 在同一模型上接入出口单证；
+/// ERP-063 在同一模型上接入既有验货记录与样品记录）：
 /// 归属单据白名单、内容格式判定（扩展名 / 声明 Content-Type / 文件签名三者一致）、
 /// 可执行与标记类格式拒绝、文件名净化、有界校验（大小 / 说明 / 作废原因）与全部文案。
 /// <para>边界：本规则只做**校验与文案**，不读写数据库、不访问任何存储提供程序、不发起任何网络请求，
@@ -27,15 +28,34 @@ public static class AttachmentEvidenceRules
     public const string OwnerTypeTradeDocument = "TradeDocument";
 
     /// <summary>
+    /// 归属单据类型：验货记录（ERP-063）。
+    /// <para>**审计结论**：本仓库**没有**独立的验货 / 质检实体与表（`docs/菜单与业务流程优化建议-20260918.md` 明确
+    /// 「验货单 QC ❌ 未实现，未立项：采购订单仅有 `QcStatus` 字段，无独立验货单与照片」，`SchemaUpgrader` 也只加过
+    /// `PurchaseOrders.QcStatus`）。因此**权威的验货记录**就是既有采购订单上的 QC 执行字段
+    /// （<c>QcStatus</c> 验货状态 + <c>ArrivalProgress</c> 到货进度）：本类型以其**既有持久化 Id** 归属，
+    /// **不**新建验货主数据、**不**新建第二张表，也绝不按订单号 / 商品文本 / 文件名猜测归属。</para>
+    /// </summary>
+    public const string OwnerTypeQualityInspection = "QualityInspection";
+
+    /// <summary>
+    /// 归属单据类型：样品记录（ERP-063，既有 <c>Sample</c> 实体 / <c>api/crm/samples</c> 工作流）：
+    /// 同一附件证据模型、同一套格式 / 大小 / 下载 / 作废口径，**不**新建样品主数据。
+    /// </summary>
+    public const string OwnerTypeSample = "Sample";
+
+    /// <summary>
     /// 已接入的归属单据类型（超出范围一律拒绝，不做隐式兜底、不猜测归属）：
-    /// 销售订单 / 采购订单（ERP-061）与出口单证（ERP-062）。其它单据类型（装柜清单等）
-    /// 仍未接入：一律拒绝，绝不按号码 / 名称 / 文件名猜测归属。
+    /// 销售订单 / 采购订单（ERP-061）、出口单证（ERP-062）、
+    /// 验货记录（既有采购订单 QC 记录）与样品记录（既有 <c>Sample</c>，ERP-063）。
+    /// 其它单据类型（装柜清单等）仍未接入：一律拒绝，绝不按号码 / 名称 / 文件名猜测归属。
     /// </summary>
     public static readonly string[] SupportedOwnerTypes =
     {
         OwnerTypeSalesOrder,
         OwnerTypePurchaseOrder,
-        OwnerTypeTradeDocument
+        OwnerTypeTradeDocument,
+        OwnerTypeQualityInspection,
+        OwnerTypeSample
     };
 
     // ==================== 1. 内容存储提供程序（唯一接缝） ====================
@@ -171,8 +191,49 @@ public static class AttachmentEvidenceRules
             OwnerTypeSalesOrder => "销售订单",
             OwnerTypePurchaseOrder => "采购订单",
             OwnerTypeTradeDocument => "出口单证",
+            OwnerTypeQualityInspection => "验货记录",
+            OwnerTypeSample => "样品记录",
             _ => "未知单据类型"
         };
+
+    /// <summary>
+    /// 验货状态文案（ERP-063）：<c>PurchaseOrders.QcStatus</c> 是**业务人工维护的自由文本**
+    /// （未验货 / 验货中 / 合格 / 不合格 / 免验）：只做有界修剪与空值标注，**不**推断、
+    /// **不**映射成合格 / 不合格裁定，**不**改写采购订单。
+    /// </summary>
+    public static string QualityInspectionStatusText(string? qcStatus)
+    {
+        var text = (qcStatus ?? string.Empty).Trim();
+        return text.Length == 0 ? "未登记验货状态" : Truncate(text, 20);
+    }
+
+    /// <summary>
+    /// 到货进度文案（ERP-063）：<c>PurchaseOrders.ArrivalProgress</c> 同样是自由文本，只做有界修剪与空值标注。
+    /// </summary>
+    public static string ArrivalProgressText(string? arrivalProgress)
+    {
+        var text = (arrivalProgress ?? string.Empty).Trim();
+        return text.Length == 0 ? "未登记到货进度" : Truncate(text, 20);
+    }
+
+    /// <summary>
+    /// 样品类型文案（ERP-063）：<c>Samples.SampleType</c> 自由文本，只做有界修剪与空值标注。
+    /// </summary>
+    public static string SampleTypeText(string? sampleType)
+    {
+        var text = (sampleType ?? string.Empty).Trim();
+        return text.Length == 0 ? "未登记样品类型" : Truncate(text, 20);
+    }
+
+    /// <summary>
+    /// 客户反馈结果文案（ERP-063）：<c>Samples.Result</c> 自由文本，只做有界修剪与空值标注，
+    /// **不**推断样品是否获批准或是否已成交。
+    /// </summary>
+    public static string SampleResultText(string? result)
+    {
+        var text = (result ?? string.Empty).Trim();
+        return text.Length == 0 ? "未登记客户反馈" : Truncate(text, 20);
+    }
 
     /// <summary>
     /// 出口单证状态文案（TradeDocument.Status 是台账里的自由文本，不是枚举）：
@@ -517,17 +578,48 @@ public static class AttachmentEvidenceRules
     /// <summary>
     /// 归属单据附件摘要文案（ERP-062：列表页只显示**有界计数**，不做逐行查库、不访问任何存储）；
     /// 计数只表示已登记的仓库证据条数，绝不表示已报关 / 已报税 / 已交承运人 / 已交付客户。
+    /// <para>ERP-063 起推荐使用按归属类型给出对应边界口径的重载
+    /// （<see cref="OwnerSummaryText(string?, string?, string?, int, int, int)"/>）；
+    /// 本重载保持 ERP-062 的对外文案（出口单证口径）不变。</para>
     /// </summary>
     public static string OwnerSummaryText(
         string? ownerTypeText, string? ownerNo, int total, int active, int voided)
+        => OwnerSummaryTextCore(
+            OwnerSnapshotText(ownerTypeText, ownerNo), SummaryBoundaryClause(OwnerTypeTradeDocument),
+            total, active, voided);
+
+    /// <summary>
+    /// 归属单据附件摘要文案（ERP-063，按归属类型给出对应边界口径）：验货记录**不**表述为验货结论、
+    /// 样品记录**不**表述为样品批准，出口单证仍保持报关 / 报税 / 承运人口径，其余单据保持通用口径。
+    /// </summary>
+    public static string OwnerSummaryText(
+        string? ownerType, string? ownerTypeText, string? ownerNo, int total, int active, int voided)
+        => OwnerSummaryTextCore(
+            OwnerSnapshotText(ownerTypeText, ownerNo), SummaryBoundaryClause(ownerType),
+            total, active, voided);
+
+    /// <summary>摘要文案核心（计数为 0 时只说明「暂无仓库附件证据」，绝不把缺失解释成「无缺陷 / 已通过」）</summary>
+    private static string OwnerSummaryTextCore(
+        string snapshot, string boundaryClause, int total, int active, int voided)
     {
-        var snapshot = OwnerSnapshotText(ownerTypeText, ownerNo);
         if (total <= 0)
             return $"{snapshot}：暂无仓库附件证据（用户提供的扫描件证据需显式上传；系统不导入既有附件说明文本）";
 
         return $"{snapshot}：仓库附件证据 {total} 条（有效 {active} / 已作废 {voided}）；"
-               + "仅为用户上传的仓库证据，不代表已向海关 / 税务 / 承运人提交或获其确认";
+               + $"仅为用户上传的仓库证据，{boundaryClause}";
     }
+
+    /// <summary>
+    /// 摘要文案的边界从句（按归属类型区分口径；未知 / 历史类型使用通用口径，不借用别的单据类型的话术）。
+    /// </summary>
+    private static string SummaryBoundaryClause(string? ownerType)
+        => ownerType?.Trim() switch
+        {
+            OwnerTypeTradeDocument => "不代表已向海关 / 税务 / 承运人提交或获其确认",
+            OwnerTypeQualityInspection => "不代表验货合格 / 不合格判定、质量认证或供应商绩效结论",
+            OwnerTypeSample => "不代表样品已获批准、客户确认或打样报告已完成",
+            _ => "不代表已获批准、已付款、已出运或已结算"
+        };
 
     /// <summary>
     /// 历史自由文本（<c>TradeDocuments.FileNote</c>，即「附件说明 / 存放位置」）的口径声明（ERP-062）：
@@ -545,6 +637,40 @@ public static class AttachmentEvidenceRules
         "出口单证附件证据只表示「用户把一份 PDF / PNG / JPEG 仓库文件挂到了该单证台账记录上」："
         + "它不是报关单回执、不是税务备案或退税资料受理结果、不是承运人或客户确认，"
         + "也不代表单证已提交、已放行、已收汇或允许出运；单证状态与明细行一律由单证中心自己的流程维护。";
+
+    /// <summary>
+    /// 验货记录附件证据的边界声明（ERP-063）：仓库证据与验货结论 / 质量认证 / 出运许可明确区分。
+    /// </summary>
+    public const string QualityInspectionEvidenceBoundaryText =
+        "验货记录附件证据只表示「用户把一份 PDF / PNG / JPEG 仓库文件挂到了该采购订单的验货记录上」："
+        + "它不是验货合格 / 不合格判定、不是质量认证或第三方检验结论，不代表供应商绩效结论、"
+        + "不代表允许出运或已获客户接受；验货状态与执行进度一律由采购订单自己的工作流维护，"
+        + "系统绝不因为有一条附件就推断验货结论。";
+
+    /// <summary>
+    /// 样品记录附件证据的边界声明（ERP-063）：仓库证据与样品批准 / 客户确认明确区分。
+    /// </summary>
+    public const string SampleEvidenceBoundaryText =
+        "样品记录附件证据只表示「用户把一份 PDF / PNG / JPEG 仓库文件挂到了该样品记录上」："
+        + "不代表样品已获批准、不代表客户确认或订单承诺、不代表打样完成报告或检测报告结论，"
+        + "也不代表样品费已结算；样品状态（客户反馈结果）一律由样品管理自己的工作流维护，"
+        + "系统绝不因为有一条附件就推断样品结论。";
+
+    /// <summary>
+    /// 按归属单据类型取对应的边界声明（接口与界面同源；大小写不敏感，与归属可用性复核口径一致）：
+    /// 未知 / 历史类型回落到通用边界文案，**不**猜测归属、也**不**借用别的单据类型的口径。
+    /// </summary>
+    public static string BoundaryTextOf(string? ownerType)
+    {
+        var text = (ownerType ?? string.Empty).Trim();
+        if (string.Equals(text, OwnerTypeTradeDocument, StringComparison.OrdinalIgnoreCase))
+            return TradeDocumentEvidenceBoundaryText;
+        if (string.Equals(text, OwnerTypeQualityInspection, StringComparison.OrdinalIgnoreCase))
+            return QualityInspectionEvidenceBoundaryText;
+        if (string.Equals(text, OwnerTypeSample, StringComparison.OrdinalIgnoreCase))
+            return SampleEvidenceBoundaryText;
+        return BoundaryText;
+    }
 
     /// <summary>证据性质与边界声明（接口与界面同源）</summary>
     public const string BoundaryText =

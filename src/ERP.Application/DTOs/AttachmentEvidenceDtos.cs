@@ -128,9 +128,10 @@ public sealed record AttachmentEvidenceDto(
     string BoundaryText);
 
 /// <summary>
-/// 归属单据的附件证据**有界摘要**（ERP-062，只读）：供列表页按当前页 Id **一次**批量取回
-/// 「有几条仓库附件证据」。计数只表示已登记证据条数，既不触发任何存储访问，也不代表
-/// 报关 / 报税 / 承运人 / 客户确认。
+/// 归属单据的附件证据**有界摘要**（ERP-062 建立；ERP-063 同样用于验货记录与样品记录，只读）：
+/// 供列表页按当前页 Id **一次**批量取回「有几条仓库附件证据」。计数只表示已登记证据条数，
+/// 既不触发任何存储访问，也不代表报关 / 报税 / 承运人 / 客户确认，更不代表验货合格、质量认证
+/// 或样品已获批准（对应口径见 <see cref="AttachmentEvidenceMetadataDto"/> 中各类型边界文案）。
 /// </summary>
 public sealed record AttachmentEvidenceOwnerSummaryDto(
     string OwnerType,
@@ -155,7 +156,8 @@ public sealed record AttachmentEvidenceContentDto(
     string Sha256);
 
 /// <summary>
-/// 附件证据模块元数据（ERP-061，只读）：白名单归属类型、格式 / 大小口径、当前内容存储提供程序与边界文案，
+/// 附件证据模块元数据（ERP-061，只读；ERP-062 增补单证口径、ERP-063 增补验货记录与样品口径）：
+/// 白名单归属类型、格式 / 大小口径、当前内容存储提供程序与边界文案，
 /// 供界面与接口同源显示，避免前端硬编码与后端校验口径漂移。
 /// </summary>
 public sealed record AttachmentEvidenceMetadataDto(
@@ -176,7 +178,9 @@ public sealed record AttachmentEvidenceMetadataDto(
     string DownloadPolicyText,
     string BoundaryText,
     string LegacyFileNotePolicyText,
-    string TradeDocumentEvidenceBoundaryText);
+    string TradeDocumentEvidenceBoundaryText,
+    string QualityInspectionEvidenceBoundaryText,
+    string SampleEvidenceBoundaryText);
 
 /// <summary>白名单选项（ERP-061：值 + 中文文案）。</summary>
 public sealed record AttachmentEvidenceOptionDto(string Value, string Label);

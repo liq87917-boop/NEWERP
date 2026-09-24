@@ -268,6 +268,10 @@ Object.assign(MODULES, {
       /* ERP-061：本采购订单的附件内容证据（上传 PDF / PNG / JPEG 证据文件；摘要与长度由服务端生成，
          下载以附件方式返回，作废必填原因并保留原始元数据与历史；不是报关 / 报税 / 银行 / 供应商确认） */
       { label: '附件证据', icon: '📎', title: '上传或查看本采购订单的附件内容证据（PDF / PNG / JPEG，服务端按文件签名复核；下载以附件方式返回，作废必填原因并保留原始文件名 / 摘要 / 历史，不改写本单）', onclick: 'openAttachmentEvidencesForCurrentModule' },
+      /* ERP-063：本单的**验货记录**附件证据（同一附件证据模型，归属类型 QualityInspection，
+         权威记录 = 既有采购订单上的 QC 字段；与上一行的「附件证据」是两个各自独立的归属类型，
+         互不共享、互不改派；上传 / 读取 / 作废都不改写验货状态与到货进度，也不推断合格 / 不合格） */
+      { label: '验货证据', icon: '🔍', title: '上传或查看本采购订单「验货记录」的附件内容证据（PDF / PNG / JPEG 报告或图片，服务端按文件签名复核；下载以附件方式返回，作废必填原因并保留原始文件名 / 摘要 / 历史；不改写验货状态与到货进度，也不把上传当作验货合格 / 不合格判定、质量认证或出运许可）', onclick: 'openQualityInspectionEvidencesForCurrentModule' },
       { label: '打印预览', icon: '🖨', title: '按打印模板预览该采购订单（含归属客户 / 执行进度等）', onclick: 'previewSalesDocPrint' },
     ],
     detailKey: 'details',

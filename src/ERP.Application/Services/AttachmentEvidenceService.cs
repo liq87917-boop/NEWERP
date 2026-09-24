@@ -9,7 +9,8 @@ using System.Security.Cryptography;
 namespace ERP.Application.Services;
 
 /// <summary>
-/// 业务单据附件内容证据服务（ERP-061 建立；ERP-062 把既有出口单证接入**同一**模型）。职责：
+/// 业务单据附件内容证据服务（ERP-061 建立；ERP-062 把既有出口单证接入**同一**模型；
+/// ERP-063 在同一模型上接入**既有**验货记录与样品记录）。职责：
 /// <list type="number">
 /// <item><b>上传证据</b>（<see cref="UploadAsync"/>）：归属单据必须是白名单类型且**存在、未删除**，
 /// 内容只接受 PDF / PNG / JPEG（按文件签名判定），扩展名 / 声明 Content-Type / 签名三者必须一致；
@@ -34,7 +35,12 @@ namespace ERP.Application.Services;
 /// 也<strong>不</strong>把证据内容转成标记、内联渲染或外发到任何第三方。
 /// ERP-062 接入出口单证时口径完全一致：只读单证台账的 <c>DocNo</c> / <c>DocType</c> / <c>Status</c> 快照，
 /// 不改写单证状态、明细行与来源销售订单 / 装柜清单，也<strong>不</strong>解析、抓取或回填单证既有的
-/// 「附件说明 / 存放位置」自由文本（<see cref="AttachmentEvidenceRules.LegacyFileNotePolicyText"/>）。</para>
+/// 「附件说明 / 存放位置」自由文本（<see cref="AttachmentEvidenceRules.LegacyFileNotePolicyText"/>）。
+/// ERP-063 接入验货记录与样品记录时同样只读：验货记录以**既有采购订单上的 QC 字段**为权威记录
+/// （本仓库没有独立验货实体，因此**不**新建验货主数据），样品记录以**既有 <c>Sample</c> 台账**为权威记录；
+/// 两者都只读取编号 / 验货状态 / 到货进度 / 样品类型 / 客户反馈等**原文快照**，
+/// <strong>不</strong>推断验货合格 / 不合格、质量认证、出运许可、样品批准或客户确认，
+/// 也<strong>不</strong>改写采购订单的 <c>QcStatus</c> 与样品台账的客户反馈结果。</para>
 /// </summary>
 public static class AttachmentEvidenceService
 {
@@ -408,7 +414,9 @@ public static class AttachmentEvidenceService
                 + "附带 nosniff / sandbox / no-store 等防御性响应头，浏览器不内联渲染上传内容",
             BoundaryText: AttachmentEvidenceRules.BoundaryText,
             LegacyFileNotePolicyText: AttachmentEvidenceRules.LegacyFileNotePolicyText,
-            TradeDocumentEvidenceBoundaryText: AttachmentEvidenceRules.TradeDocumentEvidenceBoundaryText);
+            TradeDocumentEvidenceBoundaryText: AttachmentEvidenceRules.TradeDocumentEvidenceBoundaryText,
+            QualityInspectionEvidenceBoundaryText: AttachmentEvidenceRules.QualityInspectionEvidenceBoundaryText,
+            SampleEvidenceBoundaryText: AttachmentEvidenceRules.SampleEvidenceBoundaryText);
     }
 
     // ==================== 6. 归属单据候选（有界、显式选择、批量统计） ====================
@@ -460,18 +468,60 @@ public static class AttachmentEvidenceService
             return purchaseRows.Select(r => Option(type, r, purchaseCounts)).ToList();
         }
 
+        // 验货记录（ERP-063）：权威记录是既有采购订单上的 QC 执行字段（QcStatus / ArrivalProgress）；
+        // 只读投影，不读取明细行、不推断验货结论、不改写采购订单
+        if (type == AttachmentEvidenceRules.OwnerTypeQualityInspection)
+        {
+            var inspectionQuery = db.PurchaseOrders.AsNoTracking().Where(o => !o.IsDeleted);
+            if (filter is not null) inspectionQuery = inspectionQuery.Where(o => o.OrderNo.Contains(filter));
+
+            var inspectionRows = await inspectionQuery
+                .OrderByDescending(o => o.OrderDate).ThenByDescending(o => o.Id)
+                .Take(bounded)
+                .Select(o => new QualityInspectionCandidate(o.Id, o.OrderNo, o.QcStatus, o.ArrivalProgress))
+                .ToListAsync(cancellationToken);
+
+            var inspectionCounts = await CountEvidenceAsync(
+                db, type, inspectionRows.Select(r => r.Id).ToList(), cancellationToken);
+            return inspectionRows.Select(r => Option(type, r, inspectionCounts)).ToList();
+        }
+
+        // 样品记录（ERP-063）：只读样品台账（编号 / 类型 / 客户反馈原文），不读取商品与客户主数据
+        if (type == AttachmentEvidenceRules.OwnerTypeSample)
+        {
+            var sampleQuery = db.Samples.AsNoTracking().Where(s => !s.IsDeleted);
+            if (filter is not null) sampleQuery = sampleQuery.Where(s => s.SampleNo.Contains(filter));
+
+            var sampleRows = await sampleQuery
+                .OrderByDescending(s => s.SampleDate).ThenByDescending(s => s.Id)
+                .Take(bounded)
+                .Select(s => new SampleCandidate(s.Id, s.SampleNo, s.SampleType, s.Result))
+                .ToListAsync(cancellationToken);
+
+            var sampleCounts = await CountEvidenceAsync(
+                db, type, sampleRows.Select(r => r.Id).ToList(), cancellationToken);
+            return sampleRows.Select(r => Option(type, r, sampleCounts)).ToList();
+        }
+
         // 出口单证（ERP-062）：只读单证台账（编号 / 类型 / 状态原文），不读取明细行、不解析附件说明文本
-        var documentQuery = db.TradeDocuments.AsNoTracking().Where(d => !d.IsDeleted);
-        if (filter is not null) documentQuery = documentQuery.Where(d => d.DocNo.Contains(filter));
+        if (type == AttachmentEvidenceRules.OwnerTypeTradeDocument)
+        {
+            var documentQuery = db.TradeDocuments.AsNoTracking().Where(d => !d.IsDeleted);
+            if (filter is not null) documentQuery = documentQuery.Where(d => d.DocNo.Contains(filter));
 
-        var documentRows = await documentQuery
-            .OrderByDescending(d => d.IssueDate).ThenByDescending(d => d.Id)
-            .Take(bounded)
-            .Select(d => new TradeDocumentCandidate(d.Id, d.DocNo, d.DocType, d.Status))
-            .ToListAsync(cancellationToken);
+            var documentRows = await documentQuery
+                .OrderByDescending(d => d.IssueDate).ThenByDescending(d => d.Id)
+                .Take(bounded)
+                .Select(d => new TradeDocumentCandidate(d.Id, d.DocNo, d.DocType, d.Status))
+                .ToListAsync(cancellationToken);
 
-        var documentCounts = await CountEvidenceAsync(db, type, documentRows.Select(r => r.Id).ToList(), cancellationToken);
-        return documentRows.Select(r => Option(type, r, documentCounts)).ToList();
+            var documentCounts = await CountEvidenceAsync(
+                db, type, documentRows.Select(r => r.Id).ToList(), cancellationToken);
+            return documentRows.Select(r => Option(type, r, documentCounts)).ToList();
+        }
+
+        // 防御性兜底：白名单新增类型必须在上方显式装载（绝不把未知类型当作某一类单据处理）
+        throw BusinessException.InvalidParameter($"不支持的归属单据类型「{type}」");
     }
 
     // ==================== 6.1 出口单证附件证据摘要（ERP-062：列表只有有界计数，无逐行查库 / 无存储访问） ====================
@@ -515,10 +565,9 @@ public static class AttachmentEvidenceService
                 counts.Active,
                 counts.Voided,
                 counts.Active > 0,
-                AttachmentEvidenceRules.OwnerSummaryText(typeText, ownerNo, counts.Total, counts.Active, counts.Voided),
-                type == AttachmentEvidenceRules.OwnerTypeTradeDocument
-                    ? AttachmentEvidenceRules.TradeDocumentEvidenceBoundaryText
-                    : AttachmentEvidenceRules.BoundaryText);
+                AttachmentEvidenceRules.OwnerSummaryText(
+                    type, typeText, ownerNo, counts.Total, counts.Active, counts.Voided),
+                AttachmentEvidenceRules.BoundaryTextOf(type));
         }).ToList();
     }
 
@@ -532,6 +581,17 @@ public static class AttachmentEvidenceService
 
     /// <summary>出口单证候选行的中间投影（单证编号 / 类型 / 台账状态原文，同样在内存里转文案）</summary>
     private sealed record TradeDocumentCandidate(long Id, string DocNo, string DocType, string StatusText);
+
+    /// <summary>
+    /// 验货记录候选行的中间投影（ERP-063）：权威记录 = **既有**采购订单上的 QC 执行字段，
+    /// 号码取采购单号，验货状态 / 到货进度取采购订单原文（只读，不推断）。
+    /// </summary>
+    private sealed record QualityInspectionCandidate(long Id, string OrderNo, string QcStatus, string ArrivalProgress);
+
+    /// <summary>
+    /// 样品记录候选行的中间投影（ERP-063）：号码取样品编号，样品类型 / 客户反馈取样品台账原文（只读，不推断）。
+    /// </summary>
+    private sealed record SampleCandidate(long Id, string SampleNo, string SampleType, string Result);
 
     /// <summary>归属单据权威引用（当前号码 + 是否可用）：软删除单据照样装载，读取侧标注不可用而不改派</summary>
     private sealed record OwnerReference(string No, bool Available);
@@ -584,6 +644,34 @@ public static class AttachmentEvidenceService
                 ownerType, document.Id, document.DocNo, AttachmentEvidenceRules.TradeDocumentStatusText(document.Status));
         }
 
+        // 验货记录（ERP-063）：权威记录 = 既有采购订单上的 QC 记录（本仓库**没有**独立验货实体），
+        // 因此这里复核的是采购订单**存在且未删除**；验货状态只作只读快照，绝不推断合格 / 不合格
+        if (ownerType == AttachmentEvidenceRules.OwnerTypeQualityInspection)
+        {
+            var order = await db.PurchaseOrders.AsNoTracking()
+                .FirstOrDefaultAsync(o => o.Id == ownerId && !o.IsDeleted, cancellationToken);
+            if (order is null)
+                throw BusinessException.NotFound(
+                    $"验货记录不存在或已删除（Id={ownerId}）：本仓库的验货记录就是既有采购订单上的 "
+                    + $"验货状态（QcStatus），请选择有效的采购订单后再上传附件证据"
+                    + "（系统不会按订单号、商品名称或文件名猜测归属）");
+            return new OwnerSnapshot(
+                ownerType, order.Id, order.OrderNo, AttachmentEvidenceRules.QualityInspectionStatusText(order.QcStatus));
+        }
+
+        // 样品记录（ERP-063）：复核既有样品台账记录**存在且未删除**；客户反馈只作只读快照，绝不推断是否获批准
+        if (ownerType == AttachmentEvidenceRules.OwnerTypeSample)
+        {
+            var sample = await db.Samples.AsNoTracking()
+                .FirstOrDefaultAsync(s => s.Id == ownerId && !s.IsDeleted, cancellationToken);
+            if (sample is null)
+                throw BusinessException.NotFound(
+                    $"样品记录不存在或已删除（Id={ownerId}）：请选择有效的样品记录后再上传附件证据"
+                    + "（系统不会按样品编号、商品名称或文件名猜测归属）");
+            return new OwnerSnapshot(
+                ownerType, sample.Id, sample.SampleNo, AttachmentEvidenceRules.SampleResultText(sample.Result));
+        }
+
         throw BusinessException.InvalidParameter($"不支持的归属单据类型「{ownerType}」");
     }
 
@@ -605,6 +693,14 @@ public static class AttachmentEvidenceService
         if (string.Equals(type, AttachmentEvidenceRules.OwnerTypeTradeDocument, StringComparison.OrdinalIgnoreCase))
             return await db.TradeDocuments.AsNoTracking()
                 .AnyAsync(d => d.Id == ownerId && !d.IsDeleted, cancellationToken);
+
+        // 验货记录（ERP-063）：权威记录是既有采购订单 QC 记录，可用性 = 采购订单存在且未删除
+        if (string.Equals(type, AttachmentEvidenceRules.OwnerTypeQualityInspection, StringComparison.OrdinalIgnoreCase))
+            return await db.PurchaseOrders.AsNoTracking().AnyAsync(o => o.Id == ownerId && !o.IsDeleted, cancellationToken);
+
+        // 样品记录（ERP-063）：可用性 = 既有样品台账记录存在且未删除
+        if (string.Equals(type, AttachmentEvidenceRules.OwnerTypeSample, StringComparison.OrdinalIgnoreCase))
+            return await db.Samples.AsNoTracking().AnyAsync(s => s.Id == ownerId && !s.IsDeleted, cancellationToken);
 
         return false;
     }
@@ -662,12 +758,41 @@ public static class AttachmentEvidenceService
         }
 
         // 出口单证（ERP-062）：只读取台账编号与软删除标记，不读取明细行、不读取「附件说明 / 存放位置」文本
-        var documents = await db.TradeDocuments.AsNoTracking()
-            .Where(d => ownerIds.Contains(d.Id))
-            .Select(d => new { d.Id, d.DocNo, d.IsDeleted })
-            .ToListAsync(cancellationToken);
-        foreach (var document in documents)
-            map[document.Id] = new OwnerReference(document.DocNo, !document.IsDeleted);
+        if (ownerType == AttachmentEvidenceRules.OwnerTypeTradeDocument)
+        {
+            var documents = await db.TradeDocuments.AsNoTracking()
+                .Where(d => ownerIds.Contains(d.Id))
+                .Select(d => new { d.Id, d.DocNo, d.IsDeleted })
+                .ToListAsync(cancellationToken);
+            foreach (var document in documents)
+                map[document.Id] = new OwnerReference(document.DocNo, !document.IsDeleted);
+            return map;
+        }
+
+        // 验货记录（ERP-063）：权威记录是既有采购订单 QC 记录，只读取单号与软删除标记
+        // （不读取明细行、不读取商品 / 供应商主数据，也不推断验货结论）
+        if (ownerType == AttachmentEvidenceRules.OwnerTypeQualityInspection)
+        {
+            var orders = await db.PurchaseOrders.AsNoTracking()
+                .Where(o => ownerIds.Contains(o.Id))
+                .Select(o => new { o.Id, o.OrderNo, o.IsDeleted })
+                .ToListAsync(cancellationToken);
+            foreach (var order in orders) map[order.Id] = new OwnerReference(order.OrderNo, !order.IsDeleted);
+            return map;
+        }
+
+        // 样品记录（ERP-063）：只读取样品编号与软删除标记（不读取商品 / 客户主数据）
+        if (ownerType == AttachmentEvidenceRules.OwnerTypeSample)
+        {
+            var samples = await db.Samples.AsNoTracking()
+                .Where(s => ownerIds.Contains(s.Id))
+                .Select(s => new { s.Id, s.SampleNo, s.IsDeleted })
+                .ToListAsync(cancellationToken);
+            foreach (var sample in samples) map[sample.Id] = new OwnerReference(sample.SampleNo, !sample.IsDeleted);
+            return map;
+        }
+
+        // 未知 / 历史类型：不查询、不猜测（读取侧据此标注归属不可用，绝不改派到别的单据）
         return map;
     }
 
@@ -760,6 +885,34 @@ public static class AttachmentEvidenceService
         return Option(ownerType, candidate.Id, candidate.DocNo, statusText, summary, counts);
     }
 
+    /// <summary>
+    /// 验货记录候选（ERP-063）：号码取采购单号，状态取验货状态**原文**（只读标注，**不**推断合格 / 不合格，
+    /// **不**改写采购订单），说明里只列验货状态与到货进度。
+    /// </summary>
+    private static AttachmentEvidenceOwnerOptionDto Option(
+        string ownerType, QualityInspectionCandidate candidate, IReadOnlyDictionary<long, int> counts)
+    {
+        var qcStatus = AttachmentEvidenceRules.QualityInspectionStatusText(candidate.QcStatus);
+        var arrival = AttachmentEvidenceRules.ArrivalProgressText(candidate.ArrivalProgress);
+
+        return Option(ownerType, candidate.Id, candidate.OrderNo, qcStatus,
+            $"验货状态 {qcStatus}；到货进度 {arrival}", counts);
+    }
+
+    /// <summary>
+    /// 样品记录候选（ERP-063）：号码取样品编号，状态取客户反馈**原文**（只读标注，**不**推断是否获批准，
+    /// **不**改写样品台账），说明里只列样品类型与客户反馈。
+    /// </summary>
+    private static AttachmentEvidenceOwnerOptionDto Option(
+        string ownerType, SampleCandidate candidate, IReadOnlyDictionary<long, int> counts)
+    {
+        var sampleType = AttachmentEvidenceRules.SampleTypeText(candidate.SampleType);
+        var result = AttachmentEvidenceRules.SampleResultText(candidate.Result);
+
+        return Option(ownerType, candidate.Id, candidate.SampleNo, result,
+            $"样品类型 {sampleType}；客户反馈 {result}", counts);
+    }
+
     /// <summary>候选行 → DTO 的共同映射（单据类型 / 号码 / 状态文案 / 批量统计条数）</summary>
     private static AttachmentEvidenceOwnerOptionDto Option(
         string ownerType,
@@ -827,9 +980,7 @@ public static class AttachmentEvidenceService
             AttachmentEvidenceRules.ProviderText(row.StorageProvider),
             row.CreatedAt,
             row.UpdatedAt,
-            string.Equals(row.OwnerType, AttachmentEvidenceRules.OwnerTypeTradeDocument, StringComparison.OrdinalIgnoreCase)
-                ? AttachmentEvidenceRules.TradeDocumentEvidenceBoundaryText
-                : AttachmentEvidenceRules.BoundaryText);
+            AttachmentEvidenceRules.BoundaryTextOf(row.OwnerType));
     }
 
     /// <summary>计算 SHA-256（有界：调用方已限制内容大小；用于下载前的一致性复核）</summary>

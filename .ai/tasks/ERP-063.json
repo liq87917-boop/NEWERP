@@ -1,7 +1,7 @@
 {
   "id": "ERP-063",
   "title": "Expose quality inspection and sample attachment evidence",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "medium",
   "description": "Extend the canonical ERP-061 attachment registry to the repository's authoritative quality-inspection and sample records. Preserve user-supplied reports and images as untrusted operational evidence without creating duplicate inspection, sample or storage masters. Do not infer quality approval, fetch third-party sources, render active content, configure production OSS, execute production SQL, deploy, or release.",
   "acceptance_criteria": [
@@ -48,5 +48,5 @@
     "status": "not_required",
     "reason": "Repository-only attachment evidence using isolated non-production storage. Quality certification, external data access, production OSS or database changes, deployment and release remain behind mandatory human gates."
   },
-  "attempts": 0
+  "attempts": 1
 }
