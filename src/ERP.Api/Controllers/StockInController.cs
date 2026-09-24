@@ -54,6 +54,7 @@ public class StockInController : DocumentControllerBase<StockIn>
         entity.StockInNo = await _noService.GenerateAsync(DocumentType.StockIn);
         entity.Status = DocumentStatus.Pending;
         entity.CreatedAt = DateTime.Now;
+        await StockUnitConversion.NormalizeAsync(Db, entity.Details);
         Calculate(entity);
         Db.StockIns.Add(entity);
         await Db.SaveChangesAsync();
@@ -84,6 +85,7 @@ public class StockInController : DocumentControllerBase<StockIn>
             d.CreatedAt = DateTime.Now;
         }
         existing.Details = entity.Details;
+        await StockUnitConversion.NormalizeAsync(Db, existing.Details);
         Calculate(existing);
         existing.UpdatedAt = DateTime.Now;
         await Db.SaveChangesAsync();
@@ -100,10 +102,31 @@ public class StockInController : DocumentControllerBase<StockIn>
         if (GetStatus(entity) != DocumentStatus.Submitted)
             throw BusinessException.RuleConflict("当前状态不允许该操作");
 
+        await StockUnitConversion.NormalizeAsync(Db, entity.Details);
+        Calculate(entity);
         SetStatus(entity, DocumentStatus.Approved);
         await ApplyStockAsync(entity, isIn: true);
         await Db.SaveChangesAsync();
         return Ok(ApiResponse<object>.Success(null, "审核通过，库存已更新"));
+    }
+
+    /// <summary>取消：已审核单据按持久化的基础单位数量原路冲回。</summary>
+    [HttpPost("{id:long}/cancel")]
+    public override async Task<IActionResult> Cancel(long id)
+    {
+        var entity = await Db.StockIns.Include(o => o.Details)
+            .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
+            ?? throw BusinessException.NotFound("入库单不存在");
+        var status = GetStatus(entity);
+        if (status == DocumentStatus.Cancelled)
+            throw BusinessException.RuleConflict("入库单已取消");
+        if (status == DocumentStatus.Approved)
+            await ApplyStockAsync(entity, isIn: false);
+        else if (status is not (DocumentStatus.Pending or DocumentStatus.Submitted))
+            throw BusinessException.RuleConflict("当前状态不允许取消");
+        SetStatus(entity, DocumentStatus.Cancelled);
+        await Db.SaveChangesAsync();
+        return Ok(ApiResponse<object>.Success(null, "已取消，库存已按基础单位冲回"));
     }
 
     private static void Calculate(StockIn entity)
@@ -120,6 +143,8 @@ public class StockInController : DocumentControllerBase<StockIn>
             var stock = await Db.Stocks.FirstOrDefaultAsync(s => s.WarehouseId == entity.WarehouseId && s.ProductId == d.ProductId);
             if (stock is null)
             {
+                if (!isIn)
+                    throw BusinessException.RuleConflict($"商品 [{d.ProductName}] 库存记录不存在，不能冲销入库");
                 stock = new Stock
                 {
                     WarehouseId = entity.WarehouseId, ProductId = d.ProductId,
@@ -127,6 +152,8 @@ public class StockInController : DocumentControllerBase<StockIn>
                 };
                 Db.Stocks.Add(stock);
             }
+            if (!isIn && stock.AvailableQuantity < d.Quantity)
+                throw BusinessException.RuleConflict($"商品 [{d.ProductName}] 已有库存不足，不能冲销入库");
             stock.Quantity += isIn ? d.Quantity : -d.Quantity;
             stock.AvailableQuantity += isIn ? d.Quantity : -d.Quantity;
             stock.UpdatedAt = DateTime.Now;
