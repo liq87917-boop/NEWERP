@@ -391,6 +391,22 @@ def recover_push_pending(config: dict[str, Any], state: dict[str, Any]) -> int |
     if state.get("phase") != "push_pending": return None
     task_id = state.get("current_task") or state.get("last_completed_task")
     audit("push_recovery_started", task=task_id)
+    pending_paths = changed_paths()
+    non_control_paths = [
+        path for path in pending_paths
+        if not matches(path, config.get("orchestrator_paths", []))
+        and not matches(path, config.get("ignored_change_paths", []))
+    ]
+    if non_control_paths:
+        set_state(
+            state,
+            blocker="Push recovery stopped because non-control changes are present",
+            finish_reason="push_recovery_dirty_worktree",
+        )
+        audit("push_recovery_blocked", task=task_id, changed_paths=non_control_paths)
+        return 5
+    if pending_paths:
+        checkpoint_control_files("chore: checkpoint pending push recovery state")
     pull = subprocess.run(["git", "pull", "--rebase"], cwd=ROOT)
     if pull.returncode != 0:
         set_state(state, phase="remote_degraded", current_task=None, blocker=None, finish_reason="remote_sync_degraded", remote_sync={"status": "pending", "reason": "pull_failed"})

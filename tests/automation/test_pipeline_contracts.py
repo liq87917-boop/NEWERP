@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+from unittest.mock import patch
 import tempfile
 import unittest
 from pathlib import Path
@@ -40,7 +41,7 @@ class PipelineContracts(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "dependency cycle"):
             pipeline.validate_dependency_graph(entries)
 
-    def test_first_blocked_task_is_not_skipped(self):
+    def test_blocked_task_does_not_stop_independent_work(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             tasks = root / "tasks"; tasks.mkdir()
@@ -52,8 +53,8 @@ class PipelineContracts(unittest.TestCase):
             pipeline.TASKS_DIR, pipeline.CONFIG_PATH = tasks, config
             try:
                 item, reason = pipeline.queue_head()
-                self.assertIsNone(item)
-                self.assertIn("ERP-010 status=blocked stops queue", reason)
+                self.assertEqual("ERP-011", item[1]["id"])
+                self.assertEqual("ready", reason)
             finally:
                 pipeline.TASKS_DIR, pipeline.CONFIG_PATH = old_tasks, old_config
 
@@ -69,7 +70,7 @@ class PipelineContracts(unittest.TestCase):
             try:
                 item, reason = pipeline.queue_head()
                 self.assertIsNone(item)
-                self.assertIn("waits for human_gate=L3", reason)
+                self.assertIn("ERP-010:human_gate=L3", reason)
             finally:
                 pipeline.TASKS_DIR, pipeline.CONFIG_PATH = old_tasks, old_config
 
@@ -87,6 +88,45 @@ class PipelineContracts(unittest.TestCase):
         }
         with self.assertRaisesRegex(ValueError, "require browser_acceptance.scenarios"):
             orchestrator.validate_task(task, {"task_prefix": "ERP", "validation_profiles": {"safe": []}, "completion_policy": {}})
+
+    def test_push_recovery_checkpoints_control_changes_before_pull(self):
+        config = {
+            "orchestrator_paths": [".ai/PROJECT_STATE.json", ".ai/audit.jsonl"],
+            "ignored_change_paths": [".ai/logs/**"],
+        }
+        state = {"phase": "push_pending", "current_task": "ERP-020"}
+        calls = []
+
+        def run(command, **kwargs):
+            calls.append(command)
+            return type("Completed", (), {"returncode": 0})()
+
+        with patch.object(orchestrator, "changed_paths", return_value=[".ai/PROJECT_STATE.json", ".ai/audit.jsonl"]), \
+             patch.object(orchestrator, "audit"), \
+             patch.object(orchestrator, "set_state"), \
+             patch.object(orchestrator, "checkpoint_control_files") as checkpoint, \
+             patch.object(orchestrator.subprocess, "run", side_effect=run):
+            self.assertEqual(0, orchestrator.recover_push_pending(config, state))
+
+        checkpoint.assert_any_call("chore: checkpoint pending push recovery state")
+        self.assertEqual(["git", "pull", "--rebase"], calls[0])
+
+    def test_push_recovery_refuses_non_control_changes(self):
+        config = {
+            "orchestrator_paths": [".ai/**"],
+            "ignored_change_paths": [],
+        }
+        state = {"phase": "push_pending", "current_task": "ERP-020"}
+        with patch.object(orchestrator, "changed_paths", return_value=["src/ERP.Api/Program.cs"]), \
+             patch.object(orchestrator, "audit"), \
+             patch.object(orchestrator, "set_state") as set_state, \
+             patch.object(orchestrator, "checkpoint_control_files") as checkpoint, \
+             patch.object(orchestrator.subprocess, "run") as run:
+            self.assertEqual(5, orchestrator.recover_push_pending(config, state))
+
+        set_state.assert_called_once()
+        checkpoint.assert_not_called()
+        run.assert_not_called()
 
 
 if __name__ == "__main__":

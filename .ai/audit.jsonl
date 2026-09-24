@@ -88,3 +88,4 @@
 {"at": "2026-09-24T00:56:42.637189Z", "event": "pipeline_stopped", "task": "ERP-020", "exit_code": 9}
 {"at": "2026-09-24T11:39:34.188632Z", "event": "push_recovery_started", "task": "ERP-020"}
 {"at": "2026-09-24T11:39:34.228644Z", "event": "remote_sync_degraded", "task": "ERP-020", "reason": "pull_failed"}
+{"at": "2026-09-24T11:40:47.155153Z", "event": "push_recovery_completed", "task": "ERP-020", "recovered_by": "control_fix"}
