@@ -1,0 +1,54 @@
+{
+  "id": "ERP-065",
+  "title": "Add supplier purchase-invoice evidence register",
+  "status": "pending",
+  "risk_level": "medium",
+  "description": "Add one supplier purchase-invoice evidence register for ordinary, special VAT, import and other supported supplier invoice records, with explicit allocations to existing Purchase Orders. Keep these repository records distinct from customer sales invoices and Trade Document commercial invoices. Do not issue or authenticate an invoice, contact a tax platform, infer order links, post accounts payable, execute production SQL, deploy, or release.",
+  "acceptance_criteria": [
+    "Users can create and edit draft supplier purchase-invoice evidence with invoice type, invoice code when applicable, invoice number, invoice date, optional explicit due date and payment-terms snapshot, Supplier, currency, net amount, tax amount, gross amount and bounded notes.",
+    "The server validates documented amount equations and currency precision and validates the authoritative Supplier; missing, deleted or inactive Suppliers are rejected for new records while bounded Supplier snapshots remain readable historically.",
+    "Active invoice identity is unique for the same Supplier, invoice type and normalized code and number combination; duplicates are rejected rather than merged or matched by amount, date or free text.",
+    "A draft invoice can allocate all or part of its gross amount to one or more existing non-cancelled Purchase Orders only when Supplier and currency match authoritatively; duplicate order links and allocations above invoice gross amount are rejected.",
+    "The invoice displays linked and unlinked amounts explicitly and may remain partially or wholly unlinked without guessing a Purchase Order from numbers, dates, goods, remarks or amount similarity.",
+    "Optional due date and payment terms are persisted evidence supplied by an authorized user; an absent due date remains unknown and is not calculated from Supplier defaults or free text at read time.",
+    "Customer sales-invoice evidence and Trade Document commercial invoices remain separate models and are not converted, replaced or silently linked to supplier invoices.",
+    "Users can record a draft invoice and later void it while preserving identity, amounts, allocations and audit history; recorded or voided evidence is not hard-deleted or silently rewritten.",
+    "Recording or voiding evidence does not issue or cancel a real invoice, call a tax service, change Purchase Order or receipt status, update Supplier balances, inventory, tax, finance, payment or settlement records.",
+    "Existing Suppliers and Purchase Orders remain readable without invoice evidence, and no request-time or production backfill is performed.",
+    "Repository schema changes are idempotent, queries are bounded or paged and avoid per-row database access, and validation uses only permitted local or test-database paths.",
+    "Unit and integration tests cover supported invoice types, amount validation, duplicate identity, invalid Supplier, compatible and mismatched Purchase Order allocations, partial linkage, unknown due date, void history, model separation and adjacent-record non-mutation; safe validation passes and browser acceptance is recorded as deferred during development."
+  ],
+  "allowed_paths": [
+    "src/ERP.Domain/**",
+    "src/ERP.Application/**",
+    "src/ERP.Infrastructure/**",
+    "src/ERP.Api/Controllers/**",
+    "src/ERP.Api/wwwroot/**",
+    "src/ERP.UnitTests/**",
+    "src/ERP.IntegrationTests/**",
+    "docs/**",
+    ".ai/**"
+  ],
+  "depends_on": [],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "browser",
+  "browser_acceptance": {
+    "required": true,
+    "scenarios": [
+      "Create supplier purchase-invoice evidence, allocate it partially across compatible Purchase Orders, and verify linked and unlinked amounts plus an explicit due date persist without changing the orders or issuing a real invoice.",
+      "Attempt a duplicate invoice and Supplier or currency mismatch, verify rejection, then record and void valid evidence and confirm its identity, allocations and history remain readable and separate from customer and Trade Document invoices."
+    ],
+    "test_filter": "Collection=UiTests",
+    "minimum_screenshots": 2
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L2",
+    "status": "not_required",
+    "reason": "Repository invoice evidence and non-production test schema only. Real invoice issuance or authentication, tax-platform access, accounting posting, production database execution, deployment and release remain behind mandatory human gates."
+  },
+  "attempts": 0
+}

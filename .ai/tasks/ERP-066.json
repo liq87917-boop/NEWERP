@@ -1,0 +1,57 @@
+{
+  "id": "ERP-066",
+  "title": "Add explicit supplier payment-to-invoice allocations",
+  "status": "pending",
+  "risk_level": "medium",
+  "description": "Link the existing canonical supplier-payment evidence to ERP-065 supplier purchase-invoice evidence through explicit, auditable allocation rows. Reuse existing payment records rather than creating another payment master. Do not initiate a payment, infer links, post accounts payable, alter bank or tax data, execute production SQL, deploy, or release.",
+  "acceptance_criteria": [
+    "The implementation audits and reuses the existing canonical supplier-payment evidence and ERP-065 supplier invoice records, leaving one payment master, one invoice register and one explicit allocation model.",
+    "Authorized users can allocate an eligible active supplier-payment evidence record to one or more recorded supplier invoices using persisted identifiers only.",
+    "The server requires authoritative Supplier and currency compatibility, rejects unavailable or voided records, duplicate payment and invoice pairs, non-positive values and allocations above either the payment's available amount or the invoice's unallocated gross amount.",
+    "Partial allocation and one-to-many or many-to-one allocation are supported while unallocated payment and invoice amounts remain separately visible and are never silently written off.",
+    "Different currencies are never combined or converted unless an authoritative persisted conversion already belongs to the source evidence; no current or guessed exchange rate is used.",
+    "Allocation rows preserve payment, invoice and Supplier snapshots, allocated amount, recorder and recorded time; client-supplied snapshots, balances and audit fields are not trusted.",
+    "An incorrect allocation can be voided with a bounded reason while preserving its original values and history; hard deletion, reassignment and silent amount replacement are not provided.",
+    "Purchase Order allocations, invoice allocations and payment-to-invoice allocations remain distinct evidence dimensions and are not added together as if they represented separate payments.",
+    "Missing allocations are displayed as none or unknown and are not interpreted as unpaid, paid, settled, overdue, tax-deductible or posted status.",
+    "Creating, reading or voiding an allocation does not change payment evidence, invoice status, Purchase Orders, receipts, Supplier balances, inventory, tax, bank, finance or settlement records.",
+    "Queries and summaries are bounded and avoid per-row access; schema changes are idempotent and validated only through permitted local or test-database paths.",
+    "Unit and integration tests cover partial and full allocation, multiple invoices and payments, Supplier and currency mismatch, duplicate and over-allocation rejection, void history, unavailable records, bounded summaries and source-record non-mutation; safe validation passes and browser acceptance is recorded as deferred during development."
+  ],
+  "allowed_paths": [
+    "src/ERP.Domain/**",
+    "src/ERP.Application/**",
+    "src/ERP.Infrastructure/**",
+    "src/ERP.Api/Controllers/**",
+    "src/ERP.Api/wwwroot/**",
+    "src/ERP.UnitTests/**",
+    "src/ERP.IntegrationTests/**",
+    "docs/**",
+    ".ai/**"
+  ],
+  "depends_on": [
+    "ERP-049",
+    "ERP-065"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "browser",
+  "browser_acceptance": {
+    "required": true,
+    "scenarios": [
+      "Allocate one existing supplier-payment evidence record partially across two compatible recorded supplier invoices and verify payment and invoice unallocated amounts without changing any source record or initiating a payment.",
+      "Attempt duplicate, excessive, Supplier-mismatched and currency-mismatched allocations, verify rejection, then void a valid allocation and confirm its original values and reason remain in history."
+    ],
+    "test_filter": "Collection=UiTests",
+    "minimum_screenshots": 2
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L2",
+    "status": "not_required",
+    "reason": "Explicit allocation of existing repository evidence only. Real payments, bank access, accounting posting, production database mutation, deployment and release remain behind mandatory human gates."
+  },
+  "attempts": 0
+}

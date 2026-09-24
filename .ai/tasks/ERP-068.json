@@ -1,0 +1,55 @@
+{
+  "id": "ERP-068",
+  "title": "Add bounded supplier reconciliation and aging workspace",
+  "status": "pending",
+  "risk_level": "medium",
+  "description": "Add a bounded read-only supplier reconciliation and aging workspace over ERP-065 invoices and ERP-066 explicit payment allocations. Derive only arithmetic evidence supported by persisted invoice dates, optional due dates and active allocations. Do not create a general ledger, invent due dates, authorize payment, contact suppliers, execute production SQL, deploy, or release.",
+  "acceptance_criteria": [
+    "The workspace lists recorded supplier-invoice evidence and active explicit payment allocations without copying source rows or creating another invoice, payment or allocation master.",
+    "Users can apply bounded or paged filters for Supplier, invoice identity, invoice-date range, explicit due-date range, currency, invoice status and allocation state using persisted fields only.",
+    "For each recorded invoice, arithmetic remaining evidence equals gross amount minus active ERP-066 payment-to-invoice allocations, with over-allocation prevented by the source rules and voided allocations excluded but available in explicit history.",
+    "Aging is calculated only when an explicit persisted due date exists, against an explicit as-of date, using documented mutually exclusive buckets; invoices without due dates remain in a separate unknown-due-date group.",
+    "Different currencies are grouped separately and are never combined, converted or presented as one total without an authoritative persisted conversion already belonging to source evidence.",
+    "Draft or voided invoices are separately labeled and excluded from active payable-evidence totals; missing, invalid or unavailable source links remain visible as unknown or invalid and are not repaired or reassigned.",
+    "The workspace distinguishes invoice gross evidence, explicit allocated-payment evidence and arithmetic remainder and states that these are repository reconciliation figures, not a general-ledger balance, audited Supplier statement, payment authorization, tax filing or settlement confirmation.",
+    "Opening invoice, allocation or payment detail revalidates existing authentication and module authorization and fails closed when an authoritative source is deleted, unavailable or no longer authorized.",
+    "List and aggregate queries are bounded, avoid per-row database access, do not call external services and keep legacy Suppliers with no evidence readable without request-time or production backfill.",
+    "The workspace is read-only and does not change Suppliers, invoices, allocations, Purchase Orders, receipts, payments, inventory, tax, finance or settlement records.",
+    "Any export uses the same filtered, currency-separated and unknown-due-date semantics as the screen and contains no hidden cross-currency total or inferred legal assertion.",
+    "Unit and integration tests cover explicit and missing due dates, all aging boundaries, partial and full allocations, void history, multiple Suppliers and currencies, as-of filtering, bounded queries, authorization failure and source-record non-mutation; safe validation passes and browser acceptance is recorded as deferred during development."
+  ],
+  "allowed_paths": [
+    "src/ERP.Application/**",
+    "src/ERP.Api/Controllers/**",
+    "src/ERP.Api/wwwroot/**",
+    "src/ERP.UnitTests/**",
+    "src/ERP.IntegrationTests/**",
+    "docs/**",
+    ".ai/**"
+  ],
+  "depends_on": [
+    "ERP-066",
+    "ERP-067"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "browser",
+  "browser_acceptance": {
+    "required": true,
+    "scenarios": [
+      "Open the supplier reconciliation workspace for recorded invoices with explicit due dates and partial payment allocations, select an as-of date, and verify currency-separated remaining evidence and documented aging buckets.",
+      "Inspect draft, voided, missing-due-date, invalid-link and multi-currency evidence and verify unknown values remain separate, no cross-currency total is shown and no source record is changed."
+    ],
+    "test_filter": "Collection=UiTests",
+    "minimum_screenshots": 3
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L2",
+    "status": "not_required",
+    "reason": "Read-only arithmetic over repository evidence and non-production validation only. Supplier contact, real payment, accounting posting, tax action, production database mutation, deployment and release remain behind mandatory human gates."
+  },
+  "attempts": 0
+}
