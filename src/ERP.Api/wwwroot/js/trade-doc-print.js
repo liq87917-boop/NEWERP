@@ -57,8 +57,49 @@ function tradeDocPrintFieldRows(doc, tpl) {
   });
 }
 
-/* 生成单证打印 HTML（公司抬头 + 标题 + 字段表 + 签署栏 + 页脚）。
-   单证为单表台账（无商品明细行）：不渲染明细表，也不新增明细结构。 */
+/* ============ 明细行快照（ERP-052）：打印接口返回的 detailColumns / detailLines / detailTotals ============
+   口径：列由后端按单证类型适配（商业发票 → 单价与行金额；装箱单 → 箱数与净重 / 毛重）；
+   未登记值（null / undefined）渲染为空白，**绝不**显示为 0；行金额是服务端计算值，前端不做重算与汇率换算；
+   所有文本一律经 escapeHtml 输出为纯文本（不会被当成标记执行）。 */
+function tradeDocLineCell(line, column) {
+  const raw = line ? line[column.key] : null;
+  if (raw === null || raw === undefined || raw === '') return '';
+  return column.isMonetary ? fmtMoney(raw) : String(raw);
+}
+
+/* 明细表 + 行合计说明（无明细行或类型不支持明细行时返回空串，老单证照常打印表头字段） */
+function tradeDocPrintDetailHtml(doc) {
+  const columns = Array.isArray(doc.detailColumns) ? doc.detailColumns : [];
+  const lines = Array.isArray(doc.detailLines) ? doc.detailLines : [];
+  if (doc.hasDetailLines !== true || columns.length === 0) return '';
+
+  const head = columns
+    .map(c => `<th${c.isNumeric ? ' class="num"' : ''}>${escapeHtml(c.label)}</th>`).join('');
+  const body = lines.map(line =>
+    `<tr>${columns.map(c => `<td${c.isNumeric ? ' class="num"' : ''}>${escapeHtml(tradeDocLineCell(line, c))}</td>`).join('')}</tr>`
+  ).join('');
+
+  const totals = doc.detailTotals || {};
+  const parts = [];
+  const amounts = (totals.amountByCurrency || [])
+    .map(t => `${t.currency} ${t.amountText}（${t.lineCount} 行）`).join('　');
+  if (amounts) parts.push(`行金额合计（按币种分开，不做汇率换算）：${amounts}`);
+  if (totals.packageCountTotal !== null && totals.packageCountTotal !== undefined)
+    parts.push(`箱数合计：${totals.packageCountTotal}（${totals.packageCountRecordedLines} 行登记）`);
+  if (totals.netWeightTotal !== null && totals.netWeightTotal !== undefined)
+    parts.push(`净重合计：${totals.netWeightTotal} kg（${totals.weightRecordedLines} 行登记）`);
+  if (totals.grossWeightTotal !== null && totals.grossWeightTotal !== undefined)
+    parts.push(`毛重合计：${totals.grossWeightTotal} kg（${totals.weightRecordedLines} 行登记）`);
+  if (doc.detailLinesTruncated === true) parts.push('明细行超过单次读取上限：以上合计只是部分合计');
+
+  const rules = [doc.detailRuleText, totals.missingEvidenceText].filter(t => t).map(escapeHtml).join('　');
+  return `<table class="print-details"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>
+    ${parts.length ? `<div class="print-line-totals">${escapeHtml(parts.join('　｜　'))}</div>` : ''}
+    ${rules ? `<div class="print-remark">${rules}</div>` : ''}`;
+}
+
+/* 生成单证打印 HTML（公司抬头 + 标题 + 字段表 + 明细表 + 签署栏 + 页脚）。
+   明细行只按打印接口返回的只读投影渲染：没有明细行（老单证 / 类型不支持）时输出纯表头打印件。 */
 function buildTradeDocPrintHtml(tpl, doc) {
   const rows = tradeDocPrintFieldRows(doc, tpl);
   const cells = rows.map(r =>
@@ -100,6 +141,7 @@ function buildTradeDocPrintHtml(tpl, doc) {
       <span>打印时间：${new Date().toLocaleString('zh-CN')}</span>
     </div>
     ${fieldRows ? `<table class="print-fields"><tbody>${fieldRows}</tbody></table>` : ''}
+    ${tradeDocPrintDetailHtml(doc)}
     <div class="print-sign"><span>制单人：____________</span><span>审核人：____________</span><span>客户签收：____________</span></div>
     <div class="print-footer"><span>${escapeHtml(tpl.FooterText || '')}</span><span>共 1 页</span></div>
   </div>`;
@@ -127,7 +169,8 @@ async function previewTradeDocPrint(oid) {
       <div style="max-height:62vh;overflow:auto;border:1px solid #e2e8f0;border-radius:6px;background:#f8fafc">${html}</div>
       <p class="text-muted" style="margin:8px 0 0;line-height:1.7">
         空白字段表示单证台账中未登记该值：系统不会按客户 / 柜号 / 订单号反查或推测单证上的值。
-        单证为单表台账，不含商品明细行。
+        商品明细行按行序输出单证制作当时的行快照（商业发票含服务端计算的单价与行金额、装箱单含箱数与净重 / 毛重）；
+        未登记的箱数 / 净重 / 毛重留空显示，<b>不会</b>写成 0，也不会按商品资料或自由文本推断。
       </p>
       <div class="modal-footer">
         <button class="btn btn-neutral" onclick="closeModal()">关闭</button>

@@ -1,5 +1,6 @@
 using ERP.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 
 namespace ERP.Application.Interfaces;
 
@@ -8,6 +9,14 @@ namespace ERP.Application.Interfaces;
 /// </summary>
 public interface IErpDbContext
 {
+    /// <summary>
+    /// 数据库门面（事务 / 连接 / 提供程序信息）。ERP-052 用途：单证生成时把「单证表头 + 明细行快照」
+    /// 放在**同一个事务**内写入，任何一步失败都不留下半成品单证。
+    /// <para>由 <c>DbContext</c> 基类直接实现，无需各实现类另行编写；内存库等不支持事务的提供程序由
+    /// EF 侧按「无事务」执行（仅记录警告），不影响单元测试的可读性。</para>
+    /// </summary>
+    DatabaseFacade Database { get; }
+
     // ============ 系统设置 ============
     DbSet<SysUser> SysUsers { get; }
     DbSet<SysRole> SysRoles { get; }

@@ -202,8 +202,11 @@ public class SalesOrderController : DocumentControllerBase<SalesOrder>
     }
 
     /// <summary>
-    /// 带入单证预填（ERP-019）：按销售订单返回**未落库**的单证草稿（商业发票 / 装箱单 / 报关单 / 产地证 / 提单），
+    /// 带入单证预填（ERP-019；ERP-052 增加来源明细行快照预览）：按销售订单返回**未落库**的单证草稿
+    /// （商业发票 / 装箱单 / 报关单 / 产地证 / 提单）+ 由订单明细构造的明细行预览，
     /// 并回传该订单已生成过的单证类型（前端置灰，避免重复生成）。不写库、不占用单证编号流水。
+    /// <para>明细行只取订单明细的权威值（商品 / 规格 / 数量 / 单位 / 单价），箱数与重量留空（订单无此证据）；
+    /// 订单明细非法 / 超过有界行数时明确拒绝，不静默丢弃、不臆造数值。</para>
     /// </summary>
     [HttpGet("{id:long}/trade-documents/prefill")]
     public async Task<IActionResult> TradeDocumentPrefill(long id)
@@ -217,16 +220,24 @@ public class SalesOrderController : DocumentControllerBase<SalesOrder>
             .Select(docType => TradeDocumentGeneration.BuildFromSalesOrder(order, customer, docType))
             .ToList();
 
+        // 来源明细与商品资料各**一次**有界查询（不逐行查库），供明细行快照预览使用
+        var details = await TradeDocumentLineSnapshotRules.LoadSalesOrderDetailsAsync(Db, order.Id);
+        var products = await TradeDocumentLineSnapshotRules.LoadProductsAsync(
+            Db, TradeDocumentLineSnapshotRules.ProductIdsOf(details));
+
         var result = await TradeDocumentGeneration.PrefillAsync(Db,
             TradeDocumentGeneration.SalesOrderSourceType, order.Id, order.OrderNo,
-            containerNo: null, salesOrderNo: order.OrderNo, loadingListNo: null, drafts: drafts);
+            containerNo: null, salesOrderNo: order.OrderNo, loadingListNo: null, drafts: drafts,
+            buildLines: docType => TradeDocumentLineSnapshotRules.BuildFromSalesOrder(
+                order, details, products, docType, DraftCurrencyOf(drafts, docType)));
 
-        return Ok(ApiResponse<TradeDocPrefillResult>.Success(result, "已按销售订单带入单证草稿"));
+        return Ok(ApiResponse<TradeDocPrefillResult>.Success(result, "已按销售订单带入单证草稿与明细行快照预览"));
     }
 
     /// <summary>
-    /// 生成单证（ERP-019）：按销售订单生成单证中心台账记录（默认商业发票 + 装箱单）。
-    /// 守卫：已作废订单拒绝；同一订单 + 同一单证类型只允许一张（重复点击不会产生重复单证）；
+    /// 生成单证（ERP-019；ERP-052 增加明细行快照）：按销售订单生成单证中心台账记录（默认商业发票 + 装箱单），
+    /// 并在**同一事务**内写入由订单明细构造的行快照（商业发票含服务端计算行金额，装箱单不含价格口径）。
+    /// 守卫：已作废订单拒绝；来源明细非法 / 超限拒绝；同一订单 + 同一单证类型只允许一张（重复点击不会产生重复单证）；
     /// 单证落库状态统一为「待制作」，生成后仍可在单证中心人工修改后再流转。
     /// </summary>
     [HttpPost("{id:long}/trade-documents")]
@@ -239,15 +250,31 @@ public class SalesOrderController : DocumentControllerBase<SalesOrder>
             throw BusinessException.RuleConflict("已作废的销售订单不能生成单证");
 
         var customer = await TradeDocumentGeneration.LoadCustomerAsync(Db, order.CustomerId);
+
+        // 单证草稿与明细行快照共用同一份映射：币种取自草稿，保证行快照与单证台账币种一致
+        var drafts = TradeDocumentGeneration.SalesOrderDocTypes
+            .Select(docType => TradeDocumentGeneration.BuildFromSalesOrder(order, customer, docType))
+            .ToList();
+        var details = await TradeDocumentLineSnapshotRules.LoadSalesOrderDetailsAsync(Db, order.Id);
+        var products = await TradeDocumentLineSnapshotRules.LoadProductsAsync(
+            Db, TradeDocumentLineSnapshotRules.ProductIdsOf(details));
+
         var result = await TradeDocumentGeneration.GenerateAsync(Db,
             TradeDocumentGeneration.SalesOrderSourceType, order.Id, order.OrderNo,
             containerNo: null, salesOrderNo: order.OrderNo, loadingListNo: null,
             requestedDocTypes: request?.DocTypes,
-            buildDraft: docType => TradeDocumentGeneration.BuildFromSalesOrder(order, customer, docType));
+            buildDraft: docType => TradeDocumentGeneration.BuildFromSalesOrder(order, customer, docType),
+            buildLines: docType => TradeDocumentLineSnapshotRules.BuildFromSalesOrder(
+                order, details, products, docType, DraftCurrencyOf(drafts, docType)));
 
         var numbers = string.Join("、", result.Documents.Select(d => d.DocNo));
-        return Ok(ApiResponse<TradeDocGenerateResult>.Success(result, $"已生成单证：{numbers}"));
+        return Ok(ApiResponse<TradeDocGenerateResult>.Success(result,
+            $"已生成单证：{numbers}（明细行快照 {result.TotalLineCount} 行）"));
     }
+
+    /// <summary>取某单证类型的草稿币种（明细行快照与单证台账币种保持同一口径；缺失时回退空值由规则层规范化）</summary>
+    private static string? DraftCurrencyOf(IEnumerable<TradeDocument> drafts, string docType)
+        => drafts.FirstOrDefault(d => string.Equals(d.DocType, docType, StringComparison.Ordinal))?.Currency;
 
     /// <summary>导出列定义（含 ERP-008 外贸合同与追溯字段；Excel 导出菜单「销售订单导出」使用）</summary>
     private static readonly List<(string Key, string Title)> ExcelColumns = new()

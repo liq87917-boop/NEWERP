@@ -2,16 +2,20 @@ using OpenQA.Selenium;
 using OpenQA.Selenium.Support.UI;
 using System.Globalization;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Xunit;
 
 namespace ERP.IntegrationTests;
 
 /// <summary>
-/// ERP-019 真实浏览器验收（Collection=UiTests，Microsoft Edge）：
+/// ERP-019 / ERP-052 真实浏览器验收（Collection=UiTests，Microsoft Edge）：
 /// 1) 销售订单页「生成单证」→ 生成商业发票 + 装箱单，核对映射字段与来源订单留痕，并在单证中心可见；
 /// 2) 装柜清单页「生成单证」→ 生成装箱单，核对柜号 / 港口 / 箱数毛重体积与来源清单留痕；
 /// 3) 重复生成被服务端守卫拒绝（提示已生成），单证中心不出现重复记录（已生成类型在对话框置灰）；
-/// 4) 单证中心 Excel 导出：对话框与导出接口可用，导出的 xlsx 可被解析（zip 文件头）。
+/// 4) 单证中心 Excel 导出：对话框与导出接口可用，导出的 xlsx 可被解析（zip 文件头）；
+/// 5) ERP-052 明细行快照：生成对话框展示明细行预览与行数 → 生成后商业发票 / 装箱单明细行与服务端计算行金额、
+///    缺失的箱数 / 净重 / 毛重留空（不臆造 0）→ 共享打印预览渲染明细表 → 明细行 Excel 导出可解析 →
+///    修改来源销售订单明细后已生成快照保持不变。
 /// 说明：测试数据全部经应用自身接口以登录态创建（不直连数据库、不使用生产数据、不执行 SQL）；
 ///       截图证据通过 UiTestFixture.CaptureEvidence 输出到 ERP_AI_EVIDENCE_DIR。
 /// </summary>
@@ -203,6 +207,105 @@ public class TradeDocumentGenerationUiTests
             "  done(buf.length > 1000 && buf[0] === 0x50 && buf[1] === 0x4B ? buf.length : 0);" +
             "})();", async: true);
         Assert.True(size > 1000, "导出的 xlsx 文件不可解析（无 zip 文件头或内容为空）");
+
+        AssertEmptyApiIssues();
+    }
+
+    // ==================== 场景 5：明细行快照（ERP-052） ====================
+
+    [Fact]
+    public void 单证明细行快照_页面预览与打印导出可见且缺失值不臆造()
+    {
+        var tag = "UILN" + DateTime.Now.ToString("HHmmss");
+        LoginAsAdmin();
+        InstallApiIssueRecorder();
+
+        var customer = CreateCustomer(tag);
+        var order = CreateSalesOrder(tag, customer.Id);
+
+        // 页面事实 1：生成对话框展示「明细行」列与明细行快照预览（未登记值留空）
+        OpenModule("sales-order");
+        SearchList(order.No);
+        Assert.True(FunctionExists("generateTradeDocsFromSource"),
+            "页面未加载 /js/trade-doc-gen.js（前端脚本过期）：请先重新构建并启动 ERP.Api 再运行浏览器验收");
+        ClickRowMenuAction(order.Id, "generateTradeDocsFromSource");
+        Wait(20).Until(d => d.FindElements(By.CssSelector("#modal .td-kind")).Count > 0);
+        var dialogText = _fx.Driver.FindElement(By.Id("modal")).Text;
+        Assert.Contains("明细行快照预览", dialogText);
+        Assert.Contains(tag + "-商品", dialogText);
+        CaptureEvidence("trade-document-line-preview-dialog");
+        ClickModalAction("generateSelectedTradeDocs()");
+        AcceptAlert();
+        WaitToastContains("已生成");
+        CaptureEvidence("trade-document-lines-generated");
+
+        // 服务端事实：商业发票明细行 = 订单明细的权威快照，行金额由服务端计算；缺失的箱数 / 重量为 null
+        var ci = TradeDocsBySalesOrder(order.No).Single(d => d.DocType == "商业发票");
+        var ciItems = ApiData("GET", $"/api/trade/documents/{ci.Id}/items");
+        var ciLines = ciItems.GetProperty("items").EnumerateArray().ToList();
+        Assert.Single(ciLines);
+        Assert.Equal(tag + "-商品", ciLines[0].GetProperty("productNameCn").GetString());
+        Assert.Equal(100m, ciLines[0].GetProperty("quantity").GetDecimal());
+        Assert.Equal(2.5m, ciLines[0].GetProperty("unitPrice").GetDecimal());
+        Assert.Equal(250m, ciLines[0].GetProperty("lineAmount").GetDecimal());
+        Assert.Equal("USD", ciLines[0].GetProperty("currency").GetString());
+        Assert.Equal(JsonValueKind.Null, ciLines[0].GetProperty("packageCount").ValueKind);
+        Assert.Equal(JsonValueKind.Null, ciLines[0].GetProperty("netWeight").ValueKind);
+        Assert.Equal(JsonValueKind.Null, ciLines[0].GetProperty("grossWeight").ValueKind);
+
+        // 页面事实 2：共享打印预览渲染明细表（未登记值留空而不是 0）
+        var print = ApiData("GET", $"/api/trade/documents/{ci.Id}/print");
+        Assert.True(print.GetProperty("hasDetailLines").GetBoolean());
+        Assert.Equal(1, print.GetProperty("detailLines").GetArrayLength());
+        Assert.Equal("250.0", print.GetProperty("detailTotals").GetProperty("amountByCurrency")[0]
+            .GetProperty("amount").GetDecimal().ToString("0.0", CultureInfo.InvariantCulture));
+        Assert.Equal(JsonValueKind.Null, print.GetProperty("detailLines")[0]
+            .GetProperty("grossWeight").ValueKind);
+
+        ExecuteScript($"previewTradeDocPrint({ci.Id}); return 'ok';");
+        Wait(20).Until(d => d.FindElements(By.CssSelector("#modal table.print-details")).Count > 0);
+        var printText = _fx.Driver.FindElement(By.Id("modal")).Text;
+        Assert.Contains("行金额合计", printText);
+        Assert.Contains(tag + "-商品", printText);                 // 明细行的商品名称进入打印件
+        CaptureEvidence("trade-document-print-detail-lines");
+        ExecuteScript("closeModal(); return 'ok';");
+
+        // 装柜清单来源：箱数与毛重写入、净重留空（来源没有净重列），未登记值不臆造为 0
+        var containerNo = "CTN" + tag;
+        var loadingList = CreateLoadingList(tag, customer.Id, containerNo);
+        ApiData("POST", $"/api/container/loading-lists/{loadingList.Id}/trade-documents",
+            JsonSerializer.Serialize(new { docTypes = new[] { "装箱单" } }));
+        var pl = TradeDocsByContainer(containerNo).Single(d => d.DocType == "装箱单");
+        var plItems = ApiData("GET", $"/api/trade/documents/{pl.Id}/items");
+        var plLines = plItems.GetProperty("items").EnumerateArray().ToList();
+        Assert.Single(plLines);
+        Assert.Equal(120, plLines[0].GetProperty("packageCount").GetInt32());
+        Assert.Equal(2100.5m, plLines[0].GetProperty("grossWeight").GetDecimal());
+        Assert.Equal(JsonValueKind.Null, plLines[0].GetProperty("netWeight").ValueKind);
+        Assert.Equal(0m, plLines[0].GetProperty("unitPrice").GetDecimal());   // 装箱单不含价格口径
+
+        // 明细行 Excel 导出（layout=lines）：可解析且内容非空
+        var size = ExecuteScriptLong(
+            "const done = arguments[arguments.length - 1];" +
+            "(async () => {" +
+            "  const res = await fetch('/api/trade/documents/export-excel?id=" + ci.Id + "&layout=lines'," +
+            "    { headers: { Authorization: 'Bearer ' + (localStorage.getItem('erp_token') || '') } });" +
+            "  const buf = new Uint8Array(await res.arrayBuffer());" +
+            "  done(buf.length > 1000 && buf[0] === 0x50 && buf[1] === 0x4B ? buf.length : 0);" +
+            "})();", async: true);
+        Assert.True(size > 1000, "明细行导出的 xlsx 不可解析（无 zip 文件头或内容为空）");
+        CaptureEvidence("trade-document-line-export-done");
+
+        // 来源变化：修改来源销售订单明细数量（100 → 999）后，已生成的行快照保持不变
+        var orderJson = JsonNode.Parse(Api("GET", $"/api/sales-orders/{order.Id}"))!;
+        orderJson["details"]![0]!["quantity"] = 999m;
+        ApiData("PUT", $"/api/sales-orders/{order.Id}", orderJson.ToJsonString());
+
+        var afterChange = ApiData("GET", $"/api/trade/documents/{ci.Id}/items");
+        var afterLine = afterChange.GetProperty("items").EnumerateArray().Single();
+        Assert.Equal(100m, afterLine.GetProperty("quantity").GetDecimal());     // 快照不随来源变化
+        Assert.Equal(250m, afterLine.GetProperty("lineAmount").GetDecimal());
+        Assert.Equal(250m, TradeDocsBySalesOrder(order.No).Single(d => d.Id == ci.Id).Amount);
 
         AssertEmptyApiIssues();
     }

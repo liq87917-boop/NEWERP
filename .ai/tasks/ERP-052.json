@@ -1,7 +1,7 @@
 {
   "id": "ERP-052",
   "title": "Include Trade Document line snapshots in generation, export and print",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "medium",
   "description": "Extend existing Trade Document generation, Excel export and shared printing to consume the immutable line snapshots from ERP-051. Prefill only values supported by authoritative source details and leave unavailable customs, package, weight or price evidence empty. Do not guess mappings, overwrite existing manual lines, mutate source documents, submit to external systems, execute production SQL, deploy, or release.",
   "acceptance_criteria": [
@@ -51,5 +51,5 @@
     "status": "not_required",
     "reason": "Repository generation, export and print behavior only. Production database execution, external document submission, deployment and release remain behind mandatory human gates."
   },
-  "attempts": 0
+  "attempts": 1
 }

@@ -101,9 +101,12 @@ public class ContainerLoadingListController : DocumentControllerBase<ContainerLo
     }
 
     /// <summary>
-    /// 带入单证预填（ERP-019）：按装柜清单返回**未落库**的单证草稿（装箱单 / 提单 / 报关单 / 订舱确认），
-    /// 柜号写入「关联柜号 / 订舱号」，港口按「预装柜单 → 订柜信息 → 客户档案」回退，
-    /// 并回传该柜 / 该清单已生成过的单证类型（前端置灰，避免重复生成）。不写库、不占用单证编号流水。
+    /// 带入单证预填（ERP-019；ERP-052 增加来源明细行快照预览）：按装柜清单返回**未落库**的单证草稿
+    /// （装箱单 / 提单 / 报关单 / 订舱确认），柜号写入「关联柜号 / 订舱号」，港口按
+    /// 「预装柜单 → 订柜信息 → 客户档案」回退，并回传该柜 / 该清单已生成过的单证类型（前端置灰）。
+    /// 不写库、不占用单证编号流水。
+    /// <para>明细行只取清单明细确有证据的值（商品 / 数量 / 箱数 / 毛重）：净重来源没有该列一律留空，
+    /// 清单以 0 表示未登记 <strong>不</strong>写成 0；清单明细超过有界行数时明确拒绝。</para>
     /// </summary>
     [HttpGet("{id:long}/trade-documents/prefill")]
     public async Task<IActionResult> TradeDocumentPrefill(long id)
@@ -115,16 +118,24 @@ public class ContainerLoadingListController : DocumentControllerBase<ContainerLo
             .Select(docType => TradeDocumentGeneration.BuildFromLoadingList(list, customer, booking, docType))
             .ToList();
 
+        // 来源明细与商品资料各**一次**有界查询（不逐行查库），供明细行快照预览使用
+        var details = await TradeDocumentLineSnapshotRules.LoadLoadingListDetailsAsync(Db, list.Id);
+        var products = await TradeDocumentLineSnapshotRules.LoadProductsAsync(
+            Db, TradeDocumentLineSnapshotRules.ProductIdsOf(details));
+
         var result = await TradeDocumentGeneration.PrefillAsync(Db,
             TradeDocumentGeneration.LoadingListSourceType, list.Id, list.LoadingListNo,
-            containerNo: list.ContainerNo, salesOrderNo: null, loadingListNo: list.LoadingListNo, drafts: drafts);
+            containerNo: list.ContainerNo, salesOrderNo: null, loadingListNo: list.LoadingListNo, drafts: drafts,
+            buildLines: docType => TradeDocumentLineSnapshotRules.BuildFromLoadingList(
+                list, details, products, docType, DraftCurrencyOf(drafts, docType)));
 
-        return Ok(ApiResponse<TradeDocPrefillResult>.Success(result, "已按装柜清单带入单证草稿"));
+        return Ok(ApiResponse<TradeDocPrefillResult>.Success(result, "已按装柜清单带入单证草稿与明细行快照预览"));
     }
 
     /// <summary>
-    /// 生成单证（ERP-019）：按装柜清单生成单证中心台账记录（默认装箱单）。
-    /// 守卫：已作废清单拒绝；同一柜号（或同一装柜清单）+ 同一单证类型只允许一张，
+    /// 生成单证（ERP-019；ERP-052 增加明细行快照）：按装柜清单生成单证中心台账记录（默认装箱单），
+    /// 并在**同一事务**内写入由清单明细构造的装箱单行快照（数量 / 箱数 / 毛重；净重与价格口径不含）。
+    /// 守卫：已作废清单拒绝；来源明细非法 / 超限拒绝；同一柜号（或同一装柜清单）+ 同一单证类型只允许一张，
     /// 重复点击不会产生重复单证；单证落库状态统一为「待制作」，生成后仍可人工修改。
     /// </summary>
     [HttpPost("{id:long}/trade-documents")]
@@ -136,15 +147,31 @@ public class ContainerLoadingListController : DocumentControllerBase<ContainerLo
 
         var customer = await TradeDocumentGeneration.LoadCustomerAsync(Db, list.CustomerId);
         var booking = await TradeDocumentGeneration.LoadBookingAsync(Db, list);
+
+        // 单证草稿与明细行快照共用同一份映射：币种取自草稿，保证行快照与单证台账币种一致
+        var drafts = TradeDocumentGeneration.LoadingListDocTypes
+            .Select(docType => TradeDocumentGeneration.BuildFromLoadingList(list, customer, booking, docType))
+            .ToList();
+        var details = await TradeDocumentLineSnapshotRules.LoadLoadingListDetailsAsync(Db, list.Id);
+        var products = await TradeDocumentLineSnapshotRules.LoadProductsAsync(
+            Db, TradeDocumentLineSnapshotRules.ProductIdsOf(details));
+
         var result = await TradeDocumentGeneration.GenerateAsync(Db,
             TradeDocumentGeneration.LoadingListSourceType, list.Id, list.LoadingListNo,
             containerNo: list.ContainerNo, salesOrderNo: null, loadingListNo: list.LoadingListNo,
             requestedDocTypes: request?.DocTypes,
-            buildDraft: docType => TradeDocumentGeneration.BuildFromLoadingList(list, customer, booking, docType));
+            buildDraft: docType => TradeDocumentGeneration.BuildFromLoadingList(list, customer, booking, docType),
+            buildLines: docType => TradeDocumentLineSnapshotRules.BuildFromLoadingList(
+                list, details, products, docType, DraftCurrencyOf(drafts, docType)));
 
         var numbers = string.Join("、", result.Documents.Select(d => d.DocNo));
-        return Ok(ApiResponse<TradeDocGenerateResult>.Success(result, $"已生成单证：{numbers}"));
+        return Ok(ApiResponse<TradeDocGenerateResult>.Success(result,
+            $"已生成单证：{numbers}（明细行快照 {result.TotalLineCount} 行）"));
     }
+
+    /// <summary>取某单证类型的草稿币种（明细行快照与单证台账币种保持同一口径；缺失时回退空值由规则层规范化）</summary>
+    private static string? DraftCurrencyOf(IEnumerable<TradeDocument> drafts, string docType)
+        => drafts.FirstOrDefault(d => string.Equals(d.DocType, docType, StringComparison.Ordinal))?.Currency;
 
     /// <summary>
     /// 权威外贸 / 物流跟踪值（ERP-040，**只读**）：按装柜清单 → 预装柜单 → 订柜信息的

@@ -22,6 +22,61 @@ const TRADE_DOC_NO_PREFIX = {
   '产地证': 'CO', '提单': 'BL', '订舱确认': 'BK', '外汇核销单': 'VR', '其他': 'TD',
 };
 
+/* 生成前明细行预览列（ERP-052，仅界面展示口径；落库 / 打印 / 导出的权威列由后端按单证类型给出）。
+   显示文本字段（*Text）在未登记时为空串 —— 预览里空白就是「未登记」，绝不显示 0。 */
+const TRADE_DOC_LINE_PREVIEW_COLUMNS = {
+  '商业发票': [
+    ['lineNo', '序号'], ['productCode', '商品编码'], ['productNameCn', '商品中文名称'], ['spec', '规格'],
+    ['quantityText', '数量'], ['unit', '单位'], ['unitPriceText', '单价'], ['lineAmountText', '行金额'],
+    ['remark', '行备注'],
+  ],
+  '装箱单': [
+    ['lineNo', '序号'], ['productCode', '商品编码'], ['productNameCn', '商品中文名称'], ['spec', '规格'],
+    ['quantityText', '数量'], ['unit', '单位'], ['packageCountText', '箱数'], ['netWeightText', '净重kg'],
+    ['grossWeightText', '毛重kg'], ['remark', '行备注'],
+  ],
+};
+
+/* 单次预览最多展示的行数（有界；其余行只报总数，避免对话框过大） */
+const TRADE_DOC_LINE_PREVIEW_LIMIT = 8;
+
+/* 明细行快照预览（ERP-052）：按单证类型分组展示预填结果里的行快照，未登记值留空 */
+function tradeDocLinePreviewHtml(data, kinds) {
+  const lines = Array.isArray(data.linePreviews) ? data.linePreviews : [];
+  if (!lines.length) return '';
+
+  const blocks = kinds.map(docType => {
+    const group = lines.filter(l => l.docType === docType);
+    if (!group.length) return '';
+    const columns = TRADE_DOC_LINE_PREVIEW_COLUMNS[docType];
+    if (!columns) return '';
+    const head = columns.map(c => `<th>${escapeHtml(c[1])}</th>`).join('');
+    const body = group.slice(0, TRADE_DOC_LINE_PREVIEW_LIMIT).map(line =>
+      `<tr>${columns.map(c => `<td>${escapeHtml(line[c[0]])}</td>`).join('')}</tr>`).join('');
+    const more = group.length > TRADE_DOC_LINE_PREVIEW_LIMIT
+      ? `<tr><td colspan="${columns.length}" class="text-muted">…共 ${group.length} 行，仅预览前 ${TRADE_DOC_LINE_PREVIEW_LIMIT} 行</td></tr>`
+      : '';
+    return `<div style="margin:8px 0 12px">
+      <b>${escapeHtml(docType)} · 明细行快照预览（${group.length} 行，按来源明细顺序）</b>
+      <div class="table-wrap" style="max-height:26vh;overflow:auto">
+        <table><thead><tr>${head}</tr></thead><tbody>${body}${more}</tbody></table>
+      </div>
+    </div>`;
+  }).join('');
+
+  if (!blocks) return '';
+  const hints = [data.lineSummaryText, data.lineEvidenceText, data.lineRuleText]
+    .filter(t => t).map(t => escapeHtml(t)).join('<br>');
+  return `<div style="margin-top:10px">
+    <div class="text-muted" style="line-height:1.7">
+      明细行快照只取来源单据的权威明细值：未登记的箱数 / 净重 / 毛重留空（不写成 0、不按商品资料或自由文本推断）；
+      商业发票行金额由服务端按币种精度计算，装箱单不含价格口径；生成后行快照保持生成当时的值，来源单据之后改动不会刷新它。
+    </div>
+    ${blocks}
+    ${hints ? `<div class="text-muted" style="line-height:1.7">${hints}</div>` : ''}
+  </div>`;
+}
+
 /* 当前生成对话框上下文（来源 + 预填结果），由对话框内按钮共用 */
 let TRADE_DOC_CTX = null;
 
@@ -56,11 +111,13 @@ function renderTradeDocDialog() {
     ? data.supportedDocTypes : drafts.map(d => d.docType);
   const sourceNo = data.sourceNo || '';
 
+  const lineCounts = data.lineCounts || {};
   const rows = kinds.map(t => {
     const draft = drafts.find(d => d.docType === t) || {};
     const done = generated.indexOf(t) >= 0;
     const checked = !done && defaults.indexOf(t) >= 0;
     const noHint = TRADE_DOC_NO_PREFIX[t] ? `${TRADE_DOC_NO_PREFIX[t]}-${sourceNo}` : '';
+    const lineCount = Number(lineCounts[t] || 0);
     return `<tr>
       <td><label><input type="checkbox" class="td-kind" value="${escapeHtml(t)}"
           ${checked ? 'checked' : ''} ${done ? 'disabled' : ''} onchange="tradeDocSelectionChanged()"> ${escapeHtml(t)}</label></td>
@@ -70,6 +127,7 @@ function renderTradeDocDialog() {
       <td>${escapeHtml(draft.destinationPort || '')}</td>
       <td>${escapeHtml(draft.issuedBy || '')}</td>
       <td class="text-right">${draft.copies ? draft.copies : ''}</td>
+      <td class="text-right">${lineCount ? lineCount + ' 行' : '—'}</td>
       <td>${done ? '<span class="status status-success">已生成</span>' : '<span class="status status-info">可生成</span>'}</td>
     </tr>`;
   }).join('');
@@ -78,17 +136,19 @@ function renderTradeDocDialog() {
   modal.innerHTML = `<div class="modal modal-lg" style="width:1180px;max-width:96vw">
     <h3>📋 由${escapeHtml(ctx.source.label)} ${escapeHtml(sourceNo)} 生成单证</h3>
     <p class="text-muted" style="margin:8px 0 12px">
-      勾选需要的单证类型后可直接生成（同一来源 + 同一类型只允许一张，重复点击会被拒绝）；
+      勾选需要的单证类型后可直接生成（同一来源 + 同一类型只允许一张，重复点击会被拒绝）；生成时会按来源明细
+      在<b>同一事务</b>内写入明细行快照（商业发票含服务端计算的行金额，装箱单含箱数与净重 / 毛重）。
       或选一个类型「带入预填」到单证中心新增表单，人工核对后再保存（状态默认「待制作」）。
       ${data.sourceRefNo ? `柜号 / 订舱号：<b>${escapeHtml(data.sourceRefNo)}</b>。` : ''}
     </p>
-    <div class="table-wrap" style="max-height:46vh;overflow:auto">
+    <div class="table-wrap" style="max-height:36vh;overflow:auto">
       <table><thead><tr>
         <th style="width:150px">单证类型</th><th>单证编号（预填）</th><th>客户</th>
         <th class="text-right">金额</th><th>目的港</th><th>制作人 / 出证机构</th>
-        <th class="text-right">份数</th><th>状态</th>
+        <th class="text-right">份数</th><th class="text-right">明细行</th><th>状态</th>
       </tr></thead><tbody>${rows}</tbody></table>
     </div>
+    ${tradeDocLinePreviewHtml(data, kinds)}
     <div class="modal-footer">
       <span class="text-muted" id="td-selection-hint">请选择要生成的单证类型</span>
       <button class="btn btn-neutral" onclick="prefillSelectedTradeDoc()" title="把选中的单证类型带入单证中心新增表单（不落库，可编辑后保存）">📝 带入预填</button>
@@ -121,11 +181,15 @@ async function generateSelectedTradeDocs() {
   if (!ctx) return;
   const picked = tradeDocSelectedTypes();
   if (picked.length === 0) { toast('请先勾选需要生成的单证类型', 'error'); return; }
-  if (!confirm(`确认由该${ctx.source.label}生成 ${picked.length} 张单证？同一来源的同一单证类型只允许一张。`)) return;
+  if (!confirm(`确认由该${ctx.source.label}生成 ${picked.length} 张单证？\n\n同一来源的同一单证类型只允许一张；生成时会按来源明细在**同一事务**内写入明细行快照（商业发票含服务端计算的行金额，装箱单含箱数与净重 / 毛重；未登记的量留空，不写成 0）。`)) return;
   try {
     const result = await api(`${ctx.source.api}/${ctx.sourceId}/trade-documents`, 'POST', { docTypes: picked });
     const items = (result && result.documents) || [];
-    toast(`已生成 ${items.length} 张单证：${items.map(d => d.docNo).join('、')}`);
+    const lineTotal = Number((result && result.totalLineCount) || 0);
+    const detail = items.filter(d => Number(d.lineCount || 0) > 0)
+      .map(d => `${d.docNo} ${d.lineCount} 行`).join('、');
+    toast(`已生成 ${items.length} 张单证：${items.map(d => d.docNo).join('、')}`
+      + (lineTotal > 0 ? `（明细行快照共 ${lineTotal} 行：${detail}）` : '（来源没有明细行，未带入明细行）'));
     closeModal();
     TRADE_DOC_CTX = null;
     const mod = MODULES['doc-center'];
@@ -201,7 +265,9 @@ function openTradeDocExportDialog() {
     <h3>📤 单证中心导出 Excel</h3>
     <p class="text-muted" style="margin:8px 0 16px">
       按条件导出单证台账（列含单证编号 / 类型 / 出具日期 / 客户 / 金额币种 / 港口 / 份数 / 状态 / 来源留痕）；
-      留空表示不限，日期区间按「出具 / 签发日期」过滤。
+      留空表示不限，日期区间按「出具 / 签发日期」过滤。勾选「明细行布局」时改为**每行一条明细记录 + 行合计**
+      （商业发票输出单价与服务端计算的行金额；装箱单输出箱数与净重 / 毛重，未登记留空而不是 0；
+      老单证没有明细行时照常导出一行并标明「无明细行」）。
     </p>
     <div class="form-grid">
       <div class="form-item"><label>单证类型</label>
@@ -214,6 +280,8 @@ function openTradeDocExportDialog() {
         <input type="date" id="td-ex-end" value="${defEnd}"></div>
       <div class="form-item full"><label>关键字（单证编号 / 客户 / 柜号 / 订单号 / 报关单号）</label>
         <input type="text" id="td-ex-keyword" value="${escapeHtml(keyword)}" placeholder="按单证编号、客户、柜号、关联订单号、报关单号模糊搜索"></div>
+      <div class="form-item full"><label>导出布局</label>
+        <label><input type="checkbox" id="td-ex-lines"> 按明细行导出（每行一条记录 + 行金额按币种分开的合计 + 箱数 / 重量合计）</label></div>
     </div>
     <div class="modal-footer">
       <span class="text-muted">导出为 xlsx 文件（与销售订单 / 采购订单导出一致的列头与样式）</span>
@@ -231,6 +299,7 @@ async function doExportTradeDocs() {
   const start = (document.getElementById('td-ex-start') || {}).value || '';
   const end = (document.getElementById('td-ex-end') || {}).value || '';
   const keyword = ((document.getElementById('td-ex-keyword') || {}).value || '').trim();
+  const linesLayout = !!((document.getElementById('td-ex-lines') || {}).checked);
 
   const qs = new URLSearchParams();
   if (docType) qs.set('docType', docType);
@@ -238,9 +307,20 @@ async function doExportTradeDocs() {
   if (start) qs.set('start', start + 'T00:00:00');
   if (end) qs.set('end', end + 'T23:59:59');
   if (keyword) qs.set('keyword', keyword);
+  if (linesLayout) qs.set('layout', 'lines');
 
   const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-  await downloadTradeDocExcel(`/api/trade/documents/export-excel?${qs.toString()}`, `单证台账_${dateStr}.xlsx`);
+  const fileName = linesLayout ? `单证明细行_${dateStr}.xlsx` : `单证台账_${dateStr}.xlsx`;
+  await downloadTradeDocExcel(`/api/trade/documents/export-excel?${qs.toString()}`, fileName);
+}
+
+/* 行操作：按明细行导出单条单证（每行一条记录 + 行合计；老单证无明细行时照常导出一行） */
+function exportTradeDocumentLines(id) {
+  const row = (window.__moduleRows || []).find(r => String(r.id) === String(id)) || {};
+  const base = row.docNo ? String(row.docNo).replace(/[\\/:*?"<>|]/g, '_') : String(id);
+  return downloadTradeDocExcel(
+    `/api/trade/documents/export-excel?id=${encodeURIComponent(id)}&layout=lines`,
+    `单证明细行_${base}.xlsx`);
 }
 
 /* 行操作：导出单条单证（列表已加载行数据时以其单证编号命名文件） */

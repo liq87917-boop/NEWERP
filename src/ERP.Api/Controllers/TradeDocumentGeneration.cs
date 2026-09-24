@@ -1,5 +1,6 @@
 using ERP.Application.Common;
 using ERP.Application.Interfaces;
+using ERP.Application.Services;
 using ERP.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 
@@ -198,19 +199,38 @@ public static class TradeDocumentGeneration
     // ==================== 带入预填 / 直接生成 ====================
 
     /// <summary>
-    /// 带入预填：返回未落库的单证草稿集合（每种可生成类型一份）+ 该来源**已生成过**的单证类型，
-    /// 前端据此预览映射结果、置灰已生成类型，并把选中的草稿带入单证中心新增表单。
-    /// 本方法不写库、不占用单证编号流水，重复生成只在落库接口上拦截。
+    /// 带入预填：返回未落库的单证草稿集合（每种可生成类型一份）+ 该来源**已生成过**的单证类型 +
+    /// 由来源明细构造的**明细行快照预览**（ERP-052），前端据此预览映射结果、置灰已生成类型，
+    /// 并把选中的草稿带入单证中心新增表单。
+    /// 本方法不写库、不占用单证编号流水，重复生成只在落库接口上拦截；
+    /// 来源明细非法 / 超过有界行数时**同样拒绝**（与直接生成同一套校验），以免用户在落库时才发现问题。
     /// </summary>
     public static async Task<TradeDocPrefillResult> PrefillAsync(IErpDbContext db, string sourceType, long sourceId,
         string sourceNo, string? containerNo, string? salesOrderNo, string? loadingListNo,
-        List<TradeDocument> drafts, CancellationToken ct = default)
+        List<TradeDocument> drafts, Func<string, TradeDocumentLineSnapshotResult>? buildLines = null,
+        CancellationToken ct = default)
     {
         var generated = new List<string>();
+        var previews = new List<TradeDocumentPrintLine>();
+        var summaries = new List<string>();
+        var evidences = new List<string>();
+        var lineCounts = new Dictionary<string, int>(StringComparer.Ordinal);
+
         foreach (var draft in drafts)
         {
             if (await FindExistingAsync(db, salesOrderNo, containerNo, loadingListNo, draft.DocType, ct) is not null)
                 generated.Add(draft.DocType);
+
+            // 明细行预览：只做只读投影（不落库），行序与落库时完全一致
+            var built = buildLines?.Invoke(draft.DocType);
+            if (built is null) continue;
+
+            lineCounts[draft.DocType] = built.Lines.Count;
+            foreach (var line in built.Lines)
+                previews.Add(TradeDocumentPrintLine.From(line, draft.DocType, draft.Currency));
+
+            if (built.SummaryText.Length > 0) summaries.Add(built.SummaryText);
+            if (built.EvidenceText.Length > 0) evidences.Add(built.EvidenceText);
         }
 
         return new TradeDocPrefillResult
@@ -222,23 +242,33 @@ public static class TradeDocumentGeneration
             Documents = drafts,
             GeneratedDocTypes = generated,
             DefaultDocTypes = DefaultDocTypes(sourceType).ToList(),
-            SupportedDocTypes = SupportedDocTypes(sourceType).ToList()
+            SupportedDocTypes = SupportedDocTypes(sourceType).ToList(),
+            LinePreviews = previews,
+            LineCounts = lineCounts,
+            LineSummaryText = string.Join(" ｜ ", summaries),
+            LineEvidenceText = string.Join(" ｜ ", evidences),
+            LineRuleText = TradeDocumentPrintSemantics.DetailRuleText,
         };
     }
 
     /// <summary>
-    /// 直接生成：按请求的单证类型逐个落库（不传类型时使用来源默认类型）。
-    /// 守卫顺序：来源合法性 → 未选择类型 / 类型不受支持 → 重复生成（同一来源 + 同一类型）；
-    /// 任一类型已生成即整体拒绝（不产生半成品数据），成功后返回新建单证的 Id / 编号 / 类型。
+    /// 直接生成：按请求的单证类型逐个构造单证草稿与**来源明细行快照**（ERP-052），随后在**同一事务**内
+    /// 把单证表头与明细行一起落库（任一步失败整体回滚，不留半成品单证）。
+    /// <para>守卫顺序：来源合法性 → 未选择类型 / 类型不受支持 → 来源明细校验（数量 / 单价 / 商品身份 / 有界行数）
+    /// → 重复生成（同一来源 + 同一类型）；任一类型已生成即整体拒绝（不产生半成品数据）。</para>
+    /// <para>生成后返回新建单证的 Id / 编号 / 类型 / 明细行数（可在单证中心继续人工维护明细行，
+    /// 但绝不改写来源单据、商品资料与任何库存 / 财务记录）。</para>
     /// </summary>
     /// <exception cref="BusinessException">
-    /// 重复生成（错误码 RuleConflict）；未选择类型、类型不受支持（错误码 InvalidParameter）。
+    /// 重复生成、来源明细非法 / 超限（错误码 RuleConflict）；未选择类型、类型不受支持（错误码 InvalidParameter）。
     /// </exception>
     public static async Task<TradeDocGenerateResult> GenerateAsync(IErpDbContext db, string sourceType, long sourceId,
         string sourceNo, string? containerNo, string? salesOrderNo, string? loadingListNo,
         IReadOnlyList<string>? requestedDocTypes, Func<string, TradeDocument> buildDraft,
-        CancellationToken ct = default)
+        Func<string, TradeDocumentLineSnapshotResult>? buildLines = null, CancellationToken ct = default)
     {
+        ArgumentNullException.ThrowIfNull(db);
+
         var docTypes = NormalizeDocTypes(sourceType, requestedDocTypes);
 
         var conflicts = new List<string>();
@@ -252,29 +282,68 @@ public static class TradeDocumentGeneration
                 $"该{SourceLabel(sourceType)}已生成 {string.Join("、", conflicts)}，不能重复生成；" +
                 "如需多份请调整既有单证的「份数」，如需其他单证请另选类型");
 
+        // 先把全部单证草稿与明细行快照在内存中构造并校验完成：来源明细非法 / 超限直接拒绝，不写任何半成品数据
         var created = new List<TradeDocument>();
+        var lineResults = new List<TradeDocumentLineSnapshotResult>();
         foreach (var docType in docTypes)
         {
             var doc = buildDraft(docType);
             doc.Status = DraftStatus;
             doc.CreatedAt = DateTime.Now;
             await EnsureUniqueDocNoAsync(db, doc, ct);
-            db.TradeDocuments.Add(doc);
+
+            var lines = buildLines?.Invoke(docType) ?? new TradeDocumentLineSnapshotResult { DocType = docType };
+            if (lines.Lines.Count > TradeDocumentItemRules.MaxLinesPerDocument)
+                throw BusinessException.RuleConflict(
+                    $"「{docType}」带入的明细行超过 {TradeDocumentItemRules.MaxLinesPerDocument} 行上限："
+                    + "系统不截断写入，请拆分来源单据后分别生成单证");
+
             created.Add(doc);
+            lineResults.Add(lines);
+            db.TradeDocuments.Add(doc);
         }
-        await db.SaveChangesAsync(ct);
+
+        // 父单证与明细行快照在同一事务内写库（明细行需要父单证 Id，因此分两次 SaveChanges，但同一事务）：
+        // 任一步失败都回滚，既不会留下没有明细的半成品单证，也不会留下孤儿明细行
+        await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        try
+        {
+            await db.SaveChangesAsync(ct);
+
+            for (var index = 0; index < created.Count; index++)
+            {
+                foreach (var line in lineResults[index].Lines)
+                {
+                    line.TradeDocumentId = created[index].Id;
+                    db.TradeDocumentItems.Add(line);
+                }
+            }
+
+            await db.SaveChangesAsync(ct);
+            await transaction.CommitAsync(ct);
+        }
+        catch
+        {
+            await transaction.RollbackAsync(ct);
+            throw;
+        }
 
         return new TradeDocGenerateResult
         {
             SourceType = sourceType,
             SourceId = sourceId,
             SourceNo = sourceNo,
-            Documents = created.Select(d => new TradeDocGeneratedItem
+            LineRuleText = TradeDocumentPrintSemantics.DetailRuleText,
+            TotalLineCount = lineResults.Sum(r => r.Lines.Count),
+            Documents = created.Select((d, index) => new TradeDocGeneratedItem
             {
                 Id = d.Id,
                 DocNo = d.DocNo,
                 DocType = d.DocType,
-                Status = d.Status
+                Status = d.Status,
+                LineCount = lineResults[index].Lines.Count,
+                LineSummaryText = lineResults[index].SummaryText,
+                LineEvidenceText = lineResults[index].EvidenceText,
             }).ToList()
         };
     }
@@ -439,6 +508,24 @@ public sealed class TradeDocPrefillResult
 
     /// <summary>该来源支持的全部单证类型</summary>
     public List<string> SupportedDocTypes { get; set; } = new();
+
+    /// <summary>
+    /// 由来源明细构造的**明细行快照预览**（ERP-052，未落库）：按单证类型与行序输出，
+    /// 与「直接生成」写入的行逐字段一致（含服务端计算的行金额与留空的箱数 / 重量）。
+    /// </summary>
+    public List<TradeDocumentPrintLine> LinePreviews { get; set; } = new();
+
+    /// <summary>每个可生成单证类型将带入的明细行数（前端在勾选表里展示，0 = 来源没有明细行）</summary>
+    public Dictionary<string, int> LineCounts { get; set; } = new(StringComparer.Ordinal);
+
+    /// <summary>明细行带入摘要文案（行数与口径）</summary>
+    public string LineSummaryText { get; set; } = string.Empty;
+
+    /// <summary>明细行证据说明（哪些值来源未提供、按什么口径留空）</summary>
+    public string LineEvidenceText { get; set; } = string.Empty;
+
+    /// <summary>明细行口径文案（与打印 / 导出口径同源）</summary>
+    public string LineRuleText { get; set; } = string.Empty;
 }
 
 /// <summary>生成请求：需要生成的单证类型（为空时使用来源默认类型）</summary>
@@ -462,9 +549,15 @@ public sealed class TradeDocGenerateResult
 
     /// <summary>新建单证清单</summary>
     public List<TradeDocGeneratedItem> Documents { get; set; } = new();
+
+    /// <summary>本次生成带入的明细行快照总数（0 = 来源没有明细行 / 类型不支持明细行）</summary>
+    public int TotalLineCount { get; set; }
+
+    /// <summary>明细行口径文案（与打印 / 导出口径同源）</summary>
+    public string LineRuleText { get; set; } = string.Empty;
 }
 
-/// <summary>新建单证的简要信息（Id / 编号 / 类型 / 状态）</summary>
+/// <summary>新建单证的简要信息（Id / 编号 / 类型 / 状态 + ERP-052 明细行带入信息）</summary>
 public sealed class TradeDocGeneratedItem
 {
     /// <summary>单证 Id</summary>
@@ -478,4 +571,13 @@ public sealed class TradeDocGeneratedItem
 
     /// <summary>单证状态（新生成一律为「待制作」）</summary>
     public string Status { get; set; } = string.Empty;
+
+    /// <summary>带入的明细行快照数（0 = 来源没有明细行 / 该类型不支持明细行）</summary>
+    public int LineCount { get; set; }
+
+    /// <summary>明细行带入摘要（行数与口径）</summary>
+    public string LineSummaryText { get; set; } = string.Empty;
+
+    /// <summary>明细行证据说明（哪些值来源未提供、按什么口径留空）</summary>
+    public string LineEvidenceText { get; set; } = string.Empty;
 }
