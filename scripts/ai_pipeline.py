@@ -236,29 +236,9 @@ def git_checkpoint(message: str, paths: list[str]) -> None:
 
 
 def mark_queue_replenishing() -> None:
-    config = load_json(CONFIG_PATH)
-    state = load_json(STATE_PATH)
-    rolling = config.get("rolling_queue", {})
-    if state.get("phase") == "replenishing" and state.get("finish_reason") == "awaiting_gpt_replenishment":
-        return
-    state.update({
-        "phase": rolling.get("empty_phase", "replenishing"),
-        "current_task": None,
-        "blocker": None,
-        "finish_reason": "awaiting_gpt_replenishment",
-        "rolling_queue": {
-            "enabled": bool(rolling.get("enabled", True)),
-            "batch_size": int(rolling.get("batch_size", config.get("queue_target_size", 4))),
-            "low_watermark": int(rolling.get("low_watermark", 2)),
-            "acceptance_interval_seconds": int(rolling.get("acceptance_interval_seconds", 3600)),
-            "replenishment_owner": rolling.get("replenishment_owner", "GPT"),
-            "status": "awaiting_replenishment"
-        },
-        "updated_at": utc_now()
-    })
-    save_json(STATE_PATH, state)
-    audit("queue_replenishment_requested", batch_size=state["rolling_queue"]["batch_size"], low_watermark=state["rolling_queue"]["low_watermark"])
-    git_checkpoint("chore: request rolling queue replenishment", [str(STATE_PATH.relative_to(ROOT)), str(AUDIT_PATH.relative_to(ROOT))])
+    # AI_SUPERVISOR is the sole queue replenishment writer.
+    # Keep repository clean while waiting for the next GPT batch.
+    return
 
 
 def run_all() -> int:
