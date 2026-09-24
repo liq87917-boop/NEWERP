@@ -183,6 +183,10 @@ Object.assign(MODULES, {
          由 purchase-order-invoice-evidence.js 按页有界批量取数后渲染（每页一次 / 分批请求，绝不逐行查库），
          历史 / 无效证据只以 ⚠ 提示，绝不计入已开票金额，也不当作应付余额或结算状态 */
       { key: 'invoiceEvidence', label: '发票证据', virtual: true, render: row => purchaseOrderInvoiceEvidenceCellHtml(row) },
+      /* ERP-050：付款引用证据派生列（virtual，不落库）：ERP-049 有效（未作废）付款引用行合计 / 付款单张数 /
+         未指向本单金额；由 purchase-order-payment-evidence.js 按页有界批量取数后渲染（每页一次 / 分批请求，
+         绝不逐行查库），已作废 / 无效 / 无法确认证据只以 ⚠ 提示，绝不计入有效合计，也不当作已付款或应付余额 */
+      { key: 'paymentEvidence', label: '付款引用证据', virtual: true, render: row => purchaseOrderPaymentEvidenceCellHtml(row) },
     ],
     fields: [
       { key: 'orderDate', label: '订单日期', type: 'date' },
@@ -227,6 +231,9 @@ Object.assign(MODULES, {
       /* ERP-048：本单发票证据详情（只读派生：已登记「已开票」金额 / 未开票金额 / 发票张数 / 覆盖状态，
          并逐条列出草稿 / 已作废 / 无效（供应商 / 币种不一致）/ 无法确认的历史证据；不改写本单，也不认定应付余额或付款） */
       { label: '发票证据', icon: '🧾', title: '查看本采购订单的发票证据：已登记（未作废）发票的已开票金额、未开票金额、发票张数与覆盖状态，以及草稿 / 已作废 / 无效 / 无法确认证据的逐条明细（只读派生；不是应付余额、付款授权、税务申报或结算状态）', onclick: 'showPurchaseOrderInvoiceEvidence' },
+      /* ERP-050：本单付款引用证据详情（只读派生：ERP-049 有效引用行合计 / 付款单张数 / 未指向本单金额，
+         并逐条列出已作废 / 无效（供应商 / 币种或快照不一致）/ 无法确认的历史证据；不改写本单，也不认定已付款或应付余额） */
+      { label: '付款引用证据', icon: '💳', title: '查看本采购订单的付款引用证据：有效（未作废）付款引用行的已引用金额、付款单张数与未指向本单金额，以及已作废 / 无效 / 无法确认证据的逐条明细（只读派生；不是银行付款凭证、应付余额、发票核销或结算结果）', onclick: 'showPurchaseOrderPaymentEvidence' },
       /* ERP-049：以本采购订单预筛选付款引用登记册（只显示指向本单的引用行；引用只指向同供应商 + 同币种订单） */
       { label: '付款引用', icon: '💳', title: '打开供应商付款引用登记册，并只显示指向本采购订单的引用行（登记「付款单指向哪些采购订单」的引用证据；只写引用证据，不会执行付款、不会结算或核销）', onclick: 'openSupplierPaymentAllocationRegister' },
       /* ERP-045：登记 / 查看本采购订单的附件引用（仅元数据；不上传 / 下载 / 预览 / 抓取任何文件，作废保留历史） */

@@ -271,6 +271,40 @@ public sealed class SupplierInvoiceReconciliationOrderLine
     /// <summary>该订单的持久化关联行条数（含已作废发票的关联行）</summary>
     public int AllocationCount { get; init; }
 
+    // ============ 付款引用证据（ERP-050：只按 ERP-049 持久化引用行派生；与订单金额 / 已开票金额严格分列） ============
+
+    /// <summary>
+    /// 付款引用证据金额：该订单**有效（未作废）**付款引用行的合计（原币）；
+    /// null = 未知（命中批量派生上限或订单不参与本次聚合）。
+    /// <para>它只表示「付款单金额指向了本订单多少」的引用证据，<strong>不是</strong>银行付款金额、应付余额、
+    /// 发票核销或结算结果，也不代表已付款 / 未付款 / 逾期。</para>
+    /// </summary>
+    public decimal? PaymentReferenceAmount { get; init; }
+
+    /// <summary>付款引用证据的有效引用行条数；null = 未知</summary>
+    public int? PaymentAllocationCount { get; init; }
+
+    /// <summary>付款引用证据涉及的付款单张数（按付款单去重）；null = 未知</summary>
+    public int? PaymentCount { get; init; }
+
+    /// <summary>
+    /// 参与证据的付款单金额中**未指向本订单**的部分（可能指向其他采购订单）；
+    /// null = 未知。它不是银行未付金额、不是应付余额，也不是发票余额。
+    /// </summary>
+    public decimal? PaymentUnallocatedAmount { get; init; }
+
+    /// <summary>已作废付款引用行条数（历史证据，仅可查看，绝不并入有效合计）；null = 未知</summary>
+    public int? VoidedPaymentAllocationCount { get; init; }
+
+    /// <summary>无效付款引用行条数（供应商 / 币种或快照不一致：不换算、不合并、不改派）；null = 未知</summary>
+    public int? InvalidPaymentAllocationCount { get; init; }
+
+    /// <summary>无法确认的付款引用行条数（付款单已删除 / 不存在）；null = 未知</summary>
+    public int? UnavailablePaymentAllocationCount { get; init; }
+
+    /// <summary>付款引用证据短标签（有付款引用证据 / 仅有历史无效证据 / 无付款引用证据 / 未知）</summary>
+    public string PaymentEvidenceLabel { get; init; } = PurchaseOrderPaymentEvidenceSemantics.LabelUnknown;
+
     // ============ 收货 / 结算上下文（复用 ERP-026 权威口径；未知一律 null） ============
 
     /// <summary>收货状态：none / partial / complete / over_received / unknown（未知 = 命中批量派生上限）</summary>
@@ -467,6 +501,23 @@ public sealed class SupplierInvoiceReconciliationGroup
     /// <summary>本分组来自已作废发票的订单已关联金额合计（历史参考，绝不并入 <see cref="InvoicedAmount"/>）</summary>
     public decimal VoidedOrderAllocatedAmount { get; init; }
 
+    // ============ 付款引用证据（ERP-050：与订单金额 / 已开票金额 / 未开票余额严格分列） ============
+
+    /// <summary>本分组参与对账订单的付款引用证据金额合计（只按有效引用行派生，原币；不是银行付款金额或应付余额）</summary>
+    public decimal PaymentReferenceAmount { get; init; }
+
+    /// <summary>本分组有付款引用证据的订单张数（有效已引用金额 &gt; 0，去重）</summary>
+    public int PaymentReferenceOrderCount { get; init; }
+
+    /// <summary>本分组没有付款引用证据的订单张数（证据缺口，不代表未付款 / 已付款）</summary>
+    public int NoPaymentReferenceOrderCount { get; init; }
+
+    /// <summary>本分组付款引用证据未知的订单张数（命中批量派生上限）</summary>
+    public int UnknownPaymentReferenceOrderCount { get; init; }
+
+    /// <summary>本分组已作废 / 无效 / 无法确认的付款引用行条数合计（历史证据，绝不并入有效合计）</summary>
+    public int HistoricalPaymentAllocationCount { get; init; }
+
     /// <summary>本分组收货数量未知的订单张数（命中批量派生上限）</summary>
     public int ReceiptUnknownCount { get; init; }
 
@@ -512,6 +563,23 @@ public sealed class SupplierInvoiceReconciliationCurrencySummary
 
     /// <summary>本币种参与对账订单的未开票余额合计</summary>
     public decimal RemainingUninvoicedAmount { get; init; }
+
+    // ============ 付款引用证据（ERP-050：与订单金额 / 已开票金额 / 未开票余额严格分列） ============
+
+    /// <summary>本币种参与对账订单的付款引用证据金额合计（只按有效引用行派生；不是银行付款金额或应付余额）</summary>
+    public decimal PaymentReferenceAmount { get; init; }
+
+    /// <summary>本币种有付款引用证据的订单张数（有效已引用金额 &gt; 0，去重）</summary>
+    public int PaymentReferenceOrderCount { get; init; }
+
+    /// <summary>本币种没有付款引用证据的订单张数（证据缺口，不代表未付款 / 已付款 / 逾期）</summary>
+    public int NoPaymentReferenceOrderCount { get; init; }
+
+    /// <summary>本币种付款引用证据未知的订单张数（命中批量派生上限）</summary>
+    public int UnknownPaymentReferenceOrderCount { get; init; }
+
+    /// <summary>本币种已作废 / 无效 / 无法确认的付款引用行条数合计（历史证据，绝不并入有效合计）</summary>
+    public int HistoricalPaymentAllocationCount { get; init; }
 }
 
 /// <summary>
@@ -583,6 +651,23 @@ public sealed class SupplierInvoiceReconciliationReport
 
     /// <summary>发票关联口径（与 ERP-043 同源）</summary>
     public string LinkageRule { get; init; } = PurchaseInvoiceRules.LinkageRuleText;
+
+    // ============ 付款引用证据（ERP-050） ============
+
+    /// <summary>本页有付款引用证据的订单张数（有效已引用金额 &gt; 0，去重）</summary>
+    public int PaymentReferenceOrderCount { get; init; }
+
+    /// <summary>本页没有付款引用证据的订单张数（证据缺口，不代表未付款 / 已付款 / 已结清 / 逾期）</summary>
+    public int NoPaymentReferenceOrderCount { get; init; }
+
+    /// <summary>本页付款引用证据未知的订单张数（命中批量派生上限：金额与计数按未知显示）</summary>
+    public int UnknownPaymentReferenceOrderCount { get; init; }
+
+    /// <summary>付款引用证据口径说明（与 ERP-050 同源；界面原样展示）</summary>
+    public string PaymentEvidenceRule { get; init; } = PurchaseOrderPaymentEvidenceSemantics.RuleText;
+
+    /// <summary>付款引用证据边界说明（与 ERP-050 同源；界面原样展示）</summary>
+    public string PaymentEvidenceBoundary { get; init; } = PurchaseOrderPaymentEvidenceSemantics.BoundaryText;
 }
 
 /// <summary>
@@ -658,6 +743,15 @@ public static class SupplierInvoiceReconciliation
                 .Select(o => o.PurchaseOrderId).Distinct().Count(),
             ReceiptUnknownCount = orderLines
                 .Where(o => o.ReceiptStatus == SupplierInvoiceReconciliationSemantics.ReceiptUnknown)
+                .Select(o => o.PurchaseOrderId).Distinct().Count(),
+            PaymentReferenceOrderCount = orderLines
+                .Where(o => o.PaymentReferenceAmount is > 0m)
+                .Select(o => o.PurchaseOrderId).Distinct().Count(),
+            NoPaymentReferenceOrderCount = orderLines
+                .Where(o => o.PaymentReferenceAmount == 0m)
+                .Select(o => o.PurchaseOrderId).Distinct().Count(),
+            UnknownPaymentReferenceOrderCount = orderLines
+                .Where(o => o.PaymentReferenceAmount is null)
                 .Select(o => o.PurchaseOrderId).Distinct().Count(),
             Currencies = currencies,
             Groups = groups,
@@ -787,13 +881,17 @@ public static class SupplierInvoiceReconciliation
         var receipts = await PurchaseOrderProgress.ReceiptSummariesForOrdersAsync(db, orderList);
         var settlements = await PurchaseOrderProgress.SettlementForOrdersAsync(db, orderList);
 
+        // 6) 付款引用证据（ERP-050）：复用采购订单视图的同一套派生（固定 4 次数据集访问，无逐行查库）
+        var paymentEvidence = await PurchaseOrderPaymentEvidence.AggregatesForOrdersAsync(db, orderIds);
+
         var items = new List<SupplierInvoiceReconciliationInvoice>(invoices.Count);
         foreach (var invoice in invoices)
         {
             var rows = allocationsByInvoice.TryGetValue(invoice.Id, out var found)
                 ? found
                 : (IReadOnlyList<PurchaseInvoiceAllocation>)new List<PurchaseInvoiceAllocation>();
-            items.Add(MapInvoice(invoice, rows, orders, orderAggregates, suppliers, receipts, settlements));
+            items.Add(MapInvoice(invoice, rows, orders, orderAggregates, suppliers, receipts, settlements,
+                paymentEvidence));
         }
 
         return items;
@@ -860,7 +958,8 @@ public static class SupplierInvoiceReconciliation
         Dictionary<long, OrderInvoiceAggregate> aggregates,
         Dictionary<long, BaseSupplier> suppliers,
         Dictionary<long, PurchaseOrderReceiptSummary> receipts,
-        Dictionary<long, PurchaseOrderSettlementProgress> settlements)
+        Dictionary<long, PurchaseOrderSettlementProgress> settlements,
+        PaymentEvidenceAggregateSet paymentEvidence)
     {
         var currency = CurrencyAmountRules.NormalizeCurrency(invoice.Currency);
         var linked = rows.Sum(a => a.AllocatedAmount);
@@ -875,7 +974,7 @@ public static class SupplierInvoiceReconciliation
         var orderLines = new List<SupplierInvoiceReconciliationOrderLine>(rows.Count);
         foreach (var row in rows)
         {
-            orderLines.Add(MapOrderLine(invoice, row, orders, aggregates, receipts, settlements));
+            orderLines.Add(MapOrderLine(invoice, row, orders, aggregates, receipts, settlements, paymentEvidence));
         }
 
         return new SupplierInvoiceReconciliationInvoice
@@ -926,7 +1025,8 @@ public static class SupplierInvoiceReconciliation
         Dictionary<long, PurchaseOrder> orders,
         Dictionary<long, OrderInvoiceAggregate> aggregates,
         Dictionary<long, PurchaseOrderReceiptSummary> receipts,
-        Dictionary<long, PurchaseOrderSettlementProgress> settlements)
+        Dictionary<long, PurchaseOrderSettlementProgress> settlements,
+        PaymentEvidenceAggregateSet paymentEvidence)
     {
         orders.TryGetValue(row.PurchaseOrderId, out var order);
         var available = order is not null && !order.IsDeleted;
@@ -963,6 +1063,9 @@ public static class SupplierInvoiceReconciliation
 
         receipts.TryGetValue(row.PurchaseOrderId, out var receipt);
         settlements.TryGetValue(row.PurchaseOrderId, out var settlement);
+
+        // 付款引用证据（ERP-050）：只复用采购订单视图的同一套派生结果与标签；无聚合结果 = 未知（不按 0）
+        var hasPayment = paymentEvidence.ByOrder.TryGetValue(row.PurchaseOrderId, out var payment);
         // 订单不可用（不存在 / 已删除）时收货与结算上下文无从判定：记未知，绝不用 0 / 未收货顶替
         var receiptUnknown = !available || receipt?.Truncated == true;
         var settlementLinkStatus = settlement?.LinkStatus ?? PurchaseOrderProgress.LinkUnavailable;
@@ -999,7 +1102,16 @@ public static class SupplierInvoiceReconciliation
             SettlementLinkReason = settlementLinkReason,
             SettledAmount = settlement?.SettledAmount,
             OutstandingSettlementAmount = settlement?.OutstandingAmount,
-            Note = BuildOrderLineNote(invoice, state, receiptUnknown, aggregate),
+            PaymentReferenceAmount = hasPayment ? payment!.ActiveAmount : null,
+            PaymentAllocationCount = hasPayment ? payment!.ActiveCount : null,
+            PaymentCount = hasPayment ? payment!.ActivePaymentCount : null,
+            PaymentUnallocatedAmount = hasPayment ? payment!.UnallocatedPaymentAmount : null,
+            VoidedPaymentAllocationCount = hasPayment ? payment!.VoidedCount : null,
+            InvalidPaymentAllocationCount = hasPayment ? payment!.InvalidCount : null,
+            UnavailablePaymentAllocationCount = hasPayment ? payment!.UnavailableCount : null,
+            PaymentEvidenceLabel = PurchaseOrderPaymentEvidenceSemantics.EvidenceLabel(
+                !hasPayment, hasPayment ? payment!.ActiveAmount : null, hasPayment && payment!.HasAnyRow),
+            Note = BuildOrderLineNote(invoice, state, receiptUnknown, aggregate, hasPayment ? payment : null),
         };
     }
 
@@ -1030,15 +1142,15 @@ public static class SupplierInvoiceReconciliation
             : note;
     }
 
-    /// <summary>订单行说明：已知什么 / 缺什么 / 为什么不作为应付余额</summary>
+    /// <summary>订单行说明：已知什么 / 缺什么 / 为什么不作为应付余额（含三类证据分列说明）</summary>
     private static string BuildOrderLineNote(PurchaseInvoice invoice, string orderState,
-        bool receiptUnknown, OrderInvoiceAggregate? aggregate)
+        bool receiptUnknown, OrderInvoiceAggregate? aggregate, PaymentEvidenceAggregate? payment)
     {
         var note = orderState switch
         {
             SupplierInvoiceReconciliationSemantics.OrderStateAvailable =>
                 "订单金额取采购订单已落库总额；已开票金额只按未作废发票的持久化关联行派生，"
-                + "未开票余额 = 订单金额 − 已开票金额（下限 0）。",
+                + "未开票余额 = 订单金额 − 已开票金额（下限 0）；付款引用证据单列，不参与上述计算。",
             SupplierInvoiceReconciliationSemantics.OrderStateCancelled =>
                 "订单已取消：订单金额仅作历史参考，未开票余额与覆盖状态按未知显示（不推断、不作为应付余额）。",
             _ => "订单不存在或已删除：订单金额未知（不按 0 处理），已开票金额仍按持久化关联行如实列出，未开票余额为未知。",
@@ -1057,6 +1169,30 @@ public static class SupplierInvoiceReconciliation
         if (SupplierInvoiceReconciliationSemantics.IsVoidedEvidence(invoice.Status))
         {
             note += " 本发票已作废：本行关联金额属历史证据，不计入有效合计。";
+        }
+
+        // 付款引用证据（ERP-050）：三类证据（订单金额 / 已开票金额 / 付款引用金额）必须保持分列口径
+        if (payment is null)
+        {
+            note += " 本次页内付款引用证据命中有界聚合上限：付款引用金额与计数按未知显示"
+                + "（不代表未付款 / 已付款 / 已结清 / 逾期）。";
+        }
+        else if (payment.ActiveAmount > 0)
+        {
+            note += $" 付款引用证据 {payment.ActiveAmount} 只按有效（未作废）付款引用行派生"
+                + $"（{payment.ActiveCount} 条引用行、{payment.ActivePaymentCount} 张付款单；"
+                + $"参与证据的付款单金额中未指向本订单 {payment.UnallocatedPaymentAmount}，可能指向其他采购订单）："
+                + "它不是银行付款金额、不是应付余额或发票余额，也不代表已付款或已结算。";
+
+            if (payment.HasHistoricalRow)
+            {
+                note += $" 另有已作废 {payment.VoidedCount} 条 / 无效 {payment.InvalidCount} 条 / 无法确认 {payment.UnavailableCount} 条"
+                    + "付款引用行，只作历史核对、不计入有效合计。";
+            }
+        }
+        else
+        {
+            note += " 该订单没有有效付款引用证据（付款引用证据缺口，不代表未付款、已付款、已结清或逾期）。";
         }
 
         return note;
@@ -1092,6 +1228,13 @@ public static class SupplierInvoiceReconciliation
             .Select(g => g.First())
             .ToList();
 
+        // 付款引用证据（ERP-050）：只在参与对账的订单（可用、未取消）上汇总金额；
+        // 未知（命中批量上限）与「无证据（金额 0）」分别计数，缺失绝不按 0 计入金额，也不代表未付款。
+        var paymentKnown = reconciled.Where(o => o.PaymentReferenceAmount is not null).ToList();
+        var paymentHistorical = distinctOrders.Sum(o =>
+            (o.VoidedPaymentAllocationCount ?? 0) + (o.InvalidPaymentAllocationCount ?? 0)
+            + (o.UnavailablePaymentAllocationCount ?? 0));
+
         return new SupplierInvoiceReconciliationGroup
         {
             SupplierId = supplierId,
@@ -1118,6 +1261,11 @@ public static class SupplierInvoiceReconciliation
             NotInvoicedOrderCount = reconciled.Count(o =>
                 o.CoverageStatus == SupplierInvoiceReconciliationSemantics.CoverageNotInvoiced),
             VoidedOrderAllocatedAmount = allOrders.Sum(o => o.VoidedAllocatedAmount),
+            PaymentReferenceAmount = paymentKnown.Sum(o => o.PaymentReferenceAmount ?? 0m),
+            PaymentReferenceOrderCount = paymentKnown.Count(o => o.PaymentReferenceAmount > 0m),
+            NoPaymentReferenceOrderCount = paymentKnown.Count(o => o.PaymentReferenceAmount == 0m),
+            UnknownPaymentReferenceOrderCount = distinctOrders.Count(o => o.PaymentReferenceAmount is null),
+            HistoricalPaymentAllocationCount = paymentHistorical,
             ReceiptUnknownCount = distinctOrders.Count(o =>
                 o.ReceiptStatus == SupplierInvoiceReconciliationSemantics.ReceiptUnknown),
             Invoices = invoices,
@@ -1134,11 +1282,15 @@ public static class SupplierInvoiceReconciliation
                 var active = g.Where(i => !i.IsVoided).ToList();
                 var voided = g.Where(i => i.IsVoided).ToList();
                 // 同一订单在页内可能被多张发票关联：按订单去重后再汇总订单侧金额
-                var reconciledOrders = active.SelectMany(i => i.Orders)
+                var distinctGroupOrders = active.SelectMany(i => i.Orders)
                     .GroupBy(o => o.PurchaseOrderId)
                     .Select(rows => rows.First())
+                    .ToList();
+                var reconciledOrders = distinctGroupOrders
                     .Where(o => o.OrderState == SupplierInvoiceReconciliationSemantics.OrderStateAvailable)
                     .ToList();
+                // 付款引用证据（ERP-050）：金额只在参与对账且证据已知的订单上汇总；未知与无证据分别计数
+                var paymentKnownOrders = reconciledOrders.Where(o => o.PaymentReferenceAmount is not null).ToList();
 
                 return new SupplierInvoiceReconciliationCurrencySummary
                 {
@@ -1154,6 +1306,13 @@ public static class SupplierInvoiceReconciliation
                     OrderedAmount = reconciledOrders.Sum(o => o.OrderedAmount ?? 0m),
                     InvoicedAmount = reconciledOrders.Sum(o => o.InvoicedAmount),
                     RemainingUninvoicedAmount = reconciledOrders.Sum(o => o.RemainingUninvoicedAmount ?? 0m),
+                    PaymentReferenceAmount = paymentKnownOrders.Sum(o => o.PaymentReferenceAmount ?? 0m),
+                    PaymentReferenceOrderCount = paymentKnownOrders.Count(o => o.PaymentReferenceAmount > 0m),
+                    NoPaymentReferenceOrderCount = paymentKnownOrders.Count(o => o.PaymentReferenceAmount == 0m),
+                    UnknownPaymentReferenceOrderCount = distinctGroupOrders.Count(o => o.PaymentReferenceAmount is null),
+                    HistoricalPaymentAllocationCount = distinctGroupOrders.Sum(o =>
+                        (o.VoidedPaymentAllocationCount ?? 0) + (o.InvalidPaymentAllocationCount ?? 0)
+                        + (o.UnavailablePaymentAllocationCount ?? 0)),
                 };
             })
             .ToList();

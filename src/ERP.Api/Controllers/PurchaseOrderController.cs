@@ -108,6 +108,29 @@ public class PurchaseOrderController : DocumentControllerBase<PurchaseOrder>
             await PurchaseOrderInvoiceEvidence.ForOrdersAsync(
                 Db, new PurchaseOrderInvoiceEvidenceQuery { Ids = ids })));
 
+    /// <summary>
+    /// 付款引用证据详情（ERP-050，只读派生）：只按 ERP-049 的持久化引用行派生该订单的**有效**已引用金额、
+    /// 付款单张数、行数，以及「参与证据的付款单金额 − 本订单已引用金额」的未指向上下文，
+    /// 并把已作废 / 无效（供应商 / 币种或快照不一致）/ 无法确认（付款单已删除）证据单独分桶逐条列出。
+    /// <para>只读：不改写采购订单、付款单、发票与发票关联、库存与库存成本、收付款、供应商余额、费用或退税记录；
+    /// 本值只是付款引用证据，不是银行付款金额、应付余额、发票核销或结算结果，也不据此判定已付款 / 逾期。</para>
+    /// </summary>
+    [HttpGet("{id:long}/payment-evidence")]
+    public async Task<IActionResult> PaymentEvidence(long id)
+        => Ok(ApiResponse<PurchaseOrderPaymentEvidenceDetail>.Success(
+            await PurchaseOrderPaymentEvidence.ForOrderAsync(Db, id)));
+
+    /// <summary>
+    /// 采购订单列表用有界付款引用证据汇总（ERP-050，只读派生）：逗号分隔的订单 Id（一次最多 200 张），
+    /// 固定 4 次数据集访问（订单 + 引用行 + 付款单 + 付款单侧有效引用合计聚合）、无逐行查库；
+    /// 命中读取上限时金额与计数按「未知」返回，绝不报出部分合计，也绝不呈现为已付款 / 未付款 / 逾期。
+    /// </summary>
+    [HttpGet("payment-evidence-summaries")]
+    public async Task<IActionResult> PaymentEvidenceSummaries([FromQuery] string? ids)
+        => Ok(ApiResponse<PurchaseOrderPaymentEvidenceBatch>.Success(
+            await PurchaseOrderPaymentEvidence.ForOrdersAsync(
+                Db, new PurchaseOrderPaymentEvidenceQuery { Ids = ids })));
+
     /// <summary>创建</summary>
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] PurchaseOrder entity)

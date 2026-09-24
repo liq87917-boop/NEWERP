@@ -1,7 +1,7 @@
 {
   "id": "ERP-050",
   "title": "Expose supplier-payment evidence in purchasing reconciliation workflows",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "medium",
   "description": "Extend the existing Purchase Order and supplier invoice reconciliation workflows with read-only supplier-payment allocation evidence from ERP-049. Keep ordered, invoiced and payment-reference amounts distinct and do not calculate or claim an accounts-payable balance, settlement result, due date, aging bucket or tax position. Do not infer links, mutate source records, execute production SQL, deploy, or release.",
   "acceptance_criteria": [
@@ -51,5 +51,5 @@
     "status": "not_required",
     "reason": "Read-only presentation of repository payment-reference evidence. No real payment, production mutation, settlement, deployment or release is authorized."
   },
-  "attempts": 0
+  "attempts": 1
 }

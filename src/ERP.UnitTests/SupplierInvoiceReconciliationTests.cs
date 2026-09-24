@@ -460,8 +460,9 @@ public class SupplierInvoiceReconciliationTests
         Assert.Equal(1, single.Total);
         Assert.Equal(1, single.PageInvoiceCount);
         // 常数级访问：发票筛选（含分页）+ 本页发票 + 本页关联行 + 本页订单 + 订单关联行 + 关联发票状态 +
-        // 供应商名 + 收货 2 次 + 结算 3 次
-        Assert.Equal(12, singleReads);
+        // 供应商名 + 收货 2 次 + 结算 3 次 + 付款引用证据 2 次
+        //（ERP-050：订单 + 持久化引用行；本用例没有付款引用行 → 付款单与付款单侧聚合不再访问）
+        Assert.Equal(14, singleReads);
 
         // 再补 300 张发票（跨多页，且都关联同一张订单）：同一报表的数据集访问次数必须保持不变（无 N+1）
         for (var i = 2; i <= 301; i++)

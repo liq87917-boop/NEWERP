@@ -162,7 +162,9 @@ async function loadSupplierInvoiceReconciliation(page) {
     const rule = document.getElementById('sir-rule');
     if (rule) {
       rule.textContent = '口径：' + (data.rule || '') + ' ' + (data.scopeNote || '') + ' ' +
-        (data.ledgerBoundary || '');
+        (data.ledgerBoundary || '') + ' ' +
+        /* ERP-050：付款引用证据是第三类独立证据（订单金额 / 已开票金额 / 付款引用金额分列），不是已付款金额 */
+        '付款引用证据口径：' + (data.paymentEvidenceRule || '') + ' ' + (data.paymentEvidenceBoundary || '');
     }
   } catch (e) {
     el.innerHTML = `<div class="empty"><div style="font-size:48px">⚠️</div><div>报表加载失败：${escapeHtml(e.message)}</div></div>`;
@@ -217,6 +219,11 @@ function sirRenderKpi(data) {
       <div class="kpi-label">本页币种数（不跨币种汇总）</div>
       <div class="kpi-value">${(data.currencies || []).length}<span class="unit">种</span></div>
       <div class="kpi-delta flat">涉及订单 ${data.orderCount} 张 · 金额未知 ${data.unknownOrderCount} 张 · 收货未知 ${data.receiptUnknownCount} 张 · 已作废 ${data.voidedInvoiceCount} 张</div>
+    </div>
+    <div class="kpi-card cargo">
+      <div class="kpi-label">本页付款引用证据（ERP-050：独立于发票证据）</div>
+      <div class="kpi-value">${data.paymentReferenceOrderCount}<span class="unit">张订单</span></div>
+      <div class="kpi-delta flat">无付款引用证据 ${data.noPaymentReferenceOrderCount} 张 · 未知 ${data.unknownPaymentReferenceOrderCount} 张（不代表未付款 / 已付款 / 逾期）</div>
     </div>`;
 }
 
@@ -236,6 +243,8 @@ function sirRenderCurrencyTable(data) {
       <td class="text-right">${fmtMoney(c.orderedAmount)}</td>
       <td class="text-right">${fmtMoney(c.invoicedAmount)}</td>
       <td class="text-right">${fmtMoney(c.remainingUninvoicedAmount)}</td>
+      <td class="text-right">${fmtMoney(c.paymentReferenceAmount)}</td>
+      <td class="text-right">${c.paymentReferenceOrderCount} / ${c.noPaymentReferenceOrderCount} / ${c.unknownPaymentReferenceOrderCount}</td>
     </tr>`).join('');
   el.innerHTML = `<table><thead><tr>
       <th>币种</th><th class="text-right">供应商数</th><th class="text-right">有效发票</th>
@@ -243,8 +252,9 @@ function sirRenderCurrencyTable(data) {
       <th class="text-right">已作废（张 / 金额，仅历史）</th>
       <th class="text-right">订单数</th><th class="text-right">订单金额</th>
       <th class="text-right">已开票金额</th><th class="text-right">未开票余额</th>
+      <th class="text-right">付款引用金额（ERP-050）</th><th class="text-right">有 / 无 / 未知（订单）</th>
     </tr></thead>
-    <tbody>${rows || '<tr><td colspan="11" class="empty">本页没有发票：没有可汇总的币种</td></tr>'}</tbody></table>`;
+    <tbody>${rows || '<tr><td colspan="13" class="empty">本页没有发票：没有可汇总的币种</td></tr>'}</tbody></table>`;
 }
 
 /* 「供应商 + 币种」分组：只有同分组才汇总金额；已作废金额单独成列 */
@@ -266,6 +276,9 @@ function sirRenderGroupTable(data) {
       <td>${g.fullyInvoicedOrderCount} / ${g.partiallyInvoicedOrderCount} / ${g.notInvoicedOrderCount}</td>
       <td class="text-right">${g.unknownOrderCount} / ${g.cancelledOrderCount}</td>
       <td class="text-right">${fmtMoney(g.voidedOrderAllocatedAmount)}</td>
+      <td class="text-right">${fmtMoney(g.paymentReferenceAmount)}</td>
+      <td class="text-right">${g.paymentReferenceOrderCount} / ${g.noPaymentReferenceOrderCount} / ${g.unknownPaymentReferenceOrderCount}</td>
+      <td class="text-right">${g.historicalPaymentAllocationCount}</td>
     </tr>`).join('');
   el.innerHTML = `<table><thead><tr>
       <th>供应商</th><th>币种</th><th class="text-right">有效发票</th>
@@ -275,8 +288,11 @@ function sirRenderGroupTable(data) {
       <th class="text-right">已开票金额</th><th class="text-right">未开票余额</th>
       <th>全额 / 部分 / 未开票（订单）</th><th class="text-right">金额未知 / 已取消（订单）</th>
       <th class="text-right">作废发票关联金额（仅历史）</th>
+      <th class="text-right">付款引用金额（ERP-050，独立证据）</th>
+      <th class="text-right">有 / 无 / 未知（订单）</th>
+      <th class="text-right">付款引用历史行数（不计入）</th>
     </tr></thead>
-    <tbody>${rows || '<tr><td colspan="14" class="empty">没有符合筛选条件的「供应商 + 币种」分组</td></tr>'}</tbody></table>`;
+    <tbody>${rows || '<tr><td colspan="17" class="empty">没有符合筛选条件的「供应商 + 币种」分组</td></tr>'}</tbody></table>`;
 }
 
 /* 本页发票明细（含每张发票的关联订单行；未知一律显示「未知」） */
@@ -297,6 +313,7 @@ function sirRenderInvoiceTable(data) {
       <td>${sirLinkageHtml(i.linkageStatus)}</td>
       <td class="text-right">${fmtMoney(i.linkedAmount)}</td>
       <td class="text-right">${fmtMoney(i.unlinkedAmount)}</td>
+      <td class="text-muted">—（付款引用证据按关联订单单独列出）</td>
       <td>${escapeHtml(i.statusText || '')}</td>
       <td>${escapeHtml(i.evidenceText || '')}</td>
       <td>${escapeHtml(i.note || '')}</td>
@@ -310,6 +327,7 @@ function sirRenderInvoiceTable(data) {
       <td class="text-right">已开票 ${fmtMoney(o.invoicedAmount)}</td>
       <td class="text-right">订单金额 ${sirMoney(o.orderedAmount)}</td>
       <td class="text-right">未开票余额 ${sirMoney(o.remainingUninvoicedAmount)}</td>
+      <td class="text-right">付款引用 ${o.paymentReferenceAmount === null || o.paymentReferenceAmount === undefined ? '未知' : fmtMoney(o.paymentReferenceAmount)}（${o.paymentAllocationCount === null || o.paymentAllocationCount === undefined ? '?' : o.paymentAllocationCount} 条 / ${o.paymentCount === null || o.paymentCount === undefined ? '?' : o.paymentCount} 张付款单）</td>
       <td class="text-right">作废关联 ${fmtMoney(o.voidedAllocatedAmount)}</td>
       <td>收货 ${sirQty(o.receivedQuantity)} / ${sirQty(o.orderedQuantity)} · ${sirReceiptHtml(o.receiptStatus)}</td>
       <td class="text-right">已结算 ${sirMoney(o.settledAmount)} / 未结算 ${sirMoney(o.outstandingSettlementAmount)}</td>
@@ -323,11 +341,13 @@ function sirRenderInvoiceTable(data) {
       <th>发票（类型 / 代码 / 号码）</th><th>开票日期</th><th>供应商</th><th>币种</th>
       <th class="text-right">不含税</th><th class="text-right">税额</th><th class="text-right">含税总额</th>
       <th>关联状态</th><th class="text-right">已关联金额</th><th class="text-right">未关联金额（不猜测订单）</th>
+      <th class="text-right">付款引用证据（ERP-050，独立于发票证据）</th>
       <th>状态</th><th>证据口径</th><th>说明</th>
     </tr></thead>
-    <tbody>${rows || '<tr><td colspan="13" class="empty">没有符合筛选条件的发票（可放宽供应商 / 币种 / 日期 / 关联状态 / 证据状态筛选）</td></tr>'}</tbody></table>`;
+    <tbody>${rows || '<tr><td colspan="14" class="empty">没有符合筛选条件的发票（可放宽供应商 / 币种 / 日期 / 关联状态 / 证据状态筛选）</td></tr>'}</tbody></table>`;
 }
 
+/* 分页：上一页 / 下一页（口径与本页合计一致） */
 function sirRenderPagination(data) {
   const el = document.getElementById('sir-pagination');
   if (!el) return;
