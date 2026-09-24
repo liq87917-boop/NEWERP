@@ -14,7 +14,7 @@
     "profile": "safe",
     "status": "passed"
   },
-  "cline_exit_code": 0,
+  "cline_exit_code": 1,
   "conversation_control": {
     "mode": "gpt_file_backed_rolling",
     "paused": false,
@@ -39,7 +39,7 @@
     "irreversible_data_operations": "required"
   },
   "finish_reason": "task_quarantined",
-  "updated_at": "2026-09-24T14:27:11.920425Z",
+  "updated_at": "2026-09-24T14:27:14.224843Z",
   "rolling_queue": {
     "enabled": true,
     "batch_size": 4,
