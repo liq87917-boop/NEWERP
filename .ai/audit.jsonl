@@ -90,3 +90,4 @@
 {"at": "2026-09-24T11:39:34.228644Z", "event": "remote_sync_degraded", "task": "ERP-020", "reason": "pull_failed"}
 {"at": "2026-09-24T11:40:47.155153Z", "event": "push_recovery_completed", "task": "ERP-020", "recovered_by": "control_fix"}
 {"at": "2026-09-24T11:43:07.936492Z", "event": "task_quarantined", "task": "ERP-021", "reason": "Cline exited with code 1; raw reason=error", "cline_finish_reason_raw": "error", "stash": "Saved working directory and index state On main: autonomy quarantine ERP-021"}
+{"at": "2026-09-24T11:43:27.708074Z", "event": "task_quarantined", "task": "ERP-021", "reason": "Cline exited with code 1; raw reason=error", "cline_finish_reason_raw": "error", "stash": "Saved working directory and index state On main: autonomy quarantine ERP-021"}
