@@ -37,6 +37,11 @@ public interface IErpDbContext
     /// <summary>商品规格变体（颜色 / 尺码 SKU 子表，ERP-037；商品身份不变，规格只是可选细分）</summary>
     DbSet<BaseProductVariant> BaseProductVariants { get; }
 
+    /// <summary>
+    /// 商品 / SKU 货源关系（ERP-038；多供应商货源指引，不自动选供应商、不定价、不改写采购单据与库存）
+    /// </summary>
+    DbSet<BaseProductSupplier> BaseProductSuppliers { get; }
+
     DbSet<BaseOtherInfo> BaseOtherInfos { get; }
 
     /// <summary>出口退税台账（阶段 1 新增）</summary>

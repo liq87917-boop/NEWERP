@@ -163,6 +163,22 @@ public class BaseProduct : BaseEntity
     [NotMapped]
     public int VariantTotalCount { get; set; }
 
+    // ============ ERP-038：多供应商货源关系（可选子表 BaseProductSuppliers） ============
+
+    /// <summary>
+    /// 该商品（含其规格）**启用中**的货源关系条数（**非持久化列**，列表 / 详情读取时由服务端标注）；
+    /// 没有任何货源关系的历史商品为 0，行为与历史完全一致（不自动选供应商、不影响任何单据）。
+    /// </summary>
+    [NotMapped]
+    public int SourcingCount { get; set; }
+
+    /// <summary>
+    /// 该商品（含其规格）的货源关系总条数（含停用，**非持久化列**，读取时由服务端标注）：
+    /// 与 <see cref="SourcingCount"/> 的差值即「已停用货源关系数」，界面据此提示历史货源仍可读。
+    /// </summary>
+    [NotMapped]
+    public int SourcingTotalCount { get; set; }
+
 }
 
 /// <summary>

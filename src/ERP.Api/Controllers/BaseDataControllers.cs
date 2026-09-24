@@ -83,14 +83,42 @@ public class CustomerController : BaseCrudController<BaseCustomer>
 }
 
 /// <summary>
-/// 供应商资料控制器
+/// 供应商资料控制器（ERP-038：补充「供货商品货源关系」计数标注与供应商侧有界货源列表路由）
 /// </summary>
+/// <remarks>
+/// 只读取货源关系子表 <c>BaseProductSuppliers</c> 做计数与列表展示：
+/// 不自动选择供应商、不改写采购报价 / 采购订单 / 库存与任何历史单据。
+/// 供应商侧货源列表见 <see cref="SupplierSourcingController"/>（<c>/api/base/suppliers/{id}/sourcing</c>）。
+/// </remarks>
 [ApiController]
 [Route("api/base/suppliers")]
 [Authorize]
 public class SupplierController : BaseCrudController<BaseSupplier>
 {
-    public SupplierController(IGenericService<BaseSupplier> service) : base(service) { }
+    private readonly IErpDbContext _db;
+
+    public SupplierController(IGenericService<BaseSupplier> service, IErpDbContext db) : base(service)
+    {
+        _db = db;
+    }
+
+    /// <summary>分页查询（补充货源关系计数标注，不写库）</summary>
+    [HttpGet]
+    public override async Task<IActionResult> GetPaged([FromQuery] PageQuery query)
+    {
+        var result = await Service.GetPagedAsync(query);
+        await ProductSupplierService.AnnotateSuppliersAsync(_db, result.Items);
+        return Ok(ApiResponse<PagedResult<BaseSupplier>>.Success(result));
+    }
+
+    /// <summary>根据主键获取（补充货源关系计数标注，不写库）</summary>
+    [HttpGet("{id:long}")]
+    public override async Task<IActionResult> GetById(long id)
+    {
+        var result = await Service.GetByIdAsync(id);
+        await ProductSupplierService.AnnotateSuppliersAsync(_db, new[] { result });
+        return Ok(ApiResponse<BaseSupplier>.Success(result));
+    }
 }
 
 /// <summary>
@@ -158,24 +186,27 @@ public class ProductController : BaseCrudController<BaseProduct>
     }
 
     /// <summary>
-    /// 分页查询（补充规格计数标注，不写库）。
-    /// 商品身份与字段完全不变；<c>variantCount</c> / <c>variantTotalCount</c> 只是读取标注，
-    /// 没有维护规格的历史商品两项均为 0（仍按单规格商品使用）。
+    /// 分页查询（补充规格计数与货源关系计数标注，不写库）。
+    /// 商品身份与字段完全不变；<c>variantCount</c> / <c>variantTotalCount</c> 与
+    /// <c>sourcingCount</c> / <c>sourcingTotalCount</c> 都只是读取标注，
+    /// 没有维护规格与货源关系的历史商品四项均为 0（行为与历史完全一致）。
     /// </summary>
     [HttpGet]
     public override async Task<IActionResult> GetPaged([FromQuery] PageQuery query)
     {
         var result = await Service.GetPagedAsync(query);
         await ProductVariantService.AnnotateAsync(_db, result.Items);
+        await ProductSupplierService.AnnotateProductsAsync(_db, result.Items);
         return Ok(ApiResponse<PagedResult<BaseProduct>>.Success(result));
     }
 
-    /// <summary>根据主键获取（补充规格计数标注，不写库）</summary>
+    /// <summary>根据主键获取（补充规格计数与货源关系计数标注，不写库）</summary>
     [HttpGet("{id:long}")]
     public override async Task<IActionResult> GetById(long id)
     {
         var result = await Service.GetByIdAsync(id);
         await ProductVariantService.AnnotateAsync(_db, new[] { result });
+        await ProductSupplierService.AnnotateProductsAsync(_db, new[] { result });
         return Ok(ApiResponse<BaseProduct>.Success(result));
     }
 

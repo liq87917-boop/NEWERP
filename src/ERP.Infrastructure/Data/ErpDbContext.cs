@@ -39,6 +39,8 @@ public partial class ErpDbContext : DbContext, IErpDbContext
     public DbSet<BaseWarehouse> BaseWarehouses => Set<BaseWarehouse>();
     public DbSet<BaseProduct> BaseProducts => Set<BaseProduct>();
     public DbSet<BaseProductVariant> BaseProductVariants => Set<BaseProductVariant>();
+    /// <summary>商品 / SKU 货源关系（ERP-038：多供应商货源指引子表）</summary>
+    public DbSet<BaseProductSupplier> BaseProductSuppliers => Set<BaseProductSupplier>();
     public DbSet<BaseOtherInfo> BaseOtherInfos => Set<BaseOtherInfo>();
 
     /// <summary>出口退税台账（阶段 1 新增）</summary>

@@ -1,7 +1,7 @@
 {
   "id": "ERP-038",
   "title": "Add multi-supplier sourcing relationships for Products and SKUs",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "medium",
   "description": "Add explicit master-data relationships that associate an existing Product, or one of its active SKU variants, with multiple existing Suppliers. The relationship is sourcing guidance only. It must not automatically select a supplier, approve a price, create a Purchase Quote or Purchase Order, rewrite historical purchasing records, execute production SQL, or deploy.",
   "acceptance_criteria": [
@@ -49,5 +49,5 @@
     "status": "not_required",
     "reason": "Repository master-data relationship code and non-production test schema only; no automatic purchasing, production database action, deployment or release is authorized."
   },
-  "attempts": 0
+  "attempts": 1
 }

@@ -68,6 +68,39 @@ public partial class ErpDbContext
             .IsUnique().HasDatabaseName("UX_BaseProductVariants_ProductColorSize")
             .HasFilter("IsDeleted = 0 AND Status = 1");
 
+        // ============ ERP-038：商品 / SKU 货源关系（多供应商货源指引子表） ============
+        // 设计口径：
+        //   1. 关系只描述「这个商品 / 规格可以从哪些供应商采购、货号 / 采购单位 / MOQ / 交期是多少、哪家首选」，
+        //      属于人工比价与下单前的**指引**：不自动选供应商、不定价、不生成或改写采购报价
+        //      （PurchaseQuotes）、采购订单（PurchaseOrders / PurchaseOrderDetails）、库存成本
+        //      （Stocks.AverageCost / TotalCost）与库存流水（StockMovements），也不改任何历史单据；
+        //   2. 刻意不建外键：商品 / 规格 / 供应商允许软删除或停用，历史货源关系必须继续可读；
+        //   3. ScopeKey 是服务端按规格推导的作用域键（P = 商品级；V{规格Id} = 规格级）：
+        //      SQL Server 唯一索引对 NULL 不去重，用该列才能把「同一范围 + 同一供应商不重复」
+        //      与「同一范围只有一个启用首选」落到数据库层；
+        //   4. 两个过滤唯一索引与 SchemaUpgrader 第 27 段创建的同名索引保持一致：
+        //      - ScopeSupplier：同一「商品 + 作用域 + 供应商」不重复（软删除行不占用，停用的历史行仍占用，
+        //        因此恢复供货应启用原关系而不是另建一条）；
+        //      - ScopePreferred：同一「商品 + 作用域」最多一条启用中的首选（停用 / 已删除行不占用首选位）。
+        //   5. 供应商侧列表按 SupplierId 检索：单独建一个过滤索引，避免全表扫描。
+        modelBuilder.Entity<BaseProductSupplier>().Property(x => x.ScopeKey).HasMaxLength(30);
+        modelBuilder.Entity<BaseProductSupplier>().Property(x => x.SupplierItemCode).HasMaxLength(100);
+        modelBuilder.Entity<BaseProductSupplier>().Property(x => x.PurchaseUnit).HasMaxLength(20);
+        modelBuilder.Entity<BaseProductSupplier>().Property(x => x.Remark).HasMaxLength(500);
+        modelBuilder.Entity<BaseProductSupplier>().Property(x => x.MinOrderQty).HasPrecision(18, 4);
+
+        modelBuilder.Entity<BaseProductSupplier>().HasIndex(x => new { x.ProductId, x.ScopeKey, x.SupplierId })
+            .IsUnique().HasDatabaseName("UX_BaseProductSuppliers_ScopeSupplier")
+            .HasFilter("IsDeleted = 0");
+
+        modelBuilder.Entity<BaseProductSupplier>().HasIndex(x => new { x.ProductId, x.ScopeKey })
+            .IsUnique().HasDatabaseName("UX_BaseProductSuppliers_ScopePreferred")
+            .HasFilter("IsDeleted = 0 AND Status = 1 AND IsPreferred = 1");
+
+        modelBuilder.Entity<BaseProductSupplier>().HasIndex(x => x.SupplierId)
+            .HasDatabaseName("IX_BaseProductSuppliers_SupplierId")
+            .HasFilter("IsDeleted = 0");
+
         // ============ 单据号唯一索引 ============
         modelBuilder.Entity<Inquiry>().HasIndex(x => x.InquiryNo).IsUnique();
         modelBuilder.Entity<SalesOrder>().HasIndex(x => x.OrderNo).IsUnique();

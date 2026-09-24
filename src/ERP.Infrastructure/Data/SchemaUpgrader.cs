@@ -1334,5 +1334,60 @@ IF NOT EXISTS (SELECT 1 FROM sys.indexes
         ON db_owner.BaseProductVariants(ProductId, ColorSizeKey)
         WHERE IsDeleted = 0 AND Status = 1;");
 
+        // 27. 商品 / SKU 货源关系（ERP-038：多供应商货源指引子表）
+        //     27.1 建表为幂等补齐：历史商品 / 供应商没有任何货源关系行 = 行为完全不变，
+        //          因此**不做任何回填**（不自动选供应商、不生成采购报价或采购订单、不改写库存与历史单据）；
+        //     27.2 ScopeKey 为服务端按规格推导的作用域键（P = 商品级；V{规格Id} = 规格级）：
+        //          SQL Server 唯一索引对 NULL 不去重，用该列把「同一范围 + 同一供应商不重复」
+        //          与「同一范围只有一个启用首选」落到数据库层；
+        //     27.3 两个过滤唯一索引与 ErpDbContext 模型同名同过滤条件；
+        //     27.4 表内不建外键、不被任何单据引用：货源关系是主数据指引，不参与定价、库存数量与成本口径。
+        await db.Database.ExecuteSqlRawAsync(@"
+IF OBJECT_ID('db_owner.BaseProductSuppliers') IS NULL
+BEGIN
+    CREATE TABLE db_owner.BaseProductSuppliers (
+        Id BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+        ProductId BIGINT NOT NULL,
+        VariantId BIGINT NULL,
+        ScopeKey NVARCHAR(30) NOT NULL DEFAULT N'',
+        SupplierId BIGINT NOT NULL,
+        SupplierItemCode NVARCHAR(100) NOT NULL DEFAULT N'',
+        PurchaseUnit NVARCHAR(20) NOT NULL DEFAULT N'',
+        MinOrderQty DECIMAL(18,4) NOT NULL DEFAULT 0,
+        LeadTimeDays INT NOT NULL DEFAULT 0,
+        IsPreferred BIT NOT NULL DEFAULT 0,
+        Status INT NOT NULL DEFAULT 1,
+        SortOrder INT NOT NULL DEFAULT 0,
+        Remark NVARCHAR(500) NOT NULL DEFAULT N'',
+        CreatedAt DATETIME2 NOT NULL DEFAULT GETDATE(),
+        CreatedBy BIGINT NULL,
+        UpdatedAt DATETIME2 NULL,
+        UpdatedBy BIGINT NULL,
+        IsDeleted BIT NOT NULL DEFAULT 0,
+        RowVersion ROWVERSION NOT NULL
+    );
+END
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes
+               WHERE name = 'UX_BaseProductSuppliers_ScopeSupplier'
+                 AND object_id = OBJECT_ID('db_owner.BaseProductSuppliers'))
+    CREATE UNIQUE INDEX UX_BaseProductSuppliers_ScopeSupplier
+        ON db_owner.BaseProductSuppliers(ProductId, ScopeKey, SupplierId)
+        WHERE IsDeleted = 0;
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes
+               WHERE name = 'UX_BaseProductSuppliers_ScopePreferred'
+                 AND object_id = OBJECT_ID('db_owner.BaseProductSuppliers'))
+    CREATE UNIQUE INDEX UX_BaseProductSuppliers_ScopePreferred
+        ON db_owner.BaseProductSuppliers(ProductId, ScopeKey)
+        WHERE IsDeleted = 0 AND Status = 1 AND IsPreferred = 1;
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes
+               WHERE name = 'IX_BaseProductSuppliers_SupplierId'
+                 AND object_id = OBJECT_ID('db_owner.BaseProductSuppliers'))
+    CREATE INDEX IX_BaseProductSuppliers_SupplierId
+        ON db_owner.BaseProductSuppliers(SupplierId)
+        WHERE IsDeleted = 0;");
+
     }
 }

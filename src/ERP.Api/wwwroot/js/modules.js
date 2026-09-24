@@ -91,6 +91,8 @@ const MODULES = {
       { key: 'supplierType', label: '类型' }, { key: 'boothLocation', label: '档口位置' },
       { key: 'contactPerson', label: '联系人' }, { key: 'phone', label: '电话' },
       { key: 'settlementMethod', label: '结算方式' },
+      /* ERP-038：供货商品数（启用 / 总数）。0 = 未维护货源指引，采购流程不受影响 */
+      { key: 'sourcingCount', label: '供货商品', render: row => supplierSourcingCellHtml(row) },
     ],
     fields: [
       { key: 'supplierCode', label: '供应商编码', required: true },
@@ -114,6 +116,11 @@ const MODULES = {
       { key: 'taxRate', label: '开票税率(%)', type: 'number' },
       { key: 'bankName', label: '开户银行' }, { key: 'bankAccount', label: '银行账号' },
       { key: 'paymentTerms', label: '付款条件（备注性说明）' },
+    ],
+    /* ERP-038：供应商侧只读的「供货商品」货源关系视图（有界列表）。
+       货源关系只是比价与下单前的指引：本入口不改动采购报价 / 采购订单 / 库存与任何历史单据。 */
+    rowActions: [
+      { label: '供货商品', icon: '🏭', title: '查看该供应商为哪些商品 / 规格供货（只读，含停用关系的历史记录；不触达采购与库存）', onclick: 'openSupplierSourcing' },
     ],
   },
   employee: {
@@ -167,6 +174,8 @@ const MODULES = {
       { key: 'minStock', label: '安全库存' },
       /* ERP-037：规格数（启用 / 总数）。0 = 单规格商品，历史行为不变 */
       { key: 'variantCount', label: '规格数', render: row => productVariantCellHtml(row) },
+      /* ERP-038：货源数（启用 / 总数）。0 = 未维护货源指引，采购流程不受影响 */
+      { key: 'sourcingCount', label: '货源数', render: row => productSourcingCellHtml(row) },
     ],
     fields: [
       { key: 'productCode', label: '商品编码', required: true },
@@ -202,8 +211,11 @@ const MODULES = {
     ],
     /* ERP-037：颜色 / 尺码 SKU 规格维护（主数据子表，可选）。
        只维护规格自身：不改写历史询价 / 报价 / 订单 / 库存与库存流水，也不拆分已有库存。 */
+    /* ERP-038：供应商货源关系维护（主数据关系，可选）。
+       只维护货源指引：不自动选供应商、不定价，不改写采购报价 / 采购订单 / 库存与任何历史单据。 */
     rowActions: [
       { label: '颜色/尺码规格', icon: '🎨', title: '维护该商品的颜色 / 尺码 SKU 规格（可选；没有规格即单规格商品，不触达历史单据与库存）', onclick: 'openProductVariants' },
+      { label: '供应商货源', icon: '🏭', title: '维护该商品（或其规格）的多供应商货源关系（仅供参考：不自动选供应商、不定价、不改写采购订单与库存）', onclick: 'openProductSuppliers' },
     ],
   },
   'other-info': {

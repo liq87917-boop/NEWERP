@@ -1,5 +1,6 @@
 using ERP.Domain.Common;
 using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
 
 namespace ERP.Domain.Entities;
 
@@ -93,4 +94,20 @@ public class BaseSupplier : BaseEntity
     /// <summary>备注</summary>
     [MaxLength(500)]
     public string Remark { get; set; } = string.Empty;
+
+    // ============ ERP-038：供货商品货源关系（可选子表 BaseProductSuppliers 的读取标注） ============
+
+    /// <summary>
+    /// 该供应商**启用中**的货源关系条数（**非持久化列**，列表 / 详情读取时由服务端标注）；
+    /// 没有维护任何货源关系的历史供应商为 0，行为与历史完全一致。
+    /// </summary>
+    [NotMapped]
+    public int SourcingCount { get; set; }
+
+    /// <summary>
+    /// 该供应商的货源关系总条数（含停用，**非持久化列**，读取时由服务端标注）：
+    /// 与 <see cref="SourcingCount"/> 的差值即「已停用货源关系数」，历史关系仍可读。
+    /// </summary>
+    [NotMapped]
+    public int SourcingTotalCount { get; set; }
 }
