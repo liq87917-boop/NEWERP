@@ -125,3 +125,12 @@
 {"at": "2026-09-24T14:18:03.948394Z", "event": "task_completed", "task": "ERP-029", "status": "completed", "execution_outcome": "completed", "normalized_finish_reason": "browser_deferred", "cline_exit_code": 0, "cline_finish_reason_raw": "path_guard_recovered_existing_work", "attempts": 1, "browser_acceptance": {"status": "deferred", "reason": "Real-browser/UI acceptance is deferred until FINAL-UI-ACCEPTANCE.", "deferred_at": "2026-09-24T14:18:03.817352Z"}, "finished_at": "2026-09-24T14:18:03.944801Z"}
 {"at": "2026-09-24T14:27:11.921401Z", "event": "task_quarantined", "task": "ERP-029", "reason": "Engineering validation failed with code 1.", "cline_finish_reason_raw": "completed", "stash": "Saved working directory and index state On main: autonomy quarantine ERP-029"}
 {"at": "2026-09-24T14:27:14.225827Z", "event": "task_quarantined", "task": "ERP-029", "reason": "Cline exited with code 1; raw reason=completed", "cline_finish_reason_raw": "completed", "stash": "Saved working directory and index state On main: autonomy quarantine ERP-029"}
+{"at": "2026-09-24T14:27:14.797849Z", "event": "task_started", "task": "ERP-030"}
+{"at": "2026-09-24T14:27:20.315647Z", "event": "interrupted_task_recovery_started", "task": "ERP-030", "phase": "developing", "changed_paths": [".ai/PROJECT_STATE.json", ".ai/audit.jsonl", ".ai/tasks/ERP-030.json"]}
+{"at": "2026-09-24T14:27:20.595741Z", "event": "interrupted_task_recovered", "task": "ERP-030", "changed_paths": [".ai/PROJECT_STATE.json", ".ai/audit.jsonl", ".ai/tasks/ERP-030.json"]}
+{"at": "2026-09-24T14:27:20.596838Z", "event": "path_guard_recovery_validation_started", "task": "ERP-030", "attempt": 1}
+{"at": "2026-09-24T14:27:39.019038Z", "event": "browser_acceptance_deferred", "task": "ERP-030"}
+{"at": "2026-09-24T14:34:44.358558Z", "event": "cline_failed", "task": "ERP-030", "attempt": 2}
+{"at": "2026-09-24T14:34:44.358930Z", "event": "cline_failed", "task": "ERP-030", "attempt": 1}
+{"at": "2026-09-24T14:37:25.297981Z", "event": "browser_acceptance_deferred", "task": "ERP-030"}
+{"at": "2026-09-24T14:37:25.415106Z", "event": "task_completed", "task": "ERP-030", "status": "completed", "execution_outcome": "completed", "normalized_finish_reason": "browser_deferred", "cline_exit_code": 0, "cline_finish_reason_raw": "completed", "attempts": 2, "browser_acceptance": {"status": "deferred", "reason": "Real-browser/UI acceptance is deferred until FINAL-UI-ACCEPTANCE.", "deferred_at": "2026-09-24T14:37:25.297076Z"}, "finished_at": "2026-09-24T14:37:25.413546Z"}

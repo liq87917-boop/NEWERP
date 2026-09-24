@@ -357,9 +357,13 @@ const MODULES = {
     extraActions: [
       { label: '📤 导出 Excel', onclick: 'openTradeDocExportDialog()', title: '按单证类型 / 状态 / 出具日期 / 关键字导出单证台账为 Excel' },
     ],
-    /* ERP-019：行操作支持单条单证导出，便于把某一票单证单独发给客户或报关行 */
+    /* ERP-019：行操作支持单条单证导出，便于把某一票单证单独发给客户或报关行
+       ERP-030：单条单证接入共享打印（打印预览 / 直接打印），打印模板与打印设计沿用
+       「样式设计」中登记的唯一一份 doc-center 类型模板（见 trade-doc-print.js） */
     rowActions: [
       { label: '导出该单证', icon: '📤', title: '仅导出本行单证为 Excel（便于单独归档或发送）', onclick: 'exportTradeDocument' },
+      { label: '打印预览该单证', icon: '🖨', title: '按单证打印模板预览本单证打印效果（空白字段表示台账未登记该值，系统不做推测）', onclick: 'previewTradeDocPrint' },
+      { label: '直接打印该单证', icon: '🖨', title: '不弹预览，按打印模板直接输出本单证并调起浏览器打印', onclick: 'printTradeDocDirect' },
     ],
     columns: [
       { key: 'docNo', label: '单证编号' }, { key: 'docType', label: '单证类型' },

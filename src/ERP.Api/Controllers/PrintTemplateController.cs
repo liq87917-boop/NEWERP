@@ -25,6 +25,9 @@ public class PrintTemplateController : ControllerBase
         ["product"] = "商品资料", ["other-info"] = "其他资料",
         // 阶段 3：EF 主子表单据（报价单 / 形式发票 PI）同样支持打印设计与打印预览
         ["quotation"] = "报价单", ["proforma-invoice"] = "形式发票 PI",
+        // ERP-030：单证中心（doc-center）接入共享打印（打印预览 / 直接打印 / 打印设计）；
+        // 该模块只在 MODULES 中登记一次（**不加入 BILL_CONFIG**），打印设计清单里不会与业务单据重复出现
+        ["doc-center"] = "单证中心",
     };
 
     public PrintTemplateController(IErpDbContext db)

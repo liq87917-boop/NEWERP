@@ -1,7 +1,7 @@
 {
   "id": "ERP-030",
   "title": "Add shared print workflow for Trade Document Center",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "low",
   "description": "Connect Trade Document Center records to the repository's existing shared print preview, direct-print and print-design workflow. Reuse existing TradeDocument fields and print infrastructure; do not create document-detail schema, upload attachments, access production OSS, or perform deployment actions.",
   "acceptance_criteria": [
@@ -44,6 +44,6 @@
     "status": "not_required",
     "reason": "Uses existing local print and document-center application infrastructure only; no OSS upload, production mutation, deployment or release."
   },
-  "attempts": 0,
+  "attempts": 2,
   "created_at": "2026-09-24T13:11:01Z"
 }

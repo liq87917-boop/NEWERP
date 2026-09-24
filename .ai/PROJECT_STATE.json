@@ -3,7 +3,7 @@
   "controller": "gpt_conversation",
   "phase": "ready",
   "current_task": null,
-  "last_completed_task": "ERP-028",
+  "last_completed_task": "ERP-030",
   "last_reviewed_task": "ERP-005",
   "blocker": null,
   "external_actions": [
@@ -14,7 +14,7 @@
     "profile": "safe",
     "status": "passed"
   },
-  "cline_exit_code": 1,
+  "cline_exit_code": 0,
   "conversation_control": {
     "mode": "gpt_file_backed_rolling",
     "paused": false,
@@ -30,7 +30,7 @@
     "cline_success_is_only": "code_ready"
   },
   "browser_acceptance": {
-    "status": "deferred"
+    "status": "browser_deferred"
   },
   "human_gates": {
     "production_database_changes": "required",
@@ -38,8 +38,8 @@
     "production_deployment_or_release": "required",
     "irreversible_data_operations": "required"
   },
-  "finish_reason": "task_quarantined",
-  "updated_at": "2026-09-24T14:27:14.224843Z",
+  "finish_reason": "browser_deferred",
+  "updated_at": "2026-09-24T14:37:25.414208Z",
   "rolling_queue": {
     "enabled": true,
     "batch_size": 4,

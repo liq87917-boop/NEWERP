@@ -45,6 +45,22 @@ public class TradeDocumentController : BaseCrudController<TradeDocument>
     };
 
     /// <summary>
+    /// 打印数据（ERP-030）：按单证台账既有字段输出打印模型（字段键 / 中文标签 / 是否有落库值），
+    /// 供共享打印预览、直接打印与打印设计使用；台账中没有落库值的字段一律 Available=false，
+    /// 由前端按空白渲染，不回查客户档案、不做文本推断。
+    /// 打印模板由 <c>/api/sys/print-templates/doc-center</c> 提供。
+    /// </summary>
+    [HttpGet("{id:long}/print")]
+    public async Task<IActionResult> GetPrint(long id)
+    {
+        var document = await _db.TradeDocuments.AsNoTracking()
+            .FirstOrDefaultAsync(d => d.Id == id && !d.IsDeleted)
+            ?? throw BusinessException.NotFound("单证不存在");
+
+        return Ok(ApiResponse<TradeDocumentPrintModel>.Success(TradeDocumentPrintModel.From(document)));
+    }
+
+    /// <summary>
     /// 单证导出（ERP-019）：列表 / 单条（传 id）按筛选条件导出为 Excel。
     /// 支持：单证编号·客户·柜号·订单号关键字、单证类型、状态、出具日期区间；日期为空表示不限。
     /// </summary>
