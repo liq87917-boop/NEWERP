@@ -2121,5 +2121,81 @@ IF NOT EXISTS (SELECT 1 FROM sys.foreign_keys
         ADD CONSTRAINT FK_TradeDocumentItems_TradeDocument
         FOREIGN KEY (TradeDocumentId) REFERENCES db_owner.TradeDocuments(Id);");
 
+        // 36. 客户收款引用登记（ERP-053：收款单 → 销售订单 的引用证据行）
+        //     36.1 只建「收款引用行」一张表与其索引：**不含任何 UPDATE / 回填语句**，
+        //          既有收款单、销售订单与客户不因本段产生任何变化（没有引用数据时行为与历史完全一致）；
+        //     36.2 有效引用行唯一：UX_CustomerReceiptAllocations_ReceiptOrder
+        //          （收款单 + 销售订单），过滤 IsDeleted = 0 AND Status <> 2 ——
+        //          已作废行保留可读但不占用额度（作废后可重新登记同一订单的有效引用）；
+        //     36.3 收款单 / 客户 / 销售订单只保存服务端写入的快照，**刻意不建**任何外键，也不在收款单 /
+        //          销售订单上加列 —— 收款单软删除、订单软删除或取消、客户停用或改名都不影响历史证据可读；
+        //     36.4 ERP-032 / ERP-046 的权威口径里收款单只记录客户（ReferenceReceipt = FinanceReceipt.CustomerId），
+        //          没有订单级持久化引用，因此本表是仓库中**唯一**的收款引用（分摊）登记模型，
+        //          不建立第二套收款 → 订单链接结构；
+        //     36.5 本段只建本模块一张表与其索引，不改写收款单、销售订单、客户资料、发票、库存与库存成本、
+        //          装柜与单证、佣金 / 回佣、退税、费用或客户信用数据，也不执行任何收款 / 记账 / 核销语句。
+        await db.Database.ExecuteSqlRawAsync(@"
+IF OBJECT_ID('db_owner.CustomerReceiptAllocations') IS NULL
+BEGIN
+    CREATE TABLE db_owner.CustomerReceiptAllocations (
+        Id BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+        ReceiptId BIGINT NOT NULL,
+        ReceiptNo NVARCHAR(50) NOT NULL DEFAULT N'',
+        ReceiptDate DATETIME2 NOT NULL,
+        ReceiptStatus INT NOT NULL DEFAULT 0,
+        ReceiptStatusText NVARCHAR(30) NOT NULL DEFAULT N'',
+        ReceiptAmount DECIMAL(18,2) NOT NULL DEFAULT 0,
+        SalesOrderId BIGINT NOT NULL,
+        OrderNo NVARCHAR(50) NOT NULL DEFAULT N'',
+        OrderDate DATETIME2 NOT NULL,
+        OrderStatus INT NOT NULL DEFAULT 0,
+        OrderCurrency NVARCHAR(20) NOT NULL DEFAULT N'CNY',
+        CustomerId BIGINT NOT NULL,
+        CustomerCode NVARCHAR(50) NOT NULL DEFAULT N'',
+        CustomerName NVARCHAR(200) NOT NULL DEFAULT N'',
+        AllocatedAmount DECIMAL(18,2) NOT NULL DEFAULT 0,
+        Currency NVARCHAR(20) NOT NULL DEFAULT N'CNY',
+        Remark NVARCHAR(500) NOT NULL DEFAULT N'',
+        Status INT NOT NULL DEFAULT 1,
+        AllocatedAt DATETIME2 NOT NULL DEFAULT GETDATE(),
+        VoidedAt DATETIME2 NULL,
+        VoidReason NVARCHAR(500) NOT NULL DEFAULT N'',
+        CreatedAt DATETIME2 NOT NULL DEFAULT GETDATE(),
+        CreatedBy BIGINT NULL,
+        UpdatedAt DATETIME2 NULL,
+        UpdatedBy BIGINT NULL,
+        IsDeleted BIT NOT NULL DEFAULT 0,
+        RowVersion ROWVERSION NOT NULL
+    );
+END
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes
+               WHERE name = 'UX_CustomerReceiptAllocations_ReceiptOrder'
+                 AND object_id = OBJECT_ID('db_owner.CustomerReceiptAllocations'))
+    CREATE UNIQUE INDEX UX_CustomerReceiptAllocations_ReceiptOrder
+        ON db_owner.CustomerReceiptAllocations(ReceiptId, SalesOrderId)
+        WHERE IsDeleted = 0 AND Status <> 2;
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes
+               WHERE name = 'IX_CustomerReceiptAllocations_ReceiptId_Status'
+                 AND object_id = OBJECT_ID('db_owner.CustomerReceiptAllocations'))
+    CREATE INDEX IX_CustomerReceiptAllocations_ReceiptId_Status
+        ON db_owner.CustomerReceiptAllocations(ReceiptId, Status)
+        WHERE IsDeleted = 0;
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes
+               WHERE name = 'IX_CustomerReceiptAllocations_SalesOrderId'
+                 AND object_id = OBJECT_ID('db_owner.CustomerReceiptAllocations'))
+    CREATE INDEX IX_CustomerReceiptAllocations_SalesOrderId
+        ON db_owner.CustomerReceiptAllocations(SalesOrderId)
+        WHERE IsDeleted = 0;
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes
+               WHERE name = 'IX_CustomerReceiptAllocations_Status_AllocatedAt'
+                 AND object_id = OBJECT_ID('db_owner.CustomerReceiptAllocations'))
+    CREATE INDEX IX_CustomerReceiptAllocations_Status_AllocatedAt
+        ON db_owner.CustomerReceiptAllocations(Status, AllocatedAt)
+        WHERE IsDeleted = 0;");
+
     }
 }

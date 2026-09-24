@@ -596,6 +596,52 @@ public partial class ErpDbContext
         // 刻意不建任何外键（与 ERP-045 / ERP-047 一致）：付款单只做软删除，采购订单 / 供应商可能被软删除、
         // 取消或改名 —— 本表只保存服务端快照，历史引用证据必须始终可读，且不参与付款单与采购订单的计算。
 
+        // ============ ERP-053：客户收款引用登记（收款单 → 销售订单 的引用证据行） ============
+        // 设计口径：
+        //   1. 本表只登记**引用证据**：不建应收账款 / 核销 / 账龄 / 税务表，不生成凭证、收款或结算单，
+        //      也不改写收款单状态 / 金额 / 币种 / 付款方式 / 银行账户与销售订单状态 / 出货进度 / 金额与明细；
+        //   2. 有效引用行唯一：同一「收款单 + 销售订单」在**有效**（Status <> 2）记录内唯一
+        //      （UX_CustomerReceiptAllocations_ReceiptOrder，过滤 IsDeleted = 0 AND Status <> 2）——
+        //      已作废行保留可读但不占用额度，可重新登记新行；
+        //   3. 收款单 / 客户 / 销售订单只保存**服务端写入**的快照（单号 / 日期 / 状态 / 金额 / 币种 / 编码名称）；
+        //      与 SchemaUpgrader 第 36 段建表类型一致；
+        //   4. 金额 DECIMAL(18,2)（币种精度最多 2 位，JPY 等 0 位由服务端按币种口径取整）；
+        //   5. **刻意不建任何外键**（收款单只做软删除；销售订单与客户可能被软删除 / 取消 / 停用 / 改名）——
+        //      本表只保存服务端快照，历史引用证据必须始终可读，也不参与收款单与销售订单的计算；
+        //   6. 索引与 SchemaUpgrader 第 36 段同名同过滤条件，供收款单 / 销售订单侧有界检索。
+        modelBuilder.Entity<CustomerReceiptAllocation>().Property(x => x.ReceiptNo).HasMaxLength(50);
+        modelBuilder.Entity<CustomerReceiptAllocation>().Property(x => x.ReceiptStatusText).HasMaxLength(30);
+        modelBuilder.Entity<CustomerReceiptAllocation>().Property(x => x.ReceiptAmount).HasPrecision(18, 2);
+        modelBuilder.Entity<CustomerReceiptAllocation>().Property(x => x.OrderNo).HasMaxLength(50);
+        modelBuilder.Entity<CustomerReceiptAllocation>().Property(x => x.OrderCurrency).HasMaxLength(20);
+        modelBuilder.Entity<CustomerReceiptAllocation>().Property(x => x.CustomerCode).HasMaxLength(50);
+        modelBuilder.Entity<CustomerReceiptAllocation>().Property(x => x.CustomerName).HasMaxLength(200);
+        modelBuilder.Entity<CustomerReceiptAllocation>().Property(x => x.AllocatedAmount).HasPrecision(18, 2);
+        modelBuilder.Entity<CustomerReceiptAllocation>().Property(x => x.Currency).HasMaxLength(20);
+        modelBuilder.Entity<CustomerReceiptAllocation>().Property(x => x.Remark).HasMaxLength(500);
+        modelBuilder.Entity<CustomerReceiptAllocation>().Property(x => x.VoidReason).HasMaxLength(500);
+
+        // 同一张收款单内同一张销售订单只能有一条有效引用行（重复提交由服务端先行拒绝，索引为并发兜底）
+        modelBuilder.Entity<CustomerReceiptAllocation>()
+            .HasIndex(x => new { x.ReceiptId, x.SalesOrderId })
+            .IsUnique().HasDatabaseName("UX_CustomerReceiptAllocations_ReceiptOrder")
+            .HasFilter("IsDeleted = 0 AND Status <> 2");
+
+        modelBuilder.Entity<CustomerReceiptAllocation>().HasIndex(x => new { x.ReceiptId, x.Status })
+            .HasDatabaseName("IX_CustomerReceiptAllocations_ReceiptId_Status")
+            .HasFilter("IsDeleted = 0");
+
+        modelBuilder.Entity<CustomerReceiptAllocation>().HasIndex(x => x.SalesOrderId)
+            .HasDatabaseName("IX_CustomerReceiptAllocations_SalesOrderId")
+            .HasFilter("IsDeleted = 0");
+
+        modelBuilder.Entity<CustomerReceiptAllocation>().HasIndex(x => new { x.Status, x.AllocatedAt })
+            .HasDatabaseName("IX_CustomerReceiptAllocations_Status_AllocatedAt")
+            .HasFilter("IsDeleted = 0");
+
+        // 刻意不建任何外键（与 ERP-045 / ERP-047 / ERP-049 一致）：收款单只做软删除，销售订单 / 客户可能被软删除、
+        // 取消、停用或改名 —— 本表只保存服务端快照，历史引用证据必须始终可读，也不参与二者的计算。
+
         // ============ ERP-051：单证明细行快照（商业发票 / 装箱单 的商品明细证据行） ============
         // 设计口径：
         //   1. 明细行是单证的**行级快照证据**：不是第二套商品主数据、不是库存交易、不是报关核定价格、

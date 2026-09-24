@@ -105,6 +105,17 @@ public interface IErpDbContext
     /// </summary>
     DbSet<SupplierPaymentAllocation> SupplierPaymentAllocations { get; }
 
+    // ============ 客户收款引用登记（ERP-053：收款单 → 销售订单 的引用证据行） ============
+
+    /// <summary>
+    /// 客户收款单 → 销售订单 收款引用（分摊）证据行（ERP-053）：只登记「某张既有收款单把多少钱指向了哪几张
+    /// 既有销售订单」，保留收款单 / 客户 / 订单快照；不是到账凭证、不是应收账款台账或余额、不是货款核销、
+    /// 不是客户对账单、不是税务判断，也不构成债务清偿，且不改写收款单与销售订单。
+    /// <para>ERP-032 / ERP-046 的权威口径里收款单只记录客户、没有订单级持久化引用，因此本表是**唯一**的
+    /// 收款引用登记模型（不在收款单 / 销售订单上加列，也不建第二套链接表）。</para>
+    /// </summary>
+    DbSet<CustomerReceiptAllocation> CustomerReceiptAllocations { get; }
+
     // ============ 询价管理 ============
     DbSet<Inquiry> Inquiries { get; }
     DbSet<InquiryDetail> InquiryDetails { get; }

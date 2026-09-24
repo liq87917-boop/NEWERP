@@ -1,7 +1,7 @@
 {
   "id": "ERP-053",
   "title": "Add traceable customer-receipt allocations to Sales Orders",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "medium",
   "description": "Add one canonical explicit allocation register between existing customer-receipt evidence and Sales Orders so users can record which orders a receipt document refers to without creating or executing a receipt. Reuse any equivalent authoritative persisted relationship already present in ERP-032 rather than creating a competing allocation model. Do not infer links, mark orders as settled, calculate a legal accounts-receivable balance, move funds, execute production SQL, deploy, or release.",
   "acceptance_criteria": [
@@ -51,5 +51,5 @@
     "status": "not_required",
     "reason": "Repository allocation evidence and non-production test schema only. Real receipt execution, production database changes, irreversible finance operations, deployment and release remain behind mandatory human gates."
   },
-  "attempts": 0
+  "attempts": 1
 }

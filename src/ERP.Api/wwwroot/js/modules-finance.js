@@ -85,6 +85,11 @@ Object.assign(MODULES, {
       { key: 'paymentMethod', label: '付款方式', type: 'select', options: PAYMENT_OPTS },
       { key: 'bankAccount', label: '银行账户' },
     ],
+    /* ERP-053：收款引用登记入口（工具栏，始终可见；登记「这笔收款指向哪几张销售订单」的引用证据，
+       只允许同客户 + 同币种且未取消的销售订单；不是到账凭证 / 应收账款台账 / 货款核销 / 客户对账单 / 税务判断） */
+    extraActions: [
+      { label: '🧾 收款引用', title: '登记本页收款单指向的销售订单引用证据，并查看收款单侧已引用 / 未引用金额（只写引用证据，不会真的收款、不会结算或核销，也不改写收款单与销售订单）', onclick: 'openCustomerReceiptAllocationRegister()' },
+    ],
   },
   complaint: {
     title: '客诉单', api: '/api/finance/complaints', canSubmit: true,
