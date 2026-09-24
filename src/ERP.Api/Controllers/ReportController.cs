@@ -153,4 +153,19 @@ public class ReportController : ControllerBase
         var result = await _reportService.GetInventoryMovementReportAsync(query);
         return Ok(ApiResponse<ReportDtos.InventoryMovementReport>.Success(result));
     }
+
+    /// <summary>
+    /// 库存库龄与成本估值报表（ERP-034，只读派生）：主表为库存行（现存量为基础单位），
+    /// 库龄分层（0-30 / 31-60 / 61-90 / 91-180 / 180 天以上）由库存流水（StockMovements）台账按 FIFO 派生，
+    /// 红字冲销按 ReversalOfMovementId 权威配对（入库冲销扣回原层、出库冲销按原出库日期回补），原流水不删除、不改写；
+    /// 没有台账分层依据的数量单列为「库龄未知」而不放进任何分层；估值只使用库存行持久化的移动加权平均成本与库存金额，
+    /// 成本依据缺失的数量与金额单列为「未知」（金额 null），不做跨币种合并、也不从文本字典推断汇率。
+    /// 查询按仓库 / 商品 / 关键字筛选并按截止日期截断，在数据库内分页（单页上限 200 行），不存在逐行查库。
+    /// </summary>
+    [HttpGet("inventory-aging")]
+    public async Task<IActionResult> InventoryAging([FromQuery] ReportDtos.InventoryAgingReportQuery query)
+    {
+        var result = await _reportService.GetInventoryAgingReportAsync(query);
+        return Ok(ApiResponse<ReportDtos.InventoryAgingReport>.Success(result));
+    }
 }

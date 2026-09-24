@@ -56,4 +56,12 @@ public interface IReportService
     /// </summary>
     Task<ReportDtos.InventoryMovementReport> GetInventoryMovementReportAsync(
         ReportDtos.InventoryMovementReportQuery query, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 库存库龄与成本估值报表（ERP-034，只读派生）：主表为库存行，库龄分层由库存流水台账按 FIFO 派生
+    /// （红字冲销按 ReversalOfMovementId 权威配对，不二次扣减）；没有台账分层依据的数量单列为「库龄未知」，
+    /// 不放进任何分层；估值只使用库存行持久化的移动加权平均成本与库存金额，成本依据缺失时数量与金额记为未知（null）。
+    /// </summary>
+    Task<ReportDtos.InventoryAgingReport> GetInventoryAgingReportAsync(
+        ReportDtos.InventoryAgingReportQuery query, CancellationToken cancellationToken = default);
 }

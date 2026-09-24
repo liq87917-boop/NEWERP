@@ -1,7 +1,7 @@
 {
   "id": "ERP-034",
   "title": "Add inventory aging and supported valuation report",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "medium",
   "description": "Add a read-only inventory aging and valuation report over current stock and the existing StockMovement ledger. Separate quantities with authoritative age and cost evidence from unknown-history or unknown-cost quantities. Do not add production schema, mutate inventory, reconstruct missing history, or estimate unavailable cost or exchange rates.",
   "acceptance_criteria": [
@@ -46,5 +46,5 @@
     "status": "not_required",
     "reason": "Read-only reporting over existing application records; no production mutation, schema action, deployment or release."
   },
-  "attempts": 0
+  "attempts": 1
 }
