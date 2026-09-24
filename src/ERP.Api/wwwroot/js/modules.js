@@ -488,6 +488,10 @@ const MODULES = {
       /* ERP-018：有效期治理——列表直接可见「有效期状态」（与后端 QuotationValidityRules 同口径）
          virtual: true = 派生列（接口不返回该字段），列表打印时跳过，避免出现空列 */
       { key: 'validityStatus', label: '有效期状态', virtual: true, render: row => quotationValidityBadge(row) },
+      /* ERP-035：版本链——列表直接可见版本号 / 版本链根单号 / 上一版本（历史版本不隐藏，均按版本号排列出现） */
+      { key: 'revisionNumber', label: '版本', virtual: true, render: row => quotationRevisionBadge(row) },
+      { key: 'rootQuotationNo', label: '版本链根单号', virtual: true, render: row => quotationRootNo(row) },
+      { key: 'previousRevisionNo', label: '上一版本', virtual: true, render: row => quotationPreviousNo(row) },
       { key: 'inquiryNo', label: '来源询价单' }, { key: 'currency', label: '币种' },
       { key: 'totalAmount', label: '报价总额', type: 'money' }, { key: 'totalAmountCny', label: '折人民币', type: 'money' },
       { key: 'salesmanName', label: '业务员' }, { key: 'status', label: '状态', status: true },
@@ -515,6 +519,11 @@ const MODULES = {
       { key: 'salesmanName', label: '业务员姓名（可覆盖）' },
       { key: 'inquiryId', label: '来源询价单 ID（可留空）', type: 'number' },
       { key: 'inquiryNo', label: '来源询价单号' },
+      /* ERP-035：版本链（只读展示；版本号与链根 / 上一版本由服务端分配与维护，
+         客户端提交这三个字段不会被写入 —— Update 只接受可议价业务字段） */
+      { key: 'revisionNumber', label: '版本号（只读，服务端分配）', type: 'number' },
+      { key: 'rootQuotationNo', label: '版本链根单号（只读）' },
+      { key: 'previousRevisionNo', label: '上一版本（只读）' },
       { key: 'remark', label: '备注', type: 'textarea' },
     ],
     /* 行操作扩展（crud.js 的 rowActions）：草稿可审核（审核后才能转 PI），已审核可销审与转 PI */
@@ -529,6 +538,9 @@ const MODULES = {
       /* ERP-018：补齐共享打印三件套——直接打印（不先弹预览）+ 打印设计（跳到样式设计并预选本单据） */
       { label: '直接打印', icon: '🖨', title: '直接调起浏览器打印该报价单（不用先看预览）', onclick: 'printSalesDocDirect' },
       { label: '打印设计', icon: '🎨', title: '打开样式设计，为「报价单」配置打印模板（抬头 / 纸张 / 字体 / 字段顺序）', onclick: 'designSalesDocPrint' },
+      /* ERP-035：多轮议价——创建新版本（源版本转为只读历史）+ 版本历史（完整版本链，不隐藏历史版本） */
+      { label: '创建新版本', icon: '🆕', title: '以该报价单为源复制一张新的草稿版本：服务端分配版本号并复算合计，源版本成为只读历史（审核状态与下游转换不复制）', onclick: 'quotationCreateRevision', statuses: ['Pending', 'Submitted', 'Approved', 'Completed'] },
+      { label: '版本历史', icon: '🧬', title: '查看该报价单所属的完整版本链（根单号 / 版本号 / 上一版本 / 状态 / 是否已转出）并跳转到任一版本', onclick: 'quotationRevisionHistory' },
     ],
     /* 工具栏扩展按钮（ERP-018：有效期治理与成交率报表的入口，始终可见） */
     extraActions: [

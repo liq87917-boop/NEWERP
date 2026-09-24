@@ -95,6 +95,35 @@ public class Quotation : BaseEntity
     [MaxLength(500)]
     public string Remark { get; set; } = string.Empty;
 
+    /* ============ 版本链（ERP-035：多轮议价版本留痕，源版本作为不可变历史） ============ */
+
+    /// <summary>初始版本号：首个版本与「无版本元数据」的历史报价单一律按 V1 处理</summary>
+    public const int InitialRevisionNumber = 1;
+
+    /// <summary>
+    /// 版本链根单 Id：初始版本为 <c>null</c>（自身即根），后续版本指向根单主键；
+    /// 链内查询口径 = <c>Id == 根单Id || RootQuotationId == 根单Id</c>。
+    /// </summary>
+    public long? RootQuotationId { get; set; }
+
+    /// <summary>版本链根单号（冗余：列表 / 详情 / 打印免关联；初始版本为空串，按自身单号显示）</summary>
+    [MaxLength(50)]
+    public string RootQuotationNo { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 版本号（服务端分配，链内单调递增）：初始版本为 1；
+    /// 数据库默认值为 1，因此新增列之前创建的历史报价单读取时即为初始版本，
+    /// 既不回填也不被改写（见 <see cref="InitialRevisionNumber"/>）。
+    /// </summary>
+    public int RevisionNumber { get; set; } = InitialRevisionNumber;
+
+    /// <summary>上一版本 Id（创建版本时指向被复制的源版本；初始版本为 null）</summary>
+    public long? PreviousRevisionId { get; set; }
+
+    /// <summary>上一版本号（冗余，便于列表 / 详情直接展示版本来源；初始版本为空串）</summary>
+    [MaxLength(50)]
+    public string PreviousRevisionNo { get; set; } = string.Empty;
+
     /// <summary>报价明细</summary>
     public List<QuotationDetail> Details { get; set; } = new();
 }

@@ -55,6 +55,16 @@ public partial class ErpDbContext
         // ============ 单据号唯一索引（阶段 3：形式发票 PI 使用 EF 主子表） ============
         modelBuilder.Entity<ProformaInvoice>().HasIndex(x => x.PiNo).IsUnique();
 
+        // ============ 报价单版本链唯一约束（ERP-035） ============
+        // 同一版本链内「版本号」唯一：并发创建版本时由该唯一索引在数据库层兜底，链内不可能出现重复版本号
+        // （服务端捕获唯一冲突后返回「请重试」的业务错误，见 QuotationRevisionService）。
+        // 根单的 RootQuotationId 为 NULL（自身即根，按主键天然唯一），因此只约束后续版本；
+        // 软删除行不占用版本号，与 SysMenu / SysPrintTemplates 的过滤索引策略一致。
+        // 与 SchemaUpgrader 第 24 段创建的同名索引保持一致。
+        modelBuilder.Entity<Quotation>().HasIndex(x => new { x.RootQuotationId, x.RevisionNumber })
+            .IsUnique().HasDatabaseName("UX_Quotations_RevisionChain")
+            .HasFilter("IsDeleted = 0 AND RootQuotationId IS NOT NULL");
+
         // ============ 单据号唯一索引（ERP-009：库存单据使用 EF 主子表） ============
         modelBuilder.Entity<StockAdjustment>().HasIndex(x => x.AdjustmentNo).IsUnique();
         modelBuilder.Entity<StockTransfer>().HasIndex(x => x.TransferNo).IsUnique();

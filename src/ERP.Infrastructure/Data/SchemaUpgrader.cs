@@ -1257,5 +1257,27 @@ IF NOT EXISTS (SELECT 1 FROM db_owner.SysDocumentNumberRules WHERE DocumentType 
     INSERT INTO db_owner.SysDocumentNumberRules (DocumentType, RuleCode, RuleName, Prefix, DateFormat, SerialLength, Separator, CurrentSequence, YearlyReset, Remark, CreatedAt, IsDeleted)
     VALUES (22, N'CTH', N'采购退货单', N'CTH', N'yyyyMMdd', 4, N'', 0, 1, N'采购退货单（ERP-009）', GETDATE(), 0);");
 
+        // 24. 报价单版本链（ERP-035：多轮议价版本留痕）
+        //     24.1 版本号 / 根单 / 上一版本列（幂等补齐）：RevisionNumber 默认 1 = 初始版本，
+        //          因此新增列之前创建的历史报价单读取时即为初始版本 —— 不回填、不改写历史数据；
+        //     24.2 链内版本号唯一索引（过滤索引：软删除与根单不参与），并发创建版本时在数据库层兜底。
+        await db.Database.ExecuteSqlRawAsync(@"
+IF COL_LENGTH('db_owner.Quotations', 'RevisionNumber') IS NULL
+    ALTER TABLE db_owner.Quotations ADD RevisionNumber INT NOT NULL DEFAULT 1;
+IF COL_LENGTH('db_owner.Quotations', 'RootQuotationId') IS NULL
+    ALTER TABLE db_owner.Quotations ADD RootQuotationId BIGINT NULL;
+IF COL_LENGTH('db_owner.Quotations', 'RootQuotationNo') IS NULL
+    ALTER TABLE db_owner.Quotations ADD RootQuotationNo NVARCHAR(50) NOT NULL DEFAULT N'';
+IF COL_LENGTH('db_owner.Quotations', 'PreviousRevisionId') IS NULL
+    ALTER TABLE db_owner.Quotations ADD PreviousRevisionId BIGINT NULL;
+IF COL_LENGTH('db_owner.Quotations', 'PreviousRevisionNo') IS NULL
+    ALTER TABLE db_owner.Quotations ADD PreviousRevisionNo NVARCHAR(50) NOT NULL DEFAULT N'';
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes
+               WHERE name = 'UX_Quotations_RevisionChain' AND object_id = OBJECT_ID('db_owner.Quotations'))
+    CREATE UNIQUE INDEX UX_Quotations_RevisionChain
+        ON db_owner.Quotations(RootQuotationId, RevisionNumber)
+        WHERE IsDeleted = 0 AND RootQuotationId IS NOT NULL;");
+
     }
 }

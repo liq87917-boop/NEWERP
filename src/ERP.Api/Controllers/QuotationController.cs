@@ -64,6 +64,52 @@ public class QuotationController : DocumentControllerBase<Quotation>
         return Ok(ApiResponse<Quotation>.Success(entity));
     }
 
+    /// <summary>
+    /// 创建新版本（ERP-035 多轮议价版本留痕）：把既有报价单整单复制为一张新的**草稿**版本。
+    /// </summary>
+    /// <remarks>
+    /// 规则（服务端唯一入口）：
+    /// 1) 源版本必须存在、未删除、未作废；源版本一行都不改，创建后即成为只读历史（见 <see cref="EnsureNotSupersededAsync"/>）；
+    /// 2) 版本号由服务端分配（链内单调递增，根 V1），单号 = 根单号 + <c>-R版本号</c>；并发创建同一版本号时
+    ///    由数据库唯一索引兜底，返回「请重试」而不会产生重复版本号；
+    /// 3) 复制可议价的主表字段与明细，合计经 <see cref="QuotationLineRules.Normalize"/> 服务端复算；
+    /// 4) **不复制**审核状态（新版本一律草稿）、下游转换状态与已生成单据链接（PI / 销售订单仍指向被显式选中的版本）。
+    /// </remarks>
+    [HttpPost("{id:long}/revisions")]
+    public async Task<IActionResult> CreateRevision(long id)
+    {
+        var revision = await QuotationRevisionService.CreateRevisionAsync(Db, id);
+        return Ok(ApiResponse<QuotationRevisionResult>.Success(new QuotationRevisionResult
+        {
+            Id = revision.Id,
+            QuotationNo = revision.QuotationNo,
+            RevisionNumber = revision.RevisionNumber,
+            RootQuotationId = revision.RootQuotationId ?? revision.Id,
+            RootQuotationNo = revision.RootQuotationNo,
+            PreviousRevisionId = revision.PreviousRevisionId ?? 0,
+            PreviousRevisionNo = revision.PreviousRevisionNo
+        }, $"已创建新版本 {revision.QuotationNo}（草稿，可继续修改）"));
+    }
+
+    /// <summary>
+    /// 版本链（ERP-035）：返回该报价单所属版本链的**完整**列表（根单 + 全部历史版本，按版本号升序）。
+    /// </summary>
+    /// <remarks>
+    /// 每行含版本号、根单（Id / 单号）、上一版本（Id / 单号）、是否最新版本、是否已被后续版本取代（只读历史）、
+    /// 是否已转出（已转 PI / 已转销售订单，口径与成交率报表一致）与状态 / 金额；
+    /// 历史报价单（无版本元数据）按初始版本 V1 返回，且不做任何写库 / 回填。
+    /// </remarks>
+    [HttpGet("{id:long}/revisions")]
+    public async Task<IActionResult> GetRevisions(long id)
+    {
+        var selected = await Set.AsNoTracking()
+            .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
+            ?? throw BusinessException.NotFound("报价单不存在");
+        var chain = await QuotationRevisionService.LoadChainAsync(Db, selected);
+        return Ok(ApiResponse<List<QuotationRevisionChainItem>>.Success(chain,
+            $"版本链共 {chain.Count} 个版本（根单：{chain.FirstOrDefault()?.RootQuotationNo}）"));
+    }
+
     /// <summary>按询价单带出客户与明细（新建报价单时用「带入询价明细」）</summary>
     [HttpGet("from-inquiry/{inquiryId:long}")]
     public async Task<IActionResult> FromInquiry(long inquiryId)
@@ -109,10 +155,19 @@ public class QuotationController : DocumentControllerBase<Quotation>
         return Ok(ApiResponse<object>.Success(result));
     }
 
-    /// <summary>审核（草稿可直接审核，也支持提交后审核）</summary>
+    /// <summary>提交（ERP-035：已被后续版本取代的历史版本只读，不允许再流转状态）</summary>
+    [HttpPost("{id:long}/submit")]
+    public override async Task<IActionResult> Submit(long id)
+    {
+        await EnsureNotSupersededAsync(id);
+        return await base.Submit(id);
+    }
+
+    /// <summary>审核（草稿可直接审核，也支持提交后审核；历史版本只读）</summary>
     [HttpPost("{id:long}/approve")]
     public override async Task<IActionResult> Approve(long id)
     {
+        await EnsureNotSupersededAsync(id);
         var entity = await GetOrThrowAsync(id, "报价单不存在");
         if (GetStatus(entity) == DocumentStatus.Approved)
             throw BusinessException.RuleConflict("报价单已审核");
@@ -122,14 +177,31 @@ public class QuotationController : DocumentControllerBase<Quotation>
         return Ok(ApiResponse<object>.Success(null, "报价单已审核"));
     }
 
-    /// <summary>销审（退回草稿，可继续修改）</summary>
+    /// <summary>销审（退回草稿，可继续修改；历史版本只读）</summary>
     [HttpPost("{id:long}/unaudit")]
     public async Task<IActionResult> Unaudit(long id)
     {
+        await EnsureNotSupersededAsync(id);
         var entity = await GetOrThrowAsync(id, "报价单不存在");
         SetStatus(entity, DocumentStatus.Pending);
         await Db.SaveChangesAsync();
         return Ok(ApiResponse<object>.Success(null, "已销审，可继续修改"));
+    }
+
+    /// <summary>取消（ERP-035：历史版本只读，需在最新版本上操作）</summary>
+    [HttpPost("{id:long}/cancel")]
+    public override async Task<IActionResult> Cancel(long id)
+    {
+        await EnsureNotSupersededAsync(id);
+        return await base.Cancel(id);
+    }
+
+    /// <summary>删除（软删除，仅待提交状态可删；ERP-035：历史版本不可删除）</summary>
+    [HttpDelete("{id:long}")]
+    public override async Task<IActionResult> Delete(long id)
+    {
+        await EnsureNotSupersededAsync(id);
+        return await base.Delete(id);
     }
 
     /// <summary>创建（单号缺省由字轨生成；行号/金额/合计后端复核）</summary>
@@ -141,16 +213,18 @@ public class QuotationController : DocumentControllerBase<Quotation>
             entity.QuotationNo = await _noService.GenerateAsync(DocumentType.Quotation);
         entity.Status = DocumentStatus.Pending;
         entity.CreatedAt = DateTime.Now;
-        Normalize(entity);
+        /* ERP-035：手工新建的报价单不携带任何版本元数据 → 库默认值即初始版本 V1（不做回填、不写映射） */
+        QuotationLineRules.Normalize(entity);
         Db.Quotations.Add(entity);
         await Db.SaveChangesAsync();
         return Ok(ApiResponse<object>.Success(new { entity.Id, entity.QuotationNo }, "报价单创建成功"));
     }
 
-    /// <summary>修改（已审核 / 已取消不可改；明细整体替换）</summary>
+    /// <summary>修改（已审核 / 已取消不可改；ERP-035：已被后续版本取代的历史版本不可改；明细整体替换）</summary>
     [HttpPut("{id:long}")]
     public async Task<IActionResult> Update(long id, [FromBody] Quotation entity)
     {
+        await EnsureNotSupersededAsync(id);
         var existing = await Db.Quotations.Include(o => o.Details)
             .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
             ?? throw BusinessException.NotFound("报价单不存在");
@@ -180,7 +254,7 @@ public class QuotationController : DocumentControllerBase<Quotation>
         Db.QuotationDetails.RemoveRange(existing.Details);
         entity.QuotationNo = existing.QuotationNo;
         entity.Id = id;
-        Normalize(entity);
+        QuotationLineRules.Normalize(entity);
         existing.Details = entity.Details;
         existing.TotalAmount = entity.TotalAmount;
         existing.TotalAmountCny = entity.TotalAmountCny;
@@ -391,43 +465,21 @@ public class QuotationController : DocumentControllerBase<Quotation>
         return Ok(ApiResponse<List<QuotationValidityItem>>.Success(result));
     }
 
-    /// <summary>已转出报价单 Id 集合（来源外键：已转 PI / 已转销售订单；口径与成交率报表一致）</summary>
-    private async Task<HashSet<long>> LoadConvertedQuotationIdsAsync(List<long> quotationIds)
+    /// <summary>
+    /// 已转出报价单 Id 集合（来源外键：已转 PI / 已转销售订单；口径与成交率报表一致）。
+    /// ERP-035 起统一由 <see cref="QuotationRevisionService.LoadConvertedQuotationIdsAsync"/> 提供，
+    /// 版本链与有效期提醒共用同一口径（不会因为存在新版本而把转换状态挂到别的版本上）。
+    /// </summary>
+    private Task<HashSet<long>> LoadConvertedQuotationIdsAsync(List<long> quotationIds)
+        => QuotationRevisionService.LoadConvertedQuotationIdsAsync(Db, quotationIds);
+
+    /// <summary>
+    /// 历史版本只读守卫（ERP-035）：报价单若已被后续版本取代（链内存在指向它的下一版本）则不允许
+    /// 修改 / 提交 / 审核 / 销审 / 取消 / 删除 —— 源版本作为不可变历史原样保留。
+    /// </summary>
+    private async Task EnsureNotSupersededAsync(long id)
     {
-        var converted = new HashSet<long>();
-        if (quotationIds.Count == 0) return converted;
-
-        var piIds = await Db.ProformaInvoices.AsNoTracking()
-            .Where(p => !p.IsDeleted && p.QuotationId != null && quotationIds.Contains(p.QuotationId.Value))
-            .Select(p => p.QuotationId!.Value).ToListAsync();
-        var orderIds = await Db.SalesOrders.AsNoTracking()
-            .Where(o => !o.IsDeleted && o.SourceQuotationId != null && quotationIds.Contains(o.SourceQuotationId.Value))
-            .Select(o => o.SourceQuotationId!.Value).ToListAsync();
-
-        foreach (var id in piIds) converted.Add(id);
-        foreach (var id in orderIds) converted.Add(id);
-        return converted;
-    }
-
-    /// <summary>行号 / 金额 / 合计 / 有效期统一整理（后端复核，防止前端篡改合计）</summary>
-    private static void Normalize(Quotation e)
-    {
-        decimal total = 0;
-        var line = 0;
-        foreach (var d in e.Details)
-        {
-            d.Id = 0;
-            d.QuotationId = e.Id;
-            d.QuotationNo = e.QuotationNo;
-            d.SortNo = ++line;
-            d.Amount = Math.Round(d.Quantity * d.UnitPrice, 2);
-            d.CreatedAt = DateTime.Now;
-            total += d.Amount;
-        }
-        e.TotalAmount = Math.Round(total, 2);
-        var rate = e.ExchangeRate == 0 ? 1 : e.ExchangeRate;
-        e.TotalAmountCny = Math.Round(e.TotalAmount * rate, 2);
-        if (e.QuotationDate == default) e.QuotationDate = DateTime.Today;
-        e.ValidUntil ??= e.QuotationDate.Date.AddDays(30);
+        if (await QuotationRevisionService.IsSupersededAsync(Db, id))
+            throw BusinessException.RuleConflict("该报价单已有后续版本，历史版本只读；请在最新版本上继续操作");
     }
 }

@@ -512,3 +512,84 @@ function openQuotationConversionReport() {
   renderReport(rep, rep.title);
 }
 
+/* ============ 报价单版本链（ERP-035：多轮议价版本留痕） ============ */
+/* 依赖：app.js（api / toast / fmtMoney / fmtDate / escapeHtml / statusHtml）、
+         crud.js（CURRENT_LOADER / openForm）、modules.js 的 quotation 模块（列表派生列与行操作接线）。
+   契约：版本号由服务端分配（初始版本 V1，链内单调递增），单号 = 根单号 + “-R版本号”。 */
+
+/* 版本号：数据库字段为数字；历史报价单（新增版本列之前创建）为 0 或未赋值 → 按初始版本 V1 显示 */
+function quotationRevisionNumberOf(row) {
+  const rev = Number(row && row.revisionNumber);
+  return Number.isFinite(rev) && rev > 0 ? rev : 1;
+}
+
+/* 列表「版本」派生列：V1 / V2 … 徽标 */
+function quotationRevisionBadge(row) {
+  const rev = quotationRevisionNumberOf(row);
+  return `<span class="status ${rev > 1 ? 'status-info' : 'status-neutral'}" title="报价版本 V${rev}">V${rev}</span>`;
+}
+
+/* 列表「版本链根单号」派生列：初始版本没有冗余根单号，按自身单号显示（版本链的根即它自己） */
+function quotationRootNo(row) {
+  return escapeHtml((row && (row.rootQuotationNo || row.quotationNo)) || '');
+}
+
+/* 列表「上一版本」派生列：初始版本没有前序版本 → 显式标注「初始版本」，不留空白 */
+function quotationPreviousNo(row) {
+  const prev = row && row.previousRevisionNo;
+  return prev ? escapeHtml(prev) : '<span class="text-muted">—（初始版本）</span>';
+}
+
+/* 创建新版本：POST {api}/{id}/revisions —— 服务端整单复制为草稿（源版本一行不改、合计服务端复算，
+   审核状态与下游转换不复制）；已作废 / 并发同版本号由服务端守卫拒绝 */
+async function quotationCreateRevision(id) {
+  if (!confirm('按该报价单创建新版本？源版本将成为只读历史，新版本为草稿，可修改后再审核。')) return;
+  try {
+    const result = await api(`/api/sales/quotations/${id}/revisions`, 'POST');
+    toast(`已创建新版本 ${result.quotationNo}（V${result.revisionNumber}，草稿；源版本 ${result.previousRevisionNo} 转为历史只读）`);
+    if (CURRENT_LOADER) CURRENT_LOADER();
+    return result;
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+/* 版本历史：GET {api}/{id}/revisions —— 完整版本链（根单 + 全部历史版本，不隐藏历史版本）。
+   每行显示版本号 / 单号 / 根单号 / 上一版本 / 日期 / 金额 / 状态 / 下游，并可跳转到任一版本编辑页；
+   「历史只读」与后端 Superseded 同口径（链内已有指向它的下一版本）。 */
+async function quotationRevisionHistory(id) {
+  try {
+    const data = await api(`/api/sales/quotations/${id}/revisions`);
+    const items = Array.isArray(data) ? data : (data.items || []);
+    const rows = items.length ? items.map(r => `<tr>
+        <td><span class="status ${r.revisionNumber > 1 ? 'status-info' : 'status-neutral'}">V${r.revisionNumber}</span>${r.isLatest ? ' <span class="status status-success">最新</span>' : ''}${r.superseded ? ' <span class="status status-warning">历史只读</span>' : ''}${r.isSelected ? ' <b>（当前）</b>' : ''}</td>
+        <td>${escapeHtml(r.quotationNo || '')}</td>
+        <td>${escapeHtml(r.rootQuotationNo || '')}</td>
+        <td>${r.previousRevisionNo ? escapeHtml(r.previousRevisionNo) : '<span class="text-muted">—（初始版本）</span>'}</td>
+        <td>${fmtDate(r.quotationDate)}</td>
+        <td class="text-right">${escapeHtml(r.currency || '')} ${fmtMoney(r.totalAmount)}</td>
+        <td>${statusHtml(r.status)}</td>
+        <td>${r.converted ? '<span class="status status-success">已转出</span>' : '<span class="text-muted">—</span>'}</td>
+        <td><button class="btn btn-neutral btn-sm" onclick="closeModal();openForm(${r.id})">打开</button></td>
+      </tr>`).join('')
+      : '<tr><td colspan="9" class="text-center text-muted">暂无版本记录</td></tr>';
+    const modal = document.getElementById('modal');
+    modal.innerHTML = `<div class="modal modal-lg" style="width:1180px;max-width:96vw">
+      <h3>🧬 报价版本链（共 ${items.length} 个版本）</h3>
+      <div class="toolbar" style="margin:8px 0">
+        <div class="toolbar-left">
+          <span class="text-muted">版本号由服务端分配（链内单调递增）；「历史只读」= 已被后续版本取代，不可再修改 / 审核 / 转换；下游 PI 与销售订单只认被显式选中的版本</span>
+        </div>
+      </div>
+      <div class="table-wrap" style="max-height:52vh;overflow:auto">
+        <table><thead><tr>
+          <th>版本</th><th>报价单号</th><th>版本链根单号</th><th>上一版本</th><th>报价日期</th>
+          <th class="text-right">报价总额</th><th>状态</th><th>下游</th><th>操作</th>
+        </tr></thead><tbody>${rows}</tbody></table>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-neutral" onclick="closeModal()">关闭</button>
+      </div>
+    </div>`;
+    modal.style.display = 'flex';
+  } catch (err) { toast(err.message, 'error'); }
+}
+

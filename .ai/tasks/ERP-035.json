@@ -1,7 +1,7 @@
 {
   "id": "ERP-035",
   "title": "Add immutable Quotation revision history",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "medium",
   "description": "Add an explicit Quotation revision chain for multi-round negotiation. Creating a revision must copy an existing quotation into a new draft while preserving the source as immutable history and recalculating totals through the existing authoritative Quotation logic. Repository schema code and test-database validation are allowed, but production database execution, deployment and historical backfill are prohibited.",
   "acceptance_criteria": [
@@ -48,5 +48,5 @@
     "status": "not_required",
     "reason": "Code and test-database schema implementation only. Production schema execution, data migration, deployment and release remain behind the repository's mandatory human gates."
   },
-  "attempts": 0
+  "attempts": 1
 }

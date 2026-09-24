@@ -1,6 +1,6 @@
 # 报价单（Quotation）与形式发票（PI）设计方案
 
-> 版本：v1.2（2026-09-23）· 状态：**批次 1 ~ 批次 3 已实施**（批次 2 形式发票 PI 闭环由 **ERP-007** 交付；批次 3 报价 / PI → 销售订单由 **ERP-010** 交付；剩余缺口「共享打印三件套注册 / 有效期治理 / 成交率报表」由 **ERP-018** 交付）· 适用范围：WMERP 外贸 ERP（NEWERP）· 补正任务：**ERP-017**（文档补正）、**ERP-018**（打印注册与有效期治理）
+> 版本：v1.3（2026-09-24）· 状态：**批次 1 ~ 批次 3 已实施**（批次 2 形式发票 PI 闭环由 **ERP-007** 交付；批次 3 报价 / PI → 销售订单由 **ERP-010** 交付；剩余缺口「共享打印三件套注册 / 有效期治理 / 成交率报表」由 **ERP-018** 交付）· 适用范围：WMERP 外贸 ERP（NEWERP）· 补正任务：**ERP-017**（文档补正）、**ERP-018**（打印注册与有效期治理）· **ERP-035** 交付「报价版本链」（多轮议价版本留痕，见 §12）
 >
 > **实现状态图例（唯一口径，全文一致）**
 >
@@ -64,6 +64,9 @@
 | `TotalAmount` / `TotalAmountCny` | decimal | 报价总额（原币 / 折人民币） |
 | `SalesmanId` / `SalesmanName` | bigint? / nvarchar | 业务员 |
 | `Status` | nvarchar | 草稿 / 已审核 / 已转 PI / 已转订单 / 已作废 |
+| `RevisionNumber` | int | **版本号（ERP-035）**：服务端分配，链内单调递增；初始版本 = 1，数据库默认值 1 → 新增列之前创建的历史报价单读取时即初始版本（不回填） |
+| `RootQuotationId` / `RootQuotationNo` | bigint? / nvarchar(50) | **版本链根单**（ERP-035）：初始版本为空（自身即根），后续版本指向根单主键 / 根单号 |
+| `PreviousRevisionId` / `PreviousRevisionNo` | bigint? / nvarchar(50) | **上一版本**（ERP-035）：初始版本为空；创建版本时指向被复制的源版本 |
 | `Remark` | nvarchar | 备注 |
 
 ### 3.2 报价明细 `QuotationDetails`
@@ -121,6 +124,8 @@
 | POST | `/api/sales/quotations/{id}/to-order` | **转为销售订单**（ERP-010）：按已审核报价单生成一张销售订单（EF 主子表路径），来源留痕，同一报价单仅一张 |
 | GET | `/api/sales/quotations/{id}/print` | 打印数据（主表 + 未删除明细，按 `SortNo` 排序）：**打印预览 / 直接打印 / 打印设计共用**，与报价单工作流保存的数据同源（服务端不重算、不落库，打印件与页面逐字一致） |
 | GET | `/api/sales/quotations/validity-due?asOfDate=&aheadDays=7` | **有效期到期提醒**（ERP-018）：返回已过期与提醒窗口内到期的报价单（已作废、未设置有效期的不提醒），按紧急度（已过期 &gt; 今日到期 &gt; 即将到期）排序；口径见 §10.2 |
+| POST | `/api/sales/quotations/{id}/revisions` | **创建新版本**（ERP-035）：把该报价单整单复制为新的**草稿**版本；版本号服务端分配（链内单调递增）、单号 = 根单号 + `-R版本号`、合计服务端复算、**不复制**审核状态与下游转换；源版本成为只读历史；口径见 §12 |
+| GET | `/api/sales/quotations/{id}/revisions` | **版本链**（ERP-035）：返回根单 + 全部历史版本（按版本号升序，不隐藏历史版本），含根单 / 上一版本 / 是否最新版本 / 是否已被后续版本取代（只读历史）/ 是否已转出；口径见 §12 |
 | POST | `/api/sales/proforma-invoices/...` | PI 同上一套；`POST /{id}/to-order`（PI → 销售订单）、`GET /{id}/order-prefill`（带入预填）与报价单同口径 |
 | GET | `/api/reports/quotation-conversion?start=&end=` | **报价成交率分析**（ERP-018，报表框架 `ReportController`）：按业务员聚合，计算口径见 §10.3 |
 
@@ -227,7 +232,8 @@
 | 报价单**有效期治理**（状态分类 + 到期提醒 + 列表徽标） | ✅ 已实现（ERP-018） | `QuotationValidityRules`（五态分类 / 窗口归一化 / 紧急度）、`GET /api/sales/quotations/validity-due`、`sales-pi.js`（`quotationValidityBadge` / `openQuotationValidityReminder`）、`crud.js` 列 `render` 钩子 |
 | **报价成交率报表**（按业务员聚合，口径见 §10.3） | ✅ 已实现（ERP-018） | `ReportService.Quotation.cs`、`GET /api/reports/quotation-conversion`、`reports.js` 的 `quotation-conversion`、`sales-pi.js` 的 `openQuotationConversionReport` |
 | 报价单 / PI → 销售订单（带入预填 + 直接生成、来源留痕、重复守卫） | ✅ 已实现（ERP-010） | `SalesOrderConversion.cs`、`SalesOrderConversionTests`（18 例）、§8.3 |
-| 回归测试 | ✅ 272/272 通过（2026-09-23 实测，Release） | `dotnet build NEWERP.sln -c Release`（0 警告 0 错误）+ `dotnet test src/ERP.UnitTests/ERP.UnitTests.csproj -c Release --no-build` |
+| 报价单**版本链**（多轮议价版本留痕：创建新版本 / 版本历史 / 历史版本只读） | ✅ 已实现（ERP-035） | `Quotation.RevisionNumber/RootQuotationId/RootQuotationNo/PreviousRevisionId/PreviousRevisionNo`、`QuotationRevisionRules`（纯规则）、`QuotationRevisionService`（复制 / 链查询 / 只读守卫）、`QuotationLineRules`（权威合计复算：新增 / 修改 / 版本复制共用）、`POST`+`GET /api/sales/quotations/{id}/revisions`、`SchemaUpgrader` 第 24 段（幂等补列 + 链内版本号唯一索引）、`sales-pi.js`（`quotationRevisionBadge` / `quotationCreateRevision` / `quotationRevisionHistory`）、`modules.js` 派生列与行操作、`QuotationRevisionTests`（12 例）；口径见 §12 |
+| 回归测试 | ✅ 559/559 通过（2026-09-24 实测，Release） | `dotnet build NEWERP.sln -c Release`（0 警告 0 错误）+ `dotnet test src/ERP.UnitTests/ERP.UnitTests.csproj -c Release --no-build` |
 
 ### 9.2 浏览器验收延后（代码就绪，尚未做真实 Edge 验收）
 
@@ -236,6 +242,7 @@
 | 报价单 → PI → 打开 PI → 草稿改 / 审核禁改 / 销审恢复 / 打印预览 / 作废 | 🧪 **ERP-007 已完成真实 Edge 验收**（6/6 通过、14 张截图、TRX + `browser-session.json`，2026-09-23） |
 | 报价单 / PI 转销售订单（ERP-010）、订单追溯（ERP-008）、库存单据（ERP-009）等场景 | 🧪 **`browser_deferred`**：按 `completion_policy.defer_browser_during_development` 延后到 **`FINAL-UI-ACCEPTANCE`** 阶段统一执行 `Collection=UiTests`，届时以真实 Edge + TRX + 截图 + SHA-256 清单为准 |
 | 报价单打印预览/直接打印/打印设计、有效期提醒与成交率报表（ERP-018） | 🧪 **`browser_deferred`**：用例已写入 `src/ERP.IntegrationTests/QuotationGovernanceUiTests.cs`（3 个场景：打印三件套入口、有效期治理徽标 + 提醒弹窗、成交率报表），留待 `FINAL-UI-ACCEPTANCE` 统一执行 |
+| 报价版本链（创建新版本 / 修改新版本并核对源版本未变 / 版本历史）（ERP-035） | 🧪 **`browser_deferred`**：页面入口已就绪（报价单行操作「创建新版本」「版本历史」+ 列表派生列「版本 / 版本链根单号 / 上一版本」），真实 Edge 场景留待 `FINAL-UI-ACCEPTANCE` 统一执行 |
 
 > `browser_deferred` **既不等于已验收，也不等于失败**：既有 UI 用例（`PiWorkflowUiTests`、`SalesOrderConversionUiTests`、`OrderTraceabilityUiTests`、`InventoryMovementUiTests` 等）与浏览器基础设施保持原样，待最终 UI 验收阶段批量执行。
 
@@ -243,7 +250,7 @@
 
 | 缺口 | 状态 | 备注 |
 |---|---|---|
-| 报价版本号（多轮议价版本留痕） | ❌ 未实现，未立项 | ERP-006 审计缺口④ |
+| ~~报价版本号（多轮议价版本留痕）~~ | ✅ **已实现（ERP-035）** | ERP-006 审计缺口④：`POST/GET /api/sales/quotations/{id}/revisions` + 版本链列（根单 / 版本号 / 上一版本）+ 链内版本号唯一索引 + 历史版本只读；口径见 §12。数据迁移（历史报价单回填根单 / 版本号）**有意不做**：历史报价单按初始版本 V1 读取 |
 | 报价单通用 CRUD 的控制器级单元测试 | ◑ 部分覆盖 | 转 PI / 转订单 / 打印数据 / 有效期 / 成交率路径已有测试（`QuotationToPiTests` / `SalesOrderConversionTests` / `QuotationGovernanceTests`），通用 CRUD（分页 / 详情 / 新增 / 修改）未单测 |
 | 报表中心菜单键 `quotation-conversion` | ◑ 未加菜单 | 报表已注册进 `ReportController` 与 `reports.js`，入口在报价单页工具栏「📈 成交率报表」；数据库菜单表由受门禁脚本维护（`SchemaUpgrader` / `deploy/*.sql`），本任务不改结构 |
 | 报价单 / PI 进入 `BILL_CODE_MAP` | ✅ **有意不入** | 该映射把菜单码路由到存储过程版单据页（`/api/v2/bills/*`）；两类单据是 EF 主子表（页面在 `MODULES`），挂进去会让菜单跳到 SP 页并 404。共享打印配置改由 `BILL_CONFIG`（`bill-config-ef.js`）承载 |
@@ -296,3 +303,53 @@
 | 1 | 编号前缀 | `QT` / `PI`（可在「单据编号规则」页自助修改） |
 | 2 | PI 银行信息 | **系统参数存默认 + PI 可覆盖**（避免重复录入与出错） |
 | 3 | PI → 销售订单 | **带入预填 + 直接生成**（ERP-010 已实现）：预填返回未落库草稿供人工编辑，直接生成走 EF 销售订单接口并留痕来源；**不调用旧版销售订单存储过程**，`SourceQuotationId/No`、`SourcePiId/No` 由服务端写入 |
+
+---
+
+## 12. ERP-035：报价版本链（多轮议价版本留痕，2026-09-24 实施）
+
+### 12.1 数据与编号口径
+
+| 项 | 规则 |
+|---|---|
+| 新增列 | `Quotations`：`RevisionNumber`（INT，默认 **1**）、`RootQuotationId`（BIGINT NULL）、`RootQuotationNo`（NVARCHAR(50)，默认空串）、`PreviousRevisionId`（BIGINT NULL）、`PreviousRevisionNo`（NVARCHAR(50)，默认空串）；由 `SchemaUpgrader` 第 24 段幂等补齐（`IF COL_LENGTH ... IS NULL`） |
+| 版本号 | 服务端分配，链内**单调递增**：初始版本 = **1**；下一个版本 = 链内最大版本号 + 1（链内历史行若为 0 / 未赋值按 1 参与计算） |
+| 版本单号 | 根单号 + `-R版本号`（如 `QT202609240001-R2`）；若该单号已被链外单据手工占用则继续递增；超过 `Quotations.QuotationNo` 的 50 字符上限直接拒绝（不静默截断） |
+| 链根 | 初始版本的 `RootQuotationId` 为空（自身即根，冗余根单号也为空 → 页面按自身单号显示）；后续版本指向根单主键并冗余根单号；链内查询口径 = `Id == 根单Id || RootQuotationId == 根单Id` |
+| 并发保护 | 过滤唯一索引 `UX_Quotations_RevisionChain(RootQuotationId, RevisionNumber) WHERE IsDeleted = 0 AND RootQuotationId IS NOT NULL`：并发创建同一版本号时由数据库拒绝，服务端把该冲突（SQL Server 2601 / 2627）转换为可读业务错误「版本号正被其他请求占用，请重试」；**非唯一性数据库故障原样上抛，不误报成并发冲突** |
+| 历史数据 | 新增列之前创建的报价单 `RevisionNumber` 为空 / 0 → 读取时按初始版本 V1 处理；**不回填、不改写、不新增字轨**（`SchemaUpgrader` 只做 `ALTER TABLE ... ADD`，无 `UPDATE`） |
+
+### 12.2 创建新版本（`POST /api/sales/quotations/{id}/revisions`）
+
+| 项 | 规则 |
+|---|---|
+| 源版本要求 | 必须存在、未软删除、**未作废**（`Status = Cancelled` 拒绝：「已作废的报价单不能创建新版本」）；已审核 / 已完成 / 已被取代的版本都可作为源（支持「回退到上一轮条款再议」） |
+| 复制内容 | 可议价主表字段：客户 / 对接人 / 联系方式、来源询价单、贸易术语 / 起运港 / 目的港 / 付款方式 / 交货期、币种 / 汇率、业务员、备注、有效期（有效期是可议价条款，原样继承）；明细：商品 / 规格 / 单位 / 数量 / 单价 / 起订量 / 备注（**只复制未删除行**） |
+| 服务端复算 | 行号重排为 1..n、金额 = 数量 × 单价（2 位）、合计与折人民币由 `QuotationLineRules.Normalize` 复算 —— 与「新增 / 修改」**同一份权威实现**（ERP-035 从控制器抽到 `ERP.Application/Services/QuotationLineRules.cs`） |
+| 不复制 | 主键 / 单号（服务端另分配）、**审核状态**（新版本一律草稿 `Pending`）、下游转换状态与已生成单据链接（PI / 销售订单仍只挂被显式选中的那一张） |
+| 源版本不变 | 源版本（含明细主键 / 行号 / 金额 / 状态 / 时间戳）**一行不改**；创建后源版本成为只读历史 |
+
+### 12.3 历史版本只读（不可变历史）
+
+| 操作 | 历史版本（已被后续版本取代） | 说明 |
+|---|---|---|
+| 修改 `PUT {id}`、提交、审核、销审、取消、删除 | ❌ 一律拒绝：`该报价单已有后续版本，历史版本只读；请在最新版本上继续操作` | 判定口径 = 链内存在直接指向它的下一版本（`PreviousRevisionId == Id`），与版本链接口的 `superseded` 字段同源 |
+| 转 PI / 转销售订单 | 沿用既有守卫（只允许已审核、同一来源仅一张、已转 PI 不能再转销售订单等） | **不因存在新版本而改判**：转换只针对被显式选中的 `{id}`，绝不静默转换别的版本 |
+
+### 12.4 版本链查询与页面入口
+
+| 项 | 内容 |
+|---|---|
+| 接口 | `GET /api/sales/quotations/{id}/revisions` → 根单 + 全部历史版本，按版本号升序（不隐藏历史版本）；每行给出 `revisionNumber`、`rootQuotationId/No`、`previousRevisionId/No`、`isInitialRevision`、`isLatest`、`isSelected`、`superseded`、`converted`、状态 / 日期 / 有效期 / 金额 / 客户 / 业务员 |
+| 列表页 | 报价单列表新增派生列「版本（V1/V2 徽标）」「版本链根单号」「上一版本（初始版本显式标注）」；`virtual: true` → 列表打印 / 导出跳过，不产生空列 |
+| 行操作 | 「🆕 创建新版本」（非作废状态可见）、「🧬 版本历史」（弹窗列出完整版本链并可直接跳转到任一版本编辑页；`历史只读` / `最新` / `（当前）` 标记与后端口径一致） |
+| 转换口径 | 已转出仍按「被选中的那张报价单」判定（`ProformaInvoices.QuotationId` / `SalesOrders.SourceQuotationId`），该口径 ERP-035 起由 `QuotationRevisionService.LoadConvertedQuotationIdsAsync` 统一提供，与有效期提醒（§10.2）共用 |
+
+### 12.5 验证
+
+| 项 | 内容 |
+|---|---|
+| 单元测试 | `src/ERP.UnitTests/QuotationRevisionTests.cs`（12 例）：复制隔离与合计复算、源版本一行未改、软删除明细不复制、未作废限制、版本号单调递增（含历史根单 / 分支 / 链外占用 / 超长拒绝）、历史根单不回填且时间戳不变、历史版本六类操作只读 + 最新版本仍可操作、转 PI / 转销售订单只认被选中版本、唯一索引冲突映射与「非唯一故障不误报」、EF 模型与 `SchemaUpgrader` 脚本契约、历史报价单兼容、路由与前端接线 |
+| 命令 | `dotnet build NEWERP.sln -c Release --no-restore --no-incremental /p:TreatWarningsAsErrors=true /p:RunAnalyzersDuringBuild=true`（0 警告 0 错误）+ `dotnet test src/ERP.UnitTests/ERP.UnitTests.csproj -c Release --no-build`（**559/559 通过**） |
+| 结构执行边界 | 本任务只新增**仓库内的幂等结构代码**与测试；**未执行任何 SQL**、未连接数据库、未做历史数据迁移 / 回填，生产库结构变更与部署仍在 Human Gate 之后 |
+| 浏览器验收 | `browser_deferred`（按 `completion_policy.defer_browser_during_development` 延后到 `FINAL-UI-ACCEPTANCE`） |
