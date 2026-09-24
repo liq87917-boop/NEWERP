@@ -179,6 +179,10 @@ Object.assign(MODULES, {
       { key: 'owningCustomerName', label: '归属客户' }, { key: 'owningSalesOrderNo', label: '归属销售订单' },
       { key: 'arrivalProgress', label: '到货进度' }, { key: 'settlementProgress', label: '结算进度' },
       { key: 'totalAmount', label: '总额', type: 'money' }, { key: 'status', label: '状态', status: true },
+      /* ERP-048：发票证据派生列（virtual，不落库）：已登记（未作废）发票已开票金额 / 未开票金额 / 覆盖状态；
+         由 purchase-order-invoice-evidence.js 按页有界批量取数后渲染（每页一次 / 分批请求，绝不逐行查库），
+         历史 / 无效证据只以 ⚠ 提示，绝不计入已开票金额，也不当作应付余额或结算状态 */
+      { key: 'invoiceEvidence', label: '发票证据', virtual: true, render: row => purchaseOrderInvoiceEvidenceCellHtml(row) },
     ],
     fields: [
       { key: 'orderDate', label: '订单日期', type: 'date' },
@@ -217,6 +221,9 @@ Object.assign(MODULES, {
       { label: '财务核对', icon: '💰', title: '按既有引用字段核对本单与付款单、费用单、收款单与结算单（只读，金额未知不推断）', onclick: 'showOrderFinanceReconciliation' },
       /* ERP-043：以本采购订单的供应商 / 币种打开供应商发票登记册（只关联同供应商同币种订单） */
       { label: '供应商发票', icon: '🧾', title: '打开供应商采购发票登记册，并以本单的供应商与币种预筛选与预填（发票只关联同供应商 + 同币种的采购订单）', onclick: 'openPurchaseInvoiceRegister' },
+      /* ERP-048：本单发票证据详情（只读派生：已登记「已开票」金额 / 未开票金额 / 发票张数 / 覆盖状态，
+         并逐条列出草稿 / 已作废 / 无效（供应商 / 币种不一致）/ 无法确认的历史证据；不改写本单，也不认定应付余额或付款） */
+      { label: '发票证据', icon: '🧾', title: '查看本采购订单的发票证据：已登记（未作废）发票的已开票金额、未开票金额、发票张数与覆盖状态，以及草稿 / 已作废 / 无效 / 无法确认证据的逐条明细（只读派生；不是应付余额、付款授权、税务申报或结算状态）', onclick: 'showPurchaseOrderInvoiceEvidence' },
       /* ERP-045：登记 / 查看本采购订单的附件引用（仅元数据；不上传 / 下载 / 预览 / 抓取任何文件，作废保留历史） */
       { label: '附件引用', icon: '📎', title: '登记或查看本采购订单的附件引用元数据（分类 / 显示名 / 不透明引用标识 / 大小 / 校验和；不上传、不下载、不预览、不抓取文件，作废保留历史且不改写本单）', onclick: 'openDocumentAttachmentReferencesForCurrentModule' },
       { label: '打印预览', icon: '🖨', title: '按打印模板预览该采购订单（含归属客户 / 执行进度等）', onclick: 'previewSalesDocPrint' },

@@ -1,7 +1,7 @@
 {
   "id": "ERP-048",
   "title": "Expose invoice evidence summary in Purchase Order workflows",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "low",
   "description": "Expose a read-only invoice-evidence summary in existing Purchase Order list and detail workflows by reusing ERP-043 persisted allocations and ERP-044 reconciliation semantics. Do not create another invoice schema, infer invoice links, change Purchase Order status, claim payment settlement or payable balance, execute production SQL, deploy, or release.",
   "acceptance_criteria": [
@@ -49,5 +49,5 @@
     "status": "not_required",
     "reason": "Read-only presentation of existing invoice allocations. No production mutation, payable posting, payment, tax action, deployment or release is authorized."
   },
-  "attempts": 0
+  "attempts": 1
 }

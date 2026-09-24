@@ -86,6 +86,28 @@ public class PurchaseOrderController : DocumentControllerBase<PurchaseOrder>
         => Ok(ApiResponse<SupplierPurchaseExposureReport>.Success(
             await SupplierPurchaseExposure.ForQueryAsync(Db, query)));
 
+    /// <summary>
+    /// 发票证据汇总（ERP-048，只读派生）：只按 ERP-043 的持久化关联行派生「已登记且未作废」的已开票金额、
+    /// 未开票金额、发票张数与覆盖状态，并把草稿 / 已作废 / 无效（供应商 / 币种不一致）/ 无法确认证据单独列出
+    /// （覆盖状态与订单可用性文案复用 ERP-044 的同一套口径）。
+    /// <para>只读：不改写采购订单状态、到货进度、结算进度文本、发票与关联行、库存与库存成本、收付款、
+    /// 供应商余额、费用或退税记录；本值只是采购发票证据，不是应付余额、付款授权、税务申报判断或结算状态。</para>
+    /// </summary>
+    [HttpGet("{id:long}/invoice-evidence")]
+    public async Task<IActionResult> InvoiceEvidence(long id)
+        => Ok(ApiResponse<PurchaseOrderInvoiceEvidenceDetail>.Success(
+            await PurchaseOrderInvoiceEvidence.ForOrderAsync(Db, id)));
+
+    /// <summary>
+    /// 采购订单列表用有界发票覆盖汇总（ERP-048，只读派生）：逗号分隔的订单 Id（一次最多 200 张），
+    /// 固定 3 次数据集访问、无逐行查库；命中读取上限时金额与计数按「未知」返回，绝不报出部分合计。
+    /// </summary>
+    [HttpGet("invoice-evidence-summaries")]
+    public async Task<IActionResult> InvoiceEvidenceSummaries([FromQuery] string? ids)
+        => Ok(ApiResponse<PurchaseOrderInvoiceEvidenceBatch>.Success(
+            await PurchaseOrderInvoiceEvidence.ForOrdersAsync(
+                Db, new PurchaseOrderInvoiceEvidenceQuery { Ids = ids })));
+
     /// <summary>创建</summary>
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] PurchaseOrder entity)
