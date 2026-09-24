@@ -1,4 +1,7 @@
-/* ============ 库存移动与呆滞报表（ERP-029：只读派生，基础单位口径；未知显示「未知」，绝不显示为 0） ============ */
+/* ============ 库存移动与呆滞报表（ERP-029：只读派生，基础单位口径；未知显示「未知」，绝不显示为 0） ============
+   商品筛选取自商品资料下拉（复用既有 GET /api/base/products 的有界查询 + keyword 匹配编码 / 名称）：
+   选中下拉项 = 精确 productId，关键字 = 编码 / 名称模糊并同时筛选下拉内容，两者同时存在时按 AND 组合；
+   下拉只登记商品资料里的真实编码 / 名称，报表不臆造名称、也不做事后文本权威匹配。 */
 
 /* 台账状态 / 分类文案（与后端 InventoryMovementSemantics 常量一一对应） */
 const IMR_HISTORY_LABELS = {
@@ -23,8 +26,8 @@ function openInventoryMovementReport() {
     <div class="toolbar">
       <div class="toolbar-left" style="flex-wrap:wrap;gap:8px;align-items:center">
         <label>仓库 <select id="imr-warehouse" style="min-width:150px"><option value="">全部仓库</option></select></label>
-        <label>商品ID <input type="number" id="imr-product" style="width:110px" placeholder="可留空"></label>
-        <label>商品关键字 <input type="text" id="imr-keyword" style="width:150px" placeholder="编码 / 名称"></label>
+        <label>商品 <select id="imr-product" style="min-width:190px"><option value="">全部商品</option></select></label>
+        <label>商品关键字 <input type="text" id="imr-keyword" style="width:170px" placeholder="编码 / 名称（同时筛选商品下拉）" oninput="loadImrProductOptions(this.value)"></label>
         <label>截止日期 <input type="date" id="imr-asof" value="${today}"></label>
         <label>移动窗口 <input type="date" id="imr-window-start" value="${windowStart}"> 至
           <input type="date" id="imr-window-end" value="${today}"></label>
@@ -45,6 +48,7 @@ function openInventoryMovementReport() {
     <div class="pd-hint" id="imr-rule"></div>
     <div class="pagination" id="imr-pagination"></div>`;
   loadImrWarehouses();
+  loadImrProductOptions('');
   loadInventoryMovementReport(1);
 }
 
@@ -61,6 +65,31 @@ async function loadImrWarehouses() {
       sel.appendChild(opt);
     });
   } catch (e) { /* 忽略：仓库下拉失败不影响报表查询 */ }
+}
+
+/* 商品下拉：复用既有商品资料接口（keyword 匹配编码 / 名称），只登记商品资料里的真实编码 / 名称，不臆造；
+   输入关键字时防抖刷新下拉内容（有界：单次最多 50 条）；接口不可用时不阻断报表，仍可留空或仅用关键字查询 */
+let imrProductSearchTimer = null;
+function loadImrProductOptions(keyword) {
+  clearTimeout(imrProductSearchTimer);
+  imrProductSearchTimer = setTimeout(async () => {
+    try {
+      const kw = (keyword || '').trim();
+      const data = await api('/api/base/products?page=1&pageSize=50'
+        + (kw ? '&keyword=' + encodeURIComponent(kw) : ''));
+      const sel = document.getElementById('imr-product');
+      if (!sel) return;
+      const keep = sel.value;
+      sel.innerHTML = '<option value="">全部商品</option>';
+      (data.items || []).forEach(p => {
+        const opt = document.createElement('option');
+        opt.value = p.id;
+        opt.textContent = ((p.productCode || '') + ' ' + (p.productName || '')).trim() || ('商品 ' + p.id);
+        sel.appendChild(opt);
+      });
+      if (keep && sel.querySelector(`option[value="${keep}"]`)) sel.value = keep;
+    } catch (e) { /* 忽略：商品下拉失败不影响报表查询 */ }
+  }, 250);
 }
 
 /* 查询参数：全部由页面筛选控件组装（留空即不传，由后端取默认值） */

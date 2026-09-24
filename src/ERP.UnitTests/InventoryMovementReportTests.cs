@@ -6,6 +6,7 @@ using ERP.Domain.Entities;
 using ERP.Domain.Enums;
 using ERP.Infrastructure.Data;
 using Microsoft.AspNetCore.Mvc;
+using System.Reflection;
 using Xunit;
 
 namespace ERP.UnitTests;
@@ -412,6 +413,13 @@ public class InventoryMovementReportTests
         Assert.Contains("IMR_CLASS_LABELS", reportJs);
         Assert.Contains("IMR_HISTORY_LABELS", reportJs);
 
+        // 商品筛选是「商品资料下拉」（复用既有商品资料接口，keyword 匹配编码 / 名称），使用者不必先知道商品 Id；
+        // 下拉只登记真实商品资料，接口不可用时仅降级为「留空 / 关键字」，不臆造编码或名称
+        Assert.Contains("function loadImrProductOptions(keyword)", reportJs);
+        Assert.Contains("/api/base/products?page=1&pageSize=50", reportJs);
+        Assert.Contains("<select id=\"imr-product\"", reportJs);
+        Assert.Contains("oninput=\"loadImrProductOptions(this.value)\"", reportJs);
+
         // 五项筛选控件齐备：仓库 / 商品 / 截止日期 / 移动窗口 / 呆滞阈值
         foreach (var id in new[]
                  {
@@ -427,6 +435,120 @@ public class InventoryMovementReportTests
         Assert.Contains("openInventoryMovementReport", modulesDoc2);
         var index = File.ReadAllText(Path.Combine(js, "..", "index.html"));
         Assert.Contains("/js/inventory-movement-report.js", index);
+    }
+
+    // ==================== 13. 有界查询与只读：数据集访问次数与行数无关，且全程不写库 ====================
+
+    [Fact]
+    public async Task Report_uses_a_bounded_number_of_dataset_reads_and_never_writes()
+    {
+        using var db = TestDbFactory.Create();
+        SeedWarehouse(db, WarehouseA, "主仓");
+        SeedProduct(db, Product1, "P001", "商品一");
+        SeedStock(db, WarehouseA, Product1, 5m);
+        SeedMovement(db, WarehouseA, Product1, AsOf.AddDays(-1), direction: 1, quantity: 5m);
+        await db.SaveChangesAsync();
+
+        var counting = CountingDbContext.Wrap(db);
+        var service = new ReportService(counting.Proxy);
+
+        var single = await service.GetInventoryMovementReportAsync(Query(pageSize: 1));
+        var singleReads = counting.DatasetReads;
+        Assert.Equal(1, single.Total);
+        // 常数级访问：库存行 + 窗口台账 + 历史台账 + 仓库名 + 商品信息（每条都是一次整表级查询）
+        Assert.Equal(5, singleReads);
+
+        // 再补 300 个库存行 + 对应台账（跨多页）：同一报表的数据集访问次数必须保持不变（无逐行查库）
+        for (var i = 1; i <= 300; i++)
+        {
+            var productId = Product1 + i;
+            SeedProduct(db, productId, $"P{i:0000}", $"商品{i}");
+            SeedStock(db, WarehouseA, productId, i);
+            SeedMovement(db, WarehouseA, productId, AsOf.AddDays(-2), direction: 1, quantity: i);
+        }
+        await db.SaveChangesAsync();
+
+        var large = await service.GetInventoryMovementReportAsync(Query(pageSize: 200));
+        var largeReads = counting.DatasetReads - singleReads;
+        Assert.Equal(301, large.Total);
+        Assert.Equal(ReportDtos.InventoryMovementReportQuery.MaxPageSize, large.Items.Count);   // 单页有界（上限 200）
+        Assert.Equal(singleReads, largeReads);                                                  // 行数 / 页大小变化不改变访问次数
+
+        // 关键字走 EXISTS 子查询（不逐行回表）：整页 200 行与单行请求的访问次数一致
+        await service.GetInventoryMovementReportAsync(Query(keyword: "P", pageSize: 200));       // 预热查询管道
+        var beforeFull = counting.DatasetReads;
+        var keywordFull = await service.GetInventoryMovementReportAsync(Query(keyword: "P", pageSize: 200));
+        var keywordFullReads = counting.DatasetReads - beforeFull;
+        var beforeSingle = counting.DatasetReads;
+        var keywordSingle = await service.GetInventoryMovementReportAsync(Query(keyword: "P", pageSize: 1));
+        var keywordSingleReads = counting.DatasetReads - beforeSingle;
+        Assert.Equal(301, keywordFull.Total);
+        Assert.Equal(200, keywordFull.Items.Count);
+        Assert.Equal(301, keywordSingle.Total);                 // 关键字只影响筛选取值，总数与分页无关
+        Assert.Single(keywordSingle.Items);                     // 单行页
+        Assert.Equal(keywordFullReads, keywordSingleReads);     // 整页 200 行与单行：数据集访问次数一致
+
+        Assert.Equal(0, counting.WriteCalls);                                                    // 只读报表：没有一次 SaveChanges
+    }
+
+    // ==================== 14. 移动窗口是闭区间：首尾当天（含时间部分）都计入 ====================
+
+    [Fact]
+    public async Task Report_counts_window_boundary_days_at_both_ends()
+    {
+        using var db = TestDbFactory.Create();
+        SeedProduct(db, Product1, "P001", "商品一");
+        SeedWarehouse(db, WarehouseA, "主仓");
+        SeedStock(db, WarehouseA, Product1, 5m);
+        var start = AsOf.AddDays(-9);
+        SeedMovement(db, WarehouseA, Product1, start.AddDays(-1), direction: 1, quantity: 1m);   // 窗口前：不计
+        SeedMovement(db, WarehouseA, Product1, start.AddHours(9), direction: 1, quantity: 2m);   // 首日（带时间部分）
+        SeedMovement(db, WarehouseA, Product1, AsOf.AddHours(23), direction: 1, quantity: 3m);   // 末日（带时间部分）
+        await db.SaveChangesAsync();
+
+        var report = await Service(db).GetInventoryMovementReportAsync(
+            Query(windowStart: start, windowEnd: AsOf, inactiveDays: 90));
+
+        var row = Assert.Single(report.Items);
+        Assert.Equal(5m, row.InboundQuantity);                 // 2 + 3：首尾当天都计入，窗口前的 1 不计
+        Assert.Equal(0m, row.OutboundQuantity);
+        Assert.Equal(5m, row.NetQuantity);
+        Assert.Equal(2, row.MovementCount);
+        Assert.Equal(AsOf.AddHours(23), row.LastMovementDate);
+        Assert.Equal(0, row.InactivityDays);
+        Assert.Equal(InventoryMovementSemantics.HistoryLedger, row.HistoryStatus);
+    }
+
+    // ==================== 15. 红字跨窗口边界：只计窗口内的台账行，不跨窗口配对 ====================
+
+    [Fact]
+    public async Task Report_does_not_pair_reversals_across_the_window_boundary()
+    {
+        using var db = TestDbFactory.Create();
+        SeedProduct(db, Product1, "P001", "商品一");
+        SeedWarehouse(db, WarehouseA, "主仓");
+        SeedStock(db, WarehouseA, Product1, 0m);
+
+        // 原入库（+10）在窗口之外、红字冲销（-10）在窗口之内：窗口内如实反映「只有红字腿」，
+        // 报表不跨窗口配对、也不二次扣减——每一行仍可逐笔回溯到台账
+        SeedMovement(db, WarehouseA, Product1, AsOf.AddDays(-60), direction: 1, quantity: 10m, id: 1);
+        SeedMovement(db, WarehouseA, Product1, AsOf.AddDays(-3), direction: -1, quantity: 10m,
+            isReversal: true, reversalOf: 1, id: 2);
+        await db.SaveChangesAsync();
+
+        var report = await Service(db).GetInventoryMovementReportAsync(
+            Query(windowStart: AsOf.AddDays(-9), windowEnd: AsOf, inactiveDays: 90, onlyPositiveQuantity: false));
+
+        var row = Assert.Single(report.Items);
+        Assert.Equal(0m, row.InboundQuantity);                 // 窗口内没有入库腿
+        Assert.Equal(10m, row.OutboundQuantity);
+        Assert.Equal(-10m, row.NetQuantity);
+        Assert.Equal(1, row.MovementCount);
+        Assert.Equal(1, row.ReversalCount);
+        Assert.Equal(AsOf.AddDays(-3), row.LastMovementDate);  // 红字流水同样是台账事实
+        Assert.Equal(3, row.InactivityDays);
+        Assert.Contains("红字冲销", row.Note);
+        Assert.Contains("未做二次扣减", row.Note);
     }
 
     // ==================== 助手 ====================
@@ -504,5 +626,46 @@ public class InventoryMovementReportTests
         };
         db.StockMovements.Add(movement);
         return movement;
+    }
+
+    /// <summary>
+    /// 只读计数上下文代理（<see cref="DispatchProxy"/>）：统计报表访问数据集（<c>DbSet</c> 属性）的次数与写入次数，
+    /// 用于断言「分页 / 有界查询」与「无逐行查库、只读不写库」；不引入测试依赖，也不改动生产代码。
+    /// </summary>
+    public class CountingDbContext : DispatchProxy
+    {
+        private IErpDbContext _inner = null!;
+
+        /// <summary>包装后的上下文（报表服务按 <see cref="IErpDbContext"/> 使用）</summary>
+        public IErpDbContext Proxy { get; private set; } = null!;
+
+        /// <summary>数据集（<c>DbSet</c> 属性）访问次数：即本次报表实际发起的数据集查询次数</summary>
+        public int DatasetReads { get; private set; }
+
+        /// <summary><c>SaveChangesAsync</c> 调用次数：只读报表恒为 0</summary>
+        public int WriteCalls { get; private set; }
+
+        /// <summary>包装一个真实上下文（计数从返回对象上读取）</summary>
+        public static CountingDbContext Wrap(IErpDbContext inner)
+        {
+            var proxy = DispatchProxy.Create<IErpDbContext, CountingDbContext>();
+            var counting = (CountingDbContext)(object)proxy;
+            counting._inner = inner;
+            counting.Proxy = proxy;
+            return counting;
+        }
+
+        protected override object? Invoke(MethodInfo? targetMethod, object?[]? args)
+        {
+            if (targetMethod is null) return null;
+            if (targetMethod.Name == nameof(IErpDbContext.SaveChangesAsync))
+            {
+                WriteCalls++;
+                return _inner.SaveChangesAsync(args is { Length: > 0 } ? (CancellationToken)args[0]! : default);
+            }
+
+            if (targetMethod.Name.StartsWith("get_", StringComparison.Ordinal)) DatasetReads++;
+            return targetMethod.Invoke(_inner, args);
+        }
     }
 }
