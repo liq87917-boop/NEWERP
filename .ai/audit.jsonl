@@ -104,3 +104,4 @@
 {"at": "2026-09-24T12:05:57.432143Z", "event": "browser_acceptance_deferred", "task": "ERP-024"}
 {"at": "2026-09-24T12:05:57.432143Z", "event": "task_completed", "task": "ERP-024", "status": "completed", "execution_outcome": "completed", "normalized_finish_reason": "browser_deferred", "cline_exit_code": 0, "cline_finish_reason_raw": "direct_execution", "attempts": 1, "browser_acceptance": {"status": "deferred", "reason": "Real-browser/UI acceptance is deferred until FINAL-UI-ACCEPTANCE.", "deferred_at": "2026-09-24T12:05:57.432143Z"}, "finished_at": "2026-09-24T12:05:57.432143Z"}
 {"at": "2026-09-24T12:05:57.432143Z", "event": "queue_replenishment_requested", "batch_size": 4, "low_watermark": 2}
+{"at": "2026-09-24T12:07:58.693667Z", "event": "runner_failure_cleared", "task": "ERP-021", "reason": "ERP-021 through ERP-024 completed by direct execution with safe validation"}
