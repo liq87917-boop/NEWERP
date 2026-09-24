@@ -143,8 +143,13 @@ Object.assign(MODULES, {
       { key: 'remark', label: '备注', type: 'textarea' },
     ],
     /* 行操作：打印预览（打印模板按 billType=sales-order，含客户 PO / 合同 / 唛头等新字段）
-       ERP-019：单证中心台账生成——「生成单证」直接落库，「预填单证」带入单证中心新增表单人工核对后再保存 */
+       ERP-019：单证中心台账生成——「生成单证」直接落库，「预填单证」带入单证中心新增表单人工核对后再保存
+       ERP-032：出货与收款进度（只读派生，数量来自已审核销售出库单，收款链接复用财务核对的既有引用规则） */
+    extraActions: [
+      { label: '🚚 出货 / 财务进度', onclick: 'openSalesOrderShipmentFinanceReport', title: '按客户 + 币种查看订单的已订 / 已出 / 未出数量与收款链接金额（复用出库与财务核对的权威口径，未知显示「未知」；不是应收账款台账）' },
+    ],
     rowActions: [
+      { label: '出货进度', icon: '🚚', title: '查看由销售出库单派生的已订 / 已出 / 未出数量，以及既有引用可用时的已关联 / 未覆盖收款金额', onclick: 'showSalesOrderProgress' },
       { label: '执行时间线', icon: '🕘', title: '查看由订单、出库、单证与客诉记录派生的执行时间线', onclick: 'showOrderTimeline' },
       { label: '财务核对', icon: '💰', title: '按既有引用字段核对本单与定金 / 货款申请单、付款单、费用单、客诉单、收款单与结算单（只读，金额未知不推断）', onclick: 'showOrderFinanceReconciliation' },
       { label: '打印预览', icon: '🖨', title: '按打印模板预览该销售订单（含客户 PO / 合同 / 唛头等）', onclick: 'previewSalesDocPrint' },

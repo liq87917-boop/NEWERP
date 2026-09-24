@@ -67,6 +67,25 @@ public class SalesOrderController : DocumentControllerBase<SalesOrder>
         => Ok(ApiResponse<OrderFinanceReconciliationView>.Success(
             await OrderFinanceReconciliation.ForSalesOrderAsync(Db, id)));
 
+    /// <summary>
+    /// 出货与收款进度（ERP-032，只读派生）：出货数量按「以本单为来源（SalesOrderId）、未删除、已审核」的销售出库单明细派生
+    /// （待提交 / 已提交只单列，已驳回 / 已取消不计入）；收款链接复用 ERP-028 的既有引用字段（定金 / 货款申请单的 SalesOrderId），
+    /// 只有「已审核 + 币种一致」计入金额，无权威引用或命中派生上限时金额为 null（未知，不用 0 顶替）。
+    /// </summary>
+    [HttpGet("{id:long}/progress")]
+    public async Task<IActionResult> Progress(long id)
+        => Ok(ApiResponse<SalesOrderProgressView>.Success(
+            await SalesOrderProgress.ForSalesOrderAsync(Db, id)));
+
+    /// <summary>
+    /// 销售订单出货 / 财务进度报表（ERP-032，只读派生、分页有界）：按「客户 + 币种」分组汇总已按权威口径派生的出货数量与收款链接金额，
+    /// 不同币种分别成行、绝不合并、不做汇率换算；未链接 / 命中上限一律显式标注未知，不作为应收余额或账龄使用。
+    /// </summary>
+    [HttpGet("shipment-finance-report")]
+    public async Task<IActionResult> ShipmentFinanceReport([FromQuery] SalesOrderShipmentFinanceQuery query)
+        => Ok(ApiResponse<SalesOrderShipmentFinanceReportView>.Success(
+            await SalesOrderShipmentFinanceReport.ForQueryAsync(Db, query)));
+
 
     /// <summary>创建</summary>
     [HttpPost]
