@@ -1,7 +1,7 @@
 {
   "id": "ERP-045",
   "title": "Add unified business-document attachment reference register",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "medium",
   "description": "Add a unified metadata-only attachment reference register for existing Sales Orders, Purchase Orders, Container Loading Lists and Trade Documents. It may index an already authorized opaque object or document reference, but it must not upload, download, preview, fetch, overwrite or delete any OSS object, expose credentials, accept executable markup, infer source ownership, migrate legacy FileNote values, execute production SQL, deploy, or release. Actual production storage integration remains a separate human-gated activity.",
   "acceptance_criteria": [
@@ -51,5 +51,5 @@
     "status": "not_required",
     "reason": "Repository metadata and non-production test schema only. Production OSS access, file transfer, credential use, production schema execution, deployment and release are not authorized."
   },
-  "attempts": 0
+  "attempts": 1
 }

@@ -68,6 +68,14 @@ public interface IErpDbContext
     /// <summary>供应商采购发票 → 采购订单 关联（分摊）行（ERP-043；只保存订单快照与关联金额，不建到订单的外键）</summary>
     DbSet<PurchaseInvoiceAllocation> PurchaseInvoiceAllocations { get; }
 
+    // ============ 业务单据附件引用登记（ERP-045：仅元数据的附件引用册） ============
+
+    /// <summary>
+    /// 业务单据附件引用（ERP-045：为销售订单 / 采购订单 / 装柜清单 / 出口单证登记**仅元数据**的附件引用；
+    /// 不上传 / 下载 / 预览 / 抓取任何对象，不建到父单据的外键）
+    /// </summary>
+    DbSet<DocumentAttachmentReference> DocumentAttachmentReferences { get; }
+
     // ============ 询价管理 ============
     DbSet<Inquiry> Inquiries { get; }
     DbSet<InquiryDetail> InquiryDetails { get; }

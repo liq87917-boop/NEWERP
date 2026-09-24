@@ -1765,5 +1765,70 @@ IF NOT EXISTS (SELECT 1 FROM sys.foreign_keys
         ADD CONSTRAINT FK_PurchaseInvoiceAllocations_Invoice
         FOREIGN KEY (PurchaseInvoiceId) REFERENCES db_owner.PurchaseInvoices(Id);");
 
+        // 32. 业务单据附件引用登记（ERP-045：仅元数据的附件引用册）
+        //     32.1 只建「附件引用」一张表与其索引：**不含任何 UPDATE / 回填语句**，
+        //          父单据（销售订单 / 采购订单 / 装柜清单 / 单证）与既有 FileNote、商品图片位
+        //          不因本段产生任何变化（没有引用数据时行为与历史完全一致）；
+        //     32.2 父单据只保存服务端写入的号码 / 类型快照，**刻意不建**任何外键，也不在父单据上加列 ——
+        //          父单据改名、停用或软删除都不影响历史引用可读，本表也不参与父单据的金额 / 库存 / 财务 / 出运计算；
+        //     32.3 有效身份唯一：UX_DocumentAttachmentReferences_ActiveIdentity
+        //          （父单据类型 + 父单据 Id + 分类 + 不透明引用标识），过滤 IsDeleted = 0 AND Status = 0 ——
+        //          已作废记录保留可读但不占用身份（作废后可重新登记同一引用标识）；
+        //     32.4 索引与 ErpDbContext 模型同名同过滤条件：父单据 / 引用标识均有界检索；
+        //     32.5 本段只建本模块一张表与其索引，不含任何对象存储读写、抓取或删除操作。
+        await db.Database.ExecuteSqlRawAsync(@"
+IF OBJECT_ID('db_owner.DocumentAttachmentReferences') IS NULL
+BEGIN
+    CREATE TABLE db_owner.DocumentAttachmentReferences (
+        Id BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+        ParentType NVARCHAR(30) NOT NULL,
+        ParentId BIGINT NOT NULL,
+        ParentNo NVARCHAR(50) NOT NULL DEFAULT N'',
+        ParentTypeText NVARCHAR(30) NOT NULL DEFAULT N'',
+        Category NVARCHAR(30) NOT NULL,
+        DisplayName NVARCHAR(200) NOT NULL,
+        ReferenceId NVARCHAR(200) NOT NULL,
+        ContentType NVARCHAR(120) NOT NULL DEFAULT N'',
+        SizeBytes BIGINT NOT NULL DEFAULT 0,
+        Checksum NVARCHAR(128) NOT NULL DEFAULT N'',
+        Notes NVARCHAR(500) NOT NULL DEFAULT N'',
+        SourceAuthorizationAcknowledged BIT NOT NULL DEFAULT 0,
+        SourceAuthorizationNote NVARCHAR(300) NOT NULL DEFAULT N'',
+        AuthorizedBy NVARCHAR(100) NOT NULL DEFAULT N'',
+        AuthorizedAt DATETIME2 NOT NULL DEFAULT GETDATE(),
+        RegisteredAt DATETIME2 NOT NULL DEFAULT GETDATE(),
+        Status INT NOT NULL DEFAULT 0,
+        VoidedAt DATETIME2 NULL,
+        VoidReason NVARCHAR(500) NOT NULL DEFAULT N'',
+        CreatedAt DATETIME2 NOT NULL DEFAULT GETDATE(),
+        CreatedBy BIGINT NULL,
+        UpdatedAt DATETIME2 NULL,
+        UpdatedBy BIGINT NULL,
+        IsDeleted BIT NOT NULL DEFAULT 0,
+        RowVersion ROWVERSION NOT NULL
+    );
+END
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes
+               WHERE name = 'UX_DocumentAttachmentReferences_ActiveIdentity'
+                 AND object_id = OBJECT_ID('db_owner.DocumentAttachmentReferences'))
+    CREATE UNIQUE INDEX UX_DocumentAttachmentReferences_ActiveIdentity
+        ON db_owner.DocumentAttachmentReferences(ParentType, ParentId, Category, ReferenceId)
+        WHERE IsDeleted = 0 AND Status = 0;
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes
+               WHERE name = 'IX_DocumentAttachmentReferences_ParentType_ParentId'
+                 AND object_id = OBJECT_ID('db_owner.DocumentAttachmentReferences'))
+    CREATE INDEX IX_DocumentAttachmentReferences_ParentType_ParentId
+        ON db_owner.DocumentAttachmentReferences(ParentType, ParentId, Status)
+        WHERE IsDeleted = 0;
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes
+               WHERE name = 'IX_DocumentAttachmentReferences_ReferenceId'
+                 AND object_id = OBJECT_ID('db_owner.DocumentAttachmentReferences'))
+    CREATE INDEX IX_DocumentAttachmentReferences_ReferenceId
+        ON db_owner.DocumentAttachmentReferences(ReferenceId)
+        WHERE IsDeleted = 0;");
+
     }
 }

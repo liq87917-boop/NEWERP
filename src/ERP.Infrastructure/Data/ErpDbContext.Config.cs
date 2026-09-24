@@ -382,6 +382,47 @@ public partial class ErpDbContext
             .HasOne(x => x.Invoice).WithMany(i => i.Allocations)
             .HasForeignKey(x => x.PurchaseInvoiceId).OnDelete(DeleteBehavior.Cascade);
 
+        // ============ ERP-045：业务单据附件引用登记（仅元数据的附件引用册） ============
+        // 设计口径：
+        //   1. 本表只登记**元数据引用**：分类 / 安全显示名 / 不透明引用标识 / 可选内容类型 / 字节数 /
+        //      校验和 / 备注 + 来源授权确认留痕；**不**保存文件内容、**不**保存链接、
+        //      **不**上传 / 下载 / 预览 / 抓取 / 覆盖 / 删除任何 OSS 对象（真正的存储集成另行人工审批）；
+        //   2. 父单据只保存**服务端写入**的号码 / 类型快照（ParentNo / ParentTypeText），
+        //      **刻意不建**到销售订单 / 采购订单 / 装柜清单 / 单证的数据库外键：父单据改名、停用或软删除
+        //      都不影响历史引用可读，本表也不参与父单据的金额、库存、财务与出运计算；
+        //   3. 有效身份唯一：同一「父单据类型 + 父单据 Id + 分类 + 不透明引用标识」在**有效**记录内唯一
+        //      （UX_DocumentAttachmentReferences_ActiveIdentity，过滤 IsDeleted = 0 AND Status = 0）：
+        //      已作废记录保留可读但不占用身份，作废后可重新登记同一引用标识；
+        //   4. 索引与 SchemaUpgrader 第 32 段同名同过滤条件（父单据有界检索 / 引用标识检索）；
+        //   5. 本段只改本模块模型映射：不改写父单据、库存与库存成本、财务、出运与审批数据。
+        modelBuilder.Entity<DocumentAttachmentReference>().Property(x => x.ParentType).HasMaxLength(30);
+        modelBuilder.Entity<DocumentAttachmentReference>().Property(x => x.ParentNo).HasMaxLength(50);
+        modelBuilder.Entity<DocumentAttachmentReference>().Property(x => x.ParentTypeText).HasMaxLength(30);
+        modelBuilder.Entity<DocumentAttachmentReference>().Property(x => x.Category).HasMaxLength(30);
+        modelBuilder.Entity<DocumentAttachmentReference>().Property(x => x.DisplayName).HasMaxLength(200);
+        modelBuilder.Entity<DocumentAttachmentReference>().Property(x => x.ReferenceId).HasMaxLength(200);
+        modelBuilder.Entity<DocumentAttachmentReference>().Property(x => x.ContentType).HasMaxLength(120);
+        modelBuilder.Entity<DocumentAttachmentReference>().Property(x => x.Checksum).HasMaxLength(128);
+        modelBuilder.Entity<DocumentAttachmentReference>().Property(x => x.Notes).HasMaxLength(500);
+        modelBuilder.Entity<DocumentAttachmentReference>().Property(x => x.SourceAuthorizationNote).HasMaxLength(300);
+        modelBuilder.Entity<DocumentAttachmentReference>().Property(x => x.AuthorizedBy).HasMaxLength(100);
+        modelBuilder.Entity<DocumentAttachmentReference>().Property(x => x.VoidReason).HasMaxLength(500);
+
+        modelBuilder.Entity<DocumentAttachmentReference>()
+            .HasIndex(x => new { x.ParentType, x.ParentId, x.Category, x.ReferenceId })
+            .IsUnique().HasDatabaseName("UX_DocumentAttachmentReferences_ActiveIdentity")
+            .HasFilter("IsDeleted = 0 AND Status = 0");
+
+        modelBuilder.Entity<DocumentAttachmentReference>()
+            .HasIndex(x => new { x.ParentType, x.ParentId, x.Status })
+            .HasDatabaseName("IX_DocumentAttachmentReferences_ParentType_ParentId")
+            .HasFilter("IsDeleted = 0");
+
+        modelBuilder.Entity<DocumentAttachmentReference>()
+            .HasIndex(x => x.ReferenceId)
+            .HasDatabaseName("IX_DocumentAttachmentReferences_ReferenceId")
+            .HasFilter("IsDeleted = 0");
+
         // ============ 明细外键级联删除 ============
         modelBuilder.Entity<InquiryDetail>()
             .HasOne<Inquiry>().WithMany(i => i.Details)

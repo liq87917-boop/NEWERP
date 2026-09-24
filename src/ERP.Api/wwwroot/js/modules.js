@@ -416,14 +416,18 @@ const MODULES = {
     /* ERP-019：列表按条件导出 Excel（与销售订单 / 采购订单导出一致的中文列头与 xlsx 附件） */
     extraActions: [
       { label: '📤 导出 Excel', onclick: 'openTradeDocExportDialog()', title: '按单证类型 / 状态 / 出具日期 / 关键字导出单证台账为 Excel' },
+      /* ERP-045：附件引用登记册入口（仅元数据；不上传 / 下载 / 预览 / 抓取任何文件） */
+      { label: '📎 附件引用册', onclick: 'openDocumentAttachmentReferences()', title: '查看 / 登记销售订单、采购订单、装柜清单与出口单证的附件引用元数据（分类 / 显示名 / 不透明引用标识；不上传、不下载、不预览、不抓取文件）' },
     ],
     /* ERP-019：行操作支持单条单证导出，便于把某一票单证单独发给客户或报关行
        ERP-030：单条单证接入共享打印（打印预览 / 直接打印），打印模板与打印设计沿用
-       「样式设计」中登记的唯一一份 doc-center 类型模板（见 trade-doc-print.js） */
+       「样式设计」中登记的唯一一份 doc-center 类型模板（见 trade-doc-print.js）
+       ERP-045：为本单证登记 / 查看附件引用（仅元数据；既有 FileNote 保持原样，不自动导入） */
     rowActions: [
       { label: '导出该单证', icon: '📤', title: '仅导出本行单证为 Excel（便于单独归档或发送）', onclick: 'exportTradeDocument' },
       { label: '打印预览该单证', icon: '🖨', title: '按单证打印模板预览本单证打印效果（空白字段表示台账未登记该值，系统不做推测）', onclick: 'previewTradeDocPrint' },
       { label: '直接打印该单证', icon: '🖨', title: '不弹预览，按打印模板直接输出本单证并调起浏览器打印', onclick: 'printTradeDocDirect' },
+      { label: '附件引用', icon: '📎', title: '登记或查看本单证的附件引用元数据（既有「附件说明 / 存放位置」FileNote 保持原样，不自动导入、不当作已授权附件）', onclick: 'openDocumentAttachmentReferencesForCurrentModule' },
     ],
     columns: [
       { key: 'docNo', label: '单证编号' }, { key: 'docType', label: '单证类型' },

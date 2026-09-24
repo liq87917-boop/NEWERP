@@ -155,6 +155,8 @@ Object.assign(MODULES, {
       { label: '打印预览', icon: '🖨', title: '按打印模板预览该销售订单（含客户 PO / 合同 / 唛头等）', onclick: 'previewSalesDocPrint' },
       { label: '生成单证', icon: '📋', title: '由该销售订单生成报关单 / 装箱单 / 商业发票 / 产地证 / 提单等单证中心记录（同一类型只生成一张）', onclick: 'generateTradeDocsFromSource', statuses: ['Pending', 'Submitted', 'Approved'] },
       { label: '预填单证', icon: '📝', title: '按该销售订单带入单证草稿到单证中心新增表单（不落库，可编辑后再保存）', onclick: 'prefillTradeDocFromSource', statuses: ['Pending', 'Submitted', 'Approved'] },
+      /* ERP-045：登记 / 查看本销售订单的附件引用（仅元数据；不上传 / 下载 / 预览 / 抓取任何文件，作废保留历史） */
+      { label: '附件引用', icon: '📎', title: '登记或查看本销售订单的附件引用元数据（分类 / 显示名 / 不透明引用标识 / 大小 / 校验和；不上传、不下载、不预览、不抓取文件，作废保留历史且不改写本单）', onclick: 'openDocumentAttachmentReferencesForCurrentModule' },
     ],
     detailKey: 'details',
     detailTitle: '订单商品明细（数量 × 单价 = 金额，自动算合计）',
@@ -209,6 +211,8 @@ Object.assign(MODULES, {
       { label: '财务核对', icon: '💰', title: '按既有引用字段核对本单与付款单、费用单、收款单与结算单（只读，金额未知不推断）', onclick: 'showOrderFinanceReconciliation' },
       /* ERP-043：以本采购订单的供应商 / 币种打开供应商发票登记册（只关联同供应商同币种订单） */
       { label: '供应商发票', icon: '🧾', title: '打开供应商采购发票登记册，并以本单的供应商与币种预筛选与预填（发票只关联同供应商 + 同币种的采购订单）', onclick: 'openPurchaseInvoiceRegister' },
+      /* ERP-045：登记 / 查看本采购订单的附件引用（仅元数据；不上传 / 下载 / 预览 / 抓取任何文件，作废保留历史） */
+      { label: '附件引用', icon: '📎', title: '登记或查看本采购订单的附件引用元数据（分类 / 显示名 / 不透明引用标识 / 大小 / 校验和；不上传、不下载、不预览、不抓取文件，作废保留历史且不改写本单）', onclick: 'openDocumentAttachmentReferencesForCurrentModule' },
       { label: '打印预览', icon: '🖨', title: '按打印模板预览该采购订单（含归属客户 / 执行进度等）', onclick: 'previewSalesDocPrint' },
     ],
     detailKey: 'details',

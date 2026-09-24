@@ -68,4 +68,8 @@ public partial class ErpDbContext
 
     /// <summary>供应商采购发票 → 采购订单 关联（分摊）行（含订单快照与关联金额）</summary>
     public DbSet<PurchaseInvoiceAllocation> PurchaseInvoiceAllocations => Set<PurchaseInvoiceAllocation>();
+
+    // ============ 业务单据附件引用登记（ERP-045） ============
+    /// <summary>业务单据附件引用（仅元数据的附件引用册；对父单据只保存号码 / 类型快照，不建外键）</summary>
+    public DbSet<DocumentAttachmentReference> DocumentAttachmentReferences => Set<DocumentAttachmentReference>();
 }
