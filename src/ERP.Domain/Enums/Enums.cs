@@ -93,7 +93,13 @@ public enum DocumentType
     SalesReturn = 21,
 
     /// <summary>采购退货单（ERP-009 新增）</summary>
-    PurchaseReturn = 22
+    PurchaseReturn = 22,
+
+    /// <summary>
+    /// 销售订单变更申请（ERP-047 新增）：只登记「拟议变更」的编号字轨，**不是**一张可审核 / 可执行的业务单据 ——
+    /// 本类型不进入单据存储过程目录，申请也不改写销售订单与任何下游数据。前缀 SOC。
+    /// </summary>
+    SalesOrderChangeRequest = 23
 
 }
 

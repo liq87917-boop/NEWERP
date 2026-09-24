@@ -145,10 +145,12 @@ Object.assign(MODULES, {
     /* 行操作：打印预览（打印模板按 billType=sales-order，含客户 PO / 合同 / 唛头等新字段）
        ERP-019：单证中心台账生成——「生成单证」直接落库，「预填单证」带入单证中心新增表单人工核对后再保存
        ERP-032：出货与收款进度（只读派生，数量来自已审核销售出库单，收款链接复用财务核对的既有引用规则）
-       ERP-046：客户订单与收款核对报表（只读派生；收款单无订单级引用 → 单独作为未关联证据列出，绝不自动匹配） */
+       ERP-046：客户订单与收款核对报表（只读派生；收款单无订单级引用 → 单独作为未关联证据列出，绝不自动匹配）
+       ERP-047：销售订单变更申请登记册（只登记拟议变更：来源快照 + 拟议值对照；不审核、不套用、不改写来源订单） */
     extraActions: [
       { label: '🚚 出货 / 财务进度', onclick: 'openSalesOrderShipmentFinanceReport', title: '按客户 + 币种查看订单的已订 / 已出 / 未出数量与收款链接金额（复用出库与财务核对的权威口径，未知显示「未知」；不是应收账款台账）' },
       { label: '🧾 订单 / 收款核对', onclick: 'openSalesOrderReceiptReconciliationReport', title: '按客户 + 币种核对销售订单与收款证据：已订 / 已出 / 未出数量 + 已关联收款金额 / 未覆盖金额，未关联收款单单独列出（只读派生；不是应收账款台账 / 客户对账单 / 收款授权 / 账龄表）' },
+      { label: '📝 变更申请台账', onclick: 'openSalesOrderChangeRequests()', title: '查看销售订单变更申请登记册（只登记拟议变更与来源快照对照；不审核、不套用、不改写来源订单与下游记录）' },
     ],
     rowActions: [
       { label: '出货进度', icon: '🚚', title: '查看由销售出库单派生的已订 / 已出 / 未出数量，以及既有引用可用时的已关联 / 未覆盖收款金额', onclick: 'showSalesOrderProgress' },
@@ -159,6 +161,8 @@ Object.assign(MODULES, {
       { label: '预填单证', icon: '📝', title: '按该销售订单带入单证草稿到单证中心新增表单（不落库，可编辑后再保存）', onclick: 'prefillTradeDocFromSource', statuses: ['Pending', 'Submitted', 'Approved'] },
       /* ERP-045：登记 / 查看本销售订单的附件引用（仅元数据；不上传 / 下载 / 预览 / 抓取任何文件，作废保留历史） */
       { label: '附件引用', icon: '📎', title: '登记或查看本销售订单的附件引用元数据（分类 / 显示名 / 不透明引用标识 / 大小 / 校验和；不上传、不下载、不预览、不抓取文件，作废保留历史且不改写本单）', onclick: 'openDocumentAttachmentReferencesForCurrentModule' },
+      /* ERP-047：本单的变更申请登记册（只登记拟议变更与来源快照对照；不审核、不套用、不改写本单） */
+      { label: '变更申请', icon: '📝', title: '登记或查看本销售订单的变更申请（来源快照 + 拟议值对照；提交只是登记冻结，系统不批准、不套用，也不改写本单与出库 / 装柜 / 收款 / 库存 / 财务记录）', onclick: 'openSalesOrderChangeRequestsForCurrentModule' },
     ],
     detailKey: 'details',
     detailTitle: '订单商品明细（数量 × 单价 = 金额，自动算合计）',

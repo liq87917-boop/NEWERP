@@ -76,6 +76,17 @@ public interface IErpDbContext
     /// </summary>
     DbSet<DocumentAttachmentReference> DocumentAttachmentReferences { get; }
 
+    // ============ 销售订单变更申请登记（ERP-047：只登记拟议变更的不可变登记册） ============
+
+    /// <summary>
+    /// 销售订单变更申请（ERP-047）：保存「来源销售订单快照 + 拟议主/明细值 + 提交 / 取消留痕」，
+    /// <strong>不</strong>审核、<strong>不</strong>套用、<strong>不</strong>改写销售订单与任何下游记录，也不建到销售订单的外键
+    /// </summary>
+    DbSet<SalesOrderChangeRequest> SalesOrderChangeRequests { get; }
+
+    /// <summary>销售订单变更申请明细（拟议明细行；已提交 / 已取消申请一律只读，不做硬删除）</summary>
+    DbSet<SalesOrderChangeRequestDetail> SalesOrderChangeRequestDetails { get; }
+
     // ============ 询价管理 ============
     DbSet<Inquiry> Inquiries { get; }
     DbSet<InquiryDetail> InquiryDetails { get; }

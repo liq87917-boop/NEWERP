@@ -72,4 +72,11 @@ public partial class ErpDbContext
     // ============ 业务单据附件引用登记（ERP-045） ============
     /// <summary>业务单据附件引用（仅元数据的附件引用册；对父单据只保存号码 / 类型快照，不建外键）</summary>
     public DbSet<DocumentAttachmentReference> DocumentAttachmentReferences => Set<DocumentAttachmentReference>();
+
+    // ============ 销售订单变更申请登记（ERP-047） ============
+    /// <summary>销售订单变更申请（来源订单快照 + 拟议值 + 提交 / 取消留痕；不审核、不套用、不改写来源订单）</summary>
+    public DbSet<SalesOrderChangeRequest> SalesOrderChangeRequests => Set<SalesOrderChangeRequest>();
+
+    /// <summary>销售订单变更申请明细（拟议明细行；作为来源明细快照与拟议值的对照来源）</summary>
+    public DbSet<SalesOrderChangeRequestDetail> SalesOrderChangeRequestDetails => Set<SalesOrderChangeRequestDetail>();
 }

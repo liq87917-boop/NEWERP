@@ -423,6 +423,73 @@ public partial class ErpDbContext
             .HasDatabaseName("IX_DocumentAttachmentReferences_ReferenceId")
             .HasFilter("IsDeleted = 0");
 
+        // ============ ERP-047：销售订单变更申请登记（只登记拟议变更的不可变登记册） ============
+        // 设计口径：
+        //   1. 只建「申请 + 拟议明细」两张表：来源销售订单只保存**服务端写入的快照**（Source* 列），
+        //      **刻意不建**到 SalesOrders / SalesOrderDetails 的外键 —— 来源改名、停用或软删除都不影响历史申请可读，
+        //      本模块也不参与来源订单的金额、库存、库存成本、出运与财务计算；
+        //   2. 状态只有 0 草稿 / 1 已提交 / 2 已取消（**没有**「已批准 / 已套用」）；更正走取消并保留原因，不提供硬删除；
+        //   3. 拟议金额（明细金额 / 总额 / 定金金额）由服务端按销售订单唯一权威算法
+        //      （SalesOrderAmountRules：金额 = 数量 × 单价、总额 = Σ 明细金额、定金 = 总额 × 定金比例%）重算，
+        //      精度声明与 SchemaUpgrader 第 33 段一致：数量 / 金额 DECIMAL(18,4)、汇率 DECIMAL(18,6)；
+        //   4. 索引与 SchemaUpgrader 第 33 段同名同过滤条件：申请号 / 来源订单 / 状态均有界检索；
+        //   5. 明细 → 申请（级联）：申请本身只做软删除，物理删除时才清理明细行。
+        modelBuilder.Entity<SalesOrderChangeRequest>().Property(x => x.RequestNo).HasMaxLength(50);
+        modelBuilder.Entity<SalesOrderChangeRequest>().Property(x => x.SalesOrderNo).HasMaxLength(50);
+        modelBuilder.Entity<SalesOrderChangeRequest>().Property(x => x.SourceDetailSignature).HasMaxLength(500);
+        modelBuilder.Entity<SalesOrderChangeRequest>().Property(x => x.SourceSnapshotMarker).HasMaxLength(300);
+        modelBuilder.Entity<SalesOrderChangeRequest>().Property(x => x.Reason).HasMaxLength(500);
+        modelBuilder.Entity<SalesOrderChangeRequest>().Property(x => x.CancelledReason).HasMaxLength(500);
+        modelBuilder.Entity<SalesOrderChangeRequest>().Property(x => x.SourceExchangeRate).HasPrecision(18, 6);
+        modelBuilder.Entity<SalesOrderChangeRequest>().Property(x => x.ProposedExchangeRate).HasPrecision(18, 6);
+        modelBuilder.Entity<SalesOrderChangeRequest>().Property(x => x.SourceTotalAmount).HasPrecision(18, 4);
+        modelBuilder.Entity<SalesOrderChangeRequest>().Property(x => x.ProposedTotalAmount).HasPrecision(18, 4);
+        modelBuilder.Entity<SalesOrderChangeRequest>().Property(x => x.SourceDepositRatio).HasPrecision(18, 4);
+        modelBuilder.Entity<SalesOrderChangeRequest>().Property(x => x.ProposedDepositRatio).HasPrecision(18, 4);
+        modelBuilder.Entity<SalesOrderChangeRequest>().Property(x => x.SourceDepositAmount).HasPrecision(18, 4);
+        modelBuilder.Entity<SalesOrderChangeRequest>().Property(x => x.ProposedDepositAmount).HasPrecision(18, 4);
+        modelBuilder.Entity<SalesOrderChangeRequest>().Property(x => x.SourceCommissionRatio).HasPrecision(18, 4);
+        modelBuilder.Entity<SalesOrderChangeRequest>().Property(x => x.ProposedCommissionRatio).HasPrecision(18, 4);
+
+        modelBuilder.Entity<SalesOrderChangeRequest>()
+            .HasIndex(x => x.RequestNo)
+            .IsUnique().HasDatabaseName("UX_SalesOrderChangeRequests_RequestNo")
+            .HasFilter("IsDeleted = 0");
+
+        modelBuilder.Entity<SalesOrderChangeRequest>()
+            .HasIndex(x => new { x.SalesOrderId, x.Status })
+            .HasDatabaseName("IX_SalesOrderChangeRequests_SourceOrder_Status")
+            .HasFilter("IsDeleted = 0");
+
+        modelBuilder.Entity<SalesOrderChangeRequest>()
+            .HasIndex(x => new { x.Status, x.CreatedAt })
+            .HasDatabaseName("IX_SalesOrderChangeRequests_Status_CreatedAt")
+            .HasFilter("IsDeleted = 0");
+
+        modelBuilder.Entity<SalesOrderChangeRequestDetail>().Property(x => x.SourceProductName).HasMaxLength(200);
+        modelBuilder.Entity<SalesOrderChangeRequestDetail>().Property(x => x.SourceSpec).HasMaxLength(200);
+        modelBuilder.Entity<SalesOrderChangeRequestDetail>().Property(x => x.SourceUnit).HasMaxLength(20);
+        modelBuilder.Entity<SalesOrderChangeRequestDetail>().Property(x => x.SourceRemark).HasMaxLength(500);
+        modelBuilder.Entity<SalesOrderChangeRequestDetail>().Property(x => x.ProposedProductName).HasMaxLength(200);
+        modelBuilder.Entity<SalesOrderChangeRequestDetail>().Property(x => x.ProposedSpec).HasMaxLength(200);
+        modelBuilder.Entity<SalesOrderChangeRequestDetail>().Property(x => x.ProposedUnit).HasMaxLength(20);
+        modelBuilder.Entity<SalesOrderChangeRequestDetail>().Property(x => x.ProposedQuantity).HasPrecision(18, 4);
+        modelBuilder.Entity<SalesOrderChangeRequestDetail>().Property(x => x.ProposedUnitPrice).HasPrecision(18, 4);
+        modelBuilder.Entity<SalesOrderChangeRequestDetail>().Property(x => x.ProposedAmount).HasPrecision(18, 4);
+        modelBuilder.Entity<SalesOrderChangeRequestDetail>().Property(x => x.SourceQuantity).HasPrecision(18, 4);
+        modelBuilder.Entity<SalesOrderChangeRequestDetail>().Property(x => x.SourceUnitPrice).HasPrecision(18, 4);
+        modelBuilder.Entity<SalesOrderChangeRequestDetail>().Property(x => x.SourceAmount).HasPrecision(18, 4);
+        modelBuilder.Entity<SalesOrderChangeRequestDetail>().Property(x => x.ProposedRemark).HasMaxLength(500);
+
+        modelBuilder.Entity<SalesOrderChangeRequestDetail>()
+            .HasIndex(x => new { x.ChangeRequestId, x.LineNo })
+            .HasDatabaseName("IX_SalesOrderChangeRequestDetails_Request_LineNo")
+            .HasFilter("IsDeleted = 0");
+
+        modelBuilder.Entity<SalesOrderChangeRequestDetail>()
+            .HasOne<SalesOrderChangeRequest>().WithMany(o => o.Details)
+            .HasForeignKey(d => d.ChangeRequestId).OnDelete(DeleteBehavior.Cascade);
+
         // ============ 明细外键级联删除 ============
         modelBuilder.Entity<InquiryDetail>()
             .HasOne<Inquiry>().WithMany(i => i.Details)

@@ -1830,5 +1830,167 @@ IF NOT EXISTS (SELECT 1 FROM sys.indexes
         ON db_owner.DocumentAttachmentReferences(ReferenceId)
         WHERE IsDeleted = 0;");
 
+        // 33. 销售订单变更申请登记（ERP-047：只登记拟议变更的不可变登记册）
+        //     33.1 只建「申请 + 拟议明细」两张表与其索引 / 外键：**不含任何 UPDATE / 回填语句**，
+        //          既有销售订单主表 / 明细表不因本段产生任何变化（没有申请数据时行为与历史完全一致）；
+        //     33.2 来源订单只保存服务端写入的快照（Source* 列），**刻意不建**到 SalesOrders / SalesOrderDetails 的外键，
+        //          也不在来源订单上加列 —— 来源改名、停用或软删除都不影响历史申请可读；
+        //     33.3 申请号在未删除记录内唯一：UX_SalesOrderChangeRequests_RequestNo（过滤 IsDeleted = 0）；
+        //     33.4 索引与 ErpDbContext 模型同名同过滤条件：来源订单 / 状态均有界检索；
+        //     33.5 本段只建本模块两张表与其索引，不改写销售订单、报价单、出库、装柜与出运、
+        //          收款与发票、佣金、库存与库存成本、单证中心与财务数据。
+        await db.Database.ExecuteSqlRawAsync(@"
+IF OBJECT_ID('db_owner.SalesOrderChangeRequests') IS NULL
+BEGIN
+    CREATE TABLE db_owner.SalesOrderChangeRequests (
+        Id BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+        RequestNo NVARCHAR(50) NOT NULL,
+        SalesOrderId BIGINT NOT NULL,
+        SalesOrderNo NVARCHAR(50) NOT NULL DEFAULT N'',
+        SourceStatus INT NOT NULL DEFAULT 0,
+        SourceUpdatedAt DATETIME2 NOT NULL DEFAULT GETDATE(),
+        SourceDetailSignature NVARCHAR(500) NOT NULL DEFAULT N'',
+        SourceSnapshotMarker NVARCHAR(300) NOT NULL DEFAULT N'',
+        Reason NVARCHAR(500) NOT NULL,
+        SourceOrderDate DATETIME2 NOT NULL DEFAULT GETDATE(),
+        SourceCustomerId BIGINT NOT NULL DEFAULT 0,
+        SourceSalesmanId BIGINT NULL,
+        SourceCurrency INT NOT NULL DEFAULT 0,
+        SourceExchangeRate DECIMAL(18,6) NOT NULL DEFAULT 0,
+        SourceTotalAmount DECIMAL(18,4) NOT NULL DEFAULT 0,
+        SourceDepositRatio DECIMAL(18,4) NOT NULL DEFAULT 0,
+        SourceDepositAmount DECIMAL(18,4) NOT NULL DEFAULT 0,
+        SourcePaymentTerms NVARCHAR(200) NOT NULL DEFAULT N'',
+        SourceDeliveryDate DATETIME2 NULL,
+        SourceShippingMethod NVARCHAR(100) NOT NULL DEFAULT N'',
+        SourcePortId BIGINT NULL,
+        SourceRemark NVARCHAR(500) NOT NULL DEFAULT N'',
+        SourceCustomerPoNo NVARCHAR(50) NOT NULL DEFAULT N'',
+        SourceContractNo NVARCHAR(50) NOT NULL DEFAULT N'',
+        SourceTradeTerms NVARCHAR(50) NOT NULL DEFAULT N'',
+        SourceDestinationPort NVARCHAR(100) NOT NULL DEFAULT N'',
+        SourceConsignee NVARCHAR(300) NOT NULL DEFAULT N'',
+        SourceNotifyParty NVARCHAR(300) NOT NULL DEFAULT N'',
+        SourceShippingMarks NVARCHAR(500) NOT NULL DEFAULT N'',
+        SourceQuotationNoSnapshot NVARCHAR(50) NOT NULL DEFAULT N'',
+        SourcePiNoSnapshot NVARCHAR(50) NOT NULL DEFAULT N'',
+        SourceExportMode NVARCHAR(20) NOT NULL DEFAULT N'',
+        SourceCommissionRatio DECIMAL(18,4) NOT NULL DEFAULT 0,
+        SourceBusinessNature NVARCHAR(20) NOT NULL DEFAULT N'',
+        SourceSplitShipment BIT NOT NULL DEFAULT 0,
+        SourceInspectionRequirement NVARCHAR(500) NOT NULL DEFAULT N'',
+        SourcePackagingRequirement NVARCHAR(500) NOT NULL DEFAULT N'',
+        ProposedOrderDate DATETIME2 NOT NULL DEFAULT GETDATE(),
+        ProposedCustomerId BIGINT NOT NULL DEFAULT 0,
+        ProposedSalesmanId BIGINT NULL,
+        ProposedCurrency INT NOT NULL DEFAULT 0,
+        ProposedExchangeRate DECIMAL(18,6) NOT NULL DEFAULT 0,
+        ProposedTotalAmount DECIMAL(18,4) NOT NULL DEFAULT 0,
+        ProposedDepositRatio DECIMAL(18,4) NOT NULL DEFAULT 0,
+        ProposedDepositAmount DECIMAL(18,4) NOT NULL DEFAULT 0,
+        ProposedPaymentTerms NVARCHAR(200) NOT NULL DEFAULT N'',
+        ProposedDeliveryDate DATETIME2 NULL,
+        ProposedShippingMethod NVARCHAR(100) NOT NULL DEFAULT N'',
+        ProposedPortId BIGINT NULL,
+        ProposedRemark NVARCHAR(500) NOT NULL DEFAULT N'',
+        ProposedCustomerPoNo NVARCHAR(50) NOT NULL DEFAULT N'',
+        ProposedContractNo NVARCHAR(50) NOT NULL DEFAULT N'',
+        ProposedTradeTerms NVARCHAR(50) NOT NULL DEFAULT N'',
+        ProposedDestinationPort NVARCHAR(100) NOT NULL DEFAULT N'',
+        ProposedConsignee NVARCHAR(300) NOT NULL DEFAULT N'',
+        ProposedNotifyParty NVARCHAR(300) NOT NULL DEFAULT N'',
+        ProposedShippingMarks NVARCHAR(500) NOT NULL DEFAULT N'',
+        ProposedExportMode NVARCHAR(20) NOT NULL DEFAULT N'',
+        ProposedCommissionRatio DECIMAL(18,4) NOT NULL DEFAULT 0,
+        ProposedBusinessNature NVARCHAR(20) NOT NULL DEFAULT N'',
+        ProposedSplitShipment BIT NOT NULL DEFAULT 0,
+        ProposedInspectionRequirement NVARCHAR(500) NOT NULL DEFAULT N'',
+        ProposedPackagingRequirement NVARCHAR(500) NOT NULL DEFAULT N'',
+        Status INT NOT NULL DEFAULT 0,
+        SubmittedAt DATETIME2 NULL,
+        CancelledAt DATETIME2 NULL,
+        CancelledReason NVARCHAR(500) NOT NULL DEFAULT N'',
+        CreatedAt DATETIME2 NOT NULL DEFAULT GETDATE(),
+        CreatedBy BIGINT NULL,
+        UpdatedAt DATETIME2 NULL,
+        UpdatedBy BIGINT NULL,
+        IsDeleted BIT NOT NULL DEFAULT 0,
+        RowVersion ROWVERSION NOT NULL
+    );
+END
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes
+               WHERE name = 'UX_SalesOrderChangeRequests_RequestNo'
+                 AND object_id = OBJECT_ID('db_owner.SalesOrderChangeRequests'))
+    CREATE UNIQUE INDEX UX_SalesOrderChangeRequests_RequestNo
+        ON db_owner.SalesOrderChangeRequests(RequestNo)
+        WHERE IsDeleted = 0;
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes
+               WHERE name = 'IX_SalesOrderChangeRequests_SourceOrder_Status'
+                 AND object_id = OBJECT_ID('db_owner.SalesOrderChangeRequests'))
+    CREATE INDEX IX_SalesOrderChangeRequests_SourceOrder_Status
+        ON db_owner.SalesOrderChangeRequests(SalesOrderId, Status)
+        WHERE IsDeleted = 0;
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes
+               WHERE name = 'IX_SalesOrderChangeRequests_Status_CreatedAt'
+                 AND object_id = OBJECT_ID('db_owner.SalesOrderChangeRequests'))
+    CREATE INDEX IX_SalesOrderChangeRequests_Status_CreatedAt
+        ON db_owner.SalesOrderChangeRequests(Status, CreatedAt)
+        WHERE IsDeleted = 0;");
+
+        // 33.6 拟议明细表（来源行快照 + 拟议值）+ 明细索引 + 唯一外键「明细 → 申请」：
+        //      申请本身仍只做软删除，物理删除时才级联清理明细行；明细不建到销售订单 / 商品的外键。
+        await db.Database.ExecuteSqlRawAsync(@"
+IF OBJECT_ID('db_owner.SalesOrderChangeRequestDetails') IS NULL
+BEGIN
+    CREATE TABLE db_owner.SalesOrderChangeRequestDetails (
+        Id BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+        ChangeRequestId BIGINT NOT NULL,
+        LineNo INT NOT NULL DEFAULT 0,
+        HasSourceLine BIT NOT NULL DEFAULT 0,
+        SourceProductId BIGINT NOT NULL DEFAULT 0,
+        SourceProductName NVARCHAR(200) NOT NULL DEFAULT N'',
+        SourceSpec NVARCHAR(200) NOT NULL DEFAULT N'',
+        SourceUnit NVARCHAR(20) NOT NULL DEFAULT N'',
+        SourceQuantity DECIMAL(18,4) NOT NULL DEFAULT 0,
+        SourceUnitPrice DECIMAL(18,4) NOT NULL DEFAULT 0,
+        SourceAmount DECIMAL(18,4) NOT NULL DEFAULT 0,
+        SourceDeliveryDate DATETIME2 NULL,
+        SourceRemark NVARCHAR(500) NOT NULL DEFAULT N'',
+        ProposedRemoved BIT NOT NULL DEFAULT 0,
+        ProposedProductId BIGINT NOT NULL DEFAULT 0,
+        ProposedProductName NVARCHAR(200) NOT NULL DEFAULT N'',
+        ProposedSpec NVARCHAR(200) NOT NULL DEFAULT N'',
+        ProposedUnit NVARCHAR(20) NOT NULL DEFAULT N'',
+        ProposedQuantity DECIMAL(18,4) NOT NULL DEFAULT 0,
+        ProposedUnitPrice DECIMAL(18,4) NOT NULL DEFAULT 0,
+        ProposedAmount DECIMAL(18,4) NOT NULL DEFAULT 0,
+        ProposedDeliveryDate DATETIME2 NULL,
+        ProposedRemark NVARCHAR(500) NOT NULL DEFAULT N'',
+        CreatedAt DATETIME2 NOT NULL DEFAULT GETDATE(),
+        CreatedBy BIGINT NULL,
+        UpdatedAt DATETIME2 NULL,
+        UpdatedBy BIGINT NULL,
+        IsDeleted BIT NOT NULL DEFAULT 0,
+        RowVersion ROWVERSION NOT NULL
+    );
+END
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes
+               WHERE name = 'IX_SalesOrderChangeRequestDetails_Request_LineNo'
+                 AND object_id = OBJECT_ID('db_owner.SalesOrderChangeRequestDetails'))
+    CREATE INDEX IX_SalesOrderChangeRequestDetails_Request_LineNo
+        ON db_owner.SalesOrderChangeRequestDetails(ChangeRequestId, LineNo)
+        WHERE IsDeleted = 0;
+
+IF NOT EXISTS (SELECT 1 FROM sys.foreign_keys
+               WHERE name = 'FK_SalesOrderChangeRequestDetails_Request'
+                 AND parent_object_id = OBJECT_ID('db_owner.SalesOrderChangeRequestDetails'))
+    ALTER TABLE db_owner.SalesOrderChangeRequestDetails
+        ADD CONSTRAINT FK_SalesOrderChangeRequestDetails_Request
+        FOREIGN KEY (ChangeRequestId) REFERENCES db_owner.SalesOrderChangeRequests(Id);");
+
     }
 }

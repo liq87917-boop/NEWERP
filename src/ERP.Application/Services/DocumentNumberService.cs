@@ -43,7 +43,8 @@ public class DocumentNumberService : IDocumentNumberService
         [DocumentType.StockAdjustment] = "PD",
         [DocumentType.StockTransfer] = "DB",
         [DocumentType.SalesReturn] = "XTH",
-        [DocumentType.PurchaseReturn] = "CTH"
+        [DocumentType.PurchaseReturn] = "CTH",
+        [DocumentType.SalesOrderChangeRequest] = "SOC"
     };
 
     /// <summary>生成单据号</summary>
@@ -116,6 +117,7 @@ public class DocumentNumberService : IDocumentNumberService
             DocumentType.StockTransfer => await _db.StockTransfers.CountAsync(o => !o.IsDeleted),
             DocumentType.SalesReturn => await _db.SalesReturns.CountAsync(o => !o.IsDeleted),
             DocumentType.PurchaseReturn => await _db.PurchaseReturns.CountAsync(o => !o.IsDeleted),
+            DocumentType.SalesOrderChangeRequest => await _db.SalesOrderChangeRequests.CountAsync(o => !o.IsDeleted),
             _ => 0
         };
     }

@@ -1,7 +1,7 @@
 {
   "id": "ERP-047",
   "title": "Add immutable Sales Order change-request register",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "medium",
   "description": "Add an explicit Sales Order change-request register that captures a proposed order snapshot without applying it to the authoritative Sales Order. A request may be drafted, submitted and cancelled for audit and later human review, but this task must not define approval thresholds, approve or apply changes, mutate shipment or finance records, execute production SQL, deploy, or release.",
   "acceptance_criteria": [
@@ -51,5 +51,5 @@
     "status": "not_required",
     "reason": "Repository-only proposal and audit trail. No request is approved or applied, and no production database action, downstream mutation, deployment or release is authorized."
   },
-  "attempts": 0
+  "attempts": 1
 }

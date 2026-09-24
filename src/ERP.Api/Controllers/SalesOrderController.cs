@@ -1,5 +1,6 @@
 using ERP.Application.Common;
 using ERP.Application.Interfaces;
+using ERP.Application.Services;
 using ERP.Domain.Entities;
 using ERP.Domain.Enums;
 using ERP.Infrastructure.Export;
@@ -110,7 +111,8 @@ public class SalesOrderController : DocumentControllerBase<SalesOrder>
         entity.OrderNo = await _noService.GenerateAsync(DocumentType.SalesOrder);
         entity.Status = DocumentStatus.Pending;
         entity.CreatedAt = DateTime.Now;
-        foreach (var d in entity.Details) d.Amount = d.Quantity * d.UnitPrice;   // 与 Update 对齐：补齐明细金额
+        // 与 Update 对齐：明细金额由服务端按「数量 × 单价」重算（唯一权威口径，忽略客户端金额）
+        SalesOrderAmountRules.ApplyDetailAmounts(entity);
         Calculate(entity);
         Validate(entity);
         Db.SalesOrders.Add(entity);
@@ -166,8 +168,9 @@ public class SalesOrderController : DocumentControllerBase<SalesOrder>
             d.Id = 0;
             d.SalesOrderId = id;
             d.CreatedAt = DateTime.Now;
-            d.Amount = d.Quantity * d.UnitPrice;
         }
+        // 明细金额与合计一律由服务端按唯一权威口径重算（ERP-047：SalesOrderAmountRules）
+        SalesOrderAmountRules.ApplyDetailAmounts(entity);
         existing.Details = entity.Details;
         Calculate(existing);
         Validate(existing);
@@ -300,19 +303,14 @@ public class SalesOrderController : DocumentControllerBase<SalesOrder>
 
     /// <summary>
     /// 合计口径（销售订单唯一权威算法）：总额 = Σ 明细数量×单价，定金金额 = 总额 × 定金比例%。
-    /// 声明为 public：报价单 / PI 转销售订单（ERP-010，<see cref="SalesOrderConversion"/>）复用同一算法，
-    /// 避免带入路径与页面录入路径出现两套口径。
+    /// 算法实现已抽到 <see cref="SalesOrderAmountRules.Calculate"/>（ERP-047）：报价单 / PI 转销售订单
+    /// （ERP-010）与销售订单变更申请登记（ERP-047）复用同一份实现，避免出现第二套金额口径。
     /// </summary>
-    public static void Calculate(SalesOrder entity)
-    {
-        entity.TotalAmount = entity.Details.Sum(d => d.Quantity * d.UnitPrice);
-        entity.DepositAmount = entity.TotalAmount * entity.DepositRatio / 100;
-    }
+    public static void Calculate(SalesOrder entity) => SalesOrderAmountRules.Calculate(entity);
 
-    /// <summary>业务字段校验（佣金比例 0~100；历史单据不填时为 0，不受影响）</summary>
-    public static void Validate(SalesOrder entity)
-    {
-        if (entity.CommissionRatio < 0 || entity.CommissionRatio > 100)
-            throw BusinessException.InvalidParameter("佣金比例必须在 0~100 之间");
-    }
+    /// <summary>
+    /// 业务字段校验（佣金比例 0~100；历史单据不填时为 0，不受影响）。
+    /// 实现位于 <see cref="SalesOrderAmountRules.Validate"/>，与合计算法同源。
+    /// </summary>
+    public static void Validate(SalesOrder entity) => SalesOrderAmountRules.Validate(entity);
 }
