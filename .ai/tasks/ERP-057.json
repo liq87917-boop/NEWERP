@@ -1,0 +1,52 @@
+{
+  "id": "ERP-057",
+  "title": "Add traceable container shipment reference snapshots",
+  "status": "pending",
+  "risk_level": "medium",
+  "description": "Add one canonical repository record for explicit shipment references associated with the existing container booking, pre-loading and loading-list chain. First audit and reuse any equivalent persisted relationship already present rather than creating a competing shipment master. Capture only user-recorded operational evidence; do not contact carriers, infer links from text, assert customs status, execute production SQL, deploy, or release.",
+  "acceptance_criteria": [
+    "The implementation audits the existing booking, pre-loading and loading-list entities and ends with one canonical shipment-reference model explicitly linked to authoritative records rather than matching container, order or document numbers heuristically.",
+    "Users can maintain bounded optional evidence for shipment mode, carrier booking or shipping-order reference, bill-of-lading reference, origin, transit and destination ports, planned departure and arrival timestamps, carrier, forwarder, trucking provider and customs-broker snapshots where available.",
+    "Shipment mode uses an explicit supported value such as LCL, FCL or unknown; missing values remain empty or unknown and are never defaulted from container type, volume, customer, route or free text.",
+    "Server validation enforces bounded plain text, supported values and coherent planned timestamps while preserving optional fields when authoritative evidence is unavailable.",
+    "Links to booking, pre-loading or loading-list records are validated server-side; deleted, incompatible or unrelated records are rejected and are not silently reassigned.",
+    "Recorded snapshots remain readable if a referenced master or dictionary entry later changes or becomes unavailable, and edits preserve an auditable prior-value or revision trail rather than silently rewriting historical evidence.",
+    "Creating or revising shipment references does not change Sales Orders, Purchase Orders, container workflow status, inventory, finance, invoice, tax, customs or settlement records.",
+    "Existing container records without shipment-reference evidence remain readable without request-time or production backfill.",
+    "Repository schema changes are idempotent, normal list and detail queries are bounded or paged and avoid per-row database access, and validation uses only permitted local or test-database paths.",
+    "Unit/integration tests cover each supported mode, partial evidence, explicit source linkage, invalid or deleted sources, timestamp and text validation, revision history, legacy records, bounded queries and adjacent-record non-mutation; safe validation passes and browser acceptance is recorded as deferred during development."
+  ],
+  "allowed_paths": [
+    "src/ERP.Domain/**",
+    "src/ERP.Application/**",
+    "src/ERP.Infrastructure/**",
+    "src/ERP.Api/Controllers/**",
+    "src/ERP.Api/wwwroot/**",
+    "src/ERP.UnitTests/**",
+    "src/ERP.IntegrationTests/**",
+    "docs/**",
+    ".ai/**"
+  ],
+  "depends_on": [],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "browser",
+  "browser_acceptance": {
+    "required": true,
+    "scenarios": [
+      "Open an existing container chain, record FCL or LCL shipment references with a partial route and planned dates, and verify the evidence remains linked to the selected authoritative records without changing their workflow status.",
+      "Leave unavailable references empty, attempt an invalid source link or incoherent planned dates, verify rejection, then revise valid evidence and confirm the prior recorded values remain auditable."
+    ],
+    "test_filter": "Collection=UiTests",
+    "minimum_screenshots": 2
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L2",
+    "status": "not_required",
+    "reason": "Repository-only operational shipment-reference evidence and non-production test schema. Carrier, customs, production database, deployment and release actions remain behind mandatory human gates."
+  },
+  "attempts": 0
+}

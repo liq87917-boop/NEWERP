@@ -1,0 +1,52 @@
+{
+  "id": "ERP-060",
+  "title": "Expose multi-customer expense allocation evidence in container workflows",
+  "status": "pending",
+  "risk_level": "medium",
+  "description": "Extend existing container loading and settlement workflows with read-only expense-allocation evidence from the canonical ERP-042 batches. Reuse the existing multi-customer and allocation models rather than creating another allocation engine. Do not post finance entries, rewrite settlement values, infer customer shares, execute production SQL, deploy, or release.",
+  "acceptance_criteria": [
+    "The implementation audits and reuses ERP-042 canonical allocation batches and any existing container-customer relationship, leaving one authoritative persisted allocation model.",
+    "Container loading detail exposes active allocation-batch count, allocated amount by customer and currency, allocation basis and unallocated or unavailable context using only explicit persisted rows.",
+    "Existing container settlement workflows expose the same allocation evidence in separately labeled read-only fields and do not copy or write the values into authoritative settlement totals.",
+    "Different currencies are grouped separately and are never combined or converted without an authoritative persisted conversion already belonging to the source evidence.",
+    "Voided or superseded allocation rows are excluded from active totals but remain inspectable through explicit history; invalid customer or container links are shown as invalid or unavailable and are not reassigned.",
+    "Missing allocation evidence is shown as none or unknown and is never interpreted as zero expense, settled expense, receivable, payable or a legal customer statement.",
+    "The UI and documentation state that allocation rows are operational cost-distribution evidence, not accounting posting, payment authorization, tax treatment or settlement confirmation.",
+    "The workflow does not change container records, allocation batches, settlement documents, expenses, invoices, customer balances, inventory, tax or finance records.",
+    "Queries are bounded or paged, avoid per-row database access and keep legacy containers without allocation batches readable without request-time or production backfill.",
+    "Unit/integration tests cover one and multiple customers, multiple currencies, partial and missing allocations, void history, invalid historical links, bounded queries and source-record non-mutation; safe validation passes and browser acceptance is recorded as deferred during development."
+  ],
+  "allowed_paths": [
+    "src/ERP.Application/**",
+    "src/ERP.Api/Controllers/**",
+    "src/ERP.Api/wwwroot/**",
+    "src/ERP.UnitTests/**",
+    "src/ERP.IntegrationTests/**",
+    "docs/**",
+    ".ai/**"
+  ],
+  "depends_on": [
+    "ERP-042"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "browser",
+  "browser_acceptance": {
+    "required": true,
+    "scenarios": [
+      "Open a multi-customer container with a partial ERP-042 allocation batch and verify customer, currency, basis and unallocated evidence in both loading and settlement views without changing settlement totals.",
+      "Inspect a container with voided, invalid or missing allocation evidence and verify it is not presented as settled, payable, receivable or posted and that no source record changes."
+    ],
+    "test_filter": "Collection=UiTests",
+    "minimum_screenshots": 2
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L2",
+    "status": "not_required",
+    "reason": "Read-only presentation of existing repository allocation evidence. Accounting posting, real settlement, production database mutation, deployment and release remain behind mandatory human gates."
+  },
+  "attempts": 0
+}

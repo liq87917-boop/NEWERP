@@ -1,0 +1,54 @@
+{
+  "id": "ERP-058",
+  "title": "Add append-only container shipment milestone evidence",
+  "status": "pending",
+  "risk_level": "medium",
+  "description": "Add an append-only operational milestone register beneath the canonical shipment-reference record from ERP-057. Record user-supplied departure, arrival, inspection and customs-release evidence without polling an external service or treating the entries as authoritative carrier or customs confirmation. Do not auto-advance business documents, execute production SQL, deploy, or release.",
+  "acceptance_criteria": [
+    "Users can add bounded milestone evidence to an existing ERP-057 shipment record using an explicit allowlist that covers actual departure, actual arrival, inspection and release-related operational events.",
+    "Each event records its type, event timestamp, bounded source description, bounded notes, recorder and recorded time; unavailable values remain unknown and are not inferred from planned dates, document status or free text.",
+    "The server validates the parent shipment and supported event type and rejects duplicate active evidence with the same parent, type and event timestamp rather than silently merging it.",
+    "Incorrect milestone evidence can be voided with a bounded reason while preserving its original type, timestamp, source and audit history; hard deletion and rewriting of voided evidence are not provided.",
+    "A recorded inspection or release event is labeled as repository evidence and is not presented as a legally authoritative customs decision, carrier confirmation or permission to ship.",
+    "Milestones do not automatically change container booking, pre-loading, loading-list, Sales Order, inventory, Trade Document, invoice, expense, finance, tax or settlement state.",
+    "Historical inconsistencies and missing parent references remain inspectable as invalid or unavailable evidence and are never silently reassigned to another shipment.",
+    "Legacy shipment records without milestones remain readable, and no request-time or production backfill is performed.",
+    "List and history queries are bounded or paged, avoid per-row database access, and repository schema changes are idempotent and validated only through permitted local or test-database paths.",
+    "Unit/integration tests cover supported event types, missing optional evidence, duplicate rejection, void history, unavailable parents, legacy records, bounded queries and source-record non-mutation; safe validation passes and browser acceptance is recorded as deferred during development."
+  ],
+  "allowed_paths": [
+    "src/ERP.Domain/**",
+    "src/ERP.Application/**",
+    "src/ERP.Infrastructure/**",
+    "src/ERP.Api/Controllers/**",
+    "src/ERP.Api/wwwroot/**",
+    "src/ERP.UnitTests/**",
+    "src/ERP.IntegrationTests/**",
+    "docs/**",
+    ".ai/**"
+  ],
+  "depends_on": [
+    "ERP-057"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "browser",
+  "browser_acceptance": {
+    "required": true,
+    "scenarios": [
+      "Open a shipment reference, record actual departure and inspection evidence with explicit source notes, and verify the chronological evidence is visible without advancing any container or order status.",
+      "Attempt duplicate milestone evidence, verify rejection, then void an incorrect event and confirm its original values and reason remain visible without being presented as an authoritative customs decision."
+    ],
+    "test_filter": "Collection=UiTests",
+    "minimum_screenshots": 2
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L2",
+    "status": "not_required",
+    "reason": "Append-only repository evidence only. External carrier or customs access, production database execution, operational authorization, deployment and release remain behind mandatory human gates."
+  },
+  "attempts": 0
+}

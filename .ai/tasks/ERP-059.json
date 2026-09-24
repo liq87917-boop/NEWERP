@@ -1,0 +1,53 @@
+{
+  "id": "ERP-059",
+  "title": "Expose container shipment evidence timeline and tracking workspace",
+  "status": "pending",
+  "risk_level": "medium",
+  "description": "Expose the explicit shipment references from ERP-057 and milestone evidence from ERP-058 in existing container workflows and a bounded read-only tracking workspace. Keep planned dates, actual events and missing evidence separately labeled. Do not infer carrier or customs state, mutate source records, execute production SQL, deploy, or release.",
+  "acceptance_criteria": [
+    "Container booking, pre-loading and loading-list detail workflows expose their canonical shipment-reference evidence and active milestone timeline through explicit persisted links.",
+    "The tracking workspace supports bounded or paged filtering by explicit container, booking, bill-of-lading, route, planned-date and recorded-event fields without fuzzy matching or cross-customer reassignment.",
+    "Planned departure and arrival values remain distinct from recorded actual events; a missing event is displayed as none or unknown and is never converted into departed, arrived, cleared, delayed or overdue status.",
+    "Any schedule variance is shown only when both comparable persisted timestamps exist, retains their timezone or offset semantics and is labeled as arithmetic evidence rather than a contractual SLA conclusion.",
+    "Inspection and release evidence is labeled as user-recorded operational evidence, not an authoritative customs status or permission to ship.",
+    "Voided milestones are excluded from the active timeline but remain inspectable in an explicit history view; invalid or unavailable links are visibly marked and never silently repaired.",
+    "Shipment lists expose bounded summaries without issuing a database query per row, and different shipment or customer records are never combined solely because their text references match.",
+    "The workspace is read-only and does not change container, order, inventory, Trade Document, invoice, expense, finance, tax, customs or settlement records.",
+    "Legacy records without shipment evidence remain readable without request-time or production backfill.",
+    "Unit/integration tests cover partial and complete timelines, missing and voided events, historical invalid links, multiple customers and routes, bounded queries, no N+1 access and source-record non-mutation; safe validation passes and browser acceptance is recorded as deferred during development."
+  ],
+  "allowed_paths": [
+    "src/ERP.Application/**",
+    "src/ERP.Api/Controllers/**",
+    "src/ERP.Api/wwwroot/**",
+    "src/ERP.UnitTests/**",
+    "src/ERP.IntegrationTests/**",
+    "docs/**",
+    ".ai/**"
+  ],
+  "depends_on": [
+    "ERP-057",
+    "ERP-058"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "browser",
+  "browser_acceptance": {
+    "required": true,
+    "scenarios": [
+      "Open a container with planned dates and recorded departure and arrival evidence, and verify the detail timeline and tracking workspace keep planned, actual and source evidence separately labeled.",
+      "Inspect shipments with missing, voided or unavailable milestone evidence and verify they are not presented as departed, arrived, cleared, delayed or overdue and that no source record changes."
+    ],
+    "test_filter": "Collection=UiTests",
+    "minimum_screenshots": 2
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L2",
+    "status": "not_required",
+    "reason": "Read-only presentation of repository shipment evidence. No carrier/customs action, production mutation, deployment or release is authorized."
+  },
+  "attempts": 0
+}
