@@ -20,7 +20,9 @@ using Xunit;
 namespace ERP.UnitTests;
 
 /// <summary>
-/// 业务单据附件内容证据单元测试（ERP-061）。覆盖：归属单据白名单与存在性复核（不存在 / 已删除 / Id 非法）、
+/// 业务单据附件内容证据单元测试（ERP-061）。ERP-062 在**同一**模型上接入出口单证（单证侧的上传 / 摘要 /
+/// 非变更 / 契约用例见 <c>TradeDocumentAttachmentEvidenceTests</c>），因此本文件的归属白名单断言同步扩展为三类。
+/// 覆盖：归属单据白名单与存在性复核（不存在 / 已删除 / Id 非法）、
 /// 内容格式三重判定（扩展名 + 声明 Content-Type + 文件签名）与可执行 / 标记类格式拒绝、大小上限与「超限即中止
 /// 不保存」、空内容拒绝、文件名净化（客户端路径忽略 / 控制字符 / 超长截断）与摘要完整性（SHA-256）、
 /// 同一内容重复上传**不静默合并**、服务端权威元数据（存储键 / 摘要 / 长度 / 媒体类型 / 归属快照 / 上传人 /
@@ -357,7 +359,7 @@ public class AttachmentEvidenceTests
     [InlineData("")]
     [InlineData("   ")]
     [InlineData("trade-document")]
-    [InlineData("TradeDocument")]
+    [InlineData("TradeDocuments")]
     [InlineData("SalesOrders")]
     [InlineData("ContainerLoadingList")]
     [InlineData("1")]
@@ -825,7 +827,7 @@ public class AttachmentEvidenceTests
 
         // 未知筛选取值一律拒绝
         await AssertBusinessAsync(ErrorCodes.InvalidParameter, () => AttachmentEvidenceService.ListAsync(
-            db, new AttachmentEvidenceQuery { OwnerType = "TradeDocument" }));
+            db, new AttachmentEvidenceQuery { OwnerType = "TradeDocuments" }));
         await AssertBusinessAsync(ErrorCodes.InvalidParameter, () => AttachmentEvidenceService.ListAsync(
             db, new AttachmentEvidenceQuery { Status = 7 }));
         await AssertBusinessAsync(ErrorCodes.InvalidParameter, () => AttachmentEvidenceService.ListAsync(
@@ -929,7 +931,7 @@ public class AttachmentEvidenceTests
         await AssertBusinessAsync(ErrorCodes.NotFound, () => AttachmentEvidenceService.ListForOwnerAsync(
             db, AttachmentEvidenceRules.OwnerTypeSalesOrder, deleted.Id));
         await AssertBusinessAsync(ErrorCodes.InvalidParameter, () => AttachmentEvidenceService.ListForOwnerAsync(
-            db, "TradeDocument", order.Id));
+            db, "Quotation", order.Id));
         await AssertBusinessAsync(ErrorCodes.InvalidParameter, () => AttachmentEvidenceService.ListForOwnerAsync(
             db, AttachmentEvidenceRules.OwnerTypeSalesOrder, 0));
     }
@@ -1154,10 +1156,14 @@ public class AttachmentEvidenceTests
         var store = new InMemoryAttachmentContentStore();
         var metadata = AttachmentEvidenceService.GetMetadata(store);
 
-        // 本任务只接入销售订单 / 采购订单（单证由后续任务在同一模型上扩展）
-        Assert.Equal(new[] { "SalesOrder", "PurchaseOrder" },
+        // ERP-061 接入销售订单 / 采购订单；ERP-062 在同一模型上接入出口单证（唯一一套附件内容模型）
+        Assert.Equal(new[] { "SalesOrder", "PurchaseOrder", "TradeDocument" },
             metadata.OwnerTypes.Select(o => o.Value).ToArray());
-        Assert.DoesNotContain(metadata.OwnerTypes, o => o.Value == "TradeDocument");
+        Assert.Equal("出口单证", metadata.OwnerTypes.Single(o => o.Value == "TradeDocument").Label);
+        Assert.Equal(AttachmentEvidenceRules.MaxSummaryOwnerIds, metadata.MaxSummaryOwnerIds);
+        Assert.Contains("历史自由文本", metadata.LegacyFileNotePolicyText);
+        Assert.Contains("也不在读取时按它回填附件行", metadata.LegacyFileNotePolicyText);
+        Assert.Contains("不是报关单回执", metadata.TradeDocumentEvidenceBoundaryText);
         Assert.Equal(3, metadata.MediaTypes.Count);
         Assert.Equal(new[] { ".pdf", ".png", ".jpg", ".jpeg" }, metadata.AllowedExtensions.ToArray());
         Assert.Equal(20L * 1024 * 1024, metadata.MaxSizeBytes);
@@ -1238,7 +1244,7 @@ public class AttachmentEvidenceTests
             db, AttachmentEvidenceRules.OwnerTypeSalesOrder, null, 1));
         Assert.Equal(200, AttachmentEvidenceService.MaxOwnerOptions);
         await AssertBusinessAsync(ErrorCodes.InvalidParameter, () => AttachmentEvidenceService
-            .ListOwnerOptionsAsync(db, "TradeDocument", null));
+            .ListOwnerOptionsAsync(db, "Quotation", null));
         await AssertBusinessAsync(ErrorCodes.InvalidParameter, () => AttachmentEvidenceService
             .ListOwnerOptionsAsync(db, AttachmentEvidenceRules.OwnerTypeSalesOrder, new string('k', 101)));
     }
@@ -1277,7 +1283,11 @@ public class AttachmentEvidenceTests
 
         Assert.Equal("销售订单", AttachmentEvidenceRules.OwnerTypeText("SalesOrder"));
         Assert.Equal("采购订单", AttachmentEvidenceRules.OwnerTypeText("PurchaseOrder"));
-        Assert.Equal("未知单据类型", AttachmentEvidenceRules.OwnerTypeText("TradeDocument"));
+        Assert.Equal("出口单证", AttachmentEvidenceRules.OwnerTypeText("TradeDocument"));
+        Assert.Equal("未知单据类型", AttachmentEvidenceRules.OwnerTypeText("Quotation"));
+        Assert.Equal("已制作", AttachmentEvidenceRules.TradeDocumentStatusText(" 已制作 "));
+        Assert.Equal("未登记状态", AttachmentEvidenceRules.TradeDocumentStatusText("   "));
+        Assert.True(AttachmentEvidenceRules.IsSupportedOwnerType("tradedocument"));
         Assert.True(AttachmentEvidenceRules.IsSupportedOwnerType("purchaseorder"));
         Assert.False(AttachmentEvidenceRules.IsSupportedOwnerType("PurchaseOrders"));
 
@@ -1675,9 +1685,12 @@ public class AttachmentEvidenceTests
         Assert.Contains("AttachmentEvidenceRules.ProviderOss", factory);
         Assert.Contains("Human Gate", factory);
 
-        // 唯一附件内容模型：本任务只接入销售订单 / 采购订单（单证由后续任务在同一模型上扩展）
-        Assert.Equal(2, AttachmentEvidenceRules.SupportedOwnerTypes.Length);
-        Assert.DoesNotContain(AttachmentEvidenceRules.SupportedOwnerTypes, t => t == "TradeDocument");
+        // 唯一附件内容模型：ERP-061 接入销售订单 / 采购订单，ERP-062 在**同一**模型上接入出口单证
+        // （不新增二进制表、不新增自由路径字段、不新增单证专用上传引擎）
+        Assert.Equal(3, AttachmentEvidenceRules.SupportedOwnerTypes.Length);
+        Assert.Contains(AttachmentEvidenceRules.OwnerTypeTradeDocument, AttachmentEvidenceRules.SupportedOwnerTypes);
+        Assert.Equal(AttachmentEvidenceRules.SupportedOwnerTypes.Length,
+            AttachmentEvidenceRules.SupportedOwnerTypes.Distinct(StringComparer.Ordinal).Count());
 
         // ERP-045「仅元数据引用册」保持原样（四类父单据白名单与边界文案均未被改写）
         var references = File.ReadAllText(RepoFile(

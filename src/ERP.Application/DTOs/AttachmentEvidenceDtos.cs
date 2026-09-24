@@ -127,6 +127,25 @@ public sealed record AttachmentEvidenceDto(
     DateTime? UpdatedAt,
     string BoundaryText);
 
+/// <summary>
+/// 归属单据的附件证据**有界摘要**（ERP-062，只读）：供列表页按当前页 Id **一次**批量取回
+/// 「有几条仓库附件证据」。计数只表示已登记证据条数，既不触发任何存储访问，也不代表
+/// 报关 / 报税 / 承运人 / 客户确认。
+/// </summary>
+public sealed record AttachmentEvidenceOwnerSummaryDto(
+    string OwnerType,
+    string OwnerTypeText,
+    long OwnerId,
+    string OwnerNo,
+    string OwnerSnapshotText,
+    bool OwnerAvailable,
+    int TotalCount,
+    int ActiveCount,
+    int VoidedCount,
+    bool HasActiveEvidence,
+    string SummaryText,
+    string BoundaryText);
+
 /// <summary>附件证据内容读取结果（ERP-061，服务端内部使用：只交给控制器流式返回）。</summary>
 public sealed record AttachmentEvidenceContentDto(
     Stream Content,
@@ -148,13 +167,16 @@ public sealed record AttachmentEvidenceMetadataDto(
     int MaxPageSize,
     int MaxPerOwner,
     int MaxOwnerOptions,
+    int MaxSummaryOwnerIds,
     string SizePolicyText,
     string FormatPolicyText,
     string StorageProviderCode,
     string StorageProviderText,
     string StoragePolicyText,
     string DownloadPolicyText,
-    string BoundaryText);
+    string BoundaryText,
+    string LegacyFileNotePolicyText,
+    string TradeDocumentEvidenceBoundaryText);
 
 /// <summary>白名单选项（ERP-061：值 + 中文文案）。</summary>
 public sealed record AttachmentEvidenceOptionDto(string Value, string Label);

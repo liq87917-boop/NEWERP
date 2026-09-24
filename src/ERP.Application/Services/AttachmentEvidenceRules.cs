@@ -4,7 +4,7 @@ using System.Text;
 namespace ERP.Application.Services;
 
 /// <summary>
-/// 业务单据附件内容证据的纯规则（ERP-061，无数据库与存储依赖，便于逐条单测）：
+/// 业务单据附件内容证据的纯规则（ERP-061 建立；ERP-062 在同一模型上接入出口单证）：
 /// 归属单据白名单、内容格式判定（扩展名 / 声明 Content-Type / 文件签名三者一致）、
 /// 可执行与标记类格式拒绝、文件名净化、有界校验（大小 / 说明 / 作废原因）与全部文案。
 /// <para>边界：本规则只做**校验与文案**，不读写数据库、不访问任何存储提供程序、不发起任何网络请求，
@@ -21,13 +21,21 @@ public static class AttachmentEvidenceRules
     public const string OwnerTypePurchaseOrder = "PurchaseOrder";
 
     /// <summary>
-    /// 本任务支持的归属单据类型（超出范围一律拒绝，不做隐式兜底、不猜测归属）；
-    /// 单证（TradeDocument）等其它类型由后续任务在同一模型上扩展。
+    /// 归属单据类型：出口单证（单证中心台账，ERP-062 把既有单证接入**同一**附件证据模型；
+    /// 类型编码与 ERP-045 附件引用册的 <c>ParentTypeTradeDocument</c> 完全一致）。
+    /// </summary>
+    public const string OwnerTypeTradeDocument = "TradeDocument";
+
+    /// <summary>
+    /// 已接入的归属单据类型（超出范围一律拒绝，不做隐式兜底、不猜测归属）：
+    /// 销售订单 / 采购订单（ERP-061）与出口单证（ERP-062）。其它单据类型（装柜清单等）
+    /// 仍未接入：一律拒绝，绝不按号码 / 名称 / 文件名猜测归属。
     /// </summary>
     public static readonly string[] SupportedOwnerTypes =
     {
         OwnerTypeSalesOrder,
-        OwnerTypePurchaseOrder
+        OwnerTypePurchaseOrder,
+        OwnerTypeTradeDocument
     };
 
     // ==================== 1. 内容存储提供程序（唯一接缝） ====================
@@ -113,6 +121,12 @@ public static class AttachmentEvidenceRules
     /// <summary>关键字筛选长度上限</summary>
     public const int MaxKeywordLength = 100;
 
+    /// <summary>
+    /// 单次「归属单据附件摘要」请求的归属 Id 上限（ERP-062：列表页按**本页** Id 一次批量取回摘要，
+    /// 有界、无逐行查库；超出上限一律拒绝而不是静默截断）。
+    /// </summary>
+    public const int MaxSummaryOwnerIds = 200;
+
     /// <summary>文件签名探测字节数（最长签名 8 字节）</summary>
     public const int SignatureProbeLength = 8;
 
@@ -132,25 +146,89 @@ public static class AttachmentEvidenceRules
         => value is not null
            && SupportedOwnerTypes.Contains(value.Trim(), StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>规范化归属单据类型（未知 / 留空一律拒绝，并回显白名单）</summary>
+    /// <summary>
+    /// 规范化归属单据类型：按白名单**大小写不敏感**匹配，并统一输出**规范写法**
+    /// （例如 <c>tradedocument</c> → <c>TradeDocument</c>），避免同一类型因大小写不同被存成两个值；
+    /// 未知 / 留空一律拒绝，并回显白名单。
+    /// </summary>
     public static string NormalizeOwnerType(string? value)
     {
-        if (!IsSupportedOwnerType(value))
-            throw BusinessException.InvalidParameter(
-                $"不支持的归属单据类型「{Truncate(value)}」：本模块只接受 {string.Join(" / ", SupportedOwnerTypes)}"
-                + "（其它单据类型尚未接入；系统不会按号码或名称猜测归属）");
+        var text = (value ?? string.Empty).Trim();
+        foreach (var supported in SupportedOwnerTypes)
+        {
+            if (string.Equals(supported, text, StringComparison.OrdinalIgnoreCase)) return supported;
+        }
 
-        return value!.Trim();
+        throw BusinessException.InvalidParameter(
+            $"不支持的归属单据类型「{Truncate(value)}」：本模块只接受 {string.Join(" / ", SupportedOwnerTypes)}"
+            + "（其它单据类型尚未接入；系统不会按号码或名称猜测归属）");
     }
 
-    /// <summary>归属单据类型文案（未知类型返回「未知单据类型」而不是猜测）</summary>
+    /// <summary>归属单据类型文案（未知类型返回「未知单据类型」而不是猜测；与 ERP-045 引用册口径一致）</summary>
     public static string OwnerTypeText(string? ownerType)
         => ownerType?.Trim() switch
         {
             OwnerTypeSalesOrder => "销售订单",
             OwnerTypePurchaseOrder => "采购订单",
+            OwnerTypeTradeDocument => "出口单证",
             _ => "未知单据类型"
         };
+
+    /// <summary>
+    /// 出口单证状态文案（TradeDocument.Status 是台账里的自由文本，不是枚举）：
+    /// 只做有界修剪与空值标注，**不**推断、不映射、不改写台账状态。
+    /// </summary>
+    public static string TradeDocumentStatusText(string? status)
+    {
+        var text = (status ?? string.Empty).Trim();
+        return text.Length == 0 ? "未登记状态" : Truncate(text, 20);
+    }
+
+    /// <summary>
+    /// 规范化一批归属单据 Id（ERP-062 摘要接口）：只接受正整数，按升序去重，长度有界；
+    /// 非法值（≤0）与超量请求一律拒绝，**不**静默丢弃或静默截断。
+    /// </summary>
+    public static List<long> NormalizeOwnerIds(IEnumerable<long>? ownerIds)
+    {
+        var raw = ownerIds?.ToList() ?? new List<long>();
+        if (raw.Count == 0) return new List<long>();
+
+        if (raw.Count > MaxSummaryOwnerIds)
+            throw BusinessException.InvalidParameter(
+                $"单次最多查询 {MaxSummaryOwnerIds} 个归属单据的附件证据摘要（当前 {raw.Count}）："
+                + "请按当前页分批查询（系统不做静默截断）");
+
+        foreach (var id in raw)
+        {
+            if (id <= 0)
+                throw BusinessException.InvalidParameter(
+                    $"归属单据 Id「{id}」无效：必须为正整数（系统不按 0 / 负数猜测归属）");
+        }
+
+        return raw.Distinct().OrderBy(id => id).ToList();
+    }
+
+    /// <summary>
+    /// 解析查询串里的归属单据 Id 列表（<c>ids=1,2,3</c> 或重复参数）：分隔符 <c>,</c> / <c>;</c> /
+    /// 空白，非法项照实拒绝；空串返回空列表（由服务端返回空摘要而不是查询整表）。
+    /// </summary>
+    public static List<long> ParseOwnerIds(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return new List<long>();
+
+        var parts = raw.Split(new[] { ',', ';', ' ', '\t', '\r', '\n' },
+            StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var ids = new List<long>(parts.Length);
+        foreach (var part in parts)
+        {
+            if (!long.TryParse(part, out var id))
+                throw BusinessException.InvalidParameter(
+                    $"归属单据 Id「{Truncate(part)}」不是有效整数：请使用 ids=1,2,3 形式");
+            ids.Add(id);
+        }
+
+        return NormalizeOwnerIds(ids);
+    }
 
     // ==================== 6. 有界文本 ====================
 
@@ -435,6 +513,38 @@ public static class AttachmentEvidenceRules
 
     /// <summary>内容下载接口相对地址（**只给 API 路径**，绝不给出存储键或文件系统 / 对象存储路径）</summary>
     public static string ContentApiPath(long id) => $"/api/attachment-evidences/{id}/content";
+
+    /// <summary>
+    /// 归属单据附件摘要文案（ERP-062：列表页只显示**有界计数**，不做逐行查库、不访问任何存储）；
+    /// 计数只表示已登记的仓库证据条数，绝不表示已报关 / 已报税 / 已交承运人 / 已交付客户。
+    /// </summary>
+    public static string OwnerSummaryText(
+        string? ownerTypeText, string? ownerNo, int total, int active, int voided)
+    {
+        var snapshot = OwnerSnapshotText(ownerTypeText, ownerNo);
+        if (total <= 0)
+            return $"{snapshot}：暂无仓库附件证据（用户提供的扫描件证据需显式上传；系统不导入既有附件说明文本）";
+
+        return $"{snapshot}：仓库附件证据 {total} 条（有效 {active} / 已作废 {voided}）；"
+               + "仅为用户上传的仓库证据，不代表已向海关 / 税务 / 承运人提交或获其确认";
+    }
+
+    /// <summary>
+    /// 历史自由文本（<c>TradeDocuments.FileNote</c>，即「附件说明 / 存放位置」）的口径声明（ERP-062）：
+    /// 保持原样可读，但**不**解析成路径、**不**当作 URL 抓取、**不**转成附件证据、**不**在请求时回填。
+    /// </summary>
+    public const string LegacyFileNotePolicyText =
+        "单证台账既有的「附件说明 / 存放位置」是历史自由文本：系统保持其原样可读，"
+        + "绝不把它解析成文件路径、绝不按其中的 URL 抓取任何内容、绝不转成附件证据，"
+        + "也不在读取时按它回填附件行（附件证据只能由用户在单证中心显式上传）。";
+
+    /// <summary>
+    /// 出口单证附件证据的边界声明（ERP-062）：仓库证据与报关 / 报税 / 承运人提交明确区分。
+    /// </summary>
+    public const string TradeDocumentEvidenceBoundaryText =
+        "出口单证附件证据只表示「用户把一份 PDF / PNG / JPEG 仓库文件挂到了该单证台账记录上」："
+        + "它不是报关单回执、不是税务备案或退税资料受理结果、不是承运人或客户确认，"
+        + "也不代表单证已提交、已放行、已收汇或允许出运；单证状态与明细行一律由单证中心自己的流程维护。";
 
     /// <summary>证据性质与边界声明（接口与界面同源）</summary>
     public const string BoundaryText =

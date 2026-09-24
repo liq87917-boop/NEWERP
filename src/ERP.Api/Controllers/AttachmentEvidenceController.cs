@@ -11,6 +11,8 @@ namespace ERP.Api.Controllers;
 /// <summary>
 /// 业务单据附件内容证据控制器（ERP-061）：把用户提供的 PDF / PNG / JPEG 证据挂到**既有**销售订单 /
 /// 采购订单上，并支持有界台账、详情、安全附件下载与显式作废。
+/// <para>ERP-062 在同一模型上接入**出口单证**（单证中心台账）扫描件证据：不新增第二张二进制表、
+/// 不新增自由路径字段，也不新增单证专用的上传引擎；列表页只按当前页 Id 批量取回有界计数摘要。</para>
 /// <para>审计口径：本仓库既有的文件存储代码只有 <c>OssStorageService</c>（无接口 / 无下载 / 无删除），
 /// 既有附件能力只有 ERP-045 的「仅元数据引用册」；因此本控制器使用**唯一**内容接缝
 /// <see cref="IAttachmentContentStore"/>：开发 / 测试只启用隔离的非生产本地存储，
@@ -20,6 +22,8 @@ namespace ERP.Api.Controllers;
 /// 签名必须一致；下载以「附件」方式流式返回并附带 nosniff / sandbox / no-store 等防御性响应头，
 /// <strong>不</strong>内联渲染、<strong>不</strong>转成标记、<strong>不</strong>暴露存储键或任何路径；
 /// <strong>不</strong>按号码 / 名称猜测归属，也<strong>不</strong>提供硬删除、二进制替换或改派归属；
+/// ERP-062 接入出口单证时同样只读单证台账的编号 / 类型 / 状态，不改写单证状态与明细行，
+/// 也不解析、抓取或回填单证既有的「附件说明 / 存放位置」自由文本；
 /// 生产库结构变更仍由 Human Gate 控制（建表 / 索引由 SchemaUpgrader 幂等补齐）。</para>
 /// <para>授权：全部接口（含内容下载）均要求与销售订单 / 采购订单工作流相同的 JWT 认证与模块授权；
 /// 下载还会在服务端重新校验证据状态与归属单据存在性，不能靠知道 Id 绕过。</para>
@@ -72,8 +76,8 @@ public class AttachmentEvidenceController : ControllerBase
                 _db, ownerType, ownerId, status, take, cancellationToken)));
 
     /// <summary>
-    /// 可挂附件证据的单据候选（只读、**有界**）：只列出未删除的销售订单 / 采购订单，并批量统计已有
-    /// 证据条数（含已作废历史）；仅用于**显式选择**归属，绝不按号码或名称猜测。
+    /// 可挂附件证据的单据候选（只读、**有界**）：只列出未删除的销售订单 / 采购订单 / 出口单证，
+    /// 并批量统计已有证据条数（含已作废历史）；仅用于**显式选择**归属，绝不按号码、名称或文件名猜测。
     /// </summary>
     [HttpGet("owner-options")]
     public async Task<IActionResult> OwnerOptions(
@@ -83,6 +87,22 @@ public class AttachmentEvidenceController : ControllerBase
         CancellationToken cancellationToken = default)
         => Ok(ApiResponse<List<AttachmentEvidenceOwnerOptionDto>>.Success(
             await AttachmentEvidenceService.ListOwnerOptionsAsync(_db, ownerType, keyword, take, cancellationToken)));
+
+    /// <summary>
+    /// 归属单据的附件证据**有界摘要**（ERP-062，只读）：按 <c>ids=1,2,3</c>（或重复 <c>ids</c> 参数）
+    /// 一次取回这些单据的「仓库附件证据条数（有效 / 已作废）」与归属可用性，供单证中心等列表页
+    /// 按**当前页** Id 批量展示；单次最多 <see cref="AttachmentEvidenceRules.MaxSummaryOwnerIds"/> 个 Id。
+    /// <para>本接口**不**读取任何存储内容、**不**返回证据明细；内容只有在用户显式发起带认证的
+    /// <c>GET /api/attachment-evidences/{id}/content</c> 时才被读取。</para>
+    /// </summary>
+    [HttpGet("owner-summary")]
+    public async Task<IActionResult> OwnerSummary(
+        [FromQuery] string? ownerType,
+        [FromQuery] string? ids,
+        CancellationToken cancellationToken = default)
+        => Ok(ApiResponse<List<AttachmentEvidenceOwnerSummaryDto>>.Success(
+            await AttachmentEvidenceService.SummarizeOwnersAsync(
+                _db, ownerType, AttachmentEvidenceRules.ParseOwnerIds(ids), cancellationToken)));
 
     /// <summary>证据详情（含归属单据可用性与可下载性标注；只读）</summary>
     [HttpGet("{id:long}")]

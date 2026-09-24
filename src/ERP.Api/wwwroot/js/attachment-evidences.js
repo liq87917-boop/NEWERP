@@ -36,9 +36,16 @@ function aeOwnerTypeOfModule(code) {
   switch (code) {
     case 'sales-order': return 'SalesOrder';
     case 'purchase-order': return 'PurchaseOrder';
+    /* ERP-062：单证中心（出口单证）行操作「附件证据」→ 走同一附件证据模型
+       （类型编码与 ERP-045 附件引用册的父单据类型完全一致） */
+    case 'doc-center': return 'TradeDocument';
     default: return '';
   }
 }
+
+/* 单次「附件证据概览」请求的单据数上限（与 AttachmentEvidenceRules.MaxSummaryOwnerIds 同源：
+   服务端才是权威，界面只做提示性预检，避免把明显超量的请求发出去） */
+const AE_SUMMARY_MAX_OWNER_IDS = 200;
 
 /* 列表行操作入口：crud.js 会传入行 Id，归属类型按当前模块编码推断 */
 async function openAttachmentEvidencesForCurrentModule(ownerId) {
@@ -139,6 +146,7 @@ function aeRender() {
         <b>大小</b>：${aeEsc(meta ? meta.sizePolicyText : '')}<br>
         <b>存储</b>：${aeEsc(meta ? meta.storagePolicyText : '')}（当前提供程序：${aeEsc(meta ? meta.storageProviderText : '')}）<br>
         <b>下载</b>：${aeEsc(meta ? meta.downloadPolicyText : '')}
+        ${meta && meta.legacyFileNotePolicyText ? '<br><b>历史文本</b>：' + aeEsc(meta.legacyFileNotePolicyText) : ''}
       </div>
       ${AE.upload ? aeUploadFormHtml(ownerTypeOptions, allowed) : ''}
       ${AE.ownerId ? aeFixedOwnerSelect() : ''}
@@ -448,3 +456,96 @@ async function aeConfirmVoid() {
     toast('作废失败：' + e.message, 'error');
   }
 }
+
+/* ==================== 列表页有界摘要（ERP-062：一次批量计数，无逐行查库、不读取任何存储内容） ==================== */
+
+/* 列表页入口（单证中心等模块的工具栏「📎 附件证据概览」）：按**当前页**单据 Id 一次取回
+   附件证据条数与归属可用性；界面不自行计算计数、不逐行发请求、不访问任何存储内容 */
+async function openAttachmentEvidenceSummaryForCurrentPage() {
+  const ownerType = aeOwnerTypeOfModule(CURRENT_MODULE_CODE);
+  if (!ownerType) {
+    toast('当前模块没有可汇总的附件证据归属类型：请从销售订单 / 采购订单 / 单证中心列表进入', 'error');
+    return;
+  }
+
+  const rows = Array.isArray(window.__moduleRows) ? window.__moduleRows : [];
+  const ids = [];
+  rows.forEach(row => {
+    const id = Number(row && row.id);
+    if (Number.isInteger(id) && id > 0 && ids.indexOf(id) < 0) ids.push(id);
+  });
+
+  if (!ids.length) { toast('当前页没有可汇总的单据：请先查询出本页数据', 'error'); return; }
+  if (ids.length > AE_SUMMARY_MAX_OWNER_IDS) {
+    toast('当前页单据数（' + ids.length + '）超过单次汇总上限 ' + AE_SUMMARY_MAX_OWNER_IDS
+      + '：请缩小每页数量后重试', 'error');
+    return;
+  }
+
+  try {
+    const list = await api('/api/attachment-evidences/owner-summary?ownerType='
+      + encodeURIComponent(ownerType) + '&ids=' + ids.join(','));
+    aeRenderSummary(ownerType, Array.isArray(list) ? list : []);
+  } catch (e) {
+    toast('附件证据概览加载失败：' + e.message, 'error');
+  }
+}
+
+/* 概览渲染：只显示服务端返回的有界计数与归属可用性；不访问存储、不拼任何存储路径或链接，
+   也不把计数呈现为报关 / 报税 / 承运人提交或确认 */
+function aeRenderSummary(ownerType, list) {
+  const ownerTypeText = aeEsc((list.length && list[0].ownerTypeText) ? list[0].ownerTypeText : ownerType);
+  const boundary = (list.length && list[0].boundaryText)
+    ? list[0].boundaryText
+    : '附件证据是用户提供的仓库文件证据，不是报关 / 报税 / 银行 / 承运人 / 客户确认。';
+  const body = list.map(row => `<tr style="border-top:1px solid #e2e8f0">
+    <td style="padding:6px">${aeEsc(row.ownerSnapshotText)}
+      <div style="font-size:12px;color:#64748b">Id=${aeEsc(row.ownerId)}</div>
+      ${row.ownerAvailable ? ''
+        : '<div style="color:#b45309;font-size:12px">归属单据已不存在或已删除：历史证据仍需显式进入登记册只读查看，不提供下载，也不改派</div>'}</td>
+    <td style="padding:6px">${aeEsc(row.totalCount)} 条
+      <div style="font-size:12px;color:#64748b">有效 ${aeEsc(row.activeCount)} / 已作废 ${aeEsc(row.voidedCount)}</div></td>
+    <td style="padding:6px;white-space:nowrap">
+      <button class="btn btn-neutral btn-sm" onclick="aeOpenFromSummary(${aeEsc(row.ownerId)})">查看 / 上传</button>
+    </td>
+  </tr>`).join('');
+
+  const overlay = document.createElement('div');
+  overlay.id = 'ae-summary-box';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.45);display:flex;align-items:center;justify-content:center;z-index:1200';
+  overlay.innerHTML = `
+    <div style="background:#fff;border-radius:12px;padding:16px 18px;max-width:920px;max-height:86vh;overflow:auto;box-shadow:0 20px 60px rgba(0,0,0,.3)">
+      <h4 style="margin:0 0 6px">📎 附件证据概览（${ownerTypeText} · 当前页有界摘要）</h4>
+      <div style="background:#fff7ed;border:1px solid #fed7aa;color:#9a3412;border-radius:8px;padding:8px 10px;font-size:12px;line-height:1.7;margin-bottom:8px">
+        计数只表示用户已登记的<strong>仓库附件证据</strong>条数：一次批量查询，不逐行查库、不访问任何存储内容；
+        内容只有在显式发起带认证的下载请求时才会被读取。${aeEsc(boundary)}
+      </div>
+      <div style="background:#eff6ff;border:1px solid #bfdbfe;color:#1e3a8a;border-radius:8px;padding:8px 10px;font-size:12px;line-height:1.7;margin-bottom:8px">
+        单证台账既有的「附件说明 / 存放位置」是历史自由文本：系统保持原样可读，不解析成路径、不抓取其中的地址、
+        不转成附件证据，也不在读取时回填（详细口径见登记册内说明）。
+      </div>
+      <table style="width:100%;border-collapse:collapse;font-size:13px">
+        <thead><tr style="background:#f8fafc;text-align:left">
+          <th style="padding:6px">单据</th><th style="padding:6px">附件证据</th><th style="padding:6px">操作</th>
+        </tr></thead>
+        <tbody>${body || '<tr><td colspan="3" style="padding:14px;text-align:center;color:#94a3b8">当前页没有可显示的单据</td></tr>'}</tbody>
+      </table>
+      <div style="text-align:right;margin-top:8px">
+        <button class="btn btn-neutral btn-sm" onclick="aeCloseSummary()">关闭</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+}
+
+/* 概览 → 本单据登记册（归属由当前模块类型 + 该行 Id 显式确定，绝不按号码或文件名猜测） */
+function aeOpenFromSummary(ownerId) {
+  const ownerType = aeOwnerTypeOfModule(CURRENT_MODULE_CODE);
+  aeCloseSummary();
+  openAttachmentEvidences(ownerType, ownerId);
+}
+
+function aeCloseSummary() {
+  const box = document.getElementById('ae-summary-box');
+  if (box) box.remove();
+}
+
