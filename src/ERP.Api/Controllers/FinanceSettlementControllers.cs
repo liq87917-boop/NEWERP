@@ -1,5 +1,7 @@
 using ERP.Application.Common;
+using ERP.Application.DTOs;
 using ERP.Application.Interfaces;
+using ERP.Application.Services;
 using ERP.Domain.Entities;
 using ERP.Domain.Enums;
 using Microsoft.AspNetCore.Mvc;
@@ -66,6 +68,25 @@ public class FinanceContainerSettlementController : DocumentControllerBase<Finan
         existing.UpdatedAt = DateTime.Now;
         await Db.SaveChangesAsync();
         return Ok(ApiResponse<object>.Success(null, "装柜结算单更新成功"));
+    }
+
+    /// <summary>
+    /// 费用分摊证据（ERP-060，**只读**）：本单持久化字段（结算总金额 / 海运费 / 其他费用 / 客户）的只读回显
+    /// + 本单显式关联装柜清单上 ERP-042 分摊批次 / 分摊行的证据（按「币种 → 客户」分组、含未分摊参考与
+    /// 已作废历史）。分摊证据**不参与**结算金额计算，也**不会**被写入本单任何字段；金额对照只作算术证据，
+    /// 不是结算差异、应收应付或对账结论。未关联装柜清单时证据显示「未知」，不按柜号或客户推断。
+    /// </summary>
+    [HttpGet("{id:long}/expense-allocation-evidence")]
+    public async Task<IActionResult> GetExpenseAllocationEvidence(
+        long id,
+        [FromQuery] bool includeHistory = true,
+        [FromQuery] int historyTake = ContainerExpenseAllocationEvidenceRules.DefaultHistoryTake)
+    {
+        var entity = await GetOrThrowAsync(id, "装柜结算单不存在");
+        var evidence = await ContainerExpenseAllocationEvidenceService.GetForSettlementAsync(
+            Db, entity.Id, includeHistory, historyTake);
+        return Ok(ApiResponse<ContainerSettlementAllocationEvidenceDto>.Success(
+            evidence, "已按显式装柜结算单返回分摊证据（只读：结算金额字段为原值回显，分摊证据不参与结算计算）"));
     }
 }
 

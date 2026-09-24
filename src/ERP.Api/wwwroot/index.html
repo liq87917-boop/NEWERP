@@ -248,6 +248,10 @@
   <!-- ERP-059：装柜出运证据时间线与跟踪工作台（**只读**：ERP-057 计划值与 ERP-058 里程碑证据分开标注，
        缺失事件显示「无（未登记）」、未填写计划显示「未知」，已作废证据只进历史视图，时间差只作算术证据） -->
   <script src="/js/container-shipment-timeline.js"></script>
+  <!-- ERP-060：装柜费用分摊证据（**只读**：ERP-042 分摊批次 / 分摊行按「币种 → 客户」分组呈现，
+       不同币种不合并、不换算；缺失显示「无（未登记）」/「未知」，已作废批次只进历史视图；
+       装柜结算单金额字段只作原值回显，分摊证据不参与结算计算、也不是记账 / 付款授权 / 结算确认） -->
+  <script src="/js/container-expense-allocation-evidence.js"></script>
   <script src="/js/loading-list-participants.js"></script>
   <script src="/js/print-design.js"></script>
   <script src="/js/pd-grid.js"></script>

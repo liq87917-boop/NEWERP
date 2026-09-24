@@ -1,7 +1,7 @@
 {
   "id": "ERP-060",
   "title": "Expose multi-customer expense allocation evidence in container workflows",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "medium",
   "description": "Extend existing container loading and settlement workflows with read-only expense-allocation evidence from the canonical ERP-042 batches. Reuse the existing multi-customer and allocation models rather than creating another allocation engine. Do not post finance entries, rewrite settlement values, infer customer shares, execute production SQL, deploy, or release.",
   "acceptance_criteria": [
@@ -48,5 +48,5 @@
     "status": "not_required",
     "reason": "Read-only presentation of existing repository allocation evidence. Accounting posting, real settlement, production database mutation, deployment and release remain behind mandatory human gates."
   },
-  "attempts": 0
+  "attempts": 1
 }

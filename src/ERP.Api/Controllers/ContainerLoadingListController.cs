@@ -204,6 +204,26 @@ public class ContainerLoadingListController : DocumentControllerBase<ContainerLo
             detail, "已按显式源记录返回出运证据时间线（只读：计划与实际分开标注，缺失事件显示「无 / 未知」）"));
     }
 
+    /// <summary>
+    /// 费用分摊证据（ERP-060，**只读**）：按本装柜清单的显式 Id 读取 ERP-042 已持久化的分摊批次与分摊行 ——
+    /// 有效批次条数、按「币种 → 客户」分组的有效分摊金额与分摊基数 / 方法、未分摊参考，
+    /// 以及已作废 / 历史异常批次（历史视图）与失效链接标注。不同币种不合并、不换算；缺失证据显示
+    /// 「无（未登记任何有效分摊批次）」或「未知」，绝不解释为零费用、已结算、应收、应付或客户对账单。
+    /// 本接口不写任何表，也不改写本单、分摊批次 / 分摊行、费用单与结算记录。
+    /// </summary>
+    [HttpGet("{id:long}/expense-allocation-evidence")]
+    public async Task<IActionResult> GetExpenseAllocationEvidence(
+        long id,
+        [FromQuery] bool includeHistory = true,
+        [FromQuery] int historyTake = ContainerExpenseAllocationEvidenceRules.DefaultHistoryTake)
+    {
+        var entity = await GetOrThrowAsync(id, "装柜清单不存在");
+        var evidence = await ContainerExpenseAllocationEvidenceService.GetForLoadingListAsync(
+            Db, entity.Id, includeHistory, historyTake);
+        return Ok(ApiResponse<ContainerExpenseAllocationEvidenceDto>.Success(
+            evidence, "已按显式装柜清单返回分摊证据（只读：缺失显示「无 / 未知」，不改写任何单据）"));
+    }
+
     // ==================== ERP-041：一柜多客户参与方（客户归属清单） ====================
 
     /// <summary>

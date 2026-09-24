@@ -206,13 +206,16 @@ Object.assign(MODULES, {
       /* ERP-045：登记 / 查看本装柜清单的附件引用（仅元数据；不上传 / 下载 / 预览 / 抓取任何文件，作废保留历史） */
       { label: '附件引用', icon: '📎', title: '登记或查看本装柜清单的附件引用元数据（分类 / 显示名 / 不透明引用标识 / 大小 / 校验和；不上传、不下载、不预览、不抓取文件，作废保留历史且不改写本单）', onclick: 'openDocumentAttachmentReferencesForCurrentModule' },
       /* ERP-057：出运引用证据（源记录 = 本条装柜清单；只登记证据，不改写本单）
-         ERP-059：出运证据时间线（只读：计划与实际分开标注，缺失事件显示「无（未登记）」） */
+         ERP-059：出运证据时间线（只读：计划与实际分开标注，缺失事件显示「无（未登记）」）
+         ERP-060：费用分摊证据（只读：ERP-042 分摊批次 / 分摊行按「币种 → 客户」呈现，缺失显示「无 / 未知」） */
       { label: '出运引用', icon: '📦', title: '登记 / 查看本条装柜清单的出运引用证据（只写证据，不改写本单、不改柜号、不推进装柜状态）', onclick: 'openContainerShipmentReferences' },
       { label: '时间线', icon: '🧭', title: '按本条装柜清单的显式源记录只读查看出运证据时间线（计划开船 / 到港与实际开船 / 到港 / 查验 / 放行分开标注，缺失事件显示「无（未登记）」，已作废证据只进历史视图）', onclick: 'showContainerShipmentTimeline' },
+      { label: '分摊证据', icon: '🧾', title: '按本条装柜清单只读查看 ERP-042 多客户费用分摊证据（有效批次条数、按币种分组的客户分摊金额与比例、分摊方法与基数、未分摊参考、已作废历史；不同币种不合并不换算，缺失显示「无 / 未知」，不是记账 / 付款授权 / 结算确认）', onclick: 'showContainerAllocationEvidence' },
     ],
     extraActions: [
       { label: '📦 出运引用', title: '打开装柜出运引用登记册（显式选择订柜信息 / 预装柜单 / 装柜清单作为源记录登记出运证据；不是承运人 / 海关 / 货代确认，也不改写任何装柜单据）', onclick: 'openContainerShipmentReferences()' },
       { label: '🧭 跟踪工作台', title: '打开只读出运跟踪工作台（按显式柜号 / 单号 / B/L / S/O / 港口 / 计划时间 / 记录事件筛选，分页有界；计划与实际分开标注，不按文本合并记录、不改写任何单据）', onclick: 'openContainerShipmentTimelineWorkspace()' },
+      { label: '🧾 分摊证据工作台', title: '打开只读分摊证据工作台（按显式柜号 / 装柜清单号 / 批次号 / 币种 / 批次状态 / 客户 Id 筛选，分页有界；按币种分组、不合并不换算，缺失显示「无 / 未知」，不改写任何单据、不回填历史）', onclick: 'openContainerAllocationEvidenceWorkspace()' },
     ],
   },
 

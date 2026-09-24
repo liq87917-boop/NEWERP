@@ -229,3 +229,6 @@
 {"at": "2026-09-24T22:06:02.516116Z", "event": "task_started", "task": "ERP-059"}
 {"at": "2026-09-24T22:19:08.230095Z", "event": "browser_acceptance_deferred", "task": "ERP-059"}
 {"at": "2026-09-24T22:19:08.345735Z", "event": "task_completed", "task": "ERP-059", "status": "completed", "execution_outcome": "completed", "normalized_finish_reason": "browser_deferred", "cline_exit_code": 0, "cline_finish_reason_raw": "completed", "attempts": 1, "browser_acceptance": {"status": "deferred", "reason": "Real-browser/UI acceptance is deferred until FINAL-UI-ACCEPTANCE.", "deferred_at": "2026-09-24T22:19:08.229110Z"}, "finished_at": "2026-09-24T22:19:08.343816Z"}
+{"at": "2026-09-24T22:19:14.185287Z", "event": "task_started", "task": "ERP-060"}
+{"at": "2026-09-24T22:34:18.132180Z", "event": "browser_acceptance_deferred", "task": "ERP-060"}
+{"at": "2026-09-24T22:34:18.248656Z", "event": "task_completed", "task": "ERP-060", "status": "completed", "execution_outcome": "completed", "normalized_finish_reason": "browser_deferred", "cline_exit_code": 0, "cline_finish_reason_raw": "completed", "attempts": 1, "browser_acceptance": {"status": "deferred", "reason": "Real-browser/UI acceptance is deferred until FINAL-UI-ACCEPTANCE.", "deferred_at": "2026-09-24T22:34:18.131130Z"}, "finished_at": "2026-09-24T22:34:18.247011Z"}

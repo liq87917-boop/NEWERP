@@ -60,6 +60,13 @@ Object.assign(MODULES, {
       { key: 'totalAmount', label: '结算总金额', type: 'number' }, { key: 'freightCost', label: '海运费', type: 'number' },
       { key: 'otherCost', label: '其他费用', type: 'number' },
     ],
+    /* ERP-060：分摊证据（只读）——本单持久化金额字段只作原值回显，分摊证据不参与结算计算、也不回写本单 */
+    rowActions: [
+      { label: '分摊证据', icon: '🧾', title: '按本装柜结算单显式关联的装柜清单只读查看 ERP-042 费用分摊证据（按币种分组的客户分摊金额与比例、分摊方法与基数、未分摊参考、已作废历史；结算金额只作原值回显，分摊证据不参与结算计算，也不是结算确认 / 应收应付结论）', onclick: 'showContainerAllocationEvidence' },
+    ],
+    extraActions: [
+      { label: '🧾 分摊证据工作台', title: '打开只读分摊证据工作台（按显式柜号 / 装柜清单号 / 批次号 / 币种 / 批次状态 / 客户 Id 筛选，分页有界；按币种分组、不合并不换算，缺失显示「无 / 未知」，不改写任何单据、不回填历史）', onclick: 'openContainerAllocationEvidenceWorkspace()' },
+    ],
   },
   'bulk-settlement': {
     title: '散货结算单', api: '/api/finance/bulk-settlements', canSubmit: true,
