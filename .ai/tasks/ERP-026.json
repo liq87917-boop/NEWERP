@@ -1,0 +1,26 @@
+{
+  "id": "ERP-026",
+  "title": "Derive Purchase Order receipt and settlement progress",
+  "status": "pending",
+  "risk_level": "medium",
+  "description": "Close the audited Purchase Order progress gap with read-oriented progress derived from existing purchase order, stock-in and finance/settlement records. Do not introduce production schema changes or mutate production data outside existing document workflows.",
+  "acceptance_criteria": [
+    "Purchase Order detail exposes ordered, received and outstanding quantities derived from existing records.",
+    "Where existing finance/settlement records can be linked safely, expose settled and outstanding amounts without inventing data.",
+    "Partial receipts and multiple receipts aggregate correctly and queries remain bounded.",
+    "Missing settlement linkage is represented explicitly rather than guessed.",
+    "Unit/integration tests cover no receipt, partial receipt, complete receipt and available settlement linkage; safe validation passes.",
+    "Browser/UI acceptance is recorded as deferred during development according to project policy."
+  ],
+  "allowed_paths": ["src/ERP.Application/**", "src/ERP.Api/Controllers/**", "src/ERP.Api/wwwroot/**", "src/ERP.UnitTests/**", "src/ERP.IntegrationTests/**", "docs/**", ".ai/**"],
+  "depends_on": ["ERP-022"],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "browser",
+  "browser_acceptance": {"required": true, "scenarios": ["Open a partially received Purchase Order and inspect progress.", "Open a fully received Purchase Order and inspect progress."], "test_filter": "Collection=UiTests", "minimum_screenshots": 2},
+  "human_gate": {"required": false, "level": "L2", "status": "not_required", "reason": "Read-oriented derivation from existing persisted records; no schema/deployment action."},
+  "attempts": 0,
+  "created_at": "2026-09-24T12:17:23Z"
+}
