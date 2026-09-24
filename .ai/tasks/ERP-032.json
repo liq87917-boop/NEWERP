@@ -1,0 +1,52 @@
+{
+  "id": "ERP-032",
+  "title": "Add Sales Order shipment and finance progress report",
+  "status": "pending",
+  "risk_level": "medium",
+  "description": "Add a read-only Sales Order progress report that summarizes shipment quantities and finance linkage from existing authoritative order, stock-out/movement and reconciliation records. Do not infer document links from free text, create receivable records, add production schema, or mutate order, inventory or finance data.",
+  "acceptance_criteria": [
+    "The report exposes ordered, authoritatively shipped and outstanding quantities for Sales Orders where persisted references support the calculation.",
+    "Linked finance amount, document/reference number, status and date reuse the existing reconciliation rules rather than introducing a second matching algorithm.",
+    "Missing shipment or finance linkage is displayed explicitly as unknown or unlinked and is not treated as zero or fully outstanding without supporting evidence.",
+    "Users can filter by customer, order date, shipment status and finance-link status, and different currencies are never aggregated into one monetary total.",
+    "Queries are bounded or paged and avoid per-order database queries for normal report use.",
+    "Unit/integration tests cover unshipped, partially shipped, fully shipped, linked finance and unknown-linkage histories; safe validation passes.",
+    "Browser/UI acceptance is recorded as deferred during development according to project policy."
+  ],
+  "allowed_paths": [
+    "src/ERP.Application/**",
+    "src/ERP.Api/Controllers/**",
+    "src/ERP.Api/wwwroot/**",
+    "src/ERP.UnitTests/**",
+    "src/ERP.IntegrationTests/**",
+    "docs/**",
+    ".ai/**"
+  ],
+  "depends_on": [
+    "ERP-022",
+    "ERP-025",
+    "ERP-028"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "browser",
+  "browser_acceptance": {
+    "required": true,
+    "scenarios": [
+      "Open the Sales Order progress report and inspect an order with partial authoritative shipment history.",
+      "Inspect orders with linked and unavailable finance references and verify the statuses are distinguished clearly."
+    ],
+    "test_filter": "Collection=UiTests",
+    "minimum_screenshots": 2
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L2",
+    "status": "not_required",
+    "reason": "Read-only report over existing order, inventory and finance references; no receivable creation, production mutation, deployment or release."
+  },
+  "attempts": 0,
+  "created_at": "2026-09-24T13:11:03Z"
+}

@@ -1,0 +1,51 @@
+{
+  "id": "ERP-029",
+  "title": "Add inventory movement and stagnant-stock report",
+  "status": "pending",
+  "risk_level": "medium",
+  "description": "Add a read-only inventory movement and stagnant-stock report derived from the existing StockMovement ledger and current stock records. Use explicit base-unit and reversal semantics, keep unavailable history visible as unknown, and do not add production schema, estimate inventory cost, or mutate inventory data.",
+  "acceptance_criteria": [
+    "Users can filter the report by warehouse, product, as-of date, movement window and inactivity threshold.",
+    "The report exposes current base-unit quantity, last authoritative movement date, inbound quantity, outbound quantity and inactivity days using documented ledger semantics.",
+    "Reversal or signed movement records are netted consistently without double-counting, and products without sufficient movement history are identified explicitly rather than assigned invented dates or rates.",
+    "Stagnant-stock classification follows the requested inactivity threshold and does not infer cost valuation from unavailable data.",
+    "Queries are bounded or paged and avoid per-row database queries for normal report use.",
+    "Unit/integration tests cover active stock, stagnant stock, reversals, no-history records and filters; safe validation passes.",
+    "Browser/UI acceptance is recorded as deferred during development according to project policy."
+  ],
+  "allowed_paths": [
+    "src/ERP.Application/**",
+    "src/ERP.Api/Controllers/**",
+    "src/ERP.Api/wwwroot/**",
+    "src/ERP.UnitTests/**",
+    "src/ERP.IntegrationTests/**",
+    "docs/**",
+    ".ai/**"
+  ],
+  "depends_on": [
+    "ERP-009",
+    "ERP-025"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "browser",
+  "browser_acceptance": {
+    "required": true,
+    "scenarios": [
+      "Open the inventory movement report, apply warehouse and date filters, and verify base-unit movement totals.",
+      "Apply an inactivity threshold and verify stagnant and insufficient-history rows are presented distinctly."
+    ],
+    "test_filter": "Collection=UiTests",
+    "minimum_screenshots": 2
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L2",
+    "status": "not_required",
+    "reason": "Read-only reporting over existing stock and movement records; no schema, production data mutation, deployment or release."
+  },
+  "attempts": 0,
+  "created_at": "2026-09-24T13:11:00Z"
+}

@@ -1,0 +1,51 @@
+{
+  "id": "ERP-031",
+  "title": "Add read-only supplier purchase exposure report",
+  "status": "pending",
+  "risk_level": "medium",
+  "description": "Add a read-only supplier purchase exposure report by aggregating existing Purchase Orders with the authoritative receipt and settlement linkage already used by Purchase Order progress. This is not a new accounts-payable ledger: do not create invoices, infer due dates, guess settlement links, add schema, or mutate finance records.",
+  "acceptance_criteria": [
+    "The report groups Purchase Order exposure by supplier and currency without combining different currencies.",
+    "For each group and order, the report exposes ordered amount, authoritatively linked settled amount and linkage status using the existing progress/reconciliation rules.",
+    "Outstanding amount is calculated only where linkage completeness supports it; unknown or unlinked settlement exposure is shown separately and never converted into an authoritative payable balance.",
+    "Filters include supplier, currency, order date and linkage status, and normal report queries are bounded or paged without N+1 behavior.",
+    "The UI and documentation clearly distinguish this operational exposure view from an invoice-backed accounts-payable ledger or aging statement.",
+    "Unit/integration tests cover multiple suppliers, multiple currencies, fully linked, partially linked, unlinked and empty histories; safe validation passes.",
+    "Browser/UI acceptance is recorded as deferred during development according to project policy."
+  ],
+  "allowed_paths": [
+    "src/ERP.Application/**",
+    "src/ERP.Api/Controllers/**",
+    "src/ERP.Api/wwwroot/**",
+    "src/ERP.UnitTests/**",
+    "src/ERP.IntegrationTests/**",
+    "docs/**",
+    ".ai/**"
+  ],
+  "depends_on": [
+    "ERP-026",
+    "ERP-028"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "browser",
+  "browser_acceptance": {
+    "required": true,
+    "scenarios": [
+      "Open the supplier purchase exposure report and verify orders are grouped by supplier and currency with linked settlement amounts.",
+      "Filter for unknown or unlinked settlement exposure and verify it is not presented as an authoritative payable balance."
+    ],
+    "test_filter": "Collection=UiTests",
+    "minimum_screenshots": 2
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L2",
+    "status": "not_required",
+    "reason": "Read-only aggregation using existing Purchase Order progress and authoritative finance references; no payable schema, production mutation, deployment or release."
+  },
+  "attempts": 0,
+  "created_at": "2026-09-24T13:11:02Z"
+}

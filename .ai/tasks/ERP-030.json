@@ -1,0 +1,49 @@
+{
+  "id": "ERP-030",
+  "title": "Add shared print workflow for Trade Document Center",
+  "status": "pending",
+  "risk_level": "low",
+  "description": "Connect Trade Document Center records to the repository's existing shared print preview, direct-print and print-design workflow. Reuse existing TradeDocument fields and print infrastructure; do not create document-detail schema, upload attachments, access production OSS, or perform deployment actions.",
+  "acceptance_criteria": [
+    "Trade Document Center exposes user-visible print preview, direct-print and print-design actions through the existing shared print conventions.",
+    "The print data model maps existing document number, type, status, customer, order/container references, amount, currency, port, copies, dates and notes without inventing unavailable values.",
+    "Unavailable fields render as blank or explicitly unavailable and do not trigger heuristic lookups or text-only authoritative matches.",
+    "Print configuration and design lists do not introduce duplicate registrations or break existing quotation, PI or order print workflows.",
+    "Unit/integration tests cover print-model mapping, missing optional values, action wiring and duplicate-registration protection; safe validation passes.",
+    "Browser/UI acceptance is recorded as deferred during development according to project policy."
+  ],
+  "allowed_paths": [
+    "src/ERP.Application/**",
+    "src/ERP.Api/Controllers/**",
+    "src/ERP.Api/wwwroot/**",
+    "src/ERP.UnitTests/**",
+    "src/ERP.IntegrationTests/**",
+    "docs/**",
+    ".ai/**"
+  ],
+  "depends_on": [
+    "ERP-019"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "browser",
+  "browser_acceptance": {
+    "required": true,
+    "scenarios": [
+      "Open an existing Trade Document record and verify its shared print preview contains the persisted references and values.",
+      "Open print design from Trade Document Center and verify the document type is registered once without affecting another printable document."
+    ],
+    "test_filter": "Collection=UiTests",
+    "minimum_screenshots": 2
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Uses existing local print and document-center application infrastructure only; no OSS upload, production mutation, deployment or release."
+  },
+  "attempts": 0,
+  "created_at": "2026-09-24T13:11:01Z"
+}

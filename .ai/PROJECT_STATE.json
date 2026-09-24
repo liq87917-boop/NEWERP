@@ -22,7 +22,7 @@
     "last_intent": "continuous_rolling_development",
     "last_actor": "GPT",
     "queue_target_size": 4,
-    "updated_at": "2026-09-24T12:17:25Z"
+    "updated_at": "2026-09-24T13:11:04Z"
   },
   "completion_policy": {
     "default_mode": "browser",
@@ -39,7 +39,7 @@
     "irreversible_data_operations": "required"
   },
   "finish_reason": "browser_deferred",
-  "updated_at": "2026-09-24T13:10:30.560168Z",
+  "updated_at": "2026-09-24T13:11:04Z",
   "rolling_queue": {
     "enabled": true,
     "batch_size": 4,
@@ -48,10 +48,10 @@
     "replenishment_owner": "GPT",
     "status": "ready",
     "queued_tasks": [
-      "ERP-025",
-      "ERP-026",
-      "ERP-027",
-      "ERP-028"
+      "ERP-029",
+      "ERP-030",
+      "ERP-031",
+      "ERP-032"
     ]
   }
 }
