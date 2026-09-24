@@ -14,7 +14,7 @@
     "profile": "safe",
     "status": "passed"
   },
-  "cline_exit_code": 0,
+  "cline_exit_code": 1,
   "conversation_control": {
     "mode": "gpt_file_backed_rolling",
     "paused": false,
@@ -38,8 +38,8 @@
     "production_deployment_or_release": "required",
     "irreversible_data_operations": "required"
   },
-  "finish_reason": "remote_synced",
-  "updated_at": "2026-09-24T11:40:47.155153Z",
+  "finish_reason": "task_quarantined",
+  "updated_at": "2026-09-24T11:43:07.935576Z",
   "rolling_queue": {
     "enabled": true,
     "batch_size": 4,
@@ -47,5 +47,6 @@
     "acceptance_interval_seconds": 3600,
     "replenishment_owner": "GPT",
     "status": "batch_ready"
-  }
+  },
+  "last_failed_task": "ERP-021"
 }
