@@ -43,6 +43,8 @@ public partial class ErpDbContext
     public DbSet<ContainerPreLoadingDetail> ContainerPreLoadingDetails => Set<ContainerPreLoadingDetail>();
     public DbSet<ContainerLoadingList> ContainerLoadingLists => Set<ContainerLoadingList>();
     public DbSet<ContainerLoadingDetail> ContainerLoadingDetails => Set<ContainerLoadingDetail>();
+    /// <summary>装柜清单多客户参与方（ERP-041：一柜多客户的客户归属清单子表）</summary>
+    public DbSet<ContainerLoadingListParticipant> ContainerLoadingListParticipants => Set<ContainerLoadingListParticipant>();
 
     // ============ 账务管理 ============
     public DbSet<FinanceDepositApply> FinanceDepositApplies => Set<FinanceDepositApply>();

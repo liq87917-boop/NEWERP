@@ -162,7 +162,10 @@ Object.assign(MODULES, {
     title: '装柜清单', api: '/api/container/loading-lists', canSubmit: true,
     columns: [
       { key: 'loadingListNo', label: '装柜清单号' }, { key: 'loadingDate', label: '日期', type: 'date' },
-      { key: 'customerId', label: '客户Id' }, { key: 'containerNo', label: '柜号' },
+      { key: 'customerId', label: '客户Id' },
+      /* ERP-041：一柜多客户参与方（启用 / 总数 + 主参与方）。0 条 = 历史单客户视图，沿用客户Id 字段 */
+      { key: 'participantCount', label: '客户参与方', render: row => loadingListParticipantCellHtml(row) },
+      { key: 'containerNo', label: '柜号' },
       { key: 'shippingMark', label: '唛头' }, { key: 'totalCartons', label: '总箱数', type: 'money' }, { key: 'status', label: '状态', status: true },
     ],
     fields: [
@@ -175,8 +178,10 @@ Object.assign(MODULES, {
       { key: 'totalVolume', label: '总体积(m³)', type: 'number' },
     ],
     /* ERP-019：由装柜清单生成单证中心记录（柜号写入「关联柜号/订舱号」，一柜一类单证只生成一张）
-       ERP-040：物流跟踪只读回显（装柜清单 → 预装柜单 → 订柜信息 的持久化引用链，未关联显示「未知」） */
+       ERP-040：物流跟踪只读回显（装柜清单 → 预装柜单 → 订柜信息 的持久化引用链，未关联显示「未知」）
+       ERP-041：一柜多客户参与方维护（只维护客户归属与兼容客户字段；不按体积 / 重量 / 金额分摊费用） */
     rowActions: [
+      { label: '多客户参与方', icon: '👥', title: '维护该柜的参与客户与主参与方（只改客户归属与兼容客户字段：不分摊费用、不改动装柜明细 / 跟踪值 / 单证 / 库存）', onclick: 'openLoadingListParticipants' },
       { label: '物流跟踪', icon: '🚢', title: '按持久化引用链只读查看该柜的外贸与物流跟踪值（未关联订柜信息时显示「未知」）', onclick: 'showShipmentTracking' },
       { label: '生成单证', icon: '📋', title: '由该装柜清单生成装箱单 / 提单 / 报关单 / 订舱确认等单证中心记录（同一柜号同一类型只生成一张）', onclick: 'generateTradeDocsFromSource', statuses: ['Pending', 'Submitted', 'Approved'] },
       { label: '预填单证', icon: '📝', title: '按该装柜清单带入单证草稿到单证中心新增表单（不落库，可编辑后再保存）', onclick: 'prefillTradeDocFromSource', statuses: ['Pending', 'Submitted', 'Approved'] },

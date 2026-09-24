@@ -1430,5 +1430,61 @@ IF COL_LENGTH('db_owner.ContainerBooking', 'InspectionDate') IS NULL
 IF COL_LENGTH('db_owner.ContainerBooking', 'CustomsReleaseDate') IS NULL
     ALTER TABLE db_owner.ContainerBooking ADD CustomsReleaseDate DATETIME2 NULL;");
 
+        // 29. 装柜清单多客户参与方（ERP-041：一柜多客户的客户归属清单子表）
+        //     29.1 建表为幂等补齐：历史装柜清单没有任何参与方行 = 行为完全不变，
+        //          继续按 ContainerLoadingList.CustomerId 单客户读取，因此**不做任何回填**，
+        //          也不按箱数 / 体积 / 金额替客户分摊费用或生成任何单据；
+        //     29.2 兼容主客户字段：只有显式指定主参与方时，服务端才把参与方客户写回 CustomerId
+        //          （与参与方同一次 SaveChanges），历史清单的 CustomerId 原样保留、读取不写库；
+        //     29.3 两个过滤唯一索引与 ErpDbContext 模型同名同过滤条件：
+        //          UX_ContainerLoadingListParticipants_ListCustomer —— 同一清单内同一客户不重复（软删除行不占用）；
+        //          UX_ContainerLoadingListParticipants_ListPrimary  —— 同一清单最多一条**启用中**主参与方；
+        //          另建 IX_ContainerLoadingListParticipants_CustomerId 供客户侧有界检索；
+        //     29.4 表内不建外键、不被任何单据引用：客户软删除 / 停用后历史参与方仍可读
+        //          （按编码 / 名称快照显示并显式标注不可用），无需任何历史数据修补；
+        //     29.5 本段只建本表与其索引，不改写装柜清单、装柜明细、订柜跟踪值、单证、费用与库存。
+        await db.Database.ExecuteSqlRawAsync(@"
+IF OBJECT_ID('db_owner.ContainerLoadingListParticipants') IS NULL
+BEGIN
+    CREATE TABLE db_owner.ContainerLoadingListParticipants (
+        Id BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+        LoadingListId BIGINT NOT NULL,
+        CustomerId BIGINT NOT NULL,
+        CustomerCode NVARCHAR(50) NOT NULL DEFAULT N'',
+        CustomerName NVARCHAR(200) NOT NULL DEFAULT N'',
+        IsPrimary BIT NOT NULL DEFAULT 0,
+        Status INT NOT NULL DEFAULT 1,
+        SortOrder INT NOT NULL DEFAULT 0,
+        Remark NVARCHAR(500) NOT NULL DEFAULT N'',
+        CreatedAt DATETIME2 NOT NULL DEFAULT GETDATE(),
+        CreatedBy BIGINT NULL,
+        UpdatedAt DATETIME2 NULL,
+        UpdatedBy BIGINT NULL,
+        IsDeleted BIT NOT NULL DEFAULT 0,
+        RowVersion ROWVERSION NOT NULL
+    );
+END
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes
+               WHERE name = 'UX_ContainerLoadingListParticipants_ListCustomer'
+                 AND object_id = OBJECT_ID('db_owner.ContainerLoadingListParticipants'))
+    CREATE UNIQUE INDEX UX_ContainerLoadingListParticipants_ListCustomer
+        ON db_owner.ContainerLoadingListParticipants(LoadingListId, CustomerId)
+        WHERE IsDeleted = 0;
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes
+               WHERE name = 'UX_ContainerLoadingListParticipants_ListPrimary'
+                 AND object_id = OBJECT_ID('db_owner.ContainerLoadingListParticipants'))
+    CREATE UNIQUE INDEX UX_ContainerLoadingListParticipants_ListPrimary
+        ON db_owner.ContainerLoadingListParticipants(LoadingListId)
+        WHERE IsDeleted = 0 AND Status = 1 AND IsPrimary = 1;
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes
+               WHERE name = 'IX_ContainerLoadingListParticipants_CustomerId'
+                 AND object_id = OBJECT_ID('db_owner.ContainerLoadingListParticipants'))
+    CREATE INDEX IX_ContainerLoadingListParticipants_CustomerId
+        ON db_owner.ContainerLoadingListParticipants(CustomerId)
+        WHERE IsDeleted = 0;");
+
     }
 }

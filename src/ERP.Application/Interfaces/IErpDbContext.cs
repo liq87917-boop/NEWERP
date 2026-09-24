@@ -116,6 +116,11 @@ public interface IErpDbContext
     DbSet<ContainerLoadingList> ContainerLoadingLists { get; }
     DbSet<ContainerLoadingDetail> ContainerLoadingDetails { get; }
 
+    /// <summary>
+    /// 装柜清单多客户参与方（ERP-041；一柜多客户的客户归属清单，不自动分摊费用、不改写装柜 / 单证 / 库存与客户主数据）
+    /// </summary>
+    DbSet<ContainerLoadingListParticipant> ContainerLoadingListParticipants { get; }
+
     // ============ 账务管理 ============
     DbSet<FinanceDepositApply> FinanceDepositApplies { get; }
     DbSet<FinancePaymentApply> FinancePaymentApplies { get; }

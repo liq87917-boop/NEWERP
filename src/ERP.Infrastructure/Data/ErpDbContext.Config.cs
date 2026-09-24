@@ -199,6 +199,33 @@ public partial class ErpDbContext
         modelBuilder.Entity<PurchaseReturnDetail>().Property(x => x.Amount).HasPrecision(18, 4);
         modelBuilder.Entity<PurchaseReturnDetail>().Property(x => x.UnitCost).HasPrecision(18, 6);
 
+        // ============ ERP-041：装柜清单多客户参与方（一柜多客户的客户归属清单子表） ============
+        // 设计口径：
+        //   1. 参与方只描述「这柜装了哪几个客户、哪个是主客户」：不按体积 / 重量 / 金额自动分摊费用、
+        //      不生成费用单与结算记录，不改写装柜清单明细数量、柜号、订柜跟踪值、单证、库存与客户主数据；
+        //   2. 刻意不建外键：客户允许被软删除 / 停用，历史参与方必须继续可读；
+        //   3. CustomerCode / CustomerName 是服务端按客户主数据权威写入的**快照**，客户端提交值一律不被采信；
+        //   4. 两个过滤唯一索引与 SchemaUpgrader 第 29 段创建的同名索引保持一致：
+        //      - ListCustomer：同一装柜清单内同一客户不重复（软删除行不占用，停用的历史行仍占用，
+        //        因此恢复参与应直接启用原参与方而不是另建一条）；
+        //      - ListPrimary：同一装柜清单最多一条启用中的主参与方（停用 / 已删除行不占用主参与方位）。
+        //   5. 客户侧检索单独建过滤索引，避免全表扫描；主参与方与列表顺序无关（服务端显式置主）。
+        modelBuilder.Entity<ContainerLoadingListParticipant>().Property(x => x.CustomerCode).HasMaxLength(50);
+        modelBuilder.Entity<ContainerLoadingListParticipant>().Property(x => x.CustomerName).HasMaxLength(200);
+        modelBuilder.Entity<ContainerLoadingListParticipant>().Property(x => x.Remark).HasMaxLength(500);
+
+        modelBuilder.Entity<ContainerLoadingListParticipant>().HasIndex(x => new { x.LoadingListId, x.CustomerId })
+            .IsUnique().HasDatabaseName("UX_ContainerLoadingListParticipants_ListCustomer")
+            .HasFilter("IsDeleted = 0");
+
+        modelBuilder.Entity<ContainerLoadingListParticipant>().HasIndex(x => x.LoadingListId)
+            .IsUnique().HasDatabaseName("UX_ContainerLoadingListParticipants_ListPrimary")
+            .HasFilter("IsDeleted = 0 AND Status = 1 AND IsPrimary = 1");
+
+        modelBuilder.Entity<ContainerLoadingListParticipant>().HasIndex(x => x.CustomerId)
+            .HasDatabaseName("IX_ContainerLoadingListParticipants_CustomerId")
+            .HasFilter("IsDeleted = 0");
+
         // ============ 明细外键级联删除 ============
         modelBuilder.Entity<InquiryDetail>()
             .HasOne<Inquiry>().WithMany(i => i.Details)
@@ -226,6 +253,12 @@ public partial class ErpDbContext
 
         modelBuilder.Entity<ContainerLoadingDetail>()
             .HasOne<ContainerLoadingList>().WithMany(o => o.Details)
+            .HasForeignKey(d => d.LoadingListId).OnDelete(DeleteBehavior.Cascade);
+
+        // 装柜清单多客户参与方（ERP-041）：明细/子表命名符合约定（LoadingListId），此处显式声明级联删除，
+        // 与既有单据子表保持一致：装柜清单被物理删除时参与方一并清理（本表仍只做软删除，不做物理删除）。
+        modelBuilder.Entity<ContainerLoadingListParticipant>()
+            .HasOne<ContainerLoadingList>().WithMany(o => o.Participants)
             .HasForeignKey(d => d.LoadingListId).OnDelete(DeleteBehavior.Cascade);
 
         // 形式发票 PI 明细（阶段 3）：外键名为 PiId，不符合 EF 默认命名约定（<主表实体>Id），
