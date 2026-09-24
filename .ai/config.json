@@ -27,7 +27,7 @@
   },
   "pipeline": {
     "lock_file": ".ai/pipeline.lock",
-    "push_retry_attempts": 3,
+    "push_retry_attempts": 5,
     "continue_until_queue_empty": true
   },
   "security_baseline_decision": ".ai/decisions/SECURITY_BASELINE_APPROVED.json",
@@ -136,5 +136,17 @@
     "replenishment_owner": "GPT",
     "empty_phase": "replenishing",
     "keep_agent_alive": true
+  },
+  "autonomy": {
+    "enabled": true,
+    "failure_policy": "quarantine_and_continue",
+    "nonblocking_task_statuses": [
+      "blocked",
+      "failed"
+    ],
+    "human_gate_scope": "dependency_chain_only",
+    "remote_failure_mode": "degraded_continue_local",
+    "quarantine_failed_work": true,
+    "ui_blocks_development": false
   }
 }

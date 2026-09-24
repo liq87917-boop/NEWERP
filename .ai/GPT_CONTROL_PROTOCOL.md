@@ -11,7 +11,7 @@ Every conversational command that changes execution state must be translated int
 - approve high risk: create the Human Gate decision through `ai_orchestrator.py approve`;
 - defer or retry: use the corresponding pipeline command and preserve the audit trail.
 
-The queue is fail-closed. The first non-terminal task controls progress; blocked, malformed, gated or failed work is never skipped implicitly. Normal development uses a rolling batch: GPT keeps a target working set of four queued tasks, replenishes when runnable work falls below two, and Cline executes them strictly one by one. Every completed task must pass engineering validation and receive its own git commit/push before the next task starts. The local agent never treats an empty batch as project completion; it enters `replenishing` and keeps watching Git for the next GPT-supplied batch.
+The queue is dependency-safe and self-healing rather than globally fail-closed. A failed, blocked, review-waiting, or Human-Gated task freezes only itself and tasks that depend on it; unrelated dependency-safe tasks continue. Exhausted task attempts are quarantined with their working copy preserved, while the controller restores a clean base and proceeds. Git/GitHub transport failures enter a remote-degraded mode and are retried later instead of stopping local development. Normal development uses a rolling batch: GPT keeps a target working set of four queued tasks, replenishes when runnable work falls below two, and Cline executes them strictly one by one. Every successful task receives its own checkpoint commit; remote synchronization may catch up after a temporary outage. The local agent never treats an empty batch as project completion; it enters `replenishing` and keeps watching Git for the next GPT-supplied batch.
 
 `Cline` success means only `code_ready`. A business task becomes `completed` only when engineering validation passes and a real installed Microsoft Edge session passes the declared browser scenarios with a TRX file, browser metadata, screenshots and a SHA-256 evidence manifest. Missing browser infrastructure blocks the task; it does not downgrade acceptance.
 
@@ -22,3 +22,8 @@ Only tasks explicitly marked `completion_mode: control_plane` may use non-browse
 ## Rolling acceptance cadence
 
 GPT reviews the GitHub repository on an hourly cadence while development is active. Each review checks task JSON state, per-task commits, CI/validation evidence, queue health and blockers. When runnable work is below the low-water mark, GPT adds the next safe batch from `.ai/FUNCTION_BACKLOG.md`. L3/L4, production database/OSS/deployment, irreversible operations and other explicit Human Gates are never auto-approved merely to keep the queue moving; GPT should schedule independent safe work around those gates and surface the approval need to the user.
+
+
+## Autonomy V2 failure policy
+
+Routine engineering failures must not escalate to the user merely because one task cannot proceed. The controller classifies and contains failures, retries recoverable operations, quarantines exhausted task work, and keeps scanning the dependency graph for safe work. `human_attention` is reserved for conditions that cannot be resolved safely without a person: explicit L3/L4 approval, production/irreversible operations, missing credentials that require interactive authorization, unsafe merge conflicts, or material business ambiguity. Browser/UI failures are non-blocking while development browser deferral is enabled.

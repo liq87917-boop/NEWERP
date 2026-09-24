@@ -80,10 +80,22 @@ def all_tasks(config: dict[str, Any]) -> list[tuple[Path, dict[str, Any]]]:
 
 
 def next_task(config: dict[str, Any]) -> tuple[Path, dict[str, Any]] | None:
+    """Select a dependency-safe task; failed/gated/blocked tasks do not globally stop work."""
     for path, task in all_tasks(config):
-        if task.get("status") in TERMINAL_STATUSES: continue
-        if task.get("status") not in {"pending", "retry"}:
-            raise ValueError(f"{task.get('id')} status={task.get('status')} stops queue")
+        status = task.get("status")
+        if status in TERMINAL_STATUSES:
+            continue
+        if status in {"in_progress", "code_ready"}:
+            raise ValueError(f"{task.get('id')} status={status} is an active execution")
+        if status not in {"pending", "retry"}:
+            continue
+        dependencies_ok, _ = dependencies_completed(task, config)
+        if not dependencies_ok:
+            continue
+        if not task.get("auto_start", True):
+            continue
+        if not gate_is_approved(task):
+            continue
         return path, task
     return None
 
@@ -96,6 +108,13 @@ def normalize_failed_head_for_deferred_browser(config: dict[str, Any], state: di
     validation before completion.
     """
     if not browser_acceptance_is_deferred(config):
+        return None
+    failure_context = " ".join([
+        str(state.get("blocker") or ""),
+        str(state.get("finish_reason") or ""),
+        json.dumps(state.get("browser_acceptance") or {}, ensure_ascii=False),
+    ]).lower()
+    if "browser" not in failure_context:
         return None
     for path, task in all_tasks(config):
         if task.get("status") in TERMINAL_STATUSES:
@@ -374,12 +393,16 @@ def recover_push_pending(config: dict[str, Any], state: dict[str, Any]) -> int |
     audit("push_recovery_started", task=task_id)
     pull = subprocess.run(["git", "pull", "--rebase"], cwd=ROOT)
     if pull.returncode != 0:
-        set_state(state, blocker="git pull --rebase failed; completed task was not rerun", finish_reason="push_recovery_failed")
-        return 9
+        set_state(state, phase="remote_degraded", current_task=None, blocker=None, finish_reason="remote_sync_degraded", remote_sync={"status": "pending", "reason": "pull_failed"})
+        audit("remote_sync_degraded", task=task_id, reason="pull_failed")
+        checkpoint_control_files("chore: record degraded remote sync")
+        return 0
     push = subprocess.run(["git", "push"], cwd=ROOT)
     if push.returncode != 0:
-        set_state(state, blocker="git push still pending; completed task was not rerun", finish_reason="push_recovery_failed")
-        return 9
+        set_state(state, phase="remote_degraded", current_task=None, blocker=None, finish_reason="remote_sync_degraded", remote_sync={"status": "pending", "reason": "push_failed"})
+        audit("remote_sync_degraded", task=task_id, reason="push_failed")
+        checkpoint_control_files("chore: record degraded remote sync")
+        return 0
     set_state(state, phase="ready", current_task=None, blocker=None, finish_reason="remote_synced")
     audit("push_recovery_completed", task=task_id); checkpoint_control_files("chore: record remote sync recovery")
     subprocess.run(["git", "push"], cwd=ROOT)
@@ -554,13 +577,43 @@ def run_next(dry_run: bool) -> int:
         subprocess.run(["git", "add", "--", *checkpoint_paths], cwd=ROOT, check=True)
         if subprocess.run(["git", "commit", "-m", f"{task['id']}: {task['title']}"], cwd=ROOT).returncode != 0: return 8
         if config.get("auto_push", False) and subprocess.run(["git", "push"], cwd=ROOT).returncode != 0:
-            set_state(state, phase="push_pending", current_task=task["id"], blocker="Push pending; completed task will not rerun", finish_reason="push_pending")
-            audit("push_pending", task=task["id"]); return 9
+            set_state(
+                state,
+                phase="remote_degraded",
+                current_task=None,
+                blocker=None,
+                finish_reason="remote_sync_degraded",
+                remote_sync={"status": "pending", "task": task["id"]},
+            )
+            audit("remote_sync_degraded", task=task["id"], reason="push_failed")
+            checkpoint_control_files("chore: record degraded remote sync")
+            print(f"Completed {task['id']} locally; remote push is degraded and will be retried later.")
+            return 0
         print(f"Completed {task['id']} by {normalized}"); return 0
 
+    quarantine = subprocess.run(
+        ["git", "stash", "push", "-u", "-m", f"autonomy quarantine {task['id']}"],
+        cwd=ROOT, capture_output=True, text=True,
+    )
+    if quarantine.returncode != 0:
+        task["status"] = "failed"; save_json(task_path, task)
+        set_state(state, phase="human_attention", current_task=task["id"], blocker="Failed task could not be quarantined safely", cline_exit_code=cline_code, finish_reason="quarantine_failed")
+        audit("task_quarantine_failed", task=task["id"], reason=previous_error, git_error=quarantine.stderr.strip())
+        return 7
     task["status"] = "failed"; save_json(task_path, task)
-    set_state(state, phase="human_attention", current_task=task["id"], blocker=previous_error, cline_exit_code=cline_code, finish_reason="attempts_exhausted")
-    audit("task_failed", task=task["id"], reason=previous_error, cline_finish_reason_raw=cline_raw_reason); return 7
+    set_state(
+        state,
+        phase="ready",
+        current_task=None,
+        blocker=None,
+        cline_exit_code=cline_code,
+        finish_reason="task_quarantined",
+        last_failed_task=task["id"],
+    )
+    audit("task_quarantined", task=task["id"], reason=previous_error, cline_finish_reason_raw=cline_raw_reason, stash=quarantine.stdout.strip())
+    checkpoint_control_files(f"{task['id']}: quarantine failed task state")
+    print(f"Quarantined {task['id']}; continuing with dependency-safe work.")
+    return 0
 
 
 def main() -> int:

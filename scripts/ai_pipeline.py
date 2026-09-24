@@ -28,6 +28,8 @@ ORCHESTRATOR = ROOT / "scripts" / "ai_orchestrator.py"
 AUTOMATION_TESTS = ROOT / "tests" / "automation"
 RUNNABLE_STATUSES = {"pending", "retry"}
 TERMINAL_STATUSES = {"completed", "deferred", "skipped"}
+NONBLOCKING_WAIT_STATUSES = {"blocked", "failed"}
+ACTIVE_STATUSES = {"in_progress", "code_ready"}
 SUPPORTED_GATES = {"L1", "L2", "L3", "L4"}
 
 
@@ -88,26 +90,59 @@ def validate_dependency_graph(entries: list[tuple[Path, dict[str, Any]]]) -> Non
 
 
 def queue_head() -> tuple[tuple[Path, dict[str, Any]] | None, str]:
+    """Return the first dependency-safe runnable task without head-of-line blocking."""
     entries = task_entries(); validate_dependency_graph(entries)
     by_id = {task["id"]: task for _, task in entries}
+    waiting: list[str] = []
+    unfinished = False
     for path, task in entries:
         status = task.get("status")
-        if status in TERMINAL_STATUSES: continue
-        if status not in RUNNABLE_STATUSES: return None, f"{task['id']} status={status} stops queue"
-        if not isinstance(task.get("auto_start", True), bool): return None, f"{task['id']} auto_start must be bool"
-        if not isinstance(task.get("requires_human_approval", False), bool): return None, f"{task['id']} requires_human_approval must be bool"
+        if status in TERMINAL_STATUSES:
+            continue
+        unfinished = True
+        if status in ACTIVE_STATUSES:
+            return None, f"{task['id']} status={status} is an active execution"
+        if status in NONBLOCKING_WAIT_STATUSES:
+            waiting.append(f"{task['id']}:{status}")
+            continue
+        if status not in RUNNABLE_STATUSES:
+            waiting.append(f"{task['id']}:{status}")
+            continue
+        if not isinstance(task.get("auto_start", True), bool):
+            waiting.append(f"{task['id']}:invalid_auto_start")
+            continue
+        if not isinstance(task.get("requires_human_approval", False), bool):
+            waiting.append(f"{task['id']}:invalid_human_approval")
+            continue
         gate = str(task.get("human_gate", {}).get("level", "L1")).upper()
-        if gate not in SUPPORTED_GATES: return None, f"{task['id']} unknown human gate {gate}"
-        for dependency in task_dependencies(task):
-            dependency_status = by_id[dependency].get("status")
-            if dependency_status != "completed": return None, f"{task['id']} waits for {dependency} status={dependency_status}"
+        if gate not in SUPPORTED_GATES:
+            waiting.append(f"{task['id']}:unknown_gate={gate}")
+            continue
+        unmet = [
+            dependency for dependency in task_dependencies(task)
+            if by_id[dependency].get("status") != "completed"
+        ]
+        if unmet:
+            waiting.append(
+                f"{task['id']}:waits_for=" +
+                ",".join(f"{dependency}:{by_id[dependency].get('status')}" for dependency in unmet)
+            )
+            continue
         gate_status = task.get("human_gate", {}).get("status")
         approved = gate_status in {"approved", "not_required", "ai_reviewed"}
-        if not task.get("auto_start", True): return None, f"{task['id']} auto_start=false"
+        if not task.get("auto_start", True):
+            waiting.append(f"{task['id']}:auto_start=false")
+            continue
         if (task.get("human_gate", {}).get("required", False) or gate in {"L3", "L4"} or task.get("requires_human_approval", False)) and not approved:
-            return None, f"{task['id']} waits for human_gate={gate}"
+            waiting.append(f"{task['id']}:human_gate={gate}")
+            continue
         return (path, task), "ready"
-    return None, "queue_empty"
+    if not unfinished:
+        return None, "queue_empty"
+    summary = "; ".join(waiting[:8])
+    if len(waiting) > 8:
+        summary += f"; +{len(waiting) - 8} more"
+    return None, "no_runnable_tasks" + (f": {summary}" if summary else "")
 
 
 def queue_status() -> int:
@@ -244,7 +279,9 @@ def run_all() -> int:
                 print("Current rolling batch completed; agent remains alive and waits for GPT replenishment.")
                 return 0
             if item is None:
-                print(f"Pipeline stopped fail-closed: {reason}", file=sys.stderr); return 10
+                audit("pipeline_waiting", reason=reason)
+                print(f"[pipeline] no dependency-safe runnable task: {reason}")
+                return 0
             task_id = item[1]["id"]
             print(f"[pipeline] starting {task_id}", flush=True)
             completed = run([sys.executable, str(ORCHESTRATOR), "run-next"])
