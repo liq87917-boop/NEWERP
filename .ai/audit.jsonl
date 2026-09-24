@@ -95,3 +95,5 @@
 {"at": "2026-09-24T11:43:35.393745Z", "event": "cline_failed", "task": "ERP-022", "attempt": 1}
 {"at": "2026-09-24T11:43:35.458304Z", "event": "pipeline_stopped", "task": "ERP-022", "exit_code": 1}
 {"at": "2026-09-24T11:45:18.159875Z", "event": "runner_recovered_for_direct_execution", "tasks": ["ERP-021", "ERP-022"], "reason": "Cline credits exhausted; no business changes were produced"}
+{"at": "2026-09-24T11:51:04.143300Z", "event": "browser_acceptance_deferred", "task": "ERP-021"}
+{"at": "2026-09-24T11:51:04.143300Z", "event": "task_completed", "task": "ERP-021", "status": "completed", "execution_outcome": "completed", "normalized_finish_reason": "browser_deferred", "cline_exit_code": 0, "cline_finish_reason_raw": "direct_execution", "attempts": 1, "browser_acceptance": {"status": "deferred", "reason": "Real-browser/UI acceptance is deferred until FINAL-UI-ACCEPTANCE.", "deferred_at": "2026-09-24T11:51:04.143300Z"}, "finished_at": "2026-09-24T11:51:04.143300Z"}

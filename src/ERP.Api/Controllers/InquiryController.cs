@@ -46,6 +46,41 @@ public class InquiryController : DocumentControllerBase<Inquiry>
         return Ok(ApiResponse<Inquiry>.Success(entity));
     }
 
+    /// <summary>把已审核询价单带入报价单新增表单，不落库。</summary>
+    [HttpGet("{id:long}/quotation-prefill")]
+    public async Task<IActionResult> QuotationPrefill(long id)
+    {
+        var quotation = await InquiryQuotationConversion.BuildDraftAsync(Db, id);
+        return Ok(ApiResponse<object>.Success(new { SourceId = id, quotation }));
+    }
+
+    /// <summary>把已审核询价单直接生成一张报价单；同一询价单只允许一张。</summary>
+    [HttpPost("{id:long}/to-quotation")]
+    public async Task<IActionResult> ToQuotation(long id)
+    {
+        var quotation = await InquiryQuotationConversion.BuildDraftAsync(Db, id);
+        quotation.QuotationNo = await _noService.GenerateAsync(DocumentType.Quotation);
+        quotation.CreatedAt = DateTime.Now;
+        foreach (var detail in quotation.Details)
+        {
+            detail.QuotationNo = quotation.QuotationNo;
+            detail.CreatedAt = DateTime.Now;
+        }
+
+        var inquiry = await Db.Inquiries.FirstAsync(o => o.Id == id && !o.IsDeleted);
+        Db.Quotations.Add(quotation);
+        inquiry.Status = DocumentStatus.Completed;
+        inquiry.UpdatedAt = DateTime.Now;
+        await Db.SaveChangesAsync();
+        return Ok(ApiResponse<object>.Success(new
+        {
+            quotation.Id,
+            quotation.QuotationNo,
+            SourceId = id,
+            SourceNo = inquiry.InquiryNo
+        }, "报价单生成成功"));
+    }
+
     /// <summary>创建</summary>
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] Inquiry entity)

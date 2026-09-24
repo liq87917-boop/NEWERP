@@ -219,6 +219,55 @@ async function quotationToPi(id) {
   } catch (err) { toast(err.message, 'error'); }
 }
 
+/* ============ 询价单 → 报价单（带入预填 / 直接生成，ERP-021） ============ */
+async function inquiryToQuotation(id) {
+  if (!confirm('确认按该已审核询价单生成报价单？同一询价单只能生成一张。')) return;
+  try {
+    const result = await api(`/api/inquiries/${id}/to-quotation`, 'POST');
+    toast(`已生成报价单：${result.quotationNo}`);
+    if (CURRENT_LOADER) CURRENT_LOADER();
+    return result;
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+async function inquiryPrefillQuotation(id) {
+  if (!confirm('按该询价单带入一张新的报价单？带入后可继续编辑，保存时服务端会复核金额。')) return;
+  try {
+    const data = await api(`/api/inquiries/${id}/quotation-prefill`);
+    const mod = MODULES.quotation;
+    if (!mod) { toast('报价单模块未加载', 'error'); return; }
+    gotoModulePage('quotation', mod.title);
+    openForm();
+    await fillQuotationForm(data.quotation);
+    toast('已按询价单带入，请核对后保存');
+  } catch (err) { toast(err.message, 'error'); }
+}
+
+async function fillQuotationForm(quotation) {
+  const mod = MODULES.quotation;
+  if (!mod || !quotation) throw new Error('报价单带入数据为空');
+  (mod.fields || []).forEach(f => {
+    const el = document.getElementById('f_' + f.key);
+    if (!el) return;
+    const value = quotation[f.key];
+    el.value = f.type === 'date' ? (value ? fmtDate(value) : '') : (value ?? '');
+  });
+  for (const f of (mod.fields || []).filter(x => x.type === 'ref')) {
+    const box = document.getElementById('f_' + f.key + '_search');
+    const id = quotation[f.key];
+    if (!box || !id) continue;
+    try {
+      const ref = REF_APIS[f.ref];
+      const item = await api(`${ref.api}/${id}`);
+      box.value = item[ref.nameKey] || '';
+    } catch (e) { /* 名称查询失败不影响带入 */ }
+  }
+  if (mod.detailFields && mod.detailFields.length) {
+    DETAIL_ROWS = (quotation[mod.detailKey || 'details'] || []).map(d => Object.assign({}, d));
+    detailRender();
+  }
+}
+
 /* ============ 报价单 / PI → 销售订单（带入预填 / 直接生成，ERP-010） ============ */
 
 /* 来源模块 -> 销售订单转换配置（与后端 SalesOrderConversion 的守卫规则一一对应） */

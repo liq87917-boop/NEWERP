@@ -96,6 +96,10 @@ Object.assign(MODULES, {
       { key: 'validDays', label: '有效期(天)', type: 'number', default: 30 },
       { key: 'remark', label: '备注', type: 'textarea' },
     ],
+    rowActions: [
+      { label: '预填报价单', icon: '📝', title: '按已审核询价单带入报价单新增表单，可核对修改后保存', onclick: 'inquiryPrefillQuotation', statuses: ['Approved'] },
+      { label: '转报价单', icon: '📄', title: '按已审核询价单直接生成报价单，同一询价单仅一张', onclick: 'inquiryToQuotation', statuses: ['Approved'] },
+    ],
   },
   /* 销售订单（外销合同）：EF 主子表接口（/api/sales-orders），承载 ERP-008 补齐的外贸合同 /
      运输 / 来源追溯字段；页面按主子表编辑，保存后可在账单与打印中直接使用。 */
