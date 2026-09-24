@@ -50,8 +50,19 @@ public static class PurchaseQuoteConversion
     /// </exception>
     public static async Task<PurchaseOrder> BuildDraftAsync(IErpDbContext db, PurchaseQuote quote,
         CancellationToken ct = default)
+        => await BuildDraftAsync(db, quote, null, ct);
+
+    /// <summary>
+    /// 重载（ERP-027 批次路径）：<paramref name="lookup"/> 为「批次一次性预取」的既有单据索引，
+    /// 把重复生成守卫与归属销售订单解析的**按行查询**换成预取匹配（判定口径逐字一致，不复制守卫逻辑）；
+    /// 传 null 时与单行路径完全相同（按行各查一次库）。
+    /// </summary>
+    public static async Task<PurchaseOrder> BuildDraftAsync(IErpDbContext db, PurchaseQuote quote,
+        PurchaseQuoteBatchLookup? lookup, CancellationToken ct = default)
     {
-        var generated = await FindGeneratedOrderAsync(db, quote, ct);
+        var generated = lookup is null
+            ? await FindGeneratedOrderAsync(db, quote, ct)
+            : lookup.FindGeneratedOrder(quote);
         if (generated is not null)
             throw BusinessException.RuleConflict($"该比价行已生成采购订单：{generated.OrderNo}，不能重复生成");
         if (quote.Status == ConvertedStatus)
@@ -64,7 +75,7 @@ public static class PurchaseQuoteConversion
         if (quote.SupplierId is null or <= 0)
             throw BusinessException.RuleConflict("比价行未维护供应商，不能生成采购订单");
 
-        var (salesOrderId, salesOrderNo) = await ResolveOwningSalesOrderAsync(db, quote, ct);
+        var (salesOrderId, salesOrderNo) = await ResolveOwningSalesOrderAsync(db, quote, lookup, ct);
         return MapDraft(quote, salesOrderId, salesOrderNo);
     }
 
@@ -201,14 +212,353 @@ public static class PurchaseQuoteConversion
     /// 匹配不到（含该列已是采购单号或留空）时留空，不臆造关联。
     /// </summary>
     private static async Task<(long? Id, string No)> ResolveOwningSalesOrderAsync(IErpDbContext db,
-        PurchaseQuote quote, CancellationToken ct)
+        PurchaseQuote quote, PurchaseQuoteBatchLookup? lookup, CancellationToken ct)
     {
         var refNo = (quote.RefOrderNo ?? string.Empty).Trim();
         if (refNo.Length == 0) return (null, string.Empty);
 
-        var order = await db.SalesOrders.AsNoTracking()
-            .FirstOrDefaultAsync(o => o.OrderNo == refNo && !o.IsDeleted, ct);
+        var order = lookup is null
+            ? await db.SalesOrders.AsNoTracking()
+                .FirstOrDefaultAsync(o => o.OrderNo == refNo && !o.IsDeleted, ct)
+            : lookup.FindSalesOrder(refNo);
         return order is null ? (null, string.Empty) : (order.Id, order.OrderNo);
+    }
+
+    // ==================== 比价批次 → 采购订单（ERP-027：批次多行合并） ====================
+
+    /// <summary>来源标记前缀（同一批次的全部行共用，用于一次查回该批次的来源采购订单，见 <see cref="PurchaseQuoteBatchLookup" />）</summary>
+    public static string SourceMarkerPrefix(string quoteNo) => $"来源比价 {quoteNo}（比价行 #";
+
+    /// <summary>
+    /// 解析本次要处理的比价行（只读）：优先按批次号 <paramref name="quoteNo"/>，为空时按比价行
+    /// <paramref name="lineId"/> 反查其所属批次；<paramref name="lineIds"/> 非空时只保留指定行
+    /// （必须属于同一批次，否则抛 InvalidParameter）。
+    /// </summary>
+    public static async Task<List<PurchaseQuote>> ResolveBatchLinesAsync(IErpDbContext db, string? quoteNo, long? lineId,
+        IReadOnlyCollection<long>? lineIds = null, CancellationToken ct = default)
+    {
+        var batchNo = (quoteNo ?? string.Empty).Trim();
+        if (batchNo.Length == 0)
+        {
+            if (lineId is null or <= 0)
+                throw BusinessException.InvalidParameter("请提供比价批次号或比价行 Id");
+
+            var anchor = await db.PurchaseQuotes.AsNoTracking()
+                .FirstOrDefaultAsync(q => q.Id == lineId && !q.IsDeleted, ct)
+                ?? throw BusinessException.NotFound("比价记录不存在");
+            batchNo = anchor.QuoteNo;
+        }
+
+        var lines = await db.PurchaseQuotes.AsNoTracking()
+            .Where(q => q.QuoteNo == batchNo && !q.IsDeleted)
+            .OrderBy(q => q.Id)
+            .ToListAsync(ct);
+        if (lines.Count == 0) throw BusinessException.NotFound($"比价批次 {batchNo} 不存在或已删除");
+
+        if (lineIds is { Count: > 0 })
+        {
+            var batchIds = lines.Select(l => l.Id).ToHashSet();
+            var outside = lineIds.Where(id => !batchIds.Contains(id)).ToList();
+            if (outside.Count > 0)
+                throw BusinessException.InvalidParameter($"比价行 #{outside[0]} 不属于比价批次 {batchNo}");
+
+            var wanted = lineIds.ToHashSet();
+            lines = lines.Where(l => wanted.Contains(l.Id)).ToList();
+        }
+        return lines;
+    }
+
+    /// <summary>
+    /// 批次构造（只读、不落库）：解析来源行 → 逐行复用单行权威守卫与映射（<see cref="BuildDraftAsync(IErpDbContext, PurchaseQuote, PurchaseQuoteBatchLookup?, CancellationToken)" />）→
+    /// 按兼容分组键合并为「一批采购订单草稿」。
+    /// 不合格行**不静默丢弃**，而是作为 <see cref="PurchaseQuoteBatchSkip" /> 显式列出原因。
+    /// </summary>
+    public static async Task<PurchaseQuoteBatchBuildResult> BuildBatchAsync(IErpDbContext db, string? quoteNo, long? lineId,
+        IReadOnlyCollection<long>? lineIds = null, CancellationToken ct = default)
+    {
+        var lines = await ResolveBatchLinesAsync(db, quoteNo, lineId, lineIds, ct);
+        var build = new PurchaseQuoteBatchBuildResult { SourceNo = lines[0].QuoteNo, LineCount = lines.Count };
+
+        // 批次内一次性预取既有单据索引：重复生成守卫与归属销售订单解析不再按行查库（批次内固定 2 次查询）
+        var lookup = await PurchaseQuoteBatchLookup.LoadAsync(db, lines, ct);
+
+        var drafts = new List<(PurchaseQuote Line, PurchaseOrder Draft)>();
+        foreach (var line in lines)
+        {
+            try
+            {
+                drafts.Add((line, await BuildDraftAsync(db, line, lookup, ct)));
+            }
+            catch (BusinessException ex)
+            {
+                build.Skipped.Add(new PurchaseQuoteBatchSkip
+                {
+                    LineId = line.Id,
+                    QuoteNo = line.QuoteNo,
+                    ProductName = line.ProductName,
+                    Reason = ex.Message
+                });
+            }
+        }
+
+        var index = new Dictionary<BatchGroupKey, PurchaseQuoteBatchGroup>();
+        foreach (var (line, draft) in drafts)
+        {
+            var key = BatchGroupKey.From(draft);
+            if (!index.TryGetValue(key, out var group))
+            {
+                group = new PurchaseQuoteBatchGroup();
+                index[key] = group;
+                build.Groups.Add(group);
+            }
+            group.Lines.Add(line);
+            group.LineDrafts.Add(draft);
+        }
+
+        foreach (var group in build.Groups)
+            group.Draft = MergeGroup(group.Lines, group.LineDrafts);
+        return build;
+    }
+
+    /// <summary>
+    /// 组内多行合并为一张采购订单草稿：表头取组内统一口径（分组键保证完全一致），
+    /// 明细按来源行顺序逐行铺开（每行保留自己的交期），订单交期取组内最晚一行（一单覆盖所有行），
+    /// 备注与明细备注逐行写入来源标记，最后由采购订单口径重算总额并校验。
+    /// </summary>
+    private static PurchaseOrder MergeGroup(IReadOnlyList<PurchaseQuote> lines, IReadOnlyList<PurchaseOrder> drafts)
+    {
+        var head = drafts[0];
+        var deliveryDates = drafts.Where(d => d.DeliveryDate.HasValue).Select(d => d.DeliveryDate!.Value).ToList();
+        var deliveryDate = deliveryDates.Count > 0 ? deliveryDates.Max() : (DateTime?)null;
+
+        var order = new PurchaseOrder
+        {
+            OrderNo = string.Empty,                      // 计划 / 预填不占用单据号，直接生成时由调用方按字轨赋值
+            OrderDate = head.OrderDate,
+            SupplierId = head.SupplierId,
+            BuyerId = head.BuyerId,
+            Currency = head.Currency,
+            ExchangeRate = head.ExchangeRate,
+            TaxIncluded = head.TaxIncluded,
+            TaxRate = head.TaxRate,
+            PaymentTerms = head.PaymentTerms,
+            DeliveryDate = deliveryDate,
+            SupplierConfirmedDate = deliveryDate,
+            OwningCustomerId = head.OwningCustomerId,
+            OwningCustomerName = head.OwningCustomerName,
+            OwningSalesOrderId = head.OwningSalesOrderId,
+            OwningSalesOrderNo = head.OwningSalesOrderNo,
+            AdvanceOnBehalf = head.AdvanceOnBehalf,
+            ContractNo = head.ContractNo,
+            Status = DocumentStatus.Pending,
+            Remark = MergeBatchRemark(lines),
+            CreatedAt = DateTime.Now,
+            Details = new List<PurchaseOrderDetail>()
+        };
+
+        for (var i = 0; i < lines.Count; i++)
+        {
+            var detail = drafts[i].Details[0];           // 单行草稿固定一行明细
+            detail.Remark = Clamp(MergeRemark(lines[i].Remark, SourceMarker(lines[i])), 500);   // 行级来源留痕
+            order.Details.Add(detail);
+        }
+
+        Revalidate(order);
+        PurchaseOrderController.Calculate(order);
+        PurchaseOrderController.Validate(order);
+        return order;
+    }
+
+    /// <summary>
+    /// 批次转采购订单（直接生成）：先统一取号（全部取号发生在任何单据落库之前，避免半成品数据），
+    /// 再一次性新增全部采购订单并逐行回写来源留痕，最后单次 SaveChanges 提交（只新增，绝不覆盖既有订单）。
+    /// 没有任何合格行时抛 <see cref="BusinessException" />（RuleConflict），不落库、不占号。
+    /// </summary>
+    public static async Task<PurchaseQuoteBatchConversionResult> ConvertBatchAsync(IErpDbContext db,
+        IDocumentNumberService noService, PurchaseQuoteBatchConversionRequest? request, CancellationToken ct = default)
+    {
+        if (request is null) throw BusinessException.InvalidParameter("请求内容不能为空");
+
+        var build = await BuildBatchAsync(db, request.QuoteNo, request.LineId, request.LineIds, ct);
+        if (build.Groups.Count == 0)
+            throw BusinessException.RuleConflict(
+                $"比价批次 {build.SourceNo} 没有可转换的「已选中」行：{SkipSummary(build.Skipped)}");
+
+        var assigned = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var group in build.Groups)
+        {
+            var candidate = await noService.GenerateAsync(DocumentType.PurchaseOrder);
+            group.Draft.OrderNo = await EnsureUniqueOrderNoAsync(db, candidate, assigned, ct);
+        }
+
+        foreach (var group in build.Groups)
+        {
+            db.PurchaseOrders.Add(group.Draft);
+        }
+
+        // 来源行留痕必须写在**受跟踪**的实体上（批次行是按 AsNoTracking 读出来做守卫 / 分组的，
+        // 直接改副本不会落库）：此处一次性取回本批次要留痕的行（1 次查询），逐行回写状态与采购单号。
+        var orderNoByLineId = build.Groups
+            .SelectMany(g => g.Lines.Select(l => (LineId: l.Id, OrderNo: g.Draft.OrderNo)))
+            .ToDictionary(x => x.LineId, x => x.OrderNo);
+        var lineIds = orderNoByLineId.Keys.ToList();
+        var trackedLines = await db.PurchaseQuotes.Where(q => lineIds.Contains(q.Id)).ToListAsync(ct);
+        foreach (var line in trackedLines) MarkConverted(line, orderNoByLineId[line.Id]);
+
+        await db.SaveChangesAsync(ct);
+
+        return new PurchaseQuoteBatchConversionResult
+        {
+            SourceType = PurchaseQuoteSourceType,
+            SourceNo = build.SourceNo,
+            OrderCount = build.Groups.Count,
+            ConvertedLineCount = build.Groups.Sum(g => g.Lines.Count),
+            TotalAmount = build.Groups.Sum(g => g.Draft.TotalAmount),
+            Skipped = build.Skipped,
+            Orders = build.Groups.Select(g => new PurchaseQuoteBatchOrderResult
+            {
+                Id = g.Draft.Id,
+                OrderNo = g.Draft.OrderNo,
+                SupplierId = g.Draft.SupplierId,
+                SupplierName = Clamp(g.Lines[0].SupplierName, 200),
+                Currency = g.Draft.Currency.ToString(),
+                LineIds = g.Lines.Select(l => l.Id).ToList(),
+                LineCount = g.Lines.Count,
+                TotalAmount = g.Draft.TotalAmount
+            }).ToList()
+        };
+    }
+
+    /// <summary>批次构造结果：兼容分组（每组 = 一张采购订单）+ 被显式跳过的来源行</summary>
+    public sealed class PurchaseQuoteBatchBuildResult
+    {
+        /// <summary>比价批次号</summary>
+        public string SourceNo { get; set; } = string.Empty;
+
+        /// <summary>批次内参与判定的比价行数（含不合格行）</summary>
+        public int LineCount { get; set; }
+
+        /// <summary>兼容分组（顺序 = 组内首行的比价行 Id 升序）</summary>
+        public List<PurchaseQuoteBatchGroup> Groups { get; } = new();
+
+        /// <summary>不合格行及原因（未选中 / 已放弃 / 已转 / 未维护供应商 / 数量或单价非法）</summary>
+        public List<PurchaseQuoteBatchSkip> Skipped { get; } = new();
+    }
+
+    /// <summary>组内可合并的比价行集合：来源行 + 逐行草稿 + 合并后的采购订单草稿</summary>
+    public sealed class PurchaseQuoteBatchGroup
+    {
+        /// <summary>来源比价行（按比价行 Id 升序，与明细行一一对应）</summary>
+        public List<PurchaseQuote> Lines { get; } = new();
+
+        /// <summary>逐行草稿（合并前：保留每行独立交期 / 金额 / 来源标记口径）</summary>
+        public List<PurchaseOrder> LineDrafts { get; } = new();
+
+        /// <summary>合并后的采购订单草稿（未落库、无单号）</summary>
+        public PurchaseOrder Draft { get; set; } = new();
+    }
+
+    /// <summary>
+    /// 分组键（合并为同一张采购订单的**必要条件**）：供应商 + 币种 + 归属客户 + 归属销售订单 +
+    /// 付款条件（去空格、不区分大小写）+ 是否含税。组内这些采购订单表头字段完全一致，
+    /// 合并时才不会出现「一张订单两套表头」；不一致的行保持独立成单，绝不静默改写来源值。
+    /// </summary>
+    private readonly record struct BatchGroupKey(long SupplierId, Currency Currency, long OwningCustomerId,
+        long OwningSalesOrderId, string PaymentTerms, bool TaxIncluded)
+    {
+        public static BatchGroupKey From(PurchaseOrder draft) => new(
+            draft.SupplierId,
+            draft.Currency,
+            draft.OwningCustomerId ?? 0,
+            draft.OwningSalesOrderId ?? 0,
+            (draft.PaymentTerms ?? string.Empty).Trim().ToUpperInvariant(),
+            draft.TaxIncluded);
+    }
+
+    /// <summary>
+    /// 批次内采购单号唯一性守卫：以单据号服务（字轨）返回的候选号为准，
+    /// 与库内既有采购单号或本批次已分配的单号重复时，按 ERP-019 单证编号的既有约定追加 <c>-2 / -3 …</c>（最多 200 次）。
+    /// </summary>
+    /// <remarks>
+    /// 单据号规则表未配置时，单据号服务按「单据数量 + 毫秒后四位」兜底，同一毫秒内连续取号可能得到相同候选号，
+    /// 因此批次生成必须在落库前显式保证号互不相同（全部取号在任何单据落库之前完成，避免半成品数据）。
+    /// </remarks>
+    public static async Task<string> EnsureUniqueOrderNoAsync(IErpDbContext db, string candidate,
+        ISet<string> assignedInBatch, CancellationToken ct = default)
+    {
+        var normalized = (candidate ?? string.Empty).Trim();
+        if (normalized.Length == 0) throw BusinessException.InvalidParameter("采购单号候选值不能为空");
+
+        for (var i = 1; i <= 200; i++)
+        {
+            var no = i == 1 ? normalized : $"{normalized}-{i}";
+            if (assignedInBatch.Contains(no)) continue;
+            if (await db.PurchaseOrders.AsNoTracking().AnyAsync(o => o.OrderNo == no && !o.IsDeleted, ct)) continue;
+
+            assignedInBatch.Add(no);
+            return no;
+        }
+        throw BusinessException.RuleConflict($"采购单号 {normalized} 连续冲突，无法为比价批次生成唯一单号");
+    }
+
+    /// <summary>把批次构造结果映射为只读计划响应（含每组未落库草稿、合格行数、服务端重算合计与跳过原因）</summary>
+    public static PurchaseQuoteBatchPlan BuildPlan(PurchaseQuoteBatchBuildResult build) => new()
+    {
+        SourceType = PurchaseQuoteSourceType,
+        SourceNo = build.SourceNo,
+        BatchLineCount = build.LineCount,
+        EligibleLineCount = build.Groups.Sum(g => g.Lines.Count),
+        GroupCount = build.Groups.Count,
+        TotalAmount = build.Groups.Sum(g => g.Draft.TotalAmount),
+        Skipped = build.Skipped,
+        Groups = build.Groups.Select(g => new PurchaseQuoteBatchGroupPlan
+        {
+            SupplierId = g.Draft.SupplierId,
+            SupplierName = Clamp(g.Lines[0].SupplierName, 200),
+            Currency = g.Draft.Currency.ToString(),
+            OwningCustomerId = g.Draft.OwningCustomerId,
+            OwningCustomerName = g.Draft.OwningCustomerName,
+            OwningSalesOrderNo = g.Draft.OwningSalesOrderNo,
+            PaymentTerms = g.Draft.PaymentTerms,
+            TaxIncluded = g.Draft.TaxIncluded,
+            DeliveryDate = g.Draft.DeliveryDate,
+            LineIds = g.Lines.Select(l => l.Id).ToList(),
+            LineCount = g.Lines.Count,
+            TotalAmount = g.Draft.TotalAmount,
+            Order = g.Draft
+        }).ToList()
+    };
+
+    /// <summary>跳过原因摘要（按原因分组计数，便于一次看清批次内有多少行不合格）</summary>
+    public static string SkipSummary(IReadOnlyList<PurchaseQuoteBatchSkip> skipped)
+    {
+        if (skipped.Count == 0) return "该批次没有「已选中」的比价行";
+        var parts = skipped.GroupBy(s => s.Reason).Select(gr => $"{gr.Key}（{gr.Count()} 行）");
+        return $"{skipped.Count} 行不合格：" + string.Join("；", parts);
+    }
+
+    /// <summary>
+    /// 组内多行备注合并：各行的父备注（去重、按行序）+ 每行来源标记，按 500 字符截断。
+    /// 单行时与单行转换的「备注 ｜ 来源标记」完全一致；每行的来源标记同时写进对应明细行备注，行级可追溯。
+    /// 父备注过长时**先截断父备注、保留来源标记**（来源标记是重复生成的第二道判据，不能因截断丢失）。
+    /// </summary>
+    private static string MergeBatchRemark(IReadOnlyList<PurchaseQuote> lines)
+    {
+        var markers = string.Join(" ｜ ", lines.Select(SourceMarker));
+
+        var parents = new List<string>();
+        foreach (var line in lines)
+        {
+            var text = (line.Remark ?? string.Empty).Trim();
+            if (text.Length > 0 && !parents.Contains(text)) parents.Add(text);
+        }
+        if (parents.Count == 0) return Clamp(markers, 500);
+        if (markers.Length + 3 >= 500) return Clamp(markers, 500);        // 极端批次：标记本身超长（逐行标记仍见明细备注）
+
+        var parentText = string.Join(" ｜ ", parents);
+        var budget = 500 - markers.Length - 3;
+        if (parentText.Length > budget) parentText = parentText[..budget];
+        return $"{parentText} ｜ {markers}";
     }
 
     // ==================== 文本工具 ====================
@@ -263,4 +613,187 @@ public sealed class PurchaseOrderConversionResult
 
     /// <summary>来源比价批次号</summary>
     public string SourceNo { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// 批次一次性预取索引（ERP-027，避免按行 N+1 查询：批次内固定 2 次查询）：
+/// ① 批次行 <c>RefOrderNo</c> 指向的关联销售订单（转换前语义）；
+/// ② 该批次既有来源采购订单（采购单号回写 + 备注来源标记两种重复生成判据）。
+/// 判定口径与单行路径（<see cref="PurchaseQuoteConversion.FindGeneratedOrderAsync(IErpDbContext, PurchaseQuote, CancellationToken)" />）
+/// 完全一致，只是把按行查询换成一次性预取。
+/// </summary>
+public sealed class PurchaseQuoteBatchLookup
+{
+    private readonly Dictionary<string, PurchaseOrder> _ordersByNo = new(StringComparer.OrdinalIgnoreCase);
+    private readonly List<PurchaseOrder> _ordersByMarkerRemark = new();
+    private readonly Dictionary<string, SalesOrder> _salesOrdersByNo = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>按批次行一次性装载索引（只读；仅未删除单据参与判定）</summary>
+    public static async Task<PurchaseQuoteBatchLookup> LoadAsync(IErpDbContext db, IReadOnlyList<PurchaseQuote> lines,
+        CancellationToken ct = default)
+    {
+        var lookup = new PurchaseQuoteBatchLookup();
+        if (lines.Count == 0) return lookup;
+
+        var refNos = lines.Select(l => (l.RefOrderNo ?? string.Empty).Trim())
+            .Where(no => no.Length > 0)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        // ① 关联销售订单（RefOrderNo 转换前的语义：代理采购为哪张销售订单备货）
+        if (refNos.Count > 0)
+        {
+            var salesOrders = await db.SalesOrders.AsNoTracking()
+                .Where(o => !o.IsDeleted && refNos.Contains(o.OrderNo))
+                .ToListAsync(ct);
+            foreach (var salesOrder in salesOrders) lookup._salesOrdersByNo[salesOrder.OrderNo] = salesOrder;
+        }
+
+        // ② 既有来源采购订单：按号（回写判据）或按备注来源标记（同一批次共用标记前缀，一次查回后逐行匹配）
+        var prefix = PurchaseQuoteConversion.SourceMarkerPrefix(lines[0].QuoteNo);
+        var orders = await db.PurchaseOrders.AsNoTracking()
+            .Where(o => !o.IsDeleted && (refNos.Contains(o.OrderNo) || o.Remark.Contains(prefix)))
+            .ToListAsync(ct);
+        foreach (var order in orders)
+        {
+            lookup._ordersByNo[order.OrderNo] = order;
+            if (order.Remark.Contains(prefix, StringComparison.Ordinal)) lookup._ordersByMarkerRemark.Add(order);
+        }
+        return lookup;
+    }
+
+    /// <summary>该比价行是否已生成过采购订单（与单行路径同一判定顺序：先 RefOrderNo 链接，再备注来源标记）</summary>
+    public PurchaseOrder? FindGeneratedOrder(PurchaseQuote quote)
+    {
+        var refNo = (quote.RefOrderNo ?? string.Empty).Trim();
+        if (refNo.Length > 0 && _ordersByNo.TryGetValue(refNo, out var byRef)) return byRef;
+
+        var marker = PurchaseQuoteConversion.SourceMarker(quote);
+        return _ordersByMarkerRemark.FirstOrDefault(o => o.Remark.Contains(marker, StringComparison.Ordinal));
+    }
+
+    /// <summary>按单号取关联销售订单（未预取到 = 不存在或已删除，与单行路径匹配结果一致）</summary>
+    public SalesOrder? FindSalesOrder(string orderNo)
+        => (orderNo ?? string.Empty).Trim() is { Length: > 0 } no && _salesOrdersByNo.TryGetValue(no, out var order)
+            ? order
+            : null;
+}
+
+/// <summary>批次转换中被显式跳过的比价行（不合格，附原因；不生成采购订单也不改来源状态）</summary>
+public sealed class PurchaseQuoteBatchSkip
+{
+    /// <summary>比价行 Id</summary>
+    public long LineId { get; set; }
+
+    /// <summary>比价批次号</summary>
+    public string QuoteNo { get; set; } = string.Empty;
+
+    /// <summary>商品名称</summary>
+    public string ProductName { get; set; } = string.Empty;
+
+    /// <summary>跳过原因（与单行守卫的错误文案一致）</summary>
+    public string Reason { get; set; } = string.Empty;
+}
+
+/// <summary>批次转换计划中的一组：将合并为一张采购订单的兼容行集合（未落库草稿）</summary>
+public sealed class PurchaseQuoteBatchGroupPlan
+{
+    public long SupplierId { get; set; }
+    public string SupplierName { get; set; } = string.Empty;
+    public string Currency { get; set; } = string.Empty;
+    public long? OwningCustomerId { get; set; }
+    public string OwningCustomerName { get; set; } = string.Empty;
+    public string OwningSalesOrderNo { get; set; } = string.Empty;
+    public string PaymentTerms { get; set; } = string.Empty;
+    public bool TaxIncluded { get; set; }
+
+    /// <summary>组内最晚交期（一单覆盖组内所有行）</summary>
+    public DateTime? DeliveryDate { get; set; }
+
+    /// <summary>组内来源比价行 Id（升序，与草稿明细一一对应）</summary>
+    public List<long> LineIds { get; set; } = new();
+
+    /// <summary>组内来源行数</summary>
+    public int LineCount { get; set; }
+
+    /// <summary>组内金额合计（服务端按采购订单口径重算，不采信来源报价总额）</summary>
+    public decimal TotalAmount { get; set; }
+
+    /// <summary>合并后的采购订单草稿（未落库、无单号）</summary>
+    public PurchaseOrder Order { get; set; } = new();
+}
+
+/// <summary>批次转换计划（只读）：将生成几张采购订单、每张含哪些来源行、合计多少、哪些行会被跳过</summary>
+public sealed class PurchaseQuoteBatchPlan
+{
+    public string SourceType { get; set; } = string.Empty;
+    public string SourceNo { get; set; } = string.Empty;
+
+    /// <summary>批次内比价行数（含不合格行）</summary>
+    public int BatchLineCount { get; set; }
+
+    /// <summary>可转换行数（= 各组行数合计）</summary>
+    public int EligibleLineCount { get; set; }
+
+    /// <summary>将生成的采购订单张数</summary>
+    public int GroupCount { get; set; }
+
+    /// <summary>全部合格行金额合计（服务端重算）</summary>
+    public decimal TotalAmount { get; set; }
+
+    public List<PurchaseQuoteBatchGroupPlan> Groups { get; set; } = new();
+    public List<PurchaseQuoteBatchSkip> Skipped { get; set; } = new();
+}
+
+/// <summary>批次转换结果中的一张采购订单</summary>
+public sealed class PurchaseQuoteBatchOrderResult
+{
+    public long Id { get; set; }
+    public string OrderNo { get; set; } = string.Empty;
+    public long SupplierId { get; set; }
+    public string SupplierName { get; set; } = string.Empty;
+    public string Currency { get; set; } = string.Empty;
+
+    /// <summary>本单合并的来源比价行 Id（升序）</summary>
+    public List<long> LineIds { get; set; } = new();
+
+    public int LineCount { get; set; }
+
+    /// <summary>本单金额（服务端重算）</summary>
+    public decimal TotalAmount { get; set; }
+}
+
+/// <summary>批次转换响应：生成的采购订单清单 + 被跳过的来源行（显式拒绝，不静默丢弃）</summary>
+public sealed class PurchaseQuoteBatchConversionResult
+{
+    public string SourceType { get; set; } = string.Empty;
+    public string SourceNo { get; set; } = string.Empty;
+
+    /// <summary>生成的采购订单张数</summary>
+    public int OrderCount { get; set; }
+
+    /// <summary>已转换来源行数</summary>
+    public int ConvertedLineCount { get; set; }
+
+    /// <summary>生成金额合计（服务端重算）</summary>
+    public decimal TotalAmount { get; set; }
+
+    public List<PurchaseQuoteBatchOrderResult> Orders { get; set; } = new();
+    public List<PurchaseQuoteBatchSkip> Skipped { get; set; } = new();
+}
+
+/// <summary>
+/// 批次转换请求：`QuoteNo` 与 `LineId` 至少给一个（批次号优先，`LineId` 用于按某行反查所属批次）；
+/// `LineIds` 可选，用于只转换批次内的指定行（不属于该批次时抛 InvalidParameter）。
+/// </summary>
+public sealed class PurchaseQuoteBatchConversionRequest
+{
+    /// <summary>比价批次号（同一需求的各家报价共用）</summary>
+    public string? QuoteNo { get; set; }
+
+    /// <summary>比价行 Id（不给批次号时按其所属批次转换）</summary>
+    public long? LineId { get; set; }
+
+    /// <summary>可选：只转换这些比价行（必须属于同一批次）</summary>
+    public List<long>? LineIds { get; set; }
 }

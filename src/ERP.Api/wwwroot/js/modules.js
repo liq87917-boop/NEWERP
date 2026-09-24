@@ -339,10 +339,15 @@ const MODULES = {
       { key: 'remark', label: '选中理由 / 备注', type: 'textarea' },
     ],
     /* 行操作（仅在「已选中」的比价行显示；服务端仍会二次校验资格与重复生成）
-       ERP-020：选中行 → 采购订单（带入预填打开采购订单表单 / 直接生成采购订单） */
+       ERP-020：选中行 → 采购订单（带入预填打开采购订单表单 / 直接生成采购订单）
+       ERP-027：批次转采购订单（该行所属批次内所有「已选中」行按供应商 + 币种合并，不合格行明确跳过） */
+    extraActions: [
+      { label: '📦 批次转采购订单', onclick: 'purchaseQuoteBatchToOrderByNo()', title: '按比价批次号把该批次内所有「已选中」报价行按供应商 + 币种合并生成采购订单（先取只读计划确认，不合格行明确跳过）' },
+    ],
     rowActions: [
       { label: '生成采购订单', icon: '📦', title: '按该选中比价行直接生成一张采购订单（同一比价行只生成一张，来源自动留痕）', onclick: 'purchaseQuoteToOrder', statuses: ['已选中'] },
       { label: '预填采购订单', icon: '🧾', title: '按该选中比价行带入采购订单草稿到采购订单新增表单（不落库，可编辑后再保存）', onclick: 'purchaseQuotePrefillOrder', statuses: ['已选中'] },
+      { label: '批次转采购订单', icon: '🧩', title: '把该行所属比价批次内所有「已选中」行按供应商 + 币种 + 归属客户合并生成采购订单（同组多行合并为一张订单，不合格行明确跳过）', onclick: 'purchaseQuoteBatchToOrder', statuses: ['已选中'] },
     ],
   },
   /* 单证中心（阶段 2 新增，挂在「出运管理」菜单下） */

@@ -148,6 +148,117 @@ public class PurchaseQuoteConversionUiTests
         Assert.Contains("已生成采购订单", issues[0]);
     }
 
+    // ==================== 场景 3：批次转采购订单（ERP-027：兼容行合并 / 不兼容行独立 / 不合格行跳过） ====================
+
+    [Fact]
+    public void 批次转采购订单_兼容行合并为一张_不兼容行独立成单_未选中行跳过()
+    {
+        var tag = "UIPQB" + DateTime.Now.ToString("HHmmss");
+        LoginAsAdmin();
+        InstallApiIssueRecorder();
+
+        var customer = CreateCustomer(tag);
+        var supplierA = CreateSupplier(tag + "A");
+        var supplierB = CreateSupplier(tag + "B");
+        var quoteNo = "PQ-" + tag;
+        var line1 = CreateQuoteLine(quoteNo, tag + "-商品1", supplierA.Id, 5000m, 2.6m, customer.Id, tag);
+        var line2 = CreateQuoteLine(quoteNo, tag + "-商品2", supplierA.Id, 1000m, 3.5m, customer.Id, tag);   // 同供应商 → 与 line1 合并
+        var line3 = CreateQuoteLine(quoteNo, tag + "-商品3", supplierB.Id, 2000m, 1.2m, customer.Id, tag);   // 不同供应商 → 独立成单
+        var line4 = CreateQuoteLine(quoteNo, tag + "-商品4", supplierB.Id, 100m, 1m, customer.Id, tag, selected: false);
+
+        OpenModule("purchase-quote");
+        SearchList(quoteNo);
+        Assert.True(FunctionExists("purchaseQuoteBatchToOrder"),
+            "页面未加载 /js/purchase-order-conversion.js（前端脚本过期）：请先重新构建并启动 ERP.Api 再运行浏览器验收");
+        Assert.True(FunctionExists("purchaseQuoteBatchToOrderByNo"),
+            "页面未加载批次工具栏入口（前端脚本过期）：请先重新构建并启动 ERP.Api 再运行浏览器验收");
+        Assert.Contains("批次转采购订单", ExecuteScript(
+            "const t = document.querySelector('.toolbar-actions'); return t ? t.textContent : '';"));
+        CaptureEvidence("purchase-quote-batch-list-ready");
+
+        ClickRowMenuAction(line1.Id, "purchaseQuoteBatchToOrder");
+        AcceptAlert();                                        // 计划确认框（只读计划 → 用户确认后才落库）
+        WaitToastContains("已生成 2 张采购订单");
+        CaptureEvidence("purchase-quote-batch-converted");
+
+        // 兼容组：同供应商 + 币种的两行合并为一张订单（服务端重算合计 + 逐行来源留痕）
+        var consolidated = FindOrderByQuote(quoteNo, line1.Id);
+        Assert.True(consolidated.Id > 0, "同供应商 + 币种的两行应合并为一张采购订单");
+        Assert.Equal(2, consolidated.DetailCount);
+        Assert.Equal(13000m + 3500m, consolidated.TotalAmount);          // 报价总额故意写错为 1，不采信
+        Assert.Contains(SourceMarker(quoteNo, line2.Id), consolidated.Remark);
+
+        // 不兼容组：不同供应商的行独立成单
+        var separate = FindOrderByQuote(quoteNo, line3.Id);
+        Assert.True(separate.Id > 0, "不同供应商的比价行应保持独立成单");
+        Assert.Equal(1, separate.DetailCount);
+        Assert.Equal(2400m, separate.TotalAmount);
+        Assert.NotEqual(consolidated.No, separate.No);
+
+        // 来源留痕：三行状态与采购单号回写；未选中行保持原状态且不生成订单
+        Assert.Equal("已转采购订单", QuoteRow(line1.Id).Status);
+        Assert.Equal(consolidated.No, QuoteRow(line1.Id).RefOrderNo);
+        Assert.Equal(consolidated.No, QuoteRow(line2.Id).RefOrderNo);
+        Assert.Equal(separate.No, QuoteRow(line3.Id).RefOrderNo);
+        Assert.Equal("待比较", QuoteRow(line4.Id).Status);
+        Assert.Equal(string.Empty, QuoteRow(line4.Id).RefOrderNo ?? string.Empty);
+        Assert.Empty(PurchaseOrdersByQuote(quoteNo, line4.Id));
+
+        AssertEmptyApiIssues();
+    }
+
+    // ==================== 场景 4：批次保护（重复转换拒绝 + 不合格行显式跳过） ====================
+
+    [Fact]
+    public void 批次重复转换_被服务端拒绝且不新增单据_未选中行显式跳过()
+    {
+        var tag = "UIPQD" + DateTime.Now.ToString("HHmmss");
+        LoginAsAdmin();
+        InstallApiIssueRecorder();
+
+        var customer = CreateCustomer(tag);
+        var supplier = CreateSupplier(tag);
+        var quoteNo = "PQ-" + tag;
+        var line1 = CreateQuoteLine(quoteNo, tag + "-商品1", supplier.Id, 5000m, 2.6m, customer.Id, tag);
+        var line2 = CreateQuoteLine(quoteNo, tag + "-商品2", supplier.Id, 1000m, 3.5m, customer.Id, tag);
+        var unselected = CreateQuoteLine(quoteNo, tag + "-商品3", supplier.Id, 100m, 1m, customer.Id, tag, selected: false);
+
+        OpenModule("purchase-quote");
+        SearchList(quoteNo);
+        ClickRowMenuAction(line1.Id, "purchaseQuoteBatchToOrder");
+        AcceptAlert();
+        WaitToastContains("已生成 1 张采购订单");
+        CaptureEvidence("purchase-quote-batch-first-conversion");
+
+        var first = PurchaseOrdersByQuote(quoteNo, line1.Id);
+        Assert.Single(first);
+        Assert.Equal(16500m, first[0].TotalAmount);
+        Assert.Equal(2, first[0].DetailCount);
+
+        // 重复批次转换：服务端守卫拒绝（同一来源行不再生成订单）
+        using var duplicate = JsonDocument.Parse(Api("POST", "/api/purchase/quotes/batch-to-order",
+            JsonSerializer.Serialize(new { quoteNo })));
+        Assert.NotEqual(0, duplicate.RootElement.GetProperty("code").GetInt32());
+        Assert.Contains("没有可转换", duplicate.RootElement.GetProperty("message").GetString() ?? string.Empty);
+        Assert.Single(PurchaseOrdersByQuote(quoteNo, line1.Id));
+        Assert.Equal(2, PurchaseOrdersByQuote(quoteNo, line1.Id).Single().DetailCount);   // 明细未重复
+
+        // 只读计划：批次内已无可转换行，未选中行被显式列出原因（不写库）
+        var plan = ApiData("GET", $"/api/purchase/quotes/batch-order-plan?quoteNo={Uri.EscapeDataString(quoteNo)}");
+        Assert.Equal(0, plan.GetProperty("groupCount").GetInt32());
+        Assert.Equal(0, plan.GetProperty("eligibleLineCount").GetInt32());
+        var skipped = plan.GetProperty("skipped").EnumerateArray()
+            .Select(s => s.GetProperty("reason").GetString() ?? string.Empty).ToList();
+        Assert.Contains(skipped, reason => reason.Contains("未选中供应商"));
+        Assert.Contains(skipped, reason => reason.Contains("已生成采购订单"));
+        Assert.Equal("待比较", QuoteRow(unselected.Id).Status);
+
+        // 该用例有意触发 1 次业务拒绝（重复批次转换），其余请求不允许失败
+        var issues = ApiIssues();
+        Assert.Single(issues);
+        Assert.Contains("没有可转换", issues[0]);
+    }
+
     // ==================== 接口助手（以当前登录态调用应用自身 API） ====================
 
     private string ExecuteScript(string script)
@@ -246,6 +357,41 @@ public class PurchaseQuoteConversionUiTests
             paymentTerms = "T/T 30% deposit",
             isSelected = true,
             status = "已选中",
+            customerId,
+            customerName = tag + "-客户",
+            remark = "QUOTE_CONVERSION_UI"
+        });
+        var data = ApiData("POST", "/api/purchase/quotes", body);
+        return new QuoteSeed(data.GetProperty("id").GetInt64(), data.GetProperty("quoteNo").GetString()!);
+    }
+
+    /// <summary>
+    /// 在同一比价批次下再新增一行报价（ERP-027 批次转换用）：可指定是否「选中」；
+    /// 报价总额同样故意写成 1，用于验证采购订单合计由服务端重算。
+    /// </summary>
+    private QuoteSeed CreateQuoteLine(string quoteNo, string productName, long supplierId, decimal quantity, decimal quotePrice,
+        long customerId, string tag, bool selected = true)
+    {
+        var body = JsonSerializer.Serialize(new
+        {
+            quoteNo,
+            quoteDate = DateTime.Today.ToString("yyyy-MM-dd"),
+            productName,
+            spec = "大号",
+            unit = "PCS",
+            quantity,
+            supplierId,
+            supplierName = tag + "-供应商",
+            supplierType = "档口",
+            quotePrice,
+            totalAmount = 1m,
+            currency = "USD",
+            taxIncluded = true,
+            deliveryDays = 25,
+            minOrderQty = 1000,
+            paymentTerms = "T/T 30% deposit",
+            isSelected = selected,
+            status = selected ? "已选中" : "待比较",
             customerId,
             customerName = tag + "-客户",
             remark = "QUOTE_CONVERSION_UI"

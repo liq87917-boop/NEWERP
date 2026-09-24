@@ -79,4 +79,36 @@ public class PurchaseQuoteController : BaseCrudController<PurchaseQuote>
             SourceNo = quote.QuoteNo
         }, "已生成采购订单"));
     }
+
+    /// <summary>
+    /// 批次转换计划（ERP-027，**只读**）：按比价批次号（或比价行 Id）返回「将合并为哪些采购订单」的分组计划：
+    /// 每组的供应商 / 币种 / 归属客户 / 付款条件等表头口径、包含的来源行、服务端重算合计与未落库草稿，
+    /// 以及不合格行（未选中 / 已放弃 / 已转 / 未维护供应商 / 数量或单价非法）的跳过原因。
+    /// 不写库、不占用单据号、不改来源状态；前端据此展示「将生成几张订单」并可取消。
+    /// </summary>
+    [HttpGet("batch-order-plan")]
+    public async Task<IActionResult> BatchOrderPlan([FromQuery] string? quoteNo, [FromQuery] long? lineId)
+    {
+        var build = await PurchaseQuoteConversion.BuildBatchAsync(_db, quoteNo, lineId);
+        var plan = PurchaseQuoteConversion.BuildPlan(build);
+        return Ok(ApiResponse<PurchaseQuoteBatchPlan>.Success(plan,
+            $"比价批次 {plan.SourceNo}：可转换 {plan.EligibleLineCount} 行、将生成 {plan.GroupCount} 张采购订单"));
+    }
+
+    /// <summary>
+    /// 批次转采购订单（ERP-027）：把该批次内全部「已选中」且未转换的比价行按兼容分组
+    /// （供应商 + 币种 + 归属客户 / 销售订单 + 付款条件 + 是否含税）合并生成采购订单：
+    /// 组内多行合并为一张订单的多行明细（金额与总额由服务端按采购订单口径重算），
+    /// 每组一张订单、逐行回写来源留痕（`RefOrderNo` + 备注来源标记 + 状态「已转采购订单」）；
+    /// 不合格行不静默丢弃，随响应显式返回原因。同一批次重复转换由既有两道重复守卫拦截，不产生重复单据。
+    /// </summary>
+    [HttpPost("batch-to-order")]
+    public async Task<IActionResult> BatchToOrder([FromBody] PurchaseQuoteBatchConversionRequest request)
+    {
+        var result = await PurchaseQuoteConversion.ConvertBatchAsync(_db, _noService, request);
+        var message = result.Skipped.Count > 0
+            ? $"已生成 {result.OrderCount} 张采购订单，跳过 {result.Skipped.Count} 行不合格比价行"
+            : $"已生成 {result.OrderCount} 张采购订单";
+        return Ok(ApiResponse<PurchaseQuoteBatchConversionResult>.Success(result, message));
+    }
 }
