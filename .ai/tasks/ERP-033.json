@@ -1,0 +1,49 @@
+{
+  "id": "ERP-033",
+  "title": "Carry authoritative Purchase Order cost into stock-in movements",
+  "status": "pending",
+  "risk_level": "medium",
+  "description": "Close the audited Purchase StockIn cost-source gap by deriving base-unit movement cost from an authoritatively linked Purchase Order line only when product, unit and currency semantics are unambiguous. Preserve the existing weighted-average fallback when evidence is incomplete. Do not rewrite historical inventory, add production schema, invent exchange rates, execute SQL, or touch production data.",
+  "acceptance_criteria": [
+    "An approved StockIn uses its persisted authoritative Purchase Order linkage to locate a uniquely compatible order line before using the order price as movement cost.",
+    "Package-unit Purchase Order prices are normalized to the inventory base unit using the existing UnitsPerPackage rule without changing posted quantities.",
+    "Foreign-currency prices are used only when an existing authoritative conversion to inventory cost currency is available; otherwise the existing fallback remains in effect and no exchange rate is invented.",
+    "Missing, duplicated or ambiguous order-line matches retain the documented existing weighted-average fallback rather than selecting an arbitrary price.",
+    "Cancel, unaudit and retry paths preserve movement reversal and idempotency behavior and do not rewrite historical movements.",
+    "Unit/integration tests cover unique linkage, package conversion, ambiguous product lines, unavailable currency conversion, fallback and reversal; safe validation passes.",
+    "Browser/UI acceptance is recorded as deferred during development according to project policy."
+  ],
+  "allowed_paths": [
+    "src/ERP.Application/**",
+    "src/ERP.Api/Controllers/**",
+    "src/ERP.UnitTests/**",
+    "src/ERP.IntegrationTests/**",
+    "docs/**",
+    ".ai/**"
+  ],
+  "depends_on": [
+    "ERP-025",
+    "ERP-026"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "browser",
+  "browser_acceptance": {
+    "required": true,
+    "scenarios": [
+      "Approve a StockIn with one authoritative Purchase Order line and verify its base-unit movement cost source.",
+      "Approve a StockIn with ambiguous or unsupported currency linkage and verify the documented fallback is used without an invented conversion."
+    ],
+    "test_filter": "Collection=UiTests",
+    "minimum_screenshots": 2
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L2",
+    "status": "not_required",
+    "reason": "Repository application logic and non-production tests only; no schema execution, historical rewrite, production database access, deployment or release."
+  },
+  "attempts": 0
+}

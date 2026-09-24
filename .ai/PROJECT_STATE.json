@@ -4,7 +4,7 @@
   "phase": "ready",
   "current_task": null,
   "last_completed_task": "ERP-032",
-  "last_reviewed_task": "ERP-005",
+  "last_reviewed_task": "ERP-032",
   "blocker": null,
   "external_actions": [
     "Rotate any previously exposed SQL Server credential at the database provider if rotation has not already been completed.",
@@ -48,10 +48,10 @@
     "replenishment_owner": "GPT",
     "status": "ready",
     "queued_tasks": [
-      "ERP-029",
-      "ERP-030",
-      "ERP-031",
-      "ERP-032"
+      "ERP-033",
+      "ERP-034",
+      "ERP-035",
+      "ERP-036"
     ]
   },
   "last_failed_task": "ERP-029"

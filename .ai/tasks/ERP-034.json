@@ -1,0 +1,50 @@
+{
+  "id": "ERP-034",
+  "title": "Add inventory aging and supported valuation report",
+  "status": "pending",
+  "risk_level": "medium",
+  "description": "Add a read-only inventory aging and valuation report over current stock and the existing StockMovement ledger. Separate quantities with authoritative age and cost evidence from unknown-history or unknown-cost quantities. Do not add production schema, mutate inventory, reconstruct missing history, or estimate unavailable cost or exchange rates.",
+  "acceptance_criteria": [
+    "Users can view current base-unit stock in documented age buckets of 0-30, 31-60, 61-90, 91-180 and over 180 days as of a selected date.",
+    "Age is derived from authoritative movement history with reversal semantics consistent with ERP-029; insufficient history is shown in a separate unknown-age quantity and is not placed into an invented bucket.",
+    "Valuation uses only supported persisted inventory cost semantics and keeps unknown-cost quantity and amount separate from authoritative totals.",
+    "Different currencies are never combined unless an existing authoritative normalized inventory cost already supports the aggregation; no exchange rate is inferred from the text dictionary.",
+    "Users can filter by warehouse, product and as-of date, and report queries are bounded or paged without per-row database queries.",
+    "Unit/integration tests cover every age boundary, reversals, no-history stock, known cost, unknown cost, filters and non-mutation; safe validation passes.",
+    "Browser/UI acceptance is recorded as deferred during development according to project policy."
+  ],
+  "allowed_paths": [
+    "src/ERP.Application/**",
+    "src/ERP.Api/Controllers/**",
+    "src/ERP.Api/wwwroot/**",
+    "src/ERP.UnitTests/**",
+    "src/ERP.IntegrationTests/**",
+    "docs/**",
+    ".ai/**"
+  ],
+  "depends_on": [
+    "ERP-029",
+    "ERP-033"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "browser",
+  "browser_acceptance": {
+    "required": true,
+    "scenarios": [
+      "Open the inventory aging report and verify stock is separated across the configured age buckets as of a selected date.",
+      "Inspect stock with insufficient movement or cost evidence and verify unknown quantities are excluded from authoritative age and valuation totals."
+    ],
+    "test_filter": "Collection=UiTests",
+    "minimum_screenshots": 2
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L2",
+    "status": "not_required",
+    "reason": "Read-only reporting over existing application records; no production mutation, schema action, deployment or release."
+  },
+  "attempts": 0
+}

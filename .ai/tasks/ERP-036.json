@@ -1,0 +1,50 @@
+{
+  "id": "ERP-036",
+  "title": "Add designated freight forwarder to Customer master data",
+  "status": "pending",
+  "risk_level": "medium",
+  "description": "Add an optional designated freight-forwarder reference to Customer master data by reusing the existing BaseOtherInfo Forwarder dictionary. The field is master-data guidance only and must not automatically assign or authorize shipment records. Repository schema code and test-database validation are allowed; production database execution and deployment are prohibited.",
+  "acceptance_criteria": [
+    "Customer create and edit workflows allow an optional designated freight forwarder selected from active BaseOtherInfo entries whose InfoType is Forwarder.",
+    "Customer list and detail views display the selected forwarder name while customers without a selection remain valid and unchanged.",
+    "The server rejects deleted, inactive or wrong-type dictionary entries and does not accept an arbitrary free-text value as an authoritative forwarder reference.",
+    "Deleting or deactivating a referenced dictionary entry does not corrupt historical customer reads; the unavailable reference is displayed explicitly and cannot be newly selected.",
+    "The new customer field does not automatically mutate ContainerBooking, loading, customs or expense records and does not grant access to any external forwarding system.",
+    "The schema change is backward compatible for existing customers and requires no production backfill.",
+    "Unit/integration tests cover create, update, clear, invalid type, inactive reference and existing-customer compatibility; safe validation passes.",
+    "Browser/UI acceptance is recorded as deferred during development according to project policy."
+  ],
+  "allowed_paths": [
+    "src/ERP.Domain/**",
+    "src/ERP.Application/**",
+    "src/ERP.Infrastructure/**",
+    "src/ERP.Api/Controllers/**",
+    "src/ERP.Api/wwwroot/**",
+    "src/ERP.UnitTests/**",
+    "src/ERP.IntegrationTests/**",
+    "docs/**",
+    ".ai/**"
+  ],
+  "depends_on": [],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "browser",
+  "browser_acceptance": {
+    "required": true,
+    "scenarios": [
+      "Edit a Customer, select an active Forwarder dictionary entry and verify it persists in list and detail views.",
+      "Clear the designated forwarder and verify no container or shipment document is changed automatically."
+    ],
+    "test_filter": "Collection=UiTests",
+    "minimum_screenshots": 2
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L2",
+    "status": "not_required",
+    "reason": "Local master-data code and test-database schema only. No production database operation, external forwarding integration, deployment or release is authorized."
+  },
+  "attempts": 0
+}

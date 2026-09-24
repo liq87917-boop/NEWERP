@@ -1,0 +1,52 @@
+{
+  "id": "ERP-035",
+  "title": "Add immutable Quotation revision history",
+  "status": "pending",
+  "risk_level": "medium",
+  "description": "Add an explicit Quotation revision chain for multi-round negotiation. Creating a revision must copy an existing quotation into a new draft while preserving the source as immutable history and recalculating totals through the existing authoritative Quotation logic. Repository schema code and test-database validation are allowed, but production database execution, deployment and historical backfill are prohibited.",
+  "acceptance_criteria": [
+    "Users can create a new draft revision from an existing Quotation without modifying the source quotation or its details.",
+    "Each quotation chain has a stable root and a server-assigned monotonically increasing revision number; concurrent attempts cannot create duplicate revision numbers in one chain.",
+    "The new revision copies negotiable header and detail values, recalculates totals on the server, and does not copy approval state, downstream conversion state or generated document links as if they applied to the new draft.",
+    "List and detail views display revision number, root quotation and previous revision, and users can navigate the complete chain without hiding historical revisions.",
+    "Existing quotations without revision metadata remain readable as the initial revision and are not destructively rewritten or backfilled during normal requests.",
+    "Existing Quotation-to-PI and Quotation-to-Sales-Order behavior remains unchanged for the selected revision and does not silently convert another revision.",
+    "Unit/integration tests cover copy isolation, total recalculation, numbering, concurrency protection, historical compatibility and downstream conversion selection; safe validation passes.",
+    "Browser/UI acceptance is recorded as deferred during development according to project policy."
+  ],
+  "allowed_paths": [
+    "src/ERP.Domain/**",
+    "src/ERP.Application/**",
+    "src/ERP.Infrastructure/**",
+    "src/ERP.Api/Controllers/**",
+    "src/ERP.Api/wwwroot/**",
+    "src/ERP.UnitTests/**",
+    "src/ERP.IntegrationTests/**",
+    "docs/**",
+    ".ai/**"
+  ],
+  "depends_on": [
+    "ERP-024"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "browser",
+  "browser_acceptance": {
+    "required": true,
+    "scenarios": [
+      "Create a new revision from an existing Quotation, change a price and verify the source revision remains unchanged.",
+      "Open the revision history and verify numbering, lineage and downstream conversion operate on the explicitly selected revision."
+    ],
+    "test_filter": "Collection=UiTests",
+    "minimum_screenshots": 2
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L2",
+    "status": "not_required",
+    "reason": "Code and test-database schema implementation only. Production schema execution, data migration, deployment and release remain behind the repository's mandatory human gates."
+  },
+  "attempts": 0
+}
