@@ -38,6 +38,7 @@ public partial class ErpDbContext : DbContext, IErpDbContext
     public DbSet<BaseExpenseAccount> BaseExpenseAccounts => Set<BaseExpenseAccount>();
     public DbSet<BaseWarehouse> BaseWarehouses => Set<BaseWarehouse>();
     public DbSet<BaseProduct> BaseProducts => Set<BaseProduct>();
+    public DbSet<BaseProductVariant> BaseProductVariants => Set<BaseProductVariant>();
     public DbSet<BaseOtherInfo> BaseOtherInfos => Set<BaseOtherInfo>();
 
     /// <summary>出口退税台账（阶段 1 新增）</summary>

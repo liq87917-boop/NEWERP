@@ -135,7 +135,7 @@ public class WarehouseController : BaseCrudController<BaseWarehouse>
 }
 
 /// <summary>
-/// 商品资料控制器
+/// 商品资料控制器（ERP-037：商品下可选的颜色 / 尺码 SKU 规格变体，规格维护见 <see cref="ProductVariantController"/>）
 /// </summary>
 [ApiController]
 [Route("api/base/products")]
@@ -145,12 +145,38 @@ public class ProductController : BaseCrudController<BaseProduct>
     private readonly OssStorageService _oss;
     private readonly ProductExcelExporter _exporter;
     private readonly IWebHostEnvironment _env;
+    private readonly IErpDbContext _db;
 
-    public ProductController(IGenericService<BaseProduct> service, OssStorageService oss, ProductExcelExporter exporter, IWebHostEnvironment env) : base(service)
+    public ProductController(
+        IGenericService<BaseProduct> service, OssStorageService oss, ProductExcelExporter exporter,
+        IWebHostEnvironment env, IErpDbContext db) : base(service)
     {
         _oss = oss;
         _exporter = exporter;
         _env = env;
+        _db = db;
+    }
+
+    /// <summary>
+    /// 分页查询（补充规格计数标注，不写库）。
+    /// 商品身份与字段完全不变；<c>variantCount</c> / <c>variantTotalCount</c> 只是读取标注，
+    /// 没有维护规格的历史商品两项均为 0（仍按单规格商品使用）。
+    /// </summary>
+    [HttpGet]
+    public override async Task<IActionResult> GetPaged([FromQuery] PageQuery query)
+    {
+        var result = await Service.GetPagedAsync(query);
+        await ProductVariantService.AnnotateAsync(_db, result.Items);
+        return Ok(ApiResponse<PagedResult<BaseProduct>>.Success(result));
+    }
+
+    /// <summary>根据主键获取（补充规格计数标注，不写库）</summary>
+    [HttpGet("{id:long}")]
+    public override async Task<IActionResult> GetById(long id)
+    {
+        var result = await Service.GetByIdAsync(id);
+        await ProductVariantService.AnnotateAsync(_db, new[] { result });
+        return Ok(ApiResponse<BaseProduct>.Success(result));
     }
 
     /// <summary>导出商品资料为 Excel（读取模板填充：图片/文本/数值/货币/公式/求和）</summary>

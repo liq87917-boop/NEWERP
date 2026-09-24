@@ -1,7 +1,7 @@
 {
   "id": "ERP-037",
   "title": "Add color and size SKU variants to Product master data",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "medium",
   "description": "Close the audited Product master-data gap by adding optional color and size SKU variants beneath the existing product record. Existing products without variants must continue to behave as single non-variant products. This task may add repository schema code and validate against non-production test databases, but it must not backfill historical documents, split existing inventory, execute production SQL, deploy, or reinterpret historical product references.",
   "acceptance_criteria": [
@@ -47,5 +47,5 @@
     "status": "not_required",
     "reason": "Repository master-data code and non-production test schema only. Production schema execution, historical inventory migration, deployment and release remain prohibited without human approval."
   },
-  "attempts": 0
+  "attempts": 1
 }

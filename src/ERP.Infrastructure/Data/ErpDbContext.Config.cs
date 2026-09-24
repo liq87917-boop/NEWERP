@@ -42,6 +42,32 @@ public partial class ErpDbContext
         //   3. ForwarderAvailable 是 [NotMapped] 的读取标注，不落库（SchemaUpgrader 第 25 段同样只加两列）。
         modelBuilder.Entity<BaseCustomer>().Property(x => x.ForwarderName).HasMaxLength(100);
 
+        // ============ ERP-037：商品规格变体（颜色 / 尺码 SKU 子表） ============
+        // 设计口径：
+        //   1. 商品仍是唯一权威身份（BaseProducts 不变），规格是它下面「零到多条」的可选细分：
+        //      没有规格的历史商品继续按单规格商品使用，无需任何回填；
+        //   2. 规格**刻意不建外键**、也不被任何单据引用 —— 询价 / 报价 / PI / 订单 / 库存 / 库存流水的行
+        //      保持原有 ProductId 口径，规格的新增 / 修改 / 停用 / 删除不改写历史行、不拆分库存、不重算成本；
+        //   3. VariantCode 与 ColorSizeKey 都是服务端规范化后写入的列，因此唯一性可以直接落在数据库层；
+        //   4. 两个过滤唯一索引与 SchemaUpgrader 第 26 段创建的同名索引保持一致：
+        //      - 编码在同商品内唯一（软删除行不占用编码）；
+        //      - 启用状态下「颜色 + 尺码」组合在同商品内唯一（停用行作为历史保留，不占用组合，
+        //        因此允许「停用规格 + 新启用规格」并存；服务端在启用时会再次判定，二者不会同时启用）。
+        //   5. VariantName / VariantCount / VariantTotalCount 均为 [NotMapped] 读取标注，不落库。
+        modelBuilder.Entity<BaseProductVariant>().Property(x => x.VariantCode).HasMaxLength(50);
+        modelBuilder.Entity<BaseProductVariant>().Property(x => x.Color).HasMaxLength(50);
+        modelBuilder.Entity<BaseProductVariant>().Property(x => x.Size).HasMaxLength(50);
+        modelBuilder.Entity<BaseProductVariant>().Property(x => x.ColorSizeKey).HasMaxLength(120);
+        modelBuilder.Entity<BaseProductVariant>().Property(x => x.Remark).HasMaxLength(500);
+
+        modelBuilder.Entity<BaseProductVariant>().HasIndex(x => new { x.ProductId, x.VariantCode })
+            .IsUnique().HasDatabaseName("UX_BaseProductVariants_ProductCode")
+            .HasFilter("IsDeleted = 0");
+
+        modelBuilder.Entity<BaseProductVariant>().HasIndex(x => new { x.ProductId, x.ColorSizeKey })
+            .IsUnique().HasDatabaseName("UX_BaseProductVariants_ProductColorSize")
+            .HasFilter("IsDeleted = 0 AND Status = 1");
+
         // ============ 单据号唯一索引 ============
         modelBuilder.Entity<Inquiry>().HasIndex(x => x.InquiryNo).IsUnique();
         modelBuilder.Entity<SalesOrder>().HasIndex(x => x.OrderNo).IsUnique();

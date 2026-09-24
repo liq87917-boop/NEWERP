@@ -1290,5 +1290,49 @@ IF COL_LENGTH('db_owner.BaseCustomers', 'ForwarderId') IS NULL
 IF COL_LENGTH('db_owner.BaseCustomers', 'ForwarderName') IS NULL
     ALTER TABLE db_owner.BaseCustomers ADD ForwarderName NVARCHAR(100) NOT NULL DEFAULT N'';");
 
+        // 26. 商品规格变体（ERP-037：商品资料下的颜色 / 尺码 SKU 子表）
+        //     26.1 建表为幂等补齐：历史商品没有任何规格行 = 单规格商品，读取 / 编辑 / 打印行为不变，
+        //          因此**不做任何回填**（不生成默认规格、不split已有库存、不改写任何单据行）；
+        //     26.2 两个过滤唯一索引与 ErpDbContext 模型同名同过滤条件：
+        //          - UX_BaseProductVariants_ProductCode：规格编码在同商品内唯一（软删除行不占用编码）；
+        //          - UX_BaseProductVariants_ProductColorSize：启用状态下「颜色 + 尺码」组合在同商品内唯一
+        //            （停用行作为历史保留、不占用组合）；
+        //     26.3 表内不建外键、不被任何单据引用：规格是主数据细分，不参与库存数量 / 成本口径。
+        await db.Database.ExecuteSqlRawAsync(@"
+IF OBJECT_ID('db_owner.BaseProductVariants') IS NULL
+BEGIN
+    CREATE TABLE db_owner.BaseProductVariants (
+        Id BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+        ProductId BIGINT NOT NULL,
+        VariantCode NVARCHAR(50) NOT NULL DEFAULT N'',
+        Color NVARCHAR(50) NOT NULL DEFAULT N'',
+        Size NVARCHAR(50) NOT NULL DEFAULT N'',
+        ColorSizeKey NVARCHAR(120) NOT NULL DEFAULT N'',
+        Status INT NOT NULL DEFAULT 1,
+        SortOrder INT NOT NULL DEFAULT 0,
+        Remark NVARCHAR(500) NOT NULL DEFAULT N'',
+        CreatedAt DATETIME2 NOT NULL DEFAULT GETDATE(),
+        CreatedBy BIGINT NULL,
+        UpdatedAt DATETIME2 NULL,
+        UpdatedBy BIGINT NULL,
+        IsDeleted BIT NOT NULL DEFAULT 0,
+        RowVersion ROWVERSION NOT NULL
+    );
+END
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes
+               WHERE name = 'UX_BaseProductVariants_ProductCode'
+                 AND object_id = OBJECT_ID('db_owner.BaseProductVariants'))
+    CREATE UNIQUE INDEX UX_BaseProductVariants_ProductCode
+        ON db_owner.BaseProductVariants(ProductId, VariantCode)
+        WHERE IsDeleted = 0;
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes
+               WHERE name = 'UX_BaseProductVariants_ProductColorSize'
+                 AND object_id = OBJECT_ID('db_owner.BaseProductVariants'))
+    CREATE UNIQUE INDEX UX_BaseProductVariants_ProductColorSize
+        ON db_owner.BaseProductVariants(ProductId, ColorSizeKey)
+        WHERE IsDeleted = 0 AND Status = 1;");
+
     }
 }

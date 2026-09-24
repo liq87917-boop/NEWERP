@@ -1,5 +1,6 @@
 using ERP.Domain.Common;
 using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
 
 namespace ERP.Domain.Entities;
 
@@ -145,6 +146,23 @@ public class BaseProduct : BaseEntity
     /// <summary>备注</summary>
     [MaxLength(500)]
     public string Remark { get; set; } = string.Empty;
+
+    // ============ ERP-037：颜色 / 尺码 SKU 规格变体（可选子表 BaseProductVariants） ============
+
+    /// <summary>
+    /// 该商品下**启用中**的规格条数（**非持久化列**，列表 / 详情读取时由服务端标注）；
+    /// 没有维护任何规格的历史商品为 0，仍按单规格商品使用。
+    /// </summary>
+    [NotMapped]
+    public int VariantCount { get; set; }
+
+    /// <summary>
+    /// 该商品下的规格总条数（含停用，**非持久化列**，读取时由服务端标注）：
+    /// 与 <see cref="VariantCount"/> 的差值即「已停用规格数」，界面据此提示历史规格仍可读但不可再新选。
+    /// </summary>
+    [NotMapped]
+    public int VariantTotalCount { get; set; }
+
 }
 
 /// <summary>

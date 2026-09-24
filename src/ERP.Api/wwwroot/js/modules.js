@@ -165,6 +165,8 @@ const MODULES = {
       { key: 'salePrice', label: '销售价', type: 'money' }, { key: 'costPrice', label: '成本价', type: 'money' },
       { key: 'refundRate', label: '退税率%' },
       { key: 'minStock', label: '安全库存' },
+      /* ERP-037：规格数（启用 / 总数）。0 = 单规格商品，历史行为不变 */
+      { key: 'variantCount', label: '规格数', render: row => productVariantCellHtml(row) },
     ],
     fields: [
       { key: 'productCode', label: '商品编码', required: true },
@@ -197,6 +199,11 @@ const MODULES = {
       { key: 'image2', label: '产品图片2', type: 'image' },
       { key: 'image3', label: '产品图片3', type: 'image' },
       { key: '_batch', label: '批量上传图片', type: 'image-batch' },
+    ],
+    /* ERP-037：颜色 / 尺码 SKU 规格维护（主数据子表，可选）。
+       只维护规格自身：不改写历史询价 / 报价 / 订单 / 库存与库存流水，也不拆分已有库存。 */
+    rowActions: [
+      { label: '颜色/尺码规格', icon: '🎨', title: '维护该商品的颜色 / 尺码 SKU 规格（可选；没有规格即单规格商品，不触达历史单据与库存）', onclick: 'openProductVariants' },
     ],
   },
   'other-info': {

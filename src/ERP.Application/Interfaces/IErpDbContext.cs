@@ -33,6 +33,10 @@ public interface IErpDbContext
     DbSet<BaseExpenseAccount> BaseExpenseAccounts { get; }
     DbSet<BaseWarehouse> BaseWarehouses { get; }
     DbSet<BaseProduct> BaseProducts { get; }
+
+    /// <summary>商品规格变体（颜色 / 尺码 SKU 子表，ERP-037；商品身份不变，规格只是可选细分）</summary>
+    DbSet<BaseProductVariant> BaseProductVariants { get; }
+
     DbSet<BaseOtherInfo> BaseOtherInfos { get; }
 
     /// <summary>出口退税台账（阶段 1 新增）</summary>
