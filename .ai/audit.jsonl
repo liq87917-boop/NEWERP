@@ -91,3 +91,7 @@
 {"at": "2026-09-24T11:40:47.155153Z", "event": "push_recovery_completed", "task": "ERP-020", "recovered_by": "control_fix"}
 {"at": "2026-09-24T11:43:07.936492Z", "event": "task_quarantined", "task": "ERP-021", "reason": "Cline exited with code 1; raw reason=error", "cline_finish_reason_raw": "error", "stash": "Saved working directory and index state On main: autonomy quarantine ERP-021"}
 {"at": "2026-09-24T11:43:27.708074Z", "event": "task_quarantined", "task": "ERP-021", "reason": "Cline exited with code 1; raw reason=error", "cline_finish_reason_raw": "error", "stash": "Saved working directory and index state On main: autonomy quarantine ERP-021"}
+{"at": "2026-09-24T11:43:28.220272Z", "event": "task_started", "task": "ERP-022"}
+{"at": "2026-09-24T11:43:35.393745Z", "event": "cline_failed", "task": "ERP-022", "attempt": 1}
+{"at": "2026-09-24T11:43:35.458304Z", "event": "pipeline_stopped", "task": "ERP-022", "exit_code": 1}
+{"at": "2026-09-24T11:45:18.159875Z", "event": "runner_recovered_for_direct_execution", "tasks": ["ERP-021", "ERP-022"], "reason": "Cline credits exhausted; no business changes were produced"}

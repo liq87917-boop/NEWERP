@@ -38,8 +38,8 @@
     "production_deployment_or_release": "required",
     "irreversible_data_operations": "required"
   },
-  "finish_reason": "task_quarantined",
-  "updated_at": "2026-09-24T11:43:27.706975Z",
+  "finish_reason": "runner_recovered_for_direct_execution",
+  "updated_at": "2026-09-24T11:45:18.159875Z",
   "rolling_queue": {
     "enabled": true,
     "batch_size": 4,
