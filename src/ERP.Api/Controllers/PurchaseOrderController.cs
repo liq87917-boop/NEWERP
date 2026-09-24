@@ -59,6 +59,15 @@ public class PurchaseOrderController : DocumentControllerBase<PurchaseOrder>
         => Ok(ApiResponse<List<OrderTimelineEvent>>.Success(
             await OrderExecutionTimeline.ForPurchaseOrderAsync(Db, id)));
 
+    /// <summary>
+    /// 采购执行进度（ERP-026，只读派生）：按既有采购入库单派生已订 / 已收 / 未收数量（含待审与订单外数量），
+    /// 并仅在既有引用可用时暴露已结算 / 未结算金额；无可用引用时金额为 null（未知，不推断）。
+    /// </summary>
+    [HttpGet("{id:long}/progress")]
+    public async Task<IActionResult> Progress(long id)
+        => Ok(ApiResponse<PurchaseOrderProgressView>.Success(
+            await PurchaseOrderProgress.ForPurchaseOrderAsync(Db, id)));
+
     /// <summary>创建</summary>
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] PurchaseOrder entity)

@@ -190,6 +190,7 @@ Object.assign(MODULES, {
       { key: 'remark', label: '备注', type: 'textarea' },
     ],
     rowActions: [
+      { label: '执行进度', icon: '📦', title: '查看由入库单派生的已订 / 已收 / 未收数量，以及既有引用可用时的已结算 / 未结算金额', onclick: 'showPurchaseOrderProgress' },
       { label: '执行时间线', icon: '🕘', title: '查看由订单、供应商确认交期与入库记录派生的执行时间线', onclick: 'showOrderTimeline' },
       { label: '打印预览', icon: '🖨', title: '按打印模板预览该采购订单（含归属客户 / 执行进度等）', onclick: 'previewSalesDocPrint' },
     ],
