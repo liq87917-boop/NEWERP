@@ -1,0 +1,42 @@
+{
+  "id": "ERP-024",
+  "title": "Add Quotation CRUD regression coverage",
+  "status": "pending",
+  "risk_level": "low",
+  "description": "Close the audited Quotation generic CRUD test gap using the existing EF Quotation workflow. Add focused non-production tests for create/update/detail/list validation and server-side total recalculation. Do not change production schema, deployment, OSS, or credentials.",
+  "acceptance_criteria": [
+    "Quotation create and update paths have focused regression tests for authoritative server-side total recalculation.",
+    "Detail and list/query behavior have focused coverage for normal and invalid inputs.",
+    "Existing Inquiry/PI/Sales Order conversion and quotation governance behavior remains unchanged.",
+    "No production schema, deployment, OSS, credential, or irreversible data operation is introduced.",
+    "Safe validation passes; browser/UI acceptance remains deferred during feature development."
+  ],
+  "allowed_paths": [
+    "src/ERP.UnitTests/**",
+    "src/ERP.IntegrationTests/**",
+    "src/ERP.Application/**",
+    "src/ERP.Api/Controllers/**",
+    "docs/**",
+    ".ai/**"
+  ],
+  "depends_on": ["ERP-007", "ERP-018"],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "browser",
+  "browser_acceptance": {
+    "required": true,
+    "scenarios": ["Create and edit a quotation and verify persisted totals and detail values."],
+    "test_filter": "Collection=UiTests",
+    "minimum_screenshots": 1
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Regression coverage and existing application behavior only; no production schema or external mutation."
+  },
+  "attempts": 0,
+  "created_at": "2026-09-24T02:13:00Z"
+}
