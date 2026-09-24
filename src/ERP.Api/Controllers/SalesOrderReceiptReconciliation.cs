@@ -144,7 +144,12 @@ public static class SalesOrderReceiptReconciliationSemantics
         "ERP-054 另按 ERP-053 的持久化收款引用行（CustomerReceiptAllocations）单独标注「收款引用登记证据」：" +
         "有效（未作废）已引用金额 / 引用行条数与收款单张数是独立字段，已作废 / 无效（客户 / 币种或快照不一致）/ 无法确认证据单独列出；" +
         "它与「已关联收款金额」（收款申请单的权威引用）是两类独立证据，绝不相加、不得互相替代；" +
-        "「无收款引用证据」只表示没有登记，绝不等于未收款、已收款、已结清、逾期或欠款。";
+        "「无收款引用证据」只表示没有登记，绝不等于未收款、已收款、已结清、逾期或欠款；" +
+        "ERP-056 另按 ERP-055 的持久化销项发票证据行（CustomerSalesInvoiceEvidences）与其分摊行" +
+        "（CustomerSalesInvoiceAllocations）单独标注「销项发票登记证据」：有效（已登记且未作废）已分摊金额 / 分摊行条数 / " +
+        "发票张数是独立字段，草稿（发票未登记）/ 已作废 / 无效（客户 / 币种 / 金额等式或快照不一致）/ 无法确认证据单独列出；" +
+        "它与订单金额、收款申请链接、收款引用登记证据都是**相互独立的证据类别**，四者绝不相加、不得互相替代；" +
+        "「无销项发票证据」只表示没有登记，绝不等于未开票、已开票、欠税、已收款或已结清。";
 
     /// <summary>范围说明：合计与计数只统计本次返回页的订单，未关联收款证据只列出本页客户</summary>
     public const string ScopeNoteText =
@@ -154,7 +159,9 @@ public static class SalesOrderReceiptReconciliationSemantics
         "每张收款单只列出一次、只按自己的币种汇总，绝不与订单金额相加，也不做汇率换算；" +
         "收款引用登记证据按本页订单 Id 有界聚合（最多 4 次数据集访问，与订单张数 / 行数无关，绝无逐行查库），" +
         "命中上限时金额与计数一律按「未知」显示，不报部分合计；" +
-        "订单侧汇总、未关联收款证据汇总与收款引用证据相互独立，三表不得相加；收款单查询命中单次上限时显式标注「不完整」，不静默截断。";
+        "销项发票登记证据同样按本页订单 Id 有界聚合（另有最多 4 次数据集访问，与订单张数 / 行数无关），" +
+        "命中上限时金额与计数一律按「未知」显示，不报部分合计；" +
+        "订单侧汇总、未关联收款证据汇总、收款引用证据与销项发票证据相互独立，四表不得相加；收款单查询命中单次上限时显式标注「不完整」，不静默截断。";
 
     /// <summary>与应收账款台账 / 对账单 / 收款授权 / 结算结果 / 账龄表的边界说明（界面与文档同源）</summary>
     public const string LedgerBoundaryText =
@@ -430,6 +437,59 @@ public sealed class SalesOrderReceiptReconciliationOrderRow
     /// <summary>收款引用登记证据说明（与收款申请链接证据分列，绝不当作应收余额或结算结果）</summary>
     public string ReceiptAllocationNote { get; init; } = string.Empty;
 
+    // ============ 销项发票登记证据（ERP-056：ERP-055 持久化发票证据行与分摊行；与上面三类证据相互独立） ============
+
+    /// <summary>
+    /// 销项发票登记证据状态：recorded（有有效分摊行）/ historical_only（只有草稿 / 作废 / 无效 / 无法确认）/ none（无分摊行）/ unknown（命中上限）。
+    /// <para>独立于 <see cref="ReceiptCoverageStatus"/> 与 <see cref="ReceiptAllocationStatus"/>，四类证据不得相加、不得互相替代。</para>
+    /// </summary>
+    public string InvoiceEvidenceStatus { get; init; } = SalesOrderInvoiceEvidenceSemantics.EvidenceUnknown;
+
+    /// <summary>销项发票登记证据短标签（有销项发票证据 / 仅有草稿作废无效证据 / 无销项发票证据 / 未知）</summary>
+    public string InvoiceEvidenceLabel { get; init; } = SalesOrderInvoiceEvidenceSemantics.LabelUnknown;
+
+    /// <summary>销项发票登记证据分摊行条数（含草稿 / 已作废 / 无效 / 无法确认）；null = 未知（命中上限）</summary>
+    public int? InvoiceAllocationCount { get; init; }
+
+    /// <summary>
+    /// 有效（已登记且未作废）销项发票已分摊金额合计（原币）；null = 未知（命中上限）。
+    /// 它<strong>不是</strong>已开票金额、<strong>不是</strong>应交税金，也<strong>不是</strong>应收余额，与其它三类证据相互独立。
+    /// </summary>
+    public decimal? RecordedInvoicedAmount { get; init; }
+
+    /// <summary>参与有效销项发票证据的发票张数（按发票证据去重）；null = 未知（命中上限）</summary>
+    public int? RecordedInvoiceCount { get; init; }
+
+    /// <summary>参与有效销项发票证据的发票含税总额快照合计（按发票去重；仅作上下文）；null = 未知（命中上限）</summary>
+    public decimal? RecordedInvoiceGrossAmount { get; init; }
+
+    /// <summary>发票含税总额中未指向本订单的金额（可能指向其他销售订单）；null = 未知（命中上限）</summary>
+    public decimal? UnreferencedInvoiceAmount { get; init; }
+
+    /// <summary>
+    /// 订单金额中未被任何有效销项发票证据分摊到的部分（下限 0；null = 未知 / 订单不可用）。
+    /// 只是「没有有效发票证据分摊到」的金额，不是应收余额、不是未开票金额、也不是应交税金。
+    /// </summary>
+    public decimal? InvoiceUnreferencedOrderAmount { get; init; }
+
+    /// <summary>草稿发票证据分摊行条数（发票未登记：仅工作数据，绝不并入有效合计）；null = 未知（命中上限）</summary>
+    public int? DraftInvoiceAllocationCount { get; init; }
+
+    /// <summary>已作废销项发票证据分摊行条数（单独列出，绝不并入有效合计）；null = 未知（命中上限）</summary>
+    public int? VoidedInvoiceAllocationCount { get; init; }
+
+    /// <summary>无效销项发票证据分摊行条数（客户 / 币种 / 金额等式或快照不一致，绝不换算 / 合并 / 改派）；null = 未知（命中上限）</summary>
+    public int? InvalidInvoiceAllocationCount { get; init; }
+
+    /// <summary>无法确认的销项发票证据分摊行条数（发票证据 / 订单不存在或已删除）；null = 未知（命中上限）</summary>
+    public int? UnavailableInvoiceAllocationCount { get; init; }
+
+    /// <summary>销项发票登记证据是否命中有界读取上限（true = 上述金额与计数按未知，不报部分合计）</summary>
+    public bool InvoiceEvidenceTruncated { get; init; }
+
+    /// <summary>销项发票登记证据说明（与其它三类证据分列，绝不当作已开票、税金、应收余额或结算结果）</summary>
+    public string InvoiceEvidenceNote { get; init; } = string.Empty;
+
     /// <summary>是否超收（已关联收款金额 &gt; 订单金额，按金额容差判定，需人工核对）</summary>
     public bool OverReceived { get; init; }
 
@@ -558,6 +618,24 @@ public sealed class SalesOrderReceiptReconciliationGroup
     /// 与 <see cref="LinkedReceiptAmount"/> 是两类独立证据，绝不合并、绝不相加。
     /// </summary>
     public decimal? RecordedReceiptAllocationAmount { get; init; }
+
+    /// <summary>本分组有有效销项发票证据（ERP-055 持久化分摊行）的订单数</summary>
+    public int InvoiceEvidenceOrderCount { get; init; }
+
+    /// <summary>本分组只有草稿 / 作废 / 无效 / 无法确认销项发票证据的订单数</summary>
+    public int HistoricalOnlyInvoiceEvidenceOrderCount { get; init; }
+
+    /// <summary>本分组没有任何销项发票证据的订单数（证据缺口，不是未开票）</summary>
+    public int NoInvoiceEvidenceOrderCount { get; init; }
+
+    /// <summary>本分组销项发票证据命中读取上限的订单数</summary>
+    public int UnknownInvoiceEvidenceOrderCount { get; init; }
+
+    /// <summary>
+    /// 本分组有效（已登记且未作废）销项发票已分摊金额合计（本分组同一币种内）；存在未知行时 null（不给部分合计）。
+    /// 与订单金额、已关联收款金额、收款引用登记证据都是独立证据，绝不合并、绝不相加。
+    /// </summary>
+    public decimal? RecordedInvoicedAmount { get; init; }
 
     /// <summary>已关联收款金额合计（只汇总金额已知的行）；null = 本分组所有行金额均未知（未知，不是 0）</summary>
     public decimal? LinkedReceiptAmount { get; init; }
@@ -757,6 +835,28 @@ public sealed class SalesOrderReceiptReconciliationReport
     /// <summary>收款引用证据边界说明（不是银行入账 / 应收余额 / 核销 / 对账单 / 账龄）</summary>
     public string ReceiptAllocationBoundary { get; init; } = SalesOrderReceiptEvidenceSemantics.BoundaryText;
 
+    // ============ 销项发票登记证据（ERP-056，本页；与上面三类证据相互独立） ============
+    /// <summary>本页有有效销项发票证据的订单数</summary>
+    public int InvoiceEvidenceOrderCount { get; init; }
+
+    /// <summary>本页只有草稿 / 作废 / 无效 / 无法确认销项发票证据的订单数（绝不呈现为已开票 / 已结清）</summary>
+    public int HistoricalOnlyInvoiceEvidenceOrderCount { get; init; }
+
+    /// <summary>本页没有任何销项发票证据的订单数（证据缺口，不是未开票）</summary>
+    public int NoInvoiceEvidenceOrderCount { get; init; }
+
+    /// <summary>本页销项发票证据命中读取上限、无法确认的订单数</summary>
+    public int UnknownInvoiceEvidenceOrderCount { get; init; }
+
+    // 说明（ERP-056）：报表**不提供**跨币种的页级销项发票金额合计（与订单侧口径一致：金额只按「客户 + 币种」分组或按行展示，
+    // 不同币种绝不合并、绝不换算）；有效销项发票已分摊金额只在分组汇总 `Groups[].RecordedInvoicedAmount` 与订单行 `Orders[].RecordedInvoicedAmount` 上给出。
+
+    /// <summary>销项发票证据派生口径说明（与订单视图同源）</summary>
+    public string InvoiceEvidenceRule { get; init; } = SalesOrderInvoiceEvidenceSemantics.RuleText;
+
+    /// <summary>销项发票证据边界说明（不是开票系统 / 税务申报 / 应收余额 / 核销 / 对账单 / 账龄）</summary>
+    public string InvoiceEvidenceBoundary { get; init; } = SalesOrderInvoiceEvidenceSemantics.BoundaryText;
+
     // ============ 未关联收款证据（本页客户；与订单金额相互独立） ============
     /// <summary>本页列出的未关联收款单张数</summary>
     public int PageUnlinkedReceiptCount { get; init; }
@@ -849,7 +949,10 @@ public static class SalesOrderReceiptReconciliation
 
         // ERP-054：收款引用登记证据（ERP-053 持久化引用行）聚合 —— 与订单视图共用同一套分桶，固定 4 次数据集访问
         var allocations = await SalesOrderReceiptEvidence.AggregatesForOrdersAsync(db, pageIds);
-        var orderRows = orders.Select(o => MapOrderRow(o, derived[o.Id], customerNames, allocations)).ToList();
+
+        // ERP-056：销项发票登记证据（ERP-055 持久化发票证据行 + 分摊行）聚合 —— 与订单视图共用同一套分桶，另固定 4 次数据集访问
+        var invoices = await SalesOrderInvoiceEvidence.AggregatesForOrdersAsync(db, pageIds);
+        var orderRows = orders.Select(o => MapOrderRow(o, derived[o.Id], customerNames, allocations, invoices)).ToList();
 
         // 第 12 次：未关联收款证据（收款单只记录客户，无订单级引用；按本次筛选的客户 / 币种有界读取）
         var unlinked = await LoadUnlinkedReceiptsAsync(db, query, customerIds);
@@ -889,6 +992,14 @@ public static class SalesOrderReceiptReconciliation
                 r.ReceiptAllocationStatus == SalesOrderReceiptEvidenceSemantics.AllocationNone),
             UnknownReceiptAllocationOrderCount = orderRows.Count(r =>
                 r.ReceiptAllocationStatus == SalesOrderReceiptEvidenceSemantics.AllocationUnknown),
+            InvoiceEvidenceOrderCount = orderRows.Count(r =>
+                r.InvoiceEvidenceStatus == SalesOrderInvoiceEvidenceSemantics.EvidenceRecorded),
+            HistoricalOnlyInvoiceEvidenceOrderCount = orderRows.Count(r =>
+                r.InvoiceEvidenceStatus == SalesOrderInvoiceEvidenceSemantics.EvidenceNonActiveOnly),
+            NoInvoiceEvidenceOrderCount = orderRows.Count(r =>
+                r.InvoiceEvidenceStatus == SalesOrderInvoiceEvidenceSemantics.EvidenceNone),
+            UnknownInvoiceEvidenceOrderCount = orderRows.Count(r =>
+                r.InvoiceEvidenceStatus == SalesOrderInvoiceEvidenceSemantics.EvidenceUnknown),
             PageUnlinkedReceiptCount = receiptRows.Count,
             PageUnlinkedReceiptTruncated = unlinked.Truncated,
             UnlinkedReceipts = receiptRows,
@@ -1009,7 +1120,8 @@ public static class SalesOrderReceiptReconciliation
     /// <summary>报表行：数量未知一律 null（不回落为 0），收款金额未知一律 null（不回落到 0）</summary>
     private static SalesOrderReceiptReconciliationOrderRow MapOrderRow(SalesOrder order,
         SalesOrderProgressResult progress, IReadOnlyDictionary<long, string> customerNames,
-        SalesOrderReceiptEvidenceAggregateSet allocations)
+        SalesOrderReceiptEvidenceAggregateSet allocations,
+        SalesOrderInvoiceEvidenceAggregateSet invoices)
     {
         var shipment = progress.Shipment;
         var finance = progress.Finance;
@@ -1026,6 +1138,16 @@ public static class SalesOrderReceiptReconciliation
         var unreferencedOrderAmount = allocationTruncated || order.Status == DocumentStatus.Cancelled
             ? (decimal?)null
             : Math.Max(0m, order.TotalAmount - allocation.RecordedAmount);
+
+        // ERP-056：销项发票登记证据（ERP-055 持久化发票证据行 + 分摊行）——与上面三类证据分开标注、绝不合并
+        var invoiceEvidence = invoices.Get(order.Id);
+        var invoiceTruncated = invoices.Truncated;
+        var hasInvoiceRow = !invoiceTruncated
+            && invoiceEvidence.RecordedRowCount + invoiceEvidence.NonActiveRowCount > 0;
+        var recordedInvoiced = invoiceTruncated ? (decimal?)null : invoiceEvidence.RecordedAmount;
+        var invoiceUnreferencedOrderAmount = invoiceTruncated || order.Status == DocumentStatus.Cancelled
+            ? (decimal?)null
+            : Math.Max(0m, order.TotalAmount - invoiceEvidence.RecordedAmount);
 
         return new SalesOrderReceiptReconciliationOrderRow
         {
@@ -1075,6 +1197,25 @@ public static class SalesOrderReceiptReconciliation
             ReceiptAllocationTruncated = allocationTruncated,
             UnreferencedOrderAmount = unreferencedOrderAmount,
             ReceiptAllocationNote = BuildAllocationNote(allocationTruncated, hasAllocationRow, allocation,
+                order.Status == DocumentStatus.Cancelled),
+            InvoiceEvidenceStatus = SalesOrderInvoiceEvidenceSemantics.EvidenceStatusOf(
+                invoiceTruncated, recordedInvoiced, hasInvoiceRow),
+            InvoiceEvidenceLabel = SalesOrderInvoiceEvidenceSemantics.EvidenceLabel(
+                invoiceTruncated, recordedInvoiced, hasInvoiceRow),
+            InvoiceAllocationCount = invoiceTruncated
+                ? null
+                : invoiceEvidence.RecordedRowCount + invoiceEvidence.NonActiveRowCount,
+            RecordedInvoicedAmount = recordedInvoiced,
+            RecordedInvoiceCount = invoiceTruncated ? null : invoiceEvidence.RecordedInvoiceCount,
+            RecordedInvoiceGrossAmount = invoiceTruncated ? null : invoiceEvidence.RecordedInvoiceGrossAmount,
+            UnreferencedInvoiceAmount = invoiceTruncated ? null : invoiceEvidence.UnreferencedInvoiceAmount,
+            InvoiceUnreferencedOrderAmount = invoiceUnreferencedOrderAmount,
+            DraftInvoiceAllocationCount = invoiceTruncated ? null : invoiceEvidence.DraftRowCount,
+            VoidedInvoiceAllocationCount = invoiceTruncated ? null : invoiceEvidence.VoidedRowCount,
+            InvalidInvoiceAllocationCount = invoiceTruncated ? null : invoiceEvidence.InvalidRowCount,
+            UnavailableInvoiceAllocationCount = invoiceTruncated ? null : invoiceEvidence.UnavailableRowCount,
+            InvoiceEvidenceTruncated = invoiceTruncated,
+            InvoiceEvidenceNote = BuildInvoiceEvidenceNote(invoiceTruncated, hasInvoiceRow, invoiceEvidence,
                 order.Status == DocumentStatus.Cancelled),
             Note = BuildOrderNote(shipment, finance),
         };
@@ -1126,6 +1267,61 @@ public static class SalesOrderReceiptReconciliation
 
         sb.Append(" 该证据与「已关联收款金额」（定金 / 货款申请单的权威引用）是两类独立口径，绝不相加；"
             + "它不是银行入账金额、不是应收余额、不是货款核销或结算结果，也不得据以催收。");
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// 销项发票登记证据行级说明（ERP-056）：与订单金额、收款申请链接、收款引用登记证据分列，
+    /// 逐桶点名草稿 / 已作废 / 无效 / 无法确认证据，明确「无销项发票证据」只是登记缺口，
+    /// 绝不等于未开票 / 已开票 / 欠税 / 已收款 / 已结清 / 逾期。
+    /// </summary>
+    private static string BuildInvoiceEvidenceNote(bool truncated, bool hasInvoiceRow,
+        SalesOrderInvoiceEvidenceAggregate evidence, bool cancelled)
+    {
+        var sb = new System.Text.StringBuilder();
+        if (truncated)
+        {
+            sb.Append(SalesOrderInvoiceEvidenceSemantics.TruncatedNote);
+        }
+        else if (evidence.RecordedAmount > 0)
+        {
+            sb.Append($"销项发票证据（ERP-055 持久化发票证据行 + 分摊行）：有效已分摊 {evidence.RecordedAmount}"
+                + $"（{evidence.RecordedRowCount} 条分摊行 / {evidence.RecordedInvoiceCount} 张发票）；"
+                + $"参与证据的发票含税总额快照合计 {evidence.RecordedInvoiceGrossAmount}，"
+                + $"其中未指向本订单 {evidence.UnreferencedInvoiceAmount}"
+                + "（可能指向其他销售订单，不是未开票金额，也不是应收余额或应交税金）。");
+        }
+        else if (hasInvoiceRow)
+        {
+            sb.Append(evidence.DraftRowCount > 0
+                    && evidence.DraftRowCount == evidence.NonActiveRowCount
+                ? SalesOrderInvoiceEvidenceSemantics.DraftOnlyNote
+                : "本订单没有有效销项发票证据：现有分摊行都是草稿 / 已作废 / 无效或无法确认，均不计入有效合计；"
+                    + "这是销项发票证据缺口，不代表未开票、已开票、欠税、已收款或已结清。");
+        }
+        else
+        {
+            sb.Append(SalesOrderInvoiceEvidenceSemantics.NoEvidenceNote);
+        }
+
+        if (!truncated)
+        {
+            if (evidence.DraftRowCount > 0)
+                sb.Append($" 另有草稿发票证据 {evidence.DraftRowCount} 条（金额 {evidence.DraftAmount}，发票未登记：仅工作数据），不计入有效合计。");
+            if (evidence.VoidedRowCount > 0)
+                sb.Append($" 另有已作废历史证据 {evidence.VoidedRowCount} 条（金额 {evidence.VoidedAmount}），不计入有效合计。");
+            if (evidence.InvalidRowCount > 0)
+                sb.Append($" 另有无效历史证据 {evidence.InvalidRowCount} 条（金额 {evidence.InvalidAmount}，客户 / 币种 / 金额等式或快照不一致），"
+                    + "不换算、不合并、不改派。");
+            if (evidence.UnavailableRowCount > 0)
+                sb.Append($" 另有无法确认的证据 {evidence.UnavailableRowCount} 条（金额 {evidence.UnavailableAmount}，发票证据 / 订单不存在或已删除）。");
+        }
+
+        if (cancelled)
+            sb.Append(" 本订单已取消：销项发票证据与订单金额仅作历史参考，不参与开票确认、税金、逾期或欠款判定。");
+
+        sb.Append(" 该证据与订单金额、「已关联收款金额」、「收款引用登记证据」是相互独立的口径，绝不相加；"
+            + "它不是已开票金额、不是应交税金、不是应收余额、不是收款核销或结算结果，也不得据以催收。");
         return sb.ToString();
     }
 
@@ -1223,6 +1419,14 @@ public static class SalesOrderReceiptReconciliation
                 var allocHistoricalOnly = list.Count(r => r.ReceiptAllocationStatus == SalesOrderReceiptEvidenceSemantics.AllocationHistoricalOnly);
                 var allocNone = list.Count(r => r.ReceiptAllocationStatus == SalesOrderReceiptEvidenceSemantics.AllocationNone);
                 var allocUnknown = list.Count(r => r.ReceiptAllocationStatus == SalesOrderReceiptEvidenceSemantics.AllocationUnknown);
+                var invoiceRecorded = list.Count(r =>
+                    r.InvoiceEvidenceStatus == SalesOrderInvoiceEvidenceSemantics.EvidenceRecorded);
+                var invoiceNonActiveOnly = list.Count(r =>
+                    r.InvoiceEvidenceStatus == SalesOrderInvoiceEvidenceSemantics.EvidenceNonActiveOnly);
+                var invoiceNone = list.Count(r =>
+                    r.InvoiceEvidenceStatus == SalesOrderInvoiceEvidenceSemantics.EvidenceNone);
+                var invoiceUnknown = list.Count(r =>
+                    r.InvoiceEvidenceStatus == SalesOrderInvoiceEvidenceSemantics.EvidenceUnknown);
                 if (cancelled > 0)
                     notes.Add($"{cancelled} 张已取消订单：仅在显式选择订单状态筛选时可见，其数量 / 金额仅作历史参考，不并入有效订单口径");
                 if (unlinked > 0)
@@ -1234,6 +1438,9 @@ public static class SalesOrderReceiptReconciliation
                 notes.Add($"收款引用登记证据（ERP-053 持久化引用行）与上面的收款申请链接证据是两类独立证据：" +
                     $"有效 {allocRecorded} 张 / 仅历史无效 {allocHistoricalOnly} 张 / 无引用证据 {allocNone} 张 / 未知 {allocUnknown} 张" +
                     "；「无收款引用证据」只表示没有登记，绝不等于未收款或已收款");
+                notes.Add($"销项发票登记证据（ERP-055 持久化发票证据行 + 分摊行）与上面三类证据是相互独立的证据类别：" +
+                    $"有效 {invoiceRecorded} 张 / 仅草稿作废无效 {invoiceNonActiveOnly} 张 / 无销项发票证据 {invoiceNone} 张 / 未知 {invoiceUnknown} 张" +
+                    "；「无销项发票证据」只表示没有登记，绝不等于未开票、已开票、欠税或已收款");
                 notes.Add($"仅统计本页「该客户 + {g.Key.Currency}」分组：金额绝不与其它币种合并，也不与未关联收款证据相加");
 
                 var customerName = list.Select(r => r.CustomerName).FirstOrDefault(n => n.Length > 0);
@@ -1258,6 +1465,12 @@ public static class SalesOrderReceiptReconciliation
                     UnknownReceiptAllocationOrderCount = allocUnknown,
                     RecordedReceiptAllocationAmount = SumKnownMoney(
                         list.Select(r => r.ReceiptAllocationTruncated ? null : r.RecordedReceiptAllocationAmount)),
+                    InvoiceEvidenceOrderCount = invoiceRecorded,
+                    HistoricalOnlyInvoiceEvidenceOrderCount = invoiceNonActiveOnly,
+                    NoInvoiceEvidenceOrderCount = invoiceNone,
+                    UnknownInvoiceEvidenceOrderCount = invoiceUnknown,
+                    RecordedInvoicedAmount = SumKnownMoney(
+                        list.Select(r => r.InvoiceEvidenceTruncated ? null : r.RecordedInvoicedAmount)),
                     ShippedOrderCount = list.Count(r => r.HasApprovedShipment),
                     UnshippedOrderCount = list.Count(r => !r.HasApprovedShipment),
                     UnknownShipmentOrderCount = list.Count(r => r.ShipmentStatus == SalesOrderProgress.ShipmentUnknown),

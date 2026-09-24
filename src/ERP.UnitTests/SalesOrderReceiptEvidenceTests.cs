@@ -687,12 +687,27 @@ public class SalesOrderReceiptEvidenceTests
                  {
                      typeof(SalesOrderReceiptEvidenceSummary), typeof(SalesOrderReceiptEvidenceLine),
                      typeof(SalesOrderReceiptEvidenceDetail), typeof(SalesOrderReceiptEvidenceBatch),
+                 })
+        {
+            var names = type.GetProperties().Select(p => p.Name).ToList();
+            Assert.DoesNotContain(names, n => n.Contains("Invoice", StringComparison.Ordinal));
+            Assert.DoesNotContain(names, n => n.Contains("DueDate", StringComparison.Ordinal));
+            Assert.DoesNotContain(names, n => n.Contains("Aging", StringComparison.Ordinal));
+            Assert.DoesNotContain(names, n => n.Contains("Overdue", StringComparison.Ordinal));
+            Assert.DoesNotContain(names, n => n.Contains("Receivable", StringComparison.Ordinal));
+            Assert.DoesNotContain(names, n => n.Contains("Statement", StringComparison.Ordinal));
+        }
+
+        // 说明（ERP-056）：ERP-046 报表行 / 分组 / 报表自 ERP-056 起刻意新增销项发票证据字段（Invoice*），
+        // 因此不再对这三种类型断言「不含 Invoice 字段」；其「不含应收 / 账龄 / 到期日 / 结算字段」的边界断言
+        // 由 ERP-056 的 SalesOrderInvoiceEvidenceTests 继续覆盖，本用例只保留收款引用证据自身的字段边界。
+        foreach (var type in new[]
+                 {
                      typeof(SalesOrderReceiptReconciliationOrderRow), typeof(SalesOrderReceiptReconciliationGroup),
                      typeof(SalesOrderReceiptReconciliationReport),
                  })
         {
             var names = type.GetProperties().Select(p => p.Name).ToList();
-            Assert.DoesNotContain(names, n => n.Contains("Invoice", StringComparison.Ordinal));
             Assert.DoesNotContain(names, n => n.Contains("DueDate", StringComparison.Ordinal));
             Assert.DoesNotContain(names, n => n.Contains("Aging", StringComparison.Ordinal));
             Assert.DoesNotContain(names, n => n.Contains("Overdue", StringComparison.Ordinal));

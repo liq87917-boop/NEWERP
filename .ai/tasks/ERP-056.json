@@ -1,7 +1,7 @@
 {
   "id": "ERP-056",
   "title": "Expose sales-invoice evidence in customer reconciliation workflows",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "medium",
   "description": "Extend existing Sales Order and ERP-046 customer reconciliation workflows with read-only sales-invoice allocation evidence from ERP-055 and receipt-reference evidence from ERP-053. Keep ordered, shipped, invoiced and receipt-reference amounts distinct and do not calculate or claim an accounts-receivable balance, tax liability, settlement result, due date or aging bucket. Do not infer links, mutate source records, execute production SQL, deploy, or release.",
   "acceptance_criteria": [
@@ -52,5 +52,5 @@
     "status": "not_required",
     "reason": "Read-only presentation of repository invoice and receipt evidence. No invoice issuance, tax submission, accounting posting, real settlement, production mutation, deployment or release is authorized."
   },
-  "attempts": 0
+  "attempts": 1
 }

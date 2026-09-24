@@ -518,7 +518,8 @@ public class SalesOrderReceiptReconciliationTests
         // 常数级访问：订单集合（筛选 + 计数 + 分页共用同一查询）+ 本页订单 + 客户名 + 逐单派生 8 次
         // （订单明细 / 出库主表 / 出库明细 / 定金申请 / 货款申请 / 收款单 / 装柜结算 / 散货结算）+ 未关联收款证据 1 次
         // + ERP-054 收款引用证据聚合 4 次（订单 + 持久化引用行 + 收款单 + 收款单侧有效引用合计）
-        Assert.Equal(16, singleReads);
+        // + ERP-056 销项发票证据聚合 4 次（订单 + 持久化分摊行 + 发票证据 + 发票侧分摊合计）
+        Assert.Equal(20, singleReads);
 
         // 再补 300 张订单（跨多页）：同一报表的数据集访问次数必须保持不变（无逐行查库 / 无 N+1）
         for (var i = 2; i <= 301; i++)
@@ -652,14 +653,30 @@ public class SalesOrderReceiptReconciliationTests
     {
         foreach (var type in new[]
                  {
-                     typeof(SalesOrderReceiptReconciliationOrderRow), typeof(SalesOrderReceiptReconciliationReceipt),
-                     typeof(SalesOrderReceiptReconciliationGroup), typeof(SalesOrderReceiptReconciliationCurrencySummary),
+                     typeof(SalesOrderReceiptReconciliationReceipt),
+                     typeof(SalesOrderReceiptReconciliationCurrencySummary),
                      typeof(SalesOrderReceiptReconciliationReceiptCurrencySummary),
-                     typeof(SalesOrderReceiptReconciliationReport),
                  })
         {
             var names = type.GetProperties().Select(p => p.Name).ToList();
             Assert.DoesNotContain(names, n => n.Contains("Invoice", StringComparison.Ordinal));
+            Assert.DoesNotContain(names, n => n.Contains("DueDate", StringComparison.Ordinal));
+            Assert.DoesNotContain(names, n => n.Contains("Aging", StringComparison.Ordinal));
+            Assert.DoesNotContain(names, n => n.Contains("Overdue", StringComparison.Ordinal));
+            Assert.DoesNotContain(names, n => n.Contains("Receivable", StringComparison.Ordinal));
+            Assert.DoesNotContain(names, n => n.Contains("Statement", StringComparison.Ordinal));
+        }
+
+        // 说明（ERP-056）：ERP-046 报表行 / 分组 / 报表自 ERP-056 起刻意新增销项发票证据字段（Invoice*），
+        // 因此不再对这三种类型断言「不含 Invoice 字段」；其「不含应收 / 账龄 / 到期日 / 结算字段」的边界断言
+        // 由 ERP-056 的 SalesOrderInvoiceEvidenceTests 继续覆盖。
+        foreach (var type in new[]
+                 {
+                     typeof(SalesOrderReceiptReconciliationOrderRow), typeof(SalesOrderReceiptReconciliationGroup),
+                     typeof(SalesOrderReceiptReconciliationReport),
+                 })
+        {
+            var names = type.GetProperties().Select(p => p.Name).ToList();
             Assert.DoesNotContain(names, n => n.Contains("DueDate", StringComparison.Ordinal));
             Assert.DoesNotContain(names, n => n.Contains("Aging", StringComparison.Ordinal));
             Assert.DoesNotContain(names, n => n.Contains("Overdue", StringComparison.Ordinal));

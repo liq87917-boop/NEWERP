@@ -115,6 +115,11 @@ Object.assign(MODULES, {
          收款单张数 / 引用行条数；由 sales-order-receipt-evidence.js 按页有界批量取数后渲染（每页一次 / 分批请求，
          绝不逐行查库），已作废 / 无效 / 无法确认证据只以 ⚠ 提示，绝不计入有效合计，也不当作已收款或应收余额 */
       { key: 'receiptEvidence', label: '收款引用证据', virtual: true, render: row => salesOrderReceiptEvidenceCellHtml(row) },
+      /* ERP-056：销项发票证据派生列（virtual，不落库）：ERP-055 有效（已登记且未作废）发票证据行的已分摊金额 /
+         发票张数 / 分摊行条数；由 sales-order-invoice-evidence.js 按页有界批量取数后渲染（每页一次 / 分批请求，
+         绝不逐行查库），草稿 / 已作废 / 无效 / 无法确认证据只以 ⚠ 提示，绝不计入有效合计，
+         也不当作已开票金额、应交税金、应收余额或结算结果 */
+      { key: 'invoiceEvidence', label: '销项发票证据', virtual: true, render: row => salesOrderInvoiceEvidenceCellHtml(row) },
     ],
     fields: [
       { key: 'orderDate', label: '订单日期', type: 'date' },
@@ -179,6 +184,9 @@ Object.assign(MODULES, {
       { label: '收款引用证据', icon: '🧾', title: '查看本销售订单的收款引用证据：有效（未作废）收款引用行的已引用金额、收款单张数与未指向本单金额，以及已作废 / 无效 / 无法确认证据的逐条明细（只读派生；不是银行入账凭证、应收余额、货款核销、客户对账单或结算结果）', onclick: 'showSalesOrderReceiptEvidence' },
       /* ERP-055：以本销售订单预筛选销项发票证据登记册（只显示分摊到本单的发票证据；分摊只指向同客户 + 同币种订单） */
       { label: '销项发票', icon: '🧾', title: '打开客户销项发票证据登记册，并只显示分摊到本销售订单的发票证据（登记普票 / 专票 / 出口发票证据与分摊；不开票、不报税、不记账，也不改写本单与客户数据）', onclick: 'openCustomerSalesInvoiceRegister' },
+      /* ERP-056：本单的销项发票证据只读视图（只按 ERP-055 持久化发票证据行与分摊行派生；
+         不是开票系统 / 税务申报或销项税金 / 应收余额 / 核销 / 结算结果） */
+      { label: '销项发票证据', icon: '🧾', title: '查看本销售订单的销项发票证据：有效（已登记且未作废）分摊行的已分摊金额、发票张数与未指向本单金额，以及草稿 / 已作废 / 无效 / 无法确认证据的逐条明细（只读派生；不是发票开具系统、税务申报或销项税金、应收余额、货款核销、客户对账单或结算结果）', onclick: 'showSalesOrderInvoiceEvidence' },
     ],
     detailKey: 'details',
     detailTitle: '订单商品明细（数量 × 单价 = 金额，自动算合计）',
