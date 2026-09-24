@@ -1,0 +1,55 @@
+{
+  "id": "ERP-051",
+  "title": "Add immutable line-item snapshots to Trade Documents",
+  "status": "pending",
+  "risk_level": "medium",
+  "description": "Add bounded line-item snapshots beneath existing Commercial Invoice and Packing List Trade Documents. Lines are document evidence, not a second Product master or inventory transaction. This task supports manual draft maintenance and historical readability but must not infer missing customs values, rewrite source Sales Orders or Container Loading Lists, alter inventory or tax records, execute production SQL, deploy, or release.",
+  "acceptance_criteria": [
+    "Commercial Invoice and Packing List Trade Documents can contain ordered line snapshots with optional authoritative Product reference plus bounded product code, Chinese and English description, specification, quantity and unit snapshots.",
+    "Commercial Invoice lines support currency-consistent unit price and server-calculated line amount; Packing List lines support optional package count, net weight and gross weight without inventing unavailable values.",
+    "Only the two allowlisted document types accept item lines; unsupported Trade Document types reject line mutation rather than storing ambiguous records.",
+    "Line snapshots preserve their recorded text and numeric evidence when the Product or source document later changes or becomes unavailable; they are never silently refreshed from master data.",
+    "Lines are editable only while the parent document is in its existing editable preparation states; completed or archived document snapshots are immutable and cannot be hard-deleted or silently replaced.",
+    "Server validation rejects negative values, invalid precision, unsafe or overlong text, gross weight below net weight and duplicate client-supplied line order; calculated amounts are not trusted from the client.",
+    "Document detail displays line totals and any explicit mismatch with the existing header amount or aggregate fields without automatically rewriting the parent header.",
+    "Creating or editing lines does not mutate Product, Sales Order, Purchase Order, Container Loading List, stock, invoice, tax-refund, expense or finance records.",
+    "Existing Trade Documents remain readable with no lines, no production backfill occurs, and repository schema changes are idempotent and validated only through permitted local or test-database paths.",
+    "Normal detail queries are bounded and avoid per-line database queries; unit/integration tests cover both allowed types, unsupported types, calculation and precision, immutable states, legacy documents, unavailable Product references and adjacent-record non-mutation; safe validation passes.",
+    "Browser/UI acceptance is recorded as deferred during development according to project policy."
+  ],
+  "allowed_paths": [
+    "src/ERP.Domain/**",
+    "src/ERP.Application/**",
+    "src/ERP.Infrastructure/**",
+    "src/ERP.Api/Controllers/**",
+    "src/ERP.Api/wwwroot/**",
+    "src/ERP.UnitTests/**",
+    "src/ERP.IntegrationTests/**",
+    "docs/**",
+    ".ai/**"
+  ],
+  "depends_on": [
+    "ERP-019"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "browser",
+  "browser_acceptance": {
+    "required": true,
+    "scenarios": [
+      "Open a draft Commercial Invoice Trade Document, add two item snapshots and verify server-calculated amounts, ordering and header-mismatch information without changing its source Sales Order.",
+      "Maintain Packing List quantities and optional weights, then open a completed document and verify its lines are read-only while an unsupported document type cannot accept lines."
+    ],
+    "test_filter": "Collection=UiTests",
+    "minimum_screenshots": 2
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L2",
+    "status": "not_required",
+    "reason": "Repository document-line snapshots and non-production test schema only. Production database execution, customs or tax submission, deployment and release remain behind mandatory human gates."
+  },
+  "attempts": 0
+}

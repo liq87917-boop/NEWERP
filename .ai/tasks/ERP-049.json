@@ -1,0 +1,55 @@
+{
+  "id": "ERP-049",
+  "title": "Add traceable supplier-payment allocations to Purchase Orders",
+  "status": "pending",
+  "risk_level": "medium",
+  "description": "Add an explicit allocation register between existing supplier-payment evidence and Purchase Orders so users can record which orders a payment document refers to without creating or executing a payment. Reuse the repository's existing supplier-payment document and Purchase Order records; do not create a second payment master, infer allocations, mark invoices or orders as settled, move funds, execute production SQL, deploy, or release.",
+  "acceptance_criteria": [
+    "Users can maintain bounded allocation rows for an existing non-deleted supplier-payment document, each referencing one existing non-cancelled Purchase Order and recording an allocation amount plus bounded notes.",
+    "The server validates authoritative Supplier and currency compatibility between the payment evidence and every Purchase Order; mismatches are rejected and are never converted, reassigned or matched by number, text, date or amount similarity.",
+    "The sum of active allocation rows cannot exceed the authoritative payment-evidence amount, currency precision is enforced server-side, and duplicate active links to the same Purchase Order within one payment document are rejected.",
+    "Allocation rows preserve bounded payment, Supplier, Purchase Order and currency snapshots so historical evidence remains identifiable when a referenced master record later becomes unavailable.",
+    "Users can void an incorrect allocation with a reason while preserving its original values and history; hard deletion, silent replacement and rewriting of previously voided evidence are not provided.",
+    "The workflow clearly labels allocations as payment-reference evidence rather than proof of bank transfer, accounts-payable settlement, invoice discharge, tax eligibility or Supplier balance.",
+    "Creating or voiding an allocation does not change the payment document's approval or execution status, Purchase Order status, receipt progress, invoice records, inventory cost, Supplier balance, expenses or tax records.",
+    "Existing payment documents and Purchase Orders remain readable without allocation rows, and no request-time or production backfill is performed.",
+    "List and detail queries are bounded or paged and avoid per-row database queries; repository schema changes are idempotent and validated only through permitted local or test-database paths.",
+    "Unit/integration tests cover full and partial allocation, multiple orders, Supplier and currency mismatch, over-allocation, duplicate links, void history, legacy records, bounded queries and source-record non-mutation; safe validation passes.",
+    "Browser/UI acceptance is recorded as deferred during development according to project policy."
+  ],
+  "allowed_paths": [
+    "src/ERP.Domain/**",
+    "src/ERP.Application/**",
+    "src/ERP.Infrastructure/**",
+    "src/ERP.Api/Controllers/**",
+    "src/ERP.Api/wwwroot/**",
+    "src/ERP.UnitTests/**",
+    "src/ERP.IntegrationTests/**",
+    "docs/**",
+    ".ai/**"
+  ],
+  "depends_on": [
+    "ERP-026"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "browser",
+  "browser_acceptance": {
+    "required": true,
+    "scenarios": [
+      "Open an existing supplier-payment document, allocate part of its amount to two compatible Purchase Orders, and verify the traceable rows and remaining unallocated evidence without changing either order.",
+      "Attempt a Supplier or currency mismatch and an over-allocation, verify they are rejected, then void a valid allocation and verify its history remains visible without presenting the payment as settled."
+    ],
+    "test_filter": "Collection=UiTests",
+    "minimum_screenshots": 2
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L2",
+    "status": "not_required",
+    "reason": "Repository allocation evidence and non-production test schema only. Real payment execution, production database changes, irreversible finance operations, deployment and release remain behind mandatory human gates."
+  },
+  "attempts": 0
+}

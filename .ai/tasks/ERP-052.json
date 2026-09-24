@@ -1,0 +1,55 @@
+{
+  "id": "ERP-052",
+  "title": "Include Trade Document line snapshots in generation, export and print",
+  "status": "pending",
+  "risk_level": "medium",
+  "description": "Extend existing Trade Document generation, Excel export and shared printing to consume the immutable line snapshots from ERP-051. Prefill only values supported by authoritative source details and leave unavailable customs, package, weight or price evidence empty. Do not guess mappings, overwrite existing manual lines, mutate source documents, submit to external systems, execute production SQL, deploy, or release.",
+  "acceptance_criteria": [
+    "Generating or prefilling a Commercial Invoice from a Sales Order creates bounded line snapshots from authoritative order details, preserving product descriptions, specification, quantity, unit, currency and server-calculated price evidence available at generation time.",
+    "Generating or prefilling a Packing List from an authoritative Sales Order or Container Loading List source includes only supported item, quantity, package or weight evidence; unavailable values remain blank or explicitly unknown and are never inferred from free text.",
+    "Generated line snapshots are transactional with their parent generation operation, retain stable source lineage and do not change when the source order, loading list or Product later changes.",
+    "Existing duplicate-generation guards remain authoritative; retrying generation does not append duplicate lines or overwrite manually maintained Trade Documents.",
+    "Trade Document detail, Excel export and shared print output include ordered line snapshots with type-appropriate columns and totals, while legacy documents without lines continue to export and print successfully.",
+    "Commercial Invoice export and print keep currencies separate and use server-calculated line amounts; Packing List output does not present missing package or weight evidence as zero unless zero was explicitly recorded.",
+    "Unsafe or overlong snapshot text is encoded as plain text in UI, Excel and print output and is never interpreted as executable markup or a formula payload.",
+    "Generation, export and print remain repository-only operations and do not modify Sales Orders, Container Loading Lists, inventory, invoices, tax-refund, expenses or finance records.",
+    "Queries and exports are bounded and avoid per-line database queries; no production backfill is performed for existing Trade Documents.",
+    "Unit/integration tests cover Sales Order Commercial Invoice generation, loading-list Packing List evidence, missing values, source changes after generation, duplicate guards, legacy no-line documents, Excel/print ordering, safe text handling and non-mutation; safe validation passes.",
+    "Browser/UI acceptance is recorded as deferred during development according to project policy."
+  ],
+  "allowed_paths": [
+    "src/ERP.Application/**",
+    "src/ERP.Api/Controllers/**",
+    "src/ERP.Api/wwwroot/**",
+    "src/ERP.UnitTests/**",
+    "src/ERP.IntegrationTests/**",
+    "docs/**",
+    ".ai/**"
+  ],
+  "depends_on": [
+    "ERP-019",
+    "ERP-030",
+    "ERP-051"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "browser",
+  "browser_acceptance": {
+    "required": true,
+    "scenarios": [
+      "Generate a Commercial Invoice from a Sales Order and verify its item snapshots, calculated line amounts, Excel output and shared print preview match the authoritative source at generation time.",
+      "Generate a Packing List with partially available package or weight evidence, verify unknown values are not shown as invented zeroes, then change the source and confirm the generated snapshot remains unchanged."
+    ],
+    "test_filter": "Collection=UiTests",
+    "minimum_screenshots": 2
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L2",
+    "status": "not_required",
+    "reason": "Repository generation, export and print behavior only. Production database execution, external document submission, deployment and release remain behind mandatory human gates."
+  },
+  "attempts": 0
+}
