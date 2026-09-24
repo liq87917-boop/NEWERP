@@ -1,7 +1,7 @@
 {
   "id": "ERP-043",
   "title": "Add supplier purchase invoice register",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "medium",
   "description": "Add a supplier purchase-invoice register for ordinary and special VAT invoice evidence, with optional authoritative allocation to existing Purchase Orders. The register is operational evidence only and is not an accounts-payable ledger, tax filing system or payment authorization mechanism. Repository schema code and non-production test validation are allowed; production database execution, real tax submission, payment, deployment and release are prohibited.",
   "acceptance_criteria": [
@@ -49,5 +49,5 @@
     "status": "not_required",
     "reason": "Repository invoice-evidence code and non-production test schema only. No tax filing, payment authorization, production database action, deployment or release is authorized."
   },
-  "attempts": 0
+  "attempts": 1
 }

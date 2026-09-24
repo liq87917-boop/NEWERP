@@ -61,4 +61,11 @@ public partial class ErpDbContext
 
     /// <summary>装柜费用分摊行（批次 → 参与方；含来源费用 / 装柜清单 / 客户快照与生成费用单引用）</summary>
     public DbSet<FinanceExpenseAllocationLine> FinanceExpenseAllocationLines => Set<FinanceExpenseAllocationLine>();
+
+    // ============ 供应商采购发票登记（ERP-043） ============
+    /// <summary>供应商采购发票（普票 / 专票证据台账；有效身份唯一性由过滤唯一索引兜底）</summary>
+    public DbSet<PurchaseInvoice> PurchaseInvoices => Set<PurchaseInvoice>();
+
+    /// <summary>供应商采购发票 → 采购订单 关联（分摊）行（含订单快照与关联金额）</summary>
+    public DbSet<PurchaseInvoiceAllocation> PurchaseInvoiceAllocations => Set<PurchaseInvoiceAllocation>();
 }

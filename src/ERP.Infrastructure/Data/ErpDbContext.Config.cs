@@ -311,6 +311,77 @@ public partial class ErpDbContext
             .HasDatabaseName("IX_FinanceExpenses_AllocationBatchNo")
             .HasFilter("IsDeleted = 0 AND AllocationBatchNo <> N''");
 
+        // ============ ERP-043：供应商采购发票登记（普票 / 专票证据 + 可选采购订单关联） ============
+        // 设计口径：
+        //   1. 本模块只是**运营证据台账**：不建应付账款 / 账龄 / 税务申报表，不生成凭证、收付款或结算单，
+        //      也不改写采购订单状态 / 到货进度 / 库存成本 / 退税 / 供应商余额与付款状态；
+        //   2. 有效身份唯一：同一「供应商 + 发票类型 + 规范化代码 / 号码」在**未作废**（Status <> 2）记录内唯一
+        //      （UX_PurchaseInvoices_ActiveIdentity，过滤 IsDeleted = 0 AND Status <> 2）：作废记录保留可读但不占用身份；
+        //   3. 关联行保存的服务端快照（单号 / 日期 / 币种 / 供应商）与关联金额；**刻意不建**到采购订单 / 供应商的外键，
+        //      订单软删除、取消或供应商停用都不影响历史证据可读；
+        //   4. 金额 DECIMAL(18,2)（币种精度最多 2 位，JPY 等 0 位由服务端按币种口径取整），
+        //      与 SchemaUpgrader 第 31 段的建表类型一致；
+        //   5. 索引与 SchemaUpgrader 第 31 段同名同过滤条件，供供应商 / 状态 / 开票日期与订单侧有界检索。
+        modelBuilder.Entity<PurchaseInvoice>().Property(x => x.InvoiceType).HasMaxLength(20);
+        modelBuilder.Entity<PurchaseInvoice>().Property(x => x.InvoiceCode).HasMaxLength(50);
+        modelBuilder.Entity<PurchaseInvoice>().Property(x => x.InvoiceNumber).HasMaxLength(50);
+        modelBuilder.Entity<PurchaseInvoice>().Property(x => x.NormalizedInvoiceCode).HasMaxLength(50);
+        modelBuilder.Entity<PurchaseInvoice>().Property(x => x.NormalizedInvoiceNumber).HasMaxLength(50);
+        modelBuilder.Entity<PurchaseInvoice>().Property(x => x.SupplierCode).HasMaxLength(50);
+        modelBuilder.Entity<PurchaseInvoice>().Property(x => x.SupplierName).HasMaxLength(200);
+        modelBuilder.Entity<PurchaseInvoice>().Property(x => x.Currency).HasMaxLength(20);
+        modelBuilder.Entity<PurchaseInvoice>().Property(x => x.NetAmount).HasPrecision(18, 2);
+        modelBuilder.Entity<PurchaseInvoice>().Property(x => x.TaxAmount).HasPrecision(18, 2);
+        modelBuilder.Entity<PurchaseInvoice>().Property(x => x.GrossAmount).HasPrecision(18, 2);
+        modelBuilder.Entity<PurchaseInvoice>().Property(x => x.VoidReason).HasMaxLength(500);
+        modelBuilder.Entity<PurchaseInvoice>().Property(x => x.Remark).HasMaxLength(500);
+
+        modelBuilder.Entity<PurchaseInvoice>()
+            .HasIndex(x => new
+            {
+                x.SupplierId,
+                x.InvoiceType,
+                x.NormalizedInvoiceCode,
+                x.NormalizedInvoiceNumber
+            })
+            .IsUnique().HasDatabaseName("UX_PurchaseInvoices_ActiveIdentity")
+            .HasFilter("IsDeleted = 0 AND Status <> 2");
+
+        modelBuilder.Entity<PurchaseInvoice>().HasIndex(x => x.SupplierId)
+            .HasDatabaseName("IX_PurchaseInvoices_SupplierId")
+            .HasFilter("IsDeleted = 0");
+
+        modelBuilder.Entity<PurchaseInvoice>().HasIndex(x => new { x.Status, x.InvoiceDate })
+            .HasDatabaseName("IX_PurchaseInvoices_Status_InvoiceDate")
+            .HasFilter("IsDeleted = 0");
+
+        modelBuilder.Entity<PurchaseInvoice>().HasIndex(x => x.NormalizedInvoiceNumber)
+            .HasDatabaseName("IX_PurchaseInvoices_NormalizedInvoiceNumber")
+            .HasFilter("IsDeleted = 0");
+
+        modelBuilder.Entity<PurchaseInvoiceAllocation>().Property(x => x.OrderNo).HasMaxLength(50);
+        modelBuilder.Entity<PurchaseInvoiceAllocation>().Property(x => x.OrderCurrency).HasMaxLength(20);
+        modelBuilder.Entity<PurchaseInvoiceAllocation>().Property(x => x.SupplierCode).HasMaxLength(50);
+        modelBuilder.Entity<PurchaseInvoiceAllocation>().Property(x => x.SupplierName).HasMaxLength(200);
+        modelBuilder.Entity<PurchaseInvoiceAllocation>().Property(x => x.AllocatedAmount).HasPrecision(18, 2);
+        modelBuilder.Entity<PurchaseInvoiceAllocation>().Property(x => x.Currency).HasMaxLength(20);
+        modelBuilder.Entity<PurchaseInvoiceAllocation>().Property(x => x.Remark).HasMaxLength(500);
+
+        // 同一张发票内同一张采购订单只能关联一次（重复提交由服务端先行拒绝，索引为并发兜底）
+        modelBuilder.Entity<PurchaseInvoiceAllocation>()
+            .HasIndex(x => new { x.PurchaseInvoiceId, x.PurchaseOrderId })
+            .IsUnique().HasDatabaseName("UX_PurchaseInvoiceAllocations_InvoiceOrder")
+            .HasFilter("IsDeleted = 0");
+
+        // 订单侧有界检索（不加 IsDeleted 过滤：已软删除的关联行也要能被订单侧一次读全）
+        modelBuilder.Entity<PurchaseInvoiceAllocation>().HasIndex(x => x.PurchaseOrderId)
+            .HasDatabaseName("IX_PurchaseInvoiceAllocations_PurchaseOrderId");
+
+        // 关联行 → 发票（明细级联）：发票只做软删除，物理删除时才清理关联行
+        modelBuilder.Entity<PurchaseInvoiceAllocation>()
+            .HasOne(x => x.Invoice).WithMany(i => i.Allocations)
+            .HasForeignKey(x => x.PurchaseInvoiceId).OnDelete(DeleteBehavior.Cascade);
+
         // ============ 明细外键级联删除 ============
         modelBuilder.Entity<InquiryDetail>()
             .HasOne<Inquiry>().WithMany(i => i.Details)

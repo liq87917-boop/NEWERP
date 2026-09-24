@@ -115,25 +115,18 @@ public static class ContainerExpenseAllocationRules
 
     // ==================== 1. 币种精度与取整 ====================
 
-    /// <summary>币种规范化（去空白并大写；空值按 CNY 处理）</summary>
-    public static string NormalizeCurrency(string? currency)
-    {
-        var value = (currency ?? string.Empty).Trim().ToUpperInvariant();
-        return value.Length == 0 ? "CNY" : value;
-    }
+    /// <summary>币种规范化（去空白并大写；空值按 CNY 处理）—— 实现复用 <see cref="CurrencyAmountRules"/>，全局唯一口径</summary>
+    public static string NormalizeCurrency(string? currency) => CurrencyAmountRules.NormalizeCurrency(currency);
 
     /// <summary>
     /// 币种金额小数位：JPY / KRW / VND / IDR 等无小数币种为 0 位，其余（含未知币种）按 2 位处理。
+    /// 实现复用 <see cref="CurrencyAmountRules"/>，与供应商采购发票登记（ERP-043）共用同一套口径。
     /// </summary>
-    public static int PrecisionOf(string? currency) => NormalizeCurrency(currency) switch
-    {
-        "JPY" or "KRW" or "VND" or "IDR" => 0,
-        _ => 2
-    };
+    public static int PrecisionOf(string? currency) => CurrencyAmountRules.PrecisionOf(currency);
 
-    /// <summary>按币种精度四舍五入（0.5 进位，确定性；不使用银行家舍入）</summary>
+    /// <summary>按币种精度四舍五入（0.5 进位，确定性；不使用银行家舍入）—— 实现复用 <see cref="CurrencyAmountRules"/></summary>
     public static decimal RoundAmount(decimal amount, string? currency)
-        => Math.Round(amount, PrecisionOf(currency), MidpointRounding.AwayFromZero);
+        => CurrencyAmountRules.RoundAmount(amount, currency);
 
     /// <summary>比例取整：固定 4 位小数，0.5 进位</summary>
     public static decimal RoundRatio(decimal ratio) => Math.Round(ratio, RatioDecimals, MidpointRounding.AwayFromZero);

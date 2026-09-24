@@ -1651,5 +1651,119 @@ IF NOT EXISTS (SELECT 1 FROM sys.foreign_keys
         ADD CONSTRAINT FK_FinanceExpenseAllocationLines_Expense
         FOREIGN KEY (ExpenseId) REFERENCES db_owner.FinanceExpenses(Id);");
 
+        // 31. 供应商采购发票登记（ERP-043：普票 / 专票证据台账 + 可选的采购订单关联）
+        //     31.1 只建「发票 + 关联行」两张表与其索引 / 外键：**不含任何 UPDATE / 回填语句**，
+        //          既有供应商与采购订单不因本段产生任何变化（没有发票数据时行为与历史完全一致）；
+        //     31.2 有效身份唯一：UX_PurchaseInvoices_ActiveIdentity（供应商 + 发票类型 + 规范化代码 / 号码），
+        //          过滤 IsDeleted = 0 AND Status <> 2 —— 已作废记录保留可读但不占用身份（可重新登记）；
+        //     31.3 同一发票内同一采购订单不重复：UX_PurchaseInvoiceAllocations_InvoiceOrder（过滤 IsDeleted = 0）；
+        //     31.4 唯一外键是「关联行 → 发票」（级联，发票仍只做软删除）；关联行**刻意不建**到采购订单 / 供应商的
+        //          外键，也不在采购订单上加任何列 —— 订单软删除 / 取消、供应商停用或改名都不影响历史证据可读；
+        //     31.5 本段只建本模块两张表与其索引，不改写采购订单、库存与库存成本、退税、付款与供应商数据。
+        await db.Database.ExecuteSqlRawAsync(@"
+IF OBJECT_ID('db_owner.PurchaseInvoices') IS NULL
+BEGIN
+    CREATE TABLE db_owner.PurchaseInvoices (
+        Id BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+        InvoiceType NVARCHAR(20) NOT NULL DEFAULT N'普票',
+        InvoiceCode NVARCHAR(50) NOT NULL DEFAULT N'',
+        InvoiceNumber NVARCHAR(50) NOT NULL DEFAULT N'',
+        NormalizedInvoiceCode NVARCHAR(50) NOT NULL DEFAULT N'',
+        NormalizedInvoiceNumber NVARCHAR(50) NOT NULL DEFAULT N'',
+        InvoiceDate DATETIME2 NOT NULL,
+        SupplierId BIGINT NOT NULL,
+        SupplierCode NVARCHAR(50) NOT NULL DEFAULT N'',
+        SupplierName NVARCHAR(200) NOT NULL DEFAULT N'',
+        Currency NVARCHAR(20) NOT NULL DEFAULT N'CNY',
+        NetAmount DECIMAL(18,2) NOT NULL DEFAULT 0,
+        TaxAmount DECIMAL(18,2) NOT NULL DEFAULT 0,
+        GrossAmount DECIMAL(18,2) NOT NULL DEFAULT 0,
+        Status INT NOT NULL DEFAULT 0,
+        RecordedAt DATETIME2 NULL,
+        VoidedAt DATETIME2 NULL,
+        VoidReason NVARCHAR(500) NOT NULL DEFAULT N'',
+        Remark NVARCHAR(500) NOT NULL DEFAULT N'',
+        CreatedAt DATETIME2 NOT NULL DEFAULT GETDATE(),
+        CreatedBy BIGINT NULL,
+        UpdatedAt DATETIME2 NULL,
+        UpdatedBy BIGINT NULL,
+        IsDeleted BIT NOT NULL DEFAULT 0,
+        RowVersion ROWVERSION NOT NULL
+    );
+END
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes
+               WHERE name = 'UX_PurchaseInvoices_ActiveIdentity'
+                 AND object_id = OBJECT_ID('db_owner.PurchaseInvoices'))
+    CREATE UNIQUE INDEX UX_PurchaseInvoices_ActiveIdentity
+        ON db_owner.PurchaseInvoices(SupplierId, InvoiceType, NormalizedInvoiceCode, NormalizedInvoiceNumber)
+        WHERE IsDeleted = 0 AND Status <> 2;
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes
+               WHERE name = 'IX_PurchaseInvoices_SupplierId'
+                 AND object_id = OBJECT_ID('db_owner.PurchaseInvoices'))
+    CREATE INDEX IX_PurchaseInvoices_SupplierId
+        ON db_owner.PurchaseInvoices(SupplierId)
+        WHERE IsDeleted = 0;
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes
+               WHERE name = 'IX_PurchaseInvoices_Status_InvoiceDate'
+                 AND object_id = OBJECT_ID('db_owner.PurchaseInvoices'))
+    CREATE INDEX IX_PurchaseInvoices_Status_InvoiceDate
+        ON db_owner.PurchaseInvoices(Status, InvoiceDate)
+        WHERE IsDeleted = 0;
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes
+               WHERE name = 'IX_PurchaseInvoices_NormalizedInvoiceNumber'
+                 AND object_id = OBJECT_ID('db_owner.PurchaseInvoices'))
+    CREATE INDEX IX_PurchaseInvoices_NormalizedInvoiceNumber
+        ON db_owner.PurchaseInvoices(NormalizedInvoiceNumber)
+        WHERE IsDeleted = 0;
+
+IF OBJECT_ID('db_owner.PurchaseInvoiceAllocations') IS NULL
+BEGIN
+    CREATE TABLE db_owner.PurchaseInvoiceAllocations (
+        Id BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+        PurchaseInvoiceId BIGINT NOT NULL,
+        PurchaseOrderId BIGINT NOT NULL,
+        OrderNo NVARCHAR(50) NOT NULL DEFAULT N'',
+        OrderDate DATETIME2 NOT NULL,
+        OrderCurrency NVARCHAR(20) NOT NULL DEFAULT N'CNY',
+        SupplierId BIGINT NOT NULL,
+        SupplierCode NVARCHAR(50) NOT NULL DEFAULT N'',
+        SupplierName NVARCHAR(200) NOT NULL DEFAULT N'',
+        AllocatedAmount DECIMAL(18,2) NOT NULL DEFAULT 0,
+        Currency NVARCHAR(20) NOT NULL DEFAULT N'CNY',
+        SortOrder INT NOT NULL DEFAULT 0,
+        Remark NVARCHAR(500) NOT NULL DEFAULT N'',
+        CreatedAt DATETIME2 NOT NULL DEFAULT GETDATE(),
+        CreatedBy BIGINT NULL,
+        UpdatedAt DATETIME2 NULL,
+        UpdatedBy BIGINT NULL,
+        IsDeleted BIT NOT NULL DEFAULT 0,
+        RowVersion ROWVERSION NOT NULL
+    );
+END
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes
+               WHERE name = 'UX_PurchaseInvoiceAllocations_InvoiceOrder'
+                 AND object_id = OBJECT_ID('db_owner.PurchaseInvoiceAllocations'))
+    CREATE UNIQUE INDEX UX_PurchaseInvoiceAllocations_InvoiceOrder
+        ON db_owner.PurchaseInvoiceAllocations(PurchaseInvoiceId, PurchaseOrderId)
+        WHERE IsDeleted = 0;
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes
+               WHERE name = 'IX_PurchaseInvoiceAllocations_PurchaseOrderId'
+                 AND object_id = OBJECT_ID('db_owner.PurchaseInvoiceAllocations'))
+    CREATE INDEX IX_PurchaseInvoiceAllocations_PurchaseOrderId
+        ON db_owner.PurchaseInvoiceAllocations(PurchaseOrderId);
+
+IF NOT EXISTS (SELECT 1 FROM sys.foreign_keys
+               WHERE name = 'FK_PurchaseInvoiceAllocations_Invoice'
+                 AND parent_object_id = OBJECT_ID('db_owner.PurchaseInvoiceAllocations'))
+    ALTER TABLE db_owner.PurchaseInvoiceAllocations
+        ADD CONSTRAINT FK_PurchaseInvoiceAllocations_Invoice
+        FOREIGN KEY (PurchaseInvoiceId) REFERENCES db_owner.PurchaseInvoices(Id);");
+
     }
 }

@@ -198,11 +198,15 @@ Object.assign(MODULES, {
     /* ERP-031：供应商采购敞口报表入口（工具栏，始终可见；只读派生，不落库，不作为应付账款台账） */
     extraActions: [
       { label: '🏭 供应商采购敞口', onclick: 'openSupplierPurchaseExposureReport', title: '按供应商 + 币种查看采购订单金额、链接可用的已结算 / 未结算金额与未链接敞口（复用执行进度 / 财务核对的权威引用口径，未知显示「未知」）' },
+      /* ERP-043：供应商采购发票登记入口（工具栏，始终可见；运营证据台账，不是应付账款台账 / 税务申报 / 付款授权） */
+      { label: '🧾 供应商发票', title: '登记普通发票 / 增值税专用发票证据，并把含税总额全部或部分关联到既有采购订单（仅同供应商 + 同币种可关联；不作应付账款台账、不作付款授权）', onclick: 'openPurchaseInvoiceRegister()' },
     ],
     rowActions: [
       { label: '执行进度', icon: '📦', title: '查看由入库单派生的已订 / 已收 / 未收数量，以及既有引用可用时的已结算 / 未结算金额', onclick: 'showPurchaseOrderProgress' },
       { label: '执行时间线', icon: '🕘', title: '查看由订单、供应商确认交期与入库记录派生的执行时间线', onclick: 'showOrderTimeline' },
       { label: '财务核对', icon: '💰', title: '按既有引用字段核对本单与付款单、费用单、收款单与结算单（只读，金额未知不推断）', onclick: 'showOrderFinanceReconciliation' },
+      /* ERP-043：以本采购订单的供应商 / 币种打开供应商发票登记册（只关联同供应商同币种订单） */
+      { label: '供应商发票', icon: '🧾', title: '打开供应商采购发票登记册，并以本单的供应商与币种预筛选与预填（发票只关联同供应商 + 同币种的采购订单）', onclick: 'openPurchaseInvoiceRegister' },
       { label: '打印预览', icon: '🖨', title: '按打印模板预览该采购订单（含归属客户 / 执行进度等）', onclick: 'previewSalesDocPrint' },
     ],
     detailKey: 'details',

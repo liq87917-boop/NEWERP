@@ -58,6 +58,16 @@ public interface IErpDbContext
     /// <summary>装柜费用分摊行（ERP-042；批次 → 参与方 的逐行留痕与生成费用单引用）</summary>
     DbSet<FinanceExpenseAllocationLine> FinanceExpenseAllocationLines { get; }
 
+    // ============ 供应商采购发票登记（ERP-043：运营证据台账 + 可选采购订单关联） ============
+
+    /// <summary>
+    /// 供应商采购发票（ERP-043：普票 / 专票证据台账；不是应付账款台账、不是税务申报系统、不是付款授权机制）
+    /// </summary>
+    DbSet<PurchaseInvoice> PurchaseInvoices { get; }
+
+    /// <summary>供应商采购发票 → 采购订单 关联（分摊）行（ERP-043；只保存订单快照与关联金额，不建到订单的外键）</summary>
+    DbSet<PurchaseInvoiceAllocation> PurchaseInvoiceAllocations { get; }
+
     // ============ 询价管理 ============
     DbSet<Inquiry> Inquiries { get; }
     DbSet<InquiryDetail> InquiryDetails { get; }
