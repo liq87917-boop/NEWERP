@@ -1,7 +1,7 @@
 {
   "id": "ERP-029",
   "title": "Add inventory movement and stagnant-stock report",
-  "status": "completed",
+  "status": "failed",
   "risk_level": "medium",
   "description": "Add a read-only inventory movement and stagnant-stock report derived from the existing StockMovement ledger and current stock records. Use explicit base-unit and reversal semantics, keep unavailable history visible as unknown, and do not add production schema, estimate inventory cost, or mutate inventory data.",
   "acceptance_criteria": [
@@ -46,6 +46,6 @@
     "status": "not_required",
     "reason": "Read-only reporting over existing stock and movement records; no schema, production data mutation, deployment or release."
   },
-  "attempts": 1,
+  "attempts": 3,
   "created_at": "2026-09-24T13:11:00Z"
 }

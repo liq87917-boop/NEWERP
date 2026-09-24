@@ -3,7 +3,7 @@
   "controller": "gpt_conversation",
   "phase": "ready",
   "current_task": null,
-  "last_completed_task": "ERP-029",
+  "last_completed_task": "ERP-028",
   "last_reviewed_task": "ERP-005",
   "blocker": null,
   "external_actions": [
@@ -30,7 +30,7 @@
     "cline_success_is_only": "code_ready"
   },
   "browser_acceptance": {
-    "status": "browser_deferred"
+    "status": "deferred"
   },
   "human_gates": {
     "production_database_changes": "required",
@@ -38,8 +38,8 @@
     "production_deployment_or_release": "required",
     "irreversible_data_operations": "required"
   },
-  "finish_reason": "browser_deferred",
-  "updated_at": "2026-09-24T14:18:03.946329Z",
+  "finish_reason": "task_quarantined",
+  "updated_at": "2026-09-24T14:27:11.920425Z",
   "rolling_queue": {
     "enabled": true,
     "batch_size": 4,
@@ -53,5 +53,6 @@
       "ERP-031",
       "ERP-032"
     ]
-  }
+  },
+  "last_failed_task": "ERP-029"
 }
