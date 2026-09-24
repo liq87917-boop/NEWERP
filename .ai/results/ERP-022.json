@@ -1,0 +1,15 @@
+{
+  "task": "ERP-022",
+  "status": "completed",
+  "execution_outcome": "completed",
+  "normalized_finish_reason": "browser_deferred",
+  "cline_exit_code": 0,
+  "cline_finish_reason_raw": "direct_execution",
+  "attempts": 1,
+  "browser_acceptance": {
+    "status": "deferred",
+    "reason": "Real-browser/UI acceptance is deferred until FINAL-UI-ACCEPTANCE.",
+    "deferred_at": "2026-09-24T11:57:15.556348Z"
+  },
+  "finished_at": "2026-09-24T11:57:15.556348Z"
+}

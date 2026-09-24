@@ -1,7 +1,7 @@
 {
   "id": "ERP-022",
   "title": "Add Sales and Purchase Order execution timeline",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "medium",
   "description": "Implement a read-oriented execution timeline for Sales Orders and Purchase Orders from existing document/status/stock/logistics data. Prefer derived events and existing persisted records; do not introduce production schema changes in this task.",
   "acceptance_criteria": [
@@ -45,6 +45,6 @@
     "status": "not_required",
     "reason": "Read-oriented feature derived from existing persisted data; no production schema/deployment action."
   },
-  "attempts": 0,
+  "attempts": 1,
   "created_at": "2026-09-23T13:04:02Z"
 }

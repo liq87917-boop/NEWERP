@@ -53,6 +53,12 @@ public class PurchaseOrderController : DocumentControllerBase<PurchaseOrder>
         return Ok(ApiResponse<PurchaseOrder>.Success(entity));
     }
 
+    /// <summary>从现有订单、供应商确认交期和采购入库记录派生只读执行时间线。</summary>
+    [HttpGet("{id:long}/timeline")]
+    public async Task<IActionResult> Timeline(long id)
+        => Ok(ApiResponse<List<OrderTimelineEvent>>.Success(
+            await OrderExecutionTimeline.ForPurchaseOrderAsync(Db, id)));
+
     /// <summary>创建</summary>
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] PurchaseOrder entity)

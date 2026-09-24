@@ -52,6 +52,12 @@ public class SalesOrderController : DocumentControllerBase<SalesOrder>
         return Ok(ApiResponse<SalesOrder>.Success(entity));
     }
 
+    /// <summary>从现有订单、销售出库、出口单证和客诉记录派生只读执行时间线。</summary>
+    [HttpGet("{id:long}/timeline")]
+    public async Task<IActionResult> Timeline(long id)
+        => Ok(ApiResponse<List<OrderTimelineEvent>>.Success(
+            await OrderExecutionTimeline.ForSalesOrderAsync(Db, id)));
+
     /// <summary>创建</summary>
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] SalesOrder entity)
