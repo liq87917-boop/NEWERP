@@ -47,7 +47,7 @@
 | 17 | 代理费 / 佣金结算单 | missing | 现有 `sales-commission` 是**业务员提成表**（`ReportService.Extra3.cs`：系统参数 `SalesCommissionRate` × 订单毛利），与「按柜/客户收代理费、明佣暗佣」不是同一功能 | 代理模式主要收入单据缺失 | medium-high |
 | 18 | 出口退税台账 + 退税汇总 | verified-complete | `BaseTaxRefund`/`TaxRefundController`、菜单 `tax-refund`(`init7.sql`) 与 `tax-refund-summary`(`init12.sql`)、`reports.js:59-70` | 与供应商开票/发票管理无联动 | low-medium |
 | 19 | 发票管理（专票/普票/出口发票） | missing | 无实体、无端点、无菜单 | 缺失 | medium |
-| 20 | 附件中心 | missing | 仅商品 3 张图 + 单证 `FileNote` 文本（`TradeDocument.cs:71-73`） | 合同/PO/验货报告/单证扫描件无统一挂靠 | low-medium |
+| 20 | 附件中心 | partial（**ERP-061 已交付销售订单 / 采购订单的附件内容证据**：唯一内容接缝 `IAttachmentContentStore` + 隔离的非生产本地存储；单证扫描件由 ERP-062 在同一模型上接入；浏览器验收待 FINAL-UI-ACCEPTANCE） | `AttachmentEvidence`（表 `AttachmentEvidences`，SchemaUpgrader 第 40 段幂等建表）、`AttachmentEvidenceRules`/`AttachmentEvidenceService`、`AttachmentEvidenceController`（`/api/attachment-evidences`：上传 / 台账 / 详情 / 附件方式下载 / 作废）、`IAttachmentContentStore` + `IsolatedLocalAttachmentContentStore` + `AttachmentContentStoreFactory`、`js/attachment-evidences.js` + `modules-doc.js` 行操作、`docs/业务单据附件证据说明.md`、`src/ERP.UnitTests/AttachmentEvidenceTests.cs`（84 例） | ERP-045 仅元数据引用册仍在（职责互补：引用元数据 vs 内容证据）；生产 OSS 的凭据 / 桶配置 / 迁移与激活未实现、未注册、未激活（生产 OSS Human Gate）；`TradeDocuments.FileNote` 与 `BaseProducts.Image1~3` 保持原样、不导入不作为附件 | low-medium |
 | 21 | 审批流（金额阈值/多级） | missing | 现状为 `DocumentControllerBase` 单级审核状态机（草稿→已审核/销审） | 缺失，风控不足 | medium |
 | 22 | 数据范围权限（业务员仅见自己客户） | missing | `src` 内无 `DataScope` 实现；权限仅「角色-菜单」(`SysRoleMenu`) | 缺失 | medium |
 | 23 | 业务模式开关 `BizMode` | partial / decision-required | 参数已种子化（`init6.sql:130-132`，默认 `Hybrid`），但 `src` 无任何消费方；用户已确认「两种模式都有、用角色权限区分」（`docs/部署交付文档.md:632`） | 菜单可见性与按模式必填规则未实现；按用户答复建议**不做**按模式隐藏菜单，参数保留为预留 | low |

@@ -106,4 +106,8 @@ public partial class ErpDbContext
     /// <summary>装柜出运里程碑证据（ERP-058：挂 ERP-057 出运引用之下的只追加事件留痕；只提供显式作废）</summary>
     public DbSet<ContainerShipmentMilestone> ContainerShipmentMilestones
         => Set<ContainerShipmentMilestone>();
+
+    // ============ 业务单据附件内容证据（ERP-061：唯一附件内容册；内容经 IAttachmentContentStore 接缝托管） ============
+    /// <summary>附件内容证据（用户上传的 PDF / PNG / JPEG 证据；服务端权威元数据 + 不透明存储键；刻意不建外键）</summary>
+    public DbSet<AttachmentEvidence> AttachmentEvidences => Set<AttachmentEvidence>();
 }

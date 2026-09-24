@@ -176,6 +176,9 @@ Object.assign(MODULES, {
       { label: '预填单证', icon: '📝', title: '按该销售订单带入单证草稿到单证中心新增表单（不落库，可编辑后再保存）', onclick: 'prefillTradeDocFromSource', statuses: ['Pending', 'Submitted', 'Approved'] },
       /* ERP-045：登记 / 查看本销售订单的附件引用（仅元数据；不上传 / 下载 / 预览 / 抓取任何文件，作废保留历史） */
       { label: '附件引用', icon: '📎', title: '登记或查看本销售订单的附件引用元数据（分类 / 显示名 / 不透明引用标识 / 大小 / 校验和；不上传、不下载、不预览、不抓取文件，作废保留历史且不改写本单）', onclick: 'openDocumentAttachmentReferencesForCurrentModule' },
+      /* ERP-061：本销售订单的附件内容证据（上传 PDF / PNG / JPEG 证据文件；摘要与长度由服务端生成，
+         下载以附件方式返回，作废必填原因并保留原始元数据与历史；不是报关 / 报税 / 银行 / 承运人确认） */
+      { label: '附件证据', icon: '📎', title: '上传或查看本销售订单的附件内容证据（PDF / PNG / JPEG，服务端按文件签名复核；下载以附件方式返回，作废必填原因并保留原始文件名 / 摘要 / 历史，不改写本单）', onclick: 'openAttachmentEvidencesForCurrentModule' },
       /* ERP-047：本单的变更申请登记册（只登记拟议变更与来源快照对照；不审核、不套用、不改写本单） */
       { label: '变更申请', icon: '📝', title: '登记或查看本销售订单的变更申请（来源快照 + 拟议值对照；提交只是登记冻结，系统不批准、不套用，也不改写本单与出库 / 装柜 / 收款 / 库存 / 财务记录）', onclick: 'openSalesOrderChangeRequestsForCurrentModule' },
       /* ERP-053：以本销售订单预筛选收款引用登记册（只显示指向本单的引用行；引用只指向同客户 + 同币种订单） */
@@ -262,6 +265,9 @@ Object.assign(MODULES, {
       { label: '付款引用', icon: '💳', title: '打开供应商付款引用登记册，并只显示指向本采购订单的引用行（登记「付款单指向哪些采购订单」的引用证据；只写引用证据，不会执行付款、不会结算或核销）', onclick: 'openSupplierPaymentAllocationRegister' },
       /* ERP-045：登记 / 查看本采购订单的附件引用（仅元数据；不上传 / 下载 / 预览 / 抓取任何文件，作废保留历史） */
       { label: '附件引用', icon: '📎', title: '登记或查看本采购订单的附件引用元数据（分类 / 显示名 / 不透明引用标识 / 大小 / 校验和；不上传、不下载、不预览、不抓取文件，作废保留历史且不改写本单）', onclick: 'openDocumentAttachmentReferencesForCurrentModule' },
+      /* ERP-061：本采购订单的附件内容证据（上传 PDF / PNG / JPEG 证据文件；摘要与长度由服务端生成，
+         下载以附件方式返回，作废必填原因并保留原始元数据与历史；不是报关 / 报税 / 银行 / 供应商确认） */
+      { label: '附件证据', icon: '📎', title: '上传或查看本采购订单的附件内容证据（PDF / PNG / JPEG，服务端按文件签名复核；下载以附件方式返回，作废必填原因并保留原始文件名 / 摘要 / 历史，不改写本单）', onclick: 'openAttachmentEvidencesForCurrentModule' },
       { label: '打印预览', icon: '🖨', title: '按打印模板预览该采购订单（含归属客户 / 执行进度等）', onclick: 'previewSalesDocPrint' },
     ],
     detailKey: 'details',

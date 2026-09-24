@@ -294,6 +294,10 @@
        销售订单，合计不得超过含税总额，更正走显式作废；不开票、不报税、不记账，也不改写销售订单 / 客户 /
        收款单 / 库存 / 单证，与单证中心商业发票刻意分离，只接受显式有界交叉引用） -->
   <script src="/js/customer-sales-invoices.js"></script>
+  <!-- ERP-061：业务单据附件内容证据（用户上传的 PDF / PNG / JPEG 证据 + 服务端权威元数据；内容经唯一的
+       IAttachmentContentStore 接缝托管，开发 / 测试只启用隔离的非生产本地存储，生产 OSS 未激活；
+       上传内容按不可信文件处理、以附件方式流式下载，作废必填原因并保留原始元数据与登记历史） -->
+  <script src="/js/attachment-evidences.js"></script>
   <script src="/js/app.js"></script>
 </body>
 </html>

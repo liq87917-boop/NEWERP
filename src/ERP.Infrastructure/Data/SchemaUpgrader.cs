@@ -2508,5 +2508,69 @@ IF NOT EXISTS (SELECT 1 FROM sys.indexes
         WHERE IsDeleted = 0;
 ");
 
+        // 40. 业务单据附件内容证据（ERP-061：在既有 OSS 客户端与 ERP-045 元数据引用册之外，建立唯一的附件内容册）
+        //     40.1 审计结论：本仓库没有二进制附件子系统（既有文件存储代码只有 OssStorageService，
+        //          仅被商品图片上传使用；ERP-045 只登记引用元数据）。本段只建**附件内容证据表**，
+        //          并按显式归属（单据类型 + Id）关联，**不**在销售订单 / 采购订单表上加列或建外键；
+        //     40.2 **刻意不建唯一索引**：同一摘要的重复上传不做内容寻址去重，两次上传是两条独立证据，
+        //          绝不静默合并、覆盖或替换（Sha256 上的普通索引只用于人工核对重复上传）；
+        //     40.3 只保存服务端权威元数据与**服务端生成**的不透明存储键（内容本体不在数据库）；
+        //          本段不写入任何默认业务值、不回填历史单据，也不迁移任何既有字段；
+        //     40.4 本段只建本模块一张表与其索引，不含任何 UPDATE / INSERT / DELETE 语句，也不改写
+        //          订单、库存、出库、装柜、单证、发票、费用与结算等任何既有表；
+        //     40.5 生产库执行仍由 Human Gate 控制：本段只在应用启动时以 IF OBJECT_ID(...) IS NULL 幂等补齐，
+        //          自动化验证只作用于本机非生产测试库。
+        await db.Database.ExecuteSqlRawAsync(@"
+IF OBJECT_ID('db_owner.AttachmentEvidences') IS NULL
+BEGIN
+    CREATE TABLE db_owner.AttachmentEvidences (
+        Id BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+        OwnerType NVARCHAR(30) NOT NULL DEFAULT N'',
+        OwnerId BIGINT NOT NULL,
+        OwnerNo NVARCHAR(50) NOT NULL DEFAULT N'',
+        OwnerTypeText NVARCHAR(30) NOT NULL DEFAULT N'',
+        OriginalFileName NVARCHAR(255) NOT NULL DEFAULT N'',
+        MediaType NVARCHAR(120) NOT NULL DEFAULT N'',
+        SizeBytes BIGINT NOT NULL DEFAULT 0,
+        Sha256 NVARCHAR(64) NOT NULL DEFAULT N'',
+        Description NVARCHAR(500) NOT NULL DEFAULT N'',
+        StorageKey NVARCHAR(200) NOT NULL DEFAULT N'',
+        StorageProvider NVARCHAR(30) NOT NULL DEFAULT N'',
+        UploadedBy NVARCHAR(100) NOT NULL DEFAULT N'',
+        RecordedAt DATETIME2 NOT NULL DEFAULT GETDATE(),
+        Status INT NOT NULL DEFAULT 0,
+        VoidedAt DATETIME2 NULL,
+        VoidReason NVARCHAR(500) NOT NULL DEFAULT N'',
+        CreatedAt DATETIME2 NOT NULL DEFAULT GETDATE(),
+        CreatedBy BIGINT NULL,
+        UpdatedAt DATETIME2 NULL,
+        UpdatedBy BIGINT NULL,
+        IsDeleted BIT NOT NULL DEFAULT 0,
+        RowVersion ROWVERSION NOT NULL
+    );
+END
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes
+               WHERE name = 'IX_AttachmentEvidences_Owner_Status_RecordedAt'
+                 AND object_id = OBJECT_ID('db_owner.AttachmentEvidences'))
+    CREATE INDEX IX_AttachmentEvidences_Owner_Status_RecordedAt
+        ON db_owner.AttachmentEvidences(OwnerType, OwnerId, Status, RecordedAt)
+        WHERE IsDeleted = 0;
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes
+               WHERE name = 'IX_AttachmentEvidences_Sha256'
+                 AND object_id = OBJECT_ID('db_owner.AttachmentEvidences'))
+    CREATE INDEX IX_AttachmentEvidences_Sha256
+        ON db_owner.AttachmentEvidences(Sha256)
+        WHERE IsDeleted = 0;
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes
+               WHERE name = 'IX_AttachmentEvidences_Status_RecordedAt'
+                 AND object_id = OBJECT_ID('db_owner.AttachmentEvidences'))
+    CREATE INDEX IX_AttachmentEvidences_Status_RecordedAt
+        ON db_owner.AttachmentEvidences(Status, RecordedAt)
+        WHERE IsDeleted = 0;
+");
+
     }
 }

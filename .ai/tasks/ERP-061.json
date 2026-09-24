@@ -1,7 +1,7 @@
 {
   "id": "ERP-061",
   "title": "Add secure attachment evidence to Sales and Purchase Orders",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "medium",
   "description": "Add one canonical attachment-evidence registry for existing Sales Orders and Purchase Orders, first auditing and reusing any existing approved storage abstraction rather than creating competing file stores. Files are user-supplied untrusted evidence linked through explicit authoritative record identifiers. Do not fetch remote URLs, execute or render uploaded active content, expose server paths, configure or access production OSS, execute production SQL, deploy, or release.",
   "acceptance_criteria": [
@@ -48,5 +48,5 @@
     "status": "not_required",
     "reason": "Repository implementation and isolated non-production attachment validation only. Production OSS configuration or mutation, production database execution, deployment and release remain behind mandatory human gates."
   },
-  "attempts": 0
+  "attempts": 1
 }

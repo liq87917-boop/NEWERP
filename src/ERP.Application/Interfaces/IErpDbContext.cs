@@ -155,6 +155,16 @@ public interface IErpDbContext
     /// </summary>
     DbSet<ContainerShipmentMilestone> ContainerShipmentMilestones { get; }
 
+    // ============ 业务单据附件内容证据（ERP-061：仓库内唯一的附件二进制内容证据册） ============
+
+    /// <summary>
+    /// 附件内容证据（ERP-061）：用户上传的 PDF / PNG / JPEG 证据 + 服务端权威元数据（净化文件名快照 /
+    /// 媒体类型 / 字节长度 / SHA-256 摘要 / 上传人 / 登记时间）+ 服务端生成的不透明存储键；内容经唯一接缝
+    /// <see cref="IAttachmentContentStore"/> 托管（开发 / 测试只启用隔离的非生产本地存储，生产 OSS 未激活），
+    /// 只提供显式作废（必填原因，保留原始元数据与内容），<strong>不</strong>建到归属单据的外键
+    /// </summary>
+    DbSet<AttachmentEvidence> AttachmentEvidences { get; }
+
     // ============ 询价管理 ============
     DbSet<Inquiry> Inquiries { get; }
     DbSet<InquiryDetail> InquiryDetails { get; }

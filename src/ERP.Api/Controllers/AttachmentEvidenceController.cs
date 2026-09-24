@@ -1,0 +1,174 @@
+using ERP.Application.Common;
+using ERP.Application.DTOs;
+using ERP.Application.Interfaces;
+using ERP.Application.Services;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using System.Security.Claims;
+
+namespace ERP.Api.Controllers;
+
+/// <summary>
+/// 业务单据附件内容证据控制器（ERP-061）：把用户提供的 PDF / PNG / JPEG 证据挂到**既有**销售订单 /
+/// 采购订单上，并支持有界台账、详情、安全附件下载与显式作废。
+/// <para>审计口径：本仓库既有的文件存储代码只有 <c>OssStorageService</c>（无接口 / 无下载 / 无删除），
+/// 既有附件能力只有 ERP-045 的「仅元数据引用册」；因此本控制器使用**唯一**内容接缝
+/// <see cref="IAttachmentContentStore"/>：开发 / 测试只启用隔离的非生产本地存储，
+/// 生产 OSS 未实现、未注册、未激活（其凭据 / 桶配置 / 迁移 / 启用属生产 OSS Human Gate）。</para>
+/// <para>边界（控制器层同样遵守）：只读写 <c>AttachmentEvidences</c> 一张表（读取时只读归属单据），
+/// 上传内容一律按**不可信文件**处理：只接受按文件签名判定的 PDF / PNG / JPEG，扩展名 / 声明 Content-Type /
+/// 签名必须一致；下载以「附件」方式流式返回并附带 nosniff / sandbox / no-store 等防御性响应头，
+/// <strong>不</strong>内联渲染、<strong>不</strong>转成标记、<strong>不</strong>暴露存储键或任何路径；
+/// <strong>不</strong>按号码 / 名称猜测归属，也<strong>不</strong>提供硬删除、二进制替换或改派归属；
+/// 生产库结构变更仍由 Human Gate 控制（建表 / 索引由 SchemaUpgrader 幂等补齐）。</para>
+/// <para>授权：全部接口（含内容下载）均要求与销售订单 / 采购订单工作流相同的 JWT 认证与模块授权；
+/// 下载还会在服务端重新校验证据状态与归属单据存在性，不能靠知道 Id 绕过。</para>
+/// </summary>
+[ApiController]
+[Route("api/attachment-evidences")]
+[Authorize]
+public class AttachmentEvidenceController : ControllerBase
+{
+    private readonly IErpDbContext _db;
+    private readonly IAttachmentContentStore _store;
+
+    public AttachmentEvidenceController(IErpDbContext db, IAttachmentContentStore store)
+    {
+        _db = db;
+        _store = store;
+    }
+
+    /// <summary>
+    /// 证据台账（分页，只读）：可按归属单据类型 / 归属单据 Id / 状态 / 摘要 / 关键字过滤；
+    /// 默认包含已作废历史（原始元数据保留可读），归属单据可用性与可下载性都是只读标注。
+    /// </summary>
+    [HttpGet]
+    public async Task<IActionResult> GetPaged(
+        [FromQuery] AttachmentEvidenceQuery query, CancellationToken cancellationToken = default)
+        => Ok(ApiResponse<PagedResult<AttachmentEvidenceDto>>.Success(
+            await AttachmentEvidenceService.ListAsync(_db, query, cancellationToken)));
+
+    /// <summary>
+    /// 模块元数据（只读）：白名单归属类型 / 格式 / 状态、大小与分页上下界、当前内容存储提供程序
+    /// （本阶段固定为隔离的非生产本地存储）与全部口径文案，供界面与接口同源显示。
+    /// </summary>
+    [HttpGet("metadata")]
+    public IActionResult Metadata()
+        => Ok(ApiResponse<AttachmentEvidenceMetadataDto>.Success(AttachmentEvidenceService.GetMetadata(_store)));
+
+    /// <summary>
+    /// 指定归属单据的证据清单（**有界**，单据详情工作流用；默认含已作废历史）：
+    /// 归属单据必须存在且未删除（服务端重新校验，查询参数不能绕过）。
+    /// </summary>
+    [HttpGet("by-owner")]
+    public async Task<IActionResult> GetForOwner(
+        [FromQuery] string? ownerType,
+        [FromQuery] long ownerId,
+        [FromQuery] int? status = null,
+        [FromQuery] int take = AttachmentEvidenceService.MaxPerOwner,
+        CancellationToken cancellationToken = default)
+        => Ok(ApiResponse<List<AttachmentEvidenceDto>>.Success(
+            await AttachmentEvidenceService.ListForOwnerAsync(
+                _db, ownerType, ownerId, status, take, cancellationToken)));
+
+    /// <summary>
+    /// 可挂附件证据的单据候选（只读、**有界**）：只列出未删除的销售订单 / 采购订单，并批量统计已有
+    /// 证据条数（含已作废历史）；仅用于**显式选择**归属，绝不按号码或名称猜测。
+    /// </summary>
+    [HttpGet("owner-options")]
+    public async Task<IActionResult> OwnerOptions(
+        [FromQuery] string? ownerType,
+        [FromQuery] string? keyword,
+        [FromQuery] int take = AttachmentEvidenceService.MaxOwnerOptions,
+        CancellationToken cancellationToken = default)
+        => Ok(ApiResponse<List<AttachmentEvidenceOwnerOptionDto>>.Success(
+            await AttachmentEvidenceService.ListOwnerOptionsAsync(_db, ownerType, keyword, take, cancellationToken)));
+
+    /// <summary>证据详情（含归属单据可用性与可下载性标注；只读）</summary>
+    [HttpGet("{id:long}")]
+    public async Task<IActionResult> GetById(long id, CancellationToken cancellationToken = default)
+        => Ok(ApiResponse<AttachmentEvidenceDto>.Success(
+            await AttachmentEvidenceService.GetAsync(_db, id, cancellationToken)));
+
+    /// <summary>
+    /// 上传附件证据（multipart/form-data）：只接受 PDF / PNG / JPEG，大小有界（20 MiB）；
+    /// 归属单据类型 / Id 必须显式提供且指向存在、未删除的单据；文件名只用于生成净化后的快照，
+    /// 摘要 / 长度 / 媒体类型 / 存储键 / 上传人 / 登记时间全部由服务端权威生成。
+    /// </summary>
+    [HttpPost]
+    [RequestSizeLimit(AttachmentEvidenceRules.MaxRequestBytes)]
+    public async Task<IActionResult> Upload(
+        [FromForm] IFormFile? file,
+        [FromForm] string? ownerType,
+        [FromForm] long ownerId,
+        [FromForm] string? description,
+        CancellationToken cancellationToken = default)
+    {
+        if (file is null)
+            throw BusinessException.InvalidParameter("请选择要上传的附件文件（表单字段名必须为 file）");
+
+        AttachmentEvidenceDto result;
+        await using (var content = file.OpenReadStream())
+        {
+            result = await AttachmentEvidenceService.UploadAsync(
+                _db,
+                _store,
+                new AttachmentEvidenceUploadRequest
+                {
+                    OwnerType = ownerType ?? string.Empty,
+                    OwnerId = ownerId,
+                    FileName = file.FileName ?? string.Empty,
+                    DeclaredContentType = file.ContentType ?? string.Empty,
+                    DeclaredLength = file.Length,
+                    Description = description ?? string.Empty,
+                    Content = content
+                },
+                CurrentUserName(),
+                CurrentUserId(),
+                cancellationToken);
+        }
+
+        return Ok(ApiResponse<AttachmentEvidenceDto>.Success(
+            result,
+            "附件证据已登记（只登记用户提供的仓库证据：未提交给任何第三方，也未改写任何业务单据）"));
+    }
+
+    /// <summary>
+    /// 下载证据内容（**流式**、只读）：每次都重新校验证据状态与归属单据存在性，并复核内容长度与
+    /// SHA-256 摘要；以「附件」方式返回（<c>Content-Disposition: attachment</c>）并附带
+    /// nosniff / sandbox / no-store 等防御性响应头，浏览器不会内联渲染上传内容。
+    /// </summary>
+    [HttpGet("{id:long}/content")]
+    public async Task<IActionResult> DownloadContent(long id, CancellationToken cancellationToken = default)
+    {
+        var content = await AttachmentEvidenceService.OpenContentAsync(_db, _store, id, cancellationToken);
+
+        Response.Headers["X-Content-Type-Options"] = "nosniff";
+        Response.Headers["Content-Security-Policy"] = "default-src 'none'; sandbox";
+        Response.Headers["Cache-Control"] = "no-store, no-cache, must-revalidate";
+        Response.Headers["Pragma"] = "no-cache";
+        Response.Headers["X-Download-Options"] = "noopen";
+        Response.Headers["Referrer-Policy"] = "no-referrer";
+
+        return File(content.Content, content.MediaType, content.FileName, enableRangeProcessing: false);
+    }
+
+    /// <summary>
+    /// 作废证据（必须填写原因）：保留原始文件名快照、摘要、媒体类型、长度、归属与登记历史，
+    /// 内容不再提供下载；不物理删除、不替换二进制、不改派归属；重复作废被拒绝。
+    /// </summary>
+    [HttpPost("{id:long}/void")]
+    public async Task<IActionResult> Void(
+        long id, [FromBody] AttachmentEvidenceVoidRequest? request, CancellationToken cancellationToken = default)
+        => Ok(ApiResponse<AttachmentEvidenceDto>.Success(
+            await AttachmentEvidenceService.VoidAsync(_db, id, request?.Reason, cancellationToken),
+            "附件证据已作废（原始文件名 / 摘要 / 登记历史保留可读；内容不再提供下载，不提供硬删除与二进制替换）"));
+
+    /// <summary>当前登录用户名（缺失时返回 null，由服务端统一记为「未知用户」，绝不猜测身份）</summary>
+    private string? CurrentUserName()
+        => User.FindFirst(ClaimTypes.Name)?.Value ?? User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+
+    /// <summary>当前登录用户 Id（缺失或非数字时返回 null，仅用于审计字段）</summary>
+    private long? CurrentUserId()
+        => long.TryParse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value, out var id) ? id : null;
+}

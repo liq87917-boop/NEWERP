@@ -873,6 +873,46 @@ public partial class ErpDbContext
             .HasIndex(x => new { x.Status, x.RecordedAt })
             .HasDatabaseName("IX_ContainerShipmentMilestones_Status_RecordedAt")
             .HasFilter("IsDeleted = 0");
+
+        // ============ 业务单据附件内容证据（ERP-061：唯一附件内容册） ============
+        //   1. 审计结论：既有文件存储代码只有 OssStorageService（无接口 / 无下载 / 无删除），既有附件能力
+        //      只有 ERP-045「仅元数据引用册」；因此本模块在唯一内容接缝 IAttachmentContentStore 之上建立
+        //      **唯一**的附件内容模型，不引入第二套文件存储，也不改动既有 OSS 客户端；
+        //   2. **刻意不建任何唯一索引**：同一摘要的重复上传不做内容寻址去重，两次上传是两条各自独立的
+        //      证据（绝不静默合并、覆盖或替换）；
+        //   3. 刻意不建外键与导航属性：归属单据软删除 / 改名后历史证据必须始终可读，只是由服务端显式标注
+        //      不可用，绝不改派到别的单据；
+        //   4. 只写这一张表：不改写订单状态 / 金额 / 明细 / 备注与库存 / 库存成本 / 出运 / 单证 / 发票 /
+        //      费用与分摊 / 收付款 / 税务与结算记录；
+        //   5. 内容本体不在数据库：只保存服务端生成的不透明存储键（服务端生成、不经接口返回）与内容元数据。
+        modelBuilder.Entity<AttachmentEvidence>().Property(x => x.OwnerType).HasMaxLength(30);
+        modelBuilder.Entity<AttachmentEvidence>().Property(x => x.OwnerNo).HasMaxLength(50);
+        modelBuilder.Entity<AttachmentEvidence>().Property(x => x.OwnerTypeText).HasMaxLength(30);
+        modelBuilder.Entity<AttachmentEvidence>().Property(x => x.OriginalFileName).HasMaxLength(255);
+        modelBuilder.Entity<AttachmentEvidence>().Property(x => x.MediaType).HasMaxLength(120);
+        modelBuilder.Entity<AttachmentEvidence>().Property(x => x.Sha256).HasMaxLength(64);
+        modelBuilder.Entity<AttachmentEvidence>().Property(x => x.Description).HasMaxLength(500);
+        modelBuilder.Entity<AttachmentEvidence>().Property(x => x.StorageKey).HasMaxLength(200);
+        modelBuilder.Entity<AttachmentEvidence>().Property(x => x.StorageProvider).HasMaxLength(30);
+        modelBuilder.Entity<AttachmentEvidence>().Property(x => x.UploadedBy).HasMaxLength(100);
+        modelBuilder.Entity<AttachmentEvidence>().Property(x => x.VoidReason).HasMaxLength(500);
+
+        // 归属单据 + 状态 + 登记时间：单据详情有界清单与台账分页（无唯一索引，见上）
+        modelBuilder.Entity<AttachmentEvidence>()
+            .HasIndex(x => new { x.OwnerType, x.OwnerId, x.Status, x.RecordedAt })
+            .HasDatabaseName("IX_AttachmentEvidences_Owner_Status_RecordedAt")
+            .HasFilter("IsDeleted = 0");
+
+        // 摘要检索：只用于人工核对重复上传，**不作为证据身份**，因此不做唯一约束
+        modelBuilder.Entity<AttachmentEvidence>()
+            .HasIndex(x => x.Sha256)
+            .HasDatabaseName("IX_AttachmentEvidences_Sha256")
+            .HasFilter("IsDeleted = 0");
+
+        modelBuilder.Entity<AttachmentEvidence>()
+            .HasIndex(x => new { x.Status, x.RecordedAt })
+            .HasDatabaseName("IX_AttachmentEvidences_Status_RecordedAt")
+            .HasFilter("IsDeleted = 0");
     }
 
     /// <summary>保存变更：自动填充审计字段</summary>

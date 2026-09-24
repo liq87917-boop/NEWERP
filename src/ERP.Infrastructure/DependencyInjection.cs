@@ -32,6 +32,12 @@ public static class DependencyInjection
         // 阿里云 OSS 对象存储服务（图片上传）
         services.AddSingleton<ERP.Infrastructure.Storage.OssStorageService>();
 
+        // 附件内容存储（ERP-061）：唯一内容接缝 IAttachmentContentStore —— 开发 / 测试只启用隔离的
+        // 非生产本地存储；生产对象存储（OSS）未实现、未注册、未激活（其凭据 / 桶配置 / 迁移 / 启用
+        // 属于生产 OSS Human Gate），因此工厂在遇到 Provider=oss 时显式拒绝而不是静默降级。
+        services.AddSingleton<ERP.Application.Interfaces.IAttachmentContentStore>(_ =>
+            ERP.Infrastructure.Storage.AttachmentContentStoreFactory.Create(configuration));
+
         // 商品资料 Excel 导出服务
         services.AddScoped<ERP.Infrastructure.Export.ProductExcelExporter>();
 
