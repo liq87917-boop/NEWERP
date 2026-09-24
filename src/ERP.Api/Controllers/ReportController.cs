@@ -139,4 +139,18 @@ public class ReportController : ControllerBase
         var result = await _reportService.GetQuotationConversionAsync(start, end);
         return Ok(ApiResponse<List<ReportDtos.QuotationConversionItem>>.Success(result));
     }
+
+    /// <summary>
+    /// 库存移动与呆滞报表（ERP-029，只读派生）：主表为库存行（现存量为基础单位），
+    /// 出入库数量 / 最后移动日期 / 停滞天数取自库存流水（StockMovements）台账，按截止日期截断；
+    /// 红字冲销流水以反方向计入毛额（原流水 + 红字成对净额为 0，不二次扣减）；
+    /// 截止日期前无台账的行以「未知」呈现，不臆造日期或比率，也不估算库存成本 / 金额。
+    /// 查询按仓库 / 商品 / 关键字筛选并在数据库内分页（单页上限 200 行），不存在逐行查库。
+    /// </summary>
+    [HttpGet("inventory-movement")]
+    public async Task<IActionResult> InventoryMovement([FromQuery] ReportDtos.InventoryMovementReportQuery query)
+    {
+        var result = await _reportService.GetInventoryMovementReportAsync(query);
+        return Ok(ApiResponse<ReportDtos.InventoryMovementReport>.Success(result));
+    }
 }

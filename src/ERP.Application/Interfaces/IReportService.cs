@@ -49,4 +49,11 @@ public interface IReportService
 
     /// <summary>报价成交率分析（ERP-018，按业务员聚合；分子 = 已转 PI / 已转销售订单 / 状态已完成）</summary>
     Task<List<ReportDtos.QuotationConversionItem>> GetQuotationConversionAsync(DateTime start, DateTime end);
+
+    /// <summary>
+    /// 库存移动与呆滞报表（ERP-029，只读派生）：主表为库存行，出入库 / 最后移动日期 / 停滞天数取自库存流水台账；
+    /// 红字冲销流水按反方向参与毛额（原流水与红字成对净额为 0，不二次扣减）；无台账的行以「未知」呈现，不估算成本。
+    /// </summary>
+    Task<ReportDtos.InventoryMovementReport> GetInventoryMovementReportAsync(
+        ReportDtos.InventoryMovementReportQuery query, CancellationToken cancellationToken = default);
 }

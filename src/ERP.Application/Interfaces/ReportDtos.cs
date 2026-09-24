@@ -3,7 +3,7 @@ namespace ERP.Application.Interfaces;
 /// <summary>
 /// 报表数据传输对象
 /// </summary>
-public static class ReportDtos
+public static partial class ReportDtos
 {
     /// <summary>商品销量排名项</summary>
     public class ProductSalesRankItem

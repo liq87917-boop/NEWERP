@@ -63,6 +63,10 @@ Object.assign(MODULES, {
       { key: 'warehouseName', label: '仓库' }, { key: 'quantity', label: '库存数量', type: 'money' },
       { key: 'availableQuantity', label: '可用数量', type: 'money' },
     ],
+    /* ERP-029：库存移动与呆滞报表入口（工具栏，始终可见；只读派生，不落库） */
+    extraActions: [
+      { label: '📉 库存移动 / 呆滞报表', onclick: 'openInventoryMovementReport', title: '按仓库 / 商品 / 截止日期 / 移动窗口 / 呆滞阈值查看基础单位出入库、最后移动日期与停滞天数（库存流水台账口径，未知显示「未知」）' },
+    ],
     fields: [],
   },
   'receiving-plan': {
