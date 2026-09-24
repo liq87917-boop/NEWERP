@@ -1,0 +1,54 @@
+{
+  "id": "ERP-041",
+  "title": "Add multi-customer participants to Container Loading List",
+  "status": "pending",
+  "risk_level": "medium",
+  "description": "Close the audited multi-customer consolidation gap by adding an authoritative, bounded participant list beneath an existing Container Loading List. Preserve the legacy single CustomerId as the compatibility primary-customer field and do not backfill historical containers during normal reads. This task may add repository schema code and validate against non-production test databases, but it must not allocate expenses, rewrite loading details, mutate Trade Documents, execute production SQL, deploy, or release.",
+  "acceptance_criteria": [
+    "Users can maintain one or more distinct Customer participants for a Container Loading List and explicitly designate exactly one active participant as primary.",
+    "Each new participant references an existing active Customer; duplicate active Customer entries in the same loading list are rejected, and deleted or inactive Customers cannot be newly selected.",
+    "Participant records preserve bounded Customer code and name snapshots so a later unavailable Customer remains readable and is clearly marked unavailable rather than silently replaced.",
+    "For a loading list with participant rows, the explicit primary participant is synchronized to the existing legacy CustomerId compatibility field; changing the primary participant is transactional and never depends on list order.",
+    "A historical loading list with no participant rows remains readable through its existing CustomerId as a legacy single-customer view, without request-time writes or automatic production backfill.",
+    "Loading-list list and detail workflows expose participant count, primary Customer and a bounded participant-maintenance view without changing the identity of the container or loading list.",
+    "Adding, disabling or changing participants does not rewrite loading detail quantities, Container Booking tracking, Trade Documents, expense records, inventory or historical Customer snapshots.",
+    "Repository schema changes are idempotent and validated only through permitted local or test-database paths; production database execution remains behind the mandatory human gate.",
+    "Unit/integration tests cover multiple Customers, primary uniqueness, duplicate and inactive references, legacy single-customer compatibility, unavailable historical references and non-mutation of adjacent records; safe validation passes.",
+    "Browser/UI acceptance is recorded as deferred during development according to project policy."
+  ],
+  "allowed_paths": [
+    "src/ERP.Domain/**",
+    "src/ERP.Application/**",
+    "src/ERP.Infrastructure/**",
+    "src/ERP.Api/Controllers/**",
+    "src/ERP.Api/wwwroot/**",
+    "src/ERP.UnitTests/**",
+    "src/ERP.IntegrationTests/**",
+    "docs/**",
+    ".ai/**"
+  ],
+  "depends_on": [
+    "ERP-040"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "browser",
+  "browser_acceptance": {
+    "required": true,
+    "scenarios": [
+      "Open an existing Container Loading List, add two active Customers, designate one as primary and verify the participant count and primary Customer persist in list and detail views.",
+      "Open a legacy single-customer loading list with no participant rows, verify it remains readable without automatic writes, then attempt duplicate and inactive Customer selections and verify they are rejected."
+    ],
+    "test_filter": "Collection=UiTests",
+    "minimum_screenshots": 2
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L2",
+    "status": "not_required",
+    "reason": "Repository code and non-production test schema only. Production schema execution, historical backfill, deployment, release and expense posting remain behind separate human gates."
+  },
+  "attempts": 0
+}

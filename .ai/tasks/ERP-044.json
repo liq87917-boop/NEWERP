@@ -1,0 +1,54 @@
+{
+  "id": "ERP-044",
+  "title": "Add read-only supplier invoice reconciliation report",
+  "status": "pending",
+  "risk_level": "medium",
+  "description": "Add a read-only supplier invoice reconciliation report over existing Purchase Orders and the authoritative invoice allocations introduced by ERP-043. The report must distinguish ordered, invoiced and unlinked evidence without claiming to be an accounts-payable balance or aging ledger. Do not infer links, due dates, tax eligibility or payment settlement, add another invoice schema, mutate finance records, deploy, or release.",
+  "acceptance_criteria": [
+    "The report groups Purchase Order and recorded non-void invoice evidence by Supplier and currency, and never combines different currencies into one monetary total.",
+    "For each linked Purchase Order, the report exposes authoritative ordered amount, allocated invoice amount and remaining uninvoiced amount using only persisted ERP-043 allocation rows.",
+    "Partially linked and wholly unlinked invoice amounts are shown separately with explicit linkage status and are never assigned to an order by invoice number, free text, amount or date similarity.",
+    "Voided invoices are excluded from active totals but remain available through an explicit status filter for historical inspection.",
+    "Receipt and settlement context may reuse existing authoritative Purchase Order progress fields when available, but missing or ambiguous linkage is displayed as unknown and is not treated as zero, paid or outstanding.",
+    "The UI and documentation clearly state that this is an operational purchase-invoice reconciliation view, not an invoice-backed accounts-payable ledger, payment authorization, tax filing report or aging statement.",
+    "Users can filter by Supplier, currency, Purchase Order date, invoice date and linkage status; normal queries are bounded or paged and avoid per-row database queries.",
+    "The report is read-only and does not update invoices, Purchase Orders, receipt progress, inventory cost, payments, expenses or tax-refund records.",
+    "Unit/integration tests cover multiple Suppliers and currencies, full and partial invoice linkage, unlinked invoices, voided invoices, unknown settlement context, filters, paging and non-mutation; safe validation passes.",
+    "Browser/UI acceptance is recorded as deferred during development according to project policy."
+  ],
+  "allowed_paths": [
+    "src/ERP.Application/**",
+    "src/ERP.Api/Controllers/**",
+    "src/ERP.Api/wwwroot/**",
+    "src/ERP.UnitTests/**",
+    "src/ERP.IntegrationTests/**",
+    "docs/**",
+    ".ai/**"
+  ],
+  "depends_on": [
+    "ERP-026",
+    "ERP-031",
+    "ERP-043"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "browser",
+  "browser_acceptance": {
+    "required": true,
+    "scenarios": [
+      "Open the supplier invoice reconciliation report and inspect a Purchase Order with partial authoritative invoice allocation, verifying ordered, invoiced and remaining amounts in one currency.",
+      "Filter for unlinked and voided invoices and verify they are distinguished from active linked totals and are not presented as payable, paid or overdue balances."
+    ],
+    "test_filter": "Collection=UiTests",
+    "minimum_screenshots": 2
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L2",
+    "status": "not_required",
+    "reason": "Read-only reporting over repository records. No production mutation, payable posting, payment, tax submission, deployment or release is authorized."
+  },
+  "attempts": 0
+}

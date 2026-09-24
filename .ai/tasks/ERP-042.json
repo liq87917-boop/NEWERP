@@ -1,0 +1,55 @@
+{
+  "id": "ERP-042",
+  "title": "Add traceable expense allocation batches for multi-customer containers",
+  "status": "pending",
+  "risk_level": "medium",
+  "description": "Extend the existing container expense preview and generation workflow so allocations to multi-customer container participants have explicit batch and source lineage. Reuse the existing allocation methods and FinanceExpense records rather than creating a second accounting engine. Do not infer missing bases, post payments, settle receivables or payables, rewrite legacy allocations, execute production SQL, deploy, or release.",
+  "acceptance_criteria": [
+    "The existing expense-allocation workflow can preview allocation of one eligible source expense across active participants of one Container Loading List using the supported volume, weight, carton, amount or documented whole-container method.",
+    "Every participant basis used by a preview comes from an explicit persisted value or user-confirmed request value validated by the server; missing or zero total evidence is rejected rather than guessed.",
+    "Preview is read-only and returns participant, method, basis, ratio and allocated amount, with deterministic currency-precision rounding and any remainder assigned by a documented stable rule so line totals equal the source amount.",
+    "Generation records an allocation batch identifier plus source expense, container/loading-list reference, participant Customer, method, basis, ratio and allocated amount for every generated allocation row.",
+    "A successful batch is generated transactionally; partial rows are not retained when validation or persistence fails, and duplicate active generation for the same source expense and allocation scope is rejected.",
+    "Corrections preserve history through an explicit voided batch state rather than hard deletion; voiding does not silently alter the original source expense or create payment, receipt or accounting postings.",
+    "Legacy allocated expense rows without batch lineage remain readable and are clearly identified as legacy/untracked; no automatic backfill is performed during normal requests.",
+    "Allocation does not change Container Loading detail quantities, participant identity, Trade Documents, inventory, Purchase Orders, Sales Orders or authoritative shipment tracking.",
+    "Repository schema changes are idempotent and validated only through permitted local or test-database paths; production database execution and irreversible finance operations remain behind human gates.",
+    "Unit/integration tests cover every supported basis, rounding remainder, zero or missing bases, duplicate generation, transactional rollback, void history, legacy allocations and non-mutation of source records; safe validation passes.",
+    "Browser/UI acceptance is recorded as deferred during development according to project policy."
+  ],
+  "allowed_paths": [
+    "src/ERP.Domain/**",
+    "src/ERP.Application/**",
+    "src/ERP.Infrastructure/**",
+    "src/ERP.Api/Controllers/**",
+    "src/ERP.Api/wwwroot/**",
+    "src/ERP.UnitTests/**",
+    "src/ERP.IntegrationTests/**",
+    "docs/**",
+    ".ai/**"
+  ],
+  "depends_on": [
+    "ERP-041"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "browser",
+  "browser_acceptance": {
+    "required": true,
+    "scenarios": [
+      "Open an eligible container expense, preview allocation across two persisted container participants, and verify bases, ratios, rounding and allocated totals before generating one traceable batch.",
+      "Attempt duplicate generation, then void the generated batch and verify lineage remains visible while the source expense, container quantities and unrelated finance records remain unchanged."
+    ],
+    "test_filter": "Collection=UiTests",
+    "minimum_screenshots": 2
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L2",
+    "status": "not_required",
+    "reason": "Repository allocation logic and non-production test schema only. Production database execution, real financial settlement, irreversible operations, deployment and release are not authorized."
+  },
+  "attempts": 0
+}
