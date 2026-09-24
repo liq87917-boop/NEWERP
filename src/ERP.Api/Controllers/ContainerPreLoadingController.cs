@@ -1,5 +1,7 @@
 using ERP.Application.Common;
+using ERP.Application.DTOs;
 using ERP.Application.Interfaces;
+using ERP.Application.Services;
 using ERP.Domain.Entities;
 using ERP.Domain.Enums;
 using Microsoft.AspNetCore.Mvc;
@@ -8,7 +10,7 @@ using Microsoft.EntityFrameworkCore;
 namespace ERP.Api.Controllers;
 
 /// <summary>
-/// 预装柜单控制器
+/// 预装柜单控制器（ERP-040：提供按持久化订柜引用只读回显外贸与物流跟踪值）
 /// </summary>
 [Route("api/container/pre-loadings")]
 public class ContainerPreLoadingController : DocumentControllerBase<ContainerPreLoading>
@@ -83,6 +85,19 @@ public class ContainerPreLoadingController : DocumentControllerBase<ContainerPre
         existing.UpdatedAt = DateTime.Now;
         await Db.SaveChangesAsync();
         return Ok(ApiResponse<object>.Success(null, "预装柜单更新成功"));
+    }
+
+    /// <summary>
+    /// 权威外贸 / 物流跟踪值（ERP-040，**只读**）：按预装柜单持久化的订柜引用
+    /// （<c>BookingId</c>）读取订柜信息并原样回显；没有引用（或引用指向的订柜记录已删除）时返回
+    /// 「未关联」，所有跟踪字段为未知 —— 不按柜号等自由文本匹配，也不在本单上另存一份跟踪值。
+    /// </summary>
+    [HttpGet("{id:long}/shipment-tracking")]
+    public async Task<IActionResult> GetShipmentTracking(long id)
+    {
+        var entity = await GetOrThrowAsync(id, "预装柜单不存在");
+        var tracking = await ContainerShipmentTrackingService.ResolveForPreLoadingAsync(Db, entity);
+        return Ok(ApiResponse<ContainerShipmentTrackingDto>.Success(tracking, "已按持久化订柜引用返回跟踪信息（只读）"));
     }
 
     private static void Calculate(ContainerPreLoading entity)

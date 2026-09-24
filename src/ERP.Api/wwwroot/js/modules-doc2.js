@@ -15,6 +15,18 @@ const MOVEMENT_TYPE_OPTS = [
 ];
 const DIRECTION_OPTS = [{ value: '1', label: '入库(+）' }, { value: '-1', label: '出库(-）' }];
 const REVERSAL_OPTS = [{ value: 'false', label: '正常' }, { value: 'true', label: '红字冲销' }];
+/* ERP-040：出运方式（与后端 ContainerShipmentTrackingRules 的取值域一致；留空 = 未指定 = 未知） */
+const SHIPMENT_MODE_OPTS = [
+  { value: '', label: '未指定（未知）' },
+  { value: 'LCL', label: 'LCL 拼箱' },
+  { value: 'FCL', label: 'FCL 整箱' },
+];
+/* ERP-040：查验要求三态（valueType: 'bool?' → 提交 null / false / true，未知绝不回落为「不需要查验」） */
+const INSPECTION_REQUIRED_OPTS = [
+  { value: '', label: '未知（未标注）' },
+  { value: 'false', label: '不需要查验' },
+  { value: 'true', label: '需要查验' },
+];
 /* ERP-009：退货明细列（销售退货 / 采购退货共用：数量 × 退货单价 = 金额；成本单价用于库存计价） */
 const RETURN_DETAIL_FIELDS = [
   { key: 'productId', label: '商品ID', type: 'number', width: '90px' },
@@ -85,21 +97,48 @@ Object.assign(MODULES, {
       { key: 'destination', label: '目的地' }, { key: 'totalQuantity', label: '总件数', type: 'number' },
     ],
   },
+  /* ERP-040：订柜信息 = 外贸 / 物流跟踪字段的**权威记录**（出运方式 / B/L / S-O / 中转港 / ETD·ETA·ATD·ATA /
+     拖车 / 报关行 / 查验要求与日期 / 放行日期）。列表与详情只回显本单持久化的值，未知一律显示「未知」；
+     报关行引用停用 / 删除后仍显示当时的名称快照并标注不可用。 */
   booking: {
     title: '订柜信息', api: '/api/container/bookings', canSubmit: true,
     columns: [
       { key: 'bookingNo', label: '订柜单号' }, { key: 'bookingDate', label: '日期', type: 'date' },
-      { key: 'customerId', label: '客户Id' }, { key: 'shippingCompany', label: '船公司' },
-      { key: 'departurePort', label: '起运港' }, { key: 'status', label: '状态', status: true },
+      { key: 'customerId', label: '客户Id' }, { key: 'containerType', label: '柜型' },
+      { key: 'shippingCompany', label: '船公司' },
+      { key: 'shipmentMode', label: '出运方式', render: row => shipmentModeText(row.shipmentMode) },
+      { key: 'billOfLadingNo', label: '提单号', render: row => trackingText(row.billOfLadingNo) },
+      { key: 'destinationPort', label: '目的港', render: row => trackingText(row.destinationPort) },
+      { key: 'etd', label: 'ETD', render: row => trackingDate(row.etd) },
+      { key: 'eta', label: 'ETA', render: row => trackingDate(row.eta) },
+      { key: 'customsBrokerName', label: '报关行', render: row => trackingBrokerHtml(row.customsBrokerName, row.customsBrokerAvailable) },
+      { key: 'inspectionRequired', label: '查验要求', render: row => inspectionRequiredText(row.inspectionRequired) },
+      { key: 'status', label: '状态', status: true },
     ],
     fields: [
-      { key: 'bookingDate', label: '订柜日期', type: 'date' }, { key: 'customerId', label: '客户Id', type: 'number' },
+      { key: 'bookingDate', label: '订柜日期', type: 'date' },
+      { key: 'customerId', label: '客户', type: 'ref', ref: 'customer' },
+      { key: 'supplierId', label: '供应商（可留空）', type: 'ref', ref: 'supplier' },
       { key: 'containerType', label: '柜型', type: 'select', options: CONTAINER_OPTS },
       { key: 'shippingCompany', label: '船公司' }, { key: 'voyageNo', label: '航次' },
       { key: 'sailingDate', label: '开船日期', type: 'date' },
-      { key: 'departurePort', label: '起运港' }, { key: 'destinationPort', label: '目的港' },
+      { key: 'departurePort', label: '起运港（可留空）' }, { key: 'destinationPort', label: '目的港（可留空）' },
+      /* ERP-040：外贸与物流跟踪（可留空 = 未知；服务端不推断任何日期） */
+      { key: 'shipmentMode', label: '出运方式（可留空）', type: 'select', options: SHIPMENT_MODE_OPTS },
+      { key: 'billOfLadingNo', label: '提单号 B/L' }, { key: 'shippingOrderNo', label: '订舱号 S/O' },
+      { key: 'transitPort', label: '中转港（可留空）' },
+      { key: 'etd', label: '预计开船 ETD', type: 'date' }, { key: 'eta', label: '预计到港 ETA', type: 'date' },
+      { key: 'atd', label: '实际开船 ATD', type: 'date' }, { key: 'ata', label: '实际到港 ATA', type: 'date' },
+      { key: 'truckerName', label: '拖车 / 集卡公司' },
+      { key: 'customsBrokerId', label: '报关行（可留空）', type: 'ref', ref: 'customsBroker' },
+      { key: 'inspectionRequired', label: '查验要求', type: 'select', valueType: 'bool?', options: INSPECTION_REQUIRED_OPTS },
+      { key: 'inspectionDate', label: '查验日期（可留空）', type: 'date' },
+      { key: 'customsReleaseDate', label: '海关放行日期（可留空）', type: 'date' },
+      { key: 'remark', label: '备注', type: 'textarea' },
     ],
   },
+  /* ERP-040：预装柜单按**持久化订柜引用**（bookingId）只读回显订柜信息上的外贸 / 物流跟踪值；
+     本单不保存第二份跟踪值，也不按柜号等自由文本匹配。 */
   'pre-loading': {
     title: '预装柜单', api: '/api/container/pre-loadings', canSubmit: true,
     columns: [
@@ -109,8 +148,14 @@ Object.assign(MODULES, {
     ],
     fields: [
       { key: 'loadingDate', label: '装柜日期', type: 'date' }, { key: 'containerNo', label: '柜号' },
+      /* ERP-040：订柜引用（留空 = 未关联，物流跟踪一律显示「未知」；跟踪值只按本引用读取） */
+      { key: 'bookingId', label: '订柜信息（关联）', type: 'ref', ref: 'booking' },
       { key: 'sealNo', label: '封条号' }, { key: 'totalCartons', label: '总箱数', type: 'number' },
       { key: 'totalWeight', label: '总毛重(kg)', type: 'number' }, { key: 'totalVolume', label: '总体积(m³)', type: 'number' },
+    ],
+    /* ERP-040：只读查看权威跟踪值（任何状态都可查看；未关联订柜信息时全部显示「未知」） */
+    rowActions: [
+      { label: '物流跟踪', icon: '🚢', title: '按持久化订柜引用只读查看该柜的外贸与物流跟踪值（未关联订柜信息时显示「未知」）', onclick: 'showShipmentTracking' },
     ],
   },
   'loading-list': {
@@ -121,13 +166,18 @@ Object.assign(MODULES, {
       { key: 'shippingMark', label: '唛头' }, { key: 'totalCartons', label: '总箱数', type: 'money' }, { key: 'status', label: '状态', status: true },
     ],
     fields: [
-      { key: 'loadingDate', label: '装柜日期', type: 'date' }, { key: 'customerId', label: '客户Id', type: 'number' },
+      { key: 'loadingDate', label: '装柜日期', type: 'date' },
+      { key: 'customerId', label: '客户', type: 'ref', ref: 'customer' },
       { key: 'containerNo', label: '柜号' }, { key: 'shippingMark', label: '唛头' },
+      /* ERP-040：预装柜单引用（→ 订柜信息）：物流跟踪值按该持久化引用链读取，留空 = 未关联 */
+      { key: 'preLoadingId', label: '预装柜单（关联）', type: 'ref', ref: 'pre-loading' },
       { key: 'totalCartons', label: '总箱数', type: 'number' }, { key: 'totalWeight', label: '总毛重(kg)', type: 'number' },
       { key: 'totalVolume', label: '总体积(m³)', type: 'number' },
     ],
-    /* ERP-019：由装柜清单生成单证中心记录（柜号写入「关联柜号/订舱号」，一柜一类单证只生成一张） */
+    /* ERP-019：由装柜清单生成单证中心记录（柜号写入「关联柜号/订舱号」，一柜一类单证只生成一张）
+       ERP-040：物流跟踪只读回显（装柜清单 → 预装柜单 → 订柜信息 的持久化引用链，未关联显示「未知」） */
     rowActions: [
+      { label: '物流跟踪', icon: '🚢', title: '按持久化引用链只读查看该柜的外贸与物流跟踪值（未关联订柜信息时显示「未知」）', onclick: 'showShipmentTracking' },
       { label: '生成单证', icon: '📋', title: '由该装柜清单生成装箱单 / 提单 / 报关单 / 订舱确认等单证中心记录（同一柜号同一类型只生成一张）', onclick: 'generateTradeDocsFromSource', statuses: ['Pending', 'Submitted', 'Approved'] },
       { label: '预填单证', icon: '📝', title: '按该装柜清单带入单证草稿到单证中心新增表单（不落库，可编辑后再保存）', onclick: 'prefillTradeDocFromSource', statuses: ['Pending', 'Submitted', 'Approved'] },
     ],

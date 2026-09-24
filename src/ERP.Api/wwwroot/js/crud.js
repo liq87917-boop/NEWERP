@@ -255,6 +255,11 @@ async function saveForm(id) {
     if (f.type === 'date') v = v ? v + 'T00:00:00' : null;
     /* 布尔字段（下拉选择 是/否）：统一转成真正的布尔值提交，避免服务端反序列化把 "true" 当字符串 */
     if (f.valueType === 'bool') v = (v === true || String(v).toLowerCase() === 'true');
+    /* 三态布尔（valueType: 'bool?'，如装柜查验要求）：留空提交 null（未知），绝不回落为 false；
+       ERP-040：null / false / true 三态在服务端互不混淆（ContainerShipmentTrackingRules） */
+    if (f.valueType === 'bool?') {
+      v = (v === '' || v === null || v === undefined) ? null : (String(v).toLowerCase() === 'true');
+    }
     if (f.valueType === 'number' && v !== '') v = Number(v);
     body[f.key] = v;
   });

@@ -1389,5 +1389,46 @@ IF NOT EXISTS (SELECT 1 FROM sys.indexes
         ON db_owner.BaseProductSuppliers(SupplierId)
         WHERE IsDeleted = 0;");
 
+        // 28. 订柜信息的外贸 / 物流跟踪字段（ERP-040：订柜信息 = 本套跟踪值的权威记录）
+        //     28.1 各列幂等补齐：文本列 NOT NULL DEFAULT N''、日期与报关行 Id 可空 ——
+        //          历史订柜记录的默认值即「未知 / 未填写」，因此**不做任何回填**，
+        //          也不为任何单据臆造 ETD / ETA / ATD / ATA / 查验 / 放行日期；
+        //     28.2 刻意不建外键：报关行是「其他资料」InfoType=CustomsBroker 字典项，允许软删除 / 停用，
+        //          历史订柜记录必须继续可读（外键会阻止字典项删除或使读取失败）；
+        //     28.3 InspectionRequired 为 BIT NULL 三态：NULL = 未知（未标注）、0 = 不需要查验、1 = 需要查验，
+        //          三者互不混淆，绝不把「未知」落成「不需要」；
+        //     28.4 预装柜单 / 装柜清单**不加任何跟踪列**：它们只按持久化引用（ContainerPreLoading.BookingId）
+        //          只读回显订柜信息，不维护第二份跟踪值，也不按柜号等自由文本匹配；
+        //     28.5 本段只加列，不建表、不改写其他表，也不调用任何外部跟踪系统。
+        await db.Database.ExecuteSqlRawAsync(@"
+IF COL_LENGTH('db_owner.ContainerBooking', 'ShipmentMode') IS NULL
+    ALTER TABLE db_owner.ContainerBooking ADD ShipmentMode NVARCHAR(10) NOT NULL DEFAULT N'';
+IF COL_LENGTH('db_owner.ContainerBooking', 'BillOfLadingNo') IS NULL
+    ALTER TABLE db_owner.ContainerBooking ADD BillOfLadingNo NVARCHAR(50) NOT NULL DEFAULT N'';
+IF COL_LENGTH('db_owner.ContainerBooking', 'ShippingOrderNo') IS NULL
+    ALTER TABLE db_owner.ContainerBooking ADD ShippingOrderNo NVARCHAR(50) NOT NULL DEFAULT N'';
+IF COL_LENGTH('db_owner.ContainerBooking', 'TransitPort') IS NULL
+    ALTER TABLE db_owner.ContainerBooking ADD TransitPort NVARCHAR(100) NOT NULL DEFAULT N'';
+IF COL_LENGTH('db_owner.ContainerBooking', 'Etd') IS NULL
+    ALTER TABLE db_owner.ContainerBooking ADD Etd DATETIME2 NULL;
+IF COL_LENGTH('db_owner.ContainerBooking', 'Eta') IS NULL
+    ALTER TABLE db_owner.ContainerBooking ADD Eta DATETIME2 NULL;
+IF COL_LENGTH('db_owner.ContainerBooking', 'Atd') IS NULL
+    ALTER TABLE db_owner.ContainerBooking ADD Atd DATETIME2 NULL;
+IF COL_LENGTH('db_owner.ContainerBooking', 'Ata') IS NULL
+    ALTER TABLE db_owner.ContainerBooking ADD Ata DATETIME2 NULL;
+IF COL_LENGTH('db_owner.ContainerBooking', 'TruckerName') IS NULL
+    ALTER TABLE db_owner.ContainerBooking ADD TruckerName NVARCHAR(200) NOT NULL DEFAULT N'';
+IF COL_LENGTH('db_owner.ContainerBooking', 'CustomsBrokerId') IS NULL
+    ALTER TABLE db_owner.ContainerBooking ADD CustomsBrokerId BIGINT NULL;
+IF COL_LENGTH('db_owner.ContainerBooking', 'CustomsBrokerName') IS NULL
+    ALTER TABLE db_owner.ContainerBooking ADD CustomsBrokerName NVARCHAR(100) NOT NULL DEFAULT N'';
+IF COL_LENGTH('db_owner.ContainerBooking', 'InspectionRequired') IS NULL
+    ALTER TABLE db_owner.ContainerBooking ADD InspectionRequired BIT NULL;
+IF COL_LENGTH('db_owner.ContainerBooking', 'InspectionDate') IS NULL
+    ALTER TABLE db_owner.ContainerBooking ADD InspectionDate DATETIME2 NULL;
+IF COL_LENGTH('db_owner.ContainerBooking', 'CustomsReleaseDate') IS NULL
+    ALTER TABLE db_owner.ContainerBooking ADD CustomsReleaseDate DATETIME2 NULL;");
+
     }
 }

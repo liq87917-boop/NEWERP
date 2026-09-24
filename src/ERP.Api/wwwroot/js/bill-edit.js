@@ -33,6 +33,16 @@ const REF_APIS = {
     api: '/api/base/customers/forwarder-options', nameKey: 'infoName',
     rowKey: 'forwarderName', availableKey: 'forwarderAvailable', clearOnEmpty: true,
   },
+  /* ERP-040：订柜信息的「报关行」—— 与客户指定货代同一套字典项口径（InfoType=CustomsBroker）。
+     选项接口只返回启用中、未删除的报关行字典项；rowKey / availableKey 用于编辑回显当时的名称快照，
+     字典项后来被停用 / 删除时仍显示当时的名称并标注「已停用/不可用」，而不是静默变空。 */
+  customsBroker: {
+    api: '/api/container/bookings/customs-broker-options', nameKey: 'infoName',
+    rowKey: 'customsBrokerName', availableKey: 'customsBrokerAvailable', clearOnEmpty: true,
+  },
+  /* ERP-040：装柜单据之间的持久化引用（订柜信息 / 预装柜单）—— 建立权威引用链，跟踪值只按引用读取 */
+  booking: { api: '/api/container/bookings', nameKey: 'bookingNo' },
+  'pre-loading': { api: '/api/container/pre-loadings', nameKey: 'preLoadingNo' },
 };
 
 function escapeHtml(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }

@@ -1,5 +1,7 @@
 using ERP.Application.Common;
+using ERP.Application.DTOs;
 using ERP.Application.Interfaces;
+using ERP.Application.Services;
 using ERP.Domain.Entities;
 using ERP.Domain.Enums;
 using Microsoft.AspNetCore.Mvc;
@@ -8,7 +10,7 @@ using Microsoft.EntityFrameworkCore;
 namespace ERP.Api.Controllers;
 
 /// <summary>
-/// 装柜清单控制器
+/// 装柜清单控制器（ERP-040：提供按持久化引用链只读回显外贸与物流跟踪值）
 /// </summary>
 [Route("api/container/loading-lists")]
 public class ContainerLoadingListController : DocumentControllerBase<ContainerLoadingList>
@@ -130,6 +132,19 @@ public class ContainerLoadingListController : DocumentControllerBase<ContainerLo
 
         var numbers = string.Join("、", result.Documents.Select(d => d.DocNo));
         return Ok(ApiResponse<TradeDocGenerateResult>.Success(result, $"已生成单证：{numbers}"));
+    }
+
+    /// <summary>
+    /// 权威外贸 / 物流跟踪值（ERP-040，**只读**）：按装柜清单 → 预装柜单 → 订柜信息的
+    /// 持久化引用链读取订柜记录并原样回显；链上任一环缺失即返回「未关联」（跟踪字段未知），
+    /// 不按柜号等自由文本兜底匹配，也不在本单上另存一份跟踪值。
+    /// </summary>
+    [HttpGet("{id:long}/shipment-tracking")]
+    public async Task<IActionResult> GetShipmentTracking(long id)
+    {
+        var entity = await GetOrThrowAsync(id, "装柜清单不存在");
+        var tracking = await ContainerShipmentTrackingService.ResolveForLoadingListAsync(Db, entity);
+        return Ok(ApiResponse<ContainerShipmentTrackingDto>.Success(tracking, "已按持久化引用链返回跟踪信息（只读）"));
     }
 
     private static void Calculate(ContainerLoadingList entity)

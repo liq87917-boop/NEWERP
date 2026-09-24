@@ -101,6 +101,22 @@ public partial class ErpDbContext
             .HasDatabaseName("IX_BaseProductSuppliers_SupplierId")
             .HasFilter("IsDeleted = 0");
 
+        // ============ ERP-040：订柜信息的外贸 / 物流跟踪字段（订柜信息 = 权威记录） ============
+        // 设计口径：
+        //   1. 文本列默认空串、日期列可空 = 「未知」，历史订柜记录无需回填
+        //      （SchemaUpgrader 第 28 段同样只加列，不写任何历史数据）；
+        //   2. CustomsBrokerId 刻意不建外键：报关行是允许软删除 / 停用的字典项，历史订柜记录必须继续可读；
+        //   3. CustomsBrokerAvailable 是 [NotMapped] 的读取标注，不落库；
+        //   4. InspectionRequired 为 bool? 三态（null = 未知 / false = 不需要查验 / true = 需要查验），
+        //      未知绝不回落为 false；
+        //   5. 预装柜单 / 装柜清单不加跟踪列：只按持久化引用只读回显订柜信息。
+        modelBuilder.Entity<ContainerBooking>().Property(x => x.ShipmentMode).HasMaxLength(10);
+        modelBuilder.Entity<ContainerBooking>().Property(x => x.BillOfLadingNo).HasMaxLength(50);
+        modelBuilder.Entity<ContainerBooking>().Property(x => x.ShippingOrderNo).HasMaxLength(50);
+        modelBuilder.Entity<ContainerBooking>().Property(x => x.TransitPort).HasMaxLength(100);
+        modelBuilder.Entity<ContainerBooking>().Property(x => x.TruckerName).HasMaxLength(200);
+        modelBuilder.Entity<ContainerBooking>().Property(x => x.CustomsBrokerName).HasMaxLength(100);
+
         // ============ 单据号唯一索引 ============
         modelBuilder.Entity<Inquiry>().HasIndex(x => x.InquiryNo).IsUnique();
         modelBuilder.Entity<SalesOrder>().HasIndex(x => x.OrderNo).IsUnique();
