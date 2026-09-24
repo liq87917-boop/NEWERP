@@ -1,7 +1,7 @@
 {
   "id": "ERP-064",
   "title": "Add a bounded authorized attachment center workspace",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "medium",
   "description": "Add a read-only attachment center workspace over the canonical attachment evidence delivered by ERP-061 through ERP-063. The workspace must filter out records whose authoritative parents the current user cannot access and must not become a cross-module authorization bypass. Do not inspect file contents, infer business outcomes, configure production OSS, execute production SQL, deploy, or release.",
   "acceptance_criteria": [
@@ -50,5 +50,5 @@
     "status": "not_required",
     "reason": "Read-only workspace over repository attachment metadata. Production storage, production database changes, deployment and release remain behind mandatory human gates."
   },
-  "attempts": 0
+  "attempts": 1
 }

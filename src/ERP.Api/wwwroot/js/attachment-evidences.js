@@ -571,3 +571,401 @@ function aeCloseSummary() {
   if (box) box.remove();
 }
 
+/* ==================== 附件中心工作台：渲染 ==================== */
+
+function aecRender() {
+  const modal = document.getElementById('modal');
+  modal.innerHTML = AEC.detail ? aecDetailHtml() : aecWorkspaceHtml();
+}
+
+function aecWorkspaceHtml() {
+  const s = AEC.summary;
+  const pages = Math.max(1, Math.ceil(AEC.total / AEC.pageSize));
+  const rows = AEC.list.map(aecRowHtml).join('');
+  const countedRows = s ? (s.ownerTypeCounts || []).map(c => `
+      <tr style="border-top:1px solid #e2e8f0">
+        <td style="padding:6px">${aeEsc(c.ownerTypeText)}</td>
+        <td style="padding:6px">${aeEsc(c.totalCount)} 条
+          <div style="font-size:12px;color:#64748b">有效 ${aeEsc(c.activeCount)} / 已作废 ${aeEsc(c.voidedCount)}</div></td>
+        <td style="padding:6px;color:#64748b;font-size:12px">${aeEsc(c.boundaryText)}</td>
+      </tr>`).join('') : '';
+
+  const unauthorizedRows = s ? (s.scope.ownerTypes || []).filter(o => !o.authorized).map(o => `
+      <tr style="border-top:1px solid #e2e8f0">
+        <td style="padding:6px">${aeEsc(o.ownerTypeText)}</td>
+        <td style="padding:6px;color:#b45309;font-size:12px">${aeEsc(o.authorizationText)}</td>
+      </tr>`).join('') : '';
+
+  return `
+    <div style="max-width:1500px;margin:2vh auto;background:#fff;border-radius:14px;padding:16px 18px;max-height:94vh;overflow:auto;box-shadow:0 20px 60px rgba(0,0,0,.25)">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <h3 style="margin:0">🗂 附件中心工作台（只读）
+          <span style="font-size:13px;color:#64748b;font-weight:400;margin-left:10px">
+            只列同一附件证据册的权威元数据；未获菜单授权的归属类型不显示记录、计数、文件名与摘要</span></h3>
+        <button class="btn btn-neutral btn-sm" onclick="closeModal()">关闭</button>
+      </div>
+
+      <div style="padding:8px 10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;color:#475569;font-size:13px;line-height:1.8;margin-bottom:8px">
+        <div><strong>可见范围</strong>：${aeEsc(s ? s.scope.scopeText : '正在加载…')}</div>
+        <div><strong>筛选口径</strong>：${aeEsc(s ? s.filterPolicyText : '')}</div>
+        <div style="color:#b45309"><strong>未授权披露</strong>：${aeEsc(s ? s.scope.unauthorizedNoticeText : '')}</div>
+        <div style="color:#b91c1c"><strong>证据性质</strong>：${aeEsc(s ? s.scope.untrustedEvidenceNoticeText : '')}</div>
+        <div><strong>只读</strong>：${aeEsc(s ? s.scope.readOnlyNoticeText : '')}</div>
+        <div><strong>边界</strong>：${aeEsc(s ? s.scope.boundaryText : '')}</div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+        <div>
+          <div style="font-size:13px;color:#475569;margin-bottom:4px">授权范围内计数（${s ? aeEsc(s.summaryText) : ''}）</div>
+          <table style="width:100%;border-collapse:collapse;font-size:13px">
+            <thead><tr style="background:#f8fafc;text-align:left">
+              <th style="padding:6px">归属类型</th><th style="padding:6px">仓库附件证据</th><th style="padding:6px">边界</th>
+            </tr></thead>
+            <tbody>${countedRows || `<tr><td colspan="3" style="padding:10px;color:#94a3b8">${
+              s && s.scope.hasAnyAuthorizedOwnerType
+                ? '授权范围内暂无仓库附件证据'
+                : '当前账号没有任何已授权的归属类型：不显示记录与计数（fail closed）'}</td></tr>`}</tbody>
+          </table>
+        </div>
+        <div>
+          <div style="font-size:13px;color:#475569;margin-bottom:4px">未授权归属类型（只显示「未授权」这一事实，不显示其记录 / 计数 / 文件名 / 摘要）</div>
+          <table style="width:100%;border-collapse:collapse;font-size:13px">
+            <thead><tr style="background:#f8fafc;text-align:left">
+              <th style="padding:6px">归属类型</th><th style="padding:6px">授权状态</th>
+            </tr></thead>
+            <tbody>${unauthorizedRows || '<tr><td colspan="2" style="padding:10px;color:#94a3b8">全部归属类型均已授权</td></tr>'}</tbody>
+          </table>
+        </div>
+      </div>
+
+      ${aecFilterBarHtml()}
+
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <div style="font-size:13px;color:#475569">共 ${aeEsc(AEC.total)} 条可见记录（每页 ${aeEsc(AEC.pageSize)} 条，
+          单次上限 ${aeEsc(s ? s.maxPageSize : 200)} 条；分页有界，列表与计数都不访问任何存储内容）</div>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-neutral btn-sm" onclick="aecPage(-1)">上一页</button>
+          <span style="font-size:13px;color:#475569;line-height:32px">第 ${aeEsc(AEC.page)} / ${aeEsc(pages)} 页</span>
+          <button class="btn btn-neutral btn-sm" onclick="aecPage(1)">下一页</button>
+        </div>
+      </div>
+
+      <div class="table-wrap" style="max-height:52vh;overflow:auto">
+        <table>
+          <thead><tr><th>归属单据（当前账号可见范围）</th><th>文件名快照</th><th>媒体类型 / 长度</th>
+            <th>SHA-256 摘要</th><th>说明</th><th>上传人 / 登记时间</th><th>状态</th><th>操作</th></tr></thead>
+          <tbody>${rows || `<tr><td colspan="8" class="text-muted">没有符合条件的可见记录
+            （未授权归属类型的记录不会出现在这里，也不会计入合计；系统不按文件名或摘要合并记录）</td></tr>`}</tbody>
+        </table>
+      </div>
+    </div>`;
+}
+
+
+
+/* ==================================================================================
+   ====== 附件中心工作台（ERP-064）— 只读、分页、按既有「角色 → 菜单」授权收敛 ======
+   ==================================================================================
+   定位：在 ERP-061 / ERP-062 / ERP-063 交付的**同一**附件证据册之上提供清单工作台：
+        只列权威元数据（归属快照 / 文件名快照 / 媒体类型 / 长度 / 摘要 / 上传人 / 登记时间 / 状态），
+        不复制二进制内容、不新增第二个附件登记表。
+   边界（界面侧同样遵守）：
+     1. 工作台只读：不新增 / 不改写 / 不作废任何证据，也不改动父单据与任何业务记录；
+     2. 未获菜单授权的归属类型不显示任何记录、计数、文件名与摘要（连计数行都不显示）；界面只提示
+        「未授权」这一事实，绝不把「看不到」写成「没有」；
+     3. 打开元数据 / 历史与下载都由服务端重新校验当前归属访问：父单据删除 / 不可用 / 不再授权一律
+        fail closed（界面只提示失败，不显示记录、文件名或摘要）；
+     4. 列表与摘要都不访问任何存储内容：下载只在用户显式点击时带 Bearer 认证读取内容接口，并以
+        「附件」方式保存到本地；界面不内联渲染、不拼接存储路径（存储键从不返回给界面）；
+     5. 附件是仓库内用户上传的不可信文件证据：不是批准、不是验货合格 / 不合格判定或质量认证、
+        不是报关或税务提交 / 受理结果、不是付款授权、不是结算确认，也不构成出运许可。
+   ================================================================================== */
+
+let AEC = {
+  summary: null,
+  list: [], total: 0, page: 1, pageSize: 50,
+  filters: {
+    ownerType: '', ownerId: '', ownerNo: '', fileName: '',
+    mediaType: '', uploadedBy: '', recordedFrom: '', recordedTo: '', status: ''
+  },
+  detail: null, busy: false
+};
+
+/* 工具栏入口（单证中心 extraActions）：不依赖当前单据，一次只能有一个活动工作台 */
+async function openAttachmentCenterWorkspace() {
+  AEC = {
+    summary: null,
+    list: [], total: 0, page: 1, pageSize: 50,
+    filters: {
+      ownerType: '', ownerId: '', ownerNo: '', fileName: '',
+      mediaType: '', uploadedBy: '', recordedFrom: '', recordedTo: '', status: ''
+    },
+    detail: null, busy: false
+  };
+
+  const modal = document.getElementById('modal');
+  modal.innerHTML = '<div style="padding:40px;text-align:center;color:#64748b">正在加载附件中心…</div>';
+  modal.style.display = 'block';
+
+  try {
+    await aecLoadSummary();
+    await aecLoadList();
+  } catch (e) {
+    toast('附件中心加载失败：' + e.message, 'error');
+  }
+  aecRender();
+}
+
+/* 摘要：可见范围 + 授权范围内计数 + 口径文案（未授权类型不返回记录 / 计数 / 文件名 / 摘要） */
+async function aecLoadSummary() {
+  AEC.summary = await api('/api/attachment-evidences/center/summary');
+}
+
+/* 台账：只带显式字段筛选；服务端按当前账号授权再次收敛，分页有界 */
+async function aecLoadList() {
+  const f = AEC.filters;
+  const params = ['page=' + AEC.page, 'pageSize=' + AEC.pageSize];
+  if (f.ownerType) params.push('ownerType=' + encodeURIComponent(f.ownerType));
+  if (f.ownerId) params.push('ownerId=' + encodeURIComponent(f.ownerId));
+  if (f.ownerNo) params.push('ownerNo=' + encodeURIComponent(f.ownerNo));
+  if (f.fileName) params.push('fileName=' + encodeURIComponent(f.fileName));
+  if (f.mediaType) params.push('mediaType=' + encodeURIComponent(f.mediaType));
+  if (f.uploadedBy) params.push('uploadedBy=' + encodeURIComponent(f.uploadedBy));
+  if (f.recordedFrom) params.push('recordedFrom=' + f.recordedFrom);
+  if (f.recordedTo) params.push('recordedTo=' + f.recordedTo);
+  if (f.status !== '') params.push('status=' + encodeURIComponent(f.status));
+
+  try {
+    const page = await api('/api/attachment-evidences/center?' + params.join('&'));
+    AEC.list = (page && page.items) || [];
+    AEC.total = (page && page.total) || 0;
+  } catch (e) {
+    AEC.list = [];
+    AEC.total = 0;
+    toast('附件中心台账加载失败：' + e.message, 'error');
+  }
+}
+
+
+/* 筛选条：全部为**显式字段**，只用已持久化元数据；归属类型下拉只列当前账号已授权的类型 */
+function aecFilterBarHtml() {
+  const s = AEC.summary;
+  const f = AEC.filters;
+  const ownerTypeOptions = s ? (s.ownerTypeOptions || []) : [];
+  const mediaTypes = s ? (s.mediaTypes || []) : [];
+  const statusOptions = s ? (s.statusOptions || []) : [];
+
+  return `
+    <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;padding:10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;margin-bottom:10px">
+      <div><label class="ea-lb">归属类型（仅已授权）</label>
+        <select style="width:100%" onchange="aecSetFilter('ownerType', this.value)">
+          <option value="">全部已授权类型</option>
+          ${ownerTypeOptions.map(o => `<option value="${aeEsc(o.value)}" ${f.ownerType === o.value ? 'selected' : ''}>${aeEsc(o.label)}</option>`).join('')}
+        </select></div>
+      <div><label class="ea-lb">归属单据 Id</label>
+        <input style="width:100%" value="${aeEsc(f.ownerId)}" onchange="aecSetFilter('ownerId', this.value)" placeholder="正整数" /></div>
+      <div><label class="ea-lb">归属单据号码快照</label>
+        <input style="width:100%" value="${aeEsc(f.ownerNo)}" onchange="aecSetFilter('ownerNo', this.value)" /></div>
+      <div><label class="ea-lb">文件名快照</label>
+        <input style="width:100%" value="${aeEsc(f.fileName)}" onchange="aecSetFilter('fileName', this.value)" /></div>
+      <div><label class="ea-lb">媒体类型</label>
+        <select style="width:100%" onchange="aecSetFilter('mediaType', this.value)">
+          <option value="">全部</option>
+          ${mediaTypes.map(m => `<option value="${aeEsc(m.value)}" ${f.mediaType === m.value ? 'selected' : ''}>${aeEsc(m.label)}</option>`).join('')}
+        </select></div>
+      <div><label class="ea-lb">上传人</label>
+        <input style="width:100%" value="${aeEsc(f.uploadedBy)}" onchange="aecSetFilter('uploadedBy', this.value)" /></div>
+      <div><label class="ea-lb">登记日期（自）</label>
+        <input type="date" style="width:100%" value="${aeEsc(f.recordedFrom)}" onchange="aecSetFilter('recordedFrom', this.value)" /></div>
+      <div><label class="ea-lb">登记日期（至）</label>
+        <input type="date" style="width:100%" value="${aeEsc(f.recordedTo)}" onchange="aecSetFilter('recordedTo', this.value)" /></div>
+      <div><label class="ea-lb">状态</label>
+        <select style="width:100%" onchange="aecSetFilter('status', this.value)">
+          <option value="">全部（含已作废历史）</option>
+          ${statusOptions.map(o => `<option value="${aeEsc(o.value)}" ${String(f.status) === String(o.value) ? 'selected' : ''}>${aeEsc(o.label)}</option>`).join('')}
+        </select></div>
+      <div style="display:flex;align-items:flex-end;gap:8px">
+        <button class="btn btn-primary btn-sm" onclick="aecSearch()">查询</button>
+        <button class="btn btn-neutral btn-sm" onclick="aecResetFilters()">重置筛选</button>
+      </div>
+    </div>`;
+}
+
+/* 行：全部为服务端权威元数据；有效与已作废**分开标注**；归属不可用时只标注不提供下载、绝不改派 */
+function aecRowHtml(row) {
+  const available = row.ownerAvailable
+    ? ''
+    : `<div style="color:#b45309;font-size:12px">${aeEsc(row.ownerAvailabilityText)}</div>`;
+  const voidInfo = row.isVoided
+    ? `<div style="color:#b91c1c;font-size:12px">作废于 ${aeEsc(row.voidedAt ? String(row.voidedAt).slice(0, 16).replace('T', ' ') : '未知')}：${aeEsc(row.voidReason)}</div>`
+    : '';
+
+  return `<tr style="border-top:1px solid #e2e8f0">
+    <td style="padding:6px">${aeEsc(row.ownerSnapshotText)}
+      <div style="font-size:12px;color:#64748b">Id=${aeEsc(row.ownerId)}</div>${available}</td>
+    <td style="padding:6px">${aeEsc(row.originalFileName)}
+      <div style="font-size:12px;color:#64748b">存储：${aeEsc(row.storageProviderText)}</div></td>
+    <td style="padding:6px">${aeEsc(row.mediaTypeText)}
+      <div style="font-size:12px;color:#64748b">${aeEsc(row.sizeText)}（${aeEsc(row.sizeBytes)} 字节）</div></td>
+    <td style="padding:6px;font-family:monospace;font-size:12px" title="${aeEsc(row.sha256)}">${aeEsc(String(row.sha256).slice(0, 16))}…</td>
+    <td style="padding:6px">${aeEsc(row.description)}</td>
+    <td style="padding:6px">${aeEsc(row.uploadedBy)}
+      <div style="font-size:12px;color:#64748b">${aeEsc(row.recordedAt ? String(row.recordedAt).slice(0, 16).replace('T', ' ') : '')}</div></td>
+    <td style="padding:6px">${aeEsc(row.statusText)}
+      <div style="font-size:12px;color:#64748b">${aeEsc(row.downloadAvailabilityText)}</div>${voidInfo}</td>
+    <td style="padding:6px;white-space:nowrap">
+      <button class="btn btn-neutral btn-sm" onclick="aecOpenDetail(${aeEsc(row.id)})">元数据 / 历史</button>
+      <button class="btn btn-neutral btn-sm" ${row.contentDownloadable ? '' : 'disabled'} onclick="aecDownload(${aeEsc(row.id)})">下载</button>
+    </td>
+  </tr>`;
+}
+
+
+/* ==================== 附件中心工作台：交互（筛选 / 分页 / 详情 / 下载） ==================== */
+
+function aecSetFilter(key, value) {
+  AEC.filters[key] = value;
+  if (key === 'ownerType') AEC.filters.ownerId = '';
+  AEC.page = 1;
+  aecRefresh();
+}
+
+async function aecSearch() {
+  AEC.page = 1;
+  await aecRefresh();
+}
+
+async function aecResetFilters() {
+  AEC.filters = {
+    ownerType: '', ownerId: '', ownerNo: '', fileName: '',
+    mediaType: '', uploadedBy: '', recordedFrom: '', recordedTo: '', status: ''
+  };
+  AEC.page = 1;
+  await aecRefresh();
+}
+
+async function aecPage(delta) {
+  const next = AEC.page + delta;
+  if (next < 1) return;
+  AEC.page = next;
+  await aecRefresh();
+}
+
+/* 重新读取摘要 + 本页：摘要同时刷新可见范围与授权范围内计数，因此撤销 / 新增授权后立即收敛 */
+async function aecRefresh() {
+  try {
+    await aecLoadSummary();
+    await aecLoadList();
+  } catch (e) {
+    toast('附件中心刷新失败：' + e.message, 'error');
+  }
+  aecRender();
+}
+
+/* 打开元数据 / 历史：由服务端重新校验当前归属访问；未授权或归属不可用一律 fail closed */
+async function aecOpenDetail(id) {
+  try {
+    AEC.detail = await api('/api/attachment-evidences/center/' + id);
+  } catch (e) {
+    AEC.detail = null;
+    toast('打开附件元数据失败（服务端会重新校验当前归属访问，未授权或归属不可用一律拒绝）：' + e.message, 'error');
+  }
+  aecRender();
+}
+
+function aecBackToList() {
+  AEC.detail = null;
+  aecRender();
+}
+
+/* 元数据 / 历史：只回显服务端权威值；有效与已作废分开标注，作废历史绝不隐藏、绝不改派 */
+function aecDetailHtml() {
+  const row = AEC.detail;
+  if (!row) return aecWorkspaceHtml();
+  const voidInfo = row.isVoided
+    ? `<div style="color:#b91c1c">作废时间：${aeEsc(row.voidedAt ? String(row.voidedAt).slice(0, 16).replace('T', ' ') : '未知')}
+         <div>作废原因：${aeEsc(row.voidReason)}</div>
+         <div>原始文件名 / 摘要 / 媒体类型 / 长度 / 上传人与登记时间按登记当时保留可读；内容不再提供下载，
+           系统不提供硬删除、二进制替换或改派</div></div>`
+    : '<div style="color:#475569">有效证据：内容只在显式点击「下载」时以「附件」方式流式返回</div>';
+
+  const cell = (label, value, mono) =>
+    `<tr style="border-top:1px solid #e2e8f0"><td style="padding:6px;color:#64748b;width:190px">${label}</td>
+       <td style="padding:6px${mono ? ';font-family:monospace;font-size:12px' : ''}">${value}</td></tr>`;
+
+  return `
+    <div style="max-width:1000px;margin:2vh auto;background:#fff;border-radius:14px;padding:16px 18px;max-height:94vh;overflow:auto;box-shadow:0 20px 60px rgba(0,0,0,.25)">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <h3 style="margin:0">🗂 附件元数据 / 历史（只读）</h3>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-neutral btn-sm" onclick="aecBackToList()">← 返回工作台</button>
+          <button class="btn btn-neutral btn-sm" onclick="closeModal()">关闭</button>
+        </div>
+      </div>
+      <div style="padding:8px 10px;background:#fff7ed;border:1px solid #fed7aa;color:#9a3412;border-radius:8px;font-size:12px;line-height:1.7;margin-bottom:8px">
+        ${aeEsc(AEC.summary ? AEC.summary.filterPolicyText : '')}
+        <div>本页由服务端在读取时重新校验当前归属访问：未授权、父单据已删除或不再可用一律 fail closed
+          （此时不会显示记录、文件名或摘要）。</div>
+      </div>
+      <table style="width:100%;border-collapse:collapse;font-size:13px">
+        <tbody>
+          ${cell('归属快照', `${aeEsc(row.ownerSnapshotText)}（Id=${aeEsc(row.ownerId)}）`)}
+          ${cell('归属可用性', aeEsc(row.ownerAvailabilityText))}
+          ${cell('文件名快照', aeEsc(row.originalFileName))}
+          ${cell('媒体类型 / 长度', `${aeEsc(row.mediaTypeText)}；${aeEsc(row.sizeText)}（${aeEsc(row.sizeBytes)} 字节）`)}
+          ${cell('SHA-256 摘要', aeEsc(row.sha256), true)}
+          ${cell('说明', aeEsc(row.description))}
+          ${cell('上传人 / 登记时间',
+            `${aeEsc(row.uploadedBy)}；${aeEsc(row.recordedAt ? String(row.recordedAt).slice(0, 19).replace('T', ' ') : '未知')}`)}
+          ${cell('状态 / 下载可用性', `${aeEsc(row.statusText)}；${aeEsc(row.downloadAvailabilityText)}`)}
+          ${cell('存储提供程序', aeEsc(row.storageProviderText))}
+          ${cell('作废留痕', voidInfo)}
+          ${cell('边界', aeEsc(row.boundaryText))}
+        </tbody>
+      </table>
+      <div style="text-align:right;margin-top:10px">
+        <button class="btn btn-primary btn-sm" ${row.contentDownloadable ? '' : 'disabled'}
+          onclick="aecDownload(${aeEsc(row.id)})">下载（以附件方式）</button>
+      </div>
+    </div>`;
+}
+
+/* 下载：显式用户动作；带 Bearer 认证请求工作台内容接口（服务端重新校验授权与归属），
+   以「附件」方式保存到本地；界面不内联渲染、不拼接任何存储路径或地址 */
+async function aecDownload(id) {
+  try {
+    const headers = {};
+    if (TOKEN) headers['Authorization'] = 'Bearer ' + TOKEN;
+    const resp = await fetch('/api/attachment-evidences/center/' + id + '/content', { headers: headers });
+    const contentType = resp.headers.get('Content-Type') || '';
+
+    if (!resp.ok || contentType.indexOf('application/json') >= 0) {
+      let message = '下载失败（服务端会重新校验当前归属访问，未授权或归属不可用一律拒绝）';
+      try {
+        const body = await resp.json();
+        if (body && body.message) message = body.message;
+      } catch (ignored) {
+        /* 非 JSON 错误响应：保留通用文案，绝不把任何内容或路径写进界面 */
+      }
+      toast(message, 'error');
+      return;
+    }
+
+    const blob = await resp.blob();
+    const row = AEC.list.find(r => r.id === id)
+      || (AEC.detail && AEC.detail.id === id ? AEC.detail : null);
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = (row && row.originalFileName) ? row.originalFileName : ('attachment-evidence-' + id);
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+    toast('附件已按「附件」方式下载：' + anchor.download + '（内容按不可信文件处理，不在页面内渲染）');
+  } catch (e) {
+    toast('下载失败：' + e.message, 'error');
+  }
+}
+
+

@@ -184,3 +184,115 @@ public sealed record AttachmentEvidenceMetadataDto(
 
 /// <summary>白名单选项（ERP-061：值 + 中文文案）。</summary>
 public sealed record AttachmentEvidenceOptionDto(string Value, string Label);
+
+/// <summary>
+/// 附件中心工作台查询参数（ERP-064，全部为可选过滤；结果分页返回，默认每页 50、单次最多 200 条）。
+/// <para>本查询只使用**已持久化的显式元数据**：归属单据类型 / 归属单据 Id / 归属单据号码快照 /
+/// 文件名快照 / 媒体类型 / 上传人 / 登记日期区间 / 状态。它**不**扫描文件内容、**不**抓取远端地址、
+/// **不**做模糊跨记录匹配，也**绝不**因为文件名或摘要相同而合并记录。</para>
+/// <para>结果一律按当前账号的既有「角色 → 菜单」授权收敛：未获菜单授权的归属类型既不返回记录，
+/// 也不返回计数、文件名或摘要；显式传入未授权类型时按「无可见记录」返回空页（不披露任何存在性）。</para>
+/// </summary>
+public sealed class AttachmentEvidenceCenterQuery
+{
+    /// <summary>默认每页条数</summary>
+    public const int DefaultPageSize = 50;
+
+    /// <summary>每页条数上限（有界：单次请求最多返回这么多条证据元数据）</summary>
+    public const int MaxPageSize = 200;
+
+    /// <summary>页码（从 1 开始）</summary>
+    public int Page { get; set; } = 1;
+
+    /// <summary>每页条数（1 ~ MaxPageSize，超出按上限截断）</summary>
+    public int PageSize { get; set; } = DefaultPageSize;
+
+    /// <summary>归属单据类型筛选（白名单取值；留空 = 全部**已授权**类型）</summary>
+    public string? OwnerType { get; set; }
+
+    /// <summary>归属单据 Id 筛选（留空 = 全部；必须为正整数）</summary>
+    public long? OwnerId { get; set; }
+
+    /// <summary>归属单据号码快照筛选（有界前缀 / 包含匹配，长度上限 50）</summary>
+    public string? OwnerNo { get; set; }
+
+    /// <summary>文件名快照筛选（有界包含匹配，长度上限 255；只匹配已持久化的净化文件名，不读取内容）</summary>
+    public string? FileName { get; set; }
+
+    /// <summary>媒体类型筛选（白名单取值：application/pdf / image/png / image/jpeg；留空 = 全部）</summary>
+    public string? MediaType { get; set; }
+
+    /// <summary>上传人筛选（有界包含匹配，长度上限 100）</summary>
+    public string? UploadedBy { get; set; }
+
+    /// <summary>登记日期区间起点（含；留空 = 不限）</summary>
+    public DateTime? RecordedFrom { get; set; }
+
+    /// <summary>登记日期区间终点（含；留空 = 不限；必须不早于起点）</summary>
+    public DateTime? RecordedTo { get; set; }
+
+    /// <summary>状态筛选（0 有效 / 1 已作废；留空 = 全部，默认包含已作废历史）</summary>
+    public int? Status { get; set; }
+}
+
+/// <summary>
+/// 附件中心工作台的归属类型授权明细（ERP-064，只读）：每个归属类型需要哪一个**既有菜单**授权、
+/// 当前账号是否已授权。
+/// <para>未授权类型只暴露「类型本身 + 所需菜单 + 未授权」这一事实（归属类型白名单本来就由
+/// <c>GET /api/attachment-evidences/metadata</c> 公开），**不**暴露该类型的任何记录、计数、
+/// 文件名、摘要或历史。</para>
+/// </summary>
+public sealed record AttachmentEvidenceCenterOwnerTypeScopeDto(
+    string OwnerType,
+    string OwnerTypeText,
+    string RequiredMenuCode,
+    string RequiredMenuText,
+    bool Authorized,
+    string AuthorizationText,
+    string BoundaryText);
+
+/// <summary>
+/// 附件中心工作台的当前账号可见范围（ERP-064，只读）：按**既有**「角色 → 菜单」授权口径
+/// （<c>SysUserRoles</c> → <c>SysRoleMenus</c> → <c>SysMenus.MenuCode</c>）推导当前账号可以访问哪些
+/// 归属类型；无身份、无角色或无相关菜单授权时一律 fail closed（可见范围为空）。
+/// </summary>
+public sealed record AttachmentEvidenceCenterScopeDto(
+    long UserId,
+    string UserName,
+    bool HasAnyAuthorizedOwnerType,
+    List<AttachmentEvidenceCenterOwnerTypeScopeDto> OwnerTypes,
+    string ScopeText,
+    string UnauthorizedNoticeText,
+    string ReadOnlyNoticeText,
+    string UntrustedEvidenceNoticeText,
+    string BoundaryText);
+
+/// <summary>
+/// 附件中心工作台在**授权范围内**的有界计数（ERP-064，只读）：只统计当前账号已获菜单授权的归属类型；
+/// 未授权类型连计数行都不返回，因此摘要不会泄露不可访问父单据的存在性。
+/// </summary>
+public sealed record AttachmentEvidenceCenterOwnerTypeCountDto(
+    string OwnerType,
+    string OwnerTypeText,
+    int TotalCount,
+    int ActiveCount,
+    int VoidedCount,
+    string BoundaryText);
+
+/// <summary>
+/// 附件中心工作台摘要（ERP-064，只读、有界）：一次返回「当前账号可见范围 + 授权范围内计数 +
+/// 筛选项白名单 + 全部口径文案」，供界面与接口同源显示，避免前端硬编码授权规则或口径漂移。
+/// <para>摘要只做**计数**：不访问任何存储内容、不返回文件名 / 摘要 / 存储键，也不返回未授权类型的计数。</para>
+/// </summary>
+public sealed record AttachmentEvidenceCenterSummaryDto(
+    AttachmentEvidenceCenterScopeDto Scope,
+    int TotalCount,
+    int ActiveCount,
+    int VoidedCount,
+    List<AttachmentEvidenceCenterOwnerTypeCountDto> OwnerTypeCounts,
+    List<AttachmentEvidenceOptionDto> OwnerTypeOptions,
+    List<AttachmentEvidenceOptionDto> MediaTypes,
+    List<AttachmentEvidenceOptionDto> StatusOptions,
+    int MaxPageSize,
+    string SummaryText,
+    string FilterPolicyText);

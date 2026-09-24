@@ -571,6 +571,292 @@ public static class AttachmentEvidenceService
         }).ToList();
     }
 
+    // ==================== 6.2 附件中心工作台（ERP-064：按既有「角色 → 菜单」授权收敛的只读工作台） ====================
+
+    /// <summary>工作台在授权范围内统计的归属类型上限（＝白名单类型数；有界，不随数据增长）</summary>
+    public const int MaxCenterOwnerTypes = 5;
+
+    /// <summary>
+    /// 装载当前账号**被允许访问**的归属类型（fail closed）：复用**既有**的「角色 → 菜单」授权口径
+    /// （<c>SysUserRoles</c> → <c>SysRoleMenus</c> → <c>SysMenus.MenuCode</c>，忽略按钮型菜单），
+    /// 再把菜单编码映射到附件证据的归属类型。
+    /// <para>无身份（未认证 / 缺少用户 Id）、无角色、无菜单授权时一律返回**空集合**：工作台既不显示记录
+    /// 也不显示计数。授权每次请求都重新查询，因此撤销授权后可见范围立即收敛（不需要缓存失效）。</para>
+    /// <para>只返回白名单内的规范类型且顺序与白名单一致；未知 / 历史类型永远不会被授权。</para>
+    /// </summary>
+    public static async Task<List<string>> LoadAuthorizedOwnerTypesAsync(
+        IErpDbContext db, long? userId, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        if (userId is null or <= 0) return new List<string>();
+
+        var roleIds = await db.SysUserRoles.AsNoTracking()
+            .Where(ur => ur.UserId == userId.Value && !ur.IsDeleted)
+            .Select(ur => ur.RoleId)
+            .ToListAsync(cancellationToken);
+        if (roleIds.Count == 0) return new List<string>();
+
+        var roleSet = roleIds.ToHashSet();
+        var menuIds = await db.SysRoleMenus.AsNoTracking()
+            .Where(rm => roleSet.Contains(rm.RoleId) && !rm.IsDeleted)
+            .Select(rm => rm.MenuId)
+            .ToListAsync(cancellationToken);
+        if (menuIds.Count == 0) return new List<string>();
+
+        var menuIdSet = menuIds.ToHashSet();
+        var menuCodes = await db.SysMenus.AsNoTracking()
+            .Where(m => menuIdSet.Contains(m.Id) && !m.IsDeleted && m.MenuType != MenuType.Button)
+            .Select(m => m.MenuCode)
+            .ToListAsync(cancellationToken);
+
+        var codes = menuCodes
+            .Where(code => !string.IsNullOrWhiteSpace(code))
+            .Select(code => code.Trim())
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        return AttachmentEvidenceRules.SupportedOwnerTypes
+            .Where(type => codes.Contains(AttachmentEvidenceRules.RequiredMenuCodeOf(type)))
+            .ToList();
+    }
+
+    /// <summary>
+    /// 工作台可见范围（只读）：把白名单归属类型的授权状态、所需菜单、按类型的边界文案与全部口径文案
+    /// 一次返回，供界面与接口同源显示；未授权类型不返回任何记录 / 计数 / 文件名 / 摘要。
+    /// </summary>
+    public static async Task<AttachmentEvidenceCenterScopeDto> GetCenterScopeAsync(
+        IErpDbContext db, long? userId, string? userName, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+
+        var authorized = await LoadAuthorizedOwnerTypesAsync(db, userId, cancellationToken);
+        var authorizedSet = authorized.ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var items = AttachmentEvidenceRules.SupportedOwnerTypes
+            .Select(type => new AttachmentEvidenceCenterOwnerTypeScopeDto(
+                type,
+                AttachmentEvidenceRules.OwnerTypeText(type),
+                AttachmentEvidenceRules.RequiredMenuCodeOf(type),
+                AttachmentEvidenceRules.RequiredMenuTextOf(type),
+                authorizedSet.Contains(type),
+                AttachmentEvidenceRules.CenterAuthorizationText(type, authorizedSet.Contains(type)),
+                AttachmentEvidenceRules.BoundaryTextOf(type)))
+            .ToList();
+
+        return new AttachmentEvidenceCenterScopeDto(
+            userId ?? 0,
+            TrimTo(
+                string.IsNullOrWhiteSpace(userName) ? AttachmentEvidenceRules.UnknownText : userName,
+                AttachmentEvidenceRules.MaxUploadedByLength),
+            authorized.Count > 0,
+            items,
+            AttachmentEvidenceRules.CenterScopeText(
+                items.Where(i => i.Authorized).Select(i => i.OwnerTypeText).ToList(),
+                items.Count(i => !i.Authorized)),
+            AttachmentEvidenceRules.CenterUnauthorizedNoticeText,
+            AttachmentEvidenceRules.CenterReadOnlyNoticeText,
+            AttachmentEvidenceRules.CenterUntrustedEvidenceNoticeText,
+            AttachmentEvidenceRules.CenterBoundaryText);
+    }
+
+    /// <summary>
+    /// 工作台摘要（只读、有界）：可见范围 + **授权范围内**按状态拆分的计数（**单次**分组查询；
+    /// 未授权类型连计数行都不返回）+ 筛选项白名单与口径文案。
+    /// <para>本方法不访问任何存储内容（零存储访问），也不返回文件名 / 摘要 / 存储键。</para>
+    /// </summary>
+    public static async Task<AttachmentEvidenceCenterSummaryDto> GetCenterSummaryAsync(
+        IErpDbContext db, long? userId, string? userName, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+
+        var scope = await GetCenterScopeAsync(db, userId, userName, cancellationToken);
+        var authorized = scope.OwnerTypes.Where(o => o.Authorized).Select(o => o.OwnerType).ToList();
+
+        var byType = new Dictionary<string, EvidenceStatusCounts>(StringComparer.OrdinalIgnoreCase);
+        if (authorized.Count > 0)
+        {
+            var rows = await db.AttachmentEvidences.AsNoTracking()
+                .Where(r => !r.IsDeleted && authorized.Contains(r.OwnerType))
+                .GroupBy(r => new { r.OwnerType, r.Status })
+                .Select(g => new { g.Key.OwnerType, g.Key.Status, Count = g.Count() })
+                .ToListAsync(cancellationToken);
+
+            foreach (var row in rows)
+            {
+                var type = (row.OwnerType ?? string.Empty).Trim();
+                byType.TryGetValue(type, out var current);
+                var active = current.Active + (row.Status == AttachmentEvidenceRules.StatusActive ? row.Count : 0);
+                var voided = current.Voided + (row.Status == AttachmentEvidenceRules.StatusVoided ? row.Count : 0);
+                byType[type] = new EvidenceStatusCounts(current.Total + row.Count, active, voided);
+            }
+        }
+
+        var counts = new List<AttachmentEvidenceCenterOwnerTypeCountDto>();
+        var total = 0;
+        var activeTotal = 0;
+        var voidedTotal = 0;
+        foreach (var type in authorized)
+        {
+            byType.TryGetValue(type, out var countsOfType);
+            counts.Add(new AttachmentEvidenceCenterOwnerTypeCountDto(
+                type,
+                AttachmentEvidenceRules.OwnerTypeText(type),
+                countsOfType.Total,
+                countsOfType.Active,
+                countsOfType.Voided,
+                AttachmentEvidenceRules.BoundaryTextOf(type)));
+            total += countsOfType.Total;
+            activeTotal += countsOfType.Active;
+            voidedTotal += countsOfType.Voided;
+        }
+
+        return new AttachmentEvidenceCenterSummaryDto(
+            scope,
+            total,
+            activeTotal,
+            voidedTotal,
+            counts,
+            counts.Select(c => new AttachmentEvidenceOptionDto(c.OwnerType, c.OwnerTypeText)).ToList(),
+            AttachmentEvidenceRules.SupportedMediaTypes
+                .Select(m => new AttachmentEvidenceOptionDto(m, AttachmentEvidenceRules.MediaTypeText(m))).ToList(),
+            new List<AttachmentEvidenceOptionDto>
+            {
+                new(AttachmentEvidenceRules.StatusActive.ToString(),
+                    AttachmentEvidenceRules.StatusText(AttachmentEvidenceRules.StatusActive)),
+                new(AttachmentEvidenceRules.StatusVoided.ToString(),
+                    AttachmentEvidenceRules.StatusText(AttachmentEvidenceRules.StatusVoided))
+            },
+            AttachmentEvidenceCenterQuery.MaxPageSize,
+            AttachmentEvidenceRules.CenterSummaryText(total, activeTotal, voidedTotal, authorized.Count),
+            AttachmentEvidenceRules.CenterFilterPolicyText);
+    }
+
+    /// <summary>
+    /// 附件中心工作台台账（只读、分页、有界）：只列**已授权**归属类型的证据元数据，支持按归属类型 /
+    /// 归属 Id / 归属号码快照 / 文件名快照 / 媒体类型 / 上传人 / 登记日期区间 / 状态筛选。
+    /// <para>显式传入未授权类型时按「无可见记录」返回空页（不披露该类型的任何记录、计数、文件名与摘要）；
+    /// 页内归属可用性按类型**批量装载**（每类型最多一次查询，无逐行查库），列表与计数全程不访问任何存储内容。</para>
+    /// </summary>
+    public static async Task<PagedResult<AttachmentEvidenceDto>> ListForCenterAsync(
+        IErpDbContext db, AttachmentEvidenceCenterQuery? query, long? userId,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+
+        var request = query ?? new AttachmentEvidenceCenterQuery();
+        var page = request.Page < 1 ? 1 : request.Page;
+        var pageSize = Math.Clamp(
+            request.PageSize <= 0 ? AttachmentEvidenceCenterQuery.DefaultPageSize : request.PageSize,
+            1, AttachmentEvidenceCenterQuery.MaxPageSize);
+
+        static PagedResult<AttachmentEvidenceDto> EmptyPage(int currentPage, int currentPageSize)
+            => new()
+            {
+                Items = new List<AttachmentEvidenceDto>(),
+                Total = 0,
+                Page = currentPage,
+                PageSize = currentPageSize
+            };
+
+        // 先做与授权无关的显式筛选校验：未知 / 越界取值一律拒绝（错误语义不随授权范围变化）
+        var ownerId = request.OwnerId;
+        if (ownerId is <= 0)
+            throw BusinessException.InvalidParameter("归属单据 Id 筛选值无效：必须为正整数");
+        var ownerNo = AttachmentEvidenceRules.NormalizeCenterOwnerNoFilter(request.OwnerNo);
+        var fileName = AttachmentEvidenceRules.NormalizeCenterFileNameFilter(request.FileName);
+        var uploadedBy = AttachmentEvidenceRules.NormalizeCenterUploadedByFilter(request.UploadedBy);
+        var mediaType = AttachmentEvidenceRules.NormalizeMediaTypeFilter(request.MediaType);
+        var status = AttachmentEvidenceRules.NormalizeStatusFilter(request.Status);
+        var (recordedFrom, recordedTo) =
+            AttachmentEvidenceRules.NormalizeRecordedRange(request.RecordedFrom, request.RecordedTo);
+
+        string? requestedOwnerType = null;
+        if (!string.IsNullOrWhiteSpace(request.OwnerType))
+            requestedOwnerType = AttachmentEvidenceRules.NormalizeOwnerType(request.OwnerType);
+
+        // 授权可见范围（fail closed）：无身份 / 无角色 / 无相关菜单 → 空页；显式未授权类型 → 空页（不披露存在性）
+        var authorized = await LoadAuthorizedOwnerTypesAsync(db, userId, cancellationToken);
+        if (authorized.Count == 0) return EmptyPage(page, pageSize);
+        if (requestedOwnerType is not null
+            && !authorized.Contains(requestedOwnerType, StringComparer.OrdinalIgnoreCase))
+            return EmptyPage(page, pageSize);
+
+        var ownerType = requestedOwnerType;
+
+        var source = db.AttachmentEvidences.AsNoTracking()
+            .Where(r => !r.IsDeleted && authorized.Contains(r.OwnerType));
+        if (ownerType is not null) source = source.Where(r => r.OwnerType == ownerType);
+        if (ownerId is not null) source = source.Where(r => r.OwnerId == ownerId.Value);
+        if (ownerNo is not null) source = source.Where(r => r.OwnerNo.Contains(ownerNo));
+        if (fileName is not null) source = source.Where(r => r.OriginalFileName.Contains(fileName));
+        if (mediaType is not null) source = source.Where(r => r.MediaType == mediaType);
+        if (uploadedBy is not null) source = source.Where(r => r.UploadedBy.Contains(uploadedBy));
+        if (recordedFrom is not null) source = source.Where(r => r.RecordedAt >= recordedFrom.Value);
+        if (recordedTo is not null) source = source.Where(r => r.RecordedAt < recordedTo.Value.AddDays(1));
+        if (status is not null) source = source.Where(r => r.Status == status.Value);
+
+        var total = await source.CountAsync(cancellationToken);
+        var rows = await source
+            .OrderByDescending(r => r.RecordedAt).ThenByDescending(r => r.Id)
+            .Skip((page - 1) * pageSize).Take(pageSize)
+            .ToListAsync(cancellationToken);
+
+        var availability = await LoadOwnerAvailabilityAsync(db, rows, cancellationToken);
+
+        return new PagedResult<AttachmentEvidenceDto>
+        {
+            Items = rows.Select(r => Map(r, OwnerAvailable(availability, r))).ToList(),
+            Total = total,
+            Page = page,
+            PageSize = pageSize
+        };
+    }
+
+    /// <summary>
+    /// 工作台内的证据元数据 / 历史（只读）：每次都重新校验「当前账号是否仍被允许访问该归属类型」，
+    /// 未授权一律按**不存在**处理（不披露证据 Id 与归属类型，fail closed）；归属单据已删除 / 缺失时
+    /// 照实标注不可用，历史证据仍可只读查看（绝不改派、绝不静默修复）。
+    /// </summary>
+    public static async Task<AttachmentEvidenceDto> GetForCenterAsync(
+        IErpDbContext db, long id, long? userId, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        var row = await LoadAsync(db, id, cancellationToken);
+        await EnsureCenterAccessAsync(db, row.OwnerType, userId, cancellationToken);
+        var ownerAvailable = await IsOwnerAvailableAsync(db, row.OwnerType, row.OwnerId, cancellationToken);
+        return Map(row, ownerAvailable);
+    }
+
+    /// <summary>
+    /// 工作台内的内容下载（只读、流式）：先重新校验归属类型授权（未授权 fail closed），
+    /// 再复用既有下载口径（证据必须有效、归属单据必须存在且未删除、长度与摘要必须一致）。
+    /// <para>内容只在用户**显式**发起下载时读取：列表与摘要都不访问任何存储。</para>
+    /// </summary>
+    public static async Task<AttachmentEvidenceContentDto> OpenCenterContentAsync(
+        IErpDbContext db, IAttachmentContentStore store, long id, long? userId,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(store);
+
+        var row = await LoadAsync(db, id, cancellationToken);
+        await EnsureCenterAccessAsync(db, row.OwnerType, userId, cancellationToken);
+        return await OpenContentAsync(db, store, id, cancellationToken);
+    }
+
+    /// <summary>
+    /// 工作台归属类型授权复核（fail closed）：未授权类型一律按「不存在」抛 <c>NotFound</c>，
+    /// 且消息里**不**包含证据 Id 与归属类型，避免把「存在但无权访问」与「不存在」区分出来。
+    /// </summary>
+    private static async Task EnsureCenterAccessAsync(
+        IErpDbContext db, string? ownerType, long? userId, CancellationToken cancellationToken)
+    {
+        var authorized = await LoadAuthorizedOwnerTypesAsync(db, userId, cancellationToken);
+        if (!authorized.Contains((ownerType ?? string.Empty).Trim(), StringComparer.OrdinalIgnoreCase))
+            throw BusinessException.NotFound(
+                "附件证据不存在或当前账号无权查看（系统不披露附件 Id 与归属类型）："
+                + "附件中心工作台只显示当前账号已获菜单授权的归属类型，未授权类型不披露记录、计数、文件名或摘要");
+    }
+
     // ==================== 7. 内部：归属单据读写（权威复核 + 批量装载） ====================
 
     /// <summary>归属单据快照（服务端权威读取；**不**接受客户端提交的号码 / 类型快照）</summary>

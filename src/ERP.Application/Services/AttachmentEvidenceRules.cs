@@ -678,6 +678,164 @@ public static class AttachmentEvidenceRules
         + "不构成批准、付款、出运、清关或结算依据；系统只按文件签名保存 PDF / PNG / JPEG 内容元数据并提供"
         + "安全的附件下载，绝不改写任何单据状态、金额、明细与库存 / 财务记录。";
 
+    // ==================== 9.1 附件中心工作台（ERP-064：按既有「角色 → 菜单」授权收敛） ====================
+
+    /// <summary>归属类型「销售订单」所需的既有菜单编码</summary>
+    public const string MenuCodeSalesOrder = "sales-order";
+
+    /// <summary>归属类型「采购订单」所需的既有菜单编码</summary>
+    public const string MenuCodePurchaseOrder = "purchase-order";
+
+    /// <summary>归属类型「出口单证」所需的既有菜单编码（单证中心）</summary>
+    public const string MenuCodeTradeDocument = "doc-center";
+
+    /// <summary>归属类型「样品记录」所需的既有菜单编码（样品管理）</summary>
+    public const string MenuCodeSample = "sample";
+
+    /// <summary>
+    /// 归属单据类型 → 访问该类型附件证据所需的**既有菜单编码**（与 <c>SysMenus.MenuCode</c> 同名）。
+    /// <para>附件中心工作台<strong>不</strong>引入新的权限模型：它只复用既有的「角色 → 菜单」授权
+    /// （<c>SysUserRoles</c> → <c>SysRoleMenus</c> → <c>SysMenus.MenuCode</c>）。因此「当前用户被允许访问的
+    /// 权威父单据」＝「当前用户已获对应模块菜单授权的归属类型」；未授权类型既不显示记录也不显示计数。</para>
+    /// <para>验货记录的权威记录是**既有采购订单上的 QC 记录**，因此与采购订单共用同一菜单授权；
+    /// 未知 / 历史类型返回空串（一律不授权，绝不借用别的单据类型的权限）。</para>
+    /// </summary>
+    public static string RequiredMenuCodeOf(string? ownerType) => ownerType?.Trim() switch
+    {
+        OwnerTypeSalesOrder => MenuCodeSalesOrder,
+        OwnerTypePurchaseOrder => MenuCodePurchaseOrder,
+        OwnerTypeTradeDocument => MenuCodeTradeDocument,
+        OwnerTypeQualityInspection => MenuCodePurchaseOrder,
+        OwnerTypeSample => MenuCodeSample,
+        _ => string.Empty
+    };
+
+    /// <summary>归属类型所需的既有菜单文案（与界面同源；未知类型返回「未知来源菜单」而不是猜测）</summary>
+    public static string RequiredMenuTextOf(string? ownerType) => ownerType?.Trim() switch
+    {
+        OwnerTypeSalesOrder => "销售订单菜单",
+        OwnerTypePurchaseOrder => "采购订单菜单",
+        OwnerTypeTradeDocument => "单证中心菜单",
+        OwnerTypeQualityInspection => "采购订单菜单（验货记录的权威记录就是既有采购订单上的 QC 记录）",
+        OwnerTypeSample => "样品管理菜单",
+        _ => "未知来源菜单"
+    };
+
+    /// <summary>
+    /// 授权状态文案：未授权时明确说明「记录 / 计数 / 文件名 / 摘要一律不显示」，
+    /// 避免界面把「看不到」误解成「没有」。
+    /// </summary>
+    public static string CenterAuthorizationText(string? ownerType, bool authorized)
+    {
+        var menu = RequiredMenuTextOf(ownerType);
+        return authorized
+            ? $"已获「{menu}」授权：可查看该归属类型的仓库附件证据元数据"
+            : $"未获「{menu}」授权：该归属类型的记录、计数、文件名与摘要一律不显示（系统不披露不可访问记录的存在性）";
+    }
+
+    /// <summary>工作台归属号码快照筛选（可空；有界，超长拒绝而不是无界扫描）</summary>
+    public static string? NormalizeCenterOwnerNoFilter(string? value)
+        => BoundedFilter(value, "归属单据号码筛选", MaxOwnerNoLength);
+
+    /// <summary>工作台文件名快照筛选（可空；只匹配已持久化的净化文件名，长度上限 255）</summary>
+    public static string? NormalizeCenterFileNameFilter(string? value)
+        => BoundedFilter(value, "文件名筛选", MaxOriginalFileNameLength);
+
+    /// <summary>工作台上传人筛选（可空；有界）</summary>
+    public static string? NormalizeCenterUploadedByFilter(string? value)
+        => BoundedFilter(value, "上传人筛选", MaxUploadedByLength);
+
+    /// <summary>工作台媒体类型筛选（可空；只接受白名单取值，大小写不敏感，输出规范写法）</summary>
+    public static string? NormalizeMediaTypeFilter(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        var text = value.Trim();
+        foreach (var supported in SupportedMediaTypes)
+        {
+            if (string.Equals(supported, text, StringComparison.OrdinalIgnoreCase)) return supported;
+        }
+
+        throw BusinessException.InvalidParameter(
+            $"不支持的媒体类型筛选值「{Truncate(value)}」：本模块只保存 {string.Join(" / ", SupportedMediaTypes)}");
+    }
+
+    /// <summary>
+    /// 工作台登记日期区间（可空；只做区间合法性校验，不做任何时间推断 / 时区转换）：
+    /// 起点晚于终点一律拒绝，避免出现「看似无结果」的静默空区间；区间终点按**含**处理
+    /// （由查询侧对终点加一天作为上界）。
+    /// </summary>
+    public static (DateTime? From, DateTime? To) NormalizeRecordedRange(DateTime? from, DateTime? to)
+    {
+        if (from is not null && to is not null && from.Value.Date > to.Value.Date)
+            throw BusinessException.InvalidParameter(
+                $"登记日期区间无效（起点 {from:yyyy-MM-dd} 晚于终点 {to:yyyy-MM-dd}）：请调整筛选条件后再查询");
+
+        return (from?.Date, to?.Date);
+    }
+
+    /// <summary>工作台筛选字段：可空文本（去首尾空白、拒绝控制字符、有界，超长拒绝而不是静默截断）</summary>
+    private static string? BoundedFilter(string? value, string fieldName, int maxLength)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        var text = value.Trim();
+        if (text.Length > maxLength)
+            throw BusinessException.InvalidParameter($"{fieldName}不能超过 {maxLength} 个字符（当前 {text.Length}）");
+        EnsureNoControlCharacters(text, fieldName);
+        return text;
+    }
+
+    /// <summary>工作台只读声明（界面与接口同源）</summary>
+    public const string CenterReadOnlyNoticeText =
+        "附件中心工作台是只读视图：只按已持久化的显式元数据列出 / 筛选既有附件证据，"
+        + "不新增、不改写、不作废任何证据与父单据，也不改动任何业务状态、金额、明细与库存 / 财务记录。";
+
+    /// <summary>
+    /// 工作台证据性质声明（界面与接口同源）：附件是不可信文件证据，
+    /// 不是批准 / 验货结论 / 报关或税务提交 / 付款授权 / 结算确认 / 出运许可。
+    /// </summary>
+    public const string CenterUntrustedEvidenceNoticeText =
+        "附件是仓库内的不可信文件证据：它只是用户上传并登记在仓库里的一份 PDF / PNG / JPEG。"
+        + "它不是批准或审核结论、不是验货合格或不合格判定、不是质量认证或第三方检验结论、"
+        + "不是报关或税务提交 / 受理结果、不是银行付款凭证或付款授权、不是结算 / 对账确认，"
+        + "也不构成出运许可；系统只显示服务端权威保存的内容元数据，绝不按内容推断任何业务结论。";
+
+    /// <summary>工作台未授权类型的披露口径（界面与接口同源）</summary>
+    public const string CenterUnauthorizedNoticeText =
+        "工作台按当前账号的既有「角色 → 菜单」授权收敛：未获菜单授权的归属类型不返回任何记录、计数、"
+        + "文件名或摘要（连计数行都不返回），系统也不披露不可访问记录的存在性；被撤销授权后，"
+        + "此前可见的记录会立即从列表与计数中消失，直接打开元数据、历史或下载都会 fail closed。";
+
+    /// <summary>工作台筛选口径声明（界面与接口同源）</summary>
+    public const string CenterFilterPolicyText =
+        "筛选只使用已持久化的显式元数据（归属类型 / 归属 Id / 归属号码快照 / 文件名快照 / 媒体类型 / 上传人 / "
+        + "登记日期区间 / 状态）：不扫描文件内容、不抓取任何远端地址、不做模糊跨记录匹配，"
+        + "也绝不因为文件名或摘要相同而合并或改派记录。";
+
+    /// <summary>工作台边界声明（只读 + 明确「不是什么」）</summary>
+    public const string CenterBoundaryText =
+        "附件是仓库内用户上传的不可信文件证据：不是批准、不是验货合格 / 不合格判定或质量认证、"
+        + "不是报关或税务提交 / 受理结果、不是付款授权或银行凭证、不是结算 / 对账确认，"
+        + "也不是出运许可或承运人 / 客户确认；工作台只读，不改写附件、父单据、工作流状态、库存、"
+        + "出运、单证、发票、税务、财务、审批与结算记录。";
+
+    /// <summary>工作台可见范围文案（授权类型为空时明确 fail closed，绝不把「看不到」写成「没有」）</summary>
+    public static string CenterScopeText(IReadOnlyList<string> authorizedTypeTexts, int unauthorizedTypeCount)
+    {
+        var scope = authorizedTypeTexts.Count == 0
+            ? "当前账号没有任何已授权的归属类型：工作台不显示记录与计数（fail closed）"
+            : $"当前账号可查看的归属类型：{string.Join(" / ", authorizedTypeTexts)}";
+
+        return unauthorizedTypeCount <= 0
+            ? scope
+            : $"{scope}；另有 {unauthorizedTypeCount} 类归属未授权"
+              + "（只显示「未授权」这一事实，不显示其记录、计数、文件名与摘要）";
+    }
+
+    /// <summary>工作台摘要文案（计数只在授权范围内统计，绝不把未授权类型计入合计）</summary>
+    public static string CenterSummaryText(int total, int active, int voided, int authorizedTypeCount)
+        => $"授权范围内共 {total} 条仓库附件证据（有效 {active} / 已作废 {voided}），覆盖 {authorizedTypeCount} 类归属；"
+           + "计数只统计当前账号已授权的归属类型，未授权类型既不计入合计也不单独显示。";
+
     // ==================== 10. 内部工具 ====================
 
     /// <summary>文件名中必须替换的不安全字符（文件系统保留字符 + 标记 / 引号类字符）</summary>

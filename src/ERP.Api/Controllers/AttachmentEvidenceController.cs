@@ -109,6 +109,76 @@ public class AttachmentEvidenceController : ControllerBase
             await AttachmentEvidenceService.SummarizeOwnersAsync(
                 _db, ownerType, AttachmentEvidenceRules.ParseOwnerIds(ids), cancellationToken)));
 
+    // ==================== ERP-064：附件中心工作台（只读、分页、按既有「角色 → 菜单」授权收敛） ====================
+
+    /// <summary>
+    /// 附件中心工作台台账（**只读、分页、有界**）：一次列出 ERP-061 / ERP-062 / ERP-063 交付的
+    /// 同一附件证据册中的**权威元数据**（归属快照 / 文件名快照 / 媒体类型 / 长度 / 摘要 / 上传人 /
+    /// 登记时间 / 状态与作废留痕），不复制二进制内容、不新增第二个附件登记表。
+    /// <para>结果**只包含**当前账号已获菜单授权的归属类型（授权口径 = 既有 <c>SysUserRoles</c> →
+    /// <c>SysRoleMenus</c> → <c>SysMenus.MenuCode</c>）：未授权类型既不返回记录也不返回计数，
+    /// 显式传入未授权类型时按「无可见记录」返回空页，不披露其存在性、文件名或摘要。</para>
+    /// <para>筛选只用已持久化的显式元数据，且分页有界；列表与计数都**不**访问任何存储内容。</para>
+    /// </summary>
+    [HttpGet("center")]
+    public async Task<IActionResult> GetCenterPaged(
+        [FromQuery] AttachmentEvidenceCenterQuery query, CancellationToken cancellationToken = default)
+        => Ok(ApiResponse<PagedResult<AttachmentEvidenceDto>>.Success(
+            await AttachmentEvidenceService.ListForCenterAsync(
+                _db, query, CurrentUserId(), cancellationToken)));
+
+    /// <summary>
+    /// 附件中心工作台摘要（**只读、有界**）：当前账号可见范围（哪些归属类型已授权 / 未授权、
+    /// 各需哪个既有菜单）+ **授权范围内**按状态拆分的计数 + 筛选项白名单 + 全部口径文案。
+    /// <para>未授权类型连计数行都不返回（不披露不可访问记录的存在性）；摘要不读取任何存储内容，
+    /// 也不返回文件名 / 摘要 / 存储键。</para>
+    /// </summary>
+    [HttpGet("center/summary")]
+    public async Task<IActionResult> GetCenterSummary(CancellationToken cancellationToken = default)
+        => Ok(ApiResponse<AttachmentEvidenceCenterSummaryDto>.Success(
+            await AttachmentEvidenceService.GetCenterSummaryAsync(
+                _db, CurrentUserId(), CurrentUserName(), cancellationToken)));
+
+    /// <summary>
+    /// 工作台内的证据元数据 / 历史（只读）：打开时**重新校验**当前账号对该归属类型的授权，
+    /// 未授权一律按「不存在」返回（fail closed，不披露证据 Id 与归属类型）；归属单据已删除 / 缺失时
+    /// 照实标注不可用，历史证据仍可只读查看（绝不改派、绝不静默修复）。
+    /// </summary>
+    [HttpGet("center/{id:long}")]
+    public async Task<IActionResult> GetCenterDetail(long id, CancellationToken cancellationToken = default)
+        => Ok(ApiResponse<AttachmentEvidenceDto>.Success(
+            await AttachmentEvidenceService.GetForCenterAsync(_db, id, CurrentUserId(), cancellationToken)));
+
+    /// <summary>
+    /// 工作台内的内容下载（**流式**、只读）：先重新校验归属类型授权（未授权 fail closed），
+    /// 再复用既有下载口径（证据有效 + 归属单据存在且未删除 + 长度 / 摘要一致）；
+    /// 以「附件」方式返回并附带防御性响应头，浏览器不内联渲染上传内容。
+    /// <para>内容只在用户**显式**发起下载时读取。</para>
+    /// </summary>
+    [HttpGet("center/{id:long}/content")]
+    public async Task<IActionResult> DownloadCenterContent(long id, CancellationToken cancellationToken = default)
+    {
+        var content = await AttachmentEvidenceService.OpenCenterContentAsync(
+            _db, _store, id, CurrentUserId(), cancellationToken);
+
+        SetDefensiveDownloadHeaders();
+        return File(content.Content, content.MediaType, content.FileName, enableRangeProcessing: false);
+    }
+
+    /// <summary>
+    /// 下载响应头统一口径：内容按**不可信文件**处理，强制 nosniff / sandbox / no-store，
+    /// 不允许内联渲染、不允许缓存、不暴露来源地址。既有与工作台两个下载动作共用同一口径。
+    /// </summary>
+    private void SetDefensiveDownloadHeaders()
+    {
+        Response.Headers["X-Content-Type-Options"] = "nosniff";
+        Response.Headers["Content-Security-Policy"] = "default-src 'none'; sandbox";
+        Response.Headers["Cache-Control"] = "no-store, no-cache, must-revalidate";
+        Response.Headers["Pragma"] = "no-cache";
+        Response.Headers["X-Download-Options"] = "noopen";
+        Response.Headers["Referrer-Policy"] = "no-referrer";
+    }
+
     /// <summary>证据详情（含归属单据可用性与可下载性标注；只读）</summary>
     [HttpGet("{id:long}")]
     public async Task<IActionResult> GetById(long id, CancellationToken cancellationToken = default)
@@ -168,12 +238,7 @@ public class AttachmentEvidenceController : ControllerBase
     {
         var content = await AttachmentEvidenceService.OpenContentAsync(_db, _store, id, cancellationToken);
 
-        Response.Headers["X-Content-Type-Options"] = "nosniff";
-        Response.Headers["Content-Security-Policy"] = "default-src 'none'; sandbox";
-        Response.Headers["Cache-Control"] = "no-store, no-cache, must-revalidate";
-        Response.Headers["Pragma"] = "no-cache";
-        Response.Headers["X-Download-Options"] = "noopen";
-        Response.Headers["Referrer-Policy"] = "no-referrer";
+        SetDefensiveDownloadHeaders();
 
         return File(content.Content, content.MediaType, content.FileName, enableRangeProcessing: false);
     }
