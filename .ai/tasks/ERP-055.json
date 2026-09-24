@@ -1,7 +1,7 @@
 {
   "id": "ERP-055",
   "title": "Add customer sales-invoice evidence register",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "medium",
   "description": "Add a customer sales-invoice evidence register for ordinary, special VAT and export invoice records, with explicit allocations to existing Sales Orders. Keep these accounting or tax invoice records distinct from Trade Document Commercial Invoices and do not issue an invoice, submit to a tax platform, infer order links, post accounts receivable, execute production SQL, deploy, or release.",
   "acceptance_criteria": [
@@ -51,5 +51,5 @@
     "status": "not_required",
     "reason": "Repository invoice evidence and non-production test schema only. Real invoice issuance, tax-platform access, production database execution, accounting posting, deployment and release remain behind mandatory human gates."
   },
-  "attempts": 0
+  "attempts": 1
 }

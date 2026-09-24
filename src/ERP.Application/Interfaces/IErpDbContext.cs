@@ -116,6 +116,22 @@ public interface IErpDbContext
     /// </summary>
     DbSet<CustomerReceiptAllocation> CustomerReceiptAllocations { get; }
 
+    // ============ 客户销项发票证据登记（ERP-055：普票 / 专票 / 出口发票证据台账 + 可选销售订单分摊） ============
+
+    /// <summary>
+    /// 客户销项发票证据（ERP-055）：登记普通发票 / 增值税专用发票 / 出口发票的运营证据，保留客户与
+    /// 可选单证交叉引用快照；不是开票系统、不是税务申报、不是应收账款台账或余额、不是收款核销，
+    /// 也不构成开票 / 纳税 / 债权结论，且不调用任何开票 / 税务服务、不改写销售订单与客户数据
+    /// </summary>
+    DbSet<CustomerSalesInvoiceEvidence> CustomerSalesInvoiceEvidences { get; }
+
+    /// <summary>
+    /// 客户销项发票证据 → 销售订单 的分摊证据行（ERP-055）：一张发票可把含税总额全部或部分分摊到一张或多张
+    /// 既有、未取消且客户与币种一致的销售订单，保留订单快照；不是已开票 / 已收款 / 已核销 / 应收余额结论，
+    /// 也不参与销售订单的出货、收款引用与库存计算
+    /// </summary>
+    DbSet<CustomerSalesInvoiceAllocation> CustomerSalesInvoiceAllocations { get; }
+
     // ============ 询价管理 ============
     DbSet<Inquiry> Inquiries { get; }
     DbSet<InquiryDetail> InquiryDetails { get; }

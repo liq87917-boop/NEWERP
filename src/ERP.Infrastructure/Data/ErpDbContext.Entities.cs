@@ -87,4 +87,11 @@ public partial class ErpDbContext
     // ============ 客户收款引用登记（ERP-053：收款单 → 销售订单 的引用证据行） ============
     /// <summary>收款引用行（收款单 / 客户 / 销售订单快照 + 引用金额 + 作废留痕；有效行唯一性由过滤唯一索引兜底）</summary>
     public DbSet<CustomerReceiptAllocation> CustomerReceiptAllocations => Set<CustomerReceiptAllocation>();
+
+    // ============ 客户销项发票证据登记（ERP-055：普票 / 专票 / 出口发票证据台账 + 可选销售订单分摊） ============
+    /// <summary>销项发票证据（发票身份 / 金额 / 状态 + 客户与可选单证交叉引用快照；有效身份唯一性由过滤唯一索引兜底）</summary>
+    public DbSet<CustomerSalesInvoiceEvidence> CustomerSalesInvoiceEvidences => Set<CustomerSalesInvoiceEvidence>();
+
+    /// <summary>销项发票证据分摊行（发票 → 销售订单；客户 / 订单快照 + 分摊金额；发票内同一订单唯一由过滤唯一索引兜底）</summary>
+    public DbSet<CustomerSalesInvoiceAllocation> CustomerSalesInvoiceAllocations => Set<CustomerSalesInvoiceAllocation>();
 }

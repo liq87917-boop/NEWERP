@@ -2197,5 +2197,122 @@ IF NOT EXISTS (SELECT 1 FROM sys.indexes
         ON db_owner.CustomerReceiptAllocations(Status, AllocatedAt)
         WHERE IsDeleted = 0;");
 
+        // 37. 客户销项发票证据登记（ERP-055：普票 / 专票 / 出口发票证据台账 + 可选销售订单分摊）
+        //     37.1 只建「销项发票证据」与「分摊行」两张表及其索引：**不含任何 UPDATE / INSERT / DELETE 语句**，
+        //          既有客户、销售订单、收款单与单证不因本段产生任何变化（没有发票数据时行为与历史完全一致）；
+        //     37.2 有效身份唯一：UX_CustomerSalesInvoiceEvidences_ActiveIdentity
+        //          （客户 + 发票类型 + 规范化代码 / 号码），过滤 IsDeleted = 0 AND Status <> 2 ——
+        //          作废记录保留可读但不占用身份（作废后可重新登记同一身份）；
+        //     37.3 分摊行唯一：UX_CustomerSalesInvoiceAllocations_InvoiceOrder（发票 + 销售订单），
+        //          过滤 IsDeleted = 0 —— 草稿期整体替换，登记后冻结，作废后保留；
+        //     37.4 客户 / 销售订单 / 单证只保存服务端写入的快照，**刻意不建任何外键**（本段不做任何既有表结构变更），
+        //          也不在客户 / 销售订单 / 收款单 / 单证表上加列 —— 客户停用或删除、订单取消或软删除、
+        //          单证删除都不影响历史证据可读（与 ERP-049 / ERP-053 的登记册口径一致）；
+        //     37.5 本段只建本模块两张表与其索引，不改写销售订单、客户资料、收款单与引用行、发票、库存与库存成本、
+        //          装柜与单证、佣金 / 回佣、退税、费用或客户信用数据，也不执行任何开票 / 报税 / 记账 / 核销语句。
+        await db.Database.ExecuteSqlRawAsync(@"
+IF OBJECT_ID('db_owner.CustomerSalesInvoiceEvidences') IS NULL
+BEGIN
+    CREATE TABLE db_owner.CustomerSalesInvoiceEvidences (
+        Id BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+        InvoiceType NVARCHAR(20) NOT NULL DEFAULT N'普票',
+        InvoiceCode NVARCHAR(50) NOT NULL DEFAULT N'',
+        InvoiceNumber NVARCHAR(50) NOT NULL DEFAULT N'',
+        NormalizedInvoiceCode NVARCHAR(50) NOT NULL DEFAULT N'',
+        NormalizedInvoiceNumber NVARCHAR(50) NOT NULL DEFAULT N'',
+        InvoiceDate DATETIME2 NOT NULL,
+        CustomerId BIGINT NOT NULL,
+        CustomerCode NVARCHAR(50) NOT NULL DEFAULT N'',
+        CustomerName NVARCHAR(200) NOT NULL DEFAULT N'',
+        Currency NVARCHAR(20) NOT NULL DEFAULT N'CNY',
+        NetAmount DECIMAL(18,2) NOT NULL DEFAULT 0,
+        TaxAmount DECIMAL(18,2) NOT NULL DEFAULT 0,
+        GrossAmount DECIMAL(18,2) NOT NULL DEFAULT 0,
+        TradeDocumentId BIGINT NULL,
+        TradeDocumentNo NVARCHAR(50) NOT NULL DEFAULT N'',
+        TradeDocumentDocType NVARCHAR(30) NOT NULL DEFAULT N'',
+        CommercialInvoiceReference NVARCHAR(100) NOT NULL DEFAULT N'',
+        Status INT NOT NULL DEFAULT 0,
+        RecordedAt DATETIME2 NULL,
+        VoidedAt DATETIME2 NULL,
+        VoidReason NVARCHAR(500) NOT NULL DEFAULT N'',
+        Remark NVARCHAR(500) NOT NULL DEFAULT N'',
+        CreatedAt DATETIME2 NOT NULL DEFAULT GETDATE(),
+        CreatedBy BIGINT NULL,
+        UpdatedAt DATETIME2 NULL,
+        UpdatedBy BIGINT NULL,
+        IsDeleted BIT NOT NULL DEFAULT 0,
+        RowVersion ROWVERSION NOT NULL
+    );
+END
+
+IF OBJECT_ID('db_owner.CustomerSalesInvoiceAllocations') IS NULL
+BEGIN
+    CREATE TABLE db_owner.CustomerSalesInvoiceAllocations (
+        Id BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+        CustomerSalesInvoiceEvidenceId BIGINT NOT NULL,
+        SalesOrderId BIGINT NOT NULL,
+        OrderNo NVARCHAR(50) NOT NULL DEFAULT N'',
+        OrderDate DATETIME2 NOT NULL,
+        OrderStatus INT NOT NULL DEFAULT 0,
+        OrderCurrency NVARCHAR(20) NOT NULL DEFAULT N'CNY',
+        CustomerId BIGINT NOT NULL,
+        CustomerCode NVARCHAR(50) NOT NULL DEFAULT N'',
+        CustomerName NVARCHAR(200) NOT NULL DEFAULT N'',
+        AllocatedAmount DECIMAL(18,2) NOT NULL DEFAULT 0,
+        Currency NVARCHAR(20) NOT NULL DEFAULT N'CNY',
+        SortOrder INT NOT NULL DEFAULT 0,
+        Remark NVARCHAR(500) NOT NULL DEFAULT N'',
+        CreatedAt DATETIME2 NOT NULL DEFAULT GETDATE(),
+        CreatedBy BIGINT NULL,
+        UpdatedAt DATETIME2 NULL,
+        UpdatedBy BIGINT NULL,
+        IsDeleted BIT NOT NULL DEFAULT 0,
+        RowVersion ROWVERSION NOT NULL
+    );
+END
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes
+               WHERE name = 'UX_CustomerSalesInvoiceEvidences_ActiveIdentity'
+                 AND object_id = OBJECT_ID('db_owner.CustomerSalesInvoiceEvidences'))
+    CREATE UNIQUE INDEX UX_CustomerSalesInvoiceEvidences_ActiveIdentity
+        ON db_owner.CustomerSalesInvoiceEvidences(CustomerId, InvoiceType, NormalizedInvoiceCode, NormalizedInvoiceNumber)
+        WHERE IsDeleted = 0 AND Status <> 2;
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes
+               WHERE name = 'IX_CustomerSalesInvoiceEvidences_CustomerId_Status'
+                 AND object_id = OBJECT_ID('db_owner.CustomerSalesInvoiceEvidences'))
+    CREATE INDEX IX_CustomerSalesInvoiceEvidences_CustomerId_Status
+        ON db_owner.CustomerSalesInvoiceEvidences(CustomerId, Status)
+        WHERE IsDeleted = 0;
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes
+               WHERE name = 'IX_CustomerSalesInvoiceEvidences_Status_InvoiceDate'
+                 AND object_id = OBJECT_ID('db_owner.CustomerSalesInvoiceEvidences'))
+    CREATE INDEX IX_CustomerSalesInvoiceEvidences_Status_InvoiceDate
+        ON db_owner.CustomerSalesInvoiceEvidences(Status, InvoiceDate)
+        WHERE IsDeleted = 0;
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes
+               WHERE name = 'IX_CustomerSalesInvoiceEvidences_NormalizedInvoiceNumber'
+                 AND object_id = OBJECT_ID('db_owner.CustomerSalesInvoiceEvidences'))
+    CREATE INDEX IX_CustomerSalesInvoiceEvidences_NormalizedInvoiceNumber
+        ON db_owner.CustomerSalesInvoiceEvidences(NormalizedInvoiceNumber)
+        WHERE IsDeleted = 0;
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes
+               WHERE name = 'UX_CustomerSalesInvoiceAllocations_InvoiceOrder'
+                 AND object_id = OBJECT_ID('db_owner.CustomerSalesInvoiceAllocations'))
+    CREATE UNIQUE INDEX UX_CustomerSalesInvoiceAllocations_InvoiceOrder
+        ON db_owner.CustomerSalesInvoiceAllocations(CustomerSalesInvoiceEvidenceId, SalesOrderId)
+        WHERE IsDeleted = 0;
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes
+               WHERE name = 'IX_CustomerSalesInvoiceAllocations_SalesOrderId'
+                 AND object_id = OBJECT_ID('db_owner.CustomerSalesInvoiceAllocations'))
+    CREATE INDEX IX_CustomerSalesInvoiceAllocations_SalesOrderId
+        ON db_owner.CustomerSalesInvoiceAllocations(SalesOrderId)
+        WHERE IsDeleted = 0;");
+
     }
 }

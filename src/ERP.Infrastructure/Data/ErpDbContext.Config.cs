@@ -642,6 +642,81 @@ public partial class ErpDbContext
         // 刻意不建任何外键（与 ERP-045 / ERP-047 / ERP-049 一致）：收款单只做软删除，销售订单 / 客户可能被软删除、
         // 取消、停用或改名 —— 本表只保存服务端快照，历史引用证据必须始终可读，也不参与二者的计算。
 
+        // ============ ERP-055：客户销项发票证据登记（普票 / 专票 / 出口发票证据台账 + 可选销售订单分摊） ============
+        // 设计口径：
+        //   1. 本模块只是**运营证据台账**：不建开票 / 税务申报 / 应收账款 / 账龄表，不生成凭证、收付款或结算单，
+        //      也不调用任何开票 / 税务服务、不改写销售订单状态 / 出货进度 / 金额与明细、客户信用状态、
+        //      客户收款单与其引用行、库存成本 / 流水、装柜与单证、佣金 / 回佣、退税与费用；
+        //   2. 有效身份唯一：同一「客户 + 发票类型 + 规范化代码 / 号码」在**未作废**（Status <> 2）记录内唯一
+        //      （UX_CustomerSalesInvoiceEvidences_ActiveIdentity，过滤 IsDeleted = 0 AND Status <> 2）：
+        //      作废记录保留可读但不占用身份；
+        //   3. 分摊行保存服务端快照（订单号 / 日期 / 状态 / 币种 / 客户）与分摊金额；**刻意不建**到销售订单 /
+        //      客户 / 单证的外键：订单软删除或取消、客户停用、单证删除都不影响历史证据可读；
+        //   4. 金额 DECIMAL(18,2)（币种精度最多 2 位，JPY 等 0 位由服务端按币种口径取整），
+        //      与 SchemaUpgrader 第 37 段建表类型一致；
+        //   5. 索引与 SchemaUpgrader 第 37 段同名同过滤条件，供客户 / 状态 / 开票日期与订单侧有界检索。
+        modelBuilder.Entity<CustomerSalesInvoiceEvidence>().Property(x => x.InvoiceType).HasMaxLength(20);
+        modelBuilder.Entity<CustomerSalesInvoiceEvidence>().Property(x => x.InvoiceCode).HasMaxLength(50);
+        modelBuilder.Entity<CustomerSalesInvoiceEvidence>().Property(x => x.InvoiceNumber).HasMaxLength(50);
+        modelBuilder.Entity<CustomerSalesInvoiceEvidence>().Property(x => x.NormalizedInvoiceCode).HasMaxLength(50);
+        modelBuilder.Entity<CustomerSalesInvoiceEvidence>().Property(x => x.NormalizedInvoiceNumber).HasMaxLength(50);
+        modelBuilder.Entity<CustomerSalesInvoiceEvidence>().Property(x => x.CustomerCode).HasMaxLength(50);
+        modelBuilder.Entity<CustomerSalesInvoiceEvidence>().Property(x => x.CustomerName).HasMaxLength(200);
+        modelBuilder.Entity<CustomerSalesInvoiceEvidence>().Property(x => x.Currency).HasMaxLength(20);
+        modelBuilder.Entity<CustomerSalesInvoiceEvidence>().Property(x => x.NetAmount).HasPrecision(18, 2);
+        modelBuilder.Entity<CustomerSalesInvoiceEvidence>().Property(x => x.TaxAmount).HasPrecision(18, 2);
+        modelBuilder.Entity<CustomerSalesInvoiceEvidence>().Property(x => x.GrossAmount).HasPrecision(18, 2);
+        modelBuilder.Entity<CustomerSalesInvoiceEvidence>().Property(x => x.TradeDocumentNo).HasMaxLength(50);
+        modelBuilder.Entity<CustomerSalesInvoiceEvidence>().Property(x => x.TradeDocumentDocType).HasMaxLength(30);
+        modelBuilder.Entity<CustomerSalesInvoiceEvidence>().Property(x => x.CommercialInvoiceReference).HasMaxLength(100);
+        modelBuilder.Entity<CustomerSalesInvoiceEvidence>().Property(x => x.VoidReason).HasMaxLength(500);
+        modelBuilder.Entity<CustomerSalesInvoiceEvidence>().Property(x => x.Remark).HasMaxLength(500);
+
+        modelBuilder.Entity<CustomerSalesInvoiceEvidence>()
+            .HasIndex(x => new
+            {
+                x.CustomerId,
+                x.InvoiceType,
+                x.NormalizedInvoiceCode,
+                x.NormalizedInvoiceNumber
+            })
+            .IsUnique().HasDatabaseName("UX_CustomerSalesInvoiceEvidences_ActiveIdentity")
+            .HasFilter("IsDeleted = 0 AND Status <> 2");
+
+        modelBuilder.Entity<CustomerSalesInvoiceEvidence>().HasIndex(x => new { x.CustomerId, x.Status })
+            .HasDatabaseName("IX_CustomerSalesInvoiceEvidences_CustomerId_Status")
+            .HasFilter("IsDeleted = 0");
+
+        modelBuilder.Entity<CustomerSalesInvoiceEvidence>().HasIndex(x => new { x.Status, x.InvoiceDate })
+            .HasDatabaseName("IX_CustomerSalesInvoiceEvidences_Status_InvoiceDate")
+            .HasFilter("IsDeleted = 0");
+
+        modelBuilder.Entity<CustomerSalesInvoiceEvidence>().HasIndex(x => x.NormalizedInvoiceNumber)
+            .HasDatabaseName("IX_CustomerSalesInvoiceEvidences_NormalizedInvoiceNumber")
+            .HasFilter("IsDeleted = 0");
+
+        modelBuilder.Entity<CustomerSalesInvoiceAllocation>().Property(x => x.OrderNo).HasMaxLength(50);
+        modelBuilder.Entity<CustomerSalesInvoiceAllocation>().Property(x => x.OrderCurrency).HasMaxLength(20);
+        modelBuilder.Entity<CustomerSalesInvoiceAllocation>().Property(x => x.CustomerCode).HasMaxLength(50);
+        modelBuilder.Entity<CustomerSalesInvoiceAllocation>().Property(x => x.CustomerName).HasMaxLength(200);
+        modelBuilder.Entity<CustomerSalesInvoiceAllocation>().Property(x => x.AllocatedAmount).HasPrecision(18, 2);
+        modelBuilder.Entity<CustomerSalesInvoiceAllocation>().Property(x => x.Currency).HasMaxLength(20);
+        modelBuilder.Entity<CustomerSalesInvoiceAllocation>().Property(x => x.Remark).HasMaxLength(500);
+
+        // 同一张发票内同一张销售订单只能分摊一次（重复提交由服务端先行拒绝，索引为并发兜底）
+        modelBuilder.Entity<CustomerSalesInvoiceAllocation>()
+            .HasIndex(x => new { x.CustomerSalesInvoiceEvidenceId, x.SalesOrderId })
+            .IsUnique().HasDatabaseName("UX_CustomerSalesInvoiceAllocations_InvoiceOrder")
+            .HasFilter("IsDeleted = 0");
+
+        modelBuilder.Entity<CustomerSalesInvoiceAllocation>().HasIndex(x => x.SalesOrderId)
+            .HasDatabaseName("IX_CustomerSalesInvoiceAllocations_SalesOrderId")
+            .HasFilter("IsDeleted = 0");
+
+        // 刻意不建任何外键、也不建导航属性（与 ERP-045 / ERP-047 / ERP-049 / ERP-053 一致）：
+        // 发票证据本身只做软删除，销售订单可能被取消或软删除、客户可能停用或删除、单证可能被删除 ——
+        // 本表只保存服务端快照，历史证据必须始终可读，也不参与它们的金额与状态计算。
+
         // ============ ERP-051：单证明细行快照（商业发票 / 装箱单 的商品明细证据行） ============
         // 设计口径：
         //   1. 明细行是单证的**行级快照证据**：不是第二套商品主数据、不是库存交易、不是报关核定价格、
