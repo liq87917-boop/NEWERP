@@ -1,0 +1,54 @@
+{
+  "id": "ERP-054",
+  "title": "Expose customer-receipt allocation evidence in order reconciliation workflows",
+  "status": "pending",
+  "risk_level": "medium",
+  "description": "Extend existing Sales Order and ERP-046 customer order/receipt reconciliation workflows with read-only allocation evidence from ERP-053. Keep ordered, shipped and receipt-reference evidence distinct and do not calculate or claim an accounts-receivable balance, settlement result, due date, aging bucket or Customer credit decision. Do not infer links, mutate source records, execute production SQL, deploy, or release.",
+  "acceptance_criteria": [
+    "Sales Order detail exposes active allocated customer-receipt evidence, allocation count and unallocated or unavailable context using only canonical persisted ERP-053 allocation rows.",
+    "Sales Order lists expose a bounded receipt-evidence summary without issuing a database query per row.",
+    "The ERP-046 customer order/receipt reconciliation workflow displays recorded receipt-reference evidence alongside ordered and shipment evidence while keeping each evidence class in separately labeled fields.",
+    "Customer and currency mismatches in historical evidence are displayed as invalid or unavailable and are never silently converted, merged or reassigned.",
+    "Voided allocation evidence is excluded from active totals but remains inspectable through an explicit historical status or detail view.",
+    "Missing receipt allocation evidence is shown as none or unknown as appropriate and is never converted into unpaid, paid, overdue, settled or outstanding status.",
+    "The UI and documentation state that receipt allocations are operational reference evidence, not confirmation of bank settlement, an accounts-receivable ledger, a legal Customer statement, payment authorization or credit decision.",
+    "The workflow is read-only and does not change Sales Orders, shipment records, receipt documents, Customer credit state, inventory, invoices, commissions, expenses or tax records.",
+    "Queries are bounded or paged, avoid per-row database access and reuse ERP-032, ERP-046 and ERP-053 authoritative semantics rather than implementing a second reconciliation engine.",
+    "Existing orders and reports with no explicit allocation rows remain readable without request-time or production backfill.",
+    "Unit/integration tests cover no evidence, partial and multiple allocations, void history, mismatched historical evidence, multiple Customers and currencies, bounded queries and source-record non-mutation; safe validation passes and browser acceptance is recorded as deferred during development."
+  ],
+  "allowed_paths": [
+    "src/ERP.Application/**",
+    "src/ERP.Api/Controllers/**",
+    "src/ERP.Api/wwwroot/**",
+    "src/ERP.UnitTests/**",
+    "src/ERP.IntegrationTests/**",
+    "docs/**",
+    ".ai/**"
+  ],
+  "depends_on": [
+    "ERP-046",
+    "ERP-053"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "browser",
+  "browser_acceptance": {
+    "required": true,
+    "scenarios": [
+      "Open a Sales Order with partial shipment and customer-receipt allocation evidence and verify ordered, shipped and receipt-reference values remain separately labeled and match their source records.",
+      "Inspect an order with voided, mismatched or missing receipt evidence and verify it is not presented as paid, settled, outstanding or overdue and that no source record changes."
+    ],
+    "test_filter": "Collection=UiTests",
+    "minimum_screenshots": 2
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L2",
+    "status": "not_required",
+    "reason": "Read-only presentation of repository receipt-reference evidence. No real receipt, production mutation, settlement, credit decision, deployment or release is authorized."
+  },
+  "attempts": 0
+}

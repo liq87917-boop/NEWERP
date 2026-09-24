@@ -1,0 +1,55 @@
+{
+  "id": "ERP-053",
+  "title": "Add traceable customer-receipt allocations to Sales Orders",
+  "status": "pending",
+  "risk_level": "medium",
+  "description": "Add one canonical explicit allocation register between existing customer-receipt evidence and Sales Orders so users can record which orders a receipt document refers to without creating or executing a receipt. Reuse any equivalent authoritative persisted relationship already present in ERP-032 rather than creating a competing allocation model. Do not infer links, mark orders as settled, calculate a legal accounts-receivable balance, move funds, execute production SQL, deploy, or release.",
+  "acceptance_criteria": [
+    "Users can maintain bounded allocation rows for an existing non-deleted customer-receipt evidence record, each referencing one existing non-cancelled Sales Order and recording an allocation amount plus bounded notes.",
+    "The implementation first audits and reuses any equivalent authoritative ERP-032 receipt-to-order relationship; the repository must end with one canonical persisted allocation model rather than two competing link schemas.",
+    "The server validates authoritative Customer and currency compatibility between the receipt evidence and every Sales Order; mismatches are rejected and are never converted, reassigned or matched by number, text, date or amount similarity.",
+    "The sum of active allocation rows cannot exceed the authoritative receipt-evidence amount, currency precision is enforced server-side, and duplicate active links to the same Sales Order within one receipt document are rejected.",
+    "Allocation rows preserve bounded receipt, Customer, Sales Order and currency snapshots so historical evidence remains identifiable when a referenced master record later becomes unavailable.",
+    "Users can void an incorrect allocation with a reason while preserving its original values and history; hard deletion, silent replacement and rewriting of previously voided evidence are not provided.",
+    "The workflow labels allocations as receipt-reference evidence rather than proof of bank settlement, legal discharge, accounts-receivable balance, customer statement or tax position.",
+    "Creating or voiding an allocation does not change the receipt document's execution state, Sales Order status, shipment progress, Customer credit state, inventory, invoices, commissions, expenses or tax records.",
+    "Existing receipt evidence and Sales Orders remain readable without allocation rows, and no request-time or production backfill is performed.",
+    "List and detail queries are bounded or paged and avoid per-row database queries; repository schema changes are idempotent and are validated only through permitted local or test-database paths.",
+    "Unit/integration tests cover full and partial allocation, multiple orders, Customer and currency mismatch, over-allocation, duplicate links, void history, legacy records, bounded queries and source-record non-mutation; safe validation passes and browser acceptance is recorded as deferred during development."
+  ],
+  "allowed_paths": [
+    "src/ERP.Domain/**",
+    "src/ERP.Application/**",
+    "src/ERP.Infrastructure/**",
+    "src/ERP.Api/Controllers/**",
+    "src/ERP.Api/wwwroot/**",
+    "src/ERP.UnitTests/**",
+    "src/ERP.IntegrationTests/**",
+    "docs/**",
+    ".ai/**"
+  ],
+  "depends_on": [
+    "ERP-032"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "browser",
+  "browser_acceptance": {
+    "required": true,
+    "scenarios": [
+      "Open an existing customer-receipt evidence record, allocate part of its amount to two compatible Sales Orders, and verify the traceable rows and remaining unallocated evidence without changing either order.",
+      "Attempt a Customer or currency mismatch and an over-allocation, verify they are rejected, then void a valid allocation and verify its history remains visible without presenting the receipt as settlement."
+    ],
+    "test_filter": "Collection=UiTests",
+    "minimum_screenshots": 2
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L2",
+    "status": "not_required",
+    "reason": "Repository allocation evidence and non-production test schema only. Real receipt execution, production database changes, irreversible finance operations, deployment and release remain behind mandatory human gates."
+  },
+  "attempts": 0
+}

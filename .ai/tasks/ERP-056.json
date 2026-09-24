@@ -1,0 +1,56 @@
+{
+  "id": "ERP-056",
+  "title": "Expose sales-invoice evidence in customer reconciliation workflows",
+  "status": "pending",
+  "risk_level": "medium",
+  "description": "Extend existing Sales Order and ERP-046 customer reconciliation workflows with read-only sales-invoice allocation evidence from ERP-055 and receipt-reference evidence from ERP-053. Keep ordered, shipped, invoiced and receipt-reference amounts distinct and do not calculate or claim an accounts-receivable balance, tax liability, settlement result, due date or aging bucket. Do not infer links, mutate source records, execute production SQL, deploy, or release.",
+  "acceptance_criteria": [
+    "Sales Order detail exposes active allocated customer sales-invoice evidence, invoice count and unallocated or unavailable context using only persisted ERP-055 allocation rows.",
+    "Sales Order lists expose a bounded sales-invoice evidence summary without issuing a database query per row.",
+    "The ERP-046 reconciliation workflow displays ordered, shipment, sales-invoice and customer-receipt allocation evidence in separate labeled fields and never nets them into an asserted accounts-receivable balance.",
+    "Amounts are grouped or displayed by currency and different currencies are never combined, converted or reassigned without an authoritative persisted conversion that is already part of the source record.",
+    "Draft and voided invoice evidence is distinguished from active recorded evidence; voided evidence is excluded from active totals but remains inspectable historically.",
+    "Customer or currency mismatches in historical invoice or receipt evidence are displayed as invalid or unavailable and are not silently merged with compatible evidence.",
+    "Missing invoice or receipt evidence is shown as none or unknown and is never converted into uninvoiced tax liability, unpaid, paid, settled, outstanding or overdue status.",
+    "The UI and documentation state that the workflow is an operational evidence view, not an accounts-receivable ledger, legal Customer statement, tax filing report, payment authorization, settlement result or aging statement.",
+    "The workflow is read-only and does not update invoices, Sales Orders, shipment records, receipt evidence, Customer credit state, commissions, inventory, finance or tax records.",
+    "Queries are bounded or paged, avoid per-row database access and reuse ERP-046, ERP-053, ERP-054 and ERP-055 authoritative semantics rather than implementing another reconciliation engine.",
+    "Unit/integration tests cover no evidence, full and partial invoice allocation, receipt evidence, void history, mismatched historical evidence, multiple Customers and currencies, bounded queries and source-record non-mutation; safe validation passes and browser acceptance is recorded as deferred during development."
+  ],
+  "allowed_paths": [
+    "src/ERP.Application/**",
+    "src/ERP.Api/Controllers/**",
+    "src/ERP.Api/wwwroot/**",
+    "src/ERP.UnitTests/**",
+    "src/ERP.IntegrationTests/**",
+    "docs/**",
+    ".ai/**"
+  ],
+  "depends_on": [
+    "ERP-046",
+    "ERP-053",
+    "ERP-054",
+    "ERP-055"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "browser",
+  "browser_acceptance": {
+    "required": true,
+    "scenarios": [
+      "Open a Sales Order with partial shipment, sales-invoice allocation and customer-receipt allocation evidence and verify all evidence classes remain separately labeled in one currency.",
+      "Inspect an order with draft, voided, mismatched or missing invoice evidence and verify it is not presented as taxable, paid, settled, outstanding or overdue and that no source record changes."
+    ],
+    "test_filter": "Collection=UiTests",
+    "minimum_screenshots": 2
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L2",
+    "status": "not_required",
+    "reason": "Read-only presentation of repository invoice and receipt evidence. No invoice issuance, tax submission, accounting posting, real settlement, production mutation, deployment or release is authorized."
+  },
+  "attempts": 0
+}
