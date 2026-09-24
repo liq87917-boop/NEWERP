@@ -1,0 +1,52 @@
+{
+  "id": "ERP-061",
+  "title": "Add secure attachment evidence to Sales and Purchase Orders",
+  "status": "pending",
+  "risk_level": "medium",
+  "description": "Add one canonical attachment-evidence registry for existing Sales Orders and Purchase Orders, first auditing and reusing any existing approved storage abstraction rather than creating competing file stores. Files are user-supplied untrusted evidence linked through explicit authoritative record identifiers. Do not fetch remote URLs, execute or render uploaded active content, expose server paths, configure or access production OSS, execute production SQL, deploy, or release.",
+  "acceptance_criteria": [
+    "The implementation audits existing file, image and storage code and leaves one canonical attachment metadata and content-access model rather than adding a second incompatible attachment subsystem.",
+    "Authorized users can upload bounded PDF, PNG or JPEG evidence to an existing non-deleted Sales Order or Purchase Order through an explicit owner type and owner identifier; unsupported owners and missing or deleted records are rejected server-side.",
+    "The server enforces a documented size limit, validates extension, declared content type and file signature, rejects active or executable formats, ignores client paths and stores content under server-generated opaque identifiers outside the web root.",
+    "Each record preserves a sanitized original filename snapshot, media type, byte length, SHA-256 digest, bounded description, uploader and recorded time; the client cannot supply trusted digest, storage key, owner snapshot or audit fields.",
+    "Attachment content is treated as untrusted and is downloaded with a safe attachment disposition and defensive response headers; uploaded content is never executed, transformed into markup or exposed through a directly guessable filesystem or OSS path.",
+    "Direct metadata and download requests revalidate access to the authoritative parent record and cannot bypass the same authentication and module authorization used by the Sales Order or Purchase Order workflow.",
+    "Incorrect evidence can be voided with a bounded reason while preserving metadata, digest, original ownership and audit history; hard deletion, silent binary replacement and reassignment to another owner are not provided.",
+    "Lists are bounded or paged, downloads are streamed with bounded resource use, duplicate content is not silently treated as the same business evidence, and legacy orders without attachments remain readable without backfill.",
+    "Development and tests use only an isolated non-production provider; production OSS credentials, bucket configuration, migration and activation are absent and remain behind the existing production OSS human gate.",
+    "Uploading, reading or voiding attachment evidence does not change order status, amounts, inventory, shipment, invoice, tax, finance, approval or settlement records.",
+    "Unit/integration tests cover both owner types, invalid owners, authorization checks, size and signature validation, unsafe filenames and formats, digest integrity, void history, bounded listing and adjacent-record non-mutation; safe validation passes and browser acceptance is recorded as deferred during development."
+  ],
+  "allowed_paths": [
+    "src/ERP.Domain/**",
+    "src/ERP.Application/**",
+    "src/ERP.Infrastructure/**",
+    "src/ERP.Api/**",
+    "src/ERP.UnitTests/**",
+    "src/ERP.IntegrationTests/**",
+    "docs/**",
+    ".ai/**"
+  ],
+  "depends_on": [],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "browser",
+  "browser_acceptance": {
+    "required": true,
+    "scenarios": [
+      "Open an existing Sales Order and Purchase Order, upload allowed PDF or image evidence with a description, then verify metadata and a safe download without changing either order.",
+      "Attempt an unsafe format, mismatched file signature and missing owner, verify rejection, then void valid evidence and confirm its digest and original metadata remain visible in history while active download is unavailable."
+    ],
+    "test_filter": "Collection=UiTests",
+    "minimum_screenshots": 2
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L2",
+    "status": "not_required",
+    "reason": "Repository implementation and isolated non-production attachment validation only. Production OSS configuration or mutation, production database execution, deployment and release remain behind mandatory human gates."
+  },
+  "attempts": 0
+}

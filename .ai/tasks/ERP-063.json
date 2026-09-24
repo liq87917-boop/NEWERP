@@ -1,0 +1,52 @@
+{
+  "id": "ERP-063",
+  "title": "Expose quality inspection and sample attachment evidence",
+  "status": "pending",
+  "risk_level": "medium",
+  "description": "Extend the canonical ERP-061 attachment registry to the repository's authoritative quality-inspection and sample records. Preserve user-supplied reports and images as untrusted operational evidence without creating duplicate inspection, sample or storage masters. Do not infer quality approval, fetch third-party sources, render active content, configure production OSS, execute production SQL, deploy, or release.",
+  "acceptance_criteria": [
+    "The implementation first audits the existing quality-inspection and sample entities and uses their authoritative persisted identifiers and existing workflows rather than matching order numbers, product text, filenames or remarks.",
+    "Authorized users can attach bounded PDF, PNG or JPEG evidence to existing non-deleted quality-inspection and sample records through ERP-061 services and the same signature, size, filename, digest and safe-download controls.",
+    "Inspection reports and sample images are labeled as user-recorded repository evidence and are never converted into automatic pass, fail, approval, certification, shipment authorization or supplier-performance decisions.",
+    "Direct metadata, history and download requests revalidate the authoritative parent record and its existing authentication and module authorization, preventing attachment identifiers from bypassing parent access.",
+    "Voiding preserves original ownership, metadata, digest and reason; hard deletion, silent replacement, cross-record reassignment and implicit sharing between inspection and sample records are not provided.",
+    "Missing or unavailable attachment evidence is shown as none or unavailable and is never interpreted as no defect, passed inspection, approved sample or completed report.",
+    "Lists expose bounded attachment summaries without per-row storage access, and legacy quality or sample records remain readable without request-time or production backfill.",
+    "Adding, reading or voiding evidence does not change inspection result, sample status, Product, supplier, customer, Sales Order, Purchase Order, inventory, shipment, invoice, tax or finance records.",
+    "Unsafe filenames and uploaded text are encoded as plain text; file content is downloaded rather than executed or embedded as active markup.",
+    "Unit/integration tests cover both parent types, invalid and unavailable parents, authorization, allowed and rejected content, void history, bounded summaries and adjacent-record non-mutation; safe validation passes and browser acceptance is recorded as deferred during development."
+  ],
+  "allowed_paths": [
+    "src/ERP.Application/**",
+    "src/ERP.Infrastructure/**",
+    "src/ERP.Api/**",
+    "src/ERP.UnitTests/**",
+    "src/ERP.IntegrationTests/**",
+    "docs/**",
+    ".ai/**"
+  ],
+  "depends_on": [
+    "ERP-061"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "browser",
+  "browser_acceptance": {
+    "required": true,
+    "scenarios": [
+      "Open an existing quality-inspection record and sample record, upload allowed report or image evidence, and verify each file remains linked only to its explicit parent without changing inspection or sample status.",
+      "Attempt an invalid parent and unsafe content, verify rejection, then void valid evidence and confirm history remains visible without being presented as an inspection pass or approved sample."
+    ],
+    "test_filter": "Collection=UiTests",
+    "minimum_screenshots": 2
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L2",
+    "status": "not_required",
+    "reason": "Repository-only attachment evidence using isolated non-production storage. Quality certification, external data access, production OSS or database changes, deployment and release remain behind mandatory human gates."
+  },
+  "attempts": 0
+}

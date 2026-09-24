@@ -1,0 +1,54 @@
+{
+  "id": "ERP-064",
+  "title": "Add a bounded authorized attachment center workspace",
+  "status": "pending",
+  "risk_level": "medium",
+  "description": "Add a read-only attachment center workspace over the canonical attachment evidence delivered by ERP-061 through ERP-063. The workspace must filter out records whose authoritative parents the current user cannot access and must not become a cross-module authorization bypass. Do not inspect file contents, infer business outcomes, configure production OSS, execute production SQL, deploy, or release.",
+  "acceptance_criteria": [
+    "One attachment center workspace lists canonical metadata from ERP-061 through ERP-063 and does not copy binaries, duplicate metadata or create another attachment registry.",
+    "The workspace supports bounded or paged filtering by explicit owner type, owner identifier or number snapshot, filename snapshot, media type, uploader, recorded-date range and active or voided status.",
+    "Every row, count and filter result is restricted to authoritative parent records the current user is allowed to access; inaccessible parent existence, filenames, counts, digests and history are not disclosed.",
+    "Opening metadata, history or a download from the workspace revalidates current parent access and fails closed when the parent is deleted, unavailable or no longer authorized.",
+    "Search uses explicit persisted metadata and bounded normalized filters; it does not scan file contents, fetch remote URLs, perform fuzzy cross-record matching or combine records because filenames or digests match.",
+    "Active and voided evidence are separately labeled, unavailable historical owners remain visibly unavailable to authorized historical viewers, and no record is silently reassigned or repaired.",
+    "The UI states that attachments are untrusted repository evidence and not approval, inspection outcome, customs or tax submission, payment authorization, settlement confirmation or permission to ship.",
+    "List and summary queries are bounded, avoid per-row database or storage access, do not read binary content, and downloads stream only after an explicit authorized user action.",
+    "The workspace is read-only and does not change attachments, parent documents, workflow status, inventory, shipment, invoice, tax, finance, approval or settlement records.",
+    "The page and menu registration reuse existing authorization conventions and do not add public, anonymous or production-storage endpoints.",
+    "Unit/integration tests cover mixed owner types, inaccessible parents, permission changes, active and void history, bounded pagination, no N+1 or content reads and source-record non-mutation; safe validation passes and browser acceptance is recorded as deferred during development."
+  ],
+  "allowed_paths": [
+    "src/ERP.Application/**",
+    "src/ERP.Api/**",
+    "src/ERP.UnitTests/**",
+    "src/ERP.IntegrationTests/**",
+    "docs/**",
+    ".ai/**"
+  ],
+  "depends_on": [
+    "ERP-061",
+    "ERP-062",
+    "ERP-063"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "browser",
+  "browser_acceptance": {
+    "required": true,
+    "scenarios": [
+      "Open the attachment center with authorized Sales Order, Purchase Order, Trade Document, inspection and sample evidence, filter by owner and date, and verify metadata and safe downloads without reading binary content during list loading.",
+      "Use a user lacking access to one parent record and verify its row, counts, filename and digest are absent; revoke access to a previously visible parent and verify direct metadata and download requests fail closed."
+    ],
+    "test_filter": "Collection=UiTests",
+    "minimum_screenshots": 3
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L2",
+    "status": "not_required",
+    "reason": "Read-only workspace over repository attachment metadata. Production storage, production database changes, deployment and release remain behind mandatory human gates."
+  },
+  "attempts": 0
+}

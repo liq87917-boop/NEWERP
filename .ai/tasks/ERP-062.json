@@ -1,0 +1,52 @@
+{
+  "id": "ERP-062",
+  "title": "Expose scanned attachment evidence in Trade Documents",
+  "status": "pending",
+  "risk_level": "medium",
+  "description": "Extend the canonical ERP-061 attachment registry to existing Trade Documents so users can retain scanned document evidence without overloading FileNote or creating another storage model. Keep repository evidence distinct from customs, tax or carrier submission. Do not render active uploads, submit files externally, configure production OSS, execute production SQL, deploy, or release.",
+  "acceptance_criteria": [
+    "Trade Document detail uses the ERP-061 canonical attachment metadata, storage and history services and does not add another binary table, free-form path field or document-specific upload engine.",
+    "Authorized users can add bounded PDF, PNG or JPEG evidence to an existing non-deleted Trade Document using its explicit persisted identifier, with the same signature, size, filename and safe-download controls as ERP-061.",
+    "The workflow labels files as repository attachment evidence and never presents an upload as customs acceptance, tax filing, carrier confirmation, document delivery or permission to ship.",
+    "Attachment access revalidates the authoritative Trade Document and its existing authentication and module authorization on every metadata, history and download request.",
+    "Voided attachments are excluded from the active list but remain inspectable in explicit history with original filename, digest, uploader, recorded time and void reason; they cannot be silently replaced or moved to another document.",
+    "Legacy FileNote text remains readable and is not parsed as a path, fetched as a URL, converted into an attachment or backfilled at request time.",
+    "Trade Document lists expose only bounded attachment counts or availability summaries without per-row database or storage access; content is loaded only by an explicit authorized download request.",
+    "Adding, reading or voiding an attachment does not alter Trade Document status, item snapshots, source Sales Orders or loading lists, invoices, customs, tax, inventory, finance or settlement records.",
+    "Different Trade Documents are never combined or linked because their numbers, filenames, references or digests match, and unavailable historical owners are visibly marked rather than reassigned.",
+    "Unit/integration tests cover supported Trade Document types, legacy FileNote values, unavailable owners, authorization, active and void history, bounded summaries, safe download behavior and source-record non-mutation; safe validation passes and browser acceptance is recorded as deferred during development."
+  ],
+  "allowed_paths": [
+    "src/ERP.Application/**",
+    "src/ERP.Infrastructure/**",
+    "src/ERP.Api/**",
+    "src/ERP.UnitTests/**",
+    "src/ERP.IntegrationTests/**",
+    "docs/**",
+    ".ai/**"
+  ],
+  "depends_on": [
+    "ERP-061"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "browser",
+  "browser_acceptance": {
+    "required": true,
+    "scenarios": [
+      "Open an existing Trade Document, upload a scanned PDF and image, and verify active metadata and safe downloads remain attached only to that document without changing its status or line snapshots.",
+      "Open a legacy Trade Document containing FileNote text, verify the text is not fetched or converted, then void an attachment and confirm its original evidence remains in history without being presented as submitted or accepted externally."
+    ],
+    "test_filter": "Collection=UiTests",
+    "minimum_screenshots": 2
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L2",
+    "status": "not_required",
+    "reason": "Repository-only extension of the non-production attachment registry. External submission, production OSS or database changes, deployment and release remain behind mandatory human gates."
+  },
+  "attempts": 0
+}
