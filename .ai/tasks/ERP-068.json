@@ -1,7 +1,7 @@
 {
   "id": "ERP-068",
   "title": "Add bounded supplier reconciliation and aging workspace",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "medium",
   "description": "Add a bounded read-only supplier reconciliation and aging workspace over ERP-065 invoices and ERP-066 explicit payment allocations. Derive only arithmetic evidence supported by persisted invoice dates, optional due dates and active allocations. Do not create a general ledger, invent due dates, authorize payment, contact suppliers, execute production SQL, deploy, or release.",
   "acceptance_criteria": [
@@ -51,5 +51,5 @@
     "status": "not_required",
     "reason": "Read-only arithmetic over repository evidence and non-production validation only. Supplier contact, real payment, accounting posting, tax action, production database mutation, deployment and release remain behind mandatory human gates."
   },
-  "attempts": 0
+  "attempts": 1
 }

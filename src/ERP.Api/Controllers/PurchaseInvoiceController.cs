@@ -58,6 +58,37 @@ public class PurchaseInvoiceController : ControllerBase
             await SupplierInvoiceReconciliation.ForQueryAsync(_db, query)));
 
     /// <summary>
+    /// 供应商对账与账龄工作台（ERP-068，**只读派生**）：按「供应商 + 币种」列出 ERP-065 持久化供应商采购发票证据、
+    /// ERP-066 有效已分配付款引用证据与算术剩余证据（含税总额 − 有效已分配），并按**显式到期日**与**显式 as-of 日期**
+    /// 计算互斥账龄桶；未登记到期日的发票进入独立的「未知到期日」分组，不同币种分别成行、绝不合并、不做汇率换算。
+    /// <para>本接口<strong>不是</strong>总账或应付账款余额、<strong>不是</strong>法定供应商对账单、<strong>不是</strong>付款授权、
+    /// <strong>不是</strong>税务申报、<strong>不是</strong>结算确认：它<strong>不写库</strong>、不改任何发票 / 引用行 / 付款单 /
+    /// 采购订单 / 库存 / 财务 / 税务记录，也不新增或修改任何表列（仓库对账口径的证据数字）。</para>
+    /// </summary>
+    [HttpGet("reconciliation-aging")]
+    public async Task<IActionResult> ReconciliationAging([FromQuery] SupplierReconciliationAgingQuery query)
+        => Ok(ApiResponse<SupplierReconciliationAgingReport>.Success(
+            await SupplierReconciliationAging.ForQueryAsync(_db, query)));
+
+    /// <summary>
+    /// 单张发票的对账与账龄证据明细（ERP-068，**只读派生**，与列表同一派生口径）：打开明细时**重新校验**
+    /// 当前登录身份与既有「角色 → 菜单」模块授权（<c>SysUserRoles</c> → <c>SysRoleMenus</c> → <c>SysMenus</c>），
+    /// 并重新读取权威来源；未认证 / 未获该模块授权 / 发票不存在或已删除时一律拒绝（fail closed），
+    /// 不返回任何部分证据，也不做来源修复或改派。
+    /// </summary>
+    [HttpGet("reconciliation-aging/invoices/{invoiceId:long}")]
+    public async Task<IActionResult> ReconciliationAgingInvoiceDetail(
+        long invoiceId, [FromQuery] DateTime? asOfDate = null)
+        => Ok(ApiResponse<SupplierReconciliationAgingInvoiceDetail>.Success(
+            await SupplierReconciliationAging.ForInvoiceDetailAsync(_db, invoiceId, CurrentUserId(), asOfDate)));
+
+    /// <summary>当前登录用户 Id（缺失或非数字时返回 null，由明细接口 fail closed 拒绝，绝不猜测身份）</summary>
+    private long? CurrentUserId()
+        => long.TryParse(User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value, out var id)
+            ? id
+            : null;
+
+    /// <summary>
     /// 新增草稿发票：校验发票类型 / 代码 / 号码、供应商（必须存在且启用）、币种与金额等式
     /// （含税总额 = 不含税金额 + 税额，按币种精度取整后严格相等），校验可选到期日（不得早于开票日期；
     /// 留空 = 未知，不按供应商默认账期推算）与付款条件（有界文本快照），并拒绝重复身份。
