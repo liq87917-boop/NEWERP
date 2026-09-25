@@ -377,6 +377,38 @@
 - **未做项（ERP-052 范围）**：由销售订单 / 装柜清单生成单证时带入明细、Excel 导出明细列、共享打印明细区（打印模型 `HasDetailLines` 本轮保持 `false`）；
   浏览器 / UI 验收按 `browser_deferred` 延后到 `FINAL-UI-ACCEPTANCE`。
 
+### 5.18 ERP-072 代理服务费对账与账龄工作台（只读派生，无新增表 / 无新增列）（2026-09-25）
+
+> 任务：`ERP-072`「Add bounded agency fee reconciliation workspace」（依赖 ERP-070 / ERP-071，Human Gate L2 `not_required`，`validation_profile: safe`；浏览器验收按 `browser_deferred` 延后到 `FINAL-UI-ACCEPTANCE`）。
+
+- **目标**：在 ERP-070 对账单证据与 ERP-071 收款分摊行之上，给出**只读**的运营性对账与账龄视图：按「客户 + 币种」列出
+  ①对账单合计证据（持久化 `TotalAmount`）、②**有效**收款分摊证据（未作废 + 对账单仍已登记 + 快照客户 / 币种自洽 + 收款单仍可读未取消）、
+  ③算术剩余证据（① − ②，只有两侧都可确认时才给出），并按**显式到期日**与**显式 as-of 日期**计算互斥账龄桶
+  （未到期 / 1~30 / 31~60 / 61~90 / &gt;90；未登记到期日的对账单进入独立的「未知到期日」分组，不计算账龄）。
+- **关键决策**：本模块**不新增表、不新增列、不加外键、不做回填、不写库**——既有模型里没有任何客户侧服务费对账派生，
+  因此只新增「应用服务 + 控制器 + 前端页面」的只读派生视图（口径与 ERP-068 供应商对账与账龄工作台同源）；
+  草稿 / 已作废对账单单独标注并被排除在有效合计与账龄桶之外；已作废分摊行与无效 / 无法确认链接**保留可见但永不并入**有效合计；
+  不同币种**分别成行、绝不合并**（DTO 与界面**没有任何跨币种总额字段**，单元测试以反射锁定）；
+  有效已分摊超过对账单合计时按**无效证据**显示，**绝不轧为 0**。
+- **读取口径**：固定 **8 次**数据集访问（对账单筛选 / 计数 / 分页 1 次 + 本页装载 1 次 + 分摊行 3 次聚合 + 本页客户 + 本页协议 + 来源行 2 次），
+  与对账单张数 / 行数**无关**、**无逐行查库**；单页 ≤ 200；来源身份清单每行 ≤ 5（超出只给计数）、明细分摊行清单 ≤ 100（超出标记 `AllocationsTruncated`），
+  但**金额与计数一律来自数据集侧聚合**，因此展示截断**不会**产生部分合计。
+- **授权**：控制器类级 `[Authorize]`；打开明细时**重新校验登录身份 + 既有「角色 → 菜单」授权**（要求既有菜单码 `customer`，不新增菜单 / 权限模型），
+  未认证 / 未授权 / 对账单不存在或已删除一律 **fail closed**（不返回任何部分证据、不修复、不改派）；授权回收后立即收敛。
+- **代码改动**：`src/ERP.Application/Services/AgencyServiceFeeReconciliationRules.cs`（纯规则）、
+  `src/ERP.Application/DTOs/AgencyServiceFeeReconciliationDtos.cs`、`src/ERP.Application/Services/AgencyServiceFeeReconciliationService.cs`（派生引擎 + 明细授权 + 元数据）、
+  `src/ERP.Api/Controllers/AgencyServiceFeeReconciliationController.cs`（`/api/agency-service-fee-reconciliation`，只有 `GET`）、
+  `src/ERP.Api/wwwroot/js/agency-service-fee-reconciliation.js`、`index.html`（脚本注册）、`modules.js`（客户工具栏「🧮 服务费对账与账龄」+ 客户行操作）、
+  `src/ERP.UnitTests/AgencyServiceFeeReconciliationTests.cs`（18 例）、`docs/代理服务费对账与账龄工作台说明.md`（新增）、
+  `docs/技术方案说明书.md` §十六、`docs/数据库设计说明书.md` §三十。
+- **本轮实测（未启动 API、未连数据库、未运行集成 / UI 用例）**：safe 档 `dotnet restore NEWERP.sln` +
+  `dotnet build NEWERP.sln -c Release --no-restore --no-incremental /p:TreatWarningsAsErrors=true /p:RunAnalyzersDuringBuild=true`
+  → **0 警告 / 0 错误**；`dotnet test src/ERP.UnitTests/ERP.UnitTests.csproj -c Release --no-build` → **1600/1600 通过**
+  （基线 1582 + 本任务 18）；前端脚本 `node --check`（工作台页与 `modules.js`）通过。
+- **未做的事（边界）**：未启动 `ERP.Api`、未连业务库、未执行任何 SQL / seed / 部署、未运行集成 / UI 用例；
+  **未修改** `SchemaUpgrader.cs`、`ErpDbContext*`、`IErpDbContext`、任何 `.sql`、`SeedData*.cs`、`.env*`、`deploy/**`、`release/**`、`checkpoints/**`、`logs/**`；
+  未 commit / push。本轮产物为「代码 + 测试 + 文档」，交付等级为 `code_ready`，`completed` 只由 orchestrator 判定。
+
 ## 6. 执行规则（保持有效）
 
 - 队列目标大小 3；队首非终态任务控制推进，禁止隐式跳过；`depends_on` 变更前必须重新校验依赖图。

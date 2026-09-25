@@ -1,7 +1,7 @@
 {
   "id": "ERP-072",
   "title": "Add bounded agency fee reconciliation workspace",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "medium",
   "description": "Add a bounded read-only agency service-fee reconciliation and aging workspace over ERP-070 statements and ERP-071 explicit receipt allocations. Derive only arithmetic evidence supported by persisted dates, optional due dates and active allocations. Do not create a general ledger, invent due dates, contact customers, collect funds, execute production SQL, deploy, or release.",
   "acceptance_criteria": [
@@ -50,5 +50,5 @@
     "status": "not_required",
     "reason": "Read-only arithmetic over repository evidence and non-production validation only. Customer contact, real collection, accounting or tax action, production database mutation, deployment and release remain behind mandatory human gates."
   },
-  "attempts": 0
+  "attempts": 1
 }
