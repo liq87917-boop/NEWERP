@@ -164,7 +164,10 @@ async function loadSupplierInvoiceReconciliation(page) {
       rule.textContent = '口径：' + (data.rule || '') + ' ' + (data.scopeNote || '') + ' ' +
         (data.ledgerBoundary || '') + ' ' +
         /* ERP-050：付款引用证据是第三类独立证据（订单金额 / 已开票金额 / 付款引用金额分列），不是已付款金额 */
-        '付款引用证据口径：' + (data.paymentEvidenceRule || '') + ' ' + (data.paymentEvidenceBoundary || '');
+        '付款引用证据口径：' + (data.paymentEvidenceRule || '') + ' ' + (data.paymentEvidenceBoundary || '') + ' ' +
+        /* ERP-067：已分配付款引用证据（ERP-066）是第四类独立证据，发票级金额与订单归属金额分列、绝不轧差 */
+        '已分配付款引用证据口径：' + (data.allocatedPaymentRule || '') + ' ' +
+        (data.allocatedPaymentBoundary || '') + ' ' + (data.fourEvidenceClasses || '');
     }
   } catch (e) {
     el.innerHTML = `<div class="empty"><div style="font-size:48px">⚠️</div><div>报表加载失败：${escapeHtml(e.message)}</div></div>`;
@@ -224,6 +227,11 @@ function sirRenderKpi(data) {
       <div class="kpi-label">本页付款引用证据（ERP-050：独立于发票证据）</div>
       <div class="kpi-value">${data.paymentReferenceOrderCount}<span class="unit">张订单</span></div>
       <div class="kpi-delta flat">无付款引用证据 ${data.noPaymentReferenceOrderCount} 张 · 未知 ${data.unknownPaymentReferenceOrderCount} 张（不代表未付款 / 已付款 / 逾期）</div>
+    </div>
+    <div class="kpi-card gold">
+      <div class="kpi-label">本页已分配付款引用证据（ERP-067，第四类独立证据）</div>
+      <div class="kpi-value">${data.allocatedPaymentInvoiceCount}<span class="unit">张发票</span></div>
+      <div class="kpi-delta flat">无证据（金额 0）${data.noAllocatedPaymentInvoiceCount} 张 · 未知 ${data.unknownAllocatedPaymentInvoiceCount} 张 · 发票级金额不按订单拆分、绝不与订单金额 / 已开票金额 / 付款引用金额相加减</div>
     </div>`;
 }
 
@@ -245,6 +253,9 @@ function sirRenderCurrencyTable(data) {
       <td class="text-right">${fmtMoney(c.remainingUninvoicedAmount)}</td>
       <td class="text-right">${fmtMoney(c.paymentReferenceAmount)}</td>
       <td class="text-right">${c.paymentReferenceOrderCount} / ${c.noPaymentReferenceOrderCount} / ${c.unknownPaymentReferenceOrderCount}</td>
+      <td class="text-right">${fmtMoney(c.allocatedPaymentAmount)}</td>
+      <td class="text-right">${c.allocatedPaymentInvoiceCount} / ${c.noAllocatedPaymentInvoiceCount} / ${c.unknownAllocatedPaymentInvoiceCount}</td>
+      <td class="text-right">${c.historicalAllocatedPaymentCount}</td>
     </tr>`).join('');
   el.innerHTML = `<table><thead><tr>
       <th>币种</th><th class="text-right">供应商数</th><th class="text-right">有效发票</th>
@@ -253,8 +264,10 @@ function sirRenderCurrencyTable(data) {
       <th class="text-right">订单数</th><th class="text-right">订单金额</th>
       <th class="text-right">已开票金额</th><th class="text-right">未开票余额</th>
       <th class="text-right">付款引用金额（ERP-050）</th><th class="text-right">有 / 无 / 未知（订单）</th>
+      <th class="text-right">已分配付款引用金额（ERP-067，独立证据）</th><th class="text-right">有 / 无 / 未知（发票）</th>
+      <th class="text-right">已分配历史行数（不计入）</th>
     </tr></thead>
-    <tbody>${rows || '<tr><td colspan="13" class="empty">本页没有发票：没有可汇总的币种</td></tr>'}</tbody></table>`;
+    <tbody>${rows || '<tr><td colspan="16" class="empty">本页没有发票：没有可汇总的币种</td></tr>'}</tbody></table>`;
 }
 
 /* 「供应商 + 币种」分组：只有同分组才汇总金额；已作废金额单独成列 */
@@ -279,6 +292,9 @@ function sirRenderGroupTable(data) {
       <td class="text-right">${fmtMoney(g.paymentReferenceAmount)}</td>
       <td class="text-right">${g.paymentReferenceOrderCount} / ${g.noPaymentReferenceOrderCount} / ${g.unknownPaymentReferenceOrderCount}</td>
       <td class="text-right">${g.historicalPaymentAllocationCount}</td>
+      <td class="text-right">${fmtMoney(g.allocatedPaymentAmount)}</td>
+      <td class="text-right">${g.allocatedPaymentInvoiceCount} / ${g.noAllocatedPaymentInvoiceCount} / ${g.unknownAllocatedPaymentInvoiceCount}</td>
+      <td class="text-right">${g.historicalAllocatedPaymentCount}</td>
     </tr>`).join('');
   el.innerHTML = `<table><thead><tr>
       <th>供应商</th><th>币种</th><th class="text-right">有效发票</th>
@@ -291,8 +307,11 @@ function sirRenderGroupTable(data) {
       <th class="text-right">付款引用金额（ERP-050，独立证据）</th>
       <th class="text-right">有 / 无 / 未知（订单）</th>
       <th class="text-right">付款引用历史行数（不计入）</th>
+      <th class="text-right">已分配付款引用金额（ERP-067，独立证据）</th>
+      <th class="text-right">有 / 无 / 未知（发票）</th>
+      <th class="text-right">已分配历史行数（不计入）</th>
     </tr></thead>
-    <tbody>${rows || '<tr><td colspan="17" class="empty">没有符合筛选条件的「供应商 + 币种」分组</td></tr>'}</tbody></table>`;
+    <tbody>${rows || '<tr><td colspan="20" class="empty">没有符合筛选条件的「供应商 + 币种」分组</td></tr>'}</tbody></table>`;
 }
 
 /* 本页发票明细（含每张发票的关联订单行；未知一律显示「未知」） */
@@ -313,7 +332,12 @@ function sirRenderInvoiceTable(data) {
       <td>${sirLinkageHtml(i.linkageStatus)}</td>
       <td class="text-right">${fmtMoney(i.linkedAmount)}</td>
       <td class="text-right">${fmtMoney(i.unlinkedAmount)}</td>
-      <td class="text-muted">—（付款引用证据按关联订单单独列出）</td>
+      <td class="text-muted">—（付款引用证据见关联订单行）</td>
+      <td>${sirMoney(i.allocatedPaymentAmount)} ${escapeHtml(i.currency || '')}
+        <div class="text-muted">${i.allocatedPaymentCount === null || i.allocatedPaymentCount === undefined ? '未知' : i.allocatedPaymentCount} 条 / ${i.allocatedPaymentDocumentCount === null || i.allocatedPaymentDocumentCount === undefined ? '未知' : i.allocatedPaymentDocumentCount} 张付款单
+        ${i.allocatedPaymentUnallocatedAmount === null || i.allocatedPaymentUnallocatedAmount === undefined ? '' : '· 未指向发票 ' + fmtMoney(i.allocatedPaymentUnallocatedAmount)}
+        ${(i.voidedAllocatedPaymentCount || 0) + (i.inactiveInvoiceAllocatedPaymentCount || 0) + (i.invalidAllocatedPaymentCount || 0) + (i.unavailableAllocatedPaymentCount || 0) > 0 ? '· ⚠ 含历史 / 无效证据（不计入）' : ''}
+        · ${escapeHtml(i.allocatedPaymentEvidenceLabel || '')}</div></td>
       <td>${escapeHtml(i.statusText || '')}</td>
       <td>${escapeHtml(i.evidenceText || '')}</td>
       <td>${escapeHtml(i.note || '')}</td>
@@ -342,9 +366,10 @@ function sirRenderInvoiceTable(data) {
       <th class="text-right">不含税</th><th class="text-right">税额</th><th class="text-right">含税总额</th>
       <th>关联状态</th><th class="text-right">已关联金额</th><th class="text-right">未关联金额（不猜测订单）</th>
       <th class="text-right">付款引用证据（ERP-050，独立于发票证据）</th>
+      <th class="text-right">已分配付款引用证据（ERP-067，独立于发票证据）</th>
       <th>状态</th><th>证据口径</th><th>说明</th>
     </tr></thead>
-    <tbody>${rows || '<tr><td colspan="14" class="empty">没有符合筛选条件的发票（可放宽供应商 / 币种 / 日期 / 关联状态 / 证据状态筛选）</td></tr>'}</tbody></table>`;
+    <tbody>${rows || '<tr><td colspan="15" class="empty">没有符合筛选条件的发票（可放宽供应商 / 币种 / 日期 / 关联状态 / 证据状态筛选）</td></tr>'}</tbody></table>`;
 }
 
 /* 分页：上一页 / 下一页（口径与本页合计一致） */

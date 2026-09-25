@@ -462,7 +462,9 @@ public class SupplierInvoiceReconciliationTests
         // 常数级访问：发票筛选（含分页）+ 本页发票 + 本页关联行 + 本页订单 + 订单关联行 + 关联发票状态 +
         // 供应商名 + 收货 2 次 + 结算 3 次 + 付款引用证据 2 次
         //（ERP-050：订单 + 持久化引用行；本用例没有付款引用行 → 付款单与付款单侧聚合不再访问）
-        Assert.Equal(14, singleReads);
+        // + 已分配付款引用证据 2 次（ERP-067：ERP-066 持久化引用行 + 发票；本用例没有引用行 →
+        //   付款单与付款单侧有效引用合计不再访问）
+        Assert.Equal(16, singleReads);
 
         // 再补 300 张发票（跨多页，且都关联同一张订单）：同一报表的数据集访问次数必须保持不变（无 N+1）
         for (var i = 2; i <= 301; i++)
@@ -827,6 +829,85 @@ public class SupplierInvoiceReconciliationTests
         Assert.Contains("/js/supplier-invoice-reconciliation.js", index);
     }
 
+    // ==================== 12. 已分配付款引用证据（ERP-067 第四类独立证据） ====================
+
+    [Fact]
+    public async Task Report_separates_allocated_payment_evidence_from_ordered_and_invoiced_amounts()
+    {
+        using var db = TestDbFactory.Create();
+        SeedSupplier(db, SupplierA, "甲供应商");
+        var order = SeedOrder(db, OrderA, "PO-IP-REC-1", SupplierA, Currency.CNY, 1000m);
+        var invoice = SeedInvoice(db, 944401L, SupplierA, "CNY", "0099", 800m, 0m, 800m,
+            PurchaseInvoiceRules.StatusRecorded, AsOf.AddDays(-1));
+        SeedAllocation(db, invoice, order.Id, 800m);
+        SeedInvoicePaymentEvidence(db, 944501L, invoice, allocatedAmount: 500m, paymentAmount: 900m);
+        await db.SaveChangesAsync();
+
+        var report = await SupplierInvoiceReconciliation.ForQueryAsync(db, Query());
+
+        var group = Assert.Single(report.Groups);
+        var row = Assert.Single(group.Invoices);
+        Assert.Equal(500m, row.AllocatedPaymentAmount);
+        Assert.Equal(1, row.AllocatedPaymentCount);
+        Assert.Equal(1, row.AllocatedPaymentDocumentCount);
+        Assert.Equal(400m, row.AllocatedPaymentUnallocatedAmount);
+        Assert.Equal(PurchaseOrderInvoicePaymentEvidenceSemantics.LabelRecorded, row.AllocatedPaymentEvidenceLabel);
+
+        Assert.Equal(500m, group.AllocatedPaymentAmount);
+        Assert.Equal(1, group.AllocatedPaymentInvoiceCount);
+        Assert.Equal(0, group.NoAllocatedPaymentInvoiceCount);
+        Assert.Equal(0, group.UnknownAllocatedPaymentInvoiceCount);
+        Assert.Equal(0, group.HistoricalAllocatedPaymentCount);
+
+        var currency = Assert.Single(report.Currencies);
+        Assert.Equal(500m, currency.AllocatedPaymentAmount);
+        Assert.Equal(1, currency.AllocatedPaymentInvoiceCount);
+
+        Assert.Equal(1, report.AllocatedPaymentInvoiceCount);
+        Assert.Equal(0, report.NoAllocatedPaymentInvoiceCount);
+        Assert.Equal(0, report.UnknownAllocatedPaymentInvoiceCount);
+
+        // 四类证据分列、绝不轧差：订单金额 1000 / 已开票 800 / 已关联 800 / 已分配付款引用 500 各自独立
+        Assert.Equal(1000m, group.OrderedAmount);
+        Assert.Equal(800m, group.InvoicedAmount);
+        Assert.Equal(800m, group.LinkedAmount);
+        Assert.Equal(500m, group.AllocatedPaymentAmount);
+        Assert.Equal(SupplierInvoiceReconciliationSemantics.FourClassEvidenceText, report.FourEvidenceClasses);
+    }
+
+    [Fact]
+    public async Task Report_excludes_voided_and_invalid_allocated_payment_evidence_from_active_totals()
+    {
+        using var db = TestDbFactory.Create();
+        SeedSupplier(db, SupplierA, "甲供应商");
+        var order = SeedOrder(db, OrderA, "PO-IP-REC-2", SupplierA, Currency.CNY, 1000m);
+        var invoice = SeedInvoice(db, 944402L, SupplierA, "CNY", "0100", 800m, 0m, 800m,
+            PurchaseInvoiceRules.StatusRecorded, AsOf.AddDays(-1));
+        SeedAllocation(db, invoice, order.Id, 800m);
+        SeedInvoicePaymentEvidence(db, 944502L, invoice, allocatedAmount: 200m, paymentAmount: 900m);
+        SeedInvoicePaymentEvidence(db, 944503L, invoice, allocatedAmount: 100m, paymentAmount: 900m,
+            status: SupplierPaymentInvoiceAllocationRules.StatusVoided);
+        SeedInvoicePaymentEvidence(db, 944504L, invoice, allocatedAmount: 50m, paymentAmount: 900m,
+            rowCurrency: "USD");                                     // 币种不一致 → 无效，绝不换算并入
+        await db.SaveChangesAsync();
+
+        var report = await SupplierInvoiceReconciliation.ForQueryAsync(db, Query());
+
+        var row = Assert.Single(Assert.Single(report.Groups).Invoices);
+        Assert.Equal(200m, row.AllocatedPaymentAmount);              // 已作废 100 + 无效 50 绝不并入
+        Assert.Equal(1, row.AllocatedPaymentCount);
+        Assert.Equal(100m, row.VoidedAllocatedPaymentAmount);
+        Assert.Equal(1, row.VoidedAllocatedPaymentCount);
+        Assert.Equal(50m, row.InvalidAllocatedPaymentAmount);
+        Assert.Equal(1, row.InvalidAllocatedPaymentCount);
+
+        var group = Assert.Single(report.Groups);
+        Assert.Equal(200m, group.AllocatedPaymentAmount);
+        Assert.Equal(2, group.HistoricalAllocatedPaymentCount);      // 已作废 1 + 无效 1
+        Assert.Contains("不换算", PurchaseOrderInvoicePaymentEvidenceSemantics.BucketText(
+            PurchaseOrderInvoicePaymentEvidenceSemantics.BucketInvalid));
+    }
+
     // ==================== 助手 ====================
 
     private static SupplierInvoiceReconciliationQuery Query(long? supplierId = null, string? currency = null,
@@ -1026,4 +1107,57 @@ public class SupplierInvoiceReconciliationTests
             Currency = currency,
             Status = status
         });
+
+    /// <summary>
+    /// 写入一条 ERP-066 持久化「付款单 → 采购发票」引用行（连同其付款单）：
+    /// 默认快照与发票一致（有效证据）；<paramref name="status"/> / <paramref name="rowCurrency"/> 可构造
+    /// 已作废 / 无效（币种不一致）的历史证据，用于验证绝不换算、绝不并入有效合计。
+    /// </summary>
+    private static void SeedInvoicePaymentEvidence(ErpDbContext db, long id, PurchaseInvoice invoice,
+        decimal allocatedAmount, decimal paymentAmount = 1000m,
+        int status = SupplierPaymentInvoiceAllocationRules.StatusActive, string? rowCurrency = null)
+    {
+        var currency = Enum.Parse<Currency>(invoice.Currency);
+        var payment = new FinancePayment
+        {
+            Id = id + 1_000_000L,
+            PaymentNo = $"FK-066-{id}",
+            PaymentDate = AsOf.AddDays(-3),
+            SupplierId = invoice.SupplierId,
+            Amount = paymentAmount,
+            Currency = currency,
+            Status = DocumentStatus.Approved
+        };
+        db.FinancePayments.Add(payment);
+
+        db.SupplierPaymentInvoiceAllocations.Add(new SupplierPaymentInvoiceAllocation
+        {
+            Id = id,
+            PaymentId = payment.Id,
+            PaymentNo = payment.PaymentNo,
+            PaymentDate = payment.PaymentDate,
+            PaymentStatus = (int)payment.Status,
+            PaymentStatusText = SupplierPaymentInvoiceAllocationRules.PaymentStatusText((int)payment.Status),
+            PaymentAmount = paymentAmount,
+            PurchaseInvoiceId = invoice.Id,
+            InvoiceType = invoice.InvoiceType,
+            InvoiceCode = invoice.InvoiceCode,
+            InvoiceNumber = invoice.InvoiceNumber,
+            InvoiceIdentityText = SupplierPaymentInvoiceAllocationRules.InvoiceIdentity(invoice),
+            InvoiceDate = invoice.InvoiceDate,
+            InvoiceStatus = invoice.Status,
+            InvoiceStatusText = SupplierPaymentInvoiceAllocationRules.InvoiceStatusText(invoice.Status),
+            InvoiceGrossAmount = invoice.GrossAmount,
+            SupplierId = invoice.SupplierId,
+            SupplierCode = invoice.SupplierCode,
+            SupplierName = invoice.SupplierName,
+            AllocatedAmount = allocatedAmount,
+            Currency = rowCurrency ?? invoice.Currency,
+            Status = status,
+            AllocatedAt = AsOf.AddDays(-2),
+            RecordedBy = "tester",
+            VoidedAt = status == SupplierPaymentInvoiceAllocationRules.StatusVoided ? AsOf.AddDays(-1) : null,
+            VoidReason = status == SupplierPaymentInvoiceAllocationRules.StatusVoided ? "作废重登" : string.Empty
+        });
+    }
 }

@@ -1,7 +1,7 @@
 {
   "id": "ERP-067",
   "title": "Expose supplier invoice reconciliation evidence in purchasing workflows",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "medium",
   "description": "Expose ERP-065 supplier invoice allocations and ERP-066 payment-to-invoice allocations in existing Purchase Order and supplier-payment workflows. Keep ordered, received, invoiced and allocated-payment evidence separately labeled. Do not infer an accounts-payable balance, mutate source records, execute production SQL, deploy, or release.",
   "acceptance_criteria": [
@@ -52,5 +52,5 @@
     "status": "not_required",
     "reason": "Read-only presentation of repository invoice and payment-allocation evidence. No real payment, tax action, accounting posting, production mutation, deployment or release is authorized."
   },
-  "attempts": 0
+  "attempts": 1
 }

@@ -131,6 +131,32 @@ public class PurchaseOrderController : DocumentControllerBase<PurchaseOrder>
             await PurchaseOrderPaymentEvidence.ForOrdersAsync(
                 Db, new PurchaseOrderPaymentEvidenceQuery { Ids = ids })));
 
+    /// <summary>
+    /// 已分配付款引用证据详情（ERP-067，只读派生）：只按 ERP-066 的持久化「付款单 → 供应商采购发票」引用行派生，
+    /// 并只经 ERP-043 / ERP-065 的持久化「发票 → 采购订单」关联行归属到本订单 —— 暴露有效（未作废、发票仍为已登记、
+    /// 供应商与币种自相一致）引用金额、可**安全归属本订单**的金额（仅关联本订单的发票）、发票级金额（发票还被其他订单关联，
+    /// 不按比例摊派）、发票张数与付款单张数，并把已作废 / 发票失效 / 无效 / 无法确认证据单独分桶逐条列出。
+    /// <para>只读：不改写采购订单、发票与关联行、付款单与引用行、库存与库存成本、收付款、供应商余额、费用或退税记录；
+    /// 本值只是**运营性的证据视图**，不是总账或应付余额、不是法定供应商对账单、不是税务申报、不是付款授权或结算确认，
+    /// 也不据此判定已付款 / 已结清 / 逾期（三类证据绝不轧差）。</para>
+    /// </summary>
+    [HttpGet("{id:long}/invoice-payment-evidence")]
+    public async Task<IActionResult> InvoicePaymentEvidence(long id)
+        => Ok(ApiResponse<PurchaseOrderInvoicePaymentEvidenceDetail>.Success(
+            await PurchaseOrderInvoicePaymentEvidence.ForOrderAsync(Db, id)));
+
+    /// <summary>
+    /// 采购订单列表用有界「已分配付款引用证据」汇总（ERP-067，只读派生）：逗号分隔的订单 Id（一次最多 200 张），
+    /// 固定 7 次数据集访问（订单 + 订单侧关联行 + 发票 + 发票侧关联行 + 引用行 + 付款单 + 付款单侧有效合计聚合）、
+    /// 无逐行查库、无逐行存储访问；命中读取上限时金额与计数按「未知」返回，绝不报出部分合计，
+    /// 也绝不呈现为已付款 / 未付款 / 逾期，绝不与「付款 → 采购订单」引用金额相加。
+    /// </summary>
+    [HttpGet("invoice-payment-evidence-summaries")]
+    public async Task<IActionResult> InvoicePaymentEvidenceSummaries([FromQuery] string? ids)
+        => Ok(ApiResponse<PurchaseOrderInvoicePaymentEvidenceBatch>.Success(
+            await PurchaseOrderInvoicePaymentEvidence.ForOrdersAsync(
+                Db, new PurchaseOrderInvoicePaymentEvidenceQuery { Ids = ids })));
+
     /// <summary>创建</summary>
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] PurchaseOrder entity)
