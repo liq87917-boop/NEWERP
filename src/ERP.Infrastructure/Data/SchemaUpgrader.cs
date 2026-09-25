@@ -2586,5 +2586,89 @@ IF NOT EXISTS (SELECT 1 FROM sys.indexes
         WHERE IsDeleted = 0;
 ");
 
+        // 41. 供应商付款 → 采购发票 引用登记（ERP-066：付款单 → 已登记采购发票 的引用证据行）
+        //     41.1 只建「付款发票引用行」一张表与其索引：**不含任何 UPDATE / INSERT / DELETE 语句**，
+        //          既有付款单、供应商采购发票、采购订单与供应商不因本段产生任何变化
+        //          （没有引用数据时行为与历史完全一致）；
+        //     41.2 有效引用行唯一：UX_SupplierPaymentInvoiceAllocations_PaymentInvoice
+        //          （付款单 + 采购发票），过滤 IsDeleted = 0 AND Status <> 2 ——
+        //          已作废行保留可读但不占用额度（作废后可重新登记同一发票的有效引用）；
+        //     41.3 付款单 / 供应商 / 发票只保存服务端写入的快照（含发票身份 / 含税总额与登记人），
+        //          **刻意不建**任何外键，也不在付款单、发票与采购订单上加列 ——
+        //          付款单或发票软删除、供应商停用或改名都不影响历史证据可读；
+        //     41.4 本段只建本模块一张表与其索引，不改写付款单、发票与发票关联（ERP-043 / ERP-065）、
+        //          ERP-049 的采购订单引用行、采购订单、库存与库存成本、退税、费用或供应商数据，
+        //          也不执行任何付款 / 记账 / 核销 / 认证语句；
+        //     41.5 生产库执行仍由 Human Gate 控制：本段只在应用启动时以 IF OBJECT_ID(...) IS NULL 幂等补齐，
+        //          自动化验证只作用于本机非生产测试库。
+        await db.Database.ExecuteSqlRawAsync(@"
+IF OBJECT_ID('db_owner.SupplierPaymentInvoiceAllocations') IS NULL
+BEGIN
+    CREATE TABLE db_owner.SupplierPaymentInvoiceAllocations (
+        Id BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+        PaymentId BIGINT NOT NULL,
+        PaymentNo NVARCHAR(50) NOT NULL DEFAULT N'',
+        PaymentDate DATETIME2 NOT NULL,
+        PaymentStatus INT NOT NULL DEFAULT 0,
+        PaymentStatusText NVARCHAR(30) NOT NULL DEFAULT N'',
+        PaymentAmount DECIMAL(18,2) NOT NULL DEFAULT 0,
+        PurchaseInvoiceId BIGINT NOT NULL,
+        InvoiceType NVARCHAR(20) NOT NULL DEFAULT N'',
+        InvoiceCode NVARCHAR(50) NOT NULL DEFAULT N'',
+        InvoiceNumber NVARCHAR(50) NOT NULL DEFAULT N'',
+        InvoiceIdentityText NVARCHAR(120) NOT NULL DEFAULT N'',
+        InvoiceDate DATETIME2 NOT NULL,
+        InvoiceStatus INT NOT NULL DEFAULT 1,
+        InvoiceStatusText NVARCHAR(30) NOT NULL DEFAULT N'',
+        InvoiceGrossAmount DECIMAL(18,2) NOT NULL DEFAULT 0,
+        SupplierId BIGINT NOT NULL,
+        SupplierCode NVARCHAR(50) NOT NULL DEFAULT N'',
+        SupplierName NVARCHAR(200) NOT NULL DEFAULT N'',
+        AllocatedAmount DECIMAL(18,2) NOT NULL DEFAULT 0,
+        Currency NVARCHAR(20) NOT NULL DEFAULT N'CNY',
+        Remark NVARCHAR(500) NOT NULL DEFAULT N'',
+        Status INT NOT NULL DEFAULT 1,
+        AllocatedAt DATETIME2 NOT NULL DEFAULT GETDATE(),
+        RecordedBy NVARCHAR(100) NOT NULL DEFAULT N'',
+        VoidedAt DATETIME2 NULL,
+        VoidReason NVARCHAR(500) NOT NULL DEFAULT N'',
+        CreatedAt DATETIME2 NOT NULL DEFAULT GETDATE(),
+        CreatedBy BIGINT NULL,
+        UpdatedAt DATETIME2 NULL,
+        UpdatedBy BIGINT NULL,
+        IsDeleted BIT NOT NULL DEFAULT 0,
+        RowVersion ROWVERSION NOT NULL
+    );
+END
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes
+               WHERE name = 'UX_SupplierPaymentInvoiceAllocations_PaymentInvoice'
+                 AND object_id = OBJECT_ID('db_owner.SupplierPaymentInvoiceAllocations'))
+    CREATE UNIQUE INDEX UX_SupplierPaymentInvoiceAllocations_PaymentInvoice
+        ON db_owner.SupplierPaymentInvoiceAllocations(PaymentId, PurchaseInvoiceId)
+        WHERE IsDeleted = 0 AND Status <> 2;
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes
+               WHERE name = 'IX_SupplierPaymentInvoiceAllocations_PaymentId_Status'
+                 AND object_id = OBJECT_ID('db_owner.SupplierPaymentInvoiceAllocations'))
+    CREATE INDEX IX_SupplierPaymentInvoiceAllocations_PaymentId_Status
+        ON db_owner.SupplierPaymentInvoiceAllocations(PaymentId, Status)
+        WHERE IsDeleted = 0;
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes
+               WHERE name = 'IX_SupplierPaymentInvoiceAllocations_PurchaseInvoiceId'
+                 AND object_id = OBJECT_ID('db_owner.SupplierPaymentInvoiceAllocations'))
+    CREATE INDEX IX_SupplierPaymentInvoiceAllocations_PurchaseInvoiceId
+        ON db_owner.SupplierPaymentInvoiceAllocations(PurchaseInvoiceId)
+        WHERE IsDeleted = 0;
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes
+               WHERE name = 'IX_SupplierPaymentInvoiceAllocations_Status_AllocatedAt'
+                 AND object_id = OBJECT_ID('db_owner.SupplierPaymentInvoiceAllocations'))
+    CREATE INDEX IX_SupplierPaymentInvoiceAllocations_Status_AllocatedAt
+        ON db_owner.SupplierPaymentInvoiceAllocations(Status, AllocatedAt)
+        WHERE IsDeleted = 0;
+");
+
     }
 }

@@ -105,6 +105,16 @@ public interface IErpDbContext
     /// </summary>
     DbSet<SupplierPaymentAllocation> SupplierPaymentAllocations { get; }
 
+    // ============ 供应商付款 → 采购发票 引用登记（ERP-066：付款单 → 已登记采购发票 的引用证据行） ============
+
+    /// <summary>
+    /// 供应商付款单 → 供应商采购发票 付款引用（分摊）证据行（ERP-066）：只登记「某张既有付款单把多少钱指向了
+    /// 哪几张既有已登记（未作废）的采购发票」，保留付款单 / 供应商 / 发票快照与登记人；
+    /// 不是付款凭证、不是应付账款核销、不是发票认证 / 抵扣、不是税务申报、也不是供应商余额，
+    /// 且不改写付款单、发票与采购订单，也不与 ERP-049 的采购订单引用金额相加
+    /// </summary>
+    DbSet<SupplierPaymentInvoiceAllocation> SupplierPaymentInvoiceAllocations { get; }
+
     // ============ 客户收款引用登记（ERP-053：收款单 → 销售订单 的引用证据行） ============
 
     /// <summary>

@@ -84,6 +84,10 @@ public partial class ErpDbContext
     /// <summary>付款引用行（付款单 / 供应商 / 采购订单快照 + 引用金额 + 作废留痕；有效行唯一性由过滤唯一索引兜底）</summary>
     public DbSet<SupplierPaymentAllocation> SupplierPaymentAllocations => Set<SupplierPaymentAllocation>();
 
+    // ============ 供应商付款 → 采购发票 引用登记（ERP-066：付款单 → 已登记采购发票 的引用证据行） ============
+    /// <summary>付款发票引用行（付款单 / 供应商 / 发票快照 + 引用金额 + 登记人与作废留痕；有效行唯一性由过滤唯一索引兜底）</summary>
+    public DbSet<SupplierPaymentInvoiceAllocation> SupplierPaymentInvoiceAllocations => Set<SupplierPaymentInvoiceAllocation>();
+
     // ============ 客户收款引用登记（ERP-053：收款单 → 销售订单 的引用证据行） ============
     /// <summary>收款引用行（收款单 / 客户 / 销售订单快照 + 引用金额 + 作废留痕；有效行唯一性由过滤唯一索引兜底）</summary>
     public DbSet<CustomerReceiptAllocation> CustomerReceiptAllocations => Set<CustomerReceiptAllocation>();

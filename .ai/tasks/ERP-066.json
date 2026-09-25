@@ -1,7 +1,7 @@
 {
   "id": "ERP-066",
   "title": "Add explicit supplier payment-to-invoice allocations",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "medium",
   "description": "Link the existing canonical supplier-payment evidence to ERP-065 supplier purchase-invoice evidence through explicit, auditable allocation rows. Reuse existing payment records rather than creating another payment master. Do not initiate a payment, infer links, post accounts payable, alter bank or tax data, execute production SQL, deploy, or release.",
   "acceptance_criteria": [
@@ -53,5 +53,5 @@
     "status": "not_required",
     "reason": "Explicit allocation of existing repository evidence only. Real payments, bank access, accounting posting, production database mutation, deployment and release remain behind mandatory human gates."
   },
-  "attempts": 0
+  "attempts": 1
 }
