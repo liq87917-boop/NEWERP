@@ -1090,6 +1090,60 @@ public partial class ErpDbContext
         modelBuilder.Entity<AgencyServiceFeeStatementLine>().HasIndex(x => new { x.Status, x.RecordedAt })
             .HasDatabaseName("IX_AgencyServiceFeeStatementLines_Status_RecordedAt")
             .HasFilter("IsDeleted = 0");
+
+        // ============ ERP-071：客户收款 → 代理服务费对账单 分摊登记（收款分摊证据行） ============
+        // 设计口径：
+        //   1. 只是**收款分摊证据册**：不建收款主数据、不建对账单模型、不改写收款单或对账单，也不引入第二套账务引擎；
+        //   2. 一行只按 (StatementId, ReceiptId) 的**持久化标识符**把既有、未删除且未取消的收款单的一部分金额
+        //      显式分摊到一条**已登记**的代理服务费对账单证据上；对账单 / 收款单 / 客户快照与登记人只保存
+        //      服务端权威写入的值，客户端提交的同名字段一律不被采信；
+        //   3. 有效行唯一：(StatementId, ReceiptId) 在未作废 / 未删除行内唯一
+        //      （UX_AgencyServiceFeeCollectionAllocations_StatementReceipt，过滤 IsDeleted = 0 AND Status <> 2）；
+        //   4. 金额列（StatementTotalAmount / ReceiptAmount / AllocatedAmount）都是 DECIMAL(18,2)：
+        //      前两者是写入时的**服务端快照**（对账单服务端合计 / 收款单金额），后者是用户显式提交并已按
+        //      币种精度取整的分摊金额；本模块不从对账单行金额、收款单备注或任何自由文本派生费用；
+        //   5. **刻意不建**到收款单、对账单、协议与客户的任何外键与导航属性
+        //      （收款单 / 对账单软删除、客户停用或改名后历史分摊必须始终可读）；
+        //   6. 索引与 SchemaUpgrader 第 44 段同名同过滤条件，供对账单 / 收款单 / 客户 / 登记时间有界检索；
+        //   7. 证据维度分离：本表与 ERP-053 的 CustomerReceiptAllocations、ERP-055 的
+        //      CustomerSalesInvoiceAllocations 是**互相独立**的模型，本模块绝不把三个维度的金额相加。
+        modelBuilder.Entity<AgencyServiceFeeCollectionAllocation>().Property(x => x.StatementNo).HasMaxLength(50);
+        modelBuilder.Entity<AgencyServiceFeeCollectionAllocation>().Property(x => x.StatementStatusText).HasMaxLength(30);
+        modelBuilder.Entity<AgencyServiceFeeCollectionAllocation>().Property(x => x.StatementTotalAmount).HasPrecision(18, 2);
+        modelBuilder.Entity<AgencyServiceFeeCollectionAllocation>().Property(x => x.StatementCurrency).HasMaxLength(20);
+        modelBuilder.Entity<AgencyServiceFeeCollectionAllocation>().Property(x => x.StatementAgreementNo).HasMaxLength(50);
+        modelBuilder.Entity<AgencyServiceFeeCollectionAllocation>().Property(x => x.ReceiptNo).HasMaxLength(50);
+        modelBuilder.Entity<AgencyServiceFeeCollectionAllocation>().Property(x => x.ReceiptStatusText).HasMaxLength(30);
+        modelBuilder.Entity<AgencyServiceFeeCollectionAllocation>().Property(x => x.ReceiptAmount).HasPrecision(18, 2);
+        modelBuilder.Entity<AgencyServiceFeeCollectionAllocation>().Property(x => x.CustomerCode).HasMaxLength(50);
+        modelBuilder.Entity<AgencyServiceFeeCollectionAllocation>().Property(x => x.CustomerName).HasMaxLength(200);
+        modelBuilder.Entity<AgencyServiceFeeCollectionAllocation>().Property(x => x.AllocatedAmount).HasPrecision(18, 2);
+        modelBuilder.Entity<AgencyServiceFeeCollectionAllocation>().Property(x => x.Currency).HasMaxLength(20);
+        modelBuilder.Entity<AgencyServiceFeeCollectionAllocation>().Property(x => x.Remark).HasMaxLength(500);
+        modelBuilder.Entity<AgencyServiceFeeCollectionAllocation>().Property(x => x.AllocatedBy).HasMaxLength(100);
+        modelBuilder.Entity<AgencyServiceFeeCollectionAllocation>().Property(x => x.VoidReason).HasMaxLength(500);
+
+        // 同一「对账单 + 收款单」在未作废 / 未删除行内唯一（重复分摊被拒绝，而不是合并或覆盖）
+        modelBuilder.Entity<AgencyServiceFeeCollectionAllocation>()
+            .HasIndex(x => new { x.StatementId, x.ReceiptId })
+            .IsUnique().HasDatabaseName("UX_AgencyServiceFeeCollectionAllocations_StatementReceipt")
+            .HasFilter("IsDeleted = 0 AND Status <> 2");
+
+        modelBuilder.Entity<AgencyServiceFeeCollectionAllocation>().HasIndex(x => new { x.StatementId, x.Status })
+            .HasDatabaseName("IX_AgencyServiceFeeCollectionAllocations_StatementId_Status")
+            .HasFilter("IsDeleted = 0");
+
+        modelBuilder.Entity<AgencyServiceFeeCollectionAllocation>().HasIndex(x => new { x.ReceiptId, x.Status })
+            .HasDatabaseName("IX_AgencyServiceFeeCollectionAllocations_ReceiptId_Status")
+            .HasFilter("IsDeleted = 0");
+
+        modelBuilder.Entity<AgencyServiceFeeCollectionAllocation>().HasIndex(x => new { x.CustomerId, x.Status })
+            .HasDatabaseName("IX_AgencyServiceFeeCollectionAllocations_CustomerId_Status")
+            .HasFilter("IsDeleted = 0");
+
+        modelBuilder.Entity<AgencyServiceFeeCollectionAllocation>().HasIndex(x => new { x.Status, x.AllocatedAt })
+            .HasDatabaseName("IX_AgencyServiceFeeCollectionAllocations_Status_AllocatedAt")
+            .HasFilter("IsDeleted = 0");
     }
 
     /// <summary>保存变更：自动填充审计字段</summary>

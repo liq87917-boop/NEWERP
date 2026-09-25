@@ -91,10 +91,12 @@ const MODULES = {
     extraActions: [
       { label: '🧾 服务费协议', title: '登记客户代理服务费的仓库内商业条款证据（协议号 / 生效日期区间 / 币种 / 披露的计费方式与显式费率或固定金额 / 有界计费依据说明），可显式登记与作废；费用条款只保存显式填写的值，不从业务员提成设置或客户默认比例推断；不开发票、不记账、不授权或发起付款、不提供法律意见，也不是服务已交付或已收付款的证明', onclick: 'openAgencyServiceFeeAgreementRegister()' },
       { label: '📄 服务费对账单', title: '登记客户代理服务费的仓库内操作性对账证据（对账单号 / 币种 / 对账日期 / 可选到期日 / 服务期间 / 显式关联的已登记协议 / 一条或多条显式服务来源引用行：销售订单或装柜清单的持久化记录）；行金额与计费基础只来自显式填写，合计由服务端计算，到期日留空即未知；同一来源只能被一条未作废对账单行引用；不是税务发票 / 不是具有法律效力的对账单确认 / 不是收入确认 / 不是付款通知或催收 / 不是结算或核销确认 / 不是记账分录，也不开票、不记账、不收款、不联系客户', onclick: 'openAgencyServiceFeeStatementRegister()' },
+      { label: '💰 服务费收款分摊', title: '把既有、未删除且未取消的客户收款单的一部分（或全部）金额显式分摊到已登记的代理服务费对账单证据上（按收款单 Id + 对账单 Id 建立关系，绝不按单号文本 / 金额 / 相似度猜对应关系；不得超收款单可分摊余额与对账单未分摊额，两侧未分摊金额分别展示、不被静默核销或改派；与销售订单收款引用、销项发票分摊绝不相加；不是到账凭证 / 应收台账 / 核销 / 结算 / 记账分录，也不收款、不记账、不催收）', onclick: 'openAgencyServiceFeeCollectionAllocationRegister()' },
     ],
     rowActions: [
       { label: '服务费协议', icon: '🧾', title: '以本客户打开代理服务费协议证据登记册（只登记商业条款证据；不改写客户资料、订单、发票、收款与库存记录）', onclick: 'openAgencyServiceFeeAgreementRegister' },
       { label: '服务费对账单', icon: '📄', title: '以本客户打开代理服务费对账单证据册（行只显式引用本客户的销售订单 / 装柜清单持久化记录；不改写来源单据、协议、发票、收款与库存记录）', onclick: 'openAgencyServiceFeeStatementRegister' },
+      { label: '服务费收款分摊', icon: '💰', title: '以本客户打开代理服务费收款分摊证据册（按本客户预筛选；只显式分摊既有收款单 → 已登记对账单，不改写收款单、对账单、发票与库存记录）', onclick: 'openAgencyServiceFeeCollectionAllocationForCustomer' },
     ],
   },
   supplier: {

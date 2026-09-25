@@ -663,6 +663,8 @@ function asfsDetailView() {
 
     <div style="display:flex;gap:6px;margin-top:10px">
       <button class="btn btn-neutral" onclick="asfsBackToList()">返回列表</button>
+      <button class="btn btn-neutral" title="打开代理服务费收款分摊证据册（只显式把既有、未删除、未取消的收款单的一部分金额分摊到本已登记对账单；不改写对账单与收款单，也不收款 / 记账 / 核销 / 结算）"
+        onclick="openAgencyServiceFeeCollectionAllocationRegister(${row.id})">💰 收款分摊</button>
       ${row.isDraft ? `<button class="btn btn-neutral" onclick="asfsOpenForm(${row.id})">编辑草稿</button>
         <button class="btn btn-primary" onclick="asfsRecord(${row.id})">登记</button>` : ''}
       ${row.isVoided ? '' : `<button class="btn btn-danger" onclick="asfsOpenVoid(${row.id})">作废</button>`}

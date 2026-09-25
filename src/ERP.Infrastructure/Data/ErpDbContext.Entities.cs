@@ -127,4 +127,12 @@ public partial class ErpDbContext
     public DbSet<AgencyServiceFeeStatementLine> AgencyServiceFeeStatementLines
         => Set<AgencyServiceFeeStatementLine>();
 
+    // ============ 客户收款 → 代理服务费对账单 分摊登记（ERP-071：收款分摊证据行） ============
+    /// <summary>
+    /// 收款分摊行（按对账单 Id + 收款单 Id 显式分摊；对账单 / 收款单 / 客户快照与登记人由服务端写入；
+    /// 同一「对账单 + 收款单」在未作废行内唯一；不是到账凭证 / 应收台账 / 核销 / 结算 / 记账分录）
+    /// </summary>
+    public DbSet<AgencyServiceFeeCollectionAllocation> AgencyServiceFeeCollectionAllocations
+        => Set<AgencyServiceFeeCollectionAllocation>();
+
 }

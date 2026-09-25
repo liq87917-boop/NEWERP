@@ -2898,5 +2898,97 @@ IF NOT EXISTS (SELECT 1 FROM sys.indexes
         WHERE IsDeleted = 0;
 ");
 
+        // 44. 客户收款 → 代理服务费对账单 分摊登记（ERP-071：收款分摊证据行）
+        //     44.1 只建「收款分摊行」**一张表**与其过滤索引：**不含任何 UPDATE / INSERT / DELETE 回填语句**，
+        //          也不在任何既有表（收款单 / 对账单与对账单行 / 协议 / 客户 / 销售订单 / 装柜与单证 / 发票 /
+        //          库存 / 费用 / 退税 / 结算）上加列；
+        //     44.2 有效分摊行唯一：UX_AgencyServiceFeeCollectionAllocations_StatementReceipt
+        //          （StatementId, ReceiptId，过滤 IsDeleted = 0 AND Status <> 2）= 同一「对账单 + 收款单」只能有
+        //          一条**未作废**分摊行；作废后该组合可重新登记（历史行保留可读、不再占用额度）；
+        //     44.3 收款单 / 对账单 / 客户只保存**服务端写入的快照**（单号 / 日期 / 状态 / 状态文案 / 金额 /
+        //          币种 / 协议号 / 客户编码与名称），行只按**持久化标识符**（对账单 Id + 收款单 Id）建立关系：
+        //          本段不写入任何默认业务值，也**不**按单号文本、金额、日期或相似度匹配收款单与对账单；
+        //     44.4 金额列只保存用户**显式提交并按币种精度取整**的分摊金额（DECIMAL(18,2)）与两侧**服务端快照**
+        //          （对账单服务端合计 / 收款单金额，DECIMAL(18,2)）：本段不派生、不换算、不跨币种合并；
+        //     44.5 本模块**刻意不建**任何外键与导航属性：收款单 / 对账单 / 客户被取消、软删除、作废或改名后
+        //          历史分摊证据必须始终可读；也**不**与 ERP-053 销售订单收款引用、ERP-055 销项发票分摊相加；
+        //     44.6 生产库执行仍由 Human Gate 控制：本段只在应用启动时以 IF OBJECT_ID(...) IS NULL 幂等补齐，
+        //          自动化验证只作用于本机非生产测试库。
+        await db.Database.ExecuteSqlRawAsync(@"
+IF OBJECT_ID('db_owner.AgencyServiceFeeCollectionAllocations') IS NULL
+BEGIN
+    CREATE TABLE db_owner.AgencyServiceFeeCollectionAllocations (
+        Id BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+        StatementId BIGINT NOT NULL,
+        StatementNo NVARCHAR(50) NOT NULL DEFAULT N'',
+        StatementDate DATETIME2 NOT NULL,
+        StatementStatus INT NOT NULL DEFAULT 0,
+        StatementStatusText NVARCHAR(30) NOT NULL DEFAULT N'',
+        StatementTotalAmount DECIMAL(18,2) NOT NULL DEFAULT 0,
+        StatementCurrency NVARCHAR(20) NOT NULL DEFAULT N'CNY',
+        StatementAgreementId BIGINT NOT NULL,
+        StatementAgreementNo NVARCHAR(50) NOT NULL DEFAULT N'',
+        ReceiptId BIGINT NOT NULL,
+        ReceiptNo NVARCHAR(50) NOT NULL DEFAULT N'',
+        ReceiptDate DATETIME2 NOT NULL,
+        ReceiptStatus INT NOT NULL DEFAULT 0,
+        ReceiptStatusText NVARCHAR(30) NOT NULL DEFAULT N'',
+        ReceiptAmount DECIMAL(18,2) NOT NULL DEFAULT 0,
+        CustomerId BIGINT NOT NULL,
+        CustomerCode NVARCHAR(50) NOT NULL DEFAULT N'',
+        CustomerName NVARCHAR(200) NOT NULL DEFAULT N'',
+        AllocatedAmount DECIMAL(18,2) NOT NULL DEFAULT 0,
+        Currency NVARCHAR(20) NOT NULL DEFAULT N'CNY',
+        Remark NVARCHAR(500) NOT NULL DEFAULT N'',
+        Status INT NOT NULL DEFAULT 0,
+        AllocatedAt DATETIME2 NOT NULL,
+        AllocatedBy NVARCHAR(100) NOT NULL DEFAULT N'',
+        VoidedAt DATETIME2 NULL,
+        VoidReason NVARCHAR(500) NOT NULL DEFAULT N'',
+        CreatedAt DATETIME2 NOT NULL DEFAULT GETDATE(),
+        CreatedBy BIGINT NULL,
+        UpdatedAt DATETIME2 NULL,
+        UpdatedBy BIGINT NULL,
+        IsDeleted BIT NOT NULL DEFAULT 0,
+        RowVersion ROWVERSION NOT NULL
+    );
+END
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes
+               WHERE name = 'UX_AgencyServiceFeeCollectionAllocations_StatementReceipt'
+                 AND object_id = OBJECT_ID('db_owner.AgencyServiceFeeCollectionAllocations'))
+    CREATE UNIQUE INDEX UX_AgencyServiceFeeCollectionAllocations_StatementReceipt
+        ON db_owner.AgencyServiceFeeCollectionAllocations(StatementId, ReceiptId)
+        WHERE IsDeleted = 0 AND Status <> 2;
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes
+               WHERE name = 'IX_AgencyServiceFeeCollectionAllocations_StatementId_Status'
+                 AND object_id = OBJECT_ID('db_owner.AgencyServiceFeeCollectionAllocations'))
+    CREATE INDEX IX_AgencyServiceFeeCollectionAllocations_StatementId_Status
+        ON db_owner.AgencyServiceFeeCollectionAllocations(StatementId, Status)
+        WHERE IsDeleted = 0;
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes
+               WHERE name = 'IX_AgencyServiceFeeCollectionAllocations_ReceiptId_Status'
+                 AND object_id = OBJECT_ID('db_owner.AgencyServiceFeeCollectionAllocations'))
+    CREATE INDEX IX_AgencyServiceFeeCollectionAllocations_ReceiptId_Status
+        ON db_owner.AgencyServiceFeeCollectionAllocations(ReceiptId, Status)
+        WHERE IsDeleted = 0;
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes
+               WHERE name = 'IX_AgencyServiceFeeCollectionAllocations_CustomerId_Status'
+                 AND object_id = OBJECT_ID('db_owner.AgencyServiceFeeCollectionAllocations'))
+    CREATE INDEX IX_AgencyServiceFeeCollectionAllocations_CustomerId_Status
+        ON db_owner.AgencyServiceFeeCollectionAllocations(CustomerId, Status)
+        WHERE IsDeleted = 0;
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes
+               WHERE name = 'IX_AgencyServiceFeeCollectionAllocations_Status_AllocatedAt'
+                 AND object_id = OBJECT_ID('db_owner.AgencyServiceFeeCollectionAllocations'))
+    CREATE INDEX IX_AgencyServiceFeeCollectionAllocations_Status_AllocatedAt
+        ON db_owner.AgencyServiceFeeCollectionAllocations(Status, AllocatedAt)
+        WHERE IsDeleted = 0;
+");
+
     }
 }

@@ -1,7 +1,7 @@
 {
   "id": "ERP-071",
   "title": "Allocate customer receipt evidence to agency fee statements",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "medium",
   "description": "Reuse the repository's existing canonical customer-receipt evidence and explicitly allocate it to ERP-070 agency service-fee statements. Keep receipt, sales-invoice and agency-fee allocation dimensions separate. Do not create another receipt master, initiate or confirm real funds, infer links, post accounting, execute production SQL, deploy, or release.",
   "acceptance_criteria": [
@@ -52,5 +52,5 @@
     "status": "not_required",
     "reason": "Explicit allocation of existing repository evidence only. Real receipt handling, bank access, accounting posting, production database mutation, deployment and release remain behind mandatory human gates."
   },
-  "attempts": 0
+  "attempts": 1
 }
