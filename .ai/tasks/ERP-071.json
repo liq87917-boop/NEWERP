@@ -1,0 +1,56 @@
+{
+  "id": "ERP-071",
+  "title": "Allocate customer receipt evidence to agency fee statements",
+  "status": "pending",
+  "risk_level": "medium",
+  "description": "Reuse the repository's existing canonical customer-receipt evidence and explicitly allocate it to ERP-070 agency service-fee statements. Keep receipt, sales-invoice and agency-fee allocation dimensions separate. Do not create another receipt master, initiate or confirm real funds, infer links, post accounting, execute production SQL, deploy, or release.",
+  "acceptance_criteria": [
+    "The implementation audits and reuses the existing canonical customer-receipt evidence and ERP-070 statements, leaving one receipt master, one agency statement register and one explicit allocation model.",
+    "Authorized users can allocate an eligible active customer-receipt evidence record to one or more recorded agency service-fee statements using persisted identifiers only.",
+    "The server requires authoritative Customer and currency compatibility and rejects unavailable or voided records, duplicate receipt and statement pairs, non-positive values and allocation above either the receipt's available amount or statement's unallocated amount.",
+    "Partial allocation, one-to-many and many-to-one allocation are supported while unallocated receipt and statement amounts remain separately visible and are never silently written off.",
+    "Different currencies are never combined or converted unless an authoritative persisted conversion already belongs to the source evidence; no current or guessed exchange rate is used.",
+    "Allocation rows preserve receipt, statement and Customer snapshots, allocated amount, recorder and recorded time; client-supplied snapshots, balances and audit fields are not trusted.",
+    "An incorrect allocation can be voided with a bounded reason while preserving its original values and history; hard deletion, reassignment and silent amount replacement are not provided.",
+    "Sales-order receipt allocations, sales-invoice allocations and agency-statement allocations remain distinct evidence dimensions and are not added together as if they represented separate receipts.",
+    "Missing allocations are displayed as none or unknown and are not interpreted as unpaid, paid, settled, overdue, recognized revenue or posted status.",
+    "Creating, reading or voiding an allocation does not change receipt evidence, statement status, agreements, source orders or containers, Customer balances, bank, tax, finance or settlement records.",
+    "Queries and summaries are bounded and avoid per-row access; schema changes are idempotent and validation uses only permitted local or test-database paths.",
+    "Unit and integration tests cover partial and full allocation, multiple statements and receipts, Customer and currency mismatch, duplicate and over-allocation rejection, void history, unavailable records, bounded summaries and source-record non-mutation; safe validation passes and browser acceptance is deferred during development."
+  ],
+  "allowed_paths": [
+    "src/ERP.Domain/**",
+    "src/ERP.Application/**",
+    "src/ERP.Infrastructure/**",
+    "src/ERP.Api/Controllers/**",
+    "src/ERP.Api/wwwroot/**",
+    "src/ERP.UnitTests/**",
+    "src/ERP.IntegrationTests/**",
+    "docs/**",
+    ".ai/**"
+  ],
+  "depends_on": [
+    "ERP-070"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "browser",
+  "browser_acceptance": {
+    "required": true,
+    "scenarios": [
+      "Allocate one existing customer-receipt evidence record partially across two compatible recorded agency fee statements and verify separate remaining amounts without changing any source record or initiating funds movement.",
+      "Attempt duplicate, excessive, Customer-mismatched and currency-mismatched allocations, verify rejection, then void a valid allocation and confirm its original values and reason remain in history."
+    ],
+    "test_filter": "Collection=UiTests",
+    "minimum_screenshots": 2
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L2",
+    "status": "not_required",
+    "reason": "Explicit allocation of existing repository evidence only. Real receipt handling, bank access, accounting posting, production database mutation, deployment and release remain behind mandatory human gates."
+  },
+  "attempts": 0
+}

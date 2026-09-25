@@ -1,0 +1,56 @@
+{
+  "id": "ERP-070",
+  "title": "Add agency service-fee statement evidence",
+  "status": "pending",
+  "risk_level": "medium",
+  "description": "Add agency service-fee statement evidence linked to ERP-069 agreements and explicit existing service records. Statements capture disclosed repository evidence and remain separate from legal tax invoices, salesperson commission and general-ledger entries. Do not infer service links or fee amounts, issue an invoice, contact a customer, collect funds, post accounting, execute production SQL, deploy, or release.",
+  "acceptance_criteria": [
+    "Authorized users can create and edit draft service-fee statement evidence for one authoritative Customer and currency with statement number, statement date, optional explicit due date, service period, bounded notes and one or more explicit lines.",
+    "Each line uses a persisted identifier to reference an eligible existing Sales Order, container shipment or another documented supported service source; text, amount or date similarity is never used to guess a link.",
+    "The server validates Customer and currency compatibility between the statement, ERP-069 agreement and every linked source; incompatible or unavailable active sources are rejected while bounded historical snapshots remain readable.",
+    "Line descriptions, quantities or basis snapshots and amounts are explicit persisted evidence supplied by an authorized user or copied from documented authoritative fields; no current agreement rate, default or free text is silently converted into a charge.",
+    "Statement totals are calculated server-side from validated lines using documented currency precision, and client-supplied totals are not trusted.",
+    "A service source may only be included under a documented uniqueness rule; duplicate links within a statement and duplicate active charging evidence are rejected rather than merged.",
+    "An optional due date is persisted evidence; when absent it remains unknown and is not calculated from Customer defaults, agreement prose or statement date at read time.",
+    "Draft statements can be recorded and later voided with a bounded reason while preserving lines, source and Customer snapshots, amounts and history; recorded or voided evidence cannot be silently replaced or hard-deleted.",
+    "The workflow labels statements as operational fee evidence, not a tax invoice, legal Customer statement, revenue recognition, payment demand, settlement confirmation or general-ledger posting.",
+    "Creating, recording, reading or voiding a statement does not mutate agreements, Customers, orders, containers, invoices, receipts, balances, tax, finance or settlement records and does not contact external services.",
+    "Schema changes are idempotent, queries are bounded or paged and avoid per-row access, and legacy sources remain readable without request-time or production backfill.",
+    "Unit and integration tests cover explicit source links, Customer and currency mismatch, duplicate charging protection, amount precision, unknown due date, record and void history, model separation, bounded queries and source-record non-mutation; safe validation passes and browser acceptance is deferred during development."
+  ],
+  "allowed_paths": [
+    "src/ERP.Domain/**",
+    "src/ERP.Application/**",
+    "src/ERP.Infrastructure/**",
+    "src/ERP.Api/Controllers/**",
+    "src/ERP.Api/wwwroot/**",
+    "src/ERP.UnitTests/**",
+    "src/ERP.IntegrationTests/**",
+    "docs/**",
+    ".ai/**"
+  ],
+  "depends_on": [
+    "ERP-069"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "browser",
+  "browser_acceptance": {
+    "required": true,
+    "scenarios": [
+      "Create a draft agency service-fee statement from explicit compatible service records, verify server-calculated currency totals and an optional due date, then record it without changing source orders or containers or issuing an invoice.",
+      "Attempt duplicate, Customer-mismatched and currency-mismatched source links, verify rejection, then void valid recorded evidence and confirm its source snapshots, amounts and history remain readable."
+    ],
+    "test_filter": "Collection=UiTests",
+    "minimum_screenshots": 2
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L2",
+    "status": "not_required",
+    "reason": "Repository statement evidence over explicit non-production records only. Legal invoicing, Customer contact, real collection, accounting posting, production database mutation, deployment and release remain behind mandatory human gates."
+  },
+  "attempts": 0
+}

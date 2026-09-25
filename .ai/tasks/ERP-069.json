@@ -1,0 +1,54 @@
+{
+  "id": "ERP-069",
+  "title": "Add explicit agency service-fee agreement evidence",
+  "status": "pending",
+  "risk_level": "medium",
+  "description": "Add a disclosed, auditable agency service-fee agreement evidence register for customer-facing agency services. Preserve explicit commercial terms supplied by authorized users and keep this model separate from salesperson commission reports, customer invoices and receipts. Do not support concealed or off-book commissions, infer terms, issue an invoice, move money, post accounting, execute production SQL, deploy, or release.",
+  "acceptance_criteria": [
+    "The implementation audits existing customer terms, commission reports and contract fields before adding the register and does not replace or duplicate an existing authoritative agreement model.",
+    "Authorized users can create and edit draft agreement evidence with an explicit agreement number, authoritative Customer, effective date range, currency, disclosed fee method, explicit rate or fixed-amount terms when applicable, bounded basis description and bounded notes.",
+    "Fee terms are persisted user-supplied evidence; the server does not derive them from salesperson commission settings, historical orders, free text, customer defaults or amount similarity.",
+    "The server validates the authoritative Customer and rejects missing, deleted or inactive Customers for new agreements while retaining bounded Customer snapshots for historical reads.",
+    "Active agreement identity is unique under a documented normalized Customer and agreement-number rule; duplicates are rejected rather than merged.",
+    "Supported fee methods and their required fields are explicit and validated; incompatible rate, fixed amount, currency or basis combinations are rejected without silently normalizing commercial meaning.",
+    "Agreements may be recorded and later voided with a bounded reason while preserving original terms, Customer snapshots, recorder and timestamps; recorded or voided evidence is not hard-deleted or silently rewritten.",
+    "The UI and documentation state that agreement rows are repository commercial evidence, not a tax invoice, accounting entry, payment authorization, legal advice or proof that a service was delivered or paid.",
+    "No field or workflow is provided for concealed, undisclosed or off-book commission handling, and existing salesperson commission reports remain a separate model.",
+    "Creating, recording, reading or voiding agreement evidence does not mutate Customers, Sales Orders, containers, invoices, receipts, balances, tax, finance or settlement records.",
+    "Schema changes are idempotent, lists are bounded or paged, legacy Customers remain readable without request-time or production backfill, and validation uses only permitted local or test-database paths.",
+    "Unit and integration tests cover supported fee methods, invalid term combinations, Customer validation, duplicate identity, effective dates, record and void history, separation from salesperson commission and adjacent-record non-mutation; safe validation passes and browser acceptance is recorded as deferred during development."
+  ],
+  "allowed_paths": [
+    "src/ERP.Domain/**",
+    "src/ERP.Application/**",
+    "src/ERP.Infrastructure/**",
+    "src/ERP.Api/Controllers/**",
+    "src/ERP.Api/wwwroot/**",
+    "src/ERP.UnitTests/**",
+    "src/ERP.IntegrationTests/**",
+    "docs/**",
+    ".ai/**"
+  ],
+  "depends_on": [],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "browser",
+  "browser_acceptance": {
+    "required": true,
+    "scenarios": [
+      "Create disclosed agency service-fee agreement evidence for an active Customer, verify its explicit currency and fee terms, record it and confirm no invoice, receipt, order or accounting record changes.",
+      "Attempt duplicate, invalid-term and inactive-Customer agreements, verify rejection, then void valid recorded evidence and confirm its original terms and audit history remain readable and separate from salesperson commission reports."
+    ],
+    "test_filter": "Collection=UiTests",
+    "minimum_screenshots": 2
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L2",
+    "status": "not_required",
+    "reason": "Repository-only disclosed agreement evidence and non-production validation. Real contracting, invoicing, receipt handling, accounting posting, production database mutation, deployment and release remain behind applicable human gates."
+  },
+  "attempts": 0
+}
