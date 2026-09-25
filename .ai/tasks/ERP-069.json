@@ -1,7 +1,7 @@
 {
   "id": "ERP-069",
   "title": "Add explicit agency service-fee agreement evidence",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "medium",
   "description": "Add a disclosed, auditable agency service-fee agreement evidence register for customer-facing agency services. Preserve explicit commercial terms supplied by authorized users and keep this model separate from salesperson commission reports, customer invoices and receipts. Do not support concealed or off-book commissions, infer terms, issue an invoice, move money, post accounting, execute production SQL, deploy, or release.",
   "acceptance_criteria": [
@@ -50,5 +50,5 @@
     "status": "not_required",
     "reason": "Repository-only disclosed agreement evidence and non-production validation. Real contracting, invoicing, receipt handling, accounting posting, production database mutation, deployment and release remain behind applicable human gates."
   },
-  "attempts": 0
+  "attempts": 1
 }

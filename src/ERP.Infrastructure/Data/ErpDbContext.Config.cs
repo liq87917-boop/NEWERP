@@ -968,6 +968,49 @@ public partial class ErpDbContext
             .HasIndex(x => new { x.Status, x.RecordedAt })
             .HasDatabaseName("IX_AttachmentEvidences_Status_RecordedAt")
             .HasFilter("IsDeleted = 0");
+
+        // ============ ERP-069：代理服务费协议证据登记（客户代理服务费的仓库内商业条款证据） ============
+        // 设计口径：
+        //   1. 本模块只是**商业条款证据册**：不建发票 / 记账 / 付款授权 / 法律意见模型，不生成凭证或收付款 / 结算单，
+        //      也不改写客户主数据（含佣金比例与信用状态）、销售订单（含佣金比例与金额）、收款单及其引用行、
+        //      销项发票证据、库存成本 / 流水、装柜与单证、退税与费用；
+        //   2. 有效身份唯一：同一「客户 + 规范化协议号」在**未作废**（Status <> 2）记录内唯一
+        //      （UX_AgencyServiceFeeAgreements_ActiveIdentity，过滤 IsDeleted = 0 AND Status <> 2）：
+        //      草稿同样占用身份（避免同一协议被重复登记），作废记录保留可读但不占用身份；
+        //   3. 费用条款列（RatePercent DECIMAL(9,4) / FixedAmount DECIMAL(18,2)）只保存**用户显式提交**并已按
+        //      口径取整的值，绝不与业务员提成设置（SysParameters.SalesCommissionRate）或客户 / 供应商主数据比例
+        //      发生任何派生关系；
+        //   4. **刻意不建**到客户的外键、也不建导航属性：客户停用 / 软删除 / 改名都不影响历史证据可读；
+        //   5. 索引与 SchemaUpgrader 第 42 段同名同过滤条件，供客户 / 状态 / 生效日期与规范化协议号有界检索。
+        modelBuilder.Entity<AgencyServiceFeeAgreement>().Property(x => x.AgreementNo).HasMaxLength(50);
+        modelBuilder.Entity<AgencyServiceFeeAgreement>().Property(x => x.NormalizedAgreementNo).HasMaxLength(50);
+        modelBuilder.Entity<AgencyServiceFeeAgreement>().Property(x => x.CustomerCode).HasMaxLength(50);
+        modelBuilder.Entity<AgencyServiceFeeAgreement>().Property(x => x.CustomerName).HasMaxLength(200);
+        modelBuilder.Entity<AgencyServiceFeeAgreement>().Property(x => x.Currency).HasMaxLength(20);
+        modelBuilder.Entity<AgencyServiceFeeAgreement>().Property(x => x.FeeMethod).HasMaxLength(20);
+        modelBuilder.Entity<AgencyServiceFeeAgreement>().Property(x => x.RatePercent).HasPrecision(9, 4);
+        modelBuilder.Entity<AgencyServiceFeeAgreement>().Property(x => x.FixedAmount).HasPrecision(18, 2);
+        modelBuilder.Entity<AgencyServiceFeeAgreement>().Property(x => x.FeeBasis).HasMaxLength(200);
+        modelBuilder.Entity<AgencyServiceFeeAgreement>().Property(x => x.RecordedBy).HasMaxLength(100);
+        modelBuilder.Entity<AgencyServiceFeeAgreement>().Property(x => x.VoidReason).HasMaxLength(500);
+        modelBuilder.Entity<AgencyServiceFeeAgreement>().Property(x => x.Remark).HasMaxLength(500);
+
+        modelBuilder.Entity<AgencyServiceFeeAgreement>()
+            .HasIndex(x => new { x.CustomerId, x.NormalizedAgreementNo })
+            .IsUnique().HasDatabaseName("UX_AgencyServiceFeeAgreements_ActiveIdentity")
+            .HasFilter("IsDeleted = 0 AND Status <> 2");
+
+        modelBuilder.Entity<AgencyServiceFeeAgreement>().HasIndex(x => new { x.CustomerId, x.Status })
+            .HasDatabaseName("IX_AgencyServiceFeeAgreements_CustomerId_Status")
+            .HasFilter("IsDeleted = 0");
+
+        modelBuilder.Entity<AgencyServiceFeeAgreement>().HasIndex(x => new { x.Status, x.EffectiveFrom })
+            .HasDatabaseName("IX_AgencyServiceFeeAgreements_Status_EffectiveFrom")
+            .HasFilter("IsDeleted = 0");
+
+        modelBuilder.Entity<AgencyServiceFeeAgreement>().HasIndex(x => x.NormalizedAgreementNo)
+            .HasDatabaseName("IX_AgencyServiceFeeAgreements_NormalizedAgreementNo")
+            .HasFilter("IsDeleted = 0");
     }
 
     /// <summary>保存变更：自动填充审计字段</summary>

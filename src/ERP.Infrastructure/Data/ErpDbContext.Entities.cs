@@ -114,4 +114,8 @@ public partial class ErpDbContext
     // ============ 业务单据附件内容证据（ERP-061：唯一附件内容册；内容经 IAttachmentContentStore 接缝托管） ============
     /// <summary>附件内容证据（用户上传的 PDF / PNG / JPEG 证据；服务端权威元数据 + 不透明存储键；刻意不建外键）</summary>
     public DbSet<AttachmentEvidence> AttachmentEvidences => Set<AttachmentEvidence>();
+
+    // ============ 代理服务费协议证据登记（ERP-069：客户代理服务费的仓库内商业条款证据） ============
+    /// <summary>代理服务费协议证据（授权用户显式提交的商业条款；不是发票 / 记账凭证 / 付款授权 / 法律意见 / 交付或收付款证明）</summary>
+    public DbSet<AgencyServiceFeeAgreement> AgencyServiceFeeAgreements => Set<AgencyServiceFeeAgreement>();
 }

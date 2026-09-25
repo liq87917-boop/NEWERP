@@ -83,6 +83,17 @@ const MODULES = {
       { key: 'paymentTerms', label: '付款条件（备注性说明）' }, { key: 'taxNumber', label: '税号' },
       { key: 'address', label: '地址', type: 'textarea' },
     ],
+    /* ERP-069：代理服务费协议证据入口（工具栏，始终可见；登记客户代理服务费的**仓库内商业条款证据**：
+       协议号 / 生效日期区间 / 币种 / 披露的计费方式与显式费率或固定金额 / 有界计费依据说明；
+       费用条款只来自用户显式填写（不从业务员提成设置 SalesCommissionRate、客户 / 供应商主数据比例、
+       历史订单或自由文本推断）；不是税务发票 / 会计凭证或记账分录 / 付款授权 / 法律意见 /
+       服务已交付或已收付款的证明，也不改写客户资料与任何单据）。 */
+    extraActions: [
+      { label: '🧾 服务费协议', title: '登记客户代理服务费的仓库内商业条款证据（协议号 / 生效日期区间 / 币种 / 披露的计费方式与显式费率或固定金额 / 有界计费依据说明），可显式登记与作废；费用条款只保存显式填写的值，不从业务员提成设置或客户默认比例推断；不开发票、不记账、不授权或发起付款、不提供法律意见，也不是服务已交付或已收付款的证明', onclick: 'openAgencyServiceFeeAgreementRegister()' },
+    ],
+    rowActions: [
+      { label: '服务费协议', icon: '🧾', title: '以本客户打开代理服务费协议证据登记册（只登记商业条款证据；不改写客户资料、订单、发票、收款与库存记录）', onclick: 'openAgencyServiceFeeAgreementRegister' },
+    ],
   },
   supplier: {
     title: '供应商资料', api: '/api/base/suppliers',

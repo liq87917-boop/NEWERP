@@ -175,6 +175,17 @@ public interface IErpDbContext
     /// </summary>
     DbSet<AttachmentEvidence> AttachmentEvidences { get; }
 
+    // ============ 代理服务费协议证据登记（ERP-069：客户代理服务费的仓库内商业条款证据） ============
+
+    /// <summary>
+    /// 代理服务费协议证据（ERP-069）：把授权用户**显式提供**的客户代理服务费商业条款（协议号 / 权威客户 /
+    /// 生效日期区间 / 币种 / 披露的计费方式与费率或固定金额 / 有界计费依据说明 / 有界备注）登记为可审计证据；
+    /// 不是税务发票、不是会计凭证或记账分录、不是付款授权或资金指令、不是法律意见，也不是服务已交付 /
+    /// 已收付款的证明；系统不提供任何「不披露 / 账外 / 隐匿佣金」字段或流程，费用条款也不从业务员提成设置
+    /// （<c>SalesCommissionRate</c>）、客户 / 供应商主数据比例、历史订单、自由文本或金额相似度推断
+    /// </summary>
+    DbSet<AgencyServiceFeeAgreement> AgencyServiceFeeAgreements { get; }
+
     // ============ 询价管理 ============
     DbSet<Inquiry> Inquiries { get; }
     DbSet<InquiryDetail> InquiryDetails { get; }

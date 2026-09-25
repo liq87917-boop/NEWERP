@@ -2670,5 +2670,84 @@ IF NOT EXISTS (SELECT 1 FROM sys.indexes
         WHERE IsDeleted = 0;
 ");
 
+        // 42. 代理服务费协议证据登记（ERP-069：客户代理服务费的仓库内商业条款证据）
+        //     42.1 **新增前的既有模型审计**（见 docs/代理服务费协议证据说明.md §2）：本仓库此前没有「代理服务费协议」
+        //          权威模型 —— BaseCustomers.CommissionRatio（客户佣金 / 回佣比例）、BaseSuppliers.RebateRatio（供应商
+        //          返点比例）、销售订单上的 CommissionRatio 列（订单佣金比例快照）都只是主数据 / 单据上的**比例设置**，
+        //          `业务员提成表`（/api/reports/sales-commission，比例取自系统参数 SalesCommissionRate、按毛利计算）
+        //          是**内部业务员提成报表**；三者与「客户代理服务费协议」的计费主体 / 对象 / 依据都不同，
+        //          因此本段建的是**独立的协议证据表**：既不替换、也不复制、也不派生上述任一模型；
+        //     42.2 只建「协议证据」一张表与其过滤索引：**不含任何 UPDATE / INSERT / DELETE 回填语句**，
+        //          也不在任何既有表（客户 / 销售订单 / 参数 / 发票 / 收款 / 库存 / 费用 / 退税）上加列；
+        //     42.3 有效身份唯一：UX_AgencyServiceFeeAgreements_ActiveIdentity（CustomerId, NormalizedAgreementNo，
+        //          过滤 IsDeleted = 0 AND Status <> 2）= 同一「客户 + 规范化协议号」在**未作废**记录内唯一
+        //          （草稿同样占用身份，避免同一协议重复登记；作废记录保留可读但不占用身份）；
+        //     42.4 费用条款列只保存**用户显式提交**并已按口径取整的值：费率 DECIMAL(9,4)、固定金额 DECIMAL(18,2)；
+        //          本段不写入任何默认业务值，也**不**从业务员提成设置（SalesCommissionRate）、客户 / 供应商主数据比例、
+        //          历史订单或自由文本派生任何条款；
+        //     42.5 本表**刻意不建**到客户的外键与导航属性：客户停用 / 软删除 / 改名都不影响历史证据可读；
+        //     42.6 生产库执行仍由 Human Gate 控制：本段只在应用启动时以 IF OBJECT_ID(...) IS NULL 幂等补齐，
+        //          自动化验证只作用于本机非生产测试库。
+        await db.Database.ExecuteSqlRawAsync(@"
+IF OBJECT_ID('db_owner.AgencyServiceFeeAgreements') IS NULL
+BEGIN
+    CREATE TABLE db_owner.AgencyServiceFeeAgreements (
+        Id BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+        AgreementNo NVARCHAR(50) NOT NULL DEFAULT N'',
+        NormalizedAgreementNo NVARCHAR(50) NOT NULL DEFAULT N'',
+        CustomerId BIGINT NOT NULL,
+        CustomerCode NVARCHAR(50) NOT NULL DEFAULT N'',
+        CustomerName NVARCHAR(200) NOT NULL DEFAULT N'',
+        EffectiveFrom DATETIME2 NOT NULL,
+        EffectiveTo DATETIME2 NULL,
+        Currency NVARCHAR(20) NOT NULL DEFAULT N'CNY',
+        FeeMethod NVARCHAR(20) NOT NULL DEFAULT N'',
+        RatePercent DECIMAL(9,4) NOT NULL DEFAULT 0,
+        FixedAmount DECIMAL(18,2) NOT NULL DEFAULT 0,
+        FeeBasis NVARCHAR(200) NOT NULL DEFAULT N'',
+        Status INT NOT NULL DEFAULT 0,
+        RecordedAt DATETIME2 NULL,
+        RecordedBy NVARCHAR(100) NOT NULL DEFAULT N'',
+        VoidedAt DATETIME2 NULL,
+        VoidReason NVARCHAR(500) NOT NULL DEFAULT N'',
+        Remark NVARCHAR(500) NOT NULL DEFAULT N'',
+        CreatedAt DATETIME2 NOT NULL DEFAULT GETDATE(),
+        CreatedBy BIGINT NULL,
+        UpdatedAt DATETIME2 NULL,
+        UpdatedBy BIGINT NULL,
+        IsDeleted BIT NOT NULL DEFAULT 0,
+        RowVersion ROWVERSION NOT NULL
+    );
+END
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes
+               WHERE name = 'UX_AgencyServiceFeeAgreements_ActiveIdentity'
+                 AND object_id = OBJECT_ID('db_owner.AgencyServiceFeeAgreements'))
+    CREATE UNIQUE INDEX UX_AgencyServiceFeeAgreements_ActiveIdentity
+        ON db_owner.AgencyServiceFeeAgreements(CustomerId, NormalizedAgreementNo)
+        WHERE IsDeleted = 0 AND Status <> 2;
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes
+               WHERE name = 'IX_AgencyServiceFeeAgreements_CustomerId_Status'
+                 AND object_id = OBJECT_ID('db_owner.AgencyServiceFeeAgreements'))
+    CREATE INDEX IX_AgencyServiceFeeAgreements_CustomerId_Status
+        ON db_owner.AgencyServiceFeeAgreements(CustomerId, Status)
+        WHERE IsDeleted = 0;
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes
+               WHERE name = 'IX_AgencyServiceFeeAgreements_Status_EffectiveFrom'
+                 AND object_id = OBJECT_ID('db_owner.AgencyServiceFeeAgreements'))
+    CREATE INDEX IX_AgencyServiceFeeAgreements_Status_EffectiveFrom
+        ON db_owner.AgencyServiceFeeAgreements(Status, EffectiveFrom)
+        WHERE IsDeleted = 0;
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes
+               WHERE name = 'IX_AgencyServiceFeeAgreements_NormalizedAgreementNo'
+                 AND object_id = OBJECT_ID('db_owner.AgencyServiceFeeAgreements'))
+    CREATE INDEX IX_AgencyServiceFeeAgreements_NormalizedAgreementNo
+        ON db_owner.AgencyServiceFeeAgreements(NormalizedAgreementNo)
+        WHERE IsDeleted = 0;
+");
+
     }
 }
