@@ -2749,5 +2749,154 @@ IF NOT EXISTS (SELECT 1 FROM sys.indexes
         WHERE IsDeleted = 0;
 ");
 
+        // 43. 代理服务费对账单证据（ERP-070：显式来源引用的仓库内操作性费用证据）
+        //     43.1 只建本模块**两张表**（表头 + 服务来源引用行）与其过滤索引：**不含任何 UPDATE / INSERT /
+        //          DELETE 回填语句**，也不在任何既有表（客户 / 协议 / 销售订单 / 装柜与装柜清单 / 单证 / 发票 /
+        //          收款 / 库存 / 费用 / 退税 / 结算）上加列；
+        //     43.2 对账单身份唯一：UX_AgencyServiceFeeStatements_ActiveIdentity（CustomerId, NormalizedStatementNo，
+        //          过滤 IsDeleted = 0 AND Status <> 2）= 同一「客户 + 规范化对账单号」在**未作废**记录内唯一
+        //          （草稿同样占用身份；作废记录保留可读但不占用身份）；
+        //     43.3 防重复计费证据：UX_AgencyServiceFeeStatementLines_ActiveSource（SourceType, SourceId，
+        //          过滤 IsDeleted = 0 AND Status <> 2）= 同一服务来源在**未作废行**内全局唯一；行只按
+        //          持久化标识符（来源类型 + 来源记录 Id）引用来源，来源单号 / 日期 / 状态 / 客户 / 币种只是服务端快照；
+        //     43.4 金额列只保存**用户显式提交并按币种精度取整**的行金额（行 Amount DECIMAL(18,2)）与
+        //          **服务端按已校验行求和**的合计（表头 TotalAmount DECIMAL(18,2)）：本段不写入任何默认业务值，
+        //          也**不**从协议费率 / 协议固定金额、客户账期与默认值、来源单据金额或自由文本派生任何费用；
+        //          到期日 DueDate 为 NULL 即「未知」（= 用户未提供），本段不补默认到期日、也不按对账日期推算；
+        //     43.5 本模块**刻意不建**任何外键与导航属性：客户 / 协议 / 来源记录被软删除或改名后历史证据必须始终可读；
+        //     43.6 生产库执行仍由 Human Gate 控制：本段只在应用启动时以 IF OBJECT_ID(...) IS NULL 幂等补齐，
+        //          自动化验证只作用于本机非生产测试库。
+        await db.Database.ExecuteSqlRawAsync(@"
+IF OBJECT_ID('db_owner.AgencyServiceFeeStatements') IS NULL
+BEGIN
+    CREATE TABLE db_owner.AgencyServiceFeeStatements (
+        Id BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+        StatementNo NVARCHAR(50) NOT NULL DEFAULT N'',
+        NormalizedStatementNo NVARCHAR(50) NOT NULL DEFAULT N'',
+        CustomerId BIGINT NOT NULL,
+        CustomerCode NVARCHAR(50) NOT NULL DEFAULT N'',
+        CustomerName NVARCHAR(200) NOT NULL DEFAULT N'',
+        Currency NVARCHAR(20) NOT NULL DEFAULT N'CNY',
+        StatementDate DATETIME2 NOT NULL,
+        DueDate DATETIME2 NULL,
+        ServicePeriodFrom DATETIME2 NOT NULL,
+        ServicePeriodTo DATETIME2 NOT NULL,
+        AgreementId BIGINT NOT NULL,
+        AgreementNo NVARCHAR(50) NOT NULL DEFAULT N'',
+        AgreementCurrency NVARCHAR(20) NOT NULL DEFAULT N'',
+        AgreementCustomerId BIGINT NOT NULL,
+        AgreementFeeMethod NVARCHAR(20) NOT NULL DEFAULT N'',
+        AgreementTermsText NVARCHAR(200) NOT NULL DEFAULT N'',
+        TotalAmount DECIMAL(18,2) NOT NULL DEFAULT 0,
+        Status INT NOT NULL DEFAULT 0,
+        RecordedAt DATETIME2 NULL,
+        RecordedBy NVARCHAR(100) NOT NULL DEFAULT N'',
+        VoidedAt DATETIME2 NULL,
+        VoidReason NVARCHAR(500) NOT NULL DEFAULT N'',
+        Remark NVARCHAR(500) NOT NULL DEFAULT N'',
+        CreatedAt DATETIME2 NOT NULL DEFAULT GETDATE(),
+        CreatedBy BIGINT NULL,
+        UpdatedAt DATETIME2 NULL,
+        UpdatedBy BIGINT NULL,
+        IsDeleted BIT NOT NULL DEFAULT 0,
+        RowVersion ROWVERSION NOT NULL
+    );
+END
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes
+               WHERE name = 'UX_AgencyServiceFeeStatements_ActiveIdentity'
+                 AND object_id = OBJECT_ID('db_owner.AgencyServiceFeeStatements'))
+    CREATE UNIQUE INDEX UX_AgencyServiceFeeStatements_ActiveIdentity
+        ON db_owner.AgencyServiceFeeStatements(CustomerId, NormalizedStatementNo)
+        WHERE IsDeleted = 0 AND Status <> 2;
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes
+               WHERE name = 'IX_AgencyServiceFeeStatements_CustomerId_Status'
+                 AND object_id = OBJECT_ID('db_owner.AgencyServiceFeeStatements'))
+    CREATE INDEX IX_AgencyServiceFeeStatements_CustomerId_Status
+        ON db_owner.AgencyServiceFeeStatements(CustomerId, Status)
+        WHERE IsDeleted = 0;
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes
+               WHERE name = 'IX_AgencyServiceFeeStatements_Status_StatementDate'
+                 AND object_id = OBJECT_ID('db_owner.AgencyServiceFeeStatements'))
+    CREATE INDEX IX_AgencyServiceFeeStatements_Status_StatementDate
+        ON db_owner.AgencyServiceFeeStatements(Status, StatementDate)
+        WHERE IsDeleted = 0;
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes
+               WHERE name = 'IX_AgencyServiceFeeStatements_AgreementId_Status'
+                 AND object_id = OBJECT_ID('db_owner.AgencyServiceFeeStatements'))
+    CREATE INDEX IX_AgencyServiceFeeStatements_AgreementId_Status
+        ON db_owner.AgencyServiceFeeStatements(AgreementId, Status)
+        WHERE IsDeleted = 0;
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes
+               WHERE name = 'IX_AgencyServiceFeeStatements_NormalizedStatementNo'
+                 AND object_id = OBJECT_ID('db_owner.AgencyServiceFeeStatements'))
+    CREATE INDEX IX_AgencyServiceFeeStatements_NormalizedStatementNo
+        ON db_owner.AgencyServiceFeeStatements(NormalizedStatementNo)
+        WHERE IsDeleted = 0;
+");
+
+        await db.Database.ExecuteSqlRawAsync(@"
+IF OBJECT_ID('db_owner.AgencyServiceFeeStatementLines') IS NULL
+BEGIN
+    CREATE TABLE db_owner.AgencyServiceFeeStatementLines (
+        Id BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+        StatementId BIGINT NOT NULL,
+        LineNo INT NOT NULL DEFAULT 0,
+        SourceType NVARCHAR(20) NOT NULL DEFAULT N'',
+        SourceId BIGINT NOT NULL,
+        SourceNo NVARCHAR(50) NOT NULL DEFAULT N'',
+        SourceDate DATETIME2 NOT NULL,
+        SourceStatus INT NOT NULL DEFAULT 0,
+        SourceStatusText NVARCHAR(30) NOT NULL DEFAULT N'',
+        SourceCustomerId BIGINT NOT NULL,
+        SourceCustomerCode NVARCHAR(50) NOT NULL DEFAULT N'',
+        SourceCustomerName NVARCHAR(200) NOT NULL DEFAULT N'',
+        SourceCurrency NVARCHAR(20) NOT NULL DEFAULT N'',
+        Description NVARCHAR(200) NOT NULL DEFAULT N'',
+        BasisQuantity DECIMAL(18,4) NULL,
+        BasisNote NVARCHAR(200) NOT NULL DEFAULT N'',
+        Amount DECIMAL(18,2) NOT NULL DEFAULT 0,
+        Currency NVARCHAR(20) NOT NULL DEFAULT N'CNY',
+        Status INT NOT NULL DEFAULT 0,
+        RecordedAt DATETIME2 NULL,
+        RecordedBy NVARCHAR(100) NOT NULL DEFAULT N'',
+        VoidedAt DATETIME2 NULL,
+        VoidReason NVARCHAR(500) NOT NULL DEFAULT N'',
+        Remark NVARCHAR(500) NOT NULL DEFAULT N'',
+        CreatedAt DATETIME2 NOT NULL DEFAULT GETDATE(),
+        CreatedBy BIGINT NULL,
+        UpdatedAt DATETIME2 NULL,
+        UpdatedBy BIGINT NULL,
+        IsDeleted BIT NOT NULL DEFAULT 0,
+        RowVersion ROWVERSION NOT NULL
+    );
+END
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes
+               WHERE name = 'UX_AgencyServiceFeeStatementLines_ActiveSource'
+                 AND object_id = OBJECT_ID('db_owner.AgencyServiceFeeStatementLines'))
+    CREATE UNIQUE INDEX UX_AgencyServiceFeeStatementLines_ActiveSource
+        ON db_owner.AgencyServiceFeeStatementLines(SourceType, SourceId)
+        WHERE IsDeleted = 0 AND Status <> 2;
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes
+               WHERE name = 'IX_AgencyServiceFeeStatementLines_StatementId_LineNo'
+                 AND object_id = OBJECT_ID('db_owner.AgencyServiceFeeStatementLines'))
+    CREATE INDEX IX_AgencyServiceFeeStatementLines_StatementId_LineNo
+        ON db_owner.AgencyServiceFeeStatementLines(StatementId, LineNo)
+        WHERE IsDeleted = 0;
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes
+               WHERE name = 'IX_AgencyServiceFeeStatementLines_Status_RecordedAt'
+                 AND object_id = OBJECT_ID('db_owner.AgencyServiceFeeStatementLines'))
+    CREATE INDEX IX_AgencyServiceFeeStatementLines_Status_RecordedAt
+        ON db_owner.AgencyServiceFeeStatementLines(Status, RecordedAt)
+        WHERE IsDeleted = 0;
+");
+
     }
 }

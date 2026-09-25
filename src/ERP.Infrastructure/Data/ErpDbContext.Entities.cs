@@ -118,4 +118,13 @@ public partial class ErpDbContext
     // ============ 代理服务费协议证据登记（ERP-069：客户代理服务费的仓库内商业条款证据） ============
     /// <summary>代理服务费协议证据（授权用户显式提交的商业条款；不是发票 / 记账凭证 / 付款授权 / 法律意见 / 交付或收付款证明）</summary>
     public DbSet<AgencyServiceFeeAgreement> AgencyServiceFeeAgreements => Set<AgencyServiceFeeAgreement>();
+
+    // ============ 代理服务费对账单证据（ERP-070：显式来源引用的操作性费用证据） ============
+    /// <summary>代理服务费对账单证据表头（不是发票 / 法律对账单确认 / 收入确认 / 付款通知 / 记账分录）</summary>
+    public DbSet<AgencyServiceFeeStatement> AgencyServiceFeeStatements => Set<AgencyServiceFeeStatement>();
+
+    /// <summary>代理服务费对账单服务来源引用行（只按来源类型 + 持久化 Id 显式引用；同一来源未作废行内全局唯一）</summary>
+    public DbSet<AgencyServiceFeeStatementLine> AgencyServiceFeeStatementLines
+        => Set<AgencyServiceFeeStatementLine>();
+
 }

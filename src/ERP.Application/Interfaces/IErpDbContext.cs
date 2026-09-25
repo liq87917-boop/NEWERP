@@ -186,6 +186,23 @@ public interface IErpDbContext
     /// </summary>
     DbSet<AgencyServiceFeeAgreement> AgencyServiceFeeAgreements { get; }
 
+    // ============ 代理服务费对账单证据（ERP-070：显式来源引用的操作性费用证据） ============
+
+    /// <summary>
+    /// 代理服务费对账单证据表头（ERP-070）：对账单号 / 权威客户 / 币种 / 对账日期 / **可选**到期日 / 服务期间 /
+    /// 显式关联的 ERP-069 协议 / 服务端计算的合计 / 有界状态与留痕；**不是**税务发票、**不是**具有法律效力的
+    /// 客户对账单确认、**不是**收入确认、**不是**付款通知或催收、**不是**结算 / 核销确认，
+    /// 也**不是**会计凭证或总账记账分录
+    /// </summary>
+    DbSet<AgencyServiceFeeStatement> AgencyServiceFeeStatements { get; }
+
+    /// <summary>
+    /// 代理服务费对账单服务来源引用行（ERP-070）：只按**来源类型 + 来源记录 Id（持久化标识符）**显式引用
+    /// 销售订单 / 装柜清单；单号 / 日期 / 状态 / 客户 / 币种快照由服务端写入，绝不按文本 / 金额 / 相似度猜测链接；
+    /// 同一来源在未作废行内全局唯一（防重复计费证据）
+    /// </summary>
+    DbSet<AgencyServiceFeeStatementLine> AgencyServiceFeeStatementLines { get; }
+
     // ============ 询价管理 ============
     DbSet<Inquiry> Inquiries { get; }
     DbSet<InquiryDetail> InquiryDetails { get; }

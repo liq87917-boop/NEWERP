@@ -1011,6 +1011,85 @@ public partial class ErpDbContext
         modelBuilder.Entity<AgencyServiceFeeAgreement>().HasIndex(x => x.NormalizedAgreementNo)
             .HasDatabaseName("IX_AgencyServiceFeeAgreements_NormalizedAgreementNo")
             .HasFilter("IsDeleted = 0");
+
+        // ============ ERP-070：代理服务费对账单证据（显式来源引用的操作性费用证据） ============
+        // 设计口径：
+        //   1. 只是**仓库内操作性费用证据册**：不建发票 / 记账 / 收款 / 催收 / 结算模型，也不改写 ERP-069 协议证据、
+        //      客户主数据、销售订单、装柜与装柜清单、单证、发票、收款单及其引用行、库存与费用 / 退税 / 结算记录；
+        //   2. 行只按 (SourceType, SourceId) 的**持久化标识符**引用来源（销售订单 / 装柜清单），绝不按单号文本、
+        //      金额、日期或相似度匹配；来源单号 / 日期 / 状态 / 客户 / 币种只保存服务端写入的快照；
+        //      装柜清单没有币种列 ⇒ 其来源币种照实记空串，币种校验对该来源不适用（不替它补一个币种）；
+        //   3. 对账单身份唯一：(CustomerId, NormalizedStatementNo)，过滤 IsDeleted = 0 AND Status <> 2
+        //      （草稿同样占用身份；作废记录保留可读但不占用身份）；
+        //   4. **防重复计费证据**：行 (SourceType, SourceId) 在未作废 / 未删除行内**全局唯一**
+        //      （UX_AgencyServiceFeeStatementLines_ActiveSource，过滤 IsDeleted = 0 AND Status <> 2）；
+        //   5. TotalAmount DECIMAL(18,2) 只保存**服务端按币种精度对已校验行金额求和**的结果，客户端合计不被采信；
+        //      金额与计费基础数量只来自用户显式提交，不从协议费率 / 固定金额、客户默认值或来源金额折算；
+        //   6. **刻意不建**到客户、协议与来源记录的任何外键与导航属性（客户 / 协议 / 来源软删除后历史证据必须可读）；
+        //   7. 索引与 SchemaUpgrader 第 43 段同名同过滤条件，供客户 / 状态 / 对账日期 / 协议 / 来源有界检索。
+        modelBuilder.Entity<AgencyServiceFeeStatement>().Property(x => x.StatementNo).HasMaxLength(50);
+        modelBuilder.Entity<AgencyServiceFeeStatement>().Property(x => x.NormalizedStatementNo).HasMaxLength(50);
+        modelBuilder.Entity<AgencyServiceFeeStatement>().Property(x => x.CustomerCode).HasMaxLength(50);
+        modelBuilder.Entity<AgencyServiceFeeStatement>().Property(x => x.CustomerName).HasMaxLength(200);
+        modelBuilder.Entity<AgencyServiceFeeStatement>().Property(x => x.Currency).HasMaxLength(20);
+        modelBuilder.Entity<AgencyServiceFeeStatement>().Property(x => x.AgreementNo).HasMaxLength(50);
+        modelBuilder.Entity<AgencyServiceFeeStatement>().Property(x => x.AgreementCurrency).HasMaxLength(20);
+        modelBuilder.Entity<AgencyServiceFeeStatement>().Property(x => x.AgreementFeeMethod).HasMaxLength(20);
+        modelBuilder.Entity<AgencyServiceFeeStatement>().Property(x => x.AgreementTermsText).HasMaxLength(200);
+        modelBuilder.Entity<AgencyServiceFeeStatement>().Property(x => x.TotalAmount).HasPrecision(18, 2);
+        modelBuilder.Entity<AgencyServiceFeeStatement>().Property(x => x.RecordedBy).HasMaxLength(100);
+        modelBuilder.Entity<AgencyServiceFeeStatement>().Property(x => x.VoidReason).HasMaxLength(500);
+        modelBuilder.Entity<AgencyServiceFeeStatement>().Property(x => x.Remark).HasMaxLength(500);
+
+        modelBuilder.Entity<AgencyServiceFeeStatement>()
+            .HasIndex(x => new { x.CustomerId, x.NormalizedStatementNo })
+            .IsUnique().HasDatabaseName("UX_AgencyServiceFeeStatements_ActiveIdentity")
+            .HasFilter("IsDeleted = 0 AND Status <> 2");
+
+        modelBuilder.Entity<AgencyServiceFeeStatement>().HasIndex(x => new { x.CustomerId, x.Status })
+            .HasDatabaseName("IX_AgencyServiceFeeStatements_CustomerId_Status")
+            .HasFilter("IsDeleted = 0");
+
+        modelBuilder.Entity<AgencyServiceFeeStatement>().HasIndex(x => new { x.Status, x.StatementDate })
+            .HasDatabaseName("IX_AgencyServiceFeeStatements_Status_StatementDate")
+            .HasFilter("IsDeleted = 0");
+
+        modelBuilder.Entity<AgencyServiceFeeStatement>().HasIndex(x => new { x.AgreementId, x.Status })
+            .HasDatabaseName("IX_AgencyServiceFeeStatements_AgreementId_Status")
+            .HasFilter("IsDeleted = 0");
+
+        modelBuilder.Entity<AgencyServiceFeeStatement>().HasIndex(x => x.NormalizedStatementNo)
+            .HasDatabaseName("IX_AgencyServiceFeeStatements_NormalizedStatementNo")
+            .HasFilter("IsDeleted = 0");
+
+        modelBuilder.Entity<AgencyServiceFeeStatementLine>().Property(x => x.SourceType).HasMaxLength(20);
+        modelBuilder.Entity<AgencyServiceFeeStatementLine>().Property(x => x.SourceNo).HasMaxLength(50);
+        modelBuilder.Entity<AgencyServiceFeeStatementLine>().Property(x => x.SourceStatusText).HasMaxLength(30);
+        modelBuilder.Entity<AgencyServiceFeeStatementLine>().Property(x => x.SourceCustomerCode).HasMaxLength(50);
+        modelBuilder.Entity<AgencyServiceFeeStatementLine>().Property(x => x.SourceCustomerName).HasMaxLength(200);
+        modelBuilder.Entity<AgencyServiceFeeStatementLine>().Property(x => x.SourceCurrency).HasMaxLength(20);
+        modelBuilder.Entity<AgencyServiceFeeStatementLine>().Property(x => x.Description).HasMaxLength(200);
+        modelBuilder.Entity<AgencyServiceFeeStatementLine>().Property(x => x.BasisQuantity).HasPrecision(18, 4);
+        modelBuilder.Entity<AgencyServiceFeeStatementLine>().Property(x => x.BasisNote).HasMaxLength(200);
+        modelBuilder.Entity<AgencyServiceFeeStatementLine>().Property(x => x.Amount).HasPrecision(18, 2);
+        modelBuilder.Entity<AgencyServiceFeeStatementLine>().Property(x => x.Currency).HasMaxLength(20);
+        modelBuilder.Entity<AgencyServiceFeeStatementLine>().Property(x => x.RecordedBy).HasMaxLength(100);
+        modelBuilder.Entity<AgencyServiceFeeStatementLine>().Property(x => x.VoidReason).HasMaxLength(500);
+        modelBuilder.Entity<AgencyServiceFeeStatementLine>().Property(x => x.Remark).HasMaxLength(500);
+
+        // 同一服务来源在未作废 / 未删除行内全局唯一（重复计费证据被拒绝，而不是合并）
+        modelBuilder.Entity<AgencyServiceFeeStatementLine>()
+            .HasIndex(x => new { x.SourceType, x.SourceId })
+            .IsUnique().HasDatabaseName("UX_AgencyServiceFeeStatementLines_ActiveSource")
+            .HasFilter("IsDeleted = 0 AND Status <> 2");
+
+        modelBuilder.Entity<AgencyServiceFeeStatementLine>().HasIndex(x => new { x.StatementId, x.LineNo })
+            .HasDatabaseName("IX_AgencyServiceFeeStatementLines_StatementId_LineNo")
+            .HasFilter("IsDeleted = 0");
+
+        modelBuilder.Entity<AgencyServiceFeeStatementLine>().HasIndex(x => new { x.Status, x.RecordedAt })
+            .HasDatabaseName("IX_AgencyServiceFeeStatementLines_Status_RecordedAt")
+            .HasFilter("IsDeleted = 0");
     }
 
     /// <summary>保存变更：自动填充审计字段</summary>

@@ -1,7 +1,7 @@
 {
   "id": "ERP-070",
   "title": "Add agency service-fee statement evidence",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "medium",
   "description": "Add agency service-fee statement evidence linked to ERP-069 agreements and explicit existing service records. Statements capture disclosed repository evidence and remain separate from legal tax invoices, salesperson commission and general-ledger entries. Do not infer service links or fee amounts, issue an invoice, contact a customer, collect funds, post accounting, execute production SQL, deploy, or release.",
   "acceptance_criteria": [
@@ -52,5 +52,5 @@
     "status": "not_required",
     "reason": "Repository statement evidence over explicit non-production records only. Legal invoicing, Customer contact, real collection, accounting posting, production database mutation, deployment and release remain behind mandatory human gates."
   },
-  "attempts": 0
+  "attempts": 1
 }
