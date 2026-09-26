@@ -274,3 +274,4 @@
 {"at": "2026-09-26T02:15:22.691185Z", "event": "browser_acceptance_deferred", "task": "ERP-073"}
 {"at": "2026-09-26T02:37:24.358022Z", "event": "browser_acceptance_deferred", "task": "ERP-073"}
 {"at": "2026-09-26T02:37:24.484078Z", "event": "task_completed", "task": "ERP-073", "status": "completed", "execution_outcome": "completed", "normalized_finish_reason": "browser_deferred", "cline_exit_code": 0, "cline_finish_reason_raw": "completed", "attempts": 2, "browser_acceptance": {"status": "deferred", "reason": "Real-browser/UI acceptance is deferred until FINAL-UI-ACCEPTANCE.", "deferred_at": "2026-09-26T02:37:24.357150Z"}, "finished_at": "2026-09-26T02:37:24.482592Z"}
+{"at": "2026-09-26T09:45:52.282030Z", "event": "task_quarantined", "task": "ERP-074", "reason": "Cline exited with code 1; raw reason=error", "cline_finish_reason_raw": "error", "stash": "Saved working directory and index state On main: autonomy quarantine ERP-074"}
