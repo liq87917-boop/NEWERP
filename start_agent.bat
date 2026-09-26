@@ -15,7 +15,7 @@ echo.
 
 rem Pin Cline to the user's direct DeepSeek provider (matches XAUUSD).
 set AI_CLINE_PROVIDER=deepseek
-set AI_CLINE_MODEL=deepseek-v4.1-flash
+set AI_CLINE_MODEL=deepseek-v4-pro
 
 :run
 powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\agent-bootstrap.ps1"

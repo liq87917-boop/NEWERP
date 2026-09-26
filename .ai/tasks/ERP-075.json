@@ -1,7 +1,7 @@
 {
   "id": "ERP-075",
   "title": "Expose receipt-to-invoice allocation evidence in sales-invoice and customer workflows",
-  "status": "failed",
+  "status": "pending",
   "risk_level": "medium",
   "description": "Expose ERP-073 customer receipt-to-sales-invoice allocations in existing customer sales-invoice detail and customer-facing workflows. Keep invoice gross evidence, receipt allocation evidence and unallocated amounts separately labeled. Do not infer a receivable balance, mutate source records, execute production SQL, deploy, or release.",
   "acceptance_criteria": [
@@ -51,5 +51,5 @@
     "status": "not_required",
     "reason": "Read-only presentation of repository receipt-allocation evidence. No real receipt handling, bank access, accounting posting, production mutation, deployment or release is authorized."
   },
-  "attempts": 3
+  "attempts": 0
 }

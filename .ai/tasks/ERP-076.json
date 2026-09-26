@@ -1,7 +1,7 @@
 {
   "id": "ERP-076",
   "title": "Link customer sales-invoice evidence to sales-shipment evidence",
-  "status": "failed",
+  "status": "pending",
   "risk_level": "medium",
   "description": "Add explicit evidence rows that allocate recorded ERP-055 customer sales-invoice evidence to existing sales-shipment or container-shipment evidence using persisted identifiers only. Keep the invoice-to-order (ERP-055) and receipt-to-invoice (ERP-073) dimensions separate. Do not create another invoice or shipment master, infer links, issue a real invoice, post accounting, execute production SQL, deploy, or release.",
   "acceptance_criteria": [
@@ -51,5 +51,5 @@
     "status": "not_required",
     "reason": "Explicit repository evidence linking and non-production validation only. Real invoicing, shipment execution, customs submission, accounting posting, production database mutation, deployment and release remain behind mandatory human gates."
   },
-  "attempts": 3
+  "attempts": 0
 }
