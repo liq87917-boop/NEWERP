@@ -2,7 +2,7 @@
 setlocal
 cd /d "%~dp0"
 chcp 65001 >nul
-title NEWERP AI Agent
+title NEWERP Orchestrator
 cls
 echo ============================================================
 echo  NEWERP AI AGENT
