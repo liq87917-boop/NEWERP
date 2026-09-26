@@ -5,7 +5,7 @@
   "current_task": "ERP-084",
   "last_completed_task": "ERP-073",
   "last_reviewed_task": "ERP-084",
-  "blocker": "CONTROL_PLANE_FRESH_PROCESS_REQUIRED: 本轮复核基线 remote_head=12fa82c05565bccb795f14f51dd472386815f3b6，对照上次审查快照 a0dc7d2042e42ba03adfcffc170d5ddf937eb0b2，CHANGES SINCE BASELINE 仅控制面文档文本改写（.ai/PROJECT_STATE.json blocker/updated_at/detail 与 .ai/tasks/ERP-084.json description，2 files changed, 7 insertions(+), 7 deletions(-)），属纯控制面文档改写，无任何新执行证据。仍无 .ai/results/ERP-084.json（及 ERP-079..083.json），也无 scripts/verify-executor-bootstrap.ps1 的真实执行证据（raw_script_invocation/effective_provider/effective_model/agent_bootstrap.* 全部缺失）；ERP-074..077 仍为 failed(attempts=3)；AUTO_CIRCUIT_BREAKER 仍生效。ERP-083 已显式标记为 superseded，唯一最小可执行整改任务由 ERP-084（max_attempts=1）承担：在本机真实新进程内实际运行 bootstrap 验证、写入 .ai/results/ERP-084.json 并记录 raw_script_invocation、把 ERP-074..077 恢复为可重试；若本机确实不可执行，须在 .ai/audit.jsonl 留证并把 ERP-084 标记 failed 请求人工介入。在 ERP-084 提供真实运行证据并由人工复核 AUTO_CIRCUIT_BREAKER 之前，不补充任何业务任务，也不再追加同构控制面 recovery 任务。",
+  "blocker": "CONTROL_PLANE_FRESH_PROCESS_REQUIRED: 本轮复核基线 remote_head=adf287c0343b0ec064d68f905258adeed93027a8，对照上次审查快照 12fa82c05565bccb795f14f51dd472386815f3b6，CHANGES SINCE BASELINE 仍仅为控制面文档文本改写（.ai/PROJECT_STATE.json blocker/updated_at/detail 与 .ai/tasks/ERP-084.json description，2 files changed, 6 insertions(+), 6 deletions(-)），属纯控制面文档改写，无任何新执行证据。仍无 .ai/results/ERP-084.json（及 ERP-079..083.json），也无 scripts/verify-executor-bootstrap.ps1 的真实执行证据（raw_script_invocation/effective_provider/effective_model/agent_bootstrap.* 全部缺失）；ERP-074..077 仍为 failed(attempts=3)；AUTO_CIRCUIT_BREAKER 仍生效。ERP-084（max_attempts=1）本轮判定 fail 且尝试预算已耗尽，ERP-083 已 superseded；按控制面 blocker 规则不再签发任何同构 recovery 任务，队列保持 hold，需人工介入处理本机执行环境（确认 PowerShell 与依赖可用），或由人工在 .ai/audit.jsonl 留证后将 ERP-084 标记 failed。在 ERP-084 提供真实运行证据且人工显式复核 AUTO_CIRCUIT_BREAKER 之前，不补充任何业务任务。",
   "external_actions": [
     "Rotate any previously exposed SQL Server credential at the database provider if rotation has not already been completed.",
     "Rotate any previously exposed OSS access key at the cloud provider if rotation has not already been completed."
@@ -22,7 +22,7 @@
     "last_intent": "control_plane_recovery",
     "last_actor": "GPT",
     "queue_target_size": 4,
-    "updated_at": "2026-09-27T00:35:00.000000Z"
+    "updated_at": "2026-09-27T00:48:00.000000Z"
   },
   "completion_policy": {
     "default_mode": "browser",
@@ -39,8 +39,8 @@
     "production_deployment_or_release": "required",
     "irreversible_data_operations": "required"
   },
-  "finish_reason": "control_plane_recovery_pending",
-  "updated_at": "2026-09-27T00:35:00.000000Z",
+  "finish_reason": "control_plane_recovery_pending_human_intervention",
+  "updated_at": "2026-09-27T00:48:00.000000Z",
   "rolling_queue": {
     "enabled": true,
     "batch_size": 4,
@@ -62,19 +62,15 @@
   "blockers": [
     {
       "code": "CONTROL_PLANE_FRESH_PROCESS_REQUIRED",
-      "detail": "复核基线 remote_head=12fa82c05565bccb795f14f51dd472386815f3b6 相对上次审查快照 a0dc7d2042e42ba03adfcffc170d5ddf937eb0b2 仅控制面文档文本改写（.ai/PROJECT_STATE.json blocker/updated_at/detail 与 .ai/tasks/ERP-084.json description，2 files changed, 7 insertions/7 deletions），无任何新执行证据；仍无 .ai/results/ERP-084.json（及 ERP-079..083.json），也无 scripts/verify-executor-bootstrap.ps1 真实运行证据（raw_script_invocation、effective_provider、effective_model、agent_bootstrap.* 全部缺失），ERP-074..077 仍为 failed(attempts=3)。ERP-083 已标记 superseded，ERP-084（max_attempts=1）作为唯一最小可执行整改任务：真实运行 bootstrap 验证、写入 .ai/results/ERP-084.json 并记录 raw_script_invocation、恢复 ERP-074..077 为可重试；若本机不可执行，须在 .ai/audit.jsonl 留证并把 ERP-084 标记 failed 请求人工介入。不得再次以文档改写代替执行，也不得再追加同构控制面 recovery 任务。",
-      "retryable": true,
+      "detail": "复核基线 remote_head=adf287c0343b0ec064d68f905258adeed93027a8 相对上次审查快照 12fa82c05565bccb795f14f51dd472386815f3b6 仅控制面文档文本改写（.ai/PROJECT_STATE.json blocker/updated_at/detail 与 .ai/tasks/ERP-084.json description，2 files changed, 6 insertions/6 deletions），无任何新执行证据；仍无 .ai/results/ERP-084.json（及 ERP-079..083.json），也无 scripts/verify-executor-bootstrap.ps1 真实运行证据（raw_script_invocation、effective_provider、effective_model、agent_bootstrap.* 全部缺失），ERP-074..077 仍为 failed(attempts=3)。ERP-083 已 superseded，ERP-084（max_attempts=1）作为唯一最小可执行整改任务已于本轮判定 fail 且尝试预算耗尽。禁止再签发同构控制面 recovery 任务，也禁止以文档改写代替执行。需人工介入：确认本机 PowerShell 与依赖可执行并手工运行 scripts/verify-executor-bootstrap.ps1 生成 .ai/results/ERP-084.json（含 raw_script_invocation）后恢复队列；若本机不可执行，须在 .ai/audit.jsonl 留证并把 ERP-084 标记 failed。",
+      "retryable": false,
       "recovery_task": "ERP-084",
-      "recovery_evidence": ".ai/results/ERP-084.json"
+      "recovery_evidence": ".ai/results/ERP-084.json",
+      "human_intervention_required": true
     },
     {
       "code": "AUTO_CIRCUIT_BREAKER",
-      "detail": "Supervisor 安全联锁：自 ERP-078 起连续 FAIL 判定触发，且 ERP-078..ERP-084 多轮 recovery 均以纯文档改写关闭而无真实运行证据（本轮基线 12fa82c 亦仅为 .ai/tasks/ERP-084.json description 与 .ai/PROJECT_STATE.json 文本改写）。任务补充保持暂停，等待 ERP-084 提供真实控制面运行证据（.ai/results/ERP-084.json 含 raw_script_invocation）与 .ai/audit.jsonl 佐证，并由人工显式复核后方可恢复；任何自动化流程（Cline/Supervisor/GPT）均不得自行清除本 breaker。若 ERP-084 因本机不可执行而 failed，则需人工介入处理执行环境后再行恢复。",
-      "retryable": true
-    },
-    {
-      "code": "GPT_FAIL_WITHOUT_WRITES",
-      "detail": "GPT returned fail but no correction task in writes. Protocol §17 violated. 本轮已按 §17 于 writes 中落盘 .ai/tasks/ERP-084.json（刷新唯一控制面整改载体）与 PROJECT_STATE 更新；队列保持 hold。",
+      "detail": "Supervisor 安全联锁：自 ERP-078 起连续 FAIL 判定触发，且 ERP-078..ERP-084 多轮 recovery 均以纯文档改写关闭而无真实运行证据（本轮基线 adf287c 亦仅为 .ai/tasks/ERP-084.json description 与 .ai/PROJECT_STATE.json 文本改写）。任务补充保持暂停，等待 ERP-084 提供真实控制面运行证据（.ai/results/ERP-084.json 含 raw_script_invocation）与 .ai/audit.jsonl 佐证，并由人工显式复核后方可恢复；任何自动化流程（Cline/Supervisor/GPT）均不得自行清除本 breaker。若 ERP-084 因本机不可执行而 failed，则需人工介入处理执行环境后再行恢复。",
       "retryable": true
     }
   ]
