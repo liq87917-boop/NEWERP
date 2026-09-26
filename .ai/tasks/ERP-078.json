@@ -1,7 +1,7 @@
 {
   "id": "ERP-078",
   "title": "Verify Cline provider/model fix and agent-bootstrap regression before resuming ERP-074",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "low",
   "description": "Control-plane verification of the automated executor bootstrap after four consecutive Cline exit code 1 quarantines (ERP-074..077). Confirm the provider/model pinning fix (AI_CLINE_PROVIDER=deepseek, AI_CLINE_MODEL=deepseek-v4-pro, --provider deepseek) actually removes the Cline Credits default, confirm the trimmed scripts/agent-bootstrap.ps1 no longer contains PowerShell parser errors and does not regress safe fast-forward/repair behavior, and perform a bounded dry-run invocation of ERP-074 to capture cline_exit_code and finish_reason. Do not implement ERP business logic, do not modify start_agent.bat provider semantics beyond verification, do not touch production database/OSS, do not deploy or release.",
   "acceptance_criteria": [
@@ -35,5 +35,5 @@
     "status": "not_required",
     "reason": "Automation control-layer verification only. No business logic, production database, production OSS, deployment or release action is authorized."
   },
-  "attempts": 0
+  "attempts": 3
 }

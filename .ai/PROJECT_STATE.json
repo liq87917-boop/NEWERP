@@ -3,7 +3,7 @@
   "controller": "deepseek_conversation",
   "phase": "ready",
   "current_task": null,
-  "last_completed_task": "ERP-073",
+  "last_completed_task": "ERP-078",
   "last_reviewed_task": "ERP-073",
   "blocker": null,
   "external_actions": [
@@ -30,7 +30,7 @@
     "cline_success_is_only": "code_ready"
   },
   "browser_acceptance": {
-    "status": "deferred"
+    "status": "control_plane_validated"
   },
   "human_gates": {
     "production_database_changes": "required",
@@ -38,8 +38,8 @@
     "production_deployment_or_release": "required",
     "irreversible_data_operations": "required"
   },
-  "finish_reason": "task_quarantined",
-  "updated_at": "2026-09-26T12:24:35.088405Z",
+  "finish_reason": "control_plane_validated",
+  "updated_at": "2026-09-26T12:35:21.154496Z",
   "rolling_queue": {
     "enabled": true,
     "batch_size": 4,

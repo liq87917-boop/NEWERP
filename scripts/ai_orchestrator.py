@@ -521,7 +521,7 @@ def run_next(dry_run: bool) -> int:
         else:
             log_path = LOGS_DIR / f"{task['id']}-attempt-{attempt}.jsonl"; LOGS_DIR.mkdir(parents=True, exist_ok=True)
             provider = os.environ.get("AI_CLINE_PROVIDER", "deepseek")
-            model = os.environ.get("AI_CLINE_MODEL", "deepseek-v4.1-flash")
+            model = os.environ.get("AI_CLINE_MODEL", "deepseek-v4-pro")
             command = [
                 config["cline_command"],
                 "--json",
