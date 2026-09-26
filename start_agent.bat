@@ -30,5 +30,5 @@ if "%EXITCODE%"=="75" (
 
 echo.
 echo NEWERP AI Agent exited with code %EXITCODE%.
-pause
+timeout /t 3 /nobreak >nul
 exit /b %EXITCODE%
