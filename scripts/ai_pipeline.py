@@ -237,7 +237,7 @@ def git_checkpoint(message: str, paths: list[str]) -> None:
 
 def mark_queue_replenishing() -> None:
     # AI_SUPERVISOR is the sole queue replenishment writer.
-    # Keep repository clean while waiting for the next GPT batch.
+    # Keep repository clean while waiting for the next DeepSeek batch.
     return
 
 
@@ -247,7 +247,7 @@ def run_all() -> int:
             state = load_json(STATE_PATH)
             conversation = state.get("conversation_control", {})
             if conversation.get("paused", False):
-                reason = conversation.get("pause_reason") or "paused by GPT conversation control"
+                reason = conversation.get("pause_reason") or "paused by DeepSeek conversation control"
                 audit("pipeline_paused", reason=reason)
                 print(f"Pipeline paused: {reason}", file=sys.stderr)
                 return 11
@@ -256,7 +256,7 @@ def run_all() -> int:
                 print(f"Queue metadata error: {exc}", file=sys.stderr); return 10
             if item is None and reason == "queue_empty":
                 mark_queue_replenishing()
-                print("Current rolling batch completed; agent remains alive and waits for GPT replenishment.")
+                print("Current rolling batch completed; agent remains alive and waits for DeepSeek replenishment.")
                 return 0
             if item is None:
                 audit("pipeline_waiting", reason=reason)
@@ -356,7 +356,7 @@ def self_test() -> int:
     checks["queue_target_size"] = config.get("queue_target_size", 3)
     checks["browser_completion_required"] = config.get("completion_policy", {}).get("require_real_browser", False)
     if not (ROOT / "scripts" / "ai_browser_acceptance.py").exists(): errors.append("Browser acceptance runner missing")
-    if not (ROOT / "scripts" / "gpt_project_control.py").exists(): errors.append("GPT conversation controller missing")
+    if not (ROOT / "scripts" / "ds_project_control.py").exists(): errors.append("DeepSeek conversation controller missing")
     if AUTOMATION_TESTS.exists():
         contract_tests = run([sys.executable, "-m", "unittest", "discover", "-s", str(AUTOMATION_TESTS), "-p", "test_*.py"], capture=True)
         checks["automation_contract_tests"] = "passed" if contract_tests.returncode == 0 else "failed"

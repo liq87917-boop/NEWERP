@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""File-backed GPT conversation control for the NEWERP automation pipeline."""
+"""File-backed DeepSeek conversation control for the NEWERP automation pipeline."""
 from __future__ import annotations
 
 import argparse
@@ -55,7 +55,7 @@ def current_control() -> dict[str, Any]:
         return load_json(CONVERSATION_PATH)
     return {
         "schema_version": 1,
-        "controller": "gpt_conversation",
+        "controller": "deepseek_conversation",
         "conversation_id": None,
         "last_message_id": None,
         "last_intent": None,
@@ -69,7 +69,7 @@ def update_control(intent: str, actor: str, summary: str, conversation_id: str |
     now = utc_now()
     control = current_control()
     control.update({
-        "controller": "gpt_conversation",
+        "controller": "deepseek_conversation",
         "conversation_id": conversation_id or control.get("conversation_id"),
         "last_message_id": message_id or control.get("last_message_id"),
         "last_intent": intent,
@@ -85,7 +85,7 @@ def update_control(intent: str, actor: str, summary: str, conversation_id: str |
     state = load_json(STATE_PATH)
     conversation = state.setdefault("conversation_control", {})
     conversation.update({
-        "mode": "gpt_file_backed",
+        "mode": "deepseek_file_backed",
         "paused": bool(control.get("paused", False)),
         "pause_reason": control.get("pause_reason"),
         "last_intent": intent,
@@ -96,7 +96,7 @@ def update_control(intent: str, actor: str, summary: str, conversation_id: str |
     save_json(STATE_PATH, state)
     event = {"at": now, "intent": intent, "actor": actor, "summary": summary, "conversation_id": conversation_id, "message_id": message_id}
     append_jsonl(EVENTS_PATH, event)
-    append_jsonl(AUDIT_PATH, {"at": now, "event": "gpt_control_intent", **event})
+    append_jsonl(AUDIT_PATH, {"at": now, "event": "deepseek_control_intent", **event})
 
 
 def status() -> int:
@@ -110,12 +110,12 @@ def status() -> int:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="NEWERP GPT conversation control")
+    parser = argparse.ArgumentParser(description="NEWERP DeepSeek conversation control")
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("status")
     for name in ("record", "pause", "resume"):
         command = sub.add_parser(name)
-        command.add_argument("--by", default="GPT")
+        command.add_argument("--by", default="DeepSeek")
         command.add_argument("--summary", required=True)
         command.add_argument("--conversation-id")
         command.add_argument("--message-id")
@@ -125,7 +125,7 @@ def main() -> int:
     intent = args.intent if args.command == "record" else args.command
     paused = True if args.command == "pause" else False if args.command == "resume" else None
     update_control(intent, args.by, args.summary, args.conversation_id, args.message_id, paused)
-    checkpoint(f"chore: record GPT control intent {intent}")
+    checkpoint(f"chore: record DeepSeek control intent {intent}")
     print(json.dumps({"status": "recorded", "intent": intent, "paused": current_control().get("paused")}, ensure_ascii=False))
     return 0
 

@@ -133,7 +133,7 @@
     "batch_size": 4,
     "low_watermark": 2,
     "acceptance_interval_seconds": 3600,
-    "replenishment_owner": "GPT",
+    "replenishment_owner": "DeepSeek",
     "empty_phase": "replenishing",
     "keep_agent_alive": true
   },

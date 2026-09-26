@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "controller": "gpt_conversation",
+  "controller": "deepseek_conversation",
   "conversation_id": null,
   "last_message_id": null,
   "last_intent": "install_browser_completion_pipeline",

@@ -1,8 +1,8 @@
 # NEWERP AI Master Plan
 
-GPT conversation is the user-facing controller; the repository is the durable source of truth. Each conversation command is recorded in `.ai/control/` and `.ai/audit.jsonl` before it changes queue execution.
+DeepSeek conversation is the user-facing controller; the repository is the durable source of truth. Each conversation command is recorded in `.ai/control/` and `.ai/audit.jsonl` before it changes queue execution.
 
-The rolling work set targets four tasks (`rolling_queue.batch_size = 4`, low watermark 2, replenished by GPT from `.ai/FUNCTION_BACKLOG.md`). `depends_on` forms a validated acyclic graph, while lexical task order remains deterministic. The first non-terminal task is authoritative: malformed, blocked, failed, in-progress or unapproved work stops the queue. Later tasks are never skipped implicitly.
+The rolling work set targets four tasks (`rolling_queue.batch_size = 4`, low watermark 2, replenished by DeepSeek from `.ai/FUNCTION_BACKLOG.md`). `depends_on` forms a validated acyclic graph, while lexical task order remains deterministic. The first non-terminal task is authoritative: malformed, blocked, failed, in-progress or unapproved work stops the queue. Later tasks are never skipped implicitly.
 
 Business-task lifecycle:
 

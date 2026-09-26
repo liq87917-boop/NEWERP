@@ -1,6 +1,6 @@
 {
   "project": "NEWERP",
-  "controller": "gpt_conversation",
+  "controller": "deepseek_conversation",
   "phase": "ready",
   "current_task": null,
   "last_completed_task": "ERP-072",
@@ -16,7 +16,7 @@
   },
   "cline_exit_code": 0,
   "conversation_control": {
-    "mode": "gpt_file_backed_rolling",
+    "mode": "deepseek_file_backed_rolling",
     "paused": false,
     "pause_reason": null,
     "last_intent": "continuous_rolling_development",
@@ -45,7 +45,7 @@
     "batch_size": 4,
     "low_watermark": 2,
     "acceptance_interval_seconds": 3600,
-    "replenishment_owner": "GPT",
+    "replenishment_owner": "DeepSeek",
     "status": "ready",
     "queued_tasks": [
       "ERP-069",
