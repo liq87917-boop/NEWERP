@@ -2,10 +2,10 @@
   "project": "NEWERP",
   "controller": "deepseek_conversation",
   "phase": "ready",
-  "current_task": "ERP-081",
+  "current_task": "ERP-082",
   "last_completed_task": "ERP-073",
-  "last_reviewed_task": "ERP-080",
-  "blocker": "CONTROL_PLANE_FRESH_PROCESS_REQUIRED: 审查基线 7b84f66..887a758 仅包含 .ai/tasks/ERP-080.json 的 description 文本改写与 .ai/PROJECT_STATE.json 的 blocker 文本改写，无 .ai/results/ERP-079.json 与 .ai/results/ERP-080.json，无 scripts/verify-executor-bootstrap.ps1 的真实执行证据（raw_script_invocation 缺失），ERP-074..077 仍为 failed(attempts=3)；AUTO_CIRCUIT_BREAKER 仍生效。ERP-081 作为最小可执行的整改任务继续待执行：真实运行 bootstrap 验证、写入 .ai/results/ERP-081.json 并记录 raw_script_invocation、把 ERP-074..077 恢复为可重试。在 ERP-081 提供真实运行证据并通过复核之前，不补充任何业务任务。",
+  "last_reviewed_task": "ERP-081",
+  "blocker": "CONTROL_PLANE_FRESH_PROCESS_REQUIRED: 审查基线 887a758..8a8be4c 仅包含 .ai/tasks/ERP-081.json 的新增与 .ai/PROJECT_STATE.json 的 blocker/current_task/rolling_queue 文本改写，无 .ai/results/ERP-079.json、ERP-080.json 与 ERP-081.json，无 scripts/verify-executor-bootstrap.ps1 的真实执行证据（raw_script_invocation 缺失），ERP-074..077 仍为 failed(attempts=3)；AUTO_CIRCUIT_BREAKER 仍生效。ERP-082 作为最小可执行的整改任务继续待执行：真实运行 bootstrap 验证、写入 .ai/results/ERP-082.json 并记录 raw_script_invocation、把 ERP-074..077 恢复为可重试。在 ERP-082 提供真实运行证据并通过复核之前，不补充任何业务任务。",
   "external_actions": [
     "Rotate any previously exposed SQL Server credential at the database provider if rotation has not already been completed.",
     "Rotate any previously exposed OSS access key at the cloud provider if rotation has not already been completed."
@@ -22,7 +22,7 @@
     "last_intent": "control_plane_recovery",
     "last_actor": "GPT",
     "queue_target_size": 4,
-    "updated_at": "2026-09-26T15:10:00.000000Z"
+    "updated_at": "2026-09-26T15:30:00.000000Z"
   },
   "completion_policy": {
     "default_mode": "browser",
@@ -40,7 +40,7 @@
     "irreversible_data_operations": "required"
   },
   "finish_reason": "control_plane_recovery_pending",
-  "updated_at": "2026-09-26T15:10:00.000000Z",
+  "updated_at": "2026-09-26T15:30:00.000000Z",
   "rolling_queue": {
     "enabled": true,
     "batch_size": 4,
@@ -49,7 +49,7 @@
     "replenishment_owner": "DeepSeek",
     "status": "blocked_on_control_plane_verification",
     "queued_tasks": [
-      "ERP-081"
+      "ERP-082"
     ]
   },
   "last_failed_task": "ERP-081",
@@ -62,14 +62,14 @@
   "blockers": [
     {
       "code": "CONTROL_PLANE_FRESH_PROCESS_REQUIRED",
-      "detail": "基线 7b84f66..887a758 仅包含 .ai/tasks/ERP-080.json 的 description 文本改写与 .ai/PROJECT_STATE.json 的 blocker 文本改写，没有 .ai/results/ERP-079.json 或 ERP-080.json，也没有 scripts/verify-executor-bootstrap.ps1 的真实运行证据（raw_script_invocation、effective_provider、agent_bootstrap.* 字段全部缺失），ERP-074..077 仍为 failed(attempts=3)。ERP-081 继续作为最小可执行整改任务：真实运行 bootstrap 验证、写入 .ai/results/ERP-081.json、把 ERP-074..077 恢复为可重试。在 ERP-081 提供真实运行证据并通过复核前，不补充任何业务任务。",
+      "detail": "基线 887a758..8a8be4c 仅包含 .ai/tasks/ERP-081.json 新增与 .ai/PROJECT_STATE.json 的文本改写，没有 .ai/results/ERP-079.json、.ai/results/ERP-080.json 或 .ai/results/ERP-081.json，也没有 scripts/verify-executor-bootstrap.ps1 的真实运行证据（raw_script_invocation、effective_provider、effective_model、agent_bootstrap.* 字段全部缺失），ERP-074..077 仍为 failed(attempts=3)。ERP-082 继续作为最小可执行整改任务：真实运行 bootstrap 验证、写入 .ai/results/ERP-082.json、把 ERP-074..077 恢复为可重试。在 ERP-082 提供真实运行证据并通过复核前，不补充任何业务任务。",
       "retryable": true,
-      "recovery_task": "ERP-081",
+      "recovery_task": "ERP-082",
       "recovery_evidence": null
     },
     {
       "code": "AUTO_CIRCUIT_BREAKER",
-      "detail": "Supervisor 安全联锁：连续 FAIL 判定已触发。任务补充保持暂停，等待 ERP-081 提供真实控制面运行证据，并由人工复核该 breaker 后方可恢复。",
+      "detail": "Supervisor 安全联锁：连续 FAIL 判定已触发。任务补充保持暂停，等待 ERP-082 提供真实控制面运行证据，并由人工复核该 breaker 后方可恢复。",
       "retryable": true
     }
   ]
