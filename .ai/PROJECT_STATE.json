@@ -30,7 +30,7 @@
     "cline_success_is_only": "code_ready"
   },
   "browser_acceptance": {
-    "status": "browser_deferred"
+    "status": "deferred"
   },
   "human_gates": {
     "production_database_changes": "required",
@@ -39,7 +39,7 @@
     "irreversible_data_operations": "required"
   },
   "finish_reason": "task_quarantined",
-  "updated_at": "2026-09-26T09:45:52.281279Z",
+  "updated_at": "2026-09-26T09:46:32.849252Z",
   "rolling_queue": {
     "enabled": true,
     "batch_size": 4,
