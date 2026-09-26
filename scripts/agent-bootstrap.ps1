@@ -143,62 +143,7 @@ if ($ahead -gt 0 -and $behind -gt 0) {
     }
     $safeMessages = $messages.Count -gt 0
     foreach ($message in $messages) {
-        if ($message -notmatch '^chore: (automation queue drained|request rolling queue replenishment)if ($ahead -gt 0) {
-    Write-Host "Bootstrap   : local ahead by $ahead commit(s); no pull needed" -ForegroundColor Yellow
-    exit 0
-}
-if ($behind -eq 0) {
-    Write-Host "Bootstrap   : up to date" -ForegroundColor Green
-    Repair-DeferredBrowserFailedHead
-    exit 0
-}
-
-$localStatus = Invoke-Git @("-c", "core.quotepath=false", "status", "--porcelain", "--untracked-files=all")
-if ($localStatus.Code -ne 0) {
-    Write-Host "Bootstrap   : unable to inspect local changes" -ForegroundColor Red
-    exit 0
-}
-
-$localPaths = @()
-foreach ($line in ($localStatus.Text -split "\r?\n")) {
-    if ([string]::IsNullOrWhiteSpace($line) -or $line.Length -lt 4) { continue }
-    $payload = $line.Substring(3).Trim()
-    if ($payload -match " -> ") {
-        Write-Host "Bootstrap   : rename/copy detected; no automatic merge" -ForegroundColor Yellow
-        exit 0
-    }
-    if ($payload) { $localPaths += $payload.Replace("\", "/") }
-}
-$localPaths = @($localPaths | Sort-Object -Unique)
-
-$incomingPaths = Get-Paths @("-c", "core.quotepath=false", "diff", "--name-only", "HEAD..origin/$Branch")
-if ($null -eq $incomingPaths) {
-    Write-Host "Bootstrap   : unable to inspect incoming paths" -ForegroundColor Red
-    exit 0
-}
-
-if ($localPaths.Count -gt 0) {
-    $set = @{}
-    foreach ($path in $localPaths) { $set[$path] = $true }
-    $conflicts = @($incomingPaths | Where-Object { $set.ContainsKey($_) })
-    if ($conflicts.Count -gt 0) {
-        $sample = ($conflicts | Select-Object -First 4) -join ", "
-        Write-Host "Bootstrap   : remote update overlaps local work; merge skipped" -ForegroundColor Yellow
-        Write-Host "              $sample" -ForegroundColor DarkYellow
-        exit 0
-    }
-}
-
-$merge = Invoke-Git @("merge", "--ff-only", "--quiet", "origin/$Branch")
-if ($merge.Code -ne 0) {
-    Write-Host "Bootstrap   : safe fast-forward failed; local work preserved" -ForegroundColor Red
-    exit 0
-}
-
-Write-Host "Bootstrap   : updated $behind commit(s); local task work preserved" -ForegroundColor Green
-Repair-DeferredBrowserFailedHead
-exit 0
-) {
+        if ($message -notmatch '^chore: (automation queue drained|request rolling queue replenishment)') {
             $safeMessages = $false
             break
         }
