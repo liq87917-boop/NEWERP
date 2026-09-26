@@ -1,7 +1,7 @@
 {
   "id": "ERP-073",
   "title": "Allocate customer receipt evidence to customer sales-invoice evidence",
-  "status": "failed",
+  "status": "pending",
   "risk_level": "medium",
   "description": "Reuse the repository's existing canonical customer-receipt evidence (FinanceReceipt) and ERP-055 customer sales-invoice evidence (CustomerSalesInvoiceEvidence) and explicitly allocate receipt amounts to recorded sales invoices. Keep the sales-order receipt-reference (ERP-053), sales-invoice-to-order (ERP-055) and receipt-to-invoice allocation dimensions separate. Do not create another receipt or invoice master, initiate or confirm real funds, infer links, post accounting, execute production SQL, deploy, or release.",
   "acceptance_criteria": [
@@ -53,5 +53,5 @@
     "status": "not_required",
     "reason": "Explicit allocation of existing repository evidence only. Real receipt handling, bank access, accounting posting, production database mutation, deployment and release remain behind mandatory human gates."
   },
-  "attempts": 3
+  "attempts": 0
 }
