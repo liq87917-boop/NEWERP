@@ -1,0 +1,50 @@
+{
+  "id": "ERP-080",
+  "title": "Execute executor-bootstrap verification and restore ERP-074..077 as retryable (control-plane recovery, minimum-executable deliverable)",
+  "status": "pending",
+  "risk_level": "low",
+  "description": "CONTROL-PLANE RECOVERY (review of d966400 failed). 基线 4af656a..d966400 仅包含控制面文档改动（PROJECT_STATE.json 与 ERP-079.json 重写），没有 .ai/results/ERP-079.json，没有 scripts/verify-executor-bootstrap.ps1 的真实运行证据，ERP-074..077 仍为 failed(attempts=3)。本任务把 ERP-079 的目标压缩为可机检的最小交付：在本机真实进程内运行一次 scripts/verify-executor-bootstrap.ps1（可含其内部的 agent-bootstrap 校验与有界 dry-run），把原始 stdout/stderr 与解析摘要完整写入 .ai/results/ERP-080.json，并把 ERP-074..077 从 failed 恢复为 retryable。禁止再次以仅改写控制面文档代替执行。若任一前置检查失败，必须把 command、stderr 片段、疑似原因与要求的下一步动作追加到 .ai/audit.jsonl 并把任务标记 failed，不得再进入静默 quarantine 循环。不得实现 ERP 业务逻辑，不得修改 src/ERP.* 下任何文件，不得访问或变更生产数据库/OSS，不得部署或发布，不得改动 LIVE_TRADING 或 ALLOW_EXTERNAL_ORDER_SUBMISSION。",
+  "acceptance_criteria": [
+    "scripts/verify-executor-bootstrap.ps1 已在本机真实执行，执行命令、工作目录、开始时间、结束时间与退出码被记录在 .ai/results/ERP-080.json 的 raw_script_invocation 字段中。",
+    ".ai/results/ERP-080.json 至少包含：effective_provider、effective_model、agent_bootstrap.parse_errors、agent_bootstrap.fast_forward_merge_present、agent_bootstrap.path_conflict_check_present、agent_bootstrap.repair_deferred_browser_present、bounded_dry_run.python_exit_code、bounded_dry_run.output、queue_head、erp074_resumable、conclusion、raw_script_invocation；任一只读字段缺失即视为未达标。",
+    "结果文件中记录的 effective_provider=deepseek 且 effective_model=deepseek-v4-pro，且与自动化实际传入的 --provider/--model 参数一致；同时包含一份解析后的配置 dump 用以证明 Cline Credits 默认值已被移除。",
+    "PowerShell 解析 scripts/agent-bootstrap.ps1 的 parse_errors 为 0，且 fast_forward_merge_present、path_conflict_check_present、repair_deferred_browser_present 三项均为 true，并在结果文件中保存对应的非空证据字符串。",
+    "有界 dry-run 已执行并记录 cline_exit_code 与 normalized finish_reason；该 dry-run 不得把 ERP-074..077 中任一任务静默 quarantine。",
+    "如果任一前置检查失败，必须把 command、stderr 关键片段、疑似原因与要求的人工/下一步动作追加写入 .ai/audit.jsonl 并将本任务标记 failed；禁止再次出现无证据的静默 quarantine。",
+    ".ai/tasks/ERP-074.json .. ERP-077.json 已由 status=failed(attempts=3) 恢复为可重试状态（status=pending 或 retry），且其 acceptance_criteria、allowed_paths、depends_on、browser_acceptance 字段原样保持不变；恢复动作与本任务处于同一提交。",
+    ".ai/PROJECT_STATE.json 已更新：CONTROL_PLANE_FRESH_PROCESS_REQUIRED 的 recovery_task 指向 ERP-080、recovery_evidence 指向 .ai/results/ERP-080.json；AUTO_CIRCUIT_BREAKER 不得被本任务自动清除（仍保留人工复核）。",
+    "结果文件显式声明 erp074_resumable=true|false 及其理由；除非 scripts/verify-executor-bootstrap.ps1 真实执行且退出码为 0，否则不得声明 control_plane_validated=true。",
+    "本任务未修改任何 src/ERP.* 目录下的文件，未访问生产数据库或 OSS，未执行部署或发布；LIVE_TRADING=false 与 ALLOW_EXTERNAL_ORDER_SUBMISSION=false 保持不变。"
+  ],
+  "allowed_paths": [
+    "scripts/**",
+    "start_agent.bat",
+    ".ai/tasks/ERP-074.json",
+    ".ai/tasks/ERP-075.json",
+    ".ai/tasks/ERP-076.json",
+    ".ai/tasks/ERP-077.json",
+    ".ai/results/ERP-080.json",
+    ".ai/PROJECT_STATE.json",
+    ".ai/audit.jsonl",
+    ".ai/**"
+  ],
+  "depends_on": [],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 2,
+  "validation_profile": "safe",
+  "completion_mode": "control_plane",
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": [],
+    "test_filter": "",
+    "minimum_screenshots": 0
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "自动化控制层验证与任务状态恢复；不涉及业务逻辑、生产数据库、生产 OSS、部署或发布。AUTO_CIRCUIT_BREAKER 仍由人工复核。"
+  },
+  "attempts": 0
+}
