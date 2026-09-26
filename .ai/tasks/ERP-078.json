@@ -1,20 +1,30 @@
 {
   "id": "ERP-078",
   "title": "Verify Cline provider/model fix and agent-bootstrap regression before resuming ERP-074",
-  "status": "completed",
+  "status": "pending",
   "risk_level": "low",
-  "description": "Control-plane verification of the automated executor bootstrap after four consecutive Cline exit code 1 quarantines (ERP-074..077). Confirm the provider/model pinning fix (AI_CLINE_PROVIDER=deepseek, AI_CLINE_MODEL=deepseek-v4-pro, --provider deepseek) actually removes the Cline Credits default, confirm the trimmed scripts/agent-bootstrap.ps1 no longer contains PowerShell parser errors and does not regress safe fast-forward/repair behavior, and perform a bounded dry-run invocation of ERP-074 to capture cline_exit_code and finish_reason. Do not implement ERP business logic, do not modify start_agent.bat provider semantics beyond verification, do not touch production database/OSS, do not deploy or release.",
+  "description": "CONTROL-PLANE REISSUE (review failed). The previous ERP-078 run mutated .ai/tasks/ERP-074..077.json from pending to failed(attempts=3) without evidence and without meeting its own acceptance criteria. Its own allowed_paths only permitted scripts/**, start_agent.bat and .ai/**. This reissue narrows the deliverable: actually RUN scripts/verify-executor-bootstrap.ps1, capture its JSON output, restore the four executor-failure tasks to a retryable state, and record an explicit statement whether ERP-074 may be resumed. Do not implement ERP business logic, do not touch production database/OSS, do not deploy or release.",
   "acceptance_criteria": [
-    "The task records the exact provider invocation used by the automation (AI_CLINE_PROVIDER, AI_CLINE_MODEL, --provider) and demonstrates that it no longer defaults to Cline Credits.",
-    "PowerShell parses scripts/agent-bootstrap.ps1 successfully (no unclosed string / parser error) and the script still performs or explicitly documents the removal of the fast-forward merge, path-conflict check and Repair-DeferredBrowserFailedHead behavior.",
-    "A bounded dry-run start of ERP-074 is executed and its cline_exit_code and normalized finish_reason are written to .ai/results/ERP-078.json without silently quarantining the task.",
-    "If the dry-run still fails, a bounded root-cause statement (command, stderr excerpt, suspected cause) is written to .ai/audit.jsonl and the task is marked failed with required next action, instead of another silent quarantine loop.",
-    "No business logic, no source under src/ERP.*, no production database, no production OSS, no deployment or release is changed by this task.",
-    "The task result clearly states whether ERP-074 may be safely resumed by the rolling queue."
+    "scripts/verify-executor-bootstrap.ps1 is actually executed and its JSON output is captured and written to .ai/results/ERP-078.json.",
+    ".ai/results/ERP-078.json contains: effective_provider, effective_model, agent_bootstrap.parse_errors, agent_bootstrap.fast_forward_merge_present, agent_bootstrap.path_conflict_check_present, agent_bootstrap.repair_deferred_browser_present, bounded_dry_run.python_exit_code, bounded_dry_run.output, queue_head, erp074_resumable, conclusion.",
+    "The provider/model invocation used by the automation is recorded explicitly (AI_CLINE_PROVIDER=deepseek, AI_CLINE_MODEL=deepseek-v4-pro, --provider/--model flags) and it is demonstrated that the Cline Credits default is removed.",
+    "PowerShell parses scripts/agent-bootstrap.ps1 with zero parse errors and the fast-forward merge, path-conflict check and Repair-DeferredBrowserFailedHead behavior are confirmed present (no silent regression).",
+    "A bounded dry-run of the rolling-queue head selection is executed and its cline_exit_code / normalized finish_reason behavior is recorded WITHOUT silently quarantining any task.",
+    "If any prerequisite check fails, a bounded root-cause statement (command, stderr excerpt, suspected cause) is written to .ai/audit.jsonl and the task is marked failed with an explicit required next action instead of another silent quarantine loop.",
+    ".ai/tasks/ERP-074.json .. ERP-077.json are restored from failed(attempts=3) to a retryable state (status=pending or retry) with attempts NOT counted as business acceptance failures, preserving their original acceptance_criteria and allowed_paths.",
+    "The task result explicitly states whether ERP-074 may be safely resumed by the rolling queue, and it must NOT declare control_plane_validated unless the script actually ran and exited 0.",
+    "No business logic, no source under src/ERP.*, no production database, no production OSS, no deployment or release is changed by this task."
   ],
   "allowed_paths": [
     "scripts/**",
     "start_agent.bat",
+    ".ai/tasks/ERP-074.json",
+    ".ai/tasks/ERP-075.json",
+    ".ai/tasks/ERP-076.json",
+    ".ai/tasks/ERP-077.json",
+    ".ai/results/ERP-078.json",
+    ".ai/PROJECT_STATE.json",
+    ".ai/audit.jsonl",
     ".ai/**"
   ],
   "depends_on": [],
@@ -33,7 +43,7 @@
     "required": false,
     "level": "L1",
     "status": "not_required",
-    "reason": "Automation control-layer verification only. No business logic, production database, production OSS, deployment or release action is authorized."
+    "reason": "Automation control-layer verification and state restoration only. No business logic, production database, production OSS, deployment or release action is authorized."
   },
-  "attempts": 3
+  "attempts": 0
 }
