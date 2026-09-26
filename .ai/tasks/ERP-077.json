@@ -27,8 +27,7 @@
     ".ai/**"
   ],
   "depends_on": [
-    "ERP-055",
-    "ERP-076"
+    "ERP-055"
   ],
   "auto_start": true,
   "requires_human_approval": false,
