@@ -1,0 +1,55 @@
+{
+  "id": "ERP-076",
+  "title": "Link customer sales-invoice evidence to sales-shipment evidence",
+  "status": "pending",
+  "risk_level": "medium",
+  "description": "Add explicit evidence rows that allocate recorded ERP-055 customer sales-invoice evidence to existing sales-shipment or container-shipment evidence using persisted identifiers only. Keep the invoice-to-order (ERP-055) and receipt-to-invoice (ERP-073) dimensions separate. Do not create another invoice or shipment master, infer links, issue a real invoice, post accounting, execute production SQL, deploy, or release.",
+  "acceptance_criteria": [
+    "The implementation audits existing shipment and container evidence before adding the link model and does not replace or duplicate an existing authoritative shipment or invoice model.",
+    "Authorized users can link a recorded active customer sales-invoice evidence record to eligible non-cancelled shipment or container evidence using persisted identifiers only.",
+    "The server validates authoritative Customer and currency compatibility and rejects unavailable or cancelled shipment evidence, duplicate invoice and shipment pairs and non-positive linked quantities or amounts.",
+    "The invoice-to-order allocation (ERP-055) and receipt-to-invoice allocation (ERP-073) dimensions remain distinct and are never added to linked-shipment evidence as if they represented monetary settlement.",
+    "Linked and unlinked shipment evidence is separately visible; the absence of a link is shown as none or unknown and is never interpreted as shipped, delivered, invoiced, recognized or paid.",
+    "An incorrect link can be voided with a bounded reason while preserving original values, snapshots, recorder and timestamps; hard deletion and silent replacement are not provided.",
+    "Existing shipment lists and details surface bounded linked-invoice evidence without issuing a per-row database or storage query.",
+    "Creating, reading or voiding a link does not change invoices, Sales Orders, shipments, containers, receipts, Customers, inventory, tax, finance or settlement records.",
+    "Different currencies are never combined or converted unless an authoritative persisted conversion already belongs to the source evidence.",
+    "Schema changes are idempotent, lists are bounded or paged and legacy shipments remain readable without request-time or production backfill.",
+    "Unit and integration tests cover multiple invoices and shipments, Customer and currency mismatch, duplicate and cancelled-source rejection, void history, bounded summaries, model separation and source-record non-mutation; safe validation passes and browser acceptance is recorded as deferred during development."
+  ],
+  "allowed_paths": [
+    "src/ERP.Domain/**",
+    "src/ERP.Application/**",
+    "src/ERP.Infrastructure/**",
+    "src/ERP.Api/Controllers/**",
+    "src/ERP.Api/wwwroot/**",
+    "src/ERP.UnitTests/**",
+    "src/ERP.IntegrationTests/**",
+    "docs/**",
+    ".ai/**"
+  ],
+  "depends_on": [
+    "ERP-055"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "browser",
+  "browser_acceptance": {
+    "required": true,
+    "scenarios": [
+      "Link one recorded customer sales-invoice evidence record to two compatible sales-shipment records and verify linked and unlinked shipment evidence without changing the invoice, shipment or any order record.",
+      "Attempt duplicate, cancelled-source, Customer-mismatched and currency-mismatched links, verify rejection, then void a valid link and confirm its original values and reason remain in history."
+    ],
+    "test_filter": "Collection=UiTests",
+    "minimum_screenshots": 2
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L2",
+    "status": "not_required",
+    "reason": "Explicit repository evidence linking and non-production validation only. Real invoicing, shipment execution, customs submission, accounting posting, production database mutation, deployment and release remain behind mandatory human gates."
+  },
+  "attempts": 0
+}

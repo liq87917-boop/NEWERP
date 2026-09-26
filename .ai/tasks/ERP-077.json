@@ -1,0 +1,54 @@
+{
+  "id": "ERP-077",
+  "title": "Add three-way customer evidence reconciliation view for orders, shipments and invoices",
+  "status": "pending",
+  "risk_level": "medium",
+  "description": "Add a bounded read-only three-way reconciliation view exposing ERP-055 invoice-to-order allocations, ERP-076 invoice-to-shipment links and ERP-073 receipt allocations for a Customer, keeping each evidence class separately labeled. Do not create a general ledger, assert revenue recognition, contact customers, execute production SQL, deploy, or release.",
+  "acceptance_criteria": [
+    "The view lists recorded customer sales-invoice evidence, linked Sales Orders, linked shipments and active receipt allocations without copying source rows or creating another master.",
+    "Users can apply bounded or paged filters for Customer, invoice identity, order number, shipment identity, invoice-date range, currency and allocation state using persisted fields only.",
+    "Ordered, shipped, invoiced and explicitly receipted evidence remain in separate labeled columns; the view never subtracts one class from another or asserts a settled, recognized or audited balance.",
+    "Amounts are grouped by currency and different currencies are never combined, converted or reassigned without an authoritative persisted conversion already belonging to the source evidence.",
+    "Draft, voided or cancelled source evidence is separately labeled and excluded from active reconciliation totals; missing or invalid links remain visible as unknown and are not repaired or reassigned.",
+    "The view states that it is operational evidence reconciliation, not a general ledger, audited Customer statement, revenue recognition, tax filing, payment demand or settlement confirmation.",
+    "Opening order, shipment, invoice or allocation detail revalidates authentication and module authorization and fails closed when an authoritative source is deleted, unavailable or no longer authorized.",
+    "List and aggregate queries are bounded, avoid per-row database access, do not call external services and keep legacy Customers readable without request-time or production backfill.",
+    "The view is read-only and does not change Customers, Sales Orders, shipments, containers, invoices, allocations, receipts, inventory, tax, finance or settlement records.",
+    "Any export uses the same filtered, currency-separated and evidence-class-separated semantics as the screen and contains no hidden cross-currency total or inferred legal assertion.",
+    "Unit and integration tests cover no evidence, partial evidence across the three classes, void and cancelled history, multiple Customers and currencies, bounded queries, authorization failure and source-record non-mutation; safe validation passes and browser acceptance is recorded as deferred during development."
+  ],
+  "allowed_paths": [
+    "src/ERP.Application/**",
+    "src/ERP.Api/Controllers/**",
+    "src/ERP.Api/wwwroot/**",
+    "src/ERP.UnitTests/**",
+    "src/ERP.IntegrationTests/**",
+    "docs/**",
+    ".ai/**"
+  ],
+  "depends_on": [
+    "ERP-055",
+    "ERP-076"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "browser",
+  "browser_acceptance": {
+    "required": true,
+    "scenarios": [
+      "Open the three-way reconciliation view for a Customer with order, shipment, invoice and receipt evidence and verify each evidence class is separately labeled in one currency without a settled or recognized assertion.",
+      "Inspect partially linked, draft, voided, cancelled and missing evidence and verify unknown values remain separate, no cross-class subtraction is shown and no source record is changed."
+    ],
+    "test_filter": "Collection=UiTests",
+    "minimum_screenshots": 3
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L2",
+    "status": "not_required",
+    "reason": "Read-only evidence reconciliation over repository records and non-production validation only. Customer contact, real collection, shipment execution, customs submission, accounting or tax action, production database mutation, deployment and release remain behind mandatory human gates."
+  },
+  "attempts": 0
+}

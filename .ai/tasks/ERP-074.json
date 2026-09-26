@@ -1,0 +1,55 @@
+{
+  "id": "ERP-074",
+  "title": "Add bounded customer accounts-receivable reconciliation and aging workspace",
+  "status": "pending",
+  "risk_level": "medium",
+  "description": "Add a bounded read-only customer accounts-receivable reconciliation and aging workspace over ERP-055 customer sales-invoice evidence and ERP-073 explicit receipt-to-sales-invoice allocations. Derive only arithmetic evidence supported by persisted invoice dates, optional due dates and active allocations. Do not create a general ledger, invent due dates, contact customers, collect funds, execute production SQL, deploy, or release.",
+  "acceptance_criteria": [
+    "The workspace lists recorded customer sales-invoice evidence and active explicit ERP-073 receipt allocations without copying source rows or creating another invoice, receipt or allocation master.",
+    "Users can apply bounded or paged filters for Customer, invoice identity, invoice-date range, explicit due-date range, currency, invoice status and allocation state using persisted fields only.",
+    "For each recorded invoice, arithmetic remaining evidence equals invoice gross amount minus active ERP-073 allocations, with over-allocation prevented by source rules and voided allocations excluded but available in explicit history.",
+    "Aging is calculated only when an explicit persisted due date exists, against an explicit as-of date, using documented mutually exclusive buckets; invoices without due dates remain in a separate unknown-due-date group.",
+    "Different currencies are grouped separately and are never combined, converted or presented as one total without an authoritative persisted conversion already belonging to source evidence.",
+    "Draft or voided invoices are separately labeled and excluded from active receivables-evidence totals; missing, invalid or unavailable source links remain visible as unknown or invalid and are not repaired or reassigned.",
+    "The workspace distinguishes invoice gross evidence, explicit allocated-receipt evidence and arithmetic remainder and states that these are repository reconciliation figures, not a general-ledger balance, audited Customer statement, payment demand, revenue recognition, tax filing or settlement confirmation.",
+    "Opening invoice, allocation or receipt detail revalidates existing authentication and module authorization and fails closed when an authoritative source is deleted, unavailable or no longer authorized.",
+    "List and aggregate queries are bounded, avoid per-row database access, do not call external services and keep legacy Customers with no evidence readable without request-time or production backfill.",
+    "The workspace is read-only and does not change Customers, invoices, allocations, receipts, Sales Orders, containers, balances, tax, finance or settlement records.",
+    "Any export uses the same filtered, currency-separated and unknown-due-date semantics as the screen and contains no hidden cross-currency total or inferred legal assertion.",
+    "Unit and integration tests cover explicit and missing due dates, aging boundaries, partial and full allocations, void history, multiple Customers and currencies, as-of filtering, bounded queries, authorization failure and source-record non-mutation; safe validation passes and browser acceptance is recorded as deferred during development."
+  ],
+  "allowed_paths": [
+    "src/ERP.Application/**",
+    "src/ERP.Api/Controllers/**",
+    "src/ERP.Api/wwwroot/**",
+    "src/ERP.UnitTests/**",
+    "src/ERP.IntegrationTests/**",
+    "docs/**",
+    ".ai/**"
+  ],
+  "depends_on": [
+    "ERP-055",
+    "ERP-073"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "browser",
+  "browser_acceptance": {
+    "required": true,
+    "scenarios": [
+      "Open the customer receivable reconciliation workspace for recorded sales invoices with explicit due dates and partial receipt allocations, select an as-of date, and verify currency-separated remaining evidence and documented aging buckets.",
+      "Inspect draft, voided, missing-due-date, invalid-link and multi-currency evidence and verify unknown values remain separate, no cross-currency total is shown and no source record is changed."
+    ],
+    "test_filter": "Collection=UiTests",
+    "minimum_screenshots": 3
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L2",
+    "status": "not_required",
+    "reason": "Read-only arithmetic over repository evidence and non-production validation only. Customer contact, real collection, accounting or tax action, production database mutation, deployment and release remain behind mandatory human gates."
+  },
+  "attempts": 0
+}

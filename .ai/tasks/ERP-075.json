@@ -1,0 +1,55 @@
+{
+  "id": "ERP-075",
+  "title": "Expose receipt-to-invoice allocation evidence in sales-invoice and customer workflows",
+  "status": "pending",
+  "risk_level": "medium",
+  "description": "Expose ERP-073 customer receipt-to-sales-invoice allocations in existing customer sales-invoice detail and customer-facing workflows. Keep invoice gross evidence, receipt allocation evidence and unallocated amounts separately labeled. Do not infer a receivable balance, mutate source records, execute production SQL, deploy, or release.",
+  "acceptance_criteria": [
+    "Customer sales-invoice detail exposes active ERP-073 receipt allocations, allocated count and unallocated or unavailable context using only persisted ERP-073 rows.",
+    "Customer sales-invoice lists expose bounded receipt-allocation summaries without issuing a database or storage query per row.",
+    "Existing customer-receipt workflows expose explicit ERP-073 invoice allocations and remaining receipt evidence without replacing or duplicating the canonical FinanceReceipt record.",
+    "The reconciliation view displays invoice gross, explicitly allocated-receipt and arithmetic unallocated evidence in separate labeled fields and does not net unrelated evidence into an asserted receivable or settlement balance.",
+    "Amounts are grouped by currency; different currencies are never combined, converted or reassigned without an authoritative persisted conversion already belonging to the source evidence.",
+    "Draft and voided invoices and voided receipt allocations are distinguished from active recorded evidence; inactive evidence is excluded from active totals but remains inspectable in history.",
+    "Customer, currency or source-link inconsistencies in historical evidence are displayed as invalid or unavailable and are not silently repaired, reassigned or merged.",
+    "Missing receipt-allocation evidence is shown as none or unknown and is never converted into paid, settled, outstanding, overdue, recognized or posted status.",
+    "The UI and documentation state that this is an operational evidence view, not a general ledger, legal Customer statement, tax filing, payment authorization or settlement confirmation.",
+    "The workflow is read-only and does not update invoices, allocations, receipts, Sales Orders, Customers, balances, finance or tax records.",
+    "Queries are bounded or paged, avoid per-row access and reuse ERP-053, ERP-055 and ERP-073 semantics rather than adding another reconciliation engine.",
+    "Unit and integration tests cover no evidence, partial and full receipt allocations, void and invalid history, multiple Customers and currencies, bounded queries and source-record non-mutation; safe validation passes and browser acceptance is recorded as deferred during development."
+  ],
+  "allowed_paths": [
+    "src/ERP.Application/**",
+    "src/ERP.Api/Controllers/**",
+    "src/ERP.Api/wwwroot/**",
+    "src/ERP.UnitTests/**",
+    "src/ERP.IntegrationTests/**",
+    "docs/**",
+    ".ai/**"
+  ],
+  "depends_on": [
+    "ERP-055",
+    "ERP-073"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "browser",
+  "browser_acceptance": {
+    "required": true,
+    "scenarios": [
+      "Open a customer sales-invoice with partial ERP-073 receipt allocation evidence and verify invoice gross, allocated and unallocated amounts remain separately labeled in one currency.",
+      "Inspect an invoice with draft, voided, mismatched or missing receipt-allocation evidence and verify it is not presented as paid, settled, outstanding or overdue and that no source record changes."
+    ],
+    "test_filter": "Collection=UiTests",
+    "minimum_screenshots": 2
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L2",
+    "status": "not_required",
+    "reason": "Read-only presentation of repository receipt-allocation evidence. No real receipt handling, bank access, accounting posting, production mutation, deployment or release is authorized."
+  },
+  "attempts": 0
+}
