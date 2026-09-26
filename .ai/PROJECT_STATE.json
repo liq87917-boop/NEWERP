@@ -39,7 +39,7 @@
     "irreversible_data_operations": "required"
   },
   "finish_reason": "task_quarantined",
-  "updated_at": "2026-09-26T12:21:42.049925Z",
+  "updated_at": "2026-09-26T12:24:35.088405Z",
   "rolling_queue": {
     "enabled": true,
     "batch_size": 4,
@@ -55,5 +55,5 @@
       "ERP-077"
     ]
   },
-  "last_failed_task": "ERP-076"
+  "last_failed_task": "ERP-077"
 }

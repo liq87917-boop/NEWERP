@@ -1,7 +1,7 @@
 {
   "id": "ERP-077",
   "title": "Add three-way customer evidence reconciliation view for orders, shipments and invoices",
-  "status": "pending",
+  "status": "failed",
   "risk_level": "medium",
   "description": "Add a bounded read-only three-way reconciliation view exposing ERP-055 invoice-to-order allocations, ERP-076 invoice-to-shipment links and ERP-073 receipt allocations for a Customer, keeping each evidence class separately labeled. Do not create a general ledger, assert revenue recognition, contact customers, execute production SQL, deploy, or release.",
   "acceptance_criteria": [
@@ -49,5 +49,5 @@
     "status": "not_required",
     "reason": "Read-only evidence reconciliation over repository records and non-production validation only. Customer contact, real collection, shipment execution, customs submission, accounting or tax action, production database mutation, deployment and release remain behind mandatory human gates."
   },
-  "attempts": 0
+  "attempts": 3
 }
