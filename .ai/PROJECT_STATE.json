@@ -14,7 +14,7 @@
     "profile": "safe",
     "status": "passed"
   },
-  "cline_exit_code": 0,
+  "cline_exit_code": 1,
   "conversation_control": {
     "mode": "deepseek_file_backed_rolling",
     "paused": false,
@@ -38,8 +38,8 @@
     "production_deployment_or_release": "required",
     "irreversible_data_operations": "required"
   },
-  "finish_reason": "browser_deferred",
-  "updated_at": "2026-09-25T14:51:55.239Z",
+  "finish_reason": "task_quarantined",
+  "updated_at": "2026-09-26T01:55:08.507420Z",
   "rolling_queue": {
     "enabled": true,
     "batch_size": 4,
@@ -54,5 +54,5 @@
       "ERP-072"
     ]
   },
-  "last_failed_task": "ERP-029"
+  "last_failed_task": "ERP-073"
 }
