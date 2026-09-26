@@ -56,5 +56,14 @@
   "safety": {
     "LIVE_TRADING": false,
     "ALLOW_EXTERNAL_ORDER_SUBMISSION": false
-  }
+  },
+  "status": "BLOCKED",
+  "queue_status": "BLOCKED",
+  "blockers": [
+    {
+      "code": "AUTO_CIRCUIT_BREAKER",
+      "detail": "Supervisor safety interlock: 3 consecutive FAIL verdicts. Task replenishment suspended pending human review.",
+      "retryable": true
+    }
+  ]
 }
