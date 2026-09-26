@@ -1,7 +1,7 @@
 {
   "id": "ERP-074",
   "title": "Add bounded customer accounts-receivable reconciliation and aging workspace",
-  "status": "pending",
+  "status": "failed",
   "risk_level": "medium",
   "description": "Add a bounded read-only customer accounts-receivable reconciliation and aging workspace over ERP-055 customer sales-invoice evidence and ERP-073 explicit receipt-to-sales-invoice allocations. Derive only arithmetic evidence supported by persisted invoice dates, optional due dates and active allocations. Do not create a general ledger, invent due dates, contact customers, collect funds, execute production SQL, deploy, or release.",
   "acceptance_criteria": [
@@ -51,5 +51,5 @@
     "status": "not_required",
     "reason": "Read-only arithmetic over repository evidence and non-production validation only. Customer contact, real collection, accounting or tax action, production database mutation, deployment and release remain behind mandatory human gates."
   },
-  "attempts": 0
+  "attempts": 3
 }

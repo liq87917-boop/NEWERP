@@ -5,7 +5,7 @@
   "current_task": null,
   "last_completed_task": "ERP-073",
   "last_reviewed_task": "ERP-073",
-  "blocker": "CONTROL_PLANE_EXECUTOR_FAILURE: ERP-074..077 quarantined with Cline exit code 1; provider/model and agent-bootstrap fixes landed but unverified",
+  "blocker": null,
   "external_actions": [
     "Rotate any previously exposed SQL Server credential at the database provider if rotation has not already been completed.",
     "Rotate any previously exposed OSS access key at the cloud provider if rotation has not already been completed."
@@ -14,7 +14,7 @@
     "profile": "safe",
     "status": "passed"
   },
-  "cline_exit_code": 1,
+  "cline_exit_code": 0,
   "conversation_control": {
     "mode": "deepseek_file_backed_rolling",
     "paused": false,
@@ -38,8 +38,8 @@
     "production_deployment_or_release": "required",
     "irreversible_data_operations": "required"
   },
-  "finish_reason": "review_fail_requeue",
-  "updated_at": "2026-09-26T11:00:00.000000Z",
+  "finish_reason": "task_quarantined",
+  "updated_at": "2026-09-26T11:47:45.419191Z",
   "rolling_queue": {
     "enabled": true,
     "batch_size": 4,
@@ -55,5 +55,5 @@
       "ERP-077"
     ]
   },
-  "last_failed_task": "ERP-077"
+  "last_failed_task": "ERP-074"
 }
