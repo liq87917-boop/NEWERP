@@ -13,6 +13,9 @@ echo.
 echo  Loading project status...
 echo.
 
+rem Pin Cline to the user's direct DeepSeek provider (matches XAUUSD).
+set AI_CLINE_PROVIDER=deepseek
+
 :run
 powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\agent-bootstrap.ps1"
 powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\agent-host.ps1"
