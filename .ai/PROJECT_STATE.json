@@ -2,10 +2,10 @@
   "project": "NEWERP",
   "controller": "deepseek_conversation",
   "phase": "ready",
-  "current_task": "ERP-078",
+  "current_task": "ERP-079",
   "last_completed_task": "ERP-073",
-  "last_reviewed_task": "ERP-073",
-  "blocker": "CONTROL_PLANE_FRESH_PROCESS_REQUIRED: executor health unverified after ERP-074..077 provider/model failure; ERP-078 reissued to run scripts/verify-executor-bootstrap.ps1 and restore ERP-074..077 to a retryable state. No new business tasks are queued until executor health is confirmed.",
+  "last_reviewed_task": "ERP-078",
+  "blocker": "CONTROL_PLANE_FRESH_PROCESS_REQUIRED: baseline 344a11c has no new commits/diff and no ERP-078 result file; ERP-074..077 remain failed(attempts=3). ERP-079 reissued to actually run scripts/verify-executor-bootstrap.ps1, capture .ai/results/ERP-079.json, and restore ERP-074..077 to a retryable state. No new business tasks are queued until executor health is confirmed and the AUTO_CIRCUIT_BREAKER is human-reviewed.",
   "external_actions": [
     "Rotate any previously exposed SQL Server credential at the database provider if rotation has not already been completed.",
     "Rotate any previously exposed OSS access key at the cloud provider if rotation has not already been completed."
@@ -22,7 +22,7 @@
     "last_intent": "control_plane_recovery",
     "last_actor": "GPT",
     "queue_target_size": 4,
-    "updated_at": "2026-09-26T13:10:00.000000Z"
+    "updated_at": "2026-09-26T13:40:00.000000Z"
   },
   "completion_policy": {
     "default_mode": "browser",
@@ -40,7 +40,7 @@
     "irreversible_data_operations": "required"
   },
   "finish_reason": "control_plane_recovery_pending",
-  "updated_at": "2026-09-26T13:10:00.000000Z",
+  "updated_at": "2026-09-26T13:40:00.000000Z",
   "rolling_queue": {
     "enabled": true,
     "batch_size": 4,
@@ -49,10 +49,10 @@
     "replenishment_owner": "DeepSeek",
     "status": "blocked_on_control_plane_verification",
     "queued_tasks": [
-      "ERP-078"
+      "ERP-079"
     ]
   },
-  "last_failed_task": null,
+  "last_failed_task": "ERP-078",
   "safety": {
     "LIVE_TRADING": false,
     "ALLOW_EXTERNAL_ORDER_SUBMISSION": false
@@ -60,6 +60,11 @@
   "status": "BLOCKED",
   "queue_status": "BLOCKED",
   "blockers": [
+    {
+      "code": "CONTROL_PLANE_FRESH_PROCESS_REQUIRED",
+      "detail": "Executor health unverified after ERP-074..077 provider/model failure; ERP-078 produced no result file and ERP-074..077 remain failed(attempts=3). ERP-079 must actually run scripts/verify-executor-bootstrap.ps1 and restore ERP-074..077 to retryable before any business task is queued.",
+      "retryable": true
+    },
     {
       "code": "AUTO_CIRCUIT_BREAKER",
       "detail": "Supervisor safety interlock: 3 consecutive FAIL verdicts. Task replenishment suspended pending human review.",
