@@ -5,7 +5,7 @@
   "current_task": "ERP-083",
   "last_completed_task": "ERP-073",
   "last_reviewed_task": "ERP-083",
-  "blocker": "CONTROL_PLANE_FRESH_PROCESS_REQUIRED: 复核基线 4934c3a..927a4da 仅包含 .ai/tasks/ERP-083.json 新增与 .ai/PROJECT_STATE.json 的 blocker/current_task/rolling_queue 文本改写，仍无 .ai/results/ERP-079.json、ERP-080.json、ERP-081.json、ERP-082.json，也无 scripts/verify-executor-bootstrap.ps1 的真实执行证据（raw_script_invocation/effective_provider/effective_model/agent_bootstrap.* 全部缺失），ERP-074..077 仍为 failed(attempts=3)；AUTO_CIRCUIT_BREAKER 仍生效。ERP-083（max_attempts=1）作为唯一最小可执行整改任务继续待执行：真实运行 bootstrap 验证、写入 .ai/results/ERP-083.json 并记录 raw_script_invocation、把 ERP-074..077 恢复为可重试。在 ERP-083 提供真实运行证据并由人工复核 AUTO_CIRCUIT_BREAKER 之前，不补充任何业务任务，也不再追加同构控制面 recovery 任务；若本机不可执行，须在 .ai/audit.jsonl 留证并标记 failed 请求人工介入。",
+  "blocker": "CONTROL_PLANE_FRESH_PROCESS_REQUIRED: 复核基线 927a4da..b1ca36d 仅包含 .ai/PROJECT_STATE.json 的 blocker/current_task/last_reviewed_task/rolling_queue/finish_reason/时间戳文本改写，仍无 .ai/results/ERP-079.json、ERP-080.json、ERP-081.json、ERP-082.json、ERP-083.json，也无 scripts/verify-executor-bootstrap.ps1 的真实执行证据（raw_script_invocation/effective_provider/effective_model/agent_bootstrap.* 全部缺失），ERP-074..077 仍为 failed(attempts=3)；AUTO_CIRCUIT_BREAKER 仍生效。ERP-083（max_attempts=1）作为最终最小可执行整改任务待执行：在本机真实新进程内实际运行 bootstrap 验证、写入 .ai/results/ERP-083.json 并记录 raw_script_invocation、把 ERP-074..077 恢复为可重试；若本机确实不可执行，须在 .ai/audit.jsonl 留证并把 ERP-083 标记 failed 请求人工介入。在 ERP-083 提供真实运行证据并由人工复核 AUTO_CIRCUIT_BREAKER 之前，不补充任何业务任务，也不再追加同构控制面 recovery 任务。",
   "external_actions": [
     "Rotate any previously exposed SQL Server credential at the database provider if rotation has not already been completed.",
     "Rotate any previously exposed OSS access key at the cloud provider if rotation has not already been completed."
@@ -22,7 +22,7 @@
     "last_intent": "control_plane_recovery",
     "last_actor": "GPT",
     "queue_target_size": 4,
-    "updated_at": "2026-09-26T16:00:00.000000Z"
+    "updated_at": "2026-09-26T17:00:00.000000Z"
   },
   "completion_policy": {
     "default_mode": "browser",
@@ -40,7 +40,7 @@
     "irreversible_data_operations": "required"
   },
   "finish_reason": "control_plane_recovery_pending",
-  "updated_at": "2026-09-26T16:00:00.000000Z",
+  "updated_at": "2026-09-26T17:00:00.000000Z",
   "rolling_queue": {
     "enabled": true,
     "batch_size": 4,
@@ -62,14 +62,14 @@
   "blockers": [
     {
       "code": "CONTROL_PLANE_FRESH_PROCESS_REQUIRED",
-      "detail": "基线 4934c3a..927a4da 仅包含 .ai/tasks/ERP-083.json 新增与 .ai/PROJECT_STATE.json 文本改写，没有 .ai/results/ERP-079.json、.ai/results/ERP-080.json、.ai/results/ERP-081.json 或 .ai/results/ERP-082.json，也没有 scripts/verify-executor-bootstrap.ps1 的真实运行证据（raw_script_invocation、effective_provider、effective_model、agent_bootstrap.* 字段全部缺失），ERP-074..077 仍为 failed(attempts=3)。ERP-083（max_attempts=1）继续作为唯一最小可执行整改任务：真实运行 bootstrap 验证、写入 .ai/results/ERP-083.json、把 ERP-074..077 恢复为可重试；若本机不可执行，须在 .ai/audit.jsonl 留证并标记 failed 请求人工介入，不得再次以文档改写代替执行。",
+      "detail": "基线 927a4da..b1ca36d 仅包含 .ai/PROJECT_STATE.json 文本改写，没有 .ai/results/ERP-079.json、.ai/results/ERP-080.json、.ai/results/ERP-081.json、.ai/results/ERP-082.json 或 .ai/results/ERP-083.json，也没有 scripts/verify-executor-bootstrap.ps1 的真实运行证据（raw_script_invocation、effective_provider、effective_model、agent_bootstrap.* 字段全部缺失），ERP-074..077 仍为 failed(attempts=3)。ERP-083（max_attempts=1）继续作为最终最小可执行整改任务：真实运行 bootstrap 验证、写入 .ai/results/ERP-083.json、把 ERP-074..077 恢复为可重试；若本机不可执行，须在 .ai/audit.jsonl 留证并标记 failed 请求人工介入，不得再次以文档改写代替执行，也不得再追加同构控制面 recovery 任务。",
       "retryable": true,
       "recovery_task": "ERP-083",
       "recovery_evidence": null
     },
     {
       "code": "AUTO_CIRCUIT_BREAKER",
-      "detail": "Supervisor 安全联锁：自 ERP-078 起连续 FAIL 判定触发。任务补充保持暂停，等待 ERP-083 提供真实控制面运行证据（.ai/results/ERP-083.json 含 raw_script_invocation）与 .ai/audit.jsonl 佐证，并由人工显式复核后方可恢复；任何自动化流程（Cline/Supervisor/GPT）均不得自行清除本 breaker。",
+      "detail": "Supervisor 安全联锁：自 ERP-078 起连续 FAIL 判定触发，且 ERP-078..ERP-082 五轮 recovery 均以纯文档改写关闭而无真实运行证据。任务补充保持暂停，等待 ERP-083 提供真实控制面运行证据（.ai/results/ERP-083.json 含 raw_script_invocation）与 .ai/audit.jsonl 佐证，并由人工显式复核后方可恢复；任何自动化流程（Cline/Supervisor/GPT）均不得自行清除本 breaker。若 ERP-083 因本机不可执行而 failed，则需人工介入处理执行环境后再行恢复。",
       "retryable": true
     }
   ]
