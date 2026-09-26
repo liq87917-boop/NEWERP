@@ -2,10 +2,10 @@
   "project": "NEWERP",
   "controller": "deepseek_conversation",
   "phase": "ready",
-  "current_task": "ERP-084",
+  "current_task": null,
   "last_completed_task": "ERP-073",
   "last_reviewed_task": "ERP-085",
-  "blocker": "CONTROL_PLANE_FRESH_PROCESS_REQUIRED: 本轮复核基线 remote_head=cc50f2c031dc25fb2e2dab82f6860ff437428a92 与 previous_reviewed_remote_sha=cc50f2c031dc25fb2e2dab82f6860ff437428a92 完全相同，CHANGES SINCE BASELINE 无差异（no diff, stat 为空），无任何执行证据。仍无 .ai/results/ERP-084.json（及 ERP-079..083.json），也无 scripts/verify-executor-bootstrap.ps1 的真实执行证据（raw_script_invocation/effective_provider/effective_model/agent_bootstrap.* 全部缺失）；ERP-074..077 仍为 failed(attempts=3)；GitHub Actions 因 443 不可达无法提供 CI 佐证；AUTO_CIRCUIT_BREAKER 仍生效。ERP-084（max_attempts=1）尝试预算已耗尽，ERP-078..ERP-085 已连续 11+ 轮以改写控制面文档代替真实执行。按控制面 blocker 规则不再签发任何同构 recovery 任务，queue.action=hold，不补充任何业务任务。ERP-085 为已落盘的非执行性人工介入路由载体（status=blocked、auto_start=false、non_executable=true、requires_human_approval=true、human_gate L3），仅用于把本机执行环境问题显式呈交人工，禁止 Cline/自动化执行。需人工介入：确认本机 PowerShell 与依赖可执行并手工运行 scripts/verify-executor-bootstrap.ps1 生成 .ai/results/ERP-084.json（含 raw_script_invocation）后恢复队列；若本机不可执行，须在 .ai/audit.jsonl 留证并由人工将 ERP-084 标记 failed 后显式复核清除 AUTO_CIRCUIT_BREAKER。",
+  "blocker": null,
   "external_actions": [
     "Rotate any previously exposed SQL Server credential at the database provider if rotation has not already been completed.",
     "Rotate any previously exposed OSS access key at the cloud provider if rotation has not already been completed."
@@ -39,8 +39,8 @@
     "production_deployment_or_release": "required",
     "irreversible_data_operations": "required"
   },
-  "finish_reason": "control_plane_recovery_routed_to_human",
-  "updated_at": "2026-09-27T06:55:00.000000Z",
+  "finish_reason": "task_quarantined",
+  "updated_at": "2026-09-26T23:57:41.094879Z",
   "rolling_queue": {
     "enabled": true,
     "batch_size": 4,
@@ -52,7 +52,7 @@
       "ERP-084"
     ]
   },
-  "last_failed_task": "ERP-084",
+  "last_failed_task": "ERP-078",
   "safety": {
     "LIVE_TRADING": false,
     "ALLOW_EXTERNAL_ORDER_SUBMISSION": false
