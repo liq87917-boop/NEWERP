@@ -135,4 +135,12 @@ public partial class ErpDbContext
     public DbSet<AgencyServiceFeeCollectionAllocation> AgencyServiceFeeCollectionAllocations
         => Set<AgencyServiceFeeCollectionAllocation>();
 
+    // ============ 客户收款 → 客户销项发票证据 分摊登记（ERP-073：收款分摊证据行） ============
+    /// <summary>
+    /// 收款分摊行（按发票证据 Id + 收款单 Id 显式分摊；发票 / 收款单 / 客户快照与登记人由服务端写入；
+    /// 同一「发票 + 收款单」在未作废行内唯一；不是到账凭证 / 应收台账 / 核销 / 结算 / 记账分录）
+    /// </summary>
+    public DbSet<CustomerSalesInvoiceCollectionAllocation> CustomerSalesInvoiceCollectionAllocations
+        => Set<CustomerSalesInvoiceCollectionAllocation>();
+
 }

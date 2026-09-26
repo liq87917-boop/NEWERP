@@ -2990,5 +2990,92 @@ IF NOT EXISTS (SELECT 1 FROM sys.indexes
         WHERE IsDeleted = 0;
 ");
 
+        // 45. 客户收款 → 客户销项发票证据 分摊登记（ERP-073：收款分摊证据行）
+        //     45.1 只建「收款分摊行」**一张表**与其过滤索引：**不含任何 UPDATE / INSERT / DELETE 回填语句**，
+        //          也不在任何既有表（收款单 / 销项发票证据与分摊行 / 客户 / 销售订单 / 装柜与单证 /
+        //          库存 / 费用 / 退税 / 结算）上加列；
+        //     45.2 有效分摊行唯一：UX_CustomerSalesInvoiceCollectionAllocations_InvoiceReceipt
+        //          （CustomerSalesInvoiceEvidenceId, ReceiptId，过滤 IsDeleted = 0 AND Status <> 2）；
+        //     45.3 发票 / 收款单 / 客户只保存**服务端写入的快照**，行只按**持久化标识符**（发票证据 Id + 收款单 Id）
+        //          建立关系，不按单号文本、金额、日期或相似度匹配；
+        //     45.4 金额列只保存用户**显式提交并按币种精度取整**的分摊金额与两侧**服务端快照**（DECIMAL(18,2)）；
+        //     45.5 本模块**刻意不建**任何外键与导航属性；也不与 ERP-053 / ERP-055 / ERP-071 的证据维度相加；
+        //     45.6 生产库执行仍由 Human Gate 控制：本段只在应用启动时以 IF OBJECT_ID(...) IS NULL 幂等补齐。
+        await db.Database.ExecuteSqlRawAsync(@"
+IF OBJECT_ID('db_owner.CustomerSalesInvoiceCollectionAllocations') IS NULL
+BEGIN
+    CREATE TABLE db_owner.CustomerSalesInvoiceCollectionAllocations (
+        Id BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+        CustomerSalesInvoiceEvidenceId BIGINT NOT NULL,
+        InvoiceType NVARCHAR(20) NOT NULL DEFAULT N'',
+        InvoiceCode NVARCHAR(50) NOT NULL DEFAULT N'',
+        InvoiceNumber NVARCHAR(50) NOT NULL DEFAULT N'',
+        InvoiceDate DATETIME2 NOT NULL,
+        InvoiceStatus INT NOT NULL DEFAULT 0,
+        InvoiceStatusText NVARCHAR(30) NOT NULL DEFAULT N'',
+        InvoiceGrossAmount DECIMAL(18,2) NOT NULL DEFAULT 0,
+        InvoiceCurrency NVARCHAR(20) NOT NULL DEFAULT N'CNY',
+        ReceiptId BIGINT NOT NULL,
+        ReceiptNo NVARCHAR(50) NOT NULL DEFAULT N'',
+        ReceiptDate DATETIME2 NOT NULL,
+        ReceiptStatus INT NOT NULL DEFAULT 0,
+        ReceiptStatusText NVARCHAR(30) NOT NULL DEFAULT N'',
+        ReceiptAmount DECIMAL(18,2) NOT NULL DEFAULT 0,
+        CustomerId BIGINT NOT NULL,
+        CustomerCode NVARCHAR(50) NOT NULL DEFAULT N'',
+        CustomerName NVARCHAR(200) NOT NULL DEFAULT N'',
+        AllocatedAmount DECIMAL(18,2) NOT NULL DEFAULT 0,
+        Currency NVARCHAR(20) NOT NULL DEFAULT N'CNY',
+        Remark NVARCHAR(500) NOT NULL DEFAULT N'',
+        Status INT NOT NULL DEFAULT 0,
+        AllocatedAt DATETIME2 NOT NULL,
+        AllocatedBy NVARCHAR(100) NOT NULL DEFAULT N'',
+        VoidedAt DATETIME2 NULL,
+        VoidReason NVARCHAR(500) NOT NULL DEFAULT N'',
+        CreatedAt DATETIME2 NOT NULL DEFAULT GETDATE(),
+        CreatedBy BIGINT NULL,
+        UpdatedAt DATETIME2 NULL,
+        UpdatedBy BIGINT NULL,
+        IsDeleted BIT NOT NULL DEFAULT 0,
+        RowVersion ROWVERSION NOT NULL
+    );
+END
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes
+               WHERE name = 'UX_CustomerSalesInvoiceCollectionAllocations_InvoiceReceipt'
+                 AND object_id = OBJECT_ID('db_owner.CustomerSalesInvoiceCollectionAllocations'))
+    CREATE UNIQUE INDEX UX_CustomerSalesInvoiceCollectionAllocations_InvoiceReceipt
+        ON db_owner.CustomerSalesInvoiceCollectionAllocations(CustomerSalesInvoiceEvidenceId, ReceiptId)
+        WHERE IsDeleted = 0 AND Status <> 2;
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes
+               WHERE name = 'IX_CustomerSalesInvoiceCollectionAllocations_InvoiceId_Status'
+                 AND object_id = OBJECT_ID('db_owner.CustomerSalesInvoiceCollectionAllocations'))
+    CREATE INDEX IX_CustomerSalesInvoiceCollectionAllocations_InvoiceId_Status
+        ON db_owner.CustomerSalesInvoiceCollectionAllocations(CustomerSalesInvoiceEvidenceId, Status)
+        WHERE IsDeleted = 0;
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes
+               WHERE name = 'IX_CustomerSalesInvoiceCollectionAllocations_ReceiptId_Status'
+                 AND object_id = OBJECT_ID('db_owner.CustomerSalesInvoiceCollectionAllocations'))
+    CREATE INDEX IX_CustomerSalesInvoiceCollectionAllocations_ReceiptId_Status
+        ON db_owner.CustomerSalesInvoiceCollectionAllocations(ReceiptId, Status)
+        WHERE IsDeleted = 0;
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes
+               WHERE name = 'IX_CustomerSalesInvoiceCollectionAllocations_CustomerId_Status'
+                 AND object_id = OBJECT_ID('db_owner.CustomerSalesInvoiceCollectionAllocations'))
+    CREATE INDEX IX_CustomerSalesInvoiceCollectionAllocations_CustomerId_Status
+        ON db_owner.CustomerSalesInvoiceCollectionAllocations(CustomerId, Status)
+        WHERE IsDeleted = 0;
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes
+               WHERE name = 'IX_CustomerSalesInvoiceCollectionAllocations_Status_AllocatedAt'
+                 AND object_id = OBJECT_ID('db_owner.CustomerSalesInvoiceCollectionAllocations'))
+    CREATE INDEX IX_CustomerSalesInvoiceCollectionAllocations_Status_AllocatedAt
+        ON db_owner.CustomerSalesInvoiceCollectionAllocations(Status, AllocatedAt)
+        WHERE IsDeleted = 0;
+");
+
     }
 }

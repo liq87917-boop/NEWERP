@@ -213,6 +213,17 @@ public interface IErpDbContext
     /// </summary>
     DbSet<AgencyServiceFeeCollectionAllocation> AgencyServiceFeeCollectionAllocations { get; }
 
+    // ============ 客户收款 → 客户销项发票证据 分摊登记（ERP-073：收款分摊证据行） ============
+
+    /// <summary>
+    /// 收款分摊行（ERP-073）：把既有、未删除且未取消的客户收款单的一部分金额**显式分摊**到一条**已登记**的
+    /// 客户销项发票证据（ERP-055）上；只按持久化标识符（发票证据 Id + 收款单 Id）建立关系，
+    /// 发票 / 收款单 / 客户快照与登记人由服务端权威写入；本维度与 ERP-053 销售订单收款引用、
+    /// ERP-055 销项发票 → 销售订单分摊、ERP-071 代理服务费收款分摊**刻意分离**（绝不相加）；
+    /// 不是到账凭证 / 应收台账 / 核销 / 结算 / 记账分录
+    /// </summary>
+    DbSet<CustomerSalesInvoiceCollectionAllocation> CustomerSalesInvoiceCollectionAllocations { get; }
+
     // ============ 询价管理 ============
     DbSet<Inquiry> Inquiries { get; }
     DbSet<InquiryDetail> InquiryDetails { get; }

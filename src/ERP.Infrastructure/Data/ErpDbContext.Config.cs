@@ -1144,6 +1144,52 @@ public partial class ErpDbContext
         modelBuilder.Entity<AgencyServiceFeeCollectionAllocation>().HasIndex(x => new { x.Status, x.AllocatedAt })
             .HasDatabaseName("IX_AgencyServiceFeeCollectionAllocations_Status_AllocatedAt")
             .HasFilter("IsDeleted = 0");
+
+        // ============ ERP-073：客户收款 → 客户销项发票证据 分摊登记（收款分摊证据行） ============
+        // 设计口径：只是收款分摊证据册：不建收款主数据、不改写收款单与发票证据；一行只按
+        // (CustomerSalesInvoiceEvidenceId, ReceiptId) 的持久化标识符把既有收款单的一部分金额显式分摊到
+        // 一条已登记的销项发票证据上；发票 / 收款单 / 客户快照与登记人只保存服务端权威写入的值；
+        // 有效行唯一：UX_CustomerSalesInvoiceCollectionAllocations_InvoiceReceipt（过滤 IsDeleted = 0 AND Status <> 2）；
+        // 金额列（InvoiceGrossAmount / ReceiptAmount / AllocatedAmount）都是 DECIMAL(18,2)；刻意不建任何外键与导航属性。
+        modelBuilder.Entity<CustomerSalesInvoiceCollectionAllocation>().Property(x => x.InvoiceType).HasMaxLength(20);
+        modelBuilder.Entity<CustomerSalesInvoiceCollectionAllocation>().Property(x => x.InvoiceCode).HasMaxLength(50);
+        modelBuilder.Entity<CustomerSalesInvoiceCollectionAllocation>().Property(x => x.InvoiceNumber).HasMaxLength(50);
+        modelBuilder.Entity<CustomerSalesInvoiceCollectionAllocation>().Property(x => x.InvoiceStatusText).HasMaxLength(30);
+        modelBuilder.Entity<CustomerSalesInvoiceCollectionAllocation>().Property(x => x.InvoiceGrossAmount).HasPrecision(18, 2);
+        modelBuilder.Entity<CustomerSalesInvoiceCollectionAllocation>().Property(x => x.InvoiceCurrency).HasMaxLength(20);
+        modelBuilder.Entity<CustomerSalesInvoiceCollectionAllocation>().Property(x => x.ReceiptNo).HasMaxLength(50);
+        modelBuilder.Entity<CustomerSalesInvoiceCollectionAllocation>().Property(x => x.ReceiptStatusText).HasMaxLength(30);
+        modelBuilder.Entity<CustomerSalesInvoiceCollectionAllocation>().Property(x => x.ReceiptAmount).HasPrecision(18, 2);
+        modelBuilder.Entity<CustomerSalesInvoiceCollectionAllocation>().Property(x => x.CustomerCode).HasMaxLength(50);
+        modelBuilder.Entity<CustomerSalesInvoiceCollectionAllocation>().Property(x => x.CustomerName).HasMaxLength(200);
+        modelBuilder.Entity<CustomerSalesInvoiceCollectionAllocation>().Property(x => x.AllocatedAmount).HasPrecision(18, 2);
+        modelBuilder.Entity<CustomerSalesInvoiceCollectionAllocation>().Property(x => x.Currency).HasMaxLength(20);
+        modelBuilder.Entity<CustomerSalesInvoiceCollectionAllocation>().Property(x => x.Remark).HasMaxLength(500);
+        modelBuilder.Entity<CustomerSalesInvoiceCollectionAllocation>().Property(x => x.AllocatedBy).HasMaxLength(100);
+        modelBuilder.Entity<CustomerSalesInvoiceCollectionAllocation>().Property(x => x.VoidReason).HasMaxLength(500);
+
+        // 同一「发票证据 + 收款单」在未作废 / 未删除行内唯一（重复分摊被拒绝，而不是合并或覆盖）
+        modelBuilder.Entity<CustomerSalesInvoiceCollectionAllocation>()
+            .HasIndex(x => new { x.CustomerSalesInvoiceEvidenceId, x.ReceiptId })
+            .IsUnique().HasDatabaseName("UX_CustomerSalesInvoiceCollectionAllocations_InvoiceReceipt")
+            .HasFilter("IsDeleted = 0 AND Status <> 2");
+
+        modelBuilder.Entity<CustomerSalesInvoiceCollectionAllocation>()
+            .HasIndex(x => new { x.CustomerSalesInvoiceEvidenceId, x.Status })
+            .HasDatabaseName("IX_CustomerSalesInvoiceCollectionAllocations_InvoiceId_Status")
+            .HasFilter("IsDeleted = 0");
+
+        modelBuilder.Entity<CustomerSalesInvoiceCollectionAllocation>().HasIndex(x => new { x.ReceiptId, x.Status })
+            .HasDatabaseName("IX_CustomerSalesInvoiceCollectionAllocations_ReceiptId_Status")
+            .HasFilter("IsDeleted = 0");
+
+        modelBuilder.Entity<CustomerSalesInvoiceCollectionAllocation>().HasIndex(x => new { x.CustomerId, x.Status })
+            .HasDatabaseName("IX_CustomerSalesInvoiceCollectionAllocations_CustomerId_Status")
+            .HasFilter("IsDeleted = 0");
+
+        modelBuilder.Entity<CustomerSalesInvoiceCollectionAllocation>().HasIndex(x => new { x.Status, x.AllocatedAt })
+            .HasDatabaseName("IX_CustomerSalesInvoiceCollectionAllocations_Status_AllocatedAt")
+            .HasFilter("IsDeleted = 0");
     }
 
     /// <summary>保存变更：自动填充审计字段</summary>

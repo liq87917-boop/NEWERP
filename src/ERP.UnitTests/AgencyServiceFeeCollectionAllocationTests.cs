@@ -1547,14 +1547,15 @@ public class AgencyServiceFeeCollectionAllocationTests
             or nameof(AgencyServiceFeeCollectionAllocation.AmountText)
             or nameof(AgencyServiceFeeCollectionAllocation.StatusText));
 
-        // 只建一张新表：本模块在 IErpDbContext 中只有这一个数据集
+        // 本模块在 IErpDbContext 中的「CollectionAllocation」收款分摊数据集（ERP-073 同样采用 Collection 命名，
+        // 故这里只断言本模块的 DbSet 存在且类型正确，不再断言全局唯一）
         var contextType = typeof(IErpDbContext);
         var collectionSets = contextType.GetProperties()
             .Where(p => p.Name.Contains("CollectionAllocation", StringComparison.Ordinal))
             .ToList();
-        Assert.Single(collectionSets);
-        Assert.Equal("AgencyServiceFeeCollectionAllocations", collectionSets[0].Name);
-        Assert.Equal(typeof(DbSet<AgencyServiceFeeCollectionAllocation>), collectionSets[0].PropertyType);
+        var agencySet = Assert.Single(collectionSets, p => p.Name == "AgencyServiceFeeCollectionAllocations");
+        Assert.Equal("AgencyServiceFeeCollectionAllocations", agencySet.Name);
+        Assert.Equal(typeof(DbSet<AgencyServiceFeeCollectionAllocation>), agencySet.PropertyType);
 
         // 命名契约：DbSet 名同时含 Receipt 与 Allocation 的模型**仍然只有 ERP-053 一套**（本模型用 Collection 命名，
         // 因此不会破坏 CustomerReceiptAllocationTests 锁定的「仓库只有一套收款引用模型」审计结论）

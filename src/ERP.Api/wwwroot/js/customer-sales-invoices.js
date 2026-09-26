@@ -493,6 +493,7 @@ function csiDetailView() {
           <button class="btn btn-primary btn-sm" onclick="csiOpenAllocations(${inv.id})">分摊到销售订单</button>
           <button class="btn btn-primary btn-sm" onclick="csiRecord(${inv.id})">登记</button>` : ''}
         ${!inv.isVoided ? `<button class="btn btn-danger btn-sm" onclick="csiOpenVoid(${inv.id})">作废</button>` : ''}
+        ${!inv.isDraft && !inv.isVoided ? `<button class="btn btn-primary btn-sm" onclick="openCustomerSalesInvoiceCollectionAllocationRegister(${inv.id})">收款分摊</button>` : ''}
         <button class="btn btn-neutral btn-sm" onclick="csiBackToList()">← 返回台账</button>
       </div>
     </div>
