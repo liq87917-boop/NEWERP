@@ -22,7 +22,7 @@
     "last_intent": "control_plane_recovery",
     "last_actor": "GPT",
     "queue_target_size": 4,
-    "updated_at": "2026-09-26T17:31:00.000000Z"
+    "updated_at": "2026-09-26T17:45:00.000000Z"
   },
   "completion_policy": {
     "default_mode": "browser",
@@ -40,7 +40,7 @@
     "irreversible_data_operations": "required"
   },
   "finish_reason": "control_plane_recovery_pending",
-  "updated_at": "2026-09-26T17:31:00.000000Z",
+  "updated_at": "2026-09-26T17:45:00.000000Z",
   "rolling_queue": {
     "enabled": true,
     "batch_size": 4,
