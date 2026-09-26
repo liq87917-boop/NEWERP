@@ -8,8 +8,8 @@ Set-Location $root
 $env:GIT_TERMINAL_PROMPT = "0"
 
 function Invoke-Git {
-    param([string[]]$Args)
-    $output = & git @Args 2>&1
+    param([string[]]$GitArgs)
+    $output = & git @GitArgs 2>&1
     return [pscustomobject]@{
         Code = $LASTEXITCODE
         Text = ($output -join [Environment]::NewLine)
@@ -65,8 +65,8 @@ function Repair-DeferredBrowserFailedHead {
 }
 
 function Get-Paths {
-    param([string[]]$Args)
-    $r = Invoke-Git $Args
+    param([string[]]$GitArgs)
+    $r = Invoke-Git $GitArgs
     if ($r.Code -ne 0) { return $null }
     return @(($r.Text -split "\r?\n") |
         ForEach-Object { $_.Trim().Replace("\", "/") } |
