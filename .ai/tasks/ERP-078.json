@@ -1,0 +1,39 @@
+{
+  "id": "ERP-078",
+  "title": "Verify Cline provider/model fix and agent-bootstrap regression before resuming ERP-074",
+  "status": "pending",
+  "risk_level": "low",
+  "description": "Control-plane verification of the automated executor bootstrap after four consecutive Cline exit code 1 quarantines (ERP-074..077). Confirm the provider/model pinning fix (AI_CLINE_PROVIDER=deepseek, AI_CLINE_MODEL=deepseek-v4-pro, --provider deepseek) actually removes the Cline Credits default, confirm the trimmed scripts/agent-bootstrap.ps1 no longer contains PowerShell parser errors and does not regress safe fast-forward/repair behavior, and perform a bounded dry-run invocation of ERP-074 to capture cline_exit_code and finish_reason. Do not implement ERP business logic, do not modify start_agent.bat provider semantics beyond verification, do not touch production database/OSS, do not deploy or release.",
+  "acceptance_criteria": [
+    "The task records the exact provider invocation used by the automation (AI_CLINE_PROVIDER, AI_CLINE_MODEL, --provider) and demonstrates that it no longer defaults to Cline Credits.",
+    "PowerShell parses scripts/agent-bootstrap.ps1 successfully (no unclosed string / parser error) and the script still performs or explicitly documents the removal of the fast-forward merge, path-conflict check and Repair-DeferredBrowserFailedHead behavior.",
+    "A bounded dry-run start of ERP-074 is executed and its cline_exit_code and normalized finish_reason are written to .ai/results/ERP-078.json without silently quarantining the task.",
+    "If the dry-run still fails, a bounded root-cause statement (command, stderr excerpt, suspected cause) is written to .ai/audit.jsonl and the task is marked failed with required next action, instead of another silent quarantine loop.",
+    "No business logic, no source under src/ERP.*, no production database, no production OSS, no deployment or release is changed by this task.",
+    "The task result clearly states whether ERP-074 may be safely resumed by the rolling queue."
+  ],
+  "allowed_paths": [
+    "scripts/**",
+    "start_agent.bat",
+    ".ai/**"
+  ],
+  "depends_on": [],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "control_plane",
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": [],
+    "test_filter": "",
+    "minimum_screenshots": 0
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Automation control-layer verification only. No business logic, production database, production OSS, deployment or release action is authorized."
+  },
+  "attempts": 0
+}

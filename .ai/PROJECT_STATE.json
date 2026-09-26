@@ -5,7 +5,7 @@
   "current_task": null,
   "last_completed_task": "ERP-073",
   "last_reviewed_task": "ERP-073",
-  "blocker": null,
+  "blocker": "CONTROL_PLANE_EXECUTOR_FAILURE: ERP-074..077 quarantined with Cline exit code 1; provider/model and agent-bootstrap fixes landed but unverified",
   "external_actions": [
     "Rotate any previously exposed SQL Server credential at the database provider if rotation has not already been completed.",
     "Rotate any previously exposed OSS access key at the cloud provider if rotation has not already been completed."
@@ -22,7 +22,7 @@
     "last_intent": "continuous_rolling_development",
     "last_actor": "GPT",
     "queue_target_size": 4,
-    "updated_at": "2026-09-26T10:05:00.000000Z"
+    "updated_at": "2026-09-26T11:00:00.000000Z"
   },
   "completion_policy": {
     "default_mode": "browser",
@@ -38,16 +38,17 @@
     "production_deployment_or_release": "required",
     "irreversible_data_operations": "required"
   },
-  "finish_reason": "task_quarantined",
-  "updated_at": "2026-09-26T10:36:23.018738Z",
+  "finish_reason": "review_fail_requeue",
+  "updated_at": "2026-09-26T11:00:00.000000Z",
   "rolling_queue": {
     "enabled": true,
     "batch_size": 4,
     "low_watermark": 2,
     "acceptance_interval_seconds": 3600,
     "replenishment_owner": "DeepSeek",
-    "status": "ready",
+    "status": "blocked_on_control_plane_verification",
     "queued_tasks": [
+      "ERP-078",
       "ERP-074",
       "ERP-075",
       "ERP-076",
