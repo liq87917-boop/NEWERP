@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import fnmatch
 import json
+import os
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -519,7 +520,18 @@ def run_next(dry_run: bool) -> int:
             audit("path_guard_recovery_validation_started", task=task["id"], attempt=attempt)
         else:
             log_path = LOGS_DIR / f"{task['id']}-attempt-{attempt}.jsonl"; LOGS_DIR.mkdir(parents=True, exist_ok=True)
-            command = [config["cline_command"], "--json", "--auto-approve", "true", "--cwd", str(ROOT), "--timeout", str(config["cline_timeout_seconds"]), build_prompt(task, attempt, previous_error)]
+            provider = os.environ.get("AI_CLINE_PROVIDER", "deepseek")
+            model = os.environ.get("AI_CLINE_MODEL", "deepseek-v4.1-flash")
+            command = [
+                config["cline_command"],
+                "--json",
+                "--auto-approve", "true",
+                "--provider", provider,
+                "--model", model,
+                "--cwd", str(ROOT),
+                "--timeout", str(config["cline_timeout_seconds"]),
+                build_prompt(task, attempt, previous_error),
+            ]
             with log_path.open("w", encoding="utf-8") as log:
                 cline_code = subprocess.run(command, cwd=ROOT, text=True, stdout=log, stderr=subprocess.STDOUT).returncode
             cline_raw_reason = parse_cline_finish_reason(log_path)
