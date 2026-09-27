@@ -99,6 +99,11 @@
       "rectification_task": "ERP-090",
       "secondary_rectification_task": "ERP-091",
       "evidence_enforcement_task": "ERP-092"
+    },
+    {
+      "code": "GPT_FAIL_RECOVERY_REQUIRED",
+      "detail": "GPT returned fail without a correction task in writes; decision=enqueue_exec. fail 且 writes 空：下发实现整改任务",
+      "retryable": true
     }
   ]
 }
