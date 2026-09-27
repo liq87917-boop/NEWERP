@@ -1,0 +1,45 @@
+{
+  "id": "ERP-092",
+  "title": "[CONTROL-PLANE RECTIFY] Force ERP-088/ERP-089 to produce real fresh-process evidence (.ai/results/ERP-088.json and .ai/results/ERP-089.json) or route a genuine environment-failure record to ERP-085; no doc-only closure and no autonomous circuit-breaker clearing",
+  "status": "pending",
+  "risk_level": "low",
+  "description": "CONTROL-PLANE RECTIFY (evidence-only; no business logic). GPT review of remote_head=79eadddc4c4eeff5f23b03ba3037799a252746e8 returned FAIL: commits 3674e19, a146107 and 79eaddd cleared the circuit breaker and reset failed tasks without any execution evidence, .ai/results/ERP-088.json does not exist, .ai/results/ERP-089.json does not exist, .ai/results/ERP-078.json has not been amended with the ERP-078-F2 bootstrap output, and .ai/audit.jsonl carries no PowerShell-unavailable record routed to ERP-085. CONTROL_PLANE_FRESH_PROCESS_REQUIRED remains active and AUTO_CIRCUIT_BREAKER must NOT be auto-cleared. This task binds the two outstanding evidence carriers to a single machine-checkable obligation and forbids a further doc-only closure.\n\nThis task accepts exactly two machine-checkable terminal outcomes:\n(A) EVIDENCE PRESENT: (1) run scripts/verify-executor-bootstrap.ps1 ONCE in a genuine fresh process on this machine, including its internal agent-bootstrap checks and bounded dry-run; (2) write the exact command line, working directory, start/end timestamps, exit code, raw stdout/stderr excerpt and parsed summary into .ai/results/ERP-088.json under raw_script_invocation, together with effective_provider, effective_model, agent_bootstrap.parse_errors, agent_bootstrap.fast_forward_merge_present, agent_bootstrap.path_conflict_check_present, agent_bootstrap.repair_deferred_browser_present, bounded_dry_run.python_exit_code, bounded_dry_run.output, queue_head, erp074_resumable and conclusion; (3) write .ai/results/ERP-089.json with the exact command, timestamp, verdict=ERP088_TERMINAL_EVIDENCE_PRESENT (with the source path/sha of the observed ERP-088 evidence) or verdict=ERP088_TERMINAL_EVIDENCE_ABSENT (listing the missing fields), plus doc_only_closure_attempts_observed naming at minimum commits 6c715d0, 7959762, 46e3e63, 763b14a and 58650be; (4) amend .ai/results/ERP-078.json to carry the real bootstrap output required by ERP-078-F2 (effective_provider, effective_model, agent_bootstrap.*, bounded_dry_run.*, queue_head, erp074_resumable, conclusion) instead of only diagnosed=true; (5) keep .ai/PROJECT_STATE.json consistent with the evidence actually produced: do not clear AUTO_CIRCUIT_BREAKER, keep rolling_queue.status=blocked_on_control_plane_verification until explicit human re-review, and preserve LIVE_TRADING=false plus ALLOW_EXTERNAL_ORDER_SUBMISSION=false.\n(B) ENV FAILURE: if PowerShell or its dependencies are genuinely unavailable on this machine, append the exact command, key stderr excerpt, suspected cause and the required human next action to .ai/audit.jsonl, mark ERP-088 failed, and explicitly hand off to ERP-085 (human routing, L3). Do not fake closure by rewriting control-plane documents and do not clear blocker=null.\n\nDo not implement ERP business logic, do not touch any file under src/ERP.*, do not access or change production database/OSS, do not deploy or release, and do not issue another isomorphic doc-only recovery task.",
+  "acceptance_criteria": [
+    "Either .ai/results/ERP-088.json exists with a non-empty raw_script_invocation containing command_line, working_directory, started_at, finished_at and exit_code, or a genuine environment-failure record with command, stderr excerpt, suspected cause and required human next action exists in .ai/audit.jsonl routed to ERP-085; a commit that only rewrites control-plane JSON text is unmet.",
+    ".ai/results/ERP-088.json additionally contains effective_provider, effective_model, agent_bootstrap.parse_errors, agent_bootstrap.fast_forward_merge_present, agent_bootstrap.path_conflict_check_present, agent_bootstrap.repair_deferred_browser_present, bounded_dry_run.python_exit_code, bounded_dry_run.output, queue_head, erp074_resumable and conclusion; any missing field is unmet.",
+    ".ai/results/ERP-089.json exists at that exact path with the exact command, timestamp, one of verdict=ERP088_TERMINAL_EVIDENCE_PRESENT or verdict=ERP088_TERMINAL_EVIDENCE_ABSENT, and doc_only_closure_attempts_observed listing at minimum 6c715d0, 7959762, 46e3e63, 763b14a and 58650be.",
+    ".ai/results/ERP-078.json is amended to include the real bootstrap script output required by ERP-078-F2 (effective_provider, effective_model, agent_bootstrap.*, bounded_dry_run.*, queue_head, erp074_resumable, conclusion); appending only diagnosed=true is unmet.",
+    ".ai/PROJECT_STATE.json keeps blocker=CONTROL_PLANE_FRESH_PROCESS_REQUIRED and rolling_queue.status=blocked_on_control_plane_verification until explicit human re-review; AUTO_CIRCUIT_BREAKER is NOT auto-cleared and blocker must not become null without .ai/results/ERP-088.json or a routed .ai/audit.jsonl record.",
+    ".ai/tasks/ERP-074.json, .ai/tasks/ERP-076.json and .ai/tasks/ERP-077.json keep their completed state and existing results files untouched, and .ai/tasks/ERP-075.json stays completed and byte-identical.",
+    "LIVE_TRADING=false and ALLOW_EXTERNAL_ORDER_SUBMISSION=false are preserved verbatim, and no file under src/ERP.*, no production database/OSS access, no deployment and no release occurred."
+  ],
+  "allowed_paths": [
+    "scripts/**",
+    "start_agent.bat",
+    ".ai/results/ERP-088.json",
+    ".ai/results/ERP-089.json",
+    ".ai/results/ERP-078.json",
+    ".ai/PROJECT_STATE.json",
+    ".ai/audit.jsonl",
+    ".ai/**"
+  ],
+  "depends_on": [],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 1,
+  "validation_profile": "safe",
+  "completion_mode": "control_plane",
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": [],
+    "test_filter": "",
+    "minimum_screenshots": 0
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Automation control-layer execution-evidence capture only; no business logic, production database, production OSS, deployment or release. AUTO_CIRCUIT_BREAKER still requires explicit human re-review, and genuine environment unavailability must route to ERP-085 (L3 human gate)."
+  },
+  "attempts": 0
+}
