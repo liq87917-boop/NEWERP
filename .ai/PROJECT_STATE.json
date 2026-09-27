@@ -40,7 +40,7 @@
     "irreversible_data_operations": "required"
   },
   "finish_reason": "task_quarantined",
-  "updated_at": "2026-09-27T00:16:13.923620Z",
+  "updated_at": "2026-09-27T00:20:23.402524Z",
   "rolling_queue": {
     "enabled": true,
     "batch_size": 4,
@@ -49,11 +49,10 @@
     "replenishment_owner": "DeepSeek",
     "status": "blocked_on_control_plane_verification",
     "queued_tasks": [
-      "ERP-084",
-      "ERP-080"
+      "ERP-084"
     ]
   },
-  "last_failed_task": "ERP-080",
+  "last_failed_task": "ERP-074",
   "safety": {
     "LIVE_TRADING": false,
     "ALLOW_EXTERNAL_ORDER_SUBMISSION": false
