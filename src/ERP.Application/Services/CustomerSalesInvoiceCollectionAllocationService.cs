@@ -750,8 +750,12 @@ public static class CustomerSalesInvoiceCollectionAllocationService
         IErpDbContext db, CustomerSalesInvoiceCollectionAllocation row)
         => (await MapManyAsync(db, new List<CustomerSalesInvoiceCollectionAllocation> { row })).Single();
 
-    /// <summary>批量映射：本页的收款单与发票**各一次**查询装载（与行数无关、无 N+1）。</summary>
-    private static async Task<List<CustomerSalesInvoiceCollectionAllocationDto>> MapManyAsync(
+    /// <summary>
+    /// 批量映射：本页的收款单与发票**各一次**查询装载（与行数无关、无 N+1）。
+    /// <para>ERP-075 复用：发票证据详情 / 台账要暴露 ERP-073 收款分摊证据时，用本方法把已批量装载的
+    /// 分摊行映射为带可用性标注的读取 DTO，避免重复实现映射逻辑。</para>
+    /// </summary>
+    public static async Task<List<CustomerSalesInvoiceCollectionAllocationDto>> MapManyAsync(
         IErpDbContext db, IReadOnlyList<CustomerSalesInvoiceCollectionAllocation> rows)
     {
         var receiptIds = rows.Select(r => r.ReceiptId).Distinct().ToList();

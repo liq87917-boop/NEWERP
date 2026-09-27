@@ -206,11 +206,12 @@ function csiListView() {
       <thead><tr>
         <th>发票</th><th>客户</th><th>开票日期</th>
         <th style="text-align:right">净额 + 税额 = 含税总额</th>
-        <th style="text-align:right">已分摊 / 未分摊</th>
+        <th style="text-align:right">订单分摊（已 / 未）</th>
+        <th style="text-align:right">收款分摊（已 / 未）</th>
         <th>状态</th><th>操作</th>
       </tr></thead>
       <tbody>
-        ${CSI.list.length === 0 ? '<tr><td colspan="7" class="text-muted">没有符合条件的销项发票证据（既有客户 / 销售订单 / 单证不因本登记册产生任何变化，不做历史回填）。</td></tr>' : ''}
+        ${CSI.list.length === 0 ? '<tr><td colspan="8" class="text-muted">没有符合条件的销项发票证据（既有客户 / 销售订单 / 单证不因本登记册产生任何变化，不做历史回填）。</td></tr>' : ''}
         ${CSI.list.map(row => `
           <tr>
             <td>${escapeHtml(row.identityText || '')}
@@ -222,6 +223,8 @@ function csiListView() {
               = <b>${csiMoney(row.grossAmount)}</b> ${escapeHtml(row.currency || '')}</td>
             <td style="text-align:right">${csiMoney(row.linkedAmount)}
               <div class="text-muted">未分摊 ${csiMoney(row.unlinkedAmount)}</div></td>
+            <td style="text-align:right">${csiMoney(row.receiptAllocatedAmount)}
+              <div class="text-muted">未分摊 ${csiMoney(row.receiptUnallocatedAmount)} · ${Number(row.receiptAllocationCount || 0)} 条</div></td>
             <td>${csiStatusBadge(row)}</td>
             <td>
               <button class="btn btn-neutral btn-sm" onclick="csiOpenDetail(${row.id})">详情</button>
@@ -482,6 +485,7 @@ function csiDetailView() {
   if (!inv) return '<div class="text-muted">请选择一张发票。</div>';
 
   const rows = inv.allocations || [];
+  const receiptRows = inv.receiptAllocations || [];
 
   return `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
@@ -544,6 +548,36 @@ function csiDetailView() {
               <div class="text-muted">${escapeHtml(a.orderAvailabilityText || '')}</div></td>
             <td style="text-align:right"><b>${csiMoney(a.allocatedAmount)}</b> ${escapeHtml(a.currency || '')}</td>
             <td>${escapeHtml(a.remark || '')}</td>
+          </tr>`).join('')}
+      </tbody>
+    </table>
+
+    <h5 style="margin:8px 0 4px">收款分摊证据（收款单 → 本发票，ERP-073；${receiptRows.length} 条）</h5>
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:8px">
+      <div class="text-muted">含税总额<div><b>${csiMoney(inv.grossAmount)} ${escapeHtml(inv.currency || '')}</b></div></div>
+      <div class="text-muted">已分摊收款<div><b>${csiMoney(inv.receiptAllocatedAmount)} ${escapeHtml(inv.currency || '')}</b></div></div>
+      <div class="text-muted">算术未分摊<div><b>${csiMoney(inv.receiptUnallocatedAmount)} ${escapeHtml(inv.currency || '')}</b></div></div>
+      <div class="text-muted">有效 / 已作废行<div><b>${Number(inv.receiptAllocationCount || 0)} / ${Number(inv.receiptVoidedAllocationCount || 0)}</b></div></div>
+    </div>
+    <div style="padding:6px 10px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;font-size:12px;margin-bottom:8px">
+      <b>收款分摊证据（只读派生，非结算 / 非账务）</b>
+      <div>${escapeHtml(inv.receiptAllocationText || '')}</div>
+      <div class="text-muted">本视图是操作性证据视图，不是总账、不是法定客户对账单、不是税务申报、不是付款授权，也不是结算确认；
+        已分摊收款只来自显式登记的 ERP-073 分摊行，未分摊额是算术差值，绝不代表已付 / 已结清 / 逾期 / 收入确认或应收余额。</div>
+    </div>
+    <table class="data-table">
+      <thead><tr><th>收款单</th><th>客户</th><th style="text-align:right">分摊金额</th><th>状态</th><th>登记时间</th></tr></thead>
+      <tbody>
+        ${receiptRows.length === 0 ? '<tr><td colspan="5" class="text-muted">没有收款分摊证据（只表示尚未登记，绝不代表未收款、已收款、已结清、逾期或欠款）。</td></tr>' : ''}
+        ${receiptRows.map(a => `
+          <tr>
+            <td>${escapeHtml(a.receiptNo || '')}
+              <div class="text-muted">${escapeHtml(a.receiptAvailabilityText || '')}</div></td>
+            <td>${escapeHtml(a.customerName || '')}（${escapeHtml(a.customerCode || '')}）</td>
+            <td style="text-align:right"><b>${escapeHtml(a.allocatedAmountText || '')}</b></td>
+            <td>${a.isActive ? '<span class="status status-success">有效</span>' : '<span class="status status-neutral">已作废</span>'}
+              ${a.isVoided && a.voidReason ? `<div class="text-muted">作废原因：${escapeHtml(a.voidReason)}</div>` : ''}</td>
+            <td>${fmtDate(a.allocatedAt)}</td>
           </tr>`).join('')}
       </tbody>
     </table>

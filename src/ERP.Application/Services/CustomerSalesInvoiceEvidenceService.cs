@@ -746,11 +746,12 @@ public static class CustomerSalesInvoiceEvidenceService
             invoice.InvoiceType, invoice.InvoiceCode, invoice.InvoiceNumber);
     }
 
-    /// <summary>单张发票映射（详情与单条操作返回用；只读标注，不写库）</summary>
+    /// <summary>单张发票映射（详情与单条操作返回用；只读标注，不写库；含 ERP-073 收款分摊证据逐行明细）</summary>
     private static async Task<CustomerSalesInvoiceEvidenceDto> MapAsync(
         IErpDbContext db, CustomerSalesInvoiceEvidence invoice)
     {
-        var mapped = await MapManyAsync(db, new List<CustomerSalesInvoiceEvidence> { invoice });
+        var mapped = await MapManyAsync(db, new List<CustomerSalesInvoiceEvidence> { invoice },
+            includeReceiptDetails: true);
         return mapped[0];
     }
 
@@ -759,7 +760,8 @@ public static class CustomerSalesInvoiceEvidenceService
     /// 客户可用性、订单可用性与单证引用可用性都是**只读标注**：停用 / 删除 / 取消不改变历史证据的可读性。
     /// </summary>
     private static async Task<List<CustomerSalesInvoiceEvidenceDto>> MapManyAsync(
-        IErpDbContext db, IReadOnlyList<CustomerSalesInvoiceEvidence> invoices)
+        IErpDbContext db, IReadOnlyList<CustomerSalesInvoiceEvidence> invoices,
+        bool includeReceiptDetails = false)
     {
         if (invoices.Count == 0) return new List<CustomerSalesInvoiceEvidenceDto>();
 
@@ -791,6 +793,50 @@ public static class CustomerSalesInvoiceEvidenceService
             : (await db.TradeDocuments.AsNoTracking().Where(d => documentIds.Contains(d.Id)).ToListAsync())
                 .ToDictionary(d => d.Id);
 
+        // ===== ERP-075：ERP-073 收款分摊证据汇总（一次分组聚合，与行数 / 发票张数无关，无 N+1） =====
+        var receiptStats = await db.CustomerSalesInvoiceCollectionAllocations.AsNoTracking()
+            .Where(a => !a.IsDeleted && invoiceIds.Contains(a.CustomerSalesInvoiceEvidenceId))
+            .GroupBy(a => new { a.CustomerSalesInvoiceEvidenceId, a.Status })
+            .Select(g => new
+            {
+                g.Key.CustomerSalesInvoiceEvidenceId,
+                g.Key.Status,
+                Count = g.Count(),
+                Amount = g.Sum(a => a.AllocatedAmount)
+            })
+            .ToListAsync();
+
+        var receiptSummaryByInvoice = receiptStats
+            .GroupBy(s => s.CustomerSalesInvoiceEvidenceId)
+            .ToDictionary(g => g.Key, g =>
+            {
+                var list = g.ToList();
+                var active = list
+                    .Where(x => x.Status == CustomerSalesInvoiceCollectionAllocationRules.StatusActive).ToList();
+                var voided = list
+                    .Where(x => x.Status == CustomerSalesInvoiceCollectionAllocationRules.StatusVoided).ToList();
+                return new ReceiptAllocationSummary(
+                    active.Sum(x => x.Amount),
+                    active.Sum(x => x.Count),
+                    voided.Sum(x => x.Count));
+            });
+
+        // ===== ERP-075：仅详情路径装载有界逐行明细（历史可读，含已作废行） =====
+        Dictionary<long, IReadOnlyList<CustomerSalesInvoiceCollectionAllocationDto>> receiptDtosByInvoice = new();
+        if (includeReceiptDetails)
+        {
+            var collectionRows = await db.CustomerSalesInvoiceCollectionAllocations.AsNoTracking()
+                .Where(a => !a.IsDeleted && invoiceIds.Contains(a.CustomerSalesInvoiceEvidenceId))
+                .OrderByDescending(a => a.AllocatedAt).ThenByDescending(a => a.Id)
+                .Take(CustomerSalesInvoiceCollectionAllocationRules.MaxAllocationsPerInvoice)
+                .ToListAsync();
+            var receiptDtos = await CustomerSalesInvoiceCollectionAllocationService.MapManyAsync(db, collectionRows);
+            receiptDtosByInvoice = receiptDtos
+                .GroupBy(d => d.CustomerSalesInvoiceEvidenceId)
+                .ToDictionary(g => g.Key,
+                    g => (IReadOnlyList<CustomerSalesInvoiceCollectionAllocationDto>)g.ToList());
+        }
+
         return invoices.Select(invoice =>
             Map(
                 invoice,
@@ -799,8 +845,18 @@ public static class CustomerSalesInvoiceEvidenceService
                     : (IReadOnlyList<CustomerSalesInvoiceAllocation>)new List<CustomerSalesInvoiceAllocation>(),
                 customers,
                 orders,
-                documents)).ToList();
+                documents,
+                receiptSummaryByInvoice.TryGetValue(invoice.Id, out var receiptSummary)
+                    ? receiptSummary
+                    : new ReceiptAllocationSummary(0m, 0, 0),
+                receiptDtosByInvoice.TryGetValue(invoice.Id, out var receiptRows)
+                    ? receiptRows
+                    : (IReadOnlyList<CustomerSalesInvoiceCollectionAllocationDto>)
+                        new List<CustomerSalesInvoiceCollectionAllocationDto>())).ToList();
     }
+
+    /// <summary>ERP-075：发票侧「收款单 → 本发票」收款分摊汇总（只读派生，不落库）</summary>
+    private sealed record ReceiptAllocationSummary(decimal Allocated, int Count, int VoidedCount);
 
     /// <summary>发票实体 → 台账 DTO（含分摊行、已分摊 / 未分摊金额与可用性标注；纯映射，不写库）</summary>
     private static CustomerSalesInvoiceEvidenceDto Map(
@@ -808,7 +864,9 @@ public static class CustomerSalesInvoiceEvidenceService
         IReadOnlyList<CustomerSalesInvoiceAllocation> allocations,
         Dictionary<long, BaseCustomer> customers,
         Dictionary<long, SalesOrder> orders,
-        Dictionary<long, TradeDocument> documents)
+        Dictionary<long, TradeDocument> documents,
+        ReceiptAllocationSummary receiptSummary,
+        IReadOnlyList<CustomerSalesInvoiceCollectionAllocationDto> receiptAllocations)
     {
         ArgumentNullException.ThrowIfNull(invoice);
 
@@ -816,6 +874,11 @@ public static class CustomerSalesInvoiceEvidenceService
         var linked = allocations.Sum(a => a.AllocatedAmount);
         var unlinked = invoice.GrossAmount - linked;
         if (unlinked < 0) unlinked = 0;
+
+        // ERP-075：本维度（收款单 → 本发票）收款分摊证据（只按 ERP-073 持久化行派生，只读）
+        var receiptAllocated = receiptSummary.Allocated;
+        var receiptUnallocated = invoice.GrossAmount - receiptAllocated;
+        if (receiptUnallocated < 0) receiptUnallocated = 0;
 
         customers.TryGetValue(invoice.CustomerId, out var customer);
         var customerAvailable = CustomerSalesInvoiceEvidenceRules.IsCustomerSelectable(customer);
@@ -896,7 +959,15 @@ public static class CustomerSalesInvoiceEvidenceService
             CustomerSalesInvoiceEvidenceRules.LinkageRuleText,
             CustomerSalesInvoiceEvidenceRules.TradeDocumentSeparationText,
             CustomerSalesInvoiceEvidenceRules.BoundaryText,
-            rows);
+            rows,
+            receiptAllocated,
+            receiptUnallocated,
+            receiptSummary.Count,
+            receiptSummary.VoidedCount,
+            CustomerSalesInvoiceCollectionAllocationRules.LinkageStatusOf(invoice.GrossAmount, receiptAllocated),
+            CustomerSalesInvoiceCollectionAllocationRules.LinkageText(
+                invoice.GrossAmount, receiptAllocated, receiptSummary.Count, currency, "本发票在收款分摊维度"),
+            receiptAllocations.ToList());
     }
 
     /// <summary>销售订单状态文案（只读标注；订单不存在时照实说明「不存在或已删除」，不假定为可用）</summary>

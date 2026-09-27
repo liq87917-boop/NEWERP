@@ -101,6 +101,11 @@ Object.assign(MODULES, {
     extraActions: [
       { label: '🧾 收款引用', title: '登记本页收款单指向的销售订单引用证据，并查看收款单侧已引用 / 未引用金额（只写引用证据，不会真的收款、不会结算或核销，也不改写收款单与销售订单）', onclick: 'openCustomerReceiptAllocationRegister()' },
     ],
+    /* ERP-075：收款单 → 已登记销项发票的收款分摊证据（只读派生；展示本收款单分摊到的发票与剩余收款证据，
+       不改写收款单 / 发票，也不是结算确认 / 应收账款余额 / 收款核销） */
+    rowActions: [
+      { label: '收款分摊证据', icon: '🧾', title: '查看本收款单的收款分摊证据：本维度已分摊金额、剩余未分摊收款证据，以及分摊到哪些已登记销项发票（只读派生；不是到账凭证 / 应收余额 / 货款核销 / 客户对账单 / 结算确认）', onclick: 'openCustomerSalesInvoiceCollectionAllocationForReceipt' },
+    ],
   },
   complaint: {
     title: '客诉单', api: '/api/finance/complaints', canSubmit: true,

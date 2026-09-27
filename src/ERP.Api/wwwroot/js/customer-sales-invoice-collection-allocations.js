@@ -67,6 +67,7 @@ function csicaRender() {
   const modal = document.getElementById('modal');
   if (CSICA.view === 'void') { modal.innerHTML = csicaVoidView(); return; }
   if (CSICA.view === 'invoice') { csicaRenderInvoice(); return; }
+  if (CSICA.view === 'receipt') { csicaRenderReceipt(); return; }
 
   const rows = (CSICA.list || []).map(r => `
     <tr>
@@ -197,6 +198,79 @@ function csicaRenderInvoice() {
           <tbody>${rows || `<tr><td colspan="5" style="text-align:center;color:#64748b">暂无分摊明细</td></tr>`}</tbody>
         </table>
         <button class="btn btn-neutral btn-sm" onclick="csicaBackToList()">← 返回台账</button>
+      </div>
+    </div>`;
+}
+
+/* ==================== 收款单侧：ERP-073 发票分摊证据（只读，展示剩余收款证据） ==================== */
+
+/* 从收款单台账行进入：查看「本收款单 → 哪些已登记销项发票」的分摊证据 + 剩余收款证据 */
+async function openCustomerSalesInvoiceCollectionAllocationForReceipt(receiptId) {
+  CSICA = csicaNewState();
+  const modal = document.getElementById('modal');
+  modal.innerHTML = '<div style="padding:40px;text-align:center;color:#64748b">正在加载…</div>';
+  modal.style.display = 'block';
+
+  try {
+    CSICA.receiptSummary = await api(
+      '/api/customer-sales-invoice-collection-allocations/receipts/' + receiptId + '/summary');
+  } catch (e) {
+    toast('收款单分摊证据加载失败：' + e.message, 'error');
+    return;
+  }
+  CSICA.view = 'receipt';
+  csicaRenderReceipt();
+}
+
+function csicaRenderReceipt() {
+  const s = CSICA.receiptSummary || {};
+  const rows = (s.allocations || []).map(a => `
+    <tr>
+      <td>${escapeHtml(a.identityText || '')}
+        <div class="text-muted">${escapeHtml(a.invoiceStatusText || '')} · ${escapeHtml(a.invoiceAvailabilityText || '')}</div></td>
+      <td class="text-right">${escapeHtml(a.allocatedAmountText || '')}</td>
+      <td>${a.isActive ? '<span class="status status-success">有效</span>' : '<span class="status status-neutral">已作废</span>'}
+        ${a.isVoided && a.voidReason ? `<div class="text-muted">作废原因：${escapeHtml(a.voidReason)}</div>` : ''}</td>
+      <td>${escapeHtml(fmtDate(a.allocatedAt) || '')}</td>
+      <td>${a.isActive ? `<button class="btn btn-danger btn-sm" onclick="csicaOpenVoid(${a.id},'receipt')">作废</button>` : ''}</td>
+    </tr>`).join('');
+
+  const modal = document.getElementById('modal');
+  modal.innerHTML = `
+    <div class="modal-content" style="max-width:1280px">
+      <div class="modal-header">
+        <h3>收款单分摊证据 · ${escapeHtml(s.receiptNo || '')}</h3>
+        <button class="modal-close" onclick="closeModal()">✕</button>
+      </div>
+      <div class="modal-body" style="padding:12px 16px">
+        <table class="data-table" style="margin-bottom:10px">
+          <tbody>
+            <tr><th style="width:180px">收款单</th><td>${escapeHtml(s.receiptNo || '')}
+              <span class="text-muted">（${escapeHtml(s.receiptStatusText || '')}）</span></td></tr>
+            <tr><th>客户 / 币种</th><td>${escapeHtml(s.customerCode || '')} ${escapeHtml(s.customerName || '')} ·
+              <b>${escapeHtml(s.currency || '')}</b></td></tr>
+            <tr><th>收款日期</th><td>${escapeHtml(fmtDate(s.receiptDate) || '')}</td></tr>
+            <tr><th>收款金额</th><td><b>${escapeHtml(String(s.receiptAmount))} ${escapeHtml(s.currency || '')}</b></td></tr>
+            <tr><th>本维度已分摊 / 剩余</th><td><b>${escapeHtml(String(s.allocatedAmount))}</b> /
+              <b>${escapeHtml(String(s.unallocatedAmount))}</b> ${escapeHtml(s.currency || '')}</td></tr>
+            <tr><th>有效 / 已作废行</th><td>${Number(s.allocationCount || 0)} / ${Number(s.voidedCount || 0)}</td></tr>
+            <tr><th>关联状态</th><td>${escapeHtml(s.linkageText || '')}</td></tr>
+            <tr><th>收款单可用性</th><td>${escapeHtml(s.receiptAvailabilityText || '')}</td></tr>
+          </tbody>
+        </table>
+
+        <div style="padding:6px 10px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;font-size:12px;margin-bottom:10px">
+          <b>收款分摊证据（只读派生，非结算 / 非账务）</b>
+          <div>${escapeHtml(s.boundaryText || '')}</div>
+          <div class="text-muted">${escapeHtml(s.dimensionSeparationText || '')}</div>
+        </div>
+
+        <h5 style="margin:6px 0">本收款单分摊到的销项发票明细</h5>
+        <table class="data-table">
+          <thead><tr><th>发票 ← 收款单</th><th>分摊金额</th><th>状态</th><th>登记时间</th><th>操作</th></tr></thead>
+          <tbody>${rows || `<tr><td colspan="5" style="text-align:center;color:#64748b">暂无发票分摊明细（只表示尚未登记，绝不代表未收款 / 已收款 / 已结清）</td></tr>`}</tbody>
+        </table>
+        <button class="btn btn-neutral btn-sm" onclick="closeModal()">关闭</button>
       </div>
     </div>`;
 }

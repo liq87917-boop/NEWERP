@@ -200,7 +200,22 @@ public sealed record CustomerSalesInvoiceEvidenceDto(
     string LinkageRuleText,
     string TradeDocumentSeparationText,
     string BoundaryText,
-    List<CustomerSalesInvoiceAllocationDto> Allocations);
+    List<CustomerSalesInvoiceAllocationDto> Allocations,
+    // ============ ERP-075：ERP-073 收款分摊证据（只读派生，不落库、不改写来源记录） ============
+    /// <summary>本维度（收款单 → 本发票）**有效（未作废）**分摊金额合计（原币；只按 ERP-073 持久化行派生）</summary>
+    decimal ReceiptAllocatedAmount,
+    /// <summary>本维度算术未分摊金额 = 发票含税总额 − 有效已分摊（下限 0；只作算术证据，不代表应收余额）</summary>
+    decimal ReceiptUnallocatedAmount,
+    /// <summary>本维度有效（未作废）分摊行条数</summary>
+    int ReceiptAllocationCount,
+    /// <summary>本维度已作废分摊行条数（仅历史可读，不计入有效合计）</summary>
+    int ReceiptVoidedAllocationCount,
+    /// <summary>本维度收款分摊状态（unallocated / partial / fully_allocated）</summary>
+    string ReceiptAllocationStatus,
+    /// <summary>本维度收款分摊状态文案（显式说明已分摊 / 未分摊，绝不解释为已付 / 已结清 / 逾期）</summary>
+    string ReceiptAllocationText,
+    /// <summary>本维度收款分摊行明细（有界；详情返回逐行，列表返回空集合）</summary>
+    List<CustomerSalesInvoiceCollectionAllocationDto> ReceiptAllocations);
 
 /// <summary>分摊预览行（ERP-055，只读，不写库）：销售订单快照 + 资格文案 + 本次拟分摊金额与只读派生金额</summary>
 public sealed record CustomerSalesInvoiceAllocationPreviewLineDto(
