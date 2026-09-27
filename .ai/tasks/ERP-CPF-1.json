@@ -1,0 +1,34 @@
+{
+  "id": "ERP-CPF-1",
+  "title": "[CONTROL-PLANE-FIX] reset_failed_tasks",
+  "status": "pending",
+  "risk_level": "low",
+  "description": "CONTROL-PLANE FIX (autonomy): operation=reset_failed_tasks. reason=日志显示 ERP-074~077 多个任务因“Task produced no checkpointable business changes”被隔离并标记 failed，pipeline 因 no_runnable_tasks 停滞并触发 circuit_breaker。恢复这些失败任务为可重试状态以继续执行，不触碰交易安全开关、生产配置或历史记录。. This is a non-executable record applied directly by AI_SUPERVISOR; Cline/orchestrator must NOT execute it. Safety invariants: LIVE_TRADING=false, ALLOW_EXTERNAL_ORDER_SUBMISSION=false.",
+  "acceptance_criteria": [
+    "Operation reset_failed_tasks was applied by the supervisor without touching LIVE_TRADING / ALLOW_EXTERNAL_ORDER_SUBMISSION, production config, or any history (results/audit.jsonl/ledger)."
+  ],
+  "allowed_paths": [
+    ".ai/**"
+  ],
+  "depends_on": [],
+  "auto_start": false,
+  "requires_human_approval": false,
+  "max_attempts": 1,
+  "validation_profile": "safe",
+  "completion_mode": "control_plane",
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Control-plane repair applied by supervisor autonomy mode; no business logic, production DB/OSS, deployment or release."
+  },
+  "attempts": 0,
+  "non_executable": true,
+  "control_plane_operation": "reset_failed_tasks",
+  "target_tasks": [
+    "ERP-074",
+    "ERP-075",
+    "ERP-076",
+    "ERP-077"
+  ]
+}
