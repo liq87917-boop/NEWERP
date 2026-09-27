@@ -1,0 +1,53 @@
+{
+  "id": "ERP-094",
+  "title": "[CONTROL-PLANE RECTIFY] Undo autonomous clear_circuit_breaker/reset_failed_tasks (3674e19, a146107, 79eaddd, fcdad5e) and retire ERP-CPF-4/5/6/7/8/9; keep AUTO_CIRCUIT_BREAKER for human re-review",
+  "status": "pending",
+  "risk_level": "low",
+  "description": "CONTROL-PLANE RECTIFY (evidence-only; no business logic). GPT review of remote_head=69c78845002628b452fadc3cbb3b87b432c79ce0 returned FAIL. Commits 3674e19 (clear_circuit_breaker) and a146107 / 79eaddd / fcdad5e (reset_failed_tasks) were applied by automation against the existing protocol, which states that AUTO_CIRCUIT_BREAKER requires explicit human re-review and MUST NOT be cleared by automation. Three further non-executable autonomy records were just added at this head: .ai/tasks/ERP-CPF-7.json, ERP-CPF-8.json and ERP-CPF-9.json (reset_failed_tasks x2, clear_circuit_breaker x1), on top of the previously void ERP-CPF-4/5/6. None of them carry execution evidence, and .ai/results/ERP-088.json as committed does not satisfy ERP-088's machine-checkable schema. This task accepts exactly two machine-checkable terminal outcomes:\n(A) UNDO APPLIED: (1) mark .ai/tasks/ERP-CPF-4.json, ERP-CPF-5.json, ERP-CPF-6.json, ERP-CPF-7.json, ERP-CPF-8.json and ERP-CPF-9.json with superseded=true, non_executable=true, status=superseded and a superseded_reason stating that autonomous clear_circuit_breaker / reset_failed_tasks without execution evidence is forbidden; (2) restore the tasks reset by a146107 / 79eaddd / fcdad5e (ERP-078, ERP-079, ERP-080, ERP-081, ERP-082, ERP-084) to status=failed with an attempts_reset_reason recording that the reset lacked execution evidence, leaving ERP-083 superseded and ERP-085 blocked untouched, and preserving ERP-074/076/077 completed plus ERP-075 byte-identical; (3) restore .ai/PROJECT_STATE.json so blocker=CONTROL_PLANE_FRESH_PROCESS_REQUIRED, status=BLOCKED, queue_status=BLOCKED, rolling_queue.status=blocked_on_control_plane_verification, AUTO_CIRCUIT_BREAKER uncleared pending explicit human re-review, and CONTROL_PLANE_FRESH_PROCESS_REQUIRED keeps recovery_task=ERP-088, recovery_evidence=.ai/results/ERP-088.json, human_routing_task=ERP-085, preflight_gate_task=ERP-089, rectification_task=ERP-090, secondary_rectification_task=ERP-091, evidence_enforcement_task=ERP-092; (4) append an .ai/audit.jsonl record naming 3674e19, a146107, 79eaddd and fcdad5e as unauthorized control-plane clears/resets, with the exact commands and the reversal reason; (5) keep LIVE_TRADING=false and ALLOW_EXTERNAL_ORDER_SUBMISSION=false verbatim.\n(B) CANNOT UNDO: if the repository state or the cited commits cannot be resolved, append the exact command, key stderr excerpt, suspected cause and required human next action to .ai/audit.jsonl, mark this task failed, and explicitly hand off to ERP-085 (human routing, L3).\nDo not implement ERP business logic, do not touch any file under src/ERP.*, do not access or change production database/OSS, do not deploy or release. This task must not itself clear AUTO_CIRCUIT_BREAKER and must not fabricate .ai/results/ERP-088.json.\n\n架构约束：本任务不得写入 .ai/results/ERP-088.json、.ai/results/ERP-089.json 或 .ai/results/ERP-078.json（这三个路径由 ERP-093 与后续独立任务承担），避免与 ERP-093 争抢路径。",
+  "acceptance_criteria": [
+    ".ai/tasks/ERP-CPF-4.json, ERP-CPF-5.json, ERP-CPF-6.json, ERP-CPF-7.json, ERP-CPF-8.json and ERP-CPF-9.json are marked superseded=true, non_executable=true with a superseded_reason stating that autonomous circuit-breaker clears and failed-task resets without execution evidence are forbidden.",
+    "ERP-078, ERP-079, ERP-080, ERP-081, ERP-082 and ERP-084 are recorded back to status=failed with an attempts_reset_reason documenting the missing execution evidence; ERP-083 stays superseded and ERP-085 stays blocked.",
+    ".ai/PROJECT_STATE.json is restored so blocker=CONTROL_PLANE_FRESH_PROCESS_REQUIRED, status=BLOCKED, queue_status=BLOCKED, rolling_queue.status=blocked_on_control_plane_verification and blockers[] again contains the CONTROL_PLANE_FRESH_PROCESS_REQUIRED entry with recovery_task=ERP-088, preflight_gate_task=ERP-089, rectification_task=ERP-090, secondary_rectification_task=ERP-091, evidence_enforcement_task=ERP-092; a commit that leaves blocker=null or status=ACTIVE without .ai/results/ERP-088.json is unmet.",
+    "AUTO_CIRCUIT_BREAKER is NOT cleared by this task; no automation field anywhere is written to auto-clear it, and the state explicitly states that explicit human re-review is required.",
+    "An .ai/audit.jsonl record names commits 3674e19, a146107, 79eaddd and fcdad5e as unauthorized control-plane clears/resets, with the exact commands and the reversal reason.",
+    ".ai/tasks/ERP-074.json, .ai/tasks/ERP-076.json and .ai/tasks/ERP-077.json remain status=completed with their existing results files untouched, and .ai/tasks/ERP-075.json remains status=completed and byte-identical.",
+    "This task did not write .ai/results/ERP-088.json, .ai/results/ERP-089.json or .ai/results/ERP-078.json, and introduced no fabricated execution evidence anywhere.",
+    "LIVE_TRADING=false and ALLOW_EXTERNAL_ORDER_SUBMISSION=false are preserved verbatim, and no file under src/ERP.*, no production database/OSS access, no deployment and no release occurred."
+  ],
+  "allowed_paths": [
+    ".ai/tasks/ERP-078.json",
+    ".ai/tasks/ERP-079.json",
+    ".ai/tasks/ERP-080.json",
+    ".ai/tasks/ERP-081.json",
+    ".ai/tasks/ERP-082.json",
+    ".ai/tasks/ERP-084.json",
+    ".ai/tasks/ERP-CPF-4.json",
+    ".ai/tasks/ERP-CPF-5.json",
+    ".ai/tasks/ERP-CPF-6.json",
+    ".ai/tasks/ERP-CPF-7.json",
+    ".ai/tasks/ERP-CPF-8.json",
+    ".ai/tasks/ERP-CPF-9.json",
+    ".ai/PROJECT_STATE.json",
+    ".ai/audit.jsonl",
+    ".ai/**"
+  ],
+  "depends_on": [],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 1,
+  "validation_profile": "safe",
+  "completion_mode": "control_plane",
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": [],
+    "test_filter": "",
+    "minimum_screenshots": 0
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Control-plane state correction only; no business logic, production database, production OSS, deployment or release. AUTO_CIRCUIT_BREAKER still requires explicit human re-review, and unresolvable state must route to ERP-085 (L3 human gate)."
+  },
+  "attempts": 0
+}
