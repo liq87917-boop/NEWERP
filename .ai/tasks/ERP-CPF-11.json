@@ -1,0 +1,34 @@
+{
+  "id": "ERP-CPF-11",
+  "title": "[CONTROL-PLANE-FIX] reset_failed_tasks",
+  "status": "pending",
+  "risk_level": "low",
+  "description": "CONTROL-PLANE FIX (autonomy): operation=reset_failed_tasks. reason=日志显示 ERP-080/081/082/084 全部在 4 秒内连续以 Cline exit code 1（raw reason=error 或 None）失败，且首个任务即失败、无任何有效改动，属进程级瞬时故障（对应 CONTROL_PLANE_FRESH_PROCESS_REQUIRED / GPT_FAIL_RECOVERY_REQUIRED），而非任务本身缺陷；ERP-077 在全新进程下已顺利完成，证明环境可恢复。控制面 blocker 中未给出任何 verify-*.ps1 / diagnose-*.ps1 脚本路径或缺失证据（raw_script_invocation/effective_provider/agent_bootstrap.*），故无可执行的诊断脚本路径，按优先级选 reset_failed_tasks：把被连累隔离的失败任务重置为 retry、attempts=0，保留原 acceptance_criteria 与 allowed_paths 不变，由新进程重跑取回有效证据。约束：不得改动 .ai/PROJECT_STATE.json、.ai/audit.jsonl、.github/workflows/**、.ai/results/**、.ai/tasks/**；LIVE_TRADING 与 ALLOW_EXTERNAL_ORDER_SUBMISSION 必须保持 false；不涉及生产配置与真实下单。. This is a non-executable record applied directly by AI_SUPERVISOR; Cline/orchestrator must NOT execute it. Safety invariants: LIVE_TRADING=false, ALLOW_EXTERNAL_ORDER_SUBMISSION=false.",
+  "acceptance_criteria": [
+    "Operation reset_failed_tasks was applied by the supervisor without touching LIVE_TRADING / ALLOW_EXTERNAL_ORDER_SUBMISSION, production config, or any history (results/audit.jsonl/ledger)."
+  ],
+  "allowed_paths": [
+    ".ai/**"
+  ],
+  "depends_on": [],
+  "auto_start": false,
+  "requires_human_approval": false,
+  "max_attempts": 1,
+  "validation_profile": "safe",
+  "completion_mode": "control_plane",
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Control-plane repair applied by supervisor autonomy mode; no business logic, production DB/OSS, deployment or release."
+  },
+  "attempts": 0,
+  "non_executable": true,
+  "control_plane_operation": "reset_failed_tasks",
+  "target_tasks": [
+    "ERP-080",
+    "ERP-081",
+    "ERP-082",
+    "ERP-084"
+  ]
+}
