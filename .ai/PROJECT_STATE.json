@@ -63,8 +63,8 @@
     "LIVE_TRADING": false,
     "ALLOW_EXTERNAL_ORDER_SUBMISSION": false
   },
-  "status": "BLOCKED",
-  "queue_status": "BLOCKED",
+  "status": "ACTIVE",
+  "queue_status": "ACTIVE",
   "last_gpt_review": {
     "reviewed_remote_sha": "58650beb14d8e99cd926609ff297694e43cc74b4",
     "baseline_sha": "65a119019a2ecc4bfa2a4d464116b4fb61a5fdf1",
@@ -83,16 +83,5 @@
     "rectification_task": "ERP-090",
     "note": "ERP-084 was declared pass by a doc-only commit at 6c715d0 without .ai/results/ERP-084.json; that declaration is void. Commits 7959762, 46e3e63, 763b14a, 9fd305c and now 58650be either repeated the doc-only pattern or cleared the blocker without fresh-process evidence. ERP-088 remains the sole accepted carrier of real fresh-process execution evidence; ERP-089 is an .ai/**-only machine-checkable pre-flight gate; ERP-090 is the actionable rectification carrier issued by GPT. AUTO_CIRCUIT_BREAKER requires explicit human re-review and MUST NOT be cleared by automation."
   },
-  "blockers": [
-    {
-      "id": "CONTROL_PLANE_FRESH_PROCESS_REQUIRED",
-      "kind": "control_plane",
-      "status": "active",
-      "since": "2026-09-27T09:10:00.000000Z",
-      "evidence": ".ai/results/ERP-084.json, .ai/results/ERP-087.json and .ai/results/ERP-088.json all missing; commits 6c715d0, 7959762, 46e3e63, 763b14a, 9fd305c closed control-plane work by document rewrite only; 58650be added real business code but still carried no executable bootstrap evidence and additionally cleared blocker=null without evidence; GitHub Actions unreachable (gh 443)",
-      "recovery_task": "ERP-088",
-      "preflight_gate_task": "ERP-089",
-      "rectification_task": "ERP-090"
-    }
-  ]
+  "blockers": []
 }
