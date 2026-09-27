@@ -1,0 +1,36 @@
+{
+  "id": "ERP-CPF-7",
+  "title": "[CONTROL-PLANE-FIX] reset_failed_tasks",
+  "status": "pending",
+  "risk_level": "low",
+  "description": "CONTROL-PLANE FIX (autonomy): operation=reset_failed_tasks. reason=控制面 blocker 为 CONTROL_PLANE_FRESH_PROCESS_REQUIRED 与 GPT_FAIL_RECOVERY_REQUIRED，均未指向任何 verify-*.ps1 / diagnose-*.ps1 脚本，也未提及缺少 raw_script_invocation / effective_provider / agent_bootstrap.* 证据，因此不适用 execute_control_plane_script（优先级1不成立），亦无脚本可跑。日志显示 ERP-078/079/080/081/082/084 因 Cline 进程环境异常连续两次 exit code 1 而被隔离（cline_finish_reason_raw=error/null），失败原因属于进程环境而非任务本身缺陷，任务定义（acceptance_criteria/allowed_paths）未被证伪，符合失败任务确实需要重试的条件。故选择 reset_failed_tasks：将上述失败任务恢复为 status=retry、attempts=0，保留原有验收标准与 allowed_paths 不变；因不存在可执行的诊断脚本，不采用 clear_circuit_breaker 以免形成“清 blocker 但无证据”的死循环。本轮不触碰 .ai/PROJECT_STATE.json、.ai/audit.jsonl、.ai/results/**、.ai/tasks/**、.github/workflows/**，不改变 LIVE_TRADING 与 ALLOW_EXTERNAL_ORDER_SUBMISSION（保持 false），不涉及真实下单、实盘策略、资金转移或生产配置。. This is a non-executable record applied directly by AI_SUPERVISOR; Cline/orchestrator must NOT execute it. Safety invariants: LIVE_TRADING=false, ALLOW_EXTERNAL_ORDER_SUBMISSION=false.",
+  "acceptance_criteria": [
+    "Operation reset_failed_tasks was applied by the supervisor without touching LIVE_TRADING / ALLOW_EXTERNAL_ORDER_SUBMISSION, production config, or any history (results/audit.jsonl/ledger)."
+  ],
+  "allowed_paths": [
+    ".ai/**"
+  ],
+  "depends_on": [],
+  "auto_start": false,
+  "requires_human_approval": false,
+  "max_attempts": 1,
+  "validation_profile": "safe",
+  "completion_mode": "control_plane",
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Control-plane repair applied by supervisor autonomy mode; no business logic, production DB/OSS, deployment or release."
+  },
+  "attempts": 0,
+  "non_executable": true,
+  "control_plane_operation": "reset_failed_tasks",
+  "target_tasks": [
+    "ERP-078",
+    "ERP-079",
+    "ERP-080",
+    "ERP-081",
+    "ERP-082",
+    "ERP-084"
+  ]
+}
