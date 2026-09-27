@@ -4,7 +4,7 @@
   "phase": "ready",
   "current_task": "ERP-088",
   "last_completed_task": "ERP-075",
-  "last_reviewed_task": "ERP-087",
+  "last_reviewed_task": "ERP-088",
   "blocker": "CONTROL_PLANE_FRESH_PROCESS_REQUIRED",
   "external_actions": [
     "Rotate any previously exposed SQL Server credential at the database provider if rotation has not already been completed.",
@@ -22,7 +22,7 @@
     "last_intent": "control_plane_recovery_pending_execution",
     "last_actor": "GPT",
     "queue_target_size": 4,
-    "updated_at": "2026-09-27T13:10:00.000000Z"
+    "updated_at": "2026-09-27T14:10:00.000000Z"
   },
   "completion_policy": {
     "default_mode": "browser",
@@ -40,7 +40,7 @@
     "irreversible_data_operations": "required"
   },
   "finish_reason": "control_plane_recovery_pending_execution",
-  "updated_at": "2026-09-27T13:10:00.000000Z",
+  "updated_at": "2026-09-27T14:10:00.000000Z",
   "rolling_queue": {
     "enabled": true,
     "batch_size": 4,
@@ -49,7 +49,8 @@
     "replenishment_owner": "DeepSeek",
     "status": "blocked_on_control_plane_verification",
     "queued_tasks": [
-      "ERP-088"
+      "ERP-088",
+      "ERP-089"
     ],
     "held_tasks": [
       "ERP-074",
@@ -57,9 +58,9 @@
       "ERP-077",
       "ERP-086"
     ],
-    "hold_reason": "CONTROL_PLANE_FRESH_PROCESS_REQUIRED active at reviewed head 763b14a: diff vs reviewed baseline 46e3e63 is control-plane document text only (.ai/PROJECT_STATE.json, .ai/tasks/ERP-087.json; 2 files, 12 insertions, 10 deletions), no .ai/results/ERP-087.json with raw_script_invocation and no real fresh-process execution of scripts/verify-executor-bootstrap.ps1; GitHub Actions unreachable (gh 443), so no CI evidence. ERP-074/076/077 remain failed. New business task replenishment stays halted until ERP-088 produces real fresh-process execution evidence or a concrete environment-failure record is appended to .ai/audit.jsonl and routed to ERP-085."
+    "hold_reason": "CONTROL_PLANE_FRESH_PROCESS_REQUIRED active at reviewed head 9fd305c: diff vs reviewed baseline 763b14a is control-plane document text only (.ai/PROJECT_STATE.json rewrites plus the new .ai/tasks/ERP-088.json; 2 files, 62 insertions, 13 deletions). No .ai/results/ERP-088.json exists, no .ai/results/ERP-087.json exists, no raw_script_invocation evidence of scripts/verify-executor-bootstrap.ps1, and GitHub Actions is unreachable (gh 443) so there is no CI evidence. Commits 6c715d0, 7959762, 46e3e63, 763b14a and 9fd305c all reproduce the same doc-only closure pattern. ERP-074/076/077 remain failed and ERP-075 remains completed. Per control-plane blocker policy, business replenishment stays halted (queue.action=hold) and ERP-086 remains held until ERP-088 produces real fresh-process execution evidence (.ai/results/ERP-088.json with the full required field set) or a concrete environment-failure record is appended to .ai/audit.jsonl and routed to ERP-085."
   },
-  "last_failed_task": "ERP-087",
+  "last_failed_task": "ERP-088",
   "safety": {
     "LIVE_TRADING": false,
     "ALLOW_EXTERNAL_ORDER_SUBMISSION": false
@@ -67,20 +68,21 @@
   "status": "BLOCKED",
   "queue_status": "BLOCKED",
   "last_gpt_review": {
-    "reviewed_remote_sha": "763b14a14cee9b06f5a0c43d152fafba043dad14",
-    "baseline_sha": "46e3e632b3d234edbd2f0813f3ce70995c0a06b1",
+    "reviewed_remote_sha": "9fd305ce2f2b0e900b3e04b31c48bd30a43a1921",
+    "baseline_sha": "763b14a14cee9b06f5a0c43d152fafba043dad14",
     "decision": "fail",
-    "task_id": "ERP-087",
-    "diff_vs_baseline": "control-plane documents only: .ai/PROJECT_STATE.json (updated_at/hold_reason/last_failed_task/last_gpt_review/blocker text rewrites) and .ai/tasks/ERP-087.json (description/acceptance_criteria wording only); no .ai/results/ERP-087.json and no raw_script_invocation evidence of scripts/verify-executor-bootstrap.ps1",
+    "task_id": "ERP-088",
+    "diff_vs_baseline": "control-plane documents only: .ai/PROJECT_STATE.json (current_task/updated_at/hold_reason/last_failed_task/last_gpt_review/CONTROL_PLANE_FRESH_PROCESS_REQUIRED/blockers text rewrites) and the new .ai/tasks/ERP-088.json; no .ai/results/ERP-088.json, no .ai/results/ERP-087.json, and no raw_script_invocation evidence of scripts/verify-executor-bootstrap.ps1",
     "ci_status": "unavailable: gh CLI could not reach 443, no CI pass evidence",
-    "reviewed_at": "2026-09-27T13:10:00.000000Z"
+    "reviewed_at": "2026-09-27T14:10:00.000000Z"
   },
   "CONTROL_PLANE_FRESH_PROCESS_REQUIRED": {
     "recovery_task": "ERP-088",
     "recovery_evidence": ".ai/results/ERP-088.json",
     "status": "active",
     "human_routing_task": "ERP-085",
-    "note": "ERP-084 was declared pass by a doc-only commit at 6c715d0 without .ai/results/ERP-084.json; that declaration is void. Commits 7959762, 46e3e63 and 763b14a repeated the same doc-only pattern and are also rejected. ERP-088 is now the sole accepted carrier of real fresh-process execution evidence. AUTO_CIRCUIT_BREAKER requires explicit human re-review and must not be cleared by this review."
+    "preflight_gate_task": "ERP-089",
+    "note": "ERP-084 was declared pass by a doc-only commit at 6c715d0 without .ai/results/ERP-084.json; that declaration is void. Commits 7959762, 46e3e63, 763b14a and now 9fd305c repeated the same doc-only pattern and are also rejected. ERP-088 remains the sole accepted carrier of real fresh-process execution evidence; ERP-089 is an additional .ai/**-only machine-checkable pre-flight gate that must not be used as a substitute for ERP-088's raw_script_invocation. AUTO_CIRCUIT_BREAKER requires explicit human re-review and must not be cleared by this review."
   },
   "blockers": [
     {
@@ -88,8 +90,9 @@
       "kind": "control_plane",
       "status": "active",
       "since": "2026-09-27T09:10:00.000000Z",
-      "evidence": ".ai/results/ERP-084.json, .ai/results/ERP-087.json and .ai/results/ERP-088.json all missing; commits 6c715d0, 7959762, 46e3e63 and 763b14a closed control-plane work by document rewrite only; reviewed head 763b14a contains no executable evidence and CI is unreachable",
-      "recovery_task": "ERP-088"
+      "evidence": ".ai/results/ERP-084.json, .ai/results/ERP-087.json and .ai/results/ERP-088.json all missing; commits 6c715d0, 7959762, 46e3e63, 763b14a and 9fd305c closed control-plane work by document rewrite only; reviewed head 9fd305c contains no executable evidence and CI is unreachable (gh 443)",
+      "recovery_task": "ERP-088",
+      "preflight_gate_task": "ERP-089"
     }
   ]
 }
