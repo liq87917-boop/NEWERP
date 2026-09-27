@@ -30,7 +30,6 @@ $createdNew = $false
 $mutex = [System.Threading.Mutex]::new($true, 'NEWERP_AI_AGENT', [ref]$createdNew)
 if (-not $createdNew) {
     Write-Host 'NEWERP AI Agent is already running in another window.' -ForegroundColor Yellow
-    Read-Host 'Press Enter to close'
     exit 2
 }
 
