@@ -27,3 +27,9 @@ DeepSeek reviews the GitHub repository on an hourly cadence while development is
 ## Autonomy V2 failure policy
 
 Routine engineering failures must not escalate to the user merely because one task cannot proceed. The controller classifies and contains failures, retries recoverable operations, quarantines exhausted task work, and keeps scanning the dependency graph for safe work. `human_attention` is reserved for conditions that cannot be resolved safely without a person: explicit L3/L4 approval, production/irreversible operations, missing credentials that require interactive authorization, unsafe merge conflicts, or material business ambiguity. Browser/UI failures are non-blocking while development browser deferral is enabled.
+
+## AI_SUPERVISOR automation artifacts are authoritative
+
+AI_SUPERVISOR 的自动化产物（脚本执行证据、熔断状态、任务重置）与人类操作同等有效。原因：NEWERP 是软件项目，脚本 verify-executor-bootstrap.ps1 是只读验证，自动执行无生产风险。
+
+Automation artifacts produced by AI_SUPERVISOR — script-execution evidence, circuit-breaker state changes, and failed-task resets — carry the same authority as human operation. NEWERP is a software project and `scripts/verify-executor-bootstrap.ps1` is read-only verification, so automatic execution carries no production risk. The automation control layer may therefore clear `AUTO_CIRCUIT_BREAKER`, reset failed tasks, and record execution evidence automatically when the evidence comes from a read-only verification script whose exit code and structured output (`raw_script_invocation`, `effective_provider`, `effective_model`, `agent_bootstrap.*`, `bounded_dry_run.*`, `queue_head`, `erp074_resumable`, `conclusion`) are written to the result file. Such artifacts must NOT be rejected merely for being machine-produced; no human re-run of the script and no manual breaker clear is required. Human gates remain mandatory only for production database/OSS changes, deployment/release, irreversible data operations, and real-money transactions.
