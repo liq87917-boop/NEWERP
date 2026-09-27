@@ -22,7 +22,7 @@
     "last_intent": "control_plane_recovery_pending_execution",
     "last_actor": "GPT",
     "queue_target_size": 4,
-    "updated_at": "2026-09-27T10:10:00.000000Z"
+    "updated_at": "2026-09-27T11:10:00.000000Z"
   },
   "completion_policy": {
     "default_mode": "browser",
@@ -40,7 +40,7 @@
     "irreversible_data_operations": "required"
   },
   "finish_reason": "control_plane_recovery_pending_execution",
-  "updated_at": "2026-09-27T10:10:00.000000Z",
+  "updated_at": "2026-09-27T11:10:00.000000Z",
   "rolling_queue": {
     "enabled": true,
     "batch_size": 4,
@@ -57,9 +57,9 @@
       "ERP-077",
       "ERP-086"
     ],
-    "hold_reason": "CONTROL_PLANE_FRESH_PROCESS_REQUIRED active: no .ai/results/ERP-087.json with raw_script_invocation exists and the reviewed diff was empty. New task replenishment is halted until ERP-087 produces real fresh-process execution evidence or a concrete environment-failure record is appended to .ai/audit.jsonl and routed to ERP-085."
+    "hold_reason": "CONTROL_PLANE_FRESH_PROCESS_REQUIRED active: no .ai/results/ERP-087.json with raw_script_invocation exists and the reviewed diff at 7959762 is control-plane documents only. New task replenishment is halted until ERP-087 produces real fresh-process execution evidence or a concrete environment-failure record is appended to .ai/audit.jsonl and routed to ERP-085."
   },
-  "last_failed_task": "ERP-084",
+  "last_failed_task": "ERP-087",
   "safety": {
     "LIVE_TRADING": false,
     "ALLOW_EXTERNAL_ORDER_SUBMISSION": false
@@ -67,18 +67,18 @@
   "status": "BLOCKED",
   "queue_status": "BLOCKED",
   "last_gpt_review": {
-    "reviewed_remote_sha": "3782671c020e371f9c2731e22c6c104947550647",
+    "reviewed_remote_sha": "7959762685b7cbeff78ed0c23408b12ce280674d",
     "decision": "fail",
     "task_id": "ERP-087",
-    "diff_vs_baseline": "empty: remote_head equals previous_reviewed_remote_sha (3782671c) and CHANGES SINCE BASELINE stat/diff are both empty; no .ai/results/ERP-087.json and no raw_script_invocation evidence of scripts/verify-executor-bootstrap.ps1",
-    "reviewed_at": "2026-09-27T10:10:00.000000Z"
+    "diff_vs_baseline": "control-plane documents only: .ai/PROJECT_STATE.json (+22/-19 text rewrites) and .ai/tasks/ERP-087.json (+8/-4 description/acceptance rewrites); no .ai/results/ERP-087.json and no raw_script_invocation evidence of scripts/verify-executor-bootstrap.ps1",
+    "reviewed_at": "2026-09-27T11:10:00.000000Z"
   },
   "CONTROL_PLANE_FRESH_PROCESS_REQUIRED": {
     "recovery_task": "ERP-087",
     "recovery_evidence": ".ai/results/ERP-087.json",
     "status": "active",
     "human_routing_task": "ERP-085",
-    "note": "ERP-084 was declared pass by a doc-only commit at 6c715d0 without .ai/results/ERP-084.json; that declaration is void. ERP-087 is the sole accepted carrier of real fresh-process execution evidence. AUTO_CIRCUIT_BREAKER requires explicit human re-review and must not be cleared by this review."
+    "note": "ERP-084 was declared pass by a doc-only commit at 6c715d0 without .ai/results/ERP-084.json; that declaration is void. The 7959762 commit repeated the same doc-only pattern and is also rejected. ERP-087 remains the sole accepted carrier of real fresh-process execution evidence. AUTO_CIRCUIT_BREAKER requires explicit human re-review and must not be cleared by this review."
   },
   "blockers": [
     {
@@ -86,7 +86,7 @@
       "kind": "control_plane",
       "status": "active",
       "since": "2026-09-27T09:10:00.000000Z",
-      "evidence": ".ai/results/ERP-084.json missing and .ai/results/ERP-087.json missing; commit 6c715d0 closed ERP-084 by document rewrite only; reviewed head 3782671c has an empty diff vs baseline",
+      "evidence": ".ai/results/ERP-084.json missing and .ai/results/ERP-087.json missing; commits 6c715d0 and 7959762 closed control-plane work by document rewrite only; reviewed head 7959762 contains no executable evidence",
       "recovery_task": "ERP-087"
     }
   ]
