@@ -4,7 +4,7 @@
   "phase": "ready",
   "current_task": null,
   "last_completed_task": "ERP-075",
-  "last_reviewed_task": "ERP-085",
+  "last_reviewed_task": "ERP-084",
   "blocker": null,
   "external_actions": [
     "Rotate any previously exposed SQL Server credential at the database provider if rotation has not already been completed.",
@@ -19,10 +19,10 @@
     "mode": "deepseek_file_backed_rolling",
     "paused": false,
     "pause_reason": null,
-    "last_intent": "control_plane_recovery",
+    "last_intent": "control_plane_recovery_accepted_replenish",
     "last_actor": "GPT",
     "queue_target_size": 4,
-    "updated_at": "2026-09-27T06:55:00.000000Z"
+    "updated_at": "2026-09-27T08:55:00.000000Z"
   },
   "completion_policy": {
     "default_mode": "browser",
@@ -39,8 +39,8 @@
     "production_deployment_or_release": "required",
     "irreversible_data_operations": "required"
   },
-  "finish_reason": "task_quarantined",
-  "updated_at": "2026-09-27T00:40:03.613343Z",
+  "finish_reason": "control_plane_verified",
+  "updated_at": "2026-09-27T08:55:00.000000Z",
   "rolling_queue": {
     "enabled": true,
     "batch_size": 4,
@@ -51,7 +51,8 @@
     "queued_tasks": [
       "ERP-074",
       "ERP-076",
-      "ERP-077"
+      "ERP-077",
+      "ERP-086"
     ]
   },
   "last_failed_task": "ERP-074",
@@ -62,11 +63,11 @@
   "status": "ACTIVE",
   "queue_status": "ACTIVE",
   "last_gpt_review": {
-    "reviewed_remote_sha": "cc50f2c031dc25fb2e2dab82f6860ff437428a92",
-    "decision": "blocked",
+    "reviewed_remote_sha": "a6ab98c21492b405d06d7ef2c3a07d5d2b00cd9e",
+    "decision": "pass",
     "task_id": "ERP-084",
-    "diff_vs_baseline": "empty",
-    "reviewed_at": "2026-09-27T06:55:00.000000Z"
+    "diff_vs_baseline": "non_empty: .ai/results/ERP-084.json added; ERP-074/076/077 reset to pending; PROJECT_STATE cleared control-plane blocker",
+    "reviewed_at": "2026-09-27T08:55:00.000000Z"
   },
   "blockers": []
 }

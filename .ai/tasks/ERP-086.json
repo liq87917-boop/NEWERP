@@ -1,0 +1,53 @@
+{
+  "id": "ERP-086",
+  "title": "Expose bounded customer reconciliation statement export for receipt, invoice and shipment evidence",
+  "status": "pending",
+  "risk_level": "medium",
+  "description": "Add a bounded read-only downloadable reconciliation statement per Customer that presents ERP-055 invoice evidence, ERP-073 receipt allocations, ERP-075 receipt-to-invoice allocation context and ERP-076 invoice-to-shipment links as separately labeled evidence classes. Provide a downloadable export (CSV or HTML) that reuses the same filtered, currency-separated, unknown-value semantics as the on-screen views. Do not create a general ledger, assert revenue recognition, contact customers, collect funds, execute production SQL, deploy, or release.",
+  "acceptance_criteria": [
+    "The export lists recorded customer sales-invoice evidence, active ERP-073 receipt allocations, ERP-075 receipt allocation context and ERP-076 invoice-to-shipment links for one Customer without copying source rows or creating another master.",
+    "Users can apply bounded or paged filters for Customer, invoice identity, invoice-date range, currency, evidence class and allocation state using persisted fields only.",
+    "Invoice gross evidence, explicitly allocated-receipt evidence and arithmetic remainder remain in separate labeled columns; the export never subtracts one evidence class from another or asserts a settled, recognized or audited balance.",
+    "Amounts are grouped by currency and different currencies are never combined, converted or reassigned without an authoritative persisted conversion already belonging to the source evidence.",
+    "Draft, voided or cancelled source evidence is separately labeled and excluded from active evidence totals; missing or invalid links remain visible as unknown and are not repaired or reassigned.",
+    "The export states that it is operational evidence reconciliation, not a general ledger, audited Customer statement, revenue recognition, tax filing, payment demand or settlement confirmation, and includes the as-of date, filter criteria and generation timestamp.",
+    "Export generation is read-only, bounded (row/page limited), avoids per-row database access and does not call external services; authorization is revalidated before generation and fails closed on missing or unauthorized source data.",
+    "The export does not change Customers, Sales Orders, shipments, containers, invoices, allocations, receipts, balances, tax, finance or settlement records.",
+    "Unit and integration tests cover no evidence, partial and full allocations, missing-due-date or unknown-link cases, void/cancelled history, multiple Customers and currencies, bounded filters, authorization failure and source-record non-mutation; safe validation passes and browser acceptance is recorded as deferred during development."
+  ],
+  "allowed_paths": [
+    "src/ERP.Application/**",
+    "src/ERP.Api/Controllers/**",
+    "src/ERP.Api/wwwroot/**",
+    "src/ERP.UnitTests/**",
+    "src/ERP.IntegrationTests/**",
+    "docs/**",
+    ".ai/**"
+  ],
+  "depends_on": [
+    "ERP-055",
+    "ERP-073",
+    "ERP-075"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "browser",
+  "browser_acceptance": {
+    "required": true,
+    "scenarios": [
+      "Open the customer reconciliation statement for a Customer with partial receipt allocations and linked shipments, apply a currency and date filter, generate the export and verify invoice gross, allocated-receipt and remainder evidence stay in separate labeled columns without a settled or recognized assertion.",
+      "Inspect partially linked, draft, voided, cancelled, missing-due-date and multi-currency evidence, generate the export and verify unknown values remain separate, no cross-currency total appears and no source record is changed."
+    ],
+    "test_filter": "Collection=UiTests",
+    "minimum_screenshots": 3
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L2",
+    "status": "not_required",
+    "reason": "Read-only evidence reconciliation export over repository records and non-production validation only. Customer contact, real collection, shipment execution, customs submission, accounting or tax action, production database mutation, deployment and release remain behind mandatory human gates."
+  },
+  "attempts": 0
+}
