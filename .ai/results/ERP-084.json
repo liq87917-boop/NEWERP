@@ -1,0 +1,25 @@
+{
+  "task": "ERP-084",
+  "status": "completed",
+  "execution_outcome": "completed",
+  "normalized_finish_reason": "control_plane",
+  "cline_exit_code": 0,
+  "attempts": 1,
+  "raw_script_invocation": "powershell -ExecutionPolicy Bypass -File .\\scripts\\verify-executor-bootstrap.ps1",
+  "effective_provider": "deepseek",
+  "effective_model": "deepseek-v4-pro",
+  "agent_bootstrap": {
+    "parse_errors": 0,
+    "fast_forward_merge_present": true,
+    "path_conflict_check_present": true,
+    "repair_deferred_browser_present": true
+  },
+  "bounded_dry_run": {
+    "python_exit_code": 0,
+    "output": "env_provider=deepseek\r\nenv_model=deepseek-v4-pro\r\nnext_task=ERP-076"
+  },
+  "erp074_resumable": true,
+  "queue_head": "ERP-076",
+  "conclusion": "ERP-074 may be safely resumed; provider/model pinned to deepseek/deepseek-v4-pro; agent-bootstrap.ps1 parses cleanly.",
+  "finished_at": "2026-09-27T00:49:54Z"
+}
