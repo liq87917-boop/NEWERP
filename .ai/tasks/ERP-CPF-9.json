@@ -1,0 +1,29 @@
+{
+  "id": "ERP-CPF-9",
+  "title": "[CONTROL-PLANE-FIX] clear_circuit_breaker",
+  "status": "pending",
+  "risk_level": "low",
+  "description": "CONTROL-PLANE FIX (autonomy): operation=clear_circuit_breaker. reason=日志显示 ERP-080/081/082/084 因 Cline 进程连续退出（exit code 1, finish_reason=error/None）被隔离，且随后 pipeline_waiting(no_runnable_tasks) 说明队列已无可运行任务，属于控制面被 AUTO_CIRCUIT_BREAKER 阻断而非任务本身的实现缺陷。异常摘要中的 blocker（CONTROL_PLANE_FRESH_PROCESS_REQUIRED、GPT_FAIL_RECOVERY_REQUIRED）未指向任何 verify-*.ps1 / diagnose-*.ps1 诊断脚本，也未要求补 raw_script_invocation / effective_provider / agent_bootstrap.* 证据，因此无可执行脚本可跑（优先级 2）。此时不应 reset_failed_tasks（会绕过 GPT review 以原样恢复失败任务），而应先清除控制面 blocker 并把 status/queue_status 从 BLOCKED/HOLD 恢复为 ACTIVE，使新的进程能重新接管队列；LIVE_TRADING 与 ALLOW_EXTERNAL_ORDER_SUBMISSION 保持 false，不触碰 results/audit/tasks 等历史事实。. This is a non-executable record applied directly by AI_SUPERVISOR; Cline/orchestrator must NOT execute it. Safety invariants: LIVE_TRADING=false, ALLOW_EXTERNAL_ORDER_SUBMISSION=false.",
+  "acceptance_criteria": [
+    "Operation clear_circuit_breaker was applied by the supervisor without touching LIVE_TRADING / ALLOW_EXTERNAL_ORDER_SUBMISSION, production config, or any history (results/audit.jsonl/ledger)."
+  ],
+  "allowed_paths": [
+    ".ai/**"
+  ],
+  "depends_on": [],
+  "auto_start": false,
+  "requires_human_approval": false,
+  "max_attempts": 1,
+  "validation_profile": "safe",
+  "completion_mode": "control_plane",
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Control-plane repair applied by supervisor autonomy mode; no business logic, production DB/OSS, deployment or release."
+  },
+  "attempts": 0,
+  "non_executable": true,
+  "control_plane_operation": "clear_circuit_breaker",
+  "target_tasks": []
+}
