@@ -1,0 +1,36 @@
+{
+  "id": "ERP-CPF-5",
+  "title": "[CONTROL-PLANE-FIX] reset_failed_tasks",
+  "status": "pending",
+  "risk_level": "low",
+  "description": "CONTROL-PLANE FIX (autonomy): operation=reset_failed_tasks. reason=日志显示 ERP-078/079/080/081/082/084 连续以 Cline exited with code 1、finish_reason=error 快速失败（每次 1-2 次尝试即被 quarantine），随后 pipeline_waiting 报 no_runnable_tasks，属于执行器瞬时故障导致的批量误失败，而非任务内容或验收标准问题；这些任务的 acceptance_criteria/allowed_paths 保持不变，仅将 status 重置为 retry、attempts 归零即可让执行器重新尝试。ERP-083 已 superseded 不动，ERP-085 仍 blocked 不动。修复范围严格限制在原失败任务自身，不触碰控制面（PROJECT_STATE.json、audit.jsonl、results/**、tasks/**、workflows/**），不改变 LIVE_TRADING=false 与 ALLOW_EXTERNAL_ORDER_SUBMISSION=false，也不引入任何真实下单或资金操作。. This is a non-executable record applied directly by AI_SUPERVISOR; Cline/orchestrator must NOT execute it. Safety invariants: LIVE_TRADING=false, ALLOW_EXTERNAL_ORDER_SUBMISSION=false.",
+  "acceptance_criteria": [
+    "Operation reset_failed_tasks was applied by the supervisor without touching LIVE_TRADING / ALLOW_EXTERNAL_ORDER_SUBMISSION, production config, or any history (results/audit.jsonl/ledger)."
+  ],
+  "allowed_paths": [
+    ".ai/**"
+  ],
+  "depends_on": [],
+  "auto_start": false,
+  "requires_human_approval": false,
+  "max_attempts": 1,
+  "validation_profile": "safe",
+  "completion_mode": "control_plane",
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Control-plane repair applied by supervisor autonomy mode; no business logic, production DB/OSS, deployment or release."
+  },
+  "attempts": 0,
+  "non_executable": true,
+  "control_plane_operation": "reset_failed_tasks",
+  "target_tasks": [
+    "ERP-078",
+    "ERP-079",
+    "ERP-080",
+    "ERP-081",
+    "ERP-082",
+    "ERP-084"
+  ]
+}
