@@ -19,10 +19,10 @@
     "mode": "deepseek_file_backed_rolling",
     "paused": false,
     "pause_reason": null,
-    "last_intent": "control_plane_rectify_erp088_evidence_schema_and_undo_autonomous_circuit_breaker_clear",
+    "last_intent": "control_plane_rectify_erp089_preflight_gate_and_retire_erp_cpf_10_13",
     "last_actor": "GPT",
     "queue_target_size": 4,
-    "updated_at": "2026-09-27T19:10:00.000000Z"
+    "updated_at": "2026-09-27T21:30:00.000000Z"
   },
   "completion_policy": {
     "default_mode": "browser",
@@ -40,7 +40,7 @@
     "irreversible_data_operations": "required"
   },
   "finish_reason": "control_plane_recovery_pending_execution",
-  "updated_at": "2026-09-27T19:10:00.000000Z",
+  "updated_at": "2026-09-27T21:30:00.000000Z",
   "rolling_queue": {
     "enabled": true,
     "batch_size": 4,
@@ -60,7 +60,7 @@
     "held_tasks": [
       "ERP-086"
     ],
-    "hold_reason": "CONTROL_PLANE_FRESH_PROCESS_REQUIRED active at reviewed head 69c7884. GPT fail at 69c7884: the only executable-content changes vs baseline 4dd5aa0 are .ai/results/ERP-088.json and .ai/results/verify-executor-bootstrap.json plus a one-line scripts/agent-host.ps1 mutex fix; three further non-executable autonomy records ERP-CPF-7/8/9 (reset_failed_tasks x2, clear_circuit_breaker x1) were added. The committed .ai/results/ERP-088.json fails the machine-checkable schema: raw_script_invocation is a string, not the required object with command_line/working_directory/started_at/finished_at/exit_code; effective_provider, effective_model, agent_bootstrap.*, bounded_dry_run.*, queue_head and erp074_resumable are all absent; its stdout carries the ERP-078 bootstrap report rather than the script's execution manifest. .ai/results/ERP-089.json still does not exist, .ai/results/ERP-078.json has never been amended with the ERP-078-F2 bootstrap output, and .ai/audit.jsonl carries no PowerShell-unavailable record routed to ERP-085. Commits 3674e19, a146107, 79eaddd and fcdad5e cleared AUTO_CIRCUIT_BREAKER and reset failed tasks by automation; under the updated protocol, automation clearing is authorized when the read-only verification script exits 0 and the evidence is persisted. GitHub Actions is unreachable (gh 443) so there is no CI pass evidence. Business replenishment stays halted (queue.action=hold); ERP-086 remains held. Control-plane rectification is delegated to ERP-093 (fix .ai/results/ERP-088.json to the required schema and produce .ai/results/ERP-089.json, or route a genuine environment failure to ERP-085) and ERP-094 (undo the unauthorized clear/reset from 3674e19/a146107/79eaddd/fcdad5e, retire ERP-CPF-4/5/6/7/8/9, keep AUTO_CIRCUIT_BREAKER uncleared). ERP-074/076/077 completed state and ERP-075 byte-identical remain protected."
+    "hold_reason": "CONTROL_PLANE_FRESH_PROCESS_REQUIRED active at reviewed head 729a83b. GPT fail at 729a83b: since 69c7884 the only commits are 729a83b/0f6aadb/ae20e51 (control-plane fix: execute_control_plane_script), whose content is the schema-revised .ai/results/ERP-088.json (raw_script_invocation now an object with command_line/working_directory/started_at/finished_at/exit_code plus effective_provider=deepseek, effective_model=deepseek-v4-pro, agent_bootstrap.*, bounded_dry_run.*, queue_head=ERP-078, erp074_resumable=true, conclusion) and the newly added non-executable autonomy records .ai/tasks/ERP-CPF-10.json, ERP-CPF-11.json, ERP-CPF-12.json, ERP-CPF-13.json (reset_failed_tasks x3, clear_circuit_breaker x1). .ai/DS_CONTROL_PROTOCOL.md additionally declares AI_SUPERVISOR read-only-verification artifacts authoritative when their structured output is persisted. Remaining gaps: .ai/results/ERP-089.json STILL does not exist at the required path, so the pre-flight gate is unmet; .ai/results/ERP-078.json remains unamended with the ERP-078-F2 bootstrap output; .ai/audit.jsonl carries no PowerShell-unavailable record routed to ERP-085; and ERP-CPF-10..13 were added on top of the still-unretired ERP-CPF-4..9, further expanding autonomous control-plane activity without execution evidence. GitHub Actions is unreachable (gh 443) so there is no CI pass evidence. Business replenishment stays halted (queue.action=hold); ERP-086 remains held; ERP-074/075/076/077 completed state and ERP-075 byte-identical remain protected. Control-plane rectification remains delegated to ERP-093 (produce .ai/results/ERP-089.json and finish .ai/results/ERP-088.json to a terminal verdict) and ERP-094 (retire ERP-CPF-4..13, revert the resets of ERP-078/079/080/081/082/084, keep AUTO_CIRCUIT_BREAKER uncleared)."
   },
   "last_failed_task": "ERP-088",
   "safety": {
@@ -70,13 +70,13 @@
   "status": "BLOCKED",
   "queue_status": "BLOCKED",
   "last_gpt_review": {
-    "reviewed_remote_sha": "69c78845002628b452fadc3cbb3b87b432c79ce0",
-    "baseline_sha": "4dd5aa0d90d071b2875d2f0c09708339f5d644f6",
+    "reviewed_remote_sha": "729a83b8d3947f1eeacf2143092e64c3673a2036",
+    "baseline_sha": "69c78845002628b452fadc3cbb3b87b432c79ce0",
     "decision": "fail",
     "task_id": "ERP-088",
-    "diff_vs_baseline": "control-plane evidence files plus a one-line agent-host fix: .ai/results/ERP-088.json (new, wrong schema: raw_script_invocation is a string; missing effective_provider/effective_model/agent_bootstrap.*/bounded_dry_run.*/queue_head/erp074_resumable/conclusion), .ai/results/verify-executor-bootstrap.json (new), .ai/tasks/ERP-CPF-7/8/9.json (new non-executable autonomy records for reset_failed_tasks and clear_circuit_breaker), .ai/PROJECT_STATE.json (GPT_FAIL_RECOVERY_REQUIRED blocker appended), scripts/agent-host.ps1 (-1 line: removed non-interactive Read-Host zombie). .ai/results/ERP-089.json missing; .ai/results/ERP-078.json not amended; .ai/audit.jsonl has no routed environment-failure record.",
+    "diff_vs_baseline": "control-plane only: .ai/DS_CONTROL_PROTOCOL.md (+6 lines, automation-artifacts-authoritative clause), .ai/PROJECT_STATE.json (hold_reason / last_gpt_review / blockers text refreshed to 69c7884), .ai/results/ERP-088.json (raw_script_invocation upgraded from string to object; effective_provider / effective_model / agent_bootstrap.* / bounded_dry_run.* / queue_head / erp074_resumable / conclusion added), .ai/tasks/ERP-084.json and .ai/tasks/ERP-088.json wording refreshed, .ai/tasks/ERP-093.json and .ai/tasks/ERP-094.json newly added, .ai/tasks/ERP-CPF-10.json / ERP-CPF-11.json / ERP-CPF-12.json / ERP-CPF-13.json newly added (non-executable autonomy records). .ai/results/ERP-089.json still missing; .ai/results/ERP-078.json still unamended; .ai/audit.jsonl unchanged.",
     "ci_status": "unavailable: gh CLI could not reach 443, no CI pass evidence",
-    "reviewed_at": "2026-09-27T19:10:00.000000Z"
+    "reviewed_at": "2026-09-27T21:30:00.000000Z"
   },
   "CONTROL_PLANE_FRESH_PROCESS_REQUIRED": {
     "recovery_task": "ERP-088",
@@ -89,7 +89,7 @@
     "evidence_enforcement_task": "ERP-092",
     "schema_rectification_task": "ERP-093",
     "undo_autonomy_task": "ERP-094",
-    "note": "ERP-084 was declared pass by a doc-only commit at 6c715d0 without .ai/results/ERP-084.json; that declaration is void. Commits 7959762, 46e3e63, 763b14a, 9fd305c, 58650be, dcb7145 and 2dc759c either repeated the doc-only pattern or cleared the blocker without fresh-process evidence; commits 3674e19, a146107, 79eaddd and fcdad5e additionally cleared AUTO_CIRCUIT_BREAKER and reset failed tasks by automation against the existing protocol. ERP-088 remains the sole accepted carrier of real fresh-process execution evidence and requires the exact machine-checkable schema enforced by ERP-093; ERP-089 is an .ai/**-only machine-checkable pre-flight gate; ERP-090/091 are earlier rectification carriers; ERP-092 binds ERP-088/ERP-089 evidence; ERP-093 repairs the ERP-088 result schema and produces ERP-089; ERP-094 undoes the unauthorized clear/reset and retires ERP-CPF-4/5/6/7/8/9. 自动清除可由 AI_SUPERVISOR 执行，前提是只读验证脚本退出码 0 且证据已落盘。AUTO_CIRCUIT_BREAKER may be auto-cleared by AI_SUPERVISOR when the read-only verification script exits 0 and the evidence is persisted."
+    "note": "ERP-084 was declared pass by a doc-only commit at 6c715d0 without .ai/results/ERP-084.json; that declaration is void. Commits 7959762, 46e3e63, 763b14a, 9fd305c, 58650be, dcb7145 and 2dc759c either repeated the doc-only pattern or cleared the blocker without fresh-process evidence; commits 3674e19, a146107, 79eaddd and fcdad5e additionally cleared AUTO_CIRCUIT_BREAKER and reset failed tasks by automation against the existing protocol. ERP-088 remains the sole accepted carrier of real fresh-process execution evidence; its result file now satisfies the raw_script_invocation object schema but ERP-089 is still missing, so the pre-flight gate remains unmet. ERP-093 must produce .ai/results/ERP-089.json and finish .ai/results/ERP-088.json to a terminal verdict; ERP-094 must retire ERP-CPF-4..13, revert the resets of ERP-078/079/080/081/082/084 and keep AUTO_CIRCUIT_BREAKER uncleared pending explicit human re-review. AI_SUPERVISOR may auto-clear AUTO_CIRCUIT_BREAKER only after the read-only verification script exits 0 AND the evidence is persisted in .ai/results/ERP-088.json AND ERP-089's verdict is present."
   },
   "blockers": [
     {
@@ -97,7 +97,7 @@
       "kind": "control_plane",
       "status": "active",
       "since": "2026-09-27T09:10:00.000000Z",
-      "evidence": ".ai/results/ERP-084.json, .ai/results/ERP-087.json and .ai/results/ERP-089.json missing; .ai/results/ERP-088.json committed at 69c7884 does not contain the required raw_script_invocation object or the agent_bootstrap/bounded_dry_run/effective_provider field set; .ai/results/ERP-078.json is unamended; commits 6c715d0, 7959762, 46e3e63, 763b14a, 9fd305c, 58650be, dcb7145 and 2dc759c closed control-plane work by document rewrite only; commits 3674e19, a146107, 79eaddd and fcdad5e cleared AUTO_CIRCUIT_BREAKER and reset failed tasks by automation without execution evidence; reviewed head 69c7884 contains no schema-valid executable evidence and CI is unreachable (gh 443)",
+      "evidence": ".ai/results/ERP-084.json, ERP-087.json and ERP-089.json missing; .ai/results/ERP-088.json at 729a83b carries a well-formed raw_script_invocation object and the full field set, but its stdout still reflects the ERP-078 bootstrap report rather than the script's own manifest, and no ERP-089 gate verdict exists at the required path; .ai/results/ERP-078.json is unamended; commits 6c715d0, 7959762, 46e3e63, 763b14a, 9fd305c, 58650be, dcb7145 and 2dc759c closed control-plane work by document rewrite only; commits 3674e19, a146107, 79eaddd and fcdad5e cleared AUTO_CIRCUIT_BREAKER and reset failed tasks by automation without execution evidence; ERP-CPF-4..13 accumulated as unexecuted autonomy records; reviewed head 729a83b contains no ERP-089 gate verdict and CI is unreachable (gh 443)",
       "recovery_task": "ERP-088",
       "preflight_gate_task": "ERP-089",
       "rectification_task": "ERP-090",
@@ -111,6 +111,12 @@
       "detail": "GPT returned fail without a correction task in writes; decision=enqueue_exec. fail 且 writes 空：下发实现整改任务",
       "retryable": true,
       "status": "addressed_by_erp_093_erp_094"
+    },
+    {
+      "code": "AUTONOMY_RECORD_ACCUMULATION",
+      "detail": "ERP-CPF-10/11/12/13 were added at 729a83b/0f6aadb/ae20e51 without execution evidence, on top of the still-unretired ERP-CPF-4..9. ERP-094 must supersede all of them and keep AUTO_CIRCUIT_BREAKER uncleared.",
+      "retryable": false,
+      "status": "addressed_by_erp_094"
     }
   ]
 }
