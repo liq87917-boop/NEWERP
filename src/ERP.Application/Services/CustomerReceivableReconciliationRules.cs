@@ -123,4 +123,96 @@ public static class CustomerReceivableReconciliationRules
         AllocationOverAllocated => "无效证据：有效已分摊金额超过发票含税总额（按「未知」显示，绝不轧为 0 或负数）",
         _ => "未知（命中系统有界读取上限：分摊证据无法穷尽，不给部分合计）",
     };
+
+    // ==================== 4. 剩余证据状态 ====================
+
+    /// <summary>剩余证据可确认：发票含税总额 − 有效已分摊金额</summary>
+    public const string RemainingKnown = "known";
+
+    /// <summary>剩余证据未知（命中上限）：绝不用 0 顶替</summary>
+    public const string RemainingUnknown = "unknown";
+
+    /// <summary>剩余证据与源规则矛盾（有效已分摊金额 &gt; 发票含税总额）：无效证据，不做任何修复</summary>
+    public const string RemainingOverAllocated = "over_allocated";
+
+    /// <summary>剩余证据状态中文文案（接口、界面与文档同源）</summary>
+    public static string RemainingStateText(string state) => state switch
+    {
+        RemainingKnown => "可确认（发票含税总额 − 有效已分摊金额）",
+        RemainingOverAllocated => "无效证据：有效已分摊金额超过发票含税总额（绝不轧为 0，也不视为已结清）",
+        _ => "未知（命中系统有界读取上限：不给部分合计）",
+    };
+
+    // ==================== 5. 发票状态筛选 ====================
+
+    /// <summary>发票状态筛选：已登记（默认；草稿 / 已作废金额永不并入有效对账证据合计）</summary>
+    public const string InvoiceStatusRecorded = "recorded";
+
+    /// <summary>发票状态筛选：草稿（单列，不计入有效合计）</summary>
+    public const string InvoiceStatusDraft = "draft";
+
+    /// <summary>发票状态筛选：已作废（历史证据单列）</summary>
+    public const string InvoiceStatusVoided = "voided";
+
+    /// <summary>发票状态筛选：全部（含草稿 / 已作废历史）</summary>
+    public const string InvoiceStatusAll = "all";
+
+    /// <summary>支持的发票状态筛选取值</summary>
+    public static readonly string[] SupportedInvoiceStatuses =
+    {
+        InvoiceStatusRecorded, InvoiceStatusDraft, InvoiceStatusVoided, InvoiceStatusAll,
+    };
+
+    /// <summary>发票状态筛选中文文案</summary>
+    public static string InvoiceStatusText(string status) => status switch
+    {
+        InvoiceStatusRecorded => "已登记（有效证据）",
+        InvoiceStatusDraft => "草稿（单列，不计入有效合计）",
+        InvoiceStatusVoided => "已作废（历史证据单列）",
+        InvoiceStatusAll => "全部状态",
+        _ => "未知状态",
+    };
+
+    // ==================== 6. 筛选归一化（非法取值直接拒绝，不静默忽略） ====================
+
+    /// <summary>归一化币种（去空白并大写；非法币种直接拒绝，复用系统币种白名单）</summary>
+    public static string NormalizeCurrencyStrict(string? currency)
+    {
+        var value = CurrencyAmountRules.NormalizeCurrency(currency);
+        if (!SupportedCurrencies.Contains(value, StringComparer.Ordinal))
+        {
+            throw BusinessException.InvalidParameter(
+                $"不支持的币种：{currency}（仅支持 {string.Join(" / ", SupportedCurrencies)}，不做汇率换算、不跨币种合并）");
+        }
+
+        return value;
+    }
+
+    /// <summary>归一化发票状态筛选（null / 空 = 默认 recorded；非法取值直接拒绝）</summary>
+    public static string? NormalizeInvoiceStatusFilter(string? status)
+    {
+        if (string.IsNullOrWhiteSpace(status)) return null;
+        var value = status.Trim();
+        if (value.Length == 0) return null;
+
+        return value switch
+        {
+            InvoiceStatusRecorded or InvoiceStatusDraft or InvoiceStatusVoided or InvoiceStatusAll => value,
+            _ => throw BusinessException.InvalidParameter(
+                $"非法的发票状态筛选取值：{status}（仅支持 recorded / draft / voided / all）"),
+        };
+    }
+
+    /// <summary>归一化分配状态筛选（null / 空 = 不过滤；非法取值直接拒绝）</summary>
+    public static string? NormalizeAllocationFilter(string? allocationState)
+    {
+        if (string.IsNullOrWhiteSpace(allocationState)) return null;
+        var value = allocationState.Trim();
+        if (value.Length == 0) return null;
+
+        return SupportedAllocationFilters.Contains(value, StringComparer.Ordinal)
+            ? value
+            : throw BusinessException.InvalidParameter(
+                $"非法的分配状态筛选取值：{allocationState}（仅支持 none / historical_only / partial / full）");
+    }
 }
