@@ -1,0 +1,42 @@
+{
+  "id": "ERP-078-F2",
+  "title": "修复 ERP-078：实际运行 bootstrap 验证脚本、还原 ERP-074..077 状态并明确 ERP-074 是否可续跑",
+  "description": "AUTO_FIX：上一轮 ERP-078 未满足自身验收标准——未真正运行 scripts/verify-executor-bootstrap.ps1、未捕获其 JSON 输出，且在无证据情况下把 .ai/tasks/ERP-074..077.json 由 pending 改成 failed(attempts=3)。本修复任务只聚焦该失败原因本身：(1) 真实执行 scripts/verify-executor-bootstrap.ps1（若脚本缺失或不可用，则记录有界根因并 fail-closed）；(2) 捕获并记录其 JSON 输出中的 effective_provider、effective_model、agent_bootstrap.parse_errors、agent_bootstrap.fast_forward_merge_present、agent_bootstrap.path_conflict_check_present、agent_bootstrap.repair_deferred_browser_present、bounded_dry_run.python_exit_code、bounded_dry_run.output、queue_head、erp074_resumable、conclusion；(3) 明确记录 provider/model 调用方式（AI_CLINE_PROVIDER=deepseek、AI_CLINE_MODEL=deepseek-v4-pro、--provider/--model），并证明 Cline Credits 默认已被移除；(4) 将 .ai/tasks/ERP-074..077.json 从 failed(attempts=3) 还原为可重试状态（status=pending 或 retry），且不计为业务验收失败，保留其原有 acceptance_criteria 与 allowed_paths；(5) 明确声明 ERP-074 是否可安全续跑（erp074_resumable），未真正运行脚本且退出码为 0 时不得声明 control_plane_validated。不得实现 ERP 业务逻辑、不触碰 src/ERP.*、不触碰生产数据库/OSS、不部署不发布；不得修改 .ai/PROJECT_STATE.json、.ai/audit.jsonl、.github/workflows/**、.ai/results/**、.ai/tasks/** 以外的控制面文件（本任务仅允许写入 .ai/results/ERP-078.json 与 .ai/tasks/ERP-074..077.json 的状态字段）。LIVE_TRADING 保持 false、ALLOW_EXTERNAL_ORDER_SUBMISSION 保持 false。 Safety invariant: LIVE_TRADING=false. Safety invariant: ALLOW_EXTERNAL_ORDER_SUBMISSION=false.",
+  "acceptance_criteria": [
+    "scripts/verify-executor-bootstrap.ps1 被实际执行，其 stdout JSON 被捕获并写入 .ai/results/ERP-078.json；若脚本不存在或无法执行，则在 .ai/results/ERP-078.json 中记录失败命令、stderr 片段与疑似原因，且不得伪造结果。",
+    ".ai/results/ERP-078.json 至少包含字段：effective_provider、effective_model、agent_bootstrap.parse_errors、agent_bootstrap.fast_forward_merge_present、agent_bootstrap.path_conflict_check_present、agent_bootstrap.repair_deferred_browser_present、bounded_dry_run.python_exit_code、bounded_dry_run.output、queue_head、erp074_resumable、conclusion。",
+    "显式记录该次自动化使用的 provider/model 调用方式（AI_CLINE_PROVIDER=deepseek、AI_CLINE_MODEL=deepseek-v4-pro、--provider/--model 标志），并给出证据说明 Cline Credits 默认值已被移除。",
+    "agent_bootstrap.parse_errors 为 0，且 fast_forward_merge_present、path_conflict_check_present、repair_deferred_browser_present 三项被确认存在（无静默回退）；否则记为失败并给出根因。",
+    "滚动队列头选取的有界 dry-run 已执行，其 cline_exit_code / 归一化 finish_reason 行为被记录，且未静默隔离任何任务。",
+    "任何前置检查失败时，向 .ai/results/ERP-078.json 写入有界根因（命令、stderr 摘录、疑似原因）与明确的下一步所需动作，任务标记 failed，不进入静默隔离循环。",
+    ".ai/tasks/ERP-074.json .. ERP-077.json 已从 failed(attempts=3) 还原为可重试状态（status=pending 或 retry），且不计为业务验收失败，其原 acceptance_criteria 与 allowed_paths 保持不变。",
+    ".ai/results/ERP-078.json 明确给出 erp074_resumable 结论；未实际运行脚本或退出码非 0 时不得声明 control_plane_validated。",
+    "本任务未修改任何业务逻辑、src/ERP.* 源码、生产数据库、生产 OSS，未执行部署或发布；LIVE_TRADING=false 与 ALLOW_EXTERNAL_ORDER_SUBMISSION=false 保持不变。"
+  ],
+  "allowed_paths": [
+    "scripts/**",
+    "start_agent.bat",
+    ".ai/tasks/ERP-074.json",
+    ".ai/tasks/ERP-075.json",
+    ".ai/tasks/ERP-076.json",
+    ".ai/tasks/ERP-077.json",
+    ".ai/results/ERP-078.json",
+    ".ai/PROJECT_STATE.json",
+    ".ai/audit.jsonl",
+    ".ai/**"
+  ],
+  "depends_on": [
+    "ERP-078"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 2,
+  "validation_profile": "safe",
+  "completion_mode": "control_plane",
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "仅限自动化控制层验证与状态还原，不涉及业务逻辑、生产数据库、生产 OSS、部署或发布；生产 DB/OSS、部署与发布仍保持人工门禁。"
+  }
+}

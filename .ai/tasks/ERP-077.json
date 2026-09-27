@@ -49,5 +49,5 @@
     "status": "not_required",
     "reason": "Read-only evidence reconciliation over repository records and non-production validation only. Customer contact, real collection, shipment execution, customs submission, accounting or tax action, production database mutation, deployment and release remain behind mandatory human gates."
   },
-  "attempts": 1
+  "attempts": 2
 }

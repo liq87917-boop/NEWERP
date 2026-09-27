@@ -1,0 +1,40 @@
+{
+  "id": "ERP-077-F1",
+  "title": "修复 ERP-077 三方客户证据对账视图失败的验证与提交",
+  "description": "ERP-077（三方客户证据对账视图）执行失败，结果为 status=failed，但日志缺失，无法定位具体失败点。本修复任务仅聚焦于恢复失败本身：复现 ERP-077 已有的只读三方对账视图（订单、发运、发票、收款分配）在 safe 验证与完成模式下的可执行性，定位并使 safe 验证通过。严禁扩展业务范围、改变产品规则或重写视图语义；不得新增总账、收入确认、客户联系、生产 SQL、部署或发布。若失败原因需要外部证据、凭据或人工门禁，保持 fail-closed 并记录为约束，不得伪造解决方案。 Safety invariant: LIVE_TRADING=false. Safety invariant: ALLOW_EXTERNAL_ORDER_SUBMISSION=false.",
+  "acceptance_criteria": [
+    "复现 ERP-077 失败：在仓库内以 safe（非生产）方式运行 ERP-077 对应的构建、单元与集成测试，记录可复现的失败点（命令、错误摘要、受影响文件）。",
+    "修复后 safe 验证通过：ERP-077 相关的构建、单元测试与集成测试全部通过，未引入对 ERP-077 原有验收语义的行为改变。",
+    "仍保持原任务验收语义：三方证据（订单/发运/发票/收款分配）分列标注，不跨类相减、不声明已结算或已确认余额、不合并或换算多币种、草稿/作废/取消证据单独标注并从活动对账合计排除、缺失链接保持 unknown 且不被修复或重新指派。",
+    "视图保持只读：不修改 Customers、Sales Orders、shipments、containers、invoices、allocations、receipts、inventory、tax、finance 或 settlement 记录。",
+    "验证范围仅限 allowed_paths，且未触碰控制面与历史事实：不写入 .ai/PROJECT_STATE.json、.ai/audit.jsonl、.github/workflows/**、.ai/results/**、.ai/tasks/**。",
+    "LIVE_TRADING 保持 false，ALLOW_EXTERNAL_ORDER_SUBMISSION 保持 false；不生成或批准真实下单、实盘策略、资金转移或外部订单提交。",
+    "如失败原因依赖浏览器/UI 验收或外部凭据，记录为约束并保持 fail-closed，将浏览器验收标注为开发期延后，不伪造屏幕截图或通过记录。",
+    "若因失败原因不可定位或依赖外部证据而无法在允许范围内修复，则明确 fail-closed 并输出阻塞说明，不擅自扩大 allowed_paths 或改动产品规则。"
+  ],
+  "allowed_paths": [
+    "src/ERP.Application/**",
+    "src/ERP.Api/Controllers/**",
+    "src/ERP.Api/wwwroot/**",
+    "src/ERP.UnitTests/**",
+    "src/ERP.IntegrationTests/**",
+    "docs/**",
+    ".ai/**"
+  ],
+  "depends_on": [
+    "ERP-055",
+    "ERP-076",
+    "ERP-073"
+  ],
+  "validation_profile": "safe",
+  "completion_mode": "browser",
+  "human_gate": {
+    "required": true,
+    "level": "L2",
+    "status": "pending",
+    "reason": "ERP-077 原 completion_mode 为 browser 且要求浏览器验收（含 UI 测试与截图）。修复任务需在人工门禁下确认 safe 验证结果，并确认浏览器验收在开发期延后；生产 DB/OSS、部署与发布保持 human gate。LIVE_TRADING=false、ALLOW_EXTERNAL_ORDER_SUBMISSION=false 不得改变。"
+  },
+  "max_attempts": 2,
+  "auto_start": true,
+  "requires_human_approval": false
+}
