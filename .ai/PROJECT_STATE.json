@@ -5,7 +5,7 @@
   "current_task": null,
   "last_completed_task": "ERP-075",
   "last_reviewed_task": "ERP-084",
-  "blocker": null,
+  "blocker": "CONTROL_PLANE_FRESH_PROCESS_REQUIRED",
   "external_actions": [
     "Rotate any previously exposed SQL Server credential at the database provider if rotation has not already been completed.",
     "Rotate any previously exposed OSS access key at the cloud provider if rotation has not already been completed."
@@ -19,10 +19,10 @@
     "mode": "deepseek_file_backed_rolling",
     "paused": false,
     "pause_reason": null,
-    "last_intent": "control_plane_recovery_accepted_replenish",
+    "last_intent": "control_plane_recovery_failed_doc_only_closure",
     "last_actor": "GPT",
     "queue_target_size": 4,
-    "updated_at": "2026-09-27T08:55:00.000000Z"
+    "updated_at": "2026-09-27T09:10:00.000000Z"
   },
   "completion_policy": {
     "default_mode": "browser",
@@ -39,35 +39,52 @@
     "production_deployment_or_release": "required",
     "irreversible_data_operations": "required"
   },
-  "finish_reason": "control_plane_verified",
-  "updated_at": "2026-09-27T08:55:00.000000Z",
+  "finish_reason": "control_plane_recovery_failed",
+  "updated_at": "2026-09-27T09:10:00.000000Z",
   "rolling_queue": {
     "enabled": true,
     "batch_size": 4,
     "low_watermark": 2,
     "acceptance_interval_seconds": 3600,
     "replenishment_owner": "DeepSeek",
-    "status": "active",
+    "status": "blocked_on_control_plane_verification",
     "queued_tasks": [
       "ERP-074",
       "ERP-076",
       "ERP-077",
-      "ERP-086"
+      "ERP-086",
+      "ERP-087"
     ]
   },
-  "last_failed_task": "ERP-074",
+  "last_failed_task": "ERP-084",
   "safety": {
     "LIVE_TRADING": false,
     "ALLOW_EXTERNAL_ORDER_SUBMISSION": false
   },
-  "status": "ACTIVE",
-  "queue_status": "ACTIVE",
+  "status": "BLOCKED",
+  "queue_status": "BLOCKED",
   "last_gpt_review": {
-    "reviewed_remote_sha": "a6ab98c21492b405d06d7ef2c3a07d5d2b00cd9e",
-    "decision": "pass",
+    "reviewed_remote_sha": "6c715d0dfe80ebf1032d780e23b4204784eba5b4",
+    "decision": "fail",
     "task_id": "ERP-084",
-    "diff_vs_baseline": "non_empty: .ai/results/ERP-084.json added; ERP-074/076/077 reset to pending; PROJECT_STATE cleared control-plane blocker",
-    "reviewed_at": "2026-09-27T08:55:00.000000Z"
+    "diff_vs_baseline": "non_executable: only .ai/PROJECT_STATE.json text rewrite + .ai/tasks/ERP-086.json added; no .ai/results/ERP-084.json, no raw_script_invocation evidence",
+    "reviewed_at": "2026-09-27T09:10:00.000000Z"
   },
-  "blockers": []
+  "CONTROL_PLANE_FRESH_PROCESS_REQUIRED": {
+    "recovery_task": "ERP-087",
+    "recovery_evidence": ".ai/results/ERP-087.json",
+    "status": "active",
+    "human_routing_task": "ERP-085",
+    "note": "ERP-084 was declared pass by a doc-only commit at 6c715d0 without .ai/results/ERP-084.json; that declaration is void. ERP-087 is the sole accepted carrier of real fresh-process execution evidence. AUTO_CIRCUIT_BREAKER requires explicit human re-review."
+  },
+  "blockers": [
+    {
+      "id": "CONTROL_PLANE_FRESH_PROCESS_REQUIRED",
+      "kind": "control_plane",
+      "status": "active",
+      "since": "2026-09-27T09:10:00.000000Z",
+      "evidence": ".ai/results/ERP-084.json missing; commit 6c715d0 closed ERP-084 by document rewrite only",
+      "recovery_task": "ERP-087"
+    }
+  ]
 }

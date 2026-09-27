@@ -1,0 +1,49 @@
+{
+  "id": "ERP-087",
+  "title": "Control-plane recovery FINAL-EXEC: actually run scripts/verify-executor-bootstrap.ps1 in a fresh process, persist .ai/results/ERP-087.json with raw_script_invocation, or append a concrete environment-failure record to .ai/audit.jsonl and route to human via ERP-085",
+  "status": "pending",
+  "risk_level": "low",
+  "description": "CONTROL-PLANE RECOVERY (final, evidence-only). Review of remote_head=6c715d0dfe80ebf1032d780e23b4204784eba5b4 against previous_reviewed_remote_sha=a6ab98c21492b405d06d7ef2c3a07d5d2b00cd9e FAILED: the only commit since baseline (6c715d0) rewrote .ai/PROJECT_STATE.json text (finish_reason=control_plane_verified, last_gpt_review.decision=pass, queued_tasks append ERP-086) and added .ai/tasks/ERP-086.json, WITHOUT any .ai/results/ERP-084.json and WITHOUT any raw_script_invocation evidence of scripts/verify-executor-bootstrap.ps1. ERP-084 declared doc-only closure NOT accepted, so the pass declaration is void. This task is the sole accepted carrier and has exactly two machine-checkable terminal outcomes:\n(A) EXECUTED: (1) run scripts/verify-executor-bootstrap.ps1 ONCE in a real fresh process on this machine (including its internal agent-bootstrap checks and bounded dry-run); (2) write the exact command line, working directory, start/end timestamps, exit code, raw stdout/stderr excerpt and parsed summary into .ai/results/ERP-087.json under raw_script_invocation, together with effective_provider, effective_model, agent_bootstrap.parse_errors, agent_bootstrap.fast_forward_merge_present, agent_bootstrap.path_conflict_check_present, agent_bootstrap.repair_deferred_browser_present, bounded_dry_run.python_exit_code, bounded_dry_run.output, queue_head, erp074_resumable, conclusion; (3) in the SAME commit restore .ai/tasks/ERP-074.json..ERP-077.json to a retryable state only where they are not completed (ERP-075 is completed and must stay completed verbatim) and set .ai/PROJECT_STATE.json last_gpt_review to the true reviewed_remote_sha=6c715d0dfe80ebf1032d780e23b4204784eba5b4 with decision=fail until this evidence exists.\n(B) UNABLE TO EXECUTE: if PowerShell or its dependencies are genuinely unavailable on this machine, append the exact command, key stderr excerpt, suspected cause and the required human next action to .ai/audit.jsonl and explicitly hand off to ERP-085 (human routing). Do not fake closure.\nDo not implement ERP business logic, do not touch any file under src/ERP.*, do not access or change production database/OSS, do not deploy or release, and keep LIVE_TRADING=false and ALLOW_EXTERNAL_ORDER_SUBMISSION=false.",
+  "acceptance_criteria": [
+    "scripts/verify-executor-bootstrap.ps1 was actually executed in a real fresh process on this machine (not simulated by documentation rewrites); the exact command line, working directory, start timestamp, end timestamp and exit code are recorded in .ai/results/ERP-087.json under raw_script_invocation, with the raw stdout/stderr excerpt attached. Any commit that only rewrites control-plane documents without this field is considered unmet and must fail this task.",
+    ".ai/results/ERP-087.json contains at least: effective_provider, effective_model, agent_bootstrap.parse_errors, agent_bootstrap.fast_forward_merge_present, agent_bootstrap.path_conflict_check_present, agent_bootstrap.repair_deferred_browser_present, bounded_dry_run.python_exit_code, bounded_dry_run.output, queue_head, erp074_resumable, conclusion, raw_script_invocation; any missing read-only field is considered unmet.",
+    "The result file records effective_provider=deepseek and effective_model=deepseek-v4-pro matching the --provider/--model flags actually passed by the automation, and includes a parsed configuration dump demonstrating the Cline Credits default has been removed.",
+    "PowerShell parses scripts/agent-bootstrap.ps1 with parse_errors=0 and fast_forward_merge_present, path_conflict_check_present and repair_deferred_browser_present are each true, with non-empty matching evidence strings stored in the result file.",
+    "A bounded dry-run of the rolling-queue head selection was executed and its cline_exit_code and normalized finish_reason are recorded; that dry-run must not silently quarantine any of ERP-074..077.",
+    "On any prerequisite failure (including missing PowerShell/dependencies), the command, key stderr excerpt, suspected cause and required human next action are appended to .ai/audit.jsonl, this task is marked failed, and the case is handed off to ERP-085 for human intervention; no silent quarantine loop and no doc-only closure is acceptable.",
+    "If outcome (A) is reached, in the same commit .ai/PROJECT_STATE.json is corrected so last_gpt_review.reviewed_remote_sha reflects the actually reviewed commit and finish_reason is only advanced to a control-plane-verified value when .ai/results/ERP-087.json exists with raw_script_invocation; AUTO_CIRCUIT_BREAKER must NOT be auto-cleared and still requires explicit human re-review.",
+    ".ai/tasks/ERP-075.json (status=completed) is preserved verbatim and is NOT reverted; ERP-074.json..ERP-077.json acceptance_criteria, allowed_paths, depends_on and browser_acceptance are preserved verbatim in any state change.",
+    "The result file explicitly states erp074_resumable=true|false with its reasoning; control_plane_validated must not be declared unless scripts/verify-executor-bootstrap.ps1 actually ran and exited 0.",
+    "This task did not modify any file under src/ERP.*, did not access production database or OSS, did not deploy or release, and preserved LIVE_TRADING=false and ALLOW_EXTERNAL_ORDER_SUBMISSION=false."
+  ],
+  "allowed_paths": [
+    "scripts/**",
+    "start_agent.bat",
+    ".ai/tasks/ERP-074.json",
+    ".ai/tasks/ERP-076.json",
+    ".ai/tasks/ERP-077.json",
+    ".ai/results/ERP-087.json",
+    ".ai/PROJECT_STATE.json",
+    ".ai/audit.jsonl",
+    ".ai/**"
+  ],
+  "depends_on": [],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 1,
+  "validation_profile": "safe",
+  "completion_mode": "control_plane",
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": [],
+    "test_filter": "",
+    "minimum_screenshots": 0
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Automation control-layer verification and task state correction only; no business logic, production database, production OSS, deployment or release is involved. AUTO_CIRCUIT_BREAKER still requires explicit human re-review, and environment unavailability must route to ERP-085."
+  },
+  "attempts": 0
+}
