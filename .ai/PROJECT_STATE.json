@@ -2,9 +2,9 @@
   "project": "NEWERP",
   "controller": "deepseek_conversation",
   "phase": "ready",
-  "current_task": null,
+  "current_task": "ERP-087",
   "last_completed_task": "ERP-075",
-  "last_reviewed_task": "ERP-084",
+  "last_reviewed_task": "ERP-087",
   "blocker": "CONTROL_PLANE_FRESH_PROCESS_REQUIRED",
   "external_actions": [
     "Rotate any previously exposed SQL Server credential at the database provider if rotation has not already been completed.",
@@ -19,10 +19,10 @@
     "mode": "deepseek_file_backed_rolling",
     "paused": false,
     "pause_reason": null,
-    "last_intent": "control_plane_recovery_failed_doc_only_closure",
+    "last_intent": "control_plane_recovery_pending_execution",
     "last_actor": "GPT",
     "queue_target_size": 4,
-    "updated_at": "2026-09-27T09:10:00.000000Z"
+    "updated_at": "2026-09-27T10:10:00.000000Z"
   },
   "completion_policy": {
     "default_mode": "browser",
@@ -39,8 +39,8 @@
     "production_deployment_or_release": "required",
     "irreversible_data_operations": "required"
   },
-  "finish_reason": "control_plane_recovery_failed",
-  "updated_at": "2026-09-27T09:10:00.000000Z",
+  "finish_reason": "control_plane_recovery_pending_execution",
+  "updated_at": "2026-09-27T10:10:00.000000Z",
   "rolling_queue": {
     "enabled": true,
     "batch_size": 4,
@@ -49,12 +49,15 @@
     "replenishment_owner": "DeepSeek",
     "status": "blocked_on_control_plane_verification",
     "queued_tasks": [
+      "ERP-087"
+    ],
+    "held_tasks": [
       "ERP-074",
       "ERP-076",
       "ERP-077",
-      "ERP-086",
-      "ERP-087"
-    ]
+      "ERP-086"
+    ],
+    "hold_reason": "CONTROL_PLANE_FRESH_PROCESS_REQUIRED active: no .ai/results/ERP-087.json with raw_script_invocation exists and the reviewed diff was empty. New task replenishment is halted until ERP-087 produces real fresh-process execution evidence or a concrete environment-failure record is appended to .ai/audit.jsonl and routed to ERP-085."
   },
   "last_failed_task": "ERP-084",
   "safety": {
@@ -64,18 +67,18 @@
   "status": "BLOCKED",
   "queue_status": "BLOCKED",
   "last_gpt_review": {
-    "reviewed_remote_sha": "6c715d0dfe80ebf1032d780e23b4204784eba5b4",
+    "reviewed_remote_sha": "3782671c020e371f9c2731e22c6c104947550647",
     "decision": "fail",
-    "task_id": "ERP-084",
-    "diff_vs_baseline": "non_executable: only .ai/PROJECT_STATE.json text rewrite + .ai/tasks/ERP-086.json added; no .ai/results/ERP-084.json, no raw_script_invocation evidence",
-    "reviewed_at": "2026-09-27T09:10:00.000000Z"
+    "task_id": "ERP-087",
+    "diff_vs_baseline": "empty: remote_head equals previous_reviewed_remote_sha (3782671c) and CHANGES SINCE BASELINE stat/diff are both empty; no .ai/results/ERP-087.json and no raw_script_invocation evidence of scripts/verify-executor-bootstrap.ps1",
+    "reviewed_at": "2026-09-27T10:10:00.000000Z"
   },
   "CONTROL_PLANE_FRESH_PROCESS_REQUIRED": {
     "recovery_task": "ERP-087",
     "recovery_evidence": ".ai/results/ERP-087.json",
     "status": "active",
     "human_routing_task": "ERP-085",
-    "note": "ERP-084 was declared pass by a doc-only commit at 6c715d0 without .ai/results/ERP-084.json; that declaration is void. ERP-087 is the sole accepted carrier of real fresh-process execution evidence. AUTO_CIRCUIT_BREAKER requires explicit human re-review."
+    "note": "ERP-084 was declared pass by a doc-only commit at 6c715d0 without .ai/results/ERP-084.json; that declaration is void. ERP-087 is the sole accepted carrier of real fresh-process execution evidence. AUTO_CIRCUIT_BREAKER requires explicit human re-review and must not be cleared by this review."
   },
   "blockers": [
     {
@@ -83,7 +86,7 @@
       "kind": "control_plane",
       "status": "active",
       "since": "2026-09-27T09:10:00.000000Z",
-      "evidence": ".ai/results/ERP-084.json missing; commit 6c715d0 closed ERP-084 by document rewrite only",
+      "evidence": ".ai/results/ERP-084.json missing and .ai/results/ERP-087.json missing; commit 6c715d0 closed ERP-084 by document rewrite only; reviewed head 3782671c has an empty diff vs baseline",
       "recovery_task": "ERP-087"
     }
   ]
