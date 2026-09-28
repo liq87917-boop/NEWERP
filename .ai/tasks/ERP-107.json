@@ -1,0 +1,67 @@
+{
+  "id": "ERP-107",
+  "title": "Show export product field completeness",
+  "status": "pending",
+  "risk_level": "low",
+  "description": "Add a development-only read-only product master-data completeness worksheet for fields already used by export documentation: English declaration name, packing unit and quantity, outer dimensions/weight, and refund-rate entry. Report field presence and gaps only, never a legal customs eligibility or tax-refund conclusion. Do not fetch images or change products, documents or declarations. No migration, production SQL, real database execution, irreversible data action, secret change or deployment.",
+  "acceptance_criteria": [
+    "An authenticated bounded GET worksheet filters active products by code/name and completeness group, with stable paging and no external lookups.",
+    "Each product reports present/missing values for the existing export and packing fields, distinguishing zero, blank and unknown without inventing a legal pass/fail decision.",
+    "The product page opens a read-only completeness worksheet with per-field gaps and direct product identity for follow-up through existing edit flow.",
+    "Focused unit tests cover sparse and complete products, invalid dimensions, soft deletion, paging and no-write behavior; safe Release validation passes and field rules are documented."
+  ],
+  "criterion_path_map": {
+    "An authenticated bounded GET worksheet filters active products by code/name and completeness group, with stable paging and no external lookups.": [
+      "src/ERP.Api/Controllers/BaseDataControllers.cs",
+      "src/ERP.Api/Controllers/ProductExportFieldCompleteness.cs",
+      "src/ERP.Application/DTOs/ProductExportFieldCompletenessDtos.cs"
+    ],
+    "Each product reports present/missing values for the existing export and packing fields, distinguishing zero, blank and unknown without inventing a legal pass/fail decision.": [
+      "src/ERP.Api/Controllers/ProductExportFieldCompleteness.cs",
+      "src/ERP.Application/DTOs/ProductExportFieldCompletenessDtos.cs",
+      "src/ERP.Application/Services/ProductExportFieldCompletenessRules.cs"
+    ],
+    "The product page opens a read-only completeness worksheet with per-field gaps and direct product identity for follow-up through existing edit flow.": [
+      "src/ERP.Api/wwwroot/js/product-export-field-completeness.js",
+      "src/ERP.Api/wwwroot/js/modules.js",
+      "src/ERP.Api/wwwroot/index.html"
+    ],
+    "Focused unit tests cover sparse and complete products, invalid dimensions, soft deletion, paging and no-write behavior; safe Release validation passes and field rules are documented.": [
+      "src/ERP.UnitTests/ProductExportFieldCompletenessTests.cs",
+      "docs/product-export-field-completeness.md",
+      "src/ERP.Application/Services/ProductExportFieldCompletenessRules.cs"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/BaseDataControllers.cs",
+    "src/ERP.Api/Controllers/ProductExportFieldCompleteness.cs",
+    "src/ERP.Application/DTOs/ProductExportFieldCompletenessDtos.cs",
+    "src/ERP.Application/Services/ProductExportFieldCompletenessRules.cs",
+    "src/ERP.Api/wwwroot/js/product-export-field-completeness.js",
+    "src/ERP.Api/wwwroot/js/modules.js",
+    "src/ERP.Api/wwwroot/index.html",
+    "src/ERP.UnitTests/ProductExportFieldCompletenessTests.cs",
+    "docs/product-export-field-completeness.md",
+    ".ai/**"
+  ],
+  "validation_profile": "safe",
+  "depends_on": [
+    "ERP-037",
+    "ERP-038"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "completion_mode": "build",
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only read-only feature"
+  },
+  "attempts": 0,
+  "created_at": "2026-09-28T08:04:09.385265Z"
+}

@@ -1,0 +1,68 @@
+{
+  "id": "ERP-105",
+  "title": "Compare approved supplier quotes with purchase order prices",
+  "status": "pending",
+  "risk_level": "medium",
+  "description": "Add a development-only read-only price-variance view for explicitly linked purchase-quote lines and generated purchase orders. Compare only matching product, specification, unit, currency and tax basis, using the existing conversion source marker plus persisted order link; ambiguous or stale links remain unresolved. Do not reprice orders or change approvals. No migration, production SQL, real database execution, irreversible data action, secret change or deployment.",
+  "acceptance_criteria": [
+    "An authenticated bounded GET view filters converted purchase quotes by date and optional supplier and returns stable paged source-to-order rows.",
+    "For uniquely matched quote and order lines with identical comparison basis, the view shows unit-price and extended-amount deltas; ambiguous, mismatched, deleted or unlinked rows show explicit unresolved reasons without numeric variance.",
+    "The purchase-quote page opens a read-only price-variance view with source and order evidence and no conversion or edit action.",
+    "Focused unit tests cover single and batch conversion, duplicate products, mismatched units/currency/tax, stale links, paging and no-write behavior; safe Release validation passes and rules are documented."
+  ],
+  "criterion_path_map": {
+    "An authenticated bounded GET view filters converted purchase quotes by date and optional supplier and returns stable paged source-to-order rows.": [
+      "src/ERP.Api/Controllers/PurchaseQuoteController.cs",
+      "src/ERP.Api/Controllers/PurchaseQuoteOrderPriceVariance.cs",
+      "src/ERP.Application/DTOs/PurchaseQuoteOrderPriceVarianceDtos.cs"
+    ],
+    "For uniquely matched quote and order lines with identical comparison basis, the view shows unit-price and extended-amount deltas; ambiguous, mismatched, deleted or unlinked rows show explicit unresolved reasons without numeric variance.": [
+      "src/ERP.Api/Controllers/PurchaseQuoteOrderPriceVariance.cs",
+      "src/ERP.Application/DTOs/PurchaseQuoteOrderPriceVarianceDtos.cs",
+      "src/ERP.Application/Services/PurchaseQuoteOrderPriceVarianceRules.cs"
+    ],
+    "The purchase-quote page opens a read-only price-variance view with source and order evidence and no conversion or edit action.": [
+      "src/ERP.Api/wwwroot/js/purchase-quote-order-price-variance.js",
+      "src/ERP.Api/wwwroot/js/modules.js",
+      "src/ERP.Api/wwwroot/index.html"
+    ],
+    "Focused unit tests cover single and batch conversion, duplicate products, mismatched units/currency/tax, stale links, paging and no-write behavior; safe Release validation passes and rules are documented.": [
+      "src/ERP.UnitTests/PurchaseQuoteOrderPriceVarianceTests.cs",
+      "docs/purchase-quote-order-price-variance.md",
+      "src/ERP.Application/Services/PurchaseQuoteOrderPriceVarianceRules.cs"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/PurchaseQuoteController.cs",
+    "src/ERP.Api/Controllers/PurchaseQuoteOrderPriceVariance.cs",
+    "src/ERP.Application/DTOs/PurchaseQuoteOrderPriceVarianceDtos.cs",
+    "src/ERP.Application/Services/PurchaseQuoteOrderPriceVarianceRules.cs",
+    "src/ERP.Api/wwwroot/js/purchase-quote-order-price-variance.js",
+    "src/ERP.Api/wwwroot/js/modules.js",
+    "src/ERP.Api/wwwroot/index.html",
+    "src/ERP.UnitTests/PurchaseQuoteOrderPriceVarianceTests.cs",
+    "docs/purchase-quote-order-price-variance.md",
+    ".ai/**"
+  ],
+  "validation_profile": "safe",
+  "depends_on": [
+    "ERP-020",
+    "ERP-027",
+    "ERP-095"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "completion_mode": "build",
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only read-only feature"
+  },
+  "attempts": 0,
+  "created_at": "2026-09-28T08:04:09.379535Z"
+}

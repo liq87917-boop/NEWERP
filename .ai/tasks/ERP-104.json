@@ -1,0 +1,67 @@
+{
+  "id": "ERP-104",
+  "title": "Show inquiry quotation response times",
+  "status": "pending",
+  "risk_level": "low",
+  "description": "Add a development-only read-only inquiry response workspace using persisted Quotation.InquiryId and Inquiry/Quotation dates. Treat missing links and quotation dates preceding the inquiry as separate evidence; do not infer links from text or alter conversion status. No migration, production SQL, real database execution, irreversible data action, secret change or deployment.",
+  "acceptance_criteria": [
+    "An authenticated bounded GET workspace filters inquiries by date range and optional customer, applies existing salesperson data scope, and pages by stable inquiry ID.",
+    "Each inquiry shows the first valid explicitly linked quotation date, elapsed calendar days, and distinct unquoted or inconsistent-link states; soft-deleted rows and quotation revisions never inflate the response count.",
+    "The inquiry page opens a read-only response-time workspace with date/customer filters and clear missing or anomalous evidence.",
+    "Focused unit tests cover scope, linkage, revisions, missing dates, negative intervals, paging and no-write behavior; safe Release validation passes and rules are documented."
+  ],
+  "criterion_path_map": {
+    "An authenticated bounded GET workspace filters inquiries by date range and optional customer, applies existing salesperson data scope, and pages by stable inquiry ID.": [
+      "src/ERP.Api/Controllers/InquiryController.cs",
+      "src/ERP.Api/Controllers/InquiryResponseWorkspace.cs",
+      "src/ERP.Application/DTOs/InquiryResponseDtos.cs"
+    ],
+    "Each inquiry shows the first valid explicitly linked quotation date, elapsed calendar days, and distinct unquoted or inconsistent-link states; soft-deleted rows and quotation revisions never inflate the response count.": [
+      "src/ERP.Api/Controllers/InquiryResponseWorkspace.cs",
+      "src/ERP.Application/DTOs/InquiryResponseDtos.cs",
+      "src/ERP.Application/Services/InquiryResponseRules.cs"
+    ],
+    "The inquiry page opens a read-only response-time workspace with date/customer filters and clear missing or anomalous evidence.": [
+      "src/ERP.Api/wwwroot/js/inquiry-response-workspace.js",
+      "src/ERP.Api/wwwroot/js/modules-doc.js",
+      "src/ERP.Api/wwwroot/index.html"
+    ],
+    "Focused unit tests cover scope, linkage, revisions, missing dates, negative intervals, paging and no-write behavior; safe Release validation passes and rules are documented.": [
+      "src/ERP.UnitTests/InquiryResponseWorkspaceTests.cs",
+      "docs/inquiry-response-workspace.md",
+      "src/ERP.Application/Services/InquiryResponseRules.cs"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/InquiryController.cs",
+    "src/ERP.Api/Controllers/InquiryResponseWorkspace.cs",
+    "src/ERP.Application/DTOs/InquiryResponseDtos.cs",
+    "src/ERP.Application/Services/InquiryResponseRules.cs",
+    "src/ERP.Api/wwwroot/js/inquiry-response-workspace.js",
+    "src/ERP.Api/wwwroot/js/modules-doc.js",
+    "src/ERP.Api/wwwroot/index.html",
+    "src/ERP.UnitTests/InquiryResponseWorkspaceTests.cs",
+    "docs/inquiry-response-workspace.md",
+    ".ai/**"
+  ],
+  "validation_profile": "safe",
+  "depends_on": [
+    "ERP-021",
+    "ERP-097"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "completion_mode": "build",
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only read-only feature"
+  },
+  "attempts": 0,
+  "created_at": "2026-09-28T08:04:09.370720Z"
+}

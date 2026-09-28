@@ -1,0 +1,67 @@
+{
+  "id": "ERP-106",
+  "title": "Add read-only stock replenishment worksheet",
+  "status": "pending",
+  "risk_level": "low",
+  "description": "Add a development-only read-only replenishment worksheet over existing stock, product minimum/maximum stock and active product-supplier sourcing relationships. When on-hand is below the minimum and a valid maximum target exists, show a suggested top-up to that target; otherwise mark the recommendation unavailable. Supplier data is reference only and never auto-selects a supplier, creates an order or changes inventory. No migration, production SQL, real database execution, irreversible data action, secret change or deployment.",
+  "acceptance_criteria": [
+    "An authenticated bounded GET worksheet filters stock by warehouse and optional product, uses stable paging, and batch-loads products and sourcing relationships.",
+    "Rows distinguish below-minimum stock, valid top-up quantity, missing or invalid thresholds, and unavailable sourcing; no cross-warehouse aggregation or unit conversion is inferred.",
+    "The stock-query page opens a read-only replenishment worksheet showing current stock, thresholds, suggested quantity and sourcing references without a create-order action.",
+    "Focused unit tests cover threshold boundaries, missing products, inactive suppliers, multi-warehouse stock, paging and no-write behavior; safe Release validation passes and rules are documented."
+  ],
+  "criterion_path_map": {
+    "An authenticated bounded GET worksheet filters stock by warehouse and optional product, uses stable paging, and batch-loads products and sourcing relationships.": [
+      "src/ERP.Api/Controllers/StockController.cs",
+      "src/ERP.Api/Controllers/StockReplenishmentWorksheet.cs",
+      "src/ERP.Application/DTOs/StockReplenishmentDtos.cs"
+    ],
+    "Rows distinguish below-minimum stock, valid top-up quantity, missing or invalid thresholds, and unavailable sourcing; no cross-warehouse aggregation or unit conversion is inferred.": [
+      "src/ERP.Api/Controllers/StockReplenishmentWorksheet.cs",
+      "src/ERP.Application/DTOs/StockReplenishmentDtos.cs",
+      "src/ERP.Application/Services/StockReplenishmentRules.cs"
+    ],
+    "The stock-query page opens a read-only replenishment worksheet showing current stock, thresholds, suggested quantity and sourcing references without a create-order action.": [
+      "src/ERP.Api/wwwroot/js/stock-replenishment-worksheet.js",
+      "src/ERP.Api/wwwroot/js/modules-doc2.js",
+      "src/ERP.Api/wwwroot/index.html"
+    ],
+    "Focused unit tests cover threshold boundaries, missing products, inactive suppliers, multi-warehouse stock, paging and no-write behavior; safe Release validation passes and rules are documented.": [
+      "src/ERP.UnitTests/StockReplenishmentWorksheetTests.cs",
+      "docs/stock-replenishment-worksheet.md",
+      "src/ERP.Application/Services/StockReplenishmentRules.cs"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/StockController.cs",
+    "src/ERP.Api/Controllers/StockReplenishmentWorksheet.cs",
+    "src/ERP.Application/DTOs/StockReplenishmentDtos.cs",
+    "src/ERP.Application/Services/StockReplenishmentRules.cs",
+    "src/ERP.Api/wwwroot/js/stock-replenishment-worksheet.js",
+    "src/ERP.Api/wwwroot/js/modules-doc2.js",
+    "src/ERP.Api/wwwroot/index.html",
+    "src/ERP.UnitTests/StockReplenishmentWorksheetTests.cs",
+    "docs/stock-replenishment-worksheet.md",
+    ".ai/**"
+  ],
+  "validation_profile": "safe",
+  "depends_on": [
+    "ERP-029",
+    "ERP-038"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "completion_mode": "build",
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only read-only feature"
+  },
+  "attempts": 0,
+  "created_at": "2026-09-28T08:04:09.382268Z"
+}
