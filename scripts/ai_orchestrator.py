@@ -615,8 +615,10 @@ def run_next(dry_run: bool) -> int:
                 )
             violations = path_violations(task, config)
             if violations:
+                failure_kind = "path_guard_failure"
                 previous_error = "Path guard failed:\n" + "\n".join(violations); audit("path_guard_failed", task=task["id"], violations=violations); break
             if cline_code != 0:
+                failure_kind = "executor_failure"
                 cline_tail = log_path.read_text(encoding="utf-8", errors="replace")[-12000:]
                 previous_error = f"DeepSeek executor exited with code {cline_code}; raw reason={cline_raw_reason}.\nLog tail:\n{cline_tail}"
                 set_state(state, phase="repairing", current_task=task["id"], last_error={"task": task["id"], "attempt": attempt, "kind": "deepseek", "summary": previous_error})
@@ -625,6 +627,7 @@ def run_next(dry_run: bool) -> int:
         validation_code, validation_log, validation_summary = run_validation(task, attempt)
         build_record = {"task": task["id"], "profile": task["validation_profile"], "status": "passed" if validation_code == 0 else "failed", "exit_code": validation_code, "log": validation_log, "at": utc_now()}
         if validation_code != 0:
+            failure_kind = "validation_failure"
             previous_error = f"Engineering validation failed with code {validation_code}. Full log: {validation_log}\nStructured error summary:\n{validation_summary}"
             set_state(state, phase="repairing", current_task=task["id"], last_build=build_record, last_error={"task": task["id"], "attempt": attempt, "kind": "validation", "log": validation_log, "summary": validation_summary})
             audit("validation_failed", task=task["id"], attempt=attempt, log=validation_log); continue
@@ -652,10 +655,12 @@ def run_next(dry_run: bool) -> int:
         if completion_mode == "browser" and not browser_deferred:
             browser_code, browser_manifest, browser_log = run_browser_acceptance(task)
             if browser_code == 20:
+                failure_kind = "browser_infrastructure_failure"
                 task["status"] = "blocked"; save_json(task_path, task)
                 set_state(state, phase="blocked", blocker=f"Browser infrastructure blocked; see {browser_log}", finish_reason="browser_infrastructure_blocked")
                 audit("browser_infrastructure_blocked", task=task["id"], log=browser_log); return 20
             if browser_code != 0:
+                failure_kind = "browser_acceptance_failure"
                 task["status"] = "in_progress"; save_json(task_path, task)
                 log_text = ""
                 browser_log_path = ROOT / browser_log
@@ -674,9 +679,13 @@ def run_next(dry_run: bool) -> int:
                 failure_kind = "prompt_transport_failure"
                 previous_error = "Executor did not receive the complete task prompt and requested task details."
             else:
+                failure_kind = "no_checkpoint_changes"
                 previous_error = "Task produced no checkpointable business changes."
             task["status"] = "in_progress"; save_json(task_path, task); continue
-        task["status"] = "completed"; save_json(task_path, task)
+        task["status"] = "completed"
+        for stale_key in ("blocker", "last_error", "failure_kind", "failed_transport_version", "recovery_context"):
+            task.pop(stale_key, None)
+        save_json(task_path, task)
         normalized = (
             "browser_deferred"
             if completion_mode == "browser" and browser_deferred

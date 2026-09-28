@@ -146,6 +146,8 @@
   "autonomy": {
     "enabled": true,
     "failure_policy": "quarantine_and_continue",
+    "deepseek_supervisor_enabled": true,
+    "max_supervised_recovery_cycles": 2,
     "nonblocking_task_statuses": [
       "blocked",
       "failed"

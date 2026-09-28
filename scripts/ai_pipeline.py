@@ -27,6 +27,8 @@ STATE_PATH = AI_DIR / "PROJECT_STATE.json"
 TASKS_DIR = AI_DIR / "tasks"
 DECISIONS_DIR = AI_DIR / "decisions"
 AUDIT_PATH = AI_DIR / "audit.jsonl"
+RESULTS_DIR = AI_DIR / "results"
+LOGS_DIR = AI_DIR / "logs"
 ORCHESTRATOR = ROOT / "scripts" / "ai_orchestrator.py"
 AUTOMATION_TESTS = ROOT / "tests" / "automation"
 RUNNABLE_STATUSES = {"pending", "retry"}
@@ -195,6 +197,80 @@ def recover_obsolete_transport_failures(config: dict[str, Any]) -> list[str]:
     return recovered
 
 
+def recovery_evidence(task: dict[str, Any]) -> dict[str, Any]:
+    task_id = str(task["id"])
+    result_path = RESULTS_DIR / f"{task_id}.json"
+    result = load_json(result_path) if result_path.exists() else {}
+    evidence_logs = LOGS_DIR
+    control_root = os.environ.get("AI_CONTROL_ROOT")
+    if control_root:
+        control_logs = Path(control_root) / ".ai" / "logs"
+        if control_logs.is_dir():
+            evidence_logs = control_logs
+    attempt_logs = sorted(evidence_logs.glob(f"{task_id}-attempt-*.jsonl"))[-3:]
+    validation_logs = sorted(evidence_logs.glob(f"{task_id}-validation-*.log"))[-3:]
+    def evidence_path(path: Path) -> str:
+        try:
+            return str(path.relative_to(ROOT))
+        except ValueError:
+            return str(path.resolve())
+    return {
+        "failure_kind": task.get("failure_kind") or result.get("failure_kind") or "unclassified_engineering_failure",
+        "summary": task.get("last_error") or result.get("last_error") or task.get("blocker") or "",
+        "result": str(result_path.relative_to(ROOT)) if result_path.exists() else None,
+        "attempt_logs": [evidence_path(path) for path in attempt_logs],
+        "validation_logs": [evidence_path(path) for path in validation_logs],
+    }
+
+
+def recover_blocked_with_deepseek(config: dict[str, Any]) -> list[str]:
+    """Feed exhausted engineering failures back to DeepSeek with bounded evidence."""
+    autonomy = config.get("autonomy", {})
+    if not autonomy.get("enabled", False) or not autonomy.get("deepseek_supervisor_enabled", False):
+        return []
+    maximum = int(autonomy.get("max_supervised_recovery_cycles", 2))
+    recovered: list[str] = []
+    changed: list[str] = []
+    for path, task in task_entries():
+        if task.get("status") != "blocked":
+            continue
+        if task.get("blocker") != "Automatic repair budget exhausted":
+            continue
+        if task.get("requires_human_approval", False) or str(task.get("human_gate", {}).get("level", "L1")).upper() in {"L3", "L4"}:
+            continue
+        cycles = int(task.get("supervised_recovery_cycles", 0) or 0)
+        if cycles >= maximum:
+            continue
+        evidence = recovery_evidence(task)
+        task.setdefault("recovery_history", []).append({
+            "cycle": cycles + 1,
+            "at": utc_now(),
+            "evidence": evidence,
+        })
+        task["status"] = "retry"
+        task["attempts"] = 0
+        task["supervised_recovery_cycles"] = cycles + 1
+        task["recovery_context"] = {
+            **evidence,
+            "instruction": (
+                "DeepSeek supervisor recovery: inspect the referenced complete logs, diagnose the root cause, "
+                "and implement a different safe repair within allowed_paths. Do not repeat the failed approach. "
+                "Do not edit task/state/result files or relax production and irreversible-operation gates."
+            ),
+        }
+        task.pop("blocker", None)
+        task.pop("last_error", None)
+        save_json(path, task)
+        recovered.append(task["id"])
+        changed.append(str(path.relative_to(ROOT)))
+        audit("deepseek_supervisor_requeued", task=task["id"], cycle=cycles + 1, evidence=evidence)
+    if recovered:
+        refresh_project_state(ROOT, phase="ready", current_task=None, blocker=None, finish_reason="deepseek_supervisor_recovery")
+        changed.extend([str(STATE_PATH.relative_to(ROOT)), str(AUDIT_PATH.relative_to(ROOT))])
+        git_checkpoint("chore: schedule DeepSeek supervised failure recovery", changed)
+    return recovered
+
+
 def queue_status() -> int:
     rows = [{"id": task.get("id"), "status": task.get("status"), "risk": task.get("risk_level"), "title": task.get("title")} for _, task in task_entries()]
     print(json.dumps(rows, ensure_ascii=False, indent=2)); return 0
@@ -293,7 +369,9 @@ def mark_queue_replenishing() -> None:
 
 def run_all() -> int:
     with pipeline_lock():
-        recover_obsolete_transport_failures(load_json(CONFIG_PATH))
+        config = load_json(CONFIG_PATH)
+        recover_obsolete_transport_failures(config)
+        recover_blocked_with_deepseek(config)
         while True:
             state = load_json(STATE_PATH)
             conversation = state.get("conversation_control", {})

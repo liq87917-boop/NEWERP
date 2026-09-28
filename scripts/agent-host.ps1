@@ -17,6 +17,7 @@ if ($LASTEXITCODE -ne 0) {
 $workspaceInfo = ($workspaceRaw -join [Environment]::NewLine) | ConvertFrom-Json
 $root = [string]$workspaceInfo.path
 $scriptDir = Join-Path $root 'scripts'
+$env:AI_CONTROL_ROOT = $controlRoot
 $statePath = Join-Path $root '.ai\PROJECT_STATE.json'
 $configPath = Join-Path $root '.ai\config.json'
 $tasksDir = Join-Path $root '.ai\tasks'

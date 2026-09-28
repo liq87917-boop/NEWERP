@@ -78,6 +78,13 @@ def ensure_workspace(control_root: Path) -> dict[str, Any]:
         raise RuntimeError(f"Executor checkout uses unexpected branch {current_branch!r}; expected {target!r}")
     git(executor_root, "branch", "--set-upstream-to", f"origin/{target}", target, check=False)
     dirty = bool(git(executor_root, "status", "--porcelain").stdout.strip())
+    # Local scheduler upgrades may be committed in the occupied control checkout
+    # before they are pushed.  Fast-forward those commits into the clean executor;
+    # never rewind executor work that is already ahead.
+    if not dirty:
+        local_fetch = git(executor_root, "fetch", "--quiet", str(control_root), target, check=False)
+        if local_fetch.returncode == 0 and git(executor_root, "merge-base", "--is-ancestor", "HEAD", "FETCH_HEAD", check=False).returncode == 0:
+            git(executor_root, "merge", "--ff-only", "--quiet", "FETCH_HEAD")
     ahead = behind = 0
     counts = git(executor_root, "rev-list", "--left-right", "--count", f"HEAD...origin/{target}", check=False)
     if counts.returncode == 0:

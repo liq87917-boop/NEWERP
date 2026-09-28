@@ -143,6 +143,55 @@ class PipelineContracts(unittest.TestCase):
             log.write_text("Please paste the full task JSON and I'll get started.", encoding="utf-8")
             self.assertTrue(orchestrator.executor_requested_missing_task(log))
 
+    def test_deepseek_supervisor_collects_evidence_and_requeues_exhausted_task(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            ai_dir = root / ".ai"
+            tasks = ai_dir / "tasks"
+            results = ai_dir / "results"
+            logs = ai_dir / "logs"
+            tasks.mkdir(parents=True); results.mkdir(); logs.mkdir()
+            config_path = ai_dir / "config.json"
+            state_path = ai_dir / "PROJECT_STATE.json"
+            audit_path = ai_dir / "audit.jsonl"
+            config = {
+                "task_prefix": "ERP",
+                "autonomy": {"enabled": True, "deepseek_supervisor_enabled": True, "max_supervised_recovery_cycles": 2},
+            }
+            config_path.write_text(json.dumps(config), encoding="utf-8")
+            state_path.write_text(json.dumps({"phase": "ready"}), encoding="utf-8")
+            blocked = self.task("ERP-096", "blocked") | {
+                "attempts": 3,
+                "blocker": "Automatic repair budget exhausted",
+                "failure_kind": "path_guard_failure",
+                "last_error": "outside allowed_paths: src/ERP.Domain/Entities/InventoryDocuments.cs",
+                "human_gate": {"level": "L1", "required": False, "status": "not_required"},
+            }
+            (tasks / "ERP-096.json").write_text(json.dumps(blocked), encoding="utf-8")
+            (results / "ERP-096.json").write_text(json.dumps({"last_error": blocked["last_error"]}), encoding="utf-8")
+            (logs / "ERP-096-attempt-3.jsonl").write_text("evidence", encoding="utf-8")
+            old_values = (
+                pipeline.ROOT, pipeline.TASKS_DIR, pipeline.CONFIG_PATH, pipeline.STATE_PATH,
+                pipeline.AUDIT_PATH, pipeline.RESULTS_DIR, pipeline.LOGS_DIR,
+            )
+            pipeline.ROOT, pipeline.TASKS_DIR = root, tasks
+            pipeline.CONFIG_PATH, pipeline.STATE_PATH, pipeline.AUDIT_PATH = config_path, state_path, audit_path
+            pipeline.RESULTS_DIR, pipeline.LOGS_DIR = results, logs
+            try:
+                with patch.object(pipeline, "git_checkpoint"), patch.object(pipeline, "refresh_project_state"):
+                    recovered = pipeline.recover_blocked_with_deepseek(config)
+                value = json.loads((tasks / "ERP-096.json").read_text(encoding="utf-8"))
+                self.assertEqual(["ERP-096"], recovered)
+                self.assertEqual("retry", value["status"])
+                self.assertEqual(1, value["supervised_recovery_cycles"])
+                self.assertIn("ERP-096-attempt-3.jsonl", value["recovery_context"]["attempt_logs"][0])
+                self.assertIn("different safe repair", value["recovery_context"]["instruction"])
+            finally:
+                (
+                    pipeline.ROOT, pipeline.TASKS_DIR, pipeline.CONFIG_PATH, pipeline.STATE_PATH,
+                    pipeline.AUDIT_PATH, pipeline.RESULTS_DIR, pipeline.LOGS_DIR,
+                ) = old_values
+
     def test_l3_gate_requires_explicit_approval(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
