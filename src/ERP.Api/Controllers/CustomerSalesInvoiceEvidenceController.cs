@@ -4,6 +4,7 @@ using ERP.Application.Interfaces;
 using ERP.Application.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using System.Security.Claims;
 
 namespace ERP.Api.Controllers;
 
@@ -37,8 +38,11 @@ public class CustomerSalesInvoiceEvidenceController : ControllerBase
     /// </summary>
     [HttpGet]
     public async Task<IActionResult> GetPaged([FromQuery] CustomerSalesInvoiceEvidenceQuery query)
-        => Ok(ApiResponse<PagedResult<CustomerSalesInvoiceEvidenceDto>>.Success(
-            await CustomerSalesInvoiceEvidenceService.ListAsync(_db, query)));
+    {
+        var scope = await ResolveScopeAsync();
+        return Ok(ApiResponse<PagedResult<CustomerSalesInvoiceEvidenceDto>>.Success(
+            await CustomerSalesInvoiceEvidenceService.ListAsync(_db, query, scope.AllowedCustomerIds)));
+    }
 
     /// <summary>
     /// 可显式交叉引用的单证中心商业发票候选（只读、有界）：只列出既有、未删除且类型为商业发票的单证，
@@ -54,8 +58,11 @@ public class CustomerSalesInvoiceEvidenceController : ControllerBase
     /// <summary>发票证据详情（含分摊行、已分摊 / 未分摊金额与订单可用性标注；只读）</summary>
     [HttpGet("{id:long}")]
     public async Task<IActionResult> GetById(long id)
-        => Ok(ApiResponse<CustomerSalesInvoiceEvidenceDto>.Success(
-            await CustomerSalesInvoiceEvidenceService.GetAsync(_db, id)));
+    {
+        var scope = await ResolveScopeAsync();
+        return Ok(ApiResponse<CustomerSalesInvoiceEvidenceDto>.Success(
+            await CustomerSalesInvoiceEvidenceService.GetAsync(_db, id, scope.AllowedCustomerIds)));
+    }
 
     /// <summary>
     /// 新增草稿发票证据：校验发票类型 / 代码 / 号码、客户（必须存在且启用）、币种与金额等式
@@ -127,4 +134,12 @@ public class CustomerSalesInvoiceEvidenceController : ControllerBase
         => Ok(ApiResponse<CustomerSalesInvoiceEvidenceDto>.Success(
             await CustomerSalesInvoiceEvidenceService.VoidAsync(_db, id, request?.Reason),
             "销项发票证据已作废（历史证据与分摊保留，可读）"));
+
+    /// <summary>当前登录用户 Id（缺失或非数字时返回 null，由数据范围解析 fail closed 拒绝）</summary>
+    private long? CurrentUserId()
+        => long.TryParse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value, out var id) ? id : null;
+
+    /// <summary>解析当前账号的业务员数据范围（ERP-097 唯一权威口径）</summary>
+    private Task<SalespersonDataScope> ResolveScopeAsync()
+        => SalespersonDataScopeService.ResolveAsync(_db, CurrentUserId());
 }

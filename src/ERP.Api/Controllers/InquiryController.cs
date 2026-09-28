@@ -1,5 +1,6 @@
 using ERP.Application.Common;
 using ERP.Application.Interfaces;
+using ERP.Application.Services;
 using ERP.Domain.Entities;
 using ERP.Domain.Enums;
 using Microsoft.AspNetCore.Mvc;
@@ -25,7 +26,9 @@ public class InquiryController : DocumentControllerBase<Inquiry>
     public async Task<IActionResult> GetPaged([FromQuery] PageQuery query, [FromQuery] DocumentStatus? status)
     {
         query.Normalize();
-        var source = Set.AsNoTracking().Where(o => !o.IsDeleted);
+        var scope = await ResolveScopeAsync();
+        var source = SalespersonDataScopeService.FilterByCustomer(
+            Set.AsNoTracking().Where(o => !o.IsDeleted), scope, o => o.CustomerId);
         if (status.HasValue) source = source.Where(o => o.Status == status.Value);
         if (!string.IsNullOrWhiteSpace(query.Keyword)) source = source.Where(o => o.InquiryNo.Contains(query.Keyword));
 
@@ -43,6 +46,8 @@ public class InquiryController : DocumentControllerBase<Inquiry>
         var entity = await Set.AsNoTracking().Include(o => o.Details)
             .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
             ?? throw BusinessException.NotFound("询价单不存在");
+        if (!(await ResolveScopeAsync()).AllowsCustomer(entity.CustomerId))
+            throw BusinessException.NotFound("询价单不存在");
         return Ok(ApiResponse<Inquiry>.Success(entity));
     }
 
@@ -133,7 +138,9 @@ public class InquiryController : DocumentControllerBase<Inquiry>
     [HttpGet("export")]
     public async Task<IActionResult> Export([FromQuery] DateTime? start, [FromQuery] DateTime? end)
     {
-        var source = Db.Inquiries.AsNoTracking().Include(o => o.Details).Where(o => !o.IsDeleted);
+        var scope = await ResolveScopeAsync();
+        var source = SalespersonDataScopeService.FilterByCustomer(
+            Db.Inquiries.AsNoTracking().Include(o => o.Details).Where(o => !o.IsDeleted), scope, o => o.CustomerId);
         if (start.HasValue) source = source.Where(o => o.InquiryDate >= start.Value);
         if (end.HasValue) source = source.Where(o => o.InquiryDate <= end.Value);
         var items = await source.OrderByDescending(o => o.Id).ToListAsync();

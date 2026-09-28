@@ -20,13 +20,20 @@ namespace ERP.UnitTests;
 /// </summary>
 public class OrderTraceabilityTests
 {
+
+    private static SalesOrderController BuildController(ErpDbContext db)
+    {
+        var controller = new SalesOrderController(db, new DocumentNumberService(db));
+        TestAuth.SetUser(controller, TestAuth.SeedPrivilegedUser(db));
+        return controller;
+    }
     // ==================== 销售订单：新字段往返 ====================
 
     [Fact]
     public async Task 销售订单_新字段完整持久化_GetById可原样读回()
     {
         using var db = TestDbFactory.Create();
-        var ctl = new SalesOrderController(db, new DocumentNumberService(db));
+        var ctl = BuildController(db);
 
         var so = new SalesOrder
         {
@@ -104,7 +111,7 @@ public class OrderTraceabilityTests
         db.SalesOrders.Add(legacy);
         db.SaveChanges();
 
-        var ctl = new SalesOrderController(db, new DocumentNumberService(db));
+        var ctl = BuildController(db);
         var readResult = await ctl.GetById(legacy.Id);
         var order = Assert.IsType<ApiResponse<SalesOrder>>(Assert.IsType<OkObjectResult>(readResult).Value).Data!;
 
@@ -121,7 +128,7 @@ public class OrderTraceabilityTests
     public async Task 销售订单_Update_可改写并清空新字段()
     {
         using var db = TestDbFactory.Create();
-        var ctl = new SalesOrderController(db, new DocumentNumberService(db));
+        var ctl = BuildController(db);
         await ctl.Create(new SalesOrder
         {
             OrderDate = DateTime.Today, CustomerId = 1, CustomerPoNo = "PO-A", ContractNo = "SC-A",
@@ -153,7 +160,7 @@ public class OrderTraceabilityTests
     public async Task 销售订单_佣金比例越界_抛InvalidParameter_且未落库()
     {
         using var db = TestDbFactory.Create();
-        var ctl = new SalesOrderController(db, new DocumentNumberService(db));
+        var ctl = BuildController(db);
 
         var ex = await Assert.ThrowsAsync<BusinessException>(() => ctl.Create(new SalesOrder
         {
@@ -167,7 +174,7 @@ public class OrderTraceabilityTests
     public async Task 销售订单_列表关键字_可命中客户PO号与合同号()
     {
         using var db = TestDbFactory.Create();
-        var ctl = new SalesOrderController(db, new DocumentNumberService(db));
+        var ctl = BuildController(db);
         await ctl.Create(new SalesOrder { OrderDate = DateTime.Today, CustomerId = 1, CustomerPoNo = "BUYERPO-77" });
         await ctl.Create(new SalesOrder { OrderDate = DateTime.Today, CustomerId = 1, ContractNo = "SC-KEY-9" });
 
@@ -184,7 +191,7 @@ public class OrderTraceabilityTests
     public async Task 销售订单_打印数据_返回主表新字段与明细()
     {
         using var db = TestDbFactory.Create();
-        var ctl = new SalesOrderController(db, new DocumentNumberService(db));
+        var ctl = BuildController(db);
         await ctl.Create(new SalesOrder
         {
             OrderDate = DateTime.Today, CustomerId = 1, ContractNo = "SC-PRINT-1", ShippingMarks = "MARKS-PRINT",
@@ -205,7 +212,7 @@ public class OrderTraceabilityTests
     public async Task 销售订单_Excel导出_返回xlsx字节流()
     {
         using var db = TestDbFactory.Create();
-        var ctl = new SalesOrderController(db, new DocumentNumberService(db));
+        var ctl = BuildController(db);
         await ctl.Create(new SalesOrder
         {
             OrderDate = DateTime.Today, CustomerId = 1, CustomerPoNo = "PO-EXCEL", ContractNo = "SC-EXCEL"

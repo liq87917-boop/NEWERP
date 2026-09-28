@@ -147,7 +147,11 @@ public class QuotationCrudRegressionTests
     }
 
     private static QuotationController Controller(ERP.Infrastructure.Data.ErpDbContext db)
-        => new(db, new DocumentNumberService(db));
+    {
+        var controller = new QuotationController(db, new DocumentNumberService(db));
+        TestAuth.SetUser(controller, TestAuth.SeedPrivilegedUser(db));
+        return controller;
+    }
 
     private static T GetData<T>(IActionResult action)
     {

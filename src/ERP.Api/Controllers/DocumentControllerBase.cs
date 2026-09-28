@@ -1,10 +1,12 @@
 using ERP.Application.Common;
 using ERP.Application.Interfaces;
+using ERP.Application.Services;
 using ERP.Domain.Common;
 using ERP.Domain.Enums;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.Security.Claims;
 
 namespace ERP.Api.Controllers;
 
@@ -25,6 +27,14 @@ public abstract class DocumentControllerBase<TEntity> : ControllerBase where TEn
 
     /// <summary>获取当前实体对应的 DbSet</summary>
     protected DbSet<TEntity> Set => GetDbSet();
+
+    /// <summary>当前登录用户 Id（缺失或非数字时返回 null，由数据范围解析 fail closed 拒绝，绝不猜测身份）</summary>
+    protected long? CurrentUserId()
+        => long.TryParse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value, out var id) ? id : null;
+
+    /// <summary>解析当前账号的业务员数据范围（ERP-097：客户 / 询价 / 报价 / PI / 销售订单 / 出库 / 发票共享同一策略）</summary>
+    protected Task<SalespersonDataScope> ResolveScopeAsync()
+        => SalespersonDataScopeService.ResolveAsync(Db, CurrentUserId());
 
     private DbSet<TEntity> GetDbSet()
     {

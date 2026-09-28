@@ -32,7 +32,9 @@ public class StockOutController : DocumentControllerBase<StockOut>
     public async Task<IActionResult> GetPaged([FromQuery] PageQuery query, [FromQuery] DocumentStatus? status)
     {
         query.Normalize();
-        var source = Set.AsNoTracking().Where(o => !o.IsDeleted);
+        var scope = await ResolveScopeAsync();
+        var source = SalespersonDataScopeService.FilterByCustomer(
+            Set.AsNoTracking().Where(o => !o.IsDeleted), scope, o => o.CustomerId);
         if (status.HasValue) source = source.Where(o => o.Status == status.Value);
         if (!string.IsNullOrWhiteSpace(query.Keyword)) source = source.Where(o => o.StockOutNo.Contains(query.Keyword));
 
@@ -50,6 +52,8 @@ public class StockOutController : DocumentControllerBase<StockOut>
         var entity = await Set.AsNoTracking().Include(o => o.Details)
             .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
             ?? throw BusinessException.NotFound("出库单不存在");
+        if (!(await ResolveScopeAsync()).AllowsCustomer(entity.CustomerId))
+            throw BusinessException.NotFound("出库单不存在");
         return Ok(ApiResponse<StockOut>.Success(entity));
     }
 

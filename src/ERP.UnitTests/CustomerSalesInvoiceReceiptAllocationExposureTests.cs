@@ -19,7 +19,12 @@ namespace ERP.UnitTests;
 /// </summary>
 public class CustomerSalesInvoiceReceiptAllocationExposureTests
 {
-    private static CustomerSalesInvoiceEvidenceController InvoiceController(ErpDbContext db) => new(db);
+    private static CustomerSalesInvoiceEvidenceController InvoiceController(ErpDbContext db)
+    {
+        var controller = new CustomerSalesInvoiceEvidenceController(db);
+        TestAuth.SetUser(controller, TestAuth.SeedPrivilegedUser(db));
+        return controller;
+    }
 
     private static BaseCustomer SeedCustomer(
         ErpDbContext db, string code, string name, int status = 1, bool deleted = false)

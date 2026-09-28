@@ -28,9 +28,9 @@ public abstract class BaseCrudController<TEntity> : ControllerBase where TEntity
         return Ok(ApiResponse<PagedResult<TEntity>>.Success(result));
     }
 
-    /// <summary>查询全部（供下拉框等使用）</summary>
+    /// <summary>查询全部（供下拉框等使用；派生控制器可 override 以补充数据范围过滤，见 CustomerController）</summary>
     [HttpGet("all")]
-    public async Task<IActionResult> GetAll()
+    public virtual async Task<IActionResult> GetAll()
     {
         var result = await Service.GetAllAsync();
         return Ok(ApiResponse<List<TEntity>>.Success(result));

@@ -457,7 +457,12 @@ public class QuotationRevisionTests
 
     // ==================== 工厂与种子数据 ====================
 
-    private static QuotationController Controller(ErpDbContext db) => new(db, new DocumentNumberService(db));
+    private static QuotationController Controller(ErpDbContext db)
+    {
+        var controller = new QuotationController(db, new DocumentNumberService(db));
+        TestAuth.SetUser(controller, TestAuth.SeedPrivilegedUser(db));
+        return controller;
+    }
 
     /// <summary>模拟「新的接口请求」= 新的 DbContext 作用域（清空变更跟踪器）</summary>
     private static void FreshRequest(ErpDbContext db) => db.ChangeTracker.Clear();

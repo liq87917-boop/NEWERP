@@ -27,7 +27,12 @@ public class CustomerSalesInvoiceEvidenceTests
 {
     // ==================== 0. 测试脚手架 ====================
 
-    private static CustomerSalesInvoiceEvidenceController BuildController(ErpDbContext db) => new(db);
+    private static CustomerSalesInvoiceEvidenceController BuildController(ErpDbContext db)
+    {
+        var controller = new CustomerSalesInvoiceEvidenceController(db);
+        TestAuth.SetUser(controller, TestAuth.SeedPrivilegedUser(db));
+        return controller;
+    }
 
     private static BaseCustomer SeedCustomer(
         ErpDbContext db, string code, string name, int status = 1, bool deleted = false)

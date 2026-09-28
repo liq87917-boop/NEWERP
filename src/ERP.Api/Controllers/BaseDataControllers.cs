@@ -10,6 +10,8 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.Linq.Expressions;
+using System.Security.Claims;
 
 namespace ERP.Api.Controllers;
 
@@ -41,22 +43,51 @@ public class CustomerController : BaseCrudController<BaseCustomer>
         return Ok(ApiResponse<List<OtherInfoOptionDto>>.Success(options));
     }
 
-    /// <summary>分页查询（补充指定货代引用的可用性标注，不写库）</summary>
+    /// <summary>分页查询（ERP-097：受限制业务员只看到自己被分配的客户；补充指定货代引用的可用性标注，不写库）</summary>
     [HttpGet]
     public override async Task<IActionResult> GetPaged([FromQuery] PageQuery query)
     {
-        var result = await Service.GetPagedAsync(query);
+        var scope = await ResolveScopeAsync();
+        var result = await Service.GetPagedAsync(query, CustomerFilter(scope));
         await CustomerForwarderService.AnnotateAsync(_db, result.Items);
         return Ok(ApiResponse<PagedResult<BaseCustomer>>.Success(result));
     }
 
-    /// <summary>根据主键获取（补充指定货代引用的可用性标注，不写库）</summary>
+    /// <summary>查询全部（供下拉框使用；ERP-097：受限制业务员只返回自己被分配的客户）</summary>
+    [HttpGet("all")]
+    public override async Task<IActionResult> GetAll()
+    {
+        var scope = await ResolveScopeAsync();
+        var result = await Service.GetAllAsync(CustomerFilter(scope));
+        return Ok(ApiResponse<List<BaseCustomer>>.Success(result));
+    }
+
+    /// <summary>根据主键获取（ERP-097：越界客户按「不存在」fail closed；补充指定货代引用的可用性标注，不写库）</summary>
     [HttpGet("{id:long}")]
     public override async Task<IActionResult> GetById(long id)
     {
+        if (!(await ResolveScopeAsync()).AllowsCustomer(id))
+            throw BusinessException.NotFound("客户不存在");
         var result = await Service.GetByIdAsync(id);
         await CustomerForwarderService.AnnotateAsync(_db, new[] { result });
         return Ok(ApiResponse<BaseCustomer>.Success(result));
+    }
+
+    /// <summary>当前登录用户 Id（缺失或非数字时返回 null，由数据范围解析 fail closed 拒绝）</summary>
+    private long? CurrentUserId()
+        => long.TryParse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value, out var id) ? id : null;
+
+    /// <summary>解析当前账号的业务员数据范围（ERP-097 唯一权威口径）</summary>
+    private Task<SalespersonDataScope> ResolveScopeAsync()
+        => SalespersonDataScopeService.ResolveAsync(_db, CurrentUserId());
+
+    /// <summary>客户分页 / 全部查询的范围过滤（特权账号为 null，不过滤）</summary>
+    private static Expression<Func<BaseCustomer, bool>>? CustomerFilter(SalespersonDataScope scope)
+    {
+        if (scope.AllowedCustomerIds is null)
+            return null;
+        var allowed = scope.AllowedCustomerIds.ToList();
+        return c => allowed.Contains(c.Id);
     }
 
     /// <summary>新增客户（指定货代必须是可用的 Forwarder 字典项，名称快照由服务端写入）</summary>

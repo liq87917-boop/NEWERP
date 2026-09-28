@@ -27,7 +27,9 @@ public class SalesOrderController : DocumentControllerBase<SalesOrder>
     public async Task<IActionResult> GetPaged([FromQuery] PageQuery query, [FromQuery] DocumentStatus? status)
     {
         query.Normalize();
-        var source = Set.AsNoTracking().Where(o => !o.IsDeleted);
+        var scope = await ResolveScopeAsync();
+        var source = SalespersonDataScopeService.FilterByCustomer(
+            Set.AsNoTracking().Where(o => !o.IsDeleted), scope, o => o.CustomerId);
         if (status.HasValue) source = source.Where(o => o.Status == status.Value);
         if (!string.IsNullOrWhiteSpace(query.Keyword))
         {
@@ -50,6 +52,8 @@ public class SalesOrderController : DocumentControllerBase<SalesOrder>
         var entity = await Set.AsNoTracking().Include(o => o.Details)
             .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
             ?? throw BusinessException.NotFound("销售订单不存在");
+        if (!(await ResolveScopeAsync()).AllowsCustomer(entity.CustomerId))
+            throw BusinessException.NotFound("销售订单不存在");
         return Ok(ApiResponse<SalesOrder>.Success(entity));
     }
 
@@ -349,7 +353,9 @@ public class SalesOrderController : DocumentControllerBase<SalesOrder>
     public async Task<IActionResult> ExportExcel([FromQuery] string? keyword, [FromQuery] DocumentStatus? status,
         [FromQuery] DateTime? start, [FromQuery] DateTime? end)
     {
-        var source = Db.SalesOrders.AsNoTracking().Where(o => !o.IsDeleted);
+        var scope = await ResolveScopeAsync();
+        var source = SalespersonDataScopeService.FilterByCustomer(
+            Db.SalesOrders.AsNoTracking().Where(o => !o.IsDeleted), scope, o => o.CustomerId);
         if (!string.IsNullOrWhiteSpace(keyword))
         {
             var kw = keyword;

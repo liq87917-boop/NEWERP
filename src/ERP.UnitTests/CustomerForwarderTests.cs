@@ -452,9 +452,13 @@ public class CustomerForwarderTests
 
     // ============ 测试辅助 ============
 
-    /// <summary>构造客户资料控制器（内存库 + 通用 CRUD 服务）</summary>
+    /// <summary>构造客户资料控制器（内存库 + 通用 CRUD 服务，并注入特权登录身份）</summary>
     private static CustomerController BuildController(ErpDbContext db)
-        => new(new GenericService<BaseCustomer>(db), db);
+    {
+        var controller = new CustomerController(new GenericService<BaseCustomer>(db), db);
+        TestAuth.SetUser(controller, TestAuth.SeedPrivilegedUser(db));
+        return controller;
+    }
 
     /// <summary>断言成功响应并取出数据（业务码必须为 0）</summary>
     private static T AssertOk<T>(IActionResult result)

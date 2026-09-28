@@ -23,7 +23,7 @@ public class InquiryControllerTests
     {
         using var db = TestDbFactory.Create();
         var noService = new DocumentNumberService(db);
-        var ctl = new InquiryController(db, noService);
+        var ctl = BuildController(db);
 
         var inquiry = new Inquiry
         {
@@ -62,7 +62,7 @@ public class InquiryControllerTests
     {
         using var db = TestDbFactory.Create();
         var (inquiry, _) = SeedInquiry(db, "INQ20260917-X", DocumentStatus.Pending);
-        var ctl = new InquiryController(db, new DocumentNumberService(db));
+        var ctl = BuildController(db);
 
         var result = await ctl.GetById(inquiry.Id);
 
@@ -76,7 +76,7 @@ public class InquiryControllerTests
     public async Task GetById_不存在_抛NotFound()
     {
         using var db = TestDbFactory.Create();
-        var ctl = new InquiryController(db, new DocumentNumberService(db));
+        var ctl = BuildController(db);
 
         await Assert.ThrowsAsync<BusinessException>(() => ctl.GetById(999));
     }
@@ -90,7 +90,7 @@ public class InquiryControllerTests
         SeedInquiry(db, "INQ-FOO-001", DocumentStatus.Pending);
         SeedInquiry(db, "INQ-FOO-002", DocumentStatus.Pending);
         SeedInquiry(db, "INQ-BAR-001", DocumentStatus.Pending);
-        var ctl = new InquiryController(db, new DocumentNumberService(db));
+        var ctl = BuildController(db);
 
         var result = await ctl.GetPaged(new PageQuery { Page = 1, PageSize = 10, Keyword = "FOO" }, null);
 
@@ -106,7 +106,7 @@ public class InquiryControllerTests
         using var db = TestDbFactory.Create();
         SeedInquiry(db, "INQ-P-001", DocumentStatus.Pending);
         SeedInquiry(db, "INQ-A-001", DocumentStatus.Approved);
-        var ctl = new InquiryController(db, new DocumentNumberService(db));
+        var ctl = BuildController(db);
 
         var result = await ctl.GetPaged(new PageQuery { Page = 1, PageSize = 10 }, DocumentStatus.Approved);
 
@@ -123,7 +123,7 @@ public class InquiryControllerTests
         using var db = TestDbFactory.Create();
         var (inquiry, _) = SeedInquiry(db, "INQ-X", DocumentStatus.Approved);
         var originalCount = db.InquiryDetails.Count(d => d.InquiryId == inquiry.Id);
-        var ctl = new InquiryController(db, new DocumentNumberService(db));
+        var ctl = BuildController(db);
 
         var update = new Inquiry
         {
@@ -147,7 +147,7 @@ public class InquiryControllerTests
         using var db = TestDbFactory.Create();
         var (inquiry, _) = SeedInquiry(db, "INQ-Y", DocumentStatus.Pending);
         var originalDetailId = db.InquiryDetails.Single(i => i.InquiryId == inquiry.Id).Id;
-        var ctl = new InquiryController(db, new DocumentNumberService(db));
+        var ctl = BuildController(db);
 
         var update = new Inquiry
         {
@@ -177,7 +177,7 @@ public class InquiryControllerTests
     {
         using var db = TestDbFactory.Create();
         var (inquiry, _) = SeedInquiry(db, "INQ-S", DocumentStatus.Pending);
-        var ctl = new InquiryController(db, new DocumentNumberService(db));
+        var ctl = BuildController(db);
 
         await ctl.Submit(inquiry.Id);
         Assert.Equal(DocumentStatus.Submitted, db.Inquiries.Single().Status);
@@ -188,7 +188,7 @@ public class InquiryControllerTests
     {
         using var db = TestDbFactory.Create();
         var (inquiry, _) = SeedInquiry(db, "INQ-AP", DocumentStatus.Pending);
-        var ctl = new InquiryController(db, new DocumentNumberService(db));
+        var ctl = BuildController(db);
 
         var ex = await Assert.ThrowsAsync<BusinessException>(() => ctl.Approve(inquiry.Id));
         Assert.Equal(ErrorCodes.RuleConflict, ex.Code);
@@ -199,7 +199,7 @@ public class InquiryControllerTests
     {
         using var db = TestDbFactory.Create();
         var (inquiry, _) = SeedInquiry(db, "INQ-D", DocumentStatus.Pending);
-        var ctl = new InquiryController(db, new DocumentNumberService(db));
+        var ctl = BuildController(db);
 
         await ctl.Delete(inquiry.Id);
         Assert.True(db.Inquiries.Single().IsDeleted);
@@ -210,7 +210,7 @@ public class InquiryControllerTests
     {
         using var db = TestDbFactory.Create();
         var (inquiry, _) = SeedInquiry(db, "INQ-DA", DocumentStatus.Approved);
-        var ctl = new InquiryController(db, new DocumentNumberService(db));
+        var ctl = BuildController(db);
 
         var ex = await Assert.ThrowsAsync<BusinessException>(() => ctl.Delete(inquiry.Id));
         Assert.Equal(ErrorCodes.RuleConflict, ex.Code);
@@ -219,7 +219,14 @@ public class InquiryControllerTests
 
     // ==================== 种子 ====================
 
-    private static (Inquiry inquiry, InquiryDetail detail) SeedInquiry(ErpDbContext db, string no, DocumentStatus status)
+    
+    private static InquiryController BuildController(ErpDbContext db)
+    {
+        var controller = new InquiryController(db, new DocumentNumberService(db));
+        TestAuth.SetUser(controller, TestAuth.SeedPrivilegedUser(db));
+        return controller;
+    }
+private static (Inquiry inquiry, InquiryDetail detail) SeedInquiry(ErpDbContext db, string no, DocumentStatus status)
     {
         var inq = new Inquiry
         {

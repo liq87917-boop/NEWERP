@@ -131,10 +131,14 @@ public static class CustomerSalesInvoiceEvidenceService
     // ==================== 2. 台账读取（分页 / 有界，批量装载） ====================
 
     /// <summary>发票证据详情（含分摊行、已分摊 / 未分摊金额与订单可用性标注；只读）</summary>
-    public static async Task<CustomerSalesInvoiceEvidenceDto> GetAsync(IErpDbContext db, long invoiceId)
+    /// <param name="allowedCustomerIds">ERP-097 数据范围：非 null 时仅允许读取该客户集合内的发票（越界按「不存在」fail closed）</param>
+    public static async Task<CustomerSalesInvoiceEvidenceDto> GetAsync(
+        IErpDbContext db, long invoiceId, HashSet<long>? allowedCustomerIds = null)
     {
         ArgumentNullException.ThrowIfNull(db);
         var invoice = await LoadAsync(db, invoiceId);
+        if (allowedCustomerIds is not null && !allowedCustomerIds.Contains(invoice.CustomerId))
+            throw BusinessException.NotFound("客户销项发票证据不存在或已删除");
         return await MapAsync(db, invoice);
     }
 
@@ -144,7 +148,7 @@ public static class CustomerSalesInvoiceEvidenceService
     /// 因此「只看未分摊」这类筛选不会因分页而漏行；本页分摊行一次批量装载（无逐行数据库查询）。</para>
     /// </summary>
     public static async Task<PagedResult<CustomerSalesInvoiceEvidenceDto>> ListAsync(
-        IErpDbContext db, CustomerSalesInvoiceEvidenceQuery query)
+        IErpDbContext db, CustomerSalesInvoiceEvidenceQuery query, HashSet<long>? allowedCustomerIds = null)
     {
         ArgumentNullException.ThrowIfNull(db);
         ArgumentNullException.ThrowIfNull(query);
@@ -159,6 +163,7 @@ public static class CustomerSalesInvoiceEvidenceService
         var keyword = CustomerSalesInvoiceEvidenceRules.NormalizeKeyword(query.Keyword);
 
         var source = db.CustomerSalesInvoiceEvidences.AsNoTracking().Where(x => !x.IsDeleted);
+        if (allowedCustomerIds is not null) source = source.Where(x => allowedCustomerIds.Contains(x.CustomerId));
         if (query.CustomerId is not null) source = source.Where(x => x.CustomerId == query.CustomerId.Value);
         if (invoiceType is not null) source = source.Where(x => x.InvoiceType == invoiceType);
         if (status is not null) source = source.Where(x => x.Status == status.Value);

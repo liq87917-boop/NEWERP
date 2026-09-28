@@ -30,7 +30,9 @@ public class QuotationController : DocumentControllerBase<Quotation>
         [FromQuery] DateTime? start, [FromQuery] DateTime? end)
     {
         query.Normalize();
-        var source = Set.AsNoTracking().Where(o => !o.IsDeleted);
+        var scope = await ResolveScopeAsync();
+        var source = SalespersonDataScopeService.FilterByCustomer(
+            Set.AsNoTracking().Where(o => !o.IsDeleted), scope, o => o.CustomerId);
         if (status.HasValue) source = source.Where(o => o.Status == status.Value);
         if (start.HasValue) source = source.Where(o => o.QuotationDate >= start.Value);
         if (end.HasValue) source = source.Where(o => o.QuotationDate <= end.Value);
@@ -60,6 +62,8 @@ public class QuotationController : DocumentControllerBase<Quotation>
         var entity = await Set.AsNoTracking().Include(o => o.Details)
             .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
             ?? throw BusinessException.NotFound("报价单不存在");
+        if (!(await ResolveScopeAsync()).AllowsCustomer(entity.CustomerId))
+            throw BusinessException.NotFound("报价单不存在");
         entity.Details = entity.Details.Where(d => !d.IsDeleted).OrderBy(d => d.SortNo).ToList();
         return Ok(ApiResponse<Quotation>.Success(entity));
     }
@@ -413,6 +417,8 @@ public class QuotationController : DocumentControllerBase<Quotation>
         var entity = await Set.AsNoTracking().Include(o => o.Details)
             .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
             ?? throw BusinessException.NotFound("报价单不存在");
+        if (!(await ResolveScopeAsync()).AllowsCustomer(entity.CustomerId))
+            throw BusinessException.NotFound("报价单不存在");
         entity.Details = entity.Details.Where(d => !d.IsDeleted).OrderBy(d => d.SortNo).ToList();
         return Ok(ApiResponse<Quotation>.Success(entity));
     }

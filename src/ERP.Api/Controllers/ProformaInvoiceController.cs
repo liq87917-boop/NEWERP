@@ -1,5 +1,6 @@
 using ERP.Application.Common;
 using ERP.Application.Interfaces;
+using ERP.Application.Services;
 using ERP.Domain.Entities;
 using ERP.Domain.Enums;
 using Microsoft.AspNetCore.Mvc;
@@ -28,7 +29,9 @@ public class ProformaInvoiceController : DocumentControllerBase<ProformaInvoice>
         [FromQuery] DateTime? start, [FromQuery] DateTime? end)
     {
         query.Normalize();
-        var source = Set.AsNoTracking().Where(o => !o.IsDeleted);
+        var scope = await ResolveScopeAsync();
+        var source = SalespersonDataScopeService.FilterByCustomer(
+            Set.AsNoTracking().Where(o => !o.IsDeleted), scope, o => o.CustomerId);
         if (status.HasValue) source = source.Where(o => o.Status == status.Value);
         if (start.HasValue) source = source.Where(o => o.PiDate >= start.Value);
         if (end.HasValue) source = source.Where(o => o.PiDate <= end.Value);
@@ -58,6 +61,8 @@ public class ProformaInvoiceController : DocumentControllerBase<ProformaInvoice>
         var entity = await Set.AsNoTracking().Include(o => o.Details)
             .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
             ?? throw BusinessException.NotFound("形式发票 PI 不存在");
+        if (!(await ResolveScopeAsync()).AllowsCustomer(entity.CustomerId))
+            throw BusinessException.NotFound("形式发票 PI 不存在");
         entity.Details = entity.Details.Where(d => !d.IsDeleted).OrderBy(d => d.SortNo).ToList();
         return Ok(ApiResponse<ProformaInvoice>.Success(entity));
     }
@@ -235,6 +240,8 @@ public class ProformaInvoiceController : DocumentControllerBase<ProformaInvoice>
         var entity = await Set.AsNoTracking().Include(o => o.Details)
             .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
             ?? throw BusinessException.NotFound("形式发票 PI 不存在");
+        if (!(await ResolveScopeAsync()).AllowsCustomer(entity.CustomerId))
+            throw BusinessException.NotFound("形式发票 PI 不存在");
         entity.Details = entity.Details.Where(d => !d.IsDeleted).OrderBy(d => d.SortNo).ToList();
         return Ok(ApiResponse<ProformaInvoice>.Success(entity));
     }

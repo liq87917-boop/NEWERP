@@ -477,7 +477,11 @@ public class QuotationGovernanceTests
     // ==================== 工厂与种子数据 ====================
 
     private static QuotationController NewController(ErpDbContext db)
-        => new(db, new DocumentNumberService(db));
+    {
+        var controller = new QuotationController(db, new DocumentNumberService(db));
+        TestAuth.SetUser(controller, TestAuth.SeedPrivilegedUser(db));
+        return controller;
+    }
 
     /// <summary>读取控制器返回的统一响应数据</summary>
     private static T GetData<T>(IActionResult result)

@@ -356,7 +356,11 @@ public class ProformaInvoiceControllerTests
     // ==================== 种子与工厂 ====================
 
     private static ProformaInvoiceController NewController(ErpDbContext db)
-        => new(db, new DocumentNumberService(db));
+    {
+        var controller = new ProformaInvoiceController(db, new DocumentNumberService(db));
+        TestAuth.SetUser(controller, TestAuth.SeedPrivilegedUser(db));
+        return controller;
+    }
 
     private static (ProformaInvoice pi, ProformaInvoiceDetail detail) SeedPi(
         ErpDbContext db, string no, DocumentStatus status)

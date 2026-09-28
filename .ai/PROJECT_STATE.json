@@ -1,11 +1,10 @@
 {
   "schema_version": 2,
   "project": "NEWERP",
-  "updated_at": "2026-09-28T03:45:03.371786Z",
-  "phase": "developing",
-  "current_task": "ERP-097",
+  "updated_at": "2026-09-28T03:57:54.376302Z",
+  "phase": "ready",
+  "current_task": null,
   "queue": [
-    "ERP-097",
     "ERP-098",
     "ERP-099",
     "ERP-100"
@@ -83,7 +82,8 @@
     "ERP-076",
     "ERP-077",
     "ERP-086",
-    "ERP-095"
+    "ERP-095",
+    "ERP-097"
   ],
   "blocked": [
     {
@@ -94,18 +94,14 @@
     }
   ],
   "last_build": {
-    "task": "ERP-095",
+    "task": "ERP-097",
     "profile": "safe",
     "status": "passed",
     "exit_code": 0,
-    "log": ".ai\\logs\\ERP-095-validation-1.log",
-    "at": "2026-09-28T03:13:18.164762Z"
+    "log": ".ai\\logs\\ERP-097-validation-1.log",
+    "at": "2026-09-28T03:57:53.976034Z"
   },
-  "last_error": {
-    "task": "ERP-096",
-    "kind": "repair_budget_exhausted",
-    "summary": "Path guard failed:\noutside allowed_paths: src/ERP.Domain/Entities/InventoryDocuments.cs\noutside allowed_paths: src/ERP.Domain/Entities/Logistics.cs\noutside allowed_paths: src/ERP.Domain/Entities/StockLocationBalance.cs\noutside allowed_paths: src/ERP.Infrastructure/Data/ErpDbContext.Config.cs\noutside allowed_paths: src/ERP.Infrastructure/Data/ErpDbContext.Entities.cs"
-  },
+  "last_error": null,
   "last_deepseek_fix": {
     "task": "ERP-096",
     "attempts": 3,
@@ -114,15 +110,14 @@
   },
   "git_sync": {
     "branch": "main",
-    "local_sha": "ae5fbb8",
-    "status": "synced",
-    "ahead": 1,
+    "local_sha": "695dbf2",
+    "status": "pending",
+    "ahead": 0,
     "behind": 0,
-    "last_attempt_at": "2026-09-28T03:13:23.755352Z",
+    "last_attempt_at": "2026-09-28T03:57:54.279722Z",
     "last_error": null
   },
   "next_recommended_tasks": [
-    "ERP-097",
     "ERP-098",
     "ERP-099",
     "ERP-100"
@@ -130,7 +125,5 @@
   "runner": {
     "status": "stopped",
     "pid": null
-  },
-  "blocker": null,
-  "finish_reason": null
+  }
 }

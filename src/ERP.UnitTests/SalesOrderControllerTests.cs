@@ -23,7 +23,7 @@ public class SalesOrderControllerTests
     {
         using var db = TestDbFactory.Create();
         var noService = new DocumentNumberService(db);
-        var ctl = new SalesOrderController(db, noService);
+        var ctl = BuildController(db);
 
         var so = new SalesOrder
         {
@@ -64,7 +64,7 @@ public class SalesOrderControllerTests
     public async Task GetById_不存在_抛NotFound()
     {
         using var db = TestDbFactory.Create();
-        var ctl = new SalesOrderController(db, new DocumentNumberService(db));
+        var ctl = BuildController(db);
 
         await Assert.ThrowsAsync<BusinessException>(() => ctl.GetById(999));
     }
@@ -78,7 +78,7 @@ public class SalesOrderControllerTests
         SeedSalesOrder(db, "SO-FOO-001", DocumentStatus.Pending);
         SeedSalesOrder(db, "SO-FOO-002", DocumentStatus.Pending);
         SeedSalesOrder(db, "SO-BAR-001", DocumentStatus.Pending);
-        var ctl = new SalesOrderController(db, new DocumentNumberService(db));
+        var ctl = BuildController(db);
 
         var result = await ctl.GetPaged(new PageQuery { Page = 1, PageSize = 10, Keyword = "FOO" }, null);
 
@@ -93,7 +93,7 @@ public class SalesOrderControllerTests
         using var db = TestDbFactory.Create();
         SeedSalesOrder(db, "SO-P", DocumentStatus.Pending);
         SeedSalesOrder(db, "SO-A", DocumentStatus.Approved);
-        var ctl = new SalesOrderController(db, new DocumentNumberService(db));
+        var ctl = BuildController(db);
 
         var result = await ctl.GetPaged(new PageQuery { Page = 1, PageSize = 10 }, DocumentStatus.Approved);
 
@@ -110,7 +110,7 @@ public class SalesOrderControllerTests
         using var db = TestDbFactory.Create();
         var (so, _) = SeedSalesOrder(db, "SO-X", DocumentStatus.Approved);
         var originalAmount = db.SalesOrderDetails.Single().Amount;
-        var ctl = new SalesOrderController(db, new DocumentNumberService(db));
+        var ctl = BuildController(db);
 
         var update = new SalesOrder
         {
@@ -133,7 +133,7 @@ public class SalesOrderControllerTests
     {
         using var db = TestDbFactory.Create();
         var (so, _) = SeedSalesOrder(db, "SO-Y", DocumentStatus.Pending);
-        var ctl = new SalesOrderController(db, new DocumentNumberService(db));
+        var ctl = BuildController(db);
 
         var update = new SalesOrder
         {
@@ -163,7 +163,7 @@ public class SalesOrderControllerTests
     {
         using var db = TestDbFactory.Create();
         var (so, _) = SeedSalesOrder(db, "SO-WF", DocumentStatus.Pending);
-        var ctl = new SalesOrderController(db, new DocumentNumberService(db));
+        var ctl = BuildController(db);
 
         await ctl.Submit(so.Id);
         Assert.Equal(DocumentStatus.Submitted, db.SalesOrders.Single().Status);
@@ -177,7 +177,7 @@ public class SalesOrderControllerTests
     {
         using var db = TestDbFactory.Create();
         var (so, _) = SeedSalesOrder(db, "SO-C", DocumentStatus.Approved);
-        var ctl = new SalesOrderController(db, new DocumentNumberService(db));
+        var ctl = BuildController(db);
 
         await ctl.Cancel(so.Id);
         Assert.Equal(DocumentStatus.Cancelled, db.SalesOrders.Single().Status);
@@ -188,7 +188,7 @@ public class SalesOrderControllerTests
     {
         using var db = TestDbFactory.Create();
         var (so, _) = SeedSalesOrder(db, "SO-DA", DocumentStatus.Approved);
-        var ctl = new SalesOrderController(db, new DocumentNumberService(db));
+        var ctl = BuildController(db);
 
         var ex = await Assert.ThrowsAsync<BusinessException>(() => ctl.Delete(so.Id));
         Assert.Equal(ErrorCodes.RuleConflict, ex.Code);
@@ -197,7 +197,14 @@ public class SalesOrderControllerTests
 
     // ==================== 种子 ====================
 
-    private static (SalesOrder so, SalesOrderDetail detail) SeedSalesOrder(ErpDbContext db, string no, DocumentStatus status)
+    
+    private static SalesOrderController BuildController(ErpDbContext db)
+    {
+        var controller = new SalesOrderController(db, new DocumentNumberService(db));
+        TestAuth.SetUser(controller, TestAuth.SeedPrivilegedUser(db));
+        return controller;
+    }
+private static (SalesOrder so, SalesOrderDetail detail) SeedSalesOrder(ErpDbContext db, string no, DocumentStatus status)
     {
         var so = new SalesOrder
         {
