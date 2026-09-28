@@ -88,6 +88,32 @@ class PipelineContracts(unittest.TestCase):
         value = {"result": {"finishReason": "tool_use"}}
         self.assertEqual("tool_use", orchestrator.nested_finish_reason(value))
 
+    def test_windows_cline_batch_wrapper_resolves_real_executable(self):
+        with tempfile.TemporaryDirectory() as directory:
+            npm_root = Path(directory)
+            wrapper = npm_root / "cline.cmd"
+            wrapper.write_text("@echo off\n", encoding="utf-8")
+            executable = (
+                npm_root / "node_modules" / "cline" / "node_modules" /
+                "@cline" / "cli-windows-x64" / "bin" / "cline.exe"
+            )
+            executable.parent.mkdir(parents=True)
+            executable.touch()
+
+            with patch.object(orchestrator.os, "name", "nt"):
+                resolved = orchestrator.resolve_cline_command(str(wrapper))
+
+        self.assertEqual(str(executable), resolved)
+
+    def test_windows_cline_batch_wrapper_fails_closed_without_executable(self):
+        with tempfile.TemporaryDirectory() as directory:
+            wrapper = Path(directory) / "cline.cmd"
+            wrapper.write_text("@echo off\n", encoding="utf-8")
+
+            with patch.object(orchestrator.os, "name", "nt"), \
+                 self.assertRaisesRegex(FileNotFoundError, "cannot safely carry multiline prompts"):
+                orchestrator.resolve_cline_command(str(wrapper))
+
     def test_browser_task_requires_scenarios(self):
         task = self.task("ERP-010") | {
             "description": "business task",

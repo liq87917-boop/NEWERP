@@ -375,6 +375,29 @@ def build_prompt(task: dict[str, Any], attempt: int, previous_error: str) -> str
     return f"{base}\n\nCurrent task JSON:\n{json.dumps(task, ensure_ascii=False, indent=2)}\n\nAttempt: {attempt}{retry}"
 
 
+def resolve_cline_command(command: str) -> str:
+    """Bypass npm batch wrappers that truncate multiline positional prompts on Windows."""
+    configured = Path(command)
+    if os.name != "nt" or configured.suffix.lower() not in {".cmd", ".bat"}:
+        return command
+
+    npm_root = configured.parent
+    candidates = [npm_root / "node_modules" / "cline" / "bin" / ".cline"]
+    candidates.extend(sorted(
+        (npm_root / "node_modules" / "cline" / "node_modules" / "@cline").glob(
+            "cli-windows-*/bin/cline.exe"
+        )
+    ))
+    for candidate in candidates:
+        if candidate.is_file():
+            return str(candidate)
+
+    raise FileNotFoundError(
+        f"Configured Cline wrapper {configured} cannot safely carry multiline prompts, "
+        "and no platform cline.exe was found under its npm installation."
+    )
+
+
 def run_validation(task: dict[str, Any], attempt: int) -> tuple[int, str, str]:
     """Run validation, persist the complete log, and return a bounded repair summary."""
     LOGS_DIR.mkdir(parents=True, exist_ok=True)
@@ -517,6 +540,7 @@ def run_next(dry_run: bool) -> int:
     if config.get("require_clean_worktree", True) and changed_paths() and not resume_existing:
         set_state(state, phase="blocked", current_task=task["id"], blocker="Working tree is not clean", finish_reason="dirty_worktree"); return 5
     if dry_run: print(build_prompt(task, 1, "")); return 0
+    cline_command = resolve_cline_command(config["cline_command"])
 
     task["status"] = "in_progress"; save_json(task_path, task)
     if resume_existing:
@@ -544,7 +568,7 @@ def run_next(dry_run: bool) -> int:
             provider = os.environ.get("AI_CLINE_PROVIDER", "deepseek")
             model = os.environ.get("AI_CLINE_MODEL", "deepseek-v4-pro")
             command = [
-                config["cline_command"],
+                cline_command,
                 "--json",
                 "--auto-approve", "true",
                 "--provider", provider,
