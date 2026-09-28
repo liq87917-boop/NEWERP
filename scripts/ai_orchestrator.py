@@ -22,6 +22,7 @@ LOGS_DIR, DECISIONS_DIR = AI_DIR / "logs", AI_DIR / "decisions"
 CONFIG_PATH, STATE_PATH = AI_DIR / "config.json", AI_DIR / "PROJECT_STATE.json"
 AUDIT_PATH = AI_DIR / "audit.jsonl"
 TERMINAL_STATUSES = {"completed", "deferred", "skipped", "superseded"}
+RECOVERABLE_DIRTY_STATUSES = {"retry", "retry_pending", "in_progress", "code_ready", "finalizing", "failed", "blocked"}
 
 
 def utc_now() -> str:
@@ -65,6 +66,32 @@ def git_lines(*args: str) -> list[str]:
 
 def changed_paths() -> list[str]:
     return sorted(set(git_lines("diff", "--name-only") + git_lines("diff", "--cached", "--name-only") + git_lines("ls-files", "--others", "--exclude-standard")))
+
+
+def business_changed_paths(config: dict[str, Any]) -> list[str]:
+    return [
+        path for path in changed_paths()
+        if not matches(path, config["ignored_change_paths"])
+        and not matches(path, config.get("orchestrator_paths", []))
+    ]
+
+
+def write_recovery_diff(task_id: str) -> tuple[str, list[str]]:
+    """Persist a bounded, inspectable snapshot without moving or discarding work."""
+    LOGS_DIR.mkdir(parents=True, exist_ok=True)
+    paths = changed_paths()
+    tracked = subprocess.run(
+        ["git", "diff", "--binary", "HEAD"], cwd=ROOT,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=False,
+    )
+    tracked_text = (tracked.stdout or b"").decode("utf-8", errors="replace")
+    untracked = git_lines("ls-files", "--others", "--exclude-standard")
+    payload = tracked_text
+    if untracked:
+        payload += "\n# Untracked files preserved in the execution copy\n" + "\n".join(untracked) + "\n"
+    path = LOGS_DIR / f"{task_id}-preserved-work.diff"
+    path.write_text(payload[-500000:], encoding="utf-8")
+    return str(path.relative_to(ROOT)), paths
 
 
 def matches(path: str, patterns: list[str]) -> bool:
@@ -245,6 +272,78 @@ def recoverable_interrupted_task(config: dict[str, Any], state: dict[str, Any]) 
     if not changed_paths() or path_violations(task, config):
         return None
     return path, task
+
+
+def recoverable_dirty_task(config: dict[str, Any], state: dict[str, Any]) -> tuple[Path, dict[str, Any]] | None:
+    """Find the owner of preserved dirty executor work after a scheduler interruption."""
+    current = state.get("current_task")
+    entries = all_tasks(config)
+    entries.sort(key=lambda entry: (entry[1].get("id") != current, entry[0].name))
+    current_business = set(business_changed_paths(config))
+    if not current_business:
+        return None
+    for path, task in entries:
+        if task.get("status") not in RECOVERABLE_DIRTY_STATUSES:
+            continue
+        preserved = task.get("preserved_work") or {}
+        expected = set(preserved.get("changed_paths") or [])
+        if task.get("id") != current and not expected:
+            continue
+        if expected and not current_business.issubset(expected):
+            continue
+        try:
+            validate_task(task, config)
+        except ValueError:
+            continue
+        return path, task
+    return None
+
+
+def preserve_failed_work(
+    task_path: Path,
+    task: dict[str, Any],
+    config: dict[str, Any],
+    state: dict[str, Any],
+    previous_error: str,
+    failure_kind: str | None,
+    cline_raw_reason: str | None,
+    max_attempts: int,
+) -> int:
+    """Keep failed work in place and make it first-class recovery input."""
+    diff_path, paths = write_recovery_diff(task["id"])
+    task["status"] = "retry_pending"
+    task["blocker"] = "Automatic repair cycle pending"
+    task["last_error"] = previous_error[-12000:]
+    task["preserved_work"] = {
+        "execution_copy": str(ROOT),
+        "changed_paths": paths,
+        "diff": diff_path,
+        "preserved_at": utc_now(),
+    }
+    if failure_kind:
+        task["failure_kind"] = failure_kind
+        task["failed_transport_version"] = int(config.get("pipeline", {}).get("prompt_transport_version", 1))
+    task.pop("quarantine", None)
+    save_json(task_path, task)
+    result = {
+        "task": task["id"], "status": "retry_pending", "execution_outcome": "automatic_repair_pending",
+        "attempts": max_attempts, "last_error": previous_error[-12000:], "failure_kind": failure_kind,
+        "attempted_fix": {"provider": "deepseek", "model": os.environ.get("AI_CLINE_MODEL", "deepseek-v4-pro")},
+        "preserved_work": task["preserved_work"], "finished_at": utc_now(),
+    }
+    save_json(RESULTS_DIR / f"{task['id']}.json", result)
+    set_state(
+        state, phase="ready", current_task=None,
+        last_error={"task": task["id"], "kind": "automatic_repair_pending", "summary": previous_error[-12000:]},
+        last_deepseek_fix={"task": task["id"], "attempts": max_attempts, "status": "retry_pending", "at": utc_now()},
+        finish_reason="failed_work_preserved_for_automatic_repair",
+    )
+    audit(
+        "failed_work_preserved", task=task["id"], reason=previous_error,
+        cline_finish_reason_raw=cline_raw_reason, changed_paths=paths, diff=diff_path,
+    )
+    print(f"Preserved {task['id']} work for automatic repair; no stash or reset was used.")
+    return 0
 
 
 def recoverable_deferred_failed_head(config: dict[str, Any], state: dict[str, Any]) -> tuple[Path, dict[str, Any]] | None:
@@ -506,41 +605,47 @@ def run_next(dry_run: bool) -> int:
         resume_existing = bool(changed_paths())
         resume_reason = "failed_head_normalized_for_deferred_browser"
     else:
-        item = recoverable_path_guard_task(config, state)
+        item = recoverable_dirty_task(config, state)
         if item is not None:
             resume_existing = True
-            resume_reason = "path_guard_recovered"
-            audit("path_guard_recovery_started", task=item[1]["id"], changed_paths=changed_paths())
+            resume_reason = "dirty_execution_copy_recovered"
+            audit("dirty_execution_copy_recovery_started", task=item[1]["id"], changed_paths=changed_paths())
         else:
-            item = recoverable_interrupted_task(config, state)
+            item = recoverable_path_guard_task(config, state)
             if item is not None:
                 resume_existing = True
-                resume_reason = "interrupted_task_recovered"
-                audit("interrupted_task_recovery_started", task=item[1]["id"], phase=state.get("phase"), changed_paths=changed_paths())
+                resume_reason = "path_guard_recovered"
+                audit("path_guard_recovery_started", task=item[1]["id"], changed_paths=changed_paths())
             else:
-                item = recoverable_browser_failure_task(config, state)
+                item = recoverable_interrupted_task(config, state)
                 if item is not None:
                     resume_existing = True
-                    resume_reason = "browser_failure_recovered"
-                    item[1]["browser_recovery_cycles"] = int(item[1].get("browser_recovery_cycles", 0) or 0) + 1
-                    item[1]["attempts"] = 0
-                    save_json(item[0], item[1])
-                    audit("browser_failure_recovery_started", task=item[1]["id"], cycle=item[1]["browser_recovery_cycles"], changed_paths=changed_paths())
+                    resume_reason = "interrupted_task_recovered"
+                    audit("interrupted_task_recovery_started", task=item[1]["id"], phase=state.get("phase"), changed_paths=changed_paths())
                 else:
-                    item = recoverable_deferred_failed_head(config, state)
+                    item = recoverable_browser_failure_task(config, state)
                     if item is not None:
                         resume_existing = True
-                        resume_reason = "deferred_browser_failed_head_recovered"
-                        item[1]["status"] = "retry"
+                        resume_reason = "browser_failure_recovered"
+                        item[1]["browser_recovery_cycles"] = int(item[1].get("browser_recovery_cycles", 0) or 0) + 1
                         item[1]["attempts"] = 0
                         save_json(item[0], item[1])
-                        audit("deferred_browser_failed_head_recovery_started", task=item[1]["id"], changed_paths=changed_paths())
+                        audit("browser_failure_recovery_started", task=item[1]["id"], cycle=item[1]["browser_recovery_cycles"], changed_paths=changed_paths())
                     else:
-                        try:
-                            item = next_task(config)
-                        except ValueError as exc:
-                            set_state(state, phase="blocked", blocker=str(exc), finish_reason="queue_head_blocked")
-                            audit("queue_head_blocked", reason=str(exc)); return 10
+                        item = recoverable_deferred_failed_head(config, state)
+                        if item is not None:
+                            resume_existing = True
+                            resume_reason = "deferred_browser_failed_head_recovered"
+                            item[1]["status"] = "retry"
+                            item[1]["attempts"] = 0
+                            save_json(item[0], item[1])
+                            audit("deferred_browser_failed_head_recovery_started", task=item[1]["id"], changed_paths=changed_paths())
+                        else:
+                            try:
+                                item = next_task(config)
+                            except ValueError as exc:
+                                set_state(state, phase="blocked", blocker=str(exc), finish_reason="queue_head_blocked")
+                                audit("queue_head_blocked", reason=str(exc)); return 10
     if item is None: print("No runnable task."); return 0
     task_path, task = item
     try: validate_task(task, config)
@@ -584,6 +689,13 @@ def run_next(dry_run: bool) -> int:
         if validate_existing_first:
             validate_existing_first = False
             audit("path_guard_recovery_validation_started", task=task["id"], attempt=attempt)
+            violations = path_violations(task, config)
+            if violations:
+                failure_kind = "path_guard_failure"
+                previous_error = "Path guard failed:\n" + "\n".join(violations)
+                set_state(state, phase="repairing", current_task=task["id"], last_error={"task": task["id"], "attempt": attempt, "kind": "path_guard", "summary": previous_error})
+                audit("path_guard_failed", task=task["id"], violations=violations)
+                continue
         else:
             log_path = LOGS_DIR / f"{task['id']}-attempt-{attempt}.jsonl"; LOGS_DIR.mkdir(parents=True, exist_ok=True)
             last_executor_log = log_path
@@ -686,8 +798,11 @@ def run_next(dry_run: bool) -> int:
                 failure_kind = "no_checkpoint_changes"
                 previous_error = "Task produced no checkpointable business changes."
             task["status"] = "in_progress"; save_json(task_path, task); continue
+        task["status"] = "finalizing"; save_json(task_path, task)
+        set_state(state, phase="finalizing", current_task=task["id"], last_build=build_record, last_error=None, finish_reason="validation_passed_commit_pending")
+        audit("task_finalizing", task=task["id"], changed_paths=business_changes)
         task["status"] = "completed"
-        for stale_key in ("blocker", "last_error", "failure_kind", "failed_transport_version", "recovery_context"):
+        for stale_key in ("blocker", "last_error", "failure_kind", "failed_transport_version", "recovery_context", "preserved_work", "quarantine"):
             task.pop(stale_key, None)
         save_json(task_path, task)
         normalized = (
@@ -726,42 +841,10 @@ def run_next(dry_run: bool) -> int:
             subprocess.run(["git", "push"], cwd=ROOT)
         print(f"Completed {task['id']} by {normalized}"); return 0
 
-    quarantine = subprocess.run(
-        ["git", "stash", "push", "-u", "-m", f"autonomy quarantine {task['id']}"],
-        cwd=ROOT, capture_output=True, text=True,
+    return preserve_failed_work(
+        task_path, task, config, state, previous_error, failure_kind,
+        cline_raw_reason, max_attempts,
     )
-    if quarantine.returncode != 0:
-        task["status"] = "blocked"; task["blocker"] = "Failed task could not be quarantined safely"; task["last_error"] = previous_error[-12000:]; save_json(task_path, task)
-        set_state(state, phase="degraded", current_task=None, last_error={"task": task["id"], "kind": "quarantine", "summary": previous_error[-12000:]})
-        audit("task_quarantine_failed", task=task["id"], reason=previous_error, git_error=quarantine.stderr.strip())
-        return 7
-    task["status"] = "blocked"
-    task["blocker"] = "Automatic repair budget exhausted"
-    task["last_error"] = previous_error[-12000:]
-    if failure_kind:
-        task["failure_kind"] = failure_kind
-        task["failed_transport_version"] = int(config.get("pipeline", {}).get("prompt_transport_version", 1))
-    task["quarantine"] = quarantine.stdout.strip()
-    save_json(task_path, task)
-    failure_result = {
-        "task": task["id"], "status": "blocked", "execution_outcome": "repair_budget_exhausted",
-        "attempts": max_attempts, "last_error": previous_error[-12000:],
-        "failure_kind": failure_kind,
-        "attempted_fix": {"provider": "deepseek", "model": os.environ.get("AI_CLINE_MODEL", "deepseek-v4-pro")},
-        "quarantine": quarantine.stdout.strip(), "finished_at": utc_now(),
-    }
-    save_json(RESULTS_DIR / f"{task['id']}.json", failure_result)
-    set_state(
-        state,
-        phase="ready",
-        current_task=None,
-        last_error={"task": task["id"], "kind": "repair_budget_exhausted", "summary": previous_error[-12000:]},
-        last_deepseek_fix={"task": task["id"], "attempts": max_attempts, "status": "exhausted", "at": utc_now()},
-    )
-    audit("task_quarantined", task=task["id"], reason=previous_error, cline_finish_reason_raw=cline_raw_reason, stash=quarantine.stdout.strip())
-    checkpoint_control_files(f"{task['id']}: quarantine failed task state")
-    print(f"Quarantined {task['id']}; continuing with dependency-safe work.")
-    return 0
 
 
 def main() -> int:

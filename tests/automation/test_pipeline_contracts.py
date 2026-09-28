@@ -188,6 +188,7 @@ class PipelineContracts(unittest.TestCase):
                 self.assertEqual(["ERP-096"], recovered)
                 self.assertEqual("retry", value["status"])
                 self.assertEqual(1, value["supervised_recovery_cycles"])
+                self.assertEqual("ERP-096-RECOVERY-1", value["recovery_context"]["remediation_task"])
                 self.assertIn("ERP-096-attempt-3.jsonl", value["recovery_context"]["attempt_logs"][0])
                 self.assertIn("different safe repair", value["recovery_context"]["instruction"])
             finally:
@@ -195,6 +196,142 @@ class PipelineContracts(unittest.TestCase):
                     pipeline.ROOT, pipeline.TASKS_DIR, pipeline.CONFIG_PATH, pipeline.STATE_PATH,
                     pipeline.AUDIT_PATH, pipeline.RESULTS_DIR, pipeline.LOGS_DIR,
                 ) = old_values
+
+    def test_failure_scan_runs_even_when_four_development_tasks_already_exist(self):
+        config = {"autonomy": {"enabled": True, "deepseek_supervisor_enabled": True}}
+        with patch.object(pipeline, "pipeline_lock") as lock, \
+             patch.object(pipeline, "load_json", side_effect=[config, {"conversation_control": {}}]), \
+             patch.object(pipeline, "recover_obsolete_transport_failures"), \
+             patch.object(pipeline, "recover_blocked_with_deepseek") as recover, \
+             patch.object(pipeline, "queue_head", return_value=(None, "queue_empty")), \
+             patch.object(pipeline, "mark_queue_replenishing"):
+            lock.return_value.__enter__.return_value = None
+            self.assertEqual(0, pipeline.run_all())
+        recover.assert_called_once_with(config)
+
+    def test_failed_and_retry_pending_tasks_become_bounded_deepseek_repairs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            ai_dir = root / ".ai"
+            tasks = ai_dir / "tasks"
+            results = ai_dir / "results"
+            logs = ai_dir / "logs"
+            tasks.mkdir(parents=True); results.mkdir(); logs.mkdir()
+            config_path = ai_dir / "config.json"
+            state_path = ai_dir / "PROJECT_STATE.json"
+            audit_path = ai_dir / "audit.jsonl"
+            config = {
+                "task_prefix": "ERP",
+                "autonomy": {"enabled": True, "deepseek_supervisor_enabled": True, "max_supervised_recovery_cycles": 1},
+            }
+            config_path.write_text(json.dumps(config), encoding="utf-8")
+            state_path.write_text(json.dumps({
+                "last_build": {"task": "ERP-201", "status": "failed", "log": ".ai/logs/ERP-201-validation-3.log"},
+                "last_error": {"task": "ERP-201", "kind": "validation", "summary": "compile failed"},
+            }), encoding="utf-8")
+            for task_id, status in (("ERP-201", "failed"), ("ERP-202", "retry_pending")):
+                value = self.task(task_id, status) | {"last_error": f"{task_id} error"}
+                (tasks / f"{task_id}.json").write_text(json.dumps(value), encoding="utf-8")
+            for number in range(203, 207):
+                value = self.task(f"ERP-{number}", "pending")
+                (tasks / f"ERP-{number}.json").write_text(json.dumps(value), encoding="utf-8")
+            (logs / "ERP-201-validation-3.log").write_text("CS1002 ; expected", encoding="utf-8")
+            old_values = (
+                pipeline.ROOT, pipeline.TASKS_DIR, pipeline.CONFIG_PATH, pipeline.STATE_PATH,
+                pipeline.AUDIT_PATH, pipeline.RESULTS_DIR, pipeline.LOGS_DIR,
+            )
+            pipeline.ROOT, pipeline.TASKS_DIR = root, tasks
+            pipeline.CONFIG_PATH, pipeline.STATE_PATH, pipeline.AUDIT_PATH = config_path, state_path, audit_path
+            pipeline.RESULTS_DIR, pipeline.LOGS_DIR = results, logs
+            try:
+                with patch.object(pipeline, "git_checkpoint"), patch.object(pipeline, "refresh_project_state"):
+                    recovered = pipeline.recover_blocked_with_deepseek(config)
+                self.assertEqual(["ERP-201", "ERP-202"], recovered)
+                failed = json.loads((tasks / "ERP-201.json").read_text(encoding="utf-8"))
+                self.assertEqual("retry", failed["status"])
+                self.assertEqual("failed", failed["recovery_context"]["latest_build"]["status"])
+                self.assertIn("ERP-201-validation-3.log", failed["recovery_context"]["validation_logs"][0])
+                pending = json.loads((tasks / "ERP-202.json").read_text(encoding="utf-8"))
+                self.assertEqual("retry", pending["status"])
+                self.assertEqual(1, pending["supervised_recovery_cycles"])
+                pending["status"] = "failed"
+                (tasks / "ERP-202.json").write_text(json.dumps(pending), encoding="utf-8")
+                with patch.object(pipeline, "git_checkpoint"), patch.object(pipeline, "refresh_project_state"):
+                    self.assertEqual([], pipeline.recover_blocked_with_deepseek(config))
+            finally:
+                (
+                    pipeline.ROOT, pipeline.TASKS_DIR, pipeline.CONFIG_PATH, pipeline.STATE_PATH,
+                    pipeline.AUDIT_PATH, pipeline.RESULTS_DIR, pipeline.LOGS_DIR,
+                ) = old_values
+
+    def test_in_progress_and_finalizing_tasks_are_recovered_before_pending_work(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            ai_dir = root / ".ai"
+            tasks = ai_dir / "tasks"
+            results = ai_dir / "results"
+            logs = ai_dir / "logs"
+            tasks.mkdir(parents=True); results.mkdir(); logs.mkdir()
+            config_path = ai_dir / "config.json"
+            state_path = ai_dir / "PROJECT_STATE.json"
+            audit_path = ai_dir / "audit.jsonl"
+            config = {
+                "task_prefix": "ERP",
+                "autonomy": {"enabled": True, "deepseek_supervisor_enabled": True, "max_supervised_recovery_cycles": 2},
+            }
+            config_path.write_text(json.dumps(config), encoding="utf-8")
+            state_path.write_text(json.dumps({"phase": "ready"}), encoding="utf-8")
+            for task_id, status in (("ERP-301", "in_progress"), ("ERP-302", "finalizing")):
+                (tasks / f"{task_id}.json").write_text(json.dumps(self.task(task_id, status)), encoding="utf-8")
+            old_values = (
+                pipeline.ROOT, pipeline.TASKS_DIR, pipeline.CONFIG_PATH, pipeline.STATE_PATH,
+                pipeline.AUDIT_PATH, pipeline.RESULTS_DIR, pipeline.LOGS_DIR,
+            )
+            pipeline.ROOT, pipeline.TASKS_DIR = root, tasks
+            pipeline.CONFIG_PATH, pipeline.STATE_PATH, pipeline.AUDIT_PATH = config_path, state_path, audit_path
+            pipeline.RESULTS_DIR, pipeline.LOGS_DIR = results, logs
+            try:
+                with patch.object(pipeline, "git_checkpoint"), patch.object(pipeline, "refresh_project_state"):
+                    self.assertEqual(["ERP-301", "ERP-302"], pipeline.recover_blocked_with_deepseek(config))
+                self.assertEqual("retry", json.loads((tasks / "ERP-301.json").read_text(encoding="utf-8"))["status"])
+                self.assertEqual("retry", json.loads((tasks / "ERP-302.json").read_text(encoding="utf-8"))["status"])
+            finally:
+                (
+                    pipeline.ROOT, pipeline.TASKS_DIR, pipeline.CONFIG_PATH, pipeline.STATE_PATH,
+                    pipeline.AUDIT_PATH, pipeline.RESULTS_DIR, pipeline.LOGS_DIR,
+                ) = old_values
+
+    def test_dirty_execution_copy_is_claimed_by_its_preserved_task(self):
+        task = self.task("ERP-096", "retry") | {
+            "preserved_work": {"changed_paths": ["src/ERP.Api/Program.cs"]},
+        }
+        with patch.object(orchestrator, "all_tasks", return_value=[(Path("ERP-096.json"), task)]), \
+             patch.object(orchestrator, "business_changed_paths", return_value=["src/ERP.Api/Program.cs"]), \
+             patch.object(orchestrator, "validate_task"):
+            item = orchestrator.recoverable_dirty_task({}, {"current_task": None})
+        self.assertEqual("ERP-096", item[1]["id"])
+
+    def test_failed_work_is_preserved_without_stash_or_reset(self):
+        task = self.task("ERP-096", "in_progress")
+        config = {"pipeline": {"prompt_transport_version": 2}}
+        state = {"phase": "repairing", "current_task": "ERP-096"}
+        with tempfile.TemporaryDirectory() as directory, \
+             patch.object(orchestrator, "RESULTS_DIR", Path(directory)), \
+             patch.object(orchestrator, "write_recovery_diff", return_value=(".ai/logs/ERP-096-preserved-work.diff", ["src/x.cs"])), \
+             patch.object(orchestrator, "save_json") as save, \
+             patch.object(orchestrator, "set_state") as set_state, \
+             patch.object(orchestrator, "audit") as audit, \
+             patch.object(orchestrator.subprocess, "run") as run:
+            self.assertEqual(0, orchestrator.preserve_failed_work(
+                Path("ERP-096.json"), task, config, state, "compile failed",
+                "validation_failure", "error", 3,
+            ))
+        self.assertEqual("retry_pending", task["status"])
+        self.assertEqual(["src/x.cs"], task["preserved_work"]["changed_paths"])
+        run.assert_not_called()
+        self.assertGreaterEqual(save.call_count, 2)
+        set_state.assert_called_once()
+        audit.assert_called_once()
 
     def test_l3_gate_requires_explicit_approval(self):
         with tempfile.TemporaryDirectory() as directory:

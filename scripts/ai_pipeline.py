@@ -33,8 +33,10 @@ ORCHESTRATOR = ROOT / "scripts" / "ai_orchestrator.py"
 AUTOMATION_TESTS = ROOT / "tests" / "automation"
 RUNNABLE_STATUSES = {"pending", "retry"}
 TERMINAL_STATUSES = {"completed", "deferred", "skipped", "superseded"}
-NONBLOCKING_WAIT_STATUSES = {"blocked", "failed"}
+FAILURE_STATUSES = {"blocked", "failed", "error", "retry_pending"}
+NONBLOCKING_WAIT_STATUSES = FAILURE_STATUSES
 ACTIVE_STATUSES = {"in_progress", "code_ready"}
+RECOVERY_SCAN_STATUSES = FAILURE_STATUSES | ACTIVE_STATUSES | {"finalizing"}
 SUPPORTED_GATES = {"L1", "L2", "L3", "L4"}
 
 
@@ -215,22 +217,36 @@ def recovery_evidence(task: dict[str, Any]) -> dict[str, Any]:
             evidence_logs = control_logs
     attempt_logs = sorted(evidence_logs.glob(f"{task_id}-attempt-*.jsonl"))[-3:]
     validation_logs = sorted(evidence_logs.glob(f"{task_id}-validation-*.log"))[-3:]
+    preserved = task.get("preserved_work") or {}
     def evidence_path(path: Path) -> str:
         try:
             return str(path.relative_to(ROOT))
         except ValueError:
             return str(path.resolve())
+    state = load_json(STATE_PATH) if STATE_PATH.exists() else {}
+    state_error = state.get("last_error")
+    state_build = state.get("last_build")
+    if isinstance(state_error, dict) and state_error.get("task") != task_id:
+        state_error = None
+    if isinstance(state_build, dict) and state_build.get("task") != task_id:
+        state_build = None
     return {
         "failure_kind": failure_kind or "unclassified_engineering_failure",
         "summary": summary,
         "result": str(result_path.relative_to(ROOT)) if result_path.exists() else None,
         "attempt_logs": [evidence_path(path) for path in attempt_logs],
         "validation_logs": [evidence_path(path) for path in validation_logs],
+        "latest_state_error": state_error,
+        "latest_build": state_build,
+        "task_context": str((TASKS_DIR / f"{task_id}.json").relative_to(ROOT)),
+        "changed_paths": preserved.get("changed_paths", []),
+        "diff": preserved.get("diff"),
+        "execution_copy": preserved.get("execution_copy"),
     }
 
 
 def recover_blocked_with_deepseek(config: dict[str, Any]) -> list[str]:
-    """Feed exhausted engineering failures back to DeepSeek with bounded evidence."""
+    """Turn recoverable failures into bounded, evidence-rich DeepSeek repair work."""
     autonomy = config.get("autonomy", {})
     if not autonomy.get("enabled", False) or not autonomy.get("deepseek_supervisor_enabled", False):
         return []
@@ -238,9 +254,10 @@ def recover_blocked_with_deepseek(config: dict[str, Any]) -> list[str]:
     recovered: list[str] = []
     changed: list[str] = []
     for path, task in task_entries():
-        if task.get("status") != "blocked":
+        status = task.get("status")
+        if status not in RECOVERY_SCAN_STATUSES:
             continue
-        if task.get("blocker") != "Automatic repair budget exhausted":
+        if status == "blocked" and task.get("blocker") != "Automatic repair budget exhausted":
             continue
         if task.get("requires_human_approval", False) or str(task.get("human_gate", {}).get("level", "L1")).upper() in {"L3", "L4"}:
             continue
@@ -248,7 +265,9 @@ def recover_blocked_with_deepseek(config: dict[str, Any]) -> list[str]:
         if cycles >= maximum:
             continue
         evidence = recovery_evidence(task)
+        remediation_id = f"{task['id']}-RECOVERY-{cycles + 1}"
         task.setdefault("recovery_history", []).append({
+            "remediation_task": remediation_id,
             "cycle": cycles + 1,
             "at": utc_now(),
             "evidence": evidence,
@@ -257,10 +276,12 @@ def recover_blocked_with_deepseek(config: dict[str, Any]) -> list[str]:
         task["attempts"] = 0
         task["supervised_recovery_cycles"] = cycles + 1
         task["recovery_context"] = {
+            "remediation_task": remediation_id,
             **evidence,
             "instruction": (
                 "DeepSeek supervisor recovery: inspect the referenced complete logs, diagnose the root cause, "
-                "and implement a different safe repair within allowed_paths. Do not repeat the failed approach. "
+                "and implement a different safe repair within allowed_paths. Rebuild and rerun the configured tests; "
+                "if validation fails, use the newest log as the next repair input. Do not repeat the failed approach. "
                 "Do not edit task/state/result files or relax production and irreversible-operation gates."
             ),
         }
@@ -269,7 +290,7 @@ def recover_blocked_with_deepseek(config: dict[str, Any]) -> list[str]:
         save_json(path, task)
         recovered.append(task["id"])
         changed.append(str(path.relative_to(ROOT)))
-        audit("deepseek_supervisor_requeued", task=task["id"], cycle=cycles + 1, evidence=evidence)
+        audit("deepseek_supervisor_requeued", task=task["id"], remediation_task=remediation_id, cycle=cycles + 1, evidence=evidence)
     if recovered:
         refresh_project_state(ROOT, phase="ready", current_task=None, blocker=None, finish_reason="deepseek_supervisor_recovery")
         changed.extend([str(STATE_PATH.relative_to(ROOT)), str(AUDIT_PATH.relative_to(ROOT))])
@@ -377,8 +398,11 @@ def run_all() -> int:
     with pipeline_lock():
         config = load_json(CONFIG_PATH)
         recover_obsolete_transport_failures(config)
-        recover_blocked_with_deepseek(config)
         while True:
+            # Failure handling is a first-class phase of every scheduler cycle.
+            # Queue capacity only controls replenishment; it must never bypass
+            # failed-task/log collection or DeepSeek repair scheduling.
+            recover_blocked_with_deepseek(config)
             state = load_json(STATE_PATH)
             conversation = state.get("conversation_control", {})
             if conversation.get("paused", False):
@@ -468,7 +492,7 @@ def self_test() -> int:
     try: config = load_json(CONFIG_PATH); checks["config"] = "ok"
     except Exception as exc: print(f"Configuration error: {exc}", file=sys.stderr); return 2
     ids = []
-    allowed_statuses = {"pending", "retry", "in_progress", "code_ready", "blocked", "completed", "failed", "deferred", "skipped", "superseded"}
+    allowed_statuses = {"pending", "retry", "retry_pending", "in_progress", "code_ready", "finalizing", "blocked", "completed", "failed", "error", "deferred", "skipped", "superseded"}
     for path, task in task_entries():
         ids.append(task.get("id"))
         if task.get("id") != path.stem: errors.append(f"Task id/file mismatch: {path.name}")

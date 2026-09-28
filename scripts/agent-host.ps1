@@ -103,8 +103,33 @@ function Get-Tasks {
 function Get-QueueHead {
     param([object[]]$Tasks)
     foreach ($task in $Tasks) {
-        if ($task.status -in @('completed', 'deferred', 'skipped', 'superseded', 'blocked', 'failed')) { continue }
+        if ($task.status -in @('completed', 'deferred', 'skipped', 'superseded', 'blocked', 'failed', 'error', 'retry_pending')) { continue }
         return $task
+    }
+    return $null
+}
+
+function Get-RecoverableFailure {
+    param([object[]]$Tasks)
+
+    $maximum = 2
+    try {
+        $config = Get-Content $configPath -Raw -Encoding UTF8 | ConvertFrom-Json
+        if ($config.autonomy.max_supervised_recovery_cycles) {
+            $maximum = [int]$config.autonomy.max_supervised_recovery_cycles
+        }
+    } catch {}
+
+    foreach ($task in $Tasks) {
+        if ($task.status -notin @('blocked', 'failed', 'error', 'retry_pending', 'in_progress', 'code_ready', 'finalizing')) { continue }
+        if ($task.status -eq 'blocked' -and [string]$task.blocker -ne 'Automatic repair budget exhausted') { continue }
+        if ($task.requires_human_approval -eq $true) { continue }
+        if ($task.human_gate -and [string]$task.human_gate.level -in @('L3', 'L4')) { continue }
+        $cycles = 0
+        if ($task.PSObject.Properties.Name -contains 'supervised_recovery_cycles') {
+            $cycles = [int]$task.supervised_recovery_cycles
+        }
+        if ($cycles -lt $maximum) { return $task }
     }
     return $null
 }
@@ -366,8 +391,8 @@ function Test-RecoverableInterruptedTask {
     param($State, $Head)
 
     if (-not $State -or -not $Head) { return $false }
-    if ($State.phase -notin @('developing', 'browser_acceptance')) { return $false }
-    return $Head.status -in @('in_progress', 'code_ready')
+    if ($State.phase -notin @('developing', 'repairing', 'browser_acceptance', 'finalizing')) { return $false }
+    return $Head.status -in @('in_progress', 'code_ready', 'finalizing')
 }
 
 function Test-BrowserAcceptanceDeferred {
@@ -808,6 +833,7 @@ try {
         $state = Get-ProjectState
         $tasks = @(Get-Tasks)
         $head = Get-QueueHead $tasks
+        $recoverableFailure = Get-RecoverableFailure $tasks
         $gitInfo = Get-GitInfo
 
         # Paint local state before any network operation. Git fetch or GitHub CLI
@@ -823,6 +849,7 @@ try {
             $state = Get-ProjectState
             $tasks = @(Get-Tasks)
             $head = Get-QueueHead $tasks
+            $recoverableFailure = Get-RecoverableFailure $tasks
             $gitInfo = Get-GitInfo
         }
 
@@ -853,12 +880,14 @@ try {
         $worktreeAllowsStart = (-not $gitInfo.Dirty) -or $canStartWithDirty
 
         if (-not $NoExecute -and -not $pipelineProcess -and -not $paused -and $worktreeAllowsStart -and $gitInfo.Branch -in $managedBranches) {
-            if ($recoverPush -or $recoverExisting -or (Test-TaskRunnable $head)) {
+            if ($recoverPush -or $recoverExisting -or $recoverableFailure -or (Test-TaskRunnable $head)) {
                 try {
                     if ($recoverExisting) {
                         $lastRecoveryAttemptKey = $recoveryKey
                         $pipelineProcess = Start-Pipeline -RecoverPathGuard
                     } else {
+                        # Normal pipeline startup always scans and schedules failed
+                        # work before selecting pending development work.
                         $pipelineProcess = Start-Pipeline
                     }
                 } catch {
