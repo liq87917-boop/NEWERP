@@ -463,7 +463,7 @@ function Get-StatusLines {
     elseif ($mode -eq 'ATTENTION') { $modeColor = 'Red' }
 
     $lines += New-StatusLine '============================================================' 'DarkCyan'
-    $lines += New-StatusLine (" NEWERP AI AGENT   [{0}]" -f $mode) $modeColor
+    $lines += New-StatusLine (" NEWERP LOCAL DEVELOPMENT CONSOLE   [{0}]" -f $mode) $modeColor
     $lines += New-StatusLine '============================================================' 'DarkCyan'
     $lines += New-StatusLine (" Local time : {0}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'))
 
@@ -483,15 +483,41 @@ function Get-StatusLines {
     $lines += New-StatusLine (" GitHub CI  : {0}" -f $lastCiText)
 
     $lines += New-StatusLine ''
-    $lines += New-StatusLine ' Project state' 'Cyan'
+    $lines += New-StatusLine ' Development overview' 'Cyan'
     if ($State) {
         $lines += New-StatusLine (" Phase      : {0}" -f $State.phase)
         $currentTask = '-'
         if ($State.current_task) { $currentTask = $State.current_task }
         $lastCompleted = '-'
-        if ($State.last_completed_task) { $lastCompleted = $State.last_completed_task }
+        $completedCount = 0
+        if ($State.completed) {
+            $completedItems = @($State.completed)
+            $completedCount = $completedItems.Count
+            if ($completedCount -gt 0) { $lastCompleted = $completedItems[-1] }
+        } elseif ($State.last_completed_task) {
+            $lastCompleted = $State.last_completed_task
+        }
         $lines += New-StatusLine (" Current    : {0}" -f $currentTask)
-        $lines += New-StatusLine (" Completed  : {0}" -f $lastCompleted)
+        $lines += New-StatusLine (" Completed  : {0} task(s) | latest {1}" -f $completedCount, $lastCompleted)
+        if ($State.last_build) {
+            $build = $State.last_build
+            $buildText = @($build.status, $build.build, $build.unit_tests) | Where-Object { $_ }
+            $buildColor = if ($build.status -eq 'passed') { 'Green' } else { 'Red' }
+            $lines += New-StatusLine (" Last build : {0} | {1}" -f $build.task, ($buildText -join ' | ')) $buildColor
+        }
+        if ($State.last_deepseek_fix) {
+            $fix = $State.last_deepseek_fix
+            $lines += New-StatusLine (" DeepSeek   : {0} attempt {1} | {2}" -f $fix.task, $fix.attempt, $fix.status)
+        }
+        if ($State.last_error) {
+            $errorSummary = [string]$State.last_error.summary
+            if ([string]::IsNullOrWhiteSpace($errorSummary)) { $errorSummary = [string]$State.last_error.kind }
+            $lines += New-StatusLine (" Last error : {0} | {1}" -f $State.last_error.task, $errorSummary) 'Red'
+        }
+        $blockedCount = @($State.blocked).Count
+        if ($blockedCount -gt 0) {
+            $lines += New-StatusLine (" Blocked    : {0} task(s); independent work continues" -f $blockedCount) 'Yellow'
+        }
         if ($State.validation) {
             $lines += New-StatusLine (" Validation : {0} / {1}" -f $State.validation.profile, $State.validation.status)
         }
@@ -519,15 +545,15 @@ function Get-StatusLines {
     }
 
     $lines += New-StatusLine ''
-    $lines += New-StatusLine ' Queue' 'Cyan'
+    $lines += New-StatusLine ' Task plan' 'Cyan'
     if ($Tasks.Count -eq 0) {
         $lines += New-StatusLine ' (empty)'
     } else {
         # Keep the dashboard inside the visible console window. Completed history
         # is already summarized above; the queue should focus on active/future work.
-        $visible = @($Tasks | Where-Object { $_.status -notin @('completed', 'deferred', 'skipped') } | Select-Object -First 5)
+        $visible = @($Tasks | Where-Object { $_.status -in @('pending', 'retry', 'in_progress', 'code_ready') } | Select-Object -First 6)
         if ($visible.Count -eq 0) {
-            $visible = @($Tasks | Select-Object -Last 2)
+            $visible = @($Tasks | Where-Object { $_.status -in @('blocked', 'failed') } | Select-Object -First 2)
         }
         foreach ($task in $visible) {
             $marker = ' '
@@ -540,6 +566,27 @@ function Get-StatusLines {
             elseif ($task.status -eq 'deferred') { $color = 'DarkYellow' }
             $lines += New-StatusLine $line $color
         }
+    }
+
+    if ($State -and $State.next_recommended_tasks) {
+        $lines += New-StatusLine (" Next batch : {0}" -f (@($State.next_recommended_tasks) -join ' -> ')) 'DarkCyan'
+    }
+
+    $latestResult = $null
+    if ($State -and $State.completed) {
+        $completedItems = @($State.completed)
+        if ($completedItems.Count -gt 0) {
+            $candidateResult = Join-Path $root (".ai\results\{0}.json" -f $completedItems[-1])
+            if (Test-Path $candidateResult) { $latestResult = Get-Item $candidateResult }
+        }
+    }
+    if ($latestResult) {
+        try {
+            $result = Get-Content $latestResult.FullName -Raw -Encoding UTF8 | ConvertFrom-Json
+            $resultStatus = if ($result.execution_outcome) { $result.execution_outcome } else { $result.status }
+            $reason = if ($result.normalized_finish_reason) { $result.normalized_finish_reason } else { '-' }
+            $lines += New-StatusLine (" Last result: {0} | {1} | {2} | attempts {3}" -f $result.task, $resultStatus, $reason, $result.attempts) 'DarkGreen'
+        } catch {}
     }
 
     $lines += New-StatusLine ''
