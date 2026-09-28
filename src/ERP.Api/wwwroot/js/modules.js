@@ -237,6 +237,8 @@ const MODULES = {
        服务端不抓取任何图片地址、不改写商品图片字段。 */
     extraActions: [
       { label: '🖼 图片库', onclick: 'openProductImageLibrary()', title: '打开只读商品图片库（图片位 1~3；可按商品编码 / 名称与填充状态筛选，不触达 OSS 与商品图片字段）' },
+      /* ERP-107：只读出口字段完整度工作台入口（只读派生；仅报告字段缺口，不判断报关合规 / 退税资格） */
+      { label: '🧾 出口字段完整度', onclick: 'openProductExportFieldCompleteness()', title: '打开只读出口字段完整度工作台（英文报关品名 / 装箱单位与数量 / 外箱尺寸毛重 / 退税率；仅报告字段缺口，不判断报关合规或退税资格）' },
     ],
 
     /* ERP-037：颜色 / 尺码 SKU 规格维护（主数据子表，可选）。
