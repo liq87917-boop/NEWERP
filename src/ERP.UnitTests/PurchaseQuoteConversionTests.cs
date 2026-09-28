@@ -511,6 +511,22 @@ public class PurchaseQuoteConversionTests
         };
         db.PurchaseQuotes.Add(quote);
         db.SaveChanges();
+
+        // ERP-095：比价行需先「批准选中」才能转采购订单
+        db.PurchaseQuoteDecisions.Add(new PurchaseQuoteDecision
+        {
+            QuoteId = quote.Id,
+            QuoteNo = quote.QuoteNo,
+            Decision = PurchaseQuoteApproval.Approved,
+            SelectedSupplierId = quote.SupplierId,
+            SelectedSupplierName = quote.SupplierName,
+            DecisionBasis = "单价最优",
+            DecidedBy = 1L,
+            DecidedByName = "审批人",
+            DecidedAt = DateTime.Now,
+            DecisionRef = PurchaseQuoteApproval.DecisionRef(quote)
+        });
+        db.SaveChanges();
         return quote;
     }
 }

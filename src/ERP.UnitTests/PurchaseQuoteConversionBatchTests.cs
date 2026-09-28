@@ -755,6 +755,25 @@ public class PurchaseQuoteConversionBatchTests
         };
         db.PurchaseQuotes.Add(line);
         db.SaveChanges();
+
+        // ERP-095：合格行（已选中且已维护供应商）需先「批准选中」才能转采购订单
+        if (selected && status == PurchaseQuoteConversion.SelectedStatus && supplierId > 0)
+        {
+            db.PurchaseQuoteDecisions.Add(new PurchaseQuoteDecision
+            {
+                QuoteId = line.Id,
+                QuoteNo = line.QuoteNo,
+                Decision = PurchaseQuoteApproval.Approved,
+                SelectedSupplierId = line.SupplierId,
+                SelectedSupplierName = line.SupplierName,
+                DecisionBasis = "单价最优",
+                DecidedBy = 1L,
+                DecidedByName = "审批人",
+                DecidedAt = DateTime.Now,
+                DecisionRef = PurchaseQuoteApproval.DecisionRef(line)
+            });
+            db.SaveChanges();
+        }
         return line;
     }
 }

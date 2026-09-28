@@ -75,8 +75,17 @@ public static class PurchaseQuoteConversion
         if (quote.SupplierId is null or <= 0)
             throw BusinessException.RuleConflict("比价行未维护供应商，不能生成采购订单");
 
+        // ERP-095：只接受「已批准」的比价行，并把审批参考号保留到采购订单备注
+        var decision = lookup is null
+            ? await PurchaseQuoteApproval.FindCurrentDecisionAsync(db, quote, ct)
+            : lookup.FindDecision(quote.Id);
+        if (decision is null)
+            throw BusinessException.RuleConflict("该比价行尚未审批通过，请先在「供应商比价」中审批选中供应商");
+        if (!string.Equals(decision.Decision, PurchaseQuoteApproval.Approved, StringComparison.Ordinal))
+            throw BusinessException.RuleConflict($"该比价行审批结果为「拒绝」（{decision.DecisionRef}），不能生成采购订单");
+
         var (salesOrderId, salesOrderNo) = await ResolveOwningSalesOrderAsync(db, quote, lookup, ct);
-        return MapDraft(quote, salesOrderId, salesOrderNo);
+        return MapDraft(quote, salesOrderId, salesOrderNo, decision.DecisionRef);
     }
 
     // ==================== 重复生成守卫（同一比价行仅一张采购订单） ====================
@@ -128,10 +137,15 @@ public static class PurchaseQuoteConversion
     /// 归属销售订单 ← RefOrderNo 解析出的销售订单（匹配不到留空）；备注 ← 比价备注 + 来源标记；
     /// 明细 = 该比价行一行（商品 / 规格 / 单位 / 数量 / 报价单价，商品未引用档案时 ProductId 按 0 占位）。
     /// </summary>
-    private static PurchaseOrder MapDraft(PurchaseQuote quote, long? owningSalesOrderId, string owningSalesOrderNo)
+    private static PurchaseOrder MapDraft(PurchaseQuote quote, long? owningSalesOrderId, string owningSalesOrderNo,
+        string decisionRef)
     {
         var orderDate = DateTime.Today;
         var deliveryDate = quote.DeliveryDays > 0 ? orderDate.AddDays(quote.DeliveryDays) : (DateTime?)null;
+
+        var remark = MergeRemark(quote.Remark, SourceMarker(quote));
+        if (!string.IsNullOrEmpty(decisionRef))
+            remark = MergeRemark(remark, $"审批参考 {decisionRef}");
 
         var order = new PurchaseOrder
         {
@@ -156,7 +170,7 @@ public static class PurchaseQuoteConversion
             SettlementProgress = string.Empty,
             ContractNo = string.Empty,
             Status = DocumentStatus.Pending,
-            Remark = MergeRemark(quote.Remark, SourceMarker(quote)),
+            Remark = remark,
             CreatedAt = DateTime.Now,
             Details = new List<PurchaseOrderDetail> { NewDetail(quote, deliveryDate) }
         };
@@ -315,8 +329,17 @@ public static class PurchaseQuoteConversion
             group.LineDrafts.Add(draft);
         }
 
+        // ERP-095：批内逐行的审批参考号（只含已批准行），用于订单与明细备注保留审批引用
+        var approvalRefs = new Dictionary<long, string>();
+        foreach (var (line, _) in drafts)
+        {
+            var decision = lookup.FindDecision(line.Id);
+            if (decision is not null && string.Equals(decision.Decision, PurchaseQuoteApproval.Approved, StringComparison.Ordinal))
+                approvalRefs[line.Id] = decision.DecisionRef;
+        }
+
         foreach (var group in build.Groups)
-            group.Draft = MergeGroup(group.Lines, group.LineDrafts);
+            group.Draft = MergeGroup(group.Lines, group.LineDrafts, approvalRefs);
         return build;
     }
 
@@ -325,7 +348,8 @@ public static class PurchaseQuoteConversion
     /// 明细按来源行顺序逐行铺开（每行保留自己的交期），订单交期取组内最晚一行（一单覆盖所有行），
     /// 备注与明细备注逐行写入来源标记，最后由采购订单口径重算总额并校验。
     /// </summary>
-    private static PurchaseOrder MergeGroup(IReadOnlyList<PurchaseQuote> lines, IReadOnlyList<PurchaseOrder> drafts)
+    private static PurchaseOrder MergeGroup(IReadOnlyList<PurchaseQuote> lines, IReadOnlyList<PurchaseOrder> drafts,
+        IReadOnlyDictionary<long, string> approvalRefs)
     {
         var head = drafts[0];
         var deliveryDates = drafts.Where(d => d.DeliveryDate.HasValue).Select(d => d.DeliveryDate!.Value).ToList();
@@ -351,7 +375,7 @@ public static class PurchaseQuoteConversion
             AdvanceOnBehalf = head.AdvanceOnBehalf,
             ContractNo = head.ContractNo,
             Status = DocumentStatus.Pending,
-            Remark = MergeBatchRemark(lines),
+            Remark = MergeBatchRemark(lines, approvalRefs),
             CreatedAt = DateTime.Now,
             Details = new List<PurchaseOrderDetail>()
         };
@@ -359,7 +383,10 @@ public static class PurchaseQuoteConversion
         for (var i = 0; i < lines.Count; i++)
         {
             var detail = drafts[i].Details[0];           // 单行草稿固定一行明细
-            detail.Remark = Clamp(MergeRemark(lines[i].Remark, SourceMarker(lines[i])), 500);   // 行级来源留痕
+            var detailRemark = MergeRemark(lines[i].Remark, SourceMarker(lines[i]));   // 行级来源留痕
+            if (approvalRefs.TryGetValue(lines[i].Id, out var refText) && refText.Length > 0)
+                detailRemark = MergeRemark(detailRemark, $"审批参考 {refText}");       // 行级审批引用
+            detail.Remark = Clamp(detailRemark, 500);
             order.Details.Add(detail);
         }
 
@@ -542,9 +569,16 @@ public static class PurchaseQuoteConversion
     /// 单行时与单行转换的「备注 ｜ 来源标记」完全一致；每行的来源标记同时写进对应明细行备注，行级可追溯。
     /// 父备注过长时**先截断父备注、保留来源标记**（来源标记是重复生成的第二道判据，不能因截断丢失）。
     /// </summary>
-    private static string MergeBatchRemark(IReadOnlyList<PurchaseQuote> lines)
+    private static string MergeBatchRemark(IReadOnlyList<PurchaseQuote> lines,
+        IReadOnlyDictionary<long, string> approvalRefs)
     {
-        var markers = string.Join(" ｜ ", lines.Select(SourceMarker));
+        var markers = string.Join(" ｜ ", lines.Select(l =>
+        {
+            var marker = SourceMarker(l);
+            if (approvalRefs.TryGetValue(l.Id, out var refText) && refText.Length > 0)
+                return $"{marker} ｜ 审批参考 {refText}";
+            return marker;
+        }));
 
         var parents = new List<string>();
         foreach (var line in lines)
@@ -627,6 +661,7 @@ public sealed class PurchaseQuoteBatchLookup
     private readonly Dictionary<string, PurchaseOrder> _ordersByNo = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<PurchaseOrder> _ordersByMarkerRemark = new();
     private readonly Dictionary<string, SalesOrder> _salesOrdersByNo = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<long, PurchaseQuoteDecision> _decisionsByQuoteId = new();
 
     /// <summary>按批次行一次性装载索引（只读；仅未删除单据参与判定）</summary>
     public static async Task<PurchaseQuoteBatchLookup> LoadAsync(IErpDbContext db, IReadOnlyList<PurchaseQuote> lines,
@@ -659,6 +694,13 @@ public sealed class PurchaseQuoteBatchLookup
             lookup._ordersByNo[order.OrderNo] = order;
             if (order.Remark.Contains(prefix, StringComparison.Ordinal)) lookup._ordersByMarkerRemark.Add(order);
         }
+
+        // ③ 比价行审批决定（ERP-095）：批内一次性预取，供转换守卫与审批引用留痕
+        var quoteIds = lines.Select(l => l.Id).ToList();
+        var decisions = await db.PurchaseQuoteDecisions.AsNoTracking()
+            .Where(d => !d.IsDeleted && quoteIds.Contains(d.QuoteId))
+            .ToListAsync(ct);
+        foreach (var decision in decisions) lookup._decisionsByQuoteId[decision.QuoteId] = decision;
         return lookup;
     }
 
@@ -671,6 +713,10 @@ public sealed class PurchaseQuoteBatchLookup
         var marker = PurchaseQuoteConversion.SourceMarker(quote);
         return _ordersByMarkerRemark.FirstOrDefault(o => o.Remark.Contains(marker, StringComparison.Ordinal));
     }
+
+    /// <summary>该比价行的当前审批决定（ERP-095；未预取到 = 无决定，与单行路径判定一致）</summary>
+    public PurchaseQuoteDecision? FindDecision(long quoteId)
+        => _decisionsByQuoteId.TryGetValue(quoteId, out var decision) ? decision : null;
 
     /// <summary>按单号取关联销售订单（未预取到 = 不存在或已删除，与单行路径匹配结果一致）</summary>
     public SalesOrder? FindSalesOrder(string orderNo)

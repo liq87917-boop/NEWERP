@@ -1190,6 +1190,27 @@ public partial class ErpDbContext
         modelBuilder.Entity<CustomerSalesInvoiceCollectionAllocation>().HasIndex(x => new { x.Status, x.AllocatedAt })
             .HasDatabaseName("IX_CustomerSalesInvoiceCollectionAllocations_Status_AllocatedAt")
             .HasFilter("IsDeleted = 0");
+
+        // ============ ERP-095：供应商比价价格审批与供应商选择历史（append-only） ============
+        // 设计口径：
+        //   1. 只记录「批准 / 拒绝」决定与选中供应商快照，不自动选供应商、不定价、不改写比价行、
+        //      采购订单与库存（决定是否选中供应商由人工在比价页完成，本表只是不可变留痕）；
+        //   2. append-only：不提供修改 / 删除接口；服务端「重复 / 陈旧 / 跨批次」守卫先行拒绝，
+        //      数据库层以过滤唯一索引兜底并发（同一比价行至多一条有效决定）；
+        //   3. 刻意不建到比价行的外键：比价行允许软删除，历史审批证据必须始终可读；
+        //   4. 列长度与 SchemaUpgrader 第 46 段建表类型一致。
+        modelBuilder.Entity<PurchaseQuoteDecision>().Property(x => x.QuoteNo).HasMaxLength(50);
+        modelBuilder.Entity<PurchaseQuoteDecision>().Property(x => x.Decision).HasMaxLength(20);
+        modelBuilder.Entity<PurchaseQuoteDecision>().Property(x => x.SelectedSupplierName).HasMaxLength(200);
+        modelBuilder.Entity<PurchaseQuoteDecision>().Property(x => x.DecisionBasis).HasMaxLength(500);
+        modelBuilder.Entity<PurchaseQuoteDecision>().Property(x => x.DecidedByName).HasMaxLength(100);
+        modelBuilder.Entity<PurchaseQuoteDecision>().Property(x => x.DecisionRef).HasMaxLength(50);
+
+        // 同一比价行在有效（未删除）记录内唯一：重复决定由服务端先行拒绝，索引为并发兜底
+        modelBuilder.Entity<PurchaseQuoteDecision>()
+            .HasIndex(x => x.QuoteId)
+            .IsUnique().HasDatabaseName("UX_PurchaseQuoteDecisions_QuoteId")
+            .HasFilter("IsDeleted = 0");
     }
 
     /// <summary>保存变更：自动填充审计字段</summary>

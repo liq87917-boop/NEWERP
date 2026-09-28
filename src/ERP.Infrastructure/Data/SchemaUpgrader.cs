@@ -3084,5 +3084,39 @@ IF NOT EXISTS (SELECT 1 FROM sys.indexes
         WHERE IsDeleted = 0;
 ");
 
+        // 46. ERP-095：供应商比价价格审批与供应商选择历史（append-only，只建表 + 过滤唯一索引，
+        //     不回填、不改既有表、不写业务数据）
+        await db.Database.ExecuteSqlRawAsync(@"
+IF OBJECT_ID('db_owner.PurchaseQuoteDecisions') IS NULL
+BEGIN
+    CREATE TABLE db_owner.PurchaseQuoteDecisions (
+        Id BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+        QuoteId BIGINT NOT NULL,
+        QuoteNo NVARCHAR(50) NOT NULL DEFAULT N'',
+        Decision NVARCHAR(20) NOT NULL DEFAULT N'',
+        SelectedSupplierId BIGINT NULL,
+        SelectedSupplierName NVARCHAR(200) NOT NULL DEFAULT N'',
+        DecisionBasis NVARCHAR(500) NOT NULL DEFAULT N'',
+        DecidedBy BIGINT NULL,
+        DecidedByName NVARCHAR(100) NOT NULL DEFAULT N'',
+        DecidedAt DATETIME2 NOT NULL DEFAULT GETDATE(),
+        DecisionRef NVARCHAR(50) NOT NULL DEFAULT N'',
+        CreatedAt DATETIME2 NOT NULL DEFAULT GETDATE(),
+        CreatedBy BIGINT NULL,
+        UpdatedAt DATETIME2 NULL,
+        UpdatedBy BIGINT NULL,
+        IsDeleted BIT NOT NULL DEFAULT 0,
+        RowVersion ROWVERSION NOT NULL
+    );
+END
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes
+               WHERE name = 'UX_PurchaseQuoteDecisions_QuoteId'
+                 AND object_id = OBJECT_ID('db_owner.PurchaseQuoteDecisions'))
+    CREATE UNIQUE INDEX UX_PurchaseQuoteDecisions_QuoteId
+        ON db_owner.PurchaseQuoteDecisions(QuoteId)
+        WHERE IsDeleted = 0;
+");
+
     }
 }

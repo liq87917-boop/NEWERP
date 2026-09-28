@@ -52,6 +52,9 @@ public partial class ErpDbContext : DbContext, IErpDbContext
     /// <summary>供应商报价比价（阶段 2 新增）</summary>
     public DbSet<PurchaseQuote> PurchaseQuotes => Set<PurchaseQuote>();
 
+    /// <summary>供应商比价价格审批与供应商选择历史（ERP-095）</summary>
+    public DbSet<PurchaseQuoteDecision> PurchaseQuoteDecisions => Set<PurchaseQuoteDecision>();
+
     /// <summary>出口单证台账（阶段 2 新增）</summary>
     public DbSet<TradeDocument> TradeDocuments => Set<TradeDocument>();
 

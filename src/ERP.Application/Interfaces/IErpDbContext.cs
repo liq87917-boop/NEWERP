@@ -238,6 +238,9 @@ public interface IErpDbContext
     /// <summary>供应商报价比价（阶段 2 新增）</summary>
     DbSet<PurchaseQuote> PurchaseQuotes { get; }
 
+    /// <summary>供应商比价价格审批与供应商选择历史（ERP-095：append-only 审批决定）</summary>
+    DbSet<PurchaseQuoteDecision> PurchaseQuoteDecisions { get; }
+
     /// <summary>出口单证台账（阶段 2 新增）</summary>
     DbSet<TradeDocument> TradeDocuments { get; }
 

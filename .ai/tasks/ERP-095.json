@@ -1,7 +1,7 @@
 {
   "id": "ERP-095",
   "title": "Add purchase-quote price approval and supplier selection history",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "medium",
   "description": "Add a development-only purchase-quote approval workflow that records the selected supplier, decision basis and immutable approval history before order conversion. Do not execute production SQL or deploy.",
   "acceptance_criteria": [
@@ -10,14 +10,33 @@
     "History is append-only and rejects duplicate, stale or cross-batch decisions.",
     "Release build and focused unit tests pass."
   ],
-  "allowed_paths": ["src/ERP.Domain/**", "src/ERP.Application/**", "src/ERP.Infrastructure/**", "src/ERP.Api/**", "src/ERP.UnitTests/**", "docs/**", ".ai/**"],
-  "depends_on": ["ERP-020", "ERP-027"],
+  "allowed_paths": [
+    "src/ERP.Domain/**",
+    "src/ERP.Application/**",
+    "src/ERP.Infrastructure/**",
+    "src/ERP.Api/**",
+    "src/ERP.UnitTests/**",
+    "docs/**",
+    ".ai/**"
+  ],
+  "depends_on": [
+    "ERP-020",
+    "ERP-027"
+  ],
   "auto_start": true,
   "requires_human_approval": false,
   "max_attempts": 3,
   "validation_profile": "safe",
   "completion_mode": "build",
-  "browser_acceptance": {"required": false, "deferred": true},
-  "human_gate": {"required": false, "level": "L1", "status": "not_required", "reason": "Development build gate; production migration is excluded."},
-  "attempts": 0
+  "browser_acceptance": {
+    "required": false,
+    "deferred": true
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development build gate; production migration is excluded."
+  },
+  "attempts": 1
 }
