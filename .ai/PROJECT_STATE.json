@@ -1,11 +1,10 @@
 {
   "schema_version": 2,
   "project": "NEWERP",
-  "updated_at": "2026-09-28T08:04:09.395295Z",
+  "updated_at": "2026-09-28T08:21:18.226660Z",
   "phase": "ready",
   "current_task": null,
   "queue": [
-    "ERP-104",
     "ERP-105",
     "ERP-106",
     "ERP-107"
@@ -88,7 +87,8 @@
     "ERP-098",
     "ERP-099",
     "ERP-100",
-    "ERP-101"
+    "ERP-101",
+    "ERP-104"
   ],
   "blocked": [
     {
@@ -111,35 +111,31 @@
     }
   ],
   "last_build": {
-    "task": "ERP-101",
+    "task": "ERP-104",
     "profile": "safe",
     "status": "passed",
     "exit_code": 0,
-    "log": ".ai\\logs\\ERP-101-validation-1.log",
-    "at": "2026-09-28T07:37:42.679922Z"
+    "log": ".ai\\logs\\ERP-104-validation-3.log",
+    "at": "2026-09-28T08:21:17.826344Z"
   },
-  "last_error": {
-    "task": "ERP-103",
-    "kind": "repair_budget_exhausted",
-    "summary": "Task produced no checkpointable business changes."
-  },
+  "last_error": null,
   "last_deepseek_fix": {
-    "task": "ERP-103",
-    "attempts": 3,
-    "status": "exhausted",
-    "at": "2026-09-28T07:45:24.003857Z"
+    "task": "ERP-104",
+    "attempt": 3,
+    "model": "deepseek-v4-pro",
+    "exit_code": 0,
+    "finished_at": "2026-09-28T08:20:55.445255Z"
   },
   "git_sync": {
     "branch": "main",
-    "local_sha": "9e123c9",
-    "status": "synced",
-    "ahead": 1,
+    "local_sha": "b0a2f7a",
+    "status": "pending",
+    "ahead": 0,
     "behind": 0,
-    "last_attempt_at": "2026-09-28T07:37:49.298584Z",
+    "last_attempt_at": "2026-09-28T08:21:18.132414Z",
     "last_error": null
   },
   "next_recommended_tasks": [
-    "ERP-104",
     "ERP-105",
     "ERP-106",
     "ERP-107"

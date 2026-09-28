@@ -83,6 +83,10 @@ Object.assign(MODULES, {
   },
   'inquiry-new': {
     title: '询价单', api: '/api/inquiries', canSubmit: true,
+    /* ERP-104：询价报价响应时间工作台入口（工具栏，始终可见；只读派生：按显式 InquiryId 链接 + 版本链根单计算首张有效报价与日历天间隔，缺失 / 异常不推断，不改写任何单据） */
+    extraActions: [
+      { label: '⏱️ 报价响应时间', title: '打开只读的询价报价响应时间工作台（按询价日期区间 / 客户筛选；仅按报价单持久化的 InquiryId 显式链接、只取版本链根单，软删除行排除，报价日期早于询价日期或缺失时按异常 / 未报价单独标注，绝不推断链接或改写单据）', onclick: 'openInquiryResponseWorkspace()' },
+    ],
     columns: [
       { key: 'inquiryNo', label: '询价单号' }, { key: 'inquiryDate', label: '日期', type: 'date' },
       { key: 'customerId', label: '客户Id' }, { key: 'salesmanId', label: '业务员Id' }, { key: 'status', label: '状态', status: true },
