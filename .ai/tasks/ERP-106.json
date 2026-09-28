@@ -1,7 +1,7 @@
 {
   "id": "ERP-106",
   "title": "Add read-only stock replenishment worksheet",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "low",
   "description": "Add a development-only read-only replenishment worksheet over existing stock, product minimum/maximum stock and active product-supplier sourcing relationships. When on-hand is below the minimum and a valid maximum target exists, show a suggested top-up to that target; otherwise mark the recommendation unavailable. Supplier data is reference only and never auto-selects a supplier, creates an order or changes inventory. No migration, production SQL, real database execution, irreversible data action, secret change or deployment.",
   "acceptance_criteria": [
@@ -62,6 +62,6 @@
     "status": "not_required",
     "reason": "Development-only read-only feature"
   },
-  "attempts": 0,
+  "attempts": 1,
   "created_at": "2026-09-28T08:04:09.382268Z"
 }

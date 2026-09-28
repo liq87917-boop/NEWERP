@@ -80,6 +80,8 @@ Object.assign(MODULES, {
       { label: '📉 库存移动 / 呆滞报表', onclick: 'openInventoryMovementReport', title: '按仓库 / 商品 / 截止日期 / 移动窗口 / 呆滞阈值查看基础单位出入库、最后移动日期与停滞天数（库存流水台账口径，未知显示「未知」）' },
       /* ERP-034：库存库龄与成本估值报表入口（只读派生；库龄按台账 FIFO 分层，未知一律显示「未知」） */
       { label: '⏳ 库存库龄 / 成本估值报表', onclick: 'openInventoryAgingReport', title: '按仓库 / 商品 / 截止日期查看 0-30 / 31-60 / 61-90 / 91-180 / 180 天以上库龄分层与库存金额（台账 FIFO 分层 + 库存行持久化加权平均成本，库龄未知与成本未知单列）' },
+      /* ERP-106：只读补货工作台入口（工具栏，始终可见；只读派生，不落库、不创建订单） */
+      { label: '📦 库存补货工作台', onclick: 'openStockReplenishmentWorksheet()', title: '按仓库查看现有库存 / 最低 / 上限阈值与建议补货量，货源仅作参考（不自动选供应商、不下单、不改库存）' },
     ],
     fields: [],
   },
