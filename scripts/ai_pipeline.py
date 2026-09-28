@@ -201,6 +201,12 @@ def recovery_evidence(task: dict[str, Any]) -> dict[str, Any]:
     task_id = str(task["id"])
     result_path = RESULTS_DIR / f"{task_id}.json"
     result = load_json(result_path) if result_path.exists() else {}
+    summary = task.get("last_error") or result.get("last_error") or task.get("blocker") or ""
+    failure_kind = task.get("failure_kind") or result.get("failure_kind")
+    if not failure_kind and str(summary).startswith("Path guard failed:"):
+        failure_kind = "path_guard_failure"
+    elif not failure_kind and "no checkpointable business changes" in str(summary).lower():
+        failure_kind = "no_checkpoint_changes"
     evidence_logs = LOGS_DIR
     control_root = os.environ.get("AI_CONTROL_ROOT")
     if control_root:
@@ -215,8 +221,8 @@ def recovery_evidence(task: dict[str, Any]) -> dict[str, Any]:
         except ValueError:
             return str(path.resolve())
     return {
-        "failure_kind": task.get("failure_kind") or result.get("failure_kind") or "unclassified_engineering_failure",
-        "summary": task.get("last_error") or result.get("last_error") or task.get("blocker") or "",
+        "failure_kind": failure_kind or "unclassified_engineering_failure",
+        "summary": summary,
         "result": str(result_path.relative_to(ROOT)) if result_path.exists() else None,
         "attempt_logs": [evidence_path(path) for path in attempt_logs],
         "validation_logs": [evidence_path(path) for path in validation_logs],
