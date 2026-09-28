@@ -1,11 +1,10 @@
 {
   "schema_version": 2,
   "project": "NEWERP",
-  "updated_at": "2026-09-28T06:53:35.871410Z",
+  "updated_at": "2026-09-28T07:17:18.614051Z",
   "phase": "ready",
   "current_task": null,
   "queue": [
-    "ERP-100",
     "ERP-101",
     "ERP-102",
     "ERP-103"
@@ -86,7 +85,8 @@
     "ERP-095",
     "ERP-097",
     "ERP-098",
-    "ERP-099"
+    "ERP-099",
+    "ERP-100"
   ],
   "blocked": [
     {
@@ -97,12 +97,12 @@
     }
   ],
   "last_build": {
-    "task": "ERP-099",
+    "task": "ERP-100",
     "profile": "safe",
     "status": "passed",
     "exit_code": 0,
-    "log": ".ai\\logs\\ERP-099-validation-1.log",
-    "at": "2026-09-28T04:27:52.856300Z"
+    "log": ".ai\\logs\\ERP-100-validation-1.log",
+    "at": "2026-09-28T07:17:18.189913Z"
   },
   "last_error": null,
   "last_deepseek_fix": {
@@ -114,15 +114,14 @@
   },
   "git_sync": {
     "branch": "main",
-    "local_sha": "3d5509e",
+    "local_sha": "1ca5518",
     "status": "pending",
-    "ahead": 0,
+    "ahead": 1,
     "behind": 0,
-    "last_attempt_at": "2026-09-28T04:11:20.450784Z",
+    "last_attempt_at": "2026-09-28T07:17:18.506963Z",
     "last_error": null
   },
   "next_recommended_tasks": [
-    "ERP-100",
     "ERP-101",
     "ERP-102",
     "ERP-103"
@@ -130,7 +129,5 @@
   "runner": {
     "status": "stopped",
     "pid": null
-  },
-  "blocker": null,
-  "finish_reason": "completed_checkpoint_recovered_after_state_lock"
+  }
 }

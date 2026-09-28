@@ -267,6 +267,9 @@ Object.assign(MODULES, {
     ],
     rowActions: [
       { label: '执行进度', icon: '📦', title: '查看由入库单派生的已订 / 已收 / 未收数量，以及既有引用可用时的已结算 / 未结算金额', onclick: 'showPurchaseOrderProgress' },
+      /* ERP-100：本单退货影响（只读派生：按显式链接「采购退货 → 来源入库单 → 本采购订单」派生毛收货 / 有效退货 / 净收货，
+         未审核 / 供应商不一致 / 来源已删除 / 来源不属于本单 / 未关联来源的退货作为异常单列、不计入；超退净额为负、不静默钳制） */
+      { label: '退货影响', icon: '↩️', title: '查看本采购订单的退货影响：毛收货 / 有效退货 / 净收货（按商品），以及未审核 / 供应商不一致 / 来源已删除 / 来源不属于本单 / 未关联来源的异常退货（只读派生；不改写订单任何已登记进度，不执行迁移 / 生产 SQL / 部署）', onclick: 'showPurchaseOrderReturnImpact' },
       { label: '执行时间线', icon: '🕘', title: '查看由订单、供应商确认交期与入库记录派生的执行时间线', onclick: 'showOrderTimeline' },
       { label: '财务核对', icon: '💰', title: '按既有引用字段核对本单与付款单、费用单、收款单与结算单（只读，金额未知不推断）', onclick: 'showOrderFinanceReconciliation' },
       /* ERP-043：以本采购订单的供应商 / 币种打开供应商发票登记册（只关联同供应商同币种订单） */

@@ -97,6 +97,17 @@ public class PurchaseOrderController : DocumentControllerBase<PurchaseOrder>
             await PurchaseOrderDeliveryExceptions.ForQueryAsync(Db, query)));
 
     /// <summary>
+    /// 采购订单退货影响（ERP-100，只读派生）：按显式链接链「采购退货 → 来源入库单 → 本采购订单」派生
+    /// 毛收货 / 有效退货 / 净收货数量，并把未审核、供应商不一致、来源已删除、来源不属于本单、未关联来源
+    /// 的退货作为异常单列（绝不推断为扣减）；超退净额为负、不静默钳制；证据不完整为未知。
+    /// <para>只读：不写任何表、不执行迁移 / 生产 SQL / 真实数据库操作 / 部署，不改写订单任何已登记进度。</para>
+    /// </summary>
+    [HttpGet("{id:long}/return-impact")]
+    public async Task<IActionResult> ReturnImpact(long id)
+        => Ok(ApiResponse<PurchaseOrderReturnImpactView>.Success(
+            await PurchaseOrderReturnImpact.ForOrderAsync(Db, id)));
+
+    /// <summary>
     /// 发票证据汇总（ERP-048，只读派生）：只按 ERP-043 的持久化关联行派生「已登记且未作废」的已开票金额、
     /// 未开票金额、发票张数与覆盖状态，并把草稿 / 已作废 / 无效（供应商 / 币种不一致）/ 无法确认证据单独列出
     /// （覆盖状态与订单可用性文案复用 ERP-044 的同一套口径）。

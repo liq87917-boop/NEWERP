@@ -346,6 +346,9 @@
   <!-- ERP-099：采购交期异常工作台（只读派生：按供应商 + 显式 as-of 基准日派生逾期 / 即将到期 / 晚确认 / 已收齐，
        只按已审核未删除入库收货证据；缺日期或证据不完整显示「未知」，不改写订单进度，不执行迁移 / 生产 SQL / 部署） -->
   <script src="/js/purchase-order-delivery-exceptions.js"></script>
+  <!-- ERP-100：采购订单退货影响（只读派生：按显式链接「采购退货 → 来源入库单 → 本采购订单」派生毛收货 / 有效退货 / 净收货，
+       未审核 / 供应商不一致 / 来源已删除 / 来源不属于本单 / 未关联来源的退货作为异常单列、不计入；不改写订单进度，不执行迁移 / 生产 SQL / 部署） -->
+  <script src="/js/purchase-order-return-impact.js"></script>
   <script src="/js/app.js"></script>
 </body>
 </html>

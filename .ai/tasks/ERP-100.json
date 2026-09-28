@@ -1,7 +1,7 @@
 {
   "id": "ERP-100",
   "title": "Show purchase return impact on orders",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "medium",
   "description": "Add a development-only read-only purchase-order return-impact view using explicit purchase-return-to-stock-in and stock-in-to-order links. Show gross received, returned and net quantities as operational evidence without changing existing purchase progress or inventory costing. Unlinked or conflicting returns remain visible as exceptions, not inferred allocations. Do not execute migration, production SQL, real database operations or deployment.",
   "acceptance_criteria": [
@@ -40,6 +40,6 @@
     "status": "not_required",
     "reason": "Development build gate; read-only feature."
   },
-  "attempts": 0,
+  "attempts": 1,
   "created_at": "2026-09-28T03:45:03.347972Z"
 }
