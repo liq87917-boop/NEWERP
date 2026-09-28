@@ -72,6 +72,10 @@ def matches(path: str, patterns: list[str]) -> bool:
     return any(fnmatch.fnmatch(normalized, pattern) for pattern in patterns)
 
 
+def auto_push_enabled(config: dict[str, Any]) -> bool:
+    return config.get("auto_push", False) and os.environ.get("AI_DISABLE_PUSH") != "1"
+
+
 def all_tasks(config: dict[str, Any]) -> list[tuple[Path, dict[str, Any]]]:
     return [(path, load_json(path)) for path in sorted(TASKS_DIR.glob(f"{config['task_prefix']}-*.json"))]
 
@@ -703,7 +707,7 @@ def run_next(dry_run: bool) -> int:
         checkpoint_paths = [path for path in changed_paths() if not matches(path, config["ignored_change_paths"])]
         subprocess.run(["git", "add", "--", *checkpoint_paths], cwd=ROOT, check=True)
         if subprocess.run(["git", "commit", "-m", f"{task['id']}: {task['title']}"], cwd=ROOT).returncode != 0: return 8
-        if config.get("auto_push", False) and subprocess.run(["git", "push"], cwd=ROOT).returncode != 0:
+        if auto_push_enabled(config) and subprocess.run(["git", "push"], cwd=ROOT).returncode != 0:
             set_state(
                 state,
                 phase="remote_degraded",
@@ -716,7 +720,7 @@ def run_next(dry_run: bool) -> int:
             checkpoint_control_files("chore: record degraded remote sync")
             print(f"Completed {task['id']} locally; remote push is degraded and will be retried later.")
             return 0
-        if config.get("auto_push", False):
+        if auto_push_enabled(config):
             set_state(state, phase="ready", current_task=None, git_sync={"status": "synced", "last_attempt_at": utc_now(), "last_error": None})
             checkpoint_control_files("chore: record successful remote sync")
             subprocess.run(["git", "push"], cwd=ROOT)

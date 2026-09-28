@@ -212,6 +212,12 @@ class PipelineContracts(unittest.TestCase):
         value = {"result": {"finishReason": "tool_use"}}
         self.assertEqual("tool_use", orchestrator.nested_finish_reason(value))
 
+    def test_local_autonomy_can_disable_remote_push(self):
+        with patch.dict(orchestrator.os.environ, {"AI_DISABLE_PUSH": "1"}):
+            self.assertFalse(orchestrator.auto_push_enabled({"auto_push": True}))
+        with patch.dict(orchestrator.os.environ, {}, clear=True):
+            self.assertTrue(orchestrator.auto_push_enabled({"auto_push": True}))
+
     def test_windows_cline_batch_wrapper_resolves_real_executable(self):
         with tempfile.TemporaryDirectory() as directory:
             npm_root = Path(directory)
