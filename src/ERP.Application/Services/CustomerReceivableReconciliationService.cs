@@ -73,6 +73,53 @@ public static class CustomerReceivableReconciliationService
         return BuildReport(query, invoiceStatus, asOfDate, total, rows);
     }
 
+    /// <summary>
+    /// 有界导出（只读派生，与工作台**同一派生引擎与筛选口径**，供对账证据导出复用）：
+    /// 一次性批量装载并映射全部命中发票证据（固定次数数据集访问，与发票张数 / 行数无关），
+    /// 行数受 <paramref name="maxRows"/> 钳制；命中超过上限时 <paramref name="truncated"/> 置真，
+    /// 绝不给部分金额或部分合计。
+    /// </summary>
+    public static async Task<(
+        IReadOnlyList<CustomerReceivableReconciliationInvoiceRow> Rows, bool Truncated, int Total)>
+        ForStatementRowsAsync(IErpDbContext db, CustomerReceivableReconciliationQuery query, int maxRows)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(query);
+        query.Normalize();
+
+        var asOfDate = (query.AsOfDate ?? DateTime.Today).Date;
+
+        var source = ApplyFilters(db, query);
+        var total = await source.CountAsync();
+
+        var ids = await source
+            .OrderBy(i => i.CustomerId)
+            .ThenBy(i => i.Currency)
+            .ThenByDescending(i => i.InvoiceDate)
+            .ThenByDescending(i => i.Id)
+            .Take(maxRows + 1)
+            .Select(i => i.Id)
+            .ToListAsync();
+
+        var truncated = ids.Count > maxRows;
+        var pageIds = ids.Take(maxRows).ToList();
+
+        var invoices = new List<CustomerSalesInvoiceEvidence>();
+        if (pageIds.Count > 0)
+        {
+            var loaded = await db.CustomerSalesInvoiceEvidences.AsNoTracking()
+                .Where(i => pageIds.Contains(i.Id))
+                .ToListAsync();
+            var byId = loaded.ToDictionary(i => i.Id);
+            invoices = pageIds.Where(byId.ContainsKey).Select(id => byId[id]).ToList();
+        }
+
+        var context = await LoadPageContextAsync(db, invoices);
+        var rows = invoices.Select(i => MapInvoice(i, context, asOfDate)).ToList();
+
+        return (rows, truncated, total);
+    }
+
     /// <summary>组装报表（纯映射 + 本页汇总；不访问数据库）</summary>
     private static CustomerReceivableReconciliationReport BuildReport(
         CustomerReceivableReconciliationQuery query, string invoiceStatus, DateTime asOfDate,
@@ -579,7 +626,7 @@ public static class CustomerReceivableReconciliationService
     }
 
     /// <summary>当前账号被允许访问的菜单编码（fail closed：无身份 / 无角色 / 无菜单授权 → 空集合）</summary>
-    private static async Task<HashSet<string>> LoadAuthorizedMenuCodesAsync(IErpDbContext db, long userId)
+    public static async Task<HashSet<string>> LoadAuthorizedMenuCodesAsync(IErpDbContext db, long userId)
     {
         var roleIds = await db.SysUserRoles.AsNoTracking()
             .Where(ur => ur.UserId == userId && !ur.IsDeleted)

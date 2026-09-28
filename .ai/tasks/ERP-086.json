@@ -1,7 +1,7 @@
 {
   "id": "ERP-086",
   "title": "Expose bounded customer reconciliation statement export for receipt, invoice and shipment evidence",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "medium",
   "description": "Add a bounded read-only downloadable reconciliation statement per Customer that presents ERP-055 invoice evidence, ERP-073 receipt allocations, ERP-075 receipt-to-invoice allocation context and ERP-076 invoice-to-shipment links as separately labeled evidence classes. Provide a downloadable export (CSV or HTML) that reuses the same filtered, currency-separated, unknown-value semantics as the on-screen views. Do not create a general ledger, assert revenue recognition, contact customers, collect funds, execute production SQL, deploy, or release.",
   "acceptance_criteria": [
@@ -44,5 +44,5 @@
     "status": "not_required",
     "reason": "Development build gate."
   },
-  "attempts": 0
+  "attempts": 1
 }

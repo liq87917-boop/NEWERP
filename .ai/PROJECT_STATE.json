@@ -1,11 +1,10 @@
 {
   "schema_version": 2,
   "project": "NEWERP",
-  "updated_at": "2026-09-28T02:22:01.904048Z",
+  "updated_at": "2026-09-28T02:54:25.027202Z",
   "phase": "ready",
   "current_task": null,
   "queue": [
-    "ERP-086",
     "ERP-095",
     "ERP-096",
     "ERP-097"
@@ -81,30 +80,30 @@
     "ERP-074",
     "ERP-075",
     "ERP-076",
-    "ERP-077"
+    "ERP-077",
+    "ERP-086"
   ],
   "blocked": [],
   "last_build": {
-    "task": "baseline",
+    "task": "ERP-086",
     "profile": "safe",
     "status": "passed",
-    "build": "0 warnings, 0 errors",
-    "unit_tests": "1642 passed",
-    "at": "2026-09-28T02:30:00Z"
+    "exit_code": 0,
+    "log": ".ai\\logs\\ERP-086-validation-1.log",
+    "at": "2026-09-28T02:54:24.595726Z"
   },
   "last_error": null,
   "last_deepseek_fix": null,
   "git_sync": {
     "branch": "main",
-    "local_sha": "a99a0f8",
-    "status": "synced",
+    "local_sha": "0ca13a5",
+    "status": "pending",
     "ahead": 0,
     "behind": 0,
-    "last_attempt_at": "2026-09-28T02:22:01.798327Z",
+    "last_attempt_at": "2026-09-28T02:54:24.917518Z",
     "last_error": null
   },
   "next_recommended_tasks": [
-    "ERP-086",
     "ERP-095",
     "ERP-096",
     "ERP-097"
