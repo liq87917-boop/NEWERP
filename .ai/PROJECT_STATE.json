@@ -1,12 +1,10 @@
 {
   "schema_version": 2,
   "project": "NEWERP",
-  "updated_at": "2026-09-28T07:41:20.304807Z",
+  "updated_at": "2026-09-28T07:45:24.100744Z",
   "phase": "ready",
   "current_task": null,
-  "queue": [
-    "ERP-103"
-  ],
+  "queue": [],
   "completed": [
     "ERP-000",
     "ERP-001",
@@ -99,6 +97,12 @@
       "status": "blocked",
       "reason": "Automatic repair budget exhausted",
       "attempts": 3
+    },
+    {
+      "task": "ERP-103",
+      "status": "blocked",
+      "reason": "Automatic repair budget exhausted",
+      "attempts": 3
     }
   ],
   "last_build": {
@@ -110,28 +114,26 @@
     "at": "2026-09-28T07:37:42.679922Z"
   },
   "last_error": {
-    "task": "ERP-102",
+    "task": "ERP-103",
     "kind": "repair_budget_exhausted",
     "summary": "Task produced no checkpointable business changes."
   },
   "last_deepseek_fix": {
-    "task": "ERP-102",
+    "task": "ERP-103",
     "attempts": 3,
     "status": "exhausted",
-    "at": "2026-09-28T07:41:20.096294Z"
+    "at": "2026-09-28T07:45:24.003857Z"
   },
   "git_sync": {
     "branch": "main",
-    "local_sha": "48007e8",
+    "local_sha": "9e123c9",
     "status": "synced",
-    "ahead": 0,
+    "ahead": 1,
     "behind": 0,
     "last_attempt_at": "2026-09-28T07:37:49.298584Z",
     "last_error": null
   },
-  "next_recommended_tasks": [
-    "ERP-103"
-  ],
+  "next_recommended_tasks": [],
   "runner": {
     "status": "stopped",
     "pid": null
