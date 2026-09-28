@@ -1,0 +1,45 @@
+{
+  "id": "ERP-100",
+  "title": "Show purchase return impact on orders",
+  "status": "pending",
+  "risk_level": "medium",
+  "description": "Add a development-only read-only purchase-order return-impact view using explicit purchase-return-to-stock-in and stock-in-to-order links. Show gross received, returned and net quantities as operational evidence without changing existing purchase progress or inventory costing. Unlinked or conflicting returns remain visible as exceptions, not inferred allocations. Do not execute migration, production SQL, real database operations or deployment.",
+  "acceptance_criteria": [
+    "An authenticated GET view for a purchase order loads approved, nondeleted stock-ins and explicitly linked approved, nondeleted purchase returns with bounded detail rows.",
+    "Per-product gross received, valid returned and net received quantities are derived without silently clamping over-returns; unmatched, wrong-supplier or missing-source returns are identified as exceptions rather than applied.",
+    "The purchase-order row action opens a read-only return-impact view and clearly distinguishes zero, unknown and anomalous quantities without changing stored progress fields.",
+    "Focused unit tests cover linkage, status, deletion, over-return, bounds and no-write semantics; the safe Release build passes and the calculation rules are documented."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/PurchaseOrderReturnImpact.cs",
+    "src/ERP.Api/Controllers/PurchaseOrderController.cs",
+    "src/ERP.Api/wwwroot/js/purchase-order-return-impact.js",
+    "src/ERP.Api/wwwroot/js/modules-doc.js",
+    "src/ERP.Api/wwwroot/index.html",
+    "src/ERP.UnitTests/PurchaseOrderReturnImpactTests.cs",
+    "docs/采购退货订单影响说明.md",
+    ".ai/**"
+  ],
+  "depends_on": [
+    "ERP-009",
+    "ERP-025",
+    "ERP-099"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "browser_acceptance": {
+    "required": false,
+    "deferred": true
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development build gate; read-only feature."
+  },
+  "attempts": 0,
+  "created_at": "2026-09-28T03:45:03.347972Z"
+}

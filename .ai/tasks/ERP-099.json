@@ -1,0 +1,44 @@
+{
+  "id": "ERP-099",
+  "title": "Show purchase order delivery exceptions",
+  "status": "pending",
+  "risk_level": "medium",
+  "description": "Add a development-only read-only delivery-exception workspace using existing purchase-order requested/confirmed dates and approved stock-in records. Derive operational urgency from an explicit as-of date and receipt quantities without rewriting stored progress. Missing dates or incomplete evidence remain unknown. Do not execute migration, production SQL, real database operations or deployment.",
+  "acceptance_criteria": [
+    "A bounded authenticated GET query filters purchase orders by supplier and as-of date and reports requested, supplier-confirmed and actual receipt evidence with stable paging.",
+    "Overdue, due-soon, late-confirmation and received states use approved nondeleted stock-ins only; partial receipts remain open and missing dates are shown as unknown.",
+    "The purchase-order page opens a read-only exception workspace with filters, status and quantity evidence; queries batch related rows instead of per-order database calls.",
+    "Focused unit tests cover date boundaries, partial receipt, deleted/unapproved rows, unknown values and no-write semantics; the safe Release build passes and the rules are documented."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/PurchaseOrderDeliveryExceptions.cs",
+    "src/ERP.Api/Controllers/PurchaseOrderController.cs",
+    "src/ERP.Api/wwwroot/js/purchase-order-delivery-exceptions.js",
+    "src/ERP.Api/wwwroot/js/modules-doc.js",
+    "src/ERP.Api/wwwroot/index.html",
+    "src/ERP.UnitTests/PurchaseOrderDeliveryExceptionTests.cs",
+    "docs/采购交期异常说明.md",
+    ".ai/**"
+  ],
+  "depends_on": [
+    "ERP-026",
+    "ERP-031"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "browser_acceptance": {
+    "required": false,
+    "deferred": true
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development build gate; read-only feature."
+  },
+  "attempts": 0,
+  "created_at": "2026-09-28T03:45:03.347695Z"
+}

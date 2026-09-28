@@ -1,0 +1,43 @@
+{
+  "id": "ERP-098",
+  "title": "Show comparable supplier quote price history",
+  "status": "pending",
+  "risk_level": "low",
+  "description": "Add a development-only read-only price-history workspace for persisted purchase quotes. Compare only the same product, specification, unit, currency and tax-included basis; show approval/selection as evidence, never auto-select a supplier or change quotes, orders or prices. Do not execute migration, production SQL, real database operations or deployment.",
+  "acceptance_criteria": [
+    "A bounded authenticated GET history query filters by product and optional supplier/date, excludes soft-deleted rows, and uses stable date/id ordering.",
+    "Rows preserve supplier, currency, unit, specification, tax basis and approval/selection context; price differences are calculated only within matching comparison groups, with incompatible rows clearly separated.",
+    "The purchase-quote page opens a read-only history view from a quote row with server-side filtering and explicit empty/truncated states.",
+    "Focused unit tests cover grouping, bounds, filtering and no-write semantics; the safe Release build passes, and the comparison rules are documented."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/PurchaseQuotePriceHistory.cs",
+    "src/ERP.Api/Controllers/PurchaseQuoteController.cs",
+    "src/ERP.Api/wwwroot/js/purchase-quote-price-history.js",
+    "src/ERP.Api/wwwroot/js/modules.js",
+    "src/ERP.Api/wwwroot/index.html",
+    "src/ERP.UnitTests/PurchaseQuotePriceHistoryTests.cs",
+    "docs/供应商报价历史说明.md",
+    ".ai/**"
+  ],
+  "depends_on": [
+    "ERP-095"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "browser_acceptance": {
+    "required": false,
+    "deferred": true
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development build gate; read-only feature."
+  },
+  "attempts": 0,
+  "created_at": "2026-09-28T03:45:03.347384Z"
+}
