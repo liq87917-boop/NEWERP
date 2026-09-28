@@ -86,9 +86,8 @@ function Get-Tasks {
 function Get-QueueHead {
     param([object[]]$Tasks)
     foreach ($task in $Tasks) {
-        if ($task.status -notin @('completed', 'deferred', 'skipped')) {
-            return $task
-        }
+        if ($task.status -in @('completed', 'deferred', 'skipped', 'superseded', 'blocked', 'failed')) { continue }
+        return $task
     }
     return $null
 }
