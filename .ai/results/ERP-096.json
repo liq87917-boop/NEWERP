@@ -1,0 +1,13 @@
+{
+  "task": "ERP-096",
+  "status": "blocked",
+  "execution_outcome": "repair_budget_exhausted",
+  "attempts": 3,
+  "last_error": "Path guard failed:\noutside allowed_paths: src/ERP.Domain/Entities/InventoryDocuments.cs\noutside allowed_paths: src/ERP.Domain/Entities/Logistics.cs\noutside allowed_paths: src/ERP.Domain/Entities/StockLocationBalance.cs\noutside allowed_paths: src/ERP.Infrastructure/Data/ErpDbContext.Config.cs\noutside allowed_paths: src/ERP.Infrastructure/Data/ErpDbContext.Entities.cs",
+  "attempted_fix": {
+    "provider": "deepseek",
+    "model": "deepseek-v4-pro"
+  },
+  "quarantine": "Saved working directory and index state On main: autonomy quarantine ERP-096",
+  "finished_at": "2026-09-28T03:32:33.320371Z"
+}
