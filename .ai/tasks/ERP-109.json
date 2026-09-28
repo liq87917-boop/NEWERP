@@ -1,0 +1,67 @@
+{
+  "id": "ERP-109",
+  "title": "Summarize supplier first receipt lead times",
+  "status": "pending",
+  "risk_level": "low",
+  "description": "Use explicit PurchaseOrderId links on approved stock-ins to measure days from order date to first approved receipt. Missing and inconsistent dates remain unknown; this is not full delivery completion or an on-time score. Development-only read-only feature. No migration, production SQL, real database execution, irreversible action, secret change or deployment.",
+  "acceptance_criteria": [
+    "Authenticated bounded GET filters approved purchase orders by date and supplier, pages stably and batch-loads linked stock-ins.",
+    "Show first valid approved receipt date and elapsed days; missing, unapproved, deleted, wrong-supplier and pre-order receipts remain unavailable or anomalous.",
+    "Purchase-order page opens read-only lead-time view with order and receipt links.",
+    "Unit tests cover multiple receipts, missing links, status, supplier mismatch, negative intervals, paging and no writes; safe build passes and rules are documented."
+  ],
+  "criterion_path_map": {
+    "Authenticated bounded GET filters approved purchase orders by date and supplier, pages stably and batch-loads linked stock-ins.": [
+      "src/ERP.Api/Controllers/PurchaseOrderController.cs",
+      "src/ERP.Application/DTOs/SupplierFirstReceiptLeadTimeDtos.cs",
+      "src/ERP.Application/Services/SupplierFirstReceiptLeadTimeService.cs"
+    ],
+    "Show first valid approved receipt date and elapsed days; missing, unapproved, deleted, wrong-supplier and pre-order receipts remain unavailable or anomalous.": [
+      "src/ERP.Application/DTOs/SupplierFirstReceiptLeadTimeDtos.cs",
+      "src/ERP.Application/Services/SupplierFirstReceiptLeadTimeService.cs",
+      "src/ERP.Application/Services/SupplierFirstReceiptLeadTimeRules.cs"
+    ],
+    "Purchase-order page opens read-only lead-time view with order and receipt links.": [
+      "src/ERP.Api/wwwroot/js/supplier-first-receipt-lead-times.js",
+      "src/ERP.Api/wwwroot/js/modules-doc.js",
+      "src/ERP.Api/wwwroot/index.html"
+    ],
+    "Unit tests cover multiple receipts, missing links, status, supplier mismatch, negative intervals, paging and no writes; safe build passes and rules are documented.": [
+      "src/ERP.UnitTests/SupplierFirstReceiptLeadTimeTests.cs",
+      "docs/supplier-first-receipt-lead-times.md",
+      "src/ERP.Application/Services/SupplierFirstReceiptLeadTimeRules.cs"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/PurchaseOrderController.cs",
+    "src/ERP.Application/DTOs/SupplierFirstReceiptLeadTimeDtos.cs",
+    "src/ERP.Application/Services/SupplierFirstReceiptLeadTimeService.cs",
+    "src/ERP.Application/Services/SupplierFirstReceiptLeadTimeRules.cs",
+    "src/ERP.Api/wwwroot/js/supplier-first-receipt-lead-times.js",
+    "src/ERP.Api/wwwroot/js/modules-doc.js",
+    "src/ERP.Api/wwwroot/index.html",
+    "src/ERP.UnitTests/SupplierFirstReceiptLeadTimeTests.cs",
+    "docs/supplier-first-receipt-lead-times.md",
+    ".ai/**"
+  ],
+  "validation_profile": "safe",
+  "depends_on": [
+    "ERP-026",
+    "ERP-099"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "completion_mode": "build",
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only read-only feature"
+  },
+  "attempts": 0,
+  "created_at": "2026-09-28T09:30:08.701123Z"
+}

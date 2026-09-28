@@ -1,0 +1,68 @@
+{
+  "id": "ERP-111",
+  "title": "Show customer invoice collection timing evidence",
+  "status": "pending",
+  "risk_level": "medium",
+  "description": "Use explicit customer receipt-to-invoice allocations to compare invoice date with first/latest valid receipt dates. Only comparable same-currency allocations contribute; never treat allocations as bank settlement, legal aging or collection SLA. Apply salesperson data scope. Development-only read-only feature. No migration, production SQL, real database execution, irreversible action, secret change or deployment.",
+  "acceptance_criteria": [
+    "Authenticated bounded GET filters registered invoice evidence by date/customer, applies salesperson scope, and batch-loads explicit allocations and receipts.",
+    "Show first/latest valid receipt dates, day intervals and comparable allocated/remaining evidence; missing, voided, cancelled, pre-invoice or currency-conflicting links remain separate.",
+    "Customer sales-invoice page opens read-only timing view with invoice and receipt identifiers and no allocation action.",
+    "Unit tests cover partial/full allocation, multiple receipts, cancelled sources, pre-invoice dates, currency mismatch, paging and no writes; safe build passes and rules are documented."
+  ],
+  "criterion_path_map": {
+    "Authenticated bounded GET filters registered invoice evidence by date/customer, applies salesperson scope, and batch-loads explicit allocations and receipts.": [
+      "src/ERP.Api/Controllers/CustomerSalesInvoiceEvidenceController.cs",
+      "src/ERP.Application/DTOs/CustomerInvoiceCollectionTimingDtos.cs",
+      "src/ERP.Application/Services/CustomerInvoiceCollectionTimingService.cs"
+    ],
+    "Show first/latest valid receipt dates, day intervals and comparable allocated/remaining evidence; missing, voided, cancelled, pre-invoice or currency-conflicting links remain separate.": [
+      "src/ERP.Application/DTOs/CustomerInvoiceCollectionTimingDtos.cs",
+      "src/ERP.Application/Services/CustomerInvoiceCollectionTimingService.cs",
+      "src/ERP.Application/Services/CustomerInvoiceCollectionTimingRules.cs"
+    ],
+    "Customer sales-invoice page opens read-only timing view with invoice and receipt identifiers and no allocation action.": [
+      "src/ERP.Api/wwwroot/js/customer-invoice-collection-timing.js",
+      "src/ERP.Api/wwwroot/js/customer-sales-invoices.js",
+      "src/ERP.Api/wwwroot/index.html"
+    ],
+    "Unit tests cover partial/full allocation, multiple receipts, cancelled sources, pre-invoice dates, currency mismatch, paging and no writes; safe build passes and rules are documented.": [
+      "src/ERP.UnitTests/CustomerInvoiceCollectionTimingTests.cs",
+      "docs/customer-invoice-collection-timing.md",
+      "src/ERP.Application/Services/CustomerInvoiceCollectionTimingRules.cs"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/CustomerSalesInvoiceEvidenceController.cs",
+    "src/ERP.Application/DTOs/CustomerInvoiceCollectionTimingDtos.cs",
+    "src/ERP.Application/Services/CustomerInvoiceCollectionTimingService.cs",
+    "src/ERP.Application/Services/CustomerInvoiceCollectionTimingRules.cs",
+    "src/ERP.Api/wwwroot/js/customer-invoice-collection-timing.js",
+    "src/ERP.Api/wwwroot/js/customer-sales-invoices.js",
+    "src/ERP.Api/wwwroot/index.html",
+    "src/ERP.UnitTests/CustomerInvoiceCollectionTimingTests.cs",
+    "docs/customer-invoice-collection-timing.md",
+    ".ai/**"
+  ],
+  "validation_profile": "safe",
+  "depends_on": [
+    "ERP-073",
+    "ERP-074",
+    "ERP-075"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "completion_mode": "build",
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only read-only feature"
+  },
+  "attempts": 0,
+  "created_at": "2026-09-28T09:30:08.708206Z"
+}

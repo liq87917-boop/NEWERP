@@ -1,0 +1,67 @@
+{
+  "id": "ERP-110",
+  "title": "Summarize monthly agency service fee statements",
+  "status": "pending",
+  "risk_level": "low",
+  "description": "Group registered agency service-fee statement evidence by StatementDate month, customer and original currency. Show draft/voided counts separately; never prorate service periods or call totals recognized revenue/receivables. Development-only read-only feature. No migration, production SQL, real database execution, irreversible action, secret change or deployment.",
+  "acceptance_criteria": [
+    "Authenticated bounded GET filters statement-date range and customer, pages months stably and reads statements without per-row queries.",
+    "Only nondeleted registered statements contribute original-currency totals; drafts and voided are counted separately; spanning service periods are not prorated.",
+    "Agency-service-fee page opens read-only monthly summary with customer/currency filters and evidence-only labels.",
+    "Unit tests cover month boundaries, currencies, status, deletion, service-period overlap, paging and no writes; safe build passes and rules are documented."
+  ],
+  "criterion_path_map": {
+    "Authenticated bounded GET filters statement-date range and customer, pages months stably and reads statements without per-row queries.": [
+      "src/ERP.Api/Controllers/AgencyServiceFeeStatementController.cs",
+      "src/ERP.Application/DTOs/AgencyServiceFeeMonthlySummaryDtos.cs",
+      "src/ERP.Application/Services/AgencyServiceFeeMonthlySummaryService.cs"
+    ],
+    "Only nondeleted registered statements contribute original-currency totals; drafts and voided are counted separately; spanning service periods are not prorated.": [
+      "src/ERP.Application/DTOs/AgencyServiceFeeMonthlySummaryDtos.cs",
+      "src/ERP.Application/Services/AgencyServiceFeeMonthlySummaryService.cs",
+      "src/ERP.Application/Services/AgencyServiceFeeMonthlySummaryRules.cs"
+    ],
+    "Agency-service-fee page opens read-only monthly summary with customer/currency filters and evidence-only labels.": [
+      "src/ERP.Api/wwwroot/js/agency-service-fee-monthly-summary.js",
+      "src/ERP.Api/wwwroot/js/agency-service-fee-statements.js",
+      "src/ERP.Api/wwwroot/index.html"
+    ],
+    "Unit tests cover month boundaries, currencies, status, deletion, service-period overlap, paging and no writes; safe build passes and rules are documented.": [
+      "src/ERP.UnitTests/AgencyServiceFeeMonthlySummaryTests.cs",
+      "docs/agency-service-fee-monthly-summary.md",
+      "src/ERP.Application/Services/AgencyServiceFeeMonthlySummaryRules.cs"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/AgencyServiceFeeStatementController.cs",
+    "src/ERP.Application/DTOs/AgencyServiceFeeMonthlySummaryDtos.cs",
+    "src/ERP.Application/Services/AgencyServiceFeeMonthlySummaryService.cs",
+    "src/ERP.Application/Services/AgencyServiceFeeMonthlySummaryRules.cs",
+    "src/ERP.Api/wwwroot/js/agency-service-fee-monthly-summary.js",
+    "src/ERP.Api/wwwroot/js/agency-service-fee-statements.js",
+    "src/ERP.Api/wwwroot/index.html",
+    "src/ERP.UnitTests/AgencyServiceFeeMonthlySummaryTests.cs",
+    "docs/agency-service-fee-monthly-summary.md",
+    ".ai/**"
+  ],
+  "validation_profile": "safe",
+  "depends_on": [
+    "ERP-070",
+    "ERP-072"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "completion_mode": "build",
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only read-only feature"
+  },
+  "attempts": 0,
+  "created_at": "2026-09-28T09:30:08.704824Z"
+}

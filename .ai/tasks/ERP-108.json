@@ -1,0 +1,67 @@
+{
+  "id": "ERP-108",
+  "title": "Show customer sales order price history by product",
+  "status": "pending",
+  "risk_level": "low",
+  "description": "Use persisted approved SalesOrder detail prices; compare only identical customer/product/spec/unit/currency and retain trade terms. Apply salesperson data scope. Never rewrite prices. Development-only read-only feature. No migration, production SQL, real database execution, irreversible action, secret change or deployment.",
+  "acceptance_criteria": [
+    "Authenticated bounded GET filters product, optional customer and order-date range with salesperson scope and stable detail paging.",
+    "Group only identical customer/product/spec/unit/currency; preserve raw unit price and trade terms, with incompatible evidence separate.",
+    "Sales-order page opens read-only history with filters and source order links.",
+    "Unit tests cover scope, deletion, status, incompatible units/currencies, paging and no writes; safe build passes and rules are documented."
+  ],
+  "criterion_path_map": {
+    "Authenticated bounded GET filters product, optional customer and order-date range with salesperson scope and stable detail paging.": [
+      "src/ERP.Api/Controllers/SalesOrderController.cs",
+      "src/ERP.Application/DTOs/CustomerSalesPriceHistoryDtos.cs",
+      "src/ERP.Application/Services/CustomerSalesPriceHistoryService.cs"
+    ],
+    "Group only identical customer/product/spec/unit/currency; preserve raw unit price and trade terms, with incompatible evidence separate.": [
+      "src/ERP.Application/DTOs/CustomerSalesPriceHistoryDtos.cs",
+      "src/ERP.Application/Services/CustomerSalesPriceHistoryService.cs",
+      "src/ERP.Application/Services/CustomerSalesPriceHistoryRules.cs"
+    ],
+    "Sales-order page opens read-only history with filters and source order links.": [
+      "src/ERP.Api/wwwroot/js/customer-sales-price-history.js",
+      "src/ERP.Api/wwwroot/js/modules-doc.js",
+      "src/ERP.Api/wwwroot/index.html"
+    ],
+    "Unit tests cover scope, deletion, status, incompatible units/currencies, paging and no writes; safe build passes and rules are documented.": [
+      "src/ERP.UnitTests/CustomerSalesPriceHistoryTests.cs",
+      "docs/customer-sales-price-history.md",
+      "src/ERP.Application/Services/CustomerSalesPriceHistoryRules.cs"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/SalesOrderController.cs",
+    "src/ERP.Application/DTOs/CustomerSalesPriceHistoryDtos.cs",
+    "src/ERP.Application/Services/CustomerSalesPriceHistoryService.cs",
+    "src/ERP.Application/Services/CustomerSalesPriceHistoryRules.cs",
+    "src/ERP.Api/wwwroot/js/customer-sales-price-history.js",
+    "src/ERP.Api/wwwroot/js/modules-doc.js",
+    "src/ERP.Api/wwwroot/index.html",
+    "src/ERP.UnitTests/CustomerSalesPriceHistoryTests.cs",
+    "docs/customer-sales-price-history.md",
+    ".ai/**"
+  ],
+  "validation_profile": "safe",
+  "depends_on": [
+    "ERP-032",
+    "ERP-097"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "completion_mode": "build",
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only read-only feature"
+  },
+  "attempts": 0,
+  "created_at": "2026-09-28T09:30:08.692617Z"
+}
