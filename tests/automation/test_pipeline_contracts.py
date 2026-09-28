@@ -98,6 +98,10 @@ class PipelineContracts(unittest.TestCase):
             self.assertEqual("ready", result["status"])
             self.assertTrue(result["control_worktree_dirty"])
             self.assertFalse((executor / "user-work.txt").exists())
+            self.assertEqual("Automation Test", subprocess.run(
+                ["git", "config", "user.name"], cwd=executor, check=True,
+                capture_output=True, text=True,
+            ).stdout.strip())
             self.assertEqual("", subprocess.run(
                 ["git", "status", "--porcelain"], cwd=executor, check=True,
                 capture_output=True, text=True,

@@ -76,6 +76,10 @@ def ensure_workspace(control_root: Path) -> dict[str, Any]:
     current_branch = git(executor_root, "branch", "--show-current").stdout.strip()
     if current_branch != target:
         raise RuntimeError(f"Executor checkout uses unexpected branch {current_branch!r}; expected {target!r}")
+    source_name = git(control_root, "config", "user.name", check=False).stdout.strip() or "NEWERP Automation"
+    source_email = git(control_root, "config", "user.email", check=False).stdout.strip() or "automation@local"
+    git(executor_root, "config", "user.name", source_name)
+    git(executor_root, "config", "user.email", source_email)
     git(executor_root, "branch", "--set-upstream-to", f"origin/{target}", target, check=False)
     dirty = bool(git(executor_root, "status", "--porcelain").stdout.strip())
     # Local scheduler upgrades may be committed in the occupied control checkout
