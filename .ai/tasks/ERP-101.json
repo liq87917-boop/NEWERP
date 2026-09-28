@@ -1,7 +1,7 @@
 {
   "id": "ERP-101",
   "title": "Show sales return impact on sales orders",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "medium",
   "description": "Add a development-only read-only sales-order return-impact view using explicit SalesReturn.SourceStockOutId and StockOut.SalesOrderId links. Show gross approved shipment, valid approved return and net evidence without changing stored fulfillment, inventory or financial records. Unlinked, wrong-customer and over-return rows remain visible exceptions. Do not execute migration, production SQL, real database operations, irreversible data actions or deployment.",
   "acceptance_criteria": [
@@ -39,6 +39,6 @@
     "status": "not_required",
     "reason": "Development-only read-only feature."
   },
-  "attempts": 0,
+  "attempts": 1,
   "created_at": "2026-09-28T05:00:46.952589Z"
 }

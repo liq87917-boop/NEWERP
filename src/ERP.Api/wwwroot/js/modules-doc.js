@@ -169,6 +169,9 @@ Object.assign(MODULES, {
     ],
     rowActions: [
       { label: '出货进度', icon: '🚚', title: '查看由销售出库单派生的已订 / 已出 / 未出数量，以及既有引用可用时的已关联 / 未覆盖收款金额', onclick: 'showSalesOrderProgress' },
+      /* ERP-101：本单退货影响（只读派生：按显式链接「销售退货 → 来源出库单 → 本销售订单」派生毛出货 / 有效退货 / 净出货，
+         未审核 / 客户不一致 / 来源已删除 / 来源不属于本单 / 未关联来源的退货作为异常单列、不计入；超退净额为负、不静默钳制） */
+      { label: '退货影响', icon: '↩️', title: '查看本销售订单的退货影响：毛出货 / 有效退货 / 净出货（按商品），以及未审核 / 客户不一致 / 来源已删除 / 来源不属于本单 / 未关联来源的异常退货（只读派生；不改写订单任何已登记进度，不执行迁移 / 生产 SQL / 部署）', onclick: 'showSalesOrderReturnImpact' },
       { label: '执行时间线', icon: '🕘', title: '查看由订单、出库、单证与客诉记录派生的执行时间线', onclick: 'showOrderTimeline' },
       { label: '财务核对', icon: '💰', title: '按既有引用字段核对本单与定金 / 货款申请单、付款单、费用单、客诉单、收款单与结算单（只读，金额未知不推断）', onclick: 'showOrderFinanceReconciliation' },
       { label: '打印预览', icon: '🖨', title: '按打印模板预览该销售订单（含客户 PO / 合同 / 唛头等）', onclick: 'previewSalesDocPrint' },

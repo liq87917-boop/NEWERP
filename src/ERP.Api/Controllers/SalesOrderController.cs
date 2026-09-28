@@ -83,6 +83,17 @@ public class SalesOrderController : DocumentControllerBase<SalesOrder>
             await SalesOrderProgress.ForSalesOrderAsync(Db, id)));
 
     /// <summary>
+    /// 销售订单退货影响（ERP-101，只读派生）：按显式链接链「销售退货 → 来源出库单 → 本销售订单」派生
+    /// 毛出货 / 有效退货 / 净出货数量，并把未审核、客户不一致、来源已删除、来源不属于本单、未关联来源
+    /// 的退货作为异常单列（绝不推断为扣减）；超退净额为负、不静默钳制；证据不完整为未知。
+    /// <para>只读：不写任何表、不执行迁移 / 生产 SQL / 真实数据库操作 / 部署，不改写订单任何已登记进度。</para>
+    /// </summary>
+    [HttpGet("{id:long}/return-impact")]
+    public async Task<IActionResult> ReturnImpact(long id)
+        => Ok(ApiResponse<SalesOrderReturnImpactView>.Success(
+            await SalesOrderReturnImpact.ForOrderAsync(Db, id)));
+
+    /// <summary>
     /// 销售订单出货 / 财务进度报表（ERP-032，只读派生、分页有界）：按「客户 + 币种」分组汇总已按权威口径派生的出货数量与收款链接金额，
     /// 不同币种分别成行、绝不合并、不做汇率换算；未链接 / 命中上限一律显式标注未知，不作为应收余额或账龄使用。
     /// </summary>
