@@ -1,3 +1,4 @@
+using ERP.Application.Services;
 using ERP.Infrastructure;
 using ERP.Infrastructure.Data;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -60,6 +61,9 @@ builder.Services.AddSwaggerGen(options =>
 
 // ============ 基础设施（数据库 + 服务） ============
 builder.Services.AddInfrastructure(builder.Configuration);
+
+// 库位 + 批次库存基础（ERP-096：只读派生 + 校验，不新增/修改表结构、不执行生产 SQL）
+builder.Services.AddScoped<IInventoryLocationLotService, InventoryLocationLotService>();
 
 // 钉钉通知：HttpClient 工厂 + 推送服务（业务单据状态变化时推送到钉钉群机器人）
 builder.Services.AddHttpClient();
