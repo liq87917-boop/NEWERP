@@ -1,7 +1,7 @@
 {
   "id": "ERP-096",
   "title": "Add warehouse location and inventory lot tracking foundation",
-  "status": "completed",
+  "status": "retry",
   "risk_level": "medium",
   "description": "Add development-only warehouse-location and lot identities to inventory movements and balances without changing existing product-level costing semantics or executing production SQL.",
   "acceptance_criteria": [
@@ -38,7 +38,8 @@
     "status": "not_required",
     "reason": "Development build gate."
   },
-  "attempts": 2,
+  "attempts": 0,
+  "quarantine": "Saved working directory and index state On main: autonomy quarantine ERP-096",
   "recovery_history": [
     {
       "cycle": 1,
@@ -57,7 +58,76 @@
           "D:\\VSCodeProject\\NEWERP\\.ai\\logs\\ERP-096-validation-2.log"
         ]
       }
+    },
+    {
+      "remediation_task": "ERP-096-RECOVERY-2",
+      "cycle": 2,
+      "at": "2026-09-28T13:16:35.033717Z",
+      "evidence": {
+        "failure_kind": "unclassified_engineering_failure",
+        "summary": "",
+        "result": ".ai\\results\\ERP-096.json",
+        "attempt_logs": [
+          ".ai\\logs\\ERP-096-attempt-1.jsonl",
+          ".ai\\logs\\ERP-096-attempt-2.jsonl",
+          ".ai\\logs\\ERP-096-attempt-3.jsonl"
+        ],
+        "validation_logs": [
+          ".ai\\logs\\ERP-096-validation-1.log",
+          ".ai\\logs\\ERP-096-validation-2.log"
+        ],
+        "latest_state_error": {
+          "task": "ERP-096",
+          "attempt": 2,
+          "summary": "Task produced no checkpointable business changes."
+        },
+        "latest_build": {
+          "task": "ERP-096",
+          "profile": "safe",
+          "status": "passed",
+          "exit_code": 0,
+          "log": ".ai\\logs\\ERP-096-validation-2.log",
+          "at": "2026-09-28T13:16:01.203661Z"
+        },
+        "task_context": ".ai\\tasks\\ERP-096.json",
+        "changed_paths": [],
+        "diff": null,
+        "execution_copy": null
+      }
     }
   ],
-  "supervised_recovery_cycles": 1
+  "supervised_recovery_cycles": 2,
+  "recovery_context": {
+    "remediation_task": "ERP-096-RECOVERY-2",
+    "failure_kind": "unclassified_engineering_failure",
+    "summary": "",
+    "result": ".ai\\results\\ERP-096.json",
+    "attempt_logs": [
+      ".ai\\logs\\ERP-096-attempt-1.jsonl",
+      ".ai\\logs\\ERP-096-attempt-2.jsonl",
+      ".ai\\logs\\ERP-096-attempt-3.jsonl"
+    ],
+    "validation_logs": [
+      ".ai\\logs\\ERP-096-validation-1.log",
+      ".ai\\logs\\ERP-096-validation-2.log"
+    ],
+    "latest_state_error": {
+      "task": "ERP-096",
+      "attempt": 2,
+      "summary": "Task produced no checkpointable business changes."
+    },
+    "latest_build": {
+      "task": "ERP-096",
+      "profile": "safe",
+      "status": "passed",
+      "exit_code": 0,
+      "log": ".ai\\logs\\ERP-096-validation-2.log",
+      "at": "2026-09-28T13:16:01.203661Z"
+    },
+    "task_context": ".ai\\tasks\\ERP-096.json",
+    "changed_paths": [],
+    "diff": null,
+    "execution_copy": null,
+    "instruction": "DeepSeek supervisor recovery: inspect the referenced complete logs, diagnose the root cause, and implement a different safe repair within allowed_paths. Rebuild and rerun the configured tests; if validation fails, use the newest log as the next repair input. Do not repeat the failed approach. Do not edit task/state/result files or relax production and irreversible-operation gates."
+  }
 }
