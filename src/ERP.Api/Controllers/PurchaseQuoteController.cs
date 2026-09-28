@@ -1,4 +1,5 @@
 using ERP.Application.Common;
+using ERP.Application.DTOs;
 using ERP.Application.Interfaces;
 using ERP.Domain.Entities;
 using ERP.Domain.Enums;
@@ -135,5 +136,31 @@ public class PurchaseQuoteController : BaseCrudController<PurchaseQuote>
         var view = await PurchaseQuotePriceHistory.ForQuoteAsync(_db, id);
         return Ok(ApiResponse<PurchaseQuotePriceHistoryView>.Success(view,
             $"比价行 #{id} 的报价历史：{view.TotalCount} 行、{view.GroupCount} 个比价口径"));
+    }
+
+    /// <summary>
+    /// 比价 → 采购订单价格差异（ERP-105，只读派生，通用查询）：按报价日期 + 可选供应商筛选
+    /// 「已转采购订单」的未删除比价行，稳定按报价日期 + 行 Id 排序并分页，逐行解析采购订单链接；
+    /// 仅在「商品 + 规格 + 单位 + 币种 + 是否含税」完全一致时计算单价差与金额差，
+    /// 歧义 / 口径不一致 / 陈旧链接 / 未链接显式标注为未解决，不重定价、不改审批。
+    /// </summary>
+    [HttpGet("order-price-variance")]
+    public async Task<IActionResult> OrderPriceVariance([FromQuery] PurchaseQuoteOrderPriceVarianceQuery query)
+    {
+        var view = await PurchaseQuoteOrderPriceVariance.QueryAsync(_db, query);
+        return Ok(ApiResponse<PurchaseQuoteOrderPriceVarianceView>.Success(view,
+            $"比价 → 采购订单价格差异：{view.TotalCount} 行（已核对 {view.ResolvedCount}、未解决 {view.UnresolvedCount}）"));
+    }
+
+    /// <summary>
+    /// 从某个比价行打开比价 → 采购订单价格差异（ERP-105，只读派生）：只返回该行的来源与采购订单对照；
+    /// 未转采购订单时显式标注未解决，不写库、不重定价、不改审批。
+    /// </summary>
+    [HttpGet("{id:long}/order-price-variance")]
+    public async Task<IActionResult> QuoteOrderPriceVariance(long id)
+    {
+        var view = await PurchaseQuoteOrderPriceVariance.ForQuoteAsync(_db, id);
+        return Ok(ApiResponse<PurchaseQuoteOrderPriceVarianceView>.Success(view,
+            $"比价行 #{id} 的价格差异：已核对 {view.ResolvedCount}、未解决 {view.UnresolvedCount}"));
     }
 }
