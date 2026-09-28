@@ -1,10 +1,11 @@
 {
   "schema_version": 2,
   "project": "NEWERP",
-  "updated_at": "2026-09-28T12:25:28.353488Z",
+  "updated_at": "2026-09-28T12:25:28.648360Z",
   "phase": "ready",
   "current_task": null,
   "queue": [
+    "ERP-096",
     "ERP-102",
     "ERP-103",
     "ERP-108",
@@ -96,14 +97,7 @@
     "ERP-106",
     "ERP-107"
   ],
-  "blocked": [
-    {
-      "task": "ERP-096",
-      "status": "blocked",
-      "reason": "Automatic repair budget exhausted",
-      "attempts": 3
-    }
-  ],
+  "blocked": [],
   "last_build": {
     "task": "ERP-107",
     "profile": "safe",
@@ -122,23 +116,23 @@
   },
   "git_sync": {
     "branch": "main",
-    "local_sha": "349c88f",
+    "local_sha": "2e3f502",
     "status": "synced",
-    "ahead": 5,
+    "ahead": 6,
     "behind": 0,
     "last_attempt_at": "2026-09-28T09:18:26.021269Z",
     "last_error": null
   },
   "next_recommended_tasks": [
+    "ERP-096",
     "ERP-102",
     "ERP-103",
-    "ERP-108",
-    "ERP-109"
+    "ERP-108"
   ],
   "runner": {
     "status": "stopped",
     "pid": null
   },
   "blocker": null,
-  "finish_reason": "transport_failures_requeued"
+  "finish_reason": "deepseek_supervisor_recovery"
 }
