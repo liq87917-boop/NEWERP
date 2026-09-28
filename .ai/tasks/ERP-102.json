@@ -1,0 +1,43 @@
+{
+  "id": "ERP-102",
+  "title": "Show sales order delivery exceptions",
+  "status": "pending",
+  "risk_level": "medium",
+  "description": "Add a development-only read-only sales-order delivery-exception workspace over existing order/header or line delivery dates and ERP-032 approved stock-out progress. Use an explicit as-of date and preserve unknown evidence; do not rewrite order status or progress. Do not execute migration, production SQL, real database operations, irreversible data actions or deployment.",
+  "acceptance_criteria": [
+    "An authenticated bounded GET query filters sales orders by customer and as-of date and reports header or line delivery dates with ordered, approved-shipped and outstanding quantity evidence using stable paging.",
+    "Overdue, due-soon, fulfilled and unknown states reuse ERP-032 shipment progress; partial shipments remain open, line-specific dates take precedence, and missing dates or truncated evidence remain unknown.",
+    "The sales-order page opens a read-only delivery-exception workspace with customer/date filters and clear quantity and date evidence; related records are loaded in batches, not per order.",
+    "Focused unit tests cover delivery-date precedence, date boundaries, partial shipment, nonapproved stock-outs, unknown evidence and no-write semantics; the safe Release build passes and rules are documented."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/SalesOrderDeliveryExceptions.cs",
+    "src/ERP.Api/Controllers/SalesOrderController.cs",
+    "src/ERP.Api/wwwroot/js/sales-order-delivery-exceptions.js",
+    "src/ERP.Api/wwwroot/js/modules-doc.js",
+    "src/ERP.Api/wwwroot/index.html",
+    "src/ERP.UnitTests/SalesOrderDeliveryExceptionTests.cs",
+    "docs/销售交期异常说明.md",
+    ".ai/**"
+  ],
+  "depends_on": [
+    "ERP-032"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "browser_acceptance": {
+    "required": false,
+    "deferred": true
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only read-only feature."
+  },
+  "attempts": 0,
+  "created_at": "2026-09-28T05:00:46.953490Z"
+}

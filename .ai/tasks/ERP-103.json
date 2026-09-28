@@ -1,0 +1,45 @@
+{
+  "id": "ERP-103",
+  "title": "Show supplier quote to order conversion funnel",
+  "status": "pending",
+  "risk_level": "low",
+  "description": "Add a development-only read-only supplier quote conversion funnel grouped by persisted comparison batch. Use existing approval decisions and explicit PurchaseQuote-to-PurchaseOrder conversion evidence; RefOrderNo alone can refer to a sales order before conversion, so ambiguous or deleted links remain unresolved. This is operational funnel evidence, not an approval or automatic conversion action. Do not execute migration, production SQL, real database operations, irreversible data actions or deployment.",
+  "acceptance_criteria": [
+    "An authenticated bounded GET funnel filters purchase-quote batches by quote-date range and optional supplier, returning stable paged batch and line counts.",
+    "Each batch distinguishes quoted, selected, approved, converted, rejected and unresolved evidence using the existing approval decisions and conversion source marker/order link; no conversion is inferred from RefOrderNo text alone.",
+    "The purchase-quote page opens a read-only funnel with batch drilldown and explicit empty, truncated and unresolved states; it does not create orders or alter quote decisions.",
+    "Focused unit tests cover multi-supplier batches, approval changes, batch conversion, stale or deleted order links, paging and no-write semantics; the safe Release build passes and counting rules are documented."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/PurchaseQuoteConversionFunnel.cs",
+    "src/ERP.Api/Controllers/PurchaseQuoteController.cs",
+    "src/ERP.Api/wwwroot/js/purchase-quote-conversion-funnel.js",
+    "src/ERP.Api/wwwroot/js/modules.js",
+    "src/ERP.Api/wwwroot/index.html",
+    "src/ERP.UnitTests/PurchaseQuoteConversionFunnelTests.cs",
+    "docs/供应商报价转单漏斗说明.md",
+    ".ai/**"
+  ],
+  "depends_on": [
+    "ERP-020",
+    "ERP-027",
+    "ERP-095"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "browser_acceptance": {
+    "required": false,
+    "deferred": true
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only read-only feature."
+  },
+  "attempts": 0,
+  "created_at": "2026-09-28T05:00:46.954195Z"
+}

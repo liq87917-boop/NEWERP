@@ -1,0 +1,44 @@
+{
+  "id": "ERP-101",
+  "title": "Show sales return impact on sales orders",
+  "status": "pending",
+  "risk_level": "medium",
+  "description": "Add a development-only read-only sales-order return-impact view using explicit SalesReturn.SourceStockOutId and StockOut.SalesOrderId links. Show gross approved shipment, valid approved return and net evidence without changing stored fulfillment, inventory or financial records. Unlinked, wrong-customer and over-return rows remain visible exceptions. Do not execute migration, production SQL, real database operations, irreversible data actions or deployment.",
+  "acceptance_criteria": [
+    "An authenticated bounded GET view for a sales order loads nondeleted approved stock-outs and explicitly linked nondeleted approved sales returns with stable detail ordering.",
+    "Per-product gross shipped, valid returned and net quantities are derived without silently clamping over-returns; unlinked, wrong-customer, missing-source and nonapproved returns are identified separately.",
+    "The sales-order page opens a read-only return-impact view and distinguishes zero, unknown and anomalous quantities without changing stored shipment progress.",
+    "Focused unit tests cover linkage, status, deletion, over-return, bounds and no-write semantics; the safe Release build passes and calculation rules are documented."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/SalesOrderReturnImpact.cs",
+    "src/ERP.Api/Controllers/SalesOrderController.cs",
+    "src/ERP.Api/wwwroot/js/sales-order-return-impact.js",
+    "src/ERP.Api/wwwroot/js/modules-doc.js",
+    "src/ERP.Api/wwwroot/index.html",
+    "src/ERP.UnitTests/SalesOrderReturnImpactTests.cs",
+    "docs/销售退货订单影响说明.md",
+    ".ai/**"
+  ],
+  "depends_on": [
+    "ERP-025",
+    "ERP-032"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "browser_acceptance": {
+    "required": false,
+    "deferred": true
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only read-only feature."
+  },
+  "attempts": 0,
+  "created_at": "2026-09-28T05:00:46.952589Z"
+}
