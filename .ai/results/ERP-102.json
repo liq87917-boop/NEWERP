@@ -1,0 +1,13 @@
+{
+  "task": "ERP-102",
+  "status": "blocked",
+  "execution_outcome": "repair_budget_exhausted",
+  "attempts": 3,
+  "last_error": "Task produced no checkpointable business changes.",
+  "attempted_fix": {
+    "provider": "deepseek",
+    "model": "deepseek-v4-pro"
+  },
+  "quarantine": "Saved working directory and index state On main: autonomy quarantine ERP-102",
+  "finished_at": "2026-09-28T07:41:20.095576Z"
+}
