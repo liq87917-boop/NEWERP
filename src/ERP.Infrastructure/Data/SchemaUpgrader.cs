@@ -1271,8 +1271,11 @@ IF COL_LENGTH('db_owner.Quotations', 'RootQuotationNo') IS NULL
 IF COL_LENGTH('db_owner.Quotations', 'PreviousRevisionId') IS NULL
     ALTER TABLE db_owner.Quotations ADD PreviousRevisionId BIGINT NULL;
 IF COL_LENGTH('db_owner.Quotations', 'PreviousRevisionNo') IS NULL
-    ALTER TABLE db_owner.Quotations ADD PreviousRevisionNo NVARCHAR(50) NOT NULL DEFAULT N'';
+    ALTER TABLE db_owner.Quotations ADD PreviousRevisionNo NVARCHAR(50) NOT NULL DEFAULT N'';");
 
+        // 24.2 索引必须独立成批：若与上面的 ALTER TABLE ADD 同批，当列尚不存在时，
+        // SQL Server 会在编译期报「列名无效」（错误 207），导致补列与索引一并失败、启动中断。
+        await db.Database.ExecuteSqlRawAsync(@"
 IF NOT EXISTS (SELECT 1 FROM sys.indexes
                WHERE name = 'UX_Quotations_RevisionChain' AND object_id = OBJECT_ID('db_owner.Quotations'))
     CREATE UNIQUE INDEX UX_Quotations_RevisionChain
@@ -1512,15 +1515,19 @@ IF COL_LENGTH('db_owner.FinanceExpenses', 'AllocationSourceExpenseId') IS NULL
     ALTER TABLE db_owner.FinanceExpenses ADD AllocationSourceExpenseId BIGINT NULL;
 
 IF COL_LENGTH('db_owner.FinanceExpenses', 'AllocationSourceExpenseNo') IS NULL
-    ALTER TABLE db_owner.FinanceExpenses ADD AllocationSourceExpenseNo NVARCHAR(50) NULL;
+    ALTER TABLE db_owner.FinanceExpenses ADD AllocationSourceExpenseNo NVARCHAR(50) NULL;");
 
+        // 30.2 读取侧索引必须独立成批：AllocationBatchNo 由上面的 ALTER TABLE ADD 新增，
+        //     若同批 CREATE INDEX 引用它，SQL Server 会在编译期报「列名无效」（错误 207）。
+        await db.Database.ExecuteSqlRawAsync(@"
 IF NOT EXISTS (SELECT 1 FROM sys.indexes
                WHERE name = 'IX_FinanceExpenses_AllocationBatchNo'
                  AND object_id = OBJECT_ID('db_owner.FinanceExpenses'))
     CREATE INDEX IX_FinanceExpenses_AllocationBatchNo
         ON db_owner.FinanceExpenses(AllocationBatchNo)
-        WHERE IsDeleted = 0 AND AllocationBatchNo <> N'';
+        WHERE IsDeleted = 0 AND AllocationBatchNo <> N'';");
 
+        await db.Database.ExecuteSqlRawAsync(@"
 IF OBJECT_ID('db_owner.FinanceExpenseAllocationBatches') IS NULL
 BEGIN
     CREATE TABLE db_owner.FinanceExpenseAllocationBatches (
@@ -1962,7 +1969,7 @@ BEGIN
     CREATE TABLE db_owner.SalesOrderChangeRequestDetails (
         Id BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,
         ChangeRequestId BIGINT NOT NULL,
-        LineNo INT NOT NULL DEFAULT 0,
+        [LineNo] INT NOT NULL DEFAULT 0,
         HasSourceLine BIT NOT NULL DEFAULT 0,
         SourceProductId BIGINT NOT NULL DEFAULT 0,
         SourceProductName NVARCHAR(200) NOT NULL DEFAULT N'',
@@ -1996,7 +2003,7 @@ IF NOT EXISTS (SELECT 1 FROM sys.indexes
                WHERE name = 'IX_SalesOrderChangeRequestDetails_Request_LineNo'
                  AND object_id = OBJECT_ID('db_owner.SalesOrderChangeRequestDetails'))
     CREATE INDEX IX_SalesOrderChangeRequestDetails_Request_LineNo
-        ON db_owner.SalesOrderChangeRequestDetails(ChangeRequestId, LineNo)
+        ON db_owner.SalesOrderChangeRequestDetails(ChangeRequestId, [LineNo])
         WHERE IsDeleted = 0;
 
 IF NOT EXISTS (SELECT 1 FROM sys.foreign_keys
@@ -2097,7 +2104,7 @@ BEGIN
     CREATE TABLE db_owner.TradeDocumentItems (
         Id BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,
         TradeDocumentId BIGINT NOT NULL,
-        LineNo INT NOT NULL DEFAULT 1,
+        [LineNo] INT NOT NULL DEFAULT 1,
         ProductId BIGINT NOT NULL DEFAULT 0,
         ProductCode NVARCHAR(50) NOT NULL DEFAULT N'',
         ProductNameCn NVARCHAR(200) NOT NULL DEFAULT N'',
@@ -2125,7 +2132,7 @@ IF NOT EXISTS (SELECT 1 FROM sys.indexes
                WHERE name = 'UX_TradeDocumentItems_Document_LineNo'
                  AND object_id = OBJECT_ID('db_owner.TradeDocumentItems'))
     CREATE UNIQUE INDEX UX_TradeDocumentItems_Document_LineNo
-        ON db_owner.TradeDocumentItems(TradeDocumentId, LineNo)
+        ON db_owner.TradeDocumentItems(TradeDocumentId, [LineNo])
         WHERE IsDeleted = 0;
 
 IF NOT EXISTS (SELECT 1 FROM sys.foreign_keys
@@ -2845,7 +2852,7 @@ BEGIN
     CREATE TABLE db_owner.AgencyServiceFeeStatementLines (
         Id BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,
         StatementId BIGINT NOT NULL,
-        LineNo INT NOT NULL DEFAULT 0,
+        [LineNo] INT NOT NULL DEFAULT 0,
         SourceType NVARCHAR(20) NOT NULL DEFAULT N'',
         SourceId BIGINT NOT NULL,
         SourceNo NVARCHAR(50) NOT NULL DEFAULT N'',
@@ -2887,7 +2894,7 @@ IF NOT EXISTS (SELECT 1 FROM sys.indexes
                WHERE name = 'IX_AgencyServiceFeeStatementLines_StatementId_LineNo'
                  AND object_id = OBJECT_ID('db_owner.AgencyServiceFeeStatementLines'))
     CREATE INDEX IX_AgencyServiceFeeStatementLines_StatementId_LineNo
-        ON db_owner.AgencyServiceFeeStatementLines(StatementId, LineNo)
+        ON db_owner.AgencyServiceFeeStatementLines(StatementId, [LineNo])
         WHERE IsDeleted = 0;
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes
