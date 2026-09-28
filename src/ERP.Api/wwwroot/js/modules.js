@@ -431,6 +431,8 @@ const MODULES = {
       { label: '生成采购订单', icon: '📦', title: '按该选中比价行直接生成一张采购订单（同一比价行只生成一张，来源自动留痕）', onclick: 'purchaseQuoteToOrder', statuses: ['已选中'] },
       { label: '预填采购订单', icon: '🧾', title: '按该选中比价行带入采购订单草稿到采购订单新增表单（不落库，可编辑后再保存）', onclick: 'purchaseQuotePrefillOrder', statuses: ['已选中'] },
       { label: '批次转采购订单', icon: '🧩', title: '把该行所属比价批次内所有「已选中」行按供应商 + 币种 + 归属客户合并生成采购订单（同组多行合并为一张订单，不合格行明确跳过）', onclick: 'purchaseQuoteBatchToOrder', statuses: ['已选中'] },
+      /* ERP-098：报价价格历史（只读；同商品按「规格 + 单位 + 币种 + 含税」口径分组比价，不写库、不自动选供应商） */
+      { label: '报价历史', icon: '📊', title: '只读查看该商品的历史报价：仅在相同「规格 + 单位 + 币种 + 含税」口径内计算价格差异，口径不一致的报价行明确单列；审批 / 选中仅作证据回显', onclick: 'showPurchaseQuotePriceHistory' },
     ],
   },
   /* 单证中心（阶段 2 新增，挂在「出运管理」菜单下） */

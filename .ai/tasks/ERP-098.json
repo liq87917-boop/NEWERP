@@ -1,7 +1,7 @@
 {
   "id": "ERP-098",
   "title": "Show comparable supplier quote price history",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "low",
   "description": "Add a development-only read-only price-history workspace for persisted purchase quotes. Compare only the same product, specification, unit, currency and tax-included basis; show approval/selection as evidence, never auto-select a supplier or change quotes, orders or prices. Do not execute migration, production SQL, real database operations or deployment.",
   "acceptance_criteria": [
@@ -38,6 +38,6 @@
     "status": "not_required",
     "reason": "Development build gate; read-only feature."
   },
-  "attempts": 0,
+  "attempts": 3,
   "created_at": "2026-09-28T03:45:03.347384Z"
 }

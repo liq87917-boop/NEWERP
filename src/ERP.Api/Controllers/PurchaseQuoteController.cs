@@ -111,4 +111,29 @@ public class PurchaseQuoteController : BaseCrudController<PurchaseQuote>
             : $"已生成 {result.OrderCount} 张采购订单";
         return Ok(ApiResponse<PurchaseQuoteBatchConversionResult>.Success(result, message));
     }
+
+    /// <summary>
+    /// 报价价格历史（ERP-098，只读派生，通用查询）：按商品 + 可选供应商 / 报价日期区间筛选未删除报价行，
+    /// 稳定按报价日期 + 行 Id 排序并分页，按「规格 + 单位 + 币种 + 是否含税」比价口径分组，
+    /// 价格差异只在口径内部计算，口径不一致的报价行明确分单列；审批 / 选中仅作证据回显，不写库。
+    /// </summary>
+    [HttpGet("price-history")]
+    public async Task<IActionResult> PriceHistory([FromQuery] PurchaseQuotePriceHistoryQuery query)
+    {
+        var view = await PurchaseQuotePriceHistory.QueryAsync(_db, query);
+        return Ok(ApiResponse<PurchaseQuotePriceHistoryView>.Success(view,
+            $"报价历史：{view.TotalCount} 行、{view.GroupCount} 个比价口径"));
+    }
+
+    /// <summary>
+    /// 从某个比价行打开报价价格历史（ERP-098，只读派生）：以该行商品作为筛选商品、以该行口径作为参照口径，
+    /// 与参照口径一致的报价行为「可同比价」组，口径不一致的报价行明确分单列；不写库、不自动选供应商。
+    /// </summary>
+    [HttpGet("{id:long}/price-history")]
+    public async Task<IActionResult> QuotePriceHistory(long id)
+    {
+        var view = await PurchaseQuotePriceHistory.ForQuoteAsync(_db, id);
+        return Ok(ApiResponse<PurchaseQuotePriceHistoryView>.Success(view,
+            $"比价行 #{id} 的报价历史：{view.TotalCount} 行、{view.GroupCount} 个比价口径"));
+    }
 }
