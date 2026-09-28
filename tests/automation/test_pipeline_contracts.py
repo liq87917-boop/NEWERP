@@ -20,6 +20,7 @@ def load_module(name: str, path: Path):
 
 pipeline = load_module("ai_pipeline_contract", ROOT / "scripts" / "ai_pipeline.py")
 orchestrator = load_module("ai_orchestrator_contract", ROOT / "scripts" / "ai_orchestrator.py")
+state_module = load_module("ai_state_contract", ROOT / "scripts" / "ai_state.py")
 
 
 class PipelineContracts(unittest.TestCase):
@@ -57,6 +58,15 @@ class PipelineContracts(unittest.TestCase):
                 self.assertEqual("ready", reason)
             finally:
                 pipeline.TASKS_DIR, pipeline.CONFIG_PATH = old_tasks, old_config
+
+    def test_state_save_retries_transient_windows_destination_lock(self):
+        with tempfile.TemporaryDirectory() as directory, \
+             patch.object(Path, "replace", side_effect=[PermissionError("locked"), None]) as replace, \
+             patch.object(state_module.time, "sleep") as sleep:
+            state_module.save_json(Path(directory) / "PROJECT_STATE.json", {"phase": "ready"})
+
+        self.assertEqual(2, replace.call_count)
+        sleep.assert_called_once_with(0.05)
 
     def test_l3_gate_requires_explicit_approval(self):
         with tempfile.TemporaryDirectory() as directory:

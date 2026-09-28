@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -24,9 +25,21 @@ def load_json(path: Path, default: Any = None) -> Any:
 
 
 def save_json(path: Path, value: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(path.suffix + ".tmp")
     temporary.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    temporary.replace(path)
+    # The local status console polls PROJECT_STATE.json on Windows. A reader that
+    # opens the destination without delete sharing can make an otherwise atomic
+    # os.replace fail transiently with WinError 5. Retry the atomic promotion so
+    # a completed task cannot be left out of the canonical project snapshot.
+    for attempt in range(8):
+        try:
+            temporary.replace(path)
+            return
+        except PermissionError:
+            if attempt == 7:
+                raise
+            time.sleep(0.05 * (attempt + 1))
 
 
 def _git(root: Path, *args: str) -> tuple[int, str]:

@@ -343,6 +343,9 @@
        fail closed；不新增 / 不修改任何表与列，不写库；不是总账 / 应收余额 / 法定客户对账单 / 付款通知 /
        收入确认 / 税务申报 / 结算确认） -->
   <script src="/js/agency-service-fee-reconciliation.js"></script>
+  <!-- ERP-099：采购交期异常工作台（只读派生：按供应商 + 显式 as-of 基准日派生逾期 / 即将到期 / 晚确认 / 已收齐，
+       只按已审核未删除入库收货证据；缺日期或证据不完整显示「未知」，不改写订单进度，不执行迁移 / 生产 SQL / 部署） -->
+  <script src="/js/purchase-order-delivery-exceptions.js"></script>
   <script src="/js/app.js"></script>
 </body>
 </html>

@@ -1,7 +1,7 @@
 {
   "schema_version": 2,
   "project": "NEWERP",
-  "updated_at": "2026-09-28T05:00:46.967053Z",
+  "updated_at": "2026-09-28T06:53:35.871410Z",
   "phase": "ready",
   "current_task": null,
   "queue": [
@@ -85,7 +85,8 @@
     "ERP-086",
     "ERP-095",
     "ERP-097",
-    "ERP-098"
+    "ERP-098",
+    "ERP-099"
   ],
   "blocked": [
     {
@@ -113,8 +114,8 @@
   },
   "git_sync": {
     "branch": "main",
-    "local_sha": "f4aa8bf",
-    "status": "synced",
+    "local_sha": "3d5509e",
+    "status": "pending",
     "ahead": 0,
     "behind": 0,
     "last_attempt_at": "2026-09-28T04:11:20.450784Z",
@@ -130,5 +131,6 @@
     "status": "stopped",
     "pid": null
   },
-  "finish_reason": "code_ready_not_complete"
+  "blocker": null,
+  "finish_reason": "completed_checkpoint_recovered_after_state_lock"
 }

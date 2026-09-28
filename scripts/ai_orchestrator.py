@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from ai_state import refresh_project_state
+from ai_state import refresh_project_state, save_json
 
 ROOT = Path(__file__).resolve().parents[1]
 AI_DIR = ROOT / ".ai"
@@ -30,13 +30,6 @@ def utc_now() -> str:
 
 def load_json(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
-
-
-def save_json(path: Path, value: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temp = path.with_suffix(path.suffix + ".tmp")
-    temp.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    temp.replace(path)
 
 
 def audit(event: str, **details: Any) -> None:

@@ -87,6 +87,16 @@ public class PurchaseOrderController : DocumentControllerBase<PurchaseOrder>
             await SupplierPurchaseExposure.ForQueryAsync(Db, query)));
 
     /// <summary>
+    /// 采购交期异常工作台（ERP-099，只读派生）：按供应商 + 显式 as-of 基准日过滤采购订单，
+    /// 报告要求交期 / 供应商确认交期 / 已审核入库收货证据，并派生逾期 / 即将到期 / 晚确认 / 已收齐等交期状态；
+    /// 缺日期或收货证据不完整为未知；不改写订单任何已登记进度，不执行迁移 / 生产 SQL / 真实数据库操作 / 部署。
+    /// </summary>
+    [HttpGet("delivery-exceptions")]
+    public async Task<IActionResult> DeliveryExceptions([FromQuery] PurchaseOrderDeliveryExceptionQuery query)
+        => Ok(ApiResponse<PurchaseOrderDeliveryExceptionReport>.Success(
+            await PurchaseOrderDeliveryExceptions.ForQueryAsync(Db, query)));
+
+    /// <summary>
     /// 发票证据汇总（ERP-048，只读派生）：只按 ERP-043 的持久化关联行派生「已登记且未作废」的已开票金额、
     /// 未开票金额、发票张数与覆盖状态，并把草稿 / 已作废 / 无效（供应商 / 币种不一致）/ 无法确认证据单独列出
     /// （覆盖状态与订单可用性文案复用 ERP-044 的同一套口径）。
