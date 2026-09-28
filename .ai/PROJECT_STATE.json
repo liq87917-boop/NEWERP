@@ -1,10 +1,12 @@
 {
   "schema_version": 2,
   "project": "NEWERP",
-  "updated_at": "2026-09-28T09:30:08.719084Z",
+  "updated_at": "2026-09-28T12:25:28.353488Z",
   "phase": "ready",
   "current_task": null,
   "queue": [
+    "ERP-102",
+    "ERP-103",
     "ERP-108",
     "ERP-109",
     "ERP-110",
@@ -100,18 +102,6 @@
       "status": "blocked",
       "reason": "Automatic repair budget exhausted",
       "attempts": 3
-    },
-    {
-      "task": "ERP-102",
-      "status": "blocked",
-      "reason": "Automatic repair budget exhausted",
-      "attempts": 3
-    },
-    {
-      "task": "ERP-103",
-      "status": "blocked",
-      "reason": "Automatic repair budget exhausted",
-      "attempts": 3
     }
   ],
   "last_build": {
@@ -132,21 +122,23 @@
   },
   "git_sync": {
     "branch": "main",
-    "local_sha": "297f1a0",
+    "local_sha": "349c88f",
     "status": "synced",
-    "ahead": 0,
+    "ahead": 5,
     "behind": 0,
     "last_attempt_at": "2026-09-28T09:18:26.021269Z",
     "last_error": null
   },
   "next_recommended_tasks": [
+    "ERP-102",
+    "ERP-103",
     "ERP-108",
-    "ERP-109",
-    "ERP-110",
-    "ERP-111"
+    "ERP-109"
   ],
   "runner": {
     "status": "stopped",
     "pid": null
-  }
+  },
+  "blocker": null,
+  "finish_reason": "transport_failures_requeued"
 }

@@ -1,7 +1,7 @@
 {
   "id": "ERP-103",
   "title": "Show supplier quote to order conversion funnel",
-  "status": "blocked",
+  "status": "retry",
   "risk_level": "low",
   "description": "Add a development-only read-only supplier quote conversion funnel grouped by persisted comparison batch. Use existing approval decisions and explicit PurchaseQuote-to-PurchaseOrder conversion evidence; RefOrderNo alone can refer to a sales order before conversion, so ambiguous or deleted links remain unresolved. This is operational funnel evidence, not an approval or automatic conversion action. Do not execute migration, production SQL, real database operations, irreversible data actions or deployment.",
   "acceptance_criteria": [
@@ -40,11 +40,15 @@
     "status": "not_required",
     "reason": "Development-only read-only feature."
   },
-  "attempts": 3,
+  "attempts": 0,
   "created_at": "2026-09-28T05:00:46.954195Z",
-  "blocker": "Automatic repair budget exhausted",
-  "failure_kind": "prompt_transport_failure",
-  "failed_transport_version": 1,
-  "last_error": "Task produced no checkpointable business changes.",
-  "quarantine": "Saved working directory and index state On main: autonomy quarantine ERP-103"
+  "quarantine": "Saved working directory and index state On main: autonomy quarantine ERP-103",
+  "recovery_history": [
+    {
+      "kind": "prompt_transport_failure",
+      "from_version": 1,
+      "to_version": 2,
+      "at": "2026-09-28T12:25:28.255364Z"
+    }
+  ]
 }

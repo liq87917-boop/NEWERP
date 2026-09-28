@@ -1,7 +1,7 @@
 {
   "id": "ERP-102",
   "title": "Show sales order delivery exceptions",
-  "status": "blocked",
+  "status": "retry",
   "risk_level": "medium",
   "description": "Add a development-only read-only sales-order delivery-exception workspace over existing order/header or line delivery dates and ERP-032 approved stock-out progress. Use an explicit as-of date and preserve unknown evidence; do not rewrite order status or progress. Do not execute migration, production SQL, real database operations, irreversible data actions or deployment.",
   "acceptance_criteria": [
@@ -38,11 +38,15 @@
     "status": "not_required",
     "reason": "Development-only read-only feature."
   },
-  "attempts": 3,
+  "attempts": 0,
   "created_at": "2026-09-28T05:00:46.953490Z",
-  "blocker": "Automatic repair budget exhausted",
-  "failure_kind": "prompt_transport_failure",
-  "failed_transport_version": 1,
-  "last_error": "Task produced no checkpointable business changes.",
-  "quarantine": "Saved working directory and index state On main: autonomy quarantine ERP-102"
+  "quarantine": "Saved working directory and index state On main: autonomy quarantine ERP-102",
+  "recovery_history": [
+    {
+      "kind": "prompt_transport_failure",
+      "from_version": 1,
+      "to_version": 2,
+      "at": "2026-09-28T12:25:28.254097Z"
+    }
+  ]
 }
