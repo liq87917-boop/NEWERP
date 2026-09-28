@@ -7,7 +7,16 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$root = Split-Path -Parent $scriptDir
+$controlRoot = Split-Path -Parent $scriptDir
+$workspaceManager = Join-Path $scriptDir 'ai_executor_workspace.py'
+$workspaceRaw = & py -3 $workspaceManager ensure --root $controlRoot
+if ($LASTEXITCODE -ne 0) {
+    Write-Host ("Executor workspace recovery failed: {0}" -f ($workspaceRaw -join ' ')) -ForegroundColor Red
+    exit 3
+}
+$workspaceInfo = ($workspaceRaw -join [Environment]::NewLine) | ConvertFrom-Json
+$root = [string]$workspaceInfo.path
+$scriptDir = Join-Path $root 'scripts'
 $statePath = Join-Path $root '.ai\PROJECT_STATE.json'
 $configPath = Join-Path $root '.ai\config.json'
 $tasksDir = Join-Path $root '.ai\tasks'
@@ -17,6 +26,13 @@ $orchestratorScript = Join-Path $scriptDir 'ai_orchestrator.py'
 $outLog = Join-Path $logsDir 'agent-pipeline.out.log'
 $errLog = Join-Path $logsDir 'agent-pipeline.err.log'
 $managedBranches = @('main', 'master', 'develop')
+$gitDirText = (& git -C $controlRoot rev-parse --git-dir 2>$null | Select-Object -First 1)
+$runtimePath = $null
+if ($LASTEXITCODE -eq 0 -and $gitDirText) {
+    $gitDir = [string]$gitDirText
+    if (-not [System.IO.Path]::IsPathRooted($gitDir)) { $gitDir = Join-Path $controlRoot $gitDir }
+    $runtimePath = Join-Path $gitDir 'newerp-agent-runtime.json'
+}
 
 if (-not (Test-Path $logsDir)) {
     New-Item -ItemType Directory -Path $logsDir -Force | Out-Null
@@ -419,6 +435,32 @@ function Get-AgentMode {
     return 'IDLE'
 }
 
+function Write-AgentRuntime {
+    param($State, $Head, $GitInfo, [string]$Mode)
+    if (-not $runtimePath) { return }
+    $reason = $null
+    if ($Mode -eq 'ATTENTION' -and $GitInfo.Dirty) { $reason = 'executor_worktree_dirty' }
+    elseif ($Mode -eq 'READY') { $reason = 'runnable_task_detected' }
+    elseif ($Mode -eq 'RUNNING') { $reason = 'pipeline_running' }
+    $pidValue = $null
+    if ($pipelineProcess -and -not $pipelineProcess.HasExited) { $pidValue = $pipelineProcess.Id }
+    $value = [ordered]@{
+        updated_at = [DateTime]::UtcNow.ToString('o')
+        status = $Mode.ToLowerInvariant()
+        pid = $pidValue
+        reason = $reason
+        control_root = $controlRoot
+        executor_root = $root
+        control_worktree_dirty = [bool]$workspaceInfo.control_worktree_dirty
+        executor_worktree_dirty = [bool]$GitInfo.Dirty
+        task = if ($Head) { $Head.id } else { $null }
+        phase = if ($State) { $State.phase } else { $null }
+    }
+    $temporary = "$runtimePath.tmp"
+    $value | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $temporary -Encoding UTF8
+    Move-Item -LiteralPath $temporary -Destination $runtimePath -Force
+}
+
 function New-StatusLine {
     param(
         [string]$Text = '',
@@ -469,6 +511,10 @@ function Get-StatusLines {
 
     $lines += New-StatusLine (" Repository : {0}" -f $root)
     $lines += New-StatusLine (" Git        : {0} @ {1}" -f $GitInfo.Branch, $GitInfo.Sha)
+    $lines += New-StatusLine (" Executor   : {0}" -f $root) 'DarkCyan'
+    if ($workspaceInfo.control_worktree_dirty) {
+        $lines += New-StatusLine ' Control dir: dirty but isolated; user changes are preserved' 'Yellow'
+    }
 
     $gitState = 'clean'
     if ($GitInfo.Dirty) { $gitState = 'DIRTY' }
@@ -822,6 +868,8 @@ try {
             }
         }
 
+        $mode = Get-AgentMode $state $head $gitInfo
+        Write-AgentRuntime $state $head $gitInfo $mode
         Write-Status $state $tasks $head $gitInfo
         if ($Once) { break }
         if ($script:selfRestartRequested) {
@@ -845,6 +893,18 @@ finally {
     } catch {}
     try { $mutex.ReleaseMutex() } catch {}
     try { $mutex.Dispose() } catch {}
+    if ($runtimePath) {
+        try {
+            [ordered]@{
+                updated_at = [DateTime]::UtcNow.ToString('o')
+                status = 'stopped'
+                pid = $null
+                reason = 'agent_host_exited'
+                control_root = $controlRoot
+                executor_root = $root
+            } | ConvertTo-Json | Set-Content -LiteralPath $runtimePath -Encoding UTF8
+        } catch {}
+    }
 }
 
 if ($Once) { exit 0 }

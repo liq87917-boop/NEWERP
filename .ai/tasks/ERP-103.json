@@ -43,6 +43,8 @@
   "attempts": 3,
   "created_at": "2026-09-28T05:00:46.954195Z",
   "blocker": "Automatic repair budget exhausted",
+  "failure_kind": "prompt_transport_failure",
+  "failed_transport_version": 1,
   "last_error": "Task produced no checkpointable business changes.",
   "quarantine": "Saved working directory and index state On main: autonomy quarantine ERP-103"
 }

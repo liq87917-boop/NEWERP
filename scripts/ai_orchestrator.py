@@ -369,6 +369,21 @@ def parse_cline_finish_reason(log_path: Path) -> str | None:
     return reason
 
 
+def executor_requested_missing_task(log_path: Path) -> bool:
+    """Recognize the no-op response caused by a truncated task prompt."""
+    if not log_path.exists():
+        return False
+    text = log_path.read_text(encoding="utf-8", errors="replace")[-24000:].lower()
+    markers = (
+        "describe what you'd like me to build",
+        "describe the specific feature or bug fix",
+        "paste the full task json",
+        "still need the specifics",
+        "still need the details",
+    )
+    return any(marker in text for marker in markers)
+
+
 def build_prompt(task: dict[str, Any], attempt: int, previous_error: str) -> str:
     base = (AI_DIR / "prompts" / "developer.md").read_text(encoding="utf-8")
     retry = f"\nPrevious attempt failed. The complete validation log remains at the path in this summary:\n{previous_error[-12000:]}\n" if previous_error else ""
@@ -554,6 +569,8 @@ def run_next(dry_run: bool) -> int:
     cline_code: int | None = 0 if resume_existing else None
     cline_raw_reason: str | None = "path_guard_recovered_existing_work" if resume_existing else None
     browser_manifest: dict[str, Any] | None = None
+    failure_kind: str | None = None
+    last_executor_log: Path | None = None
     max_attempts = int(task.get("max_attempts", config["max_attempts"]))
     start_attempt = max(1, min(int(task.get("attempts", 0) or 1), max_attempts))
     validate_existing_first = resume_existing
@@ -565,6 +582,7 @@ def run_next(dry_run: bool) -> int:
             audit("path_guard_recovery_validation_started", task=task["id"], attempt=attempt)
         else:
             log_path = LOGS_DIR / f"{task['id']}-attempt-{attempt}.jsonl"; LOGS_DIR.mkdir(parents=True, exist_ok=True)
+            last_executor_log = log_path
             provider = os.environ.get("AI_CLINE_PROVIDER", "deepseek")
             model = os.environ.get("AI_CLINE_MODEL", "deepseek-v4-pro")
             command = [
@@ -652,7 +670,12 @@ def run_next(dry_run: bool) -> int:
 
         business_changes = [path for path in changed_paths() if not matches(path, config["ignored_change_paths"]) and not matches(path, config.get("orchestrator_paths", []))]
         if not business_changes:
-            previous_error = "Task produced no checkpointable business changes."; task["status"] = "in_progress"; save_json(task_path, task); continue
+            if last_executor_log is not None and executor_requested_missing_task(last_executor_log):
+                failure_kind = "prompt_transport_failure"
+                previous_error = "Executor did not receive the complete task prompt and requested task details."
+            else:
+                previous_error = "Task produced no checkpointable business changes."
+            task["status"] = "in_progress"; save_json(task_path, task); continue
         task["status"] = "completed"; save_json(task_path, task)
         normalized = (
             "browser_deferred"
@@ -702,11 +725,15 @@ def run_next(dry_run: bool) -> int:
     task["status"] = "blocked"
     task["blocker"] = "Automatic repair budget exhausted"
     task["last_error"] = previous_error[-12000:]
+    if failure_kind:
+        task["failure_kind"] = failure_kind
+        task["failed_transport_version"] = int(config.get("pipeline", {}).get("prompt_transport_version", 1))
     task["quarantine"] = quarantine.stdout.strip()
     save_json(task_path, task)
     failure_result = {
         "task": task["id"], "status": "blocked", "execution_outcome": "repair_budget_exhausted",
         "attempts": max_attempts, "last_error": previous_error[-12000:],
+        "failure_kind": failure_kind,
         "attempted_fix": {"provider": "deepseek", "model": os.environ.get("AI_CLINE_MODEL", "deepseek-v4-pro")},
         "quarantine": quarantine.stdout.strip(), "finished_at": utc_now(),
     }

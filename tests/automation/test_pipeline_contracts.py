@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import subprocess
 from unittest.mock import patch
 import tempfile
 import unittest
@@ -21,6 +22,7 @@ def load_module(name: str, path: Path):
 pipeline = load_module("ai_pipeline_contract", ROOT / "scripts" / "ai_pipeline.py")
 orchestrator = load_module("ai_orchestrator_contract", ROOT / "scripts" / "ai_orchestrator.py")
 state_module = load_module("ai_state_contract", ROOT / "scripts" / "ai_state.py")
+executor_workspace = load_module("ai_executor_workspace_contract", ROOT / "scripts" / "ai_executor_workspace.py")
 
 
 class PipelineContracts(unittest.TestCase):
@@ -67,6 +69,79 @@ class PipelineContracts(unittest.TestCase):
 
         self.assertEqual(2, replace.call_count)
         sleep.assert_called_once_with(0.05)
+
+    def test_executor_checkout_preserves_dirty_control_worktree(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            control = base / "control"
+            executor = base / "executor"
+            control.mkdir()
+            subprocess.run(["git", "init", "-b", "main"], cwd=control, check=True, capture_output=True)
+            subprocess.run(["git", "config", "user.email", "automation@test.invalid"], cwd=control, check=True)
+            subprocess.run(["git", "config", "user.name", "Automation Test"], cwd=control, check=True)
+            (control / ".ai").mkdir()
+            (control / ".ai" / "config.json").write_text(json.dumps({
+                "pipeline": {"executor_worktree": {
+                    "enabled": True,
+                    "path": str(executor),
+                    "target_branch": "main",
+                }}
+            }), encoding="utf-8")
+            (control / "tracked.txt").write_text("base\n", encoding="utf-8")
+            subprocess.run(["git", "add", "."], cwd=control, check=True)
+            subprocess.run(["git", "commit", "-m", "base"], cwd=control, check=True, capture_output=True)
+            subprocess.run(["git", "remote", "add", "origin", str(control)], cwd=control, check=True)
+            (control / "user-work.txt").write_text("preserve me\n", encoding="utf-8")
+
+            result = executor_workspace.ensure_workspace(control)
+
+            self.assertEqual("ready", result["status"])
+            self.assertTrue(result["control_worktree_dirty"])
+            self.assertFalse((executor / "user-work.txt").exists())
+            self.assertEqual("", subprocess.run(
+                ["git", "status", "--porcelain"], cwd=executor, check=True,
+                capture_output=True, text=True,
+            ).stdout.strip())
+
+    def test_prompt_transport_upgrade_requeues_only_matching_blocked_tasks(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            ai_dir = root / ".ai"
+            tasks = ai_dir / "tasks"
+            tasks.mkdir(parents=True)
+            config_path = ai_dir / "config.json"
+            state_path = ai_dir / "PROJECT_STATE.json"
+            audit_path = ai_dir / "audit.jsonl"
+            config_path.write_text(json.dumps({"task_prefix": "ERP", "pipeline": {"prompt_transport_version": 2}}), encoding="utf-8")
+            state_path.write_text(json.dumps({"phase": "ready"}), encoding="utf-8")
+            affected = self.task("ERP-102", "blocked") | {
+                "failure_kind": "prompt_transport_failure",
+                "failed_transport_version": 1,
+                "attempts": 3,
+                "blocker": "Automatic repair budget exhausted",
+            }
+            unrelated = self.task("ERP-103", "blocked") | {"attempts": 3}
+            (tasks / "ERP-102.json").write_text(json.dumps(affected), encoding="utf-8")
+            (tasks / "ERP-103.json").write_text(json.dumps(unrelated), encoding="utf-8")
+            old_values = (pipeline.ROOT, pipeline.TASKS_DIR, pipeline.CONFIG_PATH, pipeline.STATE_PATH, pipeline.AUDIT_PATH)
+            pipeline.ROOT, pipeline.TASKS_DIR = root, tasks
+            pipeline.CONFIG_PATH, pipeline.STATE_PATH, pipeline.AUDIT_PATH = config_path, state_path, audit_path
+            try:
+                with patch.object(pipeline, "git_checkpoint") as checkpoint, \
+                     patch.object(pipeline, "refresh_project_state"):
+                    recovered = pipeline.recover_obsolete_transport_failures(json.loads(config_path.read_text(encoding="utf-8")))
+                self.assertEqual(["ERP-102"], recovered)
+                self.assertEqual("retry", json.loads((tasks / "ERP-102.json").read_text(encoding="utf-8"))["status"])
+                self.assertEqual("blocked", json.loads((tasks / "ERP-103.json").read_text(encoding="utf-8"))["status"])
+                checkpoint.assert_called_once()
+            finally:
+                pipeline.ROOT, pipeline.TASKS_DIR, pipeline.CONFIG_PATH, pipeline.STATE_PATH, pipeline.AUDIT_PATH = old_values
+
+    def test_missing_task_request_is_classified_as_transport_failure(self):
+        with tempfile.TemporaryDirectory() as directory:
+            log = Path(directory) / "attempt.jsonl"
+            log.write_text("Please paste the full task JSON and I'll get started.", encoding="utf-8")
+            self.assertTrue(orchestrator.executor_requested_missing_task(log))
 
     def test_l3_gate_requires_explicit_approval(self):
         with tempfile.TemporaryDirectory() as directory:

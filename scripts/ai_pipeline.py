@@ -53,6 +53,22 @@ def run(command: list[str], *, capture: bool = False) -> subprocess.CompletedPro
     return subprocess.run(command, cwd=ROOT, text=True, capture_output=capture)
 
 
+def resolve_cline_command(command: str) -> str:
+    """Use the native Cline executable when a Windows batch wrapper is configured."""
+    configured = Path(command)
+    if os.name != "nt" or configured.suffix.lower() not in {".cmd", ".bat"}:
+        return command
+    npm_root = configured.parent
+    candidates = [npm_root / "node_modules" / "cline" / "bin" / ".cline"]
+    candidates.extend(sorted(
+        (npm_root / "node_modules" / "cline" / "node_modules" / "@cline").glob("cli-windows-*/bin/cline.exe")
+    ))
+    for candidate in candidates:
+        if candidate.is_file():
+            return str(candidate)
+    return command
+
+
 def task_entries() -> list[tuple[Path, dict[str, Any]]]:
     config = load_json(CONFIG_PATH)
     entries = []
@@ -141,6 +157,42 @@ def queue_head() -> tuple[tuple[Path, dict[str, Any]] | None, str]:
     if len(waiting) > 8:
         summary += f"; +{len(waiting) - 8} more"
     return None, "no_runnable_tasks" + (f": {summary}" if summary else "")
+
+
+def recover_obsolete_transport_failures(config: dict[str, Any]) -> list[str]:
+    """Requeue only failures tied to an older, now-replaced prompt transport."""
+    current_version = int(config.get("pipeline", {}).get("prompt_transport_version", 1))
+    recovered: list[str] = []
+    changed: list[str] = []
+    for path, task in task_entries():
+        failed_version = int(task.get("failed_transport_version", current_version) or current_version)
+        if (
+            task.get("status") != "blocked"
+            or task.get("failure_kind") != "prompt_transport_failure"
+            or failed_version >= current_version
+        ):
+            continue
+        task.setdefault("recovery_history", []).append({
+            "kind": "prompt_transport_failure",
+            "from_version": failed_version,
+            "to_version": current_version,
+            "at": utc_now(),
+        })
+        task["status"] = "retry"
+        task["attempts"] = 0
+        task.pop("blocker", None)
+        task.pop("last_error", None)
+        task.pop("failure_kind", None)
+        task.pop("failed_transport_version", None)
+        save_json(path, task)
+        recovered.append(task["id"])
+        changed.append(str(path.relative_to(ROOT)))
+        audit("task_auto_requeued", task=task["id"], reason="prompt_transport_upgraded", from_version=failed_version, to_version=current_version)
+    if recovered:
+        refresh_project_state(ROOT, phase="ready", current_task=None, blocker=None, finish_reason="transport_failures_requeued")
+        changed.extend([str(STATE_PATH.relative_to(ROOT)), str(AUDIT_PATH.relative_to(ROOT))])
+        git_checkpoint("chore: requeue tasks after prompt transport upgrade", changed)
+    return recovered
 
 
 def queue_status() -> int:
@@ -241,6 +293,7 @@ def mark_queue_replenishing() -> None:
 
 def run_all() -> int:
     with pipeline_lock():
+        recover_obsolete_transport_failures(load_json(CONFIG_PATH))
         while True:
             state = load_json(STATE_PATH)
             conversation = state.get("conversation_control", {})
@@ -344,7 +397,7 @@ def self_test() -> int:
     checks["git"] = "ok" if run(["git", "rev-parse", "--is-inside-work-tree"], capture=True).returncode == 0 else "missing"
     dirty = run(["git", "status", "--porcelain"], capture=True).stdout.strip()
     checks["worktree"] = "clean" if not dirty else "dirty"
-    cline = Path(config["cline_command"])
+    cline = Path(resolve_cline_command(config["cline_command"]))
     checks["cline"] = "ok" if cline.exists() and run([str(cline), "--version"], capture=True).returncode == 0 else "unavailable"
     checks["dotnet"] = run(["dotnet", "--version"], capture=True).stdout.strip() or "unavailable"
     protected = set(config.get("protected_paths", []))

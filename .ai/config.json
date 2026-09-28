@@ -28,7 +28,13 @@
   "pipeline": {
     "lock_file": ".ai/pipeline.lock",
     "push_retry_attempts": 5,
-    "continue_until_queue_empty": true
+    "continue_until_queue_empty": true,
+    "prompt_transport_version": 2,
+    "executor_worktree": {
+      "enabled": true,
+      "path": "NEWERP.executor",
+      "target_branch": "main"
+    }
   },
   "security_baseline_decision": ".ai/decisions/SECURITY_BASELINE_APPROVED.json",
   "cline_command": "C:\\Users\\Admin\\AppData\\Roaming\\npm\\cline.cmd",
