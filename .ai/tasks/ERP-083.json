@@ -29,5 +29,6 @@
     "reason": "Superseded marker only; no execution authorized."
   },
   "attempts": 1,
-  "superseded_by": "ERP-084"
+  "superseded_by": "AUTONOMY_V2",
+  "superseded_reason": "Legacy review, evidence or control-plane task no longer blocks feature development."
 }

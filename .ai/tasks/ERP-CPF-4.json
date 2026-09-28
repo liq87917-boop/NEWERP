@@ -1,7 +1,7 @@
 {
   "id": "ERP-CPF-4",
   "title": "[CONTROL-PLANE-FIX] clear_circuit_breaker",
-  "status": "pending",
+  "status": "superseded",
   "risk_level": "low",
   "description": "CONTROL-PLANE FIX (autonomy): operation=clear_circuit_breaker. reason=日志显示 ERP-080/081/082/084 等在极短时间内连续 cline_failed 且任务被隔离，随后 pipeline_waiting 报 no_runnable_tasks，触发控制面 blocker CONTROL_PLANE_FRESH_PROCESS_REQUIRED。根因是 Cline 执行进程在连续失败后处于污染/陈旧状态，需要新进程恢复，而任务本身未被证明有代码缺陷（ERP-077 后续已 completed，说明执行链路可恢复）。因此先清除 AUTO_CIRCUIT_BREAKER 并将状态由 BLOCKED/HOLD 恢复为 ACTIVE，使控制面用新鲜进程重新调度；不重置失败任务、不 rebase、不运行脚本，保持交易安全开关与历史事实不变。. This is a non-executable record applied directly by AI_SUPERVISOR; Cline/orchestrator must NOT execute it. Safety invariants: LIVE_TRADING=false, ALLOW_EXTERNAL_ORDER_SUBMISSION=false.",
   "acceptance_criteria": [
@@ -25,5 +25,7 @@
   "attempts": 0,
   "non_executable": true,
   "control_plane_operation": "clear_circuit_breaker",
-  "target_tasks": []
+  "target_tasks": [],
+  "superseded_by": "AUTONOMY_V2",
+  "superseded_reason": "Legacy review, evidence or control-plane task no longer blocks feature development."
 }

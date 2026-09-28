@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Single-task NEWERP executor. Real browser acceptance, not Cline exit, defines done."""
+"""Single-task NEWERP executor with bounded DeepSeek repair and build-first delivery."""
 from __future__ import annotations
 
 import argparse
@@ -12,13 +12,16 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from ai_state import refresh_project_state
+
 ROOT = Path(__file__).resolve().parents[1]
 AI_DIR = ROOT / ".ai"
 TASKS_DIR, RESULTS_DIR = AI_DIR / "tasks", AI_DIR / "results"
 LOGS_DIR, DECISIONS_DIR = AI_DIR / "logs", AI_DIR / "decisions"
 CONFIG_PATH, STATE_PATH = AI_DIR / "config.json", AI_DIR / "PROJECT_STATE.json"
 AUDIT_PATH = AI_DIR / "audit.jsonl"
-TERMINAL_STATUSES = {"completed", "deferred", "skipped"}
+TERMINAL_STATUSES = {"completed", "deferred", "skipped", "superseded"}
 
 
 def utc_now() -> str:
@@ -95,7 +98,7 @@ def next_task(config: dict[str, Any]) -> tuple[Path, dict[str, Any]] | None:
             continue
         if not task.get("auto_start", True):
             continue
-        if not gate_is_approved(task):
+        if not gate_is_approved(task, config):
             continue
         return path, task
     return None
@@ -146,7 +149,7 @@ def validate_task(task: dict[str, Any], config: dict[str, Any]) -> None:
     if not task["allowed_paths"]: raise ValueError("Task must declare allowed_paths")
     if task["validation_profile"] not in config["validation_profiles"]: raise ValueError("Unknown validation profile")
     mode = task.get("completion_mode", config.get("completion_policy", {}).get("default_mode", "browser"))
-    if mode not in {"browser", "control_plane"}: raise ValueError("completion_mode must be browser or control_plane")
+    if mode not in {"build", "browser", "control_plane"}: raise ValueError("completion_mode must be build, browser or control_plane")
     if mode == "browser" and not task.get("browser_acceptance", {}).get("scenarios"):
         raise ValueError("Browser-completed tasks require browser_acceptance.scenarios")
 
@@ -156,7 +159,9 @@ def browser_acceptance_is_deferred(config: dict[str, Any]) -> bool:
     return bool(config.get("completion_policy", {}).get("defer_browser_during_development", False))
 
 
-def gate_is_approved(task: dict[str, Any]) -> bool:
+def gate_is_approved(task: dict[str, Any], config: dict[str, Any] | None = None) -> bool:
+    if config is not None and not config.get("human_gate", True):
+        return True
     gate = task.get("human_gate", {})
     level = str(gate.get("level", "L1")).upper()
     if level in {"L3", "L4"} or task.get("requires_human_approval", False):
@@ -178,7 +183,7 @@ def path_violations(task: dict[str, Any], config: dict[str, Any]) -> list[str]:
     for path in changed_paths():
         if matches(path, config["ignored_change_paths"]) or matches(path, config.get("orchestrator_paths", [])): continue
         if not matches(path, task["allowed_paths"]): violations.append(f"outside allowed_paths: {path}")
-        if matches(path, config["protected_paths"]) and not gate_is_approved(task): violations.append(f"protected without approved gate: {path}")
+        if matches(path, config["protected_paths"]) and not gate_is_approved(task, config): violations.append(f"protected without approved gate: {path}")
     return violations
 
 
@@ -313,7 +318,8 @@ def recoverable_browser_failure_task(config: dict[str, Any], state: dict[str, An
 
 
 def set_state(state: dict[str, Any], **updates: Any) -> None:
-    state.update(updates); state["updated_at"] = utc_now(); save_json(STATE_PATH, state)
+    state.clear()
+    state.update(refresh_project_state(ROOT, **updates))
 
 
 def checkpoint_control_files(message: str) -> None:
@@ -372,8 +378,30 @@ def parse_cline_finish_reason(log_path: Path) -> str | None:
 
 def build_prompt(task: dict[str, Any], attempt: int, previous_error: str) -> str:
     base = (AI_DIR / "prompts" / "developer.md").read_text(encoding="utf-8")
-    retry = f"\nPrevious attempt failed:\n{previous_error[-6000:]}\n" if previous_error else ""
+    retry = f"\nPrevious attempt failed. The complete validation log remains at the path in this summary:\n{previous_error[-12000:]}\n" if previous_error else ""
     return f"{base}\n\nCurrent task JSON:\n{json.dumps(task, ensure_ascii=False, indent=2)}\n\nAttempt: {attempt}{retry}"
+
+
+def run_validation(task: dict[str, Any], attempt: int) -> tuple[int, str, str]:
+    """Run validation, persist the complete log, and return a bounded repair summary."""
+    LOGS_DIR.mkdir(parents=True, exist_ok=True)
+    log_path = LOGS_DIR / f"{task['id']}-validation-{attempt}.log"
+    completed = subprocess.run(
+        [sys.executable, str(ROOT / "scripts" / "ai_validate.py"), "--profile", task["validation_profile"], "--task", task["id"]],
+        cwd=ROOT,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=False,
+    )
+    output = (completed.stdout or b"").decode("utf-8", errors="replace")
+    log_path.write_text(output, encoding="utf-8")
+    meaningful = [line.rstrip() for line in output.splitlines() if line.strip()]
+    summary = "\n".join(meaningful[-160:])[-12000:]
+    try:
+        log_reference = str(log_path.relative_to(ROOT))
+    except ValueError:
+        log_reference = str(log_path)
+    return completed.returncode, log_reference, summary
 
 
 def run_browser_acceptance(task: dict[str, Any]) -> tuple[int, dict[str, Any] | None, str]:
@@ -489,7 +517,7 @@ def run_next(dry_run: bool) -> int:
         set_state(state, phase="blocked", current_task=task["id"], blocker=dependency_reason, finish_reason="dependency_blocked"); return 10
     if not task.get("auto_start", True):
         set_state(state, phase="waiting_human_gate", current_task=task["id"], blocker="auto_start=false"); return 6
-    if not gate_is_approved(task):
+    if not gate_is_approved(task, config):
         set_state(state, phase="waiting_human_gate", current_task=task["id"], blocker=task.get("human_gate", {}).get("reason", "Human Gate approval required"))
         audit("waiting_human_gate", task=task["id"]); return 6
     if config.get("require_git", True) and not git_available(): return 4
@@ -532,18 +560,40 @@ def run_next(dry_run: bool) -> int:
                 "--timeout", str(config["cline_timeout_seconds"]),
                 build_prompt(task, attempt, previous_error),
             ]
+            if previous_error:
+                set_state(
+                    state,
+                    phase="repairing",
+                    current_task=task["id"],
+                    last_deepseek_fix={"task": task["id"], "attempt": attempt, "model": model, "started_at": utc_now()},
+                    last_error={"task": task["id"], "attempt": attempt - 1, "summary": previous_error[-12000:]},
+                )
             with log_path.open("w", encoding="utf-8") as log:
                 cline_code = subprocess.run(command, cwd=ROOT, text=True, stdout=log, stderr=subprocess.STDOUT).returncode
             cline_raw_reason = parse_cline_finish_reason(log_path)
+            if previous_error or attempt > 1:
+                set_state(
+                    state,
+                    phase="developing",
+                    current_task=task["id"],
+                    last_deepseek_fix={"task": task["id"], "attempt": attempt, "model": model, "exit_code": cline_code, "finished_at": utc_now()},
+                )
             violations = path_violations(task, config)
             if violations:
                 previous_error = "Path guard failed:\n" + "\n".join(violations); audit("path_guard_failed", task=task["id"], violations=violations); break
             if cline_code != 0:
-                previous_error = f"Cline exited with code {cline_code}; raw reason={cline_raw_reason}"; audit("cline_failed", task=task["id"], attempt=attempt); continue
+                cline_tail = log_path.read_text(encoding="utf-8", errors="replace")[-12000:]
+                previous_error = f"DeepSeek executor exited with code {cline_code}; raw reason={cline_raw_reason}.\nLog tail:\n{cline_tail}"
+                set_state(state, phase="repairing", current_task=task["id"], last_error={"task": task["id"], "attempt": attempt, "kind": "deepseek", "summary": previous_error})
+                audit("cline_failed", task=task["id"], attempt=attempt); continue
 
-        validation = subprocess.run([sys.executable, str(ROOT / "scripts" / "ai_validate.py"), "--profile", task["validation_profile"], "--task", task["id"]], cwd=ROOT)
-        if validation.returncode != 0:
-            previous_error = f"Engineering validation failed with code {validation.returncode}."; audit("validation_failed", task=task["id"], attempt=attempt); continue
+        validation_code, validation_log, validation_summary = run_validation(task, attempt)
+        build_record = {"task": task["id"], "profile": task["validation_profile"], "status": "passed" if validation_code == 0 else "failed", "exit_code": validation_code, "log": validation_log, "at": utc_now()}
+        if validation_code != 0:
+            previous_error = f"Engineering validation failed with code {validation_code}. Full log: {validation_log}\nStructured error summary:\n{validation_summary}"
+            set_state(state, phase="repairing", current_task=task["id"], last_build=build_record, last_error={"task": task["id"], "attempt": attempt, "kind": "validation", "log": validation_log, "summary": validation_summary})
+            audit("validation_failed", task=task["id"], attempt=attempt, log=validation_log); continue
+        set_state(state, phase="developing", current_task=task["id"], last_build=build_record, last_error=None)
         task["status"] = "code_ready"; save_json(task_path, task)
         completion_mode = task.get("completion_mode", config.get("completion_policy", {}).get("default_mode", "browser"))
         browser_deferred = completion_mode == "browser" and browser_acceptance_is_deferred(config)
@@ -590,7 +640,7 @@ def run_next(dry_run: bool) -> int:
         normalized = (
             "browser_deferred"
             if completion_mode == "browser" and browser_deferred
-            else ("browser_accepted" if completion_mode == "browser" else "control_plane_validated")
+            else ("browser_accepted" if completion_mode == "browser" else "build_validated")
         )
         result = {
             "task": task["id"], "status": "completed", "execution_outcome": "completed",
@@ -599,7 +649,7 @@ def run_next(dry_run: bool) -> int:
             "browser_acceptance": browser_manifest, "finished_at": utc_now()
         }
         save_json(RESULTS_DIR / f"{task['id']}.json", result)
-        set_state(state, phase="ready", current_task=None, last_completed_task=task["id"], validation={"profile": task["validation_profile"], "status": "passed"}, browser_acceptance={"status": normalized}, cline_exit_code=cline_code, finish_reason=normalized)
+        set_state(state, phase="ready", current_task=None, last_build=build_record, last_error=None, git_sync={"status": "pending", "last_attempt_at": utc_now(), "last_error": None})
         audit("task_completed", **result)
         checkpoint_paths = [path for path in changed_paths() if not matches(path, config["ignored_change_paths"])]
         subprocess.run(["git", "add", "--", *checkpoint_paths], cwd=ROOT, check=True)
@@ -611,12 +661,16 @@ def run_next(dry_run: bool) -> int:
                 current_task=None,
                 blocker=None,
                 finish_reason="remote_sync_degraded",
-                remote_sync={"status": "pending", "task": task["id"]},
+                git_sync={"status": "pending", "last_attempt_at": utc_now(), "last_error": "push_failed", "task": task["id"]},
             )
             audit("remote_sync_degraded", task=task["id"], reason="push_failed")
             checkpoint_control_files("chore: record degraded remote sync")
             print(f"Completed {task['id']} locally; remote push is degraded and will be retried later.")
             return 0
+        if config.get("auto_push", False):
+            set_state(state, phase="ready", current_task=None, git_sync={"status": "synced", "last_attempt_at": utc_now(), "last_error": None})
+            checkpoint_control_files("chore: record successful remote sync")
+            subprocess.run(["git", "push"], cwd=ROOT)
         print(f"Completed {task['id']} by {normalized}"); return 0
 
     quarantine = subprocess.run(
@@ -624,19 +678,28 @@ def run_next(dry_run: bool) -> int:
         cwd=ROOT, capture_output=True, text=True,
     )
     if quarantine.returncode != 0:
-        task["status"] = "failed"; save_json(task_path, task)
-        set_state(state, phase="human_attention", current_task=task["id"], blocker="Failed task could not be quarantined safely", cline_exit_code=cline_code, finish_reason="quarantine_failed")
+        task["status"] = "blocked"; task["blocker"] = "Failed task could not be quarantined safely"; task["last_error"] = previous_error[-12000:]; save_json(task_path, task)
+        set_state(state, phase="degraded", current_task=None, last_error={"task": task["id"], "kind": "quarantine", "summary": previous_error[-12000:]})
         audit("task_quarantine_failed", task=task["id"], reason=previous_error, git_error=quarantine.stderr.strip())
         return 7
-    task["status"] = "failed"; save_json(task_path, task)
+    task["status"] = "blocked"
+    task["blocker"] = "Automatic repair budget exhausted"
+    task["last_error"] = previous_error[-12000:]
+    task["quarantine"] = quarantine.stdout.strip()
+    save_json(task_path, task)
+    failure_result = {
+        "task": task["id"], "status": "blocked", "execution_outcome": "repair_budget_exhausted",
+        "attempts": max_attempts, "last_error": previous_error[-12000:],
+        "attempted_fix": {"provider": "deepseek", "model": os.environ.get("AI_CLINE_MODEL", "deepseek-v4-pro")},
+        "quarantine": quarantine.stdout.strip(), "finished_at": utc_now(),
+    }
+    save_json(RESULTS_DIR / f"{task['id']}.json", failure_result)
     set_state(
         state,
         phase="ready",
         current_task=None,
-        blocker=None,
-        cline_exit_code=cline_code,
-        finish_reason="task_quarantined",
-        last_failed_task=task["id"],
+        last_error={"task": task["id"], "kind": "repair_budget_exhausted", "summary": previous_error[-12000:]},
+        last_deepseek_fix={"task": task["id"], "attempts": max_attempts, "status": "exhausted", "at": utc_now()},
     )
     audit("task_quarantined", task=task["id"], reason=previous_error, cline_finish_reason_raw=cline_raw_reason, stash=quarantine.stdout.strip())
     checkpoint_control_files(f"{task['id']}: quarantine failed task state")

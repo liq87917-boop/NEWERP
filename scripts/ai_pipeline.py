@@ -12,6 +12,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from ai_state import refresh_project_state
+
 if os.name == "nt":
     import msvcrt
 else:
@@ -27,7 +30,7 @@ AUDIT_PATH = AI_DIR / "audit.jsonl"
 ORCHESTRATOR = ROOT / "scripts" / "ai_orchestrator.py"
 AUTOMATION_TESTS = ROOT / "tests" / "automation"
 RUNNABLE_STATUSES = {"pending", "retry"}
-TERMINAL_STATUSES = {"completed", "deferred", "skipped"}
+TERMINAL_STATUSES = {"completed", "deferred", "skipped", "superseded"}
 NONBLOCKING_WAIT_STATUSES = {"blocked", "failed"}
 ACTIVE_STATUSES = {"in_progress", "code_ready"}
 SUPPORTED_GATES = {"L1", "L2", "L3", "L4"}
@@ -91,6 +94,7 @@ def validate_dependency_graph(entries: list[tuple[Path, dict[str, Any]]]) -> Non
 
 def queue_head() -> tuple[tuple[Path, dict[str, Any]] | None, str]:
     """Return the first dependency-safe runnable task without head-of-line blocking."""
+    config = load_json(CONFIG_PATH)
     entries = task_entries(); validate_dependency_graph(entries)
     by_id = {task["id"]: task for _, task in entries}
     waiting: list[str] = []
@@ -133,7 +137,7 @@ def queue_head() -> tuple[tuple[Path, dict[str, Any]] | None, str]:
         if not task.get("auto_start", True):
             waiting.append(f"{task['id']}:auto_start=false")
             continue
-        if (task.get("human_gate", {}).get("required", False) or gate in {"L3", "L4"} or task.get("requires_human_approval", False)) and not approved:
+        if config.get("human_gate", True) and (task.get("human_gate", {}).get("required", False) or gate in {"L3", "L4"} or task.get("requires_human_approval", False)) and not approved:
             waiting.append(f"{task['id']}:human_gate={gate}")
             continue
         return (path, task), "ready"
@@ -333,7 +337,7 @@ def self_test() -> int:
     try: config = load_json(CONFIG_PATH); checks["config"] = "ok"
     except Exception as exc: print(f"Configuration error: {exc}", file=sys.stderr); return 2
     ids = []
-    allowed_statuses = {"pending", "retry", "in_progress", "code_ready", "blocked", "completed", "failed", "deferred", "skipped"}
+    allowed_statuses = {"pending", "retry", "in_progress", "code_ready", "blocked", "completed", "failed", "deferred", "skipped", "superseded"}
     for path, task in task_entries():
         ids.append(task.get("id"))
         if task.get("id") != path.stem: errors.append(f"Task id/file mismatch: {path.name}")
@@ -379,7 +383,7 @@ def main() -> int:
     cp.add_argument("--accept", action="append", required=True); cp.add_argument("--allow", action="append", required=True)
     cp.add_argument("--profile", default="safe"); cp.add_argument("--risk", choices=["low", "medium", "high"], default="low")
     cp.add_argument("--depends-on", action="append", default=[]); cp.add_argument("--gate", choices=["L1", "L2", "L3", "L4"], default="L1")
-    cp.add_argument("--completion-mode", choices=["browser", "control_plane"], default="browser")
+    cp.add_argument("--completion-mode", choices=["build", "browser", "control_plane"], default="build")
     cp.add_argument("--browser-scenario", action="append", default=[])
     dp = sub.add_parser("defer"); dp.add_argument("task_id"); dp.add_argument("--by", required=True); dp.add_argument("--note", required=True)
     rp = sub.add_parser("retry"); rp.add_argument("task_id"); rp.add_argument("--by", required=True); rp.add_argument("--note", required=True)

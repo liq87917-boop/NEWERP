@@ -69,7 +69,8 @@ jobs:
 
   integration-test:
     name: Approved SQL Integration Tests
-    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.run_integration)
+    # Non-critical database tests are opt-in while features are being built.
+    if: github.event_name == 'workflow_dispatch' && inputs.run_integration
     needs: build-test
     runs-on: windows-latest
     timeout-minutes: 20

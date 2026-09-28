@@ -1,17 +1,13 @@
-# NEWERP AI Master Plan
+# NEWERP autonomous development plan
 
-DeepSeek conversation is the user-facing controller; the repository is the durable source of truth. Each conversation command is recorded in `.ai/control/` and `.ai/audit.jsonl` before it changes queue execution.
+The durable loop is:
 
-The rolling work set targets four tasks (`rolling_queue.batch_size = 4`, low watermark 2, replenished by DeepSeek from `.ai/FUNCTION_BACKLOG.md`). `depends_on` forms a validated acyclic graph, while lexical task order remains deterministic. The first non-terminal task is authoritative: malformed, blocked, failed, in-progress or unapproved work stops the queue. Later tasks are never skipped implicitly.
+`ChatGPT plan -> GitHub task/status files -> local scheduler -> DeepSeek implementation -> Release build/fast tests -> commit/push -> next dependency-safe task`.
 
-Business-task lifecycle:
+ChatGPT owns stage planning and replenishes a small dependency-aware queue. DeepSeek is the local code executor. `.ai/PROJECT_STATE.json` is the single machine-readable project status read by ChatGPT and GitHub.
 
-`pending -> in_progress -> engineering validation -> code_ready -> (development phase: browser_deferred) -> completed -> Git checkpoint -> optional push`
+During feature development the completion threshold is a successful Release build. Fast unit tests remain in the `safe` profile. Integration, real-browser, screenshot, visual, evidence-manifest and manual-review gates do not block feature delivery. Production deployment, irreversible data operations and secrets remain outside autonomous execution.
 
-`Cline` output and exit status are implementation signals only. They cannot produce `completed`. Real-browser acceptance must produce a passing TRX, browser-session metadata, screenshots and a SHA-256 manifest under `.ai/evidence/ERP-NNN/`.
+Each task receives at most three implementation/repair attempts. Build and test output is captured in full under `.ai/logs/`; a bounded structured tail is sent back to DeepSeek. When the repair budget is exhausted, the task is marked `blocked`, its error and attempted fix are written to the task result and project status, its changes are quarantined in a recoverable Git stash, and independent tasks continue.
 
-While `completion_policy.defer_browser_during_development` is `true`, engineering validation (Release build plus the task's configured non-browser validation profile) is sufficient for the orchestrator to complete a business task; the browser status is recorded as `browser_deferred` in `.ai/results/ERP-NNN.json` and is neither a failure nor a human gate. Every deferred business task must still pass the real installed Microsoft Edge scenarios, with TRX, browser metadata, screenshots and a SHA-256 manifest, in the `FINAL-UI-ACCEPTANCE` phase; that deferred work is never silently dropped.
-
-In the browser phase, browser failures are returned to Cline within the retry budget. Missing browser infrastructure blocks the task. L3/L4 gates always require explicit human approval. Push recovery may rebase and retry the completed checkpoint, but must never rerun implementation or browser acceptance for a task already completed locally.
-
-Only automation control-layer migrations may explicitly use `completion_mode: control_plane`. Every ERP business task defaults to `completion_mode: browser`.
+Successful tasks are committed and pushed automatically. GitHub outages degrade only remote synchronization; local dependency-safe development continues and the status file records the pending sync.

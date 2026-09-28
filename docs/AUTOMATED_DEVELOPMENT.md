@@ -1,5 +1,7 @@
 # NEWERP 自动化开发流程
 
+> 本文件保留为 V1 历史参考，旧的真实浏览器、证据清单、严格 Human Gate 和人工复核流程已停用。当前生效流程见 `docs/AUTONOMOUS_DEVELOPMENT_V2.md`。
+
 ## 当前状态
 
 自动化控制层已经升级为 GPT 对话控制。项目具备任务 JSON、状态管理、Cline 执行、路径审计、失败重试、**四任务滚动队列**（`rolling_queue.batch_size = 4`，低水位 2）、依赖图、Git checkpoint、Human Gate、真实浏览器验收和审计记录。

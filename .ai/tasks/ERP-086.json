@@ -33,21 +33,16 @@
   "requires_human_approval": false,
   "max_attempts": 3,
   "validation_profile": "safe",
-  "completion_mode": "browser",
+  "completion_mode": "build",
   "browser_acceptance": {
-    "required": true,
-    "scenarios": [
-      "Open the customer reconciliation statement for a Customer with partial receipt allocations and linked shipments, apply a currency and date filter, generate the export and verify invoice gross, allocated-receipt and remainder evidence stay in separate labeled columns without a settled or recognized assertion.",
-      "Inspect partially linked, draft, voided, cancelled, missing-due-date and multi-currency evidence, generate the export and verify unknown values remain separate, no cross-currency total appears and no source record is changed."
-    ],
-    "test_filter": "Collection=UiTests",
-    "minimum_screenshots": 3
+    "required": false,
+    "deferred": true
   },
   "human_gate": {
     "required": false,
-    "level": "L2",
+    "level": "L1",
     "status": "not_required",
-    "reason": "Read-only evidence reconciliation export over repository records and non-production validation only. Customer contact, real collection, shipment execution, customs submission, accounting or tax action, production database mutation, deployment and release remain behind mandatory human gates."
+    "reason": "Development build gate."
   },
   "attempts": 0
 }

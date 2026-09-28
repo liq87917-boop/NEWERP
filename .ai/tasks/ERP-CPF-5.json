@@ -1,7 +1,7 @@
 {
   "id": "ERP-CPF-5",
   "title": "[CONTROL-PLANE-FIX] reset_failed_tasks",
-  "status": "pending",
+  "status": "superseded",
   "risk_level": "low",
   "description": "CONTROL-PLANE FIX (autonomy): operation=reset_failed_tasks. reason=日志显示 ERP-078/079/080/081/082/084 连续以 Cline exited with code 1、finish_reason=error 快速失败（每次 1-2 次尝试即被 quarantine），随后 pipeline_waiting 报 no_runnable_tasks，属于执行器瞬时故障导致的批量误失败，而非任务内容或验收标准问题；这些任务的 acceptance_criteria/allowed_paths 保持不变，仅将 status 重置为 retry、attempts 归零即可让执行器重新尝试。ERP-083 已 superseded 不动，ERP-085 仍 blocked 不动。修复范围严格限制在原失败任务自身，不触碰控制面（PROJECT_STATE.json、audit.jsonl、results/**、tasks/**、workflows/**），不改变 LIVE_TRADING=false 与 ALLOW_EXTERNAL_ORDER_SUBMISSION=false，也不引入任何真实下单或资金操作。. This is a non-executable record applied directly by AI_SUPERVISOR; Cline/orchestrator must NOT execute it. Safety invariants: LIVE_TRADING=false, ALLOW_EXTERNAL_ORDER_SUBMISSION=false.",
   "acceptance_criteria": [
@@ -32,5 +32,7 @@
     "ERP-081",
     "ERP-082",
     "ERP-084"
-  ]
+  ],
+  "superseded_by": "AUTONOMY_V2",
+  "superseded_reason": "Legacy review, evidence or control-plane task no longer blocks feature development."
 }

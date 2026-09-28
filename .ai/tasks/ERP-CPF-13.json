@@ -1,7 +1,7 @@
 {
   "id": "ERP-CPF-13",
   "title": "[CONTROL-PLANE-FIX] reset_failed_tasks",
-  "status": "pending",
+  "status": "superseded",
   "risk_level": "low",
   "description": "CONTROL-PLANE FIX (autonomy): operation=reset_failed_tasks. reason=日志中 ERP-080/081/082/084 均因 Cline 进程连续退出码 1（cline_finish_reason_raw=error/None）被隔离并置为 failed，ERP-077 随后可正常完成，说明失败属于运行时/进程级瞬时故障而非业务规则问题，且异常摘要与日志中未提及任何 verify-*.ps1 / diagnose-*.ps1 脚本或缺失 raw_script_invocation / effective_provider / agent_bootstrap.* 证据，故无可用诊断脚本可执行。因此按优先级选择重置失败任务：将 status=failed 的任务恢复为 retry、attempts=0，保留原 acceptance_criteria 与 allowed_paths，仅允许在各自原改动范围内重试，不触碰控制面文件（.ai/PROJECT_STATE.json、.ai/audit.jsonl、.github/workflows/**、.ai/results/**、.ai/tasks/**），不改变 LIVE_TRADING=false 与 ALLOW_EXTERNAL_ORDER_SUBMISSION=false，不涉及真实下单/实盘/资金转移/外部订单提交。若重试后仍出现同一进程级失败，则应升级为环境/依赖问题并 fail-closed，等待具备外部证据或人工门禁后再处理。. This is a non-executable record applied directly by AI_SUPERVISOR; Cline/orchestrator must NOT execute it. Safety invariants: LIVE_TRADING=false, ALLOW_EXTERNAL_ORDER_SUBMISSION=false.",
   "acceptance_criteria": [
@@ -32,5 +32,7 @@
     "ERP-081",
     "ERP-082",
     "ERP-084"
-  ]
+  ],
+  "superseded_by": "AUTONOMY_V2",
+  "superseded_reason": "Legacy review, evidence or control-plane task no longer blocks feature development."
 }

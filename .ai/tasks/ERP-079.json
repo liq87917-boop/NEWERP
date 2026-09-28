@@ -1,7 +1,7 @@
 {
   "id": "ERP-079",
   "title": "Actually run executor-bootstrap verification and restore ERP-074..077 to retryable (control-plane recovery, second reissue with execution proof)",
-  "status": "retry",
+  "status": "superseded",
   "risk_level": "low",
   "description": "CONTROL-PLANE REISSUE #2 (review failed). ERP-078 produced no result file and leaves the control plane unverified. This reissue keeps the same scope but tightens acceptance: the executor MUST actually invoke scripts/verify-executor-bootstrap.ps1, persist its real stdout/stderr and JSON summary to .ai/results/ERP-079.json, and restore ERP-074..077 from failed(attempts=3) to a retryable state. If any prerequisite check fails, capture the concrete command, stderr excerpt and suspected cause in .ai/audit.jsonl and mark the task failed with an explicit required next action instead of another silent quarantine loop. Do not implement ERP business logic, do not touch src/ERP.*, do not touch production database/OSS, do not deploy or release, do not change LIVE_TRADING or ALLOW_EXTERNAL_ORDER_SUBMISSION.",
   "acceptance_criteria": [
@@ -46,5 +46,7 @@
     "status": "not_required",
     "reason": "Automation control-layer verification and state restoration only. No business logic, production database, production OSS, deployment or release action is authorized."
   },
-  "attempts": 0
+  "attempts": 0,
+  "superseded_by": "AUTONOMY_V2",
+  "superseded_reason": "Legacy review, evidence or control-plane task no longer blocks feature development."
 }

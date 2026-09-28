@@ -1,0 +1,23 @@
+{
+  "id": "ERP-096",
+  "title": "Add warehouse location and inventory lot tracking foundation",
+  "status": "pending",
+  "risk_level": "medium",
+  "description": "Add development-only warehouse-location and lot identities to inventory movements and balances without changing existing product-level costing semantics or executing production SQL.",
+  "acceptance_criteria": [
+    "Stock-in, stock-out, transfer and return movements can carry validated warehouse location and optional lot identity.",
+    "Balances remain compatible with existing product totals while exposing location and lot breakdowns.",
+    "Transfers preserve quantity and cost and reject negative source-location stock.",
+    "Release build and focused unit tests pass."
+  ],
+  "allowed_paths": ["src/ERP.Application/**", "src/ERP.Api/**", "src/ERP.UnitTests/**", "docs/**", ".ai/**"],
+  "depends_on": ["ERP-009", "ERP-023", "ERP-025", "ERP-034"],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "browser_acceptance": {"required": false, "deferred": true},
+  "human_gate": {"required": false, "level": "L1", "status": "not_required", "reason": "Development build gate."},
+  "attempts": 0
+}

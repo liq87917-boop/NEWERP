@@ -36,5 +36,8 @@
   },
   "max_attempts": 2,
   "auto_start": true,
-  "requires_human_approval": false
+  "requires_human_approval": false,
+  "status": "superseded",
+  "superseded_by": "AUTONOMY_V2",
+  "superseded_reason": "Legacy review, evidence or control-plane task no longer blocks feature development."
 }

@@ -1,7 +1,7 @@
 {
   "id": "ERP-CPF-12",
   "title": "[CONTROL-PLANE-FIX] clear_circuit_breaker",
-  "status": "pending",
+  "status": "superseded",
   "risk_level": "low",
   "description": "CONTROL-PLANE FIX (autonomy): operation=clear_circuit_breaker. reason=根因：Cline 执行器在 ERP-080/081/082/084 上连续以 exit code 1 失败（raw reason=error/null），触发 GPT_FAIL_RECOVERY_REQUIRED，任务被全部隔离并产生 CONTROL_PLANE_FRESH_PROCESS_REQUIRED（需要全新进程重建执行环境），流水线进入 no_runnable_tasks 后写入 AUTO_CIRCUIT_BREAKER，PROJECT_STATE 被置为 BLOCKED/HOLD，后续任务（如 ERP-077）在 01:52 重新起进程后成功完成，说明为执行器进程状态污染而非任务本身缺陷。异常摘要未给定可运行的 verify-*.ps1 / diagnose-*.ps1 脚本或缺失证据（raw_script_invocation / effective_provider / agent_bootstrap.*）的具体脚本路径，故不选 execute_control_plane_script；且失败任务系被隔离，须先解除控制面 blocker 才能重新调度。本操作仅移除 .ai/PROJECT_STATE.json 中的 AUTO_CIRCUIT_BREAKER 控制面 blocker，并把 status/queue_status 由 BLOCKED/HOLD 恢复为 ACTIVE，不改动任务定义、验收标准、allowed_paths，也不触碰 LIVE_TRADING=false 与 ALLOW_EXTERNAL_ORDER_SUBMISSION=false 等安全开关。. This is a non-executable record applied directly by AI_SUPERVISOR; Cline/orchestrator must NOT execute it. Safety invariants: LIVE_TRADING=false, ALLOW_EXTERNAL_ORDER_SUBMISSION=false.",
   "acceptance_criteria": [
@@ -30,5 +30,7 @@
     "ERP-081",
     "ERP-082",
     "ERP-084"
-  ]
+  ],
+  "superseded_by": "AUTONOMY_V2",
+  "superseded_reason": "Legacy review, evidence or control-plane task no longer blocks feature development."
 }

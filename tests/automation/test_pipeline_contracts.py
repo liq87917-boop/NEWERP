@@ -89,6 +89,36 @@ class PipelineContracts(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "require browser_acceptance.scenarios"):
             orchestrator.validate_task(task, {"task_prefix": "ERP", "validation_profiles": {"safe": []}, "completion_policy": {}})
 
+    def test_build_task_does_not_require_browser_scenarios(self):
+        task = self.task("ERP-010") | {
+            "description": "business task",
+            "acceptance_criteria": ["accepted"],
+            "validation_profile": "safe",
+            "completion_mode": "build",
+        }
+        orchestrator.validate_task(
+            task,
+            {"task_prefix": "ERP", "validation_profiles": {"safe": []}, "completion_policy": {}},
+        )
+
+    def test_disabled_human_gate_allows_development_task(self):
+        task = self.task("ERP-010", gate="L4")
+        self.assertTrue(orchestrator.gate_is_approved(task, {"human_gate": False}))
+
+    def test_validation_failure_persists_full_log_and_bounded_summary(self):
+        task = self.task("ERP-010") | {"validation_profile": "safe"}
+        output = ("compile error\n" * 2000).encode("utf-8")
+        completed = type("Completed", (), {"returncode": 1, "stdout": output})()
+        with tempfile.TemporaryDirectory() as directory, \
+             patch.object(orchestrator, "LOGS_DIR", Path(directory)), \
+             patch.object(orchestrator.subprocess, "run", return_value=completed):
+            code, log_path, summary = orchestrator.run_validation(task, 2)
+            self.assertEqual(1, code)
+            self.assertLessEqual(len(summary), 12000)
+            self.assertIn("compile error", summary)
+            self.assertIn("ERP-010-validation-2.log", log_path)
+            self.assertEqual(output.decode("utf-8"), (Path(directory) / "ERP-010-validation-2.log").read_text(encoding="utf-8"))
+
     def test_push_recovery_checkpoints_control_changes_before_pull(self):
         config = {
             "orchestrator_paths": [".ai/PROJECT_STATE.json", ".ai/audit.jsonl"],

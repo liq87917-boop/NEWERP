@@ -1,7 +1,7 @@
 {
   "id": "ERP-CPF-2",
   "title": "[CONTROL-PLANE-FIX] reset_failed_tasks",
-  "status": "pending",
+  "status": "superseded",
   "risk_level": "low",
   "description": "CONTROL-PLANE FIX (autonomy): operation=reset_failed_tasks. reason=日志显示 ERP-074/075/076/077/078/079/080 连续被隔离（no checkpointable business changes），随后 pipeline_waiting 报告 ERP-074..077 failed，使排空队列后无可运行任务并触发控制面 circuit_breaker。根因是失败任务未被重置为可重试，而非远端分叉或需人工门禁；因此将 failed 任务恢复为 retry/attempts=0，保留 acceptance_criteria/allowed_paths 原样，清除断路器产生的 BLOCKED 状态即可继续自治修复。. This is a non-executable record applied directly by AI_SUPERVISOR; Cline/orchestrator must NOT execute it. Safety invariants: LIVE_TRADING=false, ALLOW_EXTERNAL_ORDER_SUBMISSION=false.",
   "acceptance_criteria": [
@@ -30,5 +30,7 @@
     "ERP-075",
     "ERP-076",
     "ERP-077"
-  ]
+  ],
+  "superseded_by": "AUTONOMY_V2",
+  "superseded_reason": "Legacy review, evidence or control-plane task no longer blocks feature development."
 }

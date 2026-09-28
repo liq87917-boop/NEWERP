@@ -38,5 +38,8 @@
     "level": "L1",
     "status": "not_required",
     "reason": "仅限自动化控制层验证与状态还原，不涉及业务逻辑、生产数据库、生产 OSS、部署或发布；生产 DB/OSS、部署与发布仍保持人工门禁。"
-  }
+  },
+  "status": "superseded",
+  "superseded_by": "AUTONOMY_V2",
+  "superseded_reason": "Legacy review, evidence or control-plane task no longer blocks feature development."
 }

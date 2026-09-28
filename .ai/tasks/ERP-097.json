@@ -1,0 +1,23 @@
+{
+  "id": "ERP-097",
+  "title": "Enforce salesperson data scope for customers and sales documents",
+  "status": "pending",
+  "risk_level": "medium",
+  "description": "Add reusable server-side data-scope enforcement so restricted salespeople can only view their assigned customers and related sales documents while privileged roles retain existing access.",
+  "acceptance_criteria": [
+    "Customer, inquiry, quotation, PI, sales-order, shipment and invoice queries share one explicit data-scope policy.",
+    "Detail and export endpoints fail closed when the user is outside scope, not only list endpoints.",
+    "Administrators and explicitly privileged roles retain their current authorized access.",
+    "Release build and focused unit tests pass."
+  ],
+  "allowed_paths": ["src/ERP.Application/**", "src/ERP.Api/**", "src/ERP.UnitTests/**", "docs/**", ".ai/**"],
+  "depends_on": ["ERP-086"],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "browser_acceptance": {"required": false, "deferred": true},
+  "human_gate": {"required": false, "level": "L1", "status": "not_required", "reason": "Development build gate."},
+  "attempts": 0
+}

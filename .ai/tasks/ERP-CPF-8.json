@@ -1,7 +1,7 @@
 {
   "id": "ERP-CPF-8",
   "title": "[CONTROL-PLANE-FIX] reset_failed_tasks",
-  "status": "pending",
+  "status": "superseded",
   "risk_level": "low",
   "description": "CONTROL-PLANE FIX (autonomy): operation=reset_failed_tasks. reason=日志显示 ERP-078~ERP-084 等一批任务在极短时间内连续 cline_failed 并被 quarantine（attempt 1/2 立即失败，raw reason=error 或 None），属于执行器层面的瞬时故障，而非任务本身不可完成；当前无任何 verify-*.ps1 / diagnose-*.ps1 脚本被 blocker 提及，也没有 AUTO_CIRCUIT_BREAKER 需要清除，因此按优先级 3 将失败任务重置为可重试（attempts 归零），保留其 acceptance_criteria 与 allowed_paths 不变，等待下一轮用新进程重新执行以获得真实失败证据。不触碰控制面与历史文件，交易安全开关保持 false。. This is a non-executable record applied directly by AI_SUPERVISOR; Cline/orchestrator must NOT execute it. Safety invariants: LIVE_TRADING=false, ALLOW_EXTERNAL_ORDER_SUBMISSION=false.",
   "acceptance_criteria": [
@@ -32,5 +32,7 @@
     "ERP-081",
     "ERP-082",
     "ERP-084"
-  ]
+  ],
+  "superseded_by": "AUTONOMY_V2",
+  "superseded_reason": "Legacy review, evidence or control-plane task no longer blocks feature development."
 }

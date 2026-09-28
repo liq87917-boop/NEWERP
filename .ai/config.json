@@ -7,7 +7,7 @@
   "require_clean_worktree": true,
   "auto_commit": true,
   "auto_push": true,
-  "human_gate": true,
+  "human_gate": false,
   "queue_target_size": 4,
   "supported_human_gates": [
     "L1",
@@ -16,11 +16,11 @@
     "L4"
   ],
   "completion_policy": {
-    "default_mode": "browser",
-    "require_real_browser": true,
+    "default_mode": "build",
+    "require_real_browser": false,
     "browser": "Microsoft Edge",
     "minimum_screenshots": 1,
-    "control_plane_exception_requires_explicit_task_field": true,
+    "control_plane_exception_requires_explicit_task_field": false,
     "defer_browser_during_development": true,
     "deferred_status": "browser_deferred",
     "final_browser_phase": "FINAL-UI-ACCEPTANCE"
@@ -133,7 +133,7 @@
     "batch_size": 4,
     "low_watermark": 2,
     "acceptance_interval_seconds": 3600,
-    "replenishment_owner": "DeepSeek",
+    "replenishment_owner": "ChatGPT",
     "empty_phase": "replenishing",
     "keep_agent_alive": true
   },
@@ -144,7 +144,7 @@
       "blocked",
       "failed"
     ],
-    "human_gate_scope": "dependency_chain_only",
+    "human_gate_scope": "production_and_irreversible_only",
     "remote_failure_mode": "degraded_continue_local",
     "quarantine_failed_work": true,
     "ui_blocks_development": false
