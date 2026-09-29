@@ -1,0 +1,57 @@
+{
+  "id": "ERP-164",
+  "title": "Preview selected authorized customer order and receipt evidence",
+  "description": "A sales user builds a bounded, read-only customer order and receipt reconciliation report from existing ERP-046 evidence. Development only. Recheck current-user sales-order menu and SalespersonDataScopeService customer visibility on every request; apply scope before order counts and paging, and let unlinked receipts derive only from scoped page customers. Fail closed on missing identity, denied menu and invalid fields or filters. Keep sales-order linked application amounts, receipt-allocation evidence, invoice evidence and customer-level unlinked FinanceReceipt evidence separate; never infer a receipt-order match or an accounts-receivable balance. Preserve null unknown amounts, original currencies, receipt evidence status and source truncation flags. Existing HTTP operation audit covers preview and download. No arbitrary SQL, migration, production SQL, real database execution, writes, secrets/.env changes or deployment. Verify focused unit/Node tests and safe Release build/test; no real-browser acceptance.",
+  "status": "pending",
+  "risk_level": "medium",
+  "acceptance_criteria": [
+    "Authenticated catalog and preview accept a finite ERP-046 order-evidence field allowlist; reject unknown fields, invalid customer/currency/date/shipment/receipt-link/receipt/order-status filters, long keywords and page size above 200 before report reads.",
+    "Preview checks current-user sales-order menu and applies SalespersonDataScopeService customer filtering inside ERP-046 source query before count and paging; return selected current-page order fields in requested order while keeping application, allocation and invoice evidence distinct, unknown values null and currencies separate.",
+    "Unit tests cover allowed and denied users, scoped counts/pages, field order, status filters, unknown and historical evidence and no writes; document evidence boundaries."
+  ],
+  "criterion_path_map": {
+    "Authenticated catalog and preview accept a finite ERP-046 order-evidence field allowlist; reject unknown fields, invalid customer/currency/date/shipment/receipt-link/receipt/order-status filters, long keywords and page size above 200 before report reads.": [
+      "src/ERP.Application/DTOs/DynamicReceiptReconciliationReportDtos.cs",
+      "src/ERP.Application/Services/DynamicReceiptReconciliationReportRules.cs",
+      "src/ERP.Api/Controllers/DynamicReceiptReconciliationReportController.cs"
+    ],
+    "Preview checks current-user sales-order menu and applies SalespersonDataScopeService customer filtering inside ERP-046 source query before count and paging; return selected current-page order fields in requested order while keeping application, allocation and invoice evidence distinct, unknown values null and currencies separate.": [
+      "src/ERP.Application/DTOs/DynamicReceiptReconciliationReportDtos.cs",
+      "src/ERP.Application/Services/DynamicReceiptReconciliationReportRules.cs",
+      "src/ERP.Api/Controllers/DynamicReceiptReconciliationReportController.cs",
+      "src/ERP.Api/Controllers/SalesOrderReceiptReconciliation.cs"
+    ],
+    "Unit tests cover allowed and denied users, scoped counts/pages, field order, status filters, unknown and historical evidence and no writes; document evidence boundaries.": [
+      "src/ERP.UnitTests/DynamicReceiptReconciliationReportTests.cs",
+      "src/ERP.UnitTests/SalesOrderReceiptReconciliationTests.cs",
+      "docs/dynamic-receipt-reconciliation-report.md"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Application/DTOs/DynamicReceiptReconciliationReportDtos.cs",
+    "src/ERP.Application/Services/DynamicReceiptReconciliationReportRules.cs",
+    "src/ERP.Api/Controllers/DynamicReceiptReconciliationReportController.cs",
+    "src/ERP.Api/Controllers/SalesOrderReceiptReconciliation.cs",
+    "src/ERP.UnitTests/DynamicReceiptReconciliationReportTests.cs",
+    "src/ERP.UnitTests/SalesOrderReceiptReconciliationTests.cs",
+    "docs/dynamic-receipt-reconciliation-report.md",
+    ".ai/**"
+  ],
+  "validation_profile": "safe",
+  "depends_on": [
+    "ERP-046"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "completion_mode": "build",
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only bounded read-only feature"
+  }
+}

@@ -1,0 +1,53 @@
+{
+  "id": "ERP-167",
+  "title": "Export authorized customer order and unlinked receipt evidence to Excel",
+  "description": "A sales user builds a bounded, read-only customer order and receipt reconciliation report from existing ERP-046 evidence. Development only. Recheck current-user sales-order menu and SalespersonDataScopeService customer visibility on every request; apply scope before order counts and paging, and let unlinked receipts derive only from scoped page customers. Fail closed on missing identity, denied menu and invalid fields or filters. Keep sales-order linked application amounts, receipt-allocation evidence, invoice evidence and customer-level unlinked FinanceReceipt evidence separate; never infer a receipt-order match or an accounts-receivable balance. Preserve null unknown amounts, original currencies, receipt evidence status and source truncation flags. Existing HTTP operation audit covers preview and download. No arbitrary SQL, migration, production SQL, real database execution, writes, secrets/.env changes or deployment. Verify focused unit/Node tests and safe Release build/test; no real-browser acceptance.",
+  "status": "pending",
+  "risk_level": "medium",
+  "acceptance_criteria": [
+    "Excel endpoint reuses ERP-164/165 authorized bounded preview and rechecks current-user menu, salesperson customer scope, filters, both field sets and page limit before bytes.",
+    "Workbook keeps selected order columns and unlinked-receipt columns on separate current-page sheets in requested order; null unknowns, original currencies, receipt status and truncation warning remain explicit, with formula-leading text literal.",
+    "Designer offers xlsx with visible empty and authorization errors; workbook tests cover scope, field order, cap, separate evidence, unknowns, currencies, formula safety and no writes; document limits."
+  ],
+  "criterion_path_map": {
+    "Excel endpoint reuses ERP-164/165 authorized bounded preview and rechecks current-user menu, salesperson customer scope, filters, both field sets and page limit before bytes.": [
+      "src/ERP.Api/Controllers/DynamicReceiptReconciliationReportController.cs"
+    ],
+    "Workbook keeps selected order columns and unlinked-receipt columns on separate current-page sheets in requested order; null unknowns, original currencies, receipt status and truncation warning remain explicit, with formula-leading text literal.": [
+      "src/ERP.Api/Controllers/DynamicReceiptReconciliationReportController.cs",
+      "src/ERP.Application/Services/DynamicReceiptReconciliationReportRules.cs"
+    ],
+    "Designer offers xlsx with visible empty and authorization errors; workbook tests cover scope, field order, cap, separate evidence, unknowns, currencies, formula safety and no writes; document limits.": [
+      "src/ERP.Api/wwwroot/js/sales-order-receipt-reconciliation.js",
+      "src/ERP.UnitTests/DynamicReceiptReconciliationExcelTests.cs",
+      "docs/dynamic-receipt-reconciliation-report.md"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/DynamicReceiptReconciliationReportController.cs",
+    "src/ERP.Application/Services/DynamicReceiptReconciliationReportRules.cs",
+    "src/ERP.Api/wwwroot/js/sales-order-receipt-reconciliation.js",
+    "src/ERP.UnitTests/DynamicReceiptReconciliationExcelTests.cs",
+    "docs/dynamic-receipt-reconciliation-report.md",
+    ".ai/**"
+  ],
+  "validation_profile": "safe",
+  "depends_on": [
+    "ERP-164",
+    "ERP-165",
+    "ERP-166"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "completion_mode": "build",
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only bounded read-only feature"
+  }
+}
