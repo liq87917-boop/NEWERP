@@ -1,0 +1,56 @@
+{
+  "id": "ERP-168",
+  "title": "Expose the effective as-of date in dynamic supplier aging previews",
+  "description": "A purchasing user needs to see which calendar date produced an aging bucket when the date filter is omitted and when it is explicit. Resolve one effective date per request and pass it through the existing ERP-068 read-only derivation; do not change aging formula or supplier authorization. Make fixed-date tests deterministic so the existing full validation can pass. Development only. Read-only, current-user ERP menu and salesperson/supplier scope rechecked on every request; fail closed on missing identity, denied access or invalid bounded fields. Existing HTTP operation audit applies. Preserve source evidence, unknown null values, original currencies, truncation and separate evidence classes. No arbitrary SQL, direct model database access, migrations, production SQL/real database execution, writes, secrets/.env changes, deployment or real-browser acceptance. Verify focused unit/Node tests and safe Release build/test.",
+  "status": "pending",
+  "risk_level": "medium",
+  "acceptance_criteria": [
+    "Preview returns the effective as-of date used by ERP-068 for the selected page, including the omitted-date default, and keeps the same date for grouping and amount evidence.",
+    "The supplier aging designer shows the returned effective date alongside current-page evidence and keeps explicit date filters when previewing or exporting.",
+    "Focused tests use an explicit fixed as-of date for fixed-date bucket expectations, cover default and explicit dates, denied users and no writes; document the date boundary and pass safe Release build/test."
+  ],
+  "criterion_path_map": {
+    "Preview returns the effective as-of date used by ERP-068 for the selected page, including the omitted-date default, and keeps the same date for grouping and amount evidence.": [
+      "src/ERP.Application/DTOs/DynamicSupplierAgingReportDtos.cs",
+      "src/ERP.Api/Controllers/DynamicSupplierAgingReportController.cs"
+    ],
+    "The supplier aging designer shows the returned effective date alongside current-page evidence and keeps explicit date filters when previewing or exporting.": [
+      "src/ERP.Api/wwwroot/js/supplier-reconciliation-aging.js",
+      "tests/automation/dynamic_supplier_aging_asof_ui.test.js"
+    ],
+    "Focused tests use an explicit fixed as-of date for fixed-date bucket expectations, cover default and explicit dates, denied users and no writes; document the date boundary and pass safe Release build/test.": [
+      "src/ERP.UnitTests/DynamicSupplierAgingReportTests.cs",
+      "src/ERP.UnitTests/DynamicSupplierAgingAsOfTests.cs",
+      "docs/dynamic-supplier-aging-report.md"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Application/DTOs/DynamicSupplierAgingReportDtos.cs",
+    "src/ERP.Api/Controllers/DynamicSupplierAgingReportController.cs",
+    "src/ERP.Api/wwwroot/js/supplier-reconciliation-aging.js",
+    "tests/automation/dynamic_supplier_aging_asof_ui.test.js",
+    "src/ERP.UnitTests/DynamicSupplierAgingReportTests.cs",
+    "src/ERP.UnitTests/DynamicSupplierAgingAsOfTests.cs",
+    "docs/dynamic-supplier-aging-report.md",
+    ".ai/**"
+  ],
+  "validation_profile": "safe",
+  "depends_on": [
+    "ERP-140",
+    "ERP-146"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "completion_mode": "build",
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only bounded read-only feature"
+  },
+  "attempts": 0
+}

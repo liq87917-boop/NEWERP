@@ -1,0 +1,49 @@
+{
+  "id": "ERP-171",
+  "title": "Show current-page order and receipt group counts in the report designer",
+  "description": "A sales user chooses a count group in the visual customer order and receipt evidence designer and sees separate current-page order and unlinked receipt count panels. Consume ERP-170 server groups, display permission/network/empty states and preserve the existing two-section preview. No new SQL or persistence. Development only. Read-only, current-user ERP menu and salesperson/supplier scope rechecked on every request; fail closed on missing identity, denied access or invalid bounded fields. Existing HTTP operation audit applies. Preserve source evidence, unknown null values, original currencies, truncation and separate evidence classes. No arbitrary SQL, direct model database access, migrations, production SQL/real database execution, writes, secrets/.env changes, deployment or real-browser acceptance. Verify focused unit/Node tests and safe Release build/test.",
+  "status": "pending",
+  "risk_level": "medium",
+  "acceptance_criteria": [
+    "Designer offers only server-supported group choices and sends bounded group selection with the existing authorized preview request.",
+    "Designer renders separate order and unlinked-receipt count panels labeled current-page only, retains unknown and truncation categories, escapes labels and shows empty/permission/network states.",
+    "Node tests cover group chooser, scope-safe request, two-panel rendering and error states; document the grouping workflow and pass safe Release build/test."
+  ],
+  "criterion_path_map": {
+    "Designer offers only server-supported group choices and sends bounded group selection with the existing authorized preview request.": [
+      "src/ERP.Api/wwwroot/js/sales-order-receipt-reconciliation.js"
+    ],
+    "Designer renders separate order and unlinked-receipt count panels labeled current-page only, retains unknown and truncation categories, escapes labels and shows empty/permission/network states.": [
+      "src/ERP.Api/wwwroot/js/sales-order-receipt-reconciliation.js"
+    ],
+    "Node tests cover group chooser, scope-safe request, two-panel rendering and error states; document the grouping workflow and pass safe Release build/test.": [
+      "tests/automation/dynamic_receipt_reconciliation_grouping_ui.test.js",
+      "docs/dynamic-receipt-reconciliation-report.md"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Api/wwwroot/js/sales-order-receipt-reconciliation.js",
+    "tests/automation/dynamic_receipt_reconciliation_grouping_ui.test.js",
+    "docs/dynamic-receipt-reconciliation-report.md",
+    ".ai/**"
+  ],
+  "validation_profile": "safe",
+  "depends_on": [
+    "ERP-166",
+    "ERP-170"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "completion_mode": "build",
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only bounded read-only feature"
+  },
+  "attempts": 0
+}

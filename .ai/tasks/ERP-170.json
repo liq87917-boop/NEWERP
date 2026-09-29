@@ -1,0 +1,56 @@
+{
+  "id": "ERP-170",
+  "title": "Count scoped order and unlinked receipt evidence by current-page group",
+  "description": "A sales user groups only the authorized current preview page to understand order and unlinked receipt evidence distribution. Use existing read-only ERP-046 source and never infer a receipt-order match, balance or cross-currency total. No new persistence or EF mapping. Development only. Read-only, current-user ERP menu and salesperson/supplier scope rechecked on every request; fail closed on missing identity, denied access or invalid bounded fields. Existing HTTP operation audit applies. Preserve source evidence, unknown null values, original currencies, truncation and separate evidence classes. No arbitrary SQL, direct model database access, migrations, production SQL/real database execution, writes, secrets/.env changes, deployment or real-browser acceptance. Verify focused unit/Node tests and safe Release build/test.",
+  "status": "pending",
+  "risk_level": "medium",
+  "acceptance_criteria": [
+    "Finite group keys accept none, customer, currency, receipt coverage status and receipt evidence status; invalid keys fail before source reads and scope remains applied before paging.",
+    "Preview returns separate order and unlinked-receipt current-page count groups with explicit unknown, pending, historical and truncation semantics; never sum money or merge currencies.",
+    "Focused unit tests cover group allowlist, denied and scoped users, empty page, status isolation, page cap and no writes; document current-page limits."
+  ],
+  "criterion_path_map": {
+    "Finite group keys accept none, customer, currency, receipt coverage status and receipt evidence status; invalid keys fail before source reads and scope remains applied before paging.": [
+      "src/ERP.Application/DTOs/DynamicReceiptReconciliationReportDtos.cs",
+      "src/ERP.Application/Services/DynamicReceiptReconciliationReportRules.cs",
+      "src/ERP.Api/Controllers/DynamicReceiptReconciliationReportController.cs"
+    ],
+    "Preview returns separate order and unlinked-receipt current-page count groups with explicit unknown, pending, historical and truncation semantics; never sum money or merge currencies.": [
+      "src/ERP.Application/DTOs/DynamicReceiptReconciliationReportDtos.cs",
+      "src/ERP.Application/Services/DynamicReceiptReconciliationReportRules.cs",
+      "src/ERP.Api/Controllers/DynamicReceiptReconciliationReportController.cs"
+    ],
+    "Focused unit tests cover group allowlist, denied and scoped users, empty page, status isolation, page cap and no writes; document current-page limits.": [
+      "src/ERP.UnitTests/DynamicReceiptReconciliationGroupingTests.cs",
+      "docs/dynamic-receipt-reconciliation-report.md"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Application/DTOs/DynamicReceiptReconciliationReportDtos.cs",
+    "src/ERP.Application/Services/DynamicReceiptReconciliationReportRules.cs",
+    "src/ERP.Api/Controllers/DynamicReceiptReconciliationReportController.cs",
+    "src/ERP.UnitTests/DynamicReceiptReconciliationGroupingTests.cs",
+    "docs/dynamic-receipt-reconciliation-report.md",
+    ".ai/**"
+  ],
+  "validation_profile": "safe",
+  "depends_on": [
+    "ERP-164",
+    "ERP-165",
+    "ERP-168"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "completion_mode": "build",
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only bounded read-only feature"
+  },
+  "attempts": 0
+}

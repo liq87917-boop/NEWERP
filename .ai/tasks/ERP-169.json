@@ -1,0 +1,57 @@
+{
+  "id": "ERP-169",
+  "title": "Download authorized order and unlinked receipt evidence as PDF",
+  "description": "A sales user downloads the selected page of the existing customer order and unlinked-receipt designer as paginated Chinese PDF. Reuse existing bounded, authorized preview; keep the two evidence classes separate. PDF font absence fails visibly. No new database model or EF mapping is needed. Development only. Read-only, current-user ERP menu and salesperson/supplier scope rechecked on every request; fail closed on missing identity, denied access or invalid bounded fields. Existing HTTP operation audit applies. Preserve source evidence, unknown null values, original currencies, truncation and separate evidence classes. No arbitrary SQL, direct model database access, migrations, production SQL/real database execution, writes, secrets/.env changes, deployment or real-browser acceptance. Verify focused unit/Node tests and safe Release build/test.",
+  "status": "pending",
+  "risk_level": "medium",
+  "acceptance_criteria": [
+    "PDF endpoint reuses authorized bounded preview and rechecks current-user menu, salesperson customer scope, both field allowlists, filters and page cap before producing bytes.",
+    "Paginated PDF keeps order and unlinked-receipt sections, selected column order, original currencies, status, unknown and truncation indicators; wide columns paginate and missing SimHei fails explicitly.",
+    "Designer offers current-page PDF download with visible empty, authorization and network failures; focused PDF and Node tests cover scope, separate evidence, pagination and no writes."
+  ],
+  "criterion_path_map": {
+    "PDF endpoint reuses authorized bounded preview and rechecks current-user menu, salesperson customer scope, both field allowlists, filters and page cap before producing bytes.": [
+      "src/ERP.Api/Controllers/DynamicReceiptReconciliationReportController.cs",
+      "src/ERP.Infrastructure/Export/DynamicReceiptReconciliationPdfExporter.cs"
+    ],
+    "Paginated PDF keeps order and unlinked-receipt sections, selected column order, original currencies, status, unknown and truncation indicators; wide columns paginate and missing SimHei fails explicitly.": [
+      "src/ERP.Infrastructure/Export/DynamicReceiptReconciliationPdfExporter.cs"
+    ],
+    "Designer offers current-page PDF download with visible empty, authorization and network failures; focused PDF and Node tests cover scope, separate evidence, pagination and no writes.": [
+      "src/ERP.Api/wwwroot/js/sales-order-receipt-reconciliation.js",
+      "src/ERP.UnitTests/DynamicReceiptReconciliationPdfTests.cs",
+      "tests/automation/dynamic_receipt_reconciliation_pdf_ui.test.js",
+      "docs/dynamic-receipt-reconciliation-report.md"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/DynamicReceiptReconciliationReportController.cs",
+    "src/ERP.Infrastructure/Export/DynamicReceiptReconciliationPdfExporter.cs",
+    "src/ERP.Api/wwwroot/js/sales-order-receipt-reconciliation.js",
+    "src/ERP.UnitTests/DynamicReceiptReconciliationPdfTests.cs",
+    "tests/automation/dynamic_receipt_reconciliation_pdf_ui.test.js",
+    "docs/dynamic-receipt-reconciliation-report.md",
+    ".ai/**"
+  ],
+  "validation_profile": "safe",
+  "depends_on": [
+    "ERP-164",
+    "ERP-165",
+    "ERP-166",
+    "ERP-168"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "completion_mode": "build",
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only bounded read-only feature"
+  },
+  "attempts": 0
+}
