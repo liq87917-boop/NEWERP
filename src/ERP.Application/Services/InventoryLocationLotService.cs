@@ -69,6 +69,17 @@ public sealed class InventoryLocationLotService : IInventoryLocationLotService
             var toWarehouse = await ResolveWarehouseAsync(toWarehouseId, cancellationToken);
             toWarehouseName = toWarehouse.WarehouseName;
             toLocationCode = InventoryLocationLotRules.NormalizeLocationCode(input.ToLocationCode);
+
+            // ERP-096 调拨守恒：数量守恒（调出 = 调入）、成本守恒（非负单价），
+            // 且调出仓现存量必须足以覆盖调拨数量（拒绝负库存）。
+            // 手工行（无商品 Id）无法核对现存量，跳过存量检查，仍保留数量 / 成本 / 两仓守恒。
+            var sourceOnHand = input.ProductId.HasValue
+                ? await GetSourceOnHandAsync(input.WarehouseId, input.ProductId.Value, cancellationToken)
+                : input.Quantity;
+            var conservation = InventoryLocationLotRules.EvaluateTransfer(
+                input.WarehouseId, toWarehouseId, input.Quantity, input.UnitCost, sourceOnHand);
+            if (!conservation.IsValid)
+                throw BusinessException.InvalidParameter(conservation.Message);
         }
 
         return new ValidatedMovementLocationLot(
@@ -82,7 +93,8 @@ public sealed class InventoryLocationLotService : IInventoryLocationLotService
             lotNo,
             input.ProductId,
             input.ProductName,
-            input.Quantity);
+            input.Quantity,
+            input.UnitCost);
     }
 
     /// <summary>按仓库 Id 取仓库（不存在 / 已删除抛业务异常）。</summary>
@@ -91,6 +103,15 @@ public sealed class InventoryLocationLotService : IInventoryLocationLotService
         var warehouse = await _db.BaseWarehouses.AsNoTracking()
             .FirstOrDefaultAsync(w => w.Id == warehouseId && !w.IsDeleted, cancellationToken);
         return warehouse ?? throw BusinessException.InvalidParameter($"仓库 Id {warehouseId} 不存在或已删除");
+    }
+
+    /// <summary>取调出仓（仓库 + 商品）现存量；无商品或未建库存行时为 0。</summary>
+    private async Task<decimal> GetSourceOnHandAsync(long warehouseId, long productId, CancellationToken cancellationToken)
+    {
+        return await _db.Stocks.AsNoTracking()
+            .Where(s => !s.IsDeleted && s.WarehouseId == warehouseId && s.ProductId == productId)
+            .Select(s => s.Quantity)
+            .SumAsync(cancellationToken);
     }
 
     /// <inheritdoc />

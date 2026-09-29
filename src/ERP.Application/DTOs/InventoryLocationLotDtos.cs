@@ -52,6 +52,12 @@ public sealed class MovementLocationLotInput
 
     /// <summary>移动数量（基础单位，恒为正数）</summary>
     public decimal Quantity { get; init; }
+
+    /// <summary>
+    /// 调拨成本单价（可选，仅调拨使用）：非负，用于「调拨成本守恒」校验；
+    /// 入库 / 出库 / 退货忽略此字段，默认 0。
+    /// </summary>
+    public decimal UnitCost { get; init; }
 }
 
 /// <summary>
@@ -69,7 +75,8 @@ public sealed record ValidatedMovementLocationLot(
     string LotNo,
     long? ProductId,
     string ProductName,
-    decimal Quantity);
+    decimal Quantity,
+    decimal UnitCost);
 
 /// <summary>
 /// 调拨守恒校验结果（ERP-096）：调出数量 = 调入数量、调出成本 = 调入成本（同一成本单价），
