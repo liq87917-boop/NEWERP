@@ -2,7 +2,7 @@
   "id": "ERP-142",
   "title": "Export selected authorized supplier aging page to Excel",
   "description": "Purchasing user downloads exactly the selected current supplier aging page as xlsx in chosen order; reuse ERP-140 preview, menu check and ExcelExporter. Development only; reuse existing SupplierReconciliationAging.ForQueryAsync evidence, current-user purchase-order menu authorization and HTTP audit. Preserve explicit due-date unknowns, separate currencies, draft/void history and invalid/unknown allocation evidence. Fail closed on missing permission, invalid requests or source failures. No payment approval, ledger inference, arbitrary SQL, migration, production SQL, real database execution, business writes, secrets/.env or deployment. Verify focused tests and safe Release build/test; no browser acceptance.",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "medium",
   "acceptance_criteria": [
     "Excel endpoint reuses authorized bounded preview and rechecks menu, filters, fields and page limit before bytes.",
@@ -49,5 +49,5 @@
     "status": "not_required",
     "reason": "Development-only bounded read-only feature"
   },
-  "attempts": 0
+  "attempts": 1
 }

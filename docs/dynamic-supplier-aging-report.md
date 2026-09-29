@@ -9,6 +9,7 @@ ERP-068 供应商对账与账龄工作台的既有筛选与稳定分页，预览
 | --- | --- | --- |
 | `GET` | `/api/supplier-reconciliation-aging/report` | 返回发票证据字段白名单目录（需登录 + 采购订单菜单授权） |
 | `POST` | `/api/supplier-reconciliation-aging/report` | 按选定字段与有界筛选预览当前页，稳定分页（单页上限 200） |
+| `POST` | `/api/supplier-reconciliation-aging/report/export` | 导出当前选定页为 Excel（xlsx，只读，复用有界授权预览与选定列顺序） |
 
 请求体（`DynamicSupplierAgingReportRequest`）：`fields`（选定字段键，仅限白名单）、`supplierId`、`currency`、
 `invoiceStatus`（recorded 默认 / draft / voided / all）、`allocationState`（none / historical_only / partial / full）、
@@ -74,13 +75,14 @@ ERP-068 供应商对账与账龄工作台的既有筛选与稳定分页，预览
 - 渲染只按返回的列名与选定字段值（`sraDesTableHtml` / `sraDesResultHtml`），全部 HTML 转义；未知到期日 / 未知剩余 / 未知计数一律显示「未知」（`sraDesCellText`），绝不回落为 0；不同币种分别成行、绝不合并、无跨币种总额；
 - 加载（`sraDesLoadingHtml`）、空结果（`sraDesEmptyHtml`）、权限不足 / 未登录 / 无效请求 / 网络失败（`sraDesErrorHtml`）均为可见状态；
 - 导出（`sraDesExport`）仅导出**当前预览页**的所选列 CSV（`sraDesCsv`）：未知值保留「未知」、以 `= + - @` 或制表符 / 回车开头的文本加 `'` 前缀（防公式注入）、引号转义、CRLF + BOM；空结果不下载仅表头的 CSV。
+- 导出 Excel（`sraDesExportXlsx`）复用当前预览页与所选列，`POST /api/supplier-reconciliation-aging/report/export` 下载 xlsx（只读、有界、重新校验授权 / 字段 / 筛选 / 页大小）；未知到期日 / 未知剩余 / 未知计数保留为「未知」或空单元格、绝不回落为 0，公式首字符转义、无跨币种总额；空页 / 权限 / 无效 / 网络失败均在结果区可见，不下载仅表头文件。
 
 ### 工作流
 
 1. 采购用户进入「供应商对账与账龄工作台」，设置供应商 / 币种 / 发票状态 / 分配状态 / 日期 / as-of / 关键字等当前筛选；
 2. 点击工具栏「🎛 字段设计器」，目录加载成功后按需勾选 / 清空证据字段（默认全选）；
 3. 点击「预览」→ 复用当前筛选 + 选定字段调用 ERP-140 只读预览，按请求顺序渲染当前授权页；
-4. 用「← 上一页 / 下一页 →」翻页（有界），点击「📤 导出所选列 CSV」下载当前预览页 CSV。
+4. 用「← 上一页 / 下一页 →」翻页（有界），点击「📤 导出所选列 CSV」下载当前预览页 CSV，或点击「📥 导出 Excel（xlsx）」下载当前预览页 xlsx。
 
 ### 前端单测
 
@@ -91,11 +93,33 @@ ERP-068 供应商对账与账龄工作台的既有筛选与稳定分页，预览
 
 运行：`node tests/automation/dynamic_supplier_aging_report_ui.test.js`
 
+## 当前页 Excel 导出（ERP-142）
+
+`POST /api/supplier-reconciliation-aging/report/export`，请求体与预览完全相同（`DynamicSupplierAgingReportRequest`），复用同一有界、已授权预览管线（每次请求重新校验身份 / 采购订单菜单授权 / 字段 / 供应商 / 币种 / 发票状态 / 分配状态 / 日期 / as-of / 关键字 / 页大小），**只导出请求 `page` / `pageSize` 对应的当前页**（单页上限 200，超限直接拒绝），不是全量导出。
+
+### 导出口径与限制
+
+- **仅当前页 + 选定列**：数据工作表列头与数据行都按 `page.Columns`（= 请求选定字段顺序）排列，与预览同源；只导出当前页，不导出全量。
+- **原币分行**：金额一律按原币分别成行，`currency` 为原币，不同币种绝不合并、不做汇率换算、无跨币种总额。
+- **显式未知**：未知到期日（`dueDate` / `overdueDays` / `agingBucket` 为 null）、未知剩余证据（`remainingAmount` 为 null）与未知 / 无效 / 无法确认分配证据照实保留为**空单元格（未知）**，绝不回落为 0、不推算、不修复；草稿 / 已作废发票单独标注，金额永不并入有效合计。
+- **公式注入防护**：文本单元格以 `=` / `+` / `-` / `@` / 制表符 / 回车 / 换行开头时前缀单引号转义（OWASP），保持字面文本、不被当作公式执行（`DynamicSupplierAgingReportRules.EscapeFormulaLeading`）。
+- **只读 + 审计**：无写入、无任意 SQL；`POST` 由既有 `OperationLogMiddleware` 记录审计（动作「导出」）。
+- 文件名 `SupplierAging_yyyyMMddHHmmss.xlsx`；内容类型 `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`。
+
+### 前端
+
+字段设计器工具栏新增「📥 导出 Excel（xlsx）」：复用当前字段 / 工作台筛选 / 分页组装有界请求后 `POST` 导出；空页显示可见错误、不下载仅表头文件，授权 / 校验 / 网络失败均在结果区可见。
+
+### 单元测试
+
+`src/ERP.UnitTests/DynamicSupplierAgingExcelTests.cs`（内存库，不连 SQL Server、不启动 API）覆盖：选定列顺序与行值、仅导出当前页（页大小上限）、未知到期日 / 未知分配证据保留为空单元格、不同币种分别成行、公式注入转义、权限 / 身份 fail closed、页大小超限拒绝、以及只读不写库。
+
 ## 文件地图
 
 - `src/ERP.Application/DTOs/DynamicSupplierAgingReportDtos.cs`：目录 / 请求 / 结果 DTO；
 - `src/ERP.Application/Services/DynamicSupplierAgingReportRules.cs`：字段白名单、校验与行投影（纯规则）；
 - `src/ERP.Api/Controllers/DynamicSupplierAgingReportController.cs`：授权 + 复用 ERP-068 只读派生 + 选定列投影；
 - `src/ERP.UnitTests/DynamicSupplierAgingReportTests.cs`：单元测试（内存库，不连 SQL Server、不启动 API）；
+- `src/ERP.UnitTests/DynamicSupplierAgingExcelTests.cs`：ERP-142 Excel 导出单元测试（内存库，不连 SQL Server、不启动 API）；
 - `src/ERP.Api/wwwroot/js/supplier-reconciliation-aging.js`：ERP-068 工作台 + ERP-141 前端字段设计器（`openSupplierAgingDesigner`，纯函数可 Node 单测）；
 - `tests/automation/dynamic_supplier_aging_report_ui.test.js`：ERP-141 前端 UI 逻辑单测（Node，无需浏览器）。

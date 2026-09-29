@@ -2,6 +2,7 @@ using ERP.Application.Common;
 using ERP.Application.DTOs;
 using ERP.Application.Interfaces;
 using ERP.Application.Services;
+using ERP.Infrastructure.Export;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using System.Security.Claims;
@@ -13,6 +14,7 @@ namespace ERP.Api.Controllers;
 /// <list type="number">
 /// <item><b>GET /api/supplier-reconciliation-aging/report</b>：返回发票证据字段白名单目录（需登录 + 采购订单菜单授权）；</item>
 /// <item><b>POST /api/supplier-reconciliation-aging/report</b>：按选定字段与有界筛选预览当前账号可见的供应商发票证据，稳定分页（单页上限 200）。</item>
+/// <item><b>POST /api/supplier-reconciliation-aging/report/export</b>：导出当前选定页为 Excel（xlsx，只读，复用有界授权预览与选定列顺序）。</item>
 /// </list>
 /// <para>复用 ERP-068 <see cref="SupplierReconciliationAging.ForQueryAsync"/> 的权威派生：供应商 / 币种 / 发票状态 /
 /// 分配状态 / 开票日期 / 到期日 / as-of 筛选与稳定分页全部由既有只读方法完成，本控制器只做授权、字段校验与选定列投影，不做写入。</para>
@@ -50,6 +52,33 @@ public class DynamicSupplierAgingReportController : ControllerBase
         ArgumentNullException.ThrowIfNull(request);
         return Ok(ApiResponse<DynamicSupplierAgingReportPageDto>.Success(
             await BuildPageAsync(request)));
+    }
+
+    /// <summary>
+    /// 导出当前页为 Excel（ERP-142，只读）：复用「有界、已授权预览」与选定列顺序（每次请求重新校验身份 / 菜单授权 /
+    /// 字段 / 筛选 / 页大小），仅导出当前页选定列；金额保留原币、不做汇率换算或跨币种求和；未知到期日与未知 / 无效 /
+    /// 无法确认分配证据照实保留，绝不推算或修复；文本单元格做公式注入转义。
+    /// <para>全程只读，不写库、不执行任意 SQL；请求由既有 <c>OperationLogMiddleware</c> 记录审计（动作「导出」）。</para>
+    /// </summary>
+    [HttpPost("export")]
+    public async Task<IActionResult> Export([FromBody] DynamicSupplierAgingReportRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        // 复用同一有界、已授权预览：重新校验身份 / 菜单授权 / 字段 / 筛选 / 页大小
+        var page = await BuildPageAsync(request);
+
+        var bytes = BuildWorkbook(page);
+        return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            $"SupplierAging_{DateTime.Now:yyyyMMddHHmmss}.xlsx");
+    }
+
+    /// <summary>用 ExcelExporter 生成当前页数据工作表（选定列顺序 + 公式注入转义）</summary>
+    private static byte[] BuildWorkbook(DynamicSupplierAgingReportPageDto page)
+    {
+        var columns = page.Columns.Select(c => (c.Key, c.Label)).ToList();
+        var rows = page.Rows.Select(DynamicSupplierAgingReportRules.BuildExportRow).ToList();
+        return ExcelExporter.ExportRows("供应商对账与账龄", rows, columns);
     }
 
     /// <summary>复用同一有界、已授权预览管线：授权 → 校验 → 只读查询 → 选定列投影</summary>
