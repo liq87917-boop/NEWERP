@@ -1,0 +1,54 @@
+{
+  "id": "ERP-126",
+  "title": "Add a visual purchase-order report field designer",
+  "status": "pending",
+  "risk_level": "medium",
+  "description": "User scene: from the purchase-order page, choose catalog fields and bounded supplier/date/status/currency filters and preview the current authorized purchase-order rows. The UI accepts only ERP-125's field catalog and never sends free-form SQL. Show unauthorized, empty, validation and network failures safely; previews remain read-only and covered by existing HTTP audit. Development only: no migration, production SQL, real database execution, writes, secret/.env change or deployment. Verify Node UI logic tests and safe build/test.",
+  "acceptance_criteria": [
+    "Purchase-order page opens a field chooser and supplier/date/status/currency filters populated from ERP-125's finite catalog and existing supplier selector.",
+    "Preview sends only allowlisted columns and bounded filters, renders returned cells safely, and shows loading, empty, authorization and network states without writes.",
+    "Automated UI logic tests cover field selection, request limits, safe rendering and failure states; document the workflow and run Node syntax/test checks plus safe build/test."
+  ],
+  "criterion_path_map": {
+    "Purchase-order page opens a field chooser and supplier/date/status/currency filters populated from ERP-125's finite catalog and existing supplier selector.": [
+      "src/ERP.Api/wwwroot/js/modules-doc.js",
+      "src/ERP.Api/wwwroot/js/dynamic-purchase-order-report.js",
+      "src/ERP.Api/wwwroot/index.html"
+    ],
+    "Preview sends only allowlisted columns and bounded filters, renders returned cells safely, and shows loading, empty, authorization and network states without writes.": [
+      "src/ERP.Api/wwwroot/js/dynamic-purchase-order-report.js"
+    ],
+    "Automated UI logic tests cover field selection, request limits, safe rendering and failure states; document the workflow and run Node syntax/test checks plus safe build/test.": [
+      "tests/automation/dynamic_purchase_order_report_ui.test.js",
+      "src/ERP.Api/wwwroot/js/dynamic-purchase-order-report.js",
+      "docs/dynamic-purchase-order-report.md"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Api/wwwroot/js/modules-doc.js",
+    "src/ERP.Api/wwwroot/js/dynamic-purchase-order-report.js",
+    "src/ERP.Api/wwwroot/index.html",
+    "tests/automation/dynamic_purchase_order_report_ui.test.js",
+    "docs/dynamic-purchase-order-report.md",
+    ".ai/**"
+  ],
+  "validation_profile": "safe",
+  "depends_on": [
+    "ERP-125"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "completion_mode": "build",
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only bounded read-only feature"
+  },
+  "attempts": 0,
+  "created_at": "2026-09-29T05:17:00.765837Z"
+}

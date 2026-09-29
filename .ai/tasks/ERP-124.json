@@ -1,0 +1,55 @@
+{
+  "id": "ERP-124",
+  "title": "Download the scoped customer order and receivable packet as PDF",
+  "status": "pending",
+  "risk_level": "medium",
+  "description": "User scene: download the already authorized customer report packet as a paginated Chinese PDF with separate sales-order and invoice/receipt evidence sections. Reuse ERP-122's dual menu/salesperson-scope validation and page caps on every download; do not infer invoice-to-order links, balances or mixed-currency totals. Reuse the existing PDFsharp and shared SimHei resolver, fail explicitly if the font is absent, and record the read-only request through existing HTTP audit. Development only: no migration, production SQL, real database execution, arbitrary model SQL, writes, secret/.env change or deployment. Verify PDF and authorization tests plus safe build/test.",
+  "acceptance_criteria": [
+    "PDF endpoint reuses the bounded dual-authorized packet preview, rechecks current user/customer/date/page scope and sends no bytes on either permission failure.",
+    "PDFsharp renders separate paginated sales-order and receivable-evidence sections with original currency and explicit known/unknown remaining labels; shared SimHei font absence fails clearly.",
+    "Packet page offers PDF download with visible errors; tests inspect PDF signature, Chinese/font failure, separate sections, page cap and dual permission; document export boundary."
+  ],
+  "criterion_path_map": {
+    "PDF endpoint reuses the bounded dual-authorized packet preview, rechecks current user/customer/date/page scope and sends no bytes on either permission failure.": [
+      "src/ERP.Api/Controllers/CustomerReportPacketController.cs",
+      "src/ERP.Infrastructure/Export/CustomerReportPacketPdfExporter.cs"
+    ],
+    "PDFsharp renders separate paginated sales-order and receivable-evidence sections with original currency and explicit known/unknown remaining labels; shared SimHei font absence fails clearly.": [
+      "src/ERP.Infrastructure/Export/CustomerReportPacketPdfExporter.cs"
+    ],
+    "Packet page offers PDF download with visible errors; tests inspect PDF signature, Chinese/font failure, separate sections, page cap and dual permission; document export boundary.": [
+      "src/ERP.Api/wwwroot/js/customer-report-packet.js",
+      "src/ERP.UnitTests/CustomerReportPacketPdfTests.cs",
+      "docs/customer-report-packet.md"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/CustomerReportPacketController.cs",
+    "src/ERP.Infrastructure/Export/CustomerReportPacketPdfExporter.cs",
+    "src/ERP.Api/wwwroot/js/customer-report-packet.js",
+    "src/ERP.UnitTests/CustomerReportPacketPdfTests.cs",
+    "docs/customer-report-packet.md",
+    ".ai/**"
+  ],
+  "validation_profile": "safe",
+  "depends_on": [
+    "ERP-121",
+    "ERP-122",
+    "ERP-123"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "completion_mode": "build",
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only bounded read-only feature"
+  },
+  "attempts": 0,
+  "created_at": "2026-09-29T05:17:00.765803Z"
+}

@@ -1,0 +1,61 @@
+{
+  "id": "ERP-125",
+  "title": "Preview an authorized dynamic purchase-order report",
+  "status": "pending",
+  "risk_level": "medium",
+  "description": "User scene: a purchasing user selects finite purchase-order fields and supplier/date/status/currency filters to preview a bounded report. Require the current user's existing purchase-order menu permission; reuse existing purchase-order visibility rather than introducing a broader role or data-scope policy. Supplier or order references remain raw persisted evidence, not payable balance or settlement. Invalid fields/filters and missing permission fail closed before querying; no arbitrary SQL. Existing HTTP operation audit records read-only requests. Development only: no Domain or schema changes, migration, production SQL, real database execution, writes, secret/.env change or deployment. Verify unit tests and safe build/test.",
+  "acceptance_criteria": [
+    "Authenticated catalog exposes only finite persisted purchase-order fields; preview rejects unknown columns, malformed date/supplier/status/currency filters and page size above 100 before data reads.",
+    "Preview checks the current user's existing purchase-order menu, filters nondeleted purchase orders by supplier/date/status/currency, and returns stable bounded paging with selected columns and no writes.",
+    "Tests cover permitted/denied users, filters, selected field order, 100-row cap, soft deletion, invalid input and no writes; document permission and financial-evidence limits."
+  ],
+  "criterion_path_map": {
+    "Authenticated catalog exposes only finite persisted purchase-order fields; preview rejects unknown columns, malformed date/supplier/status/currency filters and page size above 100 before data reads.": [
+      "src/ERP.Application/DTOs/DynamicPurchaseOrderReportDtos.cs",
+      "src/ERP.Application/Services/DynamicPurchaseOrderReportRules.cs",
+      "src/ERP.Api/Controllers/DynamicPurchaseOrderReportController.cs"
+    ],
+    "Preview checks the current user's existing purchase-order menu, filters nondeleted purchase orders by supplier/date/status/currency, and returns stable bounded paging with selected columns and no writes.": [
+      "src/ERP.Application/Interfaces/IDynamicPurchaseOrderReportQuery.cs",
+      "src/ERP.Infrastructure/Reports/DynamicPurchaseOrderReportQuery.cs",
+      "src/ERP.Infrastructure/DependencyInjection.cs",
+      "src/ERP.Api/Controllers/DynamicPurchaseOrderReportController.cs",
+      "src/ERP.Application/DTOs/DynamicPurchaseOrderReportDtos.cs"
+    ],
+    "Tests cover permitted/denied users, filters, selected field order, 100-row cap, soft deletion, invalid input and no writes; document permission and financial-evidence limits.": [
+      "src/ERP.UnitTests/DynamicPurchaseOrderReportTests.cs",
+      "src/ERP.Application/Services/DynamicPurchaseOrderReportRules.cs",
+      "docs/dynamic-purchase-order-report.md"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Application/DTOs/DynamicPurchaseOrderReportDtos.cs",
+    "src/ERP.Application/Services/DynamicPurchaseOrderReportRules.cs",
+    "src/ERP.Api/Controllers/DynamicPurchaseOrderReportController.cs",
+    "src/ERP.Application/Interfaces/IDynamicPurchaseOrderReportQuery.cs",
+    "src/ERP.Infrastructure/Reports/DynamicPurchaseOrderReportQuery.cs",
+    "src/ERP.Infrastructure/DependencyInjection.cs",
+    "src/ERP.UnitTests/DynamicPurchaseOrderReportTests.cs",
+    "docs/dynamic-purchase-order-report.md",
+    ".ai/**"
+  ],
+  "validation_profile": "safe",
+  "depends_on": [
+    "ERP-008"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "completion_mode": "build",
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only bounded read-only feature"
+  },
+  "attempts": 0,
+  "created_at": "2026-09-29T05:17:00.765827Z"
+}

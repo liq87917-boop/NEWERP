@@ -1,0 +1,56 @@
+{
+  "id": "ERP-127",
+  "title": "Export selected dynamic purchase-order report page to Excel",
+  "status": "pending",
+  "risk_level": "medium",
+  "description": "User scene: download exactly the selected, authorized purchase-order report page as xlsx in the chosen column order. Reuse ERP-125 scoped preview and existing ExcelExporter; revalidate current user, purchase-order menu, filters, field allowlist and 100-row cap on every export. Preserve original currency and supplier/order identifiers, keep formula-leading text literal, and make no settlement claim. Existing HTTP audit records the read-only download. Development only: no migration, production SQL, real database execution, arbitrary model SQL, writes, secret/.env change or deployment. Verify workbook tests plus safe build/test.",
+  "acceptance_criteria": [
+    "Excel endpoint reuses the authorized bounded purchase-order preview and selected fields, rechecks current-user menu permission and rejects invalid requests before sending bytes.",
+    "Workbook uses existing ExcelExporter for only the current page, preserving supplier/order identifiers and original currency while escaping formula-leading text.",
+    "Designer offers download and visible empty/authorization errors; unit tests inspect selected columns, row cap, formula safety and permission; document export limits."
+  ],
+  "criterion_path_map": {
+    "Excel endpoint reuses the authorized bounded purchase-order preview and selected fields, rechecks current-user menu permission and rejects invalid requests before sending bytes.": [
+      "src/ERP.Api/Controllers/DynamicPurchaseOrderReportController.cs",
+      "src/ERP.Application/DTOs/DynamicPurchaseOrderReportDtos.cs"
+    ],
+    "Workbook uses existing ExcelExporter for only the current page, preserving supplier/order identifiers and original currency while escaping formula-leading text.": [
+      "src/ERP.Api/Controllers/DynamicPurchaseOrderReportController.cs",
+      "src/ERP.Application/Services/DynamicPurchaseOrderReportRules.cs"
+    ],
+    "Designer offers download and visible empty/authorization errors; unit tests inspect selected columns, row cap, formula safety and permission; document export limits.": [
+      "src/ERP.Api/wwwroot/js/dynamic-purchase-order-report.js",
+      "src/ERP.UnitTests/DynamicPurchaseOrderExcelTests.cs",
+      "docs/dynamic-purchase-order-report.md"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/DynamicPurchaseOrderReportController.cs",
+    "src/ERP.Application/DTOs/DynamicPurchaseOrderReportDtos.cs",
+    "src/ERP.Application/Services/DynamicPurchaseOrderReportRules.cs",
+    "src/ERP.Api/wwwroot/js/dynamic-purchase-order-report.js",
+    "src/ERP.UnitTests/DynamicPurchaseOrderExcelTests.cs",
+    "docs/dynamic-purchase-order-report.md",
+    ".ai/**"
+  ],
+  "validation_profile": "safe",
+  "depends_on": [
+    "ERP-125",
+    "ERP-126"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "completion_mode": "build",
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only bounded read-only feature"
+  },
+  "attempts": 0,
+  "created_at": "2026-09-29T05:17:00.765844Z"
+}
