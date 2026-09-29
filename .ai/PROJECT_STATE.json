@@ -1,7 +1,7 @@
 {
   "schema_version": 2,
   "project": "NEWERP",
-  "updated_at": "2026-09-29T15:59:37.338746Z",
+  "updated_at": "2026-09-29T16:22:51.310878Z",
   "phase": "ready",
   "current_task": null,
   "queue": [
@@ -158,24 +158,27 @@
   ],
   "blocked": [],
   "last_build": {
-    "task": "ERP-166",
+    "task": "ERP-167",
     "profile": "safe",
-    "status": "passed",
-    "exit_code": 0,
-    "log": ".ai\\logs\\ERP-166-validation-1.log",
-    "at": "2026-09-29T15:59:31.183839Z"
+    "status": "failed",
+    "exit_code": 1,
+    "log": ".ai\\logs\\ERP-167-validation-2.log",
+    "at": "2026-09-29T16:17:21.975558Z"
   },
-  "last_error": null,
+  "last_error": {
+    "task": "ERP-167",
+    "kind": "automatic_repair_pending",
+    "summary": "Path guard failed:\noutside allowed_paths: src/ERP.UnitTests/DynamicSupplierAgingReportTests.cs"
+  },
   "last_deepseek_fix": {
-    "task": "ERP-102",
-    "attempt": 2,
-    "model": "deepseek-v4-pro",
-    "exit_code": 0,
-    "finished_at": "2026-09-29T01:09:46.276093Z"
+    "task": "ERP-167",
+    "attempts": 3,
+    "status": "retry_pending",
+    "at": "2026-09-29T16:22:51.060371Z"
   },
   "git_sync": {
     "branch": "main",
-    "local_sha": "8c0b515",
+    "local_sha": "c06a00c",
     "status": "synced",
     "ahead": 0,
     "behind": 0,
@@ -188,5 +191,7 @@
   "runner": {
     "status": "stopped",
     "pid": null
-  }
+  },
+  "blocker": null,
+  "finish_reason": "deepseek_supervisor_recovery"
 }

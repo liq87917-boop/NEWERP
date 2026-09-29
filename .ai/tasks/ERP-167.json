@@ -2,7 +2,7 @@
   "id": "ERP-167",
   "title": "Export authorized customer order and unlinked receipt evidence to Excel",
   "description": "A sales user builds a bounded, read-only customer order and receipt reconciliation report from existing ERP-046 evidence. Development only. Recheck current-user sales-order menu and SalespersonDataScopeService customer visibility on every request; apply scope before order counts and paging, and let unlinked receipts derive only from scoped page customers. Fail closed on missing identity, denied menu and invalid fields or filters. Keep sales-order linked application amounts, receipt-allocation evidence, invoice evidence and customer-level unlinked FinanceReceipt evidence separate; never infer a receipt-order match or an accounts-receivable balance. Preserve null unknown amounts, original currencies, receipt evidence status and source truncation flags. Existing HTTP operation audit covers preview and download. No arbitrary SQL, migration, production SQL, real database execution, writes, secrets/.env changes or deployment. Verify focused unit/Node tests and safe Release build/test; no real-browser acceptance.",
-  "status": "pending",
+  "status": "retry",
   "risk_level": "medium",
   "acceptance_criteria": [
     "Excel endpoint reuses ERP-164/165 authorized bounded preview and rechecks current-user menu, salesperson customer scope, filters, both field sets and page limit before bytes.",
@@ -49,5 +49,99 @@
     "level": "L1",
     "status": "not_required",
     "reason": "Development-only bounded read-only feature"
+  },
+  "attempts": 0,
+  "preserved_work": {
+    "execution_copy": "D:\\VSCodeProject\\NEWERP.executor",
+    "changed_paths": [
+      ".ai/PROJECT_STATE.json",
+      ".ai/tasks/ERP-167.json",
+      "docs/dynamic-receipt-reconciliation-report.md",
+      "src/ERP.Api/Controllers/DynamicReceiptReconciliationReportController.cs",
+      "src/ERP.Api/wwwroot/js/sales-order-receipt-reconciliation.js",
+      "src/ERP.Application/Services/DynamicReceiptReconciliationReportRules.cs",
+      "src/ERP.UnitTests/DynamicReceiptReconciliationExcelTests.cs",
+      "src/ERP.UnitTests/DynamicSupplierAgingReportTests.cs"
+    ],
+    "diff": ".ai\\logs\\ERP-167-preserved-work.diff",
+    "preserved_at": "2026-09-29T16:22:51.058868Z"
+  },
+  "failure_kind": "path_guard_failure",
+  "failed_transport_version": 2,
+  "recovery_history": [
+    {
+      "remediation_task": "ERP-167-RECOVERY-1",
+      "cycle": 1,
+      "at": "2026-09-29T16:22:51.202938Z",
+      "evidence": {
+        "failure_kind": "path_guard_failure",
+        "summary": "Path guard failed:\noutside allowed_paths: src/ERP.UnitTests/DynamicSupplierAgingReportTests.cs",
+        "result": ".ai\\results\\ERP-167.json",
+        "attempt_logs": [],
+        "validation_logs": [],
+        "latest_state_error": {
+          "task": "ERP-167",
+          "kind": "automatic_repair_pending",
+          "summary": "Path guard failed:\noutside allowed_paths: src/ERP.UnitTests/DynamicSupplierAgingReportTests.cs"
+        },
+        "latest_build": {
+          "task": "ERP-167",
+          "profile": "safe",
+          "status": "failed",
+          "exit_code": 1,
+          "log": ".ai\\logs\\ERP-167-validation-2.log",
+          "at": "2026-09-29T16:17:21.975558Z"
+        },
+        "task_context": ".ai\\tasks\\ERP-167.json",
+        "changed_paths": [
+          ".ai/PROJECT_STATE.json",
+          ".ai/tasks/ERP-167.json",
+          "docs/dynamic-receipt-reconciliation-report.md",
+          "src/ERP.Api/Controllers/DynamicReceiptReconciliationReportController.cs",
+          "src/ERP.Api/wwwroot/js/sales-order-receipt-reconciliation.js",
+          "src/ERP.Application/Services/DynamicReceiptReconciliationReportRules.cs",
+          "src/ERP.UnitTests/DynamicReceiptReconciliationExcelTests.cs",
+          "src/ERP.UnitTests/DynamicSupplierAgingReportTests.cs"
+        ],
+        "diff": ".ai\\logs\\ERP-167-preserved-work.diff",
+        "execution_copy": "D:\\VSCodeProject\\NEWERP.executor"
+      }
+    }
+  ],
+  "supervised_recovery_cycles": 1,
+  "recovery_context": {
+    "remediation_task": "ERP-167-RECOVERY-1",
+    "failure_kind": "path_guard_failure",
+    "summary": "Path guard failed:\noutside allowed_paths: src/ERP.UnitTests/DynamicSupplierAgingReportTests.cs",
+    "result": ".ai\\results\\ERP-167.json",
+    "attempt_logs": [],
+    "validation_logs": [],
+    "latest_state_error": {
+      "task": "ERP-167",
+      "kind": "automatic_repair_pending",
+      "summary": "Path guard failed:\noutside allowed_paths: src/ERP.UnitTests/DynamicSupplierAgingReportTests.cs"
+    },
+    "latest_build": {
+      "task": "ERP-167",
+      "profile": "safe",
+      "status": "failed",
+      "exit_code": 1,
+      "log": ".ai\\logs\\ERP-167-validation-2.log",
+      "at": "2026-09-29T16:17:21.975558Z"
+    },
+    "task_context": ".ai\\tasks\\ERP-167.json",
+    "changed_paths": [
+      ".ai/PROJECT_STATE.json",
+      ".ai/tasks/ERP-167.json",
+      "docs/dynamic-receipt-reconciliation-report.md",
+      "src/ERP.Api/Controllers/DynamicReceiptReconciliationReportController.cs",
+      "src/ERP.Api/wwwroot/js/sales-order-receipt-reconciliation.js",
+      "src/ERP.Application/Services/DynamicReceiptReconciliationReportRules.cs",
+      "src/ERP.UnitTests/DynamicReceiptReconciliationExcelTests.cs",
+      "src/ERP.UnitTests/DynamicSupplierAgingReportTests.cs"
+    ],
+    "diff": ".ai\\logs\\ERP-167-preserved-work.diff",
+    "execution_copy": "D:\\VSCodeProject\\NEWERP.executor",
+    "instruction": "DeepSeek supervisor recovery: inspect the referenced complete logs, diagnose the root cause, and implement a different safe repair within allowed_paths. Rebuild and rerun the configured tests; if validation fails, use the newest log as the next repair input. Do not repeat the failed approach. Do not edit task/state/result files or relax production and irreversible-operation gates."
   }
 }
