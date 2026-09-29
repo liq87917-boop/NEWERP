@@ -63,9 +63,39 @@ ERP-068 供应商对账与账龄工作台的既有筛选与稳定分页，预览
 - 全程只读：无 Add / Update / Remove / SaveChanges，不执行任意 SQL、不写库；
 - 请求由既有 `OperationLogMiddleware` 按 HTTP 方法记录审计。
 
+## 前端字段设计器（ERP-141）：视觉字段选择 + 所选列预览与 CSV 导出
+
+前端工作台 `wwwroot/js/supplier-reconciliation-aging.js` 在既有「供应商对账与账龄工作台」工具栏新增「🎛 字段设计器」入口，
+保持静态视图，只读、有界、可单测：
+
+- 打开设计器时先 `GET /api/supplier-reconciliation-aging/report` 拉取有限字段白名单目录，目录加载失败 / 未登录 / 无采购订单菜单授权一律 fail closed（整页可见拒绝原因，不渲染任何字段）；
+- 字段选择器只由目录白名单渲染为复选框（`name="sra-des-field"`），**没有自由填写的字段名 / SQL**；勾选状态经 `sraDesSelectFields` 规范化（去重、保持顺序、丢弃未知键）；
+- 预览复用工作台**当前筛选**（供应商 / 币种 / 发票状态 / 分配状态 / 开票日期 / 到期日 / as-of / 关键字 / 每页），并 `POST /api/supplier-reconciliation-aging/report`，只发送「白名单字段 + 当前筛选 + 有界分页（pageSize 1~200）」；请求体由 `sraDesBuildRequest` 组装，页码最小 1、每页钳制到目录 `maxPageSize`（≤200）；
+- 渲染只按返回的列名与选定字段值（`sraDesTableHtml` / `sraDesResultHtml`），全部 HTML 转义；未知到期日 / 未知剩余 / 未知计数一律显示「未知」（`sraDesCellText`），绝不回落为 0；不同币种分别成行、绝不合并、无跨币种总额；
+- 加载（`sraDesLoadingHtml`）、空结果（`sraDesEmptyHtml`）、权限不足 / 未登录 / 无效请求 / 网络失败（`sraDesErrorHtml`）均为可见状态；
+- 导出（`sraDesExport`）仅导出**当前预览页**的所选列 CSV（`sraDesCsv`）：未知值保留「未知」、以 `= + - @` 或制表符 / 回车开头的文本加 `'` 前缀（防公式注入）、引号转义、CRLF + BOM；空结果不下载仅表头的 CSV。
+
+### 工作流
+
+1. 采购用户进入「供应商对账与账龄工作台」，设置供应商 / 币种 / 发票状态 / 分配状态 / 日期 / as-of / 关键字等当前筛选；
+2. 点击工具栏「🎛 字段设计器」，目录加载成功后按需勾选 / 清空证据字段（默认全选）；
+3. 点击「预览」→ 复用当前筛选 + 选定字段调用 ERP-140 只读预览，按请求顺序渲染当前授权页；
+4. 用「← 上一页 / 下一页 →」翻页（有界），点击「📤 导出所选列 CSV」下载当前预览页 CSV。
+
+### 前端单测
+
+`tests/automation/dynamic_supplier_aging_report_ui.test.js`（Node，无需浏览器）覆盖：字段选择（去重 / 顺序 / 丢弃未知键）、
+请求边界（仅白名单字段、页码 / 每页有界、筛选仅复用当前筛选、无任意字段名）、未知证据渲染（到期日 / 剩余 / 逾期天数）、
+表格渲染（未知 + 币种分行 + 转义）、空结果与失败态（权限 / 未登录 / 网络 / 无效请求）、所选列 CSV（BOM / 未知保留 / 公式转义 / 引号转义），
+以及前端接线契约（入口、接口路径、复选框、无任意 SQL、无跨币种总额）。
+
+运行：`node tests/automation/dynamic_supplier_aging_report_ui.test.js`
+
 ## 文件地图
 
 - `src/ERP.Application/DTOs/DynamicSupplierAgingReportDtos.cs`：目录 / 请求 / 结果 DTO；
 - `src/ERP.Application/Services/DynamicSupplierAgingReportRules.cs`：字段白名单、校验与行投影（纯规则）；
 - `src/ERP.Api/Controllers/DynamicSupplierAgingReportController.cs`：授权 + 复用 ERP-068 只读派生 + 选定列投影；
-- `src/ERP.UnitTests/DynamicSupplierAgingReportTests.cs`：单元测试（内存库，不连 SQL Server、不启动 API）。
+- `src/ERP.UnitTests/DynamicSupplierAgingReportTests.cs`：单元测试（内存库，不连 SQL Server、不启动 API）；
+- `src/ERP.Api/wwwroot/js/supplier-reconciliation-aging.js`：ERP-068 工作台 + ERP-141 前端字段设计器（`openSupplierAgingDesigner`，纯函数可 Node 单测）；
+- `tests/automation/dynamic_supplier_aging_report_ui.test.js`：ERP-141 前端 UI 逻辑单测（Node，无需浏览器）。

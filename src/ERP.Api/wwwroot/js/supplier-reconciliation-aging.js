@@ -82,6 +82,7 @@ function openSupplierReconciliationAgingWorkspace(supplierId) {
       <div class="toolbar-actions">
         <button class="btn btn-primary" onclick="loadSupplierReconciliationAging(1)">查询</button>
         <button class="btn btn-neutral" onclick="exportSraCsv()" title="导出本页（筛选、币种与未知到期日语义与屏幕完全一致，无跨币种总额）">📤 导出 CSV</button>
+        <button class="btn btn-neutral" onclick="openSupplierAgingDesigner()" title="按 ERP-140 白名单字段目录选择证据列，复用工作台当前筛选只读预览并导出所选列 CSV（无跨币种总额）">🎛 字段设计器</button>
       </div>
     </div>
 
@@ -477,4 +478,403 @@ async function showSupplierReconciliationAgingDetail(invoiceId) {
     modal.style.display = 'flex';
     toast('明细打开失败（fail closed）：' + (err.message || ''), 'error');
   }
+}
+
+/* ============ 供应商对账与账龄 · 证据字段设计器（ERP-141：只读、有界的前端字段 / 筛选设计器） ============
+   口径与后端 ERP-140（DynamicSupplierAgingReportController / DynamicSupplierAgingReportRules）一一对应：
+   - 字段选择器只由 GET /api/supplier-reconciliation-aging/report 返回的有限白名单目录渲染，绝无自由填写的字段名或 SQL；
+   - 预览复用工作台当前筛选（供应商 / 币种 / 发票状态 / 分配状态 / 开票日期 / 到期日 / as-of / 关键字 / 每页），
+     并 POST /api/supplier-reconciliation-aging/report，只发送「白名单字段 + 当前筛选 + 有界分页（pageSize 1~200）」，按请求顺序渲染返回的列名与单元格；
+   - 未知到期日（dueDate / dueDateKnown / agingBucket / overdueDays 缺失）、未知剩余（remainingAmount 缺失）与未知计数一律显示「未知」，
+     绝不回落为 0；不同币种分别成行、绝不合并，页面与导出都没有任何跨币种总额；
+   - 全程只读：不写库、不迁移、不执行任意 SQL；授权 / 无效请求 / 空结果 / 网络失败都在界面可见，且不暴露范围外数据。 */
+
+const SRA_DESIGNER_API = '/api/supplier-reconciliation-aging/report';
+let SRA_DESIGNER = {
+  catalog: null,      // GET /api/supplier-reconciliation-aging/report 返回的目录 DTO
+  fields: [],         // 目录字段（白名单）
+  selectedKeys: [],   // 当前勾选的字段键（默认全选）
+  view: null,         // 最近一次预览结果
+};
+
+/* ==================== 纯函数（可在 Node 中逐条单测） ==================== */
+
+/* HTML 转义（本地独立实现，避免依赖全局 escapeHtml 的加载顺序） */
+function sraDesEsc(v) {
+  return String(v == null ? '' : v).replace(/[&<>"']/g, c => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[c]));
+}
+
+/* 规范化选定字段（fail closed）：只保留目录白名单内的键、去重、保持请求顺序；未知键丢弃（绝不进入请求） */
+function sraDesSelectFields(catalogFields, selectedKeys) {
+  const valid = new Set((catalogFields || []).map(f => f && f.key).filter(Boolean));
+  const seen = new Set();
+  const result = [];
+  for (const k of (Array.isArray(selectedKeys) ? selectedKeys : [])) {
+    if (typeof k !== 'string') continue;
+    const key = k.trim();
+    if (!key || !valid.has(key) || seen.has(key)) continue;
+    seen.add(key);
+    result.push(key);
+  }
+  return result;
+}
+
+/* 组装有界预览请求体：字段只来自目录、分页有界、筛选仅复用工作台当前筛选，绝不接受任意字段名或 SQL */
+function sraDesBuildRequest(state) {
+  const fields = sraDesSelectFields(state.catalogFields, state.selectedKeys);
+  const page = Math.max(1, Math.floor(Number(state.page) || 1));
+  const maxPageSize = Number(state.maxPageSize) || 200;
+  let pageSize = Math.floor(Number(state.pageSize));
+  if (!Number.isFinite(pageSize)) pageSize = 50;
+  pageSize = Math.max(1, Math.min(maxPageSize, pageSize));
+
+  const req = { fields, page, pageSize };
+
+  const supplierId = Number(state.supplierId);
+  if (Number.isFinite(supplierId) && supplierId > 0) req.supplierId = supplierId;
+  if (state.currency) req.currency = state.currency;
+  if (state.invoiceStatus) req.invoiceStatus = state.invoiceStatus;
+  if (state.allocationState) req.allocationState = state.allocationState;
+  if (state.keyword) req.keyword = state.keyword;
+
+  const invoiceDateFrom = state.invoiceDateFrom ? String(state.invoiceDateFrom).slice(0, 10) : null;
+  const invoiceDateTo = state.invoiceDateTo ? String(state.invoiceDateTo).slice(0, 10) : null;
+  if (invoiceDateFrom) req.invoiceDateFrom = invoiceDateFrom;
+  if (invoiceDateTo) req.invoiceDateTo = invoiceDateTo;
+
+  const dueDateFrom = state.dueDateFrom ? String(state.dueDateFrom).slice(0, 10) : null;
+  const dueDateTo = state.dueDateTo ? String(state.dueDateTo).slice(0, 10) : null;
+  if (dueDateFrom) req.dueDateFrom = dueDateFrom;
+  if (dueDateTo) req.dueDateTo = dueDateTo;
+
+  if (state.asOfDate) req.asOfDate = String(state.asOfDate).slice(0, 10);
+  return req;
+}
+/* 单元格纯文本：null / undefined = 「未知」（未知到期日 / 未知剩余 / 未知计数，绝不回落为 0）；布尔显示 是/否；日期截断到日 */
+function sraDesCellText(value, field) {
+  const dataType = (field && field.dataType) || 'text';
+  if (value === null || value === undefined) return '未知';
+  if (dataType === 'boolean') return (value === true || value === 'true' || value === 1 || value === '1') ? '是' : '否';
+  if (dataType === 'date') return String(value).slice(0, 10);
+  return String(value);
+}
+
+/* 单元格 HTML（转义后安全渲染） */
+function sraDesRenderCell(value, field) {
+  return sraDesEsc(sraDesCellText(value, field));
+}
+
+/* CSV 单元格：未知值保留「未知」，并转义以 = + - @ 或制表符 / 回车开头的文本（防公式注入） */
+function sraDesCsvCell(value, field) {
+  let text = sraDesCellText(value, field);
+  if (/^[-=+@\t\r]/.test(text)) text = "'" + text;
+  return text;
+}
+
+/* 当前预览页的所选列 CSV（纯字符串）：表头为返回的列名，行内仅选定字段；未知值保留、公式首字符转义、引号转义、CRLF + BOM */
+function sraDesCsv(view) {
+  const cols = (view && view.columns) || [];
+  const rows = (view && view.rows) || [];
+  const q = (v) => '"' + String(v).replace(/"/g, '""') + '"';
+  const header = cols.map(c => q(c.label || c.key)).join(',');
+  const body = rows.map(r => cols.map(c => q(sraDesCsvCell(r[c.key], c))).join(',')).join('\r\n');
+  const lines = [header];
+  if (body) lines.push(body);
+  return '\uFEFF' + lines.join('\r\n');
+}
+
+/* 结果表格 HTML：表头为返回的列名、单元格为返回的选定字段值，全部经转义 */
+function sraDesTableHtml(view) {
+  const cols = (view && view.columns) || [];
+  const rows = (view && view.rows) || [];
+  if (!cols.length) return '';
+  const align = c => (c.dataType === 'number' || c.dataType === 'boolean') ? ' class="text-right"' : '';
+  const head = cols.map(c => `<th${align(c)}>${sraDesEsc(c.label || c.key)}</th>`).join('');
+  const body = rows.map(r =>
+    `<tr>${cols.map(c => `<td${align(c)}>${sraDesRenderCell(r[c.key], c)}</td>`).join('')}</tr>`).join('');
+  const emptyRow = `<tr><td colspan="${cols.length}" class="empty">本页没有符合条件的发票证据</td></tr>`;
+  const prevDisabled = !view || view.page <= 1 ? ' disabled' : '';
+  const nextDisabled = !view || view.page >= view.totalPages ? ' disabled' : '';
+  const paging = `<div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px">
+      <span class="text-muted">第 ${view ? view.page : 1} 页 / 共 ${view ? view.totalPages : 0} 页</span>
+      <div>
+        <button class="btn btn-neutral btn-sm" onclick="sraDesPage(-1)"${prevDisabled}>← 上一页</button>
+        <button class="btn btn-neutral btn-sm" onclick="sraDesPage(1)"${nextDisabled}>下一页 →</button>
+      </div></div>`;
+  return `<div class="table-wrap" style="margin-top:8px"><table><thead><tr>${head}</tr></thead><tbody>${body || emptyRow}</tbody></table></div>${paging}`;
+}
+
+/* 空结果提示 */
+function sraDesEmptyHtml() {
+  return '<div class="empty" style="margin:8px 0">没有符合条件的供应商发票证据（当前账号数据范围内的只读快照）。</div>';
+}
+
+/* 错误提示（授权 / 未登录 / 无效请求 / 空导出 / 网络失败分别可见，且不暴露任何数据） */
+function sraDesErrorHtml(kind, message) {
+  const labels = {
+    forbidden: '权限不足',
+    unauthorized: '未登录 / 登录已过期',
+    invalid: '请求无效',
+    empty: '导出内容为空',
+    network: '网络请求失败',
+    error: '预览失败',
+  };
+  return `<div class="pd-hint" style="color:#b91c1c;background:#fef2f2;border-color:#fecaca">
+      <b>${sraDesEsc(labels[kind] || '预览失败')}</b>：${sraDesEsc(message || '')}</div>`;
+}
+
+/* 预览结果（口径 / 边界 / 免责文案 + 汇总 + 空结果 + 表格） */
+function sraDesResultHtml(view) {
+  const readOnly = view && view.readOnlyText ? `<div class="pd-hint">${sraDesEsc(view.readOnlyText)}</div>` : '';
+  const boundary = view && view.boundaryText ? `<div class="pd-hint">${sraDesEsc(view.boundaryText)}</div>` : '';
+  const disclaimer = view && view.disclaimerText ? `<div class="pd-hint" style="color:#64748b">${sraDesEsc(view.disclaimerText)}</div>` : '';
+  const summary = view
+    ? `<div class="text-muted" style="margin:6px 0">共 ${view.total} 条 · 第 ${view.page} 页 · 每页 ${view.pageSize} 条 · 本页 ${(view.rows || []).length} 行证据</div>`
+    : '';
+  const empty = view && (!view.rows || view.rows.length === 0) ? sraDesEmptyHtml() : '';
+  return `${readOnly}${boundary}${disclaimer}${summary}${empty}${sraDesTableHtml(view)}`;
+}
+
+/* 字段选择器：仅由目录白名单渲染为复选框，无自由填写的字段名 */
+function sraDesFieldChooserHtml(fields, selectedKeys) {
+  const selected = new Set(selectedKeys || []);
+  return (fields || []).map(f => {
+    const checked = selected.has(f.key) ? 'checked' : '';
+    return `<label style="display:inline-flex;align-items:center;gap:4px;margin:3px 6px 3px 0;padding:2px 8px;border:1px solid #e2e8f0;border-radius:6px;background:#f8fafc;cursor:pointer">
+        <input type="checkbox" name="sra-des-field" value="${sraDesEsc(f.key)}" ${checked} onchange="sraDesSyncSelection()">
+        <span>${sraDesEsc(f.label || f.key)}</span></label>`;
+  }).join('');
+}
+/* ==================== 状态 / 请求 / 渲染 ==================== */
+
+/* 轻量请求封装：返回完整 ApiResponse 信封（保留 code），网络异常抛给调用方 */
+async function sraDesRequest(path, method = 'GET', body = null) {
+  const headers = { 'Content-Type': 'application/json' };
+  const token = typeof localStorage !== 'undefined' ? (localStorage.getItem('erp_token') || '') : '';
+  if (token) headers['Authorization'] = 'Bearer ' + token;
+  const opts = { method, headers };
+  if (body) opts.body = JSON.stringify(body);
+  const resp = await fetch(path, opts);
+  return await resp.json();
+}
+
+/* 业务码 → 错误态分类 */
+function sraDesKindOfCode(code) {
+  if (code === 2002) return 'forbidden';
+  if (code === 2000 || code === 2003) return 'unauthorized';
+  return 'invalid';
+}
+
+/* 目录加载失败 / 授权失败时的整页错误态（带关闭） */
+function sraDesErrorModalHtml(kind, message) {
+  return `<div class="modal modal-lg">
+    <h3>🎛 供应商对账与账龄 · 证据字段设计器</h3>
+    ${sraDesErrorHtml(kind, message)}
+    <div class="modal-footer"><button class="btn btn-neutral" onclick="closeModal()">关闭</button></div>
+  </div>`;
+}
+
+function sraDesLoadingHtml() {
+  return '<div class="pd-hint" style="text-align:center;color:#64748b">正在预览（只读查询）…</div>';
+}
+
+function sraDesRenderResult(html) {
+  const el = document.getElementById('sra-des-result');
+  if (el) el.innerHTML = html;
+}
+
+/* 同步勾选状态到 selectedKeys（复选框 onchange） */
+function sraDesSyncSelection() {
+  const boxes = document.querySelectorAll('input[name="sra-des-field"]');
+  SRA_DESIGNER.selectedKeys = Array.from(boxes).filter(b => b.checked).map(b => b.value);
+}
+
+function sraDesToggleAll(checked) {
+  const boxes = document.querySelectorAll('input[name="sra-des-field"]');
+  SRA_DESIGNER.selectedKeys = [];
+  boxes.forEach(b => { b.checked = checked; if (checked) SRA_DESIGNER.selectedKeys.push(b.value); });
+}
+
+/* 当前筛选摘要（只读展示工作台当前筛选，预览与导出复用这些值） */
+function sraDesFilterSummaryHtml() {
+  const rows = [];
+  const add = (label, v) => { if (v) rows.push(`<div><span class="text-muted">${label}</span>：<b>${sraDesEsc(v)}</b></div>`); };
+  add('供应商', sraVal('sra-supplier'));
+  add('币种', sraVal('sra-currency'));
+  add('发票状态', sraVal('sra-invoice-status'));
+  add('分配状态', sraVal('sra-allocation-state'));
+  add('开票日期', [sraVal('sra-invoice-date-from'), sraVal('sra-invoice-date-to')].filter(Boolean).join(' ~ '));
+  add('到期日', [sraVal('sra-due-date-from'), sraVal('sra-due-date-to')].filter(Boolean).join(' ~ '));
+  add('账龄基准日(as-of)', sraVal('sra-as-of'));
+  add('关键字', sraVal('sra-keyword'));
+  add('每页', sraVal('sra-pagesize') || '50');
+  return rows.length
+    ? `<div class="pd-hint" style="color:#64748b">${rows.join('')}</div>`
+    : '<div class="pd-hint" style="color:#64748b">未设置筛选（全部供应商 / 全部币种 / 已登记证据）</div>';
+}
+
+/* 渲染设计器（字段选择器 + 当前筛选摘要 + 预览 / 导出按钮 + 结果区） */
+function sraDesRender() {
+  document.getElementById('modal').innerHTML = `
+  <div class="modal modal-lg" style="max-width:1100px">
+    <h3>🎛 供应商对账与账龄 · 证据字段设计器（只读预览）</h3>
+    <div class="pd-hint">只读：仅按 ERP-140 白名单字段与工作台当前筛选预览当前账号可见的供应商发票证据；不新增 / 修改 / 删除任何记录，不执行任意 SQL。</div>
+
+    <div style="margin:10px 0">
+      <div style="font-weight:600;margin-bottom:6px">① 选择证据字段（仅 ERP-140 白名单目录，无自由字段名）</div>
+      <div style="margin-bottom:6px">
+        <button class="btn btn-neutral btn-sm" onclick="sraDesToggleAll(true)">全选</button>
+        <button class="btn btn-neutral btn-sm" onclick="sraDesToggleAll(false)">清空</button>
+      </div>
+      <div style="max-height:180px;overflow:auto;border:1px solid #e2e8f0;border-radius:8px;padding:8px">${sraDesFieldChooserHtml(SRA_DESIGNER.fields, SRA_DESIGNER.selectedKeys)}</div>
+    </div>
+
+    <div style="margin:10px 0">
+      <div style="font-weight:600;margin-bottom:6px">② 当前筛选（复用工作台，只读）</div>
+      ${sraDesFilterSummaryHtml()}
+    </div>
+
+    <div class="modal-footer">
+      <button class="btn btn-primary" onclick="sraDesPreview(1)">预览</button>
+      <button class="btn btn-neutral" onclick="sraDesExport()">📤 导出所选列 CSV</button>
+      <button class="btn btn-neutral" onclick="closeModal()">关闭</button>
+    </div>
+    <div id="sra-des-result"></div>
+  </div>`;
+}
+/* 读取当前字段 / 工作台当前筛选 / 分页状态（预览与分页复用，单一来源） */
+function sraDesBuildState(page) {
+  return {
+    catalogFields: SRA_DESIGNER.fields,
+    selectedKeys: SRA_DESIGNER.selectedKeys,
+    supplierId: sraVal('sra-supplier'),
+    currency: sraVal('sra-currency'),
+    invoiceStatus: sraVal('sra-invoice-status'),
+    allocationState: sraVal('sra-allocation-state'),
+    invoiceDateFrom: sraVal('sra-invoice-date-from'),
+    invoiceDateTo: sraVal('sra-invoice-date-to'),
+    dueDateFrom: sraVal('sra-due-date-from'),
+    dueDateTo: sraVal('sra-due-date-to'),
+    asOfDate: sraVal('sra-as-of'),
+    keyword: sraVal('sra-keyword'),
+    pageSize: sraVal('sra-pagesize') || '50',
+    page: page || 1,
+    maxPageSize: SRA_DESIGNER.catalog && SRA_DESIGNER.catalog.maxPageSize ? SRA_DESIGNER.catalog.maxPageSize : 200,
+  };
+}
+
+/* 预览：组装有界请求 → POST → 安全渲染列名与单元格；授权 / 无效 / 空 / 网络失败均可见 */
+async function sraDesPreview(page) {
+  const state = sraDesBuildState(page);
+  if (state.invoiceDateFrom && state.invoiceDateTo && state.invoiceDateFrom > state.invoiceDateTo) {
+    sraDesRenderResult(sraDesErrorHtml('invalid', '开票日期开始不能晚于结束日期'));
+    return;
+  }
+  if (state.dueDateFrom && state.dueDateTo && state.dueDateFrom > state.dueDateTo) {
+    sraDesRenderResult(sraDesErrorHtml('invalid', '到期日开始不能晚于结束日期'));
+    return;
+  }
+
+  const req = sraDesBuildRequest(state);
+  sraDesRenderResult(sraDesLoadingHtml());
+
+  try {
+    const resp = await sraDesRequest(SRA_DESIGNER_API, 'POST', req);
+    if (resp.code === 0) {
+      SRA_DESIGNER.view = resp.data;
+      sraDesRenderResult(sraDesResultHtml(resp.data));
+    } else if (resp.code === 2000 || resp.code === 2003) {
+      if (typeof logout === 'function') logout();
+      sraDesRenderResult(sraDesErrorHtml('unauthorized', resp.message));
+    } else {
+      sraDesRenderResult(sraDesErrorHtml(sraDesKindOfCode(resp.code), resp.message));
+    }
+  } catch (err) {
+    sraDesRenderResult(sraDesErrorHtml('network', (err && err.message) || '无法连接到服务器'));
+  }
+}
+
+/* 翻页（有界：最小第 1 页） */
+function sraDesPage(delta) {
+  const view = SRA_DESIGNER.view;
+  const page = (view ? view.page : 1) + delta;
+  if (page < 1) return;
+  sraDesPreview(page);
+}
+
+/* 导出当前预览页的所选列 CSV（只读）：未知值保留、公式首字符转义、无跨币种总额；空结果可见错误，不下载仅表头的 CSV */
+function sraDesExport() {
+  const view = SRA_DESIGNER.view;
+  if (!view || !view.rows || view.rows.length === 0) {
+    sraDesRenderResult(sraDesErrorHtml('empty', '当前预览页没有发票证据，无法导出'));
+    return;
+  }
+  const csv = sraDesCsv(view);
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+  a.href = url;
+  a.download = '供应商对账与账龄_所选列_' + dateStr + '.csv';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+  toast('所选列 CSV 已导出（仅当前预览页，未知值保留，无跨币种总额）', 'success');
+}
+
+/* 从工作台打开设计器（加载目录，渲染字段选择器与当前筛选；授权失败 fail closed，不返回任何字段） */
+async function openSupplierAgingDesigner() {
+  SRA_DESIGNER = { catalog: null, fields: [], selectedKeys: [], view: null };
+  const modal = document.getElementById('modal');
+  if (!modal) return;
+  modal.innerHTML = '<div class="modal modal-lg" style="max-width:1100px"><div class="pd-hint" style="text-align:center;color:#64748b">正在加载证据字段目录…</div></div>';
+  modal.style.display = 'flex';
+
+  try {
+    const resp = await sraDesRequest(SRA_DESIGNER_API);
+    if (resp.code === 2000 || resp.code === 2003) {
+      if (typeof logout === 'function') logout();
+      modal.innerHTML = sraDesErrorModalHtml('unauthorized', resp.message);
+      return;
+    }
+    if (resp.code !== 0) {
+      modal.innerHTML = sraDesErrorModalHtml(sraDesKindOfCode(resp.code), resp.message);
+      return;
+    }
+    SRA_DESIGNER.catalog = resp.data;
+  } catch (err) {
+    modal.innerHTML = sraDesErrorModalHtml('network', (err && err.message) || '无法连接到服务器');
+    return;
+  }
+
+  SRA_DESIGNER.fields = (SRA_DESIGNER.catalog && SRA_DESIGNER.catalog.fields) || [];
+  SRA_DESIGNER.selectedKeys = SRA_DESIGNER.fields.map(f => f.key);
+  sraDesRender();
+}
+
+/* Node 单测导出（浏览器中 module 为 undefined，自动跳过） */
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = {
+    SRA_DESIGNER_API,
+    sraDesEsc,
+    sraDesSelectFields,
+    sraDesBuildRequest,
+    sraDesCellText,
+    sraDesRenderCell,
+    sraDesCsvCell,
+    sraDesCsv,
+    sraDesTableHtml,
+    sraDesEmptyHtml,
+    sraDesErrorHtml,
+    sraDesResultHtml,
+    sraDesFieldChooserHtml,
+    sraDesKindOfCode,
+    sraDesErrorModalHtml,
+    sraDesPreview,
+    sraDesPage,
+    sraDesExport,
+  };
 }

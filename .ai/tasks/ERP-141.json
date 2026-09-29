@@ -2,7 +2,7 @@
   "id": "ERP-141",
   "title": "Add a visual supplier aging evidence field designer",
   "description": "On the existing supplier aging page, purchasing user selects finite fields and filters, previews the current authorized page and exports selected-column CSV. Keep static view. Development only; reuse existing SupplierReconciliationAging.ForQueryAsync evidence, current-user purchase-order menu authorization and HTTP audit. Preserve explicit due-date unknowns, separate currencies, draft/void history and invalid/unknown allocation evidence. Fail closed on missing permission, invalid requests or source failures. No payment approval, ledger inference, arbitrary SQL, migration, production SQL, real database execution, business writes, secrets/.env or deployment. Verify focused tests and safe Release build/test; no browser acceptance.",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "medium",
   "acceptance_criteria": [
     "Existing page exposes finite field chooser and passes only catalog keys and current filters to ERP-140 bounded preview.",
@@ -45,5 +45,5 @@
     "status": "not_required",
     "reason": "Development-only bounded read-only feature"
   },
-  "attempts": 0
+  "attempts": 1
 }
