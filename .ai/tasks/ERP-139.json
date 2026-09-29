@@ -1,0 +1,55 @@
+{
+  "id": "ERP-139",
+  "title": "Download selected authorized inventory-aging page as PDF",
+  "description": "An inventory user downloads the selected bounded stock-aging page as a paginated Chinese PDF. Reuse ERP-135 stock-query authorization and preview, existing PDFsharp and shared SimHei resolver. Show fixed age buckets, base-unit quantities, CNY cost currency and unknown age/cost evidence explicitly; split wide selected-column sets across pages without clipping. Missing font fails explicitly; HTTP audit records read-only download. Development only: no migration, production SQL, real database execution, arbitrary model SQL, writes, secret/.env change or deployment. Verify PDF and safe build/test.",
+  "status": "pending",
+  "risk_level": "medium",
+  "acceptance_criteria": [
+    "PDF endpoint reuses authorized bounded stock-aging preview, rechecks stock-query permission and all filters before any bytes are returned.",
+    "PDFsharp renders selected fields, fixed age buckets, Chinese labels, CNY and explicit unknown values across row/column pages without clipping; shared SimHei resolver fails if font unavailable.",
+    "Designer offers PDF download and visible empty/authorization/font failures; tests inspect PDF signature, selected fields, page bounds, unknowns, font failure and no writes; document font prerequisite."
+  ],
+  "criterion_path_map": {
+    "PDF endpoint reuses authorized bounded stock-aging preview, rechecks stock-query permission and all filters before any bytes are returned.": [
+      "src/ERP.Api/Controllers/DynamicInventoryAgingReportController.cs",
+      "src/ERP.Infrastructure/Export/DynamicInventoryAgingPdfExporter.cs"
+    ],
+    "PDFsharp renders selected fields, fixed age buckets, Chinese labels, CNY and explicit unknown values across row/column pages without clipping; shared SimHei resolver fails if font unavailable.": [
+      "src/ERP.Infrastructure/Export/DynamicInventoryAgingPdfExporter.cs",
+      "src/ERP.Infrastructure/Export/SimHeiPdfFontResolver.cs"
+    ],
+    "Designer offers PDF download and visible empty/authorization/font failures; tests inspect PDF signature, selected fields, page bounds, unknowns, font failure and no writes; document font prerequisite.": [
+      "src/ERP.Api/wwwroot/js/inventory-aging-report.js",
+      "src/ERP.UnitTests/DynamicInventoryAgingPdfTests.cs",
+      "docs/dynamic-inventory-aging-report.md"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/DynamicInventoryAgingReportController.cs",
+    "src/ERP.Infrastructure/Export/DynamicInventoryAgingPdfExporter.cs",
+    "src/ERP.Infrastructure/Export/SimHeiPdfFontResolver.cs",
+    "src/ERP.Api/wwwroot/js/inventory-aging-report.js",
+    "src/ERP.UnitTests/DynamicInventoryAgingPdfTests.cs",
+    "docs/dynamic-inventory-aging-report.md",
+    ".ai/**"
+  ],
+  "validation_profile": "safe",
+  "depends_on": [
+    "ERP-135",
+    "ERP-136",
+    "ERP-137"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "completion_mode": "build",
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only bounded read-only feature"
+  }
+}

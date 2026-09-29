@@ -1,0 +1,55 @@
+{
+  "id": "ERP-137",
+  "title": "Show authorized inventory-aging evidence distribution by warehouse and status",
+  "description": "An inventory user groups the currently authorized dynamic stock-aging page by warehouse, aging-evidence status or cost-evidence status and sees a visual count distribution. Reuse ERP-135 stock-query permission, bounded preview and selected filters. Count rows only; do not sum different product/base-unit quantities, turn unknown cost into zero, infer age buckets, or recompute valuation. Invalid group keys fail closed and HTTP audit records read-only requests. Development only: no migration, production SQL, real database execution, arbitrary model SQL, writes, secret/.env change or deployment. Verify unit and Node logic tests plus safe build/test.",
+  "status": "pending",
+  "risk_level": "medium",
+  "acceptance_criteria": [
+    "API accepts only none/warehouse/ageEvidence/costEvidence grouping and returns deterministic row counts from the same authorized preview page without summing incompatible units or unknown amounts.",
+    "Designer renders labeled page-only count distribution for warehouse and known/partial/unknown evidence, including empty pages and pagination changes.",
+    "Unit and Node tests cover group keys, warehouse splits, missing evidence, empty page, permission and safe chart text; document evidence and page-only count semantics."
+  ],
+  "criterion_path_map": {
+    "API accepts only none/warehouse/ageEvidence/costEvidence grouping and returns deterministic row counts from the same authorized preview page without summing incompatible units or unknown amounts.": [
+      "src/ERP.Application/DTOs/DynamicInventoryAgingReportDtos.cs",
+      "src/ERP.Application/Services/DynamicInventoryAgingReportRules.cs",
+      "src/ERP.Api/Controllers/DynamicInventoryAgingReportController.cs"
+    ],
+    "Designer renders labeled page-only count distribution for warehouse and known/partial/unknown evidence, including empty pages and pagination changes.": [
+      "src/ERP.Api/wwwroot/js/inventory-aging-report.js"
+    ],
+    "Unit and Node tests cover group keys, warehouse splits, missing evidence, empty page, permission and safe chart text; document evidence and page-only count semantics.": [
+      "src/ERP.UnitTests/DynamicInventoryAgingGroupingTests.cs",
+      "tests/automation/dynamic_inventory_aging_grouping_ui.test.js",
+      "docs/dynamic-inventory-aging-report.md"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Application/DTOs/DynamicInventoryAgingReportDtos.cs",
+    "src/ERP.Application/Services/DynamicInventoryAgingReportRules.cs",
+    "src/ERP.Api/Controllers/DynamicInventoryAgingReportController.cs",
+    "src/ERP.Api/wwwroot/js/inventory-aging-report.js",
+    "src/ERP.UnitTests/DynamicInventoryAgingGroupingTests.cs",
+    "tests/automation/dynamic_inventory_aging_grouping_ui.test.js",
+    "docs/dynamic-inventory-aging-report.md",
+    ".ai/**"
+  ],
+  "validation_profile": "safe",
+  "depends_on": [
+    "ERP-135",
+    "ERP-136"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "completion_mode": "build",
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only bounded read-only feature"
+  }
+}

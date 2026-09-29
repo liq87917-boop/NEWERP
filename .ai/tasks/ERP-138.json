@@ -1,0 +1,52 @@
+{
+  "id": "ERP-138",
+  "title": "Export selected authorized inventory-aging page to Excel",
+  "description": "An inventory user downloads exactly the selected dynamic stock-aging page as xlsx in chosen field order. Reuse ERP-135 authorized bounded preview, existing ExcelExporter and current-user stock-query menu on every download. Keep fixed age buckets, base-unit quantities and CNY cost currency; unknown cost amounts remain explicitly unknown rather than zero and formula-leading text is literal. HTTP audit records the read-only download. Development only: no migration, production SQL, real database execution, arbitrary model SQL, writes, secret/.env change or deployment. Verify workbook tests and safe build/test.",
+  "status": "pending",
+  "risk_level": "medium",
+  "acceptance_criteria": [
+    "Excel endpoint reuses authorized bounded stock-aging preview and selected fields, rechecks stock-query permission and rejects invalid filters/columns/page size before bytes.",
+    "Workbook uses existing ExcelExporter for only the current page in selected order; unknown cost amounts remain explicitly unknown, base units and CNY are labeled, and formula-leading text is escaped.",
+    "Designer offers xlsx download and visible empty/authorization errors; tests inspect field order, row cap, unknown amounts, bucket values, formula safety and permission; document limits."
+  ],
+  "criterion_path_map": {
+    "Excel endpoint reuses authorized bounded stock-aging preview and selected fields, rechecks stock-query permission and rejects invalid filters/columns/page size before bytes.": [
+      "src/ERP.Api/Controllers/DynamicInventoryAgingReportController.cs"
+    ],
+    "Workbook uses existing ExcelExporter for only the current page in selected order; unknown cost amounts remain explicitly unknown, base units and CNY are labeled, and formula-leading text is escaped.": [
+      "src/ERP.Api/Controllers/DynamicInventoryAgingReportController.cs",
+      "src/ERP.Application/Services/DynamicInventoryAgingReportRules.cs"
+    ],
+    "Designer offers xlsx download and visible empty/authorization errors; tests inspect field order, row cap, unknown amounts, bucket values, formula safety and permission; document limits.": [
+      "src/ERP.Api/wwwroot/js/inventory-aging-report.js",
+      "src/ERP.UnitTests/DynamicInventoryAgingExcelTests.cs",
+      "docs/dynamic-inventory-aging-report.md"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/DynamicInventoryAgingReportController.cs",
+    "src/ERP.Application/Services/DynamicInventoryAgingReportRules.cs",
+    "src/ERP.Api/wwwroot/js/inventory-aging-report.js",
+    "src/ERP.UnitTests/DynamicInventoryAgingExcelTests.cs",
+    "docs/dynamic-inventory-aging-report.md",
+    ".ai/**"
+  ],
+  "validation_profile": "safe",
+  "depends_on": [
+    "ERP-135",
+    "ERP-136"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "completion_mode": "build",
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only bounded read-only feature"
+  }
+}

@@ -1,0 +1,48 @@
+{
+  "id": "ERP-136",
+  "title": "Add a visual inventory-aging report field designer",
+  "description": "On the existing stock-aging report page, an inventory user chooses finite ERP-135 fields, warehouse/product/as-of-date filters, and previews the current authorized page. Keep the existing static report available; use only the catalog, never free-form SQL. Show unknown age, unknown cost and CNY cost currency explicitly, preserve fixed bucket order, and offer selected-column current-page CSV with formula-leading text escaped. Missing permission and network/validation failures fail visibly; existing HTTP audit records read-only requests. Development only: no migration, production SQL, real database execution, writes, secret/.env change or deployment. Verify Node UI tests and safe build/test; no real-browser acceptance.",
+  "status": "pending",
+  "risk_level": "medium",
+  "acceptance_criteria": [
+    "Stock-aging page opens finite field chooser and warehouse/product/as-of-date filters from the existing controls; preview sends only allowlisted fields and bounded page request to ERP-135.",
+    "Preview renders selected columns, fixed age buckets, unknown-age/unknown-cost and CNY evidence safely, with loading, empty, authorization and network states.",
+    "Selected-column current-page CSV preserves unknown values and escapes spreadsheet formula-leading text; Node tests cover selection, page cap, rendering, CSV and failures; document workflow."
+  ],
+  "criterion_path_map": {
+    "Stock-aging page opens finite field chooser and warehouse/product/as-of-date filters from the existing controls; preview sends only allowlisted fields and bounded page request to ERP-135.": [
+      "src/ERP.Api/wwwroot/js/inventory-aging-report.js"
+    ],
+    "Preview renders selected columns, fixed age buckets, unknown-age/unknown-cost and CNY evidence safely, with loading, empty, authorization and network states.": [
+      "src/ERP.Api/wwwroot/js/inventory-aging-report.js"
+    ],
+    "Selected-column current-page CSV preserves unknown values and escapes spreadsheet formula-leading text; Node tests cover selection, page cap, rendering, CSV and failures; document workflow.": [
+      "src/ERP.Api/wwwroot/js/inventory-aging-report.js",
+      "tests/automation/dynamic_inventory_aging_report_ui.test.js",
+      "docs/dynamic-inventory-aging-report.md"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Api/wwwroot/js/inventory-aging-report.js",
+    "tests/automation/dynamic_inventory_aging_report_ui.test.js",
+    "docs/dynamic-inventory-aging-report.md",
+    ".ai/**"
+  ],
+  "validation_profile": "safe",
+  "depends_on": [
+    "ERP-135"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "completion_mode": "build",
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only bounded read-only feature"
+  }
+}
