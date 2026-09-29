@@ -93,6 +93,20 @@ public static class DynamicShipmentFinanceReportRules
     public static readonly string[] GroupFinanceLinkStatuses =
         { FinanceStatusLinked, FinanceStatusPartial, FinanceStatusUnlinked, FinanceStatusUnknown };
 
+    // ==================== 0.3 金额汇总模式（ERP-162） ====================
+
+    /// <summary>不汇总（默认）</summary>
+    public const string SummaryNone = "none";
+
+    /// <summary>按客户 + 币种汇总（客户与币种为强制分组边界，原币绝不跨币种合并或换算）</summary>
+    public const string SummaryCustomerCurrency = "customerCurrency";
+
+    /// <summary>按客户 + 币种 + 出货状态汇总</summary>
+    public const string SummaryCustomerCurrencyShipment = "customerCurrencyShipment";
+
+    /// <summary>按客户 + 币种 + 收款链接状态汇总</summary>
+    public const string SummaryCustomerCurrencyFinance = "customerCurrencyFinance";
+
     // ==================== 1. 文案 ====================
 
     /// <summary>只读声明（接口与文档统一声明）</summary>
@@ -396,6 +410,111 @@ public static class DynamicShipmentFinanceReportRules
         FinanceStatusUnknown => "未知（超出派生上限）",
         _ => "未知收款链接状态",
     };
+
+    // ==================== 5.2 当前页金额汇总（ERP-162） ====================
+
+    /// <summary>
+    /// 规范化金额汇总模式（fail closed）：空 / 留空 = 不汇总（none）；仅接受 none / customerCurrency / customerCurrencyShipment /
+    /// customerCurrencyFinance（大小写不敏感）；未知取值显式拒绝（在读取任何源数据之前完成）。
+    /// </summary>
+    public static string NormalizeSummaryMode(string? summaryMode)
+    {
+        if (string.IsNullOrWhiteSpace(summaryMode))
+            return SummaryNone;
+
+        var normalized = summaryMode.Trim();
+        if (string.Equals(normalized, SummaryNone, StringComparison.OrdinalIgnoreCase)) return SummaryNone;
+        if (string.Equals(normalized, SummaryCustomerCurrency, StringComparison.OrdinalIgnoreCase)) return SummaryCustomerCurrency;
+        if (string.Equals(normalized, SummaryCustomerCurrencyShipment, StringComparison.OrdinalIgnoreCase)) return SummaryCustomerCurrencyShipment;
+        if (string.Equals(normalized, SummaryCustomerCurrencyFinance, StringComparison.OrdinalIgnoreCase)) return SummaryCustomerCurrencyFinance;
+
+        throw BusinessException.InvalidParameter(
+            $"无效的金额汇总模式: {summaryMode}（可选：none / customerCurrency / customerCurrencyShipment / customerCurrencyFinance）");
+    }
+
+    /// <summary>
+    /// 当前授权预览页的金额汇总（ERP-162）：只汇总「当前授权预览页」的销售订单出货 / 财务进度证据行（非全量合计），
+    /// 客户与币种为强制分组边界（可选再按出货状态 / 收款链接状态拆分）；订单金额保持原币证据（直接求和，绝不跨币种合并或换算）；
+    /// linked / uncovered / submitted 合计只要任一行金额未知（null）即整体按「未知」（null）返回，绝不轧为 0 或给部分合计，
+    /// 并显式给出已知 / 未知行数。空页 / none 返回空列表。
+    /// </summary>
+    public static List<DynamicShipmentFinanceReportSummaryDto> BuildAmountSummaries(
+        IEnumerable<IReadOnlyDictionary<string, object?>> rows, string summaryMode)
+    {
+        var list = (rows ?? Array.Empty<IReadOnlyDictionary<string, object?>>()).ToList();
+        var mode = NormalizeSummaryMode(summaryMode);
+        if (mode == SummaryNone)
+            return new List<DynamicShipmentFinanceReportSummaryDto>();
+
+        var withShipment = mode == SummaryCustomerCurrencyShipment;
+        var withFinance = mode == SummaryCustomerCurrencyFinance;
+
+        var summaries = new List<DynamicShipmentFinanceReportSummaryDto>();
+        foreach (var group in list
+            .GroupBy(r => new
+            {
+                CustomerId = ReadCustomerId(r),
+                Currency = ReadText(r, "currency"),
+                Shipment = withShipment ? ReadText(r, "shipmentStatus") : string.Empty,
+                Finance = withFinance ? ReadText(r, "financeLinkStatus") : string.Empty,
+            })
+            .OrderBy(g => g.Key.CustomerId)
+            .ThenBy(g => g.Key.Currency, StringComparer.Ordinal)
+            .ThenBy(g => g.Key.Shipment, StringComparer.Ordinal)
+            .ThenBy(g => g.Key.Finance, StringComparer.Ordinal))
+        {
+            var groupRows = group.ToList();
+            var first = groupRows[0];
+
+            var knownLinked = CountKnownRows(groupRows, "linkedAmount");
+            var knownUncovered = CountKnownRows(groupRows, "uncoveredAmount");
+            var knownSubmitted = CountKnownRows(groupRows, "submittedAmount");
+
+            summaries.Add(new DynamicShipmentFinanceReportSummaryDto(
+                group.Key.CustomerId,
+                ReadText(first, "customerName"),
+                group.Key.Currency,
+                withShipment ? group.Key.Shipment : null,
+                withFinance ? group.Key.Finance : null,
+                groupRows.Count,
+                groupRows.Sum(r => ReadDecimal(r, "orderAmount")),
+                knownLinked,
+                groupRows.Count - knownLinked,
+                SumKnownNullable(groupRows, "linkedAmount"),
+                knownUncovered,
+                groupRows.Count - knownUncovered,
+                SumKnownNullable(groupRows, "uncoveredAmount"),
+                knownSubmitted,
+                groupRows.Count - knownSubmitted,
+                SumKnownNullable(groupRows, "submittedAmount")));
+        }
+
+        return summaries;
+    }
+
+    private static decimal ReadDecimal(IReadOnlyDictionary<string, object?> row, string key)
+        => row.TryGetValue(key, out var v) && v is decimal d ? d : 0m;
+
+    private static decimal? ReadDecimalNullable(IReadOnlyDictionary<string, object?> row, string key)
+        => row.TryGetValue(key, out var v) && v is decimal d ? d : null;
+
+    private static int CountKnownRows(IReadOnlyList<IReadOnlyDictionary<string, object?>> rows, string key)
+        => rows.Count(r => ReadDecimalNullable(r, key).HasValue);
+
+    /// <summary>可未知金额求和：只要有一行金额未知（null），整体按「未知」（null）返回，绝不用 0 顶替或给部分合计</summary>
+    private static decimal? SumKnownNullable(
+        IReadOnlyList<IReadOnlyDictionary<string, object?>> rows, string key)
+    {
+        decimal sum = 0m;
+        foreach (var row in rows)
+        {
+            var value = ReadDecimalNullable(row, key);
+            if (value is null) return null;
+            sum += value.Value;
+        }
+
+        return sum;
+    }
 
     // ==================== 6. Excel 导出（ERP-158） ====================
 

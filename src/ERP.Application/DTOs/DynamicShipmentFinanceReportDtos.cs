@@ -46,6 +46,9 @@ public sealed class DynamicShipmentFinanceReportRequest
     /// <summary>分组键（仅 none / customer / currency / shipmentStatus / financeLinkStatus；无效取值由服务端 fail closed 拒绝，默认 none）</summary>
     public string? GroupBy { get; set; }
 
+    /// <summary>金额汇总模式（仅 none / customerCurrency / customerCurrencyShipment / customerCurrencyFinance；无效取值由服务端 fail closed 拒绝，默认 none）</summary>
+    public string? SummaryMode { get; set; }
+
     /// <summary>页码（从 1 开始）</summary>
     public int Page { get; set; } = 1;
 
@@ -71,6 +74,10 @@ public sealed record DynamicShipmentFinanceReportCatalogDto(
 /// （<c>linkedAmount</c> / <c>uncoveredAmount</c> / <c>submittedAmount</c> 为 null）与未知数量
 /// （<c>orderedQuantity</c> / <c>shippedQuantity</c> / <c>pendingShipmentQuantity</c> / <c>outstandingQuantity</c> 为 null）
 /// 照实保留，绝不推算或修复。</para>
+/// <para>ERP-162 新增 <see cref="SummaryMode"/> / <see cref="Summaries"/>：仅当请求金额汇总（customerCurrency /
+/// customerCurrencyShipment / customerCurrencyFinance）时，<see cref="Summaries"/> 才给出「当前授权预览页」按客户 + 原币
+/// （可选出货状态 / 收款链接状态）的已知出货与财务金额汇总；订单金额保持原币，linked / uncovered / submitted 任一组成金额未知即合计为 null；
+/// 默认 none 时为空。</para>
 /// </summary>
 public sealed record DynamicShipmentFinanceReportPageDto(
     List<DynamicShipmentFinanceReportFieldDto> Columns,
@@ -83,7 +90,9 @@ public sealed record DynamicShipmentFinanceReportPageDto(
     string BoundaryText,
     string DisclaimerText,
     string GroupBy = "none",
-    List<DynamicShipmentFinanceReportGroupDto>? Groups = null);
+    List<DynamicShipmentFinanceReportGroupDto>? Groups = null,
+    string SummaryMode = "none",
+    List<DynamicShipmentFinanceReportSummaryDto>? Summaries = null);
 
 /// <summary>
 /// 销售订单出货 / 财务进度报表当前授权预览页的分组计数（ERP-160，只读）：当前页内按分组键聚合的销售订单张数分布。
@@ -94,3 +103,27 @@ public sealed record DynamicShipmentFinanceReportGroupDto(
     string Key,
     string Label,
     int Count);
+
+/// <summary>
+/// 销售订单出货 / 财务进度报表当前授权预览页的已知出货与财务金额汇总（ERP-162，只读）：客户与币种是强制分组边界，
+/// 订单金额保持原币证据（绝不跨币种合并或换算）；linked / uncovered / submitted 合计只要任一行金额未知（null）即整体为 null（未知，不是 0），
+/// 并显式给出已知 / 未知行数。shipmentStatus / financeLinkStatus 仅在对应汇总模式引入（customerCurrencyShipment / customerCurrencyFinance），
+/// 其余模式为 null。<c>uncoveredAmount</c> 只作「未覆盖金额」，绝不是应收余额或收款授权。
+/// </summary>
+public sealed record DynamicShipmentFinanceReportSummaryDto(
+    long CustomerId,
+    string CustomerName,
+    string Currency,
+    string? ShipmentStatus,
+    string? FinanceLinkStatus,
+    int OrderCount,
+    decimal OrderAmount,
+    int KnownLinkedAmountRows,
+    int UnknownLinkedAmountRows,
+    decimal? LinkedAmount,
+    int KnownUncoveredAmountRows,
+    int UnknownUncoveredAmountRows,
+    decimal? UncoveredAmount,
+    int KnownSubmittedAmountRows,
+    int UnknownSubmittedAmountRows,
+    decimal? SubmittedAmount);

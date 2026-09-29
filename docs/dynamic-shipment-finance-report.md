@@ -14,7 +14,7 @@
 请求体（`DynamicShipmentFinanceReportRequest`）：`fields`（选定字段键，仅限白名单，留空 = 全部白名单字段）、
 `customerId`、`currency`、`orderDateFrom` / `orderDateTo`、`shipmentStatus`（none / shipped）、
 `financeLinkStatus`（linked / partial / unlinked）、`groupBy`（none / customer / currency / shipmentStatus / financeLinkStatus）、
-`page`、`pageSize`。
+`summaryMode`（none / customerCurrency / customerCurrencyShipment / customerCurrencyFinance）、`page`、`pageSize`。
 
 ## 授权（fail closed）
 
@@ -67,6 +67,27 @@
 分组只统计**当前授权预览页**的销售订单张数（计数与分页在 ERP-032 源查询内部应用 `SalespersonDataScopeService` 客户范围之后、选定字段投影之前完成），
 绝不跨页合并、绝不求和任何金额或数量、绝不跨币种合并或换算、绝不推断收款状态；`unknown` 出货 / 收款链接类别保持可见（不当作已出货 / 已收款 / 已收齐），
 金额与数量未知证据仍照实保留为 `null`，`uncoveredAmount` 只作「未覆盖金额」，绝不当作应收余额或收款授权。空页时动态分组返回空列表、固定分类返回全 0。
+
+## 金额汇总（ERP-162）
+
+预览返回结果新增 `summaryMode`（实际生效的金额汇总模式，默认 `none`）与 `summaries`（当前授权预览页的已知出货与财务金额汇总）。
+汇总模式仅在 `none` / `customerCurrency` / `customerCurrencyShipment` / `customerCurrencyFinance` 之间选择（大小写不敏感，留空 = `none`），
+未知取值在调用 `SalesOrderShipmentFinanceReport.ForQueryAsync`（源读取）**之前**显式拒绝（`InvalidParameter`，fail closed）。
+
+- **客户 + 币种是强制分组边界**：无论哪种模式，都先按 `customerId` + `currency` 分组；币种为原币，不同币种分别成行、绝不合并或换算；
+- `customerCurrency`：只按客户 + 币种分组；`shipmentStatus` / `financeLinkStatus` 为 null；
+- `customerCurrencyShipment`：再按出货状态（`none` / `partial` / `complete` / `over_shipped` / `unknown`）拆分；
+- `customerCurrencyFinance`：再按收款链接状态（`linked` / `partial` / `unlinked` / `unknown`）拆分。
+
+每条汇总（`DynamicShipmentFinanceReportSummaryDto`）给出：`customerId` / `customerName` / `currency`、可选的 `shipmentStatus` / `financeLinkStatus`、
+`orderCount`（订单张数）与 `orderAmount`（订单金额，保持原币证据，直接求和、绝不换算）；以及三组金额证据：
+
+- `linkedAmount` / `uncoveredAmount` / `submittedAmount`：合计**只要任一行金额未知（null，即未链接 / 命中派生上限）即整体为 null**（未知，不是 0），绝不轧为 0 或给部分合计；
+- 每组金额证据同时给出 `known*Rows` / `unknown*Rows`（已知 / 未知行数），显式区分「有依据的合计」与「存在未知行」。
+
+汇总只统计**当前授权预览页**（与 ERP-032 源查询同一套 `SalespersonDataScopeService` 客户范围 + 稳定分页之后、选定字段投影之前的证据行），
+非全量合计、绝不跨页合并；空页 / `none` 返回空列表。`uncoveredAmount` 只作「未覆盖金额」（订单金额 − 权威计入金额），
+**绝不是应收余额，也不是收款授权或催收依据**——该边界在 `DynamicShipmentFinanceReportSummaryDto` 结构中强制（无 receivable / ledger / balance / authorization 等字段）。
 
 ## 前端分组计数视图（ERP-161）
 
@@ -155,13 +176,14 @@ PDF 中文一律使用 Windows 黑体 **SimHei**（`simhei.ttf`），由共享�
 
 ## 文件地图
 
-- `src/ERP.Application/DTOs/DynamicShipmentFinanceReportDtos.cs`：目录 / 请求 / 结果 DTO；
-- `src/ERP.Application/Services/DynamicShipmentFinanceReportRules.cs`：字段白名单、校验、行投影、目录（纯规则）；
+- `src/ERP.Application/DTOs/DynamicShipmentFinanceReportDtos.cs`：目录 / 请求 / 结果 DTO（含 ERP-162 金额汇总 DTO）；
+- `src/ERP.Application/Services/DynamicShipmentFinanceReportRules.cs`：字段白名单、校验、行投影、目录、分组计数与金额汇总（纯规则）；
 - `src/ERP.Api/Controllers/DynamicShipmentFinanceReportController.cs`：授权 + 业务员数据范围 + 复用 ERP-032 只读派生 + 选定列投影；
 - `src/ERP.Infrastructure/Export/DynamicShipmentFinancePdfExporter.cs`：ERP-159 PDF 导出（分页中文 PDF、列页 / 行页拆分、原币与未知证据、SimHei 缺失显式失败）；
 - `src/ERP.Api/Controllers/SalesOrderShipmentFinanceReport.cs`：ERP-032 权威派生，新增可选 `SalespersonDataScope` 参数（在源查询内部先于计数与分页过滤客户范围）；
 - `src/ERP.UnitTests/DynamicShipmentFinanceReportTests.cs`：预览单元测试（内存库，不连 SQL Server、不启动 API）；
 - `src/ERP.UnitTests/DynamicShipmentFinanceGroupingTests.cs`：ERP-160 分组计数单元测试（分组键、客户 / 币种 / 出货状态 / 收款链接状态、unknown 保留、空页 / 分页、授权拒绝、不写库）；
+- `src/ERP.UnitTests/DynamicShipmentFinanceAmountSummaryTests.cs`：ERP-162 金额汇总单元测试（汇总模式、多客户多币种、未知链接 / 未知金额、出货状态 / 收款链接状态拆分、空页 / 分页、授权拒绝、受限制业务员范围、不写库与应收边界）；
 - `src/ERP.UnitTests/DynamicShipmentFinanceExcelTests.cs`：ERP-158 Excel 导出单元测试（列顺序、页上限、数据范围、未知值、币种、公式安全、不写库、下载限制）；
 - `src/ERP.UnitTests/DynamicShipmentFinancePdfTests.cs`：ERP-159 PDF 导出单元测试（签名、页面边界、字段顺序、原币与未知证据、SimHei 嵌入与缺失失败、授权 / 校验拒绝、不写库）；
 - `src/ERP.UnitTests/SalesOrderShipmentFinanceReportTests.cs`：ERP-032 报表单元测试（含 ERP-156 复用的源查询范围过滤）。
