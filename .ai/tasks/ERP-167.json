@@ -55,18 +55,18 @@
     "execution_copy": "D:\\VSCodeProject\\NEWERP.executor",
     "changed_paths": [
       ".ai/PROJECT_STATE.json",
+      ".ai/results/ERP-167.json",
       ".ai/tasks/ERP-167.json",
       "docs/dynamic-receipt-reconciliation-report.md",
       "src/ERP.Api/Controllers/DynamicReceiptReconciliationReportController.cs",
       "src/ERP.Api/wwwroot/js/sales-order-receipt-reconciliation.js",
       "src/ERP.Application/Services/DynamicReceiptReconciliationReportRules.cs",
-      "src/ERP.UnitTests/DynamicReceiptReconciliationExcelTests.cs",
-      "src/ERP.UnitTests/DynamicSupplierAgingReportTests.cs"
+      "src/ERP.UnitTests/DynamicReceiptReconciliationExcelTests.cs"
     ],
     "diff": ".ai\\logs\\ERP-167-preserved-work.diff",
-    "preserved_at": "2026-09-29T16:22:51.058868Z"
+    "preserved_at": "2026-09-29T16:37:58.253463Z"
   },
-  "failure_kind": "path_guard_failure",
+  "failure_kind": "validation_failure",
   "failed_transport_version": 2,
   "recovery_history": [
     {
@@ -106,39 +106,77 @@
         "diff": ".ai\\logs\\ERP-167-preserved-work.diff",
         "execution_copy": "D:\\VSCodeProject\\NEWERP.executor"
       }
+    },
+    {
+      "remediation_task": "ERP-167-RECOVERY-2",
+      "cycle": 2,
+      "at": "2026-09-29T16:37:58.394684Z",
+      "evidence": {
+        "failure_kind": "validation_failure",
+        "summary": "Engineering validation failed with code 1. Full log: .ai\\logs\\ERP-167-validation-3.log\nStructured error summary:\n[validate] dotnet restore NEWERP.sln\n  正在确定要还原的项目…\n  所有项目均是最新的，无法还原。\n[validate] dotnet build NEWERP.sln -c Release --no-restore --no-incremental /p:TreatWarningsAsErrors=true /p:RunAnalyzersDuringBuild=true\n  ERP.Domain -> D:\\VSCodeProject\\NEWERP.executor\\src\\ERP.Domain\\bin\\Release\\net8.0\\ERP.Domain.dll\n  ERP.Application -> D:\\VSCodeProject\\NEWERP.executor\\src\\ERP.Application\\bin\\Release\\net8.0\\ERP.Application.dll\n  ERP.Infrastructure -> D:\\VSCodeProject\\NEWERP.executor\\src\\ERP.Infrastructure\\bin\\Release\\net8.0\\ERP.Infrastructure.dll\n  ERP.IntegrationTests -> D:\\VSCodeProject\\NEWERP.executor\\src\\ERP.IntegrationTests\\bin\\Release\\net8.0\\ERP.IntegrationTests.dll\n  ERP.Api -> D:\\VSCodeProject\\NEWERP.executor\\src\\ERP.Api\\bin\\Release\\net8.0\\ERP.Api.dll\n  ERP.UnitTests -> D:\\VSCodeProject\\NEWERP.executor\\src\\ERP.UnitTests\\bin\\Release\\net8.0\\ERP.UnitTests.dll\n已成功生成。\n    0 个警告\n    0 个错误\n已用时间 00:00:03.64\n有可用的工作负载更新。有关详细信息，请运行 `dotnet workload list`。\n[validate] dotnet test src/ERP.UnitTests/ERP.UnitTests.csproj -c Release --no-build --verbosity minimal\nD:\\VSCodeProject\\NEWERP.executor\\src\\ERP.UnitTests\\bin\\Release\\net8.0\\ERP.UnitTests.dll (.NETCoreApp,Version=v8.0)的测试运行\nVSTest 版本 17.11.0 (x64)\n正在启动测试执行，请稍候...\n总共 1 个测试文件与指定模式相匹配。\n[xUnit.net 00:00:01.79]     ERP.UnitTests.DynamicSupplierAgingReportTests.Preview_retains_separate_currencies_and_unknown_due_date_evidence [FAIL]\n  失败 ERP.UnitTests.DynamicSupplierAgingReportTests.Preview_retains_separate_currencies_and_unknown_due_date_evidence [4 ms]\n  错误消息:\n   Assert.Equal() Failure: Values differ\nExpected: not_due\nActual:   overdue_1_30\n  堆栈跟踪:\n     at ERP.UnitTests.DynamicSupplierAgingReportTests.Preview_retains_separate_currencies_and_unknown_due_date_evidence() in D:\\VSCodeProject\\NEWERP.executor\\src\\ERP.UnitTests\\DynamicSupplierAgingReportTests.cs:line 308\n--- End of stack trace from previous location ---\n失败!  - 失败:     1，通过:  2546，已跳过:     0，总计:  2547，持续时间: 38 s - ERP.UnitTests.dll (net8.0)\n有可用的工作负载更新。有关详细信息，请运行 `dotnet workload list`。",
+        "result": ".ai\\results\\ERP-167.json",
+        "attempt_logs": [],
+        "validation_logs": [],
+        "latest_state_error": {
+          "task": "ERP-167",
+          "kind": "automatic_repair_pending",
+          "summary": "Engineering validation failed with code 1. Full log: .ai\\logs\\ERP-167-validation-3.log\nStructured error summary:\n[validate] dotnet restore NEWERP.sln\n  正在确定要还原的项目…\n  所有项目均是最新的，无法还原。\n[validate] dotnet build NEWERP.sln -c Release --no-restore --no-incremental /p:TreatWarningsAsErrors=true /p:RunAnalyzersDuringBuild=true\n  ERP.Domain -> D:\\VSCodeProject\\NEWERP.executor\\src\\ERP.Domain\\bin\\Release\\net8.0\\ERP.Domain.dll\n  ERP.Application -> D:\\VSCodeProject\\NEWERP.executor\\src\\ERP.Application\\bin\\Release\\net8.0\\ERP.Application.dll\n  ERP.Infrastructure -> D:\\VSCodeProject\\NEWERP.executor\\src\\ERP.Infrastructure\\bin\\Release\\net8.0\\ERP.Infrastructure.dll\n  ERP.IntegrationTests -> D:\\VSCodeProject\\NEWERP.executor\\src\\ERP.IntegrationTests\\bin\\Release\\net8.0\\ERP.IntegrationTests.dll\n  ERP.Api -> D:\\VSCodeProject\\NEWERP.executor\\src\\ERP.Api\\bin\\Release\\net8.0\\ERP.Api.dll\n  ERP.UnitTests -> D:\\VSCodeProject\\NEWERP.executor\\src\\ERP.UnitTests\\bin\\Release\\net8.0\\ERP.UnitTests.dll\n已成功生成。\n    0 个警告\n    0 个错误\n已用时间 00:00:03.64\n有可用的工作负载更新。有关详细信息，请运行 `dotnet workload list`。\n[validate] dotnet test src/ERP.UnitTests/ERP.UnitTests.csproj -c Release --no-build --verbosity minimal\nD:\\VSCodeProject\\NEWERP.executor\\src\\ERP.UnitTests\\bin\\Release\\net8.0\\ERP.UnitTests.dll (.NETCoreApp,Version=v8.0)的测试运行\nVSTest 版本 17.11.0 (x64)\n正在启动测试执行，请稍候...\n总共 1 个测试文件与指定模式相匹配。\n[xUnit.net 00:00:01.79]     ERP.UnitTests.DynamicSupplierAgingReportTests.Preview_retains_separate_currencies_and_unknown_due_date_evidence [FAIL]\n  失败 ERP.UnitTests.DynamicSupplierAgingReportTests.Preview_retains_separate_currencies_and_unknown_due_date_evidence [4 ms]\n  错误消息:\n   Assert.Equal() Failure: Values differ\nExpected: not_due\nActual:   overdue_1_30\n  堆栈跟踪:\n     at ERP.UnitTests.DynamicSupplierAgingReportTests.Preview_retains_separate_currencies_and_unknown_due_date_evidence() in D:\\VSCodeProject\\NEWERP.executor\\src\\ERP.UnitTests\\DynamicSupplierAgingReportTests.cs:line 308\n--- End of stack trace from previous location ---\n失败!  - 失败:     1，通过:  2546，已跳过:     0，总计:  2547，持续时间: 38 s - ERP.UnitTests.dll (net8.0)\n有可用的工作负载更新。有关详细信息，请运行 `dotnet workload list`。"
+        },
+        "latest_build": {
+          "task": "ERP-167",
+          "profile": "safe",
+          "status": "failed",
+          "exit_code": 1,
+          "log": ".ai\\logs\\ERP-167-validation-3.log",
+          "at": "2026-09-29T16:37:57.966517Z"
+        },
+        "task_context": ".ai\\tasks\\ERP-167.json",
+        "changed_paths": [
+          ".ai/PROJECT_STATE.json",
+          ".ai/results/ERP-167.json",
+          ".ai/tasks/ERP-167.json",
+          "docs/dynamic-receipt-reconciliation-report.md",
+          "src/ERP.Api/Controllers/DynamicReceiptReconciliationReportController.cs",
+          "src/ERP.Api/wwwroot/js/sales-order-receipt-reconciliation.js",
+          "src/ERP.Application/Services/DynamicReceiptReconciliationReportRules.cs",
+          "src/ERP.UnitTests/DynamicReceiptReconciliationExcelTests.cs"
+        ],
+        "diff": ".ai\\logs\\ERP-167-preserved-work.diff",
+        "execution_copy": "D:\\VSCodeProject\\NEWERP.executor"
+      }
     }
   ],
-  "supervised_recovery_cycles": 1,
+  "supervised_recovery_cycles": 2,
   "recovery_context": {
-    "remediation_task": "ERP-167-RECOVERY-1",
-    "failure_kind": "path_guard_failure",
-    "summary": "Path guard failed:\noutside allowed_paths: src/ERP.UnitTests/DynamicSupplierAgingReportTests.cs",
+    "remediation_task": "ERP-167-RECOVERY-2",
+    "failure_kind": "validation_failure",
+    "summary": "Engineering validation failed with code 1. Full log: .ai\\logs\\ERP-167-validation-3.log\nStructured error summary:\n[validate] dotnet restore NEWERP.sln\n  正在确定要还原的项目…\n  所有项目均是最新的，无法还原。\n[validate] dotnet build NEWERP.sln -c Release --no-restore --no-incremental /p:TreatWarningsAsErrors=true /p:RunAnalyzersDuringBuild=true\n  ERP.Domain -> D:\\VSCodeProject\\NEWERP.executor\\src\\ERP.Domain\\bin\\Release\\net8.0\\ERP.Domain.dll\n  ERP.Application -> D:\\VSCodeProject\\NEWERP.executor\\src\\ERP.Application\\bin\\Release\\net8.0\\ERP.Application.dll\n  ERP.Infrastructure -> D:\\VSCodeProject\\NEWERP.executor\\src\\ERP.Infrastructure\\bin\\Release\\net8.0\\ERP.Infrastructure.dll\n  ERP.IntegrationTests -> D:\\VSCodeProject\\NEWERP.executor\\src\\ERP.IntegrationTests\\bin\\Release\\net8.0\\ERP.IntegrationTests.dll\n  ERP.Api -> D:\\VSCodeProject\\NEWERP.executor\\src\\ERP.Api\\bin\\Release\\net8.0\\ERP.Api.dll\n  ERP.UnitTests -> D:\\VSCodeProject\\NEWERP.executor\\src\\ERP.UnitTests\\bin\\Release\\net8.0\\ERP.UnitTests.dll\n已成功生成。\n    0 个警告\n    0 个错误\n已用时间 00:00:03.64\n有可用的工作负载更新。有关详细信息，请运行 `dotnet workload list`。\n[validate] dotnet test src/ERP.UnitTests/ERP.UnitTests.csproj -c Release --no-build --verbosity minimal\nD:\\VSCodeProject\\NEWERP.executor\\src\\ERP.UnitTests\\bin\\Release\\net8.0\\ERP.UnitTests.dll (.NETCoreApp,Version=v8.0)的测试运行\nVSTest 版本 17.11.0 (x64)\n正在启动测试执行，请稍候...\n总共 1 个测试文件与指定模式相匹配。\n[xUnit.net 00:00:01.79]     ERP.UnitTests.DynamicSupplierAgingReportTests.Preview_retains_separate_currencies_and_unknown_due_date_evidence [FAIL]\n  失败 ERP.UnitTests.DynamicSupplierAgingReportTests.Preview_retains_separate_currencies_and_unknown_due_date_evidence [4 ms]\n  错误消息:\n   Assert.Equal() Failure: Values differ\nExpected: not_due\nActual:   overdue_1_30\n  堆栈跟踪:\n     at ERP.UnitTests.DynamicSupplierAgingReportTests.Preview_retains_separate_currencies_and_unknown_due_date_evidence() in D:\\VSCodeProject\\NEWERP.executor\\src\\ERP.UnitTests\\DynamicSupplierAgingReportTests.cs:line 308\n--- End of stack trace from previous location ---\n失败!  - 失败:     1，通过:  2546，已跳过:     0，总计:  2547，持续时间: 38 s - ERP.UnitTests.dll (net8.0)\n有可用的工作负载更新。有关详细信息，请运行 `dotnet workload list`。",
     "result": ".ai\\results\\ERP-167.json",
     "attempt_logs": [],
     "validation_logs": [],
     "latest_state_error": {
       "task": "ERP-167",
       "kind": "automatic_repair_pending",
-      "summary": "Path guard failed:\noutside allowed_paths: src/ERP.UnitTests/DynamicSupplierAgingReportTests.cs"
+      "summary": "Engineering validation failed with code 1. Full log: .ai\\logs\\ERP-167-validation-3.log\nStructured error summary:\n[validate] dotnet restore NEWERP.sln\n  正在确定要还原的项目…\n  所有项目均是最新的，无法还原。\n[validate] dotnet build NEWERP.sln -c Release --no-restore --no-incremental /p:TreatWarningsAsErrors=true /p:RunAnalyzersDuringBuild=true\n  ERP.Domain -> D:\\VSCodeProject\\NEWERP.executor\\src\\ERP.Domain\\bin\\Release\\net8.0\\ERP.Domain.dll\n  ERP.Application -> D:\\VSCodeProject\\NEWERP.executor\\src\\ERP.Application\\bin\\Release\\net8.0\\ERP.Application.dll\n  ERP.Infrastructure -> D:\\VSCodeProject\\NEWERP.executor\\src\\ERP.Infrastructure\\bin\\Release\\net8.0\\ERP.Infrastructure.dll\n  ERP.IntegrationTests -> D:\\VSCodeProject\\NEWERP.executor\\src\\ERP.IntegrationTests\\bin\\Release\\net8.0\\ERP.IntegrationTests.dll\n  ERP.Api -> D:\\VSCodeProject\\NEWERP.executor\\src\\ERP.Api\\bin\\Release\\net8.0\\ERP.Api.dll\n  ERP.UnitTests -> D:\\VSCodeProject\\NEWERP.executor\\src\\ERP.UnitTests\\bin\\Release\\net8.0\\ERP.UnitTests.dll\n已成功生成。\n    0 个警告\n    0 个错误\n已用时间 00:00:03.64\n有可用的工作负载更新。有关详细信息，请运行 `dotnet workload list`。\n[validate] dotnet test src/ERP.UnitTests/ERP.UnitTests.csproj -c Release --no-build --verbosity minimal\nD:\\VSCodeProject\\NEWERP.executor\\src\\ERP.UnitTests\\bin\\Release\\net8.0\\ERP.UnitTests.dll (.NETCoreApp,Version=v8.0)的测试运行\nVSTest 版本 17.11.0 (x64)\n正在启动测试执行，请稍候...\n总共 1 个测试文件与指定模式相匹配。\n[xUnit.net 00:00:01.79]     ERP.UnitTests.DynamicSupplierAgingReportTests.Preview_retains_separate_currencies_and_unknown_due_date_evidence [FAIL]\n  失败 ERP.UnitTests.DynamicSupplierAgingReportTests.Preview_retains_separate_currencies_and_unknown_due_date_evidence [4 ms]\n  错误消息:\n   Assert.Equal() Failure: Values differ\nExpected: not_due\nActual:   overdue_1_30\n  堆栈跟踪:\n     at ERP.UnitTests.DynamicSupplierAgingReportTests.Preview_retains_separate_currencies_and_unknown_due_date_evidence() in D:\\VSCodeProject\\NEWERP.executor\\src\\ERP.UnitTests\\DynamicSupplierAgingReportTests.cs:line 308\n--- End of stack trace from previous location ---\n失败!  - 失败:     1，通过:  2546，已跳过:     0，总计:  2547，持续时间: 38 s - ERP.UnitTests.dll (net8.0)\n有可用的工作负载更新。有关详细信息，请运行 `dotnet workload list`。"
     },
     "latest_build": {
       "task": "ERP-167",
       "profile": "safe",
       "status": "failed",
       "exit_code": 1,
-      "log": ".ai\\logs\\ERP-167-validation-2.log",
-      "at": "2026-09-29T16:17:21.975558Z"
+      "log": ".ai\\logs\\ERP-167-validation-3.log",
+      "at": "2026-09-29T16:37:57.966517Z"
     },
     "task_context": ".ai\\tasks\\ERP-167.json",
     "changed_paths": [
       ".ai/PROJECT_STATE.json",
+      ".ai/results/ERP-167.json",
       ".ai/tasks/ERP-167.json",
       "docs/dynamic-receipt-reconciliation-report.md",
       "src/ERP.Api/Controllers/DynamicReceiptReconciliationReportController.cs",
       "src/ERP.Api/wwwroot/js/sales-order-receipt-reconciliation.js",
       "src/ERP.Application/Services/DynamicReceiptReconciliationReportRules.cs",
-      "src/ERP.UnitTests/DynamicReceiptReconciliationExcelTests.cs",
-      "src/ERP.UnitTests/DynamicSupplierAgingReportTests.cs"
+      "src/ERP.UnitTests/DynamicReceiptReconciliationExcelTests.cs"
     ],
     "diff": ".ai\\logs\\ERP-167-preserved-work.diff",
     "execution_copy": "D:\\VSCodeProject\\NEWERP.executor",
