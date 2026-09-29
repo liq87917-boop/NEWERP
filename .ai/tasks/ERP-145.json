@@ -1,0 +1,50 @@
+{
+  "id": "ERP-145",
+  "title": "Visualize grouped supplier aging invoice counts",
+  "description": "A purchasing user sees a page-only count distribution in the existing dynamic supplier-aging field designer and can change grouping without changing report permissions or the static workspace. Development only; reuse ERP-140 authorized, bounded read-only supplier-aging preview and existing HTTP audit. Work solely on the current page. Preserve explicit unknown due dates, invalid/unknown allocation evidence, draft/void separation and currency isolation. Missing permission or invalid grouping fails closed. No new schema, migration, production SQL, real database execution, payment action, ledger inference, arbitrary SQL, business writes, secrets/.env or deployment. Verify focused tests and safe Release build/test; no real-browser acceptance.",
+  "status": "pending",
+  "risk_level": "medium",
+  "acceptance_criteria": [
+    "Designer offers only ERP-144 catalog grouping keys and sends the selected key with the existing authorized bounded preview request.",
+    "Chart renders labeled invoice counts for supplier, currency, aging bucket and allocation status, including unknown classes, empty pages and pagination changes without unsafe HTML.",
+    "Node tests cover grouping selection, count chart text, unknown and empty groups, permission and network failures; document that counts are current-page evidence only."
+  ],
+  "criterion_path_map": {
+    "Designer offers only ERP-144 catalog grouping keys and sends the selected key with the existing authorized bounded preview request.": [
+      "src/ERP.Api/wwwroot/js/supplier-reconciliation-aging.js"
+    ],
+    "Chart renders labeled invoice counts for supplier, currency, aging bucket and allocation status, including unknown classes, empty pages and pagination changes without unsafe HTML.": [
+      "src/ERP.Api/wwwroot/js/supplier-reconciliation-aging.js"
+    ],
+    "Node tests cover grouping selection, count chart text, unknown and empty groups, permission and network failures; document that counts are current-page evidence only.": [
+      "src/ERP.Api/wwwroot/js/supplier-reconciliation-aging.js",
+      "tests/automation/dynamic_supplier_aging_grouping_ui.test.js",
+      "docs/dynamic-supplier-aging-report.md"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Api/wwwroot/js/supplier-reconciliation-aging.js",
+    "tests/automation/dynamic_supplier_aging_grouping_ui.test.js",
+    "docs/dynamic-supplier-aging-report.md",
+    ".ai/**"
+  ],
+  "validation_profile": "safe",
+  "depends_on": [
+    "ERP-144",
+    "ERP-141"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "completion_mode": "build",
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only bounded read-only feature"
+  },
+  "attempts": 0
+}

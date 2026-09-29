@@ -1,0 +1,55 @@
+{
+  "id": "ERP-146",
+  "title": "Summarize known supplier aging amounts by supplier and currency",
+  "description": "A purchasing user views cautious current-page monetary evidence grouped by supplier and original currency, with an optional aging-bucket split. Only active recorded invoice evidence contributes; unknown or invalid allocation amounts remain unknown. Development only; reuse ERP-140 authorized, bounded read-only supplier-aging preview and existing HTTP audit. Work solely on the current page. Preserve explicit unknown due dates, invalid/unknown allocation evidence, draft/void separation and currency isolation. Missing permission or invalid grouping fails closed. No new schema, migration, production SQL, real database execution, payment action, ledger inference, arbitrary SQL, business writes, secrets/.env or deployment. Verify focused tests and safe Release build/test; no real-browser acceptance.",
+  "status": "pending",
+  "risk_level": "medium",
+  "acceptance_criteria": [
+    "Preview accepts only none/supplierCurrency/supplierCurrencyAging monetary summary modes; rejects unknown modes before source reads and reuses ERP-140 authorization and paging.",
+    "Each current-page summary retains supplier and original currency, separates unknown due date, excludes draft/void invoice amounts, sums known active gross evidence and marks allocated/remaining totals unknown if any contributing row is unknown or invalid.",
+    "Unit tests cover multi-currency suppliers, draft/void rows, unknown and overallocated evidence, empty page, page boundary, permission and no writes; document arithmetic evidence limits."
+  ],
+  "criterion_path_map": {
+    "Preview accepts only none/supplierCurrency/supplierCurrencyAging monetary summary modes; rejects unknown modes before source reads and reuses ERP-140 authorization and paging.": [
+      "src/ERP.Application/DTOs/DynamicSupplierAgingReportDtos.cs",
+      "src/ERP.Application/Services/DynamicSupplierAgingReportRules.cs",
+      "src/ERP.Api/Controllers/DynamicSupplierAgingReportController.cs"
+    ],
+    "Each current-page summary retains supplier and original currency, separates unknown due date, excludes draft/void invoice amounts, sums known active gross evidence and marks allocated/remaining totals unknown if any contributing row is unknown or invalid.": [
+      "src/ERP.Application/DTOs/DynamicSupplierAgingReportDtos.cs",
+      "src/ERP.Application/Services/DynamicSupplierAgingReportRules.cs",
+      "src/ERP.Api/Controllers/DynamicSupplierAgingReportController.cs"
+    ],
+    "Unit tests cover multi-currency suppliers, draft/void rows, unknown and overallocated evidence, empty page, page boundary, permission and no writes; document arithmetic evidence limits.": [
+      "src/ERP.UnitTests/DynamicSupplierAgingAmountSummaryTests.cs",
+      "docs/dynamic-supplier-aging-report.md"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Application/DTOs/DynamicSupplierAgingReportDtos.cs",
+    "src/ERP.Application/Services/DynamicSupplierAgingReportRules.cs",
+    "src/ERP.Api/Controllers/DynamicSupplierAgingReportController.cs",
+    "src/ERP.UnitTests/DynamicSupplierAgingAmountSummaryTests.cs",
+    "docs/dynamic-supplier-aging-report.md",
+    ".ai/**"
+  ],
+  "validation_profile": "safe",
+  "depends_on": [
+    "ERP-140",
+    "ERP-144"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "completion_mode": "build",
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only bounded read-only feature"
+  },
+  "attempts": 0
+}

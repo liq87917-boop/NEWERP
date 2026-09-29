@@ -1,0 +1,54 @@
+{
+  "id": "ERP-144",
+  "title": "Count supplier aging evidence by selected page grouping",
+  "description": "A purchasing user chooses a finite grouping of the currently authorized dynamic supplier-aging evidence page and sees invoice counts without changing source records. Development only; reuse ERP-140 authorized, bounded read-only supplier-aging preview and existing HTTP audit. Work solely on the current page. Preserve explicit unknown due dates, invalid/unknown allocation evidence, draft/void separation and currency isolation. Missing permission or invalid grouping fails closed. No new schema, migration, production SQL, real database execution, payment action, ledger inference, arbitrary SQL, business writes, secrets/.env or deployment. Verify focused tests and safe Release build/test; no real-browser acceptance.",
+  "status": "pending",
+  "risk_level": "medium",
+  "acceptance_criteria": [
+    "API accepts only none/supplier/currency/agingBucket/allocationState group keys and rejects other values before source reads.",
+    "Preview returns deterministic current-page invoice counts for selected grouping, keeps unknown due date and invalid/unknown allocation classes visible, and never sums different currencies or amounts.",
+    "Unit tests cover allowed and denied users, all grouping keys, unknown evidence, empty/paged results and no writes; document page-only count semantics."
+  ],
+  "criterion_path_map": {
+    "API accepts only none/supplier/currency/agingBucket/allocationState group keys and rejects other values before source reads.": [
+      "src/ERP.Application/DTOs/DynamicSupplierAgingReportDtos.cs",
+      "src/ERP.Application/Services/DynamicSupplierAgingReportRules.cs",
+      "src/ERP.Api/Controllers/DynamicSupplierAgingReportController.cs"
+    ],
+    "Preview returns deterministic current-page invoice counts for selected grouping, keeps unknown due date and invalid/unknown allocation classes visible, and never sums different currencies or amounts.": [
+      "src/ERP.Application/DTOs/DynamicSupplierAgingReportDtos.cs",
+      "src/ERP.Application/Services/DynamicSupplierAgingReportRules.cs",
+      "src/ERP.Api/Controllers/DynamicSupplierAgingReportController.cs"
+    ],
+    "Unit tests cover allowed and denied users, all grouping keys, unknown evidence, empty/paged results and no writes; document page-only count semantics.": [
+      "src/ERP.UnitTests/DynamicSupplierAgingGroupingTests.cs",
+      "docs/dynamic-supplier-aging-report.md"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Application/DTOs/DynamicSupplierAgingReportDtos.cs",
+    "src/ERP.Application/Services/DynamicSupplierAgingReportRules.cs",
+    "src/ERP.Api/Controllers/DynamicSupplierAgingReportController.cs",
+    "src/ERP.UnitTests/DynamicSupplierAgingGroupingTests.cs",
+    "docs/dynamic-supplier-aging-report.md",
+    ".ai/**"
+  ],
+  "validation_profile": "safe",
+  "depends_on": [
+    "ERP-140"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "completion_mode": "build",
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only bounded read-only feature"
+  },
+  "attempts": 0
+}
