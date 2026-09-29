@@ -1,0 +1,53 @@
+{
+  "id": "ERP-142",
+  "title": "Export selected authorized supplier aging page to Excel",
+  "description": "Purchasing user downloads exactly the selected current supplier aging page as xlsx in chosen order; reuse ERP-140 preview, menu check and ExcelExporter. Development only; reuse existing SupplierReconciliationAging.ForQueryAsync evidence, current-user purchase-order menu authorization and HTTP audit. Preserve explicit due-date unknowns, separate currencies, draft/void history and invalid/unknown allocation evidence. Fail closed on missing permission, invalid requests or source failures. No payment approval, ledger inference, arbitrary SQL, migration, production SQL, real database execution, business writes, secrets/.env or deployment. Verify focused tests and safe Release build/test; no browser acceptance.",
+  "status": "pending",
+  "risk_level": "medium",
+  "acceptance_criteria": [
+    "Excel endpoint reuses authorized bounded preview and rechecks menu, filters, fields and page limit before bytes.",
+    "Workbook has only current-page selected columns in requested order, separate currencies, explicit unknowns and formula-safe text.",
+    "Designer offers xlsx with visible permission/empty/error states; workbook tests cover order, page cap, unknowns, currency, formula safety and no writes; document limits."
+  ],
+  "criterion_path_map": {
+    "Excel endpoint reuses authorized bounded preview and rechecks menu, filters, fields and page limit before bytes.": [
+      "src/ERP.Api/Controllers/DynamicSupplierAgingReportController.cs"
+    ],
+    "Workbook has only current-page selected columns in requested order, separate currencies, explicit unknowns and formula-safe text.": [
+      "src/ERP.Api/Controllers/DynamicSupplierAgingReportController.cs",
+      "src/ERP.Application/Services/DynamicSupplierAgingReportRules.cs"
+    ],
+    "Designer offers xlsx with visible permission/empty/error states; workbook tests cover order, page cap, unknowns, currency, formula safety and no writes; document limits.": [
+      "src/ERP.Api/wwwroot/js/supplier-reconciliation-aging.js",
+      "src/ERP.UnitTests/DynamicSupplierAgingExcelTests.cs",
+      "docs/dynamic-supplier-aging-report.md"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/DynamicSupplierAgingReportController.cs",
+    "src/ERP.Application/Services/DynamicSupplierAgingReportRules.cs",
+    "src/ERP.Api/wwwroot/js/supplier-reconciliation-aging.js",
+    "src/ERP.UnitTests/DynamicSupplierAgingExcelTests.cs",
+    "docs/dynamic-supplier-aging-report.md",
+    ".ai/**"
+  ],
+  "validation_profile": "safe",
+  "depends_on": [
+    "ERP-140",
+    "ERP-141"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "completion_mode": "build",
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only bounded read-only feature"
+  },
+  "attempts": 0
+}
