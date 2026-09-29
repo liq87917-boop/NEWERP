@@ -12,6 +12,7 @@
 | GET | `/api/purchase-orders/report` | 返回有限白名单字段目录（需登录 + 采购订单菜单授权） |
 | POST | `/api/purchase-orders/report` | 按选定字段与有界筛选预览当前账号可见（未删除）的采购订单 |
 | POST | `/api/purchase-orders/report/export` | 导出当前选定页为 Excel（xlsx，只读，复用有界授权预览与选定列顺序；ERP-127） |
+| POST | `/api/purchase-orders/report/export/pdf` | 导出当前选定页为分页中文 PDF（只读，复用有界授权预览与 ERP-128 页面小计；ERP-129） |
 
 请求体（POST，`DynamicPurchaseOrderReportRequest`）：
 
@@ -88,6 +89,22 @@
 - **财务证据边界**：小计是「原始订单金额的原币加总」，**不**计算应付余额、**不**做结算、**不**跨币种换算。
 - **导出（ERP-127）**：Excel 导出仍为当前页选定列数据导出，不含小计工作表。
 
+### 6.3 PDF 导出（ERP-129）
+
+- 路径：`POST /api/purchase-orders/report/export/pdf`，请求体与预览完全相同（`DynamicPurchaseOrderReportRequest`）。
+- **复用预览**：每次导出都重新校验当前登录用户 Id、`purchase-order` 采购订单菜单授权、字段白名单、筛选与页大小
+  （1~100），再按同一条有界预览查询读取当前页，`AsNoTracking`，无 `SaveChanges`，不执行任意 SQL。
+- **仅导当前页**：只导出请求 `page` / `pageSize` 对应的那一页选定列（不是全量导出），单页仍受 100 行上限约束。
+- **分页渲染**：以 PDFsharp 6.2.4 把选定列按请求顺序分页渲染为中文表格（A4 竖版，续页重复列标题）；
+  每页受页高约束，行数超出时自动另起一页（有界分页）。
+- **原币与页面小计**：金额按订单原币呈现、不做跨币种换算或汇总；分组（`supplier` / `month`）时在数据后追加
+  「本页小计」（币种分开，只对同币种求和，绝不跨币种相加）。
+- **字体前提（Windows）**：中文字体固定使用 Windows 黑体（SimHei，`C:\Windows\Fonts\simhei.ttf`），
+  与销售订单 PDF（ERP-116）/ 应收账款 PDF（ERP-121）共用共享解析器（`SimHeiPdfFontResolver`）；
+  **找不到 SimHei 时显式失败**（返回「未找到中文字体 SimHei」业务错误），绝不产出乱码或缺字 PDF，也不替换为其它字体。
+- **只读 + 审计**：无写入、无任意 SQL；`POST` 由既有 `OperationLogMiddleware` 记录审计（动作「导出」）。
+- 文件名 `PurchaseOrderReport_yyyyMMddHHmmss.pdf`；内容类型 `application/pdf`。
+
 ## 7. 测试覆盖（`ERP.UnitTests/DynamicPurchaseOrderReportTests.cs`）
 
 - 字段白名单目录（有限、白名单键、所需菜单与 100 上限、不含 `settlementProgress`）；
@@ -119,6 +136,17 @@
 - 无采购订单菜单授权（权限不足）与无效分组键（查询前拒绝）；
 - 只读不写库（`SaveChangesAsync` 调用次数恒为 0）。
 
+### 7.3 PDF 导出测试（`ERP.UnitTests/DynamicPurchaseOrderPdfTests.cs`）
+
+- PDF 签名（`%PDF-`）与内容类型（`application/pdf`）、`.pdf` 文件名；
+- A4 页面尺寸（分页边界：宽约 595pt、高约 842pt）与分页（少行单页、多行多页）；
+- 选定字段顺序（`BuildRowCells` 按请求列顺序映射值）；
+- 嵌入中文黑体 SimHei（`SimHei` + `FontFile2`），而非缺字替换字体；
+- 字体缺失显式失败（返回业务错误、不产出 PDF）；
+- 分组小计币种分开（同一供应商下 CNY / USD 分别小计、绝不跨币种合计）与分组 PDF 复用页面小计；
+- 无身份（未认证）、无采购订单菜单授权（权限不足）、无效字段 / 页大小超限（查询前拒绝）；
+- 只读不写库（`SaveChangesAsync` 调用次数恒为 0）。
+
 ## 8. 验证
 
 - 安全档构建 / 测试：`dotnet build NEWERP.sln -c Release` 与 `dotnet test src/ERP.UnitTests/ERP.UnitTests.csproj -c Release --no-build`。
@@ -131,6 +159,7 @@
 - 筛选只允许供应商 / 订单日期 / 状态 / 币种；状态与币种只接受枚举取值（下拉），供应商来自既有 `/api/base/suppliers?page=1&pageSize=200`。
 - 预览走 `POST /api/purchase-orders/report`，只发送「白名单字段 + 有界筛选 + 有界分页（pageSize 1~100，前端钳制到目录 `maxPageSize`）」，按请求顺序渲染返回的列名与单元格，全部经 HTML 转义。
 - 导出（ERP-127）走工具栏「📥 导出 Excel」（`dporExport`），复用当前预览请求体 `POST /api/purchase-orders/report/export`；成功（xlsx 附件）触发下载，授权 / 无效 / 空结果 / 网络失败在结果区可见（不下载任何内容）。
+- 导出 PDF（ERP-129）走工具栏「📄 导出 PDF」（`dporExportPdf`），复用当前预览请求体 `POST /api/purchase-orders/report/export/pdf`；成功（pdf 附件）触发下载，授权 / 无效 / 空结果 / 字体缺失 / 网络失败在结果区可见（不下载任何内容）。
 - 全程只读：不写库、不迁移、不执行任意 SQL；授权 / 无效请求 / 空结果 / 网络失败都在界面可见（`dporErrorHtml` / `dporEmptyHtml` / `dporLoadingHtml`），且不暴露范围外数据。
 
 ### 9.1 前端 UI 逻辑单测

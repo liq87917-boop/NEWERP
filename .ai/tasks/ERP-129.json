@@ -2,7 +2,7 @@
   "id": "ERP-129",
   "title": "Download authorized dynamic purchase-order report page as PDF",
   "description": "Download exactly the selected purchase-order report page as a paginated Chinese PDF. Reuse ERP-125 scoped preview and grouped original-currency page subtotals; require the current user's purchase-order menu on every download. Use existing PDFsharp and shared SimHei resolver; missing font fails explicitly. Existing HTTP operation audit records the read-only download. Development only: no migration, production SQL, real database execution, arbitrary model SQL, writes, secret/.env change or deployment. Verify PDF and safe build/test.",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "medium",
   "acceptance_criteria": [
     "PDF endpoint reuses authorized bounded purchase-order preview and optional grouping, rechecks current-user menu permission and invalid fields/filters before returning bytes.",
@@ -50,5 +50,6 @@
     "level": "L1",
     "status": "not_required",
     "reason": "Development-only bounded read-only feature"
-  }
+  },
+  "attempts": 1
 }

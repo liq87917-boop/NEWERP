@@ -15,6 +15,7 @@ namespace ERP.Api.Controllers;
 /// <item><b>GET /api/purchase-orders/report</b>：返回采购订单字段白名单目录（需登录 + 采购订单菜单授权）；</item>
 /// <item><b>POST /api/purchase-orders/report</b>：按选定字段与有界筛选预览当前账号可见（未删除）的采购订单，稳定分页。</item>
 /// <item><b>POST /api/purchase-orders/report/export</b>：导出当前选定页为 Excel（xlsx，只读，复用 ERP-125 有界授权预览与选定列顺序）。</item>
+/// <item><b>POST /api/purchase-orders/report/export/pdf</b>：导出当前选定页为 PDF（只读，复用 ERP-125 有界授权预览与 ERP-128 分组页面小计）。</item>
 /// </list>
 /// <para>全程只读：无 Add / Update / Remove / SaveChanges，不执行任意 SQL；请求由既有
 /// <c>OperationLogMiddleware</c> 记录审计。</para>
@@ -86,5 +87,28 @@ public class DynamicPurchaseOrderReportController : ControllerBase
         var columns = page.Columns.Select(c => (c.Key, c.Label)).ToList();
         var rows = page.Rows.Select(DynamicPurchaseOrderReportRules.BuildExportRow).ToList();
         return ExcelExporter.ExportRows("采购订单", rows, columns);
+    }
+
+    /// <summary>
+    /// 导出当前页为 PDF（ERP-129，只读）：复用「有界、已授权预览」与选定列顺序（重新校验身份 / 菜单授权 /
+    /// 字段 / 筛选 / 页大小），以 PDFsharp 6.2.4 分页渲染选定列（中文黑体 SimHei），
+    /// 可选按分组（supplier / month）追加「本页小计」（币种分开）。缺失黑体字体时显式失败（不产出乱码 / 缺字 PDF）。
+    /// </summary>
+    [HttpPost("export/pdf")]
+    public async Task<IActionResult> ExportPdf([FromBody] DynamicPurchaseOrderReportRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        // 分组键 fail closed + 补齐小计所需字段，与预览同口径
+        var groupBy = DynamicPurchaseOrderReportRules.NormalizeGroupBy(request.GroupBy);
+        if (groupBy != DynamicPurchaseOrderReportRules.GroupNone)
+            request.Fields = DynamicPurchaseOrderReportRules.EnsureGroupingFields(request.Fields, groupBy);
+
+        // 复用同一有界、已授权预览：重新校验身份 / 菜单授权 / 字段 / 筛选 / 页大小
+        var page = await _query.PreviewAsync(request, CurrentUserId());
+        var groups = DynamicPurchaseOrderReportRules.BuildGroupSubtotals(page.Rows, groupBy);
+
+        var bytes = DynamicPurchaseOrderPdfExporter.Export(page, groups, groupBy);
+        return File(bytes, "application/pdf", $"PurchaseOrderReport_{DateTime.Now:yyyyMMddHHmmss}.pdf");
     }
 }

@@ -338,6 +338,7 @@ function dporRender() {
     <div class="modal-footer">
       <button class="btn btn-primary" onclick="dporPreview(1)">预览</button>
       <button class="btn btn-neutral" onclick="dporExport()">📥 导出 Excel</button>
+      <button class="btn btn-neutral" onclick="dporExportPdf()">📄 导出 PDF</button>
       <button class="btn btn-neutral" onclick="closeModal()">关闭</button>
     </div>
     <div id="dpor-result"></div>
@@ -457,6 +458,63 @@ async function dporExport() {
   }
 }
 
+/* 导出当前页为 PDF（ERP-129，只读）：复用预览请求体 POST /api/purchase-orders/report/export/pdf；
+   成功（pdf 附件）触发下载；授权 / 无效 / 字体缺失 / 网络失败在结果区可见，不下载任何内容 */
+async function dporExportPdf() {
+  const state = dporBuildState(DPOR.view ? DPOR.view.page : DPOR.filters.page);
+  if (state.startDate && state.endDate && state.startDate > state.endDate) {
+    dporRenderResult(dporErrorHtml('invalid', '开始日期不能晚于结束日期'));
+    return;
+  }
+
+  // 当前页为空：显示可见错误，不下载仅表头的空 PDF
+  if (DPOR.view && (!DPOR.view.rows || DPOR.view.rows.length === 0)) {
+    dporRenderResult(dporErrorHtml('empty', '没有符合条件的采购订单，无法导出'));
+    return;
+  }
+
+  const req = dporBuildRequest(state);
+
+  try {
+    const resp = await fetch('/api/purchase-orders/report/export/pdf', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + (typeof localStorage !== 'undefined' ? (localStorage.getItem('erp_token') || '') : ''),
+      },
+      body: JSON.stringify(req),
+    });
+
+    const contentType = (resp.headers.get('content-type') || '');
+    if (contentType.indexOf('application/pdf') >= 0) {
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+      a.href = url;
+      a.download = '采购订单报表_' + dateStr + '.pdf';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      return;
+    }
+
+    let envelope = null;
+    try { envelope = await resp.json(); } catch (e) { /* 忽略解析失败 */ }
+    const code = envelope && envelope.code;
+    const message = (envelope && envelope.message) || 'PDF 导出失败';
+    if (code === 2000 || code === 2003) {
+      if (typeof logout === 'function') logout();
+      dporRenderResult(dporErrorHtml('unauthorized', message));
+      return;
+    }
+    dporRenderResult(dporErrorHtml(dporKindOfCode(code), message));
+  } catch (err) {
+    dporRenderResult(dporErrorHtml('network', (err && err.message) || '无法连接到服务器'));
+  }
+}
+
 /* Node 单测导出（浏览器中 module 为 undefined，自动跳过） */
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
@@ -481,6 +539,7 @@ if (typeof module !== 'undefined' && module.exports) {
     dporPreview,
     dporPage,
     dporExport,
+    dporExportPdf,
   };
 }
 
