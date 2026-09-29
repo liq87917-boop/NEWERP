@@ -444,6 +444,15 @@ const DSF_FINANCE_FILTER_OPTS = [
   { value: 'unlinked', label: '未链接（金额未知）' },
 ];
 
+/* ERP-160 分组计数键（有限白名单，仅 none / customer / currency / shipmentStatus / financeLinkStatus；非法值 fail closed 回落 none） */
+const DSF_GROUP_KEYS = [
+  { key: 'none', label: '不分组（仅表格）' },
+  { key: 'customer', label: '按客户' },
+  { key: 'currency', label: '按币种' },
+  { key: 'shipmentStatus', label: '按出货状态' },
+  { key: 'financeLinkStatus', label: '按收款链接状态' },
+];
+
 /* 订单状态枚举名 → 中文文案（与 DocumentStatus 枚举名一致） */
 const DSF_STATUS_LABELS = {
   Pending: '待提交', Submitted: '已提交', Approved: '已审核',
@@ -456,7 +465,7 @@ let DSF = {
   fields: [],         // 目录字段（白名单）
   selectedKeys: [],   // 当前勾选的字段键（默认全选）
   customers: [],      // 客户下拉来源（/api/base/customers）
-  filters: { customerId: '', currency: '', dateFrom: '', dateTo: '', shipmentStatus: '', financeLinkStatus: '', page: 1, pageSize: DSF_DEFAULT_PAGE_SIZE },
+  filters: { customerId: '', currency: '', dateFrom: '', dateTo: '', shipmentStatus: '', financeLinkStatus: '', groupBy: 'none', page: 1, pageSize: DSF_DEFAULT_PAGE_SIZE },
   view: null,         // 最近一次预览结果
 };
 
@@ -489,6 +498,20 @@ function dsfSelectFields(catalogFields, selectedKeys) {
   return result;
 }
 
+/* 分组键规范化（fail closed）：只保留 ERP-160 允许的分组键，缺失 / 空白 / 非法值一律回落 none（绝不进入请求） */
+function dsfGroupKey(value) {
+  const key = String(value == null ? '' : value).trim();
+  return DSF_GROUP_KEYS.some(g => g.key === key) ? key : 'none';
+}
+
+/* 分组键选择器：仅 ERP-160 允许的分组键（fail closed，无自由输入） */
+function dsfGroupSelectHtml(groupBy) {
+  const selected = dsfGroupKey(groupBy);
+  const opts = DSF_GROUP_KEYS.map(g =>
+    `<option value="${dsfEsc(g.key)}" ${g.key === selected ? 'selected' : ''}>${dsfEsc(g.label)}</option>`).join('');
+  return `<select id="dsf-groupby" style="min-width:200px">${opts}</select>`;
+}
+
 /* 组装有界预览请求体：字段只来自目录、分页有界、筛选仅客户 / 币种 / 订单日期 / 出货状态 / 收款链接状态，绝不接受任意字段名或 SQL */
 function dsfBuildRequest(state) {
   const fields = dsfSelectFields(state.catalogFields, state.selectedKeys);
@@ -499,6 +522,7 @@ function dsfBuildRequest(state) {
   pageSize = Math.max(1, Math.min(maxPageSize, pageSize));
 
   const req = { fields, page, pageSize };
+  req.groupBy = dsfGroupKey(state.groupBy);
 
   const customerId = Number(state.customerId);
   if (Number.isFinite(customerId) && customerId > 0) req.customerId = customerId;
@@ -597,6 +621,42 @@ function dsfErrorHtml(kind, message) {
       <b>${dsfEsc(labels[kind] || '预览失败')}</b>：${dsfEsc(message || '')}</div>`;
 }
 
+/* 分组计数视图（仅当前授权预览页，ERP-161）：渲染 ERP-160 返回的当前页销售订单张数分布；
+   标签转义、计数未知（null）不回落 0；固定分类（出货状态 / 收款链接状态）空类计数 0 仍显示；
+   动态分组（客户 / 币种）空页显示可见提示；绝不把计数解释为收款 / 结算 / 收款授权 */
+function dsfGroupChartHtml(view) {
+  const groupBy = (view && view.groupBy) || 'none';
+  if (groupBy === 'none' || !view || !Array.isArray(view.groups)) return '';
+  const groups = view.groups;
+  const titles = {
+    customer: '按客户分组 · 本页销售订单张数',
+    currency: '按币种分组 · 本页销售订单张数',
+    shipmentStatus: '按出货状态分组 · 本页销售订单张数',
+    financeLinkStatus: '按收款链接状态分组 · 本页销售订单张数',
+  };
+  const title = titles[groupBy] || '本页销售订单张数分组';
+  const counts = groups.map(g => (g && typeof g.count === 'number' && Number.isFinite(g.count)) ? g.count : 0);
+  const max = Math.max(1, ...counts);
+  const rows = groups.map(g => {
+    const label = dsfEsc((g && g.label) || (g && g.key) || '未知');
+    const unknown = !g || g.count === null || g.count === undefined || !Number.isFinite(Number(g.count));
+    const count = unknown ? '未知' : String(g.count);
+    const pct = unknown ? 0 : Math.max(0, Math.round((Number(g.count) / max) * 100));
+    return `<div style="display:flex;align-items:center;gap:8px;margin:3px 0">`
+      + `<span style="min-width:220px;text-align:right;font-size:13px">${label}</span>`
+      + `<div style="flex:1;background:#e2e8f0;border-radius:4px;height:12px;overflow:hidden">`
+      + `<div style="height:12px;background:#2563eb;width:${pct}%"></div></div>`
+      + `<span style="min-width:48px;font-variant-numeric:tabular-nums;font-size:13px">${dsfEsc(count)}</span></div>`;
+  }).join('');
+  const empty = groups.length === 0
+    ? '<div class="text-muted" style="margin:4px 0">本页没有可分组计数的销售订单出货 / 财务进度证据（空页）。</div>'
+    : '';
+  return `<div class="pd-hint" style="margin:8px 0">`
+    + `<div style="font-weight:600;margin-bottom:6px">📊 ${dsfEsc(title)}（仅当前预览页，非全量合计）</div>`
+    + `<div class="text-muted" style="font-size:12px;margin-bottom:4px">计数只统计当前授权预览页的销售订单张数，绝不求和金额 / 数量、绝不跨币种合并或换算、绝不把计数解释为收款 / 结算 / 收款授权。</div>`
+    + `${rows}${empty}</div>`;
+}
+
 /* 预览结果（口径 / 边界 / 免责文案 + 汇总 + 空结果 + 表格） */
 function dsfResultHtml(view) {
   const readOnly = view && view.readOnlyText ? `<div class="pd-hint">${dsfEsc(view.readOnlyText)}</div>` : '';
@@ -606,7 +666,7 @@ function dsfResultHtml(view) {
     ? `<div class="text-muted" style="margin:6px 0">共 ${view.total} 条 · 第 ${view.page} 页 · 每页 ${view.pageSize} 条</div>`
     : '';
   const empty = view && (!view.rows || view.rows.length === 0) ? dsfEmptyHtml() : '';
-  return `${readOnly}${boundary}${disclaimer}${summary}${empty}${dsfTableHtml(view)}`;
+  return `${readOnly}${boundary}${disclaimer}${summary}${dsfGroupChartHtml(view)}${empty}${dsfTableHtml(view)}`;
 }
 
 /* 字段选择器：仅由目录白名单渲染为复选框，无自由填写的字段名 */
@@ -682,6 +742,7 @@ function dsfBuildState(page) {
     dateTo: document.getElementById('dsf-date-to').value,
     shipmentStatus: document.getElementById('dsf-shipment-status').value,
     financeLinkStatus: document.getElementById('dsf-finance-status').value,
+    groupBy: document.getElementById('dsf-groupby').value,
     pageSize: document.getElementById('dsf-pagesize').value,
     page: page || 1,
     maxPageSize: DSF.catalog && DSF.catalog.maxPageSize ? DSF.catalog.maxPageSize : DSF_MAX_PAGE_SIZE_FALLBACK,
@@ -880,6 +941,7 @@ function dsfRender() {
     `<option value="${o.value}" ${f.shipmentStatus === o.value ? 'selected' : ''}>${o.label}</option>`).join('');
   const financeOptions = DSF_FINANCE_FILTER_OPTS.map(o =>
     `<option value="${o.value}" ${f.financeLinkStatus === o.value ? 'selected' : ''}>${o.label}</option>`).join('');
+  const groupOptions = dsfGroupSelectHtml(f.groupBy);
 
   document.getElementById('modal').innerHTML = `
   <div class="modal modal-lg" style="max-width:1100px">
@@ -904,6 +966,7 @@ function dsfRender() {
         <label>币种 <select id="dsf-currency" style="width:100%"><option value="">全部币种</option>${currencyOptions}</select></label>
         <label>出货状态 <select id="dsf-shipment-status" style="width:100%">${shipmentOptions}</select></label>
         <label>收款链接 <select id="dsf-finance-status" style="width:100%">${financeOptions}</select></label>
+        <label>分组计数 ${groupOptions}</label>
         <label>每页 <input type="number" id="dsf-pagesize" value="${Number(f.pageSize)}" min="1" max="${maxPage}" style="width:80px"></label>
       </div>
     </div>
@@ -923,7 +986,7 @@ function dsfRender() {
 async function openSalesOrderShipmentFinanceFieldDesigner() {
   DSF = {
     catalog: null, fields: [], selectedKeys: [], customers: [],
-    filters: { customerId: '', currency: '', dateFrom: '', dateTo: '', shipmentStatus: '', financeLinkStatus: '', page: 1, pageSize: DSF_DEFAULT_PAGE_SIZE },
+    filters: { customerId: '', currency: '', dateFrom: '', dateTo: '', shipmentStatus: '', financeLinkStatus: '', groupBy: 'none', page: 1, pageSize: DSF_DEFAULT_PAGE_SIZE },
     view: null,
   };
   const modal = document.getElementById('modal');
@@ -972,8 +1035,12 @@ if (typeof module !== 'undefined' && module.exports) {
     DSF_API,
     DSF_SHIPMENT_FILTER_OPTS,
     DSF_FINANCE_FILTER_OPTS,
+    DSF_GROUP_KEYS,
     DSF_STATUS_LABELS,
     dsfEsc,
+    dsfGroupKey,
+    dsfGroupSelectHtml,
+    dsfGroupChartHtml,
     dsfSelectFields,
     dsfBuildRequest,
     dsfCellText,
@@ -983,6 +1050,7 @@ if (typeof module !== 'undefined' && module.exports) {
     dsfTableHtml,
     dsfEmptyHtml,
     dsfErrorHtml,
+    dsfKindOfCode,
     dsfResultHtml,
     dsfFieldChooserHtml,
     dsfExportCsv,

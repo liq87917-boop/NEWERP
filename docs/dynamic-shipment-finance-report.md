@@ -68,6 +68,22 @@
 绝不跨页合并、绝不求和任何金额或数量、绝不跨币种合并或换算、绝不推断收款状态；`unknown` 出货 / 收款链接类别保持可见（不当作已出货 / 已收款 / 已收齐），
 金额与数量未知证据仍照实保留为 `null`，`uncoveredAmount` 只作「未覆盖金额」，绝不当作应收余额或收款授权。空页时动态分组返回空列表、固定分类返回全 0。
 
+## 前端分组计数视图（ERP-161）
+
+在既有「销售订单出货 / 财务进度字段设计器」（ERP-157）的预览请求中新增「分组计数」选择器（`id="dsf-groupby"`），
+只提供 ERP-160 允许的分组键：`none` / `customer` / `currency` / `shipmentStatus` / `financeLinkStatus`
+（`DSF_GROUP_KEYS` 白名单，无自由输入）。选中的分组键由 `dsfBuildRequest` 规范化后随当前授权预览请求体 `groupBy` 一起发送
+（非法 / 缺失 / 空白分组键由 `dsfGroupKey` 回落 `none`，fail closed，绝不发送范围外键）。
+
+预览结果区通过 `dsfGroupChartHtml` 渲染「分组计数视图」：按后端返回的 `groups`（`{ key, label, count }`）绘制带标签的计数条形图，
+标签与计数全部经 HTML 转义（无 unsafe HTML）；计数未知（null）绝不回落为 0；出货状态固定分类
+（none / partial / complete / over_shipped / unknown）与收款链接状态固定分类（linked / partial / unlinked / unknown）始终保留
+（空类计数为 0 仍显示），`unknown` 类别保持可见；动态分组（customer / currency）空页显示可见提示；翻页后视图随 `view.groups` 重渲染。
+
+计数视图仅统计**当前授权预览页**的销售订单张数（页面顶部明确标注「仅当前预览页，非全量合计」），
+绝不求和任何金额或数量、绝不跨币种合并或换算、绝不把计数解释为收款 / 结算 / 收款授权；权限不足 / 未登录 / 无效分组 / 网络失败
+与预览一致在结果区可见（fail closed），全程只读，无写入。
+
 ## 证据边界（重要）
 
 - 金额与数量一律按原币分别成行：`currency` 为原币，不同币种绝不合并、不做汇率换算；
@@ -179,6 +195,9 @@ PDF 中文一律使用 Windows 黑体 **SimHei**（`simhei.ttf`），由共享�
 
 `tests/automation/dynamic_shipment_finance_ui.test.js`（`node tests/automation/dynamic_shipment_finance_ui.test.js`）覆盖：
 字段选择、请求边界与分页、单元格渲染（未知 = 「未知」）、CSV（未知保留 + 公式前导转义）、失败态，以及前端接线契约（无任意 SQL / 自由字段名）。
+
+`tests/automation/dynamic_shipment_finance_grouping_ui.test.js`（`node tests/automation/dynamic_shipment_finance_grouping_ui.test.js`）覆盖：
+分组键选择（仅 ERP-160 白名单）、请求携带分组键、计数视图安全文本渲染、未知与空分类、权限 / 网络失败态、翻页变化，以及「计数仅当前预览页」的接线契约（无任意 SQL / 跨币种合计）。
 
 ### 前端文件
 
