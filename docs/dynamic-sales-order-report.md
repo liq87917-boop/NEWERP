@@ -19,10 +19,12 @@
 - `customerId`：客户 Id 筛选；
 - `status`：状态筛选（`Pending` / `Submitted` / `Approved` / `Rejected` / `Completed` / `Cancelled`）；
 - `currency`：币种筛选（`CNY` / `USD` / `EUR` / `HKD` / `GBP` / `JPY`）；
+- `groupBy`：分组键（仅 `none` / `customer` / `month`，大小写不敏感；空 / 缺省 = `none`，未知取值 fail closed 拒绝）；
 - `page`（默认 1）/ `pageSize`（默认 20，**上限 200**）。
 
 响应（`DynamicSalesOrderReportPageDto`）：`columns`（按请求顺序的选定列）、`rows`（每行仅含选定字段值）、
-`total` / `page` / `pageSize` / `totalPages`，以及 `readOnlyText` / `boundaryText` / `disclaimerText` 口径文案。
+`total` / `page` / `pageSize` / `totalPages`，以及 `readOnlyText` / `boundaryText` / `disclaimerText` 口径文案；
+ERP-114 新增 `groupBy`（规范化后的分组键）与 `groups`（仅当分组时的「页面小计」）。
 
 ## 3. 数据边界与安全
 
@@ -82,8 +84,34 @@
 - 筛选仅日期 / 客户 / 状态 / 币种，状态与币种取枚举下拉；无任意 SQL、无自由字段名输入；
 - 预览为 `POST`，由既有 `OperationLogMiddleware` 记录审计；前端不写库、不迁移、不执行任意 SQL。
 
-## 8. 验证
+## 8. 分组与小计（ERP-114）
+
+### 8.1 分组键（fail closed）
+
+- 仅接受 `none` / `customer` / `month`（大小写不敏感）；空 / 缺省 = `none`（不分组）。
+- 任何其它取值在**读取任何数据之前**即拒绝（`InvalidParameter`），绝不静默回落或猜测。
+
+### 8.2 页面小计语义（关键）
+
+- `groups` 是**当前预览页的小计**（page subtotal），**不是**全量合计：它只对「本次请求返回的、
+  已通过 ERP-112 权限 + ERP-097 业务员数据范围校验的同一批有界行」聚合，换页后小计随之变化。
+- 每个分组（客户 / 月份）内再**按币种分开**统计 `count` 与 `amount`；金额只对同币种求和，
+  **绝不跨币种换算或相加**（沿用 ERP-112 免责口径「金额按订单原币呈现」）。
+- 分组与小计为纯函数（`DynamicSalesOrderReportRules.BuildGroupSubtotals`），确定性排序：
+  客户按 `customerId` 升序、月份按年月升序、组内币种按 `Currency` 枚举顺序；未知币种仍单独成行并排最后。
+- 不分组（`none`）或空页时 `groups` 为空列表。
+- 分组时服务端自动补齐计算所需的 `currency` / `totalAmount` 及分组键字段（`customerId` / `orderDate`），
+  保证即使请求未选择这些字段也能得到正确、币种安全的小计。
+
+### 8.3 与既有边界的关系
+
+- 仍复用 ERP-112 的「角色 → 菜单」授权（`sales-order`）与 ERP-097 业务员数据范围：小计只来自授权可见行。
+- 仍全程只读：无新增表 / 列 / 迁移，无写入，无任意 SQL；请求由既有 `OperationLogMiddleware` 记录审计。
+- 不新增权限模型，不执行真实数据库操作，不读取或打印任何密钥 / 连接串 / `.env` 值。
+
+## 9. 验证
 
 - 前端 UI 逻辑单测：`tests/automation/dynamic_sales_order_report_ui.test.js`（`node tests/automation/dynamic_sales_order_report_ui.test.js`）；
 - 语法检查：`node --check src/ERP.Api/wwwroot/js/dynamic-sales-order-report.js`；
+- 分组与小计单测：`ERP.UnitTests/DynamicSalesOrderGroupingTests.cs`；
 - 安全档构建 / 测试：`dotnet build NEWERP.sln -c Release` 与 `dotnet test src/ERP.UnitTests/ERP.UnitTests.csproj -c Release --no-build`。

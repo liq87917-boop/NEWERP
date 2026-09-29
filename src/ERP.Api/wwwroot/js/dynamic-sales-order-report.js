@@ -25,6 +25,13 @@ const DSOR_CURRENCY_OPTS = [
   { value: 'JPY', label: 'JPY 日元' },
 ];
 
+/* 分组键枚举（与后端 NormalizeGroupBy 一致；未知取值由后端拒绝） */
+const DSOR_GROUP_OPTS = [
+  { value: 'none', label: '不分组' },
+  { value: 'customer', label: '按客户分组' },
+  { value: 'month', label: '按月份分组' },
+];
+
 const DSOR_STATUS_LABELS = {
   Pending: '待提交', Submitted: '已提交', Approved: '已审核',
   Rejected: '已驳回', Completed: '已完成', Cancelled: '已取消',
@@ -39,7 +46,7 @@ let DSOR = {
   fields: [],         // 目录字段（白名单）
   selectedKeys: [],   // 当前勾选的字段键（默认全选）
   customers: [],      // 客户下拉来源（/api/base/customers）
-  filters: { startDate: '', endDate: '', customerId: '', status: '', currency: '', page: 1, pageSize: DSOR_DEFAULT_PAGE_SIZE },
+  filters: { startDate: '', endDate: '', customerId: '', status: '', currency: '', groupBy: 'none', page: 1, pageSize: DSOR_DEFAULT_PAGE_SIZE },
   view: null,         // 最近一次预览结果
 };
 
@@ -82,6 +89,9 @@ function dsorBuildRequest(state) {
   pageSize = Math.max(1, Math.min(maxPageSize, pageSize));
 
   const req = { fields, page, pageSize };
+
+  const groupBy = DSOR_GROUP_OPTS.some(o => o.value === state.groupBy) ? state.groupBy : 'none';
+  if (groupBy && groupBy !== 'none') req.groupBy = groupBy;
 
   const startDate = state.startDate ? String(state.startDate).slice(0, 10) : null;
   const endDate = state.endDate ? String(state.endDate).slice(0, 10) : null;
@@ -136,6 +146,19 @@ function dsorEmptyHtml() {
   return '<div class="empty" style="margin:8px 0">没有符合条件的销售订单（当前账号数据范围内的只读快照）。</div>';
 }
 
+/* 分组页面小计（ERP-114）：每个分组按币种分开，金额保留原币、绝不跨币种相加；仅当前预览页 */
+function dsorGroupsHtml(view) {
+  const groups = (view && view.groups) || [];
+  if (!groups.length) return '';
+  const rows = groups.map(g => {
+    const subs = (g.subtotals || []).map(s =>
+      `<span>${dsorEsc(s.currency)}：${s.count} 条 · 金额 ${dsorEsc(s.amount)}</span>`).join('　');
+    return `<div>${dsorEsc(g.label || g.key)}：${subs}</div>`;
+  }).join('');
+  return `<div class="pd-hint" style="margin:6px 0;color:#1d4ed8;background:#eff6ff;border-color:#bfdbfe">`
+    + `<b>本页小计（按币种）</b>${rows}</div>`;
+}
+
 /* 错误提示（授权 / 未登录 / 无效请求 / 网络失败分别可见，且不暴露任何数据） */
 function dsorErrorHtml(kind, message) {
   const labels = {
@@ -149,7 +172,7 @@ function dsorErrorHtml(kind, message) {
       <b>${dsorEsc(labels[kind] || '预览失败')}</b>：${dsorEsc(message || '')}</div>`;
 }
 
-/* 预览结果（口径 / 边界 / 免责文案 + 汇总 + 空结果 + 表格） */
+/* 预览结果（口径 / 边界 / 免责文案 + 汇总 + 分组小计 + 空结果 + 表格） */
 function dsorResultHtml(view) {
   const readOnly = view && view.readOnlyText ? `<div class="pd-hint">${dsorEsc(view.readOnlyText)}</div>` : '';
   const boundary = view && view.boundaryText ? `<div class="pd-hint">${dsorEsc(view.boundaryText)}</div>` : '';
@@ -157,8 +180,9 @@ function dsorResultHtml(view) {
   const summary = view
     ? `<div class="text-muted" style="margin:6px 0">共 ${view.total} 条 · 第 ${view.page} 页 · 每页 ${view.pageSize} 条</div>`
     : '';
+  const groups = view ? dsorGroupsHtml(view) : '';
   const empty = view && (!view.rows || view.rows.length === 0) ? dsorEmptyHtml() : '';
-  return `${readOnly}${boundary}${disclaimer}${summary}${empty}${dsorTableHtml(view)}`;
+  return `${readOnly}${boundary}${disclaimer}${summary}${groups}${empty}${dsorTableHtml(view)}`;
 }
 
 /* 字段选择器：仅由目录白名单渲染为复选框，无自由填写的字段名 */
@@ -209,7 +233,7 @@ function dsorToggleAll(checked) {
 async function openDynamicSalesOrderReport() {
   DSOR = {
     catalog: null, fields: [], selectedKeys: [], customers: [],
-    filters: { startDate: '', endDate: '', customerId: '', status: '', currency: '', page: 1, pageSize: DSOR_DEFAULT_PAGE_SIZE },
+    filters: { startDate: '', endDate: '', customerId: '', status: '', currency: '', groupBy: 'none', page: 1, pageSize: DSOR_DEFAULT_PAGE_SIZE },
     view: null,
   };
   const modal = document.getElementById('modal');
@@ -277,6 +301,8 @@ function dsorRender() {
     `<option value="${o.value}" ${f.status === o.value ? 'selected' : ''}>${o.label}</option>`).join('');
   const currencyOptions = DSOR_CURRENCY_OPTS.map(o =>
     `<option value="${o.value}" ${f.currency === o.value ? 'selected' : ''}>${o.label}</option>`).join('');
+  const groupOptions = DSOR_GROUP_OPTS.map(o =>
+    `<option value="${o.value}" ${f.groupBy === o.value ? 'selected' : ''}>${o.label}</option>`).join('');
 
   document.getElementById('modal').innerHTML = `
   <div class="modal modal-lg" style="max-width:1100px">
@@ -300,6 +326,7 @@ function dsorRender() {
         <label>客户 <select id="dsor-customer" style="width:100%"><option value="">全部客户</option>${customerOptions}</select></label>
         <label>状态 <select id="dsor-status" style="width:100%"><option value="">全部状态</option>${statusOptions}</select></label>
         <label>币种 <select id="dsor-currency" style="width:100%"><option value="">全部币种</option>${currencyOptions}</select></label>
+        <label>分组 <select id="dsor-groupby" style="width:100%">${groupOptions}</select></label>
         <label>每页 <input type="number" id="dsor-pagesize" value="${Number(f.pageSize)}" min="1" max="${maxPage}" style="width:80px"></label>
       </div>
     </div>
@@ -328,6 +355,7 @@ async function dsorPreview(page) {
     customerId: document.getElementById('dsor-customer').value,
     status: document.getElementById('dsor-status').value,
     currency: document.getElementById('dsor-currency').value,
+    groupBy: document.getElementById('dsor-groupby').value,
     pageSize: document.getElementById('dsor-pagesize').value,
     page: page || 1,
     maxPageSize: DSOR.catalog && DSOR.catalog.maxPageSize ? DSOR.catalog.maxPageSize : 200,
@@ -368,6 +396,7 @@ if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     DSOR_STATUS_OPTS,
     DSOR_CURRENCY_OPTS,
+    DSOR_GROUP_OPTS,
     DSOR_STATUS_LABELS,
     dsorEsc,
     dsorStatusLabel,
@@ -377,6 +406,7 @@ if (typeof module !== 'undefined' && module.exports) {
     dsorRenderCell,
     dsorTableHtml,
     dsorEmptyHtml,
+    dsorGroupsHtml,
     dsorErrorHtml,
     dsorResultHtml,
     dsorFieldChooserHtml,

@@ -1,6 +1,7 @@
 using ERP.Application.Common;
 using ERP.Application.DTOs;
 using ERP.Application.Interfaces;
+using ERP.Application.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using System.Security.Claims;
@@ -40,11 +41,22 @@ public class DynamicSalesOrderReportController : ControllerBase
         return Ok(ApiResponse<DynamicSalesOrderReportCatalogDto>.Success(catalog));
     }
 
-    /// <summary>按选定字段与有界筛选预览（只读、分页有界）</summary>
+    /// <summary>按选定字段与有界筛选预览（只读、分页有界）；可选按客户 / 月份分组的页面小计（ERP-114，币种分开）</summary>
     [HttpPost]
     public async Task<IActionResult> Preview([FromBody] DynamicSalesOrderReportRequest request)
     {
+        ArgumentNullException.ThrowIfNull(request);
+
+        // 分组键 fail closed：仅 none / customer / month；无效取值在此直接拒绝（先于任何读取）。
+        var groupBy = DynamicSalesOrderReportRules.NormalizeGroupBy(request.GroupBy);
+        if (groupBy != DynamicSalesOrderReportRules.GroupNone)
+            request.Fields = DynamicSalesOrderReportRules.EnsureGroupingFields(request.Fields, groupBy);
+
         var page = await _query.PreviewAsync(request, CurrentUserId());
-        return Ok(ApiResponse<DynamicSalesOrderReportPageDto>.Success(page));
+
+        // 页面小计：从「同一批有界、已授权预览行」计算，组内按币种分开、绝不跨币种相加。
+        var groups = DynamicSalesOrderReportRules.BuildGroupSubtotals(page.Rows, groupBy);
+        return Ok(ApiResponse<DynamicSalesOrderReportPageDto>.Success(
+            page with { GroupBy = groupBy, Groups = groups }));
     }
 }

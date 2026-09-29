@@ -2,6 +2,7 @@ using ERP.Application.Common;
 using ERP.Application.DTOs;
 using ERP.Domain.Entities;
 using ERP.Domain.Enums;
+using System.Globalization;
 
 namespace ERP.Application.Services;
 
@@ -26,6 +27,17 @@ public static class DynamicSalesOrderReportRules
 
     /// <summary>每页条数上限（有界：单次请求最多返回这么多行）</summary>
     public const int MaxPageSize = 200;
+
+    // ==================== 0.1 分组键（ERP-114） ====================
+
+    /// <summary>不分组（默认）</summary>
+    public const string GroupNone = "none";
+
+    /// <summary>按客户分组</summary>
+    public const string GroupCustomer = "customer";
+
+    /// <summary>按订单日期月份分组</summary>
+    public const string GroupMonth = "month";
 
     // ==================== 1. 文案 ====================
 
@@ -198,5 +210,157 @@ public static class DynamicSalesOrderReportRules
         foreach (var key in fieldKeys)
             row[key] = Select(order, key);
         return row;
+    }
+
+    // ==================== 6. 分组与小计（ERP-114） ====================
+
+    /// <summary>
+    /// 规范化分组键（fail closed）：空 / 留空 = 不分组（none）；仅接受 none / customer / month（大小写不敏感），
+    /// 未知取值显式拒绝。
+    /// </summary>
+    public static string NormalizeGroupBy(string? groupBy)
+    {
+        if (string.IsNullOrWhiteSpace(groupBy))
+            return GroupNone;
+
+        var normalized = groupBy.Trim();
+        if (string.Equals(normalized, GroupNone, StringComparison.OrdinalIgnoreCase)) return GroupNone;
+        if (string.Equals(normalized, GroupCustomer, StringComparison.OrdinalIgnoreCase)) return GroupCustomer;
+        if (string.Equals(normalized, GroupMonth, StringComparison.OrdinalIgnoreCase)) return GroupMonth;
+
+        throw BusinessException.InvalidParameter($"无效的分组键: {groupBy}（可选：none / customer / month）");
+    }
+
+    /// <summary>
+    /// 分组时补齐计算页面小计所需的字段（currency / totalAmount + 分组键字段）。
+    /// <para>空 / 未指定字段 = 返回 null（由查询层按「全部白名单字段」处理，已含所需字段）；不分组时返回 null 不改动。</para>
+    /// </summary>
+    public static List<string>? EnsureGroupingFields(IEnumerable<string>? fields, string groupBy)
+    {
+        if (groupBy == GroupNone)
+            return null;
+
+        var requested = (fields ?? Array.Empty<string>())
+            .Where(f => !string.IsNullOrWhiteSpace(f))
+            .Select(f => f.Trim())
+            .ToList();
+        if (requested.Count == 0)
+            return null;
+
+        AppendIfMissing(requested, "currency");
+        AppendIfMissing(requested, "totalAmount");
+        AppendIfMissing(requested, groupBy == GroupCustomer ? "customerId" : "orderDate");
+        return requested;
+    }
+
+    /// <summary>
+    /// 从「当前预览页的只读行」（同一批有界、已授权行）计算分组页面小计（ERP-114）：
+    /// 按分组键聚合，组内再按币种分开统计条数与金额；金额只对同币种求和，绝不跨币种相加。
+    /// <para>分组键与组序均为确定性（客户按 Id 升序、月份按年月升序、币种按枚举顺序）；不分组或空页返回空列表。</para>
+    /// </summary>
+    public static List<DynamicSalesOrderReportGroupDto> BuildGroupSubtotals(
+        IReadOnlyList<Dictionary<string, object?>> rows, string groupBy)
+    {
+        var normalized = NormalizeGroupBy(groupBy);
+        if (normalized == GroupNone || rows is null || rows.Count == 0)
+            return new List<DynamicSalesOrderReportGroupDto>();
+
+        var buckets = new Dictionary<string, GroupBucket>(StringComparer.Ordinal);
+        foreach (var row in rows)
+        {
+            var (key, label, sortKey) = GroupBucketOf(row, normalized);
+            if (!buckets.TryGetValue(key, out var bucket))
+            {
+                bucket = new GroupBucket { Key = key, Label = label, SortKey = sortKey };
+                buckets[key] = bucket;
+            }
+
+            var currency = ReadCurrency(row);
+            var amount = ReadAmount(row);
+            if (!bucket.Currencies.TryGetValue(currency, out var acc))
+                acc = (0, 0m);
+            acc = (acc.Count + 1, acc.Amount + amount);
+            bucket.Currencies[currency] = acc;
+        }
+
+        return buckets.Values
+            .OrderBy(b => b.SortKey, StringComparer.Ordinal)
+            .Select(b => new DynamicSalesOrderReportGroupDto(
+                b.Key,
+                b.Label,
+                b.Currencies
+                    .OrderBy(kv => CurrencyOrder(kv.Key))
+                    .ThenBy(kv => kv.Key, StringComparer.Ordinal)
+                    .Select(kv => new DynamicSalesOrderReportCurrencySubtotalDto(
+                        kv.Key, kv.Value.Count, kv.Value.Amount))
+                    .ToList()))
+            .ToList();
+    }
+
+    private sealed class GroupBucket
+    {
+        public string Key = string.Empty;
+        public string Label = string.Empty;
+        public string SortKey = string.Empty;
+        public Dictionary<string, (int Count, decimal Amount)> Currencies = new(StringComparer.Ordinal);
+    }
+
+    private static (string Key, string Label, string SortKey) GroupBucketOf(
+        Dictionary<string, object?> row, string groupBy)
+    {
+        if (groupBy == GroupCustomer)
+        {
+            var customerId = ReadLong(row, "customerId");
+            return ($"customer:{customerId}", $"客户 #{customerId}",
+                customerId.ToString("D19", CultureInfo.InvariantCulture));
+        }
+
+        var date = ReadDate(row, "orderDate");
+        var yyyyMM = date.ToString("yyyy-MM", CultureInfo.InvariantCulture);
+        return ($"month:{yyyyMM}", $"{date.Year}年{date.Month}月",
+            date.ToString("yyyyMM", CultureInfo.InvariantCulture));
+    }
+
+    private static long ReadLong(Dictionary<string, object?> row, string key)
+    {
+        if (row.TryGetValue(key, out var v) && v != null)
+            return Convert.ToInt64(v, CultureInfo.InvariantCulture);
+        return 0L;
+    }
+
+    private static DateTime ReadDate(Dictionary<string, object?> row, string key)
+    {
+        if (row.TryGetValue(key, out var v) && v != null)
+        {
+            if (v is DateTime dt) return dt;
+            return Convert.ToDateTime(v, CultureInfo.InvariantCulture);
+        }
+        return DateTime.MinValue;
+    }
+
+    private static string ReadCurrency(Dictionary<string, object?> row)
+    {
+        if (row.TryGetValue("currency", out var v) && v != null)
+            return Convert.ToString(v, CultureInfo.InvariantCulture)?.Trim() ?? string.Empty;
+        return string.Empty;
+    }
+
+    private static decimal ReadAmount(Dictionary<string, object?> row)
+    {
+        if (row.TryGetValue("totalAmount", out var v) && v != null)
+            return Convert.ToDecimal(v, CultureInfo.InvariantCulture);
+        return 0m;
+    }
+
+    private static int CurrencyOrder(string currency)
+    {
+        // 未知币种仍单独小计（绝不并入其它币种），仅排到最后。
+        return Enum.TryParse<Currency>(currency, true, out var c) ? (int)c : int.MaxValue;
+    }
+
+    private static void AppendIfMissing(List<string> list, string key)
+    {
+        if (!list.Contains(key, StringComparer.OrdinalIgnoreCase))
+            list.Add(key);
     }
 }
