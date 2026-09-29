@@ -1,5 +1,7 @@
 using ERP.Application.Common;
+using ERP.Application.DTOs;
 using ERP.Application.Interfaces;
+using ERP.Application.Services;
 using ERP.Domain.Entities;
 using ERP.Domain.Enums;
 using ERP.Infrastructure.Export;
@@ -95,6 +97,18 @@ public class PurchaseOrderController : DocumentControllerBase<PurchaseOrder>
     public async Task<IActionResult> DeliveryExceptions([FromQuery] PurchaseOrderDeliveryExceptionQuery query)
         => Ok(ApiResponse<PurchaseOrderDeliveryExceptionReport>.Success(
             await PurchaseOrderDeliveryExceptions.ForQueryAsync(Db, query)));
+
+    /// <summary>
+    /// 供应商首收交期（ERP-109，只读派生）：按供应商 + 订单日期区间筛选未删除且已审核的采购订单，
+    /// 用显式入库单 PurchaseOrderId 链接批量装载本页入库，派生「订单日期 → 首张有效已审核入库」的首收日期与间隔天数；
+    /// 未审核 / 已删除 / 供应商不一致 / 早于订单日期的入库仅作异常证据列出、不计入首收，缺失或不一致日期保持未知。
+    /// <para>只读：不写任何表、不执行迁移 / 生产 SQL / 真实数据库操作 / 部署，不改写采购订单 / 入库单 / 库存与库存成本；
+    /// 这不是完整交付完成度，也不是准时率评分。</para>
+    /// </summary>
+    [HttpGet("first-receipt-lead-times")]
+    public async Task<IActionResult> SupplierFirstReceiptLeadTimes([FromQuery] SupplierFirstReceiptLeadTimeQuery query)
+        => Ok(ApiResponse<SupplierFirstReceiptLeadTimeReport>.Success(
+            await SupplierFirstReceiptLeadTimeService.ForQueryAsync(Db, query)));
 
     /// <summary>
     /// 采购订单退货影响（ERP-100，只读派生）：按显式链接链「采购退货 → 来源入库单 → 本采购订单」派生

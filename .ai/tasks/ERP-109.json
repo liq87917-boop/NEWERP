@@ -1,7 +1,7 @@
 {
   "id": "ERP-109",
   "title": "Summarize supplier first receipt lead times",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "low",
   "description": "Use explicit PurchaseOrderId links on approved stock-ins to measure days from order date to first approved receipt. Missing and inconsistent dates remain unknown; this is not full delivery completion or an on-time score. Development-only read-only feature. No migration, production SQL, real database execution, irreversible action, secret change or deployment.",
   "acceptance_criteria": [
@@ -62,6 +62,6 @@
     "status": "not_required",
     "reason": "Development-only read-only feature"
   },
-  "attempts": 0,
+  "attempts": 1,
   "created_at": "2026-09-28T09:30:08.701123Z"
 }
