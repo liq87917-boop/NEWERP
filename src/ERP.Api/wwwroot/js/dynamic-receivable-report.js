@@ -373,6 +373,7 @@ function dsrRender() {
 
     <div class="modal-footer">
       <button class="btn btn-primary" onclick="dsrPreview(1)">预览</button>
+      <button class="btn btn-neutral" onclick="dsrExportExcel()">📥 导出 Excel</button>
       <button class="btn btn-neutral" onclick="closeModal()">关闭</button>
     </div>
     <div id="dsr-result"></div>
@@ -435,6 +436,65 @@ function dsrPage(delta) {
   dsrPreview(page);
 }
 
+/* 触发浏览器下载 xlsx 附件：授权 / 无效失败解析业务错误信封，网络失败抛错 */
+async function dsrDownload(path, body) {
+  const headers = { 'Content-Type': 'application/json' };
+  const token = typeof localStorage !== 'undefined' ? (localStorage.getItem('erp_token') || '') : '';
+  if (token) headers['Authorization'] = 'Bearer ' + token;
+  const resp = await fetch(path, { method: 'POST', headers, body: JSON.stringify(body) });
+
+  const contentType = resp.headers.get('content-type') || '';
+  const isXlsx = contentType.indexOf('spreadsheetml') >= 0;
+  if (!isXlsx) {
+    let message = '导出失败';
+    let kind = 'error';
+    try {
+      const data = await resp.json();
+      if (data && typeof data === 'object') {
+        if (data.code === 2000 || data.code === 2003) kind = 'unauthorized';
+        else if (data.code === 2002) kind = 'forbidden';
+        else if (data.code && data.code !== 0) kind = 'invalid';
+        if (data.message) message = data.message;
+      }
+    } catch (e) { /* 忽略非 JSON 响应体 */ }
+    if (kind === 'unauthorized' && typeof logout === 'function') logout();
+    const err = new Error(message);
+    err.kind = kind;
+    throw err;
+  }
+
+  const blob = await resp.blob();
+  const disposition = resp.headers.get('content-disposition') || '';
+  const match = /filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/i.exec(disposition);
+  const filename = (match && match[1] ? match[1].replace(/['"]/g, '') : '') || 'CustomerReceivableEvidence.xlsx';
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  dsrRenderResult('<div class="pd-hint">已导出当前页为 Excel（xlsx），请查看下载。</div>');
+}
+
+/* 导出当前页为 Excel（ERP-119，只读）：与预览共用同一请求体（字段 / 筛选 / 分页），
+   授权 / 无效 / 网络失败在结果区可见；空页正常下载仅表头文件。 */
+async function dsrExportExcel() {
+  const state = dsrBuildState(DSR.filters.page);
+  if (state.startDate && state.endDate && state.startDate > state.endDate) {
+    dsrRenderResult(dsrErrorHtml('invalid', '开始日期不能晚于结束日期'));
+    return;
+  }
+  const req = dsrBuildRequest(state);
+  dsrRenderResult(dsrLoadingHtml());
+  try {
+    await dsrDownload('/api/dynamic-receivable-report/export', req);
+  } catch (err) {
+    dsrRenderResult(dsrErrorHtml((err && err.kind) || 'network', (err && err.message) || '无法连接到服务器'));
+  }
+}
+
 /* Node 单测导出（浏览器中 module 为 undefined，自动跳过） */
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
@@ -461,6 +521,8 @@ if (typeof module !== 'undefined' && module.exports) {
     dsrErrorModalHtml,
     dsrPreview,
     dsrPage,
+    dsrDownload,
+    dsrExportExcel,
   };
 }
 

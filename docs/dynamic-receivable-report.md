@@ -12,6 +12,7 @@
 |---|---|---|
 | GET | `/api/dynamic-receivable-report` | 返回有限白名单字段目录（需登录 + 客户资料菜单授权） |
 | POST | `/api/dynamic-receivable-report` | 按选定字段与有界筛选预览当前账号数据范围内的发票证据 |
+| POST | `/api/dynamic-receivable-report/export` | 导出当前选定页为 Excel（xlsx，只读，复用有界授权预览与选定列顺序） |
 
 请求体（POST，`DynamicReceivableReportRequest`）：
 
@@ -87,7 +88,9 @@
 - `src/ERP.Infrastructure/Reports/DynamicReceivableReportQuery.cs`：只读查询实现；
 - `src/ERP.Application/Services/CustomerReceivableReconciliationService.cs`：新增 `ForScopedPreviewAsync`（作用域化派生）；
 - `src/ERP.Api/Controllers/DynamicReceivableReportController.cs`：HTTP 控制器；
-- `src/ERP.UnitTests/DynamicReceivableReportTests.cs`：单元测试。
+- `src/ERP.Application/Services/DynamicReceivableReportRules.cs`：字段白名单、校验、行映射与 Excel 公式注入转义（纯规则）；
+- `src/ERP.UnitTests/DynamicReceivableReportTests.cs`：预览单元测试；
+- `src/ERP.UnitTests/DynamicReceivableExcelTests.cs`：Excel 导出单元测试。
 
 ## 9. 测试覆盖（`ERP.UnitTests/DynamicReceivableReportTests.cs`）
 
@@ -142,4 +145,46 @@ dotnet test src/ERP.UnitTests/ERP.UnitTests.csproj -c Release --no-build
 - 语法检查：`node --check src/ERP.Api/wwwroot/js/dynamic-receivable-report.js`；
 - 安全档构建 / 测试：`dotnet build NEWERP.sln -c Release` 与
   `dotnet test src/ERP.UnitTests/ERP.UnitTests.csproj -c Release --no-build`。
+
+## 12. Excel 导出（ERP-119）
+
+### 12.1 接口
+
+- `POST /api/dynamic-receivable-report/export`：请求体与预览完全相同（`DynamicReceivableReportRequest`），
+  只导出「当前页」的选定列；数据工作表复用 `ERP.Infrastructure.Export.ExcelExporter`。
+- 文件名 `CustomerReceivableEvidence_yyyyMMddHHmmss.xlsx`；
+  内容类型 `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`。
+
+### 12.2 安全与边界（导出时重新校验）
+
+1. **身份 / 菜单授权**：导出与预览同源，复用 `DynamicReceivableReportQuery.PreviewAsync`，每次请求重新校验
+   登录用户与 `customer`（客户资料）菜单授权（fail closed），不缓存权限。
+2. **数据范围**：复用 ERP-097 业务员数据范围，只导出当前账号可见行；越界筛选导出为空（仅表头工作簿）。
+3. **字段 / 筛选 / 页大小**：与预览相同的 29 个白名单字段、客户 / 发票日期 / 币种 / 分配状态 / 发票状态枚举、
+   日期区间与 `1~100` 页大小校验，无效请求在读取前拒绝。
+4. **只导当前页**：只导出请求 `page` / `pageSize` 对应的那一页（单页上限 100），不是全量导出。
+5. **原币与剩余证据状态**：金额按发票 / 分摊证据原币保留，绝不汇率换算或跨币种求和；`known` / `unknown` /
+   `over_allocated` 三种剩余证据状态原样保留，`remainingAmount` 为 null 时单元格为空（不轧为 0 或负数）。
+6. **公式注入防护**：文本单元格以 `=` / `+` / `-` / `@` / 制表符 / 回车 / 换行开头时，前缀单引号转义，
+   使单元格保持字面文本、不被当作公式执行（`DynamicReceivableReportRules.EscapeFormulaLeading`）。
+7. **只读 + 审计**：无写入、无任意 SQL；`POST` 由既有 `OperationLogMiddleware` 记录审计（动作「导出」）。
+
+### 12.3 限制（证据边界）
+
+- 单次导出最多 `pageSize ≤ 100` 行（有界分页），不提供全量导出。
+- 空结果页返回仅含表头的工作簿（数据工作表 0 数据行）。
+- 导出不含权威应收账款余额、收款 / 核销结算、到期日账龄或催收结论，也不含跨币种合计或换算。
+
+### 12.4 前端（设计器）
+
+- 「📥 导出 Excel」按钮与预览共用同一请求体（当前字段 / 筛选 / 页码 / 每页条数）；
+- 成功（xlsx 附件）触发浏览器下载；授权失败（`2000/2002/2003`）与网络失败在结果区可见；空页正常下载仅表头文件。
+
+### 12.5 测试覆盖（`ERP.UnitTests/DynamicReceivableExcelTests.cs`）
+
+- 导出当前页的列顺序、行数与单元格值（含原币保留）；
+- 公式前导文本转义（`=1+1` 等保持字面、非公式单元格）；
+- `known` / `unknown` / `over_allocated` 三种剩余证据状态与 null 剩余金额（不轧为 0）；
+- 无身份 / 无菜单授权 / 越界业务员（含越界客户空页）/ 页大小超限拒绝；
+- 空页仅表头、仅导出当前页受页大小上限约束、以及只读不写库。
 

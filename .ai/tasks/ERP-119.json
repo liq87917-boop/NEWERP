@@ -1,7 +1,7 @@
 {
   "id": "ERP-119",
   "title": "Export selected dynamic customer receivable evidence page to Excel",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "medium",
   "description": "User scene: download the currently selected, scoped invoice and receipt-allocation evidence page as xlsx, with explicit known/unknown remaining state and original currency. Revalidate current user, existing customer menu, salesperson scope, selected fields and page cap on every export; reuse ERP-117 preview and existing ExcelExporter. Text with spreadsheet formula prefixes must stay literal. No authoritative balance or cross-currency sum. Existing HTTP audit records the download. Development only: no model SQL, database writes, migration, real database execution, secret/.env change, or deployment. Verify workbook tests and safe build/test.",
   "acceptance_criteria": [
@@ -51,6 +51,6 @@
     "status": "not_required",
     "reason": "Development-only bounded read-only feature"
   },
-  "attempts": 0,
+  "attempts": 1,
   "created_at": "2026-09-29T03:22:26.663056Z"
 }

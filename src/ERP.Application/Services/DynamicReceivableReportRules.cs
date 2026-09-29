@@ -193,4 +193,37 @@ public static class DynamicReceivableReportRules
             mapped[key] = Select(row, key);
         return mapped;
     }
+
+    // ==================== 6. Excel 导出（ERP-119） ====================
+
+    /// <summary>电子表格公式注入风险首字符（OWASP：= / + / - / @ 及制表符 / 回车 / 换行）</summary>
+    private static bool IsFormulaLeadingChar(char c)
+        => c is '=' or '+' or '-' or '@' or '\t' or '\r' or '\n';
+
+    /// <summary>文本是否以电子表格公式字符开头（会触发 Excel 公式注入）</summary>
+    public static bool IsFormulaLeading(string? value)
+    {
+        if (string.IsNullOrEmpty(value)) return false;
+        return IsFormulaLeadingChar(value[0]);
+    }
+
+    /// <summary>
+    /// 转义 Excel 公式前导文本：以危险字符开头的文本前缀单引号，使单元格保持字面文本、不被当作公式执行。
+    /// <para>仅对字符串生效；数值 / 日期 / 布尔等类型原样返回（由 ExcelExporter 按其类型写入数值单元格）。</para>
+    /// </summary>
+    public static object? EscapeFormulaLeading(object? value)
+    {
+        if (value is string s && IsFormulaLeading(s))
+            return "'" + s;
+        return value;
+    }
+
+    /// <summary>把一页预览行转成导出行：对每个单元格做公式注入转义，键保持不变</summary>
+    public static Dictionary<string, object?> BuildExportRow(Dictionary<string, object?> row)
+    {
+        var export = new Dictionary<string, object?>(StringComparer.Ordinal);
+        foreach (var kv in row)
+            export[kv.Key] = EscapeFormulaLeading(kv.Value);
+        return export;
+    }
 }
