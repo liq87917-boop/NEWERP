@@ -1,13 +1,11 @@
 {
   "task": "ERP-102",
-  "status": "blocked",
-  "execution_outcome": "repair_budget_exhausted",
-  "attempts": 3,
-  "last_error": "Task produced no checkpointable business changes.",
-  "attempted_fix": {
-    "provider": "deepseek",
-    "model": "deepseek-v4-pro"
-  },
-  "quarantine": "Saved working directory and index state On main: autonomy quarantine ERP-102",
-  "finished_at": "2026-09-28T07:41:20.095576Z"
+  "status": "completed",
+  "execution_outcome": "completed",
+  "normalized_finish_reason": "build_validated",
+  "cline_exit_code": 0,
+  "cline_finish_reason_raw": "completed",
+  "attempts": 2,
+  "browser_acceptance": null,
+  "finished_at": "2026-09-29T01:10:45.320588Z"
 }

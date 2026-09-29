@@ -1,11 +1,10 @@
 {
   "schema_version": 2,
   "project": "NEWERP",
-  "updated_at": "2026-09-29T00:54:17.498714Z",
+  "updated_at": "2026-09-29T01:10:45.423484Z",
   "phase": "ready",
   "current_task": null,
   "queue": [
-    "ERP-102",
     "ERP-103",
     "ERP-108",
     "ERP-109",
@@ -95,6 +94,7 @@
     "ERP-099",
     "ERP-100",
     "ERP-101",
+    "ERP-102",
     "ERP-104",
     "ERP-105",
     "ERP-106",
@@ -102,43 +102,38 @@
   ],
   "blocked": [],
   "last_build": {
-    "task": "ERP-096",
+    "task": "ERP-102",
     "profile": "safe",
     "status": "passed",
     "exit_code": 0,
-    "log": ".ai\\logs\\ERP-096-validation-1.log",
-    "at": "2026-09-29T00:49:03.411369Z"
+    "log": ".ai\\logs\\ERP-102-validation-2.log",
+    "at": "2026-09-29T01:10:44.896226Z"
   },
-  "last_error": {
-    "task": "ERP-102",
-    "attempt": 1,
-    "summary": "Path guard failed:\noutside allowed_paths: src/ERP.Application/DTOs/InventoryLocationLotDtos.cs\noutside allowed_paths: src/ERP.Application/Services/InventoryLocationLotService.cs"
-  },
+  "last_error": null,
   "last_deepseek_fix": {
     "task": "ERP-102",
     "attempt": 2,
     "model": "deepseek-v4-pro",
-    "started_at": "2026-09-29T00:51:52.137960Z"
+    "exit_code": 0,
+    "finished_at": "2026-09-29T01:09:46.276093Z"
   },
   "git_sync": {
     "branch": "main",
-    "local_sha": "59da738",
+    "local_sha": "b8aab62",
     "status": "pending",
-    "ahead": 13,
+    "ahead": 14,
     "behind": 0,
-    "last_attempt_at": "2026-09-28T13:15:26.384551Z",
+    "last_attempt_at": "2026-09-29T01:10:45.321193Z",
     "last_error": null
   },
   "next_recommended_tasks": [
-    "ERP-102",
     "ERP-103",
     "ERP-108",
-    "ERP-109"
+    "ERP-109",
+    "ERP-110"
   ],
   "runner": {
     "status": "stopped",
     "pid": null
-  },
-  "blocker": null,
-  "finish_reason": "deepseek_supervisor_recovery"
+  }
 }

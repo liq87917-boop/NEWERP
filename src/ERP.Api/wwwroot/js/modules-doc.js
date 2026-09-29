@@ -162,6 +162,8 @@ Object.assign(MODULES, {
        ERP-047：销售订单变更申请登记册（只登记拟议变更：来源快照 + 拟议值对照；不审核、不套用、不改写来源订单） */
     extraActions: [
       { label: '🚚 出货 / 财务进度', onclick: 'openSalesOrderShipmentFinanceReport', title: '按客户 + 币种查看订单的已订 / 已出 / 未出数量与收款链接金额（复用出库与财务核对的权威口径，未知显示「未知」；不是应收账款台账）' },
+      /* ERP-102：销售交期异常工作台入口（工具栏，始终可见；只读派生，不改写订单状态 / 进度，不执行迁移 / 生产 SQL / 部署） */
+      { label: '🚚 交期异常', onclick: 'openSalesOrderDeliveryExceptions', title: '按客户 + 显式 as-of 基准日派生销售订单交期异常（逾期 / 即将到期 / 已出齐 / 在途 / 未知；明细交期优先，只按已审核未删除销售出库出货证据，缺日期或证据不完整显示「未知」，不改写订单状态与进度）' },
       { label: '🧾 订单 / 收款核对', onclick: 'openSalesOrderReceiptReconciliationReport', title: '按客户 + 币种核对销售订单与收款证据：已订 / 已出 / 未出数量 + 已关联收款金额 / 未覆盖金额，未关联收款单单独列出（只读派生；不是应收账款台账 / 客户对账单 / 收款授权 / 账龄表）' },
       { label: '📝 变更申请台账', onclick: 'openSalesOrderChangeRequests()', title: '查看销售订单变更申请登记册（只登记拟议变更与来源快照对照；不审核、不套用、不改写来源订单与下游记录）' },
       /* ERP-053：客户收款引用登记入口（工具栏，始终可见；登记「收款单指向哪几张销售订单」的引用证据，

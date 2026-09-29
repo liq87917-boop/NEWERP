@@ -83,6 +83,16 @@ public class SalesOrderController : DocumentControllerBase<SalesOrder>
             await SalesOrderProgress.ForSalesOrderAsync(Db, id)));
 
     /// <summary>
+    /// 销售交期异常工作台（ERP-102，只读派生、分页有界）：按客户 + 显式 as-of 基准日过滤销售订单，
+    /// 报告订单头 / 明细行交货日期（明细行优先）与「已订 / 已审核出货 / 未出」数量证据，并派生逾期 / 即将到期 / 已出齐 / 在途 / 未知交期状态；
+    /// 缺日期或出货证据不完整为未知；不改写订单状态与已登记进度，不执行迁移 / 生产 SQL / 真实数据库操作 / 部署。
+    /// </summary>
+    [HttpGet("delivery-exceptions")]
+    public async Task<IActionResult> DeliveryExceptions([FromQuery] SalesOrderDeliveryExceptionQuery query)
+        => Ok(ApiResponse<SalesOrderDeliveryExceptionReport>.Success(
+            await SalesOrderDeliveryExceptions.ForQueryAsync(Db, query)));
+
+    /// <summary>
     /// 销售订单退货影响（ERP-101，只读派生）：按显式链接链「销售退货 → 来源出库单 → 本销售订单」派生
     /// 毛出货 / 有效退货 / 净出货数量，并把未审核、客户不一致、来源已删除、来源不属于本单、未关联来源
     /// 的退货作为异常单列（绝不推断为扣减）；超退净额为负、不静默钳制；证据不完整为未知。
