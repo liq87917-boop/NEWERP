@@ -185,6 +185,22 @@ ERP-068 供应商对账与账龄工作台的既有筛选与稳定分页，预览
 
 `none` 或空页时 `summaries` 为空；汇总只统计当前页、非全量合计。全程只读、无写入，`POST` 由既有 `OperationLogMiddleware` 记录审计。
 
+## 前端金额汇总可视化（ERP-147）
+
+字段设计器 `wwwroot/js/supplier-reconciliation-aging.js` 新增「③ 金额汇总」选择器，复用 ERP-146 的金额汇总语义，在预览结果上方渲染当前授权预览页的已知有效金额汇总表：
+
+- 选择器只提供 ERP-146 允许的汇总模式：`none` / `supplierCurrency` / `supplierCurrencyAging`（`SRA_SUMMARY_MODES` 白名单，无自由输入）；非法 / 缺失模式经 `sraDesSummaryMode` fail closed 回落 `none`，绝不进入请求；
+- 预览请求体由 `sraDesBuildRequest` 始终携带 `summaryMode`（= 选中的白名单模式），复用既有有界、已授权预览（每次请求重新校验身份 / 采购订单菜单授权 / 字段 / 筛选 / 页大小 / 汇总模式）；
+- 结果渲染 `sraDesSummaryHtml`：按后端返回的 `summaries`（`{ supplierId, supplierCode, supplierName, currency, agingBucket, agingBucketText, invoiceCount, grossAmount, activeAllocatedAmount, remainingAmount, unknownRemainingInvoiceCount, overAllocatedInvoiceCount }`）渲染金额汇总表，标签经 HTML 转义（无 unsafe HTML）；未知金额（null）绝不回落为 0；
+- 列标签覆盖供应商 / 币种 / 可选账龄分桶（仅 `supplierCurrencyAging` 模式）/ 含税总额证据 / 有效已分配 / 算术剩余证据；草稿 / 已作废金额绝不并入（说明文案显式标注）；不同币种分别成行、绝不合并或换算；
+- 空页 / `none` 不渲染汇总或显示可见空提示；翻页后汇总随 `view.summaries` 重渲染；标注「仅当前预览页，非全量合计」。
+
+授权失败 / 无效模式 / 网络失败均在结果区可见（fail closed）；全程只读，无写入。汇总只影响预览展示，**不进入** CSV / Excel / PDF 行导出（导出仍只含当前页选定列证据，`POST` 由既有 `OperationLogMiddleware` 记录审计）。
+
+### 单元测试
+
+`tests/automation/dynamic_supplier_aging_amount_summary_ui.test.js`（Node，无需浏览器）覆盖：汇总模式选择（仅 ERP-146 白名单、非法回落 none）、请求携带 `summaryMode`、按币种分行、未知金额保持未知、草稿 / 作废排除说明、安全转义渲染、翻页随页更新、权限 / 网络失败态，以及汇总与下载范围的接线契约。
+
 ## 文件地图
 
 - `src/ERP.Application/DTOs/DynamicSupplierAgingReportDtos.cs`：目录 / 请求 / 结果 DTO；
@@ -196,6 +212,7 @@ ERP-068 供应商对账与账龄工作台的既有筛选与稳定分页，预览
 - `src/ERP.UnitTests/DynamicSupplierAgingPdfTests.cs`：ERP-143 PDF 导出单元测试（内存库，不连 SQL Server、不启动 API）；
 - `src/ERP.UnitTests/DynamicSupplierAgingGroupingTests.cs`：ERP-144 页面分组计数单元测试（内存库，不连 SQL Server、不启动 API）；
 - `src/ERP.UnitTests/DynamicSupplierAgingAmountSummaryTests.cs`：ERP-146 页面金额汇总单元测试（内存库，不连 SQL Server、不启动 API）；
-- `src/ERP.Api/wwwroot/js/supplier-reconciliation-aging.js`：ERP-068 工作台 + ERP-141 前端字段设计器（`openSupplierAgingDesigner`，纯函数可 Node 单测）+ ERP-145 分组计数可视化（`sraDesGroupKey` / `sraDesGroupSelectHtml` / `sraDesGroupChartHtml`）；
+- `src/ERP.Api/wwwroot/js/supplier-reconciliation-aging.js`：ERP-068 工作台 + ERP-141 前端字段设计器（`openSupplierAgingDesigner`，纯函数可 Node 单测）+ ERP-145 分组计数可视化（`sraDesGroupKey` / `sraDesGroupSelectHtml` / `sraDesGroupChartHtml`）+ ERP-147 金额汇总可视化（`sraDesSummaryMode` / `sraDesSummarySelectHtml` / `sraDesSummaryHtml`）；
 - `tests/automation/dynamic_supplier_aging_report_ui.test.js`：ERP-141 前端 UI 逻辑单测（Node，无需浏览器）；
 - `tests/automation/dynamic_supplier_aging_grouping_ui.test.js`：ERP-145 前端分组计数 UI 逻辑单测（Node，无需浏览器）。
+- `tests/automation/dynamic_supplier_aging_amount_summary_ui.test.js`：ERP-147 前端金额汇总 UI 逻辑单测（Node，无需浏览器）。

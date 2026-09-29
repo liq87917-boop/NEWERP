@@ -500,11 +500,19 @@ const SRA_GROUP_KEYS = [
   { key: 'allocationState', label: '按分配状态' },
 ];
 
+/* ERP-146 允许的金额汇总模式（有限、只读；后端 fail closed 拒绝非法取值，前端绝不发送范围外键） */
+const SRA_SUMMARY_MODES = [
+  { key: 'none', label: '不汇总金额（仅表格 / 分组计数）' },
+  { key: 'supplierCurrency', label: '按供应商 + 币种汇总金额' },
+  { key: 'supplierCurrencyAging', label: '按供应商 + 币种 + 账龄分桶汇总金额' },
+];
+
 let SRA_DESIGNER = {
   catalog: null,      // GET /api/supplier-reconciliation-aging/report 返回的目录 DTO
   fields: [],         // 目录字段（白名单）
   selectedKeys: [],   // 当前勾选的字段键（默认全选）
   groupBy: 'none',    // 当前分组键（仅 ERP-144 白名单；非法值回落 none）
+  summaryMode: 'none', // 当前金额汇总模式（仅 ERP-146 白名单；非法值回落 none）
   view: null,         // 最近一次预览结果
 };
 
@@ -538,6 +546,12 @@ function sraDesGroupKey(value) {
   return SRA_GROUP_KEYS.some(g => g.key === key) ? key : 'none';
 }
 
+/* 金额汇总模式规范化（fail closed）：只保留 ERP-146 允许的模式，缺失 / 空白 / 非法值一律回落 none（绝不进入请求） */
+function sraDesSummaryMode(value) {
+  const key = String(value == null ? '' : value).trim();
+  return SRA_SUMMARY_MODES.some(m => m.key === key) ? key : 'none';
+}
+
 /* 组装有界预览请求体：字段只来自目录、分页有界、筛选仅复用工作台当前筛选，绝不接受任意字段名或 SQL */
 function sraDesBuildRequest(state) {
   const fields = sraDesSelectFields(state.catalogFields, state.selectedKeys);
@@ -549,6 +563,7 @@ function sraDesBuildRequest(state) {
 
   const req = { fields, page, pageSize };
   req.groupBy = sraDesGroupKey(state.groupBy);
+  req.summaryMode = sraDesSummaryMode(state.summaryMode);
 
   const supplierId = Number(state.supplierId);
   if (Number.isFinite(supplierId) && supplierId > 0) req.supplierId = supplierId;
@@ -676,6 +691,65 @@ function sraDesGroupChartHtml(view) {
     + `${rows}${empty}</div>`;
 }
 
+/* 汇总金额显示：null / undefined = 未知（命中上限或无效证据，绝不回落 0） */
+function sraDesMoney(v) {
+  if (v === null || v === undefined) return '未知';
+  const n = Number(v);
+  if (!Number.isFinite(n)) return '未知';
+  return String(Math.round(n * 100) / 100);
+}
+
+/* 汇总计数显示：null / undefined = 未知 */
+function sraDesInt(v) {
+  if (v === null || v === undefined) return '未知';
+  return String(v);
+}
+
+/* 当前页金额汇总（ERP-146，仅当前预览页）：供应商 + 币种（可选账龄分桶）的已知有效金额；
+   未知值绝不回落 0，草稿 / 已作废金额绝不并入，不同币种绝不合并或换算 */
+function sraDesSummaryHtml(view) {
+  const mode = sraDesSummaryMode(view && view.summaryMode);
+  if (!view || mode === 'none' || !Array.isArray(view.summaries)) return '';
+  const summaries = view.summaries;
+  const withBucket = mode === 'supplierCurrencyAging';
+  if (summaries.length === 0) {
+    return `<div class="pd-hint" style="margin:8px 0">`
+      + `<div style="font-weight:600;margin-bottom:6px">💰 当前页金额汇总（仅当前预览页，非全量合计）</div>`
+      + `<div class="text-muted">本页没有可汇总金额的有效发票证据（空页，或本页发票均为草稿 / 已作废）。草稿 / 已作废金额绝不并入有效合计。</div>`
+      + `</div>`;
+  }
+  const head = `<th>供应商</th><th>币种</th>`
+    + (withBucket ? `<th>账龄分桶</th>` : '')
+    + `<th class="text-right">发票张数</th>`
+    + `<th class="text-right">含税总额证据</th>`
+    + `<th class="text-right">有效已分配</th>`
+    + `<th class="text-right">算术剩余证据</th>`
+    + `<th class="text-right">剩余未知 / 无效（超额）</th>`;
+  const rows = summaries.map(s => {
+    const name = sraDesEsc((s && s.supplierName) || '未知');
+    const code = sraDesEsc((s && s.supplierCode) || '');
+    const supplier = code ? `${name}（${code}）` : name;
+    const bucket = withBucket ? `<td>${sraDesEsc((s && s.agingBucketText) || (s && s.agingBucket) || '未知')}</td>` : '';
+    const unknownCount = sraDesInt(s && s.unknownRemainingInvoiceCount);
+    const overCount = sraDesInt(s && s.overAllocatedInvoiceCount);
+    return `<tr>`
+      + `<td>${supplier}</td>`
+      + `<td><b>${sraDesEsc((s && s.currency) || '未知')}</b></td>`
+      + bucket
+      + `<td class="text-right">${sraDesInt(s && s.invoiceCount)}</td>`
+      + `<td class="text-right">${sraDesMoney(s && s.grossAmount)}</td>`
+      + `<td class="text-right">${sraDesMoney(s && s.activeAllocatedAmount)}</td>`
+      + `<td class="text-right">${sraDesMoney(s && s.remainingAmount)}</td>`
+      + `<td class="text-right">${sraDesEsc(unknownCount)} / ${sraDesEsc(overCount)}</td>`
+      + `</tr>`;
+  }).join('');
+  return `<div class="pd-hint" style="margin:8px 0">`
+    + `<div style="font-weight:600;margin-bottom:6px">💰 当前页金额汇总（仅当前预览页，非全量合计）</div>`
+    + `<table style="width:100%;margin-bottom:6px"><thead><tr>${head}</tr></thead><tbody>${rows}</tbody></table>`
+    + `<div class="text-muted">口径：只汇总计入有效应付证据合计（已登记未作废）的发票金额；草稿 / 已作废金额绝不并入；不同币种绝不合并或换算；有效已分配或算术剩余证据未知（命中上限）或无效（超额）时合计保持「未知」。</div>`
+    + `</div>`;
+}
+
 /* 预览结果（口径 / 边界 / 免责文案 + 分组计数 + 汇总 + 空结果 + 表格） */
 function sraDesResultHtml(view) {
   const readOnly = view && view.readOnlyText ? `<div class="pd-hint">${sraDesEsc(view.readOnlyText)}</div>` : '';
@@ -685,7 +759,7 @@ function sraDesResultHtml(view) {
     ? `<div class="text-muted" style="margin:6px 0">共 ${view.total} 条 · 第 ${view.page} 页 · 每页 ${view.pageSize} 条 · 本页 ${(view.rows || []).length} 行证据</div>`
     : '';
   const empty = view && (!view.rows || view.rows.length === 0) ? sraDesEmptyHtml() : '';
-  return `${readOnly}${boundary}${disclaimer}${summary}${sraDesGroupChartHtml(view)}${empty}${sraDesTableHtml(view)}`;
+  return `${readOnly}${boundary}${disclaimer}${summary}${sraDesGroupChartHtml(view)}${sraDesSummaryHtml(view)}${empty}${sraDesTableHtml(view)}`;
 }
 
 /* 字段选择器：仅由目录白名单渲染为复选框，无自由填写的字段名 */
@@ -704,6 +778,14 @@ function sraDesGroupSelectHtml(groupBy) {
   const opts = SRA_GROUP_KEYS.map(g =>
     `<option value="${sraDesEsc(g.key)}" ${g.key === selected ? 'selected' : ''}>${sraDesEsc(g.label)}</option>`).join('');
   return `<select id="sra-des-groupby" style="min-width:180px">${opts}</select>`;
+}
+
+/* 金额汇总模式选择器：仅 ERP-146 允许的模式（fail closed，无自由输入） */
+function sraDesSummarySelectHtml(summaryMode) {
+  const selected = sraDesSummaryMode(summaryMode);
+  const opts = SRA_SUMMARY_MODES.map(m =>
+    `<option value="${sraDesEsc(m.key)}" ${m.key === selected ? 'selected' : ''}>${sraDesEsc(m.label)}</option>`).join('');
+  return `<select id="sra-des-summarymode" style="min-width:260px">${opts}</select>`;
 }
 
 /* ==================== 状态 / 请求 / 渲染 ==================== */
@@ -797,7 +879,13 @@ function sraDesRender() {
     </div>
 
     <div style="margin:10px 0">
-      <div style="font-weight:600;margin-bottom:6px">③ 当前筛选（复用工作台，只读）</div>
+      <div style="font-weight:600;margin-bottom:6px">③ 金额汇总（ERP-146，可选，仅当前预览页已知有效金额）</div>
+      ${sraDesSummarySelectHtml(SRA_DESIGNER.summaryMode)}
+      <div class="text-muted" style="margin-top:4px">只汇总当前预览页计入有效应付证据合计的发票金额；草稿 / 已作废金额绝不并入，未知 / 无效分配证据保持「未知」，不同币种绝不合并或换算。</div>
+    </div>
+
+    <div style="margin:10px 0">
+      <div style="font-weight:600;margin-bottom:6px">④ 当前筛选（复用工作台，只读）</div>
       ${sraDesFilterSummaryHtml()}
     </div>
 
@@ -829,6 +917,7 @@ function sraDesBuildState(page) {
     pageSize: sraVal('sra-pagesize') || '50',
     page: page || 1,
     groupBy: sraVal('sra-des-groupby'),
+    summaryMode: sraVal('sra-des-summarymode'),
     maxPageSize: SRA_DESIGNER.catalog && SRA_DESIGNER.catalog.maxPageSize ? SRA_DESIGNER.catalog.maxPageSize : 200,
   };
 }
@@ -895,7 +984,7 @@ function sraDesExport() {
 
 /* 从工作台打开设计器（加载目录，渲染字段选择器与当前筛选；授权失败 fail closed，不返回任何字段） */
 async function openSupplierAgingDesigner() {
-  SRA_DESIGNER = { catalog: null, fields: [], selectedKeys: [], groupBy: 'none', view: null };
+  SRA_DESIGNER = { catalog: null, fields: [], selectedKeys: [], groupBy: 'none', summaryMode: 'none', view: null };
   const modal = document.getElementById('modal');
   if (!modal) return;
   modal.innerHTML = '<div class="modal modal-lg" style="max-width:1100px"><div class="pd-hint" style="text-align:center;color:#64748b">正在加载证据字段目录…</div></div>';
@@ -1070,9 +1159,11 @@ if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     SRA_DESIGNER_API,
     SRA_GROUP_KEYS,
+    SRA_SUMMARY_MODES,
     sraDesEsc,
     sraDesSelectFields,
     sraDesGroupKey,
+    sraDesSummaryMode,
     sraDesBuildRequest,
     sraDesCellText,
     sraDesRenderCell,
@@ -1083,6 +1174,10 @@ if (typeof module !== 'undefined' && module.exports) {
     sraDesErrorHtml,
     sraDesGroupSelectHtml,
     sraDesGroupChartHtml,
+    sraDesSummarySelectHtml,
+    sraDesSummaryHtml,
+    sraDesMoney,
+    sraDesInt,
     sraDesResultHtml,
     sraDesFieldChooserHtml,
     sraDesKindOfCode,

@@ -2,7 +2,7 @@
   "id": "ERP-147",
   "title": "Show page-only supplier aging amount summaries in report designer",
   "description": "A purchasing user selects a finite monetary summary and sees currency-separated current-page totals with explicit unknowns beside the dynamic supplier-aging preview. The static report and row exports remain available. Development only; reuse ERP-140 authorized, bounded read-only supplier-aging preview and existing HTTP audit. Work solely on the current page. Preserve explicit unknown due dates, invalid/unknown allocation evidence, draft/void separation and currency isolation. Missing permission or invalid grouping fails closed. No new schema, migration, production SQL, real database execution, payment action, ledger inference, arbitrary SQL, business writes, secrets/.env or deployment. Verify focused tests and safe Release build/test; no real-browser acceptance.",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "medium",
   "acceptance_criteria": [
     "Designer exposes only ERP-146 monetary summary modes and sends them with the existing authorized filtered page request.",
@@ -46,5 +46,5 @@
     "status": "not_required",
     "reason": "Development-only bounded read-only feature"
   },
-  "attempts": 0
+  "attempts": 1
 }
