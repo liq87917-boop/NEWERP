@@ -1,0 +1,54 @@
+{
+  "id": "ERP-152",
+  "title": "Count authorized supplier purchase exposure by selected page grouping",
+  "description": "A purchasing user chooses a finite grouping and sees current-page purchase-order counts. Development only. Reuse ERP-148 authorized bounded preview over ERP-031; keep all grouping to the current page, recheck current-user purchase-order menu and use existing HTTP operation audit. Preserve unknown settlement/receipt evidence, distinct currencies and ambiguous/unavailable links; never infer an accounts-payable balance or payment authority. Invalid modes and missing permission fail closed. No arbitrary SQL, migration, production SQL, real database execution, writes, secrets/.env change or deployment. Verify focused tests and safe Release build/test; no browser acceptance.",
+  "status": "pending",
+  "risk_level": "medium",
+  "acceptance_criteria": [
+    "Preview accepts only none/supplier/currency/linkStatus/receiptStatus group keys and rejects other values before source reads.",
+    "Counts derive only from the same authorized bounded page, keep ambiguous/unavailable and unknown receipt classes visible and never sum incompatible quantities or currencies.",
+    "Unit tests cover all group keys, empty/paged results, unknown statuses, denied users and no writes; document page-only count limits."
+  ],
+  "criterion_path_map": {
+    "Preview accepts only none/supplier/currency/linkStatus/receiptStatus group keys and rejects other values before source reads.": [
+      "src/ERP.Application/DTOs/DynamicSupplierExposureReportDtos.cs",
+      "src/ERP.Application/Services/DynamicSupplierExposureReportRules.cs",
+      "src/ERP.Api/Controllers/DynamicSupplierExposureReportController.cs"
+    ],
+    "Counts derive only from the same authorized bounded page, keep ambiguous/unavailable and unknown receipt classes visible and never sum incompatible quantities or currencies.": [
+      "src/ERP.Application/DTOs/DynamicSupplierExposureReportDtos.cs",
+      "src/ERP.Application/Services/DynamicSupplierExposureReportRules.cs",
+      "src/ERP.Api/Controllers/DynamicSupplierExposureReportController.cs"
+    ],
+    "Unit tests cover all group keys, empty/paged results, unknown statuses, denied users and no writes; document page-only count limits.": [
+      "src/ERP.UnitTests/DynamicSupplierExposureGroupingTests.cs",
+      "docs/dynamic-supplier-exposure-report.md"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Application/DTOs/DynamicSupplierExposureReportDtos.cs",
+    "src/ERP.Application/Services/DynamicSupplierExposureReportRules.cs",
+    "src/ERP.Api/Controllers/DynamicSupplierExposureReportController.cs",
+    "src/ERP.UnitTests/DynamicSupplierExposureGroupingTests.cs",
+    "docs/dynamic-supplier-exposure-report.md",
+    ".ai/**"
+  ],
+  "validation_profile": "safe",
+  "depends_on": [
+    "ERP-148"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "completion_mode": "build",
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only bounded read-only feature"
+  },
+  "attempts": 0
+}

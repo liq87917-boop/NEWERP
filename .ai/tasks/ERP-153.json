@@ -1,0 +1,50 @@
+{
+  "id": "ERP-153",
+  "title": "Visualize supplier purchase exposure count groups",
+  "description": "A purchasing user views a page-only count distribution in the existing dynamic supplier exposure designer. Development only. Reuse ERP-148 authorized bounded preview over ERP-031; keep all grouping to the current page, recheck current-user purchase-order menu and use existing HTTP operation audit. Preserve unknown settlement/receipt evidence, distinct currencies and ambiguous/unavailable links; never infer an accounts-payable balance or payment authority. Invalid modes and missing permission fail closed. No arbitrary SQL, migration, production SQL, real database execution, writes, secrets/.env change or deployment. Verify focused tests and safe Release build/test; no browser acceptance.",
+  "status": "pending",
+  "risk_level": "medium",
+  "acceptance_criteria": [
+    "Designer offers only ERP-152 grouping keys and sends selected key with the existing authorized page request.",
+    "Chart renders safe labeled counts by supplier, currency, link state or receipt state, including unknown classes, empty pages and pagination changes.",
+    "Node tests cover group selection, chart text, unknown and empty groups, permission/network errors and safe rendering; document page-only semantics."
+  ],
+  "criterion_path_map": {
+    "Designer offers only ERP-152 grouping keys and sends selected key with the existing authorized page request.": [
+      "src/ERP.Api/wwwroot/js/supplier-purchase-exposure.js"
+    ],
+    "Chart renders safe labeled counts by supplier, currency, link state or receipt state, including unknown classes, empty pages and pagination changes.": [
+      "src/ERP.Api/wwwroot/js/supplier-purchase-exposure.js"
+    ],
+    "Node tests cover group selection, chart text, unknown and empty groups, permission/network errors and safe rendering; document page-only semantics.": [
+      "src/ERP.Api/wwwroot/js/supplier-purchase-exposure.js",
+      "tests/automation/dynamic_supplier_exposure_grouping_ui.test.js",
+      "docs/dynamic-supplier-exposure-report.md"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Api/wwwroot/js/supplier-purchase-exposure.js",
+    "tests/automation/dynamic_supplier_exposure_grouping_ui.test.js",
+    "docs/dynamic-supplier-exposure-report.md",
+    ".ai/**"
+  ],
+  "validation_profile": "safe",
+  "depends_on": [
+    "ERP-152",
+    "ERP-149"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "completion_mode": "build",
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only bounded read-only feature"
+  },
+  "attempts": 0
+}

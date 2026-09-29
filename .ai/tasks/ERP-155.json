@@ -1,0 +1,50 @@
+{
+  "id": "ERP-155",
+  "title": "Show supplier purchase exposure amount summaries in report designer",
+  "description": "A purchasing user chooses a finite amount summary and sees original-currency current-page evidence beside the selected-column preview. Development only. Reuse ERP-148 authorized bounded preview over ERP-031; keep all grouping to the current page, recheck current-user purchase-order menu and use existing HTTP operation audit. Preserve unknown settlement/receipt evidence, distinct currencies and ambiguous/unavailable links; never infer an accounts-payable balance or payment authority. Invalid modes and missing permission fail closed. No arbitrary SQL, migration, production SQL, real database execution, writes, secrets/.env change or deployment. Verify focused tests and safe Release build/test; no browser acceptance.",
+  "status": "pending",
+  "risk_level": "medium",
+  "acceptance_criteria": [
+    "Designer offers only ERP-154 monetary summary modes and sends them with the current filtered bounded request.",
+    "View labels supplier, currency, link state, ordered and known settlement evidence; unlinked exposure and unknown amounts stay separate, with visible empty/permission/network states.",
+    "Node tests cover mode selection, currencies, unknown/link states, safe text rendering, paging and failures; document summary and download scope."
+  ],
+  "criterion_path_map": {
+    "Designer offers only ERP-154 monetary summary modes and sends them with the current filtered bounded request.": [
+      "src/ERP.Api/wwwroot/js/supplier-purchase-exposure.js"
+    ],
+    "View labels supplier, currency, link state, ordered and known settlement evidence; unlinked exposure and unknown amounts stay separate, with visible empty/permission/network states.": [
+      "src/ERP.Api/wwwroot/js/supplier-purchase-exposure.js"
+    ],
+    "Node tests cover mode selection, currencies, unknown/link states, safe text rendering, paging and failures; document summary and download scope.": [
+      "src/ERP.Api/wwwroot/js/supplier-purchase-exposure.js",
+      "tests/automation/dynamic_supplier_exposure_amount_summary_ui.test.js",
+      "docs/dynamic-supplier-exposure-report.md"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Api/wwwroot/js/supplier-purchase-exposure.js",
+    "tests/automation/dynamic_supplier_exposure_amount_summary_ui.test.js",
+    "docs/dynamic-supplier-exposure-report.md",
+    ".ai/**"
+  ],
+  "validation_profile": "safe",
+  "depends_on": [
+    "ERP-154",
+    "ERP-153"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "completion_mode": "build",
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only bounded read-only feature"
+  },
+  "attempts": 0
+}
