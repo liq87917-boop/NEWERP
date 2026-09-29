@@ -114,12 +114,36 @@ ERP-068 供应商对账与账龄工作台的既有筛选与稳定分页，预览
 
 `src/ERP.UnitTests/DynamicSupplierAgingExcelTests.cs`（内存库，不连 SQL Server、不启动 API）覆盖：选定列顺序与行值、仅导出当前页（页大小上限）、未知到期日 / 未知分配证据保留为空单元格、不同币种分别成行、公式注入转义、权限 / 身份 fail closed、页大小超限拒绝、以及只读不写库。
 
+## 当前页分页中文 PDF 导出（ERP-143）
+
+`POST /api/supplier-reconciliation-aging/report/pdf`，请求体与预览完全相同（`DynamicSupplierAgingReportRequest`），复用同一有界、已授权预览管线（每次请求重新校验身份 / 采购订单菜单授权 / 字段 / 供应商 / 币种 / 发票状态 / 分配状态 / 日期 / as-of / 关键字 / 页大小），**只导出请求 `page` / `pageSize` 对应的当前页**（单页上限 200，超限直接拒绝），不是全量导出。
+
+### 导出口径与限制
+
+- **仅当前页 + 选定列**：列头与数据行都按 `page.Columns`（= 请求选定字段顺序）排列，与预览同源；只导出当前页，不导出全量。
+- **分页中文 PDF**：以 PDFsharp 6.2.4 分页渲染，宽列集按可用页宽贪心拆成多个「列页」、行数超出按「行页」拆分，避免列被裁切；标题标注「列 x/y」。
+- **中文标签 + 中文字体**：列头使用白名单中文标签；中文字体固定使用 Windows 黑体（SimHei），与其它报表 PDF 共用共享解析器（`SimHeiPdfFontResolver`）；字体缺失时显式失败（`InternalError`，提示安装 simhei.ttf），不产出乱码或缺字 PDF。
+- **原币分行**：金额一律按原币分别成行，`currency` 为原币，不同币种绝不合并、不做汇率换算、无跨币种总额。
+- **显式未知**：未知到期日（`dueDate` / `overdueDays` / `agingBucket` 为 null）、未知剩余证据（`remainingAmount` 为 null）与未知 / 无效 / 无法确认分配证据（各 `*Amount` / `*Count` 为 null）照实渲染为「未知」，绝不回落为 0、不推算、不修复；草稿 / 已作废发票单独标注，金额永不并入有效合计。
+- **只读 + 审计**：无写入、无任意 SQL；`POST` 由既有 `OperationLogMiddleware` 记录审计（动作「导出」）。
+- 文件名 `SupplierAging_yyyyMMddHHmmss.pdf`；内容类型 `application/pdf`。
+
+### 前端
+
+字段设计器工具栏新增「📄 导出 PDF（分页中文）」：复用当前字段 / 工作台筛选 / 分页组装有界请求后 `POST /api/supplier-reconciliation-aging/report/pdf`；空页显示可见错误、不下载仅表头文件，授权 / 校验 / 字体缺失 / 网络失败均在结果区可见。
+
+### 单元测试
+
+`src/ERP.UnitTests/DynamicSupplierAgingPdfTests.cs`（内存库，不连 SQL Server、不启动 API）覆盖：PDF 签名与内容类型、A4 页面边界（行列页）、选定列顺序与行值、原币分行、未知到期日 / 未知剩余 / 未知 / 无效分配证据显式保留（null →「未知」）、嵌入中文黑体 SimHei、字体缺失显式失败、宽列集拆分为多列页、权限 / 身份 fail closed、页大小超限 / 未知字段拒绝、空页，以及只读不写库。
+
 ## 文件地图
 
 - `src/ERP.Application/DTOs/DynamicSupplierAgingReportDtos.cs`：目录 / 请求 / 结果 DTO；
 - `src/ERP.Application/Services/DynamicSupplierAgingReportRules.cs`：字段白名单、校验与行投影（纯规则）；
 - `src/ERP.Api/Controllers/DynamicSupplierAgingReportController.cs`：授权 + 复用 ERP-068 只读派生 + 选定列投影；
+- `src/ERP.Infrastructure/Export/DynamicSupplierAgingPdfExporter.cs`：ERP-143 分页中文 PDF 导出（共享 SimHei 解析器、宽列集跨页拆分、未知证据显式保留）；
 - `src/ERP.UnitTests/DynamicSupplierAgingReportTests.cs`：单元测试（内存库，不连 SQL Server、不启动 API）；
 - `src/ERP.UnitTests/DynamicSupplierAgingExcelTests.cs`：ERP-142 Excel 导出单元测试（内存库，不连 SQL Server、不启动 API）；
+- `src/ERP.UnitTests/DynamicSupplierAgingPdfTests.cs`：ERP-143 PDF 导出单元测试（内存库，不连 SQL Server、不启动 API）；
 - `src/ERP.Api/wwwroot/js/supplier-reconciliation-aging.js`：ERP-068 工作台 + ERP-141 前端字段设计器（`openSupplierAgingDesigner`，纯函数可 Node 单测）；
 - `tests/automation/dynamic_supplier_aging_report_ui.test.js`：ERP-141 前端 UI 逻辑单测（Node，无需浏览器）。

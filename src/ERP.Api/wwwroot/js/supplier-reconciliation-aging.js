@@ -740,6 +740,7 @@ function sraDesRender() {
       <button class="btn btn-primary" onclick="sraDesPreview(1)">预览</button>
       <button class="btn btn-neutral" onclick="sraDesExport()">📤 导出所选列 CSV</button>
       <button class="btn btn-neutral" onclick="sraDesExportXlsx()" title="导出当前预览页为 Excel（xlsx，只读）：复用当前字段 / 筛选 / 分页，未知值保留、公式首字符转义、无跨币种总额">📥 导出 Excel（xlsx）</button>
+      <button class="btn btn-neutral" onclick="sraDesExportPdf()" title="导出当前预览页为分页中文 PDF（只读）：复用当前字段 / 筛选 / 分页，宽列集跨页拆分、未知证据显式保留、中文字体缺失时显式失败">📄 导出 PDF（分页中文）</button>
       <button class="btn btn-neutral" onclick="closeModal()">关闭</button>
     </div>
     <div id="sra-des-result"></div>
@@ -927,6 +928,77 @@ async function sraDesExportXlsx() {
   }
 }
 
+/* 触发浏览器下载 pdf 附件：授权 / 无效失败解析业务错误信封，网络失败抛错（绝不下载非 pdf 内容） */
+async function sraDesDownloadPdf(path, body) {
+  const headers = { 'Content-Type': 'application/json' };
+  const token = typeof localStorage !== 'undefined' ? (localStorage.getItem('erp_token') || '') : '';
+  if (token) headers['Authorization'] = 'Bearer ' + token;
+  const resp = await fetch(path, { method: 'POST', headers, body: JSON.stringify(body) });
+
+  const contentType = resp.headers.get('content-type') || '';
+  const isPdf = contentType.indexOf('application/pdf') >= 0;
+  if (!isPdf) {
+    let message = '导出失败';
+    let kind = 'error';
+    try {
+      const data = await resp.json();
+      if (data && typeof data === 'object') {
+        if (data.code === 2000 || data.code === 2003) kind = 'unauthorized';
+        else if (data.code === 2002) kind = 'forbidden';
+        else if (data.code && data.code !== 0) kind = 'invalid';
+        if (data.message) message = data.message;
+      }
+    } catch (e) { /* 忽略非 JSON 响应体 */ }
+    if (kind === 'unauthorized' && typeof logout === 'function') logout();
+    const err = new Error(message);
+    err.kind = kind;
+    throw err;
+  }
+
+  const blob = await resp.blob();
+  const disposition = resp.headers.get('content-disposition') || '';
+  const match = /filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/i.exec(disposition);
+  const filename = (match && match[1] ? match[1].replace(/['"]/g, '') : '') || 'SupplierAging.pdf';
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+  sraDesRenderResult('<div class="pd-hint">已导出当前页为分页中文 PDF，请查看下载。</div>');
+}
+
+/* 导出当前预览页为分页中文 PDF（只读）：复用当前字段 / 工作台筛选 / 分页组装有界请求后 POST 导出；
+   未知到期日 / 未知剩余 / 未知 / 无效分配证据显式保留、不同币种分别成行、宽列集跨页拆分、无跨币种总额；
+   空页可见错误，不下载仅表头文件；授权 / 无效 / 字体缺失 / 网络失败均在结果区可见。 */
+async function sraDesExportPdf() {
+  const view = SRA_DESIGNER.view;
+  if (!view || !view.rows || view.rows.length === 0) {
+    sraDesRenderResult(sraDesErrorHtml('empty', '当前预览页没有发票证据，无法导出'));
+    return;
+  }
+
+  const state = sraDesBuildState(view.page || 1);
+  if (state.invoiceDateFrom && state.invoiceDateTo && state.invoiceDateFrom > state.invoiceDateTo) {
+    sraDesRenderResult(sraDesErrorHtml('invalid', '开票日期开始不能晚于结束日期'));
+    return;
+  }
+  if (state.dueDateFrom && state.dueDateTo && state.dueDateFrom > state.dueDateTo) {
+    sraDesRenderResult(sraDesErrorHtml('invalid', '到期日开始不能晚于结束日期'));
+    return;
+  }
+
+  const req = sraDesBuildRequest(state);
+  sraDesRenderResult(sraDesLoadingHtml());
+  try {
+    await sraDesDownloadPdf(SRA_DESIGNER_API + '/pdf', req);
+  } catch (err) {
+    sraDesRenderResult(sraDesErrorHtml((err && err.kind) || 'network', (err && err.message) || '无法连接到服务器'));
+  }
+}
+
 /* Node 单测导出（浏览器中 module 为 undefined，自动跳过） */
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
@@ -950,5 +1022,7 @@ if (typeof module !== 'undefined' && module.exports) {
     sraDesExport,
     sraDesDownloadXlsx,
     sraDesExportXlsx,
+    sraDesDownloadPdf,
+    sraDesExportPdf,
   };
 }
