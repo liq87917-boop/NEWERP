@@ -1,6 +1,7 @@
 using ERP.Application.Interfaces;
 using ERP.Application.Services;
 using ERP.Infrastructure.Data;
+using ERP.Infrastructure.Reports;
 using ERP.Infrastructure.Security;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -56,6 +57,9 @@ public static class DependencyInjection
         services.AddScoped<IAuthService, AuthService>();
         services.AddScoped<IDocumentNumberService, DocumentNumberService>();
         services.AddScoped<IReportService, ReportService>();
+        // 动态销售订单报表预览（ERP-112）：只读、有界，复用销售订单菜单授权与业务员数据范围
+        services.AddScoped<IDynamicSalesOrderReportQuery, DynamicSalesOrderReportQuery>();
+
         // 库存移动与成本服务（ERP-009：库存单据审核/销审统一经此维护库存与流水）
         services.AddScoped<IInventoryService, InventoryService>();
 
