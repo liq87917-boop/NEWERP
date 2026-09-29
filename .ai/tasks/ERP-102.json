@@ -47,6 +47,52 @@
       "from_version": 1,
       "to_version": 2,
       "at": "2026-09-28T12:25:28.254097Z"
+    },
+    {
+      "remediation_task": "ERP-102-RECOVERY-1",
+      "cycle": 1,
+      "at": "2026-09-29T00:54:17.390146Z",
+      "evidence": {
+        "failure_kind": "no_checkpoint_changes",
+        "summary": "Task produced no checkpointable business changes.",
+        "result": ".ai\\results\\ERP-102.json",
+        "attempt_logs": [
+          ".ai\\logs\\ERP-102-attempt-2.jsonl"
+        ],
+        "validation_logs": [],
+        "latest_state_error": {
+          "task": "ERP-102",
+          "attempt": 1,
+          "summary": "Path guard failed:\noutside allowed_paths: src/ERP.Application/DTOs/InventoryLocationLotDtos.cs\noutside allowed_paths: src/ERP.Application/Services/InventoryLocationLotService.cs"
+        },
+        "latest_build": null,
+        "task_context": ".ai\\tasks\\ERP-102.json",
+        "changed_paths": [],
+        "diff": null,
+        "execution_copy": null
+      }
     }
-  ]
+  ],
+  "supervised_recovery_cycles": 1,
+  "recovery_context": {
+    "remediation_task": "ERP-102-RECOVERY-1",
+    "failure_kind": "no_checkpoint_changes",
+    "summary": "Task produced no checkpointable business changes.",
+    "result": ".ai\\results\\ERP-102.json",
+    "attempt_logs": [
+      ".ai\\logs\\ERP-102-attempt-2.jsonl"
+    ],
+    "validation_logs": [],
+    "latest_state_error": {
+      "task": "ERP-102",
+      "attempt": 1,
+      "summary": "Path guard failed:\noutside allowed_paths: src/ERP.Application/DTOs/InventoryLocationLotDtos.cs\noutside allowed_paths: src/ERP.Application/Services/InventoryLocationLotService.cs"
+    },
+    "latest_build": null,
+    "task_context": ".ai\\tasks\\ERP-102.json",
+    "changed_paths": [],
+    "diff": null,
+    "execution_copy": null,
+    "instruction": "DeepSeek supervisor recovery: inspect the referenced complete logs, diagnose the root cause, and implement a different safe repair within allowed_paths. Rebuild and rerun the configured tests; if validation fails, use the newest log as the next repair input. Do not repeat the failed approach. Do not edit task/state/result files or relax production and irreversible-operation gates."
+  }
 }
