@@ -43,6 +43,9 @@ public sealed class DynamicShipmentFinanceReportRequest
     /// <summary>收款链接状态筛选（linked / partial / unlinked；留空 = 全部）</summary>
     public string? FinanceLinkStatus { get; set; }
 
+    /// <summary>分组键（仅 none / customer / currency / shipmentStatus / financeLinkStatus；无效取值由服务端 fail closed 拒绝，默认 none）</summary>
+    public string? GroupBy { get; set; }
+
     /// <summary>页码（从 1 开始）</summary>
     public int Page { get; set; } = 1;
 
@@ -78,4 +81,16 @@ public sealed record DynamicShipmentFinanceReportPageDto(
     int TotalPages,
     string ReadOnlyText,
     string BoundaryText,
-    string DisclaimerText);
+    string DisclaimerText,
+    string GroupBy = "none",
+    List<DynamicShipmentFinanceReportGroupDto>? Groups = null);
+
+/// <summary>
+/// 销售订单出货 / 财务进度报表当前授权预览页的分组计数（ERP-160，只读）：当前页内按分组键聚合的销售订单张数分布。
+/// 只统计销售订单张数、绝不求和任何金额或数量、绝不跨币种合并或换算；出货状态（none / partial / complete / over_shipped / unknown）
+/// 与收款链接状态（linked / partial / unlinked / unknown）类别始终保留（计数可为 0），unknown 类别保持可见。
+/// </summary>
+public sealed record DynamicShipmentFinanceReportGroupDto(
+    string Key,
+    string Label,
+    int Count);

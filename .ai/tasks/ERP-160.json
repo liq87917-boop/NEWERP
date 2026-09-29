@@ -2,7 +2,7 @@
   "id": "ERP-160",
   "title": "Count authorized shipment and finance progress by page grouping",
   "description": "A sales user explores the current authorized shipment and finance progress page using finite grouping and evidence summaries. Development only. Reuse ERP-156 bounded ERP-032 preview; on each request recheck current-user sales-order menu and SalespersonDataScopeService customer scope before reading, and use existing HTTP operation audit. Keep grouping to the same current page; preserve null unknown shipment and linked-payment evidence, separate currencies, and never present uncovered amount as receivables or payment authority. Invalid modes and denied users fail closed. No arbitrary SQL, migrations, production SQL, real database execution, writes, secrets/.env change or deployment. Verify focused unit/Node tests and safe Release build/test; no real-browser acceptance.",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "medium",
   "acceptance_criteria": [
     "Preview accepts only none/customer/currency/shipmentStatus/financeLinkStatus count grouping keys and rejects unknown keys before ERP-032 source reads.",
@@ -49,5 +49,6 @@
     "level": "L1",
     "status": "not_required",
     "reason": "Development-only bounded read-only feature"
-  }
+  },
+  "attempts": 1
 }

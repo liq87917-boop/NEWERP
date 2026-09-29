@@ -13,7 +13,8 @@
 
 请求体（`DynamicShipmentFinanceReportRequest`）：`fields`（选定字段键，仅限白名单，留空 = 全部白名单字段）、
 `customerId`、`currency`、`orderDateFrom` / `orderDateTo`、`shipmentStatus`（none / shipped）、
-`financeLinkStatus`（linked / partial / unlinked）、`page`、`pageSize`。
+`financeLinkStatus`（linked / partial / unlinked）、`groupBy`（none / customer / currency / shipmentStatus / financeLinkStatus）、
+`page`、`pageSize`。
 
 ## 授权（fail closed）
 
@@ -52,6 +53,20 @@
 
 以上校验全部在调用 `SalesOrderShipmentFinanceReport.ForQueryAsync`（即源读取）**之前**完成；随后复用 ERP-032 的同一套
 筛选 → 稳定分页 → 批量派生（分页按客户 + 币种 + 订单日期 + 单据 Id 稳定排序）。
+
+## 分组计数（ERP-160）
+
+预览返回结果新增 `groupBy`（实际生效的分组键，默认 `none`）与 `groups`（当前授权预览页内的销售订单张数分布）。
+分组键仅在 `none` / `customer` / `currency` / `shipmentStatus` / `financeLinkStatus` 之间选择（大小写不敏感，留空 = `none`），
+未知取值在调用 `SalesOrderShipmentFinanceReport.ForQueryAsync`（源读取）**之前**显式拒绝（`InvalidParameter`，fail closed）。
+
+- `customer` / `currency`：动态分组，只出现本页存在的取值，按客户 Id / 币种升序；币种为原币，不同币种分别成行、绝不合并或换算；
+- `shipmentStatus`：固定证据分类 `none` / `partial` / `complete` / `over_shipped` / `unknown`，五类始终保留（计数可为 0）；
+- `financeLinkStatus`：固定证据分类 `linked` / `partial` / `unlinked` / `unknown`，四类始终保留（计数可为 0）。
+
+分组只统计**当前授权预览页**的销售订单张数（计数与分页在 ERP-032 源查询内部应用 `SalespersonDataScopeService` 客户范围之后、选定字段投影之前完成），
+绝不跨页合并、绝不求和任何金额或数量、绝不跨币种合并或换算、绝不推断收款状态；`unknown` 出货 / 收款链接类别保持可见（不当作已出货 / 已收款 / 已收齐），
+金额与数量未知证据仍照实保留为 `null`，`uncoveredAmount` 只作「未覆盖金额」，绝不当作应收余额或收款授权。空页时动态分组返回空列表、固定分类返回全 0。
 
 ## 证据边界（重要）
 
@@ -130,6 +145,7 @@ PDF 中文一律使用 Windows 黑体 **SimHei**（`simhei.ttf`），由共享�
 - `src/ERP.Infrastructure/Export/DynamicShipmentFinancePdfExporter.cs`：ERP-159 PDF 导出（分页中文 PDF、列页 / 行页拆分、原币与未知证据、SimHei 缺失显式失败）；
 - `src/ERP.Api/Controllers/SalesOrderShipmentFinanceReport.cs`：ERP-032 权威派生，新增可选 `SalespersonDataScope` 参数（在源查询内部先于计数与分页过滤客户范围）；
 - `src/ERP.UnitTests/DynamicShipmentFinanceReportTests.cs`：预览单元测试（内存库，不连 SQL Server、不启动 API）；
+- `src/ERP.UnitTests/DynamicShipmentFinanceGroupingTests.cs`：ERP-160 分组计数单元测试（分组键、客户 / 币种 / 出货状态 / 收款链接状态、unknown 保留、空页 / 分页、授权拒绝、不写库）；
 - `src/ERP.UnitTests/DynamicShipmentFinanceExcelTests.cs`：ERP-158 Excel 导出单元测试（列顺序、页上限、数据范围、未知值、币种、公式安全、不写库、下载限制）；
 - `src/ERP.UnitTests/DynamicShipmentFinancePdfTests.cs`：ERP-159 PDF 导出单元测试（签名、页面边界、字段顺序、原币与未知证据、SimHei 嵌入与缺失失败、授权 / 校验拒绝、不写库）；
 - `src/ERP.UnitTests/SalesOrderShipmentFinanceReportTests.cs`：ERP-032 报表单元测试（含 ERP-156 复用的源查询范围过滤）。

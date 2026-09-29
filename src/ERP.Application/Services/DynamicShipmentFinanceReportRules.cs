@@ -53,6 +53,46 @@ public static class DynamicShipmentFinanceReportRules
     public static readonly string[] SupportedFinanceLinkStatuses =
         { FinanceStatusLinked, FinanceStatusPartial, FinanceStatusUnlinked };
 
+    // ==================== 0.2 分组键（ERP-160） ====================
+
+    /// <summary>不分组（默认）</summary>
+    public const string GroupNone = "none";
+
+    /// <summary>按客户分组</summary>
+    public const string GroupCustomer = "customer";
+
+    /// <summary>按币种分组（原币，绝不跨币种合并或换算）</summary>
+    public const string GroupCurrency = "currency";
+
+    /// <summary>按出货状态分组（none / partial / complete / over_shipped / unknown，五类始终保留）</summary>
+    public const string GroupShipmentStatus = "shipmentStatus";
+
+    /// <summary>按收款链接状态分组（linked / partial / unlinked / unknown，四类始终保留）</summary>
+    public const string GroupFinanceLinkStatus = "financeLinkStatus";
+
+    /// <summary>出货状态派生类别：部分出货（与 ERP-032 派生口径同源）</summary>
+    public const string ShipmentStatusPartial = "partial";
+
+    /// <summary>出货状态派生类别：已出齐</summary>
+    public const string ShipmentStatusComplete = "complete";
+
+    /// <summary>出货状态派生类别：超发</summary>
+    public const string ShipmentStatusOver = "over_shipped";
+
+    /// <summary>出货状态派生类别：未知（命中派生上限，数量未知）</summary>
+    public const string ShipmentStatusUnknown = "unknown";
+
+    /// <summary>出货状态分组用的全部取值（确定性顺序；unknown 保持可见）</summary>
+    public static readonly string[] GroupShipmentStatuses =
+        { ShipmentStatusNone, ShipmentStatusPartial, ShipmentStatusComplete, ShipmentStatusOver, ShipmentStatusUnknown };
+
+    /// <summary>收款链接状态派生类别：未知（命中派生上限，金额未知）</summary>
+    public const string FinanceStatusUnknown = "unknown";
+
+    /// <summary>收款链接状态分组用的全部取值（确定性顺序；unknown 保持可见）</summary>
+    public static readonly string[] GroupFinanceLinkStatuses =
+        { FinanceStatusLinked, FinanceStatusPartial, FinanceStatusUnlinked, FinanceStatusUnknown };
+
     // ==================== 1. 文案 ====================
 
     /// <summary>只读声明（接口与文档统一声明）</summary>
@@ -223,6 +263,28 @@ public static class DynamicShipmentFinanceReportRules
             throw BusinessException.InvalidParameter($"每页条数必须在 1~{MaxPageSize} 之间");
     }
 
+    // ==================== 4.1 分组键校验（ERP-160，源读取之前完成） ====================
+
+    /// <summary>
+    /// 规范化分组键（fail closed）：空 / 留空 = 不分组（none）；仅接受 none / customer / currency / shipmentStatus / financeLinkStatus（大小写不敏感）；
+    /// 未知取值显式拒绝（在读取任何源数据之前完成）。
+    /// </summary>
+    public static string NormalizeGroupBy(string? groupBy)
+    {
+        if (string.IsNullOrWhiteSpace(groupBy))
+            return GroupNone;
+
+        var normalized = groupBy.Trim();
+        if (string.Equals(normalized, GroupNone, StringComparison.OrdinalIgnoreCase)) return GroupNone;
+        if (string.Equals(normalized, GroupCustomer, StringComparison.OrdinalIgnoreCase)) return GroupCustomer;
+        if (string.Equals(normalized, GroupCurrency, StringComparison.OrdinalIgnoreCase)) return GroupCurrency;
+        if (string.Equals(normalized, GroupShipmentStatus, StringComparison.OrdinalIgnoreCase)) return GroupShipmentStatus;
+        if (string.Equals(normalized, GroupFinanceLinkStatus, StringComparison.OrdinalIgnoreCase)) return GroupFinanceLinkStatus;
+
+        throw BusinessException.InvalidParameter(
+            $"无效的分组键: {groupBy}（可选：none / customer / currency / shipmentStatus / financeLinkStatus）");
+    }
+
     // ==================== 5. 行投影 ====================
 
     /// <summary>从整行证据字典中仅投影选定的白名单字段（保持请求顺序；缺失键按 null）</summary>
@@ -234,6 +296,106 @@ public static class DynamicShipmentFinanceReportRules
             row[key] = source.TryGetValue(key, out var v) ? v : null;
         return row;
     }
+
+    // ==================== 5.1 分组计数（ERP-160） ====================
+
+    /// <summary>
+    /// 分组销售订单张数分布（ERP-160）：从「当前授权预览页」的销售订单出货 / 财务进度证据行计算张数分布，只统计张数、绝不求和任何金额或数量、绝不跨币种合并或换算。
+    /// <para>customer / currency 为动态分组（只出现本页存在的取值，按客户 Id / 币种升序）；shipmentStatus 与 financeLinkStatus 为固定证据分类，
+    /// 空分类始终保留（计数可为 0），其中 unknown 出货 / 收款链接类别保持可见；none / 空页返回空列表。</para>
+    /// </summary>
+    public static List<DynamicShipmentFinanceReportGroupDto> BuildGroupCounts(
+        IEnumerable<IReadOnlyDictionary<string, object?>> rows, string groupBy)
+    {
+        var list = (rows ?? Array.Empty<IReadOnlyDictionary<string, object?>>()).ToList();
+        return NormalizeGroupBy(groupBy) switch
+        {
+            GroupCustomer => BuildCustomerCounts(list),
+            GroupCurrency => BuildCurrencyCounts(list),
+            GroupShipmentStatus => BuildShipmentStatusCounts(list),
+            GroupFinanceLinkStatus => BuildFinanceLinkStatusCounts(list),
+            _ => new List<DynamicShipmentFinanceReportGroupDto>(),
+        };
+    }
+
+    private static List<DynamicShipmentFinanceReportGroupDto> BuildCustomerCounts(
+        List<IReadOnlyDictionary<string, object?>> rows)
+    {
+        return rows
+            .GroupBy(ReadCustomerId)
+            .OrderBy(g => g.Key)
+            .Select(g =>
+            {
+                var name = ReadText(g.First(), "customerName");
+                return new DynamicShipmentFinanceReportGroupDto(
+                    $"customer:{g.Key}",
+                    string.IsNullOrWhiteSpace(name) ? $"客户 #{g.Key}" : name,
+                    g.Count());
+            })
+            .ToList();
+    }
+
+    private static List<DynamicShipmentFinanceReportGroupDto> BuildCurrencyCounts(
+        List<IReadOnlyDictionary<string, object?>> rows)
+    {
+        return rows
+            .GroupBy(r => ReadText(r, "currency"))
+            .OrderBy(g => g.Key, StringComparer.Ordinal)
+            .Select(g => new DynamicShipmentFinanceReportGroupDto(
+                $"currency:{g.Key}",
+                string.IsNullOrWhiteSpace(g.Key) ? "未知币种" : g.Key,
+                g.Count()))
+            .ToList();
+    }
+
+    private static List<DynamicShipmentFinanceReportGroupDto> BuildShipmentStatusCounts(
+        List<IReadOnlyDictionary<string, object?>> rows)
+    {
+        return GroupShipmentStatuses
+            .Select(status => new DynamicShipmentFinanceReportGroupDto(
+                $"shipmentStatus:{status}",
+                GroupShipmentStatusLabel(status),
+                rows.Count(r => ReadText(r, "shipmentStatus") == status)))
+            .ToList();
+    }
+
+    private static List<DynamicShipmentFinanceReportGroupDto> BuildFinanceLinkStatusCounts(
+        List<IReadOnlyDictionary<string, object?>> rows)
+    {
+        return GroupFinanceLinkStatuses
+            .Select(status => new DynamicShipmentFinanceReportGroupDto(
+                $"financeLinkStatus:{status}",
+                GroupFinanceLinkStatusLabel(status),
+                rows.Count(r => ReadText(r, "financeLinkStatus") == status)))
+            .ToList();
+    }
+
+    private static long ReadCustomerId(IReadOnlyDictionary<string, object?> row)
+        => row.TryGetValue("customerId", out var v) && v is long id ? id : 0L;
+
+    private static string ReadText(IReadOnlyDictionary<string, object?> row, string key)
+        => row.TryGetValue(key, out var v) && v is string s ? s : string.Empty;
+
+    /// <summary>出货状态中文文案（与 ERP-032 / 执行进度同源；unknown 保持可见）</summary>
+    public static string GroupShipmentStatusLabel(string status) => status switch
+    {
+        ShipmentStatusNone => "未出货",
+        ShipmentStatusPartial => "部分出货",
+        ShipmentStatusComplete => "已出齐",
+        ShipmentStatusOver => "超发",
+        ShipmentStatusUnknown => "未知（超出派生上限）",
+        _ => "未知出货状态",
+    };
+
+    /// <summary>收款链接状态中文文案（与 ERP-032 / 执行进度同源；unknown 保持可见）</summary>
+    public static string GroupFinanceLinkStatusLabel(string status) => status switch
+    {
+        FinanceStatusLinked => "收款引用完整",
+        FinanceStatusPartial => "部分可归属（其余未知）",
+        FinanceStatusUnlinked => "未链接（金额未知）",
+        FinanceStatusUnknown => "未知（超出派生上限）",
+        _ => "未知收款链接状态",
+    };
 
     // ==================== 6. Excel 导出（ERP-158） ====================
 

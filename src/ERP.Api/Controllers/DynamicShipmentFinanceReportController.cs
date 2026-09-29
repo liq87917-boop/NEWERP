@@ -113,6 +113,7 @@ public class DynamicShipmentFinanceReportController : ControllerBase
         var financeLinkStatus = DynamicShipmentFinanceReportRules.NormalizeFinanceLinkStatus(request.FinanceLinkStatus);
         DynamicShipmentFinanceReportRules.ValidateDateRange(request.OrderDateFrom, request.OrderDateTo);
         DynamicShipmentFinanceReportRules.ValidatePageSize(request.PageSize);
+        var groupBy = DynamicShipmentFinanceReportRules.NormalizeGroupBy(request.GroupBy);
         var page = request.Page < 1 ? 1 : request.Page;
 
         // 3) 解析当前账号业务员数据范围（特权账号不过滤；受限制业务员仅其被分配客户）
@@ -132,10 +133,11 @@ public class DynamicShipmentFinanceReportController : ControllerBase
         };
         var report = await SalesOrderShipmentFinanceReport.ForQueryAsync(_db, query, scope);
 
-        // 5) 仅投影选定列（保持请求顺序；未知金额 / 未知数量 / 原币照实保留）
+        // 5) 同一有界授权页：先取整行证据（选定字段投影之前），再据此做分组计数（ERP-160，只统计张数）
         var columns = fieldKeys.Select(k => DynamicShipmentFinanceReportRules.GetField(k)!).ToList();
-        var rows = report.Groups.SelectMany(g => g.Orders)
-            .Select(BuildSourceRow)
+        var sourceRows = report.Groups.SelectMany(g => g.Orders).Select(BuildSourceRow).ToList();
+        var groups = DynamicShipmentFinanceReportRules.BuildGroupCounts(sourceRows, groupBy);
+        var rows = sourceRows
             .Select(s => DynamicShipmentFinanceReportRules.BuildRow(s, fieldKeys))
             .ToList();
 
@@ -148,7 +150,9 @@ public class DynamicShipmentFinanceReportController : ControllerBase
             report.TotalPages,
             DynamicShipmentFinanceReportRules.ReadOnlyText,
             DynamicShipmentFinanceReportRules.BoundaryText,
-            DynamicShipmentFinanceReportRules.DisclaimerText);
+            DynamicShipmentFinanceReportRules.DisclaimerText,
+            groupBy,
+            groups);
     }
 
     /// <summary>把单张 ERP-032 订单证据行展开为整行「字段 → 值」字典（仅白名单字段，供 <see cref="DynamicShipmentFinanceReportRules.BuildRow"/> 投影）</summary>
