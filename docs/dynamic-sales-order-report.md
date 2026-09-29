@@ -11,6 +11,7 @@
 |---|---|---|
 | GET | `/api/sales-orders/report` | 返回有限白名单字段目录（需登录 + 销售订单菜单授权） |
 | POST | `/api/sales-orders/report` | 按选定字段与有界筛选预览当前账号数据范围内的订单 |
+| POST | `/api/sales-orders/report/export` | 按同一请求体导出当前页为 xlsx（只读；可选分组页面小计，ERP-115） |
 
 请求体（POST，`DynamicSalesOrderReportRequest`）：
 
@@ -114,4 +115,46 @@ ERP-114 新增 `groupBy`（规范化后的分组键）与 `groups`（仅当分�
 - 前端 UI 逻辑单测：`tests/automation/dynamic_sales_order_report_ui.test.js`（`node tests/automation/dynamic_sales_order_report_ui.test.js`）；
 - 语法检查：`node --check src/ERP.Api/wwwroot/js/dynamic-sales-order-report.js`；
 - 分组与小计单测：`ERP.UnitTests/DynamicSalesOrderGroupingTests.cs`；
+- Excel 导出单测：`ERP.UnitTests/DynamicSalesOrderExcelTests.cs`；
 - 安全档构建 / 测试：`dotnet build NEWERP.sln -c Release` 与 `dotnet test src/ERP.UnitTests/ERP.UnitTests.csproj -c Release --no-build`。
+
+## 10. Excel 导出（ERP-115）
+
+### 10.1 接口
+
+- `POST /api/sales-orders/report/export`：请求体与预览完全相同（`DynamicSalesOrderReportRequest`），
+  只导出「当前页」的选定列；可选按分组（customer / month）追加「本页小计」工作表（币种分开）。
+- 数据工作表复用 `ERP.Infrastructure.Export.ExcelExporter`；分组时在同一工作簿追加小计工作表。
+- 文件名 `SalesOrderReport_yyyyMMddHHmmss.xlsx`；内容类型 `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`。
+
+### 10.2 安全与边界（导出时重新校验）
+
+1. **身份 / 菜单授权**：导出与预览同源，复用 `DynamicSalesOrderReportQuery.PreviewAsync`，每次请求重新校验
+   登录用户与 `sales-order` 菜单授权（fail closed），不缓存权限。
+2. **数据范围**：复用 ERP-097 业务员数据范围，只导出当前账号可见行；越界筛选导出为空。
+3. **字段 / 筛选 / 页大小**：与预览相同的白名单字段、状态 / 币种枚举、日期区间与 `1~200` 页大小校验，
+   无效请求在读取前拒绝。
+4. **只导当前页**：只导出请求 `page` / `pageSize` 对应的那一页，不是全量导出。
+5. **公式注入防护**：文本单元格以 `=` / `+` / `-` / `@` / 制表符 / 回车 / 换行开头时，前缀单引号转义，
+   使单元格保持字面文本、不被当作公式执行（`DynamicSalesOrderReportRules.EscapeFormulaLeading`）。
+6. **币种安全小计**：分组小计与预览 `groups` 同源，按币种分开统计条数与金额，绝不跨币种换算或相加。
+7. **只读 + 审计**：无写入、无任意 SQL；`POST` 由既有 `OperationLogMiddleware` 记录审计（动作「导出」）。
+
+### 10.3 限制
+
+- 单次导出最多 `pageSize ≤ 200` 行（有界分页），不提供全量导出。
+- 空结果页返回仅含表头的工作簿（数据工作表 0 数据行；分组时小计工作表仅表头）。
+- 导出不含跨币种合计或换算，金额保留订单原币。
+
+### 10.4 前端（设计器）
+
+- 「📥 导出 Excel」按钮与预览共用同一请求体（当前字段 / 筛选 / 分组 / 页码）；
+- 成功（xlsx 附件）触发浏览器下载；授权失败（`2000/2002/2003`）与网络失败在结果区可见；空页正常下载仅表头文件。
+
+### 10.5 测试覆盖（`ERP.UnitTests/DynamicSalesOrderExcelTests.cs`）
+
+- 导出当前页的列顺序、行数与单元格值；
+- 公式前导文本转义（`=1+1` 等保持字面、非公式单元格）；
+- 分组导出的小计工作表（币种分开、条数 / 金额）；
+- 无身份 / 无菜单授权 / 越界业务员 / 页大小超限拒绝；
+- 空页返回仅表头工作簿；只读不写库。

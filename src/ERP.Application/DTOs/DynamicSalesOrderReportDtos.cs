@@ -18,6 +18,8 @@ public sealed record DynamicSalesOrderReportFieldDto(
 /// <summary>
 /// 销售订单报表预览查询参数（ERP-112，全部为只读筛选）：
 /// 选定字段（仅限白名单）、订单日期 / 客户 / 状态 / 币种有界筛选、以及稳定分页（单页上限 200）。
+/// <para>同一请求体亦用于 Excel 导出（ERP-115，只读）：服务端在导出时重新校验字段 / 筛选 / 页大小与当前账号权限，
+/// 只导出「当前页」，可选按分组追加币种分开的页面小计。</para>
 /// </summary>
 public sealed class DynamicSalesOrderReportRequest
 {

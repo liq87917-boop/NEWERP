@@ -363,4 +363,72 @@ public static class DynamicSalesOrderReportRules
         if (!list.Contains(key, StringComparer.OrdinalIgnoreCase))
             list.Add(key);
     }
+
+    // ==================== 7. Excel 导出（ERP-115） ====================
+
+    /// <summary>电子表格公式注入风险首字符（OWASP：= / + / - / @ 及制表符 / 回车 / 换行）</summary>
+    private static bool IsFormulaLeadingChar(char c)
+        => c is '=' or '+' or '-' or '@' or '\t' or '\r' or '\n';
+
+    /// <summary>文本是否以电子表格公式字符开头（会触发 Excel 公式注入）</summary>
+    public static bool IsFormulaLeading(string? value)
+    {
+        if (string.IsNullOrEmpty(value)) return false;
+        return IsFormulaLeadingChar(value[0]);
+    }
+
+    /// <summary>
+    /// 转义 Excel 公式前导文本：以危险字符开头的文本前缀单引号，使单元格保持字面文本、不被当作公式执行。
+    /// <para>仅对字符串生效；数值 / 日期 / 布尔等类型原样返回（由 ExcelExporter 按其类型写入数值单元格）。</para>
+    /// </summary>
+    public static object? EscapeFormulaLeading(object? value)
+    {
+        if (value is string s && IsFormulaLeading(s))
+            return "'" + s;
+        return value;
+    }
+
+    /// <summary>把一页预览行转成导出行：对每个单元格做公式注入转义，键保持不变</summary>
+    public static Dictionary<string, object?> BuildExportRow(Dictionary<string, object?> row)
+    {
+        var export = new Dictionary<string, object?>(StringComparer.Ordinal);
+        foreach (var kv in row)
+            export[kv.Key] = EscapeFormulaLeading(kv.Value);
+        return export;
+    }
+
+    /// <summary>导出「本页小计」工作表的列定义（分组 / 币种 / 条数 / 金额，只读）</summary>
+    public static IReadOnlyList<(string Key, string Title)> SubtotalColumns { get; } = new[]
+    {
+        ("group", "分组"),
+        ("currency", "币种"),
+        ("count", "条数"),
+        ("amount", "金额"),
+    };
+
+    /// <summary>
+    /// 把分组页面小计拍平为导出行（每个分组 × 币种一行；无分组或空页返回空列表）。
+    /// 与 <see cref="BuildGroupSubtotals"/> 同源，金额只对同币种求和、绝不跨币种相加。
+    /// </summary>
+    public static List<Dictionary<string, object?>> BuildSubtotalRows(
+        IReadOnlyList<DynamicSalesOrderReportGroupDto>? groups)
+    {
+        var rows = new List<Dictionary<string, object?>>();
+        if (groups is null) return rows;
+
+        foreach (var g in groups)
+        {
+            foreach (var s in g.Subtotals)
+            {
+                rows.Add(new Dictionary<string, object?>(StringComparer.Ordinal)
+                {
+                    ["group"] = g.Label,
+                    ["currency"] = s.Currency,
+                    ["count"] = s.Count,
+                    ["amount"] = s.Amount,
+                });
+            }
+        }
+        return rows;
+    }
 }
