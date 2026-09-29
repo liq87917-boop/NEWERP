@@ -43,6 +43,9 @@ public sealed class DynamicSupplierExposureReportRequest
     /// <summary>分组键（仅 none / supplier / currency / linkStatus / receiptStatus；无效取值由服务端 fail closed 拒绝，默认 none）</summary>
     public string? GroupBy { get; set; }
 
+    /// <summary>金额汇总模式（仅 none / supplierCurrency / supplierCurrencyLink；无效取值由服务端 fail closed 拒绝，默认 none）</summary>
+    public string? SummaryMode { get; set; }
+
     /// <summary>关键字（匹配采购单号 / 采购合同号 / 归属销售订单号；留空 = 不过滤）</summary>
     public string? Keyword { get; set; }
 
@@ -83,7 +86,9 @@ public sealed record DynamicSupplierExposureReportPageDto(
     string BoundaryText,
     string DisclaimerText,
     string GroupBy = "none",
-    List<DynamicSupplierExposureReportGroupDto>? Groups = null);
+    List<DynamicSupplierExposureReportGroupDto>? Groups = null,
+    string SummaryMode = "none",
+    List<DynamicSupplierExposureReportSummaryDto>? Summaries = null);
 
 /// <summary>
 /// 供应商采购敞口预览页面分组计数（ERP-152，只读）：当前授权预览页内按分组键聚合的采购订单张数分布。
@@ -94,3 +99,30 @@ public sealed record DynamicSupplierExposureReportGroupDto(
     string Key,
     string Label,
     int Count);
+
+/// <summary>
+/// 供应商采购敞口报表当前页金额汇总（ERP-154，只读）：按供应商 + 原币分组，可选按链接状态拆分。
+/// 只汇总当前授权预览页的采购订单敞口证据：订单金额来自采购订单已落库总额（恒可确认，直接求和）；
+/// 已结算 / 未结算 / 已提交付款金额只汇总「链接可用且金额已知」的订单，链接不唯一（ambiguous）或无可用链接
+/// （unavailable）的订单金额保持独立（绝不并入权威已结算合计，绝不推断为应付余额）；未知金额一律保持 null，绝不回落为 0。
+/// <para><see cref="LinkStatus"/> / <see cref="LinkStatusText"/> 仅在 supplierCurrencyLink 模式下出现；
+/// 不同币种严格隔离、绝不跨币种合并或换算；汇总只统计当前页、非全量合计。</para>
+/// </summary>
+public sealed record DynamicSupplierExposureReportSummaryDto(
+    long SupplierId,
+    string SupplierName,
+    string Currency,
+    string? LinkStatus,
+    string? LinkStatusText,
+    int OrderCount,
+    decimal OrderedAmount,
+    int LinkedOrderCount,
+    decimal LinkedOrderedAmount,
+    int AmbiguousOrderCount,
+    decimal AmbiguousOrderedAmount,
+    int UnavailableOrderCount,
+    decimal UnavailableOrderedAmount,
+    decimal? SettledAmount,
+    decimal? OutstandingAmount,
+    decimal? SubmittedAmount,
+    int UnknownSettlementOrderCount);

@@ -2,7 +2,7 @@
   "id": "ERP-154",
   "title": "Summarize known supplier purchase exposure amounts by currency and link state",
   "description": "A purchasing user sees cautious current-page order and settlement evidence by supplier and original currency, optionally split by link state. Development only. Reuse ERP-148 authorized bounded preview over ERP-031; keep all grouping to the current page, recheck current-user purchase-order menu and use existing HTTP operation audit. Preserve unknown settlement/receipt evidence, distinct currencies and ambiguous/unavailable links; never infer an accounts-payable balance or payment authority. Invalid modes and missing permission fail closed. No arbitrary SQL, migration, production SQL, real database execution, writes, secrets/.env change or deployment. Verify focused tests and safe Release build/test; no browser acceptance.",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "medium",
   "acceptance_criteria": [
     "Preview accepts only none/supplierCurrency/supplierCurrencyLink monetary modes and validates them before source reads with ERP-148 permission and paging.",
@@ -51,5 +51,5 @@
     "status": "not_required",
     "reason": "Development-only bounded read-only feature"
   },
-  "attempts": 0
+  "attempts": 1
 }

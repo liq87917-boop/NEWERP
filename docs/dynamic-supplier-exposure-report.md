@@ -13,7 +13,8 @@ ERP-031 供应商采购敞口报表的既有筛选与稳定分页，预览当前
 
 请求体（`DynamicSupplierExposureReportRequest`）：`fields`（选定字段键，仅限白名单）、`supplierId`、`currency`、
 `orderDateFrom` / `orderDateTo`、`linkStatus`（linked / ambiguous / unavailable）、`groupBy`（分组键，仅
-none / supplier / currency / linkStatus / receiptStatus）、`keyword`、`page`、`pageSize`。
+none / supplier / currency / linkStatus / receiptStatus）、`summaryMode`（金额汇总模式，仅
+none / supplierCurrency / supplierCurrencyLink）、`keyword`、`page`、`pageSize`。
 
 ## 授权（fail closed）
 
@@ -155,14 +156,39 @@ CSV 只导出当前预览页选定列证据，`POST` 由既有 `OperationLogMidd
   绝不跨币种合并或换算，也从结构上杜绝应付余额 / 付款授权推断；
 - 权限 / 网络失败与预览一致（fail closed，界面可见拒绝原因，不暴露范围外数据）。
 
+## 当前页金额汇总（ERP-154）
+
+`POST /api/supplier-purchase-exposure/report` 的请求体新增 `summaryMode`（仅 `none` / `supplierCurrency` / `supplierCurrencyLink`；
+无效取值在读取任何源数据之前即拒绝 `InvalidParameter`，fail closed，默认 `none`）。当请求汇总时，响应页新增：
+
+- `summaryMode`：归一化后的金额汇总模式（默认 `none`）；
+- `summaries`：`[{ supplierId, supplierName, currency, linkStatus, linkStatusText, orderCount, orderedAmount,
+  linkedOrderCount, linkedOrderedAmount, ambiguousOrderCount, ambiguousOrderedAmount, unavailableOrderCount,
+  unavailableOrderedAmount, settledAmount, outstandingAmount, submittedAmount, unknownSettlementOrderCount }]`，
+  只给出「当前授权预览页」的**金额**汇总，绝不跨币种合并或换算。
+
+汇总口径（算术证据边界）：
+
+- 按 `supplier + currency` 分组（不同币种分别成组、绝不合并）；`supplierCurrencyLink` 再按链接状态拆分
+  （linked / ambiguous / unavailable，仅出现本页存在的类别）；
+- `orderedAmount` 来自采购订单已落库总额（恒可确认，直接求和），只统计当前页；
+- `settledAmount` / `outstandingAmount` / `submittedAmount` 只汇总「链接可用且金额已知」的订单；没有链接可用订单
+  或任一行金额未知（null）即对应合计为「未知」（null），绝不轧为 0、绝不给出部分合计；
+- `ambiguousOrderedAmount` / `unavailableOrderedAmount` 保持独立，绝不并入权威已结算合计、绝不推断为应付余额；
+- `unknownSettlementOrderCount` 记录本组链接可用订单中结算金额未知的订单张数，用于显式标注算术证据限制。
+
+`none` 或空页时 `summaries` 为空；汇总只统计当前页、非全量合计，收货数量等非金额证据绝不进入汇总。
+全程只读、无写入，`POST` 由既有 `OperationLogMiddleware` 记录审计。
+
 ## 文件地图
 
-- `src/ERP.Application/DTOs/DynamicSupplierExposureReportDtos.cs`：目录 / 请求 / 结果 DTO（含 ERP-152 分组计数 DTO）；
-- `src/ERP.Application/Services/DynamicSupplierExposureReportRules.cs`：字段白名单、校验、行投影、Excel 公式转义与分组计数（纯规则）；
-- `src/ERP.Api/Controllers/DynamicSupplierExposureReportController.cs`：授权 + 复用 ERP-031 只读派生 + 选定列投影 + 分组计数（ERP-152）+ xlsx 导出（ERP-150）+ PDF 导出（ERP-151）；
+- `src/ERP.Application/DTOs/DynamicSupplierExposureReportDtos.cs`：目录 / 请求 / 结果 DTO（含 ERP-152 分组计数 DTO 与 ERP-154 金额汇总 DTO）；
+- `src/ERP.Application/Services/DynamicSupplierExposureReportRules.cs`：字段白名单、校验、行投影、Excel 公式转义、分组计数（ERP-152）与金额汇总（ERP-154）（纯规则）；
+- `src/ERP.Api/Controllers/DynamicSupplierExposureReportController.cs`：授权 + 复用 ERP-031 只读派生 + 选定列投影 + 分组计数（ERP-152）+ 金额汇总（ERP-154）+ xlsx 导出（ERP-150）+ PDF 导出（ERP-151）；
 - `src/ERP.Infrastructure/Export/DynamicSupplierExposurePdfExporter.cs`：分页中文 PDF 导出（ERP-151，PDFsharp + 共享黑体解析器）；
 - `src/ERP.UnitTests/DynamicSupplierExposureReportTests.cs`：预览单元测试（内存库，不连 SQL Server、不启动 API）；
 - `src/ERP.UnitTests/DynamicSupplierExposureGroupingTests.cs`：分组计数单元测试（ERP-152，内存库，不连 SQL Server、不启动 API）；
+- `src/ERP.UnitTests/DynamicSupplierExposureAmountSummaryTests.cs`：金额汇总单元测试（ERP-154，内存库，不连 SQL Server、不启动 API）；
 - `src/ERP.UnitTests/DynamicSupplierExposureExcelTests.cs`：Excel 导出单元测试（ERP-150，内存库，不连 SQL Server、不启动 API）；
 - `src/ERP.UnitTests/DynamicSupplierExposurePdfTests.cs`：PDF 导出单元测试（ERP-151，内存库，不连 SQL Server、不启动 API）；
 - `src/ERP.Api/wwwroot/js/supplier-purchase-exposure.js`：ERP-031 工作台 + ERP-149 前端字段设计器 + ERP-150 Excel 导出（`speDesExportExcel`）+ ERP-151 PDF 导出（`speDesExportPdf`，纯函数可 Node 单测）+ ERP-153 分组计数可视化（`speDesGroupChartHtml` / `speDesGroupSelectHtml`）；

@@ -87,6 +87,17 @@ public static class DynamicSupplierExposureReportRules
     public static readonly string[] GroupReceiptStatuses =
         { ReceiptNone, ReceiptPartial, ReceiptComplete, ReceiptOverReceived, ReceiptUnknown };
 
+    // ==================== 0.3 金额汇总模式（ERP-154） ====================
+
+    /// <summary>不输出金额汇总（默认）</summary>
+    public const string SummaryNone = "none";
+
+    /// <summary>按供应商 + 币种输出当前页金额汇总（原币，绝不跨币种合并或换算）</summary>
+    public const string SummarySupplierCurrency = "supplierCurrency";
+
+    /// <summary>按供应商 + 币种 + 链接状态输出当前页金额汇总（ambiguous / unavailable 订单金额保持独立）</summary>
+    public const string SummarySupplierCurrencyLink = "supplierCurrencyLink";
+
     // ==================== 1. 文案 ====================
 
     /// <summary>只读声明（接口与文档统一声明）</summary>
@@ -380,6 +391,116 @@ public static class DynamicSupplierExposureReportRules
         ReceiptOverReceived => "超收",
         ReceiptUnknown => "未知（超出派生上限）",
         _ => "未知收货状态",
+    };
+
+    // ==================== 5.2 当前页金额汇总（ERP-154） ====================
+
+    /// <summary>
+    /// 规范化金额汇总模式（fail closed）：空 / 留空 = 不汇总（none）；仅接受 none / supplierCurrency / supplierCurrencyLink（大小写不敏感）；
+    /// 未知取值显式拒绝（在读取任何源数据之前完成）。
+    /// </summary>
+    public static string NormalizeSummaryMode(string? summaryMode)
+    {
+        if (string.IsNullOrWhiteSpace(summaryMode))
+            return SummaryNone;
+
+        var normalized = summaryMode.Trim();
+        if (string.Equals(normalized, SummaryNone, StringComparison.OrdinalIgnoreCase)) return SummaryNone;
+        if (string.Equals(normalized, SummarySupplierCurrency, StringComparison.OrdinalIgnoreCase)) return SummarySupplierCurrency;
+        if (string.Equals(normalized, SummarySupplierCurrencyLink, StringComparison.OrdinalIgnoreCase)) return SummarySupplierCurrencyLink;
+
+        throw BusinessException.InvalidParameter(
+            $"无效的金额汇总模式: {summaryMode}（可选：none / supplierCurrency / supplierCurrencyLink）");
+    }
+
+    /// <summary>
+    /// 当前授权预览页的金额汇总（ERP-154）：按供应商 + 原币分组（可选再按链接状态拆分），只汇总当前页采购订单敞口证据。
+    /// <para>订单金额来自采购订单已落库总额（恒可确认，直接求和，只统计当前页）；已结算 / 未结算 / 已提交付款金额只汇总
+    /// 「链接可用且金额已知」的订单（没有链接可用订单或任一行金额未知即整组合计为 null，绝不轧为 0、绝不给出部分合计）；
+    /// 链接不唯一（ambiguous）与无可用链接（unavailable）的订单金额保持独立，绝不并入权威已结算合计、绝不推断为应付余额。</para>
+    /// <para>空页 / none 返回空列表；汇总只统计当前页、非全量合计。</para>
+    /// </summary>
+    public static List<DynamicSupplierExposureReportSummaryDto> BuildAmountSummaries(
+        IEnumerable<IReadOnlyDictionary<string, object?>> rows, string summaryMode)
+    {
+        var list = (rows ?? Array.Empty<IReadOnlyDictionary<string, object?>>()).ToList();
+        var mode = NormalizeSummaryMode(summaryMode);
+        if (mode == SummaryNone)
+            return new List<DynamicSupplierExposureReportSummaryDto>();
+
+        var summaries = new List<DynamicSupplierExposureReportSummaryDto>();
+        foreach (var group in list
+            .GroupBy(r => new
+            {
+                SupplierId = ReadSupplierId(r),
+                Currency = ReadText(r, "currency"),
+                LinkStatus = mode == SummarySupplierCurrencyLink ? ReadText(r, "linkStatus") : string.Empty,
+            })
+            .OrderBy(g => g.Key.SupplierId)
+            .ThenBy(g => g.Key.Currency, StringComparer.Ordinal)
+            .ThenBy(g => LinkStatusOrder(g.Key.LinkStatus)))
+        {
+            var groupRows = group.ToList();
+            var first = groupRows[0];
+            var withLink = mode == SummarySupplierCurrencyLink;
+
+            var linked = groupRows.Where(r => ReadText(r, "linkStatus") == LinkLinked).ToList();
+            var ambiguous = groupRows.Where(r => ReadText(r, "linkStatus") == LinkAmbiguous).ToList();
+            var unavailable = groupRows.Where(r => ReadText(r, "linkStatus") == LinkUnavailable).ToList();
+
+            summaries.Add(new DynamicSupplierExposureReportSummaryDto(
+                group.Key.SupplierId,
+                ReadText(first, "supplierName"),
+                group.Key.Currency,
+                withLink ? group.Key.LinkStatus : null,
+                withLink ? GroupLinkStatusLabel(group.Key.LinkStatus) : null,
+                groupRows.Count,
+                groupRows.Sum(ReadOrderedAmount),
+                linked.Count,
+                linked.Sum(ReadOrderedAmount),
+                ambiguous.Count,
+                ambiguous.Sum(ReadOrderedAmount),
+                unavailable.Count,
+                unavailable.Sum(ReadOrderedAmount),
+                SumKnownNullable(linked, "settledAmount"),
+                SumKnownNullable(linked, "outstandingAmount"),
+                SumKnownNullable(linked, "submittedAmount"),
+                linked.Count(r => ReadDecimalNullable(r, "settledAmount") is null
+                                  || ReadDecimalNullable(r, "outstandingAmount") is null
+                                  || ReadDecimalNullable(r, "submittedAmount") is null)));
+        }
+
+        return summaries;
+    }
+
+    private static decimal ReadOrderedAmount(IReadOnlyDictionary<string, object?> row)
+        => row.TryGetValue("orderedAmount", out var v) && v is decimal d ? d : 0m;
+
+    private static decimal? ReadDecimalNullable(IReadOnlyDictionary<string, object?> row, string key)
+        => row.TryGetValue(key, out var v) && v is decimal d ? d : null;
+
+    /// <summary>链接可用订单的可未知金额求和：没有链接可用订单或任一行金额未知（null）即整体按「未知」（null）返回，绝不用 0 顶替或给部分合计</summary>
+    private static decimal? SumKnownNullable(
+        IReadOnlyList<IReadOnlyDictionary<string, object?>> rows, string key)
+    {
+        if (rows.Count == 0) return null;
+        decimal sum = 0m;
+        foreach (var row in rows)
+        {
+            var value = ReadDecimalNullable(row, key);
+            if (value is null) return null;
+            sum += value.Value;
+        }
+
+        return sum;
+    }
+
+    private static int LinkStatusOrder(string linkStatus) => linkStatus switch
+    {
+        LinkLinked => 0,
+        LinkAmbiguous => 1,
+        LinkUnavailable => 2,
+        _ => int.MaxValue,
     };
 
     // ==================== 6. Excel 导出（ERP-150） ====================
