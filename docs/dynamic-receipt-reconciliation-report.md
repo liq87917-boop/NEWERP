@@ -11,8 +11,8 @@ ERP-046 客户订单与收款核对证据。本功能为**开发期只读派生*
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET | `/api/sales-orders/dynamic-receipt-reconciliation-report` | 返回 ERP-046 订单证据字段白名单目录（需登录 + `sales-order` 销售订单菜单授权） |
-| POST | `/api/sales-orders/dynamic-receipt-reconciliation-report` | 按选定字段与有界筛选预览当前账号数据范围内的订单与收款证据，稳定分页 |
+| GET | `/api/sales-orders/dynamic-receipt-reconciliation-report` | 返回 ERP-046 订单证据字段白名单目录 + 独立的未关联收款证据字段目录（需登录 + `sales-order` 销售订单菜单授权） |
+| POST | `/api/sales-orders/dynamic-receipt-reconciliation-report` | 按选定字段与有界筛选预览当前账号数据范围内的订单与收款证据，稳定分页；未关联收款证据按独立的收款字段目录单独投影，绝不并入订单行 |
 
 预览与下载请求由既有 `OperationLogMiddleware` 按 HTTP 方法记录审计，本控制器自身不写任何操作日志。
 
@@ -64,6 +64,25 @@ ERP-046 客户订单与收款核对证据。本功能为**开发期只读派生*
   `invoiceEvidenceTruncated` / `invoiceEvidenceNote`
 - 行级说明：`note`
 
+### 4.1 未关联收款证据字段目录（独立、有限、只读）
+
+未关联收款证据字段目录与订单证据字段目录**完全独立**，由 `DynamicReceiptReconciliationReportRules.GetReceiptCatalog()`
+统一供给（界面 / 接口共用同一份口径）。请求体通过 `ReceiptFields` 选择收款证据列：空 / 留空 = 返回全部收款证据字段
+（目录顺序）；去重并保持请求顺序；未知收款证据列显式拒绝（错误码 2004），**在读取 ERP-046 源数据之前**即失败（fail closed）。
+
+未关联收款证据字段目录（数据类别为 `number` / `text` / `date` / `enum`）：
+
+- 收款单身份：`receiptId` / `receiptNo` / `receiptDate`
+- 客户与币种：`customerId` / `customerName` / `currency`（原币，绝不合并 / 换算）
+- 金额：`amount`（收款单自身已落库金额，按原币原样列出；未知照实保留 `null`，绝不回落为 0）
+- 付款与状态：`paymentMethod` / `status` / `evidenceStatus`（`active` / `pending` / `historical`）/ `evidenceText`
+- 链接证据：`receiptLinkageStatus`（恒为 `unlinked`）/ `receiptLinkageText` / `referenceField`（=`FinanceReceipt.CustomerId`）
+- 行级说明：`note`
+
+预览响应中收款证据以 `ReceiptColumns` + `ReceiptRows` 单独投影，与订单 `Columns` / `Rows` 分开；
+`UnlinkedReceiptTruncated` 保留源查询的「不完整」截断标记（命中上限时显式标注，绝不静默截断）。
+收款证据绝不并入订单行、绝不与订单金额相加、绝不猜测收款单到订单的匹配关系。
+
 ## 5. 筛选校验（全部在读取源数据之前完成，非法取值 fail closed）
 
 | 筛选 | 取值 | 校验 |
@@ -105,4 +124,5 @@ ERP-046 客户订单与收款核对证据。本功能为**开发期只读派生*
 - `src/ERP.Api/Controllers/DynamicReceiptReconciliationReportController.cs`
 - `src/ERP.Api/Controllers/SalesOrderReceiptReconciliation.cs`（ERP-046 源查询，新增 `SalespersonDataScope? scope` 参数）
 - `src/ERP.UnitTests/DynamicReceiptReconciliationReportTests.cs`
+- `src/ERP.UnitTests/DynamicReceiptReconciliationUnlinkedTests.cs`
 - `src/ERP.UnitTests/SalesOrderReceiptReconciliationTests.cs`

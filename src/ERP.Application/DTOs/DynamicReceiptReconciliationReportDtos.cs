@@ -25,6 +25,9 @@ public sealed class DynamicReceiptReconciliationReportRequest
     /// <summary>选定字段键（仅限白名单；留空 = 返回全部白名单字段，目录顺序）</summary>
     public List<string>? Fields { get; set; }
 
+    /// <summary>选定的未关联收款证据字段键（仅限白名单；留空 = 返回全部收款证据白名单字段，目录顺序）</summary>
+    public List<string>? ReceiptFields { get; set; }
+
     /// <summary>客户 Id 筛选（留空 = 全部；非正数直接拒绝，且仅在当前业务员数据范围内生效）</summary>
     public long? CustomerId { get; set; }
 
@@ -64,6 +67,7 @@ public sealed class DynamicReceiptReconciliationReportRequest
 /// </summary>
 public sealed record DynamicReceiptReconciliationReportCatalogDto(
     List<DynamicReceiptReconciliationReportFieldDto> Fields,
+    List<DynamicReceiptReconciliationReportFieldDto> ReceiptFields,
     string RequiredMenuCode,
     string RequiredMenuText,
     int MaxPageSize,
@@ -100,6 +104,8 @@ public sealed record DynamicReceiptReconciliationReportPageDto(
     List<DynamicReceiptReconciliationReportFieldDto> Columns,
     List<Dictionary<string, object?>> Rows,
     List<DynamicReceiptReconciliationReportReceiptDto> UnlinkedReceipts,
+    List<DynamicReceiptReconciliationReportFieldDto> ReceiptColumns,
+    List<Dictionary<string, object?>> ReceiptRows,
     bool UnlinkedReceiptTruncated,
     int Total,
     int Page,

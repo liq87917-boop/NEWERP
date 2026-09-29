@@ -2,7 +2,7 @@
   "id": "ERP-165",
   "title": "Preview separate unlinked customer receipt evidence fields",
   "description": "A sales user builds a bounded, read-only customer order and receipt reconciliation report from existing ERP-046 evidence. Development only. Recheck current-user sales-order menu and SalespersonDataScopeService customer visibility on every request; apply scope before order counts and paging, and let unlinked receipts derive only from scoped page customers. Fail closed on missing identity, denied menu and invalid fields or filters. Keep sales-order linked application amounts, receipt-allocation evidence, invoice evidence and customer-level unlinked FinanceReceipt evidence separate; never infer a receipt-order match or an accounts-receivable balance. Preserve null unknown amounts, original currencies, receipt evidence status and source truncation flags. Existing HTTP operation audit covers preview and download. No arbitrary SQL, migration, production SQL, real database execution, writes, secrets/.env changes or deployment. Verify focused unit/Node tests and safe Release build/test; no real-browser acceptance.",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "medium",
   "acceptance_criteria": [
     "Preview exposes a separate finite unlinked-receipt field catalog and rejects unknown receipt columns before ERP-046 source reads.",
@@ -49,5 +49,6 @@
     "level": "L1",
     "status": "not_required",
     "reason": "Development-only bounded read-only feature"
-  }
+  },
+  "attempts": 1
 }

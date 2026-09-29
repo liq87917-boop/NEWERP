@@ -179,15 +179,46 @@ public static class DynamicReceiptReconciliationReportRules
 
     private static readonly string[] AllFieldKeys = Fields.Select(f => f.Key).ToArray();
 
+    // ==================== 2.1 未关联收款证据字段目录（独立、有限、只读） ====================
+
+    /// <summary>
+    /// 未关联收款证据字段白名单：与订单证据字段目录完全独立，只覆盖 <see cref="DynamicReceiptReconciliationReportReceiptDto"/>
+    /// 的有限字段，绝不混入订单侧合计字段；收款单只有客户级引用，因此链接状态恒为 unlinked，金额按收款单原币原样列出。
+    /// </summary>
+    private static readonly IReadOnlyList<FieldDef> ReceiptFields = new List<FieldDef>
+    {
+        new("receiptId", "收款单Id", "number", false),
+        new("receiptNo", "收款单号", "text", false),
+        new("receiptDate", "收款日期", "date", false),
+        new("customerId", "客户Id", "number", false),
+        new("customerName", "客户名", "text", false),
+        new("currency", "币种", "enum", false),
+        new("amount", "收款金额", "number", false),
+        new("paymentMethod", "付款方式", "text", false),
+        new("status", "单据状态", "text", false),
+        new("evidenceStatus", "收款证据状态", "text", false),
+        new("evidenceText", "收款证据文案", "text", false),
+        new("receiptLinkageStatus", "收款链接状态", "text", false),
+        new("receiptLinkageText", "收款链接文案", "text", false),
+        new("referenceField", "建立引用字段", "text", false),
+        new("note", "说明", "text", false),
+    };
+
+    private static readonly IReadOnlyDictionary<string, FieldDef> ReceiptFieldByKey =
+        ReceiptFields.ToDictionary(f => f.Key, StringComparer.OrdinalIgnoreCase);
+
+    private static readonly string[] AllReceiptFieldKeys = ReceiptFields.Select(f => f.Key).ToArray();
+
     // ==================== 3. 字段目录 ====================
 
     /// <summary>完整字段目录（仅白名单，有序）</summary>
     public static List<DynamicReceiptReconciliationReportFieldDto> GetCatalog()
         => Fields.Select(f => new DynamicReceiptReconciliationReportFieldDto(f.Key, f.Label, f.DataType, f.Filterable)).ToList();
 
-    /// <summary>完整目录（含所需菜单与有界额度口径）</summary>
+    /// <summary>完整目录（含所需菜单与有界额度口径），并额外暴露独立的未关联收款证据字段目录</summary>
     public static DynamicReceiptReconciliationReportCatalogDto GetCatalogDto() => new(
         GetCatalog(),
+        GetReceiptCatalog(),
         RequiredMenuCode,
         RequiredMenuText,
         MaxPageSize,
@@ -200,7 +231,15 @@ public static class DynamicReceiptReconciliationReportRules
             ? new DynamicReceiptReconciliationReportFieldDto(def.Key, def.Label, def.DataType, def.Filterable)
             : null;
 
+    /// <summary>完整未关联收款证据字段目录（仅白名单，有序，独立于订单字段目录）</summary>
+    public static List<DynamicReceiptReconciliationReportFieldDto> GetReceiptCatalog()
+        => ReceiptFields.Select(f => new DynamicReceiptReconciliationReportFieldDto(f.Key, f.Label, f.DataType, f.Filterable)).ToList();
 
+    /// <summary>按字段键查找未关联收款证据目录项（大小写不敏感；未知返回 null）</summary>
+    public static DynamicReceiptReconciliationReportFieldDto? GetReceiptField(string key)
+        => ReceiptFieldByKey.TryGetValue(key.Trim(), out var def)
+            ? new DynamicReceiptReconciliationReportFieldDto(def.Key, def.Label, def.DataType, def.Filterable)
+            : null;
 
     // ==================== 4. 校验与规范化（全部在源读取之前完成） ====================
 
@@ -221,6 +260,31 @@ public static class DynamicReceiptReconciliationReportRules
         {
             if (!FieldByKey.TryGetValue(key, out var def))
                 throw BusinessException.InvalidParameter($"未知字段: {key}");
+            if (!ordered.Contains(def.Key, StringComparer.OrdinalIgnoreCase))
+                ordered.Add(def.Key);
+        }
+
+        return ordered;
+    }
+
+    /// <summary>
+    /// 规范化选定的未关联收款证据字段（fail closed）：未知收款字段显式拒绝；空 / 留空 = 返回全部收款证据白名单字段（目录顺序）；
+    /// 去重并保持请求顺序。与订单字段目录相互独立，绝不把订单侧合计字段当成收款证据字段接受。
+    /// </summary>
+    public static IReadOnlyList<string> NormalizeReceiptFields(IEnumerable<string>? fields)
+    {
+        var requested = (fields ?? Array.Empty<string>())
+            .Where(f => !string.IsNullOrWhiteSpace(f))
+            .Select(f => f.Trim())
+            .ToList();
+        if (requested.Count == 0)
+            return AllReceiptFieldKeys;
+
+        var ordered = new List<string>();
+        foreach (var key in requested)
+        {
+            if (!ReceiptFieldByKey.TryGetValue(key, out var def))
+                throw BusinessException.InvalidParameter($"未知收款证据字段: {key}");
             if (!ordered.Contains(def.Key, StringComparer.OrdinalIgnoreCase))
                 ordered.Add(def.Key);
         }

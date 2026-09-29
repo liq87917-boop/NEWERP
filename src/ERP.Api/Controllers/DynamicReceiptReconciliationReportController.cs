@@ -63,6 +63,7 @@ public class DynamicReceiptReconciliationReportController : ControllerBase
 
         // 1) 字段 / 筛选 / 页大小校验：全部在读取 ERP-046 源数据之前完成（fail closed）
         var fieldKeys = DynamicReceiptReconciliationReportRules.NormalizeFields(request.Fields);
+        var receiptFieldKeys = DynamicReceiptReconciliationReportRules.NormalizeReceiptFields(request.ReceiptFields);
         var customerId = DynamicReceiptReconciliationReportRules.NormalizeCustomerId(request.CustomerId);
         var currency = DynamicReceiptReconciliationReportRules.NormalizeCurrency(request.Currency);
         DynamicReceiptReconciliationReportRules.ValidateDateRange(request.OrderDateFrom, request.OrderDateTo);
@@ -102,11 +103,17 @@ public class DynamicReceiptReconciliationReportController : ControllerBase
             .Select(o => DynamicReceiptReconciliationReportRules.BuildRow(BuildSourceRow(o), fieldKeys))
             .ToList();
         var receipts = report.UnlinkedReceipts.Select(MapReceipt).ToList();
+        var receiptColumns = receiptFieldKeys.Select(k => DynamicReceiptReconciliationReportRules.GetReceiptField(k)!).ToList();
+        var receiptRows = report.UnlinkedReceipts
+            .Select(r => DynamicReceiptReconciliationReportRules.BuildRow(BuildReceiptSourceRow(r), receiptFieldKeys))
+            .ToList();
 
         return new DynamicReceiptReconciliationReportPageDto(
             columns,
             rows,
             receipts,
+            receiptColumns,
+            receiptRows,
             report.PageUnlinkedReceiptTruncated,
             report.Total,
             report.Page,
@@ -180,6 +187,27 @@ public class DynamicReceiptReconciliationReportController : ControllerBase
             ["note"] = o.Note,
         };
 
+
+    /// <summary>把单张 ERP-046 未关联收款证据行展开为整行「字段 → 值」字典（仅收款证据白名单字段，供 <see cref="DynamicReceiptReconciliationReportRules.BuildRow"/> 投影）</summary>
+    private static Dictionary<string, object?> BuildReceiptSourceRow(SalesOrderReceiptReconciliationReceipt r)
+        => new(StringComparer.Ordinal)
+        {
+            ["receiptId"] = r.ReceiptId,
+            ["receiptNo"] = r.ReceiptNo,
+            ["receiptDate"] = r.ReceiptDate,
+            ["customerId"] = r.CustomerId,
+            ["customerName"] = r.CustomerName,
+            ["currency"] = r.Currency,
+            ["amount"] = r.Amount,
+            ["paymentMethod"] = r.PaymentMethod,
+            ["status"] = r.Status,
+            ["evidenceStatus"] = r.EvidenceStatus,
+            ["evidenceText"] = r.EvidenceText,
+            ["receiptLinkageStatus"] = r.ReceiptLinkageStatus,
+            ["receiptLinkageText"] = r.ReceiptLinkageText,
+            ["referenceField"] = r.ReferenceField,
+            ["note"] = r.Note,
+        };
 
     /// <summary>把 ERP-046 未关联收款证据行映射为只读预览 DTO（链接状态恒为 unlinked，原币金额原样保留）</summary>
     private static DynamicReceiptReconciliationReportReceiptDto MapReceipt(
