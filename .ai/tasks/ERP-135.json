@@ -2,7 +2,7 @@
   "id": "ERP-135",
   "title": "Preview selected fields in an authorized inventory-aging report",
   "description": "An inventory user selects finite existing stock-aging fields and warehouse/product/as-of-date filters for a bounded read-only preview. Reuse ERP-034 inventory-aging report service, including authoritative FIFO age buckets, separate unknown-age and unknown-cost evidence, persisted cost currency, and stock-query menu authorization; do not widen data scope or compute new valuation. Unknown cost amounts remain null rather than zero. Invalid requests fail closed before report reads; HTTP audit records read-only requests. Development only: no Domain/schema change, migration, production SQL, real database execution, arbitrary model SQL, writes, secret/.env change or deployment. Verify unit tests and safe build/test.",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "medium",
   "acceptance_criteria": [
     "Authenticated catalog exposes a finite allowlist of existing scalar and fixed age-bucket fields; preview rejects unknown columns, malformed date/warehouse/product filters and page size above 200 before reading.",
@@ -50,5 +50,6 @@
     "level": "L1",
     "status": "not_required",
     "reason": "Development-only bounded read-only feature"
-  }
+  },
+  "attempts": 1
 }
