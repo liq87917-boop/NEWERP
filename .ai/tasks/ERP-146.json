@@ -2,7 +2,7 @@
   "id": "ERP-146",
   "title": "Summarize known supplier aging amounts by supplier and currency",
   "description": "A purchasing user views cautious current-page monetary evidence grouped by supplier and original currency, with an optional aging-bucket split. Only active recorded invoice evidence contributes; unknown or invalid allocation amounts remain unknown. Development only; reuse ERP-140 authorized, bounded read-only supplier-aging preview and existing HTTP audit. Work solely on the current page. Preserve explicit unknown due dates, invalid/unknown allocation evidence, draft/void separation and currency isolation. Missing permission or invalid grouping fails closed. No new schema, migration, production SQL, real database execution, payment action, ledger inference, arbitrary SQL, business writes, secrets/.env or deployment. Verify focused tests and safe Release build/test; no real-browser acceptance.",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "medium",
   "acceptance_criteria": [
     "Preview accepts only none/supplierCurrency/supplierCurrencyAging monetary summary modes; rejects unknown modes before source reads and reuses ERP-140 authorization and paging.",
@@ -51,5 +51,5 @@
     "status": "not_required",
     "reason": "Development-only bounded read-only feature"
   },
-  "attempts": 0
+  "attempts": 1
 }

@@ -40,6 +40,9 @@ public sealed class DynamicSupplierAgingReportRequest
     /// <summary>分组键（仅 none / supplier / currency / agingBucket / allocationState；无效取值由服务端 fail closed 拒绝）</summary>
     public string? GroupBy { get; set; }
 
+    /// <summary>金额汇总模式（仅 none / supplierCurrency / supplierCurrencyAging；无效取值由服务端 fail closed 拒绝，默认 none）</summary>
+    public string? SummaryMode { get; set; }
+
     /// <summary>关键字（匹配发票号码 / 代码 / 供应商编码与名称 / 付款条件文本；留空 = 不过滤）</summary>
     public string? Keyword { get; set; }
 
@@ -83,6 +86,9 @@ public sealed record DynamicSupplierAgingReportCatalogDto(
 /// 与未知 / 无效分配证据（<c>allocationState</c> / <c>remainingState</c> / 各计数与金额字段）照实保留，绝不推算或修复。</para>
 /// <para>ERP-144 新增 <see cref="GroupBy"/> / <see cref="Groups"/>：仅当请求分组（supplier / currency / agingBucket / allocationState）时，
 /// <see cref="Groups"/> 才给出「当前授权预览页」按分组键的发票张数分布；只统计张数、绝不求和任何金额；默认 none 时为空。</para>
+/// <para>ERP-146 新增 <see cref="SummaryMode"/> / <see cref="Summaries"/>：仅当请求金额汇总（supplierCurrency / supplierCurrencyAging）时，
+/// <see cref="Summaries"/> 才给出「当前授权预览页」按供应商 + 原币（可选账龄分桶）的已知有效含税总额 / 有效已分配 / 剩余证据金额；
+/// 草稿 / 已作废金额绝不并入，未知 / 无效分配证据按「未知」（null）返回，绝不轧为 0 或给部分合计；默认 none 时为空。</para>
 /// </summary>
 public sealed record DynamicSupplierAgingReportPageDto(
     List<DynamicSupplierAgingReportFieldDto> Columns,
@@ -95,7 +101,9 @@ public sealed record DynamicSupplierAgingReportPageDto(
     string BoundaryText,
     string DisclaimerText,
     string GroupBy = "none",
-    List<DynamicSupplierAgingReportGroupDto>? Groups = null);
+    List<DynamicSupplierAgingReportGroupDto>? Groups = null,
+    string SummaryMode = "none",
+    List<DynamicSupplierAgingReportSummaryDto>? Summaries = null);
 
 /// <summary>
 /// 供应商对账与账龄报表页面分组计数（ERP-144，只读）：当前授权预览页内按分组键聚合的发票张数分布。
@@ -106,3 +114,23 @@ public sealed record DynamicSupplierAgingReportGroupDto(
     string Key,
     string Label,
     int Count);
+
+/// <summary>
+/// 供应商对账与账龄报表当前页金额汇总（ERP-146，只读）：按供应商 + 原币分组，可选账龄分桶拆分。
+/// 只汇总计入有效应付证据合计（已登记未作废）的发票证据：含税总额来自完整加载的发票行（恒可确认，直接求和）；
+/// 有效已分配与算术剩余证据只要任一行未知（命中有界上限）或无效（超过含税总额），对应合计即按「未知」（null）返回。
+/// 草稿 / 已作废金额绝不并入；<see cref="AgingBucket"/> 仅在账龄汇总模式下出现，未知到期日独立分组、绝不推算。
+/// </summary>
+public sealed record DynamicSupplierAgingReportSummaryDto(
+    long SupplierId,
+    string SupplierCode,
+    string SupplierName,
+    string Currency,
+    string? AgingBucket,
+    string? AgingBucketText,
+    int InvoiceCount,
+    decimal GrossAmount,
+    decimal? ActiveAllocatedAmount,
+    decimal? RemainingAmount,
+    int UnknownRemainingInvoiceCount,
+    int OverAllocatedInvoiceCount);

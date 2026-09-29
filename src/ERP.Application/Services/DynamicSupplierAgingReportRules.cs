@@ -109,6 +109,17 @@ public static class DynamicSupplierAgingReportRules
     public static readonly string[] GroupAgingBuckets =
         { BucketNotDue, BucketOverdue1To30, BucketOverdue31To60, BucketOverdue61To90, BucketOverdueOver90, UnknownDueDateBucket };
 
+    // ==================== 0.3 金额汇总模式（ERP-146） ====================
+
+    /// <summary>不输出金额汇总（默认）</summary>
+    public const string SummaryNone = "none";
+
+    /// <summary>按供应商 + 币种输出当前页金额汇总（原币，绝不跨币种合并）</summary>
+    public const string SummarySupplierCurrency = "supplierCurrency";
+
+    /// <summary>按供应商 + 币种 + 账龄分桶输出当前页金额汇总（未知到期日独立分组）</summary>
+    public const string SummarySupplierCurrencyAging = "supplierCurrencyAging";
+
     // ==================== 1. 文案 ====================
 
     /// <summary>只读声明（接口与文档统一声明）</summary>
@@ -447,6 +458,105 @@ public static class DynamicSupplierAgingReportRules
         AllocationOverAllocated => "无效证据（超过含税总额）",
         _ => "未知（命中上限）",
     };
+
+    // ==================== 4.2 当前页金额汇总（ERP-146） ====================
+
+    /// <summary>
+    /// 规范化金额汇总模式（fail closed）：空 / 留空 = 不汇总（none）；仅接受 none / supplierCurrency / supplierCurrencyAging（大小写不敏感）；
+    /// 未知取值显式拒绝（在读取任何源数据之前完成）。
+    /// </summary>
+    public static string NormalizeSummaryMode(string? summaryMode)
+    {
+        if (string.IsNullOrWhiteSpace(summaryMode))
+            return SummaryNone;
+
+        var normalized = summaryMode.Trim();
+        if (string.Equals(normalized, SummaryNone, StringComparison.OrdinalIgnoreCase)) return SummaryNone;
+        if (string.Equals(normalized, SummarySupplierCurrency, StringComparison.OrdinalIgnoreCase)) return SummarySupplierCurrency;
+        if (string.Equals(normalized, SummarySupplierCurrencyAging, StringComparison.OrdinalIgnoreCase)) return SummarySupplierCurrencyAging;
+
+        throw BusinessException.InvalidParameter(
+            $"无效的金额汇总模式: {summaryMode}（可选：none / supplierCurrency / supplierCurrencyAging）");
+    }
+
+    /// <summary>
+    /// 当前授权预览页的金额汇总（ERP-146）：只汇总计入有效应付证据合计（已登记未作废）的发票证据，
+    /// 草稿 / 已作废金额绝不并入；按供应商 + 原币分组（可选再按账龄分桶拆分，未知到期日独立分组）。
+    /// <para>含税总额来自完整加载的发票行（恒可确认，直接求和）；有效已分配与算术剩余证据只要任一行未知或无效，
+    /// 对应合计即按「未知」（null）返回，绝不轧为 0 或给部分合计。空页 / none 返回空列表。</para>
+    /// </summary>
+    public static List<DynamicSupplierAgingReportSummaryDto> BuildAmountSummaries(
+        IEnumerable<IReadOnlyDictionary<string, object?>> rows, string summaryMode)
+    {
+        var list = (rows ?? Array.Empty<IReadOnlyDictionary<string, object?>>()).ToList();
+        var mode = NormalizeSummaryMode(summaryMode);
+        if (mode == SummaryNone)
+            return new List<DynamicSupplierAgingReportSummaryDto>();
+
+        var active = list.Where(IsActiveEvidenceRow).ToList();
+        var summaries = new List<DynamicSupplierAgingReportSummaryDto>();
+        foreach (var group in active
+            .GroupBy(r => new
+            {
+                SupplierId = ReadSupplierId(r),
+                Currency = ReadText(r, "currency"),
+                Bucket = mode == SummarySupplierCurrencyAging ? EffectiveBucket(r) : string.Empty,
+            })
+            .OrderBy(g => g.Key.SupplierId)
+            .ThenBy(g => g.Key.Currency, StringComparer.Ordinal)
+            .ThenBy(g => BucketOrder(g.Key.Bucket)))
+        {
+            var groupRows = group.ToList();
+            var first = groupRows[0];
+            var withBucket = mode == SummarySupplierCurrencyAging;
+            summaries.Add(new DynamicSupplierAgingReportSummaryDto(
+                group.Key.SupplierId,
+                ReadText(first, "supplierCode"),
+                ReadText(first, "supplierName"),
+                group.Key.Currency,
+                withBucket ? group.Key.Bucket : null,
+                withBucket ? GroupBucketLabel(group.Key.Bucket) : null,
+                groupRows.Count,
+                groupRows.Sum(ReadGrossAmount),
+                SumKnownNullable(groupRows, "activeAllocatedAmount"),
+                SumKnownNullable(groupRows, "remainingAmount"),
+                groupRows.Count(r => ReadDecimalNullable(r, "remainingAmount") is null),
+                groupRows.Count(r => ReadText(r, "remainingState") == AllocationOverAllocated)));
+        }
+
+        return summaries;
+    }
+
+    private static bool IsActiveEvidenceRow(IReadOnlyDictionary<string, object?> row)
+        => row.TryGetValue("isActiveEvidence", out var v) && v is bool b && b;
+
+    private static decimal ReadGrossAmount(IReadOnlyDictionary<string, object?> row)
+        => row.TryGetValue("grossAmount", out var v) && v is decimal d ? d : 0m;
+
+    private static decimal? ReadDecimalNullable(IReadOnlyDictionary<string, object?> row, string key)
+        => row.TryGetValue(key, out var v) && v is decimal d ? d : null;
+
+    /// <summary>可未知金额求和：只要有一行未知（null），整体按「未知」（null）返回，绝不用 0 顶替或给部分合计</summary>
+    private static decimal? SumKnownNullable(
+        IReadOnlyList<IReadOnlyDictionary<string, object?>> rows, string key)
+    {
+        decimal sum = 0m;
+        foreach (var row in rows)
+        {
+            var value = ReadDecimalNullable(row, key);
+            if (value is null) return null;
+            sum += value.Value;
+        }
+
+        return sum;
+    }
+
+    /// <summary>账龄分桶排序（与 <see cref="GroupAgingBuckets"/> 顺序一致；未知取值排最后）</summary>
+    private static int BucketOrder(string bucket)
+    {
+        var index = Array.IndexOf(GroupAgingBuckets, bucket);
+        return index < 0 ? int.MaxValue : index;
+    }
 
     // ==================== 5. 行投影 ====================
 
