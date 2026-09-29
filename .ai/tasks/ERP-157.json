@@ -2,7 +2,7 @@
   "id": "ERP-157",
   "title": "Add a visual shipment and finance progress field designer",
   "description": "A sales user builds a read-only shipment and finance progress report from the existing ERP-032 authoritative derivation. Development only. Recheck current-user sales-order menu and SalespersonDataScopeService customer visibility on every request; fail closed for missing identity, denied menu, invalid fields or filters. Keep unknown quantities and linked amounts as null, preserve original currencies, and never infer receivables or payment authority. Existing HTTP operation audit covers preview and download. No arbitrary SQL, schema/migration, production SQL, real database execution, writes, secrets/.env changes or deployment. Verify focused unit/Node tests and safe Release build/test; no real-browser acceptance.",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "medium",
   "acceptance_criteria": [
     "Existing shipment and finance progress page offers a catalog-driven field chooser and sends selected fields with existing bounded filters to ERP-156 preview.",
@@ -44,5 +44,6 @@
     "level": "L1",
     "status": "not_required",
     "reason": "Development-only bounded read-only feature"
-  }
+  },
+  "attempts": 1
 }

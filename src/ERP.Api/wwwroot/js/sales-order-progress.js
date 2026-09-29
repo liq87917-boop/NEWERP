@@ -60,6 +60,7 @@ function openSalesOrderShipmentFinanceReport() {
       <div class="toolbar-actions">
         <button class="btn btn-primary" onclick="loadSalesOrderShipmentFinance(1)">查询</button>
         <button class="btn btn-neutral" onclick="exportSopCsv()" title="导出本页订单明细为 CSV">📤 导出 CSV</button>
+        <button class="btn btn-neutral" onclick="openSalesOrderShipmentFinanceFieldDesigner()" title="按 ERP-156 白名单字段选择列并预览当前账号数据范围（只读）">🧩 字段设计器</button>
       </div>
     </div>
 
@@ -413,4 +414,449 @@ function sopShipmentLabel(status) {
 /* 收款引用状态中文（linked / partial / unlinked / unknown） */
 function sopFinanceLabel(status) {
   return SOP_FINANCE_LABELS[status] || status || '';
+}
+
+/* ============ 销售订单出货 / 财务进度字段设计器（ERP-157：只读、有界的可视化字段设计器） ============
+   口径与后端 ERP-156（DynamicShipmentFinanceReportController / DynamicShipmentFinanceReportRules）一一对应：
+   - 字段选择器只由 GET /api/sales-orders/dynamic-shipment-finance-report 返回的有限白名单目录（27 个字段）渲染，绝无自由填写的字段名或 SQL；
+   - 筛选只允许客户 / 币种 / 订单日期（起止）/ 出货状态（none / shipped）/ 收款链接状态（linked / partial / unlinked），与 ERP-032 同口径；
+   - 预览走 POST /api/sales-orders/dynamic-shipment-finance-report，只发送「白名单字段 + 有界筛选 + 有界分页」，按请求顺序渲染返回的列名与单元格；
+   - 未知金额 / 未知数量（null）在界面与 CSV 中显式显示「未知」，绝不回落为 0；金额按原币成行、绝不跨币种合并或换算；
+   - 全程只读：不写库、不迁移、不执行任意 SQL；授权 / 无效请求 / 空结果 / 网络失败都在界面可见，且不暴露范围外数据。 */
+
+/* ERP-156 预览接口与额度口径（有界，与后端 DynamicShipmentFinanceReportRules 同源） */
+const DSF_API = '/api/sales-orders/dynamic-shipment-finance-report';
+const DSF_DEFAULT_PAGE_SIZE = 50;
+const DSF_MAX_PAGE_SIZE_FALLBACK = 200;
+
+/* 出货状态筛选取值（与 ERP-032 / ERP-156 口径一致：none / shipped） */
+const DSF_SHIPMENT_FILTER_OPTS = [
+  { value: '', label: '全部' },
+  { value: 'none', label: '未出货（无已审核出库单）' },
+  { value: 'shipped', label: '已有已审核出库单' },
+];
+
+/* 收款链接状态筛选取值（linked / partial / unlinked；unknown 无法用既有列条件表达，不提供筛选） */
+const DSF_FINANCE_FILTER_OPTS = [
+  { value: '', label: '全部' },
+  { value: 'linked', label: '收款引用完整' },
+  { value: 'partial', label: '部分可归属（其余未知）' },
+  { value: 'unlinked', label: '未链接（金额未知）' },
+];
+
+/* 订单状态枚举名 → 中文文案（与 DocumentStatus 枚举名一致） */
+const DSF_STATUS_LABELS = {
+  Pending: '待提交', Submitted: '已提交', Approved: '已审核',
+  Rejected: '已驳回', Completed: '已完成', Cancelled: '已取消',
+};
+
+/* 设计器状态（纯数据；DOM 访问只在事件处理函数内部发生） */
+let DSF = {
+  catalog: null,      // GET 目录 DTO
+  fields: [],         // 目录字段（白名单）
+  selectedKeys: [],   // 当前勾选的字段键（默认全选）
+  customers: [],      // 客户下拉来源（/api/base/customers）
+  filters: { customerId: '', currency: '', dateFrom: '', dateTo: '', shipmentStatus: '', financeLinkStatus: '', page: 1, pageSize: DSF_DEFAULT_PAGE_SIZE },
+  view: null,         // 最近一次预览结果
+};
+
+/* ==================== 纯函数（可在 Node 中逐条单测） ==================== */
+
+/* HTML 转义（本地独立实现，避免依赖全局 escapeHtml 的加载顺序） */
+function dsfEsc(v) {
+  return String(v ?? '').replace(/[&<>"']/g, c => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[c]));
+}
+
+/* 出货 / 收款链接 / 订单状态中文（未知取值原样返回，不猜测） */
+function dsfShipmentStatusLabel(v) { return SOP_SHIPMENT_LABELS[String(v)] || String(v) || ''; }
+function dsfFinanceStatusLabel(v) { return SOP_FINANCE_LABELS[String(v)] || String(v) || ''; }
+function dsfOrderStatusLabel(v) { return DSF_STATUS_LABELS[String(v)] || String(v) || ''; }
+
+/* 规范化选定字段（fail closed）：只保留目录白名单内的键、去重、保持请求顺序；未知键丢弃 */
+function dsfSelectFields(catalogFields, selectedKeys) {
+  const valid = new Set((catalogFields || []).map(f => f && f.key).filter(Boolean));
+  const seen = new Set();
+  const result = [];
+  for (const k of (Array.isArray(selectedKeys) ? selectedKeys : [])) {
+    if (typeof k !== 'string') continue;
+    const key = k.trim();
+    if (!key || !valid.has(key) || seen.has(key)) continue;
+    seen.add(key);
+    result.push(key);
+  }
+  return result;
+}
+
+/* 组装有界预览请求体：字段只来自目录、分页有界、筛选仅客户 / 币种 / 订单日期 / 出货状态 / 收款链接状态，绝不接受任意字段名或 SQL */
+function dsfBuildRequest(state) {
+  const fields = dsfSelectFields(state.catalogFields, state.selectedKeys);
+  const page = Math.max(1, Math.floor(Number(state.page) || 1));
+  const maxPageSize = Number(state.maxPageSize) || DSF_MAX_PAGE_SIZE_FALLBACK;
+  let pageSize = Math.floor(Number(state.pageSize));
+  if (!Number.isFinite(pageSize)) pageSize = DSF_DEFAULT_PAGE_SIZE;
+  pageSize = Math.max(1, Math.min(maxPageSize, pageSize));
+
+  const req = { fields, page, pageSize };
+
+  const customerId = Number(state.customerId);
+  if (Number.isFinite(customerId) && customerId > 0) req.customerId = customerId;
+
+  const currency = state.currency ? String(state.currency).trim() : '';
+  if (currency) req.currency = currency;
+
+  const dateFrom = state.dateFrom ? String(state.dateFrom).slice(0, 10) : '';
+  const dateTo = state.dateTo ? String(state.dateTo).slice(0, 10) : '';
+  if (dateFrom) req.orderDateFrom = dateFrom;
+  if (dateTo) req.orderDateTo = dateTo;
+
+  const shipmentStatus = state.shipmentStatus ? String(state.shipmentStatus).trim() : '';
+  if (shipmentStatus && DSF_SHIPMENT_FILTER_OPTS.some(o => o.value === shipmentStatus)) req.shipmentStatus = shipmentStatus;
+
+  const financeLinkStatus = state.financeLinkStatus ? String(state.financeLinkStatus).trim() : '';
+  if (financeLinkStatus && DSF_FINANCE_FILTER_OPTS.some(o => o.value === financeLinkStatus)) req.financeLinkStatus = financeLinkStatus;
+
+  return req;
+}
+
+/* 单元格纯文本（安全：null/undefined 显示「未知」、布尔显示 是/否、日期截断到日、状态映射中文；绝不回落为 0） */
+function dsfCellText(value, field) {
+  const key = (field && field.key) || '';
+  const dataType = (field && field.dataType) || 'text';
+  if (value === null || value === undefined) return '未知';
+  if (key === 'shipmentStatus') return dsfShipmentStatusLabel(value);
+  if (key === 'financeLinkStatus') return dsfFinanceStatusLabel(value);
+  if (key === 'status') return dsfOrderStatusLabel(value);
+  if (dataType === 'boolean') return (value === true || value === 'true' || value === 1 || value === '1') ? '是' : '否';
+  if (dataType === 'date') return String(value).slice(0, 10);
+  return String(value);
+}
+
+/* 单元格 HTML（转义后安全渲染） */
+function dsfRenderCell(value, field) {
+  return dsfEsc(dsfCellText(value, field));
+}
+
+/* CSV 单元格安全封装：公式前导（= + - @ 或含制表 / 换行）加单引号防注入；内部引号翻倍；未知保留「未知」 */
+function dsfCsvCell(text) {
+  const s = (text === null || text === undefined) ? '' : String(text);
+  let v = s;
+  if (/^[=+\-@]/.test(v) || /[\t\r\n]/.test(v)) v = "'" + v;
+  return '"' + v.replace(/"/g, '""') + '"';
+}
+
+/* 当前页选定列 CSV：表头为列名、单元格为选定字段纯文本（未知保留「未知」、公式前导转义） */
+function dsfCsv(view) {
+  const cols = (view && view.columns) || [];
+  const rows = (view && view.rows) || [];
+  const lines = [cols.map(c => dsfCsvCell(c.label || c.key)).join(',')];
+  rows.forEach(r => lines.push(cols.map(c => dsfCsvCell(dsfCellText(r[c.key], c))).join(',')));
+  return lines.join('\r\n');
+}
+
+/* ==================== 结果渲染（只读、转义、失败态分类） ==================== */
+
+/* 结果表格 HTML：表头为返回的列名、单元格为返回的选定字段值，全部经转义 */
+function dsfTableHtml(view) {
+  const cols = (view && view.columns) || [];
+  const rows = (view && view.rows) || [];
+  if (!cols.length) return '';
+  const align = c => (c.dataType === 'number' || c.dataType === 'boolean') ? ' class="text-right"' : '';
+  const head = cols.map(c => `<th${align(c)}>${dsfEsc(c.label || c.key)}</th>`).join('');
+  const body = rows.map(r =>
+    `<tr>${cols.map(c => `<td${align(c)}>${dsfRenderCell(r[c.key], c)}</td>`).join('')}</tr>`).join('');
+  const emptyRow = `<tr><td colspan="${cols.length}" class="empty">没有符合条件的销售订单</td></tr>`;
+  const prevDisabled = !view || view.page <= 1 ? ' disabled' : '';
+  const nextDisabled = !view || view.page >= view.totalPages ? ' disabled' : '';
+  const paging = `<div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px">
+      <span class="text-muted">第 ${view ? view.page : 1} 页 / 共 ${view ? view.totalPages : 0} 页</span>
+      <div>
+        <button class="btn btn-neutral btn-sm" onclick="dsfPage(-1)"${prevDisabled}>← 上一页</button>
+        <button class="btn btn-neutral btn-sm" onclick="dsfPage(1)"${nextDisabled}>下一页 →</button>
+      </div></div>`;
+  return `<div class="table-wrap" style="margin-top:8px"><table><thead><tr>${head}</tr></thead><tbody>${body || emptyRow}</tbody></table></div>${paging}`;
+}
+
+/* 空结果提示 */
+function dsfEmptyHtml() {
+  return '<div class="empty" style="margin:8px 0">没有符合条件的销售订单（当前账号数据范围内的只读快照，未知金额 / 数量显示「未知」）。</div>';
+}
+
+/* 错误提示（授权 / 未登录 / 无效请求 / 网络失败分别可见，且不暴露任何数据） */
+function dsfErrorHtml(kind, message) {
+  const labels = {
+    forbidden: '权限不足',
+    unauthorized: '未登录 / 登录已过期',
+    invalid: '请求无效',
+    network: '网络请求失败',
+    error: '预览失败',
+  };
+  return `<div class="pd-hint" style="color:#b91c1c;background:#fef2f2;border-color:#fecaca">
+      <b>${dsfEsc(labels[kind] || '预览失败')}</b>：${dsfEsc(message || '')}</div>`;
+}
+
+/* 预览结果（口径 / 边界 / 免责文案 + 汇总 + 空结果 + 表格） */
+function dsfResultHtml(view) {
+  const readOnly = view && view.readOnlyText ? `<div class="pd-hint">${dsfEsc(view.readOnlyText)}</div>` : '';
+  const boundary = view && view.boundaryText ? `<div class="pd-hint">${dsfEsc(view.boundaryText)}</div>` : '';
+  const disclaimer = view && view.disclaimerText ? `<div class="pd-hint" style="color:#64748b">${dsfEsc(view.disclaimerText)}</div>` : '';
+  const summary = view
+    ? `<div class="text-muted" style="margin:6px 0">共 ${view.total} 条 · 第 ${view.page} 页 · 每页 ${view.pageSize} 条</div>`
+    : '';
+  const empty = view && (!view.rows || view.rows.length === 0) ? dsfEmptyHtml() : '';
+  return `${readOnly}${boundary}${disclaimer}${summary}${empty}${dsfTableHtml(view)}`;
+}
+
+/* 字段选择器：仅由目录白名单渲染为复选框，无自由填写的字段名 */
+function dsfFieldChooserHtml(fields, selectedKeys) {
+  const selected = new Set(selectedKeys || []);
+  return (fields || []).map(f => {
+    const checked = selected.has(f.key) ? 'checked' : '';
+    return `<label style="display:inline-flex;align-items:center;gap:4px;margin:3px 6px 3px 0;padding:2px 8px;border:1px solid #e2e8f0;border-radius:6px;background:#f8fafc;cursor:pointer">
+        <input type="checkbox" name="dsf-field" value="${dsfEsc(f.key)}" ${checked} onchange="dsfSyncSelection()">
+        <span>${dsfEsc(f.label || f.key)}</span></label>`;
+  }).join('');
+}
+
+/* ==================== 状态 / 请求 / 渲染 ==================== */
+
+/* 轻量请求封装：返回完整 ApiResponse 信封（保留 code），网络异常抛给调用方 */
+async function dsfRequest(path, method = 'GET', body = null) {
+  const headers = { 'Content-Type': 'application/json' };
+  const token = typeof localStorage !== 'undefined' ? (localStorage.getItem('erp_token') || '') : '';
+  if (token) headers['Authorization'] = 'Bearer ' + token;
+  const opts = { method, headers };
+  if (body) opts.body = JSON.stringify(body);
+  const resp = await fetch(path, opts);
+  return await resp.json();
+}
+
+/* 业务码 → 错误态分类（与 ErrorCodes 同源：2002 权限不足、2000/2003 未登录 / 令牌过期） */
+function dsfKindOfCode(code) {
+  if (code === 2002) return 'forbidden';
+  if (code === 2000 || code === 2003) return 'unauthorized';
+  return 'invalid';
+}
+
+function dsfLoadingHtml() {
+  return '<div class="pd-hint" style="text-align:center;color:#64748b">正在预览（只读查询）…</div>';
+}
+
+function dsfRenderResult(html) {
+  const el = document.getElementById('dsf-result');
+  if (el) el.innerHTML = html;
+}
+
+/* 同步勾选状态到 selectedKeys（复选框 onchange） */
+function dsfSyncSelection() {
+  const boxes = document.querySelectorAll('input[name="dsf-field"]');
+  DSF.selectedKeys = Array.from(boxes).filter(b => b.checked).map(b => b.value);
+}
+
+function dsfToggleAll(checked) {
+  const boxes = document.querySelectorAll('input[name="dsf-field"]');
+  DSF.selectedKeys = [];
+  boxes.forEach(b => { b.checked = checked; if (checked) DSF.selectedKeys.push(b.value); });
+}
+
+/* 目录加载失败 / 授权失败时的整页错误态（带关闭） */
+function dsfErrorModalHtml(kind, message) {
+  return `<div class="modal modal-lg">
+    <h3>🧩 销售订单出货 / 财务进度字段设计器</h3>
+    ${dsfErrorHtml(kind, message)}
+    <div class="modal-footer"><button class="btn btn-neutral" onclick="closeModal()">关闭</button></div>
+  </div>`;
+}
+
+/* 读取当前字段 / 筛选 / 分页状态（预览与导出复用，单一来源） */
+function dsfBuildState(page) {
+  return {
+    catalogFields: DSF.fields,
+    selectedKeys: DSF.selectedKeys,
+    customerId: document.getElementById('dsf-customer').value,
+    currency: document.getElementById('dsf-currency').value,
+    dateFrom: document.getElementById('dsf-date-from').value,
+    dateTo: document.getElementById('dsf-date-to').value,
+    shipmentStatus: document.getElementById('dsf-shipment-status').value,
+    financeLinkStatus: document.getElementById('dsf-finance-status').value,
+    pageSize: document.getElementById('dsf-pagesize').value,
+    page: page || 1,
+    maxPageSize: DSF.catalog && DSF.catalog.maxPageSize ? DSF.catalog.maxPageSize : DSF_MAX_PAGE_SIZE_FALLBACK,
+  };
+}
+
+/* 预览：组装有界请求 → POST → 安全渲染列名与单元格；授权 / 无效 / 空 / 网络失败均可见 */
+async function dsfPreview(page) {
+  const state = dsfBuildState(page);
+  if (state.dateFrom && state.dateTo && state.dateFrom > state.dateTo) {
+    dsfRenderResult(dsfErrorHtml('invalid', '订单日期开始不能晚于结束'));
+    return;
+  }
+
+  const req = dsfBuildRequest(state);
+  DSF.filters.page = req.page;
+  DSF.filters.pageSize = req.pageSize;
+
+  dsfRenderResult(dsfLoadingHtml());
+
+  try {
+    const resp = await dsfRequest(DSF_API, 'POST', req);
+    if (resp.code === 0) {
+      DSF.view = resp.data;
+      DSF.filters.page = resp.data.page;
+      dsfRenderResult(dsfResultHtml(resp.data));
+    } else if (resp.code === 2000 || resp.code === 2003) {
+      if (typeof logout === 'function') logout();
+      dsfRenderResult(dsfErrorHtml('unauthorized', resp.message));
+    } else {
+      dsfRenderResult(dsfErrorHtml(dsfKindOfCode(resp.code), resp.message));
+    }
+  } catch (err) {
+    dsfRenderResult(dsfErrorHtml('network', (err && err.message) || '无法连接到服务器'));
+  }
+}
+
+/* 翻页（有界：最小第 1 页） */
+function dsfPage(delta) {
+  const view = DSF.view;
+  const page = (view ? view.page : DSF.filters.page) + delta;
+  if (page < 1) return;
+  dsfPreview(page);
+}
+
+/* 导出当前页选定列 CSV（只读）：未知保留「未知」、公式前导转义；无数据不导出 */
+function dsfExportCsv() {
+  const view = DSF.view;
+  if (!view || !view.columns || !view.columns.length) { toast('暂无可导出数据', 'warning'); return; }
+  const csv = dsfCsv(view);
+  const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = '销售订单出货财务进度动态报表.csv';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+  toast('CSV 已导出', 'success');
+}
+
+/* 渲染设计器（字段选择器 + 有界筛选器 + 预览按钮 + 结果区） */
+function dsfRender() {
+  const f = DSF.filters;
+  const maxPage = DSF.catalog && DSF.catalog.maxPageSize ? DSF.catalog.maxPageSize : DSF_MAX_PAGE_SIZE_FALLBACK;
+  const customerOptions = DSF.customers.map(c =>
+    `<option value="${dsfEsc(c.id)}" ${String(c.id) === String(f.customerId) ? 'selected' : ''}>${dsfEsc(c.customerName || ('客户 ' + c.id))}</option>`).join('');
+  const currencyOptions = (typeof CURRENCY_NAME_OPTS !== 'undefined' ? CURRENCY_NAME_OPTS : []).map(o =>
+    `<option value="${dsfEsc(o.value)}" ${f.currency === o.value ? 'selected' : ''}>${dsfEsc(o.label)}</option>`).join('');
+  const shipmentOptions = DSF_SHIPMENT_FILTER_OPTS.map(o =>
+    `<option value="${o.value}" ${f.shipmentStatus === o.value ? 'selected' : ''}>${o.label}</option>`).join('');
+  const financeOptions = DSF_FINANCE_FILTER_OPTS.map(o =>
+    `<option value="${o.value}" ${f.financeLinkStatus === o.value ? 'selected' : ''}>${o.label}</option>`).join('');
+
+  document.getElementById('modal').innerHTML = `
+  <div class="modal modal-lg" style="max-width:1100px">
+    <h3>🧩 销售订单出货 / 财务进度字段设计器（只读预览）</h3>
+    <div class="pd-hint">只读：仅按 ERP-156 白名单字段与有界筛选（客户 / 币种 / 订单日期 / 出货状态 / 收款链接状态）预览当前账号数据范围内的销售订单出货与收款链接证据；未知金额与未知数量显示「未知」，绝不推算或回落为 0。</div>
+
+    <div style="margin:10px 0">
+      <div style="font-weight:600;margin-bottom:6px">① 选择字段（仅 ERP-156 白名单目录，无自由字段名）</div>
+      <div style="margin-bottom:6px">
+        <button class="btn btn-neutral btn-sm" onclick="dsfToggleAll(true)">全选</button>
+        <button class="btn btn-neutral btn-sm" onclick="dsfToggleAll(false)">清空</button>
+      </div>
+      <div style="max-height:180px;overflow:auto;border:1px solid #e2e8f0;border-radius:8px;padding:8px">${dsfFieldChooserHtml(DSF.fields, DSF.selectedKeys)}</div>
+    </div>
+
+    <div style="margin:10px 0">
+      <div style="font-weight:600;margin-bottom:6px">② 筛选（客户 / 币种 / 订单日期 / 出货状态 / 收款链接状态）</div>
+      <div class="form-grid" style="grid-template-columns:repeat(3,1fr);gap:10px">
+        <label>订单日期从 <input type="date" id="dsf-date-from" value="${dsfEsc(f.dateFrom)}" style="width:100%"></label>
+        <label>至 <input type="date" id="dsf-date-to" value="${dsfEsc(f.dateTo)}" style="width:100%"></label>
+        <label>客户 <select id="dsf-customer" style="width:100%"><option value="">全部客户</option>${customerOptions}</select></label>
+        <label>币种 <select id="dsf-currency" style="width:100%"><option value="">全部币种</option>${currencyOptions}</select></label>
+        <label>出货状态 <select id="dsf-shipment-status" style="width:100%">${shipmentOptions}</select></label>
+        <label>收款链接 <select id="dsf-finance-status" style="width:100%">${financeOptions}</select></label>
+        <label>每页 <input type="number" id="dsf-pagesize" value="${Number(f.pageSize)}" min="1" max="${maxPage}" style="width:80px"></label>
+      </div>
+    </div>
+
+    <div class="modal-footer">
+      <button class="btn btn-primary" onclick="dsfPreview(1)">预览</button>
+      <button class="btn btn-neutral" onclick="dsfExportCsv()">📤 导出当前页 CSV</button>
+      <button class="btn btn-neutral" onclick="closeModal()">关闭</button>
+    </div>
+    <div id="dsf-result"></div>
+  </div>`;
+}
+
+/* 从出货 / 财务进度报表页打开字段设计器（加载目录 + 客户，渲染字段选择器与筛选器） */
+async function openSalesOrderShipmentFinanceFieldDesigner() {
+  DSF = {
+    catalog: null, fields: [], selectedKeys: [], customers: [],
+    filters: { customerId: '', currency: '', dateFrom: '', dateTo: '', shipmentStatus: '', financeLinkStatus: '', page: 1, pageSize: DSF_DEFAULT_PAGE_SIZE },
+    view: null,
+  };
+  const modal = document.getElementById('modal');
+  modal.innerHTML = '<div class="modal modal-lg" style="max-width:1100px"><div class="pd-hint" style="text-align:center;color:#64748b">正在加载字段目录…</div></div>';
+  modal.style.display = 'flex';
+
+  // 1) 目录（需登录 + 销售订单菜单授权；授权失败 fail closed，不返回任何字段）
+  try {
+    const resp = await dsfRequest(DSF_API);
+    if (resp.code === 2000 || resp.code === 2003) {
+      if (typeof logout === 'function') logout();
+      modal.innerHTML = dsfErrorModalHtml('unauthorized', resp.message);
+      return;
+    }
+    if (resp.code !== 0) {
+      modal.innerHTML = dsfErrorModalHtml(dsfKindOfCode(resp.code), resp.message);
+      return;
+    }
+    DSF.catalog = resp.data;
+  } catch (err) {
+    modal.innerHTML = dsfErrorModalHtml('network', (err && err.message) || '无法连接到服务器');
+    return;
+  }
+
+  DSF.fields = (DSF.catalog && DSF.catalog.fields) || [];
+  DSF.selectedKeys = DSF.fields.map(f => f.key);
+  const maxPageSize = DSF.catalog && DSF.catalog.maxPageSize ? DSF.catalog.maxPageSize : DSF_MAX_PAGE_SIZE_FALLBACK;
+  DSF.filters.pageSize = Math.min(DSF_DEFAULT_PAGE_SIZE, maxPageSize);
+
+  // 2) 客户下拉（尽力而为：失败仅保留「全部客户」，仍可预览）
+  try {
+    const cresp = await dsfRequest('/api/base/customers?page=1&pageSize=200');
+    if (cresp.code === 0) {
+      DSF.customers = (cresp.data && cresp.data.items) || (Array.isArray(cresp.data) ? cresp.data : []) || [];
+    }
+  } catch (e) {
+    DSF.customers = [];
+  }
+
+  dsfRender();
+}
+
+/* Node 单测导出（浏览器中 module 为 undefined，自动跳过） */
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = {
+    DSF_API,
+    DSF_SHIPMENT_FILTER_OPTS,
+    DSF_FINANCE_FILTER_OPTS,
+    DSF_STATUS_LABELS,
+    dsfEsc,
+    dsfSelectFields,
+    dsfBuildRequest,
+    dsfCellText,
+    dsfRenderCell,
+    dsfCsvCell,
+    dsfCsv,
+    dsfTableHtml,
+    dsfEmptyHtml,
+    dsfErrorHtml,
+    dsfResultHtml,
+    dsfFieldChooserHtml,
+    dsfExportCsv,
+  };
 }

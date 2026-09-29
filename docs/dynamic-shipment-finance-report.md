@@ -81,3 +81,32 @@
 - `src/ERP.Api/Controllers/SalesOrderShipmentFinanceReport.cs`：ERP-032 权威派生，新增可选 `SalespersonDataScope` 参数（在源查询内部先于计数与分页过滤客户范围）；
 - `src/ERP.UnitTests/DynamicShipmentFinanceReportTests.cs`：预览单元测试（内存库，不连 SQL Server、不启动 API）；
 - `src/ERP.UnitTests/SalesOrderShipmentFinanceReportTests.cs`：ERP-032 报表单元测试（含 ERP-156 复用的源查询范围过滤）。
+
+## 前端字段设计器（ERP-157）
+
+在既有「销售订单出货 / 财务进度报表」页（`openSalesOrderShipmentFinanceReport`）工具栏提供「🧩 字段设计器」入口
+（`openSalesOrderShipmentFinanceFieldDesigner`），复用 ERP-156 只读预览，实现可视化的字段 / 筛选设计器。
+
+### 工作流
+
+1. **打开设计器**：从出货 / 财务进度报表页点击「🧩 字段设计器」，前端先 `GET /api/sales-orders/dynamic-shipment-finance-report`
+   拉取 ERP-156 有限字段白名单目录（27 个字段）；授权 / 未登录 / 网络失败时 fail closed 并整页显示错误态，不渲染任何字段。
+2. **字段选择**：仅由目录白名单渲染为复选框（`dsf-field`），无自由填写的字段名；`dsfSelectFields` 只保留白名单键、去重、保持请求顺序、丢弃未知键。
+3. **有界筛选**：客户（`/api/base/customers`）/ 币种（复用 `CURRENCY_NAME_OPTS`）/ 订单日期（起止）/ 出货状态（none / shipped）/
+   收款链接状态（linked / partial / unlinked），与 ERP-156 请求体一致；关键字不在 ERP-156 筛选面内，不提供。
+4. **预览**：`POST /api/sales-orders/dynamic-shipment-finance-report`，请求体只含「白名单字段 + 有界筛选 + 有界分页（1 ~ 200）」；
+   当前账号数据范围由服务端（`SalespersonDataScopeService`）在预览内解析，前端不做任何客户范围推断。
+5. **渲染**：按请求顺序渲染返回列名与单元格；未知金额 / 未知数量（null）显式显示「未知」、绝不回落为 0；金额按原币成行、绝不跨币种合并或换算；
+   权限不足 / 未登录 / 无效请求 / 网络失败 / 空结果 / 加载中各自可见。
+6. **导出 CSV**：导出当前页选定列（`dsfCsv`），未知保留「未知」、公式前导（`= + - @` 或含制表 / 换行）加单引号防注入、内部引号翻倍。
+   预览与导出均由既有 `OperationLogMiddleware` 按 HTTP 方法记录审计。
+
+### 前端单测
+
+`tests/automation/dynamic_shipment_finance_ui.test.js`（`node tests/automation/dynamic_shipment_finance_ui.test.js`）覆盖：
+字段选择、请求边界与分页、单元格渲染（未知 = 「未知」）、CSV（未知保留 + 公式前导转义）、失败态，以及前端接线契约（无任意 SQL / 自由字段名）。
+
+### 前端文件
+
+- `src/ERP.Api/wwwroot/js/sales-order-progress.js`：新增 `DSF_*` 常量、`dsf*` 纯函数 / 渲染 / 请求与设计器入口
+  （`openSalesOrderShipmentFinanceFieldDesigner`），并在报表页工具栏注册「🧩 字段设计器」按钮。
