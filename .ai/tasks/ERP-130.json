@@ -2,7 +2,7 @@
   "id": "ERP-130",
   "title": "Preview selected fields in an authorized inventory-movement report",
   "description": "An inventory user selects finite existing movement-report columns and warehouse/product/date filters to preview bounded stock-ledger evidence. Reuse ERP-029 report service and require the current user's existing stock-query menu; do not widen role, warehouse, product or data visibility. Preserve base-unit quantities and explicit unknown history; do not infer cost or stock value. Invalid inputs and missing permission fail closed before report reads. Existing HTTP operation audit records the read-only preview. Development only: no Domain/schema change, migration, production SQL, real database execution, arbitrary model SQL, writes, secret/.env change or deployment. Verify unit tests and safe build/test.",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "medium",
   "acceptance_criteria": [
     "Authenticated catalog exposes a finite allowlist of existing inventory-movement fields; preview rejects unknown columns, inverted dates, invalid thresholds and page size above 200 before report reads.",
@@ -50,5 +50,6 @@
     "level": "L1",
     "status": "not_required",
     "reason": "Development-only bounded read-only feature"
-  }
+  },
+  "attempts": 1
 }
