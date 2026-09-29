@@ -15,6 +15,7 @@ namespace ERP.Api.Controllers;
 /// <item><b>GET /api/sales-orders/dynamic-shipment-finance-report</b>：返回 ERP-032 订单证据字段白名单目录（需登录 + 销售订单菜单授权）；</item>
 /// <item><b>POST /api/sales-orders/dynamic-shipment-finance-report</b>：按选定字段与有界筛选预览当前账号数据范围内的订单，稳定分页。</item>
 /// <item><b>POST /api/sales-orders/dynamic-shipment-finance-report/export</b>：把当前页选定列导出为 xlsx（只读，复用有界授权预览与选定列顺序）。</item>
+/// <item><b>POST /api/sales-orders/dynamic-shipment-finance-report/pdf</b>：把当前页选定列导出为分页中文 PDF（只读，复用有界授权预览与选定列顺序，宽列集跨页拆分）。</item>
 /// </list>
 /// <para>复用 ERP-032 <see cref="SalesOrderShipmentFinanceReport.ForQueryAsync"/> 的权威派生：客户 / 币种 / 订单日期 / 出货状态 /
 /// 收款链接状态筛选与稳定分页全部由既有只读方法完成，本控制器只做授权、字段校验、数据范围过滤与选定列投影，不做写入。</para>
@@ -72,6 +73,25 @@ public class DynamicShipmentFinanceReportController : ControllerBase
         var bytes = BuildWorkbook(page);
         return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             $"ShipmentFinanceReport_{DateTime.Now:yyyyMMddHHmmss}.xlsx");
+    }
+
+    /// <summary>
+    /// 导出当前页为分页中文 PDF（ERP-159，只读）：复用「有界、已授权预览」与选定列顺序（每次请求重新校验身份 / 菜单授权 /
+    /// 字段 / 筛选 / 页大小 / 业务员数据范围），仅导出当前页选定列；金额与数量按原币分别成行、绝不跨币种合并或换算，
+    /// 未知金额 / 未知数量显式保留（null → 「未知」，绝不回落为 0），宽列集按可用页宽跨页拆分、行数超出按行页拆分，避免列被裁切。
+    /// <para>中文字体固定使用 Windows 黑体（SimHei，共享解析器），字体缺失时显式失败（不产出乱码或缺字 PDF）；全程只读，
+    /// 不写库、不执行任意 SQL；请求由既有 <c>OperationLogMiddleware</c> 记录审计（动作「导出」）。</para>
+    /// </summary>
+    [HttpPost("pdf")]
+    public async Task<IActionResult> ExportPdf([FromBody] DynamicShipmentFinanceReportRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        // 复用同一有界、已授权预览：重新校验身份 / 菜单授权 / 字段 / 筛选 / 页大小 / 数据范围
+        var page = await BuildPageAsync(request);
+
+        var bytes = DynamicShipmentFinancePdfExporter.Export(page);
+        return File(bytes, "application/pdf", $"ShipmentFinanceReport_{DateTime.Now:yyyyMMddHHmmss}.pdf");
     }
 
     /// <summary>

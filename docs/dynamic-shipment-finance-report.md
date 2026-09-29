@@ -9,6 +9,7 @@
 | `GET` | `/api/sales-orders/dynamic-shipment-finance-report` | 返回 ERP-032 订单证据字段白名单目录（需登录 + 销售订单菜单授权） |
 | `POST` | `/api/sales-orders/dynamic-shipment-finance-report` | 按选定字段与有界筛选预览当前页，稳定分页（单页上限 200） |
 | `POST` | `/api/sales-orders/dynamic-shipment-finance-report/export` | 把当前页选定列导出为 xlsx（只读，复用有界授权预览与选定列顺序） |
+| `POST` | `/api/sales-orders/dynamic-shipment-finance-report/pdf` | 把当前页选定列导出为分页中文 PDF（只读，复用有界授权预览与选定列顺序，宽列集跨页拆分） |
 
 请求体（`DynamicShipmentFinanceReportRequest`）：`fields`（选定字段键，仅限白名单，留空 = 全部白名单字段）、
 `customerId`、`currency`、`orderDateFrom` / `orderDateTo`、`shipmentStatus`（none / shipped）、
@@ -93,14 +94,44 @@
 - 文件名 `ShipmentFinanceReport_yyyyMMddHHmmss.xlsx`；内容类型 `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`；
 - 只读 + 审计：无写入、无任意 SQL；`POST` 由既有 `OperationLogMiddleware` 记录审计（动作「导出」）。
 
+## PDF 导出（ERP-159）
+
+`POST /api/sales-orders/dynamic-shipment-finance-report/pdf` 请求体与预览完全相同
+（`DynamicShipmentFinanceReportRequest`），复用同一有界、已授权预览管线（每次请求重新校验身份 / 销售订单菜单授权 /
+字段 / 筛选 / 页大小 / 业务员数据范围），**只导出请求 `page` / `pageSize` 对应的当前页选定列**（单页上限 200，
+超限直接拒绝），不是全量导出。生成字节前完成全部授权与校验（fail closed），字体缺失在任何文件字节返回前即失败。
+
+导出口径与导出限制：
+
+- 复用 `ERP.Infrastructure.Export.DynamicShipmentFinancePdfExporter`，以 PDFsharp 6.2.4 分页渲染；
+- 表头与数据行都按 `page.Columns`（= 请求选定字段顺序）排列，与预览同源；宽列集按可用页宽贪心拆成多个「列页」、
+  行数超出单页可用高度时拆成多个「行页」，每个列页总宽不超页宽，**列不被裁切**；标题 / 元信息标注「列 X/Y · 行页 A/B」；
+- 中文标签照实渲染（订单号 / 订单金额 / 已关联金额 / 出货状态 / 收款链接状态等）；
+- 金额与数量一律按原币分别成行：`currency` 为原币，不同币种绝不合并、不做汇率换算、无跨币种总额；
+- 未知金额（`linkedAmount` / `uncoveredAmount` / `submittedAmount` 为 null）与未知数量（`orderedQuantity` / `shippedQuantity` /
+  `pendingShipmentQuantity` / `outstandingQuantity` 为 null）照实渲染为「未知」，绝不回落为 0、不推算、不修复；
+- 出货状态 / 收款链接状态 / 单据状态映射中文文案（如「已出齐」「未链接（金额未知）」「已审核」），布尔显示 是 / 否；
+- 空页仍返回仅含表头与空态提示的 PDF（下载限制：前端空结果可见、不触发下载）；
+- 文件名 `ShipmentFinanceReport_yyyyMMddHHmmss.pdf`；内容类型 `application/pdf`；
+- 只读 + 审计：无写入、无任意 SQL；`POST` 由既有 `OperationLogMiddleware` 记录审计（动作「导出」）。
+
+### 字体前置条件（Windows · 缺失显式失败）
+
+PDF 中文一律使用 Windows 黑体 **SimHei**（`simhei.ttf`），由共享解析器
+`ERP.Infrastructure.Export.SimHeiPdfFontResolver` 定位并注册（与其它报表 PDF 共用）。运行时若未找到
+`simhei.ttf`，导出**显式失败**（`ErrorCodes.InternalError`，前端在结果区可见「未找到中文字体 SimHei」错误），
+**绝不产出乱码或缺字的 PDF**、也不替换为其它字体。部署机器需在 Windows 字体目录安装黑体（默认随 Windows 中文版提供）。
+
 ## 文件地图
 
 - `src/ERP.Application/DTOs/DynamicShipmentFinanceReportDtos.cs`：目录 / 请求 / 结果 DTO；
 - `src/ERP.Application/Services/DynamicShipmentFinanceReportRules.cs`：字段白名单、校验、行投影、目录（纯规则）；
 - `src/ERP.Api/Controllers/DynamicShipmentFinanceReportController.cs`：授权 + 业务员数据范围 + 复用 ERP-032 只读派生 + 选定列投影；
+- `src/ERP.Infrastructure/Export/DynamicShipmentFinancePdfExporter.cs`：ERP-159 PDF 导出（分页中文 PDF、列页 / 行页拆分、原币与未知证据、SimHei 缺失显式失败）；
 - `src/ERP.Api/Controllers/SalesOrderShipmentFinanceReport.cs`：ERP-032 权威派生，新增可选 `SalespersonDataScope` 参数（在源查询内部先于计数与分页过滤客户范围）；
 - `src/ERP.UnitTests/DynamicShipmentFinanceReportTests.cs`：预览单元测试（内存库，不连 SQL Server、不启动 API）；
 - `src/ERP.UnitTests/DynamicShipmentFinanceExcelTests.cs`：ERP-158 Excel 导出单元测试（列顺序、页上限、数据范围、未知值、币种、公式安全、不写库、下载限制）；
+- `src/ERP.UnitTests/DynamicShipmentFinancePdfTests.cs`：ERP-159 PDF 导出单元测试（签名、页面边界、字段顺序、原币与未知证据、SimHei 嵌入与缺失失败、授权 / 校验拒绝、不写库）；
 - `src/ERP.UnitTests/SalesOrderShipmentFinanceReportTests.cs`：ERP-032 报表单元测试（含 ERP-156 复用的源查询范围过滤）。
 
 ## 前端字段设计器（ERP-157）
@@ -123,6 +154,9 @@
    预览与导出均由既有 `OperationLogMiddleware` 按 HTTP 方法记录审计。
 7. **导出 Excel**：工具栏「📥 导出 Excel」复用当前字段 / 筛选 / 分页组装请求后 `POST /api/sales-orders/dynamic-shipment-finance-report/export`
     （`dsfExportExcel`）；成功（xlsx 附件）触发下载，空结果 / 授权 / 校验 / 网络失败均在结果区可见、不下载任何内容；未知金额 / 数量保持空单元格（未知）。
+8. **导出 PDF**：工具栏「📄 导出 PDF」复用当前字段 / 筛选 / 分页组装请求后 `POST /api/sales-orders/dynamic-shipment-finance-report/pdf`
+    （`dsfExportPdf`）；成功（`application/pdf` 附件）触发下载；空结果 / 授权 / 校验 / 字体缺失（`SimHei` 缺失返回 `5000` 内部错误，结果区可见「未找到中文字体 SimHei」）/
+    网络失败均在结果区可见、不下载任何内容；未知金额 / 数量显式渲染为「未知」。
 
 
 ### 前端单测

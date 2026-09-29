@@ -591,7 +591,7 @@ function dsfErrorHtml(kind, message) {
     invalid: '请求无效',
     network: '网络请求失败',
     empty: '暂无数据',
-    error: '预览失败',
+    error: '导出失败',
   };
   return `<div class="pd-hint" style="color:#b91c1c;background:#fef2f2;border-color:#fecaca">
       <b>${dsfEsc(labels[kind] || '预览失败')}</b>：${dsfEsc(message || '')}</div>`;
@@ -633,10 +633,11 @@ async function dsfRequest(path, method = 'GET', body = null) {
   return await resp.json();
 }
 
-/* 业务码 → 错误态分类（与 ErrorCodes 同源：2002 权限不足、2000/2003 未登录 / 令牌过期） */
+/* 业务码 → 错误态分类（与 ErrorCodes 同源：2002 权限不足、2000/2003 未登录 / 令牌过期、5000 内部错误如字体缺失） */
 function dsfKindOfCode(code) {
   if (code === 2002) return 'forbidden';
   if (code === 2000 || code === 2003) return 'unauthorized';
+  if (code === 5000) return 'error';
   return 'invalid';
 }
 
@@ -805,6 +806,68 @@ async function dsfExportExcel() {
   }
 }
 
+/* 导出当前页选定列为 PDF（ERP-159，只读）：复用预览请求体 POST /api/sales-orders/dynamic-shipment-finance-report/pdf；
+   成功（application/pdf 附件）触发下载；授权 / 无效 / 空结果 / 字体缺失 / 网络失败在结果区可见，不下载任何内容 */
+async function dsfExportPdf() {
+  if (!DSF.view || !DSF.view.columns || !DSF.view.columns.length) {
+    dsfRenderResult(dsfErrorHtml('invalid', '请先预览后再导出 PDF'));
+    return;
+  }
+  if (!DSF.view.rows || DSF.view.rows.length === 0) {
+    dsfRenderResult(dsfErrorHtml('empty', '没有符合条件的销售订单，无法导出（请先预览）'));
+    return;
+  }
+
+  const state = dsfBuildState(DSF.view ? DSF.view.page : DSF.filters.page);
+  if (state.dateFrom && state.dateTo && state.dateFrom > state.dateTo) {
+    dsfRenderResult(dsfErrorHtml('invalid', '订单日期开始不能晚于结束'));
+    return;
+  }
+
+  const req = dsfBuildRequest(state);
+  dsfRenderResult(dsfLoadingHtml());
+
+  try {
+    const headers = { 'Content-Type': 'application/json' };
+    const token = typeof localStorage !== 'undefined' ? (localStorage.getItem('erp_token') || '') : '';
+    if (token) headers['Authorization'] = 'Bearer ' + token;
+    const resp = await fetch(DSF_API + '/pdf', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(req),
+    });
+
+    const contentType = (resp.headers.get('content-type') || '');
+    if (contentType.indexOf('application/pdf') >= 0) {
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+      a.href = url;
+      a.download = '销售订单出货财务进度动态报表_' + dateStr + '.pdf';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      toast('PDF 已导出（当前页 · 选定列）', 'success');
+      return;
+    }
+
+    let envelope = null;
+    try { envelope = await resp.json(); } catch (e) { /* 忽略解析失败 */ }
+    const code = envelope && envelope.code;
+    const message = (envelope && envelope.message) || '导出失败';
+    if (code === 2000 || code === 2003) {
+      if (typeof logout === 'function') logout();
+      dsfRenderResult(dsfErrorHtml('unauthorized', message));
+      return;
+    }
+    dsfRenderResult(dsfErrorHtml(dsfKindOfCode(code), message));
+  } catch (err) {
+    dsfRenderResult(dsfErrorHtml('network', (err && err.message) || '无法连接到服务器'));
+  }
+}
+
 /* 渲染设计器（字段选择器 + 有界筛选器 + 预览按钮 + 结果区） */
 function dsfRender() {
   const f = DSF.filters;
@@ -849,6 +912,7 @@ function dsfRender() {
       <button class="btn btn-primary" onclick="dsfPreview(1)">预览</button>
       <button class="btn btn-neutral" onclick="dsfExportCsv()">📤 导出当前页 CSV</button>
       <button class="btn btn-neutral" onclick="dsfExportExcel()" title="导出当前页选定列为 Excel（只读，复用授权预览；空结果显示可见错误）">📥 导出 Excel</button>
+      <button class="btn btn-neutral" onclick="dsfExportPdf()" title="导出当前页选定列为 PDF（只读，复用授权预览；空结果 / 授权 / 字体缺失可见错误）">📄 导出 PDF</button>
       <button class="btn btn-neutral" onclick="closeModal()">关闭</button>
     </div>
     <div id="dsf-result"></div>
@@ -923,5 +987,6 @@ if (typeof module !== 'undefined' && module.exports) {
     dsfFieldChooserHtml,
     dsfExportCsv,
     dsfExportExcel,
+    dsfExportPdf,
   };
 }
