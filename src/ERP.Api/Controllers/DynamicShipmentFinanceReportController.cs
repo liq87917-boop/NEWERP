@@ -2,6 +2,7 @@ using ERP.Application.Common;
 using ERP.Application.DTOs;
 using ERP.Application.Interfaces;
 using ERP.Application.Services;
+using ERP.Infrastructure.Export;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using System.Security.Claims;
@@ -13,6 +14,7 @@ namespace ERP.Api.Controllers;
 /// <list type="number">
 /// <item><b>GET /api/sales-orders/dynamic-shipment-finance-report</b>：返回 ERP-032 订单证据字段白名单目录（需登录 + 销售订单菜单授权）；</item>
 /// <item><b>POST /api/sales-orders/dynamic-shipment-finance-report</b>：按选定字段与有界筛选预览当前账号数据范围内的订单，稳定分页。</item>
+/// <item><b>POST /api/sales-orders/dynamic-shipment-finance-report/export</b>：把当前页选定列导出为 xlsx（只读，复用有界授权预览与选定列顺序）。</item>
 /// </list>
 /// <para>复用 ERP-032 <see cref="SalesOrderShipmentFinanceReport.ForQueryAsync"/> 的权威派生：客户 / 币种 / 订单日期 / 出货状态 /
 /// 收款链接状态筛选与稳定分页全部由既有只读方法完成，本控制器只做授权、字段校验、数据范围过滤与选定列投影，不做写入。</para>
@@ -51,6 +53,25 @@ public class DynamicShipmentFinanceReportController : ControllerBase
         ArgumentNullException.ThrowIfNull(request);
         return Ok(ApiResponse<DynamicShipmentFinanceReportPageDto>.Success(
             await BuildPageAsync(request)));
+    }
+
+    /// <summary>
+    /// 导出当前页为 Excel（ERP-158，只读）：复用「有界、已授权预览」与选定列顺序（每次请求重新校验身份 / 菜单授权 /
+    /// 字段 / 筛选 / 页大小 / 业务员数据范围），仅导出当前页选定列；未知金额 / 未知数量保持 null（空单元格，绝不回落为 0），
+    /// 金额按原币分别成行、绝不跨币种合并或换算，文本单元格做公式注入转义。
+    /// <para>全程只读，不写库、不执行任意 SQL；请求由既有 <c>OperationLogMiddleware</c> 记录审计（动作「导出」）。</para>
+    /// </summary>
+    [HttpPost("export")]
+    public async Task<IActionResult> Export([FromBody] DynamicShipmentFinanceReportRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        // 复用同一有界、已授权预览：重新校验身份 / 菜单授权 / 字段 / 筛选 / 页大小 / 数据范围
+        var page = await BuildPageAsync(request);
+
+        var bytes = BuildWorkbook(page);
+        return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            $"ShipmentFinanceReport_{DateTime.Now:yyyyMMddHHmmss}.xlsx");
     }
 
     /// <summary>
@@ -142,6 +163,14 @@ public class DynamicShipmentFinanceReportController : ControllerBase
             ["overReceived"] = o.OverReceived,
             ["note"] = o.Note,
         };
+
+    /// <summary>用 ExcelExporter 生成当前页数据工作表（选定列顺序 + 公式注入转义；未知金额 / 数量保持 null → 空单元格）</summary>
+    private static byte[] BuildWorkbook(DynamicShipmentFinanceReportPageDto page)
+    {
+        var columns = page.Columns.Select(c => (c.Key, c.Label)).ToList();
+        var rows = page.Rows.Select(DynamicShipmentFinanceReportRules.BuildExportRow).ToList();
+        return ExcelExporter.ExportRows("销售订单出货财务进度", rows, columns);
+    }
 
     /// <summary>身份 + 既有「角色 → 菜单」销售订单模块授权（fail closed，绝不猜测身份）</summary>
     private async Task EnsureAuthorizedAsync(long? userId)

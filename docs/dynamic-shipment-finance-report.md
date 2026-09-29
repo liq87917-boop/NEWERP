@@ -8,6 +8,7 @@
 | --- | --- | --- |
 | `GET` | `/api/sales-orders/dynamic-shipment-finance-report` | 返回 ERP-032 订单证据字段白名单目录（需登录 + 销售订单菜单授权） |
 | `POST` | `/api/sales-orders/dynamic-shipment-finance-report` | 按选定字段与有界筛选预览当前页，稳定分页（单页上限 200） |
+| `POST` | `/api/sales-orders/dynamic-shipment-finance-report/export` | 把当前页选定列导出为 xlsx（只读，复用有界授权预览与选定列顺序） |
 
 请求体（`DynamicShipmentFinanceReportRequest`）：`fields`（选定字段键，仅限白名单，留空 = 全部白名单字段）、
 `customerId`、`currency`、`orderDateFrom` / `orderDateTo`、`shipmentStatus`（none / shipped）、
@@ -73,6 +74,25 @@
 - 未知金额 / 未知数量照实保留为 `null`，绝不回落为 0、绝不跨币种合并或换算；
 - 不新增表 / 列 / 权限模型，不执行迁移、生产 SQL、真实数据库操作或部署。
 
+## Excel 导出（ERP-158）
+
+`POST /api/sales-orders/dynamic-shipment-finance-report/export` 请求体与预览完全相同
+（`DynamicShipmentFinanceReportRequest`），复用同一有界、已授权预览管线（每次请求重新校验身份 / 销售订单菜单授权 /
+字段 / 筛选 / 页大小 / 业务员数据范围），**只导出请求 `page` / `pageSize` 对应的当前页选定列**（单页上限 200，
+超限直接拒绝），不是全量导出。
+
+导出口径与导出限制：
+
+- 数据工作表复用 `ERP.Infrastructure.Export.ExcelExporter`；列头 = 选定字段的中文标签，列顺序 = 请求 `fields` 顺序，仅当前页行；
+- 未知金额（`linkedAmount` / `uncoveredAmount` / `submittedAmount` 为 null）与未知数量（`orderedQuantity` / `shippedQuantity` /
+  `pendingShipmentQuantity` / `outstandingQuantity` 为 null）导出为**空单元格（未知）**，绝不回落为 0、不推算、不修复；
+- 金额与数量一律按原币分别成行：`currency` 为原币，不同币种绝不合并、不做汇率换算、无跨币种总额；
+- 公式注入防护：文本单元格以 `=` / `+` / `-` / `@` / 制表符 / 回车 / 换行开头时，前缀单引号转义为字面文本、
+  不生成公式单元格（`DynamicShipmentFinanceReportRules.EscapeFormulaLeading`）；
+- 空页仍返回仅含表头的工作簿（下载限制：不下载空数据表，前端空结果显示可见错误、不触发下载）；
+- 文件名 `ShipmentFinanceReport_yyyyMMddHHmmss.xlsx`；内容类型 `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`；
+- 只读 + 审计：无写入、无任意 SQL；`POST` 由既有 `OperationLogMiddleware` 记录审计（动作「导出」）。
+
 ## 文件地图
 
 - `src/ERP.Application/DTOs/DynamicShipmentFinanceReportDtos.cs`：目录 / 请求 / 结果 DTO；
@@ -80,6 +100,7 @@
 - `src/ERP.Api/Controllers/DynamicShipmentFinanceReportController.cs`：授权 + 业务员数据范围 + 复用 ERP-032 只读派生 + 选定列投影；
 - `src/ERP.Api/Controllers/SalesOrderShipmentFinanceReport.cs`：ERP-032 权威派生，新增可选 `SalespersonDataScope` 参数（在源查询内部先于计数与分页过滤客户范围）；
 - `src/ERP.UnitTests/DynamicShipmentFinanceReportTests.cs`：预览单元测试（内存库，不连 SQL Server、不启动 API）；
+- `src/ERP.UnitTests/DynamicShipmentFinanceExcelTests.cs`：ERP-158 Excel 导出单元测试（列顺序、页上限、数据范围、未知值、币种、公式安全、不写库、下载限制）；
 - `src/ERP.UnitTests/SalesOrderShipmentFinanceReportTests.cs`：ERP-032 报表单元测试（含 ERP-156 复用的源查询范围过滤）。
 
 ## 前端字段设计器（ERP-157）
@@ -100,6 +121,9 @@
    权限不足 / 未登录 / 无效请求 / 网络失败 / 空结果 / 加载中各自可见。
 6. **导出 CSV**：导出当前页选定列（`dsfCsv`），未知保留「未知」、公式前导（`= + - @` 或含制表 / 换行）加单引号防注入、内部引号翻倍。
    预览与导出均由既有 `OperationLogMiddleware` 按 HTTP 方法记录审计。
+7. **导出 Excel**：工具栏「📥 导出 Excel」复用当前字段 / 筛选 / 分页组装请求后 `POST /api/sales-orders/dynamic-shipment-finance-report/export`
+    （`dsfExportExcel`）；成功（xlsx 附件）触发下载，空结果 / 授权 / 校验 / 网络失败均在结果区可见、不下载任何内容；未知金额 / 数量保持空单元格（未知）。
+
 
 ### 前端单测
 
