@@ -8,6 +8,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -50,17 +51,23 @@ def git_lines(*args: str) -> list[str]:
     # Force Git to emit real UTF-8 paths instead of C-style quoted/octal names.
     # Use explicit byte pipes here instead of the generic run() helper because
     # local recovery must never depend on a console host's stdout redirection state.
-    result = subprocess.run(
-        ["git", "-c", "core.quotepath=false", *args],
-        cwd=ROOT,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=False,
-    )
+    result = None
+    for retry in range(3):
+        result = subprocess.run(
+            ["git", "-c", "core.quotepath=false", *args],
+            cwd=ROOT,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=False,
+        )
+        if result.returncode == 0:
+            break
+        time.sleep(0.1 * (retry + 1))
+    assert result is not None
     stdout = (result.stdout or b"").decode("utf-8", errors="replace")
     stderr = (result.stderr or b"").decode("utf-8", errors="replace")
     if result.returncode != 0:
-        raise RuntimeError(stderr.strip() or "Git command failed")
+        raise RuntimeError(stderr.strip() or f"Git command failed with code {result.returncode}: {' '.join(args)}")
     return [line.strip().replace("\\", "/") for line in stdout.splitlines() if line.strip()]
 
 
@@ -105,6 +112,28 @@ def auto_push_enabled(config: dict[str, Any]) -> bool:
 
 def all_tasks(config: dict[str, Any]) -> list[tuple[Path, dict[str, Any]]]:
     return [(path, load_json(path)) for path in sorted(TASKS_DIR.glob(f"{config['task_prefix']}-*.json"))]
+
+
+def completed_result(task_id: str) -> dict[str, Any] | None:
+    path = RESULTS_DIR / f"{task_id}.json"
+    if not path.exists():
+        return None
+    result = load_json(path)
+    return result if result.get("status") == "completed" else None
+
+
+def honor_terminal_completion(task_path: Path, task: dict[str, Any], state: dict[str, Any]) -> bool:
+    """A committed completion result is a terminal fence against stale workers."""
+    result = completed_result(str(task.get("id")))
+    if result is None:
+        return False
+    task["status"] = "completed"
+    for key in ("blocker", "last_error", "failure_kind", "failed_transport_version", "recovery_context", "preserved_work", "quarantine"):
+        task.pop(key, None)
+    save_json(task_path, task)
+    set_state(state, phase="ready", current_task=None, last_error=None, blocker=None, finish_reason="terminal_completion_reconciled")
+    audit("terminal_completion_reconciled", task=task["id"], result=result)
+    return True
 
 
 def next_task(config: dict[str, Any]) -> tuple[Path, dict[str, Any]] | None:
@@ -648,6 +677,9 @@ def run_next(dry_run: bool) -> int:
                                 audit("queue_head_blocked", reason=str(exc)); return 10
     if item is None: print("No runnable task."); return 0
     task_path, task = item
+    if honor_terminal_completion(task_path, task, state):
+        print(f"Ignored stale execution for already completed {task['id']}.")
+        return 0
     try: validate_task(task, config)
     except ValueError as exc:
         set_state(state, phase="blocked", current_task=task.get("id"), blocker=str(exc), finish_reason="invalid_task")
@@ -685,6 +717,9 @@ def run_next(dry_run: bool) -> int:
     validate_existing_first = resume_existing
 
     for attempt in range(start_attempt, max_attempts + 1):
+        if honor_terminal_completion(task_path, task, state):
+            print(f"Stopped stale worker for already completed {task['id']}.")
+            return 0
         task["attempts"] = attempt; save_json(task_path, task)
         if validate_existing_first:
             validate_existing_first = False
@@ -841,6 +876,9 @@ def run_next(dry_run: bool) -> int:
             subprocess.run(["git", "push"], cwd=ROOT)
         print(f"Completed {task['id']} by {normalized}"); return 0
 
+    if honor_terminal_completion(task_path, task, state):
+        print(f"Skipped failure handling for already completed {task['id']}.")
+        return 0
     return preserve_failed_work(
         task_path, task, config, state, previous_error, failure_kind,
         cline_raw_reason, max_attempts,

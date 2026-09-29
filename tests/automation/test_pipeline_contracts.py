@@ -202,12 +202,64 @@ class PipelineContracts(unittest.TestCase):
         with patch.object(pipeline, "pipeline_lock") as lock, \
              patch.object(pipeline, "load_json", side_effect=[config, {"conversation_control": {}}]), \
              patch.object(pipeline, "recover_obsolete_transport_failures"), \
+             patch.object(pipeline, "reconcile_completed_results"), \
              patch.object(pipeline, "recover_blocked_with_deepseek") as recover, \
              patch.object(pipeline, "queue_head", return_value=(None, "queue_empty")), \
              patch.object(pipeline, "mark_queue_replenishing"):
             lock.return_value.__enter__.return_value = None
             self.assertEqual(0, pipeline.run_all())
         recover.assert_called_once_with(config)
+
+    def test_completed_result_prevents_stale_task_reactivation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            ai_dir = root / ".ai"
+            tasks = ai_dir / "tasks"
+            results = ai_dir / "results"
+            tasks.mkdir(parents=True); results.mkdir()
+            config_path = ai_dir / "config.json"
+            state_path = ai_dir / "PROJECT_STATE.json"
+            audit_path = ai_dir / "audit.jsonl"
+            config_path.write_text(json.dumps({"task_prefix": "ERP"}), encoding="utf-8")
+            state_path.write_text(json.dumps({"phase": "developing", "current_task": "ERP-096"}), encoding="utf-8")
+            (tasks / "ERP-096.json").write_text(json.dumps(self.task("ERP-096", "in_progress")), encoding="utf-8")
+            (results / "ERP-096.json").write_text(json.dumps({"task": "ERP-096", "status": "completed"}), encoding="utf-8")
+            old_values = (
+                pipeline.ROOT, pipeline.TASKS_DIR, pipeline.CONFIG_PATH, pipeline.STATE_PATH,
+                pipeline.AUDIT_PATH, pipeline.RESULTS_DIR,
+            )
+            pipeline.ROOT, pipeline.TASKS_DIR = root, tasks
+            pipeline.CONFIG_PATH, pipeline.STATE_PATH, pipeline.AUDIT_PATH = config_path, state_path, audit_path
+            pipeline.RESULTS_DIR = results
+            try:
+                with patch.object(pipeline, "git_checkpoint"), patch.object(pipeline, "refresh_project_state"):
+                    self.assertEqual(["ERP-096"], pipeline.reconcile_completed_results({"task_prefix": "ERP"}))
+                value = json.loads((tasks / "ERP-096.json").read_text(encoding="utf-8"))
+                self.assertEqual("completed", value["status"])
+            finally:
+                (
+                    pipeline.ROOT, pipeline.TASKS_DIR, pipeline.CONFIG_PATH, pipeline.STATE_PATH,
+                    pipeline.AUDIT_PATH, pipeline.RESULTS_DIR,
+                ) = old_values
+
+    def test_scheduler_process_error_retries_instead_of_stopping_pipeline(self):
+        config = {"autonomy": {"enabled": True, "deepseek_supervisor_enabled": True}}
+        task = (Path("ERP-102.json"), {"id": "ERP-102"})
+        failed = type("Completed", (), {"returncode": 1})()
+        passed = type("Completed", (), {"returncode": 0})()
+        with patch.object(pipeline, "pipeline_lock") as lock, \
+             patch.object(pipeline, "load_json", side_effect=[config, {"conversation_control": {}}, {"conversation_control": {}}, {"conversation_control": {}}]), \
+             patch.object(pipeline, "recover_obsolete_transport_failures"), \
+             patch.object(pipeline, "reconcile_completed_results"), \
+             patch.object(pipeline, "recover_blocked_with_deepseek"), \
+             patch.object(pipeline, "queue_head", side_effect=[(task, "ready"), (task, "ready"), (None, "queue_empty")]), \
+             patch.object(pipeline, "run", side_effect=[failed, passed]), \
+             patch.object(pipeline, "audit"), \
+             patch.object(pipeline, "mark_queue_replenishing"), \
+             patch.object(pipeline.time, "sleep") as sleep:
+            lock.return_value.__enter__.return_value = None
+            self.assertEqual(0, pipeline.run_all())
+        sleep.assert_called_once_with(1)
 
     def test_failed_and_retry_pending_tasks_become_bounded_deepseek_repairs(self):
         with tempfile.TemporaryDirectory() as directory:

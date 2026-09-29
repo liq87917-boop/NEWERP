@@ -8,6 +8,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
@@ -197,6 +198,33 @@ def recover_obsolete_transport_failures(config: dict[str, Any]) -> list[str]:
         changed.extend([str(STATE_PATH.relative_to(ROOT)), str(AUDIT_PATH.relative_to(ROOT))])
         git_checkpoint("chore: requeue tasks after prompt transport upgrade", changed)
     return recovered
+
+
+def reconcile_completed_results(config: dict[str, Any]) -> list[str]:
+    """Make successful results terminal even when a stale worker rewrites task state."""
+    reconciled: list[str] = []
+    changed: list[str] = []
+    for path, task in task_entries():
+        if task.get("status") == "completed":
+            continue
+        result_path = RESULTS_DIR / f"{task['id']}.json"
+        if not result_path.exists():
+            continue
+        result = load_json(result_path)
+        if result.get("status") != "completed":
+            continue
+        task["status"] = "completed"
+        for key in ("blocker", "last_error", "failure_kind", "failed_transport_version", "recovery_context", "preserved_work", "quarantine"):
+            task.pop(key, None)
+        save_json(path, task)
+        reconciled.append(task["id"])
+        changed.append(str(path.relative_to(ROOT)))
+        audit("terminal_completion_reconciled", task=task["id"], result=str(result_path.relative_to(ROOT)))
+    if reconciled:
+        refresh_project_state(ROOT, phase="ready", current_task=None, blocker=None, last_error=None, finish_reason="terminal_results_reconciled")
+        changed.extend([str(STATE_PATH.relative_to(ROOT)), str(AUDIT_PATH.relative_to(ROOT))])
+        git_checkpoint("chore: reconcile terminal task completions", changed)
+    return reconciled
 
 
 def recovery_evidence(task: dict[str, Any]) -> dict[str, Any]:
@@ -398,10 +426,12 @@ def run_all() -> int:
     with pipeline_lock():
         config = load_json(CONFIG_PATH)
         recover_obsolete_transport_failures(config)
+        scheduler_failures = 0
         while True:
             # Failure handling is a first-class phase of every scheduler cycle.
             # Queue capacity only controls replenishment; it must never bypass
             # failed-task/log collection or DeepSeek repair scheduling.
+            reconcile_completed_results(config)
             recover_blocked_with_deepseek(config)
             state = load_json(STATE_PATH)
             conversation = state.get("conversation_control", {})
@@ -426,8 +456,16 @@ def run_all() -> int:
             completed = run([sys.executable, str(ORCHESTRATOR), "run-next"])
             if completed.returncode != 0:
                 audit("pipeline_stopped", task=task_id, exit_code=completed.returncode)
-                print(f"Pipeline stopped at {task_id} with exit code {completed.returncode}.", file=sys.stderr)
-                return completed.returncode
+                scheduler_failures += 1
+                delay = min(10, scheduler_failures)
+                print(
+                    f"Scheduler execution failed at {task_id} with exit code {completed.returncode}; "
+                    f"automatic recovery will retry in {delay}s.",
+                    file=sys.stderr,
+                )
+                time.sleep(delay)
+                continue
+            scheduler_failures = 0
 
 
 def defer_task(task_id: str, actor: str, note: str) -> int:
