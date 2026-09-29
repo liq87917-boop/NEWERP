@@ -69,6 +69,7 @@ function openInventoryMovementReport() {
         <button class="btn btn-primary" onclick="imrDynPreview(1)">预览</button>
         <button class="btn btn-neutral" onclick="exportImrDesignerCsv()" title="导出当前页为 CSV（选定列）">📤 导出 CSV（选定列）</button>
         <button class="btn btn-neutral" onclick="exportImrDesignerExcel()" title="导出当前页为 Excel（选定列）">📥 导出 Excel（选定列）</button>
+        <button class="btn btn-neutral" onclick="exportImrDesignerPdf()" title="导出当前页为分页中文 PDF（选定列）">📄 导出 PDF（选定列）</button>
       </div>
     </div>
     <div id="imr-designer-result"></div>
@@ -407,6 +408,7 @@ function imrDynErrorHtml(kind, message) {
     unauthorized: '未登录 / 登录已过期',
     invalid: '请求无效',
     empty: '导出内容为空',
+    font: '中文字体缺失',
     network: '网络请求失败',
     error: '预览失败',
   };
@@ -442,6 +444,7 @@ function imrDynFieldChooserHtml(fields, selectedKeys) {
 function imrDynKindOfCode(code) {
   if (code === 2002) return 'forbidden';
   if (code === 2000 || code === 2003) return 'unauthorized';
+  if (code === 5000) return 'font';
   return 'invalid';
 }
 
@@ -643,6 +646,56 @@ async function exportImrDesignerExcel() {
   }
 }
 
+/* 导出当前预览页为 PDF（分页中文 PDF，选定列顺序 + 基础单位 / 未知历史证据 + 宽列集跨页拆分）；
+   每次下载都重新读取当前筛选并走只读导出接口（后端重新校验授权 / 字段 / 筛选 / 页大小，字体缺失显式失败），空数据不下载空表 */
+async function exportImrDesignerPdf() {
+  const state = imrDynBuildState(IMR_DYN.page);
+  if (state.windowStart && state.windowEnd && state.windowStart > state.windowEnd) {
+    imrDynRenderResult(imrDynErrorHtml('invalid', '移动窗口开始日期不能晚于结束日期'));
+    return;
+  }
+  if (IMR_DYN.view && (!IMR_DYN.view.rows || IMR_DYN.view.rows.length === 0)) {
+    imrDynRenderResult(imrDynErrorHtml('empty', '没有符合条件的库存行，无法导出（请先预览）'));
+    return;
+  }
+
+  const req = imrDynBuildRequest(state);
+  imrDynRenderResult(imrDynLoadingHtml());
+
+  try {
+    const headers = { 'Content-Type': 'application/json' };
+    const token = typeof localStorage !== 'undefined' ? (localStorage.getItem('erp_token') || '') : '';
+    if (token) headers['Authorization'] = 'Bearer ' + token;
+    const resp = await fetch('/api/dynamic-inventory-movement-report/pdf', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(req),
+    });
+
+    const contentType = (resp.headers.get('content-type') || '');
+    if (contentType.indexOf('application/pdf') >= 0) {
+      const blob = await resp.blob();
+      downloadImrBlob(blob, '库存移动字段设计器_当前页.pdf');
+      imrDynRenderResult('');
+      toast('PDF 已导出（当前页 · 选定列 · 分页）', 'success');
+      return;
+    }
+
+    let envelope = null;
+    try { envelope = await resp.json(); } catch (e) { /* 忽略解析失败 */ }
+    const code = envelope && envelope.code;
+    const message = (envelope && envelope.message) || '导出失败';
+    if (code === 2000 || code === 2003) {
+      if (typeof logout === 'function') logout();
+      imrDynRenderResult(imrDynErrorHtml('unauthorized', message));
+      return;
+    }
+    imrDynRenderResult(imrDynErrorHtml(imrDynKindOfCode(code), message));
+  } catch (err) {
+    imrDynRenderResult(imrDynErrorHtml('network', (err && err.message) || '无法连接到服务器'));
+  }
+}
+
 /* 触发浏览器下载指定 blob（下载后回收对象 URL） */
 function downloadImrBlob(blob, filename) {
   const url = URL.createObjectURL(blob);
@@ -676,6 +729,7 @@ if (typeof module !== 'undefined' && module.exports) {
     imrDynCsvCell,
     imrDynCsv,
     exportImrDesignerExcel,
+    exportImrDesignerPdf,
     downloadImrBlob,
   };
 }

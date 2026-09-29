@@ -14,6 +14,8 @@
 |---|---|---|
 | `GET` | `/api/dynamic-inventory-movement-report` | 字段白名单目录（需登录 + 库存查询菜单授权） |
 | `POST` | `/api/dynamic-inventory-movement-report` | 按选定字段与有界筛选预览（只读，复用 ERP-029） |
+| `POST` | `/api/dynamic-inventory-movement-report/export` | 导出当前页为 Excel（xlsx，只读，复用有界授权预览与选定列顺序） |
+| `POST` | `/api/dynamic-inventory-movement-report/pdf` | 导出当前页为分页中文 PDF（只读，复用有界授权预览与选定列顺序） |
 
 目录返回：`{ fields[], requiredMenuCode, requiredMenuText, maxPageSize, readOnlyText, boundaryText }`。
 
@@ -89,5 +91,19 @@
 - **公式注入防护**：文本单元格以 `=` / `+` / `-` / `@` / 制表符 / 回车 / 换行开头时前缀单引号转义（OWASP），保持字面文本、不被当作公式执行（`DynamicInventoryMovementReportRules.EscapeFormulaLeading`）。
 - **文件名**：`InventoryMovement_yyyyMMddHHmmss.xlsx`；内容类型 `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`。
 - **前端**：字段设计器工具栏新增「📥 导出 Excel（选定列）」，复用当前字段 / 筛选 / 分页组装请求后 `POST` 导出；空数据显示可见错误、不下载空表，授权 / 校验 / 网络失败均在结果区可见。
+- **审计与只读**：`POST` 由既有 `OperationLogMiddleware` 记录操作日志（动作「导出」，读操作）；本导出不新增 / 修改 / 删除任何记录，不执行任意 SQL。
+
+## 11. 当前页分页中文 PDF 导出（ERP-134）
+
+只读、有界的**当前页分页中文 PDF 导出**：把 ERP-130/131 的「有界、已授权预览」与选定列顺序直接导出为 PDF，复用既有 `PDFsharp` 与共享中文字体解析器 `SimHeiPdfFontResolver`。
+
+- **端点**：`POST /api/dynamic-inventory-movement-report/pdf`，请求体与预览完全相同（`DynamicInventoryMovementReportRequest`），只导出请求 `page` / `pageSize` 对应的**当前页**（单页上限 200，超限直接拒绝），不是全量导出。
+- **复用有界授权预览**：每次下载都重新校验身份 + `stock-query` 库存查询菜单授权 + 字段 / 筛选 / 页大小，非法取值在读取任何数据之前即拒绝，**在任何文件字节返回之前完成**；只读、不写库、不执行任意 SQL。
+- **选定列顺序与跨页渲染**：PDF 表头与数据行都按 `page.Columns`（= 请求选定字段顺序）排列，与预览同源；宽列集（如选中全部 18 项字段）按可用页宽拆分为多个「列页」，每个列页总宽不超页宽，**列不被裁切**；行数超过单页可用高度时拆分为多个「行页」，行列页在页头标注「列 X/Y · 行页 A/B」。
+- **中文字体与显式失败**：中文字体固定使用 Windows 黑体（SimHei，`simhei.ttf`），与销售订单 / 应收 / 采购订单 / 客户报告包 PDF 共用同一共享解析器，避免进程内互相覆盖为缺字字体；**字体缺失（未安装 SimHei）显式失败**（`ErrorCodes.InternalError`，返回「未找到中文字体 SimHei」），不产出乱码或缺字 PDF。**字体前置条件**：部署机需在 Windows 字体目录安装 `simhei.ttf`。
+- **基础单位 / 未知历史证据**：`unit` 保留基础单位标签（如 PCS / KG）；`lastMovementDate` / `inactivityDays` 无台账时显式显示「未知」（绝不回落为 0），`historyStatus` / `classification` 显式保留并映射中文（`no_history` → 「无台账（历史库存 · 未知）」、`unknown` → 「无法判定」）；不臆造日期、比率，不推断成本 / 金额。
+- **可选页面行数分布（只计数不求和）**：请求分组（`warehouse` / `classification` / `history`）时，页头追加「本页行数分布（仅统计本页 · 只计数不求和）」；只渲染各分组 `label` + `count`，绝不跨不同商品 / 基础单位（如 PCS / KG）求和任何数量。
+- **文件名 / 内容类型**：`InventoryMovement_yyyyMMddHHmmss.pdf`；内容类型 `application/pdf`。
+- **前端**：字段设计器工具栏新增「📄 导出 PDF（选定列）」，复用当前字段 / 筛选 / 分页组装请求后 `POST` 导出；空数据显示可见错误、不下载空表；授权（未登录 / 权限不足）、校验、**字体缺失**与网络失败均在结果区可见。
 - **审计与只读**：`POST` 由既有 `OperationLogMiddleware` 记录操作日志（动作「导出」，读操作）；本导出不新增 / 修改 / 删除任何记录，不执行任意 SQL。
 

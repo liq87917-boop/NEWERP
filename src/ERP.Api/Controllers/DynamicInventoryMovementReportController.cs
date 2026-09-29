@@ -15,6 +15,7 @@ namespace ERP.Api.Controllers;
 /// <item><b>GET /api/dynamic-inventory-movement-report</b>：返回库存移动字段白名单目录（需登录 + 库存查询菜单授权）；</item>
 /// <item><b>POST /api/dynamic-inventory-movement-report</b>：按选定字段与有界筛选预览库存移动报表，稳定分页。</item>
 /// <item><b>POST /api/dynamic-inventory-movement-report/export</b>：导出当前选定页为 Excel（xlsx，只读，复用有界授权预览与选定列顺序）。</item>
+/// <item><b>POST /api/dynamic-inventory-movement-report/pdf</b>：导出当前选定页为分页中文 PDF（只读，复用有界授权预览与选定列顺序，宽列集跨页拆分）。</item>
 /// </list>
 /// <para>复用 ERP-029 报表服务（<see cref="IReportService.GetInventoryMovementReportAsync"/>）：
 /// 仓库 / 商品 / 截止日期 / 移动窗口 / 呆滞阈值筛选与稳定分页全部由既有只读服务完成，本控制器只做授权与字段投影，不做写入。</para>
@@ -72,6 +73,25 @@ public class DynamicInventoryMovementReportController : ControllerBase
         var bytes = BuildWorkbook(page);
         return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             $"InventoryMovement_{DateTime.Now:yyyyMMddHHmmss}.xlsx");
+    }
+
+    /// <summary>
+    /// 导出当前页为分页中文 PDF（ERP-134，只读）：复用「有界、已授权预览」与选定列顺序（每次请求重新校验身份 / 菜单授权 /
+    /// 字段 / 筛选 / 页大小），仅导出当前页选定列；基础单位与未知历史证据显式保留，宽列集按可用页宽跨页拆分避免裁切。
+    /// <para>中文字体固定使用 Windows 黑体（SimHei，共享解析器），字体缺失时显式失败（不产出乱码或缺字 PDF）；
+    /// 页面分组计数只统计行数、绝不跨不同基础单位求和任何数量。全程只读，不写库、不执行任意 SQL；
+    /// 请求由既有 <c>OperationLogMiddleware</c> 记录审计（动作「导出」）。</para>
+    /// </summary>
+    [HttpPost("pdf")]
+    public async Task<IActionResult> ExportPdf([FromBody] DynamicInventoryMovementReportRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        // 复用同一有界、已授权预览：重新校验身份 / 菜单授权 / 字段 / 筛选 / 页大小
+        var page = await BuildPageAsync(request);
+
+        var bytes = DynamicInventoryMovementPdfExporter.Export(page);
+        return File(bytes, "application/pdf", $"InventoryMovement_{DateTime.Now:yyyyMMddHHmmss}.pdf");
     }
 
     /// <summary>用 ExcelExporter 生成当前页数据工作表（选定列顺序 + 公式注入转义）</summary>

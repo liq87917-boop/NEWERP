@@ -2,7 +2,7 @@
   "id": "ERP-134",
   "title": "Download selected authorized inventory-movement page as PDF",
   "description": "An inventory user downloads the selected bounded movement report page as a paginated Chinese PDF. Reuse ERP-130 authorized preview, current-user stock-query permission, existing PDFsharp and shared SimHei resolver. Show base-unit and unknown-history evidence explicitly; render all selected columns without clipping by splitting wide column sets across pages, and show optional page-only status counts without summing incompatible units. Missing font fails explicitly; HTTP audit records read-only download. Development only: no migration, production SQL, real database execution, arbitrary model SQL, writes, secret/.env change or deployment. Verify PDF and safe build/test.",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "medium",
   "acceptance_criteria": [
     "PDF endpoint reuses authorized bounded inventory preview, rechecks stock-query permission and all filters before any file bytes are returned.",
@@ -51,5 +51,6 @@
     "level": "L1",
     "status": "not_required",
     "reason": "Development-only bounded read-only feature"
-  }
+  },
+  "attempts": 1
 }
