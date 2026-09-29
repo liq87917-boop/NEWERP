@@ -107,6 +107,7 @@ function openSalesOrderReceiptReconciliationReport() {
       <div class="toolbar-actions">
         <button class="btn btn-primary" onclick="loadSalesOrderReceiptReconciliation(1)">查询</button>
         <button class="btn btn-neutral" onclick="exportSorrcsv()" title="导出本页订单明细为 CSV">📤 导出 CSV</button>
+        <button class="btn btn-neutral" onclick="openDynamicReceiptReconciliationDesigner()" title="打开目录驱动的订单证据与未关联收款证据字段 / 筛选设计器（只读，走 ERP-164/165 预览接口）">🔧 动态设计器</button>
       </div>
     </div>
 
@@ -476,5 +477,553 @@ function exportSorrcsv() {
   a.remove();
   URL.revokeObjectURL(url);
   toast('CSV 已导出', 'success');
+}
+
+/* ============ 客户订单与收款核对报表 · 动态字段 / 筛选设计器（ERP-166：只读、有界） ============
+    口径与后端 ERP-164 / ERP-165（DynamicReceiptReconciliationReportController / DynamicReceiptReconciliationReportRules）一一对应：
+    - 字段选择器只由 GET /api/sales-orders/dynamic-receipt-reconciliation-report 返回的有限白名单目录渲染，
+      订单证据字段（fields）与未关联收款证据字段（receiptFields）两个目录完全独立，绝无自由填写的字段名或 SQL；
+    - 筛选只允许客户 / 币种 / 订单日期 / 出货状态 / 收款链接状态 / 收款证据状态 / 订单状态 / 关键字，且只接受枚举取值（下拉）；
+    - 预览走 POST /api/sales-orders/dynamic-receipt-reconciliation-report，只发送「白名单字段 + 有界筛选 + 有界分页」，
+      订单证据行与未关联收款证据行分别投影、绝不合并，按请求顺序渲染返回的列名与单元格；
+    - 全程只读：不写库、不迁移、不执行任意 SQL；授权 / 无效请求 / 空结果 / 网络失败都在界面可见，且不暴露范围外数据。 */
+
+/* 币种枚举（与系统 Currency 枚举名一致；未知取值由后端拒绝，前端也不再发送） */
+const DRR_CURRENCY_OPTS = [
+  { value: 'CNY', label: 'CNY 人民币' },
+  { value: 'USD', label: 'USD 美元' },
+  { value: 'EUR', label: 'EUR 欧元' },
+  { value: 'HKD', label: 'HKD 港币' },
+  { value: 'GBP', label: 'GBP 英镑' },
+  { value: 'JPY', label: 'JPY 日元' },
+];
+
+/* 出货状态（与后端 none / shipped 一致） */
+const DRR_SHIPMENT_STATUS_OPTS = [
+  { value: 'none', label: '未出货（无已审核出库单）' },
+  { value: 'shipped', label: '已有已审核出库单' },
+];
+
+/* 收款链接状态（与后端 linked / partial / unlinked 一致；unknown 只在派生上限出现，不提供筛选） */
+const DRR_LINK_STATUS_OPTS = [
+  { value: 'linked', label: '已关联（全部可计入）' },
+  { value: 'partial', label: '部分可归属（其余未知）' },
+  { value: 'unlinked', label: '未关联（金额未知）' },
+];
+
+/* 收款证据状态（与后端 active / pending / historical / all 一致） */
+const DRR_RECEIPT_STATUS_OPTS = [
+  { value: 'active', label: '仅有效收款证据（默认：已审核）' },
+  { value: 'pending', label: '仅未审核收款单' },
+  { value: 'historical', label: '仅历史收款单' },
+  { value: 'all', label: '全部状态（有效 + 未审核 + 历史）' },
+];
+
+/* 订单状态（与后端 active / cancelled / all 一致） */
+const DRR_ORDER_STATUS_OPTS = [
+  { value: 'active', label: '仅有效订单（默认：排除已取消）' },
+  { value: 'cancelled', label: '仅已取消订单' },
+  { value: 'all', label: '全部未删除订单' },
+];
+
+/* 默认每页条数（后端上限 200，由目录 maxPageSize 供给并钳制） */
+const DRR_DEFAULT_PAGE_SIZE = 20;
+const DRR_MAX_PAGE_SIZE = 200;
+
+/* 设计器状态（纯数据；DOM 访问只在事件处理函数内部发生） */
+let DRR = {
+  catalog: null,
+  fields: [],
+  receiptFields: [],
+  selectedKeys: [],
+  selectedReceiptKeys: [],
+  customers: [],
+  filters: { page: 1, pageSize: DRR_DEFAULT_PAGE_SIZE },
+  view: null,
+};
+
+/* ==================== 纯函数（可在 Node 中逐条单测） ==================== */
+
+/* HTML 转义（本地独立实现，避免依赖全局 escapeHtml 的加载顺序） */
+function drrEsc(v) {
+  return String(v ?? '').replace(/[&<>"']/g, c => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[c]));
+}
+
+/* 规范化选定字段（fail closed）：只保留目录白名单内的键、去重、保持请求顺序；未知键丢弃 */
+function drrSelectFields(catalogFields, selectedKeys) {
+  const valid = new Set((catalogFields || []).map(f => f && f.key).filter(Boolean));
+  const seen = new Set();
+  const result = [];
+  for (const k of (Array.isArray(selectedKeys) ? selectedKeys : [])) {
+    if (typeof k !== 'string') continue;
+    const key = k.trim();
+    if (!key || !valid.has(key) || seen.has(key)) continue;
+    seen.add(key);
+    result.push(key);
+  }
+  return result;
+}
+
+/* 枚举筛选取值：只在白名单内才携带（fail closed：非法取值绝不进入请求） */
+function drrEnumValue(value, opts) {
+  const v = value === null || value === undefined ? '' : String(value).trim();
+  if (!v) return '';
+  return (opts || []).some(o => o.value === v) ? v : '';
+}
+
+/* 组装有界预览请求体：字段 / 收款字段只来自目录、分页有界、筛选只取枚举白名单，绝不接受任意字段名或 SQL */
+function drrBuildRequest(state) {
+  const fields = drrSelectFields(state.catalogFields, state.selectedKeys);
+  const receiptFields = drrSelectFields(state.receiptFields, state.selectedReceiptKeys);
+
+  const page = Math.max(1, Math.floor(Number(state.page) || 1));
+  const maxPageSize = Number(state.maxPageSize) || DRR_MAX_PAGE_SIZE;
+  let pageSize = Math.floor(Number(state.pageSize));
+  if (!Number.isFinite(pageSize)) pageSize = DRR_DEFAULT_PAGE_SIZE;
+  pageSize = Math.max(1, Math.min(maxPageSize, pageSize));
+
+  const req = { fields, receiptFields, page, pageSize };
+
+  const customerId = Number(state.customerId);
+  if (Number.isFinite(customerId) && customerId > 0) req.customerId = customerId;
+
+  const currency = drrEnumValue(state.currency, DRR_CURRENCY_OPTS);
+  if (currency) req.currency = currency;
+
+  const orderDateFrom = state.orderDateFrom ? String(state.orderDateFrom).slice(0, 10) : '';
+  const orderDateTo = state.orderDateTo ? String(state.orderDateTo).slice(0, 10) : '';
+  if (orderDateFrom) req.orderDateFrom = orderDateFrom;
+  if (orderDateTo) req.orderDateTo = orderDateTo;
+
+  const shipmentStatus = drrEnumValue(state.shipmentStatus, DRR_SHIPMENT_STATUS_OPTS);
+  if (shipmentStatus) req.shipmentStatus = shipmentStatus;
+
+  const receiptLinkStatus = drrEnumValue(state.receiptLinkStatus, DRR_LINK_STATUS_OPTS);
+  if (receiptLinkStatus) req.receiptLinkStatus = receiptLinkStatus;
+
+  const receiptStatus = drrEnumValue(state.receiptStatus, DRR_RECEIPT_STATUS_OPTS);
+  if (receiptStatus) req.receiptStatus = receiptStatus;
+
+  const orderStatus = drrEnumValue(state.orderStatus, DRR_ORDER_STATUS_OPTS);
+  if (orderStatus) req.orderStatus = orderStatus;
+
+  const keyword = state.keyword ? String(state.keyword).trim() : '';
+  if (keyword) req.keyword = keyword;
+
+  return req;
+}
+
+/* 单元格纯文本（安全：null 数值显示「未知」、其余 null 为空、布尔 是/否、日期截断到日；绝不回落为 0） */
+function drrCellText(value, field) {
+  const dataType = (field && field.dataType) || 'text';
+  if (value === null || value === undefined) return dataType === 'number' ? '未知' : '';
+  if (dataType === 'boolean') return (value === true || value === 'true' || value === 1 || value === '1') ? '是' : '否';
+  if (dataType === 'date') return String(value).slice(0, 10);
+  return String(value);
+}
+
+/* 单元格 HTML（转义后安全渲染） */
+function drrRenderCell(value, field) {
+  return drrEsc(drrCellText(value, field));
+}
+
+/* 通用结果表格（无分页；表头为返回的列名、单元格为返回的选定字段值，全部经转义） */
+function drrTableHtml(columns, rows, emptyText) {
+  const cols = (columns || []).filter(c => c && c.key);
+  if (!cols.length) return '';
+  const align = c => (c.dataType === 'number' || c.dataType === 'boolean') ? ' class="text-right"' : '';
+  const head = cols.map(c => `<th${align(c)}>${drrEsc(c.label || c.key)}</th>`).join('');
+  const body = (rows || []).map(r =>
+    `<tr>${cols.map(c => `<td${align(c)}>${drrRenderCell(r[c.key], c)}</td>`).join('')}</tr>`).join('');
+  const emptyRow = `<tr><td colspan="${cols.length}" class="empty">${drrEsc(emptyText || '没有符合条件的数据')}</td></tr>`;
+  return `<table><thead><tr>${head}</tr></thead><tbody>${body || emptyRow}</tbody></table>`;
+}
+
+/* 订单证据结果区：汇总 + 订单表 + 分页（有界） */
+function drrOrderSectionHtml(view) {
+  if (!view) return '';
+  const summary = `<div class="text-muted" style="margin:6px 0">共 ${view.total} 张订单 · 第 ${view.page} 页 · 每页 ${view.pageSize} 条</div>`;
+  const table = drrTableHtml(view.columns, view.rows, '没有符合筛选条件的销售订单证据（可放宽客户 / 币种 / 日期 / 出货 / 收款链接筛选）');
+  const prevDisabled = view.page <= 1 ? ' disabled' : '';
+  const nextDisabled = view.page >= view.totalPages ? ' disabled' : '';
+  const paging = `<div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px">
+      <span class="text-muted">第 ${view.page} 页 / 共 ${view.totalPages} 页</span>
+      <div>
+        <button class="btn btn-neutral btn-sm" onclick="drrPage(-1)"${prevDisabled}>← 上一页</button>
+        <button class="btn btn-neutral btn-sm" onclick="drrPage(1)"${nextDisabled}>下一页 →</button>
+      </div></div>`;
+  return `${summary}${table}${paging}`;
+}
+
+/* 未关联收款证据结果区（独立投影：收款字段目录 + 收款行；截断时显式标注，绝不静默截断） */
+function drrReceiptSectionHtml(view) {
+  if (!view) return '';
+  const truncation = view.unlinkedReceiptTruncated
+    ? `<div class="pd-hint" style="color:#b45309;background:#fffbeb;border-color:#fde68a">⚠️ 未关联收款证据命中读取上限，本页收款证据被截断（不完整，请缩小筛选范围后重试）。</div>`
+    : '';
+  const table = drrTableHtml(view.receiptColumns, view.receiptRows, '本页客户没有符合条件的未关联收款单（收款单无订单级引用，只列出、不匹配、不并入订单金额）');
+  return `<h4 style="margin:14px 0 6px">🧾 未关联收款证据（收款单仅客户级引用：原币原样列出，绝不匹配 / 并入任何订单）</h4>${truncation}${table}`;
+}
+
+/* 空结果提示 */
+function drrEmptyHtml() {
+  return '<div class="empty" style="margin:8px 0">没有符合条件的订单证据（当前账号数据范围内的只读快照）。</div>';
+}
+
+/* 加载中提示 */
+function drrLoadingHtml() {
+  return '<div class="pd-hint" style="text-align:center;color:#64748b">正在预览（只读查询）…</div>';
+}
+
+/* 错误提示（权限 / 未登录 / 无效请求 / 网络失败分别可见，且不暴露任何数据） */
+function drrErrorHtml(kind, message) {
+  const labels = {
+    forbidden: '权限不足',
+    unauthorized: '未登录 / 登录已过期',
+    invalid: '请求无效',
+    network: '网络请求失败',
+    error: '预览失败',
+  };
+  return `<div class="pd-hint" style="color:#b91c1c;background:#fef2f2;border-color:#fecaca">
+      <b>${drrEsc(labels[kind] || '预览失败')}</b>：${drrEsc(message || '')}</div>`;
+}
+
+/* 预览结果：只读 / 边界 / 免责文案 + 订单证据 + 独立未关联收款证据 */
+function drrResultHtml(view) {
+  if (!view) return drrEmptyHtml();
+  const readOnly = view.readOnlyText ? `<div class="pd-hint">${drrEsc(view.readOnlyText)}</div>` : '';
+  const boundary = view.boundaryText ? `<div class="pd-hint">${drrEsc(view.boundaryText)}</div>` : '';
+  const disclaimer = view.disclaimerText ? `<div class="pd-hint" style="color:#64748b">${drrEsc(view.disclaimerText)}</div>` : '';
+  return `${readOnly}${boundary}${disclaimer}${drrOrderSectionHtml(view)}${drrReceiptSectionHtml(view)}`;
+}
+
+/* 字段选择器：仅由目录白名单渲染为复选框，无自由填写的字段名 */
+function drrFieldChooserHtml(fields, selectedKeys, name) {
+  const selected = new Set(selectedKeys || []);
+  return (fields || []).map(f => {
+    const checked = selected.has(f.key) ? 'checked' : '';
+    const onChange = name === 'drr-receipt-field' ? 'drrSyncReceiptSelection()' : 'drrSyncOrderSelection()';
+    return `<label style="display:inline-flex;align-items:center;gap:4px;margin:3px 6px 3px 0;padding:2px 8px;border:1px solid #e2e8f0;border-radius:6px;background:#f8fafc;cursor:pointer">
+        <input type="checkbox" name="${drrEsc(name)}" value="${drrEsc(f.key)}" ${checked} onchange="${onChange}">
+        <span>${drrEsc(f.label || f.key)}</span></label>`;
+  }).join('');
+}
+
+/* 业务码 → 错误态分类（与后端 ErrorCodes 一致：2000/2003 未登录，2002 权限不足，其余按无效请求） */
+function drrKindOfCode(code) {
+  if (code === 2002) return 'forbidden';
+  if (code === 2000 || code === 2003) return 'unauthorized';
+  return 'invalid';
+}
+
+/* ==================== CSV 导出（纯函数，当前页、两类证据分开导出） ==================== */
+
+/* CSV 单元格：null/undefined 保留为空（未知绝不回落为 0），
+   文本类首字符为 = + - @ / 制表符 / 回车时前缀单引号防公式注入，含逗号 / 引号 / 换行时按 RFC4180 加引号 */
+function drrCsvCell(value, field) {
+  if (value === null || value === undefined) return '';
+  const dataType = (field && field.dataType) || 'text';
+  let s = String(value);
+  if (dataType !== 'number' && dataType !== 'boolean' && dataType !== 'date') {
+    if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;
+  }
+  if (/[",\r\n]/.test(s)) s = '"' + s.replace(/"/g, '""') + '"';
+  return s;
+}
+
+/* 组装当前页 CSV 正文（表头用返回列名；行按列键投影，null 保留为空） */
+function drrBuildCsv(columns, rows) {
+  const cols = (columns || []).filter(c => c && c.key);
+  if (!cols.length) return '';
+  const head = cols.map(c => drrCsvCell(c.label || c.key, { dataType: 'text' })).join(',');
+  const body = (rows || []).map(r => cols.map(c => drrCsvCell(r[c.key], c)).join(','));
+  return [head].concat(body).join('\n');
+}
+
+/* ==================== 状态 / 请求 / 渲染（DOM 访问只在事件处理函数内部发生） ==================== */
+
+/* 轻量请求封装：返回完整 ApiResponse 信封（保留 code）；网络异常抛给调用方 */
+async function drrRequest(path, method = 'GET', body = null) {
+  const headers = { 'Content-Type': 'application/json' };
+  const token = typeof localStorage !== 'undefined' ? (localStorage.getItem('erp_token') || '') : '';
+  if (token) headers['Authorization'] = 'Bearer ' + token;
+  const opts = { method, headers };
+  if (body) opts.body = JSON.stringify(body);
+  const resp = await fetch(path, opts);
+  return await resp.json();
+}
+
+function drrRenderResult(html) {
+  const el = document.getElementById('drr-result');
+  if (el) el.innerHTML = html;
+}
+
+/* 同步订单证据勾选状态到 selectedKeys */
+function drrSyncOrderSelection() {
+  const boxes = document.querySelectorAll('input[name="drr-field"]');
+  DRR.selectedKeys = Array.from(boxes).filter(b => b.checked).map(b => b.value);
+}
+
+/* 同步未关联收款证据勾选状态到 selectedReceiptKeys */
+function drrSyncReceiptSelection() {
+  const boxes = document.querySelectorAll('input[name="drr-receipt-field"]');
+  DRR.selectedReceiptKeys = Array.from(boxes).filter(b => b.checked).map(b => b.value);
+}
+
+function drrToggleOrderAll(checked) {
+  const boxes = document.querySelectorAll('input[name="drr-field"]');
+  DRR.selectedKeys = [];
+  boxes.forEach(b => { b.checked = checked; if (checked) DRR.selectedKeys.push(b.value); });
+}
+
+function drrToggleReceiptAll(checked) {
+  const boxes = document.querySelectorAll('input[name="drr-receipt-field"]');
+  DRR.selectedReceiptKeys = [];
+  boxes.forEach(b => { b.checked = checked; if (checked) DRR.selectedReceiptKeys.push(b.value); });
+}
+
+/* 从销售订单核对报表页打开设计器（加载目录 + 客户，渲染订单 / 收款字段选择器与筛选器） */
+async function openDynamicReceiptReconciliationDesigner() {
+  CURRENT_PAGE_CODE = 'sales-order-receipt-reconciliation';
+  document.getElementById('header-title').textContent = '客户订单与收款核对报表 · 动态设计器';
+  const content = document.getElementById('content');
+  content.innerHTML = '<div class="pd-hint" style="text-align:center;color:#64748b">正在加载字段目录…</div>';
+
+  DRR = {
+    catalog: null, fields: [], receiptFields: [],
+    selectedKeys: [], selectedReceiptKeys: [], customers: [],
+    filters: { page: 1, pageSize: DRR_DEFAULT_PAGE_SIZE }, view: null,
+  };
+
+  try {
+    const resp = await drrRequest('/api/sales-orders/dynamic-receipt-reconciliation-report', 'GET');
+    if (resp.code === 0) {
+      DRR.catalog = resp.data;
+    } else if (resp.code === 2000 || resp.code === 2003) {
+      if (typeof logout === 'function') logout();
+      content.innerHTML = drrErrorHtml('unauthorized', resp.message);
+      return;
+    } else {
+      content.innerHTML = drrErrorHtml(drrKindOfCode(resp.code), resp.message);
+      return;
+    }
+  } catch (err) {
+    content.innerHTML = drrErrorHtml('network', (err && err.message) || '无法连接到服务器');
+    return;
+  }
+
+  DRR.fields = (DRR.catalog && DRR.catalog.fields) || [];
+  DRR.receiptFields = (DRR.catalog && DRR.catalog.receiptFields) || [];
+  DRR.selectedKeys = DRR.fields.map(f => f.key);
+  DRR.selectedReceiptKeys = DRR.receiptFields.map(f => f.key);
+  const maxPageSize = (DRR.catalog && DRR.catalog.maxPageSize) || DRR_MAX_PAGE_SIZE;
+  DRR.filters.pageSize = Math.min(DRR_DEFAULT_PAGE_SIZE, maxPageSize);
+
+  try {
+    const cresp = await drrRequest('/api/base/customers?page=1&pageSize=500');
+    if (cresp.code === 0) {
+      DRR.customers = (cresp.data && cresp.data.items) || (Array.isArray(cresp.data) ? cresp.data : []) || [];
+    }
+  } catch (e) {
+    DRR.customers = [];
+  }
+
+  drrRender();
+}
+
+/* 渲染设计器（订单 / 收款字段选择器 + 有界筛选器 + 预览按钮 + 结果区） */
+function drrRender() {
+  const f = DRR.filters;
+  const maxPage = (DRR.catalog && DRR.catalog.maxPageSize) || DRR_MAX_PAGE_SIZE;
+
+  const customerOptions = DRR.customers.map(c =>
+    `<option value="${drrEsc(c.id)}" ${String(c.id) === String(f.customerId || '') ? 'selected' : ''}>${drrEsc(c.customerName || ('客户 ' + c.id))}</option>`).join('');
+  const currencyOptions = DRR_CURRENCY_OPTS.map(o =>
+    `<option value="${o.value}" ${f.currency === o.value ? 'selected' : ''}>${o.label}</option>`).join('');
+  const shipmentOptions = DRR_SHIPMENT_STATUS_OPTS.map(o =>
+    `<option value="${o.value}" ${f.shipmentStatus === o.value ? 'selected' : ''}>${o.label}</option>`).join('');
+  const linkOptions = DRR_LINK_STATUS_OPTS.map(o =>
+    `<option value="${o.value}" ${f.receiptLinkStatus === o.value ? 'selected' : ''}>${o.label}</option>`).join('');
+  const receiptStatusOptions = DRR_RECEIPT_STATUS_OPTS.map(o =>
+    `<option value="${o.value}" ${f.receiptStatus === o.value ? 'selected' : ''}>${o.label}</option>`).join('');
+  const orderStatusOptions = DRR_ORDER_STATUS_OPTS.map(o =>
+    `<option value="${o.value}" ${f.orderStatus === o.value ? 'selected' : ''}>${o.label}</option>`).join('');
+
+  document.getElementById('content').innerHTML = `
+  <div class="page-hero report-hero">
+    <h2>🔧 客户订单与收款核对报表 · 动态设计器</h2>
+    <p>目录驱动的订单证据与未关联收款证据字段 / 筛选设计器（只读：仅按 ERP-046 白名单字段与有界筛选预览，绝不写入、绝不执行任意 SQL）</p>
+  </div>
+
+  <div class="pd-hint" style="margin-bottom:10px">
+    ⚠️ 本设计器是运营性订单 / 收款证据核对视图：<b>不是</b>应收账款台账，<b>不是</b>客户对账单，<b>不是</b>收款授权或结算结果，也<b>不是</b>账龄表；
+    收款申请链接证据、收款引用登记证据、销项发票登记证据与未关联收款证据<b>各自独立、绝不合并</b>，未知金额 / 数量一律 null（不是 0）。
+  </div>
+
+  <div style="margin:10px 0">
+    <div style="font-weight:600;margin-bottom:6px">① 选择订单证据字段（仅 ERP-046 订单字段白名单目录，无自由字段名）</div>
+    <div style="margin-bottom:6px">
+      <button class="btn btn-neutral btn-sm" onclick="drrToggleOrderAll(true)">全选</button>
+      <button class="btn btn-neutral btn-sm" onclick="drrToggleOrderAll(false)">清空</button>
+    </div>
+    <div style="max-height:180px;overflow:auto;border:1px solid #e2e8f0;border-radius:8px;padding:8px">${drrFieldChooserHtml(DRR.fields, DRR.selectedKeys, 'drr-field')}</div>
+  </div>
+
+  <div style="margin:10px 0">
+    <div style="font-weight:600;margin-bottom:6px">② 选择未关联收款证据字段（独立收款字段白名单目录，与订单字段目录完全分开）</div>
+    <div style="margin-bottom:6px">
+      <button class="btn btn-neutral btn-sm" onclick="drrToggleReceiptAll(true)">全选</button>
+      <button class="btn btn-neutral btn-sm" onclick="drrToggleReceiptAll(false)">清空</button>
+    </div>
+    <div style="max-height:160px;overflow:auto;border:1px solid #e2e8f0;border-radius:8px;padding:8px">${drrFieldChooserHtml(DRR.receiptFields, DRR.selectedReceiptKeys, 'drr-receipt-field')}</div>
+  </div>
+
+  <div style="margin:10px 0">
+    <div style="font-weight:600;margin-bottom:6px">③ 有界筛选（客户 / 币种 / 订单日期 / 出货状态 / 收款链接 / 收款证据 / 订单状态 / 关键字 / 每页）</div>
+    <div class="form-grid" style="grid-template-columns:repeat(3,1fr);gap:10px">
+      <label>订单日期从 <input type="date" id="drr-date-from" value="${drrEsc(f.orderDateFrom || '')}" style="width:100%"></label>
+      <label>至 <input type="date" id="drr-date-to" value="${drrEsc(f.orderDateTo || '')}" style="width:100%"></label>
+      <label>客户 <select id="drr-customer" style="width:100%"><option value="">全部客户</option>${customerOptions}</select></label>
+      <label>币种 <select id="drr-currency" style="width:100%"><option value="">全部币种</option>${currencyOptions}</select></label>
+      <label>出货状态 <select id="drr-shipment-status" style="width:100%"><option value="">全部</option>${shipmentOptions}</select></label>
+      <label>收款链接 <select id="drr-link-status" style="width:100%"><option value="">全部</option>${linkOptions}</select></label>
+      <label>收款证据 <select id="drr-receipt-status" style="width:100%"><option value="">全部</option>${receiptStatusOptions}</select></label>
+      <label>订单状态 <select id="drr-order-status" style="width:100%"><option value="">全部</option>${orderStatusOptions}</select></label>
+      <label>关键字 <input type="text" id="drr-keyword" value="${drrEsc(f.keyword || '')}" style="width:100%" placeholder="订单号 / 合同号 / 客户 PO 号"></label>
+      <label>每页 <input type="number" id="drr-pagesize" value="${Number(f.pageSize)}" min="1" max="${maxPage}" style="width:100%"></label>
+    </div>
+  </div>
+
+  <div class="toolbar" style="margin:10px 0">
+    <div class="toolbar-left"></div>
+    <div class="toolbar-actions">
+      <button class="btn btn-primary" onclick="drrPreview(1)">预览</button>
+      <button class="btn btn-neutral" onclick="drrExportOrderCsv()" title="导出当前页订单证据为 CSV（两类证据分开导出）">📤 导出订单证据 CSV</button>
+      <button class="btn btn-neutral" onclick="drrExportReceiptCsv()" title="导出当前页未关联收款证据为 CSV">📤 导出未关联收款 CSV</button>
+      <button class="btn btn-neutral" onclick="openSalesOrderReceiptReconciliationReport()">← 返回核对报表</button>
+    </div>
+  </div>
+
+  <div id="drr-result"></div>`;
+}
+
+/* 读取当前字段 / 筛选 / 分页状态（预览与导出复用，单一来源） */
+function drrBuildState(page) {
+  return {
+    catalogFields: DRR.fields,
+    receiptFields: DRR.receiptFields,
+    selectedKeys: DRR.selectedKeys,
+    selectedReceiptKeys: DRR.selectedReceiptKeys,
+    orderDateFrom: document.getElementById('drr-date-from').value,
+    orderDateTo: document.getElementById('drr-date-to').value,
+    customerId: document.getElementById('drr-customer').value,
+    currency: document.getElementById('drr-currency').value,
+    shipmentStatus: document.getElementById('drr-shipment-status').value,
+    receiptLinkStatus: document.getElementById('drr-link-status').value,
+    receiptStatus: document.getElementById('drr-receipt-status').value,
+    orderStatus: document.getElementById('drr-order-status').value,
+    keyword: document.getElementById('drr-keyword').value,
+    pageSize: document.getElementById('drr-pagesize').value,
+    page: page || 1,
+    maxPageSize: (DRR.catalog && DRR.catalog.maxPageSize) || DRR_MAX_PAGE_SIZE,
+  };
+}
+
+/* 预览：组装有界请求 → POST → 安全渲染列名与单元格；授权 / 无效 / 空 / 网络失败均可见 */
+async function drrPreview(page) {
+  const state = drrBuildState(page);
+  if (state.orderDateFrom && state.orderDateTo && state.orderDateFrom > state.orderDateTo) {
+    drrRenderResult(drrErrorHtml('invalid', '订单日期开始不能晚于结束'));
+    return;
+  }
+
+  const req = drrBuildRequest(state);
+  DRR.filters.page = req.page;
+  DRR.filters.pageSize = req.pageSize;
+
+  drrRenderResult(drrLoadingHtml());
+
+  try {
+    const resp = await drrRequest('/api/sales-orders/dynamic-receipt-reconciliation-report', 'POST', req);
+    if (resp.code === 0) {
+      DRR.view = resp.data;
+      DRR.filters.page = resp.data.page;
+      drrRenderResult(drrResultHtml(resp.data));
+    } else if (resp.code === 2000 || resp.code === 2003) {
+      if (typeof logout === 'function') logout();
+      drrRenderResult(drrErrorHtml('unauthorized', resp.message));
+    } else {
+      drrRenderResult(drrErrorHtml(drrKindOfCode(resp.code), resp.message));
+    }
+  } catch (err) {
+    drrRenderResult(drrErrorHtml('network', (err && err.message) || '无法连接到服务器'));
+  }
+}
+
+/* 翻页（有界：最小第 1 页） */
+function drrPage(delta) {
+  const view = DRR.view;
+  const page = (view ? view.page : DRR.filters.page) + delta;
+  if (page < 1) return;
+  drrPreview(page);
+}
+
+/* 下载当前页 CSV（两类证据分开；未知 null 保留为空、防公式注入） */
+function drrDownloadCsv(filename, csv) {
+  if (!csv) { toast('暂无可导出数据', 'warning'); return; }
+  const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+  toast('CSV 已导出', 'success');
+}
+
+function drrExportOrderCsv() {
+  const view = DRR.view;
+  if (!view) { toast('请先预览再导出', 'warning'); return; }
+  const csv = drrBuildCsv(view.columns, view.rows);
+  drrDownloadCsv('客户订单证据_' + (view.page || 1) + '.csv', csv);
+}
+
+function drrExportReceiptCsv() {
+  const view = DRR.view;
+  if (!view) { toast('请先预览再导出', 'warning'); return; }
+  const csv = drrBuildCsv(view.receiptColumns, view.receiptRows);
+  drrDownloadCsv('未关联收款证据_' + (view.page || 1) + '.csv', csv);
+}
+
+/* Node 单测导出（浏览器中 module 为 undefined，自动跳过） */
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = {
+    DRR_CURRENCY_OPTS,
+    DRR_SHIPMENT_STATUS_OPTS,
+    DRR_LINK_STATUS_OPTS,
+    DRR_RECEIPT_STATUS_OPTS,
+    DRR_ORDER_STATUS_OPTS,
+    drrEsc,
+    drrSelectFields,
+    drrEnumValue,
+    drrBuildRequest,
+    drrCellText,
+    drrRenderCell,
+    drrTableHtml,
+    drrOrderSectionHtml,
+    drrReceiptSectionHtml,
+    drrEmptyHtml,
+    drrLoadingHtml,
+    drrErrorHtml,
+    drrResultHtml,
+    drrFieldChooserHtml,
+    drrKindOfCode,
+    drrCsvCell,
+    drrBuildCsv,
+  };
 }
 

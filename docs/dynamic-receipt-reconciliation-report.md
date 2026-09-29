@@ -126,3 +126,34 @@ ERP-046 客户订单与收款核对证据。本功能为**开发期只读派生*
 - `src/ERP.UnitTests/DynamicReceiptReconciliationReportTests.cs`
 - `src/ERP.UnitTests/DynamicReceiptReconciliationUnlinkedTests.cs`
 - `src/ERP.UnitTests/SalesOrderReceiptReconciliationTests.cs`
+
+## 9. 前端设计器（ERP-166，只读、有界）
+
+`src/ERP.Api/wwwroot/js/sales-order-receipt-reconciliation.js` 在既有「客户订单与收款核对报表」页工具栏提供「🔧 动态设计器」入口，
+打开目录驱动的订单证据与未关联收款证据字段 / 筛选设计器（开发期只读派生，不写库、不迁移、不执行任意 SQL）。
+
+### 9.1 工作流
+
+1. 销售订单页 →「客户订单与收款核对报表」→ 工具栏「🔧 动态设计器」。
+2. 设计器先 `GET /api/sales-orders/dynamic-receipt-reconciliation-report` 拉取字段目录（订单证据 `fields` 与
+   未关联收款证据 `receiptFields` 两个**独立**白名单），并尽力拉取 `/api/base/customers` 客户下拉；
+   目录加载失败（未登录 / 无 `sales-order` 菜单 / 网络失败）时整页 fail closed，不渲染任何字段选择器、不暴露任何数据。
+3. 用户分别勾选订单证据字段与未关联收款证据字段（复选框，仅由目录白名单渲染，无自由字段名 / SQL），
+   并填写有界筛选（客户 / 币种 / 订单日期 / 出货状态 / 收款链接状态 / 收款证据状态 / 订单状态 / 关键字 / 每页）。
+4. 「预览」以 `POST /api/sales-orders/dynamic-receipt-reconciliation-report` 发送「选定字段 + 有界筛选 + 有界分页」，
+   按请求顺序渲染订单证据列与单元格；未关联收款证据以**独立分区**渲染（原币、状态、截断警告），绝不并入订单行。
+5. 「📤 导出订单证据 CSV」与「📤 导出未关联收款 CSV」分别导出当前页的两类证据：null 未知保留为空（绝不回落为 0），
+   文本类首字符为 `=` / `+` / `-` / `@` / 制表符 / 回车时前缀单引号防公式注入，含逗号 / 引号 / 换行按 RFC4180 加引号。
+6. 加载 / 空结果 / 权限不足 / 网络失败均在结果区可见；翻页有界（最小第 1 页，单页上限 200 由目录 `maxPageSize` 供给并钳制）。
+
+### 9.2 与既有核对报表的关系
+
+设计器与既有静态核对报表共用同一权威口径（ERP-046 / ERP-164 / ERP-165），二者均只读、均把收款申请链接证据、
+收款引用登记证据、销项发票登记证据与客户级未关联收款证据作为**相互独立证据**呈现，绝不合并 / 相加 / 推断；
+未关联收款单只记录客户（`FinanceReceipt.CustomerId`）、没有订单级引用，链接状态恒为 `unlinked`。
+
+### 9.3 测试
+
+- 前端纯逻辑单测：`tests/automation/dynamic_receipt_reconciliation_ui.test.js`（Node，覆盖字段选择、请求边界、
+  分页渲染、单元格渲染、CSV 导出与失败态；运行 `node tests/automation/dynamic_receipt_reconciliation_ui.test.js`）。
+- 后端契约单测：`DynamicReceiptReconciliationReportTests.cs` / `DynamicReceiptReconciliationUnlinkedTests.cs`。
