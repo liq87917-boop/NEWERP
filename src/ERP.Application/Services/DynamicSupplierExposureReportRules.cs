@@ -47,6 +47,46 @@ public static class DynamicSupplierExposureReportRules
     public static readonly string[] SupportedLinkStatuses =
         { LinkLinked, LinkAmbiguous, LinkUnavailable };
 
+    // ==================== 0.2 分组键（ERP-152） ====================
+
+    /// <summary>不分组（默认）</summary>
+    public const string GroupNone = "none";
+
+    /// <summary>按供应商分组</summary>
+    public const string GroupSupplier = "supplier";
+
+    /// <summary>按币种分组（原币，绝不跨币种合并或换算）</summary>
+    public const string GroupCurrency = "currency";
+
+    /// <summary>按链接状态分组（linked / ambiguous / unavailable，三类始终保留）</summary>
+    public const string GroupLinkStatus = "linkStatus";
+
+    /// <summary>按收货状态分组（none / partial / complete / over_received / unknown，五类始终保留）</summary>
+    public const string GroupReceiptStatus = "receiptStatus";
+
+    /// <summary>收货状态：无已收（含订单数量为 0）</summary>
+    public const string ReceiptNone = "none";
+
+    /// <summary>收货状态：部分收货（仍有未收数量）</summary>
+    public const string ReceiptPartial = "partial";
+
+    /// <summary>收货状态：已收齐</summary>
+    public const string ReceiptComplete = "complete";
+
+    /// <summary>收货状态：超收</summary>
+    public const string ReceiptOverReceived = "over_received";
+
+    /// <summary>收货状态：本次派生命中上限（数量不完整，未知，不等于 0）</summary>
+    public const string ReceiptUnknown = "unknown";
+
+    /// <summary>链接状态分组用的全部取值（确定性顺序；ambiguous / unavailable 保持可见）</summary>
+    public static readonly string[] GroupLinkStatuses =
+        { LinkLinked, LinkAmbiguous, LinkUnavailable };
+
+    /// <summary>收货状态分组用的全部取值（确定性顺序；unknown 保持可见）</summary>
+    public static readonly string[] GroupReceiptStatuses =
+        { ReceiptNone, ReceiptPartial, ReceiptComplete, ReceiptOverReceived, ReceiptUnknown };
+
     // ==================== 1. 文案 ====================
 
     /// <summary>只读声明（接口与文档统一声明）</summary>
@@ -222,6 +262,125 @@ public static class DynamicSupplierExposureReportRules
             row[key] = source.TryGetValue(key, out var v) ? v : null;
         return row;
     }
+
+    // ==================== 5.1 分组计数（ERP-152） ====================
+
+    /// <summary>
+    /// 规范化分组键（fail closed）：空 / 留空 = 不分组（none）；仅接受 none / supplier / currency / linkStatus / receiptStatus（大小写不敏感）；
+    /// 未知取值显式拒绝（在读取任何源数据之前完成）。
+    /// </summary>
+    public static string NormalizeGroupBy(string? groupBy)
+    {
+        if (string.IsNullOrWhiteSpace(groupBy))
+            return GroupNone;
+
+        var normalized = groupBy.Trim();
+        if (string.Equals(normalized, GroupNone, StringComparison.OrdinalIgnoreCase)) return GroupNone;
+        if (string.Equals(normalized, GroupSupplier, StringComparison.OrdinalIgnoreCase)) return GroupSupplier;
+        if (string.Equals(normalized, GroupCurrency, StringComparison.OrdinalIgnoreCase)) return GroupCurrency;
+        if (string.Equals(normalized, GroupLinkStatus, StringComparison.OrdinalIgnoreCase)) return GroupLinkStatus;
+        if (string.Equals(normalized, GroupReceiptStatus, StringComparison.OrdinalIgnoreCase)) return GroupReceiptStatus;
+
+        throw BusinessException.InvalidParameter(
+            $"无效的分组键: {groupBy}（可选：none / supplier / currency / linkStatus / receiptStatus）");
+    }
+
+    /// <summary>
+    /// 分组采购订单张数分布（ERP-152）：从「当前授权预览页」的采购订单敞口证据行计算张数分布，只统计张数、绝不求和任何金额或数量、绝不跨币种合并或换算。
+    /// <para>supplier / currency 为动态分组（只出现本页存在的取值，按供应商 Id / 币种升序）；linkStatus 与 receiptStatus 为固定证据分类，
+    /// 空分类始终保留（计数可为 0），其中 ambiguous / unavailable 链接与 unknown 收货保持可见；none / 空页返回空列表。</para>
+    /// </summary>
+    public static List<DynamicSupplierExposureReportGroupDto> BuildGroupCounts(
+        IEnumerable<IReadOnlyDictionary<string, object?>> rows, string groupBy)
+    {
+        var list = (rows ?? Array.Empty<IReadOnlyDictionary<string, object?>>()).ToList();
+        return NormalizeGroupBy(groupBy) switch
+        {
+            GroupSupplier => BuildSupplierCounts(list),
+            GroupCurrency => BuildCurrencyCounts(list),
+            GroupLinkStatus => BuildLinkStatusCounts(list),
+            GroupReceiptStatus => BuildReceiptStatusCounts(list),
+            _ => new List<DynamicSupplierExposureReportGroupDto>(),
+        };
+    }
+
+    private static List<DynamicSupplierExposureReportGroupDto> BuildSupplierCounts(
+        List<IReadOnlyDictionary<string, object?>> rows)
+    {
+        return rows
+            .GroupBy(ReadSupplierId)
+            .OrderBy(g => g.Key)
+            .Select(g =>
+            {
+                var name = ReadText(g.First(), "supplierName");
+                return new DynamicSupplierExposureReportGroupDto(
+                    $"supplier:{g.Key}",
+                    string.IsNullOrWhiteSpace(name) ? $"供应商 #{g.Key}" : name,
+                    g.Count());
+            })
+            .ToList();
+    }
+
+    private static List<DynamicSupplierExposureReportGroupDto> BuildCurrencyCounts(
+        List<IReadOnlyDictionary<string, object?>> rows)
+    {
+        return rows
+            .GroupBy(r => ReadText(r, "currency"))
+            .OrderBy(g => g.Key, StringComparer.Ordinal)
+            .Select(g => new DynamicSupplierExposureReportGroupDto(
+                $"currency:{g.Key}",
+                string.IsNullOrWhiteSpace(g.Key) ? "未知币种" : g.Key,
+                g.Count()))
+            .ToList();
+    }
+
+    private static List<DynamicSupplierExposureReportGroupDto> BuildLinkStatusCounts(
+        List<IReadOnlyDictionary<string, object?>> rows)
+    {
+        return GroupLinkStatuses
+            .Select(status => new DynamicSupplierExposureReportGroupDto(
+                $"linkStatus:{status}",
+                GroupLinkStatusLabel(status),
+                rows.Count(r => ReadText(r, "linkStatus") == status)))
+            .ToList();
+    }
+
+    private static List<DynamicSupplierExposureReportGroupDto> BuildReceiptStatusCounts(
+        List<IReadOnlyDictionary<string, object?>> rows)
+    {
+        return GroupReceiptStatuses
+            .Select(status => new DynamicSupplierExposureReportGroupDto(
+                $"receiptStatus:{status}",
+                GroupReceiptStatusLabel(status),
+                rows.Count(r => ReadText(r, "receiptStatus") == status)))
+            .ToList();
+    }
+
+    private static long ReadSupplierId(IReadOnlyDictionary<string, object?> row)
+        => row.TryGetValue("supplierId", out var v) && v is long id ? id : 0L;
+
+    private static string ReadText(IReadOnlyDictionary<string, object?> row, string key)
+        => row.TryGetValue(key, out var v) && v is string s ? s : string.Empty;
+
+    /// <summary>链接状态中文文案（与 ERP-031 / 执行进度同源）</summary>
+    public static string GroupLinkStatusLabel(string status) => status switch
+    {
+        LinkLinked => "链接可用",
+        LinkAmbiguous => "链接不唯一（金额未知）",
+        LinkUnavailable => "无可用链接（金额未知）",
+        _ => "未知链接状态",
+    };
+
+    /// <summary>收货状态中文文案（与 ERP-031 / 执行进度同源）</summary>
+    public static string GroupReceiptStatusLabel(string status) => status switch
+    {
+        ReceiptNone => "未收货",
+        ReceiptPartial => "部分收货",
+        ReceiptComplete => "已收齐",
+        ReceiptOverReceived => "超收",
+        ReceiptUnknown => "未知（超出派生上限）",
+        _ => "未知收货状态",
+    };
 
     // ==================== 6. Excel 导出（ERP-150） ====================
 

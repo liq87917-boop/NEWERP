@@ -114,6 +114,7 @@ public class DynamicSupplierExposureReportController : ControllerBase
         var currency = DynamicSupplierExposureReportRules.NormalizeCurrency(request.Currency);
         var linkStatus = DynamicSupplierExposureReportRules.NormalizeLinkStatus(request.LinkStatus);
         var keyword = DynamicSupplierExposureReportRules.NormalizeKeyword(request.Keyword);
+        var groupBy = DynamicSupplierExposureReportRules.NormalizeGroupBy(request.GroupBy);
         DynamicSupplierExposureReportRules.ValidateDateRange(request.OrderDateFrom, request.OrderDateTo);
         DynamicSupplierExposureReportRules.ValidatePageSize(request.PageSize);
         var page = request.Page < 1 ? 1 : request.Page;
@@ -140,6 +141,9 @@ public class DynamicSupplierExposureReportController : ControllerBase
             .Select(s => DynamicSupplierExposureReportRules.BuildRow(s, fieldKeys))
             .ToList();
 
+        // 5) 分组计数（ERP-152）：只统计当前授权预览页的采购订单张数，绝不求和任何金额或数量、绝不跨币种合并或换算
+        var groups = DynamicSupplierExposureReportRules.BuildGroupCounts(sourceRows, groupBy);
+
         return new DynamicSupplierExposureReportPageDto(
             columns,
             rows,
@@ -149,7 +153,9 @@ public class DynamicSupplierExposureReportController : ControllerBase
             report.TotalPages,
             DynamicSupplierExposureReportRules.ReadOnlyText,
             DynamicSupplierExposureReportRules.BoundaryText,
-            DynamicSupplierExposureReportRules.DisclaimerText);
+            DynamicSupplierExposureReportRules.DisclaimerText,
+            groupBy,
+            groups);
     }
 
     /// <summary>把单张 ERP-031 采购订单敞口证据行展开为整行「字段 → 值」字典（仅白名单字段，供 <see cref="DynamicSupplierExposureReportRules.BuildRow"/> 投影）</summary>

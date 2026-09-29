@@ -12,7 +12,8 @@ ERP-031 供应商采购敞口报表的既有筛选与稳定分页，预览当前
 | `POST` | `/api/supplier-purchase-exposure/report/export` | 导出当前选定页为 Excel（xlsx，只读，复用有界授权预览与选定列顺序） |
 
 请求体（`DynamicSupplierExposureReportRequest`）：`fields`（选定字段键，仅限白名单）、`supplierId`、`currency`、
-`orderDateFrom` / `orderDateTo`、`linkStatus`（linked / ambiguous / unavailable）、`keyword`、`page`、`pageSize`。
+`orderDateFrom` / `orderDateTo`、`linkStatus`（linked / ambiguous / unavailable）、`groupBy`（分组键，仅
+none / supplier / currency / linkStatus / receiptStatus）、`keyword`、`page`、`pageSize`。
 
 ## 授权（fail closed）
 
@@ -120,13 +121,31 @@ CSV 只导出当前预览页选定列证据，`POST` 由既有 `OperationLogMidd
 - 无身份 / 无采购订单菜单授权 / 页大小超限 / 未知字段拒绝（先于发送字节）；
 - 空页仅表头；只读不写库（`SaveChangesAsync` 调用次数恒为 0）。
 
+## 分组计数（ERP-152）
+
+采购用户可选择一个**有限分组键**，预览响应额外返回「当前授权预览页」的采购订单张数分布（`groupBy` + `groups`）。
+
+- 分组键仅接受 `none` / `supplier` / `currency` / `linkStatus` / `receiptStatus`（大小写不敏感），
+  留空 = `none`（不分组）；其他取值在**读取任何源数据之前**即 `InvalidParameter` fail closed 拒绝。
+- 计数只统计「当前授权预览页」的采购订单张数，绝不求和任何金额或数量、绝不跨币种合并或换算；`total` 仍是符合筛选条件的订单总数。
+- `supplier` / `currency` 为**动态分组**：只出现本页存在的取值，按供应商 Id / 币种升序。
+- `linkStatus` 为**固定证据分类**（linked / ambiguous / unavailable）：三类始终保留（计数可为 0），
+  `ambiguous`（链接不唯一）与 `unavailable`（无可用链接）保持可见，绝不因计数为 0 而省略。
+- `receiptStatus` 为**固定证据分类**（none / partial / complete / over_received / unknown）：五类始终保留（计数可为 0），
+  `unknown`（收货数量命中派生上限，未知）保持可见。
+- 计数结果 `DynamicSupplierExposureReportGroupDto` 只含 `key` / `label` / `count`，**没有**金额 / 数量字段，
+  从结构上杜绝跨币种、跨单位求和。
+- 授权、只读与审计与预览完全一致：每次请求重新校验当前登录用户与 `purchase-order` 采购订单菜单授权（fail closed），
+  全程只读不写库，`POST` 由既有 `OperationLogMiddleware` 记录审计。
+
 ## 文件地图
 
-- `src/ERP.Application/DTOs/DynamicSupplierExposureReportDtos.cs`：目录 / 请求 / 结果 DTO；
-- `src/ERP.Application/Services/DynamicSupplierExposureReportRules.cs`：字段白名单、校验、行投影与 Excel 公式转义（纯规则）；
-- `src/ERP.Api/Controllers/DynamicSupplierExposureReportController.cs`：授权 + 复用 ERP-031 只读派生 + 选定列投影 + xlsx 导出（ERP-150）+ PDF 导出（ERP-151）；
+- `src/ERP.Application/DTOs/DynamicSupplierExposureReportDtos.cs`：目录 / 请求 / 结果 DTO（含 ERP-152 分组计数 DTO）；
+- `src/ERP.Application/Services/DynamicSupplierExposureReportRules.cs`：字段白名单、校验、行投影、Excel 公式转义与分组计数（纯规则）；
+- `src/ERP.Api/Controllers/DynamicSupplierExposureReportController.cs`：授权 + 复用 ERP-031 只读派生 + 选定列投影 + 分组计数（ERP-152）+ xlsx 导出（ERP-150）+ PDF 导出（ERP-151）；
 - `src/ERP.Infrastructure/Export/DynamicSupplierExposurePdfExporter.cs`：分页中文 PDF 导出（ERP-151，PDFsharp + 共享黑体解析器）；
 - `src/ERP.UnitTests/DynamicSupplierExposureReportTests.cs`：预览单元测试（内存库，不连 SQL Server、不启动 API）；
+- `src/ERP.UnitTests/DynamicSupplierExposureGroupingTests.cs`：分组计数单元测试（ERP-152，内存库，不连 SQL Server、不启动 API）；
 - `src/ERP.UnitTests/DynamicSupplierExposureExcelTests.cs`：Excel 导出单元测试（ERP-150，内存库，不连 SQL Server、不启动 API）；
 - `src/ERP.UnitTests/DynamicSupplierExposurePdfTests.cs`：PDF 导出单元测试（ERP-151，内存库，不连 SQL Server、不启动 API）；
 - `src/ERP.Api/wwwroot/js/supplier-purchase-exposure.js`：ERP-031 工作台 + ERP-149 前端字段设计器 + ERP-150 Excel 导出（`speDesExportExcel`）+ ERP-151 PDF 导出（`speDesExportPdf`，纯函数可 Node 单测）；

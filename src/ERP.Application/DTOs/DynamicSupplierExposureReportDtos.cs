@@ -40,6 +40,9 @@ public sealed class DynamicSupplierExposureReportRequest
     /// <summary>链接状态筛选（linked / ambiguous / unavailable；留空 = 全部）</summary>
     public string? LinkStatus { get; set; }
 
+    /// <summary>分组键（仅 none / supplier / currency / linkStatus / receiptStatus；无效取值由服务端 fail closed 拒绝，默认 none）</summary>
+    public string? GroupBy { get; set; }
+
     /// <summary>关键字（匹配采购单号 / 采购合同号 / 归属销售订单号；留空 = 不过滤）</summary>
     public string? Keyword { get; set; }
 
@@ -78,4 +81,16 @@ public sealed record DynamicSupplierExposureReportPageDto(
     int TotalPages,
     string ReadOnlyText,
     string BoundaryText,
-    string DisclaimerText);
+    string DisclaimerText,
+    string GroupBy = "none",
+    List<DynamicSupplierExposureReportGroupDto>? Groups = null);
+
+/// <summary>
+/// 供应商采购敞口预览页面分组计数（ERP-152，只读）：当前授权预览页内按分组键聚合的采购订单张数分布。
+/// 只统计采购订单张数、绝不求和任何金额或数量、绝不跨币种合并或换算；链接状态（linked / ambiguous / unavailable）
+/// 与收货状态（none / partial / complete / over_received / unknown）类别始终保留（计数可为 0）。
+/// </summary>
+public sealed record DynamicSupplierExposureReportGroupDto(
+    string Key,
+    string Label,
+    int Count);
