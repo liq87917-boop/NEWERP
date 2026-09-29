@@ -139,3 +139,38 @@
 - 仅导出当前页（≤ 200 行）；`total` 为符合筛选条件的库存行总数，导出不含全量数据。
 - 验证：后端 `ERP.UnitTests/DynamicInventoryAgingExcelTests.cs`；前端语法 `node --check src/ERP.Api/wwwroot/js/inventory-aging-report.js`。
 
+---
+
+## 11. PDF 导出（ERP-139）
+
+在既有字段设计器工具栏内新增「📄 导出 PDF（选定列）」，把当前授权预览页按选定列顺序下载为分页中文 PDF。全程只读、复用有界授权预览，绝不跨页、绝不把未知成本金额当作 0、绝不臆造库龄分层或成本估值；宽列集按可用页宽跨页拆分，避免列被裁切。
+
+### 11.1 端点
+
+- `POST /api/dynamic-inventory-aging-report/pdf`：请求体与预览完全相同（`DynamicInventoryAgingReportRequest`），复用同一有界、已授权预览管线（每次请求重新校验身份 / 库存查询菜单授权 / 字段 / 日期 / 仓库 / 商品 / 页大小），**只导出请求 `page` / `pageSize` 对应的当前页**（单页上限 200，超限直接拒绝），不是全量导出。任何校验失败都在返回任何 PDF 字节之前拒绝。
+- 文件名 `InventoryAging_yyyyMMddHHmmss.pdf`；内容类型 `application/pdf`。
+
+### 11.2 导出口径
+
+- PDF 由 `ERP.Infrastructure.Export.DynamicInventoryAgingPdfExporter` 以 PDFsharp 6.2.4 分页渲染；列头 = 选定字段的中文标签，列顺序 = 请求 `fields` 顺序，仅当前页行。
+- **固定 5 格库龄分层**（0-30 / 31-60 / 61-90 / 91-180 / 180 天以上）与**基础单位数量**语义保持不变；`costCurrency` 显式标注 `CNY`。
+- **未知库龄 / 未知成本证据显式保留**：`evidenceStatus`（full / partial / none）映射为「有台账分层依据 / 部分数量无依据 / 无台账分层依据」；`costStatus = unknown` 映射「成本未知」；成本 / 金额类字段（`averageCost` / `*Amount`）为 null 时显示「未知」，**绝不回落为 0**、不估算成本、不做跨币种合并或汇率换算。
+- **行列分页不裁切**：每页固定 A4（210 × 297 mm）；宽列集按可用页宽贪心拆分为多个「列页」（每列页总宽不超页宽），多行按可用页高拆分为多个「行页」；每页页头标注「列 x/y · 行页 x/y」与「成本币种 CNY」。
+- **页面分组计数只计数不求和**：分组时页头追加「本页行数分布（仅统计本页 · 只计数不求和）」，绝不跨不同商品 / 基础单位求和任何数量。
+
+### 11.3 字体前置条件（显式失败）
+
+- 中文一律使用 Windows 黑体 **SimHei**（`simhei.ttf`），由共享解析器 `ERP.Infrastructure.Export.SimHeiPdfFontResolver` 定位并注册（与其它报表 PDF 共用）。
+- **前置条件**：服务器必须安装 `simhei.ttf`（位于 Windows 字体目录 `%WINDIR%\Fonts\simhei.ttf`，或通过 `Environment.SpecialFolder.Fonts` 可定位）。**字体缺失时显式失败**（`ErrorCodes.InternalError`，提示「未找到中文字体 SimHei（黑体）…」），绝不产出乱码或缺字 PDF。
+
+### 11.4 前端与审计
+
+- 前端：字段设计器工具栏新增「📄 导出 PDF（选定列）」，复用当前字段 / 筛选 / 分页组装请求后 `POST` 导出；空数据显示可见错误、不下载空表；授权 / 校验 / 字体缺失 / 网络失败均在结果区可见（字体缺失消息来自后端错误信封）。
+- 审计与只读：`POST` 由既有 `OperationLogMiddleware` 记录操作日志（动作「导出」，读操作）；本导出不新增 / 修改 / 删除任何记录，不执行任意 SQL。
+
+### 11.5 限制与验证
+
+- 仅导出当前页（≤ 200 行）；`total` 为符合筛选条件的库存行总数，导出不含全量数据。
+- 验证：后端 `ERP.UnitTests/DynamicInventoryAgingPdfTests.cs`（PDF 签名 / A4 页面边界 / 选定字段顺序 / 未知值 / 字体失败 / 只读不写库）；前端语法 `node --check src/ERP.Api/wwwroot/js/inventory-aging-report.js`。
+
+

@@ -39,7 +39,7 @@ function openInventoryAgingReport() {
 
     <!-- ERP-136：字段设计器（只读预览）：复用上方仓库 / 商品 / 截止日期 / 每页筛选，勾选白名单字段预览授权有界结果 -->
     <div class="pd-hint" id="iar-designer-hint">
-      🎛 字段设计器（只读预览）：勾选可见列 → 复用上方仓库 / 商品 / 截止日期筛选 → 预览授权有界结果；可导出当前页 CSV（选定列顺序，公式转义，未知值保留）。
+      🎛 字段设计器（只读预览）：勾选可见列 → 复用上方仓库 / 商品 / 截止日期筛选 → 预览授权有界结果；可导出当前页 CSV / Excel / PDF（选定列顺序，未知值保留，公式转义）。
     </div>
     <div class="toolbar" style="margin-top:0">
       <div class="toolbar-left" style="flex-wrap:wrap;gap:6px;align-items:center;font-size:13px">
@@ -57,6 +57,7 @@ function openInventoryAgingReport() {
         <button class="btn btn-primary" onclick="iarDynPreview(1)">预览</button>
         <button class="btn btn-neutral" onclick="exportIarDesignerCsv()" title="导出当前页为 CSV（选定列）">📤 导出 CSV（选定列）</button>
         <button class="btn btn-neutral" onclick="exportIarDesignerXlsx()" title="导出当前页为 Excel（选定列）">📥 导出 Excel（选定列）</button>
+        <button class="btn btn-neutral" onclick="exportIarDesignerPdf()" title="导出当前页为分页 PDF（选定列）">📄 导出 PDF（选定列）</button>
       </div>
     </div>
     <div id="iar-designer-result"></div>
@@ -649,6 +650,52 @@ async function exportIarDesignerXlsx() {
   }
 }
 
+/* 导出当前预览页为分页中文 PDF（选定列顺序 + 固定库龄分层 + 基础单位 / CNY 语义 + 未知成本金额保留为未知）；
+   每次下载都重新读取当前筛选并走只读导出接口（后端重新校验授权 / 字段 / 筛选 / 页大小）；空数据 / 授权失败 / 字体缺失均可见 */
+async function exportIarDesignerPdf() {
+  const state = iarDynBuildState(IAR_DYN.page);
+  if (IAR_DYN.view && (!IAR_DYN.view.rows || IAR_DYN.view.rows.length === 0)) {
+    iarDynRenderResult(iarDynErrorHtml('empty', '没有符合条件的库存行，无法导出（请先预览）'));
+    return;
+  }
+
+  const req = iarDynBuildRequest(state);
+  iarDynRenderResult(iarDynLoadingHtml());
+
+  try {
+    const headers = { 'Content-Type': 'application/json' };
+    const token = typeof localStorage !== 'undefined' ? (localStorage.getItem('erp_token') || '') : '';
+    if (token) headers['Authorization'] = 'Bearer ' + token;
+    const resp = await fetch('/api/dynamic-inventory-aging-report/pdf', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(req),
+    });
+
+    const contentType = (resp.headers.get('content-type') || '');
+    if (contentType.indexOf('application/pdf') >= 0) {
+      const blob = await resp.blob();
+      downloadIarBlob(blob, '库存库龄字段设计器_当前页.pdf');
+      iarDynRenderResult('');
+      toast('PDF 已导出（当前页 · 选定列）', 'success');
+      return;
+    }
+
+    let envelope = null;
+    try { envelope = await resp.json(); } catch (e) { /* 忽略解析失败 */ }
+    const code = envelope && envelope.code;
+    const message = (envelope && envelope.message) || '导出失败';
+    if (code === 2000 || code === 2003) {
+      if (typeof logout === 'function') logout();
+      iarDynRenderResult(iarDynErrorHtml('unauthorized', message));
+      return;
+    }
+    iarDynRenderResult(iarDynErrorHtml(iarDynKindOfCode(code), message));
+  } catch (err) {
+    iarDynRenderResult(iarDynErrorHtml('network', (err && err.message) || '无法连接到服务器'));
+  }
+}
+
 /* 触发浏览器下载指定 blob（下载后回收对象 URL） */
 function downloadIarBlob(blob, filename) {
   const url = URL.createObjectURL(blob);
@@ -692,6 +739,7 @@ if (typeof module !== 'undefined' && module.exports) {
     loadIarDesignerCatalog,
     exportIarDesignerCsv,
     exportIarDesignerXlsx,
+    exportIarDesignerPdf,
     downloadIarBlob,
   };
 }

@@ -2,7 +2,7 @@
   "id": "ERP-139",
   "title": "Download selected authorized inventory-aging page as PDF",
   "description": "An inventory user downloads the selected bounded stock-aging page as a paginated Chinese PDF. Reuse ERP-135 stock-query authorization and preview, existing PDFsharp and shared SimHei resolver. Show fixed age buckets, base-unit quantities, CNY cost currency and unknown age/cost evidence explicitly; split wide selected-column sets across pages without clipping. Missing font fails explicitly; HTTP audit records read-only download. Development only: no migration, production SQL, real database execution, arbitrary model SQL, writes, secret/.env change or deployment. Verify PDF and safe build/test.",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "medium",
   "acceptance_criteria": [
     "PDF endpoint reuses authorized bounded stock-aging preview, rechecks stock-query permission and all filters before any bytes are returned.",
@@ -51,5 +51,6 @@
     "level": "L1",
     "status": "not_required",
     "reason": "Development-only bounded read-only feature"
-  }
+  },
+  "attempts": 1
 }
