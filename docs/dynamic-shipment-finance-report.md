@@ -105,6 +105,28 @@
 绝不求和任何金额或数量、绝不跨币种合并或换算、绝不把计数解释为收款 / 结算 / 收款授权；权限不足 / 未登录 / 无效分组 / 网络失败
 与预览一致在结果区可见（fail closed），全程只读，无写入。
 
+## 前端金额汇总视图（ERP-163）
+
+在既有「销售订单出货 / 财务进度字段设计器」（ERP-157）的预览请求中新增「金额汇总」选择器（`id="dsf-summarymode"`），
+只提供 ERP-162 允许的金额汇总模式：`none` / `customerCurrency` / `customerCurrencyShipment` / `customerCurrencyFinance`
+（`DSF_SUMMARY_MODES` 白名单，无自由输入）。选中的汇总模式由 `dsfBuildRequest` 规范化后随当前授权预览请求体 `summaryMode` 一起发送
+（非法 / 缺失 / 空白汇总模式由 `dsfSummaryMode` 回落 `none`，fail closed，绝不发送范围外键），
+并复用同一「客户 / 币种 / 订单日期 / 出货状态 / 收款链接状态」有界筛选与有界分页；当前账号数据范围由服务端
+（`SalespersonDataScopeService`）在预览内解析，前端不做任何客户范围推断。
+
+预览结果区通过 `dsfSummaryHtml` 渲染「金额汇总视图」：按后端返回的 `summaries`
+（`customerId` / `customerName` / `currency`、可选的 `shipmentStatus` / `financeLinkStatus`、`orderCount` / `orderAmount`，
+以及三组金额证据 `linkedAmount` / `uncoveredAmount` / `submittedAmount` 与各自的 `known*Rows` / `unknown*Rows`）绘制表格；
+客户、原币与状态标签全部经 HTML 转义（无 unsafe HTML）；订单金额保持原币，不同币种分别成行、绝不合并或换算；
+已关联 / 未覆盖 / 已提交合计只要任一行金额未知（null）即显示「未知」、绝不回落为 0，并显式给出未知行数；
+`uncoveredAmount` 只作「未覆盖金额」，不是应收余额，也不是收款授权或催收依据。
+
+汇总视图仅统计**当前授权预览页**（页面顶部明确标注「仅当前预览页，非全量合计」），非全量合计、绝不跨页合并；
+权限不足 / 未登录 / 无效汇总模式 / 网络失败与预览一致在结果区可见（fail closed），空页显示可见提示，全程只读，无写入。
+
+金额汇总**不进入行导出范围**：Excel（ERP-158）与 PDF（ERP-159）仍只导出请求 `page` / `pageSize` 对应的当前页选定列（单页上限 200），
+绝不把金额汇总追加为导出行；金额汇总仅作为只读预览视图展示，与行级下载范围刻意分离。
+
 ## 证据边界（重要）
 
 - 金额与数量一律按原币分别成行：`currency` 为原币，不同币种绝不合并、不做汇率换算；
@@ -221,7 +243,11 @@ PDF 中文一律使用 Windows 黑体 **SimHei**（`simhei.ttf`），由共享�
 `tests/automation/dynamic_shipment_finance_grouping_ui.test.js`（`node tests/automation/dynamic_shipment_finance_grouping_ui.test.js`）覆盖：
 分组键选择（仅 ERP-160 白名单）、请求携带分组键、计数视图安全文本渲染、未知与空分类、权限 / 网络失败态、翻页变化，以及「计数仅当前预览页」的接线契约（无任意 SQL / 跨币种合计）。
 
+`tests/automation/dynamic_shipment_finance_amount_summary_ui.test.js`（`node tests/automation/dynamic_shipment_finance_amount_summary_ui.test.js`）覆盖：
+金额汇总模式选择（仅 ERP-162 白名单）、请求携带汇总模式、多币种分别成行、null 金额证据保持「未知」、未知行数、客户 / 原币 / 状态标签安全转义、
+翻页随页更新、权限 / 网络失败态，以及「汇总仅当前预览页、不进入行导出范围」的接线契约（无任意 SQL / 跨币种合计 / 应收余额口径）。
+
 ### 前端文件
 
-- `src/ERP.Api/wwwroot/js/sales-order-progress.js`：新增 `DSF_*` 常量、`dsf*` 纯函数 / 渲染 / 请求与设计器入口
-  （`openSalesOrderShipmentFinanceFieldDesigner`），并在报表页工具栏注册「🧩 字段设计器」按钮。
+- `src/ERP.Api/wwwroot/js/sales-order-progress.js`：新增 `DSF_*` 常量（含 `DSF_GROUP_KEYS` / `DSF_SUMMARY_MODES`）、`dsf*` 纯函数 / 渲染 / 请求与设计器入口
+  （`openSalesOrderShipmentFinanceFieldDesigner`），含 ERP-161 分组计数视图与 ERP-163 金额汇总视图，并在报表页工具栏注册「🧩 字段设计器」按钮。

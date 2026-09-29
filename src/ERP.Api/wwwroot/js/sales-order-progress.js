@@ -453,6 +453,14 @@ const DSF_GROUP_KEYS = [
   { key: 'financeLinkStatus', label: '按收款链接状态' },
 ];
 
+/* ERP-162 金额汇总模式（有限、只读；后端 fail closed 拒绝非法取值，前端绝不发送范围外键） */
+const DSF_SUMMARY_MODES = [
+  { key: 'none', label: '不汇总金额（仅表格 / 分组计数）' },
+  { key: 'customerCurrency', label: '按客户 + 币种汇总金额' },
+  { key: 'customerCurrencyShipment', label: '按客户 + 币种 + 出货状态汇总金额' },
+  { key: 'customerCurrencyFinance', label: '按客户 + 币种 + 收款链接状态汇总金额' },
+];
+
 /* 订单状态枚举名 → 中文文案（与 DocumentStatus 枚举名一致） */
 const DSF_STATUS_LABELS = {
   Pending: '待提交', Submitted: '已提交', Approved: '已审核',
@@ -465,7 +473,7 @@ let DSF = {
   fields: [],         // 目录字段（白名单）
   selectedKeys: [],   // 当前勾选的字段键（默认全选）
   customers: [],      // 客户下拉来源（/api/base/customers）
-  filters: { customerId: '', currency: '', dateFrom: '', dateTo: '', shipmentStatus: '', financeLinkStatus: '', groupBy: 'none', page: 1, pageSize: DSF_DEFAULT_PAGE_SIZE },
+  filters: { customerId: '', currency: '', dateFrom: '', dateTo: '', shipmentStatus: '', financeLinkStatus: '', groupBy: 'none', summaryMode: 'none', page: 1, pageSize: DSF_DEFAULT_PAGE_SIZE },
   view: null,         // 最近一次预览结果
 };
 
@@ -512,6 +520,20 @@ function dsfGroupSelectHtml(groupBy) {
   return `<select id="dsf-groupby" style="min-width:200px">${opts}</select>`;
 }
 
+/* 金额汇总模式规范化（fail closed）：只保留 ERP-162 允许的模式，缺失 / 空白 / 非法值一律回落 none（绝不进入请求） */
+function dsfSummaryMode(value) {
+  const key = String(value == null ? '' : value).trim();
+  return DSF_SUMMARY_MODES.some(m => m.key === key) ? key : 'none';
+}
+
+/* 金额汇总模式选择器：仅 ERP-162 允许的模式（fail closed，无自由输入） */
+function dsfSummarySelectHtml(summaryMode) {
+  const selected = dsfSummaryMode(summaryMode);
+  const opts = DSF_SUMMARY_MODES.map(m =>
+    `<option value="${dsfEsc(m.key)}" ${m.key === selected ? 'selected' : ''}>${dsfEsc(m.label)}</option>`).join('');
+  return `<select id="dsf-summarymode" style="min-width:260px">${opts}</select>`;
+}
+
 /* 组装有界预览请求体：字段只来自目录、分页有界、筛选仅客户 / 币种 / 订单日期 / 出货状态 / 收款链接状态，绝不接受任意字段名或 SQL */
 function dsfBuildRequest(state) {
   const fields = dsfSelectFields(state.catalogFields, state.selectedKeys);
@@ -523,6 +545,7 @@ function dsfBuildRequest(state) {
 
   const req = { fields, page, pageSize };
   req.groupBy = dsfGroupKey(state.groupBy);
+  req.summaryMode = dsfSummaryMode(state.summaryMode);
 
   const customerId = Number(state.customerId);
   if (Number.isFinite(customerId) && customerId > 0) req.customerId = customerId;
@@ -657,6 +680,76 @@ function dsfGroupChartHtml(view) {
     + `${rows}${empty}</div>`;
 }
 
+/* 汇总金额显示：null / undefined / 非有限数 = 未知（命中派生上限或无效证据，绝不回落 0） */
+function dsfSummaryMoney(v) {
+  if (v === null || v === undefined) return '未知';
+  const n = Number(v);
+  if (!Number.isFinite(n)) return '未知';
+  return String(Math.round(n * 100) / 100);
+}
+
+/* 汇总行数显示：null / undefined = 未知 */
+function dsfSummaryInt(v) {
+  if (v === null || v === undefined) return '未知';
+  return String(v);
+}
+
+/* 当前页金额汇总（ERP-162，仅当前授权预览页）：客户 + 原币（可选出货状态 / 收款链接状态拆分）的已知出货与财务金额证据；
+   订单金额保持原币、已关联 / 未覆盖 / 已提交任一组成金额未知即合计为「未知」（绝不回落 0），并显式给出未知行数；
+   「未覆盖金额」不是应收余额，不同币种绝不合并或换算 */
+function dsfSummaryHtml(view) {
+  const mode = dsfSummaryMode(view && view.summaryMode);
+  if (!view || mode === 'none' || !Array.isArray(view.summaries)) return '';
+  const summaries = view.summaries;
+  const byShipment = mode === 'customerCurrencyShipment';
+  const byFinance = mode === 'customerCurrencyFinance';
+  const title = '💰 当前页金额汇总（仅当前预览页，非全量合计）';
+  if (summaries.length === 0) {
+    return `<div class="pd-hint" style="margin:8px 0">`
+      + `<div style="font-weight:600;margin-bottom:6px">${title}</div>`
+      + `<div class="text-muted">本页没有可汇总金额的销售订单出货 / 财务进度证据（空页）。</div>`
+      + `</div>`;
+  }
+  const head = `<th>客户</th><th>币种</th>`
+    + (byShipment ? `<th>出货状态</th>` : '')
+    + (byFinance ? `<th>收款链接状态</th>` : '')
+    + `<th class="text-right">订单数</th>`
+    + `<th class="text-right">订单金额·原币</th>`
+    + `<th class="text-right">已关联金额·原币</th>`
+    + `<th class="text-right">已关联·未知行</th>`
+    + `<th class="text-right">未覆盖金额·原币</th>`
+    + `<th class="text-right">未覆盖·未知行</th>`
+    + `<th class="text-right">已提交未审核·原币</th>`
+    + `<th class="text-right">已提交·未知行</th>`;
+  const rows = summaries.map(s => {
+    const customer = s && s.customerName ? dsfEsc(s.customerName)
+      : (s && s.customerId != null ? '客户 ' + s.customerId : '未知');
+    const status = byShipment
+      ? `<td>${dsfEsc(s && s.shipmentStatus != null ? dsfShipmentStatusLabel(s.shipmentStatus) : '未知')}</td>`
+      : (byFinance
+        ? `<td>${dsfEsc(s && s.financeLinkStatus != null ? dsfFinanceStatusLabel(s.financeLinkStatus) : '未知')}</td>`
+        : '');
+    return `<tr>`
+      + `<td>${customer}</td>`
+      + `<td><b>${dsfEsc((s && s.currency) || '未知')}</b></td>`
+      + status
+      + `<td class="text-right">${dsfSummaryInt(s && s.orderCount)}</td>`
+      + `<td class="text-right">${dsfSummaryMoney(s && s.orderAmount)}</td>`
+      + `<td class="text-right">${dsfSummaryMoney(s && s.linkedAmount)}</td>`
+      + `<td class="text-right">${dsfSummaryInt(s && s.unknownLinkedAmountRows)}</td>`
+      + `<td class="text-right">${dsfSummaryMoney(s && s.uncoveredAmount)}</td>`
+      + `<td class="text-right">${dsfSummaryInt(s && s.unknownUncoveredAmountRows)}</td>`
+      + `<td class="text-right">${dsfSummaryMoney(s && s.submittedAmount)}</td>`
+      + `<td class="text-right">${dsfSummaryInt(s && s.unknownSubmittedAmountRows)}</td>`
+      + `</tr>`;
+  }).join('');
+  return `<div class="pd-hint" style="margin:8px 0">`
+    + `<div style="font-weight:600;margin-bottom:6px">${title}</div>`
+    + `<div style="overflow-x:auto"><table style="width:100%;margin-bottom:6px"><thead><tr>${head}</tr></thead><tbody>${rows}</tbody></table></div>`
+    + `<div class="text-muted">口径：只汇总当前授权预览页的销售订单出货 / 财务金额证据；客户 + 原币是强制分组边界，订单金额保持原币（绝不跨币种合并或换算）；已关联 / 未覆盖 / 已提交合计只要任一行金额未知即整体为「未知」（绝不回落 0），并显式给出未知行数；「未覆盖金额」只是订单金额与权威计入金额之差，不是应收余额，也不是收款授权或催收依据。</div>`
+    + `</div>`;
+}
+
 /* 预览结果（口径 / 边界 / 免责文案 + 汇总 + 空结果 + 表格） */
 function dsfResultHtml(view) {
   const readOnly = view && view.readOnlyText ? `<div class="pd-hint">${dsfEsc(view.readOnlyText)}</div>` : '';
@@ -666,7 +759,7 @@ function dsfResultHtml(view) {
     ? `<div class="text-muted" style="margin:6px 0">共 ${view.total} 条 · 第 ${view.page} 页 · 每页 ${view.pageSize} 条</div>`
     : '';
   const empty = view && (!view.rows || view.rows.length === 0) ? dsfEmptyHtml() : '';
-  return `${readOnly}${boundary}${disclaimer}${summary}${dsfGroupChartHtml(view)}${empty}${dsfTableHtml(view)}`;
+  return `${readOnly}${boundary}${disclaimer}${summary}${dsfGroupChartHtml(view)}${dsfSummaryHtml(view)}${empty}${dsfTableHtml(view)}`;
 }
 
 /* 字段选择器：仅由目录白名单渲染为复选框，无自由填写的字段名 */
@@ -743,6 +836,7 @@ function dsfBuildState(page) {
     shipmentStatus: document.getElementById('dsf-shipment-status').value,
     financeLinkStatus: document.getElementById('dsf-finance-status').value,
     groupBy: document.getElementById('dsf-groupby').value,
+    summaryMode: document.getElementById('dsf-summarymode').value,
     pageSize: document.getElementById('dsf-pagesize').value,
     page: page || 1,
     maxPageSize: DSF.catalog && DSF.catalog.maxPageSize ? DSF.catalog.maxPageSize : DSF_MAX_PAGE_SIZE_FALLBACK,
@@ -942,6 +1036,7 @@ function dsfRender() {
   const financeOptions = DSF_FINANCE_FILTER_OPTS.map(o =>
     `<option value="${o.value}" ${f.financeLinkStatus === o.value ? 'selected' : ''}>${o.label}</option>`).join('');
   const groupOptions = dsfGroupSelectHtml(f.groupBy);
+  const summaryOptions = dsfSummarySelectHtml(f.summaryMode);
 
   document.getElementById('modal').innerHTML = `
   <div class="modal modal-lg" style="max-width:1100px">
@@ -971,6 +1066,12 @@ function dsfRender() {
       </div>
     </div>
 
+    <div style="margin:10px 0">
+      <div style="font-weight:600;margin-bottom:6px">③ 金额汇总（ERP-162，可选，仅当前预览页原币金额）</div>
+      ${summaryOptions}
+      <div class="text-muted" style="margin-top:4px">只汇总当前授权预览页已知的出货与财务金额证据：客户 + 原币是强制分组边界（可选再按出货状态 / 收款链接状态拆分）；订单金额保持原币，已关联 / 未覆盖 / 已提交任一组成金额未知即合计为「未知」；「未覆盖金额」不是应收余额，不同币种绝不合并或换算。</div>
+    </div>
+
     <div class="modal-footer">
       <button class="btn btn-primary" onclick="dsfPreview(1)">预览</button>
       <button class="btn btn-neutral" onclick="dsfExportCsv()">📤 导出当前页 CSV</button>
@@ -986,7 +1087,7 @@ function dsfRender() {
 async function openSalesOrderShipmentFinanceFieldDesigner() {
   DSF = {
     catalog: null, fields: [], selectedKeys: [], customers: [],
-    filters: { customerId: '', currency: '', dateFrom: '', dateTo: '', shipmentStatus: '', financeLinkStatus: '', groupBy: 'none', page: 1, pageSize: DSF_DEFAULT_PAGE_SIZE },
+    filters: { customerId: '', currency: '', dateFrom: '', dateTo: '', shipmentStatus: '', financeLinkStatus: '', groupBy: 'none', summaryMode: 'none', page: 1, pageSize: DSF_DEFAULT_PAGE_SIZE },
     view: null,
   };
   const modal = document.getElementById('modal');
@@ -1036,11 +1137,17 @@ if (typeof module !== 'undefined' && module.exports) {
     DSF_SHIPMENT_FILTER_OPTS,
     DSF_FINANCE_FILTER_OPTS,
     DSF_GROUP_KEYS,
+    DSF_SUMMARY_MODES,
     DSF_STATUS_LABELS,
     dsfEsc,
     dsfGroupKey,
     dsfGroupSelectHtml,
     dsfGroupChartHtml,
+    dsfSummaryMode,
+    dsfSummarySelectHtml,
+    dsfSummaryHtml,
+    dsfSummaryMoney,
+    dsfSummaryInt,
     dsfSelectFields,
     dsfBuildRequest,
     dsfCellText,

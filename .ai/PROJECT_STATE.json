@@ -1,12 +1,10 @@
 {
   "schema_version": 2,
   "project": "NEWERP",
-  "updated_at": "2026-09-29T14:46:43.536985Z",
+  "updated_at": "2026-09-29T14:54:58.229802Z",
   "phase": "ready",
   "current_task": null,
-  "queue": [
-    "ERP-163"
-  ],
+  "queue": [],
   "completed": [
     "ERP-000",
     "ERP-001",
@@ -150,16 +148,17 @@
     "ERP-159",
     "ERP-160",
     "ERP-161",
-    "ERP-162"
+    "ERP-162",
+    "ERP-163"
   ],
   "blocked": [],
   "last_build": {
-    "task": "ERP-162",
+    "task": "ERP-163",
     "profile": "safe",
     "status": "passed",
     "exit_code": 0,
-    "log": ".ai\\logs\\ERP-162-validation-1.log",
-    "at": "2026-09-29T14:46:36.543183Z"
+    "log": ".ai\\logs\\ERP-163-validation-1.log",
+    "at": "2026-09-29T14:54:57.598519Z"
   },
   "last_error": null,
   "last_deepseek_fix": {
@@ -171,16 +170,14 @@
   },
   "git_sync": {
     "branch": "main",
-    "local_sha": "d71d95a",
-    "status": "synced",
+    "local_sha": "77e4720",
+    "status": "pending",
     "ahead": 0,
     "behind": 0,
-    "last_attempt_at": "2026-09-29T14:46:43.324988Z",
+    "last_attempt_at": "2026-09-29T14:54:58.122466Z",
     "last_error": null
   },
-  "next_recommended_tasks": [
-    "ERP-163"
-  ],
+  "next_recommended_tasks": [],
   "runner": {
     "status": "stopped",
     "pid": null
