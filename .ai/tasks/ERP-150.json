@@ -1,0 +1,53 @@
+{
+  "id": "ERP-150",
+  "title": "Export selected authorized supplier purchase exposure page to Excel",
+  "description": "A purchasing user downloads exactly the selected dynamic supplier exposure current page as xlsx in chosen field order, using existing ExcelExporter. Development only. Reuse ERP-031 SupplierPurchaseExposure.ForQueryAsync, its supplier/currency/date/link-status filters and bounded page; recheck the current user's purchase-order menu for every request, fail closed on missing permission and invalid filters, and use existing HTTP operation audit. Keep linked settlement evidence separate from ambiguous/unavailable references, preserve null unknown amounts and original currencies, and state this is not accounts payable or payment authority. No arbitrary SQL, migration, production SQL, real database execution, writes, secrets/.env change or deployment. Verify focused tests and safe Release build/test; no real-browser acceptance.",
+  "status": "pending",
+  "risk_level": "medium",
+  "acceptance_criteria": [
+    "Excel endpoint reuses ERP-148 authorized bounded preview and rechecks current-user menu, filters, selected fields and page limit before bytes.",
+    "Workbook contains only current-page chosen columns in requested order; null unknown amounts remain unknown, currencies remain separate and formula-leading text is literal.",
+    "Designer offers xlsx with visible empty/authorization errors; workbook tests cover order, cap, linked ambiguity, unknowns, currency, formula safety and no writes; document limits."
+  ],
+  "criterion_path_map": {
+    "Excel endpoint reuses ERP-148 authorized bounded preview and rechecks current-user menu, filters, selected fields and page limit before bytes.": [
+      "src/ERP.Api/Controllers/DynamicSupplierExposureReportController.cs"
+    ],
+    "Workbook contains only current-page chosen columns in requested order; null unknown amounts remain unknown, currencies remain separate and formula-leading text is literal.": [
+      "src/ERP.Api/Controllers/DynamicSupplierExposureReportController.cs",
+      "src/ERP.Application/Services/DynamicSupplierExposureReportRules.cs"
+    ],
+    "Designer offers xlsx with visible empty/authorization errors; workbook tests cover order, cap, linked ambiguity, unknowns, currency, formula safety and no writes; document limits.": [
+      "src/ERP.Api/wwwroot/js/supplier-purchase-exposure.js",
+      "src/ERP.UnitTests/DynamicSupplierExposureExcelTests.cs",
+      "docs/dynamic-supplier-exposure-report.md"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/DynamicSupplierExposureReportController.cs",
+    "src/ERP.Application/Services/DynamicSupplierExposureReportRules.cs",
+    "src/ERP.Api/wwwroot/js/supplier-purchase-exposure.js",
+    "src/ERP.UnitTests/DynamicSupplierExposureExcelTests.cs",
+    "docs/dynamic-supplier-exposure-report.md",
+    ".ai/**"
+  ],
+  "validation_profile": "safe",
+  "depends_on": [
+    "ERP-148",
+    "ERP-149"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "completion_mode": "build",
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only bounded read-only feature"
+  },
+  "attempts": 0
+}

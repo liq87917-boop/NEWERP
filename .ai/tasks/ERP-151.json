@@ -1,0 +1,53 @@
+{
+  "id": "ERP-151",
+  "title": "Download selected authorized supplier purchase exposure page as PDF",
+  "description": "A purchasing user downloads the selected bounded supplier exposure page as a paginated Chinese PDF with PDFsharp and shared SimHei resolver. Development only. Reuse ERP-031 SupplierPurchaseExposure.ForQueryAsync, its supplier/currency/date/link-status filters and bounded page; recheck the current user's purchase-order menu for every request, fail closed on missing permission and invalid filters, and use existing HTTP operation audit. Keep linked settlement evidence separate from ambiguous/unavailable references, preserve null unknown amounts and original currencies, and state this is not accounts payable or payment authority. No arbitrary SQL, migration, production SQL, real database execution, writes, secrets/.env change or deployment. Verify focused tests and safe Release build/test; no real-browser acceptance.",
+  "status": "pending",
+  "risk_level": "medium",
+  "acceptance_criteria": [
+    "PDF endpoint reuses ERP-148 authorized bounded preview and rechecks current-user menu, filters and fields before any bytes.",
+    "PDF renders chosen order fields, Chinese labels, separate currencies and explicit unknown or ambiguous link evidence across row and column pages without clipping; missing SimHei fails visibly.",
+    "Designer offers PDF with visible empty/authorization/font failures; tests inspect signature, selected order, page bounds, unknown evidence, font failure and no writes; document font prerequisite."
+  ],
+  "criterion_path_map": {
+    "PDF endpoint reuses ERP-148 authorized bounded preview and rechecks current-user menu, filters and fields before any bytes.": [
+      "src/ERP.Api/Controllers/DynamicSupplierExposureReportController.cs",
+      "src/ERP.Infrastructure/Export/DynamicSupplierExposurePdfExporter.cs"
+    ],
+    "PDF renders chosen order fields, Chinese labels, separate currencies and explicit unknown or ambiguous link evidence across row and column pages without clipping; missing SimHei fails visibly.": [
+      "src/ERP.Infrastructure/Export/DynamicSupplierExposurePdfExporter.cs"
+    ],
+    "Designer offers PDF with visible empty/authorization/font failures; tests inspect signature, selected order, page bounds, unknown evidence, font failure and no writes; document font prerequisite.": [
+      "src/ERP.Api/wwwroot/js/supplier-purchase-exposure.js",
+      "src/ERP.UnitTests/DynamicSupplierExposurePdfTests.cs",
+      "docs/dynamic-supplier-exposure-report.md"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/DynamicSupplierExposureReportController.cs",
+    "src/ERP.Infrastructure/Export/DynamicSupplierExposurePdfExporter.cs",
+    "src/ERP.Api/wwwroot/js/supplier-purchase-exposure.js",
+    "src/ERP.UnitTests/DynamicSupplierExposurePdfTests.cs",
+    "docs/dynamic-supplier-exposure-report.md",
+    ".ai/**"
+  ],
+  "validation_profile": "safe",
+  "depends_on": [
+    "ERP-148",
+    "ERP-149"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "completion_mode": "build",
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only bounded read-only feature"
+  },
+  "attempts": 0
+}

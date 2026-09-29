@@ -1,0 +1,54 @@
+{
+  "id": "ERP-148",
+  "title": "Preview selected authorized supplier purchase exposure fields",
+  "description": "A purchasing user selects finite purchase-order exposure fields and filters for a current-page read-only preview. Development only. Reuse ERP-031 SupplierPurchaseExposure.ForQueryAsync, its supplier/currency/date/link-status filters and bounded page; recheck the current user's purchase-order menu for every request, fail closed on missing permission and invalid filters, and use existing HTTP operation audit. Keep linked settlement evidence separate from ambiguous/unavailable references, preserve null unknown amounts and original currencies, and state this is not accounts payable or payment authority. No arbitrary SQL, migration, production SQL, real database execution, writes, secrets/.env change or deployment. Verify focused tests and safe Release build/test; no real-browser acceptance.",
+  "status": "pending",
+  "risk_level": "medium",
+  "acceptance_criteria": [
+    "Authenticated catalog and preview expose only a finite order-evidence field allowlist; reject unknown columns, bad supplier/currency/date/link filters and page size above 200 before source reads.",
+    "Preview checks current-user purchase-order menu, reuses SupplierPurchaseExposure.ForQueryAsync and projects only selected current-page order fields in requested order, retaining null unknown settlement/receipt values and currency isolation.",
+    "Unit tests cover allowed and denied users, filters, selected order, link ambiguity, unknown values, paging and no writes; document exposure and payable boundaries."
+  ],
+  "criterion_path_map": {
+    "Authenticated catalog and preview expose only a finite order-evidence field allowlist; reject unknown columns, bad supplier/currency/date/link filters and page size above 200 before source reads.": [
+      "src/ERP.Application/DTOs/DynamicSupplierExposureReportDtos.cs",
+      "src/ERP.Application/Services/DynamicSupplierExposureReportRules.cs",
+      "src/ERP.Api/Controllers/DynamicSupplierExposureReportController.cs"
+    ],
+    "Preview checks current-user purchase-order menu, reuses SupplierPurchaseExposure.ForQueryAsync and projects only selected current-page order fields in requested order, retaining null unknown settlement/receipt values and currency isolation.": [
+      "src/ERP.Application/DTOs/DynamicSupplierExposureReportDtos.cs",
+      "src/ERP.Application/Services/DynamicSupplierExposureReportRules.cs",
+      "src/ERP.Api/Controllers/DynamicSupplierExposureReportController.cs"
+    ],
+    "Unit tests cover allowed and denied users, filters, selected order, link ambiguity, unknown values, paging and no writes; document exposure and payable boundaries.": [
+      "src/ERP.UnitTests/DynamicSupplierExposureReportTests.cs",
+      "docs/dynamic-supplier-exposure-report.md"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Application/DTOs/DynamicSupplierExposureReportDtos.cs",
+    "src/ERP.Application/Services/DynamicSupplierExposureReportRules.cs",
+    "src/ERP.Api/Controllers/DynamicSupplierExposureReportController.cs",
+    "src/ERP.UnitTests/DynamicSupplierExposureReportTests.cs",
+    "docs/dynamic-supplier-exposure-report.md",
+    ".ai/**"
+  ],
+  "validation_profile": "safe",
+  "depends_on": [
+    "ERP-031"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "completion_mode": "build",
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only bounded read-only feature"
+  },
+  "attempts": 0
+}
