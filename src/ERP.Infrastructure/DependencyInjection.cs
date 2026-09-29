@@ -61,6 +61,8 @@ public static class DependencyInjection
         services.AddScoped<IDynamicSalesOrderReportQuery, DynamicSalesOrderReportQuery>();
         // 动态客户应收账款证据报表预览（ERP-117）：只读、有界，复用客户资料菜单授权、业务员数据范围与 ERP-074 对账引擎
         services.AddScoped<IDynamicReceivableReportQuery, DynamicReceivableReportQuery>();
+        // 动态采购订单报表预览（ERP-125）：只读、有界，复用采购订单菜单授权与未删除可见性（不引入更宽的角色或数据范围策略）
+        services.AddScoped<IDynamicPurchaseOrderReportQuery, DynamicPurchaseOrderReportQuery>();
 
         // 库存移动与成本服务（ERP-009：库存单据审核/销审统一经此维护库存与流水）
         services.AddScoped<IInventoryService, InventoryService>();
