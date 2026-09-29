@@ -539,6 +539,7 @@ function speDesRender() {
       <div class="modal-footer">
         <button class="btn btn-primary" onclick="speDesPreview(1)">预览</button>
         <button class="btn btn-neutral" onclick="speDesExport()">📤 导出所选列 CSV</button>
+        <button class="btn btn-neutral" onclick="speDesExportExcel()">📥 导出 Excel</button>
         <button class="btn btn-neutral" onclick="closeModal()">关闭</button>
       </div>
       <div id="spe-des-result"></div>
@@ -618,6 +619,63 @@ function speDesExport() {
   toast('所选列 CSV 已导出（仅当前预览页，未知值保留，无跨币种总额）', 'success');
 }
 
+/* 导出当前预览页的所选列 Excel（ERP-150，只读）：复用预览请求体 POST /api/supplier-purchase-exposure/report/export；
+   成功（xlsx 附件）触发下载；授权 / 无效 / 空结果 / 网络失败在结果区可见，不下载任何内容 */
+async function speDesExportExcel() {
+  const state = speDesBuildState(SPE_DESIGNER.view ? SPE_DESIGNER.view.page : 1);
+  if (state.orderDateFrom && state.orderDateTo && state.orderDateFrom > state.orderDateTo) {
+    speDesRenderResult(speDesErrorHtml('invalid', '订单日期开始不能晚于结束日期'));
+    return;
+  }
+
+  // 当前页为空：显示可见错误，不下载仅表头的空工作簿
+  if (SPE_DESIGNER.view && (!SPE_DESIGNER.view.rows || SPE_DESIGNER.view.rows.length === 0)) {
+    speDesRenderResult(speDesErrorHtml('empty', '当前预览页没有采购订单敞口证据，无法导出 Excel'));
+    return;
+  }
+
+  const req = speDesBuildRequest(state);
+
+  try {
+    const resp = await fetch(SPE_DESIGNER_API + '/export', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + (typeof localStorage !== 'undefined' ? (localStorage.getItem('erp_token') || '') : ''),
+      },
+      body: JSON.stringify(req),
+    });
+
+    const contentType = (resp.headers.get('content-type') || '');
+    if (contentType.indexOf('spreadsheetml') >= 0) {
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+      a.href = url;
+      a.download = '供应商采购敞口_所选列_' + dateStr + '.xlsx';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      return;
+    }
+
+    let envelope = null;
+    try { envelope = await resp.json(); } catch (e) { /* 忽略解析失败 */ }
+    const code = envelope && envelope.code;
+    const message = (envelope && envelope.message) || 'Excel 导出失败';
+    if (code === 2000 || code === 2003) {
+      if (typeof logout === 'function') logout();
+      speDesRenderResult(speDesErrorHtml('unauthorized', message));
+      return;
+    }
+    speDesRenderResult(speDesErrorHtml(speDesKindOfCode(code), message));
+  } catch (err) {
+    speDesRenderResult(speDesErrorHtml('network', (err && err.message) || '无法连接到服务器'));
+  }
+}
+
 /* 从工作台打开设计器（加载目录，渲染字段选择器与当前筛选；授权失败 fail closed，不返回任何字段） */
 async function openSupplierPurchaseExposureDesigner() {
   SPE_DESIGNER = { catalog: null, fields: [], selectedKeys: [], view: null };
@@ -669,6 +727,7 @@ if (typeof module !== 'undefined' && module.exports) {
     speDesPreview,
     speDesPage,
     speDesExport,
+    speDesExportExcel,
   };
 }
 

@@ -9,6 +9,7 @@ ERP-031 供应商采购敞口报表的既有筛选与稳定分页，预览当前
 | --- | --- | --- |
 | `GET` | `/api/supplier-purchase-exposure/report` | 返回采购订单敞口证据字段白名单目录（需登录 + 采购订单菜单授权） |
 | `POST` | `/api/supplier-purchase-exposure/report` | 按选定字段与有界筛选预览当前页，稳定分页（单页上限 200） |
+| `POST` | `/api/supplier-purchase-exposure/report/export` | 导出当前选定页为 Excel（xlsx，只读，复用有界授权预览与选定列顺序） |
 
 请求体（`DynamicSupplierExposureReportRequest`）：`fields`（选定字段键，仅限白名单）、`supplierId`、`currency`、
 `orderDateFrom` / `orderDateTo`、`linkStatus`（linked / ambiguous / unavailable）、`keyword`、`page`、`pageSize`。
@@ -61,6 +62,20 @@ ERP-031 供应商采购敞口报表的既有筛选与稳定分页，预览当前
 - 全程只读：无 Add / Update / Remove / SaveChanges，不执行任意 SQL、不写库；
 - 请求由既有 `OperationLogMiddleware` 按 HTTP 方法记录审计。
 
+## Excel 导出（ERP-150）
+
+- 路径：`POST /api/supplier-purchase-exposure/report/export`，请求体与预览完全相同（`DynamicSupplierExposureReportRequest`）。
+- **复用预览**：每次导出都重新校验当前登录用户 Id、`purchase-order` 采购订单菜单授权、字段白名单、筛选与页大小
+  （1~200），再按同一条有界预览查询读取当前页，全程只读、不执行任意 SQL、不写库。
+- **仅导当前页**：只导出请求 `page` / `pageSize` 对应的那一页选定列（不是全量导出），单页仍受 200 行上限约束。
+- **原样保留**：供应商 / 采购单号 / 归属销售订单号等标识与金额**原币**原样保留，不做跨币种换算或汇总；
+  链接不唯一（`ambiguous`）/ 无引用（`unavailable`）的未知结算金额与未知收货数量照实保留（空单元格 = 未知，绝不回落为 0）。
+- **公式注入防护**：文本单元格以 `=` / `+` / `-` / `@` / 制表符 / 回车 / 换行开头时，前缀单引号转义为字面文本，
+  不生成公式单元格。
+- **只读 + 审计**：无写入、无任意 SQL；`POST` 由既有 `OperationLogMiddleware` 记录审计（动作「导出」）。
+- 文件名 `SupplierPurchaseExposure_yyyyMMddHHmmss.xlsx`；内容类型
+  `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`。
+
 ## 前端字段设计器（ERP-149）：视觉字段选择 + 所选列预览与 CSV 导出
 
 前端工作台 `wwwroot/js/supplier-purchase-exposure.js` 在既有「供应商采购敞口报表」工具栏新增「🎛 字段设计器」入口，
@@ -82,11 +97,22 @@ CSV 只导出当前预览页选定列证据，`POST` 由既有 `OperationLogMidd
 请求边界（分页有界、筛选仅复用工作台当前筛选）、未知证据渲染（链接 / 收货 / 结算 / 数量 null 不回落 0）、
 表格渲染（转义、不同币种分行、分页接线）、空结果与失败态、所选列 CSV（未知保留 + 公式转义 + 引号转义），以及前端接线契约。
 
+### Excel 导出测试（`ERP.UnitTests/DynamicSupplierExposureExcelTests.cs`）
+
+- 导出当前页的选定列顺序与行值（仅选定字段、保持请求顺序）；
+- 供应商 / 采购单号等标识与原币保留（不做换算）、金额数值单元格；
+- 公式前导文本转义（`=` / `+` / `-` / `@` 开头前缀单引号、非公式单元格）；
+- 仅导出当前页（`page` / `pageSize`，单页受 200 上限约束）；
+- 链接不唯一 / 无引用订单的未知结算金额保持未知（空单元格、绝不回落为 0），链接状态分列保留；
+- 无身份 / 无采购订单菜单授权 / 页大小超限 / 未知字段拒绝（先于发送字节）；
+- 空页仅表头；只读不写库（`SaveChangesAsync` 调用次数恒为 0）。
+
 ## 文件地图
 
 - `src/ERP.Application/DTOs/DynamicSupplierExposureReportDtos.cs`：目录 / 请求 / 结果 DTO；
-- `src/ERP.Application/Services/DynamicSupplierExposureReportRules.cs`：字段白名单、校验与行投影（纯规则）；
-- `src/ERP.Api/Controllers/DynamicSupplierExposureReportController.cs`：授权 + 复用 ERP-031 只读派生 + 选定列投影；
-- `src/ERP.UnitTests/DynamicSupplierExposureReportTests.cs`：单元测试（内存库，不连 SQL Server、不启动 API）；
-- `src/ERP.Api/wwwroot/js/supplier-purchase-exposure.js`：ERP-031 工作台 + ERP-149 前端字段设计器（`openSupplierPurchaseExposureDesigner`，纯函数可 Node 单测）；
+- `src/ERP.Application/Services/DynamicSupplierExposureReportRules.cs`：字段白名单、校验、行投影与 Excel 公式转义（纯规则）；
+- `src/ERP.Api/Controllers/DynamicSupplierExposureReportController.cs`：授权 + 复用 ERP-031 只读派生 + 选定列投影 + xlsx 导出（ERP-150）；
+- `src/ERP.UnitTests/DynamicSupplierExposureReportTests.cs`：预览单元测试（内存库，不连 SQL Server、不启动 API）；
+- `src/ERP.UnitTests/DynamicSupplierExposureExcelTests.cs`：Excel 导出单元测试（ERP-150，内存库，不连 SQL Server、不启动 API）；
+- `src/ERP.Api/wwwroot/js/supplier-purchase-exposure.js`：ERP-031 工作台 + ERP-149 前端字段设计器 + ERP-150 Excel 导出（`speDesExportExcel`，纯函数可 Node 单测）；
 - `tests/automation/dynamic_supplier_exposure_ui.test.js`：ERP-149 前端 UI 逻辑单测（Node，无需浏览器）。
