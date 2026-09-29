@@ -1,0 +1,54 @@
+{
+  "id": "ERP-129",
+  "title": "Download authorized dynamic purchase-order report page as PDF",
+  "description": "Download exactly the selected purchase-order report page as a paginated Chinese PDF. Reuse ERP-125 scoped preview and grouped original-currency page subtotals; require the current user's purchase-order menu on every download. Use existing PDFsharp and shared SimHei resolver; missing font fails explicitly. Existing HTTP operation audit records the read-only download. Development only: no migration, production SQL, real database execution, arbitrary model SQL, writes, secret/.env change or deployment. Verify PDF and safe build/test.",
+  "status": "pending",
+  "risk_level": "medium",
+  "acceptance_criteria": [
+    "PDF endpoint reuses authorized bounded purchase-order preview and optional grouping, rechecks current-user menu permission and invalid fields/filters before returning bytes.",
+    "PDFsharp renders selected columns, Chinese text, original currency and separate page subtotals with bounded pagination; shared SimHei resolver fails explicitly if font unavailable.",
+    "Designer offers PDF download and visible empty/authorization/font failures; tests inspect PDF signature, selected fields, page bounds, currency separation and missing-font behavior; document prerequisites."
+  ],
+  "criterion_path_map": {
+    "PDF endpoint reuses authorized bounded purchase-order preview and optional grouping, rechecks current-user menu permission and invalid fields/filters before returning bytes.": [
+      "src/ERP.Api/Controllers/DynamicPurchaseOrderReportController.cs",
+      "src/ERP.Infrastructure/Export/DynamicPurchaseOrderPdfExporter.cs"
+    ],
+    "PDFsharp renders selected columns, Chinese text, original currency and separate page subtotals with bounded pagination; shared SimHei resolver fails explicitly if font unavailable.": [
+      "src/ERP.Infrastructure/Export/DynamicPurchaseOrderPdfExporter.cs",
+      "src/ERP.Infrastructure/Export/SimHeiPdfFontResolver.cs"
+    ],
+    "Designer offers PDF download and visible empty/authorization/font failures; tests inspect PDF signature, selected fields, page bounds, currency separation and missing-font behavior; document prerequisites.": [
+      "src/ERP.Api/wwwroot/js/dynamic-purchase-order-report.js",
+      "src/ERP.UnitTests/DynamicPurchaseOrderPdfTests.cs",
+      "docs/dynamic-purchase-order-report.md"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/DynamicPurchaseOrderReportController.cs",
+    "src/ERP.Infrastructure/Export/DynamicPurchaseOrderPdfExporter.cs",
+    "src/ERP.Infrastructure/Export/SimHeiPdfFontResolver.cs",
+    "src/ERP.Api/wwwroot/js/dynamic-purchase-order-report.js",
+    "src/ERP.UnitTests/DynamicPurchaseOrderPdfTests.cs",
+    "docs/dynamic-purchase-order-report.md",
+    ".ai/**"
+  ],
+  "validation_profile": "safe",
+  "depends_on": [
+    "ERP-125",
+    "ERP-128"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "completion_mode": "build",
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only bounded read-only feature"
+  }
+}

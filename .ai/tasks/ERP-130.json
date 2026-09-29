@@ -1,0 +1,54 @@
+{
+  "id": "ERP-130",
+  "title": "Preview selected fields in an authorized inventory-movement report",
+  "description": "An inventory user selects finite existing movement-report columns and warehouse/product/date filters to preview bounded stock-ledger evidence. Reuse ERP-029 report service and require the current user's existing stock-query menu; do not widen role, warehouse, product or data visibility. Preserve base-unit quantities and explicit unknown history; do not infer cost or stock value. Invalid inputs and missing permission fail closed before report reads. Existing HTTP operation audit records the read-only preview. Development only: no Domain/schema change, migration, production SQL, real database execution, arbitrary model SQL, writes, secret/.env change or deployment. Verify unit tests and safe build/test.",
+  "status": "pending",
+  "risk_level": "medium",
+  "acceptance_criteria": [
+    "Authenticated catalog exposes a finite allowlist of existing inventory-movement fields; preview rejects unknown columns, inverted dates, invalid thresholds and page size above 200 before report reads.",
+    "Preview requires the current user's stock-query menu and reuses existing inventory-movement service for warehouse/product/date filters and stable page data; projects selected columns with unknown-history and base-unit semantics and no writes.",
+    "Tests cover allowed/denied users, selected field order, page cap, filters, unknown history, invalid input and no writes; document access and ledger limits."
+  ],
+  "criterion_path_map": {
+    "Authenticated catalog exposes a finite allowlist of existing inventory-movement fields; preview rejects unknown columns, inverted dates, invalid thresholds and page size above 200 before report reads.": [
+      "src/ERP.Application/DTOs/DynamicInventoryMovementReportDtos.cs",
+      "src/ERP.Application/Services/DynamicInventoryMovementReportRules.cs",
+      "src/ERP.Api/Controllers/DynamicInventoryMovementReportController.cs"
+    ],
+    "Preview requires the current user's stock-query menu and reuses existing inventory-movement service for warehouse/product/date filters and stable page data; projects selected columns with unknown-history and base-unit semantics and no writes.": [
+      "src/ERP.Application/DTOs/DynamicInventoryMovementReportDtos.cs",
+      "src/ERP.Application/Services/DynamicInventoryMovementReportRules.cs",
+      "src/ERP.Api/Controllers/DynamicInventoryMovementReportController.cs"
+    ],
+    "Tests cover allowed/denied users, selected field order, page cap, filters, unknown history, invalid input and no writes; document access and ledger limits.": [
+      "src/ERP.UnitTests/DynamicInventoryMovementReportTests.cs",
+      "src/ERP.Application/Services/DynamicInventoryMovementReportRules.cs",
+      "docs/dynamic-inventory-movement-report.md"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Application/DTOs/DynamicInventoryMovementReportDtos.cs",
+    "src/ERP.Application/Services/DynamicInventoryMovementReportRules.cs",
+    "src/ERP.Api/Controllers/DynamicInventoryMovementReportController.cs",
+    "src/ERP.UnitTests/DynamicInventoryMovementReportTests.cs",
+    "docs/dynamic-inventory-movement-report.md",
+    ".ai/**"
+  ],
+  "validation_profile": "safe",
+  "depends_on": [
+    "ERP-029"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "completion_mode": "build",
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only bounded read-only feature"
+  }
+}

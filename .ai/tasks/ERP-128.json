@@ -1,0 +1,54 @@
+{
+  "id": "ERP-128",
+  "title": "Currency-safe grouping and page subtotals for dynamic purchase orders",
+  "description": "A purchasing user groups the selected report page by supplier or month and sees order count and original-currency amount subtotals. Reuse ERP-125 authorization and bounded preview, preserve selected field order, reject unknown grouping before data access, and never claim payable balance or combine currencies. Existing HTTP operation audit records read-only requests. Development only: no migration, production SQL, real database execution, arbitrary model SQL, writes, secret/.env change or deployment. Verify unit tests and safe build/test.",
+  "status": "pending",
+  "risk_level": "medium",
+  "acceptance_criteria": [
+    "API accepts only none/supplier/month grouping and computes count and amount subtotals from the same authorized bounded preview page; currencies never combine.",
+    "Designer offers finite grouping choices and labels subtotals as page-only in original currency, including empty groups and pagination changes.",
+    "Tests cover mixed currencies, month boundaries, selected fields, empty page, invalid group key, permission and no writes; document subtotal semantics."
+  ],
+  "criterion_path_map": {
+    "API accepts only none/supplier/month grouping and computes count and amount subtotals from the same authorized bounded preview page; currencies never combine.": [
+      "src/ERP.Application/DTOs/DynamicPurchaseOrderReportDtos.cs",
+      "src/ERP.Application/Services/DynamicPurchaseOrderReportRules.cs",
+      "src/ERP.Api/Controllers/DynamicPurchaseOrderReportController.cs"
+    ],
+    "Designer offers finite grouping choices and labels subtotals as page-only in original currency, including empty groups and pagination changes.": [
+      "src/ERP.Api/wwwroot/js/dynamic-purchase-order-report.js"
+    ],
+    "Tests cover mixed currencies, month boundaries, selected fields, empty page, invalid group key, permission and no writes; document subtotal semantics.": [
+      "src/ERP.UnitTests/DynamicPurchaseOrderGroupingTests.cs",
+      "src/ERP.Application/Services/DynamicPurchaseOrderReportRules.cs",
+      "docs/dynamic-purchase-order-report.md"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Application/DTOs/DynamicPurchaseOrderReportDtos.cs",
+    "src/ERP.Application/Services/DynamicPurchaseOrderReportRules.cs",
+    "src/ERP.Api/Controllers/DynamicPurchaseOrderReportController.cs",
+    "src/ERP.Api/wwwroot/js/dynamic-purchase-order-report.js",
+    "src/ERP.UnitTests/DynamicPurchaseOrderGroupingTests.cs",
+    "docs/dynamic-purchase-order-report.md",
+    ".ai/**"
+  ],
+  "validation_profile": "safe",
+  "depends_on": [
+    "ERP-125",
+    "ERP-126"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "completion_mode": "build",
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only bounded read-only feature"
+  }
+}
