@@ -2,7 +2,7 @@
   "id": "ERP-153",
   "title": "Visualize supplier purchase exposure count groups",
   "description": "A purchasing user views a page-only count distribution in the existing dynamic supplier exposure designer. Development only. Reuse ERP-148 authorized bounded preview over ERP-031; keep all grouping to the current page, recheck current-user purchase-order menu and use existing HTTP operation audit. Preserve unknown settlement/receipt evidence, distinct currencies and ambiguous/unavailable links; never infer an accounts-payable balance or payment authority. Invalid modes and missing permission fail closed. No arbitrary SQL, migration, production SQL, real database execution, writes, secrets/.env change or deployment. Verify focused tests and safe Release build/test; no browser acceptance.",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "medium",
   "acceptance_criteria": [
     "Designer offers only ERP-152 grouping keys and sends selected key with the existing authorized page request.",
@@ -46,5 +46,5 @@
     "status": "not_required",
     "reason": "Development-only bounded read-only feature"
   },
-  "attempts": 0
+  "attempts": 1
 }

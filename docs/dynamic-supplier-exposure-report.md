@@ -138,6 +138,23 @@ CSV 只导出当前预览页选定列证据，`POST` 由既有 `OperationLogMidd
 - 授权、只读与审计与预览完全一致：每次请求重新校验当前登录用户与 `purchase-order` 采购订单菜单授权（fail closed），
   全程只读不写库，`POST` 由既有 `OperationLogMiddleware` 记录审计。
 
+## 分组计数可视化（ERP-153）
+
+采购用户在 ERP-149 字段设计器内可视化 ERP-152 的「当前授权预览页」采购订单张数分布，全程只读、只按当前页计数。
+
+- 设计器新增「② 分组计数」选择器（`id="spe-des-groupby"`），只提供 ERP-152 允许的分组键：`none` / `supplier` /
+  `currency` / `linkStatus` / `receiptStatus`（`SPE_GROUP_KEYS` 白名单，无自由输入）；非法 / 缺失分组键经
+  `speDesGroupKey` fail closed 回落 `none`，绝不进入请求；
+- 预览请求体由 `speDesBuildRequest` 始终携带 `groupBy`（= 选中的白名单键），复用既有有界、已授权预览
+  （每次请求重新校验身份 / `purchase-order` 采购订单菜单授权 / 字段 / 筛选 / 页大小），全程只读不写库；
+- 图表 `speDesGroupChartHtml` 渲染为安全条形图：供应商 / 币种为动态分组（只出现本页存在的取值，按供应商 Id / 币种升序），
+  链接状态（linked / ambiguous / unavailable）与收货状态（none / partial / complete / over_received / unknown）为固定证据分类，
+  空分类计数为 0 仍显示，「链接不唯一」「无可用链接」与「未知（超出派生上限）」保持可见；标签与计数全部转义、绝不注入 HTML，
+  未知计数不回落 0；动态分组空页显示可见提示，翻页后图表随 `view.groups` 重渲染；
+- 图表标注「仅当前预览页，非全量合计」：**计数只是当前预览页采购订单张数**，不是全量合计、绝不求和任何金额或数量、
+  绝不跨币种合并或换算，也从结构上杜绝应付余额 / 付款授权推断；
+- 权限 / 网络失败与预览一致（fail closed，界面可见拒绝原因，不暴露范围外数据）。
+
 ## 文件地图
 
 - `src/ERP.Application/DTOs/DynamicSupplierExposureReportDtos.cs`：目录 / 请求 / 结果 DTO（含 ERP-152 分组计数 DTO）；
@@ -148,5 +165,6 @@ CSV 只导出当前预览页选定列证据，`POST` 由既有 `OperationLogMidd
 - `src/ERP.UnitTests/DynamicSupplierExposureGroupingTests.cs`：分组计数单元测试（ERP-152，内存库，不连 SQL Server、不启动 API）；
 - `src/ERP.UnitTests/DynamicSupplierExposureExcelTests.cs`：Excel 导出单元测试（ERP-150，内存库，不连 SQL Server、不启动 API）；
 - `src/ERP.UnitTests/DynamicSupplierExposurePdfTests.cs`：PDF 导出单元测试（ERP-151，内存库，不连 SQL Server、不启动 API）；
-- `src/ERP.Api/wwwroot/js/supplier-purchase-exposure.js`：ERP-031 工作台 + ERP-149 前端字段设计器 + ERP-150 Excel 导出（`speDesExportExcel`）+ ERP-151 PDF 导出（`speDesExportPdf`，纯函数可 Node 单测）；
-- `tests/automation/dynamic_supplier_exposure_ui.test.js`：ERP-149 前端 UI 逻辑单测（Node，无需浏览器）。
+- `src/ERP.Api/wwwroot/js/supplier-purchase-exposure.js`：ERP-031 工作台 + ERP-149 前端字段设计器 + ERP-150 Excel 导出（`speDesExportExcel`）+ ERP-151 PDF 导出（`speDesExportPdf`，纯函数可 Node 单测）+ ERP-153 分组计数可视化（`speDesGroupChartHtml` / `speDesGroupSelectHtml`）；
+- `tests/automation/dynamic_supplier_exposure_ui.test.js`：ERP-149 前端 UI 逻辑单测（Node，无需浏览器）；
+- `tests/automation/dynamic_supplier_exposure_grouping_ui.test.js`：ERP-153 前端分组计数 UI 逻辑单测（Node，无需浏览器）。
