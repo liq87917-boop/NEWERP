@@ -118,6 +118,7 @@ public class DynamicSupplierAgingReportController : ControllerBase
         DynamicSupplierAgingReportRules.ValidateDateRange(request.DueDateFrom, request.DueDateTo, "到期日");
         DynamicSupplierAgingReportRules.ValidateAsOfDate(request.AsOfDate);
         DynamicSupplierAgingReportRules.ValidatePageSize(request.PageSize);
+        var groupBy = DynamicSupplierAgingReportRules.NormalizeGroupBy(request.GroupBy);
         var page = request.Page < 1 ? 1 : request.Page;
 
         // 3) 复用 ERP-068 权威派生（供应商 / 币种 / 状态 / 日期 / as-of 筛选 + 稳定分页），全程只读不写库
@@ -141,9 +142,13 @@ public class DynamicSupplierAgingReportController : ControllerBase
         // 4) 投影选定列（保持请求顺序；仅返回当前页发票证据行，未知到期日 / 币种 / 无效证据照实保留）
         var columns = fieldKeys.Select(k => DynamicSupplierAgingReportRules.GetField(k)!).ToList();
         var invoiceRows = report.Groups.SelectMany(g => g.Invoices).ToList();
-        var rows = invoiceRows
-            .Select(i => DynamicSupplierAgingReportRules.BuildRow(BuildSourceRow(i), fieldKeys))
+        var sourceRows = invoiceRows.Select(BuildSourceRow).ToList();
+        var rows = sourceRows
+            .Select(s => DynamicSupplierAgingReportRules.BuildRow(s, fieldKeys))
             .ToList();
+
+        // 5) 分组计数（ERP-144）：只统计当前授权预览页的发票张数，绝不求和任何金额、绝不跨币种合并
+        var groups = DynamicSupplierAgingReportRules.BuildGroupCounts(sourceRows, groupBy);
 
         return new DynamicSupplierAgingReportPageDto(
             columns,
@@ -154,7 +159,9 @@ public class DynamicSupplierAgingReportController : ControllerBase
             report.TotalPages,
             DynamicSupplierAgingReportRules.ReadOnlyText,
             DynamicSupplierAgingReportRules.BoundaryText,
-            DynamicSupplierAgingReportRules.DisclaimerText);
+            DynamicSupplierAgingReportRules.DisclaimerText,
+            groupBy,
+            groups);
     }
 
     /// <summary>把单张 ERP-068 发票证据行展开为整行「字段 → 值」字典（仅白名单字段，供 <see cref="DynamicSupplierAgingReportRules.BuildRow"/> 投影）</summary>

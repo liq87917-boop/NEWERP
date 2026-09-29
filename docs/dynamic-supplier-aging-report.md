@@ -136,6 +136,22 @@ ERP-068 供应商对账与账龄工作台的既有筛选与稳定分页，预览
 
 `src/ERP.UnitTests/DynamicSupplierAgingPdfTests.cs`（内存库，不连 SQL Server、不启动 API）覆盖：PDF 签名与内容类型、A4 页面边界（行列页）、选定列顺序与行值、原币分行、未知到期日 / 未知剩余 / 未知 / 无效分配证据显式保留（null →「未知」）、嵌入中文黑体 SimHei、字体缺失显式失败、宽列集拆分为多列页、权限 / 身份 fail closed、页大小超限 / 未知字段拒绝、空页，以及只读不写库。
 
+## 当前页发票张数分组计数（ERP-144）
+
+`POST /api/supplier-reconciliation-aging/report` 的请求体新增 `groupBy`（仅 `none` / `supplier` / `currency` / `agingBucket` / `allocationState`；无效取值在读取任何源数据之前即拒绝 `InvalidParameter`，fail closed）。当请求分组时，响应页新增：
+
+- `groupBy`：归一化后的分组键（默认 `none`）；
+- `groups`：`[{ key, label, count }]`，只给出「当前授权预览页」按分组键的**发票张数**分布，绝不求和任何金额、绝不跨币种合并或换算。
+
+分组口径：
+
+- `supplier`：动态分组，只出现本页存在的供应商，按供应商 Id 升序；`label` 为供应商名称（缺失时「供应商 #Id」）；
+- `currency`：动态分组，只出现本页存在的币种，按币种升序；`label` 为币种代码；只计数、绝不跨币种求和金额；
+- `agingBucket`：固定分类，始终返回 5 个账龄桶 + 「未知到期日」（`not_due` / `overdue_1_30` / `overdue_31_60` / `overdue_61_90` / `overdue_over_90` / `unknown_due_date`），空分类计数为 0；未知到期日（`agingBucket` 为 null）独立成组、绝不推算；
+- `allocationState`：固定分类，始终返回 `none` / `historical_only` / `partial` / `full` / `over_allocated` / `unknown`，空分类计数为 0；无效证据（`over_allocated`）与未知证据（`unknown`）保持可见、绝不修复或合并。
+
+`none` 或不分组时 `groups` 为空；固定分类在空页仍返回全部分类、计数为 0；动态分组在空页返回空列表。分组只统计当前页、非全量合计。全程只读、无写入，`POST` 由既有 `OperationLogMiddleware` 记录审计。
+
 ## 文件地图
 
 - `src/ERP.Application/DTOs/DynamicSupplierAgingReportDtos.cs`：目录 / 请求 / 结果 DTO；
@@ -145,5 +161,6 @@ ERP-068 供应商对账与账龄工作台的既有筛选与稳定分页，预览
 - `src/ERP.UnitTests/DynamicSupplierAgingReportTests.cs`：单元测试（内存库，不连 SQL Server、不启动 API）；
 - `src/ERP.UnitTests/DynamicSupplierAgingExcelTests.cs`：ERP-142 Excel 导出单元测试（内存库，不连 SQL Server、不启动 API）；
 - `src/ERP.UnitTests/DynamicSupplierAgingPdfTests.cs`：ERP-143 PDF 导出单元测试（内存库，不连 SQL Server、不启动 API）；
+- `src/ERP.UnitTests/DynamicSupplierAgingGroupingTests.cs`：ERP-144 页面分组计数单元测试（内存库，不连 SQL Server、不启动 API）；
 - `src/ERP.Api/wwwroot/js/supplier-reconciliation-aging.js`：ERP-068 工作台 + ERP-141 前端字段设计器（`openSupplierAgingDesigner`，纯函数可 Node 单测）；
 - `tests/automation/dynamic_supplier_aging_report_ui.test.js`：ERP-141 前端 UI 逻辑单测（Node，无需浏览器）。

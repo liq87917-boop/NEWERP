@@ -68,6 +68,47 @@ public static class DynamicSupplierAgingReportRules
     public static readonly string[] SupportedAllocationStates =
         { AllocationNone, AllocationHistoricalOnly, AllocationPartial, AllocationFull };
 
+    // ==================== 0.2 分组键（ERP-144） ====================
+
+    /// <summary>不分组（默认）</summary>
+    public const string GroupNone = "none";
+
+    /// <summary>按供应商分组</summary>
+    public const string GroupSupplier = "supplier";
+
+    /// <summary>按币种分组</summary>
+    public const string GroupCurrency = "currency";
+
+    /// <summary>按账龄分桶分组（未知到期日独立成组）</summary>
+    public const string GroupAgingBucket = "agingBucket";
+
+    /// <summary>按分配状态分组（含读取时派生的 over_allocated / unknown）</summary>
+    public const string GroupAllocationState = "allocationState";
+
+    /// <summary>分配状态读取时派生取值：有效已分配超过含税总额（无效证据）</summary>
+    public const string AllocationOverAllocated = "over_allocated";
+
+    /// <summary>分配状态读取时派生取值：命中系统有界读取上限（未知）</summary>
+    public const string AllocationUnknown = "unknown";
+
+    /// <summary>账龄分桶取值（与 ERP-068 SupplierReconciliationAgingSemantics 同源，仅分组计数用）</summary>
+    public const string BucketNotDue = "not_due";
+    public const string BucketOverdue1To30 = "overdue_1_30";
+    public const string BucketOverdue31To60 = "overdue_31_60";
+    public const string BucketOverdue61To90 = "overdue_61_90";
+    public const string BucketOverdueOver90 = "overdue_over_90";
+
+    /// <summary>未知到期日分组桶名（独立分组、不是账龄桶；到期日为 null 时绝不推算）</summary>
+    public const string UnknownDueDateBucket = "unknown_due_date";
+
+    /// <summary>分组计数用的全部分配状态取值（确定性顺序；over_allocated / unknown 保持可见）</summary>
+    public static readonly string[] GroupAllocationStates =
+        { AllocationNone, AllocationHistoricalOnly, AllocationPartial, AllocationFull, AllocationOverAllocated, AllocationUnknown };
+
+    /// <summary>分组计数用的全部账龄分桶取值（确定性顺序；未知到期日独立成组）</summary>
+    public static readonly string[] GroupAgingBuckets =
+        { BucketNotDue, BucketOverdue1To30, BucketOverdue31To60, BucketOverdue61To90, BucketOverdueOver90, UnknownDueDateBucket };
+
     // ==================== 1. 文案 ====================
 
     /// <summary>只读声明（接口与文档统一声明）</summary>
@@ -280,6 +321,132 @@ public static class DynamicSupplierAgingReportRules
         if (pageSize < 1 || pageSize > MaxPageSize)
             throw BusinessException.InvalidParameter($"每页条数必须在 1~{MaxPageSize} 之间");
     }
+
+    // ==================== 4.1 分组计数（ERP-144） ====================
+
+    /// <summary>
+    /// 规范化分组键（fail closed）：空 / 留空 = 不分组（none）；仅接受 none / supplier / currency / agingBucket / allocationState（大小写不敏感）；
+    /// 未知取值显式拒绝。
+    /// </summary>
+    public static string NormalizeGroupBy(string? groupBy)
+    {
+        if (string.IsNullOrWhiteSpace(groupBy))
+            return GroupNone;
+
+        var normalized = groupBy.Trim();
+        if (string.Equals(normalized, GroupNone, StringComparison.OrdinalIgnoreCase)) return GroupNone;
+        if (string.Equals(normalized, GroupSupplier, StringComparison.OrdinalIgnoreCase)) return GroupSupplier;
+        if (string.Equals(normalized, GroupCurrency, StringComparison.OrdinalIgnoreCase)) return GroupCurrency;
+        if (string.Equals(normalized, GroupAgingBucket, StringComparison.OrdinalIgnoreCase)) return GroupAgingBucket;
+        if (string.Equals(normalized, GroupAllocationState, StringComparison.OrdinalIgnoreCase)) return GroupAllocationState;
+
+        throw BusinessException.InvalidParameter(
+            $"无效的分组键: {groupBy}（可选：none / supplier / currency / agingBucket / allocationState）");
+    }
+
+    /// <summary>
+    /// 分组发票张数分布（ERP-144）：从「当前授权预览页」的发票证据行计算张数分布，只统计张数、绝不求和任何金额、绝不跨币种合并或换算。
+    /// <para>supplier / currency 为动态分组（只出现本页存在的取值，按供应商 Id / 币种升序）；agingBucket 与 allocationState 为固定证据分类，
+    /// 空分类始终保留（计数可为 0），其中未知到期日与 over_allocated / unknown 分配证据保持可见；none / 空页返回空列表。</para>
+    /// </summary>
+    public static List<DynamicSupplierAgingReportGroupDto> BuildGroupCounts(
+        IEnumerable<IReadOnlyDictionary<string, object?>> rows, string groupBy)
+    {
+        var list = (rows ?? Array.Empty<IReadOnlyDictionary<string, object?>>()).ToList();
+        return NormalizeGroupBy(groupBy) switch
+        {
+            GroupSupplier => BuildSupplierCounts(list),
+            GroupCurrency => BuildCurrencyCounts(list),
+            GroupAgingBucket => BuildAgingBucketCounts(list),
+            GroupAllocationState => BuildAllocationStateCounts(list),
+            _ => new List<DynamicSupplierAgingReportGroupDto>(),
+        };
+    }
+
+    private static List<DynamicSupplierAgingReportGroupDto> BuildSupplierCounts(
+        List<IReadOnlyDictionary<string, object?>> rows)
+    {
+        return rows
+            .GroupBy(ReadSupplierId)
+            .OrderBy(g => g.Key)
+            .Select(g =>
+            {
+                var name = ReadText(g.First(), "supplierName");
+                return new DynamicSupplierAgingReportGroupDto(
+                    $"supplier:{g.Key}",
+                    string.IsNullOrWhiteSpace(name) ? $"供应商 #{g.Key}" : name,
+                    g.Count());
+            })
+            .ToList();
+    }
+
+    private static List<DynamicSupplierAgingReportGroupDto> BuildCurrencyCounts(
+        List<IReadOnlyDictionary<string, object?>> rows)
+    {
+        return rows
+            .GroupBy(r => ReadText(r, "currency"))
+            .OrderBy(g => g.Key, StringComparer.Ordinal)
+            .Select(g => new DynamicSupplierAgingReportGroupDto(
+                $"currency:{g.Key}",
+                string.IsNullOrWhiteSpace(g.Key) ? "未知币种" : g.Key,
+                g.Count()))
+            .ToList();
+    }
+
+    private static List<DynamicSupplierAgingReportGroupDto> BuildAgingBucketCounts(
+        List<IReadOnlyDictionary<string, object?>> rows)
+    {
+        return GroupAgingBuckets
+            .Select(bucket => new DynamicSupplierAgingReportGroupDto(
+                $"agingBucket:{bucket}",
+                GroupBucketLabel(bucket),
+                rows.Count(r => EffectiveBucket(r) == bucket)))
+            .ToList();
+    }
+
+    private static List<DynamicSupplierAgingReportGroupDto> BuildAllocationStateCounts(
+        List<IReadOnlyDictionary<string, object?>> rows)
+    {
+        return GroupAllocationStates
+            .Select(state => new DynamicSupplierAgingReportGroupDto(
+                $"allocationState:{state}",
+                GroupAllocationLabel(state),
+                rows.Count(r => ReadText(r, "allocationState") == state)))
+            .ToList();
+    }
+
+    private static long ReadSupplierId(IReadOnlyDictionary<string, object?> row)
+        => row.TryGetValue("supplierId", out var v) && v is long id ? id : 0L;
+
+    private static string ReadText(IReadOnlyDictionary<string, object?> row, string key)
+        => row.TryGetValue(key, out var v) && v is string s ? s : string.Empty;
+
+    /// <summary>账龄分桶归一化（null / 缺失 = 未知到期日，独立成组，绝不推算）</summary>
+    private static string EffectiveBucket(IReadOnlyDictionary<string, object?> row)
+        => row.TryGetValue("agingBucket", out var v) && v is string s ? s : UnknownDueDateBucket;
+
+    /// <summary>账龄分桶中文文案（与 ERP-068 同源）</summary>
+    public static string GroupBucketLabel(string bucket) => bucket switch
+    {
+        BucketNotDue => "未到期",
+        BucketOverdue1To30 => "逾期 1 ~ 30 天",
+        BucketOverdue31To60 => "逾期 31 ~ 60 天",
+        BucketOverdue61To90 => "逾期 61 ~ 90 天",
+        BucketOverdueOver90 => "逾期 90 天以上",
+        UnknownDueDateBucket => "未知到期日",
+        _ => "未知分桶",
+    };
+
+    /// <summary>分配状态中文文案（与 ERP-068 同源）</summary>
+    public static string GroupAllocationLabel(string state) => state switch
+    {
+        AllocationNone => "无持久化付款引用行",
+        AllocationHistoricalOnly => "仅有历史 / 无效引用行",
+        AllocationPartial => "部分分配",
+        AllocationFull => "整笔分配",
+        AllocationOverAllocated => "无效证据（超过含税总额）",
+        _ => "未知（命中上限）",
+    };
 
     // ==================== 5. 行投影 ====================
 

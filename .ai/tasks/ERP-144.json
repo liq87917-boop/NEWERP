@@ -2,7 +2,7 @@
   "id": "ERP-144",
   "title": "Count supplier aging evidence by selected page grouping",
   "description": "A purchasing user chooses a finite grouping of the currently authorized dynamic supplier-aging evidence page and sees invoice counts without changing source records. Development only; reuse ERP-140 authorized, bounded read-only supplier-aging preview and existing HTTP audit. Work solely on the current page. Preserve explicit unknown due dates, invalid/unknown allocation evidence, draft/void separation and currency isolation. Missing permission or invalid grouping fails closed. No new schema, migration, production SQL, real database execution, payment action, ledger inference, arbitrary SQL, business writes, secrets/.env or deployment. Verify focused tests and safe Release build/test; no real-browser acceptance.",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "medium",
   "acceptance_criteria": [
     "API accepts only none/supplier/currency/agingBucket/allocationState group keys and rejects other values before source reads.",
@@ -50,5 +50,5 @@
     "status": "not_required",
     "reason": "Development-only bounded read-only feature"
   },
-  "attempts": 0
+  "attempts": 1
 }

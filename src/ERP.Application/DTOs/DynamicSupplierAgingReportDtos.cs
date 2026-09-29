@@ -37,6 +37,9 @@ public sealed class DynamicSupplierAgingReportRequest
     /// <summary>分配状态筛选（none / historical_only / partial / full；留空 = 全部）</summary>
     public string? AllocationState { get; set; }
 
+    /// <summary>分组键（仅 none / supplier / currency / agingBucket / allocationState；无效取值由服务端 fail closed 拒绝）</summary>
+    public string? GroupBy { get; set; }
+
     /// <summary>关键字（匹配发票号码 / 代码 / 供应商编码与名称 / 付款条件文本；留空 = 不过滤）</summary>
     public string? Keyword { get; set; }
 
@@ -78,6 +81,8 @@ public sealed record DynamicSupplierAgingReportCatalogDto(
 /// 行内仅包含选定的白名单发票证据字段值，不泄露范围外数据。
 /// <para>金额一律按原币分别成行：<c>currency</c> 为原币，不同币种绝不合并、不做汇率换算；未知到期日（<c>agingBucket</c> 为 null）
 /// 与未知 / 无效分配证据（<c>allocationState</c> / <c>remainingState</c> / 各计数与金额字段）照实保留，绝不推算或修复。</para>
+/// <para>ERP-144 新增 <see cref="GroupBy"/> / <see cref="Groups"/>：仅当请求分组（supplier / currency / agingBucket / allocationState）时，
+/// <see cref="Groups"/> 才给出「当前授权预览页」按分组键的发票张数分布；只统计张数、绝不求和任何金额；默认 none 时为空。</para>
 /// </summary>
 public sealed record DynamicSupplierAgingReportPageDto(
     List<DynamicSupplierAgingReportFieldDto> Columns,
@@ -88,4 +93,16 @@ public sealed record DynamicSupplierAgingReportPageDto(
     int TotalPages,
     string ReadOnlyText,
     string BoundaryText,
-    string DisclaimerText);
+    string DisclaimerText,
+    string GroupBy = "none",
+    List<DynamicSupplierAgingReportGroupDto>? Groups = null);
+
+/// <summary>
+/// 供应商对账与账龄报表页面分组计数（ERP-144，只读）：当前授权预览页内按分组键聚合的发票张数分布。
+/// 只统计发票张数、绝不求和任何金额、绝不跨币种合并或换算；未知到期日（<c>agingBucket</c> 为 null）
+/// 与无效 / 未知分配证据（<c>allocationState</c> 为 over_allocated / unknown）类别始终保留（计数可为 0）。
+/// </summary>
+public sealed record DynamicSupplierAgingReportGroupDto(
+    string Key,
+    string Label,
+    int Count);
