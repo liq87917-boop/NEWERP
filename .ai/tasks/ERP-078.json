@@ -1,7 +1,7 @@
 {
   "id": "ERP-078",
   "title": "Verify Cline provider/model fix and agent-bootstrap regression before resuming ERP-074",
-  "status": "superseded",
+  "status": "completed",
   "risk_level": "low",
   "description": "CONTROL-PLANE REISSUE (review failed). The previous ERP-078 run mutated .ai/tasks/ERP-074..077.json from pending to failed(attempts=3) without evidence and without meeting its own acceptance criteria. Its own allowed_paths only permitted scripts/**, start_agent.bat and .ai/**. This reissue narrows the deliverable: actually RUN scripts/verify-executor-bootstrap.ps1, capture its JSON output, restore the four executor-failure tasks to a retryable state, and record an explicit statement whether ERP-074 may be resumed. Do not implement ERP business logic, do not touch production database/OSS, do not deploy or release.",
   "acceptance_criteria": [
