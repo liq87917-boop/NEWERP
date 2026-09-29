@@ -1,0 +1,65 @@
+{
+  "id": "ERP-117",
+  "title": "Preview scoped dynamic customer receivable evidence report",
+  "status": "pending",
+  "risk_level": "medium",
+  "description": "User scene: an authorized user selects invoice evidence fields and bounded customer/date/currency/allocation filters to preview invoice gross, explicitly allocated receipts and arithmetic remaining evidence. Reuse the ERP-074 reconciliation engine, existing customer menu permission and SalespersonDataScopeService. Apply scope inside the EF query before Count/Skip/Take and batch evidence loading; absent scope, missing menu or invalid fields fail closed. Do not claim authoritative receivable balance, payment settlement, due-date aging or collection status. Existing HTTP operation audit records reads. Development only: no new tables/migration, production SQL, real database execution, arbitrary model SQL, writes, secret/.env change, or deployment. Run unit tests and safe build/test.",
+  "acceptance_criteria": [
+    "Authenticated catalog exposes only finite invoice and receipt-allocation evidence fields; preview rejects unknown fields, invalid filters and page size above 100 before reading data.",
+    "Preview requires existing customer menu permission and resolves salesperson scope on every request; existing reconciliation EF filters apply allowed customer IDs before count/paging and preserve known, unknown and over-allocated remaining states.",
+    "Tests cover authorized and out-of-scope customers, unmapped user, invalid fields, 100-row cap, receipt evidence states and no writes; document evidentiary limits and audit behavior."
+  ],
+  "criterion_path_map": {
+    "Authenticated catalog exposes only finite invoice and receipt-allocation evidence fields; preview rejects unknown fields, invalid filters and page size above 100 before reading data.": [
+      "src/ERP.Application/DTOs/DynamicReceivableReportDtos.cs",
+      "src/ERP.Application/Services/DynamicReceivableReportRules.cs",
+      "src/ERP.Api/Controllers/DynamicReceivableReportController.cs"
+    ],
+    "Preview requires existing customer menu permission and resolves salesperson scope on every request; existing reconciliation EF filters apply allowed customer IDs before count/paging and preserve known, unknown and over-allocated remaining states.": [
+      "src/ERP.Application/Interfaces/IDynamicReceivableReportQuery.cs",
+      "src/ERP.Application/Services/CustomerReceivableReconciliationService.cs",
+      "src/ERP.Infrastructure/Reports/DynamicReceivableReportQuery.cs",
+      "src/ERP.Infrastructure/DependencyInjection.cs",
+      "src/ERP.Api/Controllers/DynamicReceivableReportController.cs",
+      "src/ERP.Application/DTOs/DynamicReceivableReportDtos.cs"
+    ],
+    "Tests cover authorized and out-of-scope customers, unmapped user, invalid fields, 100-row cap, receipt evidence states and no writes; document evidentiary limits and audit behavior.": [
+      "src/ERP.UnitTests/DynamicReceivableReportTests.cs",
+      "src/ERP.Application/Services/DynamicReceivableReportRules.cs",
+      "docs/dynamic-receivable-report.md"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Application/DTOs/DynamicReceivableReportDtos.cs",
+    "src/ERP.Application/Services/DynamicReceivableReportRules.cs",
+    "src/ERP.Api/Controllers/DynamicReceivableReportController.cs",
+    "src/ERP.Application/Interfaces/IDynamicReceivableReportQuery.cs",
+    "src/ERP.Application/Services/CustomerReceivableReconciliationService.cs",
+    "src/ERP.Infrastructure/Reports/DynamicReceivableReportQuery.cs",
+    "src/ERP.Infrastructure/DependencyInjection.cs",
+    "src/ERP.UnitTests/DynamicReceivableReportTests.cs",
+    "docs/dynamic-receivable-report.md",
+    ".ai/**"
+  ],
+  "validation_profile": "safe",
+  "depends_on": [
+    "ERP-074",
+    "ERP-097",
+    "ERP-086"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "completion_mode": "build",
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only bounded read-only feature"
+  },
+  "attempts": 0,
+  "created_at": "2026-09-29T03:22:26.663038Z"
+}

@@ -1,0 +1,57 @@
+{
+  "id": "ERP-116",
+  "title": "Download scoped dynamic sales-order report as PDF",
+  "status": "pending",
+  "risk_level": "medium",
+  "description": "User scene: download the selected, authorized dynamic sales-order report page as a paginated PDF with Chinese headings and values. Reuse ERP-112 scoped preview and ERP-114 currency-separated page subtotals; recheck current ERP menu and salesperson scope on every export. Implement with pinned MIT PDFsharp 6.2.4 in the Infrastructure project and the available Windows SimHei font; if the required font is unavailable, return an explicit failure rather than a corrupt or glyph-missing PDF. Existing HTTP operation audit records the read-only download. Development only: no migration, production SQL, real database execution, arbitrary model SQL, irreversible operation, secret/.env change, or deployment. Run focused PDF tests plus safe build/test.",
+  "acceptance_criteria": [
+    "PDF endpoint reuses the authorized bounded preview request and selected column order, rejects invalid filters and access, and never queries outside the current salesperson scope.",
+    "PDFsharp 6.2.4 renders paginated selected rows and optional currency-separated page subtotals with Chinese text; missing font fails explicitly and no cross-currency total is invented.",
+    "Designer offers PDF download and visible failure handling; unit tests inspect PDF signature, page bound, selected fields, Chinese text/font failure and permission denial; document the Windows font prerequisite."
+  ],
+  "criterion_path_map": {
+    "PDF endpoint reuses the authorized bounded preview request and selected column order, rejects invalid filters and access, and never queries outside the current salesperson scope.": [
+      "src/ERP.Api/Controllers/DynamicSalesOrderReportController.cs",
+      "src/ERP.Infrastructure/Export/DynamicSalesOrderPdfExporter.cs"
+    ],
+    "PDFsharp 6.2.4 renders paginated selected rows and optional currency-separated page subtotals with Chinese text; missing font fails explicitly and no cross-currency total is invented.": [
+      "src/ERP.Infrastructure/ERP.Infrastructure.csproj",
+      "src/ERP.Infrastructure/Export/DynamicSalesOrderPdfExporter.cs"
+    ],
+    "Designer offers PDF download and visible failure handling; unit tests inspect PDF signature, page bound, selected fields, Chinese text/font failure and permission denial; document the Windows font prerequisite.": [
+      "src/ERP.Api/wwwroot/js/dynamic-sales-order-report.js",
+      "src/ERP.UnitTests/DynamicSalesOrderPdfTests.cs",
+      "docs/dynamic-sales-order-report.md"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/DynamicSalesOrderReportController.cs",
+    "src/ERP.Infrastructure/Export/DynamicSalesOrderPdfExporter.cs",
+    "src/ERP.Infrastructure/ERP.Infrastructure.csproj",
+    "src/ERP.Api/wwwroot/js/dynamic-sales-order-report.js",
+    "src/ERP.UnitTests/DynamicSalesOrderPdfTests.cs",
+    "docs/dynamic-sales-order-report.md",
+    ".ai/**"
+  ],
+  "validation_profile": "safe",
+  "depends_on": [
+    "ERP-112",
+    "ERP-114",
+    "ERP-115"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "completion_mode": "build",
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only bounded read-only feature"
+  },
+  "attempts": 0,
+  "created_at": "2026-09-29T03:22:26.663017Z"
+}

@@ -1,0 +1,54 @@
+{
+  "id": "ERP-118",
+  "title": "Add visual customer receivable evidence report designer",
+  "status": "pending",
+  "risk_level": "medium",
+  "description": "User scene: from the customer sales-invoice register, choose allowed invoice and receipt evidence fields, bounded filters and preview the arithmetic remaining evidence, including unknown states. Reuse only ERP-117's scoped report endpoint; a saved or guessed field key cannot bypass its catalog. Authorization, empty rows and network errors are visible without leaking data. Existing request audit covers preview calls. Development only: no arbitrary SQL, database writes, migration, real database execution, secret/.env change or deployment. Verify with Node UI logic tests and safe build/test.",
+  "acceptance_criteria": [
+    "Customer sales-invoice register opens a visual field/filter chooser populated by ERP-117 catalog, with customer/date/currency/allocation filters and no free-form SQL.",
+    "Preview renders only selected returned columns and labels known remaining versus unknown or over-allocated evidence; authorization, empty and network failures are safe and visible.",
+    "Automated UI logic tests cover field allowlist, request bounds, safe cell rendering and failure states; document the user workflow and run Node syntax/test checks plus safe build/test."
+  ],
+  "criterion_path_map": {
+    "Customer sales-invoice register opens a visual field/filter chooser populated by ERP-117 catalog, with customer/date/currency/allocation filters and no free-form SQL.": [
+      "src/ERP.Api/wwwroot/js/customer-sales-invoices.js",
+      "src/ERP.Api/wwwroot/js/dynamic-receivable-report.js",
+      "src/ERP.Api/wwwroot/index.html"
+    ],
+    "Preview renders only selected returned columns and labels known remaining versus unknown or over-allocated evidence; authorization, empty and network failures are safe and visible.": [
+      "src/ERP.Api/wwwroot/js/dynamic-receivable-report.js"
+    ],
+    "Automated UI logic tests cover field allowlist, request bounds, safe cell rendering and failure states; document the user workflow and run Node syntax/test checks plus safe build/test.": [
+      "tests/automation/dynamic_receivable_report_ui.test.js",
+      "src/ERP.Api/wwwroot/js/dynamic-receivable-report.js",
+      "docs/dynamic-receivable-report.md"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Api/wwwroot/js/customer-sales-invoices.js",
+    "src/ERP.Api/wwwroot/js/dynamic-receivable-report.js",
+    "src/ERP.Api/wwwroot/index.html",
+    "tests/automation/dynamic_receivable_report_ui.test.js",
+    "docs/dynamic-receivable-report.md",
+    ".ai/**"
+  ],
+  "validation_profile": "safe",
+  "depends_on": [
+    "ERP-117"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "completion_mode": "build",
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only bounded read-only feature"
+  },
+  "attempts": 0,
+  "created_at": "2026-09-29T03:22:26.663048Z"
+}

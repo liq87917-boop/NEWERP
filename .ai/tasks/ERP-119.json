@@ -1,0 +1,56 @@
+{
+  "id": "ERP-119",
+  "title": "Export selected dynamic customer receivable evidence page to Excel",
+  "status": "pending",
+  "risk_level": "medium",
+  "description": "User scene: download the currently selected, scoped invoice and receipt-allocation evidence page as xlsx, with explicit known/unknown remaining state and original currency. Revalidate current user, existing customer menu, salesperson scope, selected fields and page cap on every export; reuse ERP-117 preview and existing ExcelExporter. Text with spreadsheet formula prefixes must stay literal. No authoritative balance or cross-currency sum. Existing HTTP audit records the download. Development only: no model SQL, database writes, migration, real database execution, secret/.env change, or deployment. Verify workbook tests and safe build/test.",
+  "acceptance_criteria": [
+    "Excel endpoint reuses the current authorized bounded preview and selected field order, rechecks menu/data scope and fails closed for invalid filters or out-of-scope customers.",
+    "Workbook uses existing ExcelExporter for only the current page, preserves currency and known/unknown/over-allocated remaining states, and keeps formula-leading text literal.",
+    "Designer downloads the selected report and handles authorization/empty failures; tests inspect xlsx fields, row cap, formula text and scope; document evidence limits."
+  ],
+  "criterion_path_map": {
+    "Excel endpoint reuses the current authorized bounded preview and selected field order, rechecks menu/data scope and fails closed for invalid filters or out-of-scope customers.": [
+      "src/ERP.Api/Controllers/DynamicReceivableReportController.cs",
+      "src/ERP.Application/DTOs/DynamicReceivableReportDtos.cs"
+    ],
+    "Workbook uses existing ExcelExporter for only the current page, preserves currency and known/unknown/over-allocated remaining states, and keeps formula-leading text literal.": [
+      "src/ERP.Api/Controllers/DynamicReceivableReportController.cs",
+      "src/ERP.Application/Services/DynamicReceivableReportRules.cs"
+    ],
+    "Designer downloads the selected report and handles authorization/empty failures; tests inspect xlsx fields, row cap, formula text and scope; document evidence limits.": [
+      "src/ERP.Api/wwwroot/js/dynamic-receivable-report.js",
+      "src/ERP.UnitTests/DynamicReceivableExcelTests.cs",
+      "docs/dynamic-receivable-report.md"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/DynamicReceivableReportController.cs",
+    "src/ERP.Application/DTOs/DynamicReceivableReportDtos.cs",
+    "src/ERP.Application/Services/DynamicReceivableReportRules.cs",
+    "src/ERP.Api/wwwroot/js/dynamic-receivable-report.js",
+    "src/ERP.UnitTests/DynamicReceivableExcelTests.cs",
+    "docs/dynamic-receivable-report.md",
+    ".ai/**"
+  ],
+  "validation_profile": "safe",
+  "depends_on": [
+    "ERP-117",
+    "ERP-118"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "completion_mode": "build",
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only bounded read-only feature"
+  },
+  "attempts": 0,
+  "created_at": "2026-09-29T03:22:26.663056Z"
+}
