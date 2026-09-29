@@ -87,6 +87,29 @@ public class DynamicSalesOrderReportController : ControllerBase
             $"SalesOrderReport_{DateTime.Now:yyyyMMddHHmmss}.xlsx");
     }
 
+    /// <summary>
+    /// 导出当前页为 PDF（ERP-116，只读）：复用「有界、已授权预览」与选定列顺序（重新校验身份 / 菜单授权 /
+    /// 字段 / 筛选 / 页大小 / 业务员数据范围），以 PDFsharp 6.2.4 分页渲染选定列（中文黑体 SimHei），
+    /// 可选按分组追加「本页小计」（币种分开）。缺失黑体字体时显式失败（不产出乱码 / 缺字 PDF）。
+    /// </summary>
+    [HttpPost("export/pdf")]
+    public async Task<IActionResult> ExportPdf([FromBody] DynamicSalesOrderReportRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        // 分组键 fail closed + 补齐小计所需字段，与预览同口径
+        var groupBy = DynamicSalesOrderReportRules.NormalizeGroupBy(request.GroupBy);
+        if (groupBy != DynamicSalesOrderReportRules.GroupNone)
+            request.Fields = DynamicSalesOrderReportRules.EnsureGroupingFields(request.Fields, groupBy);
+
+        // 复用同一有界、已授权预览：重新校验身份 / 菜单授权 / 字段 / 筛选 / 页大小 / 数据范围
+        var page = await _query.PreviewAsync(request, CurrentUserId());
+        var groups = DynamicSalesOrderReportRules.BuildGroupSubtotals(page.Rows, groupBy);
+
+        var bytes = DynamicSalesOrderPdfExporter.Export(page, groups, groupBy);
+        return File(bytes, "application/pdf", $"SalesOrderReport_{DateTime.Now:yyyyMMddHHmmss}.pdf");
+    }
+
     /// <summary>用 ExcelExporter 生成数据工作表；分组时在同一工作簿追加「本页小计」工作表（币种分开）</summary>
     private static byte[] BuildWorkbook(
         DynamicSalesOrderReportPageDto page,

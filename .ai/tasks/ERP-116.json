@@ -1,7 +1,7 @@
 {
   "id": "ERP-116",
   "title": "Download scoped dynamic sales-order report as PDF",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "medium",
   "description": "User scene: download the selected, authorized dynamic sales-order report page as a paginated PDF with Chinese headings and values. Reuse ERP-112 scoped preview and ERP-114 currency-separated page subtotals; recheck current ERP menu and salesperson scope on every export. Implement with pinned MIT PDFsharp 6.2.4 in the Infrastructure project and the available Windows SimHei font; if the required font is unavailable, return an explicit failure rather than a corrupt or glyph-missing PDF. Existing HTTP operation audit records the read-only download. Development only: no migration, production SQL, real database execution, arbitrary model SQL, irreversible operation, secret/.env change, or deployment. Run focused PDF tests plus safe build/test.",
   "acceptance_criteria": [
@@ -52,6 +52,6 @@
     "status": "not_required",
     "reason": "Development-only bounded read-only feature"
   },
-  "attempts": 0,
+  "attempts": 1,
   "created_at": "2026-09-29T03:22:26.663017Z"
 }

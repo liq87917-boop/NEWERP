@@ -12,6 +12,7 @@
 | GET | `/api/sales-orders/report` | 返回有限白名单字段目录（需登录 + 销售订单菜单授权） |
 | POST | `/api/sales-orders/report` | 按选定字段与有界筛选预览当前账号数据范围内的订单 |
 | POST | `/api/sales-orders/report/export` | 按同一请求体导出当前页为 xlsx（只读；可选分组页面小计，ERP-115） |
+| POST | `/api/sales-orders/report/export/pdf` | 按同一请求体导出当前页为 PDF（只读；可选分组页面小计，ERP-116） |
 
 请求体（POST，`DynamicSalesOrderReportRequest`）：
 
@@ -157,4 +158,48 @@ ERP-114 新增 `groupBy`（规范化后的分组键）与 `groups`（仅当分�
 - 公式前导文本转义（`=1+1` 等保持字面、非公式单元格）；
 - 分组导出的小计工作表（币种分开、条数 / 金额）；
 - 无身份 / 无菜单授权 / 越界业务员 / 页大小超限拒绝；
+
+## 11. PDF 导出（ERP-116）
+
+### 11.1 接口
+
+- `POST /api/sales-orders/report/export/pdf`：请求体与预览完全相同（`DynamicSalesOrderReportRequest`），
+  只导出「当前页」的选定列，并以 PDFsharp 6.2.4 分页渲染；可选按分组（customer / month）追加「本页小计」（币种分开）。
+- 文件名 `SalesOrderReport_yyyyMMddHHmmss.pdf`；内容类型 `application/pdf`。
+
+### 11.2 字体前提（Windows）
+
+- PDF 中文表头与数值固定使用 **Windows 黑体（SimHei，`C:\Windows\Fonts\simhei.ttf`）**。
+- 生成前先校验字体文件存在：**找不到 SimHei 时显式失败**（返回「未找到中文字体 SimHei」业务错误），
+  **绝不产出乱码或缺字的 PDF**，也不替换为其它字体。
+- 因此运行导出功能的主机需安装中文（简体）黑体字体；缺少时请通过 Windows「语言 → 简体中文补充字体」安装。
+
+### 11.3 安全与边界（导出时重新校验）
+
+1. **身份 / 菜单授权**：与预览、Excel 导出同源，复用 `DynamicSalesOrderReportQuery.PreviewAsync`，
+   每次请求重新校验登录用户与 `sales-order` 菜单授权（fail closed），不缓存权限。
+2. **数据范围**：复用 ERP-097 业务员数据范围，只导出当前账号可见行；越界筛选导出为空。
+3. **字段 / 筛选 / 页大小**：与预览相同的白名单字段、状态 / 币种枚举、日期区间与 `1~200` 页大小校验，
+   无效请求在读取前拒绝。
+4. **只导当前页**：只导出请求 `page` / `pageSize` 对应的那一页，不是全量导出。
+5. **分页渲染**：A4 纵向、固定行高，超出一页自动分页并重复表头；单页最多 `pageSize ≤ 200` 行。
+6. **币种安全小计**：分组小计与预览 `groups` 同源，按币种分开统计条数与金额，绝不跨币种换算或相加，
+   也不生成任何跨币种合计。
+7. **只读 + 审计**：无写入、无任意 SQL；`POST` 由既有 `OperationLogMiddleware` 记录审计（动作「导出」）。
+
+### 11.4 前端（设计器）
+
+- 「📄 导出 PDF」按钮与预览 / Excel 共用同一请求体（当前字段 / 筛选 / 分组 / 页码）；
+- 成功（`application/pdf` 附件）触发浏览器下载；授权失败（`2000/2002/2003`）、字体缺失与网络失败在结果区可见；
+  空页正常下载仅表头文件。
+
+### 11.5 测试覆盖（`ERP.UnitTests/DynamicSalesOrderPdfTests.cs`）
+
+- PDF 签名（`%PDF-`）与内容类型 / 文件名；
+- 分页（少行单页、多行多页）；
+- 嵌入中文黑体 SimHei（`/BaseFont /SimHei` + `/FontFile2`），而非缺字替换字体；
+- 字体缺失显式失败（`InternalError`，消息含 SimHei）；
+- 中文布尔 / 日期 / 数值单元格格式化；
+- 无身份 / 无菜单授权 / 页大小超限拒绝；币种分开小计不跨币种合计；只读不写库。
+
 - 空页返回仅表头工作簿；只读不写库。

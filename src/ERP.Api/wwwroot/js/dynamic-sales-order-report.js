@@ -334,6 +334,7 @@ function dsorRender() {
     <div class="modal-footer">
       <button class="btn btn-primary" onclick="dsorPreview(1)">预览</button>
       <button class="btn btn-neutral" onclick="dsorExport()">📥 导出 Excel</button>
+      <button class="btn btn-neutral" onclick="dsorExportPdf()">📄 导出 PDF</button>
       <button class="btn btn-neutral" onclick="closeModal()">关闭</button>
     </div>
     <div id="dsor-result"></div>
@@ -440,6 +441,53 @@ async function dsorExport() {
     dsorRenderResult(dsorErrorHtml('network', (err && err.message) || '无法连接到服务器'));
   }
 }
+/* 导出当前页为 PDF（ERP-116，只读）：复用预览请求体 POST /api/sales-orders/report/export/pdf；
+   成功（pdf 附件）触发下载；授权 / 无效 / 字体缺失 / 网络失败在结果区可见，不下载任何内容 */
+async function dsorExportPdf() {
+  const state = dsorBuildState(DSOR.view ? DSOR.view.page : DSOR.filters.page);
+  const req = dsorBuildRequest(state);
+
+  try {
+    const resp = await fetch('/api/sales-orders/report/export/pdf', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + (typeof localStorage !== 'undefined' ? (localStorage.getItem('erp_token') || '') : ''),
+      },
+      body: JSON.stringify(req),
+    });
+
+    const contentType = (resp.headers.get('content-type') || '');
+    if (contentType.indexOf('application/pdf') >= 0) {
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+      a.href = url;
+      a.download = '销售订单报表_' + dateStr + '.pdf';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      return;
+    }
+
+    let envelope = null;
+    try { envelope = await resp.json(); } catch (e) { /* 忽略解析失败 */ }
+    const code = envelope && envelope.code;
+    const message = (envelope && envelope.message) || 'PDF 导出失败';
+    if (code === 2000 || code === 2003) {
+      if (typeof logout === 'function') logout();
+      dsorRenderResult(dsorErrorHtml('unauthorized', message));
+      return;
+    }
+    dsorRenderResult(dsorErrorHtml(dsorKindOfCode(code), message));
+  } catch (err) {
+    dsorRenderResult(dsorErrorHtml('network', (err && err.message) || '无法连接到服务器'));
+  }
+}
+
+
 
 /* Node 单测导出（浏览器中 module 为 undefined，自动跳过） */
 if (typeof module !== 'undefined' && module.exports) {
@@ -461,5 +509,6 @@ if (typeof module !== 'undefined' && module.exports) {
     dsorResultHtml,
     dsorFieldChooserHtml,
     dsorExport,
+    dsorExportPdf,
   };
 }
