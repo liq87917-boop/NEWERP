@@ -74,6 +74,57 @@ public static class CustomerReceivableReconciliationService
     }
 
     /// <summary>
+    /// 有界、作用域化的应收账款证据预览（ERP-117，只读派生）：复用本工作台的筛选 / 派生引擎，
+    /// 并在 Count / Skip / Take 之前先应用业务员数据范围（<see cref="SalespersonDataScopeService"/>），
+    /// 再一次性批量装载本页派生证据；保留 known / unknown / over_allocated 三种剩余证据状态。
+    /// <para>边界：只读，不写库、不执行任意 SQL；越界客户被范围过滤后绝不会出现在结果中（fail closed）。</para>
+    /// </summary>
+    public static async Task<(IReadOnlyList<CustomerReceivableReconciliationInvoiceRow> Rows, int Total)>
+        ForScopedPreviewAsync(
+            IErpDbContext db,
+            CustomerReceivableReconciliationQuery query,
+            SalespersonDataScope scope)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(query);
+        ArgumentNullException.ThrowIfNull(scope);
+        query.Normalize();
+
+        var asOfDate = (query.AsOfDate ?? DateTime.Today).Date;
+
+        var source = ApplyFilters(db, query);
+        // 业务员数据范围硬边界：先过滤允许客户，再 Count / Skip / Take（绝不返回范围外客户）
+        source = SalespersonDataScopeService.FilterByCustomer(source, scope, i => i.CustomerId);
+
+        var total = await source.CountAsync();
+
+        var pageIds = await source
+            .OrderBy(i => i.CustomerId)
+            .ThenBy(i => i.Currency)
+            .ThenByDescending(i => i.InvoiceDate)
+            .ThenByDescending(i => i.Id)
+            .Skip((query.Page - 1) * query.PageSize)
+            .Take(query.PageSize)
+            .Select(i => i.Id)
+            .ToListAsync();
+
+        var invoices = new List<CustomerSalesInvoiceEvidence>();
+        if (pageIds.Count > 0)
+        {
+            var loaded = await db.CustomerSalesInvoiceEvidences.AsNoTracking()
+                .Where(i => pageIds.Contains(i.Id))
+                .ToListAsync();
+            var byId = loaded.ToDictionary(i => i.Id);
+            invoices = pageIds.Where(byId.ContainsKey).Select(id => byId[id]).ToList();
+        }
+
+        var context = await LoadPageContextAsync(db, invoices);
+        var rows = invoices.Select(i => MapInvoice(i, context, asOfDate)).ToList();
+
+        return (rows, total);
+    }
+
+    /// <summary>
     /// 有界导出（只读派生，与工作台**同一派生引擎与筛选口径**，供对账证据导出复用）：
     /// 一次性批量装载并映射全部命中发票证据（固定次数数据集访问，与发票张数 / 行数无关），
     /// 行数受 <paramref name="maxRows"/> 钳制；命中超过上限时 <paramref name="truncated"/> 置真，
