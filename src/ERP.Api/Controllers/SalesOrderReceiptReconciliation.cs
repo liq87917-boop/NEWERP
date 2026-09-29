@@ -910,14 +910,14 @@ public static class SalesOrderReceiptReconciliation
 
     /// <summary>客户订单与收款核对报表查询（GET /api/sales-orders/receipt-reconciliation-report，只读、分页有界）</summary>
     public static async Task<SalesOrderReceiptReconciliationReport> ForQueryAsync(IErpDbContext db,
-        SalesOrderReceiptReconciliationQuery query)
+        SalesOrderReceiptReconciliationQuery query, SalespersonDataScope? scope = null)
     {
         ArgumentNullException.ThrowIfNull(db);
         ArgumentNullException.ThrowIfNull(query);
         query.Normalize();
 
         // 1~2 次：筛选 + 计数 + 本页 Id（分页按客户 + 币种 + 订单日期 + 单据 Id 稳定排序，翻页不重不漏）
-        var source = ApplyFilters(db, query);
+        var source = ApplyFilters(db, query, scope);
         var total = await source.CountAsync();
         var totalPages = total == 0 ? 0 : (int)Math.Ceiling(total / (double)query.PageSize);
         var pageIds = await source
@@ -1014,9 +1014,15 @@ public static class SalesOrderReceiptReconciliation
     /// 出货状态与收款链接状态筛选（与 ERP-032 报表同一套条件，避免两处口径分叉）。
     /// 不按备注文本、金额接近度或客户汇总口径猜测任何链接。
     /// </summary>
-    private static IQueryable<SalesOrder> ApplyFilters(IErpDbContext db, SalesOrderReceiptReconciliationQuery query)
+    private static IQueryable<SalesOrder> ApplyFilters(IErpDbContext db, SalesOrderReceiptReconciliationQuery query,
+        SalespersonDataScope? scope = null)
     {
         var source = db.SalesOrders.AsNoTracking().Where(o => !o.IsDeleted);
+
+        // 业务员数据范围是硬边界：在既有显式筛选之前先按客户范围过滤（特权账号不过滤）。
+        // 供 ERP-164 动态报表预览复用；scope 为 null（既有报表端点）时保持既有行为，不改变现有接口。
+        if (scope is not null)
+            source = SalespersonDataScopeService.FilterByCustomer(source, scope, o => o.CustomerId);
 
         // 订单状态：默认排除「已取消」订单（历史订单需显式选择 cancelled / all 才可见）；软删除订单一律排除
         if (query.OrderStatusValue == SalesOrderReceiptReconciliationSemantics.OrderStatusCancelled)

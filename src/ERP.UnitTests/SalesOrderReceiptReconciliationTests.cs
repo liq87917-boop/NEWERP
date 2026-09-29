@@ -859,6 +859,51 @@ public class SalesOrderReceiptReconciliationTests
         Assert.Null(currency.LinkedReceiptAmount);
     }
 
+    // ==================== 17. 业务员数据范围（ERP-164 复用）：范围过滤在计数与分页之前 ====================
+
+    [Fact]
+    public async Task ForQueryAsync_applies_salesperson_scope_before_count_and_paging()
+    {
+        using var db = TestDbFactory.Create();
+        SeedCustomer(db, CustomerA, "甲客户");
+        SeedCustomer(db, CustomerB, "乙客户");
+        SeedOrder(db, "SO-SC1", CustomerA, Currency.USD, 100m);
+        SeedOrder(db, "SO-SC2", CustomerA, Currency.USD, 200m);
+        SeedOrder(db, "SO-SC3", CustomerB, Currency.USD, 300m);
+        SeedReceipt(db, "SK-SC1", CustomerA, 50m, Currency.USD, DocumentStatus.Approved);
+        SeedReceipt(db, "SK-SC2", CustomerB, 40m, Currency.USD, DocumentStatus.Approved);
+        await db.SaveChangesAsync();
+
+        // 受限制业务员只能看到 CustomerA：范围过滤在计数与分页之前完成（total 只统计范围内订单）
+        var scope = new SalespersonDataScope { IsPrivileged = false, AllowedCustomerIds = new HashSet<long> { CustomerA } };
+        var report = await SalesOrderReceiptReconciliation.ForQueryAsync(db, Query(pageSize: 2), scope);
+
+        Assert.Equal(2, report.Total);
+        Assert.Equal(2, report.PageOrderCount);
+        Assert.Equal(1, report.TotalPages);
+        Assert.All(report.Groups, g => Assert.Equal(CustomerA, g.CustomerId));
+        Assert.All(report.Groups.SelectMany(g => g.Orders), o => Assert.Equal(CustomerA, o.CustomerId));
+
+        // 未关联收款证据只由本页范围内客户派生：CustomerB 的收款单绝不出现
+        Assert.Single(report.UnlinkedReceipts);
+        Assert.Equal("SK-SC1", report.UnlinkedReceipts[0].ReceiptNo);
+    }
+
+    [Fact]
+    public async Task ForQueryAsync_without_scope_keeps_existing_behavior()
+    {
+        using var db = TestDbFactory.Create();
+        SeedCustomer(db, CustomerA, "甲客户");
+        SeedCustomer(db, CustomerB, "乙客户");
+        SeedOrder(db, "SO-SC4", CustomerA, Currency.USD, 100m);
+        SeedOrder(db, "SO-SC5", CustomerB, Currency.USD, 300m);
+        await db.SaveChangesAsync();
+
+        // 既有报表端点（scope 为 null）保持既有行为：不按客户范围过滤
+        var report = await SalesOrderReceiptReconciliation.ForQueryAsync(db, Query());
+        Assert.Equal(2, report.Total);
+    }
+
     // ==================== 助手 ====================
 
     private static SalesOrderReceiptReconciliationQuery Query(long? customerId = null, string? currency = null,
