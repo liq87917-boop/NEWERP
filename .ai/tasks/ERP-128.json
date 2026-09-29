@@ -2,7 +2,7 @@
   "id": "ERP-128",
   "title": "Currency-safe grouping and page subtotals for dynamic purchase orders",
   "description": "A purchasing user groups the selected report page by supplier or month and sees order count and original-currency amount subtotals. Reuse ERP-125 authorization and bounded preview, preserve selected field order, reject unknown grouping before data access, and never claim payable balance or combine currencies. Existing HTTP operation audit records read-only requests. Development only: no migration, production SQL, real database execution, arbitrary model SQL, writes, secret/.env change or deployment. Verify unit tests and safe build/test.",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "medium",
   "acceptance_criteria": [
     "API accepts only none/supplier/month grouping and computes count and amount subtotals from the same authorized bounded preview page; currencies never combine.",
@@ -50,5 +50,6 @@
     "level": "L1",
     "status": "not_required",
     "reason": "Development-only bounded read-only feature"
-  }
+  },
+  "attempts": 1
 }

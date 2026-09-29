@@ -20,10 +20,12 @@
 - `supplierId`：供应商 Id 筛选；
 - `status`：状态筛选（`Pending` / `Submitted` / `Approved` / `Rejected` / `Completed` / `Cancelled`）；
 - `currency`：币种筛选（`CNY` / `USD` / `EUR` / `HKD` / `GBP` / `JPY`）；
+- `groupBy`：分组键（仅 `none` / `supplier` / `month`；空 / 缺省 = `none`，任何其它取值在读取任何数据之前即拒绝，fail closed）；
 - `page`（默认 1）/ `pageSize`（默认 20，**上限 100**）。
 
 响应（`DynamicPurchaseOrderReportPageDto`）：`columns`（按请求顺序的选定列）、`rows`（每行仅含选定字段值）、
 `total` / `page` / `pageSize` / `totalPages`，以及 `readOnlyText` / `boundaryText` / `disclaimerText` 口径文案。
+分组时另含 `groupBy`（`none` / `supplier` / `month`）与 `groups`（当前预览页的分组小计，见 6.2）。
 
 ## 3. 数据边界与安全
 
@@ -72,6 +74,20 @@
 - 文件名 `PurchaseOrderReport_yyyyMMddHHmmss.xlsx`；内容类型
   `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`。
 
+### 6.2 分组与页面小计（ERP-128）
+
+- 路径：仍为 `POST /api/purchase-orders/report`，仅新增 `groupBy` 请求字段。
+- **分组键有限且 fail closed**：仅接受 `none`（默认）/ `supplier` / `month`（大小写不敏感）；
+  任何其它取值在读取任何采购订单之前即拒绝（`InvalidParameter`）。
+- **页面小计语义**：分组时服务端自动补齐计算所需字段（`currency` / `totalAmount` + 分组键字段 `supplierId` 或
+  `orderDate`），小计只对「当前预览页」的已授权行聚合（**非全量合计**），组内按币种分开统计条数与金额；
+  **金额只对同币种求和，绝不跨币种换算或相加**。
+- **确定性排序**：供应商按 `supplierId` 升序、月份按年月升序、组内币种按 `Currency` 枚举顺序；
+  未知币种仍单独成行并排最后。
+- **空页**：`groups` 为空列表；不分组（`none`）时 `groups` 亦为空。
+- **财务证据边界**：小计是「原始订单金额的原币加总」，**不**计算应付余额、**不**做结算、**不**跨币种换算。
+- **导出（ERP-127）**：Excel 导出仍为当前页选定列数据导出，不含小计工作表。
+
 ## 7. 测试覆盖（`ERP.UnitTests/DynamicPurchaseOrderReportTests.cs`）
 
 - 字段白名单目录（有限、白名单键、所需菜单与 100 上限、不含 `settlementProgress`）；
@@ -91,6 +107,17 @@
 - 仅导出当前页（`page` / `pageSize`，单页受 100 上限约束）；
 - 无身份 / 无采购订单菜单授权 / 页大小超限 / 未知字段拒绝（先于发送字节）；
 - 空页仅表头；只读不写库（`SaveChangesAsync` 调用次数恒为 0）。
+
+### 7.2 分组与页面小计测试（`ERP.UnitTests/DynamicPurchaseOrderGroupingTests.cs`）
+
+- 分组键规范化（`none` / `supplier` / `month`，大小写不敏感；空 = `none`）与无效分组键拒绝；
+- 按供应商分组：混合币种（CNY / USD）在同一供应商下分开小计、绝不合并；
+- 按月份分组：月份边界（1 月 31 日 vs 2 月 1 日）各成一组且按年月升序；
+- 页面小计仅统计当前页，随分页变化；
+- 选定字段自动补齐（仅选 `orderNo` / `id` 时补齐 `currency` / `totalAmount` / 分组键字段），保持请求顺序；
+- 空页无分组小计；
+- 无采购订单菜单授权（权限不足）与无效分组键（查询前拒绝）；
+- 只读不写库（`SaveChangesAsync` 调用次数恒为 0）。
 
 ## 8. 验证
 
@@ -114,4 +141,5 @@
 - 请求边界（仅选定白名单字段、页码最小 1、每页钳制到 100、筛选只含供应商 / 日期 / 状态 / 币种、空筛选不携带多余键）；
 - 安全单元格渲染（HTML 转义、null/undefined 为空、布尔 是/否、日期截断到日、状态映射中文）；
 - 空结果与失败态（空结果、口径文案、权限不足 / 网络失败 / 无效请求分别可见）；
+- 分组键有限选择（`none` / `supplier` / `month`）与页面小计渲染（按币种分开、标注「仅当前页」）；
 - 前端接线契约（工具栏入口、脚本注册、接口路径、复选框字段选择器、无任意 SQL / 自由字段名输入）。

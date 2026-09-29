@@ -25,6 +25,13 @@ const DPOR_CURRENCY_OPTS = [
   { value: 'JPY', label: 'JPY 日元' },
 ];
 
+/* 分组键枚举（与后端 NormalizeGroupBy 一致；未知取值由后端拒绝） */
+const DPOR_GROUP_OPTS = [
+  { value: 'none', label: '不分组' },
+  { value: 'supplier', label: '按供应商分组' },
+  { value: 'month', label: '按月份分组' },
+];
+
 const DPOR_STATUS_LABELS = {
   Pending: '待提交', Submitted: '已提交', Approved: '已审核',
   Rejected: '已驳回', Completed: '已完成', Cancelled: '已取消',
@@ -39,7 +46,7 @@ let DPOR = {
   fields: [],         // 目录字段（白名单）
   selectedKeys: [],   // 当前勾选的字段键（默认全选）
   suppliers: [],      // 供应商下拉来源（/api/base/suppliers）
-  filters: { startDate: '', endDate: '', supplierId: '', status: '', currency: '', page: 1, pageSize: DPOR_DEFAULT_PAGE_SIZE },
+  filters: { startDate: '', endDate: '', supplierId: '', status: '', currency: '', groupBy: 'none', page: 1, pageSize: DPOR_DEFAULT_PAGE_SIZE },
   view: null,         // 最近一次预览结果
 };
 
@@ -82,6 +89,9 @@ function dporBuildRequest(state) {
   pageSize = Math.max(1, Math.min(maxPageSize, pageSize));
 
   const req = { fields, page, pageSize };
+
+  const groupBy = DPOR_GROUP_OPTS.some(o => o.value === state.groupBy) ? state.groupBy : 'none';
+  if (groupBy && groupBy !== 'none') req.groupBy = groupBy;
 
   const startDate = state.startDate ? String(state.startDate).slice(0, 10) : null;
   const endDate = state.endDate ? String(state.endDate).slice(0, 10) : null;
@@ -137,6 +147,19 @@ function dporEmptyHtml() {
   return '<div class="empty" style="margin:8px 0">没有符合条件的采购订单（当前账号数据范围内的只读快照）。</div>';
 }
 
+/* 分组页面小计（ERP-128）：每个分组按币种分开，金额保留原币、绝不跨币种相加；仅当前预览页 */
+function dporGroupsHtml(view) {
+  const groups = (view && view.groups) || [];
+  if (!groups.length) return '';
+  const rows = groups.map(g => {
+    const subs = (g.subtotals || []).map(s =>
+      `<span>${dporEsc(s.currency)}：${s.count} 条 · 金额 ${dporEsc(s.amount)}</span>`).join('　');
+    return `<div>${dporEsc(g.label || g.key)}：${subs}</div>`;
+  }).join('');
+  return `<div class="pd-hint" style="margin:6px 0;color:#1d4ed8;background:#eff6ff;border-color:#bfdbfe">`
+    + `<b>本页小计（按币种，仅当前页）</b>${rows}</div>`;
+}
+
 /* 错误提示（授权 / 未登录 / 无效请求 / 网络失败分别可见，且不暴露任何数据） */
 function dporErrorHtml(kind, message) {
   const labels = {
@@ -159,8 +182,9 @@ function dporResultHtml(view) {
   const summary = view
     ? `<div class="text-muted" style="margin:6px 0">共 ${view.total} 条 · 第 ${view.page} 页 · 每页 ${view.pageSize} 条</div>`
     : '';
+  const groups = view ? dporGroupsHtml(view) : '';
   const empty = view && (!view.rows || view.rows.length === 0) ? dporEmptyHtml() : '';
-  return `${readOnly}${boundary}${disclaimer}${summary}${empty}${dporTableHtml(view)}`;
+  return `${readOnly}${boundary}${disclaimer}${summary}${groups}${empty}${dporTableHtml(view)}`;
 }
 
 /* 字段选择器：仅由目录白名单渲染为复选框，无自由填写的字段名 */
@@ -212,7 +236,7 @@ function dporToggleAll(checked) {
 async function openDynamicPurchaseOrderReport() {
   DPOR = {
     catalog: null, fields: [], selectedKeys: [], suppliers: [],
-    filters: { startDate: '', endDate: '', supplierId: '', status: '', currency: '', page: 1, pageSize: DPOR_DEFAULT_PAGE_SIZE },
+    filters: { startDate: '', endDate: '', supplierId: '', status: '', currency: '', groupBy: 'none', page: 1, pageSize: DPOR_DEFAULT_PAGE_SIZE },
     view: null,
   };
   const modal = document.getElementById('modal');
@@ -281,6 +305,8 @@ function dporRender() {
     `<option value="${o.value}" ${f.status === o.value ? 'selected' : ''}>${o.label}</option>`).join('');
   const currencyOptions = DPOR_CURRENCY_OPTS.map(o =>
     `<option value="${o.value}" ${f.currency === o.value ? 'selected' : ''}>${o.label}</option>`).join('');
+  const groupOptions = DPOR_GROUP_OPTS.map(o =>
+    `<option value="${o.value}" ${f.groupBy === o.value ? 'selected' : ''}>${o.label}</option>`).join('');
 
   document.getElementById('modal').innerHTML = `
   <div class="modal modal-lg" style="max-width:1100px">
@@ -304,6 +330,7 @@ function dporRender() {
         <label>供应商 <select id="dpor-supplier" style="width:100%"><option value="">全部供应商</option>${supplierOptions}</select></label>
         <label>状态 <select id="dpor-status" style="width:100%"><option value="">全部状态</option>${statusOptions}</select></label>
         <label>币种 <select id="dpor-currency" style="width:100%"><option value="">全部币种</option>${currencyOptions}</select></label>
+        <label>分组 <select id="dpor-groupby" style="width:100%">${groupOptions}</select></label>
         <label>每页 <input type="number" id="dpor-pagesize" value="${Number(f.pageSize)}" min="1" max="${maxPage}" style="width:80px"></label>
       </div>
     </div>
@@ -327,6 +354,7 @@ function dporBuildState(page) {
     supplierId: document.getElementById('dpor-supplier').value,
     status: document.getElementById('dpor-status').value,
     currency: document.getElementById('dpor-currency').value,
+    groupBy: document.getElementById('dpor-groupby').value,
     pageSize: document.getElementById('dpor-pagesize').value,
     page: page || 1,
     maxPageSize: DPOR.catalog && DPOR.catalog.maxPageSize ? DPOR.catalog.maxPageSize : 100,
@@ -434,6 +462,7 @@ if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     DPOR_STATUS_OPTS,
     DPOR_CURRENCY_OPTS,
+    DPOR_GROUP_OPTS,
     DPOR_STATUS_LABELS,
     dporEsc,
     dporStatusLabel,
@@ -443,6 +472,7 @@ if (typeof module !== 'undefined' && module.exports) {
     dporRenderCell,
     dporTableHtml,
     dporEmptyHtml,
+    dporGroupsHtml,
     dporErrorHtml,
     dporResultHtml,
     dporFieldChooserHtml,

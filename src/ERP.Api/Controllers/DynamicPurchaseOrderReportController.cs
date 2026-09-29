@@ -43,14 +43,23 @@ public class DynamicPurchaseOrderReportController : ControllerBase
         return Ok(ApiResponse<DynamicPurchaseOrderReportCatalogDto>.Success(catalog));
     }
 
-    /// <summary>按选定字段与有界筛选预览（只读、分页有界）</summary>
+    /// <summary>按选定字段与有界筛选预览（只读、分页有界）；可选按供应商 / 月份分组的页面小计（ERP-128，币种分开）</summary>
     [HttpPost]
     public async Task<IActionResult> Preview([FromBody] DynamicPurchaseOrderReportRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
 
+        // 分组键 fail closed：仅 none / supplier / month；无效取值在此直接拒绝（先于任何读取）。
+        var groupBy = DynamicPurchaseOrderReportRules.NormalizeGroupBy(request.GroupBy);
+        if (groupBy != DynamicPurchaseOrderReportRules.GroupNone)
+            request.Fields = DynamicPurchaseOrderReportRules.EnsureGroupingFields(request.Fields, groupBy);
+
         var page = await _query.PreviewAsync(request, CurrentUserId());
-        return Ok(ApiResponse<DynamicPurchaseOrderReportPageDto>.Success(page));
+
+        // 页面小计：从「同一批有界、已授权预览行」计算，组内按币种分开、绝不跨币种相加。
+        var groups = DynamicPurchaseOrderReportRules.BuildGroupSubtotals(page.Rows, groupBy);
+        return Ok(ApiResponse<DynamicPurchaseOrderReportPageDto>.Success(
+            page with { GroupBy = groupBy, Groups = groups }));
     }
 
     /// <summary>

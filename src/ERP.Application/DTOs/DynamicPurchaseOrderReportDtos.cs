@@ -39,6 +39,9 @@ public sealed class DynamicPurchaseOrderReportRequest
     /// <summary>币种筛选（可选：CNY / USD / EUR / HKD / GBP / JPY）</summary>
     public string? Currency { get; set; }
 
+    /// <summary>分组键（仅 none / supplier / month；无效取值由服务端 fail closed 拒绝）</summary>
+    public string? GroupBy { get; set; }
+
     /// <summary>页码（从 1 开始）</summary>
     public int Page { get; set; } = 1;
 
@@ -60,6 +63,8 @@ public sealed record DynamicPurchaseOrderReportCatalogDto(
 /// <summary>
 /// 采购订单报表预览结果页（ERP-125，只读）：按请求顺序返回选定列与分页行；
 /// 行内仅包含选定的白名单字段值，不泄露范围外采购订单数据。
+/// <para>ERP-128 新增 <see cref="GroupBy"/> / <see cref="Groups"/>：仅当请求分组（supplier / month）时，
+/// <see cref="Groups"/> 才给出「当前预览页」按分组键 + 币种分开的页面小计；默认 none 时为空。</para>
 /// </summary>
 public sealed record DynamicPurchaseOrderReportPageDto(
     List<DynamicPurchaseOrderReportFieldDto> Columns,
@@ -70,4 +75,24 @@ public sealed record DynamicPurchaseOrderReportPageDto(
     int TotalPages,
     string ReadOnlyText,
     string BoundaryText,
-    string DisclaimerText);
+    string DisclaimerText,
+    string GroupBy = "none",
+    List<DynamicPurchaseOrderReportGroupDto>? Groups = null);
+
+/// <summary>
+/// 采购订单报表页面小计的「币种小计」项（ERP-128，只读）：同一分组键内按订单原币分开统计条数与金额，
+/// 金额只对同币种求和，绝不跨币种换算或相加。
+/// </summary>
+public sealed record DynamicPurchaseOrderReportCurrencySubtotalDto(
+    string Currency,
+    int Count,
+    decimal Amount);
+
+/// <summary>
+/// 采购订单报表分组小计（ERP-128，只读）：当前预览页内按分组键聚合的「页面小计」（非全量合计），
+/// 每个分组内再按币种分开（<see cref="Subtotals"/>）。分组键与文案由服务端规则统一生成，确定性排序。
+/// </summary>
+public sealed record DynamicPurchaseOrderReportGroupDto(
+    string Key,
+    string Label,
+    List<DynamicPurchaseOrderReportCurrencySubtotalDto> Subtotals);
