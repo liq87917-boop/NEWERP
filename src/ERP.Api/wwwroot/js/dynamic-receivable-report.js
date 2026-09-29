@@ -32,6 +32,13 @@ const DSR_INVOICE_STATUS_OPTS = [
   { value: 'all', label: '全部状态' },
 ];
 
+/* 分组键枚举（与后端 NormalizeGroupBy 一致；未知取值由后端拒绝） */
+const DSR_GROUP_OPTS = [
+  { value: 'none', label: '不分组' },
+  { value: 'customer', label: '按客户分组' },
+  { value: 'month', label: '按月份分组' },
+];
+
 /* 剩余证据状态中文文案（与后端 RemainingStateText 同源，短文案便于着色标注） */
 const DSR_REMAINING_STATE_LABELS = {
   known: '剩余可确认',
@@ -59,7 +66,7 @@ let DSR = {
   fields: [],         // 目录字段（白名单）
   selectedKeys: [],   // 当前勾选的字段键（默认全选）
   customers: [],      // 客户下拉来源（/api/base/customers）
-  filters: { startDate: '', endDate: '', customerId: '', currency: '', allocationState: '', invoiceStatus: 'recorded', page: 1, pageSize: DSR_DEFAULT_PAGE_SIZE },
+  filters: { startDate: '', endDate: '', customerId: '', currency: '', allocationState: '', invoiceStatus: 'recorded', groupBy: 'none', page: 1, pageSize: DSR_DEFAULT_PAGE_SIZE },
   view: null,         // 最近一次预览结果
 };
 
@@ -107,6 +114,9 @@ function dsrBuildRequest(state) {
   pageSize = Math.max(1, Math.min(maxPageSize, pageSize));
 
   const req = { fields, page, pageSize };
+
+  const groupBy = DSR_GROUP_OPTS.some(o => o.value === state.groupBy) ? state.groupBy : 'none';
+  if (groupBy && groupBy !== 'none') req.groupBy = groupBy;
 
   const startDate = state.startDate ? String(state.startDate).slice(0, 10) : null;
   const endDate = state.endDate ? String(state.endDate).slice(0, 10) : null;
@@ -195,6 +205,26 @@ function dsrEmptyHtml() {
   return '<div class="empty" style="margin:8px 0">没有符合条件的应收账款证据（当前账号数据范围内的只读快照）。</div>';
 }
 
+/* 分组页面小计（ERP-120）：每个分组按币种分开统计条数、发票含税总额与有效已分摊金额；
+   剩余证据仅在可确认时显示金额，否则标注未知/超额分摊；金额保留原币、绝不跨币种相加；仅当前预览页 */
+function dsrGroupsHtml(view) {
+  const groups = (view && view.groups) || [];
+  if (!groups.length) return '';
+  const remainingText = s => {
+    if (s.remainingState === 'known' && s.remainingAmount !== null && s.remainingAmount !== undefined) {
+      return `剩余 ${dsrEsc(s.remainingAmount)}`;
+    }
+    return `剩余${dsrEsc(dsrRemainingStateLabel(s.remainingState || 'unknown'))}`;
+  };
+  const rows = groups.map(g => {
+    const subs = (g.subtotals || []).map(s =>
+      `<span>${dsrEsc(s.currency)}：${s.count} 条 · 含税总额 ${dsrEsc(s.grossAmount)} · 有效分摊 ${dsrEsc(s.effectiveAllocatedAmount)} · ${remainingText(s)}</span>`).join('　');
+    return `<div>${dsrEsc(g.label || g.key)}：${subs}</div>`;
+  }).join('');
+  return `<div class="pd-hint" style="margin:6px 0;color:#1d4ed8;background:#eff6ff;border-color:#bfdbfe">`
+    + `<b>本页小计（按币种，仅当前页）</b>${rows}</div>`;
+}
+
 /* 错误提示（授权 / 未登录 / 无效请求 / 网络失败分别可见，且不暴露任何数据） */
 function dsrErrorHtml(kind, message) {
   const labels = {
@@ -217,7 +247,8 @@ function dsrResultHtml(view) {
     ? `<div class="text-muted" style="margin:6px 0">共 ${view.total} 条 · 第 ${view.page} 页 · 每页 ${view.pageSize} 条</div>`
     : '';
   const empty = view && (!view.rows || view.rows.length === 0) ? dsrEmptyHtml() : '';
-  return `${readOnly}${boundary}${disclaimer}${summary}${empty}${dsrTableHtml(view)}`;
+  const groups = view ? dsrGroupsHtml(view) : '';
+  return `${readOnly}${boundary}${disclaimer}${summary}${groups}${empty}${dsrTableHtml(view)}`;
 }
 
 /* 字段选择器：仅由目录白名单渲染为复选框，无自由填写的字段名 */
@@ -343,6 +374,8 @@ function dsrRender() {
     `<option value="${o.value}" ${f.allocationState === o.value ? 'selected' : ''}>${o.label}</option>`).join('');
   const invoiceStatusOptions = DSR_INVOICE_STATUS_OPTS.map(o =>
     `<option value="${o.value}" ${f.invoiceStatus === o.value ? 'selected' : ''}>${o.label}</option>`).join('');
+  const groupOptions = DSR_GROUP_OPTS.map(o =>
+    `<option value="${o.value}" ${f.groupBy === o.value ? 'selected' : ''}>${o.label}</option>`).join('');
 
   document.getElementById('modal').innerHTML = `
   <div class="modal modal-lg" style="max-width:1100px">
@@ -367,6 +400,7 @@ function dsrRender() {
         <label>币种 <select id="dsr-currency" style="width:100%"><option value="">全部币种</option>${currencyOptions}</select></label>
         <label>分配状态 <select id="dsr-allocation" style="width:100%"><option value="">全部分配状态</option>${allocationOptions}</select></label>
         <label>发票状态 <select id="dsr-invoice-status" style="width:100%">${invoiceStatusOptions}</select></label>
+        <label>分组 <select id="dsr-groupby" style="width:100%">${groupOptions}</select></label>
         <label>每页 <input type="number" id="dsr-pagesize" value="${Number(f.pageSize)}" min="1" max="${maxPage}" style="width:80px"></label>
       </div>
     </div>
@@ -391,6 +425,7 @@ function dsrBuildState(page) {
     currency: document.getElementById('dsr-currency').value,
     allocationState: document.getElementById('dsr-allocation').value,
     invoiceStatus: document.getElementById('dsr-invoice-status').value,
+    groupBy: document.getElementById('dsr-groupby').value,
     pageSize: document.getElementById('dsr-pagesize').value,
     page: page || 1,
     maxPageSize: DSR.catalog && DSR.catalog.maxPageSize ? DSR.catalog.maxPageSize : DSR_MAX_PAGE_SIZE,
@@ -501,6 +536,7 @@ if (typeof module !== 'undefined' && module.exports) {
     DSR_CURRENCY_OPTS,
     DSR_ALLOCATION_OPTS,
     DSR_INVOICE_STATUS_OPTS,
+    DSR_GROUP_OPTS,
     DSR_REMAINING_STATE_LABELS,
     DSR_ALLOCATION_STATE_LABELS,
     dsrEsc,
@@ -514,6 +550,7 @@ if (typeof module !== 'undefined' && module.exports) {
     dsrRenderCell,
     dsrTableHtml,
     dsrEmptyHtml,
+    dsrGroupsHtml,
     dsrErrorHtml,
     dsrResultHtml,
     dsrFieldChooserHtml,

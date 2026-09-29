@@ -43,6 +43,9 @@ public sealed class DynamicReceivableReportRequest
     /// <summary>发票状态筛选（可选：recorded / draft / voided / all；默认 recorded；非法取值直接拒绝）</summary>
     public string? InvoiceStatus { get; set; }
 
+    /// <summary>分组键（仅 none / customer / month；无效取值由服务端 fail closed 拒绝）</summary>
+    public string? GroupBy { get; set; }
+
     /// <summary>页码（从 1 开始）</summary>
     public int Page { get; set; } = 1;
 
@@ -64,6 +67,8 @@ public sealed record DynamicReceivableReportCatalogDto(
 /// <summary>
 /// 应收账款证据报表预览结果页（ERP-117，只读）：按请求顺序返回选定列与分页行；
 /// 行内仅包含选定的白名单字段值，不泄露范围外客户 / 发票证据数据。
+/// <para>ERP-120 新增 <see cref="GroupBy"/> / <see cref="Groups"/>：仅当请求分组（customer / month）时，
+/// <see cref="Groups"/> 才给出「当前预览页」按分组键 + 币种分开的页面小计；默认 none 时为空。</para>
 /// </summary>
 public sealed record DynamicReceivableReportPageDto(
     List<DynamicReceivableReportFieldDto> Columns,
@@ -74,4 +79,29 @@ public sealed record DynamicReceivableReportPageDto(
     int TotalPages,
     string ReadOnlyText,
     string BoundaryText,
-    string DisclaimerText);
+    string DisclaimerText,
+    string GroupBy = "none",
+    List<DynamicReceivableReportGroupDto>? Groups = null);
+
+/// <summary>
+/// 应收账款证据报表页面小计的「币种小计」项（ERP-120，只读）：同一分组键内按发票 / 分摊证据原币
+/// 分开统计条数、发票含税总额与有效已分摊金额；剩余证据仅在组内全部行都「可确认」时给出金额，
+/// 任一行为 unknown / over_allocated 时该币种小计的剩余证据标注为 unknown / over_allocated（金额为 null），
+/// 绝不跨币种换算或相加、绝不轧为假余额。
+/// </summary>
+public sealed record DynamicReceivableReportCurrencySubtotalDto(
+    string Currency,
+    int Count,
+    decimal GrossAmount,
+    decimal EffectiveAllocatedAmount,
+    decimal? RemainingAmount,
+    string RemainingState);
+
+/// <summary>
+/// 应收账款证据报表分组小计（ERP-120，只读）：当前预览页内按分组键聚合的「页面小计」（非全量合计），
+/// 每个分组内再按币种分开（<see cref="Subtotals"/>）。分组键与文案由服务端规则统一生成，确定性排序。
+/// </summary>
+public sealed record DynamicReceivableReportGroupDto(
+    string Key,
+    string Label,
+    List<DynamicReceivableReportCurrencySubtotalDto> Subtotals);

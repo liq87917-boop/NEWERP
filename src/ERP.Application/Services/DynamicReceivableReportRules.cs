@@ -1,5 +1,7 @@
 using ERP.Application.Common;
 using ERP.Application.DTOs;
+using ERP.Domain.Enums;
+using System.Globalization;
 
 namespace ERP.Application.Services;
 
@@ -26,6 +28,17 @@ public static class DynamicReceivableReportRules
 
     /// <summary>每页条数上限（有界：单次请求最多返回这么多发票证据）</summary>
     public const int MaxPageSize = 100;
+
+    // ==================== 0.1 分组键（ERP-120） ====================
+
+    /// <summary>不分组（默认）</summary>
+    public const string GroupNone = "none";
+
+    /// <summary>按客户分组</summary>
+    public const string GroupCustomer = "customer";
+
+    /// <summary>按发票日期月份分组</summary>
+    public const string GroupMonth = "month";
 
     // ==================== 1. 文案 ====================
 
@@ -194,7 +207,222 @@ public static class DynamicReceivableReportRules
         return mapped;
     }
 
-    // ==================== 6. Excel 导出（ERP-119） ====================
+    // ==================== 6. 分组与小计（ERP-120） ====================
+
+    /// <summary>
+    /// 规范化分组键（fail closed）：空 / 留空 = 不分组（none）；仅接受 none / customer / month（大小写不敏感）；
+    /// 未知取值显式拒绝。
+    /// </summary>
+    public static string NormalizeGroupBy(string? groupBy)
+    {
+        if (string.IsNullOrWhiteSpace(groupBy))
+            return GroupNone;
+
+        var normalized = groupBy.Trim();
+        if (string.Equals(normalized, GroupNone, StringComparison.OrdinalIgnoreCase)) return GroupNone;
+        if (string.Equals(normalized, GroupCustomer, StringComparison.OrdinalIgnoreCase)) return GroupCustomer;
+        if (string.Equals(normalized, GroupMonth, StringComparison.OrdinalIgnoreCase)) return GroupMonth;
+
+        throw BusinessException.InvalidParameter($"无效的分组键: {groupBy}（可选：none / customer / month）");
+    }
+
+    /// <summary>
+    /// 分组时补齐计算页面小计所需的字段（currency / grossAmount / effectiveAmount / remainingAmount /
+    /// remainingState + 分组键字段 customerId 或 invoiceDate）。
+    /// <para>空 / 未指定字段 = 返回 null（由查询层按「全部白名单字段」处理，已含所需字段）；不分组时返回 null 不改动。</para>
+    /// </summary>
+    public static List<string>? EnsureGroupingFields(IEnumerable<string>? fields, string groupBy)
+    {
+        if (groupBy == GroupNone)
+            return null;
+
+        var requested = (fields ?? Array.Empty<string>())
+            .Where(f => !string.IsNullOrWhiteSpace(f))
+            .Select(f => f.Trim())
+            .ToList();
+        if (requested.Count == 0)
+            return null;
+
+        AppendIfMissing(requested, "currency");
+        AppendIfMissing(requested, "grossAmount");
+        AppendIfMissing(requested, "effectiveAmount");
+        AppendIfMissing(requested, "remainingAmount");
+        AppendIfMissing(requested, "remainingState");
+        AppendIfMissing(requested, groupBy == GroupCustomer ? "customerId" : "invoiceDate");
+        return requested;
+    }
+
+    /// <summary>
+    /// 从「当前预览页的只读行」（同一批有界、已授权行）计算分组页面小计（ERP-120）：
+    /// 按分组键聚合，组内再按币种分开统计条数、发票含税总额与有效已分摊金额；
+    /// 剩余证据仅当组内全部行都「可确认」时给出金额，任一行为 unknown / over_allocated 时该币种小计的
+    /// 剩余证据标注为 unknown / over_allocated（金额为 null，绝不轧为假余额）；金额只对同币种求和，绝不跨币种相加。
+    /// <para>分组键与组序均为确定性（客户按 Id 升序、月份按年月升序、币种按枚举顺序）；不分组或空页返回空列表。</para>
+    /// </summary>
+    public static List<DynamicReceivableReportGroupDto> BuildGroupSubtotals(
+        IReadOnlyList<Dictionary<string, object?>> rows, string groupBy)
+    {
+        var normalized = NormalizeGroupBy(groupBy);
+        if (normalized == GroupNone || rows is null || rows.Count == 0)
+            return new List<DynamicReceivableReportGroupDto>();
+
+        var buckets = new Dictionary<string, GroupBucket>(StringComparer.Ordinal);
+        foreach (var row in rows)
+        {
+            var (key, label, sortKey) = GroupBucketOf(row, normalized);
+            if (!buckets.TryGetValue(key, out var bucket))
+            {
+                bucket = new GroupBucket { Key = key, Label = label, SortKey = sortKey };
+                buckets[key] = bucket;
+            }
+
+            var currency = ReadCurrency(row);
+            var gross = ReadAmount(row, "grossAmount");
+            var effective = ReadAmount(row, "effectiveAmount");
+            var remainingState = ReadRemainingState(row);
+
+            if (!bucket.Currencies.TryGetValue(currency, out var acc))
+                acc = new CurrencyAccumulator();
+            acc.Count++;
+            acc.GrossAmount += gross;
+            acc.EffectiveAllocatedAmount += effective;
+            acc.AbsorbRemaining(remainingState, ReadNullableAmount(row, "remainingAmount"));
+            bucket.Currencies[currency] = acc;
+        }
+
+        return buckets.Values
+            .OrderBy(b => b.SortKey, StringComparer.Ordinal)
+            .Select(b => new DynamicReceivableReportGroupDto(
+                b.Key,
+                b.Label,
+                b.Currencies
+                    .OrderBy(kv => CurrencyOrder(kv.Key))
+                    .ThenBy(kv => kv.Key, StringComparer.Ordinal)
+                    .Select(kv => new DynamicReceivableReportCurrencySubtotalDto(
+                        kv.Key,
+                        kv.Value.Count,
+                        kv.Value.GrossAmount,
+                        kv.Value.EffectiveAllocatedAmount,
+                        kv.Value.RemainingAmount,
+                        kv.Value.RemainingState))
+                    .ToList()))
+            .ToList();
+    }
+
+    private sealed class GroupBucket
+    {
+        public string Key = string.Empty;
+        public string Label = string.Empty;
+        public string SortKey = string.Empty;
+        public Dictionary<string, CurrencyAccumulator> Currencies = new(StringComparer.Ordinal);
+    }
+
+    /// <summary>单个分组 × 币种的聚合器：金额只对同币种求和；剩余证据采用「矛盾 / 缺口绝不回落为可确认」的确定性合并。</summary>
+    private sealed class CurrencyAccumulator
+    {
+        public int Count;
+        public decimal GrossAmount;
+        public decimal EffectiveAllocatedAmount;
+        public decimal? RemainingAmount;
+        public string RemainingState = CustomerReceivableReconciliationRules.RemainingKnown;
+
+        /// <summary>
+        /// 合并一行剩余证据（确定性、fail closed）：over_allocated &gt; unknown &gt; known 的优先级，
+        /// 一旦出现非 known 行，该币种小计的剩余证据即降级为 unknown / over_allocated 且金额为 null（绝不轧为假余额）。
+        /// </summary>
+        public void AbsorbRemaining(string state, decimal? amount)
+        {
+            if (state == CustomerReceivableReconciliationRules.RemainingOverAllocated)
+            {
+                RemainingState = CustomerReceivableReconciliationRules.RemainingOverAllocated;
+            }
+            else if (state != CustomerReceivableReconciliationRules.RemainingKnown
+                     && RemainingState == CustomerReceivableReconciliationRules.RemainingKnown)
+            {
+                RemainingState = CustomerReceivableReconciliationRules.RemainingUnknown;
+            }
+
+            if (RemainingState == CustomerReceivableReconciliationRules.RemainingKnown)
+                RemainingAmount = (RemainingAmount ?? 0m) + (amount ?? 0m);
+            else
+                RemainingAmount = null;
+        }
+    }
+
+    private static (string Key, string Label, string SortKey) GroupBucketOf(
+        Dictionary<string, object?> row, string groupBy)
+    {
+        if (groupBy == GroupCustomer)
+        {
+            var customerId = ReadLong(row, "customerId");
+            return ($"customer:{customerId}", $"客户 #{customerId}",
+                customerId.ToString("D19", CultureInfo.InvariantCulture));
+        }
+
+        var date = ReadDate(row, "invoiceDate");
+        var yyyyMM = date.ToString("yyyy-MM", CultureInfo.InvariantCulture);
+        return ($"month:{yyyyMM}", $"{date.Year}年{date.Month}月",
+            date.ToString("yyyyMM", CultureInfo.InvariantCulture));
+    }
+
+    private static long ReadLong(Dictionary<string, object?> row, string key)
+    {
+        if (row.TryGetValue(key, out var v) && v != null)
+            return Convert.ToInt64(v, CultureInfo.InvariantCulture);
+        return 0L;
+    }
+
+    private static DateTime ReadDate(Dictionary<string, object?> row, string key)
+    {
+        if (row.TryGetValue(key, out var v) && v != null)
+        {
+            if (v is DateTime dt) return dt;
+            return Convert.ToDateTime(v, CultureInfo.InvariantCulture);
+        }
+        return DateTime.MinValue;
+    }
+
+    private static string ReadCurrency(Dictionary<string, object?> row)
+    {
+        if (row.TryGetValue("currency", out var v) && v != null)
+            return Convert.ToString(v, CultureInfo.InvariantCulture)?.Trim() ?? string.Empty;
+        return string.Empty;
+    }
+
+    private static decimal ReadAmount(Dictionary<string, object?> row, string key)
+    {
+        if (row.TryGetValue(key, out var v) && v != null)
+            return Convert.ToDecimal(v, CultureInfo.InvariantCulture);
+        return 0m;
+    }
+
+    private static decimal? ReadNullableAmount(Dictionary<string, object?> row, string key)
+    {
+        if (row.TryGetValue(key, out var v) && v != null)
+            return Convert.ToDecimal(v, CultureInfo.InvariantCulture);
+        return null;
+    }
+
+    private static string ReadRemainingState(Dictionary<string, object?> row)
+    {
+        if (row.TryGetValue("remainingState", out var v) && v != null)
+            return Convert.ToString(v, CultureInfo.InvariantCulture)?.Trim() ?? string.Empty;
+        return CustomerReceivableReconciliationRules.RemainingUnknown;
+    }
+
+    private static int CurrencyOrder(string currency)
+    {
+        // 未知币种仍单独小计（绝不并入其它币种），仅排到最后。
+        return Enum.TryParse<Currency>(currency, true, out var c) ? (int)c : int.MaxValue;
+    }
+
+    private static void AppendIfMissing(List<string> list, string key)
+    {
+        if (!list.Contains(key, StringComparer.OrdinalIgnoreCase))
+            list.Add(key);
+    }
+
+    // ==================== 7. Excel 导出（ERP-119） ====================
 
     /// <summary>电子表格公式注入风险首字符（OWASP：= / + / - / @ 及制表符 / 回车 / 换行）</summary>
     private static bool IsFormulaLeadingChar(char c)

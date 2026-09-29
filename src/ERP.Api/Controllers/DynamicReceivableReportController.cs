@@ -42,13 +42,23 @@ public class DynamicReceivableReportController : ControllerBase
         return Ok(ApiResponse<DynamicReceivableReportCatalogDto>.Success(catalog));
     }
 
-    /// <summary>按选定字段与有界筛选预览（只读、分页有界；单页上限 100）</summary>
+    /// <summary>按选定字段与有界筛选预览（只读、分页有界；单页上限 100）；可选按客户 / 月份分组的页面小计（ERP-120，币种分开）</summary>
     [HttpPost]
     public async Task<IActionResult> Preview([FromBody] DynamicReceivableReportRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
+
+        // 分组键 fail closed：仅 none / customer / month；无效取值在此直接拒绝（先于任何读取）。
+        var groupBy = DynamicReceivableReportRules.NormalizeGroupBy(request.GroupBy);
+        if (groupBy != DynamicReceivableReportRules.GroupNone)
+            request.Fields = DynamicReceivableReportRules.EnsureGroupingFields(request.Fields, groupBy);
+
         var page = await _query.PreviewAsync(request, CurrentUserId());
-        return Ok(ApiResponse<DynamicReceivableReportPageDto>.Success(page));
+
+        // 页面小计：从「同一批有界、已授权预览行」计算，组内按币种分开、绝不跨币种相加。
+        var groups = DynamicReceivableReportRules.BuildGroupSubtotals(page.Rows, groupBy);
+        return Ok(ApiResponse<DynamicReceivableReportPageDto>.Success(
+            page with { GroupBy = groupBy, Groups = groups }));
     }
 
     /// <summary>

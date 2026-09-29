@@ -188,3 +188,45 @@ dotnet test src/ERP.UnitTests/ERP.UnitTests.csproj -c Release --no-build
 - 无身份 / 无菜单授权 / 越界业务员（含越界客户空页）/ 页大小超限拒绝；
 - 空页仅表头、仅导出当前页受页大小上限约束、以及只读不写库。
 
+## 13. 分组与小计（ERP-120）
+
+### 13.1 接口
+
+- `POST /api/dynamic-receivable-report` 请求体新增 `groupBy`（可选）：仅 `none` / `customer` / `month`；
+  空 / 缺省 = `none`（不分组）；任何其它取值在读取任何数据之前即拒绝（`InvalidParameter`，fail closed）。
+- 响应 `DynamicReceivableReportPageDto` 新增 `groupBy`（回显规范化的分组键）与 `groups`：
+  仅当请求分组时，`groups` 才给出「当前预览页」按分组键 + 币种分开的页面小计；默认 `none` 时为空列表。
+
+### 13.2 页面小计语义（关键）
+
+- `groups` 是**当前预览页的小计**（page subtotal），**不是**全量合计：它只对「本次请求返回的、
+  已通过 ERP-117 权限 + ERP-097 业务员数据范围校验的同一批有界行」聚合，换页后小计随之变化。
+- 每个分组（客户 / 月份）内再**按币种分开**统计 `count`、`grossAmount`（发票含税总额）与
+  `effectiveAllocatedAmount`（有效已分摊金额）；金额只对同币种求和，**绝不跨币种换算或相加**。
+- 剩余证据 `remainingAmount` / `remainingState` 只在组内全部行都「可确认」（`known`）时给出金额；
+  任一行为 `unknown` / `over_allocated` 时，该币种小计的剩余证据标注为 `unknown` / `over_allocated`
+  且 `remainingAmount` 为 `null`（**绝不轧为假余额**）。优先级：`over_allocated` &gt; `unknown` &gt; `known`。
+- 分组与小计为纯函数（`DynamicReceivableReportRules.BuildGroupSubtotals`），确定性排序：
+  客户按 `customerId` 升序、月份按年月升序、组内币种按 `Currency` 枚举顺序；未知币种仍单独成行并排最后。
+- 分组时服务端自动补齐计算所需的 `currency` / `grossAmount` / `effectiveAmount` / `remainingAmount` /
+  `remainingState` 及分组键字段（`customerId` / `invoiceDate`），保证即使请求未选择这些字段也能得到正确、币种安全的小计。
+
+### 13.3 前端设计器
+
+- 「② 筛选」区域新增「分组」下拉（`none` / `customer` / `month`，与后端 `NormalizeGroupBy` 一致）；
+- 结果区在汇总下方渲染「本页小计（按币种，仅当前页）」，明确标注小计只针对当前页；
+  剩余证据仅当可确认时显示金额，否则显示「剩余未知 / 剩余超额分摊（无效）」而不显示假余额。
+
+### 13.4 安全与只读
+
+- 复用 ERP-117 的「角色 → 菜单」授权（`customer`）与 ERP-097 业务员数据范围，小计只来自授权可见行；
+- 全程只读：无新增表 / 列 / 迁移，无写入，无任意 SQL；请求由既有 `OperationLogMiddleware` 记录审计；
+- 不读取或打印任何连接串 / JWT / OSS 密钥或 `.env` 值。
+
+### 13.5 测试覆盖（`ERP.UnitTests/DynamicReceivableGroupingTests.cs`）
+
+- 混合币种分开小计（绝不合并）、月份边界不跨月、未选择字段时服务端补齐分组字段仍可小计；
+- 未知 / 超额分摊证据下组内剩余证据标注未知 / 超额分摊且金额为 null（不轧为假余额）；
+- 空页无分组小计、越界业务员仅本人客户分组、无效分组键拒绝、以及只读不写库。
+
+
