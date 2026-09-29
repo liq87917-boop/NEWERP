@@ -1,5 +1,6 @@
 using ERP.Application.Common;
 using ERP.Application.Interfaces;
+using ERP.Application.Services;
 using ERP.Domain.Entities;
 using ERP.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
@@ -438,14 +439,14 @@ public static class SalesOrderShipmentFinanceReport
 {
     /// <summary>出货 / 财务进度报表查询（GET /api/sales-orders/shipment-finance-report，只读、分页有界）</summary>
     public static async Task<SalesOrderShipmentFinanceReportView> ForQueryAsync(IErpDbContext db,
-        SalesOrderShipmentFinanceQuery query)
+        SalesOrderShipmentFinanceQuery query, SalespersonDataScope? scope = null)
     {
         ArgumentNullException.ThrowIfNull(db);
         ArgumentNullException.ThrowIfNull(query);
         query.Normalize();
 
         // 1~2 次：筛选 + 计数 + 本页 Id（分页按客户 + 币种 + 订单日期 + 单据 Id 稳定排序，翻页不重不漏）
-        var source = ApplyFilters(db, query);
+        var source = ApplyFilters(db, query, scope);
         var total = await source.CountAsync();
         var totalPages = total == 0 ? 0 : (int)Math.Ceiling(total / (double)query.PageSize);
         var pageIds = await source
@@ -508,9 +509,16 @@ public static class SalesOrderShipmentFinanceReport
     /// 报表筛选（只读）：客户 / 币种 / 订单日期（含首尾当天）/ 关键字，以及用与派生规则等价的既有列条件表达的状态筛选。
     /// 不按备注文本、金额接近度或客户 / 供应商汇总口径猜测任何链接。
     /// </summary>
-    private static IQueryable<SalesOrder> ApplyFilters(IErpDbContext db, SalesOrderShipmentFinanceQuery query)
+    private static IQueryable<SalesOrder> ApplyFilters(IErpDbContext db, SalesOrderShipmentFinanceQuery query,
+        SalespersonDataScope? scope)
     {
         var source = db.SalesOrders.AsNoTracking().Where(o => !o.IsDeleted);
+
+        // 业务员数据范围是硬边界：在既有显式筛选之前先按客户范围过滤（特权账号不过滤）。
+        // 供 ERP-156 动态报表预览复用；scope 为 null（既有报表端点）时保持既有行为，不改变现有接口。
+        if (scope is not null)
+            source = SalespersonDataScopeService.FilterByCustomer(source, scope, o => o.CustomerId);
+
         if (query.CustomerId.HasValue) source = source.Where(o => o.CustomerId == query.CustomerId.Value);
         if (query.CurrencyValue.HasValue) source = source.Where(o => o.Currency == query.CurrencyValue.Value);
         if (query.OrderDateFrom.HasValue) source = source.Where(o => o.OrderDate >= query.OrderDateFrom.Value);

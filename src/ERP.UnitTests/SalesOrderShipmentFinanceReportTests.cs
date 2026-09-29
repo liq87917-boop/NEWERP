@@ -840,6 +840,35 @@ public class SalesOrderShipmentFinanceReportTests
         Assert.Contains("\"uncoveredAmount\":null", json);             // 未知一律 null
         Assert.Contains("\"receivableDisclaimer\"", json);
     }
+
+    // ==================== 25. ERP-156 复用：业务员数据范围过滤在源查询内部生效 ====================
+
+    [Fact]
+    public async Task Report_applies_salesperson_customer_scope_inside_source_query()
+    {
+        using var db = TestDbFactory.Create();
+        SeedCustomer(db, CustomerA, "甲客户");
+        SeedCustomer(db, CustomerB, "乙客户");
+        var mine = SeedOrder(db, "SO-SCOPE-1", CustomerA, Currency.USD, 100m);
+        SeedDetail(db, mine.Id, ProductA, 10m);
+        var other = SeedOrder(db, "SO-SCOPE-2", CustomerB, Currency.USD, 200m);
+        SeedDetail(db, other.Id, ProductA, 20m);
+        await db.SaveChangesAsync();
+
+        // 受限制业务员只能看到 CustomerA：范围过滤应在计数与分页之前完成（total 只统计范围内订单）
+        var scope = new SalespersonDataScope
+        {
+            IsPrivileged = false,
+            AllowedCustomerIds = new HashSet<long> { CustomerA }
+        };
+        var report = await SalesOrderShipmentFinanceReport.ForQueryAsync(db, Query(), scope);
+
+        Assert.Equal(1, report.Total);
+        var row = Assert.Single(Assert.Single(report.Groups).Orders);
+        Assert.Equal(CustomerA, row.CustomerId);
+        Assert.Equal("SO-SCOPE-1", row.OrderNo);
+    }
+
     // ==================== 助手 ====================
 
     private static SalesOrderShipmentFinanceQuery Query(long? customerId = null, string? currency = null,
