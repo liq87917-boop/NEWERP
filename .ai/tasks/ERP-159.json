@@ -1,0 +1,52 @@
+{
+  "id": "ERP-159",
+  "title": "Download authorized shipment and finance progress page as PDF",
+  "description": "A sales user builds a read-only shipment and finance progress report from the existing ERP-032 authoritative derivation. Development only. Recheck current-user sales-order menu and SalespersonDataScopeService customer visibility on every request; fail closed for missing identity, denied menu, invalid fields or filters. Keep unknown quantities and linked amounts as null, preserve original currencies, and never infer receivables or payment authority. Existing HTTP operation audit covers preview and download. No arbitrary SQL, schema/migration, production SQL, real database execution, writes, secrets/.env changes or deployment. Verify focused unit/Node tests and safe Release build/test; no real-browser acceptance.",
+  "status": "pending",
+  "risk_level": "medium",
+  "acceptance_criteria": [
+    "PDF endpoint reuses ERP-156 authorized bounded preview and rechecks current-user menu, salesperson data scope, filters and selected fields before generating bytes.",
+    "PDF renders chosen order fields and Chinese labels across bounded row and column pages, preserving separate currencies and explicit unknown evidence without clipping; missing SimHei fails visibly.",
+    "Designer offers PDF with visible empty, authorization and font failures; tests inspect signature, selected order, page bounds, unknown evidence, font failure and no writes; document font prerequisite."
+  ],
+  "criterion_path_map": {
+    "PDF endpoint reuses ERP-156 authorized bounded preview and rechecks current-user menu, salesperson data scope, filters and selected fields before generating bytes.": [
+      "src/ERP.Api/Controllers/DynamicShipmentFinanceReportController.cs",
+      "src/ERP.Infrastructure/Export/DynamicShipmentFinancePdfExporter.cs"
+    ],
+    "PDF renders chosen order fields and Chinese labels across bounded row and column pages, preserving separate currencies and explicit unknown evidence without clipping; missing SimHei fails visibly.": [
+      "src/ERP.Infrastructure/Export/DynamicShipmentFinancePdfExporter.cs"
+    ],
+    "Designer offers PDF with visible empty, authorization and font failures; tests inspect signature, selected order, page bounds, unknown evidence, font failure and no writes; document font prerequisite.": [
+      "src/ERP.Api/wwwroot/js/sales-order-progress.js",
+      "src/ERP.UnitTests/DynamicShipmentFinancePdfTests.cs",
+      "docs/dynamic-shipment-finance-report.md"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/DynamicShipmentFinanceReportController.cs",
+    "src/ERP.Infrastructure/Export/DynamicShipmentFinancePdfExporter.cs",
+    "src/ERP.Api/wwwroot/js/sales-order-progress.js",
+    "src/ERP.UnitTests/DynamicShipmentFinancePdfTests.cs",
+    "docs/dynamic-shipment-finance-report.md",
+    ".ai/**"
+  ],
+  "validation_profile": "safe",
+  "depends_on": [
+    "ERP-156",
+    "ERP-157"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "completion_mode": "build",
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only bounded read-only feature"
+  }
+}

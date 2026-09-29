@@ -1,0 +1,52 @@
+{
+  "id": "ERP-158",
+  "title": "Export authorized shipment and finance progress page to Excel",
+  "description": "A sales user builds a read-only shipment and finance progress report from the existing ERP-032 authoritative derivation. Development only. Recheck current-user sales-order menu and SalespersonDataScopeService customer visibility on every request; fail closed for missing identity, denied menu, invalid fields or filters. Keep unknown quantities and linked amounts as null, preserve original currencies, and never infer receivables or payment authority. Existing HTTP operation audit covers preview and download. No arbitrary SQL, schema/migration, production SQL, real database execution, writes, secrets/.env changes or deployment. Verify focused unit/Node tests and safe Release build/test; no real-browser acceptance.",
+  "status": "pending",
+  "risk_level": "medium",
+  "acceptance_criteria": [
+    "Excel endpoint reuses ERP-156 authorized bounded preview and rechecks current-user menu, salesperson data scope, filters and selected fields before generating bytes.",
+    "Workbook contains only the current page chosen columns in requested order; unknown amounts remain unknown, currencies remain distinct and formula-leading text is literal.",
+    "Designer offers xlsx with visible empty and authorization failures; workbook tests cover column order, page cap, scope, unknowns, currencies, formula safety and no writes; document download limits."
+  ],
+  "criterion_path_map": {
+    "Excel endpoint reuses ERP-156 authorized bounded preview and rechecks current-user menu, salesperson data scope, filters and selected fields before generating bytes.": [
+      "src/ERP.Api/Controllers/DynamicShipmentFinanceReportController.cs"
+    ],
+    "Workbook contains only the current page chosen columns in requested order; unknown amounts remain unknown, currencies remain distinct and formula-leading text is literal.": [
+      "src/ERP.Api/Controllers/DynamicShipmentFinanceReportController.cs",
+      "src/ERP.Application/Services/DynamicShipmentFinanceReportRules.cs"
+    ],
+    "Designer offers xlsx with visible empty and authorization failures; workbook tests cover column order, page cap, scope, unknowns, currencies, formula safety and no writes; document download limits.": [
+      "src/ERP.Api/wwwroot/js/sales-order-progress.js",
+      "src/ERP.UnitTests/DynamicShipmentFinanceExcelTests.cs",
+      "docs/dynamic-shipment-finance-report.md"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/DynamicShipmentFinanceReportController.cs",
+    "src/ERP.Application/Services/DynamicShipmentFinanceReportRules.cs",
+    "src/ERP.Api/wwwroot/js/sales-order-progress.js",
+    "src/ERP.UnitTests/DynamicShipmentFinanceExcelTests.cs",
+    "docs/dynamic-shipment-finance-report.md",
+    ".ai/**"
+  ],
+  "validation_profile": "safe",
+  "depends_on": [
+    "ERP-156",
+    "ERP-157"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "completion_mode": "build",
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only bounded read-only feature"
+  }
+}

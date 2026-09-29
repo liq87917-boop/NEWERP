@@ -1,0 +1,48 @@
+{
+  "id": "ERP-157",
+  "title": "Add a visual shipment and finance progress field designer",
+  "description": "A sales user builds a read-only shipment and finance progress report from the existing ERP-032 authoritative derivation. Development only. Recheck current-user sales-order menu and SalespersonDataScopeService customer visibility on every request; fail closed for missing identity, denied menu, invalid fields or filters. Keep unknown quantities and linked amounts as null, preserve original currencies, and never infer receivables or payment authority. Existing HTTP operation audit covers preview and download. No arbitrary SQL, schema/migration, production SQL, real database execution, writes, secrets/.env changes or deployment. Verify focused unit/Node tests and safe Release build/test; no real-browser acceptance.",
+  "status": "pending",
+  "risk_level": "medium",
+  "acceptance_criteria": [
+    "Existing shipment and finance progress page offers a catalog-driven field chooser and sends selected fields with existing bounded filters to ERP-156 preview.",
+    "Designer renders selected order and explicit unknown shipment/finance evidence, with loading, empty, permission and network failure states; current-user data scope comes from preview.",
+    "Current-page selected-column CSV preserves unknown values and escapes formula-leading text; Node tests cover chooser, paging, rendering, CSV and failures; document workflow."
+  ],
+  "criterion_path_map": {
+    "Existing shipment and finance progress page offers a catalog-driven field chooser and sends selected fields with existing bounded filters to ERP-156 preview.": [
+      "src/ERP.Api/wwwroot/js/sales-order-progress.js"
+    ],
+    "Designer renders selected order and explicit unknown shipment/finance evidence, with loading, empty, permission and network failure states; current-user data scope comes from preview.": [
+      "src/ERP.Api/wwwroot/js/sales-order-progress.js"
+    ],
+    "Current-page selected-column CSV preserves unknown values and escapes formula-leading text; Node tests cover chooser, paging, rendering, CSV and failures; document workflow.": [
+      "src/ERP.Api/wwwroot/js/sales-order-progress.js",
+      "tests/automation/dynamic_shipment_finance_ui.test.js",
+      "docs/dynamic-shipment-finance-report.md"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Api/wwwroot/js/sales-order-progress.js",
+    "tests/automation/dynamic_shipment_finance_ui.test.js",
+    "docs/dynamic-shipment-finance-report.md",
+    ".ai/**"
+  ],
+  "validation_profile": "safe",
+  "depends_on": [
+    "ERP-156"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "completion_mode": "build",
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only bounded read-only feature"
+  }
+}

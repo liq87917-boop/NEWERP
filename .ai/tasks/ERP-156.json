@@ -1,0 +1,57 @@
+{
+  "id": "ERP-156",
+  "title": "Preview selected authorized shipment and finance progress fields",
+  "description": "A sales user builds a read-only shipment and finance progress report from the existing ERP-032 authoritative derivation. Development only. Recheck current-user sales-order menu and SalespersonDataScopeService customer visibility on every request; fail closed for missing identity, denied menu, invalid fields or filters. Keep unknown quantities and linked amounts as null, preserve original currencies, and never infer receivables or payment authority. Existing HTTP operation audit covers preview and download. No arbitrary SQL, schema/migration, production SQL, real database execution, writes, secrets/.env changes or deployment. Verify focused unit/Node tests and safe Release build/test; no real-browser acceptance.",
+  "status": "pending",
+  "risk_level": "medium",
+  "acceptance_criteria": [
+    "Authenticated catalog and preview accept only a finite ERP-032 order-evidence field allowlist and reject unknown fields, invalid customer/currency/date/status filters and page size above 200 before report reads.",
+    "Preview checks current-user sales-order menu and applies SalespersonDataScopeService customer filtering inside ERP-032 source query before count and paging, then returns selected current-page fields in requested order while retaining null unknown amounts and separate currencies.",
+    "Unit tests cover authorized and denied users, scoped counts and pages, field order, invalid filters, unknown evidence and no writes; document report limits."
+  ],
+  "criterion_path_map": {
+    "Authenticated catalog and preview accept only a finite ERP-032 order-evidence field allowlist and reject unknown fields, invalid customer/currency/date/status filters and page size above 200 before report reads.": [
+      "src/ERP.Application/DTOs/DynamicShipmentFinanceReportDtos.cs",
+      "src/ERP.Application/Services/DynamicShipmentFinanceReportRules.cs",
+      "src/ERP.Api/Controllers/DynamicShipmentFinanceReportController.cs"
+    ],
+    "Preview checks current-user sales-order menu and applies SalespersonDataScopeService customer filtering inside ERP-032 source query before count and paging, then returns selected current-page fields in requested order while retaining null unknown amounts and separate currencies.": [
+      "src/ERP.Application/DTOs/DynamicShipmentFinanceReportDtos.cs",
+      "src/ERP.Application/Services/DynamicShipmentFinanceReportRules.cs",
+      "src/ERP.Api/Controllers/DynamicShipmentFinanceReportController.cs",
+      "src/ERP.Api/Controllers/SalesOrderShipmentFinanceReport.cs"
+    ],
+    "Unit tests cover authorized and denied users, scoped counts and pages, field order, invalid filters, unknown evidence and no writes; document report limits.": [
+      "src/ERP.UnitTests/DynamicShipmentFinanceReportTests.cs",
+      "src/ERP.UnitTests/SalesOrderShipmentFinanceReportTests.cs",
+      "docs/dynamic-shipment-finance-report.md"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Application/DTOs/DynamicShipmentFinanceReportDtos.cs",
+    "src/ERP.Application/Services/DynamicShipmentFinanceReportRules.cs",
+    "src/ERP.Api/Controllers/DynamicShipmentFinanceReportController.cs",
+    "src/ERP.Api/Controllers/SalesOrderShipmentFinanceReport.cs",
+    "src/ERP.UnitTests/DynamicShipmentFinanceReportTests.cs",
+    "src/ERP.UnitTests/SalesOrderShipmentFinanceReportTests.cs",
+    "docs/dynamic-shipment-finance-report.md",
+    ".ai/**"
+  ],
+  "validation_profile": "safe",
+  "depends_on": [
+    "ERP-032"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "completion_mode": "build",
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only bounded read-only feature"
+  }
+}
