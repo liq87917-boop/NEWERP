@@ -1,0 +1,56 @@
+{
+  "id": "ERP-114",
+  "title": "Currency-safe grouping and totals in dynamic sales-order report",
+  "status": "pending",
+  "risk_level": "medium",
+  "description": "User scene: in the visual sales-order report, choose customer or month grouping and see count and amount totals for the currently authorized preview page. Keep each currency separate and label page totals explicitly; preserve ERP-112 permission and salesperson scope. Invalid group keys fail closed. Read-only requests retain the existing request audit; no model SQL, database writes, migration, real database execution, secret/.env change, or deployment. Verify with unit tests and safe build/test.",
+  "acceptance_criteria": [
+    "The API accepts only none/customer/month group keys and computes deterministic count and amount totals from the same bounded authorized preview rows; never combines currencies.",
+    "The designer offers allowed grouping choices and labels each result as a page subtotal by currency, including empty groups and pagination changes.",
+    "Tests cover mixed currencies, month boundary, scope-limited rows, empty page, invalid group key and no writes; document page-subtotal semantics."
+  ],
+  "criterion_path_map": {
+    "The API accepts only none/customer/month group keys and computes deterministic count and amount totals from the same bounded authorized preview rows; never combines currencies.": [
+      "src/ERP.Application/DTOs/DynamicSalesOrderReportDtos.cs",
+      "src/ERP.Application/Services/DynamicSalesOrderReportRules.cs",
+      "src/ERP.Api/Controllers/DynamicSalesOrderReportController.cs"
+    ],
+    "The designer offers allowed grouping choices and labels each result as a page subtotal by currency, including empty groups and pagination changes.": [
+      "src/ERP.Api/wwwroot/js/dynamic-sales-order-report.js"
+    ],
+    "Tests cover mixed currencies, month boundary, scope-limited rows, empty page, invalid group key and no writes; document page-subtotal semantics.": [
+      "src/ERP.UnitTests/DynamicSalesOrderGroupingTests.cs",
+      "src/ERP.Application/Services/DynamicSalesOrderReportRules.cs",
+      "docs/dynamic-sales-order-report.md"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Application/DTOs/DynamicSalesOrderReportDtos.cs",
+    "src/ERP.Application/Services/DynamicSalesOrderReportRules.cs",
+    "src/ERP.Api/Controllers/DynamicSalesOrderReportController.cs",
+    "src/ERP.Api/wwwroot/js/dynamic-sales-order-report.js",
+    "src/ERP.UnitTests/DynamicSalesOrderGroupingTests.cs",
+    "docs/dynamic-sales-order-report.md",
+    ".ai/**"
+  ],
+  "validation_profile": "safe",
+  "depends_on": [
+    "ERP-112",
+    "ERP-113"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "completion_mode": "build",
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only read-only feature"
+  },
+  "attempts": 0,
+  "created_at": "2026-09-29T02:25:56.296613Z"
+}

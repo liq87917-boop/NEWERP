@@ -1,0 +1,62 @@
+{
+  "id": "ERP-112",
+  "title": "Scoped dynamic sales-order report preview",
+  "status": "pending",
+  "risk_level": "medium",
+  "description": "User scene: an authorized salesperson selects sales-order fields and bounded filters to preview only orders in their ERP data scope. Reuse the existing sales-order menu permission and SalespersonDataScopeService; deny missing role, scope, or invalid field/filter, and return a bounded error without data leakage. Read-only queries use the existing request audit trail; no direct SQL from a model or new privilege. Development-only: no migration, production SQL, real database execution, irreversible operation, secret/.env change, or deployment. Verify with unit tests and the safe build/test profile.",
+  "acceptance_criteria": [
+    "Authenticated GET returns a finite allowlisted sales-order field catalog; POST rejects unknown fields, invalid date ranges, excessive page size and missing sales-order permission before querying.",
+    "Preview filters order date, customer, status and currency within the current user's SalespersonDataScopeService scope, with stable paging capped at 200 and no writes or arbitrary SQL.",
+    "Tests cover selected columns, filters, paging, unauthorized and out-of-scope users, invalid input and no writes; document the request audit and data boundaries."
+  ],
+  "criterion_path_map": {
+    "Authenticated GET returns a finite allowlisted sales-order field catalog; POST rejects unknown fields, invalid date ranges, excessive page size and missing sales-order permission before querying.": [
+      "src/ERP.Application/DTOs/DynamicSalesOrderReportDtos.cs",
+      "src/ERP.Application/Services/DynamicSalesOrderReportRules.cs",
+      "src/ERP.Api/Controllers/DynamicSalesOrderReportController.cs"
+    ],
+    "Preview filters order date, customer, status and currency within the current user's SalespersonDataScopeService scope, with stable paging capped at 200 and no writes or arbitrary SQL.": [
+      "src/ERP.Application/Interfaces/IDynamicSalesOrderReportQuery.cs",
+      "src/ERP.Infrastructure/Reports/DynamicSalesOrderReportQuery.cs",
+      "src/ERP.Infrastructure/DependencyInjection.cs",
+      "src/ERP.Api/Controllers/DynamicSalesOrderReportController.cs",
+      "src/ERP.Application/DTOs/DynamicSalesOrderReportDtos.cs"
+    ],
+    "Tests cover selected columns, filters, paging, unauthorized and out-of-scope users, invalid input and no writes; document the request audit and data boundaries.": [
+      "src/ERP.UnitTests/DynamicSalesOrderReportTests.cs",
+      "docs/dynamic-sales-order-report.md",
+      "src/ERP.Application/Services/DynamicSalesOrderReportRules.cs"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Application/DTOs/DynamicSalesOrderReportDtos.cs",
+    "src/ERP.Application/Services/DynamicSalesOrderReportRules.cs",
+    "src/ERP.Api/Controllers/DynamicSalesOrderReportController.cs",
+    "src/ERP.Application/Interfaces/IDynamicSalesOrderReportQuery.cs",
+    "src/ERP.Infrastructure/Reports/DynamicSalesOrderReportQuery.cs",
+    "src/ERP.Infrastructure/DependencyInjection.cs",
+    "src/ERP.UnitTests/DynamicSalesOrderReportTests.cs",
+    "docs/dynamic-sales-order-report.md",
+    ".ai/**"
+  ],
+  "validation_profile": "safe",
+  "depends_on": [
+    "ERP-008",
+    "ERP-097"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "completion_mode": "build",
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only read-only feature"
+  },
+  "attempts": 0,
+  "created_at": "2026-09-29T02:25:56.296568Z"
+}

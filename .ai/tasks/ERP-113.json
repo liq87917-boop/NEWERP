@@ -1,0 +1,54 @@
+{
+  "id": "ERP-113",
+  "title": "Visual sales-order report field and filter designer",
+  "status": "pending",
+  "risk_level": "medium",
+  "description": "User scene: from the sales-order page, an authorized user opens a visual designer, chooses allowed fields and filters, and previews results. Use only the scoped API from ERP-112 and existing ERP login/menu context. Show authorization, invalid request, empty result, and network failures without exposing hidden data. Preview is read-only and recorded by the existing request audit; no arbitrary SQL, database writes, migration, real database execution, secret/.env change, or deployment. Verify with script checks and safe build/test.",
+  "acceptance_criteria": [
+    "The sales-order page opens a field chooser and date/customer/status/currency filters populated only by the ERP-112 catalog; no free-form SQL or field names are accepted.",
+    "Preview sends the selected bounded request to ERP-112 and safely renders returned column names and cells; loading, empty, authorization and network failures are visible without writes.",
+    "Automated UI logic tests verify selection, request bounds, safe cell rendering and failures; document user steps and run node syntax/test checks plus safe build/test."
+  ],
+  "criterion_path_map": {
+    "The sales-order page opens a field chooser and date/customer/status/currency filters populated only by the ERP-112 catalog; no free-form SQL or field names are accepted.": [
+      "src/ERP.Api/wwwroot/js/dynamic-sales-order-report.js",
+      "src/ERP.Api/wwwroot/js/modules-doc.js",
+      "src/ERP.Api/wwwroot/index.html"
+    ],
+    "Preview sends the selected bounded request to ERP-112 and safely renders returned column names and cells; loading, empty, authorization and network failures are visible without writes.": [
+      "src/ERP.Api/wwwroot/js/dynamic-sales-order-report.js"
+    ],
+    "Automated UI logic tests verify selection, request bounds, safe cell rendering and failures; document user steps and run node syntax/test checks plus safe build/test.": [
+      "tests/automation/dynamic_sales_order_report_ui.test.js",
+      "src/ERP.Api/wwwroot/js/dynamic-sales-order-report.js",
+      "docs/dynamic-sales-order-report.md"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Api/wwwroot/js/dynamic-sales-order-report.js",
+    "src/ERP.Api/wwwroot/js/modules-doc.js",
+    "src/ERP.Api/wwwroot/index.html",
+    "tests/automation/dynamic_sales_order_report_ui.test.js",
+    "docs/dynamic-sales-order-report.md",
+    ".ai/**"
+  ],
+  "validation_profile": "safe",
+  "depends_on": [
+    "ERP-112"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "completion_mode": "build",
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only read-only feature"
+  },
+  "attempts": 0,
+  "created_at": "2026-09-29T02:25:56.296599Z"
+}

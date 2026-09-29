@@ -1,0 +1,57 @@
+{
+  "id": "ERP-115",
+  "title": "Export selected dynamic sales-order report page to Excel",
+  "status": "pending",
+  "risk_level": "medium",
+  "description": "User scene: download exactly the selected, authorized sales-order report page and optional grouped page totals as xlsx. Reuse ERP-112 query/scope and ERP.Infrastructure.Export.ExcelExporter; revalidate fields, filters, page cap and current ERP permission on export, and escape spreadsheet formula-leading text. Fail closed on auth/validation/query error and preserve existing request audit. Development-only read-only export: no arbitrary SQL, database writes, migration, real database execution, secret/.env change, or deployment. Verify with xlsx unit tests and safe build/test.",
+  "acceptance_criteria": [
+    "Authenticated Excel endpoint reuses the bounded scoped preview and selected field order, rechecks current-user permission and rejects invalid or out-of-scope requests.",
+    "Export uses existing ExcelExporter for only the current page and optional currency-separated page subtotals; text beginning with spreadsheet formula characters stays literal.",
+    "Designer downloads the selected report and handles empty/authorization failures; tests inspect workbook columns, rows, formula safety, grouping and scope; document export limits."
+  ],
+  "criterion_path_map": {
+    "Authenticated Excel endpoint reuses the bounded scoped preview and selected field order, rechecks current-user permission and rejects invalid or out-of-scope requests.": [
+      "src/ERP.Api/Controllers/DynamicSalesOrderReportController.cs",
+      "src/ERP.Application/DTOs/DynamicSalesOrderReportDtos.cs"
+    ],
+    "Export uses existing ExcelExporter for only the current page and optional currency-separated page subtotals; text beginning with spreadsheet formula characters stays literal.": [
+      "src/ERP.Api/Controllers/DynamicSalesOrderReportController.cs",
+      "src/ERP.Application/Services/DynamicSalesOrderReportRules.cs"
+    ],
+    "Designer downloads the selected report and handles empty/authorization failures; tests inspect workbook columns, rows, formula safety, grouping and scope; document export limits.": [
+      "src/ERP.Api/wwwroot/js/dynamic-sales-order-report.js",
+      "src/ERP.UnitTests/DynamicSalesOrderExcelTests.cs",
+      "docs/dynamic-sales-order-report.md"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/DynamicSalesOrderReportController.cs",
+    "src/ERP.Application/DTOs/DynamicSalesOrderReportDtos.cs",
+    "src/ERP.Application/Services/DynamicSalesOrderReportRules.cs",
+    "src/ERP.Api/wwwroot/js/dynamic-sales-order-report.js",
+    "src/ERP.UnitTests/DynamicSalesOrderExcelTests.cs",
+    "docs/dynamic-sales-order-report.md",
+    ".ai/**"
+  ],
+  "validation_profile": "safe",
+  "depends_on": [
+    "ERP-112",
+    "ERP-113",
+    "ERP-114"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "completion_mode": "build",
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only read-only feature"
+  },
+  "attempts": 0,
+  "created_at": "2026-09-29T02:25:56.296626Z"
+}
