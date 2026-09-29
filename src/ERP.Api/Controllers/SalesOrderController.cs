@@ -1,4 +1,5 @@
 using ERP.Application.Common;
+using ERP.Application.DTOs;
 using ERP.Application.Interfaces;
 using ERP.Application.Services;
 using ERP.Domain.Entities;
@@ -180,6 +181,22 @@ public class SalesOrderController : DocumentControllerBase<SalesOrder>
         => Ok(ApiResponse<SalesOrderInvoiceEvidenceBatch>.Success(
             await SalesOrderInvoiceEvidence.ForOrdersAsync(Db, query)));
 
+
+    /// <summary>
+    /// 客户销售订单价格历史（ERP-108，**只读派生**、分页有界）：按商品过滤「已审核、未删除」销售订单的
+    /// 「未删除」明细价格，可再按客户与订单日期区间筛选，并应用业务员数据范围（硬边界）；
+    /// 仅把「客户 + 商品 + 规格 + 单位 + 币种」完全一致的明细归为同一口径，保留原始单价与贸易条款，
+    /// 口径不一致（单位 / 币种 / 规格 / 客户不同）的证据分组成行单列。
+    /// <para>本接口<strong>不是</strong>定价工具、<strong>不写库</strong>：不改写销售订单 / 明细 / 价格 / 贸易条款，
+    /// 不做汇率换算、不合并不同币种金额，也不执行迁移 / 生产 SQL / 真实数据库操作 / 部署。</para>
+    /// </summary>
+    [HttpGet("price-history")]
+    public async Task<IActionResult> PriceHistory([FromQuery] CustomerSalesPriceHistoryQuery query)
+    {
+        var scope = await ResolveScopeAsync();
+        return Ok(ApiResponse<CustomerSalesPriceHistoryView>.Success(
+            await CustomerSalesPriceHistoryService.QueryAsync(Db, query, scope.AllowedCustomerIds)));
+    }
 
     /// <summary>创建</summary>
     [HttpPost]
