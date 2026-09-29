@@ -202,6 +202,7 @@ function csiListView() {
       <button class="btn btn-neutral btn-sm" onclick="csiOpenForm(null)">➕ 新建发票证据</button>
       <button class="btn btn-neutral btn-sm" title="只读收款时效：按显式 ERP-073 收款分摊行派生开票日期到首末有效收款日期的间隔天数与可比较已分摊 / 剩余证据；不提供任何分摊 / 收款 / 作废动作" onclick="openCustomerInvoiceCollectionTiming(CSI.filters.customerId || null)">⏱️ 收款时效</button>
       <button class="btn btn-neutral btn-sm" title="只读应收账款证据动态报表：仅按 ERP-117 白名单字段与有界筛选预览发票含税总额 / 显式收款分摊 / 算术剩余证据（known / unknown / over_allocated）；不写库、不执行任意 SQL" onclick="openDynamicReceivableReport(CSI.filters.customerId || null)">📊 应收证据报表</button>
+      <button class="btn btn-neutral btn-sm" title="只读客户报告包：销售订单与发票 / 收款分摊证据两个独立有界分区，分别重检销售订单与客户资料菜单授权并按业务员数据范围过滤；不推断跨单链接、不写库" onclick="openCustomerReportPacket(CSI.filters.customerId || null)">🧾 客户报告包</button>
     </div>
 
     <table class="data-table">
@@ -501,6 +502,7 @@ function csiDetailView() {
         ${!inv.isVoided ? `<button class="btn btn-danger btn-sm" onclick="csiOpenVoid(${inv.id})">作废</button>` : ''}
         ${!inv.isDraft && !inv.isVoided ? `<button class="btn btn-primary btn-sm" onclick="openCustomerSalesInvoiceCollectionAllocationRegister(${inv.id})">收款分摊</button>` : ''}
         <button class="btn btn-neutral btn-sm" onclick="openCustomerInvoiceCollectionTiming(${inv.customerId})">⏱️ 收款时效</button>
+        <button class="btn btn-neutral btn-sm" title="只读客户报告包：销售订单与发票 / 收款分摊证据两个独立有界分区，分别重检销售订单与客户资料菜单授权并按业务员数据范围过滤；不推断跨单链接、不写库" onclick="openCustomerReportPacket(${inv.customerId})">🧾 客户报告包</button>
         <button class="btn btn-neutral btn-sm" onclick="csiBackToList()">← 返回台账</button>
       </div>
     </div>
