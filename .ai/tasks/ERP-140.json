@@ -2,7 +2,7 @@
   "id": "ERP-140",
   "title": "Preview selected fields in an authorized supplier reconciliation aging report",
   "description": "Purchasing user selects finite invoice evidence fields and existing filters for a bounded dynamic preview. Development only; reuse existing SupplierReconciliationAging.ForQueryAsync evidence, current-user purchase-order menu authorization and HTTP audit. Preserve explicit due-date unknowns, separate currencies, draft/void history and invalid/unknown allocation evidence. Fail closed on missing permission, invalid requests or source failures. No payment approval, ledger inference, arbitrary SQL, migration, production SQL, real database execution, business writes, secrets/.env or deployment. Verify focused tests and safe Release build/test; no browser acceptance.",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "medium",
   "acceptance_criteria": [
     "Catalog and preview allow only finite invoice evidence fields in selected order and validate existing supplier/currency/status/date/as-of filters and page size at most 200 before source reads.",
@@ -50,5 +50,5 @@
     "status": "not_required",
     "reason": "Development-only bounded read-only feature"
   },
-  "attempts": 0
+  "attempts": 1
 }
