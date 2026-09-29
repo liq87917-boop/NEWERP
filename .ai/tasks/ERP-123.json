@@ -1,0 +1,55 @@
+{
+  "id": "ERP-123",
+  "title": "Export the scoped customer order and receivable packet to Excel",
+  "status": "pending",
+  "risk_level": "medium",
+  "description": "User scene: download the same customer's selected sales-order and invoice/receipt evidence pages in two clearly labeled xlsx sheets. Re-run ERP-122 dual menu, salesperson scope, customer and bounded-page checks at download time; preserve source identifiers and currencies, distinguish unknown remaining evidence, and keep formula-leading text literal. Do not join unrelated orders and invoices or claim authoritative unpaid balance. Existing HTTP operation audit records the download. Development only: no migration, production SQL, real database execution, arbitrary model SQL, writes, secret/.env change or deployment. Verify workbook tests and safe build/test.",
+  "acceptance_criteria": [
+    "Excel endpoint reuses the bounded dual-authorized packet preview and rejects missing permissions, out-of-scope customers and invalid page/filter input before sending bytes.",
+    "Workbook has separate sales-order and receivable-evidence sheets with selected identifiers, original currencies, literal formula-leading text and explicit unknown remaining states, without inferred joins or mixed-currency totals.",
+    "Packet preview offers download and clear empty/error states; tests inspect both sheets, row caps, formula safety and dual scope; document export limits."
+  ],
+  "criterion_path_map": {
+    "Excel endpoint reuses the bounded dual-authorized packet preview and rejects missing permissions, out-of-scope customers and invalid page/filter input before sending bytes.": [
+      "src/ERP.Api/Controllers/CustomerReportPacketController.cs",
+      "src/ERP.Application/DTOs/CustomerReportPacketDtos.cs"
+    ],
+    "Workbook has separate sales-order and receivable-evidence sheets with selected identifiers, original currencies, literal formula-leading text and explicit unknown remaining states, without inferred joins or mixed-currency totals.": [
+      "src/ERP.Api/Controllers/CustomerReportPacketController.cs",
+      "src/ERP.Application/Services/CustomerReportPacketRules.cs"
+    ],
+    "Packet preview offers download and clear empty/error states; tests inspect both sheets, row caps, formula safety and dual scope; document export limits.": [
+      "src/ERP.Api/wwwroot/js/customer-report-packet.js",
+      "src/ERP.UnitTests/CustomerReportPacketExcelTests.cs",
+      "docs/customer-report-packet.md"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/CustomerReportPacketController.cs",
+    "src/ERP.Application/DTOs/CustomerReportPacketDtos.cs",
+    "src/ERP.Application/Services/CustomerReportPacketRules.cs",
+    "src/ERP.Api/wwwroot/js/customer-report-packet.js",
+    "src/ERP.UnitTests/CustomerReportPacketExcelTests.cs",
+    "docs/customer-report-packet.md",
+    ".ai/**"
+  ],
+  "validation_profile": "safe",
+  "depends_on": [
+    "ERP-122"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "completion_mode": "build",
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only bounded read-only feature"
+  },
+  "attempts": 0,
+  "created_at": "2026-09-29T04:16:45.697084Z"
+}

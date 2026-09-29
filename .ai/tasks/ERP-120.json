@@ -1,0 +1,59 @@
+{
+  "id": "ERP-120",
+  "title": "Add currency-safe grouping to dynamic customer receivable report",
+  "status": "pending",
+  "risk_level": "medium",
+  "description": "User scene: group the selected, scoped invoice and receipt-allocation evidence preview by customer or invoice month, with page subtotals split by original currency. Reuse ERP-117 authorized bounded rows; a group with unknown or over-allocated remaining evidence must visibly remain unknown rather than becoming a fake debt balance. Invalid group keys fail closed. Existing HTTP operation audit records read-only requests. Development only: no migration, production SQL, real database execution, arbitrary model SQL, writes, secret/.env change or deployment. Verify unit tests and safe build/test.",
+  "acceptance_criteria": [
+    "API accepts only none/customer/month and derives deterministic customer-or-month plus currency page groups from the same authorized bounded preview rows; invalid group keys are rejected.",
+    "Page subtotals separate gross and effective allocations by currency, and label remaining as unknown if any row lacks known valid remaining evidence; designer labels totals as current-page only.",
+    "Tests cover mixed currencies, month boundaries, selected-field omission, unknown/over-allocated evidence, empty page and no writes; document page-subtotal semantics."
+  ],
+  "criterion_path_map": {
+    "API accepts only none/customer/month and derives deterministic customer-or-month plus currency page groups from the same authorized bounded preview rows; invalid group keys are rejected.": [
+      "src/ERP.Application/DTOs/DynamicReceivableReportDtos.cs",
+      "src/ERP.Application/Services/DynamicReceivableReportRules.cs",
+      "src/ERP.Api/Controllers/DynamicReceivableReportController.cs"
+    ],
+    "Page subtotals separate gross and effective allocations by currency, and label remaining as unknown if any row lacks known valid remaining evidence; designer labels totals as current-page only.": [
+      "src/ERP.Application/Services/DynamicReceivableReportRules.cs",
+      "src/ERP.Api/wwwroot/js/dynamic-receivable-report.js",
+      "src/ERP.Application/DTOs/DynamicReceivableReportDtos.cs"
+    ],
+    "Tests cover mixed currencies, month boundaries, selected-field omission, unknown/over-allocated evidence, empty page and no writes; document page-subtotal semantics.": [
+      "src/ERP.UnitTests/DynamicReceivableGroupingTests.cs",
+      "src/ERP.Application/Services/DynamicReceivableReportRules.cs",
+      "docs/dynamic-receivable-report.md"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Application/DTOs/DynamicReceivableReportDtos.cs",
+    "src/ERP.Application/Services/DynamicReceivableReportRules.cs",
+    "src/ERP.Api/Controllers/DynamicReceivableReportController.cs",
+    "src/ERP.Api/wwwroot/js/dynamic-receivable-report.js",
+    "src/ERP.UnitTests/DynamicReceivableGroupingTests.cs",
+    "docs/dynamic-receivable-report.md",
+    ".ai/**"
+  ],
+  "validation_profile": "safe",
+  "depends_on": [
+    "ERP-117",
+    "ERP-118",
+    "ERP-119"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "completion_mode": "build",
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only bounded read-only feature"
+  },
+  "attempts": 0,
+  "created_at": "2026-09-29T04:16:45.697028Z"
+}

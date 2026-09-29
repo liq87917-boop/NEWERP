@@ -1,0 +1,61 @@
+{
+  "id": "ERP-121",
+  "title": "Download scoped dynamic customer receivable report as PDF",
+  "status": "pending",
+  "risk_level": "medium",
+  "description": "User scene: download exactly the selected, authorized receivable evidence page and optional ERP-120 page subtotals as a paginated Chinese PDF. Reuse ERP-117 preview, current ERP customer-menu and salesperson scope on every download. Reuse the existing PDFsharp 6.2.4 dependency and SimHei font resolver from ERP-116; refactor shared font setup narrowly so both report types work in one process. Missing font fails explicitly; known and unknown remaining evidence remain distinct and no cross-currency sum is invented. Existing HTTP audit records the read-only download. Development only: no migration, production SQL, real database execution, arbitrary model SQL, writes, secret/.env change or deployment. Verify PDF and regression tests plus safe build/test.",
+  "acceptance_criteria": [
+    "PDF endpoint reuses authorized bounded receivable preview and selected field order, rejects invalid filters or missing customer scope, and never returns partial unauthorized data.",
+    "PDFsharp renders paginated Chinese rows and currency-separated page subtotals; share the SimHei resolver safely with the existing sales-order PDF exporter and fail explicitly if the font is unavailable.",
+    "Designer offers PDF download with visible errors; tests inspect PDF signature, selected fields, page bounds, Chinese font failure and no cross-report font regression; document font prerequisite."
+  ],
+  "criterion_path_map": {
+    "PDF endpoint reuses authorized bounded receivable preview and selected field order, rejects invalid filters or missing customer scope, and never returns partial unauthorized data.": [
+      "src/ERP.Api/Controllers/DynamicReceivableReportController.cs",
+      "src/ERP.Infrastructure/Export/DynamicReceivablePdfExporter.cs"
+    ],
+    "PDFsharp renders paginated Chinese rows and currency-separated page subtotals; share the SimHei resolver safely with the existing sales-order PDF exporter and fail explicitly if the font is unavailable.": [
+      "src/ERP.Infrastructure/Export/DynamicReceivablePdfExporter.cs",
+      "src/ERP.Infrastructure/Export/DynamicSalesOrderPdfExporter.cs",
+      "src/ERP.Infrastructure/Export/SimHeiPdfFontResolver.cs"
+    ],
+    "Designer offers PDF download with visible errors; tests inspect PDF signature, selected fields, page bounds, Chinese font failure and no cross-report font regression; document font prerequisite.": [
+      "src/ERP.Api/wwwroot/js/dynamic-receivable-report.js",
+      "src/ERP.UnitTests/DynamicReceivablePdfTests.cs",
+      "src/ERP.UnitTests/DynamicSalesOrderPdfTests.cs",
+      "docs/dynamic-receivable-report.md"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/DynamicReceivableReportController.cs",
+    "src/ERP.Infrastructure/Export/DynamicReceivablePdfExporter.cs",
+    "src/ERP.Infrastructure/Export/DynamicSalesOrderPdfExporter.cs",
+    "src/ERP.Infrastructure/Export/SimHeiPdfFontResolver.cs",
+    "src/ERP.Api/wwwroot/js/dynamic-receivable-report.js",
+    "src/ERP.UnitTests/DynamicReceivablePdfTests.cs",
+    "src/ERP.UnitTests/DynamicSalesOrderPdfTests.cs",
+    "docs/dynamic-receivable-report.md",
+    ".ai/**"
+  ],
+  "validation_profile": "safe",
+  "depends_on": [
+    "ERP-116",
+    "ERP-117",
+    "ERP-120"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "completion_mode": "build",
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only bounded read-only feature"
+  },
+  "attempts": 0,
+  "created_at": "2026-09-29T04:16:45.697050Z"
+}

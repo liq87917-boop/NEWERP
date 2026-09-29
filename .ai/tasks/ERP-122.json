@@ -1,0 +1,65 @@
+{
+  "id": "ERP-122",
+  "title": "Preview a scoped customer order and receivable evidence packet",
+  "status": "pending",
+  "risk_level": "medium",
+  "description": "User scene: from a customer invoice, preview that customer's sales orders alongside invoice and explicit receipt-allocation evidence as two separate bounded sections. Both sections independently recheck their existing ERP menu permission and SalespersonDataScopeService scope; deny the entire response if either side fails. Do not infer invoice-to-order linkage, settlement, account balance or collection status. Existing HTTP operation audit records the read-only preview. Development only: no migration, production SQL, real database execution, arbitrary model SQL, writes, secret/.env change or deployment. Verify API/UI tests and safe build/test.",
+  "acceptance_criteria": [
+    "Authenticated packet endpoint requires a positive customer Id, bounded date/page filters and both existing sales-order and customer menu permissions; it calls the two scoped report query interfaces and fails closed without partial results.",
+    "Response keeps sales orders and invoice/receipt-allocation evidence in separate sections with independent counts, original currency and unknown remaining labels; it never fabricates a cross-document link.",
+    "Customer invoice page opens the packet preview with safe empty/error states; tests cover dual permission, customer scope, page cap, no inferred links and no writes; document evidence limits."
+  ],
+  "criterion_path_map": {
+    "Authenticated packet endpoint requires a positive customer Id, bounded date/page filters and both existing sales-order and customer menu permissions; it calls the two scoped report query interfaces and fails closed without partial results.": [
+      "src/ERP.Application/DTOs/CustomerReportPacketDtos.cs",
+      "src/ERP.Application/Services/CustomerReportPacketRules.cs",
+      "src/ERP.Api/Controllers/CustomerReportPacketController.cs"
+    ],
+    "Response keeps sales orders and invoice/receipt-allocation evidence in separate sections with independent counts, original currency and unknown remaining labels; it never fabricates a cross-document link.": [
+      "src/ERP.Application/DTOs/CustomerReportPacketDtos.cs",
+      "src/ERP.Application/Services/CustomerReportPacketRules.cs",
+      "src/ERP.Api/Controllers/CustomerReportPacketController.cs"
+    ],
+    "Customer invoice page opens the packet preview with safe empty/error states; tests cover dual permission, customer scope, page cap, no inferred links and no writes; document evidence limits.": [
+      "src/ERP.Api/wwwroot/js/customer-sales-invoices.js",
+      "src/ERP.Api/wwwroot/js/customer-report-packet.js",
+      "src/ERP.Api/wwwroot/index.html",
+      "src/ERP.UnitTests/CustomerReportPacketTests.cs",
+      "tests/automation/customer_report_packet_ui.test.js",
+      "docs/customer-report-packet.md"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Application/DTOs/CustomerReportPacketDtos.cs",
+    "src/ERP.Application/Services/CustomerReportPacketRules.cs",
+    "src/ERP.Api/Controllers/CustomerReportPacketController.cs",
+    "src/ERP.Api/wwwroot/js/customer-sales-invoices.js",
+    "src/ERP.Api/wwwroot/js/customer-report-packet.js",
+    "src/ERP.Api/wwwroot/index.html",
+    "src/ERP.UnitTests/CustomerReportPacketTests.cs",
+    "tests/automation/customer_report_packet_ui.test.js",
+    "docs/customer-report-packet.md",
+    ".ai/**"
+  ],
+  "validation_profile": "safe",
+  "depends_on": [
+    "ERP-112",
+    "ERP-117",
+    "ERP-118"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "completion_mode": "build",
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only bounded read-only feature"
+  },
+  "attempts": 0,
+  "created_at": "2026-09-29T04:16:45.697075Z"
+}
