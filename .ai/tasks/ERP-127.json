@@ -1,7 +1,7 @@
 {
   "id": "ERP-127",
   "title": "Export selected dynamic purchase-order report page to Excel",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "medium",
   "description": "User scene: download exactly the selected, authorized purchase-order report page as xlsx in the chosen column order. Reuse ERP-125 scoped preview and existing ExcelExporter; revalidate current user, purchase-order menu, filters, field allowlist and 100-row cap on every export. Preserve original currency and supplier/order identifiers, keep formula-leading text literal, and make no settlement claim. Existing HTTP audit records the read-only download. Development only: no migration, production SQL, real database execution, arbitrary model SQL, writes, secret/.env change or deployment. Verify workbook tests plus safe build/test.",
   "acceptance_criteria": [
@@ -51,6 +51,6 @@
     "status": "not_required",
     "reason": "Development-only bounded read-only feature"
   },
-  "attempts": 0,
+  "attempts": 1,
   "created_at": "2026-09-29T05:17:00.765844Z"
 }
