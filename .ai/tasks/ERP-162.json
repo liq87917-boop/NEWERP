@@ -1,0 +1,54 @@
+{
+  "id": "ERP-162",
+  "title": "Summarize known shipment and finance amounts by customer and currency",
+  "description": "A sales user explores the current authorized shipment and finance progress page using finite grouping and evidence summaries. Development only. Reuse ERP-156 bounded ERP-032 preview; on each request recheck current-user sales-order menu and SalespersonDataScopeService customer scope before reading, and use existing HTTP operation audit. Keep grouping to the same current page; preserve null unknown shipment and linked-payment evidence, separate currencies, and never present uncovered amount as receivables or payment authority. Invalid modes and denied users fail closed. No arbitrary SQL, migrations, production SQL, real database execution, writes, secrets/.env change or deployment. Verify focused unit/Node tests and safe Release build/test; no real-browser acceptance.",
+  "status": "pending",
+  "risk_level": "medium",
+  "acceptance_criteria": [
+    "Preview accepts only none/customerCurrency/customerCurrencyShipment/customerCurrencyFinance monetary summary modes and rejects invalid modes before source reads with ERP-156 authorization and paging.",
+    "Summaries use only the same scoped current-page ERP-032 evidence rows; customer and currency are mandatory grouping boundaries, order amounts remain original-currency evidence, and linked/uncovered/submitted sums are null when any contributing amount is unknown with explicit known/unknown row counts.",
+    "Unit tests cover multiple customers and currencies, unknown links or amounts, shipment states, empty/paged results, denied users and no writes; document that uncovered amount is not an accounts-receivable balance."
+  ],
+  "criterion_path_map": {
+    "Preview accepts only none/customerCurrency/customerCurrencyShipment/customerCurrencyFinance monetary summary modes and rejects invalid modes before source reads with ERP-156 authorization and paging.": [
+      "src/ERP.Application/DTOs/DynamicShipmentFinanceReportDtos.cs",
+      "src/ERP.Application/Services/DynamicShipmentFinanceReportRules.cs",
+      "src/ERP.Api/Controllers/DynamicShipmentFinanceReportController.cs"
+    ],
+    "Summaries use only the same scoped current-page ERP-032 evidence rows; customer and currency are mandatory grouping boundaries, order amounts remain original-currency evidence, and linked/uncovered/submitted sums are null when any contributing amount is unknown with explicit known/unknown row counts.": [
+      "src/ERP.Application/DTOs/DynamicShipmentFinanceReportDtos.cs",
+      "src/ERP.Application/Services/DynamicShipmentFinanceReportRules.cs",
+      "src/ERP.Api/Controllers/DynamicShipmentFinanceReportController.cs"
+    ],
+    "Unit tests cover multiple customers and currencies, unknown links or amounts, shipment states, empty/paged results, denied users and no writes; document that uncovered amount is not an accounts-receivable balance.": [
+      "src/ERP.UnitTests/DynamicShipmentFinanceAmountSummaryTests.cs",
+      "docs/dynamic-shipment-finance-report.md"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Application/DTOs/DynamicShipmentFinanceReportDtos.cs",
+    "src/ERP.Application/Services/DynamicShipmentFinanceReportRules.cs",
+    "src/ERP.Api/Controllers/DynamicShipmentFinanceReportController.cs",
+    "src/ERP.UnitTests/DynamicShipmentFinanceAmountSummaryTests.cs",
+    "docs/dynamic-shipment-finance-report.md",
+    ".ai/**"
+  ],
+  "validation_profile": "safe",
+  "depends_on": [
+    "ERP-156",
+    "ERP-160"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "completion_mode": "build",
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only bounded read-only feature"
+  }
+}

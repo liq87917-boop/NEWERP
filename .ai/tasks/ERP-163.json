@@ -1,0 +1,48 @@
+{
+  "id": "ERP-163",
+  "title": "Show shipment and finance amount summaries in report designer",
+  "description": "A sales user explores the current authorized shipment and finance progress page using finite grouping and evidence summaries. Development only. Reuse ERP-156 bounded ERP-032 preview; on each request recheck current-user sales-order menu and SalespersonDataScopeService customer scope before reading, and use existing HTTP operation audit. Keep grouping to the same current page; preserve null unknown shipment and linked-payment evidence, separate currencies, and never present uncovered amount as receivables or payment authority. Invalid modes and denied users fail closed. No arbitrary SQL, migrations, production SQL, real database execution, writes, secrets/.env change or deployment. Verify focused unit/Node tests and safe Release build/test; no real-browser acceptance.",
+  "status": "pending",
+  "risk_level": "medium",
+  "acceptance_criteria": [
+    "Designer offers only ERP-162 monetary summary modes and sends them with the current bounded filters and salesperson-scoped request.",
+    "View labels customer, original currency, shipment or finance-link status, known order and linked amount evidence, plus unknown row counts; null totals remain unknown with visible empty, permission and network states.",
+    "Node tests cover mode selection, multiple currencies, null amount evidence, safe labels, paging and failures; document summary scope and existing Excel/PDF download scope."
+  ],
+  "criterion_path_map": {
+    "Designer offers only ERP-162 monetary summary modes and sends them with the current bounded filters and salesperson-scoped request.": [
+      "src/ERP.Api/wwwroot/js/sales-order-progress.js"
+    ],
+    "View labels customer, original currency, shipment or finance-link status, known order and linked amount evidence, plus unknown row counts; null totals remain unknown with visible empty, permission and network states.": [
+      "src/ERP.Api/wwwroot/js/sales-order-progress.js"
+    ],
+    "Node tests cover mode selection, multiple currencies, null amount evidence, safe labels, paging and failures; document summary scope and existing Excel/PDF download scope.": [
+      "tests/automation/dynamic_shipment_finance_amount_summary_ui.test.js",
+      "docs/dynamic-shipment-finance-report.md"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Api/wwwroot/js/sales-order-progress.js",
+    "tests/automation/dynamic_shipment_finance_amount_summary_ui.test.js",
+    "docs/dynamic-shipment-finance-report.md",
+    ".ai/**"
+  ],
+  "validation_profile": "safe",
+  "depends_on": [
+    "ERP-162",
+    "ERP-161"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "completion_mode": "build",
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only bounded read-only feature"
+  }
+}
