@@ -163,4 +163,18 @@ public class PurchaseQuoteController : BaseCrudController<PurchaseQuote>
         return Ok(ApiResponse<PurchaseQuoteOrderPriceVarianceView>.Success(view,
             $"比价行 #{id} 的价格差异：已核对 {view.ResolvedCount}、未解决 {view.UnresolvedCount}"));
     }
+
+    /// <summary>
+    /// 供应商报价转采购订单转化漏斗（ERP-103，只读派生）：按比价批次号分组，按报价日期 + 可选供应商筛选未删除报价行，
+    /// 稳定按批次最早报价日期 + 批次号排序并分页；逐批次区分 已报价 / 已选中 / 已批准 / 已转采购订单 / 已拒绝 / 未解决 六类证据
+    /// （批准 / 拒绝来自审批决定，转采购订单只以「状态 + 采购订单备注来源标记 + 订单链接」三重证据认定，绝不凭 RefOrderNo 文本推断）。
+    /// 不写库、不转单、不创建订单、不改报价 / 审批决定。
+    /// </summary>
+    [HttpGet("conversion-funnel")]
+    public async Task<IActionResult> ConversionFunnel([FromQuery] PurchaseQuoteConversionFunnelQuery query)
+    {
+        var view = await PurchaseQuoteConversionFunnel.QueryAsync(_db, query);
+        return Ok(ApiResponse<PurchaseQuoteConversionFunnelView>.Success(view,
+            $"供应商报价转单漏斗：{view.TotalBatchCount} 个批次、{view.TotalLineCount} 行"));
+    }
 }

@@ -428,6 +428,8 @@ const MODULES = {
        ERP-027：批次转采购订单（该行所属批次内所有「已选中」行按供应商 + 币种合并，不合格行明确跳过） */
     extraActions: [
       { label: '📦 批次转采购订单', onclick: 'purchaseQuoteBatchToOrderByNo()', title: '按比价批次号把该批次内所有「已选中」报价行按供应商 + 币种合并生成采购订单（先取只读计划确认，不合格行明确跳过）' },
+      /* ERP-103：供应商报价转采购订单转化漏斗（只读；按批次分组六类证据，不写库、不转单、不改审批） */
+      { label: '🔎 转单漏斗', onclick: 'showPurchaseQuoteConversionFunnel()', title: '只读查看各比价批次的「报价 → 选中 → 批准 → 转采购订单」转化漏斗：批准 / 拒绝来自审批决定，转采购订单只以状态 + 来源标记 + 订单链接三重证据认定，绝不凭 RefOrderNo 文本推断；链接缺失 / 订单删除 / 单号歧义显式标注为未解决' },
     ],
     rowActions: [
       { label: '生成采购订单', icon: '📦', title: '按该选中比价行直接生成一张采购订单（同一比价行只生成一张，来源自动留痕）', onclick: 'purchaseQuoteToOrder', statuses: ['已选中'] },
