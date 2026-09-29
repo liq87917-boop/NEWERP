@@ -201,6 +201,7 @@ function csiListView() {
       <button class="btn btn-primary btn-sm" onclick="csiSearch()">🔍 查询</button>
       <button class="btn btn-neutral btn-sm" onclick="csiOpenForm(null)">➕ 新建发票证据</button>
       <button class="btn btn-neutral btn-sm" title="只读收款时效：按显式 ERP-073 收款分摊行派生开票日期到首末有效收款日期的间隔天数与可比较已分摊 / 剩余证据；不提供任何分摊 / 收款 / 作废动作" onclick="openCustomerInvoiceCollectionTiming(CSI.filters.customerId || null)">⏱️ 收款时效</button>
+      <button class="btn btn-neutral btn-sm" title="只读应收账款证据动态报表：仅按 ERP-117 白名单字段与有界筛选预览发票含税总额 / 显式收款分摊 / 算术剩余证据（known / unknown / over_allocated）；不写库、不执行任意 SQL" onclick="openDynamicReceivableReport(CSI.filters.customerId || null)">📊 应收证据报表</button>
     </div>
 
     <table class="data-table">

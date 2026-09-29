@@ -106,3 +106,40 @@
 dotnet build NEWERP.sln -c Release --no-restore --no-incremental /p:TreatWarningsAsErrors=true /p:RunAnalyzersDuringBuild=true
 dotnet test src/ERP.UnitTests/ERP.UnitTests.csproj -c Release --no-build
 ```
+
+## 11. 前端设计器（ERP-118）
+
+### 11.1 入口与脚本
+
+- 入口：客户销项发票证据登记册工具栏「📊 应收证据报表」按钮（`customer-sales-invoices.js` 列表工具栏，
+  点击调用 `openDynamicReceivableReport(CSI.filters.customerId || null)`，把当前登记的客户筛选带入设计器）。
+- 脚本：`wwwroot/js/dynamic-receivable-report.js`（`index.html` 注册，加载于 `app.js` 之前）。
+
+### 11.2 用户步骤
+
+1. 登录后进入「客户销项发票证据登记册」列表页；
+2. 点击工具栏「📊 应收证据报表」，设计器弹窗打开并调用 `GET /api/dynamic-receivable-report` 加载字段白名单目录
+   （无登录 / 无「客户资料」菜单授权 → 显示「未登录 / 权限不足」错误态，不返回任何字段）；
+3. 「① 选择字段」区域按目录渲染 29 个字段复选框（全选 / 清空），无自由填写的字段名；
+4. 「② 筛选」区域设置开票日期区间、客户（来自既有 `/api/base/customers`）、币种、分配状态、发票状态
+   （均为下拉 / 日期控件，币种 / 分配状态 / 发票状态只接受枚举取值，无自由 SQL）；
+5. 点击「预览」→ `POST /api/dynamic-receivable-report`，只发送「白名单字段 + 有界筛选 + 有界分页（pageSize 1~100）」；
+6. 结果区安全渲染返回的列名与单元格（全部 HTML 转义），并对剩余证据状态 `known` / `unknown` / `over_allocated`
+   与分配状态单独着色标注，绝不把 null 金额回落为 0；显示只读 / 边界 / 免责口径文案、总数与分页；
+   空结果 / 无效请求 / 授权失败 / 网络失败分别显示可见提示，全程无写入。
+
+### 11.3 安全与只读
+
+- 字段选择器仅由 ERP-117 目录渲染，请求组装时再次按目录白名单过滤（`dsrSelectFields`），未知字段绝不进入请求；
+- 筛选仅客户 / 开票日期 / 币种 / 分配状态 / 发票状态，币种、分配状态与发票状态只接受枚举取值（`dsrBuildRequest`
+  再次校验，非法取值直接丢弃、绝不进入请求）；无任意 SQL、无自由字段名输入；
+- 预览为 `POST`，由既有 `OperationLogMiddleware` 记录审计；前端不写库、不迁移、不执行任意 SQL。
+
+### 11.4 验证
+
+- UI 逻辑单测：`node tests/automation/dynamic_receivable_report_ui.test.js`（覆盖字段白名单选择、请求边界、
+  安全单元格渲染、剩余证据状态标注、空结果与授权 / 网络 / 无效失败态、前端接线契约与无任意 SQL）；
+- 语法检查：`node --check src/ERP.Api/wwwroot/js/dynamic-receivable-report.js`；
+- 安全档构建 / 测试：`dotnet build NEWERP.sln -c Release` 与
+  `dotnet test src/ERP.UnitTests/ERP.UnitTests.csproj -c Release --no-build`。
+

@@ -1,7 +1,7 @@
 {
   "id": "ERP-118",
   "title": "Add visual customer receivable evidence report designer",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "medium",
   "description": "User scene: from the customer sales-invoice register, choose allowed invoice and receipt evidence fields, bounded filters and preview the arithmetic remaining evidence, including unknown states. Reuse only ERP-117's scoped report endpoint; a saved or guessed field key cannot bypass its catalog. Authorization, empty rows and network errors are visible without leaking data. Existing request audit covers preview calls. Development only: no arbitrary SQL, database writes, migration, real database execution, secret/.env change or deployment. Verify with Node UI logic tests and safe build/test.",
   "acceptance_criteria": [
@@ -49,6 +49,6 @@
     "status": "not_required",
     "reason": "Development-only bounded read-only feature"
   },
-  "attempts": 0,
+  "attempts": 1,
   "created_at": "2026-09-29T03:22:26.663048Z"
 }
