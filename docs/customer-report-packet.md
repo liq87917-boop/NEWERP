@@ -12,6 +12,7 @@
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | POST | `/api/customer-report-packet` | 按正整数客户 Id + 有界日期 / 分页筛选预览两个独立分区 |
+| POST | `/api/customer-report-packet/export` | 把同一客户的两个分区导出为含两个独立工作表的 Excel（xlsx，只读，仅导出当前页） |
 
 请求体（`CustomerReportPacketRequest`）：
 
@@ -25,6 +26,24 @@
 - `salesOrders`：销售订单分区（`DynamicSalesOrderReportPageDto`，独立 `columns` / `rows` / `total` / `page` / `pageSize` / `totalPages`）；
 - `receivableEvidence`：发票 / 收款分摊证据分区（`DynamicReceivableReportPageDto`，同上）；
 - `readOnlyText` / `boundaryText` / `disclaimerText`：只读 / 边界 / 免责口径文案。
+
+### 2.1 Excel 导出（ERP-123）
+
+下载同一客户的两个分区为 xlsx：`POST /api/customer-report-packet/export`，请求体与预览同构（`CustomerReportPacketRequest`），
+返回 `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`，文件名 `CustomerReportPacket_yyyyMMddHHmmss.xlsx`。
+
+导出口径与导出限制：
+
+- **复用有界双授权预览**：导出时重新校验身份、双菜单授权、正整数客户 Id、日期区间、页大小（1 ~ 100）与业务员数据范围，
+  任一失败即拒绝（不发字节）；两个分区仍各自独立重检本分区菜单授权与数据范围。
+- **两个独立工作表**：`销售订单`（销售订单白名单字段，含 `orderNo` / `currency` / `totalAmount` 等原币与标识）与
+  `应收证据`（ERP-074 证据字段，含 `invoiceNumber` / `currency` / `grossAmount` / `remainingState` / `remainingStateText` 等）。
+- **原币与显式剩余状态**：金额按原币呈现，`remainingState` 保留 `known` / `unknown` / `over_allocated`，
+  `unknown` / `over_allocated` 金额为空文本，绝不轧成假余额。
+- **绝不跨单拼接 / 混合币种合计**：不推断发票到订单的链接，不生成任何合计 / 余额 / 催收结论行。
+- **公式注入安全**：以 `=` `+` `-` `@` 或制表符 / 回车 / 换行开头的文本单元格前缀单引号，保持字面文本。
+- **仅导出当前页**：行数受当前 `page` / `pageSize`（上限 100）约束，超出部分不导出。
+- **审计**：导出为 `POST`，由既有 `OperationLogMiddleware` 记录审计；全程只读，不写库、不执行任意 SQL。
 
 ## 3. 分区口径
 
@@ -66,6 +85,7 @@
 - `src/ERP.Api/wwwroot/js/customer-report-packet.js`：前端预览（入口 `openCustomerReportPacket`）；
 - `src/ERP.Api/wwwroot/js/customer-sales-invoices.js`：登记册工具栏 / 详情工具栏入口；
 - `src/ERP.UnitTests/CustomerReportPacketTests.cs`：预览单元测试；
+- `src/ERP.UnitTests/CustomerReportPacketExcelTests.cs`：Excel 导出单元测试（ERP-123）；
 - `tests/automation/customer_report_packet_ui.test.js`：前端 UI 逻辑单测。
 
 ## 8. 测试覆盖
@@ -75,11 +95,13 @@
 - **数据范围**：受限业务员越界客户时两分区都空、不泄露。
 - **独立分区**：两分区各自独立计数、原币字段、剩余证据状态字段；分区字段互不串用（不推断跨单链接）。
 - **只读**：`SaveChangesAsync` 调用次数恒为 0。
+- **Excel 导出（ERP-123）**：双权限 / 越界客户拒绝、两个工作表 / 原币 / 显式剩余证据状态、公式前导文本转义、
+  行数上限与仅导出当前页、只读不写库。
 
 ## 9. 验证
 
 ```
 dotnet build NEWERP.sln -c Release --no-restore --no-incremental
-dotnet test src/ERP.UnitTests/ERP.UnitTests.csproj -c Release --no-build --filter FullyQualifiedName~CustomerReportPacketTests
+dotnet test src/ERP.UnitTests/ERP.UnitTests.csproj -c Release --no-build --filter "FullyQualifiedName~CustomerReportPacket"
 node tests/automation/customer_report_packet_ui.test.js
 ```

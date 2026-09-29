@@ -10,6 +10,8 @@ namespace ERP.Application.DTOs;
 /// 客户报告包预览查询参数（ERP-122，全部为只读筛选）：
 /// 必须提供正整数客户 Id；日期区间与分页均有界（每页 1 ~ 100）。
 /// 两个分区复用既有作用域化报表查询接口（ERP-112 / ERP-117），各自独立重检菜单授权与业务员数据范围。
+/// <para>同一请求体亦用于 ERP-123 Excel 导出（只读）：导出时重新校验身份 / 双菜单授权 / 客户 / 日期 / 分页 / 业务员数据范围，
+/// 仅导出当前页，金额按原币呈现、不做跨币种合计或跨单拼接。</para>
 /// </summary>
 public sealed class CustomerReportPacketRequest
 {
