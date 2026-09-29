@@ -1,0 +1,54 @@
+{
+  "id": "ERP-135",
+  "title": "Preview selected fields in an authorized inventory-aging report",
+  "description": "An inventory user selects finite existing stock-aging fields and warehouse/product/as-of-date filters for a bounded read-only preview. Reuse ERP-034 inventory-aging report service, including authoritative FIFO age buckets, separate unknown-age and unknown-cost evidence, persisted cost currency, and stock-query menu authorization; do not widen data scope or compute new valuation. Unknown cost amounts remain null rather than zero. Invalid requests fail closed before report reads; HTTP audit records read-only requests. Development only: no Domain/schema change, migration, production SQL, real database execution, arbitrary model SQL, writes, secret/.env change or deployment. Verify unit tests and safe build/test.",
+  "status": "pending",
+  "risk_level": "medium",
+  "acceptance_criteria": [
+    "Authenticated catalog exposes a finite allowlist of existing scalar and fixed age-bucket fields; preview rejects unknown columns, malformed date/warehouse/product filters and page size above 200 before reading.",
+    "Preview requires the current user's stock-query menu and reuses existing inventory-aging service for bounded warehouse/product/as-of-date paging; selected columns preserve unknown-age, unknown-cost and CNY cost semantics without writes.",
+    "Tests cover allowed/denied users, bucket boundaries, selected field order, unknown amounts, filters, page cap and no writes; document aging and valuation evidence limits."
+  ],
+  "criterion_path_map": {
+    "Authenticated catalog exposes a finite allowlist of existing scalar and fixed age-bucket fields; preview rejects unknown columns, malformed date/warehouse/product filters and page size above 200 before reading.": [
+      "src/ERP.Application/DTOs/DynamicInventoryAgingReportDtos.cs",
+      "src/ERP.Application/Services/DynamicInventoryAgingReportRules.cs",
+      "src/ERP.Api/Controllers/DynamicInventoryAgingReportController.cs"
+    ],
+    "Preview requires the current user's stock-query menu and reuses existing inventory-aging service for bounded warehouse/product/as-of-date paging; selected columns preserve unknown-age, unknown-cost and CNY cost semantics without writes.": [
+      "src/ERP.Application/DTOs/DynamicInventoryAgingReportDtos.cs",
+      "src/ERP.Application/Services/DynamicInventoryAgingReportRules.cs",
+      "src/ERP.Api/Controllers/DynamicInventoryAgingReportController.cs"
+    ],
+    "Tests cover allowed/denied users, bucket boundaries, selected field order, unknown amounts, filters, page cap and no writes; document aging and valuation evidence limits.": [
+      "src/ERP.UnitTests/DynamicInventoryAgingReportTests.cs",
+      "src/ERP.Application/Services/DynamicInventoryAgingReportRules.cs",
+      "docs/dynamic-inventory-aging-report.md"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Application/DTOs/DynamicInventoryAgingReportDtos.cs",
+    "src/ERP.Application/Services/DynamicInventoryAgingReportRules.cs",
+    "src/ERP.Api/Controllers/DynamicInventoryAgingReportController.cs",
+    "src/ERP.UnitTests/DynamicInventoryAgingReportTests.cs",
+    "docs/dynamic-inventory-aging-report.md",
+    ".ai/**"
+  ],
+  "validation_profile": "safe",
+  "depends_on": [
+    "ERP-034"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "completion_mode": "build",
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only bounded read-only feature"
+  }
+}

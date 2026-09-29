@@ -1,0 +1,55 @@
+{
+  "id": "ERP-134",
+  "title": "Download selected authorized inventory-movement page as PDF",
+  "description": "An inventory user downloads the selected bounded movement report page as a paginated Chinese PDF. Reuse ERP-130 authorized preview, current-user stock-query permission, existing PDFsharp and shared SimHei resolver. Show base-unit and unknown-history evidence explicitly; render all selected columns without clipping by splitting wide column sets across pages, and show optional page-only status counts without summing incompatible units. Missing font fails explicitly; HTTP audit records read-only download. Development only: no migration, production SQL, real database execution, arbitrary model SQL, writes, secret/.env change or deployment. Verify PDF and safe build/test.",
+  "status": "pending",
+  "risk_level": "medium",
+  "acceptance_criteria": [
+    "PDF endpoint reuses authorized bounded inventory preview, rechecks stock-query permission and all filters before any file bytes are returned.",
+    "PDFsharp renders selected fields, Chinese labels and unknown-history markers across row and column pages without clipping; shared SimHei resolver fails explicitly if font is unavailable.",
+    "Designer offers PDF download with visible authorization/empty/font failures; tests inspect PDF signature, field order, page bounds, unknowns, font failure and no writes; document font prerequisite."
+  ],
+  "criterion_path_map": {
+    "PDF endpoint reuses authorized bounded inventory preview, rechecks stock-query permission and all filters before any file bytes are returned.": [
+      "src/ERP.Api/Controllers/DynamicInventoryMovementReportController.cs",
+      "src/ERP.Infrastructure/Export/DynamicInventoryMovementPdfExporter.cs"
+    ],
+    "PDFsharp renders selected fields, Chinese labels and unknown-history markers across row and column pages without clipping; shared SimHei resolver fails explicitly if font is unavailable.": [
+      "src/ERP.Infrastructure/Export/DynamicInventoryMovementPdfExporter.cs",
+      "src/ERP.Infrastructure/Export/SimHeiPdfFontResolver.cs"
+    ],
+    "Designer offers PDF download with visible authorization/empty/font failures; tests inspect PDF signature, field order, page bounds, unknowns, font failure and no writes; document font prerequisite.": [
+      "src/ERP.Api/wwwroot/js/inventory-movement-report.js",
+      "src/ERP.UnitTests/DynamicInventoryMovementPdfTests.cs",
+      "docs/dynamic-inventory-movement-report.md"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/DynamicInventoryMovementReportController.cs",
+    "src/ERP.Infrastructure/Export/DynamicInventoryMovementPdfExporter.cs",
+    "src/ERP.Infrastructure/Export/SimHeiPdfFontResolver.cs",
+    "src/ERP.Api/wwwroot/js/inventory-movement-report.js",
+    "src/ERP.UnitTests/DynamicInventoryMovementPdfTests.cs",
+    "docs/dynamic-inventory-movement-report.md",
+    ".ai/**"
+  ],
+  "validation_profile": "safe",
+  "depends_on": [
+    "ERP-130",
+    "ERP-131",
+    "ERP-132"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "completion_mode": "build",
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only bounded read-only feature"
+  }
+}

@@ -1,0 +1,52 @@
+{
+  "id": "ERP-133",
+  "title": "Export selected authorized inventory-movement page to Excel",
+  "description": "An inventory user downloads exactly the selected dynamic movement report page as xlsx, in chosen field order. Reuse ERP-130 authorized bounded preview and the existing ExcelExporter; recheck current-user stock-query menu and all filters on each download. Preserve base-unit labels and explicit unknown-history values, escape formula-leading text, never infer cost or aggregate unlike units. Existing HTTP audit records the read-only download. Development only: no migration, production SQL, real database execution, arbitrary model SQL, writes, secret/.env change or deployment. Verify workbook tests and safe build/test.",
+  "status": "pending",
+  "risk_level": "medium",
+  "acceptance_criteria": [
+    "Excel endpoint reuses authorized bounded dynamic inventory preview, rechecks current-user stock-query permission and rejects invalid fields/filters/page size before returning bytes.",
+    "Workbook uses existing ExcelExporter for only the selected current page and column order, preserving base-unit and unknown-history evidence while escaping formula-leading text.",
+    "Designer offers xlsx download and visible empty/authorization errors; tests inspect selected columns, row cap, null/unknown values, formula safety and permission; document page limit."
+  ],
+  "criterion_path_map": {
+    "Excel endpoint reuses authorized bounded dynamic inventory preview, rechecks current-user stock-query permission and rejects invalid fields/filters/page size before returning bytes.": [
+      "src/ERP.Api/Controllers/DynamicInventoryMovementReportController.cs"
+    ],
+    "Workbook uses existing ExcelExporter for only the selected current page and column order, preserving base-unit and unknown-history evidence while escaping formula-leading text.": [
+      "src/ERP.Api/Controllers/DynamicInventoryMovementReportController.cs",
+      "src/ERP.Application/Services/DynamicInventoryMovementReportRules.cs"
+    ],
+    "Designer offers xlsx download and visible empty/authorization errors; tests inspect selected columns, row cap, null/unknown values, formula safety and permission; document page limit.": [
+      "src/ERP.Api/wwwroot/js/inventory-movement-report.js",
+      "src/ERP.UnitTests/DynamicInventoryMovementExcelTests.cs",
+      "docs/dynamic-inventory-movement-report.md"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/DynamicInventoryMovementReportController.cs",
+    "src/ERP.Application/Services/DynamicInventoryMovementReportRules.cs",
+    "src/ERP.Api/wwwroot/js/inventory-movement-report.js",
+    "src/ERP.UnitTests/DynamicInventoryMovementExcelTests.cs",
+    "docs/dynamic-inventory-movement-report.md",
+    ".ai/**"
+  ],
+  "validation_profile": "safe",
+  "depends_on": [
+    "ERP-130",
+    "ERP-131"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "completion_mode": "build",
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only bounded read-only feature"
+  }
+}

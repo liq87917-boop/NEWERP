@@ -1,0 +1,55 @@
+{
+  "id": "ERP-132",
+  "title": "Show authorized inventory-movement page distribution by warehouse and status",
+  "description": "An inventory user groups the currently authorized dynamic movement report page by warehouse, stagnant classification, or ledger-history status and sees a visual count distribution. Reuse ERP-130 stock-query menu authorization, existing warehouse/product/date filters and bounded report service. Count rows only; never sum quantities across different products or base units, infer missing movement history, or estimate cost. Invalid group keys fail closed; existing HTTP audit records read-only requests. Development only: no Domain/schema change, migration, production SQL, real database execution, arbitrary model SQL, writes, secret/.env change or deployment. Verify unit and Node logic tests plus safe build/test.",
+  "status": "pending",
+  "risk_level": "medium",
+  "acceptance_criteria": [
+    "API accepts only none/warehouse/classification/history grouping and returns deterministic row counts from the same authorized current preview page; no quantities across unlike units are summed.",
+    "Designer renders an accessible labeled count chart for the selected group, including empty and unknown-history categories; pagination changes recompute page-only counts.",
+    "Unit and Node tests cover warehouse grouping, classification and unknown history, empty page, invalid group key, permission and safe rendering; document page-only count semantics."
+  ],
+  "criterion_path_map": {
+    "API accepts only none/warehouse/classification/history grouping and returns deterministic row counts from the same authorized current preview page; no quantities across unlike units are summed.": [
+      "src/ERP.Application/DTOs/DynamicInventoryMovementReportDtos.cs",
+      "src/ERP.Application/Services/DynamicInventoryMovementReportRules.cs",
+      "src/ERP.Api/Controllers/DynamicInventoryMovementReportController.cs"
+    ],
+    "Designer renders an accessible labeled count chart for the selected group, including empty and unknown-history categories; pagination changes recompute page-only counts.": [
+      "src/ERP.Api/wwwroot/js/inventory-movement-report.js"
+    ],
+    "Unit and Node tests cover warehouse grouping, classification and unknown history, empty page, invalid group key, permission and safe rendering; document page-only count semantics.": [
+      "src/ERP.UnitTests/DynamicInventoryMovementGroupingTests.cs",
+      "tests/automation/dynamic_inventory_movement_grouping_ui.test.js",
+      "docs/dynamic-inventory-movement-report.md"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Application/DTOs/DynamicInventoryMovementReportDtos.cs",
+    "src/ERP.Application/Services/DynamicInventoryMovementReportRules.cs",
+    "src/ERP.Api/Controllers/DynamicInventoryMovementReportController.cs",
+    "src/ERP.Api/wwwroot/js/inventory-movement-report.js",
+    "src/ERP.UnitTests/DynamicInventoryMovementGroupingTests.cs",
+    "tests/automation/dynamic_inventory_movement_grouping_ui.test.js",
+    "docs/dynamic-inventory-movement-report.md",
+    ".ai/**"
+  ],
+  "validation_profile": "safe",
+  "depends_on": [
+    "ERP-130",
+    "ERP-131"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "completion_mode": "build",
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only bounded read-only feature"
+  }
+}
