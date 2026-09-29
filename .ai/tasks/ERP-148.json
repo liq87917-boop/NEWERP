@@ -2,7 +2,7 @@
   "id": "ERP-148",
   "title": "Preview selected authorized supplier purchase exposure fields",
   "description": "A purchasing user selects finite purchase-order exposure fields and filters for a current-page read-only preview. Development only. Reuse ERP-031 SupplierPurchaseExposure.ForQueryAsync, its supplier/currency/date/link-status filters and bounded page; recheck the current user's purchase-order menu for every request, fail closed on missing permission and invalid filters, and use existing HTTP operation audit. Keep linked settlement evidence separate from ambiguous/unavailable references, preserve null unknown amounts and original currencies, and state this is not accounts payable or payment authority. No arbitrary SQL, migration, production SQL, real database execution, writes, secrets/.env change or deployment. Verify focused tests and safe Release build/test; no real-browser acceptance.",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "medium",
   "acceptance_criteria": [
     "Authenticated catalog and preview expose only a finite order-evidence field allowlist; reject unknown columns, bad supplier/currency/date/link filters and page size above 200 before source reads.",
@@ -50,5 +50,5 @@
     "status": "not_required",
     "reason": "Development-only bounded read-only feature"
   },
-  "attempts": 0
+  "attempts": 1
 }
