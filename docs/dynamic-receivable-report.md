@@ -230,3 +230,50 @@ dotnet test src/ERP.UnitTests/ERP.UnitTests.csproj -c Release --no-build
 - 空页无分组小计、越界业务员仅本人客户分组、无效分组键拒绝、以及只读不写库。
 
 
+
+## 14. PDF 导出（ERP-121）
+
+### 14.1 接口
+
+- `POST /api/dynamic-receivable-report/export/pdf`：请求体与预览完全相同（`DynamicReceivableReportRequest`），
+  只导出「当前页」的选定列（保持请求字段顺序），并以 PDFsharp 6.2.4 分页渲染中文；
+  可选按分组（customer / month）追加「本页小计」（币种分开，剩余证据状态区分）。
+- 文件名 `CustomerReceivableEvidence_yyyyMMddHHmmss.pdf`；内容类型 `application/pdf`。
+
+### 14.2 字体前提（Windows）
+
+- PDF 中文表头与数值固定使用 **Windows 黑体（SimHei，`C:\Windows\Fonts\simhei.ttf`）**，
+  与销售订单 PDF（ERP-116）共用 `ERP.Infrastructure.Export.SimHeiPdfFontResolver`（同一进程共享解析器，互不覆盖）。
+- 生成前先校验字体文件存在：**找不到 SimHei 时显式失败**（返回「未找到中文字体 SimHei」业务错误），
+  **绝不产出乱码或缺字的 PDF**，也不替换为其它字体。
+- 因此运行导出功能的主机需安装中文（简体）黑体字体；缺少时请通过 Windows「语言 → 简体中文补充字体」安装。
+
+### 14.3 安全与边界（导出时重新校验）
+
+1. **身份 / 菜单授权**：与预览、Excel 导出同源，复用 `DynamicReceivableReportQuery.PreviewAsync`，
+   每次请求重新校验登录用户与 `customer`（客户资料）菜单授权（fail closed），不缓存权限。
+2. **数据范围**：复用 ERP-097 业务员数据范围，只导出当前账号可见行；越界筛选导出为空，绝不返回范围外数据。
+3. **字段 / 筛选 / 页大小**：与预览相同的 29 个白名单字段、客户 / 发票日期 / 币种 / 分配状态 / 发票状态枚举、
+   日期区间与 `1~100` 页大小校验，无效请求在读取前拒绝。
+4. **只导当前页**：只导出请求 `page` / `pageSize` 对应的那一页（单页上限 100），不是全量导出。
+5. **分页渲染**：A4 纵向、固定行高，超出一页自动分页并重复表头；单页最多 `pageSize ≤ 100` 行。
+6. **币种安全小计与剩余证据**：分组小计与预览 `groups` 同源，按币种分开统计条数 / 发票含税总额 / 有效已分摊金额，
+   绝不跨币种换算或相加；`known` 显示剩余金额、`unknown` 显示「剩余未知」、`over_allocated` 显示「剩余超额分摊（无效）」
+   且金额为 null（绝不轧为假余额）。
+7. **只读 + 审计**：无写入、无任意 SQL；`POST` 由既有 `OperationLogMiddleware` 记录审计（动作「导出」）。
+
+### 14.4 前端（设计器）
+
+- 「📄 导出 PDF」按钮与预览 / Excel 共用同一请求体（当前字段 / 筛选 / 分组 / 页码 / 每页条数）；
+- 成功（`application/pdf` 附件）触发浏览器下载；授权失败（`2000/2002/2003`）、无效请求、字体缺失与网络失败
+  在结果区可见，不下载任何内容。
+
+### 14.5 测试覆盖（`ERP.UnitTests/DynamicReceivablePdfTests.cs`）
+
+- PDF 签名（`%PDF-`）与内容类型 / 文件名、A4 页面尺寸（分页边界）；
+- 选定字段顺序（`BuildRowCells` 按请求列顺序映射值）；
+- 分页（少行单页、多行多页）与嵌入中文黑体 SimHei（`/BaseFont /SimHei` + `/FontFile2`）；
+- 字体缺失显式失败、`known` / `unknown` / `over_allocated` 剩余证据区分（不轧为假余额）；
+- 分组小计币种分开（绝不跨币种合计）、无身份 / 无菜单授权 / 页大小超限拒绝、越界业务员仅本人范围；
+- 共享 SimHei 解析器下销售订单与应收 PDF 无跨报表回归、以及只读不写库。
+

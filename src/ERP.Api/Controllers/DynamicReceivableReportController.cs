@@ -15,6 +15,7 @@ namespace ERP.Api.Controllers;
 /// <item><b>GET /api/dynamic-receivable-report</b>：返回应收账款证据字段白名单目录（需登录 + 客户资料菜单授权）；</item>
 /// <item><b>POST /api/dynamic-receivable-report</b>：按选定字段与有界筛选预览当前账号数据范围内的发票证据，稳定分页。</item>
 /// <item><b>POST /api/dynamic-receivable-report/export</b>：导出当前选定页为 Excel（xlsx，只读，复用有界授权预览）。</item>
+/// <item><b>POST /api/dynamic-receivable-report/export/pdf</b>：导出当前选定页为 PDF（只读，复用有界授权预览与 ERP-120 页面小计）。</item>
 /// </list>
 /// <para>全程只读：无 Add / Update / Remove / SaveChanges，不执行任意 SQL；请求由既有 <c>OperationLogMiddleware</c> 记录审计。</para>
 /// </summary>
@@ -77,6 +78,29 @@ public class DynamicReceivableReportController : ControllerBase
         var bytes = BuildWorkbook(page);
         return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             $"CustomerReceivableEvidence_{DateTime.Now:yyyyMMddHHmmss}.xlsx");
+    }
+
+    /// <summary>
+    /// 导出当前页为 PDF（ERP-121，只读）：复用「有界、已授权预览」与选定列顺序（重新校验身份 / 菜单授权 /
+    /// 字段 / 筛选 / 页大小 / 业务员数据范围），以 PDFsharp 6.2.4 分页渲染选定列（中文黑体 SimHei），
+    /// 可选按分组追加「本页小计」（币种分开，剩余证据状态区分）。缺失黑体字体时显式失败（不产出乱码 / 缺字 PDF）。
+    /// </summary>
+    [HttpPost("export/pdf")]
+    public async Task<IActionResult> ExportPdf([FromBody] DynamicReceivableReportRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        // 分组键 fail closed + 补齐小计所需字段，与预览同口径
+        var groupBy = DynamicReceivableReportRules.NormalizeGroupBy(request.GroupBy);
+        if (groupBy != DynamicReceivableReportRules.GroupNone)
+            request.Fields = DynamicReceivableReportRules.EnsureGroupingFields(request.Fields, groupBy);
+
+        // 复用同一有界、已授权预览：重新校验身份 / 菜单授权 / 字段 / 筛选 / 页大小 / 数据范围
+        var page = await _query.PreviewAsync(request, CurrentUserId());
+        var groups = DynamicReceivableReportRules.BuildGroupSubtotals(page.Rows, groupBy);
+
+        var bytes = DynamicReceivablePdfExporter.Export(page, groups, groupBy);
+        return File(bytes, "application/pdf", $"CustomerReceivableEvidence_{DateTime.Now:yyyyMMddHHmmss}.pdf");
     }
 
     /// <summary>用 ExcelExporter 生成当前页数据工作表（选定列顺序 + 公式注入转义）</summary>

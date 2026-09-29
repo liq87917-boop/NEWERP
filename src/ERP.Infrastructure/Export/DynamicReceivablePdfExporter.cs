@@ -8,11 +8,13 @@ using System.Globalization;
 namespace ERP.Infrastructure.Export;
 
 /// <summary>
-/// 动态销售订单报表（ERP-116）PDF 导出：复用 ERP-112 有界预览与 ERP-114 分组页面小计（币种分开），
-/// 以 PDFsharp 6.2.4 分页渲染选定列；中文字体固定使用 Windows 黑体（SimHei），字体缺失时显式失败（不产出乱码或缺字 PDF）。
+/// 动态客户应收账款证据报表（ERP-121）PDF 导出：复用 ERP-117 有界授权预览与 ERP-120 分组页面小计（币种分开），
+/// 以 PDFsharp 6.2.4 分页渲染选定列；中文字体固定使用 Windows 黑体（SimHei），与销售订单 PDF（ERP-116）共用同一
+/// 共享解析器（<see cref="SimHeiPdfFontResolver"/>），字体缺失时显式失败（不产出乱码或缺字 PDF）。
+/// <para>剩余证据（known / unknown / over_allocated）保持区分；小计金额只对同币种求和，绝不跨币种换算或相加。</para>
 /// <para>全程只读：仅生成 PDF 字节流，不写库、不执行任意 SQL；请求审计由既有 OperationLogMiddleware 记录。</para>
 /// </summary>
-public static class DynamicSalesOrderPdfExporter
+public static class DynamicReceivablePdfExporter
 {
     /// <summary>固定使用的中文字体族（Windows 黑体，共享解析器 SimHeiPdfFontResolver）</summary>
     private const string FontFamily = SimHeiPdfFontResolver.FontFamily;
@@ -37,8 +39,8 @@ public static class DynamicSalesOrderPdfExporter
 
     /// <summary>导出当前预览页为 PDF 字节流（只读；字体缺失显式失败）</summary>
     public static byte[] Export(
-        DynamicSalesOrderReportPageDto page,
-        IReadOnlyList<DynamicSalesOrderReportGroupDto>? groups,
+        DynamicReceivableReportPageDto page,
+        IReadOnlyList<DynamicReceivableReportGroupDto>? groups,
         string groupBy)
         => Export(page, groups, groupBy, SimHeiPdfFontResolver.FindFontPath());
 
@@ -47,8 +49,8 @@ public static class DynamicSalesOrderPdfExporter
     /// <para>公开该重载以便单元测试注入「字体缺失」路径，以及显式控制字体文件位置。</para>
     /// </summary>
     public static byte[] Export(
-        DynamicSalesOrderReportPageDto page,
-        IReadOnlyList<DynamicSalesOrderReportGroupDto>? groups,
+        DynamicReceivableReportPageDto page,
+        IReadOnlyList<DynamicReceivableReportGroupDto>? groups,
         string groupBy,
         string? fontPath)
     {
@@ -65,7 +67,7 @@ public static class DynamicSalesOrderPdfExporter
         SimHeiPdfFontResolver.Ensure(fontPath);
 
         using var document = new PdfDocument();
-        document.Info.Title = "销售订单报表";
+        document.Info.Title = "客户应收账款证据报表";
 
         DrawReport(document, page, groups, groupBy);
 
@@ -78,11 +80,11 @@ public static class DynamicSalesOrderPdfExporter
 
     private static void DrawReport(
         PdfDocument document,
-        DynamicSalesOrderReportPageDto page,
-        IReadOnlyList<DynamicSalesOrderReportGroupDto>? groups,
+        DynamicReceivableReportPageDto page,
+        IReadOnlyList<DynamicReceivableReportGroupDto>? groups,
         string groupBy)
     {
-        var columns = page.Columns ?? new List<DynamicSalesOrderReportFieldDto>();
+        var columns = page.Columns ?? new List<DynamicReceivableReportFieldDto>();
         var rows = page.Rows ?? new List<Dictionary<string, object?>>();
         var columnCount = Math.Max(1, columns.Count);
 
@@ -127,11 +129,11 @@ public static class DynamicSalesOrderPdfExporter
                 gfxList.Add(gfx);
                 y = DrawPageHead(gfx, titleFont, metaFont, page);
                 y = DrawColumnHeaders(gfx, headerFont, headerBrush, borderPen, columns, colWidth, y);
-                gfx.DrawString("没有符合条件的销售订单", cellFont, XBrushes.Black,
+                gfx.DrawString("没有符合条件的客户应收账款证据", cellFont, XBrushes.Black,
                     new XRect(Mm(MarginLeftMm), y + Mm(2), tableWidth, dataRowHeight), XStringFormats.TopLeft);
             }
 
-            if (!string.Equals(groupBy, DynamicSalesOrderReportRules.GroupNone, StringComparison.Ordinal)
+            if (!string.Equals(groupBy, DynamicReceivableReportRules.GroupNone, StringComparison.Ordinal)
                 && groups is { Count: > 0 })
             {
                 var subtotalHeight = Mm(8) + groups.Sum(g => g.Subtotals.Count) * Mm(6) + Mm(6);
@@ -161,9 +163,9 @@ public static class DynamicSalesOrderPdfExporter
     }
 
     private static double DrawPageHead(XGraphics gfx, XFont titleFont, XFont metaFont,
-        DynamicSalesOrderReportPageDto page)
+        DynamicReceivableReportPageDto page)
     {
-        gfx.DrawString("销售订单报表", titleFont, XBrushes.Black,
+        gfx.DrawString("客户应收账款证据报表", titleFont, XBrushes.Black,
             new XRect(Mm(MarginLeftMm), Mm(MarginTopMm), Mm(PageWidthMm - MarginLeftMm - MarginRightMm), Mm(9)),
             XStringFormats.TopCenter);
 
@@ -175,8 +177,9 @@ public static class DynamicSalesOrderPdfExporter
         return Mm(MarginTopMm + 18);
     }
 
+
     private static double DrawColumnHeaders(XGraphics gfx, XFont font, XBrush brush, XPen pen,
-        IReadOnlyList<DynamicSalesOrderReportFieldDto> columns, double colWidth, double y)
+        IReadOnlyList<DynamicReceivableReportFieldDto> columns, double colWidth, double y)
     {
         for (var c = 0; c < columns.Count; c++)
         {
@@ -188,29 +191,28 @@ public static class DynamicSalesOrderPdfExporter
     }
 
     private static void DrawDataRow(XGraphics gfx, XFont font, XPen pen,
-        IReadOnlyList<DynamicSalesOrderReportFieldDto> columns,
+        IReadOnlyList<DynamicReceivableReportFieldDto> columns,
         Dictionary<string, object?> row, double colWidth, double y)
     {
+        var cells = BuildRowCells(columns, row);
         for (var c = 0; c < columns.Count; c++)
         {
             var rect = new XRect(Mm(MarginLeftMm) + c * colWidth, y, colWidth, Mm(DataRowHeightMm));
             gfx.DrawRectangle(pen, rect);
 
-            var value = row.TryGetValue(columns[c].Key, out var v) ? v : null;
-            var text = FormatCellValue(value);
             var format = columns[c].DataType is "number" or "boolean"
                 ? XStringFormats.CenterRight
                 : XStringFormats.CenterLeft;
-            DrawCellText(gfx, text, font, rect, format);
+            DrawCellText(gfx, cells[c], font, rect, format);
         }
     }
 
     private static void DrawSubtotals(XGraphics gfx, XFont headerFont, XFont cellFont, XPen pen, XBrush brush,
-        IReadOnlyList<DynamicSalesOrderReportGroupDto> groups, double y)
+        IReadOnlyList<DynamicReceivableReportGroupDto> groups, double y)
     {
         var left = Mm(MarginLeftMm);
-        var widths = new[] { Mm(70), Mm(40), Mm(30), Mm(50) };
-        var titles = new[] { "分组", "币种", "条数", "金额" };
+        var widths = new[] { Mm(45), Mm(30), Mm(25), Mm(32), Mm(30), Mm(28) };
+        var titles = new[] { "分组", "币种", "条数", "含税总额", "有效分摊", "剩余证据" };
 
         gfx.DrawString("本页小计（按币种分开，不跨币种合计）", headerFont, XBrushes.Black,
             new XRect(left, y, Mm(PageWidthMm - MarginLeftMm - MarginRightMm), Mm(7)), XStringFormats.TopLeft);
@@ -234,7 +236,9 @@ public static class DynamicSalesOrderPdfExporter
                     group.Label,
                     subtotal.Currency,
                     subtotal.Count.ToString(CultureInfo.InvariantCulture),
-                    subtotal.Amount.ToString("0.##", CultureInfo.InvariantCulture),
+                    subtotal.GrossAmount.ToString("0.##", CultureInfo.InvariantCulture),
+                    subtotal.EffectiveAllocatedAmount.ToString("0.##", CultureInfo.InvariantCulture),
+                    FormatRemainingText(subtotal),
                 };
                 for (var c = 0; c < cells.Length; c++)
                 {
@@ -247,6 +251,39 @@ public static class DynamicSalesOrderPdfExporter
                 y += Mm(6);
             }
         }
+    }
+
+
+    /// <summary>按选定列顺序把一行转成 PDF 单元格文本（与绘制共用同一口径，供测试验证字段顺序）</summary>
+    public static IReadOnlyList<string> BuildRowCells(
+        IReadOnlyList<DynamicReceivableReportFieldDto> columns,
+        Dictionary<string, object?> row)
+    {
+        var cells = new List<string>(columns.Count);
+        foreach (var col in columns)
+        {
+            var value = row.TryGetValue(col.Key, out var v) ? v : null;
+            cells.Add(FormatCellValue(value));
+        }
+        return cells;
+    }
+
+    /// <summary>
+    /// 剩余证据单元格文本：known 给金额、unknown 标注「剩余未知」、over_allocated 标注「剩余超额分摊（无效）」
+    /// 且金额为 null（绝不轧为假余额）；未知状态返回空串。
+    /// </summary>
+    public static string FormatRemainingText(DynamicReceivableReportCurrencySubtotalDto subtotal)
+    {
+        if (string.Equals(subtotal.RemainingState, CustomerReceivableReconciliationRules.RemainingKnown, StringComparison.Ordinal))
+            return subtotal.RemainingAmount?.ToString("0.##", CultureInfo.InvariantCulture) ?? string.Empty;
+
+        if (string.Equals(subtotal.RemainingState, CustomerReceivableReconciliationRules.RemainingOverAllocated, StringComparison.Ordinal))
+            return "剩余超额分摊（无效）";
+
+        if (string.Equals(subtotal.RemainingState, CustomerReceivableReconciliationRules.RemainingUnknown, StringComparison.Ordinal))
+            return "剩余未知";
+
+        return string.Empty;
     }
 
     private static double SumWidths(double[] values, int count)
@@ -307,5 +344,5 @@ public static class DynamicSalesOrderPdfExporter
     }
 
     private static double Mm(double millimeters) => millimeters * PointsPerMillimeter;
-
 }
+

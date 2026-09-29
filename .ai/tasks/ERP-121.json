@@ -1,7 +1,7 @@
 {
   "id": "ERP-121",
   "title": "Download scoped dynamic customer receivable report as PDF",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "medium",
   "description": "User scene: download exactly the selected, authorized receivable evidence page and optional ERP-120 page subtotals as a paginated Chinese PDF. Reuse ERP-117 preview, current ERP customer-menu and salesperson scope on every download. Reuse the existing PDFsharp 6.2.4 dependency and SimHei font resolver from ERP-116; refactor shared font setup narrowly so both report types work in one process. Missing font fails explicitly; known and unknown remaining evidence remain distinct and no cross-currency sum is invented. Existing HTTP audit records the read-only download. Development only: no migration, production SQL, real database execution, arbitrary model SQL, writes, secret/.env change or deployment. Verify PDF and regression tests plus safe build/test.",
   "acceptance_criteria": [
@@ -56,6 +56,6 @@
     "status": "not_required",
     "reason": "Development-only bounded read-only feature"
   },
-  "attempts": 0,
+  "attempts": 1,
   "created_at": "2026-09-29T04:16:45.697050Z"
 }
