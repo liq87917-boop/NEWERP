@@ -56,6 +56,7 @@ function openInventoryAgingReport() {
         <button class="btn btn-neutral btn-sm" onclick="iarDynToggleAll(false)">清空</button>
         <button class="btn btn-primary" onclick="iarDynPreview(1)">预览</button>
         <button class="btn btn-neutral" onclick="exportIarDesignerCsv()" title="导出当前页为 CSV（选定列）">📤 导出 CSV（选定列）</button>
+        <button class="btn btn-neutral" onclick="exportIarDesignerXlsx()" title="导出当前页为 Excel（选定列）">📥 导出 Excel（选定列）</button>
       </div>
     </div>
     <div id="iar-designer-result"></div>
@@ -602,6 +603,64 @@ function exportIarDesignerCsv() {
   toast('CSV 已导出（当前页 · 选定列）', 'success');
 }
 
+/* 导出当前预览页为 Excel（xlsx，选定列顺序 + 公式转义 + 未知成本金额保留为未知 + 基础单位 / CNY 语义）；
+   每次下载都重新读取当前筛选并走只读导出接口（后端重新校验授权 / 字段 / 筛选 / 页大小），空数据不下载空表 */
+async function exportIarDesignerXlsx() {
+  const state = iarDynBuildState(IAR_DYN.page);
+  if (IAR_DYN.view && (!IAR_DYN.view.rows || IAR_DYN.view.rows.length === 0)) {
+    iarDynRenderResult(iarDynErrorHtml('empty', '没有符合条件的库存行，无法导出（请先预览）'));
+    return;
+  }
+
+  const req = iarDynBuildRequest(state);
+  iarDynRenderResult(iarDynLoadingHtml());
+
+  try {
+    const headers = { 'Content-Type': 'application/json' };
+    const token = typeof localStorage !== 'undefined' ? (localStorage.getItem('erp_token') || '') : '';
+    if (token) headers['Authorization'] = 'Bearer ' + token;
+    const resp = await fetch('/api/dynamic-inventory-aging-report/export', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(req),
+    });
+
+    const contentType = (resp.headers.get('content-type') || '');
+    if (contentType.indexOf('spreadsheetml') >= 0) {
+      const blob = await resp.blob();
+      downloadIarBlob(blob, '库存库龄字段设计器_当前页.xlsx');
+      iarDynRenderResult('');
+      toast('Excel 已导出（当前页 · 选定列）', 'success');
+      return;
+    }
+
+    let envelope = null;
+    try { envelope = await resp.json(); } catch (e) { /* 忽略解析失败 */ }
+    const code = envelope && envelope.code;
+    const message = (envelope && envelope.message) || '导出失败';
+    if (code === 2000 || code === 2003) {
+      if (typeof logout === 'function') logout();
+      iarDynRenderResult(iarDynErrorHtml('unauthorized', message));
+      return;
+    }
+    iarDynRenderResult(iarDynErrorHtml(iarDynKindOfCode(code), message));
+  } catch (err) {
+    iarDynRenderResult(iarDynErrorHtml('network', (err && err.message) || '无法连接到服务器'));
+  }
+}
+
+/* 触发浏览器下载指定 blob（下载后回收对象 URL） */
+function downloadIarBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
 /* Node 单测导出（浏览器中 module 为 undefined，自动跳过） */
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
@@ -632,6 +691,8 @@ if (typeof module !== 'undefined' && module.exports) {
     iarDynPage,
     loadIarDesignerCatalog,
     exportIarDesignerCsv,
+    exportIarDesignerXlsx,
+    downloadIarBlob,
   };
 }
 

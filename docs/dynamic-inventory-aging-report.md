@@ -110,3 +110,32 @@
 - **审计与只读**：分组仍走同一 `POST` 预览端点，由既有 `OperationLogMiddleware` 按 HTTP 方法记录操作日志（读操作）；本设计器不新增 / 修改 / 删除任何记录，不执行任意 SQL。
 - **前端渲染**：分组结果渲染为可访问的横向条形图（`role="list"` / `role="listitem"`，每项带可见标签与计数），标签与计数全部转义、不注入 HTML；空页 / 不分组不渲染图表，仍显示空结果提示。
 - **验证**：后端由 `ERP.UnitTests/DynamicInventoryAgingGroupingTests.cs`（ERP-137）覆盖分组键、仓库拆分、缺失证据、空页、权限与只读；前端由 `node tests/automation/dynamic_inventory_aging_grouping_ui.test.js` 覆盖分组键白名单、仓库 / 证据分布渲染、安全图表文本与接线契约。
+
+---
+
+## 10. Excel 导出（ERP-138）
+
+在既有字段设计器工具栏内新增「📥 导出 Excel（选定列）」，把当前授权预览页按选定列顺序下载为 xlsx。全程只读、复用有界授权预览，绝不跨页、绝不把未知成本金额当作 0、绝不臆造库龄分层或成本估值。
+
+### 10.1 端点
+
+- `POST /api/dynamic-inventory-aging-report/export`：请求体与预览完全相同（`DynamicInventoryAgingReportRequest`），复用同一有界、已授权预览管线（每次请求重新校验身份 / 库存查询菜单授权 / 字段 / 日期 / 仓库 / 商品 / 页大小），**只导出请求 `page` / `pageSize` 对应的当前页**（单页上限 200，超限直接拒绝），不是全量导出。
+- 文件名 `InventoryAging_yyyyMMddHHmmss.xlsx`；内容类型 `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`。
+
+### 10.2 导出口径
+
+- 数据工作表复用 `ERP.Infrastructure.Export.ExcelExporter`；列头 = 选定字段的中文标签，列顺序 = 请求 `fields` 顺序，仅当前页行。
+- **固定 5 格库龄分层**与**基础单位数量**语义保持不变；`costCurrency` 显式标注 `CNY`。
+- **未知成本金额显式保留为未知**：成本 / 金额字段（`averageCost` / `*Amount`）为 null 时导出为空单元格（未知），**绝不回落为 0**、不估算成本、不做跨币种合并或汇率换算。
+- **公式注入防护**：文本单元格以 `=` / `+` / `-` / `@` / 制表符 / 回车 / 换行开头时前缀单引号转义（OWASP），保持字面文本、不被当作公式执行（`DynamicInventoryAgingReportRules.EscapeFormulaLeading`）。
+
+### 10.3 前端与审计
+
+- 前端：字段设计器工具栏新增「📥 导出 Excel（选定列）」，复用当前字段 / 筛选 / 分页组装请求后 `POST` 导出；空数据显示可见错误、不下载空表，授权 / 校验 / 网络失败均在结果区可见。
+- 审计与只读：`POST` 由既有 `OperationLogMiddleware` 记录操作日志（动作「导出」，读操作）；本导出不新增 / 修改 / 删除任何记录，不执行任意 SQL。
+
+### 10.4 限制
+
+- 仅导出当前页（≤ 200 行）；`total` 为符合筛选条件的库存行总数，导出不含全量数据。
+- 验证：后端 `ERP.UnitTests/DynamicInventoryAgingExcelTests.cs`；前端语法 `node --check src/ERP.Api/wwwroot/js/inventory-aging-report.js`。
+

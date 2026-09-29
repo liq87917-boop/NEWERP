@@ -2,7 +2,7 @@
   "id": "ERP-138",
   "title": "Export selected authorized inventory-aging page to Excel",
   "description": "An inventory user downloads exactly the selected dynamic stock-aging page as xlsx in chosen field order. Reuse ERP-135 authorized bounded preview, existing ExcelExporter and current-user stock-query menu on every download. Keep fixed age buckets, base-unit quantities and CNY cost currency; unknown cost amounts remain explicitly unknown rather than zero and formula-leading text is literal. HTTP audit records the read-only download. Development only: no migration, production SQL, real database execution, arbitrary model SQL, writes, secret/.env change or deployment. Verify workbook tests and safe build/test.",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "medium",
   "acceptance_criteria": [
     "Excel endpoint reuses authorized bounded stock-aging preview and selected fields, rechecks stock-query permission and rejects invalid filters/columns/page size before bytes.",
@@ -48,5 +48,6 @@
     "level": "L1",
     "status": "not_required",
     "reason": "Development-only bounded read-only feature"
-  }
+  },
+  "attempts": 1
 }
