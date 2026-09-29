@@ -180,6 +180,22 @@ CSV 只导出当前预览页选定列证据，`POST` 由既有 `OperationLogMidd
 `none` 或空页时 `summaries` 为空；汇总只统计当前页、非全量合计，收货数量等非金额证据绝不进入汇总。
 全程只读、无写入，`POST` 由既有 `OperationLogMiddleware` 记录审计。
 
+## 前端金额汇总可视化（ERP-155）
+
+字段设计器 `wwwroot/js/supplier-purchase-exposure.js` 新增「③ 金额汇总」选择器，复用 ERP-154 的金额汇总语义，在预览结果上方渲染当前授权预览页的原始币金额汇总表：
+
+- 选择器只提供 ERP-154 允许的汇总模式：`none` / `supplierCurrency` / `supplierCurrencyLink`（`SPE_SUMMARY_MODES` 白名单，无自由输入）；非法 / 缺失模式经 `speDesSummaryMode` fail closed 回落 `none`，绝不进入请求；
+- 预览请求体由 `speDesBuildRequest` 始终携带 `summaryMode`（= 选中的白名单模式），复用既有有界、已授权预览（每次请求重新校验身份 / `purchase-order` 采购订单菜单授权 / 字段 / 筛选 / 页大小 / 汇总模式）；
+- 结果渲染 `speDesSummaryHtml`：按后端返回的 `summaries`（`{ supplierId, supplierName, currency, linkStatus, linkStatusText, orderCount, orderedAmount, linkedOrderCount, linkedOrderedAmount, ambiguousOrderCount, ambiguousOrderedAmount, unavailableOrderCount, unavailableOrderedAmount, settledAmount, outstandingAmount, submittedAmount, unknownSettlementOrderCount }`）渲染金额汇总表，标签经 HTML 转义（无 unsafe HTML）；未知金额（null）绝不回落为 0；
+- 列标签覆盖供应商 / 币种 / 可选链接状态（仅 `supplierCurrencyLink` 模式）/ 订单金额·原币 / 链接可用订单金额·原币 / 链接不唯一·金额·原币 / 无可用链接·金额·原币 / 已结算·原币 / 未结算·原币 / 已提交·原币 / 链接可用未知结算单数；链接不唯一 / 无可用链接金额保持独立（绝不并入权威已结算合计、绝不推断为应付余额），不同币种分别成行、绝不合并或换算；
+- 空页 / `none` 不渲染汇总或显示可见空提示；翻页后汇总随 `view.summaries` 重渲染；标注「仅当前预览页，非全量合计」。
+
+授权失败 / 无效模式 / 网络失败均在结果区可见（fail closed）；全程只读，无写入。汇总只影响预览展示，**不进入** CSV / Excel / PDF 行导出（导出仍只含当前页选定列证据，`POST` 由既有 `OperationLogMiddleware` 记录审计）。
+
+### 单元测试
+
+`tests/automation/dynamic_supplier_exposure_amount_summary_ui.test.js`（Node，无需浏览器）覆盖：汇总模式选择（仅 ERP-154 白名单）、请求携带 `summaryMode`、供应商 / 币种 / 链接状态 / 订单金额与已知结算证据标签、未知与链接不唯一 / 无可用链接独立、安全文本渲染、分页与失败态，以及汇总与下载范围接线契约。
+
 ## 文件地图
 
 - `src/ERP.Application/DTOs/DynamicSupplierExposureReportDtos.cs`：目录 / 请求 / 结果 DTO（含 ERP-152 分组计数 DTO 与 ERP-154 金额汇总 DTO）；
@@ -191,6 +207,7 @@ CSV 只导出当前预览页选定列证据，`POST` 由既有 `OperationLogMidd
 - `src/ERP.UnitTests/DynamicSupplierExposureAmountSummaryTests.cs`：金额汇总单元测试（ERP-154，内存库，不连 SQL Server、不启动 API）；
 - `src/ERP.UnitTests/DynamicSupplierExposureExcelTests.cs`：Excel 导出单元测试（ERP-150，内存库，不连 SQL Server、不启动 API）；
 - `src/ERP.UnitTests/DynamicSupplierExposurePdfTests.cs`：PDF 导出单元测试（ERP-151，内存库，不连 SQL Server、不启动 API）；
-- `src/ERP.Api/wwwroot/js/supplier-purchase-exposure.js`：ERP-031 工作台 + ERP-149 前端字段设计器 + ERP-150 Excel 导出（`speDesExportExcel`）+ ERP-151 PDF 导出（`speDesExportPdf`，纯函数可 Node 单测）+ ERP-153 分组计数可视化（`speDesGroupChartHtml` / `speDesGroupSelectHtml`）；
+- `src/ERP.Api/wwwroot/js/supplier-purchase-exposure.js`：ERP-031 工作台 + ERP-149 前端字段设计器 + ERP-150 Excel 导出（`speDesExportExcel`）+ ERP-151 PDF 导出（`speDesExportPdf`，纯函数可 Node 单测）+ ERP-153 分组计数可视化（`speDesGroupChartHtml` / `speDesGroupSelectHtml`）+ ERP-155 金额汇总可视化（`speDesSummaryMode` / `speDesSummarySelectHtml` / `speDesSummaryHtml`）；
 - `tests/automation/dynamic_supplier_exposure_ui.test.js`：ERP-149 前端 UI 逻辑单测（Node，无需浏览器）；
-- `tests/automation/dynamic_supplier_exposure_grouping_ui.test.js`：ERP-153 前端分组计数 UI 逻辑单测（Node，无需浏览器）。
+- `tests/automation/dynamic_supplier_exposure_grouping_ui.test.js`：ERP-153 前端分组计数 UI 逻辑单测（Node，无需浏览器）；
+- `tests/automation/dynamic_supplier_exposure_amount_summary_ui.test.js`：ERP-155 前端金额汇总 UI 逻辑单测（Node，无需浏览器）。

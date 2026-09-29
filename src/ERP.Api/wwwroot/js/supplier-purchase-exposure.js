@@ -305,11 +305,19 @@ const SPE_GROUP_KEYS = [
   { key: 'receiptStatus', label: '按收货状态' },
 ];
 
+/* ERP-154 允许的金额汇总模式（有限、只读；后端 fail closed 拒绝非法取值，前端绝不发送范围外键） */
+const SPE_SUMMARY_MODES = [
+  { key: 'none', label: '不汇总金额（仅表格 / 分组计数）' },
+  { key: 'supplierCurrency', label: '按供应商 + 币种汇总金额' },
+  { key: 'supplierCurrencyLink', label: '按供应商 + 币种 + 链接状态汇总金额' },
+];
+
 let SPE_DESIGNER = {
   catalog: null,      // GET /api/supplier-purchase-exposure/report 返回的目录 DTO
   fields: [],         // 目录字段（白名单）
   selectedKeys: [],   // 当前勾选的字段键（默认全选）
   groupBy: 'none',    // 当前分组键（仅 ERP-152 白名单；非法值回落 none）
+  summaryMode: 'none', // 当前金额汇总模式（仅 ERP-154 白名单；非法值回落 none）
   view: null,         // 最近一次预览结果
 };
 
@@ -341,6 +349,12 @@ function speDesGroupKey(value) {
   return SPE_GROUP_KEYS.some(g => g.key === key) ? key : 'none';
 }
 
+/* 金额汇总模式规范化（fail closed）：只保留 ERP-154 允许的模式，缺失 / 空白 / 非法值一律回落 none（绝不进入请求） */
+function speDesSummaryMode(value) {
+  const key = String(value == null ? '' : value).trim();
+  return SPE_SUMMARY_MODES.some(m => m.key === key) ? key : 'none';
+}
+
 /* 组装有界预览请求体：字段只来自目录、分页有界、筛选仅复用工作台当前筛选，绝不接受任意字段名或 SQL */
 function speDesBuildRequest(state) {
   const fields = speDesSelectFields(state.catalogFields, state.selectedKeys);
@@ -352,6 +366,7 @@ function speDesBuildRequest(state) {
 
   const req = { fields, page, pageSize };
   req.groupBy = speDesGroupKey(state.groupBy);
+  req.summaryMode = speDesSummaryMode(state.summaryMode);
 
   const supplierId = Number(state.supplierId);
   if (Number.isFinite(supplierId) && supplierId > 0) req.supplierId = supplierId;
@@ -452,7 +467,7 @@ function speDesResultHtml(view) {
     ? `<div class="text-muted" style="margin:6px 0">共 ${view.total} 条 · 第 ${view.page} 页 · 每页 ${view.pageSize} 条 · 本页 ${(view.rows || []).length} 行证据</div>`
     : '';
   const empty = view && (!view.rows || view.rows.length === 0) ? speDesEmptyHtml() : '';
-  return `${readOnly}${boundary}${disclaimer}${summary}${speDesGroupChartHtml(view)}${empty}${speDesTableHtml(view)}`;
+  return `${readOnly}${boundary}${disclaimer}${summary}${speDesGroupChartHtml(view)}${speDesSummaryHtml(view)}${empty}${speDesTableHtml(view)}`;
 }
 
 /* 分组计数条形图（仅当前预览页）：标签转义渲染、计数未知不回落 0；固定分类空类计数为 0 仍显示、动态分组空页可见提示 */
@@ -488,12 +503,93 @@ function speDesGroupChartHtml(view) {
     + `${rows}${empty}</div>`;
 }
 
+/* 汇总金额显示：null / undefined / 非有限数 = 未知（命中上限或无效证据，绝不回落 0） */
+function speDesMoney(v) {
+  if (v === null || v === undefined) return '未知';
+  const n = Number(v);
+  if (!Number.isFinite(n)) return '未知';
+  return String(Math.round(n * 100) / 100);
+}
+
+/* 汇总计数显示：null / undefined = 未知 */
+function speDesInt(v) {
+  if (v === null || v === undefined) return '未知';
+  return String(v);
+}
+
+/* 当前页金额汇总（ERP-154，仅当前预览页）：供应商 + 原币（可选按链接状态拆分）的采购订单敞口金额证据；
+   未知值绝不回落 0，未链接敞口（链接不唯一 / 无可用链接）保持独立，不同币种绝不合并或换算 */
+function speDesSummaryHtml(view) {
+  const mode = speDesSummaryMode(view && view.summaryMode);
+  if (!view || mode === 'none' || !Array.isArray(view.summaries)) return '';
+  const summaries = view.summaries;
+  const withLink = mode === 'supplierCurrencyLink';
+  const title = '💰 当前页金额汇总（仅当前预览页，非全量合计）';
+  if (summaries.length === 0) {
+    return `<div class="pd-hint" style="margin:8px 0">`
+      + `<div style="font-weight:600;margin-bottom:6px">${title}</div>`
+      + `<div class="text-muted">本页没有可汇总金额的采购订单敞口证据（空页）。</div>`
+      + `</div>`;
+  }
+  const head = `<th>供应商</th><th>币种</th>`
+    + (withLink ? `<th>链接状态</th>` : '')
+    + `<th class="text-right">订单数</th>`
+    + `<th class="text-right">订单金额·原币</th>`
+    + `<th class="text-right">链接可用·订单数</th>`
+    + `<th class="text-right">链接可用·订单金额·原币</th>`
+    + `<th class="text-right">链接不唯一·订单数</th>`
+    + `<th class="text-right">链接不唯一·金额·原币</th>`
+    + `<th class="text-right">无可用链接·订单数</th>`
+    + `<th class="text-right">无可用链接·金额·原币</th>`
+    + `<th class="text-right">已结算·原币</th>`
+    + `<th class="text-right">未结算·原币</th>`
+    + `<th class="text-right">已提交·原币</th>`
+    + `<th class="text-right">链接可用未知结算单数</th>`;
+  const rows = summaries.map(s => {
+    const supplier = s && s.supplierName ? speDesEsc(s.supplierName)
+      : (s && s.supplierId != null ? '供应商 ' + s.supplierId : '未知');
+    const link = withLink
+      ? `<td>${speDesEsc((s && s.linkStatusText) || (s && s.linkStatus) || '未知')}</td>`
+      : '';
+    return `<tr>`
+      + `<td>${supplier}</td>`
+      + `<td><b>${speDesEsc((s && s.currency) || '未知')}</b></td>`
+      + link
+      + `<td class="text-right">${speDesInt(s && s.orderCount)}</td>`
+      + `<td class="text-right">${speDesMoney(s && s.orderedAmount)}</td>`
+      + `<td class="text-right">${speDesInt(s && s.linkedOrderCount)}</td>`
+      + `<td class="text-right">${speDesMoney(s && s.linkedOrderedAmount)}</td>`
+      + `<td class="text-right">${speDesInt(s && s.ambiguousOrderCount)}</td>`
+      + `<td class="text-right">${speDesMoney(s && s.ambiguousOrderedAmount)}</td>`
+      + `<td class="text-right">${speDesInt(s && s.unavailableOrderCount)}</td>`
+      + `<td class="text-right">${speDesMoney(s && s.unavailableOrderedAmount)}</td>`
+      + `<td class="text-right">${speDesMoney(s && s.settledAmount)}</td>`
+      + `<td class="text-right">${speDesMoney(s && s.outstandingAmount)}</td>`
+      + `<td class="text-right">${speDesMoney(s && s.submittedAmount)}</td>`
+      + `<td class="text-right">${speDesInt(s && s.unknownSettlementOrderCount)}</td>`
+      + `</tr>`;
+  }).join('');
+  return `<div class="pd-hint" style="margin:8px 0">`
+    + `<div style="font-weight:600;margin-bottom:6px">${title}</div>`
+    + `<table style="width:100%;margin-bottom:6px"><thead><tr>${head}</tr></thead><tbody>${rows}</tbody></table>`
+    + `<div class="text-muted">口径：只汇总当前授权预览页的采购订单敞口金额；订单金额来自采购订单已落库总额，已结算 / 未结算 / 已提交只汇总「链接可用且金额已知」的订单，链接不唯一 / 无可用链接金额保持独立（绝不并入权威已结算合计、绝不推断为应付余额），未知金额保持「未知」，不同币种绝不合并或换算。</div>`
+    + `</div>`;
+}
+
 /* 分组键选择器：仅 ERP-152 允许的分组键（fail closed，无自由输入） */
 function speDesGroupSelectHtml(groupBy) {
   const selected = speDesGroupKey(groupBy);
   const opts = SPE_GROUP_KEYS.map(g =>
     `<option value="${speDesEsc(g.key)}" ${g.key === selected ? 'selected' : ''}>${speDesEsc(g.label)}</option>`).join('');
   return `<select id="spe-des-groupby" style="min-width:200px">${opts}</select>`;
+}
+
+/* 金额汇总模式选择器：仅 ERP-154 允许的模式（fail closed，无自由输入） */
+function speDesSummarySelectHtml(summaryMode) {
+  const selected = speDesSummaryMode(summaryMode);
+  const opts = SPE_SUMMARY_MODES.map(m =>
+    `<option value="${speDesEsc(m.key)}" ${m.key === selected ? 'selected' : ''}>${speDesEsc(m.label)}</option>`).join('');
+  return `<select id="spe-des-summarymode" style="min-width:260px">${opts}</select>`;
 }
 
 /* 字段选择器：仅由目录白名单渲染为复选框，无自由填写的字段名 */
@@ -597,7 +693,13 @@ function speDesRender() {
       </div>
 
       <div style="margin:10px 0">
-        <div style="font-weight:600;margin-bottom:6px">③ 当前筛选（复用工作台，只读）</div>
+        <div style="font-weight:600;margin-bottom:6px">③ 金额汇总（ERP-154，可选，仅当前预览页原币金额）</div>
+        ${speDesSummarySelectHtml(SPE_DESIGNER.summaryMode)}
+        <div class="text-muted" style="margin-top:4px">只汇总当前预览页采购订单敞口金额：订单金额来自已落库总额，已结算 / 未结算 / 已提交只汇总「链接可用且金额已知」的订单；链接不唯一 / 无可用链接金额保持独立，未知金额保持「未知」，不同币种绝不合并或换算。</div>
+      </div>
+
+      <div style="margin:10px 0">
+        <div style="font-weight:600;margin-bottom:6px">④ 当前筛选（复用工作台，只读）</div>
         ${speDesFilterSummaryHtml()}
       </div>
 
@@ -626,6 +728,7 @@ function speDesBuildState(page) {
     pageSize: speVal('spe-pagesize') || '50',
     page: page || 1,
     groupBy: speVal('spe-des-groupby'),
+    summaryMode: speVal('spe-des-summarymode'),
     maxPageSize: SPE_DESIGNER.catalog && SPE_DESIGNER.catalog.maxPageSize ? SPE_DESIGNER.catalog.maxPageSize : 200,
   };
 }
@@ -835,9 +938,11 @@ if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     SPE_DESIGNER_API,
     SPE_GROUP_KEYS,
+    SPE_SUMMARY_MODES,
     speDesEsc,
     speDesSelectFields,
     speDesGroupKey,
+    speDesSummaryMode,
     speDesBuildRequest,
     speDesCellText,
     speDesRenderCell,
@@ -850,6 +955,10 @@ if (typeof module !== 'undefined' && module.exports) {
     speDesGroupChartHtml,
     speDesFieldChooserHtml,
     speDesGroupSelectHtml,
+    speDesSummarySelectHtml,
+    speDesSummaryHtml,
+    speDesMoney,
+    speDesInt,
     speDesKindOfCode,
     speDesErrorModalHtml,
     speDesPreview,
