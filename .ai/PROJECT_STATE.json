@@ -1,11 +1,10 @@
 {
   "schema_version": 2,
   "project": "NEWERP",
-  "updated_at": "2026-09-29T07:15:57.625030Z",
+  "updated_at": "2026-09-29T07:29:04.578431Z",
   "phase": "ready",
   "current_task": null,
   "queue": [
-    "ERP-132",
     "ERP-133",
     "ERP-134",
     "ERP-135"
@@ -122,16 +121,17 @@
     "ERP-128",
     "ERP-129",
     "ERP-130",
-    "ERP-131"
+    "ERP-131",
+    "ERP-132"
   ],
   "blocked": [],
   "last_build": {
-    "task": "ERP-131",
+    "task": "ERP-132",
     "profile": "safe",
     "status": "passed",
     "exit_code": 0,
-    "log": ".ai\\logs\\ERP-131-validation-1.log",
-    "at": "2026-09-29T06:55:03.714000Z"
+    "log": ".ai\\logs\\ERP-132-validation-1.log",
+    "at": "2026-09-29T07:29:03.934946Z"
   },
   "last_error": null,
   "last_deepseek_fix": {
@@ -143,15 +143,14 @@
   },
   "git_sync": {
     "branch": "main",
-    "local_sha": "2a28a84",
-    "status": "synced",
+    "local_sha": "8354a14",
+    "status": "pending",
     "ahead": 0,
     "behind": 0,
-    "last_attempt_at": "2026-09-29T06:55:09.818088Z",
+    "last_attempt_at": "2026-09-29T07:29:04.449072Z",
     "last_error": null
   },
   "next_recommended_tasks": [
-    "ERP-132",
     "ERP-133",
     "ERP-134",
     "ERP-135"

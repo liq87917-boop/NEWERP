@@ -2,7 +2,7 @@
   "id": "ERP-132",
   "title": "Show authorized inventory-movement page distribution by warehouse and status",
   "description": "An inventory user groups the currently authorized dynamic movement report page by warehouse, stagnant classification, or ledger-history status and sees a visual count distribution. Reuse ERP-130 stock-query menu authorization, existing warehouse/product/date filters and bounded report service. Count rows only; never sum quantities across different products or base units, infer missing movement history, or estimate cost. Invalid group keys fail closed; existing HTTP audit records read-only requests. Development only: no Domain/schema change, migration, production SQL, real database execution, arbitrary model SQL, writes, secret/.env change or deployment. Verify unit and Node logic tests plus safe build/test.",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "medium",
   "acceptance_criteria": [
     "API accepts only none/warehouse/classification/history grouping and returns deterministic row counts from the same authorized current preview page; no quantities across unlike units are summed.",
@@ -51,5 +51,6 @@
     "level": "L1",
     "status": "not_required",
     "reason": "Development-only bounded read-only feature"
-  }
+  },
+  "attempts": 1
 }

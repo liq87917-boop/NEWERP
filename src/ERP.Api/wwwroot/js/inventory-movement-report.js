@@ -11,6 +11,14 @@ const IMR_HISTORY_LABELS = {
 };
 const IMR_CLASS_LABELS = { active: '正常流动', stagnant: '呆滞', unknown: '无法判定' };
 
+/* 分组键枚举（与后端 NormalizeGroupBy 一致；未知取值由后端拒绝） */
+const IMR_DYN_GROUP_OPTS = [
+  { value: 'none', label: '不分组' },
+  { value: 'warehouse', label: '按仓库分组' },
+  { value: 'classification', label: '按分类分组' },
+  { value: 'history', label: '按台账状态分组' },
+];
+
 /* 工具栏入口（库存查询页）：渲染独立报表页，筛选与数据全部走既有只读接口 GET /api/reports/inventory-movement */
 function openInventoryMovementReport() {
   const today = new Date().toISOString().slice(0, 10);
@@ -46,7 +54,15 @@ function openInventoryMovementReport() {
       🎛 字段设计器（只读预览）：勾选可见列 → 复用上方仓库 / 商品 / 日期 / 阈值筛选 → 预览授权有界结果；可导出当前页 CSV（选定列顺序，公式转义）。
     </div>
     <div class="toolbar" style="margin-top:0">
-      <div class="toolbar-left" id="imr-designer-fields" style="flex-wrap:wrap;gap:6px;align-items:center;font-size:13px">正在加载字段目录…</div>
+      <div class="toolbar-left" style="flex-wrap:wrap;gap:6px;align-items:center;font-size:13px">
+        <label>分组 <select id="imr-dyn-group" style="min-width:150px" onchange="imrDynPreview(1)">
+          <option value="none">不分组</option>
+          <option value="warehouse">按仓库分组</option>
+          <option value="classification">按分类分组</option>
+          <option value="history">按台账状态分组</option>
+        </select></label>
+        <span id="imr-designer-fields">正在加载字段目录…</span>
+      </div>
       <div class="toolbar-actions">
         <button class="btn btn-neutral btn-sm" onclick="imrDynToggleAll(true)">全选</button>
         <button class="btn btn-neutral btn-sm" onclick="imrDynToggleAll(false)">清空</button>
@@ -258,6 +274,7 @@ let IMR_DYN = {
   catalog: null,      // GET /api/dynamic-inventory-movement-report 返回的目录 DTO
   fields: [],         // 目录字段（白名单）
   selectedKeys: [],   // 当前勾选的字段键（默认全选）
+  groupBy: 'none',    // 当前分组键（none / warehouse / classification / history）
   view: null,         // 最近一次预览结果
   page: 1,            // 当前预览页（预览 / 翻页复用）
 };
@@ -294,6 +311,9 @@ function imrDynBuildRequest(state) {
   pageSize = Math.max(1, Math.min(maxPageSize, pageSize));
 
   const req = { fields, page, pageSize };
+
+  const groupBy = IMR_DYN_GROUP_OPTS.some(o => o.value === state.groupBy) ? state.groupBy : 'none';
+  if (groupBy && groupBy !== 'none') req.groupBy = groupBy;
 
   const warehouseId = Number(state.warehouseId);
   if (Number.isFinite(warehouseId) && warehouseId > 0) req.warehouseId = warehouseId;
@@ -351,6 +371,29 @@ function imrDynTableHtml(view) {
   return `<div class="table-wrap" style="margin-top:8px"><table><thead><tr>${head}</tr></thead><tbody>${body || emptyRow}</tbody></table></div>${paging}`;
 }
 
+/* 分组行数分布图（ERP-132）：按当前授权预览页的分组行数渲染可访问的横向条形图（只统计行数，绝不求和任何数量）；
+   固定分类（classification / history）的空分类与未知历史分类保留（计数可为 0）；标签与计数全部转义 */
+function imrDynGroupsHtml(view) {
+  const groupBy = view && view.groupBy;
+  const groups = (view && view.groups) || [];
+  if (!groupBy || groupBy === 'none' || !Array.isArray(groups) || groups.length === 0) return '';
+  const max = Math.max(1, ...groups.map(g => Number(g && g.count) || 0));
+  const bars = groups.map(g => {
+    const label = (g && g.label) || (g && g.key) || '';
+    const count = Number(g && g.count) || 0;
+    const pct = Math.round(count / max * 100);
+    return `<li role="listitem" aria-label="${imrDynEsc(label)}：${count} 行" style="display:flex;align-items:center;gap:8px;margin:4px 0">
+      <span style="flex:0 0 180px;text-align:right;color:#334155;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${imrDynEsc(label)}">${imrDynEsc(label)}</span>
+      <span style="flex:1;background:#e2e8f0;border-radius:4px;height:16px;overflow:hidden;min-width:40px">
+        <span style="display:block;height:100%;background:#2563eb;width:${pct}%"></span>
+      </span>
+      <span style="flex:0 0 72px;text-align:right;color:#0f172a">${count} 行</span>
+    </li>`;
+  }).join('');
+  return `<div class="pd-hint" role="img" aria-label="本页库存行数分布图（仅统计本页）" style="margin-top:8px">📊 本页行数分布（仅统计本页）</div>
+    <ul role="list" style="list-style:none;padding:0 8px;margin:4px 0 8px">${bars}</ul>`;
+}
+
 /* 空结果提示 */
 function imrDynEmptyHtml() {
   return '<div class="empty" style="margin:8px 0">没有符合条件的库存行（可放宽仓库 / 商品 / 日期筛选）。</div>';
@@ -378,8 +421,9 @@ function imrDynResultHtml(view) {
   const summary = view
     ? `<div class="text-muted" style="margin:6px 0">共 ${view.total} 行 · 第 ${view.page} 页 · 每页 ${view.pageSize} 行 · 基础单位口径</div>`
     : '';
+  const groups = imrDynGroupsHtml(view);
   const empty = view && (!view.rows || view.rows.length === 0) ? imrDynEmptyHtml() : '';
-  return `${readOnly}${boundary}${disclaimer}${summary}${empty}${imrDynTableHtml(view)}`;
+  return `${readOnly}${boundary}${disclaimer}${summary}${groups}${empty}${imrDynTableHtml(view)}`;
 }
 
 /* 字段选择器：仅由目录白名单渲染为复选框，无自由填写的字段名 */
@@ -463,6 +507,7 @@ function imrDynBuildState(page) {
     windowEnd: val('imr-window-end'),
     inactiveDays: val('imr-inactive'),
     pageSize: val('imr-pagesize'),
+    groupBy: val('imr-dyn-group') || 'none',
     page: page || IMR_DYN.page || 1,
     maxPageSize: IMR_DYN.catalog && IMR_DYN.catalog.maxPageSize ? IMR_DYN.catalog.maxPageSize : 200,
   };
@@ -552,12 +597,14 @@ if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     IMR_HISTORY_LABELS,
     IMR_CLASS_LABELS,
+    IMR_DYN_GROUP_OPTS,
     imrDynEsc,
     imrDynSelectFields,
     imrDynBuildRequest,
     imrDynCellText,
     imrDynRenderCell,
     imrDynTableHtml,
+    imrDynGroupsHtml,
     imrDynEmptyHtml,
     imrDynErrorHtml,
     imrDynResultHtml,

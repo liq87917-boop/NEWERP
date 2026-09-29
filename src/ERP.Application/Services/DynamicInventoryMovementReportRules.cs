@@ -33,6 +33,20 @@ public static class DynamicInventoryMovementReportRules
     /// <summary>默认呆滞阈值（天）</summary>
     public const int DefaultInactiveDays = 90;
 
+    // ==================== 0.1 分组键（ERP-132） ====================
+
+    /// <summary>不分组（默认）</summary>
+    public const string GroupNone = "none";
+
+    /// <summary>按仓库分组</summary>
+    public const string GroupWarehouse = "warehouse";
+
+    /// <summary>按呆滞分类分组（active / stagnant / unknown）</summary>
+    public const string GroupClassification = "classification";
+
+    /// <summary>按台账状态分组（ledger / window_empty / no_history）</summary>
+    public const string GroupHistory = "history";
+
     // ==================== 1. 文案 ====================
 
     /// <summary>只读声明（界面与接口统一声明）</summary>
@@ -198,5 +212,93 @@ public static class DynamicInventoryMovementReportRules
         foreach (var key in fieldKeys)
             row[key] = Select(item, key);
         return row;
+    }
+
+    // ==================== 6. 分组计数（ERP-132） ====================
+
+    /// <summary>
+    /// 规范化分组键（fail closed）：空 / 留空 = 不分组（none）；仅接受 none / warehouse / classification / history（大小写不敏感）；
+    /// 未知取值显式拒绝。
+    /// </summary>
+    public static string NormalizeGroupBy(string? groupBy)
+    {
+        if (string.IsNullOrWhiteSpace(groupBy))
+            return GroupNone;
+
+        var normalized = groupBy.Trim();
+        if (string.Equals(normalized, GroupNone, StringComparison.OrdinalIgnoreCase)) return GroupNone;
+        if (string.Equals(normalized, GroupWarehouse, StringComparison.OrdinalIgnoreCase)) return GroupWarehouse;
+        if (string.Equals(normalized, GroupClassification, StringComparison.OrdinalIgnoreCase)) return GroupClassification;
+        if (string.Equals(normalized, GroupHistory, StringComparison.OrdinalIgnoreCase)) return GroupHistory;
+
+        throw BusinessException.InvalidParameter(
+            $"无效的分组键: {groupBy}（可选：none / warehouse / classification / history）");
+    }
+
+    /// <summary>
+    /// 分组行数分布（ERP-132）：从「当前授权预览页」的库存行计算行数分布，只统计行数、绝不跨不同商品 / 基础单位求和任何数量。
+    /// <para>warehouse 为动态分组（只出现本页存在的仓库，按仓库 Id 升序）；classification / history 为固定分类，
+    /// 空分类与未知历史分类始终保留（计数可为 0），确定性排序。none / 空页（warehouse）返回空列表。</para>
+    /// </summary>
+    public static List<DynamicInventoryMovementReportGroupDto> BuildGroupCounts(
+        IEnumerable<ReportDtos.InventoryMovementItem> items, string groupBy)
+    {
+        var list = (items ?? Array.Empty<ReportDtos.InventoryMovementItem>()).ToList();
+        var normalized = NormalizeGroupBy(groupBy);
+
+        if (normalized == GroupWarehouse)
+            return BuildWarehouseCounts(list);
+        if (normalized == GroupClassification)
+            return BuildClassificationCounts(list);
+        if (normalized == GroupHistory)
+            return BuildHistoryCounts(list);
+        return new List<DynamicInventoryMovementReportGroupDto>();
+    }
+
+    private static List<DynamicInventoryMovementReportGroupDto> BuildWarehouseCounts(
+        List<ReportDtos.InventoryMovementItem> items)
+    {
+        return items
+            .GroupBy(i => i.WarehouseId)
+            .OrderBy(g => g.Key)
+            .Select(g =>
+            {
+                var name = g.First().WarehouseName;
+                return new DynamicInventoryMovementReportGroupDto(
+                    $"warehouse:{g.Key}",
+                    string.IsNullOrWhiteSpace(name) ? $"仓库 #{g.Key}" : name,
+                    g.Count());
+            })
+            .ToList();
+    }
+
+    private static List<DynamicInventoryMovementReportGroupDto> BuildClassificationCounts(
+        List<ReportDtos.InventoryMovementItem> items)
+    {
+        var categories = new (string Value, string Label)[]
+        {
+            (InventoryMovementSemantics.ClassActive, "正常流动"),
+            (InventoryMovementSemantics.ClassStagnant, "呆滞"),
+            (InventoryMovementSemantics.ClassUnknown, "无法判定"),
+        };
+        return categories.Select(c => new DynamicInventoryMovementReportGroupDto(
+            $"classification:{c.Value}",
+            c.Label,
+            items.Count(i => i.Classification == c.Value))).ToList();
+    }
+
+    private static List<DynamicInventoryMovementReportGroupDto> BuildHistoryCounts(
+        List<ReportDtos.InventoryMovementItem> items)
+    {
+        var categories = new (string Value, string Label)[]
+        {
+            (InventoryMovementSemantics.HistoryLedger, "有台账（窗口内有移动）"),
+            (InventoryMovementSemantics.HistoryWindowEmpty, "有台账（窗口内无移动）"),
+            (InventoryMovementSemantics.HistoryNoHistory, "无台账（历史库存 · 未知）"),
+        };
+        return categories.Select(c => new DynamicInventoryMovementReportGroupDto(
+            $"history:{c.Value}",
+            c.Label,
+            items.Count(i => i.HistoryStatus == c.Value))).ToList();
     }
 }

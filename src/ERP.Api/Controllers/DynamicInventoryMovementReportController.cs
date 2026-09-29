@@ -60,6 +60,7 @@ public class DynamicInventoryMovementReportController : ControllerBase
         DynamicInventoryMovementReportRules.ValidateInactiveDays(request.InactiveDays);
         DynamicInventoryMovementReportRules.ValidatePageSize(request.PageSize);
         if (request.Page < 1) request.Page = 1;
+        var groupBy = DynamicInventoryMovementReportRules.NormalizeGroupBy(request.GroupBy);
 
         // 3) 复用 ERP-029 报表服务（仓库 / 商品 / 日期 / 阈值 / 分页），全程只读不写库
         var query = DynamicInventoryMovementReportRules.BuildQuery(request);
@@ -68,6 +69,9 @@ public class DynamicInventoryMovementReportController : ControllerBase
         // 4) 投影选定列（未知历史 / 基础单位语义保持不变）
         var columns = fieldKeys.Select(k => DynamicInventoryMovementReportRules.GetField(k)!).ToList();
         var rows = report.Items.Select(i => DynamicInventoryMovementReportRules.BuildRow(i, fieldKeys)).ToList();
+
+        // 5) 分组行数分布（ERP-132）：只统计当前授权预览页的行数，绝不求和任何数量
+        var groups = DynamicInventoryMovementReportRules.BuildGroupCounts(report.Items, groupBy);
 
         return Ok(ApiResponse<DynamicInventoryMovementReportPageDto>.Success(
             new DynamicInventoryMovementReportPageDto(
@@ -83,7 +87,9 @@ public class DynamicInventoryMovementReportController : ControllerBase
                 report.InactiveDays,
                 DynamicInventoryMovementReportRules.ReadOnlyText,
                 DynamicInventoryMovementReportRules.BoundaryText,
-                DynamicInventoryMovementReportRules.DisclaimerText)));
+                DynamicInventoryMovementReportRules.DisclaimerText,
+                groupBy,
+                groups)));
     }
 
     /// <summary>身份 + 既有「角色 → 菜单」库存查询模块授权（fail closed，绝不猜测身份）</summary>

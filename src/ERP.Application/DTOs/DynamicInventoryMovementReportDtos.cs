@@ -39,6 +39,9 @@ public sealed class DynamicInventoryMovementReportRequest
     /// <summary>商品 Id 筛选（留空 = 全部商品）</summary>
     public long? ProductId { get; set; }
 
+    /// <summary>分组键（仅 none / warehouse / classification / history；无效取值由服务端 fail closed 拒绝）</summary>
+    public string? GroupBy { get; set; }
+
     /// <summary>呆滞阈值（天），必须 >= 1，否则无法表达「停滞」含义</summary>
     public int InactiveDays { get; set; } = 90;
 
@@ -64,6 +67,8 @@ public sealed record DynamicInventoryMovementReportCatalogDto(
 /// 库存移动报表预览结果页（ERP-130，只读）：按请求顺序返回选定列与分页行；
 /// 行内仅包含选定的白名单字段值，不泄露范围外库存数据。
 /// <para>未知历史（最后移动日期 / 停滞天数无台账）以 null 呈现，数量一律为基础单位，不做成本 / 金额估值。</para>
+/// <para>ERP-132 新增 <see cref="GroupBy"/> / <see cref="Groups"/>：仅当请求分组（warehouse / classification / history）时，
+/// <see cref="Groups"/> 才给出「当前授权预览页」按分组键的行数分布；只统计行数、绝不求和任何数量；默认 none 时为空。</para>
 /// </summary>
 public sealed record DynamicInventoryMovementReportPageDto(
     List<DynamicInventoryMovementReportFieldDto> Columns,
@@ -78,4 +83,15 @@ public sealed record DynamicInventoryMovementReportPageDto(
     int InactiveDays,
     string ReadOnlyText,
     string BoundaryText,
-    string DisclaimerText);
+    string DisclaimerText,
+    string GroupBy = "none",
+    List<DynamicInventoryMovementReportGroupDto>? Groups = null);
+
+/// <summary>
+/// 库存移动报表页面分组计数（ERP-132，只读）：当前授权预览页内按分组键聚合的行数分布。
+/// 只统计行数，绝不跨不同商品 / 基础单位求和任何数量；固定分类（分类 / 台账状态）的空分类与未知历史分类始终保留。
+/// </summary>
+public sealed record DynamicInventoryMovementReportGroupDto(
+    string Key,
+    string Label,
+    int Count);
