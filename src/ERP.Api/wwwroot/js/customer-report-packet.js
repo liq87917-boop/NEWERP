@@ -182,7 +182,7 @@ function cpkResultHtml(view) {
   const disclaimer = view.disclaimerText ? `<div class="pd-hint" style="color:#64748b">${cpkEsc(view.disclaimerText)}</div>` : '';
   const orders = cpkSectionHtml('销售订单', view.salesOrders, '没有符合条件的销售订单');
   const receivable = cpkSectionHtml('发票 / 收款分摊证据', view.receivableEvidence, '没有符合条件的发票 / 收款分摊证据');
-  const download = `<div style="margin:10px 0"><button class="btn btn-primary btn-sm" onclick="cpkDownload()">⬇ 下载 Excel（销售订单 + 应收证据两个独立工作表）</button></div>`;
+  const download = `<div style="margin:10px 0"><button class="btn btn-primary btn-sm" onclick="cpkDownload()">⬇ 下载 Excel（销售订单 + 应收证据两个独立工作表）</button> <button class="btn btn-primary btn-sm" onclick="cpkDownloadPdf()">⬇ 下载 PDF（销售订单 + 应收证据两个独立分页章节）</button></div>`;
   return `${readOnly}${boundary}${disclaimer}${download}${orders}${receivable}${cpkPagingHtml(view)}`;
 }
 
@@ -383,6 +383,57 @@ async function cpkDownload() {
     cpkRenderResult(cpkErrorHtml('network', (err && err.message) || '无法连接到服务器'));
   }
 }
+/* 下载当前筛选下的两个独立分页章节 PDF（复用与预览同一有界 / 双授权口径，后端在返回字节前重新校验；
+   成功 = 二进制 pdf，失败 = 异常中间件 JSON 信封，均可见、不暴露范围外数据） */
+async function cpkDownloadPdf() {
+  const state = cpkBuildState(CPK.filters.page || 1);
+  if (state.startDate && state.endDate && state.startDate > state.endDate) {
+    cpkRenderResult(cpkErrorHtml('invalid', '开始日期不能晚于结束日期'));
+    return;
+  }
+  const req = cpkBuildRequest(state);
+  if (!req) {
+    cpkRenderResult(cpkErrorHtml('invalid', '请选择有效客户（客户 Id 必须为正整数）'));
+    return;
+  }
+
+  const headers = { 'Content-Type': 'application/json' };
+  const token = typeof localStorage !== 'undefined' ? (localStorage.getItem('erp_token') || '') : '';
+  if (token) headers['Authorization'] = 'Bearer ' + token;
+
+  try {
+    const resp = await fetch('/api/customer-report-packet/export/pdf', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(req),
+    });
+
+    const ct = (resp.headers.get('Content-Type') || '').toLowerCase();
+    if (ct.includes('application/json')) {
+      const err = await resp.json();
+      const code = (err && err.code) || 0;
+      if (code === 2000 || code === 2003) {
+        if (typeof logout === 'function') logout();
+        cpkRenderResult(cpkErrorHtml('unauthorized', (err && err.message) || '未登录'));
+      } else {
+        cpkRenderResult(cpkErrorHtml(cpkKindOfCode(code), (err && err.message) || 'PDF 导出失败'));
+      }
+      return;
+    }
+
+    const blob = await resp.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `客户报告包_${new Date().toISOString().slice(0, 10).replace(/-/g, '')}.pdf`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  } catch (err) {
+    cpkRenderResult(cpkErrorHtml('network', (err && err.message) || '无法连接到服务器'));
+  }
+}
 
 
 
@@ -412,5 +463,6 @@ if (typeof module !== 'undefined' && module.exports) {
     cpkPreview,
     cpkPage,
     cpkDownload,
+    cpkDownloadPdf,
   };
 }

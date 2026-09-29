@@ -1,7 +1,7 @@
 {
   "id": "ERP-124",
   "title": "Download the scoped customer order and receivable packet as PDF",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "medium",
   "description": "User scene: download the already authorized customer report packet as a paginated Chinese PDF with separate sales-order and invoice/receipt evidence sections. Reuse ERP-122's dual menu/salesperson-scope validation and page caps on every download; do not infer invoice-to-order links, balances or mixed-currency totals. Reuse the existing PDFsharp and shared SimHei resolver, fail explicitly if the font is absent, and record the read-only request through existing HTTP audit. Development only: no migration, production SQL, real database execution, arbitrary model SQL, writes, secret/.env change or deployment. Verify PDF and authorization tests plus safe build/test.",
   "acceptance_criteria": [
@@ -50,6 +50,6 @@
     "status": "not_required",
     "reason": "Development-only bounded read-only feature"
   },
-  "attempts": 0,
+  "attempts": 1,
   "created_at": "2026-09-29T05:17:00.765803Z"
 }

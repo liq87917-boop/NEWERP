@@ -13,6 +13,7 @@
 |---|---|---|
 | POST | `/api/customer-report-packet` | 按正整数客户 Id + 有界日期 / 分页筛选预览两个独立分区 |
 | POST | `/api/customer-report-packet/export` | 把同一客户的两个分区导出为含两个独立工作表的 Excel（xlsx，只读，仅导出当前页） |
+| POST | `/api/customer-report-packet/export/pdf` | 把同一客户的两个分区导出为含两个独立分页章节的 PDF（只读，仅导出当前页） |
 
 请求体（`CustomerReportPacketRequest`）：
 
@@ -43,6 +44,24 @@
 - **绝不跨单拼接 / 混合币种合计**：不推断发票到订单的链接，不生成任何合计 / 余额 / 催收结论行。
 - **公式注入安全**：以 `=` `+` `-` `@` 或制表符 / 回车 / 换行开头的文本单元格前缀单引号，保持字面文本。
 - **仅导出当前页**：行数受当前 `page` / `pageSize`（上限 100）约束，超出部分不导出。
+- **审计**：导出为 `POST`，由既有 `OperationLogMiddleware` 记录审计；全程只读，不写库、不执行任意 SQL。
+
+### 2.2 PDF 导出（ERP-124）
+
+下载同一客户的两个分区为分页中文 PDF：`POST /api/customer-report-packet/export/pdf`，请求体与预览同构（`CustomerReportPacketRequest`），
+返回 `application/pdf`，文件名 `CustomerReportPacket_yyyyMMddHHmmss.pdf`。
+
+导出口径与导出限制：
+
+- **复用有界双授权预览**：导出时重新校验身份、双菜单授权、正整数客户 Id、日期区间、页大小（1 ~ 100）与业务员数据范围，
+  任一失败即拒绝（不发字节）；两个分区仍各自独立重检本分区菜单授权与数据范围。
+- **两个独立分页章节**：`一、销售订单` 与 `二、发票 / 收款分摊证据` 各自独立分页（应收证据章节另起一页），续页重复章节标题与列标题；
+  行数受当前 `page` / `pageSize`（上限 100）约束，仅导出当前页。
+- **原币与显式剩余状态**：金额按原币文本呈现；`remainingState` 显式保留 `known`（剩余可确认）/ `unknown`（剩余未知）/
+  `over_allocated`（剩余超额分摊（无效））标签，绝不轧成假余额。
+- **绝不跨单拼接 / 混合币种合计**：不推断发票到订单的链接，不生成任何合计 / 余额 / 催收结论行。
+- **字体前提（Windows）**：中文字体固定使用 Windows 黑体（SimHei），与销售订单 PDF（ERP-116）/ 应收账款 PDF（ERP-121）
+  共用同一共享解析器（`SimHeiPdfFontResolver`）；字体缺失时显式失败（`500`），**绝不产出乱码或缺字的 PDF**，也不替换为其它字体。
 - **审计**：导出为 `POST`，由既有 `OperationLogMiddleware` 记录审计；全程只读，不写库、不执行任意 SQL。
 
 ## 3. 分区口径
@@ -81,11 +100,13 @@
 
 - `src/ERP.Application/DTOs/CustomerReportPacketDtos.cs`：请求 / 结果 DTO；
 - `src/ERP.Application/Services/CustomerReportPacketRules.cs`：双菜单授权、有界校验与纯映射（纯规则）；
-- `src/ERP.Api/Controllers/CustomerReportPacketController.cs`：HTTP 控制器；
-- `src/ERP.Api/wwwroot/js/customer-report-packet.js`：前端预览（入口 `openCustomerReportPacket`）；
+- `src/ERP.Api/Controllers/CustomerReportPacketController.cs`：HTTP 控制器（预览 / Excel / PDF 三个端点）；
+- `src/ERP.Infrastructure/Export/CustomerReportPacketPdfExporter.cs`：PDF 导出（ERP-124，复用共享 SimHei 解析器，独立分页章节）；
+- `src/ERP.Api/wwwroot/js/customer-report-packet.js`：前端预览 + Excel / PDF 下载（入口 `openCustomerReportPacket`）；
 - `src/ERP.Api/wwwroot/js/customer-sales-invoices.js`：登记册工具栏 / 详情工具栏入口；
 - `src/ERP.UnitTests/CustomerReportPacketTests.cs`：预览单元测试；
 - `src/ERP.UnitTests/CustomerReportPacketExcelTests.cs`：Excel 导出单元测试（ERP-123）；
+- `src/ERP.UnitTests/CustomerReportPacketPdfTests.cs`：PDF 导出单元测试（ERP-124）；
 - `tests/automation/customer_report_packet_ui.test.js`：前端 UI 逻辑单测。
 
 ## 8. 测试覆盖
@@ -97,6 +118,8 @@
 - **只读**：`SaveChangesAsync` 调用次数恒为 0。
 - **Excel 导出（ERP-123）**：双权限 / 越界客户拒绝、两个工作表 / 原币 / 显式剩余证据状态、公式前导文本转义、
   行数上限与仅导出当前页、只读不写库。
+- **PDF 导出（ERP-124）**：PDF 签名 / 内容类型 / A4 尺寸、嵌入 SimHei（非缺字字体）、字体缺失显式失败、
+  两个独立分页章节（各自独立分页、页大小上限 100）、原币文本原样与显式剩余证据状态标签、双权限 / 越界客户拒绝、只读不写库。
 
 ## 9. 验证
 

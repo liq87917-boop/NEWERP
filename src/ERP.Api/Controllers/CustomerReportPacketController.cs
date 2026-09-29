@@ -2,6 +2,7 @@ using ERP.Application.Common;
 using ERP.Application.DTOs;
 using ERP.Application.Interfaces;
 using ERP.Application.Services;
+using ERP.Infrastructure.Export;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using NPOI.SS.UserModel;
@@ -16,6 +17,7 @@ namespace ERP.Api.Controllers;
 /// <list type="number">
 /// <item><b>POST /api/customer-report-packet</b>：按正整数客户 Id + 有界日期 / 分页筛选预览两个分区。</item>
 /// <item><b>POST /api/customer-report-packet/export</b>：把同一客户的两个分区导出为含两个独立工作表的 Excel（xlsx，只读，复用有界双授权预览，仅导出当前页）。</item>
+/// <item><b>POST /api/customer-report-packet/export/pdf</b>：把同一客户的两个分区导出为含两个独立分页章节的 PDF（只读，复用有界双授权预览，仅导出当前页；缺失 SimHei 字体显式失败）。</item>
 /// </list>
 /// <para>授权：必须同时具备「销售订单」与「客户资料」两个既有菜单授权；两个分区复用
 /// <see cref="IDynamicSalesOrderReportQuery"/>（ERP-112）与 <see cref="IDynamicReceivableReportQuery"/>（ERP-117），
@@ -69,6 +71,23 @@ public class CustomerReportPacketController : ControllerBase
         var bytes = BuildWorkbook(packet);
         return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             $"CustomerReportPacket_{DateTime.Now:yyyyMMddHHmmss}.xlsx");
+    }
+
+    /// <summary>
+    /// 导出同一客户的两个分区为 PDF（ERP-124，只读）：复用「有界、双授权、作用域化」的同一预览（每次请求重新校验身份 /
+    /// 双菜单授权 / 客户 / 日期 / 分页 / 业务员数据范围），以 PDFsharp 渲染两个独立分页章节（销售订单 + 应收证据），
+    /// 金额按原币呈现、剩余证据状态显式保留（known / unknown / over_allocated）、不做跨单拼接或混合币种合计；
+    /// 缺失共享黑体字体（SimHei）时显式失败（不产出乱码或缺字 PDF）。
+    /// <para>全程只读，不写库、不执行任意 SQL；请求由既有 <c>OperationLogMiddleware</c> 记录审计（动作「导出」）。</para>
+    /// </summary>
+    [HttpPost("export/pdf")]
+    public async Task<IActionResult> ExportPdf([FromBody] CustomerReportPacketRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        var packet = await LoadPacketAsync(request);
+        var bytes = CustomerReportPacketPdfExporter.Export(packet);
+        return File(bytes, "application/pdf",
+            $"CustomerReportPacket_{DateTime.Now:yyyyMMddHHmmss}.pdf");
     }
 
     /// <summary>复用预览的全部有界校验与双授权 / 作用域化查询（预览与导出共用同一口径，任一失败均拒绝整个响应）</summary>
