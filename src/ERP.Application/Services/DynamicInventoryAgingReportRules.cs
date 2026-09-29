@@ -30,6 +30,20 @@ public static class DynamicInventoryAgingReportRules
     /// <summary>早于该年份的截止日期视为「无效」（<c>DateTime</c> 未赋值的默认年份为 1，绝不静默兜底为当天）</summary>
     public const int MinDateYear = 1900;
 
+    // ==================== 0.1 分组键（ERP-137） ====================
+
+    /// <summary>不分组（默认）</summary>
+    public const string GroupNone = "none";
+
+    /// <summary>按仓库分组</summary>
+    public const string GroupWarehouse = "warehouse";
+
+    /// <summary>按库龄依据分组（full / partial / none）</summary>
+    public const string GroupAgeEvidence = "ageEvidence";
+
+    /// <summary>按成本依据分组（known / unknown）</summary>
+    public const string GroupCostEvidence = "costEvidence";
+
     // ==================== 1. 文案 ====================
 
     /// <summary>只读声明（界面与接口统一声明）</summary>
@@ -234,5 +248,93 @@ public static class DynamicInventoryAgingReportRules
         foreach (var key in fieldKeys)
             row[key] = Select(item, key);
         return row;
+    }
+
+    // ==================== 6. 分组计数（ERP-137） ====================
+
+    /// <summary>
+    /// 规范化分组键（fail closed）：空 / 留空 = 不分组（none）；仅接受 none / warehouse / ageEvidence / costEvidence（大小写不敏感）；
+    /// 未知取值显式拒绝。
+    /// </summary>
+    public static string NormalizeGroupBy(string? groupBy)
+    {
+        if (string.IsNullOrWhiteSpace(groupBy))
+            return GroupNone;
+
+        var normalized = groupBy.Trim();
+        if (string.Equals(normalized, GroupNone, StringComparison.OrdinalIgnoreCase)) return GroupNone;
+        if (string.Equals(normalized, GroupWarehouse, StringComparison.OrdinalIgnoreCase)) return GroupWarehouse;
+        if (string.Equals(normalized, GroupAgeEvidence, StringComparison.OrdinalIgnoreCase)) return GroupAgeEvidence;
+        if (string.Equals(normalized, GroupCostEvidence, StringComparison.OrdinalIgnoreCase)) return GroupCostEvidence;
+
+        throw BusinessException.InvalidParameter(
+            $"无效的分组键: {groupBy}（可选：none / warehouse / ageEvidence / costEvidence）");
+    }
+
+    /// <summary>
+    /// 分组行数分布（ERP-137）：从「当前授权预览页」的库存库龄行计算行数分布，只统计行数、绝不跨不同商品 / 基础单位求和任何数量，
+    /// 也不把未知成本金额当作 0 求和、不臆造库龄分层、不重算估值。
+    /// <para>warehouse 为动态分组（只出现本页存在的仓库，按仓库 Id 升序）；ageEvidence（full / partial / none）与
+    /// costEvidence（known / unknown）为固定证据分类，空分类始终保留（计数可为 0），确定性排序。none / 空页（warehouse）返回空列表。</para>
+    /// </summary>
+    public static List<DynamicInventoryAgingReportGroupDto> BuildGroupCounts(
+        IEnumerable<ReportDtos.InventoryAgingItem> items, string groupBy)
+    {
+        var list = (items ?? Array.Empty<ReportDtos.InventoryAgingItem>()).ToList();
+        var normalized = NormalizeGroupBy(groupBy);
+
+        if (normalized == GroupWarehouse)
+            return BuildWarehouseCounts(list);
+        if (normalized == GroupAgeEvidence)
+            return BuildAgeEvidenceCounts(list);
+        if (normalized == GroupCostEvidence)
+            return BuildCostEvidenceCounts(list);
+        return new List<DynamicInventoryAgingReportGroupDto>();
+    }
+
+    private static List<DynamicInventoryAgingReportGroupDto> BuildWarehouseCounts(
+        List<ReportDtos.InventoryAgingItem> items)
+    {
+        return items
+            .GroupBy(i => i.WarehouseId)
+            .OrderBy(g => g.Key)
+            .Select(g =>
+            {
+                var name = g.First().WarehouseName;
+                return new DynamicInventoryAgingReportGroupDto(
+                    $"warehouse:{g.Key}",
+                    string.IsNullOrWhiteSpace(name) ? $"仓库 #{g.Key}" : name,
+                    g.Count());
+            })
+            .ToList();
+    }
+
+    private static List<DynamicInventoryAgingReportGroupDto> BuildAgeEvidenceCounts(
+        List<ReportDtos.InventoryAgingItem> items)
+    {
+        var categories = new (string Value, string Label)[]
+        {
+            (InventoryAgingSemantics.EvidenceFull, "有台账分层依据"),
+            (InventoryAgingSemantics.EvidencePartial, "部分数量无依据"),
+            (InventoryAgingSemantics.EvidenceNone, "无台账分层依据"),
+        };
+        return categories.Select(c => new DynamicInventoryAgingReportGroupDto(
+            $"ageEvidence:{c.Value}",
+            c.Label,
+            items.Count(i => i.EvidenceStatus == c.Value))).ToList();
+    }
+
+    private static List<DynamicInventoryAgingReportGroupDto> BuildCostEvidenceCounts(
+        List<ReportDtos.InventoryAgingItem> items)
+    {
+        var categories = new (string Value, string Label)[]
+        {
+            (InventoryAgingSemantics.CostKnown, "成本已知"),
+            (InventoryAgingSemantics.CostUnknown, "成本未知"),
+        };
+        return categories.Select(c => new DynamicInventoryAgingReportGroupDto(
+            $"costEvidence:{c.Value}",
+            c.Label,
+            items.Count(i => i.CostStatus == c.Value))).ToList();
     }
 }

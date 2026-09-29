@@ -54,19 +54,20 @@ public class DynamicInventoryAgingReportController : ControllerBase
             await BuildPageAsync(request)));
     }
 
-    /// <summary>复用同一有界、已授权预览管线：授权 → 校验 → 只读查询 → 选定列投影</summary>
+    /// <summary>复用同一有界、已授权预览管线：授权 → 校验 → 只读查询 → 选定列投影 → 分组行数分布</summary>
     private async Task<DynamicInventoryAgingReportPageDto> BuildPageAsync(DynamicInventoryAgingReportRequest request)
     {
         // 1) 身份 + 既有库存查询菜单授权（无身份 / 无角色 / 无菜单授权 → fail closed）
         await EnsureAuthorizedAsync(CurrentUserId());
 
-        // 2) 字段 / 日期 / 仓库 / 商品 / 页大小校验（全部在报告读取之前完成，失败即拒绝）
+        // 2) 字段 / 日期 / 仓库 / 商品 / 页大小 / 分组键校验（全部在报告读取之前完成，失败即拒绝）
         var fieldKeys = DynamicInventoryAgingReportRules.NormalizeFields(request.Fields);
         DynamicInventoryAgingReportRules.ValidateAsOfDate(request.AsOfDate);
         DynamicInventoryAgingReportRules.ValidateWarehouseId(request.WarehouseId);
         DynamicInventoryAgingReportRules.ValidateProductId(request.ProductId);
         DynamicInventoryAgingReportRules.ValidatePageSize(request.PageSize);
         if (request.Page < 1) request.Page = 1;
+        var groupBy = DynamicInventoryAgingReportRules.NormalizeGroupBy(request.GroupBy);
 
         // 3) 复用 ERP-034 报表服务（仓库 / 商品 / 日期 / 分页），全程只读不写库
         var query = DynamicInventoryAgingReportRules.BuildQuery(request);
@@ -75,6 +76,9 @@ public class DynamicInventoryAgingReportController : ControllerBase
         // 4) 投影选定列（未知库龄 / 未知成本 / CNY 币种语义保持不变）
         var columns = fieldKeys.Select(k => DynamicInventoryAgingReportRules.GetField(k)!).ToList();
         var rows = report.Items.Select(i => DynamicInventoryAgingReportRules.BuildRow(i, fieldKeys)).ToList();
+
+        // 5) 分组行数分布（ERP-137）：只统计当前授权预览页的行数，绝不求和任何数量 / 金额
+        var groups = DynamicInventoryAgingReportRules.BuildGroupCounts(report.Items, groupBy);
 
         return new DynamicInventoryAgingReportPageDto(
             columns,
@@ -87,7 +91,9 @@ public class DynamicInventoryAgingReportController : ControllerBase
             report.CostCurrency,
             DynamicInventoryAgingReportRules.ReadOnlyText,
             DynamicInventoryAgingReportRules.BoundaryText,
-            DynamicInventoryAgingReportRules.DisclaimerText);
+            DynamicInventoryAgingReportRules.DisclaimerText,
+            groupBy,
+            groups);
     }
 
     /// <summary>身份 + 既有「角色 → 菜单」库存查询模块授权（fail closed，绝不猜测身份）</summary>

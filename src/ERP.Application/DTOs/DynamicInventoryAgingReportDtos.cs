@@ -33,6 +33,9 @@ public sealed class DynamicInventoryAgingReportRequest
     /// <summary>商品 Id 筛选（留空 = 全部商品）</summary>
     public long? ProductId { get; set; }
 
+    /// <summary>分组键（仅 none / warehouse / ageEvidence / costEvidence；无效取值由服务端 fail closed 拒绝）</summary>
+    public string? GroupBy { get; set; }
+
     /// <summary>页码（从 1 开始）</summary>
     public int Page { get; set; } = 1;
 
@@ -56,6 +59,8 @@ public sealed record DynamicInventoryAgingReportCatalogDto(
 /// 行内仅包含选定的白名单字段值，不泄露范围外库存数据。
 /// <para>未知库龄（库龄未知数量）与未知成本（成本状态 unknown、金额 null）语义保持不变，
 /// 金额一律为持久化的库存成本币种（CNY），不跨币种合并、不推断汇率。</para>
+/// <para>ERP-137 新增 <see cref="GroupBy"/> / <see cref="Groups"/>：仅当请求分组（warehouse / ageEvidence / costEvidence）时，
+/// <see cref="Groups"/> 才给出「当前授权预览页」按分组键的行数分布；只统计行数、绝不求和任何数量或金额；默认 none 时为空。</para>
 /// </summary>
 public sealed record DynamicInventoryAgingReportPageDto(
     List<DynamicInventoryAgingReportFieldDto> Columns,
@@ -68,4 +73,16 @@ public sealed record DynamicInventoryAgingReportPageDto(
     string CostCurrency,
     string ReadOnlyText,
     string BoundaryText,
-    string DisclaimerText);
+    string DisclaimerText,
+    string GroupBy = "none",
+    List<DynamicInventoryAgingReportGroupDto>? Groups = null);
+
+/// <summary>
+/// 库存库龄报表页面分组计数（ERP-137，只读）：当前授权预览页内按分组键聚合的行数分布。
+/// 只统计行数，绝不跨不同商品 / 基础单位求和任何数量，也不把未知成本金额当作 0 求和；
+/// 固定证据分类（库龄依据 full / partial / none，成本依据 known / unknown）的空分类始终保留（计数可为 0）。
+/// </summary>
+public sealed record DynamicInventoryAgingReportGroupDto(
+    string Key,
+    string Label,
+    int Count);

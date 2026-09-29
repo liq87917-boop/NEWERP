@@ -2,7 +2,7 @@
   "id": "ERP-137",
   "title": "Show authorized inventory-aging evidence distribution by warehouse and status",
   "description": "An inventory user groups the currently authorized dynamic stock-aging page by warehouse, aging-evidence status or cost-evidence status and sees a visual count distribution. Reuse ERP-135 stock-query permission, bounded preview and selected filters. Count rows only; do not sum different product/base-unit quantities, turn unknown cost into zero, infer age buckets, or recompute valuation. Invalid group keys fail closed and HTTP audit records read-only requests. Development only: no migration, production SQL, real database execution, arbitrary model SQL, writes, secret/.env change or deployment. Verify unit and Node logic tests plus safe build/test.",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "medium",
   "acceptance_criteria": [
     "API accepts only none/warehouse/ageEvidence/costEvidence grouping and returns deterministic row counts from the same authorized preview page without summing incompatible units or unknown amounts.",
@@ -51,5 +51,6 @@
     "level": "L1",
     "status": "not_required",
     "reason": "Development-only bounded read-only feature"
-  }
+  },
+  "attempts": 1
 }

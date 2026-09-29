@@ -43,6 +43,12 @@ function openInventoryAgingReport() {
     </div>
     <div class="toolbar" style="margin-top:0">
       <div class="toolbar-left" style="flex-wrap:wrap;gap:6px;align-items:center;font-size:13px">
+        <label>分组 <select id="iar-dyn-group" style="min-width:150px" onchange="iarDynPreview(1)">
+          <option value="none">不分组</option>
+          <option value="warehouse">按仓库分组</option>
+          <option value="ageEvidence">按库龄依据分组</option>
+          <option value="costEvidence">按成本依据分组</option>
+        </select></label>
         <span id="iar-designer-fields">正在加载字段目录…</span>
       </div>
       <div class="toolbar-actions">
@@ -272,6 +278,14 @@ const IAR_DYN_BUCKET_KEYS = [
   'bucket0To30', 'bucket31To60', 'bucket61To90', 'bucket91To180', 'bucketOver180',
 ];
 
+/* 分组键枚举（与后端 NormalizeGroupBy 一致；未知取值由后端拒绝） */
+const IAR_DYN_GROUP_OPTS = [
+  { value: 'none', label: '不分组' },
+  { value: 'warehouse', label: '按仓库分组' },
+  { value: 'ageEvidence', label: '按库龄依据分组' },
+  { value: 'costEvidence', label: '按成本依据分组' },
+];
+
 /* 字段设计器状态（纯数据；DOM 访问只在事件处理函数内部发生） */
 let IAR_DYN = {
   catalog: null,      // GET /api/dynamic-inventory-aging-report 返回的目录 DTO
@@ -313,6 +327,9 @@ function iarDynBuildRequest(state) {
   pageSize = Math.max(1, Math.min(maxPageSize, pageSize));
 
   const req = { fields, page, pageSize };
+
+  const groupBy = IAR_DYN_GROUP_OPTS.some(o => o.value === state.groupBy) ? state.groupBy : 'none';
+  if (groupBy && groupBy !== 'none') req.groupBy = groupBy;
 
   const warehouseId = Number(state.warehouseId);
   if (Number.isFinite(warehouseId) && warehouseId > 0) req.warehouseId = warehouseId;
@@ -371,6 +388,29 @@ function iarDynTableHtml(view) {
   return `<div class="table-wrap" style="margin-top:8px"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>${paging}`;
 }
 
+/* 分组行数分布图（ERP-137）：按当前授权预览页的分组行数渲染可访问的横向条形图（只统计行数，绝不求和任何数量 / 金额）；
+   固定证据分类（ageEvidence / costEvidence）的空分类始终保留（计数可为 0）；标签与计数全部转义 */
+function iarDynGroupsHtml(view) {
+  const groupBy = view && view.groupBy;
+  const groups = (view && view.groups) || [];
+  if (!groupBy || groupBy === 'none' || !Array.isArray(groups) || groups.length === 0) return '';
+  const max = Math.max(1, ...groups.map(g => Number(g && g.count) || 0));
+  const bars = groups.map(g => {
+    const label = (g && g.label) || (g && g.key) || '';
+    const count = Number(g && g.count) || 0;
+    const pct = Math.round(count / max * 100);
+    return `<li role="listitem" aria-label="${iarDynEsc(label)}：${count} 行" style="display:flex;align-items:center;gap:8px;margin:4px 0">
+      <span style="flex:0 0 180px;text-align:right;color:#334155;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${iarDynEsc(label)}">${iarDynEsc(label)}</span>
+      <span style="flex:1;background:#e2e8f0;border-radius:4px;height:16px;overflow:hidden;min-width:40px">
+        <span style="display:block;height:100%;background:#2563eb;width:${pct}%"></span>
+      </span>
+      <span style="flex:0 0 72px;text-align:right;color:#0f172a">${count} 行</span>
+    </li>`;
+  }).join('');
+  return `<div class="pd-hint" role="img" aria-label="本页库存行数分布图（仅统计本页）" style="margin-top:8px">📊 本页行数分布（仅统计本页）</div>
+    <ul role="list" style="list-style:none;padding:0 8px;margin:4px 0 8px">${bars}</ul>`;
+}
+
 /* 空结果提示（用于结果区） */
 function iarDynEmptyHtml() {
   return '<div class="empty" style="margin:8px 0">没有符合条件的库存行（可放宽仓库 / 商品 / 日期筛选）。</div>';
@@ -398,8 +438,9 @@ function iarDynResultHtml(view) {
   const summary = view
     ? `<div class="text-muted" style="margin:6px 0">共 ${view.total} 行 · 第 ${view.page} 页 · 每页 ${view.pageSize} 行 · 币种 ${iarDynEsc(view.costCurrency || '')}</div>`
     : '';
+  const groups = iarDynGroupsHtml(view);
   const empty = view && (!view.rows || view.rows.length === 0) ? iarDynEmptyHtml() : '';
-  return `${readOnly}${boundary}${disclaimer}${summary}${empty}${iarDynTableHtml(view)}`;
+  return `${readOnly}${boundary}${disclaimer}${summary}${groups}${empty}${iarDynTableHtml(view)}`;
 }
 
 /* 字段选择器：仅由目录白名单渲染为复选框，无自由填写的字段名 */
@@ -481,6 +522,7 @@ function iarDynBuildState(page) {
     productId: val('iar-product'),
     asOfDate: val('iar-asof'),
     pageSize: val('iar-pagesize'),
+    groupBy: val('iar-dyn-group') || 'none',
     page: page || IAR_DYN.page || 1,
     maxPageSize: IAR_DYN.catalog && IAR_DYN.catalog.maxPageSize ? IAR_DYN.catalog.maxPageSize : 200,
   };
@@ -564,6 +606,7 @@ function exportIarDesignerCsv() {
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     IAR_DYN_BUCKET_KEYS,
+    IAR_DYN_GROUP_OPTS,
     iarDynEsc,
     iarDynSelectFields,
     iarDynBuildRequest,
@@ -571,6 +614,7 @@ if (typeof module !== 'undefined' && module.exports) {
     iarDynCellText,
     iarDynRenderCell,
     iarDynTableHtml,
+    iarDynGroupsHtml,
     iarDynEmptyHtml,
     iarDynErrorHtml,
     iarDynResultHtml,

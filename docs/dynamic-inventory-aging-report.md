@@ -95,3 +95,18 @@
 - 前端逻辑单测：`node tests/automation/dynamic_inventory_aging_report_ui.test.js`（字段选择、分页上限、渲染、CSV、失败态、接线契约）；
 - 语法检查：`node --check src/ERP.Api/wwwroot/js/inventory-aging-report.js`；
 - 后端只读 / 授权口径由 `ERP.UnitTests/DynamicInventoryAgingReportTests.cs`（ERP-135）覆盖。
+
+---
+
+## 9. 分组行数分布（ERP-137）
+
+在既有字段设计器工具栏内新增「分组」选择器（`iar-dyn-group`），把当前授权预览页按 `warehouse` / `ageEvidence` / `costEvidence` 分组，渲染**只读、可访问的行数分布图**。全程只读、只计数，绝不跨不同商品 / 基础单位求和任何数量、不把未知成本金额当作 0 求和、不臆造库龄分层、不重算估值。
+
+- **分组键（fail closed）**：`none`（默认，不分组）/ `warehouse`（按仓库）/ `ageEvidence`（按库龄依据：`full` / `partial` / `none`）/ `costEvidence`（按成本依据：`known` / `unknown`）。空 / 留空 = `none`；任何其它取值在读取任何数据之前即拒绝（`InvalidParameter`，fail closed），不返回任何数据。
+- **页面行数语义**：分组计数只对「当前授权预览页」的库存库龄行计算（复用同一批有界、已授权预览行），**不是全量合计**；翻页 / 改每页条数后按新页重算。`total` 仍为符合筛选条件的库存行总数。
+- **只计数不求和**：`Groups[]` 每项只有 `key` / `label` / `count`，不存在任何数量 / 金额字段；不同商品、不同基础单位（如 PCS / KG）只按行计数，绝不求和为同一个数量；未知成本（金额 null）只按行计数、绝不回落为 0 后求和，也不重算估值。
+- **固定证据分类始终保留**：`ageEvidence`（full / partial / none）与 `costEvidence`（known / unknown）为固定证据分类，空分类即使计数为 0 也保留在响应中（确定性排序：full → partial → none；known → unknown）；`warehouse` 为动态分组，只出现本页存在的仓库（按仓库 Id 升序），空页返回空列表。
+- **接口**：`POST /api/dynamic-inventory-aging-report` 请求体新增可选 `groupBy`；响应新增 `groupBy` 与 `groups[]`（`none` 或未分组时 `groups` 为空）。
+- **审计与只读**：分组仍走同一 `POST` 预览端点，由既有 `OperationLogMiddleware` 按 HTTP 方法记录操作日志（读操作）；本设计器不新增 / 修改 / 删除任何记录，不执行任意 SQL。
+- **前端渲染**：分组结果渲染为可访问的横向条形图（`role="list"` / `role="listitem"`，每项带可见标签与计数），标签与计数全部转义、不注入 HTML；空页 / 不分组不渲染图表，仍显示空结果提示。
+- **验证**：后端由 `ERP.UnitTests/DynamicInventoryAgingGroupingTests.cs`（ERP-137）覆盖分组键、仓库拆分、缺失证据、空页、权限与只读；前端由 `node tests/automation/dynamic_inventory_aging_grouping_ui.test.js` 覆盖分组键白名单、仓库 / 证据分布渲染、安全图表文本与接线契约。
