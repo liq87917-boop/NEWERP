@@ -61,3 +61,29 @@
 - 无身份（未认证）、无销售订单菜单授权（权限不足）、越界业务员（只返回自己客户、越界筛选返回空）；
 - 无效字段 / 无效日期区间 / 无效状态与币种 / 页大小超限（查询前拒绝）；
 - 只读不写库（`SaveChangesAsync` 调用次数恒为 0）。
+
+## 7. 前端设计器（ERP-113）
+
+- 入口：销售订单页工具栏「📊 动态报表」（`modules-doc.js` 的 `extraActions`，`openDynamicSalesOrderReport()`）。
+- 脚本：`wwwroot/js/dynamic-sales-order-report.js`（`index.html` 注册，加载于 `app.js` 之前）。
+
+### 7.1 用户步骤
+
+1. 登录后进入「订单管理 → 销售订单」列表页；
+2. 点击工具栏「📊 动态报表」，设计器弹窗打开并调用 `GET /api/sales-orders/report` 加载字段白名单目录（无登录 / 无销售订单菜单授权 → 显示「权限不足 / 未登录」错误态，不返回任何字段）；
+3. 「① 选择字段」区域按目录渲染 31 个字段复选框（全选 / 清空），无自由填写的字段名；
+4. 「② 筛选」区域设置订单日期区间、客户（来自既有 `/api/base/customers`）、状态、币种（均为下拉 / 日期控件，无自由 SQL）；
+5. 点击「预览」→ `POST /api/sales-orders/report`，只发送「白名单字段 + 有界筛选 + 有界分页（pageSize 1~200）」；
+6. 结果区安全渲染返回的列名与单元格（全部 HTML 转义），并显示只读 / 边界 / 免责口径文案、总数与分页；空结果 / 无效请求 / 授权失败 / 网络失败分别显示可见提示，全程无写入。
+
+### 7.2 安全与只读
+
+- 字段选择器仅由 ERP-112 目录渲染，请求组装时再次按目录白名单过滤（`dsorSelectFields`），未知字段绝不进入请求；
+- 筛选仅日期 / 客户 / 状态 / 币种，状态与币种取枚举下拉；无任意 SQL、无自由字段名输入；
+- 预览为 `POST`，由既有 `OperationLogMiddleware` 记录审计；前端不写库、不迁移、不执行任意 SQL。
+
+## 8. 验证
+
+- 前端 UI 逻辑单测：`tests/automation/dynamic_sales_order_report_ui.test.js`（`node tests/automation/dynamic_sales_order_report_ui.test.js`）；
+- 语法检查：`node --check src/ERP.Api/wwwroot/js/dynamic-sales-order-report.js`；
+- 安全档构建 / 测试：`dotnet build NEWERP.sln -c Release` 与 `dotnet test src/ERP.UnitTests/ERP.UnitTests.csproj -c Release --no-build`。

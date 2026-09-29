@@ -376,6 +376,8 @@
   <script src="/js/sales-order-return-impact.js"></script>
   <!-- ERP-108：客户销售订单价格历史（只读派生：按商品 + 可选客户 + 订单日期筛选已审核订单明细价格，仅同客户 / 商品 / 规格 / 单位 / 币种分组，保留原始单价与贸易条款，逐条链接回来源订单；不写库、不重定价、不改贸易条款、不做汇率换算） -->
   <script src="/js/customer-sales-price-history.js"></script>
+  <!-- ERP-113：销售订单动态报表设计器（只读：仅按 ERP-112 白名单字段目录选择字段，筛选仅限订单日期 / 客户 / 状态 / 币种，预览走 POST /api/sales-orders/report，安全渲染返回列名与单元格；不写库、不迁移、不执行任意 SQL，授权 / 无效 / 空 / 网络失败均可见） -->
+  <script src="/js/dynamic-sales-order-report.js"></script>
   <!-- ERP-104：询价报价响应时间工作台（只读派生：按显式 InquiryId 链接 + 版本链根单计算首张有效报价与日历天间隔，缺失 / 异常不推断，不改写任何单据） -->
   <script src="/js/inquiry-response-workspace.js"></script>
   <script src="/js/app.js"></script>
