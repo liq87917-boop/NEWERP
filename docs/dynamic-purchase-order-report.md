@@ -71,3 +71,22 @@
 ## 8. 验证
 
 - 安全档构建 / 测试：`dotnet build NEWERP.sln -c Release` 与 `dotnet test src/ERP.UnitTests/ERP.UnitTests.csproj -c Release --no-build`。
+
+## 9. 前端设计器（ERP-126）
+
+- 入口：采购订单页工具栏「📊 动态报表」（`modules-doc.js` 的 `extraActions`，`onclick: 'openDynamicPurchaseOrderReport()'`）。
+- 脚本：`wwwroot/js/dynamic-purchase-order-report.js`（`index.html` 注册，加载于 `app.js` 之前）。
+- 字段选择器只由 `GET /api/purchase-orders/report` 返回的有限白名单目录（24 个字段）渲染为复选框，绝无自由填写的字段名或 SQL。
+- 筛选只允许供应商 / 订单日期 / 状态 / 币种；状态与币种只接受枚举取值（下拉），供应商来自既有 `/api/base/suppliers?page=1&pageSize=200`。
+- 预览走 `POST /api/purchase-orders/report`，只发送「白名单字段 + 有界筛选 + 有界分页（pageSize 1~100，前端钳制到目录 `maxPageSize`）」，按请求顺序渲染返回的列名与单元格，全部经 HTML 转义。
+- 全程只读：不写库、不迁移、不执行任意 SQL；授权 / 无效请求 / 空结果 / 网络失败都在界面可见（`dporErrorHtml` / `dporEmptyHtml` / `dporLoadingHtml`），且不暴露范围外数据。
+
+### 9.1 前端 UI 逻辑单测
+
+`node tests/automation/dynamic_purchase_order_report_ui.test.js` 覆盖：
+
+- 字段选择（只来自目录白名单、去重、保持顺序、丢弃未知键）；
+- 请求边界（仅选定白名单字段、页码最小 1、每页钳制到 100、筛选只含供应商 / 日期 / 状态 / 币种、空筛选不携带多余键）；
+- 安全单元格渲染（HTML 转义、null/undefined 为空、布尔 是/否、日期截断到日、状态映射中文）；
+- 空结果与失败态（空结果、口径文案、权限不足 / 网络失败 / 无效请求分别可见）；
+- 前端接线契约（工具栏入口、脚本注册、接口路径、复选框字段选择器、无任意 SQL / 自由字段名输入）。

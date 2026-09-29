@@ -1,7 +1,7 @@
 {
   "id": "ERP-126",
   "title": "Add a visual purchase-order report field designer",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "medium",
   "description": "User scene: from the purchase-order page, choose catalog fields and bounded supplier/date/status/currency filters and preview the current authorized purchase-order rows. The UI accepts only ERP-125's field catalog and never sends free-form SQL. Show unauthorized, empty, validation and network failures safely; previews remain read-only and covered by existing HTTP audit. Development only: no migration, production SQL, real database execution, writes, secret/.env change or deployment. Verify Node UI logic tests and safe build/test.",
   "acceptance_criteria": [
@@ -49,6 +49,6 @@
     "status": "not_required",
     "reason": "Development-only bounded read-only feature"
   },
-  "attempts": 0,
+  "attempts": 1,
   "created_at": "2026-09-29T05:17:00.765837Z"
 }
