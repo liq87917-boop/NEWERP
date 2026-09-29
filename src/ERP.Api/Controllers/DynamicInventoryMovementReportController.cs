@@ -2,6 +2,7 @@ using ERP.Application.Common;
 using ERP.Application.DTOs;
 using ERP.Application.Interfaces;
 using ERP.Application.Services;
+using ERP.Infrastructure.Export;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using System.Security.Claims;
@@ -13,6 +14,7 @@ namespace ERP.Api.Controllers;
 /// <list type="number">
 /// <item><b>GET /api/dynamic-inventory-movement-report</b>：返回库存移动字段白名单目录（需登录 + 库存查询菜单授权）；</item>
 /// <item><b>POST /api/dynamic-inventory-movement-report</b>：按选定字段与有界筛选预览库存移动报表，稳定分页。</item>
+/// <item><b>POST /api/dynamic-inventory-movement-report/export</b>：导出当前选定页为 Excel（xlsx，只读，复用有界授权预览与选定列顺序）。</item>
 /// </list>
 /// <para>复用 ERP-029 报表服务（<see cref="IReportService.GetInventoryMovementReportAsync"/>）：
 /// 仓库 / 商品 / 截止日期 / 移动窗口 / 呆滞阈值筛选与稳定分页全部由既有只读服务完成，本控制器只做授权与字段投影，不做写入。</para>
@@ -50,7 +52,39 @@ public class DynamicInventoryMovementReportController : ControllerBase
     public async Task<IActionResult> Preview([FromBody] DynamicInventoryMovementReportRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
+        return Ok(ApiResponse<DynamicInventoryMovementReportPageDto>.Success(
+            await BuildPageAsync(request)));
+    }
 
+    /// <summary>
+    /// 导出当前页为 Excel（ERP-133，只读）：复用「有界、已授权预览」与选定列顺序（每次请求重新校验身份 / 菜单授权 /
+    /// 字段 / 筛选 / 页大小），仅导出当前页选定列；基础单位与未知历史语义保持不变，文本单元格做公式注入转义。
+    /// <para>全程只读，不写库、不执行任意 SQL；请求由既有 <c>OperationLogMiddleware</c> 记录审计（动作「导出」）。</para>
+    /// </summary>
+    [HttpPost("export")]
+    public async Task<IActionResult> Export([FromBody] DynamicInventoryMovementReportRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        // 复用同一有界、已授权预览：重新校验身份 / 菜单授权 / 字段 / 筛选 / 页大小
+        var page = await BuildPageAsync(request);
+
+        var bytes = BuildWorkbook(page);
+        return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            $"InventoryMovement_{DateTime.Now:yyyyMMddHHmmss}.xlsx");
+    }
+
+    /// <summary>用 ExcelExporter 生成当前页数据工作表（选定列顺序 + 公式注入转义）</summary>
+    private static byte[] BuildWorkbook(DynamicInventoryMovementReportPageDto page)
+    {
+        var columns = page.Columns.Select(c => (c.Key, c.Label)).ToList();
+        var rows = page.Rows.Select(DynamicInventoryMovementReportRules.BuildExportRow).ToList();
+        return ExcelExporter.ExportRows("库存移动", rows, columns);
+    }
+
+    /// <summary>复用同一有界、已授权预览管线：授权 → 校验 → 只读查询 → 选定列投影 → 分组行数分布</summary>
+    private async Task<DynamicInventoryMovementReportPageDto> BuildPageAsync(DynamicInventoryMovementReportRequest request)
+    {
         // 1) 身份 + 既有库存查询菜单授权（无身份 / 无角色 / 无菜单授权 → fail closed）
         await EnsureAuthorizedAsync(CurrentUserId());
 
@@ -73,23 +107,22 @@ public class DynamicInventoryMovementReportController : ControllerBase
         // 5) 分组行数分布（ERP-132）：只统计当前授权预览页的行数，绝不求和任何数量
         var groups = DynamicInventoryMovementReportRules.BuildGroupCounts(report.Items, groupBy);
 
-        return Ok(ApiResponse<DynamicInventoryMovementReportPageDto>.Success(
-            new DynamicInventoryMovementReportPageDto(
-                columns,
-                rows,
-                report.Total,
-                report.Page,
-                report.PageSize,
-                report.TotalPages,
-                report.AsOfDate,
-                report.WindowStart,
-                report.WindowEnd,
-                report.InactiveDays,
-                DynamicInventoryMovementReportRules.ReadOnlyText,
-                DynamicInventoryMovementReportRules.BoundaryText,
-                DynamicInventoryMovementReportRules.DisclaimerText,
-                groupBy,
-                groups)));
+        return new DynamicInventoryMovementReportPageDto(
+            columns,
+            rows,
+            report.Total,
+            report.Page,
+            report.PageSize,
+            report.TotalPages,
+            report.AsOfDate,
+            report.WindowStart,
+            report.WindowEnd,
+            report.InactiveDays,
+            DynamicInventoryMovementReportRules.ReadOnlyText,
+            DynamicInventoryMovementReportRules.BoundaryText,
+            DynamicInventoryMovementReportRules.DisclaimerText,
+            groupBy,
+            groups);
     }
 
     /// <summary>身份 + 既有「角色 → 菜单」库存查询模块授权（fail closed，绝不猜测身份）</summary>

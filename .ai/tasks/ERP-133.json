@@ -2,7 +2,7 @@
   "id": "ERP-133",
   "title": "Export selected authorized inventory-movement page to Excel",
   "description": "An inventory user downloads exactly the selected dynamic movement report page as xlsx, in chosen field order. Reuse ERP-130 authorized bounded preview and the existing ExcelExporter; recheck current-user stock-query menu and all filters on each download. Preserve base-unit labels and explicit unknown-history values, escape formula-leading text, never infer cost or aggregate unlike units. Existing HTTP audit records the read-only download. Development only: no migration, production SQL, real database execution, arbitrary model SQL, writes, secret/.env change or deployment. Verify workbook tests and safe build/test.",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "medium",
   "acceptance_criteria": [
     "Excel endpoint reuses authorized bounded dynamic inventory preview, rechecks current-user stock-query permission and rejects invalid fields/filters/page size before returning bytes.",
@@ -48,5 +48,6 @@
     "level": "L1",
     "status": "not_required",
     "reason": "Development-only bounded read-only feature"
-  }
+  },
+  "attempts": 1
 }

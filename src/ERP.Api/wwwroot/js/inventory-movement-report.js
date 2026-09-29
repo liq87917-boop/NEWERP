@@ -51,7 +51,7 @@ function openInventoryMovementReport() {
 
     <!-- ERP-131：字段设计器（只读预览）：复用上方仓库 / 商品 / 日期 / 阈值 / 每页筛选，勾选白名单字段预览授权有界结果 -->
     <div class="pd-hint" id="imr-designer-hint">
-      🎛 字段设计器（只读预览）：勾选可见列 → 复用上方仓库 / 商品 / 日期 / 阈值筛选 → 预览授权有界结果；可导出当前页 CSV（选定列顺序，公式转义）。
+      🎛 字段设计器（只读预览）：勾选可见列 → 复用上方仓库 / 商品 / 日期 / 阈值筛选 → 预览授权有界结果；可导出当前页 CSV / Excel（选定列顺序，公式转义）。
     </div>
     <div class="toolbar" style="margin-top:0">
       <div class="toolbar-left" style="flex-wrap:wrap;gap:6px;align-items:center;font-size:13px">
@@ -68,6 +68,7 @@ function openInventoryMovementReport() {
         <button class="btn btn-neutral btn-sm" onclick="imrDynToggleAll(false)">清空</button>
         <button class="btn btn-primary" onclick="imrDynPreview(1)">预览</button>
         <button class="btn btn-neutral" onclick="exportImrDesignerCsv()" title="导出当前页为 CSV（选定列）">📤 导出 CSV（选定列）</button>
+        <button class="btn btn-neutral" onclick="exportImrDesignerExcel()" title="导出当前页为 Excel（选定列）">📥 导出 Excel（选定列）</button>
       </div>
     </div>
     <div id="imr-designer-result"></div>
@@ -592,6 +593,68 @@ function exportImrDesignerCsv() {
   toast('CSV 已导出（当前页 · 选定列）', 'success');
 }
 
+/* 导出当前预览页为 Excel（xlsx，选定列顺序 + 公式转义 + 未知值保留 + 基础单位语义）；
+   每次下载都重新读取当前筛选并走只读导出接口（后端重新校验授权 / 字段 / 筛选 / 页大小），空数据不下载空表 */
+async function exportImrDesignerExcel() {
+  const state = imrDynBuildState(IMR_DYN.page);
+  if (state.windowStart && state.windowEnd && state.windowStart > state.windowEnd) {
+    imrDynRenderResult(imrDynErrorHtml('invalid', '移动窗口开始日期不能晚于结束日期'));
+    return;
+  }
+  if (IMR_DYN.view && (!IMR_DYN.view.rows || IMR_DYN.view.rows.length === 0)) {
+    imrDynRenderResult(imrDynErrorHtml('empty', '没有符合条件的库存行，无法导出（请先预览）'));
+    return;
+  }
+
+  const req = imrDynBuildRequest(state);
+  imrDynRenderResult(imrDynLoadingHtml());
+
+  try {
+    const headers = { 'Content-Type': 'application/json' };
+    const token = typeof localStorage !== 'undefined' ? (localStorage.getItem('erp_token') || '') : '';
+    if (token) headers['Authorization'] = 'Bearer ' + token;
+    const resp = await fetch('/api/dynamic-inventory-movement-report/export', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(req),
+    });
+
+    const contentType = (resp.headers.get('content-type') || '');
+    if (contentType.indexOf('spreadsheetml') >= 0) {
+      const blob = await resp.blob();
+      downloadImrBlob(blob, '库存移动字段设计器_当前页.xlsx');
+      imrDynRenderResult('');
+      toast('Excel 已导出（当前页 · 选定列）', 'success');
+      return;
+    }
+
+    let envelope = null;
+    try { envelope = await resp.json(); } catch (e) { /* 忽略解析失败 */ }
+    const code = envelope && envelope.code;
+    const message = (envelope && envelope.message) || '导出失败';
+    if (code === 2000 || code === 2003) {
+      if (typeof logout === 'function') logout();
+      imrDynRenderResult(imrDynErrorHtml('unauthorized', message));
+      return;
+    }
+    imrDynRenderResult(imrDynErrorHtml(imrDynKindOfCode(code), message));
+  } catch (err) {
+    imrDynRenderResult(imrDynErrorHtml('network', (err && err.message) || '无法连接到服务器'));
+  }
+}
+
+/* 触发浏览器下载指定 blob（下载后回收对象 URL） */
+function downloadImrBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
 /* Node 单测导出（浏览器中 module 为 undefined，自动跳过） */
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
@@ -612,5 +675,7 @@ if (typeof module !== 'undefined' && module.exports) {
     imrDynKindOfCode,
     imrDynCsvCell,
     imrDynCsv,
+    exportImrDesignerExcel,
+    downloadImrBlob,
   };
 }

@@ -77,3 +77,17 @@
 - **固定分类始终保留**：`classification` / `history` 为固定分类，空分类与未知历史分类（`unknown` / `no_history`）即使计数为 0 也保留在响应中；`warehouse` 为动态分组，只出现本页存在的仓库（按仓库 Id 升序），空页返回空列表。
 - **接口**：`POST /api/dynamic-inventory-movement-report` 请求体新增可选 `groupBy`；响应新增 `groupBy` 与 `groups[]`（`none` 或未分组时 `groups` 为空）。
 - **前端渲染**：分组结果渲染为可访问的横向条形图（`role="list"` / `role="listitem"`，每项带可见标签与计数），标签与计数全部转义、不注入 HTML；空页 / 不分组不渲染图表，仍显示空结果提示。
+
+## 10. 当前页 Excel 导出（ERP-133）
+
+只读、有界的**当前页 xlsx 导出**：把 ERP-130/131 的「有界、已授权预览」与选定列顺序直接导出为 Excel（xlsx），复用既有 `ERP.Infrastructure.Export.ExcelExporter`。
+
+- **端点**：`POST /api/dynamic-inventory-movement-report/export`，请求体与预览完全相同（`DynamicInventoryMovementReportRequest`），只导出请求 `page` / `pageSize` 对应的**当前页**（单页上限 200，超限直接拒绝），不是全量导出。
+- **复用有界授权预览**：每次下载都重新校验身份 + `stock-query` 库存查询菜单授权 + 字段 / 筛选 / 页大小，非法取值在读取任何数据之前即拒绝；只读、不写库、不执行任意 SQL。
+- **选定列顺序**：数据工作表列头与数据行都按 `page.Columns`（= 请求选定字段顺序）排列，与预览同源。
+- **基础单位 / 未知历史证据**：`unit` 保留基础单位标签（如 PCS / KG），`lastMovementDate` / `inactivityDays` 无台账时保持空（null），`historyStatus` / `classification` 显式保留 `no_history` / `unknown`，不臆造日期、比率，不推断成本 / 金额、不跨不同基础单位聚合。
+- **公式注入防护**：文本单元格以 `=` / `+` / `-` / `@` / 制表符 / 回车 / 换行开头时前缀单引号转义（OWASP），保持字面文本、不被当作公式执行（`DynamicInventoryMovementReportRules.EscapeFormulaLeading`）。
+- **文件名**：`InventoryMovement_yyyyMMddHHmmss.xlsx`；内容类型 `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`。
+- **前端**：字段设计器工具栏新增「📥 导出 Excel（选定列）」，复用当前字段 / 筛选 / 分页组装请求后 `POST` 导出；空数据显示可见错误、不下载空表，授权 / 校验 / 网络失败均在结果区可见。
+- **审计与只读**：`POST` 由既有 `OperationLogMiddleware` 记录操作日志（动作「导出」，读操作）；本导出不新增 / 修改 / 删除任何记录，不执行任意 SQL。
+
