@@ -153,6 +153,8 @@ function asfsListView() {
           placeholder="对账单号 / 客户 / 协议号 / 备注"></div>
       <button class="btn btn-primary btn-sm" onclick="asfsSearch()">🔍 查询</button>
       <button class="btn btn-neutral btn-sm" onclick="asfsOpenForm(null)">➕ 新建对账单证据</button>
+      <button class="btn btn-neutral btn-sm" title="只读月度汇总：按对账日期所属年月 + 客户 + 原币分组；仅未删除且已登记计入原币合计，草稿与已作废单独计数；服务期间跨月不按期间分摊；不是收入确认 / 应收 / 付款通知 / 税务 / 结算"
+        onclick="openAgencyServiceFeeMonthlySummary()">📊 月度汇总</button>
     </div>
 
     <table class="data-table">

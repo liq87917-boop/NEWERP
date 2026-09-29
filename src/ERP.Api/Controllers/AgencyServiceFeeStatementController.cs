@@ -71,6 +71,16 @@ public class AgencyServiceFeeStatementController : ControllerBase
             await AgencyServiceFeeStatementService.ListSourceOptionsAsync(
                 _db, sourceType, customerId, currency, keyword, take)));
 
+    /// <summary>
+    /// 代理服务费对账单**月度汇总**（只读派生）：把未删除的对账单证据按「对账日期所属年月 + 客户 + 原币」分组，
+    /// 仅未删除且已登记的对账单计入原币合计，草稿与已作废单独计数；服务期间跨月不按期间分摊；
+    /// 可按对账日期区间与客户 / 币种过滤，按月份稳定分页，读取为固定次数数据集访问、无逐行查库。
+    /// </summary>
+    [HttpGet("monthly-summary")]
+    public async Task<IActionResult> MonthlySummary([FromQuery] AgencyServiceFeeMonthlySummaryQuery query)
+        => Ok(ApiResponse<AgencyServiceFeeMonthlySummaryView>.Success(
+            await AgencyServiceFeeMonthlySummaryService.ForQueryAsync(_db, query)));
+
     /// <summary>对账单证据详情（含全部有界行清单、来源快照与客户 / 协议可用性标注；只读）</summary>
     [HttpGet("{id:long}")]
     public async Task<IActionResult> GetById(long id)
