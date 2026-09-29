@@ -55,3 +55,14 @@
 
 - 单页上限 200 行；`total` 为符合筛选条件的库存行总数，本页合计与分类计数沿用 ERP-029「仅统计本页」口径。
 - 不提供关键字、导出、分组等 ERP-029 之外的扩展能力，避免放宽数据可见性。
+
+## 8. 前端字段设计器（ERP-131）
+
+只读、有界的**库存移动字段设计器**：在既有库存移动报表页（`openInventoryMovementReport()`，`wwwroot/js/inventory-movement-report.js`）内，新增字段选择器与当前页 CSV 导出，全程只读不写库。
+
+- **入口与目录**：进入库存移动报表页即加载字段目录 `GET /api/dynamic-inventory-movement-report`（需登录 + `stock-query` 库存查询菜单授权）。字段选择器只由目录返回的 18 项有限白名单渲染为复选框，**无自由填写的字段名或 SQL**；目录 / 授权失败 fail closed，不渲染任何字段并显示错误态。
+- **筛选复用**：字段设计器复用页面上方既有筛选控件——仓库 `imr-warehouse`、商品 `imr-product`、截止日期 `imr-asof`、移动窗口 `imr-window-start` / `imr-window-end`、呆滞阈值 `imr-inactive`、每页 `imr-pagesize`（关键字与「仅现存量 > 0」等 ERP-029 扩展口径不进入预览，避免放宽数据可见性）。
+- **预览**：点「预览」按白名单字段 + 有界筛选 + 有界分页（page 1 起、pageSize 1~200）`POST /api/dynamic-inventory-movement-report`，按请求顺序渲染返回列名与单元格；列名来自目录（`unit` = 基础单位），无台账的 `lastMovementDate` / `inactivityDays` 显示「未知」，`historyStatus` / `classification` 映射中文文案，全程转义、不暴露范围外数据。
+- **当前页 CSV**：仅导出当前预览页，表头与数据行都按返回列（= 选定字段顺序）排列；对 `=` `+` `-` `@` 制表 / 回车开头的文本加单引号转义（公式注入防护），未知值原样保留为「未知」；带 UTF-8 BOM；无数据时不下载空表。
+- **状态**：加载、空结果、授权（权限不足 / 未登录）、校验失败（倒置日期 / 非法阈值 / 页大小超限）、网络失败均在结果区可见，全程无写入。
+- **审计与只读**：预览 `POST` 由既有 `OperationLogMiddleware` 记录操作日志（读操作），`GET` 目录沿用既有只读约定；本设计器不新增 / 修改 / 删除任何记录，不执行任意 SQL。

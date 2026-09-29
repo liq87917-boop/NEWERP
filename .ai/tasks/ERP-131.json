@@ -2,7 +2,7 @@
   "id": "ERP-131",
   "title": "Add a visual inventory-movement report field designer",
   "description": "On the existing inventory movement report page, choose visible ledger fields, preview the authorized page and download selected columns as CSV. Reuse the finite catalog and stock-query permission; preserve existing warehouse/product/date filters, base-unit and unknown-history semantics. CSV is current-page only with spreadsheet formula escaping. Fail closed on authorization and validation errors; existing HTTP operation audit records read-only requests. Development only: no migration, production SQL, real database execution, arbitrary model SQL, writes, secret/.env change or deployment. Verify Node UI logic tests and safe build/test; no real browser acceptance.",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "medium",
   "acceptance_criteria": [
     "Inventory movement page opens finite field chooser alongside existing warehouse/product/date filters and sends selected fields to the authorized bounded preview.",
@@ -44,5 +44,6 @@
     "level": "L1",
     "status": "not_required",
     "reason": "Development-only bounded read-only feature"
-  }
+  },
+  "attempts": 1
 }
