@@ -61,9 +61,32 @@ ERP-031 供应商采购敞口报表的既有筛选与稳定分页，预览当前
 - 全程只读：无 Add / Update / Remove / SaveChanges，不执行任意 SQL、不写库；
 - 请求由既有 `OperationLogMiddleware` 按 HTTP 方法记录审计。
 
+## 前端字段设计器（ERP-149）：视觉字段选择 + 所选列预览与 CSV 导出
+
+前端工作台 `wwwroot/js/supplier-purchase-exposure.js` 在既有「供应商采购敞口报表」工具栏新增「🎛 字段设计器」入口，
+保持静态视图，只读、有界、可单测：
+
+- 打开设计器时先 `GET /api/supplier-purchase-exposure/report` 拉取有限字段白名单目录，目录加载失败 / 未登录 / 无采购订单菜单授权一律 fail closed（整页可见拒绝原因，不渲染任何字段）；
+- 字段选择器只由目录白名单渲染为复选框（`name="spe-des-field"`），**没有自由填写的字段名 / SQL**；勾选状态经 `speDesSelectFields` 规范化（去重、保持顺序、丢弃未知键）；
+- 预览复用工作台**当前筛选**（供应商 / 币种 / 订单日期 / 链接状态 / 关键字 / 每页），并 `POST /api/supplier-purchase-exposure/report`，只发送「白名单字段 + 当前筛选 + 有界分页（pageSize 1~200）」；请求体由 `speDesBuildRequest` 组装，未知字段 / 非法分页绝不进入请求；
+- 结果渲染 `speDesResultHtml` / `speDesTableHtml`：按后端返回的列名与顺序渲染选定列，单元格经 HTML 转义（无 unsafe HTML）；链接状态（linked / ambiguous / unavailable）、收货状态（unknown）与未知结算 / 收货数量（null）显式显示「未知」，绝不回落为 0；不同币种分别成行、绝不合并或换算；口径 / 边界 / 免责文案照实展示；
+- 所选列 CSV 由 `speDesCsv` 生成：表头为返回的列名、行内仅选定字段；未知值保留「未知」、公式首字符（= + - @ 制表符 / 回车）转义、双引号转义、CRLF + BOM；空页可见错误，不下载仅表头文件；
+- 加载 / 空结果 / 授权 / 未登录 / 无效请求 / 网络失败状态均在结果区可见（fail closed，不暴露范围外数据）。
+
+翻页复用 `speDesPage`（有界：最小第 1 页），每次预览都重新走 ERP-148 授权与校验；全程只读，无写入。
+CSV 只导出当前预览页选定列证据，`POST` 由既有 `OperationLogMiddleware` 记录审计。
+
+### 单元测试
+
+`tests/automation/dynamic_supplier_exposure_ui.test.js`（Node，无需浏览器）覆盖：字段选择（仅白名单、去重、丢弃未知键）、
+请求边界（分页有界、筛选仅复用工作台当前筛选）、未知证据渲染（链接 / 收货 / 结算 / 数量 null 不回落 0）、
+表格渲染（转义、不同币种分行、分页接线）、空结果与失败态、所选列 CSV（未知保留 + 公式转义 + 引号转义），以及前端接线契约。
+
 ## 文件地图
 
 - `src/ERP.Application/DTOs/DynamicSupplierExposureReportDtos.cs`：目录 / 请求 / 结果 DTO；
 - `src/ERP.Application/Services/DynamicSupplierExposureReportRules.cs`：字段白名单、校验与行投影（纯规则）；
 - `src/ERP.Api/Controllers/DynamicSupplierExposureReportController.cs`：授权 + 复用 ERP-031 只读派生 + 选定列投影；
-- `src/ERP.UnitTests/DynamicSupplierExposureReportTests.cs`：单元测试（内存库，不连 SQL Server、不启动 API）。
+- `src/ERP.UnitTests/DynamicSupplierExposureReportTests.cs`：单元测试（内存库，不连 SQL Server、不启动 API）；
+- `src/ERP.Api/wwwroot/js/supplier-purchase-exposure.js`：ERP-031 工作台 + ERP-149 前端字段设计器（`openSupplierPurchaseExposureDesigner`，纯函数可 Node 单测）；
+- `tests/automation/dynamic_supplier_exposure_ui.test.js`：ERP-149 前端 UI 逻辑单测（Node，无需浏览器）。
