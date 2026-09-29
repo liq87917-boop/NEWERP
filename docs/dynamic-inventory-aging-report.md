@@ -57,3 +57,41 @@
 
 - 单页上限 200 行；`total` 为符合筛选条件的库存行总数，本页合计与分层合计沿用 ERP-034「仅统计本页」口径。
 - 本预览为只读快照：不替代库存库龄与成本估值报表主口径，不重算、不重建历史成本、不计提跌价准备；不提供关键字、导出、分组等 ERP-034 之外的扩展能力。
+
+---
+
+## 8. 前端字段设计器（ERP-136）
+
+在既有「库存库龄与成本估值报表」（ERP-034，`openInventoryAgingReport`）页面内新增**只读字段设计器**（预览）：库存查询用户勾选 ERP-135 有限白名单字段，配合仓库 / 商品 / 截止日期筛选，预览有界的库龄台账与成本估值证据，并导出当前页 CSV。既有静态报表保持不变。
+
+### 8.1 入口与控件
+
+- 设计器直接嵌入 ERP-034 报表页（`wwwroot/js/inventory-aging-report.js`），无新增菜单 / 脚本注册。
+- 字段选择器只由 `GET /api/dynamic-inventory-aging-report` 返回的有限白名单目录（32 个字段）渲染为复选框（`name="iar-dyn-field"`），绝无自由填写的字段名或 SQL。
+- 仓库 / 商品 / 截止日期 / 每页筛选复用上方既有控件（`iar-warehouse` / `iar-product` / `iar-asof` / `iar-pagesize`）；关键字与「仅现存量 > 0」等 ERP-034 扩展口径不进入本预览。
+
+### 8.2 预览请求与响应
+
+- 预览走 `POST /api/dynamic-inventory-aging-report`，请求体只含 `{ fields, warehouseId, productId, asOfDate, page, pageSize }`：
+  - `fields` 只来自目录白名单（去重、保持请求顺序、丢弃未知键）；
+  - `page` 最小 1，`pageSize` 钳制在 1 ~ 目录 `maxPageSize`（200）之间。
+- 响应按请求顺序返回 `columns[]`（选定字段）与 `rows[]`（仅含选定字段值的字典行），前端按返回列名与单元格顺序渲染，不重排。
+
+### 8.3 渲染口径（与 ERP-135 一致）
+
+- 未知库龄：`evidenceStatus`（full / partial / none）映射为「有台账分层依据 / 部分数量无依据 / 无台账分层依据」；`unknownAgeQuantity`（库龄未知数量）按数值显示。
+- 未知成本：`costStatus = unknown` 映射「成本未知」；成本 / 金额类字段（`averageCost` 与 `*Amount`）为 `null` 时显示「未知」，绝不回落为 0。
+- CNY 币种：`costCurrency` 恒为 `CNY`，表格与汇总均显式展示。
+- 固定库龄分层顺序：0-30 / 31-60 / 61-90 / 91-180 / 180 天以上（`IAR_DYN_BUCKET_KEYS`），绝不重排。
+- 全部列名与单元格经 HTML 转义后渲染，不注入脚本。
+
+### 8.4 状态与导出
+
+- 状态：加载（`正在预览…`）、空结果（`没有符合条件`）、授权失败（`权限不足`）、未登录（`未登录 / 登录已过期`）、无效请求（`请求无效`）、网络失败（`网络请求失败`）均可见。
+- 导出：`📤 导出 CSV（选定列）` 仅导出当前预览页、按选定列顺序、对公式前导文本（= + - @ 制表 / 回车）加单引号转义、未知值原样保留为「未知」。
+
+### 8.5 验证
+
+- 前端逻辑单测：`node tests/automation/dynamic_inventory_aging_report_ui.test.js`（字段选择、分页上限、渲染、CSV、失败态、接线契约）；
+- 语法检查：`node --check src/ERP.Api/wwwroot/js/inventory-aging-report.js`；
+- 后端只读 / 授权口径由 `ERP.UnitTests/DynamicInventoryAgingReportTests.cs`（ERP-135）覆盖。
