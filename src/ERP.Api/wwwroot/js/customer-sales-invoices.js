@@ -200,6 +200,7 @@ function csiListView() {
           placeholder="发票号 / 代码 / 客户 / 商业发票引用"></div>
       <button class="btn btn-primary btn-sm" onclick="csiSearch()">🔍 查询</button>
       <button class="btn btn-neutral btn-sm" onclick="csiOpenForm(null)">➕ 新建发票证据</button>
+      <button class="btn btn-neutral btn-sm" title="只读收款时效：按显式 ERP-073 收款分摊行派生开票日期到首末有效收款日期的间隔天数与可比较已分摊 / 剩余证据；不提供任何分摊 / 收款 / 作废动作" onclick="openCustomerInvoiceCollectionTiming(CSI.filters.customerId || null)">⏱️ 收款时效</button>
     </div>
 
     <table class="data-table">
@@ -498,6 +499,7 @@ function csiDetailView() {
           <button class="btn btn-primary btn-sm" onclick="csiRecord(${inv.id})">登记</button>` : ''}
         ${!inv.isVoided ? `<button class="btn btn-danger btn-sm" onclick="csiOpenVoid(${inv.id})">作废</button>` : ''}
         ${!inv.isDraft && !inv.isVoided ? `<button class="btn btn-primary btn-sm" onclick="openCustomerSalesInvoiceCollectionAllocationRegister(${inv.id})">收款分摊</button>` : ''}
+        <button class="btn btn-neutral btn-sm" onclick="openCustomerInvoiceCollectionTiming(${inv.customerId})">⏱️ 收款时效</button>
         <button class="btn btn-neutral btn-sm" onclick="csiBackToList()">← 返回台账</button>
       </div>
     </div>

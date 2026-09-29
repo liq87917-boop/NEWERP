@@ -45,6 +45,22 @@ public class CustomerSalesInvoiceEvidenceController : ControllerBase
     }
 
     /// <summary>
+    /// 客户销项发票收款时效证据（ERP-111，只读派生）：按客户 / 开票日期区间筛选已登记未删除的发票证据，
+    /// 用显式 ERP-073「收款单 → 发票」分摊行批量装载收款单，派生「开票日期 → 首张 / 末张有效收款日期」的
+    /// 间隔天数与可比较的已分摊 / 剩余证据；缺链接、已作废、收款单取消、早于开票日期、币种不一致的分摊行
+    /// 仅作异常证据列出、不计入首末收款与可比较金额；应用业务员数据范围。
+    /// <para>只读：不写任何表、不执行迁移 / 生产 SQL / 真实数据库操作 / 部署，不改写发票 / 收款单 / 分摊行 / 客户；
+    /// 分摊行<strong>绝不</strong>被当作银行到账、法定账龄或催收 SLA。</para>
+    /// </summary>
+    [HttpGet("collection-timing")]
+    public async Task<IActionResult> CollectionTiming([FromQuery] CustomerInvoiceCollectionTimingQuery query)
+    {
+        var scope = await ResolveScopeAsync();
+        return Ok(ApiResponse<CustomerInvoiceCollectionTimingReport>.Success(
+            await CustomerInvoiceCollectionTimingService.ForQueryAsync(_db, query, scope.AllowedCustomerIds)));
+    }
+
+    /// <summary>
     /// 可显式交叉引用的单证中心商业发票候选（只读、有界）：只列出既有、未删除且类型为商业发票的单证，
     /// 仅用于显式选择交叉引用来源；不读取单证金额、不转换单证、不建立自动链接。
     /// </summary>
