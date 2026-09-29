@@ -152,6 +152,22 @@ ERP-068 供应商对账与账龄工作台的既有筛选与稳定分页，预览
 
 `none` 或不分组时 `groups` 为空；固定分类在空页仍返回全部分类、计数为 0；动态分组在空页返回空列表。分组只统计当前页、非全量合计。全程只读、无写入，`POST` 由既有 `OperationLogMiddleware` 记录审计。
 
+## 前端分组计数可视化（ERP-145）
+
+字段设计器 `wwwroot/js/supplier-reconciliation-aging.js` 新增「② 分组计数」选择器，复用 ERP-144 的分组语义，在预览结果上方渲染当前授权预览页的发票张数条形图：
+
+- 选择器只提供 ERP-144 允许的分组键：`none` / `supplier` / `currency` / `agingBucket` / `allocationState`（`SRA_GROUP_KEYS` 白名单，无自由输入）；非法 / 缺失分组键经 `sraDesGroupKey` fail closed 回落 `none`，绝不进入请求；
+- 预览请求体由 `sraDesBuildRequest` 始终携带 `groupBy`（= 选中的白名单键），复用既有有界、已授权预览（每次请求重新校验身份 / 采购订单菜单授权 / 字段 / 筛选 / 页大小）；
+- 结果渲染 `sraDesGroupChartHtml`：按后端返回的 `groups`（`{ key, label, count }`）渲染带标签的计数条形图，标签经 HTML 转义（无 unsafe HTML）；计数未知（null）绝不回落为 0；
+- 未知到期日（`unknown_due_date`）、无效 / 未知分配证据（`over_allocated` / `unknown`）等固定分类保持可见（计数可为 0）；动态分组（supplier / currency）空页显示可见提示；翻页后图表随 `view.groups` 重渲染；
+- 图表标注「仅当前预览页，非全量合计」：**计数只是当前预览页证据**，不是全量合计、绝不求和任何金额、绝不跨币种合并或换算。
+
+授权失败 / 无效分组 / 网络失败均在结果区可见（fail closed）；全程只读，无写入。
+
+### 单元测试
+
+`tests/automation/dynamic_supplier_aging_grouping_ui.test.js`（Node，无需浏览器）覆盖：分组键选择（仅 ERP-144 白名单、非法回落 none）、请求携带分组键、计数条形图文本（供应商 / 币种 / 账龄分桶 / 分配状态，含未知与空类）、未知计数与空分组、翻页变化、权限 / 网络失败态，以及「计数仅当前预览页」的接线契约。
+
 ## 文件地图
 
 - `src/ERP.Application/DTOs/DynamicSupplierAgingReportDtos.cs`：目录 / 请求 / 结果 DTO；
@@ -162,5 +178,6 @@ ERP-068 供应商对账与账龄工作台的既有筛选与稳定分页，预览
 - `src/ERP.UnitTests/DynamicSupplierAgingExcelTests.cs`：ERP-142 Excel 导出单元测试（内存库，不连 SQL Server、不启动 API）；
 - `src/ERP.UnitTests/DynamicSupplierAgingPdfTests.cs`：ERP-143 PDF 导出单元测试（内存库，不连 SQL Server、不启动 API）；
 - `src/ERP.UnitTests/DynamicSupplierAgingGroupingTests.cs`：ERP-144 页面分组计数单元测试（内存库，不连 SQL Server、不启动 API）；
-- `src/ERP.Api/wwwroot/js/supplier-reconciliation-aging.js`：ERP-068 工作台 + ERP-141 前端字段设计器（`openSupplierAgingDesigner`，纯函数可 Node 单测）；
-- `tests/automation/dynamic_supplier_aging_report_ui.test.js`：ERP-141 前端 UI 逻辑单测（Node，无需浏览器）。
+- `src/ERP.Api/wwwroot/js/supplier-reconciliation-aging.js`：ERP-068 工作台 + ERP-141 前端字段设计器（`openSupplierAgingDesigner`，纯函数可 Node 单测）+ ERP-145 分组计数可视化（`sraDesGroupKey` / `sraDesGroupSelectHtml` / `sraDesGroupChartHtml`）；
+- `tests/automation/dynamic_supplier_aging_report_ui.test.js`：ERP-141 前端 UI 逻辑单测（Node，无需浏览器）；
+- `tests/automation/dynamic_supplier_aging_grouping_ui.test.js`：ERP-145 前端分组计数 UI 逻辑单测（Node，无需浏览器）。

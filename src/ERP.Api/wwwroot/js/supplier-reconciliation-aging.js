@@ -490,10 +490,21 @@ async function showSupplierReconciliationAgingDetail(invoiceId) {
    - 全程只读：不写库、不迁移、不执行任意 SQL；授权 / 无效请求 / 空结果 / 网络失败都在界面可见，且不暴露范围外数据。 */
 
 const SRA_DESIGNER_API = '/api/supplier-reconciliation-aging/report';
+
+/* ERP-144 允许的分组键（有限、只读；后端 fail closed 拒绝非法取值，前端绝不发送范围外键） */
+const SRA_GROUP_KEYS = [
+  { key: 'none', label: '不分组（仅表格）' },
+  { key: 'supplier', label: '按供应商' },
+  { key: 'currency', label: '按币种' },
+  { key: 'agingBucket', label: '按账龄分桶' },
+  { key: 'allocationState', label: '按分配状态' },
+];
+
 let SRA_DESIGNER = {
   catalog: null,      // GET /api/supplier-reconciliation-aging/report 返回的目录 DTO
   fields: [],         // 目录字段（白名单）
   selectedKeys: [],   // 当前勾选的字段键（默认全选）
+  groupBy: 'none',    // 当前分组键（仅 ERP-144 白名单；非法值回落 none）
   view: null,         // 最近一次预览结果
 };
 
@@ -521,6 +532,12 @@ function sraDesSelectFields(catalogFields, selectedKeys) {
   return result;
 }
 
+/* 分组键规范化（fail closed）：只保留 ERP-144 允许的分组键，缺失 / 空白 / 非法值一律回落 none（绝不进入请求） */
+function sraDesGroupKey(value) {
+  const key = String(value == null ? '' : value).trim();
+  return SRA_GROUP_KEYS.some(g => g.key === key) ? key : 'none';
+}
+
 /* 组装有界预览请求体：字段只来自目录、分页有界、筛选仅复用工作台当前筛选，绝不接受任意字段名或 SQL */
 function sraDesBuildRequest(state) {
   const fields = sraDesSelectFields(state.catalogFields, state.selectedKeys);
@@ -531,6 +548,7 @@ function sraDesBuildRequest(state) {
   pageSize = Math.max(1, Math.min(maxPageSize, pageSize));
 
   const req = { fields, page, pageSize };
+  req.groupBy = sraDesGroupKey(state.groupBy);
 
   const supplierId = Number(state.supplierId);
   if (Number.isFinite(supplierId) && supplierId > 0) req.supplierId = supplierId;
@@ -625,7 +643,40 @@ function sraDesErrorHtml(kind, message) {
       <b>${sraDesEsc(labels[kind] || '预览失败')}</b>：${sraDesEsc(message || '')}</div>`;
 }
 
-/* 预览结果（口径 / 边界 / 免责文案 + 汇总 + 空结果 + 表格） */
+/* 分组计数条形图（仅当前预览页）：标签转义渲染、计数未知不回落 0；固定分类空类计数为 0 仍显示、动态分组空页可见提示 */
+function sraDesGroupChartHtml(view) {
+  const groupBy = (view && view.groupBy) || 'none';
+  if (groupBy === 'none' || !view || !Array.isArray(view.groups)) return '';
+  const groups = view.groups;
+  const titles = {
+    supplier: '按供应商分组 · 本页发票张数',
+    currency: '按币种分组 · 本页发票张数',
+    agingBucket: '按账龄分桶分组 · 本页发票张数',
+    allocationState: '按分配状态分组 · 本页发票张数',
+  };
+  const title = titles[groupBy] || '本页发票张数分组';
+  const counts = groups.map(g => (g && typeof g.count === 'number' && Number.isFinite(g.count)) ? g.count : 0);
+  const max = Math.max(1, ...counts);
+  const rows = groups.map(g => {
+    const label = sraDesEsc((g && g.label) || (g && g.key) || '未知');
+    const unknown = !g || g.count === null || g.count === undefined || !Number.isFinite(Number(g.count));
+    const count = unknown ? '未知' : String(g.count);
+    const pct = unknown ? 0 : Math.max(0, Math.round((Number(g.count) / max) * 100));
+    return `<div style="display:flex;align-items:center;gap:8px;margin:3px 0">`
+      + `<span style="min-width:180px;text-align:right;font-size:13px">${label}</span>`
+      + `<div style="flex:1;background:#e2e8f0;border-radius:4px;height:12px;overflow:hidden">`
+      + `<div style="height:12px;background:#2563eb;width:${pct}%"></div></div>`
+      + `<span style="min-width:48px;font-variant-numeric:tabular-nums;font-size:13px">${sraDesEsc(count)}</span></div>`;
+  }).join('');
+  const empty = groups.length === 0
+    ? '<div class="text-muted" style="margin:4px 0">本页没有可分组计数的发票证据（空页）。</div>'
+    : '';
+  return `<div class="pd-hint" style="margin:8px 0">`
+    + `<div style="font-weight:600;margin-bottom:6px">📊 ${sraDesEsc(title)}（仅当前预览页，非全量合计）</div>`
+    + `${rows}${empty}</div>`;
+}
+
+/* 预览结果（口径 / 边界 / 免责文案 + 分组计数 + 汇总 + 空结果 + 表格） */
 function sraDesResultHtml(view) {
   const readOnly = view && view.readOnlyText ? `<div class="pd-hint">${sraDesEsc(view.readOnlyText)}</div>` : '';
   const boundary = view && view.boundaryText ? `<div class="pd-hint">${sraDesEsc(view.boundaryText)}</div>` : '';
@@ -634,7 +685,7 @@ function sraDesResultHtml(view) {
     ? `<div class="text-muted" style="margin:6px 0">共 ${view.total} 条 · 第 ${view.page} 页 · 每页 ${view.pageSize} 条 · 本页 ${(view.rows || []).length} 行证据</div>`
     : '';
   const empty = view && (!view.rows || view.rows.length === 0) ? sraDesEmptyHtml() : '';
-  return `${readOnly}${boundary}${disclaimer}${summary}${empty}${sraDesTableHtml(view)}`;
+  return `${readOnly}${boundary}${disclaimer}${summary}${sraDesGroupChartHtml(view)}${empty}${sraDesTableHtml(view)}`;
 }
 
 /* 字段选择器：仅由目录白名单渲染为复选框，无自由填写的字段名 */
@@ -647,6 +698,14 @@ function sraDesFieldChooserHtml(fields, selectedKeys) {
         <span>${sraDesEsc(f.label || f.key)}</span></label>`;
   }).join('');
 }
+/* 分组键选择器：仅 ERP-144 允许的分组键（fail closed，无自由输入） */
+function sraDesGroupSelectHtml(groupBy) {
+  const selected = sraDesGroupKey(groupBy);
+  const opts = SRA_GROUP_KEYS.map(g =>
+    `<option value="${sraDesEsc(g.key)}" ${g.key === selected ? 'selected' : ''}>${sraDesEsc(g.label)}</option>`).join('');
+  return `<select id="sra-des-groupby" style="min-width:180px">${opts}</select>`;
+}
+
 /* ==================== 状态 / 请求 / 渲染 ==================== */
 
 /* 轻量请求封装：返回完整 ApiResponse 信封（保留 code），网络异常抛给调用方 */
@@ -732,7 +791,13 @@ function sraDesRender() {
     </div>
 
     <div style="margin:10px 0">
-      <div style="font-weight:600;margin-bottom:6px">② 当前筛选（复用工作台，只读）</div>
+      <div style="font-weight:600;margin-bottom:6px">② 分组计数（可选，仅当前预览页发票张数）</div>
+      ${sraDesGroupSelectHtml(SRA_DESIGNER.groupBy)}
+      <div class="text-muted" style="margin-top:4px">只统计当前预览页发票张数，绝不求和金额、绝不跨币种合并或换算；未知到期日与无效 / 未知分配证据保持可见。</div>
+    </div>
+
+    <div style="margin:10px 0">
+      <div style="font-weight:600;margin-bottom:6px">③ 当前筛选（复用工作台，只读）</div>
       ${sraDesFilterSummaryHtml()}
     </div>
 
@@ -763,6 +828,7 @@ function sraDesBuildState(page) {
     keyword: sraVal('sra-keyword'),
     pageSize: sraVal('sra-pagesize') || '50',
     page: page || 1,
+    groupBy: sraVal('sra-des-groupby'),
     maxPageSize: SRA_DESIGNER.catalog && SRA_DESIGNER.catalog.maxPageSize ? SRA_DESIGNER.catalog.maxPageSize : 200,
   };
 }
@@ -829,7 +895,7 @@ function sraDesExport() {
 
 /* 从工作台打开设计器（加载目录，渲染字段选择器与当前筛选；授权失败 fail closed，不返回任何字段） */
 async function openSupplierAgingDesigner() {
-  SRA_DESIGNER = { catalog: null, fields: [], selectedKeys: [], view: null };
+  SRA_DESIGNER = { catalog: null, fields: [], selectedKeys: [], groupBy: 'none', view: null };
   const modal = document.getElementById('modal');
   if (!modal) return;
   modal.innerHTML = '<div class="modal modal-lg" style="max-width:1100px"><div class="pd-hint" style="text-align:center;color:#64748b">正在加载证据字段目录…</div></div>';
@@ -1003,8 +1069,10 @@ async function sraDesExportPdf() {
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     SRA_DESIGNER_API,
+    SRA_GROUP_KEYS,
     sraDesEsc,
     sraDesSelectFields,
+    sraDesGroupKey,
     sraDesBuildRequest,
     sraDesCellText,
     sraDesRenderCell,
@@ -1013,6 +1081,8 @@ if (typeof module !== 'undefined' && module.exports) {
     sraDesTableHtml,
     sraDesEmptyHtml,
     sraDesErrorHtml,
+    sraDesGroupSelectHtml,
+    sraDesGroupChartHtml,
     sraDesResultHtml,
     sraDesFieldChooserHtml,
     sraDesKindOfCode,

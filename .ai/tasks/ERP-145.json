@@ -2,7 +2,7 @@
   "id": "ERP-145",
   "title": "Visualize grouped supplier aging invoice counts",
   "description": "A purchasing user sees a page-only count distribution in the existing dynamic supplier-aging field designer and can change grouping without changing report permissions or the static workspace. Development only; reuse ERP-140 authorized, bounded read-only supplier-aging preview and existing HTTP audit. Work solely on the current page. Preserve explicit unknown due dates, invalid/unknown allocation evidence, draft/void separation and currency isolation. Missing permission or invalid grouping fails closed. No new schema, migration, production SQL, real database execution, payment action, ledger inference, arbitrary SQL, business writes, secrets/.env or deployment. Verify focused tests and safe Release build/test; no real-browser acceptance.",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "medium",
   "acceptance_criteria": [
     "Designer offers only ERP-144 catalog grouping keys and sends the selected key with the existing authorized bounded preview request.",
@@ -46,5 +46,5 @@
     "status": "not_required",
     "reason": "Development-only bounded read-only feature"
   },
-  "attempts": 0
+  "attempts": 1
 }
