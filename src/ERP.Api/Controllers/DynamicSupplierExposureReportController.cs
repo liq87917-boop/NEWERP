@@ -15,6 +15,7 @@ namespace ERP.Api.Controllers;
 /// <item><b>GET /api/supplier-purchase-exposure/report</b>：返回采购订单敞口证据字段白名单目录（需登录 + 采购订单菜单授权）；</item>
 /// <item><b>POST /api/supplier-purchase-exposure/report</b>：按选定字段与有界筛选预览当前账号可见的采购订单敞口，稳定分页（单页上限 200）。</item>
 /// <item><b>POST /api/supplier-purchase-exposure/report/export</b>：导出当前选定页为 Excel（xlsx，只读，复用有界授权预览与选定列顺序）。</item>
+/// <item><b>POST /api/supplier-purchase-exposure/report/pdf</b>：导出当前选定页为分页中文 PDF（只读，复用有界授权预览与选定列顺序，宽列集跨页拆分）。</item>
 /// </list>
 /// <para>复用 ERP-031 <see cref="SupplierPurchaseExposure.ForQueryAsync"/> 的权威派生：供应商 / 币种 / 订单日期 / 链接状态 /
 /// 关键字筛选与稳定分页全部由既有只读方法完成，本控制器只做授权、字段校验与选定列投影，不做写入。</para>
@@ -71,6 +72,26 @@ public class DynamicSupplierExposureReportController : ControllerBase
         var bytes = BuildWorkbook(page);
         return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             $"SupplierPurchaseExposure_{DateTime.Now:yyyyMMddHHmmss}.xlsx");
+    }
+
+    /// <summary>
+    /// 导出当前页为分页中文 PDF（ERP-151，只读）：复用「有界、已授权预览」与选定列顺序（每次请求重新校验身份 / 菜单授权 /
+    /// 字段 / 筛选 / 页大小），仅导出当前页选定列；选定字段、中文标签、原币（不同币种分别成行、绝不换算或合并）与链接不唯一 /
+    /// 无引用的未知结算金额、未知收货数量显式保留，宽列集按可用页宽跨页拆分、行数超出按行页拆分避免裁切。
+    /// <para>中文字体固定使用 Windows 黑体（SimHei，共享解析器），字体缺失时显式失败（不产出乱码或缺字 PDF）。</para>
+    /// <para>全程只读，不写库、不执行任意 SQL；请求由既有 <c>OperationLogMiddleware</c> 记录审计（动作「导出」）。</para>
+    /// </summary>
+    [HttpPost("pdf")]
+    public async Task<IActionResult> ExportPdf([FromBody] DynamicSupplierExposureReportRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        // 复用同一有界、已授权预览：重新校验身份 / 菜单授权 / 字段 / 筛选 / 页大小
+        var page = await BuildPageAsync(request);
+
+        var bytes = DynamicSupplierExposurePdfExporter.Export(page);
+        return File(bytes, "application/pdf",
+            $"SupplierPurchaseExposure_{DateTime.Now:yyyyMMddHHmmss}.pdf");
     }
 
     /// <summary>用 ExcelExporter 生成当前页数据工作表（选定列顺序 + 公式注入转义）</summary>

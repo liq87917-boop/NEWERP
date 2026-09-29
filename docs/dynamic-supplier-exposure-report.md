@@ -76,6 +76,19 @@ ERP-031 供应商采购敞口报表的既有筛选与稳定分页，预览当前
 - 文件名 `SupplierPurchaseExposure_yyyyMMddHHmmss.xlsx`；内容类型
   `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`。
 
+## PDF 导出（ERP-151）
+
+- 路径：`POST /api/supplier-purchase-exposure/report/pdf`，请求体与预览完全相同（`DynamicSupplierExposureReportRequest`）。
+- **复用预览**：每次导出都重新校验当前登录用户 Id、`purchase-order` 采购订单菜单授权、字段白名单、筛选与页大小
+  （1~200），再按同一条有界预览查询读取当前页，全程只读、不执行任意 SQL、不写库。
+- **仅导当前页**：只导出请求 `page` / `pageSize` 对应的那一页选定列（不是全量导出），单页仍受 200 行上限约束。
+- **分页中文 PDF**：使用 PDFsharp 6.2.4 与共享黑体解析器（`SimHeiPdfFontResolver`）渲染 A4 页面；选定字段、中文标签、
+  原币（不同币种分别成行、绝不换算或合并）与链接不唯一（`ambiguous`）/ 无引用（`unavailable`）的未知结算金额、未知收货
+  数量照实保留（null →「未知」，绝不回落为 0）；宽列集按可用页宽拆成多个「列页」、行数超出按「行页」拆分，避免列被裁切。
+- **字体前提**：中文字体固定使用 Windows 黑体（SimHei，simhei.ttf）；字体缺失时显式失败（不产出乱码或缺字 PDF）。
+- **只读 + 审计**：无写入、无任意 SQL；`POST` 由既有 `OperationLogMiddleware` 记录审计（动作「导出」）。
+- 文件名 `SupplierPurchaseExposure_yyyyMMddHHmmss.pdf`；内容类型 `application/pdf`。
+
 ## 前端字段设计器（ERP-149）：视觉字段选择 + 所选列预览与 CSV 导出
 
 前端工作台 `wwwroot/js/supplier-purchase-exposure.js` 在既有「供应商采购敞口报表」工具栏新增「🎛 字段设计器」入口，
@@ -111,8 +124,10 @@ CSV 只导出当前预览页选定列证据，`POST` 由既有 `OperationLogMidd
 
 - `src/ERP.Application/DTOs/DynamicSupplierExposureReportDtos.cs`：目录 / 请求 / 结果 DTO；
 - `src/ERP.Application/Services/DynamicSupplierExposureReportRules.cs`：字段白名单、校验、行投影与 Excel 公式转义（纯规则）；
-- `src/ERP.Api/Controllers/DynamicSupplierExposureReportController.cs`：授权 + 复用 ERP-031 只读派生 + 选定列投影 + xlsx 导出（ERP-150）；
+- `src/ERP.Api/Controllers/DynamicSupplierExposureReportController.cs`：授权 + 复用 ERP-031 只读派生 + 选定列投影 + xlsx 导出（ERP-150）+ PDF 导出（ERP-151）；
+- `src/ERP.Infrastructure/Export/DynamicSupplierExposurePdfExporter.cs`：分页中文 PDF 导出（ERP-151，PDFsharp + 共享黑体解析器）；
 - `src/ERP.UnitTests/DynamicSupplierExposureReportTests.cs`：预览单元测试（内存库，不连 SQL Server、不启动 API）；
 - `src/ERP.UnitTests/DynamicSupplierExposureExcelTests.cs`：Excel 导出单元测试（ERP-150，内存库，不连 SQL Server、不启动 API）；
-- `src/ERP.Api/wwwroot/js/supplier-purchase-exposure.js`：ERP-031 工作台 + ERP-149 前端字段设计器 + ERP-150 Excel 导出（`speDesExportExcel`，纯函数可 Node 单测）；
+- `src/ERP.UnitTests/DynamicSupplierExposurePdfTests.cs`：PDF 导出单元测试（ERP-151，内存库，不连 SQL Server、不启动 API）；
+- `src/ERP.Api/wwwroot/js/supplier-purchase-exposure.js`：ERP-031 工作台 + ERP-149 前端字段设计器 + ERP-150 Excel 导出（`speDesExportExcel`）+ ERP-151 PDF 导出（`speDesExportPdf`，纯函数可 Node 单测）；
 - `tests/automation/dynamic_supplier_exposure_ui.test.js`：ERP-149 前端 UI 逻辑单测（Node，无需浏览器）。

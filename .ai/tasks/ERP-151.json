@@ -2,7 +2,7 @@
   "id": "ERP-151",
   "title": "Download selected authorized supplier purchase exposure page as PDF",
   "description": "A purchasing user downloads the selected bounded supplier exposure page as a paginated Chinese PDF with PDFsharp and shared SimHei resolver. Development only. Reuse ERP-031 SupplierPurchaseExposure.ForQueryAsync, its supplier/currency/date/link-status filters and bounded page; recheck the current user's purchase-order menu for every request, fail closed on missing permission and invalid filters, and use existing HTTP operation audit. Keep linked settlement evidence separate from ambiguous/unavailable references, preserve null unknown amounts and original currencies, and state this is not accounts payable or payment authority. No arbitrary SQL, migration, production SQL, real database execution, writes, secrets/.env change or deployment. Verify focused tests and safe Release build/test; no real-browser acceptance.",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "medium",
   "acceptance_criteria": [
     "PDF endpoint reuses ERP-148 authorized bounded preview and rechecks current-user menu, filters and fields before any bytes.",
@@ -49,5 +49,5 @@
     "status": "not_required",
     "reason": "Development-only bounded read-only feature"
   },
-  "attempts": 0
+  "attempts": 1
 }
