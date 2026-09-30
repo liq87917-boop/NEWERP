@@ -349,6 +349,8 @@ def confirmed_baseline_unit_failure(task: dict[str, Any], evidence: dict[str, An
                     text=True, errors="replace", timeout=300,
                 )
                 baseline_output = baseline.stdout or ""
+                if baseline.returncode == 0:
+                    return None
         except (OSError, subprocess.TimeoutExpired, RuntimeError):
             return None
         LOGS_DIR.mkdir(parents=True, exist_ok=True)
