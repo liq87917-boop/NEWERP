@@ -1,0 +1,37 @@
+{
+  "id": "ERP-185",
+  "title": "Show current-page agency monthly evidence count groups in designer",
+  "status": "pending",
+  "risk_level": "low",
+  "description": "A customer-service user selects month or customer grouping in the existing agency monthly report designer and sees count summaries for only the authorized current preview page. Consume the finite ERP-184 group catalog and request parameter; render separate currency groups and registered, draft and void statement counts without deriving totals from selected columns or claiming all pages. Keep loading, empty, unauthorized and invalid-request errors visible, and preserve selected fields, existing filters and paging when group selection changes. OperationLogMiddleware continues to audit preview calls. Development only: no schema or migration edits, production SQL or real database execution, arbitrary SQL, business writes, secrets, deployment or browser acceptance. Use temporary locations for manual test output and verify focused UI contract tests plus safe Release build/test.",
+  "acceptance_criteria": [
+    "Designer offers only ERP-184 catalog group choices and passes the chosen group through the existing bounded authorized preview while preserving selected fields, filters and page bounds.",
+    "The current-page group panel shows separate currency count rows and clear page-only or truncated context, including empty, loading and error states; it does not mix draft or void statements into registered counts.",
+    "Focused UI contract tests cover group choice, hidden dimension columns, mixed currencies, empty data, paging and error display; safe Release build/test passes."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/wwwroot/js/agency-service-fee-monthly-summary.js",
+    "src/ERP.UnitTests/DynamicAgencyServiceFeeMonthlyGroupUiTests.cs"
+  ],
+  "validation_profile": "safe",
+  "depends_on": [
+    "ERP-184"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "completion_mode": "build",
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": [],
+    "test_filter": "Collection=UiTests",
+    "minimum_screenshots": 1
+  },
+  "human_gate": {
+    "required": false,
+    "status": "not_required",
+    "level": "L1",
+    "reason": ""
+  },
+  "attempts": 0,
+  "created_at": "2026-09-30T05:47:44.371823Z"
+}
