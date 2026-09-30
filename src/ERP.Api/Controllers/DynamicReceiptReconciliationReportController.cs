@@ -65,23 +65,26 @@ public class DynamicReceiptReconciliationReportController : ControllerBase
     }
 
     /// <summary>
-    /// 导出当前页为 Excel（ERP-167 / ERP-174，只读）：复用「有界、已授权预览」与选定列顺序（每次请求重新校验身份 / 销售订单菜单授权 /
+    /// 导出当前页为 Excel（ERP-167 / ERP-174 / ERP-176，只读）：复用「有界、已授权预览」与选定列顺序（每次请求重新校验身份 / 销售订单菜单授权 /
     /// 字段 / 筛选 / 页大小 / 业务员数据范围），把当前页选定订单列与未关联收款列分别写入两个独立工作表（仅导出当前页）。
     /// <para>金额保留原币、未知金额 null 保留为空文本（绝不回落 0）、收款证据状态与截断警告显式保留；文本单元格做公式注入转义；
     /// 全程只读，不写库、不执行任意 SQL；请求由既有 <c>OperationLogMiddleware</c> 记录审计（动作「导出」）。</para>
     /// <para>ERP-174：分组键在读取源数据之前按有限白名单校验（fail closed）；非 none 分组模式在同一工作簿追加
     /// 「订单计数分组」与「未关联收款计数分组」两个独立工作表（复用 ERP-170 同一批有界、已授权分组数据，只计数、不含金额、绝不推断匹配）。</para>
+    /// <para>ERP-176：金额汇总模式在读取源数据之前按有限白名单校验（fail closed）；customerCurrency 模式在同一工作簿追加
+    /// 「订单金额汇总」与「未关联收款金额汇总」两个独立工作表（复用 ERP-172 同一批有界、已授权当前页汇总数据，只汇总当前页、绝不跨币种合并 / 换算、绝不推断收款分配 / 应收余额）。</para>
     /// </summary>
     [HttpPost("export")]
     public async Task<IActionResult> Export([FromBody] DynamicReceiptReconciliationReportRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        // 分组键 fail closed：先于任何源读取校验（与预览同口径）；none 保留原有两表默认结构。
+        // 分组键 / 金额汇总模式 fail closed：先于任何源读取校验（与预览同口径）；none 保留原有两表默认结构、不追加金额汇总工作表。
         var groupBy = DynamicReceiptReconciliationReportRules.NormalizeGroupBy(request.GroupBy);
+        var summaryMode = DynamicReceiptReconciliationReportRules.NormalizeSummaryMode(request.SummaryMode);
 
-        var page = await BuildPageAsync(request, groupBy);
-        var bytes = BuildWorkbook(page, groupBy);
+        var page = await BuildPageAsync(request, groupBy, summaryMode);
+        var bytes = BuildWorkbook(page, groupBy, summaryMode);
         return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             $"ReceiptReconciliation_{DateTime.Now:yyyyMMddHHmmss}.xlsx");
     }
@@ -325,8 +328,9 @@ public class DynamicReceiptReconciliationReportController : ControllerBase
     }
 
     /// <summary>生成只读工作簿：默认含「订单证据」与「未关联收款证据」两个独立工作表（原币 / 状态 / 截断警告显式保留，公式注入转义，绝不合并）；
-    /// 非 none 分组模式追加「订单计数分组」与「未关联收款计数分组」两个独立工作表（ERP-174，只计数、不含金额、绝不推断匹配）。</summary>
-    private static byte[] BuildWorkbook(DynamicReceiptReconciliationReportPageDto page, string groupBy)
+    /// 非 none 分组模式追加「订单计数分组」与「未关联收款计数分组」两个独立工作表（ERP-174，只计数、不含金额、绝不推断匹配）；
+    /// customerCurrency 金额汇总模式追加「订单金额汇总」与「未关联收款金额汇总」两个独立工作表（ERP-176，只汇总当前页、绝不跨币种合并 / 换算、绝不推断收款分配 / 应收余额）。</summary>
+    private static byte[] BuildWorkbook(DynamicReceiptReconciliationReportPageDto page, string groupBy, string summaryMode)
     {
         using var workbook = new XSSFWorkbook();
 
@@ -350,6 +354,14 @@ public class DynamicReceiptReconciliationReportController : ControllerBase
         {
             AppendOrderGroupSheet(workbook, page.OrderGroups);
             AppendReceiptGroupSheet(workbook, page.ReceiptGroups);
+        }
+
+        // ERP-176：仅 customerCurrency 金额汇总模式追加两个独立金额汇总工作表（复用 ERP-172 同一批有界、已授权当前页汇总数据，
+        // 只汇总当前页、绝不跨币种合并 / 换算、绝不推断收款分配 / 应收余额；未知 null 保留为空、截断 / 空页显式保留）。
+        if (summaryMode == DynamicReceiptReconciliationReportRules.SummaryCustomerCurrency)
+        {
+            AppendOrderSummarySheet(workbook, page.OrderSummaries);
+            AppendReceiptSummarySheet(workbook, page.ReceiptSummaries, page.UnlinkedReceiptTruncated);
         }
 
         using var output = new MemoryStream();
@@ -430,6 +442,139 @@ public class DynamicReceiptReconciliationReportController : ControllerBase
             row.CreateCell(0).SetCellValue(SafeLabel(groups[r].Label));
             row.CreateCell(1).SetCellValue(groups[r].ReceiptCount);
             row.CreateCell(2).SetCellValue(groups[r].Truncated ? "是" : "否");
+        }
+    }
+
+    // ==================== Excel 金额汇总工作表（ERP-176，只读） ====================
+
+    /// <summary>订单金额汇总工作表名称（仅 customerCurrency 汇总模式追加，与订单证据工作表互不混淆）</summary>
+    private const string OrderSummarySheetName = "订单金额汇总";
+
+    /// <summary>未关联收款金额汇总工作表名称（仅 customerCurrency 汇总模式追加，与未关联收款证据工作表互不混淆）</summary>
+    private const string ReceiptSummarySheetName = "未关联收款金额汇总";
+
+    /// <summary>客户列标题（文本，公式注入转义）</summary>
+    private const string CustomerColumn = "客户";
+
+    /// <summary>原币列标题（文本，公式注入转义，绝不跨币种合并）</summary>
+    private const string CurrencyColumn = "币种";
+
+    /// <summary>订单金额列标题（数值，原币直接求和）</summary>
+    private const string OrderAmountColumn = "订单金额";
+
+    /// <summary>已关联收款金额已知行数列标题（数值）</summary>
+    private const string KnownLinkedReceiptAmountRowsColumn = "已关联收款金额已知行数";
+
+    /// <summary>已关联收款金额未知行数列标题（数值）</summary>
+    private const string UnknownLinkedReceiptAmountRowsColumn = "已关联收款金额未知行数";
+
+    /// <summary>已关联收款金额列标题（数值；任一行金额未知则整列空，绝不回落 0）</summary>
+    private const string LinkedReceiptAmountColumn = "已关联收款金额";
+
+    /// <summary>未覆盖金额已知行数列标题（数值）</summary>
+    private const string KnownUncoveredAmountRowsColumn = "未覆盖金额已知行数";
+
+    /// <summary>未覆盖金额未知行数列标题（数值）</summary>
+    private const string UnknownUncoveredAmountRowsColumn = "未覆盖金额未知行数";
+
+    /// <summary>未覆盖金额列标题（数值；任一行金额未知则整列空，绝不回落 0）</summary>
+    private const string UncoveredAmountColumn = "未覆盖金额";
+
+    /// <summary>收款证据状态列标题（active / pending / historical 显式保留，不回落到其它桶）</summary>
+    private const string EvidenceStatusColumn = "收款证据状态";
+
+    /// <summary>收款金额列标题（数值，收款单原币直接求和）</summary>
+    private const string ReceiptAmountColumn = "金额";
+
+    /// <summary>订单金额汇总当前页为空时的显式提示（绝不静默留白）</summary>
+    private const string OrderSummaryEmptyNote = "本页没有可汇总金额的订单证据（空页）";
+
+    /// <summary>未关联收款金额汇总当前页为空时的显式提示（绝不静默留白）</summary>
+    private const string ReceiptSummaryEmptyNote = "本页没有可汇总金额的未关联收款证据（空页）";
+
+    /// <summary>追加「订单金额汇总」工作表：每行 = 客户 + 原币 + 订单张数 + 订单金额 + 已关联收款金额（已知 / 未知行数 + 未知时整列空）+
+    /// 未覆盖金额（同口径）；文本标签做公式注入转义，未知金额 null 保留为空（绝不回落 0），绝不跨币种合并 / 换算，绝不推断收款分配 / 应收余额；空页显式提示。</summary>
+    private static void AppendOrderSummarySheet(
+        XSSFWorkbook workbook,
+        List<DynamicReceiptReconciliationReportOrderSummaryDto>? summaries)
+    {
+        var sheet = workbook.CreateSheet(OrderSummarySheetName);
+        var header = sheet.CreateRow(0);
+        header.CreateCell(0).SetCellValue(CustomerColumn);
+        header.CreateCell(1).SetCellValue(CurrencyColumn);
+        header.CreateCell(2).SetCellValue(OrderCountColumn);
+        header.CreateCell(3).SetCellValue(OrderAmountColumn);
+        header.CreateCell(4).SetCellValue(KnownLinkedReceiptAmountRowsColumn);
+        header.CreateCell(5).SetCellValue(UnknownLinkedReceiptAmountRowsColumn);
+        header.CreateCell(6).SetCellValue(LinkedReceiptAmountColumn);
+        header.CreateCell(7).SetCellValue(KnownUncoveredAmountRowsColumn);
+        header.CreateCell(8).SetCellValue(UnknownUncoveredAmountRowsColumn);
+        header.CreateCell(9).SetCellValue(UncoveredAmountColumn);
+
+        if (summaries is null || summaries.Count == 0)
+        {
+            sheet.CreateRow(1).CreateCell(0).SetCellValue(OrderSummaryEmptyNote);
+            return;
+        }
+
+        for (var r = 0; r < summaries.Count; r++)
+        {
+            var s = summaries[r];
+            var row = sheet.CreateRow(r + 1);
+            row.CreateCell(0).SetCellValue(SafeLabel(s.CustomerName));
+            row.CreateCell(1).SetCellValue(SafeLabel(s.Currency));
+            row.CreateCell(2).SetCellValue(s.OrderCount);
+            row.CreateCell(3).SetCellValue((double)s.OrderAmount);
+            row.CreateCell(4).SetCellValue(s.KnownLinkedReceiptAmountRows);
+            row.CreateCell(5).SetCellValue(s.UnknownLinkedReceiptAmountRows);
+            WriteCell(row.CreateCell(6), s.LinkedReceiptAmount);
+            row.CreateCell(7).SetCellValue(s.KnownUncoveredAmountRows);
+            row.CreateCell(8).SetCellValue(s.UnknownUncoveredAmountRows);
+            WriteCell(row.CreateCell(9), s.UncoveredAmount);
+        }
+    }
+
+    /// <summary>追加「未关联收款金额汇总」工作表：每行 = 客户 + 原币 + 收款证据状态 + 收款张数 + 金额 + 截断（是 / 否，显式保留）；
+    /// 文本标签做公式注入转义，金额按收款单原币直接求和（绝不跨币种合并 / 换算），active / pending / historical 证据状态显式保留、绝不并入有效合计；
+    /// 空页显式提示；页级截断时在尾行显式标注（绝不静默截断）。</summary>
+    private static void AppendReceiptSummarySheet(
+        XSSFWorkbook workbook,
+        List<DynamicReceiptReconciliationReportReceiptSummaryDto>? summaries,
+        bool truncated)
+    {
+        var sheet = workbook.CreateSheet(ReceiptSummarySheetName);
+        var header = sheet.CreateRow(0);
+        header.CreateCell(0).SetCellValue(CustomerColumn);
+        header.CreateCell(1).SetCellValue(CurrencyColumn);
+        header.CreateCell(2).SetCellValue(EvidenceStatusColumn);
+        header.CreateCell(3).SetCellValue(ReceiptCountColumn);
+        header.CreateCell(4).SetCellValue(ReceiptAmountColumn);
+        header.CreateCell(5).SetCellValue(TruncatedColumn);
+
+        if (summaries is null || summaries.Count == 0)
+        {
+            sheet.CreateRow(1).CreateCell(0).SetCellValue(ReceiptSummaryEmptyNote);
+            return;
+        }
+
+        for (var r = 0; r < summaries.Count; r++)
+        {
+            var s = summaries[r];
+            var row = sheet.CreateRow(r + 1);
+            row.CreateCell(0).SetCellValue(SafeLabel(s.CustomerName));
+            row.CreateCell(1).SetCellValue(SafeLabel(s.Currency));
+            row.CreateCell(2).SetCellValue(SafeLabel(s.EvidenceStatus));
+            row.CreateCell(3).SetCellValue(s.ReceiptCount);
+            row.CreateCell(4).SetCellValue((double)s.Amount);
+            row.CreateCell(5).SetCellValue(s.Truncated ? "是" : "否");
+        }
+
+        if (truncated)
+        {
+            var noteRow = sheet.CreateRow(summaries.Count + 1);
+            var safe = (string?)DynamicReceiptReconciliationReportRules.EscapeFormulaLeading(
+                DynamicReceiptReconciliationReportRules.ReceiptTruncationNote) ?? string.Empty;
+            noteRow.CreateCell(0).SetCellValue(safe);
         }
     }
 
