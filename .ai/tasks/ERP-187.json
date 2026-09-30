@@ -1,7 +1,7 @@
 {
   "id": "ERP-187",
   "title": "Show agency monthly original-currency subtotals in report designer",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "low",
   "description": "A customer-service user sees the registered, draft and void original-currency subtotals alongside current-page group counts in the agency monthly report designer. Consume ERP-186 server-provided group amounts rather than calculating from visible columns; preserve month or customer labels, currency precision, field selection, filters and bounded paging. Display explicit page-only evidence, no-proration and truncated context so users do not mistake values for receivables or revenue; show visible empty, unauthorized, validation and network states. Preview remains read-only and OperationLogMiddleware records calls. Development only: no schema or migration edits, production SQL or real database execution, arbitrary SQL, business writes, secrets, deployment or browser acceptance. Use temporary locations for manual test output and verify focused UI contract tests plus safe Release build/test.",
   "acceptance_criteria": [
@@ -33,6 +33,6 @@
     "level": "L1",
     "reason": ""
   },
-  "attempts": 0,
+  "attempts": 1,
   "created_at": "2026-09-30T05:48:48.563803Z"
 }

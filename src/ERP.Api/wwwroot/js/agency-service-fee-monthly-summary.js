@@ -493,31 +493,46 @@ function asfmsCountText(v) {
   return Number.isFinite(n) ? String(n) : '0';
 }
 
-/* 当前页分组计数面板（ERP-185）：按币种分行、各状态张数分离，仅当前授权预览页，非全量合计 */
+/* 金额纯文本（ERP-186）：直接取服务端按币种精度给出的原币金额文案（含币种），绝不重算、绝不换算；null 回落空串 */
+function asfmsAmountText(v) {
+  if (v === null || v === undefined) return '';
+  return String(v);
+}
+
+/* 当前页分组汇总面板（ERP-185 计数 + ERP-186 原币金额小计）：按币种分行、各状态张数与原币金额分离，
+   仅当前授权预览页，非全量合计；金额直接取服务端按币种精度给出的文案，绝不从选定列重算、绝不换算 */
 function asfmsGroupPanelHtml(view) {
   const groupBy = (view && view.groupBy) || 'none';
   if (groupBy === 'none') return '';
   const counts = (view && Array.isArray(view.groupCounts)) ? view.groupCounts : [];
-  const title = groupBy === 'month' ? '📊 按对账月份分组 · 本页各状态张数' : '📊 按客户分组 · 本页各状态张数';
+  const title = groupBy === 'month'
+    ? '📊 按对账月份分组 · 本页各状态张数与原币小计'
+    : '📊 按客户分组 · 本页各状态张数与原币小计';
   const scope = (view && view.groupCountScopeText)
     ? `<div class="text-muted" style="margin-top:6px">${escapeHtml(view.groupCountScopeText)}</div>` : '';
   const truncated = (view && view.truncated)
-    ? '<div class="text-muted" style="color:#b45309;margin-top:4px">⚠ 分组计数仅当前页，不含后续分页。</div>' : '';
+    ? '<div class="text-muted" style="color:#b45309;margin-top:4px">⚠ 分组计数与原币小计仅当前页，不含后续分页，也不是整份报表或会计合计。</div>' : '';
   const empty = counts.length === 0
     ? '<div class="text-muted" style="margin:4px 0">本页没有可分组计数的月度汇总（空页）。</div>' : '';
   const head = '<th>分组</th><th>币种</th>'
     + '<th class="text-right">月度汇总行数</th>'
-    + '<th class="text-right">已登记</th>'
-    + '<th class="text-right">草稿</th>'
-    + '<th class="text-right">已作废</th>'
+    + '<th class="text-right">已登记张数</th>'
+    + '<th class="text-right">已登记原币小计</th>'
+    + '<th class="text-right">草稿张数</th>'
+    + '<th class="text-right">草稿原币小计</th>'
+    + '<th class="text-right">已作废张数</th>'
+    + '<th class="text-right">已作废原币小计</th>'
     + '<th class="text-right">对账单张数</th>';
   const body = counts.map(g => `<tr>`
     + `<td>${escapeHtml(asfmsGroupCountLabel(g))}</td>`
     + `<td><b>${escapeHtml(g && g.currency ? String(g.currency) : '未知')}</b></td>`
     + `<td class="text-right">${escapeHtml(asfmsCountText(g && g.rowCount))}</td>`
     + `<td class="text-right">${escapeHtml(asfmsCountText(g && g.registeredCount))}</td>`
+    + `<td class="text-right">${escapeHtml(asfmsAmountText(g && g.registeredTotalAmountText))}</td>`
     + `<td class="text-right">${escapeHtml(asfmsCountText(g && g.draftCount))}</td>`
+    + `<td class="text-right">${escapeHtml(asfmsAmountText(g && g.draftTotalAmountText))}</td>`
     + `<td class="text-right">${escapeHtml(asfmsCountText(g && g.voidedCount))}</td>`
+    + `<td class="text-right">${escapeHtml(asfmsAmountText(g && g.voidedTotalAmountText))}</td>`
     + `<td class="text-right">${escapeHtml(asfmsCountText(g && g.statementCount))}</td>`
     + `</tr>`).join('');
   const table = counts.length === 0 ? ''

@@ -135,7 +135,7 @@ public class DynamicAgencyServiceFeeMonthlyGroupUiTests
         var js = Script;
 
         Assert.Contains("view && view.truncated", js);
-        Assert.Contains("分组计数仅当前页，不含后续分页", js);
+        Assert.Contains("分组计数与原币小计仅当前页，不含后续分页", js);
         Assert.Contains("view.groupCountScopeText", js);
     }
 
@@ -155,4 +155,90 @@ public class DynamicAgencyServiceFeeMonthlyGroupUiTests
         Assert.Contains("if (ASFMS.error)", js);
         Assert.Contains("if (ASFMS.loading)", js);
     }
+
+    // ==================== 9. ERP-187 原币金额小计：消费服务端分组金额文案 ====================
+
+    [Fact]
+    public void 金额小计_消费服务端原币金额文案_不从选定列或十进制金额推导()
+    {
+        var js = Script;
+
+        Assert.Contains("function asfmsAmountText(", js);
+        Assert.Contains("asfmsAmountText(g && g.registeredTotalAmountText)", js);
+        Assert.Contains("asfmsAmountText(g && g.draftTotalAmountText)", js);
+        Assert.Contains("asfmsAmountText(g && g.voidedTotalAmountText)", js);
+
+        var panel = Segment(js, "function asfmsGroupPanelHtml(", "function asfmsResultHtml()");
+        // 金额小计来自服务端分组（groupCounts），绝不从选定列（columns / rows）推导
+        Assert.DoesNotContain("view.columns", panel);
+        Assert.DoesNotContain("view.rows", panel);
+        // 只用服务端按币种精度给出的文案，不用十进制金额重算 / 自行格式化精度
+        Assert.DoesNotContain("g.registeredTotalAmount)", panel);
+        Assert.DoesNotContain("g.draftTotalAmount)", panel);
+        Assert.DoesNotContain("g.voidedTotalAmount)", panel);
+        Assert.DoesNotContain(".toFixed", panel);
+    }
+
+    [Fact]
+    public void 金额小计_各状态金额分离_与张数并排()
+    {
+        var js = Script;
+
+        Assert.Contains("asfmsCountText(g && g.registeredCount)", js);
+        Assert.Contains("asfmsAmountText(g && g.registeredTotalAmountText)", js);
+        Assert.Contains("asfmsCountText(g && g.draftCount)", js);
+        Assert.Contains("asfmsAmountText(g && g.draftTotalAmountText)", js);
+        Assert.Contains("asfmsCountText(g && g.voidedCount)", js);
+        Assert.Contains("asfmsAmountText(g && g.voidedTotalAmountText)", js);
+        // 已登记 / 草稿 / 已作废金额小计三者各自独立列示
+        Assert.Contains("已登记原币小计", js);
+        Assert.Contains("草稿原币小计", js);
+        Assert.Contains("已作废原币小计", js);
+    }
+
+    [Fact]
+    public void 金额小计_混合币种按原币分行_绝不合并或换算()
+    {
+        var js = Script;
+
+        Assert.Contains("asfmsAmountText(g && g.registeredTotalAmountText)", js);
+        Assert.Contains("asfmsAmountText(g && g.draftTotalAmountText)", js);
+        Assert.Contains("asfmsAmountText(g && g.voidedTotalAmountText)", js);
+
+        var panel = Segment(js, "function asfmsGroupPanelHtml(", "function asfmsResultHtml()");
+        Assert.DoesNotContain("跨币种合计", panel);
+        Assert.DoesNotContain("折算", panel);
+        Assert.DoesNotContain("换算", panel);
+    }
+
+    [Fact]
+    public void 金额小计_空页与截断页提示覆盖金额()
+    {
+        var js = Script;
+
+        // 空页提示保持不变（空页既无计数也无金额）
+        Assert.Contains("本页没有可分组计数的月度汇总（空页）", js);
+        // 截断提示明确「计数与原币小计」仅当前页，非整份报表 / 会计合计
+        Assert.Contains("分组计数与原币小计仅当前页，不含后续分页", js);
+        Assert.Contains("也不是整份报表或会计合计", js);
+    }
+
+    [Fact]
+    public void 金额小计_授权与网络失败不泄露金额面板()
+    {
+        var js = Script;
+
+        // 错误 / 加载态先于分组面板渲染，不渲染任何金额小计
+        var result = Segment(js, "function asfmsResultHtml()", "function asfmsPage(delta)");
+        Assert.Contains("if (ASFMS.error)", result);
+        Assert.Contains("return asfmsErrorHtml(ASFMS.error.kind, ASFMS.error.message);", result);
+        Assert.Contains("if (ASFMS.loading)", result);
+
+        // 错误提示自身不包含任何服务端原币金额字段，金额面板不泄露
+        var errorHtml = Segment(js, "function asfmsErrorHtml(", "function asfmsLoadingHtml()");
+        Assert.DoesNotContain("registeredTotalAmountText", errorHtml);
+        Assert.DoesNotContain("draftTotalAmountText", errorHtml);
+        Assert.DoesNotContain("voidedTotalAmountText", errorHtml);
+    }
+
 }
