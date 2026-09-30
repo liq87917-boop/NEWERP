@@ -440,5 +440,187 @@ public class DynamicFollowUpDueReportPdfTests
         Assert.Equal(before, db.CustomerFollowUps.Count());
         Assert.False(db.ChangeTracker.HasChanges());
     }
+
+    // ==================== 8. 分组 PDF 导出（ERP-199） ====================
+
+    [Fact]
+    public async Task ExportPdf_不分组_仅明细页_无分组计数区块()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedAuthorizedUser(db, "priv-user", "Priv", isSystemRole: true);
+        var customer = SeedCustomer(db, "C001", "客户");
+        SeedFollowUp(db, "FU-1", customer.Id, "客户", AsOf);
+
+        var ctl = NewController(db);
+        TestAuth.SetUser(ctl, user.Id);
+
+        var file = PdfOk(await ctl.ExportPdf(new DynamicFollowUpDueReportRequest
+        {
+            Fields = new List<string> { "followNo" },
+            AsOfDate = AsOf,
+            AheadDays = 7,
+            GroupBy = DynamicFollowUpDueReportRules.GroupNone
+        }));
+
+        using var pdf = OpenPdf(file.FileContents);
+        Assert.Equal(1, pdf.Pages.Count);
+    }
+
+    [Fact]
+    public async Task ExportPdf_分组_dueStatus_明细后追加分组计数页()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedAuthorizedUser(db, "priv-user", "Priv", isSystemRole: true);
+        var customer = SeedCustomer(db, "C001", "客户");
+        SeedFollowUp(db, "FU-1", customer.Id, "客户", AsOf);
+
+        var ctl = NewController(db);
+        TestAuth.SetUser(ctl, user.Id);
+
+        var file = PdfOk(await ctl.ExportPdf(new DynamicFollowUpDueReportRequest
+        {
+            Fields = new List<string> { "followNo", "dueStatus" },
+            AsOfDate = AsOf,
+            AheadDays = 7,
+            GroupBy = DynamicFollowUpDueReportRules.GroupDueStatus
+        }));
+
+        using var pdf = OpenPdf(file.FileContents);
+        // 1 页明细 + 1 页分组计数
+        Assert.Equal(2, pdf.Pages.Count);
+    }
+
+    [Fact]
+    public async Task ExportPdf_分组_salesman_明细后追加分组计数页()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedAuthorizedUser(db, "priv-user", "Priv", isSystemRole: true);
+        var customer = SeedCustomer(db, "C001", "客户");
+        var follow = SeedFollowUp(db, "FU-1", customer.Id, "客户", AsOf);
+        follow.SalesmanName = "销售甲";
+        db.SaveChanges();
+
+        var ctl = NewController(db);
+        TestAuth.SetUser(ctl, user.Id);
+
+        var file = PdfOk(await ctl.ExportPdf(new DynamicFollowUpDueReportRequest
+        {
+            Fields = new List<string> { "followNo", "salesmanName" },
+            AsOfDate = AsOf,
+            AheadDays = 7,
+            GroupBy = DynamicFollowUpDueReportRules.GroupSalesman
+        }));
+
+        using var pdf = OpenPdf(file.FileContents);
+        Assert.Equal(2, pdf.Pages.Count);
+    }
+
+    [Fact]
+    public void BuildGroupCountRows_标签与数量_照实映射()
+    {
+        var groups = new List<DynamicFollowUpDueReportGroupDto>
+        {
+            new("dueStatus:overdue", "已逾期", 2),
+            new("dueStatus:today", "今日到期", 1),
+            new("dueStatus:upcoming", "即将到期", 0),
+        };
+
+        var rows = DynamicFollowUpDuePdfExporter.BuildGroupCountRows(groups);
+
+        Assert.Equal(3, rows.Count);
+        Assert.Equal("已逾期", rows[0].Label);
+        Assert.Equal("2", rows[0].Count);
+        Assert.Equal("今日到期", rows[1].Label);
+        Assert.Equal("1", rows[1].Count);
+        Assert.Equal("即将到期", rows[2].Label);
+        Assert.Equal("0", rows[2].Count);
+    }
+
+    [Fact]
+    public async Task ExportPdf_分组_dueStatus_空页_含零计数与空页说明()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedAuthorizedUser(db, "priv-user", "Priv", isSystemRole: true);
+
+        var ctl = NewController(db);
+        TestAuth.SetUser(ctl, user.Id);
+
+        var file = PdfOk(await ctl.ExportPdf(new DynamicFollowUpDueReportRequest
+        {
+            Fields = new List<string> { "followNo" },
+            AsOfDate = AsOf,
+            AheadDays = 7,
+            GroupBy = DynamicFollowUpDueReportRules.GroupDueStatus,
+            PageSize = 20
+        }));
+
+        using var pdf = OpenPdf(file.FileContents);
+        // 1 页空明细 + 1 页分组计数（含零计数与空页说明）
+        Assert.Equal(2, pdf.Pages.Count);
+    }
+
+    [Fact]
+    public async Task ExportPdf_分组_salesman_空页_仅空页说明()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedAuthorizedUser(db, "priv-user", "Priv", isSystemRole: true);
+
+        var ctl = NewController(db);
+        TestAuth.SetUser(ctl, user.Id);
+
+        var file = PdfOk(await ctl.ExportPdf(new DynamicFollowUpDueReportRequest
+        {
+            Fields = new List<string> { "followNo" },
+            AsOfDate = AsOf,
+            AheadDays = 7,
+            GroupBy = DynamicFollowUpDueReportRules.GroupSalesman,
+            PageSize = 20
+        }));
+
+        using var pdf = OpenPdf(file.FileContents);
+        Assert.Equal(2, pdf.Pages.Count);
+    }
+
+    [Fact]
+    public async Task ExportPdf_分组_salesman_多分组_分组计数跨页()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedAuthorizedUser(db, "priv-user", "Priv", isSystemRole: true);
+        var customer = SeedCustomer(db, "C001", "客户");
+        for (var i = 0; i < 80; i++)
+        {
+            var follow = SeedFollowUp(db, $"FU-{i:D3}", customer.Id, "客户", AsOf.AddDays(-(i % 5)));
+            follow.SalesmanName = $"销售员{i:D3}";
+        }
+        db.SaveChanges();
+
+        var ctl = NewController(db);
+        TestAuth.SetUser(ctl, user.Id);
+
+        var noneFile = PdfOk(await ctl.ExportPdf(new DynamicFollowUpDueReportRequest
+        {
+            Fields = new List<string> { "followNo" },
+            AsOfDate = AsOf,
+            AheadDays = 7,
+            GroupBy = DynamicFollowUpDueReportRules.GroupNone,
+            Page = 1,
+            PageSize = 200
+        }));
+        var groupFile = PdfOk(await ctl.ExportPdf(new DynamicFollowUpDueReportRequest
+        {
+            Fields = new List<string> { "followNo" },
+            AsOfDate = AsOf,
+            AheadDays = 7,
+            GroupBy = DynamicFollowUpDueReportRules.GroupSalesman,
+            Page = 1,
+            PageSize = 200
+        }));
+
+        using var nonePdf = OpenPdf(noneFile.FileContents);
+        using var groupPdf = OpenPdf(groupFile.FileContents);
+
+        // 分组计数自身跨多页（明细页之外至少再新增 2 页），标签 / 数量保持可读
+        Assert.True(groupPdf.Pages.Count > nonePdf.Pages.Count + 1);
+    }
 }
 

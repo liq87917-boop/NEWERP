@@ -1,5 +1,6 @@
 using ERP.Application.Common;
 using ERP.Application.DTOs;
+using ERP.Application.Services;
 using PdfSharp.Drawing;
 using PdfSharp.Pdf;
 using System.Globalization;
@@ -46,6 +47,17 @@ public static class DynamicFollowUpDuePdfExporter
 
     /// <summary>空页显式说明（与 <see cref="DynamicFollowUpDueReportRules.EmptyText"/> 同源）</summary>
     private const string EmptyFallbackText = "没有符合筛选条件的跟进提醒证据";
+
+    /// <summary>分组计数区块：标签 / 数量两列（仅统计当前页，不重算；none 不渲染）</summary>
+    private const double GroupLabelWidthMm = 120;
+    private const double GroupCountWidthMm = 60;
+    private const double GroupTitleHeightMm = 7;
+
+    /// <summary>分组计数区块标题（与 Excel 导出「分组计数」同口径）</summary>
+    private const string GroupSectionTitle = "本页分组计数（仅统计当前页，不重算）";
+
+    /// <summary>分组计数空页显式说明（与 Excel 导出空页说明同源）</summary>
+    private const string GroupEmptyNoteText = "当前页没有符合分组条件的跟进提醒证据（空页）";
 
     /// <summary>导出当前预览页为 PDF 字节流（只读；字体缺失显式失败）</summary>
     public static byte[] Export(DynamicFollowUpDueReportPageDto page)
@@ -147,6 +159,9 @@ public static class DynamicFollowUpDuePdfExporter
                     }
                 }
             }
+
+            DrawGroupSection(document, gfxList, titleFont, metaFont, headerFont, cellFont,
+                borderPen, headerBrush, page, headNotes, contentBottom);
         }
         finally
         {
@@ -324,6 +339,141 @@ public static class DynamicFollowUpDuePdfExporter
         }
     }
 
+    // ==================== 分组计数（ERP-199） ====================
+
+    /// <summary>是否需要渲染「本页分组计数」区块：仅 dueStatus / salesman 分组；none 保持仅明细布局</summary>
+    private static bool HasGroupSection(DynamicFollowUpDueReportPageDto page)
+        => !string.Equals(page.GroupBy, DynamicFollowUpDueReportRules.GroupNone, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// 明细之后追加「本页分组计数」区块（状态 / 业务员标签与数量，仅统计当前授权预览页，绝不重算 / 外推）；
+    /// 始终以新页开始（明细与分组计数之间以分页符隔开），分组行超出页高时按分页继续、每页重复表头，保证标签 / 数量可读。
+    /// </summary>
+    private static void DrawGroupSection(
+        PdfDocument document,
+        List<XGraphics> gfxList,
+        XFont titleFont, XFont metaFont, XFont headerFont, XFont cellFont,
+        XPen borderPen, XBrush headerBrush,
+        DynamicFollowUpDueReportPageDto page,
+        IReadOnlyList<string> headNotes,
+        double contentBottom)
+    {
+        if (!HasGroupSection(page))
+            return;
+
+        var emptyPage = page.Rows is null || page.Rows.Count == 0;
+        var groupRows = BuildGroupCountRows(page.Groups);
+
+        var labelWidth = Mm(GroupLabelWidthMm);
+        var countWidth = Mm(GroupCountWidthMm);
+        var titleHeight = Mm(GroupTitleHeightMm);
+        var headerHeight = Mm(HeaderRowHeightMm);
+        var rowHeight = Mm(DataRowHeightMm);
+        var usableWidth = Mm(PageWidthMm - MarginLeftMm - MarginRightMm);
+
+        var rowIndex = 0;
+        while (true)
+        {
+            var gfx = NewPage(document);
+            gfxList.Add(gfx);
+
+            var y = DrawGroupPageHead(gfx, titleFont, metaFont, page, headNotes);
+            gfx.DrawString(GroupSectionTitle, headerFont, XBrushes.Black,
+                new XRect(Mm(MarginLeftMm), y, usableWidth, titleHeight), XStringFormats.TopLeft);
+            y += titleHeight;
+
+            y = DrawGroupHeaderRow(gfx, headerFont, headerBrush, borderPen, labelWidth, countWidth, y);
+
+            while (rowIndex < groupRows.Count && y + rowHeight <= contentBottom)
+            {
+                DrawGroupRow(gfx, cellFont, borderPen, labelWidth, countWidth, groupRows[rowIndex], y);
+                y += rowHeight;
+                rowIndex++;
+            }
+
+            if (rowIndex < groupRows.Count)
+                continue;
+
+            if (emptyPage)
+            {
+                if (y + rowHeight > contentBottom)
+                {
+                    gfx = NewPage(document);
+                    gfxList.Add(gfx);
+                    y = DrawGroupPageHead(gfx, titleFont, metaFont, page, headNotes);
+                    gfx.DrawString(GroupSectionTitle, headerFont, XBrushes.Black,
+                        new XRect(Mm(MarginLeftMm), y, usableWidth, titleHeight), XStringFormats.TopLeft);
+                    y += titleHeight;
+                    y = DrawGroupHeaderRow(gfx, headerFont, headerBrush, borderPen, labelWidth, countWidth, y);
+                }
+
+                gfx.DrawString(GroupEmptyNoteText, cellFont, XBrushes.Black,
+                    new XRect(Mm(MarginLeftMm), y, usableWidth, rowHeight), XStringFormats.TopLeft);
+            }
+
+            break;
+        }
+    }
+
+    /// <summary>分组计数页头：标题 + 分页元信息 + 只读 / 边界 / 免责文案（与明细页同口径，保证可读与免责声明齐全）</summary>
+    private static double DrawGroupPageHead(
+        XGraphics gfx, XFont titleFont, XFont metaFont,
+        DynamicFollowUpDueReportPageDto page, IReadOnlyList<string> headNotes)
+    {
+        var left = Mm(MarginLeftMm);
+        var width = Mm(PageWidthMm - MarginLeftMm - MarginRightMm);
+
+        gfx.DrawString("跟进提醒报表（本页分组计数）", titleFont, XBrushes.Black,
+            new XRect(left, Mm(MarginTopMm), width, Mm(TitleHeightMm)), XStringFormats.TopCenter);
+
+        var meta = $"共 {page.Total.ToString(CultureInfo.InvariantCulture)} 条"
+            + $" · 第 {page.Page.ToString(CultureInfo.InvariantCulture)}/{page.TotalPages.ToString(CultureInfo.InvariantCulture)} 页"
+            + " · 分组计数（仅当前页）";
+        gfx.DrawString(meta, metaFont, XBrushes.Black,
+            new XRect(left, Mm(MarginTopMm + TitleHeightMm), width, Mm(MetaHeightMm)), XStringFormats.TopCenter);
+
+        var y = Mm(MarginTopMm + TitleHeightMm + MetaHeightMm);
+        foreach (var note in headNotes)
+        {
+            gfx.DrawString(note, metaFont, XBrushes.Black,
+                new XRect(left, y, width, Mm(NoteLineHeightMm)), XStringFormats.TopLeft);
+            y += Mm(NoteLineHeightMm);
+        }
+
+        return y;
+    }
+
+    private static double DrawGroupHeaderRow(
+        XGraphics gfx, XFont font, XBrush brush, XPen pen,
+        double labelWidth, double countWidth, double y)
+    {
+        var left = Mm(MarginLeftMm);
+        var labelRect = new XRect(left, y, labelWidth, Mm(HeaderRowHeightMm));
+        var countRect = new XRect(left + labelWidth, y, countWidth, Mm(HeaderRowHeightMm));
+
+        gfx.DrawRectangle(pen, brush, labelRect);
+        gfx.DrawString("分组", font, XBrushes.Black, labelRect, XStringFormats.Center);
+        gfx.DrawRectangle(pen, brush, countRect);
+        gfx.DrawString("数量", font, XBrushes.Black, countRect, XStringFormats.Center);
+
+        return y + Mm(HeaderRowHeightMm);
+    }
+
+    private static void DrawGroupRow(
+        XGraphics gfx, XFont font, XPen pen,
+        double labelWidth, double countWidth,
+        (string Label, string Count) groupRow, double y)
+    {
+        var left = Mm(MarginLeftMm);
+        var labelRect = new XRect(left, y, labelWidth, Mm(DataRowHeightMm));
+        var countRect = new XRect(left + labelWidth, y, countWidth, Mm(DataRowHeightMm));
+
+        gfx.DrawRectangle(pen, labelRect);
+        DrawCellText(gfx, groupRow.Label, font, labelRect, XStringFormats.CenterLeft);
+        gfx.DrawRectangle(pen, countRect);
+        DrawCellText(gfx, groupRow.Count, font, countRect, XStringFormats.CenterRight);
+    }
+
     /// <summary>按选定列顺序把一行转成 PDF 单元格文本（与绘制共用同一口径，供测试验证字段顺序与到期证据）</summary>
     public static IReadOnlyList<string> BuildRowCells(
         IReadOnlyList<DynamicFollowUpDueReportFieldDto> columns,
@@ -333,6 +483,20 @@ public static class DynamicFollowUpDuePdfExporter
         foreach (var col in columns)
             cells.Add(FormatFieldCell(col, row));
         return cells;
+    }
+
+    /// <summary>
+    /// 把「当前授权预览页」的分组计数映射为 PDF 分组行（标签 + 数量文本）；只照实呈现 <paramref name="groups"/>，
+    /// 绝不重算 / 外推为整表总数（与绘制共用同一口径，供测试验证标签与数量）。
+    /// </summary>
+    public static IReadOnlyList<(string Label, string Count)> BuildGroupCountRows(
+        IReadOnlyList<DynamicFollowUpDueReportGroupDto>? groups)
+    {
+        var source = groups ?? new List<DynamicFollowUpDueReportGroupDto>();
+        var rows = new List<(string Label, string Count)>(source.Count);
+        foreach (var g in source)
+            rows.Add((g.Label ?? string.Empty, g.Count.ToString(CultureInfo.InvariantCulture)));
+        return rows;
     }
 
     /// <summary>
