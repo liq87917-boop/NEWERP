@@ -571,6 +571,63 @@ async function fudDesExport() {
   }
 }
 
+/* 导出当前页为中文 PDF（ERP-196，只读）：复用预览请求体 POST /api/dynamic-follow-up-due-report/pdf；
+   成功（application/pdf 附件）触发下载；授权 / 无效 / 空结果 / 网络失败在结果区可见，不下载任何内容 */
+async function fudDesExportPdf() {
+  if (!FUD_DYN.view || !FUD_DYN.view.columns || !FUD_DYN.view.columns.length) {
+    fudDesRenderResult(fudDesErrorHtml('invalid', '请先预览后再导出 PDF'));
+    return;
+  }
+  if (!FUD_DYN.view.rows || FUD_DYN.view.rows.length === 0) {
+    fudDesRenderResult(fudDesErrorHtml('empty', '没有符合筛选条件的跟进提醒证据，无法导出 PDF（请先预览）'));
+    return;
+  }
+
+  const state = fudDesBuildState(FUD_DYN.view.page);
+  const req = fudDesBuildRequest(state);
+  fudDesRenderResult(fudDesLoadingHtml());
+
+  try {
+    const headers = { 'Content-Type': 'application/json' };
+    const token = typeof localStorage !== 'undefined' ? (localStorage.getItem('erp_token') || '') : '';
+    if (token) headers['Authorization'] = 'Bearer ' + token;
+    const resp = await fetch('/api/dynamic-follow-up-due-report/pdf', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(req),
+    });
+
+    const contentType = (resp.headers.get('content-type') || '');
+    if (contentType.indexOf('application/pdf') >= 0) {
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+      a.href = url;
+      a.download = '动态跟进提醒_' + dateStr + '.pdf';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      fudDesRenderResult('<div class="pd-hint">已导出当前页为中文 PDF，请查看下载。</div>');
+      return;
+    }
+
+    let envelope = null;
+    try { envelope = await resp.json(); } catch (e) { /* 忽略解析失败 */ }
+    const code = envelope && envelope.code;
+    const message = (envelope && envelope.message) || '导出失败';
+    if (code === 2000 || code === 2003) {
+      if (typeof logout === 'function') logout();
+      fudDesRenderResult(fudDesErrorHtml('unauthorized', message));
+      return;
+    }
+    fudDesRenderResult(fudDesErrorHtml(fudDesKindOfCode(code), message));
+  } catch (err) {
+    fudDesRenderResult(fudDesErrorHtml('network', (err && err.message) || '无法连接到服务器'));
+  }
+}
+
 /* 翻页（有界：最小第 1 页） */
 function fudDesPage(delta) {
   const page = (FUD_DYN.view ? FUD_DYN.view.page : FUD_DYN.page) + delta;
@@ -625,6 +682,7 @@ function openFollowUpDueDesigner() {
         <button class="btn btn-neutral btn-sm" onclick="fudDesToggleAll(true)">全选</button>
         <button class="btn btn-neutral btn-sm" onclick="fudDesToggleAll(false)">清空</button>
         <button class="btn btn-neutral" onclick="fudDesExport()" title="导出当前页为 Excel（选定列，复用当前筛选与分页）">📥 导出 Excel（当前页）</button>
+        <button class="btn btn-neutral" onclick="fudDesExportPdf()" title="导出当前页为中文 PDF（选定列，复用当前筛选与分页）">📥 导出 PDF（当前页）</button>
         <button class="btn btn-primary" onclick="fudDesPreview(1)">预览</button>
       </div>
     </div>

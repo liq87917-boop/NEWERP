@@ -225,5 +225,33 @@ public class DynamicFollowUpDueReportUiTests
         Assert.Contains("fudDesErrorHtml('unauthorized', message)", js);
         Assert.Contains("fudDesErrorHtml('network', (err && err.message) || '无法连接到服务器')", js);
     }
+
+    // ==================== 9. PDF 导出（ERP-196） ====================
+
+    [Fact]
+    public void 导出PDF_入口与请求_复用预览请求体与PDF端点()
+    {
+        var js = Script;
+
+        Assert.Contains("onclick=\"fudDesExportPdf()\"", js);
+        Assert.Contains("function fudDesExportPdf()", js);
+        Assert.Contains("fetch('/api/dynamic-follow-up-due-report/pdf'", js);
+        Assert.Contains("fudDesBuildState(FUD_DYN.view.page)", js);
+        Assert.Contains("fudDesBuildRequest(state)", js);
+        Assert.Contains("contentType.indexOf('application/pdf') >= 0", js);
+        Assert.Contains("URL.createObjectURL(blob)", js);
+        Assert.Contains("a.download", js);
+    }
+
+    [Fact]
+    public void 导出PDF_空结果与错误可见_不下载内容()
+    {
+        var js = Script;
+
+        Assert.Contains("fudDesErrorHtml('invalid', '请先预览后再导出 PDF')", js);
+        Assert.Contains("fudDesErrorHtml('empty', '没有符合筛选条件的跟进提醒证据，无法导出 PDF（请先预览）')", js);
+        Assert.Contains("fudDesErrorHtml('unauthorized', message)", js);
+        Assert.Contains("fudDesErrorHtml('network', (err && err.message) || '无法连接到服务器')", js);
+    }
 }
 

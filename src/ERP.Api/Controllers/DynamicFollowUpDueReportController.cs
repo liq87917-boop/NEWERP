@@ -15,6 +15,7 @@ namespace ERP.Api.Controllers;
 /// <item><b>GET /api/dynamic-follow-up-due-report</b>：返回跟进提醒证据字段白名单目录（需登录 + 跟进提醒菜单授权 + 业务员数据范围）；</item>
 /// <item><b>POST /api/dynamic-follow-up-due-report</b>：按选定字段与有界筛选（as-of 日期 / 提前天数 / 可选到期状态）预览当前账号数据范围内的跟进证据，稳定分页。</item>
 /// <item><b>POST /api/dynamic-follow-up-due-report/export</b>：导出当前选定页为 Excel（xlsx，只读，复用有界授权预览与选定列顺序）。</item>
+/// <item><b>POST /api/dynamic-follow-up-due-report/pdf</b>：导出当前选定页为分页中文 PDF（只读，复用有界授权预览与选定列顺序，宽列集跨页拆分）。</item>
 /// </list>
 /// <para>复用 ERP-192 的「跟进提醒」菜单授权与 <see cref="SalespersonDataScopeService"/>（ERP-097）业务员数据范围；
 /// 每次目录 / 预览请求都重新校验身份、菜单授权与业务员数据范围（fail closed），查询由 <see cref="ReportService"/> 只读完成，
@@ -78,6 +79,24 @@ public class DynamicFollowUpDueReportController : ControllerBase
     {
         var scope = await EnsureAuthorizedAsync(CurrentUserId());
         return await _reportService.GetDynamicFollowUpDueReportAsync(request, scope);
+    }
+
+    /// <summary>
+    /// 导出当前页为分页中文 PDF（ERP-196，只读）：复用「有界、已授权预览」与选定列顺序（每次请求重新校验身份 /
+    /// 跟进提醒菜单授权 / 业务员数据范围 / 字段 / 筛选 / 分页，fail closed），仅导出当前页选定列；选定字段、中文标签、
+    /// 到期证据（下次跟进日期 / 到期天数 / 到期状态）与只读 / 边界 / 免责文案、空页说明显式保留，宽列集按可用页宽
+    /// 跨页拆分、行数超出按行页拆分避免裁切。
+    /// <para>中文字体固定使用 Windows 黑体（SimHei，共享解析器），字体缺失时显式失败（不产出乱码或缺字 PDF）。</para>
+    /// <para>全程只读，不写库、不执行任意 SQL；请求由既有 <c>OperationLogMiddleware</c> 记录审计（动作「导出」）。</para>
+    /// </summary>
+    [HttpPost("pdf")]
+    public async Task<IActionResult> ExportPdf([FromBody] DynamicFollowUpDueReportRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var page = await BuildPageAsync(request);
+        var bytes = DynamicFollowUpDuePdfExporter.Export(page);
+        return File(bytes, "application/pdf", $"FollowUpDue_{DateTime.Now:yyyyMMddHHmmss}.pdf");
     }
 
     /// <summary>用 ExcelExporter 生成当前页数据工作表（选定列顺序 + 公式注入转义）</summary>
