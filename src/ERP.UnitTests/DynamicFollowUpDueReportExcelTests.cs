@@ -414,5 +414,201 @@ public class DynamicFollowUpDueReportExcelTests
         Assert.Equal(before, db.CustomerFollowUps.Count());
         Assert.False(db.ChangeTracker.HasChanges());
     }
+
+    // ==================== 7. 分组 Excel 导出（ERP-198） ====================
+
+    [Fact]
+    public async Task Export_分组_追加分组计数工作表_键标签数量()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedAuthorizedUser(db, "priv-user", "Priv", isSystemRole: true);
+        var customer = SeedCustomer(db, "C001", "客户");
+        SeedFollowUp(db, "FU-OVD", customer.Id, "客户", AsOf.AddDays(-2));
+        SeedFollowUp(db, "FU-TODAY", customer.Id, "客户", AsOf);
+        SeedFollowUp(db, "FU-UP1", customer.Id, "客户", AsOf.AddDays(2));
+        SeedFollowUp(db, "FU-UP2", customer.Id, "客户", AsOf.AddDays(3));
+
+        var ctl = NewController(db);
+        TestAuth.SetUser(ctl, user.Id);
+
+        var file = ExportOk(await ctl.Export(new DynamicFollowUpDueReportRequest
+        {
+            Fields = new List<string> { "followNo", "dueStatus" },
+            AsOfDate = AsOf,
+            AheadDays = 7,
+            GroupBy = DynamicFollowUpDueReportRules.GroupDueStatus,
+            Page = 1,
+            PageSize = 20
+        }));
+
+        using var workbook = OpenWorkbook(file.FileContents);
+        Assert.Equal(2, workbook.NumberOfSheets);
+
+        // 第一张仍是选定列数据工作表，保持既有顺序与行值
+        var data = workbook.GetSheetAt(0);
+        Assert.Equal("跟进编号", data.GetRow(0).GetCell(0).StringCellValue);
+        Assert.Equal("到期状态", data.GetRow(0).GetCell(1).StringCellValue);
+        Assert.Equal(4, data.LastRowNum);
+
+        // 第二张为分组计数工作表：分组键 + 标签 + 数量
+        var group = workbook.GetSheetAt(1);
+        Assert.Equal("分组计数", group.SheetName);
+        Assert.Equal("分组键", group.GetRow(0).GetCell(0).StringCellValue);
+        Assert.Equal("分组标签", group.GetRow(0).GetCell(1).StringCellValue);
+        Assert.Equal("数量", group.GetRow(0).GetCell(2).StringCellValue);
+
+        Assert.Equal("dueStatus:overdue", group.GetRow(1).GetCell(0).StringCellValue);
+        Assert.Equal("已逾期", group.GetRow(1).GetCell(1).StringCellValue);
+        Assert.Equal(1d, group.GetRow(1).GetCell(2).NumericCellValue);
+
+        Assert.Equal("dueStatus:today", group.GetRow(2).GetCell(0).StringCellValue);
+        Assert.Equal("今日到期", group.GetRow(2).GetCell(1).StringCellValue);
+        Assert.Equal(1d, group.GetRow(2).GetCell(2).NumericCellValue);
+
+        Assert.Equal("dueStatus:upcoming", group.GetRow(3).GetCell(0).StringCellValue);
+        Assert.Equal("即将到期", group.GetRow(3).GetCell(1).StringCellValue);
+        Assert.Equal(2d, group.GetRow(3).GetCell(2).NumericCellValue);
+    }
+
+    [Fact]
+    public async Task Export_分组_计数只统计当前页_不重算全部()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedAuthorizedUser(db, "priv-user", "Priv", isSystemRole: true);
+        var customer = SeedCustomer(db, "C001", "客户");
+        // 4 条全部今日到期，但当前页（第 1 页，每页 2 条）只有 2 条
+        SeedFollowUp(db, "FU-1", customer.Id, "客户", AsOf);
+        SeedFollowUp(db, "FU-2", customer.Id, "客户", AsOf);
+        SeedFollowUp(db, "FU-3", customer.Id, "客户", AsOf);
+        SeedFollowUp(db, "FU-4", customer.Id, "客户", AsOf);
+
+        var ctl = NewController(db);
+        TestAuth.SetUser(ctl, user.Id);
+
+        var file = ExportOk(await ctl.Export(new DynamicFollowUpDueReportRequest
+        {
+            Fields = new List<string> { "followNo" },
+            AsOfDate = AsOf,
+            AheadDays = 7,
+            GroupBy = DynamicFollowUpDueReportRules.GroupDueStatus,
+            Page = 1,
+            PageSize = 2
+        }));
+
+        using var workbook = OpenWorkbook(file.FileContents);
+        var group = workbook.GetSheetAt(1);
+        // 今日到期仅当前页 2 条；已逾期 / 即将到期本页为 0
+        Assert.Equal(2d, group.GetRow(2).GetCell(2).NumericCellValue);
+        Assert.Equal(0d, group.GetRow(1).GetCell(2).NumericCellValue);
+        Assert.Equal(0d, group.GetRow(3).GetCell(2).NumericCellValue);
+    }
+
+    [Fact]
+    public async Task Export_不分组_仅单个工作表()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedAuthorizedUser(db, "priv-user", "Priv", isSystemRole: true);
+        var customer = SeedCustomer(db, "C001", "客户");
+        SeedFollowUp(db, "FU-1", customer.Id, "客户", AsOf);
+
+        var ctl = NewController(db);
+        TestAuth.SetUser(ctl, user.Id);
+
+        var file = ExportOk(await ctl.Export(new DynamicFollowUpDueReportRequest
+        {
+            Fields = new List<string> { "followNo" },
+            AsOfDate = AsOf,
+            AheadDays = 7,
+            GroupBy = DynamicFollowUpDueReportRules.GroupNone
+        }));
+
+        using var workbook = OpenWorkbook(file.FileContents);
+        Assert.Equal(1, workbook.NumberOfSheets);
+        Assert.Equal("跟进提醒", workbook.GetSheetAt(0).SheetName);
+    }
+
+    [Fact]
+    public async Task Export_分组_空页_分组工作表含空页说明()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedAuthorizedUser(db, "priv-user", "Priv", isSystemRole: true);
+
+        var ctl = NewController(db);
+        TestAuth.SetUser(ctl, user.Id);
+
+        var file = ExportOk(await ctl.Export(new DynamicFollowUpDueReportRequest
+        {
+            Fields = new List<string> { "followNo" },
+            AsOfDate = AsOf,
+            AheadDays = 7,
+            GroupBy = DynamicFollowUpDueReportRules.GroupDueStatus
+        }));
+
+        using var workbook = OpenWorkbook(file.FileContents);
+        Assert.Equal(2, workbook.NumberOfSheets);
+
+        var group = workbook.GetSheetAt(1);
+        Assert.Equal("dueStatus:overdue", group.GetRow(1).GetCell(0).StringCellValue);
+        Assert.Equal(0d, group.GetRow(1).GetCell(2).NumericCellValue);
+        Assert.Equal("dueStatus:today", group.GetRow(2).GetCell(0).StringCellValue);
+        Assert.Equal("dueStatus:upcoming", group.GetRow(3).GetCell(0).StringCellValue);
+        // 空页显式说明
+        Assert.Equal("当前页没有符合分组条件的跟进提醒证据（空页）", group.GetRow(4).GetCell(0).StringCellValue);
+    }
+
+    [Fact]
+    public async Task Export_分组_公式前导标签_转义为字面文本()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedAuthorizedUser(db, "priv-user", "Priv", isSystemRole: true);
+        var customer = SeedCustomer(db, "C001", "客户");
+        var follow = SeedFollowUp(db, "FU-1", customer.Id, "客户", AsOf);
+        follow.SalesmanName = "=SUM(A1)";
+        db.SaveChanges();
+
+        var ctl = NewController(db);
+        TestAuth.SetUser(ctl, user.Id);
+
+        var file = ExportOk(await ctl.Export(new DynamicFollowUpDueReportRequest
+        {
+            Fields = new List<string> { "followNo" },
+            AsOfDate = AsOf,
+            AheadDays = 7,
+            GroupBy = DynamicFollowUpDueReportRules.GroupSalesman
+        }));
+
+        using var workbook = OpenWorkbook(file.FileContents);
+        var group = workbook.GetSheetAt(1);
+        var labelCell = group.GetRow(1).GetCell(1);
+        Assert.Equal(CellType.String, labelCell.CellType);
+        Assert.Equal("'=SUM(A1)", labelCell.StringCellValue);
+        // 键以「salesman:」开头，非公式前导，不做多余转义
+        Assert.Equal("salesman:=SUM(A1)", group.GetRow(1).GetCell(0).StringCellValue);
+    }
+
+    [Fact]
+    public async Task Export_分组_授权撤销_拒绝()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedAuthorizedUser(db, "revoked-user", "Sales");
+        var customer = SeedCustomer(db, "C001", "客户");
+        SeedFollowUp(db, "FU-1", customer.Id, "客户", AsOf);
+
+        var roleMenu = db.SysRoleMenus.Single();
+        roleMenu.IsDeleted = true;
+        db.SaveChanges();
+
+        var ctl = NewController(db);
+        TestAuth.SetUser(ctl, user.Id);
+
+        var ex = await Assert.ThrowsAsync<BusinessException>(() => ctl.Export(
+            new DynamicFollowUpDueReportRequest
+            {
+                AsOfDate = AsOf,
+                AheadDays = 7,
+                GroupBy = DynamicFollowUpDueReportRules.GroupDueStatus
+            }));
+        Assert.Equal(ErrorCodes.Forbidden, ex.Code);
+    }
 }
 

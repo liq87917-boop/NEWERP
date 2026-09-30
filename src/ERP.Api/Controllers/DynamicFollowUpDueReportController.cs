@@ -5,6 +5,7 @@ using ERP.Application.Services;
 using ERP.Infrastructure.Export;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using NPOI.XSSF.UserModel;
 using System.Security.Claims;
 
 namespace ERP.Api.Controllers;
@@ -99,13 +100,85 @@ public class DynamicFollowUpDueReportController : ControllerBase
         return File(bytes, "application/pdf", $"FollowUpDue_{DateTime.Now:yyyyMMddHHmmss}.pdf");
     }
 
-    /// <summary>用 ExcelExporter 生成当前页数据工作表（选定列顺序 + 公式注入转义）</summary>
+    /// <summary>分组计数工作表名称（ERP-198，仅 dueStatus / salesman 分组时追加）</summary>
+    private const string GroupCountSheetName = "分组计数";
+
+    /// <summary>分组计数工作表列标题（数量为数值单元格，键 / 标签为公式安全文本；不含未选定列）</summary>
+    private const string GroupKeyColumn = "分组键";
+    private const string GroupLabelColumn = "分组标签";
+    private const string GroupCountColumn = "数量";
+
+    /// <summary>分组工作表空页显式说明（当前页没有符合分组条件的跟进提醒证据）</summary>
+    private const string GroupCountEmptyNote = "当前页没有符合分组条件的跟进提醒证据（空页）";
+
+    /// <summary>
+    /// 生成 Excel 工作簿（ERP-195 / ERP-198，只读）：复用有界、已授权预览；none 模式保持既有单工作表不变；
+    /// dueStatus / salesman 分组模式在选定列数据工作表之后追加「分组计数」工作表（复用 ERP-197 同一批有界、已授权分组计数，
+    /// 只统计当前页、绝不从全部记录重算、不暴露未选定列）。
+    /// </summary>
     private static byte[] BuildWorkbook(DynamicFollowUpDueReportPageDto page)
+    {
+        var dataBytes = BuildDataWorkbook(page);
+
+        if (!IsCountGroupedExport(page.GroupBy))
+            return dataBytes;
+
+        using var input = new MemoryStream(dataBytes);
+        using var workbook = new XSSFWorkbook(input);
+        AppendGroupCountSheet(workbook, page);
+
+        using var output = new MemoryStream();
+        workbook.Write(output);
+        return output.ToArray();
+    }
+
+    /// <summary>生成选定列数据工作表（ERP-195 既有逻辑：选定列顺序 + 类型化值 + 公式注入转义）</summary>
+    private static byte[] BuildDataWorkbook(DynamicFollowUpDueReportPageDto page)
     {
         var columns = page.Columns.Select(c => (c.Key, c.Label)).ToList();
         var rows = page.Rows.Select(DynamicFollowUpDueReportRules.BuildExportRow).ToList();
         return ExcelExporter.ExportRows(DynamicFollowUpDueReportRules.RequiredMenuText, rows, columns);
     }
+
+    /// <summary>是否需要追加分组计数工作表（仅 dueStatus / salesman；none 保持既有单工作表）</summary>
+    private static bool IsCountGroupedExport(string? groupBy)
+        => string.Equals(groupBy, DynamicFollowUpDueReportRules.GroupDueStatus, StringComparison.OrdinalIgnoreCase)
+           || string.Equals(groupBy, DynamicFollowUpDueReportRules.GroupSalesman, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>追加「分组计数」工作表：分组键 + 标签 + 数量（数值单元格），并显式标注空页；只统计当前页、不重算。</summary>
+    private static void AppendGroupCountSheet(XSSFWorkbook workbook, DynamicFollowUpDueReportPageDto page)
+    {
+        var sheet = workbook.CreateSheet(GroupCountSheetName);
+
+        var header = sheet.CreateRow(0);
+        header.CreateCell(0).SetCellValue(GroupKeyColumn);
+        header.CreateCell(1).SetCellValue(GroupLabelColumn);
+        header.CreateCell(2).SetCellValue(GroupCountColumn);
+
+        var groups = page.Groups ?? new List<DynamicFollowUpDueReportGroupDto>();
+        var rowIndex = 1;
+        foreach (var group in groups)
+        {
+            var row = sheet.CreateRow(rowIndex++);
+            row.CreateCell(0).SetCellValue(SafeGroupText(group.Key));
+            row.CreateCell(1).SetCellValue(SafeGroupText(group.Label));
+            row.CreateCell(2).SetCellValue(group.Count);
+        }
+
+        if (IsEmptyPage(page))
+        {
+            var emptyRow = sheet.CreateRow(rowIndex);
+            emptyRow.CreateCell(0).SetCellValue(SafeGroupText(GroupCountEmptyNote));
+        }
+    }
+
+    /// <summary>当前页是否为空（没有已分页的跟进提醒行）</summary>
+    private static bool IsEmptyPage(DynamicFollowUpDueReportPageDto page)
+        => page.Rows is null || page.Rows.Count == 0;
+
+    /// <summary>分组工作表文本统一做公式注入转义（保持字面文本，不被当作公式执行）</summary>
+    private static string SafeGroupText(string? value)
+        => DynamicFollowUpDueReportRules.EscapeFormulaLeading(value) as string ?? string.Empty;
 
     /// <summary>身份 + 既有「角色 → 菜单」跟进提醒模块授权 + 业务员数据范围（fail closed，绝不猜测身份）</summary>
     private async Task<SalespersonDataScope> EnsureAuthorizedAsync(long? userId)
