@@ -1,0 +1,42 @@
+{
+  "id": "ERP-193",
+  "title": "Preview a scoped dynamic follow-up due report",
+  "status": "pending",
+  "risk_level": "medium",
+  "description": "A salesperson selects follow-up reminder evidence fields and an as-of date and ahead-day window, then previews a stable bounded page. Reuse the current-user menu and SalespersonDataScopeService policy established by the preceding task, with database-side scope, count, order and page limits before materialization. Add a finite field catalog, request and page DTO, server-side field projection, and a dedicated authorized API endpoint. Validate unknown or duplicate fields, aheadDays 0 to 365, page 1 or greater, pageSize 1 to 200 and optional due status before source reads; fail closed with clear errors. Return only selected fields, total, truncation and empty context; keep overdue, today and upcoming meanings and do not expose unrestricted records. OperationLogMiddleware audits preview calls. Development only: no schema or migration edits, production SQL or real database execution, arbitrary SQL, business writes, secrets, deployment or browser acceptance. Verify focused in-memory tests and safe Release build/test.",
+  "acceptance_criteria": [
+    "A finite field catalog and bounded POST preview validate fields, due status, date and page limits before data reads and recheck current-user follow-up-due menu and salesperson scope on every call.",
+    "The preview uses a server-side scoped, stably ordered current page of follow-up evidence, projects only selected fields, and returns total, truncation and empty meaning without leaking unassigned or null-customer rows.",
+    "Focused tests cover field order, duplicate or unknown fields, status and date filters, page limits, scope revocation, empty pages and read-only operation; safe Release build/test passes."
+  ],
+  "allowed_paths": [
+    "src/ERP.Application/DTOs/DynamicFollowUpDueReportDtos.cs",
+    "src/ERP.Application/Services/DynamicFollowUpDueReportRules.cs",
+    "src/ERP.Application/Services/ReportService.Extra4.cs",
+    "src/ERP.Application/Interfaces/IReportService.cs",
+    "src/ERP.Api/Controllers/DynamicFollowUpDueReportController.cs",
+    "src/ERP.UnitTests/DynamicFollowUpDueReportTests.cs"
+  ],
+  "validation_profile": "safe",
+  "depends_on": [
+    "ERP-192"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "completion_mode": "build",
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": [],
+    "test_filter": "Collection=UiTests",
+    "minimum_screenshots": 1
+  },
+  "human_gate": {
+    "required": false,
+    "status": "not_required",
+    "level": "L1",
+    "reason": ""
+  },
+  "max_attempts": 3,
+  "attempts": 0,
+  "created_at": "2026-09-30T08:24:54.636346Z"
+}
