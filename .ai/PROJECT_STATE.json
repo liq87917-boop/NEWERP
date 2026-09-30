@@ -1,12 +1,10 @@
 {
   "schema_version": 2,
   "project": "NEWERP",
-  "updated_at": "2026-09-30T08:04:58.787444Z",
+  "updated_at": "2026-09-30T08:26:16.483785Z",
   "phase": "ready",
   "current_task": null,
-  "queue": [
-    "ERP-191"
-  ],
+  "queue": [],
   "completed": [
     "ERP-000",
     "ERP-001",
@@ -177,7 +175,8 @@
     "ERP-186",
     "ERP-187",
     "ERP-188",
-    "ERP-189"
+    "ERP-189",
+    "ERP-191"
   ],
   "blocked": [
     {
@@ -188,18 +187,14 @@
     }
   ],
   "last_build": {
-    "task": "ERP-190",
+    "task": "ERP-191",
     "profile": "safe",
-    "status": "failed",
-    "exit_code": 1,
-    "log": ".ai\\logs\\ERP-190-validation-3.log",
-    "at": "2026-09-30T07:37:13.448924Z"
+    "status": "passed",
+    "exit_code": 0,
+    "log": ".ai\\logs\\ERP-191-validation-1.log",
+    "at": "2026-09-30T08:26:15.962200Z"
   },
-  "last_error": {
-    "task": "ERP-190",
-    "kind": "repair_budget_exhausted",
-    "summary": "Path guard failed:\noutside allowed_paths: src/ERP.UnitTests/DynamicAgencyServiceFeeMonthlyGroupedExcelTests.cs"
-  },
+  "last_error": null,
   "last_deepseek_fix": {
     "task": "ERP-190",
     "attempts": 3,
@@ -208,19 +203,16 @@
   },
   "git_sync": {
     "branch": "main",
-    "local_sha": "47e7d9b",
-    "status": "synced",
-    "ahead": 0,
+    "local_sha": "b16c33c",
+    "status": "pending",
+    "ahead": 1,
     "behind": 0,
-    "last_attempt_at": "2026-09-30T07:10:08.718422Z",
+    "last_attempt_at": "2026-09-30T08:26:16.374134Z",
     "last_error": null
   },
-  "next_recommended_tasks": [
-    "ERP-191"
-  ],
+  "next_recommended_tasks": [],
   "runner": {
     "status": "stopped",
     "pid": null
-  },
-  "finish_reason": "failed_work_isolated_for_independent_tasks"
+  }
 }

@@ -1,7 +1,7 @@
 {
   "id": "ERP-191",
   "title": "Export agency monthly original-currency group amounts to PDF",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "low",
   "description": "A customer-service user downloads the authorized current-page agency monthly report as a Chinese PDF and sees separate original-currency amount subtotals for the chosen month or customer grouping. Extend ERP-189 PDF rendering with a distinct amount-group section from ERP-186 server-provided GroupCounts while preserving selected-column evidence and count sections; none grouping keeps current PDF behavior. The existing endpoint reruns identity, customer menu, salesperson scope, fields, group, filters and page bounds and OperationLogMiddleware audits download. Render registered, draft and void amounts separately with currency precision and explicit current-page, empty and truncated evidence meaning, never merge currencies or pages and never claim revenue or receivables. Reuse shared SimHei font resolution, paginate without clipping and fail clearly when font is absent. Development only: no schema or migration edits, production SQL or real database execution, arbitrary SQL, business writes, secrets, deployment or browser acceptance. Keep manual test output outside the repo and verify focused PDF tests plus safe Release build/test.",
   "acceptance_criteria": [
@@ -33,6 +33,6 @@
     "level": "L1",
     "reason": ""
   },
-  "attempts": 0,
+  "attempts": 1,
   "created_at": "2026-09-30T06:46:30.611564Z"
 }
