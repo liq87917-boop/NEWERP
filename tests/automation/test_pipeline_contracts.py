@@ -261,6 +261,24 @@ class PipelineContracts(unittest.TestCase):
             self.assertEqual(0, pipeline.run_all())
         sleep.assert_called_once_with(1)
 
+    def test_dirty_worktree_failure_stops_without_tight_retry(self):
+        config = {"autonomy": {"enabled": True}}
+        task = (Path("ERP-168.json"), {"id": "ERP-168"})
+        failed = type("Completed", (), {"returncode": 5})()
+        with patch.object(pipeline, "pipeline_lock") as lock, \
+             patch.object(pipeline, "load_json", side_effect=[config, {"conversation_control": {}}]), \
+             patch.object(pipeline, "recover_obsolete_transport_failures"), \
+             patch.object(pipeline, "reconcile_completed_results"), \
+             patch.object(pipeline, "recover_blocked_with_deepseek"), \
+             patch.object(pipeline, "queue_head", return_value=(task, "ready")), \
+             patch.object(pipeline, "run", return_value=failed) as run, \
+             patch.object(pipeline, "audit"), \
+             patch.object(pipeline.time, "sleep") as sleep:
+            lock.return_value.__enter__.return_value = None
+            self.assertEqual(5, pipeline.run_all())
+        run.assert_called_once()
+        sleep.assert_not_called()
+
     def test_failed_and_retry_pending_tasks_become_bounded_deepseek_repairs(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -362,6 +380,21 @@ class PipelineContracts(unittest.TestCase):
              patch.object(orchestrator, "validate_task"):
             item = orchestrator.recoverable_dirty_task({}, {"current_task": None})
         self.assertEqual("ERP-096", item[1]["id"])
+
+    def test_exhausted_preserved_work_revalidates_only_once_per_revision(self):
+        task = self.task("ERP-167", "retry_pending") | {
+            "preserved_work": {"changed_paths": ["src/ERP.Api/Program.cs"]},
+            "supervised_recovery_cycles": 2,
+            "exhausted_revalidation_head": "oldhead",
+        }
+        config = {"autonomy": {"max_supervised_recovery_cycles": 2}}
+        with patch.object(orchestrator, "all_tasks", return_value=[(Path("ERP-167.json"), task)]), \
+             patch.object(orchestrator, "business_changed_paths", return_value=["src/ERP.Api/Program.cs"]), \
+             patch.object(orchestrator, "validate_task"), \
+             patch.object(orchestrator, "run", return_value=type("Result", (), {"stdout": "newhead\n"})()):
+            self.assertIsNotNone(orchestrator.recoverable_dirty_task(config, {"current_task": None}))
+            task["exhausted_revalidation_head"] = "newhead"
+            self.assertIsNone(orchestrator.recoverable_dirty_task(config, {"current_task": None}))
 
     def test_failed_work_is_preserved_without_stash_or_reset(self):
         task = self.task("ERP-096", "in_progress")

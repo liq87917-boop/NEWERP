@@ -134,6 +134,35 @@ function Get-RecoverableFailure {
     return $null
 }
 
+function Get-RecoverablePreservedWork {
+    param([object[]]$Tasks, $GitInfo)
+
+    $paths = Get-LocalChangedPaths
+    if ($null -eq $paths) { return $null }
+    $businessPaths = @($paths | Where-Object { -not $_.StartsWith('.ai/') })
+    if ($businessPaths.Count -eq 0) { return $null }
+
+    $maximum = 2
+    try {
+        $config = Get-Content $configPath -Raw -Encoding UTF8 | ConvertFrom-Json
+        if ($config.autonomy.max_supervised_recovery_cycles) {
+            $maximum = [int]$config.autonomy.max_supervised_recovery_cycles
+        }
+    } catch { return $null }
+
+    foreach ($task in $Tasks) {
+        if ($task.status -notin @('retry', 'retry_pending', 'in_progress', 'code_ready', 'finalizing', 'failed', 'blocked')) { continue }
+        if (-not $task.preserved_work -or -not $task.preserved_work.changed_paths) { continue }
+        $expected = @($task.preserved_work.changed_paths | ForEach-Object { [string]$_ -replace '\\', '/' })
+        if (@($businessPaths | Where-Object { $_ -notin $expected }).Count -gt 0) { continue }
+        $cycles = [int]$task.supervised_recovery_cycles
+        if ($task.status -in @('retry_pending', 'failed', 'blocked') -and $cycles -ge $maximum -and
+            [string]$task.exhausted_revalidation_head -eq [string]$GitInfo.Sha) { continue }
+        return $task
+    }
+    return $null
+}
+
 function Test-TaskRunnable {
     param($Task)
     if ($null -eq $Task) { return $false }
@@ -435,7 +464,7 @@ function Test-RecoverableBrowserFailure {
 }
 
 function Get-AgentMode {
-    param($State, $Head, $GitInfo)
+    param($State, $Head, $GitInfo, $RecoverPreserved)
 
     if ($State -and $State.conversation_control -and $State.conversation_control.paused -eq $true) {
         return 'PAUSED'
@@ -443,7 +472,7 @@ function Get-AgentMode {
     if ($pipelineProcess -and -not $pipelineProcess.HasExited) {
         return 'RUNNING'
     }
-    if ((Test-RecoverablePathGuard $State $Head) -or (Test-RecoverableInterruptedTask $State $Head) -or (Test-RecoverableBrowserFailure $State $Head) -or (Test-RecoverableDeferredFailedHead $State $Head)) {
+    if ($RecoverPreserved -or (Test-RecoverablePathGuard $State $Head) -or (Test-RecoverableInterruptedTask $State $Head) -or (Test-RecoverableBrowserFailure $State $Head) -or (Test-RecoverableDeferredFailedHead $State $Head)) {
         return 'READY'
     }
     if ($State -and $State.phase -eq 'replenishing') {
@@ -870,10 +899,12 @@ try {
         $recoverInterrupted = Test-RecoverableInterruptedTask $state $head
         $recoverBrowser = Test-RecoverableBrowserFailure $state $head
         $recoverDeferredFailedHead = Test-RecoverableDeferredFailedHead $state $head
-        $recoverExisting = $recoverPathGuard -or $recoverInterrupted -or $recoverBrowser -or $recoverDeferredFailedHead
+        $recoverPreserved = Get-RecoverablePreservedWork $tasks $gitInfo
+        $recoverExisting = $recoverPathGuard -or $recoverInterrupted -or $recoverBrowser -or $recoverDeferredFailedHead -or ($null -ne $recoverPreserved)
         $recoveryKey = $null
         if ($recoverExisting) {
-            $recoveryKey = "$($head.id)|$($gitInfo.Sha)|$($state.phase)|$([string]$state.blocker)"
+            $recoveryTask = if ($recoverPreserved) { $recoverPreserved } else { $head }
+            $recoveryKey = "$($recoveryTask.id)|$($gitInfo.Sha)|$($state.phase)|$([string]$state.blocker)"
         }
 
         $canStartWithDirty = $recoverExisting -and ($lastRecoveryAttemptKey -ne $recoveryKey)
@@ -898,7 +929,7 @@ try {
             }
         }
 
-        $mode = Get-AgentMode $state $head $gitInfo
+        $mode = Get-AgentMode $state $head $gitInfo $recoverPreserved
         Write-AgentRuntime $state $head $gitInfo $mode
         Write-Status $state $tasks $head $gitInfo
         if ($Once) { break }

@@ -457,6 +457,13 @@ def run_all() -> int:
             if completed.returncode != 0:
                 audit("pipeline_stopped", task=task_id, exit_code=completed.returncode)
                 scheduler_failures += 1
+                if completed.returncode in {5, 6, 10, 20} or scheduler_failures >= 3:
+                    print(
+                        f"Scheduler stopped at {task_id} after {scheduler_failures} failed launch(es); "
+                        "preserved work and failure evidence remain available.",
+                        file=sys.stderr,
+                    )
+                    return completed.returncode
                 delay = min(10, scheduler_failures)
                 print(
                     f"Scheduler execution failed at {task_id} with exit code {completed.returncode}; "

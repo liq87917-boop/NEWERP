@@ -295,6 +295,7 @@ public class DynamicSupplierAgingReportTests
 
         var page = PreviewOk(await ctl.Preview(new DynamicSupplierAgingReportRequest
         {
+            AsOfDate = AsOf,
             Fields = new() { "invoiceNumber", "currency", "grossAmount", "dueDateKnown", "agingBucket", "allocationState", "remainingAmount", "activeAllocatedAmount" }
         }));
 
