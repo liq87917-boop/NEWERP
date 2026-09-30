@@ -1,7 +1,7 @@
 {
   "schema_version": 2,
   "project": "NEWERP",
-  "updated_at": "2026-09-30T04:55:57.496197Z",
+  "updated_at": "2026-09-30T05:09:11.475693Z",
   "phase": "ready",
   "current_task": null,
   "queue": [
@@ -181,16 +181,20 @@
     "log": ".ai\\logs\\ERP-180-validation-1.log",
     "at": "2026-09-30T04:55:52.023847Z"
   },
-  "last_error": null,
+  "last_error": {
+    "task": "ERP-181",
+    "kind": "automatic_repair_pending",
+    "summary": "Path guard failed:\noutside allowed_paths: src/ERP.UnitTests/TestResults/focused.trx\noutside allowed_paths: src/ERP.UnitTests/TestResults/focused2.trx\noutside allowed_paths: src/ERP.UnitTests/TestResults/full.trx\noutside allowed_paths: src/ERP.UnitTests/TestResults/status.trx\noutside allowed_paths: test_out.txt\noutside allowed_paths: test_out2.txt"
+  },
   "last_deepseek_fix": {
-    "task": "ERP-179",
+    "task": "ERP-181",
     "attempts": 3,
     "status": "retry_pending",
-    "at": "2026-09-30T03:40:18.635680Z"
+    "at": "2026-09-30T05:09:11.226811Z"
   },
   "git_sync": {
     "branch": "main",
-    "local_sha": "e5b763d",
+    "local_sha": "3159b08",
     "status": "synced",
     "ahead": 0,
     "behind": 0,
@@ -205,5 +209,7 @@
   "runner": {
     "status": "stopped",
     "pid": null
-  }
+  },
+  "blocker": null,
+  "finish_reason": "deepseek_supervisor_recovery"
 }

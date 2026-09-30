@@ -1,7 +1,7 @@
 {
   "id": "ERP-181",
   "title": "Design an authorized dynamic agency monthly summary report",
-  "status": "pending",
+  "status": "retry",
   "risk_level": "medium",
   "description": "A customer-service user chooses monthly service-fee evidence fields and existing customer, currency and statement-date filters in the monthly-summary workspace, then previews the selected columns. Add a finite field catalog and bounded request/response DTOs in the existing ERP layers; reuse ERP-180 scoped AgencyServiceFeeMonthlySummaryService. Recheck identity, customer menu grant and salesperson data scope on each catalog/preview call; validate unknown or duplicate field keys and page bounds before source reads, fail closed and show a clear UI error. Preserve month, customer and original-currency grouping, status-specific amounts and evidence-only language; OperationLogMiddleware records access. Development only: no schema/migration edits, production SQL or real database execution, arbitrary SQL, business writes, secrets or .env changes, deployment or browser acceptance. Verify focused tests and safe Release build/test.",
   "acceptance_criteria": [
@@ -36,5 +36,104 @@
     "reason": ""
   },
   "attempts": 0,
-  "created_at": "2026-09-30T04:47:02.334869Z"
+  "created_at": "2026-09-30T04:47:02.334869Z",
+  "preserved_work": {
+    "execution_copy": "D:\\VSCodeProject\\NEWERP.executor",
+    "changed_paths": [
+      ".ai/PROJECT_STATE.json",
+      ".ai/tasks/ERP-181.json",
+      "src/ERP.Api/Controllers/DynamicAgencyServiceFeeMonthlyReportController.cs",
+      "src/ERP.Api/wwwroot/js/agency-service-fee-monthly-summary.js",
+      "src/ERP.Application/DTOs/DynamicAgencyServiceFeeMonthlyReportDtos.cs",
+      "src/ERP.Application/Services/DynamicAgencyServiceFeeMonthlyReportRules.cs",
+      "src/ERP.UnitTests/DynamicAgencyServiceFeeMonthlyReportTests.cs",
+      "src/ERP.UnitTests/TestResults/focused.trx",
+      "src/ERP.UnitTests/TestResults/focused2.trx",
+      "src/ERP.UnitTests/TestResults/full.trx",
+      "src/ERP.UnitTests/TestResults/status.trx",
+      "test_out.txt",
+      "test_out2.txt"
+    ],
+    "diff": ".ai\\logs\\ERP-181-preserved-work.diff",
+    "preserved_at": "2026-09-30T05:09:11.225123Z"
+  },
+  "failure_kind": "path_guard_failure",
+  "failed_transport_version": 2,
+  "recovery_history": [
+    {
+      "remediation_task": "ERP-181-RECOVERY-1",
+      "cycle": 1,
+      "at": "2026-09-30T05:09:11.373402Z",
+      "evidence": {
+        "failure_kind": "path_guard_failure",
+        "summary": "Path guard failed:\noutside allowed_paths: src/ERP.UnitTests/TestResults/focused.trx\noutside allowed_paths: src/ERP.UnitTests/TestResults/focused2.trx\noutside allowed_paths: src/ERP.UnitTests/TestResults/full.trx\noutside allowed_paths: src/ERP.UnitTests/TestResults/status.trx\noutside allowed_paths: test_out.txt\noutside allowed_paths: test_out2.txt",
+        "result": ".ai\\results\\ERP-181.json",
+        "attempt_logs": [
+          ".ai/logs/ERP-181-attempt-1.jsonl"
+        ],
+        "validation_logs": [],
+        "latest_state_error": {
+          "task": "ERP-181",
+          "kind": "automatic_repair_pending",
+          "summary": "Path guard failed:\noutside allowed_paths: src/ERP.UnitTests/TestResults/focused.trx\noutside allowed_paths: src/ERP.UnitTests/TestResults/focused2.trx\noutside allowed_paths: src/ERP.UnitTests/TestResults/full.trx\noutside allowed_paths: src/ERP.UnitTests/TestResults/status.trx\noutside allowed_paths: test_out.txt\noutside allowed_paths: test_out2.txt"
+        },
+        "latest_build": null,
+        "task_context": ".ai\\tasks\\ERP-181.json",
+        "changed_paths": [
+          ".ai/PROJECT_STATE.json",
+          ".ai/tasks/ERP-181.json",
+          "src/ERP.Api/Controllers/DynamicAgencyServiceFeeMonthlyReportController.cs",
+          "src/ERP.Api/wwwroot/js/agency-service-fee-monthly-summary.js",
+          "src/ERP.Application/DTOs/DynamicAgencyServiceFeeMonthlyReportDtos.cs",
+          "src/ERP.Application/Services/DynamicAgencyServiceFeeMonthlyReportRules.cs",
+          "src/ERP.UnitTests/DynamicAgencyServiceFeeMonthlyReportTests.cs",
+          "src/ERP.UnitTests/TestResults/focused.trx",
+          "src/ERP.UnitTests/TestResults/focused2.trx",
+          "src/ERP.UnitTests/TestResults/full.trx",
+          "src/ERP.UnitTests/TestResults/status.trx",
+          "test_out.txt",
+          "test_out2.txt"
+        ],
+        "diff": ".ai\\logs\\ERP-181-preserved-work.diff",
+        "execution_copy": "D:\\VSCodeProject\\NEWERP.executor"
+      }
+    }
+  ],
+  "supervised_recovery_cycles": 1,
+  "recovery_context": {
+    "remediation_task": "ERP-181-RECOVERY-1",
+    "failure_kind": "path_guard_failure",
+    "summary": "Path guard failed:\noutside allowed_paths: src/ERP.UnitTests/TestResults/focused.trx\noutside allowed_paths: src/ERP.UnitTests/TestResults/focused2.trx\noutside allowed_paths: src/ERP.UnitTests/TestResults/full.trx\noutside allowed_paths: src/ERP.UnitTests/TestResults/status.trx\noutside allowed_paths: test_out.txt\noutside allowed_paths: test_out2.txt",
+    "result": ".ai\\results\\ERP-181.json",
+    "attempt_logs": [
+      ".ai/logs/ERP-181-attempt-1.jsonl"
+    ],
+    "validation_logs": [],
+    "latest_state_error": {
+      "task": "ERP-181",
+      "kind": "automatic_repair_pending",
+      "summary": "Path guard failed:\noutside allowed_paths: src/ERP.UnitTests/TestResults/focused.trx\noutside allowed_paths: src/ERP.UnitTests/TestResults/focused2.trx\noutside allowed_paths: src/ERP.UnitTests/TestResults/full.trx\noutside allowed_paths: src/ERP.UnitTests/TestResults/status.trx\noutside allowed_paths: test_out.txt\noutside allowed_paths: test_out2.txt"
+    },
+    "latest_build": null,
+    "task_context": ".ai\\tasks\\ERP-181.json",
+    "changed_paths": [
+      ".ai/PROJECT_STATE.json",
+      ".ai/tasks/ERP-181.json",
+      "src/ERP.Api/Controllers/DynamicAgencyServiceFeeMonthlyReportController.cs",
+      "src/ERP.Api/wwwroot/js/agency-service-fee-monthly-summary.js",
+      "src/ERP.Application/DTOs/DynamicAgencyServiceFeeMonthlyReportDtos.cs",
+      "src/ERP.Application/Services/DynamicAgencyServiceFeeMonthlyReportRules.cs",
+      "src/ERP.UnitTests/DynamicAgencyServiceFeeMonthlyReportTests.cs",
+      "src/ERP.UnitTests/TestResults/focused.trx",
+      "src/ERP.UnitTests/TestResults/focused2.trx",
+      "src/ERP.UnitTests/TestResults/full.trx",
+      "src/ERP.UnitTests/TestResults/status.trx",
+      "test_out.txt",
+      "test_out2.txt"
+    ],
+    "diff": ".ai\\logs\\ERP-181-preserved-work.diff",
+    "execution_copy": "D:\\VSCodeProject\\NEWERP.executor",
+    "repair_allowed_paths": [],
+    "instruction": "DeepSeek supervisor recovery: inspect the referenced complete logs, diagnose the root cause, and implement a different safe repair within allowed_paths. Rebuild and rerun the configured tests; if validation fails, use the newest log as the next repair input. Do not repeat the failed approach. Do not edit task/state/result files or relax production and irreversible-operation gates. "
+  }
 }
