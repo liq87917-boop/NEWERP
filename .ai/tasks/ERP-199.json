@@ -1,0 +1,40 @@
+{
+  "id": "ERP-199",
+  "title": "Include current-page group counts in follow-up PDF export",
+  "status": "pending",
+  "risk_level": "low",
+  "description": "A salesperson exporting grouped follow-up reminders as PDF sees selected current-page detail and scoped group counts from the authorized preview. Render status or salesperson labels/counts after detail with page breaks, while groupBy none retains original PDF. Never query unbounded records or include out-of-scope rows; every PDF request rechecks current-user menu/scope through existing endpoint. Missing SimHei remains an explicit error and existing HTTP logging audits export. Development only: no schema or migration changes, production SQL or real database execution, arbitrary SQL, business writes, secrets, deployment or browser acceptance. Verify focused PDF tests and safe Release build/test.",
+  "acceptance_criteria": [
+    "Grouped PDF uses only authorized current-page metadata and preserves selected detail columns; none retains detail-only layout.",
+    "Group labels/counts remain readable across page breaks; empty pages are explicit, and missing SimHei fails clearly.",
+    "PDF tests cover none/status/salesperson groups, empty and multi-page output and font failure; safe Release build/test passes."
+  ],
+  "allowed_paths": [
+    "src/ERP.Infrastructure/Export/DynamicFollowUpDuePdfExporter.cs",
+    "src/ERP.Api/Controllers/DynamicFollowUpDueReportController.cs",
+    "src/ERP.UnitTests/DynamicFollowUpDueReportPdfTests.cs"
+  ],
+  "validation_profile": "safe",
+  "depends_on": [
+    "ERP-196",
+    "ERP-197"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "completion_mode": "build",
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": [],
+    "test_filter": "Collection=UiTests",
+    "minimum_screenshots": 1
+  },
+  "human_gate": {
+    "required": false,
+    "status": "not_required",
+    "level": "L1",
+    "reason": ""
+  },
+  "max_attempts": 3,
+  "attempts": 0,
+  "created_at": "2026-09-30T09:22:09.702995Z"
+}

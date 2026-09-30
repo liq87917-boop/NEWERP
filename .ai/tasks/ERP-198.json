@@ -1,0 +1,39 @@
+{
+  "id": "ERP-198",
+  "title": "Include current-page group counts in follow-up Excel export",
+  "status": "pending",
+  "risk_level": "low",
+  "description": "A salesperson exporting a grouped follow-up reminder page receives selected detail worksheet plus a separate current-page group-count worksheet. Reuse bounded reauthorized Excel preview and scoped group metadata. GroupBy none keeps one sheet; grouped mode shows group key, label and count with explicit empty-page note. Never recalculate from all records or expose unselected columns. Preserve formula-safe text and typed dates/numbers. Existing HTTP operation logging audits export. Development only: no schema or migration changes, production SQL or real database execution, arbitrary SQL, business writes, secrets, deployment or browser acceptance. Verify focused workbook tests and safe Release build/test.",
+  "acceptance_criteria": [
+    "Grouped Excel export reruns authorization and bounded preview, writes selected current-page details and group counts; none retains one worksheet.",
+    "Group worksheet has only scoped current-page counts and an empty-page note; detail order, typed values and formula safety remain intact.",
+    "Workbook tests cover grouped/ungrouped sheets, revocation, empty pages and formula text; safe Release build/test passes."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/DynamicFollowUpDueReportController.cs",
+    "src/ERP.Application/Services/DynamicFollowUpDueReportRules.cs",
+    "src/ERP.UnitTests/DynamicFollowUpDueReportExcelTests.cs"
+  ],
+  "validation_profile": "safe",
+  "depends_on": [
+    "ERP-197"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "completion_mode": "build",
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": [],
+    "test_filter": "Collection=UiTests",
+    "minimum_screenshots": 1
+  },
+  "human_gate": {
+    "required": false,
+    "status": "not_required",
+    "level": "L1",
+    "reason": ""
+  },
+  "max_attempts": 3,
+  "attempts": 0,
+  "created_at": "2026-09-30T09:22:09.702917Z"
+}
