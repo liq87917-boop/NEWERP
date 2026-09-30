@@ -96,7 +96,7 @@ const REPORTS = {
     ] },
 
   /* === 阶段 2 续：跟进提醒（客户回访清单） === */
-  'follow-up-due': { api: '/api/reports/follow-up-due', title: '跟进提醒', asOf: true,
+  'follow-up-due': { api: '/api/reports/follow-up-due', title: '跟进提醒', asOf: true, designer: true,
     emoji: '🔔', kpi: 'gold', summary: '下次跟进日期已到期 / 未来 7 天内即将到期（按逾期天数排序，可直接当回访清单用）',
     columns: [
       { key: 'customerName', label: '客户' },
@@ -168,10 +168,13 @@ async function renderReport(rep, name) {
         <button class="btn btn-primary" onclick="loadReport()">查询</button>
       </div>
       <div class="toolbar-actions">
+        ${rep.designer ? `<button class="btn btn-neutral" onclick="openFollowUpDueDesigner()" title="打开动态跟进提醒字段设计器（只读预览）">🎛 字段设计器</button>` : ''}
         <button class="btn btn-neutral" onclick="exportReportCSV()" title="导出为 CSV">📤 导出 CSV</button>
         <button class="btn btn-neutral" onclick="window.print()" title="打印报表">🖨 打印</button>
       </div>
     </div>
+
+    ${rep.designer ? `<div id="fud-designer"></div>` : ''}
 
     <div class="table-wrap" id="report-table">
       <div class="skeleton-row"></div><div class="skeleton-row"></div><div class="skeleton-row"></div>
@@ -272,4 +275,301 @@ function emptyReportHtml(msg, emoji) {
     <div class="empty-text">${msg}</div>
     <div class="empty-sub">试试调整日期范围或切换其他报表</div>
   </div>`;
+}
+
+/* ============ 动态跟进提醒字段设计器（ERP-194：只读、有界的前端字段选择与分页预览） ============
+   口径与后端 ERP-193（DynamicFollowUpDueReportController / DynamicFollowUpDueReportRules）一一对应：
+   - 入口复用在「跟进提醒」报表（reports.js 的 follow-up-due，designer: true），不新增菜单 / 架构 / 脚本注册；
+   - 字段选择器只由 GET /api/dynamic-follow-up-due-report 返回的有限白名单目录渲染为复选框（name="fud-des-field"），
+     绝无自由填写的字段名或 SQL；勾选状态经 fudDesSelectFields 规范化（去重、保持顺序、丢弃未知键）；
+   - 筛选仅限到期状态（overdue / today / upcoming）、as-of 日期与提前天数（0~365），分页有界（页码 ≥ 1，每页 1~200），
+     预览走 POST /api/dynamic-follow-up-due-report，只发送「白名单字段 + 有界筛选 + 有界分页」；
+   - 结果按后端返回的列名与选定字段值渲染（fudDesTableHtml / fudDesResultHtml），全部 HTML 转义；
+   - 空页 / 授权撤销（权限不足 / 未登录）/ 无效请求 / 网络失败分别可见，且不暴露范围外数据；
+   - 全程只读：不写库、不迁移、不执行任意 SQL。 */
+
+/* 字段设计器状态（纯数据；DOM 访问只在事件处理函数内部发生） */
+let FUD_DYN = {
+  catalog: null,      // GET /api/dynamic-follow-up-due-report 返回的目录 DTO
+  fields: [],         // 目录字段（白名单）
+  selectedKeys: [],   // 当前勾选的字段键（默认全选）
+  view: null,         // 最近一次预览结果
+  page: 1,            // 当前预览页（预览 / 翻页复用）
+};
+
+/* HTML 转义（本地独立实现，避免依赖全局 escapeHtml 的加载顺序） */
+function fudDesEsc(v) {
+  return String(v ?? '').replace(/[&<>"']/g, c => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[c]));
+}
+
+/* 规范化选定字段（fail closed）：只保留目录白名单内的键、去重、保持请求顺序；未知键丢弃，绝不发送任意字段名 */
+function fudDesSelectFields(catalogFields, selectedKeys) {
+  const valid = new Set((catalogFields || []).map(f => f && f.key).filter(Boolean));
+  const seen = new Set();
+  const result = [];
+  for (const k of (Array.isArray(selectedKeys) ? selectedKeys : [])) {
+    if (typeof k !== 'string') continue;
+    const key = k.trim();
+    if (!key || !valid.has(key) || seen.has(key)) continue;
+    seen.add(key);
+    result.push(key);
+  }
+  return result;
+}
+
+/* 到期状态白名单（overdue / today / upcoming；未知取值不回传，由后端 fail closed 兜底） */
+function fudDesDueStatusKey(v) {
+  const s = String(v || '').trim();
+  return (s === 'overdue' || s === 'today' || s === 'upcoming') ? s : '';
+}
+
+/* 组装有界预览请求体：字段只来自目录、筛选仅到期状态 / as-of 日期 / 提前天数、分页有界，绝不接受任意字段名或 SQL */
+function fudDesBuildRequest(state) {
+  const fields = fudDesSelectFields(state.catalogFields, state.selectedKeys);
+  const page = Math.max(1, Math.floor(Number(state.page) || 1));
+  const maxPageSize = Number(state.maxPageSize) || 200;
+  let pageSize = Math.floor(Number(state.pageSize));
+  if (!Number.isFinite(pageSize)) pageSize = 20;
+  pageSize = Math.max(1, Math.min(maxPageSize, pageSize));
+
+  const req = { fields, page, pageSize };
+
+  if (state.asOfDate) req.asOfDate = String(state.asOfDate).slice(0, 10);
+  let aheadDays = Math.floor(Number(state.aheadDays));
+  if (!Number.isFinite(aheadDays)) aheadDays = 7;
+  aheadDays = Math.max(0, Math.min(365, aheadDays));
+  req.aheadDays = aheadDays;
+
+  const dueStatus = fudDesDueStatusKey(state.dueStatus);
+  if (dueStatus) req.dueStatus = dueStatus;
+
+  return req;
+}
+
+/* 单元格纯文本：日期截断为 YYYY-MM-DD、数字合理格式化、其余按字符串呈现（null 显示为空） */
+function fudDesCellText(value, field) {
+  const dataType = (field && field.dataType) || 'text';
+  if (value === null || value === undefined) return '';
+  if (dataType === 'date') return String(value).slice(0, 10);
+  if (dataType === 'number') {
+    const n = Number(value);
+    if (Number.isFinite(n)) return Number.isInteger(n) ? String(n) : n.toFixed(2);
+    return String(value);
+  }
+  return String(value);
+}
+
+/* 单元格 HTML（转义后安全渲染） */
+function fudDesRenderCell(value, field) {
+  return fudDesEsc(fudDesCellText(value, field));
+}
+
+/* 结果表格 HTML：表头为返回的列名、单元格为返回的选定字段值，全部经转义 */
+function fudDesTableHtml(view) {
+  const cols = (view && view.columns) || [];
+  const rows = (view && view.rows) || [];
+  if (!cols.length) return '';
+  const align = c => (c.dataType === 'number') ? ' class="text-right"' : '';
+  const head = cols.map(c => `<th${align(c)}>${fudDesEsc(c.label || c.key)}</th>`).join('');
+  const body = rows.length
+    ? rows.map(r => `<tr>${cols.map(c => `<td${align(c)}>${fudDesRenderCell(r[c.key], c)}</td>`).join('')}</tr>`).join('')
+    : '';
+  return `<div class="table-wrap" style="margin-top:8px"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
+}
+
+/* 分页（有界、稳定）：当前页之外仍有记录时标注截断，翻页复用当前字段 / 筛选 / 每页条数 */
+function fudDesPagingHtml(view) {
+  if (!view) return '';
+  const prevDisabled = view.page <= 1 ? ' disabled' : '';
+  const nextDisabled = view.page >= view.totalPages ? ' disabled' : '';
+  return `<div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px">
+      <span class="text-muted">第 ${view.page} 页 / 共 ${view.totalPages} 页${view.truncated ? '（仅当前页，后续仍有记录）' : ''}</span>
+      <div>
+        <button class="btn btn-neutral btn-sm" onclick="fudDesPage(-1)"${prevDisabled}>← 上一页</button>
+        <button class="btn btn-neutral btn-sm" onclick="fudDesPage(1)"${nextDisabled}>下一页 →</button>
+      </div></div>`;
+}
+
+/* 空结果提示（显式使用后端 emptyText） */
+function fudDesEmptyHtml(view) {
+  return `<div class="empty" style="margin:8px 0">${fudDesEsc((view && view.emptyText) || '没有符合筛选条件的跟进提醒证据')}</div>`;
+}
+
+/* 错误提示（授权撤销 / 未登录 / 无效请求 / 网络失败分别可见，且不暴露任何数据） */
+function fudDesErrorHtml(kind, message) {
+  const labels = {
+    forbidden: '权限不足',
+    unauthorized: '未登录 / 登录已过期',
+    invalid: '请求无效',
+    empty: '导出内容为空',
+    network: '网络请求失败',
+    error: '预览失败',
+  };
+  return `<div class="pd-hint" style="color:#b91c1c;background:#fef2f2;border-color:#fecaca">
+      <b>${fudDesEsc(labels[kind] || '预览失败')}</b>：${fudDesEsc(message || '')}</div>`;
+}
+
+/* 业务码 → 错误态分类 */
+function fudDesKindOfCode(code) {
+  if (code === 2002) return 'forbidden';
+  if (code === 2000 || code === 2003) return 'unauthorized';
+  if (code === 5000) return 'error';
+  return 'invalid';
+}
+
+/* 预览结果（只读 / 边界 / 免责文案 + 摘要 + 空结果 + 表格 + 分页） */
+function fudDesResultHtml(view) {
+  const readOnly = view && view.readOnlyText ? `<div class="pd-hint">${fudDesEsc(view.readOnlyText)}</div>` : '';
+  const boundary = view && view.boundaryText ? `<div class="pd-hint">${fudDesEsc(view.boundaryText)}</div>` : '';
+  const disclaimer = view && view.disclaimerText ? `<div class="pd-hint" style="color:#64748b">${fudDesEsc(view.disclaimerText)}</div>` : '';
+  const summary = view
+    ? `<div class="text-muted" style="margin:6px 0">共 ${view.total} 行 · 第 ${view.page} 页 · 每页 ${view.pageSize} 行 · 共 ${view.totalPages} 页${view.truncated ? ' · 后续仍有分页' : ''}</div>`
+    : '';
+  const empty = view && (!view.rows || view.rows.length === 0) ? fudDesEmptyHtml(view) : '';
+  return `${readOnly}${boundary}${disclaimer}${summary}${empty}${fudDesTableHtml(view)}${fudDesPagingHtml(view)}`;
+}
+
+/* 字段选择器：仅由目录白名单渲染为复选框，无自由填写的字段名 */
+function fudDesFieldChooserHtml(fields, selectedKeys) {
+  const selected = new Set(selectedKeys || []);
+  return (fields || []).map(f => {
+    const checked = selected.has(f.key) ? 'checked' : '';
+    return `<label style="display:inline-flex;align-items:center;gap:4px;margin:3px 6px 3px 0;padding:2px 8px;border:1px solid #e2e8f0;border-radius:6px;background:#f8fafc;cursor:pointer">
+        <input type="checkbox" name="fud-des-field" value="${fudDesEsc(f.key)}" ${checked} onchange="fudDesSyncSelection()">
+        <span>${fudDesEsc(f.label || f.key)}</span></label>`;
+  }).join('');
+}
+
+function fudDesLoadingHtml() {
+  return '<div class="pd-hint" style="text-align:center;color:#64748b">正在预览（只读查询）…</div>';
+}
+
+function fudDesRenderResult(html) {
+  const el = document.getElementById('fud-designer-result');
+  if (el) el.innerHTML = html;
+}
+
+/* 轻量请求封装：返回完整 ApiResponse 信封（保留 code），网络异常抛给调用方 */
+async function fudDesRequest(path, method = 'GET', body = null) {
+  const headers = { 'Content-Type': 'application/json' };
+  const token = typeof localStorage !== 'undefined' ? (localStorage.getItem('erp_token') || '') : '';
+  if (token) headers['Authorization'] = 'Bearer ' + token;
+  const opts = { method, headers };
+  if (body) opts.body = JSON.stringify(body);
+  const resp = await fetch(path, opts);
+  return await resp.json();
+}
+
+/* 同步勾选状态到 selectedKeys（复选框 onchange） */
+function fudDesSyncSelection() {
+  const boxes = document.querySelectorAll('input[name="fud-des-field"]');
+  FUD_DYN.selectedKeys = Array.from(boxes).filter(b => b.checked).map(b => b.value);
+}
+
+function fudDesToggleAll(checked) {
+  const boxes = document.querySelectorAll('input[name="fud-des-field"]');
+  FUD_DYN.selectedKeys = [];
+  boxes.forEach(b => { b.checked = checked; if (checked) FUD_DYN.selectedKeys.push(b.value); });
+}
+
+/* 读取当前字段 / 筛选 / 分页状态（预览与翻页复用，单一来源） */
+function fudDesBuildState(page) {
+  const val = id => { const el = document.getElementById(id); return el ? el.value.trim() : ''; };
+  return {
+    catalogFields: FUD_DYN.fields,
+    selectedKeys: FUD_DYN.selectedKeys,
+    asOfDate: val('fud-des-asof'),
+    aheadDays: val('fud-des-ahead'),
+    dueStatus: val('fud-des-due-status'),
+    pageSize: val('fud-des-pagesize'),
+    page: page || FUD_DYN.page || 1,
+    maxPageSize: FUD_DYN.catalog && FUD_DYN.catalog.maxPageSize ? FUD_DYN.catalog.maxPageSize : 200,
+  };
+}
+
+/* 预览：组装有界请求 → POST → 安全渲染列名与单元格；授权 / 无效 / 空 / 网络失败均可见 */
+async function fudDesPreview(page) {
+  const state = fudDesBuildState(page);
+  const req = fudDesBuildRequest(state);
+  FUD_DYN.page = req.page;
+
+  fudDesRenderResult(fudDesLoadingHtml());
+
+  try {
+    const resp = await fudDesRequest('/api/dynamic-follow-up-due-report', 'POST', req);
+    if (resp.code === 0) {
+      FUD_DYN.view = resp.data;
+      FUD_DYN.page = resp.data.page;
+      fudDesRenderResult(fudDesResultHtml(resp.data));
+    } else if (resp.code === 2000 || resp.code === 2003) {
+      if (typeof logout === 'function') logout();
+      fudDesRenderResult(fudDesErrorHtml('unauthorized', resp.message));
+    } else {
+      fudDesRenderResult(fudDesErrorHtml(fudDesKindOfCode(resp.code), resp.message));
+    }
+  } catch (err) {
+    fudDesRenderResult(fudDesErrorHtml('network', (err && err.message) || '无法连接到服务器'));
+  }
+}
+
+/* 翻页（有界：最小第 1 页） */
+function fudDesPage(delta) {
+  const page = (FUD_DYN.view ? FUD_DYN.view.page : FUD_DYN.page) + delta;
+  if (page < 1) return;
+  fudDesPreview(page);
+}
+
+/* 加载字段目录（需登录 + 跟进提醒菜单授权；授权 / 网络失败 fail closed，不渲染任何字段） */
+async function loadFollowUpDueDesignerCatalog() {
+  try {
+    const resp = await fudDesRequest('/api/dynamic-follow-up-due-report');
+    if (resp.code === 2000 || resp.code === 2003) {
+      if (typeof logout === 'function') logout();
+      fudDesRenderResult(fudDesErrorHtml('unauthorized', resp.message));
+      return;
+    }
+    if (resp.code !== 0) {
+      fudDesRenderResult(fudDesErrorHtml(fudDesKindOfCode(resp.code), resp.message));
+      return;
+    }
+    FUD_DYN.catalog = resp.data;
+    FUD_DYN.fields = (resp.data && resp.data.fields) || [];
+    FUD_DYN.selectedKeys = FUD_DYN.fields.map(f => f.key);
+    const el = document.getElementById('fud-designer-fields');
+    if (el) el.innerHTML = fudDesFieldChooserHtml(FUD_DYN.fields, FUD_DYN.selectedKeys);
+  } catch (err) {
+    fudDesRenderResult(fudDesErrorHtml('network', (err && err.message) || '无法连接到服务器'));
+  }
+}
+
+/* 打开动态跟进提醒字段设计器（从「跟进提醒」报表工具栏进入） */
+function openFollowUpDueDesigner() {
+  const el = document.getElementById('fud-designer');
+  if (!el) return;
+  const today = new Date().toISOString().slice(0, 10);
+  el.innerHTML = `
+    <div class="pd-hint">🎛 字段设计器（只读预览）：勾选可见列 → 选择到期状态 / as-of 日期 / 提前天数 / 每页条数 → 预览授权有界结果；全程只读，不执行任意 SQL。</div>
+    <div class="toolbar" style="margin-top:0">
+      <div class="toolbar-left" style="flex-wrap:wrap;gap:6px;align-items:center;font-size:13px">
+        <label>到期状态 <select id="fud-des-due-status" onchange="fudDesPreview(1)">
+          <option value="">全部状态</option>
+          <option value="overdue">已逾期</option>
+          <option value="today">今日到期</option>
+          <option value="upcoming">即将到期</option>
+        </select></label>
+        <label>as-of 日期 <input type="date" id="fud-des-asof" value="${today}"></label>
+        <label>提前天数 <input type="number" id="fud-des-ahead" value="7" min="0" max="365" style="width:80px"></label>
+        <label>每页 <input type="number" id="fud-des-pagesize" value="20" min="1" max="200" style="width:70px"></label>
+        <span id="fud-designer-fields">正在加载字段目录…</span>
+      </div>
+      <div class="toolbar-actions">
+        <button class="btn btn-neutral btn-sm" onclick="fudDesToggleAll(true)">全选</button>
+        <button class="btn btn-neutral btn-sm" onclick="fudDesToggleAll(false)">清空</button>
+        <button class="btn btn-primary" onclick="fudDesPreview(1)">预览</button>
+      </div>
+    </div>
+    <div id="fud-designer-result"></div>`;
+  loadFollowUpDueDesignerCatalog();
 }
