@@ -1,0 +1,38 @@
+{
+  "id": "ERP-191",
+  "title": "Export agency monthly original-currency group amounts to PDF",
+  "status": "pending",
+  "risk_level": "low",
+  "description": "A customer-service user downloads the authorized current-page agency monthly report as a Chinese PDF and sees separate original-currency amount subtotals for the chosen month or customer grouping. Extend ERP-189 PDF rendering with a distinct amount-group section from ERP-186 server-provided GroupCounts while preserving selected-column evidence and count sections; none grouping keeps current PDF behavior. The existing endpoint reruns identity, customer menu, salesperson scope, fields, group, filters and page bounds and OperationLogMiddleware audits download. Render registered, draft and void amounts separately with currency precision and explicit current-page, empty and truncated evidence meaning, never merge currencies or pages and never claim revenue or receivables. Reuse shared SimHei font resolution, paginate without clipping and fail clearly when font is absent. Development only: no schema or migration edits, production SQL or real database execution, arbitrary SQL, business writes, secrets, deployment or browser acceptance. Keep manual test output outside the repo and verify focused PDF tests plus safe Release build/test.",
+  "acceptance_criteria": [
+    "For month or customer grouping, the existing authorized bounded PDF endpoint appends a distinct amount-group section from ERP-186 current-page subtotals while retaining selected-column evidence and ERP-189 count sections; none mode stays unchanged.",
+    "The section renders separate registered, draft and void original-currency values with precision, page-only empty or truncated evidence, and bounded Chinese pagination without clipping or cross-currency totals.",
+    "Focused PDF tests cover denied access, invalid grouping, mixed currencies, decimal precision, long labels, pagination, empty and truncated groups, missing font and unchanged earlier sections; safe Release build/test passes."
+  ],
+  "allowed_paths": [
+    "src/ERP.Infrastructure/Export/DynamicAgencyServiceFeeMonthlyPdfExporter.cs",
+    "src/ERP.UnitTests/DynamicAgencyServiceFeeMonthlyGroupedAmountPdfTests.cs"
+  ],
+  "validation_profile": "safe",
+  "depends_on": [
+    "ERP-186",
+    "ERP-189"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "completion_mode": "build",
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": [],
+    "test_filter": "Collection=UiTests",
+    "minimum_screenshots": 1
+  },
+  "human_gate": {
+    "required": false,
+    "status": "not_required",
+    "level": "L1",
+    "reason": ""
+  },
+  "attempts": 0,
+  "created_at": "2026-09-30T06:46:30.611564Z"
+}
