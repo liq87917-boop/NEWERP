@@ -355,3 +355,31 @@ Excel 导出（`POST .../export`）在既有「订单证据」「未关联收款
 - 后端工作簿单测：`DynamicReceiptReconciliationGroupedExcelTests.cs`（覆盖 none 保留两表、customer / receiptCoverageStatus /
   receiptEvidenceStatus 分组工作表、未知分组键源读取前拒绝、无销售订单菜单授权拒绝、空页 / 截断 / 公式前导标签转义、以及只读不写库）。
 
+## 17. 当前页计数分组 PDF 导出（ERP-175，只读、有界、作用域化）
+
+PDF 导出（`POST .../export-pdf`）在既有「订单证据」「未关联收款证据」两个独立分区的基础上，**仅在非 `none` 分组模式**下追加
+「订单计数分组」「未关联收款计数分组」两个独立分区，复用 ERP-170 同一批有界、已授权的当前页分组数据，并保留既有默认文档、
+分页与 SimHei 字体缺失显式失败语义：
+
+- **分组键校验先于源读取**：`DynamicReceiptReconciliationReportRules.NormalizeGroupBy(request.GroupBy)` 在读取 ERP-046 源数据之前
+  完成有限白名单校验（`none` / `customer` / `currency` / `receiptCoverageStatus` / `receiptEvidenceStatus`，大小写不敏感），
+  未知取值显式拒绝（错误码 2004，fail closed）；`none` 模式保留原有两分区默认结构（不追加分组分区）。
+- **订单计数分组分区**（「三、订单计数分组（当前页）」）：列 `分组标签` + `订单张数`（数值，只计数、不含金额）；标签按 PDF 单元格
+  同口径渲染为字面文本（绝不解释为公式 / 控制字符），长标签按列宽省略号截断、绝不溢出或挤压。
+- **未关联收款计数分组分区**（「四、未关联收款计数分组（当前页）」）：列 `分组标签` + `收款张数`（数值）+ `截断`（是 / 否，显式保留）；
+  标签按字面文本渲染、长标签省略号截断。
+- **当前页标注**：两个计数分区标题均显式标注「当前页」，并复用既有分区头「预览第 X / Y 页」元信息，绝不暗示全量合计。
+- **不适用 / 空显式提示**：收款覆盖状态分组只作用于订单侧、收款证据状态分组只作用于未关联收款侧，不适用侧与当前页为空时，
+  相应分组分区显式渲染可见提示（`无订单计数分组（不适用或当前页为空）` / `无未关联收款计数分组（不适用或当前页为空）`），绝不静默留白。
+- **截断显式保留**：未关联收款命中读取上限时，收款计数分组各行 `截断 = 是`（绝不静默截断）。
+- **只计数、不含金额、绝不推断匹配**：两个分组分区只导出当前页计数，绝不写入任何金额合计 / 跨币种合计，绝不推断收款单与订单的匹配关系。
+- **字体前提（Windows）**：中文字体固定使用 Windows 黑体（SimHei），找不到 SimHei 时显式失败（`ErrorCodes.InternalError`），
+  绝不产出乱码或缺字 PDF，也不替换为其它字体；只读 + 审计：无写入、无任意 SQL，`POST` 由既有 `OperationLogMiddleware` 记录审计（动作「导出」）。
+
+### 17.1 测试
+
+- 后端 PDF 单测：`DynamicReceiptReconciliationGroupedPdfTests.cs`（覆盖 none 保留两分区、customer / currency / receiptCoverageStatus /
+  receiptEvidenceStatus 分组分区、未知分组键源读取前拒绝、无销售订单菜单授权拒绝、无身份拒绝、字体缺失显式失败、长标签 / 多组分页、
+  空页 / 截断分组、以及只读不写库）。
+
+

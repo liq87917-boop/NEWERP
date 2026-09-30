@@ -87,16 +87,23 @@ public class DynamicReceiptReconciliationReportController : ControllerBase
     }
 
     /// <summary>
-    /// 导出当前页为 PDF（ERP-169，只读）：复用「有界、已授权预览」与选定列顺序（每次请求重新校验身份 / 销售订单菜单授权 /
+    /// 导出当前页为 PDF（ERP-169 / ERP-175，只读）：复用「有界、已授权预览」与选定列顺序（每次请求重新校验身份 / 销售订单菜单授权 /
     /// 字段 / 筛选 / 页大小 / 业务员数据范围），把当前页选定订单列与未关联收款列分别渲染为两个独立 PDF 分区（仅导出当前页）。
     /// <para>金额保留原币、未知金额 null 保留为空文本（绝不回落 0）、状态与未关联收款截断警告显式保留；宽列集自动分页；
     /// 中文字体（SimHei）缺失时显式失败；全程只读，不写库、不执行任意 SQL；请求由既有 <c>OperationLogMiddleware</c> 记录审计（动作「导出」）。</para>
+    /// <para>ERP-175：分组键在读取源数据之前按有限白名单校验（fail closed，与预览 / Excel 导出同口径）；非 none 分组模式在同一 PDF 追加
+    /// 「订单计数分组」与「未关联收款计数分组」两个独立分区（复用 ERP-170 同一批有界、已授权分组数据，只计数、不含金额、绝不推断匹配），
+    /// none 模式保留原有两分区默认结构（不追加分组分区）。</para>
     /// </summary>
     [HttpPost("export-pdf")]
     public async Task<IActionResult> ExportPdf([FromBody] DynamicReceiptReconciliationReportRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
-        var page = await BuildPageAsync(request);
+
+        // 分组键 fail closed：先于任何源读取校验（与预览 / Excel 导出同口径）；none 保留原有两分区默认结构。
+        var groupBy = DynamicReceiptReconciliationReportRules.NormalizeGroupBy(request.GroupBy);
+
+        var page = await BuildPageAsync(request, groupBy);
         var bytes = DynamicReceiptReconciliationPdfExporter.Export(page);
         return File(bytes, "application/pdf", $"ReceiptReconciliation_{DateTime.Now:yyyyMMddHHmmss}.pdf");
     }

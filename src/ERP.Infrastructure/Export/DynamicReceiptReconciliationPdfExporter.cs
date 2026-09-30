@@ -39,6 +39,27 @@ public static class DynamicReceiptReconciliationPdfExporter
     private const double MinColumnWidthMm = 20;
     private const double MaxColumnWidthMm = 45;
 
+    /// <summary>订单计数分组 PDF 分区标题（ERP-175，明确「当前页」，绝不暗示全量合计）</summary>
+    private const string OrderGroupSectionTitle = "三、订单计数分组（当前页）";
+
+    /// <summary>未关联收款计数分组 PDF 分区标题（ERP-175，明确「当前页」）</summary>
+    private const string ReceiptGroupSectionTitle = "四、未关联收款计数分组（当前页）";
+
+    /// <summary>订单计数分组不适用 / 当前页为空时的可见提示（绝不静默留白）</summary>
+    private const string OrderGroupEmptyNote = "无订单计数分组（不适用或当前页为空）";
+
+    /// <summary>未关联收款计数分组不适用 / 当前页为空时的可见提示（绝不静默留白）</summary>
+    private const string ReceiptGroupEmptyNote = "无未关联收款计数分组（不适用或当前页为空）";
+
+    private const string GroupLabelKey = "label";
+    private const string OrderCountKey = "orderCount";
+    private const string ReceiptCountKey = "receiptCount";
+    private const string TruncatedKey = "truncated";
+    private const string GroupLabelColumn = "分组标签";
+    private const string OrderCountColumn = "订单张数";
+    private const string ReceiptCountColumn = "收款张数";
+    private const string TruncatedColumn = "截断";
+
     private const double PointsPerMillimeter = 72.0 / 25.4;
 
     /// <summary>导出当前预览页为 PDF 字节流（只读；字体缺失显式失败）</summary>
@@ -106,9 +127,68 @@ public static class DynamicReceiptReconciliationPdfExporter
             metaFont,
             headerFont,
             cellFont);
+
+        // ERP-175：仅非 none 分组模式追加两个独立计数分区（复用 ERP-170 同一批有界、已授权分组数据，只计数、不含金额、绝不推断匹配）。
+        if (!string.Equals(page.GroupBy, DynamicReceiptReconciliationReportRules.GroupNone, StringComparison.Ordinal))
+        {
+            DrawOrderGroupSection(document, page, titleFont, metaFont, headerFont, cellFont);
+            DrawReceiptGroupSection(document, page, titleFont, metaFont, headerFont, cellFont);
+        }
     }
 
-    /// <summary>渲染一个独立证据分区：宽列集按列页拆分（每个列页重复表头），行按纵向分页；空结果仅渲染分区头与空提示。</summary>
+    /// <summary>渲染「订单计数分组」独立分区：分组标签 + 订单张数（数值），只计数、不含金额；不适用 / 空页显式提示。</summary>
+    private static void DrawOrderGroupSection(
+        PdfDocument document,
+        DynamicReceiptReconciliationReportPageDto page,
+        XFont titleFont,
+        XFont metaFont,
+        XFont headerFont,
+        XFont cellFont)
+    {
+        var columns = new List<DynamicReceiptReconciliationReportFieldDto>
+        {
+            new(GroupLabelKey, GroupLabelColumn, "text", false),
+            new(OrderCountKey, OrderCountColumn, "number", false),
+        };
+
+        var rows = page.OrderGroups?.Select(g => new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            [GroupLabelKey] = g.Label,
+            [OrderCountKey] = g.OrderCount,
+        }).ToList() ?? new List<Dictionary<string, object?>>();
+
+        DrawSection(document, OrderGroupSectionTitle, columns, rows, null, page,
+            titleFont, metaFont, headerFont, cellFont, OrderGroupEmptyNote);
+    }
+
+    /// <summary>渲染「未关联收款计数分组」独立分区：分组标签 + 收款张数（数值）+ 截断（是 / 否，显式保留），只计数、不含金额；不适用 / 空页显式提示。</summary>
+    private static void DrawReceiptGroupSection(
+        PdfDocument document,
+        DynamicReceiptReconciliationReportPageDto page,
+        XFont titleFont,
+        XFont metaFont,
+        XFont headerFont,
+        XFont cellFont)
+    {
+        var columns = new List<DynamicReceiptReconciliationReportFieldDto>
+        {
+            new(GroupLabelKey, GroupLabelColumn, "text", false),
+            new(ReceiptCountKey, ReceiptCountColumn, "number", false),
+            new(TruncatedKey, TruncatedColumn, "text", false),
+        };
+
+        var rows = page.ReceiptGroups?.Select(g => new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            [GroupLabelKey] = g.Label,
+            [ReceiptCountKey] = g.ReceiptCount,
+            [TruncatedKey] = g.Truncated,
+        }).ToList() ?? new List<Dictionary<string, object?>>();
+
+        DrawSection(document, ReceiptGroupSectionTitle, columns, rows, null, page,
+            titleFont, metaFont, headerFont, cellFont, ReceiptGroupEmptyNote);
+    }
+
+    /// <summary>渲染一个独立分区：宽列集按列页拆分（每个列页重复表头），行按纵向分页；空结果仅渲染分区头与空提示（可自定义空提示文案）。</summary>
     private static void DrawSection(
         PdfDocument document,
         string sectionTitle,
@@ -119,7 +199,8 @@ public static class DynamicReceiptReconciliationPdfExporter
         XFont titleFont,
         XFont metaFont,
         XFont headerFont,
-        XFont cellFont)
+        XFont cellFont,
+        string emptyText = "没有符合筛选条件的证据")
     {
         var cols = columns ?? new List<DynamicReceiptReconciliationReportFieldDto>();
         var dataRows = rows ?? new List<Dictionary<string, object?>>();
@@ -139,7 +220,7 @@ public static class DynamicReceiptReconciliationPdfExporter
                     gfxList.Add(gfx);
                     var y = DrawSectionHead(gfx, sectionTitle, note, page, titleFont, metaFont);
                     y = DrawColumnHeaders(gfx, headerFont, columnPage, widths, y);
-                    gfx.DrawString("没有符合筛选条件的证据", cellFont, XBrushes.Black,
+                    gfx.DrawString(emptyText, cellFont, XBrushes.Black,
                         new XRect(Mm(MarginLeftMm), y + Mm(2), TableWidthMm(), DataRowHeightMmPoints),
                         XStringFormats.TopLeft);
                     continue;
