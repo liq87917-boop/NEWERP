@@ -362,7 +362,7 @@ public class DynamicFollowUpDueReportUiTests
         Assert.Contains("合计", js);
 
         var result = Segment(js, "function fudDesResultHtml(", "function fudDesFieldChooserHtml(");
-        Assert.Contains("const totals = fudDesDueStatusTotalsHtml(view);", result);
+        Assert.Contains("const totals = fudDesDueStatusTotalsHtml(view, activeDueStatus);", result);
         Assert.Contains("${totals}", result);
         Assert.Contains("const groups = fudDesGroupsHtml(view);", result);
         Assert.Contains("${groups}", result);
@@ -380,6 +380,68 @@ public class DynamicFollowUpDueReportUiTests
         Assert.Contains("Number(totals.upcoming) || 0", fn);
         Assert.Contains("fudDesEsc(label)", fn);
         Assert.DoesNotContain("view.groups", fn);
+    }
+
+    // ==================== 13. 状态钻取（ERP-202） ====================
+
+    [Fact]
+    public void 钻取_入口_仅设置有限到期状态_回到第1页_复用只读预览()
+    {
+        var js = Script;
+
+        Assert.Contains("function fudDesDrillDueStatus(", js);
+        Assert.Contains("function fudDesResetDueStatus(", js);
+
+        var drill = Segment(js, "function fudDesDrillDueStatus(", "function fudDesResetDueStatus(");
+        Assert.Contains("const key = fudDesDueStatusKey(status);", drill);
+        Assert.Contains("if (!key) return;", drill);
+        Assert.Contains("getElementById('fud-des-due-status')", drill);
+        Assert.Contains("el.value = key", drill);
+        Assert.Contains("fudDesPreview(1);", drill);
+
+        var reset = Segment(js, "function fudDesResetDueStatus(", "/* 错误提示");
+        Assert.Contains("getElementById('fud-des-due-status')", reset);
+        Assert.Contains("el.value = ''", reset);
+        Assert.Contains("fudDesPreview(1);", reset);
+    }
+
+    [Fact]
+    public void 钻取_合计入口可点击_活动状态与返回全部可见()
+    {
+        var js = Script;
+
+        var fn = Segment(js, "function fudDesDueStatusTotalsHtml(", "function fudDesDrillDueStatus(");
+        Assert.Contains("chip('overdue', '已逾期', overdue)", fn);
+        Assert.Contains("chip('today', '今日到期', today)", fn);
+        Assert.Contains("chip('upcoming', '即将到期', upcoming)", fn);
+        Assert.Contains("onclick=\"fudDesDrillDueStatus('${key}')\"", fn);
+        Assert.Contains("aria-current=\"true\"", fn);
+        Assert.Contains("返回全部状态", fn);
+        Assert.Contains("onclick=\"fudDesResetDueStatus()\"", fn);
+        Assert.Contains("当前仅查看", fn);
+    }
+
+    [Fact]
+    public void 钻取_结果与预览_传递活动状态_保留既有错误反馈_无自由SQL与原始数据缓存()
+    {
+        var js = Script;
+
+        Assert.Contains("function fudDesResultHtml(view, activeDueStatus)", js);
+        var result = Segment(js, "function fudDesResultHtml(", "function fudDesFieldChooserHtml(");
+        Assert.Contains("const totals = fudDesDueStatusTotalsHtml(view, activeDueStatus);", result);
+
+        var preview = Segment(js, "function fudDesPreview(", "function fudDesPage(delta)");
+        Assert.Contains("fudDesResultHtml(resp.data, state.dueStatus)", preview);
+        Assert.Contains("fudDesErrorHtml('unauthorized', resp.message)", preview);
+        Assert.Contains("fudDesErrorHtml(fudDesKindOfCode(resp.code), resp.message)", preview);
+        Assert.Contains("fudDesErrorHtml('invalid', filterError)", preview);
+        Assert.Contains("fudDesErrorHtml('network', (err && err.message) || '无法连接到服务器')", preview);
+
+        var drill = Segment(js, "function fudDesDrillDueStatus(", "function fudDesResetDueStatus(");
+        Assert.DoesNotContain("FromSql", drill);
+        Assert.DoesNotContain("ExecuteSql", drill);
+        Assert.DoesNotContain("SqlCommand", drill);
+        Assert.DoesNotContain("localStorage.setItem", drill);
     }
 }
 

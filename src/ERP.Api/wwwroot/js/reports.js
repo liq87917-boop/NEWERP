@@ -461,10 +461,12 @@ function fudDesGroupsHtml(view) {
     <ul role="list" style="list-style:none;padding:0 8px;margin:4px 0 8px">${bars}</ul>`;
 }
 
-/* 筛选集到期状态合计（ERP-201）：显示后端返回的「分页前全量」已逾期 / 今日到期 / 即将到期三项计数；
+/* 筛选集到期状态合计（ERP-201）＋ 状态钻取（ERP-202）：显示后端返回的「分页前全量」已逾期 / 今日到期 / 即将到期三项计数；
    与「本页」分组计数在口径上区分（合计为筛选集全量，分组仅当前页）；后端未返回 dueStatusTotals 时不渲染，
-   三项计数全部转义（数字零值安全兜底）。 */
-function fudDesDueStatusTotalsHtml(view) {
+   三项计数全部转义（数字零值安全兜底）。ERP-202：每一项均为只读钻取入口，点击后仅把到期状态筛选设为该项、
+   回到第 1 页并复用既有只读预览（其余筛选与字段保留）；activeDueStatus 命中时以 aria-current 标出当前状态，
+   并提供「返回全部状态」出口。 */
+function fudDesDueStatusTotalsHtml(view, activeDueStatus) {
   const totals = view && view.dueStatusTotals;
   if (!totals) return '';
   const label = (totals.label || '筛选集到期状态合计');
@@ -472,7 +474,36 @@ function fudDesDueStatusTotalsHtml(view) {
   const today = Number(totals.today) || 0;
   const upcoming = Number(totals.upcoming) || 0;
   const total = overdue + today + upcoming;
-  return `<div class="pd-hint" role="img" aria-label="${fudDesEsc(label)}：已逾期 ${overdue}，今日到期 ${today}，即将到期 ${upcoming}，合计 ${total}" style="margin-top:8px">🧮 ${fudDesEsc(label)}：已逾期 <b>${overdue}</b> · 今日到期 <b>${today}</b> · 即将到期 <b>${upcoming}</b>（合计 ${total}）</div>`;
+  const active = fudDesDueStatusKey(activeDueStatus);
+  const textOf = { overdue: '已逾期', today: '今日到期', upcoming: '即将到期' };
+  const chip = (key, text, count) => {
+    const isActive = active === key;
+    const activeAttr = isActive ? ' aria-current="true"' : '';
+    const activeStyle = isActive ? ' style="font-weight:700;border-color:#2563eb;color:#1d4ed8;background:#eff6ff"' : '';
+    return `<button type="button" class="btn btn-neutral btn-sm"${activeAttr}${activeStyle} onclick="fudDesDrillDueStatus('${key}')" title="仅查看${fudDesEsc(text)}">${fudDesEsc(text)} <b>${count}</b></button>`;
+  };
+  const back = active
+    ? ` <button type="button" class="btn btn-neutral btn-sm" onclick="fudDesResetDueStatus()" title="清除到期状态筛选，返回全部状态">↩ 返回全部状态</button>`
+    : '';
+  const activeNote = active ? `，当前仅查看${fudDesEsc(textOf[active] || active)}` : '';
+  return `<div class="pd-hint" role="img" aria-label="${fudDesEsc(label)}：已逾期 ${overdue}，今日到期 ${today}，即将到期 ${upcoming}，合计 ${total}${activeNote}" style="margin-top:8px">🧮 ${fudDesEsc(label)}：${chip('overdue', '已逾期', overdue)} · ${chip('today', '今日到期', today)} · ${chip('upcoming', '即将到期', upcoming)}（合计 ${total}）${back}</div>`;
+}
+
+/* 状态钻取（ERP-202）：点击筛选集到期状态合计中的某一状态，仅设置该有限到期状态筛选并回到第 1 页；
+   其余客户 Id / 关键字 / as-of / 提前天数 / 选定字段 / 分组全部保留；仍走既有只读预览（授权审计不变）。 */
+function fudDesDrillDueStatus(status) {
+  const key = fudDesDueStatusKey(status);
+  if (!key) return; // fail closed：非白名单状态不钻取
+  const el = document.getElementById('fud-des-due-status');
+  if (el) el.value = key;
+  fudDesPreview(1);
+}
+
+/* 返回全部状态（ERP-202）：清除到期状态筛选并回到第 1 页，其余筛选与字段保留 */
+function fudDesResetDueStatus() {
+  const el = document.getElementById('fud-des-due-status');
+  if (el) el.value = '';
+  fudDesPreview(1);
 }
 
 /* 错误提示（授权撤销 / 未登录 / 无效请求 / 网络失败分别可见，且不暴露任何数据） */
@@ -497,8 +528,8 @@ function fudDesKindOfCode(code) {
   return 'invalid';
 }
 
-/* 预览结果（只读 / 边界 / 免责文案 + 摘要 + 空结果 + 表格 + 分页） */
-function fudDesResultHtml(view) {
+/* 预览结果（只读 / 边界 / 免责文案 + 摘要 + 空结果 + 表格 + 分页；activeDueStatus 用于标出钻取中的到期状态） */
+function fudDesResultHtml(view, activeDueStatus) {
   const readOnly = view && view.readOnlyText ? `<div class="pd-hint">${fudDesEsc(view.readOnlyText)}</div>` : '';
   const boundary = view && view.boundaryText ? `<div class="pd-hint">${fudDesEsc(view.boundaryText)}</div>` : '';
   const disclaimer = view && view.disclaimerText ? `<div class="pd-hint" style="color:#64748b">${fudDesEsc(view.disclaimerText)}</div>` : '';
@@ -506,7 +537,7 @@ function fudDesResultHtml(view) {
     ? `<div class="text-muted" style="margin:6px 0">共 ${view.total} 行 · 第 ${view.page} 页 · 每页 ${view.pageSize} 行 · 共 ${view.totalPages} 页${view.truncated ? ' · 后续仍有分页' : ''}</div>`
     : '';
   const groups = fudDesGroupsHtml(view);
-  const totals = fudDesDueStatusTotalsHtml(view);
+  const totals = fudDesDueStatusTotalsHtml(view, activeDueStatus);
   const empty = view && (!view.rows || view.rows.length === 0) ? fudDesEmptyHtml(view) : '';
   return `${readOnly}${boundary}${disclaimer}${summary}${totals}${groups}${empty}${fudDesTableHtml(view)}${fudDesPagingHtml(view)}`;
 }
@@ -590,7 +621,7 @@ async function fudDesPreview(page) {
     if (resp.code === 0) {
       FUD_DYN.view = resp.data;
       FUD_DYN.page = resp.data.page;
-      fudDesRenderResult(fudDesResultHtml(resp.data));
+      fudDesRenderResult(fudDesResultHtml(resp.data, state.dueStatus));
     } else if (resp.code === 2000 || resp.code === 2003) {
       if (typeof logout === 'function') logout();
       fudDesRenderResult(fudDesErrorHtml('unauthorized', resp.message));
