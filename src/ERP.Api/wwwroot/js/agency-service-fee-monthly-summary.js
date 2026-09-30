@@ -125,6 +125,7 @@ function asfmsRender() {
         <div><label class="ea-lb">每页</label>
           <input type="number" id="asfms-f-pagesize" value="${Number(f.pageSize)}" min="1" max="200" style="width:70px"></div>
         <button class="btn btn-primary btn-sm" onclick="asfmsSearch()">🔍 预览</button>
+        <button class="btn btn-neutral btn-sm" onclick="asfmsExportExcel()" title="下载当前页所选列为 Excel（只读，复用当前筛选与分页）">📥 导出 Excel</button>
         <button class="btn btn-neutral btn-sm" onclick="openAgencyServiceFeeStatementRegister()">← 返回对账单台账</button>
       </div>
       ${asfmsFieldChooserHtml()}
@@ -238,6 +239,66 @@ async function asfmsPreview(page) {
   } catch (err) {
     ASFMS.loading = false;
     ASFMS.view = null;
+    ASFMS.error = { kind: 'network', message: (err && err.message) || '无法连接到服务器' };
+  }
+  asfmsRender();
+}
+
+/* 下载当前页选定列为 Excel（ERP-182，只读）：复用预览请求体 POST /api/dynamic-agency-service-fee-monthly-report/export；
+   成功（xlsx 附件）触发下载；授权 / 无效 / 网络失败在结果区可见，不下载任何内容；空页下载含显式说明的工作簿 */
+async function asfmsExportExcel() {
+  if (!ASFMS.view || !ASFMS.view.columns || !ASFMS.view.columns.length) {
+    ASFMS.error = { kind: 'invalid', message: '请先预览后再导出 Excel' };
+    asfmsRender();
+    return;
+  }
+
+  const req = asfmsBuildRequest(ASFMS.view ? ASFMS.view.page : ASFMS.filters.page);
+  ASFMS.loading = true;
+  ASFMS.error = null;
+  asfmsRender();
+
+  try {
+    const headers = { 'Content-Type': 'application/json' };
+    const token = typeof localStorage !== 'undefined' ? (localStorage.getItem('erp_token') || '') : '';
+    if (token) headers['Authorization'] = 'Bearer ' + token;
+    const resp = await fetch('/api/dynamic-agency-service-fee-monthly-report/export', {
+      method: 'POST', headers, body: JSON.stringify(req)
+    });
+
+    const contentType = (resp.headers.get('content-type') || '');
+    if (contentType.indexOf('spreadsheetml') >= 0) {
+      const blob = await resp.blob();
+      const disposition = resp.headers.get('content-disposition') || '';
+      const match = /filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/i.exec(disposition);
+      const filename = (match && match[1] ? match[1].replace(/['"]/g, '') : '') || 'AgencyServiceFeeMonthly.xlsx';
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      ASFMS.loading = false;
+      toast('Excel 已导出（当前页 · 选定列）', 'success');
+      asfmsRender();
+      return;
+    }
+
+    let envelope = null;
+    try { envelope = await resp.json(); } catch (e) { /* 忽略非 JSON 响应体 */ }
+    const code = envelope && envelope.code;
+    const message = (envelope && envelope.message) || '导出失败';
+    ASFMS.loading = false;
+    if (code === 2000 || code === 2003) {
+      if (typeof logout === 'function') logout();
+      ASFMS.error = { kind: 'unauthorized', message };
+    } else {
+      ASFMS.error = { kind: asfmsKindOfCode(code), message };
+    }
+  } catch (err) {
+    ASFMS.loading = false;
     ASFMS.error = { kind: 'network', message: (err && err.message) || '无法连接到服务器' };
   }
   asfmsRender();

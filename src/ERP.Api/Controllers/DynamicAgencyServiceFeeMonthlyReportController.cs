@@ -2,6 +2,7 @@ using ERP.Application.Common;
 using ERP.Application.DTOs;
 using ERP.Application.Interfaces;
 using ERP.Application.Services;
+using ERP.Infrastructure.Export;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using System.Security.Claims;
@@ -13,6 +14,7 @@ namespace ERP.Api.Controllers;
 /// <list type="number">
 /// <item><b>GET /api/dynamic-agency-service-fee-monthly-report</b>：返回有限字段白名单目录（需登录 + 客户资料菜单授权 + 业务员数据范围）；</item>
 /// <item><b>POST /api/dynamic-agency-service-fee-monthly-report</b>：按选定字段与有界筛选预览 ERP-180 月度汇总，稳定分页、原币隔离、状态金额口径不变。</item>
+/// <item><b>POST /api/dynamic-agency-service-fee-monthly-report/export</b>：下载当前选定页为 Excel（xlsx，只读，复用有界授权预览与选定列顺序）。</item>
 /// </list>
 /// <para>复用 ERP-180 的 <see cref="AgencyServiceFeeMonthlySummaryService.ForQueryAsync"/>：
 /// 客户 / 币种 / 对账日期筛选、稳定分页与分组 / 金额口径全部由既有只读服务完成，本控制器只做授权与字段投影，不做写入。</para>
@@ -47,6 +49,29 @@ public class DynamicAgencyServiceFeeMonthlyReportController : ControllerBase
     /// <summary>按选定字段与有界筛选预览代理服务费月度汇总（只读、分页有界；复用 ERP-180 只读服务）</summary>
     [HttpPost]
     public async Task<IActionResult> Preview([FromBody] DynamicAgencyServiceFeeMonthlyReportRequest request)
+        => Ok(ApiResponse<DynamicAgencyServiceFeeMonthlyReportPageDto>.Success(
+            await BuildPageAsync(request)));
+
+    /// <summary>
+    /// 下载当前选定页为 Excel（ERP-182，只读）：复用「有界、已授权预览」与选定列顺序（每次请求重新校验身份 / 菜单授权 /
+    /// 字段 / 筛选 / 页大小 / 业务员数据范围），仅导出当前页选定列；金额保留原币、草稿 / 已作废金额与已登记合计分开列示，
+    /// 文本单元格做公式注入转义，空页显式说明（证据数字不代表收入或应收）。
+    /// <para>全程只读，不写库、不执行任意 SQL；请求由既有 <c>OperationLogMiddleware</c> 记录审计（动作「导出」）。</para>
+    /// </summary>
+    [HttpPost("export")]
+    public async Task<IActionResult> Export([FromBody] DynamicAgencyServiceFeeMonthlyReportRequest request)
+    {
+        // 复用同一有界、已授权预览：重新校验身份 / 菜单授权 / 字段 / 筛选 / 页大小 / 业务员数据范围
+        var page = await BuildPageAsync(request);
+
+        var bytes = BuildWorkbook(page);
+        return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            $"AgencyServiceFeeMonthly_{DateTime.Now:yyyyMMddHHmmss}.xlsx");
+    }
+
+    /// <summary>复用同一有界、已授权预览管线：授权 → 校验 → 只读查询 → 选定列投影（与 ERP-181 预览同源，fail closed）</summary>
+    private async Task<DynamicAgencyServiceFeeMonthlyReportPageDto> BuildPageAsync(
+        DynamicAgencyServiceFeeMonthlyReportRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
         var scope = await EnsureAuthorizedAsync(CurrentUserId());
@@ -65,22 +90,21 @@ public class DynamicAgencyServiceFeeMonthlyReportController : ControllerBase
             .Select(r => DynamicAgencyServiceFeeMonthlyReportRules.BuildRow(r, fieldKeys))
             .ToList();
 
-        return Ok(ApiResponse<DynamicAgencyServiceFeeMonthlyReportPageDto>.Success(
-            new DynamicAgencyServiceFeeMonthlyReportPageDto(
-                columns,
-                rows,
-                view.Total,
-                view.Page,
-                view.PageSize,
-                view.TotalPages,
-                view.Truncated,
-                view.GroupCount,
-                view.EmptyText,
-                DynamicAgencyServiceFeeMonthlyReportRules.ReadOnlyText,
-                DynamicAgencyServiceFeeMonthlyReportRules.BoundaryText,
-                DynamicAgencyServiceFeeMonthlyReportRules.EvidenceOnlyText,
-                DynamicAgencyServiceFeeMonthlyReportRules.CurrencyIsolationText,
-                DynamicAgencyServiceFeeMonthlyReportRules.NoProrationText)));
+        return new DynamicAgencyServiceFeeMonthlyReportPageDto(
+            columns,
+            rows,
+            view.Total,
+            view.Page,
+            view.PageSize,
+            view.TotalPages,
+            view.Truncated,
+            view.GroupCount,
+            view.EmptyText,
+            DynamicAgencyServiceFeeMonthlyReportRules.ReadOnlyText,
+            DynamicAgencyServiceFeeMonthlyReportRules.BoundaryText,
+            DynamicAgencyServiceFeeMonthlyReportRules.EvidenceOnlyText,
+            DynamicAgencyServiceFeeMonthlyReportRules.CurrencyIsolationText,
+            DynamicAgencyServiceFeeMonthlyReportRules.NoProrationText);
     }
 
     /// <summary>身份 + 既有「角色 → 菜单」客户资料模块授权 + 业务员数据范围（fail closed，绝不猜测身份）</summary>
@@ -101,5 +125,53 @@ public class DynamicAgencyServiceFeeMonthlyReportController : ControllerBase
         }
 
         return await SalespersonDataScopeService.ResolveAsync(_db, userId);
+    }
+
+    /// <summary>既有选定列数据工作表名称（ERP-182，单工作表）</summary>
+    private const string DataSheetName = "代理服务费月度汇总";
+
+    /// <summary>空页显式说明（证据数字，不代表收入或应收）</summary>
+    private const string EmptyPageNote = "没有符合筛选条件的代理服务费对账单证据（或已被软删除；证据数字不代表收入或应收）";
+
+    /// <summary>用 ExcelExporter 生成当前页数据工作表（选定列顺序 + 数值金额 + 公式注入转义 + 空页显式说明）</summary>
+    private static byte[] BuildWorkbook(DynamicAgencyServiceFeeMonthlyReportPageDto page)
+    {
+        var columns = page.Columns.Select(c => (c.Key, c.Label)).ToList();
+        var rows = page.Rows.Select(BuildExportRow).ToList();
+
+        if (rows.Count == 0 && columns.Count > 0)
+        {
+            var emptyNote = string.IsNullOrWhiteSpace(page.EmptyText) ? EmptyPageNote : page.EmptyText;
+            var noteRow = new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                [columns[0].Key] = EscapeFormulaLeading(emptyNote) ?? string.Empty,
+            };
+            rows.Add(noteRow);
+        }
+
+        return ExcelExporter.ExportRows(DataSheetName, rows, columns);
+    }
+
+    /// <summary>把一页预览行转成导出行：对每个单元格做公式注入转义，键保持不变</summary>
+    private static Dictionary<string, object?> BuildExportRow(Dictionary<string, object?> row)
+    {
+        var export = new Dictionary<string, object?>(StringComparer.Ordinal);
+        foreach (var kv in row)
+            export[kv.Key] = EscapeFormulaLeading(kv.Value);
+        return export;
+    }
+
+    /// <summary>文本是否以电子表格公式字符开头（会触发 Excel 公式注入）</summary>
+    private static bool IsFormulaLeading(string? value)
+        => !string.IsNullOrEmpty(value)
+           && value[0] is '=' or '+' or '-' or '@' or '\t' or '\r' or '\n';
+
+    /// <summary>转义 Excel 公式前导文本：以危险字符开头的文本前缀单引号，保持字面文本、不被当作公式执行；
+    /// 数值 / 日期 / 布尔等类型原样返回（由 ExcelExporter 按其类型写入数值单元格）。</summary>
+    private static object? EscapeFormulaLeading(object? value)
+    {
+        if (value is string s && IsFormulaLeading(s))
+            return "'" + s;
+        return value;
     }
 }
