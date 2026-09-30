@@ -1,7 +1,9 @@
 using ERP.Application.Common;
 using ERP.Application.Interfaces;
+using ERP.Application.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using System.Security.Claims;
 
 namespace ERP.Api.Controllers;
 
@@ -13,12 +15,28 @@ namespace ERP.Api.Controllers;
 [Authorize]
 public class ReportController : ControllerBase
 {
-    private readonly IReportService _reportService;
+    /// <summary>跟进提醒报表要求的既有菜单编码（与 SeedData / SchemaUpgrader 同源）</summary>
+    private const string FollowUpDueMenuCode = "follow-up-due";
 
-    public ReportController(IReportService reportService)
+    /// <summary>跟进提醒报表要求菜单的中文文案（与既有菜单名一致）</summary>
+    private const string FollowUpDueMenuText = "跟进提醒";
+
+    private readonly IReportService _reportService;
+    private readonly IErpDbContext? _db;
+
+    /// <summary>
+    /// <paramref name="db"/> 为可空是为了不破坏既有仅注入 <see cref="IReportService"/> 的报表端点测试；
+    /// 跟进提醒端点每次请求都要求已注入的数据库上下文，缺失时 fail closed（绝不静默返回未授权数据）。
+    /// </summary>
+    public ReportController(IReportService reportService, IErpDbContext? db = null)
     {
         _reportService = reportService;
+        _db = db;
     }
+
+    /// <summary>当前登录用户 Id（缺失或非数字时返回 null，由授权检查 fail closed 拒绝，绝不猜测身份）</summary>
+    private long? CurrentUserId()
+        => long.TryParse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value, out var id) ? id : null;
 
     /// <summary>商品销量排名榜</summary>
     [HttpGet("product-sales-ranking")]
@@ -124,11 +142,34 @@ public class ReportController : ControllerBase
         return Ok(ApiResponse<List<ReportDtos.SalesCommissionItem>>.Success(result));
     }
 
-    /// <summary>跟进提醒（下次跟进日期已到期 / 未来 N 天内即将到期；默认 N=7）</summary>
+    /// <summary>跟进提醒（下次跟进日期已到期 / 未来 N 天内即将到期；默认 N=7；每次请求重新校验身份、菜单授权与业务员数据范围）</summary>
     [HttpGet("follow-up-due")]
     public async Task<IActionResult> FollowUpDue([FromQuery] DateTime? asOfDate, [FromQuery] int aheadDays = 7)
     {
-        var result = await _reportService.GetFollowUpDueAsync(asOfDate ?? DateTime.Today, aheadDays);
+        if (aheadDays is < 0 or > 365)
+            throw new BusinessException("跟进提醒的提前天数必须在 0 到 365 之间", ErrorCodes.InvalidParameter);
+
+        if (_db is null)
+            throw new BusinessException("跟进提醒报表缺少数据库上下文，无法解析当前账号授权", ErrorCodes.InternalError);
+
+        var db = _db;
+        var userId = CurrentUserId();
+        if (userId is null or <= 0)
+            throw new BusinessException("请先登录后再查看跟进提醒报表", ErrorCodes.Unauthorized);
+
+        var menuCodes = await CustomerReceivableReconciliationService.LoadAuthorizedMenuCodesAsync(
+            db, userId.Value);
+        if (!menuCodes.Contains(FollowUpDueMenuCode, StringComparer.OrdinalIgnoreCase))
+        {
+            throw new BusinessException(
+                $"当前账号没有「{FollowUpDueMenuText}」（{FollowUpDueMenuCode}）模块授权：拒绝查看跟进提醒报表"
+                + "（fail closed，不返回任何数据）",
+                ErrorCodes.Forbidden);
+        }
+
+        var scope = await SalespersonDataScopeService.ResolveAsync(db, userId);
+
+        var result = await _reportService.GetFollowUpDueAsync(asOfDate ?? DateTime.Today, aheadDays, scope);
         return Ok(ApiResponse<List<ReportDtos.FollowUpDueItem>>.Success(result));
     }
 

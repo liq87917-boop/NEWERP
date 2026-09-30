@@ -1,3 +1,5 @@
+using ERP.Application.Services;
+
 namespace ERP.Application.Interfaces;
 
 /// <summary>
@@ -44,8 +46,8 @@ public interface IReportService
     /// <summary>业务员提成表（销售额 / 毛利 / 提成额，提成比例取自系统参数）</summary>
     Task<List<ReportDtos.SalesCommissionItem>> GetSalesCommissionAsync(DateTime start, DateTime end);
 
-    /// <summary>跟进提醒（下次跟进日期已到期或即将到期的记录）</summary>
-    Task<List<ReportDtos.FollowUpDueItem>> GetFollowUpDueAsync(DateTime asOfDate, int aheadDays);
+    /// <summary>跟进提醒（下次跟进日期已到期或即将到期的记录；按当前账号业务员数据范围过滤）</summary>
+    Task<List<ReportDtos.FollowUpDueItem>> GetFollowUpDueAsync(DateTime asOfDate, int aheadDays, SalespersonDataScope scope);
 
     /// <summary>报价成交率分析（ERP-018，按业务员聚合；分子 = 已转 PI / 已转销售订单 / 状态已完成）</summary>
     Task<List<ReportDtos.QuotationConversionItem>> GetQuotationConversionAsync(DateTime start, DateTime end);

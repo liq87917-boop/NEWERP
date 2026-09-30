@@ -9,14 +9,21 @@ namespace ERP.Application.Services;
 /// </summary>
 public partial class ReportService
 {
-    /// <summary>跟进提醒（已逾期排最前）</summary>
-    public async Task<List<ReportDtos.FollowUpDueItem>> GetFollowUpDueAsync(DateTime asOfDate, int aheadDays)
+    /// <summary>跟进提醒（已逾期排最前；先按当前账号业务员数据范围过滤，再读取与排序）</summary>
+    public async Task<List<ReportDtos.FollowUpDueItem>> GetFollowUpDueAsync(
+        DateTime asOfDate, int aheadDays, SalespersonDataScope scope)
     {
-        var days = aheadDays < 0 ? 7 : aheadDays;
-        var limit = asOfDate.Date.AddDays(days);
+        ArgumentNullException.ThrowIfNull(scope);
 
-        var list = await _db.CustomerFollowUps
-            .Where(x => !x.IsDeleted && x.NextFollowDate != null && x.NextFollowDate <= limit)
+        var limit = asOfDate.Date.AddDays(aheadDays);
+
+        var source = _db.CustomerFollowUps
+            .Where(x => !x.IsDeleted && x.NextFollowDate != null && x.NextFollowDate <= limit);
+
+        // 业务员数据范围（ERP-097，唯一权威口径）：特权账号不过滤；受限制业务员仅其被分配客户，
+        // 无客户 Id 的记录对受限制账号不可见（fail closed，绝不返回范围外客户或匿名记录）。
+        var list = await SalespersonDataScopeService
+            .FilterByCustomer(source, scope, x => x.CustomerId)
             .ToListAsync();
 
         return list

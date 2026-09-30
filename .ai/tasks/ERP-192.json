@@ -1,7 +1,7 @@
 {
   "id": "ERP-192",
   "title": "Scope follow-up due reminders to current ERP user",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "medium",
   "description": "A salesperson opens the existing follow-up due report and sees only reminders for customers in the current ERP data scope. Preserve the existing GET response shape and due-date ordering while requiring the follow-up-due menu grant, resolving the current login on every request, and filtering CustomerFollowUps at the query source with SalespersonDataScopeService. For restricted users, records without a customer ID and customers outside their assignments are invisible; unmapped users receive no rows. Reject invalid aheadDays outside 0 to 365 and fail closed on missing identity or menu access. The existing HTTP operation log provides audit evidence; an error is visible to the report caller. Development only: no schema or migration edits, production SQL or real database execution, arbitrary SQL, business writes, secrets, deployment or browser acceptance. Verify focused in-memory tests and safe Release build/test.",
   "acceptance_criteria": [
@@ -33,6 +33,6 @@
     "reason": ""
   },
   "max_attempts": 3,
-  "attempts": 0,
+  "attempts": 1,
   "created_at": "2026-09-30T08:24:54.636346Z"
 }
