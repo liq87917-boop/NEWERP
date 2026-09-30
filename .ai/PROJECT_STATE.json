@@ -1,11 +1,10 @@
 {
   "schema_version": 2,
   "project": "NEWERP",
-  "updated_at": "2026-09-30T05:09:11.475693Z",
+  "updated_at": "2026-09-30T05:14:32.731559Z",
   "phase": "ready",
   "current_task": null,
   "queue": [
-    "ERP-181",
     "ERP-182",
     "ERP-183"
   ],
@@ -170,46 +169,41 @@
     "ERP-177",
     "ERP-178",
     "ERP-179",
-    "ERP-180"
+    "ERP-180",
+    "ERP-181"
   ],
   "blocked": [],
   "last_build": {
-    "task": "ERP-180",
+    "task": "ERP-181",
     "profile": "safe",
     "status": "passed",
     "exit_code": 0,
-    "log": ".ai\\logs\\ERP-180-validation-1.log",
-    "at": "2026-09-30T04:55:52.023847Z"
+    "log": ".ai\\logs\\ERP-181-validation-2.log",
+    "at": "2026-09-30T05:14:32.214911Z"
   },
-  "last_error": {
-    "task": "ERP-181",
-    "kind": "automatic_repair_pending",
-    "summary": "Path guard failed:\noutside allowed_paths: src/ERP.UnitTests/TestResults/focused.trx\noutside allowed_paths: src/ERP.UnitTests/TestResults/focused2.trx\noutside allowed_paths: src/ERP.UnitTests/TestResults/full.trx\noutside allowed_paths: src/ERP.UnitTests/TestResults/status.trx\noutside allowed_paths: test_out.txt\noutside allowed_paths: test_out2.txt"
-  },
+  "last_error": null,
   "last_deepseek_fix": {
     "task": "ERP-181",
-    "attempts": 3,
-    "status": "retry_pending",
-    "at": "2026-09-30T05:09:11.226811Z"
+    "attempt": 2,
+    "model": "deepseek-v4-pro",
+    "exit_code": 0,
+    "finished_at": "2026-09-30T05:14:07.921353Z"
   },
   "git_sync": {
     "branch": "main",
-    "local_sha": "3159b08",
-    "status": "synced",
-    "ahead": 0,
+    "local_sha": "5b5f937",
+    "status": "pending",
+    "ahead": 1,
     "behind": 0,
-    "last_attempt_at": "2026-09-30T04:55:57.389330Z",
+    "last_attempt_at": "2026-09-30T05:14:32.631950Z",
     "last_error": null
   },
   "next_recommended_tasks": [
-    "ERP-181",
     "ERP-182",
     "ERP-183"
   ],
   "runner": {
     "status": "stopped",
     "pid": null
-  },
-  "blocker": null,
-  "finish_reason": "deepseek_supervisor_recovery"
+  }
 }
