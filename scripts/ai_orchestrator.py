@@ -15,6 +15,7 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from ai_state import refresh_project_state, save_json
+from ai_provider_availability import next_retry, provider_failure_from_log
 
 ROOT = Path(__file__).resolve().parents[1]
 AI_DIR = ROOT / ".ai"
@@ -128,7 +129,7 @@ def honor_terminal_completion(task_path: Path, task: dict[str, Any], state: dict
     if result is None:
         return False
     task["status"] = "completed"
-    for key in ("blocker", "last_error", "failure_kind", "failed_transport_version", "recovery_context", "preserved_work", "quarantine"):
+    for key in ("blocker", "last_error", "failure_kind", "failed_transport_version", "recovery_context", "provider_retry", "preserved_work", "quarantine"):
         task.pop(key, None)
     save_json(task_path, task)
     set_state(state, phase="ready", current_task=None, last_error=None, blocker=None, finish_reason="terminal_completion_reconciled")
@@ -392,6 +393,44 @@ def preserve_failed_work(
         cline_finish_reason_raw=cline_raw_reason, changed_paths=paths, diff=diff_path,
     )
     print(f"Preserved {task['id']} work for automatic repair; no stash or reset was used.")
+    return 0
+
+
+def preserve_provider_unavailable(
+    task_path: Path, task: dict[str, Any], config: dict[str, Any],
+    state: dict[str, Any], message: str, log_path: Path, attempt: int,
+) -> int:
+    """Keep the task queued for a timed provider probe without using repair budget."""
+    retry = next_retry(task.get("provider_retry"), config.get("autonomy", {}))
+    diff_path, paths = write_recovery_diff(task["id"])
+    task.update({
+        "status": "retry_pending", "attempts": 0,
+        "failure_kind": "provider_unavailable",
+        "blocker": "Model provider quota unavailable; timed retry pending",
+        "last_error": message[-12000:], "provider_retry": retry,
+        "preserved_work": {
+            "execution_copy": str(ROOT), "changed_paths": paths,
+            "diff": diff_path, "preserved_at": utc_now(),
+        },
+    })
+    task.pop("recovery_context", None)
+    save_json(task_path, task)
+    save_json(RESULTS_DIR / f"{task['id']}.json", {
+        "task": task["id"], "status": "retry_pending",
+        "execution_outcome": "provider_unavailable", "failure_kind": "provider_unavailable",
+        "attempt": attempt, "last_error": message[-12000:],
+        "executor_log": str(log_path.relative_to(ROOT)),
+        "provider_retry": retry, "preserved_work": task["preserved_work"],
+        "finished_at": utc_now(),
+    })
+    set_state(state, phase="ready", current_task=None, blocker=None,
+              last_error={"task": task["id"], "kind": "provider_unavailable",
+                          "summary": message[-12000:], "log": str(log_path.relative_to(ROOT)),
+                          "next_probe_at": retry["next_probe_at"]},
+              finish_reason="provider_retry_scheduled")
+    audit("provider_retry_scheduled", task=task["id"], attempt=attempt,
+          log=str(log_path.relative_to(ROOT)), retry=retry)
+    print(f"Model provider unavailable for {task['id']}; next probe at {retry['next_probe_at']}.")
     return 0
 
 
@@ -827,6 +866,10 @@ def run_next(dry_run: bool) -> int:
             if violations:
                 failure_kind = "path_guard_failure"
                 previous_error = "Path guard failed:\n" + "\n".join(violations); audit("path_guard_failed", task=task["id"], violations=violations); break
+            provider_error = provider_failure_from_log(log_path)
+            if provider_error:
+                return preserve_provider_unavailable(task_path, task, config, state,
+                                                     provider_error, log_path, attempt)
             if cline_code != 0:
                 failure_kind = "executor_failure"
                 cline_tail = log_path.read_text(encoding="utf-8", errors="replace")[-12000:]
@@ -896,7 +939,7 @@ def run_next(dry_run: bool) -> int:
         set_state(state, phase="finalizing", current_task=task["id"], last_build=build_record, last_error=None, finish_reason="validation_passed_commit_pending")
         audit("task_finalizing", task=task["id"], changed_paths=business_changes)
         task["status"] = "completed"
-        for stale_key in ("blocker", "last_error", "failure_kind", "failed_transport_version", "recovery_context", "preserved_work", "quarantine", "exhausted_revalidation_head", "exhausted_revalidation_source_tree"):
+        for stale_key in ("blocker", "last_error", "failure_kind", "failed_transport_version", "recovery_context", "provider_retry", "preserved_work", "quarantine", "exhausted_revalidation_head", "exhausted_revalidation_source_tree"):
             task.pop(stale_key, None)
         save_json(task_path, task)
         normalized = (

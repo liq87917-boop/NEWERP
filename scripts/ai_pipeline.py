@@ -19,6 +19,7 @@ from typing import Any, Iterator
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from ai_state import refresh_project_state, save_json
+from ai_provider_availability import is_provider_failure, retry_due
 
 if os.name == "nt":
     import msvcrt
@@ -218,7 +219,7 @@ def reconcile_completed_results(config: dict[str, Any]) -> list[str]:
         if result.get("status") != "completed":
             continue
         task["status"] = "completed"
-        for key in ("blocker", "last_error", "failure_kind", "failed_transport_version", "recovery_context", "preserved_work", "quarantine"):
+        for key in ("blocker", "last_error", "failure_kind", "failed_transport_version", "recovery_context", "provider_retry", "preserved_work", "quarantine"):
             task.pop(key, None)
         save_json(path, task)
         reconciled.append(task["id"])
@@ -380,6 +381,9 @@ def recover_blocked_with_deepseek(config: dict[str, Any]) -> list[str]:
         status = task.get("status")
         if status not in RECOVERY_SCAN_STATUSES:
             continue
+        if is_provider_failure(task):
+            # Billing/quota recovery needs a timed probe, not a code repair cycle.
+            continue
         if status == "blocked" and task.get("blocker") != "Automatic repair budget exhausted":
             continue
         if task.get("requires_human_approval", False) or str(task.get("human_gate", {}).get("level", "L1")).upper() in {"L3", "L4"}:
@@ -429,6 +433,34 @@ def recover_blocked_with_deepseek(config: dict[str, Any]) -> list[str]:
         refresh_project_state(ROOT, phase="ready", current_task=None, blocker=None, finish_reason="deepseek_supervisor_recovery")
         changed.extend([str(STATE_PATH.relative_to(ROOT)), str(AUDIT_PATH.relative_to(ROOT))])
         git_checkpoint("chore: schedule DeepSeek supervised failure recovery", changed)
+    return recovered
+
+
+def schedule_provider_retries(config: dict[str, Any]) -> list[str]:
+    """Wake quota failures when due, including failures recorded by older runners."""
+    recovered: list[str] = []
+    changed: list[str] = []
+    for path, task in task_entries():
+        if task.get("status") not in FAILURE_STATUSES or not is_provider_failure(task):
+            continue
+        if task.get("requires_human_approval", False) or str(task.get("human_gate", {}).get("level", "L1")).upper() in {"L3", "L4"}:
+            continue
+        if not retry_due(task.get("provider_retry")):
+            continue
+        task["status"] = "retry"
+        task["attempts"] = 0
+        task["failure_kind"] = "provider_unavailable"
+        task.pop("blocker", None)
+        task.pop("recovery_context", None)
+        save_json(path, task)
+        recovered.append(task["id"])
+        changed.append(str(path.relative_to(ROOT)))
+        audit("provider_retry_due", task=task["id"], previous_retry=task.get("provider_retry"))
+    if recovered:
+        refresh_project_state(ROOT, phase="ready", current_task=None, blocker=None,
+                              finish_reason="provider_retry_due")
+        changed.extend([str(STATE_PATH.relative_to(ROOT)), str(AUDIT_PATH.relative_to(ROOT))])
+        git_checkpoint("chore: schedule model provider retry", changed)
     return recovered
 
 
@@ -538,6 +570,7 @@ def run_all() -> int:
             # Queue capacity only controls replenishment; it must never bypass
             # failed-task/log collection or DeepSeek repair scheduling.
             reconcile_completed_results(config)
+            schedule_provider_retries(config)
             recover_blocked_with_deepseek(config)
             state = load_json(STATE_PATH)
             conversation = state.get("conversation_control", {})

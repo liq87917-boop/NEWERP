@@ -110,6 +110,28 @@ function Get-QueueHead {
     return $null
 }
 
+function Test-ProviderUnavailable {
+    param($Task)
+    if ([string]$Task.failure_kind -eq 'provider_unavailable') { return $true }
+    return ([string]$Task.last_error -match '(?i)insufficient balance|insufficient credits|insufficient quota|quota exceeded|billing hard limit')
+}
+
+function Get-ProviderRetryDueTask {
+    param([object[]]$Tasks)
+    foreach ($task in $Tasks) {
+        if ($task.status -notin @('retry_pending', 'failed', 'error', 'blocked')) { continue }
+        if (-not (Test-ProviderUnavailable $task)) { continue }
+        if ($task.requires_human_approval -eq $true) { continue }
+        if ($task.human_gate -and [string]$task.human_gate.level -in @('L3', 'L4')) { continue }
+        $nextProbe = [string]$task.provider_retry.next_probe_at
+        if (-not $nextProbe) { return $task }
+        try {
+            if ([datetimeoffset]::Parse($nextProbe) -le [datetimeoffset]::UtcNow) { return $task }
+        } catch { return $task }
+    }
+    return $null
+}
+
 function Get-RecoverableFailure {
     param([object[]]$Tasks)
 
@@ -123,6 +145,7 @@ function Get-RecoverableFailure {
 
     foreach ($task in $Tasks) {
         if ($task.status -notin @('blocked', 'failed', 'error', 'retry_pending', 'in_progress', 'code_ready', 'finalizing')) { continue }
+        if (Test-ProviderUnavailable $task) { continue }
         if ($task.status -eq 'blocked' -and [string]$task.blocker -ne 'Automatic repair budget exhausted') { continue }
         if ($task.requires_human_approval -eq $true) { continue }
         if ($task.human_gate -and [string]$task.human_gate.level -in @('L3', 'L4')) { continue }
@@ -153,6 +176,7 @@ function Get-RecoverablePreservedWork {
 
     foreach ($task in $Tasks) {
         if ($task.status -notin @('retry', 'retry_pending', 'in_progress', 'code_ready', 'finalizing', 'failed', 'blocked')) { continue }
+        if ($task.status -ne 'retry' -and (Test-ProviderUnavailable $task)) { continue }
         if (-not $task.preserved_work -or -not $task.preserved_work.changed_paths) { continue }
         $expected = @($task.preserved_work.changed_paths | ForEach-Object { [string]$_ -replace '\\', '/' })
         if ($task.recovery_context -and $task.recovery_context.baseline_test_fix -and
@@ -906,6 +930,7 @@ try {
         $head = Get-QueueHead $tasks
         $runnable = Get-DependencySafeRunnableTask $tasks
         $recoverableFailure = Get-RecoverableFailure $tasks
+        $providerRetryDue = Get-ProviderRetryDueTask $tasks
         $gitInfo = Get-GitInfo
 
         # Paint local state before any network operation. Git fetch or GitHub CLI
@@ -923,6 +948,7 @@ try {
             $head = Get-QueueHead $tasks
             $runnable = Get-DependencySafeRunnableTask $tasks
             $recoverableFailure = Get-RecoverableFailure $tasks
+            $providerRetryDue = Get-ProviderRetryDueTask $tasks
             $gitInfo = Get-GitInfo
         }
 
@@ -985,6 +1011,7 @@ try {
                         $runnable = Get-DependencySafeRunnableTask $tasks
                         $gitInfo = Get-GitInfo
                         $recoverableFailure = Get-RecoverableFailure $tasks
+                        $providerRetryDue = Get-ProviderRetryDueTask $tasks
                         $recoverPreserved = $null
                         $recoverExisting = $false
                         $worktreeAllowsStart = -not $gitInfo.Dirty
@@ -1000,7 +1027,7 @@ try {
         }
 
         if (-not $NoExecute -and -not $pipelineProcess -and -not $paused -and $worktreeAllowsStart -and $gitInfo.Branch -in $managedBranches) {
-            if ($recoverPush -or $recoverExisting -or $recoverableFailure -or $null -ne $runnable) {
+            if ($recoverPush -or $recoverExisting -or $recoverableFailure -or $providerRetryDue -or $null -ne $runnable) {
                 try {
                     if ($recoverExisting) {
                         $lastRecoveryAttemptKey = $recoveryKey

@@ -7,6 +7,7 @@ from unittest.mock import patch
 import tempfile
 import unittest
 from pathlib import Path
+from datetime import datetime, timedelta, timezone
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -23,6 +24,7 @@ pipeline = load_module("ai_pipeline_contract", ROOT / "scripts" / "ai_pipeline.p
 orchestrator = load_module("ai_orchestrator_contract", ROOT / "scripts" / "ai_orchestrator.py")
 state_module = load_module("ai_state_contract", ROOT / "scripts" / "ai_state.py")
 executor_workspace = load_module("ai_executor_workspace_contract", ROOT / "scripts" / "ai_executor_workspace.py")
+provider = load_module("ai_provider_availability_contract", ROOT / "scripts" / "ai_provider_availability.py")
 
 
 class PipelineContracts(unittest.TestCase):
@@ -60,6 +62,91 @@ class PipelineContracts(unittest.TestCase):
                 self.assertEqual("ready", reason)
             finally:
                 pipeline.TASKS_DIR, pipeline.CONFIG_PATH = old_tasks, old_config
+
+    def test_provider_quota_detected_only_from_executor_error_event(self):
+        with tempfile.TemporaryDirectory() as directory:
+            log = Path(directory) / "attempt.jsonl"
+            log.write_text('\n'.join(json.dumps(item) for item in [
+                {"type": "say", "text": "Task prompt mentions Insufficient Balance"},
+                {"type": "run_result", "finishReason": "completed", "text": "Insufficient Balance"},
+            ]), encoding="utf-8")
+            self.assertIsNone(provider.provider_failure_from_log(log))
+            with log.open("a", encoding="utf-8") as stream:
+                stream.write('\n' + json.dumps({"type": "run_result", "finishReason": "error",
+                                                 "text": "Insufficient Balance (request_id=123)"}) + '\n')
+            self.assertIn("Insufficient Balance", provider.provider_failure_from_log(log))
+
+    def test_provider_retry_has_bounded_backoff_and_due_time(self):
+        now = datetime(2026, 9, 30, tzinfo=timezone.utc)
+        config = {"provider_retry_initial_seconds": 60, "provider_retry_max_seconds": 180}
+        first = provider.next_retry(None, config, now)
+        second = provider.next_retry(first, config, now)
+        third = provider.next_retry(second, config, now)
+        self.assertEqual([60, 120, 180], [item["cooldown_seconds"] for item in (first, second, third)])
+        self.assertFalse(provider.retry_due(first, now + timedelta(seconds=59)))
+        self.assertTrue(provider.retry_due(first, now + timedelta(seconds=60)))
+
+    def test_legacy_exhausted_quota_task_requeues_without_repair_cycle(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            path = base / "ERP-178.json"
+            task = self.task("ERP-178", "retry_pending")
+            task.update({"attempts": 3, "supervised_recovery_cycles": 2,
+                         "failure_kind": "executor_failure",
+                         "last_error": "DeepSeek executor failed: Insufficient Balance",
+                         "recovery_context": {"remediation_task": "old"}})
+            path.write_text(json.dumps(task), encoding="utf-8")
+            with patch.object(pipeline, "task_entries", return_value=[(path, task)]), \
+                 patch.object(pipeline, "ROOT", base), \
+                 patch.object(pipeline, "STATE_PATH", base / "state.json"), \
+                 patch.object(pipeline, "AUDIT_PATH", base / "audit.jsonl"), \
+                 patch.object(pipeline, "refresh_project_state", return_value={}), \
+                 patch.object(pipeline, "git_checkpoint") as checkpoint:
+                self.assertEqual(["ERP-178"], pipeline.schedule_provider_retries({}))
+                checkpoint.assert_called_once()
+            updated = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual("retry", updated["status"])
+            self.assertEqual(0, updated["attempts"])
+            self.assertEqual(2, updated["supervised_recovery_cycles"])
+            self.assertNotIn("recovery_context", updated)
+
+    def test_provider_cooldown_does_not_trigger_engineering_repair(self):
+        future = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+        task = self.task("ERP-179", "retry_pending")
+        task.update({"failure_kind": "provider_unavailable", "last_error": "Insufficient Balance",
+                     "provider_retry": {"next_probe_at": future}})
+        with patch.object(pipeline, "task_entries", return_value=[(Path("ERP-179.json"), task)]), \
+             patch.object(pipeline, "recovery_evidence", side_effect=AssertionError("engineering repair was called")):
+            self.assertEqual([], pipeline.schedule_provider_retries({}))
+            self.assertEqual([], pipeline.recover_blocked_with_deepseek({"autonomy": {
+                "enabled": True, "deepseek_supervisor_enabled": True,
+                "max_supervised_recovery_cycles": 2}}))
+
+    def test_provider_outage_preserves_task_without_spending_repair_budget(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            results = base / "results"
+            results.mkdir()
+            task_path = base / "ERP-178.json"
+            log_path = base / "ERP-178-attempt-1.jsonl"
+            task = self.task("ERP-178", "in_progress")
+            task.update({"attempts": 1, "supervised_recovery_cycles": 2,
+                         "recovery_context": {"remediation_task": "obsolete"}})
+            with patch.object(orchestrator, "ROOT", base), \
+                 patch.object(orchestrator, "RESULTS_DIR", results), \
+                 patch.object(orchestrator, "write_recovery_diff", return_value=("logs/work.diff", [])), \
+                 patch.object(orchestrator, "set_state"), \
+                 patch.object(orchestrator, "audit"):
+                self.assertEqual(0, orchestrator.preserve_provider_unavailable(
+                    task_path, task, {"autonomy": {}}, {}, "Insufficient Balance", log_path, 1))
+            saved = json.loads(task_path.read_text(encoding="utf-8"))
+            result = json.loads((results / "ERP-178.json").read_text(encoding="utf-8"))
+            self.assertEqual("retry_pending", saved["status"])
+            self.assertEqual(0, saved["attempts"])
+            self.assertEqual(2, saved["supervised_recovery_cycles"])
+            self.assertEqual("provider_unavailable", result["execution_outcome"])
+            self.assertEqual(1, saved["provider_retry"]["probe_count"])
+            self.assertNotIn("recovery_context", saved)
 
     def test_state_save_retries_transient_windows_destination_lock(self):
         with tempfile.TemporaryDirectory() as directory, \
@@ -256,12 +343,14 @@ class PipelineContracts(unittest.TestCase):
              patch.object(pipeline, "load_json", side_effect=[config, {"conversation_control": {}}]), \
              patch.object(pipeline, "recover_obsolete_transport_failures"), \
              patch.object(pipeline, "reconcile_completed_results"), \
+             patch.object(pipeline, "schedule_provider_retries") as provider_retries, \
              patch.object(pipeline, "recover_blocked_with_deepseek") as recover, \
              patch.object(pipeline, "queue_head", return_value=(None, "queue_empty")), \
              patch.object(pipeline, "mark_queue_replenishing"):
             lock.return_value.__enter__.return_value = None
             self.assertEqual(0, pipeline.run_all())
         recover.assert_called_once_with(config)
+        provider_retries.assert_called_once_with(config)
 
     def test_completed_result_prevents_stale_task_reactivation(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -304,6 +393,7 @@ class PipelineContracts(unittest.TestCase):
              patch.object(pipeline, "load_json", side_effect=[config, {"conversation_control": {}}, {"conversation_control": {}}, {"conversation_control": {}}]), \
              patch.object(pipeline, "recover_obsolete_transport_failures"), \
              patch.object(pipeline, "reconcile_completed_results"), \
+             patch.object(pipeline, "schedule_provider_retries"), \
              patch.object(pipeline, "recover_blocked_with_deepseek"), \
              patch.object(pipeline, "queue_head", side_effect=[(task, "ready"), (task, "ready"), (None, "queue_empty")]), \
              patch.object(pipeline, "run", side_effect=[failed, passed]), \
@@ -322,6 +412,7 @@ class PipelineContracts(unittest.TestCase):
              patch.object(pipeline, "load_json", side_effect=[config, {"conversation_control": {}}]), \
              patch.object(pipeline, "recover_obsolete_transport_failures"), \
              patch.object(pipeline, "reconcile_completed_results"), \
+             patch.object(pipeline, "schedule_provider_retries"), \
              patch.object(pipeline, "recover_blocked_with_deepseek"), \
              patch.object(pipeline, "queue_head", return_value=(task, "ready")), \
              patch.object(pipeline, "run", return_value=failed) as run, \
