@@ -1,7 +1,7 @@
 {
   "schema_version": 2,
   "project": "NEWERP",
-  "updated_at": "2026-09-30T04:24:42.118988Z",
+  "updated_at": "2026-09-30T04:46:40.119880Z",
   "phase": "ready",
   "current_task": null,
   "queue": [],
@@ -196,5 +196,7 @@
   "runner": {
     "status": "stopped",
     "pid": null
-  }
+  },
+  "blocker": null,
+  "finish_reason": "task_queued"
 }
