@@ -8,10 +8,11 @@ using System.Globalization;
 namespace ERP.Infrastructure.Export;
 
 /// <summary>
-/// 动态客户订单与收款核对报表（ERP-169）PDF 导出：复用 ERP-164 有界授权预览与选定列顺序（订单证据与未关联收款证据两个独立分区），
+/// 动态客户订单与收款核对报表（ERP-169 / ERP-175 / ERP-177）PDF 导出：复用 ERP-164 有界授权预览与选定列顺序（订单证据与未关联收款证据两个独立分区），
 /// 以 PDFsharp 6.2.4 分页渲染当前页；宽列集按可用页宽拆成多个「列页」，避免列被裁切；中文字体固定使用 Windows 黑体（SimHei），
 /// 与其它报表 PDF 共用共享解析器（<see cref="SimHeiPdfFontResolver"/>），字体缺失时显式失败（不产出乱码或缺字 PDF）。
-/// <para>金额保留原币、未知金额 / 未知数量显式保留（null → 空文本，绝不回落 0）、状态与未关联收款截断警告显式保留；
+/// <para>金额保留原币、未知金额 / 未知数量显式保留（证据行 null → 空文本；金额汇总行 null → 「未知」，绝不回落 0）、状态与未关联收款截断警告显式保留；
+/// ERP-175 非 none 分组模式追加两个计数分组分区、ERP-177 customerCurrency 金额汇总模式追加两个金额汇总分区（只汇总当前页、绝不跨币种合并 / 换算、绝不推断收款分配 / 应收余额）；
 /// 全程只读：仅生成 PDF 字节流，不写库、不执行任意 SQL；请求审计由既有 OperationLogMiddleware 记录。</para>
 /// </summary>
 public static class DynamicReceiptReconciliationPdfExporter
@@ -59,6 +60,45 @@ public static class DynamicReceiptReconciliationPdfExporter
     private const string OrderCountColumn = "订单张数";
     private const string ReceiptCountColumn = "收款张数";
     private const string TruncatedColumn = "截断";
+
+    /// <summary>订单金额汇总 PDF 分区标题（ERP-177，明确「当前页」，绝不暗示全量合计）</summary>
+    private const string OrderSummarySectionTitle = "五、订单金额汇总（当前页）";
+
+    /// <summary>未关联收款金额汇总 PDF 分区标题（ERP-177，明确「当前页」）</summary>
+    private const string ReceiptSummarySectionTitle = "六、未关联收款金额汇总（当前页）";
+
+    /// <summary>订单金额汇总不适用 / 当前页为空时的可见提示（绝不静默留白）</summary>
+    private const string OrderSummaryEmptyNote = "本页没有可汇总金额的订单证据（空页）";
+
+    /// <summary>未关联收款金额汇总不适用 / 当前页为空时的可见提示（绝不静默留白）</summary>
+    private const string ReceiptSummaryEmptyNote = "本页没有可汇总金额的未关联收款证据（空页）";
+
+    /// <summary>可未知金额的统一「未知」标记（绝不回落为 0 或臆造金额）</summary>
+    public const string UnknownText = "未知";
+
+    private const string CustomerKey = "customerName";
+    private const string CurrencyKey = "currency";
+    private const string EvidenceStatusKey = "evidenceStatus";
+    private const string OrderAmountKey = "orderAmount";
+    private const string KnownLinkedKey = "knownLinkedReceiptAmountRows";
+    private const string UnknownLinkedKey = "unknownLinkedReceiptAmountRows";
+    private const string LinkedAmountKey = "linkedReceiptAmount";
+    private const string KnownUncoveredKey = "knownUncoveredAmountRows";
+    private const string UnknownUncoveredKey = "unknownUncoveredAmountRows";
+    private const string UncoveredAmountKey = "uncoveredAmount";
+    private const string AmountKey = "amount";
+
+    private const string CustomerColumn = "客户";
+    private const string CurrencyColumn = "币种";
+    private const string EvidenceStatusColumn = "收款证据状态";
+    private const string OrderAmountColumn = "订单金额";
+    private const string KnownLinkedReceiptAmountRowsColumn = "已关联收款金额已知行数";
+    private const string UnknownLinkedReceiptAmountRowsColumn = "已关联收款金额未知行数";
+    private const string LinkedReceiptAmountColumn = "已关联收款金额";
+    private const string KnownUncoveredAmountRowsColumn = "未覆盖金额已知行数";
+    private const string UnknownUncoveredAmountRowsColumn = "未覆盖金额未知行数";
+    private const string UncoveredAmountColumn = "未覆盖金额";
+    private const string ReceiptAmountColumn = "金额";
 
     private const double PointsPerMillimeter = 72.0 / 25.4;
 
@@ -134,6 +174,14 @@ public static class DynamicReceiptReconciliationPdfExporter
             DrawOrderGroupSection(document, page, titleFont, metaFont, headerFont, cellFont);
             DrawReceiptGroupSection(document, page, titleFont, metaFont, headerFont, cellFont);
         }
+
+        // ERP-177：仅 customerCurrency 金额汇总模式追加两个独立金额汇总分区（复用 ERP-172 同一批有界、已授权当前页汇总数据，
+        // 只汇总当前页、绝不跨币种合并 / 换算、绝不推断收款分配 / 应收余额；未知 null 显式「未知」、截断 / 空页显式保留）。
+        if (string.Equals(page.SummaryMode, DynamicReceiptReconciliationReportRules.SummaryCustomerCurrency, StringComparison.Ordinal))
+        {
+            DrawOrderSummarySection(document, page, titleFont, metaFont, headerFont, cellFont);
+            DrawReceiptSummarySection(document, page, titleFont, metaFont, headerFont, cellFont);
+        }
     }
 
     /// <summary>渲染「订单计数分组」独立分区：分组标签 + 订单张数（数值），只计数、不含金额；不适用 / 空页显式提示。</summary>
@@ -187,6 +235,133 @@ public static class DynamicReceiptReconciliationPdfExporter
         DrawSection(document, ReceiptGroupSectionTitle, columns, rows, null, page,
             titleFont, metaFont, headerFont, cellFont, ReceiptGroupEmptyNote);
     }
+
+    /// <summary>渲染「订单金额汇总」独立分区：客户 + 币种 + 订单张数 + 订单金额 + 已关联收款金额（已知 / 未知行数 + 未知整列显式）+ 未覆盖金额（同口径）。</summary>
+    private static void DrawOrderSummarySection(
+        PdfDocument document,
+        DynamicReceiptReconciliationReportPageDto page,
+        XFont titleFont,
+        XFont metaFont,
+        XFont headerFont,
+        XFont cellFont)
+    {
+        var columns = new List<DynamicReceiptReconciliationReportFieldDto>
+        {
+            new(CustomerKey, CustomerColumn, "text", false),
+            new(CurrencyKey, CurrencyColumn, "text", false),
+            new(OrderCountKey, OrderCountColumn, "number", false),
+            new(OrderAmountKey, OrderAmountColumn, "number", false),
+            new(KnownLinkedKey, KnownLinkedReceiptAmountRowsColumn, "number", false),
+            new(UnknownLinkedKey, UnknownLinkedReceiptAmountRowsColumn, "number", false),
+            new(LinkedAmountKey, LinkedReceiptAmountColumn, "number", false),
+            new(KnownUncoveredKey, KnownUncoveredAmountRowsColumn, "number", false),
+            new(UnknownUncoveredKey, UnknownUncoveredAmountRowsColumn, "number", false),
+            new(UncoveredAmountKey, UncoveredAmountColumn, "number", false),
+        };
+
+        DrawSection(document, OrderSummarySectionTitle, columns,
+            BuildOrderSummaryRows(page.OrderSummaries), null, page,
+            titleFont, metaFont, headerFont, cellFont, OrderSummaryEmptyNote);
+    }
+
+    /// <summary>渲染「未关联收款金额汇总」独立分区：客户 + 币种 + 收款证据状态 + 收款张数 + 金额 + 截断（是 / 否，显式保留）；页级截断警告显式标注。</summary>
+    private static void DrawReceiptSummarySection(
+        PdfDocument document,
+        DynamicReceiptReconciliationReportPageDto page,
+        XFont titleFont,
+        XFont metaFont,
+        XFont headerFont,
+        XFont cellFont)
+    {
+        var columns = new List<DynamicReceiptReconciliationReportFieldDto>
+        {
+            new(CustomerKey, CustomerColumn, "text", false),
+            new(CurrencyKey, CurrencyColumn, "text", false),
+            new(EvidenceStatusKey, EvidenceStatusColumn, "text", false),
+            new(ReceiptCountKey, ReceiptCountColumn, "number", false),
+            new(AmountKey, ReceiptAmountColumn, "number", false),
+            new(TruncatedKey, TruncatedColumn, "text", false),
+        };
+
+        DrawSection(document, ReceiptSummarySectionTitle, columns,
+            BuildReceiptSummaryRows(page.ReceiptSummaries),
+            page.UnlinkedReceiptTruncated ? DynamicReceiptReconciliationReportRules.ReceiptTruncationNote : null,
+            page, titleFont, metaFont, headerFont, cellFont, ReceiptSummaryEmptyNote);
+    }
+
+    private static List<Dictionary<string, object?>> BuildOrderSummaryRows(
+        List<DynamicReceiptReconciliationReportOrderSummaryDto>? summaries)
+    {
+        if (summaries is null)
+            return new List<Dictionary<string, object?>>();
+
+        var keys = new[]
+        {
+            CustomerKey, CurrencyKey, OrderCountKey, OrderAmountKey,
+            KnownLinkedKey, UnknownLinkedKey, LinkedAmountKey,
+            KnownUncoveredKey, UnknownUncoveredKey, UncoveredAmountKey,
+        };
+
+        return summaries.Select(s =>
+        {
+            var cells = BuildOrderSummaryCells(s);
+            var row = new Dictionary<string, object?>(StringComparer.Ordinal);
+            for (var i = 0; i < keys.Length; i++)
+                row[keys[i]] = cells[i];
+            return row;
+        }).ToList();
+    }
+
+    private static List<Dictionary<string, object?>> BuildReceiptSummaryRows(
+        List<DynamicReceiptReconciliationReportReceiptSummaryDto>? summaries)
+    {
+        if (summaries is null)
+            return new List<Dictionary<string, object?>>();
+
+        var keys = new[]
+        {
+            CustomerKey, CurrencyKey, EvidenceStatusKey, ReceiptCountKey, AmountKey, TruncatedKey,
+        };
+
+        return summaries.Select(s =>
+        {
+            var cells = BuildReceiptSummaryCells(s);
+            var row = new Dictionary<string, object?>(StringComparer.Ordinal);
+            for (var i = 0; i < keys.Length; i++)
+                row[keys[i]] = cells[i];
+            return row;
+        }).ToList();
+    }
+
+    /// <summary>订单金额汇总行按列序渲染为 PDF 单元格文本（可未知金额 null → 「未知」，绝不回落为 0；供测试验证语义）</summary>
+    public static IReadOnlyList<string> BuildOrderSummaryCells(DynamicReceiptReconciliationReportOrderSummaryDto s) => new[]
+    {
+        s.CustomerName,
+        s.Currency,
+        FormatCellValue(s.OrderCount),
+        FormatCellValue(s.OrderAmount),
+        FormatCellValue(s.KnownLinkedReceiptAmountRows),
+        FormatCellValue(s.UnknownLinkedReceiptAmountRows),
+        FormatSummaryAmount(s.LinkedReceiptAmount),
+        FormatCellValue(s.KnownUncoveredAmountRows),
+        FormatCellValue(s.UnknownUncoveredAmountRows),
+        FormatSummaryAmount(s.UncoveredAmount),
+    };
+
+    /// <summary>未关联收款金额汇总行按列序渲染为 PDF 单元格文本（active / pending / historical 显式保留，绝不回落、绝不并入有效合计）</summary>
+    public static IReadOnlyList<string> BuildReceiptSummaryCells(DynamicReceiptReconciliationReportReceiptSummaryDto s) => new[]
+    {
+        s.CustomerName,
+        s.Currency,
+        s.EvidenceStatus,
+        FormatCellValue(s.ReceiptCount),
+        FormatCellValue(s.Amount),
+        FormatCellValue(s.Truncated),
+    };
+
+    /// <summary>把可未知金额渲染为 PDF 单元格文本：null → 「未知」，否则按数值口径格式化（绝不回落为 0）</summary>
+    public static string FormatSummaryAmount(decimal? amount)
+        => amount is null ? UnknownText : FormatCellValue(amount);
 
     /// <summary>渲染一个独立分区：宽列集按列页拆分（每个列页重复表头），行按纵向分页；空结果仅渲染分区头与空提示（可自定义空提示文案）。</summary>
     private static void DrawSection(

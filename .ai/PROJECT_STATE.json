@@ -1,11 +1,10 @@
 {
   "schema_version": 2,
   "project": "NEWERP",
-  "updated_at": "2026-09-30T03:25:01.983303Z",
+  "updated_at": "2026-09-30T03:36:58.702546Z",
   "phase": "ready",
   "current_task": null,
   "queue": [
-    "ERP-177",
     "ERP-178",
     "ERP-179"
   ],
@@ -166,16 +165,17 @@
     "ERP-173",
     "ERP-174",
     "ERP-175",
-    "ERP-176"
+    "ERP-176",
+    "ERP-177"
   ],
   "blocked": [],
   "last_build": {
-    "task": "ERP-176",
+    "task": "ERP-177",
     "profile": "safe",
     "status": "passed",
     "exit_code": 0,
-    "log": ".ai\\logs\\ERP-176-validation-1.log",
-    "at": "2026-09-30T03:24:56.019596Z"
+    "log": ".ai\\logs\\ERP-177-validation-1.log",
+    "at": "2026-09-30T03:36:58.147959Z"
   },
   "last_error": null,
   "last_deepseek_fix": {
@@ -186,15 +186,14 @@
   },
   "git_sync": {
     "branch": "main",
-    "local_sha": "7c234c9",
-    "status": "synced",
+    "local_sha": "f86a18b",
+    "status": "pending",
     "ahead": 0,
     "behind": 0,
-    "last_attempt_at": "2026-09-30T03:25:01.875543Z",
+    "last_attempt_at": "2026-09-30T03:36:58.593702Z",
     "last_error": null
   },
   "next_recommended_tasks": [
-    "ERP-177",
     "ERP-178",
     "ERP-179"
   ],
