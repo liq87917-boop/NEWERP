@@ -15,6 +15,7 @@ namespace ERP.Api.Controllers;
 /// <item><b>GET /api/dynamic-agency-service-fee-monthly-report</b>：返回有限字段白名单目录（需登录 + 客户资料菜单授权 + 业务员数据范围）；</item>
 /// <item><b>POST /api/dynamic-agency-service-fee-monthly-report</b>：按选定字段与有界筛选预览 ERP-180 月度汇总，稳定分页、原币隔离、状态金额口径不变。</item>
 /// <item><b>POST /api/dynamic-agency-service-fee-monthly-report/export</b>：下载当前选定页为 Excel（xlsx，只读，复用有界授权预览与选定列顺序）。</item>
+/// <item><b>POST /api/dynamic-agency-service-fee-monthly-report/pdf</b>：下载当前选定页为 PDF（只读，复用有界授权预览与选定列顺序）。</item>
 /// </list>
 /// <para>复用 ERP-180 的 <see cref="AgencyServiceFeeMonthlySummaryService.ForQueryAsync"/>：
 /// 客户 / 币种 / 对账日期筛选、稳定分页与分组 / 金额口径全部由既有只读服务完成，本控制器只做授权与字段投影，不做写入。</para>
@@ -67,6 +68,23 @@ public class DynamicAgencyServiceFeeMonthlyReportController : ControllerBase
         var bytes = BuildWorkbook(page);
         return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             $"AgencyServiceFeeMonthly_{DateTime.Now:yyyyMMddHHmmss}.xlsx");
+    }
+
+    /// <summary>
+    /// 下载当前选定页为 PDF（ERP-183，只读）：复用「有界、已授权预览」与选定列顺序（每次请求重新校验身份 / 菜单授权 /
+    /// 字段 / 筛选 / 页大小 / 业务员数据范围），仅导出当前页选定列；金额保留原币、草稿 / 已作废金额与已登记合计分开列示，
+    /// 宽列集按可用页宽拆分「列页」、行数超出拆分「行页」避免裁切，空页显式说明；缺失黑体字体时显式失败（不产出乱码 PDF）。
+    /// <para>全程只读，不写库、不执行任意 SQL；请求由既有 <c>OperationLogMiddleware</c> 记录审计（动作「导出」）。</para>
+    /// </summary>
+    [HttpPost("pdf")]
+    public async Task<IActionResult> ExportPdf([FromBody] DynamicAgencyServiceFeeMonthlyReportRequest request)
+    {
+        // 复用同一有界、已授权预览：重新校验身份 / 菜单授权 / 字段 / 筛选 / 页大小 / 业务员数据范围
+        var page = await BuildPageAsync(request);
+
+        var bytes = DynamicAgencyServiceFeeMonthlyPdfExporter.Export(page);
+        return File(bytes, "application/pdf",
+            $"AgencyServiceFeeMonthly_{DateTime.Now:yyyyMMddHHmmss}.pdf");
     }
 
     /// <summary>复用同一有界、已授权预览管线：授权 → 校验 → 只读查询 → 选定列投影（与 ERP-181 预览同源，fail closed）</summary>
