@@ -56,9 +56,9 @@
       ".ai/tasks/ERP-179.json"
     ],
     "diff": ".ai\\logs\\ERP-179-preserved-work.diff",
-    "preserved_at": "2026-09-30T03:40:05.171638Z"
+    "preserved_at": "2026-09-30T03:40:18.634136Z"
   },
-  "failure_kind": "executor_failure",
+  "failure_kind": "provider_unavailable",
   "failed_transport_version": 2,
   "recovery_history": [
     {
@@ -121,31 +121,5 @@
     }
   ],
   "supervised_recovery_cycles": 2,
-  "recovery_context": {
-    "remediation_task": "ERP-179-RECOVERY-2",
-    "failure_kind": "executor_failure",
-    "summary": "DeepSeek executor exited with code 1; raw reason=error.\nLog tail:\n{\"ts\":\"2026-09-30T03:40:03.136Z\",\"type\":\"hook_event\",\"hookEventName\":\"agent_start\",\"agentId\":\"agent_1790739603031_b2xis2\",\"taskId\":\"conv_1790739603134_t4g3ntj\",\"parentAgentId\":null}\n{\"ts\":\"2026-09-30T03:40:03.138Z\",\"type\":\"agent_event\",\"event\":{\"type\":\"iteration_start\",\"iteration\":1}}\n{\"ts\":\"2026-09-30T03:40:03.799Z\",\"type\":\"error\",\"message\":\"hook dispatch failed: session.hook requires a valid hook event payload\"}\n{\"ts\":\"2026-09-30T03:40:04.144Z\",\"type\":\"agent_event\",\"event\":{\"type\":\"done\",\"reason\":\"error\",\"text\":\"Insufficient Balance (request_id: 78cbb7b9-5215-4821-ade2-6a57b1ff408e)\",\"iterations\":1,\"usage\":{\"inputTokens\":0,\"outputTokens\":0,\"cacheReadTokens\":0,\"cacheWriteTokens\":0,\"totalCost\":0}}}\n{\"ts\":\"2026-09-30T03:40:04.590Z\",\"type\":\"run_result\",\"finishReason\":\"error\",\"iterations\":1,\"usage\":{\"inputTokens\":0,\"outputTokens\":0,\"cacheReadTokens\":0,\"cacheWriteTokens\":0,\"totalCost\":0},\"aggregateUsage\":{\"inputTokens\":0,\"outputTokens\":0,\"cacheReadTokens\":0,\"cacheWriteTokens\":0,\"totalCost\":0},\"durationMs\":665,\"text\":\"Insufficient Balance (request_id: 78cbb7b9-5215-4821-ade2-6a57b1ff408e)\",\"model\":{\"id\":\"deepseek-v4-pro\",\"provider\":\"deepseek\",\"info\":{\"id\":\"deepseek-v4-pro\",\"name\":\"DeepSeek V4 Pro\",\"contextWindow\":1000000,\"maxInputTokens\":1000000,\"maxTokens\":393216,\"capabilities\":[\"tools\",\"reasoning\",\"structured_output\",\"temperature\",\"prompt-cache\"],\"reasoningOptions\":[{\"type\":\"toggle\"},{\"type\":\"effort\",\"values\":[\"low\",\"high\",\"max\"]}],\"pricing\":{\"input\":0.435,\"output\":0.87,\"cacheRead\":0.003625,\"cacheWrite\":0},\"releaseDate\":\"2026-08-12\",\"family\":\"deepseek-thinking\",\"operation\":\"language\"}}}\n{\"ts\":\"2026-09-30T03:40:04.590Z\",\"type\":\"error\",\"message\":\"Insufficient Balance (request_id: 78cbb7b9-5215-4821-ade2-6a57b1ff408e)\"}\n",
-    "result": ".ai\\results\\ERP-179.json",
-    "attempt_logs": [
-      ".ai/logs/ERP-179-attempt-1.jsonl",
-      ".ai/logs/ERP-179-attempt-2.jsonl",
-      ".ai/logs/ERP-179-attempt-3.jsonl"
-    ],
-    "validation_logs": [],
-    "latest_state_error": {
-      "task": "ERP-179",
-      "kind": "automatic_repair_pending",
-      "summary": "DeepSeek executor exited with code 1; raw reason=error.\nLog tail:\n{\"ts\":\"2026-09-30T03:40:03.136Z\",\"type\":\"hook_event\",\"hookEventName\":\"agent_start\",\"agentId\":\"agent_1790739603031_b2xis2\",\"taskId\":\"conv_1790739603134_t4g3ntj\",\"parentAgentId\":null}\n{\"ts\":\"2026-09-30T03:40:03.138Z\",\"type\":\"agent_event\",\"event\":{\"type\":\"iteration_start\",\"iteration\":1}}\n{\"ts\":\"2026-09-30T03:40:03.799Z\",\"type\":\"error\",\"message\":\"hook dispatch failed: session.hook requires a valid hook event payload\"}\n{\"ts\":\"2026-09-30T03:40:04.144Z\",\"type\":\"agent_event\",\"event\":{\"type\":\"done\",\"reason\":\"error\",\"text\":\"Insufficient Balance (request_id: 78cbb7b9-5215-4821-ade2-6a57b1ff408e)\",\"iterations\":1,\"usage\":{\"inputTokens\":0,\"outputTokens\":0,\"cacheReadTokens\":0,\"cacheWriteTokens\":0,\"totalCost\":0}}}\n{\"ts\":\"2026-09-30T03:40:04.590Z\",\"type\":\"run_result\",\"finishReason\":\"error\",\"iterations\":1,\"usage\":{\"inputTokens\":0,\"outputTokens\":0,\"cacheReadTokens\":0,\"cacheWriteTokens\":0,\"totalCost\":0},\"aggregateUsage\":{\"inputTokens\":0,\"outputTokens\":0,\"cacheReadTokens\":0,\"cacheWriteTokens\":0,\"totalCost\":0},\"durationMs\":665,\"text\":\"Insufficient Balance (request_id: 78cbb7b9-5215-4821-ade2-6a57b1ff408e)\",\"model\":{\"id\":\"deepseek-v4-pro\",\"provider\":\"deepseek\",\"info\":{\"id\":\"deepseek-v4-pro\",\"name\":\"DeepSeek V4 Pro\",\"contextWindow\":1000000,\"maxInputTokens\":1000000,\"maxTokens\":393216,\"capabilities\":[\"tools\",\"reasoning\",\"structured_output\",\"temperature\",\"prompt-cache\"],\"reasoningOptions\":[{\"type\":\"toggle\"},{\"type\":\"effort\",\"values\":[\"low\",\"high\",\"max\"]}],\"pricing\":{\"input\":0.435,\"output\":0.87,\"cacheRead\":0.003625,\"cacheWrite\":0},\"releaseDate\":\"2026-08-12\",\"family\":\"deepseek-thinking\",\"operation\":\"language\"}}}\n{\"ts\":\"2026-09-30T03:40:04.590Z\",\"type\":\"error\",\"message\":\"Insufficient Balance (request_id: 78cbb7b9-5215-4821-ade2-6a57b1ff408e)\"}\n"
-    },
-    "latest_build": null,
-    "task_context": ".ai\\tasks\\ERP-179.json",
-    "changed_paths": [
-      ".ai/PROJECT_STATE.json",
-      ".ai/tasks/ERP-179.json"
-    ],
-    "diff": ".ai\\logs\\ERP-179-preserved-work.diff",
-    "execution_copy": "D:\\VSCodeProject\\NEWERP.executor",
-    "repair_allowed_paths": [],
-    "instruction": "DeepSeek supervisor recovery: inspect the referenced complete logs, diagnose the root cause, and implement a different safe repair within allowed_paths. Rebuild and rerun the configured tests; if validation fails, use the newest log as the next repair input. Do not repeat the failed approach. Do not edit task/state/result files or relax production and irreversible-operation gates. "
-  }
+  "last_error": "DeepSeek executor exited with code 1; raw reason=error.\nLog tail:\n{\"ts\":\"2026-09-30T03:40:16.629Z\",\"type\":\"hook_event\",\"hookEventName\":\"agent_start\",\"agentId\":\"agent_1790739616523_g2f6g8\",\"taskId\":\"conv_1790739616625_v1kglui\",\"parentAgentId\":null}\n{\"ts\":\"2026-09-30T03:40:16.631Z\",\"type\":\"agent_event\",\"event\":{\"type\":\"iteration_start\",\"iteration\":1}}\n{\"ts\":\"2026-09-30T03:40:17.253Z\",\"type\":\"error\",\"message\":\"hook dispatch failed: session.hook requires a valid hook event payload\"}\n{\"ts\":\"2026-09-30T03:40:17.612Z\",\"type\":\"agent_event\",\"event\":{\"type\":\"done\",\"reason\":\"error\",\"text\":\"Insufficient Balance (request_id: 54fbc0c4-9ee6-447b-907d-fdb2f5ecbfa7)\",\"iterations\":1,\"usage\":{\"inputTokens\":0,\"outputTokens\":0,\"cacheReadTokens\":0,\"cacheWriteTokens\":0,\"totalCost\":0}}}\n{\"ts\":\"2026-09-30T03:40:18.055Z\",\"type\":\"run_result\",\"finishReason\":\"error\",\"iterations\":1,\"usage\":{\"inputTokens\":0,\"outputTokens\":0,\"cacheReadTokens\":0,\"cacheWriteTokens\":0,\"totalCost\":0},\"aggregateUsage\":{\"inputTokens\":0,\"outputTokens\":0,\"cacheReadTokens\":0,\"cacheWriteTokens\":0,\"totalCost\":0},\"durationMs\":628,\"text\":\"Insufficient Balance (request_id: 54fbc0c4-9ee6-447b-907d-fdb2f5ecbfa7)\",\"model\":{\"id\":\"deepseek-v4-pro\",\"provider\":\"deepseek\",\"info\":{\"id\":\"deepseek-v4-pro\",\"name\":\"DeepSeek V4 Pro\",\"contextWindow\":1000000,\"maxInputTokens\":1000000,\"maxTokens\":393216,\"capabilities\":[\"tools\",\"reasoning\",\"structured_output\",\"temperature\",\"prompt-cache\"],\"reasoningOptions\":[{\"type\":\"toggle\"},{\"type\":\"effort\",\"values\":[\"low\",\"high\",\"max\"]}],\"pricing\":{\"input\":0.435,\"output\":0.87,\"cacheRead\":0.003625,\"cacheWrite\":0},\"releaseDate\":\"2026-08-12\",\"family\":\"deepseek-thinking\",\"operation\":\"language\"}}}\n{\"ts\":\"2026-09-30T03:40:18.055Z\",\"type\":\"error\",\"message\":\"Insufficient Balance (request_id: 54fbc0c4-9ee6-447b-907d-fdb2f5ecbfa7)\"}\n"
 }
