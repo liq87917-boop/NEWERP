@@ -2,7 +2,7 @@
   "id": "ERP-171",
   "title": "Show current-page order and receipt group counts in the report designer",
   "description": "A sales user chooses a count group in the visual customer order and receipt evidence designer and sees separate current-page order and unlinked receipt count panels. Consume ERP-170 server groups, display permission/network/empty states and preserve the existing two-section preview. No new SQL or persistence. Development only. Read-only, current-user ERP menu and salesperson/supplier scope rechecked on every request; fail closed on missing identity, denied access or invalid bounded fields. Existing HTTP operation audit applies. Preserve source evidence, unknown null values, original currencies, truncation and separate evidence classes. No arbitrary SQL, direct model database access, migrations, production SQL/real database execution, writes, secrets/.env changes, deployment or real-browser acceptance. Verify focused unit/Node tests and safe Release build/test.",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "medium",
   "acceptance_criteria": [
     "Designer offers only server-supported group choices and sends bounded group selection with the existing authorized preview request.",
@@ -45,5 +45,5 @@
     "status": "not_required",
     "reason": "Development-only bounded read-only feature"
   },
-  "attempts": 0
+  "attempts": 1
 }

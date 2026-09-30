@@ -248,3 +248,26 @@ ERP-046 客户订单与收款核对证据。本功能为**开发期只读派生*
 
 - 后端契约单测：`DynamicReceiptReconciliationGroupingTests.cs`（覆盖分组键白名单与非法拒绝、无菜单授权拒绝、受限制业务员范围、空页、active / pending / historical 与 linked / partial / unlinked / unknown 状态隔离、币种不合并、当前页上限与只读不写库）。
 - 前端计数面板接线（ERP-171）：`tests/automation/dynamic_receipt_reconciliation_grouping_ui.test.js`。
+
+## 13. 前端当前页计数面板（ERP-171，只读、有界）
+
+设计器工具栏新增**当前页分组**选择器（`id="drr-groupby"`），仅提供 ERP-170 服务端白名单键
+（`none` / `customer` / `currency` / `receiptCoverageStatus` / `receiptEvidenceStatus`，`drrGroupKey` 规范化，
+缺失 / 空白 / 非法值一律回落 `none`，fail closed，绝不发送范围外键）。预览与导出复用既有已授权有界预览请求，
+并在请求体携带选中的分组键 `GroupBy`（`drrBuildRequest` 组装，`drrBuildState` 从选择器读取）。
+
+预览成功后，结果区在既有两个独立证据分区（订单证据 / 未关联收款证据）**之上**渲染两个独立计数面板
+（`drrOrderGroupPanelHtml` / `drrReceiptGroupPanelHtml`），明确标注**仅当前预览页，非全量合计**：
+
+- 订单计数面板只统计本页订单张数（`orderGroups` 的 `orderCount`），绝不求和金额 / 数量、绝不跨币种合并或换算。
+- 未关联收款计数面板只统计本页未关联收款张数（`receiptGroups` 的 `receiptCount`），
+  active / pending / historical 证据状态显式保留；命中读取上限时各项 `truncated` 显式渲染「（截断）」标记。
+- `receiptCoverageStatus` 分组下收款覆盖状态 `unknown` 作为独立分类显式保留（不回落到其它桶）；
+  收款证据状态分组只作用于未关联收款侧、收款覆盖状态分组只作用于订单侧，不适用侧显示可见提示（不静默清空）。
+- 分组标签全部经 `drrEsc` HTML 转义；计数未知（null）绝不回落为 0，显示「未知」；空页显示可见提示。
+- 权限不足 / 未登录 / 网络失败 / 无效请求复用既有 `drrErrorHtml` 失败态（fail closed，不渲染任何分组数据）。
+
+### 13.1 前端测试
+
+- `tests/automation/dynamic_receipt_reconciliation_grouping_ui.test.js`：覆盖分组键规范化与选择器白名单、
+  scope-safe 请求携带分组键、两个独立计数面板渲染（仅当前预览页、unknown / 截断 / 转义 / 空态）、错误态与无任意 SQL。

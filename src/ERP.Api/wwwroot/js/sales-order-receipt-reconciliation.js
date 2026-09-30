@@ -526,6 +526,15 @@ const DRR_ORDER_STATUS_OPTS = [
   { value: 'all', label: '全部未删除订单' },
 ];
 
+/* 当前页计数分组键（与后端 NormalizeGroupBy 白名单一致：none / customer / currency / receiptCoverageStatus / receiptEvidenceStatus） */
+const DRR_GROUP_OPTS = [
+  { value: 'none', label: '不分组' },
+  { value: 'customer', label: '按客户分组' },
+  { value: 'currency', label: '按币种分组' },
+  { value: 'receiptCoverageStatus', label: '按收款覆盖状态分组（订单侧）' },
+  { value: 'receiptEvidenceStatus', label: '按收款证据状态分组（未关联收款侧）' },
+];
+
 /* 默认每页条数（后端上限 200，由目录 maxPageSize 供给并钳制） */
 const DRR_DEFAULT_PAGE_SIZE = 20;
 const DRR_MAX_PAGE_SIZE = 200;
@@ -573,6 +582,23 @@ function drrEnumValue(value, opts) {
   return (opts || []).some(o => o.value === v) ? v : '';
 }
 
+/* 分组键规范化（fail closed）：只保留 ERP-170 白名单（none / customer / currency / receiptCoverageStatus / receiptEvidenceStatus），
+   缺失 / 空白 / 非法值一律回落 none（绝不进入请求） */
+function drrGroupKey(value) {
+  const key = String(value == null ? '' : value).trim();
+  if (!key) return 'none';
+  const hit = DRR_GROUP_OPTS.find(g => g.value.toLowerCase() === key.toLowerCase());
+  return hit ? hit.value : 'none';
+}
+
+/* 分组键选择器：仅 ERP-170 白名单（fail closed，无自由输入） */
+function drrGroupSelectHtml(groupBy) {
+  const selected = drrGroupKey(groupBy);
+  const opts = DRR_GROUP_OPTS.map(g =>
+    `<option value="${drrEsc(g.value)}" ${g.value === selected ? 'selected' : ''}>${drrEsc(g.label)}</option>`).join('');
+  return `<select id="drr-groupby" style="min-width:220px">${opts}</select>`;
+}
+
 /* 组装有界预览请求体：字段 / 收款字段只来自目录、分页有界、筛选只取枚举白名单，绝不接受任意字段名或 SQL */
 function drrBuildRequest(state) {
   const fields = drrSelectFields(state.catalogFields, state.selectedKeys);
@@ -585,6 +611,7 @@ function drrBuildRequest(state) {
   pageSize = Math.max(1, Math.min(maxPageSize, pageSize));
 
   const req = { fields, receiptFields, page, pageSize };
+  req.groupBy = drrGroupKey(state.groupBy);
 
   const customerId = Number(state.customerId);
   if (Number.isFinite(customerId) && customerId > 0) req.customerId = customerId;
@@ -667,6 +694,76 @@ function drrReceiptSectionHtml(view) {
   return `<h4 style="margin:14px 0 6px">🧾 未关联收款证据（收款单仅客户级引用：原币原样列出，绝不匹配 / 并入任何订单）</h4>${truncation}${table}`;
 }
 
+/* 单个计数分组面板（仅当前预览页）：标签转义、计数未知（null）绝不回落 0、截断标记显式保留、空页可见提示 */
+function drrCountPanelHtml(title, groups, countKey) {
+  const items = Array.isArray(groups) ? groups : [];
+  const max = Math.max(1, ...items.map(g => {
+    const n = Number(g && g[countKey]);
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  }));
+  const rows = items.map(g => {
+    const label = drrEsc((g && (g.label || g.key)) || '未知');
+    const unknown = !g || g[countKey] === null || g[countKey] === undefined || !Number.isFinite(Number(g[countKey]));
+    const count = unknown ? '未知' : String(g[countKey]);
+    const pct = unknown ? 0 : Math.max(0, Math.round((Number(g[countKey]) / max) * 100));
+    const trunc = (g && g.truncated)
+      ? '<span style="color:#b45309;font-size:11px;margin-left:4px">（截断）</span>' : '';
+    return `<div style="display:flex;align-items:center;gap:8px;margin:3px 0">`
+      + `<span style="min-width:200px;text-align:right;font-size:13px">${label}</span>`
+      + `<div style="flex:1;background:#e2e8f0;border-radius:4px;height:12px;overflow:hidden">`
+      + `<div style="height:12px;background:#2563eb;width:${pct}%"></div></div>`
+      + `<span style="min-width:48px;font-variant-numeric:tabular-nums;font-size:13px">${drrEsc(count)}</span>${trunc}</div>`;
+  }).join('');
+  const empty = items.length === 0
+    ? '<div class="text-muted" style="margin:4px 0">本页没有可分组计数的证据（空页）。</div>'
+    : '';
+  return `<div class="pd-hint" style="margin:8px 0">`
+    + `<div style="font-weight:600;margin-bottom:6px">${drrEsc(title)}（仅当前预览页，非全量合计）</div>`
+    + `<div class="text-muted" style="font-size:12px;margin-bottom:4px">计数只统计当前授权预览页，绝不求和金额 / 数量、绝不跨币种合并或换算、绝不推断收款单与订单的匹配关系。</div>`
+    + `${rows}${empty}</div>`;
+}
+
+/* 当前页订单计数分组面板（ERP-171）：只计数本页订单张数、不含金额；收款覆盖状态 unknown 显式保留；
+   收款证据状态分组不作用于订单侧（显式提示不适用） */
+function drrOrderGroupPanelHtml(view) {
+  const groupBy = (view && view.groupBy) || 'none';
+  if (groupBy === 'none' || !view) return '';
+  if (groupBy === 'receiptEvidenceStatus') {
+    return `<div class="pd-hint" style="margin:8px 0"><div style="font-weight:600;margin-bottom:4px">📊 本页订单计数分组（仅当前预览页）</div>`
+      + `<div class="text-muted">按收款证据状态分组只作用于未关联收款证据侧，订单侧不适用（本页无订单计数分组）。</div></div>`;
+  }
+  const title = {
+    customer: '📊 本页订单计数 · 按客户分组',
+    currency: '📊 本页订单计数 · 按币种分组',
+    receiptCoverageStatus: '📊 本页订单计数 · 按收款覆盖状态分组',
+  }[groupBy] || '📊 本页订单计数分组';
+  return drrCountPanelHtml(title, view.orderGroups, 'orderCount');
+}
+
+/* 当前页未关联收款计数分组面板（ERP-171）：只计数本页未关联收款张数；active / pending / historical 证据状态显式保留，
+   截断标记显式保留；收款覆盖状态分组不作用于未关联收款侧（显式提示不适用） */
+function drrReceiptGroupPanelHtml(view) {
+  const groupBy = (view && view.groupBy) || 'none';
+  if (groupBy === 'none' || !view) return '';
+  if (groupBy === 'receiptCoverageStatus') {
+    return `<div class="pd-hint" style="margin:8px 0"><div style="font-weight:600;margin-bottom:4px">🧾 本页未关联收款计数分组（仅当前预览页）</div>`
+      + `<div class="text-muted">按收款覆盖状态分组只作用于订单证据侧，未关联收款侧不适用（本页无收款计数分组）。</div></div>`;
+  }
+  const title = {
+    customer: '🧾 本页未关联收款计数 · 按客户分组',
+    currency: '🧾 本页未关联收款计数 · 按币种分组',
+    receiptEvidenceStatus: '🧾 本页未关联收款计数 · 按收款证据状态分组',
+  }[groupBy] || '🧾 本页未关联收款计数分组';
+  return drrCountPanelHtml(title, view.receiptGroups, 'receiptCount');
+}
+
+/* 两个独立计数面板（订单 + 未关联收款），仅当前预览页 */
+function drrGroupPanelsHtml(view) {
+  const groupBy = (view && view.groupBy) || 'none';
+  if (groupBy === 'none' || !view) return '';
+  return drrOrderGroupPanelHtml(view) + drrReceiptGroupPanelHtml(view);
+}
+
 /* 空结果提示 */
 function drrEmptyHtml() {
   return '<div class="empty" style="margin:8px 0">没有符合条件的订单证据（当前账号数据范围内的只读快照）。</div>';
@@ -697,7 +794,7 @@ function drrResultHtml(view) {
   const readOnly = view.readOnlyText ? `<div class="pd-hint">${drrEsc(view.readOnlyText)}</div>` : '';
   const boundary = view.boundaryText ? `<div class="pd-hint">${drrEsc(view.boundaryText)}</div>` : '';
   const disclaimer = view.disclaimerText ? `<div class="pd-hint" style="color:#64748b">${drrEsc(view.disclaimerText)}</div>` : '';
-  return `${readOnly}${boundary}${disclaimer}${drrOrderSectionHtml(view)}${drrReceiptSectionHtml(view)}`;
+  return `${readOnly}${boundary}${disclaimer}${drrGroupPanelsHtml(view)}${drrOrderSectionHtml(view)}${drrReceiptSectionHtml(view)}`;
 }
 
 /* 字段选择器：仅由目录白名单渲染为复选框，无自由填写的字段名 */
@@ -882,7 +979,7 @@ function drrRender() {
   </div>
 
   <div style="margin:10px 0">
-    <div style="font-weight:600;margin-bottom:6px">③ 有界筛选（客户 / 币种 / 订单日期 / 出货状态 / 收款链接 / 收款证据 / 订单状态 / 关键字 / 每页）</div>
+    <div style="font-weight:600;margin-bottom:6px">③ 有界筛选（客户 / 币种 / 订单日期 / 出货状态 / 收款链接 / 收款证据 / 订单状态 / 关键字 / 每页 / 当前页分组）</div>
     <div class="form-grid" style="grid-template-columns:repeat(3,1fr);gap:10px">
       <label>订单日期从 <input type="date" id="drr-date-from" value="${drrEsc(f.orderDateFrom || '')}" style="width:100%"></label>
       <label>至 <input type="date" id="drr-date-to" value="${drrEsc(f.orderDateTo || '')}" style="width:100%"></label>
@@ -894,6 +991,7 @@ function drrRender() {
       <label>订单状态 <select id="drr-order-status" style="width:100%"><option value="">全部</option>${orderStatusOptions}</select></label>
       <label>关键字 <input type="text" id="drr-keyword" value="${drrEsc(f.keyword || '')}" style="width:100%" placeholder="订单号 / 合同号 / 客户 PO 号"></label>
       <label>每页 <input type="number" id="drr-pagesize" value="${Number(f.pageSize)}" min="1" max="${maxPage}" style="width:100%"></label>
+      <label>当前页分组 ${drrGroupSelectHtml(f.groupBy)}</label>
     </div>
   </div>
 
@@ -928,6 +1026,7 @@ function drrBuildState(page) {
     receiptStatus: document.getElementById('drr-receipt-status').value,
     orderStatus: document.getElementById('drr-order-status').value,
     keyword: document.getElementById('drr-keyword').value,
+    groupBy: document.getElementById('drr-groupby').value,
     pageSize: document.getElementById('drr-pagesize').value,
     page: page || 1,
     maxPageSize: (DRR.catalog && DRR.catalog.maxPageSize) || DRR_MAX_PAGE_SIZE,
@@ -1143,6 +1242,7 @@ if (typeof module !== 'undefined' && module.exports) {
     DRR_LINK_STATUS_OPTS,
     DRR_RECEIPT_STATUS_OPTS,
     DRR_ORDER_STATUS_OPTS,
+    DRR_GROUP_OPTS,
     drrEsc,
     drrSelectFields,
     drrEnumValue,
@@ -1158,6 +1258,11 @@ if (typeof module !== 'undefined' && module.exports) {
     drrResultHtml,
     drrFieldChooserHtml,
     drrKindOfCode,
+    drrGroupKey,
+    drrGroupSelectHtml,
+    drrOrderGroupPanelHtml,
+    drrReceiptGroupPanelHtml,
+    drrGroupPanelsHtml,
     drrCsvCell,
     drrBuildCsv,
     drrExportExcel,

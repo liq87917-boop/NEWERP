@@ -1,12 +1,10 @@
 {
   "schema_version": 2,
   "project": "NEWERP",
-  "updated_at": "2026-09-30T01:24:04.030824Z",
-  "phase": "blocked",
-  "current_task": "ERP-171",
-  "queue": [
-    "ERP-171"
-  ],
+  "updated_at": "2026-09-30T01:40:16.671281Z",
+  "phase": "ready",
+  "current_task": null,
+  "queue": [],
   "completed": [
     "ERP-000",
     "ERP-001",
@@ -158,16 +156,17 @@
     "ERP-167",
     "ERP-168",
     "ERP-169",
-    "ERP-170"
+    "ERP-170",
+    "ERP-171"
   ],
   "blocked": [],
   "last_build": {
-    "task": "ERP-170",
+    "task": "ERP-171",
     "profile": "safe",
     "status": "passed",
     "exit_code": 0,
-    "log": ".ai\\logs\\ERP-170-validation-1.log",
-    "at": "2026-09-30T01:23:57.414312Z"
+    "log": ".ai\\logs\\ERP-171-validation-1.log",
+    "at": "2026-09-30T01:40:16.008521Z"
   },
   "last_error": null,
   "last_deepseek_fix": {
@@ -178,20 +177,16 @@
   },
   "git_sync": {
     "branch": "main",
-    "local_sha": "0f3a197",
+    "local_sha": "004f3f1",
     "status": "pending",
-    "ahead": 1,
-    "behind": 0,
-    "last_attempt_at": "2026-09-30T01:24:01.992340Z",
-    "last_error": "push_failed"
+    "ahead": 2,
+    "behind": 6,
+    "last_attempt_at": "2026-09-30T01:40:16.535300Z",
+    "last_error": null
   },
-  "next_recommended_tasks": [
-    "ERP-171"
-  ],
+  "next_recommended_tasks": [],
   "runner": {
     "status": "stopped",
     "pid": null
-  },
-  "blocker": "Working tree is not clean",
-  "finish_reason": "dirty_worktree"
+  }
 }
