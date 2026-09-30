@@ -1,0 +1,26 @@
+{
+  "task": "ERP-190",
+  "status": "blocked",
+  "execution_outcome": "preserved_failure_isolated",
+  "attempts": 3,
+  "last_error": "Path guard failed:\noutside allowed_paths: src/ERP.UnitTests/DynamicAgencyServiceFeeMonthlyGroupedExcelTests.cs",
+  "failure_kind": "path_guard_failure",
+  "attempted_fix": {
+    "provider": "deepseek",
+    "model": "deepseek-v4-pro"
+  },
+  "preserved_work": {
+    "execution_copy": "D:\\VSCodeProject\\NEWERP.executor",
+    "changed_paths": [
+      ".ai/PROJECT_STATE.json",
+      ".ai/results/ERP-190.json",
+      ".ai/tasks/ERP-190.json",
+      "src/ERP.Api/Controllers/DynamicAgencyServiceFeeMonthlyReportController.cs",
+      "src/ERP.UnitTests/DynamicAgencyServiceFeeMonthlyGroupedAmountExcelTests.cs",
+      "src/ERP.UnitTests/DynamicAgencyServiceFeeMonthlyGroupedExcelTests.cs"
+    ],
+    "diff": ".ai\\logs\\ERP-190-preserved-work.diff",
+    "preserved_at": "2026-09-30T08:04:51.570669Z"
+  },
+  "finished_at": "2026-09-30T08:04:51.571547Z"
+}

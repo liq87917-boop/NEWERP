@@ -1,7 +1,7 @@
 {
   "id": "ERP-190",
   "title": "Export agency monthly original-currency group amounts to Excel",
-  "status": "retry",
+  "status": "blocked",
   "risk_level": "low",
   "description": "A customer-service user downloads the authorized current-page agency monthly report as Excel and sees separate original-currency amount subtotals for the chosen month or customer grouping. Extend ERP-188 workbook generation with a distinct amount-group worksheet sourced from ERP-186 server-provided GroupCounts, retaining the selected-column evidence and count sheets; none grouping preserves the existing workbook. Reuse the same identity, customer menu, salesperson scope, field, group, filter and page validation on every export, with OperationLogMiddleware audit. Store registered, draft and void amounts as numeric cells with currency precision, never merge currencies or pages, escape formula-leading labels, and mark empty or truncated page-only evidence. Do not imply revenue recognition or receivables. Development only: no schema or migration edits, production SQL or real database execution, arbitrary SQL, business writes, secrets, deployment or browser acceptance. Keep manual test output outside the repo and verify focused workbook tests plus safe Release build/test.",
   "acceptance_criteria": [
@@ -33,7 +33,7 @@
     "level": "L1",
     "reason": ""
   },
-  "attempts": 0,
+  "attempts": 3,
   "created_at": "2026-09-30T06:45:46.950997Z",
   "preserved_work": {
     "execution_copy": "D:\\VSCodeProject\\NEWERP.executor",
@@ -42,12 +42,13 @@
       ".ai/results/ERP-190.json",
       ".ai/tasks/ERP-190.json",
       "src/ERP.Api/Controllers/DynamicAgencyServiceFeeMonthlyReportController.cs",
-      "src/ERP.UnitTests/DynamicAgencyServiceFeeMonthlyGroupedAmountExcelTests.cs"
+      "src/ERP.UnitTests/DynamicAgencyServiceFeeMonthlyGroupedAmountExcelTests.cs",
+      "src/ERP.UnitTests/DynamicAgencyServiceFeeMonthlyGroupedExcelTests.cs"
     ],
     "diff": ".ai\\logs\\ERP-190-preserved-work.diff",
-    "preserved_at": "2026-09-30T07:37:13.717250Z"
+    "preserved_at": "2026-09-30T08:04:51.570669Z"
   },
-  "failure_kind": "validation_failure",
+  "failure_kind": "path_guard_failure",
   "failed_transport_version": 2,
   "recovery_history": [
     {
@@ -163,5 +164,9 @@
     "execution_copy": "D:\\VSCodeProject\\NEWERP.executor",
     "repair_allowed_paths": [],
     "instruction": "DeepSeek supervisor recovery: inspect the referenced complete logs, diagnose the root cause, and implement a different safe repair within allowed_paths. Rebuild and rerun the configured tests; if validation fails, use the newest log as the next repair input. Do not repeat the failed approach. Do not edit task/state/result files or relax production and irreversible-operation gates. "
-  }
+  },
+  "blocker": "Automatic repair budget exhausted; preserved work remains in D:\\VSCodeProject\\NEWERP.executor",
+  "last_error": "Path guard failed:\noutside allowed_paths: src/ERP.UnitTests/DynamicAgencyServiceFeeMonthlyGroupedExcelTests.cs",
+  "exhausted_revalidation_source_tree": "d6bb6f925a4c3a194ca00ac07b1e2f93440f49f1",
+  "parked_execution_copy": "D:\\VSCodeProject\\NEWERP.executor"
 }
