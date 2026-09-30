@@ -1,0 +1,39 @@
+{
+  "id": "ERP-184",
+  "title": "Count authorized agency monthly evidence by current-page group",
+  "status": "pending",
+  "risk_level": "low",
+  "description": "A customer-service user groups the current authorized agency service-fee monthly report page by statement month or customer while original currencies remain separate. Extend the existing bounded request and catalog with finite group choices and return current-page count summaries from the underlying ERP-180 scoped rows even when dimension columns are not selected. Count monthly rows and registered, draft, void and total statements separately; disclose truncation and never imply a whole-report or accounting total. Recheck current-user menu and salesperson scope on every request; OperationLogMiddleware audits access. Fail closed for unknown groups, invalid fields, filters, page bounds or revoked access. Development only: no schema or migration edits, production SQL or real database execution, arbitrary SQL, business writes, secrets, deployment or browser acceptance. Use temporary locations for manual test output and verify focused tests plus safe Release build/test.",
+  "acceptance_criteria": [
+    "A finite groupBy choice of none, month or customer is validated before source reads; denied access and unknown groups fail closed while the existing page remains bounded.",
+    "Current-page group count summaries derive from the same authorized ERP-180 rows even when dimension columns are unselected, keep currencies separate, distinguish registered, draft and void statements, and label truncation and evidence-only scope.",
+    "Focused tests cover grouping, mixed currencies, hidden dimension columns, revoked scope, invalid options, empty and truncated pages; safe Release build/test passes."
+  ],
+  "allowed_paths": [
+    "src/ERP.Application/DTOs/DynamicAgencyServiceFeeMonthlyReportDtos.cs",
+    "src/ERP.Application/Services/DynamicAgencyServiceFeeMonthlyReportRules.cs",
+    "src/ERP.Api/Controllers/DynamicAgencyServiceFeeMonthlyReportController.cs",
+    "src/ERP.UnitTests/DynamicAgencyServiceFeeMonthlyGroupCountTests.cs"
+  ],
+  "validation_profile": "safe",
+  "depends_on": [
+    "ERP-181"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "completion_mode": "build",
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": [],
+    "test_filter": "Collection=UiTests",
+    "minimum_screenshots": 1
+  },
+  "human_gate": {
+    "required": false,
+    "status": "not_required",
+    "level": "L1",
+    "reason": ""
+  },
+  "attempts": 0,
+  "created_at": "2026-09-30T05:47:13.147951Z"
+}
