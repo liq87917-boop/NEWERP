@@ -258,6 +258,47 @@ public class DynamicFollowUpDueReportTests
         Assert.Equal(ErrorCodes.InvalidParameter, ex.Code);
     }
 
+    [Theory]
+    [InlineData(null)]
+    [InlineData(1L)]
+    [InlineData(long.MaxValue)]
+    public void ValidateCustomerId_留空或正整数通过(long? customerId)
+        => Assert.Equal(customerId, DynamicFollowUpDueReportRules.ValidateCustomerId(customerId));
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    public void ValidateCustomerId_非正整数拒绝(long customerId)
+    {
+        var ex = Assert.Throws<BusinessException>(
+            () => DynamicFollowUpDueReportRules.ValidateCustomerId(customerId));
+        Assert.Equal(ErrorCodes.InvalidParameter, ex.Code);
+    }
+
+    [Fact]
+    public void NormalizeKeyword_留空为不过滤()
+    {
+        Assert.Null(DynamicFollowUpDueReportRules.NormalizeKeyword(null));
+        Assert.Null(DynamicFollowUpDueReportRules.NormalizeKeyword(""));
+        Assert.Null(DynamicFollowUpDueReportRules.NormalizeKeyword("   "));
+    }
+
+    [Fact]
+    public void NormalizeKeyword_去首尾空白()
+        => Assert.Equal("圣诞饰品", DynamicFollowUpDueReportRules.NormalizeKeyword("  圣诞饰品  "));
+
+    [Fact]
+    public void NormalizeKeyword_最多80字符通过()
+        => Assert.Equal(new string('k', 80), DynamicFollowUpDueReportRules.NormalizeKeyword(new string('k', 80)));
+
+    [Fact]
+    public void NormalizeKeyword_超过80字符拒绝()
+    {
+        var ex = Assert.Throws<BusinessException>(
+            () => DynamicFollowUpDueReportRules.NormalizeKeyword(new string('k', 81)));
+        Assert.Equal(ErrorCodes.InvalidParameter, ex.Code);
+    }
+
     [Fact]
     public void 到期派生_逾期今日即将到期口径一致()
     {
@@ -659,5 +700,120 @@ public class DynamicFollowUpDueReportTests
         Assert.NotNull(page.Groups);
         Assert.Contains(page.Groups, g => g.Label == "张三" && g.Count == 1);
         Assert.DoesNotContain(page.Groups, g => g.Label == "李四");
+    }
+
+    // ==================== 客户 Id / 关键字筛选（ERP-200） ====================
+
+    [Fact]
+    public async Task 预览_客户Id筛选_只返回该客户记录()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedAuthorizedUser(db, "priv-user", "Priv", isSystemRole: true);
+        var c1 = SeedCustomer(db, "C001", "客户一");
+        var c2 = SeedCustomer(db, "C002", "客户二");
+        SeedFollowUp(db, "FU-1", c1.Id, "客户一", AsOf, subject: "主题A");
+        SeedFollowUp(db, "FU-2", c2.Id, "客户二", AsOf, subject: "主题B");
+
+        var ctl = BuildController(db, user.Id);
+        var page = OkPage(await ctl.Preview(new DynamicFollowUpDueReportRequest
+        {
+            Fields = new List<string> { "customerName" }, AsOfDate = AsOf, AheadDays = 7, CustomerId = c2.Id
+        }));
+
+        var row = Assert.Single(page.Rows);
+        Assert.Equal("客户二", (string)row["customerName"]!);
+        Assert.Equal(1, page.Total);
+    }
+
+    [Fact]
+    public async Task 预览_关键字筛选_匹配客户名称或跟进主题()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedAuthorizedUser(db, "priv-user", "Priv", isSystemRole: true);
+        var c1 = SeedCustomer(db, "C001", "义乌A公司");
+        var c2 = SeedCustomer(db, "C002", "广州B公司");
+        var c3 = SeedCustomer(db, "C003", "义乌C公司");
+        SeedFollowUp(db, "FU-1", c1.Id, "义乌A公司", AsOf, subject: "圣诞饰品");
+        SeedFollowUp(db, "FU-2", c2.Id, "广州B公司", AsOf, subject: "义乌小商品");
+        SeedFollowUp(db, "FU-3", c3.Id, "义乌C公司", AsOf, subject: "春交会");
+
+        var ctl = BuildController(db, user.Id);
+        var byName = OkPage(await ctl.Preview(new DynamicFollowUpDueReportRequest
+        {
+            Fields = new List<string> { "customerName" }, AsOfDate = AsOf, AheadDays = 7, Keyword = "义乌"
+        }));
+        Assert.Equal(3, byName.Total);
+
+        var bySubject = OkPage(await ctl.Preview(new DynamicFollowUpDueReportRequest
+        {
+            Fields = new List<string> { "customerName" }, AsOfDate = AsOf, AheadDays = 7, Keyword = "圣诞"
+        }));
+        var row = Assert.Single(bySubject.Rows);
+        Assert.Equal("义乌A公司", (string)row["customerName"]!);
+    }
+
+    [Fact]
+    public async Task 预览_关键字筛选_受限制业务员不泄露未分配客户()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedAuthorizedUser(db, "alice", "Sales");
+        var employee = SeedEmployee(db, "alice");
+        var otherEmployee = SeedEmployee(db, "bob");
+        var mine = SeedCustomer(db, "C001", "我的客户", employee.Id);
+        var other = SeedCustomer(db, "C002", "别人的客户", otherEmployee.Id);
+        SeedFollowUp(db, "FU-MINE", mine.Id, "我的客户", AsOf, subject: "机密报价");
+        SeedFollowUp(db, "FU-OTHER", other.Id, "别人的客户", AsOf, subject: "机密报价");
+
+        var ctl = BuildController(db, user.Id);
+        var page = OkPage(await ctl.Preview(new DynamicFollowUpDueReportRequest
+        {
+            Fields = new List<string> { "customerName", "subject" }, AsOfDate = AsOf, AheadDays = 7, Keyword = "机密"
+        }));
+
+        var row = Assert.Single(page.Rows);
+        Assert.Equal("我的客户", (string)row["customerName"]!);
+        Assert.Equal(1, page.Total);
+    }
+
+    [Fact]
+    public async Task 预览_客户Id非正整数_读取前拒绝且不写库()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedAuthorizedUser(db, "priv-user", "Priv", isSystemRole: true);
+        var c = SeedCustomer(db, "C001", "客户");
+        SeedFollowUp(db, "FU-1", c.Id, "客户", AsOf);
+
+        var before = db.CustomerFollowUps.Count();
+        var ctl = BuildController(db, user.Id);
+        var ex = await Assert.ThrowsAsync<BusinessException>(
+            () => ctl.Preview(new DynamicFollowUpDueReportRequest
+            {
+                AsOfDate = AsOf, AheadDays = 7, CustomerId = 0
+            }));
+
+        Assert.Equal(ErrorCodes.InvalidParameter, ex.Code);
+        Assert.Equal(before, db.CustomerFollowUps.Count());
+        Assert.False(db.ChangeTracker.HasChanges());
+    }
+
+    [Fact]
+    public async Task 预览_关键字超过80字符_读取前拒绝且不写库()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedAuthorizedUser(db, "priv-user", "Priv", isSystemRole: true);
+        var c = SeedCustomer(db, "C001", "客户");
+        SeedFollowUp(db, "FU-1", c.Id, "客户", AsOf);
+
+        var before = db.CustomerFollowUps.Count();
+        var ctl = BuildController(db, user.Id);
+        var ex = await Assert.ThrowsAsync<BusinessException>(
+            () => ctl.Preview(new DynamicFollowUpDueReportRequest
+            {
+                AsOfDate = AsOf, AheadDays = 7, Keyword = new string('k', 81)
+            }));
+
+        Assert.Equal(ErrorCodes.InvalidParameter, ex.Code);
+        Assert.Equal(before, db.CustomerFollowUps.Count());
+        Assert.False(db.ChangeTracker.HasChanges());
     }
 }

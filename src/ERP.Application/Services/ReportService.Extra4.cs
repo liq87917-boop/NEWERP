@@ -69,16 +69,19 @@ public partial class ReportService
         var groupBy = DynamicFollowUpDueReportRules.NormalizeGroupBy(request.GroupBy);
         DynamicFollowUpDueReportRules.ValidateAheadDays(request.AheadDays);
         DynamicFollowUpDueReportRules.ValidatePageBounds(request.Page, request.PageSize);
+        var customerId = DynamicFollowUpDueReportRules.ValidateCustomerId(request.CustomerId);
+        var keyword = DynamicFollowUpDueReportRules.NormalizeKeyword(request.Keyword);
         var asOfDate = DynamicFollowUpDueReportRules.NormalizeAsOfDate(request.AsOfDate);
         var limit = asOfDate.AddDays(request.AheadDays);
 
-        // 2) 数据库端：数据范围 → 到期状态 → 计数 → 稳定排序 → 分页（全部在物化之前完成）
+        // 2) 数据库端：数据范围 → 客户 Id / 关键字 → 到期状态 → 计数 → 稳定排序 → 分页（全部在物化之前完成）
         var source = _db.CustomerFollowUps
             .AsNoTracking()
             .Where(x => !x.IsDeleted && x.NextFollowDate != null && x.NextFollowDate <= limit);
 
         var scoped = SalespersonDataScopeService.FilterByCustomer(source, scope, x => x.CustomerId);
-        var filtered = ApplyDueStatus(scoped, dueStatus, asOfDate);
+        var filtered = ApplyCustomerAndKeyword(scoped, customerId, keyword);
+        filtered = ApplyDueStatus(filtered, dueStatus, asOfDate);
 
         var total = await filtered.CountAsync();
 
@@ -136,5 +139,22 @@ public partial class ReportService
             DynamicFollowUpDueReportRules.DueUpcoming => source.Where(x => x.NextFollowDate!.Value >= day.AddDays(1)),
             _ => source,
         };
+    }
+
+    /// <summary>
+    /// 把客户 Id / 关键字筛选映射为数据库端参数化过滤（ERP-200）：
+    /// 客户 Id 精确匹配；关键字对客户名称与跟进主题做 <c>Contains</c>（EF 参数化，非任意 SQL）。
+    /// 两者都作用在业务员数据范围过滤之后、计数 / 排序 / 分页之前。
+    /// </summary>
+    private static IQueryable<CustomerFollowUp> ApplyCustomerAndKeyword(
+        IQueryable<CustomerFollowUp> source, long? customerId, string? keyword)
+    {
+        if (customerId.HasValue)
+            source = source.Where(x => x.CustomerId == customerId.Value);
+
+        if (!string.IsNullOrEmpty(keyword))
+            source = source.Where(x => x.CustomerName.Contains(keyword) || x.Subject.Contains(keyword));
+
+        return source;
     }
 }

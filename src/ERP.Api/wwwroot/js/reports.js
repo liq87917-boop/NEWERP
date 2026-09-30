@@ -331,6 +331,33 @@ function fudDesGroupKey(v) {
   return (s === 'none' || s === 'dueStatus' || s === 'salesman') ? s : '';
 }
 
+/* 客户 Id 白名单校验：留空 = 不过滤；正整数才回传，否则返回 null（由 fudDesFilterError 先行提示） */
+function fudDesCustomerId(v) {
+  const s = String(v || '').trim();
+  if (s === '') return null;
+  const n = Number(s);
+  return Number.isInteger(n) && n > 0 ? n : null;
+}
+
+/* 关键字规范化：去首尾空白，最多 80 字符；超长返回 null（由 fudDesFilterError 先行提示） */
+function fudDesKeyword(v) {
+  const s = String(v || '').trim();
+  if (s === '') return null;
+  return s.length > 80 ? null : s;
+}
+
+/* 客户 Id / 关键字客户端校验错误文案（与后端 ValidateCustomerId / NormalizeKeyword 一致；空串 = 通过） */
+function fudDesFilterError(state) {
+  const s = String(state && state.customerId || '').trim();
+  if (s !== '') {
+    const n = Number(s);
+    if (!Number.isInteger(n) || n <= 0) return '客户 Id 必须是正整数';
+  }
+  const keyword = String(state && state.keyword || '').trim();
+  if (keyword.length > 80) return '关键字最多 80 个字符';
+  return '';
+}
+
 /* 组装有界预览请求体：字段只来自目录、筛选仅到期状态 / as-of 日期 / 提前天数、分组仅白名单、分页有界，绝不接受任意字段名或 SQL */
 function fudDesBuildRequest(state) {
   const fields = fudDesSelectFields(state.catalogFields, state.selectedKeys);
@@ -353,6 +380,11 @@ function fudDesBuildRequest(state) {
 
   const groupBy = fudDesGroupKey(state.groupBy);
   if (groupBy && groupBy !== 'none') req.groupBy = groupBy;
+
+  const customerId = fudDesCustomerId(state.customerId);
+  if (customerId) req.customerId = customerId;
+  const keyword = fudDesKeyword(state.keyword);
+  if (keyword) req.keyword = keyword;
 
   return req;
 }
@@ -517,6 +549,8 @@ function fudDesBuildState(page) {
     aheadDays: val('fud-des-ahead'),
     dueStatus: val('fud-des-due-status'),
     groupBy: val('fud-des-group'),
+    customerId: val('fud-des-customer-id'),
+    keyword: val('fud-des-keyword'),
     pageSize: val('fud-des-pagesize'),
     page: page || FUD_DYN.page || 1,
     maxPageSize: FUD_DYN.catalog && FUD_DYN.catalog.maxPageSize ? FUD_DYN.catalog.maxPageSize : 200,
@@ -526,6 +560,11 @@ function fudDesBuildState(page) {
 /* 预览：组装有界请求 → POST → 安全渲染列名与单元格；授权 / 无效 / 空 / 网络失败均可见 */
 async function fudDesPreview(page) {
   const state = fudDesBuildState(page);
+  const filterError = fudDesFilterError(state);
+  if (filterError) {
+    fudDesRenderResult(fudDesErrorHtml('invalid', filterError));
+    return;
+  }
   const req = fudDesBuildRequest(state);
   FUD_DYN.page = req.page;
 
@@ -561,6 +600,11 @@ async function fudDesExport() {
   }
 
   const state = fudDesBuildState(FUD_DYN.view.page);
+  const filterError = fudDesFilterError(state);
+  if (filterError) {
+    fudDesRenderResult(fudDesErrorHtml('invalid', filterError));
+    return;
+  }
   const req = fudDesBuildRequest(state);
   fudDesRenderResult(fudDesLoadingHtml());
 
@@ -618,6 +662,11 @@ async function fudDesExportPdf() {
   }
 
   const state = fudDesBuildState(FUD_DYN.view.page);
+  const filterError = fudDesFilterError(state);
+  if (filterError) {
+    fudDesRenderResult(fudDesErrorHtml('invalid', filterError));
+    return;
+  }
   const req = fudDesBuildRequest(state);
   fudDesRenderResult(fudDesLoadingHtml());
 
@@ -712,6 +761,8 @@ function openFollowUpDueDesigner() {
           <option value="dueStatus">按到期状态</option>
           <option value="salesman">按业务员</option>
         </select></label>
+        <label>客户Id <input type="number" id="fud-des-customer-id" min="1" style="width:90px" placeholder="全部客户"></label>
+        <label>关键字 <input type="text" id="fud-des-keyword" maxlength="80" style="width:160px" placeholder="客户名称 / 主题"></label>
         <label>as-of 日期 <input type="date" id="fud-des-asof" value="${today}"></label>
         <label>提前天数 <input type="number" id="fud-des-ahead" value="7" min="0" max="365" style="width:80px"></label>
         <label>每页 <input type="number" id="fud-des-pagesize" value="20" min="1" max="200" style="width:70px"></label>

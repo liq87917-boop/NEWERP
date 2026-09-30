@@ -29,6 +29,9 @@ public static class DynamicFollowUpDueReportRules
     /// <summary>提前天数上限（有界）</summary>
     public const int MaxAheadDays = 365;
 
+    /// <summary>关键字筛选最大长度（有界）</summary>
+    public const int MaxKeywordLength = 80;
+
     // ==================== 0.1 到期状态（与 ERP-192 同源） ====================
 
     /// <summary>已逾期（下次跟进日期早于 as-of 日期）</summary>
@@ -218,6 +221,28 @@ public static class DynamicFollowUpDueReportRules
             throw BusinessException.InvalidParameter("页码必须从 1 开始");
         if (pageSize < 1 || pageSize > MaxPageSize)
             throw BusinessException.InvalidParameter($"每页条数必须在 1 ~ {MaxPageSize} 之间（收到 {pageSize}）");
+    }
+
+    /// <summary>校验客户 Id 筛选（可选）：提供时必须是正整数（&gt;0），否则 fail closed 拒绝；留空 = 不过滤。</summary>
+    public static long? ValidateCustomerId(long? customerId)
+    {
+        if (customerId is <= 0)
+            throw BusinessException.InvalidParameter("客户 Id 筛选必须是正整数（大于 0）");
+        return customerId;
+    }
+
+    /// <summary>
+    /// 规范化关键字筛选（fail closed）：留空 / 全空白 = 不过滤；否则去首尾空白，长度最多 <see cref="MaxKeywordLength"/> 字符，超出直接拒绝。
+    /// </summary>
+    public static string? NormalizeKeyword(string? keyword)
+    {
+        if (string.IsNullOrWhiteSpace(keyword))
+            return null;
+
+        var trimmed = keyword.Trim();
+        if (trimmed.Length > MaxKeywordLength)
+            throw BusinessException.InvalidParameter($"关键字筛选最多 {MaxKeywordLength} 个字符（收到 {trimmed.Length} 个字符）");
+        return trimmed;
     }
 
     // ==================== 5. 到期派生与行映射 ====================

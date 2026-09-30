@@ -34,6 +34,12 @@ public sealed class DynamicFollowUpDueReportRequest
     /// <summary>到期状态筛选（可选：overdue / today / upcoming；非法取值直接拒绝）</summary>
     public string? DueStatus { get; set; }
 
+    /// <summary>客户 Id 筛选（可选：正整数；留空 = 不过滤；非法取值由服务端 fail closed 拒绝）</summary>
+    public long? CustomerId { get; set; }
+
+    /// <summary>客户名称 / 跟进主题关键字筛选（可选：去首尾空白后最多 80 字符；留空 = 不过滤；超出直接拒绝）</summary>
+    public string? Keyword { get; set; }
+
     /// <summary>分组键（仅 none / dueStatus / salesman；无效取值由服务端 fail closed 拒绝，默认 none 不分组）</summary>
     public string? GroupBy { get; set; }
 

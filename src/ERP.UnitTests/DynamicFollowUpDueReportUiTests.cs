@@ -294,5 +294,53 @@ public class DynamicFollowUpDueReportUiTests
         Assert.Contains("function fudDesBuildState(", js);
         Assert.Contains("groupBy: val('fud-des-group')", js);
     }
+
+    // ==================== 11. 客户 Id / 关键字筛选（ERP-200） ====================
+
+    [Fact]
+    public void 筛选_客户Id与关键字输入框_有界_无自由SQL()
+    {
+        var js = Script;
+
+        Assert.Contains("id=\"fud-des-customer-id\"", js);
+        Assert.Contains("min=\"1\"", js);
+        Assert.Contains("id=\"fud-des-keyword\"", js);
+        Assert.Contains("maxlength=\"80\"", js);
+        Assert.DoesNotContain("FromSql", js);
+        Assert.DoesNotContain("ExecuteSql", js);
+        Assert.DoesNotContain("SqlCommand", js);
+    }
+
+    [Fact]
+    public void 筛选_状态读取与请求组装_预览与导出复用()
+    {
+        var js = Script;
+
+        Assert.Contains("function fudDesCustomerId(", js);
+        Assert.Contains("function fudDesKeyword(", js);
+        Assert.Contains("function fudDesFilterError(", js);
+        Assert.Contains("customerId: val('fud-des-customer-id')", js);
+        Assert.Contains("keyword: val('fud-des-keyword')", js);
+        Assert.Contains("req.customerId = customerId;", js);
+        Assert.Contains("req.keyword = keyword;", js);
+
+        var export = Segment(js, "async function fudDesExport()", "async function fudDesExportPdf()");
+        Assert.Contains("fudDesFilterError(state)", export);
+        Assert.Contains("fudDesBuildRequest(state)", export);
+
+        var pdf = Segment(js, "async function fudDesExportPdf()", "/* 翻页");
+        Assert.Contains("fudDesFilterError(state)", pdf);
+        Assert.Contains("fudDesBuildRequest(state)", pdf);
+    }
+
+    [Fact]
+    public void 筛选_校验错误可见_不发送无效请求()
+    {
+        var js = Script;
+
+        Assert.Contains("客户 Id 必须是正整数", js);
+        Assert.Contains("关键字最多 80 个字符", js);
+        Assert.Contains("fudDesErrorHtml('invalid', filterError)", js);
+    }
 }
 
