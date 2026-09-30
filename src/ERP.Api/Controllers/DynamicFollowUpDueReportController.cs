@@ -2,6 +2,7 @@ using ERP.Application.Common;
 using ERP.Application.DTOs;
 using ERP.Application.Interfaces;
 using ERP.Application.Services;
+using ERP.Infrastructure.Export;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using System.Security.Claims;
@@ -13,6 +14,7 @@ namespace ERP.Api.Controllers;
 /// <list type="number">
 /// <item><b>GET /api/dynamic-follow-up-due-report</b>：返回跟进提醒证据字段白名单目录（需登录 + 跟进提醒菜单授权 + 业务员数据范围）；</item>
 /// <item><b>POST /api/dynamic-follow-up-due-report</b>：按选定字段与有界筛选（as-of 日期 / 提前天数 / 可选到期状态）预览当前账号数据范围内的跟进证据，稳定分页。</item>
+/// <item><b>POST /api/dynamic-follow-up-due-report/export</b>：导出当前选定页为 Excel（xlsx，只读，复用有界授权预览与选定列顺序）。</item>
 /// </list>
 /// <para>复用 ERP-192 的「跟进提醒」菜单授权与 <see cref="SalespersonDataScopeService"/>（ERP-097）业务员数据范围；
 /// 每次目录 / 预览请求都重新校验身份、菜单授权与业务员数据范围（fail closed），查询由 <see cref="ReportService"/> 只读完成，
@@ -51,10 +53,39 @@ public class DynamicFollowUpDueReportController : ControllerBase
     public async Task<IActionResult> Preview([FromBody] DynamicFollowUpDueReportRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
+        return Ok(ApiResponse<DynamicFollowUpDueReportPageDto>.Success(await BuildPageAsync(request)));
+    }
 
+    /// <summary>
+    /// 导出当前页为 Excel（ERP-195，只读）：复用同一有界、已授权预览与选定列顺序，仅导出当前页选定列；
+    /// 文本单元格做公式注入转义，数值 / 日期按类型写入。每次请求重新校验身份 / 跟进提醒菜单授权 /
+    /// 业务员数据范围 / 字段 / 筛选 / 分页（fail closed）。授权撤销返回错误、不返回任何工作簿。
+    /// <para>全程只读，不写库、不执行任意 SQL；请求由既有 <c>OperationLogMiddleware</c> 记录审计（动作「导出」）。</para>
+    /// </summary>
+    [HttpPost("export")]
+    public async Task<IActionResult> Export([FromBody] DynamicFollowUpDueReportRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var page = await BuildPageAsync(request);
+        var bytes = BuildWorkbook(page);
+        return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            $"FollowUpDue_{DateTime.Now:yyyyMMddHHmmss}.xlsx");
+    }
+
+    /// <summary>复用同一有界、已授权预览管线：每次重新校验身份 / 菜单授权 / 数据范围，再只读查询当前页</summary>
+    private async Task<DynamicFollowUpDueReportPageDto> BuildPageAsync(DynamicFollowUpDueReportRequest request)
+    {
         var scope = await EnsureAuthorizedAsync(CurrentUserId());
-        var page = await _reportService.GetDynamicFollowUpDueReportAsync(request, scope);
-        return Ok(ApiResponse<DynamicFollowUpDueReportPageDto>.Success(page));
+        return await _reportService.GetDynamicFollowUpDueReportAsync(request, scope);
+    }
+
+    /// <summary>用 ExcelExporter 生成当前页数据工作表（选定列顺序 + 公式注入转义）</summary>
+    private static byte[] BuildWorkbook(DynamicFollowUpDueReportPageDto page)
+    {
+        var columns = page.Columns.Select(c => (c.Key, c.Label)).ToList();
+        var rows = page.Rows.Select(DynamicFollowUpDueReportRules.BuildExportRow).ToList();
+        return ExcelExporter.ExportRows(DynamicFollowUpDueReportRules.RequiredMenuText, rows, columns);
     }
 
     /// <summary>身份 + 既有「角色 → 菜单」跟进提醒模块授权 + 业务员数据范围（fail closed，绝不猜测身份）</summary>

@@ -197,5 +197,33 @@ public class DynamicFollowUpDueReportUiTests
         Assert.Contains("return fudDesEsc(fudDesCellText(value, field));", js);
         Assert.Contains("fudDesEsc(c.label || c.key)", js);
     }
+
+    // ==================== 8. Excel 导出（ERP-195） ====================
+
+    [Fact]
+    public void 导出_入口与请求_复用预览请求体与导出端点()
+    {
+        var js = Script;
+
+        Assert.Contains("onclick=\"fudDesExport()\"", js);
+        Assert.Contains("function fudDesExport()", js);
+        Assert.Contains("fetch('/api/dynamic-follow-up-due-report/export'", js);
+        Assert.Contains("fudDesBuildState(FUD_DYN.view.page)", js);
+        Assert.Contains("fudDesBuildRequest(state)", js);
+        Assert.Contains("contentType.indexOf('spreadsheetml') >= 0", js);
+        Assert.Contains("URL.createObjectURL(blob)", js);
+        Assert.Contains("a.download", js);
+    }
+
+    [Fact]
+    public void 导出_空结果与错误可见_不下载内容()
+    {
+        var js = Script;
+
+        Assert.Contains("fudDesErrorHtml('invalid', '请先预览后再导出 Excel')", js);
+        Assert.Contains("fudDesErrorHtml('empty', '没有符合筛选条件的跟进提醒证据，无法导出（请先预览）')", js);
+        Assert.Contains("fudDesErrorHtml('unauthorized', message)", js);
+        Assert.Contains("fudDesErrorHtml('network', (err && err.message) || '无法连接到服务器')", js);
+    }
 }
 
