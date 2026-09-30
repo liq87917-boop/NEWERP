@@ -34,6 +34,9 @@ public sealed class DynamicFollowUpDueReportRequest
     /// <summary>到期状态筛选（可选：overdue / today / upcoming；非法取值直接拒绝）</summary>
     public string? DueStatus { get; set; }
 
+    /// <summary>分组键（仅 none / dueStatus / salesman；无效取值由服务端 fail closed 拒绝，默认 none 不分组）</summary>
+    public string? GroupBy { get; set; }
+
     /// <summary>页码（从 1 开始）</summary>
     public int Page { get; set; } = 1;
 
@@ -56,6 +59,8 @@ public sealed record DynamicFollowUpDueReportCatalogDto(
 /// 跟进提醒报表预览结果页（ERP-193，只读）：按请求顺序返回选定列与分页行；行内仅包含选定的白名单字段值，
 /// 不泄露范围外 / 未分配 / 空客户记录。<see cref="Total"/> 为范围内记录总数（分页前），
 /// <see cref="Truncated"/> 表示本页之外仍有更多记录，<see cref="EmptyText"/> 在空页时显式说明。
+/// <para>ERP-197 新增 <see cref="GroupBy"/> / <see cref="Groups"/>：仅当请求分组（dueStatus / salesman）时，
+/// <see cref="Groups"/> 才给出「当前授权预览页」按分组键的行数分布（只统计本页，绝不外推为整表总数）；默认 none 时为空。</para>
 /// </summary>
 public sealed record DynamicFollowUpDueReportPageDto(
     List<DynamicFollowUpDueReportFieldDto> Columns,
@@ -68,4 +73,16 @@ public sealed record DynamicFollowUpDueReportPageDto(
     string EmptyText,
     string ReadOnlyText,
     string BoundaryText,
-    string DisclaimerText);
+    string DisclaimerText,
+    string GroupBy = "none",
+    List<DynamicFollowUpDueReportGroupDto>? Groups = null);
+
+/// <summary>
+/// 跟进提醒报表页面分组计数（ERP-197，只读）：当前授权预览页内按分组键聚合的行数分布。
+/// 只统计本页行数，绝不把计数外推为整表 / 未分页总数；dueStatus 为固定分类（已逾期 / 今日到期 / 即将到期，计数可为 0），
+/// salesman 为动态分组（未分配业务员单独分桶，标签清晰稳定）。
+/// </summary>
+public sealed record DynamicFollowUpDueReportGroupDto(
+    string Key,
+    string Label,
+    int Count);

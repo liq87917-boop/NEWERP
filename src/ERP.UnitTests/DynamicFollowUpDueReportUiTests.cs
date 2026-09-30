@@ -253,5 +253,46 @@ public class DynamicFollowUpDueReportUiTests
         Assert.Contains("fudDesErrorHtml('unauthorized', message)", js);
         Assert.Contains("fudDesErrorHtml('network', (err && err.message) || '无法连接到服务器')", js);
     }
+
+    // ==================== 10. 页面分组计数（ERP-197） ====================
+
+    [Fact]
+    public void 分组_请求_仅白名单选择器_无自由输入()
+    {
+        var js = Script;
+
+        Assert.Contains("function fudDesGroupKey(", js);
+        Assert.Contains("req.groupBy = groupBy;", js);
+        Assert.Contains("groupBy: val('fud-des-group')", js);
+        Assert.Contains("id=\"fud-des-group\"", js);
+        Assert.Contains("value=\"none\"", js);
+        Assert.Contains("value=\"dueStatus\"", js);
+        Assert.Contains("value=\"salesman\"", js);
+        Assert.DoesNotContain("fud-des-group\" type=\"text\"", js);
+    }
+
+    [Fact]
+    public void 分组_结果_本页计数且标签转义()
+    {
+        var js = Script;
+
+        Assert.Contains("function fudDesGroupsHtml(", js);
+        Assert.Contains("groupBy === 'none'", js);
+        Assert.Contains("view.groups", js);
+        Assert.Contains("仅统计本页", js);
+        Assert.Contains("role=\"list\"", js);
+        Assert.Contains("fudDesEsc(label)", js);
+    }
+
+    [Fact]
+    public void 分组_翻页与筛选_保留分组选择()
+    {
+        var js = Script;
+
+        Assert.Contains("function fudDesPage(", js);
+        Assert.Contains("fudDesPreview(page)", js);
+        Assert.Contains("function fudDesBuildState(", js);
+        Assert.Contains("groupBy: val('fud-des-group')", js);
+    }
 }
 

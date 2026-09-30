@@ -66,6 +66,7 @@ public partial class ReportService
         // 1) 全部校验先于任何跟进记录读取（fail closed）
         var fieldKeys = DynamicFollowUpDueReportRules.NormalizeFields(request.Fields);
         var dueStatus = DynamicFollowUpDueReportRules.NormalizeDueStatus(request.DueStatus);
+        var groupBy = DynamicFollowUpDueReportRules.NormalizeGroupBy(request.GroupBy);
         DynamicFollowUpDueReportRules.ValidateAheadDays(request.AheadDays);
         DynamicFollowUpDueReportRules.ValidatePageBounds(request.Page, request.PageSize);
         var asOfDate = DynamicFollowUpDueReportRules.NormalizeAsOfDate(request.AsOfDate);
@@ -97,6 +98,9 @@ public partial class ReportService
             .Select(x => DynamicFollowUpDueReportRules.BuildRow(x, fieldKeys, asOfDate))
             .ToList();
 
+        // 4) 页面分组计数（ERP-197）：只统计「当前授权预览页」的已分页行，绝不外推为整表总数
+        var groups = DynamicFollowUpDueReportRules.BuildGroupCounts(items, groupBy, asOfDate);
+
         var totalPages = total == 0 ? 0 : (int)Math.Ceiling(total / (double)request.PageSize);
         var truncated = (request.Page - 1) * request.PageSize + rows.Count < total;
 
@@ -111,7 +115,9 @@ public partial class ReportService
             rows.Count == 0 ? DynamicFollowUpDueReportRules.EmptyText : string.Empty,
             DynamicFollowUpDueReportRules.ReadOnlyText,
             DynamicFollowUpDueReportRules.BoundaryText,
-            DynamicFollowUpDueReportRules.DisclaimerText);
+            DynamicFollowUpDueReportRules.DisclaimerText,
+            groupBy,
+            groups);
     }
 
     /// <summary>把规范化到期状态映射为数据库端 <c>NextFollowDate</c> 与 as-of 日期的比较（全部可翻译为 SQL）</summary>

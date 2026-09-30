@@ -40,7 +40,7 @@ public class DynamicFollowUpDueReportTests
 
     private static CustomerFollowUp SeedFollowUp(
         ErpDbContext db, string followNo, long? customerId, string customerName,
-        DateTime? nextFollowDate, string subject = "跟进主题")
+        DateTime? nextFollowDate, string subject = "跟进主题", string salesmanName = "张三")
     {
         var follow = new CustomerFollowUp
         {
@@ -49,7 +49,7 @@ public class DynamicFollowUpDueReportTests
             CustomerId = customerId,
             CustomerName = customerName,
             Subject = subject,
-            SalesmanName = "张三",
+            SalesmanName = salesmanName,
             Result = "待跟进",
             NextFollowDate = nextFollowDate,
             IsDeleted = false
@@ -486,5 +486,178 @@ public class DynamicFollowUpDueReportTests
 
         Assert.Equal(before, db.CustomerFollowUps.Count());
         Assert.False(db.ChangeTracker.HasChanges());
+    }
+
+    // ==================== 页面分组计数（ERP-197） ====================
+
+    [Theory]
+    [InlineData("none", "none")]
+    [InlineData("NONE", "none")]
+    [InlineData("dueStatus", "dueStatus")]
+    [InlineData("DueStatus", "dueStatus")]
+    [InlineData("salesman", "salesman")]
+    [InlineData("SALESMAN", "salesman")]
+    public void NormalizeGroupBy_合法取值_大小写不敏感(string input, string expected)
+    {
+        Assert.Equal(expected, DynamicFollowUpDueReportRules.NormalizeGroupBy(input));
+    }
+
+    [Fact]
+    public void NormalizeGroupBy_空为不分组()
+    {
+        Assert.Equal(DynamicFollowUpDueReportRules.GroupNone, DynamicFollowUpDueReportRules.NormalizeGroupBy(null));
+        Assert.Equal(DynamicFollowUpDueReportRules.GroupNone, DynamicFollowUpDueReportRules.NormalizeGroupBy("  "));
+    }
+
+    [Theory]
+    [InlineData("warehouse")]
+    [InlineData("quarter")]
+    [InlineData("due-status")]
+    [InlineData("分组")]
+    [InlineData("unknown")]
+    public void NormalizeGroupBy_无效取值拒绝(string input)
+    {
+        var ex = Assert.Throws<BusinessException>(() => DynamicFollowUpDueReportRules.NormalizeGroupBy(input));
+        Assert.Equal(ErrorCodes.InvalidParameter, ex.Code);
+    }
+
+    [Fact]
+    public async Task 预览_分组_到期状态_固定分类且保留空分类()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedAuthorizedUser(db, "priv-user", "Priv", isSystemRole: true);
+        var c = SeedCustomer(db, "C001", "客户");
+        SeedFollowUp(db, "FU-OD", c.Id, "客户", AsOf.AddDays(-1), subject: "逾期一条");
+
+        var ctl = BuildController(db, user.Id);
+        var page = OkPage(await ctl.Preview(new DynamicFollowUpDueReportRequest
+        {
+            Fields = new List<string> { "subject" }, AsOfDate = AsOf, AheadDays = 7, GroupBy = "dueStatus"
+        }));
+
+        Assert.Equal(DynamicFollowUpDueReportRules.GroupDueStatus, page.GroupBy);
+        Assert.NotNull(page.Groups);
+        Assert.Equal(new[] { "已逾期", "今日到期", "即将到期" }, page.Groups.Select(g => g.Label).ToArray());
+        Assert.Equal(new[] { 1, 0, 0 }, page.Groups.Select(g => g.Count).ToArray());
+    }
+
+    [Fact]
+    public async Task 预览_分组_业务员_未分配单独分桶且标签稳定()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedAuthorizedUser(db, "priv-user", "Priv", isSystemRole: true);
+        var c = SeedCustomer(db, "C001", "客户");
+        SeedFollowUp(db, "FU-A1", c.Id, "客户", AsOf, subject: "a1", salesmanName: "李四");
+        SeedFollowUp(db, "FU-A2", c.Id, "客户", AsOf, subject: "a2", salesmanName: "李四");
+        SeedFollowUp(db, "FU-B", c.Id, "客户", AsOf, subject: "b", salesmanName: "王五");
+        SeedFollowUp(db, "FU-U", c.Id, "客户", AsOf, subject: "u", salesmanName: "");
+
+        var ctl = BuildController(db, user.Id);
+        var page = OkPage(await ctl.Preview(new DynamicFollowUpDueReportRequest
+        {
+            Fields = new List<string> { "subject" }, AsOfDate = AsOf, AheadDays = 7, GroupBy = "salesman"
+        }));
+
+        Assert.Equal(DynamicFollowUpDueReportRules.GroupSalesman, page.GroupBy);
+        Assert.NotNull(page.Groups);
+        Assert.Equal(3, page.Groups.Count);
+        Assert.Contains(page.Groups, g => g.Label == "李四" && g.Count == 2);
+        Assert.Contains(page.Groups, g => g.Label == "王五" && g.Count == 1);
+        var unassigned = Assert.Single(page.Groups, g => g.Key.EndsWith(":unassigned"));
+        Assert.Equal(DynamicFollowUpDueReportRules.UnassignedSalesmanText, unassigned.Label);
+        Assert.Equal(1, unassigned.Count);
+    }
+
+    [Fact]
+    public async Task 预览_分组_只统计当前页_绝不外推整表总数()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedAuthorizedUser(db, "priv-user", "Priv", isSystemRole: true);
+        var c = SeedCustomer(db, "C001", "客户");
+        for (var i = 0; i < 5; i++)
+            SeedFollowUp(db, $"FU-{i}", c.Id, "客户", AsOf.AddDays(-(i + 1)), subject: $"逾期{i}");
+
+        var ctl = BuildController(db, user.Id);
+
+        var page1 = OkPage(await ctl.Preview(new DynamicFollowUpDueReportRequest
+        {
+            Fields = new List<string> { "subject" }, AsOfDate = AsOf, AheadDays = 7, GroupBy = "dueStatus", Page = 1, PageSize = 2
+        }));
+        Assert.Equal(5, page1.Total); // 整表口径总数仍为 5，分组计数只统计本页
+        Assert.NotNull(page1.Groups);
+        Assert.Equal(2, Assert.Single(page1.Groups, g => g.Label == "已逾期").Count);
+
+        var page3 = OkPage(await ctl.Preview(new DynamicFollowUpDueReportRequest
+        {
+            Fields = new List<string> { "subject" }, AsOfDate = AsOf, AheadDays = 7, GroupBy = "dueStatus", Page = 3, PageSize = 2
+        }));
+        Assert.NotNull(page3.Groups);
+        Assert.Equal(1, Assert.Single(page3.Groups, g => g.Label == "已逾期").Count);
+    }
+
+    [Fact]
+    public async Task 预览_分组_none_不返回分组计数()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedAuthorizedUser(db, "priv-user", "Priv", isSystemRole: true);
+        var c = SeedCustomer(db, "C001", "客户");
+        SeedFollowUp(db, "FU-1", c.Id, "客户", AsOf);
+
+        var ctl = BuildController(db, user.Id);
+        var page = OkPage(await ctl.Preview(new DynamicFollowUpDueReportRequest
+        {
+            Fields = new List<string> { "subject" }, AsOfDate = AsOf, AheadDays = 7
+        }));
+
+        Assert.Equal(DynamicFollowUpDueReportRules.GroupNone, page.GroupBy);
+        Assert.NotNull(page.Groups);
+        Assert.Empty(page.Groups);
+    }
+
+    [Fact]
+    public async Task 预览_分组_无效键_读取前拒绝且不写库()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedAuthorizedUser(db, "priv-user", "Priv", isSystemRole: true);
+        var c = SeedCustomer(db, "C001", "客户");
+        SeedFollowUp(db, "FU-1", c.Id, "客户", AsOf);
+
+        var before = db.CustomerFollowUps.Count();
+        var ctl = BuildController(db, user.Id);
+        var ex = await Assert.ThrowsAsync<BusinessException>(
+            () => ctl.Preview(new DynamicFollowUpDueReportRequest
+            {
+                Fields = new List<string> { "subject" }, AsOfDate = AsOf, AheadDays = 7, GroupBy = "warehouse"
+            }));
+
+        Assert.Equal(ErrorCodes.InvalidParameter, ex.Code);
+        Assert.Equal(before, db.CustomerFollowUps.Count());
+        Assert.False(db.ChangeTracker.HasChanges());
+    }
+
+    [Fact]
+    public async Task 预览_分组_受限制业务员_范围外行不进入分组计数()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedAuthorizedUser(db, "alice", "Sales");
+        var employee = SeedEmployee(db, "alice");
+        var otherEmployee = SeedEmployee(db, "bob");
+        var mine = SeedCustomer(db, "C001", "我的客户", employee.Id);
+        var other = SeedCustomer(db, "C002", "别人的客户", otherEmployee.Id);
+        SeedFollowUp(db, "FU-MINE", mine.Id, "我的客户", AsOf, subject: "我的", salesmanName: "张三");
+        SeedFollowUp(db, "FU-OTHER", other.Id, "别人的客户", AsOf, subject: "他人", salesmanName: "李四");
+
+        var ctl = BuildController(db, user.Id);
+        var page = OkPage(await ctl.Preview(new DynamicFollowUpDueReportRequest
+        {
+            Fields = new List<string> { "customerName" }, AsOfDate = AsOf, AheadDays = 7, GroupBy = "salesman"
+        }));
+
+        var row = Assert.Single(page.Rows);
+        Assert.Equal("我的客户", (string)row["customerName"]!);
+        Assert.Equal(1, page.Total);
+        Assert.NotNull(page.Groups);
+        Assert.Contains(page.Groups, g => g.Label == "张三" && g.Count == 1);
+        Assert.DoesNotContain(page.Groups, g => g.Label == "李四");
     }
 }

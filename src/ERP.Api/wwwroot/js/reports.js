@@ -325,7 +325,13 @@ function fudDesDueStatusKey(v) {
   return (s === 'overdue' || s === 'today' || s === 'upcoming') ? s : '';
 }
 
-/* 组装有界预览请求体：字段只来自目录、筛选仅到期状态 / as-of 日期 / 提前天数、分页有界，绝不接受任意字段名或 SQL */
+/* 分组键白名单（与后端 NormalizeGroupBy 一致：none / dueStatus / salesman；未知取值不回传，由后端 fail closed 兜底） */
+function fudDesGroupKey(v) {
+  const s = String(v || '').trim();
+  return (s === 'none' || s === 'dueStatus' || s === 'salesman') ? s : '';
+}
+
+/* 组装有界预览请求体：字段只来自目录、筛选仅到期状态 / as-of 日期 / 提前天数、分组仅白名单、分页有界，绝不接受任意字段名或 SQL */
 function fudDesBuildRequest(state) {
   const fields = fudDesSelectFields(state.catalogFields, state.selectedKeys);
   const page = Math.max(1, Math.floor(Number(state.page) || 1));
@@ -344,6 +350,9 @@ function fudDesBuildRequest(state) {
 
   const dueStatus = fudDesDueStatusKey(state.dueStatus);
   if (dueStatus) req.dueStatus = dueStatus;
+
+  const groupBy = fudDesGroupKey(state.groupBy);
+  if (groupBy && groupBy !== 'none') req.groupBy = groupBy;
 
   return req;
 }
@@ -397,6 +406,29 @@ function fudDesEmptyHtml(view) {
   return `<div class="empty" style="margin:8px 0">${fudDesEsc((view && view.emptyText) || '没有符合筛选条件的跟进提醒证据')}</div>`;
 }
 
+/* 分组行数分布（ERP-197）：按当前授权预览页的分组行数渲染可访问列表（只统计本页，绝不外推整表总数）；
+   未分配业务员标签由后端给出并清晰可见；标签与计数全部转义；none / 空分组不渲染 */
+function fudDesGroupsHtml(view) {
+  const groupBy = view && view.groupBy;
+  const groups = (view && view.groups) || [];
+  if (!groupBy || groupBy === 'none' || !Array.isArray(groups) || groups.length === 0) return '';
+  const max = Math.max(1, ...groups.map(g => Number(g && g.count) || 0));
+  const bars = groups.map(g => {
+    const label = (g && g.label) || (g && g.key) || '';
+    const count = Number(g && g.count) || 0;
+    const pct = Math.round(count / max * 100);
+    return `<li role="listitem" aria-label="${fudDesEsc(label)}：${count} 行" style="display:flex;align-items:center;gap:8px;margin:4px 0">
+      <span style="flex:0 0 180px;text-align:right;color:#334155;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${fudDesEsc(label)}">${fudDesEsc(label)}</span>
+      <span style="flex:1;background:#e2e8f0;border-radius:4px;height:16px;overflow:hidden;min-width:40px">
+        <span style="display:block;height:100%;background:#2563eb;width:${pct}%"></span>
+      </span>
+      <span style="flex:0 0 72px;text-align:right;color:#0f172a">${count} 行</span>
+    </li>`;
+  }).join('');
+  return `<div class="pd-hint" role="img" aria-label="本页跟进提醒行数分布（仅统计本页）" style="margin-top:8px">📊 本页行数分布（仅统计本页）</div>
+    <ul role="list" style="list-style:none;padding:0 8px;margin:4px 0 8px">${bars}</ul>`;
+}
+
 /* 错误提示（授权撤销 / 未登录 / 无效请求 / 网络失败分别可见，且不暴露任何数据） */
 function fudDesErrorHtml(kind, message) {
   const labels = {
@@ -427,8 +459,9 @@ function fudDesResultHtml(view) {
   const summary = view
     ? `<div class="text-muted" style="margin:6px 0">共 ${view.total} 行 · 第 ${view.page} 页 · 每页 ${view.pageSize} 行 · 共 ${view.totalPages} 页${view.truncated ? ' · 后续仍有分页' : ''}</div>`
     : '';
+  const groups = fudDesGroupsHtml(view);
   const empty = view && (!view.rows || view.rows.length === 0) ? fudDesEmptyHtml(view) : '';
-  return `${readOnly}${boundary}${disclaimer}${summary}${empty}${fudDesTableHtml(view)}${fudDesPagingHtml(view)}`;
+  return `${readOnly}${boundary}${disclaimer}${summary}${groups}${empty}${fudDesTableHtml(view)}${fudDesPagingHtml(view)}`;
 }
 
 /* 字段选择器：仅由目录白名单渲染为复选框，无自由填写的字段名 */
@@ -483,6 +516,7 @@ function fudDesBuildState(page) {
     asOfDate: val('fud-des-asof'),
     aheadDays: val('fud-des-ahead'),
     dueStatus: val('fud-des-due-status'),
+    groupBy: val('fud-des-group'),
     pageSize: val('fud-des-pagesize'),
     page: page || FUD_DYN.page || 1,
     maxPageSize: FUD_DYN.catalog && FUD_DYN.catalog.maxPageSize ? FUD_DYN.catalog.maxPageSize : 200,
@@ -672,6 +706,11 @@ function openFollowUpDueDesigner() {
           <option value="overdue">已逾期</option>
           <option value="today">今日到期</option>
           <option value="upcoming">即将到期</option>
+        </select></label>
+        <label>分组 <select id="fud-des-group" onchange="fudDesPreview(1)">
+          <option value="none">不分组</option>
+          <option value="dueStatus">按到期状态</option>
+          <option value="salesman">按业务员</option>
         </select></label>
         <label>as-of 日期 <input type="date" id="fud-des-asof" value="${today}"></label>
         <label>提前天数 <input type="number" id="fud-des-ahead" value="7" min="0" max="365" style="width:80px"></label>

@@ -1,11 +1,10 @@
 {
   "schema_version": 2,
   "project": "NEWERP",
-  "updated_at": "2026-09-30T09:32:18.066038Z",
+  "updated_at": "2026-09-30T09:39:39.860711Z",
   "phase": "ready",
   "current_task": null,
   "queue": [
-    "ERP-197",
     "ERP-198",
     "ERP-199"
   ],
@@ -185,7 +184,8 @@
     "ERP-193",
     "ERP-194",
     "ERP-195",
-    "ERP-196"
+    "ERP-196",
+    "ERP-197"
   ],
   "blocked": [
     {
@@ -196,12 +196,12 @@
     }
   ],
   "last_build": {
-    "task": "ERP-196",
+    "task": "ERP-197",
     "profile": "safe",
     "status": "passed",
     "exit_code": 0,
-    "log": ".ai\\logs\\ERP-196-validation-1.log",
-    "at": "2026-09-30T09:32:12.342732Z"
+    "log": ".ai\\logs\\ERP-197-validation-1.log",
+    "at": "2026-09-30T09:39:39.361916Z"
   },
   "last_error": null,
   "last_deepseek_fix": {
@@ -212,15 +212,14 @@
   },
   "git_sync": {
     "branch": "main",
-    "local_sha": "b12c35a",
-    "status": "synced",
+    "local_sha": "073133c",
+    "status": "pending",
     "ahead": 0,
     "behind": 0,
-    "last_attempt_at": "2026-09-30T09:32:17.964462Z",
+    "last_attempt_at": "2026-09-30T09:39:39.761924Z",
     "last_error": null
   },
   "next_recommended_tasks": [
-    "ERP-197",
     "ERP-198",
     "ERP-199"
   ],

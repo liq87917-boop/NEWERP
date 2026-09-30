@@ -49,6 +49,20 @@ public static class DynamicFollowUpDueReportRules
     /// <summary>即将到期文案（与 ERP-192 同源）</summary>
     public const string DueUpcomingText = "即将到期";
 
+    // ==================== 0.2 分组键（ERP-197） ====================
+
+    /// <summary>不分组（默认）</summary>
+    public const string GroupNone = "none";
+
+    /// <summary>按到期状态分组（已逾期 / 今日到期 / 即将到期）</summary>
+    public const string GroupDueStatus = "dueStatus";
+
+    /// <summary>按业务员分组（跟进人姓名；未分配业务员单独分桶）</summary>
+    public const string GroupSalesman = "salesman";
+
+    /// <summary>未分配业务员文案（跟进人姓名缺失 / 空白时使用的稳定标签）</summary>
+    public const string UnassignedSalesmanText = "未分配业务员";
+
     // ==================== 1. 文案 ====================
 
     /// <summary>只读声明（接口与文档统一声明）</summary>
@@ -168,6 +182,24 @@ public static class DynamicFollowUpDueReportRules
             $"无效的到期状态筛选值: {dueStatus}（可选：overdue / today / upcoming）");
     }
 
+    /// <summary>
+    /// 规范化分组键（fail closed）：空 / 留空 = 不分组（none）；仅接受 none / dueStatus / salesman（大小写不敏感）；
+    /// 未知取值显式拒绝（在读取任何源数据之前完成）。
+    /// </summary>
+    public static string NormalizeGroupBy(string? groupBy)
+    {
+        if (string.IsNullOrWhiteSpace(groupBy))
+            return GroupNone;
+
+        var normalized = groupBy.Trim();
+        if (string.Equals(normalized, GroupNone, StringComparison.OrdinalIgnoreCase)) return GroupNone;
+        if (string.Equals(normalized, GroupDueStatus, StringComparison.OrdinalIgnoreCase)) return GroupDueStatus;
+        if (string.Equals(normalized, GroupSalesman, StringComparison.OrdinalIgnoreCase)) return GroupSalesman;
+
+        throw BusinessException.InvalidParameter(
+            $"无效的分组键: {groupBy}（可选：none / dueStatus / salesman）");
+    }
+
     /// <summary>规范化 as-of 日期（留空 = 今天；只取日期部分）</summary>
     public static DateTime NormalizeAsOfDate(DateTime? asOfDate)
         => (asOfDate ?? DateTime.Today).Date;
@@ -201,6 +233,10 @@ public static class DynamicFollowUpDueReportRules
     public static string DueStatusText(int dueDays)
         => dueDays > 0 ? DueOverdueText : (dueDays == 0 ? DueTodayText : DueUpcomingText);
 
+    /// <summary>到期状态键（与 ERP-192 同源：&gt;0 overdue、=0 today、&lt;0 upcoming），供分组计数使用</summary>
+    public static string DueStatusKey(int dueDays)
+        => dueDays > 0 ? DueOverdue : (dueDays == 0 ? DueToday : DueUpcoming);
+
     /// <summary>读取指定字段的值（未知字段 fail closed）</summary>
     public static object? Select(CustomerFollowUp item, string key, DateTime asOfDate)
         => FieldByKey.TryGetValue(key.Trim(), out var def)
@@ -215,6 +251,62 @@ public static class DynamicFollowUpDueReportRules
         foreach (var key in fieldKeys)
             row[key] = Select(item, key, asOfDate);
         return row;
+    }
+
+    // ==================== 5.1 页面分组计数（ERP-197） ====================
+
+    /// <summary>
+    /// 分组行数分布（ERP-197）：从「当前授权预览页」的跟进提醒行计算行数分布，只统计本页行数、绝不把计数外推为整表 / 未分页总数。
+    /// <para>dueStatus（已逾期 / 今日到期 / 即将到期）为固定分类，空分类始终保留（计数可为 0），确定性排序；
+    /// salesman 为动态分组（只出现本页存在的业务员），未分配业务员（跟进人姓名缺失 / 空白）单独分桶为「未分配业务员」并按标签稳定排序；
+    /// none / 空页返回空列表。</para>
+    /// </summary>
+    public static List<DynamicFollowUpDueReportGroupDto> BuildGroupCounts(
+        IEnumerable<CustomerFollowUp> items, string groupBy, DateTime asOfDate)
+    {
+        var list = (items ?? Array.Empty<CustomerFollowUp>()).ToList();
+        var normalized = NormalizeGroupBy(groupBy);
+
+        if (normalized == GroupDueStatus)
+            return BuildDueStatusCounts(list, asOfDate);
+        if (normalized == GroupSalesman)
+            return BuildSalesmanCounts(list);
+        return new List<DynamicFollowUpDueReportGroupDto>();
+    }
+
+    private static List<DynamicFollowUpDueReportGroupDto> BuildDueStatusCounts(
+        List<CustomerFollowUp> items, DateTime asOfDate)
+    {
+        var categories = new (string Value, string Label)[]
+        {
+            (DueOverdue, DueOverdueText),
+            (DueToday, DueTodayText),
+            (DueUpcoming, DueUpcomingText),
+        };
+        return categories
+            .Select(c => new DynamicFollowUpDueReportGroupDto(
+                $"{GroupDueStatus}:{c.Value}",
+                c.Label,
+                items.Count(i => DueStatusKey(DueDays(i, asOfDate)) == c.Value)))
+            .ToList();
+    }
+
+    private static List<DynamicFollowUpDueReportGroupDto> BuildSalesmanCounts(
+        List<CustomerFollowUp> items)
+    {
+        return items
+            .GroupBy(i => string.IsNullOrWhiteSpace(i.SalesmanName) ? string.Empty : i.SalesmanName.Trim())
+            .OrderBy(g => g.Key == string.Empty ? 1 : 0)   // 未分配业务员固定排最后
+            .ThenBy(g => g.Key, StringComparer.Ordinal)
+            .Select(g =>
+            {
+                var assigned = g.Key != string.Empty;
+                return new DynamicFollowUpDueReportGroupDto(
+                    assigned ? $"{GroupSalesman}:{g.Key}" : $"{GroupSalesman}:unassigned",
+                    assigned ? g.Key : UnassignedSalesmanText,
+                    g.Count());
+            })
+            .ToList();
     }
 
     // ==================== 6. Excel 导出（ERP-195） ====================
