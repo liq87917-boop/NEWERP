@@ -1,0 +1,38 @@
+{
+  "id": "ERP-194",
+  "title": "Open a visual dynamic follow-up due report designer",
+  "status": "pending",
+  "risk_level": "low",
+  "description": "A user opens the existing follow-up-due report and chooses a visual dynamic designer to select permitted evidence columns, due status, as-of date, ahead-day window and bounded page. Use the preceding catalog and preview APIs and the existing reports.js entry point so no new menu, schema or script registration is required. Keep selected column order, current-user permission and data-scope errors, loading and empty states, stable paging and truncation visible. The interface must not allow free-form SQL or arbitrary field names. Existing HTTP operation logging audits preview; no business writes occur. Development only: no schema or migration edits, production SQL or real database execution, arbitrary SQL, business writes, secrets, deployment or browser acceptance. Verify focused UI contract tests and safe Release build/test.",
+  "acceptance_criteria": [
+    "The existing follow-up-due report exposes a designer entry and builds controls only from the authorized finite catalog, preserving selected field order and current filters across bounded page changes.",
+    "The designer renders only server-selected current-page evidence with overdue, today or upcoming meaning and visible loading, empty, denied, validation, network and truncation states; no free-form SQL or field input is accepted.",
+    "Focused UI contract tests cover field selection, filter and page requests, revoked access, empty and error states and safe text rendering; safe Release build/test passes."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/wwwroot/js/reports.js",
+    "src/ERP.UnitTests/DynamicFollowUpDueReportUiTests.cs"
+  ],
+  "validation_profile": "safe",
+  "depends_on": [
+    "ERP-193"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "completion_mode": "build",
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": [],
+    "test_filter": "Collection=UiTests",
+    "minimum_screenshots": 1
+  },
+  "human_gate": {
+    "required": false,
+    "status": "not_required",
+    "level": "L1",
+    "reason": ""
+  },
+  "max_attempts": 3,
+  "attempts": 0,
+  "created_at": "2026-09-30T08:24:54.636346Z"
+}

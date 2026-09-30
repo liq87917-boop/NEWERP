@@ -1,0 +1,38 @@
+{
+  "id": "ERP-192",
+  "title": "Scope follow-up due reminders to current ERP user",
+  "status": "pending",
+  "risk_level": "medium",
+  "description": "A salesperson opens the existing follow-up due report and sees only reminders for customers in the current ERP data scope. Preserve the existing GET response shape and due-date ordering while requiring the follow-up-due menu grant, resolving the current login on every request, and filtering CustomerFollowUps at the query source with SalespersonDataScopeService. For restricted users, records without a customer ID and customers outside their assignments are invisible; unmapped users receive no rows. Reject invalid aheadDays outside 0 to 365 and fail closed on missing identity or menu access. The existing HTTP operation log provides audit evidence; an error is visible to the report caller. Development only: no schema or migration edits, production SQL or real database execution, arbitrary SQL, business writes, secrets, deployment or browser acceptance. Verify focused in-memory tests and safe Release build/test.",
+  "acceptance_criteria": [
+    "The existing follow-up-due GET checks current-user identity and its menu grant on each request, rejects invalid aheadDays, and preserves the existing list response for authorized callers.",
+    "The report query applies SalespersonDataScopeService before materialization: assigned customer reminders are visible, other and null-customer reminders are hidden for restricted users, and privileged scope retains authorized visibility.",
+    "Focused tests cover revoked menu access, unmapped salesperson, reassigned customer, null customer, date bounds, stable due ordering and read-only behavior; safe Release build/test passes."
+  ],
+  "allowed_paths": [
+    "src/ERP.Application/Interfaces/IReportService.cs",
+    "src/ERP.Application/Services/ReportService.Extra4.cs",
+    "src/ERP.Api/Controllers/ReportController.cs",
+    "src/ERP.UnitTests/FollowUpDueScopeTests.cs"
+  ],
+  "validation_profile": "safe",
+  "depends_on": [],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "completion_mode": "build",
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": [],
+    "test_filter": "Collection=UiTests",
+    "minimum_screenshots": 1
+  },
+  "human_gate": {
+    "required": false,
+    "status": "not_required",
+    "level": "L1",
+    "reason": ""
+  },
+  "max_attempts": 3,
+  "attempts": 0,
+  "created_at": "2026-09-30T08:24:54.636346Z"
+}

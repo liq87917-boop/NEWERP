@@ -1,0 +1,41 @@
+{
+  "id": "ERP-195",
+  "title": "Download a scoped dynamic follow-up due Excel page",
+  "status": "pending",
+  "risk_level": "low",
+  "description": "A salesperson downloads exactly the current selected page of the visual follow-up due report as Excel, with the same field order and filters visible in the designer. Add a bounded export endpoint to the dynamic follow-up controller. Every export request reruns the authorized preview, rechecking identity, follow-up-due menu, salesperson customer scope and validation at download time; a revoked grant returns an error and no file. Reuse ExcelExporter for typed dates and numbers and formula-safe text, and existing HTTP OperationLogMiddleware audit. No full-dataset export or model-generated SQL. Development only: no schema or migration edits, production SQL or real database execution, arbitrary SQL, business writes, secrets, deployment or browser acceptance. Verify focused workbook and UI contract tests and safe Release build/test.",
+  "acceptance_criteria": [
+    "A bounded POST export accepts the preview request, reruns current-user menu and data-scope checks, and returns only the selected current page as an xlsx attachment; invalid, denied or revoked requests return no workbook.",
+    "The workbook preserves catalog-selected column order and typed date and number values, escapes formula-like text, and never includes hidden or unassigned customer follow-ups or more than the configured page maximum.",
+    "The designer downloads its current selected fields, filters and page and displays denied, validation or network errors; focused workbook and UI contract tests plus safe Release build/test pass."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/DynamicFollowUpDueReportController.cs",
+    "src/ERP.Application/Services/DynamicFollowUpDueReportRules.cs",
+    "src/ERP.Api/wwwroot/js/reports.js",
+    "src/ERP.UnitTests/DynamicFollowUpDueReportExcelTests.cs",
+    "src/ERP.UnitTests/DynamicFollowUpDueReportUiTests.cs"
+  ],
+  "validation_profile": "safe",
+  "depends_on": [
+    "ERP-194"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "completion_mode": "build",
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": [],
+    "test_filter": "Collection=UiTests",
+    "minimum_screenshots": 1
+  },
+  "human_gate": {
+    "required": false,
+    "status": "not_required",
+    "level": "L1",
+    "reason": ""
+  },
+  "max_attempts": 3,
+  "attempts": 0,
+  "created_at": "2026-09-30T08:33:56.169292Z"
+}
