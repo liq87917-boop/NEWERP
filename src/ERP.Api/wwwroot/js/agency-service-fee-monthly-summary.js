@@ -19,7 +19,7 @@ let ASFMS = {
   catalog: null,       // 字段白名单目录 DTO
   fields: [],          // 目录字段
   selectedKeys: [],    // 当前勾选的字段键（默认全选）
-  filters: { customerId: '', currency: '', from: '', to: '', page: 1, pageSize: 50 },
+  filters: { customerId: '', currency: '', from: '', to: '', groupBy: 'none', page: 1, pageSize: 50 },
   view: null,
   loading: false,
   error: null
@@ -36,7 +36,7 @@ async function openAgencyServiceFeeMonthlySummary(customerId) {
     selectedKeys: [],
     filters: {
       customerId: customerId ? String(customerId) : '',
-      currency: '', from: '', to: '', page: 1, pageSize: 50
+      currency: '', from: '', to: '', groupBy: 'none', page: 1, pageSize: 50
     },
     view: null,
     loading: true,
@@ -118,6 +118,7 @@ function asfmsRender() {
             <option value="">全部币种</option>
             ${ASFMS_CURRENCIES.map(c => `<option value="${c}" ${f.currency === c ? 'selected' : ''}>${c}</option>`).join('')}
           </select></div>
+        ${asfmsGroupSelectHtml()}
         <div><label class="ea-lb">对账日期从</label>
           <input type="date" id="asfms-f-from" value="${escapeHtml(f.from)}"></div>
         <div><label class="ea-lb">到</label>
@@ -172,11 +173,47 @@ function asfmsToggleAll(checked) {
   boxes.forEach(b => { b.checked = checked; if (checked) ASFMS.selectedKeys.push(b.value); });
 }
 
+/* 分组键选择（ERP-185）：只提供 ERP-184 目录返回的有限分组键（none / month / customer），无自由输入 */
+function asfmsGroupByOptions() {
+  const catalog = ASFMS.catalog;
+  if (catalog && Array.isArray(catalog.groupBys)) {
+    return catalog.groupBys
+      .filter(o => o && o.key)
+      .map(o => ({ key: String(o.key), label: String(o.label || o.key) }));
+  }
+  return [];
+}
+
+/* 分组键规范化（fail closed）：仅保留目录白名单内的分组键，缺失 / 空白 / 非法值一律回落 none */
+function asfmsGroupKey(value) {
+  const key = String(value == null ? '' : value).trim();
+  return asfmsGroupByOptions().some(o => o.key === key) ? key : 'none';
+}
+
+/* 分组键选择器：仅目录分组键（fail closed，无自由输入） */
+function asfmsGroupSelectHtml() {
+  const opts = asfmsGroupByOptions();
+  if (!opts.length) return '';
+  const selected = asfmsGroupKey(ASFMS.filters.groupBy);
+  const options = opts.map(o =>
+    `<option value="${escapeHtml(o.key)}" ${o.key === selected ? 'selected' : ''}>${escapeHtml(o.label)}</option>`).join('');
+  return `<div><label class="ea-lb">分组</label>`
+    + `<select id="asfms-f-groupby" style="min-width:120px" onchange="asfmsGroupChange()">${options}</select></div>`;
+}
+
+/* 分组键变化：只更新分组键并保留当前分页与其它筛选 / 已选字段后重新预览 */
+function asfmsGroupChange() {
+  ASFMS.filters.groupBy = asfmsGroupKey((document.getElementById('asfms-f-groupby') || {}).value);
+  const page = (ASFMS.view && ASFMS.view.page > 0) ? ASFMS.view.page : ASFMS.filters.page;
+  asfmsPreview(page > 0 ? page : 1);
+}
+
 function asfmsSearch() {
   ASFMS.filters.customerId = (document.getElementById('asfms-f-customer') || {}).value || '';
   ASFMS.filters.currency = (document.getElementById('asfms-f-currency') || {}).value || '';
   ASFMS.filters.from = (document.getElementById('asfms-f-from') || {}).value || '';
   ASFMS.filters.to = (document.getElementById('asfms-f-to') || {}).value || '';
+  ASFMS.filters.groupBy = asfmsGroupKey((document.getElementById('asfms-f-groupby') || {}).value);
   const size = (document.getElementById('asfms-f-pagesize') || {}).value;
   if (size) ASFMS.filters.pageSize = Math.max(1, Math.min(200, Number(size) || 50));
   asfmsSyncSelection();
@@ -208,6 +245,8 @@ function asfmsBuildRequest(page) {
   pageSize = Math.max(1, Math.min(maxPageSize, pageSize));
 
   const req = { fields, page: pageNum, pageSize };
+  const groupBy = asfmsGroupKey(ASFMS.filters.groupBy);
+  if (groupBy && groupBy !== 'none') req.groupBy = groupBy;
   const cid = Number(ASFMS.filters.customerId);
   if (Number.isFinite(cid) && cid > 0) req.customerId = cid;
   if (ASFMS.filters.currency) req.currency = ASFMS.filters.currency;
@@ -427,6 +466,67 @@ function asfmsTableHtml(view) {
   return `<div class="table-wrap" style="margin-top:8px"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>${paging}`;
 }
 
+/* 分组计数标签（ERP-185）：由分组维度生成（月份用 statementMonthText、客户用 customerName + customerCode），
+   绝不从选定列推导 */
+function asfmsGroupCountLabel(g) {
+  if (!g) return '未知';
+  const by = g.groupBy || '';
+  if (by === 'month') {
+    if (g.statementMonthText) return String(g.statementMonthText);
+    if (g.statementYear != null && g.statementMonth != null) {
+      return `${g.statementYear}-${String(g.statementMonth).padStart(2, '0')}`;
+    }
+    return '未知';
+  }
+  if (by === 'customer') {
+    const code = g.customerCode ? String(g.customerCode) : (g.customerId != null ? String(g.customerId) : '');
+    const name = g.customerName ? String(g.customerName) : '';
+    return name ? (code ? `${name}（${code}）` : name) : (code || '未知');
+  }
+  return '未知';
+}
+
+/* 计数纯文本：整数直出，null / 非有限数回落 0（绝不推导合计） */
+function asfmsCountText(v) {
+  if (v === null || v === undefined) return '0';
+  const n = Number(v);
+  return Number.isFinite(n) ? String(n) : '0';
+}
+
+/* 当前页分组计数面板（ERP-185）：按币种分行、各状态张数分离，仅当前授权预览页，非全量合计 */
+function asfmsGroupPanelHtml(view) {
+  const groupBy = (view && view.groupBy) || 'none';
+  if (groupBy === 'none') return '';
+  const counts = (view && Array.isArray(view.groupCounts)) ? view.groupCounts : [];
+  const title = groupBy === 'month' ? '📊 按对账月份分组 · 本页各状态张数' : '📊 按客户分组 · 本页各状态张数';
+  const scope = (view && view.groupCountScopeText)
+    ? `<div class="text-muted" style="margin-top:6px">${escapeHtml(view.groupCountScopeText)}</div>` : '';
+  const truncated = (view && view.truncated)
+    ? '<div class="text-muted" style="color:#b45309;margin-top:4px">⚠ 分组计数仅当前页，不含后续分页。</div>' : '';
+  const empty = counts.length === 0
+    ? '<div class="text-muted" style="margin:4px 0">本页没有可分组计数的月度汇总（空页）。</div>' : '';
+  const head = '<th>分组</th><th>币种</th>'
+    + '<th class="text-right">月度汇总行数</th>'
+    + '<th class="text-right">已登记</th>'
+    + '<th class="text-right">草稿</th>'
+    + '<th class="text-right">已作废</th>'
+    + '<th class="text-right">对账单张数</th>';
+  const body = counts.map(g => `<tr>`
+    + `<td>${escapeHtml(asfmsGroupCountLabel(g))}</td>`
+    + `<td><b>${escapeHtml(g && g.currency ? String(g.currency) : '未知')}</b></td>`
+    + `<td class="text-right">${escapeHtml(asfmsCountText(g && g.rowCount))}</td>`
+    + `<td class="text-right">${escapeHtml(asfmsCountText(g && g.registeredCount))}</td>`
+    + `<td class="text-right">${escapeHtml(asfmsCountText(g && g.draftCount))}</td>`
+    + `<td class="text-right">${escapeHtml(asfmsCountText(g && g.voidedCount))}</td>`
+    + `<td class="text-right">${escapeHtml(asfmsCountText(g && g.statementCount))}</td>`
+    + `</tr>`).join('');
+  const table = counts.length === 0 ? ''
+    : `<table style="width:100%;margin-bottom:6px"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
+  return `<div class="pd-hint" style="margin:8px 0">`
+    + `<div style="font-weight:600;margin-bottom:6px">${title}（仅当前预览页，非全量合计）</div>`
+    + `${empty}${table}${truncated}${scope}</div>`;
+}
+
 function asfmsResultHtml() {
   if (ASFMS.error) {
     return asfmsErrorHtml(ASFMS.error.kind, ASFMS.error.message);
@@ -452,7 +552,7 @@ function asfmsResultHtml() {
     ? `<div class="empty">${escapeHtml(v.emptyText || '没有符合条件的月度汇总（证据数字，不代表收入或应收）。')}</div>`
     : '';
 
-  return `${hints}${truncated}${empty}${asfmsTableHtml(v)}`;
+  return `${hints}${truncated}${asfmsGroupPanelHtml(v)}${empty}${asfmsTableHtml(v)}`;
 }
 
 function asfmsPage(delta) {
