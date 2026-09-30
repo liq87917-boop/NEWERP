@@ -2,7 +2,7 @@
   "id": "ERP-170",
   "title": "Count scoped order and unlinked receipt evidence by current-page group",
   "description": "A sales user groups only the authorized current preview page to understand order and unlinked receipt evidence distribution. Use existing read-only ERP-046 source and never infer a receipt-order match, balance or cross-currency total. No new persistence or EF mapping. Development only. Read-only, current-user ERP menu and salesperson/supplier scope rechecked on every request; fail closed on missing identity, denied access or invalid bounded fields. Existing HTTP operation audit applies. Preserve source evidence, unknown null values, original currencies, truncation and separate evidence classes. No arbitrary SQL, direct model database access, migrations, production SQL/real database execution, writes, secrets/.env changes, deployment or real-browser acceptance. Verify focused unit/Node tests and safe Release build/test.",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "medium",
   "acceptance_criteria": [
     "Finite group keys accept none, customer, currency, receipt coverage status and receipt evidence status; invalid keys fail before source reads and scope remains applied before paging.",
@@ -52,5 +52,5 @@
     "status": "not_required",
     "reason": "Development-only bounded read-only feature"
   },
-  "attempts": 0
+  "attempts": 1
 }

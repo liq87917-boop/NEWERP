@@ -1,6 +1,7 @@
 using ERP.Application.Common;
 using ERP.Application.DTOs;
 using ERP.Domain.Enums;
+using System.Globalization;
 
 namespace ERP.Application.Services;
 
@@ -84,6 +85,23 @@ public static class DynamicReceiptReconciliationReportRules
 
     /// <summary>支持的订单状态筛选取值（超出范围一律拒绝，不静默兜底）</summary>
     public static readonly string[] SupportedOrderStatuses = { OrderStatusActive, OrderStatusCancelled, OrderStatusAll };
+
+    // ==================== 0.2 分组键（ERP-170） ====================
+
+    /// <summary>不分组（默认；orderGroups / receiptGroups 为空列表）</summary>
+    public const string GroupNone = "none";
+
+    /// <summary>按客户分组（订单证据与未关联收款证据各自按客户计数）</summary>
+    public const string GroupCustomer = "customer";
+
+    /// <summary>按币种分组（订单证据与未关联收款证据各自按币种计数，绝不跨币种合并）</summary>
+    public const string GroupCurrency = "currency";
+
+    /// <summary>按收款覆盖状态分组（订单侧：linked / partial / unlinked / unknown 显式保留；未关联收款侧不适用）</summary>
+    public const string GroupReceiptCoverageStatus = "receiptCoverageStatus";
+
+    /// <summary>按收款证据状态分组（未关联收款侧：active / pending / historical 显式保留；订单侧不适用）</summary>
+    public const string GroupReceiptEvidenceStatus = "receiptEvidenceStatus";
 
     // ==================== 1. 文案 ====================
 
@@ -395,6 +413,183 @@ public static class DynamicReceiptReconciliationReportRules
         foreach (var key in fieldKeys)
             row[key] = source.TryGetValue(key, out var v) ? v : null;
         return row;
+    }
+
+    // ==================== 5.1 分组计数（ERP-170，只读、仅当前页、只计数不含金额） ====================
+
+    /// <summary>
+    /// 规范化分组键（fail closed）：空 / 留空 = 不分组（none）；仅接受 none / customer / currency /
+    /// receiptCoverageStatus / receiptEvidenceStatus（大小写不敏感）；未知取值显式拒绝（先于任何源读取）。
+    /// </summary>
+    public static string NormalizeGroupBy(string? groupBy)
+    {
+        if (string.IsNullOrWhiteSpace(groupBy))
+            return GroupNone;
+
+        var normalized = groupBy.Trim();
+        if (string.Equals(normalized, GroupNone, StringComparison.OrdinalIgnoreCase)) return GroupNone;
+        if (string.Equals(normalized, GroupCustomer, StringComparison.OrdinalIgnoreCase)) return GroupCustomer;
+        if (string.Equals(normalized, GroupCurrency, StringComparison.OrdinalIgnoreCase)) return GroupCurrency;
+        if (string.Equals(normalized, GroupReceiptCoverageStatus, StringComparison.OrdinalIgnoreCase)) return GroupReceiptCoverageStatus;
+        if (string.Equals(normalized, GroupReceiptEvidenceStatus, StringComparison.OrdinalIgnoreCase)) return GroupReceiptEvidenceStatus;
+
+        throw BusinessException.InvalidParameter(
+            $"无效的分组键: {groupBy}（可选：none / customer / currency / receiptCoverageStatus / receiptEvidenceStatus）");
+    }
+
+    /// <summary>
+    /// 从「当前预览页的已授权订单源行」计算订单计数分组（ERP-170）：只计数、不含金额、绝不跨币种合并；
+    /// linked / partial / unlinked / unknown 收款覆盖状态显式保留。不分组、空页或「收款证据状态」分组（订单侧不适用）返回空列表。
+    /// </summary>
+    public static List<DynamicReceiptReconciliationReportOrderGroupDto> BuildOrderGroups(
+        IReadOnlyList<Dictionary<string, object?>> rows, string groupBy)
+    {
+        var normalized = NormalizeGroupBy(groupBy);
+        if (normalized == GroupNone || normalized == GroupReceiptEvidenceStatus || rows is null || rows.Count == 0)
+            return new List<DynamicReceiptReconciliationReportOrderGroupDto>();
+
+        var buckets = new Dictionary<string, CountGroupBucket>(StringComparer.Ordinal);
+        foreach (var row in rows)
+        {
+            var (key, label, sortKey) = OrderGroupBucketOf(row, normalized);
+            if (!buckets.TryGetValue(key, out var bucket))
+            {
+                bucket = new CountGroupBucket { Key = key, Label = label, SortKey = sortKey };
+                buckets[key] = bucket;
+            }
+            bucket.Count++;
+        }
+
+        return buckets.Values
+            .OrderBy(b => b.SortKey, StringComparer.Ordinal)
+            .Select(b => new DynamicReceiptReconciliationReportOrderGroupDto(b.Key, b.Label, b.Count))
+            .ToList();
+    }
+
+    /// <summary>
+    /// 从「当前预览页的已授权未关联收款源行」计算收款计数分组（ERP-170）：只计数、不含金额、绝不跨币种合并；
+    /// active / pending / historical 证据状态显式保留，截断标记显式保留。不分组、空页或「收款覆盖状态」分组（收款侧不适用）返回空列表。
+    /// </summary>
+    public static List<DynamicReceiptReconciliationReportReceiptGroupDto> BuildReceiptGroups(
+        IReadOnlyList<Dictionary<string, object?>> rows, string groupBy, bool truncated)
+    {
+        var normalized = NormalizeGroupBy(groupBy);
+        if (normalized == GroupNone || normalized == GroupReceiptCoverageStatus || rows is null || rows.Count == 0)
+            return new List<DynamicReceiptReconciliationReportReceiptGroupDto>();
+
+        var buckets = new Dictionary<string, CountGroupBucket>(StringComparer.Ordinal);
+        foreach (var row in rows)
+        {
+            var (key, label, sortKey) = ReceiptGroupBucketOf(row, normalized);
+            if (!buckets.TryGetValue(key, out var bucket))
+            {
+                bucket = new CountGroupBucket { Key = key, Label = label, SortKey = sortKey };
+                buckets[key] = bucket;
+            }
+            bucket.Count++;
+        }
+
+        return buckets.Values
+            .OrderBy(b => b.SortKey, StringComparer.Ordinal)
+            .Select(b => new DynamicReceiptReconciliationReportReceiptGroupDto(b.Key, b.Label, b.Count, truncated))
+            .ToList();
+    }
+
+    private static (string Key, string Label, string SortKey) OrderGroupBucketOf(
+        Dictionary<string, object?> row, string groupBy)
+    {
+        if (groupBy == GroupCustomer)
+        {
+            var customerId = ReadLong(row, "customerId");
+            var customerName = ReadString(row, "customerName");
+            var label = customerName.Length > 0 ? customerName : $"客户 #{customerId}";
+            return ($"customer:{customerId}", label, customerId.ToString("D19", CultureInfo.InvariantCulture));
+        }
+
+        if (groupBy == GroupCurrency)
+        {
+            var currency = ReadString(row, "currency");
+            var label = currency.Length > 0 ? currency : "未知币种";
+            return ($"currency:{currency}", label, CurrencySortKey(currency) + ":" + currency);
+        }
+
+        // receiptCoverageStatus：linked / partial / unlinked / unknown 显式保留，确定性排序
+        var status = ReadString(row, "receiptCoverageStatus");
+        var text = ReadString(row, "receiptCoverageText");
+        var coverageLabel = text.Length > 0 ? text : status;
+        return ($"coverage:{status}", coverageLabel,
+            CoverageOrder(status).ToString("D2", CultureInfo.InvariantCulture) + ":" + status);
+    }
+
+    private static (string Key, string Label, string SortKey) ReceiptGroupBucketOf(
+        Dictionary<string, object?> row, string groupBy)
+    {
+        if (groupBy == GroupCustomer)
+        {
+            var customerId = ReadLong(row, "customerId");
+            var customerName = ReadString(row, "customerName");
+            var label = customerName.Length > 0 ? customerName : $"客户 #{customerId}";
+            return ($"customer:{customerId}", label, customerId.ToString("D19", CultureInfo.InvariantCulture));
+        }
+
+        if (groupBy == GroupCurrency)
+        {
+            var currency = ReadString(row, "currency");
+            var label = currency.Length > 0 ? currency : "未知币种";
+            return ($"currency:{currency}", label, CurrencySortKey(currency) + ":" + currency);
+        }
+
+        // receiptEvidenceStatus：active / pending / historical 显式保留，确定性排序
+        var status = ReadString(row, "evidenceStatus");
+        var text = ReadString(row, "evidenceText");
+        var evidenceLabel = text.Length > 0 ? text : status;
+        return ($"evidence:{status}", evidenceLabel,
+            EvidenceOrder(status).ToString("D2", CultureInfo.InvariantCulture) + ":" + status);
+    }
+
+    private static string CurrencySortKey(string currency)
+    {
+        var order = Enum.TryParse<Currency>(currency, true, out var parsed) ? (int)parsed : int.MaxValue;
+        return order.ToString("D4", CultureInfo.InvariantCulture);
+    }
+
+    private static int CoverageOrder(string status) => status.ToLowerInvariant() switch
+    {
+        ReceiptLinkStatusLinked => 0,
+        ReceiptLinkStatusPartial => 1,
+        ReceiptLinkStatusUnlinked => 2,
+        "unknown" => 3,
+        _ => 9,
+    };
+
+    private static int EvidenceOrder(string status) => status.ToLowerInvariant() switch
+    {
+        ReceiptStatusActive => 0,
+        ReceiptStatusPending => 1,
+        ReceiptStatusHistorical => 2,
+        _ => 9,
+    };
+
+    private static long ReadLong(Dictionary<string, object?> row, string key)
+    {
+        if (row.TryGetValue(key, out var v) && v != null)
+            return Convert.ToInt64(v, CultureInfo.InvariantCulture);
+        return 0L;
+    }
+
+    private static string ReadString(Dictionary<string, object?> row, string key)
+    {
+        if (row.TryGetValue(key, out var v) && v != null)
+            return Convert.ToString(v, CultureInfo.InvariantCulture)?.Trim() ?? string.Empty;
+        return string.Empty;
+    }
+
+    private sealed class CountGroupBucket
+    {
+        public string Key = string.Empty;
+        public string Label = string.Empty;
+        public string SortKey = string.Empty;
+        public int Count;
     }
 
     // ==================== 6. Excel 导出（ERP-167，只读） ====================

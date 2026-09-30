@@ -48,13 +48,18 @@ public class DynamicReceiptReconciliationReportController : ControllerBase
             DynamicReceiptReconciliationReportRules.GetCatalogDto()));
     }
 
-    /// <summary>按选定字段与有界筛选预览（只读、分页有界；单页上限 200）</summary>
+    /// <summary>按选定字段与有界筛选预览（只读、分页有界；单页上限 200）；可选按有限分组键返回当前页订单与未关联收款计数分组（ERP-170）</summary>
     [HttpPost]
     public async Task<IActionResult> Preview([FromBody] DynamicReceiptReconciliationReportRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
+
+        // 分组键 fail closed：仅 none / customer / currency / receiptCoverageStatus / receiptEvidenceStatus；
+        // 无效取值在此直接拒绝（先于任何源读取），业务员数据范围仍先于分页在 ERP-046 源查询内生效。
+        var groupBy = DynamicReceiptReconciliationReportRules.NormalizeGroupBy(request.GroupBy);
+
         return Ok(ApiResponse<DynamicReceiptReconciliationReportPageDto>.Success(
-            await BuildPageAsync(request)));
+            await BuildPageAsync(request, groupBy)));
     }
 
     /// <summary>
@@ -88,9 +93,10 @@ public class DynamicReceiptReconciliationReportController : ControllerBase
         return File(bytes, "application/pdf", $"ReceiptReconciliation_{DateTime.Now:yyyyMMddHHmmss}.pdf");
     }
 
-    /// <summary>有界、已授权的订单与收款证据预览（每次请求重新校验身份 / 菜单授权 / 字段 / 筛选 / 页大小 / 数据范围）</summary>
+    /// <summary>有界、已授权的订单与收款证据预览（每次请求重新校验身份 / 菜单授权 / 字段 / 筛选 / 页大小 / 数据范围）；可选返回当前页计数分组（ERP-170）</summary>
     private async Task<DynamicReceiptReconciliationReportPageDto> BuildPageAsync(
-        DynamicReceiptReconciliationReportRequest request)
+        DynamicReceiptReconciliationReportRequest request,
+        string groupBy = DynamicReceiptReconciliationReportRules.GroupNone)
     {
         var userId = CurrentUserId();
         await EnsureAuthorizedAsync(userId);
@@ -142,6 +148,14 @@ public class DynamicReceiptReconciliationReportController : ControllerBase
             .Select(r => DynamicReceiptReconciliationReportRules.BuildRow(BuildReceiptSourceRow(r), receiptFieldKeys))
             .ToList();
 
+        // 5) 当前页计数分组（ERP-170）：从同一批有界、已授权的完整源行计算，订单证据与未关联收款证据各自独立，
+        //    只计数、不含金额、绝不跨币种合并；unknown / pending / historical / 截断语义由规则层显式保留。
+        var orderGroups = DynamicReceiptReconciliationReportRules.BuildOrderGroups(
+            orderRows.Select(BuildSourceRow).ToList(), groupBy);
+        var receiptGroups = DynamicReceiptReconciliationReportRules.BuildReceiptGroups(
+            report.UnlinkedReceipts.Select(BuildReceiptSourceRow).ToList(),
+            groupBy, report.PageUnlinkedReceiptTruncated);
+
         return new DynamicReceiptReconciliationReportPageDto(
             columns,
             rows,
@@ -155,7 +169,10 @@ public class DynamicReceiptReconciliationReportController : ControllerBase
             report.TotalPages,
             DynamicReceiptReconciliationReportRules.ReadOnlyText,
             DynamicReceiptReconciliationReportRules.BoundaryText,
-            DynamicReceiptReconciliationReportRules.DisclaimerText);
+            DynamicReceiptReconciliationReportRules.DisclaimerText,
+            groupBy,
+            orderGroups,
+            receiptGroups);
     }
 
 

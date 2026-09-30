@@ -55,6 +55,9 @@ public sealed class DynamicReceiptReconciliationReportRequest
     /// <summary>关键字（匹配订单号 / 外销合同号 / 客户 PO 号；超长直接拒绝）</summary>
     public string? Keyword { get; set; }
 
+    /// <summary>分组键（仅 none / customer / currency / receiptCoverageStatus / receiptEvidenceStatus；无效取值由服务端 fail closed 拒绝）</summary>
+    public string? GroupBy { get; set; }
+
     /// <summary>页码（从 1 开始）</summary>
     public int Page { get; set; } = 1;
 
@@ -113,4 +116,26 @@ public sealed record DynamicReceiptReconciliationReportPageDto(
     int TotalPages,
     string ReadOnlyText,
     string BoundaryText,
-    string DisclaimerText);
+    string DisclaimerText,
+    string GroupBy = "none",
+    List<DynamicReceiptReconciliationReportOrderGroupDto>? OrderGroups = null,
+    List<DynamicReceiptReconciliationReportReceiptGroupDto>? ReceiptGroups = null);
+
+/// <summary>
+/// 客户订单与收款核对报表当前页订单计数分组项（ERP-170，只读）：仅当前页已授权订单按分组键计数，
+/// 不含任何金额、不跨币种合并、绝不推断收款单与订单的匹配；收款覆盖状态 unknown 显式保留。
+/// </summary>
+public sealed record DynamicReceiptReconciliationReportOrderGroupDto(
+    string Key,
+    string Label,
+    int OrderCount);
+
+/// <summary>
+/// 客户订单与收款核对报表当前页未关联收款计数分组项（ERP-170，只读）：仅当前页已授权未关联收款按分组键计数，
+/// 不含任何金额、不跨币种合并；active / pending / historical 证据状态显式保留，截断标记显式保留。
+/// </summary>
+public sealed record DynamicReceiptReconciliationReportReceiptGroupDto(
+    string Key,
+    string Label,
+    int ReceiptCount,
+    bool Truncated);

@@ -128,6 +128,7 @@ ERP-046 客户订单与收款核对证据。本功能为**开发期只读派生*
 - `src/ERP.Infrastructure/Export/DynamicReceiptReconciliationPdfExporter.cs`
 - `src/ERP.UnitTests/DynamicReceiptReconciliationReportTests.cs`
 - `src/ERP.UnitTests/DynamicReceiptReconciliationUnlinkedTests.cs`
+- `src/ERP.UnitTests/DynamicReceiptReconciliationGroupingTests.cs`
 - `src/ERP.UnitTests/DynamicReceiptReconciliationExcelTests.cs`
 - `src/ERP.UnitTests/DynamicReceiptReconciliationPdfTests.cs`
 - `src/ERP.UnitTests/SalesOrderReceiptReconciliationTests.cs`
@@ -206,3 +207,44 @@ ERP-046 客户订单与收款核对证据。本功能为**开发期只读派生*
 
 - 后端契约单测：`DynamicReceiptReconciliationPdfTests.cs`（覆盖 PDF 签名与内容类型、两类证据独立分区、行分页、宽列列页分页、嵌入 SimHei、字体缺失显式失败、未知 null / 原币 / 状态格式化、授权拒绝与只读不写库）。
 - 前端接线单测：`tests/automation/dynamic_receipt_reconciliation_pdf_ui.test.js`。
+
+## 12. 当前页计数分组（ERP-170，只读、有界）
+
+预览请求体新增有限分组键 `GroupBy`，让销售用户按分组键查看**当前预览页**的订单证据与未关联收款证据分布。分组**只统计当前页**（同一批有界、已授权行），**绝不统计全量**；只输出计数，**绝不求和金额、绝不跨币种合并、绝不推断收款单与订单的匹配关系**。
+
+### 12.1 分组键白名单（有限、fail closed）
+
+`DynamicReceiptReconciliationReportRules.NormalizeGroupBy` 仅接受（大小写不敏感）：
+
+| 键 | 说明 |
+|---|---|
+| `none`（默认） | 不分组；`orderGroups` / `receiptGroups` 为空列表 |
+| `customer` | 按客户计数（订单证据与未关联收款证据各自按客户分组） |
+| `currency` | 按币种计数（不同币种分别成行，绝不合并） |
+| `receiptCoverageStatus` | 订单侧按收款覆盖状态计数：`linked` / `partial` / `unlinked` / `unknown` 显式保留；未关联收款侧不适用（返回空） |
+| `receiptEvidenceStatus` | 未关联收款侧按收款证据状态计数：`active` / `pending` / `historical` 显式保留；订单侧不适用（返回空） |
+
+未知分组键在**读取 ERP-046 源数据之前**显式拒绝（错误码 2004，fail closed）；业务员数据范围仍在 ERP-046 源查询内**先于计数与分页**生效。
+
+### 12.2 响应字段
+
+`DynamicReceiptReconciliationReportPageDto` 新增三个字段（保持原有预览 / 导出字段不变）：
+
+- `GroupBy`（`string`）：归一化后的实际分组键（默认 `none`）。
+- `OrderGroups`（`List<DynamicReceiptReconciliationReportOrderGroupDto>?`）：当前页订单计数分组，每项含 `Key` / `Label` / `OrderCount`。
+- `ReceiptGroups`（`List<DynamicReceiptReconciliationReportReceiptGroupDto>?`）：当前页未关联收款计数分组，每项含 `Key` / `Label` / `ReceiptCount` / `Truncated`。
+
+分组键与组序为确定性（客户按 Id 升序、币种按 `Currency` 枚举顺序、覆盖状态按 linked → partial → unlinked → unknown、证据状态按 active → pending → historical）。未关联收款命中单次查询上限时，`ReceiptGroups` 各项 `Truncated = true`（显式保留截断语义，绝不静默截断）。
+
+### 12.3 口径边界（与预览同源）
+
+- **只统计当前页**：分组来自与预览同一批有界、已授权源行，`total` 仍为符合筛选条件的全量订单数，但分组计数只覆盖本页（单页上限 200，超限直接拒绝）。
+- **不求和金额**：分组 DTO 只有计数，不含金额 / 合计 / 余额，也绝不把订单金额与未关联收款金额相加。
+- **不合并币种**：`currency` 分组下不同币种分别成行，绝不换算或合并。
+- **不推断匹配**：未关联收款只按收款单自身客户 / 币种 / 证据状态计数，绝不按客户名、单号文本、日期或金额相似度匹配到订单。
+- **状态显式保留**：收款覆盖状态 `unknown`、收款证据状态 `pending` / `historical` 作为独立分组显式列出，不回落到其它桶、不并入有效合计。
+
+### 12.4 测试
+
+- 后端契约单测：`DynamicReceiptReconciliationGroupingTests.cs`（覆盖分组键白名单与非法拒绝、无菜单授权拒绝、受限制业务员范围、空页、active / pending / historical 与 linked / partial / unlinked / unknown 状态隔离、币种不合并、当前页上限与只读不写库）。
+- 前端计数面板接线（ERP-171）：`tests/automation/dynamic_receipt_reconciliation_grouping_ui.test.js`。
