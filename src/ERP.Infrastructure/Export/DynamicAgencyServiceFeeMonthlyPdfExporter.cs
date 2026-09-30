@@ -1,5 +1,6 @@
 using ERP.Application.Common;
 using ERP.Application.DTOs;
+using ERP.Application.Services;
 using PdfSharp.Drawing;
 using PdfSharp.Pdf;
 using System.Globalization;
@@ -46,6 +47,37 @@ public static class DynamicAgencyServiceFeeMonthlyPdfExporter
 
     /// <summary>空页显式说明（证据数字，不代表收入或应收）</summary>
     private const string EmptyPageNote = "没有符合筛选条件的代理服务费对账单证据（或已被软删除；证据数字不代表收入或应收）";
+
+    /// <summary>分组计数 PDF 分区标题（ERP-189，明确「当前页」，绝不暗示全量合计）</summary>
+    private const string GroupCountSectionTitle = "分组计数（当前页）";
+
+    /// <summary>分组计数分区列标题（计数为数值；标签 / 原币为文本；不含金额列）</summary>
+    private const string GroupLabelColumn = "分组标签";
+    private const string CurrencyColumn = "原币";
+    private const string RowCountColumn = "月度行数";
+    private const string RegisteredCountColumn = "已登记张数";
+    private const string DraftCountColumn = "草稿张数";
+    private const string VoidedCountColumn = "已作废张数";
+    private const string StatementCountColumn = "对账单总张数";
+
+    private const string GroupLabelKey = "groupLabel";
+    private const string CurrencyKey = "currency";
+    private const string RowCountKey = "rowCount";
+    private const string RegisteredCountKey = "registeredCount";
+    private const string DraftCountKey = "draftCount";
+    private const string VoidedCountKey = "voidedCount";
+    private const string StatementCountKey = "statementCount";
+
+    /// <summary>分组计数当前页为空时的可见提示（绝不静默留白）</summary>
+    private const string GroupCountEmptyNote = "当前页没有符合分组条件的对账单证据（空页）";
+
+    /// <summary>分组计数截断说明（后续分页未计入本分区）</summary>
+    private const string GroupCountTruncatedNote = "当前页已被截断，后续分页未计入本分组计数（仅本页）";
+
+    /// <summary>分组计数仅本页说明（兜底；优先使用页面自带的分组范围文案）</summary>
+    private const string GroupCountPageOnlyNote =
+        "本分区只统计当前授权预览页的月度汇总行，不覆盖整份报表，也绝不跨币种、跨页合计；"
+        + "计数只是证据数字，不代表收入 / 应收 / 已收款等会计结论。";
 
     /// <summary>导出当前预览页为 PDF 字节流（只读；字体缺失显式失败）</summary>
     public static byte[] Export(DynamicAgencyServiceFeeMonthlyReportPageDto page)
@@ -153,7 +185,186 @@ public static class DynamicAgencyServiceFeeMonthlyPdfExporter
             foreach (var g in gfxList)
                 g.Dispose();
         }
+
+        // ERP-189：month / customer 分组时，在选定列证据页之后追加「分组计数」分区；none 保持既有文档不变
+        if (IsCountGrouped(page.GroupBy))
+            DrawCountGroupSection(document, page, titleFont, metaFont, headerFont, cellFont, borderPen, headerBrush);
     }
+
+    // ==================== 分组计数分区（ERP-189） ====================
+
+    /// <summary>是否需要追加分组计数分区（仅 month / customer；none 保持既有文档不变）</summary>
+    private static bool IsCountGrouped(string? groupBy)
+        => string.Equals(groupBy, DynamicAgencyServiceFeeMonthlyReportRules.GroupByMonth, StringComparison.OrdinalIgnoreCase)
+           || string.Equals(groupBy, DynamicAgencyServiceFeeMonthlyReportRules.GroupByCustomer, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>分组计数列定义（与 Excel 分组工作表同一套标签；仅计数、不含金额列）</summary>
+    private static List<DynamicAgencyServiceFeeMonthlyReportFieldDto> BuildGroupColumns()
+        => new()
+        {
+            new(GroupLabelKey, GroupLabelColumn, "text", false),
+            new(CurrencyKey, CurrencyColumn, "text", false),
+            new(RowCountKey, RowCountColumn, "number", false),
+            new(RegisteredCountKey, RegisteredCountColumn, "number", false),
+            new(DraftCountKey, DraftCountColumn, "number", false),
+            new(VoidedCountKey, VoidedCountColumn, "number", false),
+            new(StatementCountKey, StatementCountColumn, "number", false),
+        };
+
+    /// <summary>分组计数列宽（点）：分组标签列更宽以容纳较长客户名，其余固定；总宽不超过可用页宽，避免列被裁切</summary>
+    private static double[] GroupColumnWidths()
+        => new[]
+        {
+            Mm(64), // 分组标签
+            Mm(20), // 原币
+            Mm(21), // 月度行数
+            Mm(21), // 已登记张数
+            Mm(21), // 草稿张数
+            Mm(21), // 已作废张数
+            Mm(21), // 对账单总张数
+        };
+
+    /// <summary>把 ERP-184 分组计数转成 PDF 行（仅分组标签 + 原币 + 各状态张数，绝不进入金额列）</summary>
+    private static List<Dictionary<string, object?>> BuildGroupRows(
+        List<DynamicAgencyServiceFeeMonthlyReportGroupCountDto> groups)
+        => groups.Select(g => new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            [GroupLabelKey] = GroupLabel(g),
+            [CurrencyKey] = g.Currency,
+            [RowCountKey] = g.RowCount,
+            [RegisteredCountKey] = g.RegisteredCount,
+            [DraftCountKey] = g.DraftCount,
+            [VoidedCountKey] = g.VoidedCount,
+            [StatementCountKey] = g.StatementCount,
+        }).ToList();
+
+    /// <summary>分组标签：month → 年月文案（yyyy-MM）；customer → 客户名称（回退客户编码）</summary>
+    private static string GroupLabel(DynamicAgencyServiceFeeMonthlyReportGroupCountDto group)
+    {
+        if (string.Equals(group.GroupBy, DynamicAgencyServiceFeeMonthlyReportRules.GroupByMonth, StringComparison.OrdinalIgnoreCase))
+        {
+            return string.IsNullOrWhiteSpace(group.StatementMonthText)
+                ? (group.StatementYear.HasValue && group.StatementMonth.HasValue
+                    ? $"{group.StatementYear.Value:0000}-{group.StatementMonth.Value:00}"
+                    : string.Empty)
+                : group.StatementMonthText;
+        }
+
+        return string.IsNullOrWhiteSpace(group.CustomerName) ? group.CustomerCode : group.CustomerName;
+    }
+
+    /// <summary>
+    /// 渲染「分组计数」分区：分组标签 + 原币 + 月度行数与已登记 / 草稿 / 已作废 / 总计张数，只计数、不含金额列；
+    /// 长分组集按「行页」拆分避免裁切；空分组与截断页显式说明，仅本页口径显式标注。
+    /// </summary>
+    private static void DrawCountGroupSection(
+        PdfDocument document,
+        DynamicAgencyServiceFeeMonthlyReportPageDto page,
+        XFont titleFont,
+        XFont metaFont,
+        XFont headerFont,
+        XFont cellFont,
+        XPen borderPen,
+        XBrush headerBrush)
+    {
+        var groups = page.GroupCounts ?? new List<DynamicAgencyServiceFeeMonthlyReportGroupCountDto>();
+        var columns = BuildGroupColumns();
+        var rows = BuildGroupRows(groups);
+        var widths = GroupColumnWidths();
+
+        var usableWidth = Mm(PageWidthMm - MarginLeftMm - MarginRightMm);
+        var contentBottom = Mm(PageHeightMm - MarginBottomMm);
+        var headerHeight = Mm(HeaderRowHeightMm);
+        var dataRowHeight = Mm(DataRowHeightMm);
+
+        var scopeNote = string.IsNullOrWhiteSpace(page.GroupCountScopeText)
+            ? GroupCountPageOnlyNote
+            : page.GroupCountScopeText;
+        var notes = new List<string>();
+        AddWrapped(notes, scopeNote, metaFont, usableWidth);
+        if (page.Truncated)
+            AddWrapped(notes, GroupCountTruncatedNote, metaFont, usableWidth);
+
+        var headHeightMm = TitleHeightMm + MetaHeightMm + notes.Count * NoteLineHeightMm;
+        var rowsPerPage = Math.Max(1, (int)Math.Floor(
+            (contentBottom - Mm(MarginTopMm) - Mm(headHeightMm) - headerHeight) / dataRowHeight));
+        var rowPageCount = rows.Count == 0 ? 1 : (int)Math.Ceiling(rows.Count / (double)rowsPerPage);
+
+        var gfxList = new List<XGraphics>();
+        try
+        {
+            if (rows.Count == 0)
+            {
+                var gfx = NewPage(document);
+                gfxList.Add(gfx);
+                var y = DrawGroupSectionHead(gfx, titleFont, metaFont, page, notes, 0, 1);
+                y = DrawColumnHeaders(gfx, headerFont, headerBrush, borderPen, columns, widths, y);
+                gfx.DrawString(GroupCountEmptyNote, cellFont, XBrushes.Black,
+                    new XRect(Mm(MarginLeftMm), y + Mm(2), usableWidth, dataRowHeight), XStringFormats.TopLeft);
+                return;
+            }
+
+            for (var rp = 0; rp < rowPageCount; rp++)
+            {
+                var gfx = NewPage(document);
+                gfxList.Add(gfx);
+                var y = DrawGroupSectionHead(gfx, titleFont, metaFont, page, notes, rp, rowPageCount);
+                y = DrawColumnHeaders(gfx, headerFont, headerBrush, borderPen, columns, widths, y);
+
+                var start = rp * rowsPerPage;
+                var count = Math.Min(rowsPerPage, rows.Count - start);
+                for (var i = 0; i < count; i++)
+                {
+                    DrawDataRow(gfx, cellFont, borderPen, columns, widths, rows[start + i],
+                        y + i * dataRowHeight);
+                }
+            }
+        }
+        finally
+        {
+            foreach (var g in gfxList)
+                g.Dispose();
+        }
+    }
+
+    private static double DrawGroupSectionHead(
+        XGraphics gfx,
+        XFont titleFont,
+        XFont metaFont,
+        DynamicAgencyServiceFeeMonthlyReportPageDto page,
+        IReadOnlyList<string> notes,
+        int rowPage,
+        int rowPageCount)
+    {
+        var left = Mm(MarginLeftMm);
+        var width = Mm(PageWidthMm - MarginLeftMm - MarginRightMm);
+
+        gfx.DrawString(GroupCountSectionTitle, titleFont, XBrushes.Black,
+            new XRect(left, Mm(MarginTopMm), width, Mm(TitleHeightMm)), XStringFormats.TopCenter);
+
+        var groupCount = page.GroupCounts?.Count ?? 0;
+        var meta = $"分组键：{GroupByLabel(page.GroupBy)}"
+            + $" · 共 {groupCount.ToString(CultureInfo.InvariantCulture)} 组"
+            + $" · 行页 {rowPage + 1}/{rowPageCount}";
+        gfx.DrawString(meta, metaFont, XBrushes.Black,
+            new XRect(left, Mm(MarginTopMm + TitleHeightMm), width, Mm(MetaHeightMm)), XStringFormats.TopCenter);
+
+        var y = Mm(MarginTopMm + TitleHeightMm + MetaHeightMm);
+        foreach (var note in notes)
+        {
+            gfx.DrawString(note, metaFont, XBrushes.Black,
+                new XRect(left, y, width, Mm(NoteLineHeightMm)), XStringFormats.TopLeft);
+            y += Mm(NoteLineHeightMm);
+        }
+
+        return y;
+    }
+
+    /// <summary>分组键中文文案（仅 month / customer 会进入本分区）</summary>
+    private static string GroupByLabel(string? groupBy)
+        => string.Equals(groupBy, DynamicAgencyServiceFeeMonthlyReportRules.GroupByMonth, StringComparison.OrdinalIgnoreCase)
+            ? "对账月份"
+            : "客户";
 
     private static XGraphics NewPage(PdfDocument document)
     {

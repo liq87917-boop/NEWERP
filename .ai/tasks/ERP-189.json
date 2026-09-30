@@ -1,7 +1,7 @@
 {
   "id": "ERP-189",
   "title": "Export authorized agency monthly count groups to PDF",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "low",
   "description": "A customer-service user downloads the agency monthly report current page as Chinese PDF after choosing month or customer grouping. Extend the existing PDF exporter to append a count-group section from ERP-184 GroupCounts while preserving the selected-column evidence pages; none grouping retains the current document. The existing export controller reruns identity, customer menu and salesperson scope checks plus bounded request validation and OperationLogMiddleware audits the download. Show group label, original currency, monthly-row count and registered, draft, void and total statement counts with explicit current-page, empty and truncated meaning. Reuse shared SimHei font resolution and paginate long sections without clipping; missing font fails visibly. No group amount section in this increment. Development only: no schema or migration edits, production SQL or real database execution, arbitrary SQL, business writes, secrets, deployment or browser acceptance. Keep manual test output outside the repo and verify focused PDF tests plus safe Release build/test.",
   "acceptance_criteria": [
@@ -34,6 +34,6 @@
     "level": "L1",
     "reason": ""
   },
-  "attempts": 0,
+  "attempts": 1,
   "created_at": "2026-09-30T06:44:59.993579Z"
 }
