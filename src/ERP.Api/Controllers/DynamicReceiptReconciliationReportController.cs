@@ -55,11 +55,13 @@ public class DynamicReceiptReconciliationReportController : ControllerBase
         ArgumentNullException.ThrowIfNull(request);
 
         // 分组键 fail closed：仅 none / customer / currency / receiptCoverageStatus / receiptEvidenceStatus；
+        // 金额汇总模式 fail closed：仅 none / customerCurrency；
         // 无效取值在此直接拒绝（先于任何源读取），业务员数据范围仍先于分页在 ERP-046 源查询内生效。
         var groupBy = DynamicReceiptReconciliationReportRules.NormalizeGroupBy(request.GroupBy);
+        var summaryMode = DynamicReceiptReconciliationReportRules.NormalizeSummaryMode(request.SummaryMode);
 
         return Ok(ApiResponse<DynamicReceiptReconciliationReportPageDto>.Success(
-            await BuildPageAsync(request, groupBy)));
+            await BuildPageAsync(request, groupBy, summaryMode)));
     }
 
     /// <summary>
@@ -96,7 +98,8 @@ public class DynamicReceiptReconciliationReportController : ControllerBase
     /// <summary>有界、已授权的订单与收款证据预览（每次请求重新校验身份 / 菜单授权 / 字段 / 筛选 / 页大小 / 数据范围）；可选返回当前页计数分组（ERP-170）</summary>
     private async Task<DynamicReceiptReconciliationReportPageDto> BuildPageAsync(
         DynamicReceiptReconciliationReportRequest request,
-        string groupBy = DynamicReceiptReconciliationReportRules.GroupNone)
+        string groupBy = DynamicReceiptReconciliationReportRules.GroupNone,
+        string summaryMode = DynamicReceiptReconciliationReportRules.SummaryNone)
     {
         var userId = CurrentUserId();
         await EnsureAuthorizedAsync(userId);
@@ -150,11 +153,18 @@ public class DynamicReceiptReconciliationReportController : ControllerBase
 
         // 5) 当前页计数分组（ERP-170）：从同一批有界、已授权的完整源行计算，订单证据与未关联收款证据各自独立，
         //    只计数、不含金额、绝不跨币种合并；unknown / pending / historical / 截断语义由规则层显式保留。
-        var orderGroups = DynamicReceiptReconciliationReportRules.BuildOrderGroups(
-            orderRows.Select(BuildSourceRow).ToList(), groupBy);
+        var orderSourceRows = orderRows.Select(BuildSourceRow).ToList();
+        var receiptSourceRows = report.UnlinkedReceipts.Select(BuildReceiptSourceRow).ToList();
+
+        var orderGroups = DynamicReceiptReconciliationReportRules.BuildOrderGroups(orderSourceRows, groupBy);
         var receiptGroups = DynamicReceiptReconciliationReportRules.BuildReceiptGroups(
-            report.UnlinkedReceipts.Select(BuildReceiptSourceRow).ToList(),
-            groupBy, report.PageUnlinkedReceiptTruncated);
+            receiptSourceRows, groupBy, report.PageUnlinkedReceiptTruncated);
+
+        // 5.1) 当前页金额汇总（ERP-172，只读）：只汇总当前页（非全量）、绝不跨币种合并或换算、绝不推断收款分配 / 应收余额；
+        //      订单证据与未关联收款证据各自独立，未知 null 与截断语义由规则层显式保留。
+        var orderSummaries = DynamicReceiptReconciliationReportRules.BuildOrderSummaries(orderSourceRows, summaryMode);
+        var receiptSummaries = DynamicReceiptReconciliationReportRules.BuildReceiptSummaries(
+            receiptSourceRows, summaryMode, report.PageUnlinkedReceiptTruncated);
 
         return new DynamicReceiptReconciliationReportPageDto(
             columns,
@@ -172,7 +182,10 @@ public class DynamicReceiptReconciliationReportController : ControllerBase
             DynamicReceiptReconciliationReportRules.DisclaimerText,
             groupBy,
             orderGroups,
-            receiptGroups);
+            receiptGroups,
+            summaryMode,
+            orderSummaries,
+            receiptSummaries);
     }
 
 

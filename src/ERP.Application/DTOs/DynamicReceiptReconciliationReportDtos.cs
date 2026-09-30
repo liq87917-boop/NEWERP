@@ -58,6 +58,9 @@ public sealed class DynamicReceiptReconciliationReportRequest
     /// <summary>分组键（仅 none / customer / currency / receiptCoverageStatus / receiptEvidenceStatus；无效取值由服务端 fail closed 拒绝）</summary>
     public string? GroupBy { get; set; }
 
+    /// <summary>金额汇总模式（仅 none / customerCurrency；无效取值由服务端 fail closed 拒绝，默认 none）</summary>
+    public string? SummaryMode { get; set; }
+
     /// <summary>页码（从 1 开始）</summary>
     public int Page { get; set; } = 1;
 
@@ -119,7 +122,10 @@ public sealed record DynamicReceiptReconciliationReportPageDto(
     string DisclaimerText,
     string GroupBy = "none",
     List<DynamicReceiptReconciliationReportOrderGroupDto>? OrderGroups = null,
-    List<DynamicReceiptReconciliationReportReceiptGroupDto>? ReceiptGroups = null);
+    List<DynamicReceiptReconciliationReportReceiptGroupDto>? ReceiptGroups = null,
+    string SummaryMode = "none",
+    List<DynamicReceiptReconciliationReportOrderSummaryDto>? OrderSummaries = null,
+    List<DynamicReceiptReconciliationReportReceiptSummaryDto>? ReceiptSummaries = null);
 
 /// <summary>
 /// 客户订单与收款核对报表当前页订单计数分组项（ERP-170，只读）：仅当前页已授权订单按分组键计数，
@@ -138,4 +144,36 @@ public sealed record DynamicReceiptReconciliationReportReceiptGroupDto(
     string Key,
     string Label,
     int ReceiptCount,
+    bool Truncated);
+
+/// <summary>
+/// 客户订单与收款核对报表当前页订单金额汇总项（ERP-172，只读）：客户与币种为强制分组边界，订单金额按原币直接求和，
+/// 绝不跨币种合并或换算；linkedReceiptAmount / uncoveredAmount 收款覆盖证据合计只要任一行金额未知（null）即整体为 null（未知，不是 0），
+/// 并显式给出已知 / 未知行数。与未关联收款证据金额保持独立，绝不合并、绝不相加；绝不推断收款分配、应收余额或跨币种合计。
+/// </summary>
+public sealed record DynamicReceiptReconciliationReportOrderSummaryDto(
+    long CustomerId,
+    string CustomerName,
+    string Currency,
+    int OrderCount,
+    decimal OrderAmount,
+    int KnownLinkedReceiptAmountRows,
+    int UnknownLinkedReceiptAmountRows,
+    decimal? LinkedReceiptAmount,
+    int KnownUncoveredAmountRows,
+    int UnknownUncoveredAmountRows,
+    decimal? UncoveredAmount);
+
+/// <summary>
+/// 客户订单与收款核对报表当前页未关联收款金额汇总项（ERP-172，只读）：客户与币种为强制分组边界，并按收款证据状态
+/// （active / pending / historical）显式拆分；金额按收款单原币直接求和，绝不跨币种合并或换算；截断标记显式保留
+/// （命中读取上限时 Truncated = true）。与订单侧金额证据保持独立，绝不合并、绝不相加。
+/// </summary>
+public sealed record DynamicReceiptReconciliationReportReceiptSummaryDto(
+    long CustomerId,
+    string CustomerName,
+    string Currency,
+    string EvidenceStatus,
+    int ReceiptCount,
+    decimal Amount,
     bool Truncated);

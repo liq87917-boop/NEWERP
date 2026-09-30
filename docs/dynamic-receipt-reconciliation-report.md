@@ -271,3 +271,41 @@ ERP-046 客户订单与收款核对证据。本功能为**开发期只读派生*
 
 - `tests/automation/dynamic_receipt_reconciliation_grouping_ui.test.js`：覆盖分组键规范化与选择器白名单、
   scope-safe 请求携带分组键、两个独立计数面板渲染（仅当前预览页、unknown / 截断 / 转义 / 空态）、错误态与无任意 SQL。
+
+## 14. 当前页金额汇总（ERP-172，只读、有界、按客户 + 原币）
+
+预览请求体新增有限金额汇总模式 `SummaryMode`，让销售用户查看**当前授权预览页**的订单金额证据与未关联收款金额证据的分布汇总。金额汇总**只统计当前页**（同一批有界、已授权行），**绝不统计全量**；订单证据与未关联收款证据**各自独立，绝不合并、绝不相加**；绝不跨币种合并或换算，绝不推断收款分配 / 应收余额 / 结算结果。
+
+### 14.1 金额汇总模式白名单（有限、fail closed）
+
+`DynamicReceiptReconciliationReportRules.NormalizeSummaryMode` 仅接受（大小写不敏感）：
+
+| 键 | 说明 |
+|---|---|
+| `none`（默认） | 不汇总金额；`orderSummaries` / `receiptSummaries` 为空列表 |
+| `customerCurrency` | 按客户 Id + 原币汇总（订单证据与未关联收款证据各自独立） |
+
+未知汇总模式在**读取 ERP-046 源数据之前**显式拒绝（错误码 2004，fail closed）；业务员数据范围仍在 ERP-046 源查询内**先于计数与分页**生效；每次请求重新校验身份 / 销售订单菜单授权 / 字段 / 筛选 / 页大小 / 业务员数据范围（fail closed），请求由既有 `OperationLogMiddleware` 记录审计。
+
+### 14.2 响应字段
+
+`DynamicReceiptReconciliationReportPageDto` 新增三个字段（保持原有预览 / 导出字段不变）：
+
+- `SummaryMode`（`string`）：归一化后的实际金额汇总模式（默认 `none`）。
+- `OrderSummaries`（`List<DynamicReceiptReconciliationReportOrderSummaryDto>?`）：当前页订单金额汇总，每项含 `CustomerId` / `CustomerName` / `Currency` / `OrderCount` / `OrderAmount` / `KnownLinkedReceiptAmountRows` / `UnknownLinkedReceiptAmountRows` / `LinkedReceiptAmount` / `KnownUncoveredAmountRows` / `UnknownUncoveredAmountRows` / `UncoveredAmount`。
+- `ReceiptSummaries`（`List<DynamicReceiptReconciliationReportReceiptSummaryDto>?`）：当前页未关联收款金额汇总，每项含 `CustomerId` / `CustomerName` / `Currency` / `EvidenceStatus` / `ReceiptCount` / `Amount` / `Truncated`。
+
+### 14.3 口径边界（与预览同源）
+
+- **只统计当前页**：汇总来自与预览同一批有界、已授权源行，`total` 仍为符合筛选条件的全量订单数，但金额汇总只覆盖本页（单页上限 200，超限直接拒绝）。
+- **订单证据与未关联收款证据独立**：`OrderSummaries` 只汇总订单侧证据（订单金额 + 收款覆盖 linked / uncovered 证据）；`ReceiptSummaries` 只汇总未关联收款证据；两表绝不合并、绝不相加，绝不推断收款单与订单的匹配关系。
+- **不合并币种**：客户与币种为强制分组边界，不同币种分别成行，绝不换算或合并。
+- **未知金额显式保留**：`LinkedReceiptAmount` / `UncoveredAmount` 只要分组内任一行金额未知（null，即未链接 / 命中派生上限）即整体为 null（未知，不是 0），并显式给出已知 / 未知行数；绝不轧为 0 或给部分合计。
+- **收款证据状态显式拆分**：`ReceiptSummaries` 按 `active` / `pending` / `historical` 显式拆分成行，pending / historical 不回落到其它桶、不并入有效合计。
+- **截断显式保留**：未关联收款命中单次查询上限时，`ReceiptSummaries` 各项 `Truncated = true`（显式保留截断语义，绝不静默截断）。
+- **不推断收款分配 / 应收余额 / 跨币种合计**：汇总 DTO 不含任何「收款分配 / 应收余额 / 账龄 / 已收 / 未收」字段，也绝不做跨币种总额。
+
+### 14.4 测试
+
+- 后端契约单测：`DynamicReceiptReconciliationAmountSummaryTests.cs`（覆盖汇总模式白名单与非法拒绝、无菜单授权拒绝、受限制业务员范围、多币种隔离、订单 / 未关联收款证据独立、未知金额按未知、收款证据状态拆分、空页 / 分页边界、只读不写库与汇总 DTO 结构边界）。
+

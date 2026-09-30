@@ -103,6 +103,14 @@ public static class DynamicReceiptReconciliationReportRules
     /// <summary>按收款证据状态分组（未关联收款侧：active / pending / historical 显式保留；订单侧不适用）</summary>
     public const string GroupReceiptEvidenceStatus = "receiptEvidenceStatus";
 
+    // ==================== 0.3 金额汇总模式（ERP-172） ====================
+
+    /// <summary>不汇总金额（默认）；orderSummaries / receiptSummaries 为空列表</summary>
+    public const string SummaryNone = "none";
+
+    /// <summary>按客户 + 币种汇总金额（订单证据与未关联收款证据各自独立，绝不跨币种合并或换算）</summary>
+    public const string SummaryCustomerCurrency = "customerCurrency";
+
     // ==================== 1. 文案 ====================
 
     /// <summary>只读声明（界面与接口统一声明）</summary>
@@ -590,6 +598,136 @@ public static class DynamicReceiptReconciliationReportRules
         public string Label = string.Empty;
         public string SortKey = string.Empty;
         public int Count;
+    }
+
+    // ==================== 5.2 当前页金额汇总（ERP-172，只读、仅当前页、按客户 + 原币） ====================
+
+    /// <summary>
+    /// 规范化金额汇总模式（fail closed）：空 / 留空 = 不汇总金额（none）；仅接受 none / customerCurrency（大小写不敏感）；
+    /// 未知取值显式拒绝（在读取任何 ERP-046 源数据之前完成）。
+    /// </summary>
+    public static string NormalizeSummaryMode(string? summaryMode)
+    {
+        if (string.IsNullOrWhiteSpace(summaryMode))
+            return SummaryNone;
+
+        var normalized = summaryMode.Trim();
+        if (string.Equals(normalized, SummaryNone, StringComparison.OrdinalIgnoreCase)) return SummaryNone;
+        if (string.Equals(normalized, SummaryCustomerCurrency, StringComparison.OrdinalIgnoreCase)) return SummaryCustomerCurrency;
+
+        throw BusinessException.InvalidParameter(
+            $"无效的金额汇总模式: {summaryMode}（可选：none / customerCurrency）");
+    }
+
+    /// <summary>
+    /// 从「当前授权预览页的已授权订单源行」计算订单金额汇总（ERP-172，只读）：只汇总当前页（非全量合计），客户与币种为强制分组边界；
+    /// 订单金额按原币直接求和（绝不跨币种合并或换算）；linkedReceiptAmount / uncoveredAmount 收款覆盖证据只要任一行金额未知（null）
+    /// 即整体按「未知」（null）返回（绝不轧为 0 或给部分合计），并显式给出已知 / 未知行数；与未关联收款证据金额保持独立，绝不合并、绝不相加。
+    /// 不汇总模式 / 空页返回空列表。
+    /// </summary>
+    public static List<DynamicReceiptReconciliationReportOrderSummaryDto> BuildOrderSummaries(
+        IReadOnlyList<Dictionary<string, object?>> rows, string summaryMode)
+    {
+        var mode = NormalizeSummaryMode(summaryMode);
+        if (mode == SummaryNone || rows is null || rows.Count == 0)
+            return new List<DynamicReceiptReconciliationReportOrderSummaryDto>();
+
+        var summaries = new List<DynamicReceiptReconciliationReportOrderSummaryDto>();
+        foreach (var group in rows
+                     .GroupBy(r => new
+                     {
+                         CustomerId = ReadLong(r, "customerId"),
+                         Currency = ReadString(r, "currency"),
+                     })
+                     .OrderBy(g => g.Key.CustomerId)
+                     .ThenBy(g => CurrencySortKey(g.Key.Currency))
+                     .ThenBy(g => g.Key.Currency, StringComparer.Ordinal))
+        {
+            var groupRows = group.ToList();
+            var first = groupRows[0];
+            var knownLinked = CountKnownRows(groupRows, "linkedReceiptAmount");
+            var knownUncovered = CountKnownRows(groupRows, "uncoveredAmount");
+
+            summaries.Add(new DynamicReceiptReconciliationReportOrderSummaryDto(
+                group.Key.CustomerId,
+                ReadString(first, "customerName"),
+                group.Key.Currency,
+                groupRows.Count,
+                groupRows.Sum(r => ReadDecimal(r, "orderAmount")),
+                knownLinked,
+                groupRows.Count - knownLinked,
+                SumKnownNullable(groupRows, "linkedReceiptAmount"),
+                knownUncovered,
+                groupRows.Count - knownUncovered,
+                SumKnownNullable(groupRows, "uncoveredAmount")));
+        }
+
+        return summaries;
+    }
+
+    /// <summary>
+    /// 从「当前授权预览页的已授权未关联收款源行」计算未关联收款金额汇总（ERP-172，只读）：只汇总当前页（非全量合计），客户与币种为强制分组边界，
+    /// 并按收款证据状态（active / pending / historical）显式拆分；金额按收款单原币直接求和（绝不跨币种合并或换算）；截断标记显式保留（命中读取上限时各项 Truncated = true）。
+    /// 不汇总模式 / 空页返回空列表。
+    /// </summary>
+    public static List<DynamicReceiptReconciliationReportReceiptSummaryDto> BuildReceiptSummaries(
+        IReadOnlyList<Dictionary<string, object?>> rows, string summaryMode, bool truncated)
+    {
+        var mode = NormalizeSummaryMode(summaryMode);
+        if (mode == SummaryNone || rows is null || rows.Count == 0)
+            return new List<DynamicReceiptReconciliationReportReceiptSummaryDto>();
+
+        var summaries = new List<DynamicReceiptReconciliationReportReceiptSummaryDto>();
+        foreach (var group in rows
+                     .GroupBy(r => new
+                     {
+                         CustomerId = ReadLong(r, "customerId"),
+                         Currency = ReadString(r, "currency"),
+                         EvidenceStatus = ReadString(r, "evidenceStatus"),
+                     })
+                     .OrderBy(g => g.Key.CustomerId)
+                     .ThenBy(g => CurrencySortKey(g.Key.Currency))
+                     .ThenBy(g => g.Key.Currency, StringComparer.Ordinal)
+                     .ThenBy(g => EvidenceOrder(g.Key.EvidenceStatus))
+                     .ThenBy(g => g.Key.EvidenceStatus, StringComparer.Ordinal))
+        {
+            var groupRows = group.ToList();
+            var first = groupRows[0];
+
+            summaries.Add(new DynamicReceiptReconciliationReportReceiptSummaryDto(
+                group.Key.CustomerId,
+                ReadString(first, "customerName"),
+                group.Key.Currency,
+                group.Key.EvidenceStatus,
+                groupRows.Count,
+                groupRows.Sum(r => ReadDecimal(r, "amount")),
+                truncated));
+        }
+
+        return summaries;
+    }
+
+    private static decimal ReadDecimal(Dictionary<string, object?> row, string key)
+        => row.TryGetValue(key, out var v) && v is decimal d ? d : 0m;
+
+    private static decimal? ReadNullableDecimal(Dictionary<string, object?> row, string key)
+        => row.TryGetValue(key, out var v) && v is decimal d ? d : null;
+
+    private static int CountKnownRows(IReadOnlyList<Dictionary<string, object?>> rows, string key)
+        => rows.Count(r => ReadNullableDecimal(r, key).HasValue);
+
+    /// <summary>可未知金额求和：只要有一行金额未知（null），整体按「未知」（null）返回，绝不用 0 顶替或给部分合计</summary>
+    private static decimal? SumKnownNullable(IReadOnlyList<Dictionary<string, object?>> rows, string key)
+    {
+        decimal sum = 0m;
+        foreach (var row in rows)
+        {
+            var value = ReadNullableDecimal(row, key);
+            if (value is null) return null;
+            sum += value.Value;
+        }
+
+        return sum;
     }
 
     // ==================== 6. Excel 导出（ERP-167，只读） ====================
