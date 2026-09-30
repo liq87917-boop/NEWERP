@@ -13,6 +13,7 @@ ERP-046 客户订单与收款核对证据。本功能为**开发期只读派生*
 |---|---|---|
 | GET | `/api/sales-orders/dynamic-receipt-reconciliation-report` | 返回 ERP-046 订单证据字段白名单目录 + 独立的未关联收款证据字段目录（需登录 + `sales-order` 销售订单菜单授权） |
 | POST | `/api/sales-orders/dynamic-receipt-reconciliation-report` | 按选定字段与有界筛选预览当前账号数据范围内的订单与收款证据，稳定分页；未关联收款证据按独立的收款字段目录单独投影，绝不并入订单行 |
+| POST | `/api/sales-orders/dynamic-receipt-reconciliation-report/export` | 导出当前页为 Excel（xlsx，只读，复用有界授权预览；订单证据与未关联收款证据写入两个独立工作表，仅导出当前页） |
 
 预览与下载请求由既有 `OperationLogMiddleware` 按 HTTP 方法记录审计，本控制器自身不写任何操作日志。
 
@@ -125,6 +126,7 @@ ERP-046 客户订单与收款核对证据。本功能为**开发期只读派生*
 - `src/ERP.Api/Controllers/SalesOrderReceiptReconciliation.cs`（ERP-046 源查询，新增 `SalespersonDataScope? scope` 参数）
 - `src/ERP.UnitTests/DynamicReceiptReconciliationReportTests.cs`
 - `src/ERP.UnitTests/DynamicReceiptReconciliationUnlinkedTests.cs`
+- `src/ERP.UnitTests/DynamicReceiptReconciliationExcelTests.cs`
 - `src/ERP.UnitTests/SalesOrderReceiptReconciliationTests.cs`
 
 ## 9. 前端设计器（ERP-166，只读、有界）
@@ -157,3 +159,23 @@ ERP-046 客户订单与收款核对证据。本功能为**开发期只读派生*
 - 前端纯逻辑单测：`tests/automation/dynamic_receipt_reconciliation_ui.test.js`（Node，覆盖字段选择、请求边界、
   分页渲染、单元格渲染、CSV 导出与失败态；运行 `node tests/automation/dynamic_receipt_reconciliation_ui.test.js`）。
 - 后端契约单测：`DynamicReceiptReconciliationReportTests.cs` / `DynamicReceiptReconciliationUnlinkedTests.cs`。
+
+## 10. Excel 导出（ERP-167，只读、有界）
+
+`POST /api/sales-orders/dynamic-receipt-reconciliation-report/export`：请求体与预览完全相同
+（`DynamicReceiptReconciliationReportRequest`），复用同一有界、已授权预览管线（每次请求重新校验身份 / `sales-order` 销售订单菜单授权 /
+字段 / 筛选 / 页大小 / 业务员数据范围），**只导出请求 `page` / `pageSize` 对应的当前页**（单页上限 200，超限直接拒绝），不是全量导出。
+
+- 生成**两个独立工作表**：`订单证据`（选定订单列）与 `未关联收款证据`（选定收款列），列顺序与请求一致；两个工作表绝不合并、绝不推导收款单到订单的匹配关系。
+- 金额保留原币、不同币种分别成行、绝不换算或跨币种合计；未知金额 / 数量为 null → 导出为空文本（**绝不回落 0**）；收款证据状态（active / pending / historical）与收款链接状态（unlinked）显式保留；命中未关联收款读取上限时，收款证据工作表尾行显式写入截断警告。
+- 文本单元格以 `=` / `+` / `-` / `@` / 制表符 / 回车开头时前缀单引号转义（`DynamicReceiptReconciliationReportRules.EscapeFormulaLeading`），保持字面文本、不被当作公式执行。
+- 文件名 `ReceiptReconciliation_yyyyMMddHHmmss.xlsx`；内容类型 `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`。
+- 只读 + 审计：无写入、无任意 SQL；`POST` 由既有 `OperationLogMiddleware` 记录审计（动作「导出」）。
+
+### 10.1 前端
+
+设计器工具栏「📥 导出 Excel（选定列）」复用当前字段 / 筛选 / 分页组装请求后 `POST` 导出；空数据 / 未预览 / 授权 / 校验 / 网络失败均在结果区可见，不下载空表。
+
+### 10.2 测试
+
+- 后端契约单测：`DynamicReceiptReconciliationExcelTests.cs`（覆盖作用域、列顺序、页大小上限、两个独立证据工作表、未知金额 null、原币、公式注入防护与只读不写库）。

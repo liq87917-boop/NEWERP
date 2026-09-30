@@ -4,6 +4,8 @@ using ERP.Application.Interfaces;
 using ERP.Application.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using NPOI.SS.UserModel;
+using NPOI.XSSF.UserModel;
 using System.Security.Claims;
 
 namespace ERP.Api.Controllers;
@@ -52,6 +54,22 @@ public class DynamicReceiptReconciliationReportController : ControllerBase
         ArgumentNullException.ThrowIfNull(request);
         return Ok(ApiResponse<DynamicReceiptReconciliationReportPageDto>.Success(
             await BuildPageAsync(request)));
+    }
+
+    /// <summary>
+    /// 导出当前页为 Excel（ERP-167，只读）：复用「有界、已授权预览」与选定列顺序（每次请求重新校验身份 / 销售订单菜单授权 /
+    /// 字段 / 筛选 / 页大小 / 业务员数据范围），把当前页选定订单列与未关联收款列分别写入两个独立工作表（仅导出当前页）。
+    /// <para>金额保留原币、未知金额 null 保留为空文本（绝不回落 0）、收款证据状态与截断警告显式保留；文本单元格做公式注入转义；
+    /// 全程只读，不写库、不执行任意 SQL；请求由既有 <c>OperationLogMiddleware</c> 记录审计（动作「导出」）。</para>
+    /// </summary>
+    [HttpPost("export")]
+    public async Task<IActionResult> Export([FromBody] DynamicReceiptReconciliationReportRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        var page = await BuildPageAsync(request);
+        var bytes = BuildWorkbook(page);
+        return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            $"ReceiptReconciliation_{DateTime.Now:yyyyMMddHHmmss}.xlsx");
     }
 
     /// <summary>有界、已授权的订单与收款证据预览（每次请求重新校验身份 / 菜单授权 / 字段 / 筛选 / 页大小 / 数据范围）</summary>
@@ -244,6 +262,97 @@ public class DynamicReceiptReconciliationReportController : ControllerBase
                 + $"（{DynamicReceiptReconciliationReportRules.RequiredMenuCode}）模块授权：拒绝预览客户订单与收款核对报表"
                 + "（fail closed，不返回任何数据）",
                 ErrorCodes.Forbidden);
+        }
+    }
+
+    /// <summary>生成含「订单证据」与「未关联收款证据」两个独立工作表的只读工作簿（原币 / 状态 / 截断警告显式保留，公式注入转义，绝不合并）</summary>
+    private static byte[] BuildWorkbook(DynamicReceiptReconciliationReportPageDto page)
+    {
+        using var workbook = new XSSFWorkbook();
+
+        AppendSheet(
+            workbook,
+            DynamicReceiptReconciliationReportRules.OrderSheetName,
+            page.Columns.Select(c => (c.Key, c.Label)).ToList(),
+            page.Rows.Select(DynamicReceiptReconciliationReportRules.BuildExportRow).ToList(),
+            null);
+
+        AppendSheet(
+            workbook,
+            DynamicReceiptReconciliationReportRules.ReceiptSheetName,
+            page.ReceiptColumns.Select(c => (c.Key, c.Label)).ToList(),
+            page.ReceiptRows.Select(DynamicReceiptReconciliationReportRules.BuildExportRow).ToList(),
+            page.UnlinkedReceiptTruncated ? DynamicReceiptReconciliationReportRules.ReceiptTruncationNote : null);
+
+        using var output = new MemoryStream();
+        workbook.Write(output);
+        return output.ToArray();
+    }
+
+    /// <summary>把一个分区写为独立工作表：首行为列标题，后续行为该分区当前页的只读行（列顺序与预览一致）；截断警告作为尾行显式标注</summary>
+    private static void AppendSheet(
+        XSSFWorkbook workbook,
+        string sheetName,
+        List<(string Key, string Label)> columns,
+        List<Dictionary<string, object?>> rows,
+        string? note)
+    {
+        var sheet = workbook.CreateSheet(sheetName);
+
+        var header = sheet.CreateRow(0);
+        for (var c = 0; c < columns.Count; c++)
+            header.CreateCell(c).SetCellValue(columns[c].Label);
+
+        for (var r = 0; r < rows.Count; r++)
+        {
+            var row = sheet.CreateRow(r + 1);
+            for (var c = 0; c < columns.Count; c++)
+            {
+                var value = rows[r].TryGetValue(columns[c].Key, out var v) ? v : null;
+                WriteCell(row.CreateCell(c), value);
+            }
+        }
+
+        if (!string.IsNullOrEmpty(note))
+        {
+            var noteRow = sheet.CreateRow(rows.Count + 1);
+            var safe = (string?)DynamicReceiptReconciliationReportRules.EscapeFormulaLeading(note) ?? string.Empty;
+            noteRow.CreateCell(0).SetCellValue(safe);
+        }
+    }
+
+    /// <summary>按类型写入单元格（与既有 ExcelExporter 同口径的文本 / 数值语义；未知金额 null → 空文本，绝不回落 0）</summary>
+    private static void WriteCell(ICell cell, object? value)
+    {
+        switch (value)
+        {
+            case null or DBNull:
+                cell.SetCellValue(string.Empty);
+                break;
+            case int i:
+                cell.SetCellValue(i);
+                break;
+            case long l:
+                cell.SetCellValue(l);
+                break;
+            case decimal m:
+                cell.SetCellValue((double)m);
+                break;
+            case double d:
+                cell.SetCellValue(d);
+                break;
+            case float f:
+                cell.SetCellValue(f);
+                break;
+            case bool b:
+                cell.SetCellValue(b ? "是" : "否");
+                break;
+            case DateTime dt:
+                cell.SetCellValue(dt.ToString("yyyy-MM-dd HH:mm"));
+                break;
+            default:
+                cell.SetCellValue(value.ToString() ?? string.Empty);
+                break;
         }
     }
 }

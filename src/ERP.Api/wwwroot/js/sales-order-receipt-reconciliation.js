@@ -683,6 +683,7 @@ function drrErrorHtml(kind, message) {
     forbidden: '权限不足',
     unauthorized: '未登录 / 登录已过期',
     invalid: '请求无效',
+    empty: '暂无数据',
     network: '网络请求失败',
     error: '预览失败',
   };
@@ -902,6 +903,7 @@ function drrRender() {
       <button class="btn btn-primary" onclick="drrPreview(1)">预览</button>
       <button class="btn btn-neutral" onclick="drrExportOrderCsv()" title="导出当前页订单证据为 CSV（两类证据分开导出）">📤 导出订单证据 CSV</button>
       <button class="btn btn-neutral" onclick="drrExportReceiptCsv()" title="导出当前页未关联收款证据为 CSV">📤 导出未关联收款 CSV</button>
+      <button class="btn btn-neutral" onclick="drrExportExcel()" title="导出当前页订单证据与未关联收款证据为两个独立工作表的 Excel（复用当前字段 / 筛选 / 分页）">📥 导出 Excel（选定列）</button>
       <button class="btn btn-neutral" onclick="openSalesOrderReceiptReconciliationReport()">← 返回核对报表</button>
     </div>
   </div>
@@ -999,6 +1001,72 @@ function drrExportReceiptCsv() {
   drrDownloadCsv('未关联收款证据_' + (view.page || 1) + '.csv', csv);
 }
 
+/* 导出当前页为 Excel（ERP-167，只读）：复用预览请求体 POST /api/sales-orders/dynamic-receipt-reconciliation-report/export；
+   把当前页订单证据与未关联收款证据写入两个独立工作表；成功（xlsx 附件）触发下载；
+   授权 / 无效 / 空结果 / 网络失败在结果区可见，不下载任何内容 */
+async function drrExportExcel() {
+  const view = DRR.view;
+  if (!view || !view.columns || !view.columns.length) {
+    drrRenderResult(drrErrorHtml('invalid', '请先预览后再导出 Excel'));
+    return;
+  }
+  const hasOrder = view.rows && view.rows.length > 0;
+  const hasReceipt = view.receiptRows && view.receiptRows.length > 0;
+  if (!hasOrder && !hasReceipt) {
+    drrRenderResult(drrErrorHtml('empty', '没有符合条件的订单证据或未关联收款证据，无法导出（请先预览）'));
+    return;
+  }
+
+  const state = drrBuildState(view ? view.page : DRR.filters.page);
+  if (state.orderDateFrom && state.orderDateTo && state.orderDateFrom > state.orderDateTo) {
+    drrRenderResult(drrErrorHtml('invalid', '订单日期开始不能晚于结束'));
+    return;
+  }
+
+  const req = drrBuildRequest(state);
+  drrRenderResult(drrLoadingHtml());
+
+  try {
+    const headers = { 'Content-Type': 'application/json' };
+    const token = typeof localStorage !== 'undefined' ? (localStorage.getItem('erp_token') || '') : '';
+    if (token) headers['Authorization'] = 'Bearer ' + token;
+    const resp = await fetch('/api/sales-orders/dynamic-receipt-reconciliation-report/export', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(req),
+    });
+
+    const contentType = (resp.headers.get('content-type') || '');
+    if (contentType.indexOf('spreadsheetml') >= 0) {
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+      a.href = url;
+      a.download = '客户订单与收款核对报表_' + dateStr + '.xlsx';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      toast('Excel 已导出（当前页 · 两个独立工作表）', 'success');
+      return;
+    }
+
+    let envelope = null;
+    try { envelope = await resp.json(); } catch (e) { /* 忽略解析失败 */ }
+    const code = envelope && envelope.code;
+    const message = (envelope && envelope.message) || '导出失败';
+    if (code === 2000 || code === 2003) {
+      if (typeof logout === 'function') logout();
+      drrRenderResult(drrErrorHtml('unauthorized', message));
+      return;
+    }
+    drrRenderResult(drrErrorHtml(drrKindOfCode(code), message));
+  } catch (err) {
+    drrRenderResult(drrErrorHtml('network', (err && err.message) || '无法连接到服务器'));
+  }
+}
+
 /* Node 单测导出（浏览器中 module 为 undefined，自动跳过） */
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
@@ -1024,6 +1092,7 @@ if (typeof module !== 'undefined' && module.exports) {
     drrKindOfCode,
     drrCsvCell,
     drrBuildCsv,
+    drrExportExcel,
   };
 }
 
