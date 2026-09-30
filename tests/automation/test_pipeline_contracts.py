@@ -107,6 +107,56 @@ class PipelineContracts(unittest.TestCase):
                 capture_output=True, text=True,
             ).stdout.strip())
 
+    def test_exhausted_dirty_task_is_parked_while_independent_queue_continues(self):
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            control, executor = base / "NEWERP", base / "NEWERP.executor"
+            control.mkdir()
+            def git(cwd, *args):
+                result = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True)
+                self.assertEqual(0, result.returncode, result.stderr)
+                return result.stdout.strip()
+            git(control, "init", "-b", "main")
+            git(control, "config", "user.name", "Scheduler Test")
+            git(control, "config", "user.email", "scheduler@example.invalid")
+            (control / ".ai" / "tasks").mkdir(parents=True)
+            (control / ".ai" / "config.json").write_text(json.dumps({
+                "task_prefix": "ERP", "pipeline": {"executor_worktree": {
+                    "enabled": True, "path": "NEWERP.executor", "target_branch": "main"}},
+                "autonomy": {"max_supervised_recovery_cycles": 2},
+            }), encoding="utf-8")
+            (control / ".ai" / "PROJECT_STATE.json").write_text('{"phase":"ready"}', encoding="utf-8")
+            for number, status in ((167, "pending"), (168, "pending")):
+                (control / ".ai" / "tasks" / f"ERP-{number}.json").write_text(
+                    json.dumps(self.task(f"ERP-{number}", status)), encoding="utf-8")
+            git(control, "add", ".ai")
+            git(control, "commit", "-m", "queue fixture")
+            git(base, "clone", "--quiet", str(control), str(executor))
+            git(executor, "config", "user.name", "Scheduler Test")
+            git(executor, "config", "user.email", "scheduler@example.invalid")
+            head = git(executor, "rev-parse", "--short", "HEAD")
+            task_path = executor / ".ai" / "tasks" / "ERP-167.json"
+            failed = self.task("ERP-167", "retry_pending") | {
+                "supervised_recovery_cycles": 2,
+                "exhausted_revalidation_head": head,
+                "preserved_work": {"execution_copy": str(executor), "changed_paths": [
+                    ".ai/tasks/ERP-167.json", "src/ERP.Api/Feature.cs"]},
+            }
+            task_path.write_text(json.dumps(failed), encoding="utf-8")
+            work = executor / "src" / "ERP.Api" / "Feature.cs"
+            work.parent.mkdir(parents=True)
+            work.write_text("unfinished feature", encoding="utf-8")
+            outcome = executor_workspace.continue_after_exhausted_failure(control, executor)
+            self.assertEqual("continued", outcome["status"])
+            self.assertEqual("ERP-168", outcome["next_task"])
+            self.assertEqual("unfinished feature", work.read_text(encoding="utf-8"))
+            next_root = Path(outcome["path"])
+            parked = json.loads((next_root / ".ai" / "tasks" / "ERP-167.json").read_text(encoding="utf-8"))
+            self.assertEqual("blocked", parked["status"])
+            self.assertEqual(str(executor), parked["parked_execution_copy"])
+            self.assertFalse((next_root / "src" / "ERP.Api" / "Feature.cs").exists())
+            self.assertEqual(next_root, executor_workspace.selected_executor(control, executor))
+
     def test_prompt_transport_upgrade_requeues_only_matching_blocked_tasks(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -395,6 +445,60 @@ class PipelineContracts(unittest.TestCase):
             self.assertIsNotNone(orchestrator.recoverable_dirty_task(config, {"current_task": None}))
             task["exhausted_revalidation_head"] = "newhead"
             self.assertIsNone(orchestrator.recoverable_dirty_task(config, {"current_task": None}))
+
+    def test_recovery_evidence_prefers_active_executor_logs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            active = root / "active"; control = root / "control"
+            (active / ".ai" / "logs").mkdir(parents=True)
+            (control / ".ai" / "logs").mkdir(parents=True)
+            (active / ".ai" / "logs" / "ERP-167-validation-3.log").write_text("current failure", encoding="utf-8")
+            (control / ".ai" / "logs" / "ERP-167-validation-1.log").write_text("old failure", encoding="utf-8")
+            task = self.task("ERP-167", "retry_pending") | {"failure_kind": "validation_failure"}
+            with patch.object(pipeline, "ROOT", active), \
+                 patch.object(pipeline, "LOGS_DIR", active / ".ai" / "logs"), \
+                 patch.object(pipeline, "RESULTS_DIR", active / ".ai" / "results"), \
+                 patch.object(pipeline, "TASKS_DIR", active / ".ai" / "tasks"), \
+                 patch.object(pipeline, "STATE_PATH", active / ".ai" / "PROJECT_STATE.json"), \
+                 patch.dict("os.environ", {"AI_CONTROL_ROOT": str(control)}):
+                evidence = pipeline.recovery_evidence(task)
+            self.assertEqual([".ai/logs/ERP-167-validation-3.log"], evidence["validation_logs"])
+
+    def test_confirmed_baseline_failure_grants_only_failing_unit_test(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            logs = root / ".ai" / "logs"; logs.mkdir(parents=True)
+            source = root / "src" / "ERP.UnitTests" / "DynamicSupplierAgingReportTests.cs"
+            source.parent.mkdir(parents=True); source.write_text("test fixture", encoding="utf-8")
+            name = "ERP.UnitTests.DynamicSupplierAgingReportTests.Preview_retains_separate_currencies_and_unknown_due_date_evidence"
+            failure = f"[xUnit.net 00:00:01] {name} [FAIL]\nAssert.Equal() Failure: Values differ\nExpected: not_due\nActual: overdue_1_30\n at Test in {source}:line 308\n"
+            (logs / "ERP-167-validation-3.log").write_text(failure, encoding="utf-8")
+            evidence = {"failure_kind": "validation_failure", "latest_build": {"log": ".ai/logs/ERP-167-validation-3.log"}}
+            task = self.task("ERP-167", "retry_pending")
+            task["allowed_paths"] = ["src/ERP.Api/Controllers/Feature.cs"]
+            responses = [
+                type("Result", (), {"returncode": 0, "stdout": "tracked\n"})(),
+                type("Result", (), {"returncode": 0, "stdout": ""})(),
+                type("Result", (), {"returncode": 0, "stdout": "abc123\n"})(),
+            ]
+            baseline = type("Result", (), {"returncode": 1, "stdout": failure})()
+            with patch.object(pipeline, "ROOT", root), patch.object(pipeline, "LOGS_DIR", logs), \
+                 patch.object(pipeline, "run", side_effect=responses), \
+                 patch.object(pipeline.subprocess, "run", side_effect=[
+                     type("Result", (), {"returncode": 0})(),
+                     type("Result", (), {"returncode": 0})(), baseline,
+                 ]) as commands:
+                confirmed = pipeline.confirmed_baseline_unit_failure(task, evidence)
+            self.assertEqual("src/ERP.UnitTests/DynamicSupplierAgingReportTests.cs", confirmed["path"])
+            self.assertEqual(name, confirmed["test"])
+            self.assertEqual(3, commands.call_count)
+            config = {"ignored_change_paths": [], "orchestrator_paths": [], "protected_paths": []}
+            task["recovery_context"] = {"baseline_test_fix": confirmed, "repair_allowed_paths": [confirmed["path"]]}
+            with patch.object(orchestrator, "changed_paths", return_value=[confirmed["path"]]):
+                self.assertEqual([], orchestrator.path_violations(task, config))
+            task["recovery_context"]["repair_allowed_paths"] = ["src/ERP.UnitTests/**"]
+            with patch.object(orchestrator, "changed_paths", return_value=[confirmed["path"]]):
+                self.assertIn("outside allowed_paths", orchestrator.path_violations(task, config)[0])
 
     def test_failed_work_is_preserved_without_stash_or_reset(self):
         task = self.task("ERP-096", "in_progress")

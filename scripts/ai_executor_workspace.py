@@ -13,8 +13,11 @@ from __future__ import annotations
 import argparse
 import json
 import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+from ai_state import refresh_project_state, save_json
 
 
 def git(root: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -49,12 +52,113 @@ def remote_url(root: Path) -> str:
     return completed.stdout.strip()
 
 
+def active_manifest(control_root: Path) -> Path:
+    git_dir = Path(git(control_root, "rev-parse", "--absolute-git-dir").stdout.strip())
+    return git_dir / "newerp-active-executor.json"
+
+
+def selected_executor(control_root: Path, configured: Path) -> Path:
+    manifest = active_manifest(control_root)
+    if not manifest.is_file():
+        return configured
+    value = json.loads(manifest.read_text(encoding="utf-8"))
+    selected = Path(value["path"]).resolve()
+    if selected.parent != configured.parent or not selected.name.startswith(configured.name + ".continue-"):
+        raise RuntimeError("Executor manifest points outside the managed sibling checkouts")
+    if git(selected, "rev-parse", "--is-inside-work-tree", check=False).returncode != 0:
+        raise RuntimeError(f"Executor manifest checkout is unavailable: {selected}")
+    return selected
+
+
+def continue_after_exhausted_failure(control_root: Path, active_root: Path) -> dict[str, Any]:
+    """Park a failed dirty checkout and continue independent work in a clean clone."""
+    control_root, active_root = control_root.resolve(), active_root.resolve()
+    config = load_config(active_root)
+    _, configured, target = workspace_settings(control_root, config)
+    if selected_executor(control_root, configured) != active_root:
+        raise RuntimeError("Executor changed while continuation was being prepared")
+    revision = git(active_root, "rev-parse", "--short", "HEAD").stdout.strip()
+    maximum = int(config.get("autonomy", {}).get("max_supervised_recovery_cycles", 2))
+    tasks_dir = active_root / ".ai" / "tasks"
+    tasks = [json.loads(path.read_text(encoding="utf-8")) for path in sorted(tasks_dir.glob("ERP-*.json"))]
+    by_id = {task["id"]: task for task in tasks}
+    exhausted = [task for task in tasks if
+                 task.get("status") in {"retry_pending", "failed", "blocked", "error"}
+                 and int(task.get("supervised_recovery_cycles", 0) or 0) >= maximum
+                 and task.get("exhausted_revalidation_head") == revision
+                 and Path((task.get("preserved_work") or {}).get("execution_copy", "")).resolve() == active_root]
+    if len(exhausted) != 1:
+        return {"status": "not_needed", "reason": "no unique exhausted preserved task"}
+    failed = exhausted[0]
+    runnable = [task for task in tasks if task.get("status") in {"pending", "retry"}
+                and task.get("auto_start", True)
+                and all(by_id.get(dep, {}).get("status") == "completed" for dep in task.get("depends_on", []))]
+    if not runnable:
+        return {"status": "not_needed", "reason": "no independent runnable task"}
+    porcelain = git(active_root, "-c", "core.quotepath=false", "status", "--porcelain", "--untracked-files=all").stdout
+    changed = set()
+    for line in porcelain.splitlines():
+        if len(line) < 4 or " -> " in line:
+            raise RuntimeError("Cannot safely isolate renamed or malformed executor changes")
+        changed.add(line[3:].replace("\\", "/"))
+    expected = set((failed.get("preserved_work") or {}).get("changed_paths") or [])
+    expected.update((failed.get("recovery_context") or {}).get("repair_allowed_paths") or [])
+    if not changed or not changed.issubset(expected):
+        raise RuntimeError("Executor has changes outside the failed task's preserved work")
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+    destination = configured.with_name(f"{configured.name}.continue-{failed['id'].lower()}-{stamp}")
+    if destination.exists():
+        raise RuntimeError(f"Continuation checkout already exists: {destination}")
+    clone = subprocess.run(
+        ["git", "clone", "--shared", "--quiet", "--branch", target, str(active_root), str(destination)],
+        cwd=control_root, capture_output=True, text=True,
+    )
+    if clone.returncode != 0:
+        raise RuntimeError((clone.stderr or clone.stdout).strip() or "Continuation clone failed")
+    git(destination, "remote", "set-url", "origin", remote_url(active_root))
+    for key in ("user.name", "user.email"):
+        value = git(active_root, "config", key, check=False).stdout.strip()
+        if value:
+            git(destination, "config", key, value)
+    parked = dict(failed)
+    parked["status"] = "blocked"
+    parked["blocker"] = "Automatic repair budget exhausted; preserved work remains in " + str(active_root)
+    parked["parked_execution_copy"] = str(active_root)
+    task_relative = Path(".ai") / "tasks" / f"{failed['id']}.json"
+    save_json(destination / task_relative, parked)
+    result_relative = Path(".ai") / "results" / f"{failed['id']}.json"
+    old_result = active_root / result_relative
+    result = json.loads(old_result.read_text(encoding="utf-8")) if old_result.is_file() else {"task": failed["id"]}
+    result.update({"status": "blocked", "execution_outcome": "preserved_failure_isolated",
+                   "preserved_work": failed.get("preserved_work")})
+    save_json(destination / result_relative, result)
+    state = refresh_project_state(
+        destination, phase="ready", current_task=None,
+        last_error={"task": failed["id"], "kind": "repair_budget_exhausted",
+                    "summary": str(failed.get("last_error") or failed.get("blocker") or "")[-12000:]},
+        finish_reason="failed_work_isolated_for_independent_tasks",
+    )
+    commit_paths = [task_relative.as_posix(), result_relative.as_posix(), ".ai/PROJECT_STATE.json"]
+    git(destination, "add", "--", *commit_paths)
+    staged = set(git(destination, "diff", "--cached", "--name-only").stdout.splitlines())
+    if not staged.issubset(set(commit_paths)):
+        raise RuntimeError("Continuation checkout staged unrelated paths")
+    git(destination, "commit", "-m", f"{failed['id']}: isolate exhausted repair and continue independent tasks")
+    manifest = active_manifest(control_root)
+    save_json(manifest, {"path": str(destination), "parked": str(active_root),
+                         "failed_task": failed["id"], "created_at": datetime.now(timezone.utc).isoformat()})
+    return {"status": "continued", "path": str(destination), "parked": str(active_root),
+            "failed_task": failed["id"], "next_task": runnable[0]["id"], "queue": state.get("queue", [])}
+
+
 def ensure_workspace(control_root: Path) -> dict[str, Any]:
     control_root = control_root.resolve()
     config = load_config(control_root)
     enabled, executor_root, target = workspace_settings(control_root, config)
     if not enabled:
         return {"status": "disabled", "path": str(control_root), "branch": target, "target_branch": target}
+
+    executor_root = selected_executor(control_root, executor_root)
 
     git(control_root, "fetch", "--quiet", "origin", target, check=False)
     if not executor_root.exists():
@@ -121,11 +225,17 @@ def ensure_workspace(control_root: Path) -> dict[str, Any]:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("command", choices=["ensure"])
+    parser.add_argument("command", choices=["ensure", "continue"])
     parser.add_argument("--root", required=True)
+    parser.add_argument("--executor")
     args = parser.parse_args()
     try:
-        result = ensure_workspace(Path(args.root))
+        if args.command == "continue":
+            if not args.executor:
+                parser.error("continue requires --executor")
+            result = continue_after_exhausted_failure(Path(args.root), Path(args.executor))
+        else:
+            result = ensure_workspace(Path(args.root))
         print(json.dumps(result, ensure_ascii=False))
         return 0 if result["status"] != "diverged" else 4
     except Exception as exc:

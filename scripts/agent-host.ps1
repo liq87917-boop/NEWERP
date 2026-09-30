@@ -58,6 +58,7 @@ $lastSyncMessage = 'not synced yet'
 $lastCiText = 'GitHub CLI not checked'
 $lastCiAt = Get-Date '2000-01-01'
 $lastRecoveryAttemptKey = $null
+$lastIsolationAttemptKey = $null
 $selfRestartRequested = $false
 $screenInitialized = $false
 $lastScreen = @()
@@ -154,6 +155,10 @@ function Get-RecoverablePreservedWork {
         if ($task.status -notin @('retry', 'retry_pending', 'in_progress', 'code_ready', 'finalizing', 'failed', 'blocked')) { continue }
         if (-not $task.preserved_work -or -not $task.preserved_work.changed_paths) { continue }
         $expected = @($task.preserved_work.changed_paths | ForEach-Object { [string]$_ -replace '\\', '/' })
+        if ($task.recovery_context -and $task.recovery_context.baseline_test_fix -and
+            $task.recovery_context.baseline_test_fix.baseline_confirmed -eq $true) {
+            $expected += @($task.recovery_context.repair_allowed_paths)
+        }
         if (@($businessPaths | Where-Object { $_ -notin $expected }).Count -gt 0) { continue }
         $cycles = [int]$task.supervised_recovery_cycles
         if ($task.status -in @('retry_pending', 'failed', 'blocked') -and $cycles -ge $maximum -and
@@ -909,6 +914,50 @@ try {
 
         $canStartWithDirty = $recoverExisting -and ($lastRecoveryAttemptKey -ne $recoveryKey)
         $worktreeAllowsStart = (-not $gitInfo.Dirty) -or $canStartWithDirty
+
+        # A failed task can exhaust repair while its guarded edits must be kept.
+        # Move independent development to a clean sibling clone; the failed
+        # checkout and its complete evidence remain untouched for later repair.
+        $isolationKey = "$($gitInfo.Sha)|$($state.updated_at)|$($head.id)"
+        if (-not $NoExecute -and -not $pipelineProcess -and -not $paused -and
+            $gitInfo.Dirty -and -not $recoverExisting -and (Test-TaskRunnable $head) -and
+            $lastIsolationAttemptKey -ne $isolationKey) {
+            $lastIsolationAttemptKey = $isolationKey
+            try {
+                $continuationRaw = & py -3 $workspaceManager continue --root $controlRoot --executor $root
+                if ($LASTEXITCODE -eq 0) {
+                    $continuation = ($continuationRaw -join [Environment]::NewLine) | ConvertFrom-Json
+                    if ($continuation.status -eq 'continued') {
+                        $root = [string]$continuation.path
+                        $workspaceInfo.path = $root
+                        $scriptDir = Join-Path $root 'scripts'
+                        $statePath = Join-Path $root '.ai\PROJECT_STATE.json'
+                        $configPath = Join-Path $root '.ai\config.json'
+                        $tasksDir = Join-Path $root '.ai\tasks'
+                        $logsDir = Join-Path $root '.ai\logs'
+                        $pipelineScript = Join-Path $scriptDir 'run-pipeline.ps1'
+                        $orchestratorScript = Join-Path $scriptDir 'ai_orchestrator.py'
+                        $outLog = Join-Path $logsDir 'agent-pipeline.out.log'
+                        $errLog = Join-Path $logsDir 'agent-pipeline.err.log'
+                        Set-Location $root
+                        $state = Get-ProjectState
+                        $tasks = @(Get-Tasks)
+                        $head = Get-QueueHead $tasks
+                        $gitInfo = Get-GitInfo
+                        $recoverableFailure = Get-RecoverableFailure $tasks
+                        $recoverPreserved = $null
+                        $recoverExisting = $false
+                        $worktreeAllowsStart = -not $gitInfo.Dirty
+                        $lastRecoveryAttemptKey = $null
+                        $lastSyncMessage = "isolated $($continuation.failed_task); continuing $($continuation.next_task)"
+                    }
+                } else {
+                    Add-Content -Path $errLog -Value ("Executor continuation failed: " + ($continuationRaw -join ' '))
+                }
+            } catch {
+                Add-Content -Path $errLog -Value ("Executor continuation failed: " + $_.Exception.Message)
+            }
+        }
 
         if (-not $NoExecute -and -not $pipelineProcess -and -not $paused -and $worktreeAllowsStart -and $gitInfo.Branch -in $managedBranches) {
             if ($recoverPush -or $recoverExisting -or $recoverableFailure -or (Test-TaskRunnable $head)) {

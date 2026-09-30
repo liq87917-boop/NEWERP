@@ -233,9 +233,19 @@ def dependencies_completed(task: dict[str, Any], config: dict[str, Any]) -> tupl
 
 def path_violations(task: dict[str, Any], config: dict[str, Any]) -> list[str]:
     violations = []
+    recovery = task.get("recovery_context") or {}
+    baseline = recovery.get("baseline_test_fix") or {}
+    repair_paths = recovery.get("repair_allowed_paths") or []
+    if (baseline.get("baseline_confirmed") is True
+            and repair_paths == [baseline.get("path")]
+            and str(baseline.get("path", "")).startswith("src/ERP.UnitTests/")
+            and str(baseline.get("path", "")).endswith("Tests.cs")):
+        allowed = [*task["allowed_paths"], *repair_paths]
+    else:
+        allowed = task["allowed_paths"]
     for path in changed_paths():
         if matches(path, config["ignored_change_paths"]) or matches(path, config.get("orchestrator_paths", [])): continue
-        if not matches(path, task["allowed_paths"]): violations.append(f"outside allowed_paths: {path}")
+        if not matches(path, allowed): violations.append(f"outside allowed_paths: {path}")
         if matches(path, config["protected_paths"]) and not gate_is_approved(task, config): violations.append(f"protected without approved gate: {path}")
     return violations
 
@@ -322,6 +332,10 @@ def recoverable_dirty_task(config: dict[str, Any], state: dict[str, Any]) -> tup
             continue
         preserved = task.get("preserved_work") or {}
         expected = set(preserved.get("changed_paths") or [])
+        recovery = task.get("recovery_context") or {}
+        baseline = recovery.get("baseline_test_fix") or {}
+        if baseline.get("baseline_confirmed") is True:
+            expected.update(recovery.get("repair_allowed_paths") or [])
         if task.get("id") != current and not expected:
             continue
         if expected and not current_business.issubset(expected):
