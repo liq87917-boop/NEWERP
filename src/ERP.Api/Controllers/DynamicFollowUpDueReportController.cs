@@ -1,0 +1,79 @@
+using ERP.Application.Common;
+using ERP.Application.DTOs;
+using ERP.Application.Interfaces;
+using ERP.Application.Services;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using System.Security.Claims;
+
+namespace ERP.Api.Controllers;
+
+/// <summary>
+/// 动态跟进提醒报表（ERP-193）控制器：只读的字段目录与预览接口。
+/// <list type="number">
+/// <item><b>GET /api/dynamic-follow-up-due-report</b>：返回跟进提醒证据字段白名单目录（需登录 + 跟进提醒菜单授权 + 业务员数据范围）；</item>
+/// <item><b>POST /api/dynamic-follow-up-due-report</b>：按选定字段与有界筛选（as-of 日期 / 提前天数 / 可选到期状态）预览当前账号数据范围内的跟进证据，稳定分页。</item>
+/// </list>
+/// <para>复用 ERP-192 的「跟进提醒」菜单授权与 <see cref="SalespersonDataScopeService"/>（ERP-097）业务员数据范围；
+/// 每次目录 / 预览请求都重新校验身份、菜单授权与业务员数据范围（fail closed），查询由 <see cref="ReportService"/> 只读完成，
+/// 本控制器只做授权与字段投影，不做写入。请求由既有 <c>OperationLogMiddleware</c> 按 HTTP 方法记录审计
+/// （POST 预览落操作日志，GET 目录沿用只读约定）。</para>
+/// </summary>
+[ApiController]
+[Route("api/dynamic-follow-up-due-report")]
+[Authorize]
+public class DynamicFollowUpDueReportController : ControllerBase
+{
+    private readonly IErpDbContext _db;
+    private readonly IReportService _reportService;
+
+    public DynamicFollowUpDueReportController(IErpDbContext db, IReportService reportService)
+    {
+        _db = db;
+        _reportService = reportService;
+    }
+
+    /// <summary>当前登录用户 Id（缺失或非数字时返回 null，由授权检查 fail closed 拒绝，绝不猜测身份）</summary>
+    private long? CurrentUserId()
+        => long.TryParse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value, out var id) ? id : null;
+
+    /// <summary>字段白名单目录（有限、只读）</summary>
+    [HttpGet]
+    public async Task<IActionResult> Catalog()
+    {
+        await EnsureAuthorizedAsync(CurrentUserId());
+        return Ok(ApiResponse<DynamicFollowUpDueReportCatalogDto>.Success(
+            DynamicFollowUpDueReportRules.GetCatalogDto()));
+    }
+
+    /// <summary>按选定字段与有界筛选预览跟进提醒证据（只读、分页有界；复用 ERP-192 跟进提醒口径）</summary>
+    [HttpPost]
+    public async Task<IActionResult> Preview([FromBody] DynamicFollowUpDueReportRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var scope = await EnsureAuthorizedAsync(CurrentUserId());
+        var page = await _reportService.GetDynamicFollowUpDueReportAsync(request, scope);
+        return Ok(ApiResponse<DynamicFollowUpDueReportPageDto>.Success(page));
+    }
+
+    /// <summary>身份 + 既有「角色 → 菜单」跟进提醒模块授权 + 业务员数据范围（fail closed，绝不猜测身份）</summary>
+    private async Task<SalespersonDataScope> EnsureAuthorizedAsync(long? userId)
+    {
+        if (userId is null or <= 0)
+            throw new BusinessException("请先登录后再预览动态跟进提醒报表", ErrorCodes.Unauthorized);
+
+        var menuCodes = await CustomerReceivableReconciliationService.LoadAuthorizedMenuCodesAsync(
+            _db, userId.Value);
+        if (!menuCodes.Contains(DynamicFollowUpDueReportRules.RequiredMenuCode, StringComparer.OrdinalIgnoreCase))
+        {
+            throw new BusinessException(
+                $"当前账号没有「{DynamicFollowUpDueReportRules.RequiredMenuText}」"
+                + $"（{DynamicFollowUpDueReportRules.RequiredMenuCode}）模块授权：拒绝预览动态跟进提醒报表"
+                + "（fail closed，不返回任何数据）",
+                ErrorCodes.Forbidden);
+        }
+
+        return await SalespersonDataScopeService.ResolveAsync(_db, userId);
+    }
+}

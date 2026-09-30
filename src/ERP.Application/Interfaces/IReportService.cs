@@ -1,3 +1,4 @@
+using ERP.Application.DTOs;
 using ERP.Application.Services;
 
 namespace ERP.Application.Interfaces;
@@ -48,6 +49,13 @@ public interface IReportService
 
     /// <summary>跟进提醒（下次跟进日期已到期或即将到期的记录；按当前账号业务员数据范围过滤）</summary>
     Task<List<ReportDtos.FollowUpDueItem>> GetFollowUpDueAsync(DateTime asOfDate, int aheadDays, SalespersonDataScope scope);
+
+    /// <summary>
+    /// 动态跟进提醒报表预览（ERP-193，只读派生）：先校验字段 / 到期状态 / 提前天数 / 分页，再按当前账号业务员数据范围
+    /// 在数据库端过滤、计数、稳定排序与分页，最后只投影选定字段并返回 total / truncation / empty 上下文。
+    /// </summary>
+    Task<DynamicFollowUpDueReportPageDto> GetDynamicFollowUpDueReportAsync(
+        DynamicFollowUpDueReportRequest request, SalespersonDataScope scope);
 
     /// <summary>报价成交率分析（ERP-018，按业务员聚合；分子 = 已转 PI / 已转销售订单 / 状态已完成）</summary>
     Task<List<ReportDtos.QuotationConversionItem>> GetQuotationConversionAsync(DateTime start, DateTime end);
