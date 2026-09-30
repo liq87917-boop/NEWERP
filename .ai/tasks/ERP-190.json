@@ -1,0 +1,38 @@
+{
+  "id": "ERP-190",
+  "title": "Export agency monthly original-currency group amounts to Excel",
+  "status": "pending",
+  "risk_level": "low",
+  "description": "A customer-service user downloads the authorized current-page agency monthly report as Excel and sees separate original-currency amount subtotals for the chosen month or customer grouping. Extend ERP-188 workbook generation with a distinct amount-group worksheet sourced from ERP-186 server-provided GroupCounts, retaining the selected-column evidence and count sheets; none grouping preserves the existing workbook. Reuse the same identity, customer menu, salesperson scope, field, group, filter and page validation on every export, with OperationLogMiddleware audit. Store registered, draft and void amounts as numeric cells with currency precision, never merge currencies or pages, escape formula-leading labels, and mark empty or truncated page-only evidence. Do not imply revenue recognition or receivables. Development only: no schema or migration edits, production SQL or real database execution, arbitrary SQL, business writes, secrets, deployment or browser acceptance. Keep manual test output outside the repo and verify focused workbook tests plus safe Release build/test.",
+  "acceptance_criteria": [
+    "For month or customer grouping, the existing authorized bounded Excel endpoint adds an amount-group worksheet from ERP-186 current-page subtotals while retaining selected-column and ERP-188 count sheets; none mode stays unchanged.",
+    "The amount sheet records separate numeric registered, draft and void original-currency amounts with currency precision, formula-safe labels and explicit empty or truncated page-only evidence; no cross-currency or cross-page total appears.",
+    "Focused workbook tests cover revoked access, invalid grouping, mixed currencies, exact decimals, hidden amount fields, formula-leading labels, empty and truncated pages and unchanged other sheets; safe Release build/test passes."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/DynamicAgencyServiceFeeMonthlyReportController.cs",
+    "src/ERP.UnitTests/DynamicAgencyServiceFeeMonthlyGroupedAmountExcelTests.cs"
+  ],
+  "validation_profile": "safe",
+  "depends_on": [
+    "ERP-186",
+    "ERP-188"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "completion_mode": "build",
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": [],
+    "test_filter": "Collection=UiTests",
+    "minimum_screenshots": 1
+  },
+  "human_gate": {
+    "required": false,
+    "status": "not_required",
+    "level": "L1",
+    "reason": ""
+  },
+  "attempts": 0,
+  "created_at": "2026-09-30T06:45:46.950997Z"
+}
