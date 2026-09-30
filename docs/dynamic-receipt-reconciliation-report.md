@@ -14,6 +14,7 @@ ERP-046 客户订单与收款核对证据。本功能为**开发期只读派生*
 | GET | `/api/sales-orders/dynamic-receipt-reconciliation-report` | 返回 ERP-046 订单证据字段白名单目录 + 独立的未关联收款证据字段目录（需登录 + `sales-order` 销售订单菜单授权） |
 | POST | `/api/sales-orders/dynamic-receipt-reconciliation-report` | 按选定字段与有界筛选预览当前账号数据范围内的订单与收款证据，稳定分页；未关联收款证据按独立的收款字段目录单独投影，绝不并入订单行 |
 | POST | `/api/sales-orders/dynamic-receipt-reconciliation-report/export` | 导出当前页为 Excel（xlsx，只读，复用有界授权预览；订单证据与未关联收款证据写入两个独立工作表，仅导出当前页） |
+| POST | `/api/sales-orders/dynamic-receipt-reconciliation-report/export-pdf` | 导出当前页为 PDF（只读，复用有界授权预览；订单证据与未关联收款证据渲染为两个独立分区，宽列自动分页，仅导出当前页） |
 
 预览与下载请求由既有 `OperationLogMiddleware` 按 HTTP 方法记录审计，本控制器自身不写任何操作日志。
 
@@ -124,9 +125,11 @@ ERP-046 客户订单与收款核对证据。本功能为**开发期只读派生*
 - `src/ERP.Application/Services/DynamicReceiptReconciliationReportRules.cs`
 - `src/ERP.Api/Controllers/DynamicReceiptReconciliationReportController.cs`
 - `src/ERP.Api/Controllers/SalesOrderReceiptReconciliation.cs`（ERP-046 源查询，新增 `SalespersonDataScope? scope` 参数）
+- `src/ERP.Infrastructure/Export/DynamicReceiptReconciliationPdfExporter.cs`
 - `src/ERP.UnitTests/DynamicReceiptReconciliationReportTests.cs`
 - `src/ERP.UnitTests/DynamicReceiptReconciliationUnlinkedTests.cs`
 - `src/ERP.UnitTests/DynamicReceiptReconciliationExcelTests.cs`
+- `src/ERP.UnitTests/DynamicReceiptReconciliationPdfTests.cs`
 - `src/ERP.UnitTests/SalesOrderReceiptReconciliationTests.cs`
 
 ## 9. 前端设计器（ERP-166，只读、有界）
@@ -158,6 +161,8 @@ ERP-046 客户订单与收款核对证据。本功能为**开发期只读派生*
 
 - 前端纯逻辑单测：`tests/automation/dynamic_receipt_reconciliation_ui.test.js`（Node，覆盖字段选择、请求边界、
   分页渲染、单元格渲染、CSV 导出与失败态；运行 `node tests/automation/dynamic_receipt_reconciliation_ui.test.js`）。
+- 前端 PDF 下载接线单测：`tests/automation/dynamic_receipt_reconciliation_pdf_ui.test.js`（Node，覆盖 PDF 按钮、
+  export-pdf 接口路径、application/pdf 下载、空 / 授权 / 网络失败可见、两类证据分开导出与无任意 SQL）。
 - 后端契约单测：`DynamicReceiptReconciliationReportTests.cs` / `DynamicReceiptReconciliationUnlinkedTests.cs`。
 
 ## 10. Excel 导出（ERP-167，只读、有界）
@@ -179,3 +184,25 @@ ERP-046 客户订单与收款核对证据。本功能为**开发期只读派生*
 ### 10.2 测试
 
 - 后端契约单测：`DynamicReceiptReconciliationExcelTests.cs`（覆盖作用域、列顺序、页大小上限、两个独立证据工作表、未知金额 null、原币、公式注入防护与只读不写库）。
+
+## 11. PDF 导出（ERP-169，只读、有界）
+
+`POST /api/sales-orders/dynamic-receipt-reconciliation-report/export-pdf`：请求体与预览完全相同
+（`DynamicReceiptReconciliationReportRequest`），复用同一有界、已授权预览管线（每次请求重新校验身份 / `sales-order` 销售订单菜单授权 /
+字段 / 筛选 / 页大小 / 业务员数据范围），**只导出请求 `page` / `pageSize` 对应的当前页**（单页上限 200，超限直接拒绝），不是全量导出。
+
+- 生成**两个独立分区**：`一、订单证据`（选定订单列）与 `二、未关联收款证据`（选定收款列），列顺序与请求一致；两个分区绝不合并、绝不推导收款单到订单的匹配关系。
+- 金额保留原币、不同币种分别成行、绝不换算或跨币种合计；未知金额 / 数量为 null → 渲染为空文本（**绝不回落 0**）；收款证据状态（active / pending / historical）与收款链接状态（unlinked）显式保留；命中未关联收款读取上限时，收款证据分区标题下显式渲染截断警告。
+- **宽列集自动分页**：选定列超过单页可用宽度（按每列有界宽度 20~45mm）时按「列页」拆分，每个列页重复表头，避免挤压 / 裁切；行超出页高时纵向分页，表头重复。
+- **字体前提**：中文字体固定使用 Windows 黑体 `SimHei`（`SimHeiPdfFontResolver` 与其它报表 PDF 共享解析器）；字体缺失时显式失败（错误码 5000，提示安装 `simhei.ttf`），不产出乱码 / 缺字 PDF。
+- 文件名 `ReceiptReconciliation_yyyyMMddHHmmss.pdf`；内容类型 `application/pdf`。
+- 只读 + 审计：无写入、无任意 SQL；`POST` 由既有 `OperationLogMiddleware` 记录审计（动作「导出」）。
+
+### 11.1 前端
+
+设计器工具栏「📄 导出 PDF（当前页）」复用当前字段 / 筛选 / 分页组装请求后 `POST` 导出；空数据 / 未预览 / 授权 / 校验 / 网络失败均在结果区可见，不下载空 PDF。
+
+### 11.2 测试
+
+- 后端契约单测：`DynamicReceiptReconciliationPdfTests.cs`（覆盖 PDF 签名与内容类型、两类证据独立分区、行分页、宽列列页分页、嵌入 SimHei、字体缺失显式失败、未知 null / 原币 / 状态格式化、授权拒绝与只读不写库）。
+- 前端接线单测：`tests/automation/dynamic_receipt_reconciliation_pdf_ui.test.js`。
