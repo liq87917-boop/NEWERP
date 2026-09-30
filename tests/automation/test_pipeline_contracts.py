@@ -618,7 +618,7 @@ class PipelineContracts(unittest.TestCase):
             self.assertIn("ERP-010-validation-2.log", log_path)
             self.assertEqual(output.decode("utf-8"), (Path(directory) / "ERP-010-validation-2.log").read_text(encoding="utf-8"))
 
-    def test_push_recovery_checkpoints_control_changes_before_pull(self):
+    def test_push_recovery_checkpoints_control_changes_without_rebase(self):
         config = {
             "orchestrator_paths": [".ai/PROJECT_STATE.json", ".ai/audit.jsonl"],
             "ignored_change_paths": [".ai/logs/**"],
@@ -633,12 +633,42 @@ class PipelineContracts(unittest.TestCase):
         with patch.object(orchestrator, "changed_paths", return_value=[".ai/PROJECT_STATE.json", ".ai/audit.jsonl"]), \
              patch.object(orchestrator, "audit"), \
              patch.object(orchestrator, "set_state"), \
+             patch.object(orchestrator, "run", return_value=type("Result", (), {"stdout": "main\n"})()), \
              patch.object(orchestrator, "checkpoint_control_files") as checkpoint, \
              patch.object(orchestrator.subprocess, "run", side_effect=run):
             self.assertEqual(0, orchestrator.recover_push_pending(config, state))
 
         checkpoint.assert_any_call("chore: checkpoint pending push recovery state")
-        self.assertEqual(["git", "pull", "--rebase"], calls[0])
+        self.assertEqual(["git", "fetch", "origin", "main"], calls[0])
+        self.assertFalse(any("--rebase" in command for command in calls))
+
+    def test_interrupted_control_checkpoint_can_be_committed_without_business_edits(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            def git(cwd, *args):
+                result = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True)
+                self.assertEqual(0, result.returncode, result.stderr)
+                return result.stdout.strip()
+            git(root, "init", "-b", "main")
+            git(root, "config", "user.name", "Scheduler Test")
+            git(root, "config", "user.email", "scheduler@example.invalid")
+            (root / ".ai").mkdir()
+            (root / ".ai" / "config.json").write_text(json.dumps({
+                "ignored_change_paths": [".ai/logs/**"],
+                "orchestrator_paths": [".ai/PROJECT_STATE.json"],
+            }), encoding="utf-8")
+            state = root / ".ai" / "PROJECT_STATE.json"
+            state.write_text('{"phase":"ready"}', encoding="utf-8")
+            git(root, "add", ".ai")
+            git(root, "commit", "-m", "initial control state")
+            state.write_text('{"phase":"remote_degraded"}', encoding="utf-8")
+            git(root, "add", ".ai/PROJECT_STATE.json")
+            state.write_text('{"phase":"blocked"}', encoding="utf-8")
+            with patch.object(orchestrator, "ROOT", root), \
+                 patch.object(orchestrator, "CONFIG_PATH", root / ".ai" / "config.json"):
+                orchestrator.checkpoint_control_files("resume control state")
+                self.assertEqual([], orchestrator.changed_paths())
+            self.assertEqual("blocked", json.loads(state.read_text(encoding="utf-8"))["phase"])
 
     def test_push_recovery_refuses_non_control_changes(self):
         config = {

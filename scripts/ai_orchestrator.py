@@ -474,8 +474,21 @@ def checkpoint_control_files(message: str) -> None:
     if unexpected: raise RuntimeError("Unrelated changes prevent control checkpoint: " + ", ".join(unexpected))
     control = [path for path in paths if matches(path, config.get("orchestrator_paths", []))]
     if not control: return
-    subprocess.run(["git", "add", "--", *control], cwd=ROOT, check=True)
-    if subprocess.run(["git", "commit", "-m", message], cwd=ROOT).returncode != 0: raise RuntimeError("Control checkpoint failed")
+    for attempt in range(3):
+        added = subprocess.run(["git", "add", "--", *control], cwd=ROOT, capture_output=True, text=True)
+        if added.returncode == 0: break
+        if "index.lock" not in added.stderr or attempt == 2:
+            raise RuntimeError("Control checkpoint add failed: " + added.stderr.strip())
+        time.sleep(0.2 * (attempt + 1))
+    staged = git_lines("diff", "--cached", "--name-only")
+    outside = [path for path in staged if not matches(path, config.get("orchestrator_paths", []))]
+    if outside: raise RuntimeError("Unrelated staged changes prevent control checkpoint: " + ", ".join(outside))
+    for attempt in range(3):
+        committed = subprocess.run(["git", "commit", "-m", message], cwd=ROOT, capture_output=True, text=True)
+        if committed.returncode == 0: return
+        if "index.lock" not in committed.stderr or attempt == 2:
+            raise RuntimeError("Control checkpoint failed: " + committed.stderr.strip())
+        time.sleep(0.2 * (attempt + 1))
 
 
 def status() -> int:
@@ -619,12 +632,20 @@ def recover_push_pending(config: dict[str, Any], state: dict[str, Any]) -> int |
         return 5
     if pending_paths:
         checkpoint_control_files("chore: checkpoint pending push recovery state")
-    pull = subprocess.run(["git", "pull", "--rebase"], cwd=ROOT)
-    if pull.returncode != 0:
+    branch = run(["git", "branch", "--show-current"]).stdout.strip()
+    fetch = subprocess.run(["git", "fetch", "origin", branch], cwd=ROOT)
+    if fetch.returncode != 0:
         set_state(state, phase="remote_degraded", current_task=None, blocker=None, finish_reason="remote_sync_degraded", remote_sync={"status": "pending", "reason": "pull_failed"})
         audit("remote_sync_degraded", task=task_id, reason="pull_failed")
         checkpoint_control_files("chore: record degraded remote sync")
         return 0
+    behind = subprocess.run(["git", "merge-base", "--is-ancestor", "HEAD", f"origin/{branch}"], cwd=ROOT)
+    if behind.returncode == 0:
+        merged = subprocess.run(["git", "merge", "--ff-only", f"origin/{branch}"], cwd=ROOT)
+        if merged.returncode != 0:
+            set_state(state, phase="remote_degraded", current_task=None, blocker=None, finish_reason="remote_sync_degraded", remote_sync={"status": "pending", "reason": "fast_forward_failed"})
+            checkpoint_control_files("chore: record degraded remote sync")
+            return 0
     push = subprocess.run(["git", "push"], cwd=ROOT)
     if push.returncode != 0:
         set_state(state, phase="remote_degraded", current_task=None, blocker=None, finish_reason="remote_sync_degraded", remote_sync={"status": "pending", "reason": "push_failed"})
@@ -641,6 +662,15 @@ def run_next(dry_run: bool) -> int:
     config, state = load_json(CONFIG_PATH), load_json(STATE_PATH)
     recovered = recover_push_pending(config, state)
     if recovered is not None: return recovered
+    # A failed remote push or transient Git lock may leave only scheduler state
+    # dirty. Checkpoint that state so the next independent task can still run.
+    pending = changed_paths()
+    if not dry_run and pending and all(
+        matches(path, config.get("orchestrator_paths", [])) or matches(path, config["ignored_change_paths"])
+        for path in pending
+    ):
+        checkpoint_control_files("chore: resume after interrupted control checkpoint")
+        state = load_json(STATE_PATH)
 
     normalized_failed_head = normalize_failed_head_for_deferred_browser(config, state)
     if normalized_failed_head is not None:

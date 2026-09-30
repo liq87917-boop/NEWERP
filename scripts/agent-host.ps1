@@ -269,6 +269,22 @@ function Get-LocalChangedPaths {
     return @($paths | Sort-Object -Unique)
 }
 
+function Test-ControlOnlyDirtyTree {
+    $paths = Get-LocalChangedPaths
+    if ($null -eq $paths -or $paths.Count -eq 0) { return $false }
+    try {
+        $config = Get-Content $configPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    } catch { return $false }
+    foreach ($path in $paths) {
+        $allowed = $false
+        foreach ($pattern in $config.orchestrator_paths) {
+            if ($path -like ([string]$pattern)) { $allowed = $true; break }
+        }
+        if (-not $allowed) { return $false }
+    }
+    return $true
+}
+
 function Get-IncomingPaths {
     param([string]$Branch)
 
@@ -936,7 +952,7 @@ try {
         }
 
         $canStartWithDirty = $recoverExisting -and ($lastRecoveryAttemptKey -ne $recoveryKey)
-        $worktreeAllowsStart = (-not $gitInfo.Dirty) -or $canStartWithDirty
+        $worktreeAllowsStart = (-not $gitInfo.Dirty) -or $canStartWithDirty -or (Test-ControlOnlyDirtyTree)
 
         # A failed task can exhaust repair while its guarded edits must be kept.
         # Move independent development to a clean sibling clone; the failed
