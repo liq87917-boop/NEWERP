@@ -930,7 +930,7 @@ try {
         $recoveryKey = $null
         if ($recoverExisting) {
             $recoveryTask = if ($recoverPreserved) { $recoverPreserved } else { $head }
-            $recoveryKey = "$($recoveryTask.id)|$($gitInfo.Sha)|$($state.phase)|$([string]$state.blocker)"
+            $recoveryKey = "$($recoveryTask.id)|$($gitInfo.Sha)|$($recoveryTask.status)|$($recoveryTask.supervised_recovery_cycles)|$($recoveryTask.exhausted_revalidation_head)|$($state.phase)|$([string]$state.blocker)"
         }
 
         $canStartWithDirty = $recoverExisting -and ($lastRecoveryAttemptKey -ne $recoveryKey)
