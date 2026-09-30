@@ -1,5 +1,6 @@
 using ERP.Application.Common;
 using ERP.Application.DTOs;
+using ERP.Application.Services;
 using PdfSharp.Drawing;
 using PdfSharp.Pdf;
 using System.Globalization;
@@ -48,6 +49,44 @@ public static class DynamicShipmentFinancePdfExporter
 
     /// <summary>无权威引用 / 命中派生上限的统一「未知」标记（绝不回落为 0 或臆造金额 / 数量）</summary>
     private const string UnknownText = "未知";
+
+    /// <summary>金额汇总 PDF 分区标题（ERP-179，明确「当前页」，绝不暗示全量合计 / 应收余额）</summary>
+    private const string AmountSummarySectionTitle = "金额汇总（当前页）";
+
+    /// <summary>金额汇总不适用 / 当前页为空时的可见提示（绝不静默留白）</summary>
+    private const string AmountSummaryEmptyNote = "本页没有可汇总金额的订单出货 / 财务证据（空页）";
+
+    private const string SummaryCustomerKey = "customerName";
+    private const string SummaryCurrencyKey = "currency";
+    private const string SummaryShipmentStatusKey = "shipmentStatus";
+    private const string SummaryFinanceLinkStatusKey = "financeLinkStatus";
+    private const string SummaryOrderCountKey = "orderCount";
+    private const string SummaryOrderAmountKey = "orderAmount";
+    private const string SummaryKnownLinkedKey = "knownLinkedAmountRows";
+    private const string SummaryUnknownLinkedKey = "unknownLinkedAmountRows";
+    private const string SummaryLinkedAmountKey = "linkedAmount";
+    private const string SummaryKnownUncoveredKey = "knownUncoveredAmountRows";
+    private const string SummaryUnknownUncoveredKey = "unknownUncoveredAmountRows";
+    private const string SummaryUncoveredAmountKey = "uncoveredAmount";
+    private const string SummaryKnownSubmittedKey = "knownSubmittedAmountRows";
+    private const string SummaryUnknownSubmittedKey = "unknownSubmittedAmountRows";
+    private const string SummarySubmittedAmountKey = "submittedAmount";
+
+    private const string SummaryCustomerColumn = "客户";
+    private const string SummaryCurrencyColumn = "币种";
+    private const string SummaryShipmentStatusColumn = "出货状态";
+    private const string SummaryFinanceLinkStatusColumn = "收款链接状态";
+    private const string SummaryOrderCountColumn = "订单张数";
+    private const string SummaryOrderAmountColumn = "订单金额";
+    private const string SummaryKnownLinkedColumn = "已关联金额已知行数";
+    private const string SummaryUnknownLinkedColumn = "已关联金额未知行数";
+    private const string SummaryLinkedAmountColumn = "已关联金额";
+    private const string SummaryKnownUncoveredColumn = "未覆盖金额已知行数";
+    private const string SummaryUnknownUncoveredColumn = "未覆盖金额未知行数";
+    private const string SummaryUncoveredAmountColumn = "未覆盖金额";
+    private const string SummaryKnownSubmittedColumn = "已提交金额已知行数";
+    private const string SummaryUnknownSubmittedColumn = "已提交金额未知行数";
+    private const string SummarySubmittedAmountColumn = "已提交金额";
 
     /// <summary>导出当前预览页为 PDF 字节流（只读；字体缺失显式失败）</summary>
     public static byte[] Export(DynamicShipmentFinanceReportPageDto page)
@@ -152,6 +191,13 @@ public static class DynamicShipmentFinancePdfExporter
         {
             foreach (var g in gfxList)
                 g.Dispose();
+        }
+
+        // ERP-179：仅非 none 金额汇总模式追加独立「金额汇总（当前页）」分区（复用 ERP-162 同一批有界、已授权当前页汇总数据，
+        // 只汇总当前页、绝不跨币种合并 / 换算、绝不推断应收余额 / 收款授权；未知 null 显式「未知」、空页显式保留）。
+        if (!string.Equals(page.SummaryMode, DynamicShipmentFinanceReportRules.SummaryNone, StringComparison.Ordinal))
+        {
+            DrawAmountSummarySection(document, page, titleFont, metaFont, headerFont, cellFont);
         }
     }
 
@@ -320,6 +366,169 @@ public static class DynamicShipmentFinancePdfExporter
                 : XStringFormats.CenterLeft;
             DrawCellText(gfx, cells[c], font, rect, format);
         }
+    }
+
+    // ==================== 金额汇总分区（ERP-179） ====================
+
+    /// <summary>
+    /// 渲染「金额汇总（当前页）」独立分区：客户 + 原币（可选出货状态 / 收款链接状态）+ 订单张数 + 订单金额
+    /// + 已关联 / 未覆盖 / 已提交金额的已知 / 未知行数与金额（未知 null 显式「未知」，绝不回落为 0）；
+    /// 金额按原币分别成行、绝不跨币种合并 / 换算、绝无应收余额 / 合计；宽列集按列页拆分、行数超出按行页拆分，空页显式提示。
+    /// </summary>
+    private static void DrawAmountSummarySection(
+        PdfDocument document,
+        DynamicShipmentFinanceReportPageDto page,
+        XFont titleFont,
+        XFont metaFont,
+        XFont headerFont,
+        XFont cellFont)
+    {
+        var columns = BuildSummaryColumns(page.SummaryMode);
+        var rows = BuildSummaryRows(page.Summaries);
+
+        var usableWidth = Mm(PageWidthMm - MarginLeftMm - MarginRightMm);
+        var contentBottom = Mm(PageHeightMm - MarginBottomMm);
+        var headerHeight = Mm(HeaderRowHeightMm);
+        var dataRowHeight = Mm(DataRowHeightMm);
+        var headHeightMm = TitleHeightMm + MetaHeightMm;
+
+        var rowsPerPage = Math.Max(1, (int)Math.Floor(
+            (contentBottom - Mm(MarginTopMm) - Mm(headHeightMm) - headerHeight) / dataRowHeight));
+        var columnPages = SplitColumnPages(columns, rows, usableWidth);
+        var rowPageCount = rows.Count == 0 ? 1 : (int)Math.Ceiling(rows.Count / (double)rowsPerPage);
+
+        var borderPen = new XPen(XColor.FromArgb(0xC4, 0xC4, 0xC4), 0.4);
+        var headerBrush = new XSolidBrush(XColor.FromArgb(0xED, 0xED, 0xED));
+
+        var gfxList = new List<XGraphics>();
+        try
+        {
+            if (rows.Count == 0)
+            {
+                var gfx = NewPage(document);
+                gfxList.Add(gfx);
+                var cols = columnPages[0];
+                var widths = ComputeColumnWidths(cols, rows);
+                var y = DrawSummaryHead(gfx, titleFont, metaFont, page, 0, columnPages.Count, 0, 1);
+                y = DrawColumnHeaders(gfx, headerFont, headerBrush, borderPen, cols, widths, y);
+                gfx.DrawString(AmountSummaryEmptyNote, cellFont, XBrushes.Black,
+                    new XRect(Mm(MarginLeftMm), y + Mm(2), usableWidth, dataRowHeight), XStringFormats.TopLeft);
+            }
+            else
+            {
+                for (var cp = 0; cp < columnPages.Count; cp++)
+                {
+                    var cols = columnPages[cp];
+                    var widths = ComputeColumnWidths(cols, rows);
+                    for (var rp = 0; rp < rowPageCount; rp++)
+                    {
+                        var gfx = NewPage(document);
+                        gfxList.Add(gfx);
+                        var y = DrawSummaryHead(gfx, titleFont, metaFont, page, cp, columnPages.Count, rp, rowPageCount);
+                        y = DrawColumnHeaders(gfx, headerFont, headerBrush, borderPen, cols, widths, y);
+
+                        var start = rp * rowsPerPage;
+                        var count = Math.Min(rowsPerPage, rows.Count - start);
+                        for (var i = 0; i < count; i++)
+                        {
+                            DrawDataRow(gfx, cellFont, borderPen, cols, widths, rows[start + i],
+                                y + i * dataRowHeight);
+                        }
+                    }
+                }
+            }
+        }
+        finally
+        {
+            foreach (var g in gfxList)
+                g.Dispose();
+        }
+    }
+
+    /// <summary>金额汇总分区页头：分区标题（含列页标记）+ 当前页 / 行页 / 列页口径（明确「当前页」，绝不暗示全量合计）</summary>
+    private static double DrawSummaryHead(
+        XGraphics gfx,
+        XFont titleFont,
+        XFont metaFont,
+        DynamicShipmentFinanceReportPageDto page,
+        int columnPage,
+        int columnPageCount,
+        int rowPage,
+        int rowPageCount)
+    {
+        var left = Mm(MarginLeftMm);
+        var width = Mm(PageWidthMm - MarginLeftMm - MarginRightMm);
+
+        var title = AmountSummarySectionTitle;
+        if (columnPageCount > 1)
+            title += $"（列 {columnPage + 1}/{columnPageCount}）";
+
+        gfx.DrawString(title, titleFont, XBrushes.Black,
+            new XRect(left, Mm(MarginTopMm), width, Mm(TitleHeightMm)), XStringFormats.TopCenter);
+
+        var meta = $"共 {page.Total.ToString(CultureInfo.InvariantCulture)} 条"
+            + $" · 第 {page.Page.ToString(CultureInfo.InvariantCulture)}/{page.TotalPages.ToString(CultureInfo.InvariantCulture)} 页"
+            + $" · 列页 {columnPage + 1}/{columnPageCount}"
+            + $" · 行页 {rowPage + 1}/{rowPageCount}";
+        gfx.DrawString(meta, metaFont, XBrushes.Black,
+            new XRect(left, Mm(MarginTopMm + TitleHeightMm), width, Mm(MetaHeightMm)), XStringFormats.TopCenter);
+
+        return Mm(MarginTopMm + TitleHeightMm + MetaHeightMm);
+    }
+
+    /// <summary>金额汇总分区列：客户 + 原币（可选出货状态 / 收款链接状态）+ 订单张数 / 订单金额 + 三组金额证据（已知 / 未知行数 + 金额）</summary>
+    private static List<DynamicShipmentFinanceReportFieldDto> BuildSummaryColumns(string summaryMode)
+    {
+        var columns = new List<DynamicShipmentFinanceReportFieldDto>
+        {
+            new(SummaryCustomerKey, SummaryCustomerColumn, "text", false),
+            new(SummaryCurrencyKey, SummaryCurrencyColumn, "text", false),
+        };
+
+        if (string.Equals(summaryMode, DynamicShipmentFinanceReportRules.SummaryCustomerCurrencyShipment, StringComparison.Ordinal))
+            columns.Add(new DynamicShipmentFinanceReportFieldDto(SummaryShipmentStatusKey, SummaryShipmentStatusColumn, "text", false));
+        if (string.Equals(summaryMode, DynamicShipmentFinanceReportRules.SummaryCustomerCurrencyFinance, StringComparison.Ordinal))
+            columns.Add(new DynamicShipmentFinanceReportFieldDto(SummaryFinanceLinkStatusKey, SummaryFinanceLinkStatusColumn, "text", false));
+
+        columns.Add(new DynamicShipmentFinanceReportFieldDto(SummaryOrderCountKey, SummaryOrderCountColumn, "number", false));
+        columns.Add(new DynamicShipmentFinanceReportFieldDto(SummaryOrderAmountKey, SummaryOrderAmountColumn, "number", false));
+        columns.Add(new DynamicShipmentFinanceReportFieldDto(SummaryKnownLinkedKey, SummaryKnownLinkedColumn, "number", false));
+        columns.Add(new DynamicShipmentFinanceReportFieldDto(SummaryUnknownLinkedKey, SummaryUnknownLinkedColumn, "number", false));
+        columns.Add(new DynamicShipmentFinanceReportFieldDto(SummaryLinkedAmountKey, SummaryLinkedAmountColumn, "number", false));
+        columns.Add(new DynamicShipmentFinanceReportFieldDto(SummaryKnownUncoveredKey, SummaryKnownUncoveredColumn, "number", false));
+        columns.Add(new DynamicShipmentFinanceReportFieldDto(SummaryUnknownUncoveredKey, SummaryUnknownUncoveredColumn, "number", false));
+        columns.Add(new DynamicShipmentFinanceReportFieldDto(SummaryUncoveredAmountKey, SummaryUncoveredAmountColumn, "number", false));
+        columns.Add(new DynamicShipmentFinanceReportFieldDto(SummaryKnownSubmittedKey, SummaryKnownSubmittedColumn, "number", false));
+        columns.Add(new DynamicShipmentFinanceReportFieldDto(SummaryUnknownSubmittedKey, SummaryUnknownSubmittedColumn, "number", false));
+        columns.Add(new DynamicShipmentFinanceReportFieldDto(SummarySubmittedAmountKey, SummarySubmittedAmountColumn, "number", false));
+        return columns;
+    }
+
+    /// <summary>金额汇总分区行：null 金额保持 null（由 <see cref="FormatFieldCell"/> 显式渲染为「未知」，绝不回落为 0）</summary>
+    private static List<Dictionary<string, object?>> BuildSummaryRows(
+        List<DynamicShipmentFinanceReportSummaryDto>? summaries)
+    {
+        if (summaries is null)
+            return new List<Dictionary<string, object?>>();
+
+        return summaries.Select(s => new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            [SummaryCustomerKey] = s.CustomerName,
+            [SummaryCurrencyKey] = s.Currency,
+            [SummaryShipmentStatusKey] = s.ShipmentStatus,
+            [SummaryFinanceLinkStatusKey] = s.FinanceLinkStatus,
+            [SummaryOrderCountKey] = s.OrderCount,
+            [SummaryOrderAmountKey] = s.OrderAmount,
+            [SummaryKnownLinkedKey] = s.KnownLinkedAmountRows,
+            [SummaryUnknownLinkedKey] = s.UnknownLinkedAmountRows,
+            [SummaryLinkedAmountKey] = s.LinkedAmount,
+            [SummaryKnownUncoveredKey] = s.KnownUncoveredAmountRows,
+            [SummaryUnknownUncoveredKey] = s.UnknownUncoveredAmountRows,
+            [SummaryUncoveredAmountKey] = s.UncoveredAmount,
+            [SummaryKnownSubmittedKey] = s.KnownSubmittedAmountRows,
+            [SummaryUnknownSubmittedKey] = s.UnknownSubmittedAmountRows,
+            [SummarySubmittedAmountKey] = s.SubmittedAmount,
+        }).ToList();
     }
 
     /// <summary>按选定列顺序把一行转成 PDF 单元格文本（与绘制共用同一口径，供测试验证字段顺序与未知证据）</summary>

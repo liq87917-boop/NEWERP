@@ -124,9 +124,9 @@
 汇总视图仅统计**当前授权预览页**（页面顶部明确标注「仅当前预览页，非全量合计」），非全量合计、绝不跨页合并；
 权限不足 / 未登录 / 无效汇总模式 / 网络失败与预览一致在结果区可见（fail closed），空页显示可见提示，全程只读，无写入。
 
-金额汇总**不进入行导出范围**：Excel（ERP-158）与 PDF（ERP-159）的**数据工作表**仍只导出请求 `page` / `pageSize` 对应的当前页选定列（单页上限 200），
-绝不把金额汇总追加为数据工作表导出行；ERP-178 起 Excel 导出在非 none 汇总模式下追加独立「金额汇总」工作表（复用 ERP-162 当前页汇总数据），
-PDF 仍不包含金额汇总，金额汇总与行级下载范围刻意分离。
+金额汇总**不进入行导出范围**：Excel（ERP-158）与 PDF（ERP-159）的**数据（列）区**仍只导出请求 `page` / `pageSize` 对应的当前页选定列（单页上限 200），
+绝不把金额汇总追加为数据导出行；ERP-178 起 Excel 导出在非 none 汇总模式下追加独立「金额汇总」工作表（复用 ERP-162 当前页汇总数据），
+ERP-179 起 PDF 导出在非 none 汇总模式下追加独立「金额汇总（当前页）」分区（同样复用 ERP-162 当前页汇总数据，只汇总当前页、绝不跨币种合并 / 换算、绝不推断应收余额）。
 
 ## 证据边界（重要）
 
@@ -216,12 +216,34 @@ PDF 中文一律使用 Windows 黑体 **SimHei**（`simhei.ttf`），由共享�
 `simhei.ttf`，导出**显式失败**（`ErrorCodes.InternalError`，前端在结果区可见「未找到中文字体 SimHei」错误），
 **绝不产出乱码或缺字的 PDF**、也不替换为其它字体。部署机器需在 Windows 字体目录安装黑体（默认随 Windows 中文版提供）。
 
+## PDF 金额汇总导出（ERP-179）
+
+`POST /api/sales-orders/dynamic-shipment-finance-report/pdf` 复用 ERP-162 的有限金额汇总模式与汇总 DTO：每次请求重新校验
+身份 / 销售订单菜单授权 / 字段 / 筛选 / 页大小 / 业务员数据范围，并在读取任何源数据**之前**按有限白名单校验 `summaryMode`
+（none / customerCurrency / customerCurrencyShipment / customerCurrencyFinance，大小写不敏感，未知取值直接拒绝，fail closed）。
+
+- `none`（默认）：保留既有选定列分页中文 PDF（原 ERP-159 行为），不追加金额汇总分区；
+- `customerCurrency` / `customerCurrencyShipment` / `customerCurrencyFinance`：在同一 PDF 追加独立「金额汇总（当前页）」分区
+  （选定列数据分区仍为首部分），复用 ERP-162 同一批有界、已授权当前页汇总数据，**只汇总当前页、绝不跨页 / 跨币种合并或换算**。
+
+金额汇总分区口径：
+
+- 每行 = 客户 + 原币（可选出货状态 / 收款链接状态）+ 订单张数 + 订单金额 + 已关联 / 未覆盖 / 已提交金额；
+- 订单金额与已关联 / 未覆盖 / 已提交金额为数值（原币直接求和）；任一组成金额未知（null）时对应金额显式渲染为「未知」，绝不回落为 0；
+- 显式给出已关联 / 未覆盖 / 已提交金额的已知 / 未知行数；`customerCurrencyShipment` 引入「出货状态」列、`customerCurrencyFinance` 引入「收款链接状态」列；
+- 宽列集按可用页宽拆成多个「列页」、行数超出按「行页」拆分（分区标题标注「金额汇总（当前页）」与列页 / 行页口径，可读、不裁切）；
+- 空页在汇总分区渲染显式提示（绝不静默留白）；无跨币种总额、无应收 / 余额 / 账龄列，`uncoveredAmount` 只作「未覆盖金额」、不是应收余额；
+- 下载范围仍是请求 `page` / `pageSize` 对应的当前页（单页上限 200）；`POST` 由既有 `OperationLogMiddleware` 记录审计（动作「导出」）。
+
+字体前提与 ERP-159 相同：缺失 SimHei 时在任何文件字节返回前显式失败（`ErrorCodes.InternalError`，提示「未找到中文字体 SimHei」），
+绝不产出乱码或缺字 PDF、也不替换为其它字体。
+
 ## 文件地图
 
 - `src/ERP.Application/DTOs/DynamicShipmentFinanceReportDtos.cs`：目录 / 请求 / 结果 DTO（含 ERP-162 金额汇总 DTO）；
 - `src/ERP.Application/Services/DynamicShipmentFinanceReportRules.cs`：字段白名单、校验、行投影、目录、分组计数与金额汇总（纯规则）；
 - `src/ERP.Api/Controllers/DynamicShipmentFinanceReportController.cs`：授权 + 业务员数据范围 + 复用 ERP-032 只读派生 + 选定列投影；
-- `src/ERP.Infrastructure/Export/DynamicShipmentFinancePdfExporter.cs`：ERP-159 PDF 导出（分页中文 PDF、列页 / 行页拆分、原币与未知证据、SimHei 缺失显式失败）；
+- `src/ERP.Infrastructure/Export/DynamicShipmentFinancePdfExporter.cs`：ERP-159 / ERP-179 PDF 导出（分页中文 PDF、列页 / 行页拆分、原币与未知证据、非 none 金额汇总追加独立「金额汇总（当前页）」分区、SimHei 缺失显式失败）；
 - `src/ERP.Api/Controllers/SalesOrderShipmentFinanceReport.cs`：ERP-032 权威派生，新增可选 `SalespersonDataScope` 参数（在源查询内部先于计数与分页过滤客户范围）；
 - `src/ERP.UnitTests/DynamicShipmentFinanceReportTests.cs`：预览单元测试（内存库，不连 SQL Server、不启动 API）；
 - `src/ERP.UnitTests/DynamicShipmentFinanceGroupingTests.cs`：ERP-160 分组计数单元测试（分组键、客户 / 币种 / 出货状态 / 收款链接状态、unknown 保留、空页 / 分页、授权拒绝、不写库）；
@@ -229,6 +251,7 @@ PDF 中文一律使用 Windows 黑体 **SimHei**（`simhei.ttf`），由共享�
 - `src/ERP.UnitTests/DynamicShipmentFinanceExcelTests.cs`：ERP-158 Excel 导出单元测试（列顺序、页上限、数据范围、未知值、币种、公式安全、不写库、下载限制）；
 - `src/ERP.UnitTests/DynamicShipmentFinanceSummaryExcelTests.cs`：ERP-178 金额汇总 Excel 导出单元测试（none 保留既有数据工作表、非 none 追加金额汇总工作表、出货状态 / 收款链接状态拆分、多币种隔离、未知金额空单元格与已知 / 未知行数、空页 / 分页、公式前导标签转义、授权 / 校验拒绝、受限制业务员范围、不写库）；
 - `src/ERP.UnitTests/DynamicShipmentFinancePdfTests.cs`：ERP-159 PDF 导出单元测试（签名、页面边界、字段顺序、原币与未知证据、SimHei 嵌入与缺失失败、授权 / 校验拒绝、不写库）；
+- `src/ERP.UnitTests/DynamicShipmentFinanceSummaryPdfTests.cs`：ERP-179 金额汇总 PDF 导出单元测试（none 保留既有选定列文档、非 none 追加金额汇总分区、出货状态 / 收款链接状态拆分、多币种隔离、未知金额显式「未知」与已知 / 未知行数、空页 / 分页、长标签、授权 / 校验拒绝、受限制业务员范围、字体缺失显式失败、不写库）；
 - `src/ERP.UnitTests/SalesOrderShipmentFinanceReportTests.cs`：ERP-032 报表单元测试（含 ERP-156 复用的源查询范围过滤）。
 
 ## 前端字段设计器（ERP-157）
