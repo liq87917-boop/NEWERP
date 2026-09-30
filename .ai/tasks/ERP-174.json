@@ -1,0 +1,51 @@
+{
+  "id": "ERP-174",
+  "title": "Export current-page order and receipt count groups to Excel",
+  "description": "A sales user downloads the selected current-page count grouping alongside the two existing order and unlinked-receipt evidence worksheets. Reuse ERP-170 group data and the existing authorized bounded export request, current-user sales-order menu and salesperson scope; retain HTTP audit. Add separate order-group and receipt-group sheets only for a supported non-none group mode, preserving the original two-sheet default. Escape formula-leading labels, keep unknown and truncation warnings visible, and never sum amounts or match receipts to orders. Development only: no arbitrary SQL, direct model database access, schema/migrations, production SQL or real database execution, writes, secrets/.env changes, deployment or real-browser acceptance. Verify focused workbook tests and safe Release build/test.",
+  "status": "pending",
+  "risk_level": "medium",
+  "acceptance_criteria": [
+    "Excel export validates the finite GroupBy value before source reads and builds from the same authorized bounded current-page preview; none mode retains the existing two-sheet workbook.",
+    "Supported grouping adds distinct order-count and unlinked-receipt-count sheets with current-page labels, numeric counts, explicit inapplicable/empty and truncation states, and formula-safe text; no amount totals or inferred links appear.",
+    "Workbook unit tests cover modes, denied access, unknown/empty/truncated groups, formula-leading labels and original worksheets; document export scope and pass safe Release build/test."
+  ],
+  "criterion_path_map": {
+    "Excel export validates the finite GroupBy value before source reads and builds from the same authorized bounded current-page preview; none mode retains the existing two-sheet workbook.": [
+      "src/ERP.Api/Controllers/DynamicReceiptReconciliationReportController.cs"
+    ],
+    "Supported grouping adds distinct order-count and unlinked-receipt-count sheets with current-page labels, numeric counts, explicit inapplicable/empty and truncation states, and formula-safe text; no amount totals or inferred links appear.": [
+      "src/ERP.Api/Controllers/DynamicReceiptReconciliationReportController.cs"
+    ],
+    "Workbook unit tests cover modes, denied access, unknown/empty/truncated groups, formula-leading labels and original worksheets; document export scope and pass safe Release build/test.": [
+      "src/ERP.UnitTests/DynamicReceiptReconciliationGroupedExcelTests.cs",
+      "docs/dynamic-receipt-reconciliation-report.md"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/DynamicReceiptReconciliationReportController.cs",
+    "src/ERP.UnitTests/DynamicReceiptReconciliationGroupedExcelTests.cs",
+    "docs/dynamic-receipt-reconciliation-report.md",
+    ".ai/**"
+  ],
+  "validation_profile": "safe",
+  "depends_on": [
+    "ERP-167",
+    "ERP-170",
+    "ERP-171"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "completion_mode": "build",
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only bounded read-only feature"
+  },
+  "attempts": 0,
+  "created_at": "2026-09-30T02:11:44.602322Z"
+}

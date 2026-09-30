@@ -1,0 +1,57 @@
+{
+  "id": "ERP-172",
+  "title": "Summarize scoped customer order and unlinked receipt amounts by customer and currency",
+  "description": "A sales user previews known order and separate unlinked-receipt amount evidence for the current authorized page. Add only finite none/customerCurrency amount-summary modes to the existing dynamic receipt reconciliation preview. Recheck current-user sales-order menu and SalespersonDataScopeService scope on every request; reject invalid modes before source reads and retain existing HTTP audit. Group by customer ID and original currency; keep order-side linked/uncovered evidence distinct from unlinked receipts, split receipt evidence status, preserve unknown null totals and truncation. Do not infer payment allocation, receivable balance, or cross-currency totals. Development only: no arbitrary SQL, direct model database access, schema/migrations, production SQL or real database execution, writes, secrets/.env changes, deployment, or real-browser acceptance. Verify focused unit tests and safe Release build/test.",
+  "status": "pending",
+  "risk_level": "medium",
+  "acceptance_criteria": [
+    "Preview accepts only none/customerCurrency amount modes, rejects invalid modes before source reads, and reuses the ERP-164 authorized bounded page and HTTP audit.",
+    "Current-page order and unlinked-receipt amount groups remain separate by customer and original currency; pending/historical receipt evidence remains distinct, unknown contributors yield null totals with known/unknown counts, and truncation is explicit.",
+    "Unit tests cover denied users, invalid modes, currencies, null amounts, receipt states, empty/paged results and no writes; document the amount-evidence boundary and pass safe Release build/test."
+  ],
+  "criterion_path_map": {
+    "Preview accepts only none/customerCurrency amount modes, rejects invalid modes before source reads, and reuses the ERP-164 authorized bounded page and HTTP audit.": [
+      "src/ERP.Application/DTOs/DynamicReceiptReconciliationReportDtos.cs",
+      "src/ERP.Application/Services/DynamicReceiptReconciliationReportRules.cs",
+      "src/ERP.Api/Controllers/DynamicReceiptReconciliationReportController.cs"
+    ],
+    "Current-page order and unlinked-receipt amount groups remain separate by customer and original currency; pending/historical receipt evidence remains distinct, unknown contributors yield null totals with known/unknown counts, and truncation is explicit.": [
+      "src/ERP.Application/DTOs/DynamicReceiptReconciliationReportDtos.cs",
+      "src/ERP.Application/Services/DynamicReceiptReconciliationReportRules.cs",
+      "src/ERP.Api/Controllers/DynamicReceiptReconciliationReportController.cs"
+    ],
+    "Unit tests cover denied users, invalid modes, currencies, null amounts, receipt states, empty/paged results and no writes; document the amount-evidence boundary and pass safe Release build/test.": [
+      "src/ERP.UnitTests/DynamicReceiptReconciliationAmountSummaryTests.cs",
+      "docs/dynamic-receipt-reconciliation-report.md"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Application/DTOs/DynamicReceiptReconciliationReportDtos.cs",
+    "src/ERP.Application/Services/DynamicReceiptReconciliationReportRules.cs",
+    "src/ERP.Api/Controllers/DynamicReceiptReconciliationReportController.cs",
+    "src/ERP.UnitTests/DynamicReceiptReconciliationAmountSummaryTests.cs",
+    "docs/dynamic-receipt-reconciliation-report.md",
+    ".ai/**"
+  ],
+  "validation_profile": "safe",
+  "depends_on": [
+    "ERP-164",
+    "ERP-165",
+    "ERP-170"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "completion_mode": "build",
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only bounded read-only feature"
+  },
+  "attempts": 0,
+  "created_at": "2026-09-30T02:11:44.602258Z"
+}

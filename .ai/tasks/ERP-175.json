@@ -1,0 +1,53 @@
+{
+  "id": "ERP-175",
+  "title": "Export current-page order and receipt count groups to PDF",
+  "description": "A sales user downloads the selected current-page count grouping with the existing two-section customer order and unlinked-receipt evidence PDF. Reuse ERP-170 groups and the authorized bounded PDF request, current-user sales-order menu, salesperson scope and HTTP audit. Render separate order and receipt count sections only for a supported non-none mode; retain the original default document, pagination and explicit missing-font failure. Preserve unknown, inapplicable and truncation states; do not sum amounts or infer links. Development only: no arbitrary SQL, direct model database access, schema/migrations, production SQL or real database execution, writes, secrets/.env changes, deployment or real-browser acceptance. Verify focused PDF tests and safe Release build/test.",
+  "status": "pending",
+  "risk_level": "medium",
+  "acceptance_criteria": [
+    "PDF export rejects invalid GroupBy before source reads and reuses the authorized bounded current-page preview; none mode retains the existing two-section document.",
+    "Supported grouping adds separate order-count and unlinked-receipt-count PDF sections with current-page labels, escaped text, visible empty/inapplicable/truncation states and no inferred amount or receipt matching.",
+    "PDF unit tests cover modes, denied access, missing font, long labels and pagination, empty/truncated groups and unchanged evidence sections; document scope and pass safe Release build/test."
+  ],
+  "criterion_path_map": {
+    "PDF export rejects invalid GroupBy before source reads and reuses the authorized bounded current-page preview; none mode retains the existing two-section document.": [
+      "src/ERP.Api/Controllers/DynamicReceiptReconciliationReportController.cs"
+    ],
+    "Supported grouping adds separate order-count and unlinked-receipt-count PDF sections with current-page labels, escaped text, visible empty/inapplicable/truncation states and no inferred amount or receipt matching.": [
+      "src/ERP.Api/Controllers/DynamicReceiptReconciliationReportController.cs",
+      "src/ERP.Infrastructure/Export/DynamicReceiptReconciliationPdfExporter.cs"
+    ],
+    "PDF unit tests cover modes, denied access, missing font, long labels and pagination, empty/truncated groups and unchanged evidence sections; document scope and pass safe Release build/test.": [
+      "src/ERP.UnitTests/DynamicReceiptReconciliationGroupedPdfTests.cs",
+      "docs/dynamic-receipt-reconciliation-report.md"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/DynamicReceiptReconciliationReportController.cs",
+    "src/ERP.Infrastructure/Export/DynamicReceiptReconciliationPdfExporter.cs",
+    "src/ERP.UnitTests/DynamicReceiptReconciliationGroupedPdfTests.cs",
+    "docs/dynamic-receipt-reconciliation-report.md",
+    ".ai/**"
+  ],
+  "validation_profile": "safe",
+  "depends_on": [
+    "ERP-169",
+    "ERP-170",
+    "ERP-171"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "completion_mode": "build",
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only bounded read-only feature"
+  },
+  "attempts": 0,
+  "created_at": "2026-09-30T02:11:44.602347Z"
+}
