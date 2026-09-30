@@ -755,11 +755,14 @@ function sraDesResultHtml(view) {
   const readOnly = view && view.readOnlyText ? `<div class="pd-hint">${sraDesEsc(view.readOnlyText)}</div>` : '';
   const boundary = view && view.boundaryText ? `<div class="pd-hint">${sraDesEsc(view.boundaryText)}</div>` : '';
   const disclaimer = view && view.disclaimerText ? `<div class="pd-hint" style="color:#64748b">${sraDesEsc(view.disclaimerText)}</div>` : '';
+  const asOf = view && (view.asOfDateText || view.asOfDate)
+    ? `<div class="pd-hint" style="margin:6px 0">${sraDesEsc(view.asOfDateText || `账龄基准日（as-of）：${String(view.asOfDate).slice(0, 10)}`)}</div>`
+    : '';
   const summary = view
     ? `<div class="text-muted" style="margin:6px 0">共 ${view.total} 条 · 第 ${view.page} 页 · 每页 ${view.pageSize} 条 · 本页 ${(view.rows || []).length} 行证据</div>`
     : '';
   const empty = view && (!view.rows || view.rows.length === 0) ? sraDesEmptyHtml() : '';
-  return `${readOnly}${boundary}${disclaimer}${summary}${sraDesGroupChartHtml(view)}${sraDesSummaryHtml(view)}${empty}${sraDesTableHtml(view)}`;
+  return `${readOnly}${boundary}${disclaimer}${asOf}${summary}${sraDesGroupChartHtml(view)}${sraDesSummaryHtml(view)}${empty}${sraDesTableHtml(view)}`;
 }
 
 /* 字段选择器：仅由目录白名单渲染为复选框，无自由填写的字段名 */

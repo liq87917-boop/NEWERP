@@ -50,6 +50,16 @@ ERP-068 供应商对账与账龄工作台的既有筛选与稳定分页，预览
 以上校验全部在调用 `SupplierReconciliationAging.ForQueryAsync`（即源读取）**之前**完成；随后复用 ERP-068 的同一套
 筛选 → 稳定分页 → 批量派生。
 
+## 有效 as-of 日期回传（ERP-168）
+
+`POST /api/supplier-reconciliation-aging/report` 的响应页新增两个字段：
+
+- `asOfDate`：本次请求由 ERP-068 只读派生解析出的**唯一**有效账龄基准日（省略 as-of 时默认当天）；
+- `asOfDateText`：同源中文文案（`账龄基准日（as-of）：yyyy-MM-dd`）。
+
+该日期与分组计数（ERP-144）和金额汇总（ERP-146）使用的账龄基准完全一致，绝不重复解析出第二个日期。
+省略 as-of 时按 ERP-068 既有口径默认当天（`DateTime.Today`），显式传入时严格复用传入日期（早于 1900 在源读取前拒绝）。
+
 ## 证据边界（重要）
 
 - 金额一律按原币分别成行：`currency` 为原币，不同币种绝不合并、不做汇率换算；
@@ -73,6 +83,7 @@ ERP-068 供应商对账与账龄工作台的既有筛选与稳定分页，预览
 - 字段选择器只由目录白名单渲染为复选框（`name="sra-des-field"`），**没有自由填写的字段名 / SQL**；勾选状态经 `sraDesSelectFields` 规范化（去重、保持顺序、丢弃未知键）；
 - 预览复用工作台**当前筛选**（供应商 / 币种 / 发票状态 / 分配状态 / 开票日期 / 到期日 / as-of / 关键字 / 每页），并 `POST /api/supplier-reconciliation-aging/report`，只发送「白名单字段 + 当前筛选 + 有界分页（pageSize 1~200）」；请求体由 `sraDesBuildRequest` 组装，页码最小 1、每页钳制到目录 `maxPageSize`（≤200）；
 - 渲染只按返回的列名与选定字段值（`sraDesTableHtml` / `sraDesResultHtml`），全部 HTML 转义；未知到期日 / 未知剩余 / 未知计数一律显示「未知」（`sraDesCellText`），绝不回落为 0；不同币种分别成行、绝不合并、无跨币种总额；
+- 预览结果在**当前页证据之上回显后端返回的有效 as-of 日期**（`asOfDateText` / `asOfDate`，`sraDesResultHtml`）；预览 / 导出请求由 `sraDesBuildRequest` 始终保留工作台显式 as-of 日期（省略时后端按当天默认解析），分组计数与金额汇总使用同一日期；
 - 加载（`sraDesLoadingHtml`）、空结果（`sraDesEmptyHtml`）、权限不足 / 未登录 / 无效请求 / 网络失败（`sraDesErrorHtml`）均为可见状态；
 - 导出（`sraDesExport`）仅导出**当前预览页**的所选列 CSV（`sraDesCsv`）：未知值保留「未知」、以 `= + - @` 或制表符 / 回车开头的文本加 `'` 前缀（防公式注入）、引号转义、CRLF + BOM；空结果不下载仅表头的 CSV。
 - 导出 Excel（`sraDesExportXlsx`）复用当前预览页与所选列，`POST /api/supplier-reconciliation-aging/report/export` 下载 xlsx（只读、有界、重新校验授权 / 字段 / 筛选 / 页大小）；未知到期日 / 未知剩余 / 未知计数保留为「未知」或空单元格、绝不回落为 0，公式首字符转义、无跨币种总额；空页 / 权限 / 无效 / 网络失败均在结果区可见，不下载仅表头文件。
@@ -212,7 +223,9 @@ ERP-068 供应商对账与账龄工作台的既有筛选与稳定分页，预览
 - `src/ERP.UnitTests/DynamicSupplierAgingPdfTests.cs`：ERP-143 PDF 导出单元测试（内存库，不连 SQL Server、不启动 API）；
 - `src/ERP.UnitTests/DynamicSupplierAgingGroupingTests.cs`：ERP-144 页面分组计数单元测试（内存库，不连 SQL Server、不启动 API）；
 - `src/ERP.UnitTests/DynamicSupplierAgingAmountSummaryTests.cs`：ERP-146 页面金额汇总单元测试（内存库，不连 SQL Server、不启动 API）；
-- `src/ERP.Api/wwwroot/js/supplier-reconciliation-aging.js`：ERP-068 工作台 + ERP-141 前端字段设计器（`openSupplierAgingDesigner`，纯函数可 Node 单测）+ ERP-145 分组计数可视化（`sraDesGroupKey` / `sraDesGroupSelectHtml` / `sraDesGroupChartHtml`）+ ERP-147 金额汇总可视化（`sraDesSummaryMode` / `sraDesSummarySelectHtml` / `sraDesSummaryHtml`）；
+- `src/ERP.UnitTests/DynamicSupplierAgingAsOfTests.cs`：ERP-168 有效 as-of 日期回传单元测试（内存库，不连 SQL Server、不启动 API）；
+- `src/ERP.Api/wwwroot/js/supplier-reconciliation-aging.js`：ERP-068 工作台 + ERP-141 前端字段设计器（`openSupplierAgingDesigner`，纯函数可 Node 单测）+ ERP-145 分组计数可视化（`sraDesGroupKey` / `sraDesGroupSelectHtml` / `sraDesGroupChartHtml`）+ ERP-147 金额汇总可视化（`sraDesSummaryMode` / `sraDesSummarySelectHtml` / `sraDesSummaryHtml`）+ ERP-168 as-of 回显（`sraDesResultHtml`）；
 - `tests/automation/dynamic_supplier_aging_report_ui.test.js`：ERP-141 前端 UI 逻辑单测（Node，无需浏览器）；
 - `tests/automation/dynamic_supplier_aging_grouping_ui.test.js`：ERP-145 前端分组计数 UI 逻辑单测（Node，无需浏览器）。
 - `tests/automation/dynamic_supplier_aging_amount_summary_ui.test.js`：ERP-147 前端金额汇总 UI 逻辑单测（Node，无需浏览器）。
+- `tests/automation/dynamic_supplier_aging_asof_ui.test.js`：ERP-168 前端 as-of 回显 UI 逻辑单测（Node，无需浏览器）。

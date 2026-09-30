@@ -167,7 +167,9 @@ public class DynamicSupplierAgingReportController : ControllerBase
             groupBy,
             groups,
             summaryMode,
-            summaries);
+            summaries,
+            report.AsOfDate,
+            report.AsOfDateText);
     }
 
     /// <summary>把单张 ERP-068 发票证据行展开为整行「字段 → 值」字典（仅白名单字段，供 <see cref="DynamicSupplierAgingReportRules.BuildRow"/> 投影）</summary>

@@ -89,6 +89,8 @@ public sealed record DynamicSupplierAgingReportCatalogDto(
 /// <para>ERP-146 新增 <see cref="SummaryMode"/> / <see cref="Summaries"/>：仅当请求金额汇总（supplierCurrency / supplierCurrencyAging）时，
 /// <see cref="Summaries"/> 才给出「当前授权预览页」按供应商 + 原币（可选账龄分桶）的已知有效含税总额 / 有效已分配 / 剩余证据金额；
 /// 草稿 / 已作废金额绝不并入，未知 / 无效分配证据按「未知」（null）返回，绝不轧为 0 或给部分合计；默认 none 时为空。</para>
+/// <para>ERP-168 新增 <see cref="AsOfDate"/> / <see cref="AsOfDateText"/>：每次请求由 ERP-068 只读派生解析出唯一有效账龄基准日
+/// （省略 as-of 时默认当天），并原样回传；分组计数与金额汇总使用的账龄基准与该回传值完全一致，绝不重复解析出第二个日期。</para>
 /// </summary>
 public sealed record DynamicSupplierAgingReportPageDto(
     List<DynamicSupplierAgingReportFieldDto> Columns,
@@ -103,7 +105,9 @@ public sealed record DynamicSupplierAgingReportPageDto(
     string GroupBy = "none",
     List<DynamicSupplierAgingReportGroupDto>? Groups = null,
     string SummaryMode = "none",
-    List<DynamicSupplierAgingReportSummaryDto>? Summaries = null);
+    List<DynamicSupplierAgingReportSummaryDto>? Summaries = null,
+    DateTime AsOfDate = default,
+    string AsOfDateText = "");
 
 /// <summary>
 /// 供应商对账与账龄报表页面分组计数（ERP-144，只读）：当前授权预览页内按分组键聚合的发票张数分布。
