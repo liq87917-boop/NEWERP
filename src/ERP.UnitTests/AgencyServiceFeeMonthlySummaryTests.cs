@@ -1,11 +1,14 @@
 using System.Reflection;
+using System.Security.Claims;
 using ERP.Api.Controllers;
 using ERP.Application.Common;
 using ERP.Application.DTOs;
 using ERP.Application.Interfaces;
 using ERP.Application.Services;
 using ERP.Domain.Entities;
+using ERP.Domain.Enums;
 using ERP.Infrastructure.Data;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Routing;
 using Xunit;
@@ -23,7 +26,7 @@ public class AgencyServiceFeeMonthlySummaryTests
 {
     // ==================== 0. 测试脚手架 ====================
 
-    private static BaseCustomer SeedCustomer(ErpDbContext db, string code, string name)
+    private static BaseCustomer SeedCustomer(ErpDbContext db, string code, string name, long? empId = null)
     {
         var customer = new BaseCustomer
         {
@@ -33,6 +36,7 @@ public class AgencyServiceFeeMonthlySummaryTests
             CreditStatus = "正常",
             CreditLimit = 100000m,
             CreditDays = 30,
+            EmpId = empId,
             IsDeleted = false
         };
         db.BaseCustomers.Add(customer);
@@ -70,9 +74,17 @@ public class AgencyServiceFeeMonthlySummaryTests
         return statement;
     }
 
+    /// <summary>特权范围（不过滤，用于既有行为与无数据范围限制的测试）</summary>
+    private static readonly SalespersonDataScope PrivilegedScope = new()
+    {
+        IsPrivileged = true,
+        AllowedCustomerIds = null
+    };
+
     private static async Task<AgencyServiceFeeMonthlySummaryView> QueryAsync(
-        ErpDbContext db, AgencyServiceFeeMonthlySummaryQuery query)
-        => await AgencyServiceFeeMonthlySummaryService.ForQueryAsync(db, query);
+        ErpDbContext db, AgencyServiceFeeMonthlySummaryQuery query,
+        SalespersonDataScope? scope = null)
+        => await AgencyServiceFeeMonthlySummaryService.ForQueryAsync(db, query, scope ?? PrivilegedScope);
 
     private static string RepoFile(params string[] segments)
         => Path.GetFullPath(Path.Combine(
@@ -239,7 +251,7 @@ public class AgencyServiceFeeMonthlySummaryTests
 
         var counting = AgencyServiceFeeStatementTests.StatementReadCounter.Wrap(db);
         var single = await AgencyServiceFeeMonthlySummaryService.ForQueryAsync(
-            counting.Proxy, new AgencyServiceFeeMonthlySummaryQuery { PageSize = 100 });
+            counting.Proxy, new AgencyServiceFeeMonthlySummaryQuery { PageSize = 100 }, PrivilegedScope);
         Assert.Equal(1, single.Total);
         Assert.Equal(
             new[] { nameof(IErpDbContext.AgencyServiceFeeStatements) },
@@ -270,7 +282,7 @@ public class AgencyServiceFeeMonthlySummaryTests
 
         var counting2 = AgencyServiceFeeStatementTests.StatementReadCounter.Wrap(db);
         var large = await AgencyServiceFeeMonthlySummaryService.ForQueryAsync(
-            counting2.Proxy, new AgencyServiceFeeMonthlySummaryQuery { PageSize = 5 });
+            counting2.Proxy, new AgencyServiceFeeMonthlySummaryQuery { PageSize = 5 }, PrivilegedScope);
         Assert.Equal(5, large.Rows.Count);
         Assert.Equal(baselineReads, counting2.DatasetReads);
         Assert.Equal(0, counting2.WriteCalls);
@@ -355,6 +367,279 @@ public class AgencyServiceFeeMonthlySummaryTests
         Assert.Contains("无逐行查库", doc);
         Assert.Contains("/api/agency-service-fee-statements/monthly-summary", doc);
     }
+
+    // ==================== 13. 数据范围与授权（ERP-180） ====================
+
+    private static SysUser SeedUser(ErpDbContext db, string userName)
+    {
+        var user = new SysUser
+        {
+            UserName = userName,
+            PasswordHash = "hash",
+            PasswordSalt = "salt",
+            DisplayName = userName,
+            Status = UserStatus.Enabled
+        };
+        db.SysUsers.Add(user);
+        db.SaveChanges();
+        return user;
+    }
+
+    private static SysRole SeedRole(ErpDbContext db, string code, bool isSystem = false)
+    {
+        var role = new SysRole { RoleName = code, RoleCode = code, IsSystem = isSystem };
+        db.SysRoles.Add(role);
+        db.SaveChanges();
+        return role;
+    }
+
+    private static void SeedUserRole(ErpDbContext db, long userId, long roleId)
+    {
+        db.SysUserRoles.Add(new SysUserRole { UserId = userId, RoleId = roleId });
+        db.SaveChanges();
+    }
+
+    private static SysMenu SeedMenu(ErpDbContext db, string code)
+    {
+        var menu = new SysMenu { MenuName = code, MenuCode = code, MenuType = MenuType.Menu };
+        db.SysMenus.Add(menu);
+        db.SaveChanges();
+        return menu;
+    }
+
+    private static void SeedRoleMenu(ErpDbContext db, long roleId, long menuId)
+    {
+        db.SysRoleMenus.Add(new SysRoleMenu { RoleId = roleId, MenuId = menuId });
+        db.SaveChanges();
+    }
+
+    private static BaseEmployee SeedEmployee(ErpDbContext db, string code, bool isSalesman = true)
+    {
+        var employee = new BaseEmployee
+        {
+            EmployeeCode = code,
+            EmployeeName = code,
+            IsSalesman = isSalesman,
+            Status = 1
+        };
+        db.BaseEmployees.Add(employee);
+        db.SaveChanges();
+        return employee;
+    }
+
+    private static AgencyServiceFeeStatementController BuildController(ErpDbContext db, long? userId)
+    {
+        var ctl = new AgencyServiceFeeStatementController(db);
+        var claims = userId.HasValue
+            ? new[] { new Claim(ClaimTypes.NameIdentifier, userId.Value.ToString()) }
+            : Array.Empty<Claim>();
+        ctl.ControllerContext = new ControllerContext
+        {
+            HttpContext = new DefaultHttpContext
+            {
+                User = new ClaimsPrincipal(new ClaimsIdentity(claims, "Test"))
+            }
+        };
+        return ctl;
+    }
+
+    [Fact]
+    public async Task 范围_特权账号不过滤_看到全部客户()
+    {
+        using var db = TestDbFactory.Create();
+        var c1 = SeedCustomer(db, "C001", "客户一");
+        var c2 = SeedCustomer(db, "C002", "客户二");
+        SeedStatement(db, "ASF-1", c1.Id, 100m);
+        SeedStatement(db, "ASF-2", c2.Id, 200m);
+
+        var view = await QueryAsync(db, new AgencyServiceFeeMonthlySummaryQuery { PageSize = 100 },
+            new SalespersonDataScope { IsPrivileged = true, AllowedCustomerIds = null });
+
+        Assert.Equal(2, view.Total);
+        Assert.Equal(2, view.Rows.Count);
+        Assert.Contains(view.Rows, r => r.CustomerId == c1.Id);
+        Assert.Contains(view.Rows, r => r.CustomerId == c2.Id);
+    }
+
+    [Fact]
+    public async Task 范围_受限制业务员_只看到其被分配客户_合计与金额不泄露他人()
+    {
+        using var db = TestDbFactory.Create();
+        var mine = SeedCustomer(db, "C001", "我的客户");
+        var other = SeedCustomer(db, "C002", "别人的客户");
+        SeedStatement(db, "ASF-MY-1", mine.Id, 100m);
+        SeedStatement(db, "ASF-MY-2", mine.Id, 150m);
+        SeedStatement(db, "ASF-OTHER", other.Id, 999m);
+
+        var view = await QueryAsync(db, new AgencyServiceFeeMonthlySummaryQuery { PageSize = 100 },
+            new SalespersonDataScope { IsPrivileged = false, AllowedCustomerIds = new HashSet<long> { mine.Id } });
+
+        var row = Assert.Single(view.Rows);
+        Assert.Equal(1, view.Total);
+        Assert.Equal(mine.Id, row.CustomerId);
+        Assert.Equal(2, row.RegisteredCount);
+        Assert.Equal(250m, row.RegisteredTotalAmount);
+        Assert.DoesNotContain(view.Rows, r => r.CustomerId == other.Id);
+    }
+
+    [Fact]
+    public async Task 范围_未授权客户筛选_无数据_不泄露任何分组()
+    {
+        using var db = TestDbFactory.Create();
+        var mine = SeedCustomer(db, "C001", "我的客户");
+        var other = SeedCustomer(db, "C002", "别人的客户");
+        SeedStatement(db, "ASF-OTHER", other.Id, 999m);
+
+        var view = await QueryAsync(db, new AgencyServiceFeeMonthlySummaryQuery
+        {
+            CustomerId = other.Id,
+            PageSize = 100
+        }, new SalespersonDataScope { IsPrivileged = false, AllowedCustomerIds = new HashSet<long> { mine.Id } });
+
+        Assert.Equal(0, view.Total);
+        Assert.Empty(view.Rows);
+        Assert.False(string.IsNullOrEmpty(view.EmptyText));
+    }
+
+    [Fact]
+    public async Task 范围_空范围_fail_closed_看不到任何客户()
+    {
+        using var db = TestDbFactory.Create();
+        var c = SeedCustomer(db, "C001", "客户一");
+        SeedStatement(db, "ASF-1", c.Id, 100m);
+
+        var view = await QueryAsync(db, new AgencyServiceFeeMonthlySummaryQuery { PageSize = 100 },
+            new SalespersonDataScope { IsPrivileged = false, AllowedCustomerIds = new HashSet<long>() });
+
+        Assert.Equal(0, view.Total);
+        Assert.Empty(view.Rows);
+        Assert.Equal(0, view.GroupCount);
+    }
+
+    [Fact]
+    public async Task 范围_混合币种_保留原币分离_绝不跨币种合并()
+    {
+        using var db = TestDbFactory.Create();
+        var mine = SeedCustomer(db, "C001", "我的客户");
+        var other = SeedCustomer(db, "C002", "别人的客户");
+        var date = new DateTime(2026, 9, 1);
+        SeedStatement(db, "ASF-USD", mine.Id, 100m, currency: "USD", statementDate: date);
+        SeedStatement(db, "ASF-CNY", mine.Id, 300m, currency: "CNY", statementDate: date);
+        SeedStatement(db, "ASF-OTHER", other.Id, 999m, currency: "USD", statementDate: date);
+
+        var view = await QueryAsync(db, new AgencyServiceFeeMonthlySummaryQuery { PageSize = 100 },
+            new SalespersonDataScope { IsPrivileged = false, AllowedCustomerIds = new HashSet<long> { mine.Id } });
+
+        Assert.Equal(2, view.Total);
+        Assert.Equal(2, view.Rows.Count);
+        Assert.Equal(100m, view.Rows.Single(r => r.Currency == "USD").RegisteredTotalAmount);
+        Assert.Equal(300m, view.Rows.Single(r => r.Currency == "CNY").RegisteredTotalAmount);
+        Assert.All(view.Rows, r => Assert.Equal(mine.Id, r.CustomerId));
+    }
+
+
+    [Fact]
+    public async Task 授权_无身份_未认证拒绝()
+    {
+        using var db = TestDbFactory.Create();
+        var ctl = BuildController(db, null);
+
+        var ex = await Assert.ThrowsAsync<BusinessException>(() => ctl.MonthlySummary(
+            new AgencyServiceFeeMonthlySummaryQuery()));
+        Assert.Equal(ErrorCodes.Unauthorized, ex.Code);
+    }
+
+    [Fact]
+    public async Task 授权_无客户菜单_权限不足拒绝()
+    {
+        using var db = TestDbFactory.Create();
+        var role = SeedRole(db, "NoMenu");
+        var user = SeedUser(db, "nommenu-user");
+        SeedUserRole(db, user.Id, role.Id);
+        var ctl = BuildController(db, user.Id);
+
+        var ex = await Assert.ThrowsAsync<BusinessException>(() => ctl.MonthlySummary(
+            new AgencyServiceFeeMonthlySummaryQuery()));
+        Assert.Equal(ErrorCodes.Forbidden, ex.Code);
+    }
+
+    [Fact]
+    public async Task 授权_被回收后_下一次请求立即拒绝()
+    {
+        using var db = TestDbFactory.Create();
+        var role = SeedRole(db, "Revoke-Role");
+        var user = SeedUser(db, "revoke-user");
+        SeedUserRole(db, user.Id, role.Id);
+        var menu = SeedMenu(db, AgencyServiceFeeReconciliationRules.RequiredMenuCode);
+        var roleMenu = new SysRoleMenu { RoleId = role.Id, MenuId = menu.Id };
+        db.SysRoleMenus.Add(roleMenu);
+        db.SaveChanges();
+
+        var ctl = BuildController(db, user.Id);
+        var ok = await ctl.MonthlySummary(new AgencyServiceFeeMonthlySummaryQuery { PageSize = 10 });
+        Assert.IsType<OkObjectResult>(ok);
+
+        roleMenu.IsDeleted = true;
+        db.SaveChanges();
+
+        var ex = await Assert.ThrowsAsync<BusinessException>(() => ctl.MonthlySummary(
+            new AgencyServiceFeeMonthlySummaryQuery { PageSize = 10 }));
+        Assert.Equal(ErrorCodes.Forbidden, ex.Code);
+    }
+
+    [Fact]
+    public async Task 授权_特权账号_正常返回全部客户()
+    {
+        using var db = TestDbFactory.Create();
+        var role = SeedRole(db, "Priv", isSystem: true);
+        var user = SeedUser(db, "priv-user");
+        SeedUserRole(db, user.Id, role.Id);
+        SeedRoleMenu(db, role.Id, SeedMenu(db, AgencyServiceFeeReconciliationRules.RequiredMenuCode).Id);
+
+        var c1 = SeedCustomer(db, "C001", "客户一");
+        var c2 = SeedCustomer(db, "C002", "客户二");
+        SeedStatement(db, "ASF-1", c1.Id, 100m);
+        SeedStatement(db, "ASF-2", c2.Id, 200m);
+
+        var ctl = BuildController(db, user.Id);
+        var ok = Assert.IsType<OkObjectResult>(await ctl.MonthlySummary(
+            new AgencyServiceFeeMonthlySummaryQuery { PageSize = 100 }));
+        var resp = Assert.IsType<ApiResponse<AgencyServiceFeeMonthlySummaryView>>(ok.Value);
+
+        Assert.NotNull(resp.Data);
+        Assert.Equal(2, resp.Data.Total);
+        Assert.Contains(resp.Data.Rows, r => r.CustomerId == c1.Id);
+        Assert.Contains(resp.Data.Rows, r => r.CustomerId == c2.Id);
+    }
+
+    [Fact]
+    public async Task 授权_受限制业务员_通过接口只看到其被分配客户()
+    {
+        using var db = TestDbFactory.Create();
+        var role = SeedRole(db, "Sales");
+        var user = SeedUser(db, "alice");
+        SeedUserRole(db, user.Id, role.Id);
+        SeedRoleMenu(db, role.Id, SeedMenu(db, AgencyServiceFeeReconciliationRules.RequiredMenuCode).Id);
+
+        var employee = SeedEmployee(db, "alice");
+        var mine = SeedCustomer(db, "C001", "我的客户", employee.Id);
+        var other = SeedCustomer(db, "C002", "别人的客户", employee.Id + 1000);
+
+        SeedStatement(db, "ASF-MY", mine.Id, 100m);
+        SeedStatement(db, "ASF-OTHER", other.Id, 999m);
+
+        var ctl = BuildController(db, user.Id);
+        var ok = Assert.IsType<OkObjectResult>(await ctl.MonthlySummary(
+            new AgencyServiceFeeMonthlySummaryQuery { PageSize = 100 }));
+        var resp = Assert.IsType<ApiResponse<AgencyServiceFeeMonthlySummaryView>>(ok.Value);
+
+        Assert.NotNull(resp.Data);
+        Assert.Equal(1, resp.Data.Total);
+        var row = Assert.Single(resp.Data.Rows);
+        Assert.Equal(mine.Id, row.CustomerId);
+        Assert.Equal(100m, row.RegisteredTotalAmount);
+    }
+
 }
 
 

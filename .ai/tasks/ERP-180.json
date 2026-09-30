@@ -1,7 +1,7 @@
 {
   "id": "ERP-180",
   "title": "Scope agency monthly summaries to current ERP permissions",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "medium",
   "description": "A customer-service user opens the existing agency service fee monthly summary and sees only customer evidence allowed by the current ERP role-menu grant and salesperson data scope. Recheck authenticated user and customer menu grant before reading source data; apply the scope to both group-key paging and row loading so totals and page counts cannot reveal hidden customers. Denied identity, revoked grant and empty scope fail closed; existing OperationLogMiddleware records reads. Reuse existing AgencyServiceFeeMonthlySummaryService and SalespersonDataScopeService; preserve original-currency separation and evidence-only meaning. Development only: no schema or migration edits, production SQL or real database execution, arbitrary SQL, business writes, secrets or .env changes, deployment or browser acceptance. Verify focused unit tests and safe Release build/test.",
   "acceptance_criteria": [
@@ -34,6 +34,6 @@
     "level": "L1",
     "reason": ""
   },
-  "attempts": 0,
+  "attempts": 1,
   "created_at": "2026-09-30T04:46:40.118463Z"
 }

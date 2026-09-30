@@ -78,8 +78,34 @@ public class AgencyServiceFeeStatementController : ControllerBase
     /// </summary>
     [HttpGet("monthly-summary")]
     public async Task<IActionResult> MonthlySummary([FromQuery] AgencyServiceFeeMonthlySummaryQuery query)
-        => Ok(ApiResponse<AgencyServiceFeeMonthlySummaryView>.Success(
-            await AgencyServiceFeeMonthlySummaryService.ForQueryAsync(_db, query)));
+    {
+        // 1) 身份（每次请求都重新校验；缺失或非正整数 → 未认证，绝不猜测身份）
+        var userId = CurrentUserId();
+        if (userId is null or <= 0)
+        {
+            throw new BusinessException(
+                "请先登录后再查看代理服务费对账单月度汇总", ErrorCodes.Unauthorized);
+        }
+
+        // 2) 既有「角色 → 菜单」模块授权（每次请求都重新查询，撤销授权后立即收敛，fail closed）
+        var menuCodes = await CustomerReceivableReconciliationService.LoadAuthorizedMenuCodesAsync(
+            _db, userId.Value);
+        if (!menuCodes.Contains(
+                AgencyServiceFeeReconciliationRules.RequiredMenuCode, StringComparer.OrdinalIgnoreCase))
+        {
+            throw new BusinessException(
+                $"当前账号没有「{AgencyServiceFeeReconciliationRules.RequiredMenuText}」"
+                + $"（{AgencyServiceFeeReconciliationRules.RequiredMenuCode}）模块授权：拒绝查看代理服务费对账单月度汇总"
+                + "（fail closed，不返回任何数据）",
+                ErrorCodes.Forbidden);
+        }
+
+        // 3) 业务员数据范围（ERP-097，唯一权威口径；特权账号不过滤，受限制业务员仅其被分配客户）
+        var scope = await SalespersonDataScopeService.ResolveAsync(_db, userId);
+
+        return Ok(ApiResponse<AgencyServiceFeeMonthlySummaryView>.Success(
+            await AgencyServiceFeeMonthlySummaryService.ForQueryAsync(_db, query, scope)));
+    }
 
     /// <summary>对账单证据详情（含全部有界行清单、来源快照与客户 / 协议可用性标注；只读）</summary>
     [HttpGet("{id:long}")]
@@ -130,4 +156,8 @@ public class AgencyServiceFeeStatementController : ControllerBase
     /// <summary>当前登录用户名（登记人由服务端按已认证身份写入，不采信客户端提交的值；无身份时返回 null → 记「未知用户」）</summary>
     private string? CurrentUserName()
         => User?.FindFirst(ClaimTypes.Name)?.Value ?? User?.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+
+    /// <summary>当前登录用户 Id（缺失或非数字时返回 null，由月度汇总授权检查 fail closed 拒绝，绝不猜测身份）</summary>
+    private long? CurrentUserId()
+        => long.TryParse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value, out var id) ? id : null;
 }

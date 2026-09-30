@@ -26,10 +26,11 @@ public static class AgencyServiceFeeMonthlySummaryService
     /// 去重得到「年月 + 客户 + 币种」分组键 → 稳定分页 → 一次性批量装载本页对账单 → 内存聚合。
     /// </summary>
     public static async Task<AgencyServiceFeeMonthlySummaryView> ForQueryAsync(
-        IErpDbContext db, AgencyServiceFeeMonthlySummaryQuery query)
+        IErpDbContext db, AgencyServiceFeeMonthlySummaryQuery query, SalespersonDataScope scope)
     {
         ArgumentNullException.ThrowIfNull(db);
         ArgumentNullException.ThrowIfNull(query);
+        ArgumentNullException.ThrowIfNull(scope);
 
         var (from, to) = AgencyServiceFeeMonthlySummaryRules.NormalizeDateRange(
             query.StatementDateFrom, query.StatementDateTo);
@@ -37,9 +38,13 @@ public static class AgencyServiceFeeMonthlySummaryService
         var currency = AgencyServiceFeeMonthlySummaryRules.NormalizeCurrencyFilter(query.Currency);
         var (page, pageSize) = AgencyServiceFeeMonthlySummaryRules.NormalizePaging(query.Page, query.PageSize);
 
+        // 0) 当前账号业务员数据范围（ERP-097，唯一权威口径）：特权账号不过滤，受限制业务员仅其被分配客户。
+        //    同一范围同时作用于「分组 / 计数」与「本页行装载」两组查询，保证合计、页数与金额不会泄露范围外客户。
+        var scopedSource = SalespersonDataScopeService.FilterByCustomer(
+            db.AgencyServiceFeeStatements.AsNoTracking().Where(s => !s.IsDeleted), scope, s => s.CustomerId);
+
         // 1) 去重得到「年月 + 客户 + 币种」分组键（只用持久化字段，固定一次数据集访问）
-        var distinctKeys = db.AgencyServiceFeeStatements.AsNoTracking()
-            .Where(s => !s.IsDeleted)
+        var distinctKeys = scopedSource
             .Where(s => customerId == null || s.CustomerId == customerId.Value)
             .Where(s => currency == null || s.Currency == currency)
             .Where(s => from == null || s.StatementDate >= from.Value)
@@ -64,8 +69,8 @@ public static class AgencyServiceFeeMonthlySummaryService
         var pageStatements = new List<AgencyServiceFeeStatement>();
         if (pageKeys.Count > 0)
         {
-            pageStatements = await db.AgencyServiceFeeStatements.AsNoTracking()
-                .Where(s => !s.IsDeleted)
+            pageStatements = await SalespersonDataScopeService.FilterByCustomer(
+                    db.AgencyServiceFeeStatements.AsNoTracking().Where(s => !s.IsDeleted), scope, s => s.CustomerId)
                 .Where(BuildPageKeyPredicate(pageKeys))
                 .OrderBy(s => s.StatementDate)
                 .ThenBy(s => s.Id)
