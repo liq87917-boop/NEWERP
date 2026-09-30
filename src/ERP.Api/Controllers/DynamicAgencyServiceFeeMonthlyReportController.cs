@@ -5,6 +5,8 @@ using ERP.Application.Services;
 using ERP.Infrastructure.Export;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using NPOI.SS.UserModel;
+using NPOI.XSSF.UserModel;
 using System.Security.Claims;
 
 namespace ERP.Api.Controllers;
@@ -158,8 +160,52 @@ public class DynamicAgencyServiceFeeMonthlyReportController : ControllerBase
     /// <summary>空页显式说明（证据数字，不代表收入或应收）</summary>
     private const string EmptyPageNote = "没有符合筛选条件的代理服务费对账单证据（或已被软删除；证据数字不代表收入或应收）";
 
-    /// <summary>用 ExcelExporter 生成当前页数据工作表（选定列顺序 + 数值金额 + 公式注入转义 + 空页显式说明）</summary>
+    /// <summary>分组计数工作表名称（ERP-188，仅 month / customer 分组时追加）</summary>
+    private const string GroupCountSheetName = "分组计数";
+
+    /// <summary>分组计数工作表列标题（计数单元格为数值，标签 / 币种为公式安全文本；不含金额列）</summary>
+    private const string GroupLabelColumn = "分组标签";
+    private const string CurrencyColumn = "原币";
+    private const string RowCountColumn = "月度行数";
+    private const string RegisteredCountColumn = "已登记张数";
+    private const string DraftCountColumn = "草稿张数";
+    private const string VoidedCountColumn = "已作废张数";
+    private const string StatementCountColumn = "对账单总张数";
+
+    /// <summary>仅本页说明（分组计数只统计当前授权预览页，不做跨币种 / 跨页合计，计数只是证据数字）</summary>
+    private const string GroupCountPageOnlyNote =
+        "本工作表只统计当前授权预览页的月度汇总行，不覆盖整份报表，也绝不跨币种、跨页合计；"
+        + "计数只是证据数字，不代表收入 / 应收 / 已收款等会计结论。";
+
+    /// <summary>空页显式说明（当前页没有符合分组条件的对账单证据）</summary>
+    private const string GroupCountEmptyNote = "当前页没有符合分组条件的对账单证据（空页）";
+
+    /// <summary>截断显式说明（后续分页未计入本工作表）</summary>
+    private const string GroupCountTruncatedNote = "当前页已被截断，后续分页未计入本工作表（仅本页）";
+
+    /// <summary>
+    /// 生成 Excel 工作簿（ERP-182 / ERP-188，只读）：复用有界、已授权预览；none 模式保持既有单工作表不变；
+    /// month / customer 分组模式在选定列证据工作表之后追加「分组计数」工作表（复用 ERP-184 同一批有界、已授权分组计数，
+    /// 只计数、不含金额列、绝不声明跨页合计）。
+    /// </summary>
     private static byte[] BuildWorkbook(DynamicAgencyServiceFeeMonthlyReportPageDto page)
+    {
+        var dataBytes = BuildDataWorkbook(page);
+
+        if (!IsCountGroupedExport(page.GroupBy))
+            return dataBytes;
+
+        using var input = new MemoryStream(dataBytes);
+        using var workbook = new XSSFWorkbook(input);
+        AppendCountGroupSheet(workbook, page);
+
+        using var output = new MemoryStream();
+        workbook.Write(output);
+        return output.ToArray();
+    }
+
+    /// <summary>生成选定列证据工作表（ERP-182 既有逻辑：选定列顺序 + 数值金额 + 公式注入转义 + 空页显式说明）</summary>
+    private static byte[] BuildDataWorkbook(DynamicAgencyServiceFeeMonthlyReportPageDto page)
     {
         var columns = page.Columns.Select(c => (c.Key, c.Label)).ToList();
         var rows = page.Rows.Select(BuildExportRow).ToList();
@@ -176,6 +222,75 @@ public class DynamicAgencyServiceFeeMonthlyReportController : ControllerBase
 
         return ExcelExporter.ExportRows(DataSheetName, rows, columns);
     }
+
+    /// <summary>是否需要追加分组计数工作表（仅 month / customer；none 保持既有工作簿）</summary>
+    private static bool IsCountGroupedExport(string? groupBy)
+        => string.Equals(groupBy, DynamicAgencyServiceFeeMonthlyReportRules.GroupByMonth, StringComparison.OrdinalIgnoreCase)
+           || string.Equals(groupBy, DynamicAgencyServiceFeeMonthlyReportRules.GroupByCustomer, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>追加「分组计数」工作表：分组标签 + 原币 + 月度行数与各状态张数（数值单元格），
+    /// 并显式标注空页 / 截断 / 仅本页；不含金额列、不声明跨页合计。</summary>
+    private static void AppendCountGroupSheet(XSSFWorkbook workbook, DynamicAgencyServiceFeeMonthlyReportPageDto page)
+    {
+        var sheet = workbook.CreateSheet(GroupCountSheetName);
+
+        var header = sheet.CreateRow(0);
+        header.CreateCell(0).SetCellValue(GroupLabelColumn);
+        header.CreateCell(1).SetCellValue(CurrencyColumn);
+        header.CreateCell(2).SetCellValue(RowCountColumn);
+        header.CreateCell(3).SetCellValue(RegisteredCountColumn);
+        header.CreateCell(4).SetCellValue(DraftCountColumn);
+        header.CreateCell(5).SetCellValue(VoidedCountColumn);
+        header.CreateCell(6).SetCellValue(StatementCountColumn);
+
+        var groups = page.GroupCounts ?? new List<DynamicAgencyServiceFeeMonthlyReportGroupCountDto>();
+        var rowIndex = 1;
+        foreach (var group in groups)
+        {
+            var row = sheet.CreateRow(rowIndex++);
+            row.CreateCell(0).SetCellValue(SafeGroupText(GroupLabel(group)));
+            row.CreateCell(1).SetCellValue(SafeGroupText(group.Currency));
+            row.CreateCell(2).SetCellValue(group.RowCount);
+            row.CreateCell(3).SetCellValue(group.RegisteredCount);
+            row.CreateCell(4).SetCellValue(group.DraftCount);
+            row.CreateCell(5).SetCellValue(group.VoidedCount);
+            row.CreateCell(6).SetCellValue(group.StatementCount);
+        }
+
+        if (groups.Count == 0)
+        {
+            var emptyRow = sheet.CreateRow(rowIndex++);
+            emptyRow.CreateCell(0).SetCellValue(SafeGroupText(GroupCountEmptyNote));
+        }
+
+        if (page.Truncated)
+        {
+            var truncatedRow = sheet.CreateRow(rowIndex++);
+            truncatedRow.CreateCell(0).SetCellValue(SafeGroupText(GroupCountTruncatedNote));
+        }
+
+        var pageOnlyRow = sheet.CreateRow(rowIndex);
+        pageOnlyRow.CreateCell(0).SetCellValue(SafeGroupText(GroupCountPageOnlyNote));
+    }
+
+    /// <summary>分组标签：month → 年月文案（yyyy-MM）；customer → 客户名称（回退客户编码）</summary>
+    private static string GroupLabel(DynamicAgencyServiceFeeMonthlyReportGroupCountDto group)
+    {
+        if (string.Equals(group.GroupBy, DynamicAgencyServiceFeeMonthlyReportRules.GroupByMonth, StringComparison.OrdinalIgnoreCase))
+        {
+            return string.IsNullOrWhiteSpace(group.StatementMonthText)
+                ? (group.StatementYear.HasValue && group.StatementMonth.HasValue
+                    ? $"{group.StatementYear.Value:0000}-{group.StatementMonth.Value:00}"
+                    : string.Empty)
+                : group.StatementMonthText;
+        }
+
+        return string.IsNullOrWhiteSpace(group.CustomerName) ? group.CustomerCode : group.CustomerName;
+    }
+
+    /// <summary>分组工作表文本统一做公式注入转义（保持字面文本，不被当作公式执行）</summary>
+    private static string SafeGroupText(string? value)
+        => (string?)EscapeFormulaLeading(value) ?? string.Empty;
 
     /// <summary>把一页预览行转成导出行：对每个单元格做公式注入转义，键保持不变</summary>
     private static Dictionary<string, object?> BuildExportRow(Dictionary<string, object?> row)
