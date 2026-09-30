@@ -126,9 +126,10 @@ class PipelineContracts(unittest.TestCase):
                 "autonomy": {"max_supervised_recovery_cycles": 2},
             }), encoding="utf-8")
             (control / ".ai" / "PROJECT_STATE.json").write_text('{"phase":"ready"}', encoding="utf-8")
-            for number, status in ((167, "pending"), (168, "pending")):
+            for number, status in ((167, "pending"), (168, "pending"), (169, "pending")):
+                value = self.task(f"ERP-{number}", status, depends_on=["ERP-167"] if number == 168 else [])
                 (control / ".ai" / "tasks" / f"ERP-{number}.json").write_text(
-                    json.dumps(self.task(f"ERP-{number}", status)), encoding="utf-8")
+                    json.dumps(value), encoding="utf-8")
             git(control, "add", ".ai")
             git(control, "commit", "-m", "queue fixture")
             git(base, "clone", "--quiet", str(control), str(executor))
@@ -148,7 +149,7 @@ class PipelineContracts(unittest.TestCase):
             work.write_text("unfinished feature", encoding="utf-8")
             outcome = executor_workspace.continue_after_exhausted_failure(control, executor)
             self.assertEqual("continued", outcome["status"])
-            self.assertEqual("ERP-168", outcome["next_task"])
+            self.assertEqual("ERP-169", outcome["next_task"])
             self.assertEqual("unfinished feature", work.read_text(encoding="utf-8"))
             next_root = Path(outcome["path"])
             parked = json.loads((next_root / ".ai" / "tasks" / "ERP-167.json").read_text(encoding="utf-8"))

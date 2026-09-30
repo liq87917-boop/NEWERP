@@ -203,6 +203,25 @@ function Test-TaskRunnable {
     return $true
 }
 
+function Get-DependencySafeRunnableTask {
+    param([object[]]$Tasks)
+    $byId = @{}
+    foreach ($task in $Tasks) { $byId[[string]$task.id] = $task }
+    foreach ($task in $Tasks) {
+        if (-not (Test-TaskRunnable $task)) { continue }
+        $ready = $true
+        foreach ($dependency in $task.depends_on) {
+            if (-not $byId.ContainsKey([string]$dependency) -or
+                $byId[[string]$dependency].status -ne 'completed') {
+                $ready = $false
+                break
+            }
+        }
+        if ($ready) { return $task }
+    }
+    return $null
+}
+
 function Get-GitInfo {
     $branchResult = Invoke-Git @('branch', '--show-current')
     $shaResult = Invoke-Git @('rev-parse', '--short', 'HEAD')
@@ -867,6 +886,7 @@ try {
         $state = Get-ProjectState
         $tasks = @(Get-Tasks)
         $head = Get-QueueHead $tasks
+        $runnable = Get-DependencySafeRunnableTask $tasks
         $recoverableFailure = Get-RecoverableFailure $tasks
         $gitInfo = Get-GitInfo
 
@@ -883,6 +903,7 @@ try {
             $state = Get-ProjectState
             $tasks = @(Get-Tasks)
             $head = Get-QueueHead $tasks
+            $runnable = Get-DependencySafeRunnableTask $tasks
             $recoverableFailure = Get-RecoverableFailure $tasks
             $gitInfo = Get-GitInfo
         }
@@ -920,7 +941,7 @@ try {
         # checkout and its complete evidence remain untouched for later repair.
         $isolationKey = "$($gitInfo.Sha)|$($state.updated_at)|$($head.id)"
         if (-not $NoExecute -and -not $pipelineProcess -and -not $paused -and
-            $gitInfo.Dirty -and -not $recoverExisting -and (Test-TaskRunnable $head) -and
+            $gitInfo.Dirty -and -not $recoverExisting -and $null -ne $runnable -and
             $lastIsolationAttemptKey -ne $isolationKey) {
             $lastIsolationAttemptKey = $isolationKey
             try {
@@ -943,6 +964,7 @@ try {
                         $state = Get-ProjectState
                         $tasks = @(Get-Tasks)
                         $head = Get-QueueHead $tasks
+                        $runnable = Get-DependencySafeRunnableTask $tasks
                         $gitInfo = Get-GitInfo
                         $recoverableFailure = Get-RecoverableFailure $tasks
                         $recoverPreserved = $null
@@ -960,7 +982,7 @@ try {
         }
 
         if (-not $NoExecute -and -not $pipelineProcess -and -not $paused -and $worktreeAllowsStart -and $gitInfo.Branch -in $managedBranches) {
-            if ($recoverPush -or $recoverExisting -or $recoverableFailure -or (Test-TaskRunnable $head)) {
+            if ($recoverPush -or $recoverExisting -or $recoverableFailure -or $null -ne $runnable) {
                 try {
                     if ($recoverExisting) {
                         $lastRecoveryAttemptKey = $recoveryKey

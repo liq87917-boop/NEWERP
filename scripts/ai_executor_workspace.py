@@ -90,9 +90,19 @@ def continue_after_exhausted_failure(control_root: Path, active_root: Path) -> d
     if len(exhausted) != 1:
         return {"status": "not_needed", "reason": "no unique exhausted preserved task"}
     failed = exhausted[0]
-    runnable = [task for task in tasks if task.get("status") in {"pending", "retry"}
-                and task.get("auto_start", True)
-                and all(by_id.get(dep, {}).get("status") == "completed" for dep in task.get("depends_on", []))]
+    def can_run(task: dict[str, Any]) -> bool:
+        if task.get("status") not in {"pending", "retry"} or not task.get("auto_start", True):
+            return False
+        if not all(by_id.get(dep, {}).get("status") == "completed" for dep in task.get("depends_on", [])):
+            return False
+        gate = task.get("human_gate") or {}
+        if task.get("requires_human_approval") or str(gate.get("level", "L1")).upper() in {"L3", "L4"}:
+            return gate.get("status") == "approved"
+        if gate.get("required"):
+            return gate.get("status") in {"approved", "ai_reviewed", "not_required"}
+        return True
+
+    runnable = [task for task in tasks if can_run(task)]
     if not runnable:
         return {"status": "not_needed", "reason": "no independent runnable task"}
     porcelain = git(active_root, "-c", "core.quotepath=false", "status", "--porcelain", "--untracked-files=all").stdout
