@@ -1,0 +1,22 @@
+{
+  "task": "ERP-178",
+  "status": "retry_pending",
+  "execution_outcome": "automatic_repair_pending",
+  "attempts": 3,
+  "last_error": "DeepSeek executor exited with code 1; raw reason=error.\nLog tail:\n{\"ts\":\"2026-09-30T03:38:48.662Z\",\"type\":\"hook_event\",\"hookEventName\":\"agent_start\",\"agentId\":\"agent_1790739528553_2c9r6p\",\"taskId\":\"conv_1790739528659_1kjcc2m\",\"parentAgentId\":null}\n{\"ts\":\"2026-09-30T03:38:48.663Z\",\"type\":\"agent_event\",\"event\":{\"type\":\"iteration_start\",\"iteration\":1}}\n{\"ts\":\"2026-09-30T03:38:49.283Z\",\"type\":\"error\",\"message\":\"hook dispatch failed: session.hook requires a valid hook event payload\"}\n{\"ts\":\"2026-09-30T03:38:49.807Z\",\"type\":\"agent_event\",\"event\":{\"type\":\"done\",\"reason\":\"error\",\"text\":\"Insufficient Balance (request_id: 5aeb4973-d9a3-4fea-91b0-ae87f2e5b44d)\",\"iterations\":1,\"usage\":{\"inputTokens\":0,\"outputTokens\":0,\"cacheReadTokens\":0,\"cacheWriteTokens\":0,\"totalCost\":0}}}\n{\"ts\":\"2026-09-30T03:38:50.829Z\",\"type\":\"run_result\",\"finishReason\":\"error\",\"iterations\":1,\"usage\":{\"inputTokens\":0,\"outputTokens\":0,\"cacheReadTokens\":0,\"cacheWriteTokens\":0,\"totalCost\":0},\"aggregateUsage\":{\"inputTokens\":0,\"outputTokens\":0,\"cacheReadTokens\":0,\"cacheWriteTokens\":0,\"totalCost\":0},\"durationMs\":625,\"text\":\"Insufficient Balance (request_id: 5aeb4973-d9a3-4fea-91b0-ae87f2e5b44d)\",\"model\":{\"id\":\"deepseek-v4-pro\",\"provider\":\"deepseek\",\"info\":{\"id\":\"deepseek-v4-pro\",\"name\":\"DeepSeek V4 Pro\",\"contextWindow\":1000000,\"maxInputTokens\":1000000,\"maxTokens\":393216,\"capabilities\":[\"tools\",\"reasoning\",\"structured_output\",\"temperature\",\"prompt-cache\"],\"reasoningOptions\":[{\"type\":\"toggle\"},{\"type\":\"effort\",\"values\":[\"low\",\"high\",\"max\"]}],\"pricing\":{\"input\":0.435,\"output\":0.87,\"cacheRead\":0.003625,\"cacheWrite\":0},\"releaseDate\":\"2026-08-12\",\"family\":\"deepseek-thinking\",\"operation\":\"language\"}}}\n{\"ts\":\"2026-09-30T03:38:50.829Z\",\"type\":\"error\",\"message\":\"Insufficient Balance (request_id: 5aeb4973-d9a3-4fea-91b0-ae87f2e5b44d)\"}\n",
+  "failure_kind": "executor_failure",
+  "attempted_fix": {
+    "provider": "deepseek",
+    "model": "deepseek-v4-pro"
+  },
+  "preserved_work": {
+    "execution_copy": "D:\\VSCodeProject\\NEWERP.executor",
+    "changed_paths": [
+      ".ai/PROJECT_STATE.json",
+      ".ai/tasks/ERP-178.json"
+    ],
+    "diff": ".ai\\logs\\ERP-178-preserved-work.diff",
+    "preserved_at": "2026-09-30T03:38:51.557556Z"
+  },
+  "finished_at": "2026-09-30T03:38:51.558438Z"
+}
