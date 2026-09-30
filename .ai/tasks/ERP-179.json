@@ -1,0 +1,52 @@
+{
+  "id": "ERP-179",
+  "title": "Export scoped shipment and finance amount summaries to PDF",
+  "description": "A sales user downloads the monetary summary shown by the shipment/finance report designer in the existing paged Chinese PDF for the current authorized order page. Reuse ERP-162 finite SummaryMode and summary DTOs in ERP-156 bounded preview; append a separate current-page amount-summary section for supported non-none modes while preserving existing selected-column pages for none. Recheck current-user sales-order menu and SalespersonDataScopeService scope on each export, reject invalid modes before source reads, retain OperationLogMiddleware audit and explicit missing-SimHei failure. Keep customer, original currency and optional shipment/finance status boundaries; null linked/uncovered/submitted evidence remains unknown with known/unknown row counts, and uncovered amount is not an AR balance. Development only: no arbitrary SQL, schema/migrations, production SQL or real database execution, business writes, secrets/.env changes, deployment or browser acceptance. Verify focused PDF tests and safe Release build/test.",
+  "status": "pending",
+  "risk_level": "medium",
+  "acceptance_criteria": [
+    "PDF export reuses the ERP-162 authorized bounded current page and finite SummaryMode validation; none retains the existing selected-column document.",
+    "Supported modes append a separately titled current-page summary section keyed by customer, original currency and optional status, with known/unknown counts, explicit unknown and empty text, readable page bounds and visible missing-SimHei failure; no cross-currency or AR totals.",
+    "PDF tests cover all modes, denial, invalid mode, multiple currencies, null evidence, empty/paged results, long labels, pagination, font failure and original document preservation; document download scope and pass safe Release build/test."
+  ],
+  "criterion_path_map": {
+    "PDF export reuses the ERP-162 authorized bounded current page and finite SummaryMode validation; none retains the existing selected-column document.": [
+      "src/ERP.Api/Controllers/DynamicShipmentFinanceReportController.cs"
+    ],
+    "Supported modes append a separately titled current-page summary section keyed by customer, original currency and optional status, with known/unknown counts, explicit unknown and empty text, readable page bounds and visible missing-SimHei failure; no cross-currency or AR totals.": [
+      "src/ERP.Infrastructure/Export/DynamicShipmentFinancePdfExporter.cs"
+    ],
+    "PDF tests cover all modes, denial, invalid mode, multiple currencies, null evidence, empty/paged results, long labels, pagination, font failure and original document preservation; document download scope and pass safe Release build/test.": [
+      "src/ERP.UnitTests/DynamicShipmentFinanceSummaryPdfTests.cs",
+      "docs/dynamic-shipment-finance-report.md"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/DynamicShipmentFinanceReportController.cs",
+    "src/ERP.Infrastructure/Export/DynamicShipmentFinancePdfExporter.cs",
+    "src/ERP.UnitTests/DynamicShipmentFinanceSummaryPdfTests.cs",
+    "docs/dynamic-shipment-finance-report.md",
+    ".ai/**"
+  ],
+  "validation_profile": "safe",
+  "depends_on": [
+    "ERP-159",
+    "ERP-162",
+    "ERP-163"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "completion_mode": "build",
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only bounded read-only report export"
+  },
+  "attempts": 0,
+  "created_at": "2026-09-30T03:10:15.078499Z"
+}

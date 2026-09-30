@@ -1,0 +1,51 @@
+{
+  "id": "ERP-176",
+  "title": "Export current-page order and unlinked receipt amount summaries to Excel",
+  "description": "A sales user downloads the chosen current-page amount summary alongside existing order and unlinked-receipt evidence. For supported customerCurrency SummaryMode, reuse ERP-172 summary DTOs from the same bounded authorized page and add separate order-amount and unlinked-receipt-amount worksheets; none keeps the existing workbook. Recheck current-user sales-order menu and salesperson scope on every export, reject invalid modes before source reads, retain OperationLogMiddleware download audit, and show empty/truncated/unknown evidence visibly. Pending and historical receipts stay separate; never join receipts to orders, infer allocation/receivable balance, merge currencies, or turn null into zero. Development only: no arbitrary SQL, schema/migrations, production SQL or real database execution, business writes, secrets/.env changes, deployment or browser acceptance. Verify focused workbook tests and safe Release build/test.",
+  "status": "pending",
+  "risk_level": "medium",
+  "acceptance_criteria": [
+    "Excel export validates SummaryMode before source reads and reuses the ERP-172 authorized bounded current page; none keeps the existing two evidence worksheets and any selected count-group sheets.",
+    "customerCurrency adds separate order and unlinked-receipt amount worksheets with customer, original currency, receipt evidence status, numeric known totals, blank unknown totals with known/unknown counts, visible empty/truncation notes, and formula-safe labels.",
+    "Workbook tests cover permission denial, invalid mode, multiple currencies, null amounts, pending/historical receipts, empty/truncated pages, formula-leading labels and unchanged evidence sheets; document the current-page evidence boundary and pass safe Release build/test."
+  ],
+  "criterion_path_map": {
+    "Excel export validates SummaryMode before source reads and reuses the ERP-172 authorized bounded current page; none keeps the existing two evidence worksheets and any selected count-group sheets.": [
+      "src/ERP.Api/Controllers/DynamicReceiptReconciliationReportController.cs"
+    ],
+    "customerCurrency adds separate order and unlinked-receipt amount worksheets with customer, original currency, receipt evidence status, numeric known totals, blank unknown totals with known/unknown counts, visible empty/truncation notes, and formula-safe labels.": [
+      "src/ERP.Api/Controllers/DynamicReceiptReconciliationReportController.cs"
+    ],
+    "Workbook tests cover permission denial, invalid mode, multiple currencies, null amounts, pending/historical receipts, empty/truncated pages, formula-leading labels and unchanged evidence sheets; document the current-page evidence boundary and pass safe Release build/test.": [
+      "src/ERP.UnitTests/DynamicReceiptReconciliationSummaryExcelTests.cs",
+      "docs/dynamic-receipt-reconciliation-report.md"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/DynamicReceiptReconciliationReportController.cs",
+    "src/ERP.UnitTests/DynamicReceiptReconciliationSummaryExcelTests.cs",
+    "docs/dynamic-receipt-reconciliation-report.md",
+    ".ai/**"
+  ],
+  "validation_profile": "safe",
+  "depends_on": [
+    "ERP-167",
+    "ERP-172",
+    "ERP-174"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "completion_mode": "build",
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only bounded read-only report export"
+  },
+  "attempts": 0,
+  "created_at": "2026-09-30T03:10:15.077731Z"
+}

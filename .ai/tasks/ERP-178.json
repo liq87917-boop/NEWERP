@@ -1,0 +1,51 @@
+{
+  "id": "ERP-178",
+  "title": "Export scoped shipment and finance amount summaries to Excel",
+  "description": "A sales user downloads the monetary summary shown by the shipment/finance report designer for the current authorized order page. Reuse ERP-162 finite SummaryMode and summary DTOs in ERP-156 bounded preview; add a separate amount-summary worksheet for supported non-none modes while preserving the existing selected-column data worksheet for none. Recheck current-user sales-order menu and SalespersonDataScopeService scope on each export; reject invalid modes before source reads and retain OperationLogMiddleware audit. Keep customer, original currency and optional shipment/finance status boundaries; null linked/uncovered/submitted evidence remains unknown with known/unknown row counts, and uncovered amount is not an AR balance. Development only: no arbitrary SQL, schema/migrations, production SQL or real database execution, business writes, secrets/.env changes, deployment or browser acceptance. Verify focused workbook tests and safe Release build/test.",
+  "status": "pending",
+  "risk_level": "medium",
+  "acceptance_criteria": [
+    "Excel export reuses the ERP-162 authorized bounded current page and finite SummaryMode validation; none retains the existing selected-column worksheet.",
+    "Supported amount modes add a separate current-page summary worksheet keyed by customer, original currency and optional status, with numeric known totals, blank unknown linked/uncovered/submitted totals, explicit known/unknown counts, visible empty note and formula-safe text; no cross-currency or AR totals.",
+    "Workbook tests cover all modes, denied access, invalid mode, multiple currencies, null evidence, empty/paged results, formula-leading labels and original worksheet preservation; document download scope and pass safe Release build/test."
+  ],
+  "criterion_path_map": {
+    "Excel export reuses the ERP-162 authorized bounded current page and finite SummaryMode validation; none retains the existing selected-column worksheet.": [
+      "src/ERP.Api/Controllers/DynamicShipmentFinanceReportController.cs"
+    ],
+    "Supported amount modes add a separate current-page summary worksheet keyed by customer, original currency and optional status, with numeric known totals, blank unknown linked/uncovered/submitted totals, explicit known/unknown counts, visible empty note and formula-safe text; no cross-currency or AR totals.": [
+      "src/ERP.Api/Controllers/DynamicShipmentFinanceReportController.cs"
+    ],
+    "Workbook tests cover all modes, denied access, invalid mode, multiple currencies, null evidence, empty/paged results, formula-leading labels and original worksheet preservation; document download scope and pass safe Release build/test.": [
+      "src/ERP.UnitTests/DynamicShipmentFinanceSummaryExcelTests.cs",
+      "docs/dynamic-shipment-finance-report.md"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/DynamicShipmentFinanceReportController.cs",
+    "src/ERP.UnitTests/DynamicShipmentFinanceSummaryExcelTests.cs",
+    "docs/dynamic-shipment-finance-report.md",
+    ".ai/**"
+  ],
+  "validation_profile": "safe",
+  "depends_on": [
+    "ERP-158",
+    "ERP-162",
+    "ERP-163"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "max_attempts": 3,
+  "completion_mode": "build",
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only bounded read-only report export"
+  },
+  "attempts": 0,
+  "created_at": "2026-09-30T03:10:15.078185Z"
+}
