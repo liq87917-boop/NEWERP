@@ -321,14 +321,14 @@ def recoverable_dirty_task(config: dict[str, Any], state: dict[str, Any]) -> tup
     current_business = set(business_changed_paths(config))
     if not current_business:
         return None
-    revision = run(["git", "rev-parse", "--short", "HEAD"]).stdout.strip()
+    revision = run(["git", "rev-parse", "HEAD:src"]).stdout.strip()
     maximum = int(config.get("autonomy", {}).get("max_supervised_recovery_cycles", 2))
     for path, task in entries:
         if task.get("status") not in RECOVERABLE_DIRTY_STATUSES:
             continue
         if (task.get("status") in {"retry_pending", "failed", "blocked"}
                 and int(task.get("supervised_recovery_cycles", 0) or 0) >= maximum
-                and task.get("exhausted_revalidation_head") == revision):
+                and task.get("exhausted_revalidation_source_tree") == revision):
             continue
         preserved = task.get("preserved_work") or {}
         expected = set(preserved.get("changed_paths") or [])
@@ -721,9 +721,9 @@ def run_next(dry_run: bool) -> int:
             and int(task.get("supervised_recovery_cycles", 0) or 0)
             >= int(config.get("autonomy", {}).get("max_supervised_recovery_cycles", 2))):
         # At the repair limit, permit one validation of preserved work per base
-        # revision. A baseline test fix can unblock it without another DeepSeek
-        # cycle; an unchanged failing revision cannot spin indefinitely.
-        task["exhausted_revalidation_head"] = run(["git", "rev-parse", "--short", "HEAD"]).stdout.strip()
+        # source revision. A baseline test fix can unblock it without another
+        # DeepSeek cycle; task-queue commits cannot trigger repeated validation.
+        task["exhausted_revalidation_source_tree"] = run(["git", "rev-parse", "HEAD:src"]).stdout.strip()
         save_json(task_path, task)
     cline_command = resolve_cline_command(config["cline_command"])
 
@@ -866,7 +866,7 @@ def run_next(dry_run: bool) -> int:
         set_state(state, phase="finalizing", current_task=task["id"], last_build=build_record, last_error=None, finish_reason="validation_passed_commit_pending")
         audit("task_finalizing", task=task["id"], changed_paths=business_changes)
         task["status"] = "completed"
-        for stale_key in ("blocker", "last_error", "failure_kind", "failed_transport_version", "recovery_context", "preserved_work", "quarantine", "exhausted_revalidation_head"):
+        for stale_key in ("blocker", "last_error", "failure_kind", "failed_transport_version", "recovery_context", "preserved_work", "quarantine", "exhausted_revalidation_head", "exhausted_revalidation_source_tree"):
             task.pop(stale_key, None)
         save_json(task_path, task)
         normalized = (

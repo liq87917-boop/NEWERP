@@ -126,20 +126,22 @@ class PipelineContracts(unittest.TestCase):
                 "autonomy": {"max_supervised_recovery_cycles": 2},
             }), encoding="utf-8")
             (control / ".ai" / "PROJECT_STATE.json").write_text('{"phase":"ready"}', encoding="utf-8")
+            (control / "src").mkdir()
+            (control / "src" / "README.txt").write_text("committed source", encoding="utf-8")
             for number, status in ((167, "pending"), (168, "pending"), (169, "pending")):
                 value = self.task(f"ERP-{number}", status, depends_on=["ERP-167"] if number == 168 else [])
                 (control / ".ai" / "tasks" / f"ERP-{number}.json").write_text(
                     json.dumps(value), encoding="utf-8")
-            git(control, "add", ".ai")
+            git(control, "add", ".ai", "src")
             git(control, "commit", "-m", "queue fixture")
             git(base, "clone", "--quiet", str(control), str(executor))
             git(executor, "config", "user.name", "Scheduler Test")
             git(executor, "config", "user.email", "scheduler@example.invalid")
-            head = git(executor, "rev-parse", "--short", "HEAD")
+            source_tree = git(executor, "rev-parse", "HEAD:src")
             task_path = executor / ".ai" / "tasks" / "ERP-167.json"
             failed = self.task("ERP-167", "retry_pending") | {
                 "supervised_recovery_cycles": 2,
-                "exhausted_revalidation_head": head,
+                "exhausted_revalidation_source_tree": source_tree,
                 "preserved_work": {"execution_copy": str(executor), "changed_paths": [
                     ".ai/tasks/ERP-167.json", "src/ERP.Api/Feature.cs"]},
             }
@@ -432,19 +434,19 @@ class PipelineContracts(unittest.TestCase):
             item = orchestrator.recoverable_dirty_task({}, {"current_task": None})
         self.assertEqual("ERP-096", item[1]["id"])
 
-    def test_exhausted_preserved_work_revalidates_only_once_per_revision(self):
+    def test_exhausted_preserved_work_revalidates_only_once_per_source_tree(self):
         task = self.task("ERP-167", "retry_pending") | {
             "preserved_work": {"changed_paths": ["src/ERP.Api/Program.cs"]},
             "supervised_recovery_cycles": 2,
-            "exhausted_revalidation_head": "oldhead",
+            "exhausted_revalidation_source_tree": "oldtree",
         }
         config = {"autonomy": {"max_supervised_recovery_cycles": 2}}
         with patch.object(orchestrator, "all_tasks", return_value=[(Path("ERP-167.json"), task)]), \
              patch.object(orchestrator, "business_changed_paths", return_value=["src/ERP.Api/Program.cs"]), \
              patch.object(orchestrator, "validate_task"), \
-             patch.object(orchestrator, "run", return_value=type("Result", (), {"stdout": "newhead\n"})()):
+             patch.object(orchestrator, "run", return_value=type("Result", (), {"stdout": "newtree\n"})()):
             self.assertIsNotNone(orchestrator.recoverable_dirty_task(config, {"current_task": None}))
-            task["exhausted_revalidation_head"] = "newhead"
+            task["exhausted_revalidation_source_tree"] = "newtree"
             self.assertIsNone(orchestrator.recoverable_dirty_task(config, {"current_task": None}))
 
     def test_recovery_evidence_prefers_active_executor_logs(self):

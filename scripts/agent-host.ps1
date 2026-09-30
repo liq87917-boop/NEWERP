@@ -162,7 +162,7 @@ function Get-RecoverablePreservedWork {
         if (@($businessPaths | Where-Object { $_ -notin $expected }).Count -gt 0) { continue }
         $cycles = [int]$task.supervised_recovery_cycles
         if ($task.status -in @('retry_pending', 'failed', 'blocked') -and $cycles -ge $maximum -and
-            [string]$task.exhausted_revalidation_head -eq [string]$GitInfo.Sha) { continue }
+            [string]$task.exhausted_revalidation_source_tree -eq [string]$GitInfo.SourceTree) { continue }
         return $task
     }
     return $null
@@ -225,6 +225,7 @@ function Get-DependencySafeRunnableTask {
 function Get-GitInfo {
     $branchResult = Invoke-Git @('branch', '--show-current')
     $shaResult = Invoke-Git @('rev-parse', '--short', 'HEAD')
+    $sourceTreeResult = Invoke-Git @('rev-parse', 'HEAD:src')
     $statusResult = Invoke-Git @('status', '--porcelain')
     $branch = $branchResult[1].Trim()
     $sha = $shaResult[1].Trim()
@@ -246,6 +247,7 @@ function Get-GitInfo {
     return [pscustomobject]@{
         Branch = $branch
         Sha = $sha
+        SourceTree = $sourceTreeResult[1].Trim()
         Dirty = $dirty
         Ahead = $ahead
         Behind = $behind
@@ -930,7 +932,7 @@ try {
         $recoveryKey = $null
         if ($recoverExisting) {
             $recoveryTask = if ($recoverPreserved) { $recoverPreserved } else { $head }
-            $recoveryKey = "$($recoveryTask.id)|$($gitInfo.Sha)|$($recoveryTask.status)|$($recoveryTask.supervised_recovery_cycles)|$($recoveryTask.exhausted_revalidation_head)|$($state.phase)|$([string]$state.blocker)"
+            $recoveryKey = "$($recoveryTask.id)|$($gitInfo.SourceTree)|$($recoveryTask.status)|$($recoveryTask.supervised_recovery_cycles)|$($recoveryTask.exhausted_revalidation_source_tree)|$($state.phase)|$([string]$state.blocker)"
         }
 
         $canStartWithDirty = $recoverExisting -and ($lastRecoveryAttemptKey -ne $recoveryKey)

@@ -77,7 +77,7 @@ def continue_after_exhausted_failure(control_root: Path, active_root: Path) -> d
     _, configured, target = workspace_settings(control_root, config)
     if selected_executor(control_root, configured) != active_root:
         raise RuntimeError("Executor changed while continuation was being prepared")
-    revision = git(active_root, "rev-parse", "--short", "HEAD").stdout.strip()
+    source_tree = git(active_root, "rev-parse", "HEAD:src").stdout.strip()
     maximum = int(config.get("autonomy", {}).get("max_supervised_recovery_cycles", 2))
     tasks_dir = active_root / ".ai" / "tasks"
     tasks = [json.loads(path.read_text(encoding="utf-8")) for path in sorted(tasks_dir.glob("ERP-*.json"))]
@@ -85,7 +85,7 @@ def continue_after_exhausted_failure(control_root: Path, active_root: Path) -> d
     exhausted = [task for task in tasks if
                  task.get("status") in {"retry_pending", "failed", "blocked", "error"}
                  and int(task.get("supervised_recovery_cycles", 0) or 0) >= maximum
-                 and task.get("exhausted_revalidation_head") == revision
+                 and task.get("exhausted_revalidation_source_tree") == source_tree
                  and Path((task.get("preserved_work") or {}).get("execution_copy", "")).resolve() == active_root]
     if len(exhausted) != 1:
         return {"status": "not_needed", "reason": "no unique exhausted preserved task"}
