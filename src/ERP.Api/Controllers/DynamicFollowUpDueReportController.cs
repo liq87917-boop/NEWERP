@@ -17,6 +17,7 @@ namespace ERP.Api.Controllers;
 /// <item><b>POST /api/dynamic-follow-up-due-report</b>：按选定字段与有界筛选（as-of 日期 / 提前天数 / 可选到期状态）预览当前账号数据范围内的跟进证据，稳定分页。</item>
 /// <item><b>POST /api/dynamic-follow-up-due-report/export</b>：导出当前选定页为 Excel（xlsx，只读，复用有界授权预览与选定列顺序）。</item>
 /// <item><b>POST /api/dynamic-follow-up-due-report/pdf</b>：导出当前选定页为分页中文 PDF（只读，复用有界授权预览与选定列顺序，宽列集跨页拆分）。</item>
+/// <item><b>POST /api/dynamic-follow-up-due-report/status-summary</b>：导出筛选集状态汇总为 Excel（只读，仅已逾期 / 今日到期 / 即将到期计数，不含任何明细行）。</item>
 /// </list>
 /// <para>复用 ERP-192 的「跟进提醒」菜单授权与 <see cref="SalespersonDataScopeService"/>（ERP-097）业务员数据范围；
 /// 每次目录 / 预览请求都重新校验身份、菜单授权与业务员数据范围（fail closed），查询由 <see cref="ReportService"/> 只读完成，
@@ -99,6 +100,73 @@ public class DynamicFollowUpDueReportController : ControllerBase
         var bytes = DynamicFollowUpDuePdfExporter.Export(page);
         return File(bytes, "application/pdf", $"FollowUpDue_{DateTime.Now:yyyyMMddHHmmss}.pdf");
     }
+
+    /// <summary>
+    /// 导出筛选集状态汇总为 Excel（ERP-203，只读）：复用同一有界、已授权预览，仅导出筛选集（分页前全量）的
+    /// 已逾期 / 今日到期 / 即将到期三项状态计数，不含任何明细行；工作表标注 as-of 日期、筛选条件与范围口径。
+    /// 数值计数写入数值单元格，文本做公式注入转义；每次请求重新校验身份 / 跟进提醒菜单授权 / 业务员数据范围 /
+    /// 字段 / 筛选 / 分页（fail closed）。授权撤销或无效请求返回错误、不返回任何工作簿。
+    /// <para>全程只读，不写库、不执行任意 SQL；请求由既有 <c>OperationLogMiddleware</c> 记录审计。</para>
+    /// </summary>
+    [HttpPost("status-summary")]
+    public async Task<IActionResult> ExportStatusSummary([FromBody] DynamicFollowUpDueReportRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var page = await BuildPageAsync(request);
+        var bytes = BuildStatusSummaryWorkbook(request, page);
+        return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            $"FollowUpDueStatusSummary_{DateTime.Now:yyyyMMddHHmmss}.xlsx");
+    }
+
+    /// <summary>汇总表「项目 / 值」两列布局的列键与列表头（计数列使用数值单元格）</summary>
+    private const string SummaryLabelKey = "label";
+    private const string SummaryValueKey = "value";
+    private const string SummaryLabelTitle = "项目";
+    private const string SummaryValueTitle = "值";
+
+    /// <summary>
+    /// 生成筛选集状态汇总工作簿（ERP-203，只读）：只包含 as-of 日期 / 筛选条件 / 范围口径标签与三项状态计数 + 合计，
+    /// 不含任何明细行或范围外数据；计数取自同一有界、已授权预览的 <see cref="DynamicFollowUpDueReportPageDto.DueStatusTotals"/>
+    /// （分页前全量），文本统一做公式注入转义。
+    /// </summary>
+    private static byte[] BuildStatusSummaryWorkbook(
+        DynamicFollowUpDueReportRequest request, DynamicFollowUpDueReportPageDto page)
+    {
+        var totals = page.DueStatusTotals
+            ?? DynamicFollowUpDueReportRules.BuildDueStatusTotals(0, 0, 0);
+
+        var asOf = DynamicFollowUpDueReportRules.NormalizeAsOfDate(request.AsOfDate);
+        var rows = new List<Dictionary<string, object?>>
+        {
+            SummaryRow(DynamicFollowUpDueReportRules.SummaryAsOfLabel, asOf.ToString("yyyy-MM-dd")),
+            SummaryRow(DynamicFollowUpDueReportRules.SummaryFilterLabel,
+                DynamicFollowUpDueReportRules.BuildSummaryFilterContext(request)),
+            SummaryRow(DynamicFollowUpDueReportRules.SummaryScopeLabel,
+                DynamicFollowUpDueReportRules.SummaryScopeText),
+            SummaryRow(DynamicFollowUpDueReportRules.DueOverdueText, totals.Overdue),
+            SummaryRow(DynamicFollowUpDueReportRules.DueTodayText, totals.Today),
+            SummaryRow(DynamicFollowUpDueReportRules.DueUpcomingText, totals.Upcoming),
+            SummaryRow(DynamicFollowUpDueReportRules.SummaryTotalLabel,
+                totals.Overdue + totals.Today + totals.Upcoming),
+        };
+
+        var columns = new List<(string Key, string Title)>
+        {
+            (SummaryLabelKey, SummaryLabelTitle),
+            (SummaryValueKey, SummaryValueTitle),
+        };
+
+        return ExcelExporter.ExportRows(DynamicFollowUpDueReportRules.SummarySheetName, rows, columns);
+    }
+
+    /// <summary>汇总表单行：标签与值都做公式注入转义（文本保持字面、数值原样写入对应类型单元格）</summary>
+    private static Dictionary<string, object?> SummaryRow(string label, object? value)
+        => new(StringComparer.Ordinal)
+        {
+            [SummaryLabelKey] = DynamicFollowUpDueReportRules.EscapeFormulaLeading(label),
+            [SummaryValueKey] = DynamicFollowUpDueReportRules.EscapeFormulaLeading(value),
+        };
 
     /// <summary>分组计数工作表名称（ERP-198，仅 dueStatus / salesman 分组时追加）</summary>
     private const string GroupCountSheetName = "分组计数";

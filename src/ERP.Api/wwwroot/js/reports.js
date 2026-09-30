@@ -757,6 +757,59 @@ async function fudDesExportPdf() {
   }
 }
 
+/* 下载筛选集状态汇总为 Excel（ERP-203，只读）：复用当前筛选请求体 POST /api/dynamic-follow-up-due-report/status-summary；
+   成功（xlsx 附件）触发下载；授权 / 无效 / 网络失败在结果区可见，不下载任何内容。不要求先预览：接口会重跑有界授权预览。 */
+async function fudDesExportStatusSummary() {
+  const state = fudDesBuildState(FUD_DYN.page);
+  const filterError = fudDesFilterError(state);
+  if (filterError) {
+    fudDesRenderResult(fudDesErrorHtml('invalid', filterError));
+    return;
+  }
+  const req = fudDesBuildRequest(state);
+  fudDesRenderResult(fudDesLoadingHtml());
+
+  try {
+    const headers = { 'Content-Type': 'application/json' };
+    const token = typeof localStorage !== 'undefined' ? (localStorage.getItem('erp_token') || '') : '';
+    if (token) headers['Authorization'] = 'Bearer ' + token;
+    const resp = await fetch('/api/dynamic-follow-up-due-report/status-summary', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(req),
+    });
+
+    const contentType = (resp.headers.get('content-type') || '');
+    if (contentType.indexOf('spreadsheetml') >= 0) {
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+      a.href = url;
+      a.download = '动态跟进提醒状态汇总_' + dateStr + '.xlsx';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      fudDesRenderResult('<div class="pd-hint">已下载筛选集状态汇总 Excel（xlsx），请查看下载。</div>');
+      return;
+    }
+
+    let envelope = null;
+    try { envelope = await resp.json(); } catch (e) { /* 忽略解析失败 */ }
+    const code = envelope && envelope.code;
+    const message = (envelope && envelope.message) || '下载失败';
+    if (code === 2000 || code === 2003) {
+      if (typeof logout === 'function') logout();
+      fudDesRenderResult(fudDesErrorHtml('unauthorized', message));
+      return;
+    }
+    fudDesRenderResult(fudDesErrorHtml(fudDesKindOfCode(code), message));
+  } catch (err) {
+    fudDesRenderResult(fudDesErrorHtml('network', (err && err.message) || '无法连接到服务器'));
+  }
+}
+
 /* 翻页（有界：最小第 1 页） */
 function fudDesPage(delta) {
   const page = (FUD_DYN.view ? FUD_DYN.view.page : FUD_DYN.page) + delta;
@@ -819,6 +872,7 @@ function openFollowUpDueDesigner() {
         <button class="btn btn-neutral btn-sm" onclick="fudDesToggleAll(false)">清空</button>
         <button class="btn btn-neutral" onclick="fudDesExport()" title="导出当前页为 Excel（选定列，复用当前筛选与分页）">📥 导出 Excel（当前页）</button>
         <button class="btn btn-neutral" onclick="fudDesExportPdf()" title="导出当前页为中文 PDF（选定列，复用当前筛选与分页）">📥 导出 PDF（当前页）</button>
+        <button class="btn btn-neutral" onclick="fudDesExportStatusSummary()" title="下载当前筛选集的状态汇总 Excel（已逾期/今日到期/即将到期计数，不含明细行）">📥 状态汇总 Excel</button>
         <button class="btn btn-primary" onclick="fudDesPreview(1)">预览</button>
       </div>
     </div>

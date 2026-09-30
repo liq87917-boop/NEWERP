@@ -344,6 +344,49 @@ public static class DynamicFollowUpDueReportRules
         int overdue, int today, int upcoming)
         => new(DueStatusTotalsLabel, overdue, today, upcoming);
 
+    // ==================== 5.3 筛选集状态汇总 Excel（ERP-203） ====================
+
+    /// <summary>筛选集状态汇总工作表名（ERP-203：只导出筛选集状态计数，不导出任何明细行）</summary>
+    public const string SummarySheetName = "跟进提醒状态汇总";
+
+    /// <summary>汇总表「as-of 日期」行标签</summary>
+    public const string SummaryAsOfLabel = "as-of 日期";
+
+    /// <summary>汇总表「筛选条件」行标签</summary>
+    public const string SummaryFilterLabel = "筛选条件";
+
+    /// <summary>汇总表「范围口径」行标签</summary>
+    public const string SummaryScopeLabel = "范围口径";
+
+    /// <summary>汇总表范围口径文案：强调计数覆盖全量匹配授权行、明细仍分页、不含明细行</summary>
+    public const string SummaryScopeText =
+        "计数覆盖当前账号有权限的全部匹配跟进记录（分页前）；明细仍按页展示，本表不导出任何明细行";
+
+    /// <summary>汇总表「合计」行标签</summary>
+    public const string SummaryTotalLabel = "合计";
+
+    /// <summary>
+    /// 汇总表筛选条件文案（ERP-203）：按与预览相同的规范化口径渲染 as-of 日期 / 提前天数 / 到期状态 / 客户 Id / 关键字，
+    /// 使工作表明确标注其筛选上下文（不含任何 SQL、连接串或范围外信息）。
+    /// </summary>
+    public static string BuildSummaryFilterContext(DynamicFollowUpDueReportRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var asOf = NormalizeAsOfDate(request.AsOfDate);
+        var dueStatus = NormalizeDueStatus(request.DueStatus);
+        var dueStatusText = dueStatus switch
+        {
+            DueOverdue => DueOverdueText,
+            DueToday => DueTodayText,
+            DueUpcoming => DueUpcomingText,
+            _ => "全部状态",
+        };
+        var customerIdText = request.CustomerId.HasValue ? request.CustomerId.Value.ToString() : "全部";
+        var keywordText = string.IsNullOrWhiteSpace(request.Keyword) ? "全部" : request.Keyword.Trim();
+        return $"as-of {asOf:yyyy-MM-dd}；提前天数 {request.AheadDays}；到期状态 {dueStatusText}；客户 Id {customerIdText}；关键字 {keywordText}";
+    }
+
     // ==================== 6. Excel 导出（ERP-195） ====================
 
     /// <summary>电子表格公式注入风险首字符（OWASP：= / + / - / @ 及制表符 / 回车 / 换行）</summary>

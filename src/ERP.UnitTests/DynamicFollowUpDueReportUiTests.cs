@@ -443,5 +443,49 @@ public class DynamicFollowUpDueReportUiTests
         Assert.DoesNotContain("SqlCommand", drill);
         Assert.DoesNotContain("localStorage.setItem", drill);
     }
+
+    // ==================== 14. 状态汇总下载（ERP-203） ====================
+
+    [Fact]
+    public void 状态汇总_入口_设计器提供下载按钮_不新增菜单或脚本注册()
+    {
+        var js = Script;
+
+        Assert.Contains("function fudDesExportStatusSummary()", js);
+        Assert.Contains("onclick=\"fudDesExportStatusSummary()\"", js);
+        Assert.Contains("/api/dynamic-follow-up-due-report/status-summary", js);
+    }
+
+    [Fact]
+    public void 状态汇总_复用当前筛选请求_无自由SQL_不要求先预览()
+    {
+        var js = Script;
+
+        var fn = Segment(js, "function fudDesExportStatusSummary()", "/* 翻页（有界：最小第 1 页） */");
+        Assert.Contains("fudDesBuildState(FUD_DYN.page)", fn);
+        Assert.Contains("fudDesFilterError(state)", fn);
+        Assert.Contains("fudDesBuildRequest(state)", fn);
+        Assert.Contains("method: 'POST'", fn);
+        Assert.DoesNotContain("fudDesExport()", fn);
+        Assert.DoesNotContain("FromSql", fn);
+        Assert.DoesNotContain("ExecuteSql", fn);
+        Assert.DoesNotContain("SqlCommand", fn);
+        Assert.DoesNotContain("localStorage.setItem", fn);
+    }
+
+    [Fact]
+    public void 状态汇总_成功下载xlsx附件_授权无效网络失败可见()
+    {
+        var js = Script;
+
+        var fn = Segment(js, "function fudDesExportStatusSummary()", "/* 翻页（有界：最小第 1 页） */");
+        Assert.Contains("contentType.indexOf('spreadsheetml') >= 0", fn);
+        Assert.Contains("URL.createObjectURL(blob)", fn);
+        Assert.Contains("a.download = '动态跟进提醒状态汇总_'", fn);
+        Assert.Contains("fudDesErrorHtml('unauthorized', message)", fn);
+        Assert.Contains("fudDesErrorHtml('invalid', filterError)", fn);
+        Assert.Contains("fudDesErrorHtml(fudDesKindOfCode(code), message)", fn);
+        Assert.Contains("fudDesErrorHtml('network', (err && err.message) || '无法连接到服务器')", fn);
+    }
 }
 

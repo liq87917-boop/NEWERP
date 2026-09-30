@@ -1,7 +1,7 @@
 {
   "id": "ERP-203",
   "title": "Download a scoped follow-up status summary as Excel",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "low",
   "description": "A salesperson downloads the current filtered-set overdue/today/upcoming totals as a small Excel summary from the dynamic follow-up designer. Add a dedicated bounded endpoint that reruns the existing authorized preview and derives its status totals, never reading unscoped records; it does not silently export all detail rows. Label the worksheet with as-of date, filter context and the fact that counts span all matching authorized rows while details remain paged. Use ExcelExporter for typed numeric counts and formula-safe text, and existing HTTP OperationLogMiddleware for audit. Revoked/invalid requests return no file. Development only: no schema or migration edits, production SQL or real database execution, arbitrary SQL, business writes, secrets, deployment or browser acceptance. Verify focused workbook/UI tests and safe Release build/test.",
   "acceptance_criteria": [
@@ -36,6 +36,6 @@
     "reason": ""
   },
   "max_attempts": 3,
-  "attempts": 0,
+  "attempts": 1,
   "created_at": "2026-09-30T10:19:11.226130Z"
 }
