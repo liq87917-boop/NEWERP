@@ -58,6 +58,7 @@ $lastSyncMessage = 'not synced yet'
 $lastCiText = 'GitHub CLI not checked'
 $lastCiAt = Get-Date '2000-01-01'
 $lastRecoveryAttemptKey = $null
+$lastIsolationAttemptKey = $null
 $selfRestartRequested = $false
 $screenInitialized = $false
 $lastScreen = @()
@@ -154,10 +155,14 @@ function Get-RecoverablePreservedWork {
         if ($task.status -notin @('retry', 'retry_pending', 'in_progress', 'code_ready', 'finalizing', 'failed', 'blocked')) { continue }
         if (-not $task.preserved_work -or -not $task.preserved_work.changed_paths) { continue }
         $expected = @($task.preserved_work.changed_paths | ForEach-Object { [string]$_ -replace '\\', '/' })
+        if ($task.recovery_context -and $task.recovery_context.baseline_test_fix -and
+            $task.recovery_context.baseline_test_fix.baseline_confirmed -eq $true) {
+            $expected += @($task.recovery_context.repair_allowed_paths)
+        }
         if (@($businessPaths | Where-Object { $_ -notin $expected }).Count -gt 0) { continue }
         $cycles = [int]$task.supervised_recovery_cycles
         if ($task.status -in @('retry_pending', 'failed', 'blocked') -and $cycles -ge $maximum -and
-            [string]$task.exhausted_revalidation_head -eq [string]$GitInfo.Sha) { continue }
+            [string]$task.exhausted_revalidation_source_tree -eq [string]$GitInfo.SourceTree) { continue }
         return $task
     }
     return $null
@@ -198,9 +203,29 @@ function Test-TaskRunnable {
     return $true
 }
 
+function Get-DependencySafeRunnableTask {
+    param([object[]]$Tasks)
+    $byId = @{}
+    foreach ($task in $Tasks) { $byId[[string]$task.id] = $task }
+    foreach ($task in $Tasks) {
+        if (-not (Test-TaskRunnable $task)) { continue }
+        $ready = $true
+        foreach ($dependency in $task.depends_on) {
+            if (-not $byId.ContainsKey([string]$dependency) -or
+                $byId[[string]$dependency].status -ne 'completed') {
+                $ready = $false
+                break
+            }
+        }
+        if ($ready) { return $task }
+    }
+    return $null
+}
+
 function Get-GitInfo {
     $branchResult = Invoke-Git @('branch', '--show-current')
     $shaResult = Invoke-Git @('rev-parse', '--short', 'HEAD')
+    $sourceTreeResult = Invoke-Git @('rev-parse', 'HEAD:src')
     $statusResult = Invoke-Git @('status', '--porcelain')
     $branch = $branchResult[1].Trim()
     $sha = $shaResult[1].Trim()
@@ -222,6 +247,7 @@ function Get-GitInfo {
     return [pscustomobject]@{
         Branch = $branch
         Sha = $sha
+        SourceTree = $sourceTreeResult[1].Trim()
         Dirty = $dirty
         Ahead = $ahead
         Behind = $behind
@@ -241,6 +267,22 @@ function Get-LocalChangedPaths {
         if ($payload) { $paths += $payload.Replace('\', '/') }
     }
     return @($paths | Sort-Object -Unique)
+}
+
+function Test-ControlOnlyDirtyTree {
+    $paths = Get-LocalChangedPaths
+    if ($null -eq $paths -or $paths.Count -eq 0) { return $false }
+    try {
+        $config = Get-Content $configPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    } catch { return $false }
+    foreach ($path in $paths) {
+        $allowed = $false
+        foreach ($pattern in $config.orchestrator_paths) {
+            if ($path -like ([string]$pattern)) { $allowed = $true; break }
+        }
+        if (-not $allowed) { return $false }
+    }
+    return $true
 }
 
 function Get-IncomingPaths {
@@ -862,6 +904,7 @@ try {
         $state = Get-ProjectState
         $tasks = @(Get-Tasks)
         $head = Get-QueueHead $tasks
+        $runnable = Get-DependencySafeRunnableTask $tasks
         $recoverableFailure = Get-RecoverableFailure $tasks
         $gitInfo = Get-GitInfo
 
@@ -878,6 +921,7 @@ try {
             $state = Get-ProjectState
             $tasks = @(Get-Tasks)
             $head = Get-QueueHead $tasks
+            $runnable = Get-DependencySafeRunnableTask $tasks
             $recoverableFailure = Get-RecoverableFailure $tasks
             $gitInfo = Get-GitInfo
         }
@@ -904,14 +948,59 @@ try {
         $recoveryKey = $null
         if ($recoverExisting) {
             $recoveryTask = if ($recoverPreserved) { $recoverPreserved } else { $head }
-            $recoveryKey = "$($recoveryTask.id)|$($gitInfo.Sha)|$($state.phase)|$([string]$state.blocker)"
+            $recoveryKey = "$($recoveryTask.id)|$($gitInfo.SourceTree)|$($recoveryTask.status)|$($recoveryTask.supervised_recovery_cycles)|$($recoveryTask.exhausted_revalidation_source_tree)|$($state.phase)|$([string]$state.blocker)"
         }
 
         $canStartWithDirty = $recoverExisting -and ($lastRecoveryAttemptKey -ne $recoveryKey)
-        $worktreeAllowsStart = (-not $gitInfo.Dirty) -or $canStartWithDirty
+        $worktreeAllowsStart = (-not $gitInfo.Dirty) -or $canStartWithDirty -or (Test-ControlOnlyDirtyTree)
+
+        # A failed task can exhaust repair while its guarded edits must be kept.
+        # Move independent development to a clean sibling clone; the failed
+        # checkout and its complete evidence remain untouched for later repair.
+        $isolationKey = "$($gitInfo.Sha)|$($state.updated_at)|$($head.id)"
+        if (-not $NoExecute -and -not $pipelineProcess -and -not $paused -and
+            $gitInfo.Dirty -and -not $recoverExisting -and $null -ne $runnable -and
+            $lastIsolationAttemptKey -ne $isolationKey) {
+            $lastIsolationAttemptKey = $isolationKey
+            try {
+                $continuationRaw = & py -3 $workspaceManager continue --root $controlRoot --executor $root
+                if ($LASTEXITCODE -eq 0) {
+                    $continuation = ($continuationRaw -join [Environment]::NewLine) | ConvertFrom-Json
+                    if ($continuation.status -eq 'continued') {
+                        $root = [string]$continuation.path
+                        $workspaceInfo.path = $root
+                        $scriptDir = Join-Path $root 'scripts'
+                        $statePath = Join-Path $root '.ai\PROJECT_STATE.json'
+                        $configPath = Join-Path $root '.ai\config.json'
+                        $tasksDir = Join-Path $root '.ai\tasks'
+                        $logsDir = Join-Path $root '.ai\logs'
+                        $pipelineScript = Join-Path $scriptDir 'run-pipeline.ps1'
+                        $orchestratorScript = Join-Path $scriptDir 'ai_orchestrator.py'
+                        $outLog = Join-Path $logsDir 'agent-pipeline.out.log'
+                        $errLog = Join-Path $logsDir 'agent-pipeline.err.log'
+                        Set-Location $root
+                        $state = Get-ProjectState
+                        $tasks = @(Get-Tasks)
+                        $head = Get-QueueHead $tasks
+                        $runnable = Get-DependencySafeRunnableTask $tasks
+                        $gitInfo = Get-GitInfo
+                        $recoverableFailure = Get-RecoverableFailure $tasks
+                        $recoverPreserved = $null
+                        $recoverExisting = $false
+                        $worktreeAllowsStart = -not $gitInfo.Dirty
+                        $lastRecoveryAttemptKey = $null
+                        $lastSyncMessage = "isolated $($continuation.failed_task); continuing $($continuation.next_task)"
+                    }
+                } else {
+                    Add-Content -Path $errLog -Value ("Executor continuation failed: " + ($continuationRaw -join ' '))
+                }
+            } catch {
+                Add-Content -Path $errLog -Value ("Executor continuation failed: " + $_.Exception.Message)
+            }
+        }
 
         if (-not $NoExecute -and -not $pipelineProcess -and -not $paused -and $worktreeAllowsStart -and $gitInfo.Branch -in $managedBranches) {
-            if ($recoverPush -or $recoverExisting -or $recoverableFailure -or (Test-TaskRunnable $head)) {
+            if ($recoverPush -or $recoverExisting -or $recoverableFailure -or $null -ne $runnable) {
                 try {
                     if ($recoverExisting) {
                         $lastRecoveryAttemptKey = $recoveryKey

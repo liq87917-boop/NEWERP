@@ -4,10 +4,14 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import fnmatch
+import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
+import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -237,18 +241,19 @@ def recovery_evidence(task: dict[str, Any]) -> dict[str, Any]:
         failure_kind = "path_guard_failure"
     elif not failure_kind and "no checkpointable business changes" in str(summary).lower():
         failure_kind = "no_checkpoint_changes"
-    evidence_logs = LOGS_DIR
+    # The active executor owns the current attempt. Control-root logs are only
+    # historical fallback evidence; preferring them hid ERP-167's actual failure.
+    attempt_logs = sorted(LOGS_DIR.glob(f"{task_id}-attempt-*.jsonl"))[-3:]
+    validation_logs = sorted(LOGS_DIR.glob(f"{task_id}-validation-*.log"))[-3:]
     control_root = os.environ.get("AI_CONTROL_ROOT")
-    if control_root:
+    if control_root and not (attempt_logs or validation_logs):
         control_logs = Path(control_root) / ".ai" / "logs"
-        if control_logs.is_dir():
-            evidence_logs = control_logs
-    attempt_logs = sorted(evidence_logs.glob(f"{task_id}-attempt-*.jsonl"))[-3:]
-    validation_logs = sorted(evidence_logs.glob(f"{task_id}-validation-*.log"))[-3:]
+        attempt_logs = sorted(control_logs.glob(f"{task_id}-attempt-*.jsonl"))[-3:]
+        validation_logs = sorted(control_logs.glob(f"{task_id}-validation-*.log"))[-3:]
     preserved = task.get("preserved_work") or {}
     def evidence_path(path: Path) -> str:
         try:
-            return str(path.relative_to(ROOT))
+            return path.relative_to(ROOT).as_posix()
         except ValueError:
             return str(path.resolve())
     state = load_json(STATE_PATH) if STATE_PATH.exists() else {}
@@ -273,6 +278,96 @@ def recovery_evidence(task: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def confirmed_baseline_unit_failure(task: dict[str, Any], evidence: dict[str, Any]) -> dict[str, Any] | None:
+    """Grant an exact test-file repair only after reproducing it at clean HEAD.
+
+    A feature task cannot silently broaden its own path guard. This independent
+    remediation scope is limited to one tracked unit test whose same failure
+    reproduces without the feature's uncommitted changes.
+    """
+    if evidence.get("failure_kind") != "validation_failure":
+        return None
+    build = evidence.get("latest_build") or {}
+    reference = build.get("log") or (evidence.get("validation_logs") or [None])[-1]
+    if not reference:
+        return None
+    validation_log = Path(reference)
+    if not validation_log.is_absolute():
+        validation_log = ROOT / validation_log
+    if not validation_log.is_file():
+        return None
+    output = validation_log.read_text(encoding="utf-8", errors="replace")
+    failed = re.findall(r"\[xUnit\.net[^\]]*\]\s+([^\s]+)\s+\[FAIL\]", output)
+    if len(failed) != 1:
+        return None
+    match = re.search(r"\bin\s+([^\r\n]+?\.cs):line\s+\d+", output)
+    if not match:
+        return None
+    try:
+        path = Path(match.group(1)).resolve().relative_to(ROOT.resolve()).as_posix()
+    except ValueError:
+        return None
+    if not path.startswith("src/ERP.UnitTests/") or not path.endswith("Tests.cs"):
+        return None
+    if any(fnmatch.fnmatchcase(path, pattern) for pattern in task.get("allowed_paths", [])):
+        return None
+    if run(["git", "ls-files", "--error-unmatch", "--", path], capture=True).returncode != 0:
+        return None
+    if run(["git", "status", "--porcelain", "--", path], capture=True).stdout.strip():
+        return None
+    revision = run(["git", "rev-parse", "HEAD"], capture=True).stdout.strip()
+    if not revision:
+        return None
+    failure_values = re.search(r"Expected:\s*(\S+)\s+Actual:\s*(\S+)", output)
+    signature = hashlib.sha256(f"{revision}|{failed[0]}|{failure_values.group(0) if failure_values else ''}".encode()).hexdigest()[:12]
+    baseline_log = LOGS_DIR / f"{task['id']}-baseline-{signature}.log"
+    if baseline_log.is_file():
+        baseline_output = baseline_log.read_text(encoding="utf-8", errors="replace")
+    else:
+        try:
+            with tempfile.TemporaryDirectory(prefix="newerp-baseline-") as directory:
+                temporary = Path(directory).resolve()
+                if not temporary.is_relative_to(Path(tempfile.gettempdir()).resolve()):
+                    raise RuntimeError("Baseline checkout escaped the temporary directory")
+                checkout = temporary / "checkout"
+                clone = subprocess.run(
+                    ["git", "clone", "--shared", "--quiet", "--no-checkout", str(ROOT), str(checkout)],
+                    cwd=ROOT, capture_output=True, text=True, timeout=120,
+                )
+                if clone.returncode != 0:
+                    return None
+                checkout_result = subprocess.run(
+                    ["git", "checkout", "--quiet", "--detach", revision],
+                    cwd=checkout, capture_output=True, text=True, timeout=120,
+                )
+                if checkout_result.returncode != 0:
+                    return None
+                baseline = subprocess.run(
+                    ["dotnet", "test", "src/ERP.UnitTests/ERP.UnitTests.csproj", "-c", "Release",
+                     "--filter", f"FullyQualifiedName={failed[0]}", "--verbosity", "minimal"],
+                    cwd=checkout, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                    text=True, errors="replace", timeout=300,
+                )
+                baseline_output = baseline.stdout or ""
+                if baseline.returncode == 0:
+                    return None
+        except (OSError, subprocess.TimeoutExpired, RuntimeError):
+            return None
+        LOGS_DIR.mkdir(parents=True, exist_ok=True)
+        baseline_log.write_text(baseline_output, encoding="utf-8")
+    if failed[0].split(".")[-1] not in baseline_output or not re.search(r"\bFAIL(?:ED)?\b|失败", baseline_output, re.IGNORECASE):
+        return None
+    if failure_values and not all(value in baseline_output for value in failure_values.groups()):
+        return None
+    return {
+        "path": path,
+        "test": failed[0],
+        "baseline_revision": revision,
+        "baseline_log": str(baseline_log.relative_to(ROOT)),
+        "baseline_confirmed": True,
+    }
+
+
 def recover_blocked_with_deepseek(config: dict[str, Any]) -> list[str]:
     """Turn recoverable failures into bounded, evidence-rich DeepSeek repair work."""
     autonomy = config.get("autonomy", {})
@@ -293,6 +388,9 @@ def recover_blocked_with_deepseek(config: dict[str, Any]) -> list[str]:
         if cycles >= maximum:
             continue
         evidence = recovery_evidence(task)
+        baseline_fix = confirmed_baseline_unit_failure(task, evidence)
+        if baseline_fix:
+            evidence["baseline_test_fix"] = baseline_fix
         remediation_id = f"{task['id']}-RECOVERY-{cycles + 1}"
         task.setdefault("recovery_history", []).append({
             "remediation_task": remediation_id,
@@ -306,11 +404,19 @@ def recover_blocked_with_deepseek(config: dict[str, Any]) -> list[str]:
         task["recovery_context"] = {
             "remediation_task": remediation_id,
             **evidence,
+            "repair_allowed_paths": [baseline_fix["path"]] if baseline_fix else [],
             "instruction": (
                 "DeepSeek supervisor recovery: inspect the referenced complete logs, diagnose the root cause, "
                 "and implement a different safe repair within allowed_paths. Rebuild and rerun the configured tests; "
                 "if validation fails, use the newest log as the next repair input. Do not repeat the failed approach. "
-                "Do not edit task/state/result files or relax production and irreversible-operation gates."
+                "Do not edit task/state/result files or relax production and irreversible-operation gates. "
+                + (
+                    f"Clean-HEAD replay confirms {baseline_fix['test']} also fails without this feature. "
+                    f"The separate {remediation_id} repair may change only the exact baseline test file "
+                    f"{baseline_fix['path']} in addition to the original task paths; keep the original assertions "
+                    "meaningful and fix deterministic fixtures rather than hiding a failure. "
+                    if baseline_fix else ""
+                )
             ),
         }
         task.pop("blocker", None)

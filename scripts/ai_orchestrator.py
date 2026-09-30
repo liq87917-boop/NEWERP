@@ -233,9 +233,19 @@ def dependencies_completed(task: dict[str, Any], config: dict[str, Any]) -> tupl
 
 def path_violations(task: dict[str, Any], config: dict[str, Any]) -> list[str]:
     violations = []
+    recovery = task.get("recovery_context") or {}
+    baseline = recovery.get("baseline_test_fix") or {}
+    repair_paths = recovery.get("repair_allowed_paths") or []
+    if (baseline.get("baseline_confirmed") is True
+            and repair_paths == [baseline.get("path")]
+            and str(baseline.get("path", "")).startswith("src/ERP.UnitTests/")
+            and str(baseline.get("path", "")).endswith("Tests.cs")):
+        allowed = [*task["allowed_paths"], *repair_paths]
+    else:
+        allowed = task["allowed_paths"]
     for path in changed_paths():
         if matches(path, config["ignored_change_paths"]) or matches(path, config.get("orchestrator_paths", [])): continue
-        if not matches(path, task["allowed_paths"]): violations.append(f"outside allowed_paths: {path}")
+        if not matches(path, allowed): violations.append(f"outside allowed_paths: {path}")
         if matches(path, config["protected_paths"]) and not gate_is_approved(task, config): violations.append(f"protected without approved gate: {path}")
     return violations
 
@@ -311,17 +321,21 @@ def recoverable_dirty_task(config: dict[str, Any], state: dict[str, Any]) -> tup
     current_business = set(business_changed_paths(config))
     if not current_business:
         return None
-    revision = run(["git", "rev-parse", "--short", "HEAD"]).stdout.strip()
+    revision = run(["git", "rev-parse", "HEAD:src"]).stdout.strip()
     maximum = int(config.get("autonomy", {}).get("max_supervised_recovery_cycles", 2))
     for path, task in entries:
         if task.get("status") not in RECOVERABLE_DIRTY_STATUSES:
             continue
         if (task.get("status") in {"retry_pending", "failed", "blocked"}
                 and int(task.get("supervised_recovery_cycles", 0) or 0) >= maximum
-                and task.get("exhausted_revalidation_head") == revision):
+                and task.get("exhausted_revalidation_source_tree") == revision):
             continue
         preserved = task.get("preserved_work") or {}
         expected = set(preserved.get("changed_paths") or [])
+        recovery = task.get("recovery_context") or {}
+        baseline = recovery.get("baseline_test_fix") or {}
+        if baseline.get("baseline_confirmed") is True:
+            expected.update(recovery.get("repair_allowed_paths") or [])
         if task.get("id") != current and not expected:
             continue
         if expected and not current_business.issubset(expected):
@@ -460,8 +474,21 @@ def checkpoint_control_files(message: str) -> None:
     if unexpected: raise RuntimeError("Unrelated changes prevent control checkpoint: " + ", ".join(unexpected))
     control = [path for path in paths if matches(path, config.get("orchestrator_paths", []))]
     if not control: return
-    subprocess.run(["git", "add", "--", *control], cwd=ROOT, check=True)
-    if subprocess.run(["git", "commit", "-m", message], cwd=ROOT).returncode != 0: raise RuntimeError("Control checkpoint failed")
+    for attempt in range(3):
+        added = subprocess.run(["git", "add", "--", *control], cwd=ROOT, capture_output=True, text=True)
+        if added.returncode == 0: break
+        if "index.lock" not in added.stderr or attempt == 2:
+            raise RuntimeError("Control checkpoint add failed: " + added.stderr.strip())
+        time.sleep(0.2 * (attempt + 1))
+    staged = git_lines("diff", "--cached", "--name-only")
+    outside = [path for path in staged if not matches(path, config.get("orchestrator_paths", []))]
+    if outside: raise RuntimeError("Unrelated staged changes prevent control checkpoint: " + ", ".join(outside))
+    for attempt in range(3):
+        committed = subprocess.run(["git", "commit", "-m", message], cwd=ROOT, capture_output=True, text=True)
+        if committed.returncode == 0: return
+        if "index.lock" not in committed.stderr or attempt == 2:
+            raise RuntimeError("Control checkpoint failed: " + committed.stderr.strip())
+        time.sleep(0.2 * (attempt + 1))
 
 
 def status() -> int:
@@ -605,12 +632,20 @@ def recover_push_pending(config: dict[str, Any], state: dict[str, Any]) -> int |
         return 5
     if pending_paths:
         checkpoint_control_files("chore: checkpoint pending push recovery state")
-    pull = subprocess.run(["git", "pull", "--rebase"], cwd=ROOT)
-    if pull.returncode != 0:
+    branch = run(["git", "branch", "--show-current"]).stdout.strip()
+    fetch = subprocess.run(["git", "fetch", "origin", branch], cwd=ROOT)
+    if fetch.returncode != 0:
         set_state(state, phase="remote_degraded", current_task=None, blocker=None, finish_reason="remote_sync_degraded", remote_sync={"status": "pending", "reason": "pull_failed"})
         audit("remote_sync_degraded", task=task_id, reason="pull_failed")
         checkpoint_control_files("chore: record degraded remote sync")
         return 0
+    behind = subprocess.run(["git", "merge-base", "--is-ancestor", "HEAD", f"origin/{branch}"], cwd=ROOT)
+    if behind.returncode == 0:
+        merged = subprocess.run(["git", "merge", "--ff-only", f"origin/{branch}"], cwd=ROOT)
+        if merged.returncode != 0:
+            set_state(state, phase="remote_degraded", current_task=None, blocker=None, finish_reason="remote_sync_degraded", remote_sync={"status": "pending", "reason": "fast_forward_failed"})
+            checkpoint_control_files("chore: record degraded remote sync")
+            return 0
     push = subprocess.run(["git", "push"], cwd=ROOT)
     if push.returncode != 0:
         set_state(state, phase="remote_degraded", current_task=None, blocker=None, finish_reason="remote_sync_degraded", remote_sync={"status": "pending", "reason": "push_failed"})
@@ -627,6 +662,15 @@ def run_next(dry_run: bool) -> int:
     config, state = load_json(CONFIG_PATH), load_json(STATE_PATH)
     recovered = recover_push_pending(config, state)
     if recovered is not None: return recovered
+    # A failed remote push or transient Git lock may leave only scheduler state
+    # dirty. Checkpoint that state so the next independent task can still run.
+    pending = changed_paths()
+    if not dry_run and pending and all(
+        matches(path, config.get("orchestrator_paths", [])) or matches(path, config["ignored_change_paths"])
+        for path in pending
+    ):
+        checkpoint_control_files("chore: resume after interrupted control checkpoint")
+        state = load_json(STATE_PATH)
 
     normalized_failed_head = normalize_failed_head_for_deferred_browser(config, state)
     if normalized_failed_head is not None:
@@ -707,9 +751,9 @@ def run_next(dry_run: bool) -> int:
             and int(task.get("supervised_recovery_cycles", 0) or 0)
             >= int(config.get("autonomy", {}).get("max_supervised_recovery_cycles", 2))):
         # At the repair limit, permit one validation of preserved work per base
-        # revision. A baseline test fix can unblock it without another DeepSeek
-        # cycle; an unchanged failing revision cannot spin indefinitely.
-        task["exhausted_revalidation_head"] = run(["git", "rev-parse", "--short", "HEAD"]).stdout.strip()
+        # source revision. A baseline test fix can unblock it without another
+        # DeepSeek cycle; task-queue commits cannot trigger repeated validation.
+        task["exhausted_revalidation_source_tree"] = run(["git", "rev-parse", "HEAD:src"]).stdout.strip()
         save_json(task_path, task)
     cline_command = resolve_cline_command(config["cline_command"])
 
@@ -852,7 +896,7 @@ def run_next(dry_run: bool) -> int:
         set_state(state, phase="finalizing", current_task=task["id"], last_build=build_record, last_error=None, finish_reason="validation_passed_commit_pending")
         audit("task_finalizing", task=task["id"], changed_paths=business_changes)
         task["status"] = "completed"
-        for stale_key in ("blocker", "last_error", "failure_kind", "failed_transport_version", "recovery_context", "preserved_work", "quarantine", "exhausted_revalidation_head"):
+        for stale_key in ("blocker", "last_error", "failure_kind", "failed_transport_version", "recovery_context", "preserved_work", "quarantine", "exhausted_revalidation_head", "exhausted_revalidation_source_tree"):
             task.pop(stale_key, None)
         save_json(task_path, task)
         normalized = (
