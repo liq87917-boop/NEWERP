@@ -1,0 +1,41 @@
+{
+  "id": "ERP-203",
+  "title": "Download a scoped follow-up status summary as Excel",
+  "status": "pending",
+  "risk_level": "low",
+  "description": "A salesperson downloads the current filtered-set overdue/today/upcoming totals as a small Excel summary from the dynamic follow-up designer. Add a dedicated bounded endpoint that reruns the existing authorized preview and derives its status totals, never reading unscoped records; it does not silently export all detail rows. Label the worksheet with as-of date, filter context and the fact that counts span all matching authorized rows while details remain paged. Use ExcelExporter for typed numeric counts and formula-safe text, and existing HTTP OperationLogMiddleware for audit. Revoked/invalid requests return no file. Development only: no schema or migration edits, production SQL or real database execution, arbitrary SQL, business writes, secrets, deployment or browser acceptance. Verify focused workbook/UI tests and safe Release build/test.",
+  "acceptance_criteria": [
+    "A dedicated Excel summary endpoint reruns current-user menu, scope and request validation and returns only filtered-set status counts; denied or invalid calls return no workbook.",
+    "The workbook labels status counts, filter context and all-matching-row scope accurately, uses numeric cells and safe text, and contains no detail rows or out-of-scope data.",
+    "The designer downloads with current filters and reports errors; focused workbook/UI tests and safe Release build/test pass."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/DynamicFollowUpDueReportController.cs",
+    "src/ERP.Application/Services/DynamicFollowUpDueReportRules.cs",
+    "src/ERP.Api/wwwroot/js/reports.js",
+    "src/ERP.UnitTests/DynamicFollowUpDueStatusSummaryExcelTests.cs",
+    "src/ERP.UnitTests/DynamicFollowUpDueReportUiTests.cs"
+  ],
+  "validation_profile": "safe",
+  "depends_on": [
+    "ERP-202"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "completion_mode": "build",
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": [],
+    "test_filter": "Collection=UiTests",
+    "minimum_screenshots": 1
+  },
+  "human_gate": {
+    "required": false,
+    "status": "not_required",
+    "level": "L1",
+    "reason": ""
+  },
+  "max_attempts": 3,
+  "attempts": 0,
+  "created_at": "2026-09-30T10:19:11.226130Z"
+}

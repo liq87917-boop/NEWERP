@@ -1,0 +1,42 @@
+{
+  "id": "ERP-200",
+  "title": "Filter scoped follow-up reminders by customer and keyword",
+  "status": "pending",
+  "risk_level": "medium",
+  "description": "A salesperson narrows the dynamic follow-up due report to one customer ID and/or a short customer-name or follow-up-subject keyword before preview and download. Validate a positive customer ID and a trimmed keyword of at most 80 characters before source reads; apply both as parameterized EF filters after the existing current-user menu and SalespersonDataScopeService filter, before count/order/page. Preserve existing as-of, ahead-days, status, grouping and selected columns; a scoped user must never discover an unassigned customer through filtering. Designer keeps the new filters across page, Excel and PDF requests and shows validation errors. Existing HTTP operation logging audits requests. Development only: no schema or migration edits, production SQL or real database execution, arbitrary SQL, business writes, secrets, deployment or browser acceptance. Verify focused in-memory/UI tests and safe Release build/test.",
+  "acceptance_criteria": [
+    "A positive customer ID and bounded keyword are validated before data reads; invalid values fail clearly while each call still checks current-user menu and salesperson scope.",
+    "Customer and keyword predicates run on the scoped query before total, ordering and pagination; no unassigned or null-customer rows leak to restricted users.",
+    "The designer preserves both filters through preview, page changes, Excel and PDF downloads; focused filter/scope/UI tests and safe Release build/test pass."
+  ],
+  "allowed_paths": [
+    "src/ERP.Application/DTOs/DynamicFollowUpDueReportDtos.cs",
+    "src/ERP.Application/Services/DynamicFollowUpDueReportRules.cs",
+    "src/ERP.Application/Services/ReportService.Extra4.cs",
+    "src/ERP.Api/wwwroot/js/reports.js",
+    "src/ERP.UnitTests/DynamicFollowUpDueReportTests.cs",
+    "src/ERP.UnitTests/DynamicFollowUpDueReportUiTests.cs"
+  ],
+  "validation_profile": "safe",
+  "depends_on": [
+    "ERP-199"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "completion_mode": "build",
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": [],
+    "test_filter": "Collection=UiTests",
+    "minimum_screenshots": 1
+  },
+  "human_gate": {
+    "required": false,
+    "status": "not_required",
+    "level": "L1",
+    "reason": ""
+  },
+  "max_attempts": 3,
+  "attempts": 0,
+  "created_at": "2026-09-30T10:19:11.225718Z"
+}

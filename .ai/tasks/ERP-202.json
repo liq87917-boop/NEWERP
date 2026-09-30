@@ -1,0 +1,38 @@
+{
+  "id": "ERP-202",
+  "title": "Drill down from follow-up status totals to scoped details",
+  "status": "pending",
+  "risk_level": "low",
+  "description": "A user clicks an overdue, today or upcoming total in the dynamic follow-up due designer and sees the matching authorized detail page. The click sets only a finite due-status filter, resets to page one, retains customer, keyword, as-of, ahead-days, selected fields and grouping, and invokes the existing server preview. Show active status and provide a clear way back to all statuses; preserve denied, validation, empty and network feedback. No client-side raw data cache, arbitrary SQL, business write or permission expansion; existing preview audit remains in force. Development only: no schema or migration edits, production SQL or real database execution, secrets, deployment or browser acceptance. Verify focused UI contract tests and safe Release build/test.",
+  "acceptance_criteria": [
+    "Each status total opens page one with only the finite matching due-status filter while retaining all other selected fields and filters.",
+    "The active drill-down state and return-to-all control are clear; empty, denied, validation and network states remain visible with safe text rendering.",
+    "Focused UI contract tests cover status choice, reset, retained filters and errors; safe Release build/test passes."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/wwwroot/js/reports.js",
+    "src/ERP.UnitTests/DynamicFollowUpDueReportUiTests.cs"
+  ],
+  "validation_profile": "safe",
+  "depends_on": [
+    "ERP-201"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "completion_mode": "build",
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": [],
+    "test_filter": "Collection=UiTests",
+    "minimum_screenshots": 1
+  },
+  "human_gate": {
+    "required": false,
+    "status": "not_required",
+    "level": "L1",
+    "reason": ""
+  },
+  "max_attempts": 3,
+  "attempts": 0,
+  "created_at": "2026-09-30T10:19:11.226022Z"
+}
