@@ -461,6 +461,20 @@ function fudDesGroupsHtml(view) {
     <ul role="list" style="list-style:none;padding:0 8px;margin:4px 0 8px">${bars}</ul>`;
 }
 
+/* 筛选集到期状态合计（ERP-201）：显示后端返回的「分页前全量」已逾期 / 今日到期 / 即将到期三项计数；
+   与「本页」分组计数在口径上区分（合计为筛选集全量，分组仅当前页）；后端未返回 dueStatusTotals 时不渲染，
+   三项计数全部转义（数字零值安全兜底）。 */
+function fudDesDueStatusTotalsHtml(view) {
+  const totals = view && view.dueStatusTotals;
+  if (!totals) return '';
+  const label = (totals.label || '筛选集到期状态合计');
+  const overdue = Number(totals.overdue) || 0;
+  const today = Number(totals.today) || 0;
+  const upcoming = Number(totals.upcoming) || 0;
+  const total = overdue + today + upcoming;
+  return `<div class="pd-hint" role="img" aria-label="${fudDesEsc(label)}：已逾期 ${overdue}，今日到期 ${today}，即将到期 ${upcoming}，合计 ${total}" style="margin-top:8px">🧮 ${fudDesEsc(label)}：已逾期 <b>${overdue}</b> · 今日到期 <b>${today}</b> · 即将到期 <b>${upcoming}</b>（合计 ${total}）</div>`;
+}
+
 /* 错误提示（授权撤销 / 未登录 / 无效请求 / 网络失败分别可见，且不暴露任何数据） */
 function fudDesErrorHtml(kind, message) {
   const labels = {
@@ -492,8 +506,9 @@ function fudDesResultHtml(view) {
     ? `<div class="text-muted" style="margin:6px 0">共 ${view.total} 行 · 第 ${view.page} 页 · 每页 ${view.pageSize} 行 · 共 ${view.totalPages} 页${view.truncated ? ' · 后续仍有分页' : ''}</div>`
     : '';
   const groups = fudDesGroupsHtml(view);
+  const totals = fudDesDueStatusTotalsHtml(view);
   const empty = view && (!view.rows || view.rows.length === 0) ? fudDesEmptyHtml(view) : '';
-  return `${readOnly}${boundary}${disclaimer}${summary}${groups}${empty}${fudDesTableHtml(view)}${fudDesPagingHtml(view)}`;
+  return `${readOnly}${boundary}${disclaimer}${summary}${totals}${groups}${empty}${fudDesTableHtml(view)}${fudDesPagingHtml(view)}`;
 }
 
 /* 字段选择器：仅由目录白名单渲染为复选框，无自由填写的字段名 */

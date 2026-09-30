@@ -1,3 +1,4 @@
+using System.Linq.Expressions;
 using ERP.Application.DTOs;
 using ERP.Application.Interfaces;
 using ERP.Domain.Entities;
@@ -83,7 +84,15 @@ public partial class ReportService
         var filtered = ApplyCustomerAndKeyword(scoped, customerId, keyword);
         filtered = ApplyDueStatus(filtered, dueStatus, asOfDate);
 
-        var total = await filtered.CountAsync();
+        // 筛选集到期状态合计（ERP-201）：在数据库端、分页前聚合已逾期 / 今日到期 / 即将到期三项计数。
+        // 三项之和恒等于 Total，均作用于同一已授权筛选集，不随请求页码变化；与「当前页」分组计数区分。
+        var overdue = await filtered.CountAsync(
+            DueStatusPredicate(DynamicFollowUpDueReportRules.DueOverdue, asOfDate));
+        var today = await filtered.CountAsync(
+            DueStatusPredicate(DynamicFollowUpDueReportRules.DueToday, asOfDate));
+        var upcoming = await filtered.CountAsync(
+            DueStatusPredicate(DynamicFollowUpDueReportRules.DueUpcoming, asOfDate));
+        var total = overdue + today + upcoming;
 
         var items = await filtered
             .OrderBy(x => x.NextFollowDate)   // 逾期最久（下次跟进日期最早）排最前
@@ -103,6 +112,7 @@ public partial class ReportService
 
         // 4) 页面分组计数（ERP-197）：只统计「当前授权预览页」的已分页行，绝不外推为整表总数
         var groups = DynamicFollowUpDueReportRules.BuildGroupCounts(items, groupBy, asOfDate);
+        var dueStatusTotals = DynamicFollowUpDueReportRules.BuildDueStatusTotals(overdue, today, upcoming);
 
         var totalPages = total == 0 ? 0 : (int)Math.Ceiling(total / (double)request.PageSize);
         var truncated = (request.Page - 1) * request.PageSize + rows.Count < total;
@@ -120,7 +130,8 @@ public partial class ReportService
             DynamicFollowUpDueReportRules.BoundaryText,
             DynamicFollowUpDueReportRules.DisclaimerText,
             groupBy,
-            groups);
+            groups,
+            dueStatusTotals);
     }
 
     /// <summary>把规范化到期状态映射为数据库端 <c>NextFollowDate</c> 与 as-of 日期的比较（全部可翻译为 SQL）</summary>
@@ -129,15 +140,24 @@ public partial class ReportService
     {
         if (dueStatus is null)
             return source;
+        return source.Where(DueStatusPredicate(dueStatus, asOfDate));
+    }
 
+    /// <summary>
+    /// 到期状态 → 数据库端谓词（ERP-201 复用）：已逾期 / 今日到期 / 即将到期与
+    /// <see cref="DynamicFollowUpDueReportRules.DueDays"/> 口径一致；筛选与筛选集计数共用同一谓词，保证二者同源。
+    /// </summary>
+    private static Expression<Func<CustomerFollowUp, bool>> DueStatusPredicate(
+        string dueStatus, DateTime asOfDate)
+    {
         var day = asOfDate.Date;
         return dueStatus switch
         {
-            DynamicFollowUpDueReportRules.DueOverdue => source.Where(x => x.NextFollowDate!.Value < day),
+            DynamicFollowUpDueReportRules.DueOverdue => x => x.NextFollowDate!.Value < day,
             DynamicFollowUpDueReportRules.DueToday =>
-                source.Where(x => x.NextFollowDate!.Value >= day && x.NextFollowDate!.Value < day.AddDays(1)),
-            DynamicFollowUpDueReportRules.DueUpcoming => source.Where(x => x.NextFollowDate!.Value >= day.AddDays(1)),
-            _ => source,
+                x => x.NextFollowDate!.Value >= day && x.NextFollowDate!.Value < day.AddDays(1),
+            DynamicFollowUpDueReportRules.DueUpcoming => x => x.NextFollowDate!.Value >= day.AddDays(1),
+            _ => x => true,
         };
     }
 

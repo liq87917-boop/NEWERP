@@ -334,6 +334,16 @@ public static class DynamicFollowUpDueReportRules
             .ToList();
     }
 
+    // ==================== 5.2 筛选集到期状态合计（ERP-201） ====================
+
+    /// <summary>筛选集到期状态合计的显式口径标签：强调「分页前全量」，与「本页」分组计数明确区分</summary>
+    public const string DueStatusTotalsLabel = "筛选集到期状态合计（分页前全量）";
+
+    /// <summary>把数据库端聚合的三项到期状态计数打包为筛选集合计 DTO（三项之和恒等于 Total）</summary>
+    public static DynamicFollowUpDueReportDueStatusTotalsDto BuildDueStatusTotals(
+        int overdue, int today, int upcoming)
+        => new(DueStatusTotalsLabel, overdue, today, upcoming);
+
     // ==================== 6. Excel 导出（ERP-195） ====================
 
     /// <summary>电子表格公式注入风险首字符（OWASP：= / + / - / @ 及制表符 / 回车 / 换行）</summary>

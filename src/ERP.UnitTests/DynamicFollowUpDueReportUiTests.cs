@@ -342,5 +342,44 @@ public class DynamicFollowUpDueReportUiTests
         Assert.Contains("关键字最多 80 个字符", js);
         Assert.Contains("fudDesErrorHtml('invalid', filterError)", js);
     }
+
+    // ==================== 12. 筛选集到期状态合计（ERP-201） ====================
+
+    [Fact]
+    public void 合计_渲染筛选集全量到期状态_与分组区分()
+    {
+        var js = Script;
+
+        Assert.Contains("function fudDesDueStatusTotalsHtml(", js);
+        Assert.Contains("view.dueStatusTotals", js);
+        Assert.Contains("totals.overdue", js);
+        Assert.Contains("totals.today", js);
+        Assert.Contains("totals.upcoming", js);
+        Assert.Contains("筛选集到期状态合计", js);
+        Assert.Contains("已逾期", js);
+        Assert.Contains("今日到期", js);
+        Assert.Contains("即将到期", js);
+        Assert.Contains("合计", js);
+
+        var result = Segment(js, "function fudDesResultHtml(", "function fudDesFieldChooserHtml(");
+        Assert.Contains("const totals = fudDesDueStatusTotalsHtml(view);", result);
+        Assert.Contains("${totals}", result);
+        Assert.Contains("const groups = fudDesGroupsHtml(view);", result);
+        Assert.Contains("${groups}", result);
+    }
+
+    [Fact]
+    public void 合计_缺失或空集_安全渲染_不含分组计数()
+    {
+        var js = Script;
+
+        var fn = Segment(js, "function fudDesDueStatusTotalsHtml(", "function fudDesErrorHtml(");
+        Assert.Contains("if (!totals) return '';", fn);
+        Assert.Contains("Number(totals.overdue) || 0", fn);
+        Assert.Contains("Number(totals.today) || 0", fn);
+        Assert.Contains("Number(totals.upcoming) || 0", fn);
+        Assert.Contains("fudDesEsc(label)", fn);
+        Assert.DoesNotContain("view.groups", fn);
+    }
 }
 

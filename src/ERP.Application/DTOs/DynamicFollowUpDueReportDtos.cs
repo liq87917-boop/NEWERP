@@ -67,6 +67,9 @@ public sealed record DynamicFollowUpDueReportCatalogDto(
 /// <see cref="Truncated"/> 表示本页之外仍有更多记录，<see cref="EmptyText"/> 在空页时显式说明。
 /// <para>ERP-197 新增 <see cref="GroupBy"/> / <see cref="Groups"/>：仅当请求分组（dueStatus / salesman）时，
 /// <see cref="Groups"/> 才给出「当前授权预览页」按分组键的行数分布（只统计本页，绝不外推为整表总数）；默认 none 时为空。</para>
+/// <para>ERP-201 新增 <see cref="DueStatusTotals"/>：对同一范围内、经客户 Id / 关键字 / as-of 日期 / 提前天数 /
+/// 可选到期状态筛选后的结果集（分页前）在数据库端聚合的已逾期 / 今日到期 / 即将到期三项计数，三项之和恒等于
+/// <see cref="Total"/>，与请求页码无关；与 <see cref="Groups"/>（仅当前页）在口径上明确区分。</para>
 /// </summary>
 public sealed record DynamicFollowUpDueReportPageDto(
     List<DynamicFollowUpDueReportFieldDto> Columns,
@@ -81,7 +84,8 @@ public sealed record DynamicFollowUpDueReportPageDto(
     string BoundaryText,
     string DisclaimerText,
     string GroupBy = "none",
-    List<DynamicFollowUpDueReportGroupDto>? Groups = null);
+    List<DynamicFollowUpDueReportGroupDto>? Groups = null,
+    DynamicFollowUpDueReportDueStatusTotalsDto? DueStatusTotals = null);
 
 /// <summary>
 /// 跟进提醒报表页面分组计数（ERP-197，只读）：当前授权预览页内按分组键聚合的行数分布。
@@ -92,3 +96,15 @@ public sealed record DynamicFollowUpDueReportGroupDto(
     string Key,
     string Label,
     int Count);
+
+/// <summary>
+/// 跟进提醒报表「筛选集」到期状态合计（ERP-201，只读）：对同一范围内、经客户 Id / 关键字 / as-of 日期 /
+/// 提前天数 / 可选到期状态筛选后的结果集，在分页前于数据库端聚合的已逾期 / 今日到期 / 即将到期三项计数。
+/// <para>三项之和恒等于 <see cref="DynamicFollowUpDueReportPageDto.Total"/>，与请求页码无关；与「当前页」分组计数
+/// （<see cref="DynamicFollowUpDueReportPageDto.Groups"/>）在口径上区分：本合计为筛选集全量，Groups 仅统计当前页。</para>
+/// </summary>
+public sealed record DynamicFollowUpDueReportDueStatusTotalsDto(
+    string Label,
+    int Overdue,
+    int Today,
+    int Upcoming);

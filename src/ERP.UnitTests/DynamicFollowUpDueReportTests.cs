@@ -816,4 +816,132 @@ public class DynamicFollowUpDueReportTests
         Assert.Equal(before, db.CustomerFollowUps.Count());
         Assert.False(db.ChangeTracker.HasChanges());
     }
+
+    [Fact]
+    public async Task 预览_筛选集合计_三项之和等于Total_不随页码变化()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedAuthorizedUser(db, "priv-user", "Priv", isSystemRole: true);
+        var c = SeedCustomer(db, "C001", "客户A");
+
+        SeedFollowUp(db, "FU-1", c.Id, "客户A", AsOf.AddDays(-2));   // 已逾期
+        SeedFollowUp(db, "FU-2", c.Id, "客户A", AsOf.AddDays(-1));   // 已逾期
+        SeedFollowUp(db, "FU-3", c.Id, "客户A", AsOf);               // 今日到期
+        SeedFollowUp(db, "FU-4", c.Id, "客户A", AsOf.AddDays(1));    // 即将到期
+        SeedFollowUp(db, "FU-5", c.Id, "客户A", AsOf.AddDays(3));    // 即将到期
+
+        var ctl = BuildController(db, user.Id);
+        var page1 = OkPage(await ctl.Preview(new DynamicFollowUpDueReportRequest
+        {
+            Fields = new List<string> { "customerName" }, AsOfDate = AsOf, AheadDays = 7, Page = 1, PageSize = 2
+        }));
+        var page2 = OkPage(await ctl.Preview(new DynamicFollowUpDueReportRequest
+        {
+            Fields = new List<string> { "customerName" }, AsOfDate = AsOf, AheadDays = 7, Page = 2, PageSize = 2
+        }));
+
+        Assert.NotNull(page1.DueStatusTotals);
+        Assert.Equal("筛选集到期状态合计（分页前全量）", page1.DueStatusTotals!.Label);
+        Assert.Equal(2, page1.DueStatusTotals.Overdue);
+        Assert.Equal(1, page1.DueStatusTotals.Today);
+        Assert.Equal(2, page1.DueStatusTotals.Upcoming);
+        Assert.Equal(5, page1.Total);
+        Assert.Equal(page1.Total,
+            page1.DueStatusTotals.Overdue + page1.DueStatusTotals.Today + page1.DueStatusTotals.Upcoming);
+
+        // 页码变化不影响筛选集合计（分页前全量）
+        Assert.Equal(page1.DueStatusTotals, page2.DueStatusTotals);
+        Assert.Equal(page1.Total, page2.Total);
+    }
+
+    [Fact]
+    public async Task 预览_筛选集合计_受限制业务员不泄露范围外与空客户()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedAuthorizedUser(db, "alice", "Sales");
+        var employee = SeedEmployee(db, "alice");
+        var otherEmployee = SeedEmployee(db, "bob");
+
+        var mine = SeedCustomer(db, "C001", "我的客户", employee.Id);
+        var other = SeedCustomer(db, "C002", "别人的客户", otherEmployee.Id);
+
+        SeedFollowUp(db, "FU-M1", mine.Id, "我的客户", AsOf.AddDays(-1));   // 已逾期（我的）
+        SeedFollowUp(db, "FU-M2", mine.Id, "我的客户", AsOf);               // 今日到期（我的）
+        SeedFollowUp(db, "FU-O1", other.Id, "别人的客户", AsOf.AddDays(-2)); // 范围外：已逾期
+        SeedFollowUp(db, "FU-NULL", null, "匿名客户", AsOf.AddDays(1));      // 空客户：即将到期
+
+        var ctl = BuildController(db, user.Id);
+        var page = OkPage(await ctl.Preview(new DynamicFollowUpDueReportRequest
+        {
+            Fields = new List<string> { "customerName" }, AsOfDate = AsOf, AheadDays = 7, Page = 1, PageSize = 20
+        }));
+
+        Assert.NotNull(page.DueStatusTotals);
+        Assert.Equal(2, page.Total);
+        Assert.Equal(1, page.DueStatusTotals!.Overdue);
+        Assert.Equal(1, page.DueStatusTotals.Today);
+        Assert.Equal(0, page.DueStatusTotals.Upcoming);
+        Assert.Equal(page.Total,
+            page.DueStatusTotals.Overdue + page.DueStatusTotals.Today + page.DueStatusTotals.Upcoming);
+        Assert.All(page.Rows, r => Assert.Equal("我的客户", (string)r["customerName"]!));
+    }
+
+    [Fact]
+    public async Task 预览_筛选集合计_尊重客户Id与关键字筛选()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedAuthorizedUser(db, "priv-user", "Priv", isSystemRole: true);
+        var a = SeedCustomer(db, "C001", "义乌A公司");
+        var b = SeedCustomer(db, "C002", "广州B公司");
+
+        SeedFollowUp(db, "FU-A1", a.Id, "义乌A公司", AsOf.AddDays(-1), subject: "圣诞饰品");  // 已逾期
+        SeedFollowUp(db, "FU-A2", a.Id, "义乌A公司", AsOf, subject: "义乌小商品");           // 今日到期
+        SeedFollowUp(db, "FU-B1", b.Id, "广州B公司", AsOf.AddDays(1), subject: "义乌小商品"); // 即将到期
+
+        var ctl = BuildController(db, user.Id);
+
+        var byKeyword = OkPage(await ctl.Preview(new DynamicFollowUpDueReportRequest
+        {
+            Fields = new List<string> { "customerName" }, AsOfDate = AsOf, AheadDays = 7, Keyword = "义乌"
+        }));
+        Assert.Equal(3, byKeyword.Total);
+        Assert.Equal(3,
+            byKeyword.DueStatusTotals!.Overdue + byKeyword.DueStatusTotals.Today + byKeyword.DueStatusTotals.Upcoming);
+
+        var byCustomer = OkPage(await ctl.Preview(new DynamicFollowUpDueReportRequest
+        {
+            Fields = new List<string> { "customerName" }, AsOfDate = AsOf, AheadDays = 7, CustomerId = a.Id
+        }));
+        Assert.Equal(2, byCustomer.Total);
+        Assert.Equal(1, byCustomer.DueStatusTotals!.Overdue);
+        Assert.Equal(1, byCustomer.DueStatusTotals.Today);
+        Assert.Equal(0, byCustomer.DueStatusTotals.Upcoming);
+        Assert.Equal(byCustomer.Total,
+            byCustomer.DueStatusTotals.Overdue + byCustomer.DueStatusTotals.Today + byCustomer.DueStatusTotals.Upcoming);
+    }
+
+    [Fact]
+    public async Task 预览_筛选集合计_尊重到期状态筛选()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedAuthorizedUser(db, "priv-user", "Priv", isSystemRole: true);
+        var c = SeedCustomer(db, "C001", "客户A");
+
+        SeedFollowUp(db, "FU-1", c.Id, "客户A", AsOf.AddDays(-1));   // 已逾期
+        SeedFollowUp(db, "FU-2", c.Id, "客户A", AsOf);               // 今日到期
+        SeedFollowUp(db, "FU-3", c.Id, "客户A", AsOf.AddDays(1));    // 即将到期
+
+        var ctl = BuildController(db, user.Id);
+        var page = OkPage(await ctl.Preview(new DynamicFollowUpDueReportRequest
+        {
+            Fields = new List<string> { "customerName" }, AsOfDate = AsOf, AheadDays = 7, DueStatus = "overdue"
+        }));
+
+        Assert.Equal(1, page.Total);
+        Assert.Equal(1, page.DueStatusTotals!.Overdue);
+        Assert.Equal(0, page.DueStatusTotals.Today);
+        Assert.Equal(0, page.DueStatusTotals.Upcoming);
+        Assert.Equal(page.Total,
+            page.DueStatusTotals.Overdue + page.DueStatusTotals.Today + page.DueStatusTotals.Upcoming);
+    }
 }
