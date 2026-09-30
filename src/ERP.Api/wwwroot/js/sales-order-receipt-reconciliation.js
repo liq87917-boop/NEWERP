@@ -535,6 +535,12 @@ const DRR_GROUP_OPTS = [
   { value: 'receiptEvidenceStatus', label: '按收款证据状态分组（未关联收款侧）' },
 ];
 
+/* 当前页金额汇总模式（与后端 NormalizeSummaryMode 白名单一致：none / customerCurrency） */
+const DRR_SUMMARY_MODE_OPTS = [
+  { value: 'none', label: '不汇总金额' },
+  { value: 'customerCurrency', label: '按客户 + 币种汇总金额' },
+];
+
 /* 默认每页条数（后端上限 200，由目录 maxPageSize 供给并钳制） */
 const DRR_DEFAULT_PAGE_SIZE = 20;
 const DRR_MAX_PAGE_SIZE = 200;
@@ -599,6 +605,23 @@ function drrGroupSelectHtml(groupBy) {
   return `<select id="drr-groupby" style="min-width:220px">${opts}</select>`;
 }
 
+/* 金额汇总模式规范化（fail closed）：只保留 ERP-172 白名单（none / customerCurrency），
+   缺失 / 空白 / 非法值一律回落 none（绝不进入请求） */
+function drrSummaryModeKey(value) {
+  const key = String(value == null ? '' : value).trim();
+  if (!key) return 'none';
+  const hit = DRR_SUMMARY_MODE_OPTS.find(m => m.value.toLowerCase() === key.toLowerCase());
+  return hit ? hit.value : 'none';
+}
+
+/* 金额汇总模式选择器：仅 ERP-172 白名单（fail closed，无自由输入） */
+function drrSummaryModeSelectHtml(summaryMode) {
+  const selected = drrSummaryModeKey(summaryMode);
+  const opts = DRR_SUMMARY_MODE_OPTS.map(m =>
+    `<option value="${drrEsc(m.value)}" ${m.value === selected ? 'selected' : ''}>${drrEsc(m.label)}</option>`).join('');
+  return `<select id="drr-summary-mode" style="min-width:220px">${opts}</select>`;
+}
+
 /* 组装有界预览请求体：字段 / 收款字段只来自目录、分页有界、筛选只取枚举白名单，绝不接受任意字段名或 SQL */
 function drrBuildRequest(state) {
   const fields = drrSelectFields(state.catalogFields, state.selectedKeys);
@@ -612,6 +635,7 @@ function drrBuildRequest(state) {
 
   const req = { fields, receiptFields, page, pageSize };
   req.groupBy = drrGroupKey(state.groupBy);
+  req.summaryMode = drrSummaryModeKey(state.summaryMode);
 
   const customerId = Number(state.customerId);
   if (Number.isFinite(customerId) && customerId > 0) req.customerId = customerId;
@@ -764,6 +788,80 @@ function drrGroupPanelsHtml(view) {
   return drrOrderGroupPanelHtml(view) + drrReceiptGroupPanelHtml(view);
 }
 
+/* 金额显示（自包含，避免依赖全局 fmtMoney 的加载顺序）：null / undefined / 空串 → 未知；
+   其余按两位小数原币显示（绝不换算） */
+function drrMoney(v) {
+  if (v === null || v === undefined || v === '') return '未知';
+  const n = Number(v);
+  if (!Number.isFinite(n)) return '未知';
+  return n.toFixed(2);
+}
+
+/* 金额 + 已知 / 未知行数（null 合计绝不回落为 0，显式保留未知语义） */
+function drrSummaryAmountHtml(amount, known, unknown) {
+  const amt = drrMoney(amount);
+  const k = (known === null || known === undefined) ? '未知' : String(known);
+  const u = (unknown === null || unknown === undefined) ? '未知' : String(unknown);
+  return `${drrEsc(amt)}（已知 ${drrEsc(k)} 行 / 未知 ${drrEsc(u)} 行）`;
+}
+
+/* 当前页订单金额汇总面板（ERP-173）：客户 + 原币强制分组边界；订单金额 / 已关联收款金额 / 未覆盖金额各自独立呈现，
+   任一行金额未知则整体显示「未知」（不是 0）并给出已知 / 未知行数；绝不跨币种合并 / 换算、绝不推断收款分配或应收余额 */
+function drrOrderSummaryPanelHtml(view) {
+  const mode = (view && view.summaryMode) || 'none';
+  if (mode !== 'customerCurrency' || !view) return '';
+  const items = Array.isArray(view.orderSummaries) ? view.orderSummaries : [];
+  const rows = items.map(s => {
+    const name = drrEsc((s && (s.customerName || ('客户 ' + s.customerId))) || '未知');
+    const currency = drrEsc((s && s.currency) || '未知');
+    const orderCount = (s && s.orderCount !== null && s.orderCount !== undefined && Number.isFinite(Number(s.orderCount)))
+      ? String(s.orderCount) : '未知';
+    const orderAmount = drrMoney(s && s.orderAmount);
+    const linked = drrSummaryAmountHtml(s && s.linkedReceiptAmount, s && s.knownLinkedReceiptAmountRows, s && s.unknownLinkedReceiptAmountRows);
+    const uncovered = drrSummaryAmountHtml(s && s.uncoveredAmount, s && s.knownUncoveredAmountRows, s && s.unknownUncoveredAmountRows);
+    return `<tr><td>${name}</td><td>${currency}</td><td class="text-right">${orderCount}</td><td class="text-right">${drrEsc(orderAmount)}</td><td class="text-right">${linked}</td><td class="text-right">${uncovered}</td></tr>`;
+  }).join('');
+  const empty = items.length === 0
+    ? '<tr><td colspan="6" class="empty">本页没有可汇总金额的订单证据（空页）。</td></tr>' : '';
+  return `<div class="pd-hint" style="margin:8px 0">`
+    + `<div style="font-weight:600;margin-bottom:6px">💰 本页订单金额汇总 · 按客户 + 原币（仅当前预览页，非全量合计）</div>`
+    + `<div class="text-muted" style="font-size:12px;margin-bottom:4px">金额只汇总当前授权预览页的订单证据；已关联 / 未覆盖收款证据合计只要任一行金额未知即整体显示「未知」（不是 0），绝不跨币种合并 / 换算、绝不推断收款分配或应收余额。</div>`
+    + `<table><thead><tr><th>客户</th><th>币种</th><th class="text-right">订单张数</th><th class="text-right">订单金额</th><th class="text-right">已关联收款金额</th><th class="text-right">未覆盖金额</th></tr></thead>`
+    + `<tbody>${rows}${empty}</tbody></table></div>`;
+}
+
+/* 当前页未关联收款金额汇总面板（ERP-173）：客户 + 原币 + 收款证据状态显式拆分；
+   active / pending / historical 不回落、不并入有效合计；截断标记显式保留；绝不跨币种合并 / 换算、绝不并入订单侧合计 */
+function drrReceiptSummaryPanelHtml(view) {
+  const mode = (view && view.summaryMode) || 'none';
+  if (mode !== 'customerCurrency' || !view) return '';
+  const items = Array.isArray(view.receiptSummaries) ? view.receiptSummaries : [];
+  const rows = items.map(s => {
+    const name = drrEsc((s && (s.customerName || ('客户 ' + s.customerId))) || '未知');
+    const currency = drrEsc((s && s.currency) || '未知');
+    const status = drrEsc((s && (SORR_EVIDENCE_LABELS[s.evidenceStatus] || s.evidenceStatus)) || '未知');
+    const count = (s && s.receiptCount !== null && s.receiptCount !== undefined && Number.isFinite(Number(s.receiptCount)))
+      ? String(s.receiptCount) : '未知';
+    const trunc = (s && s.truncated)
+      ? '<span style="color:#b45309;font-size:11px;margin-left:4px">（截断）</span>' : '';
+    return `<tr><td>${name}</td><td>${currency}</td><td>${status}</td><td class="text-right">${count}</td><td class="text-right">${drrEsc(drrMoney(s && s.amount))}${trunc}</td></tr>`;
+  }).join('');
+  const empty = items.length === 0
+    ? '<tr><td colspan="5" class="empty">本页没有可汇总金额的未关联收款证据（空页）。</td></tr>' : '';
+  return `<div class="pd-hint" style="margin:8px 0">`
+    + `<div style="font-weight:600;margin-bottom:6px">🧾 本页未关联收款金额汇总 · 按客户 + 原币 + 收款证据状态（仅当前预览页，非全量合计）</div>`
+    + `<div class="text-muted" style="font-size:12px;margin-bottom:4px">未关联收款金额只按收款单自身原币原样汇总；active / pending / historical 证据状态显式拆分（pending / historical 不并入有效合计），绝不跨币种合并 / 换算、绝不并入订单侧合计。</div>`
+    + `<table><thead><tr><th>客户</th><th>币种</th><th>收款证据状态</th><th class="text-right">收款单张数</th><th class="text-right">金额</th></tr></thead>`
+    + `<tbody>${rows}${empty}</tbody></table></div>`;
+}
+
+/* 两个独立金额汇总面板（订单 + 未关联收款），仅当前预览页、仅 customerCurrency 模式 */
+function drrSummaryPanelsHtml(view) {
+  const mode = (view && view.summaryMode) || 'none';
+  if (mode !== 'customerCurrency' || !view) return '';
+  return drrOrderSummaryPanelHtml(view) + drrReceiptSummaryPanelHtml(view);
+}
+
 /* 空结果提示 */
 function drrEmptyHtml() {
   return '<div class="empty" style="margin:8px 0">没有符合条件的订单证据（当前账号数据范围内的只读快照）。</div>';
@@ -794,7 +892,7 @@ function drrResultHtml(view) {
   const readOnly = view.readOnlyText ? `<div class="pd-hint">${drrEsc(view.readOnlyText)}</div>` : '';
   const boundary = view.boundaryText ? `<div class="pd-hint">${drrEsc(view.boundaryText)}</div>` : '';
   const disclaimer = view.disclaimerText ? `<div class="pd-hint" style="color:#64748b">${drrEsc(view.disclaimerText)}</div>` : '';
-  return `${readOnly}${boundary}${disclaimer}${drrGroupPanelsHtml(view)}${drrOrderSectionHtml(view)}${drrReceiptSectionHtml(view)}`;
+  return `${readOnly}${boundary}${disclaimer}${drrGroupPanelsHtml(view)}${drrSummaryPanelsHtml(view)}${drrOrderSectionHtml(view)}${drrReceiptSectionHtml(view)}`;
 }
 
 /* 字段选择器：仅由目录白名单渲染为复选框，无自由填写的字段名 */
@@ -979,7 +1077,7 @@ function drrRender() {
   </div>
 
   <div style="margin:10px 0">
-    <div style="font-weight:600;margin-bottom:6px">③ 有界筛选（客户 / 币种 / 订单日期 / 出货状态 / 收款链接 / 收款证据 / 订单状态 / 关键字 / 每页 / 当前页分组）</div>
+    <div style="font-weight:600;margin-bottom:6px">③ 有界筛选（客户 / 币种 / 订单日期 / 出货状态 / 收款链接 / 收款证据 / 订单状态 / 关键字 / 每页 / 当前页分组 / 金额汇总模式）</div>
     <div class="form-grid" style="grid-template-columns:repeat(3,1fr);gap:10px">
       <label>订单日期从 <input type="date" id="drr-date-from" value="${drrEsc(f.orderDateFrom || '')}" style="width:100%"></label>
       <label>至 <input type="date" id="drr-date-to" value="${drrEsc(f.orderDateTo || '')}" style="width:100%"></label>
@@ -992,6 +1090,7 @@ function drrRender() {
       <label>关键字 <input type="text" id="drr-keyword" value="${drrEsc(f.keyword || '')}" style="width:100%" placeholder="订单号 / 合同号 / 客户 PO 号"></label>
       <label>每页 <input type="number" id="drr-pagesize" value="${Number(f.pageSize)}" min="1" max="${maxPage}" style="width:100%"></label>
       <label>当前页分组 ${drrGroupSelectHtml(f.groupBy)}</label>
+      <label>金额汇总模式 ${drrSummaryModeSelectHtml(f.summaryMode)}</label>
     </div>
   </div>
 
@@ -1027,6 +1126,7 @@ function drrBuildState(page) {
     orderStatus: document.getElementById('drr-order-status').value,
     keyword: document.getElementById('drr-keyword').value,
     groupBy: document.getElementById('drr-groupby').value,
+    summaryMode: document.getElementById('drr-summary-mode').value,
     pageSize: document.getElementById('drr-pagesize').value,
     page: page || 1,
     maxPageSize: (DRR.catalog && DRR.catalog.maxPageSize) || DRR_MAX_PAGE_SIZE,
@@ -1258,11 +1358,19 @@ if (typeof module !== 'undefined' && module.exports) {
     drrResultHtml,
     drrFieldChooserHtml,
     drrKindOfCode,
+    DRR_SUMMARY_MODE_OPTS,
     drrGroupKey,
     drrGroupSelectHtml,
     drrOrderGroupPanelHtml,
     drrReceiptGroupPanelHtml,
     drrGroupPanelsHtml,
+    drrSummaryModeKey,
+    drrSummaryModeSelectHtml,
+    drrMoney,
+    drrSummaryAmountHtml,
+    drrOrderSummaryPanelHtml,
+    drrReceiptSummaryPanelHtml,
+    drrSummaryPanelsHtml,
     drrCsvCell,
     drrBuildCsv,
     drrExportExcel,

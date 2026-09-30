@@ -309,3 +309,28 @@ ERP-046 客户订单与收款核对证据。本功能为**开发期只读派生*
 
 - 后端契约单测：`DynamicReceiptReconciliationAmountSummaryTests.cs`（覆盖汇总模式白名单与非法拒绝、无菜单授权拒绝、受限制业务员范围、多币种隔离、订单 / 未关联收款证据独立、未知金额按未知、收款证据状态拆分、空页 / 分页边界、只读不写库与汇总 DTO 结构边界）。
 
+## 15. 前端当前页金额汇总面板（ERP-173，只读、有界）
+
+设计器工具栏新增**金额汇总模式**选择器（`id="drr-summary-mode"`），仅提供 ERP-172 服务端白名单键
+（`none` / `customerCurrency`，`drrSummaryModeKey` 规范化，缺失 / 空白 / 非法值一律回落 `none`，fail closed，
+绝不发送范围外模式）。预览与导出复用既有已授权有界预览请求，并在请求体携带选中的金额汇总模式 `summaryMode`
+（`drrBuildRequest` 组装，`drrBuildState` 从选择器读取）。
+
+预览成功后，结果区在既有两个独立证据分区（订单证据 / 未关联收款证据）**之上**渲染两个独立金额汇总面板
+（`drrOrderSummaryPanelHtml` / `drrReceiptSummaryPanelHtml`），仅在 `summaryMode === customerCurrency` 时渲染，
+明确标注**仅当前预览页，非全量合计**：
+
+- 订单金额汇总面板按客户 + 原币成行，展示订单张数、订单金额，以及已关联收款金额 / 未覆盖金额两列；
+  两列只要任一行金额未知（null）即整体显示「未知」（不是 0），并显式给出已知 / 未知行数（`drrSummaryAmountHtml`）。
+- 未关联收款金额汇总面板按客户 + 原币 + 收款证据状态成行，展示收款单张数与金额；active / pending / historical
+  证据状态显式保留（不回落到其它桶、不并入有效合计）；命中读取上限时金额旁显式渲染「（截断）」标记。
+- 客户名 / 币种 / 证据状态标签全部经 `drrEsc` HTML 转义；金额 / 张数未知（null）绝不回落为 0，显示「未知」；
+  原币金额两位小数原样展示、绝不跨币种合并 / 换算、绝不推断收款分配 / 应收余额；空页显示可见提示。
+- 权限不足 / 未登录 / 网络失败 / 无效请求复用既有 `drrErrorHtml` 失败态（fail closed，不渲染任何汇总数据、不保留旧数据）。
+
+### 15.1 前端测试
+
+- `tests/automation/dynamic_receipt_reconciliation_amount_summary_ui.test.js`：覆盖金额汇总模式规范化与选择器白名单、
+  scope-safe 请求携带金额汇总模式、两个独立金额汇总面板渲染（仅当前预览页、多币种 / null 未知 / 已知未知行数 / 截断 / 转义 / 空态）、
+  错误态与无任意 SQL / 跨币种合计。
+
