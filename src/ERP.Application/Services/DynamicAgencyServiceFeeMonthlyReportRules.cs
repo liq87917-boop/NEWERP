@@ -56,9 +56,10 @@ public static class DynamicAgencyServiceFeeMonthlyReportRules
     /// <summary>服务期间跨月不按期间分摊说明</summary>
     public const string NoProrationText = AgencyServiceFeeMonthlySummaryRules.NoProrationText;
 
-    /// <summary>分组计数范围说明（只统计当前授权预览页，非全量 / 非会计合计）</summary>
+    /// <summary>分组汇总范围说明（只统计当前授权预览页，非全量 / 非会计合计；计数与原币金额都是证据数字）</summary>
     public const string GroupCountScopeText =
-        "分组计数只统计当前授权预览页的月度汇总行，不覆盖整份报表；计数只是证据数字，不代表收入 / 应收 / 已收款等会计结论。";
+        "分组汇总只统计当前授权预览页的月度汇总行，不覆盖整份报表，也绝不跨币种、跨页合计；"
+        + "计数与原币金额（已登记 / 草稿 / 已作废分开列示）只是证据数字，不代表收入 / 应收 / 已收款等会计结论。";
 
     // ==================== 2. 字段白名单（有限、有序） ====================
 
@@ -205,7 +206,7 @@ public static class DynamicAgencyServiceFeeMonthlyReportRules
         return result;
     }
 
-    // ==================== 5. 分组计数（ERP-184） ====================
+    // ==================== 5. 分组汇总（ERP-184 / ERP-186） ====================
 
     /// <summary>
     /// 规范化分组键（fail closed）：空 / 留空 = 不分组（none）；仅接受 none / month / customer（大小写不敏感）；
@@ -226,8 +227,9 @@ public static class DynamicAgencyServiceFeeMonthlyReportRules
     }
 
     /// <summary>
-    /// 分组计数（ERP-184）：从「当前授权预览页」的 ERP-180 月度汇总行计算计数，原币严格隔离、绝不跨币种合并或换算；
-    /// 只统计当前页行数（RowCount）与已登记 / 草稿 / 已作废 / 总计张数，绝不做整份报表或会计合计。none / 空页返回空列表。
+    /// 分组汇总（ERP-184 / ERP-186）：从「当前授权预览页」的 ERP-180 月度汇总行计算计数与原币金额，原币严格隔离、绝不跨币种合并或换算；
+    /// 统计当前页行数（RowCount）、已登记 / 草稿 / 已作废 / 总计张数，以及已登记 / 草稿 / 已作废原币金额（绝不跨币种、跨页合计），
+    /// 绝不做整份报表或会计合计。none / 空页返回空列表。
     /// </summary>
     public static List<DynamicAgencyServiceFeeMonthlyReportGroupCountDto> BuildGroupCounts(
         IEnumerable<AgencyServiceFeeMonthlySummaryRow> rows, string groupBy)
@@ -249,20 +251,33 @@ public static class DynamicAgencyServiceFeeMonthlyReportRules
             .OrderBy(g => g.Key.StatementYear)
             .ThenBy(g => g.Key.StatementMonth)
             .ThenBy(g => g.Key.Currency, StringComparer.Ordinal)
-            .Select(g => new DynamicAgencyServiceFeeMonthlyReportGroupCountDto(
-                GroupByMonth,
-                g.Key.StatementYear,
-                g.Key.StatementMonth,
-                AgencyServiceFeeMonthlySummaryRules.MonthText(g.Key.StatementYear, g.Key.StatementMonth),
-                null,
-                string.Empty,
-                string.Empty,
-                g.Key.Currency,
-                g.Count(),
-                g.Sum(r => r.RegisteredCount),
-                g.Sum(r => r.DraftCount),
-                g.Sum(r => r.VoidedCount),
-                g.Sum(r => r.StatementCount)))
+            .Select(g =>
+            {
+                var currency = g.Key.Currency;
+                var registeredAmount = g.Sum(r => r.RegisteredTotalAmount);
+                var draftAmount = g.Sum(r => r.DraftTotalAmount);
+                var voidedAmount = g.Sum(r => r.VoidedTotalAmount);
+                return new DynamicAgencyServiceFeeMonthlyReportGroupCountDto(
+                    GroupByMonth,
+                    g.Key.StatementYear,
+                    g.Key.StatementMonth,
+                    AgencyServiceFeeMonthlySummaryRules.MonthText(g.Key.StatementYear, g.Key.StatementMonth),
+                    null,
+                    string.Empty,
+                    string.Empty,
+                    currency,
+                    g.Count(),
+                    g.Sum(r => r.RegisteredCount),
+                    g.Sum(r => r.DraftCount),
+                    g.Sum(r => r.VoidedCount),
+                    g.Sum(r => r.StatementCount),
+                    registeredAmount,
+                    AgencyServiceFeeStatementRules.AmountText(registeredAmount, currency),
+                    draftAmount,
+                    AgencyServiceFeeStatementRules.AmountText(draftAmount, currency),
+                    voidedAmount,
+                    AgencyServiceFeeStatementRules.AmountText(voidedAmount, currency));
+            })
             .ToList();
     }
 
@@ -276,6 +291,10 @@ public static class DynamicAgencyServiceFeeMonthlyReportRules
             .Select(g =>
             {
                 var first = g.First();
+                var currency = g.Key.Currency;
+                var registeredAmount = g.Sum(r => r.RegisteredTotalAmount);
+                var draftAmount = g.Sum(r => r.DraftTotalAmount);
+                var voidedAmount = g.Sum(r => r.VoidedTotalAmount);
                 return new DynamicAgencyServiceFeeMonthlyReportGroupCountDto(
                     GroupByCustomer,
                     null,
@@ -284,12 +303,18 @@ public static class DynamicAgencyServiceFeeMonthlyReportRules
                     g.Key.CustomerId,
                     first.CustomerCode,
                     first.CustomerName,
-                    g.Key.Currency,
+                    currency,
                     g.Count(),
                     g.Sum(r => r.RegisteredCount),
                     g.Sum(r => r.DraftCount),
                     g.Sum(r => r.VoidedCount),
-                    g.Sum(r => r.StatementCount));
+                    g.Sum(r => r.StatementCount),
+                    registeredAmount,
+                    AgencyServiceFeeStatementRules.AmountText(registeredAmount, currency),
+                    draftAmount,
+                    AgencyServiceFeeStatementRules.AmountText(draftAmount, currency),
+                    voidedAmount,
+                    AgencyServiceFeeStatementRules.AmountText(voidedAmount, currency));
             })
             .ToList();
     }

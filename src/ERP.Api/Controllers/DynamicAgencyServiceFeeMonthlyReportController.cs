@@ -109,7 +109,7 @@ public class DynamicAgencyServiceFeeMonthlyReportController : ControllerBase
             .Select(r => DynamicAgencyServiceFeeMonthlyReportRules.BuildRow(r, fieldKeys))
             .ToList();
 
-        // 分组计数（ERP-184）：只统计当前授权预览页的月度汇总行，原币隔离，绝不跨币种合并或换算
+        // 分组汇总（ERP-184 / ERP-186）：只统计当前授权预览页的月度汇总行，原币隔离，绝不跨币种合并或换算；金额按原币保留精度
         var groupCounts = DynamicAgencyServiceFeeMonthlyReportRules.BuildGroupCounts(view.Rows, groupBy);
 
         return new DynamicAgencyServiceFeeMonthlyReportPageDto(

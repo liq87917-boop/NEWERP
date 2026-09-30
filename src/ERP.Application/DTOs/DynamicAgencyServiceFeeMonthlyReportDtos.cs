@@ -74,9 +74,9 @@ public sealed class DynamicAgencyServiceFeeMonthlyReportRequest
 /// <summary>
 /// 预览结果页（ERP-181，只读）：按请求顺序返回选定列与分页行；行内仅包含选定的白名单字段值，
 /// 不泄露范围外客户数据；保留 ERP-180 的稳定分页、原币隔离、状态金额口径与空结果提示。
-/// <para>ERP-184 新增 <see cref="GroupBy"/> / <see cref="GroupCounts"/>：仅当请求分组（month / customer）时，
-/// <see cref="GroupCounts"/> 给出「当前授权预览页」按分组键的计数（已登记 / 草稿 / 已作废 / 总计张数），
-/// 原币严格隔离、只统计当前页、绝不做整份报表或会计合计；默认 none 时为空。</para>
+/// <para>ERP-184 / ERP-186 新增 <see cref="GroupBy"/> / <see cref="GroupCounts"/>：仅当请求分组（month / customer）时，
+/// <see cref="GroupCounts"/> 给出「当前授权预览页」按分组键的计数（已登记 / 草稿 / 已作废 / 总计张数）与
+/// 已登记 / 草稿 / 已作废原币金额，原币严格隔离、只统计当前页、绝不做整份报表或会计合计；默认 none 时为空。</para>
 /// </summary>
 public sealed record DynamicAgencyServiceFeeMonthlyReportPageDto(
     List<DynamicAgencyServiceFeeMonthlyReportFieldDto> Columns,
@@ -98,9 +98,11 @@ public sealed record DynamicAgencyServiceFeeMonthlyReportPageDto(
     string GroupCountScopeText = "");
 
 /// <summary>
-/// 当前授权预览页的分组计数（ERP-184，只读）：按「对账月份」或「客户」分组、原币严格隔离，
-/// 只统计当前页的月度汇总行数（<see cref="RowCount"/>）与其中已登记 / 草稿 / 已作废 / 总计张数。
-/// <para>本计数只统计当前授权预览页、不是整份报表总计，也绝不做任何会计结论（不代表收入 / 应收 / 已收款）。</para>
+/// 当前授权预览页的分组汇总（ERP-184 / ERP-186，只读）：按「对账月份」或「客户」分组、原币严格隔离，
+/// 统计当前页的月度汇总行数（<see cref="RowCount"/>）与已登记 / 草稿 / 已作废 / 总计张数，并分别汇总
+/// 已登记 / 草稿 / 已作废原币金额（<see cref="RegisteredTotalAmount"/> / <see cref="DraftTotalAmount"/> / <see cref="VoidedTotalAmount"/>）。
+/// <para>本汇总只统计当前授权预览页、不是整份报表总计；金额按原币保留精度、绝不跨币种 / 跨页合计，
+/// 且只作为证据数字（不代表收入 / 应收 / 已收款），服务期间跨月不按期间分摊。</para>
 /// </summary>
 public sealed record DynamicAgencyServiceFeeMonthlyReportGroupCountDto(
     string GroupBy,
@@ -115,4 +117,10 @@ public sealed record DynamicAgencyServiceFeeMonthlyReportGroupCountDto(
     int RegisteredCount,
     int DraftCount,
     int VoidedCount,
-    int StatementCount);
+    int StatementCount,
+    decimal RegisteredTotalAmount,
+    string RegisteredTotalAmountText,
+    decimal DraftTotalAmount,
+    string DraftTotalAmountText,
+    decimal VoidedTotalAmount,
+    string VoidedTotalAmountText);

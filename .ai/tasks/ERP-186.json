@@ -1,7 +1,7 @@
 {
   "id": "ERP-186",
   "title": "Summarize agency monthly evidence amounts within authorized page groups",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "low",
   "description": "A customer-service user sees original-currency amount subtotals for the month or customer groups on the authorized current agency monthly report page. Extend ERP-184 group summaries from the same underlying scoped ERP-180 rows, never from a client-projected field list. Sum registered original-currency amounts separately from draft and void amounts, retain currency precision and the no-proration rule, and label every subtotal as page-only evidence rather than revenue or receivables. No cross-currency or cross-page total is allowed. Recheck current-user menu and salesperson scope on every preview; invalid group, filters or page bounds fail closed before source reads and existing operation logging remains. Development only: no schema or migration edits, production SQL or real database execution, arbitrary SQL, business writes, secrets, deployment or browser acceptance. Use temporary locations for manual test output and verify focused tests plus safe Release build/test.",
   "acceptance_criteria": [
@@ -34,6 +34,6 @@
     "level": "L1",
     "reason": ""
   },
-  "attempts": 0,
+  "attempts": 1,
   "created_at": "2026-09-30T05:48:17.936672Z"
 }
