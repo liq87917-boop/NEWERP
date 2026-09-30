@@ -1,11 +1,10 @@
 {
   "schema_version": 2,
   "project": "NEWERP",
-  "updated_at": "2026-09-30T04:03:25.419747Z",
+  "updated_at": "2026-09-30T04:14:29.442952Z",
   "phase": "ready",
   "current_task": null,
   "queue": [
-    "ERP-178",
     "ERP-179"
   ],
   "completed": [
@@ -166,22 +165,19 @@
     "ERP-174",
     "ERP-175",
     "ERP-176",
-    "ERP-177"
+    "ERP-177",
+    "ERP-178"
   ],
   "blocked": [],
   "last_build": {
-    "task": "ERP-177",
+    "task": "ERP-178",
     "profile": "safe",
     "status": "passed",
     "exit_code": 0,
-    "log": ".ai\\logs\\ERP-177-validation-1.log",
-    "at": "2026-09-30T03:36:58.147959Z"
+    "log": ".ai\\logs\\ERP-178-validation-1.log",
+    "at": "2026-09-30T04:14:28.938281Z"
   },
-  "last_error": {
-    "task": "ERP-179",
-    "kind": "automatic_repair_pending",
-    "summary": "DeepSeek executor exited with code 1; raw reason=error.\nLog tail:\n{\"ts\":\"2026-09-30T03:40:16.629Z\",\"type\":\"hook_event\",\"hookEventName\":\"agent_start\",\"agentId\":\"agent_1790739616523_g2f6g8\",\"taskId\":\"conv_1790739616625_v1kglui\",\"parentAgentId\":null}\n{\"ts\":\"2026-09-30T03:40:16.631Z\",\"type\":\"agent_event\",\"event\":{\"type\":\"iteration_start\",\"iteration\":1}}\n{\"ts\":\"2026-09-30T03:40:17.253Z\",\"type\":\"error\",\"message\":\"hook dispatch failed: session.hook requires a valid hook event payload\"}\n{\"ts\":\"2026-09-30T03:40:17.612Z\",\"type\":\"agent_event\",\"event\":{\"type\":\"done\",\"reason\":\"error\",\"text\":\"Insufficient Balance (request_id: 54fbc0c4-9ee6-447b-907d-fdb2f5ecbfa7)\",\"iterations\":1,\"usage\":{\"inputTokens\":0,\"outputTokens\":0,\"cacheReadTokens\":0,\"cacheWriteTokens\":0,\"totalCost\":0}}}\n{\"ts\":\"2026-09-30T03:40:18.055Z\",\"type\":\"run_result\",\"finishReason\":\"error\",\"iterations\":1,\"usage\":{\"inputTokens\":0,\"outputTokens\":0,\"cacheReadTokens\":0,\"cacheWriteTokens\":0,\"totalCost\":0},\"aggregateUsage\":{\"inputTokens\":0,\"outputTokens\":0,\"cacheReadTokens\":0,\"cacheWriteTokens\":0,\"totalCost\":0},\"durationMs\":628,\"text\":\"Insufficient Balance (request_id: 54fbc0c4-9ee6-447b-907d-fdb2f5ecbfa7)\",\"model\":{\"id\":\"deepseek-v4-pro\",\"provider\":\"deepseek\",\"info\":{\"id\":\"deepseek-v4-pro\",\"name\":\"DeepSeek V4 Pro\",\"contextWindow\":1000000,\"maxInputTokens\":1000000,\"maxTokens\":393216,\"capabilities\":[\"tools\",\"reasoning\",\"structured_output\",\"temperature\",\"prompt-cache\"],\"reasoningOptions\":[{\"type\":\"toggle\"},{\"type\":\"effort\",\"values\":[\"low\",\"high\",\"max\"]}],\"pricing\":{\"input\":0.435,\"output\":0.87,\"cacheRead\":0.003625,\"cacheWrite\":0},\"releaseDate\":\"2026-08-12\",\"family\":\"deepseek-thinking\",\"operation\":\"language\"}}}\n{\"ts\":\"2026-09-30T03:40:18.055Z\",\"type\":\"error\",\"message\":\"Insufficient Balance (request_id: 54fbc0c4-9ee6-447b-907d-fdb2f5ecbfa7)\"}\n"
-  },
+  "last_error": null,
   "last_deepseek_fix": {
     "task": "ERP-179",
     "attempts": 3,
@@ -190,21 +186,18 @@
   },
   "git_sync": {
     "branch": "main",
-    "local_sha": "617bd54",
-    "status": "synced",
-    "ahead": 0,
+    "local_sha": "653ab52",
+    "status": "pending",
+    "ahead": 2,
     "behind": 0,
-    "last_attempt_at": "2026-09-30T03:37:04.199069Z",
+    "last_attempt_at": "2026-09-30T04:14:29.344832Z",
     "last_error": null
   },
   "next_recommended_tasks": [
-    "ERP-178",
     "ERP-179"
   ],
   "runner": {
     "status": "stopped",
     "pid": null
-  },
-  "blocker": null,
-  "finish_reason": "provider_retry_due"
+  }
 }

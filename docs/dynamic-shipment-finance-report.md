@@ -124,8 +124,9 @@
 汇总视图仅统计**当前授权预览页**（页面顶部明确标注「仅当前预览页，非全量合计」），非全量合计、绝不跨页合并；
 权限不足 / 未登录 / 无效汇总模式 / 网络失败与预览一致在结果区可见（fail closed），空页显示可见提示，全程只读，无写入。
 
-金额汇总**不进入行导出范围**：Excel（ERP-158）与 PDF（ERP-159）仍只导出请求 `page` / `pageSize` 对应的当前页选定列（单页上限 200），
-绝不把金额汇总追加为导出行；金额汇总仅作为只读预览视图展示，与行级下载范围刻意分离。
+金额汇总**不进入行导出范围**：Excel（ERP-158）与 PDF（ERP-159）的**数据工作表**仍只导出请求 `page` / `pageSize` 对应的当前页选定列（单页上限 200），
+绝不把金额汇总追加为数据工作表导出行；ERP-178 起 Excel 导出在非 none 汇总模式下追加独立「金额汇总」工作表（复用 ERP-162 当前页汇总数据），
+PDF 仍不包含金额汇总，金额汇总与行级下载范围刻意分离。
 
 ## 证据边界（重要）
 
@@ -168,6 +169,25 @@
 - 文件名 `ShipmentFinanceReport_yyyyMMddHHmmss.xlsx`；内容类型 `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`；
 - 只读 + 审计：无写入、无任意 SQL；`POST` 由既有 `OperationLogMiddleware` 记录审计（动作「导出」）。
 
+## Excel 金额汇总导出（ERP-178）
+
+`POST /api/sales-orders/dynamic-shipment-finance-report/export` 复用 ERP-162 的有限金额汇总模式与汇总 DTO：
+每次请求重新校验身份 / 销售订单菜单授权 / 字段 / 筛选 / 页大小 / 业务员数据范围，并在读取任何源数据**之前**按有限白名单校验
+`summaryMode`（none / customerCurrency / customerCurrencyShipment / customerCurrencyFinance，大小写不敏感，未知取值直接拒绝，fail closed）。
+
+- `none`（默认）：保留既有「销售订单出货财务进度」选定列数据工作表（原 ERP-158 单工作表行为），不追加金额汇总工作表；
+- `customerCurrency` / `customerCurrencyShipment` / `customerCurrencyFinance`：在同一工作簿追加独立「金额汇总」工作表
+  （数据工作表仍为首张工作表），复用 ERP-162 同一批有界、已授权当前页汇总数据，**只汇总当前页、绝不跨页 / 跨币种合并或换算**。
+
+金额汇总工作表口径：
+
+- 每行 = 客户 + 原币（可选出货状态 / 收款链接状态）+ 订单张数 + 订单金额 + 已关联 / 未覆盖 / 已提交金额；
+- 订单金额与已关联 / 未覆盖 / 已提交金额为数值（原币直接求和）；任一组成金额未知（null）时对应合计为空单元格（未知），绝不回落为 0；
+- 显式给出已关联 / 未覆盖 / 已提交金额的已知 / 未知行数；`customerCurrencyShipment` 引入「出货状态」列、`customerCurrencyFinance` 引入「收款链接状态」列；
+- 客户 / 币种 / 状态标签做公式注入转义（`EscapeFormulaLeading`），保持字面文本、不生成公式单元格；
+- 空页在汇总工作表写入显式提示（绝不静默留白）；无跨币种总额、无应收 / 余额 / 账龄列，`uncoveredAmount` 只作「未覆盖金额」、不是应收余额；
+- 下载范围仍是请求 `page` / `pageSize` 对应的当前页（单页上限 200）；`POST` 由既有 `OperationLogMiddleware` 记录审计（动作「导出」）。
+
 ## PDF 导出（ERP-159）
 
 `POST /api/sales-orders/dynamic-shipment-finance-report/pdf` 请求体与预览完全相同
@@ -207,6 +227,7 @@ PDF 中文一律使用 Windows 黑体 **SimHei**（`simhei.ttf`），由共享�
 - `src/ERP.UnitTests/DynamicShipmentFinanceGroupingTests.cs`：ERP-160 分组计数单元测试（分组键、客户 / 币种 / 出货状态 / 收款链接状态、unknown 保留、空页 / 分页、授权拒绝、不写库）；
 - `src/ERP.UnitTests/DynamicShipmentFinanceAmountSummaryTests.cs`：ERP-162 金额汇总单元测试（汇总模式、多客户多币种、未知链接 / 未知金额、出货状态 / 收款链接状态拆分、空页 / 分页、授权拒绝、受限制业务员范围、不写库与应收边界）；
 - `src/ERP.UnitTests/DynamicShipmentFinanceExcelTests.cs`：ERP-158 Excel 导出单元测试（列顺序、页上限、数据范围、未知值、币种、公式安全、不写库、下载限制）；
+- `src/ERP.UnitTests/DynamicShipmentFinanceSummaryExcelTests.cs`：ERP-178 金额汇总 Excel 导出单元测试（none 保留既有数据工作表、非 none 追加金额汇总工作表、出货状态 / 收款链接状态拆分、多币种隔离、未知金额空单元格与已知 / 未知行数、空页 / 分页、公式前导标签转义、授权 / 校验拒绝、受限制业务员范围、不写库）；
 - `src/ERP.UnitTests/DynamicShipmentFinancePdfTests.cs`：ERP-159 PDF 导出单元测试（签名、页面边界、字段顺序、原币与未知证据、SimHei 嵌入与缺失失败、授权 / 校验拒绝、不写库）；
 - `src/ERP.UnitTests/SalesOrderShipmentFinanceReportTests.cs`：ERP-032 报表单元测试（含 ERP-156 复用的源查询范围过滤）。
 

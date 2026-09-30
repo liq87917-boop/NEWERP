@@ -5,6 +5,8 @@ using ERP.Application.Services;
 using ERP.Infrastructure.Export;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using NPOI.SS.UserModel;
+using NPOI.XSSF.UserModel;
 using System.Security.Claims;
 
 namespace ERP.Api.Controllers;
@@ -57,15 +59,21 @@ public class DynamicShipmentFinanceReportController : ControllerBase
     }
 
     /// <summary>
-    /// 导出当前页为 Excel（ERP-158，只读）：复用「有界、已授权预览」与选定列顺序（每次请求重新校验身份 / 菜单授权 /
+    /// 导出当前页为 Excel（ERP-158 / ERP-178，只读）：复用「有界、已授权预览」与选定列顺序（每次请求重新校验身份 / 菜单授权 /
     /// 字段 / 筛选 / 页大小 / 业务员数据范围），仅导出当前页选定列；未知金额 / 未知数量保持 null（空单元格，绝不回落为 0），
     /// 金额按原币分别成行、绝不跨币种合并或换算，文本单元格做公式注入转义。
+    /// <para>ERP-178：金额汇总模式在读取源数据之前按有限白名单校验（fail closed）；none 保留既有选定列数据工作表，
+    /// 非 none 汇总模式在同一工作簿追加独立「金额汇总」工作表（复用 ERP-162 同一批有界、已授权当前页汇总数据，只汇总当前页、绝不跨币种合并 / 换算、绝不推断应收余额）。</para>
     /// <para>全程只读，不写库、不执行任意 SQL；请求由既有 <c>OperationLogMiddleware</c> 记录审计（动作「导出」）。</para>
     /// </summary>
     [HttpPost("export")]
     public async Task<IActionResult> Export([FromBody] DynamicShipmentFinanceReportRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
+
+        // 金额汇总模式 fail closed：先于任何源读取校验（与预览同口径，none / customerCurrency / customerCurrencyShipment / customerCurrencyFinance）；
+        // none 保留既有选定列工作表、不追加金额汇总工作表。
+        _ = DynamicShipmentFinanceReportRules.NormalizeSummaryMode(request.SummaryMode);
 
         // 复用同一有界、已授权预览：重新校验身份 / 菜单授权 / 字段 / 筛选 / 页大小 / 数据范围
         var page = await BuildPageAsync(request);
@@ -192,12 +200,168 @@ public class DynamicShipmentFinanceReportController : ControllerBase
             ["note"] = o.Note,
         };
 
-    /// <summary>用 ExcelExporter 生成当前页数据工作表（选定列顺序 + 公式注入转义；未知金额 / 数量保持 null → 空单元格）</summary>
+    /// <summary>既有选定列数据工作表名称（ERP-158，单工作表；非 none 汇总模式仍保留为首张工作表）</summary>
+    private const string DataSheetName = "销售订单出货财务进度";
+
+    /// <summary>
+    /// 生成只读工作簿：none 保留既有「销售订单出货财务进度」选定列数据工作表（单工作表，原 ERP-158 行为）；
+    /// 非 none 金额汇总模式在同一工作簿追加「金额汇总」工作表（ERP-178，复用 ERP-162 同一批有界、已授权当前页汇总数据，
+    /// 只汇总当前页、绝不跨币种合并 / 换算、绝不推断应收余额 / 收款授权）。
+    /// </summary>
     private static byte[] BuildWorkbook(DynamicShipmentFinanceReportPageDto page)
     {
         var columns = page.Columns.Select(c => (c.Key, c.Label)).ToList();
         var rows = page.Rows.Select(DynamicShipmentFinanceReportRules.BuildExportRow).ToList();
-        return ExcelExporter.ExportRows("销售订单出货财务进度", rows, columns);
+
+        if (page.SummaryMode == DynamicShipmentFinanceReportRules.SummaryNone)
+        {
+            return ExcelExporter.ExportRows(DataSheetName, rows, columns);
+        }
+
+        // 非 none：复用 ExcelExporter 生成与 none 完全一致的既有数据工作表，再在同一工作簿追加当前页金额汇总工作表。
+        var dataBytes = ExcelExporter.ExportRows(DataSheetName, rows, columns);
+        using var dataStream = new MemoryStream(dataBytes);
+        using var workbook = new XSSFWorkbook(dataStream);
+        AppendAmountSummarySheet(workbook, page.Summaries, page.SummaryMode);
+
+        using var output = new MemoryStream();
+        workbook.Write(output);
+        return output.ToArray();
+    }
+
+    // ==================== Excel 金额汇总工作表（ERP-178，只读） ====================
+
+    /// <summary>金额汇总工作表名称（仅非 none 金额汇总模式追加，与选定列数据工作表互不混淆）</summary>
+    private const string AmountSummarySheetName = "金额汇总";
+
+    /// <summary>客户列标题（文本，公式注入转义）</summary>
+    private const string CustomerColumn = "客户";
+
+    /// <summary>原币列标题（文本，公式注入转义，绝不跨币种合并）</summary>
+    private const string CurrencyColumn = "币种";
+
+    /// <summary>出货状态列标题（仅 customerCurrencyShipment 模式出现，中文文案）</summary>
+    private const string ShipmentStatusColumn = "出货状态";
+
+    /// <summary>收款链接状态列标题（仅 customerCurrencyFinance 模式出现，中文文案）</summary>
+    private const string FinanceLinkStatusColumn = "收款链接状态";
+
+    /// <summary>订单张数列标题（数值）</summary>
+    private const string OrderCountColumn = "订单张数";
+
+    /// <summary>订单金额列标题（数值，原币直接求和）</summary>
+    private const string OrderAmountColumn = "订单金额";
+
+    /// <summary>已关联金额已知行数列标题（数值）</summary>
+    private const string KnownLinkedAmountRowsColumn = "已关联金额已知行数";
+
+    /// <summary>已关联金额未知行数列标题（数值）</summary>
+    private const string UnknownLinkedAmountRowsColumn = "已关联金额未知行数";
+
+    /// <summary>已关联金额列标题（数值；任一行金额未知则整列空，绝不回落 0）</summary>
+    private const string LinkedAmountColumn = "已关联金额";
+
+    /// <summary>未覆盖金额已知行数列标题（数值）</summary>
+    private const string KnownUncoveredAmountRowsColumn = "未覆盖金额已知行数";
+
+    /// <summary>未覆盖金额未知行数列标题（数值）</summary>
+    private const string UnknownUncoveredAmountRowsColumn = "未覆盖金额未知行数";
+
+    /// <summary>未覆盖金额列标题（数值；任一行金额未知则整列空，绝不回落 0）</summary>
+    private const string UncoveredAmountColumn = "未覆盖金额";
+
+    /// <summary>已提交金额已知行数列标题（数值）</summary>
+    private const string KnownSubmittedAmountRowsColumn = "已提交金额已知行数";
+
+    /// <summary>已提交金额未知行数列标题（数值）</summary>
+    private const string UnknownSubmittedAmountRowsColumn = "已提交金额未知行数";
+
+    /// <summary>已提交金额列标题（数值；任一行金额未知则整列空，绝不回落 0）</summary>
+    private const string SubmittedAmountColumn = "已提交金额";
+
+    /// <summary>金额汇总当前页为空时的显式提示（绝不静默留白）</summary>
+    private const string AmountSummaryEmptyNote = "本页没有可汇总金额的订单出货 / 财务证据（空页）";
+
+    /// <summary>
+    /// 追加「金额汇总」工作表（ERP-178，只读）：每行 = 客户 + 原币（可选出货状态 / 收款链接状态）+ 订单张数 + 订单金额 +
+    /// 已关联 / 未覆盖 / 已提交金额（已知 / 未知行数 + 未知时整列空）；文本标签做公式注入转义，未知金额 null 保留为空（绝不回落 0），
+    /// 绝不跨币种合并 / 换算、绝不计算应收余额 / 收款授权；空页显式提示。
+    /// </summary>
+    private static void AppendAmountSummarySheet(
+        XSSFWorkbook workbook,
+        List<DynamicShipmentFinanceReportSummaryDto>? summaries,
+        string summaryMode)
+    {
+        var withShipment = summaryMode == DynamicShipmentFinanceReportRules.SummaryCustomerCurrencyShipment;
+        var withFinance = summaryMode == DynamicShipmentFinanceReportRules.SummaryCustomerCurrencyFinance;
+
+        var sheet = workbook.CreateSheet(AmountSummarySheetName);
+        var header = sheet.CreateRow(0);
+
+        var c0 = 0;
+        header.CreateCell(c0++).SetCellValue(CustomerColumn);
+        header.CreateCell(c0++).SetCellValue(CurrencyColumn);
+        if (withShipment) header.CreateCell(c0++).SetCellValue(ShipmentStatusColumn);
+        if (withFinance) header.CreateCell(c0++).SetCellValue(FinanceLinkStatusColumn);
+        header.CreateCell(c0++).SetCellValue(OrderCountColumn);
+        header.CreateCell(c0++).SetCellValue(OrderAmountColumn);
+        header.CreateCell(c0++).SetCellValue(KnownLinkedAmountRowsColumn);
+        header.CreateCell(c0++).SetCellValue(UnknownLinkedAmountRowsColumn);
+        header.CreateCell(c0++).SetCellValue(LinkedAmountColumn);
+        header.CreateCell(c0++).SetCellValue(KnownUncoveredAmountRowsColumn);
+        header.CreateCell(c0++).SetCellValue(UnknownUncoveredAmountRowsColumn);
+        header.CreateCell(c0++).SetCellValue(UncoveredAmountColumn);
+        header.CreateCell(c0++).SetCellValue(KnownSubmittedAmountRowsColumn);
+        header.CreateCell(c0++).SetCellValue(UnknownSubmittedAmountRowsColumn);
+        header.CreateCell(c0++).SetCellValue(SubmittedAmountColumn);
+
+        if (summaries is null || summaries.Count == 0)
+        {
+            sheet.CreateRow(1).CreateCell(0).SetCellValue(AmountSummaryEmptyNote);
+            return;
+        }
+
+        for (var r = 0; r < summaries.Count; r++)
+        {
+            var s = summaries[r];
+            var row = sheet.CreateRow(r + 1);
+            var c = 0;
+            row.CreateCell(c++).SetCellValue(SafeLabel(s.CustomerName));
+            row.CreateCell(c++).SetCellValue(SafeLabel(s.Currency));
+            if (withShipment)
+                row.CreateCell(c++).SetCellValue(SafeLabel(
+                    DynamicShipmentFinanceReportRules.GroupShipmentStatusLabel(s.ShipmentStatus ?? string.Empty)));
+            if (withFinance)
+                row.CreateCell(c++).SetCellValue(SafeLabel(
+                    DynamicShipmentFinanceReportRules.GroupFinanceLinkStatusLabel(s.FinanceLinkStatus ?? string.Empty)));
+            row.CreateCell(c++).SetCellValue(s.OrderCount);
+            row.CreateCell(c++).SetCellValue((double)s.OrderAmount);
+            row.CreateCell(c++).SetCellValue(s.KnownLinkedAmountRows);
+            row.CreateCell(c++).SetCellValue(s.UnknownLinkedAmountRows);
+            WriteNullableAmount(row.CreateCell(c++), s.LinkedAmount);
+            row.CreateCell(c++).SetCellValue(s.KnownUncoveredAmountRows);
+            row.CreateCell(c++).SetCellValue(s.UnknownUncoveredAmountRows);
+            WriteNullableAmount(row.CreateCell(c++), s.UncoveredAmount);
+            row.CreateCell(c++).SetCellValue(s.KnownSubmittedAmountRows);
+            row.CreateCell(c++).SetCellValue(s.UnknownSubmittedAmountRows);
+            WriteNullableAmount(row.CreateCell(c++), s.SubmittedAmount);
+        }
+    }
+
+    /// <summary>文本标签统一做公式注入转义（与数据单元格同口径，保持字面文本）</summary>
+    private static string SafeLabel(string? label)
+        => (string?)DynamicShipmentFinanceReportRules.EscapeFormulaLeading(label) ?? string.Empty;
+
+    /// <summary>可未知金额写入：null → 空文本（绝不回落 0）；已知 → 数值</summary>
+    private static void WriteNullableAmount(ICell cell, decimal? amount)
+    {
+        if (amount is null)
+        {
+            cell.SetCellValue(string.Empty);
+            return;
+        }
+
+        cell.SetCellValue((double)amount.Value);
     }
 
     /// <summary>身份 + 既有「角色 → 菜单」销售订单模块授权（fail closed，绝不猜测身份）</summary>
