@@ -1,7 +1,7 @@
 {
   "schema_version": 2,
   "project": "NEWERP",
-  "updated_at": "2026-09-30T07:10:08.825298Z",
+  "updated_at": "2026-09-30T07:19:59.381179Z",
   "phase": "ready",
   "current_task": null,
   "queue": [
@@ -189,17 +189,20 @@
     "log": ".ai\\logs\\ERP-189-validation-1.log",
     "at": "2026-09-30T07:10:03.204883Z"
   },
-  "last_error": null,
+  "last_error": {
+    "task": "ERP-190",
+    "kind": "automatic_repair_pending",
+    "summary": "Path guard failed:\noutside allowed_paths: src/ERP.UnitTests/DynamicAgencyServiceFeeMonthlyGroupedExcelTests.cs"
+  },
   "last_deepseek_fix": {
-    "task": "ERP-181",
-    "attempt": 2,
-    "model": "deepseek-v4-pro",
-    "exit_code": 0,
-    "finished_at": "2026-09-30T05:14:07.921353Z"
+    "task": "ERP-190",
+    "attempts": 3,
+    "status": "retry_pending",
+    "at": "2026-09-30T07:19:59.131422Z"
   },
   "git_sync": {
     "branch": "main",
-    "local_sha": "16cf1b7",
+    "local_sha": "fe24b46",
     "status": "synced",
     "ahead": 0,
     "behind": 0,
@@ -213,5 +216,7 @@
   "runner": {
     "status": "stopped",
     "pid": null
-  }
+  },
+  "blocker": null,
+  "finish_reason": "deepseek_supervisor_recovery"
 }
