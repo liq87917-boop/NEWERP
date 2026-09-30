@@ -1,0 +1,39 @@
+{
+  "id": "ERP-188",
+  "title": "Export authorized agency monthly count groups to Excel",
+  "status": "pending",
+  "risk_level": "low",
+  "description": "A customer-service user downloads the agency monthly report current page after choosing month or customer grouping. Extend the existing Excel export to append a count-group worksheet sourced from the same ERP-184 authorized bounded preview while retaining the selected-column evidence sheet; none grouping preserves the current workbook. Recheck user identity, customer menu permission, salesperson scope, group key, fields, filters and page bounds on each export; OperationLogMiddleware audits download. The group worksheet must show grouping label, original currency, monthly-row count and registered, draft, void and total statement counts as numeric cells, with formula-safe text and explicit page-only, empty and truncated notices. Do not export group amount columns in this increment or claim cross-page totals. Development only: no schema or migration edits, production SQL or real database execution, arbitrary SQL, business writes, secrets, deployment or browser acceptance. Keep manual test output outside the repo and verify focused workbook tests plus safe Release build/test.",
+  "acceptance_criteria": [
+    "Excel export reuses the existing authorized bounded current-page builder and validates groupBy and access before source reads; none mode keeps the selected-column workbook unchanged.",
+    "Month or customer grouping adds a separate current-page count sheet with original-currency labels, numeric monthly-row and status counts, formula-safe text and explicit empty or truncated scope, without amount totals.",
+    "Focused workbook tests cover grouping modes, denied access, invalid grouping, mixed currencies, hidden dimensions, formula-leading labels, empty and truncated pages and unchanged data sheet; safe Release build/test passes."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/DynamicAgencyServiceFeeMonthlyReportController.cs",
+    "src/ERP.UnitTests/DynamicAgencyServiceFeeMonthlyGroupedExcelTests.cs"
+  ],
+  "validation_profile": "safe",
+  "depends_on": [
+    "ERP-182",
+    "ERP-184",
+    "ERP-185"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "completion_mode": "build",
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": [],
+    "test_filter": "Collection=UiTests",
+    "minimum_screenshots": 1
+  },
+  "human_gate": {
+    "required": false,
+    "status": "not_required",
+    "level": "L1",
+    "reason": ""
+  },
+  "attempts": 0,
+  "created_at": "2026-09-30T06:44:20.932965Z"
+}
