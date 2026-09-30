@@ -65,17 +65,23 @@ public class DynamicReceiptReconciliationReportController : ControllerBase
     }
 
     /// <summary>
-    /// 导出当前页为 Excel（ERP-167，只读）：复用「有界、已授权预览」与选定列顺序（每次请求重新校验身份 / 销售订单菜单授权 /
+    /// 导出当前页为 Excel（ERP-167 / ERP-174，只读）：复用「有界、已授权预览」与选定列顺序（每次请求重新校验身份 / 销售订单菜单授权 /
     /// 字段 / 筛选 / 页大小 / 业务员数据范围），把当前页选定订单列与未关联收款列分别写入两个独立工作表（仅导出当前页）。
     /// <para>金额保留原币、未知金额 null 保留为空文本（绝不回落 0）、收款证据状态与截断警告显式保留；文本单元格做公式注入转义；
     /// 全程只读，不写库、不执行任意 SQL；请求由既有 <c>OperationLogMiddleware</c> 记录审计（动作「导出」）。</para>
+    /// <para>ERP-174：分组键在读取源数据之前按有限白名单校验（fail closed）；非 none 分组模式在同一工作簿追加
+    /// 「订单计数分组」与「未关联收款计数分组」两个独立工作表（复用 ERP-170 同一批有界、已授权分组数据，只计数、不含金额、绝不推断匹配）。</para>
     /// </summary>
     [HttpPost("export")]
     public async Task<IActionResult> Export([FromBody] DynamicReceiptReconciliationReportRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
-        var page = await BuildPageAsync(request);
-        var bytes = BuildWorkbook(page);
+
+        // 分组键 fail closed：先于任何源读取校验（与预览同口径）；none 保留原有两表默认结构。
+        var groupBy = DynamicReceiptReconciliationReportRules.NormalizeGroupBy(request.GroupBy);
+
+        var page = await BuildPageAsync(request, groupBy);
+        var bytes = BuildWorkbook(page, groupBy);
         return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             $"ReceiptReconciliation_{DateTime.Now:yyyyMMddHHmmss}.xlsx");
     }
@@ -311,8 +317,9 @@ public class DynamicReceiptReconciliationReportController : ControllerBase
         }
     }
 
-    /// <summary>生成含「订单证据」与「未关联收款证据」两个独立工作表的只读工作簿（原币 / 状态 / 截断警告显式保留，公式注入转义，绝不合并）</summary>
-    private static byte[] BuildWorkbook(DynamicReceiptReconciliationReportPageDto page)
+    /// <summary>生成只读工作簿：默认含「订单证据」与「未关联收款证据」两个独立工作表（原币 / 状态 / 截断警告显式保留，公式注入转义，绝不合并）；
+    /// 非 none 分组模式追加「订单计数分组」与「未关联收款计数分组」两个独立工作表（ERP-174，只计数、不含金额、绝不推断匹配）。</summary>
+    private static byte[] BuildWorkbook(DynamicReceiptReconciliationReportPageDto page, string groupBy)
     {
         using var workbook = new XSSFWorkbook();
 
@@ -330,10 +337,98 @@ public class DynamicReceiptReconciliationReportController : ControllerBase
             page.ReceiptRows.Select(DynamicReceiptReconciliationReportRules.BuildExportRow).ToList(),
             page.UnlinkedReceiptTruncated ? DynamicReceiptReconciliationReportRules.ReceiptTruncationNote : null);
 
+        // ERP-174：仅非 none 分组模式追加两个独立计数分组工作表（复用 ERP-170 同一批有界、已授权分组数据，
+        // 只计数、不含金额、绝不推断收款单与订单的匹配；不适用 / 空 / 截断状态显式保留）。
+        if (groupBy != DynamicReceiptReconciliationReportRules.GroupNone)
+        {
+            AppendOrderGroupSheet(workbook, page.OrderGroups);
+            AppendReceiptGroupSheet(workbook, page.ReceiptGroups);
+        }
+
         using var output = new MemoryStream();
         workbook.Write(output);
         return output.ToArray();
     }
+
+    // ==================== Excel 计数分组工作表（ERP-174，只读） ====================
+
+    /// <summary>订单计数分组工作表名称（仅非 none 分组模式追加，与订单证据工作表互不混淆）</summary>
+    private const string OrderGroupSheetName = "订单计数分组";
+
+    /// <summary>未关联收款计数分组工作表名称（仅非 none 分组模式追加，与未关联收款证据工作表互不混淆）</summary>
+    private const string ReceiptGroupSheetName = "未关联收款计数分组";
+
+    /// <summary>分组标签列标题</summary>
+    private const string GroupLabelColumn = "分组标签";
+
+    /// <summary>订单张数列标题（数值，只计数不含金额）</summary>
+    private const string OrderCountColumn = "订单张数";
+
+    /// <summary>收款张数列标题（数值，只计数不含金额）</summary>
+    private const string ReceiptCountColumn = "收款张数";
+
+    /// <summary>截断状态列标题（显式保留，绝不静默截断）</summary>
+    private const string TruncatedColumn = "截断";
+
+    /// <summary>订单侧不适用 / 当前页为空时的显式提示（绝不静默留白）</summary>
+    private const string OrderGroupEmptyNote = "无订单计数分组（不适用或当前页为空）";
+
+    /// <summary>未关联收款侧不适用 / 当前页为空时的显式提示（绝不静默留白）</summary>
+    private const string ReceiptGroupEmptyNote = "无未关联收款计数分组（不适用或当前页为空）";
+
+    /// <summary>追加「订单计数分组」工作表：每行 = 分组标签 + 订单张数（数值，只计数不含金额）；标签做公式注入转义；无数据时显式提示</summary>
+    private static void AppendOrderGroupSheet(
+        XSSFWorkbook workbook,
+        List<DynamicReceiptReconciliationReportOrderGroupDto>? groups)
+    {
+        var sheet = workbook.CreateSheet(OrderGroupSheetName);
+        var header = sheet.CreateRow(0);
+        header.CreateCell(0).SetCellValue(GroupLabelColumn);
+        header.CreateCell(1).SetCellValue(OrderCountColumn);
+
+        if (groups is null || groups.Count == 0)
+        {
+            sheet.CreateRow(1).CreateCell(0).SetCellValue(OrderGroupEmptyNote);
+            return;
+        }
+
+        for (var r = 0; r < groups.Count; r++)
+        {
+            var row = sheet.CreateRow(r + 1);
+            row.CreateCell(0).SetCellValue(SafeLabel(groups[r].Label));
+            row.CreateCell(1).SetCellValue(groups[r].OrderCount);
+        }
+    }
+
+    /// <summary>追加「未关联收款计数分组」工作表：每行 = 分组标签 + 收款张数（数值）+ 截断（是 / 否，显式保留）；标签做公式注入转义；无数据时显式提示</summary>
+    private static void AppendReceiptGroupSheet(
+        XSSFWorkbook workbook,
+        List<DynamicReceiptReconciliationReportReceiptGroupDto>? groups)
+    {
+        var sheet = workbook.CreateSheet(ReceiptGroupSheetName);
+        var header = sheet.CreateRow(0);
+        header.CreateCell(0).SetCellValue(GroupLabelColumn);
+        header.CreateCell(1).SetCellValue(ReceiptCountColumn);
+        header.CreateCell(2).SetCellValue(TruncatedColumn);
+
+        if (groups is null || groups.Count == 0)
+        {
+            sheet.CreateRow(1).CreateCell(0).SetCellValue(ReceiptGroupEmptyNote);
+            return;
+        }
+
+        for (var r = 0; r < groups.Count; r++)
+        {
+            var row = sheet.CreateRow(r + 1);
+            row.CreateCell(0).SetCellValue(SafeLabel(groups[r].Label));
+            row.CreateCell(1).SetCellValue(groups[r].ReceiptCount);
+            row.CreateCell(2).SetCellValue(groups[r].Truncated ? "是" : "否");
+        }
+    }
+
+    /// <summary>分组标签统一做公式注入转义（与数据单元格同口径，保持字面文本）</summary>
+    private static string SafeLabel(string? label)
+        => (string?)DynamicReceiptReconciliationReportRules.EscapeFormulaLeading(label) ?? string.Empty;
 
     /// <summary>把一个分区写为独立工作表：首行为列标题，后续行为该分区当前页的只读行（列顺序与预览一致）；截断警告作为尾行显式标注</summary>
     private static void AppendSheet(

@@ -13,7 +13,7 @@ ERP-046 客户订单与收款核对证据。本功能为**开发期只读派生*
 |---|---|---|
 | GET | `/api/sales-orders/dynamic-receipt-reconciliation-report` | 返回 ERP-046 订单证据字段白名单目录 + 独立的未关联收款证据字段目录（需登录 + `sales-order` 销售订单菜单授权） |
 | POST | `/api/sales-orders/dynamic-receipt-reconciliation-report` | 按选定字段与有界筛选预览当前账号数据范围内的订单与收款证据，稳定分页；未关联收款证据按独立的收款字段目录单独投影，绝不并入订单行 |
-| POST | `/api/sales-orders/dynamic-receipt-reconciliation-report/export` | 导出当前页为 Excel（xlsx，只读，复用有界授权预览；订单证据与未关联收款证据写入两个独立工作表，仅导出当前页） |
+| POST | `/api/sales-orders/dynamic-receipt-reconciliation-report/export` | 导出当前页为 Excel（xlsx，只读，复用有界授权预览；订单证据与未关联收款证据写入两个独立工作表，仅导出当前页；非 none 分组模式追加「订单计数分组」与「未关联收款计数分组」两个独立工作表，见 §16） |
 | POST | `/api/sales-orders/dynamic-receipt-reconciliation-report/export-pdf` | 导出当前页为 PDF（只读，复用有界授权预览；订单证据与未关联收款证据渲染为两个独立分区，宽列自动分页，仅导出当前页） |
 
 预览与下载请求由既有 `OperationLogMiddleware` 按 HTTP 方法记录审计，本控制器自身不写任何操作日志。
@@ -333,4 +333,25 @@ ERP-046 客户订单与收款核对证据。本功能为**开发期只读派生*
 - `tests/automation/dynamic_receipt_reconciliation_amount_summary_ui.test.js`：覆盖金额汇总模式规范化与选择器白名单、
   scope-safe 请求携带金额汇总模式、两个独立金额汇总面板渲染（仅当前预览页、多币种 / null 未知 / 已知未知行数 / 截断 / 转义 / 空态）、
   错误态与无任意 SQL / 跨币种合计。
+
+
+## 16. 当前页计数分组 Excel 导出（ERP-174，只读、有界、作用域化）
+
+Excel 导出（`POST .../export`）在既有「订单证据」「未关联收款证据」两个工作表的基础上，**仅在非 `none` 分组模式**下追加
+「订单计数分组」「未关联收款计数分组」两个独立工作表，复用 ERP-170 同一批有界、已授权的当前页分组数据：
+
+- **分组键校验先于源读取**：`DynamicReceiptReconciliationReportRules.NormalizeGroupBy(request.GroupBy)` 在读取 ERP-046 源数据之前
+  完成有限白名单校验（`none` / `customer` / `currency` / `receiptCoverageStatus` / `receiptEvidenceStatus`，大小写不敏感），
+  未知取值显式拒绝（错误码 2004，fail closed）；`none` 模式保留原有两表默认结构（不追加分组工作表）。
+- **订单计数分组工作表**（「订单计数分组」）：列 `分组标签` + `订单张数`（数值）；标签做公式注入转义（与数据单元格同口径）。
+- **未关联收款计数分组工作表**（「未关联收款计数分组」）：列 `分组标签` + `收款张数`（数值）+ `截断`（是 / 否，显式保留）；标签做公式注入转义。
+- **不适用 / 空显式提示**：收款覆盖状态分组只作用于订单侧、收款证据状态分组只作用于未关联收款侧，不适用侧与当前页为空时，
+  相应分组工作表显式写入可见提示（`无订单计数分组（不适用或当前页为空）` / `无未关联收款计数分组（不适用或当前页为空）`），绝不静默留白。
+- **截断显式保留**：未关联收款命中读取上限时，收款计数分组各行 `截断 = 是`（绝不静默截断）。
+- **只计数、不含金额、绝不推断匹配**：两个分组工作表只导出当前页计数，绝不写入任何金额合计 / 跨币种合计，绝不推断收款单与订单的匹配关系。
+
+### 16.1 测试
+
+- 后端工作簿单测：`DynamicReceiptReconciliationGroupedExcelTests.cs`（覆盖 none 保留两表、customer / receiptCoverageStatus /
+  receiptEvidenceStatus 分组工作表、未知分组键源读取前拒绝、无销售订单菜单授权拒绝、空页 / 截断 / 公式前导标签转义、以及只读不写库）。
 
