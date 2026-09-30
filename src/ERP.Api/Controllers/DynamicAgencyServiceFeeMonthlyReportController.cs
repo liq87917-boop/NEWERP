@@ -94,9 +94,10 @@ public class DynamicAgencyServiceFeeMonthlyReportController : ControllerBase
         ArgumentNullException.ThrowIfNull(request);
         var scope = await EnsureAuthorizedAsync(CurrentUserId());
 
-        // 字段 / 分页 / 筛选全部在读取 ERP-180 数据源之前校验（未知 / 重复字段、越界分页、非法币种、日期倒置均 fail closed）
+        // 字段 / 分组 / 分页 / 筛选全部在读取 ERP-180 数据源之前校验（未知 / 重复字段、未知分组、越界分页、非法币种、日期倒置均 fail closed）
         var fieldKeys = DynamicAgencyServiceFeeMonthlyReportRules.NormalizeFields(request.Fields);
         DynamicAgencyServiceFeeMonthlyReportRules.ValidatePageBounds(request.Page, request.PageSize);
+        var groupBy = DynamicAgencyServiceFeeMonthlyReportRules.NormalizeGroupBy(request.GroupBy);
         var query = DynamicAgencyServiceFeeMonthlyReportRules.BuildQuery(request);
 
         var view = await AgencyServiceFeeMonthlySummaryService.ForQueryAsync(_db, query, scope);
@@ -107,6 +108,9 @@ public class DynamicAgencyServiceFeeMonthlyReportController : ControllerBase
         var rows = view.Rows
             .Select(r => DynamicAgencyServiceFeeMonthlyReportRules.BuildRow(r, fieldKeys))
             .ToList();
+
+        // 分组计数（ERP-184）：只统计当前授权预览页的月度汇总行，原币隔离，绝不跨币种合并或换算
+        var groupCounts = DynamicAgencyServiceFeeMonthlyReportRules.BuildGroupCounts(view.Rows, groupBy);
 
         return new DynamicAgencyServiceFeeMonthlyReportPageDto(
             columns,
@@ -122,7 +126,10 @@ public class DynamicAgencyServiceFeeMonthlyReportController : ControllerBase
             DynamicAgencyServiceFeeMonthlyReportRules.BoundaryText,
             DynamicAgencyServiceFeeMonthlyReportRules.EvidenceOnlyText,
             DynamicAgencyServiceFeeMonthlyReportRules.CurrencyIsolationText,
-            DynamicAgencyServiceFeeMonthlyReportRules.NoProrationText);
+            DynamicAgencyServiceFeeMonthlyReportRules.NoProrationText,
+            groupBy,
+            groupCounts,
+            DynamicAgencyServiceFeeMonthlyReportRules.GroupCountScopeText);
     }
 
     /// <summary>身份 + 既有「角色 → 菜单」客户资料模块授权 + 业务员数据范围（fail closed，绝不猜测身份）</summary>

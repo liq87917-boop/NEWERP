@@ -21,7 +21,14 @@ public sealed record DynamicAgencyServiceFeeMonthlyReportFieldDto(
     bool Filterable);
 
 /// <summary>
-/// 字段目录（ERP-181，只读）：白名单字段 + 所需菜单授权与有界额度口径（与规则同源）。
+/// 分组键目录项（ERP-184，只读）：有限分组选择 none / month / customer，由服务端规则统一供给。
+/// </summary>
+public sealed record DynamicAgencyServiceFeeMonthlyReportGroupByDto(
+    string Key,
+    string Label);
+
+/// <summary>
+/// 字段目录（ERP-181，只读）：白名单字段 + 分组键选择 + 所需菜单授权与有界额度口径（与规则同源）。
 /// </summary>
 public sealed record DynamicAgencyServiceFeeMonthlyReportCatalogDto(
     List<DynamicAgencyServiceFeeMonthlyReportFieldDto> Fields,
@@ -30,7 +37,8 @@ public sealed record DynamicAgencyServiceFeeMonthlyReportCatalogDto(
     int MaxPageSize,
     string ReadOnlyText,
     string BoundaryText,
-    string EvidenceOnlyText);
+    string EvidenceOnlyText,
+    List<DynamicAgencyServiceFeeMonthlyReportGroupByDto> GroupBys);
 
 /// <summary>
 /// 预览查询参数（ERP-181，全部为只读筛选）：选定字段（仅限白名单）、复用 ERP-180 的客户 / 币种 /
@@ -53,6 +61,9 @@ public sealed class DynamicAgencyServiceFeeMonthlyReportRequest
     /// <summary>对账日期结束（含当天；留空 = 不限）</summary>
     public DateTime? StatementDateTo { get; set; }
 
+    /// <summary>分组键（仅 none / month / customer；无效取值由服务端 fail closed 拒绝，默认 none）</summary>
+    public string? GroupBy { get; set; }
+
     /// <summary>页码（从 1 开始）</summary>
     public int Page { get; set; } = 1;
 
@@ -63,6 +74,9 @@ public sealed class DynamicAgencyServiceFeeMonthlyReportRequest
 /// <summary>
 /// 预览结果页（ERP-181，只读）：按请求顺序返回选定列与分页行；行内仅包含选定的白名单字段值，
 /// 不泄露范围外客户数据；保留 ERP-180 的稳定分页、原币隔离、状态金额口径与空结果提示。
+/// <para>ERP-184 新增 <see cref="GroupBy"/> / <see cref="GroupCounts"/>：仅当请求分组（month / customer）时，
+/// <see cref="GroupCounts"/> 给出「当前授权预览页」按分组键的计数（已登记 / 草稿 / 已作废 / 总计张数），
+/// 原币严格隔离、只统计当前页、绝不做整份报表或会计合计；默认 none 时为空。</para>
 /// </summary>
 public sealed record DynamicAgencyServiceFeeMonthlyReportPageDto(
     List<DynamicAgencyServiceFeeMonthlyReportFieldDto> Columns,
@@ -78,4 +92,27 @@ public sealed record DynamicAgencyServiceFeeMonthlyReportPageDto(
     string BoundaryText,
     string EvidenceOnlyText,
     string CurrencyIsolationText,
-    string NoProrationText);
+    string NoProrationText,
+    string GroupBy = "none",
+    List<DynamicAgencyServiceFeeMonthlyReportGroupCountDto> GroupCounts = null!,
+    string GroupCountScopeText = "");
+
+/// <summary>
+/// 当前授权预览页的分组计数（ERP-184，只读）：按「对账月份」或「客户」分组、原币严格隔离，
+/// 只统计当前页的月度汇总行数（<see cref="RowCount"/>）与其中已登记 / 草稿 / 已作废 / 总计张数。
+/// <para>本计数只统计当前授权预览页、不是整份报表总计，也绝不做任何会计结论（不代表收入 / 应收 / 已收款）。</para>
+/// </summary>
+public sealed record DynamicAgencyServiceFeeMonthlyReportGroupCountDto(
+    string GroupBy,
+    int? StatementYear,
+    int? StatementMonth,
+    string StatementMonthText,
+    long? CustomerId,
+    string CustomerCode,
+    string CustomerName,
+    string Currency,
+    int RowCount,
+    int RegisteredCount,
+    int DraftCount,
+    int VoidedCount,
+    int StatementCount);

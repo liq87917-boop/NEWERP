@@ -25,6 +25,20 @@ public static class DynamicAgencyServiceFeeMonthlyReportRules
     /// <summary>每页条数上限（有界：单次请求最多返回这么多「年月 + 客户 + 币种」分组）</summary>
     public const int MaxPageSize = AgencyServiceFeeMonthlySummaryRules.MaxPageSize;
 
+    // ==================== 0.1 分组键（ERP-184） ====================
+
+    /// <summary>不分组（默认）</summary>
+    public const string GroupByNone = "none";
+
+    /// <summary>按对账月份分组（原币仍分别成组）</summary>
+    public const string GroupByMonth = "month";
+
+    /// <summary>按客户分组（原币仍分别成组）</summary>
+    public const string GroupByCustomer = "customer";
+
+    /// <summary>支持的分组键（有限、有序）</summary>
+    public static readonly string[] SupportedGroupBys = { GroupByNone, GroupByMonth, GroupByCustomer };
+
     // ==================== 1. 文案（与 ERP-180 同源，保证界面 / 接口证据口径一致） ====================
 
     /// <summary>只读声明（与 ERP-180 同源）</summary>
@@ -41,6 +55,10 @@ public static class DynamicAgencyServiceFeeMonthlyReportRules
 
     /// <summary>服务期间跨月不按期间分摊说明</summary>
     public const string NoProrationText = AgencyServiceFeeMonthlySummaryRules.NoProrationText;
+
+    /// <summary>分组计数范围说明（只统计当前授权预览页，非全量 / 非会计合计）</summary>
+    public const string GroupCountScopeText =
+        "分组计数只统计当前授权预览页的月度汇总行，不覆盖整份报表；计数只是证据数字，不代表收入 / 应收 / 已收款等会计结论。";
 
     // ==================== 2. 字段白名单（有限、有序） ====================
 
@@ -85,7 +103,7 @@ public static class DynamicAgencyServiceFeeMonthlyReportRules
         => Fields.Select(f => new DynamicAgencyServiceFeeMonthlyReportFieldDto(
             f.Key, f.Label, f.DataType, f.Filterable)).ToList();
 
-    /// <summary>返回预览接口所需的完整字段目录 DTO（字段 + 菜单授权 + 有界额度 + 证据口径文案）。</summary>
+    /// <summary>返回预览接口所需的完整字段目录 DTO（字段 + 分组键 + 菜单授权 + 有界额度 + 证据口径文案）。</summary>
     public static DynamicAgencyServiceFeeMonthlyReportCatalogDto GetCatalogDto()
         => new(
             GetCatalog(),
@@ -94,7 +112,17 @@ public static class DynamicAgencyServiceFeeMonthlyReportRules
             MaxPageSize,
             ReadOnlyText,
             BoundaryText,
-            EvidenceOnlyText);
+            EvidenceOnlyText,
+            GetGroupBys());
+
+    /// <summary>返回有限、有序的分组键选择（与规则同源）。</summary>
+    public static List<DynamicAgencyServiceFeeMonthlyReportGroupByDto> GetGroupBys()
+        => new()
+        {
+            new(GroupByNone, "不分组"),
+            new(GroupByMonth, "按对账月份"),
+            new(GroupByCustomer, "按客户"),
+        };
 
     /// <summary>按键取字段定义（未知键返回 null）。</summary>
     public static DynamicAgencyServiceFeeMonthlyReportFieldDto? GetField(string key)
@@ -175,5 +203,94 @@ public static class DynamicAgencyServiceFeeMonthlyReportRules
         }
 
         return result;
+    }
+
+    // ==================== 5. 分组计数（ERP-184） ====================
+
+    /// <summary>
+    /// 规范化分组键（fail closed）：空 / 留空 = 不分组（none）；仅接受 none / month / customer（大小写不敏感）；
+    /// 未知取值显式拒绝（在读取任何源数据之前完成）。
+    /// </summary>
+    public static string NormalizeGroupBy(string? groupBy)
+    {
+        if (string.IsNullOrWhiteSpace(groupBy))
+            return GroupByNone;
+
+        var normalized = groupBy.Trim();
+        if (string.Equals(normalized, GroupByNone, StringComparison.OrdinalIgnoreCase)) return GroupByNone;
+        if (string.Equals(normalized, GroupByMonth, StringComparison.OrdinalIgnoreCase)) return GroupByMonth;
+        if (string.Equals(normalized, GroupByCustomer, StringComparison.OrdinalIgnoreCase)) return GroupByCustomer;
+
+        throw BusinessException.InvalidParameter(
+            $"无效的分组键: {groupBy}（可选：none / month / customer）");
+    }
+
+    /// <summary>
+    /// 分组计数（ERP-184）：从「当前授权预览页」的 ERP-180 月度汇总行计算计数，原币严格隔离、绝不跨币种合并或换算；
+    /// 只统计当前页行数（RowCount）与已登记 / 草稿 / 已作废 / 总计张数，绝不做整份报表或会计合计。none / 空页返回空列表。
+    /// </summary>
+    public static List<DynamicAgencyServiceFeeMonthlyReportGroupCountDto> BuildGroupCounts(
+        IEnumerable<AgencyServiceFeeMonthlySummaryRow> rows, string groupBy)
+    {
+        var list = (rows ?? Array.Empty<AgencyServiceFeeMonthlySummaryRow>()).ToList();
+        return NormalizeGroupBy(groupBy) switch
+        {
+            GroupByMonth => BuildMonthCounts(list),
+            GroupByCustomer => BuildCustomerCounts(list),
+            _ => new List<DynamicAgencyServiceFeeMonthlyReportGroupCountDto>(),
+        };
+    }
+
+    private static List<DynamicAgencyServiceFeeMonthlyReportGroupCountDto> BuildMonthCounts(
+        List<AgencyServiceFeeMonthlySummaryRow> rows)
+    {
+        return rows
+            .GroupBy(r => (r.StatementYear, r.StatementMonth, r.Currency))
+            .OrderBy(g => g.Key.StatementYear)
+            .ThenBy(g => g.Key.StatementMonth)
+            .ThenBy(g => g.Key.Currency, StringComparer.Ordinal)
+            .Select(g => new DynamicAgencyServiceFeeMonthlyReportGroupCountDto(
+                GroupByMonth,
+                g.Key.StatementYear,
+                g.Key.StatementMonth,
+                AgencyServiceFeeMonthlySummaryRules.MonthText(g.Key.StatementYear, g.Key.StatementMonth),
+                null,
+                string.Empty,
+                string.Empty,
+                g.Key.Currency,
+                g.Count(),
+                g.Sum(r => r.RegisteredCount),
+                g.Sum(r => r.DraftCount),
+                g.Sum(r => r.VoidedCount),
+                g.Sum(r => r.StatementCount)))
+            .ToList();
+    }
+
+    private static List<DynamicAgencyServiceFeeMonthlyReportGroupCountDto> BuildCustomerCounts(
+        List<AgencyServiceFeeMonthlySummaryRow> rows)
+    {
+        return rows
+            .GroupBy(r => (r.CustomerId, r.Currency))
+            .OrderBy(g => g.Key.CustomerId)
+            .ThenBy(g => g.Key.Currency, StringComparer.Ordinal)
+            .Select(g =>
+            {
+                var first = g.First();
+                return new DynamicAgencyServiceFeeMonthlyReportGroupCountDto(
+                    GroupByCustomer,
+                    null,
+                    null,
+                    string.Empty,
+                    g.Key.CustomerId,
+                    first.CustomerCode,
+                    first.CustomerName,
+                    g.Key.Currency,
+                    g.Count(),
+                    g.Sum(r => r.RegisteredCount),
+                    g.Sum(r => r.DraftCount),
+                    g.Sum(r => r.VoidedCount),
+                    g.Sum(r => r.StatementCount));
+            })
+            .ToList();
     }
 }
