@@ -1,0 +1,40 @@
+{
+  "id": "ERP-181",
+  "title": "Design an authorized dynamic agency monthly summary report",
+  "status": "pending",
+  "risk_level": "medium",
+  "description": "A customer-service user chooses monthly service-fee evidence fields and existing customer, currency and statement-date filters in the monthly-summary workspace, then previews the selected columns. Add a finite field catalog and bounded request/response DTOs in the existing ERP layers; reuse ERP-180 scoped AgencyServiceFeeMonthlySummaryService. Recheck identity, customer menu grant and salesperson data scope on each catalog/preview call; validate unknown or duplicate field keys and page bounds before source reads, fail closed and show a clear UI error. Preserve month, customer and original-currency grouping, status-specific amounts and evidence-only language; OperationLogMiddleware records access. Development only: no schema/migration edits, production SQL or real database execution, arbitrary SQL, business writes, secrets or .env changes, deployment or browser acceptance. Verify focused tests and safe Release build/test.",
+  "acceptance_criteria": [
+    "A finite GET field catalog and bounded POST preview validate selected keys, filters and paging before database reads; unknown keys and unauthorized access fail closed.",
+    "Preview projects only selected fields from the ERP-180 authorized monthly-summary page, retaining stable paging, original-currency separation, status-specific amount meaning and empty results.",
+    "The existing monthly-summary UI exposes field selection, filters and preview with visible loading, empty and error states; focused tests cover scope, field order, invalid keys, page bounds and mixed currencies, and safe Release build/test passes."
+  ],
+  "allowed_paths": [
+    "src/ERP.Application/DTOs/DynamicAgencyServiceFeeMonthlyReportDtos.cs",
+    "src/ERP.Application/Services/DynamicAgencyServiceFeeMonthlyReportRules.cs",
+    "src/ERP.Api/Controllers/DynamicAgencyServiceFeeMonthlyReportController.cs",
+    "src/ERP.Api/wwwroot/js/agency-service-fee-monthly-summary.js",
+    "src/ERP.UnitTests/DynamicAgencyServiceFeeMonthlyReportTests.cs"
+  ],
+  "validation_profile": "safe",
+  "depends_on": [
+    "ERP-180"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "completion_mode": "build",
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": [],
+    "test_filter": "Collection=UiTests",
+    "minimum_screenshots": 1
+  },
+  "human_gate": {
+    "required": false,
+    "status": "not_required",
+    "level": "L1",
+    "reason": ""
+  },
+  "attempts": 0,
+  "created_at": "2026-09-30T04:47:02.334869Z"
+}
