@@ -177,4 +177,37 @@ public class DynamicContainerStatsReportUiTests
         Assert.DoesNotContain("SqlCommand", fn);
         Assert.DoesNotContain("ExecuteSql", fn);
     }
+
+    // ==================== 7. 下载 PDF（ERP-254） ====================
+
+    [Fact]
+    public void 下载PDF_入口按钮与函数_复用当前字段日期筛选分页状态_失败不下载旧行()
+    {
+        var js = Script;
+
+        Assert.Contains("onclick=\"cstExportPdf()\"", js);
+        Assert.Contains("function cstExportPdf()", js);
+
+        var fn = Segment(js, "function cstExportPdf()", "function cstPage(");
+        Assert.Contains("'/api/dynamic-container-stats-report/pdf'", fn);
+        Assert.Contains("method: 'POST'", fn);
+        Assert.Contains("const state = cstBuildState(CST_DYN.view.page);", fn);
+        Assert.Contains("const req = cstBuildRequest(state);", fn);
+        Assert.Contains("body: JSON.stringify(req)", fn);
+
+        // 成功路径：识别 pdf 附件并触发下载，绝不使用旧预览行
+        Assert.Contains("application/pdf", fn);
+        Assert.Contains("resp.blob()", fn);
+        Assert.Contains("URL.createObjectURL(blob)", fn);
+        Assert.Contains("a.download", fn);
+
+        // 失败路径：授权 / 无效 / 来源超限 / 字体缺失 / 渲染失败 / 网络失败可见，不下载任何内容
+        Assert.Contains("cstErrorHtml(cstKindOfCode(code), message)", fn);
+        Assert.Contains("cstErrorHtml('network'", fn);
+        Assert.Contains("请先预览后再下载 PDF", fn);
+
+        Assert.DoesNotContain("FromSql", fn);
+        Assert.DoesNotContain("SqlCommand", fn);
+        Assert.DoesNotContain("ExecuteSql", fn);
+    }
 }

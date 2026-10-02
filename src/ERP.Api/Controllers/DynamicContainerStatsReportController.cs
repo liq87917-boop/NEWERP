@@ -74,6 +74,26 @@ public class DynamicContainerStatsReportController : ControllerBase
             $"ContainerStatsEvidence_{DateTime.Now:yyyyMMddHHmmss}.xlsx");
     }
 
+    /// <summary>
+    /// 下载当前页为中文 PDF（ERP-254，只读）：复用同一有界、已授权预览与选定列顺序，重建当前页（绝不信任客户端行 / 预览缓存）；
+    /// 有符号签名箱数 / 毛重 / 体积与授权范围计数按数值渲染、单位独立，装载率 / 柜型恒为字面「未知」；
+    /// 并始终标注规范化日期 / 应用筛选 / 页面覆盖 / 分组身份 / 授权范围计数 / 来源上限 / 数量单位 /
+    /// 未知实际容积 / 柜型 / 出运上下文（即使对应列被取消选择也始终包含）。宽列集按可用页宽拆成多个列页（携带桶 / 日期 / 覆盖身份），
+    /// 行数超出按行页拆分并重复表头，避免列 / 行被裁切；绝不追加全匹配 / 跨单位合计 / 实体柜数量声称或未选定列。
+    /// 每次请求重新校验身份 / 柜量与装柜利用率统计菜单授权 / 业务员数据范围 / 字段 / 日期 / 分页（fail closed）；
+    /// 授权撤销 / 无效输入 / 来源超限 / 字体缺失或渲染失败返回错误、不返回任何文件。全程只读，请求由既有 <c>OperationLogMiddleware</c> 记录审计（动作「导出」）。
+    /// </summary>
+    [HttpPost("pdf")]
+    public async Task<IActionResult> ExportPdf([FromBody] DynamicContainerStatsReportRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var page = await BuildPageAsync(request);
+        var bytes = DynamicContainerStatsPdfExporter.Export(page);
+        return File(bytes, "application/pdf",
+            $"ContainerStatsEvidence_{DateTime.Now:yyyyMMddHHmmss}.pdf");
+    }
+
     /// <summary>每次重新校验身份 + 菜单授权 + 业务员数据范围，再交由服务层校验请求并只读查询当前页</summary>
     private async Task<DynamicContainerStatsReportPageDto> BuildPageAsync(DynamicContainerStatsReportRequest request)
     {
