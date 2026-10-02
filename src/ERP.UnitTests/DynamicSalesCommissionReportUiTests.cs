@@ -213,4 +213,39 @@ public class DynamicSalesCommissionReportUiTests
         Assert.DoesNotContain("JSON.stringify(SCD_DYN.view)", fn);
     }
 
+    // ==================== 7. 全匹配原币汇总（ERP-247，前端契约） ====================
+
+    [Fact]
+    public void 汇总面板_全匹配原币汇总_独立于当前页_全局计数与比例原因可见()
+    {
+        var js = Script;
+        var fn = Segment(js, "function scdSummaryHtml(", "function scdResultHtml(");
+
+        Assert.Contains("view.summary", fn);
+        Assert.Contains("s.currencyColumns", fn);
+        Assert.Contains("s.currencyRows", fn);
+        Assert.Contains("s.globalUniqueSalesmanBuckets", fn);
+        Assert.Contains("s.globalApprovedOrders", fn);
+        Assert.Contains("s.currentReferenceRate", fn);
+        Assert.Contains("s.currentReferenceRateReason", fn);
+        Assert.Contains("s.coverageText", fn);
+        Assert.Contains("s.profitBasisText", fn);
+        Assert.Contains("s.emptyText", fn);
+    }
+
+    [Fact]
+    public void 汇总面板_失败清空旧汇总_空汇总显式无证据()
+    {
+        var js = Script;
+        var fn = Segment(js, "function scdSummaryHtml(", "function scdResultHtml(");
+
+        // 无 summary 时绝不渲染旧汇总（清空视图即清空汇总）
+        Assert.Contains("if (!s) return ''", fn);
+        Assert.Contains("全匹配原币汇总", fn);
+
+        // 预览错误路径统一清空视图（汇总随 view 一并清空，绝不保留旧汇总）
+        var pv = Segment(js, "function scdPreview(", "function scdPage(");
+        Assert.Contains("SCD_DYN.view = null", pv);
+    }
+
 }

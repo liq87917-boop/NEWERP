@@ -4426,6 +4426,35 @@ function scdScopeLine(view) {
   return `${scdEsc(c.label || '')}：行 ${c.salesmanCurrencyRows} · 去重业务员桶 ${c.uniqueSalesmanBuckets} · 已审核订单 ${c.approvedOrders} · ${scdEsc(c.evidenceBasis || '')}`;
 }
 
+/* 全匹配原币汇总（ERP-247，独立于当前页 / 选定列）：按原始原币合并全部匹配业务员桶 × 原币证据行；
+   金额仅按原始原币独立小计、绝不跨币种合计；去重业务员桶（跨币种去重）与已审核订单（不相交合计）为全局计数，
+   与当前页行数无关；利润 / 利润率 / 提成额恒未知；当前参考比例仅在全部匹配证据一致时显示、否则显示原因；
+   空汇总显式标注无匹配证据。 */
+function scdSummaryHtml(view) {
+  const s = view && view.summary;
+  if (!s) return '';
+  const cols = (s.currencyColumns || []);
+  const rows = (s.currencyRows || []);
+  const align = c => (c.dataType === 'number') ? ' class="text-right"' : '';
+  const head = cols.map(c => `<th${align(c)}>${scdEsc(c.label || c.key)}</th>`).join('');
+  const cell = (value, field) => (value === null || value === undefined)
+    ? '<span class="text-muted">未知</span>'
+    : scdEsc(scdCellText(value, field));
+  const body = rows.length
+    ? rows.map(r => `<tr>${cols.map(c => `<td${align(c)}>${cell(r[c.key], c)}</td>`).join('')}</tr>`).join('')
+    : '';
+  const coverage = `<div class="pd-hint" style="margin:4px 0">${scdEsc(s.coverageText || '')}</div>`;
+  const globals = `<div class="pd-hint" style="margin:4px 0">去重业务员桶（跨币种去重） ${scdEsc(s.globalUniqueSalesmanBuckets)} · 已审核订单（不相交合计） ${scdEsc(s.globalApprovedOrders)}（与当前页行数无关）</div>`;
+  const rate = (s.currentReferenceRate === null || s.currentReferenceRate === undefined)
+    ? `<div class="pd-hint" style="margin:4px 0">${scdEsc(s.currentReferenceRateReason || '')}</div>`
+    : `<div class="pd-hint" style="margin:4px 0">当前参考比例 ${scdEsc(scdCellText(s.currentReferenceRate, { dataType: 'number' }))}%（全部匹配证据一致）</div>`;
+  const profitBasis = `<div class="pd-hint" style="margin:4px 0">${scdEsc(s.profitBasisText || '')}</div>`;
+  const table = rows.length
+    ? `<div class="table-wrap" style="margin-top:8px"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`
+    : `<div class="empty" style="margin:8px 0">${scdEsc(s.emptyText || '')}</div>`;
+  return `<div class="card" style="margin:8px 0;padding:8px"><div class="pd-hint"><b>${scdEsc('全匹配原币汇总')}</b></div>${coverage}${globals}${rate}${profitBasis}${table}</div>`;
+}
+
 /* 结果区渲染：先给范围 / 口径提示（即使对应列被取消选择也始终显示），再渲染空态或表格 + 分页 */
 function scdResultHtml(view) {
   if (!view) return '';
@@ -4445,10 +4474,11 @@ function scdResultHtml(view) {
     view.sourceLimitText,
   ].filter(Boolean).map(t => `<div class="pd-hint" style="margin:0 0 8px">${scdEsc(t)}</div>`).join('');
   const scope = `<div class="pd-hint" style="margin:0 0 8px">${scdScopeLine(view)}</div>`;
+  const summary = scdSummaryHtml(view);
   const body = view.rows && view.rows.length
     ? scdTableHtml(view) + scdPagingHtml(view)
     : scdEmptyHtml(view);
-  return `${scope}${filterLine}${hints}${body}`;
+  return `${scope}${filterLine}${hints}${summary}${body}`;
 }
 
 /* 字段选择器：只由目录白名单渲染为复选框，绝不渲染自由输入框或 SQL */

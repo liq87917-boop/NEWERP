@@ -337,6 +337,9 @@ public static class DynamicSalesCommissionReportRules
             items.Sum(x => x.OrderCount),
             SourceEvidenceBasis);
 
+        // ERP-247：在分页 / 选定列投影之前，基于同一份完整有界作用域化列表纯派生「全匹配」原币汇总。
+        var summary = DynamicSalesCommissionSummaryRules.BuildSummary(items);
+
         return new DynamicSalesCommissionReportPageDto(
             columns,
             rows,
@@ -361,7 +364,8 @@ public static class DynamicSalesCommissionReportRules
             SourceContextText,
             SourceLimitText,
             filterText,
-            context);
+            context,
+            summary);
     }
 
     // ==================== 6. Excel 导出 ====================

@@ -381,4 +381,55 @@ public class DynamicSalesCommissionReportTests
         var ex = await Assert.ThrowsAsync<BusinessException>(() => ctl.Preview(Request()));
         Assert.Equal(ErrorCodes.RuleConflict, ex.Code);
     }
+
+    [Fact]
+    public async Task 预览_全匹配汇总_独立于当前页与选定列()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedAuthorizedUser(db, "priv", "Priv", isSystemRole: true);
+        var customer = SeedCustomer(db, "C001", "客户");
+        var emp1 = SeedEmployee(db, "S001", "业务员甲");
+        var emp2 = SeedEmployee(db, "S002", "业务员乙");
+
+        SeedOrder(db, "SO-1", customer.Id, emp1.Id, Currency.USD, 100m);
+        SeedOrder(db, "SO-2", customer.Id, emp2.Id, Currency.USD, 200m);
+        SeedOrder(db, "SO-3", customer.Id, emp1.Id, Currency.CNY, 500m);
+
+        var ctl = BuildController(db, user.Id);
+        TestAuth.SetUser(ctl, user.Id);
+
+        var page = OkPage(await ctl.Preview(Request(
+            fields: new List<string> { "currency" }, page: 1, pageSize: 1)));
+
+        Assert.Single(page.Rows);                              // 当前页仅 1 行
+        Assert.NotNull(page.Summary);
+        Assert.Equal(2, page.Summary.CurrencyRows.Count);      // 汇总覆盖全部匹配行（USD + CNY）
+        Assert.Equal(2, page.Summary.GlobalUniqueSalesmanBuckets);
+        Assert.Equal(3, page.Summary.GlobalApprovedOrders);
+    }
+
+    [Fact]
+    public async Task 预览_汇总_受限制业务员_只汇总被分配客户证据()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedAuthorizedUser(db, "alice", "Sales");
+        var employee = SeedEmployee(db, "alice", "业务员甲");
+        var otherEmp = SeedEmployee(db, "bob", "业务员乙");
+        var mine = SeedCustomer(db, "C001", "我的客户", employee.Id);
+        var other = SeedCustomer(db, "C002", "别人的客户", otherEmp.Id);
+
+        SeedOrder(db, "SO-MINE", mine.Id, employee.Id, Currency.USD, 100m);
+        SeedOrder(db, "SO-OTHER", other.Id, otherEmp.Id, Currency.USD, 9000m);
+
+        var ctl = BuildController(db, user.Id);
+        TestAuth.SetUser(ctl, user.Id);
+
+        var page = OkPage(await ctl.Preview(Request()));
+
+        Assert.NotNull(page.Summary);
+        Assert.Equal(1, page.Summary.GlobalApprovedOrders);
+        Assert.Equal(1, page.Summary.GlobalUniqueSalesmanBuckets);
+        var usd = Assert.Single(page.Summary.CurrencyRows);
+        Assert.Equal(100m, usd.SalesAmount);
+    }
 }

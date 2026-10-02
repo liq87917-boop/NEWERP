@@ -504,6 +504,47 @@ public class DynamicSalesCommissionExcelTests
         Assert.Equal(100m, Assert.IsType<decimal>(DynamicSalesCommissionReportRules.EscapeFormulaLeading(100m)));
         Assert.Null(DynamicSalesCommissionReportRules.EscapeFormulaLeading(null));
     }
+
+    [Fact]
+    public async Task Export_不追加全匹配汇总_仅当前页数据与口径工作表()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedAuthorizedUser(db, "priv", "Priv", isSystemRole: true);
+        var customer = SeedCustomer(db, "C001", "客户");
+        var emp1 = SeedEmployee(db, "S001", "业务员甲");
+        var emp2 = SeedEmployee(db, "S002", "业务员乙");
+
+        SeedOrder(db, "SO-1", customer.Id, emp1.Id, Currency.USD, 100m);
+        SeedOrder(db, "SO-2", customer.Id, emp2.Id, Currency.CNY, 200m);
+
+        var ctl = BuildController(db, user.Id);
+        TestAuth.SetUser(ctl, user.Id);
+
+        var file = ExportOk(await ctl.Export(Request(
+            new List<string> { "salesmanName", "currency", "salesAmount" })));
+
+        var workbook = OpenWorkbook(file.FileContents);
+        Assert.Equal(2, workbook.NumberOfSheets);
+        Assert.Equal(DynamicSalesCommissionReportRules.DataSheetName, workbook.GetSheetName(0));
+        Assert.Equal(DynamicSalesCommissionReportRules.ContextSheetName, workbook.GetSheetName(1));
+
+        for (var i = 0; i < workbook.NumberOfSheets; i++)
+        {
+            var sheet = workbook.GetSheetAt(i);
+            Assert.DoesNotContain("全匹配原币汇总", sheet.SheetName);
+            for (var r = 0; r <= sheet.LastRowNum; r++)
+            {
+                var row = sheet.GetRow(r);
+                if (row == null) continue;
+                foreach (var cell in row.Cells)
+                {
+                    var text = cell.CellType == CellType.String ? cell.StringCellValue : string.Empty;
+                    Assert.DoesNotContain("全匹配原币汇总", text);
+                    Assert.DoesNotContain("globalUniqueSalesmanBuckets", text);
+                }
+            }
+        }
+    }
 }
 
 

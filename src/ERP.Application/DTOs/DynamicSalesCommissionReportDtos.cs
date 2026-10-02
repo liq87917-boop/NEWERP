@@ -103,7 +103,9 @@ public sealed record DynamicSalesCommissionReportContextDto(
 /// <see cref="CurrencyContextText"/> / <see cref="UnknownContextText"/> / <see cref="ProfitContextText"/> /
 /// <see cref="CommissionContextText"/> / <see cref="RateContextText"/> / <see cref="SourceContextText"/> /
 /// <see cref="SourceLimitText"/> 显式声明原币 / 未知 / 未知利润 / 未知提成 / 当前参考比例 / 来源 / 来源上限口径
-/// （即使对应列被取消选择也始终呈现）；<see cref="FilterText"/> 显式声明已规范化的应用筛选上下文。
+/// （即使对应列被取消选择也始终呈现）；<see cref="FilterText"/> 显式声明已规范化的应用筛选上下文；
+/// <see cref="Summary"/> 为分页 / 选定列投影之前的全匹配原币汇总（与当前页 / 选定列无关，空汇总显式标注无证据，
+/// 绝不跨币种合计金额 / 累加百分比）。
 /// </summary>
 public sealed record DynamicSalesCommissionReportPageDto(
     List<DynamicSalesCommissionReportFieldDto> Columns,
@@ -129,4 +131,5 @@ public sealed record DynamicSalesCommissionReportPageDto(
     string SourceContextText,
     string SourceLimitText,
     string FilterText,
-    DynamicSalesCommissionReportContextDto Context);
+    DynamicSalesCommissionReportContextDto Context,
+    DynamicSalesCommissionSummaryDto? Summary = null);

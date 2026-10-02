@@ -426,6 +426,32 @@ public class DynamicSalesCommissionPdfTests
         Assert.Equal(before, db.SalesOrders.Count());
         Assert.False(db.ChangeTracker.HasChanges());
     }
+
+    [Fact]
+    public void ExportPdf_不追加全匹配汇总_页面数与无汇总一致()
+    {
+        var items = new List<ReportDtos.SalesCommissionItem>
+        {
+            new() { SalesmanId = 1, SalesmanName = "业务员甲", Currency = "USD", CurrencyLabel = "USD 美元", OrderCount = 1, SalesAmount = 100m },
+            new() { SalesmanId = 2, SalesmanName = "业务员乙", Currency = "CNY", CurrencyLabel = "CNY 人民币", OrderCount = 1, SalesAmount = 200m },
+        };
+
+        var page = DynamicSalesCommissionReportRules.BuildPage(
+            items,
+            new List<string> { "salesmanName", "currency", "salesAmount" },
+            1, 20, Start, End);
+
+        Assert.NotNull(page.Summary);
+        Assert.Equal(2, page.Summary.CurrencyRows.Count);
+
+        var withoutSummary = page with { Summary = null };
+
+        using var withPdf = OpenPdf(DynamicSalesCommissionPdfExporter.Export(page));
+        using var withoutPdf = OpenPdf(DynamicSalesCommissionPdfExporter.Export(withoutSummary));
+
+        // 汇总绝不为当前页下载追加额外页（保留既有当前页 PDF 语义）
+        Assert.Equal(withoutPdf.Pages.Count, withPdf.Pages.Count);
+    }
 }
 
 
