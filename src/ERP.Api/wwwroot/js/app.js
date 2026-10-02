@@ -344,6 +344,7 @@ function renderPage(code, name) {
   else if (code === 'dingtalk-log') renderDingTalkLogModule();                       // 钉钉发送记录
   else if (EXPORT_MENU_MAP[code]) renderBillExport(code);
   else if (BILL_CODE_MAP[code]) renderBillV2(BILL_CODE_MAP[code]);
+  else if (code === 'report-configuration') renderReportConfigurationWorkspace();   // 通用报表配置工作台（ERP-262）
   else {
     const mod = MODULES[code];
     if (mod) { CURRENT_MODULE_CODE = code; renderModule(mod); }

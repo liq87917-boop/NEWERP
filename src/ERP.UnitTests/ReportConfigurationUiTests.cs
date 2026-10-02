@@ -1,0 +1,162 @@
+using Xunit;
+
+namespace ERP.UnitTests;
+
+/// <summary>
+/// ERP-262 通用报表配置工作台前端接线源契约测试：独立工作台路由 / 脚本加载、目录驱动字段 / 筛选 / 分组 /
+/// 预览、保存 / 复制 / 重命名 / 删除 / 发布 / 恢复 / 修订、草稿与已发布区分、未保存 / 陈旧版本 / 权限 /
+/// 环境阻断 / 转义 / 迟到响应丢弃，以及币种单位分离与当前预览页覆盖口径。
+/// <para>只做源码静态断言，不启动浏览器、不执行任何 UI 交互、不连接数据库。</para>
+/// </summary>
+public class ReportConfigurationUiTests
+{
+    // ==================== 1. 独立工作台路由 / 脚本加载 ====================
+
+    [Fact]
+    public void 前端接线_独立工作台路由与脚本加载_且保留既有报表入口()
+    {
+        var app = File.ReadAllText(Path.Combine(JsDirectory(), "app.js"));
+        var index = File.ReadAllText(Path.Combine(JsDirectory(), "..", "index.html"));
+        var js = File.ReadAllText(Path.Combine(JsDirectory(), "report-configuration.js"));
+
+        Assert.Contains("code === 'report-configuration'", app);
+        Assert.Contains("renderReportConfigurationWorkspace()", app);
+        Assert.Contains("/js/report-configuration.js", index);
+        Assert.Contains("function renderReportConfigurationWorkspace()", js);
+
+        // 旧报表菜单 / URL 分派保持不变：REPORTS 分派仍在，未破坏既有入口
+        Assert.Contains("REPORTS[code]", app);
+        Assert.Contains("renderReport(REPORTS[code], name)", app);
+    }
+
+    // ==================== 2. 目录驱动字段 / 筛选 / 分组，不暴露不支持控件 ====================
+
+    [Fact]
+    public void 目录驱动_字段白名单规范化与有界定义_不含任意SQL脚本联接()
+    {
+        var js = File.ReadAllText(Path.Combine(JsDirectory(), "report-configuration.js"));
+
+        Assert.Contains("function rccSelectFields(catalogFields, selectedKeys)", js);
+        Assert.Contains("valid.has(key)", js);          // 未知 / 隐藏键丢弃，fail closed
+        Assert.Contains("function rccBuildDefinition(state)", js);
+        Assert.Contains("aggregates: []", js);          // 不提供任意聚合 / SQL
+        Assert.Contains("capabilities: []", js);        // 不请求超出目录的能力
+        Assert.Contains("function rccGroupingHtml(groupingKeys, groupBy)", js);
+        Assert.Contains("function rccFilterRowHtml(fields, f, i)", js);
+        Assert.DoesNotContain("SELECT ", js);
+        Assert.DoesNotContain("localStorage.setItem('rcc", js);   // 绝不使用本地存储替代持久化定义
+    }
+
+    [Fact]
+    public void 不支持能力_以为什么不支持说明呈现_而非装饰性控件()
+    {
+        var js = File.ReadAllText(Path.Combine(JsDirectory(), "report-configuration.js"));
+
+        Assert.Contains("function rccUnsupportedHtml(dataset)", js);
+        Assert.Contains("为什么不支持", js);
+        Assert.Contains("自定义公式：本阶段不支持", js);
+        Assert.Contains("透视表：本阶段不支持", js);
+        Assert.Contains("跨数据集联接：本阶段不支持", js);
+        Assert.Contains("共享：本阶段仅支持私有配置", js);
+        Assert.Contains("导出：本阶段不支持导出", js);
+    }
+
+    // ==================== 3. 保存 / 复制 / 重命名 / 删除 / 发布 / 恢复 / 修订 ====================
+
+    [Fact]
+    public void 生命周期接口_保存复制重命名删除发布恢复修订预览接线完整()
+    {
+        var js = File.ReadAllText(Path.Combine(JsDirectory(), "report-configuration.js"));
+
+        Assert.Contains("const RCC_API = '/api/report-configurations'", js);
+        Assert.Contains("'/catalog'", js);
+        Assert.Contains("'/preview'", js);
+        Assert.Contains("'/copy'", js);
+        Assert.Contains("/rename?version=", js);
+        Assert.Contains("/publish?version=", js);
+        Assert.Contains("/restore?version=", js);
+        Assert.Contains("'/revisions'", js);
+        Assert.Contains("function rccSave()", js);
+        Assert.Contains("function rccCopy()", js);
+        Assert.Contains("function rccRename()", js);
+        Assert.Contains("function rccDelete()", js);
+        Assert.Contains("function rccPublish()", js);
+        Assert.Contains("function rccRestore(version)", js);
+        Assert.Contains("function rccLoadRevisions(id)", js);
+        Assert.Contains("function rccPreview()", js);
+    }
+
+    [Fact]
+    public void 草稿已发布区分_且陈旧版本冲突不覆盖()
+    {
+        var js = File.ReadAllText(Path.Combine(JsDirectory(), "report-configuration.js"));
+
+        Assert.Contains("function rccStatusLabel(v)", js);
+        Assert.Contains("草稿", js);
+        Assert.Contains("已发布", js);
+        Assert.Contains("function rccStatusBadge(v)", js);
+        Assert.Contains("if (env.code === 1004)", js);   // 陈旧版本冲突分支
+        Assert.Contains("版本冲突", js);
+        Assert.Contains("未覆盖", js);                    // 冲突时不覆盖
+    }
+
+    // ==================== 4. 转义 / 迟到响应 / 失败清除 / 空错误环境态 ====================
+
+    [Fact]
+    public void 转义与迟到响应丢弃与失败清除过期行_空错误环境态可见()
+    {
+        var js = File.ReadAllText(Path.Combine(JsDirectory(), "report-configuration.js"));
+
+        Assert.Contains("function rccEsc(v)", js);       // 所有用户 / 目录字符串转义
+        Assert.Contains("if (seq !== RCC.requestSeq) return;", js);   // 丢弃迟到预览响应
+        Assert.Contains("RCC.requestSeq++", js);          // 数据集 / 配置变化令牌递增
+        Assert.Contains("function rccErrorHtml(kind, message)", js);
+        Assert.Contains("function rccEmptyHtml()", js);
+        Assert.Contains("function rccEnvBlockedHtml(message)", js);
+    }
+
+    [Fact]
+    public void 环境阻断_显式环境未就绪且不用本地存储替代持久化()
+    {
+        var js = File.ReadAllText(Path.Combine(JsDirectory(), "report-configuration.js"));
+
+        Assert.Contains("环境未就绪（environment-blocked）", js);
+        Assert.Contains("不使用浏览器本地存储替代持久化定义", js);
+        Assert.Contains("function rccKindOfCode(code)", js);
+        Assert.Contains("if (code === 5000) return 'environment';", js);
+    }
+
+    // ==================== 5. 币种单位分离与当前预览页覆盖口径 ====================
+
+    [Fact]
+    public void 币种单位分离_分组小计按币种分区_并明确当前预览页覆盖口径()
+    {
+        var js = File.ReadAllText(Path.Combine(JsDirectory(), "report-configuration.js"));
+
+        Assert.Contains("function rccGroupHtml(preview)", js);
+        Assert.Contains("币种：", js);                    // 分组小计按币种分区
+        Assert.Contains("绝不跨币种", js);
+        Assert.Contains("function rccTableHtml(preview)", js);
+        Assert.Contains("currencyUnit", js);              // 列头带币种单位语义
+        Assert.Contains("当前预览页（非全量合计）", js);   // 与全量合计明确区分
+    }
+
+    // ==================== 6. 数据集 / 字段变化 ====================
+
+    [Fact]
+    public void 数据集与字段变化_重置筛选分组并按目录白名单规范化()
+    {
+        var js = File.ReadAllText(Path.Combine(JsDirectory(), "report-configuration.js"));
+
+        Assert.Contains("function rccSelectDataset(key, touch = true)", js);
+        Assert.Contains("RCC.filters = []", js);           // 切换数据集重置筛选
+        Assert.Contains("RCC.groupBy = 'none'", js);       // 切换数据集重置分组
+        Assert.Contains("function rccApplyDefinition(def)", js);
+        Assert.Contains("rccSelectFields(RCC.fields, (def && def.fields) || [])", js);  // 加载时丢弃未知字段
+    }
+
+    /// <summary>前端脚本目录（沿测试程序集输出目录上溯到仓库根，与 CustomerShipmentReportUiTests 同一约定）</summary>
+    private static string JsDirectory() => Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+        "..", "..", "..", "..", "..", "src", "ERP.Api", "wwwroot", "js"));
+}
+
