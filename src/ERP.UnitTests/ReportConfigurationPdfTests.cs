@@ -126,7 +126,8 @@ public class ReportConfigurationPdfTests
         => new(
             new ReportConfigurationCatalog(BuildProviders(db)),
             BuildService(db),
-            BuildExecution(db));
+            BuildExecution(db),
+            new ReportConfigurationSharingService(db, new ReportConfigurationCatalog(BuildProviders(db))));
 
     private static ReportConfigurationSaveDto SaveDto(string name, ReportConfigurationDefinition definition)
         => new() { Name = name, Definition = definition };

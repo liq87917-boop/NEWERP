@@ -95,9 +95,9 @@
   "depends_on": [
     "ERP-264"
   ],
-  "status": "pending",
+  "status": "completed",
   "max_attempts": 3,
-  "attempts": 0,
+  "attempts": 1,
   "validation_profile": "safe",
   "completion_mode": "build",
   "auto_start": true,

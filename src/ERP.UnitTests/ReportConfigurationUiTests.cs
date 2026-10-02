@@ -57,7 +57,7 @@ public class ReportConfigurationUiTests
         Assert.Contains("自定义公式：本阶段不支持", js);
         Assert.Contains("透视表：本阶段不支持", js);
         Assert.Contains("跨数据集联接：本阶段不支持", js);
-        Assert.Contains("共享：本阶段仅支持私有配置", js);
+        Assert.DoesNotContain("共享：本阶段仅支持私有配置", js);   // 共享已是真实能力，不再列入不支持清单
         Assert.DoesNotContain("导出：本阶段不支持导出", js);   // 导出已成为真实能力，不再列入不支持清单
     }
 
@@ -211,6 +211,39 @@ public class ReportConfigurationUiTests
         Assert.Contains("rccRenderResult(rccErrorHtml(rccKindOfCode(code), message))", fn);
         Assert.Contains("rccRenderResult(rccErrorHtml('network'", fn);
         Assert.DoesNotContain("RCC.dirty = false", fn);                // 失败 / 成功路径都不清除未保存标记
+    }
+
+    // ==================== 9. 只读共享：owned/shared 区分 + owner grant/revoke ====================
+
+    [Fact]
+    public void 共享_owned_shared_区分与共享列表接线()
+    {
+        var js = File.ReadAllText(Path.Combine(JsDirectory(), "report-configuration.js"));
+
+        Assert.Contains("function rccRenderShared()", js);
+        Assert.Contains("共享给我的", js);
+        Assert.Contains("class=\"status status-info\">共享</span>", js);   // shared 与 owned 区分
+        Assert.Contains("async function rccLoadShared()", js);
+        Assert.Contains("RCC_API + '/shared'", js);
+        Assert.Contains("function rccCopyShared(id)", js);
+        Assert.Contains("RCC_API + '/shared/' + id + '/copy'", js);
+        Assert.Contains("sharedCurrent", js);
+    }
+
+    [Fact]
+    public void 共享_owner_grant_revoke_控件与转义与冲突保留()
+    {
+        var js = File.ReadAllText(Path.Combine(JsDirectory(), "report-configuration.js"));
+
+        Assert.Contains("function rccRenderGrants()", js);
+        Assert.Contains("共享授权（owner-only）", js);
+        Assert.Contains("function rccGrant()", js);
+        Assert.Contains("RCC_API + '/' + RCC.current.id + '/grants'", js);
+        Assert.Contains("function rccRevoke(recipientUserId, version)", js);
+        Assert.Contains("'/grants/' + recipientUserId + '?version=' + version", js);
+        Assert.Contains("rccEsc(g.recipientDisplayName", js);   // 授权列表值转义，防注入
+        Assert.Contains("env.code === 1004", js);               // 冲突码处理，保留未提交输入
+        Assert.Contains("await rccLoadGrants()", js);           // 冲突后刷新授权列表
     }
 
     /// <summary>截取源码中两个锚点之间的片段，便于对单个函数做「不含某内容」的契约断言。</summary>

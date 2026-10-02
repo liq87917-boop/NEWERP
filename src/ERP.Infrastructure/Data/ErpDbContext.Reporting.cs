@@ -16,6 +16,9 @@ public partial class ErpDbContext
     /// <summary>私有报表配置的不可变发布修订快照集合</summary>
     public DbSet<ReportConfigurationRevision> ReportConfigurationRevisions => Set<ReportConfigurationRevision>();
 
+    /// <summary>私有报表配置的只读共享授权集合（ERP-265）</summary>
+    public DbSet<ReportConfigurationGrant> ReportConfigurationGrants => Set<ReportConfigurationGrant>();
+
     /// <summary>
     /// 报表配置与发布修订的精确 EF 映射（ERP-260）：列长 / JSON 列、owner/deleted 索引、
     /// 唯一修订元组、乐观预期版本并发令牌、级联删除关系。
@@ -53,5 +56,31 @@ public partial class ErpDbContext
         modelBuilder.Entity<ReportConfigurationRevision>()
             .HasIndex(x => x.ReportConfigurationId)
             .HasDatabaseName("IX_ReportConfigurationRevisions_ConfigurationId");
+
+        // ============ 只读共享授权（ERP-265） ============
+        modelBuilder.Entity<ReportConfigurationGrant>().Property(x => x.Version).IsConcurrencyToken();
+
+        modelBuilder.Entity<ReportConfigurationGrant>()
+            .HasOne(x => x.ReportConfiguration)
+            .WithMany()
+            .HasForeignKey(x => x.ReportConfigurationId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        // 同一被授权人在同一配置上至多一条有效授权（撤销 = 软删除，重新授权可插入新行）
+        modelBuilder.Entity<ReportConfigurationGrant>()
+            .HasIndex(x => new { x.RecipientUserId, x.ReportConfigurationId })
+            .IsUnique()
+            .HasFilter("[IsDeleted] = 0")
+            .HasDatabaseName("UX_ReportConfigurationGrants_Recipient_Configuration");
+
+        // 所有者按配置列出有效授权
+        modelBuilder.Entity<ReportConfigurationGrant>()
+            .HasIndex(x => new { x.ReportConfigurationId, x.IsDeleted })
+            .HasDatabaseName("IX_ReportConfigurationGrants_ConfigurationId_IsDeleted");
+
+        // 被授权人按自身列出有效共享
+        modelBuilder.Entity<ReportConfigurationGrant>()
+            .HasIndex(x => new { x.RecipientUserId, x.IsDeleted })
+            .HasDatabaseName("IX_ReportConfigurationGrants_RecipientUserId_IsDeleted");
     }
 }

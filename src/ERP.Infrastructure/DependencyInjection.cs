@@ -75,6 +75,9 @@ public static class DependencyInjection
         // 通用报表配置平台（ERP-261 Stage 1）：预览执行服务（草稿 / 固定发布修订 → 数据集适配器分发）
         services.AddScoped<IReportConfigurationExecutionService, ReportConfigurationExecutionService>();
 
+        // 通用报表配置平台（ERP-265 Stage 1）：只读共享授权服务（owner grant/revoke + recipient 只读 / 复制）
+        services.AddScoped<IReportConfigurationSharingService, ReportConfigurationSharingService>();
+
         // 库存移动与成本服务（ERP-009：库存单据审核/销审统一经此维护库存与流水）
         services.AddScoped<IInventoryService, InventoryService>();
 

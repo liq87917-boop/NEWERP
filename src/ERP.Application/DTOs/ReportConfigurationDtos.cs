@@ -425,3 +425,105 @@ public sealed class ReportConfigurationRenameDto
     /// <summary>新名称（1 ~ 200 字符）</summary>
     public string Name { get; set; } = string.Empty;
 }
+
+// ==================== ERP-265 Stage 1：只读共享授权契约 ====================
+
+/// <summary>
+/// 所有者授权 / 变更固定修订的请求契约（客户端提交；所有者 Id 由服务端认证注入，客户端不得提交）。
+/// <para>只接受被授权人用户 Id（不提供用户目录检索），并固定一个不可变发布修订版本号。</para>
+/// </summary>
+public sealed class ReportConfigurationGrantRequestDto
+{
+    /// <summary>被授权人用户 Id（现有激活 ERP 用户）</summary>
+    public long RecipientUserId { get; set; }
+
+    /// <summary>要固定共享的不可变发布修订版本号</summary>
+    public int RevisionVersion { get; set; }
+
+    /// <summary>已存在有效授权时的预期版本令牌（新建授权留空；变更固定修订时必填，防止陈旧写入）</summary>
+    public int? ExpectedVersion { get; set; }
+}
+
+/// <summary>只读共享授权项（所有者管理视图；含被授权人显示信息与预期版本令牌）。</summary>
+public sealed class ReportConfigurationGrantDto
+{
+    /// <summary>授权 Id</summary>
+    public long Id { get; set; }
+
+    /// <summary>被授权的私有报表配置 Id</summary>
+    public long ReportConfigurationId { get; set; }
+
+    /// <summary>被授权人用户 Id</summary>
+    public long RecipientUserId { get; set; }
+
+    /// <summary>被授权人登录账号</summary>
+    public string RecipientUserName { get; set; } = string.Empty;
+
+    /// <summary>被授权人显示姓名</summary>
+    public string RecipientDisplayName { get; set; } = string.Empty;
+
+    /// <summary>被固定的不可变发布修订版本号</summary>
+    public int RevisionVersion { get; set; }
+
+    /// <summary>当前预期版本令牌（后续变更固定修订 / 撤销需原样回传）</summary>
+    public int Version { get; set; }
+
+    /// <summary>授权人（所有者）用户 Id</summary>
+    public long GrantedByUserId { get; set; }
+
+    /// <summary>授权时间</summary>
+    public DateTime CreatedAt { get; set; }
+
+    /// <summary>最近变更时间（变更固定修订时更新）</summary>
+    public DateTime? UpdatedAt { get; set; }
+}
+
+/// <summary>被授权人共享列表项（只暴露被固定的发布快照，绝不暴露草稿 / 其它修订 / 历史）。</summary>
+public sealed class ReportConfigurationSharedSummaryDto
+{
+    /// <summary>被共享的私有报表配置 Id</summary>
+    public long ReportConfigurationId { get; set; }
+
+    /// <summary>固定发布修订的名称快照</summary>
+    public string Name { get; set; } = string.Empty;
+
+    /// <summary>固定发布修订的数据集键快照</summary>
+    public string DatasetKey { get; set; } = string.Empty;
+
+    /// <summary>固定发布修订版本号</summary>
+    public int RevisionVersion { get; set; }
+
+    /// <summary>发布时间</summary>
+    public DateTime PublishedAt { get; set; }
+
+    /// <summary>所有者用户 Id</summary>
+    public long OwnerUserId { get; set; }
+
+    /// <summary>所有者显示姓名（仅用于「来自谁」的展示）</summary>
+    public string OwnerDisplayName { get; set; } = string.Empty;
+}
+
+/// <summary>被授权人共享详情（只暴露被固定的发布快照定义，绝不暴露所有者草稿 / 其它修订 / 历史 / 编辑权）。</summary>
+public sealed class ReportConfigurationSharedDetailDto
+{
+    /// <summary>被共享的私有报表配置 Id</summary>
+    public long ReportConfigurationId { get; set; }
+
+    /// <summary>固定发布修订的名称快照</summary>
+    public string Name { get; set; } = string.Empty;
+
+    /// <summary>固定发布修订的数据集键快照</summary>
+    public string DatasetKey { get; set; } = string.Empty;
+
+    /// <summary>固定发布修订版本号</summary>
+    public int RevisionVersion { get; set; }
+
+    /// <summary>schema 版本快照</summary>
+    public int SchemaVersion { get; set; }
+
+    /// <summary>发布时间</summary>
+    public DateTime PublishedAt { get; set; }
+
+    /// <summary>已反序列化的被固定定义快照</summary>
+    public ReportConfigurationDefinition? Definition { get; set; }
+}

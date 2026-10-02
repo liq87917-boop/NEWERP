@@ -6,7 +6,7 @@
      POST /api/report-configurations（新增）或 PUT /api/report-configurations/{id}?version=N（更新，匹配预期版本令牌）；
    - 复制 / 重命名 / 软删除 / 发布 / 恢复 / 修订列表分别走 {id}/copy、{id}/rename、DELETE {id}、
      {id}/publish、{id}/restore、{id}/revisions；预览走 POST /api/report-configurations/preview；
-   - 不支持的能力（自定义公式 / 透视 / 跨数据集联接 / 全匹配合计 / 共享）只在「为什么不支持」面板说明原因，
+   - 不支持的能力（自定义公式 / 透视 / 跨数据集联接 / 全匹配合计）只在「为什么不支持」面板说明原因，
      绝不渲染为装饰性按钮假装可运行；
    - 币种 / 单位分离：列头带币种单位语义，分组小计按币种分区呈现，绝不跨币种 / 单位合并；
    - 草稿与已发布区分展示；当前预览页覆盖口径与全量合计明确区分（仅当前预览页小计）；
@@ -31,7 +31,6 @@ const RCC_UNSUPPORTED_REASONS = {
   'cross-dataset-join': '跨数据集联接：本阶段不支持，单个报表配置只绑定一个已授权数据集',
   'pivot': '透视表：本阶段不支持，只提供有限字段 / 筛选 / 单一分组键',
   'all-match-total': '全匹配合计：本阶段不支持，页面小计只覆盖当前预览页（非全量合计）',
-  'sharing': '共享：本阶段仅支持私有配置，专用管理员共享权限为未来平台增量',
 };
 
 /* 设计器状态（纯数据；DOM 访问只在事件处理函数内部发生） */
@@ -52,6 +51,9 @@ let RCC = {
   previewRevision: null,
   view: null,
   revisions: [],
+  sharedList: [],
+  sharedCurrent: null,
+  grants: [],
   dirty: false,
   requestSeq: 0,
   envBlocked: false,
@@ -136,8 +138,7 @@ function rccLoadingHtml() { return '<div class="rcc-hint">正在预览…</div>'
 /* 不支持能力面板：只解释「为什么不支持」，绝不渲染可点击的装饰性控件 */
 function rccUnsupportedHtml(dataset) {
   const keys = (dataset && dataset.unsupportedCapabilities) || [];
-  const extra = ['sharing'];
-  const rows = keys.concat(extra.filter(k => keys.indexOf(k) < 0))
+  const rows = keys
     .map(k => '<li><b>' + rccEsc(k) + '</b>：' + rccEsc(RCC_UNSUPPORTED_REASONS[k] || '本阶段不支持') + '</li>')
     .join('');
   return '<div class="rcc-unsupported"><div class="rcc-unsupported-title">为什么不支持（本阶段不提供）</div><ul>' + rows + '</ul></div>';
@@ -448,14 +449,18 @@ async function rccInit() {
   RCC = {
     catalog: null, datasets: [], datasetKey: '', fields: [], list: [], current: null, name: '',
     selectedKeys: [], filters: [], groupBy: 'none', page: 1, pageSize: RCC_DEFAULT_PAGE_SIZE,
-    maxPageSize: 200, previewRevision: null, view: null, revisions: [], dirty: false,
+    maxPageSize: 200, previewRevision: null, view: null, revisions: [],
+    sharedList: [], sharedCurrent: null, grants: [], dirty: false,
     requestSeq: 0, envBlocked: false, busy: false,
   };
   rccRenderDesigner();
   rccRenderList([]);
+  rccRenderShared();
+  rccRenderGrants();
   rccRenderResult(rccEmptyHtml());
   await rccLoadCatalog();
   await rccLoadList();
+  await rccLoadShared();
 }
 
 async function rccLoadCatalog() {
@@ -572,6 +577,7 @@ function rccOnGroupBy(value) {
 
 function rccNew() {
   RCC.current = null;
+  RCC.sharedCurrent = null;
   RCC.name = '';
   RCC.previewRevision = null;
   RCC.selectedKeys = rccSelectFields(RCC.fields, RCC.fields.map(f => f.key));
@@ -580,10 +586,12 @@ function rccNew() {
   RCC.page = 1;
   RCC.dirty = false;
   RCC.revisions = [];
+  RCC.grants = [];
   rccRenderDirty();
   rccRenderDesigner();
   rccRenderResult(rccEmptyHtml());
   rccRenderRevisions();
+  rccRenderGrants();
 }
 
 function rccApplyDefinition(def) {
@@ -615,6 +623,7 @@ async function rccLoadConfiguration(id) {
   }
   const dto = env.data;
   RCC.current = dto;
+  RCC.sharedCurrent = null;
   RCC.name = dto.name || '';
   RCC.previewRevision = null;
   rccApplyDefinition(dto.definition || {});
@@ -623,6 +632,7 @@ async function rccLoadConfiguration(id) {
   rccRenderDesigner();
   rccRenderResult(rccEmptyHtml());
   await rccLoadRevisions(id);
+  await rccLoadGrants();
 }
 
 async function rccSave() {
@@ -696,13 +706,16 @@ async function rccDelete() {
   if (env.code === 1004) { toast('版本冲突：配置已被其他操作修改，未删除', 'error'); return; }
   if (env.code !== 0) { toast(env.message || '删除失败', 'error'); return; }
   RCC.current = null;
+  RCC.sharedCurrent = null;
   RCC.name = '';
   RCC.revisions = [];
+  RCC.grants = [];
   RCC.dirty = false;
   rccRenderDirty();
   rccRenderDesigner();
   rccRenderResult(rccEmptyHtml());
   rccRenderRevisions();
+  rccRenderGrants();
   toast('删除成功');
   await rccLoadList();
 }
@@ -745,6 +758,148 @@ async function rccRestore(version) {
   toast('恢复成功');
   await rccLoadList();
   await rccLoadRevisions(RCC.current.id);
+}
+
+/* ==================== 只读共享（ERP-265 Stage 1）：owned / shared 区分 ==================== */
+
+function rccRenderShared() {
+  const el = document.getElementById('rcc-shared');
+  if (!el) return;
+  const list = RCC.sharedList || [];
+  if (!list.length) {
+    el.innerHTML = '<div class="rcc-shared-title">共享给我的</div><div class="empty">暂无共享报表</div>';
+    return;
+  }
+  el.innerHTML = '<div class="rcc-shared-title">共享给我的</div>'
+    + list.map(item => '<div class="rcc-list-item rcc-shared-item">'
+      + '<div class="rcc-list-title">' + rccEsc(item.name) + ' <span class="status status-info">共享</span></div>'
+      + '<div class="rcc-list-meta">' + rccEsc(rccDatasetLabel(item.datasetKey))
+      + ' · v' + rccEsc(item.revisionVersion) + ' · 来自 ' + rccEsc(item.ownerDisplayName || item.ownerUserId) + '</div>'
+      + '<div class="rcc-list-actions">'
+      + '<button type="button" class="btn" onclick="rccOpenShared(' + item.reportConfigurationId + ')">查看</button>'
+      + '<button type="button" class="btn" onclick="rccCopyShared(' + item.reportConfigurationId + ')">复制为草稿</button>'
+      + '</div></div>').join('');
+}
+
+async function rccLoadShared() {
+  const env = await rccFetch(RCC_API + '/shared');
+  if (env.code === 2000 || env.code === 2003) { rccOnUnauthorized(env.message); return; }
+  if (env.code !== 0) {
+    if (env.code === 5000) { RCC.envBlocked = true; rccRenderEnvBanner(); }
+    RCC.sharedList = [];
+    rccRenderShared();
+    return;
+  }
+  RCC.sharedList = env.data || [];
+  rccRenderShared();
+}
+
+function rccSharedViewHtml(dto) {
+  return '<div class="rcc-shared-view">'
+    + '<div class="rcc-shared-title">共享报表（只读）</div>'
+    + '<div class="rcc-meta">名称：' + rccEsc(dto.name)
+    + ' · 数据集：' + rccEsc(rccDatasetLabel(dto.datasetKey))
+    + ' · 固定修订 v' + rccEsc(dto.revisionVersion)
+    + ' · 发布于 ' + rccEsc(String((dto.publishedAt || '')).slice(0, 10)) + '</div>'
+    + '<div class="rcc-hint">这是别人分享给你的固定发布修订快照，无法编辑原配置；可预览 / 导出，或复制为自有草稿。</div>'
+    + '</div>';
+}
+
+async function rccOpenShared(id) {
+  if (RCC.dirty) { toast('当前存在未保存编辑，请先保存或新建', 'error'); return; }
+  const env = await rccFetch(RCC_API + '/shared/' + id);
+  if (env.code === 2000 || env.code === 2003) { rccOnUnauthorized(env.message); return; }
+  if (env.code !== 0) {
+    if (env.code === 5000) { RCC.envBlocked = true; rccRenderEnvBanner(); }
+    rccRenderResult(rccErrorHtml(rccKindOfCode(env.code), env.message || '加载失败'));
+    return;
+  }
+  const dto = env.data;
+  RCC.sharedCurrent = dto;
+  RCC.current = { id: dto.reportConfigurationId, name: dto.name, version: dto.revisionVersion };
+  RCC.name = dto.name || '';
+  RCC.previewRevision = dto.revisionVersion;
+  rccApplyDefinition(dto.definition || {});
+  RCC.dirty = false;
+  rccRenderDirty();
+  rccRenderDesigner('<div class="rcc-hint">共享视图（只读）：无法编辑原配置，可预览 / 导出或复制为自有草稿。</div>');
+  rccRenderResult(rccSharedViewHtml(dto));
+  rccRenderRevisions();
+  rccRenderGrants();
+}
+
+async function rccCopyShared(id) {
+  const env = await rccFetch(RCC_API + '/shared/' + id + '/copy', 'POST');
+  if (env.code === 2000 || env.code === 2003) { rccOnUnauthorized(env.message); return; }
+  if (env.code === 5000) { RCC.envBlocked = true; rccRenderEnvBanner(); return; }
+  if (env.code !== 0) { toast(env.message || '复制失败', 'error'); return; }
+  toast('已复制为自有草稿');
+  await rccLoadList();
+  await rccLoadShared();
+}
+
+function rccRenderGrants() {
+  const el = document.getElementById('rcc-grants');
+  if (!el) return;
+  if (!RCC.current || !RCC.current.id || RCC.sharedCurrent) { el.innerHTML = ''; return; }
+  const grants = RCC.grants || [];
+  const rows = grants.length
+    ? grants.map(g => '<div class="rcc-grant-row">'
+        + '<span>' + rccEsc(g.recipientDisplayName || g.recipientUserName || g.recipientUserId)
+        + ' · 固定修订 v' + rccEsc(g.revisionVersion) + '</span>'
+        + '<button type="button" class="btn btn-danger" onclick="rccRevoke(' + g.recipientUserId + ', ' + g.version + ')">撤销</button>'
+        + '</div>').join('')
+    : '<div class="rcc-hint">暂无共享授权</div>';
+  el.innerHTML = '<div class="rcc-grants-title">共享授权（owner-only）</div>'
+    + '<div class="rcc-grant-form">'
+    + '<input id="rcc-grant-recipient" placeholder="被授权用户 Id">'
+    + '<input id="rcc-grant-revision" placeholder="固定发布修订号">'
+    + '<button type="button" class="btn" onclick="rccGrant()">授权</button>'
+    + '</div>'
+    + rows;
+}
+
+async function rccLoadGrants() {
+  if (!RCC.current || !RCC.current.id || RCC.sharedCurrent) { RCC.grants = []; rccRenderGrants(); return; }
+  const env = await rccFetch(RCC_API + '/' + RCC.current.id + '/grants');
+  if (env.code === 2000 || env.code === 2003) { rccOnUnauthorized(env.message); return; }
+  if (env.code !== 0) {
+    if (env.code === 5000) { RCC.envBlocked = true; rccRenderEnvBanner(); }
+    RCC.grants = [];
+    rccRenderGrants();
+    return;
+  }
+  RCC.grants = env.data || [];
+  rccRenderGrants();
+}
+
+async function rccGrant() {
+  if (!RCC.current || !RCC.current.id || RCC.sharedCurrent) { toast('请先选择自有配置', 'error'); return; }
+  const recipientEl = document.getElementById('rcc-grant-recipient');
+  const revisionEl = document.getElementById('rcc-grant-revision');
+  const recipientUserId = parseInt((recipientEl && recipientEl.value) || '', 10);
+  const revisionVersion = parseInt((revisionEl && revisionEl.value) || '', 10);
+  if (!Number.isFinite(recipientUserId) || recipientUserId <= 0) { toast('请输入被授权用户 Id', 'error'); return; }
+  if (!Number.isFinite(revisionVersion) || revisionVersion <= 0) { toast('请输入固定发布修订号', 'error'); return; }
+  const env = await rccFetch(RCC_API + '/' + RCC.current.id + '/grants', 'POST', { recipientUserId, revisionVersion });
+  if (env.code === 2000 || env.code === 2003) { rccOnUnauthorized(env.message); return; }
+  if (env.code === 5000) { RCC.envBlocked = true; rccRenderEnvBanner(); rccRenderResult(rccEnvBlockedHtml(env.message)); return; }
+  if (env.code === 1004) { toast('版本冲突：授权已被其他操作修改，未覆盖，请刷新后重试', 'error'); await rccLoadGrants(); return; }
+  if (env.code !== 0) { toast(env.message || '授权失败', 'error'); return; }
+  toast('授权成功');
+  await rccLoadGrants();
+}
+
+async function rccRevoke(recipientUserId, version) {
+  if (!RCC.current || !RCC.current.id) return;
+  if (!confirm('确认撤销该用户的共享授权？')) return;
+  const env = await rccFetch(RCC_API + '/' + RCC.current.id + '/grants/' + recipientUserId + '?version=' + version, 'DELETE');
+  if (env.code === 2000 || env.code === 2003) { rccOnUnauthorized(env.message); return; }
+  if (env.code === 5000) { RCC.envBlocked = true; rccRenderEnvBanner(); return; }
+  if (env.code === 1004) { toast('版本冲突：授权已被其他操作修改，未撤销，请刷新后重试', 'error'); await rccLoadGrants(); return; }
+  if (env.code !== 0) { toast(env.message || '撤销失败', 'error'); return; }
+  toast('撤销成功');
+  await rccLoadGrants();
 }
 
 async function rccPreview() {
@@ -888,9 +1043,11 @@ function renderReportConfigurationWorkspace() {
     + '</div>'
     + '<div class="rcc-layout">'
     + '<aside class="rcc-list" id="rcc-list"></aside>'
+    + '<aside class="rcc-shared" id="rcc-shared"></aside>'
     + '<section class="rcc-designer" id="rcc-designer"></section>'
     + '<section class="rcc-result" id="rcc-result"></section>'
     + '<section class="rcc-revisions" id="rcc-revisions"></section>'
+    + '<section class="rcc-grants" id="rcc-grants"></section>'
     + '</div>'
     + '</div>';
   rccInit();
@@ -934,14 +1091,20 @@ if (typeof module !== 'undefined' && module.exports) {
     rccRenderDesigner,
     rccRenderList,
     rccRenderRevisions,
+    rccRenderShared,
+    rccRenderGrants,
     rccRenderResult,
     rccFetch,
     rccInit,
     rccLoadCatalog,
     rccLoadList,
+    rccLoadShared,
     rccSelectDataset,
     rccApplyDefinition,
     rccLoadConfiguration,
+    rccOpenShared,
+    rccSharedViewHtml,
+    rccCopyShared,
     rccSave,
     rccCopy,
     rccRename,
@@ -949,6 +1112,9 @@ if (typeof module !== 'undefined' && module.exports) {
     rccPublish,
     rccRestore,
     rccLoadRevisions,
+    rccLoadGrants,
+    rccGrant,
+    rccRevoke,
     rccPreview,
     rccExport,
     rccExportPdf,

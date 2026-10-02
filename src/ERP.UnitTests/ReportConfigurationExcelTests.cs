@@ -129,7 +129,8 @@ public class ReportConfigurationExcelTests
         => new(
             new ReportConfigurationCatalog(BuildProviders(db)),
             new ReportConfigurationService(db, new ReportConfigurationCatalog(BuildProviders(db))),
-            new ReportConfigurationExecutionService(db, BuildProviders(db)));
+            new ReportConfigurationExecutionService(db, BuildProviders(db)),
+            new ReportConfigurationSharingService(db, new ReportConfigurationCatalog(BuildProviders(db))));
 
     private static string Serialize(ReportConfigurationDefinition definition)
         => JsonSerializer.Serialize(definition, JsonOptions);

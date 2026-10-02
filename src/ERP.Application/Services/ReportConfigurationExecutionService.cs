@@ -2,6 +2,7 @@ using ERP.Application.Common;
 using ERP.Application.DTOs;
 using ERP.Application.Interfaces;
 using ERP.Domain.Entities;
+using ERP.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
 using System.Collections;
 using System.Globalization;
@@ -48,13 +49,23 @@ public sealed class ReportConfigurationExecutionService : IReportConfigurationEx
         if (request.ConfigurationId <= 0)
             throw BusinessException.InvalidParameter("请选择要预览的报表配置");
 
-        // 1) 仅加载当前用户自己、未删除的配置（跨所有者 / 已删除 → 一律 NotFound，不泄露存在性）
+        // 1) 优先按所有者解析（跨所有者不影响共享判定；无授权仍 fail closed）
         var config = await _db.ReportConfigurations
             .FirstOrDefaultAsync(c => c.Id == request.ConfigurationId && !c.IsDeleted && c.OwnerUserId == ownerUserId,
-                cancellationToken)
-            ?? throw BusinessException.NotFound("报表配置不存在或无权访问");
+                cancellationToken);
 
-        // 2) 选定定义：草稿 or 固定发布修订（修订必须属于该配置且未被软删除）
+        if (config is not null)
+            return await PreviewOwnedAsync(ownerUserId, request, config, cancellationToken);
+
+        // 2) 否则按被授权人共享解析（每次重新校验授权与固定修订，绝不暴露草稿 / 其它修订 / 历史）
+        return await PreviewSharedAsync(ownerUserId, request, cancellationToken);
+    }
+
+    private async Task<ReportConfigurationPreviewDto> PreviewOwnedAsync(
+        long ownerUserId, ReportConfigurationPreviewRequest request, ReportConfiguration config,
+        CancellationToken cancellationToken)
+    {
+        // 选定定义：草稿 or 固定发布修订（修订必须属于该配置且未被软删除）
         ReportConfigurationDefinition definition;
         string datasetKey;
         string name;
@@ -81,29 +92,70 @@ public sealed class ReportConfigurationExecutionService : IReportConfigurationEx
             name = config.Name;
         }
 
-        // 3) 定位对应数据集适配器（未知数据集 fail closed）
+        return await ExecutePreviewAsync(ownerUserId, config.Id, datasetKey, definition, name,
+            pinnedRevision, pinnedRevision ?? config.Version, request, cancellationToken);
+    }
+
+    private async Task<ReportConfigurationPreviewDto> PreviewSharedAsync(
+        long recipientUserId, ReportConfigurationPreviewRequest request, CancellationToken cancellationToken)
+    {
+        // 被授权人必须为现有激活用户（fail closed）
+        var recipient = await _db.SysUsers.AsNoTracking()
+            .FirstOrDefaultAsync(u => u.Id == recipientUserId && !u.IsDeleted, cancellationToken)
+            ?? throw BusinessException.NotFound("报表配置不存在或无权访问");
+        if (recipient.Status != UserStatus.Enabled)
+            throw BusinessException.NotFound("报表配置不存在或无权访问");
+
+        var grant = await _db.ReportConfigurationGrants
+            .FirstOrDefaultAsync(g => g.RecipientUserId == recipientUserId
+                && g.ReportConfigurationId == request.ConfigurationId && !g.IsDeleted, cancellationToken)
+            ?? throw BusinessException.NotFound("报表配置不存在或无权访问");
+
+        var config = await _db.ReportConfigurations
+            .FirstOrDefaultAsync(c => c.Id == grant.ReportConfigurationId && !c.IsDeleted, cancellationToken)
+            ?? throw BusinessException.NotFound("报表配置不存在或无权访问");
+
+        var revision = await _db.ReportConfigurationRevisions
+            .FirstOrDefaultAsync(r => r.ReportConfigurationId == config.Id
+                && !r.IsDeleted && r.Version == grant.RevisionVersion, cancellationToken)
+            ?? throw BusinessException.NotFound("共享的发布版本不存在");
+
+        var definition = Deserialize(revision.DefinitionJson)
+            ?? throw BusinessException.RuleConflict("共享发布修订定义缺失，无法预览");
+
+        // 共享预览始终使用固定修订（忽略客户端 RevisionVersion），绝不暴露其它修订 / 草稿
+        return await ExecutePreviewAsync(recipientUserId, config.Id, revision.DatasetKey, definition,
+            revision.Name, revision.Version, revision.Version, request, cancellationToken);
+    }
+
+    private async Task<ReportConfigurationPreviewDto> ExecutePreviewAsync(
+        long userId, long configurationId, string datasetKey, ReportConfigurationDefinition definition,
+        string name, int? pinnedRevision, int version, ReportConfigurationPreviewRequest request,
+        CancellationToken cancellationToken)
+    {
+        // 定位对应数据集适配器（未知数据集 fail closed）
         var provider = _providers.FirstOrDefault(p =>
             string.Equals(p.DatasetKey, datasetKey, StringComparison.OrdinalIgnoreCase))
             ?? throw BusinessException.InvalidParameter($"未知数据集: {datasetKey}");
 
-        // 4) 每次预览重新校验数据集菜单授权（撤销后立即收敛；未授权 → 拒绝，不返回任何数据）
-        var dataset = await provider.GetDatasetAsync(ownerUserId, cancellationToken)
+        // 每次预览重新校验数据集菜单授权（撤销后立即收敛；未授权 → 拒绝，不返回任何数据）
+        var dataset = await provider.GetDatasetAsync(userId, cancellationToken)
             ?? throw new BusinessException($"当前账号没有「{datasetKey}」数据集授权：拒绝预览（fail closed）",
                 ErrorCodes.Forbidden);
 
-        // 5) 按「当前」目录重新校验有界定义（字段撤销 / 陈旧 schema / 不支持能力都会在此被拒绝）
+        // 按「当前」目录重新校验有界定义（字段撤销 / 陈旧 schema / 不支持能力都会在此被拒绝）
         ReportConfigurationRules.Validate(definition, dataset);
 
-        // 6) 解析 / 校验当前预览参数（页码 / 每页条数 / 分组键）
+        // 解析 / 校验当前预览参数（页码 / 每页条数 / 分组键）
         var parameters = ResolveParameters(request, definition, dataset);
 
-        // 7) 分发执行（适配器内部再次走既有查询的菜单授权 + 数据范围，并保留币种 / 单位口径）
-        var preview = await provider.PreviewAsync(definition, parameters, ownerUserId, cancellationToken);
-        preview.ConfigurationId = config.Id;
+        // 分发执行（适配器内部再次走既有查询的菜单授权 + 数据范围，并保留币种 / 单位口径）
+        var preview = await provider.PreviewAsync(definition, parameters, userId, cancellationToken);
+        preview.ConfigurationId = configurationId;
         preview.PinnedRevisionVersion = pinnedRevision;
         preview.IsPinnedRevision = pinnedRevision.HasValue;
         preview.Name = name;
-        preview.Version = pinnedRevision ?? config.Version;
+        preview.Version = version;
         preview.NormalizedFiltersText = BuildNormalizedFiltersText(definition, dataset);
         preview.DateRangeText = BuildNormalizedDateRangeText(definition, dataset);
         return preview;

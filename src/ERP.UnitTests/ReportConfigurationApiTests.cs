@@ -87,7 +87,8 @@ public class ReportConfigurationApiTests
         => new(
             new ReportConfigurationCatalog(BuildProviders(db)),
             new ReportConfigurationService(db, new ReportConfigurationCatalog(BuildProviders(db))),
-            new ReportConfigurationExecutionService(db, BuildProviders(db)));
+            new ReportConfigurationExecutionService(db, BuildProviders(db)),
+            new ReportConfigurationSharingService(db, new ReportConfigurationCatalog(BuildProviders(db))));
 
     private static ReportConfigurationSaveDto SaveDto(string name, ReportConfigurationDefinition? definition = null)
         => new() { Name = name, Definition = definition ?? SalesOrderDefinition() };
@@ -330,6 +331,146 @@ public class ReportConfigurationApiTests
         var ex = await Assert.ThrowsAsync<BusinessException>(
             () => ctl.ExportPdf(new ReportConfigurationPreviewRequest { ConfigurationId = 1 }));
         Assert.Equal(ErrorCodes.Unauthorized, ex.Code);
+    }
+
+    // ==================== ERP-265：只读共享授权 / 被授权人端点 ====================
+
+    [Fact]
+    public async Task Grants_授权与撤销_owner_only()
+    {
+        using var db = TestDbFactory.Create();
+        var owner = SeedAuthorizedUser(db, "owner", "sales-order");
+        var recipient = SeedAuthorizedUser(db, "recipient", "sales-order");
+        var ctlOwner = BuildController(db);
+        TestAuth.SetUser(ctlOwner, owner);
+
+        var created = await ctlOwner.Create(SaveDto("报表"));
+        var id = Assert.IsType<ApiResponse<ReportConfigurationDto>>(
+            Assert.IsType<OkObjectResult>(created).Value).Data!.Id;
+        await ctlOwner.Publish(id, 1);
+
+        var grantResult = await ctlOwner.Grant(id,
+            new ReportConfigurationGrantRequestDto { RecipientUserId = recipient, RevisionVersion = 1 });
+        var grantData = Assert.IsType<ApiResponse<ReportConfigurationGrantDto>>(
+            Assert.IsType<OkObjectResult>(grantResult).Value).Data!;
+        Assert.Equal(recipient, grantData.RecipientUserId);
+        Assert.Equal(1, grantData.RevisionVersion);
+
+        var list = await ctlOwner.Grants(id);
+        Assert.Single(Assert.IsType<ApiResponse<List<ReportConfigurationGrantDto>>>(
+            Assert.IsType<OkObjectResult>(list).Value).Data!);
+
+        await ctlOwner.Revoke(id, recipient, grantData.Version);
+        var after = await ctlOwner.Grants(id);
+        Assert.Empty(Assert.IsType<ApiResponse<List<ReportConfigurationGrantDto>>>(
+            Assert.IsType<OkObjectResult>(after).Value).Data!);
+    }
+
+    [Fact]
+    public async Task Shared_列表与详情_recipient_only()
+    {
+        using var db = TestDbFactory.Create();
+        var owner = SeedAuthorizedUser(db, "owner", "sales-order");
+        var recipient = SeedAuthorizedUser(db, "recipient", "sales-order");
+        var ctlOwner = BuildController(db);
+        TestAuth.SetUser(ctlOwner, owner);
+
+        var created = await ctlOwner.Create(SaveDto("报表"));
+        var id = Assert.IsType<ApiResponse<ReportConfigurationDto>>(
+            Assert.IsType<OkObjectResult>(created).Value).Data!.Id;
+        await ctlOwner.Publish(id, 1);
+        await ctlOwner.Grant(id, new ReportConfigurationGrantRequestDto { RecipientUserId = recipient, RevisionVersion = 1 });
+
+        var ctlRecipient = BuildController(db);
+        TestAuth.SetUser(ctlRecipient, recipient);
+
+        var list = await ctlRecipient.Shared();
+        var items = Assert.IsType<ApiResponse<List<ReportConfigurationSharedSummaryDto>>>(
+            Assert.IsType<OkObjectResult>(list).Value).Data!;
+        var item = Assert.Single(items);
+        Assert.Equal(id, item.ReportConfigurationId);
+        Assert.Equal("报表", item.Name);
+        Assert.Equal(1, item.RevisionVersion);
+
+        var detail = await ctlRecipient.SharedDetail(id);
+        var dto = Assert.IsType<ApiResponse<ReportConfigurationSharedDetailDto>>(
+            Assert.IsType<OkObjectResult>(detail).Value).Data!;
+        Assert.Equal(1, dto.RevisionVersion);
+        Assert.NotNull(dto.Definition);
+    }
+
+    [Fact]
+    public async Task Shared_复制为自有草稿()
+    {
+        using var db = TestDbFactory.Create();
+        var owner = SeedAuthorizedUser(db, "owner", "sales-order");
+        var recipient = SeedAuthorizedUser(db, "recipient", "sales-order");
+        var ctlOwner = BuildController(db);
+        TestAuth.SetUser(ctlOwner, owner);
+
+        var created = await ctlOwner.Create(SaveDto("报表"));
+        var id = Assert.IsType<ApiResponse<ReportConfigurationDto>>(
+            Assert.IsType<OkObjectResult>(created).Value).Data!.Id;
+        await ctlOwner.Publish(id, 1);
+        await ctlOwner.Grant(id, new ReportConfigurationGrantRequestDto { RecipientUserId = recipient, RevisionVersion = 1 });
+
+        var ctlRecipient = BuildController(db);
+        TestAuth.SetUser(ctlRecipient, recipient);
+        var copy = await ctlRecipient.CopyShared(id);
+        var dto = Assert.IsType<ApiResponse<ReportConfigurationDto>>(
+            Assert.IsType<OkObjectResult>(copy).Value).Data!;
+        Assert.Equal(recipient, dto.OwnerUserId);
+        Assert.Equal(ReportConfigurationStatus.Draft, dto.Status);
+        Assert.EndsWith("副本", dto.Name);
+    }
+
+    [Fact]
+    public async Task Shared_非授权用户_列表为空且详情拒绝()
+    {
+        using var db = TestDbFactory.Create();
+        var owner = SeedAuthorizedUser(db, "owner", "sales-order");
+        var recipient = SeedAuthorizedUser(db, "recipient", "sales-order");
+        var stranger = SeedAuthorizedUser(db, "stranger", "sales-order");
+        var ctlOwner = BuildController(db);
+        TestAuth.SetUser(ctlOwner, owner);
+
+        var created = await ctlOwner.Create(SaveDto("报表"));
+        var id = Assert.IsType<ApiResponse<ReportConfigurationDto>>(
+            Assert.IsType<OkObjectResult>(created).Value).Data!.Id;
+        await ctlOwner.Publish(id, 1);
+        await ctlOwner.Grant(id, new ReportConfigurationGrantRequestDto { RecipientUserId = recipient, RevisionVersion = 1 });
+
+        var ctlStranger = BuildController(db);
+        TestAuth.SetUser(ctlStranger, stranger);
+        var list = await ctlStranger.Shared();
+        Assert.Empty(Assert.IsType<ApiResponse<List<ReportConfigurationSharedSummaryDto>>>(
+            Assert.IsType<OkObjectResult>(list).Value).Data!);
+
+        var ex = await Assert.ThrowsAsync<BusinessException>(() => ctlStranger.SharedDetail(id));
+        Assert.Equal(ErrorCodes.NotFound, ex.Code);
+    }
+
+    [Fact]
+    public async Task Export_共享被授权人_成功()
+    {
+        using var db = TestDbFactory.Create();
+        var owner = SeedAuthorizedUser(db, "owner", "sales-order");
+        var recipient = SeedAuthorizedUser(db, "recipient", "sales-order");
+        var ctlOwner = BuildController(db);
+        TestAuth.SetUser(ctlOwner, owner);
+
+        var created = await ctlOwner.Create(SaveDto("报表"));
+        var id = Assert.IsType<ApiResponse<ReportConfigurationDto>>(
+            Assert.IsType<OkObjectResult>(created).Value).Data!.Id;
+        await ctlOwner.Publish(id, 1);
+        await ctlOwner.Grant(id, new ReportConfigurationGrantRequestDto { RecipientUserId = recipient, RevisionVersion = 1 });
+
+        var ctlRecipient = BuildController(db);
+        TestAuth.SetUser(ctlRecipient, recipient);
+        var result = await ctlRecipient.Export(new ReportConfigurationPreviewRequest { ConfigurationId = id });
+        var file = Assert.IsType<FileContentResult>(result);
+        Assert.Equal("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", file.ContentType);
+        Assert.NotEmpty(file.FileContents);
     }
 }
 

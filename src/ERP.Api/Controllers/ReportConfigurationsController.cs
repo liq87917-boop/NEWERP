@@ -23,15 +23,18 @@ public class ReportConfigurationsController : ControllerBase
     private readonly IReportConfigurationCatalog _catalog;
     private readonly IReportConfigurationService _service;
     private readonly IReportConfigurationExecutionService _execution;
+    private readonly IReportConfigurationSharingService _sharing;
 
     public ReportConfigurationsController(
         IReportConfigurationCatalog catalog,
         IReportConfigurationService service,
-        IReportConfigurationExecutionService execution)
+        IReportConfigurationExecutionService execution,
+        IReportConfigurationSharingService sharing)
     {
         _catalog = catalog;
         _service = service;
         _execution = execution;
+        _sharing = sharing;
     }
 
     /// <summary>当前登录用户 Id（缺失或非正数时抛未认证，绝不猜测身份）</summary>
@@ -132,6 +135,55 @@ public class ReportConfigurationsController : ControllerBase
     {
         var result = await _service.ListRevisionsAsync(CurrentUserId(), id);
         return Ok(ApiResponse<List<ReportConfigurationRevisionDto>>.Success(result));
+    }
+
+    /// <summary>列出某条私有报表配置的全部有效只读授权（owner-only）</summary>
+    [HttpGet("{id:long}/grants")]
+    public async Task<IActionResult> Grants(long id)
+    {
+        var result = await _sharing.ListGrantsAsync(CurrentUserId(), id);
+        return Ok(ApiResponse<List<ReportConfigurationGrantDto>>.Success(result));
+    }
+
+    /// <summary>授予 / 变更某条私有报表配置的只读授权（owner-only；固定发布修订；变更 pin 需回传预期版本）</summary>
+    [HttpPost("{id:long}/grants")]
+    public async Task<IActionResult> Grant(long id, [FromBody] ReportConfigurationGrantRequestDto request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        var result = await _sharing.GrantAsync(CurrentUserId(), id, request);
+        return Ok(ApiResponse<ReportConfigurationGrantDto>.Success(result, "授权成功"));
+    }
+
+    /// <summary>撤销某条私有报表配置的只读授权（owner-only；需回传预期版本，防止陈旧撤销）</summary>
+    [HttpDelete("{id:long}/grants/{recipientUserId:long}")]
+    public async Task<IActionResult> Revoke(long id, long recipientUserId, [FromQuery] int version)
+    {
+        await _sharing.RevokeAsync(CurrentUserId(), id, recipientUserId, version);
+        return Ok(ApiResponse<object>.Success(null, "撤销授权成功"));
+    }
+
+    /// <summary>列出当前用户被共享的只读发布快照（recipient-only；只暴露固定快照）</summary>
+    [HttpGet("shared")]
+    public async Task<IActionResult> Shared()
+    {
+        var result = await _sharing.ListSharedAsync(CurrentUserId());
+        return Ok(ApiResponse<List<ReportConfigurationSharedSummaryDto>>.Success(result));
+    }
+
+    /// <summary>加载当前用户被共享的只读发布快照详情（recipient-only）</summary>
+    [HttpGet("shared/{configurationId:long}")]
+    public async Task<IActionResult> SharedDetail(long configurationId)
+    {
+        var result = await _sharing.GetSharedAsync(CurrentUserId(), configurationId);
+        return Ok(ApiResponse<ReportConfigurationSharedDetailDto>.Success(result));
+    }
+
+    /// <summary>复制被共享的只读发布快照为当前用户自有草稿（recipient-only，新鲜校验，绝不改写原配置）</summary>
+    [HttpPost("shared/{configurationId:long}/copy")]
+    public async Task<IActionResult> CopyShared(long configurationId)
+    {
+        var result = await _sharing.CopySharedAsync(CurrentUserId(), configurationId);
+        return Ok(ApiResponse<ReportConfigurationDto>.Success(result, "复制成功"));
     }
 
     /// <summary>预览：草稿（默认）或指定发布修订；每次重新校验身份 / 数据集授权 / 数据范围（fail closed）</summary>

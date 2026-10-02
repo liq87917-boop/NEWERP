@@ -324,6 +324,12 @@ public interface IErpDbContext
     /// </summary>
     DbSet<ReportConfigurationRevision> ReportConfigurationRevisions { get; }
 
+    /// <summary>
+    /// 私有报表配置的只读共享授权（ERP-265）：recipient + configuration + revision 精准只读授权，
+    /// owner-only 管理；被授权人只读取固定发布快照，绝不暴露草稿 / 其它修订 / 历史或所有者编辑。
+    /// </summary>
+    DbSet<ReportConfigurationGrant> ReportConfigurationGrants { get; }
+
     /// <summary>保存变更（返回受影响行数）</summary>
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 }
