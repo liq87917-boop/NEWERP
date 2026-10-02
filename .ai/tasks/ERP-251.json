@@ -1,0 +1,64 @@
+{
+  "id": "ERP-251",
+  "title": "Make container statistics scoped bounded loading-list evidence",
+  "description": "Users opening the existing container statistics report see only authorized approved loading-list headers with truthful grouping and measures. Require non-null SalespersonDataScope service argument; existing ReportController endpoint resolves identity/container-stats menu/fresh scope before service. Validate start/end before reads, then apply approved/nondeleted/date/customer-scope predicates before the stable 501-header probe; no unbounded reads, no detail/current-product/booking lookup or per-row queries. Replace global raw ContainerNo grouping with explicit evidence buckets by loading calendar date and exact persisted raw nonblank ContainerNo; blank/whitespace numbers stay separate per loading-list ID, never merged into a fake shared container. Stable bucket key/order, loading-list count, distinct positive customer ID count explicitly labelled authorized-scope count, and invalid/missing customer identity count/reason. Sum signed persisted TotalCartons/TotalWeight/TotalVolume as separate recorded header measures in cartons/kg/m3, distinguish zero from missing identity, never claim actual shipment or physical-container quantity. Existing 68m3/40HQ assumption lacks authoritative capacity/complete-container evidence: Utilization becomes nullable unknown with reason and TypeText no longer infers full-container/pooling type from scoped customer counts. Add mandatory source/coverage/grouping/capacity/type/quantity basis labels. Page table/KPI separate list/bucket counts and each unit, no money formatting/unit, summing unlike measures or claiming physical containers. Modify only container statistics behavior in shared ReportService.Extra.cs and reports.js, preserving purchase-cost and unrelated reports. Development only. Reuse existing container-stats menu, current-user SalespersonDataScopeService customer scope, approved nondeleted ContainerLoadingLists and OperationLogMiddleware HTTP audit. Each endpoint revalidates current input and rechecks identity/menu/fresh scope; revoked permission, invalid input and source overflow return no data/file. Date span <=366 inclusive days, whole end day via next-day exclusive boundary with overflow rejection, stable source probe Take(501) and fail closed above 500 authorized matching list headers. Recorded cartons/kg/m3 are scoped list-header evidence, not verified stock-out, actual shipping, revenue or physical container totals. Partial customer scope must never reveal excluded customers/records or infer whole-container utilization, type, capacity or shipping state. No client identity/scope/rows/aggregates as authority, arbitrary/model-generated SQL, business writes, new domain entities or persistence schema, migrations, schema/view/stored-procedure changes, production SQL or real database execution, credentials/secrets/.env/config changes, irreversible operations, production deployment or real browser acceptance. Preserve unrelated modules and uncommitted work. Run focused in-memory service/API/export/UI source-contract tests plus configured safe Release build/test; unavailable external database/browser acceptance is environment-blocked, never fabricated passed.",
+  "depends_on": [],
+  "risk_level": "medium",
+  "priority": "P1",
+  "acceptance_criteria": [
+    "Existing API/service require fresh identity/menu/customer scope, approved-only validated dates and fail-closed 500-list cap before source materialization.",
+    "Date/raw-number evidence buckets keep blank IDs separate, explicit scoped list/customer counts and signed unit measures, with unknown utilization/type instead of unsupported 68m3 assumptions.",
+    "Existing table/KPI shows truthful units and mandatory scope/grouping/capacity context; scope/bounds/grouping/UI tests cover excluded/draft/deleted records, end-day timestamps, overflow and missing identities, and safe build/test passes."
+  ],
+  "criterion_path_map": {
+    "Existing API/service require fresh identity/menu/customer scope, approved-only validated dates and fail-closed 500-list cap before source materialization.": [
+      "src/ERP.Application/Interfaces/IReportService.cs",
+      "src/ERP.Application/Services/ReportService.Extra.cs",
+      "src/ERP.Api/Controllers/ReportController.cs",
+      "src/ERP.UnitTests/ContainerStatsScopeTests.cs",
+      "src/ERP.UnitTests/ContainerStatsQueryBoundsTests.cs"
+    ],
+    "Date/raw-number evidence buckets keep blank IDs separate, explicit scoped list/customer counts and signed unit measures, with unknown utilization/type instead of unsupported 68m3 assumptions.": [
+      "src/ERP.Application/Interfaces/ReportDtos.cs",
+      "src/ERP.Application/Services/ReportService.Extra.cs",
+      "src/ERP.Application/Services/ContainerStatsEvidenceRules.cs",
+      "src/ERP.UnitTests/ContainerStatsEvidenceTests.cs"
+    ],
+    "Existing table/KPI shows truthful units and mandatory scope/grouping/capacity context; scope/bounds/grouping/UI tests cover excluded/draft/deleted records, end-day timestamps, overflow and missing identities, and safe build/test passes.": [
+      "src/ERP.Api/wwwroot/js/reports.js",
+      "src/ERP.UnitTests/ContainerStatsUiTests.cs",
+      "src/ERP.UnitTests/ContainerStatsScopeTests.cs",
+      "src/ERP.UnitTests/ContainerStatsQueryBoundsTests.cs",
+      "src/ERP.UnitTests/ContainerStatsEvidenceTests.cs"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Application/Interfaces/IReportService.cs",
+    "src/ERP.Application/Services/ReportService.Extra.cs",
+    "src/ERP.Api/Controllers/ReportController.cs",
+    "src/ERP.UnitTests/ContainerStatsScopeTests.cs",
+    "src/ERP.UnitTests/ContainerStatsQueryBoundsTests.cs",
+    "src/ERP.Application/Interfaces/ReportDtos.cs",
+    "src/ERP.Application/Services/ContainerStatsEvidenceRules.cs",
+    "src/ERP.UnitTests/ContainerStatsEvidenceTests.cs",
+    "src/ERP.Api/wwwroot/js/reports.js",
+    "src/ERP.UnitTests/ContainerStatsUiTests.cs"
+  ],
+  "status": "pending",
+  "max_attempts": 3,
+  "attempts": 0,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only bounded scoped report feature"
+  },
+  "created_at": "2026-10-02T11:43:26.741144Z"
+}

@@ -1,0 +1,61 @@
+{
+  "id": "ERP-254",
+  "title": "Download selected scoped loading-list evidence page as Chinese PDF",
+  "description": "Users download selected field order and current evidence page as Chinese PDF from the existing designer. Dedicated PDF endpoint reuses current request/pure validation/fresh authorization/source and rebuilds the capped page without posted rows/preview cache. Narrow DynamicContainerStatsPdfExporter uses existing PDFsharp and local SimHei font resolution through direct controller call, no package/config/DI/font writes. Chinese headers, signed numeric recorded cartons/kg/m3 and counts retain separate units; utilization/type remain explicit unknown with reasons, no zero/68m3 fallback or whole-container/shipping claim. Mandatory normalized dates/filters/current page coverage/grouping/scoped counts/source cap/units/unknown capacity-type-shipping context is always printed. Wide finite columns split into column pages with bucket/date/coverage identity; tall pages repeat headers and avoid clipped/overlapping text, no unselected detail columns, all-match or mixed-unit totals. Font unavailable or render failure explicitly rejects file rather than empty/missing-glyph success. Page PDF download keeps field/filter/page state and displays failures. Verify bytes/text/page structure where supported and deterministic layout/render inputs, not screenshots or real browser acceptance. Development only. Reuse existing container-stats menu, current-user SalespersonDataScopeService customer scope, approved nondeleted ContainerLoadingLists and OperationLogMiddleware HTTP audit. Each endpoint revalidates current input and rechecks identity/menu/fresh scope; revoked permission, invalid input and source overflow return no data/file. Date span <=366 inclusive days, whole end day via next-day exclusive boundary with overflow rejection, stable source probe Take(501) and fail closed above 500 authorized matching list headers. Recorded cartons/kg/m3 are scoped list-header evidence, not verified stock-out, actual shipping, revenue or physical container totals. Partial customer scope must never reveal excluded customers/records or infer whole-container utilization, type, capacity or shipping state. No client identity/scope/rows/aggregates as authority, arbitrary/model-generated SQL, business writes, new domain entities or persistence schema, migrations, schema/view/stored-procedure changes, production SQL or real database execution, credentials/secrets/.env/config changes, irreversible operations, production deployment or real browser acceptance. Preserve unrelated modules and uncommitted work. Run focused in-memory service/API/export/UI source-contract tests plus configured safe Release build/test; unavailable external database/browser acceptance is environment-blocked, never fabricated passed.",
+  "depends_on": [
+    "ERP-253"
+  ],
+  "risk_level": "low",
+  "priority": "P1",
+  "acceptance_criteria": [
+    "PDF endpoint validates current request and fresh identity/menu/customer scope and rebuilds the same capped selected page, failing closed on revocation, overflow and rendering failure.",
+    "Chinese PDF preserves selected field order, signed separate-unit numbers and unknown capacity/type with mandatory evidence context, repeated headers and explicit font/layout failure handling.",
+    "Existing PDF download preserves current state and displays errors; PDF/controller/UI tests cover scopes, caps, missing numbers, negative/zero values and unknowns, and safe build/test passes."
+  ],
+  "criterion_path_map": {
+    "PDF endpoint validates current request and fresh identity/menu/customer scope and rebuilds the same capped selected page, failing closed on revocation, overflow and rendering failure.": [
+      "src/ERP.Api/Controllers/DynamicContainerStatsReportController.cs",
+      "src/ERP.Application/DTOs/DynamicContainerStatsReportDtos.cs",
+      "src/ERP.Application/Services/DynamicContainerStatsReportRules.cs",
+      "src/ERP.UnitTests/DynamicContainerStatsPdfTests.cs"
+    ],
+    "Chinese PDF preserves selected field order, signed separate-unit numbers and unknown capacity/type with mandatory evidence context, repeated headers and explicit font/layout failure handling.": [
+      "src/ERP.Infrastructure/Export/DynamicContainerStatsPdfExporter.cs",
+      "src/ERP.Application/DTOs/DynamicContainerStatsReportDtos.cs",
+      "src/ERP.UnitTests/DynamicContainerStatsPdfTests.cs"
+    ],
+    "Existing PDF download preserves current state and displays errors; PDF/controller/UI tests cover scopes, caps, missing numbers, negative/zero values and unknowns, and safe build/test passes.": [
+      "src/ERP.Api/wwwroot/js/reports.js",
+      "src/ERP.UnitTests/DynamicContainerStatsPdfTests.cs",
+      "src/ERP.UnitTests/DynamicContainerStatsReportUiTests.cs",
+      "src/ERP.UnitTests/DynamicContainerStatsReportTests.cs"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/DynamicContainerStatsReportController.cs",
+    "src/ERP.Application/DTOs/DynamicContainerStatsReportDtos.cs",
+    "src/ERP.Application/Services/DynamicContainerStatsReportRules.cs",
+    "src/ERP.UnitTests/DynamicContainerStatsPdfTests.cs",
+    "src/ERP.Infrastructure/Export/DynamicContainerStatsPdfExporter.cs",
+    "src/ERP.Api/wwwroot/js/reports.js",
+    "src/ERP.UnitTests/DynamicContainerStatsReportUiTests.cs",
+    "src/ERP.UnitTests/DynamicContainerStatsReportTests.cs"
+  ],
+  "status": "pending",
+  "max_attempts": 3,
+  "attempts": 0,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only bounded scoped report feature"
+  },
+  "created_at": "2026-10-02T11:43:26.743193Z"
+}

@@ -1,0 +1,69 @@
+{
+  "id": "ERP-252",
+  "title": "Design scoped loading-list evidence fields filters and pages",
+  "description": "Add finite ordered field selection and stable paged preview to the existing container statistics page using the preceding evidence source. New DTOs/pure rules define finite fields for date/raw number/bucket/list count/scoped customer count/recorded cartons/kg/m3/unknown utilization-type/reasons; mandatory context cannot be hidden. Optional positive CustomerId and trimmed literal ContainerNo keyword (blank absent, max80 chars, no controls), intersect fresh customer scope and date/status source predicates before Take(501); percent/underscore are literal, provider collation semantics, no arbitrary SQL or container directory. Blank keyword preserves missing-number evidence buckets, nonblank keyword matches only persisted nonblank raw number. Validate finite ordered fields and page>=1/pageSize1..200 before source reads; reject unknown/duplicate/blank field keys and invalid input. Dedicated automatically discovered DynamicContainerStatsReportController provides authorized catalog and preview using current IReportService and shared rules/source, no DI/package/config changes. Stable grouping/page total/current-page coverage and full scope/normalized dates/filters/header source cap/quantity units/unknown actual capacity/type/shipping context even evidence columns hidden. Existing UI maintains selection/filter/page state, resets page on field/filter changes, clears stale rows on failures and escapes labels; no unrelated style refactor. Development only. Reuse existing container-stats menu, current-user SalespersonDataScopeService customer scope, approved nondeleted ContainerLoadingLists and OperationLogMiddleware HTTP audit. Each endpoint revalidates current input and rechecks identity/menu/fresh scope; revoked permission, invalid input and source overflow return no data/file. Date span <=366 inclusive days, whole end day via next-day exclusive boundary with overflow rejection, stable source probe Take(501) and fail closed above 500 authorized matching list headers. Recorded cartons/kg/m3 are scoped list-header evidence, not verified stock-out, actual shipping, revenue or physical container totals. Partial customer scope must never reveal excluded customers/records or infer whole-container utilization, type, capacity or shipping state. No client identity/scope/rows/aggregates as authority, arbitrary/model-generated SQL, business writes, new domain entities or persistence schema, migrations, schema/view/stored-procedure changes, production SQL or real database execution, credentials/secrets/.env/config changes, irreversible operations, production deployment or real browser acceptance. Preserve unrelated modules and uncommitted work. Run focused in-memory service/API/export/UI source-contract tests plus configured safe Release build/test; unavailable external database/browser acceptance is environment-blocked, never fabricated passed.",
+  "depends_on": [
+    "ERP-251"
+  ],
+  "risk_level": "medium",
+  "priority": "P1",
+  "acceptance_criteria": [
+    "Finite field/filter/page validation applies authorized customer and literal raw-container predicates before source cap with blank defaults and no directory leak.",
+    "Authorized catalog/preview exposes selected ordered fields and stable page coverage plus mandatory normalized source/unit/unknown-capacity context, rejecting revocation and invalid requests.",
+    "Existing page provides safe field selection/filtering/pagination and stale/error state; service/API/UI tests cover filter-before-cap, literal wildcard text and date/scope boundaries, and safe build/test passes."
+  ],
+  "criterion_path_map": {
+    "Finite field/filter/page validation applies authorized customer and literal raw-container predicates before source cap with blank defaults and no directory leak.": [
+      "src/ERP.Application/DTOs/DynamicContainerStatsReportDtos.cs",
+      "src/ERP.Application/Services/DynamicContainerStatsReportRules.cs",
+      "src/ERP.Application/Interfaces/IReportService.cs",
+      "src/ERP.Application/Services/ReportService.Extra.cs",
+      "src/ERP.UnitTests/DynamicContainerStatsFilterTests.cs",
+      "src/ERP.UnitTests/ContainerStatsQueryBoundsTests.cs"
+    ],
+    "Authorized catalog/preview exposes selected ordered fields and stable page coverage plus mandatory normalized source/unit/unknown-capacity context, rejecting revocation and invalid requests.": [
+      "src/ERP.Api/Controllers/DynamicContainerStatsReportController.cs",
+      "src/ERP.Application/DTOs/DynamicContainerStatsReportDtos.cs",
+      "src/ERP.Application/Services/DynamicContainerStatsReportRules.cs",
+      "src/ERP.UnitTests/DynamicContainerStatsReportTests.cs"
+    ],
+    "Existing page provides safe field selection/filtering/pagination and stale/error state; service/API/UI tests cover filter-before-cap, literal wildcard text and date/scope boundaries, and safe build/test passes.": [
+      "src/ERP.Api/wwwroot/js/reports.js",
+      "src/ERP.UnitTests/DynamicContainerStatsReportUiTests.cs",
+      "src/ERP.UnitTests/DynamicContainerStatsFilterTests.cs",
+      "src/ERP.UnitTests/DynamicContainerStatsReportTests.cs",
+      "src/ERP.UnitTests/ContainerStatsScopeTests.cs",
+      "src/ERP.UnitTests/ContainerStatsQueryBoundsTests.cs"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Application/DTOs/DynamicContainerStatsReportDtos.cs",
+    "src/ERP.Application/Services/DynamicContainerStatsReportRules.cs",
+    "src/ERP.Application/Interfaces/IReportService.cs",
+    "src/ERP.Application/Services/ReportService.Extra.cs",
+    "src/ERP.UnitTests/DynamicContainerStatsFilterTests.cs",
+    "src/ERP.UnitTests/ContainerStatsQueryBoundsTests.cs",
+    "src/ERP.Api/Controllers/DynamicContainerStatsReportController.cs",
+    "src/ERP.UnitTests/DynamicContainerStatsReportTests.cs",
+    "src/ERP.Api/wwwroot/js/reports.js",
+    "src/ERP.UnitTests/DynamicContainerStatsReportUiTests.cs",
+    "src/ERP.UnitTests/ContainerStatsScopeTests.cs"
+  ],
+  "status": "pending",
+  "max_attempts": 3,
+  "attempts": 0,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only bounded scoped report feature"
+  },
+  "created_at": "2026-10-02T11:43:26.741936Z"
+}

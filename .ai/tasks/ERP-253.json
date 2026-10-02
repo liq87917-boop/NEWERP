@@ -1,0 +1,61 @@
+{
+  "id": "ERP-253",
+  "title": "Export selected scoped loading-list evidence page to Excel",
+  "description": "Users download selected columns in request order and the current evidence page as Excel through a dedicated export endpoint rebuilding fresh bounded authorized evidence; never trust client rows or a preview cache. Reuse finite DTO/rules/source and existing NPOI with narrow DynamicContainerStatsExcelExporter, direct controller construction, no DI/package/config change. Numeric signed recorded cartons/kg/m3 and scoped counts retain numeric cells; nullable utilization shows unknown, never zero/68m3-derived percentage; type unknown/source reasons are explicit. Always include normalized dates/filters/current-page coverage/source count and cap/scoped customer and grouping identity/recorded units/unknown capacity-type-shipping evidence even selected fields omit them. No all-match/cross-unit total, physical-container-count claim or appended unselected detail columns. Formula-like raw container strings/context are literal text cells, not formulas. Existing UI downloads with current field/filter/page state and preserves it while reporting fresh-permission/source-cap/export failure without stale download. Existing HTTP audit only, no duplicate business records. Development only. Reuse existing container-stats menu, current-user SalespersonDataScopeService customer scope, approved nondeleted ContainerLoadingLists and OperationLogMiddleware HTTP audit. Each endpoint revalidates current input and rechecks identity/menu/fresh scope; revoked permission, invalid input and source overflow return no data/file. Date span <=366 inclusive days, whole end day via next-day exclusive boundary with overflow rejection, stable source probe Take(501) and fail closed above 500 authorized matching list headers. Recorded cartons/kg/m3 are scoped list-header evidence, not verified stock-out, actual shipping, revenue or physical container totals. Partial customer scope must never reveal excluded customers/records or infer whole-container utilization, type, capacity or shipping state. No client identity/scope/rows/aggregates as authority, arbitrary/model-generated SQL, business writes, new domain entities or persistence schema, migrations, schema/view/stored-procedure changes, production SQL or real database execution, credentials/secrets/.env/config changes, irreversible operations, production deployment or real browser acceptance. Preserve unrelated modules and uncommitted work. Run focused in-memory service/API/export/UI source-contract tests plus configured safe Release build/test; unavailable external database/browser acceptance is environment-blocked, never fabricated passed.",
+  "depends_on": [
+    "ERP-252"
+  ],
+  "risk_level": "low",
+  "priority": "P1",
+  "acceptance_criteria": [
+    "Excel endpoint revalidates fields/filters/page and fresh identity/menu/customer scope, rebuilding the same authorized capped current page without client rows or cached previews.",
+    "Workbook preserves selected order, separate numeric signed unit measures/counts, explicit unknown utilization/type and mandatory context with formula-safe strings and no unsupported totals.",
+    "Existing page Excel download retains request state and handles failures; workbook/controller/UI tests cover revoked scope, caps, empty pages, negative/zero measures, unknowns and formula strings; safe build/test passes."
+  ],
+  "criterion_path_map": {
+    "Excel endpoint revalidates fields/filters/page and fresh identity/menu/customer scope, rebuilding the same authorized capped current page without client rows or cached previews.": [
+      "src/ERP.Api/Controllers/DynamicContainerStatsReportController.cs",
+      "src/ERP.Application/DTOs/DynamicContainerStatsReportDtos.cs",
+      "src/ERP.Application/Services/DynamicContainerStatsReportRules.cs",
+      "src/ERP.UnitTests/DynamicContainerStatsExcelTests.cs"
+    ],
+    "Workbook preserves selected order, separate numeric signed unit measures/counts, explicit unknown utilization/type and mandatory context with formula-safe strings and no unsupported totals.": [
+      "src/ERP.Infrastructure/Export/DynamicContainerStatsExcelExporter.cs",
+      "src/ERP.Application/DTOs/DynamicContainerStatsReportDtos.cs",
+      "src/ERP.UnitTests/DynamicContainerStatsExcelTests.cs"
+    ],
+    "Existing page Excel download retains request state and handles failures; workbook/controller/UI tests cover revoked scope, caps, empty pages, negative/zero measures, unknowns and formula strings; safe build/test passes.": [
+      "src/ERP.Api/wwwroot/js/reports.js",
+      "src/ERP.UnitTests/DynamicContainerStatsExcelTests.cs",
+      "src/ERP.UnitTests/DynamicContainerStatsReportUiTests.cs",
+      "src/ERP.UnitTests/DynamicContainerStatsReportTests.cs"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/DynamicContainerStatsReportController.cs",
+    "src/ERP.Application/DTOs/DynamicContainerStatsReportDtos.cs",
+    "src/ERP.Application/Services/DynamicContainerStatsReportRules.cs",
+    "src/ERP.UnitTests/DynamicContainerStatsExcelTests.cs",
+    "src/ERP.Infrastructure/Export/DynamicContainerStatsExcelExporter.cs",
+    "src/ERP.Api/wwwroot/js/reports.js",
+    "src/ERP.UnitTests/DynamicContainerStatsReportUiTests.cs",
+    "src/ERP.UnitTests/DynamicContainerStatsReportTests.cs"
+  ],
+  "status": "pending",
+  "max_attempts": 3,
+  "attempts": 0,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only bounded scoped report feature"
+  },
+  "created_at": "2026-10-02T11:43:26.742500Z"
+}
