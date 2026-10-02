@@ -189,6 +189,8 @@ public static class DynamicProductSalesRankingPdfExporter
         AddWrapped(lines, page.ReadOnlyText, metaFont, usableWidth);
         AddWrapped(lines, page.BoundaryText, metaFont, usableWidth);
         AddWrapped(lines, page.DisclaimerText, metaFont, usableWidth);
+        if (!string.IsNullOrEmpty(page.FilterText))
+            AddWrapped(lines, "筛选：" + page.FilterText, metaFont, usableWidth);
         AddWrapped(lines, page.UnitContextText, metaFont, usableWidth);
         AddWrapped(lines, page.ApprovedShipmentText, metaFont, usableWidth);
         return lines;

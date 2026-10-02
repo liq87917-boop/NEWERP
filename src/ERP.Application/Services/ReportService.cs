@@ -1,4 +1,5 @@
 using ERP.Application.Common;
+using ERP.Application.DTOs;
 using ERP.Application.Interfaces;
 using ERP.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
@@ -29,7 +30,8 @@ public partial class ReportService : IReportService
     /// 日期 / Top 校验先于任何源读取；金额为数量 × 商品当前售价的估算（币种未知，非实际发货收入）。
     /// </summary>
     public async Task<List<ReportDtos.ProductSalesRankItem>> GetProductSalesRankingAsync(
-        DateTime start, DateTime end, int top, SalespersonDataScope scope)
+        DateTime start, DateTime end, int top, SalespersonDataScope scope,
+        ProductSalesRankingFilterDto? filter = null)
     {
         ArgumentNullException.ThrowIfNull(scope);
 
@@ -56,9 +58,16 @@ public partial class ReportService : IReportService
                         && o.StockOutDate >= startDate
                         && o.StockOutDate < endExclusive);
         stockOuts = SalespersonDataScopeService.FilterByCustomer(stockOuts, scope, o => o.CustomerId);
+        if (filter?.CustomerId is > 0)
+            stockOuts = stockOuts.Where(o => o.CustomerId == filter.CustomerId.Value);
 
-        var detailGroups = await _db.StockOutDetails
-            .Where(d => !d.IsDeleted)
+        var details = _db.StockOutDetails.Where(d => !d.IsDeleted);
+        if (filter?.ProductId is > 0)
+            details = details.Where(d => d.ProductId == filter.ProductId.Value);
+        if (!string.IsNullOrEmpty(filter?.Unit))
+            details = details.Where(d => d.Unit == filter.Unit);
+
+        var detailGroups = await details
             .Join(stockOuts, d => d.StockOutId, o => o.Id, (d, o) => d)
             .GroupBy(d => new { d.ProductId, d.ProductName, d.Spec, d.Unit })
             .Select(g => new

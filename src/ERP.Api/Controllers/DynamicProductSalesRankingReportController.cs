@@ -99,18 +99,20 @@ public class DynamicProductSalesRankingReportController : ControllerBase
     private async Task<DynamicProductSalesRankingReportPageDto> BuildPageAsync(
         DynamicProductSalesRankingReportRequest request)
     {
-        // 1) 纯校验先于任何发货数据读取（fail closed）
+        // 1) 纯校验先于任何发货数据读取（fail closed；含 ERP-215 客户 / 商品 / 单位筛选校验）
         var fieldKeys = DynamicProductSalesRankingReportRules.NormalizeFields(request.Fields);
         var (start, end) = DynamicProductSalesRankingReportRules.ValidateDateRange(request.Start, request.End);
         var top = DynamicProductSalesRankingReportRules.ValidateTop(request.Top);
+        var filter = DynamicProductSalesRankingReportRules.NormalizeFilter(request.Filter);
 
         // 2) 每次重新校验身份 + 商品销量排名榜菜单授权 + 业务员数据范围
         var scope = await EnsureAuthorizedAsync(CurrentUserId());
 
-        // 3) 复用 ERP-212 的有界、作用域化发货数量读取（已审核销售出库，按商品 / 规格 / 单位分桶）
-        var items = await _reportService.GetProductSalesRankingAsync(start, end, top, scope);
+        // 3) 复用 ERP-212 的有界、作用域化发货数量读取（已审核销售出库，按商品 / 规格 / 单位分桶；筛选在分组 / 排名 / Take 之前应用）
+        var items = await _reportService.GetProductSalesRankingAsync(start, end, top, scope, filter);
 
-        return DynamicProductSalesRankingReportRules.BuildPage(items, fieldKeys, top, start, end);
+        var filterText = DynamicProductSalesRankingReportRules.BuildFilterContext(filter);
+        return DynamicProductSalesRankingReportRules.BuildPage(items, fieldKeys, top, start, end, filterText);
     }
 
     /// <summary>生成 Excel：数据工作表（选定列顺序 + 类型化值 + 公式注入转义） + 「报表口径」上下文工作表</summary>
@@ -151,8 +153,15 @@ public class DynamicProductSalesRankingReportController : ControllerBase
         AddLabel(4, DynamicProductSalesRankingReportRules.ContextUnitLabel, page.UnitContextText);
         AddLabel(5, DynamicProductSalesRankingReportRules.ContextReadOnlyLabel, page.ReadOnlyText);
 
+        var nextRow = 6;
+        if (!string.IsNullOrEmpty(page.FilterText))
+        {
+            AddLabel(nextRow, DynamicProductSalesRankingReportRules.ContextFilterLabel, page.FilterText);
+            nextRow++;
+        }
+
         if (page.Rows is null || page.Rows.Count == 0)
-            AddLabel(6, DynamicProductSalesRankingReportRules.ContextEmptyLabel, page.EmptyText);
+            AddLabel(nextRow, DynamicProductSalesRankingReportRules.ContextEmptyLabel, page.EmptyText);
     }
 
     /// <summary>身份 + 既有「角色 → 菜单」商品销量排名榜模块授权 + 业务员数据范围（fail closed，绝不猜测身份）</summary>

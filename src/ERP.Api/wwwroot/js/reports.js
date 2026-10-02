@@ -1592,11 +1592,33 @@ function psrTopError(state) {
   return '';
 }
 
-/* 日期 / Top 客户端校验错误文案（空串 = 通过） */
+/* 日期 / Top / 客户 Id / 商品 Id / 单位客户端校验错误文案（空串 = 通过） */
 function psrFilterError(state) {
   const dateError = psrDateError(state);
   if (dateError) return dateError;
-  return psrTopError(state);
+  const topError = psrTopError(state);
+  if (topError) return topError;
+
+  const customerId = String(state && state.customerId || '').trim();
+  const productId = String(state && state.productId || '').trim();
+  const unit = String(state && state.unit || '').trim();
+
+  if (customerId !== '') {
+    const c = Number(customerId);
+    if (!Number.isInteger(c) || c <= 0) return '客户 Id 必须是正整数（大于 0）';
+  }
+  if (productId !== '') {
+    const p = Number(productId);
+    if (!Number.isInteger(p) || p <= 0) return '商品 Id 必须是正整数（大于 0）';
+  }
+  if (unit !== '') {
+    if (unit.length > 30) return '单位筛选最多 30 个字符';
+    for (const ch of unit) {
+      const code = ch.codePointAt(0);
+      if (code < 0x20 || code === 0x7f) return '单位筛选不能包含控制字符';
+    }
+  }
+  return '';
 }
 
 /* 读取当前字段 / 日期 / Top 状态（预览与导出复用，单一来源） */
@@ -1608,11 +1630,28 @@ function psrBuildState() {
     start: val('psr-des-start'),
     end: val('psr-des-end'),
     top: val('psr-des-top'),
+    customerId: val('psr-des-customer-id'),
+    productId: val('psr-des-product-id'),
+    unit: val('psr-des-unit'),
     maxTop: PSR_DYN.catalog && PSR_DYN.catalog.maxTop ? PSR_DYN.catalog.maxTop : 200,
   };
 }
 
-/* 组装有界预览请求体：字段只来自目录、日期有界、Top 有界（1~200），绝不接受任意字段名或 SQL */
+/* 组装可选应用筛选（只发送规范化后的客户 Id / 商品 Id / 单位；全部留空 = null，保持既有排名行为） */
+function psrBuildFilter(state) {
+  const customerId = String(state && state.customerId || '').trim();
+  const productId = String(state && state.productId || '').trim();
+  const unit = String(state && state.unit || '').trim();
+  const filter = {};
+  if (customerId !== '') filter.customerId = Number(customerId);
+  if (productId !== '') filter.productId = Number(productId);
+  if (unit !== '') filter.unit = unit;
+  return (filter.customerId === undefined && filter.productId === undefined && filter.unit === undefined)
+    ? null
+    : filter;
+}
+
+/* 组装有界预览请求体：字段只来自目录、日期有界、Top 有界（1~200）、筛选有界，绝不接受任意字段名或 SQL */
 function psrBuildRequest(state) {
   const fields = psrSelectFields(state.catalogFields, state.selectedKeys);
   let top = Math.floor(Number(state.top));
@@ -1624,6 +1663,7 @@ function psrBuildRequest(state) {
     start: String(state.start).slice(0, 10),
     end: String(state.end).slice(0, 10),
     top,
+    filter: psrBuildFilter(state),
   };
 }
 
@@ -1723,10 +1763,11 @@ function psrResultHtml(view) {
   const topLine = view
     ? `<div class="text-muted" style="margin:6px 0">Top ${psrEsc(view.top)} 限定 · 返回 ${psrEsc(view.total)} 行${view.topLimited ? ' · 可能存在 Top 之外更多排名（不声称完整）' : ' · 已覆盖全部匹配排名'} · 期间 ${psrEsc(String(view.start || '').slice(0, 10))} 至 ${psrEsc(String(view.end || '').slice(0, 10))}</div>`
     : '';
+  const filterLine = view && view.filterText ? `<div class="pd-hint" style="color:#0f766e;background:#f0fdfa;border-color:#99f6e4">🔍 ${psrEsc(view.filterText)}</div>` : '';
   const approved = view && view.approvedShipmentText ? `<div class="pd-hint">✅ ${psrEsc(view.approvedShipmentText)}</div>` : '';
   const unit = view && view.unitContextText ? `<div class="pd-hint" style="color:#b45309;background:#fffbeb;border-color:#fde68a">⚠️ ${psrEsc(view.unitContextText)}</div>` : '';
   const empty = view && (!view.rows || view.rows.length === 0) ? psrEmptyHtml(view) : '';
-  return `${readOnly}${boundary}${disclaimer}${topLine}${approved}${unit}${empty}${psrTableHtml(view)}`;
+  return `${readOnly}${boundary}${disclaimer}${filterLine}${topLine}${approved}${unit}${empty}${psrTableHtml(view)}`;
 }
 
 /* 同步勾选状态到 selectedKeys（复选框 onchange） */
@@ -1920,6 +1961,9 @@ function openProductSalesRankingDesigner() {
         <label>开始日期 <input type="date" id="psr-des-start" value="${defStart}"></label>
         <label>结束日期 <input type="date" id="psr-des-end" value="${defEnd}"></label>
         <label>Top <input type="number" id="psr-des-top" value="10" min="1" max="200" style="width:80px"></label>
+        <label>客户 Id <input type="number" id="psr-des-customer-id" min="1" style="width:90px" placeholder="全部客户"></label>
+        <label>商品 Id <input type="number" id="psr-des-product-id" min="1" style="width:90px" placeholder="全部商品"></label>
+        <label>单位 <input type="text" id="psr-des-unit" maxlength="30" style="width:90px" placeholder="全部单位"></label>
         <span id="psr-designer-fields">正在加载字段目录…</span>
       </div>
       <div class="toolbar-actions">

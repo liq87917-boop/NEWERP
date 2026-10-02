@@ -30,6 +30,9 @@ public static class DynamicProductSalesRankingReportRules
     /// <summary>允许的日期区间最大跨度（含首尾日历日）：366 天，与既有商品销量排名口径一致</summary>
     public const int MaxDateRangeDays = 366;
 
+    /// <summary>单位筛选最大长度（有界文本；超长直接拒绝，绝不静默截断）</summary>
+    public const int MaxUnitFilterLength = 30;
+
     // ==================== 1. 文案 ====================
 
     /// <summary>只读声明（接口与文档统一声明）</summary>
@@ -163,6 +166,82 @@ public static class DynamicProductSalesRankingReportRules
         return top;
     }
 
+    // ==================== 4.1 应用筛选校验与规范化（ERP-215，fail closed） ====================
+
+    /// <summary>
+    /// 规范化可选应用筛选（fail closed）：客户 Id / 商品 Id 必须为正整数、单位文本去首尾空白后最多
+    /// <see cref="MaxUnitFilterLength"/> 字符且不含控制字符；非法取值直接拒绝，绝不静默丢弃或做单位换算。
+    /// 三项全部留空时返回 null（表示不过滤，保持既有排名行为与稳定顺序）。
+    /// </summary>
+    public static ProductSalesRankingFilterDto? NormalizeFilter(ProductSalesRankingFilterDto? filter)
+    {
+        if (filter is null)
+            return null;
+
+        var customerId = ValidateFilterCustomerId(filter.CustomerId);
+        var productId = ValidateFilterProductId(filter.ProductId);
+        var unit = NormalizeUnitFilter(filter.Unit);
+
+        if (customerId is null && productId is null && unit is null)
+            return null;
+
+        return new ProductSalesRankingFilterDto
+        {
+            CustomerId = customerId,
+            ProductId = productId,
+            Unit = unit,
+        };
+    }
+
+    /// <summary>校验客户 Id 筛选（可选）：提供时必须是正整数（&gt;0），否则 fail closed 拒绝；留空 = 不过滤。</summary>
+    public static long? ValidateFilterCustomerId(long? customerId)
+    {
+        if (customerId is <= 0)
+            throw BusinessException.InvalidParameter("客户 Id 筛选必须是正整数（大于 0）");
+        return customerId;
+    }
+
+    /// <summary>校验商品 Id 筛选（可选）：提供时必须是正整数（&gt;0），否则 fail closed 拒绝；留空 = 不过滤。</summary>
+    public static long? ValidateFilterProductId(long? productId)
+    {
+        if (productId is <= 0)
+            throw BusinessException.InvalidParameter("商品 Id 筛选必须是正整数（大于 0）");
+        return productId;
+    }
+
+    /// <summary>规范化单位筛选（可选）：留空 / 全空白 = 不过滤；否则去首尾空白、长度有界且不含控制字符（精确匹配，绝不做单位换算）。</summary>
+    public static string? NormalizeUnitFilter(string? unit)
+    {
+        if (string.IsNullOrWhiteSpace(unit))
+            return null;
+
+        var trimmed = unit.Trim();
+        if (trimmed.Length > MaxUnitFilterLength)
+            throw BusinessException.InvalidParameter($"单位筛选最多 {MaxUnitFilterLength} 个字符（收到 {trimmed.Length} 个字符）");
+
+        if (trimmed.Any(ch => char.IsControl(ch)))
+            throw BusinessException.InvalidParameter("单位筛选不能包含控制字符");
+
+        return trimmed;
+    }
+
+    /// <summary>把已规范化的应用筛选渲染为上下文文案（客户 Id / 商品 Id / 单位）；无筛选时返回空串。</summary>
+    public static string BuildFilterContext(ProductSalesRankingFilterDto? filter)
+    {
+        if (filter is null)
+            return string.Empty;
+
+        var parts = new List<string>();
+        if (filter.CustomerId.HasValue)
+            parts.Add($"客户 Id {filter.CustomerId.Value}");
+        if (filter.ProductId.HasValue)
+            parts.Add($"商品 Id {filter.ProductId.Value}");
+        if (!string.IsNullOrEmpty(filter.Unit))
+            parts.Add($"单位 {filter.Unit}");
+
+        return parts.Count == 0 ? string.Empty : string.Join("；", parts);
+    }
+
     // ==================== 5. 行投影与结果页（纯规则） ====================
 
     /// <summary>把一条排名行映射为「选定字段 → 值」的只读行（仅含选定字段，键保持请求顺序）</summary>
@@ -191,7 +270,8 @@ public static class DynamicProductSalesRankingReportRules
         IReadOnlyList<string> fieldKeys,
         int top,
         DateTime start,
-        DateTime end)
+        DateTime end,
+        string filterText = "")
     {
         var all = items ?? Array.Empty<ReportDtos.ProductSalesRankItem>();
         var columns = fieldKeys.Select(k => GetField(k)!).ToList();
@@ -211,7 +291,8 @@ public static class DynamicProductSalesRankingReportRules
             UnitContextText,
             ApprovedShipmentText,
             start,
-            end);
+            end,
+            filterText);
     }
 
     // ==================== 6. Excel 导出（ERP-213） ====================
@@ -236,6 +317,9 @@ public static class DynamicProductSalesRankingReportRules
 
     /// <summary>上下文表「只读声明」行标签</summary>
     public const string ContextReadOnlyLabel = "只读声明";
+
+    /// <summary>上下文表「筛选」行标签（ERP-215：客户 Id / 商品 Id / 单位规范化上下文）</summary>
+    public const string ContextFilterLabel = "筛选";
 
     /// <summary>上下文表「空结果说明」行标签</summary>
     public const string ContextEmptyLabel = "空结果说明";

@@ -21,8 +21,25 @@ public sealed record DynamicProductSalesRankingReportFieldDto(
     bool Filterable);
 
 /// <summary>
+/// 商品销量排名报表可选应用筛选（ERP-215，只读）：客户 Id / 商品 Id 为正整数标识，单位文本有界且拒绝控制字符。
+/// <para>本 DTO 只描述「如何在既有业务员数据范围 + 日期窗口 + Top 之外再收窄发货数量排名读取范围」，不含任何 SQL、连接串或写入语义；
+/// 校验 / 规范化统一由 <see cref="Services.DynamicProductSalesRankingReportRules.NormalizeFilter"/> 完成（fail closed）。</para>
+/// </summary>
+public sealed class ProductSalesRankingFilterDto
+{
+    /// <summary>客户 Id 筛选（可选：正整数；留空 = 不过滤；非法取值由服务端 fail closed 拒绝；与当前业务员数据范围求交集）</summary>
+    public long? CustomerId { get; set; }
+
+    /// <summary>商品 Id 筛选（可选：正整数；留空 = 不过滤；非法取值由服务端 fail closed 拒绝）</summary>
+    public long? ProductId { get; set; }
+
+    /// <summary>单位筛选（可选：去首尾空白后最多 30 字符；留空 = 不过滤；不含控制字符；精确匹配，不做单位换算）</summary>
+    public string? Unit { get; set; }
+}
+
+/// <summary>
 /// 商品销量排名报表预览请求（ERP-213，全部为只读筛选）：选定字段（仅限白名单，保持请求顺序）、
-/// 有界日期窗口（start / end，含首尾最多 366 天）与有界 Top（1 ~ 200）。
+/// 有界日期窗口（start / end，含首尾最多 366 天）与有界 Top（1 ~ 200），以及 ERP-215 可选客户 / 商品 / 单位筛选。
 /// </summary>
 public sealed class DynamicProductSalesRankingReportRequest
 {
@@ -37,6 +54,9 @@ public sealed class DynamicProductSalesRankingReportRequest
 
     /// <summary>Top（1 ~ 200，超出直接拒绝；默认 10）</summary>
     public int Top { get; set; } = 10;
+
+    /// <summary>可选应用筛选（客户 Id / 商品 Id / 单位；留空 = 不过滤，保持既有排名行为）</summary>
+    public ProductSalesRankingFilterDto? Filter { get; set; }
 }
 
 /// <summary>
@@ -55,7 +75,8 @@ public sealed record DynamicProductSalesRankingReportCatalogDto(
 /// 不泄露范围外 / 未分配 / 空客户记录。<see cref="Total"/> 为本次实际返回的排名行数（≤ Top），
 /// <see cref="TopLimited"/> 表示返回行数已达 Top、可能存在 Top 之外的排名（绝不声称 Top 之外完整）；
 /// <see cref="EmptyText"/> 在空结果时显式说明；<see cref="Start"/> / <see cref="End"/> 为已规范化的日期上下文；
-/// <see cref="UnitContextText"/> 显式声明单位不兼容、绝不跨单位合计数量；<see cref="ApprovedShipmentText"/> 显式声明发货证据口径。
+/// <see cref="UnitContextText"/> 显式声明单位不兼容、绝不跨单位合计数量；<see cref="ApprovedShipmentText"/> 显式声明发货证据口径；
+/// <see cref="FilterText"/> 为已规范化的客户 / 商品 / 单位筛选上下文（只含 Id 与单位文本，绝不泄露范围外客户名称）。
 /// </summary>
 public sealed record DynamicProductSalesRankingReportPageDto(
     List<DynamicProductSalesRankingReportFieldDto> Columns,
@@ -70,4 +91,5 @@ public sealed record DynamicProductSalesRankingReportPageDto(
     string UnitContextText,
     string ApprovedShipmentText,
     DateTime Start,
-    DateTime End);
+    DateTime End,
+    string FilterText = "");

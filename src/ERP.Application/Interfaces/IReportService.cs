@@ -10,7 +10,8 @@ public interface IReportService
 {
     /// <summary>商品销量排名榜（仅已审核、未删除、当前账号数据范围内的销售出库；按商品/规格/单位分桶）</summary>
     Task<List<ReportDtos.ProductSalesRankItem>> GetProductSalesRankingAsync(
-        DateTime start, DateTime end, int top, SalespersonDataScope scope);
+        DateTime start, DateTime end, int top, SalespersonDataScope scope,
+        ProductSalesRankingFilterDto? filter = null);
 
     /// <summary>订单利润暂估表</summary>
     Task<List<ReportDtos.OrderProfitItem>> GetOrderProfitEstimateAsync(DateTime start, DateTime end);
