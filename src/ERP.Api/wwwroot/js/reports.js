@@ -5038,6 +5038,7 @@ function openContainerStatsDesigner() {
         <button class="btn btn-neutral btn-sm" onclick="cstToggleAll(true)">全选</button>
         <button class="btn btn-neutral btn-sm" onclick="cstToggleAll(false)">清空</button>
         <button class="btn btn-primary" onclick="cstPreview(1)">预览</button>
+        <button class="btn btn-neutral btn-sm" onclick="cstExportExcel()" title="导出当前页选定字段为 Excel（只读）：复用当前字段 / 日期 / 筛选 / 分页状态，服务端重建有界授权当前页，绝不信任旧预览行">📥 导出 Excel</button>
       </div>
     </div>
     <div id="cst-des-result"></div>`;
@@ -5176,6 +5177,7 @@ function cstErrorHtml(kind, message) {
     forbidden: '权限不足',
     unauthorized: '未登录 / 登录已过期',
     invalid: '请求无效',
+    empty: '导出内容为空',
     network: '网络请求失败',
     error: '预览失败',
   };
@@ -5299,6 +5301,66 @@ async function cstPreview(page) {
     } else {
       cstRenderResult(cstErrorHtml(cstKindOfCode(resp.code), resp.message));
     }
+  } catch (err) {
+    cstRenderResult(cstErrorHtml('network', (err && err.message) || '无法连接到服务器'));
+  }
+}
+
+/* 导出当前页选定列为 Excel（ERP-253，只读）：复用预览请求体 POST /api/dynamic-container-stats-report/export；
+   成功（xlsx 附件）触发下载；授权 / 无效 / 来源超限 / 空结果 / 网络失败在结果区可见，不下载任何内容、绝不使用旧预览行 */
+async function cstExportExcel() {
+  if (!CST_DYN.view || !CST_DYN.view.columns || !CST_DYN.view.columns.length) {
+    cstRenderResult(cstErrorHtml('invalid', '请先预览后再导出 Excel'));
+    return;
+  }
+  if (!CST_DYN.view.rows || CST_DYN.view.rows.length === 0) {
+    cstRenderResult(cstErrorHtml('empty', '没有符合所选日期范围、数据范围与筛选的已审核装柜清单头，无法导出（请先预览）'));
+    return;
+  }
+
+  const state = cstBuildState(CST_DYN.view.page);
+  const dateError = cstDateError(state);
+  if (dateError) {
+    cstRenderResult(cstErrorHtml('invalid', dateError));
+    return;
+  }
+  const req = cstBuildRequest(state);
+  cstRenderResult(cstLoadingHtml());
+
+  try {
+    const headers = { 'Content-Type': 'application/json' };
+    const token = typeof localStorage !== 'undefined' ? (localStorage.getItem('erp_token') || '') : '';
+    if (token) headers['Authorization'] = 'Bearer ' + token;
+    const resp = await fetch('/api/dynamic-container-stats-report/export', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(req),
+    });
+
+    const contentType = (resp.headers.get('content-type') || '');
+    if (contentType.indexOf('spreadsheetml') >= 0) {
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+      a.href = url;
+      a.download = '柜量装柜证据_' + dateStr + '.xlsx';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      cstRenderResult(cstResultHtml(CST_DYN.view));
+      return;
+    }
+
+    let message = '导出失败';
+    let code;
+    try {
+      const data = await resp.json();
+      message = (data && data.message) || message;
+      code = data && data.code;
+    } catch (e) { /* 非 JSON 响应，沿用默认提示 */ }
+    cstRenderResult(cstErrorHtml(cstKindOfCode(code), message));
   } catch (err) {
     cstRenderResult(cstErrorHtml('network', (err && err.message) || '无法连接到服务器'));
   }

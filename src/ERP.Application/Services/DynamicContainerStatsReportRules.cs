@@ -89,6 +89,14 @@ public static class DynamicContainerStatsReportRules
     public const string ShippingContextText =
         "出运口径：箱数 / 毛重 / 体积为装柜清单头证据，非实际发货 / 实体柜 / 收入 / 收款，绝不据此推断实体柜容量或出运状态";
 
+    /// <summary>客户范围口径：仅当前账号业务员数据范围（特权账号不受限；受限制业务员仅其被分配客户），绝不泄露范围外客户 / 记录</summary>
+    public const string CustomerScopeContextText =
+        "客户范围口径：仅当前账号业务员数据范围（特权账号不受限；受限制业务员仅其被分配客户）；绝不泄露范围外客户 / 记录，绝不据此推断整柜 / 拼柜 / 装载率 / 柜型 / 出运状态";
+
+    /// <summary>分组身份口径：装柜日历日 × 精确原始非空白柜号证据桶（空白 / 纯空白柜号按装柜清单 Id 独立成桶）</summary>
+    public const string GroupingContextText =
+        "分组身份口径：装柜日历日 × 精确原始非空白柜号证据桶（空白 / 纯空白柜号按装柜清单 Id 独立成桶，绝不并入伪造共享柜）";
+
     /// <summary>目录口径：支持的筛选能力说明（仅能力说明，不含任何客户 / 装柜清单数据）</summary>
     public const string SupportedFilterText =
         "可选应用筛选：客户 Id（正整数）与柜号关键字（去首尾空白最多 80 字符、字面文本、拒绝控制字符）；留空 = 不过滤（保留全部已审核装柜清单头证据）";
@@ -342,6 +350,8 @@ public static class DynamicContainerStatsReportRules
             TypeContextText,
             ShippingContextText,
             filterText,
+            CustomerScopeContextText,
+            GroupingContextText,
             context);
     }
 
@@ -358,6 +368,123 @@ public static class DynamicContainerStatsReportRules
         ArgumentNullException.ThrowIfNull(context);
         return $"{context.Label} {context.BucketCount} 桶 · 已审核清单 {context.ApprovedLists} · {context.EvidenceBasis}";
     }
+
+    // ==================== 6. Excel 导出 ====================
+
+    /// <summary>Excel 数据工作表名（选定字段证据）</summary>
+    public const string DataSheetName = "柜量装柜证据";
+
+    /// <summary>Excel 报表口径上下文工作表名</summary>
+    public const string ContextSheetName = "报表口径";
+
+    /// <summary>未知装载率 / 柜型的显式展示文本（未知，而非数值 0 或 68m³ 推导百分比）</summary>
+    public const string UnknownValueText = "未知";
+
+    /// <summary>上下文表「开始日期」行标签</summary>
+    public const string ContextStartLabel = "开始日期";
+
+    /// <summary>上下文表「结束日期」行标签</summary>
+    public const string ContextEndLabel = "结束日期";
+
+    /// <summary>上下文表「分页」行标签</summary>
+    public const string ContextPageLabel = "分页";
+
+    /// <summary>上下文表「页面覆盖」行标签</summary>
+    public const string ContextPageOnlyLabel = "页面覆盖";
+
+    /// <summary>上下文表「来源上限」行标签</summary>
+    public const string ContextSourceLimitLabel = "来源上限";
+
+    /// <summary>上下文表「来源计数」行标签</summary>
+    public const string ContextSourceCountLabel = "来源计数";
+
+    /// <summary>上下文表「客户范围口径」行标签</summary>
+    public const string ContextCustomerScopeLabel = "客户范围口径";
+
+    /// <summary>上下文表「分组身份口径」行标签</summary>
+    public const string ContextGroupingLabel = "分组身份口径";
+
+    /// <summary>上下文表「数量单位口径」行标签</summary>
+    public const string ContextUnitLabel = "数量单位口径";
+
+    /// <summary>上下文表「未知实际容积口径」行标签</summary>
+    public const string ContextUnknownCapacityLabel = "未知实际容积口径";
+
+    /// <summary>上下文表「柜型口径」行标签</summary>
+    public const string ContextTypeLabel = "柜型口径";
+
+    /// <summary>上下文表「出运口径」行标签</summary>
+    public const string ContextShippingLabel = "出运口径";
+
+    /// <summary>上下文表「来源证据」行标签</summary>
+    public const string ContextSourceLabel = "来源证据";
+
+    /// <summary>上下文表「边界口径」行标签</summary>
+    public const string ContextBoundaryLabel = "边界口径";
+
+    /// <summary>上下文表「免责声明」行标签</summary>
+    public const string ContextDisclaimerLabel = "免责声明";
+
+    /// <summary>上下文表「只读声明」行标签</summary>
+    public const string ContextReadOnlyLabel = "只读声明";
+
+    /// <summary>上下文表「应用筛选」行标签</summary>
+    public const string ContextFilterLabel = "应用筛选";
+
+    /// <summary>上下文表「空页说明」行标签</summary>
+    public const string ContextEmptyLabel = "空页说明";
+
+    /// <summary>上下文表「无筛选」显示文案</summary>
+    public const string ContextNoFilterText = "无筛选";
+
+    /// <summary>电子表格公式注入风险首字符（OWASP：= / + / - / @ 及制表符 / 回车 / 换行）</summary>
+    private static bool IsFormulaLeadingChar(char c)
+        => c is '=' or '+' or '-' or '@' or '\t' or '\r' or '\n';
+
+    /// <summary>文本是否以电子表格公式字符开头（会触发 Excel 公式注入）</summary>
+    public static bool IsFormulaLeading(string? value)
+    {
+        if (string.IsNullOrEmpty(value)) return false;
+        return IsFormulaLeadingChar(value[0]);
+    }
+
+    /// <summary>
+    /// 转义 Excel 公式前导文本：以危险字符开头的文本前缀单引号，使单元格保持字面文本、不被当作公式执行。
+    /// 仅对字符串生效；数值 / 日期等类型原样返回（由导出端按其类型写入对应单元格）。
+    /// </summary>
+    public static object? EscapeFormulaLeading(object? value)
+    {
+        if (value is string s && IsFormulaLeading(s))
+            return "'" + s;
+        return value;
+    }
+
+    /// <summary>
+    /// 把一页预览行转成导出行（字面文本、公式安全）：日期统一规范化为 <c>yyyy-MM-dd</c> 文本；字符串做公式注入转义；
+    /// 数值（有符号箱数 / 毛重 / 体积 / 授权范围计数）原样保留为数值单元格（含负数 / 0）；装载率 / 柜型字段恒为字面「未知」，
+    /// 绝不写成数值 0 或按 68m³ 推导百分比。
+    /// </summary>
+    public static Dictionary<string, object?> BuildExportRow(
+        Dictionary<string, object?> row, IReadOnlyList<string> fieldKeys)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+        ArgumentNullException.ThrowIfNull(fieldKeys);
+
+        var export = new Dictionary<string, object?>(StringComparer.Ordinal);
+        foreach (var key in fieldKeys)
+        {
+            var value = row.TryGetValue(key, out var v) ? v : null;
+            export[key] = value switch
+            {
+                DateTime dt => dt.ToString("yyyy-MM-dd"),
+                string s => EscapeFormulaLeading(s),
+                _ => value,
+            };
+        }
+
+        return export;
+    }
+
 }
 
 

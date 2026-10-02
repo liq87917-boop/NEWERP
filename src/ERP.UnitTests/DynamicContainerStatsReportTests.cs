@@ -388,6 +388,41 @@ public class DynamicContainerStatsReportTests
         var row = Assert.Single(page.Rows);
         Assert.Equal("TCLU-001", row["containerNo"]);
     }
+
+    // ==================== 7. 导出 Excel（ERP-253）端点 ====================
+
+    [Fact]
+    public async Task 导出_授权用户_重新校验并重建当前页为xlsx工作簿()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedAuthorizedUser(db, "priv-user", "Priv", isSystemRole: true);
+        var customer = SeedCustomer(db, "C001", "客户");
+        SeedList(db, "LL-1", customer.Id, "TCLU-001");
+
+        var ctl = BuildController(db, user.Id);
+        TestAuth.SetUser(ctl, user.Id);
+
+        var file = Assert.IsType<FileContentResult>(await ctl.Export(Request(
+            fields: new List<string> { "containerNo", "totalVolume" })));
+        Assert.Equal("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", file.ContentType);
+        Assert.EndsWith(".xlsx", file.FileDownloadName);
+        Assert.NotEmpty(file.FileContents);
+    }
+
+    [Fact]
+    public async Task 导出_无菜单授权_拒绝且不返回工作簿()
+    {
+        using var db = TestDbFactory.Create();
+        var role = SeedRole(db, "NoMenu");
+        var user = SeedUser(db, "nomenu");
+        SeedUserRole(db, user.Id, role.Id);
+
+        var ctl = BuildController(db, user.Id);
+        TestAuth.SetUser(ctl, user.Id);
+
+        var ex = await Assert.ThrowsAsync<BusinessException>(() => ctl.Export(Request()));
+        Assert.Equal(ErrorCodes.Forbidden, ex.Code);
+    }
 }
 
 

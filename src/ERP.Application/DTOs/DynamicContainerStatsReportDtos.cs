@@ -98,7 +98,8 @@ public sealed record DynamicContainerStatsReportContextDto(
 /// <see cref="SourceContextText"/> / <see cref="SourceLimitText"/> / <see cref="UnitContextText"/> /
 /// <see cref="UnknownCapacityContextText"/> / <see cref="TypeContextText"/> / <see cref="ShippingContextText"/>
 /// 显式声明来源 / 来源上限 / 数量单位 / 未知实际容积 / 柜型 / 出运口径（即使对应列被取消选择也始终呈现）；
-/// <see cref="FilterText"/> 显式声明已规范化的应用筛选上下文。
+/// <see cref="FilterText"/> 显式声明已规范化的应用筛选上下文；
+/// <see cref="CustomerScopeContextText"/> / <see cref="GroupingContextText"/> 显式声明客户范围与分组身份口径（即使对应列被取消选择也始终呈现）。
 /// </summary>
 public sealed record DynamicContainerStatsReportPageDto(
     List<DynamicContainerStatsReportFieldDto> Columns,
@@ -123,4 +124,6 @@ public sealed record DynamicContainerStatsReportPageDto(
     string TypeContextText,
     string ShippingContextText,
     string FilterText,
+    string CustomerScopeContextText,
+    string GroupingContextText,
     DynamicContainerStatsReportContextDto Context);
