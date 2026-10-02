@@ -1,6 +1,7 @@
 using ERP.Application.Common;
 using ERP.Application.DTOs;
 using ERP.Application.Interfaces;
+using ERP.Domain.Entities;
 using ERP.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
 
@@ -112,6 +113,27 @@ public partial class ReportService : IReportService
         return result;
     }
 
+    /// <summary>订单利润暂估表：销售额口径标签（订单总额，原币，未换算汇率）</summary>
+    public const string OrderProfitSalesAmountLabel = "销售额＝订单总额（原币，未换算汇率）";
+
+    /// <summary>订单利润暂估表：成本证据标签（无可信历史成本依据，不回落为 0）</summary>
+    public const string OrderProfitCostEvidence = "成本未知：无可信可比较的历史成本依据，不回落为0";
+
+    /// <summary>订单利润暂估表：利润证据标签（绝不减去币种未知的当前成本价）</summary>
+    public const string OrderProfitProfitEvidence = "利润未知：绝不减去币种未知的当前成本价";
+
+    /// <summary>订单利润暂估表：当前价估算口径标签（币种未知，仅估算，非历史成本）</summary>
+    public const string OrderProfitCurrentPriceEstimateLabel = "当前价估算(币种未知，仅估算，非历史成本)";
+
+    /// <summary>订单利润暂估表：明细缺失 / 为空的估算原因</summary>
+    public const string OrderProfitEstimateMissingDetailReason = "明细缺失或为空，无法估算当前价";
+
+    /// <summary>订单利润暂估表：商品缺失 / 已删除的估算原因</summary>
+    public const string OrderProfitEstimateMissingProductReason = "明细商品缺失或已删除，无法估算当前价";
+
+    /// <summary>订单利润暂估表：明细缺少商品的估算原因</summary>
+    public const string OrderProfitEstimateIncompleteDetailReason = "明细不完整（缺少商品），无法估算当前价";
+
     /// <summary>订单利润暂估表允许的日期区间最大跨度（含首尾日历日）：366 天</summary>
     private const int OrderProfitMaxDateRangeDays = 366;
 
@@ -122,8 +144,10 @@ public partial class ReportService : IReportService
     private const int OrderProfitMaxDetails = 10000;
 
     /// <summary>
-    /// 订单利润暂估表（销售额 - 商品成本，只读派生）：仅统计已审核、未删除、当前账号数据范围内的销售订单头，
-    /// 再关联未删除明细按商品成本价求和（成本 / 金额估算口径沿用既有实现，货币语义由依赖的货币任务处理）。
+    /// 订单利润暂估表（ERP-219 / ERP-220，只读派生）：仅统计已审核、未删除、当前账号数据范围内的销售订单头。
+    /// 销售额保留订单原币 <c>TotalAmount</c>（绝不换算汇率、不改动金额）；成本 / 利润 / 利润率为未知（null），
+    /// 绝不减去币种未知的当前成本价、绝不回落为 0；「当前价估算」仅为数量 × 商品当前 <c>CostPrice</c> 的独立口径
+    /// （币种未知，仅估算，非历史成本），明细 / 商品缺失或已删除时为 null 并给出显式原因。
     /// 日期校验（含溢出防护）先于任何源读取；订单 / 明细均为有界读取，超出上限立即 fail closed，不返回部分行或金额；
     /// 订单头在 SQL 端按 OrderDate 降序、Id 降序稳定排序后，才用固定批量查询解析商品 / 客户，无逐单查库。
     /// </summary>
@@ -182,10 +206,11 @@ public partial class ReportService : IReportService
                 ErrorCodes.RuleConflict);
         }
 
-        // 4) 固定批量查询解析商品 / 客户（各一次整表按 Id 集合查询，无逐单查库）
+        // 4) 固定批量查询解析商品 / 客户（各一次整表按 Id 集合查询，无逐单查库）；
+        //    商品只取未删除，用于「当前价估算」——商品缺失 / 已删除时估算为未知，绝不回落为 0
         var productIds = details.Select(d => d.ProductId).Distinct().ToList();
         var products = await _db.BaseProducts
-            .Where(p => productIds.Contains(p.Id))
+            .Where(p => productIds.Contains(p.Id) && !p.IsDeleted)
             .ToDictionaryAsync(p => p.Id, p => p);
 
         var customerIds = orders.Select(o => o.CustomerId).Distinct().ToList();
@@ -193,25 +218,71 @@ public partial class ReportService : IReportService
             .Where(c => customerIds.Contains(c.Id))
             .ToDictionaryAsync(c => c.Id, c => c.CustomerName);
 
-        // 5) 按已稳定排序的订单头映射（保留 SQL 端 OrderDate 降序、Id 降序顺序）
+        // 5) 按已稳定排序的订单头映射（保留 SQL 端 OrderDate 降序、Id 降序顺序）：
+        //    销售额保留订单原币 TotalAmount；成本 / 利润 / 利润率为未知（null）；
+        //    「当前价估算」仅作独立口径呈现，明细 / 商品缺失或已删除时为 null 并给出显式原因
         var result = new List<ReportDtos.OrderProfitItem>();
         foreach (var order in orders)
         {
             var orderDetails = details.Where(d => d.SalesOrderId == order.Id).ToList();
-            var cost = orderDetails.Sum(d =>
-                d.Quantity * (products.TryGetValue(d.ProductId, out var p) ? p.CostPrice : 0));
-            var profit = order.TotalAmount - cost;
+            var estimate = BuildOrderProfitCurrentPriceEstimate(orderDetails, products);
             result.Add(new ReportDtos.OrderProfitItem
             {
+                OrderId = order.Id,
+                CustomerId = order.CustomerId,
                 OrderNo = order.OrderNo,
                 OrderDate = order.OrderDate,
                 CustomerName = customers.TryGetValue(order.CustomerId, out var name) ? name : string.Empty,
+                Currency = OrderProfitCurrencyCode(order.Currency),
+                CurrencyLabel = OrderProfitCurrencyLabel(order.Currency),
                 SalesAmount = order.TotalAmount,
-                CostAmount = cost,
-                Profit = profit,
-                ProfitRate = order.TotalAmount == 0 ? 0 : Math.Round(profit / order.TotalAmount * 100, 2)
+                SalesAmountLabel = OrderProfitSalesAmountLabel,
+                CostAmount = null,
+                Profit = null,
+                ProfitRate = null,
+                CostEvidence = OrderProfitCostEvidence,
+                ProfitEvidence = OrderProfitProfitEvidence,
+                CurrentPriceEstimate = estimate.Estimate,
+                CurrentPriceEstimateLabel = OrderProfitCurrentPriceEstimateLabel,
+                CurrentPriceEstimateReason = estimate.Reason
             });
         }
         return result;
+    }
+
+    /// <summary>原币币种编码：未知取值（未定义枚举值）归入「未知币种」，绝不默认币种或推断汇率</summary>
+    private static string OrderProfitCurrencyCode(Currency currency)
+        => Enum.IsDefined(typeof(Currency), currency) ? currency.ToString() : UnknownCurrencyGroup;
+
+    /// <summary>原币币种标签（如「USD 美元」）；未知取值归入「未知币种」</summary>
+    private static string OrderProfitCurrencyLabel(Currency currency) => currency switch
+    {
+        Currency.CNY => "CNY 人民币",
+        Currency.USD => "USD 美元",
+        Currency.EUR => "EUR 欧元",
+        Currency.HKD => "HKD 港币",
+        Currency.GBP => "GBP 英镑",
+        Currency.JPY => "JPY 日元",
+        _ => UnknownCurrencyGroup
+    };
+
+    /// <summary>
+    /// 当前价估算（数量 × 商品当前 CostPrice，币种未知，仅估算）：
+    /// 明细为空、明细缺少商品、或商品缺失 / 已删除时返回 null 并给出显式原因；商品存在且 CostPrice 为 0 时按已知 0 计入。
+    /// </summary>
+    private static (decimal? Estimate, string Reason) BuildOrderProfitCurrentPriceEstimate(
+        List<SalesOrderDetail> orderDetails, Dictionary<long, BaseProduct> products)
+    {
+        if (orderDetails.Count == 0)
+            return (null, OrderProfitEstimateMissingDetailReason);
+
+        if (orderDetails.Any(d => d.ProductId <= 0))
+            return (null, OrderProfitEstimateIncompleteDetailReason);
+
+        if (orderDetails.Any(d => !products.ContainsKey(d.ProductId)))
+            return (null, OrderProfitEstimateMissingProductReason);
+
+        var estimate = orderDetails.Sum(d => d.Quantity * products[d.ProductId].CostPrice);
+        return (estimate, string.Empty);
     }
 }

@@ -346,7 +346,8 @@ public class OrderProfitEstimateScopeTests
         var items = OkList(await ctl.OrderProfit(Start, End));
 
         var row = Assert.Single(items);
-        Assert.Equal(600m, row.CostAmount);   // 10 × 60；已删除的 999 数量不计入
+        Assert.Null(row.CostAmount);                  // 成本未知，绝不回落为 0
+        Assert.Equal(600m, row.CurrentPriceEstimate); // 当前价估算仅计入未删除明细：10 × 60；已删除的 999 数量不计入
     }
 
     // ==================== 只读 ====================

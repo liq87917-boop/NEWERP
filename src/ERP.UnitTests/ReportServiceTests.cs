@@ -98,7 +98,7 @@ public class ReportServiceTests
     // ==================== 2. 订单利润暂估表 ====================
 
     [Fact]
-    public async Task GetOrderProfitEstimateAsync_销售额减明细成本_并按利润率()
+    public async Task GetOrderProfitEstimateAsync_销售额保留原币_成本利润未知_当前价估算独立()
     {
         using var db = TestDbFactory.Create();
         var customer = SeedCustomer(db, "C001", "测试客户");
@@ -115,7 +115,7 @@ public class ReportServiceTests
         db.SalesOrders.Add(order);
         await db.SaveChangesAsync();
 
-        // 明细：商品 1 × 10（成本 60 → 600）+ 商品 2 × 5（成本 120 → 600）= 1200 成本
+        // 明细：商品 1 × 10 + 商品 2 × 5；当前价估算（币种未知，仅估算）= 10×60 + 5×120 = 1200
         db.SalesOrderDetails.AddRange(
             new SalesOrderDetail { SalesOrderId = order.Id, ProductId = 1, ProductName = "热销商品", Quantity = 10m, Unit = "PCS", UnitPrice = 100m, Amount = 1000m },
             new SalesOrderDetail { SalesOrderId = order.Id, ProductId = 2, ProductName = "平销商品", Quantity = 5m, Unit = "PCS", UnitPrice = 800m, Amount = 4000m }
@@ -125,11 +125,17 @@ public class ReportServiceTests
         var service = new ReportService(db);
         var result = await service.GetOrderProfitEstimateAsync(Start, End, PrivilegedScope);
 
-        Assert.Single(result);
-        Assert.Equal(5000m, result[0].SalesAmount);
-        Assert.Equal(1200m, result[0].CostAmount);
-        Assert.Equal(3800m, result[0].Profit);
-        Assert.Equal(76.00m, result[0].ProfitRate);    // 3800 / 5000 * 100
+        var row = Assert.Single(result);
+        Assert.Equal(5000m, row.SalesAmount);                                   // 销售额保留订单原币，不改动
+        Assert.Equal(ReportService.OrderProfitSalesAmountLabel, row.SalesAmountLabel);
+        Assert.Null(row.CostAmount);                                            // 成本未知，绝不回落为 0
+        Assert.Null(row.Profit);                                                // 利润未知
+        Assert.Null(row.ProfitRate);                                            // 利润率未知
+        Assert.Equal(ReportService.OrderProfitCostEvidence, row.CostEvidence);
+        Assert.Equal(ReportService.OrderProfitProfitEvidence, row.ProfitEvidence);
+        Assert.Equal(1200m, row.CurrentPriceEstimate);                          // 独立当前价估算（币种未知，仅估算）
+        Assert.Equal(ReportService.OrderProfitCurrentPriceEstimateLabel, row.CurrentPriceEstimateLabel);
+        Assert.Equal(string.Empty, row.CurrentPriceEstimateReason);
     }
 
     [Fact]
@@ -153,7 +159,7 @@ public class ReportServiceTests
     }
 
     [Fact]
-    public async Task GetOrderProfitEstimateAsync_零金额订单的利润率不抛异常()
+    public async Task GetOrderProfitEstimateAsync_零金额订单_销售额保持0_利润率未知()
     {
         using var db = TestDbFactory.Create();
         var customer = SeedCustomer(db, "C001", "客户");
@@ -172,8 +178,11 @@ public class ReportServiceTests
         var service = new ReportService(db);
         var result = await service.GetOrderProfitEstimateAsync(Start, End, PrivilegedScope);
 
-        Assert.Single(result);
-        Assert.Equal(0m, result[0].ProfitRate);   // 分母保护：0 除以 0 不抛
+        var row = Assert.Single(result);
+        Assert.Equal(0m, row.SalesAmount);   // 销售额保持订单原币 0
+        Assert.Null(row.ProfitRate);          // 利润率未知，绝不回落为 0
+        Assert.Null(row.CurrentPriceEstimate);// 无明细：当前价估算未知
+        Assert.Equal(ReportService.OrderProfitEstimateMissingDetailReason, row.CurrentPriceEstimateReason);
     }
 
     // ==================== 3. 客户出货量统计表 ====================

@@ -15,7 +15,21 @@ const REPORTS = {
       { key: 'amountLabel', label: '金额口径' },
     ] },
   'order-profit': { api: '/api/reports/order-profit', title: '订单利润暂估表',
-    emoji: '💹', kpi: 'gold', summary: '订单毛利 · FOB/CIF/DDP 利润核算' },
+    emoji: '💹', kpi: 'gold',
+    summary: '原币销售额 · 成本/利润未知(无历史成本依据) · 当前价估算(币种未知，仅估算)',
+    columns: [
+      { key: 'orderNo', label: '订单号' },
+      { key: 'orderDate', label: '订单日期', type: 'date' },
+      { key: 'customerName', label: '客户' },
+      { key: 'currencyLabel', label: '原币币种' },
+      { key: 'salesAmount', label: '销售额(原币)', type: 'money' },
+      { key: 'costAmount', label: '成本金额', type: 'money' },
+      { key: 'profit', label: '利润', type: 'money' },
+      { key: 'profitRate', label: '利润率%', type: 'number' },
+      { key: 'costEvidence', label: '成本证据' },
+      { key: 'currentPriceEstimate', label: '当前价估算(币种未知)', type: 'money' },
+      { key: 'currentPriceEstimateReason', label: '估算说明' },
+    ] },
   'customer-shipment': { api: '/api/reports/customer-shipment', title: '客户出货量统计表',
     emoji: '🚢', kpi: 'ocean', summary: '客户出货量 · 按目的港口 / 区域' },
   'salesman-output': { api: '/api/reports/salesman-output', title: '业务员产值报表',
@@ -228,6 +242,7 @@ function fillReportKpi(code, data) {
   const setT = (k, v) => { const el = document.querySelector(`[data-rkpi="${k}"]`); if (el) el.textContent = String(v); };
   if (code === 'quotation-conversion') { fillQuotationConversionKpi(data); return; }
   if (code === 'product-sales-ranking') { fillProductSalesRankingKpi(data); return; }
+  if (code === 'order-profit') { fillOrderProfitKpi(data); return; }
   if (code === 'balance-sheet' || code === 'income-statement' || code === 'cash-flow') {
     const lines = data.lines || [];
     const total = lines.reduce((s, l) => s + (Number(l.amount) || 0), 0);
@@ -268,6 +283,27 @@ function fillProductSalesRankingKpi(data) {
   const top = rows[0];
   setR('top', top ? ([top.productName, top.spec, top.unit].filter(Boolean).join(' ') || 'TOP 1') : '--');
   setT('top-tip', '排名首位（件数降序）');
+}
+
+/* 订单利润暂估 KPI：销售额为订单原币，成本/利润/利润率为未知，绝不跨币种合计、绝不展示实际利润口径 */
+function fillOrderProfitKpi(data) {
+  const setR = (k, v) => { const el = document.querySelector(`[data-rkpi="${k}"]`); if (el) el.firstChild.nodeValue = String(v); };
+  const setT = (k, v) => { const el = document.querySelector(`[data-rkpi="${k}"]`); if (el) el.textContent = String(v); };
+  const rows = Array.isArray(data) ? data : [];
+  setR('rows', rows.length);
+  setT('rows-tip', '订单逐笔 · 原币分别成行');
+
+  const label = document.querySelector('[data-rkpi-label="total"]');
+  if (label) label.textContent = '原币币种';
+  const unit = document.querySelector('[data-rkpi-unit="total"]');
+  if (unit) unit.textContent = '';
+  const currencies = Array.from(new Set(rows.map(r => String(r.currency || '未知币种')))).sort();
+  setR('total', currencies.length ? currencies.join(' / ') : '--');
+  setT('total-tip', '原币分别成行，绝不跨币种合计（不提供跨币种总额 / 利润率）');
+
+  const top = rows[0];
+  setR('top', top ? `${top.orderNo || '--'} · ${top.currency || '未知币种'}` : '--');
+  setT('top-tip', '排序首位（订单日期降序）');
 }
 
 /* 报价成交率 KPI：金额一律按原币分列，绝不跨币种相加/换算/默认币种；计数可汇总 */
@@ -320,6 +356,7 @@ function renderReportData(code, data) {
     el.innerHTML = `<table><thead><tr><th>项目</th><th class="text-right">金额</th></tr></thead><tbody>${rows}</tbody></table>`;
     return;
   }
+  if (code === 'order-profit') { renderOrderProfitData(data); return; }
   const arr = Array.isArray(data) ? data : (data.items || []);
   if (!arr.length) { el.innerHTML = emptyReportHtml('暂无数据', '📭'); return; }
   const rep = REPORTS[code] || {};
@@ -339,6 +376,36 @@ function renderReportData(code, data) {
     return `<td>${v ?? ''}</td>`;
   }).join('')}</tr>`).join('');
   el.innerHTML = `<table><thead><tr>${head}</tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+/* 订单利润暂估表：原币销售额 + 未知成本/利润 + 当前价估算（币种未知）；null 显式显示「未知」，文本安全转义 */
+function renderOrderProfitData(data) {
+  const el = document.getElementById('report-table');
+  const rows = Array.isArray(data) ? data : [];
+  if (!rows.length) { el.innerHTML = emptyReportHtml('暂无可显示数据', '💹'); return; }
+  const esc = (v) => fudDesEsc(v);
+  const num = (v) => (v === null || v === undefined ? '<span class="text-muted">未知</span>' : fmtMoney(v));
+  const txt = (v) => (v === null || v === undefined || v === '' ? '<span class="text-muted">未知</span>' : esc(v));
+  const reason = (v) => (v ? esc(v) : '');
+  const body = rows.map(r => `<tr>
+    <td>${esc(r.orderNo)}</td>
+    <td>${fmtDate(r.orderDate)}</td>
+    <td>${esc(r.customerName)}</td>
+    <td>${esc(r.currencyLabel || r.currency || '未知币种')}</td>
+    <td class="text-right">${fmtMoney(r.salesAmount)}</td>
+    <td class="text-right">${num(r.costAmount)}</td>
+    <td class="text-right">${num(r.profit)}</td>
+    <td class="text-right">${num(r.profitRate)}</td>
+    <td>${txt(r.costEvidence)}</td>
+    <td class="text-right">${num(r.currentPriceEstimate)}</td>
+    <td>${reason(r.currentPriceEstimateReason)}</td>
+  </tr>`).join('');
+  el.innerHTML = `<table><thead><tr>
+    <th>订单号</th><th>订单日期</th><th>客户</th><th>原币币种</th>
+    <th class="text-right">销售额(原币)</th>
+    <th class="text-right">成本金额</th><th class="text-right">利润</th><th class="text-right">利润率%</th>
+    <th>成本证据</th><th class="text-right">当前价估算(币种未知)</th><th>估算说明</th>
+  </tr></thead><tbody>${body}</tbody></table>`;
 }
 
 /* 报表空状态：行业主题 emoji */

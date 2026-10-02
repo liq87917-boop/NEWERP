@@ -21,16 +21,65 @@ public static partial class ReportDtos
         public int Rank { get; set; }
     }
 
-    /// <summary>订单利润暂估项</summary>
+    /// <summary>
+    /// 订单利润暂估项（ERP-219 / ERP-220，只读派生）：
+    /// 销售额保留订单原币 <c>TotalAmount</c>，绝不换算汇率、不改动金额；
+    /// 成本 / 利润 / 利润率为未知（null，绝不减去币种未知的当前成本价、绝不回落为 0）；
+    /// 「当前价估算」仅为数量 × 商品当前 CostPrice 的独立口径（币种未知，仅估算），
+    /// 明细 / 商品缺失或已删除时为 null 并给出显式原因。
+    /// </summary>
     public class OrderProfitItem
     {
+        /// <summary>订单 Id（订单身份）</summary>
+        public long OrderId { get; set; }
+
+        /// <summary>客户 Id（客户身份）</summary>
+        public long CustomerId { get; set; }
+
+        /// <summary>订单号</summary>
         public string OrderNo { get; set; } = string.Empty;
+
+        /// <summary>订单日期</summary>
         public DateTime OrderDate { get; set; }
+
+        /// <summary>客户名称</summary>
         public string CustomerName { get; set; } = string.Empty;
+
+        /// <summary>原币币种编码（如 CNY / USD；未知取值归入「未知币种」）</summary>
+        public string Currency { get; set; } = string.Empty;
+
+        /// <summary>原币币种标签（如「USD 美元」；未知取值为「未知币种」）</summary>
+        public string CurrencyLabel { get; set; } = string.Empty;
+
+        /// <summary>销售额 = 订单 <c>TotalAmount</c>（原币，未做任何汇率换算）</summary>
         public decimal SalesAmount { get; set; }
-        public decimal CostAmount { get; set; }
-        public decimal Profit { get; set; }
-        public decimal ProfitRate { get; set; }
+
+        /// <summary>销售额口径证据标签</summary>
+        public string SalesAmountLabel { get; set; } = string.Empty;
+
+        /// <summary>成本金额（未知：当前无可信、可比较的历史成本依据；绝不回落为 0）</summary>
+        public decimal? CostAmount { get; set; }
+
+        /// <summary>利润（未知：绝不减去币种未知的当前成本价）</summary>
+        public decimal? Profit { get; set; }
+
+        /// <summary>利润率 %（未知）</summary>
+        public decimal? ProfitRate { get; set; }
+
+        /// <summary>成本证据标签（未知原因）</summary>
+        public string CostEvidence { get; set; } = string.Empty;
+
+        /// <summary>利润证据标签（未知原因）</summary>
+        public string ProfitEvidence { get; set; } = string.Empty;
+
+        /// <summary>当前价估算金额（数量 × 商品当前 CostPrice；币种未知，仅估算；明细 / 商品缺失或已删除时为 null）</summary>
+        public decimal? CurrentPriceEstimate { get; set; }
+
+        /// <summary>当前价估算口径标签（币种未知，仅估算，非历史成本）</summary>
+        public string CurrentPriceEstimateLabel { get; set; } = string.Empty;
+
+        /// <summary>当前价估算不可用的显式原因（可估算时为空字符串）</summary>
+        public string CurrentPriceEstimateReason { get; set; } = string.Empty;
     }
 
     /// <summary>客户出货量统计项</summary>
