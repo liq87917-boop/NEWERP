@@ -1,4 +1,5 @@
 using ERP.Application.Common;
+using ERP.Application.DTOs;
 using ERP.Application.Interfaces;
 using ERP.Domain.Entities;
 using ERP.Domain.Enums;
@@ -32,9 +33,11 @@ public partial class ReportService
     /// 旧口径数量合计仅在明细证据完整且单一非空单位时可知（否则 null）。本表口径为「已审核销售订单证据」，
     /// 不是实际出库 / 装柜数量，也不是实际收款。日期校验先于任何源读取；订单头在业务员数据范围之后做 501 行探测
     /// （500 张上限），明细按 10001 条探测（10000 条上限），超出即 fail closed 且不返回任何行或金额。
+    /// <see cref="CustomerShipmentFilterDto"/> 可选筛选（客户 Id / 原币币种）在业务员数据范围之后、501 订单头上限探测与
+    /// 10001 明细探测之前与范围相交并过滤（参数化 EF 谓词）；省略筛选保持既有全部已知 / 未知币种证据。
     /// </summary>
     public async Task<List<ReportDtos.CustomerShipmentItem>> GetCustomerShipmentStatsAsync(
-        DateTime start, DateTime end, SalespersonDataScope scope)
+        DateTime start, DateTime end, SalespersonDataScope scope, CustomerShipmentFilterDto? filter = null)
     {
         ArgumentNullException.ThrowIfNull(scope);
 
@@ -60,6 +63,9 @@ public partial class ReportService
                         && o.OrderDate >= startDate
                         && o.OrderDate < endExclusive);
         ordersQuery = SalespersonDataScopeService.FilterByCustomer(ordersQuery, scope, o => o.CustomerId);
+
+        // 2.1) ERP-231 可选应用筛选：作用在业务员数据范围之后、501 订单头上限探测与 10001 明细探测之前（参数化 EF 谓词）
+        ordersQuery = ApplyCustomerShipmentFilter(ordersQuery, filter);
 
         var orders = await ordersQuery
             .OrderBy(o => o.CustomerId)
@@ -158,6 +164,28 @@ public partial class ReportService
             QuantityCompletenessReason = completenessReason,
             UnitGroups = unitGroups.ToList()
         };
+    }
+
+    /// <summary>
+    /// 应用 ERP-231 可选筛选（在业务员数据范围之后、501 订单头上限探测与分页之前）：客户 Id 精确匹配、
+    /// 原币币种已知枚举码精确匹配。筛选已由调用方规范化；全部为参数化 EF 谓词，非任意 SQL。
+    /// </summary>
+    private static IQueryable<SalesOrder> ApplyCustomerShipmentFilter(
+        IQueryable<SalesOrder> source, CustomerShipmentFilterDto? filter)
+    {
+        if (filter is null)
+            return source;
+
+        if (filter.CustomerId is > 0)
+            source = source.Where(o => o.CustomerId == filter.CustomerId.Value);
+
+        if (!string.IsNullOrEmpty(filter.Currency)
+            && Enum.TryParse<Currency>(filter.Currency, true, out var currency))
+        {
+            source = source.Where(o => o.Currency == currency);
+        }
+
+        return source;
     }
 
     /// <summary>业务员产值报表</summary>

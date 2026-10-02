@@ -412,4 +412,54 @@ public class DynamicCustomerShipmentPdfTests
         Assert.Equal(before, db.SalesOrders.Count());
         Assert.False(db.ChangeTracker.HasChanges());
     }
+
+    // ==================== 6. ERP-231 应用筛选上下文 ====================
+
+    [Fact]
+    public void BuildFilterLine_有筛选_渲染规范化筛选_无筛选为空串()
+    {
+        var pageWithFilter = DynamicCustomerShipmentReportRules.BuildPage(
+            Array.Empty<ReportDtos.CustomerShipmentItem>(),
+            DynamicCustomerShipmentReportRules.NormalizeFields(null),
+            1, 20, Start, End, "客户 Id 7；原币币种 USD");
+
+        var line = DynamicCustomerShipmentPdfExporter.BuildFilterLine(pageWithFilter);
+        Assert.Contains("应用筛选", line);
+        Assert.Contains("客户 Id 7", line);
+        Assert.Contains("原币币种 USD", line);
+
+        var pageWithoutFilter = DynamicCustomerShipmentReportRules.BuildPage(
+            Array.Empty<ReportDtos.CustomerShipmentItem>(),
+            DynamicCustomerShipmentReportRules.NormalizeFields(null),
+            1, 20, Start, End);
+        Assert.Equal(string.Empty, DynamicCustomerShipmentPdfExporter.BuildFilterLine(pageWithoutFilter));
+    }
+
+    [Fact]
+    public async Task ExportPdf_应用筛选_下载成功_且不写库()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedAuthorizedUser(db, "csd-pdf-filter", "Priv");
+        var customer = SeedCustomer(db, "C001", "客户");
+        SeedOrder(db, "SO-1", customer.Id, Currency.USD, 100m);
+
+        var before = db.SalesOrders.Count();
+        var ctl = NewController(db);
+        TestAuth.SetUser(ctl, user.Id);
+
+        var file = PdfOk(await ctl.ExportPdf(new DynamicCustomerShipmentReportRequest
+        {
+            Fields = new List<string> { "customerName" },
+            Start = Start,
+            End = End,
+            Page = 1,
+            PageSize = 20,
+            Filter = new CustomerShipmentFilterDto { CustomerId = customer.Id, Currency = "usd" }
+        }));
+
+        Assert.True(file.FileContents.Length > 0);
+        Assert.Equal(before, db.SalesOrders.Count());
+        Assert.False(db.ChangeTracker.HasChanges());
+    }
+
 }

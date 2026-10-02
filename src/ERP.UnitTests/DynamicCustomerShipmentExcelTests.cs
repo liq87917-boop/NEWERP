@@ -462,4 +462,47 @@ public class DynamicCustomerShipmentExcelTests
             new DynamicCustomerShipmentReportRequest { Start = Start, End = End }));
         Assert.Equal(ErrorCodes.Forbidden, ex.Code);
     }
+
+    // ==================== 6. ERP-231 应用筛选上下文 ====================
+
+    [Fact]
+    public async Task Export_应用筛选_上下文工作表可见规范化筛选_即使列被取消选择()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedAuthorizedUser(db, "priv-user", "Priv", isSystemRole: true);
+        var customer = SeedCustomer(db, "C001", "客户");
+        SeedOrder(db, "SO-1", customer.Id, Currency.USD, 100m);
+
+        var ctl = NewController(db);
+        TestAuth.SetUser(ctl, user.Id);
+
+        var file = ExportOk(await ctl.Export(new DynamicCustomerShipmentReportRequest
+        {
+            // 不选择任何身份列，仍应保留服务端筛选上下文
+            Fields = new List<string> { "totalAmount" },
+            Start = Start,
+            End = End,
+            Page = 1,
+            PageSize = 20,
+            Filter = new CustomerShipmentFilterDto { CustomerId = customer.Id, Currency = "usd" }
+        }));
+
+        using var workbook = OpenWorkbook(file.FileContents);
+        var ctx = workbook.GetSheetAt(1);
+        var labels = new List<string>();
+        for (var r = 0; r <= ctx.LastRowNum; r++)
+        {
+            var row = ctx.GetRow(r);
+            if (row is null) continue;
+            labels.Add(row.GetCell(0).StringCellValue);
+            if (row.GetCell(0).StringCellValue == DynamicCustomerShipmentReportRules.ContextFilterLabel)
+            {
+                var value = row.GetCell(1).StringCellValue;
+                Assert.Contains("客户 Id " + customer.Id, value);
+                Assert.Contains("原币币种 USD", value);
+            }
+        }
+        Assert.Contains(DynamicCustomerShipmentReportRules.ContextFilterLabel, labels);
+    }
+
 }

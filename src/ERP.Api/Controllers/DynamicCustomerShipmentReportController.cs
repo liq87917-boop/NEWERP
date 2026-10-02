@@ -107,15 +107,17 @@ public class DynamicCustomerShipmentReportController : ControllerBase
         var fieldKeys = DynamicCustomerShipmentReportRules.NormalizeFields(request.Fields);
         var (start, end) = DynamicCustomerShipmentReportRules.ValidateDateRange(request.Start, request.End);
         DynamicCustomerShipmentReportRules.ValidatePageBounds(request.Page, request.PageSize);
+        var filter = CustomerShipmentReportFilterRules.NormalizeFilter(request.Filter);
 
         // 2) 每次重新校验身份 + 客户出货量统计表菜单授权 + 业务员数据范围
         var scope = await EnsureAuthorizedAsync(CurrentUserId());
 
         // 3) 复用 ERP-227 / ERP-228 的有界、作用域化客户出货量读取（金额按客户 × 原币独立小计，绝不跨币种 / 跨单位合计；
-        //    500 订单 / 10000 明细来源上限 fail closed）
-        var items = await _reportService.GetCustomerShipmentStatsAsync(start, end, scope);
+        //    500 订单 / 10000 明细来源上限 fail closed）；ERP-231 可选筛选与业务员数据范围相交后再做上限探测
+        var items = await _reportService.GetCustomerShipmentStatsAsync(start, end, scope, filter);
+        var filterText = CustomerShipmentReportFilterRules.BuildFilterContext(filter);
 
-        return DynamicCustomerShipmentReportRules.BuildPage(items, fieldKeys, request.Page, request.PageSize, start, end);
+        return DynamicCustomerShipmentReportRules.BuildPage(items, fieldKeys, request.Page, request.PageSize, start, end, filterText);
     }
 
     /// <summary>生成当前页 Excel：数据工作表（选定列顺序 + 类型化值 + 公式注入转义 + null 显式未知）+ 报表口径上下文工作表</summary>
@@ -160,6 +162,9 @@ public class DynamicCustomerShipmentReportController : ControllerBase
         AddLabel(nextRow++, DynamicCustomerShipmentReportRules.ContextSourceLabel, page.SourceContextText);
         AddLabel(nextRow++, DynamicCustomerShipmentReportRules.ContextPageOnlyLabel, DynamicCustomerShipmentReportRules.PageOnlyText);
         AddLabel(nextRow++, DynamicCustomerShipmentReportRules.ContextReadOnlyLabel, page.ReadOnlyText);
+
+        if (!string.IsNullOrWhiteSpace(page.FilterText))
+            AddLabel(nextRow++, DynamicCustomerShipmentReportRules.ContextFilterLabel, page.FilterText);
 
         if (!string.IsNullOrWhiteSpace(page.EmptyText))
             AddLabel(nextRow, DynamicCustomerShipmentReportRules.ContextEmptyLabel, page.EmptyText);

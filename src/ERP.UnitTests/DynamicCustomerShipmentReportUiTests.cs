@@ -222,4 +222,46 @@ public class DynamicCustomerShipmentReportUiTests
         Assert.Contains("csdErrorHtml('network', (err && err.message) || '无法连接到服务器')", fn);
         Assert.Contains("'PDF 下载失败'", fn);
     }
+
+    // ==================== 8. ERP-231 可选应用筛选（客户 Id / 原币币种） ====================
+
+    [Fact]
+    public void 筛选_设计器提供客户Id与原币选择_筛选变化重置页码_保留其余输入()
+    {
+        var js = Script;
+
+        Assert.Contains("id=\"csd-des-customer-id\"", js);
+        Assert.Contains("id=\"csd-des-currency\"", js);
+        Assert.Contains("<option value=\"CNY\">", js);
+        Assert.Contains("<option value=\"USD\">", js);
+        Assert.Contains("<option value=\"JPY\">", js);
+
+        var designer = Segment(js, "function openCustomerShipmentDesigner()", "loadCustomerShipmentDesignerCatalog();");
+        Assert.DoesNotContain("未知币种", designer);
+
+        var reset = Segment(js, "function csdResetPage()", "function csdBuildState(");
+        Assert.Contains("CSD_DYN.page = 1;", reset);
+        Assert.Contains("CSD_DYN.view = null;", reset);
+    }
+
+    [Fact]
+    public void 筛选_组装规范化筛选_校验非法取值_无自由SQL()
+    {
+        var js = Script;
+
+        Assert.Contains("function csdBuildFilter(", js);
+        Assert.Contains("function csdFilterError(", js);
+        Assert.Contains("filter.customerId = Number(customerId)", js);
+        Assert.Contains("filter.currency = currency.toUpperCase()", js);
+        Assert.Contains("filter: csdBuildFilter(state)", js);
+        Assert.Contains("客户 Id 必须是正整数（大于 0）", js);
+        Assert.Contains("原币币种仅支持 CNY / USD / EUR / HKD / GBP / JPY", js);
+        Assert.Contains("view.filterText", js);
+
+        var build = Segment(js, "function csdBuildRequest(", "function csdCellText(");
+        Assert.DoesNotContain("FromSql", build);
+        Assert.DoesNotContain("ExecuteSql", build);
+        Assert.DoesNotContain("SqlCommand", build);
+    }
+
 }

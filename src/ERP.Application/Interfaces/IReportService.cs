@@ -19,8 +19,9 @@ public interface IReportService
         DateTime start, DateTime end, SalespersonDataScope scope, OrderProfitEstimateFilterDto? filter = null);
 
     /// <summary>客户出货量统计表（仅已审核、未删除、当前账号数据范围内的销售订单证据；日期 / 订单 / 明细均有界，超出即 fail closed）</summary>
+    /// <param name="filter">ERP-231 可选应用筛选（客户 Id / 原币币种）；传 null 保持既有行为。</param>
     Task<List<ReportDtos.CustomerShipmentItem>> GetCustomerShipmentStatsAsync(
-        DateTime start, DateTime end, SalespersonDataScope scope);
+        DateTime start, DateTime end, SalespersonDataScope scope, CustomerShipmentFilterDto? filter = null);
 
     /// <summary>业务员产值报表</summary>
     Task<List<ReportDtos.SalesmanOutputItem>> GetSalesmanOutputAsync(DateTime start, DateTime end);

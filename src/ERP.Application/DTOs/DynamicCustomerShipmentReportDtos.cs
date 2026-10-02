@@ -35,6 +35,9 @@ public sealed class DynamicCustomerShipmentReportRequest
     /// <summary>结束日期（留空 = 今天；只取日期部分；含首尾，且不得早于开始日期）</summary>
     public DateTime? End { get; set; }
 
+    /// <summary>可选应用筛选（客户 Id / 原币币种；留空 = 不过滤）</summary>
+    public CustomerShipmentFilterDto? Filter { get; set; }
+
     /// <summary>页码（从 1 开始）</summary>
     public int Page { get; set; } = 1;
 
@@ -43,7 +46,25 @@ public sealed class DynamicCustomerShipmentReportRequest
 }
 
 /// <summary>
-/// 客户出货量证据字段目录（ERP-229，只读）：白名单字段 + 所需菜单授权与有界额度口径（与规则同源）。
+/// 动态客户出货量证据报表（ERP-231）的可选应用筛选 DTO：客户 Id 与原币币种有限选择。
+/// <para>本 DTO 只描述「如何在既有业务员数据范围 + 日期窗口之外再收窄销售订单读取范围」，不含任何 SQL、连接串或写入语义；
+/// 校验 / 规范化统一由 <see cref="Services.CustomerShipmentReportFilterRules.NormalizeFilter"/> 完成（fail closed）。</para>
+/// </summary>
+public sealed class CustomerShipmentFilterDto
+{
+    /// <summary>客户 Id 筛选（可选：正整数；留空 = 不过滤；非法取值由服务端 fail closed 拒绝）</summary>
+    public long? CustomerId { get; set; }
+
+    /// <summary>
+    /// 原币币种筛选（可选：留空 = 全部；仅接受已知 <c>Currency</c> 枚举码 CNY / USD / EUR / HKD / GBP / JPY，
+    /// 非法 / 数字 / 未知取值直接拒绝，绝不回退为 CNY 或任何默认币种）。不提供「未知币种」选择器。
+    /// </summary>
+    public string? Currency { get; set; }
+}
+
+/// <summary>
+/// 客户出货量证据字段目录（ERP-229，只读）：白名单字段 + 所需菜单授权与有界额度口径（与规则同源），
+/// 以及仅含筛选能力说明（不含任何客户 / 订单 / 金额数据）的支持筛选口径。
 /// </summary>
 public sealed record DynamicCustomerShipmentReportCatalogDto(
     List<DynamicCustomerShipmentReportFieldDto> Fields,
@@ -52,7 +73,8 @@ public sealed record DynamicCustomerShipmentReportCatalogDto(
     int MaxPageSize,
     int DefaultPageSize,
     string ReadOnlyText,
-    string BoundaryText);
+    string BoundaryText,
+    string FilterText);
 
 /// <summary>
 /// 客户出货量证据范围上下文（ERP-229，只读、服务端派生）：明确区分「客户 × 原币证据行」与
@@ -73,7 +95,8 @@ public sealed record DynamicCustomerShipmentReportContextDto(
 /// <see cref="Start"/> / <see cref="End"/> 为已规范化的日期上下文（供 Excel 导出标注日期口径）。
 /// <see cref="CurrencyContextText"/> / <see cref="UnitContextText"/> / <see cref="UnknownContextText"/> /
 /// <see cref="SourceContextText"/> 显式声明原币 / 精确单位 / 未知 / 来源口径（即使对应列被取消选择也始终呈现）；
-/// <see cref="SourceLimitText"/> 显式声明来源上限（有界读取，超出 fail closed）；<see cref="Context"/> 携带去重客户 / 订单数。
+/// <see cref="SourceLimitText"/> 显式声明来源上限（有界读取，超出 fail closed）；<see cref="Context"/> 携带去重客户 / 订单数；
+/// <see cref="FilterText"/> 显式声明已规范化的应用筛选上下文（即使对应列被取消选择也始终呈现，供预览 / Excel / PDF 复用）。
 /// </summary>
 public sealed record DynamicCustomerShipmentReportPageDto(
     List<DynamicCustomerShipmentReportFieldDto> Columns,
@@ -96,4 +119,5 @@ public sealed record DynamicCustomerShipmentReportPageDto(
     string UnknownContextText,
     string SourceContextText,
     string SourceLimitText,
+    string FilterText,
     DynamicCustomerShipmentReportContextDto Context);

@@ -521,4 +521,81 @@ public class DynamicCustomerShipmentReportTests
         Assert.Equal(before, db.SalesOrders.Count());
         Assert.False(db.ChangeTracker.HasChanges());
     }
+
+    // ==================== 5. ERP-231 可选应用筛选 ====================
+
+    [Fact]
+    public async Task 预览_应用客户Id筛选_结果与规范化筛选上下文一致()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedAuthorizedUser(db, "priv-user", "Priv", isSystemRole: true);
+        var a = SeedCustomer(db, "C-A", "客户A");
+        var b = SeedCustomer(db, "C-B", "客户B");
+        SeedOrder(db, "SO-A", a.Id, Currency.USD, 100m);
+        SeedOrder(db, "SO-B", b.Id, Currency.USD, 999m);
+
+        var ctl = BuildController(db, user.Id);
+        var page = OkPage(await ctl.Preview(new DynamicCustomerShipmentReportRequest
+        {
+            Fields = new List<string> { "customerName" },
+            Start = Start,
+            End = End,
+            Filter = new CustomerShipmentFilterDto { CustomerId = a.Id }
+        }));
+
+        var row = Assert.Single(page.Rows);
+        Assert.Equal("客户A", (string)row["customerName"]!);
+        Assert.Contains("客户 Id " + a.Id, page.FilterText);
+    }
+
+    [Fact]
+    public async Task 预览_应用原币币种筛选_结果与规范化筛选上下文一致()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedAuthorizedUser(db, "priv-user", "Priv", isSystemRole: true);
+        var customer = SeedCustomer(db, "C001", "客户");
+        SeedOrder(db, "SO-USD", customer.Id, Currency.USD, 100m);
+        SeedOrder(db, "SO-CNY", customer.Id, Currency.CNY, 500m);
+
+        var ctl = BuildController(db, user.Id);
+        var page = OkPage(await ctl.Preview(new DynamicCustomerShipmentReportRequest
+        {
+            Fields = new List<string> { "currency", "totalAmount" },
+            Start = Start,
+            End = End,
+            Filter = new CustomerShipmentFilterDto { Currency = "usd" }
+        }));
+
+        var row = Assert.Single(page.Rows);
+        Assert.Equal("USD", (string)row["currency"]!);
+        Assert.Equal(100m, (decimal)row["totalAmount"]!);
+        Assert.Contains("原币币种 USD", page.FilterText);
+    }
+
+    [Fact]
+    public async Task 预览_非法筛选_校验先于读取并拒绝()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedAuthorizedUser(db, "priv-user", "Priv", isSystemRole: true);
+
+        var ctl = BuildController(db, user.Id);
+        var ex = await Assert.ThrowsAsync<BusinessException>(() => ctl.Preview(
+            new DynamicCustomerShipmentReportRequest
+            {
+                Start = Start,
+                End = End,
+                Filter = new CustomerShipmentFilterDto { CustomerId = 0 }
+            }));
+        Assert.Equal(ErrorCodes.InvalidParameter, ex.Code);
+
+        var ex2 = await Assert.ThrowsAsync<BusinessException>(() => ctl.Preview(
+            new DynamicCustomerShipmentReportRequest
+            {
+                Start = Start,
+                End = End,
+                Filter = new CustomerShipmentFilterDto { Currency = "ABC" }
+            }));
+        Assert.Equal(ErrorCodes.InvalidParameter, ex2.Code);
+    }
+
 }

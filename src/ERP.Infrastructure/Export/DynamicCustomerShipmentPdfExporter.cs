@@ -172,12 +172,13 @@ public static class DynamicCustomerShipmentPdfExporter
         return XGraphics.FromPdfPage(page);
     }
 
-    /// <summary>上下文注释（与只读 / 原币 / 单位 / 未知 / 来源 / 页面覆盖 / 来源上限一一对应，即使对应列被取消选择也始终呈现）</summary>
+    /// <summary>上下文注释（与只读 / 应用筛选 / 原币 / 单位 / 未知 / 来源 / 页面覆盖 / 来源上限一一对应，即使对应列被取消选择也始终呈现）</summary>
     private static List<string> BuildHeadNotes(DynamicCustomerShipmentReportPageDto page)
         => new()
         {
             page.ReadOnlyText,
             BuildScopeLine(page),
+            BuildFilterLine(page),
             page.CurrencyContextText,
             page.UnitContextText,
             page.UnknownContextText,
@@ -186,6 +187,10 @@ public static class DynamicCustomerShipmentPdfExporter
             page.PageOnlyText,
             page.SourceLimitText,
         };
+
+    /// <summary>把已规范化的应用筛选渲染为 PDF 上下文行（无筛选时为空串；供测试与绘制共用同一口径）</summary>
+    public static string BuildFilterLine(DynamicCustomerShipmentReportPageDto? page)
+        => string.IsNullOrWhiteSpace(page?.FilterText) ? string.Empty : $"应用筛选：{page.FilterText}";
 
     /// <summary>服务端范围上下文：区分「客户 × 原币证据行」与「去重客户数 / 去重订单数」，并显式声明证据依据为已审核销售订单</summary>
     private static string BuildScopeLine(DynamicCustomerShipmentReportPageDto page)

@@ -2788,8 +2788,8 @@ function openOrderProfitEstimateDesigner() {
    - 入口复用在「客户出货量统计表」报表（reports.js 的 customer-shipment，designer: 'customer-shipment'），不新增菜单 / 架构 / 脚本注册；
    - 字段选择器只由 GET /api/dynamic-customer-shipment-report 返回的有限白名单目录渲染为复选框（name="csd-des-field"），
      绝无自由填写的字段名或 SQL；勾选状态经 csdSelectFields 规范化（去重、保持顺序、丢弃未知键）；
-   - 筛选仅限开始 / 结束日期（含首尾最多 366 天），分页有界（页码 ≥ 1，每页 1~200），
-     预览走 POST /api/dynamic-customer-shipment-report，只发送「白名单字段 + 有界日期 + 有界分页」；
+   - 筛选仅限开始 / 结束日期（含首尾最多 366 天）、客户 Id（正整数）与原币币种（CNY / USD / EUR / HKD / GBP / JPY），分页有界（页码 ≥ 1，每页 1~200），
+     预览走 POST /api/dynamic-customer-shipment-report，只发送「白名单字段 + 有界日期 + 有界分页 + 规范化可选筛选」；
    - 结果按后端返回的列名与选定字段值渲染（csdTableHtml / csdResultHtml），全部 HTML 转义，null 金额 / 数量显示「未知」；
    - 原币 / 单位 / 未知 / 来源口径与去重客户 / 订单上下文始终显示（即使对应列被取消选择），绝不展示跨币种 / 跨单位总额或实际出库 / 收款；
    - 空页 / 授权撤销（权限不足 / 未登录）/ 无效请求 / 网络失败分别可见，且不暴露范围外数据；
@@ -2840,6 +2840,31 @@ function csdDateError(state) {
   return '';
 }
 
+/* 客户 Id / 原币币种客户端校验（与后端 CustomerShipmentReportFilterRules.NormalizeFilter 一致）：
+   客户 Id 正整数、币种仅已知枚举码，非法取值在发送前可见拒绝 */
+function csdFilterError(state) {
+  const customerId = String(state && state.customerId || '').trim();
+  if (customerId !== '') {
+    const c = Number(customerId);
+    if (!Number.isInteger(c) || c <= 0) return '客户 Id 必须是正整数（大于 0）';
+  }
+  const currency = String(state && state.currency || '').trim();
+  if (currency !== '') {
+    if (!/^(CNY|USD|EUR|HKD|GBP|JPY)$/i.test(currency)) return '原币币种仅支持 CNY / USD / EUR / HKD / GBP / JPY';
+  }
+  return '';
+}
+
+/* 组装可选应用筛选（只发送规范化后的客户 Id / 原币币种；全部留空 = null，保持既有客户出货量行为） */
+function csdBuildFilter(state) {
+  const customerId = String(state && state.customerId || '').trim();
+  const currency = String(state && state.currency || '').trim();
+  const filter = {};
+  if (customerId !== '') filter.customerId = Number(customerId);
+  if (currency !== '') filter.currency = currency.toUpperCase();
+  return (filter.customerId === undefined && filter.currency === undefined) ? null : filter;
+}
+
 /* 组装有界预览请求体：字段只来自目录、日期仅开始 / 结束、分页有界，绝不接受任意字段名或 SQL */
 function csdBuildRequest(state) {
   const fields = csdSelectFields(state.catalogFields, state.selectedKeys);
@@ -2854,6 +2879,7 @@ function csdBuildRequest(state) {
     pageSize,
     start: String(state.start).slice(0, 10),
     end: String(state.end).slice(0, 10),
+    filter: csdBuildFilter(state),
   };
 }
 
@@ -2939,6 +2965,9 @@ function csdScopeLine(view) {
 /* 结果区渲染：先给范围 / 口径提示（即使对应列被取消选择也始终显示），再渲染空态或表格 + 分页 */
 function csdResultHtml(view) {
   if (!view) return '';
+  const filterLine = view && view.filterText
+    ? `<div class="pd-hint" style="color:#0f766e;background:#f0fdfa;border-color:#99f6e4;margin:0 0 8px">🔍 ${csdEsc(view.filterText)}</div>`
+    : '';
   const hints = [
     view.pageOnlyText,
     view.currencyContextText,
@@ -2950,7 +2979,7 @@ function csdResultHtml(view) {
   const body = view.rows && view.rows.length
     ? csdTableHtml(view) + csdPagingHtml(view)
     : csdEmptyHtml(view);
-  return `${scope}${hints}${body}`;
+  return `${scope}${filterLine}${hints}${body}`;
 }
 
 /* 字段选择器：只由目录白名单渲染为复选框，绝不渲染自由输入框或 SQL */
@@ -3011,9 +3040,10 @@ function csdToggleAll(checked) {
   csdSyncSelection();
 }
 
-/* 重置回第 1 页（字段 / 日期 / 每页条数变更后调用） */
+/* 筛选 / 字段 / 日期 / 每页条数变更后重置到第 1 页并清空旧结果（保留其余输入值） */
 function csdResetPage() {
   CSD_DYN.page = 1;
+  CSD_DYN.view = null;
 }
 
 /* 读取当前字段 / 日期 / 每页条数 / 分页状态（预览与翻页复用，单一来源） */
@@ -3024,6 +3054,8 @@ function csdBuildState(page) {
     selectedKeys: CSD_DYN.selectedKeys,
     start: val('csd-des-start'),
     end: val('csd-des-end'),
+    customerId: val('csd-des-customer-id'),
+    currency: val('csd-des-currency'),
     pageSize: val('csd-des-pagesize'),
     page: page || CSD_DYN.page || 1,
     maxPageSize: CSD_DYN.catalog && CSD_DYN.catalog.maxPageSize ? CSD_DYN.catalog.maxPageSize : 200,
@@ -3037,6 +3069,11 @@ async function csdPreview(page) {
   const dateError = csdDateError(state);
   if (dateError) {
     csdRenderResult(csdErrorHtml('invalid', dateError));
+    return;
+  }
+  const filterError = csdFilterError(state);
+  if (filterError) {
+    csdRenderResult(csdErrorHtml('invalid', filterError));
     return;
   }
   const req = csdBuildRequest(state);
@@ -3191,6 +3228,8 @@ async function loadCustomerShipmentDesignerCatalog() {
       CSD_DYN.view = null;
       csdRenderFields(csdFieldChooserHtml(CSD_DYN.fields, CSD_DYN.selectedKeys));
       csdSyncSelection();
+      const filterHint = document.getElementById('csd-des-filter-hint');
+      if (filterHint) filterHint.textContent = (resp.data && resp.data.filterText) || '';
       return;
     }
     if (resp.code === 2000 || resp.code === 2003) {
@@ -3216,8 +3255,19 @@ function openCustomerShipmentDesigner() {
         <div class="form-row" style="margin:12px 0">
           <label>开始日期 <input type="date" id="csd-des-start" value="${csdEsc(new Date().toISOString().slice(0, 10))}" onchange="csdResetPage()"></label>
           <label>结束日期 <input type="date" id="csd-des-end" value="${csdEsc(new Date().toISOString().slice(0, 10))}" onchange="csdResetPage()"></label>
+          <label>客户 Id <input type="number" id="csd-des-customer-id" min="1" style="width:90px" placeholder="全部客户" onchange="csdResetPage()"></label>
+          <label>原币 <select id="csd-des-currency" onchange="csdResetPage()">
+            <option value="">全部币种</option>
+            <option value="CNY">CNY 人民币</option>
+            <option value="USD">USD 美元</option>
+            <option value="EUR">EUR 欧元</option>
+            <option value="HKD">HKD 港币</option>
+            <option value="GBP">GBP 英镑</option>
+            <option value="JPY">JPY 日元</option>
+          </select></label>
           <label>每页条数 <input type="number" id="csd-des-pagesize" value="20" min="1" max="200" style="width:90px" onchange="csdResetPage()"></label>
         </div>
+        <div id="csd-des-filter-hint" class="pd-hint" style="margin:8px 0"></div>
         <div style="margin:8px 0">
           <button class="btn btn-primary" onclick="csdPreview(1)">🔍 预览</button>
           <button class="btn btn-neutral" onclick="csdExport()">📤 导出当前页 Excel</button>

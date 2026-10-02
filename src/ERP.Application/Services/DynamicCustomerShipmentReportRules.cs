@@ -52,7 +52,7 @@ public static class DynamicCustomerShipmentReportRules
     /// <summary>边界口径文案</summary>
     public const string BoundaryText =
         "口径：字段仅限客户出货量证据字段白名单（客户 / 原币 / 已审核订单数 / 原币金额小计 / 已知单一单位数量 / 显式数量与来源证据）；" +
-        "筛选仅限开始 / 结束日期（含首尾最多 366 天），分页页码 ≥ 1、每页 1~200；" +
+        "筛选仅限开始 / 结束日期（含首尾最多 366 天）、客户 Id（正整数）与原币币种（CNY / USD / EUR / HKD / GBP / JPY），分页页码 ≥ 1、每页 1~200；" +
         "结果限定在当前账号业务员数据范围（特权账号不受限）；金额按客户 × 原币独立小计、数量按原始精确单位分组，绝不跨币种 / 跨单位合计；不执行任意 SQL、不做写入";
 
     /// <summary>免责文案</summary>
@@ -172,7 +172,8 @@ public static class DynamicCustomerShipmentReportRules
         MaxPageSize,
         DefaultPageSize,
         ReadOnlyText,
-        BoundaryText);
+        BoundaryText,
+        CustomerShipmentReportFilterRules.SupportedFilterText);
 
     /// <summary>按键取字段定义（键不存在返回 null）。</summary>
     public static DynamicCustomerShipmentReportFieldDto? GetField(string key)
@@ -224,7 +225,8 @@ public static class DynamicCustomerShipmentReportRules
         int page,
         int pageSize,
         DateTime start,
-        DateTime end)
+        DateTime end,
+        string filterText = "")
     {
         ArgumentNullException.ThrowIfNull(items);
         ArgumentNullException.ThrowIfNull(fieldKeys);
@@ -267,6 +269,7 @@ public static class DynamicCustomerShipmentReportRules
             UnknownContextText,
             SourceContextText,
             SourceLimitText,
+            filterText,
             context);
     }
 
@@ -304,6 +307,9 @@ public static class DynamicCustomerShipmentReportRules
 
     /// <summary>上下文表「只读声明」行标签</summary>
     public const string ContextReadOnlyLabel = "只读声明";
+
+    /// <summary>上下文表「应用筛选」行标签</summary>
+    public const string ContextFilterLabel = "应用筛选";
 
     /// <summary>上下文表「空页说明」行标签</summary>
     public const string ContextEmptyLabel = "空页说明";
