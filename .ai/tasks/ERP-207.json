@@ -1,7 +1,7 @@
 {
   "id": "ERP-207",
   "title": "Download designed quotation conversion reports as PDF",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "low",
   "priority": "P1",
   "description": "A user downloads the currently designed scoped quotation conversion report as PDF with the same selected columns, date context and original-currency buckets as preview/Excel. Add a PDF endpoint to the prerequisite controller that independently validates and reauthorizes and obtains server-derived bounded preview data. Add one narrow Infrastructure exporter using existing PDFsharp and SimHeiPdfFontResolver without package or font-secret changes. Paginate rows and wide columns, render empty evidence, label original currencies and never produce a mixed-currency money grand total. Missing font/render failure must return a clear error with no corrupt or misleading file. The existing designer retains current field order/date context in the PDF request and surfaces download failures; no new persistence or DB model is needed. Development only: reuse existing ERP services, current-user menu permissions and SalespersonDataScopeService; OperationLogMiddleware audits API calls. No new authorization privileges, direct table writes, arbitrary SQL, schema/migration/stored-procedure/view changes, production SQL, real database execution, irreversible actions, secrets/.env changes, deployment or real browser acceptance. Verify focused in-memory or source-contract tests and the configured safe Release build/test; unavailable external environments must be marked blocked, never reported passed. Preserve unrelated work.",
@@ -42,7 +42,7 @@
     "ERP-206"
   ],
   "max_attempts": 3,
-  "attempts": 0,
+  "attempts": 1,
   "validation_profile": "safe",
   "completion_mode": "build",
   "auto_start": true,

@@ -1219,6 +1219,68 @@ async function qcdExport() {
   }
 }
 
+/* 导出当前页选定列为 PDF（ERP-207，只读）：复用预览请求体 POST /api/dynamic-quotation-conversion-report/pdf；
+   成功（application/pdf 附件）触发下载；授权 / 无效 / 空结果 / 网络失败在结果区可见，不下载任何内容 */
+async function qcdExportPdf() {
+  if (!QCD_DYN.view || !QCD_DYN.view.columns || !QCD_DYN.view.columns.length) {
+    qcdRenderResult(qcdErrorHtml('invalid', '请先预览后再导出 PDF'));
+    return;
+  }
+  if (!QCD_DYN.view.rows || QCD_DYN.view.rows.length === 0) {
+    qcdRenderResult(qcdErrorHtml('empty', '没有符合所选日期范围的报价成交率数据，无法导出 PDF（请先预览）'));
+    return;
+  }
+
+  const state = qcdBuildState(QCD_DYN.view.page);
+  const dateError = qcdDateError(state);
+  if (dateError) {
+    qcdRenderResult(qcdErrorHtml('invalid', dateError));
+    return;
+  }
+  const req = qcdBuildRequest(state);
+  qcdRenderResult(qcdLoadingHtml());
+
+  try {
+    const headers = { 'Content-Type': 'application/json' };
+    const token = typeof localStorage !== 'undefined' ? (localStorage.getItem('erp_token') || '') : '';
+    if (token) headers['Authorization'] = 'Bearer ' + token;
+    const resp = await fetch('/api/dynamic-quotation-conversion-report/pdf', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(req),
+    });
+
+    const contentType = (resp.headers.get('content-type') || '');
+    if (contentType.indexOf('application/pdf') >= 0) {
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+      a.href = url;
+      a.download = '报价成交率_' + dateStr + '.pdf';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      qcdRenderResult('<div class="pd-hint">已导出当前页为中文 PDF，请查看下载。</div>');
+      return;
+    }
+
+    let envelope = null;
+    try { envelope = await resp.json(); } catch (e) { /* 忽略解析失败 */ }
+    const code = envelope && envelope.code;
+    const message = (envelope && envelope.message) || '导出失败';
+    if (code === 2000 || code === 2003) {
+      if (typeof logout === 'function') logout();
+      qcdRenderResult(qcdErrorHtml('unauthorized', message));
+      return;
+    }
+    qcdRenderResult(qcdErrorHtml(qcdKindOfCode(code), message));
+  } catch (err) {
+    qcdRenderResult(qcdErrorHtml('network', (err && err.message) || '无法连接到服务器'));
+  }
+}
+
 /* 翻页（有界：最小第 1 页） */
 function qcdPage(delta) {
   const page = (QCD_DYN.view ? QCD_DYN.view.page : QCD_DYN.page) + delta;
@@ -1268,6 +1330,7 @@ function openQuotationConversionDesigner() {
         <button class="btn btn-neutral btn-sm" onclick="qcdToggleAll(true)">全选</button>
         <button class="btn btn-neutral btn-sm" onclick="qcdToggleAll(false)">清空</button>
         <button class="btn btn-neutral" onclick="qcdExport()" title="导出当前页为 Excel（选定列，复用当前日期与分页）">📥 导出 Excel（当前页）</button>
+        <button class="btn btn-neutral" onclick="qcdExportPdf()" title="导出当前页为中文 PDF（选定列，复用当前日期与分页）">📥 导出 PDF（当前页）</button>
         <button class="btn btn-primary" onclick="qcdPreview(1)">预览</button>
       </div>
     </div>

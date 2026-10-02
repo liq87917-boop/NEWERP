@@ -141,4 +141,29 @@ public class DynamicQuotationConversionReportUiTests
         Assert.DoesNotContain("SqlCommand", chooser);
         Assert.DoesNotContain("localStorage.setItem", chooser);
     }
+
+    [Fact]
+    public void 导出PDF_端点与下载附件_授权无效空结果网络失败可见()
+    {
+        var js = Script;
+
+        Assert.Contains("/api/dynamic-quotation-conversion-report/pdf", js);
+        Assert.Contains("function qcdExportPdf()", js);
+        Assert.Contains("onclick=\"qcdExportPdf()\"", js);
+
+        var fn = Segment(js, "async function qcdExportPdf()", "function qcdPage(");
+        // 复用预览请求组装（保留当前字段顺序与日期上下文）
+        Assert.Contains("const state = qcdBuildState(QCD_DYN.view.page);", fn);
+        Assert.Contains("const req = qcdBuildRequest(state);", fn);
+        // 成功（application/pdf 附件）触发下载
+        Assert.Contains("contentType.indexOf('application/pdf') >= 0", fn);
+        Assert.Contains("URL.createObjectURL(blob)", fn);
+        Assert.Contains("a.download = '报价成交率_'", fn);
+        // 授权 / 无效 / 空结果 / 网络失败在结果区可见，不下载任何内容
+        Assert.Contains("qcdErrorHtml('unauthorized', message)", fn);
+        Assert.Contains("qcdErrorHtml('invalid', '请先预览后再导出 PDF')", fn);
+        Assert.Contains("qcdErrorHtml('empty', '没有符合所选日期范围的报价成交率数据，无法导出 PDF（请先预览）')", fn);
+        Assert.Contains("qcdErrorHtml(qcdKindOfCode(code), message)", fn);
+        Assert.Contains("qcdErrorHtml('network', (err && err.message) || '无法连接到服务器')", fn);
+    }
 }

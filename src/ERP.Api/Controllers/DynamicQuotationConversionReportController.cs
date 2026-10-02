@@ -16,6 +16,7 @@ namespace ERP.Api.Controllers;
 /// <item><b>GET /api/dynamic-quotation-conversion-report</b>：返回报价成交率字段白名单目录（需登录 + 报价单菜单授权 + 业务员数据范围）；</item>
 /// <item><b>POST /api/dynamic-quotation-conversion-report</b>：按选定字段与有界日期窗口（start / end）预览当前账号数据范围内的报价成交率分桶（业务员 × 原币），稳定分页。</item>
 /// <item><b>POST /api/dynamic-quotation-conversion-report/export</b>：导出当前选定页为 Excel（xlsx，只读，复用有界授权预览与选定列顺序，含日期 / 原币口径上下文工作表，绝不追加跨币种金额合计）。</item>
+/// <item><b>POST /api/dynamic-quotation-conversion-report/pdf</b>：导出当前选定页为 PDF（只读，复用同一有界授权预览与选定列顺序、日期与原币口径，分页渲染行与宽列，绝不追加跨币种金额合计）。</item>
 /// </list>
 /// <para>复用既有「报价单」（quotation）菜单授权与 <see cref="SalespersonDataScopeService"/>（ERP-097）业务员数据范围；
 /// 每次目录 / 预览 / 导出请求都重新校验身份、菜单授权与业务员数据范围（fail closed），
@@ -74,6 +75,23 @@ public class DynamicQuotationConversionReportController : ControllerBase
         var bytes = BuildWorkbook(page);
         return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             $"QuotationConversion_{DateTime.Now:yyyyMMddHHmmss}.xlsx");
+    }
+
+    /// <summary>
+    /// 导出当前页为 PDF（ERP-207，只读）：复用「有界、已授权预览」与选定列顺序、日期与原币口径
+    /// （每次请求重新校验身份 / 报价单菜单授权 / 业务员数据范围 / 字段 / 日期 / 分页，fail closed），
+    /// 仅导出当前页选定列；业务员 × 原币分桶行照实呈现，绝不追加跨币种金额合计。缺失中文字体（SimHei）
+    /// 或渲染失败时显式失败（不返回任何文件）。
+    /// <para>全程只读，不写库、不执行任意 SQL；请求由既有 <c>OperationLogMiddleware</c> 记录审计（动作「导出」）。</para>
+    /// </summary>
+    [HttpPost("pdf")]
+    public async Task<IActionResult> ExportPdf([FromBody] DynamicQuotationConversionReportRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var page = await BuildPageAsync(request);
+        var bytes = DynamicQuotationConversionPdfExporter.Export(page);
+        return File(bytes, "application/pdf", $"QuotationConversion_{DateTime.Now:yyyyMMddHHmmss}.pdf");
     }
 
     /// <summary>复用同一有界、已授权预览管线：先校验字段 / 日期 / 分页，再每次重新校验身份 / 菜单授权 / 数据范围，最后只读查询当前页</summary>
