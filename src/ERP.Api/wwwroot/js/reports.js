@@ -1360,6 +1360,62 @@ async function qcdExportSummary() {
     qcdRenderResult(qcdErrorHtml('network', (err && err.message) || '无法连接到服务器'));
   }
 }
+/* 下载分币种汇总 PDF（ERP-211，只读）：复用当前字段 / 日期 / 应用筛选组装请求体 POST
+   /api/dynamic-quotation-conversion-report/export-summary-pdf；成功（pdf 附件）触发下载；
+   授权 / 无效 / 网络失败在结果区可见，不下载任何内容。区别于「导出 PDF（当前页）」与「分币种汇总 Excel」：
+   本按钮导出服务端在全部匹配分桶上派生的分币种汇总（无需先预览、绝不含明细行、绝不跨币种合计）。 */
+async function qcdExportSummaryPdf() {
+  const state = qcdBuildState(QCD_DYN.page);
+  const dateError = qcdDateError(state);
+  if (dateError) {
+    qcdRenderResult(qcdErrorHtml('invalid', dateError));
+    return;
+  }
+  const req = qcdBuildRequest(state);
+  qcdRenderResult(qcdLoadingHtml());
+
+  try {
+    const headers = { 'Content-Type': 'application/json' };
+    const token = typeof localStorage !== 'undefined' ? (localStorage.getItem('erp_token') || '') : '';
+    if (token) headers['Authorization'] = 'Bearer ' + token;
+    const resp = await fetch('/api/dynamic-quotation-conversion-report/export-summary-pdf', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(req),
+    });
+
+    const contentType = (resp.headers.get('content-type') || '');
+    if (contentType.indexOf('application/pdf') >= 0) {
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+      a.href = url;
+      a.download = '报价成交率分币种汇总_' + dateStr + '.pdf';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      qcdRenderResult('<div class="pd-hint">已下载分币种汇总 PDF（按原币合并全部匹配分桶），请查看下载。</div>');
+      return;
+    }
+
+    let envelope = null;
+    try { envelope = await resp.json(); } catch (e) { /* 忽略解析失败 */ }
+    const code = envelope && envelope.code;
+    const message = (envelope && envelope.message) || '导出失败';
+    if (code === 2000 || code === 2003) {
+      if (typeof logout === 'function') logout();
+      qcdRenderResult(qcdErrorHtml('unauthorized', message));
+      return;
+    }
+    qcdRenderResult(qcdErrorHtml(qcdKindOfCode(code), message));
+  } catch (err) {
+    qcdRenderResult(qcdErrorHtml('network', (err && err.message) || '无法连接到服务器'));
+  }
+}
+
+
 
 /* 翻页（有界：最小第 1 页） */
 function qcdPage(delta) {
@@ -1424,6 +1480,7 @@ function openQuotationConversionDesigner() {
         <button class="btn btn-neutral" onclick="qcdExport()" title="导出当前页为 Excel（选定列，复用当前日期与分页）">📥 导出 Excel（当前页）</button>
         <button class="btn btn-neutral" onclick="qcdExportPdf()" title="导出当前页为中文 PDF（选定列，复用当前日期与分页）">📥 导出 PDF（当前页）</button>
         <button class="btn btn-neutral" onclick="qcdExportSummary()" title="下载分币种汇总 Excel（按原币合并全部匹配分桶，不含明细行；区别于当前页导出）">📥 分币种汇总 Excel</button>
+        <button class="btn btn-neutral" onclick="qcdExportSummaryPdf()" title="下载分币种汇总中文 PDF（按原币合并全部匹配分桶，复用当前字段与筛选；区别于当前页 PDF）">📥 分币种汇总 PDF</button>
         <button class="btn btn-primary" onclick="qcdPreview(1)">预览</button>
       </div>
     </div>

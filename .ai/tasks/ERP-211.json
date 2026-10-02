@@ -1,7 +1,7 @@
 {
   "id": "ERP-211",
   "title": "Download scoped quotation currency summaries as PDF",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "low",
   "priority": "P1",
   "description": "A user downloads the all-matching original-currency summary from the quotation designer as PDF with the same selected metrics and applied filter context as the summary Excel. Add a dedicated summary PDF endpoint to the existing controller and a narrow Infrastructure exporter using existing PDFsharp and SimHeiPdfFontResolver, with no dependency/font/config changes. Independently reauthorize and validate through the existing preview path and render only server-derived ERP-209 summaries; paginate wide metric columns and rows, preserve selected metric order and explicit empty evidence, and label all-matching bounded-source coverage. Never combine currencies or show unselected monetary metrics. Missing font or rendering errors must fail clearly with no corrupt file. Add a distinct designer summary PDF action retaining current fields/filters and showing failed downloads; keep current-page PDF behavior intact. Development only: reuse current authenticated ERP identity, the existing quotation menu and freshly resolved SalespersonDataScopeService; audit every endpoint through existing OperationLogMiddleware. No permission expansion, arbitrary/model-generated SQL, direct table or business writes, new entities or persistence schema, migrations, schema/view/stored-procedure edits, production SQL or real database execution, secrets/.env changes, deployment, irreversible operations or real browser acceptance. Preserve unrelated modules and work. Run focused in-memory/service/API/export/UI source-contract tests and configured safe Release build/test; mark unavailable external environments blocked rather than inventing success.",
@@ -44,7 +44,7 @@
     "ERP-210"
   ],
   "max_attempts": 3,
-  "attempts": 0,
+  "attempts": 1,
   "validation_profile": "safe",
   "completion_mode": "build",
   "auto_start": true,
