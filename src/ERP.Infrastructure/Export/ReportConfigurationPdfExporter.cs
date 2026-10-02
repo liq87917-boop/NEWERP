@@ -81,15 +81,24 @@ public static class ReportConfigurationPdfExporter
 
     /// <summary>导出当前预览页为 PDF 字节流（只读；字体缺失显式失败）</summary>
     public static byte[] Export(ReportConfigurationPreviewDto preview)
-        => Export(preview, SimHeiPdfFontResolver.FindFontPath());
+        => Export(preview, SimHeiPdfFontResolver.FindFontPath(), CancellationToken.None);
+
+    /// <summary>导出当前预览页为 PDF 字节流（可传播联动取消令牌到渲染循环）。</summary>
+    public static byte[] Export(ReportConfigurationPreviewDto preview, CancellationToken cancellationToken)
+        => Export(preview, SimHeiPdfFontResolver.FindFontPath(), cancellationToken);
 
     /// <summary>
     /// 导出当前预览页为 PDF 字节流；<paramref name="fontPath"/> 为空或文件不存在时显式失败。
     /// <para>公开该重载以便单元测试注入「字体缺失」路径，以及显式控制字体文件位置。</para>
     /// </summary>
     public static byte[] Export(ReportConfigurationPreviewDto preview, string? fontPath)
+        => Export(preview, fontPath, CancellationToken.None);
+
+    /// <summary>导出当前预览页为 PDF 字节流（字体缺失显式失败；渲染循环可传播取消）。</summary>
+    public static byte[] Export(ReportConfigurationPreviewDto preview, string? fontPath, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(preview);
+        cancellationToken.ThrowIfCancellationRequested();
 
         if (string.IsNullOrWhiteSpace(fontPath) || !File.Exists(fontPath))
         {
@@ -105,15 +114,21 @@ public static class ReportConfigurationPdfExporter
             using var document = new PdfDocument();
             document.Info.Title = string.IsNullOrWhiteSpace(preview.Name) ? "报表配置" : preview.Name;
 
-            DrawReport(document, preview);
-            DrawSubtotalSection(document, preview);
-            DrawMetricsSection(document, preview);
+            DrawReport(document, preview, cancellationToken);
+            DrawSubtotalSection(document, preview, cancellationToken);
+            DrawMetricsSection(document, preview, cancellationToken);
+
+            cancellationToken.ThrowIfCancellationRequested();
 
             using var stream = new MemoryStream();
             document.Save(stream, false);
             return stream.ToArray();
         }
         catch (BusinessException)
+        {
+            throw;
+        }
+        catch (OperationCanceledException)
         {
             throw;
         }
@@ -489,7 +504,7 @@ public static class ReportConfigurationPdfExporter
         return $"{metric.Label}（{ReportConfigurationMetricRules.FunctionLabel(metric.Function)}）{unit}";
     }
 
-    private static void DrawMetricsSection(PdfDocument document, ReportConfigurationPreviewDto preview)
+    private static void DrawMetricsSection(PdfDocument document, ReportConfigurationPreviewDto preview, CancellationToken cancellationToken)
     {
         var metrics = preview.Metrics;
         if (metrics is null || metrics.Count == 0)
@@ -530,6 +545,8 @@ public static class ReportConfigurationPdfExporter
 
             foreach (var row in rows)
             {
+                cancellationToken.ThrowIfCancellationRequested();
+
                 var height = RowHeightPoints(columns, widths, row, 0, lineHeight);
                 DrawDataRow(gfx, cellFont, borderPen, columns, widths, row, 0, y, height, lineHeight);
                 y += height;
@@ -543,7 +560,7 @@ public static class ReportConfigurationPdfExporter
 
     // ==================== 绘制 ====================
 
-    private static void DrawReport(PdfDocument document, ReportConfigurationPreviewDto preview)
+    private static void DrawReport(PdfDocument document, ReportConfigurationPreviewDto preview, CancellationToken cancellationToken)
     {
         var columns = preview.Columns ?? new List<ReportConfigurationColumnDto>();
         var rows = preview.Rows ?? new List<Dictionary<string, object?>>();
@@ -600,6 +617,8 @@ public static class ReportConfigurationPdfExporter
                         var rowY = y;
                         for (var i = 0; i < count; i++)
                         {
+                            cancellationToken.ThrowIfCancellationRequested();
+
                             var rowIndex = start + i;
                             var rowHeight = RowHeightPoints(band, widths, rows[rowIndex], rowIndex + 1, lineHeight);
                             DrawDataRow(gfx, cellFont, borderPen, band, widths, rows[rowIndex], rowIndex + 1, rowY, rowHeight, lineHeight);
@@ -797,7 +816,7 @@ public static class ReportConfigurationPdfExporter
 
     // ==================== 分组小计分区（当前页、按币种分区） ====================
 
-    private static void DrawSubtotalSection(PdfDocument document, ReportConfigurationPreviewDto preview)
+    private static void DrawSubtotalSection(PdfDocument document, ReportConfigurationPreviewDto preview, CancellationToken cancellationToken)
     {
         var groups = preview.Groups;
         if (groups is null || groups.Count == 0)
@@ -838,6 +857,8 @@ public static class ReportConfigurationPdfExporter
 
             foreach (var row in rows)
             {
+                cancellationToken.ThrowIfCancellationRequested();
+
                 var height = RowHeightPoints(columns, widths, row, 0, lineHeight);
                 DrawDataRow(gfx, cellFont, borderPen, columns, widths, row, 0, y, height, lineHeight);
                 y += height;

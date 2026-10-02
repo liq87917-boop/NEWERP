@@ -89,6 +89,16 @@ public class ReportConfigurationApiTests
             new ReportConfigurationService(db, new ReportConfigurationCatalog(BuildProviders(db))),
             new ReportConfigurationExecutionService(db, BuildProviders(db)),
             new ReportConfigurationSharingService(db, new ReportConfigurationCatalog(BuildProviders(db))));
+    private static ReportConfigurationsController BuildControllerWithBudget(
+        ErpDbContext db, IReportConfigurationExecutionBudget budget)
+        => new(
+            new ReportConfigurationCatalog(BuildProviders(db)),
+            new ReportConfigurationService(db, new ReportConfigurationCatalog(BuildProviders(db))),
+            new ReportConfigurationExecutionService(db, BuildProviders(db), budget: budget),
+            new ReportConfigurationSharingService(db, new ReportConfigurationCatalog(BuildProviders(db))),
+            budget);
+
+
 
     private static ReportConfigurationSaveDto SaveDto(string name, ReportConfigurationDefinition? definition = null)
         => new() { Name = name, Definition = definition ?? SalesOrderDefinition() };
@@ -471,6 +481,27 @@ public class ReportConfigurationApiTests
         var file = Assert.IsType<FileContentResult>(result);
         Assert.Equal("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", file.ContentType);
         Assert.NotEmpty(file.FileContents);
+    }
+
+    [Fact]
+    public async Task Preview_每用户并发上限_第三请求返回繁忙关联ID()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedAuthorizedUser(db, "busy-user", "sales-order");
+        var service = new ReportConfigurationService(db, new ReportConfigurationCatalog(BuildProviders(db)));
+        var created = await service.CreateAsync(user, SaveDto("报表", SalesOrderDefinition()));
+
+        var budget = new ReportConfigurationExecutionBudget();
+        var ctl = BuildControllerWithBudget(db, budget);
+        TestAuth.SetUser(ctl, user);
+
+        using var first = budget.Acquire(user);
+        using var second = budget.Acquire(user);
+
+        var ex = await Assert.ThrowsAsync<BusinessException>(() =>
+            ctl.Preview(new ReportConfigurationPreviewRequest { ConfigurationId = created.Id }));
+        Assert.Equal(ReportConfigurationExecutionLimits.ErrorCodeBusy, ex.Code);
+        Assert.Contains("关联ID", ex.Message);
     }
 }
 

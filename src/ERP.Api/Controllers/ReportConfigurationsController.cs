@@ -1,9 +1,12 @@
 using ERP.Application.Common;
 using ERP.Application.DTOs;
 using ERP.Application.Interfaces;
+using ERP.Application.Services;
 using ERP.Infrastructure.Export;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
+using System.Diagnostics;
 using System.Security.Claims;
 
 namespace ERP.Api.Controllers;
@@ -24,17 +27,23 @@ public class ReportConfigurationsController : ControllerBase
     private readonly IReportConfigurationService _service;
     private readonly IReportConfigurationExecutionService _execution;
     private readonly IReportConfigurationSharingService _sharing;
+    private readonly IReportConfigurationExecutionBudget _budget;
+    private readonly ILogger<ReportConfigurationsController>? _logger;
 
     public ReportConfigurationsController(
         IReportConfigurationCatalog catalog,
         IReportConfigurationService service,
         IReportConfigurationExecutionService execution,
-        IReportConfigurationSharingService sharing)
+        IReportConfigurationSharingService sharing,
+        IReportConfigurationExecutionBudget? budget = null,
+        ILogger<ReportConfigurationsController>? logger = null)
     {
         _catalog = catalog;
         _service = service;
         _execution = execution;
         _sharing = sharing;
+        _budget = budget ?? new ReportConfigurationExecutionBudget();
+        _logger = logger;
     }
 
     /// <summary>当前登录用户 Id（缺失或非正数时抛未认证，绝不猜测身份）</summary>
@@ -207,10 +216,7 @@ public class ReportConfigurationsController : ControllerBase
     public async Task<IActionResult> Export([FromBody] ReportConfigurationPreviewRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
-        var preview = await _execution.PreviewAsync(CurrentUserId(), request);
-        var bytes = new ReportConfigurationExcelExporter().Build(preview);
-        return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            $"ReportConfiguration_{DateTime.Now:yyyyMMddHHmmss}.xlsx");
+        return await ExportBoundedAsync(CurrentUserId(), request, exportKind: "excel");
     }
 
     /// <summary>
@@ -226,9 +232,134 @@ public class ReportConfigurationsController : ControllerBase
     public async Task<IActionResult> ExportPdf([FromBody] ReportConfigurationPreviewRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
-        var preview = await _execution.PreviewAsync(CurrentUserId(), request);
-        var bytes = ReportConfigurationPdfExporter.Export(preview);
-        return File(bytes, "application/pdf",
-            $"ReportConfiguration_{DateTime.Now:yyyyMMddHHmmss}.pdf");
+        return await ExportBoundedAsync(CurrentUserId(), request, exportKind: "pdf");
+    }
+
+    private async Task<IActionResult> ExportBoundedAsync(long userId, ReportConfigurationPreviewRequest request, string exportKind)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        try
+        {
+            return await _budget.ExecuteAsync<IActionResult>(userId, HttpContext.RequestAborted, async lease =>
+            {
+                var preview = await _execution.PreviewAsync(userId, request, lease);
+
+                var bytes = exportKind == "pdf"
+                    ? RenderPdf(preview, lease)
+                    : RenderExcel(preview, lease);
+
+                if (bytes.Length > ReportConfigurationExecutionLimits.MaxGeneratedFileBytes)
+                    throw new BusinessException(
+                        "报表文件过大，已拒绝下载（关联ID：" + lease.CorrelationId + "）",
+                        ReportConfigurationExecutionLimits.ErrorCodeResultTooLarge);
+
+                LogExport(userId, request, preview, exportKind, ReportConfigurationExecutionOutcomes.Success, stopwatch.ElapsedMilliseconds);
+
+                return exportKind == "pdf"
+                    ? File(bytes, "application/pdf", $"ReportConfiguration_{DateTime.Now:yyyyMMddHHmmss}.pdf")
+                    : File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        $"ReportConfiguration_{DateTime.Now:yyyyMMddHHmmss}.xlsx");
+            });
+        }
+        catch (BusinessException ex)
+        {
+            LogExport(userId, request, null, exportKind, ReportConfigurationExecutionOutcomes.For(ex.Code), stopwatch.ElapsedMilliseconds);
+            throw;
+        }
+        catch (OperationCanceledException)
+        {
+            LogExport(userId, request, null, exportKind, ReportConfigurationExecutionOutcomes.Cancelled, stopwatch.ElapsedMilliseconds);
+            throw;
+        }
+        catch (Exception)
+        {
+            LogExport(userId, request, null, exportKind, ReportConfigurationExecutionOutcomes.Error, stopwatch.ElapsedMilliseconds);
+            throw;
+        }
+    }
+
+    private static byte[] RenderExcel(ReportConfigurationPreviewDto preview, IReportConfigurationExecutionLease lease)
+    {
+        try
+        {
+            return new ReportConfigurationExcelExporter().Build(preview, lease.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (BusinessException)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            throw new BusinessException(
+                "Excel 导出渲染失败（关联ID：" + lease.CorrelationId + "）",
+                ReportConfigurationExecutionLimits.ErrorCodeRenderingFailed);
+        }
+    }
+
+    private static byte[] RenderPdf(ReportConfigurationPreviewDto preview, IReportConfigurationExecutionLease lease)
+    {
+        try
+        {
+            return ReportConfigurationPdfExporter.Export(preview, lease.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (BusinessException)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            throw new BusinessException(
+                "PDF 导出渲染失败（关联ID：" + lease.CorrelationId + "）",
+                ReportConfigurationExecutionLimits.ErrorCodeRenderingFailed);
+        }
+    }
+
+    private void LogExport(long userId, ReportConfigurationPreviewRequest request, ReportConfigurationPreviewDto? preview, string operation, string outcome, long durationMs)
+    {
+        if (_logger is null)
+            return;
+
+        try
+        {
+            _logger.LogInformation(
+                "ReportConfigurationExecution {@Execution}",
+                new
+                {
+                    UserId = userId,
+                    ConfigurationId = request.ConfigurationId,
+                    PinnedRevision = preview?.PinnedRevisionVersion,
+                    DatasetKey = preview?.DatasetKey,
+                    Operation = operation,
+                    Outcome = outcome,
+                    DurationMs = durationMs,
+                    RowCount = preview?.Rows?.Count ?? 0,
+                    ColumnCount = preview?.Columns?.Count ?? 0,
+                    RelationKeys = RelationKeysOf(preview),
+                });
+        }
+        catch
+        {
+            // 日志失败不影响主流程
+        }
+    }
+
+    private static string[] RelationKeysOf(ReportConfigurationPreviewDto? preview)
+    {
+        if (preview?.RelationEvidence is null)
+            return Array.Empty<string>();
+
+        return preview.RelationEvidence
+            .Select(r => r.RelationKey)
+            .Where(k => !string.IsNullOrWhiteSpace(k))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
     }
 }

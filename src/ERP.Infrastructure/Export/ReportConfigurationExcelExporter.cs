@@ -36,21 +36,28 @@ public sealed class ReportConfigurationExcelExporter
 
     /// <summary>生成当前预览页工作簿（只读）。</summary>
     public byte[] Build(ReportConfigurationPreviewDto preview)
+        => Build(preview, CancellationToken.None);
+
+    /// <summary>生成当前预览页工作簿（只读；可传播联动取消令牌到渲染循环，超时 / 断连时提前停止）。</summary>
+    public byte[] Build(ReportConfigurationPreviewDto preview, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(preview);
+        cancellationToken.ThrowIfCancellationRequested();
 
         using var workbook = new XSSFWorkbook();
         var styles = CreateStyles(workbook);
 
-        BuildDataSheet(workbook, preview, styles);
+        BuildDataSheet(workbook, preview, styles, cancellationToken);
 
         if (preview.Groups is { Count: > 0 })
-            BuildGroupsSheet(workbook, preview.Groups, styles);
+            BuildGroupsSheet(workbook, preview.Groups, styles, cancellationToken);
 
         if (preview.Metrics is { Count: > 0 })
-            BuildMetricsSheet(workbook, preview.Metrics, styles);
+            BuildMetricsSheet(workbook, preview.Metrics, styles, cancellationToken);
 
-        BuildContextSheet(workbook, preview, styles);
+        BuildContextSheet(workbook, preview, styles, cancellationToken);
+
+        cancellationToken.ThrowIfCancellationRequested();
 
         using var output = new MemoryStream();
         workbook.Write(output);
@@ -100,7 +107,7 @@ public sealed class ReportConfigurationExcelExporter
 
     // ==================== 数据工作表 ====================
 
-    private static void BuildDataSheet(XSSFWorkbook workbook, ReportConfigurationPreviewDto preview, Styles styles)
+    private static void BuildDataSheet(XSSFWorkbook workbook, ReportConfigurationPreviewDto preview, Styles styles, CancellationToken cancellationToken)
     {
         var sheet = workbook.CreateSheet(DataSheetName);
         var columns = preview.Columns ?? new List<ReportConfigurationColumnDto>();
@@ -115,6 +122,8 @@ public sealed class ReportConfigurationExcelExporter
 
         for (var r = 0; r < preview.Rows.Count; r++)
         {
+            cancellationToken.ThrowIfCancellationRequested();
+
             var row = sheet.CreateRow(r + 1);
             var source = preview.Rows[r];
             for (var c = 0; c < columns.Count; c++)
@@ -243,7 +252,7 @@ public sealed class ReportConfigurationExcelExporter
     // ==================== 分组页面小计工作表（当前预览页、按币种分区） ====================
 
     private static void BuildGroupsSheet(
-        XSSFWorkbook workbook, IReadOnlyList<ReportConfigurationGroupSubtotalDto> groups, Styles styles)
+        XSSFWorkbook workbook, IReadOnlyList<ReportConfigurationGroupSubtotalDto> groups, Styles styles, CancellationToken cancellationToken)
     {
         var sheet = workbook.CreateSheet(GroupsSheetName);
         var headerRow = sheet.CreateRow(0);
@@ -258,6 +267,8 @@ public sealed class ReportConfigurationExcelExporter
         var rowIndex = 1;
         foreach (var group in groups)
         {
+            cancellationToken.ThrowIfCancellationRequested();
+
             foreach (var partition in group.Partitions)
             {
                 var row = sheet.CreateRow(rowIndex++);
@@ -280,7 +291,7 @@ public sealed class ReportConfigurationExcelExporter
     // ==================== 指标汇总工作表（当前预览页、分组 + 币种分区） ====================
 
     private static void BuildMetricsSheet(
-        XSSFWorkbook workbook, IReadOnlyList<ReportConfigurationMetricResultDto> metrics, Styles styles)
+        XSSFWorkbook workbook, IReadOnlyList<ReportConfigurationMetricResultDto> metrics, Styles styles, CancellationToken cancellationToken)
     {
         var sheet = workbook.CreateSheet(MetricsSheetName);
         var headerRow = sheet.CreateRow(0);
@@ -295,6 +306,8 @@ public sealed class ReportConfigurationExcelExporter
         var rowIndex = 1;
         foreach (var metric in metrics)
         {
+            cancellationToken.ThrowIfCancellationRequested();
+
             var label = MetricTitle(metric);
             foreach (var cell in metric.Cells)
             {
@@ -344,8 +357,10 @@ public sealed class ReportConfigurationExcelExporter
 
     // ==================== 报表口径上下文工作表 ====================
 
-    private static void BuildContextSheet(XSSFWorkbook workbook, ReportConfigurationPreviewDto preview, Styles styles)
+    private static void BuildContextSheet(XSSFWorkbook workbook, ReportConfigurationPreviewDto preview, Styles styles, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+
         var sheet = workbook.CreateSheet(ContextSheetName);
         var evidence = preview.Evidence;
 

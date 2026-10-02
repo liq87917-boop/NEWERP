@@ -75,6 +75,9 @@ public static class DependencyInjection
         // 通用报表配置平台（ERP-261 Stage 1）：预览执行服务（草稿 / 固定发布修订 → 数据集适配器分发）
         services.AddScoped<IReportConfigurationExecutionService, ReportConfigurationExecutionService>();
 
+        // 通用报表配置平台（ERP-269 Stage 1）：服务端执行预算（每用户并发租约 + 截止时间 + 大小上限；单例共享，平台常量）
+        services.AddSingleton<IReportConfigurationExecutionBudget>(_ => new ReportConfigurationExecutionBudget());
+
         // 通用报表配置平台（ERP-268）：受控关系解析器（客户维度批量只读补全，复用客户资料菜单 + 业务员数据范围）
         services.AddScoped<IReportConfigurationRelationResolver, ReportConfigurationRelationResolver>();
 

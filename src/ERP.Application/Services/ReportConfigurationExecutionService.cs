@@ -4,7 +4,9 @@ using ERP.Application.Interfaces;
 using ERP.Domain.Entities;
 using ERP.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using System.Collections;
+using System.Diagnostics;
 using System.Globalization;
 using System.Text.Json;
 
@@ -28,17 +30,23 @@ public sealed class ReportConfigurationExecutionService : IReportConfigurationEx
     private readonly IErpDbContext _db;
     private readonly IReadOnlyList<IReportConfigurationDatasetProvider> _providers;
     private readonly IReportConfigurationRelationResolver? _relationResolver;
+    private readonly IReportConfigurationExecutionBudget _budget;
+    private readonly ILogger<ReportConfigurationExecutionService>? _logger;
 
     public ReportConfigurationExecutionService(
         IErpDbContext db,
         IEnumerable<IReportConfigurationDatasetProvider> providers,
-        IReportConfigurationRelationResolver? relationResolver = null)
+        IReportConfigurationRelationResolver? relationResolver = null,
+        IReportConfigurationExecutionBudget? budget = null,
+        ILogger<ReportConfigurationExecutionService>? logger = null)
     {
         _db = db;
         _providers = (providers ?? Array.Empty<IReportConfigurationDatasetProvider>())
             .OrderBy(p => p.DatasetKey, StringComparer.Ordinal)
             .ToList();
         _relationResolver = relationResolver;
+        _budget = budget ?? new ReportConfigurationExecutionBudget();
+        _logger = logger;
     }
 
     /// <inheritdoc />
@@ -46,6 +54,60 @@ public sealed class ReportConfigurationExecutionService : IReportConfigurationEx
         long ownerUserId,
         ReportConfigurationPreviewRequest request,
         CancellationToken cancellationToken = default)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        ReportConfigurationPreviewDto? preview = null;
+        try
+        {
+            preview = await _budget.ExecuteAsync(
+                ownerUserId,
+                cancellationToken,
+                lease => PreviewWithinLeaseCoreAsync(ownerUserId, request, lease));
+
+            LogExecution(ownerUserId, request, preview, ReportConfigurationExecutionOutcomes.Success, stopwatch.ElapsedMilliseconds);
+            return preview;
+        }
+        catch (BusinessException ex)
+        {
+            LogExecution(ownerUserId, request, preview, ReportConfigurationExecutionOutcomes.For(ex.Code), stopwatch.ElapsedMilliseconds);
+            throw;
+        }
+        catch (OperationCanceledException)
+        {
+            LogExecution(ownerUserId, request, preview, ReportConfigurationExecutionOutcomes.Cancelled, stopwatch.ElapsedMilliseconds);
+            throw;
+        }
+        catch (Exception)
+        {
+            LogExecution(ownerUserId, request, preview, ReportConfigurationExecutionOutcomes.Error, stopwatch.ElapsedMilliseconds);
+            throw;
+        }
+    }
+
+    /// <summary>在已获取的执行租约内预览（导出复用同一租约，共享截止时间，绝不二次获取租约）。</summary>
+    public async Task<ReportConfigurationPreviewDto> PreviewAsync(
+        long ownerUserId,
+        ReportConfigurationPreviewRequest request,
+        IReportConfigurationExecutionLease lease)
+    {
+        ArgumentNullException.ThrowIfNull(lease);
+        return await PreviewWithinLeaseCoreAsync(ownerUserId, request, lease);
+    }
+
+    private async Task<ReportConfigurationPreviewDto> PreviewWithinLeaseCoreAsync(
+        long ownerUserId,
+        ReportConfigurationPreviewRequest request,
+        IReportConfigurationExecutionLease lease)
+    {
+        var preview = await PreviewResolvedAsync(ownerUserId, request, lease.Token);
+        CheckPreviewBounds(preview, lease.CorrelationId);
+        return preview;
+    }
+
+    private async Task<ReportConfigurationPreviewDto> PreviewResolvedAsync(
+        long ownerUserId,
+        ReportConfigurationPreviewRequest request,
+        CancellationToken cancellationToken)
     {
         EnsureAuthenticated(ownerUserId);
         ArgumentNullException.ThrowIfNull(request);
@@ -63,6 +125,77 @@ public sealed class ReportConfigurationExecutionService : IReportConfigurationEx
         // 2) 否则按被授权人共享解析（每次重新校验授权与固定修订，绝不暴露草稿 / 其它修订 / 历史）
         return await PreviewSharedAsync(ownerUserId, request, cancellationToken);
     }
+
+    private static void CheckPreviewBounds(ReportConfigurationPreviewDto preview, string correlationId)
+    {
+        if (preview is null)
+            return;
+
+        if (preview.Columns is { Count: > ReportConfigurationExecutionLimits.MaxPreviewColumns })
+            throw new BusinessException(
+                $"报表结果列数超出上限（{preview.Columns.Count} > {ReportConfigurationExecutionLimits.MaxPreviewColumns}），请减少所选字段（关联ID：{correlationId}）",
+                ReportConfigurationExecutionLimits.ErrorCodeResultTooLarge);
+
+        if (preview.Rows is { Count: > ReportConfigurationExecutionLimits.MaxPreviewRows })
+            throw new BusinessException(
+                $"报表结果行数超出上限（{preview.Rows.Count} > {ReportConfigurationExecutionLimits.MaxPreviewRows}），请缩小筛选范围（关联ID：{correlationId}）",
+                ReportConfigurationExecutionLimits.ErrorCodeResultTooLarge);
+
+        if (SerializePreviewBytes(preview) > ReportConfigurationExecutionLimits.MaxSerializedPreviewBytes)
+            throw new BusinessException(
+                "报表结果过大，已拒绝返回，请减少所选字段或缩小筛选范围（关联ID：" + correlationId + "）",
+                ReportConfigurationExecutionLimits.ErrorCodeResultTooLarge);
+    }
+
+    private static long SerializePreviewBytes(ReportConfigurationPreviewDto preview)
+        => JsonSerializer.SerializeToUtf8Bytes(preview, JsonOptions).LongLength;
+
+    private void LogExecution(
+        long userId,
+        ReportConfigurationPreviewRequest request,
+        ReportConfigurationPreviewDto? preview,
+        string outcome,
+        long durationMs)
+    {
+        if (_logger is null)
+            return;
+
+        try
+        {
+            _logger.LogInformation(
+                "ReportConfigurationExecution {@Execution}",
+                new
+                {
+                    UserId = userId,
+                    ConfigurationId = request.ConfigurationId,
+                    PinnedRevision = preview?.PinnedRevisionVersion,
+                    DatasetKey = preview?.DatasetKey,
+                    Operation = "preview",
+                    Outcome = outcome,
+                    DurationMs = durationMs,
+                    RowCount = preview?.Rows?.Count ?? 0,
+                    ColumnCount = preview?.Columns?.Count ?? 0,
+                    RelationKeys = RelationKeysOf(preview),
+                });
+        }
+        catch
+        {
+            // 日志失败不影响主流程
+        }
+    }
+
+    private static string[] RelationKeysOf(ReportConfigurationPreviewDto? preview)
+    {
+        if (preview?.RelationEvidence is null)
+            return Array.Empty<string>();
+
+        return preview.RelationEvidence
+            .Select(r => r.RelationKey)
+            .Where(k => !string.IsNullOrWhiteSpace(k))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+    }
+
 
     private async Task<ReportConfigurationPreviewDto> PreviewOwnedAsync(
         long ownerUserId, ReportConfigurationPreviewRequest request, ReportConfiguration config,

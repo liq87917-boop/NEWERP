@@ -292,6 +292,24 @@ public class ReportConfigurationUiTests
         return j < 0 ? source[i..] : source[i..j];
     }
 
+    [Fact]
+    public void 有界失败_错误分类与显式重试_且防重复点击()
+    {
+        var js = File.ReadAllText(Path.Combine(JsDirectory(), "report-configuration.js"));
+
+        Assert.Contains("if (code === 1005) return 'busy'", js);
+        Assert.Contains("if (code === 1006) return 'timeout'", js);
+        Assert.Contains("if (code === 1007) return 'cancelled'", js);
+        Assert.Contains("if (code === 1008) return 'too-large'", js);
+        Assert.Contains("if (code === 5001) return 'rendering'", js);
+        Assert.Contains("busy: '执行繁忙'", js);
+        Assert.Contains("rendering: '文件生成失败'", js);
+        Assert.Contains("function rccRetry()", js);
+        Assert.Contains("onclick=\"rccRetry()\"", js);
+        Assert.Contains("RCC.lastAction", js);
+        Assert.Contains("RCC.busy = false;", js);   // 预览 / 导出结束都复位，防止重复点击
+    }
+
     /// <summary>前端脚本目录（沿测试程序集输出目录上溯到仓库根，与 CustomerShipmentReportUiTests 同一约定）</summary>
     private static string JsDirectory() => Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
         "..", "..", "..", "..", "..", "src", "ERP.Api", "wwwroot", "js"));

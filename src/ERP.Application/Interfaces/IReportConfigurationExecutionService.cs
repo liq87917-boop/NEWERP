@@ -1,4 +1,5 @@
 using ERP.Application.DTOs;
+using ERP.Application.Services;
 
 namespace ERP.Application.Interfaces;
 
@@ -18,4 +19,12 @@ public interface IReportConfigurationExecutionService
         long ownerUserId,
         ReportConfigurationPreviewRequest request,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 在已获取的执行租约内预览（导出复用同一租约，共享截止时间，绝不二次获取租约）。
+    /// </summary>
+    Task<ReportConfigurationPreviewDto> PreviewAsync(
+        long ownerUserId,
+        ReportConfigurationPreviewRequest request,
+        IReportConfigurationExecutionLease lease);
 }

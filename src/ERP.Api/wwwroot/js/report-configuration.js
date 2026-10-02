@@ -59,6 +59,7 @@ let RCC = {
   grants: [],
   dirty: false,
   requestSeq: 0,
+  lastAction: '',
   envBlocked: false,
   busy: false,
 };
@@ -109,7 +110,12 @@ function rccKindOfCode(code) {
   if (code === 1001) return 'invalid';
   if (code === 1002) return 'notfound';
   if (code === 1004) return 'conflict';
+  if (code === 1005) return 'busy';
+  if (code === 1006) return 'timeout';
+  if (code === 1007) return 'cancelled';
+  if (code === 1008) return 'too-large';
   if (code === 5000) return 'environment';
+  if (code === 5001) return 'rendering';
   if (code === -1) return 'network';
   return 'unknown';
 }
@@ -129,14 +135,30 @@ function rccErrorHtml(kind, message) {
     invalid: '请求无效',
     notfound: '不存在或无权访问',
     conflict: '版本冲突',
+    busy: '执行繁忙',
+    timeout: '执行超时',
+    cancelled: '请求已取消',
+    'too-large': '结果过大',
+    rendering: '文件生成失败',
     network: '网络请求失败',
     unknown: '操作失败',
   };
-  return '<div class="rcc-error"><b>' + (labels[kind] || labels.unknown) + '</b>：' + rccEsc(message || '') + '</div>';
+  const retryable = ['busy', 'timeout', 'network', 'rendering'].indexOf(kind) >= 0;
+  const retry = retryable
+    ? ' <button type="button" class="rcc-retry" onclick="rccRetry()">重试</button>'
+    : '';
+  return '<div class="rcc-error"><b>' + (labels[kind] || labels.unknown) + '</b>：' + rccEsc(message || '') + retry + '</div>';
 }
 
 function rccEmptyHtml() { return '<div class="empty">暂无数据</div>'; }
 function rccLoadingHtml() { return '<div class="rcc-hint">正在预览…</div>'; }
+
+/* 显式重试：按最近一次失败的操作重放（预览 / Excel 导出 / PDF 导出），绝不覆盖未保存编辑 */
+function rccRetry() {
+  if (RCC.lastAction === 'export') { rccExport(); return; }
+  if (RCC.lastAction === 'exportPdf') { rccExportPdf(); return; }
+  rccPreview();
+}
 
 /* 不支持能力面板：只解释「为什么不支持」，绝不渲染可点击的装饰性控件 */
 function rccUnsupportedHtml(dataset) {
@@ -1246,6 +1268,8 @@ async function rccPreview() {
   if (!RCC.current) { rccRenderResult(rccErrorHtml('invalid', '请先选择或保存一个报表配置')); return; }
   if (RCC.dirty) { rccRenderResult(rccErrorHtml('invalid', '存在未保存编辑，请先保存后再预览')); return; }
   const seq = ++RCC.requestSeq;   // 本次预览的令牌：迟到响应一律丢弃
+  RCC.lastAction = 'preview';
+  RCC.busy = true;
   rccRenderResult(rccLoadingHtml());
   try {
     const env = await rccFetch(RCC_API + '/preview', 'POST', rccBuildPreviewRequest(RCC));
@@ -1261,6 +1285,8 @@ async function rccPreview() {
   } catch (err) {
     if (seq !== RCC.requestSeq) return;
     rccRenderResult(rccErrorHtml('network', (err && err.message) || '无法连接到服务器'));
+  } finally {
+    RCC.busy = false;
   }
 }
 
@@ -1273,8 +1299,11 @@ function rccPreviewRevision(version) {
    成功（xlsx 附件）触发下载；授权 / 无效 / 环境未就绪 / 网络失败在结果区可见，不下载任何内容，
    且绝不覆盖未保存编辑（保留 dirty 状态与设计器控件）。 */
 async function rccExport() {
+  if (RCC.busy) return;
   if (!RCC.current) { rccRenderResult(rccErrorHtml('invalid', '请先选择或保存一个报表配置')); return; }
   if (RCC.dirty) { rccRenderResult(rccErrorHtml('invalid', '存在未保存编辑，请先保存后再导出')); return; }
+  RCC.lastAction = 'export';
+  RCC.busy = true;
   const req = rccBuildPreviewRequest(RCC);
   try {
     const resp = await fetch(RCC_API + '/export', {
@@ -1310,6 +1339,8 @@ async function rccExport() {
     rccRenderResult(rccErrorHtml(rccKindOfCode(code), message));   // 失败只显示错误，绝不覆盖未保存编辑
   } catch (err) {
     rccRenderResult(rccErrorHtml('network', (err && err.message) || '无法连接到服务器'));
+  } finally {
+    RCC.busy = false;
   }
 }
 
@@ -1317,9 +1348,12 @@ async function rccExport() {
    成功（application/pdf 附件）触发下载；授权 / 无效 / 环境未就绪 / 字体缺失 / 渲染失败在结果区可见，
    不下载任何内容，且绝不覆盖未保存编辑（保留 dirty 状态与设计器控件）；迟到响应一律丢弃。 */
 async function rccExportPdf() {
+  if (RCC.busy) return;
   if (!RCC.current) { rccRenderResult(rccErrorHtml('invalid', '请先选择或保存一个报表配置')); return; }
   if (RCC.dirty) { rccRenderResult(rccErrorHtml('invalid', '存在未保存编辑，请先保存后再导出')); return; }
   const seq = ++RCC.requestSeq;   // 本次下载的令牌：迟到响应一律丢弃
+  RCC.lastAction = 'exportPdf';
+  RCC.busy = true;
   const req = rccBuildPreviewRequest(RCC);
   try {
     const resp = await fetch(RCC_API + '/export/pdf', {
@@ -1358,6 +1392,8 @@ async function rccExportPdf() {
   } catch (err) {
     if (seq !== RCC.requestSeq) return;
     rccRenderResult(rccErrorHtml('network', (err && err.message) || '无法连接到服务器'));
+  } finally {
+    RCC.busy = false;
   }
 }
 
