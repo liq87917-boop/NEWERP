@@ -266,6 +266,32 @@ public class ReportConfigurationPdfTests
         Assert.DoesNotContain(rows, r => string.Equals(r["currency"] as string, "全匹配", StringComparison.Ordinal));
     }
 
+    [Fact]
+    public void BuildMetricRows_拍平选中指标_保留数值与来源条数()
+    {
+        var metrics = new List<ReportConfigurationMetricResultDto>
+        {
+            new()
+            {
+                Key = "totalAmount",
+                Function = ReportConfigurationConstants.AggregateSum,
+                Label = "金额",
+                Unit = "原币金额",
+                CurrencyBehavior = ReportConfigurationMetricRules.CurrencyBehaviorPartition,
+                Cells = new List<ReportConfigurationMetricCellDto>
+                {
+                    new() { GroupLabel = "全部", Currency = "USD", Value = 150m, KnownCount = 2, MissingCount = 0, SourceCount = 2 },
+                },
+            },
+        };
+
+        var rows = ReportConfigurationPdfExporter.BuildMetricRows(metrics);
+        var row = Assert.Single(rows);
+        Assert.Equal("金额（合计）（原币金额）", row["metric"]);
+        Assert.Equal(150m, row["value"]);
+        Assert.Equal(2, row["source"]);
+    }
+
     // ==================== 3. 字体缺失 / 渲染失败 ====================
 
     [Fact]

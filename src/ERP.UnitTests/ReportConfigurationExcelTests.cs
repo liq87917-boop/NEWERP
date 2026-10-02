@@ -440,4 +440,29 @@ public class ReportConfigurationExcelTests
         Assert.Contains(ReportConfigurationFormulaRules.UnknownReasonText, text);
         Assert.Contains("totalAmount", text);
     }
+
+    [Fact]
+    public void 导出_选中指标_追加指标汇总工作表()
+    {
+        var preview = MixedPreview();
+        preview.Metrics = new List<ReportConfigurationMetricResultDto>
+        {
+            new()
+            {
+                Key = "totalAmount",
+                Function = ReportConfigurationConstants.AggregateSum,
+                Label = "金额",
+                Unit = "原币金额",
+                CurrencyBehavior = ReportConfigurationMetricRules.CurrencyBehaviorPartition,
+                Cells = new List<ReportConfigurationMetricCellDto>
+                {
+                    new() { GroupLabel = "全部", Currency = "USD", Value = 150m, KnownCount = 2, MissingCount = 0, SourceCount = 2 },
+                },
+            },
+        };
+
+        using var workbook = OpenWorkbook(new ReportConfigurationExcelExporter().Build(preview));
+        Assert.NotNull(workbook.GetSheet(ReportConfigurationExcelExporter.MetricsSheetName));
+        Assert.Contains("金额（合计）（原币金额）", AllSheetText(workbook));
+    }
 }

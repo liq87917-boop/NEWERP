@@ -89,6 +89,21 @@ public sealed record ReportConfigurationFieldDto(
     IReadOnlyList<string> FilterOperators);
 
 /// <summary>
+/// 指标描述符（有限、只读）：从已授权字段派生，携带稳定的字段键 / 中文标签 / 类型 / 行粒度 /
+/// 单位 / 币种行为 / 允许的聚合函数与显式的当前页覆盖口径。字段 / 函数 / 覆盖取值只允许
+/// <see cref="ReportConfigurationConstants"/> 中的有限取值。
+/// </summary>
+public sealed record ReportConfigurationMetricDto(
+    string Key,
+    string Label,
+    string Type,
+    string Grain,
+    string? Unit,
+    string CurrencyBehavior,
+    IReadOnlyList<string> AllowedFunctions,
+    string Coverage);
+
+/// <summary>
 /// 数据集目录（有限、只读）：当前账号已授权的单一数据集及其字段白名单、行粒度、币种 / 单位口径、
 /// 允许分组键、支持 / 不支持能力与分页边界。字段与能力均为有限枚举，绝不扩大到数据库全量元数据发现。
 /// </summary>
@@ -106,7 +121,17 @@ public sealed record ReportConfigurationDatasetDto(
     int DefaultPageSize,
     int MaxPageSize,
     string ReadOnlyText,
-    string BoundaryText);
+    string BoundaryText)
+{
+    /// <summary>由已授权字段派生的指标描述符（粒度 / 单位 / 币种行为 / 允许函数 / 当前页覆盖口径）。</summary>
+    public List<ReportConfigurationMetricDto> Metrics { get; init; } = new();
+
+    /// <summary>按客户分组使用的底层字段键（销售订单 / 应收账款均为 customerId）。</summary>
+    public string? GroupCustomerFieldKey { get; init; }
+
+    /// <summary>按月份分组使用的底层日期字段键（销售订单 orderDate / 应收账款 invoiceDate）。</summary>
+    public string? GroupMonthFieldKey { get; init; }
+}
 
 /// <summary>通用报表配置目录（有限、只读）：当前账号可访问的全部已授权数据集。</summary>
 public sealed record ReportConfigurationCatalogDto(
@@ -430,6 +455,56 @@ public sealed class ReportConfigurationComputedColumnEvidenceDto
     public IReadOnlyList<string> Dependencies { get; set; } = new List<string>();
 }
 
+/// <summary>选中指标的单个汇总单元格（当前页：分组 × 币种；未知币种单独隔离并附原因）。</summary>
+public sealed class ReportConfigurationMetricCellDto
+{
+    /// <summary>分组键（不分组时为空）</summary>
+    public string GroupKey { get; set; } = string.Empty;
+
+    /// <summary>分组中文标签（不分组时为「全部」）</summary>
+    public string GroupLabel { get; set; } = string.Empty;
+
+    /// <summary>币种（非货币指标为空；未知币种单独隔离）</summary>
+    public string? Currency { get; set; }
+
+    /// <summary>指标值（sum / count / avg / min / max；空 / 全 null / 溢出为 null，绝不静默置零）</summary>
+    public decimal? Value { get; set; }
+
+    /// <summary>已知值条数（参与计算的非 null 值条数；count = 该值）</summary>
+    public int KnownCount { get; set; }
+
+    /// <summary>缺失值条数（null / 缺失）</summary>
+    public int MissingCount { get; set; }
+
+    /// <summary>来源条数（当前页该分组 × 币种的总行数 = 已知 + 缺失）</summary>
+    public int SourceCount { get; set; }
+
+    /// <summary>显式原因（未知币种 / 数值溢出等）；无异常为 null</summary>
+    public string? Reason { get; set; }
+}
+
+/// <summary>选中指标的汇总结果（仅用户已选择的聚合；金额按币种分区，绝不跨币种 / 单位合并）。</summary>
+public sealed class ReportConfigurationMetricResultDto
+{
+    /// <summary>字段键（稳定）</summary>
+    public string Key { get; set; } = string.Empty;
+
+    /// <summary>聚合函数（sum / count / avg / min / max）</summary>
+    public string Function { get; set; } = string.Empty;
+
+    /// <summary>字段中文标签</summary>
+    public string Label { get; set; } = string.Empty;
+
+    /// <summary>单位（原币金额 / % / 空）</summary>
+    public string? Unit { get; set; }
+
+    /// <summary>币种行为（currency-partition / none）</summary>
+    public string CurrencyBehavior { get; set; } = string.Empty;
+
+    /// <summary>当前页分组 × 币种汇总单元格</summary>
+    public List<ReportConfigurationMetricCellDto> Cells { get; set; } = new();
+}
+
 /// <summary>通用报表配置预览结果（有界、只读）</summary>
 public sealed class ReportConfigurationPreviewDto
 {
@@ -480,6 +555,9 @@ public sealed class ReportConfigurationPreviewDto
 
     /// <summary>当前预览页分组小计（分组时才非空；组内按币种分区，绝不跨币种相加）</summary>
     public List<ReportConfigurationGroupSubtotalDto>? Groups { get; set; }
+
+    /// <summary>选中的指标汇总（仅用户已选择的聚合；按当前页计算，分组 + 币种分区，绝不追加全匹配合计）</summary>
+    public List<ReportConfigurationMetricResultDto> Metrics { get; set; } = new();
 
     /// <summary>计算列证据（有界：键 / 标签 / 单位 / 未知值口径 / 依赖）；无计算列为空</summary>
     public List<ReportConfigurationComputedColumnEvidenceDto> ComputedColumns { get; set; } = new();

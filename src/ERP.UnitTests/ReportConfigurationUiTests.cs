@@ -39,7 +39,7 @@ public class ReportConfigurationUiTests
         Assert.Contains("function rccSelectFields(catalogFields, selectedKeys)", js);
         Assert.Contains("valid.has(key)", js);          // 未知 / 隐藏键丢弃，fail closed
         Assert.Contains("function rccBuildDefinition(state)", js);
-        Assert.Contains("aggregates: []", js);          // 不提供任意聚合 / SQL
+        Assert.Contains("aggregates: rccBuildAggregates(state)", js);  // 指标只来自目录 metric 白名单，绝不自由聚合 / SQL
         Assert.Contains("capabilities: []", js);        // 不请求超出目录的能力
         Assert.Contains("function rccGroupingHtml(groupingKeys, groupBy)", js);
         Assert.Contains("function rccFilterRowHtml(fields, f, i)", js);
@@ -264,6 +264,23 @@ public class ReportConfigurationUiTests
         Assert.Contains("字段 / 数字 / + - × ÷", js);
         Assert.DoesNotContain("eval(", js);              // 计算列同样绝不执行脚本
         Assert.Contains("自定义公式：本阶段不支持", js);   // 任意公式仍显式不支持
+    }
+
+    // ==================== 11. 指标汇总（目录驱动、当前页、分组 + 币种分区） ====================
+
+    [Fact]
+    public void 指标汇总_目录驱动编辑器与结果渲染_绝不自由函数与跨币种合计()
+    {
+        var js = File.ReadAllText(Path.Combine(JsDirectory(), "report-configuration.js"));
+
+        Assert.Contains("function rccBuildAggregates(state)", js);
+        Assert.Contains("aggregates: rccBuildAggregates(state)", js);
+        Assert.Contains("function rccMetricEditorHtml()", js);
+        Assert.Contains("allowedFunctions", js);
+        Assert.Contains("function rccMetricsHtml(preview)", js);
+        Assert.Contains("最多 4 个", js);
+        Assert.Contains("非全量合计", js);
+        Assert.Contains("金额按币种分区", js);
     }
 
     /// <summary>截取源码中两个锚点之间的片段，便于对单个函数做「不含某内容」的契约断言。</summary>

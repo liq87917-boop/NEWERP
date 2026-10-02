@@ -105,7 +105,7 @@ public sealed class SalesOrderReportConfigurationDatasetProvider : IReportConfig
         var groupBy = DynamicSalesOrderReportRules.NormalizeGroupBy(parameters.GroupBy);
         var request = new DynamicSalesOrderReportRequest
         {
-            Fields = BuildFields(definition.Fields, definition.ComputedColumns, groupBy),
+            Fields = BuildFields(definition.Fields, definition.ComputedColumns, definition.Aggregates, groupBy),
             Page = parameters.Page,
             PageSize = parameters.PageSize,
             GroupBy = groupBy,
@@ -174,6 +174,7 @@ public sealed class SalesOrderReportConfigurationDatasetProvider : IReportConfig
     private static List<string> BuildFields(
         IReadOnlyList<string> fields,
         IReadOnlyList<ReportConfigurationComputedColumn> computedColumns,
+        IReadOnlyList<ReportConfigurationAggregate> aggregates,
         string groupBy)
     {
         var selected = (fields ?? new List<string>())
@@ -182,7 +183,7 @@ public sealed class SalesOrderReportConfigurationDatasetProvider : IReportConfig
             .ToList();
 
         if (groupBy != DynamicSalesOrderReportRules.GroupNone)
-            return DynamicSalesOrderReportRules.EnsureGroupingFields(selected, groupBy) ?? selected;
+            selected = DynamicSalesOrderReportRules.EnsureGroupingFields(selected, groupBy) ?? selected;
 
         if (computedColumns is { Count: > 0 })
         {
@@ -192,6 +193,24 @@ public sealed class SalesOrderReportConfigurationDatasetProvider : IReportConfig
                     selected.Add(dependency);
             }
         }
+
+        // 指标依赖字段：即使用户未选择展示，也必须获取（执行后在引擎侧剥离，绝不返回隐藏原始依赖值）
+        var needsCurrency = false;
+        foreach (var aggregate in aggregates ?? new List<ReportConfigurationAggregate>())
+        {
+            if (aggregate is null || string.IsNullOrWhiteSpace(aggregate.FieldKey))
+                continue;
+            var key = aggregate.FieldKey.Trim();
+            if (!selected.Contains(key, StringComparer.OrdinalIgnoreCase))
+                selected.Add(key);
+
+            var isCount = string.Equals(aggregate.Function, ReportConfigurationConstants.AggregateCount, StringComparison.OrdinalIgnoreCase);
+            if (!isCount && ReportConfigurationMetricRules.IsMonetaryUnit(CurrencyUnitOf(key)))
+                needsCurrency = true;
+        }
+
+        if (needsCurrency && !selected.Contains("currency", StringComparer.OrdinalIgnoreCase))
+            selected.Add("currency");
 
         return selected;
     }
@@ -261,7 +280,12 @@ public sealed class SalesOrderReportConfigurationDatasetProvider : IReportConfig
             DefaultPageSize,
             MaxPageSize,
             ReadOnlyText,
-            BoundaryText);
+            BoundaryText)
+        {
+            Metrics = ReportConfigurationMetricRules.BuildMetrics(fields, Grain),
+            GroupCustomerFieldKey = "customerId",
+            GroupMonthFieldKey = "orderDate",
+        };
     }
 
     private static ReportConfigurationFieldDto BuildField(string key, string label, string dataType, bool filterable)
@@ -376,7 +400,7 @@ public sealed class ReceivableReportConfigurationDatasetProvider : IReportConfig
         var groupBy = DynamicReceivableReportRules.NormalizeGroupBy(parameters.GroupBy);
         var request = new DynamicReceivableReportRequest
         {
-            Fields = BuildFields(definition.Fields, definition.ComputedColumns, groupBy),
+            Fields = BuildFields(definition.Fields, definition.ComputedColumns, definition.Aggregates, groupBy),
             Page = parameters.Page,
             PageSize = parameters.PageSize,
             GroupBy = groupBy,
@@ -446,6 +470,7 @@ public sealed class ReceivableReportConfigurationDatasetProvider : IReportConfig
     private static List<string> BuildFields(
         IReadOnlyList<string> fields,
         IReadOnlyList<ReportConfigurationComputedColumn> computedColumns,
+        IReadOnlyList<ReportConfigurationAggregate> aggregates,
         string groupBy)
     {
         var selected = (fields ?? new List<string>())
@@ -454,7 +479,7 @@ public sealed class ReceivableReportConfigurationDatasetProvider : IReportConfig
             .ToList();
 
         if (groupBy != DynamicReceivableReportRules.GroupNone)
-            return DynamicReceivableReportRules.EnsureGroupingFields(selected, groupBy) ?? selected;
+            selected = DynamicReceivableReportRules.EnsureGroupingFields(selected, groupBy) ?? selected;
 
         if (computedColumns is { Count: > 0 })
         {
@@ -464,6 +489,24 @@ public sealed class ReceivableReportConfigurationDatasetProvider : IReportConfig
                     selected.Add(dependency);
             }
         }
+
+        // 指标依赖字段：即使用户未选择展示，也必须获取（执行后在引擎侧剥离，绝不返回隐藏原始依赖值）
+        var needsCurrency = false;
+        foreach (var aggregate in aggregates ?? new List<ReportConfigurationAggregate>())
+        {
+            if (aggregate is null || string.IsNullOrWhiteSpace(aggregate.FieldKey))
+                continue;
+            var key = aggregate.FieldKey.Trim();
+            if (!selected.Contains(key, StringComparer.OrdinalIgnoreCase))
+                selected.Add(key);
+
+            var isCount = string.Equals(aggregate.Function, ReportConfigurationConstants.AggregateCount, StringComparison.OrdinalIgnoreCase);
+            if (!isCount && ReportConfigurationMetricRules.IsMonetaryUnit(CurrencyUnitOf(key)))
+                needsCurrency = true;
+        }
+
+        if (needsCurrency && !selected.Contains("currency", StringComparer.OrdinalIgnoreCase))
+            selected.Add("currency");
 
         return selected;
     }
@@ -533,7 +576,12 @@ public sealed class ReceivableReportConfigurationDatasetProvider : IReportConfig
             DefaultPageSize,
             MaxPageSize,
             ReadOnlyText,
-            BoundaryText);
+            BoundaryText)
+        {
+            Metrics = ReportConfigurationMetricRules.BuildMetrics(fields, Grain),
+            GroupCustomerFieldKey = "customerId",
+            GroupMonthFieldKey = "invoiceDate",
+        };
     }
 
     private static ReportConfigurationFieldDto BuildField(string key, string label, string dataType, bool filterable)

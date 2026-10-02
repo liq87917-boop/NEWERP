@@ -491,4 +491,35 @@ public class ReportConfigurationExecutionTests
         Assert.Equal("doubleAmount", evidence.Key);
         Assert.Equal(new[] { "totalAmount" }, evidence.Dependencies);
     }
+
+    [Fact]
+    public async Task PreviewAsync_选中指标_仅计算选中指标且剥离隐藏依赖()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedPrivilegedUser(db, "so-metric", "sales-order");
+        var customer = SeedCustomer(db, "C1", "客户");
+        SeedOrder(db, "SO-1", customer.Id, Currency.USD, 100m);
+        SeedOrder(db, "SO-2", customer.Id, Currency.CNY, 200m);
+
+        var def = SalesOrderDefinition(fields: new[] { "orderNo" });
+        def.Aggregates = new List<ReportConfigurationAggregate>
+        {
+            new() { Function = ReportConfigurationConstants.AggregateSum, FieldKey = "totalAmount" },
+        };
+
+        var service = BuildService(db);
+        var created = await service.CreateAsync(user, SaveDto("指标报表", def));
+        var execution = BuildExecution(db);
+        var preview = await execution.PreviewAsync(user, new ReportConfigurationPreviewRequest { ConfigurationId = created.Id });
+
+        var metric = Assert.Single(preview.Metrics);
+        Assert.Equal("totalAmount", metric.Key);
+        Assert.Equal(ReportConfigurationConstants.AggregateSum, metric.Function);
+        Assert.Equal(2, metric.Cells.Count);
+        Assert.Equal(100m, Assert.Single(metric.Cells, c => c.Currency == "USD").Value);
+        Assert.Equal(200m, Assert.Single(metric.Cells, c => c.Currency == "CNY").Value);
+
+        Assert.DoesNotContain(preview.Columns, c => c.Key == "totalAmount");
+        Assert.All(preview.Rows, r => Assert.False(r.ContainsKey("totalAmount")));
+    }
 }

@@ -151,6 +151,7 @@ public sealed class ReportConfigurationExecutionService : IReportConfigurationEx
 
         // 分发执行（适配器内部再次走既有查询的菜单授权 + 数据范围，并保留币种 / 单位口径）
         var preview = await provider.PreviewAsync(definition, parameters, userId, cancellationToken);
+        ApplyMetrics(definition, dataset, parameters.GroupBy, preview);
         preview.ConfigurationId = configurationId;
         preview.PinnedRevisionVersion = pinnedRevision;
         preview.IsPinnedRevision = pinnedRevision.HasValue;
@@ -162,6 +163,50 @@ public sealed class ReportConfigurationExecutionService : IReportConfigurationEx
     }
 
     // ==================== 内部辅助 ====================
+
+    /// <summary>执行用户已选中的指标汇总，并从行 / 列中剥离未选择展示的指标原始依赖值（绝不返回隐藏依赖）。</summary>
+    private static void ApplyMetrics(
+        ReportConfigurationDefinition definition,
+        ReportConfigurationDatasetDto dataset,
+        string groupBy,
+        ReportConfigurationPreviewDto preview)
+    {
+        var aggregates = definition.Aggregates ?? new List<ReportConfigurationAggregate>();
+        if (aggregates.Count == 0)
+            return;
+
+        preview.Metrics = ReportConfigurationMetricRules.Compute(definition, dataset, preview.Rows, groupBy);
+
+        var selected = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var field in definition.Fields ?? new List<string>())
+        {
+            if (!string.IsNullOrWhiteSpace(field))
+                selected.Add(field.Trim());
+        }
+
+        var metricKeys = aggregates
+            .Where(a => a is not null && !string.IsNullOrWhiteSpace(a.FieldKey))
+            .Select(a => a.FieldKey.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var hidden = metricKeys.Where(k => !selected.Contains(k)).ToList();
+        if (hidden.Count == 0)
+            return;
+
+        preview.Columns = preview.Columns
+            .Where(c => !hidden.Contains(c.Key, StringComparer.OrdinalIgnoreCase))
+            .ToList();
+
+        foreach (var row in preview.Rows)
+        {
+            if (row is null)
+                continue;
+            var remove = row.Keys.Where(k => hidden.Contains(k, StringComparer.OrdinalIgnoreCase)).ToList();
+            foreach (var key in remove)
+                row.Remove(key);
+        }
+    }
 
     private static void EnsureAuthenticated(long ownerUserId)
     {

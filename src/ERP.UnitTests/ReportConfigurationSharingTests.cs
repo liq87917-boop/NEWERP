@@ -511,6 +511,38 @@ public class ReportConfigurationSharingTests
         Assert.Equal(ErrorCodes.Forbidden, ex.Code);
     }
 
+    [Fact]
+    public async Task 共享预览_选中指标_按被授权人作用域计算并剥离隐藏依赖()
+    {
+        using var db = TestDbFactory.Create();
+        var ownerId = SeedAuthorizedUser(db, "owner", "sales-order");
+        var recipientId = SeedAuthorizedUser(db, "recipient", "sales-order");
+        var service = BuildService(db);
+        var sharing = BuildSharing(db);
+        var execution = BuildExecution(db);
+
+        var def = Definition("orderNo");
+        def.Aggregates = new List<ReportConfigurationAggregate>
+        {
+            new() { Function = ReportConfigurationConstants.AggregateSum, FieldKey = "totalAmount" },
+        };
+
+        var created = await service.CreateAsync(ownerId, SaveDto("指标报表", def));
+        await service.PublishAsync(ownerId, created.Id, created.Version);
+        await sharing.GrantAsync(ownerId, created.Id,
+            new ReportConfigurationGrantRequestDto { RecipientUserId = recipientId, RevisionVersion = 1 });
+
+        var preview = await execution.PreviewAsync(recipientId,
+            new ReportConfigurationPreviewRequest { ConfigurationId = created.Id });
+
+        Assert.True(preview.IsPinnedRevision);
+        var metric = Assert.Single(preview.Metrics);
+        Assert.Equal("totalAmount", metric.Key);
+        Assert.Equal(ReportConfigurationConstants.AggregateSum, metric.Function);
+        Assert.DoesNotContain(preview.Columns, c => c.Key == "totalAmount");
+        Assert.All(preview.Rows, r => Assert.False(r.ContainsKey("totalAmount")));
+    }
+
     // ==================== 4. 精确 EF 关系型模型映射（离线建模，不连接 SQL Server） ====================
 
     [Fact]

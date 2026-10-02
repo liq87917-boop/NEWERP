@@ -1,4 +1,5 @@
 using ERP.Application.DTOs;
+using ERP.Application.Services;
 using NPOI.SS.UserModel;
 using NPOI.XSSF.UserModel;
 using System.Globalization;
@@ -24,6 +25,9 @@ public sealed class ReportConfigurationExcelExporter
     /// <summary>分组页面小计工作表名（仅分组时追加；当前预览页、按币种分区）</summary>
     public const string GroupsSheetName = "分组小计（当前页）";
 
+    /// <summary>指标汇总工作表名（仅选中指标时追加；当前预览页、分组 + 币种分区）</summary>
+    public const string MetricsSheetName = "指标汇总（当前页）";
+
     /// <summary>报表口径上下文工作表名</summary>
     public const string ContextSheetName = "报表口径";
 
@@ -42,6 +46,9 @@ public sealed class ReportConfigurationExcelExporter
 
         if (preview.Groups is { Count: > 0 })
             BuildGroupsSheet(workbook, preview.Groups, styles);
+
+        if (preview.Metrics is { Count: > 0 })
+            BuildMetricsSheet(workbook, preview.Metrics, styles);
 
         BuildContextSheet(workbook, preview, styles);
 
@@ -268,6 +275,52 @@ public sealed class ReportConfigurationExcelExporter
 
         for (var c = 0; c < headers.Length; c++)
             sheet.SetColumnWidth(c, Math.Min(headers[c].Length * 2 + 4, 40) * 256);
+    }
+
+    // ==================== 指标汇总工作表（当前预览页、分组 + 币种分区） ====================
+
+    private static void BuildMetricsSheet(
+        XSSFWorkbook workbook, IReadOnlyList<ReportConfigurationMetricResultDto> metrics, Styles styles)
+    {
+        var sheet = workbook.CreateSheet(MetricsSheetName);
+        var headerRow = sheet.CreateRow(0);
+        var headers = new[] { "指标", "分组", "币种", "数值", "已知值条数", "缺失条数", "来源条数", "原因" };
+        for (var c = 0; c < headers.Length; c++)
+        {
+            var cell = headerRow.CreateCell(c);
+            cell.SetCellValue(headers[c]);
+            cell.CellStyle = styles.Header;
+        }
+
+        var rowIndex = 1;
+        foreach (var metric in metrics)
+        {
+            var label = MetricTitle(metric);
+            foreach (var cell in metric.Cells)
+            {
+                var row = sheet.CreateRow(rowIndex++);
+                WriteText(row.CreateCell(0), label, styles.Text);
+                WriteText(row.CreateCell(1), cell.GroupLabel, styles.Text);
+                WriteText(row.CreateCell(2), cell.Currency, styles.Text);
+                WriteOptionalAmount(row.CreateCell(3), cell.Value, styles.Number);
+                row.CreateCell(4).SetCellValue(cell.KnownCount);
+                row.GetCell(4).CellStyle = styles.Integer;
+                row.CreateCell(5).SetCellValue(cell.MissingCount);
+                row.GetCell(5).CellStyle = styles.Integer;
+                row.CreateCell(6).SetCellValue(cell.SourceCount);
+                row.GetCell(6).CellStyle = styles.Integer;
+                WriteText(row.CreateCell(7), cell.Reason, styles.Text);
+            }
+        }
+
+        for (var c = 0; c < headers.Length; c++)
+            sheet.SetColumnWidth(c, Math.Min(headers[c].Length * 2 + 4, 40) * 256);
+    }
+
+    private static string MetricTitle(ReportConfigurationMetricResultDto metric)
+    {
+        var unit = string.IsNullOrWhiteSpace(metric.Unit) ? string.Empty : $"（{metric.Unit}）";
+        return $"{metric.Label}（{ReportConfigurationMetricRules.FunctionLabel(metric.Function)}）{unit}";
     }
 
     private static void WriteOptionalAmount(ICell cell, decimal? value, ICellStyle style)

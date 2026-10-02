@@ -311,42 +311,8 @@ public static class ReportConfigurationRules
 
     private static void ValidateAggregates(ReportConfigurationDefinition definition, ReportConfigurationDatasetDto dataset)
     {
-        var aggregates = definition.Aggregates ?? new List<ReportConfigurationAggregate>();
-        if (aggregates.Count > MaxAggregates)
-            throw BusinessException.InvalidParameter($"聚合定义数量不能超过 {MaxAggregates} 个");
-
-        foreach (var aggregate in aggregates)
-            ValidateAggregate(aggregate, dataset);
-    }
-
-    private static void ValidateAggregate(ReportConfigurationAggregate aggregate, ReportConfigurationDatasetDto dataset)
-    {
-        ArgumentNullException.ThrowIfNull(aggregate);
-
-        var function = (aggregate.Function ?? string.Empty).Trim();
-        if (!IsKnownAggregateFunction(function))
-            throw BusinessException.InvalidParameter($"未知聚合函数: {function}");
-
-        if (string.IsNullOrWhiteSpace(aggregate.FieldKey))
-            throw BusinessException.InvalidParameter("聚合字段键不能为空");
-        var key = aggregate.FieldKey.Trim();
-        if (!TryGetField(dataset, key, out var field))
-            throw BusinessException.InvalidParameter($"未知聚合字段: {key}");
-        if (field.Hidden)
-            throw BusinessException.InvalidParameter($"隐藏字段不允许用于聚合: {key}");
-
-        var isCount = string.Equals(function, ReportConfigurationConstants.AggregateCount, StringComparison.OrdinalIgnoreCase);
-        if (!isCount)
-        {
-            if (!field.Aggregatable)
-                throw BusinessException.InvalidParameter($"字段不可聚合: {key}");
-
-            var isNumeric = string.Equals(field.Type, ReportConfigurationConstants.TypeNumber, StringComparison.OrdinalIgnoreCase);
-            var isSumOrAvg = string.Equals(function, ReportConfigurationConstants.AggregateSum, StringComparison.OrdinalIgnoreCase)
-                || string.Equals(function, ReportConfigurationConstants.AggregateAverage, StringComparison.OrdinalIgnoreCase);
-            if (isSumOrAvg && !isNumeric)
-                throw BusinessException.InvalidParameter($"聚合函数 {function} 只适用于数值字段（{key} 类型为 {field.Type}）");
-        }
+        // 指标契约（粒度 / 单位 / 币种行为 / 允许函数）校验：在源读取前拒绝不合规的选中聚合（ERP-267）
+        ReportConfigurationMetricRules.ValidateAggregates(definition, dataset);
     }
 
     private static void ValidateCapabilities(ReportConfigurationDefinition definition, ReportConfigurationDatasetDto dataset)

@@ -45,6 +45,7 @@ let RCC = {
   selectedKeys: [],
   filters: [],
   computedColumns: [],
+  aggregates: [],
   groupBy: 'none',
   page: 1,
   pageSize: RCC_DEFAULT_PAGE_SIZE,
@@ -348,6 +349,7 @@ function rccResultHtml(preview) {
   if (preview.groupBy && preview.groupBy !== 'none') parts.push(rccGroupHtml(preview));
   parts.push(rccTableHtml(preview));
   parts.push(rccComputedEvidenceHtml(preview));
+  parts.push(rccMetricsHtml(preview));
   parts.push('<div class="rcc-evidence">' + rccEsc(evidence.grain || '')
     + ' · ' + rccEsc(evidence.currencyUnitSemantics || '')
     + ' · 覆盖口径：' + rccEsc(coverageText) + '</div>');
@@ -427,7 +429,7 @@ function rccBuildDefinition(state) {
     fields,
     filters,
     grouping,
-    aggregates: [],
+    aggregates: rccBuildAggregates(state),
     capabilities: [],
     computedColumns: rccBuildComputedColumns(state),
     presentation: { page: 1, pageSize: state.pageSize || RCC_DEFAULT_PAGE_SIZE },
@@ -495,6 +497,112 @@ function rccGroupingHtml(groupingKeys, groupBy) {
     + '</select>';
 }
 
+/* ==================== 指标汇总（ERP-267）：目录驱动、仅当前预览页、分组 + 币种分区 ==================== */
+
+const RCC_METRIC_FUNCTION_LABELS = { sum: '合计', count: '计数', avg: '平均', min: '最小', max: '最大' };
+
+function rccFunctionLabel(fn) {
+  return RCC_METRIC_FUNCTION_LABELS[fn] || String(fn || '');
+}
+
+/* 组装已选中的指标（字段只来自目录 metric 白名单、函数只来自允许函数；未知键 / 函数丢弃） */
+function rccBuildAggregates(state) {
+  const ds = rccCurrentDataset();
+  const metrics = (ds && ds.metrics) || [];
+  const valid = new Set(metrics.map(m => m && m.key).filter(Boolean));
+  return ((state && state.aggregates) || []).map(a => ({
+    function: String(a && a.function || '').trim(),
+    fieldKey: String(a && a.fieldKey || '').trim(),
+  })).filter(a => {
+    if (!a.fieldKey || !a.function || !valid.has(a.fieldKey)) return false;
+    const m = metrics.find(x => x.key === a.fieldKey);
+    return !!m && ((m.allowedFunctions || []).indexOf(a.function) >= 0);
+  });
+}
+
+function rccMetricFieldOptionsHtml(selected) {
+  const ds = rccCurrentDataset();
+  const metrics = (ds && ds.metrics) || [];
+  return metrics.map(m => '<option value="' + rccEsc(m.key) + '" ' + (m.key === selected ? 'selected' : '') + '>'
+    + rccEsc(m.label) + '</option>').join('');
+}
+
+function rccMetricFunctionOptionsHtml(fieldKey, selectedFn) {
+  const ds = rccCurrentDataset();
+  const m = ((ds && ds.metrics) || []).find(x => x.key === fieldKey);
+  const fns = (m && m.allowedFunctions) || [];
+  return fns.map(f => '<option value="' + rccEsc(f) + '" ' + (f === selectedFn ? 'selected' : '') + '>'
+    + rccEsc(rccFunctionLabel(f)) + '</option>').join('');
+}
+
+/* 指标编辑器：仅目录 metric 白名单 + 允许函数，最多 4 个，绝不渲染自由函数 / 全匹配合计 */
+function rccMetricEditorHtml() {
+  const ds = rccCurrentDataset();
+  if (!ds || !(ds.metrics || []).length) return '';
+  const rows = (RCC.aggregates || []).map((a, i) =>
+    '<div class="rcc-filter-row">'
+    + '<select onchange="rccOnMetricField(' + i + ', this.value)">' + rccMetricFieldOptionsHtml(a.fieldKey) + '</select>'
+    + '<select onchange="rccOnMetricFunction(' + i + ', this.value)">' + rccMetricFunctionOptionsHtml(a.fieldKey, a.function) + '</select>'
+    + '<button type="button" class="btn" onclick="rccRemoveMetric(' + i + ')">删除</button></div>').join('');
+  return '<div class="rcc-filters"><label>指标汇总（最多 4 个 · 仅当前预览页 · 金额按币种分区）</label>' + rows
+    + '<button type="button" class="btn" onclick="rccAddMetric()">+ 添加指标</button></div>';
+}
+
+function rccAddMetric() {
+  if ((RCC.aggregates || []).length >= 4) { toast('最多添加 4 个指标', 'error'); return; }
+  const ds = rccCurrentDataset();
+  const m = ((ds && ds.metrics) || [])[0];
+  if (!m) { toast('没有可用的指标', 'error'); return; }
+  RCC.aggregates = RCC.aggregates || [];
+  RCC.aggregates.push({ function: (m.allowedFunctions || [])[0] || 'count', fieldKey: m.key });
+  rccTouch();
+  rccRenderDesigner();
+}
+
+function rccRemoveMetric(i) {
+  (RCC.aggregates || []).splice(i, 1);
+  rccTouch();
+  rccRenderDesigner();
+}
+
+function rccOnMetricField(i, value) {
+  const a = (RCC.aggregates || [])[i];
+  if (!a) return;
+  a.fieldKey = value;
+  const ds = rccCurrentDataset();
+  const m = ((ds && ds.metrics) || []).find(x => x.key === value);
+  const fns = (m && m.allowedFunctions) || [];
+  a.function = fns.indexOf(a.function) >= 0 ? a.function : (fns[0] || 'count');
+  rccTouch();
+  rccRenderDesigner();
+}
+
+function rccOnMetricFunction(i, value) {
+  const a = (RCC.aggregates || [])[i];
+  if (a) { a.function = value; rccTouch(); }
+}
+
+/* 指标汇总结果：仅当前预览页选中指标，分组 + 币种分区，绝不跨币种 / 单位合并 */
+function rccMetricsHtml(preview) {
+  const metrics = (preview && preview.metrics) || [];
+  if (!metrics.length) return '';
+  const rows = metrics.map(m => {
+    const unit = m.unit ? '（' + rccEsc(m.unit) + '）' : '';
+    const title = '<b>' + rccEsc(m.label) + '（' + rccEsc(rccFunctionLabel(m.function)) + '）' + unit + '</b>';
+    const cells = (m.cells || []).map(c => '<div class="rcc-partition">'
+      + (c.groupLabel ? '分组：' + rccEsc(c.groupLabel) + ' · ' : '')
+      + (c.currency ? '币种：' + rccEsc(c.currency) + ' · ' : '')
+      + '数值 ' + rccNumberText(c.value)
+      + ' · 已知 ' + rccEsc(c.knownCount)
+      + ' · 缺失 ' + rccEsc(c.missingCount)
+      + ' · 来源 ' + rccEsc(c.sourceCount)
+      + (c.reason ? ' · ' + rccEsc(c.reason) : '')
+      + '</div>').join('');
+    return '<div class="rcc-group">' + title + cells + '</div>';
+  }).join('');
+  return '<div class="rcc-metrics"><div class="rcc-metrics-title">指标汇总（当前预览页 · 非全量合计）</div>' + rows + '</div>';
+}
+
 function rccDatasetLabel(key) {
   const ds = (RCC.datasets || []).find(d => d.datasetKey === key);
   return ds ? ds.label : key;
@@ -540,6 +648,7 @@ function rccRenderDesigner(html) {
     + '<div class="rcc-filters"><label>类型化筛选</label>' + rccFiltersHtml(RCC.filters, RCC.fields)
     + '<button type="button" class="btn" onclick="rccAddFilter()">+ 添加筛选</button></div>'
     + '<div class="rcc-grouping"><label>分组</label>' + rccGroupingHtml(ds.groupingKeys, RCC.groupBy) + '</div>'
+    + rccMetricEditorHtml()
     + rccUnsupportedHtml(ds);
 }
 
@@ -599,7 +708,7 @@ function rccTouch() {
 async function rccInit() {
   RCC = {
     catalog: null, datasets: [], datasetKey: '', fields: [], list: [], current: null, name: '',
-    selectedKeys: [], filters: [], computedColumns: [], groupBy: 'none', page: 1, pageSize: RCC_DEFAULT_PAGE_SIZE,
+    selectedKeys: [], filters: [], computedColumns: [], aggregates: [], groupBy: 'none', page: 1, pageSize: RCC_DEFAULT_PAGE_SIZE,
     maxPageSize: 200, previewRevision: null, view: null, revisions: [],
     sharedList: [], sharedCurrent: null, grants: [], dirty: false,
     requestSeq: 0, envBlocked: false, busy: false,
@@ -653,6 +762,7 @@ function rccSelectDataset(key, touch = true) {
   RCC.pageSize = Math.min(RCC.pageSize || RCC_DEFAULT_PAGE_SIZE, RCC.maxPageSize);
   RCC.filters = [];
   RCC.computedColumns = [];
+  RCC.aggregates = [];
   RCC.groupBy = 'none';
   RCC.page = 1;
   if (touch) rccTouch();
@@ -735,6 +845,7 @@ function rccNew() {
   RCC.selectedKeys = rccSelectFields(RCC.fields, RCC.fields.map(f => f.key));
   RCC.filters = [];
   RCC.computedColumns = [];
+  RCC.aggregates = [];
   RCC.groupBy = 'none';
   RCC.page = 1;
   RCC.dirty = false;
@@ -768,6 +879,10 @@ function rccApplyDefinition(def) {
     label: String(c.label || ''),
     expression: rccNormalizeFormulaNode(c.expression) || { kind: 'field', fieldKey: '' },
   })).filter(c => c.key);
+  RCC.aggregates = ((def && def.aggregates) || []).map(a => ({
+    function: String(a.function || '').trim(),
+    fieldKey: String(a.fieldKey || '').trim(),
+  })).filter(a => a.fieldKey && a.function);
 }
 
 async function rccLoadConfiguration(id) {

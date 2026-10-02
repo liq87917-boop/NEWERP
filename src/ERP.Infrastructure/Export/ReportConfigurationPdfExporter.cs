@@ -1,5 +1,6 @@
 using ERP.Application.Common;
 using ERP.Application.DTOs;
+using ERP.Application.Services;
 using PdfSharp.Drawing;
 using PdfSharp.Pdf;
 using System.Globalization;
@@ -106,6 +107,7 @@ public static class ReportConfigurationPdfExporter
 
             DrawReport(document, preview);
             DrawSubtotalSection(document, preview);
+            DrawMetricsSection(document, preview);
 
             using var stream = new MemoryStream();
             document.Save(stream, false);
@@ -434,6 +436,109 @@ public static class ReportConfigurationPdfExporter
         }
 
         return rows;
+    }
+
+    // ==================== 指标汇总（当前预览页、分组 + 币种分区） ====================
+
+    /// <summary>指标汇总表列（与 Excel「指标汇总（当前页）」同口径）</summary>
+    public static IReadOnlyList<ReportConfigurationColumnDto> MetricsColumns { get; } = new[]
+    {
+        new ReportConfigurationColumnDto("metric", "指标", ReportConfigurationConstants.TypeText, null),
+        new ReportConfigurationColumnDto("group", "分组", ReportConfigurationConstants.TypeText, null),
+        new ReportConfigurationColumnDto("currency", "币种", ReportConfigurationConstants.TypeText, null),
+        new ReportConfigurationColumnDto("value", "数值", ReportConfigurationConstants.TypeNumber, null),
+        new ReportConfigurationColumnDto("known", "已知值条数", ReportConfigurationConstants.TypeNumber, null),
+        new ReportConfigurationColumnDto("missing", "缺失条数", ReportConfigurationConstants.TypeNumber, null),
+        new ReportConfigurationColumnDto("source", "来源条数", ReportConfigurationConstants.TypeNumber, null),
+        new ReportConfigurationColumnDto("reason", "原因", ReportConfigurationConstants.TypeText, null),
+    };
+
+    /// <summary>把选中指标拍平为导出行（每个指标 × 分组 × 币种一行；无指标返回空列表，绝不追加全匹配合计）。</summary>
+    public static IReadOnlyList<Dictionary<string, object?>> BuildMetricRows(
+        IReadOnlyList<ReportConfigurationMetricResultDto>? metrics)
+    {
+        var rows = new List<Dictionary<string, object?>>();
+        if (metrics is null)
+            return rows;
+
+        foreach (var metric in metrics)
+        {
+            var title = MetricTitle(metric);
+            foreach (var cell in metric.Cells)
+            {
+                rows.Add(new Dictionary<string, object?>(StringComparer.Ordinal)
+                {
+                    ["metric"] = title,
+                    ["group"] = cell.GroupLabel,
+                    ["currency"] = cell.Currency,
+                    ["value"] = cell.Value,
+                    ["known"] = cell.KnownCount,
+                    ["missing"] = cell.MissingCount,
+                    ["source"] = cell.SourceCount,
+                    ["reason"] = cell.Reason,
+                });
+            }
+        }
+
+        return rows;
+    }
+
+    private static string MetricTitle(ReportConfigurationMetricResultDto metric)
+    {
+        var unit = string.IsNullOrWhiteSpace(metric.Unit) ? string.Empty : $"（{metric.Unit}）";
+        return $"{metric.Label}（{ReportConfigurationMetricRules.FunctionLabel(metric.Function)}）{unit}";
+    }
+
+    private static void DrawMetricsSection(PdfDocument document, ReportConfigurationPreviewDto preview)
+    {
+        var metrics = preview.Metrics;
+        if (metrics is null || metrics.Count == 0)
+            return;
+
+        var rows = BuildMetricRows(metrics);
+        if (rows.Count == 0)
+            return;
+
+        var columns = MetricsColumns;
+        var titleFont = new XFont(FontFamily, TitleSize, XFontStyleEx.Bold);
+        var metaFont = new XFont(FontFamily, MetaSize, XFontStyleEx.Regular);
+        var headerFont = new XFont(FontFamily, HeaderSize, XFontStyleEx.Bold);
+        var cellFont = new XFont(FontFamily, CellSize, XFontStyleEx.Regular);
+
+        var borderPen = new XPen(XColor.FromArgb(0xC4, 0xC4, 0xC4), 0.4);
+        var headerBrush = new XSolidBrush(XColor.FromArgb(0xED, 0xED, 0xED));
+
+        var usableWidth = Mm(PageWidthMm - MarginLeftMm - MarginRightMm);
+        var lineHeight = Mm(DataLineHeightMm);
+
+        var gfx = NewPage(document);
+        try
+        {
+            var widths = ComputeSubtotalWidths(columns, rows, usableWidth);
+
+            var y = Mm(MarginTopMm);
+            gfx.DrawString("指标汇总（当前页）", titleFont, XBrushes.Black,
+                new XRect(Mm(MarginLeftMm), y, usableWidth, Mm(TitleHeightMm)), XStringFormats.TopCenter);
+            y += Mm(TitleHeightMm);
+
+            gfx.DrawString("仅当前预览页；金额按币种分区，绝不跨币种 / 单位相加，绝不等于全匹配合计。",
+                metaFont, XBrushes.Black,
+                new XRect(Mm(MarginLeftMm), y, usableWidth, Mm(MetaHeightMm)), XStringFormats.TopLeft);
+            y += Mm(MetaHeightMm + 2);
+
+            y = DrawColumnHeaders(gfx, headerFont, headerBrush, borderPen, columns, widths, y);
+
+            foreach (var row in rows)
+            {
+                var height = RowHeightPoints(columns, widths, row, 0, lineHeight);
+                DrawDataRow(gfx, cellFont, borderPen, columns, widths, row, 0, y, height, lineHeight);
+                y += height;
+            }
+        }
+        finally
+        {
+            gfx.Dispose();
+        }
     }
 
     // ==================== 绘制 ====================

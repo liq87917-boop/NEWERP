@@ -258,5 +258,31 @@ public class ReportConfigurationCatalogTests
         Assert.Contains(dataset.Fields, f => f.Key == "grossAmount" && f.CurrencyUnit == "原币金额");
         Assert.All(dataset.Fields, f => Assert.True(ReportConfigurationRules.IsKnownFieldType(f.Type)));
     }
+
+    [Fact]
+    public async Task Catalog_销售订单_指标描述符契约真实()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedUser(db, "metric-meta");
+        var role = SeedRole(db, "Role-metric-meta");
+        SeedUserRole(db, user.Id, role.Id);
+        SeedRoleMenu(db, role.Id, SeedMenu(db, "sales-order").Id);
+        var catalog = BuildCatalog(db);
+
+        var result = await catalog.GetCatalogAsync(user.Id);
+        var dataset = Assert.Single(result.Datasets);
+
+        Assert.NotEmpty(dataset.Metrics);
+        var amount = Assert.Single(dataset.Metrics, m => m.Key == "totalAmount");
+        Assert.Equal("订单总额", amount.Label);
+        Assert.Equal("原币金额", amount.Unit);
+        Assert.Equal(ReportConfigurationMetricRules.CurrencyBehaviorPartition, amount.CurrencyBehavior);
+        Assert.Contains(ReportConfigurationConstants.AggregateSum, amount.AllowedFunctions);
+        Assert.Equal(ReportConfigurationConstants.CoverageCurrentPage, amount.Coverage);
+
+        var orderNo = Assert.Single(dataset.Metrics, m => m.Key == "orderNo");
+        Assert.Equal(new[] { ReportConfigurationConstants.AggregateCount }, orderNo.AllowedFunctions);
+        Assert.Equal(ReportConfigurationMetricRules.CurrencyBehaviorNone, orderNo.CurrencyBehavior);
+    }
 }
 
