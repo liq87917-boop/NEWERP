@@ -110,7 +110,7 @@ const REPORTS = {
     ] },
 
   /* === ERP-018：报价成交率（询报价 → 形式发票 PI / 销售订单 转化分析；按业务员 × 原币分列，金额绝不跨币种合计） === */
-  'quotation-conversion': { api: '/api/reports/quotation-conversion', title: '报价成交率分析',
+  'quotation-conversion': { api: '/api/reports/quotation-conversion', title: '报价成交率分析', designer: 'quotation',
     emoji: '📈', kpi: 'gold',
     summary: '按业务员 × 原币币种：成交率 = 已转出数 ÷ 有效报价数 × 100（已转出 = 已转 PI / 已转销售订单 / 已完成；已作废不计入分母；金额按原币分列，不跨币种合计）',
     columns: [
@@ -169,13 +169,19 @@ async function renderReport(rep, name) {
         <button class="btn btn-primary" onclick="loadReport()">查询</button>
       </div>
       <div class="toolbar-actions">
-        ${rep.designer ? `<button class="btn btn-neutral" onclick="openFollowUpDueDesigner()" title="打开动态跟进提醒字段设计器（只读预览）">🎛 字段设计器</button>` : ''}
+        ${rep.designer === 'quotation'
+          ? `<button class="btn btn-neutral" onclick="openQuotationConversionDesigner()" title="打开报价成交率字段设计器（只读预览，按业务员 × 原币分桶）">🎛 字段设计器</button>`
+          : rep.designer
+            ? `<button class="btn btn-neutral" onclick="openFollowUpDueDesigner()" title="打开动态跟进提醒字段设计器（只读预览）">🎛 字段设计器</button>`
+            : ''}
         <button class="btn btn-neutral" onclick="exportReportCSV()" title="导出为 CSV">📤 导出 CSV</button>
         <button class="btn btn-neutral" onclick="window.print()" title="打印报表">🖨 打印</button>
       </div>
     </div>
 
-    ${rep.designer ? `<div id="fud-designer"></div>` : ''}
+    ${rep.designer === 'quotation'
+      ? `<div id="qcd-designer"></div>`
+      : rep.designer ? `<div id="fud-designer"></div>` : ''}
 
     <div class="table-wrap" id="report-table">
       <div class="skeleton-row"></div><div class="skeleton-row"></div><div class="skeleton-row"></div>
@@ -909,3 +915,367 @@ function openFollowUpDueDesigner() {
     <div id="fud-designer-result"></div>`;
   loadFollowUpDueDesignerCatalog();
 }
+
+/* ============ 动态报价成交率字段设计器（ERP-206：只读、有界的前端字段选择与分页预览 / Excel 导出） ============
+   口径与后端 ERP-206（DynamicQuotationConversionReportController / DynamicQuotationConversionReportRules）一一对应：
+   - 入口复用在「报价成交率分析」报表（reports.js 的 quotation-conversion，designer: 'quotation'），不新增菜单 / 架构 / 脚本注册；
+   - 字段选择器只由 GET /api/dynamic-quotation-conversion-report 返回的有限白名单目录渲染为复选框（name="qcd-des-field"），
+     绝无自由填写的字段名或 SQL；勾选状态经 qcdSelectFields 规范化（去重、保持顺序、丢弃未知键）；
+   - 筛选仅限开始 / 结束日期（含首尾最多 366 天），分页有界（页码 ≥ 1，每页 1~200），
+     预览走 POST /api/dynamic-quotation-conversion-report，只发送「白名单字段 + 有界日期 + 有界分页」；
+   - 结果按后端返回的列名与选定字段值渲染（qcdTableHtml / qcdResultHtml），全部 HTML 转义；
+   - 空页 / 授权撤销（权限不足 / 未登录）/ 无效请求 / 网络失败分别可见，且不暴露范围外数据；
+   - 导出复用预览请求体 POST /api/dynamic-quotation-conversion-report/export，成功（xlsx 附件）触发下载；
+   - 全程只读：不写库、不迁移、不执行任意 SQL。 */
+
+/* 字段设计器状态（纯数据；DOM 访问只在事件处理函数内部发生） */
+let QCD_DYN = {
+  catalog: null,      // GET /api/dynamic-quotation-conversion-report 返回的目录 DTO
+  fields: [],         // 目录字段（白名单）
+  selectedKeys: [],   // 当前勾选的字段键（默认全选）
+  view: null,         // 最近一次预览结果
+  page: 1,            // 当前预览页（预览 / 翻页复用）
+};
+
+function qcdEsc(v) {
+  return String(v ?? '').replace(/[&<>"']/g, c => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[c]));
+}
+
+/* 规范化选定字段（fail closed）：只保留目录白名单内的键、去重、保持请求顺序；未知键丢弃，绝不发送任意字段名 */
+function qcdSelectFields(catalogFields, selectedKeys) {
+  const valid = new Set((catalogFields || []).map(f => f && f.key).filter(Boolean));
+  const seen = new Set();
+  const result = [];
+  for (const k of (Array.isArray(selectedKeys) ? selectedKeys : [])) {
+    if (typeof k !== 'string') continue;
+    const key = k.trim();
+    if (!key || !valid.has(key) || seen.has(key)) continue;
+    seen.add(key);
+    result.push(key);
+  }
+  return result;
+}
+
+/* 日期窗口客户端校验（与后端 ValidateDateRange 一致）：必填、结束不早于开始、含首尾最多 366 天 */
+function qcdDateError(state) {
+  const start = String(state && state.start || '').trim();
+  const end = String(state && state.end || '').trim();
+  if (!start || !end) return '请填写开始与结束日期';
+  const startMs = Date.parse(start);
+  const endMs = Date.parse(end);
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) return '日期格式无效';
+  if (end < start) return '结束日期不能早于开始日期';
+  if (Math.round((endMs - startMs) / 86400000) + 1 > 366) return '日期范围最多 366 天（含首尾）';
+  return '';
+}
+
+/* 组装有界预览请求体：字段只来自目录、日期仅开始 / 结束、分页有界，绝不接受任意字段名或 SQL */
+function qcdBuildRequest(state) {
+  const fields = qcdSelectFields(state.catalogFields, state.selectedKeys);
+  const page = Math.max(1, Math.floor(Number(state.page) || 1));
+  const maxPageSize = Number(state.maxPageSize) || 200;
+  let pageSize = Math.floor(Number(state.pageSize));
+  if (!Number.isFinite(pageSize)) pageSize = 20;
+  pageSize = Math.max(1, Math.min(maxPageSize, pageSize));
+  return {
+    fields,
+    page,
+    pageSize,
+    start: String(state.start).slice(0, 10),
+    end: String(state.end).slice(0, 10),
+  };
+}
+
+/* 单元格纯文本：数字合理格式化（整数 / 2 位小数）、其余按字符串呈现（null 显示为空） */
+function qcdCellText(value, field) {
+  const dataType = (field && field.dataType) || 'text';
+  if (value === null || value === undefined) return '';
+  if (dataType === 'number') {
+    const n = Number(value);
+    if (Number.isFinite(n)) return Number.isInteger(n) ? String(n) : n.toFixed(2);
+    return String(value);
+  }
+  return String(value);
+}
+
+/* 单元格 HTML（转义后安全渲染） */
+function qcdRenderCell(value, field) {
+  return qcdEsc(qcdCellText(value, field));
+}
+
+/* 结果表格 HTML：表头为返回的列名、单元格为返回的选定字段值，全部经转义 */
+function qcdTableHtml(view) {
+  const cols = (view && view.columns) || [];
+  const rows = (view && view.rows) || [];
+  if (!cols.length) return '';
+  const align = c => (c.dataType === 'number') ? ' class="text-right"' : '';
+  const head = cols.map(c => `<th${align(c)}>${qcdEsc(c.label || c.key)}</th>`).join('');
+  const body = rows.length
+    ? rows.map(r => `<tr>${cols.map(c => `<td${align(c)}>${qcdRenderCell(r[c.key], c)}</td>`).join('')}</tr>`).join('')
+    : '';
+  return `<div class="table-wrap" style="margin-top:8px"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
+}
+
+/* 分页（有界、稳定）：当前页之外仍有记录时标注截断，翻页复用当前字段 / 日期 / 每页条数 */
+function qcdPagingHtml(view) {
+  if (!view) return '';
+  const prevDisabled = view.page <= 1 ? ' disabled' : '';
+  const nextDisabled = view.page >= view.totalPages ? ' disabled' : '';
+  return `<div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px">
+      <span class="text-muted">第 ${view.page} 页 / 共 ${view.totalPages} 页${view.truncated ? '（仅当前页，后续仍有分页）' : ''}</span>
+      <div>
+        <button class="btn btn-neutral btn-sm" onclick="qcdPage(-1)"${prevDisabled}>← 上一页</button>
+        <button class="btn btn-neutral btn-sm" onclick="qcdPage(1)"${nextDisabled}>下一页 →</button>
+      </div></div>`;
+}
+
+/* 空结果提示（显式使用后端 emptyText） */
+function qcdEmptyHtml(view) {
+  return `<div class="empty" style="margin:8px 0">${qcdEsc((view && view.emptyText) || '没有符合所选日期范围的报价成交率数据')}</div>`;
+}
+
+/* 错误提示（授权撤销 / 未登录 / 无效请求 / 网络失败分别可见，且不暴露任何数据） */
+function qcdErrorHtml(kind, message) {
+  const labels = {
+    forbidden: '权限不足',
+    unauthorized: '未登录 / 登录已过期',
+    invalid: '请求无效',
+    empty: '导出内容为空',
+    network: '网络请求失败',
+    error: '预览失败',
+  };
+  return `<div class="pd-hint" style="color:#b91c1c;background:#fef2f2;border-color:#fecaca">
+      <b>${qcdEsc(labels[kind] || '预览失败')}</b>：${qcdEsc(message || '')}</div>`;
+}
+
+/* 业务码 → 错误态分类 */
+function qcdKindOfCode(code) {
+  if (code === 2002) return 'forbidden';
+  if (code === 2000 || code === 2003) return 'unauthorized';
+  if (code === 5000) return 'error';
+  return 'invalid';
+}
+
+/* 预览结果（只读 / 边界 / 免责文案 + 摘要 + 空结果 + 表格 + 分页） */
+function qcdResultHtml(view) {
+  const readOnly = view && view.readOnlyText ? `<div class="pd-hint">${qcdEsc(view.readOnlyText)}</div>` : '';
+  const boundary = view && view.boundaryText ? `<div class="pd-hint">${qcdEsc(view.boundaryText)}</div>` : '';
+  const disclaimer = view && view.disclaimerText ? `<div class="pd-hint" style="color:#64748b">${qcdEsc(view.disclaimerText)}</div>` : '';
+  const summary = view
+    ? `<div class="text-muted" style="margin:6px 0">共 ${view.total} 行 · 第 ${view.page} 页 · 每页 ${view.pageSize} 行 · 共 ${view.totalPages} 页${view.truncated ? ' · 后续仍有分页' : ''} · 期间 ${String(view.start || '').slice(0, 10)} 至 ${String(view.end || '').slice(0, 10)}</div>`
+    : '';
+  const empty = view && (!view.rows || view.rows.length === 0) ? qcdEmptyHtml(view) : '';
+  return `${readOnly}${boundary}${disclaimer}${summary}${empty}${qcdTableHtml(view)}${qcdPagingHtml(view)}`;
+}
+
+/* 字段选择器：仅由目录白名单渲染为复选框，无自由填写的字段名 */
+function qcdFieldChooserHtml(fields, selectedKeys) {
+  const selected = new Set(selectedKeys || []);
+  return (fields || []).map(f => {
+    const checked = selected.has(f.key) ? 'checked' : '';
+    return `<label style="display:inline-flex;align-items:center;gap:4px;margin:3px 6px 3px 0;padding:2px 8px;border:1px solid #e2e8f0;border-radius:6px;background:#f8fafc;cursor:pointer">
+        <input type="checkbox" name="qcd-des-field" value="${qcdEsc(f.key)}" ${checked} onchange="qcdSyncSelection()">
+        <span>${qcdEsc(f.label || f.key)}</span></label>`;
+  }).join('');
+}
+
+function qcdLoadingHtml() {
+  return '<div class="pd-hint" style="text-align:center;color:#64748b">正在预览（只读查询）…</div>';
+}
+
+function qcdRenderResult(html) {
+  const el = document.getElementById('qcd-designer-result');
+  if (el) el.innerHTML = html;
+}
+
+/* 轻量请求封装：返回完整 ApiResponse 信封（保留 code），网络异常抛给调用方 */
+async function qcdRequest(path, method = 'GET', body = null) {
+  const headers = { 'Content-Type': 'application/json' };
+  const token = typeof localStorage !== 'undefined' ? (localStorage.getItem('erp_token') || '') : '';
+  if (token) headers['Authorization'] = 'Bearer ' + token;
+  const opts = { method, headers };
+  if (body) opts.body = JSON.stringify(body);
+  const resp = await fetch(path, opts);
+  return await resp.json();
+}
+
+/* 同步勾选状态到 selectedKeys（复选框 onchange） */
+function qcdSyncSelection() {
+  const boxes = document.querySelectorAll('input[name="qcd-des-field"]');
+  QCD_DYN.selectedKeys = Array.from(boxes).filter(b => b.checked).map(b => b.value);
+}
+
+function qcdToggleAll(checked) {
+  const boxes = document.querySelectorAll('input[name="qcd-des-field"]');
+  QCD_DYN.selectedKeys = [];
+  boxes.forEach(b => { b.checked = checked; if (checked) QCD_DYN.selectedKeys.push(b.value); });
+}
+
+/* 读取当前字段 / 日期 / 分页状态（预览、翻页与导出复用，单一来源） */
+function qcdBuildState(page) {
+  const val = id => { const el = document.getElementById(id); return el ? el.value.trim() : ''; };
+  return {
+    catalogFields: QCD_DYN.fields,
+    selectedKeys: QCD_DYN.selectedKeys,
+    start: val('qcd-des-start'),
+    end: val('qcd-des-end'),
+    pageSize: val('qcd-des-pagesize'),
+    page: page || QCD_DYN.page || 1,
+    maxPageSize: QCD_DYN.catalog && QCD_DYN.catalog.maxPageSize ? QCD_DYN.catalog.maxPageSize : 200,
+  };
+}
+
+/* 预览：组装有界请求 → POST → 安全渲染列名与单元格；授权 / 无效 / 空 / 网络失败均可见 */
+async function qcdPreview(page) {
+  const state = qcdBuildState(page);
+  const dateError = qcdDateError(state);
+  if (dateError) {
+    qcdRenderResult(qcdErrorHtml('invalid', dateError));
+    return;
+  }
+  const req = qcdBuildRequest(state);
+  QCD_DYN.page = req.page;
+
+  qcdRenderResult(qcdLoadingHtml());
+
+  try {
+    const resp = await qcdRequest('/api/dynamic-quotation-conversion-report', 'POST', req);
+    if (resp.code === 0) {
+      QCD_DYN.view = resp.data;
+      QCD_DYN.page = resp.data.page;
+      qcdRenderResult(qcdResultHtml(resp.data));
+    } else if (resp.code === 2000 || resp.code === 2003) {
+      if (typeof logout === 'function') logout();
+      qcdRenderResult(qcdErrorHtml('unauthorized', resp.message));
+    } else {
+      qcdRenderResult(qcdErrorHtml(qcdKindOfCode(resp.code), resp.message));
+    }
+  } catch (err) {
+    qcdRenderResult(qcdErrorHtml('network', (err && err.message) || '无法连接到服务器'));
+  }
+}
+
+/* 导出当前页选定列为 Excel（ERP-206，只读）：复用预览请求体 POST /api/dynamic-quotation-conversion-report/export；
+   成功（xlsx 附件）触发下载；授权 / 无效 / 空结果 / 网络失败在结果区可见，不下载任何内容 */
+async function qcdExport() {
+  if (!QCD_DYN.view || !QCD_DYN.view.columns || !QCD_DYN.view.columns.length) {
+    qcdRenderResult(qcdErrorHtml('invalid', '请先预览后再导出 Excel'));
+    return;
+  }
+  if (!QCD_DYN.view.rows || QCD_DYN.view.rows.length === 0) {
+    qcdRenderResult(qcdErrorHtml('empty', '没有符合所选日期范围的报价成交率数据，无法导出（请先预览）'));
+    return;
+  }
+
+  const state = qcdBuildState(QCD_DYN.view.page);
+  const dateError = qcdDateError(state);
+  if (dateError) {
+    qcdRenderResult(qcdErrorHtml('invalid', dateError));
+    return;
+  }
+  const req = qcdBuildRequest(state);
+  qcdRenderResult(qcdLoadingHtml());
+
+  try {
+    const headers = { 'Content-Type': 'application/json' };
+    const token = typeof localStorage !== 'undefined' ? (localStorage.getItem('erp_token') || '') : '';
+    if (token) headers['Authorization'] = 'Bearer ' + token;
+    const resp = await fetch('/api/dynamic-quotation-conversion-report/export', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(req),
+    });
+
+    const contentType = (resp.headers.get('content-type') || '');
+    if (contentType.indexOf('spreadsheetml') >= 0) {
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+      a.href = url;
+      a.download = '报价成交率_' + dateStr + '.xlsx';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      qcdRenderResult('<div class="pd-hint">已导出当前页为 Excel（xlsx），请查看下载。</div>');
+      return;
+    }
+
+    let envelope = null;
+    try { envelope = await resp.json(); } catch (e) { /* 忽略解析失败 */ }
+    const code = envelope && envelope.code;
+    const message = (envelope && envelope.message) || '导出失败';
+    if (code === 2000 || code === 2003) {
+      if (typeof logout === 'function') logout();
+      qcdRenderResult(qcdErrorHtml('unauthorized', message));
+      return;
+    }
+    qcdRenderResult(qcdErrorHtml(qcdKindOfCode(code), message));
+  } catch (err) {
+    qcdRenderResult(qcdErrorHtml('network', (err && err.message) || '无法连接到服务器'));
+  }
+}
+
+/* 翻页（有界：最小第 1 页） */
+function qcdPage(delta) {
+  const page = (QCD_DYN.view ? QCD_DYN.view.page : QCD_DYN.page) + delta;
+  if (page < 1) return;
+  qcdPreview(page);
+}
+
+/* 加载字段目录（需登录 + 报价单菜单授权；授权 / 网络失败 fail closed，不渲染任何字段） */
+async function loadQuotationConversionDesignerCatalog() {
+  try {
+    const resp = await qcdRequest('/api/dynamic-quotation-conversion-report');
+    if (resp.code === 2000 || resp.code === 2003) {
+      if (typeof logout === 'function') logout();
+      qcdRenderResult(qcdErrorHtml('unauthorized', resp.message));
+      return;
+    }
+    if (resp.code !== 0) {
+      qcdRenderResult(qcdErrorHtml(qcdKindOfCode(resp.code), resp.message));
+      return;
+    }
+    QCD_DYN.catalog = resp.data;
+    QCD_DYN.fields = (resp.data && resp.data.fields) || [];
+    QCD_DYN.selectedKeys = QCD_DYN.fields.map(f => f.key);
+    const el = document.getElementById('qcd-designer-fields');
+    if (el) el.innerHTML = qcdFieldChooserHtml(QCD_DYN.fields, QCD_DYN.selectedKeys);
+  } catch (err) {
+    qcdRenderResult(qcdErrorHtml('network', (err && err.message) || '无法连接到服务器'));
+  }
+}
+
+/* 打开动态报价成交率字段设计器（从「报价成交率分析」报表工具栏进入） */
+function openQuotationConversionDesigner() {
+  const el = document.getElementById('qcd-designer');
+  if (!el) return;
+  const defStart = new Date(Date.now() - 365 * 86400000).toISOString().slice(0, 10);
+  const defEnd = new Date().toISOString().slice(0, 10);
+  el.innerHTML = `
+    <div class="pd-hint">🎛 字段设计器（只读预览）：勾选可见列 → 选择开始 / 结束日期与每页条数 → 预览授权有界结果（业务员 × 原币分桶，金额绝不跨币种合计）；全程只读，不执行任意 SQL。</div>
+    <div class="toolbar" style="margin-top:0">
+      <div class="toolbar-left" style="flex-wrap:wrap;gap:6px;align-items:center;font-size:13px">
+        <label>开始日期 <input type="date" id="qcd-des-start" value="${defStart}"></label>
+        <label>结束日期 <input type="date" id="qcd-des-end" value="${defEnd}"></label>
+        <label>每页 <input type="number" id="qcd-des-pagesize" value="20" min="1" max="200" style="width:70px"></label>
+        <span id="qcd-designer-fields">正在加载字段目录…</span>
+      </div>
+      <div class="toolbar-actions">
+        <button class="btn btn-neutral btn-sm" onclick="qcdToggleAll(true)">全选</button>
+        <button class="btn btn-neutral btn-sm" onclick="qcdToggleAll(false)">清空</button>
+        <button class="btn btn-neutral" onclick="qcdExport()" title="导出当前页为 Excel（选定列，复用当前日期与分页）">📥 导出 Excel（当前页）</button>
+        <button class="btn btn-primary" onclick="qcdPreview(1)">预览</button>
+      </div>
+    </div>
+    <div id="qcd-designer-result"></div>`;
+  loadQuotationConversionDesignerCatalog();
+}
+
+
+
+
+
