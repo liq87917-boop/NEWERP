@@ -1,0 +1,113 @@
+{
+  "title": "Import and export portable report definitions as authorized private drafts",
+  "description": "Customer exports an owned draft or accessible pinned published definition as bounded versioned JSON and imports it as a new private draft through the common configuration module. This is customer configuration portability, not report-data export or old-report migration. Envelope contains only format/schema version, safe display name and structured report definition; exclude ERP rows, internal grant/owner IDs, audit identities, connection/SQL data, revision history and attachments. Only server-authorized detail resolution supplies export. Import <=64KiB UTF-8 JSON, depth<=16, no unknown/duplicate top-level keys, unsupported format/schema or dangerous/script payloads. Revalidate all fields/metrics/formulas/relations/sort/group/pivot under importing authenticated user's fresh current catalog and data permissions. Ignore no malformed identity or capability extras: reject them clearly; never import ownership/sharing/published state. Existing service creates recipient-owned private draft version1 with normal audit, no overwriting ID or publication. Bounded safe name and escaped UI; import conflict/capability/environment errors preserve original draft and provide actionable field errors without leaking unavailable metadata. Sharing source revoked before export fails closed. Add download/upload controls without browser-local persistence substitute; original persisted definitions remain unchanged on failed import. In-memory roundtrip tests for base/shared/formula/relational/group/pivot definitions, unauthorized fields and malicious JSON plus safe build/test. No new entities or schema. Stage 1 unified platform only; existing sales-order/receivable adapters are engine fixtures, not migration or new bespoke reports. Preserve old report entries until every fixed/dynamic report passes Stage 2 parity. No Agent or cross-business flow work. Server-authenticated identity and fresh existing menu/field/row/data scope remain authoritative, saved definitions/grants never grant ERP permissions. No arbitrary SQL, scripts, joins, tables, mixed currency/unit totals or one-to-many header duplication. No migrations, SchemaUpgrader/SeedData modifications, production SQL/database execution, schema/view/procedure changes, secrets/.env/config changes, deployment or irreversible operations. Use existing HTTP and entity audit conventions. Safe build/test and relevant offline integration tests required; missing actual DB/browser/font environment must be explicitly blocked, never claim the phase complete from build. Preserve unrelated source/work.",
+  "acceptance_criteria": [
+    "Safe bounded versioned definition envelope exports only owned or granted pinned metadata without rows/identities/grants/history and rejects revoked access.",
+    "Import validates schema/JSON/permissions and all engine capabilities then creates an audited new private draft, never overwrites, publishes or expands rights.",
+    "Customer workspace upload/download preserves edits on errors and meaningful offline roundtrip/malicious/unauthorized tests pass safe build/test."
+  ],
+  "criterion_path_map": {
+    "Safe bounded versioned definition envelope exports only owned or granted pinned metadata without rows/identities/grants/history and rejects revoked access.": [
+      "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
+      "src/ERP.Application/Services/ReportConfigurationRules.cs",
+      "src/ERP.Application/Services/ReportConfigurationCatalog.cs",
+      "src/ERP.Application/Interfaces/IReportConfigurationDatasetProvider.cs",
+      "src/ERP.Infrastructure/Reports/ReportConfigurationDatasetProvider.cs",
+      "src/ERP.Application/Services/ReportConfigurationExecutionService.cs",
+      "src/ERP.Api/Controllers/ReportConfigurationsController.cs",
+      "src/ERP.Api/wwwroot/js/report-configuration.js",
+      "src/ERP.Application/Interfaces/IReportConfigurationTransferService.cs",
+      "src/ERP.Application/Services/ReportConfigurationTransferService.cs",
+      "src/ERP.Application/Interfaces/IReportConfigurationService.cs",
+      "src/ERP.Application/Services/ReportConfigurationService.cs",
+      "src/ERP.Application/Interfaces/IReportConfigurationSharingService.cs",
+      "src/ERP.Infrastructure/DependencyInjection.cs",
+      "src/ERP.UnitTests/ReportConfigurationTransferTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationApiTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationSharingTests.cs"
+    ],
+    "Import validates schema/JSON/permissions and all engine capabilities then creates an audited new private draft, never overwrites, publishes or expands rights.": [
+      "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
+      "src/ERP.Application/Services/ReportConfigurationRules.cs",
+      "src/ERP.Application/Services/ReportConfigurationCatalog.cs",
+      "src/ERP.Application/Interfaces/IReportConfigurationDatasetProvider.cs",
+      "src/ERP.Infrastructure/Reports/ReportConfigurationDatasetProvider.cs",
+      "src/ERP.Application/Services/ReportConfigurationExecutionService.cs",
+      "src/ERP.Api/Controllers/ReportConfigurationsController.cs",
+      "src/ERP.Api/wwwroot/js/report-configuration.js",
+      "src/ERP.Application/Interfaces/IReportConfigurationTransferService.cs",
+      "src/ERP.Application/Services/ReportConfigurationTransferService.cs",
+      "src/ERP.Application/Interfaces/IReportConfigurationService.cs",
+      "src/ERP.Application/Services/ReportConfigurationService.cs",
+      "src/ERP.Application/Interfaces/IReportConfigurationSharingService.cs",
+      "src/ERP.Infrastructure/DependencyInjection.cs",
+      "src/ERP.UnitTests/ReportConfigurationTransferTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationPersistenceTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationVersionTests.cs"
+    ],
+    "Customer workspace upload/download preserves edits on errors and meaningful offline roundtrip/malicious/unauthorized tests pass safe build/test.": [
+      "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
+      "src/ERP.Application/Services/ReportConfigurationRules.cs",
+      "src/ERP.Application/Services/ReportConfigurationCatalog.cs",
+      "src/ERP.Application/Interfaces/IReportConfigurationDatasetProvider.cs",
+      "src/ERP.Infrastructure/Reports/ReportConfigurationDatasetProvider.cs",
+      "src/ERP.Application/Services/ReportConfigurationExecutionService.cs",
+      "src/ERP.Api/Controllers/ReportConfigurationsController.cs",
+      "src/ERP.Api/wwwroot/js/report-configuration.js",
+      "src/ERP.Application/Interfaces/IReportConfigurationTransferService.cs",
+      "src/ERP.Application/Services/ReportConfigurationTransferService.cs",
+      "src/ERP.Application/Interfaces/IReportConfigurationService.cs",
+      "src/ERP.Application/Services/ReportConfigurationService.cs",
+      "src/ERP.Application/Interfaces/IReportConfigurationSharingService.cs",
+      "src/ERP.Infrastructure/DependencyInjection.cs",
+      "src/ERP.UnitTests/ReportConfigurationTransferTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationUiTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationApiTests.cs"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
+    "src/ERP.Application/Services/ReportConfigurationRules.cs",
+    "src/ERP.Application/Services/ReportConfigurationCatalog.cs",
+    "src/ERP.Application/Interfaces/IReportConfigurationDatasetProvider.cs",
+    "src/ERP.Infrastructure/Reports/ReportConfigurationDatasetProvider.cs",
+    "src/ERP.Application/Services/ReportConfigurationExecutionService.cs",
+    "src/ERP.Api/Controllers/ReportConfigurationsController.cs",
+    "src/ERP.Api/wwwroot/js/report-configuration.js",
+    "src/ERP.Application/Interfaces/IReportConfigurationTransferService.cs",
+    "src/ERP.Application/Services/ReportConfigurationTransferService.cs",
+    "src/ERP.Application/Interfaces/IReportConfigurationService.cs",
+    "src/ERP.Application/Services/ReportConfigurationService.cs",
+    "src/ERP.Application/Interfaces/IReportConfigurationSharingService.cs",
+    "src/ERP.Infrastructure/DependencyInjection.cs",
+    "src/ERP.UnitTests/ReportConfigurationTransferTests.cs",
+    "src/ERP.UnitTests/ReportConfigurationApiTests.cs",
+    "src/ERP.UnitTests/ReportConfigurationSharingTests.cs",
+    "src/ERP.UnitTests/ReportConfigurationPersistenceTests.cs",
+    "src/ERP.UnitTests/ReportConfigurationVersionTests.cs",
+    "src/ERP.UnitTests/ReportConfigurationUiTests.cs"
+  ],
+  "id": "ERP-276",
+  "depends_on": [
+    "ERP-275"
+  ],
+  "status": "pending",
+  "max_attempts": 3,
+  "attempts": 0,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "browser_acceptance": {
+    "required": false
+  },
+  "risk_level": "medium",
+  "priority": "P1",
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Bounded development-only unified reporting increment"
+  },
+  "created_at": "2026-10-02T17:36:55.752413Z"
+}
