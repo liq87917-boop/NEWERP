@@ -1,0 +1,65 @@
+{
+  "id": "ERP-209",
+  "title": "Summarize all matching quotation conversion buckets by currency",
+  "status": "pending",
+  "risk_level": "low",
+  "priority": "P1",
+  "description": "A user sees per-original-currency totals for every matching authorized quotation conversion bucket alongside the paged designer rows. Extend the existing preview with a separate summary result built from the bounded source service result after all ERP-208 filters but before group-row pagination. Merge only equal canonical currency keys, retain an explicit unknown currency bucket, and calculate effective/converted/expired/cancelled counts plus original-currency amounts; conversion rate must be total converted count divided by total effective count and average converted amount total converted amount divided by total converted count, never average salesperson rates or averages. Return only summary metrics selected by the finite field selection, omitting unselected monetary metrics; currency grouping keys are explicit context. Label coverage all matching scoped buckets within the successful bounded source; source overflow returns no partial summary. Preview renders currency summaries separately from current-page detail and handles empty/loading/denied/errors. Existing current-page Excel/PDF downloads retain their detail semantics; summary-specific downloads are later dependent tasks. Development only: reuse current authenticated ERP identity, the existing quotation menu and freshly resolved SalespersonDataScopeService; audit every endpoint through existing OperationLogMiddleware. No permission expansion, arbitrary/model-generated SQL, direct table or business writes, new entities or persistence schema, migrations, schema/view/stored-procedure edits, production SQL or real database execution, secrets/.env changes, deployment, irreversible operations or real browser acceptance. Preserve unrelated modules and work. Run focused in-memory/service/API/export/UI source-contract tests and configured safe Release build/test; mark unavailable external environments blocked rather than inventing success.",
+  "acceptance_criteria": [
+    "Authorized preview builds per-currency summaries from all scoped filtered buckets before pagination, never cross-currency totals, with explicit all-matching coverage and no result on source-limit failures.",
+    "Summary counts/amounts and weighted derived rates respect field selection, including omitted unselected money, zero denominators and unknown currency; totals remain unchanged when page or page size changes.",
+    "The designer shows distinct per-currency summaries and current-page rows with safe text and empty/loading/errors; existing detail Excel/PDF contracts and focused summary/UI tests plus safe Release build/test pass."
+  ],
+  "criterion_path_map": {
+    "Authorized preview builds per-currency summaries from all scoped filtered buckets before pagination, never cross-currency totals, with explicit all-matching coverage and no result on source-limit failures.": [
+      "src/ERP.Application/DTOs/DynamicQuotationConversionReportDtos.cs",
+      "src/ERP.Application/Services/DynamicQuotationConversionReportRules.cs",
+      "src/ERP.Api/Controllers/DynamicQuotationConversionReportController.cs",
+      "src/ERP.UnitTests/QuotationConversionCurrencySummaryTests.cs",
+      "src/ERP.UnitTests/DynamicQuotationConversionReportTests.cs"
+    ],
+    "Summary counts/amounts and weighted derived rates respect field selection, including omitted unselected money, zero denominators and unknown currency; totals remain unchanged when page or page size changes.": [
+      "src/ERP.Application/DTOs/DynamicQuotationConversionReportDtos.cs",
+      "src/ERP.Application/Services/DynamicQuotationConversionReportRules.cs",
+      "src/ERP.UnitTests/QuotationConversionCurrencySummaryTests.cs"
+    ],
+    "The designer shows distinct per-currency summaries and current-page rows with safe text and empty/loading/errors; existing detail Excel/PDF contracts and focused summary/UI tests plus safe Release build/test pass.": [
+      "src/ERP.Api/wwwroot/js/reports.js",
+      "src/ERP.UnitTests/DynamicQuotationConversionReportUiTests.cs",
+      "src/ERP.UnitTests/QuotationConversionCurrencySummaryTests.cs",
+      "src/ERP.UnitTests/DynamicQuotationConversionReportTests.cs",
+      "src/ERP.UnitTests/DynamicQuotationConversionExcelTests.cs",
+      "src/ERP.UnitTests/DynamicQuotationConversionPdfTests.cs"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Application/DTOs/DynamicQuotationConversionReportDtos.cs",
+    "src/ERP.Application/Services/DynamicQuotationConversionReportRules.cs",
+    "src/ERP.Api/Controllers/DynamicQuotationConversionReportController.cs",
+    "src/ERP.UnitTests/QuotationConversionCurrencySummaryTests.cs",
+    "src/ERP.UnitTests/DynamicQuotationConversionReportTests.cs",
+    "src/ERP.Api/wwwroot/js/reports.js",
+    "src/ERP.UnitTests/DynamicQuotationConversionReportUiTests.cs",
+    "src/ERP.UnitTests/DynamicQuotationConversionExcelTests.cs",
+    "src/ERP.UnitTests/DynamicQuotationConversionPdfTests.cs"
+  ],
+  "depends_on": [
+    "ERP-208"
+  ],
+  "max_attempts": 3,
+  "attempts": 0,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only bounded read/report feature"
+  },
+  "created_at": "2026-10-02T01:09:46.623174Z"
+}

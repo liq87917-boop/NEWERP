@@ -1,0 +1,62 @@
+{
+  "id": "ERP-211",
+  "title": "Download scoped quotation currency summaries as PDF",
+  "status": "pending",
+  "risk_level": "low",
+  "priority": "P1",
+  "description": "A user downloads the all-matching original-currency summary from the quotation designer as PDF with the same selected metrics and applied filter context as the summary Excel. Add a dedicated summary PDF endpoint to the existing controller and a narrow Infrastructure exporter using existing PDFsharp and SimHeiPdfFontResolver, with no dependency/font/config changes. Independently reauthorize and validate through the existing preview path and render only server-derived ERP-209 summaries; paginate wide metric columns and rows, preserve selected metric order and explicit empty evidence, and label all-matching bounded-source coverage. Never combine currencies or show unselected monetary metrics. Missing font or rendering errors must fail clearly with no corrupt file. Add a distinct designer summary PDF action retaining current fields/filters and showing failed downloads; keep current-page PDF behavior intact. Development only: reuse current authenticated ERP identity, the existing quotation menu and freshly resolved SalespersonDataScopeService; audit every endpoint through existing OperationLogMiddleware. No permission expansion, arbitrary/model-generated SQL, direct table or business writes, new entities or persistence schema, migrations, schema/view/stored-procedure edits, production SQL or real database execution, secrets/.env changes, deployment, irreversible operations or real browser acceptance. Preserve unrelated modules and work. Run focused in-memory/service/API/export/UI source-contract tests and configured safe Release build/test; mark unavailable external environments blocked rather than inventing success.",
+  "acceptance_criteria": [
+    "Summary PDF independently validates and rechecks current identity/quotation-menu/customer scope before obtaining server-derived per-currency summaries; invalid/revoked/source-overflow requests return no file.",
+    "The Infrastructure exporter renders selected metric order, normalized filters/dates, all-matching coverage, currency/unknown groups, empty evidence and row/column pagination; unselected money and mixed-currency totals are absent and font/render errors fail explicitly.",
+    "Designer summary PDF keeps current fields/filters and surfaces errors while existing current-page PDF stays compatible; focused PDF/UI tests and safe Release build/test pass."
+  ],
+  "criterion_path_map": {
+    "Summary PDF independently validates and rechecks current identity/quotation-menu/customer scope before obtaining server-derived per-currency summaries; invalid/revoked/source-overflow requests return no file.": [
+      "src/ERP.Api/Controllers/DynamicQuotationConversionReportController.cs",
+      "src/ERP.UnitTests/QuotationConversionCurrencySummaryPdfTests.cs"
+    ],
+    "The Infrastructure exporter renders selected metric order, normalized filters/dates, all-matching coverage, currency/unknown groups, empty evidence and row/column pagination; unselected money and mixed-currency totals are absent and font/render errors fail explicitly.": [
+      "src/ERP.Infrastructure/Export/QuotationConversionCurrencySummaryPdfExporter.cs",
+      "src/ERP.Application/DTOs/DynamicQuotationConversionReportDtos.cs",
+      "src/ERP.Application/Services/DynamicQuotationConversionReportRules.cs",
+      "src/ERP.UnitTests/QuotationConversionCurrencySummaryPdfTests.cs"
+    ],
+    "Designer summary PDF keeps current fields/filters and surfaces errors while existing current-page PDF stays compatible; focused PDF/UI tests and safe Release build/test pass.": [
+      "src/ERP.Api/wwwroot/js/reports.js",
+      "src/ERP.UnitTests/DynamicQuotationConversionReportUiTests.cs",
+      "src/ERP.Api/Controllers/DynamicQuotationConversionReportController.cs",
+      "src/ERP.Infrastructure/Export/QuotationConversionCurrencySummaryPdfExporter.cs",
+      "src/ERP.UnitTests/QuotationConversionCurrencySummaryPdfTests.cs",
+      "src/ERP.UnitTests/DynamicQuotationConversionPdfTests.cs"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/DynamicQuotationConversionReportController.cs",
+    "src/ERP.UnitTests/QuotationConversionCurrencySummaryPdfTests.cs",
+    "src/ERP.Infrastructure/Export/QuotationConversionCurrencySummaryPdfExporter.cs",
+    "src/ERP.Application/DTOs/DynamicQuotationConversionReportDtos.cs",
+    "src/ERP.Application/Services/DynamicQuotationConversionReportRules.cs",
+    "src/ERP.Api/wwwroot/js/reports.js",
+    "src/ERP.UnitTests/DynamicQuotationConversionReportUiTests.cs",
+    "src/ERP.UnitTests/DynamicQuotationConversionPdfTests.cs"
+  ],
+  "depends_on": [
+    "ERP-210"
+  ],
+  "max_attempts": 3,
+  "attempts": 0,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only bounded read/report feature"
+  },
+  "created_at": "2026-10-02T01:09:46.623373Z"
+}

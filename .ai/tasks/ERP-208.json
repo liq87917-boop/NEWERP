@@ -1,0 +1,81 @@
+{
+  "id": "ERP-208",
+  "title": "Filter dynamic quotation reports by customer salesperson and currency",
+  "status": "pending",
+  "risk_level": "medium",
+  "priority": "P1",
+  "description": "A salesperson narrows the existing quotation conversion designer by a positive optional customer ID, a trimmed salesperson-name keyword of at most 80 characters and a finite original-currency selector (blank means all; a known Currency enum code or explicit unknown bucket). Define and normalize one optional application filter DTO and preserve the existing method call shape via a compatible optional filter argument after its mandatory scope argument. Validate before quotation reads, apply parameterized EF predicates to the current-user scoped date query before the 2001-row source limit and before conversion aggregation; never filter only the already aggregated/page rows. Unknown currency means persisted undefined enum values, never fallback to CNY; reject invalid filter tokens. Preserve date, selected-field order, paging and current conversion rules. Designer resets to page one when filters change and retains all filters on preview, Excel and PDF; export context must accurately label applied filters and existing denied/limit/error states. Reuse existing enum/domain mapping unchanged. Development only: reuse current authenticated ERP identity, the existing quotation menu and freshly resolved SalespersonDataScopeService; audit every endpoint through existing OperationLogMiddleware. No permission expansion, arbitrary/model-generated SQL, direct table or business writes, new entities or persistence schema, migrations, schema/view/stored-procedure edits, production SQL or real database execution, secrets/.env changes, deployment, irreversible operations or real browser acceptance. Preserve unrelated modules and work. Run focused in-memory/service/API/export/UI source-contract tests and configured safe Release build/test; mark unavailable external environments blocked rather than inventing success.",
+  "acceptance_criteria": [
+    "Customer ID, salesperson keyword and finite currency filters are validated before quotation reads and applied after ERP customer scope but before source limits and aggregation; unauthorized/null-customer rows do not leak to restricted users.",
+    "The designer resets pagination on filter changes and preserves normalized filters, dates and field order for preview/Excel/PDF; exported filter context and denied/validation/empty/source-limit feedback are accurate.",
+    "Focused service/API/UI/export tests cover filter combinations, undefined currencies, limits after filtering, revocation, unmapped users and compatibility; existing tests and safe Release build/test pass."
+  ],
+  "criterion_path_map": {
+    "Customer ID, salesperson keyword and finite currency filters are validated before quotation reads and applied after ERP customer scope but before source limits and aggregation; unauthorized/null-customer rows do not leak to restricted users.": [
+      "src/ERP.Application/DTOs/QuotationConversionFilterDto.cs",
+      "src/ERP.Application/DTOs/DynamicQuotationConversionReportDtos.cs",
+      "src/ERP.Application/Services/DynamicQuotationConversionReportRules.cs",
+      "src/ERP.Application/Interfaces/IReportService.cs",
+      "src/ERP.Application/Services/ReportService.Quotation.cs",
+      "src/ERP.Api/Controllers/DynamicQuotationConversionReportController.cs",
+      "src/ERP.UnitTests/QuotationConversionFilterTests.cs",
+      "src/ERP.UnitTests/QuotationConversionScopeTests.cs",
+      "src/ERP.UnitTests/QuotationGovernanceTests.cs"
+    ],
+    "The designer resets pagination on filter changes and preserves normalized filters, dates and field order for preview/Excel/PDF; exported filter context and denied/validation/empty/source-limit feedback are accurate.": [
+      "src/ERP.Application/DTOs/DynamicQuotationConversionReportDtos.cs",
+      "src/ERP.Application/Services/DynamicQuotationConversionReportRules.cs",
+      "src/ERP.Api/Controllers/DynamicQuotationConversionReportController.cs",
+      "src/ERP.Api/wwwroot/js/reports.js",
+      "src/ERP.UnitTests/DynamicQuotationConversionReportUiTests.cs",
+      "src/ERP.UnitTests/DynamicQuotationConversionExcelTests.cs",
+      "src/ERP.UnitTests/DynamicQuotationConversionPdfTests.cs",
+      "src/ERP.Infrastructure/Export/DynamicQuotationConversionPdfExporter.cs"
+    ],
+    "Focused service/API/UI/export tests cover filter combinations, undefined currencies, limits after filtering, revocation, unmapped users and compatibility; existing tests and safe Release build/test pass.": [
+      "src/ERP.UnitTests/QuotationConversionFilterTests.cs",
+      "src/ERP.UnitTests/DynamicQuotationConversionReportTests.cs",
+      "src/ERP.UnitTests/QuotationConversionScopeTests.cs",
+      "src/ERP.UnitTests/QuotationGovernanceTests.cs",
+      "src/ERP.UnitTests/DynamicQuotationConversionReportUiTests.cs",
+      "src/ERP.UnitTests/DynamicQuotationConversionExcelTests.cs",
+      "src/ERP.UnitTests/DynamicQuotationConversionPdfTests.cs"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Application/DTOs/QuotationConversionFilterDto.cs",
+    "src/ERP.Application/DTOs/DynamicQuotationConversionReportDtos.cs",
+    "src/ERP.Application/Services/DynamicQuotationConversionReportRules.cs",
+    "src/ERP.Application/Interfaces/IReportService.cs",
+    "src/ERP.Application/Services/ReportService.Quotation.cs",
+    "src/ERP.Api/Controllers/DynamicQuotationConversionReportController.cs",
+    "src/ERP.UnitTests/QuotationConversionFilterTests.cs",
+    "src/ERP.UnitTests/QuotationConversionScopeTests.cs",
+    "src/ERP.UnitTests/QuotationGovernanceTests.cs",
+    "src/ERP.Api/wwwroot/js/reports.js",
+    "src/ERP.UnitTests/DynamicQuotationConversionReportUiTests.cs",
+    "src/ERP.UnitTests/DynamicQuotationConversionExcelTests.cs",
+    "src/ERP.UnitTests/DynamicQuotationConversionPdfTests.cs",
+    "src/ERP.Infrastructure/Export/DynamicQuotationConversionPdfExporter.cs",
+    "src/ERP.UnitTests/DynamicQuotationConversionReportTests.cs"
+  ],
+  "depends_on": [
+    "ERP-207"
+  ],
+  "max_attempts": 3,
+  "attempts": 0,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only bounded read/report feature"
+  },
+  "created_at": "2026-10-02T01:09:46.623044Z"
+}
