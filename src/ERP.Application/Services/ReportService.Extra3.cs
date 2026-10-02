@@ -1,3 +1,4 @@
+using ERP.Application.Common;
 using ERP.Application.Interfaces;
 using ERP.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
@@ -5,68 +6,144 @@ using Microsoft.EntityFrameworkCore;
 namespace ERP.Application.Services;
 
 /// <summary>
-/// 扩展报表实现（三）：业务员提成表
-/// 提成规则：**统一比例**，比例取自系统参数 `SalesCommissionRate`（%，可在「系统设置 → 系统参数」维护）；
-///           默认为 0 时仅输出业绩数据（销售额 / 毛利 / 毛利率），提成额为 0，便于先看数据再定比例。
-///           （阶梯提成、按柜提成等规则留待后续扩展，避免现在把规则写死。）
+/// 扩展报表实现（三）：业务员提成表（ERP-243，只读派生）
+/// <para>口径：仅统计已审核、未删除、当前账号数据范围内的销售订单头，按「持久化业务员桶 × 原始原币」分组。
+/// 已知币种按签名订单头 <c>TotalAmount</c> 小计；未知 / 无效币种保留原始键、金额为 null 仅计数。
+/// 利润 / 利润率 / 提成额恒为未知（null）：当前商品售价 / 成本价不能证明历史可比较成本 / 利润 / 提成，
+/// 因此本报表不再读取销售订单明细与当前商品成本价，绝不从当前成本派生或推断为 0。</para>
+/// <para>系统参数 <c>SalesCommissionRate</c> 仅作为「当前参考比例」（可空）：至多读取 2 条未删除记录，
+/// 恰好一条不变量普通十进制 0..100（含显式 0）才可知；缺失 / 重复 / 非法 / 负数 / 超范围一律未知，绝不回退为 0。</para>
 /// </summary>
 public partial class ReportService
 {
-    /// <summary>业务员提成表（按毛利降序）</summary>
-    public async Task<List<ReportDtos.SalesCommissionItem>> GetSalesCommissionAsync(DateTime start, DateTime end)
+    /// <summary>业务员提成表允许的日期区间最大跨度（含首尾日历日）：366 天</summary>
+    private const int SalesCommissionMaxDateRangeDays = 366;
+
+    /// <summary>业务员提成表订单头读取上限（范围内已审核销售订单）：500 张</summary>
+    private const int SalesCommissionMaxOrders = 500;
+
+    /// <summary>
+    /// 业务员提成表（只读派生，ERP-243）：日期校验（含结束日溢出防护）先于任何源读取；
+    /// 订单头在业务员数据范围之后稳定排序做 501 行探测（500 张上限），超出即 fail closed 且不返回任何行或金额；
+    /// 业务员姓名按已限定范围内 Id 一次固定批量查询（未删除，无逐单 / 逐行查库，绝不做员工权威 / 广域目录读取）；
+    /// 系统参数 <c>SalesCommissionRate</c> 至多读取 2 条未删除记录并解析当前参考比例（可空）。
+    /// </summary>
+    public async Task<List<ReportDtos.SalesCommissionItem>> GetSalesCommissionAsync(
+        DateTime start, DateTime end, SalespersonDataScope scope)
     {
-        // 提成比例（系统参数，默认 0）
-        var rateText = await _db.SysParameters
-            .Where(p => !p.IsDeleted && p.ParamKey == "SalesCommissionRate")
-            .Select(p => p.ParamValue)
-            .FirstOrDefaultAsync();
-        var rate = decimal.TryParse(rateText, out var parsed) && parsed > 0 ? parsed : 0m;
+        ArgumentNullException.ThrowIfNull(scope);
 
-        var orders = await _db.SalesOrders
-            .Where(o => !o.IsDeleted && o.OrderDate >= start && o.OrderDate <= end
-                        && o.Status != DocumentStatus.Cancelled && o.Status != DocumentStatus.Rejected)
+        // 1) 日期校验先于任何源读取（fail closed，含结束日溢出防护）
+        var startDate = start.Date;
+        var endDate = end.Date;
+        if (endDate < startDate)
+            throw new BusinessException("业务员提成表的结束日期不能早于开始日期", ErrorCodes.InvalidParameter);
+
+        var inclusiveDays = (endDate - startDate).Days + 1;
+        if (inclusiveDays > SalesCommissionMaxDateRangeDays)
+            throw new BusinessException(
+                $"业务员提成表的日期范围最多 {SalesCommissionMaxDateRangeDays} 天（含首尾）",
+                ErrorCodes.InvalidParameter);
+
+        if (endDate == DateTime.MaxValue.Date)
+            throw new BusinessException("业务员提成表的结束日期无效（结束日次日溢出）", ErrorCodes.InvalidParameter);
+
+        var endExclusive = endDate.AddDays(1);
+
+        // 2) 订单头：已审核、未删除、日期窗口、业务员数据范围；稳定排序后做 501 行探测（500 张上限）
+        var ordersQuery = _db.SalesOrders
+            .Where(o => !o.IsDeleted
+                        && o.Status == DocumentStatus.Approved
+                        && o.OrderDate >= startDate
+                        && o.OrderDate < endExclusive);
+        ordersQuery = SalespersonDataScopeService.FilterByCustomer(ordersQuery, scope, o => o.CustomerId);
+
+        var orders = await ordersQuery
+            .OrderBy(o => o.SalesmanId)
+            .ThenBy(o => o.Id)
+            .Take(SalesCommissionMaxOrders + 1)
             .ToListAsync();
-        if (orders.Count == 0) return new List<ReportDtos.SalesCommissionItem>();
 
-        var orderIds = orders.Select(o => o.Id).ToList();
-        var details = await _db.SalesOrderDetails
-            .Where(x => orderIds.Contains(x.SalesOrderId) && !x.IsDeleted)
-            .ToListAsync();
+        if (orders.Count > SalesCommissionMaxOrders)
+        {
+            throw new BusinessException(
+                $"业务员提成表超出报告上限：范围内已审核销售订单超过 {SalesCommissionMaxOrders} 张"
+                + "（fail closed，不返回任何行或金额）",
+                ErrorCodes.RuleConflict);
+        }
 
-        var productIds = details.Select(x => x.ProductId).Distinct().ToList();
-        var products = await _db.BaseProducts
-            .Where(p => productIds.Contains(p.Id))
-            .ToDictionaryAsync(p => p.Id, p => p);
-
-        var salesmanIds = orders.Where(o => o.SalesmanId.HasValue && o.SalesmanId > 0)
-            .Select(o => o.SalesmanId!.Value).Distinct().ToList();
+        // 3) 业务员姓名按已限定范围内 Id 一次固定批量查询（未删除；无逐单 / 逐行查库、绝不做员工权威 / 广域目录读取）
+        var salesmanIds = orders
+            .Where(o => o.SalesmanId is > 0)
+            .Select(o => o.SalesmanId!.Value)
+            .Distinct()
+            .ToList();
         var employees = await _db.BaseEmployees
-            .Where(e => salesmanIds.Contains(e.Id))
-            .ToDictionaryAsync(e => e.Id, e => e);
+            .Where(e => salesmanIds.Contains(e.Id) && !e.IsDeleted)
+            .ToDictionaryAsync(e => e.Id, e => e.EmployeeName);
 
-        decimal ProfitOf(long orderId) => details
-            .Where(x => x.SalesOrderId == orderId)
-            .Sum(x => x.Quantity * (x.UnitPrice - (products.TryGetValue(x.ProductId, out var p) ? p.CostPrice : 0)));
+        // 4) 系统参数 SalesCommissionRate：至多读取 2 条未删除记录；恰好一条 0..100 普通十进制为当前参考比例（含显式 0）
+        var rateValues = await _db.SysParameters
+            .Where(p => !p.IsDeleted && p.ParamKey == SalesCommissionEvidenceRules.SalesCommissionRateKey)
+            .OrderBy(p => p.Id)
+            .Select(p => p.ParamValue)
+            .Take(2)
+            .ToListAsync();
+        var (rate, rateReason) = SalesCommissionEvidenceRules.ParseRate(rateValues);
 
-        return orders
-            .GroupBy(o => o.SalesmanId ?? 0)
-            .Select(g =>
+        // 5) 按「持久化业务员桶 × 原始原币」分组（未指定业务员与缺失 / 已删除员工刻意区分）；
+        //    金额仅已知币种签名小计、未知币种 null；利润 / 利润率 / 提成额恒为未知（null）
+        var result = new List<ReportDtos.SalesCommissionItem>();
+        foreach (var salesmanGroup in orders.GroupBy(o => o.SalesmanId is > 0 ? o.SalesmanId : null))
+        {
+            var bucket = salesmanGroup.Key;
+            var nameKnown = bucket.HasValue
+                            && employees.TryGetValue(bucket.Value, out var name)
+                            && !string.IsNullOrWhiteSpace(name);
+            var salesmanName = bucket.HasValue
+                ? (nameKnown ? employees[bucket.Value] : SalesCommissionEvidenceRules.UnknownSalesmanName)
+                : SalesCommissionEvidenceRules.UnassignedSalesmanName;
+            var identityEvidence = bucket.HasValue
+                ? (nameKnown ? string.Empty : SalesCommissionEvidenceRules.UnknownSalesmanIdentityEvidence)
+                : SalesCommissionEvidenceRules.UnassignedSalesmanIdentityEvidence;
+
+            foreach (var currencyGroup in salesmanGroup
+                         .GroupBy(o => SalesCommissionEvidenceRules.CurrencyGroupKey(o.Currency))
+                         .OrderBy(g => g.Key, StringComparer.Ordinal))
             {
-                employees.TryGetValue(g.Key, out var emp);
-                var sales = g.Sum(x => x.TotalAmount);
-                var profit = g.Sum(x => ProfitOf(x.Id));
-                return new ReportDtos.SalesCommissionItem
+                var currencyKey = currencyGroup.Key;
+                var isKnown = SalesCommissionEvidenceRules.IsKnownCurrency(currencyGroup.First().Currency);
+                result.Add(new ReportDtos.SalesCommissionItem
                 {
-                    SalesmanName = emp?.EmployeeName ?? (g.Key > 0 ? "业务员#" + g.Key : "(未指定业务员)"),
-                    OrderCount = g.Count(),
-                    SalesAmount = sales,
-                    Profit = profit,
-                    ProfitRate = sales > 0 ? Math.Round(profit / sales * 100, 2) : 0,
+                    SalesmanId = bucket,
+                    SalesmanName = salesmanName,
+                    SalesmanIdentityEvidence = identityEvidence,
+                    Currency = currencyKey,
+                    CurrencyLabel = SalesCommissionEvidenceRules.CurrencyGroupLabel(currencyKey),
+                    OrderCount = currencyGroup.Count(),
+                    SalesAmount = isKnown ? (decimal?)currencyGroup.Sum(o => o.TotalAmount) : null,
+                    AmountLabel = SalesCommissionEvidenceRules.AmountLabel,
+                    CurrencyEvidence = isKnown
+                        ? SalesCommissionEvidenceRules.KnownCurrencyEvidence
+                        : SalesCommissionEvidenceRules.UnknownCurrencyEvidence,
+                    Profit = null,
+                    ProfitEvidence = SalesCommissionEvidenceRules.ProfitEvidence,
+                    ProfitRate = null,
+                    ProfitRateEvidence = SalesCommissionEvidenceRules.ProfitRateEvidence,
                     CommissionRate = rate,
-                    CommissionAmount = profit > 0 ? Math.Round(profit * rate / 100m, 2) : 0
-                };
-            })
-            .OrderByDescending(x => x.Profit)
+                    CommissionRateEvidence = string.IsNullOrEmpty(rateReason)
+                        ? SalesCommissionEvidenceRules.CommissionRateEvidence
+                        : rateReason,
+                    CommissionAmount = null,
+                    CommissionEvidence = SalesCommissionEvidenceRules.CommissionEvidence,
+                    SourceLabel = SalesCommissionEvidenceRules.SourceLabel
+                });
+            }
+        }
+
+        return result
+            .OrderBy(x => x.SalesmanId)
+            .ThenBy(x => x.Currency, StringComparer.Ordinal)
             .ToList();
     }
 }

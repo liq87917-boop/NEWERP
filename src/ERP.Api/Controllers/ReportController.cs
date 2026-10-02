@@ -51,6 +51,12 @@ public class ReportController : ControllerBase
     /// <summary>业务员产值报表要求菜单的中文文案（与既有菜单名一致）</summary>
     private const string SalesmanOutputMenuText = "业务员产值报表";
 
+    /// <summary>业务员提成报表要求的既有菜单编码（与 SeedData / SchemaUpgrader 同源）</summary>
+    private const string SalesCommissionMenuCode = "sales-commission";
+
+    /// <summary>业务员提成报表要求菜单的中文文案（与既有菜单名一致）</summary>
+    private const string SalesCommissionMenuText = "业务员提成表";
+
     private readonly IReportService _reportService;
     private readonly IErpDbContext? _db;
 
@@ -244,11 +250,31 @@ public class ReportController : ControllerBase
         return Ok(ApiResponse<List<ReportDtos.StockAlertItem>>.Success(result));
     }
 
-    /// <summary>业务员提成表</summary>
+    /// <summary>业务员提成表（ERP-243；每次请求重新校验身份、菜单授权与业务员数据范围，缺失即 fail closed，不返回任何数据）</summary>
     [HttpGet("sales-commission")]
     public async Task<IActionResult> SalesCommission([FromQuery] DateTime start, [FromQuery] DateTime end)
     {
-        var result = await _reportService.GetSalesCommissionAsync(start, end);
+        if (_db is null)
+            throw new BusinessException("业务员提成报表缺少数据库上下文，无法解析当前账号授权", ErrorCodes.InternalError);
+
+        var db = _db;
+        var userId = CurrentUserId();
+        if (userId is null or <= 0)
+            throw new BusinessException("请先登录后再查看业务员提成报表", ErrorCodes.Unauthorized);
+
+        var menuCodes = await CustomerReceivableReconciliationService.LoadAuthorizedMenuCodesAsync(
+            db, userId.Value);
+        if (!menuCodes.Contains(SalesCommissionMenuCode, StringComparer.OrdinalIgnoreCase))
+        {
+            throw new BusinessException(
+                $"当前账号没有「{SalesCommissionMenuText}」（{SalesCommissionMenuCode}）模块授权：拒绝查看业务员提成报表"
+                + "（fail closed，不返回任何数据）",
+                ErrorCodes.Forbidden);
+        }
+
+        var scope = await SalespersonDataScopeService.ResolveAsync(db, userId);
+
+        var result = await _reportService.GetSalesCommissionAsync(start, end, scope);
         return Ok(ApiResponse<List<ReportDtos.SalesCommissionItem>>.Success(result));
     }
 

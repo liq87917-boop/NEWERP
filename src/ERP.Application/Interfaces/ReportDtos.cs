@@ -261,18 +261,67 @@ public static partial class ReportDtos
         public string AlertLevel { get; set; } = string.Empty;
     }
 
-    /// <summary>业务员提成项（销售额 / 毛利 / 提成额）</summary>
+    /// <summary>
+    /// 业务员提成项（ERP-243，只读派生）：按「持久化业务员桶 × 原始原币」分组，
+    /// 金额仅在已知币种下按签名订单头 <c>TotalAmount</c> 小计，未知 / 无效币种保留原始键且金额为 null 仅计数；
+    /// 利润 / 利润率 / 提成额恒为未知（null，绝不从当前商品成本派生或推断为 0）；
+    /// 提成比例为可空的「当前参考比例」（系统参数 SalesCommissionRate 恰好一条不变量普通十进制 0..100 时可知，含显式 0）。
+    /// </summary>
     public class SalesCommissionItem
     {
+        /// <summary>持久化业务员桶（订单 <c>SalesmanId</c>；null / &lt;=0 表示「未指定业务员」桶，与「缺失 / 已删除员工」桶刻意区分）</summary>
+        public long? SalesmanId { get; set; }
+
+        /// <summary>业务员展示名（未指定业务员为「(未指定业务员)」；员工缺失 / 已删除为「未知业务员」）</summary>
         public string SalesmanName { get; set; } = string.Empty;
+
+        /// <summary>业务员身份依据标签（缺失 / 已删除员工的显式未知身份；仅订单属性，非权限边界）</summary>
+        public string SalesmanIdentityEvidence { get; set; } = string.Empty;
+
+        /// <summary>原始原币币种键（已知枚举为名称如 USD；未知 / 无效为原始数值如 999，绝不折叠为默认币种）</summary>
+        public string Currency { get; set; } = string.Empty;
+
+        /// <summary>原币币种标签（如「USD 美元」；未知 / 无效为「未知币种」）</summary>
+        public string CurrencyLabel { get; set; } = string.Empty;
+
+        /// <summary>该业务员 / 币种分桶内已审核、未删除销售订单头数量</summary>
         public int OrderCount { get; set; }
-        public decimal SalesAmount { get; set; }
-        public decimal Profit { get; set; }
-        public decimal ProfitRate { get; set; }
-        /// <summary>提成比例（%，取自系统参数 SalesCommissionRate）</summary>
-        public decimal CommissionRate { get; set; }
-        /// <summary>提成额（= 毛利 × 提成比例）</summary>
-        public decimal CommissionAmount { get; set; }
+
+        /// <summary>原币订单金额小计（签名，仅已知币种）；未知 / 无效币种为 null（不推断币种、金额未知）</summary>
+        public decimal? SalesAmount { get; set; }
+
+        /// <summary>金额口径证据标签：已审核订单金额（原币），非实际收款金额</summary>
+        public string AmountLabel { get; set; } = string.Empty;
+
+        /// <summary>币种证据标签（已知原币 / 未知币种原因）</summary>
+        public string CurrencyEvidence { get; set; } = string.Empty;
+
+        /// <summary>利润（未知：当前商品售价/成本价不能证明历史可比较成本/利润，绝不回落为 0）</summary>
+        public decimal? Profit { get; set; }
+
+        /// <summary>利润证据标签（未知原因）</summary>
+        public string ProfitEvidence { get; set; } = string.Empty;
+
+        /// <summary>利润率 %（未知：与利润同源，绝不回落为 0）</summary>
+        public decimal? ProfitRate { get; set; }
+
+        /// <summary>利润率证据标签（未知原因）</summary>
+        public string ProfitRateEvidence { get; set; } = string.Empty;
+
+        /// <summary>提成比例 %（当前参考，可空：系统参数 SalesCommissionRate 恰好一条不变量普通十进制 0..100 时可知，含显式 0）</summary>
+        public decimal? CommissionRate { get; set; }
+
+        /// <summary>提成比例依据标签（当前参考 / 缺失 / 重复 / 非法 / 负数 / 超范围原因）</summary>
+        public string CommissionRateEvidence { get; set; } = string.Empty;
+
+        /// <summary>提成额（未知：历史可比较成本/利润缺失，绝不从当前成本派生或推断为 0）</summary>
+        public decimal? CommissionAmount { get; set; }
+
+        /// <summary>提成额依据标签（未知原因）</summary>
+        public string CommissionEvidence { get; set; } = string.Empty;
+
+        /// <summary>来源依据标签：已审核、未删除、授权客户销售订单证据（非总 ERP 订单 / 产值 / 实际收入 / 出货 / 收款）</summary>
+        public string SourceLabel { get; set; } = string.Empty;
     }
 
     /// <summary>

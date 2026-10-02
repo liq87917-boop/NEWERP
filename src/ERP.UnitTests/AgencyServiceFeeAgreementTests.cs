@@ -896,7 +896,8 @@ public class AgencyServiceFeeAgreementTests
         await db.SaveChangesAsync();
 
         var report = new ReportService(db);
-        var before = await report.GetSalesCommissionAsync(new DateTime(2026, 9, 1), new DateTime(2026, 9, 30));
+        var scope = new SalespersonDataScope { IsPrivileged = true, AllowedCustomerIds = null };
+        var before = await report.GetSalesCommissionAsync(new DateTime(2026, 9, 1), new DateTime(2026, 9, 30), scope);
         Assert.Single(before);
         Assert.Equal(10m, before[0].CommissionRate);
 
@@ -905,7 +906,7 @@ public class AgencyServiceFeeAgreementTests
         AssertOk<AgencyServiceFeeAgreementDto>(await controller.Void(recorded.Id,
             new AgencyServiceFeeAgreementVoidRequest { Reason = "协议终止" }));
 
-        var after = await report.GetSalesCommissionAsync(new DateTime(2026, 9, 1), new DateTime(2026, 9, 30));
+        var after = await report.GetSalesCommissionAsync(new DateTime(2026, 9, 1), new DateTime(2026, 9, 30), scope);
         Assert.Single(after);
         Assert.Equal(before[0].SalesmanName, after[0].SalesmanName);
         Assert.Equal(before[0].CommissionRate, after[0].CommissionRate);

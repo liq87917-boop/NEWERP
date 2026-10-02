@@ -132,15 +132,25 @@ const REPORTS = {
 
   /* === 阶段 2 续：业务员提成 === */
   'sales-commission': { api: '/api/reports/sales-commission', title: '业务员提成表',
-    emoji: '💰', kpi: 'gold', summary: '按业务员：销售额 / 毛利 / 毛利率 / 提成额（提成比例取自系统参数 SalesCommissionRate）',
+    emoji: '💰', kpi: 'gold',
+    summary: '按业务员桶 × 原币：已审核订单金额小计（原币）· 利润/提成未知 · 提成比例为当前参考（非历史约定/实际提成）',
     columns: [
       { key: 'salesmanName', label: '业务员' },
+      { key: 'salesmanIdentityEvidence', label: '业务员身份依据' },
+      { key: 'currencyLabel', label: '原币币种' },
       { key: 'orderCount', label: '订单数', type: 'number' },
-      { key: 'salesAmount', label: '销售额', type: 'money' },
-      { key: 'profit', label: '毛利', type: 'money' },
-      { key: 'profitRate', label: '毛利率%', type: 'number' },
-      { key: 'commissionRate', label: '提成比例%', type: 'number' },
+      { key: 'salesAmount', label: '订单金额小计(原币)', type: 'money' },
+      { key: 'amountLabel', label: '金额口径' },
+      { key: 'currencyEvidence', label: '币种证据' },
+      { key: 'profit', label: '利润', type: 'money' },
+      { key: 'profitEvidence', label: '利润依据' },
+      { key: 'profitRate', label: '利润率%', type: 'number' },
+      { key: 'profitRateEvidence', label: '利润率依据' },
+      { key: 'commissionRate', label: '提成比例%(当前参考)', type: 'number' },
+      { key: 'commissionRateEvidence', label: '提成比例依据' },
       { key: 'commissionAmount', label: '提成额', type: 'money' },
+      { key: 'commissionEvidence', label: '提成依据' },
+      { key: 'sourceLabel', label: '来源依据' },
     ] },
 
   /* === 阶段 2 续：跟进提醒（客户回访清单） === */
@@ -280,6 +290,7 @@ function fillReportKpi(code, data) {
   if (code === 'order-profit') { fillOrderProfitKpi(data); return; }
   if (code === 'customer-shipment') { fillCustomerShipmentKpi(data); return; }
   if (code === 'salesman-output') { fillSalesmanOutputKpi(data); return; }
+  if (code === 'sales-commission') { fillSalesCommissionKpi(data); return; }
   if (code === 'balance-sheet' || code === 'income-statement' || code === 'cash-flow') {
     const lines = data.lines || [];
     const total = lines.reduce((s, l) => s + (Number(l.amount) || 0), 0);
@@ -375,6 +386,27 @@ function fillSalesmanOutputKpi(data) {
   setT('top-tip', '排序首位（业务员 Id / 币种升序）');
 }
 
+/* 业务员提成 KPI：按业务员桶 × 原币分组；金额仅同币种小计、绝不跨币种合计；利润/提成未知，绝不把当前参考比例标成已赚提成 */
+function fillSalesCommissionKpi(data) {
+  const setR = (k, v) => { const el = document.querySelector(`[data-rkpi="${k}"]`); if (el) el.firstChild.nodeValue = String(v); };
+  const setT = (k, v) => { const el = document.querySelector(`[data-rkpi="${k}"]`); if (el) el.textContent = String(v); };
+  const rows = Array.isArray(data) ? data : [];
+  setR('rows', rows.length);
+  setT('rows-tip', '业务员桶 × 原币分组');
+
+  const label = document.querySelector('[data-rkpi-label="total"]');
+  if (label) label.textContent = '币种';
+  const unit = document.querySelector('[data-rkpi-unit="total"]');
+  if (unit) unit.textContent = '';
+  const currencies = Array.from(new Set(rows.map(r => String(r.currency || '未知币种')))).sort();
+  setR('total', currencies.length ? currencies.join(' / ') : '--');
+  setT('total-tip', '原币分列呈现，绝不跨币种合计金额');
+
+  const top = rows[0];
+  setR('top', top ? `${top.salesmanName || '未指定业务员'} · ${top.currencyLabel || top.currency || '未知币种'}` : '--');
+  setT('top-tip', '排序首位（业务员桶升序 · 币种升序）');
+}
+
 /* 订单利润暂估 KPI：销售额为订单原币，成本/利润/利润率为未知，绝不跨币种合计、绝不展示实际利润口径 */
 function fillOrderProfitKpi(data) {
   const setR = (k, v) => { const el = document.querySelector(`[data-rkpi="${k}"]`); if (el) el.firstChild.nodeValue = String(v); };
@@ -449,6 +481,7 @@ function renderReportData(code, data) {
   if (code === 'order-profit') { renderOrderProfitData(data); return; }
   if (code === 'customer-shipment') { renderCustomerShipmentData(data); return; }
   if (code === 'salesman-output') { renderSalesmanOutputData(data); return; }
+  if (code === 'sales-commission') { renderSalesCommissionData(data); return; }
   const arr = Array.isArray(data) ? data : (data.items || []);
   if (!arr.length) { el.innerHTML = emptyReportHtml('暂无数据', '📭'); return; }
   const rep = REPORTS[code] || {};
@@ -557,6 +590,43 @@ function renderSalesmanOutputData(data) {
   el.innerHTML = `<div class="text-muted">已分配业务员 · 已审核 · 未删除 · 授权客户销售订单证据（非总ERP订单 / 非产值 / 非实际收入 / 非出货 / 非收款）；未分配业务员的订单不参与</div>
     <table><thead><tr>
       <th>业务员</th><th>原币币种</th><th class="text-right">已审核订单数</th><th class="text-right">订单金额小计(原币)</th><th>币种证据</th><th class="text-right">利润</th><th>利润依据</th>
+    </tr></thead><tbody>${body}</tbody></table>`;
+}
+
+/* 业务员提成表：按业务员桶 × 原币分组；金额仅在已知币种下显示原币小计、未知币种为「未知」；
+   利润/利润率/提成额恒为未知（null）；提成比例为「当前参考」（非历史约定/实际提成/客户代理费/台账分录）；
+   绝不跨币种合计，绝不把提成额标成已赚/已计提 */
+function renderSalesCommissionData(data) {
+  const el = document.getElementById('report-table');
+  const rows = Array.isArray(data) ? data : [];
+  if (!rows.length) { el.innerHTML = emptyReportHtml('暂无数据', '💰'); return; }
+  const esc = (v) => fudDesEsc(v);
+  const num = (v) => (v === null || v === undefined ? '<span class="text-muted">未知</span>' : fmtMoney(v));
+  const pct = (v) => (v === null || v === undefined ? '<span class="text-muted">未知</span>' : fmtMoney(v) + '%');
+  const body = rows.map(r => `<tr>
+    <td>${esc(r.salesmanName || '未知业务员')}</td>
+    <td>${esc(r.salesmanIdentityEvidence || '')}</td>
+    <td>${esc(r.currencyLabel || r.currency || '未知币种')}</td>
+    <td class="text-right">${r.orderCount ?? ''}</td>
+    <td class="text-right">${num(r.salesAmount)}</td>
+    <td>${esc(r.amountLabel || '')}</td>
+    <td>${esc(r.currencyEvidence || '')}</td>
+    <td class="text-right">${num(r.profit)}</td>
+    <td>${esc(r.profitEvidence || '')}</td>
+    <td class="text-right">${num(r.profitRate)}</td>
+    <td>${esc(r.profitRateEvidence || '')}</td>
+    <td class="text-right">${pct(r.commissionRate)}</td>
+    <td>${esc(r.commissionRateEvidence || '')}</td>
+    <td class="text-right">${num(r.commissionAmount)}</td>
+    <td>${esc(r.commissionEvidence || '')}</td>
+    <td>${esc(r.sourceLabel || '')}</td>
+  </tr>`).join('');
+  el.innerHTML = `<div class="text-muted">已审核 · 未删除 · 授权客户销售订单证据；金额按业务员桶 × 原币分列，利润/提成未知；提成比例为当前参考（非历史约定/实际提成）</div>
+    <table><thead><tr>
+      <th>业务员</th><th>业务员身份依据</th><th>原币币种</th><th class="text-right">订单数</th>
+      <th class="text-right">订单金额小计(原币)</th><th>金额口径</th><th>币种证据</th>
+      <th class="text-right">利润</th><th>利润依据</th><th class="text-right">利润率%</th><th>利润率依据</th>
+      <th class="text-right">提成比例%(当前参考)</th><th>提成比例依据</th><th class="text-right">提成额</th><th>提成依据</th><th>来源依据</th>
     </tr></thead><tbody>${body}</tbody></table>`;
 }
 

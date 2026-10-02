@@ -52,8 +52,12 @@ public interface IReportService
     /// <summary>库存预警（低于安全库存 / 高于上限）</summary>
     Task<List<ReportDtos.StockAlertItem>> GetStockAlertAsync();
 
-    /// <summary>业务员提成表（销售额 / 毛利 / 提成额，提成比例取自系统参数）</summary>
-    Task<List<ReportDtos.SalesCommissionItem>> GetSalesCommissionAsync(DateTime start, DateTime end);
+    /// <summary>
+    /// 业务员提成表（ERP-243，只读派生）：仅已审核、未删除、当前账号数据范围内的销售订单头，按「持久化业务员桶 × 原始原币」分组；
+    /// 金额仅已知币种签名小计、未知 / 无效币种金额为 null 仅计数；利润 / 利润率 / 提成额恒为未知（null）；
+    /// 系统参数 SalesCommissionRate 仅为可空的当前参考比例（至多读取 2 条未删除记录，缺失 / 重复 / 非法一律未知）。日期有界，超出即 fail closed。
+    /// </summary>
+    Task<List<ReportDtos.SalesCommissionItem>> GetSalesCommissionAsync(DateTime start, DateTime end, SalespersonDataScope scope);
 
     /// <summary>跟进提醒（下次跟进日期已到期或即将到期的记录；按当前账号业务员数据范围过滤）</summary>
     Task<List<ReportDtos.FollowUpDueItem>> GetFollowUpDueAsync(DateTime asOfDate, int aheadDays, SalespersonDataScope scope);
