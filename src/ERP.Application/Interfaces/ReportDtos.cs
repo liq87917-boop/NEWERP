@@ -151,12 +151,15 @@ public static partial class ReportDtos
     }
 
     /// <summary>
-    /// 报价成交率分析项（ERP-018，按业务员聚合；计算口径见 <c>docs/报价单与PI设计方案.md</c> §10.3）
+    /// 报价成交率分析项（ERP-018，按业务员 × 原币聚合；计算口径见 <c>docs/报价单与PI设计方案.md</c> §10.3）
     /// </summary>
     public class QuotationConversionItem
     {
         /// <summary>业务员（报价单未填业务员时归入「未指定业务员」）</summary>
         public string SalesmanName { get; set; } = string.Empty;
+
+        /// <summary>原币币种（规范化大写；空值 / 未知取值归入「未知币种」，绝不默认币种或折算汇率）</summary>
+        public string Currency { get; set; } = string.Empty;
 
         /// <summary>有效报价单数（分母：期间内未删除、未作废的报价单数）</summary>
         public int QuotationCount { get; set; }

@@ -109,20 +109,21 @@ const REPORTS = {
       { key: 'subject', label: '跟进主题' },
     ] },
 
-  /* === ERP-018：报价成交率（询报价 → 形式发票 PI / 销售订单 转化分析） === */
+  /* === ERP-018：报价成交率（询报价 → 形式发票 PI / 销售订单 转化分析；按业务员 × 原币分列，金额绝不跨币种合计） === */
   'quotation-conversion': { api: '/api/reports/quotation-conversion', title: '报价成交率分析',
     emoji: '📈', kpi: 'gold',
-    summary: '按业务员：成交率 = 已转出数 ÷ 有效报价数 × 100（已转出 = 已转 PI / 已转销售订单 / 已完成；已作废不计入分母）',
+    summary: '按业务员 × 原币币种：成交率 = 已转出数 ÷ 有效报价数 × 100（已转出 = 已转 PI / 已转销售订单 / 已完成；已作废不计入分母；金额按原币分列，不跨币种合计）',
     columns: [
       { key: 'salesmanName', label: '业务员' },
+      { key: 'currency', label: '原币币种' },
       { key: 'quotationCount', label: '有效报价数', type: 'number' },
       { key: 'convertedCount', label: '已转出数', type: 'number' },
       { key: 'conversionRate', label: '成交率%', type: 'number' },
       { key: 'expiredCount', label: '已过期未成交', type: 'number' },
       { key: 'cancelledCount', label: '已作废', type: 'number' },
-      { key: 'totalAmount', label: '有效报价金额', type: 'money' },
-      { key: 'convertedAmount', label: '已转出金额', type: 'money' },
-      { key: 'avgConvertedAmount', label: '单笔成交均价', type: 'money' },
+      { key: 'totalAmount', label: '有效报价金额(原币)', type: 'money' },
+      { key: 'convertedAmount', label: '已转出金额(原币)', type: 'money' },
+      { key: 'avgConvertedAmount', label: '单笔成交均价(原币)', type: 'money' },
     ] },
 };
 
@@ -146,8 +147,8 @@ async function renderReport(rep, name) {
         <div class="kpi-delta flat" data-rkpi="rows-tip">查询中…</div>
       </div>
       <div class="kpi-card gold">
-        <div class="kpi-label"><span class="kpi-emoji">💰</span>合计金额</div>
-        <div class="kpi-value" data-rkpi="total">--<span class="unit">USD</span></div>
+        <div class="kpi-label"><span class="kpi-emoji">💰</span><span data-rkpi-label="total">合计金额</span></div>
+        <div class="kpi-value" data-rkpi="total">--<span class="unit" data-rkpi-unit="total">USD</span></div>
         <div class="kpi-delta flat" data-rkpi="total-tip">本币合计</div>
       </div>
       <div class="kpi-card ocean">
@@ -204,6 +205,7 @@ async function loadReport() {
 function fillReportKpi(code, data) {
   const setR = (k, v) => { const el = document.querySelector(`[data-rkpi="${k}"]`); if (el) el.firstChild.nodeValue = String(v); };
   const setT = (k, v) => { const el = document.querySelector(`[data-rkpi="${k}"]`); if (el) el.textContent = String(v); };
+  if (code === 'quotation-conversion') { fillQuotationConversionKpi(data); return; }
   if (code === 'balance-sheet' || code === 'income-statement' || code === 'cash-flow') {
     const lines = data.lines || [];
     const total = lines.reduce((s, l) => s + (Number(l.amount) || 0), 0);
@@ -223,6 +225,34 @@ function fillReportKpi(code, data) {
     setR('total', '--');
     setR('top', data.items[0]?.name || '--');
   }
+}
+
+/* 报价成交率 KPI：金额一律按原币分列，绝不跨币种相加/换算/默认币种；计数可汇总 */
+function fillQuotationConversionKpi(data) {
+  const setR = (k, v) => { const el = document.querySelector(`[data-rkpi="${k}"]`); if (el) el.firstChild.nodeValue = String(v); };
+  const setT = (k, v) => { const el = document.querySelector(`[data-rkpi="${k}"]`); if (el) el.textContent = String(v); };
+  const rows = Array.isArray(data) ? data : [];
+  setR('rows', rows.length);
+  setT('rows-tip', '业务员 × 原币分桶');
+
+  /* 只对同币种金额求和；货币永远保留原币标签，绝不跨币种合计 */
+  const byCurrency = {};
+  rows.forEach(r => {
+    const c = String(r.currency || '').trim().toUpperCase() || '未知币种';
+    byCurrency[c] = (byCurrency[c] || 0) + (Number(r.convertedAmount) || 0);
+  });
+  const currencies = Object.keys(byCurrency).sort();
+  const label = document.querySelector('[data-rkpi-label="total"]');
+  if (label) label.textContent = '币种';
+  const unit = document.querySelector('[data-rkpi-unit="total"]');
+  if (unit) unit.textContent = '';
+  setR('total', currencies.length ? currencies.join(' / ') : '--');
+  setT('total-tip', Object.keys(byCurrency).sort()
+    .map(c => `${c} ${fmtMoney(byCurrency[c])}`).join(' · ') || '暂无');
+
+  const top = rows[0];
+  setR('top', top ? `${top.salesmanName || '未指定业务员'} · ${top.currency || '未知币种'}` : '--');
+  setT('top-tip', '排名首位');
 }
 
 function exportReportCSV() {

@@ -1,7 +1,7 @@
 {
   "id": "ERP-205",
   "title": "Separate quotation conversion amounts by original currency",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "low",
   "priority": "P1",
   "description": "A user compares quotation conversion counts and amounts by salesperson and original currency without treating mixed-currency money as one total. On the scoped bounded source from the prerequisite, group by normalized salesperson name plus currency; trim and normalize currency casing, preserve blank/unknown currency as a separate explicit unknown bucket, and never infer an exchange rate or default currency. Keep count/rate/cancellation/expiry semantics per bucket and deterministic tie ordering. Add the currency field to the DTO and the existing report table. Ensure the quotation report summary never adds amount columns across currencies; counts may be summed, money stays per-currency and is labelled original currency. This is quotation evidence, not recognized revenue. Development only: reuse existing ERP services, current-user menu permissions and SalespersonDataScopeService; OperationLogMiddleware audits API calls. No new authorization privileges, direct table writes, arbitrary SQL, schema/migration/stored-procedure/view changes, production SQL, real database execution, irreversible actions, secrets/.env changes, deployment or real browser acceptance. Verify focused in-memory or source-contract tests and the configured safe Release build/test; unavailable external environments must be marked blocked, never reported passed. Preserve unrelated work.",
@@ -42,7 +42,7 @@
     "ERP-204"
   ],
   "max_attempts": 3,
-  "attempts": 0,
+  "attempts": 1,
   "validation_profile": "safe",
   "completion_mode": "build",
   "auto_start": true,

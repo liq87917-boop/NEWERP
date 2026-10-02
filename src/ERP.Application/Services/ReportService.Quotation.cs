@@ -18,8 +18,8 @@ namespace ERP.Application.Services;
 ///     以来源外键为主、状态为兜底，保证历史数据（外键回填前的状态变更）也能正确归类。</item>
 /// <item>成交率 = 已转出数 ÷ 有效报价数 × 100，保留 2 位小数；分母为 0 时按 0 处理（避免除零）。</item>
 /// <item>已过期未成交数：有效期（<c>ValidUntil</c>）早于**报表期间结束日**且未转出的报价单数，口径与「有效期提醒」一致。</item>
-/// <item>金额均为报价单原币金额（`TotalAmount`）合计，不做汇率折算，避免期间内汇率波动影响可比性。</item>
-/// <item>按业务员聚合（未填写业务员归入「未指定业务员」），按成交率降序、报价数降序、业务员升序排列。</item>
+/// <item>金额均为报价单原币金额（`TotalAmount`）合计，不做汇率折算，避免期间内汇率波动影响可比性；不同币种分列，绝不跨币种合计。</item>
+/// <item>按业务员 × 原币聚合（未填写业务员归入「未指定业务员」；空值 / 未知币种归入「未知币种」），按成交率降序、报价数降序、业务员升序、币种升序排列。</item>
 /// </list>
 /// 本报表只读现有表，**不新增任何数据库结构**。
 /// </remarks>
@@ -27,6 +27,9 @@ public partial class ReportService
 {
     /// <summary>未指定业务员时的分组名称</summary>
     private const string NoSalesmanGroup = "未指定业务员";
+
+    /// <summary>空值 / 未知币种时的分组名称（绝不默认币种或推断汇率）</summary>
+    public const string UnknownCurrencyGroup = "未知币种";
 
     /// <summary>允许的报价日期区间最大跨度（含首尾日历日）：366 天</summary>
     private const int MaxDateRangeDays = 366;
@@ -40,7 +43,7 @@ public partial class ReportService
     /// <summary>PI / 销售订单转换链接查询的分批大小（远低于 SQL Server 2100 参数上限）</summary>
     private const int LinkBatchSize = 1000;
 
-    /// <summary>报价成交率分析（按业务员聚合；显式传入当前账号业务员数据范围）</summary>
+    /// <summary>报价成交率分析（按业务员 × 原币聚合；显式传入当前账号业务员数据范围）</summary>
     public async Task<List<ReportDtos.QuotationConversionItem>> GetQuotationConversionAsync(
         DateTime start, DateTime end, SalespersonDataScope scope)
     {
@@ -98,7 +101,7 @@ public partial class ReportService
         foreach (var id in orderQuotationIds) convertedIds.Add(id);
 
         var result = new List<ReportDtos.QuotationConversionItem>();
-        foreach (var group in quotations.GroupBy(GroupKey))
+        foreach (var group in quotations.GroupBy(q => (Salesman: GroupKey(q), Currency: CurrencyGroupKey(q))))
         {
             var all = group.ToList();
             var active = all.Where(q => q.Status != DocumentStatus.Cancelled).ToList();
@@ -110,7 +113,8 @@ public partial class ReportService
 
             result.Add(new ReportDtos.QuotationConversionItem
             {
-                SalesmanName = group.Key,
+                SalesmanName = group.Key.Salesman,
+                Currency = group.Key.Currency,
                 QuotationCount = quotationCount,
                 ConvertedCount = convertedCount,
                 ConversionRate = quotationCount == 0 ? 0m : Math.Round(convertedCount * 100m / quotationCount, 2),
@@ -127,12 +131,30 @@ public partial class ReportService
             .OrderByDescending(r => r.ConversionRate)
             .ThenByDescending(r => r.QuotationCount)
             .ThenBy(r => r.SalesmanName, StringComparer.Ordinal)
+            .ThenBy(r => r.Currency, StringComparer.Ordinal)
             .ToList();
     }
 
     /// <summary>分组键：业务员姓名为空时归入「未指定业务员」</summary>
     private static string GroupKey(Domain.Entities.Quotation quotation)
         => string.IsNullOrWhiteSpace(quotation.SalesmanName) ? NoSalesmanGroup : quotation.SalesmanName.Trim();
+
+    /// <summary>分组键：原币币种规范化（空值 / 未知取值归入「未知币种」）</summary>
+    private static string CurrencyGroupKey(Domain.Entities.Quotation quotation)
+        => NormalizeCurrencyCode(quotation.Currency.ToString());
+
+    /// <summary>
+    /// 币种分组键规范化：去首尾空白并大写；空值或不在 <see cref="Currency"/> 枚举内的取值一律归入
+    /// <see cref="UnknownCurrencyGroup"/>（绝不默认币种、绝不推断汇率）。
+    /// </summary>
+    public static string NormalizeCurrencyCode(string? currency)
+    {
+        var value = (currency ?? string.Empty).Trim().ToUpperInvariant();
+        if (value.Length == 0) return UnknownCurrencyGroup;
+        return Enum.TryParse<Currency>(value, true, out var parsed) && Enum.IsDefined(parsed)
+            ? parsed.ToString()
+            : UnknownCurrencyGroup;
+    }
 
     /// <summary>是否已转出：来源外键（PI / 销售订单）优先，报价单状态「已完成」兜底</summary>
     private static bool IsConverted(Domain.Entities.Quotation quotation, HashSet<long> convertedIds)
