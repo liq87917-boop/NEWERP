@@ -2,7 +2,18 @@
 const REPORTS = {
   /* === 通用财务报表 === */
   'product-sales-ranking': { api: '/api/reports/product-sales-ranking', title: '爆款 SKU 销售排行',
-    emoji: '🔥', kpi: 'cargo', summary: 'TOP SKU · 按销售件数 · 义乌爆款挖掘' },
+    emoji: '🔥', kpi: 'cargo',
+    summary: 'TOP SKU · 已审核销售出库 · 当前授权客户 · 单位独立不合并 · 金额为当前价估算(币种未知，非实际发货收入)',
+    columns: [
+      { key: 'rank', label: '排名', type: 'number' },
+      { key: 'productCode', label: '商品编码' },
+      { key: 'productName', label: '商品名称' },
+      { key: 'spec', label: '规格' },
+      { key: 'unit', label: '单位' },
+      { key: 'totalQuantity', label: '销售件数(签名)', type: 'number' },
+      { key: 'totalAmount', label: '当前价估算金额(币种未知)', type: 'number' },
+      { key: 'amountLabel', label: '金额口径' },
+    ] },
   'order-profit': { api: '/api/reports/order-profit', title: '订单利润暂估表',
     emoji: '💹', kpi: 'gold', summary: '订单毛利 · FOB/CIF/DDP 利润核算' },
   'customer-shipment': { api: '/api/reports/customer-shipment', title: '客户出货量统计表',
@@ -212,6 +223,7 @@ function fillReportKpi(code, data) {
   const setR = (k, v) => { const el = document.querySelector(`[data-rkpi="${k}"]`); if (el) el.firstChild.nodeValue = String(v); };
   const setT = (k, v) => { const el = document.querySelector(`[data-rkpi="${k}"]`); if (el) el.textContent = String(v); };
   if (code === 'quotation-conversion') { fillQuotationConversionKpi(data); return; }
+  if (code === 'product-sales-ranking') { fillProductSalesRankingKpi(data); return; }
   if (code === 'balance-sheet' || code === 'income-statement' || code === 'cash-flow') {
     const lines = data.lines || [];
     const total = lines.reduce((s, l) => s + (Number(l.amount) || 0), 0);
@@ -231,6 +243,27 @@ function fillReportKpi(code, data) {
     setR('total', '--');
     setR('top', data.items[0]?.name || '--');
   }
+}
+
+/* 商品销量排名 KPI：单位保持独立，绝不跨单位合计数量；金额仅当前价估算（币种未知，非实际发货收入） */
+function fillProductSalesRankingKpi(data) {
+  const setR = (k, v) => { const el = document.querySelector(`[data-rkpi="${k}"]`); if (el) el.firstChild.nodeValue = String(v); };
+  const setT = (k, v) => { const el = document.querySelector(`[data-rkpi="${k}"]`); if (el) el.textContent = String(v); };
+  const rows = Array.isArray(data) ? data : [];
+  setR('rows', rows.length);
+  setT('rows-tip', '商品 × 规格 × 单位分桶');
+
+  const units = Array.from(new Set(rows.map(r => String(r.unit || '未知单位')))).sort();
+  const label = document.querySelector('[data-rkpi-label="total"]');
+  if (label) label.textContent = '单位组';
+  const unit = document.querySelector('[data-rkpi-unit="total"]');
+  if (unit) unit.textContent = '';
+  setR('total', units.length ? units.join(' / ') : '--');
+  setT('total-tip', '单位保持独立，禁止跨单位合计数量');
+
+  const top = rows[0];
+  setR('top', top ? ([top.productName, top.spec, top.unit].filter(Boolean).join(' ') || 'TOP 1') : '--');
+  setT('top-tip', '排名首位（件数降序）');
 }
 
 /* 报价成交率 KPI：金额一律按原币分列，绝不跨币种相加/换算/默认币种；计数可汇总 */

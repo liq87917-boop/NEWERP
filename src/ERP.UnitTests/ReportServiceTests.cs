@@ -1,3 +1,4 @@
+using ERP.Application.Common;
 using ERP.Application.Services;
 using ERP.Domain.Entities;
 using ERP.Domain.Enums;
@@ -14,6 +15,9 @@ public class ReportServiceTests
 {
     private static readonly DateTime Start = new(2026, 9, 1);
     private static readonly DateTime End = new(2026, 9, 30);
+
+    /// <summary>商品销量排名既有无权限口径测试使用的特权数据范围（不过滤客户）</summary>
+    private static readonly SalespersonDataScope PrivilegedScope = new() { IsPrivileged = true, AllowedCustomerIds = null };
 
     // ==================== 1. 商品销量排名榜 ====================
 
@@ -33,13 +37,14 @@ public class ReportServiceTests
         await db.SaveChangesAsync();
 
         var service = new ReportService(db);
-        var result = await service.GetProductSalesRankingAsync(Start, End, 10);
+        var result = await service.GetProductSalesRankingAsync(Start, End, 10, PrivilegedScope);
 
         Assert.Equal(3, result.Count);
         Assert.Equal(1, result[0].Rank);
         Assert.Equal(100m, result[0].TotalQuantity);
         Assert.Equal("P001", result[0].ProductCode);
-        Assert.Equal(100m * 100m, result[0].TotalAmount);   // 销量 × 售价
+        Assert.Equal(100m * 100m, result[0].TotalAmount);   // 销量 × 售价（当前价估算，非实际收入）
+        Assert.Equal(ReportService.ProductSalesRankingAmountLabel, result[0].AmountLabel);
         Assert.Equal(2, result[1].Rank);
         Assert.Equal(50m, result[1].TotalQuantity);
         Assert.Equal(3, result[2].Rank);
@@ -64,7 +69,7 @@ public class ReportServiceTests
         await db.SaveChangesAsync();
 
         var service = new ReportService(db);
-        var result = await service.GetProductSalesRankingAsync(Start, End, 10);
+        var result = await service.GetProductSalesRankingAsync(Start, End, 10, PrivilegedScope);
 
         Assert.Single(result);
         Assert.Equal(100m, result[0].TotalQuantity);
@@ -84,7 +89,7 @@ public class ReportServiceTests
         await db.SaveChangesAsync();
 
         var service = new ReportService(db);
-        var result = await service.GetProductSalesRankingAsync(Start, End, 10);
+        var result = await service.GetProductSalesRankingAsync(Start, End, 10, PrivilegedScope);
 
         Assert.Single(result);
         Assert.Equal(100m, result[0].TotalQuantity);
@@ -452,7 +457,7 @@ public class ReportServiceTests
         await db.SaveChangesAsync();
 
         var service = new ReportService(db);
-        var result = await service.GetProductSalesRankingAsync(Start, End, 2);
+        var result = await service.GetProductSalesRankingAsync(Start, End, 2, PrivilegedScope);
 
         Assert.Equal(2, result.Count);
         Assert.Equal(1, result[0].Rank);
@@ -468,9 +473,134 @@ public class ReportServiceTests
         SeedProducts(db);   // 商品存在但没出库
         var service = new ReportService(db);
 
-        var result = await service.GetProductSalesRankingAsync(Start, End, 10);
+        var result = await service.GetProductSalesRankingAsync(Start, End, 10, PrivilegedScope);
 
         Assert.Empty(result);
+    }
+
+    // ==================== 商品销量排名：日期 / Top 边界与稳定排序 ====================
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(201)]
+    public async Task GetProductSalesRankingAsync_Top越界_拒绝(int top)
+    {
+        using var db = TestDbFactory.Create();
+        var service = new ReportService(db);
+
+        var ex = await Assert.ThrowsAsync<BusinessException>(() =>
+            service.GetProductSalesRankingAsync(Start, End, top, PrivilegedScope));
+        Assert.Equal(ErrorCodes.InvalidParameter, ex.Code);
+    }
+
+    [Fact]
+    public async Task GetProductSalesRankingAsync_结束日期早于开始日期_拒绝()
+    {
+        using var db = TestDbFactory.Create();
+        var service = new ReportService(db);
+
+        var ex = await Assert.ThrowsAsync<BusinessException>(() =>
+            service.GetProductSalesRankingAsync(new DateTime(2026, 9, 30), new DateTime(2026, 9, 1), 10, PrivilegedScope));
+        Assert.Equal(ErrorCodes.InvalidParameter, ex.Code);
+    }
+
+    [Fact]
+    public async Task GetProductSalesRankingAsync_日期范围超过366天_拒绝()
+    {
+        using var db = TestDbFactory.Create();
+        var service = new ReportService(db);
+
+        var ex = await Assert.ThrowsAsync<BusinessException>(() =>
+            service.GetProductSalesRankingAsync(new DateTime(2026, 1, 1), new DateTime(2027, 1, 2), 10, PrivilegedScope));
+        Assert.Equal(ErrorCodes.InvalidParameter, ex.Code);
+    }
+
+    [Fact]
+    public async Task GetProductSalesRankingAsync_日期范围恰为366天_正常通过()
+    {
+        using var db = TestDbFactory.Create();
+        SeedProducts(db);
+        var stockOut = new StockOut { StockOutNo = "OUT-366", StockOutDate = new DateTime(2026, 1, 1), Status = DocumentStatus.Approved };
+        db.StockOuts.Add(stockOut);
+        db.SaveChanges();
+        db.StockOutDetails.Add(new StockOutDetail { StockOutId = stockOut.Id, ProductId = 1, ProductName = "热销商品", Quantity = 1m, Unit = "PCS" });
+        db.SaveChanges();
+
+        var service = new ReportService(db);
+        var result = await service.GetProductSalesRankingAsync(new DateTime(2026, 1, 1), new DateTime(2027, 1, 1), 10, PrivilegedScope);
+
+        Assert.Single(result);
+    }
+
+    [Fact]
+    public async Task GetProductSalesRankingAsync_相同销量_按ProductId名称规格单位稳定排序()
+    {
+        using var db = TestDbFactory.Create();
+        SeedProducts(db);
+        var out1 = new StockOut { StockOutNo = "OUT-TIE", StockOutDate = new DateTime(2026, 9, 10), Status = DocumentStatus.Approved };
+        db.StockOuts.Add(out1);
+        db.SaveChanges();
+
+        // 相同销量：按 ProductId → ProductName → Spec → Unit 稳定排序（数据库端 Top）
+        db.StockOutDetails.AddRange(
+            new StockOutDetail { StockOutId = out1.Id, ProductId = 3, ProductName = "同销量", Spec = "A", Unit = "PCS", Quantity = 10m },
+            new StockOutDetail { StockOutId = out1.Id, ProductId = 1, ProductName = "同销量", Spec = "A", Unit = "PCS", Quantity = 10m },
+            new StockOutDetail { StockOutId = out1.Id, ProductId = 2, ProductName = "同销量", Spec = "A", Unit = "PCS", Quantity = 10m }
+        );
+        db.SaveChanges();
+
+        var service = new ReportService(db);
+        var result = await service.GetProductSalesRankingAsync(Start, End, 10, PrivilegedScope);
+
+        Assert.Equal(3, result.Count);
+        Assert.Equal(new long[] { 1, 2, 3 }, result.Select(x => x.ProductId).ToArray());
+    }
+
+    [Fact]
+    public async Task GetProductSalesRankingAsync_不同单位_分开成桶_不合并()
+    {
+        using var db = TestDbFactory.Create();
+        SeedProducts(db);
+        var out1 = new StockOut { StockOutNo = "OUT-UNIT", StockOutDate = new DateTime(2026, 9, 10), Status = DocumentStatus.Approved };
+        db.StockOuts.Add(out1);
+        db.SaveChanges();
+
+        // 同一商品同一名称规格，但单位不同，必须分桶，绝不合并数量
+        db.StockOutDetails.AddRange(
+            new StockOutDetail { StockOutId = out1.Id, ProductId = 1, ProductName = "热销商品", Spec = "大", Unit = "PCS", Quantity = 100m },
+            new StockOutDetail { StockOutId = out1.Id, ProductId = 1, ProductName = "热销商品", Spec = "大", Unit = "CTN", Quantity = 30m }
+        );
+        db.SaveChanges();
+
+        var service = new ReportService(db);
+        var result = await service.GetProductSalesRankingAsync(Start, End, 10, PrivilegedScope);
+
+        Assert.Equal(2, result.Count);
+        Assert.Contains(result, x => x.Unit == "PCS" && x.TotalQuantity == 100m);
+        Assert.Contains(result, x => x.Unit == "CTN" && x.TotalQuantity == 30m);
+    }
+
+    [Fact]
+    public async Task GetProductSalesRankingAsync_签名数量保留_负数量直接计入_不二次调整()
+    {
+        using var db = TestDbFactory.Create();
+        SeedProducts(db);
+        var out1 = new StockOut { StockOutNo = "OUT-SIGN", StockOutDate = new DateTime(2026, 9, 10), Status = DocumentStatus.Approved };
+        db.StockOuts.Add(out1);
+        db.SaveChanges();
+
+        // 正出库 100、负数量 -20（如红字冲销明细），直接按签名求和 = 80，不重复计入退货或库存流水
+        db.StockOutDetails.AddRange(
+            new StockOutDetail { StockOutId = out1.Id, ProductId = 1, ProductName = "热销商品", Spec = "大", Unit = "PCS", Quantity = 100m },
+            new StockOutDetail { StockOutId = out1.Id, ProductId = 1, ProductName = "热销商品", Spec = "大", Unit = "PCS", Quantity = -20m }
+        );
+        db.SaveChanges();
+
+        var service = new ReportService(db);
+        var result = await service.GetProductSalesRankingAsync(Start, End, 10, PrivilegedScope);
+
+        Assert.Single(result);
+        Assert.Equal(80m, result[0].TotalQuantity);
     }
 
     [Fact]

@@ -14,7 +14,10 @@ public static partial class ReportDtos
         public string Spec { get; set; } = string.Empty;
         public string Unit { get; set; } = string.Empty;
         public decimal TotalQuantity { get; set; }
+        /// <summary>数量 × 商品当前售价的估算金额（币种未知，仅估算，非实际发货收入）</summary>
         public decimal TotalAmount { get; set; }
+        /// <summary>金额口径证据标签：明确「当前价估算、币种未知、非实际发货收入」</summary>
+        public string AmountLabel { get; set; } = string.Empty;
         public int Rank { get; set; }
     }
 

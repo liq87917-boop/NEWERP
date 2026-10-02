@@ -27,6 +27,12 @@ public class ReportController : ControllerBase
     /// <summary>报价成交率报表要求菜单的中文文案（与既有菜单名一致）</summary>
     private const string QuotationConversionMenuText = "报价单";
 
+    /// <summary>商品销量排名报表要求的既有菜单编码（与 SeedData / SchemaUpgrader 同源）</summary>
+    private const string ProductSalesRankingMenuCode = "product-sales-ranking";
+
+    /// <summary>商品销量排名报表要求菜单的中文文案（与既有菜单名一致）</summary>
+    private const string ProductSalesRankingMenuText = "商品销量排名榜";
+
     private readonly IReportService _reportService;
     private readonly IErpDbContext? _db;
 
@@ -44,11 +50,31 @@ public class ReportController : ControllerBase
     private long? CurrentUserId()
         => long.TryParse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value, out var id) ? id : null;
 
-    /// <summary>商品销量排名榜</summary>
+    /// <summary>商品销量排名榜（ERP-212；每次请求重新校验身份、菜单授权与业务员数据范围，缺失即 fail closed）</summary>
     [HttpGet("product-sales-ranking")]
     public async Task<IActionResult> ProductSalesRanking([FromQuery] DateTime start, [FromQuery] DateTime end, [FromQuery] int top = 10)
     {
-        var result = await _reportService.GetProductSalesRankingAsync(start, end, top);
+        if (_db is null)
+            throw new BusinessException("商品销量排名报表缺少数据库上下文，无法解析当前账号授权", ErrorCodes.InternalError);
+
+        var db = _db;
+        var userId = CurrentUserId();
+        if (userId is null or <= 0)
+            throw new BusinessException("请先登录后再查看商品销量排名报表", ErrorCodes.Unauthorized);
+
+        var menuCodes = await CustomerReceivableReconciliationService.LoadAuthorizedMenuCodesAsync(
+            db, userId.Value);
+        if (!menuCodes.Contains(ProductSalesRankingMenuCode, StringComparer.OrdinalIgnoreCase))
+        {
+            throw new BusinessException(
+                $"当前账号没有「{ProductSalesRankingMenuText}」（{ProductSalesRankingMenuCode}）模块授权：拒绝查看商品销量排名报表"
+                + "（fail closed，不返回任何数据）",
+                ErrorCodes.Forbidden);
+        }
+
+        var scope = await SalespersonDataScopeService.ResolveAsync(db, userId);
+
+        var result = await _reportService.GetProductSalesRankingAsync(start, end, top, scope);
         return Ok(ApiResponse<List<ReportDtos.ProductSalesRankItem>>.Success(result));
     }
 

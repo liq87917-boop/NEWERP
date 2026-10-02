@@ -1,7 +1,7 @@
 {
   "id": "ERP-212",
   "title": "Scope product sales ranking to authorized approved shipments",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "medium",
   "priority": "P1",
   "description": "A salesperson opens the existing product sales ranking and sees quantities only from approved, nondeleted sales stock-outs for currently assigned customers. Require positive current identity, existing product-sales-ranking menu and fresh scope on every endpoint call; missing db/identity/menu must fail closed. Add mandatory scope to the existing application method and update current callers/tests. Validate inclusive start/end (maximum 366 days) and Top 1..200 before source reads, use exclusive end-day boundary, apply customer scope to stock-out headers before joining nondeleted details and aggregating, then stable quantity-descending/ProductId/name/spec/unit tie order and database-side Top. Preserve signed persisted quantities without adding returns or stock movements again, keep product/spec/unit groups separate and forbid a grand quantity total across units. Existing TotalAmount compatibility may retain quantity times current product SalePrice only as explicitly labelled current-price estimate of unknown currency, never actual shipment revenue; provide DTO/UI evidence labels and remove misleading sales-money KPIs. No entity/model change is needed. Development only: reuse existing ERP report services, the product-sales-ranking menu and current-user SalespersonDataScopeService; existing OperationLogMiddleware records HTTP audit. No arbitrary/model-generated SQL, permission expansion, direct table/business writes, new domain entities or persistence schema, schema/view/stored-procedure edits, migrations, production SQL or real database execution, secrets/.env/config changes, irreversible actions, production deployment or real browser acceptance. Keep unrelated work. Run focused in-memory API/service/export/UI source-contract tests and configured safe Release build/test; unavailable external environments must be marked blocked, never fabricated passed.",
@@ -49,7 +49,7 @@
     "ERP-097"
   ],
   "max_attempts": 3,
-  "attempts": 0,
+  "attempts": 1,
   "validation_profile": "safe",
   "completion_mode": "build",
   "auto_start": true,
