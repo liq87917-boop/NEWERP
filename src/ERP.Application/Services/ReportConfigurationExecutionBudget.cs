@@ -27,6 +27,12 @@ public static class ReportConfigurationExecutionLimits
     /// <summary>生成文件（Excel / PDF）体积上限（10 MiB）</summary>
     public const int MaxGeneratedFileBytes = 10 * 1024 * 1024;
 
+    /// <summary>有界一致只读快照最大事实数（ERP-273，1000；超过即 fail closed，绝不截断冒充足量）</summary>
+    public const int MaxSnapshotFacts = 1000;
+
+    /// <summary>有界一致只读快照内部字节上限（8 MiB）</summary>
+    public const int MaxSnapshotBytes = 8 * 1024 * 1024;
+
     // ==================== ERP-269 有界执行失败码（平台常量，客户端不可递增） ====================
 
     /// <summary>服务繁忙（每用户并发执行达到上限）</summary>
@@ -43,6 +49,9 @@ public static class ReportConfigurationExecutionLimits
 
     /// <summary>文件渲染失败（Excel / PDF 生成异常，区别于持久化环境不可用）</summary>
     public const int ErrorCodeRenderingFailed = 5001;
+
+    /// <summary>环境不支持（如一致快照事务 / SQL Server 不可用；显式 environment-blocked，绝不静默降级）</summary>
+    public const int ErrorCodeEnvironmentUnsupported = 5002;
 }
 
 /// <summary>有界执行结果分类（用于结构化日志 outcome 键，仅记录受控取值）。</summary>
@@ -79,6 +88,7 @@ public static class ReportConfigurationExecutionOutcomes
         ReportConfigurationExecutionLimits.ErrorCodeCancelled => Cancelled,
         ReportConfigurationExecutionLimits.ErrorCodeResultTooLarge => TooLarge,
         ReportConfigurationExecutionLimits.ErrorCodeRenderingFailed => RenderingFailed,
+        ReportConfigurationExecutionLimits.ErrorCodeEnvironmentUnsupported => Environment,
         _ => Error,
     };
 }

@@ -2,6 +2,10 @@ using ERP.Application.Common;
 using ERP.Application.DTOs;
 using ERP.Application.Interfaces;
 using ERP.Application.Services;
+using ERP.Domain.Entities;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
+using System.Data;
 using System.Globalization;
 using System.Text.Json;
 
@@ -14,13 +18,15 @@ namespace ERP.Infrastructure.Reports;
 /// 目录是有限静态元数据，绝不扩大到数据库全量元数据发现。新增数据集 = 新增一个适配器并注册，
 /// 不改动目录聚合与控制器。</para>
 /// </summary>
-public sealed class SalesOrderReportConfigurationDatasetProvider : IReportConfigurationDatasetProvider
+public sealed class SalesOrderReportConfigurationDatasetProvider : IReportConfigurationSnapshotDatasetProvider
 {
     private readonly IDynamicSalesOrderReportQuery _query;
+    private readonly IErpDbContext? _db;
 
-    public SalesOrderReportConfigurationDatasetProvider(IDynamicSalesOrderReportQuery query)
+    public SalesOrderReportConfigurationDatasetProvider(IDynamicSalesOrderReportQuery query, IErpDbContext? db = null)
     {
         _query = query;
+        _db = db;
     }
 
     /// <inheritdoc />
@@ -66,6 +72,7 @@ public sealed class SalesOrderReportConfigurationDatasetProvider : IReportConfig
         ReportConfigurationConstants.CapabilityDateRange,
         ReportConfigurationConstants.CapabilityPaging,
         ReportConfigurationConstants.CapabilityComputedColumns,
+        ReportConfigurationConstants.CapabilityMatchedSet,
     };
 
     private static readonly IReadOnlyList<string> UnsupportedCapabilities = new[]
@@ -431,18 +438,319 @@ public sealed class SalesOrderReportConfigurationDatasetProvider : IReportConfig
             SortUnavailableReason = sortability.Reason,
         };
     }
+
+    /// <inheritdoc />
+    public bool SupportsReadSnapshot => _db is not null;
+
+    /// <inheritdoc />
+    public async Task<IReportConfigurationReadSnapshot> OpenReadSnapshotAsync(
+        ReportConfigurationDefinition definition,
+        ReportConfigurationPreviewParameters parameters,
+        long? userId,
+        string correlationId,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(definition);
+        ArgumentNullException.ThrowIfNull(parameters);
+        if (_db is null)
+            throw new BusinessException(
+                "销售订单数据集快照不可用（environment-blocked）",
+                ReportConfigurationExecutionLimits.ErrorCodeEnvironmentUnsupported);
+
+        // 1) 每次请求重新校验菜单授权（fail closed）
+        await EnsureSnapshotAuthorizedAsync(userId, cancellationToken);
+
+        // 2) 归一化字段 / 谓词（复用既有规则；在读取任何订单之前完成）
+        var compositeGroupings = ReportConfigurationGroupingRules.NormalizeGroupingKeys(parameters.Groupings);
+        var groupBy = DynamicSalesOrderReportRules.NormalizeGroupBy(parameters.GroupBy);
+        IReadOnlyList<string> pivotDimensionKeys = definition.Pivot is null
+            ? Array.Empty<string>()
+            : CompositeFieldKeys(new[] { definition.Pivot.RowDimension, definition.Pivot.ColumnDimension });
+        List<string>? compositeFieldKeys = null;
+        if (compositeGroupings.Count >= 2)
+            compositeFieldKeys = CompositeFieldKeys(compositeGroupings).Concat(new[] { "currency", "totalAmount" }).ToList();
+        else if (pivotDimensionKeys.Count > 0)
+            compositeFieldKeys = pivotDimensionKeys.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+
+        var fieldKeys = DynamicSalesOrderReportRules.NormalizeFields(
+            BuildFields(definition.Fields, definition.ComputedColumns, definition.Aggregates, groupBy,
+                compositeFieldKeys, definition.Relations));
+
+        var request = new DynamicSalesOrderReportRequest
+        {
+            Fields = fieldKeys.ToList(),
+            SortFieldKey = parameters.SortFieldKey,
+            SortDirection = parameters.SortDirection,
+        };
+        MapFilters(definition.Filters, request);
+        DynamicSalesOrderReportRules.ValidateDateRange(request.StartDate, request.EndDate);
+
+        var status = DynamicSalesOrderReportRules.NormalizeStatus(request.Status);
+        var currency = DynamicSalesOrderReportRules.NormalizeCurrency(request.Currency);
+        var sort = DynamicSalesOrderReportRules.NormalizeSort(request.SortFieldKey, request.SortDirection);
+
+        // 3) 每次请求重新解析业务员数据范围
+        var scope = await SalespersonDataScopeService.ResolveAsync(_db, userId);
+        var scopeFingerprint = ComputeScopeFingerprint(scope);
+
+        // 4) 客户范围硬边界 + 显式筛选 → 稳定源排序（先于身份探针）
+        var source = SalespersonDataScopeService.FilterByCustomer(
+            _db.SalesOrders.AsNoTracking().Where(o => !o.IsDeleted), scope, o => o.CustomerId);
+        if (request.StartDate.HasValue) source = source.Where(o => o.OrderDate >= request.StartDate.Value.Date);
+        if (request.EndDate.HasValue) source = source.Where(o => o.OrderDate <= request.EndDate.Value.Date);
+        if (request.CustomerId.HasValue) source = source.Where(o => o.CustomerId == request.CustomerId.Value);
+        if (status.HasValue) source = source.Where(o => o.Status == status.Value);
+        if (currency.HasValue) source = source.Where(o => o.Currency == currency.Value);
+        var ordered = ApplySnapshotSort(source, sort);
+
+        IDbContextTransaction transaction;
+        try
+        {
+            transaction = await _db.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            throw new BusinessException(
+                "当前环境无法提供一致只读快照（environment-blocked）",
+                ReportConfigurationExecutionLimits.ErrorCodeEnvironmentUnsupported);
+        }
+
+        return await BuildSalesOrderSnapshotAsync(
+            transaction, correlationId, ordered, fieldKeys, scopeFingerprint, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public ReportConfigurationPreviewDto RenderMatchedPage(
+        IReportConfigurationReadSnapshot snapshot,
+        ReportConfigurationDefinition definition,
+        ReportConfigurationPreviewParameters parameters)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+        ArgumentNullException.ThrowIfNull(definition);
+        ArgumentNullException.ThrowIfNull(parameters);
+
+        var compositeGroupings = ReportConfigurationGroupingRules.NormalizeGroupingKeys(parameters.Groupings);
+        var groupBy = DynamicSalesOrderReportRules.NormalizeGroupBy(parameters.GroupBy);
+        var offset = CheckedPageOffset(parameters.Page, parameters.PageSize);
+        var pageRows = snapshot.Rows.Skip(offset).Take(parameters.PageSize).ToList();
+        var baseColumns = snapshot.Columns.Select(c => (c.Key, c.Label, c.Type)).ToList();
+
+        List<ReportConfigurationGroupSubtotalDto>? groups = null;
+        if (compositeGroupings.Count >= 2)
+        {
+            groups = ReportConfigurationGroupingRules.BuildCompositeGroupSubtotals(
+                pageRows, compositeGroupings, GroupingDimensions,
+                row => ReadCurrency(row), row => ReadDecimalValue(row, "totalAmount"));
+        }
+        else if (groupBy != DynamicSalesOrderReportRules.GroupNone)
+        {
+            groups = DynamicSalesOrderReportRules.BuildGroupSubtotals(pageRows, groupBy)
+                .Select(g => new ReportConfigurationGroupSubtotalDto(
+                    g.Key, g.Label,
+                    g.Subtotals.Select(s => new ReportConfigurationCurrencyPartitionDto(
+                        s.Currency, s.Count, s.Amount, null, null, null, string.Empty)).ToList()))
+                .ToList();
+        }
+
+        var totalPages = snapshot.MatchedCount == 0
+            ? 0
+            : (int)Math.Ceiling(snapshot.MatchedCount / (double)parameters.PageSize);
+
+        if (groupBy == DynamicSalesOrderReportRules.GroupNone && definition.ComputedColumns is { Count: > 0 })
+        {
+            var projection = ReportConfigurationComputedProjection.Apply(
+                definition.Fields, baseColumns, pageRows, definition.ComputedColumns, CurrencyUnitOf);
+            return new ReportConfigurationPreviewDto
+            {
+                DatasetKey = DatasetKey,
+                Columns = projection.Columns,
+                Rows = projection.Rows,
+                CellReasons = projection.CellReasons,
+                ComputedColumns = projection.Evidence,
+                Total = snapshot.MatchedCount,
+                MatchedCount = snapshot.MatchedCount,
+                Page = parameters.Page,
+                PageSize = parameters.PageSize,
+                TotalPages = totalPages,
+                GroupBy = groupBy,
+                Groups = groups,
+                Evidence = snapshot.Evidence,
+            };
+        }
+
+        return new ReportConfigurationPreviewDto
+        {
+            DatasetKey = DatasetKey,
+            Columns = snapshot.Columns.ToList(),
+            Rows = pageRows,
+            Total = snapshot.MatchedCount,
+            MatchedCount = snapshot.MatchedCount,
+            Page = parameters.Page,
+            PageSize = parameters.PageSize,
+            TotalPages = totalPages,
+            GroupBy = groupBy,
+            Groups = groups,
+            Evidence = snapshot.Evidence,
+        };
+    }
+
+    private async Task<IReportConfigurationReadSnapshot> BuildSalesOrderSnapshotAsync(
+        IDbContextTransaction transaction,
+        string correlationId,
+        IOrderedQueryable<SalesOrder> ordered,
+        IReadOnlyList<string> fieldKeys,
+        string scopeFingerprint,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            // 原生身份探针：稳定排序后只取 Id（Take 1001）；超 1000 直接 fail closed（绝不 COUNT / 物化无界匹配）
+            var probeIds = await ordered
+                .Select(o => o.Id)
+                .Take(ReportConfigurationExecutionLimits.MaxSnapshotFacts + 1)
+                .ToListAsync(cancellationToken);
+            if (probeIds.Count > ReportConfigurationExecutionLimits.MaxSnapshotFacts)
+            {
+                throw new BusinessException(
+                    $"匹配事实超过 {ReportConfigurationExecutionLimits.MaxSnapshotFacts} 条，请缩小筛选范围（关联ID：{correlationId}）",
+                    ReportConfigurationExecutionLimits.ErrorCodeResultTooLarge);
+            }
+
+            var matchedCount = probeIds.Count;
+            var factIds = probeIds;
+
+            // 有界批量装载证据（≤1000、分批、保持源顺序；绝不 N+1）
+            var orders = await LoadOrdersBatchedAsync(factIds, cancellationToken);
+
+            // 映射为既有事实行（保持源粒度 / 顺序 / null 语义）
+            var rows = orders.Select(o => DynamicSalesOrderReportRules.BuildRow(o, fieldKeys)).ToList();
+            var columns = fieldKeys
+                .Select(key => DynamicSalesOrderReportRules.GetField(key)!)
+                .Select(f => new ReportConfigurationColumnDto(f.Key, f.Label, f.DataType, CurrencyUnitOf(f.Key)))
+                .ToList();
+
+            var estimatedBytes = EstimateBytes(rows, columns);
+            if (estimatedBytes > ReportConfigurationExecutionLimits.MaxSnapshotBytes)
+            {
+                throw new BusinessException(
+                    $"匹配集证据超过 {ReportConfigurationExecutionLimits.MaxSnapshotBytes / (1024 * 1024)} MiB，请缩小筛选范围（关联ID：{correlationId}）",
+                    ReportConfigurationExecutionLimits.ErrorCodeResultTooLarge);
+            }
+
+            var evidence = new ReportConfigurationEvidenceContextDto(
+                DatasetKey, Grain, CurrencyUnitSemantics,
+                ReadOnlyText, BoundaryText, DynamicSalesOrderReportRules.DisclaimerText,
+                ReportConfigurationConstants.CoverageMatchedSet);
+
+            return new ReportConfigurationReadSnapshot(
+                correlationId, DatasetKey, ReportConfigurationConstants.CoverageMatchedSet,
+                matchedCount, factIds, rows, columns, evidence, scopeFingerprint,
+                estimatedBytes, isConsistent: true, transaction);
+        }
+        catch
+        {
+            try { await transaction.DisposeAsync(); } catch { /* 尽力释放 */ }
+            throw;
+        }
+    }
+
+    private async Task<List<SalesOrder>> LoadOrdersBatchedAsync(
+        IReadOnlyList<long> ids, CancellationToken cancellationToken)
+    {
+        var result = new List<SalesOrder>(ids.Count);
+        const int batchSize = 200;
+        for (var i = 0; i < ids.Count; i += batchSize)
+        {
+            var batch = ids.Skip(i).Take(batchSize).ToList();
+            var loaded = await _db!.SalesOrders.AsNoTracking()
+                .Where(o => batch.Contains(o.Id))
+                .ToListAsync(cancellationToken);
+            var byId = loaded.ToDictionary(o => o.Id);
+            foreach (var id in batch)
+            {
+                if (byId.TryGetValue(id, out var order))
+                    result.Add(order);
+            }
+        }
+
+        return result;
+    }
+
+    private async Task EnsureSnapshotAuthorizedAsync(long? userId, CancellationToken cancellationToken)
+    {
+        if (userId is null or <= 0)
+            throw new BusinessException("请先登录后再预览销售订单报表", ErrorCodes.Unauthorized);
+
+        var menuCodes = await CustomerReceivableReconciliationService.LoadAuthorizedMenuCodesAsync(_db!, userId.Value);
+        if (!menuCodes.Contains(DynamicSalesOrderReportRules.RequiredMenuCode, StringComparer.OrdinalIgnoreCase))
+        {
+            throw new BusinessException(
+                $"当前账号没有「{DynamicSalesOrderReportRules.RequiredMenuText}」（{DynamicSalesOrderReportRules.RequiredMenuCode}）模块授权：拒绝预览（fail closed）",
+                ErrorCodes.Forbidden);
+        }
+    }
+
+    private static IOrderedQueryable<SalesOrder> ApplySnapshotSort(
+        IQueryable<SalesOrder> source, (string FieldKey, bool Descending) sort)
+    {
+        switch (sort.FieldKey)
+        {
+            case "orderDate":
+                return sort.Descending
+                    ? source.OrderByDescending(o => o.OrderDate).ThenBy(o => o.Id)
+                    : source.OrderBy(o => o.OrderDate).ThenBy(o => o.Id);
+            case "customerId":
+                return sort.Descending
+                    ? source.OrderByDescending(o => o.CustomerId).ThenBy(o => o.Id)
+                    : source.OrderBy(o => o.CustomerId).ThenBy(o => o.Id);
+            default:
+                return sort.Descending
+                    ? source.OrderByDescending(o => o.Id)
+                    : source.OrderBy(o => o.Id);
+        }
+    }
+
+    private static string ComputeScopeFingerprint(SalespersonDataScope scope)
+        => scope.IsPrivileged
+            ? "privileged"
+            : (scope.SalesmanId?.ToString(CultureInfo.InvariantCulture) ?? "none")
+              + "|" + string.Join(",", (scope.AllowedCustomerIds ?? new HashSet<long>()).OrderBy(x => x));
+
+    private static int CheckedPageOffset(int page, int pageSize)
+    {
+        var offset = (long)(page - 1) * pageSize;
+        if (offset > int.MaxValue)
+            throw BusinessException.InvalidParameter("分页偏移超出安全范围");
+        return (int)offset;
+    }
+
+    private static long EstimateBytes(
+        IReadOnlyList<Dictionary<string, object?>> rows, IReadOnlyList<ReportConfigurationColumnDto> columns)
+    {
+        try
+        {
+            return JsonSerializer.SerializeToUtf8Bytes(rows).LongLength
+                + JsonSerializer.SerializeToUtf8Bytes(columns).LongLength;
+        }
+        catch
+        {
+            return 0;
+        }
+    }
 }
 
 /// <summary>
 /// 客户应收账款证据数据集适配器（ERP-117）：复用既有「客户资料」菜单授权与 ERP-074 对账证据行白名单。
 /// </summary>
-public sealed class ReceivableReportConfigurationDatasetProvider : IReportConfigurationDatasetProvider
+public sealed class ReceivableReportConfigurationDatasetProvider : IReportConfigurationSnapshotDatasetProvider
 {
     private readonly IDynamicReceivableReportQuery _query;
+    private readonly IErpDbContext? _db;
 
-    public ReceivableReportConfigurationDatasetProvider(IDynamicReceivableReportQuery query)
+    public ReceivableReportConfigurationDatasetProvider(IDynamicReceivableReportQuery query, IErpDbContext? db = null)
     {
         _query = query;
+        _db = db;
     }
 
     /// <inheritdoc />
@@ -488,6 +796,7 @@ public sealed class ReceivableReportConfigurationDatasetProvider : IReportConfig
         ReportConfigurationConstants.CapabilityDateRange,
         ReportConfigurationConstants.CapabilityPaging,
         ReportConfigurationConstants.CapabilityComputedColumns,
+        ReportConfigurationConstants.CapabilityMatchedSet,
     };
 
     private static readonly IReadOnlyList<string> UnsupportedCapabilities = new[]
@@ -853,6 +1162,265 @@ public sealed class ReceivableReportConfigurationDatasetProvider : IReportConfig
             Sortable = sortability.Sortable,
             SortUnavailableReason = sortability.Reason,
         };
+    }
+
+    /// <inheritdoc />
+    public bool SupportsReadSnapshot => _db is not null;
+
+    /// <inheritdoc />
+    public async Task<IReportConfigurationReadSnapshot> OpenReadSnapshotAsync(
+        ReportConfigurationDefinition definition,
+        ReportConfigurationPreviewParameters parameters,
+        long? userId,
+        string correlationId,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(definition);
+        ArgumentNullException.ThrowIfNull(parameters);
+        if (_db is null)
+            throw new BusinessException(
+                "客户应收账款证据数据集快照不可用（environment-blocked）",
+                ReportConfigurationExecutionLimits.ErrorCodeEnvironmentUnsupported);
+
+        // 1) 每次请求重新校验菜单授权（fail closed）
+        await EnsureSnapshotAuthorizedAsync(userId, cancellationToken);
+
+        // 2) 归一化字段 / 谓词（复用既有规则；在读取任何发票之前完成）
+        var compositeGroupings = ReportConfigurationGroupingRules.NormalizeGroupingKeys(parameters.Groupings);
+        var groupBy = DynamicReceivableReportRules.NormalizeGroupBy(parameters.GroupBy);
+        IReadOnlyList<string> pivotDimensionKeys = definition.Pivot is null
+            ? Array.Empty<string>()
+            : CompositeFieldKeys(new[] { definition.Pivot.RowDimension, definition.Pivot.ColumnDimension });
+        List<string>? compositeFieldKeys = null;
+        if (compositeGroupings.Count >= 2)
+            compositeFieldKeys = CompositeFieldKeys(compositeGroupings).Concat(new[] { "currency", "grossAmount" }).ToList();
+        else if (pivotDimensionKeys.Count > 0)
+            compositeFieldKeys = pivotDimensionKeys.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+
+        var fieldKeys = DynamicReceivableReportRules.NormalizeFields(
+            BuildFields(definition.Fields, definition.ComputedColumns, definition.Aggregates, groupBy,
+                compositeFieldKeys, definition.Relations));
+
+        var request = new DynamicReceivableReportRequest
+        {
+            Fields = fieldKeys.ToList(),
+            SortFieldKey = parameters.SortFieldKey,
+            SortDirection = parameters.SortDirection,
+        };
+        MapFilters(definition.Filters, request);
+        DynamicReceivableReportRules.ValidateDateRange(request.StartDate, request.EndDate);
+
+        var currency = DynamicReceivableReportRules.NormalizeCurrency(request.Currency);
+        var allocationState = DynamicReceivableReportRules.NormalizeAllocationState(request.AllocationState);
+        var invoiceStatus = DynamicReceivableReportRules.NormalizeInvoiceStatus(request.InvoiceStatus);
+
+        // 3) 每次请求重新解析业务员数据范围
+        var scope = await SalespersonDataScopeService.ResolveAsync(_db, userId);
+        var scopeFingerprint = ComputeScopeFingerprint(scope);
+
+        var query = new CustomerReceivableReconciliationQuery
+        {
+            CustomerId = request.CustomerId,
+            Currency = currency,
+            AllocationState = allocationState,
+            InvoiceStatus = invoiceStatus,
+            InvoiceDateFrom = request.StartDate?.Date,
+            InvoiceDateTo = request.EndDate?.Date,
+            Page = 1,
+            PageSize = parameters.PageSize,
+        };
+
+        IDbContextTransaction transaction;
+        try
+        {
+            transaction = await _db.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            throw new BusinessException(
+                "当前环境无法提供一致只读快照（environment-blocked）",
+                ReportConfigurationExecutionLimits.ErrorCodeEnvironmentUnsupported);
+        }
+
+        return await BuildReceivableSnapshotAsync(
+            transaction, correlationId, query, scope, fieldKeys, scopeFingerprint,
+            request.SortFieldKey, request.SortDirection, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public ReportConfigurationPreviewDto RenderMatchedPage(
+        IReportConfigurationReadSnapshot snapshot,
+        ReportConfigurationDefinition definition,
+        ReportConfigurationPreviewParameters parameters)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+        ArgumentNullException.ThrowIfNull(definition);
+        ArgumentNullException.ThrowIfNull(parameters);
+
+        var compositeGroupings = ReportConfigurationGroupingRules.NormalizeGroupingKeys(parameters.Groupings);
+        var groupBy = DynamicReceivableReportRules.NormalizeGroupBy(parameters.GroupBy);
+        var offset = CheckedPageOffset(parameters.Page, parameters.PageSize);
+        var pageRows = snapshot.Rows.Skip(offset).Take(parameters.PageSize).ToList();
+        var baseColumns = snapshot.Columns.Select(c => (c.Key, c.Label, c.Type)).ToList();
+
+        List<ReportConfigurationGroupSubtotalDto>? groups = null;
+        if (compositeGroupings.Count >= 2)
+        {
+            groups = ReportConfigurationGroupingRules.BuildCompositeGroupSubtotals(
+                pageRows, compositeGroupings, GroupingDimensions,
+                row => ReadCurrency(row), row => ReadDecimalValue(row, "grossAmount"));
+        }
+        else if (groupBy != DynamicReceivableReportRules.GroupNone)
+        {
+            groups = DynamicReceivableReportRules.BuildGroupSubtotals(pageRows, groupBy)
+                .Select(g => new ReportConfigurationGroupSubtotalDto(
+                    g.Key, g.Label,
+                    g.Subtotals.Select(s => new ReportConfigurationCurrencyPartitionDto(
+                        s.Currency, s.Count, null, s.GrossAmount, s.EffectiveAllocatedAmount,
+                        s.RemainingAmount, s.RemainingState)).ToList()))
+                .ToList();
+        }
+
+        var totalPages = snapshot.MatchedCount == 0
+            ? 0
+            : (int)Math.Ceiling(snapshot.MatchedCount / (double)parameters.PageSize);
+
+        if (groupBy == DynamicReceivableReportRules.GroupNone && definition.ComputedColumns is { Count: > 0 })
+        {
+            var projection = ReportConfigurationComputedProjection.Apply(
+                definition.Fields, baseColumns, pageRows, definition.ComputedColumns, CurrencyUnitOf);
+            return new ReportConfigurationPreviewDto
+            {
+                DatasetKey = DatasetKey,
+                Columns = projection.Columns,
+                Rows = projection.Rows,
+                CellReasons = projection.CellReasons,
+                ComputedColumns = projection.Evidence,
+                Total = snapshot.MatchedCount,
+                MatchedCount = snapshot.MatchedCount,
+                Page = parameters.Page,
+                PageSize = parameters.PageSize,
+                TotalPages = totalPages,
+                GroupBy = groupBy,
+                Groups = groups,
+                Evidence = snapshot.Evidence,
+            };
+        }
+
+        return new ReportConfigurationPreviewDto
+        {
+            DatasetKey = DatasetKey,
+            Columns = snapshot.Columns.ToList(),
+            Rows = pageRows,
+            Total = snapshot.MatchedCount,
+            MatchedCount = snapshot.MatchedCount,
+            Page = parameters.Page,
+            PageSize = parameters.PageSize,
+            TotalPages = totalPages,
+            GroupBy = groupBy,
+            Groups = groups,
+            Evidence = snapshot.Evidence,
+        };
+    }
+
+    private async Task<IReportConfigurationReadSnapshot> BuildReceivableSnapshotAsync(
+        IDbContextTransaction transaction,
+        string correlationId,
+        CustomerReceivableReconciliationQuery query,
+        SalespersonDataScope scope,
+        IReadOnlyList<string> fieldKeys,
+        string scopeFingerprint,
+        string? sortFieldKey,
+        string? sortDirection,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var (rows, matchedCount, overflow) =
+                await CustomerReceivableReconciliationService.ForScopedMatchedPreviewAsync(
+                    _db!, query, scope, sortFieldKey, sortDirection,
+                    ReportConfigurationExecutionLimits.MaxSnapshotFacts, cancellationToken);
+
+            if (overflow)
+            {
+                throw new BusinessException(
+                    $"匹配事实超过 {ReportConfigurationExecutionLimits.MaxSnapshotFacts} 条，请缩小筛选范围（关联ID：{correlationId}）",
+                    ReportConfigurationExecutionLimits.ErrorCodeResultTooLarge);
+            }
+
+            var mapped = rows.Select(row => DynamicReceivableReportRules.BuildRow(row, fieldKeys)).ToList();
+            var columns = fieldKeys
+                .Select(key => DynamicReceivableReportRules.GetField(key)!)
+                .Select(f => new ReportConfigurationColumnDto(f.Key, f.Label, f.DataType, CurrencyUnitOf(f.Key)))
+                .ToList();
+
+            var factIds = rows.Select(r => r.InvoiceId).ToList();
+
+            var estimatedBytes = EstimateBytes(mapped, columns);
+            if (estimatedBytes > ReportConfigurationExecutionLimits.MaxSnapshotBytes)
+            {
+                throw new BusinessException(
+                    $"匹配集证据超过 {ReportConfigurationExecutionLimits.MaxSnapshotBytes / (1024 * 1024)} MiB，请缩小筛选范围（关联ID：{correlationId}）",
+                    ReportConfigurationExecutionLimits.ErrorCodeResultTooLarge);
+            }
+
+            var evidence = new ReportConfigurationEvidenceContextDto(
+                DatasetKey, Grain, CurrencyUnitSemantics,
+                ReadOnlyText, BoundaryText, DynamicReceivableReportRules.DisclaimerText,
+                ReportConfigurationConstants.CoverageMatchedSet);
+
+            return new ReportConfigurationReadSnapshot(
+                correlationId, DatasetKey, ReportConfigurationConstants.CoverageMatchedSet,
+                matchedCount, factIds, mapped, columns, evidence, scopeFingerprint,
+                estimatedBytes, isConsistent: true, transaction);
+        }
+        catch
+        {
+            try { await transaction.DisposeAsync(); } catch { /* 尽力释放 */ }
+            throw;
+        }
+    }
+
+    private async Task EnsureSnapshotAuthorizedAsync(long? userId, CancellationToken cancellationToken)
+    {
+        if (userId is null or <= 0)
+            throw new BusinessException("请先登录后再预览客户应收账款证据报表", ErrorCodes.Unauthorized);
+
+        var menuCodes = await CustomerReceivableReconciliationService.LoadAuthorizedMenuCodesAsync(_db!, userId.Value);
+        if (!menuCodes.Contains(DynamicReceivableReportRules.RequiredMenuCode, StringComparer.OrdinalIgnoreCase))
+        {
+            throw new BusinessException(
+                $"当前账号没有「{DynamicReceivableReportRules.RequiredMenuText}」（{DynamicReceivableReportRules.RequiredMenuCode}）模块授权：拒绝预览（fail closed）",
+                ErrorCodes.Forbidden);
+        }
+    }
+
+    private static string ComputeScopeFingerprint(SalespersonDataScope scope)
+        => scope.IsPrivileged
+            ? "privileged"
+            : (scope.SalesmanId?.ToString(CultureInfo.InvariantCulture) ?? "none")
+              + "|" + string.Join(",", (scope.AllowedCustomerIds ?? new HashSet<long>()).OrderBy(x => x));
+
+    private static int CheckedPageOffset(int page, int pageSize)
+    {
+        var offset = (long)(page - 1) * pageSize;
+        if (offset > int.MaxValue)
+            throw BusinessException.InvalidParameter("分页偏移超出安全范围");
+        return (int)offset;
+    }
+
+    private static long EstimateBytes(
+        IReadOnlyList<Dictionary<string, object?>> rows, IReadOnlyList<ReportConfigurationColumnDto> columns)
+    {
+        try
+        {
+            return JsonSerializer.SerializeToUtf8Bytes(rows).LongLength
+                + JsonSerializer.SerializeToUtf8Bytes(columns).LongLength;
+        }
+        catch
+        {
+            return 0;
+        }
     }
 }
 

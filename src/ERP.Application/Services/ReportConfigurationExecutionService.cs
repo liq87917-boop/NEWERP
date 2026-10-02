@@ -99,7 +99,7 @@ public sealed class ReportConfigurationExecutionService : IReportConfigurationEx
         ReportConfigurationPreviewRequest request,
         IReportConfigurationExecutionLease lease)
     {
-        var preview = await PreviewResolvedAsync(ownerUserId, request, lease.Token);
+        var preview = await PreviewResolvedAsync(ownerUserId, request, lease.Token, lease.CorrelationId);
         CheckPreviewBounds(preview, lease.CorrelationId);
         return preview;
     }
@@ -107,7 +107,8 @@ public sealed class ReportConfigurationExecutionService : IReportConfigurationEx
     private async Task<ReportConfigurationPreviewDto> PreviewResolvedAsync(
         long ownerUserId,
         ReportConfigurationPreviewRequest request,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string correlationId)
     {
         EnsureAuthenticated(ownerUserId);
         ArgumentNullException.ThrowIfNull(request);
@@ -120,10 +121,10 @@ public sealed class ReportConfigurationExecutionService : IReportConfigurationEx
                 cancellationToken);
 
         if (config is not null)
-            return await PreviewOwnedAsync(ownerUserId, request, config, cancellationToken);
+            return await PreviewOwnedAsync(ownerUserId, request, config, cancellationToken, correlationId);
 
         // 2) 否则按被授权人共享解析（每次重新校验授权与固定修订，绝不暴露草稿 / 其它修订 / 历史）
-        return await PreviewSharedAsync(ownerUserId, request, cancellationToken);
+        return await PreviewSharedAsync(ownerUserId, request, cancellationToken, correlationId);
     }
 
     private static void CheckPreviewBounds(ReportConfigurationPreviewDto preview, string correlationId)
@@ -199,7 +200,7 @@ public sealed class ReportConfigurationExecutionService : IReportConfigurationEx
 
     private async Task<ReportConfigurationPreviewDto> PreviewOwnedAsync(
         long ownerUserId, ReportConfigurationPreviewRequest request, ReportConfiguration config,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, string correlationId)
     {
         // 选定定义：草稿 or 固定发布修订（修订必须属于该配置且未被软删除）
         ReportConfigurationDefinition definition;
@@ -229,11 +230,12 @@ public sealed class ReportConfigurationExecutionService : IReportConfigurationEx
         }
 
         return await ExecutePreviewAsync(ownerUserId, config.Id, datasetKey, definition, name,
-            pinnedRevision, pinnedRevision ?? config.Version, request, cancellationToken);
+            pinnedRevision, pinnedRevision ?? config.Version, request, cancellationToken, correlationId, isShared: false);
     }
 
     private async Task<ReportConfigurationPreviewDto> PreviewSharedAsync(
-        long recipientUserId, ReportConfigurationPreviewRequest request, CancellationToken cancellationToken)
+        long recipientUserId, ReportConfigurationPreviewRequest request,
+        CancellationToken cancellationToken, string correlationId)
     {
         // 被授权人必须为现有激活用户（fail closed）
         var recipient = await _db.SysUsers.AsNoTracking()
@@ -261,13 +263,13 @@ public sealed class ReportConfigurationExecutionService : IReportConfigurationEx
 
         // 共享预览始终使用固定修订（忽略客户端 RevisionVersion），绝不暴露其它修订 / 草稿
         return await ExecutePreviewAsync(recipientUserId, config.Id, revision.DatasetKey, definition,
-            revision.Name, revision.Version, revision.Version, request, cancellationToken);
+            revision.Name, revision.Version, revision.Version, request, cancellationToken, correlationId, isShared: true);
     }
 
     private async Task<ReportConfigurationPreviewDto> ExecutePreviewAsync(
         long userId, long configurationId, string datasetKey, ReportConfigurationDefinition definition,
         string name, int? pinnedRevision, int version, ReportConfigurationPreviewRequest request,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, string correlationId, bool isShared)
     {
         // 定位对应数据集适配器（未知数据集 fail closed）
         var provider = _providers.FirstOrDefault(p =>
@@ -284,6 +286,15 @@ public sealed class ReportConfigurationExecutionService : IReportConfigurationEx
 
         // 解析 / 校验当前预览参数（页码 / 每页条数 / 分组键）
         var parameters = ResolveParameters(request, definition, dataset);
+
+        // ERP-273：客户显式选择有界匹配集覆盖时走一致快照管线；否则维持既有当前页行为（默认）。
+        if (string.Equals(definition.Coverage?.Trim(), ReportConfigurationConstants.CoverageMatchedSet,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return await ExecuteMatchedSetPreviewAsync(
+                userId, configurationId, datasetKey, definition, name, pinnedRevision, version,
+                request, parameters, dataset, provider, correlationId, isShared, cancellationToken);
+        }
 
         // 分发执行（适配器内部再次走既有查询的菜单授权 + 数据范围，并保留币种 / 单位口径）
         var preview = await provider.PreviewAsync(definition, parameters, userId, cancellationToken);
@@ -307,8 +318,106 @@ public sealed class ReportConfigurationExecutionService : IReportConfigurationEx
         preview.SortFieldKey = parameters.SortFieldKey;
         preview.SortDirection = parameters.SortDirection;
         preview.SortEvidence = BuildNormalizedSortText(parameters, dataset);
+        preview.MatchedCount = preview.Total;
         return preview;
     }
+
+    private async Task<ReportConfigurationPreviewDto> ExecuteMatchedSetPreviewAsync(
+        long userId, long configurationId, string datasetKey, ReportConfigurationDefinition definition,
+        string name, int? pinnedRevision, int version, ReportConfigurationPreviewRequest request,
+        ReportConfigurationPreviewParameters parameters, ReportConfigurationDatasetDto dataset,
+        IReportConfigurationDatasetProvider provider, string correlationId, bool isShared,
+        CancellationToken cancellationToken)
+    {
+        if (!provider.SupportsReadSnapshot)
+        {
+            throw new BusinessException(
+                $"数据集 {datasetKey} 不支持有界一致只读快照（environment-blocked）",
+                ReportConfigurationExecutionLimits.ErrorCodeEnvironmentUnsupported);
+        }
+
+        IReportConfigurationReadSnapshot snapshot;
+        try
+        {
+            snapshot = await provider.OpenReadSnapshotAsync(
+                definition, parameters, userId, correlationId, cancellationToken);
+        }
+        catch (BusinessException)
+        {
+            throw;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            throw new BusinessException(
+                "当前环境无法提供一致只读快照（environment-blocked）",
+                ReportConfigurationExecutionLimits.ErrorCodeEnvironmentUnsupported);
+        }
+
+        await using (snapshot)
+        {
+            var preview = provider.RenderMatchedPage(snapshot, definition, parameters);
+            preview.Groupings = parameters.Groupings.ToList();
+
+            if (definition.Pivot is not null)
+                preview.Pivot = ReportConfigurationPivotRules.Build(definition, dataset, preview.Rows, cancellationToken);
+
+            ApplyMetrics(definition, dataset, parameters.Groupings, preview);
+            if (parameters.Groupings.Count >= 2 || definition.Pivot is not null)
+                StripCompositeDependencies(definition, preview);
+            await ApplyRelationsAsync(definition, preview, userId, cancellationToken);
+
+            preview.ConfigurationId = configurationId;
+            preview.PinnedRevisionVersion = pinnedRevision;
+            preview.IsPinnedRevision = pinnedRevision.HasValue;
+            preview.Name = name;
+            preview.Version = version;
+            preview.NormalizedFiltersText = BuildNormalizedFiltersText(definition, dataset);
+            preview.DateRangeText = BuildNormalizedDateRangeText(definition, dataset);
+            preview.SortFieldKey = parameters.SortFieldKey;
+            preview.SortDirection = parameters.SortDirection;
+            preview.SortEvidence = BuildNormalizedSortText(parameters, dataset);
+            preview.MatchedCount = snapshot.MatchedCount;
+
+            // 完成事务后再做最终新鲜授权复核（授权 / 菜单 / 数据范围变更即拒绝整个响应）
+            await snapshot.CompleteAsync(cancellationToken);
+            await EnsureFinalAuthorizationAsync(
+                userId, configurationId, datasetKey, snapshot.ScopeFingerprint, isShared, cancellationToken);
+
+            return preview;
+        }
+    }
+
+    private async Task EnsureFinalAuthorizationAsync(
+        long userId, long configurationId, string datasetKey, string scopeFingerprint, bool isShared,
+        CancellationToken cancellationToken)
+    {
+        // 1) 新鲜菜单复核（fail closed）
+        var provider = _providers.FirstOrDefault(p =>
+            string.Equals(p.DatasetKey, datasetKey, StringComparison.OrdinalIgnoreCase))
+            ?? throw new BusinessException($"未知数据集: {datasetKey}");
+        if (await provider.GetDatasetAsync(userId, cancellationToken) is null)
+            throw new BusinessException($"当前账号没有「{datasetKey}」数据集授权：拒绝预览（fail closed）", ErrorCodes.Forbidden);
+
+        // 2) 新鲜数据范围复核（变更即拒绝）
+        var scope = await SalespersonDataScopeService.ResolveAsync(_db, userId);
+        if (!string.Equals(ComputeScopeFingerprint(scope), scopeFingerprint, StringComparison.Ordinal))
+            throw new BusinessException("数据范围已变更，本次预览被拒绝（fail closed）", ErrorCodes.Forbidden);
+
+        // 3) 共享授权复核（仅共享预览）
+        if (isShared)
+        {
+            var grant = await _db.ReportConfigurationGrants
+                .FirstOrDefaultAsync(g => g.RecipientUserId == userId
+                    && g.ReportConfigurationId == configurationId && !g.IsDeleted, cancellationToken)
+                ?? throw BusinessException.NotFound("报表配置不存在或无权访问");
+        }
+    }
+
+    private static string ComputeScopeFingerprint(SalespersonDataScope scope)
+        => scope.IsPrivileged
+            ? "privileged"
+            : (scope.SalesmanId?.ToString(CultureInfo.InvariantCulture) ?? "none")
+              + "|" + string.Join(",", (scope.AllowedCustomerIds ?? new HashSet<long>()).OrderBy(x => x));
 
     // ==================== 内部辅助 ====================
 

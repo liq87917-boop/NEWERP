@@ -344,6 +344,20 @@ public class ReportConfigurationUiTests
         Assert.Contains("RCC.busy = false;", js);   // 预览 / 导出结束都复位，防止重复点击
     }
 
+    [Fact]
+    public void 匹配集覆盖_设计器切换与结果标注_不含全量合计()
+    {
+        var js = File.ReadAllText(Path.Combine(JsDirectory(), "report-configuration.js"));
+
+        Assert.Contains("function rccCoverageHtml(ds)", js);
+        Assert.Contains("function rccSetCoverage(v)", js);
+        Assert.Contains("coverage: state.coverage || 'current-page'", js);
+        Assert.Contains("有界匹配集", js);
+        Assert.Contains("覆盖口径：", js);
+        Assert.Contains("全量合计后续版本提供", js);
+        Assert.Contains("if (code === 5002) return 'environment'", js);
+    }
+
     /// <summary>前端脚本目录（沿测试程序集输出目录上溯到仓库根，与 CustomerShipmentReportUiTests 同一约定）</summary>
     private static string JsDirectory() => Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
         "..", "..", "..", "..", "..", "src", "ERP.Api", "wwwroot", "js"));

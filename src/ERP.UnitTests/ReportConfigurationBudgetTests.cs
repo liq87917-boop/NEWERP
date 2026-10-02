@@ -25,6 +25,9 @@ public class ReportConfigurationBudgetTests
         Assert.Equal(32, ReportConfigurationExecutionLimits.MaxPreviewColumns);
         Assert.Equal(1024 * 1024, ReportConfigurationExecutionLimits.MaxSerializedPreviewBytes);
         Assert.Equal(10 * 1024 * 1024, ReportConfigurationExecutionLimits.MaxGeneratedFileBytes);
+        Assert.Equal(1000, ReportConfigurationExecutionLimits.MaxSnapshotFacts);
+        Assert.Equal(8 * 1024 * 1024, ReportConfigurationExecutionLimits.MaxSnapshotBytes);
+        Assert.Equal(5002, ReportConfigurationExecutionLimits.ErrorCodeEnvironmentUnsupported);
     }
 
     [Fact]

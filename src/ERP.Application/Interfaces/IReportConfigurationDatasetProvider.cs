@@ -1,4 +1,6 @@
+using ERP.Application.Common;
 using ERP.Application.DTOs;
+using ERP.Application.Services;
 
 namespace ERP.Application.Interfaces;
 
@@ -29,4 +31,37 @@ public interface IReportConfigurationDatasetProvider
         ReportConfigurationPreviewParameters parameters,
         long? userId,
         CancellationToken cancellationToken = default);
+
+    // ==================== ERP-273 Stage 1：可选有界一致只读快照契约（默认不支持） ====================
+
+    /// <summary>该数据集是否支持请求作用域的有界一致只读快照（默认 false；实现方显式开启）。</summary>
+    bool SupportsReadSnapshot => false;
+
+    /// <summary>
+    /// 打开请求作用域的有界一致只读快照。默认实现显式抛「环境不支持」错误（environment-blocked），
+    /// 绝不静默回落到无保护的多页读取；仅实现 <see cref="IReportConfigurationSnapshotDatasetProvider"/>
+    /// 的关系型适配器覆写本方法提供真实快照。
+    /// </summary>
+    Task<IReportConfigurationReadSnapshot> OpenReadSnapshotAsync(
+        ReportConfigurationDefinition definition,
+        ReportConfigurationPreviewParameters parameters,
+        long? userId,
+        string correlationId,
+        CancellationToken cancellationToken = default)
+        => Task.FromException<IReportConfigurationReadSnapshot>(
+            new BusinessException(
+                $"数据集 {DatasetKey} 不支持有界一致只读快照（environment-blocked）",
+                ReportConfigurationExecutionLimits.ErrorCodeEnvironmentUnsupported));
+
+    /// <summary>
+    /// 从已打开快照渲染选中页（保持与既有预览相同的列 / 行 / 计算列 / 分组页面小计口径）。
+    /// 默认实现显式抛「环境不支持」错误；仅快照适配器覆写。
+    /// </summary>
+    ReportConfigurationPreviewDto RenderMatchedPage(
+        IReportConfigurationReadSnapshot snapshot,
+        ReportConfigurationDefinition definition,
+        ReportConfigurationPreviewParameters parameters)
+        => throw new BusinessException(
+            $"数据集 {DatasetKey} 不支持有界一致只读快照（environment-blocked）",
+            ReportConfigurationExecutionLimits.ErrorCodeEnvironmentUnsupported);
 }

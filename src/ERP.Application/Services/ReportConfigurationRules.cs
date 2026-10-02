@@ -204,6 +204,7 @@ public static class ReportConfigurationRules
         ValidateAggregates(definition, dataset);
         ReportConfigurationPivotRules.Validate(definition, dataset);
         ValidateCapabilities(definition, dataset);
+        ValidateCoverage(definition, dataset);
         ReportConfigurationFormulaRules.ValidateComputedColumns(definition, dataset);
         ValidatePresentation(definition, dataset);
         ReportConfigurationRelationRules.Validate(definition, dataset);
@@ -317,6 +318,26 @@ public static class ReportConfigurationRules
                 throw BusinessException.InvalidParameter($"能力 {capability} 在当前阶段明确不支持（不提供惰性成功）");
             if (!dataset.SupportedCapabilities.Contains(capability, StringComparer.OrdinalIgnoreCase))
                 throw BusinessException.InvalidParameter($"数据集 {dataset.DatasetKey} 不支持能力 {capability}");
+        }
+    }
+
+    /// <summary>校验预览覆盖口径（ERP-273）：仅 current-page / matched-set；matched-set 需数据集显式支持。</summary>
+    private static void ValidateCoverage(ReportConfigurationDefinition definition, ReportConfigurationDatasetDto dataset)
+    {
+        var coverage = string.IsNullOrWhiteSpace(definition.Coverage)
+            ? ReportConfigurationConstants.CoverageCurrentPage
+            : definition.Coverage.Trim();
+
+        if (!string.Equals(coverage, ReportConfigurationConstants.CoverageCurrentPage, StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(coverage, ReportConfigurationConstants.CoverageMatchedSet, StringComparison.OrdinalIgnoreCase))
+        {
+            throw BusinessException.InvalidParameter($"未知覆盖口径: {coverage}");
+        }
+
+        if (string.Equals(coverage, ReportConfigurationConstants.CoverageMatchedSet, StringComparison.OrdinalIgnoreCase)
+            && !dataset.SupportedCapabilities.Contains(ReportConfigurationConstants.CapabilityMatchedSet, StringComparer.OrdinalIgnoreCase))
+        {
+            throw BusinessException.InvalidParameter($"数据集 {dataset.DatasetKey} 不支持有界匹配集预览");
         }
     }
 

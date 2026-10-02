@@ -48,6 +48,7 @@ let RCC = {
   aggregates: [],
   relations: [],
   groupings: [],
+  coverage: 'current-page',
   pivot: { rowDimension: '', columnDimension: '' },
   sortFieldKey: '',
   sortDirection: 'asc',
@@ -119,6 +120,7 @@ function rccKindOfCode(code) {
   if (code === 1008) return 'too-large';
   if (code === 5000) return 'environment';
   if (code === 5001) return 'rendering';
+  if (code === 5002) return 'environment';
   if (code === -1) return 'network';
   return 'unknown';
 }
@@ -379,7 +381,9 @@ function rccResultHtml(preview) {
   if (!preview) return rccEmptyHtml();
   const evidence = preview.evidence || {};
   const coverage = evidence.coverage || 'current-page';
-  const coverageText = coverage === 'current-page' ? '当前预览页（非全量合计）' : coverage;
+  const coverageText = coverage === 'matched-set'
+    ? '有界匹配集（≤1000 条一致快照，非全量合计）'
+    : (coverage === 'current-page' ? '当前预览页（非全量合计）' : coverage);
   const parts = [];
   if (rccEffectiveGroupings(preview).length) parts.push(rccGroupHtml(preview));
   parts.push(rccPivotResultHtml(preview));
@@ -391,8 +395,11 @@ function rccResultHtml(preview) {
     + ' · 覆盖口径：' + rccEsc(coverageText) + '</div>');
   if (evidence.disclaimerText) parts.push('<div class="rcc-disclaimer">' + rccEsc(evidence.disclaimerText) + '</div>');
   if (preview.sortEvidence) parts.push('<div class="rcc-sort-evidence">' + rccEsc(preview.sortEvidence) + '</div>');
+  const matchedSuffix = coverage === 'matched-set'
+    ? ' · 匹配 ' + rccEsc(preview.matchedCount !== undefined ? preview.matchedCount : preview.total) + ' 条'
+    : '';
   parts.push('<div class="rcc-meta">第 ' + rccEsc(preview.page) + '/' + rccEsc(preview.totalPages)
-    + ' 页 · 共 ' + rccEsc(preview.total) + ' 条</div>');
+    + ' 页 · 共 ' + rccEsc(preview.total) + ' 条' + matchedSuffix + '</div>');
   return parts.join('');
 }
 
@@ -467,6 +474,7 @@ function rccBuildDefinition(state) {
     filters,
     grouping,
     aggregates: rccBuildAggregates(state),
+    coverage: state.coverage || 'current-page',
     capabilities: [],
     computedColumns: rccBuildComputedColumns(state),
     relations: rccBuildRelations(state),
@@ -850,6 +858,26 @@ function rccRenderResult(html) {
   if (el) el.innerHTML = html;
 }
 
+function rccSupportsMatchedSet(ds) {
+  return !!ds && Array.isArray(ds.supportedCapabilities) && ds.supportedCapabilities.indexOf('matched-set') >= 0;
+}
+
+function rccCoverageHtml(ds) {
+  if (!rccSupportsMatchedSet(ds)) return '';
+  const cur = RCC.coverage === 'matched-set' ? 'matched-set' : 'current-page';
+  return '<div class="rcc-coverage"><label>覆盖口径</label>'
+    + '<select onchange="rccSetCoverage(this.value)">'
+    + '<option value="current-page" ' + (cur === 'current-page' ? 'selected' : '') + '>当前预览页（默认）</option>'
+    + '<option value="matched-set" ' + (cur === 'matched-set' ? 'selected' : '') + '>有界匹配集（≤1000 条一致快照）</option>'
+    + '</select>'
+    + '<div class="rcc-hint">有界匹配集读取 ≤1000 条一致快照，仍只展示选中页；全量合计后续版本提供</div></div>';
+}
+
+function rccSetCoverage(v) {
+  RCC.coverage = v === 'matched-set' ? 'matched-set' : 'current-page';
+  rccTouch();
+}
+
 function rccRenderDesigner(html) {
   const el = document.getElementById('rcc-designer');
   if (!el) return;
@@ -873,6 +901,7 @@ function rccRenderDesigner(html) {
     + rccPivotHtml()
     + '<div class="rcc-sorting"><label>排序（仅持久化键）</label>' + rccSortingHtml(ds)
     + '<div class="rcc-hint">' + rccEsc(ds.sortingExplanation || '仅订单 / 发票原生键可排序') + '</div></div>'
+    + rccCoverageHtml(ds)
     + rccMetricEditorHtml()
     + rccUnsupportedHtml(ds);
 }
@@ -933,7 +962,7 @@ function rccTouch() {
 async function rccInit() {
   RCC = {
     catalog: null, datasets: [], datasetKey: '', fields: [], list: [], current: null, name: '',
-    selectedKeys: [], filters: [], computedColumns: [], aggregates: [], groupings: [], sortFieldKey: '', sortDirection: 'asc', page: 1, pageSize: RCC_DEFAULT_PAGE_SIZE,
+    selectedKeys: [], filters: [], computedColumns: [], aggregates: [], groupings: [], coverage: 'current-page', sortFieldKey: '', sortDirection: 'asc', page: 1, pageSize: RCC_DEFAULT_PAGE_SIZE,
     maxPageSize: 200, previewRevision: null, view: null, revisions: [],
     sharedList: [], sharedCurrent: null, grants: [], dirty: false,
     requestSeq: 0, envBlocked: false, busy: false,
@@ -1112,6 +1141,7 @@ function rccApplyDefinition(def) {
     value2: f.value2 !== null && f.value2 !== undefined ? String(f.value2) : '',
   }));
   RCC.groupings = ((def && def.grouping) || []).filter(k => k && k !== 'none').slice(0, 2);
+  RCC.coverage = (def && def.coverage === 'matched-set') ? 'matched-set' : 'current-page';
   RCC.page = (def && def.presentation && def.presentation.page) || 1;
   RCC.pageSize = (def && def.presentation && def.presentation.pageSize) || RCC_DEFAULT_PAGE_SIZE;
   RCC.sortFieldKey = (def && def.presentation && def.presentation.sortFieldKey) || '';

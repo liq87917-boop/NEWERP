@@ -72,8 +72,14 @@ public static class ReportConfigurationConstants
     /// <summary>全匹配合计（all-match total）：Stage 1 明确不支持（不提供惰性成功）</summary>
     public const string CapabilityAllMatchTotal = "all-match-total";
 
+    /// <summary>有界匹配集预览能力（ERP-273）：一致快照读取选定匹配事实页；全量合计仍不支持。</summary>
+    public const string CapabilityMatchedSet = "matched-set";
+
     /// <summary>预览页面覆盖口径：小计仅覆盖「当前预览页」，绝不声称全匹配合计</summary>
     public const string CoverageCurrentPage = "current-page";
+
+    /// <summary>预览覆盖口径：有界匹配集（ERP-273，≤1000 条一致快照；非全量合计）</summary>
+    public const string CoverageMatchedSet = "matched-set";
 
     // ==================== 既有数据集键（适配器夹具，非数据库全量发现） ====================
 
@@ -288,6 +294,12 @@ public sealed class ReportConfigurationDefinition
     /// <para>绝不承载任意公式 / SQL / 脚本 / 跨事实联接 / 全匹配合计。</para>
     /// </summary>
     public ReportConfigurationPivotDefinition? Pivot { get; set; }
+
+    /// <summary>
+    /// 预览覆盖口径（ERP-273，可选；旧定义缺省为 current-page）：current-page = 当前预览页（默认），
+    /// matched-set = 有界一致匹配集（≤1000 条一致快照；仍展示选中页，绝不追加全匹配合计）。
+    /// </summary>
+    public string Coverage { get; set; } = ReportConfigurationConstants.CoverageCurrentPage;
 }
 
 /// <summary>类型化筛选：字段键 + 有限操作符 + 与字段类型匹配的值。</summary>
@@ -694,6 +706,9 @@ public sealed class ReportConfigurationPreviewDto
 
     /// <summary>总命中条数（分页前）</summary>
     public int Total { get; set; }
+
+    /// <summary>有界匹配集命中条数（ERP-273；current-page 模式与 <see cref="Total"/> 同值，matched-set 模式 = 一致快照命中数）</summary>
+    public int MatchedCount { get; set; }
 
     /// <summary>当前页码</summary>
     public int Page { get; set; }

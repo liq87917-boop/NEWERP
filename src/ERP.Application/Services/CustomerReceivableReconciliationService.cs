@@ -140,6 +140,70 @@ public static class CustomerReceivableReconciliationService
         return (rows, total);
     }
 
+    /// <summary>
+    /// 有界、作用域化的一致匹配集快照读取（ERP-273，只读派生）：复用本工作台的筛选 / 派生引擎，
+    /// 在业务员数据范围后直接做原生身份探针（Take(maxFacts + 1)），超上限置 overflow 而非 COUNT /
+    /// 物化无界匹配；命中后一次性批量装载本批发票与派生证据，保持源粒度 / 顺序 / null 语义。
+    /// </summary>
+    public static async Task<(
+        IReadOnlyList<CustomerReceivableReconciliationInvoiceRow> Rows, int MatchedCount, bool Overflow)>
+        ForScopedMatchedPreviewAsync(
+            IErpDbContext db,
+            CustomerReceivableReconciliationQuery query,
+            SalespersonDataScope scope,
+            string? sortFieldKey,
+            string? sortDirection,
+            int maxFacts,
+            CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(query);
+        query.Normalize();
+
+        var asOfDate = (query.AsOfDate ?? DateTime.Today).Date;
+
+        var source = ApplyFilters(db, query);
+        source = SalespersonDataScopeService.FilterByCustomer(source, scope, i => i.CustomerId);
+
+        IOrderedQueryable<CustomerSalesInvoiceEvidence> ordered;
+        if (string.IsNullOrWhiteSpace(sortFieldKey))
+        {
+            ordered = source
+                .OrderBy(i => i.CustomerId)
+                .ThenBy(i => i.Currency)
+                .ThenByDescending(i => i.InvoiceDate)
+                .ThenByDescending(i => i.Id);
+        }
+        else
+        {
+            var sort = DynamicReceivableReportRules.NormalizeSort(sortFieldKey, sortDirection);
+            ordered = ApplyPreviewSort(source, sort);
+        }
+
+        // 原生身份探针：只取 Id（Take(maxFacts + 1)），绝不 COUNT / 扫描 / 物化无界匹配
+        var probeIds = await ordered
+            .Select(i => i.Id)
+            .Take(maxFacts + 1)
+            .ToListAsync(cancellationToken);
+        if (probeIds.Count > maxFacts)
+            return (Array.Empty<CustomerReceivableReconciliationInvoiceRow>(), maxFacts + 1, true);
+
+        var matchedCount = probeIds.Count;
+        var invoices = new List<CustomerSalesInvoiceEvidence>();
+        if (probeIds.Count > 0)
+        {
+            var loaded = await db.CustomerSalesInvoiceEvidences.AsNoTracking()
+                .Where(i => probeIds.Contains(i.Id))
+                .ToListAsync(cancellationToken);
+            var byId = loaded.ToDictionary(i => i.Id);
+            invoices = probeIds.Where(byId.ContainsKey).Select(id => byId[id]).ToList();
+        }
+
+        var context = await LoadPageContextAsync(db, invoices);
+        var rows = invoices.Select(i => MapInvoice(i, context, asOfDate)).ToList();
+        return (rows, matchedCount, false);
+    }
+
     /// <summary>有限类型化源侧排序：仅 invoiceId / invoiceDate / customerId，附带不可变身份并列决断（Id 升序）。</summary>
     private static IOrderedQueryable<CustomerSalesInvoiceEvidence> ApplyPreviewSort(
         IQueryable<CustomerSalesInvoiceEvidence> source, (string FieldKey, bool Descending) sort)
