@@ -270,4 +270,43 @@ public class DynamicSalesCommissionReportUiTests
         Assert.DoesNotContain("JSON.stringify(SCD_DYN.view)", fn);
         Assert.DoesNotContain("请先预览", fn);
     }
+
+    // ==================== 9. 全匹配汇总 PDF 下载（ERP-249，前端契约） ====================
+
+    [Fact]
+    public void 导出汇总PDF_入口按钮与函数_复用当前字段日期筛选状态_不要求先预览_绝不传客户端行()
+    {
+        var js = Script;
+
+        Assert.Contains("onclick=\"scdExportSummaryPdf()\"", js);
+        Assert.Contains("function scdExportSummaryPdf(", js);
+        Assert.Contains("/api/dynamic-sales-commission-report/export-summary-pdf", js);
+
+        var fn = Segment(js, "function scdExportSummaryPdf(", "function loadSalesCommissionDesignerCatalog(");
+        Assert.Contains("scdBuildRequest(state)", fn);
+        Assert.Contains("scdDateError(state)", fn);
+        Assert.Contains("scdFilterError(state)", fn);
+        Assert.Contains("application/pdf", fn);
+        Assert.Contains("createObjectURL", fn);
+        // 独立于之前预览：绝不把预览行 / 客户端行 / 金额作为请求体，也不校验 SCD_DYN.view 是否已预览。
+        Assert.DoesNotContain("rows:", fn);
+        Assert.DoesNotContain("JSON.stringify(SCD_DYN.view)", fn);
+        Assert.DoesNotContain("请先预览", fn);
+    }
+
+    [Fact]
+    public void 导出汇总PDF_失败在结果区可见_保留详情状态_不覆盖预览视图()
+    {
+        var js = Script;
+        var fn = Segment(js, "function scdExportSummaryPdf(", "function loadSalesCommissionDesignerCatalog(");
+
+        // 下载失败 / 授权 / 网络错误在结果区可见（绝不静默、绝不下载任何内容）
+        Assert.Contains("scdErrorHtml", fn);
+        Assert.Contains("scdKindOfCode(code)", fn);
+
+        // 成功下载后若已有预览视图则重新渲染详情（保留详情 / 筛选 / 分页状态），绝不清空 SCD_DYN.view
+        Assert.Contains("if (SCD_DYN.view)", fn);
+        Assert.Contains("scdResultHtml(SCD_DYN.view)", fn);
+        Assert.DoesNotContain("SCD_DYN.view = null", fn);
+    }
 }

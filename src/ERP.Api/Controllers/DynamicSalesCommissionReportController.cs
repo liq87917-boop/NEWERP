@@ -117,6 +117,30 @@ public class DynamicSalesCommissionReportController : ControllerBase
             $"SalesCommissionSummary_{DateTime.Now:yyyyMMddHHmmss}.xlsx");
     }
 
+    /// <summary>
+    /// 下载全匹配原币汇总为中文 PDF（ERP-249，只读）：不依赖之前预览 / 当前页 / 选定明细列，每次请求重新校验身份 / 菜单授权 /
+    /// 业务员数据范围 / 字段 / 日期 / 分页 / 可选筛选与 500 订单来源上限（fail closed），基于同一有界、作用域化、已筛选证据
+    /// 纯派生「全匹配」原币汇总并以 PDFsharp + 共享 SimHei 解析器分页渲染（复用 ERP-247 汇总 DTO / 规则）。
+    /// 固定有限原币汇总行渲染已知签名原币金额 / 计数与未知金额完整度 / 未知利润 / 未知提成 / 当前参考比例证据；
+    /// 上下文中始终标注规范化日期 / 应用筛选 / 全匹配覆盖 / 来源上限 / 全局去重业务员桶与已审核订单 / 来源 / 原币 /
+    /// 当前参考比例 / 未知历史利润与提成依据；每页重复表头并按行页 / 列页拆分、每个列页恒保留币种身份列；
+    /// 无员工明细行 / 跨币种合计金额 / 编造提成。字体缺失 / 渲染失败显式失败（绝不空成功或缺失字形成功）。
+    /// 授权撤销 / 无效输入 / 来源超限返回错误、不返回任何文件。全程只读，请求由既有 <c>OperationLogMiddleware</c> 记录审计（动作「导出汇总 PDF」）。
+    /// </summary>
+    [HttpPost("export-summary-pdf")]
+    public async Task<IActionResult> ExportSummaryPdf([FromBody] DynamicSalesCommissionReportRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var page = await BuildPageAsync(request);
+        var summary = page.Summary ?? DynamicSalesCommissionSummaryRules.BuildSummary(
+            Array.Empty<ReportDtos.SalesCommissionItem>());
+
+        var bytes = DynamicSalesCommissionSummaryPdfExporter.Export(summary, page);
+        return File(bytes, "application/pdf",
+            $"SalesCommissionSummary_{DateTime.Now:yyyyMMddHHmmss}.pdf");
+    }
+
     /// <summary>每次重新校验身份 + 菜单授权 + 业务员数据范围，再交由服务层校验请求并只读查询当前页</summary>
     private async Task<DynamicSalesCommissionReportPageDto> BuildPageAsync(DynamicSalesCommissionReportRequest request)
     {
