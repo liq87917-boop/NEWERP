@@ -1,0 +1,108 @@
+{
+  "title": "Configure composite dimensions in unified current-page grouping",
+  "description": "Customer groups the same report by customer and month in chosen order using one generic engine. Current execution rejects more than one saved grouping: support at most two distinct catalogued base dimensions, initially customer/month in either order, without source joins or new business reports. Dimension metadata identifies authorized required fields, stable typed key and label and calendar-month semantics; no grouping on related/calculated/unauthorized fields yet. New grouping list and legacy single GroupBy request/defaults remain compatible; conflicting overrides rejected clearly. Provider fetches authorized dependencies using ungrouped source page, common engine groups only those current-page facts and projects only selected fields. Typed tuple keys avoid string-concatenation collision and deterministic customer/month order; missing dimensions form explicit unknown bucket. Selected metrics from ERP-267 compute per tuple and currency partition, preserve null/missing counts and no mixed currencies/units. Label coverage as current-page, not all matching facts; do not change page total or silently repage grouped results. No header duplication or fact multiplication. Persist JSON and immutable shared revisions; UI ordered dimension selection, bounded state and late-response protection. Universal exports render all composite group dimensions and selected metrics in their saved order; old subtotal contract remains backward compatible. Existing max32 columns, max200 page rows, 1MiB preview/10MiB file/deadline budgets remain authoritative. Stage 1 unified platform only; existing sales-order/receivable adapters are engine fixtures, not migration or new bespoke reports. Preserve old report entries until every fixed/dynamic report passes Stage 2 parity. No Agent or cross-business flow work. Server-authenticated identity and fresh existing menu/field/row/data scope remain authoritative, saved definitions/grants never grant ERP permissions. No arbitrary SQL, scripts, joins, tables, mixed currency/unit totals or one-to-many header duplication. No migrations, SchemaUpgrader/SeedData modifications, production SQL/database execution, schema/view/procedure changes, secrets/.env/config changes, deployment or irreversible operations. Use existing HTTP and entity audit conventions. Safe build/test and relevant offline integration tests required; missing actual DB/browser/font environment must be explicitly blocked, never claim the phase complete from build. Preserve unrelated source/work.",
+  "acceptance_criteria": [
+    "Catalog and persisted definitions validate two ordered base dimensions and legacy single-group compatibility, rejecting duplicate/unknown/unauthorized or conflicting dimensions.",
+    "Generic grouping and selected metrics use typed composite keys, authorized hidden dependencies, stable order and unknown/currency partitions over current page without changing source facts.",
+    "Workspace and universal Excel/PDF agree on saved dimension order, summaries and current-page coverage; offline key-collision/null/scope/compatibility tests pass safe build/test."
+  ],
+  "criterion_path_map": {
+    "Catalog and persisted definitions validate two ordered base dimensions and legacy single-group compatibility, rejecting duplicate/unknown/unauthorized or conflicting dimensions.": [
+      "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
+      "src/ERP.Application/Services/ReportConfigurationRules.cs",
+      "src/ERP.Application/Services/ReportConfigurationCatalog.cs",
+      "src/ERP.Application/Interfaces/IReportConfigurationDatasetProvider.cs",
+      "src/ERP.Infrastructure/Reports/ReportConfigurationDatasetProvider.cs",
+      "src/ERP.Application/Services/ReportConfigurationExecutionService.cs",
+      "src/ERP.Api/Controllers/ReportConfigurationsController.cs",
+      "src/ERP.Api/wwwroot/js/report-configuration.js",
+      "src/ERP.Application/Services/ReportConfigurationGroupingRules.cs",
+      "src/ERP.Application/Services/ReportConfigurationMetricRules.cs",
+      "src/ERP.UnitTests/ReportConfigurationGroupingTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationRulesTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationCatalogTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationVersionTests.cs"
+    ],
+    "Generic grouping and selected metrics use typed composite keys, authorized hidden dependencies, stable order and unknown/currency partitions over current page without changing source facts.": [
+      "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
+      "src/ERP.Application/Services/ReportConfigurationRules.cs",
+      "src/ERP.Application/Services/ReportConfigurationCatalog.cs",
+      "src/ERP.Application/Interfaces/IReportConfigurationDatasetProvider.cs",
+      "src/ERP.Infrastructure/Reports/ReportConfigurationDatasetProvider.cs",
+      "src/ERP.Application/Services/ReportConfigurationExecutionService.cs",
+      "src/ERP.Api/Controllers/ReportConfigurationsController.cs",
+      "src/ERP.Api/wwwroot/js/report-configuration.js",
+      "src/ERP.Application/Services/ReportConfigurationGroupingRules.cs",
+      "src/ERP.Application/Services/ReportConfigurationMetricRules.cs",
+      "src/ERP.UnitTests/ReportConfigurationGroupingTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationMetricTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationExecutionTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationSharingTests.cs"
+    ],
+    "Workspace and universal Excel/PDF agree on saved dimension order, summaries and current-page coverage; offline key-collision/null/scope/compatibility tests pass safe build/test.": [
+      "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
+      "src/ERP.Application/Services/ReportConfigurationRules.cs",
+      "src/ERP.Application/Services/ReportConfigurationCatalog.cs",
+      "src/ERP.Application/Interfaces/IReportConfigurationDatasetProvider.cs",
+      "src/ERP.Infrastructure/Reports/ReportConfigurationDatasetProvider.cs",
+      "src/ERP.Application/Services/ReportConfigurationExecutionService.cs",
+      "src/ERP.Api/Controllers/ReportConfigurationsController.cs",
+      "src/ERP.Api/wwwroot/js/report-configuration.js",
+      "src/ERP.Application/Services/ReportConfigurationGroupingRules.cs",
+      "src/ERP.Application/Services/ReportConfigurationMetricRules.cs",
+      "src/ERP.Infrastructure/Export/ReportConfigurationExcelExporter.cs",
+      "src/ERP.Infrastructure/Export/ReportConfigurationPdfExporter.cs",
+      "src/ERP.UnitTests/ReportConfigurationGroupingTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationExcelTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationPdfTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationUiTests.cs"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
+    "src/ERP.Application/Services/ReportConfigurationRules.cs",
+    "src/ERP.Application/Services/ReportConfigurationCatalog.cs",
+    "src/ERP.Application/Interfaces/IReportConfigurationDatasetProvider.cs",
+    "src/ERP.Infrastructure/Reports/ReportConfigurationDatasetProvider.cs",
+    "src/ERP.Application/Services/ReportConfigurationExecutionService.cs",
+    "src/ERP.Api/Controllers/ReportConfigurationsController.cs",
+    "src/ERP.Api/wwwroot/js/report-configuration.js",
+    "src/ERP.Application/Services/ReportConfigurationGroupingRules.cs",
+    "src/ERP.Application/Services/ReportConfigurationMetricRules.cs",
+    "src/ERP.UnitTests/ReportConfigurationGroupingTests.cs",
+    "src/ERP.UnitTests/ReportConfigurationRulesTests.cs",
+    "src/ERP.UnitTests/ReportConfigurationCatalogTests.cs",
+    "src/ERP.UnitTests/ReportConfigurationVersionTests.cs",
+    "src/ERP.UnitTests/ReportConfigurationMetricTests.cs",
+    "src/ERP.UnitTests/ReportConfigurationExecutionTests.cs",
+    "src/ERP.UnitTests/ReportConfigurationSharingTests.cs",
+    "src/ERP.Infrastructure/Export/ReportConfigurationExcelExporter.cs",
+    "src/ERP.Infrastructure/Export/ReportConfigurationPdfExporter.cs",
+    "src/ERP.UnitTests/ReportConfigurationExcelTests.cs",
+    "src/ERP.UnitTests/ReportConfigurationPdfTests.cs",
+    "src/ERP.UnitTests/ReportConfigurationUiTests.cs"
+  ],
+  "id": "ERP-271",
+  "depends_on": [
+    "ERP-270"
+  ],
+  "status": "pending",
+  "max_attempts": 3,
+  "attempts": 0,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "browser_acceptance": {
+    "required": false
+  },
+  "risk_level": "medium",
+  "priority": "P1",
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Bounded development-only unified reporting increment"
+  },
+  "created_at": "2026-10-02T16:37:44.099387Z"
+}

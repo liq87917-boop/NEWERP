@@ -1,0 +1,112 @@
+{
+  "title": "Build bounded configurable pivot views using common dimensions and metrics",
+  "description": "Customer chooses one authorized row dimension and one distinct authorized column dimension plus selected metrics to pivot existing current preview facts in the unified workspace. Use preceding composite dimension/metric contracts, initially customer/month, and saved schema-versioned Pivot definition. Enable only this bounded pivot capability, never arbitrary formula/SQL/cross-fact joins or all-match totals. At most two pivot axes, four selected base metrics, 32 visible columns/200 rendered rows and 1MiB preview/10MiB file with ERP-269 request deadline; reject an over-wide pivot with actionable reduce-range/metrics error before render, do not truncate unnoticed. Partition output by currency, never combine unlike units/currencies; null unknown buckets remain explicit. Typed axis keys avoid collision/injection, deterministic axis order and escaped labels. Empty intersections carry no facts: null aggregate value and known count zero; distinguish all-unknown source values from true numeric zero. Compute cell/grand summaries from source accumulators, not averages-of-averages, and preserve selected metric null/overflow rules. Coverage remains current-page only and existing source pagination total separate from pivot rows; do not claim global reporting totals. Fresh shared-user authorization, relation restrictions and dependency projection apply before computation. Persist draft/pinned definitions and generic preview Pivot result separately from ordinary rows; UI render and universal Excel/PDF render the same matrix with axis labels, currency/unit/coverage evidence and known/unknown counts. Offline tests of multiple metrics, empty/null/negative, mixed currency, limits and malicious labels plus configured safe build/test. Retain nonpivot behavior unchanged. Stage 1 unified platform only; existing sales-order/receivable adapters are engine fixtures, not migration or new bespoke reports. Preserve old report entries until every fixed/dynamic report passes Stage 2 parity. No Agent or cross-business flow work. Server-authenticated identity and fresh existing menu/field/row/data scope remain authoritative, saved definitions/grants never grant ERP permissions. No arbitrary SQL, scripts, joins, tables, mixed currency/unit totals or one-to-many header duplication. No migrations, SchemaUpgrader/SeedData modifications, production SQL/database execution, schema/view/procedure changes, secrets/.env/config changes, deployment or irreversible operations. Use existing HTTP and entity audit conventions. Safe build/test and relevant offline integration tests required; missing actual DB/browser/font environment must be explicitly blocked, never claim the phase complete from build. Preserve unrelated source/work.",
+  "acceptance_criteria": [
+    "Schema-versioned saved pivot and catalog capability validate authorized distinct axes/selected metrics and all request/result bounds before rendering.",
+    "Generic engine builds deterministic typed-key currency-partitioned matrices from current-page facts with correct sparse/null/count/weighted-summary semantics and fresh shared scope.",
+    "Unified UI and Excel/PDF display identical pivot axes/cells/summary/evidence and controlled over-limit failures; offline renderer/API/UI tests pass safe build/test."
+  ],
+  "criterion_path_map": {
+    "Schema-versioned saved pivot and catalog capability validate authorized distinct axes/selected metrics and all request/result bounds before rendering.": [
+      "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
+      "src/ERP.Application/Services/ReportConfigurationRules.cs",
+      "src/ERP.Application/Services/ReportConfigurationCatalog.cs",
+      "src/ERP.Application/Interfaces/IReportConfigurationDatasetProvider.cs",
+      "src/ERP.Infrastructure/Reports/ReportConfigurationDatasetProvider.cs",
+      "src/ERP.Application/Services/ReportConfigurationExecutionService.cs",
+      "src/ERP.Api/Controllers/ReportConfigurationsController.cs",
+      "src/ERP.Api/wwwroot/js/report-configuration.js",
+      "src/ERP.Application/Services/ReportConfigurationPivotRules.cs",
+      "src/ERP.Application/Services/ReportConfigurationGroupingRules.cs",
+      "src/ERP.Application/Services/ReportConfigurationMetricRules.cs",
+      "src/ERP.UnitTests/ReportConfigurationPivotTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationRulesTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationVersionTests.cs"
+    ],
+    "Generic engine builds deterministic typed-key currency-partitioned matrices from current-page facts with correct sparse/null/count/weighted-summary semantics and fresh shared scope.": [
+      "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
+      "src/ERP.Application/Services/ReportConfigurationRules.cs",
+      "src/ERP.Application/Services/ReportConfigurationCatalog.cs",
+      "src/ERP.Application/Interfaces/IReportConfigurationDatasetProvider.cs",
+      "src/ERP.Infrastructure/Reports/ReportConfigurationDatasetProvider.cs",
+      "src/ERP.Application/Services/ReportConfigurationExecutionService.cs",
+      "src/ERP.Api/Controllers/ReportConfigurationsController.cs",
+      "src/ERP.Api/wwwroot/js/report-configuration.js",
+      "src/ERP.Application/Services/ReportConfigurationPivotRules.cs",
+      "src/ERP.Application/Services/ReportConfigurationGroupingRules.cs",
+      "src/ERP.Application/Services/ReportConfigurationMetricRules.cs",
+      "src/ERP.UnitTests/ReportConfigurationPivotTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationMetricTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationExecutionTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationSharingTests.cs"
+    ],
+    "Unified UI and Excel/PDF display identical pivot axes/cells/summary/evidence and controlled over-limit failures; offline renderer/API/UI tests pass safe build/test.": [
+      "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
+      "src/ERP.Application/Services/ReportConfigurationRules.cs",
+      "src/ERP.Application/Services/ReportConfigurationCatalog.cs",
+      "src/ERP.Application/Interfaces/IReportConfigurationDatasetProvider.cs",
+      "src/ERP.Infrastructure/Reports/ReportConfigurationDatasetProvider.cs",
+      "src/ERP.Application/Services/ReportConfigurationExecutionService.cs",
+      "src/ERP.Api/Controllers/ReportConfigurationsController.cs",
+      "src/ERP.Api/wwwroot/js/report-configuration.js",
+      "src/ERP.Application/Services/ReportConfigurationPivotRules.cs",
+      "src/ERP.Application/Services/ReportConfigurationGroupingRules.cs",
+      "src/ERP.Application/Services/ReportConfigurationMetricRules.cs",
+      "src/ERP.Infrastructure/Export/ReportConfigurationExcelExporter.cs",
+      "src/ERP.Infrastructure/Export/ReportConfigurationPdfExporter.cs",
+      "src/ERP.UnitTests/ReportConfigurationPivotTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationExcelTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationPdfTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationApiTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationUiTests.cs"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
+    "src/ERP.Application/Services/ReportConfigurationRules.cs",
+    "src/ERP.Application/Services/ReportConfigurationCatalog.cs",
+    "src/ERP.Application/Interfaces/IReportConfigurationDatasetProvider.cs",
+    "src/ERP.Infrastructure/Reports/ReportConfigurationDatasetProvider.cs",
+    "src/ERP.Application/Services/ReportConfigurationExecutionService.cs",
+    "src/ERP.Api/Controllers/ReportConfigurationsController.cs",
+    "src/ERP.Api/wwwroot/js/report-configuration.js",
+    "src/ERP.Application/Services/ReportConfigurationPivotRules.cs",
+    "src/ERP.Application/Services/ReportConfigurationGroupingRules.cs",
+    "src/ERP.Application/Services/ReportConfigurationMetricRules.cs",
+    "src/ERP.UnitTests/ReportConfigurationPivotTests.cs",
+    "src/ERP.UnitTests/ReportConfigurationRulesTests.cs",
+    "src/ERP.UnitTests/ReportConfigurationVersionTests.cs",
+    "src/ERP.UnitTests/ReportConfigurationMetricTests.cs",
+    "src/ERP.UnitTests/ReportConfigurationExecutionTests.cs",
+    "src/ERP.UnitTests/ReportConfigurationSharingTests.cs",
+    "src/ERP.Infrastructure/Export/ReportConfigurationExcelExporter.cs",
+    "src/ERP.Infrastructure/Export/ReportConfigurationPdfExporter.cs",
+    "src/ERP.UnitTests/ReportConfigurationExcelTests.cs",
+    "src/ERP.UnitTests/ReportConfigurationPdfTests.cs",
+    "src/ERP.UnitTests/ReportConfigurationApiTests.cs",
+    "src/ERP.UnitTests/ReportConfigurationUiTests.cs"
+  ],
+  "id": "ERP-272",
+  "depends_on": [
+    "ERP-271"
+  ],
+  "status": "pending",
+  "max_attempts": 3,
+  "attempts": 0,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "browser_acceptance": {
+    "required": false
+  },
+  "risk_level": "medium",
+  "priority": "P1",
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Bounded development-only unified reporting increment"
+  },
+  "created_at": "2026-10-02T16:37:44.100711Z"
+}
