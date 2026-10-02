@@ -207,7 +207,7 @@ public partial class ReportService
     /// 员工姓名快照缺失 / 已删除显式为「未知业务员」，绝不把订单改派到其他业务员；超出即 fail closed 且不返回任何行或金额。
     /// </summary>
     public async Task<List<ReportDtos.SalesmanOutputItem>> GetSalesmanOutputAsync(
-        DateTime start, DateTime end, SalespersonDataScope scope)
+        DateTime start, DateTime end, SalespersonDataScope scope, SalesmanOutputFilterDto? filter = null)
     {
         ArgumentNullException.ThrowIfNull(scope);
 
@@ -237,6 +237,10 @@ public partial class ReportService
                         && o.OrderDate >= startDate
                         && o.OrderDate < endExclusive);
         ordersQuery = SalespersonDataScopeService.FilterByCustomer(ordersQuery, scope, o => o.CustomerId);
+
+        // 2.1) ERP-237 可选应用筛选：作用在业务员数据范围之后、501 订单头上限探测之前（参数化 EF 谓词）；
+        // 客户 / 业务员 / 原币谓词与范围相交；绝不因业务员筛选而扩展数据范围，也绝不在聚合后再筛选。
+        ordersQuery = ApplySalesmanOutputFilter(ordersQuery, filter);
 
         var orders = await ordersQuery
             .OrderBy(o => o.SalesmanId)
@@ -299,5 +303,31 @@ public partial class ReportService
             .OrderBy(x => x.SalesmanId)
             .ThenBy(x => x.Currency, StringComparer.Ordinal)
             .ToList();
+    }
+
+    /// <summary>
+    /// 应用 ERP-237 可选筛选（在业务员数据范围之后、501 订单头上限探测之前）：客户 Id 精确匹配、
+    /// 业务员 Id 精确匹配、原币币种已知枚举码精确匹配。筛选已由调用方规范化；全部为参数化 EF 谓词，非任意 SQL。
+    /// <para>业务员 Id 仅订单属性（非权限边界）：不会因业务员筛选而扩展客户范围，也不会在聚合后再筛选。</para>
+    /// </summary>
+    private static IQueryable<SalesOrder> ApplySalesmanOutputFilter(
+        IQueryable<SalesOrder> source, SalesmanOutputFilterDto? filter)
+    {
+        if (filter is null)
+            return source;
+
+        if (filter.CustomerId is > 0)
+            source = source.Where(o => o.CustomerId == filter.CustomerId.Value);
+
+        if (filter.SalesmanId is > 0)
+            source = source.Where(o => o.SalesmanId == filter.SalesmanId.Value);
+
+        if (!string.IsNullOrEmpty(filter.Currency)
+            && Enum.TryParse<Currency>(filter.Currency, true, out var currency))
+        {
+            source = source.Where(o => o.Currency == currency);
+        }
+
+        return source;
     }
 }

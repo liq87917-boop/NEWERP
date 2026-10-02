@@ -24,7 +24,9 @@ public interface IReportService
         DateTime start, DateTime end, SalespersonDataScope scope, CustomerShipmentFilterDto? filter = null);
 
     /// <summary>业务员产值报表（仅已审核、未删除、已分配业务员、当前账号数据范围内的销售订单证据；日期有界，超出即 fail closed）</summary>
-    Task<List<ReportDtos.SalesmanOutputItem>> GetSalesmanOutputAsync(DateTime start, DateTime end, SalespersonDataScope scope);
+    /// <param name="filter">ERP-237 可选应用筛选（客户 Id / 业务员 Id / 原币币种）；传 null 保持既有行为。</param>
+    Task<List<ReportDtos.SalesmanOutputItem>> GetSalesmanOutputAsync(
+        DateTime start, DateTime end, SalespersonDataScope scope, SalesmanOutputFilterDto? filter = null);
 
     /// <summary>资产负债表</summary>
     Task<ReportDtos.FinancialStatement> GetBalanceSheetAsync(DateTime asOfDate);
