@@ -1845,18 +1845,11 @@ async function psrPreview() {
   }
 }
 
-/* 导出选定 Top 结果为 Excel（ERP-213，只读）：复用预览请求体 POST /api/dynamic-product-sales-ranking-report/export；
-   成功（xlsx 附件）触发下载；授权 / 无效 / 空结果 / 网络失败在结果区可见，不下载任何内容 */
+/* 导出选定 Top 结果为 Excel（ERP-213 / ERP-217，只读）：复用当前字段 / 分组 / 开始 / 结束日期 / Top / 筛选组装请求体
+   POST /api/dynamic-product-sales-ranking-report/export；接口会重新校验并重跑有界授权预览（不要求先预览），
+   分组键随请求下发（none 时保持既有单工作表导出，unit 时服务端追加「单位汇总」工作表）；
+   成功（xlsx 附件）触发下载；授权 / 无效 / 网络失败在结果区可见，不下载任何内容，且不清空 / 不覆盖设计器表单状态 */
 async function psrExport() {
-  if (!PSR_DYN.view || !PSR_DYN.view.columns || !PSR_DYN.view.columns.length) {
-    psrRenderResult(psrErrorHtml('invalid', '请先预览后再导出 Excel'));
-    return;
-  }
-  if (!PSR_DYN.view.rows || PSR_DYN.view.rows.length === 0) {
-    psrRenderResult(psrErrorHtml('empty', '没有符合日期范围与数据范围的已审核发货证据，无法导出（请先预览）'));
-    return;
-  }
-
   const state = psrBuildState();
   const filterError = psrFilterError(state);
   if (filterError) {

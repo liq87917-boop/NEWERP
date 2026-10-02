@@ -113,6 +113,31 @@ public class DynamicProductSalesRankingReportUiTests
         Assert.Contains("绝不跨单位合计数量", js);
     }
 
+    [Fact]
+    public void Excel下载_复用当前字段分组日期Top请求_不要求先预览_不覆盖表单状态()
+    {
+        var js = Script;
+
+        var fn = Segment(js, "async function psrExport()", "/* 下载选定 Top 结果为中文 PDF");
+        Assert.Contains("psrBuildState()", fn);
+        Assert.Contains("psrFilterError(state)", fn);
+        Assert.Contains("psrBuildRequest(state)", fn);
+        Assert.Contains("/api/dynamic-product-sales-ranking-report/export", fn);
+        Assert.Contains("method: 'POST'", fn);
+        Assert.Contains("a.download = '商品销量排名_'", fn);
+        Assert.Contains("psrErrorHtml('unauthorized', message)", fn);
+        Assert.Contains("psrErrorHtml('invalid', filterError)", fn);
+        Assert.Contains("psrErrorHtml(psrKindOfCode(code), message)", fn);
+        Assert.Contains("psrErrorHtml('network', (err && err.message) || '无法连接到服务器')", fn);
+        // 不要求先预览、不依赖 PSR_DYN.view、不写入 localStorage 覆盖表单状态
+        Assert.DoesNotContain("PSR_DYN.view", fn);
+        Assert.DoesNotContain("请先预览后再导出 Excel", fn);
+        Assert.DoesNotContain("FromSql", fn);
+        Assert.DoesNotContain("ExecuteSql", fn);
+        Assert.DoesNotContain("SqlCommand", fn);
+        Assert.DoesNotContain("localStorage.setItem", fn);
+    }
+
     // ==================== PDF 下载（ERP-214） ====================
 
     [Fact]

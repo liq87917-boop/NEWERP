@@ -420,6 +420,45 @@ public static class DynamicProductSalesRankingReportRules
     /// <summary>上下文表「空结果说明」行标签</summary>
     public const string ContextEmptyLabel = "空结果说明";
 
+    // ==================== 6.1 单位汇总工作表（ERP-217） ====================
+
+    /// <summary>「单位汇总」工作表名（仅 unit 分组时追加，与数据 / 报表口径工作表互不混淆）</summary>
+    public const string UnitSummarySheetName = "单位汇总";
+
+    /// <summary>单位汇总「单位」列标题（文本，公式注入转义）</summary>
+    public const string UnitSummaryUnitColumn = "单位";
+
+    /// <summary>单位汇总「排名桶数」列标题（数值）</summary>
+    public const string UnitSummaryBucketCountColumn = "排名桶数";
+
+    /// <summary>单位汇总「同单位数量小计」列标题（已知单位数值；未知单位显式标记，绝不回落 0）</summary>
+    public const string UnitSummaryQuantityColumn = "同单位数量小计";
+
+    /// <summary>未知单位数量的显式文本（绝不当作数值 0）</summary>
+    public const string UnknownQuantityText = "未知";
+
+    /// <summary>单位汇总「分组口径」上下文行标签（仅当前 Top 结果）</summary>
+    public const string UnitSummaryGroupContextLabel = "分组口径";
+
+    /// <summary>单位汇总「Top 限定」上下文行标签</summary>
+    public const string UnitSummaryTopLabel = "Top 限定";
+
+    /// <summary>单位汇总「开始日期」上下文行标签</summary>
+    public const string UnitSummaryStartLabel = "开始日期";
+
+    /// <summary>单位汇总「结束日期」上下文行标签</summary>
+    public const string UnitSummaryEndLabel = "结束日期";
+
+    /// <summary>单位汇总「筛选」上下文行标签</summary>
+    public const string UnitSummaryFilterLabel = "筛选";
+
+    /// <summary>单位汇总空结果的显式提示（绝不静默留白）</summary>
+    public const string UnitSummaryEmptyNote = "当前 Top 结果没有可汇总的单位证据（空结果）";
+
+    /// <summary>是否按单位分组（仅 unit 返回 true；入参为已规范化分组键）</summary>
+    public static bool IsUnitGrouping(string? groupBy)
+        => string.Equals(groupBy, GroupUnit, StringComparison.OrdinalIgnoreCase);
+
     /// <summary>把 Top 与是否截断渲染为上下文文案（绝不声称 Top 之外完整）</summary>
     public static string BuildTopContext(int top, bool topLimited)
         => topLimited

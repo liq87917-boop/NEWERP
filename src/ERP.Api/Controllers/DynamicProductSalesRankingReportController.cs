@@ -116,7 +116,7 @@ public class DynamicProductSalesRankingReportController : ControllerBase
         return DynamicProductSalesRankingReportRules.BuildPage(items, fieldKeys, top, start, end, filterText, groupBy);
     }
 
-    /// <summary>生成 Excel：数据工作表（选定列顺序 + 类型化值 + 公式注入转义） + 「报表口径」上下文工作表</summary>
+    /// <summary>生成 Excel：数据工作表（选定列顺序 + 类型化值 + 公式注入转义） + 「报表口径」上下文工作表；unit 分组时再追加「单位汇总」工作表</summary>
     private static byte[] BuildWorkbook(DynamicProductSalesRankingReportPageDto page)
     {
         var columns = page.Columns.Select(c => (c.Key, c.Label)).ToList();
@@ -126,6 +126,8 @@ public class DynamicProductSalesRankingReportController : ControllerBase
         using var input = new MemoryStream(dataBytes);
         using var workbook = new XSSFWorkbook(input);
         AppendContextSheet(workbook, page);
+        if (DynamicProductSalesRankingReportRules.IsUnitGrouping(page.GroupBy))
+            AppendUnitSummarySheet(workbook, page);
 
         using var output = new MemoryStream();
         workbook.Write(output);
@@ -163,6 +165,62 @@ public class DynamicProductSalesRankingReportController : ControllerBase
 
         if (page.Rows is null || page.Rows.Count == 0)
             AddLabel(nextRow, DynamicProductSalesRankingReportRules.ContextEmptyLabel, page.EmptyText);
+    }
+
+    /// <summary>文本标签统一做公式注入转义（保持字面文本，与数据单元格同口径）</summary>
+    private static string SafeText(string? value)
+        => DynamicProductSalesRankingReportRules.EscapeFormulaLeading(value) as string ?? string.Empty;
+
+    /// <summary>
+    /// 追加「单位汇总」工作表（ERP-217，只读）：仅 unit 分组时追加，每行 = 精确单位（未知单位显式标注）+ 排名桶数（数值）
+    /// + 同单位数量小计（已知单位数值、未知单位显式「未知」绝不回落 0）；随后追加分组口径（仅当前 Top 结果）/
+    /// Top 限定 / 日期 / 筛选上下文；文本标签做公式注入转义，绝不跨单位合计数量、绝不含金额。
+    /// </summary>
+    private static void AppendUnitSummarySheet(XSSFWorkbook workbook, DynamicProductSalesRankingReportPageDto page)
+    {
+        var sheet = workbook.CreateSheet(DynamicProductSalesRankingReportRules.UnitSummarySheetName);
+
+        var header = sheet.CreateRow(0);
+        header.CreateCell(0).SetCellValue(SafeText(DynamicProductSalesRankingReportRules.UnitSummaryUnitColumn));
+        header.CreateCell(1).SetCellValue(SafeText(DynamicProductSalesRankingReportRules.UnitSummaryBucketCountColumn));
+        header.CreateCell(2).SetCellValue(SafeText(DynamicProductSalesRankingReportRules.UnitSummaryQuantityColumn));
+
+        var groups = page.Groups ?? new List<DynamicProductSalesRankingReportGroupDto>();
+        if (groups.Count == 0)
+        {
+            sheet.CreateRow(1).CreateCell(0).SetCellValue(SafeText(DynamicProductSalesRankingReportRules.UnitSummaryEmptyNote));
+        }
+        else
+        {
+            for (var r = 0; r < groups.Count; r++)
+            {
+                var group = groups[r];
+                var row = sheet.CreateRow(r + 1);
+                row.CreateCell(0).SetCellValue(SafeText(group.Label));
+                row.CreateCell(1).SetCellValue(group.RankingBucketCount);
+                if (group.IsUnknown)
+                    row.CreateCell(2).SetCellValue(SafeText(DynamicProductSalesRankingReportRules.UnknownQuantityText));
+                else
+                    row.CreateCell(2).SetCellValue((double)(group.TotalQuantity ?? 0m));
+            }
+        }
+
+        var contextRow = (groups.Count == 0 ? 1 : groups.Count) + 2;
+
+        void AddContext(int rowIndex, string label, string value)
+        {
+            var row = sheet.CreateRow(rowIndex);
+            row.CreateCell(0).SetCellValue(SafeText(label));
+            row.CreateCell(1).SetCellValue(SafeText(value));
+        }
+
+        AddContext(contextRow, DynamicProductSalesRankingReportRules.UnitSummaryGroupContextLabel, page.GroupContextText);
+        AddContext(contextRow + 1, DynamicProductSalesRankingReportRules.UnitSummaryTopLabel,
+            DynamicProductSalesRankingReportRules.BuildTopContext(page.Top, page.TopLimited));
+        AddContext(contextRow + 2, DynamicProductSalesRankingReportRules.UnitSummaryStartLabel, page.Start.ToString("yyyy-MM-dd"));
+        AddContext(contextRow + 3, DynamicProductSalesRankingReportRules.UnitSummaryEndLabel, page.End.ToString("yyyy-MM-dd"));
+        if (!string.IsNullOrEmpty(page.FilterText))
+            AddContext(contextRow + 4, DynamicProductSalesRankingReportRules.UnitSummaryFilterLabel, page.FilterText);
     }
 
     /// <summary>身份 + 既有「角色 → 菜单」商品销量排名榜模块授权 + 业务员数据范围（fail closed，绝不猜测身份）</summary>

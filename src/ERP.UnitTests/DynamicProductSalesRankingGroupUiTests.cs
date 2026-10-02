@@ -88,4 +88,17 @@ public class DynamicProductSalesRankingGroupUiTests
         Assert.Contains("const groups = psrGroupsHtml(view);", fn);
         Assert.Contains("${groups}", fn);
     }
+
+    [Fact]
+    public void Excel导出_分组键随请求下发_复用有界请求体_不要求先预览()
+    {
+        var js = Script;
+
+        var fn = Segment(js, "async function psrExport()", "/* 下载选定 Top 结果为中文 PDF");
+        Assert.Contains("psrBuildState()", fn);
+        Assert.Contains("psrBuildRequest(state)", fn);
+        Assert.Contains("/api/dynamic-product-sales-ranking-report/export", fn);
+        Assert.DoesNotContain("PSR_DYN.view", fn);
+        Assert.DoesNotContain("请先预览后再导出 Excel", fn);
+    }
 }
