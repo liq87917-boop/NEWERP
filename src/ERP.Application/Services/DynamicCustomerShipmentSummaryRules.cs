@@ -34,6 +34,7 @@ public static class DynamicCustomerShipmentSummaryRules
         new List<DynamicCustomerShipmentReportFieldDto>
         {
             new("currency", "原币币种", "string", false),
+            new("currencyLabel", "原币币种标签", "string", false),
             new("customerCount", "客户数", "number", false),
             new("orderCount", "已审核订单数", "number", false),
             new("totalAmount", "原币金额合计", "number", false),

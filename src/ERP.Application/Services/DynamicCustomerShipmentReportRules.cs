@@ -358,4 +358,64 @@ public static class DynamicCustomerShipmentReportRules
             export[kv.Key] = kv.Value is null ? UnknownValueText : EscapeFormulaLeading(kv.Value);
         return export;
     }
+
+    // ==================== 6.1 全匹配汇总 Excel（ERP-233） ====================
+
+    /// <summary>全匹配汇总 Excel「原币金额汇总」工作表名（ERP-233：区别于当前页明细导出的「客户出货量统计表」工作表）</summary>
+    public const string SummaryCurrencySheetName = "原币金额汇总";
+
+    /// <summary>全匹配汇总 Excel「精确单位数量汇总」工作表名（ERP-233：区别于当前页明细导出与金额汇总工作表）</summary>
+    public const string SummaryUnitSheetName = "精确单位数量汇总";
+
+    /// <summary>上下文表「覆盖范围」行标签（ERP-233：显式标注汇总覆盖本次有界来源内的全部匹配客户 × 原币证据行，区别于明细页「页面覆盖」）</summary>
+    public const string ContextCoverageLabel = "覆盖范围";
+
+    /// <summary>上下文表「完整度」行标签（ERP-233：显式标注数量证据完整度与不完整桶数）</summary>
+    public const string ContextCompletenessLabel = "完整度";
+
+    /// <summary>上下文表「原币证据」行标签（ERP-233：金额均为订单原币、未知币种独立、绝不跨币种合计）</summary>
+    public const string ContextCurrencyEvidenceLabel = "原币证据";
+
+    /// <summary>原币证据文案：金额均为订单原币、未知币种单独分桶、绝不跨币种合计、无任何跨币种金额总计</summary>
+    public const string ContextCurrencyEvidenceText =
+        "金额均为订单原币；未知币种单独分桶；绝不跨币种合计，无任何跨币种金额总计；" +
+        "证据依据为已审核、未删除销售订单，非实际出库 / 装柜 / 收款";
+
+    /// <summary>
+    /// 把一条全匹配原币金额汇总行转成导出行（ERP-233）：币种键 / 标签文本做公式注入转义，客户数 / 订单数为整数数值；
+    /// 已知币种金额为签名数值、未知币种金额显式转为「未知」（绝不写成数值 0、绝不跨币种求和）。
+    /// <para>键集合与 <see cref="DynamicCustomerShipmentSummaryRules.CurrencySummaryColumns"/> 一致
+    /// （currency / currencyLabel / customerCount / orderCount / totalAmount / evidence）。</para>
+    /// </summary>
+    public static Dictionary<string, object?> BuildCurrencySummaryExportRow(DynamicCustomerShipmentCurrencySummaryDto row)
+    {
+        return new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["currency"] = EscapeFormulaLeading(row.Currency),
+            ["currencyLabel"] = EscapeFormulaLeading(row.CurrencyLabel),
+            ["customerCount"] = row.CustomerCount,
+            ["orderCount"] = row.OrderCount,
+            ["totalAmount"] = row.TotalAmount is null ? UnknownValueText : row.TotalAmount,
+            ["evidence"] = EscapeFormulaLeading(row.Evidence),
+        };
+    }
+
+    /// <summary>
+    /// 把一条全匹配精确单位数量汇总行转成导出行（ERP-233）：币种键 / 原始单位 / 数量证据标签文本做公式注入转义；
+    /// 已知单位数量为签名数值、未知单位数量显式转为「未知」（绝不写成数值 0、绝不换算单位）；绝不携带任何货币金额。
+    /// <para>键集合与 <see cref="DynamicCustomerShipmentSummaryRules.UnitSummaryColumns"/> 一致
+    /// （currency / unit / quantity / detailCount / quantityLabel）。</para>
+    /// </summary>
+    public static Dictionary<string, object?> BuildUnitSummaryExportRow(DynamicCustomerShipmentUnitSummaryDto row)
+    {
+        return new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["currency"] = EscapeFormulaLeading(row.Currency),
+            ["unit"] = EscapeFormulaLeading(row.Unit),
+            ["quantity"] = row.Quantity is null ? UnknownValueText : row.Quantity,
+            ["detailCount"] = row.DetailCount,
+            ["quantityLabel"] = EscapeFormulaLeading(row.QuantityLabel),
+        };
+    }
+
 }

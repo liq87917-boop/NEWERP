@@ -313,4 +313,26 @@ public class DynamicCustomerShipmentReportUiTests
         Assert.Contains("const summaryHtml = csdCurrencySummaryHtml(view) + csdUnitSummaryHtml(view);", fn);
         Assert.Contains("${summaryHtml}${body}", fn);
     }
+
+    // ==================== 10. ERP-233 全匹配汇总 Excel 下载（独立于预览与当前页） ====================
+
+    [Fact]
+    public void 汇总导出_独立按钮与端点_无需先预览_绝不含明细行()
+    {
+        var js = Script;
+
+        Assert.Contains("onclick=\"csdExportSummary()\"", js);
+        Assert.Contains("function csdExportSummary()", js);
+        Assert.Contains("/api/dynamic-customer-shipment-report/export-summary", js);
+        Assert.Contains("下载全匹配汇总 Excel", js);
+
+        // 与当前页明细导出按钮文案不同
+        Assert.Contains("导出当前页 Excel", js);
+
+        // 汇总导出无需先预览：函数不读取 CSD_DYN.view.rows / view.columns（区别于 csdExport 的「请先预览」守卫）
+        var fn = Segment(js, "function csdExportSummary()", "loadCustomerShipmentDesignerCatalog();");
+        Assert.DoesNotContain("请先预览", fn);
+        Assert.DoesNotContain("view.rows", fn);
+        Assert.DoesNotContain("view.columns", fn);
+    }
 }

@@ -5,6 +5,7 @@ using ERP.Application.Services;
 using ERP.Infrastructure.Export;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using NPOI.SS.UserModel;
 using NPOI.XSSF.UserModel;
 using System.Security.Claims;
 
@@ -97,6 +98,29 @@ public class DynamicCustomerShipmentReportController : ControllerBase
             $"CustomerShipmentEvidence_{DateTime.Now:yyyyMMddHHmmss}.pdf");
     }
 
+    /// <summary>
+    /// 下载当前筛选集的全匹配汇总为 Excel（ERP-233，只读）：独立重新校验身份 / 客户出货量统计表菜单授权 /
+    /// 业务员数据范围 / 字段 / 日期 / 分页 / 应用筛选，并复用同一服务端在全部匹配客户 × 原币证据行上派生的
+    /// ERP-232 全匹配汇总（与当前页 / 选定列无关，无需先预览、绝不含客户明细行）；绝不信任客户端行 / 金额 / 身份 / 数据范围。
+    /// 工作簿含「原币金额汇总」「精确单位数量汇总」两张数据工作表（已知金额 / 数量 / 计数为数值，未知显式「未知」）
+    /// 与「报表口径」上下文工作表（日期 / 来源上限 / 覆盖范围 / 来源证据 / 未知口径 / 完整度 / 应用筛选 / 只读声明）；
+    /// 绝不把金额复制到单位行、绝不跨币种 / 跨单位合计、绝无任何总计行。授权撤销 / 无效输入 / 来源超限返回错误、不返回任何工作簿。
+    /// <para>全程只读，不写库、不执行任意 SQL；请求由既有 <c>OperationLogMiddleware</c> 记录审计（动作「导出全匹配汇总」）。</para>
+    /// </summary>
+    [HttpPost("export-summary")]
+    public async Task<IActionResult> ExportSummary([FromBody] DynamicCustomerShipmentReportRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        // 复用同一有界、已授权管线：重新校验字段 / 日期 / 分页 / 应用筛选与身份 / 菜单授权 / 数据范围，
+        // 并由服务端同一 BuildPageAsync 派生覆盖全部匹配客户 × 原币证据行的全匹配汇总
+        // （绝不相信客户端行 / 金额 / 身份 / 数据范围；即使未先预览或详情页越界，汇总仍覆盖全部匹配行）
+        var page = await BuildPageAsync(request);
+        var bytes = BuildSummaryWorkbook(page);
+        return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            $"CustomerShipmentEvidenceSummary_{DateTime.Now:yyyyMMddHHmmss}.xlsx");
+    }
+
     /// <summary>复用同一有界、已授权预览管线：先校验字段 / 日期 / 分页，再每次重新校验身份 / 菜单授权 / 数据范围，最后只读查询当前页</summary>
     private async Task<DynamicCustomerShipmentReportPageDto> BuildPageAsync(
         DynamicCustomerShipmentReportRequest request)
@@ -169,6 +193,126 @@ public class DynamicCustomerShipmentReportController : ControllerBase
         if (!string.IsNullOrWhiteSpace(page.EmptyText))
             AddLabel(nextRow, DynamicCustomerShipmentReportRules.ContextEmptyLabel, page.EmptyText);
     }
+
+    /// <summary>生成全匹配汇总 Excel（ERP-233）：原币金额汇总 + 精确单位数量汇总两张数据工作表 +「报表口径」上下文工作表；绝不含客户明细行或总计行</summary>
+    private static byte[] BuildSummaryWorkbook(DynamicCustomerShipmentReportPageDto page)
+    {
+        var summary = page.Summary
+            ?? throw BusinessException.RuleConflict("全匹配汇总不可用");
+
+        var currencyColumns = summary.CurrencyColumns.Select(c => (c.Key, c.Label)).ToList();
+        var currencyRows = summary.CurrencyRows
+            .Select(DynamicCustomerShipmentReportRules.BuildCurrencySummaryExportRow).ToList();
+
+        var unitColumns = summary.UnitColumns.Select(c => (c.Key, c.Label)).ToList();
+        var unitRows = summary.UnitRows
+            .Select(DynamicCustomerShipmentReportRules.BuildUnitSummaryExportRow).ToList();
+
+        using var workbook = new XSSFWorkbook();
+        AppendSummaryDataSheet(workbook, DynamicCustomerShipmentReportRules.SummaryCurrencySheetName, currencyColumns, currencyRows);
+        AppendSummaryDataSheet(workbook, DynamicCustomerShipmentReportRules.SummaryUnitSheetName, unitColumns, unitRows);
+        AppendSummaryContextSheet(workbook, page, summary);
+
+        using var output = new MemoryStream();
+        workbook.Write(output);
+        return output.ToArray();
+    }
+
+    /// <summary>追加一张汇总数据工作表：表头文本做公式注入转义，已知金额 / 数量 / 计数按类型写入数值单元格，未知显式文本（绝不写成 0）</summary>
+    private static void AppendSummaryDataSheet(
+        XSSFWorkbook workbook,
+        string sheetName,
+        IReadOnlyList<(string Key, string Label)> columns,
+        IReadOnlyList<Dictionary<string, object?>> rows)
+    {
+        var sheet = workbook.CreateSheet(sheetName);
+
+        var header = sheet.CreateRow(0);
+        for (var c = 0; c < columns.Count; c++)
+            header.CreateCell(c).SetCellValue(SafeText(columns[c].Label));
+
+        for (var r = 0; r < rows.Count; r++)
+        {
+            var row = sheet.CreateRow(r + 1);
+            for (var c = 0; c < columns.Count; c++)
+            {
+                var value = rows[r].TryGetValue(columns[c].Key, out var v) ? v : null;
+                SetTypedCell(row.CreateCell(c), value);
+            }
+        }
+    }
+
+    /// <summary>追加全匹配汇总「报表口径」上下文工作表：日期 / 来源上限 / 覆盖范围 / 来源证据 / 未知口径 / 完整度 / 原币证据 / 应用筛选 / 空汇总 / 只读声明</summary>
+    private static void AppendSummaryContextSheet(
+        XSSFWorkbook workbook,
+        DynamicCustomerShipmentReportPageDto page,
+        DynamicCustomerShipmentSummaryDto summary)
+    {
+        var sheet = workbook.CreateSheet(DynamicCustomerShipmentReportRules.ContextSheetName);
+
+        void AddLabel(int rowIndex, string label, string value)
+        {
+            var row = sheet.CreateRow(rowIndex);
+            row.CreateCell(0).SetCellValue(SafeText(label));
+            row.CreateCell(1).SetCellValue(SafeText(value));
+        }
+
+        var nextRow = 0;
+        AddLabel(nextRow++, DynamicCustomerShipmentReportRules.ContextStartLabel, page.Start.ToString("yyyy-MM-dd"));
+        AddLabel(nextRow++, DynamicCustomerShipmentReportRules.ContextEndLabel, page.End.ToString("yyyy-MM-dd"));
+        AddLabel(nextRow++, DynamicCustomerShipmentReportRules.ContextSourceLimitLabel, page.SourceLimitText);
+        AddLabel(nextRow++, DynamicCustomerShipmentReportRules.ContextCoverageLabel, summary.CoverageText);
+        AddLabel(nextRow++, DynamicCustomerShipmentReportRules.ContextSourceLabel, page.SourceContextText);
+        AddLabel(nextRow++, DynamicCustomerShipmentReportRules.ContextUnknownLabel, page.UnknownContextText);
+
+        var completenessText = summary.CompletenessReasons is { Count: > 0 }
+            ? $"{summary.IncompleteBucketCount} 个不完整桶；{string.Join("；", summary.CompletenessReasons)}"
+            : "数量证据完整";
+        AddLabel(nextRow++, DynamicCustomerShipmentReportRules.ContextCompletenessLabel, completenessText);
+
+        AddLabel(nextRow++, DynamicCustomerShipmentReportRules.ContextCurrencyEvidenceLabel, DynamicCustomerShipmentReportRules.ContextCurrencyEvidenceText);
+        AddLabel(nextRow++, DynamicCustomerShipmentReportRules.ContextReadOnlyLabel, page.ReadOnlyText);
+
+        if (!string.IsNullOrWhiteSpace(page.FilterText))
+            AddLabel(nextRow++, DynamicCustomerShipmentReportRules.ContextFilterLabel, page.FilterText);
+
+        if (summary.CurrencyRows.Count == 0 && summary.UnitRows.Count == 0)
+            AddLabel(nextRow, DynamicCustomerShipmentReportRules.ContextEmptyLabel, page.EmptyText);
+    }
+
+    /// <summary>文本标签统一做公式注入转义（保持字面文本，与数据单元格同口径）</summary>
+    private static string SafeText(string? value)
+        => DynamicCustomerShipmentReportRules.EscapeFormulaLeading(value) as string ?? string.Empty;
+
+    /// <summary>按值类型写入单元格：整数 / 小数写入数值单元格，其余写入文本；null 不写成 0（由导出行保证未知显式文本）</summary>
+    private static void SetTypedCell(ICell cell, object? value)
+    {
+        switch (value)
+        {
+            case null or DBNull:
+                cell.SetCellValue(string.Empty);
+                break;
+            case int i:
+                cell.SetCellValue(i);
+                break;
+            case long l:
+                cell.SetCellValue(l);
+                break;
+            case decimal m:
+                cell.SetCellValue((double)m);
+                break;
+            case double d:
+                cell.SetCellValue(d);
+                break;
+            case float f:
+                cell.SetCellValue((double)f);
+                break;
+            default:
+                cell.SetCellValue(value.ToString() ?? string.Empty);
+                break;
+        }
+    }
+
 
     /// <summary>身份 + 既有「角色 → 菜单」客户出货量统计表模块授权 + 业务员数据范围（fail closed，绝不猜测身份）</summary>
     private async Task<SalespersonDataScope> EnsureAuthorizedAsync(long? userId)

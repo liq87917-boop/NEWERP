@@ -3243,6 +3243,67 @@ async function csdExportPdf() {
   }
 }
 
+
+/* 下载全匹配汇总 Excel（ERP-233，只读）：无需先预览，复用当前字段 / 日期 / 分页 / 应用筛选组装请求体
+   POST /api/dynamic-customer-shipment-report/export-summary；成功（xlsx 附件）触发下载；
+   授权 / 无效 / 来源超限 / 网络失败在结果区可见、保留当前输入、不下载任何内容。
+   区别于「导出当前页 Excel」：本按钮导出服务端在全部匹配客户 × 原币证据行上派生的
+   原币金额汇总 + 精确单位数量汇总，绝不含客户明细行。 */
+async function csdExportSummary() {
+  const state = csdBuildState(CSD_DYN.page || 1);
+  const dateError = csdDateError(state);
+  if (dateError) {
+    csdRenderResult(csdErrorHtml('invalid', dateError));
+    return;
+  }
+  const filterError = csdFilterError(state);
+  if (filterError) {
+    csdRenderResult(csdErrorHtml('invalid', filterError));
+    return;
+  }
+  const req = csdBuildRequest(state);
+  csdRenderResult(csdLoadingHtml());
+
+  try {
+    const headers = { 'Content-Type': 'application/json' };
+    const token = typeof localStorage !== 'undefined' ? (localStorage.getItem('erp_token') || '') : '';
+    if (token) headers['Authorization'] = 'Bearer ' + token;
+    const resp = await fetch('/api/dynamic-customer-shipment-report/export-summary', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(req),
+    });
+
+    const contentType = (resp.headers.get('content-type') || '');
+    if (contentType.indexOf('spreadsheetml') >= 0) {
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+      a.href = url;
+      a.download = '客户出货量证据汇总_' + dateStr + '.xlsx';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      csdRenderResult(CSD_DYN.view ? csdResultHtml(CSD_DYN.view) : '');
+      return;
+    }
+
+    let message = '汇总 Excel 下载失败';
+    let code;
+    try {
+      const data = await resp.json();
+      message = (data && data.message) || message;
+      code = data && data.code;
+    } catch (e) { /* 非 JSON 响应，沿用默认提示 */ }
+    csdRenderResult(csdErrorHtml(csdKindOfCode(code), message));
+  } catch (err) {
+    csdRenderResult(csdErrorHtml('network', (err && err.message) || '无法连接到服务器'));
+  }
+}
+
+
 /* 加载字段目录（白名单，有限、只读），失败时区分未登录 / 权限不足 / 网络错误 */
 async function loadCustomerShipmentDesignerCatalog() {
   csdRenderResult(csdLoadingHtml());
@@ -3300,6 +3361,7 @@ function openCustomerShipmentDesigner() {
           <button class="btn btn-primary" onclick="csdPreview(1)">🔍 预览</button>
           <button class="btn btn-neutral" onclick="csdExport()">📤 导出当前页 Excel</button>
           <button class="btn btn-neutral" onclick="csdExportPdf()" title="下载当前页为中文 PDF（选定列，复用当前日期与分页，无需先预览）">📄 下载 PDF（当前页）</button>
+          <button class="btn btn-neutral" onclick="csdExportSummary()" title="下载全匹配汇总 Excel（原币金额与精确单位数量汇总，无需先预览，绝不含客户明细行）">📊 下载全匹配汇总 Excel</button>
         </div>
         <div id="csd-des-result"></div>
       </div>
