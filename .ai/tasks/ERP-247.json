@@ -1,0 +1,77 @@
+{
+  "id": "ERP-247",
+  "title": "Summarize all matching salesman commission evidence by original currency",
+  "description": "Users see a compact summary of all authorized matching evidence while paging the existing field designer. Introduce summary DTOs and pure aggregation rules from the full bounded SalesCommissionItem sequence before selected-field projection and pagination; add Summary to the preview page contract and compute it in the existing rules/service flow without another source query. One summary row per raw currency, with approved order count, unique persisted salesman bucket count (explicit unassigned bucket separate; not unique employee headcount), signed known-currency SalesAmount sum only when every amount is known, completeness/unknown-count reasons, and unknown historical Profit/ProfitRate/CommissionAmount. Global unique bucket count deduplicates across currency groups; global approved order count sums disjoint evidence counts; never sum monetary values across currencies or add percentages. Carry current reference rate only if nonempty source rows consistently contain the same known rate and evidence; missing/conflicting rate remains null with reason, no weighted average/sum or zero fallback; empty summary explicitly labels no evidence. Required date/normalized filter/full matching coverage/500-order source cap/source/currency/unknown/rate context persists even fields are hidden. UI summary is independent of current page, distinguishes aggregate counts from row count, and clears stale summaries on failure. Preserve current-page Excel/PDF behavior and page-only labels; do not append the all-match summary to those existing downloads. Development only. Reuse existing sales-commission menu, current-user SalespersonDataScopeService customer scope, approved nondeleted SalesOrders, <=366-day inclusive date window and fail-closed 500-order source cap, and OperationLogMiddleware HTTP audit. Each endpoint validates its current request and rechecks identity/menu/fresh scope; invalid input, revoked authorization or overflow returns no data/file. Employee identity is an order attribute, not a permission boundary. Known original-currency signed order amounts remain separate; invalid raw currencies are distinct count-only unknown-amount groups. Historical Profit, ProfitRate and CommissionAmount remain null with reasons, including configured zero current reference rate; current SalesCommissionRate is not a historical agreement, earned payout, customer agency fee or ledger posting. No client identity/scope/rows/aggregates as authority, arbitrary/model-generated SQL, business writes, new domain entities or persistence schema, migrations, schema/view/stored-procedure changes, production SQL or real database execution, credentials/secrets/.env/config changes, irreversible operations, production deployment or real browser acceptance. Preserve unrelated modules and uncommitted work. Run focused in-memory service/API/export/UI source-contract tests plus configured safe Release build/test; unavailable external database/browser acceptance is environment-blocked, never fabricated passed.",
+  "depends_on": [
+    "ERP-246"
+  ],
+  "risk_level": "medium",
+  "priority": "P1",
+  "acceptance_criteria": [
+    "All-match summary DTO and pure rules aggregate the full bounded evidence before projection/paging, preserving raw currency, signed values, distinct bucket/order counts and unknown profit/payout/reference-rate semantics.",
+    "Preview and existing designer show mandatory all-match scope/context independently of fields/pages, clear stale summaries on errors and retain existing current-page download semantics.",
+    "Service/API/UI tests cover page independence, signed mixed/unknown currencies, cross-currency bucket deduplication, unassigned/missing identities, zero/unknown/conflicting rate, scope revocation and caps; safe build/test passes."
+  ],
+  "criterion_path_map": {
+    "All-match summary DTO and pure rules aggregate the full bounded evidence before projection/paging, preserving raw currency, signed values, distinct bucket/order counts and unknown profit/payout/reference-rate semantics.": [
+      "src/ERP.Application/DTOs/DynamicSalesCommissionSummaryDtos.cs",
+      "src/ERP.Application/DTOs/DynamicSalesCommissionReportDtos.cs",
+      "src/ERP.Application/Services/DynamicSalesCommissionSummaryRules.cs",
+      "src/ERP.Application/Services/DynamicSalesCommissionReportRules.cs",
+      "src/ERP.Application/Services/ReportService.Extra3.cs",
+      "src/ERP.UnitTests/DynamicSalesCommissionSummaryTests.cs",
+      "src/ERP.UnitTests/SalesCommissionEvidenceTests.cs"
+    ],
+    "Preview and existing designer show mandatory all-match scope/context independently of fields/pages, clear stale summaries on errors and retain existing current-page download semantics.": [
+      "src/ERP.Api/Controllers/DynamicSalesCommissionReportController.cs",
+      "src/ERP.Api/wwwroot/js/reports.js",
+      "src/ERP.Application/DTOs/DynamicSalesCommissionReportDtos.cs",
+      "src/ERP.Application/Services/DynamicSalesCommissionReportRules.cs",
+      "src/ERP.UnitTests/DynamicSalesCommissionReportTests.cs",
+      "src/ERP.UnitTests/DynamicSalesCommissionReportUiTests.cs"
+    ],
+    "Service/API/UI tests cover page independence, signed mixed/unknown currencies, cross-currency bucket deduplication, unassigned/missing identities, zero/unknown/conflicting rate, scope revocation and caps; safe build/test passes.": [
+      "src/ERP.UnitTests/DynamicSalesCommissionSummaryTests.cs",
+      "src/ERP.UnitTests/DynamicSalesCommissionReportTests.cs",
+      "src/ERP.UnitTests/DynamicSalesCommissionReportUiTests.cs",
+      "src/ERP.UnitTests/SalesCommissionScopeTests.cs",
+      "src/ERP.UnitTests/SalesCommissionQueryBoundsTests.cs",
+      "src/ERP.UnitTests/DynamicSalesCommissionExcelTests.cs",
+      "src/ERP.UnitTests/DynamicSalesCommissionPdfTests.cs"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Application/DTOs/DynamicSalesCommissionSummaryDtos.cs",
+    "src/ERP.Application/DTOs/DynamicSalesCommissionReportDtos.cs",
+    "src/ERP.Application/Services/DynamicSalesCommissionSummaryRules.cs",
+    "src/ERP.Application/Services/DynamicSalesCommissionReportRules.cs",
+    "src/ERP.Application/Services/ReportService.Extra3.cs",
+    "src/ERP.UnitTests/DynamicSalesCommissionSummaryTests.cs",
+    "src/ERP.UnitTests/SalesCommissionEvidenceTests.cs",
+    "src/ERP.Api/Controllers/DynamicSalesCommissionReportController.cs",
+    "src/ERP.Api/wwwroot/js/reports.js",
+    "src/ERP.UnitTests/DynamicSalesCommissionReportTests.cs",
+    "src/ERP.UnitTests/DynamicSalesCommissionReportUiTests.cs",
+    "src/ERP.UnitTests/SalesCommissionScopeTests.cs",
+    "src/ERP.UnitTests/SalesCommissionQueryBoundsTests.cs",
+    "src/ERP.UnitTests/DynamicSalesCommissionExcelTests.cs",
+    "src/ERP.UnitTests/DynamicSalesCommissionPdfTests.cs"
+  ],
+  "status": "pending",
+  "max_attempts": 3,
+  "attempts": 0,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only bounded scoped report feature"
+  },
+  "created_at": "2026-10-02T10:40:42.189734Z"
+}

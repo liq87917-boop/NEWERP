@@ -1,0 +1,67 @@
+{
+  "id": "ERP-248",
+  "title": "Download all-match salesman commission currency summary as Excel",
+  "description": "Add a separate summary Excel action to the designer and POST export-summary endpoint. Rebuild fresh bounded authorized matching evidence from the validated request without requiring a previous preview and export the full-match summary, independent of requested preview page/selected detail fields. Reuse preceding summary DTO/rules and current source; add narrow DynamicSalesCommissionSummaryExcelExporter using existing NPOI with direct controller construction, no new DI/package/config. Fixed finite summary columns per raw currency include order count, distinct persisted salesman bucket count, signed known original-currency amount, completeness/unknown reasons, current reference rate/evidence and explicitly unknown profit/rate/payout; no employee detail rows, cross-currency grand monetary total or invented payout. Numeric known amounts/counts/explicit zero reference rate remain numeric; unknown is text, not zero. Workbook always includes normalized dates/filters/full matching coverage/source cap and limits/global deduplicated bucket/order counts/source/currency/current-reference and unknown historical-profit/payout explanations; literal formula-safe context cells. Summary download preserves UI field/filter/page state, rechecks fresh authorization/cap and reports failures without stale file. Existing detail Excel remains current-page only. Development only. Reuse existing sales-commission menu, current-user SalespersonDataScopeService customer scope, approved nondeleted SalesOrders, <=366-day inclusive date window and fail-closed 500-order source cap, and OperationLogMiddleware HTTP audit. Each endpoint validates its current request and rechecks identity/menu/fresh scope; invalid input, revoked authorization or overflow returns no data/file. Employee identity is an order attribute, not a permission boundary. Known original-currency signed order amounts remain separate; invalid raw currencies are distinct count-only unknown-amount groups. Historical Profit, ProfitRate and CommissionAmount remain null with reasons, including configured zero current reference rate; current SalesCommissionRate is not a historical agreement, earned payout, customer agency fee or ledger posting. No client identity/scope/rows/aggregates as authority, arbitrary/model-generated SQL, business writes, new domain entities or persistence schema, migrations, schema/view/stored-procedure changes, production SQL or real database execution, credentials/secrets/.env/config changes, irreversible operations, production deployment or real browser acceptance. Preserve unrelated modules and uncommitted work. Run focused in-memory service/API/export/UI source-contract tests plus configured safe Release build/test; unavailable external database/browser acceptance is environment-blocked, never fabricated passed.",
+  "depends_on": [
+    "ERP-247"
+  ],
+  "risk_level": "low",
+  "priority": "P1",
+  "acceptance_criteria": [
+    "Separate summary Excel endpoint revalidates requests and fresh authorization/scope, rebuilding all matching bounded evidence independently of prior preview, current page or selected detail columns.",
+    "Finite Excel summary columns preserve signed numbers, explicit unknowns/current reference rate and mandatory all-match context with safe literal strings and no employee details or unsupported totals.",
+    "Designer offers a distinct summary download preserving state; workbook/controller/UI tests cover scope revocation, caps, page independence, unknown/negative/zero values and formula strings; safe build/test passes."
+  ],
+  "criterion_path_map": {
+    "Separate summary Excel endpoint revalidates requests and fresh authorization/scope, rebuilding all matching bounded evidence independently of prior preview, current page or selected detail columns.": [
+      "src/ERP.Api/Controllers/DynamicSalesCommissionReportController.cs",
+      "src/ERP.Application/DTOs/DynamicSalesCommissionReportDtos.cs",
+      "src/ERP.Application/DTOs/DynamicSalesCommissionSummaryDtos.cs",
+      "src/ERP.Application/Services/DynamicSalesCommissionReportRules.cs",
+      "src/ERP.Application/Services/DynamicSalesCommissionSummaryRules.cs",
+      "src/ERP.UnitTests/DynamicSalesCommissionSummaryExcelTests.cs"
+    ],
+    "Finite Excel summary columns preserve signed numbers, explicit unknowns/current reference rate and mandatory all-match context with safe literal strings and no employee details or unsupported totals.": [
+      "src/ERP.Infrastructure/Export/DynamicSalesCommissionSummaryExcelExporter.cs",
+      "src/ERP.Application/DTOs/DynamicSalesCommissionSummaryDtos.cs",
+      "src/ERP.UnitTests/DynamicSalesCommissionSummaryExcelTests.cs"
+    ],
+    "Designer offers a distinct summary download preserving state; workbook/controller/UI tests cover scope revocation, caps, page independence, unknown/negative/zero values and formula strings; safe build/test passes.": [
+      "src/ERP.Api/wwwroot/js/reports.js",
+      "src/ERP.UnitTests/DynamicSalesCommissionSummaryExcelTests.cs",
+      "src/ERP.UnitTests/DynamicSalesCommissionReportUiTests.cs",
+      "src/ERP.UnitTests/DynamicSalesCommissionReportTests.cs",
+      "src/ERP.UnitTests/DynamicSalesCommissionExcelTests.cs"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/DynamicSalesCommissionReportController.cs",
+    "src/ERP.Application/DTOs/DynamicSalesCommissionReportDtos.cs",
+    "src/ERP.Application/DTOs/DynamicSalesCommissionSummaryDtos.cs",
+    "src/ERP.Application/Services/DynamicSalesCommissionReportRules.cs",
+    "src/ERP.Application/Services/DynamicSalesCommissionSummaryRules.cs",
+    "src/ERP.UnitTests/DynamicSalesCommissionSummaryExcelTests.cs",
+    "src/ERP.Infrastructure/Export/DynamicSalesCommissionSummaryExcelExporter.cs",
+    "src/ERP.Api/wwwroot/js/reports.js",
+    "src/ERP.UnitTests/DynamicSalesCommissionReportUiTests.cs",
+    "src/ERP.UnitTests/DynamicSalesCommissionReportTests.cs",
+    "src/ERP.UnitTests/DynamicSalesCommissionExcelTests.cs"
+  ],
+  "status": "pending",
+  "max_attempts": 3,
+  "attempts": 0,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only bounded scoped report feature"
+  },
+  "created_at": "2026-10-02T10:40:42.190427Z"
+}
