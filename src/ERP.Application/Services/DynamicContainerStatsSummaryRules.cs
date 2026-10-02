@@ -75,4 +75,37 @@ public static class DynamicContainerStatsSummaryRules
             CoverageText,
             daily.Count == 0 ? NoEvidenceContext : string.Empty);
     }
+
+    // ==================== 汇总 Excel 导出 ====================
+
+    /// <summary>全匹配汇总 Excel 每日汇总工作表名（与明细「柜量装柜证据」工作表刻意区分）</summary>
+    public const string SummarySheetName = "每日证据汇总";
+
+    /// <summary>全匹配汇总 Excel 期间合计与口径工作表名</summary>
+    public const string PeriodContextSheetName = "期间合计与口径";
+
+    /// <summary>全匹配汇总 Excel 上下文表「全匹配覆盖」行标签</summary>
+    public const string ContextCoverageLabel = "全匹配覆盖";
+
+    /// <summary>空证据工作簿的显式标注（每日汇总工作表无每日行时写入第一数据行）</summary>
+    public const string EmptyEvidenceRowText =
+        "没有符合所选日期范围、数据范围与筛选的已审核装柜清单头证据（空证据工作簿，无每日行、无期间合计）";
+
+    /// <summary>期间合计「证据桶数」行标签</summary>
+    public const string PeriodBucketLabel = "期间证据桶数";
+
+    /// <summary>期间合计「已审核装柜清单数」行标签</summary>
+    public const string PeriodApprovedListsLabel = "期间已审核装柜清单数";
+
+    /// <summary>期间合计「缺柜号清单数」行标签</summary>
+    public const string PeriodMissingLabel = "期间缺柜号清单数";
+
+    /// <summary>期间合计「箱数」行标签</summary>
+    public const string PeriodCartonsLabel = "期间箱数(cartons)";
+
+    /// <summary>期间合计「毛重」行标签</summary>
+    public const string PeriodWeightLabel = "期间毛重(kg)";
+
+    /// <summary>期间合计「体积」行标签</summary>
+    public const string PeriodVolumeLabel = "期间体积(m³)";
 }

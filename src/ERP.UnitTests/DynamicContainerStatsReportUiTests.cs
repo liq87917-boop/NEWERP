@@ -242,4 +242,38 @@ public class DynamicContainerStatsReportUiTests
         var rp = Segment(js, "function cstResetPage(", "function cstCellText(");
         Assert.Contains("CST_DYN.view = null", rp);
     }
+
+    // ==================== 9. 全匹配汇总 Excel 下载（ERP-256） ====================
+
+    [Fact]
+    public void 下载汇总Excel_入口按钮与函数_复用当前字段日期筛选_独立于当前页明细_失败不下载旧行()
+    {
+        var js = Script;
+
+        Assert.Contains("onclick=\"cstExportSummaryExcel()\"", js);
+        Assert.Contains("function cstExportSummaryExcel()", js);
+        Assert.Contains("下载全匹配汇总 Excel", js);
+
+        var fn = Segment(js, "function cstExportSummaryExcel()", "function cstPage(");
+        Assert.Contains("'/api/dynamic-container-stats-report/export-summary'", fn);
+        Assert.Contains("method: 'POST'", fn);
+        Assert.Contains("const state = cstBuildState(", fn);
+        Assert.Contains("const req = cstBuildRequest(state);", fn);
+        Assert.Contains("body: JSON.stringify(req)", fn);
+
+        // 成功路径：识别 xlsx 附件并触发下载，独立于当前页明细（无「请先预览」前置要求）
+        Assert.Contains("spreadsheetml", fn);
+        Assert.Contains("resp.blob()", fn);
+        Assert.Contains("URL.createObjectURL(blob)", fn);
+        Assert.Contains("a.download", fn);
+        Assert.DoesNotContain("请先预览", fn);
+
+        // 失败路径：授权 / 无效 / 来源超限 / 网络失败可见，不下载任何内容
+        Assert.Contains("cstErrorHtml(cstKindOfCode(code), message)", fn);
+        Assert.Contains("cstErrorHtml('network'", fn);
+
+        Assert.DoesNotContain("FromSql", fn);
+        Assert.DoesNotContain("SqlCommand", fn);
+        Assert.DoesNotContain("ExecuteSql", fn);
+    }
 }

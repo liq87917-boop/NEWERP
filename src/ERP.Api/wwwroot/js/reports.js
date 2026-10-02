@@ -5040,6 +5040,7 @@ function openContainerStatsDesigner() {
         <button class="btn btn-primary" onclick="cstPreview(1)">预览</button>
         <button class="btn btn-neutral btn-sm" onclick="cstExportExcel()" title="导出当前页选定字段为 Excel（只读）：复用当前字段 / 日期 / 筛选 / 分页状态，服务端重建有界授权当前页，绝不信任旧预览行">📥 导出 Excel</button>
         <button class="btn btn-neutral btn-sm" onclick="cstExportPdf()" title="下载当前页选定字段为中文 PDF（只读）：复用当前字段 / 日期 / 筛选 / 分页状态，服务端重建有界授权当前页，装载率/柜型未知、字体/渲染失败显式提示">📄 导出 PDF</button>
+        <button class="btn btn-neutral btn-sm" onclick="cstExportSummaryExcel()" title="下载全匹配每日证据汇总为 Excel（只读）：独立于当前页 / 选定明细列，复用当前字段 / 日期 / 筛选状态，全部匹配证据按日汇总，绝无客户 / 柜号 / 清单明细行">📊 下载全匹配汇总 Excel</button>
       </div>
     </div>
     <div id="cst-des-result"></div>`;
@@ -5463,6 +5464,61 @@ async function cstExportPdf() {
     }
 
     let message = 'PDF 下载失败';
+    let code;
+    try {
+      const data = await resp.json();
+      message = (data && data.message) || message;
+      code = data && data.code;
+    } catch (e) { /* 非 JSON 响应，沿用默认提示 */ }
+    cstRenderResult(cstErrorHtml(cstKindOfCode(code), message));
+  } catch (err) {
+    cstRenderResult(cstErrorHtml('network', (err && err.message) || '无法连接到服务器'));
+  }
+}
+
+/* 下载全匹配每日证据汇总为 Excel（ERP-256，只读）：独立于当前页 / 选定明细列，复用当前字段 / 日期 / 筛选状态，
+   成功（xlsx 附件）触发下载并保留当前明细页；授权 / 无效 / 来源超限 / 网络失败在结果区可见，不下载任何内容 */
+async function cstExportSummaryExcel() {
+  const state = cstBuildState(CST_DYN.view ? CST_DYN.view.page : CST_DYN.page);
+  const dateError = cstDateError(state);
+  if (dateError) {
+    cstRenderResult(cstErrorHtml('invalid', dateError));
+    return;
+  }
+  const req = cstBuildRequest(state);
+  cstRenderResult(cstLoadingHtml());
+
+  try {
+    const headers = { 'Content-Type': 'application/json' };
+    const token = typeof localStorage !== 'undefined' ? (localStorage.getItem('erp_token') || '') : '';
+    if (token) headers['Authorization'] = 'Bearer ' + token;
+    const resp = await fetch('/api/dynamic-container-stats-report/export-summary', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(req),
+    });
+
+    const contentType = (resp.headers.get('content-type') || '');
+    if (contentType.indexOf('spreadsheetml') >= 0) {
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+      a.href = url;
+      a.download = '柜量装柜证据汇总_' + dateStr + '.xlsx';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      if (CST_DYN.view) {
+        cstRenderResult(cstResultHtml(CST_DYN.view));
+      } else {
+        cstRenderResult('<div class="pd-hint" style="text-align:center;color:#16a34a">已下载全匹配每日证据汇总 Excel（独立于当前页明细）</div>');
+      }
+      return;
+    }
+
+    let message = '汇总导出失败';
     let code;
     try {
       const data = await resp.json();

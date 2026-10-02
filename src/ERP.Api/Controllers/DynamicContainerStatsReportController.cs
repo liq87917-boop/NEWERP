@@ -75,6 +75,30 @@ public class DynamicContainerStatsReportController : ControllerBase
     }
 
     /// <summary>
+    /// 下载全匹配每日证据汇总为 Excel（ERP-256，只读）：复用 <see cref="BuildPageAsync"/> 重建的同一有界、已授权、已筛选证据
+    /// 与 <see cref="DynamicContainerStatsReportPageDto.Summary"/>（在分页 / 选定列投影之前派生，独立于当前页 / 选定明细列 / 已提交缓存总数），
+    /// 只导出固定每日汇总工作表（装柜日历日 / 证据桶数 / 已审核装柜清单数 / 缺柜号清单数与签名有符号箱数 / 毛重 / 体积，各自独立）与
+    /// 期间合计 / 口径工作表（规范化日期 / 应用筛选 / 全匹配覆盖 / 客户范围 / 来源上限 / 数量单位 / 分组身份 / 未知实际容积 / 柜型 / 出运）。
+    /// 绝不追加客户 / 柜号 / 清单明细行或全局去重客户数 / 实体柜容量合计；计数与有符号计量写入数值单元格（保留 0 / 负数、不按金额格式化），
+    /// 危险公式前导文本 / 筛选 / 口径字符串转义为字面文本；空证据工作簿显式标注。
+    /// 每次请求重新校验身份 / 柜量与装柜利用率统计菜单授权 / 业务员数据范围 / 字段 / 日期 / 分页 / 可选筛选与 500 清单来源上限（fail closed）；
+    /// 授权撤销 / 无效输入 / 来源超限返回错误、不返回任何文件。全程只读，请求由既有 <c>OperationLogMiddleware</c> 记录审计（动作「导出汇总」）。
+    /// </summary>
+    [HttpPost("export-summary")]
+    public async Task<IActionResult> ExportSummary([FromBody] DynamicContainerStatsReportRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var page = await BuildPageAsync(request);
+        var summary = page.Summary ?? DynamicContainerStatsSummaryRules.BuildSummary(
+            Array.Empty<ReportDtos.ContainerStatsItem>());
+
+        var bytes = new DynamicContainerStatsSummaryExcelExporter().Build(summary, page);
+        return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            $"ContainerStatsSummary_{DateTime.Now:yyyyMMddHHmmss}.xlsx");
+    }
+
+    /// <summary>
     /// 下载当前页为中文 PDF（ERP-254，只读）：复用同一有界、已授权预览与选定列顺序，重建当前页（绝不信任客户端行 / 预览缓存）；
     /// 有符号签名箱数 / 毛重 / 体积与授权范围计数按数值渲染、单位独立，装载率 / 柜型恒为字面「未知」；
     /// 并始终标注规范化日期 / 应用筛选 / 页面覆盖 / 分组身份 / 授权范围计数 / 来源上限 / 数量单位 /

@@ -66,7 +66,7 @@
     "src/ERP.UnitTests/DynamicContainerStatsSummaryTests.cs",
     "src/ERP.UnitTests/DynamicContainerStatsReportTests.cs"
   ],
-  "status": "pending",
+  "status": "deferred",
   "max_attempts": 3,
   "attempts": 0,
   "validation_profile": "safe",
@@ -82,5 +82,8 @@
     "status": "not_required",
     "reason": "Development-only bounded scoped report feature"
   },
-  "created_at": "2026-10-02T12:39:39.150535Z"
+  "created_at": "2026-10-02T12:39:39.150535Z",
+  "deferred_by": "user",
+  "deferred_at": "2026-10-02T12:53:36.983514Z",
+  "deferred_reason": "User 2026-10-02 direction: replace individual report development with unified customer-configurable reporting module and existing-report template migration. Preserve this task definition; do not automatically resume."
 }
