@@ -18,6 +18,8 @@ namespace ERP.Api.Controllers;
 /// <item><b>POST /api/dynamic-customer-shipment-report</b>：按选定字段与有界日期窗口（start / end）预览当前账号数据范围内的客户 × 原币证据行，稳定分页。</item>
 /// <item><b>POST /api/dynamic-customer-shipment-report/export</b>：导出当前选定页为 Excel（xlsx，只读，复用有界授权预览与选定列顺序，含日期 / 分页 / 来源上限 / 原币 / 单位 / 未知 / 来源上下文工作表，绝不追加跨币种 / 跨单位合计）。</item>
 /// <item><b>POST /api/dynamic-customer-shipment-report/pdf</b>：下载当前选定页为分页中文 PDF（只读，复用有界授权预览与选定列顺序，分页渲染行与宽列，字体缺失显式失败，绝不跨币种 / 跨单位合计或声称实际出库 / 装柜 / 收款）。</item>
+    /// <item><b>POST /api/dynamic-customer-shipment-report/export-summary-pdf</b>：下载全部匹配客户 × 原币证据行的全匹配汇总为中文 PDF（只读，复用服务端派生的 ERP-232 原币金额汇总与精确单位数量汇总，稳定币种 / 单位分组行、未知显式「未知」，绝不跨币种 / 跨单位合计、绝不含客户明细行，区别于当前页明细 PDF）。</item>
+
 /// </list>
 /// <para>复用既有「客户出货量统计表」（customer-shipment）菜单授权与 <see cref="SalespersonDataScopeService"/>（ERP-097）业务员数据范围；
 /// 每次目录 / 预览 / 导出请求都重新校验身份、菜单授权与业务员数据范围（fail closed），
@@ -119,6 +121,30 @@ public class DynamicCustomerShipmentReportController : ControllerBase
         var bytes = BuildSummaryWorkbook(page);
         return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             $"CustomerShipmentEvidenceSummary_{DateTime.Now:yyyyMMddHHmmss}.xlsx");
+    }
+
+    /// <summary>
+    /// 下载全部匹配客户 × 原币证据行的全匹配汇总为中文 PDF（ERP-234，只读）：复用与「全匹配汇总 Excel」完全相同的已授权预览管线，
+    /// 每次请求重新校验身份 / 客户出货量统计表菜单授权 / 业务员数据范围 / 字段 / 日期 / 分页 / 应用筛选（fail closed），
+    /// 但使用服务端在全部匹配客户 × 原币证据行上派生的 ERP-232 全匹配汇总（绝不接受客户端行 / 金额 / 身份 / 数据范围，
+    /// 绝不含客户明细行）。原币金额与精确单位数量分块呈现，稳定币种 / 单位分组行，未知币种金额 / 未知单位数量显式「未知」，
+    /// 绝不跨币种 / 跨单位合计、绝不重复金额到单位行；无身份 / 授权撤销 / 来源超限均不返回任何文件；字体缺失或渲染失败显式失败。
+    /// <para>全程只读，不写库、不执行任意 SQL；请求由既有 <c>OperationLogMiddleware</c> 记录审计（动作「下载全匹配汇总 PDF」）。</para>
+    /// </summary>
+    [HttpPost("export-summary-pdf")]
+    public async Task<IActionResult> ExportSummaryPdf([FromBody] DynamicCustomerShipmentReportRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        // 复用同一有界、已授权管线：重新校验字段 / 日期 / 分页 / 应用筛选与身份 / 菜单授权 / 数据范围，
+        // 并由服务端同一 BuildPageAsync 派生覆盖全部匹配客户 × 原币证据行的全匹配汇总
+        // （绝不相信客户端行 / 金额 / 身份 / 数据范围；即使未先预览或详情页越界，汇总仍覆盖全部匹配行）
+        var page = await BuildPageAsync(request);
+        var summary = page.Summary
+            ?? throw new BusinessException("全匹配汇总不可用", ErrorCodes.RuleConflict);
+        var bytes = DynamicCustomerShipmentSummaryPdfExporter.Export(summary, page);
+        return File(bytes, "application/pdf",
+            $"CustomerShipmentEvidenceSummary_{DateTime.Now:yyyyMMddHHmmss}.pdf");
     }
 
     /// <summary>复用同一有界、已授权预览管线：先校验字段 / 日期 / 分页，再每次重新校验身份 / 菜单授权 / 数据范围，最后只读查询当前页</summary>

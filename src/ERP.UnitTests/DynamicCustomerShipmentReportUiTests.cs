@@ -335,4 +335,27 @@ public class DynamicCustomerShipmentReportUiTests
         Assert.DoesNotContain("view.rows", fn);
         Assert.DoesNotContain("view.columns", fn);
     }
+
+    // ==================== 11. ERP-234 全匹配汇总 PDF 下载（独立于预览与当前页） ====================
+
+    [Fact]
+    public void 汇总PDF导出_独立按钮与端点_无需先预览_绝不含明细行()
+    {
+        var js = Script;
+
+        Assert.Contains("onclick=\"csdExportSummaryPdf()\"", js);
+        Assert.Contains("function csdExportSummaryPdf()", js);
+        Assert.Contains("/api/dynamic-customer-shipment-report/export-summary-pdf", js);
+        Assert.Contains("下载全匹配汇总 PDF", js);
+
+        // 与当前页明细 PDF / 汇总 Excel 按钮文案不同
+        Assert.Contains("下载 PDF（当前页）", js);
+        Assert.Contains("下载全匹配汇总 Excel", js);
+
+        // 汇总 PDF 导出无需先预览：函数不读取 CSD_DYN.view.rows / view.columns（区别于 csdExport 的「请先预览」守卫）
+        var fn = Segment(js, "function csdExportSummaryPdf()", "loadCustomerShipmentDesignerCatalog();");
+        Assert.DoesNotContain("请先预览", fn);
+        Assert.DoesNotContain("view.rows", fn);
+        Assert.DoesNotContain("view.columns", fn);
+    }
 }
