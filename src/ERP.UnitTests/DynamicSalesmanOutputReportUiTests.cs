@@ -150,4 +150,27 @@ public class DynamicSalesmanOutputReportUiTests
         var fn = Segment(js, "function sodExport()", "function loadSalesmanOutputDesignerCatalog()");
         Assert.Contains("sodBuildRequest(state)", fn);
     }
+
+    [Fact]
+    public void 导出PDF_复用预览请求体_仅下载pdf_先预览守卫()
+    {
+        var js = Script;
+
+        Assert.Contains("function sodExportPdf()", js);
+        Assert.Contains("/api/dynamic-salesman-output-report/pdf", js);
+        Assert.Contains("contentType.indexOf('application/pdf') >= 0", js);
+        Assert.Contains("请先预览后再导出 PDF", js);
+
+        var fn = Segment(js, "function sodExportPdf()", "function loadSalesmanOutputDesignerCatalog()");
+        Assert.Contains("sodBuildRequest(state)", fn);
+    }
+
+    [Fact]
+    public void 导出PDF按钮_设计器工具栏提供_并保留当前状态()
+    {
+        var js = Script;
+        Assert.Contains("onclick=\"sodExportPdf()\"", js);
+        Assert.Contains("📄 导出当前页 PDF", js);
+    }
+
 }

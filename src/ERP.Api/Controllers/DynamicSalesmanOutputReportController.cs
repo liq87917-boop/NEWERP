@@ -16,6 +16,7 @@ namespace ERP.Api.Controllers;
 /// <item><b>GET /api/dynamic-salesman-output-report</b>：返回业务员产值证据字段白名单目录（需登录 + 业务员产值报表菜单授权 + 业务员数据范围）；</item>
 /// <item><b>POST /api/dynamic-salesman-output-report</b>：按选定字段与有界日期窗口（start / end）预览当前账号数据范围内的业务员 × 原币证据行，稳定分页。</item>
 /// <item><b>POST /api/dynamic-salesman-output-report/export</b>：导出当前选定页为 Excel（xlsx，只读，复用有界授权预览与选定列顺序，含日期 / 分页 / 来源上限 / 原币 / 未知 / 未知利润 / 来源上下文工作表，绝不追加跨币种合计）。</item>
+/// <item><b>POST /api/dynamic-salesman-output-report/pdf</b>：下载当前选定页为分页中文 PDF（只读，复用有界授权预览与选定列顺序，分页渲染，字体缺失显式失败，绝不跨币种合计或声称实际出货 / 收款 / 已实现利润）。</item>
 /// </list>
 /// <para>复用既有「业务员产值报表」（salesman-output）菜单授权与 <see cref="SalespersonDataScopeService"/>（ERP-097）业务员数据范围；
 /// 每次目录 / 预览 / 导出请求都重新校验身份、菜单授权与业务员数据范围（fail closed），
@@ -75,6 +76,24 @@ public class DynamicSalesmanOutputReportController : ControllerBase
         var bytes = BuildWorkbook(page);
         return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             $"SalesmanOutputEvidence_{DateTime.Now:yyyyMMddHHmmss}.xlsx");
+    }
+
+    /// <summary>
+    /// 下载当前页为中文 PDF（ERP-238，只读）：复用同一有界、已授权预览与选定列顺序，仅导出当前页选定列；
+    /// 已知原币金额按签名数值渲染、null 金额 / 利润显式呈现为「未知」（绝不写成 0、绝不跨币种合计），
+    /// 分页渲染（宽列集拆多列页、行数超出拆多行页且重复表头），并标注日期 / 分页 / 来源上限 / 原币 / 未知 / 未知利润 / 来源 / 页面覆盖上下文；
+    /// 绝不追加跨币种合计、绝不声称实际出货 / 收款 / 已实现利润。每次请求重新校验身份 / 业务员产值报表菜单授权 /
+    /// 业务员数据范围 / 字段 / 日期 / 分页（fail closed）；授权撤销返回错误、不返回任何文件；字体缺失 / 渲染失败显式失败。
+    /// <para>全程只读，不写库、不执行任意 SQL；请求由既有 <c>OperationLogMiddleware</c> 记录审计（动作「导出」）。</para>
+    /// </summary>
+    [HttpPost("pdf")]
+    public async Task<IActionResult> ExportPdf([FromBody] DynamicSalesmanOutputReportRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var page = await BuildPageAsync(request);
+        var bytes = DynamicSalesmanOutputPdfExporter.Export(page);
+        return File(bytes, "application/pdf", $"SalesmanOutputEvidence_{DateTime.Now:yyyyMMddHHmmss}.pdf");
     }
 
     /// <summary>复用同一有界、已授权预览管线：先校验字段 / 日期 / 分页 / 应用筛选，再每次重新校验身份 / 菜单授权 / 数据范围，最后只读查询当前页</summary>

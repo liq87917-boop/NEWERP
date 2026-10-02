@@ -3889,6 +3889,67 @@ async function sodExport() {
   }
 }
 
+/* 导出当前页选定列为中文 PDF（ERP-238，只读）：复用预览请求体 POST /api/dynamic-salesman-output-report/pdf；
+   成功（application/pdf 附件）触发下载；授权 / 无效 / 空结果 / 网络 / 字体缺失失败在结果区可见，
+   不下载任何内容，且保留当前字段 / 日期 / 筛选 / 分页状态 */
+async function sodExportPdf() {
+  if (!SOD_DYN.view || !SOD_DYN.view.columns || !SOD_DYN.view.columns.length) {
+    sodRenderResult(sodErrorHtml('invalid', '请先预览后再导出 PDF'));
+    return;
+  }
+  if (!SOD_DYN.view.rows || SOD_DYN.view.rows.length === 0) {
+    sodRenderResult(sodErrorHtml('empty', '没有符合所选日期范围与数据范围的已审核销售订单，无法导出 PDF（请先预览）'));
+    return;
+  }
+
+  const state = sodBuildState(SOD_DYN.view.page);
+  const dateError = sodDateError(state);
+  if (dateError) {
+    sodRenderResult(sodErrorHtml('invalid', dateError));
+    return;
+  }
+  const req = sodBuildRequest(state);
+  sodRenderResult(sodLoadingHtml());
+
+  try {
+    const headers = { 'Content-Type': 'application/json' };
+    const token = typeof localStorage !== 'undefined' ? (localStorage.getItem('erp_token') || '') : '';
+    if (token) headers['Authorization'] = 'Bearer ' + token;
+    const resp = await fetch('/api/dynamic-salesman-output-report/pdf', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(req),
+    });
+
+    const contentType = (resp.headers.get('content-type') || '');
+    if (contentType.indexOf('application/pdf') >= 0) {
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+      a.href = url;
+      a.download = '业务员产值证据_' + dateStr + '.pdf';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      sodRenderResult('<div class="pd-hint">已导出当前页为中文 PDF，请查看下载。</div>');
+      return;
+    }
+
+    let message = '导出失败';
+    let code;
+    try {
+      const data = await resp.json();
+      message = (data && data.message) || message;
+      code = data && data.code;
+    } catch (e) { /* 非 JSON 响应，沿用默认提示 */ }
+    sodRenderResult(sodErrorHtml(sodKindOfCode(code), message));
+  } catch (err) {
+    sodRenderResult(sodErrorHtml('network', (err && err.message) || '无法连接到服务器'));
+  }
+}
+
 /* 加载字段目录（白名单，有限、只读），失败时区分未登录 / 权限不足 / 网络错误 */
 async function loadSalesmanOutputDesignerCatalog() {
   sodRenderResult(sodLoadingHtml());
@@ -3946,6 +4007,7 @@ function openSalesmanOutputDesigner() {
         <div style="margin:8px 0">
           <button class="btn btn-primary" onclick="sodPreview(1)">🔍 预览</button>
           <button class="btn btn-neutral" onclick="sodExport()">📤 导出当前页 Excel</button>
+          <button class="btn btn-neutral" onclick="sodExportPdf()" title="导出当前预览页为中文 PDF（只读）：复用当前字段 / 日期 / 筛选 / 分页，原币金额签名呈现、未知金额 / 利润显式「未知」、无跨币种合计">📄 导出当前页 PDF</button>
         </div>
         <div id="sod-des-result"></div>
       </div>
