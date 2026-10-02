@@ -125,6 +125,7 @@ public static class ReportConfigurationRules
         ReportConfigurationConstants.CapabilityGrouping,
         ReportConfigurationConstants.CapabilityDateRange,
         ReportConfigurationConstants.CapabilityPaging,
+        ReportConfigurationConstants.CapabilityComputedColumns,
         ReportConfigurationConstants.CapabilityCustomFormula,
         ReportConfigurationConstants.CapabilityCrossDatasetJoin,
         ReportConfigurationConstants.CapabilityPivot,
@@ -202,6 +203,7 @@ public static class ReportConfigurationRules
         ValidateGrouping(definition, dataset);
         ValidateAggregates(definition, dataset);
         ValidateCapabilities(definition, dataset);
+        ReportConfigurationFormulaRules.ValidateComputedColumns(definition, dataset);
         ValidatePresentation(definition, dataset);
     }
 

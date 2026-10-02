@@ -412,4 +412,32 @@ public class ReportConfigurationExcelTests
             new ReportConfigurationPreviewRequest { ConfigurationId = created.Id, RevisionVersion = 99 }));
         Assert.Equal(ErrorCodes.NotFound, ex.Code);
     }
+
+    [Fact]
+    public void Build_计算列_上下文包含单位与未知值口径()
+    {
+        var preview = MixedPreview();
+        preview.Columns.Add(new ReportConfigurationColumnDto(
+            "doubleAmount", "双倍金额", ReportConfigurationConstants.TypeNumber, "原币金额",
+            ReportConfigurationFormulaRules.UnknownReasonText, IsComputed: true));
+        preview.ComputedColumns = new List<ReportConfigurationComputedColumnEvidenceDto>
+        {
+            new()
+            {
+                Key = "doubleAmount",
+                Label = "双倍金额",
+                Unit = "原币金额",
+                UnknownReason = ReportConfigurationFormulaRules.UnknownReasonText,
+                Dependencies = new List<string> { "totalAmount" },
+            },
+        };
+
+        var workbook = OpenWorkbook(new ReportConfigurationExcelExporter().Build(preview));
+        var text = AllSheetText(workbook);
+
+        Assert.Contains("计算列口径", text);
+        Assert.Contains("双倍金额", text);
+        Assert.Contains(ReportConfigurationFormulaRules.UnknownReasonText, text);
+        Assert.Contains("totalAmount", text);
+    }
 }

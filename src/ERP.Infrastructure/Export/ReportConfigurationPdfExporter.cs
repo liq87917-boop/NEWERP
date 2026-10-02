@@ -311,6 +311,20 @@ public static class ReportConfigurationPdfExporter
         return lines;
     }
 
+    private static string BuildComputedEvidenceText(
+        IReadOnlyList<ReportConfigurationComputedColumnEvidenceDto>? computedColumns)
+    {
+        if (computedColumns is null || computedColumns.Count == 0)
+            return string.Empty;
+
+        return string.Join("；", computedColumns.Select(c =>
+        {
+            var unit = string.IsNullOrWhiteSpace(c.Unit) ? string.Empty : $"（{c.Unit}）";
+            var deps = c.Dependencies is { Count: > 0 } ? $"；依赖：{string.Join(", ", c.Dependencies)}" : string.Empty;
+            return $"{c.Label}{unit}：{c.UnknownReason}{deps}";
+        }));
+    }
+
     /// <summary>纯文本宽度估算（点）：中文 / 全角按一个字号宽、半角按半个字号宽（不依赖已注册字体）。</summary>
     public static double EstimateWidthPoints(string? text, double size)
     {
@@ -339,6 +353,10 @@ public static class ReportConfigurationPdfExporter
 
         if (!string.IsNullOrWhiteSpace(evidence?.CurrencyUnitSemantics))
             notes.Add($"币种/单位口径：{evidence.CurrencyUnitSemantics}");
+
+        var computedText = BuildComputedEvidenceText(preview.ComputedColumns);
+        if (!string.IsNullOrWhiteSpace(computedText))
+            notes.Add($"计算列口径：{computedText}");
 
         notes.Add($"查询筛选：{(string.IsNullOrWhiteSpace(preview.NormalizedFiltersText) ? "无筛选" : preview.NormalizedFiltersText)}");
         notes.Add($"日期范围：{(string.IsNullOrWhiteSpace(preview.DateRangeText) ? "无日期筛选" : preview.DateRangeText)}");

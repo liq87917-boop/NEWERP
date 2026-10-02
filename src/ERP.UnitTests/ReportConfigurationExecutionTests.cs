@@ -121,6 +121,12 @@ public class ReportConfigurationExecutionTests
     private static string Serialize(ReportConfigurationDefinition definition)
         => JsonSerializer.Serialize(definition, JsonOptions);
 
+    private static ReportConfigurationFormulaNode FormulaField(string key) => new() { Kind = "field", FieldKey = key };
+    private static ReportConfigurationFormulaNode FormulaLiteral(decimal value) => new() { Kind = "literal", Literal = value };
+    private static ReportConfigurationFormulaNode FormulaBinary(
+        string kind, ReportConfigurationFormulaNode left, ReportConfigurationFormulaNode right)
+        => new() { Kind = kind, Left = left, Right = right };
+
     private static ReportConfigurationSaveDto SaveDto(string name, ReportConfigurationDefinition definition)
         => new() { Name = name, Definition = definition };
 
@@ -442,5 +448,47 @@ public class ReportConfigurationExecutionTests
             user, new ReportConfigurationPreviewRequest { ConfigurationId = created.Id, GroupBy = "foo" }));
 
         Assert.Equal(ErrorCodes.InvalidParameter, ex.Code);
+    }
+
+    [Fact]
+    public async Task PreviewAsync_计算列_投影计算值且不泄露隐藏依赖()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedPrivilegedUser(db, "so-calc", "sales-order");
+        var customer = SeedCustomer(db, "C1", "客户");
+        SeedOrder(db, "SO-1", customer.Id, Currency.USD, 100m);
+
+        var def = SalesOrderDefinition(fields: new[] { "orderNo" });
+        def.ComputedColumns = new List<ReportConfigurationComputedColumn>
+        {
+            new()
+            {
+                Key = "doubleAmount",
+                Label = "双倍金额",
+                Expression = FormulaBinary(
+                    ReportConfigurationFormulaRules.NodeMultiply,
+                    FormulaField("totalAmount"),
+                    FormulaLiteral(2m)),
+            },
+        };
+
+        var service = BuildService(db);
+        var created = await service.CreateAsync(user, SaveDto("计算报表", def));
+        var execution = BuildExecution(db);
+        var preview = await execution.PreviewAsync(user, new ReportConfigurationPreviewRequest { ConfigurationId = created.Id });
+
+        Assert.Contains(preview.Columns, c => c.Key == "orderNo");
+        var computedColumn = Assert.Single(preview.Columns, c => c.Key == "doubleAmount");
+        Assert.True(computedColumn.IsComputed);
+        Assert.Equal("原币金额", computedColumn.CurrencyUnit);
+        Assert.DoesNotContain(preview.Columns, c => c.Key == "totalAmount");
+
+        var row = Assert.Single(preview.Rows);
+        Assert.Equal(200m, row["doubleAmount"]);
+        Assert.False(row.ContainsKey("totalAmount"));
+
+        var evidence = Assert.Single(preview.ComputedColumns);
+        Assert.Equal("doubleAmount", evidence.Key);
+        Assert.Equal(new[] { "totalAmount" }, evidence.Dependencies);
     }
 }

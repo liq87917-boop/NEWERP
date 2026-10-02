@@ -246,6 +246,26 @@ public class ReportConfigurationUiTests
         Assert.Contains("await rccLoadGrants()", js);           // 冲突后刷新授权列表
     }
 
+    // ==================== 10. 受限计算列结构化编辑器 ====================
+
+    [Fact]
+    public void 计算列_结构化编辑器与证据接线_且保留任意公式不支持()
+    {
+        var js = File.ReadAllText(Path.Combine(JsDirectory(), "report-configuration.js"));
+
+        Assert.Contains("function rccSupportsComputedColumns()", js);
+        Assert.Contains("computed-columns", js);
+        Assert.Contains("function rccFormulaNodeHtml(node, colIndex, path)", js);
+        Assert.Contains("function rccComputedColumnsHtml()", js);
+        Assert.Contains("function rccAddComputedColumn()", js);
+        Assert.Contains("function rccComputedEvidenceHtml(preview)", js);
+        Assert.Contains("computedColumns: rccBuildComputedColumns(state)", js);
+        Assert.Contains("RCC_FORMULA_NODE_KINDS", js);
+        Assert.Contains("字段 / 数字 / + - × ÷", js);
+        Assert.DoesNotContain("eval(", js);              // 计算列同样绝不执行脚本
+        Assert.Contains("自定义公式：本阶段不支持", js);   // 任意公式仍显式不支持
+    }
+
     /// <summary>截取源码中两个锚点之间的片段，便于对单个函数做「不含某内容」的契约断言。</summary>
     private static string Segment(string source, string start, string end)
     {

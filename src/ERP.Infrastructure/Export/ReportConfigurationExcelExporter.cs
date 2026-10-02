@@ -313,6 +313,10 @@ public sealed class ReportConfigurationExcelExporter
             styles);
         AddLabel(sheet, ref nextRow, "币种/单位口径", evidence?.CurrencyUnitSemantics ?? string.Empty, styles);
 
+        var computedText = BuildComputedEvidenceText(preview.ComputedColumns);
+        if (!string.IsNullOrWhiteSpace(computedText))
+            AddLabel(sheet, ref nextRow, "计算列口径", computedText, styles);
+
         var readOnlyText = evidence?.ReadOnlyText ?? string.Empty;
         var boundaryText = evidence?.BoundaryText ?? string.Empty;
         var readOnlyBoundary = string.IsNullOrWhiteSpace(readOnlyText)
@@ -327,6 +331,20 @@ public sealed class ReportConfigurationExcelExporter
 
         sheet.SetColumnWidth(0, 18 * 256);
         sheet.SetColumnWidth(1, 90 * 256);
+    }
+
+    private static string BuildComputedEvidenceText(
+        IReadOnlyList<ReportConfigurationComputedColumnEvidenceDto>? computedColumns)
+    {
+        if (computedColumns is null || computedColumns.Count == 0)
+            return string.Empty;
+
+        return string.Join("；", computedColumns.Select(c =>
+        {
+            var unit = string.IsNullOrWhiteSpace(c.Unit) ? string.Empty : $"（{c.Unit}）";
+            var deps = c.Dependencies is { Count: > 0 } ? $"；依赖：{string.Join(", ", c.Dependencies)}" : string.Empty;
+            return $"{c.Label}{unit}：{c.UnknownReason}{deps}";
+        }));
     }
 
     private static void AddLabel(ISheet sheet, ref int rowIndex, string label, string value, Styles styles)

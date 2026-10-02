@@ -386,4 +386,56 @@ public class ReportConfigurationPdfTests
             new ReportConfigurationPreviewRequest { ConfigurationId = created.Id }));
         Assert.Equal(ErrorCodes.Forbidden, ex.Code);
     }
+
+    [Fact]
+    public void Export_计算列_返回有效PDF且不失败()
+    {
+        var preview = new ReportConfigurationPreviewDto
+        {
+            ConfigurationId = 1,
+            Name = "计算报表",
+            Version = 1,
+            DatasetKey = ReportConfigurationConstants.DatasetSalesOrder,
+            Columns = new List<ReportConfigurationColumnDto>
+            {
+                new("orderNo", "订单号", ReportConfigurationConstants.TypeText, null),
+                new("doubleAmount", "双倍金额", ReportConfigurationConstants.TypeNumber, "原币金额",
+                    ReportConfigurationFormulaRules.UnknownReasonText, IsComputed: true),
+            },
+            Rows = new List<Dictionary<string, object?>>
+            {
+                new(StringComparer.Ordinal) { ["orderNo"] = "SO-1", ["doubleAmount"] = 200m },
+            },
+            ComputedColumns = new List<ReportConfigurationComputedColumnEvidenceDto>
+            {
+                new()
+                {
+                    Key = "doubleAmount",
+                    Label = "双倍金额",
+                    Unit = "原币金额",
+                    UnknownReason = ReportConfigurationFormulaRules.UnknownReasonText,
+                    Dependencies = new List<string> { "totalAmount" },
+                },
+            },
+            Total = 1,
+            Page = 1,
+            PageSize = 20,
+            TotalPages = 1,
+            GroupBy = ReportConfigurationConstants.GroupNone,
+            Evidence = new ReportConfigurationEvidenceContextDto(
+                ReportConfigurationConstants.DatasetSalesOrder,
+                "销售订单（一行一条销售订单）",
+                "金额按订单原币呈现，不跨币种换算或合并",
+                "只读声明",
+                "边界声明",
+                "免责声明",
+                ReportConfigurationConstants.CoverageCurrentPage),
+        };
+
+        var bytes = ReportConfigurationPdfExporter.Export(preview);
+        Assert.StartsWith("%PDF-", Encoding.ASCII.GetString(bytes));
+
+        using var pdf = OpenPdf(bytes);
+        Assert.True(pdf.Pages.Count >= 1);
+    }
 }

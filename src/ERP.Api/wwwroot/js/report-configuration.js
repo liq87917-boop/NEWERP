@@ -44,6 +44,7 @@ let RCC = {
   name: '',
   selectedKeys: [],
   filters: [],
+  computedColumns: [],
   groupBy: 'none',
   page: 1,
   pageSize: RCC_DEFAULT_PAGE_SIZE,
@@ -144,6 +145,147 @@ function rccUnsupportedHtml(dataset) {
   return '<div class="rcc-unsupported"><div class="rcc-unsupported-title">为什么不支持（本阶段不提供）</div><ul>' + rows + '</ul></div>';
 }
 
+/* ==================== 受限计算列（ERP-266）：结构化 字段 / 数字 / + - × ÷ 编辑器 ==================== */
+
+const RCC_FORMULA_NODE_KINDS = {
+  field: '字段',
+  literal: '数字',
+  add: '+',
+  subtract: '-',
+  multiply: '×',
+  divide: '÷',
+};
+
+function rccSupportsComputedColumns() {
+  const ds = rccCurrentDataset();
+  return !!ds && ((ds.supportedCapabilities || []).indexOf('computed-columns') >= 0);
+}
+
+function rccNormalizeFormulaNode(node) {
+  if (!node || !node.kind) return null;
+  const kind = String(node.kind);
+  if (kind === 'field') return { kind, fieldKey: String(node.fieldKey || '') };
+  if (kind === 'literal') return { kind, literal: Number(node.literal) || 0 };
+  const left = rccNormalizeFormulaNode(node.left);
+  const right = rccNormalizeFormulaNode(node.right);
+  if (!left || !right) return { kind, fieldKey: '' };
+  return { kind, left, right };
+}
+
+function rccBuildComputedColumns(state) {
+  return ((state && state.computedColumns) || []).map(c => ({
+    key: String(c.key || '').trim(),
+    label: String(c.label || ''),
+    expression: rccNormalizeFormulaNode(c.expression),
+  })).filter(c => c.key && c.expression && c.expression.kind);
+}
+
+function rccNewFormulaNode(kind) {
+  if (kind === 'field') return { kind: 'field', fieldKey: '' };
+  if (kind === 'literal') return { kind: 'literal', literal: 0 };
+  return { kind, left: { kind: 'field', fieldKey: '' }, right: { kind: 'field', fieldKey: '' } };
+}
+
+function rccFormulaNodeAt(colIndex, path) {
+  const col = (RCC.computedColumns || [])[colIndex];
+  if (!col) return null;
+  if (!col.expression) col.expression = { kind: 'field', fieldKey: '' };
+  let cur = col.expression;
+  if (path) {
+    for (const p of path.split('.')) {
+      cur[p] = cur[p] || {};
+      cur = cur[p];
+    }
+  }
+  return cur;
+}
+
+function rccFormulaNodeHtml(node, colIndex, path) {
+  node = node || { kind: 'field', fieldKey: '' };
+  const kind = node.kind || 'field';
+  const kindSelect = '<select onchange="rccOnFormulaKind(' + colIndex + ', \'' + path + '\', this.value)">'
+    + Object.keys(RCC_FORMULA_NODE_KINDS).map(k =>
+        '<option value="' + k + '" ' + (k === kind ? 'selected' : '') + '>' + RCC_FORMULA_NODE_KINDS[k] + '</option>').join('')
+    + '</select>';
+  if (kind === 'field') {
+    const opts = (RCC.fields || []).filter(f => f.type === 'number').map(f =>
+      '<option value="' + rccEsc(f.key) + '" ' + (node.fieldKey === f.key ? 'selected' : '') + '>' + rccEsc(f.label) + '</option>').join('');
+    return kindSelect + ' <select onchange="rccOnFormulaField(' + colIndex + ', \'' + path + '\', this.value)"><option value="">选择字段</option>' + opts + '</select>';
+  }
+  if (kind === 'literal') {
+    return kindSelect + ' <input type="number" step="any" value="' + rccEsc(node.literal ?? '') + '" oninput="rccOnFormulaLiteral(' + colIndex + ', \'' + path + '\', this.value)">';
+  }
+  return kindSelect + ' ( ' + rccFormulaNodeHtml(node.left, colIndex, path + '.left')
+    + ' <b>' + rccEsc(RCC_FORMULA_NODE_KINDS[kind]) + '</b> '
+    + rccFormulaNodeHtml(node.right, colIndex, path + '.right') + ' )';
+}
+
+function rccComputedColumnsHtml() {
+  if (!rccSupportsComputedColumns()) return '';
+  const numeric = (RCC.fields || []).filter(f => f.type === 'number');
+  const rows = (RCC.computedColumns || []).map((c, i) =>
+    '<div class="rcc-computed-row">'
+    + '<input value="' + rccEsc(c.key) + '" oninput="rccOnComputedKey(' + i + ', this.value)" placeholder="键（唯一）">'
+    + '<input value="' + rccEsc(c.label) + '" oninput="rccOnComputedLabel(' + i + ', this.value)" placeholder="标签">'
+    + '<div class="rcc-computed-expr">' + rccFormulaNodeHtml(c.expression, i, '') + '</div>'
+    + '<button type="button" class="btn" onclick="rccRemoveComputedColumn(' + i + ')">删除</button></div>').join('');
+  return '<div class="rcc-computed"><label>计算列（受限：字段 / 数字 / + - × ÷，最多 8 列）</label>'
+    + rows
+    + (numeric.length ? '<button type="button" class="btn" onclick="rccAddComputedColumn()">+ 添加计算列</button>' : '')
+    + '</div>';
+}
+
+function rccOnFormulaKind(colIndex, path, kind) {
+  if (!path) { const col = (RCC.computedColumns || [])[colIndex]; if (col) col.expression = rccNewFormulaNode(kind); }
+  else {
+    const parts = path.split('.');
+    const child = parts.pop();
+    const parent = rccFormulaNodeAt(colIndex, parts.join('.'));
+    if (parent) parent[child] = rccNewFormulaNode(kind);
+  }
+  rccTouch(); rccRenderDesigner();
+}
+
+function rccOnFormulaField(colIndex, path, value) {
+  const node = rccFormulaNodeAt(colIndex, path);
+  if (node) { node.kind = 'field'; node.fieldKey = value; }
+  rccTouch(); rccRenderDesigner();
+}
+
+function rccOnFormulaLiteral(colIndex, path, value) {
+  const node = rccFormulaNodeAt(colIndex, path);
+  if (node) { node.kind = 'literal'; node.literal = value === '' ? 0 : Number(value); }
+  rccTouch(); rccRenderDesigner();
+}
+
+function rccAddComputedColumn() {
+  if (!rccSupportsComputedColumns()) { toast('当前数据集不支持计算列', 'error'); return; }
+  const numeric = (RCC.fields || []).filter(f => f.type === 'number');
+  if (!numeric.length) { toast('没有可用的数值字段', 'error'); return; }
+  RCC.computedColumns = RCC.computedColumns || [];
+  RCC.computedColumns.push({ key: 'calc' + (RCC.computedColumns.length + 1), label: '计算列' + (RCC.computedColumns.length + 1), expression: { kind: 'field', fieldKey: numeric[0].key } });
+  rccTouch(); rccRenderDesigner();
+}
+
+function rccRemoveComputedColumn(i) {
+  (RCC.computedColumns || []).splice(i, 1);
+  rccTouch(); rccRenderDesigner();
+}
+
+function rccOnComputedKey(i, v) { const c = (RCC.computedColumns || [])[i]; if (c) { c.key = v; rccTouch(); } }
+function rccOnComputedLabel(i, v) { const c = (RCC.computedColumns || [])[i]; if (c) { c.label = v; rccTouch(); } }
+
+/* 计算列口径（单位 / 未知值原因 / 依赖） */
+function rccComputedEvidenceHtml(preview) {
+  const cols = (preview && preview.computedColumns) || [];
+  if (!cols.length) return '';
+  const rows = cols.map(c => '<li><b>' + rccEsc(c.label || c.key) + '</b>'
+    + (c.unit ? '（' + rccEsc(c.unit) + '）' : '')
+    + '：' + rccEsc(c.unknownReason || '')
+    + '；依赖：' + rccEsc((c.dependencies || []).join(', ')) + '</li>').join('');
+  return '<div class="rcc-computed-evidence"><div class="rcc-computed-evidence-title">计算列口径</div><ul>' + rows + '</ul></div>';
+}
+
 /* 数值格式化：整数原样，小数两位；不追加币种符号（币种由列头 / 分区单独呈现） */
 function rccNumberText(v) {
   if (v === null || v === undefined || v === '') return '';
@@ -163,11 +305,17 @@ function rccRenderCell(value, type, currencyUnit) {
   return '<td>' + rccEsc(rccCellText(value, type, currencyUnit)) + '</td>';
 }
 
+function rccColumnHeadHtml(c) {
+  const unit = c.currencyUnit ? '（' + rccEsc(c.currencyUnit) + '）' : '';
+  const marker = c.isComputed ? ' · 计算列' : '';
+  const title = c.unknownReason ? ' title="' + rccEsc(c.unknownReason) + '"' : '';
+  return '<th' + title + '>' + rccEsc(c.label) + unit + marker + '</th>';
+}
+
 function rccTableHtml(preview) {
   const columns = (preview && preview.columns) || [];
   const rows = (preview && preview.rows) || [];
-  const head = '<tr>' + columns.map(c =>
-    '<th>' + rccEsc(c.label) + (c.currencyUnit ? '（' + rccEsc(c.currencyUnit) + '）' : '') + '</th>').join('') + '</tr>';
+  const head = '<tr>' + columns.map(c => rccColumnHeadHtml(c)).join('') + '</tr>';
   const body = rows.map(row => '<tr>' + columns.map(c => rccRenderCell(row[c.key], c.type, c.currencyUnit)).join('') + '</tr>').join('');
   return '<div class="rcc-table-wrap"><table class="rcc-table"><thead>' + head + '</thead><tbody>' + body + '</tbody></table></div>';
 }
@@ -199,6 +347,7 @@ function rccResultHtml(preview) {
   const parts = [];
   if (preview.groupBy && preview.groupBy !== 'none') parts.push(rccGroupHtml(preview));
   parts.push(rccTableHtml(preview));
+  parts.push(rccComputedEvidenceHtml(preview));
   parts.push('<div class="rcc-evidence">' + rccEsc(evidence.grain || '')
     + ' · ' + rccEsc(evidence.currencyUnitSemantics || '')
     + ' · 覆盖口径：' + rccEsc(coverageText) + '</div>');
@@ -280,6 +429,7 @@ function rccBuildDefinition(state) {
     grouping,
     aggregates: [],
     capabilities: [],
+    computedColumns: rccBuildComputedColumns(state),
     presentation: { page: 1, pageSize: state.pageSize || RCC_DEFAULT_PAGE_SIZE },
   };
 }
@@ -386,6 +536,7 @@ function rccRenderDesigner(html) {
     + '<div class="rcc-name"><label>配置名称</label>'
     + '<input id="rcc-name" value="' + rccEsc(RCC.name) + '" maxlength="200" oninput="rccOnNameInput(this.value)"></div>'
     + '<div class="rcc-fields"><label>选择字段（可上下调整顺序）</label>' + rccFieldChooserHtml(RCC.fields, RCC.selectedKeys) + '</div>'
+    + rccComputedColumnsHtml()
     + '<div class="rcc-filters"><label>类型化筛选</label>' + rccFiltersHtml(RCC.filters, RCC.fields)
     + '<button type="button" class="btn" onclick="rccAddFilter()">+ 添加筛选</button></div>'
     + '<div class="rcc-grouping"><label>分组</label>' + rccGroupingHtml(ds.groupingKeys, RCC.groupBy) + '</div>'
@@ -448,7 +599,7 @@ function rccTouch() {
 async function rccInit() {
   RCC = {
     catalog: null, datasets: [], datasetKey: '', fields: [], list: [], current: null, name: '',
-    selectedKeys: [], filters: [], groupBy: 'none', page: 1, pageSize: RCC_DEFAULT_PAGE_SIZE,
+    selectedKeys: [], filters: [], computedColumns: [], groupBy: 'none', page: 1, pageSize: RCC_DEFAULT_PAGE_SIZE,
     maxPageSize: 200, previewRevision: null, view: null, revisions: [],
     sharedList: [], sharedCurrent: null, grants: [], dirty: false,
     requestSeq: 0, envBlocked: false, busy: false,
@@ -501,6 +652,7 @@ function rccSelectDataset(key, touch = true) {
   RCC.maxPageSize = ds ? (ds.maxPageSize || 200) : 200;
   RCC.pageSize = Math.min(RCC.pageSize || RCC_DEFAULT_PAGE_SIZE, RCC.maxPageSize);
   RCC.filters = [];
+  RCC.computedColumns = [];
   RCC.groupBy = 'none';
   RCC.page = 1;
   if (touch) rccTouch();
@@ -582,6 +734,7 @@ function rccNew() {
   RCC.previewRevision = null;
   RCC.selectedKeys = rccSelectFields(RCC.fields, RCC.fields.map(f => f.key));
   RCC.filters = [];
+  RCC.computedColumns = [];
   RCC.groupBy = 'none';
   RCC.page = 1;
   RCC.dirty = false;
@@ -610,6 +763,11 @@ function rccApplyDefinition(def) {
   RCC.groupBy = g.length === 1 ? g[0] : 'none';
   RCC.page = (def && def.presentation && def.presentation.page) || 1;
   RCC.pageSize = (def && def.presentation && def.presentation.pageSize) || RCC_DEFAULT_PAGE_SIZE;
+  RCC.computedColumns = ((def && def.computedColumns) || []).map(c => ({
+    key: String(c.key || '').trim(),
+    label: String(c.label || ''),
+    expression: rccNormalizeFormulaNode(c.expression) || { kind: 'field', fieldKey: '' },
+  })).filter(c => c.key);
 }
 
 async function rccLoadConfiguration(id) {

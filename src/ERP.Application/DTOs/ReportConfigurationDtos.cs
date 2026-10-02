@@ -49,6 +49,9 @@ public static class ReportConfigurationConstants
     public const string CapabilityDateRange = "date-range";
     public const string CapabilityPaging = "paging";
 
+    /// <summary>受限计算列（ERP-266）：仅支持已授权数值字段引用 / 数值字面量 / + - * / 的有界算术 AST；无任意公式 / SQL / 脚本</summary>
+    public const string CapabilityComputedColumns = "computed-columns";
+
     /// <summary>自定义公式：Stage 1 明确不支持（不提供惰性成功）</summary>
     public const string CapabilityCustomFormula = "custom-formula";
 
@@ -135,6 +138,9 @@ public sealed class ReportConfigurationDefinition
     /// <summary>聚合定义（仅限可聚合字段与有限函数；0 ~ 4 个）</summary>
     public List<ReportConfigurationAggregate> Aggregates { get; set; } = new();
 
+    /// <summary>受限计算列（ERP-266）：结构化算术 AST，最多 8 列；旧定义不含此属性时可正常反序列化（向后兼容）</summary>
+    public List<ReportConfigurationComputedColumn> ComputedColumns { get; set; } = new();
+
     /// <summary>请求的能力标志（仅限数据集支持能力；未支持能力显式拒绝）</summary>
     public List<string> Capabilities { get; set; } = new();
 
@@ -166,6 +172,45 @@ public sealed class ReportConfigurationAggregate
 
     /// <summary>聚合字段键（必须存在、未隐藏且与函数类型兼容）</summary>
     public string FieldKey { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// 受限计算列（ERP-266）：可复用的行级数值计算列。表达式为结构化算术 AST，
+/// 仅允许已授权数值字段引用、数值字面量与 + - * / 四种二元运算；绝不承载任意公式 / SQL / 脚本 / eval。
+/// </summary>
+public sealed class ReportConfigurationComputedColumn
+{
+    /// <summary>计算列键（唯一；不得与数据集基础字段键冲突，不得引用其它计算列）</summary>
+    public string Key { get; set; } = string.Empty;
+
+    /// <summary>展示标签（纯展示）</summary>
+    public string Label { get; set; } = string.Empty;
+
+    /// <summary>算术表达式 AST 根节点</summary>
+    public ReportConfigurationFormulaNode Expression { get; set; } = new();
+}
+
+/// <summary>
+/// 计算列算术 AST 节点（有界）：Kind 仅限 field / literal / add / subtract / multiply / divide。
+/// <para>field 节点仅带 <see cref="FieldKey"/>；literal 节点仅带 <see cref="Literal"/>；
+/// 二元节点仅带 <see cref="Left"/> / <see cref="Right"/>；其它组合在纯校验器中被拒绝。</para>
+/// </summary>
+public sealed class ReportConfigurationFormulaNode
+{
+    /// <summary>节点种类：field / literal / add / subtract / multiply / divide</summary>
+    public string Kind { get; set; } = string.Empty;
+
+    /// <summary>字段引用键（仅 field 节点；必须为已授权、未隐藏、数值类型的基础字段）</summary>
+    public string? FieldKey { get; set; }
+
+    /// <summary>数值字面量（仅 literal 节点；绝对值 ≤ 1e12）</summary>
+    public decimal? Literal { get; set; }
+
+    /// <summary>左子树（仅二元节点）</summary>
+    public ReportConfigurationFormulaNode? Left { get; set; }
+
+    /// <summary>右子树（仅二元节点）</summary>
+    public ReportConfigurationFormulaNode? Right { get; set; }
 }
 
 /// <summary>展示 / 分页（可选；排序字段必须属于已选字段，分页受数据集上限约束）。</summary>
@@ -328,12 +373,14 @@ public sealed record ReportConfigurationPreviewParameters(
     int PageSize,
     string GroupBy);
 
-/// <summary>通用报表列（有界、只读）：有限字段键 + 真实中文标签 / 类型 / 币种单位语义</summary>
+/// <summary>通用报表列（有界、只读）：有限字段键 + 真实中文标签 / 类型 / 币种单位语义；计算列附未知值口径说明</summary>
 public sealed record ReportConfigurationColumnDto(
     string Key,
     string Label,
     string Type,
-    string? CurrencyUnit);
+    string? CurrencyUnit,
+    string? UnknownReason = null,
+    bool IsComputed = false);
 
 /// <summary>分组页面小计的「币种分区」：金额只对同币种求和，绝不跨币种换算或相加</summary>
 public sealed record ReportConfigurationCurrencyPartitionDto(
@@ -363,6 +410,25 @@ public sealed record ReportConfigurationEvidenceContextDto(
     string BoundaryText,
     string DisclaimerText,
     string Coverage);
+
+/// <summary>计算列证据（有界、只读）：单元 / 未知值口径与依赖字段，供 UI / Excel / PDF 共用同一份口径。</summary>
+public sealed class ReportConfigurationComputedColumnEvidenceDto
+{
+    /// <summary>计算列键</summary>
+    public string Key { get; set; } = string.Empty;
+
+    /// <summary>展示标签</summary>
+    public string Label { get; set; } = string.Empty;
+
+    /// <summary>推导出的单位（原币金额 / % / 无量纲）</summary>
+    public string Unit { get; set; } = string.Empty;
+
+    /// <summary>未知值口径（null 的显式有界原因说明，绝不静默置零）</summary>
+    public string UnknownReason { get; set; } = string.Empty;
+
+    /// <summary>依赖的基础字段键（已授权、未隐藏、数值类型；即使未选展示也会在源读取时获取）</summary>
+    public IReadOnlyList<string> Dependencies { get; set; } = new List<string>();
+}
 
 /// <summary>通用报表配置预览结果（有界、只读）</summary>
 public sealed class ReportConfigurationPreviewDto
@@ -414,6 +480,12 @@ public sealed class ReportConfigurationPreviewDto
 
     /// <summary>当前预览页分组小计（分组时才非空；组内按币种分区，绝不跨币种相加）</summary>
     public List<ReportConfigurationGroupSubtotalDto>? Groups { get; set; }
+
+    /// <summary>计算列证据（有界：键 / 标签 / 单位 / 未知值口径 / 依赖）；无计算列为空</summary>
+    public List<ReportConfigurationComputedColumnEvidenceDto> ComputedColumns { get; set; } = new();
+
+    /// <summary>计算列单元格未知值原因（与 <see cref="Rows"/> 平行；仅计算列 null 单元格携带有界原因）</summary>
+    public List<Dictionary<string, string?>> CellReasons { get; set; } = new();
 
     /// <summary>证据上下文（数据集键 / 粒度 / 币种单位口径 / 只读 / 覆盖口径）</summary>
     public ReportConfigurationEvidenceContextDto? Evidence { get; set; }

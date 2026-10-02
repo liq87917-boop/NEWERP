@@ -49,6 +49,7 @@ public sealed class SalesOrderReportConfigurationDatasetProvider : IReportConfig
         ReportConfigurationConstants.CapabilityGrouping,
         ReportConfigurationConstants.CapabilityDateRange,
         ReportConfigurationConstants.CapabilityPaging,
+        ReportConfigurationConstants.CapabilityComputedColumns,
     };
 
     private static readonly IReadOnlyList<string> UnsupportedCapabilities = new[]
@@ -104,7 +105,7 @@ public sealed class SalesOrderReportConfigurationDatasetProvider : IReportConfig
         var groupBy = DynamicSalesOrderReportRules.NormalizeGroupBy(parameters.GroupBy);
         var request = new DynamicSalesOrderReportRequest
         {
-            Fields = BuildFields(definition.Fields, groupBy),
+            Fields = BuildFields(definition.Fields, definition.ComputedColumns, groupBy),
             Page = parameters.Page,
             PageSize = parameters.PageSize,
             GroupBy = groupBy,
@@ -118,6 +119,34 @@ public sealed class SalesOrderReportConfigurationDatasetProvider : IReportConfig
         var groups = groupBy == DynamicSalesOrderReportRules.GroupNone
             ? null
             : DynamicSalesOrderReportRules.BuildGroupSubtotals(page.Rows, groupBy);
+
+        if (groupBy == DynamicSalesOrderReportRules.GroupNone && definition.ComputedColumns is { Count: > 0 })
+        {
+            var baseColumns = page.Columns
+                .Select(c => (c.Key, c.Label, c.DataType))
+                .ToList();
+            var projection = ReportConfigurationComputedProjection.Apply(
+                definition.Fields, baseColumns, page.Rows, definition.ComputedColumns, CurrencyUnitOf);
+
+            return new ReportConfigurationPreviewDto
+            {
+                DatasetKey = DatasetKey,
+                Columns = projection.Columns,
+                Rows = projection.Rows,
+                CellReasons = projection.CellReasons,
+                ComputedColumns = projection.Evidence,
+                Total = page.Total,
+                Page = page.Page,
+                PageSize = page.PageSize,
+                TotalPages = page.TotalPages,
+                GroupBy = groupBy,
+                Groups = null,
+                Evidence = new ReportConfigurationEvidenceContextDto(
+                    DatasetKey, Grain, CurrencyUnitSemantics,
+                    page.ReadOnlyText, page.BoundaryText, page.DisclaimerText,
+                    ReportConfigurationConstants.CoverageCurrentPage),
+            };
+        }
 
         return new ReportConfigurationPreviewDto
         {
@@ -142,7 +171,10 @@ public sealed class SalesOrderReportConfigurationDatasetProvider : IReportConfig
         };
     }
 
-    private static List<string> BuildFields(IReadOnlyList<string> fields, string groupBy)
+    private static List<string> BuildFields(
+        IReadOnlyList<string> fields,
+        IReadOnlyList<ReportConfigurationComputedColumn> computedColumns,
+        string groupBy)
     {
         var selected = (fields ?? new List<string>())
             .Where(f => !string.IsNullOrWhiteSpace(f))
@@ -151,6 +183,15 @@ public sealed class SalesOrderReportConfigurationDatasetProvider : IReportConfig
 
         if (groupBy != DynamicSalesOrderReportRules.GroupNone)
             return DynamicSalesOrderReportRules.EnsureGroupingFields(selected, groupBy) ?? selected;
+
+        if (computedColumns is { Count: > 0 })
+        {
+            foreach (var dependency in ReportConfigurationFormulaRules.CollectDependencies(computedColumns))
+            {
+                if (!selected.Contains(dependency, StringComparer.OrdinalIgnoreCase))
+                    selected.Add(dependency);
+            }
+        }
 
         return selected;
     }
@@ -279,6 +320,7 @@ public sealed class ReceivableReportConfigurationDatasetProvider : IReportConfig
         ReportConfigurationConstants.CapabilityGrouping,
         ReportConfigurationConstants.CapabilityDateRange,
         ReportConfigurationConstants.CapabilityPaging,
+        ReportConfigurationConstants.CapabilityComputedColumns,
     };
 
     private static readonly IReadOnlyList<string> UnsupportedCapabilities = new[]
@@ -334,7 +376,7 @@ public sealed class ReceivableReportConfigurationDatasetProvider : IReportConfig
         var groupBy = DynamicReceivableReportRules.NormalizeGroupBy(parameters.GroupBy);
         var request = new DynamicReceivableReportRequest
         {
-            Fields = BuildFields(definition.Fields, groupBy),
+            Fields = BuildFields(definition.Fields, definition.ComputedColumns, groupBy),
             Page = parameters.Page,
             PageSize = parameters.PageSize,
             GroupBy = groupBy,
@@ -348,6 +390,34 @@ public sealed class ReceivableReportConfigurationDatasetProvider : IReportConfig
         var groups = groupBy == DynamicReceivableReportRules.GroupNone
             ? null
             : DynamicReceivableReportRules.BuildGroupSubtotals(page.Rows, groupBy);
+
+        if (groupBy == DynamicReceivableReportRules.GroupNone && definition.ComputedColumns is { Count: > 0 })
+        {
+            var baseColumns = page.Columns
+                .Select(c => (c.Key, c.Label, c.DataType))
+                .ToList();
+            var projection = ReportConfigurationComputedProjection.Apply(
+                definition.Fields, baseColumns, page.Rows, definition.ComputedColumns, CurrencyUnitOf);
+
+            return new ReportConfigurationPreviewDto
+            {
+                DatasetKey = DatasetKey,
+                Columns = projection.Columns,
+                Rows = projection.Rows,
+                CellReasons = projection.CellReasons,
+                ComputedColumns = projection.Evidence,
+                Total = page.Total,
+                Page = page.Page,
+                PageSize = page.PageSize,
+                TotalPages = page.TotalPages,
+                GroupBy = groupBy,
+                Groups = null,
+                Evidence = new ReportConfigurationEvidenceContextDto(
+                    DatasetKey, Grain, CurrencyUnitSemantics,
+                    page.ReadOnlyText, page.BoundaryText, page.DisclaimerText,
+                    ReportConfigurationConstants.CoverageCurrentPage),
+            };
+        }
 
         return new ReportConfigurationPreviewDto
         {
@@ -373,7 +443,10 @@ public sealed class ReceivableReportConfigurationDatasetProvider : IReportConfig
         };
     }
 
-    private static List<string> BuildFields(IReadOnlyList<string> fields, string groupBy)
+    private static List<string> BuildFields(
+        IReadOnlyList<string> fields,
+        IReadOnlyList<ReportConfigurationComputedColumn> computedColumns,
+        string groupBy)
     {
         var selected = (fields ?? new List<string>())
             .Where(f => !string.IsNullOrWhiteSpace(f))
@@ -382,6 +455,15 @@ public sealed class ReceivableReportConfigurationDatasetProvider : IReportConfig
 
         if (groupBy != DynamicReceivableReportRules.GroupNone)
             return DynamicReceivableReportRules.EnsureGroupingFields(selected, groupBy) ?? selected;
+
+        if (computedColumns is { Count: > 0 })
+        {
+            foreach (var dependency in ReportConfigurationFormulaRules.CollectDependencies(computedColumns))
+            {
+                if (!selected.Contains(dependency, StringComparer.OrdinalIgnoreCase))
+                    selected.Add(dependency);
+            }
+        }
 
         return selected;
     }
@@ -584,5 +666,132 @@ internal static class ReportConfigurationDatasetTranslation
         }
     }
 }
+internal static class ReportConfigurationComputedProjection
+{
+    /// <summary>
+    /// 投影当前预览明细行：只返回「已选基础字段 + 计算列」，绝不返回隐藏依赖字段值。
+    /// <para>求值由 <see cref="ReportConfigurationFormulaRules.Evaluate"/> 完成（checked 十进制，null 携带有界原因）。</para>
+    /// </summary>
+    public static (
+        List<ReportConfigurationColumnDto> Columns,
+        List<Dictionary<string, object?>> Rows,
+        List<Dictionary<string, string?>> CellReasons,
+        List<ReportConfigurationComputedColumnEvidenceDto> Evidence) Apply(
+        IReadOnlyList<string> selectedFields,
+        IReadOnlyList<(string Key, string Label, string Type)> baseColumns,
+        IReadOnlyList<Dictionary<string, object?>> rows,
+        IReadOnlyList<ReportConfigurationComputedColumn> computedColumns,
+        Func<string, string?> unitLookup)
+    {
+        var selected = (selectedFields ?? new List<string>())
+            .Where(f => !string.IsNullOrWhiteSpace(f))
+            .Select(f => f.Trim())
+            .ToList();
+
+        var evidence = ReportConfigurationFormulaRules.BuildEvidence(computedColumns, unitLookup).ToList();
+        if (computedColumns is null || computedColumns.Count == 0)
+        {
+            return (BuildBaseColumns(selected, baseColumns, unitLookup),
+                (rows ?? new List<Dictionary<string, object?>>()).ToList(),
+                new List<Dictionary<string, string?>>(),
+                evidence);
+        }
+
+        var evaluation = ReportConfigurationFormulaRules.Evaluate(computedColumns, rows);
+
+        var projectedRows = new List<Dictionary<string, object?>>();
+        var cellReasons = new List<Dictionary<string, string?>>();
+        var sourceRows = rows ?? new List<Dictionary<string, object?>>();
+
+        for (var i = 0; i < sourceRows.Count; i++)
+        {
+            var source = sourceRows[i];
+            var projected = new Dictionary<string, object?>(StringComparer.Ordinal);
+            foreach (var key in selected)
+                projected[key] = ReadValue(source, key);
+
+            if (i < evaluation.Count)
+            {
+                foreach (var column in computedColumns)
+                {
+                    if (column is null)
+                        continue;
+                    evaluation[i].Values.TryGetValue(column.Key, out var value);
+                    projected[column.Key] = value;
+                }
+
+                var reasons = new Dictionary<string, string?>(StringComparer.Ordinal);
+                foreach (var kv in evaluation[i].Reasons)
+                    reasons[kv.Key] = kv.Value;
+                cellReasons.Add(reasons);
+            }
+            else
+            {
+                cellReasons.Add(new Dictionary<string, string?>());
+            }
+
+            projectedRows.Add(projected);
+        }
+
+        var columns = BuildBaseColumns(selected, baseColumns, unitLookup);
+        foreach (var column in computedColumns)
+        {
+            if (column is null)
+                continue;
+            var key = (column.Key ?? string.Empty).Trim();
+            var label = string.IsNullOrWhiteSpace(column.Label) ? key : column.Label.Trim();
+            columns.Add(new ReportConfigurationColumnDto(
+                key,
+                label,
+                ReportConfigurationConstants.TypeNumber,
+                ReportConfigurationFormulaRules.DeriveUnit(column, unitLookup),
+                ReportConfigurationFormulaRules.UnknownReasonText,
+                IsComputed: true));
+        }
+
+        return (columns, projectedRows, cellReasons, evidence);
+    }
+
+    private static List<ReportConfigurationColumnDto> BuildBaseColumns(
+        IReadOnlyList<string> selected,
+        IReadOnlyList<(string Key, string Label, string Type)> baseColumns,
+        Func<string, string?> unitLookup)
+    {
+        var result = new List<ReportConfigurationColumnDto>();
+        foreach (var key in selected)
+        {
+            var column = default((string Key, string Label, string Type));
+            foreach (var candidate in baseColumns)
+            {
+                if (string.Equals(candidate.Key, key, StringComparison.OrdinalIgnoreCase))
+                {
+                    column = candidate;
+                    break;
+                }
+            }
+
+            result.Add(new ReportConfigurationColumnDto(
+                key,
+                string.IsNullOrWhiteSpace(column.Label) ? key : column.Label,
+                string.IsNullOrWhiteSpace(column.Type) ? ReportConfigurationConstants.TypeNumber : column.Type,
+                unitLookup(key)));
+        }
+
+        return result;
+    }
+
+    private static object? ReadValue(Dictionary<string, object?> row, string key)
+    {
+        if (row.TryGetValue(key, out var value))
+            return value;
+        foreach (var kv in row)
+        {
+            if (string.Equals(kv.Key, key, StringComparison.OrdinalIgnoreCase))
+                return kv.Value;
+        }
+        return null;
+    }
+}
+
 
 
