@@ -287,6 +287,35 @@ public class ReportConfigurationExecutionTests
     }
 
     [Fact]
+    public async Task PreviewAsync_草稿_返回名称版本与规范化筛选日期范围()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedPrivilegedUser(db, "so-meta", "sales-order");
+
+        var def = SalesOrderDefinition(fields: new[] { "orderNo", "orderDate", "totalAmount" });
+        def.Filters = new List<ReportConfigurationFilter>
+        {
+            new ReportConfigurationFilter
+            {
+                FieldKey = "orderDate",
+                Operator = ReportConfigurationConstants.OperatorGte,
+                Value = "2026-09-01",
+            },
+        };
+
+        var service = BuildService(db);
+        var created = await service.CreateAsync(user, SaveDto("元数据报表", def));
+
+        var execution = BuildExecution(db);
+        var preview = await execution.PreviewAsync(user, new ReportConfigurationPreviewRequest { ConfigurationId = created.Id });
+
+        Assert.Equal("元数据报表", preview.Name);
+        Assert.Equal(1, preview.Version);
+        Assert.Contains("≥", preview.NormalizedFiltersText);
+        Assert.Equal("2026-09-01 起", preview.DateRangeText);
+    }
+
+    [Fact]
     public async Task PreviewAsync_字段被撤销_拒绝()
     {
         using var db = TestDbFactory.Create();

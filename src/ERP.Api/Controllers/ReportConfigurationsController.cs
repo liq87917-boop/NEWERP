@@ -1,6 +1,7 @@
 using ERP.Application.Common;
 using ERP.Application.DTOs;
 using ERP.Application.Interfaces;
+using ERP.Infrastructure.Export;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using System.Security.Claims;
@@ -140,5 +141,23 @@ public class ReportConfigurationsController : ControllerBase
         ArgumentNullException.ThrowIfNull(request);
         var result = await _execution.PreviewAsync(CurrentUserId(), request);
         return Ok(ApiResponse<ReportConfigurationPreviewDto>.Success(result));
+    }
+
+    /// <summary>
+    /// 导出当前页为 Excel（ERP-263，只读）：复用同一有界、已授权预览管线，仅导出当前预览页选定列，
+    /// 绝不信任客户端行 / 身份 / 范围 / 预览缓存；追加「报表口径」工作表标注定义名称 / 版本、数据集 / 行粒度、
+    /// 规范化查询筛选与日期范围、当前页覆盖口径、币种 / 单位语义、只读与边界、未知值说明（即使对应展示列被取消选择也始终包含）。
+    /// 分组小计仅覆盖当前预览页且按币种分区，绝不追加全匹配合计；数值保留符号、null 未知留空、日期 / 布尔按类型呈现、文本做公式注入转义。
+    /// 每次请求重新校验身份 / 数据集菜单授权 / 数据范围（fail closed）；授权撤销 / 无效修订 / 环境不可用 / 导出失败返回受控错误，不返回过期下载。
+    /// <para>全程只读，不写库、不执行任意 SQL；请求由既有 <c>OperationLogMiddleware</c> 记录审计（动作「导出」）。</para>
+    /// </summary>
+    [HttpPost("export")]
+    public async Task<IActionResult> Export([FromBody] ReportConfigurationPreviewRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        var preview = await _execution.PreviewAsync(CurrentUserId(), request);
+        var bytes = new ReportConfigurationExcelExporter().Build(preview);
+        return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            $"ReportConfiguration_{DateTime.Now:yyyyMMddHHmmss}.xlsx");
     }
 }

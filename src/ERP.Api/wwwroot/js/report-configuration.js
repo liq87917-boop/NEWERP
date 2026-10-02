@@ -6,13 +6,15 @@
      POST /api/report-configurations（新增）或 PUT /api/report-configurations/{id}?version=N（更新，匹配预期版本令牌）；
    - 复制 / 重命名 / 软删除 / 发布 / 恢复 / 修订列表分别走 {id}/copy、{id}/rename、DELETE {id}、
      {id}/publish、{id}/restore、{id}/revisions；预览走 POST /api/report-configurations/preview；
-   - 不支持的能力（自定义公式 / 透视 / 跨数据集联接 / 全匹配合计 / 共享 / 导出）只在「为什么不支持」面板说明原因，
+   - 不支持的能力（自定义公式 / 透视 / 跨数据集联接 / 全匹配合计 / 共享）只在「为什么不支持」面板说明原因，
      绝不渲染为装饰性按钮假装可运行；
    - 币种 / 单位分离：列头带币种单位语义，分组小计按币种分区呈现，绝不跨币种 / 单位合并；
    - 草稿与已发布区分展示；当前预览页覆盖口径与全量合计明确区分（仅当前预览页小计）；
    - 未保存本地编辑保留到保存成功为止；保存冲突（1004）不覆盖；所有用户 / 目录字符串一律转义；
    - 数据集 / 配置变化后丢弃迟到的预览响应（请求序号令牌）；授权 / 失败时清除过期预览行；
-   - 报表配置数据表缺失（5000）显式显示为「环境未就绪（environment-blocked）」，绝不使用浏览器本地存储替代持久化定义。 */
+   - 报表配置数据表缺失（5000）显式显示为「环境未就绪（environment-blocked）」，绝不使用浏览器本地存储替代持久化定义；
+   - 导出：POST /api/report-configurations/export 复用同一有界、已授权预览管线，仅导出当前预览页选定列；
+     导出失败只显示错误、保留未保存编辑，绝不下载过期内容、绝不覆盖设计器状态。 */
 
 const RCC_API = '/api/report-configurations';
 const RCC_DEFAULT_PAGE_SIZE = 20;
@@ -30,7 +32,6 @@ const RCC_UNSUPPORTED_REASONS = {
   'pivot': '透视表：本阶段不支持，只提供有限字段 / 筛选 / 单一分组键',
   'all-match-total': '全匹配合计：本阶段不支持，页面小计只覆盖当前预览页（非全量合计）',
   'sharing': '共享：本阶段仅支持私有配置，专用管理员共享权限为未来平台增量',
-  'export': '导出：本阶段不支持导出，仅提供页面预览',
 };
 
 /* 设计器状态（纯数据；DOM 访问只在事件处理函数内部发生） */
@@ -135,7 +136,7 @@ function rccLoadingHtml() { return '<div class="rcc-hint">正在预览…</div>'
 /* 不支持能力面板：只解释「为什么不支持」，绝不渲染可点击的装饰性控件 */
 function rccUnsupportedHtml(dataset) {
   const keys = (dataset && dataset.unsupportedCapabilities) || [];
-  const extra = ['sharing', 'export'];
+  const extra = ['sharing'];
   const rows = keys.concat(extra.filter(k => keys.indexOf(k) < 0))
     .map(k => '<li><b>' + rccEsc(k) + '</b>：' + rccEsc(RCC_UNSUPPORTED_REASONS[k] || '本阶段不支持') + '</li>')
     .join('');
@@ -774,6 +775,50 @@ function rccPreviewRevision(version) {
   rccPreview();
 }
 
+/* 导出当前预览页为 Excel（ERP-263，只读）：复用预览请求体 POST /api/report-configurations/export；
+   成功（xlsx 附件）触发下载；授权 / 无效 / 环境未就绪 / 网络失败在结果区可见，不下载任何内容，
+   且绝不覆盖未保存编辑（保留 dirty 状态与设计器控件）。 */
+async function rccExport() {
+  if (!RCC.current) { rccRenderResult(rccErrorHtml('invalid', '请先选择或保存一个报表配置')); return; }
+  if (RCC.dirty) { rccRenderResult(rccErrorHtml('invalid', '存在未保存编辑，请先保存后再导出')); return; }
+  const req = rccBuildPreviewRequest(RCC);
+  try {
+    const resp = await fetch(RCC_API + '/export', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + (typeof localStorage !== 'undefined' ? (localStorage.getItem('erp_token') || '') : ''),
+      },
+      body: JSON.stringify(req),
+    });
+
+    const contentType = (resp.headers.get('content-type') || '');
+    if (contentType.indexOf('spreadsheetml') >= 0) {
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+      a.href = url;
+      a.download = '报表配置_' + dateStr + '.xlsx';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      return;   // 导出成功：不触碰任何未保存控件 / 设计器状态
+    }
+
+    let envelope = null;
+    try { envelope = await resp.json(); } catch (e) { /* 忽略解析失败 */ }
+    const code = envelope && envelope.code;
+    const message = (envelope && envelope.message) || '导出失败';
+    if (code === 2000 || code === 2003) { rccOnUnauthorized(message); return; }
+    if (code === 5000) { RCC.envBlocked = true; rccRenderEnvBanner(); rccRenderResult(rccEnvBlockedHtml(message)); return; }
+    rccRenderResult(rccErrorHtml(rccKindOfCode(code), message));   // 失败只显示错误，绝不覆盖未保存编辑
+  } catch (err) {
+    rccRenderResult(rccErrorHtml('network', (err && err.message) || '无法连接到服务器'));
+  }
+}
+
 /* 工作台入口（app.js 路由 code === 'report-configuration' 调用） */
 function renderReportConfigurationWorkspace() {
   document.getElementById('header-title').textContent = '报表配置工作台';
@@ -789,6 +834,7 @@ function renderReportConfigurationWorkspace() {
     + '<button type="button" class="btn btn-danger" onclick="rccDelete()">删除</button>'
     + '<button type="button" class="btn" onclick="rccPublish()">发布</button>'
     + '<button type="button" class="btn" onclick="rccPreview()">预览</button>'
+    + '<button type="button" class="btn" onclick="rccExport()">导出</button>'
     + '<span id="rcc-dirty" class="rcc-dirty"></span>'
     + '</div>'
     + '<div class="rcc-layout">'
@@ -855,6 +901,7 @@ if (typeof module !== 'undefined' && module.exports) {
     rccRestore,
     rccLoadRevisions,
     rccPreview,
+    rccExport,
     renderReportConfigurationWorkspace,
   };
 }

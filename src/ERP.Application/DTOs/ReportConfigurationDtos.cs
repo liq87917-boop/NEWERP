@@ -376,6 +376,18 @@ public sealed class ReportConfigurationPreviewDto
     /// <summary>是否为固定发布修订预览（false = 当前草稿）</summary>
     public bool IsPinnedRevision { get; set; }
 
+    /// <summary>当前预览定义的名称（草稿 = 配置名称；固定发布修订 = 修订名称快照）</summary>
+    public string Name { get; set; } = string.Empty;
+
+    /// <summary>当前预览定义的版本标识（草稿 = 配置预期版本令牌；固定发布修订 = 修订版本号）</summary>
+    public int Version { get; set; }
+
+    /// <summary>规范化查询筛选文本（字段标签 + 有限操作符 + 值；无筛选为空字符串）</summary>
+    public string NormalizedFiltersText { get; set; } = string.Empty;
+
+    /// <summary>规范化日期范围文本（仅日期筛选字段；无日期筛选为空字符串）</summary>
+    public string DateRangeText { get; set; } = string.Empty;
+
     /// <summary>数据集键</summary>
     public string DatasetKey { get; set; } = string.Empty;
 

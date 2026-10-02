@@ -3,6 +3,8 @@ using ERP.Application.DTOs;
 using ERP.Application.Interfaces;
 using ERP.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
+using System.Collections;
+using System.Globalization;
 using System.Text.Json;
 
 namespace ERP.Application.Services;
@@ -55,6 +57,7 @@ public sealed class ReportConfigurationExecutionService : IReportConfigurationEx
         // 2) 选定定义：草稿 or 固定发布修订（修订必须属于该配置且未被软删除）
         ReportConfigurationDefinition definition;
         string datasetKey;
+        string name;
         int? pinnedRevision = null;
 
         if (request.RevisionVersion.HasValue)
@@ -67,6 +70,7 @@ public sealed class ReportConfigurationExecutionService : IReportConfigurationEx
             definition = Deserialize(revision.DefinitionJson)
                 ?? throw BusinessException.RuleConflict("发布修订定义缺失，无法预览");
             datasetKey = revision.DatasetKey;
+            name = revision.Name;
             pinnedRevision = revision.Version;
         }
         else
@@ -74,6 +78,7 @@ public sealed class ReportConfigurationExecutionService : IReportConfigurationEx
             definition = Deserialize(config.DefinitionJson)
                 ?? throw BusinessException.RuleConflict("报表配置定义缺失，无法预览");
             datasetKey = config.DatasetKey;
+            name = config.Name;
         }
 
         // 3) 定位对应数据集适配器（未知数据集 fail closed）
@@ -97,6 +102,10 @@ public sealed class ReportConfigurationExecutionService : IReportConfigurationEx
         preview.ConfigurationId = config.Id;
         preview.PinnedRevisionVersion = pinnedRevision;
         preview.IsPinnedRevision = pinnedRevision.HasValue;
+        preview.Name = name;
+        preview.Version = pinnedRevision ?? config.Version;
+        preview.NormalizedFiltersText = BuildNormalizedFiltersText(definition, dataset);
+        preview.DateRangeText = BuildNormalizedDateRangeText(definition, dataset);
         return preview;
     }
 
@@ -156,6 +165,212 @@ public sealed class ReportConfigurationExecutionService : IReportConfigurationEx
 
         throw BusinessException.InvalidParameter(
             $"当前阶段仅支持单一分组键（收到 {grouping.Count} 个），请选择 none / customer / month 之一");
+    }
+
+    // ==================== 导出证据规范化（纯文本、无 DB、无数据集特化分派） ====================
+
+    private static string BuildNormalizedFiltersText(
+        ReportConfigurationDefinition definition, ReportConfigurationDatasetDto dataset)
+    {
+        if (definition.Filters is null || definition.Filters.Count == 0)
+            return string.Empty;
+
+        var parts = new List<string>();
+        foreach (var filter in definition.Filters)
+        {
+            if (filter is null || string.IsNullOrWhiteSpace(filter.FieldKey) || string.IsNullOrWhiteSpace(filter.Operator))
+                continue;
+
+            var text = BuildFilterText(filter, dataset);
+            if (!string.IsNullOrWhiteSpace(text))
+                parts.Add(text);
+        }
+
+        return string.Join("；", parts);
+    }
+
+    private static string BuildNormalizedDateRangeText(
+        ReportConfigurationDefinition definition, ReportConfigurationDatasetDto dataset)
+    {
+        DateTime? start = null;
+        DateTime? end = null;
+        var hasDateFilter = false;
+
+        foreach (var filter in definition.Filters ?? new List<ReportConfigurationFilter>())
+        {
+            if (filter is null || string.IsNullOrWhiteSpace(filter.FieldKey) || string.IsNullOrWhiteSpace(filter.Operator))
+                continue;
+
+            if (!TryGetField(dataset, filter.FieldKey, out var field)
+                || !string.Equals(field.Type, ReportConfigurationConstants.TypeDate, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            if (!TryApplyDateBound(filter, ref start, ref end))
+                continue;
+
+            hasDateFilter = true;
+        }
+
+        if (!hasDateFilter)
+            return string.Empty;
+
+        if (start.HasValue && end.HasValue && start.Value.Date == end.Value.Date)
+            return start.Value.Date.ToString("yyyy-MM-dd");
+        if (start.HasValue && end.HasValue)
+            return $"{start.Value.Date:yyyy-MM-dd} ~ {end.Value.Date:yyyy-MM-dd}";
+        if (start.HasValue)
+            return $"{start.Value.Date:yyyy-MM-dd} 起";
+        return $"截至 {end!.Value.Date:yyyy-MM-dd}";
+    }
+
+    private static string? BuildFilterText(ReportConfigurationFilter filter, ReportConfigurationDatasetDto dataset)
+    {
+        if (!TryGetField(dataset, filter.FieldKey, out var field))
+            return null;
+
+        var op = filter.Operator.Trim();
+        return $"{field.Label} {OperatorLabel(op)} {BuildValueText(filter)}";
+    }
+
+    private static string OperatorLabel(string op)
+    {
+        return op switch
+        {
+            ReportConfigurationConstants.OperatorEq => "=",
+            ReportConfigurationConstants.OperatorNe => "≠",
+            ReportConfigurationConstants.OperatorIn => "属于",
+            ReportConfigurationConstants.OperatorGt => ">",
+            ReportConfigurationConstants.OperatorGte => "≥",
+            ReportConfigurationConstants.OperatorLt => "<",
+            ReportConfigurationConstants.OperatorLte => "≤",
+            ReportConfigurationConstants.OperatorBetween => "介于",
+            _ => op,
+        };
+    }
+
+    private static string BuildValueText(ReportConfigurationFilter filter)
+    {
+        var op = filter.Operator.Trim();
+        var value = ToClrValue(filter.Value);
+
+        if (string.Equals(op, ReportConfigurationConstants.OperatorBetween, StringComparison.OrdinalIgnoreCase))
+        {
+            var upper = ToClrValue(filter.Value2);
+            return $"{DisplayScalar(value)} ~ {DisplayScalar(upper)}";
+        }
+
+        if (string.Equals(op, ReportConfigurationConstants.OperatorIn, StringComparison.OrdinalIgnoreCase)
+            && value is IEnumerable enumerable && value is not string)
+        {
+            return string.Join("、", enumerable.Cast<object?>().Select(DisplayScalar));
+        }
+
+        return DisplayScalar(value);
+    }
+
+    private static string DisplayScalar(object? value)
+    {
+        if (value is null)
+            return "空";
+        if (value is DateTime dt)
+            return dt.ToString("yyyy-MM-dd");
+        if (value is DateTimeOffset dto)
+            return dto.DateTime.ToString("yyyy-MM-dd");
+        if (value is bool b)
+            return b ? "是" : "否";
+        return Convert.ToString(value, CultureInfo.InvariantCulture) ?? string.Empty;
+    }
+
+    private static bool TryApplyDateBound(ReportConfigurationFilter filter, ref DateTime? start, ref DateTime? end)
+    {
+        switch (filter.Operator.Trim())
+        {
+            case ReportConfigurationConstants.OperatorEq:
+                if (TryGetDate(filter.Value, out var eq)) { start = eq; end = eq; return true; }
+                return false;
+            case ReportConfigurationConstants.OperatorGte:
+                if (TryGetDate(filter.Value, out var gte)) { start = gte; return true; }
+                return false;
+            case ReportConfigurationConstants.OperatorLte:
+                if (TryGetDate(filter.Value, out var lte)) { end = lte; return true; }
+                return false;
+            case ReportConfigurationConstants.OperatorGt:
+                if (TryGetDate(filter.Value, out var gt)) { start = gt.AddDays(1); return true; }
+                return false;
+            case ReportConfigurationConstants.OperatorLt:
+                if (TryGetDate(filter.Value, out var lt)) { end = lt.AddDays(-1); return true; }
+                return false;
+            case ReportConfigurationConstants.OperatorBetween:
+                if (TryGetDate(filter.Value, out var b1) && TryGetDate(filter.Value2, out var b2)) { start = b1; end = b2; return true; }
+                return false;
+            default:
+                return false;
+        }
+    }
+
+    private static bool TryGetDate(object? value, out DateTime date)
+    {
+        var v = ToClrValue(value);
+        switch (v)
+        {
+            case DateTime dt:
+                date = dt.Date;
+                return true;
+            case DateTimeOffset dto:
+                date = dto.DateTime.Date;
+                return true;
+            case string s when TryParseDate(s, out var parsed):
+                date = parsed.Date;
+                return true;
+            default:
+                date = default;
+                return false;
+        }
+    }
+
+    private static bool TryGetField(
+        ReportConfigurationDatasetDto dataset, string key, out ReportConfigurationFieldDto field)
+    {
+        foreach (var candidate in dataset.Fields)
+        {
+            if (string.Equals(candidate.Key, key, StringComparison.OrdinalIgnoreCase))
+            {
+                field = candidate;
+                return true;
+            }
+        }
+
+        field = null!;
+        return false;
+    }
+
+    private static bool TryParseDate(string text, out DateTime date)
+        => DateTime.TryParse(text, CultureInfo.InvariantCulture,
+            DateTimeStyles.AllowWhiteSpaces | DateTimeStyles.RoundtripKind, out date);
+
+    private static object? ToClrValue(object? value)
+        => value is JsonElement element ? JsonElementToClr(element) : value;
+
+    private static object? JsonElementToClr(JsonElement element)
+    {
+        switch (element.ValueKind)
+        {
+            case JsonValueKind.String:
+                return element.GetString();
+            case JsonValueKind.True:
+                return true;
+            case JsonValueKind.False:
+                return false;
+            case JsonValueKind.Number:
+                return element.TryGetInt64(out var l) ? l : element.GetDecimal();
+            case JsonValueKind.Array:
+                return element.EnumerateArray().Select(JsonElementToClr).ToList();
+            case JsonValueKind.Null:
+            case JsonValueKind.Undefined:
+            case JsonValueKind.Object:
+            default:
+                return null;
+        }
     }
 }
 

@@ -58,7 +58,36 @@ public class ReportConfigurationUiTests
         Assert.Contains("透视表：本阶段不支持", js);
         Assert.Contains("跨数据集联接：本阶段不支持", js);
         Assert.Contains("共享：本阶段仅支持私有配置", js);
-        Assert.Contains("导出：本阶段不支持导出", js);
+        Assert.DoesNotContain("导出：本阶段不支持导出", js);   // 导出已成为真实能力，不再列入不支持清单
+    }
+
+    // ==================== 7. 通用导出按钮与失败保留未保存编辑 ====================
+
+    [Fact]
+    public void 导出_通用下载按钮与端点接线_不提交客户端行()
+    {
+        var js = File.ReadAllText(Path.Combine(JsDirectory(), "report-configuration.js"));
+
+        Assert.Contains("onclick=\"rccExport()\"", js);
+        Assert.Contains("async function rccExport()", js);
+        Assert.Contains("RCC_API + '/export'", js);
+        Assert.Contains("rccBuildPreviewRequest(RCC)", js);       // 复用预览请求体，绝不信任客户端行 / 缓存
+        Assert.Contains("contentType.indexOf('spreadsheetml') >= 0", js);
+        Assert.Contains("a.download = '报表配置_'", js);
+        Assert.DoesNotContain("rows:", Segment(js, "async function rccExport()", "/* 工作台入口"));
+    }
+
+    [Fact]
+    public void 导出_失败保留未保存编辑_绝不覆盖设计器状态()
+    {
+        var js = File.ReadAllText(Path.Combine(JsDirectory(), "report-configuration.js"));
+        var fn = Segment(js, "async function rccExport()", "/* 工作台入口");
+
+        Assert.Contains("存在未保存编辑，请先保存后再导出", fn);   // 未保存编辑显式阻断，绝不导出过期定义
+        Assert.Contains("rccRenderResult(rccErrorHtml(rccKindOfCode(code), message))", fn);
+        Assert.Contains("rccRenderResult(rccErrorHtml('network'", fn);
+        Assert.DoesNotContain("RCC.dirty = false", fn);          // 失败 / 成功路径都不清除未保存标记
+        Assert.DoesNotContain("rccTouch()", fn);                 // 失败不触发数据集 / 配置变化，保留设计器控件
     }
 
     // ==================== 3. 保存 / 复制 / 重命名 / 删除 / 发布 / 恢复 / 修订 ====================
@@ -153,6 +182,15 @@ public class ReportConfigurationUiTests
         Assert.Contains("RCC.groupBy = 'none'", js);       // 切换数据集重置分组
         Assert.Contains("function rccApplyDefinition(def)", js);
         Assert.Contains("rccSelectFields(RCC.fields, (def && def.fields) || [])", js);  // 加载时丢弃未知字段
+    }
+
+    /// <summary>截取源码中两个锚点之间的片段，便于对单个函数做「不含某内容」的契约断言。</summary>
+    private static string Segment(string source, string start, string end)
+    {
+        var i = source.IndexOf(start, StringComparison.Ordinal);
+        if (i < 0) return string.Empty;
+        var j = source.IndexOf(end, i + start.Length, StringComparison.Ordinal);
+        return j < 0 ? source[i..] : source[i..j];
     }
 
     /// <summary>前端脚本目录（沿测试程序集输出目录上溯到仓库根，与 CustomerShipmentReportUiTests 同一约定）</summary>

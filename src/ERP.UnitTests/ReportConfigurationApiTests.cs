@@ -235,5 +235,53 @@ public class ReportConfigurationApiTests
             () => ctlB.Preview(new ReportConfigurationPreviewRequest { ConfigurationId = id }));
         Assert.Equal(ErrorCodes.NotFound, ex.Code);
     }
+
+    [Fact]
+    public async Task Export_授权用户_返回xlsx工作簿()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedAuthorizedUser(db, "owner", "sales-order");
+        var ctl = BuildController(db);
+        TestAuth.SetUser(ctl, user);
+
+        var created = await ctl.Create(SaveDto("报表"));
+        var id = Assert.IsType<ApiResponse<ReportConfigurationDto>>(Assert.IsType<OkObjectResult>(created).Value).Data!.Id;
+
+        var result = await ctl.Export(new ReportConfigurationPreviewRequest { ConfigurationId = id });
+        var file = Assert.IsType<FileContentResult>(result);
+        Assert.Equal("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", file.ContentType);
+        Assert.EndsWith(".xlsx", file.FileDownloadName);
+        Assert.NotEmpty(file.FileContents);
+    }
+
+    [Fact]
+    public async Task Export_跨所有者_拒绝()
+    {
+        using var db = TestDbFactory.Create();
+        var ownerA = SeedAuthorizedUser(db, "owner-a", "sales-order");
+        var ownerB = SeedAuthorizedUser(db, "owner-b", "sales-order");
+
+        var ctlA = BuildController(db);
+        TestAuth.SetUser(ctlA, ownerA);
+        var created = await ctlA.Create(SaveDto("报表"));
+        var id = Assert.IsType<ApiResponse<ReportConfigurationDto>>(Assert.IsType<OkObjectResult>(created).Value).Data!.Id;
+
+        var ctlB = BuildController(db);
+        TestAuth.SetUser(ctlB, ownerB);
+        var ex = await Assert.ThrowsAsync<BusinessException>(
+            () => ctlB.Export(new ReportConfigurationPreviewRequest { ConfigurationId = id }));
+        Assert.Equal(ErrorCodes.NotFound, ex.Code);
+    }
+
+    [Fact]
+    public async Task Export_未认证_拒绝()
+    {
+        using var db = TestDbFactory.Create();
+        var ctl = BuildController(db);
+        TestAuth.SetUser(ctl, null);
+        var ex = await Assert.ThrowsAsync<BusinessException>(
+            () => ctl.Export(new ReportConfigurationPreviewRequest { ConfigurationId = 1 }));
+        Assert.Equal(ErrorCodes.Unauthorized, ex.Code);
+    }
 }
 
