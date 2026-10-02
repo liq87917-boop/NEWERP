@@ -64,6 +64,11 @@ public static class DependencyInjection
         // 动态采购订单报表预览（ERP-125）：只读、有界，复用采购订单菜单授权与未删除可见性（不引入更宽的角色或数据范围策略）
         services.AddScoped<IDynamicPurchaseOrderReportQuery, DynamicPurchaseOrderReportQuery>();
 
+        // 通用报表配置平台（ERP-259 Stage 1）：目录聚合 + 既有数据集适配器（新增数据集只加适配器，不改控制器/目录实现）
+        services.AddScoped<IReportConfigurationCatalog, ReportConfigurationCatalog>();
+        services.AddScoped<IReportConfigurationDatasetProvider, SalesOrderReportConfigurationDatasetProvider>();
+        services.AddScoped<IReportConfigurationDatasetProvider, ReceivableReportConfigurationDatasetProvider>();
+
         // 库存移动与成本服务（ERP-009：库存单据审核/销审统一经此维护库存与流水）
         services.AddScoped<IInventoryService, InventoryService>();
 
