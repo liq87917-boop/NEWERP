@@ -82,20 +82,57 @@ public static partial class ReportDtos
         public string CurrentPriceEstimateReason { get; set; } = string.Empty;
     }
 
-    /// <summary>客户出货量统计项（证据口径：已审核、未删除销售订单的数量与金额，非实际出库/装柜/收款）</summary>
+    /// <summary>客户出货量统计项（证据口径：已审核、未删除销售订单，按客户 × 原币分组；非实际出库/装柜/收款）</summary>
     public class CustomerShipmentItem
     {
         public long CustomerId { get; set; }
         public string CustomerName { get; set; } = string.Empty;
-        public int OrderCount { get; set; }
-        public decimal TotalQuantity { get; set; }
-        public decimal TotalAmount { get; set; }
 
-        /// <summary>数量口径证据标签：已审核订单明细数量合计，非实际出库 / 装柜数量</summary>
+        /// <summary>原币币种编码（如 USD）；未知 / 无效币种归入「未知币种」，绝不推断币种或默认币种</summary>
+        public string Currency { get; set; } = string.Empty;
+
+        /// <summary>原币币种标签（如「USD 美元」；未知为「未知币种」）</summary>
+        public string CurrencyLabel { get; set; } = string.Empty;
+
+        /// <summary>该客户/币种分组内已审核、未删除销售订单头数量（非发货单数、非装柜数）</summary>
+        public int OrderCount { get; set; }
+
+        /// <summary>原币订单金额小计（签名，仅已知币种）；未知 / 无效币种为 null（不推断币种、金额未知）</summary>
+        public decimal? TotalAmount { get; set; }
+
+        /// <summary>数量口径证据标签：已审核订单明细数量，非实际出库 / 装柜数量</summary>
         public string QuantityLabel { get; set; } = string.Empty;
 
-        /// <summary>金额口径证据标签：已审核订单金额合计（原币），非实际收款金额</summary>
+        /// <summary>金额口径证据标签：已审核订单金额（原币），非实际收款金额</summary>
         public string AmountLabel { get; set; } = string.Empty;
+
+        /// <summary>币种证据标签（已知原币 / 未知币种原因）</summary>
+        public string CurrencyEvidence { get; set; } = string.Empty;
+
+        /// <summary>旧口径数量合计：仅当明细证据完整且只有一种受支持的非空精确单位时可知；否则为 null（未知，绝不回落为 0）</summary>
+        public decimal? TotalQuantity { get; set; }
+
+        /// <summary>旧口径数量完整度原因（证据完整且单一非空单位时为空字符串）</summary>
+        public string QuantityCompletenessReason { get; set; } = string.Empty;
+
+        /// <summary>精确单位数量分组（非删除明细按原始单位精确分组；不归一化、不换算、不合并不兼容单位）</summary>
+        public List<CustomerShipmentUnitGroup> UnitGroups { get; set; } = new();
+    }
+
+    /// <summary>客户出货量统计——精确单位数量分组（签名数量独立呈现；未知单位仅计数证据、数量为 null）</summary>
+    public class CustomerShipmentUnitGroup
+    {
+        /// <summary>原始精确单位（非空原样保留；空白 / 未知归入「未知单位」）</summary>
+        public string Unit { get; set; } = string.Empty;
+
+        /// <summary>该单位签名数量合计；空白 / 未知单位为 null（不推断单位）</summary>
+        public decimal? Quantity { get; set; }
+
+        /// <summary>该单位分组内的非删除明细条数（未知单位时的计数证据）</summary>
+        public int DetailCount { get; set; }
+
+        /// <summary>数量口径证据标签</summary>
+        public string QuantityLabel { get; set; } = string.Empty;
     }
 
     /// <summary>业务员产值项</summary>

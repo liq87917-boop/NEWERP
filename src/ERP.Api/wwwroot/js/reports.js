@@ -32,14 +32,18 @@ const REPORTS = {
     ] },
   'customer-shipment': { api: '/api/reports/customer-shipment', title: '客户出货量统计表',
     emoji: '🚢', kpi: 'ocean',
-    summary: '已审核销售订单证据 · 非实际出库/装柜/收款 · 授权客户 · 有界(500单/10000明细)',
+    summary: '已审核销售订单证据 · 非实际出库 / 非实际装柜 / 非实际收款 · 授权客户 · 按客户×原币分组 · 精确单位分组 · 有界(500单/10000明细)',
     columns: [
       { key: 'customerName', label: '客户' },
+      { key: 'currency', label: '原币币种' },
       { key: 'orderCount', label: '订单数', type: 'number' },
-      { key: 'totalQuantity', label: '已审核订单数量(非实际出库)', type: 'number' },
-      { key: 'quantityLabel', label: '数量口径' },
-      { key: 'totalAmount', label: '已审核订单金额(原币，非实际收款)', type: 'money' },
+      { key: 'totalAmount', label: '原币金额小计', type: 'money' },
+      { key: 'currencyEvidence', label: '币种证据' },
       { key: 'amountLabel', label: '金额口径' },
+      { key: 'unitGroups', label: '单位分组' },
+      { key: 'totalQuantity', label: '旧数量合计', type: 'number' },
+      { key: 'quantityCompletenessReason', label: '数量完整度' },
+      { key: 'quantityLabel', label: '数量口径' },
     ] },
   'salesman-output': { api: '/api/reports/salesman-output', title: '业务员产值报表',
     emoji: '📊', kpi: 'lc', summary: '业务员产值 · 按月汇总' },
@@ -256,6 +260,7 @@ function fillReportKpi(code, data) {
   if (code === 'quotation-conversion') { fillQuotationConversionKpi(data); return; }
   if (code === 'product-sales-ranking') { fillProductSalesRankingKpi(data); return; }
   if (code === 'order-profit') { fillOrderProfitKpi(data); return; }
+  if (code === 'customer-shipment') { fillCustomerShipmentKpi(data); return; }
   if (code === 'balance-sheet' || code === 'income-statement' || code === 'cash-flow') {
     const lines = data.lines || [];
     const total = lines.reduce((s, l) => s + (Number(l.amount) || 0), 0);
@@ -296,6 +301,27 @@ function fillProductSalesRankingKpi(data) {
   const top = rows[0];
   setR('top', top ? ([top.productName, top.spec, top.unit].filter(Boolean).join(' ') || 'TOP 1') : '--');
   setT('top-tip', '排名首位（件数降序）');
+}
+
+/* 客户出货量 KPI：币种/单位分别呈现，绝不跨币种合计金额、绝不跨单位合计数量（无跨币种/跨单位总额） */
+function fillCustomerShipmentKpi(data) {
+  const setR = (k, v) => { const el = document.querySelector(`[data-rkpi="${k}"]`); if (el) el.firstChild.nodeValue = String(v); };
+  const setT = (k, v) => { const el = document.querySelector(`[data-rkpi="${k}"]`); if (el) el.textContent = String(v); };
+  const rows = Array.isArray(data) ? data : [];
+  setR('rows', rows.length);
+  setT('rows-tip', '客户 × 原币分组');
+
+  const label = document.querySelector('[data-rkpi-label="total"]');
+  if (label) label.textContent = '币种 / 单位';
+  const unit = document.querySelector('[data-rkpi-unit="total"]');
+  if (unit) unit.textContent = '';
+  const currencies = Array.from(new Set(rows.map(r => String(r.currency || '未知币种')))).sort();
+  setR('total', currencies.length ? currencies.join(' / ') : '--');
+  setT('total-tip', '币种/单位分别呈现，禁止跨币种、跨单位合计金额或数量');
+
+  const top = rows[0];
+  setR('top', top ? `${top.customerName || '--'} · ${top.currency || '未知币种'}` : '--');
+  setT('top-tip', '排序首位（客户 Id 升序）');
 }
 
 /* 订单利润暂估 KPI：销售额为订单原币，成本/利润/利润率为未知，绝不跨币种合计、绝不展示实际利润口径 */
@@ -370,6 +396,7 @@ function renderReportData(code, data) {
     return;
   }
   if (code === 'order-profit') { renderOrderProfitData(data); return; }
+  if (code === 'customer-shipment') { renderCustomerShipmentData(data); return; }
   const arr = Array.isArray(data) ? data : (data.items || []);
   if (!arr.length) { el.innerHTML = emptyReportHtml('暂无数据', '📭'); return; }
   const rep = REPORTS[code] || {};
@@ -418,6 +445,42 @@ function renderOrderProfitData(data) {
     <th class="text-right">销售额(原币)</th>
     <th class="text-right">成本金额</th><th class="text-right">利润</th><th class="text-right">利润率%</th>
     <th>成本证据</th><th class="text-right">当前价估算(币种未知)</th><th>估算说明</th>
+  </tr></thead><tbody>${body}</tbody></table>`;
+}
+
+/* 客户出货量统计表：按客户 × 原币分组；金额仅在已知币种下显示原币小计，未知币种金额为「未知」；
+   单位按原始精确单位独立呈现，未知单位数量为「未知」（仅计数证据），绝不跨币种/跨单位合计 */
+function renderCustomerShipmentData(data) {
+  const el = document.getElementById('report-table');
+  const rows = Array.isArray(data) ? data : [];
+  if (!rows.length) { el.innerHTML = emptyReportHtml('暂无数据', '🚢'); return; }
+  const esc = (v) => fudDesEsc(v);
+  const num = (v) => (v === null || v === undefined ? '<span class="text-muted">未知</span>' : fmtMoney(v));
+  const cnt = (v) => (v === null || v === undefined ? '<span class="text-muted">未知</span>' : String(v));
+  const unitGroupsHtml = (groups) => {
+    if (!groups || !groups.length) return '<span class="text-muted">无明细</span>';
+    return groups.map(g => {
+      const q = (g.quantity === null || g.quantity === undefined)
+        ? `<span class="text-muted">未知（${g.detailCount || 0} 条明细）</span>`
+        : fmtMoney(g.quantity);
+      return `<div>${esc(g.unit)}：${q}${g.quantityLabel ? ` <span class="text-muted">${esc(g.quantityLabel)}</span>` : ''}</div>`;
+    }).join('');
+  };
+  const body = rows.map(r => `<tr>
+    <td>${esc(r.customerName)}</td>
+    <td>${esc(r.currencyLabel || r.currency || '未知币种')}</td>
+    <td class="text-right">${cnt(r.orderCount)}</td>
+    <td class="text-right">${num(r.totalAmount)}</td>
+    <td>${esc(r.currencyEvidence || '')}</td>
+    <td>${esc(r.amountLabel || '')}</td>
+    <td>${unitGroupsHtml(r.unitGroups)}</td>
+    <td class="text-right">${num(r.totalQuantity)}</td>
+    <td>${esc(r.quantityCompletenessReason || '')}</td>
+    <td>${esc(r.quantityLabel || '')}</td>
+  </tr>`).join('');
+  el.innerHTML = `<table><thead><tr>
+    <th>客户</th><th>原币币种</th><th class="text-right">订单数</th><th class="text-right">原币金额小计</th>
+    <th>币种证据</th><th>金额口径</th><th>单位分组</th><th class="text-right">旧数量合计</th><th>数量完整度</th><th>数量口径</th>
   </tr></thead><tbody>${body}</tbody></table>`;
 }
 

@@ -1,5 +1,6 @@
 using ERP.Application.Common;
 using ERP.Application.Interfaces;
+using ERP.Domain.Entities;
 using ERP.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
 
@@ -26,11 +27,11 @@ public partial class ReportService
     public const string CustomerShipmentAmountLabel = "已审核订单金额合计（原币，非实际收款金额）";
 
     /// <summary>
-    /// 客户出货量统计表（只读派生）：仅统计已审核、未删除、当前账号数据范围内的销售订单头，
-    /// 再关联未删除明细按客户聚合已审核订单数量与金额。本表口径为「已审核销售订单证据」，
-    /// 不是实际出库 / 装柜数量，也不是实际收款（跨币种 / 跨单位分组由依赖任务 ERP-228 另行修正）。
-    /// 日期校验先于任何源读取；订单头在业务员数据范围之后做 501 行探测（500 张上限），
-    /// 明细按 10001 条探测（10000 条上限），超出即 fail closed 且不返回任何行或金额。
+    /// 客户出货量统计表（只读派生）：仅统计已审核、未删除、当前账号数据范围内的销售订单头，按客户 × 原币分组；
+    /// 已知币种按签名原币合计金额、未知 / 无效币种金额为 null 仅保留订单头计数；精确单位数量分组由非删除明细派生，
+    /// 旧口径数量合计仅在明细证据完整且单一非空单位时可知（否则 null）。本表口径为「已审核销售订单证据」，
+    /// 不是实际出库 / 装柜数量，也不是实际收款。日期校验先于任何源读取；订单头在业务员数据范围之后做 501 行探测
+    /// （500 张上限），明细按 10001 条探测（10000 条上限），超出即 fail closed 且不返回任何行或金额。
     /// </summary>
     public async Task<List<ReportDtos.CustomerShipmentItem>> GetCustomerShipmentStatsAsync(
         DateTime start, DateTime end, SalespersonDataScope scope)
@@ -90,32 +91,73 @@ public partial class ReportService
                 ErrorCodes.RuleConflict);
         }
 
-        var quantityByOrder = details
-            .GroupBy(d => d.SalesOrderId)
-            .ToDictionary(g => g.Key, g => g.Sum(x => x.Quantity));
-
         // 4) 固定批量查询解析客户名称（仅按已限定范围内的客户 Id 一次查询；无逐单查库）
         var customerIds = orders.Select(o => o.CustomerId).Distinct().ToList();
         var customers = await _db.BaseCustomers
             .Where(c => customerIds.Contains(c.Id))
             .ToDictionaryAsync(c => c.Id, c => c.CustomerName);
 
-        // 5) 按客户聚合：仅已审核、未删除、范围内订单的数量与金额；稳定排序（金额降序，客户 Id 升序平局）
+        // 5) 按客户 × 原币分组：金额仅在已知币种下按签名原币合计，未知 / 无效币种金额为 null 仅保留订单头计数；
+        //    精确单位数量分组由非删除明细派生，旧口径数量合计仅在证据完整且单一非空单位时可知（否则 null）。
+        //    稳定排序（客户 Id 升序，同客户按币种编码升序），绝不跨币种比较金额排序。
+        var detailsByOrder = details
+            .GroupBy(d => d.SalesOrderId)
+            .ToDictionary(g => g.Key, g => g.ToList());
+
         return orders
             .GroupBy(o => o.CustomerId)
-            .Select(g => new ReportDtos.CustomerShipmentItem
+            .SelectMany(customerGroup =>
             {
-                CustomerId = g.Key,
-                CustomerName = customers.TryGetValue(g.Key, out var name) ? name : string.Empty,
-                OrderCount = g.Count(),
-                TotalQuantity = g.Sum(o => quantityByOrder.TryGetValue(o.Id, out var q) ? q : 0),
-                TotalAmount = g.Sum(o => o.TotalAmount),
-                QuantityLabel = CustomerShipmentQuantityLabel,
-                AmountLabel = CustomerShipmentAmountLabel
+                var customerName = customers.TryGetValue(customerGroup.Key, out var name) ? name : string.Empty;
+                return customerGroup
+                    .GroupBy(o => CustomerShipmentEvidenceRules.CurrencyGroupKey(o.Currency))
+                    .OrderBy(g => g.Key, StringComparer.Ordinal)
+                    .Select(currencyGroup => BuildCustomerShipmentItem(
+                        customerGroup.Key, customerName, currencyGroup.ToList(), detailsByOrder));
             })
-            .OrderByDescending(x => x.TotalAmount)
-            .ThenBy(x => x.CustomerId)
+            .OrderBy(x => x.CustomerId)
+            .ThenBy(x => x.Currency, StringComparer.Ordinal)
             .ToList();
+    }
+
+    /// <summary>
+    /// 构造单个「客户 × 原币」分组行：金额只在已知币种下做签名原币小计，未知 / 无效币种为 null；
+    /// 精确单位数量分组与旧口径数量合计（可空）由 <see cref="CustomerShipmentEvidenceRules"/> 派生。
+    /// </summary>
+    private static ReportDtos.CustomerShipmentItem BuildCustomerShipmentItem(
+        long customerId,
+        string customerName,
+        List<SalesOrder> currencyOrders,
+        Dictionary<long, List<SalesOrderDetail>> detailsByOrder)
+    {
+        var currencyKey = CustomerShipmentEvidenceRules.CurrencyGroupKey(currencyOrders[0].Currency);
+        var isKnown = CustomerShipmentEvidenceRules.IsKnownCurrency(currencyOrders[0].Currency);
+
+        var groupDetails = currencyOrders
+            .SelectMany(o => detailsByOrder.TryGetValue(o.Id, out var d) ? d : new List<SalesOrderDetail>())
+            .ToList();
+
+        var unitGroups = CustomerShipmentEvidenceRules.BuildUnitGroups(groupDetails);
+        var (totalQuantity, completenessReason) =
+            CustomerShipmentEvidenceRules.BuildLegacyTotalQuantity(currencyOrders, detailsByOrder);
+
+        return new ReportDtos.CustomerShipmentItem
+        {
+            CustomerId = customerId,
+            CustomerName = customerName,
+            Currency = currencyKey,
+            CurrencyLabel = CustomerShipmentEvidenceRules.CurrencyGroupLabel(currencyKey),
+            OrderCount = currencyOrders.Count,
+            TotalAmount = isKnown ? (decimal?)currencyOrders.Sum(o => o.TotalAmount) : null,
+            QuantityLabel = CustomerShipmentQuantityLabel,
+            AmountLabel = CustomerShipmentAmountLabel,
+            CurrencyEvidence = isKnown
+                ? CustomerShipmentEvidenceRules.KnownCurrencyEvidence
+                : CustomerShipmentEvidenceRules.UnknownCurrencyEvidence,
+            TotalQuantity = totalQuantity,
+            QuantityCompletenessReason = completenessReason,
+            UnitGroups = unitGroups.ToList()
+        };
     }
 
     /// <summary>业务员产值报表</summary>
