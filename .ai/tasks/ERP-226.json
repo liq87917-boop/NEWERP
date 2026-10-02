@@ -1,0 +1,72 @@
+{
+  "title": "Download scoped all-matching order sales currency summaries as PDF",
+  "description": "A user downloads the filtered all-matching approved order sales currency summary as Chinese PDF from the order-profit designer. Add a summary/pdf endpoint and a narrow Infrastructure exporter using existing PDFsharp/SimHeiPdfFontResolver, consuming the same freshly authorized/validated ERP-224 summary. Preserve stable currency rows/counts/signed known sales, explicit unknown currency/null money and normalized dates/filters/all-matching/source-cap/unknown-cost context; paginate rows and provide explicit empty evidence. Never combine currencies, cost/current-price estimates/profit sums or claim realized/collected revenue. Missing fonts/render failures return a clear error and no corrupt file. Designer sends current filters independently of prior preview, retains form on errors and distinguishes summary from detail-page PDF. Existing Excel/detail PDF stay compatible. Development only: reuse existing order-profit menu, fresh current-user SalespersonDataScopeService, approved nondeleted scoped SalesOrders and existing OperationLogMiddleware HTTP audit. Do not accept client identity/scope/rows/aggregates as authority or widen ERP permissions. No arbitrary/model-generated SQL, direct table/business writes, new domain entities or persistence schema, schema/view/stored-procedure changes, migrations, production SQL or real database execution, secrets/.env/config changes, irreversible actions, production deployment or real browser acceptance. Preserve unrelated work. Run focused in-memory API/service/export/UI source-contract tests plus configured safe Release build/test. Any unavailable external environment acceptance must be explicitly environment-blocked, never fabricated passed.",
+  "depends_on": [
+    "ERP-225"
+  ],
+  "risk_level": "low",
+  "priority": "P1",
+  "acceptance_criteria": [
+    "Summary PDF independently validates current dates/filters and rechecks current identity/menu/scope via the existing server summary; invalid/revoked/cap-overflow requests return no file.",
+    "Infrastructure PDF exporter preserves original-currency rows, counts/signed known money, explicit unknown/null evidence and all-matching/filter/date/limit/basis context with pagination, empty evidence and explicit font/render failure.",
+    "Designer summary PDF sends current filters and handles download errors without losing state; PDF/UI and Excel/detail-export compatibility tests plus safe Release build/test pass."
+  ],
+  "criterion_path_map": {
+    "Summary PDF independently validates current dates/filters and rechecks current identity/menu/scope via the existing server summary; invalid/revoked/cap-overflow requests return no file.": [
+      "src/ERP.Api/Controllers/DynamicOrderProfitEstimateReportController.cs",
+      "src/ERP.Application/DTOs/DynamicOrderProfitEstimateReportDtos.cs",
+      "src/ERP.Application/Services/DynamicOrderProfitEstimateReportRules.cs",
+      "src/ERP.UnitTests/OrderProfitCurrencySummaryPdfTests.cs",
+      "src/ERP.UnitTests/OrderProfitCurrencySummaryTests.cs"
+    ],
+    "Infrastructure PDF exporter preserves original-currency rows, counts/signed known money, explicit unknown/null evidence and all-matching/filter/date/limit/basis context with pagination, empty evidence and explicit font/render failure.": [
+      "src/ERP.Infrastructure/Export/OrderProfitCurrencySummaryPdfExporter.cs",
+      "src/ERP.Application/DTOs/DynamicOrderProfitEstimateReportDtos.cs",
+      "src/ERP.Application/Services/DynamicOrderProfitEstimateReportRules.cs",
+      "src/ERP.UnitTests/OrderProfitCurrencySummaryPdfTests.cs"
+    ],
+    "Designer summary PDF sends current filters and handles download errors without losing state; PDF/UI and Excel/detail-export compatibility tests plus safe Release build/test pass.": [
+      "src/ERP.Api/wwwroot/js/reports.js",
+      "src/ERP.Api/Controllers/DynamicOrderProfitEstimateReportController.cs",
+      "src/ERP.Infrastructure/Export/OrderProfitCurrencySummaryPdfExporter.cs",
+      "src/ERP.UnitTests/OrderProfitCurrencySummaryUiTests.cs",
+      "src/ERP.UnitTests/DynamicOrderProfitEstimateReportUiTests.cs",
+      "src/ERP.UnitTests/OrderProfitCurrencySummaryPdfTests.cs",
+      "src/ERP.UnitTests/OrderProfitCurrencySummaryExcelTests.cs",
+      "src/ERP.UnitTests/DynamicOrderProfitEstimateExcelTests.cs",
+      "src/ERP.UnitTests/DynamicOrderProfitEstimatePdfTests.cs"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/DynamicOrderProfitEstimateReportController.cs",
+    "src/ERP.Application/DTOs/DynamicOrderProfitEstimateReportDtos.cs",
+    "src/ERP.Application/Services/DynamicOrderProfitEstimateReportRules.cs",
+    "src/ERP.UnitTests/OrderProfitCurrencySummaryPdfTests.cs",
+    "src/ERP.UnitTests/OrderProfitCurrencySummaryTests.cs",
+    "src/ERP.Infrastructure/Export/OrderProfitCurrencySummaryPdfExporter.cs",
+    "src/ERP.Api/wwwroot/js/reports.js",
+    "src/ERP.UnitTests/OrderProfitCurrencySummaryUiTests.cs",
+    "src/ERP.UnitTests/DynamicOrderProfitEstimateReportUiTests.cs",
+    "src/ERP.UnitTests/OrderProfitCurrencySummaryExcelTests.cs",
+    "src/ERP.UnitTests/DynamicOrderProfitEstimateExcelTests.cs",
+    "src/ERP.UnitTests/DynamicOrderProfitEstimatePdfTests.cs"
+  ],
+  "status": "pending",
+  "max_attempts": 3,
+  "attempts": 0,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only bounded scoped report feature"
+  },
+  "id": "ERP-226",
+  "created_at": "2026-10-02T04:39:52.845343Z"
+}

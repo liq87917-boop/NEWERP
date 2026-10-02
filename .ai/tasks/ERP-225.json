@@ -1,0 +1,67 @@
+{
+  "title": "Download scoped all-matching order sales currency summaries as Excel",
+  "description": "A user downloads the currently filtered all-matching approved order sales currency summary as Excel from the existing order-profit designer. Add a summary/export endpoint that independently validates/rechecks identity/menu/fresh scope and invokes the same server-derived summary from ERP-224; the request must not trust client rows or require a prior preview. Workbook has stable original-currency/count/signed known sales rows and explicit unknown currency/null amount, with normalized dates/customer/currency and all-matching/source-cap/unknown-cost context. Use existing ExcelExporter/NPOI helpers for formula-safe labels, numeric counts/known amounts and unknown cells distinct from zero. No cross-currency grand total, cost/current-price/profit sums or conversion. Designer retains form state, sends current filters and clearly distinguishes this summary download from selected-page detail Excel. Existing detail Excel/PDF remain compatible. Development only: reuse existing order-profit menu, fresh current-user SalespersonDataScopeService, approved nondeleted scoped SalesOrders and existing OperationLogMiddleware HTTP audit. Do not accept client identity/scope/rows/aggregates as authority or widen ERP permissions. No arbitrary/model-generated SQL, direct table/business writes, new domain entities or persistence schema, schema/view/stored-procedure changes, migrations, production SQL or real database execution, secrets/.env/config changes, irreversible actions, production deployment or real browser acceptance. Preserve unrelated work. Run focused in-memory API/service/export/UI source-contract tests plus configured safe Release build/test. Any unavailable external environment acceptance must be explicitly environment-blocked, never fabricated passed.",
+  "depends_on": [
+    "ERP-224"
+  ],
+  "risk_level": "low",
+  "priority": "P1",
+  "acceptance_criteria": [
+    "Summary Excel independently revalidates current dates/filters and reauthorizes current ERP identity/menu/scope, reusing all-matching server summary and returning no file on revoked permission/invalid input/cap overflow.",
+    "Workbook preserves stable currency rows, numeric counts/known amounts, explicit unknown/null cells and formula-safe text plus normalized filter/date/source-cap/all-matching context without cross-currency or profit totals.",
+    "Designer summary download sends current filters and preserves form/error states; workbook/API/UI tests plus existing detail export regressions and safe Release build/test pass."
+  ],
+  "criterion_path_map": {
+    "Summary Excel independently revalidates current dates/filters and reauthorizes current ERP identity/menu/scope, reusing all-matching server summary and returning no file on revoked permission/invalid input/cap overflow.": [
+      "src/ERP.Api/Controllers/DynamicOrderProfitEstimateReportController.cs",
+      "src/ERP.Application/DTOs/DynamicOrderProfitEstimateReportDtos.cs",
+      "src/ERP.Application/Services/DynamicOrderProfitEstimateReportRules.cs",
+      "src/ERP.UnitTests/OrderProfitCurrencySummaryExcelTests.cs",
+      "src/ERP.UnitTests/OrderProfitCurrencySummaryTests.cs"
+    ],
+    "Workbook preserves stable currency rows, numeric counts/known amounts, explicit unknown/null cells and formula-safe text plus normalized filter/date/source-cap/all-matching context without cross-currency or profit totals.": [
+      "src/ERP.Api/Controllers/DynamicOrderProfitEstimateReportController.cs",
+      "src/ERP.Application/DTOs/DynamicOrderProfitEstimateReportDtos.cs",
+      "src/ERP.Application/Services/DynamicOrderProfitEstimateReportRules.cs",
+      "src/ERP.UnitTests/OrderProfitCurrencySummaryExcelTests.cs"
+    ],
+    "Designer summary download sends current filters and preserves form/error states; workbook/API/UI tests plus existing detail export regressions and safe Release build/test pass.": [
+      "src/ERP.Api/wwwroot/js/reports.js",
+      "src/ERP.UnitTests/OrderProfitCurrencySummaryUiTests.cs",
+      "src/ERP.UnitTests/DynamicOrderProfitEstimateReportUiTests.cs",
+      "src/ERP.UnitTests/OrderProfitCurrencySummaryExcelTests.cs",
+      "src/ERP.UnitTests/DynamicOrderProfitEstimateExcelTests.cs",
+      "src/ERP.UnitTests/DynamicOrderProfitEstimatePdfTests.cs"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/DynamicOrderProfitEstimateReportController.cs",
+    "src/ERP.Application/DTOs/DynamicOrderProfitEstimateReportDtos.cs",
+    "src/ERP.Application/Services/DynamicOrderProfitEstimateReportRules.cs",
+    "src/ERP.UnitTests/OrderProfitCurrencySummaryExcelTests.cs",
+    "src/ERP.UnitTests/OrderProfitCurrencySummaryTests.cs",
+    "src/ERP.Api/wwwroot/js/reports.js",
+    "src/ERP.UnitTests/OrderProfitCurrencySummaryUiTests.cs",
+    "src/ERP.UnitTests/DynamicOrderProfitEstimateReportUiTests.cs",
+    "src/ERP.UnitTests/DynamicOrderProfitEstimateExcelTests.cs",
+    "src/ERP.UnitTests/DynamicOrderProfitEstimatePdfTests.cs"
+  ],
+  "status": "pending",
+  "max_attempts": 3,
+  "attempts": 0,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only bounded scoped report feature"
+  },
+  "id": "ERP-225",
+  "created_at": "2026-10-02T04:39:52.845300Z"
+}
