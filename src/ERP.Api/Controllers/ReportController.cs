@@ -39,6 +39,12 @@ public class ReportController : ControllerBase
     /// <summary>订单利润暂估报表要求菜单的中文文案（与既有菜单名一致）</summary>
     private const string OrderProfitMenuText = "订单利润暂估表";
 
+    /// <summary>客户出货量统计报表要求的既有菜单编码（与 SeedData / SchemaUpgrader 同源）</summary>
+    private const string CustomerShipmentMenuCode = "customer-shipment";
+
+    /// <summary>客户出货量统计报表要求菜单的中文文案（与既有菜单名一致）</summary>
+    private const string CustomerShipmentMenuText = "客户出货量统计表";
+
     private readonly IReportService _reportService;
     private readonly IErpDbContext? _db;
 
@@ -112,11 +118,31 @@ public class ReportController : ControllerBase
         return Ok(ApiResponse<List<ReportDtos.OrderProfitItem>>.Success(result));
     }
 
-    /// <summary>客户出货量统计表</summary>
+    /// <summary>客户出货量统计表（每次请求重新校验身份、菜单授权与业务员数据范围，缺失即 fail closed）</summary>
     [HttpGet("customer-shipment")]
     public async Task<IActionResult> CustomerShipment([FromQuery] DateTime start, [FromQuery] DateTime end)
     {
-        var result = await _reportService.GetCustomerShipmentStatsAsync(start, end);
+        if (_db is null)
+            throw new BusinessException("客户出货量统计表缺少数据库上下文，无法解析当前账号授权", ErrorCodes.InternalError);
+
+        var db = _db;
+        var userId = CurrentUserId();
+        if (userId is null or <= 0)
+            throw new BusinessException("请先登录后再查看客户出货量统计表", ErrorCodes.Unauthorized);
+
+        var menuCodes = await CustomerReceivableReconciliationService.LoadAuthorizedMenuCodesAsync(
+            db, userId.Value);
+        if (!menuCodes.Contains(CustomerShipmentMenuCode, StringComparer.OrdinalIgnoreCase))
+        {
+            throw new BusinessException(
+                $"当前账号没有「{CustomerShipmentMenuText}」（{CustomerShipmentMenuCode}）模块授权：拒绝查看客户出货量统计表"
+                + "（fail closed，不返回任何数据）",
+                ErrorCodes.Forbidden);
+        }
+
+        var scope = await SalespersonDataScopeService.ResolveAsync(db, userId);
+
+        var result = await _reportService.GetCustomerShipmentStatsAsync(start, end, scope);
         return Ok(ApiResponse<List<ReportDtos.CustomerShipmentItem>>.Success(result));
     }
 

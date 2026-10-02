@@ -82,7 +82,7 @@ public static partial class ReportDtos
         public string CurrentPriceEstimateReason { get; set; } = string.Empty;
     }
 
-    /// <summary>客户出货量统计项</summary>
+    /// <summary>客户出货量统计项（证据口径：已审核、未删除销售订单的数量与金额，非实际出库/装柜/收款）</summary>
     public class CustomerShipmentItem
     {
         public long CustomerId { get; set; }
@@ -90,6 +90,12 @@ public static partial class ReportDtos
         public int OrderCount { get; set; }
         public decimal TotalQuantity { get; set; }
         public decimal TotalAmount { get; set; }
+
+        /// <summary>数量口径证据标签：已审核订单明细数量合计，非实际出库 / 装柜数量</summary>
+        public string QuantityLabel { get; set; } = string.Empty;
+
+        /// <summary>金额口径证据标签：已审核订单金额合计（原币），非实际收款金额</summary>
+        public string AmountLabel { get; set; } = string.Empty;
     }
 
     /// <summary>业务员产值项</summary>

@@ -18,8 +18,9 @@ public interface IReportService
     Task<List<ReportDtos.OrderProfitItem>> GetOrderProfitEstimateAsync(
         DateTime start, DateTime end, SalespersonDataScope scope, OrderProfitEstimateFilterDto? filter = null);
 
-    /// <summary>客户出货量统计表</summary>
-    Task<List<ReportDtos.CustomerShipmentItem>> GetCustomerShipmentStatsAsync(DateTime start, DateTime end);
+    /// <summary>客户出货量统计表（仅已审核、未删除、当前账号数据范围内的销售订单证据；日期 / 订单 / 明细均有界，超出即 fail closed）</summary>
+    Task<List<ReportDtos.CustomerShipmentItem>> GetCustomerShipmentStatsAsync(
+        DateTime start, DateTime end, SalespersonDataScope scope);
 
     /// <summary>业务员产值报表</summary>
     Task<List<ReportDtos.SalesmanOutputItem>> GetSalesmanOutputAsync(DateTime start, DateTime end);

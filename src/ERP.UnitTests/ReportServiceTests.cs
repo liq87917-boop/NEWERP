@@ -194,21 +194,23 @@ public class ReportServiceTests
         SeedProducts(db);
         var (cA, cB) = (SeedCustomer(db, "CA", "A客户"), SeedCustomer(db, "CB", "B客户"));
 
-        // A 客户：2 单合计 10000；B 客户：1 单合计 8000
+        // A 客户：2 单合计 10000；B 客户：1 单合计 8000（仅已审核订单计入）
         db.SalesOrders.AddRange(
             new SalesOrder { OrderNo = "SO-A1", OrderDate = new DateTime(2026, 9, 5), CustomerId = cA.Id, Status = DocumentStatus.Approved, TotalAmount = 4000m },
-            new SalesOrder { OrderNo = "SO-A2", OrderDate = new DateTime(2026, 9, 12), CustomerId = cA.Id, Status = DocumentStatus.Submitted, TotalAmount = 6000m },
+            new SalesOrder { OrderNo = "SO-A2", OrderDate = new DateTime(2026, 9, 12), CustomerId = cA.Id, Status = DocumentStatus.Approved, TotalAmount = 6000m },
             new SalesOrder { OrderNo = "SO-B1", OrderDate = new DateTime(2026, 9, 15), CustomerId = cB.Id, Status = DocumentStatus.Approved, TotalAmount = 8000m }
         );
         await db.SaveChangesAsync();
 
         var service = new ReportService(db);
-        var result = await service.GetCustomerShipmentStatsAsync(Start, End);
+        var result = await service.GetCustomerShipmentStatsAsync(Start, End, PrivilegedScope);
 
         Assert.Equal(2, result.Count);
         Assert.Equal("A客户", result[0].CustomerName);
         Assert.Equal(2, result[0].OrderCount);
         Assert.Equal(10000m, result[0].TotalAmount);
+        Assert.Equal(ReportService.CustomerShipmentAmountLabel, result[0].AmountLabel);
+        Assert.Equal(ReportService.CustomerShipmentQuantityLabel, result[0].QuantityLabel);
         Assert.Equal("B客户", result[1].CustomerName);
         Assert.Equal(1, result[1].OrderCount);
         Assert.Equal(8000m, result[1].TotalAmount);
