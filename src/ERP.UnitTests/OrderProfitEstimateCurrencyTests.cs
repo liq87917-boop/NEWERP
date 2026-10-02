@@ -1,4 +1,5 @@
 using ERP.Application.Common;
+using ERP.Application.DTOs;
 using ERP.Application.Services;
 using ERP.Domain.Entities;
 using ERP.Domain.Enums;
@@ -251,4 +252,75 @@ public class OrderProfitEstimateCurrencyTests
         Assert.Equal(1000m, row.SalesAmount);              // 仍为订单原币，绝不乘以汇率
         Assert.Equal(60m, row.CurrentPriceEstimate);        // 当前价估算也不做汇率换算
     }
+
+    // ==================== ERP-223 原币币种筛选 ====================
+
+    [Fact]
+    public async Task 六种已知币种筛选_逐一精确命中_绝不跨币种()
+    {
+        using var db = TestDbFactory.Create();
+        var customer = SeedCustomer(db, "C001", "币种筛选客户");
+
+        SeedOrder(db, "SO-CNY", customer.Id, Currency.CNY, 100m);
+        SeedOrder(db, "SO-USD", customer.Id, Currency.USD, 200m);
+        SeedOrder(db, "SO-EUR", customer.Id, Currency.EUR, 300m);
+        SeedOrder(db, "SO-HKD", customer.Id, Currency.HKD, 400m);
+        SeedOrder(db, "SO-GBP", customer.Id, Currency.GBP, 500m);
+        SeedOrder(db, "SO-JPY", customer.Id, Currency.JPY, 600m);
+
+        var service = new ReportService(db);
+        var cases = new Dictionary<string, string>
+        {
+            ["CNY"] = "SO-CNY",
+            ["USD"] = "SO-USD",
+            ["EUR"] = "SO-EUR",
+            ["HKD"] = "SO-HKD",
+            ["GBP"] = "SO-GBP",
+            ["JPY"] = "SO-JPY",
+        };
+
+        foreach (var (code, expectedNo) in cases)
+        {
+            var rows = await service.GetOrderProfitEstimateAsync(Start, End, PrivilegedScope,
+                new OrderProfitEstimateFilterDto { Currency = code });
+            var row = Assert.Single(rows);
+            Assert.Equal(expectedNo, row.OrderNo);
+            Assert.Equal(code, row.Currency);
+        }
+    }
+
+    [Fact]
+    public async Task 未知币种枚举值订单_不被任何已知币种筛选命中()
+    {
+        using var db = TestDbFactory.Create();
+        var customer = SeedCustomer(db, "C001", "币种筛选客户");
+        SeedOrder(db, "SO-UNK", customer.Id, (Currency)99, 100m);
+        SeedOrder(db, "SO-USD", customer.Id, Currency.USD, 200m);
+
+        var service = new ReportService(db);
+        foreach (var code in new[] { "CNY", "USD", "EUR", "HKD", "GBP", "JPY" })
+        {
+            var rows = await service.GetOrderProfitEstimateAsync(Start, End, PrivilegedScope,
+                new OrderProfitEstimateFilterDto { Currency = code });
+
+            Assert.DoesNotContain(rows, r => r.OrderNo == "SO-UNK");
+            if (code == "USD")
+                Assert.Contains(rows, r => r.OrderNo == "SO-USD");
+        }
+    }
+
+    [Fact]
+    public async Task 未知币种原币语义_保持不变_仍显式呈现为未知币种()
+    {
+        using var db = TestDbFactory.Create();
+        var customer = SeedCustomer(db, "C001", "币种筛选客户");
+        SeedOrder(db, "SO-UNK", customer.Id, (Currency)0, 100m);
+
+        var rows = await new ReportService(db).GetOrderProfitEstimateAsync(Start, End, PrivilegedScope);
+
+        var row = Assert.Single(rows);
+        Assert.Equal(ReportService.UnknownCurrencyGroup, row.Currency);
+        Assert.Equal(ReportService.UnknownCurrencyGroup, row.CurrencyLabel);
+    }
+
 }

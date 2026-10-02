@@ -103,18 +103,21 @@ public class DynamicOrderProfitEstimateReportController : ControllerBase
     private async Task<DynamicOrderProfitEstimateReportPageDto> BuildPageAsync(
         DynamicOrderProfitEstimateReportRequest request)
     {
-        // 1) 纯校验先于任何订单读取（fail closed）
+        // 1) 纯校验先于任何订单读取（fail closed；含 ERP-223 应用筛选校验）
         var fieldKeys = DynamicOrderProfitEstimateReportRules.NormalizeFields(request.Fields);
         var (start, end) = DynamicOrderProfitEstimateReportRules.ValidateDateRange(request.Start, request.End);
         DynamicOrderProfitEstimateReportRules.ValidatePageBounds(request.Page, request.PageSize);
+        var filter = DynamicOrderProfitEstimateReportRules.NormalizeFilter(request.Filter);
 
         // 2) 每次重新校验身份 + 订单利润暂估表菜单授权 + 业务员数据范围
         var scope = await EnsureAuthorizedAsync(CurrentUserId());
 
-        // 3) 复用 ERP-219 / ERP-220 的有界、作用域化订单利润暂估读取（金额均为订单原币，绝不跨币种合计）
-        var items = await _reportService.GetOrderProfitEstimateAsync(start, end, scope);
+        // 3) 复用 ERP-219 / ERP-220 的有界、作用域化订单利润暂估读取（金额均为订单原币，绝不跨币种合计；
+        //    客户 / 原币筛选在业务员数据范围之后、501 订单头上限探测与分页之前生效）
+        var items = await _reportService.GetOrderProfitEstimateAsync(start, end, scope, filter);
 
-        return DynamicOrderProfitEstimateReportRules.BuildPage(items, fieldKeys, request.Page, request.PageSize, start, end);
+        var filterText = DynamicOrderProfitEstimateReportRules.BuildFilterContext(filter);
+        return DynamicOrderProfitEstimateReportRules.BuildPage(items, fieldKeys, request.Page, request.PageSize, start, end, filterText);
     }
 
     /// <summary>生成 Excel：数据工作表（选定列顺序 + 类型化值 + 公式注入转义 + null→未知）+「报表口径」上下文工作表</summary>
@@ -158,8 +161,12 @@ public class DynamicOrderProfitEstimateReportController : ControllerBase
         AddLabel(7, DynamicOrderProfitEstimateReportRules.ContextCoverageLabel, page.PageOnlyText);
         AddLabel(8, DynamicOrderProfitEstimateReportRules.ContextReadOnlyLabel, page.ReadOnlyText);
 
+        var nextRow = 9;
+        if (!string.IsNullOrWhiteSpace(page.FilterText))
+            AddLabel(nextRow++, DynamicOrderProfitEstimateReportRules.ContextFilterLabel, page.FilterText);
+
         if (page.Rows is null || page.Rows.Count == 0)
-            AddLabel(9, DynamicOrderProfitEstimateReportRules.ContextEmptyLabel, page.EmptyText);
+            AddLabel(nextRow, DynamicOrderProfitEstimateReportRules.ContextEmptyLabel, page.EmptyText);
     }
 
     /// <summary>身份 + 既有「角色 → 菜单」订单利润暂估表模块授权 + 业务员数据范围（fail closed，绝不猜测身份）</summary>

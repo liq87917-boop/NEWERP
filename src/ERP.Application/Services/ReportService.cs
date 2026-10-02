@@ -152,7 +152,7 @@ public partial class ReportService : IReportService
     /// 订单头在 SQL 端按 OrderDate 降序、Id 降序稳定排序后，才用固定批量查询解析商品 / 客户，无逐单查库。
     /// </summary>
     public async Task<List<ReportDtos.OrderProfitItem>> GetOrderProfitEstimateAsync(
-        DateTime start, DateTime end, SalespersonDataScope scope)
+        DateTime start, DateTime end, SalespersonDataScope scope, OrderProfitEstimateFilterDto? filter = null)
     {
         ArgumentNullException.ThrowIfNull(scope);
 
@@ -176,6 +176,9 @@ public partial class ReportService : IReportService
                         && o.OrderDate >= startDate
                         && o.OrderDate < endExclusive);
         ordersQuery = SalespersonDataScopeService.FilterByCustomer(ordersQuery, scope, o => o.CustomerId);
+
+        // 2.1) ERP-223 可选应用筛选：作用在业务员数据范围之后、501 订单头上限探测与分页之前（参数化 EF 谓词）
+        ordersQuery = ApplyOrderProfitFilter(ordersQuery, filter);
 
         var orders = await ordersQuery
             .OrderByDescending(o => o.OrderDate)
@@ -248,6 +251,28 @@ public partial class ReportService : IReportService
             });
         }
         return result;
+    }
+
+    /// <summary>
+    /// 应用 ERP-223 可选筛选（在业务员数据范围之后、501 订单头上限探测与分页之前）：客户 Id 精确匹配、
+    /// 原币币种已知枚举码精确匹配。筛选已由调用方规范化；全部为参数化 EF 谓词，非任意 SQL。
+    /// </summary>
+    private static IQueryable<SalesOrder> ApplyOrderProfitFilter(
+        IQueryable<SalesOrder> source, OrderProfitEstimateFilterDto? filter)
+    {
+        if (filter is null)
+            return source;
+
+        if (filter.CustomerId is > 0)
+            source = source.Where(o => o.CustomerId == filter.CustomerId.Value);
+
+        if (!string.IsNullOrEmpty(filter.Currency)
+            && Enum.TryParse<Currency>(filter.Currency, true, out var currency))
+        {
+            source = source.Where(o => o.Currency == currency);
+        }
+
+        return source;
     }
 
     /// <summary>原币币种编码：未知取值（未定义枚举值）归入「未知币种」，绝不默认币种或推断汇率</summary>

@@ -1,6 +1,7 @@
 using ERP.Application.Common;
 using ERP.Application.DTOs;
 using ERP.Application.Interfaces;
+using ERP.Domain.Enums;
 
 namespace ERP.Application.Services;
 
@@ -40,8 +41,8 @@ public static class DynamicOrderProfitEstimateReportRules
     /// <summary>边界口径文案</summary>
     public const string BoundaryText =
         "口径：字段仅限订单利润暂估字段白名单（身份 / 日期 / 客户 / 原币 / 销售额 / 显式未知成本利润证据 / 独立当前价估算）；" +
-        "日期范围含首尾最多 366 天、页码 ≥ 1、每页 1~200；结果限定在当前账号业务员数据范围（特权账号不受限）；" +
-        "金额均为订单原币，绝不跨币种合计；不执行任意 SQL、不做写入";
+        "筛选仅限开始 / 结束日期（含首尾最多 366 天）、客户 Id（正整数）与原币币种（CNY / USD / EUR / HKD / GBP / JPY），分页页码 ≥ 1、每页 1~200；" +
+        "结果限定在当前账号业务员数据范围（特权账号不受限）；金额均为订单原币，绝不跨币种合计；不执行任意 SQL、不做写入";
 
     /// <summary>免责文案</summary>
     public const string DisclaimerText =
@@ -194,6 +195,75 @@ public static class DynamicOrderProfitEstimateReportRules
             throw BusinessException.InvalidParameter($"每页条数必须在 1 ~ {MaxPageSize} 之间（收到 {pageSize}）");
     }
 
+    // ==================== 4.1 筛选校验与规范化（ERP-223，fail closed） ====================
+
+    /// <summary>
+    /// 规范化可选应用筛选（fail closed）：客户 Id 必须为正整数、原币币种仅接受空（全部）/ 已知 <see cref="Currency"/> 枚举码
+    /// （CNY / USD / EUR / HKD / GBP / JPY）；非法 / 数字 / 未知取值直接拒绝，绝不静默丢弃或回退币种。
+    /// 两项全部留空时返回 null（表示不过滤）。
+    /// </summary>
+    public static OrderProfitEstimateFilterDto? NormalizeFilter(OrderProfitEstimateFilterDto? filter)
+    {
+        if (filter is null)
+            return null;
+
+        var customerId = ValidateFilterCustomerId(filter.CustomerId);
+        var currency = NormalizeCurrencyFilter(filter.Currency);
+
+        if (customerId is null && currency is null)
+            return null;
+
+        return new OrderProfitEstimateFilterDto
+        {
+            CustomerId = customerId,
+            Currency = currency,
+        };
+    }
+
+    /// <summary>校验客户 Id 筛选（可选）：提供时必须是正整数（&gt;0），否则 fail closed 拒绝；留空 = 不过滤。</summary>
+    public static long? ValidateFilterCustomerId(long? customerId)
+    {
+        if (customerId is <= 0)
+            throw BusinessException.InvalidParameter("客户 Id 筛选必须是正整数（大于 0）");
+        return customerId;
+    }
+
+    /// <summary>
+    /// 规范化原币币种筛选（fail closed）：留空 = 全部；已知 <see cref="Currency"/> 枚举码（大小写不敏感）归一化为枚举名；
+    /// 纯数字与未知取值直接拒绝（绝不回退为 CNY 或任何默认币种）。
+    /// </summary>
+    public static string? NormalizeCurrencyFilter(string? currency)
+    {
+        if (string.IsNullOrWhiteSpace(currency))
+            return null;
+
+        var value = currency.Trim();
+        if (value.All(char.IsDigit))
+            throw BusinessException.InvalidParameter(
+                $"无效的原币币种筛选: {currency}（可选：CNY / USD / EUR / HKD / GBP / JPY）");
+
+        if (Enum.TryParse<Currency>(value, true, out var parsed) && Enum.IsDefined(parsed))
+            return parsed.ToString();
+
+        throw BusinessException.InvalidParameter(
+            $"无效的原币币种筛选: {currency}（可选：CNY / USD / EUR / HKD / GBP / JPY）");
+    }
+
+    /// <summary>把已规范化的应用筛选渲染为导出上下文文案（客户 Id / 原币币种）；无筛选时返回空串。</summary>
+    public static string BuildFilterContext(OrderProfitEstimateFilterDto? filter)
+    {
+        if (filter is null)
+            return string.Empty;
+
+        var parts = new List<string>();
+        if (filter.CustomerId.HasValue)
+            parts.Add($"客户 Id {filter.CustomerId.Value}");
+        if (!string.IsNullOrEmpty(filter.Currency))
+            parts.Add($"原币币种 {filter.Currency}");
+
+        return parts.Count == 0 ? string.Empty : string.Join("；", parts);
+    }
+
     // ==================== 5. 行投影与分页（纯规则） ====================
 
     /// <summary>把一条订单利润暂估行映射为「选定字段 → 值」的只读行（仅含选定字段，键保持请求顺序）</summary>
@@ -224,7 +294,8 @@ public static class DynamicOrderProfitEstimateReportRules
         int page,
         int pageSize,
         DateTime start,
-        DateTime end)
+        DateTime end,
+        string filterText = "")
     {
         var all = items ?? Array.Empty<ReportDtos.OrderProfitItem>();
         var total = all.Count;
@@ -254,7 +325,8 @@ public static class DynamicOrderProfitEstimateReportRules
             PageOnlyText,
             CurrencyContextText,
             UnknownBasisText,
-            SourceLimitText);
+            SourceLimitText,
+            filterText);
     }
 
     /// <summary>把分页上下文渲染为 Excel 口径文案（页面 / 每页条数 / 总数 / 是否截断）</summary>
@@ -272,6 +344,9 @@ public static class DynamicOrderProfitEstimateReportRules
 
     /// <summary>上下文表「结束日期」行标签</summary>
     public const string ContextEndLabel = "结束日期";
+
+    /// <summary>上下文表「筛选条件」行标签（ERP-223：准确标注已应用的应用筛选）</summary>
+    public const string ContextFilterLabel = "筛选条件";
 
     /// <summary>上下文表「分页」行标签</summary>
     public const string ContextPageLabel = "分页";

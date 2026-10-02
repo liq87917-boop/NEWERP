@@ -35,11 +35,31 @@ public sealed class DynamicOrderProfitEstimateReportRequest
     /// <summary>结束日期（留空 = 今天；只取日期部分；含首尾，且不得早于开始日期）</summary>
     public DateTime? End { get; set; }
 
+    /// <summary>可选应用筛选（客户 Id / 原币币种；留空 = 不过滤）</summary>
+    public OrderProfitEstimateFilterDto? Filter { get; set; }
+
     /// <summary>页码（从 1 开始）</summary>
     public int Page { get; set; } = 1;
 
     /// <summary>每页条数（1 ~ 200，超出直接拒绝）</summary>
     public int PageSize { get; set; } = 20;
+}
+
+/// <summary>
+/// 动态订单利润暂估报表（ERP-223）的可选应用筛选 DTO：客户 Id 与原币币种有限选择。
+/// <para>本 DTO 只描述「如何在既有业务员数据范围 + 日期窗口之外再收窄销售订单读取范围」，不含任何 SQL、连接串或写入语义；
+/// 校验 / 规范化统一由 <see cref="Services.DynamicOrderProfitEstimateReportRules.NormalizeFilter"/> 完成（fail closed）。</para>
+/// </summary>
+public sealed class OrderProfitEstimateFilterDto
+{
+    /// <summary>客户 Id 筛选（可选：正整数；留空 = 不过滤；非法取值由服务端 fail closed 拒绝）</summary>
+    public long? CustomerId { get; set; }
+
+    /// <summary>
+    /// 原币币种筛选（可选：留空 = 全部；仅接受已知 <c>Currency</c> 枚举码 CNY / USD / EUR / HKD / GBP / JPY，
+    /// 非法 / 数字 / 未知取值直接拒绝，绝不回退为 CNY 或任何默认币种）。
+    /// </summary>
+    public string? Currency { get; set; }
 }
 
 /// <summary>
@@ -80,4 +100,5 @@ public sealed record DynamicOrderProfitEstimateReportPageDto(
     string PageOnlyText,
     string CurrencyContextText,
     string UnknownBasisText,
-    string SourceLimitText);
+    string SourceLimitText,
+    string FilterText = "");

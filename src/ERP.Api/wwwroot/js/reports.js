@@ -2138,6 +2138,30 @@ function opdDateError(state) {
   return '';
 }
 
+/* 客户 Id / 原币币种客户端校验（与后端 NormalizeFilter 一致）：客户 Id 正整数、币种仅已知枚举码 */
+function opdFilterError(state) {
+  const customerId = String(state && state.customerId || '').trim();
+  if (customerId !== '') {
+    const c = Number(customerId);
+    if (!Number.isInteger(c) || c <= 0) return '客户 Id 必须是正整数（大于 0）';
+  }
+  const currency = String(state && state.currency || '').trim();
+  if (currency !== '') {
+    if (!/^(CNY|USD|EUR|HKD|GBP|JPY)$/i.test(currency)) return '原币币种仅支持 CNY / USD / EUR / HKD / GBP / JPY';
+  }
+  return '';
+}
+
+/* 组装可选应用筛选（只发送规范化后的客户 Id / 原币币种；全部留空 = null，保持既有订单利润暂估行为） */
+function opdBuildFilter(state) {
+  const customerId = String(state && state.customerId || '').trim();
+  const currency = String(state && state.currency || '').trim();
+  const filter = {};
+  if (customerId !== '') filter.customerId = Number(customerId);
+  if (currency !== '') filter.currency = currency.toUpperCase();
+  return (filter.customerId === undefined && filter.currency === undefined) ? null : filter;
+}
+
 /* 组装有界预览请求体：字段只来自目录、日期仅开始 / 结束、分页有界，绝不接受任意字段名或 SQL */
 function opdBuildRequest(state) {
   const fields = opdSelectFields(state.catalogFields, state.selectedKeys);
@@ -2152,6 +2176,7 @@ function opdBuildRequest(state) {
     pageSize,
     start: String(state.start).slice(0, 10),
     end: String(state.end).slice(0, 10),
+    filter: opdBuildFilter(state),
   };
 }
 
@@ -2226,14 +2251,15 @@ function opdKindOfCode(code) {
   return 'invalid';
 }
 
-/* 结果：先显示页面覆盖 / 原币 / 未知依据上下文（即使对应列被取消选择），再显示表格与分页 */
+/* 结果：先显示筛选 / 页面覆盖 / 原币 / 未知依据上下文（即使对应列被取消选择），再显示表格与分页 */
 function opdResultHtml(view) {
+  const filterLine = view && view.filterText ? `<div class="pd-hint" style="color:#0f766e;background:#f0fdfa;border-color:#99f6e4">🔍 ${opdEsc(view.filterText)}</div>` : '';
   const ctx = `<div class="pd-hint" style="margin:8px 0">${opdEsc((view && view.pageOnlyText) || '')}</div>
     <div class="pd-hint" style="margin:0 0 8px">${opdEsc((view && view.currencyContextText) || '')}</div>
     <div class="pd-hint" style="margin:0 0 8px">${opdEsc((view && view.unknownBasisText) || '')}</div>`;
-  if (!view || !view.columns || !view.columns.length) return ctx;
-  if (!view.rows || !view.rows.length) return ctx + opdEmptyHtml(view);
-  return ctx + opdTableHtml(view) + opdPagingHtml(view);
+  if (!view || !view.columns || !view.columns.length) return filterLine + ctx;
+  if (!view.rows || !view.rows.length) return filterLine + ctx + opdEmptyHtml(view);
+  return filterLine + ctx + opdTableHtml(view) + opdPagingHtml(view);
 }
 
 /* 字段选择器：仅由目录白名单渲染为复选框，无自由填写的字段名 */
@@ -2279,6 +2305,12 @@ function opdToggleAll(checked) {
   boxes.forEach(b => { b.checked = checked; if (checked) OPD_DYN.selectedKeys.push(b.value); });
 }
 
+/* 筛选变化时重置到第 1 页并清空旧结果（保留字段 / 日期 / 每页条数） */
+function opdResetPage() {
+  OPD_DYN.page = 1;
+  OPD_DYN.view = null;
+}
+
 /* 读取当前字段 / 日期 / 分页状态（预览、翻页与导出复用，单一来源） */
 function opdBuildState(page) {
   const val = id => { const el = document.getElementById(id); return el ? el.value.trim() : ''; };
@@ -2287,6 +2319,8 @@ function opdBuildState(page) {
     selectedKeys: OPD_DYN.selectedKeys,
     start: val('opd-des-start'),
     end: val('opd-des-end'),
+    customerId: val('opd-des-customer-id'),
+    currency: val('opd-des-currency'),
     pageSize: val('opd-des-pagesize'),
     page: page || OPD_DYN.page || 1,
     maxPageSize: OPD_DYN.catalog && OPD_DYN.catalog.maxPageSize ? OPD_DYN.catalog.maxPageSize : 200,
@@ -2299,6 +2333,11 @@ async function opdPreview(page) {
   const dateError = opdDateError(state);
   if (dateError) {
     opdRenderResult(opdErrorHtml('invalid', dateError));
+    return;
+  }
+  const filterError = opdFilterError(state);
+  if (filterError) {
+    opdRenderResult(opdErrorHtml('invalid', filterError));
     return;
   }
   const req = opdBuildRequest(state);
@@ -2339,6 +2378,11 @@ async function opdExport() {
   const dateError = opdDateError(state);
   if (dateError) {
     opdRenderResult(opdErrorHtml('invalid', dateError));
+    return;
+  }
+  const filterError = opdFilterError(state);
+  if (filterError) {
+    opdRenderResult(opdErrorHtml('invalid', filterError));
     return;
   }
   const req = opdBuildRequest(state);
@@ -2402,6 +2446,11 @@ async function opdExportPdf() {
   const dateError = opdDateError(state);
   if (dateError) {
     opdRenderResult(opdErrorHtml('invalid', dateError));
+    return;
+  }
+  const filterError = opdFilterError(state);
+  if (filterError) {
+    opdRenderResult(opdErrorHtml('invalid', filterError));
     return;
   }
   const req = opdBuildRequest(state);
@@ -2490,6 +2539,16 @@ function openOrderProfitEstimateDesigner() {
       <div class="toolbar-left" style="flex-wrap:wrap;gap:6px;align-items:center;font-size:13px">
         <label>开始日期 <input type="date" id="opd-des-start" value="${defStart}"></label>
         <label>结束日期 <input type="date" id="opd-des-end" value="${defEnd}"></label>
+        <label>客户 Id <input type="number" id="opd-des-customer-id" min="1" style="width:90px" placeholder="全部客户" onchange="opdResetPage()"></label>
+        <label>原币 <select id="opd-des-currency" onchange="opdResetPage()">
+          <option value="">全部币种</option>
+          <option value="CNY">CNY 人民币</option>
+          <option value="USD">USD 美元</option>
+          <option value="EUR">EUR 欧元</option>
+          <option value="HKD">HKD 港币</option>
+          <option value="GBP">GBP 英镑</option>
+          <option value="JPY">JPY 日元</option>
+        </select></label>
         <label>每页 <input type="number" id="opd-des-pagesize" value="20" min="1" max="200" style="width:70px"></label>
         <span id="opd-designer-fields">正在加载字段目录…</span>
       </div>

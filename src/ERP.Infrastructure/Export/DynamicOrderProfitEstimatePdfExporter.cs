@@ -182,6 +182,7 @@ public static class DynamicOrderProfitEstimatePdfExporter
         => new()
         {
             page.ReadOnlyText,
+            string.IsNullOrWhiteSpace(page.FilterText) ? string.Empty : $"筛选条件：{page.FilterText}",
             page.CurrencyContextText,
             page.UnknownBasisText,
             page.DisclaimerText,

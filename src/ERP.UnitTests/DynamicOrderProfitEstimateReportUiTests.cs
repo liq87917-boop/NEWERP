@@ -173,4 +173,67 @@ public class DynamicOrderProfitEstimateReportUiTests
         Assert.DoesNotContain("OPD_DYN.view = null", fn);
         Assert.DoesNotContain("OPD_DYN.view = {", fn);
     }
+
+    [Fact]
+    public void 筛选_客户Id与原币选择器存在_币种有限白名单_无自由币种输入()
+    {
+        var js = Script;
+
+        Assert.Contains("id=\"opd-des-customer-id\"", js);
+        Assert.Contains("id=\"opd-des-currency\"", js);
+        Assert.Contains("<option value=\"CNY\">", js);
+        Assert.Contains("<option value=\"USD\">", js);
+        Assert.Contains("<option value=\"EUR\">", js);
+        Assert.Contains("<option value=\"HKD\">", js);
+        Assert.Contains("<option value=\"GBP\">", js);
+        Assert.Contains("<option value=\"JPY\">", js);
+        Assert.DoesNotContain("opd-des-currency\" type=\"text\"", js);
+    }
+
+    [Fact]
+    public void 筛选_客户端校验_客户Id正整数与币种有限白名单()
+    {
+        var js = Script;
+
+        Assert.Contains("function opdFilterError(", js);
+        var fn = Segment(js, "function opdFilterError(", "function opdBuildFilter(");
+        Assert.Contains("客户 Id 必须是正整数（大于 0）", fn);
+        Assert.Contains("原币币种仅支持 CNY / USD / EUR / HKD / GBP / JPY", fn);
+    }
+
+    [Fact]
+    public void 筛选_组装_只发送规范化客户Id与原币币种()
+    {
+        var js = Script;
+
+        Assert.Contains("function opdBuildFilter(", js);
+        var fn = Segment(js, "function opdBuildFilter(", "function opdBuildRequest(");
+        Assert.Contains("filter.customerId = Number(customerId)", fn);
+        Assert.Contains("filter.currency = currency.toUpperCase()", fn);
+        Assert.Contains("return (filter.customerId === undefined && filter.currency === undefined) ? null : filter", fn);
+
+        Assert.Contains("filter: opdBuildFilter(state),", js);
+    }
+
+    [Fact]
+    public void 筛选_变化重置第1页_保留字段日期每页条数()
+    {
+        var js = Script;
+
+        Assert.Contains("function opdResetPage()", js);
+        var fn = Segment(js, "function opdResetPage()", "/* 读取当前字段");
+        Assert.Contains("OPD_DYN.page = 1", fn);
+        Assert.Contains("OPD_DYN.view = null", fn);
+        Assert.Contains("onchange=\"opdResetPage()\"", js);
+    }
+
+    [Fact]
+    public void 结果_显示服务端规范化筛选上下文()
+    {
+        var js = Script;
+
+        var result = Segment(js, "function opdResultHtml(", "function opdFieldChooserHtml(");
+        Assert.Contains("view.filterText", result);
+    }
+
 }
