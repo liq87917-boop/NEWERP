@@ -363,4 +363,130 @@ public static class DynamicSalesCommissionReportRules
             filterText,
             context);
     }
+
+    // ==================== 6. Excel 导出 ====================
+
+    /// <summary>Excel 数据工作表名（选定字段证据）</summary>
+    public const string DataSheetName = "业务员提成证据";
+
+    /// <summary>Excel 报表口径上下文工作表名</summary>
+    public const string ContextSheetName = "报表口径";
+
+    /// <summary>未知 / null 金额与利润 / 利润率 / 提成比例 / 提成额的显式展示文本（未知，而非数值 0）</summary>
+    public const string UnknownValueText = "未知";
+
+    /// <summary>上下文表「开始日期」行标签</summary>
+    public const string ContextStartLabel = "开始日期";
+
+    /// <summary>上下文表「结束日期」行标签</summary>
+    public const string ContextEndLabel = "结束日期";
+
+    /// <summary>上下文表「分页」行标签</summary>
+    public const string ContextPageLabel = "分页";
+
+    /// <summary>上下文表「来源上限」行标签</summary>
+    public const string ContextSourceLimitLabel = "来源上限";
+
+    /// <summary>上下文表「来源计数」行标签</summary>
+    public const string ContextSourceCountLabel = "来源计数";
+
+    /// <summary>上下文表「币种口径」行标签</summary>
+    public const string ContextCurrencyLabel = "币种口径";
+
+    /// <summary>上下文表「未知口径」行标签</summary>
+    public const string ContextUnknownLabel = "未知口径";
+
+    /// <summary>上下文表「利润口径」行标签</summary>
+    public const string ContextProfitLabel = "利润口径";
+
+    /// <summary>上下文表「提成口径」行标签</summary>
+    public const string ContextCommissionLabel = "提成口径";
+
+    /// <summary>上下文表「当前参考比例」行标签</summary>
+    public const string ContextRateLabel = "当前参考比例";
+
+    /// <summary>上下文表「来源证据」行标签</summary>
+    public const string ContextSourceLabel = "来源证据";
+
+    /// <summary>上下文表「页面覆盖」行标签</summary>
+    public const string ContextPageOnlyLabel = "页面覆盖";
+
+    /// <summary>上下文表「只读声明」行标签</summary>
+    public const string ContextReadOnlyLabel = "只读声明";
+
+    /// <summary>上下文表「应用筛选」行标签</summary>
+    public const string ContextFilterLabel = "应用筛选";
+
+    /// <summary>上下文表「空页说明」行标签</summary>
+    public const string ContextEmptyLabel = "空页说明";
+
+    /// <summary>上下文表「无筛选」显示文案</summary>
+    public const string ContextNoFilterText = "无筛选";
+
+    /// <summary>null 金额 / 利润 / 利润率 / 提成比例 / 提成额字段键（这些字段 null = 显式未知，绝非数值 0）</summary>
+    private static readonly HashSet<string> UnknownNumericFields = new(StringComparer.Ordinal)
+    {
+        "salesAmount", "profit", "profitRate", "commissionRate", "commissionAmount",
+    };
+
+    /// <summary>字段键的 null 值是否表示「显式未知」（金额 / 利润 / 利润率 / 提成比例 / 提成额）；业务员 Id null 表示未指定业务员桶，非未知。</summary>
+    public static bool IsUnknownNumericField(string key)
+        => UnknownNumericFields.Contains(key);
+
+    /// <summary>把预览页分页信息格式化为上下文文本（日期 / 页 / 条数 / 行总数 / 总页数）。</summary>
+    public static string BuildPageContext(DynamicSalesCommissionReportPageDto page)
+    {
+        ArgumentNullException.ThrowIfNull(page);
+        return $"第 {page.Page} 页 · 每页 {page.PageSize} 条 · 业务员桶×原币行总数 {page.Total} · 共 {page.TotalPages} 页";
+    }
+
+    /// <summary>把范围上下文格式化为上下文文本（业务员桶 × 原币证据行 / 去重业务员桶 / 已审核订单 / 证据依据）。</summary>
+    public static string BuildSourceCountContext(DynamicSalesCommissionReportContextDto context)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        return $"{context.Label} {context.SalesmanCurrencyRows} 行 · 去重业务员桶 {context.UniqueSalesmanBuckets} · 已审核订单 {context.ApprovedOrders} · {context.EvidenceBasis}";
+    }
+
+    /// <summary>电子表格公式注入风险首字符（OWASP：= / + / - / @ 及制表符 / 回车 / 换行）</summary>
+    private static bool IsFormulaLeadingChar(char c)
+        => c is '=' or '+' or '-' or '@' or '\t' or '\r' or '\n';
+
+    /// <summary>文本是否以电子表格公式字符开头（会触发 Excel 公式注入）</summary>
+    public static bool IsFormulaLeading(string? value)
+    {
+        if (string.IsNullOrEmpty(value)) return false;
+        return IsFormulaLeadingChar(value[0]);
+    }
+
+    /// <summary>
+    /// 转义 Excel 公式前导文本：以危险字符开头的文本前缀单引号，使单元格保持字面文本、不被当作公式执行。
+    /// 仅对字符串生效；数值 / 日期等类型原样返回（由导出端按其类型写入对应单元格）。
+    /// </summary>
+    public static object? EscapeFormulaLeading(object? value)
+    {
+        if (value is string s && IsFormulaLeading(s))
+            return "'" + s;
+        return value;
+    }
+
+    /// <summary>
+    /// 把一页预览行转成导出行：null 金额 / 利润 / 利润率 / 提成比例 / 提成额显式转为「未知」（绝不写成数值 0），
+    /// 业务员 Id null 保留为空（未指定业务员桶，非未知）；其余字符串做公式注入转义，数值 / 计数原样保留。
+    /// </summary>
+    public static Dictionary<string, object?> BuildExportRow(
+        Dictionary<string, object?> row, IReadOnlyList<string> fieldKeys)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+        ArgumentNullException.ThrowIfNull(fieldKeys);
+
+        var export = new Dictionary<string, object?>(StringComparer.Ordinal);
+        foreach (var key in fieldKeys)
+        {
+            var value = row.TryGetValue(key, out var v) ? v : null;
+            export[key] = value is null && IsUnknownNumericField(key)
+                ? UnknownValueText
+                : EscapeFormulaLeading(value);
+        }
+        return export;
+    }
 }

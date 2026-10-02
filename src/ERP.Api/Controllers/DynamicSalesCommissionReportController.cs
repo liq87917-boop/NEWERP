@@ -2,6 +2,7 @@ using ERP.Application.Common;
 using ERP.Application.DTOs;
 using ERP.Application.Interfaces;
 using ERP.Application.Services;
+using ERP.Infrastructure.Export;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using System.Security.Claims;
@@ -52,6 +53,26 @@ public class DynamicSalesCommissionReportController : ControllerBase
     {
         ArgumentNullException.ThrowIfNull(request);
         return Ok(ApiResponse<DynamicSalesCommissionReportPageDto>.Success(await BuildPageAsync(request)));
+    }
+
+    /// <summary>
+    /// 导出当前页为 Excel（ERP-245，只读）：复用同一有界、已授权预览与选定列顺序，仅导出当前页选定列；
+    /// 已知签名原币金额 / 计数按类型写入数值单元格，null 金额 / 利润 / 利润率 / 提成比例 / 提成额显式「未知」（绝不写成 0），
+    /// 配置为 0 的当前参考比例写入数值 0；并追加「报表口径」上下文工作表标注规范化日期 / 应用筛选 / 页面覆盖 / 来源计数与上限 /
+    /// 当前用户受限已审核订单来源 / 当前参考比例 / 未知历史利润与提成口径（即使对应列被取消选择也始终包含）。
+    /// 每次请求重新校验身份 / 业务员提成表菜单授权 / 业务员数据范围 / 字段 / 日期 / 分页（fail closed），
+    /// 从不信任客户端行或预览缓存；绝不追加跨币种合计。授权撤销 / 无效输入 / 来源超限返回错误、不返回任何工作簿。
+    /// <para>全程只读，不写库、不执行任意 SQL；请求由既有 <c>OperationLogMiddleware</c> 记录审计（动作「导出」）。</para>
+    /// </summary>
+    [HttpPost("export")]
+    public async Task<IActionResult> Export([FromBody] DynamicSalesCommissionReportRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var page = await BuildPageAsync(request);
+        var bytes = new DynamicSalesCommissionExcelExporter().Build(page);
+        return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            $"SalesCommissionEvidence_{DateTime.Now:yyyyMMddHHmmss}.xlsx");
     }
 
     /// <summary>每次重新校验身份 + 菜单授权 + 业务员数据范围，再交由服务层校验请求并只读查询当前页</summary>

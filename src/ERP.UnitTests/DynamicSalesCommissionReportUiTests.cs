@@ -169,4 +169,26 @@ public class DynamicSalesCommissionReportUiTests
         Assert.Contains("view.commissionContextText", res);
         Assert.Contains("view.rateContextText", res);
     }
+
+    // ==================== 5. Excel 导出（ERP-245，前端契约） ====================
+
+    [Fact]
+    public void 导出Excel_入口按钮与函数_复用预览请求体_绝不传客户端行或旧预览()
+    {
+        var js = Script;
+
+        Assert.Contains("onclick=\"scdExportExcel()\"", js);
+        Assert.Contains("function scdExportExcel(", js);
+        Assert.Contains("/api/dynamic-sales-commission-report/export", js);
+
+        var fn = Segment(js, "function scdExportExcel(", "function loadSalesCommissionDesignerCatalog(");
+        Assert.Contains("scdBuildRequest(state)", fn);
+        Assert.Contains("scdDateError(state)", fn);
+        Assert.Contains("scdFilterError(state)", fn);
+        Assert.Contains("spreadsheetml", fn);
+        Assert.Contains("createObjectURL", fn);
+        // 绝不把预览行 / 客户端行 / 金额作为请求体（后端按请求重建有界证据）
+        Assert.DoesNotContain("rows:", fn);
+        Assert.DoesNotContain("JSON.stringify(SCD_DYN.view)", fn);
+    }
 }
