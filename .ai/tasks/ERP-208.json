@@ -1,7 +1,7 @@
 {
   "id": "ERP-208",
   "title": "Filter dynamic quotation reports by customer salesperson and currency",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "medium",
   "priority": "P1",
   "description": "A salesperson narrows the existing quotation conversion designer by a positive optional customer ID, a trimmed salesperson-name keyword of at most 80 characters and a finite original-currency selector (blank means all; a known Currency enum code or explicit unknown bucket). Define and normalize one optional application filter DTO and preserve the existing method call shape via a compatible optional filter argument after its mandatory scope argument. Validate before quotation reads, apply parameterized EF predicates to the current-user scoped date query before the 2001-row source limit and before conversion aggregation; never filter only the already aggregated/page rows. Unknown currency means persisted undefined enum values, never fallback to CNY; reject invalid filter tokens. Preserve date, selected-field order, paging and current conversion rules. Designer resets to page one when filters change and retains all filters on preview, Excel and PDF; export context must accurately label applied filters and existing denied/limit/error states. Reuse existing enum/domain mapping unchanged. Development only: reuse current authenticated ERP identity, the existing quotation menu and freshly resolved SalespersonDataScopeService; audit every endpoint through existing OperationLogMiddleware. No permission expansion, arbitrary/model-generated SQL, direct table or business writes, new entities or persistence schema, migrations, schema/view/stored-procedure edits, production SQL or real database execution, secrets/.env changes, deployment, irreversible operations or real browser acceptance. Preserve unrelated modules and work. Run focused in-memory/service/API/export/UI source-contract tests and configured safe Release build/test; mark unavailable external environments blocked rather than inventing success.",
@@ -63,7 +63,7 @@
     "ERP-207"
   ],
   "max_attempts": 3,
-  "attempts": 0,
+  "attempts": 1,
   "validation_profile": "safe",
   "completion_mode": "build",
   "auto_start": true,

@@ -166,4 +166,38 @@ public class DynamicQuotationConversionReportUiTests
         Assert.Contains("qcdErrorHtml(qcdKindOfCode(code), message)", fn);
         Assert.Contains("qcdErrorHtml('network', (err && err.message) || '无法连接到服务器')", fn);
     }
+
+    [Fact]
+    public void 筛选输入_客户Id业务员关键字与有限币种_变更重置到第1页()
+    {
+        var js = Script;
+
+        Assert.Contains("id=\"qcd-des-customer-id\"", js);
+        Assert.Contains("id=\"qcd-des-salesperson\"", js);
+        Assert.Contains("id=\"qcd-des-currency\"", js);
+        Assert.Contains("onchange=\"qcdPreview(1)\"", js);
+        Assert.Contains("<option value=\"unknown\">未知币种</option>", js);
+        Assert.Contains("<option value=\"CNY\">CNY 人民币</option>", js);
+        Assert.Contains("<option value=\"JPY\">JPY 日元</option>", js);
+    }
+
+    [Fact]
+    public void 请求_组装规范化筛选_并保留字段日期与分页()
+    {
+        var js = Script;
+
+        var state = Segment(js, "function qcdBuildState(", "function qcdPreview(");
+        Assert.Contains("customerId: val('qcd-des-customer-id')", state);
+        Assert.Contains("salesperson: val('qcd-des-salesperson')", state);
+        Assert.Contains("currency: val('qcd-des-currency')", state);
+
+        var build = Segment(js, "function qcdBuildRequest(", "function qcdCellText(");
+        Assert.Contains("filter.customerId = Number(customerId)", build);
+        Assert.Contains("filter.salespersonName = salesperson", build);
+        Assert.Contains("filter.currency = currency", build);
+        Assert.Contains("start: String(state.start).slice(0, 10),", build);
+        Assert.Contains("end: String(state.end).slice(0, 10),", build);
+        Assert.Contains("filter,", build);
+    }
+
 }

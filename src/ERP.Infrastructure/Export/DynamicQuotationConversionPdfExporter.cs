@@ -173,6 +173,8 @@ public static class DynamicQuotationConversionPdfExporter
             $"日期范围：{page.Start.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)} 至 "
             + $"{page.End.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)}",
             metaFont, usableWidth);
+        if (!string.IsNullOrWhiteSpace(page.FilterText))
+            AddWrapped(lines, $"筛选条件：{page.FilterText}", metaFont, usableWidth);
         AddWrapped(lines, DynamicQuotationConversionReportRules.ContextCurrencyText, metaFont, usableWidth);
         AddWrapped(lines, page.ReadOnlyText, metaFont, usableWidth);
         AddWrapped(lines, page.BoundaryText, metaFont, usableWidth);

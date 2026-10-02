@@ -442,4 +442,33 @@ public class DynamicQuotationConversionPdfTests
         Assert.Equal(before, db.Quotations.Count());
         Assert.False(db.ChangeTracker.HasChanges());
     }
+
+    [Fact]
+    public async Task ExportPdf_应用筛选_复用筛选集并成功导出()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedAuthorizedUser(db, "qcd-pdf-filter", "Priv");
+        SeedQuotation(db, "QT-USD", "张三", Currency.USD, 1000m);
+        SeedQuotation(db, "QT-EUR", "李四", Currency.EUR, 2000m);
+
+        var ctl = NewController(db);
+        TestAuth.SetUser(ctl, user.Id);
+
+        var request = new DynamicQuotationConversionReportRequest
+        {
+            Fields = new List<string> { "salesmanName", "currency" },
+            Start = Start,
+            End = End,
+            PageSize = 200,
+            Filter = new QuotationConversionFilterDto { Currency = "USD" }
+        };
+
+        var page = OkPage(await ctl.Preview(request));
+        var row = Assert.Single(page.Rows);
+        Assert.Equal("USD", row["currency"]);
+
+        var file = PdfOk(await ctl.ExportPdf(request));
+        Assert.NotEmpty(file.FileContents);
+    }
+
 }

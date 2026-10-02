@@ -32,6 +32,9 @@ public sealed class DynamicQuotationConversionReportRequest
     /// <summary>结束日期（留空 = 今天；只取日期部分；含首尾，且不得早于开始日期）</summary>
     public DateTime? End { get; set; }
 
+    /// <summary>可选应用筛选（客户 Id / 业务员姓名关键字 / 原币币种；留空 = 不过滤）</summary>
+    public QuotationConversionFilterDto? Filter { get; set; }
+
     /// <summary>页码（从 1 开始）</summary>
     public int Page { get; set; } = 1;
 
@@ -69,4 +72,5 @@ public sealed record DynamicQuotationConversionReportPageDto(
     string BoundaryText,
     string DisclaimerText,
     DateTime Start,
-    DateTime End);
+    DateTime End,
+    string FilterText = "");

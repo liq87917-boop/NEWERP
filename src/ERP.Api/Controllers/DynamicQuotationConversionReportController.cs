@@ -98,18 +98,20 @@ public class DynamicQuotationConversionReportController : ControllerBase
     private async Task<DynamicQuotationConversionReportPageDto> BuildPageAsync(
         DynamicQuotationConversionReportRequest request)
     {
-        // 1) 纯校验先于任何报价单读取（fail closed）
+        // 1) 纯校验先于任何报价单读取（fail closed；含 ERP-208 应用筛选校验）
         var fieldKeys = DynamicQuotationConversionReportRules.NormalizeFields(request.Fields);
         var (start, end) = DynamicQuotationConversionReportRules.ValidateDateRange(request.Start, request.End);
         DynamicQuotationConversionReportRules.ValidatePageBounds(request.Page, request.PageSize);
+        var filter = DynamicQuotationConversionReportRules.NormalizeFilter(request.Filter);
 
         // 2) 每次重新校验身份 + 报价单菜单授权 + 业务员数据范围
         var scope = await EnsureAuthorizedAsync(CurrentUserId());
 
         // 3) 复用 ERP-205 的有界、作用域化报价成交率读取（业务员 × 原币分桶，金额绝不跨币种合计）
-        var items = await _reportService.GetQuotationConversionAsync(start, end, scope);
+        var items = await _reportService.GetQuotationConversionAsync(start, end, scope, filter);
 
-        return DynamicQuotationConversionReportRules.BuildPage(items, fieldKeys, request.Page, request.PageSize, start, end);
+        var filterText = DynamicQuotationConversionReportRules.BuildFilterContext(filter);
+        return DynamicQuotationConversionReportRules.BuildPage(items, fieldKeys, request.Page, request.PageSize, start, end, filterText);
     }
 
     /// <summary>生成 Excel：数据工作表（选定列顺序 + 类型化值 + 公式注入转义） + 「报表口径」上下文工作表</summary>
@@ -147,8 +149,12 @@ public class DynamicQuotationConversionReportController : ControllerBase
         AddLabel(2, DynamicQuotationConversionReportRules.ContextCurrencyLabel, DynamicQuotationConversionReportRules.ContextCurrencyText);
         AddLabel(3, DynamicQuotationConversionReportRules.ContextReadOnlyLabel, page.ReadOnlyText);
 
+        var nextRow = 4;
+        if (!string.IsNullOrWhiteSpace(page.FilterText))
+            AddLabel(nextRow++, DynamicQuotationConversionReportRules.ContextFilterLabel, page.FilterText);
+
         if (page.Rows is null || page.Rows.Count == 0)
-            AddLabel(4, DynamicQuotationConversionReportRules.ContextEmptyLabel, page.EmptyText);
+            AddLabel(nextRow, DynamicQuotationConversionReportRules.ContextEmptyLabel, page.EmptyText);
     }
 
     /// <summary>身份 + 既有「角色 → 菜单」报价单模块授权 + 业务员数据范围（fail closed，绝不猜测身份）</summary>

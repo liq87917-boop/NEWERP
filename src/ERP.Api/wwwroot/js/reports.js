@@ -979,12 +979,20 @@ function qcdBuildRequest(state) {
   let pageSize = Math.floor(Number(state.pageSize));
   if (!Number.isFinite(pageSize)) pageSize = 20;
   pageSize = Math.max(1, Math.min(maxPageSize, pageSize));
+  const filter = {};
+  const customerId = String(state.customerId || '').trim();
+  if (customerId) filter.customerId = Number(customerId);
+  const salesperson = String(state.salesperson || '').trim();
+  if (salesperson) filter.salespersonName = salesperson;
+  const currency = String(state.currency || '').trim();
+  if (currency) filter.currency = currency;
   return {
     fields,
     page,
     pageSize,
     start: String(state.start).slice(0, 10),
     end: String(state.end).slice(0, 10),
+    filter,
   };
 }
 
@@ -1121,6 +1129,9 @@ function qcdBuildState(page) {
     selectedKeys: QCD_DYN.selectedKeys,
     start: val('qcd-des-start'),
     end: val('qcd-des-end'),
+    customerId: val('qcd-des-customer-id'),
+    salesperson: val('qcd-des-salesperson'),
+    currency: val('qcd-des-currency'),
     pageSize: val('qcd-des-pagesize'),
     page: page || QCD_DYN.page || 1,
     maxPageSize: QCD_DYN.catalog && QCD_DYN.catalog.maxPageSize ? QCD_DYN.catalog.maxPageSize : 200,
@@ -1323,6 +1334,18 @@ function openQuotationConversionDesigner() {
       <div class="toolbar-left" style="flex-wrap:wrap;gap:6px;align-items:center;font-size:13px">
         <label>开始日期 <input type="date" id="qcd-des-start" value="${defStart}"></label>
         <label>结束日期 <input type="date" id="qcd-des-end" value="${defEnd}"></label>
+        <label>客户 Id <input type="number" id="qcd-des-customer-id" min="1" style="width:90px" placeholder="全部客户" onchange="qcdPreview(1)"></label>
+        <label>业务员关键字 <input type="text" id="qcd-des-salesperson" maxlength="80" style="width:160px" placeholder="业务员姓名" onchange="qcdPreview(1)"></label>
+        <label>币种 <select id="qcd-des-currency" onchange="qcdPreview(1)">
+          <option value="">全部币种</option>
+          <option value="CNY">CNY 人民币</option>
+          <option value="USD">USD 美元</option>
+          <option value="EUR">EUR 欧元</option>
+          <option value="HKD">HKD 港币</option>
+          <option value="GBP">GBP 英镑</option>
+          <option value="JPY">JPY 日元</option>
+          <option value="unknown">未知币种</option>
+        </select></label>
         <label>每页 <input type="number" id="qcd-des-pagesize" value="20" min="1" max="200" style="width:70px"></label>
         <span id="qcd-designer-fields">正在加载字段目录…</span>
       </div>

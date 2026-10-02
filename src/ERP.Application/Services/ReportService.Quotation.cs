@@ -1,4 +1,5 @@
 using ERP.Application.Common;
+using ERP.Application.DTOs;
 using ERP.Application.Interfaces;
 using ERP.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
@@ -45,7 +46,7 @@ public partial class ReportService
 
     /// <summary>报价成交率分析（按业务员 × 原币聚合；显式传入当前账号业务员数据范围）</summary>
     public async Task<List<ReportDtos.QuotationConversionItem>> GetQuotationConversionAsync(
-        DateTime start, DateTime end, SalespersonDataScope scope)
+        DateTime start, DateTime end, SalespersonDataScope scope, QuotationConversionFilterDto? filter = null)
     {
         ArgumentNullException.ThrowIfNull(scope);
 
@@ -65,6 +66,9 @@ public partial class ReportService
         var source = _db.Quotations.AsNoTracking()
             .Where(q => !q.IsDeleted && q.QuotationDate >= startDate && q.QuotationDate < endExclusive);
         source = SalespersonDataScopeService.FilterByCustomer(source, scope, q => q.CustomerId);
+
+        // 2.1) ERP-208 可选应用筛选：作用在业务员数据范围之后、来源上限与聚合之前（参数化 EF 谓词）
+        source = ApplyConversionFilter(source, filter);
 
         var quotations = await source.Take(ScopedQuotationReadLimit).ToListAsync();
         if (quotations.Count > MaxScopedQuotations)
@@ -133,6 +137,39 @@ public partial class ReportService
             .ThenBy(r => r.SalesmanName, StringComparer.Ordinal)
             .ThenBy(r => r.Currency, StringComparer.Ordinal)
             .ToList();
+    }
+
+    /// <summary>
+    /// 应用 ERP-208 可选筛选（在业务员数据范围之后、来源上限与聚合之前）：客户 Id 精确匹配、
+    /// 业务员姓名关键字 Contains、原币币种有限选择（已知枚举码精确匹配；未知桶匹配「未定义枚举值」，绝不回退 CNY）。
+    /// 全部为参数化 EF 谓词，非任意 SQL。
+    /// </summary>
+    private static IQueryable<Domain.Entities.Quotation> ApplyConversionFilter(
+        IQueryable<Domain.Entities.Quotation> source, QuotationConversionFilterDto? filter)
+    {
+        if (filter is null)
+            return source;
+
+        if (filter.CustomerId.HasValue)
+            source = source.Where(q => q.CustomerId == filter.CustomerId.Value);
+
+        if (!string.IsNullOrEmpty(filter.SalespersonName))
+            source = source.Where(q => q.SalesmanName.Contains(filter.SalespersonName));
+
+        if (!string.IsNullOrEmpty(filter.Currency))
+        {
+            if (string.Equals(filter.Currency, DynamicQuotationConversionReportRules.UnknownCurrencyFilterToken, StringComparison.OrdinalIgnoreCase))
+            {
+                var defined = Enum.GetValues<Currency>();
+                source = source.Where(q => !defined.Contains(q.Currency));
+            }
+            else if (Enum.TryParse<Currency>(filter.Currency, true, out var parsed))
+            {
+                source = source.Where(q => q.Currency == parsed);
+            }
+        }
+
+        return source;
     }
 
     /// <summary>分组键：业务员姓名为空时归入「未指定业务员」</summary>

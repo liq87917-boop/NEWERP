@@ -1,6 +1,7 @@
 using ERP.Application.Common;
 using ERP.Application.DTOs;
 using ERP.Application.Interfaces;
+using ERP.Domain.Enums;
 
 namespace ERP.Application.Services;
 
@@ -29,6 +30,15 @@ public static class DynamicQuotationConversionReportRules
 
     /// <summary>允许的报价日期区间最大跨度（含首尾日历日）：366 天，与既有报价成交率口径一致</summary>
     public const int MaxDateRangeDays = 366;
+
+    /// <summary>筛选关键字最大长度（有界）</summary>
+    public const int MaxFilterKeywordLength = 80;
+
+    /// <summary>原币币种筛选「未知币种」分桶的规范 token（显式未知桶；绝不回退为 CNY）</summary>
+    public const string UnknownCurrencyFilterToken = "unknown";
+
+    /// <summary>原币币种筛选「未知币种」分桶的展示文案（与分组口径一致）</summary>
+    public const string UnknownCurrencyFilterText = "未知币种";
 
     // ==================== 1. 文案 ====================
 
@@ -160,6 +170,106 @@ public static class DynamicQuotationConversionReportRules
             throw BusinessException.InvalidParameter($"每页条数必须在 1 ~ {MaxPageSize} 之间（收到 {pageSize}）");
     }
 
+    // ==================== 4.1 筛选校验与规范化（ERP-208，fail closed） ====================
+
+    /// <summary>
+    /// 规范化可选应用筛选（fail closed）：客户 Id 必须为正整数、业务员姓名关键字去首尾空白后最多
+    /// <see cref="MaxFilterKeywordLength"/> 字符、原币币种仅接受空白（全部）/ 已知 <see cref="Currency"/> 枚举码 /
+    /// 显式 <see cref="UnknownCurrencyFilterToken"/> 未知桶；非法取值直接拒绝，绝不静默丢弃或回退币种。
+    /// 三项全部留空时返回 null（表示不过滤）。
+    /// </summary>
+    public static QuotationConversionFilterDto? NormalizeFilter(QuotationConversionFilterDto? filter)
+    {
+        if (filter is null)
+            return null;
+
+        var customerId = ValidateFilterCustomerId(filter.CustomerId);
+        var salespersonName = NormalizeSalespersonKeyword(filter.SalespersonName);
+        var currency = NormalizeCurrencyFilter(filter.Currency);
+
+        if (customerId is null && salespersonName is null && currency is null)
+            return null;
+
+        return new QuotationConversionFilterDto
+        {
+            CustomerId = customerId,
+            SalespersonName = salespersonName,
+            Currency = currency,
+        };
+    }
+
+    /// <summary>校验客户 Id 筛选（可选）：提供时必须是正整数（&gt;0），否则 fail closed 拒绝；留空 = 不过滤。</summary>
+    public static long? ValidateFilterCustomerId(long? customerId)
+    {
+        if (customerId is <= 0)
+            throw BusinessException.InvalidParameter("客户 Id 筛选必须是正整数（大于 0）");
+        return customerId;
+    }
+
+    /// <summary>
+    /// 规范化业务员姓名关键字（fail closed）：留空 / 全空白 = 不过滤；否则去首尾空白，长度最多
+    /// <see cref="MaxFilterKeywordLength"/> 字符，超出直接拒绝。
+    /// </summary>
+    public static string? NormalizeSalespersonKeyword(string? keyword)
+    {
+        if (string.IsNullOrWhiteSpace(keyword))
+            return null;
+
+        var trimmed = keyword.Trim();
+        if (trimmed.Length > MaxFilterKeywordLength)
+            throw BusinessException.InvalidParameter(
+                $"业务员姓名关键字筛选最多 {MaxFilterKeywordLength} 个字符（收到 {trimmed.Length} 个字符）");
+        return trimmed;
+    }
+
+    /// <summary>
+    /// 规范化原币币种筛选（fail closed）：留空 = 全部；已知 <see cref="Currency"/> 枚举码（大小写不敏感）归一化为枚举名；
+    /// 显式未知桶（unknown / 未知币种）归一化为 <see cref="UnknownCurrencyFilterToken"/>；其余取值直接拒绝。
+    /// 绝不把未知币种回退为 CNY 或任何默认币种。
+    /// </summary>
+    public static string? NormalizeCurrencyFilter(string? currency)
+    {
+        if (string.IsNullOrWhiteSpace(currency))
+            return null;
+
+        var value = currency.Trim();
+        if (string.Equals(value, UnknownCurrencyFilterToken, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(value, UnknownCurrencyFilterText, StringComparison.OrdinalIgnoreCase))
+        {
+            return UnknownCurrencyFilterToken;
+        }
+
+        if (Enum.TryParse<Currency>(value, true, out var parsed) && Enum.IsDefined(parsed))
+            return parsed.ToString();
+
+        throw BusinessException.InvalidParameter(
+            $"无效的原币币种筛选: {currency}（可选：CNY / USD / EUR / HKD / GBP / JPY 或 {UnknownCurrencyFilterText}）");
+    }
+
+    /// <summary>
+    /// 把已规范化的应用筛选渲染为导出上下文文案（客户 Id / 业务员关键字 / 原币币种）；无筛选时返回空串。
+    /// </summary>
+    public static string BuildFilterContext(QuotationConversionFilterDto? filter)
+    {
+        if (filter is null)
+            return string.Empty;
+
+        var parts = new List<string>();
+        if (filter.CustomerId.HasValue)
+            parts.Add($"客户 Id {filter.CustomerId.Value}");
+        if (!string.IsNullOrEmpty(filter.SalespersonName))
+            parts.Add($"业务员关键字 {filter.SalespersonName}");
+        if (!string.IsNullOrEmpty(filter.Currency))
+        {
+            var currencyText = string.Equals(filter.Currency, UnknownCurrencyFilterToken, StringComparison.OrdinalIgnoreCase)
+                ? UnknownCurrencyFilterText
+                : filter.Currency;
+            parts.Add($"原币币种 {currencyText}");
+        }
+
+        return parts.Count == 0 ? string.Empty : string.Join("；", parts);
+    }
+
     // ==================== 5. 行投影与分页（纯规则） ====================
 
     /// <summary>把一条报价成交率分桶行映射为「选定字段 → 值」的只读行（仅含选定字段，键保持请求顺序）</summary>
@@ -188,7 +298,8 @@ public static class DynamicQuotationConversionReportRules
         int page,
         int pageSize,
         DateTime start,
-        DateTime end)
+        DateTime end,
+        string filterText = "")
     {
         var all = items ?? Array.Empty<ReportDtos.QuotationConversionItem>();
         var total = all.Count;
@@ -214,7 +325,8 @@ public static class DynamicQuotationConversionReportRules
             BoundaryText,
             DisclaimerText,
             start,
-            end);
+            end,
+            filterText);
     }
 
     // ==================== 6. Excel 导出（ERP-206） ====================
@@ -230,6 +342,9 @@ public static class DynamicQuotationConversionReportRules
 
     /// <summary>上下文表「币种口径」行标签</summary>
     public const string ContextCurrencyLabel = "币种口径";
+
+    /// <summary>上下文表「筛选条件」行标签（ERP-208：准确标注已应用的应用筛选）</summary>
+    public const string ContextFilterLabel = "筛选条件";
 
     /// <summary>上下文表币种口径文案：强调金额为报价单原币、按业务员 × 原币分列、绝不跨币种合计</summary>
     public const string ContextCurrencyText =

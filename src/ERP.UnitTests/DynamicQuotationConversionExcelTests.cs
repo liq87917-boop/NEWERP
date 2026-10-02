@@ -282,6 +282,34 @@ public class DynamicQuotationConversionExcelTests
         Assert.Equal(DynamicQuotationConversionReportRules.ContextEmptyLabel, ctx.GetRow(4).GetCell(0).StringCellValue);
         Assert.Equal(DynamicQuotationConversionReportRules.EmptyText, ctx.GetRow(4).GetCell(1).StringCellValue);
     }
+
+    [Fact]
+    public async Task Export_应用筛选_口径表准确标注筛选条件()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedAuthorizedUser(db, "qcd-filter", "Priv");
+        SeedQuotation(db, "QT-USD", "张三", Currency.USD, 1000m);
+        SeedQuotation(db, "QT-EUR", "李四", Currency.EUR, 2000m);
+
+        var ctl = NewController(db);
+        TestAuth.SetUser(ctl, user.Id);
+
+        var file = ExportOk(await ctl.Export(new DynamicQuotationConversionReportRequest
+        {
+            Fields = new List<string> { "salesmanName", "currency" },
+            Start = Start,
+            End = End,
+            PageSize = 200,
+            Filter = new QuotationConversionFilterDto { SalespersonName = "张三" }
+        }));
+
+        using var workbook = OpenWorkbook(file.FileContents);
+        var ctx = workbook.GetSheetAt(1);
+
+        Assert.Equal(DynamicQuotationConversionReportRules.ContextFilterLabel, ctx.GetRow(4).GetCell(0).StringCellValue);
+        Assert.Contains("业务员关键字 张三", ctx.GetRow(4).GetCell(1).StringCellValue);
+    }
+
 }
 
 
