@@ -1,0 +1,68 @@
+{
+  "title": "Scope and bound customer shipment report approved-order evidence",
+  "description": "A user opens the existing customer-shipment report and sees only approved nondeleted sales-order evidence belonging to authorized customers. Recheck identity and existing customer-shipment menu each request; missing db/user/menu or unmapped user must fail closed. Require resolved scope in GetCustomerShipmentStatsAsync and update existing callers/tests; do not retain a scope-free bypass. Validate inclusive dates at most 366 days before reads, including end-day overflow, use end-next-day exclusive SQL comparison. Apply current customer scope to SalesOrders before a 501-row probe for the 500-header cap and read at most 10001 nondeleted order details to enforce 10000-detail cap; overflow returns an explicit error with no partial rows/aggregates. Batch-resolve names only for scoped IDs and keep fixed query counts/stable customer ordering. Keep existing SalesOrders/SalesOrderDetails source, clearly label it as approved order quantities/amounts rather than actual stock-out/customer shipment or collected revenue; do not rewrite source to StockOut without a separate business task. Cross-unit/currency grouping is corrected by dependent ERP-228. Development only: reuse existing customer-shipment menu, current-user SalespersonDataScopeService and existing OperationLogMiddleware HTTP audit; remain read-only. Preserve the verified existing sales-order source and identify it as approved-order evidence, never actual shipment or receipt evidence. No client identity/scope/rows/aggregates as authority, permission expansion, arbitrary/model-generated SQL, direct table/business writes, new domain entities or persistence schema, schema/view/stored-procedure changes, migrations, production SQL or real database execution, secrets/.env/config changes, irreversible operations, production deployment or real browser acceptance. Preserve unrelated work. Run focused in-memory service/API/export/UI source-contract tests plus configured safe Release build/test. Any unavailable external environment acceptance must be explicitly environment-blocked, never fabricated passed.",
+  "depends_on": [
+    "ERP-097"
+  ],
+  "risk_level": "medium",
+  "priority": "P1",
+  "acceptance_criteria": [
+    "Legacy customer-shipment HTTP requests recheck identity/menu/fresh ERP scope and the service requires scope; only approved nondeleted scoped SalesOrders and nondeleted details contribute with no unauthorized names/amounts.",
+    "Inclusive dates are at most 366 days and validated before reads; scoped bounded queries enforce 500 headers/10000 details with explicit overflow error, fixed batch name lookup and stable ordering without partial aggregates.",
+    "The existing report identifies its approved-sales-order evidence source without claiming actual shipment/receipts; missing authorization/drafts/deleted/date/cap regressions and safe Release build/test pass."
+  ],
+  "criterion_path_map": {
+    "Legacy customer-shipment HTTP requests recheck identity/menu/fresh ERP scope and the service requires scope; only approved nondeleted scoped SalesOrders and nondeleted details contribute with no unauthorized names/amounts.": [
+      "src/ERP.Api/Controllers/ReportController.cs",
+      "src/ERP.Application/Interfaces/IReportService.cs",
+      "src/ERP.Application/Services/ReportService.Sales.cs",
+      "src/ERP.UnitTests/CustomerShipmentScopeTests.cs",
+      "src/ERP.UnitTests/ReportServiceTests.cs"
+    ],
+    "Inclusive dates are at most 366 days and validated before reads; scoped bounded queries enforce 500 headers/10000 details with explicit overflow error, fixed batch name lookup and stable ordering without partial aggregates.": [
+      "src/ERP.Application/Services/ReportService.Sales.cs",
+      "src/ERP.Application/Interfaces/IReportService.cs",
+      "src/ERP.UnitTests/CustomerShipmentQueryBoundsTests.cs",
+      "src/ERP.UnitTests/CustomerShipmentScopeTests.cs",
+      "src/ERP.UnitTests/ReportServiceTests.cs"
+    ],
+    "The existing report identifies its approved-sales-order evidence source without claiming actual shipment/receipts; missing authorization/drafts/deleted/date/cap regressions and safe Release build/test pass.": [
+      "src/ERP.Api/wwwroot/js/reports.js",
+      "src/ERP.Application/Interfaces/ReportDtos.cs",
+      "src/ERP.Application/Services/ReportService.Sales.cs",
+      "src/ERP.UnitTests/CustomerShipmentReportUiTests.cs",
+      "src/ERP.UnitTests/CustomerShipmentScopeTests.cs",
+      "src/ERP.UnitTests/CustomerShipmentQueryBoundsTests.cs",
+      "src/ERP.UnitTests/ReportServiceTests.cs"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/ReportController.cs",
+    "src/ERP.Application/Interfaces/IReportService.cs",
+    "src/ERP.Application/Services/ReportService.Sales.cs",
+    "src/ERP.UnitTests/CustomerShipmentScopeTests.cs",
+    "src/ERP.UnitTests/ReportServiceTests.cs",
+    "src/ERP.UnitTests/CustomerShipmentQueryBoundsTests.cs",
+    "src/ERP.Api/wwwroot/js/reports.js",
+    "src/ERP.Application/Interfaces/ReportDtos.cs",
+    "src/ERP.UnitTests/CustomerShipmentReportUiTests.cs"
+  ],
+  "status": "pending",
+  "max_attempts": 3,
+  "attempts": 0,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only bounded scoped report feature"
+  },
+  "id": "ERP-227",
+  "created_at": "2026-10-02T05:39:37.198066Z"
+}

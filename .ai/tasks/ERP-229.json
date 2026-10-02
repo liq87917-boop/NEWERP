@@ -1,0 +1,80 @@
+{
+  "title": "Design and export scoped customer order evidence pages to Excel",
+  "description": "A user opens a field designer from the existing customer-shipment report to select customer/original-currency/approved-order-count/known-single-unit-quantity/order-amount and explicit quantity/source evidence fields. Add narrow DTO/rules/controller files with a finite whitelist from ERP-228 evidence; preserve selected order, inclusive dates and stable Page>=1/PageSize1..200 slicing of the existing bounded authorized source. Catalog/preview/Excel each recheck identity/customer-shipment menu/fresh ERP scope; source caps fail closed, never accept client rows/amounts or cached scope. Server Total/TotalPages/PageOnly/context distinguish customer-currency rows from unique customers/orders and actual shipments. Always show original-currency/exact-unit/unknown/source context even when evidence columns are hidden; format unit-group evidence safely without duplicating monetary totals. Designer handles empty/invalid/denied/network states and preserves selection/date/page-size. Excel reruns preview and exports selected page fields in order with numeric known amounts/counts/quantities and explicit unknown cells distinct from zero, formula-safe text and normalized date/page/limit/source/currency/unit context; no cross-currency or cross-unit totals. Reuse existing menu and exporter helpers. Development only: reuse existing customer-shipment menu, current-user SalespersonDataScopeService and existing OperationLogMiddleware HTTP audit; remain read-only. Preserve the verified existing sales-order source and identify it as approved-order evidence, never actual shipment or receipt evidence. No client identity/scope/rows/aggregates as authority, permission expansion, arbitrary/model-generated SQL, direct table/business writes, new domain entities or persistence schema, schema/view/stored-procedure changes, migrations, production SQL or real database execution, secrets/.env/config changes, irreversible operations, production deployment or real browser acceptance. Preserve unrelated work. Run focused in-memory service/API/export/UI source-contract tests plus configured safe Release build/test. Any unavailable external environment acceptance must be explicitly environment-blocked, never fabricated passed.",
+  "depends_on": [
+    "ERP-228"
+  ],
+  "risk_level": "medium",
+  "priority": "P1",
+  "acceptance_criteria": [
+    "Finite field/date/page validation and fresh menu/scope authorization drive the same bounded server evidence source, with stable selected-page customer/currency rows and server-derived coverage/unknown/unit metadata.",
+    "Existing customer-shipment entry opens a safe field/date/page designer preserving selection order and context, showing current-page/unknown/source evidence without actual shipment or cross-unit/currency claims.",
+    "Excel reruns authorization/validation and exports only selected page fields with typed known values, explicit unknown/null cells and formula-safe labels plus date/page/source-limit/currency/unit context; API/workbook/UI and source regressions plus safe Release build/test pass."
+  ],
+  "criterion_path_map": {
+    "Finite field/date/page validation and fresh menu/scope authorization drive the same bounded server evidence source, with stable selected-page customer/currency rows and server-derived coverage/unknown/unit metadata.": [
+      "src/ERP.Application/DTOs/DynamicCustomerShipmentReportDtos.cs",
+      "src/ERP.Application/Services/DynamicCustomerShipmentReportRules.cs",
+      "src/ERP.Api/Controllers/DynamicCustomerShipmentReportController.cs",
+      "src/ERP.Application/Interfaces/IReportService.cs",
+      "src/ERP.Application/Services/ReportService.Sales.cs",
+      "src/ERP.Application/Interfaces/ReportDtos.cs",
+      "src/ERP.Application/Services/CustomerShipmentEvidenceRules.cs",
+      "src/ERP.UnitTests/DynamicCustomerShipmentReportTests.cs"
+    ],
+    "Existing customer-shipment entry opens a safe field/date/page designer preserving selection order and context, showing current-page/unknown/source evidence without actual shipment or cross-unit/currency claims.": [
+      "src/ERP.Api/wwwroot/js/reports.js",
+      "src/ERP.Application/DTOs/DynamicCustomerShipmentReportDtos.cs",
+      "src/ERP.Application/Services/DynamicCustomerShipmentReportRules.cs",
+      "src/ERP.UnitTests/DynamicCustomerShipmentReportUiTests.cs",
+      "src/ERP.UnitTests/CustomerShipmentReportUiTests.cs"
+    ],
+    "Excel reruns authorization/validation and exports only selected page fields with typed known values, explicit unknown/null cells and formula-safe labels plus date/page/source-limit/currency/unit context; API/workbook/UI and source regressions plus safe Release build/test pass.": [
+      "src/ERP.Api/Controllers/DynamicCustomerShipmentReportController.cs",
+      "src/ERP.Application/DTOs/DynamicCustomerShipmentReportDtos.cs",
+      "src/ERP.Application/Services/DynamicCustomerShipmentReportRules.cs",
+      "src/ERP.Api/wwwroot/js/reports.js",
+      "src/ERP.UnitTests/DynamicCustomerShipmentExcelTests.cs",
+      "src/ERP.UnitTests/DynamicCustomerShipmentReportTests.cs",
+      "src/ERP.UnitTests/DynamicCustomerShipmentReportUiTests.cs",
+      "src/ERP.UnitTests/CustomerShipmentCurrencyUnitTests.cs",
+      "src/ERP.UnitTests/CustomerShipmentScopeTests.cs",
+      "src/ERP.UnitTests/CustomerShipmentQueryBoundsTests.cs"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Application/DTOs/DynamicCustomerShipmentReportDtos.cs",
+    "src/ERP.Application/Services/DynamicCustomerShipmentReportRules.cs",
+    "src/ERP.Api/Controllers/DynamicCustomerShipmentReportController.cs",
+    "src/ERP.Application/Interfaces/IReportService.cs",
+    "src/ERP.Application/Services/ReportService.Sales.cs",
+    "src/ERP.Application/Interfaces/ReportDtos.cs",
+    "src/ERP.Application/Services/CustomerShipmentEvidenceRules.cs",
+    "src/ERP.UnitTests/DynamicCustomerShipmentReportTests.cs",
+    "src/ERP.Api/wwwroot/js/reports.js",
+    "src/ERP.UnitTests/DynamicCustomerShipmentReportUiTests.cs",
+    "src/ERP.UnitTests/CustomerShipmentReportUiTests.cs",
+    "src/ERP.UnitTests/DynamicCustomerShipmentExcelTests.cs",
+    "src/ERP.UnitTests/CustomerShipmentCurrencyUnitTests.cs",
+    "src/ERP.UnitTests/CustomerShipmentScopeTests.cs",
+    "src/ERP.UnitTests/CustomerShipmentQueryBoundsTests.cs"
+  ],
+  "status": "pending",
+  "max_attempts": 3,
+  "attempts": 0,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only bounded scoped report feature"
+  },
+  "id": "ERP-229",
+  "created_at": "2026-10-02T05:39:37.198630Z"
+}
