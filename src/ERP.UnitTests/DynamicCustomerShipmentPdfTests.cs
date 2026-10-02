@@ -462,4 +462,32 @@ public class DynamicCustomerShipmentPdfTests
         Assert.False(db.ChangeTracker.HasChanges());
     }
 
+    // ==================== 7. ERP-232 全匹配汇总不改变明细 PDF ====================
+
+    [Fact]
+    public async Task ExportPdf_全匹配汇总在场_明细PDF下载成功_且不写库()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedAuthorizedUser(db, "csd-pdf-summary", "Priv");
+        var customer = SeedCustomer(db, "C001", "客户");
+        SeedOrder(db, "SO-1", customer.Id, Currency.USD, 100m);
+
+        var before = db.SalesOrders.Count();
+        var ctl = NewController(db);
+        TestAuth.SetUser(ctl, user.Id);
+
+        var file = PdfOk(await ctl.ExportPdf(new DynamicCustomerShipmentReportRequest
+        {
+            Fields = new List<string> { "customerName", "totalAmount" },
+            Start = Start,
+            End = End,
+            Page = 1,
+            PageSize = 20
+        }));
+
+        Assert.True(file.FileContents.Length > 0);
+        Assert.Equal(before, db.SalesOrders.Count());
+        Assert.False(db.ChangeTracker.HasChanges());
+    }
+
 }

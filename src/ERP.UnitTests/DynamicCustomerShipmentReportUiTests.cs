@@ -264,4 +264,53 @@ public class DynamicCustomerShipmentReportUiTests
         Assert.DoesNotContain("SqlCommand", build);
     }
 
+    // ==================== 9. ERP-232 全匹配汇总面板（币种 / 单位，独立于当前页与选定列） ====================
+
+    [Fact]
+    public void 汇总面板_存在币种与单位两块_只读后端summary列与指标()
+    {
+        var js = Script;
+
+        Assert.Contains("function csdSummaryPanelHtml(", js);
+        Assert.Contains("function csdCurrencySummaryHtml(", js);
+        Assert.Contains("function csdUnitSummaryHtml(", js);
+
+        var currency = Segment(js, "function csdCurrencySummaryHtml(", "function csdUnitSummaryHtml(");
+        Assert.Contains("view && view.summary", currency);
+        Assert.Contains("summary && summary.currencyColumns", currency);
+        Assert.Contains("summary && summary.currencyRows", currency);
+
+        var unit = Segment(js, "function csdUnitSummaryHtml(", "/* 结果区渲染：先给范围 / 口径提示（即使对应列被取消选择也始终显示），再渲染空态或表格 + 分页 */");
+        Assert.Contains("view && view.summary", unit);
+        Assert.Contains("summary && summary.unitColumns", unit);
+        Assert.Contains("summary && summary.unitRows", unit);
+        Assert.Contains("summary && summary.completenessReasons", unit);
+        // 只渲染后端返回的 summary 列与指标，绝不读取当前页明细行或选定列
+        Assert.DoesNotContain("view.rows", unit);
+        Assert.DoesNotContain("view.columns", unit);
+    }
+
+    [Fact]
+    public void 汇总渲染_全部转义_金额只属原币面板_未知单位显式未知()
+    {
+        var js = Script;
+        var fn = Segment(js, "function csdSummaryPanelHtml(", "function csdCurrencySummaryHtml(");
+
+        Assert.Contains("csdEsc(c.label || c.key)", fn);
+        Assert.Contains("csdRenderCell(r[c.key], c)", fn);
+        Assert.Contains("csdEsc(summary.coverageText)", fn);
+        Assert.Contains("全匹配原币金额汇总", js);
+        Assert.Contains("全匹配精确单位数量汇总", js);
+        Assert.Contains("明细证据不完整", js);
+    }
+
+    [Fact]
+    public void 结果区_插入全匹配汇总_独立于当前页明细与选定列()
+    {
+        var js = Script;
+        var fn = Segment(js, "function csdResultHtml(", "function csdFieldChooserHtml(");
+
+        Assert.Contains("const summaryHtml = csdCurrencySummaryHtml(view) + csdUnitSummaryHtml(view);", fn);
+        Assert.Contains("${summaryHtml}${body}", fn);
+    }
 }

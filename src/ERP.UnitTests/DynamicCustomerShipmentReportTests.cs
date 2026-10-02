@@ -598,4 +598,69 @@ public class DynamicCustomerShipmentReportTests
         Assert.Equal(ErrorCodes.InvalidParameter, ex2.Code);
     }
 
+    // ==================== 6. ERP-232 全匹配汇总（服务端派生） ====================
+
+    [Fact]
+    public async Task 预览_全匹配汇总_按原币签名金额与去重客户订单数_不跨币种合计()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedAuthorizedUser(db, "priv-user", "Priv", isSystemRole: true);
+        var a = SeedCustomer(db, "C-A", "客户A");
+        var b = SeedCustomer(db, "C-B", "客户B");
+        SeedOrder(db, "SO-USD-A", a.Id, Currency.USD, 1000m);
+        SeedOrder(db, "SO-USD-B", b.Id, Currency.USD, -200m);
+        SeedOrder(db, "SO-CNY-A", a.Id, Currency.CNY, 500m);
+
+        var ctl = BuildController(db, user.Id);
+        var page = OkPage(await ctl.Preview(new DynamicCustomerShipmentReportRequest
+        {
+            Fields = new List<string> { "currency", "totalAmount" },
+            Start = Start,
+            End = End,
+            Page = 1,
+            PageSize = 1
+        }));
+
+        Assert.NotNull(page.Summary);
+        Assert.Single(page.Rows);                   // 当前页仅 1 行
+
+        var usd = Assert.Single(page.Summary.CurrencyRows.Where(r => r.Currency == "USD"));
+        Assert.Equal(800m, usd.TotalAmount);        // 1000 + (-200)
+        Assert.Equal(2, usd.CustomerCount);         // 去重客户数
+        Assert.Equal(2, usd.OrderCount);            // 不相交订单数
+        Assert.Equal(CustomerShipmentEvidenceRules.KnownCurrencyEvidence, usd.Evidence);
+
+        var cny = Assert.Single(page.Summary.CurrencyRows.Where(r => r.Currency == "CNY"));
+        Assert.Equal(500m, cny.TotalAmount);
+        Assert.Equal(1, cny.CustomerCount);
+
+        // 绝不出现跨币种合计
+        Assert.DoesNotContain(page.Summary.CurrencyRows, r => r.TotalAmount == 1300m);
+        Assert.NotEmpty(page.Summary.CoverageText);
+    }
+
+    [Fact]
+    public async Task 预览_空来源_全匹配汇总仍可用且与选定列无关()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedAuthorizedUser(db, "priv-user", "Priv", isSystemRole: true);
+
+        var ctl = BuildController(db, user.Id);
+        var page = OkPage(await ctl.Preview(new DynamicCustomerShipmentReportRequest
+        {
+            Fields = new List<string>(),            // 隐藏全部选定列
+            Start = Start,
+            End = End,
+            Page = 1,
+            PageSize = 20
+        }));
+
+        Assert.NotNull(page.Summary);               // 空页上汇总仍可用
+        Assert.Empty(page.Summary.CurrencyRows);
+        Assert.Empty(page.Summary.UnitRows);
+        Assert.Equal(0, page.Summary.IncompleteBucketCount);
+        Assert.NotEmpty(page.Summary.CoverageText);
+        Assert.NotEmpty(page.EmptyText);            // 空页说明与汇总并存
+    }
+
 }

@@ -248,6 +248,9 @@ public static class DynamicCustomerShipmentReportRules
             items.Sum(x => x.OrderCount),
             SourceEvidenceBasis);
 
+        // ERP-232：在分页 / 选定列投影之前，对同一份完整有界、作用域化、已筛选列表纯派生「全匹配」汇总
+        var summary = DynamicCustomerShipmentSummaryRules.BuildSummary(items);
+
         return new DynamicCustomerShipmentReportPageDto(
             columns,
             rows,
@@ -270,7 +273,8 @@ public static class DynamicCustomerShipmentReportRules
             SourceContextText,
             SourceLimitText,
             filterText,
-            context);
+            context,
+            summary);
     }
 
     // ==================== 6. Excel 导出 ====================

@@ -2962,6 +2962,33 @@ function csdScopeLine(view) {
 }
 
 
+/* ERP-232 全匹配汇总面板：独立于当前页明细行与选定列渲染，仅渲染后端返回的 summary 列与指标，全部转义；空 / 无汇总不渲染 */
+function csdSummaryPanelHtml(summary, title, columns, rows, hint) {
+  if (!summary || !columns || !columns.length) return '';
+  const align = c => (c.dataType === 'number') ? ' class="text-right"' : '';
+  const head = columns.map(c => `<th${align(c)}>${csdEsc(c.label || c.key)}</th>`).join('');
+  const body = (rows && rows.length)
+    ? rows.map(r => `<tr>${columns.map(c => `<td${align(c)}>${csdRenderCell(r[c.key], c)}</td>`).join('')}</tr>`).join('')
+    : '';
+  const coverage = summary.coverageText ? `<div class="text-muted" style="margin:6px 0">${csdEsc(summary.coverageText)}</div>` : '';
+  const hintText = hint ? `<div class="text-muted" style="margin:6px 0">${csdEsc(hint)}</div>` : '';
+  return `<div class="pd-hint" style="margin-top:10px"><b>${csdEsc(title)}</b></div>${coverage}${hintText}<div class="table-wrap"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
+}
+
+/* ERP-232 原币金额汇总：按原币合并全部匹配客户 × 原币证据行，金额只在此面板出现、绝不复制到单位行 */
+function csdCurrencySummaryHtml(view) {
+  const summary = view && view.summary;
+  return csdSummaryPanelHtml(summary, '全匹配原币金额汇总（按原币合并全部匹配客户 × 原币证据行）', summary && summary.currencyColumns, summary && summary.currencyRows);
+}
+
+/* ERP-232 精确单位数量汇总：按原币内原始单位合并已审核订单明细数量；未知单位数量为「未知」，显式保留明细证据不完整原因 */
+function csdUnitSummaryHtml(view) {
+  const summary = view && view.summary;
+  const reasons = summary && summary.completenessReasons;
+  const hint = reasons && reasons.length ? ('明细证据不完整：' + reasons.join('；')) : '';
+  return csdSummaryPanelHtml(summary, '全匹配精确单位数量汇总（按原币内原始单位合并已审核订单明细数量）', summary && summary.unitColumns, summary && summary.unitRows, hint);
+}
+
 /* 结果区渲染：先给范围 / 口径提示（即使对应列被取消选择也始终显示），再渲染空态或表格 + 分页 */
 function csdResultHtml(view) {
   if (!view) return '';
@@ -2976,10 +3003,11 @@ function csdResultHtml(view) {
     view.sourceContextText,
   ].filter(Boolean).map(t => `<div class="pd-hint" style="margin:0 0 8px">${csdEsc(t)}</div>`).join('');
   const scope = `<div class="pd-hint" style="margin:0 0 8px">${csdScopeLine(view)}</div>`;
+  const summaryHtml = csdCurrencySummaryHtml(view) + csdUnitSummaryHtml(view);
   const body = view.rows && view.rows.length
     ? csdTableHtml(view) + csdPagingHtml(view)
     : csdEmptyHtml(view);
-  return `${scope}${filterLine}${hints}${body}`;
+  return `${scope}${filterLine}${hints}${summaryHtml}${body}`;
 }
 
 /* 字段选择器：只由目录白名单渲染为复选框，绝不渲染自由输入框或 SQL */

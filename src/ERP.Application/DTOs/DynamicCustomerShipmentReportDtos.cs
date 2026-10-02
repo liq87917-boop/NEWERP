@@ -96,7 +96,8 @@ public sealed record DynamicCustomerShipmentReportContextDto(
 /// <see cref="CurrencyContextText"/> / <see cref="UnitContextText"/> / <see cref="UnknownContextText"/> /
 /// <see cref="SourceContextText"/> 显式声明原币 / 精确单位 / 未知 / 来源口径（即使对应列被取消选择也始终呈现）；
 /// <see cref="SourceLimitText"/> 显式声明来源上限（有界读取，超出 fail closed）；<see cref="Context"/> 携带去重客户 / 订单数；
-/// <see cref="FilterText"/> 显式声明已规范化的应用筛选上下文（即使对应列被取消选择也始终呈现，供预览 / Excel / PDF 复用）。
+/// <see cref="FilterText"/> 显式声明已规范化的应用筛选上下文（即使对应列被取消选择也始终呈现，供预览 / Excel / PDF 复用）；
+/// <see cref="Summary"/> 携带分页 / 选定列投影之前、覆盖全部匹配行（与当前页 / 选定列无关）的「全匹配」原币金额与精确单位数量汇总。
 /// </summary>
 public sealed record DynamicCustomerShipmentReportPageDto(
     List<DynamicCustomerShipmentReportFieldDto> Columns,
@@ -120,4 +121,5 @@ public sealed record DynamicCustomerShipmentReportPageDto(
     string SourceContextText,
     string SourceLimitText,
     string FilterText,
-    DynamicCustomerShipmentReportContextDto Context);
+    DynamicCustomerShipmentReportContextDto Context,
+    DynamicCustomerShipmentSummaryDto? Summary = null);

@@ -1,3 +1,4 @@
+using ERP.Application.Interfaces;
 using ERP.Application.Services;
 using ERP.Domain.Entities;
 using ERP.Domain.Enums;
@@ -285,6 +286,40 @@ public class CustomerShipmentCurrencyUnitTests
         var row = Assert.Single(result);
         Assert.Equal(8m, row.TotalQuantity);   // 10 + (-2)，签名合计
         Assert.Equal(string.Empty, row.QuantityCompletenessReason);
+    }
+
+    // ==================== ERP-232 全匹配汇总（与既有精确单位分组同源） ====================
+
+    [Fact]
+    public void 全匹配汇总_同源精确单位分组_未知单位null且金额只属原币面板()
+    {
+        var item = new ReportDtos.CustomerShipmentItem
+        {
+            CustomerId = 1,
+            Currency = "USD",
+            TotalAmount = 100m,
+            OrderCount = 1,
+            UnitGroups = CustomerShipmentEvidenceRules.BuildUnitGroups(new[]
+            {
+                Detail(1, "PCS", 10m),
+                Detail(1, "PCS", -2m),
+                Detail(1, "", 5m),
+            }).ToList(),
+        };
+
+        var summary = DynamicCustomerShipmentSummaryRules.BuildSummary(new[] { item });
+
+        var pcs = Assert.Single(summary.UnitRows.Where(r => r.Unit == "PCS"));
+        Assert.Equal(8m, pcs.Quantity);
+        Assert.Equal(2, pcs.DetailCount);
+
+        var unknown = Assert.Single(summary.UnitRows.Where(r => r.Unit == CustomerShipmentEvidenceRules.UnknownUnitGroup));
+        Assert.Null(unknown.Quantity);
+        Assert.Equal(1, unknown.DetailCount);
+
+        // 金额只属于原币面板，绝不复制到单位行
+        Assert.Equal(100m, Assert.Single(summary.CurrencyRows).TotalAmount);
+        Assert.DoesNotContain(DynamicCustomerShipmentSummaryRules.UnitSummaryColumns, c => c.Key == "totalAmount");
     }
 }
 

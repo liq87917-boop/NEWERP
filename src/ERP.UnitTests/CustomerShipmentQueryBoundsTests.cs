@@ -1,4 +1,5 @@
 using ERP.Application.Common;
+using ERP.Application.Interfaces;
 using ERP.Application.Services;
 using ERP.Domain.Entities;
 using ERP.Domain.Enums;
@@ -179,5 +180,30 @@ public class CustomerShipmentQueryBoundsTests
         // 固定 3 次数据集访问：SalesOrders + SalesOrderDetails + BaseCustomers；无逐单查库
         Assert.Equal(3, counting.DatasetReads);
         Assert.Equal(0, counting.WriteCalls);
+    }
+
+    // ==================== ERP-232 全匹配汇总与分页同源（有界列表派生） ====================
+
+    [Fact]
+    public void BuildPage_越界页_全匹配汇总仍覆盖完整有界列表()
+    {
+        var items = new List<ReportDtos.CustomerShipmentItem>
+        {
+            new() { CustomerId = 1, Currency = "USD", TotalAmount = 100m, OrderCount = 1 },
+            new() { CustomerId = 2, Currency = "CNY", TotalAmount = 50m, OrderCount = 1 },
+        };
+
+        var page = DynamicCustomerShipmentReportRules.BuildPage(
+            items,
+            new List<string> { "currency", "totalAmount" },
+            page: 99,
+            pageSize: 20,
+            start: new DateTime(2026, 9, 1),
+            end: new DateTime(2026, 9, 30));
+
+        Assert.NotNull(page.Summary);
+        Assert.Empty(page.Rows);
+        Assert.Equal(2, page.Summary.CurrencyRows.Count);
+        Assert.Equal(2, page.Summary.CurrencyRows.Sum(r => r.CustomerCount));
     }
 }

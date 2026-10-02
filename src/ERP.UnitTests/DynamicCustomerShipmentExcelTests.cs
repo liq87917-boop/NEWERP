@@ -1,6 +1,7 @@
 using ERP.Api.Controllers;
 using ERP.Application.Common;
 using ERP.Application.DTOs;
+using ERP.Application.Interfaces;
 using ERP.Application.Services;
 using ERP.Domain.Entities;
 using ERP.Domain.Enums;
@@ -503,6 +504,52 @@ public class DynamicCustomerShipmentExcelTests
             }
         }
         Assert.Contains(DynamicCustomerShipmentReportRules.ContextFilterLabel, labels);
+    }
+
+    // ==================== 7. ERP-232 全匹配汇总不改变明细导出 ====================
+
+    [Fact]
+    public void BuildPage_装配全匹配汇总_明细导出仍保持数据与口径两张表()
+    {
+        var items = new List<ReportDtos.CustomerShipmentItem>
+        {
+            new() { CustomerId = 1, CustomerName = "客户", Currency = "USD", TotalAmount = 100m, OrderCount = 1 },
+        };
+
+        var page = DynamicCustomerShipmentReportRules.BuildPage(
+            items,
+            new List<string> { "customerName", "currency", "orderCount", "totalAmount" },
+            1, 20, Start, End);
+
+        Assert.NotNull(page.Summary);                      // 明细导出复用的页面仍携带全匹配汇总
+        Assert.Single(page.Summary.CurrencyRows);
+        Assert.Contains(DynamicCustomerShipmentSummaryRules.CurrencySummaryColumns, c => c.Key == "totalAmount");
+    }
+
+    [Fact]
+    public async Task Export_全匹配汇总在场_明细导出仍为数据与口径两张表_不新增汇总表()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedAuthorizedUser(db, "priv-user", "Priv", isSystemRole: true);
+        var customer = SeedCustomer(db, "C001", "客户");
+        SeedOrder(db, "SO-1", customer.Id, Currency.USD, 100m);
+
+        var ctl = NewController(db);
+        TestAuth.SetUser(ctl, user.Id);
+
+        var file = ExportOk(await ctl.Export(new DynamicCustomerShipmentReportRequest
+        {
+            Fields = new List<string> { "customerName", "totalAmount" },
+            Start = Start,
+            End = End,
+            Page = 1,
+            PageSize = 20
+        }));
+
+        using var workbook = OpenWorkbook(file.FileContents);
+        Assert.Equal(2, workbook.NumberOfSheets);          // 数据表 + 报表口径表，绝不新增汇总表
+        Assert.Equal("客户出货量统计表", workbook.GetSheetAt(0).SheetName);
+        Assert.Equal(DynamicCustomerShipmentReportRules.ContextSheetName, workbook.GetSheetAt(1).SheetName);
     }
 
 }

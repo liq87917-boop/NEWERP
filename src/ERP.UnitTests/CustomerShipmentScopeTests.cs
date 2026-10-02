@@ -408,4 +408,31 @@ public class CustomerShipmentScopeTests
         Assert.Equal(before, db.SalesOrders.Count());
         Assert.False(db.ChangeTracker.HasChanges());
     }
+
+    // ==================== ERP-232 全匹配汇总遵循数据范围 ====================
+
+    [Fact]
+    public async Task 全匹配汇总_受限制业务员_只覆盖被分配客户()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedAuthorizedUser(db, "alice-summary", "Sales");
+        var employee = SeedEmployee(db, "alice-summary");
+        var mine = SeedCustomer(db, "C001", "我的客户", employee.Id);
+        var other = SeedCustomer(db, "C002", "别人的客户", employee.Id + 1000);
+
+        SeedOrder(db, "SO-MINE", mine.Id, DocumentStatus.Approved);
+        SeedOrder(db, "SO-OTHER", other.Id, DocumentStatus.Approved);
+
+        var ctl = BuildController(db, user.Id);
+        var items = OkList(await ctl.CustomerShipment(Start, End));
+
+        // 全匹配汇总与分页明细同源：只覆盖当前账号数据范围内的客户 × 原币证据行
+        var page = DynamicCustomerShipmentReportRules.BuildPage(
+            items, new List<string> { "customerName" }, 1, 20, Start, End);
+
+        Assert.NotNull(page.Summary);
+        var row = Assert.Single(page.Summary.CurrencyRows);
+        Assert.Equal(1, row.CustomerCount);
+        Assert.Equal(1, row.OrderCount);
+    }
 }
