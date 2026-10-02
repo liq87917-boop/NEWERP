@@ -56,7 +56,8 @@ public class DynamicContainerStatsReportTests
 
     private static ContainerLoadingList SeedList(
         ErpDbContext db, string loadingListNo, long customerId, string containerNo,
-        DateTime? loadingDate = null, DocumentStatus status = DocumentStatus.Approved, bool deleted = false)
+        DateTime? loadingDate = null, DocumentStatus status = DocumentStatus.Approved, bool deleted = false,
+        decimal cartons = 1m, decimal weight = 2m, decimal volume = 3m)
     {
         var list = new ContainerLoadingList
         {
@@ -66,9 +67,9 @@ public class DynamicContainerStatsReportTests
             CustomerId = customerId,
             Status = status,
             IsDeleted = deleted,
-            TotalCartons = 1m,
-            TotalWeight = 2m,
-            TotalVolume = 3m
+            TotalCartons = cartons,
+            TotalWeight = weight,
+            TotalVolume = volume
         };
         db.ContainerLoadingLists.Add(list);
         db.SaveChanges();
@@ -422,6 +423,89 @@ public class DynamicContainerStatsReportTests
 
         var ex = await Assert.ThrowsAsync<BusinessException>(() => ctl.Export(Request()));
         Assert.Equal(ErrorCodes.Forbidden, ex.Code);
+    }
+
+    // ==================== 8. 全匹配汇总（ERP-255） ====================
+
+    [Fact]
+    public async Task 预览_汇总附加_每日期间汇总且跨页稳定()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedAuthorizedUser(db, "priv-user", "Priv", isSystemRole: true);
+        var customer = SeedCustomer(db, "C001", "客户");
+        SeedList(db, "LL-1", customer.Id, "AAA", new DateTime(2026, 9, 10), cartons: 10m, weight: 100m, volume: 5m);
+        SeedList(db, "LL-2", customer.Id, "BBB", new DateTime(2026, 9, 10), cartons: -2m, weight: 8m, volume: -1m);
+        SeedList(db, "LL-3", customer.Id, "CCC", new DateTime(2026, 9, 11), cartons: 0m, weight: 0m, volume: 0m);
+
+        var ctl = BuildController(db, user.Id);
+        TestAuth.SetUser(ctl, user.Id);
+
+        var page1 = OkPage(await ctl.Preview(Request(
+            fields: new List<string> { "containerNo" }, page: 1, pageSize: 2)));
+        var page2 = OkPage(await ctl.Preview(Request(
+            fields: new List<string> { "containerNo" }, page: 2, pageSize: 2)));
+
+        Assert.NotNull(page1.Summary);
+        Assert.NotNull(page2.Summary);
+
+        // 跨页汇总一致（覆盖全部匹配证据，与当前页 / 分页无关）
+        Assert.Equal(page1.Summary.Period, page2.Summary.Period);
+        Assert.Equal(page1.Summary.DailyRows.Count, page2.Summary.DailyRows.Count);
+        Assert.Equal(page1.Summary.DailyRows[0], page2.Summary.DailyRows[0]);
+
+        Assert.Equal(2, page1.Summary.DailyRows.Count);
+        Assert.Equal(new DateTime(2026, 9, 10), page1.Summary.DailyRows[0].Date);
+        Assert.Equal(2, page1.Summary.DailyRows[0].BucketCount);
+        Assert.Equal(2, page1.Summary.DailyRows[0].ApprovedLists);
+        Assert.Equal(0, page1.Summary.DailyRows[0].MissingContainerNoCount);
+        Assert.Equal(8m, page1.Summary.DailyRows[0].TotalCartons);    // 10 + (-2)
+        Assert.Equal(108m, page1.Summary.DailyRows[0].TotalWeight);
+        Assert.Equal(4m, page1.Summary.DailyRows[0].TotalVolume);
+
+        Assert.Equal(new DateTime(2026, 9, 11), page1.Summary.DailyRows[1].Date);
+        Assert.Equal(1, page1.Summary.DailyRows[1].BucketCount);
+
+        Assert.Equal(3, page1.Summary.Period.BucketCount);
+        Assert.Equal(3, page1.Summary.Period.ApprovedLists);
+        Assert.Equal(8m, page1.Summary.Period.TotalCartons);
+    }
+
+    [Fact]
+    public async Task 预览_汇总_空结果_无证据上下文()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedAuthorizedUser(db, "priv-user", "Priv", isSystemRole: true);
+
+        var ctl = BuildController(db, user.Id);
+        TestAuth.SetUser(ctl, user.Id);
+
+        var page = OkPage(await ctl.Preview(Request()));
+
+        Assert.NotNull(page.Summary);
+        Assert.Empty(page.Summary.DailyRows);
+        Assert.Equal(0, page.Summary.Period.BucketCount);
+        Assert.False(string.IsNullOrEmpty(page.Summary.NoEvidenceContext));
+    }
+
+    [Fact]
+    public async Task 预览_汇总_已记录零_区分无证据()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedAuthorizedUser(db, "priv-user", "Priv", isSystemRole: true);
+        var customer = SeedCustomer(db, "C001", "客户");
+        SeedList(db, "LL-ZERO", customer.Id, "TCLU-001", cartons: 0m, weight: 0m, volume: 0m);
+
+        var ctl = BuildController(db, user.Id);
+        TestAuth.SetUser(ctl, user.Id);
+
+        var page = OkPage(await ctl.Preview(Request()));
+
+        Assert.NotNull(page.Summary);
+        var day = Assert.Single(page.Summary.DailyRows);
+        Assert.Equal(0m, day.TotalCartons);
+        Assert.Equal(0m, day.TotalWeight);
+        Assert.Equal(0m, day.TotalVolume);
+        Assert.Equal(string.Empty, page.Summary.NoEvidenceContext);
     }
 }
 

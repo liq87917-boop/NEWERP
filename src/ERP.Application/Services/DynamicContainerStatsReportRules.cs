@@ -327,6 +327,9 @@ public static class DynamicContainerStatsReportRules
             items.Sum(x => x.LoadingListCount),
             SourceEvidenceBasis);
 
+        // ERP-255：在分页 / 选定列投影之前，对同一份完整有界、作用域化、已筛选证据桶纯派生「全匹配」每日与期间汇总
+        var summary = DynamicContainerStatsSummaryRules.BuildSummary(items);
+
         return new DynamicContainerStatsReportPageDto(
             columns,
             rows,
@@ -352,7 +355,8 @@ public static class DynamicContainerStatsReportRules
             filterText,
             CustomerScopeContextText,
             GroupingContextText,
-            context);
+            context,
+            summary);
     }
 
     /// <summary>把预览页分页信息格式化为上下文文本（日期 / 页 / 条数 / 行总数 / 总页数）。</summary>

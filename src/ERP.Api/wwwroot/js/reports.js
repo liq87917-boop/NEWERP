@@ -5194,6 +5194,53 @@ function cstKindOfCode(code) {
   return 'invalid';
 }
 
+/* 全匹配汇总数量文本（与 cstCellText 一致：整数原样、非整数两位小数；null/undefined 显示为空） */
+function cstSummaryQty(v) {
+  if (v === null || v === undefined) return '';
+  const n = Number(v);
+  if (Number.isFinite(n)) return Number.isInteger(n) ? String(n) : n.toFixed(2);
+  return String(v);
+}
+
+/* 全匹配汇总（ERP-255，只读）：基于服务端完整有界授权证据（字段投影 / 分页之前）的每日与期间汇总，
+   独立于当前页明细；日期升序；箱数 / 毛重 / 体积为签名头证据有符号独立单位合计；全部 HTML 转义。
+   无证据时显式说明；绝不合计授权范围客户数或推断实体柜容量。 */
+function cstSummaryHtml(view) {
+  const summary = view && view.summary;
+  if (!summary) return '';
+  const title = '<div class="text-muted" style="margin:6px 0"><b>全匹配汇总（全部匹配证据 · 非当前页明细）</b></div>';
+  if (!summary.dailyRows || summary.dailyRows.length === 0) {
+    const noEv = summary.noEvidenceContext || '没有符合所选日期范围、数据范围与筛选的已审核装柜清单头证据';
+    return `${title}<div class="empty" style="margin:4px 0">${cstEsc(noEv)}</div>`;
+  }
+  const rows = (summary.dailyRows || []).map(r => `<tr>
+      <td>${cstEsc(String(r.date || '').slice(0, 10))}</td>
+      <td class="text-right">${cstEsc(cstSummaryQty(r.bucketCount))}</td>
+      <td class="text-right">${cstEsc(cstSummaryQty(r.approvedLists))}</td>
+      <td class="text-right">${cstEsc(cstSummaryQty(r.missingContainerNoCount))}</td>
+      <td class="text-right">${cstEsc(cstSummaryQty(r.totalCartons))}</td>
+      <td class="text-right">${cstEsc(cstSummaryQty(r.totalWeight))}</td>
+      <td class="text-right">${cstEsc(cstSummaryQty(r.totalVolume))}</td>
+    </tr>`).join('');
+  const p = summary.period || {};
+  const periodRow = `<tr style="font-weight:600">
+      <td>期间合计</td>
+      <td class="text-right">${cstEsc(cstSummaryQty(p.bucketCount))}</td>
+      <td class="text-right">${cstEsc(cstSummaryQty(p.approvedLists))}</td>
+      <td class="text-right">${cstEsc(cstSummaryQty(p.missingContainerNoCount))}</td>
+      <td class="text-right">${cstEsc(cstSummaryQty(p.totalCartons))}</td>
+      <td class="text-right">${cstEsc(cstSummaryQty(p.totalWeight))}</td>
+      <td class="text-right">${cstEsc(cstSummaryQty(p.totalVolume))}</td>
+    </tr>`;
+  const table = `<div class="table-wrap" style="margin-top:4px"><table>
+    <thead><tr>
+      <th>装柜日历日</th><th class="text-right">证据桶数</th><th class="text-right">已审核装柜清单数</th>
+      <th class="text-right">缺柜号清单数</th><th class="text-right">箱数(cartons)</th>
+      <th class="text-right">毛重(kg)</th><th class="text-right">体积(m³)</th>
+    </tr></thead><tbody>${rows}${periodRow}</tbody></table></div>`;
+  return `${title}${table}`;
+}
+
 /* 预览结果（只读 / 边界 / 免责文案 + 规范化筛选 + 数量单位 / 未知实际容积 / 柜型 / 出运 / 来源 / 来源上限口径 + 空结果 + 表格 + 分页） */
 function cstResultHtml(view) {
   const readOnly = view && view.readOnlyText ? `<div class="pd-hint">${cstEsc(view.readOnlyText)}</div>` : '';
@@ -5213,8 +5260,9 @@ function cstResultHtml(view) {
   const context = contextLines.length
     ? `<div class="pd-hint" style="margin:6px 0">${contextLines.map(l => `<div>${cstEsc(l)}</div>`).join('')}</div>`
     : '';
+  const fullSummary = cstSummaryHtml(view);
   const empty = view && (!view.rows || view.rows.length === 0) ? cstEmptyHtml(view) : '';
-  return `${readOnly}${boundary}${disclaimer}${summary}${context}${empty}${cstTableHtml(view)}${cstPagingHtml(view)}`;
+  return `${readOnly}${boundary}${disclaimer}${summary}${context}${fullSummary}${empty}${cstTableHtml(view)}${cstPagingHtml(view)}`;
 }
 
 /* 字段选择器：仅由目录白名单渲染为复选框，无自由填写的字段名 */

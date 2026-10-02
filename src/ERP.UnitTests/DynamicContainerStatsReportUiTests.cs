@@ -210,4 +210,36 @@ public class DynamicContainerStatsReportUiTests
         Assert.DoesNotContain("SqlCommand", fn);
         Assert.DoesNotContain("ExecuteSql", fn);
     }
+
+    // ==================== 8. 全匹配汇总（ERP-255） ====================
+
+    [Fact]
+    public void 汇总_全匹配汇总_独立于当前页明细_转义()
+    {
+        var js = Script;
+
+        Assert.Contains("function cstSummaryHtml(", js);
+        var fn = Segment(js, "function cstSummaryHtml(", "function cstFieldChooserHtml(");
+        Assert.Contains("view.summary", fn);
+        Assert.Contains("summary.dailyRows", fn);
+        Assert.Contains("summary.period", fn);
+        Assert.Contains("summary.noEvidenceContext", fn);
+        Assert.Contains("cstEsc(", fn);
+
+        var result = Segment(js, "function cstResultHtml(", "function cstFieldChooserHtml(");
+        Assert.Contains("cstSummaryHtml(view)", result);
+    }
+
+    [Fact]
+    public void 汇总_失败清空_错误态不残留旧汇总()
+    {
+        var js = Script;
+
+        var err = Segment(js, "function cstErrorHtml(", "function cstKindOfCode(");
+        Assert.DoesNotContain("summary", err);
+        Assert.DoesNotContain("cstSummaryHtml", err);
+
+        var rp = Segment(js, "function cstResetPage(", "function cstCellText(");
+        Assert.Contains("CST_DYN.view = null", rp);
+    }
 }

@@ -100,6 +100,7 @@ public sealed record DynamicContainerStatsReportContextDto(
 /// 显式声明来源 / 来源上限 / 数量单位 / 未知实际容积 / 柜型 / 出运口径（即使对应列被取消选择也始终呈现）；
 /// <see cref="FilterText"/> 显式声明已规范化的应用筛选上下文；
 /// <see cref="CustomerScopeContextText"/> / <see cref="GroupingContextText"/> 显式声明客户范围与分组身份口径（即使对应列被取消选择也始终呈现）。
+/// <see cref="Summary"/> 携带分页 / 选定列投影之前、覆盖全部匹配装柜清单头证据（与当前页 / 选定列无关）的每日 / 期间全匹配汇总。
 /// </summary>
 public sealed record DynamicContainerStatsReportPageDto(
     List<DynamicContainerStatsReportFieldDto> Columns,
@@ -126,4 +127,46 @@ public sealed record DynamicContainerStatsReportPageDto(
     string FilterText,
     string CustomerScopeContextText,
     string GroupingContextText,
-    DynamicContainerStatsReportContextDto Context);
+    DynamicContainerStatsReportContextDto Context,
+    DynamicContainerStatsReportSummaryDto? Summary = null);
+
+/// <summary>
+/// 柜量与装柜利用率证据每日汇总行（ERP-255，只读派生）：按装柜日历日（升序）汇总完整有界授权证据桶。
+/// <see cref="BucketCount"/> 为证据桶数、<see cref="ApprovedLists"/> 为已审核装柜清单数、<see cref="MissingContainerNoCount"/> 为缺柜号（空白柜号）装柜清单数；
+/// <see cref="TotalCartons"/> / <see cref="TotalWeight"/> / <see cref="TotalVolume"/> 为签名持久化头箱数 / 毛重 / 体积证据的有符号独立单位合计；
+/// 绝不合计桶级授权范围客户数，也绝不推断全局去重客户数或实体柜容量。
+/// </summary>
+public sealed record DynamicContainerStatsReportDailySummaryDto(
+    DateTime Date,
+    int BucketCount,
+    int ApprovedLists,
+    int MissingContainerNoCount,
+    decimal TotalCartons,
+    decimal TotalWeight,
+    decimal TotalVolume);
+
+/// <summary>
+/// 柜量与装柜利用率证据期间汇总（ERP-255，只读派生）：对全部匹配的有界授权证据桶合计与每日行相同的事实，
+/// 箱数 / 毛重 / 体积为签名持久化头证据的独立单位合计，绝不跨单位合计、绝不合计授权范围客户数或推断实体柜容量。
+/// </summary>
+public sealed record DynamicContainerStatsReportPeriodSummaryDto(
+    int BucketCount,
+    int ApprovedLists,
+    int MissingContainerNoCount,
+    decimal TotalCartons,
+    decimal TotalWeight,
+    decimal TotalVolume);
+
+/// <summary>
+/// 柜量与装柜利用率证据「全匹配」汇总（ERP-255，只读派生）：在分页与选定列投影之前，基于全部匹配的
+/// 有界、作用域化、已筛选 <see cref="Interfaces.ReportDtos.ContainerStatsItem"/> 证据桶纯派生。
+/// <see cref="DailyColumns"/> 为固定每日汇总列（与明细页选定列无关）；<see cref="DailyRows"/> 为按装柜日历日升序的每日汇总；
+/// <see cref="Period"/> 为期间合计；<see cref="CoverageText"/> 显式声明覆盖范围与证据依据；
+/// <see cref="NoEvidenceContext"/> 在无证据时显式说明（有证据时为空串），区分「无证据」与「已记录零」。
+/// </summary>
+public sealed record DynamicContainerStatsReportSummaryDto(
+    List<DynamicContainerStatsReportFieldDto> DailyColumns,
+    List<DynamicContainerStatsReportDailySummaryDto> DailyRows,
+    DynamicContainerStatsReportPeriodSummaryDto Period,
+    string CoverageText,
+    string NoEvidenceContext);

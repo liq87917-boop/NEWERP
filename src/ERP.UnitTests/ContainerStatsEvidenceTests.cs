@@ -47,14 +47,44 @@ public class ContainerStatsEvidenceTests
     public void 分组键_非空白柜号_使用原始柜号()
     {
         var key = ContainerStatsEvidenceRules.BucketKey(new DateTime(2026, 9, 10), " TCLU-001 ", 7);
-        Assert.Equal("2026-09-10| TCLU-001 ", key);
+        Assert.Equal("2026-09-10|R| TCLU-001 ", key);
     }
 
     [Fact]
     public void 分组键_空白柜号_按装柜清单Id独立()
     {
         var key = ContainerStatsEvidenceRules.BucketKey(new DateTime(2026, 9, 10), "   ", 7);
-        Assert.Equal("2026-09-10|#7", key);
+        Assert.Equal("2026-09-10|B|7", key);
+    }
+
+    [Fact]
+    public void 分组键_原始井号柜号与空白清单Id_不碰撞()
+    {
+        var raw = ContainerStatsEvidenceRules.BucketKey(new DateTime(2026, 9, 10), "#1", 99);
+        var blank = ContainerStatsEvidenceRules.BucketKey(new DateTime(2026, 9, 10), "   ", 1);
+
+        Assert.Equal("2026-09-10|R|#1", raw);
+        Assert.Equal("2026-09-10|B|1", blank);
+        Assert.NotEqual(raw, blank);
+    }
+
+    [Fact]
+    public void 构建桶_原始井号柜号与空白清单Id_独立成桶不碰撞()
+    {
+        var lists = new[]
+        {
+            List(2, new DateTime(2026, 9, 10), "#1", 101),
+            List(1, new DateTime(2026, 9, 10), "   ", 102),
+        };
+
+        var buckets = ContainerStatsEvidenceRules.BuildBuckets(lists);
+
+        Assert.Equal(2, buckets.Count);
+        var raw = Assert.Single(buckets, b => !b.ContainerNoBlank);
+        Assert.Equal("#1", raw.ContainerNo);
+        var blank = Assert.Single(buckets, b => b.ContainerNoBlank);
+        Assert.Equal("未填柜号（装柜清单 #1）", blank.ContainerNo);
+        Assert.Equal(1, blank.LoadingListCount);
     }
 
     [Fact]

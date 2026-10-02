@@ -1,3 +1,4 @@
+using System.Globalization;
 using ERP.Application.Interfaces;
 using ERP.Domain.Entities;
 
@@ -57,14 +58,55 @@ public static class ContainerStatsEvidenceRules
     public static string ContainerNoLabel(string? containerNo, long loadingListId)
         => IsContainerNoBlank(containerNo) ? $"{BlankContainerPrefix}（装柜清单 #{loadingListId}）" : containerNo!;
 
+    /// <summary>证据桶分组身份的种类：原始柜号桶 / 空白（缺柜号）柜号桶。</summary>
+    public enum ContainerStatsBucketKind
+    {
+        /// <summary>原始非空白柜号桶（按精确原始柜号合并）</summary>
+        Raw,
+
+        /// <summary>空白 / 纯空白柜号桶（按装柜清单 Id 独立）</summary>
+        Blank,
+    }
+
     /// <summary>
-    /// 稳定分组键：装柜日历日 + 精确原始非空白柜号；空白 / 纯空白柜号用装柜清单 Id 独立区分。
-    /// 用于稳定排序（Ordinal），保证同一来源在不同请求下的桶顺序一致。
+    /// 证据桶分组身份（类型化 / 消歧）：明确区分「原始柜号」与「空白 / 纯空白柜号（按装柜清单 Id 独立）」两种桶身份，
+    /// 避免原始柜号字面文本（如「#1」）与空白柜号装柜清单 Id（1）产生字符串键碰撞；Raw 桶按原始柜号合并、Blank 桶按装柜清单 Id 独立。
+    /// </summary>
+    public readonly record struct ContainerStatsBucketId
+    {
+        public ContainerStatsBucketId(DateTime loadingDate, ContainerStatsBucketKind kind, string key)
+        {
+            LoadingDate = loadingDate;
+            Kind = kind;
+            Key = key;
+        }
+
+        /// <summary>装柜日历日（仅日期部分）</summary>
+        public DateTime LoadingDate { get; }
+
+        /// <summary>桶身份种类（原始柜号 / 空白柜号）</summary>
+        public ContainerStatsBucketKind Kind { get; }
+
+        /// <summary>身份键：Raw 为精确原始非空白柜号；Blank 为装柜清单 Id 文本</summary>
+        public string Key { get; }
+
+        public static ContainerStatsBucketId From(DateTime loadingDate, string? containerNo, long loadingListId)
+            => IsContainerNoBlank(containerNo)
+                ? new ContainerStatsBucketId(loadingDate.Date, ContainerStatsBucketKind.Blank, loadingListId.ToString(CultureInfo.InvariantCulture))
+                : new ContainerStatsBucketId(loadingDate.Date, ContainerStatsBucketKind.Raw, containerNo!);
+    }
+
+    /// <summary>
+    /// 稳定分组键（消歧后字符串）：装柜日历日 + 类型标记 + 精确原始非空白柜号 / 空白装柜清单 Id。
+    /// 用于稳定排序（Ordinal），保证同一来源在不同请求下的桶顺序一致，且原始柜号「#1」与空白清单 Id 1 绝不碰撞。
     /// </summary>
     public static string BucketKey(DateTime loadingDate, string? containerNo, long loadingListId)
-        => IsContainerNoBlank(containerNo)
-            ? $"{loadingDate:yyyy-MM-dd}|#{loadingListId}"
-            : $"{loadingDate:yyyy-MM-dd}|{containerNo}";
+    {
+        var id = ContainerStatsBucketId.From(loadingDate, containerNo, loadingListId);
+        return id.Kind == ContainerStatsBucketKind.Blank
+            ? $"{id.LoadingDate:yyyy-MM-dd}|B|{id.Key}"
+            : $"{id.LoadingDate:yyyy-MM-dd}|R|{id.Key}";
+    }
 
     /// <summary>按分组键在内存中构建证据桶（每组为一个桶；只读，不落库、不执行 SQL）</summary>
     public static IReadOnlyList<ReportDtos.ContainerStatsItem> BuildBuckets(
@@ -72,15 +114,15 @@ public static class ContainerStatsEvidenceRules
     {
         ArgumentNullException.ThrowIfNull(lists);
         return lists
-            .GroupBy(x => BucketKey(x.LoadingDate, x.ContainerNo, x.Id))
+            .GroupBy(x => ContainerStatsBucketId.From(x.LoadingDate, x.ContainerNo, x.Id))
             .Select(g =>
             {
                 var first = g.First();
-                var blank = IsContainerNoBlank(first.ContainerNo);
+                var blank = g.Key.Kind == ContainerStatsBucketKind.Blank;
                 var invalid = g.Count(x => x.CustomerId <= 0);
                 return new ReportDtos.ContainerStatsItem
                 {
-                    BucketKey = g.Key,
+                    BucketKey = BucketKey(first.LoadingDate, first.ContainerNo, first.Id),
                     LoadingDate = first.LoadingDate.Date,
                     ContainerNo = ContainerNoLabel(first.ContainerNo, first.Id),
                     ContainerNoBlank = blank,
