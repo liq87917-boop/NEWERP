@@ -1,5 +1,6 @@
 using ERP.Application.Common;
 using ERP.Application.DTOs;
+using ERP.Application.Services;
 using PdfSharp.Drawing;
 using PdfSharp.Pdf;
 using System.Globalization;
@@ -51,6 +52,9 @@ public static class DynamicProductSalesRankingPdfExporter
 
     /// <summary>报表标题</summary>
     private const string ReportTitle = "商品销量排名报表（发货数量证据）";
+
+    /// <summary>单位汇总分区标题（ERP-218：仅 unit 分组时渲染，绝不跨单位合计数量、绝不追加金额）</summary>
+    private const string UnitSummaryTitle = "商品销量排名报表（单位汇总 · 发货数量证据）";
 
     /// <summary>导出当前预览页为 PDF 字节流（只读；字体缺失显式失败）</summary>
     public static byte[] Export(DynamicProductSalesRankingReportPageDto page)
@@ -164,6 +168,11 @@ public static class DynamicProductSalesRankingPdfExporter
                         }
                     }
                 }
+            }
+            if (DynamicProductSalesRankingReportRules.IsUnitGrouping(page.GroupBy))
+            {
+                DrawUnitSummarySection(document, page, titleFont, metaFont, headerFont, cellFont,
+                    borderPen, headerBrush, gfxList, usableWidth, contentBottom);
             }
         }
         finally
@@ -349,6 +358,143 @@ public static class DynamicProductSalesRankingPdfExporter
     }
 
 
+    // ==================== 单位汇总分区（ERP-218） ====================
+
+    /// <summary>
+    /// 渲染「单位汇总」分区（仅 unit 分组时）：按精确单位稳定呈现排名桶数与同单位签名数量小计，
+    /// 未知单位数量显式渲染「未知」；行数超出按「行页」拆分、每个行页重复表头与标题；空分组渲染显式空提示；
+    /// 绝不跨单位合计数量、绝不追加金额。
+    /// </summary>
+    private static void DrawUnitSummarySection(
+        PdfDocument document,
+        DynamicProductSalesRankingReportPageDto page,
+        XFont titleFont, XFont metaFont, XFont headerFont, XFont cellFont,
+        XPen borderPen, XBrush headerBrush,
+        List<XGraphics> gfxList, double usableWidth, double contentBottom)
+    {
+        var groups = page.Groups ?? new List<DynamicProductSalesRankingReportGroupDto>();
+
+        var notes = new List<string>();
+        AddWrapped(notes, page.GroupContextText, metaFont, usableWidth);
+        AddWrapped(notes, DynamicProductSalesRankingReportRules.BuildTopContext(page.Top, page.TopLimited), metaFont, usableWidth);
+        if (!string.IsNullOrEmpty(page.FilterText))
+            AddWrapped(notes, "筛选：" + page.FilterText, metaFont, usableWidth);
+        AddWrapped(notes, page.UnitContextText, metaFont, usableWidth);
+
+        var headHeightMm = TitleHeightMm + MetaHeightMm + notes.Count * NoteLineHeightMm;
+        var headerHeight = Mm(HeaderRowHeightMm);
+        var dataRowHeight = Mm(DataRowHeightMm);
+        var rowsPerPage = Math.Max(1, (int)Math.Floor(
+            (contentBottom - Mm(MarginTopMm) - Mm(headHeightMm) - headerHeight) / dataRowHeight));
+        var rowPageCount = groups.Count == 0 ? 1 : (int)Math.Ceiling(groups.Count / (double)rowsPerPage);
+
+        var widths = new[] { Mm(60), Mm(40), Mm(90) };
+        var headers = new[]
+        {
+            DynamicProductSalesRankingReportRules.UnitSummaryUnitColumn,
+            DynamicProductSalesRankingReportRules.UnitSummaryBucketCountColumn,
+            DynamicProductSalesRankingReportRules.UnitSummaryQuantityColumn,
+        };
+
+        for (var rp = 0; rp < rowPageCount; rp++)
+        {
+            var gfx = NewPage(document);
+            gfxList.Add(gfx);
+            var y = DrawUnitSummaryHead(gfx, titleFont, metaFont, page, groups.Count, rp, rowPageCount, notes);
+            y = DrawUnitSummaryHeaders(gfx, headerFont, headerBrush, borderPen, headers, widths, y);
+
+            if (groups.Count == 0)
+            {
+                gfx.DrawString(DynamicProductSalesRankingReportRules.UnitSummaryEmptyNote,
+                    cellFont, XBrushes.Black,
+                    new XRect(Mm(MarginLeftMm), y + Mm(2), usableWidth, dataRowHeight), XStringFormats.TopLeft);
+                continue;
+            }
+
+            var start = rp * rowsPerPage;
+            var count = Math.Min(rowsPerPage, groups.Count - start);
+            for (var i = 0; i < count; i++)
+                DrawGroupSummaryRow(gfx, cellFont, borderPen, widths, groups[start + i], y + i * dataRowHeight);
+        }
+    }
+
+    /// <summary>单位汇总页头：标题（分页时带页码）+ 日期 / Top / 组数 + 分组 / Top / 筛选 / 单位口径上下文</summary>
+    private static double DrawUnitSummaryHead(
+        XGraphics gfx, XFont titleFont, XFont metaFont,
+        DynamicProductSalesRankingReportPageDto page, int groupCount,
+        int rowPage, int rowPageCount, IReadOnlyList<string> notes)
+    {
+        var left = Mm(MarginLeftMm);
+        var width = Mm(PageWidthMm - MarginLeftMm - MarginRightMm);
+
+        var title = UnitSummaryTitle;
+        if (rowPageCount > 1)
+            title += $"（页 {rowPage + 1}/{rowPageCount}）";
+
+        gfx.DrawString(title, titleFont, XBrushes.Black,
+            new XRect(left, Mm(MarginTopMm), width, Mm(TitleHeightMm)), XStringFormats.TopCenter);
+
+        var meta = $"日期 {page.Start.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)}"
+            + $" ~ {page.End.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)}"
+            + $" · Top {page.Top.ToString(CultureInfo.InvariantCulture)}"
+            + (page.TopLimited ? "（已达 Top 上限）" : string.Empty)
+            + $" · 共 {groupCount.ToString(CultureInfo.InvariantCulture)} 组";
+        gfx.DrawString(meta, metaFont, XBrushes.Black,
+            new XRect(left, Mm(MarginTopMm + TitleHeightMm), width, Mm(MetaHeightMm)), XStringFormats.TopCenter);
+
+        var y = Mm(MarginTopMm + TitleHeightMm + MetaHeightMm);
+        foreach (var note in notes)
+        {
+            gfx.DrawString(note, metaFont, XBrushes.Black,
+                new XRect(left, y, width, Mm(NoteLineHeightMm)), XStringFormats.TopLeft);
+            y += Mm(NoteLineHeightMm);
+        }
+
+        return y;
+    }
+
+    /// <summary>单位汇总表头（3 列：单位 / 排名桶数 / 同单位数量小计）</summary>
+    private static double DrawUnitSummaryHeaders(
+        XGraphics gfx, XFont font, XBrush brush, XPen pen,
+        IReadOnlyList<string> headers, double[] widths, double y)
+    {
+        var left = Mm(MarginLeftMm);
+        for (var c = 0; c < headers.Count; c++)
+        {
+            var x = left + SumWidths(widths, c);
+            var rect = new XRect(x, y, widths[c], Mm(HeaderRowHeightMm));
+            gfx.DrawRectangle(pen, brush, rect);
+            gfx.DrawString(headers[c], font, XBrushes.Black, rect, XStringFormats.Center);
+        }
+
+        return y + Mm(HeaderRowHeightMm);
+    }
+
+    /// <summary>单位汇总行：单位标签 / 排名桶数 / 同单位签名数量小计（未知单位数量显式「未知」，绝不回落 0）</summary>
+    private static void DrawGroupSummaryRow(
+        XGraphics gfx, XFont font, XPen pen,
+        double[] widths, DynamicProductSalesRankingReportGroupDto group, double y)
+    {
+        var left = Mm(MarginLeftMm);
+        var cells = new[]
+        {
+            group.Label,
+            group.RankingBucketCount.ToString(CultureInfo.InvariantCulture),
+            group.IsUnknown
+                ? DynamicProductSalesRankingReportRules.UnknownQuantityText
+                : FormatCellValue(group.TotalQuantity),
+        };
+
+        for (var c = 0; c < cells.Length; c++)
+        {
+            var x = left + SumWidths(widths, c);
+            var rect = new XRect(x, y, widths[c], Mm(DataRowHeightMm));
+            gfx.DrawRectangle(pen, rect);
+            var format = c == 0 ? XStringFormats.CenterLeft : XStringFormats.CenterRight;
+            DrawCellText(gfx, cells[c], font, rect, format);
+        }
+    }
+
     /// <summary>把一行按选定列顺序转成 PDF 单元格文本（与绘制共用同一口径，供测试验证字段顺序与空值）</summary>
     public static IReadOnlyList<string> BuildRowCells(
         IReadOnlyList<DynamicProductSalesRankingReportFieldDto> columns,
@@ -358,6 +504,27 @@ public static class DynamicProductSalesRankingPdfExporter
         foreach (var col in columns)
             cells.Add(FormatFieldCell(col, row));
         return cells;
+    }
+
+    /// <summary>把分组桶转成 PDF 单元格文本（与绘制共用同一口径，供测试验证精确单位 / 签名数量 / 未知单位证据）</summary>
+    public static IReadOnlyList<IReadOnlyList<string>> BuildGroupSummaryRows(
+        IReadOnlyList<DynamicProductSalesRankingReportGroupDto> groups)
+    {
+        var list = groups ?? Array.Empty<DynamicProductSalesRankingReportGroupDto>();
+        var rows = new List<IReadOnlyList<string>>(list.Count);
+        foreach (var group in list)
+        {
+            rows.Add(new[]
+            {
+                group.Label,
+                group.RankingBucketCount.ToString(CultureInfo.InvariantCulture),
+                group.IsUnknown
+                    ? DynamicProductSalesRankingReportRules.UnknownQuantityText
+                    : FormatCellValue(group.TotalQuantity),
+            });
+        }
+
+        return rows;
     }
 
     /// <summary>字段感知的单元格文本：按选定列键照实取行值；null 显示空文本（与既有 Excel 导出口径一致，绝不推算 / 修复）</summary>
