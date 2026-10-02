@@ -27,15 +27,18 @@ public sealed class ReportConfigurationExecutionService : IReportConfigurationEx
 
     private readonly IErpDbContext _db;
     private readonly IReadOnlyList<IReportConfigurationDatasetProvider> _providers;
+    private readonly IReportConfigurationRelationResolver? _relationResolver;
 
     public ReportConfigurationExecutionService(
         IErpDbContext db,
-        IEnumerable<IReportConfigurationDatasetProvider> providers)
+        IEnumerable<IReportConfigurationDatasetProvider> providers,
+        IReportConfigurationRelationResolver? relationResolver = null)
     {
         _db = db;
         _providers = (providers ?? Array.Empty<IReportConfigurationDatasetProvider>())
             .OrderBy(p => p.DatasetKey, StringComparer.Ordinal)
             .ToList();
+        _relationResolver = relationResolver;
     }
 
     /// <inheritdoc />
@@ -152,6 +155,7 @@ public sealed class ReportConfigurationExecutionService : IReportConfigurationEx
         // 分发执行（适配器内部再次走既有查询的菜单授权 + 数据范围，并保留币种 / 单位口径）
         var preview = await provider.PreviewAsync(definition, parameters, userId, cancellationToken);
         ApplyMetrics(definition, dataset, parameters.GroupBy, preview);
+        await ApplyRelationsAsync(definition, preview, userId, cancellationToken);
         preview.ConfigurationId = configurationId;
         preview.PinnedRevisionVersion = pinnedRevision;
         preview.IsPinnedRevision = pinnedRevision.HasValue;
@@ -206,6 +210,20 @@ public sealed class ReportConfigurationExecutionService : IReportConfigurationEx
             foreach (var key in remove)
                 row.Remove(key);
         }
+    }
+
+    /// <summary>补全受控关系维度（ERP-268）：定义含关系选择时调用关系解析器，批量只读解析当前页客户 Id。</summary>
+    private async Task ApplyRelationsAsync(
+        ReportConfigurationDefinition definition,
+        ReportConfigurationPreviewDto preview,
+        long userId,
+        CancellationToken cancellationToken)
+    {
+        if (_relationResolver is null)
+            return;
+        if (definition.Relations is not { Count: > 0 })
+            return;
+        await _relationResolver.EnrichAsync(preview, definition, userId, cancellationToken);
     }
 
     private static void EnsureAuthenticated(long ownerUserId)

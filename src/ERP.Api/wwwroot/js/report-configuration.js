@@ -46,6 +46,7 @@ let RCC = {
   filters: [],
   computedColumns: [],
   aggregates: [],
+  relations: [],
   groupBy: 'none',
   page: 1,
   pageSize: RCC_DEFAULT_PAGE_SIZE,
@@ -432,6 +433,7 @@ function rccBuildDefinition(state) {
     aggregates: rccBuildAggregates(state),
     capabilities: [],
     computedColumns: rccBuildComputedColumns(state),
+    relations: rccBuildRelations(state),
     presentation: { page: 1, pageSize: state.pageSize || RCC_DEFAULT_PAGE_SIZE },
   };
 }
@@ -518,6 +520,64 @@ function rccBuildAggregates(state) {
     const m = metrics.find(x => x.key === a.fieldKey);
     return !!m && ((m.allowedFunctions || []).indexOf(a.function) >= 0);
   });
+}
+
+/* 组装已选中的受控关系（关系键 / 字段只来自目录 relation 白名单；未知键 / 字段丢弃，fail closed） */
+function rccBuildRelations(state) {
+  const ds = rccCurrentDataset();
+  const catalog = (ds && ds.relations) || [];
+  const byKey = new Map(catalog.map(r => [String(r && r.key || '').trim(), r]));
+  return ((state && state.relations) || []).map(r => ({
+    relationKey: String(r && r.relationKey || '').trim(),
+    fields: ((r && r.fields) || []).map(f => String(f || '').trim()).filter(Boolean),
+  })).filter(r => {
+    if (!r.relationKey || !byKey.has(r.relationKey)) return false;
+    const meta = byKey.get(r.relationKey);
+    const allowed = new Set(((meta && meta.fields) || []).map(f => f && f.key).filter(Boolean));
+    if (!r.fields.length) return false;
+    r.fields = r.fields.filter(f => allowed.has(f));
+    return r.fields.length > 0;
+  });
+}
+
+/* 受控关系选择器：仅目录 relation 白名单 + 允许字段，绝不渲染任意关系 / 联接 / SQL */
+function rccRelationsHtml() {
+  const ds = rccCurrentDataset();
+  const relations = (ds && ds.relations) || [];
+  if (!relations.length) return '';
+  const selected = RCC.relations || [];
+  const rows = relations.map(rel => {
+    const relKey = String(rel.key || '').trim();
+    const picked = (selected.find(s => s.relationKey === relKey) || {}).fields || [];
+    const checks = (rel.fields || []).map(f => {
+      const fk = String(f.key || '').trim();
+      const on = picked.indexOf(fk) >= 0 ? ' checked' : '';
+      return '<label class="rcc-relation-field"><input type="checkbox" data-rel="' + rccEsc(relKey)
+        + '" data-field="' + rccEsc(fk) + '"' + on
+        + ' onchange="rccOnRelationField(this.getAttribute(\'data-rel\'), this.getAttribute(\'data-field\'), this.checked)">'
+        + rccEsc(f.label) + '</label>';
+    }).join('');
+    return '<div class="rcc-relation-row"><div class="rcc-relation-key">' + rccEsc(rel.label)
+      + '<span class="rcc-muted">（' + rccEsc(rel.cardinality || '') + '）</span></div>'
+      + '<div class="rcc-relation-fields">' + checks + '</div></div>';
+  }).join('');
+  return '<div class="rcc-relations"><label>客户维度（受控关系，仅客户编码 / 国别）</label>' + rows + '</div>';
+}
+
+function rccOnRelationField(relKey, fieldKey, checked) {
+  let item = (RCC.relations || []).find(r => r.relationKey === relKey);
+  if (!item) {
+    if (!checked) return;
+    item = { relationKey: relKey, fields: [] };
+    RCC.relations.push(item);
+  }
+  const idx = item.fields.indexOf(fieldKey);
+  if (checked && idx < 0) item.fields.push(fieldKey);
+  if (!checked && idx >= 0) item.fields.splice(idx, 1);
+  if (!item.fields.length) {
+    RCC.relations = RCC.relations.filter(r => r !== item);
+  }
+  rccTouch();
 }
 
 function rccMetricFieldOptionsHtml(selected) {
@@ -645,6 +705,7 @@ function rccRenderDesigner(html) {
     + '<input id="rcc-name" value="' + rccEsc(RCC.name) + '" maxlength="200" oninput="rccOnNameInput(this.value)"></div>'
     + '<div class="rcc-fields"><label>选择字段（可上下调整顺序）</label>' + rccFieldChooserHtml(RCC.fields, RCC.selectedKeys) + '</div>'
     + rccComputedColumnsHtml()
+    + rccRelationsHtml()
     + '<div class="rcc-filters"><label>类型化筛选</label>' + rccFiltersHtml(RCC.filters, RCC.fields)
     + '<button type="button" class="btn" onclick="rccAddFilter()">+ 添加筛选</button></div>'
     + '<div class="rcc-grouping"><label>分组</label>' + rccGroupingHtml(ds.groupingKeys, RCC.groupBy) + '</div>'
@@ -763,6 +824,7 @@ function rccSelectDataset(key, touch = true) {
   RCC.filters = [];
   RCC.computedColumns = [];
   RCC.aggregates = [];
+  RCC.relations = [];
   RCC.groupBy = 'none';
   RCC.page = 1;
   if (touch) rccTouch();
@@ -883,6 +945,10 @@ function rccApplyDefinition(def) {
     function: String(a.function || '').trim(),
     fieldKey: String(a.fieldKey || '').trim(),
   })).filter(a => a.fieldKey && a.function);
+  RCC.relations = ((def && def.relations) || []).map(r => ({
+    relationKey: String(r.relationKey || '').trim(),
+    fields: ((r && r.fields) || []).map(f => String(f || '').trim()).filter(Boolean),
+  })).filter(r => r.relationKey && r.fields.length);
 }
 
 async function rccLoadConfiguration(id) {

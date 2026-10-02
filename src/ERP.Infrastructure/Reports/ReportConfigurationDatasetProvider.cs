@@ -105,7 +105,7 @@ public sealed class SalesOrderReportConfigurationDatasetProvider : IReportConfig
         var groupBy = DynamicSalesOrderReportRules.NormalizeGroupBy(parameters.GroupBy);
         var request = new DynamicSalesOrderReportRequest
         {
-            Fields = BuildFields(definition.Fields, definition.ComputedColumns, definition.Aggregates, groupBy),
+            Fields = BuildFields(definition.Fields, definition.ComputedColumns, definition.Aggregates, groupBy, definition.Relations),
             Page = parameters.Page,
             PageSize = parameters.PageSize,
             GroupBy = groupBy,
@@ -175,7 +175,8 @@ public sealed class SalesOrderReportConfigurationDatasetProvider : IReportConfig
         IReadOnlyList<string> fields,
         IReadOnlyList<ReportConfigurationComputedColumn> computedColumns,
         IReadOnlyList<ReportConfigurationAggregate> aggregates,
-        string groupBy)
+        string groupBy,
+        IReadOnlyList<ReportConfigurationRelationSelection> relations)
     {
         var selected = (fields ?? new List<string>())
             .Where(f => !string.IsNullOrWhiteSpace(f))
@@ -211,6 +212,10 @@ public sealed class SalesOrderReportConfigurationDatasetProvider : IReportConfig
 
         if (needsCurrency && !selected.Contains("currency", StringComparer.OrdinalIgnoreCase))
             selected.Add("currency");
+
+        // 关系来源事实键：即使用户未选择展示，也必须获取（引擎补全后剥离，绝不返回隐藏依赖值）
+        if (relations is { Count: > 0 } && !selected.Contains("customerId", StringComparer.OrdinalIgnoreCase))
+            selected.Add("customerId");
 
         return selected;
     }
@@ -285,6 +290,10 @@ public sealed class SalesOrderReportConfigurationDatasetProvider : IReportConfig
             Metrics = ReportConfigurationMetricRules.BuildMetrics(fields, Grain),
             GroupCustomerFieldKey = "customerId",
             GroupMonthFieldKey = "orderDate",
+            Relations = new List<ReportConfigurationRelationDto>
+            {
+                ReportConfigurationRelationRules.BuildCustomerRelation(Grain),
+            },
         };
     }
 
@@ -400,7 +409,7 @@ public sealed class ReceivableReportConfigurationDatasetProvider : IReportConfig
         var groupBy = DynamicReceivableReportRules.NormalizeGroupBy(parameters.GroupBy);
         var request = new DynamicReceivableReportRequest
         {
-            Fields = BuildFields(definition.Fields, definition.ComputedColumns, definition.Aggregates, groupBy),
+            Fields = BuildFields(definition.Fields, definition.ComputedColumns, definition.Aggregates, groupBy, definition.Relations),
             Page = parameters.Page,
             PageSize = parameters.PageSize,
             GroupBy = groupBy,
@@ -471,7 +480,8 @@ public sealed class ReceivableReportConfigurationDatasetProvider : IReportConfig
         IReadOnlyList<string> fields,
         IReadOnlyList<ReportConfigurationComputedColumn> computedColumns,
         IReadOnlyList<ReportConfigurationAggregate> aggregates,
-        string groupBy)
+        string groupBy,
+        IReadOnlyList<ReportConfigurationRelationSelection> relations)
     {
         var selected = (fields ?? new List<string>())
             .Where(f => !string.IsNullOrWhiteSpace(f))
@@ -507,6 +517,10 @@ public sealed class ReceivableReportConfigurationDatasetProvider : IReportConfig
 
         if (needsCurrency && !selected.Contains("currency", StringComparer.OrdinalIgnoreCase))
             selected.Add("currency");
+
+        // 关系来源事实键：即使用户未选择展示，也必须获取（引擎补全后剥离，绝不返回隐藏依赖值）
+        if (relations is { Count: > 0 } && !selected.Contains("customerId", StringComparer.OrdinalIgnoreCase))
+            selected.Add("customerId");
 
         return selected;
     }
@@ -581,6 +595,10 @@ public sealed class ReceivableReportConfigurationDatasetProvider : IReportConfig
             Metrics = ReportConfigurationMetricRules.BuildMetrics(fields, Grain),
             GroupCustomerFieldKey = "customerId",
             GroupMonthFieldKey = "invoiceDate",
+            Relations = new List<ReportConfigurationRelationDto>
+            {
+                ReportConfigurationRelationRules.BuildCustomerRelation(Grain),
+            },
         };
     }
 

@@ -205,6 +205,7 @@ public static class ReportConfigurationRules
         ValidateCapabilities(definition, dataset);
         ReportConfigurationFormulaRules.ValidateComputedColumns(definition, dataset);
         ValidatePresentation(definition, dataset);
+        ReportConfigurationRelationRules.Validate(definition, dataset);
     }
 
     // ==================== 3. 有界尺寸 / 字段 / 筛选 ====================

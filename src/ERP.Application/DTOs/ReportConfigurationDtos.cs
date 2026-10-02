@@ -71,6 +71,14 @@ public static class ReportConfigurationConstants
 
     public const string DatasetSalesOrder = "sales-order";
     public const string DatasetReceivable = "receivable";
+
+    // ==================== 受控关系（ERP-268：客户维度） ====================
+
+    /// <summary>客户维度关系键（稳定、受控；唯一允许的关系键）</summary>
+    public const string RelationCustomer = "customer";
+
+    /// <summary>关系基数：多对一（有限；拒绝任意 / 一对多 / 事实联接）</summary>
+    public const string CardinalityManyToOne = "many-to-one";
 }
 
 /// <summary>
@@ -131,6 +139,57 @@ public sealed record ReportConfigurationDatasetDto(
 
     /// <summary>按月份分组使用的底层日期字段键（销售订单 orderDate / 应收账款 invoiceDate）。</summary>
     public string? GroupMonthFieldKey { get; init; }
+
+    /// <summary>受控关系目录（ERP-268）：稳定关系元数据与允许字段清单；空表示该数据集不暴露任何关系。</summary>
+    public List<ReportConfigurationRelationDto> Relations { get; init; } = new();
+}
+
+/// <summary>
+/// 受控关系字段（有限、只读）：目标维度允许选择的有限文本字段（仅客户编码 / 国别），
+/// 绝不暴露地址 / 联系人 / 银行 / 隐私字段。
+/// </summary>
+public sealed record ReportConfigurationRelationFieldDto(
+    string Key,
+    string Label,
+    string Type);
+
+/// <summary>
+/// 受控关系目录项（有限、只读）：稳定关系键、来源事实粒度 / 键、目标维度唯一键、多对一基数、
+/// 目标权限、标签 / 类型、允许字段清单与缺失 / 删除语义。全部为服务端静态白名单，绝不来自客户端。
+/// </summary>
+public sealed record ReportConfigurationRelationDto(
+    string Key,
+    string Label,
+    string SourceFactGrain,
+    string SourceFactKey,
+    string TargetDimensionUniqueKey,
+    string Cardinality,
+    string RequiredMenuCode,
+    string RequiredMenuText,
+    IReadOnlyList<ReportConfigurationRelationFieldDto> Fields,
+    string MissingDeletedSemantics);
+
+/// <summary>用户选定的关系（关系键 + 有限字段；字段只允许目标维度白名单内的文本字段）。</summary>
+public sealed class ReportConfigurationRelationSelection
+{
+    /// <summary>关系键（必须与目录关系键一致）</summary>
+    public string RelationKey { get; set; } = string.Empty;
+
+    /// <summary>选定的目标维度字段键（有限、去重、保持顺序）</summary>
+    public List<string> Fields { get; set; } = new();
+}
+
+/// <summary>关系证据（有界、只读）：关系键 / 字段 / 状态汇总，绝不包含客户姓名 / 编码等隐私值。</summary>
+public sealed class ReportConfigurationRelationEvidenceDto
+{
+    /// <summary>关系键</summary>
+    public string RelationKey { get; set; } = string.Empty;
+
+    /// <summary>选定的字段键</summary>
+    public IReadOnlyList<string> Fields { get; set; } = new List<string>();
+
+    /// <summary>状态汇总（resolved / missing / deleted / forbidden 计数，不含隐私值）</summary>
+    public string StatusSummary { get; set; } = string.Empty;
 }
 
 /// <summary>通用报表配置目录（有限、只读）：当前账号可访问的全部已授权数据集。</summary>
@@ -171,6 +230,9 @@ public sealed class ReportConfigurationDefinition
 
     /// <summary>展示 / 分页（可选；分页边界受数据集约束）</summary>
     public ReportConfigurationPresentation? Presentation { get; set; }
+
+    /// <summary>受控关系选择（ERP-268）：关系键 + 有限字段；旧定义不含此属性时向后兼容为空。</summary>
+    public List<ReportConfigurationRelationSelection> Relations { get; set; } = new();
 }
 
 /// <summary>类型化筛选：字段键 + 有限操作符 + 与字段类型匹配的值。</summary>
@@ -564,6 +626,9 @@ public sealed class ReportConfigurationPreviewDto
 
     /// <summary>计算列单元格未知值原因（与 <see cref="Rows"/> 平行；仅计算列 null 单元格携带有界原因）</summary>
     public List<Dictionary<string, string?>> CellReasons { get; set; } = new();
+
+    /// <summary>关系证据（ERP-268）：关系键 / 字段 / 状态汇总；无关系选择时为空。</summary>
+    public List<ReportConfigurationRelationEvidenceDto> RelationEvidence { get; set; } = new();
 
     /// <summary>证据上下文（数据集键 / 粒度 / 币种单位口径 / 只读 / 覆盖口径）</summary>
     public ReportConfigurationEvidenceContextDto? Evidence { get; set; }
