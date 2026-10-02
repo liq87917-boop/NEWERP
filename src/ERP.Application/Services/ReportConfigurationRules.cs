@@ -291,23 +291,9 @@ public static class ReportConfigurationRules
 
     private static void ValidateGrouping(ReportConfigurationDefinition definition, ReportConfigurationDatasetDto dataset)
     {
-        var grouping = definition.Grouping ?? new List<string>();
-        if (grouping.Count > MaxGroupings)
-            throw BusinessException.InvalidParameter($"分组数量不能超过 {MaxGroupings} 个");
-
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var raw in grouping)
-        {
-            if (string.IsNullOrWhiteSpace(raw))
-                throw BusinessException.InvalidParameter("分组键不能为空");
-            var key = raw.Trim();
-            if (!seen.Add(key))
-                throw BusinessException.InvalidParameter($"重复分组键: {key}");
-            if (!IsKnownGroupingKey(key))
-                throw BusinessException.InvalidParameter($"未知分组键: {key}");
-            if (!dataset.GroupingKeys.Contains(key, StringComparer.OrdinalIgnoreCase))
-                throw BusinessException.InvalidParameter($"分组键 {key} 不是数据集支持的分组（{dataset.DatasetKey}）");
-        }
+        // ERP-271：最多两个有区别的基础分组维度（初始 customer / month 任意顺序），
+        // 拒绝重复 / 未知 / 未授权 / none 混用 / 超限；旧单分组与默认不分组保持兼容。
+        ReportConfigurationGroupingRules.ValidateGrouping(definition.Grouping, dataset);
     }
 
     private static void ValidateAggregates(ReportConfigurationDefinition definition, ReportConfigurationDatasetDto dataset)

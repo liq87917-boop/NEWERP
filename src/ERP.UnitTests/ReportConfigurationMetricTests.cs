@@ -303,4 +303,43 @@ public class ReportConfigurationMetricTests
         Assert.Equal(5m, Assert.Single(min.Cells).Value);
         Assert.Equal(30m, Assert.Single(max.Cells).Value);
     }
+
+    [Fact]
+    public void Compute_复合分组_按元组与币种分区()
+    {
+        var dataset = BuildDataset();
+        var definition = Definition(Aggregate(ReportConfigurationConstants.AggregateSum, "amount"));
+        var rows = new[]
+        {
+            Row(("amount", 1m), ("currency", "USD"), ("customerId", 1L), ("orderDate", new DateTime(2026, 9, 1))),
+            Row(("amount", 2m), ("currency", "USD"), ("customerId", 1L), ("orderDate", new DateTime(2026, 10, 1))),
+            Row(("amount", 3m), ("currency", "USD"), ("customerId", 2L), ("orderDate", new DateTime(2026, 9, 1))),
+        };
+
+        var result = Assert.Single(ReportConfigurationMetricRules.Compute(
+            definition, dataset, rows, new[] { "customer", "month" }));
+        Assert.Equal(3, result.Cells.Count);
+        Assert.All(result.Cells, c => Assert.Equal(2, c.Dimensions.Count));
+        Assert.Equal("customer", result.Cells[0].Dimensions[0].Key);
+        Assert.Equal("month", result.Cells[0].Dimensions[1].Key);
+        Assert.Equal("客户 #1 · 2026年9月", result.Cells[0].GroupLabel);
+    }
+
+    [Fact]
+    public void Compute_复合分组_缺失维度形成显式未知桶()
+    {
+        var dataset = BuildDataset();
+        var definition = Definition(Aggregate(ReportConfigurationConstants.AggregateSum, "amount"));
+        var rows = new[]
+        {
+            Row(("amount", 5m), ("currency", "USD")),
+        };
+
+        var result = Assert.Single(ReportConfigurationMetricRules.Compute(
+            definition, dataset, rows, new[] { "customer", "month" }));
+        var cell = Assert.Single(result.Cells);
+        Assert.All(cell.Dimensions, d => Assert.True(d.IsUnknown));
+        Assert.Contains("未知客户", cell.GroupLabel);
+        Assert.Contains("未知月份", cell.GroupLabel);
+    }
 }

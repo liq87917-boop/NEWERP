@@ -287,7 +287,10 @@ public sealed class ReportConfigurationExecutionService : IReportConfigurationEx
 
         // 分发执行（适配器内部再次走既有查询的菜单授权 + 数据范围，并保留币种 / 单位口径）
         var preview = await provider.PreviewAsync(definition, parameters, userId, cancellationToken);
-        ApplyMetrics(definition, dataset, parameters.GroupBy, preview);
+        preview.Groupings = parameters.Groupings.ToList();
+        ApplyMetrics(definition, dataset, parameters.Groupings, preview);
+        if (parameters.Groupings.Count >= 2)
+            StripCompositeDependencies(definition, preview);
         await ApplyRelationsAsync(definition, preview, userId, cancellationToken);
         preview.ConfigurationId = configurationId;
         preview.PinnedRevisionVersion = pinnedRevision;
@@ -308,14 +311,14 @@ public sealed class ReportConfigurationExecutionService : IReportConfigurationEx
     private static void ApplyMetrics(
         ReportConfigurationDefinition definition,
         ReportConfigurationDatasetDto dataset,
-        string groupBy,
+        IReadOnlyList<string> groupings,
         ReportConfigurationPreviewDto preview)
     {
         var aggregates = definition.Aggregates ?? new List<ReportConfigurationAggregate>();
         if (aggregates.Count == 0)
             return;
 
-        preview.Metrics = ReportConfigurationMetricRules.Compute(definition, dataset, preview.Rows, groupBy);
+        preview.Metrics = ReportConfigurationMetricRules.Compute(definition, dataset, preview.Rows, groupings);
 
         var selected = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var field in definition.Fields ?? new List<string>())
@@ -343,6 +346,38 @@ public sealed class ReportConfigurationExecutionService : IReportConfigurationEx
             if (row is null)
                 continue;
             var remove = row.Keys.Where(k => hidden.Contains(k, StringComparer.OrdinalIgnoreCase)).ToList();
+            foreach (var key in remove)
+                row.Remove(key);
+        }
+    }
+
+    /// <summary>
+    /// 复合分组（ERP-271）：通用引擎读取未分组源页时补取的维度 / 币种 / 金额授权依赖仅在分组汇总中消费，
+    /// 数据表只投影用户选定字段（保留选择顺序），绝不泄露隐藏依赖、绝不复制事实行。
+    /// </summary>
+    private static void StripCompositeDependencies(ReportConfigurationDefinition definition, ReportConfigurationPreviewDto preview)
+    {
+        var selected = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var field in definition.Fields ?? new List<string>())
+        {
+            if (!string.IsNullOrWhiteSpace(field))
+                selected.Add(field.Trim());
+        }
+        foreach (var column in definition.ComputedColumns ?? new List<ReportConfigurationComputedColumn>())
+        {
+            if (column is not null && !string.IsNullOrWhiteSpace(column.Key))
+                selected.Add(column.Key.Trim());
+        }
+
+        preview.Columns = preview.Columns
+            .Where(c => selected.Contains(c.Key))
+            .ToList();
+
+        foreach (var row in preview.Rows)
+        {
+            if (row is null)
+                continue;
+            var remove = row.Keys.Where(k => !selected.Contains(k)).ToList();
             foreach (var key in remove)
                 row.Remove(key);
         }
@@ -386,15 +421,18 @@ public sealed class ReportConfigurationExecutionService : IReportConfigurationEx
         if (pageSize < 1 || pageSize > dataset.MaxPageSize)
             throw BusinessException.InvalidParameter($"每页条数必须在 1 ~ {dataset.MaxPageSize} 之间");
 
-        var groupBy = ResolveGroupBy(request.GroupBy, definition);
-        if (!dataset.GroupingKeys.Contains(groupBy, StringComparer.OrdinalIgnoreCase))
+        var groupings = ResolveGroupings(request, definition, dataset);
+        var groupBy = groupings.Count switch
         {
-            throw BusinessException.InvalidParameter(
-                $"分组键 {groupBy} 不是数据集 {dataset.DatasetKey} 支持的分组（仅支持 {string.Join(" / ", dataset.GroupingKeys)}）");
-        }
+            1 => groupings[0],
+            _ => ReportConfigurationConstants.GroupNone,
+        };
 
         var (sortFieldKey, sortDirection) = ResolveSort(definition);
-        return new ReportConfigurationPreviewParameters(page, pageSize, groupBy, sortFieldKey, sortDirection);
+        return new ReportConfigurationPreviewParameters(page, pageSize, groupBy, sortFieldKey, sortDirection)
+        {
+            Groupings = groupings,
+        };
     }
 
     /// <summary>解析保存的排序（排序在纯校验器中已按目录校验为有限可排序字段；无排序时返回空）。</summary>
@@ -413,26 +451,27 @@ public sealed class ReportConfigurationExecutionService : IReportConfigurationEx
         return (fieldKey, direction);
     }
 
-    private static string ResolveGroupBy(string? overrideGroupBy, ReportConfigurationDefinition definition)
+    private static IReadOnlyList<string> ResolveGroupings(
+        ReportConfigurationPreviewRequest request,
+        ReportConfigurationDefinition definition,
+        ReportConfigurationDatasetDto dataset)
     {
-        if (!string.IsNullOrWhiteSpace(overrideGroupBy))
-            return overrideGroupBy.Trim();
+        var overrideList = request.Groupings;
+        var overrideSingle = request.GroupBy;
 
-        var grouping = (definition.Grouping ?? new List<string>())
-            .Where(g => !string.IsNullOrWhiteSpace(g))
-            .Select(g => g.Trim())
-            .Where(g => !string.Equals(g, ReportConfigurationConstants.GroupNone, StringComparison.OrdinalIgnoreCase))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
+        // ERP-271：旧单 GroupBy 覆盖与新有序 Groupings 覆盖冲突时显式拒绝（绝不猜测优先级）。
+        if (overrideList is { Count: > 0 } && !string.IsNullOrWhiteSpace(overrideSingle))
+            throw BusinessException.InvalidParameter("分组覆盖冲突：请只使用 groupBy（单一）或 groupings（有序复合）之一");
 
-        if (grouping.Count == 0)
-            return ReportConfigurationConstants.GroupNone;
+        IReadOnlyList<string> resolved;
+        if (overrideList is { Count: > 0 })
+            resolved = ReportConfigurationGroupingRules.NormalizeGroupingKeys(overrideList);
+        else if (!string.IsNullOrWhiteSpace(overrideSingle))
+            resolved = new[] { overrideSingle.Trim() };
+        else
+            resolved = ReportConfigurationGroupingRules.NormalizeGroupingKeys(definition.Grouping);
 
-        if (grouping.Count == 1)
-            return grouping[0];
-
-        throw BusinessException.InvalidParameter(
-            $"当前阶段仅支持单一分组键（收到 {grouping.Count} 个），请选择 none / customer / month 之一");
+        return ReportConfigurationGroupingRules.ValidateGrouping(resolved, dataset);
     }
 
     // ==================== 导出证据规范化（纯文本、无 DB、无数据集特化分派） ====================

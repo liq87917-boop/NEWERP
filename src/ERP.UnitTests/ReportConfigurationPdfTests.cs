@@ -292,6 +292,73 @@ public class ReportConfigurationPdfTests
         Assert.Equal(2, row["source"]);
     }
 
+    [Fact]
+    public void 复合分组_小计与指标_按保存顺序渲染全部维度列()
+    {
+        var groups = new List<ReportConfigurationGroupSubtotalDto>
+        {
+            new(
+                "key",
+                "客户 #1 · 2026年9月",
+                new List<ReportConfigurationCurrencyPartitionDto>
+                {
+                    new("USD", 1, 100m, null, null, null, string.Empty),
+                })
+            {
+                Dimensions = new List<ReportConfigurationGroupDimensionValueDto>
+                {
+                    new("customer", "客户 #1", "1", false),
+                    new("month", "2026年9月", "2026-09", false),
+                },
+            },
+        };
+        var metrics = new List<ReportConfigurationMetricResultDto>
+        {
+            new()
+            {
+                Key = "totalAmount",
+                Function = ReportConfigurationConstants.AggregateSum,
+                Label = "金额",
+                Unit = "原币金额",
+                CurrencyBehavior = ReportConfigurationMetricRules.CurrencyBehaviorPartition,
+                Cells = new List<ReportConfigurationMetricCellDto>
+                {
+                    new()
+                    {
+                        GroupLabel = "客户 #1 · 2026年9月",
+                        Currency = "USD",
+                        Value = 100m,
+                        KnownCount = 1,
+                        MissingCount = 0,
+                        SourceCount = 1,
+                        Dimensions = new List<ReportConfigurationGroupDimensionValueDto>
+                        {
+                            new("customer", "客户 #1", "1", false),
+                            new("month", "2026年9月", "2026-09", false),
+                        },
+                    },
+                },
+            },
+        };
+
+        var subtotalColumns = ReportConfigurationPdfExporter.BuildSubtotalColumns(groups);
+        Assert.Equal(new[] { "customer", "month", "currency", "count", "amount" },
+            subtotalColumns.Take(5).Select(c => c.Key));
+
+        var subtotalRow = Assert.Single(ReportConfigurationPdfExporter.BuildSubtotalRows(groups));
+        Assert.Equal("客户 #1", subtotalRow["customer"]);
+        Assert.Equal("2026年9月", subtotalRow["month"]);
+        Assert.Equal(100m, subtotalRow["amount"]);
+
+        var metricColumns = ReportConfigurationPdfExporter.BuildMetricColumns(metrics);
+        Assert.Equal(new[] { "metric", "customer", "month", "currency", "value" },
+            metricColumns.Take(5).Select(c => c.Key));
+
+        var metricRow = Assert.Single(ReportConfigurationPdfExporter.BuildMetricRows(metrics));
+        Assert.Equal("客户 #1", metricRow["customer"]);
+        Assert.Equal("2026年9月", metricRow["month"]);
+    }
+
     // ==================== 3. 字体缺失 / 渲染失败 ====================
 
     [Fact]

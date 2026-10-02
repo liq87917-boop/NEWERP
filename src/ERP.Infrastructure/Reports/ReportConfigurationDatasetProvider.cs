@@ -43,6 +43,22 @@ public sealed class SalesOrderReportConfigurationDatasetProvider : IReportConfig
         ReportConfigurationConstants.GroupMonth,
     };
 
+    private static readonly IReadOnlyList<ReportConfigurationGroupingDimensionDto> GroupingDimensions = new[]
+    {
+        new ReportConfigurationGroupingDimensionDto(
+            ReportConfigurationConstants.GroupCustomer,
+            "按客户分组",
+            "customerId",
+            ReportConfigurationConstants.TypeNumber,
+            ReportConfigurationConstants.GroupingSemanticsIdentity),
+        new ReportConfigurationGroupingDimensionDto(
+            ReportConfigurationConstants.GroupMonth,
+            "按月份分组",
+            "orderDate",
+            ReportConfigurationConstants.TypeDate,
+            ReportConfigurationConstants.GroupingSemanticsCalendarMonth),
+    };
+
     private static readonly IReadOnlyList<string> SupportedCapabilities = new[]
     {
         ReportConfigurationConstants.CapabilityPreview,
@@ -119,10 +135,15 @@ public sealed class SalesOrderReportConfigurationDatasetProvider : IReportConfig
         ArgumentNullException.ThrowIfNull(definition);
         ArgumentNullException.ThrowIfNull(parameters);
 
+        var compositeGroupings = ReportConfigurationGroupingRules.NormalizeGroupingKeys(parameters.Groupings);
         var groupBy = DynamicSalesOrderReportRules.NormalizeGroupBy(parameters.GroupBy);
+        var compositeFieldKeys = compositeGroupings.Count >= 2
+            ? CompositeFieldKeys(compositeGroupings).Concat(new[] { "currency", "totalAmount" }).ToList()
+            : null;
+
         var request = new DynamicSalesOrderReportRequest
         {
-            Fields = BuildFields(definition.Fields, definition.ComputedColumns, definition.Aggregates, groupBy, definition.Relations),
+            Fields = BuildFields(definition.Fields, definition.ComputedColumns, definition.Aggregates, groupBy, compositeFieldKeys, definition.Relations),
             Page = parameters.Page,
             PageSize = parameters.PageSize,
             GroupBy = groupBy,
@@ -135,9 +156,23 @@ public sealed class SalesOrderReportConfigurationDatasetProvider : IReportConfig
 
         var page = await _query.PreviewAsync(request, userId, cancellationToken);
 
-        var groups = groupBy == DynamicSalesOrderReportRules.GroupNone
-            ? null
-            : DynamicSalesOrderReportRules.BuildGroupSubtotals(page.Rows, groupBy);
+        List<ReportConfigurationGroupSubtotalDto>? groups = null;
+        if (compositeGroupings.Count >= 2)
+        {
+            groups = ReportConfigurationGroupingRules.BuildCompositeGroupSubtotals(
+                page.Rows, compositeGroupings, GroupingDimensions,
+                row => ReadCurrency(row), row => ReadDecimalValue(row, "totalAmount"));
+        }
+        else if (groupBy != DynamicSalesOrderReportRules.GroupNone)
+        {
+            groups = DynamicSalesOrderReportRules.BuildGroupSubtotals(page.Rows, groupBy)
+                .Select(g => new ReportConfigurationGroupSubtotalDto(
+                    g.Key,
+                    g.Label,
+                    g.Subtotals.Select(s => new ReportConfigurationCurrencyPartitionDto(
+                        s.Currency, s.Count, s.Amount, null, null, null, string.Empty)).ToList()))
+                .ToList();
+        }
 
         if (groupBy == DynamicSalesOrderReportRules.GroupNone && definition.ComputedColumns is { Count: > 0 })
         {
@@ -159,7 +194,7 @@ public sealed class SalesOrderReportConfigurationDatasetProvider : IReportConfig
                 PageSize = page.PageSize,
                 TotalPages = page.TotalPages,
                 GroupBy = groupBy,
-                Groups = null,
+                Groups = groups,
                 Evidence = new ReportConfigurationEvidenceContextDto(
                     DatasetKey, Grain, CurrencyUnitSemantics,
                     page.ReadOnlyText, page.BoundaryText, page.DisclaimerText,
@@ -178,11 +213,7 @@ public sealed class SalesOrderReportConfigurationDatasetProvider : IReportConfig
             PageSize = page.PageSize,
             TotalPages = page.TotalPages,
             GroupBy = groupBy,
-            Groups = groups?.Select(g => new ReportConfigurationGroupSubtotalDto(
-                g.Key,
-                g.Label,
-                g.Subtotals.Select(s => new ReportConfigurationCurrencyPartitionDto(
-                    s.Currency, s.Count, s.Amount, null, null, null, string.Empty)).ToList())).ToList(),
+            Groups = groups,
             Evidence = new ReportConfigurationEvidenceContextDto(
                 DatasetKey, Grain, CurrencyUnitSemantics,
                 page.ReadOnlyText, page.BoundaryText, page.DisclaimerText,
@@ -195,6 +226,7 @@ public sealed class SalesOrderReportConfigurationDatasetProvider : IReportConfig
         IReadOnlyList<ReportConfigurationComputedColumn> computedColumns,
         IReadOnlyList<ReportConfigurationAggregate> aggregates,
         string groupBy,
+        IReadOnlyList<string>? compositeFieldKeys,
         IReadOnlyList<ReportConfigurationRelationSelection> relations)
     {
         var selected = (fields ?? new List<string>())
@@ -204,6 +236,13 @@ public sealed class SalesOrderReportConfigurationDatasetProvider : IReportConfig
 
         if (groupBy != DynamicSalesOrderReportRules.GroupNone)
             selected = DynamicSalesOrderReportRules.EnsureGroupingFields(selected, groupBy) ?? selected;
+
+        // 复合分组（ERP-271）：读取未分组源页时仍补齐维度底层授权字段，执行后由通用引擎侧剥离隐藏依赖。
+        foreach (var dependency in compositeFieldKeys ?? Array.Empty<string>())
+        {
+            if (!selected.Contains(dependency, StringComparer.OrdinalIgnoreCase))
+                selected.Add(dependency);
+        }
 
         if (computedColumns is { Count: > 0 })
         {
@@ -241,6 +280,54 @@ public sealed class SalesOrderReportConfigurationDatasetProvider : IReportConfig
 
     private static string? CurrencyUnitOf(string key)
         => CurrencyUnits.TryGetValue(key, out var unit) ? unit : null;
+
+    private static IReadOnlyList<string> CompositeFieldKeys(IReadOnlyList<string> groupings)
+    {
+        var keys = new List<string>();
+        foreach (var grouping in groupings ?? Array.Empty<string>())
+        {
+            if (string.Equals(grouping, ReportConfigurationConstants.GroupCustomer, StringComparison.OrdinalIgnoreCase))
+                keys.Add("customerId");
+            else if (string.Equals(grouping, ReportConfigurationConstants.GroupMonth, StringComparison.OrdinalIgnoreCase))
+                keys.Add("orderDate");
+        }
+        return keys;
+    }
+
+    private static string ReadCurrency(Dictionary<string, object?> row)
+    {
+        var value = ReadValue(row, "currency");
+        if (value is null or DBNull)
+            return string.Empty;
+        return Convert.ToString(value, CultureInfo.InvariantCulture)?.Trim() ?? string.Empty;
+    }
+
+    private static decimal? ReadDecimalValue(Dictionary<string, object?> row, string key)
+    {
+        var value = ReadValue(row, key);
+        if (value is null or DBNull)
+            return null;
+        try
+        {
+            return Convert.ToDecimal(value, CultureInfo.InvariantCulture);
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    private static object? ReadValue(Dictionary<string, object?> row, string key)
+    {
+        if (row.TryGetValue(key, out var value))
+            return value;
+        foreach (var kv in row)
+        {
+            if (string.Equals(kv.Key, key, StringComparison.OrdinalIgnoreCase))
+                return kv.Value;
+        }
+        return null;
+    }
 
     private static void MapFilters(IReadOnlyList<ReportConfigurationFilter>? filters, DynamicSalesOrderReportRequest request)
     {
@@ -307,6 +394,7 @@ public sealed class SalesOrderReportConfigurationDatasetProvider : IReportConfig
             BoundaryText)
         {
             Metrics = ReportConfigurationMetricRules.BuildMetrics(fields, Grain),
+            GroupingDimensions = GroupingDimensions.ToList(),
             GroupCustomerFieldKey = "customerId",
             GroupMonthFieldKey = "orderDate",
             Relations = new List<ReportConfigurationRelationDto>
@@ -370,6 +458,22 @@ public sealed class ReceivableReportConfigurationDatasetProvider : IReportConfig
         ReportConfigurationConstants.GroupNone,
         ReportConfigurationConstants.GroupCustomer,
         ReportConfigurationConstants.GroupMonth,
+    };
+
+    private static readonly IReadOnlyList<ReportConfigurationGroupingDimensionDto> GroupingDimensions = new[]
+    {
+        new ReportConfigurationGroupingDimensionDto(
+            ReportConfigurationConstants.GroupCustomer,
+            "按客户分组",
+            "customerId",
+            ReportConfigurationConstants.TypeNumber,
+            ReportConfigurationConstants.GroupingSemanticsIdentity),
+        new ReportConfigurationGroupingDimensionDto(
+            ReportConfigurationConstants.GroupMonth,
+            "按月份分组",
+            "invoiceDate",
+            ReportConfigurationConstants.TypeDate,
+            ReportConfigurationConstants.GroupingSemanticsCalendarMonth),
     };
 
     private static readonly IReadOnlyList<string> SupportedCapabilities = new[]
@@ -448,10 +552,15 @@ public sealed class ReceivableReportConfigurationDatasetProvider : IReportConfig
         ArgumentNullException.ThrowIfNull(definition);
         ArgumentNullException.ThrowIfNull(parameters);
 
+        var compositeGroupings = ReportConfigurationGroupingRules.NormalizeGroupingKeys(parameters.Groupings);
         var groupBy = DynamicReceivableReportRules.NormalizeGroupBy(parameters.GroupBy);
+        var compositeFieldKeys = compositeGroupings.Count >= 2
+            ? CompositeFieldKeys(compositeGroupings).Concat(new[] { "currency", "grossAmount" }).ToList()
+            : null;
+
         var request = new DynamicReceivableReportRequest
         {
-            Fields = BuildFields(definition.Fields, definition.ComputedColumns, definition.Aggregates, groupBy, definition.Relations),
+            Fields = BuildFields(definition.Fields, definition.ComputedColumns, definition.Aggregates, groupBy, compositeFieldKeys, definition.Relations),
             Page = parameters.Page,
             PageSize = parameters.PageSize,
             GroupBy = groupBy,
@@ -464,9 +573,24 @@ public sealed class ReceivableReportConfigurationDatasetProvider : IReportConfig
 
         var page = await _query.PreviewAsync(request, userId, cancellationToken);
 
-        var groups = groupBy == DynamicReceivableReportRules.GroupNone
-            ? null
-            : DynamicReceivableReportRules.BuildGroupSubtotals(page.Rows, groupBy);
+        List<ReportConfigurationGroupSubtotalDto>? groups = null;
+        if (compositeGroupings.Count >= 2)
+        {
+            groups = ReportConfigurationGroupingRules.BuildCompositeGroupSubtotals(
+                page.Rows, compositeGroupings, GroupingDimensions,
+                row => ReadCurrency(row), row => ReadDecimalValue(row, "grossAmount"));
+        }
+        else if (groupBy != DynamicReceivableReportRules.GroupNone)
+        {
+            groups = DynamicReceivableReportRules.BuildGroupSubtotals(page.Rows, groupBy)
+                .Select(g => new ReportConfigurationGroupSubtotalDto(
+                    g.Key,
+                    g.Label,
+                    g.Subtotals.Select(s => new ReportConfigurationCurrencyPartitionDto(
+                        s.Currency, s.Count, null, s.GrossAmount, s.EffectiveAllocatedAmount,
+                        s.RemainingAmount, s.RemainingState)).ToList()))
+                .ToList();
+        }
 
         if (groupBy == DynamicReceivableReportRules.GroupNone && definition.ComputedColumns is { Count: > 0 })
         {
@@ -488,7 +612,7 @@ public sealed class ReceivableReportConfigurationDatasetProvider : IReportConfig
                 PageSize = page.PageSize,
                 TotalPages = page.TotalPages,
                 GroupBy = groupBy,
-                Groups = null,
+                Groups = groups,
                 Evidence = new ReportConfigurationEvidenceContextDto(
                     DatasetKey, Grain, CurrencyUnitSemantics,
                     page.ReadOnlyText, page.BoundaryText, page.DisclaimerText,
@@ -507,12 +631,7 @@ public sealed class ReceivableReportConfigurationDatasetProvider : IReportConfig
             PageSize = page.PageSize,
             TotalPages = page.TotalPages,
             GroupBy = groupBy,
-            Groups = groups?.Select(g => new ReportConfigurationGroupSubtotalDto(
-                g.Key,
-                g.Label,
-                g.Subtotals.Select(s => new ReportConfigurationCurrencyPartitionDto(
-                    s.Currency, s.Count, null, s.GrossAmount, s.EffectiveAllocatedAmount,
-                    s.RemainingAmount, s.RemainingState)).ToList())).ToList(),
+            Groups = groups,
             Evidence = new ReportConfigurationEvidenceContextDto(
                 DatasetKey, Grain, CurrencyUnitSemantics,
                 page.ReadOnlyText, page.BoundaryText, page.DisclaimerText,
@@ -525,6 +644,7 @@ public sealed class ReceivableReportConfigurationDatasetProvider : IReportConfig
         IReadOnlyList<ReportConfigurationComputedColumn> computedColumns,
         IReadOnlyList<ReportConfigurationAggregate> aggregates,
         string groupBy,
+        IReadOnlyList<string>? compositeFieldKeys,
         IReadOnlyList<ReportConfigurationRelationSelection> relations)
     {
         var selected = (fields ?? new List<string>())
@@ -534,6 +654,13 @@ public sealed class ReceivableReportConfigurationDatasetProvider : IReportConfig
 
         if (groupBy != DynamicReceivableReportRules.GroupNone)
             selected = DynamicReceivableReportRules.EnsureGroupingFields(selected, groupBy) ?? selected;
+
+        // 复合分组（ERP-271）：读取未分组源页时仍补齐维度底层授权字段，执行后由通用引擎侧剥离隐藏依赖。
+        foreach (var dependency in compositeFieldKeys ?? Array.Empty<string>())
+        {
+            if (!selected.Contains(dependency, StringComparer.OrdinalIgnoreCase))
+                selected.Add(dependency);
+        }
 
         if (computedColumns is { Count: > 0 })
         {
@@ -571,6 +698,54 @@ public sealed class ReceivableReportConfigurationDatasetProvider : IReportConfig
 
     private static string? CurrencyUnitOf(string key)
         => CurrencyUnits.TryGetValue(key, out var unit) ? unit : null;
+
+    private static IReadOnlyList<string> CompositeFieldKeys(IReadOnlyList<string> groupings)
+    {
+        var keys = new List<string>();
+        foreach (var grouping in groupings ?? Array.Empty<string>())
+        {
+            if (string.Equals(grouping, ReportConfigurationConstants.GroupCustomer, StringComparison.OrdinalIgnoreCase))
+                keys.Add("customerId");
+            else if (string.Equals(grouping, ReportConfigurationConstants.GroupMonth, StringComparison.OrdinalIgnoreCase))
+                keys.Add("invoiceDate");
+        }
+        return keys;
+    }
+
+    private static string ReadCurrency(Dictionary<string, object?> row)
+    {
+        var value = ReadValue(row, "currency");
+        if (value is null or DBNull)
+            return string.Empty;
+        return Convert.ToString(value, CultureInfo.InvariantCulture)?.Trim() ?? string.Empty;
+    }
+
+    private static decimal? ReadDecimalValue(Dictionary<string, object?> row, string key)
+    {
+        var value = ReadValue(row, key);
+        if (value is null or DBNull)
+            return null;
+        try
+        {
+            return Convert.ToDecimal(value, CultureInfo.InvariantCulture);
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    private static object? ReadValue(Dictionary<string, object?> row, string key)
+    {
+        if (row.TryGetValue(key, out var value))
+            return value;
+        foreach (var kv in row)
+        {
+            if (string.Equals(kv.Key, key, StringComparison.OrdinalIgnoreCase))
+                return kv.Value;
+        }
+        return null;
+    }
 
     private static void MapFilters(IReadOnlyList<ReportConfigurationFilter>? filters, DynamicReceivableReportRequest request)
     {
@@ -637,6 +812,7 @@ public sealed class ReceivableReportConfigurationDatasetProvider : IReportConfig
             BoundaryText)
         {
             Metrics = ReportConfigurationMetricRules.BuildMetrics(fields, Grain),
+            GroupingDimensions = GroupingDimensions.ToList(),
             GroupCustomerFieldKey = "customerId",
             GroupMonthFieldKey = "invoiceDate",
             Relations = new List<ReportConfigurationRelationDto>

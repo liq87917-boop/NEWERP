@@ -465,4 +465,64 @@ public class ReportConfigurationExcelTests
         Assert.NotNull(workbook.GetSheet(ReportConfigurationExcelExporter.MetricsSheetName));
         Assert.Contains("金额（合计）（原币金额）", AllSheetText(workbook));
     }
+
+    [Fact]
+    public void 导出_复合分组_按保存顺序渲染全部维度列()
+    {
+        var preview = MixedPreview();
+        preview.Groupings = new List<string> { "customer", "month" };
+        preview.Groups = new List<ReportConfigurationGroupSubtotalDto>
+        {
+            new(
+                "key",
+                "客户 #1 · 2026年9月",
+                new List<ReportConfigurationCurrencyPartitionDto>
+                {
+                    new("USD", 1, 100m, null, null, null, string.Empty),
+                })
+            {
+                Dimensions = new List<ReportConfigurationGroupDimensionValueDto>
+                {
+                    new("customer", "客户 #1", "1", false),
+                    new("month", "2026年9月", "2026-09", false),
+                },
+            },
+        };
+        preview.Metrics = new List<ReportConfigurationMetricResultDto>
+        {
+            new()
+            {
+                Key = "totalAmount",
+                Function = ReportConfigurationConstants.AggregateSum,
+                Label = "金额",
+                Unit = "原币金额",
+                CurrencyBehavior = ReportConfigurationMetricRules.CurrencyBehaviorPartition,
+                Cells = new List<ReportConfigurationMetricCellDto>
+                {
+                    new()
+                    {
+                        GroupLabel = "客户 #1 · 2026年9月",
+                        Currency = "USD",
+                        Value = 100m,
+                        KnownCount = 1,
+                        MissingCount = 0,
+                        SourceCount = 1,
+                        Dimensions = new List<ReportConfigurationGroupDimensionValueDto>
+                        {
+                            new("customer", "客户 #1", "1", false),
+                            new("month", "2026年9月", "2026-09", false),
+                        },
+                    },
+                },
+            },
+        };
+
+        using var workbook = OpenWorkbook(new ReportConfigurationExcelExporter().Build(preview));
+        var text = AllSheetText(workbook);
+
+        Assert.Contains("客户", text);
+        Assert.Contains("月份", text);
+        Assert.Contains("客户 #1", text);
+        Assert.Contains("2026年9月", text);
+    }
 }

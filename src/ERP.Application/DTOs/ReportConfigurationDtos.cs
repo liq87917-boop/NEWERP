@@ -34,6 +34,14 @@ public static class ReportConfigurationConstants
     public const string GroupCustomer = "customer";
     public const string GroupMonth = "month";
 
+    // ==================== 分组维度语义（有限） ====================
+
+    /// <summary>恒等维度语义：按稳定主键原样分组（如客户 Id）。</summary>
+    public const string GroupingSemanticsIdentity = "identity";
+
+    /// <summary>日历月维度语义：按日期字段的「年-月」归并为自然日历月。</summary>
+    public const string GroupingSemanticsCalendarMonth = "calendar-month";
+
     // ==================== 聚合函数（有限） ====================
 
     public const string AggregateSum = "sum";
@@ -141,6 +149,13 @@ public sealed record ReportConfigurationDatasetDto(
     /// <summary>由已授权字段派生的指标描述符（粒度 / 单位 / 币种行为 / 允许函数 / 当前页覆盖口径）。</summary>
     public List<ReportConfigurationMetricDto> Metrics { get; init; } = new();
 
+    /// <summary>
+    /// 分组维度目录（有限、只读、有序）：描述每个可用基础分组维度的稳定键 / 中文标签 / 底层授权必需字段 / 类型与语义。
+    /// <para>ERP-271：同一报表可最多按两个有区别的基础维度分组（初始 customer / month 任意顺序）；空列表回退为
+    /// 按 <see cref="GroupingKeys"/> 与 GroupCustomerFieldKey / GroupMonthFieldKey 的旧契约派生。</para>
+    /// </summary>
+    public List<ReportConfigurationGroupingDimensionDto> GroupingDimensions { get; init; } = new();
+
     /// <summary>按客户分组使用的底层字段键（销售订单 / 应收账款均为 customerId）。</summary>
     public string? GroupCustomerFieldKey { get; init; }
 
@@ -153,6 +168,29 @@ public sealed record ReportConfigurationDatasetDto(
     /// <summary>排序口径说明：列出有限可排序字段，并说明计算列 / 关系 / 派生金额字段不可排序的原因。</summary>
     public string? SortingExplanation { get; init; }
 }
+
+/// <summary>
+/// 分组维度目录项（有限、只读）：一个可用于分组的基础维度的稳定键 / 中文标签 / 底层授权必需字段 / 类型与语义。
+/// <para>ERP-271：语义取值仅限 <see cref="ReportConfigurationConstants"/> 中的 identity / calendar-month；
+/// 底层字段必须是已授权、未隐藏的基础字段；相关 / 计算 / 未授权字段一律不作为分组维度。</para>
+/// </summary>
+public sealed record ReportConfigurationGroupingDimensionDto(
+    string Key,
+    string Label,
+    string FieldKey,
+    string FieldType,
+    string Semantics);
+
+/// <summary>
+/// 分组维度值（有限、只读）：某个事实行在某分组维度上的稳定类型化取值。
+/// <para><see cref="Value"/> 为该维度的稳定规范串（客户 = 主键十进制字符串；月份 = yyyy-MM）；
+/// <see cref="IsUnknown"/> 为 true 表示该维度缺失 / 非法，形成显式「未知」桶，绝不并入其它维度。</para>
+/// </summary>
+public sealed record ReportConfigurationGroupDimensionValueDto(
+    string Key,
+    string Label,
+    string? Value,
+    bool IsUnknown);
 
 /// <summary>
 /// 受控关系字段（有限、只读）：目标维度允许选择的有限文本字段（仅客户编码 / 国别），
@@ -460,8 +498,14 @@ public sealed class ReportConfigurationPreviewRequest
     /// <summary>每页条数覆盖（可选；空 = 使用已保存展示分页 / 数据集默认；受数据集上限约束）</summary>
     public int? PageSize { get; set; }
 
-    /// <summary>分组键覆盖（可选；空 = 使用已保存分组；仅 none / customer / month）</summary>
+    /// <summary>分组键覆盖（可选；空 = 使用已保存分组；仅 none / customer / month；旧单分组契约）</summary>
     public string? GroupBy { get; set; }
+
+    /// <summary>
+    /// 有序复合分组维度覆盖（ERP-271，可选；空 = 使用已保存分组 / 旧 GroupBy）。
+    /// <para>与 <see cref="GroupBy"/> 同时提供时显式拒绝（冲突覆盖）；最多两个有区别的基础维度，保持提交顺序。</para>
+    /// </summary>
+    public List<string>? Groupings { get; set; }
 }
 
 /// <summary>经执行服务解析、校验后的预览参数（有界、只读）</summary>
@@ -470,7 +514,14 @@ public sealed record ReportConfigurationPreviewParameters(
     int PageSize,
     string GroupBy,
     string? SortFieldKey,
-    string? SortDirection);
+    string? SortDirection)
+{
+    /// <summary>
+    /// 有序有效分组维度（ERP-271）：0 = 不分组，1 = 旧单分组（<see cref="GroupBy"/>），2 = 复合分组。
+    /// <para>复合分组时 <see cref="GroupBy"/> 保持 none（适配器读取未分组源页 + 授权隐藏依赖），由通用引擎负责分组。</para>
+    /// </summary>
+    public IReadOnlyList<string> Groupings { get; init; } = new List<string>();
+}
 
 /// <summary>通用报表列（有界、只读）：有限字段键 + 真实中文标签 / 类型 / 币种单位语义；计算列附未知值口径说明</summary>
 public sealed record ReportConfigurationColumnDto(
@@ -495,7 +546,14 @@ public sealed record ReportConfigurationCurrencyPartitionDto(
 public sealed record ReportConfigurationGroupSubtotalDto(
     string Key,
     string Label,
-    IReadOnlyList<ReportConfigurationCurrencyPartitionDto> Partitions);
+    IReadOnlyList<ReportConfigurationCurrencyPartitionDto> Partitions)
+{
+    /// <summary>
+    /// 有序分组维度值（ERP-271）：复合分组时按保存顺序携带每个维度的键 / 标签 / 稳定值 / 是否未知；
+    /// 旧单分组与不分组时为空列表（沿用旧 Key / Label 契约）。
+    /// </summary>
+    public IReadOnlyList<ReportConfigurationGroupDimensionValueDto> Dimensions { get; init; } = new List<ReportConfigurationGroupDimensionValueDto>();
+}
 
 /// <summary>
 /// 预览证据上下文：数据集键 / 行粒度 / 币种单位口径 / 只读与边界文案 / 页面覆盖口径。
@@ -537,6 +595,12 @@ public sealed class ReportConfigurationMetricCellDto
 
     /// <summary>分组中文标签（不分组时为「全部」）</summary>
     public string GroupLabel { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 有序分组维度值（ERP-271）：复合分组时按保存顺序携带每个维度的键 / 标签 / 稳定值 / 是否未知；
+    /// 旧单分组与不分组时为空列表（沿用旧 GroupKey / GroupLabel 契约）。
+    /// </summary>
+    public List<ReportConfigurationGroupDimensionValueDto> Dimensions { get; set; } = new();
 
     /// <summary>币种（非货币指标为空；未知币种单独隔离）</summary>
     public string? Currency { get; set; }
@@ -633,8 +697,14 @@ public sealed class ReportConfigurationPreviewDto
     /// <summary>总页数</summary>
     public int TotalPages { get; set; }
 
-    /// <summary>生效分组键（none / customer / month）</summary>
+    /// <summary>生效分组键（none / customer / month；旧单分组契约，复合分组时为 none）</summary>
     public string GroupBy { get; set; } = ReportConfigurationConstants.GroupNone;
+
+    /// <summary>
+    /// 有序生效分组维度（ERP-271）：0 = 不分组，1 = 旧单分组，2 = 复合分组；
+    /// 供工作台 / Excel / PDF 按保存顺序渲染全部复合维度。
+    /// </summary>
+    public List<string> Groupings { get; set; } = new();
 
     /// <summary>当前预览页分组小计（分组时才非空；组内按币种分区，绝不跨币种相加）</summary>
     public List<ReportConfigurationGroupSubtotalDto>? Groups { get; set; }

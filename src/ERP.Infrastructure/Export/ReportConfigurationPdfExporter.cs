@@ -437,21 +437,51 @@ public static class ReportConfigurationPdfExporter
         {
             foreach (var partition in group.Partitions)
             {
-                rows.Add(new Dictionary<string, object?>(StringComparer.Ordinal)
+                var row = new Dictionary<string, object?>(StringComparer.Ordinal);
+                if (group.Dimensions is { Count: > 0 })
                 {
-                    ["group"] = group.Label,
-                    ["currency"] = partition.Currency,
-                    ["count"] = partition.Count,
-                    ["amount"] = partition.Amount,
-                    ["grossAmount"] = partition.GrossAmount,
-                    ["effectiveAllocatedAmount"] = partition.EffectiveAllocatedAmount,
-                    ["remainingAmount"] = partition.RemainingAmount,
-                    ["remainingState"] = partition.RemainingState,
-                });
+                    foreach (var dimension in group.Dimensions)
+                        row[dimension.Key] = dimension.Label;
+                }
+                else
+                {
+                    row["group"] = group.Label;
+                }
+
+                row["currency"] = partition.Currency;
+                row["count"] = partition.Count;
+                row["amount"] = partition.Amount;
+                row["grossAmount"] = partition.GrossAmount;
+                row["effectiveAllocatedAmount"] = partition.EffectiveAllocatedAmount;
+                row["remainingAmount"] = partition.RemainingAmount;
+                row["remainingState"] = partition.RemainingState;
+                rows.Add(row);
             }
         }
 
         return rows;
+    }
+
+    /// <summary>分组小计表列：复合分组时按保存顺序渲染全部维度列，否则沿用旧「分组」单列契约。</summary>
+    public static IReadOnlyList<ReportConfigurationColumnDto> BuildSubtotalColumns(
+        IReadOnlyList<ReportConfigurationGroupSubtotalDto>? groups)
+    {
+        var dimensionKeys = groups?.FirstOrDefault(g => g.Dimensions is { Count: > 0 })
+            ?.Dimensions.Select(d => d.Key).ToList();
+        if (dimensionKeys is null || dimensionKeys.Count == 0)
+            return SubtotalColumns;
+
+        var columns = dimensionKeys.Select(k =>
+                new ReportConfigurationColumnDto(k, ReportConfigurationGroupingRules.DimensionHeaderLabel(k), ReportConfigurationConstants.TypeText, null))
+            .ToList();
+        columns.Add(new ReportConfigurationColumnDto("currency", "币种", ReportConfigurationConstants.TypeText, null));
+        columns.Add(new ReportConfigurationColumnDto("count", "条数", ReportConfigurationConstants.TypeNumber, null));
+        columns.Add(new ReportConfigurationColumnDto("amount", "金额", ReportConfigurationConstants.TypeNumber, null));
+        columns.Add(new ReportConfigurationColumnDto("grossAmount", "含税金额", ReportConfigurationConstants.TypeNumber, null));
+        columns.Add(new ReportConfigurationColumnDto("effectiveAllocatedAmount", "已分摊金额", ReportConfigurationConstants.TypeNumber, null));
+        columns.Add(new ReportConfigurationColumnDto("remainingAmount", "剩余金额", ReportConfigurationConstants.TypeNumber, null));
+        columns.Add(new ReportConfigurationColumnDto("remainingState", "剩余状态", ReportConfigurationConstants.TypeText, null));
+        return columns;
     }
 
     // ==================== 指标汇总（当前预览页、分组 + 币种分区） ====================
@@ -482,21 +512,72 @@ public static class ReportConfigurationPdfExporter
             var title = MetricTitle(metric);
             foreach (var cell in metric.Cells)
             {
-                rows.Add(new Dictionary<string, object?>(StringComparer.Ordinal)
+                var row = new Dictionary<string, object?>(StringComparer.Ordinal)
                 {
                     ["metric"] = title,
-                    ["group"] = cell.GroupLabel,
                     ["currency"] = cell.Currency,
                     ["value"] = cell.Value,
                     ["known"] = cell.KnownCount,
                     ["missing"] = cell.MissingCount,
                     ["source"] = cell.SourceCount,
                     ["reason"] = cell.Reason,
-                });
+                };
+
+                if (cell.Dimensions is { Count: > 0 })
+                {
+                    foreach (var dimension in cell.Dimensions)
+                        row[dimension.Key] = dimension.Label;
+                }
+                else
+                {
+                    row["group"] = cell.GroupLabel;
+                }
+
+                rows.Add(row);
             }
         }
 
         return rows;
+    }
+
+    /// <summary>指标汇总表列：复合分组时按保存顺序渲染全部维度列，否则沿用旧「分组」单列契约。</summary>
+    public static IReadOnlyList<ReportConfigurationColumnDto> BuildMetricColumns(
+        IReadOnlyList<ReportConfigurationMetricResultDto>? metrics)
+    {
+        IReadOnlyList<string>? dimensionKeys = null;
+        if (metrics is not null)
+        {
+            foreach (var metric in metrics)
+            {
+                foreach (var cell in metric.Cells)
+                {
+                    if (cell.Dimensions is { Count: > 0 })
+                    {
+                        dimensionKeys = cell.Dimensions.Select(d => d.Key).ToList();
+                        break;
+                    }
+                }
+                if (dimensionKeys is not null)
+                    break;
+            }
+        }
+
+        if (dimensionKeys is null || dimensionKeys.Count == 0)
+            return MetricsColumns;
+
+        var columns = new List<ReportConfigurationColumnDto>
+        {
+            new ReportConfigurationColumnDto("metric", "指标", ReportConfigurationConstants.TypeText, null),
+        };
+        columns.AddRange(dimensionKeys.Select(k =>
+            new ReportConfigurationColumnDto(k, ReportConfigurationGroupingRules.DimensionHeaderLabel(k), ReportConfigurationConstants.TypeText, null)));
+        columns.Add(new ReportConfigurationColumnDto("currency", "币种", ReportConfigurationConstants.TypeText, null));
+        columns.Add(new ReportConfigurationColumnDto("value", "数值", ReportConfigurationConstants.TypeNumber, null));
+        columns.Add(new ReportConfigurationColumnDto("known", "已知值条数", ReportConfigurationConstants.TypeNumber, null));
+        columns.Add(new ReportConfigurationColumnDto("missing", "缺失条数", ReportConfigurationConstants.TypeNumber, null));
+        columns.Add(new ReportConfigurationColumnDto("source", "来源条数", ReportConfigurationConstants.TypeNumber, null));
+        columns.Add(new ReportConfigurationColumnDto("reason", "原因", ReportConfigurationConstants.TypeText, null));
+        return columns;
     }
 
     private static string MetricTitle(ReportConfigurationMetricResultDto metric)
@@ -515,7 +596,7 @@ public static class ReportConfigurationPdfExporter
         if (rows.Count == 0)
             return;
 
-        var columns = MetricsColumns;
+        var columns = BuildMetricColumns(metrics);
         var titleFont = new XFont(FontFamily, TitleSize, XFontStyleEx.Bold);
         var metaFont = new XFont(FontFamily, MetaSize, XFontStyleEx.Regular);
         var headerFont = new XFont(FontFamily, HeaderSize, XFontStyleEx.Bold);
@@ -827,7 +908,7 @@ public static class ReportConfigurationPdfExporter
         if (rows.Count == 0)
             return;
 
-        var columns = SubtotalColumns;
+        var columns = BuildSubtotalColumns(groups);
         var titleFont = new XFont(FontFamily, TitleSize, XFontStyleEx.Bold);
         var metaFont = new XFont(FontFamily, MetaSize, XFontStyleEx.Regular);
         var headerFont = new XFont(FontFamily, HeaderSize, XFontStyleEx.Bold);

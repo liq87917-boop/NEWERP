@@ -284,5 +284,32 @@ public class ReportConfigurationCatalogTests
         Assert.Equal(new[] { ReportConfigurationConstants.AggregateCount }, orderNo.AllowedFunctions);
         Assert.Equal(ReportConfigurationMetricRules.CurrencyBehaviorNone, orderNo.CurrencyBehavior);
     }
+
+    [Fact]
+    public async Task Catalog_销售订单_分组维度元数据真实()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedUser(db, "dim-meta");
+        var role = SeedRole(db, "Role-dim-meta");
+        SeedUserRole(db, user.Id, role.Id);
+        SeedRoleMenu(db, role.Id, SeedMenu(db, "sales-order").Id);
+        var catalog = BuildCatalog(db);
+
+        var result = await catalog.GetCatalogAsync(user.Id);
+        var dataset = Assert.Single(result.Datasets);
+
+        Assert.Equal(2, dataset.GroupingDimensions.Count);
+        var customer = dataset.GroupingDimensions[0];
+        Assert.Equal(ReportConfigurationConstants.GroupCustomer, customer.Key);
+        Assert.Equal("customerId", customer.FieldKey);
+        Assert.Equal(ReportConfigurationConstants.TypeNumber, customer.FieldType);
+        Assert.Equal(ReportConfigurationConstants.GroupingSemanticsIdentity, customer.Semantics);
+
+        var month = dataset.GroupingDimensions[1];
+        Assert.Equal(ReportConfigurationConstants.GroupMonth, month.Key);
+        Assert.Equal("orderDate", month.FieldKey);
+        Assert.Equal(ReportConfigurationConstants.TypeDate, month.FieldType);
+        Assert.Equal(ReportConfigurationConstants.GroupingSemanticsCalendarMonth, month.Semantics);
+    }
 }
 

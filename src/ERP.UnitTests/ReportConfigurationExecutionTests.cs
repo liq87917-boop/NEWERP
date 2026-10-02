@@ -403,19 +403,55 @@ public class ReportConfigurationExecutionTests
     }
 
     [Fact]
-    public async Task PreviewAsync_多分组键_拒绝()
+    public async Task PreviewAsync_复合分组_返回有序复合维度且不改写源页事实()
     {
         using var db = TestDbFactory.Create();
         var user = SeedPrivilegedUser(db, "owner", "sales-order");
+        var customer = SeedCustomer(db, "C001", "客户一");
+        SeedOrder(db, "SO-1", customer.Id, Currency.USD, 100m, new DateTime(2026, 9, 1));
+        SeedOrder(db, "SO-2", customer.Id, Currency.CNY, 200m, new DateTime(2026, 10, 1));
+
         var def = SalesOrderDefinition();
         def.Grouping = new List<string> { "customer", "month" };
 
         var service = BuildService(db);
-        var created = await service.CreateAsync(user, SaveDto("报表", def));
+        var created = await service.CreateAsync(user, SaveDto("复合分组报表", def));
+
+        var execution = BuildExecution(db);
+        var preview = await execution.PreviewAsync(user, new ReportConfigurationPreviewRequest { ConfigurationId = created.Id });
+
+        Assert.Equal(new List<string> { "customer", "month" }, preview.Groupings);
+        Assert.Equal(2, preview.Rows.Count);              // 源页事实不变、不重新分页、不复制行
+        Assert.Equal(2, preview.Total);
+        Assert.All(preview.Rows, r => Assert.False(r.ContainsKey("customerId")));  // 仅投影选定字段，剥离分组依赖
+        Assert.All(preview.Rows, r => Assert.False(r.ContainsKey("orderDate")));
+        Assert.All(preview.Rows, r => Assert.True(r.ContainsKey("orderNo")));
+
+        Assert.NotNull(preview.Groups);
+        Assert.Equal(2, preview.Groups!.Count);           // 客户一 × 2026年9月、客户一 × 2026年10月
+        Assert.All(preview.Groups, g => Assert.Equal(2, g.Dimensions.Count));
+        var first = preview.Groups[0];
+        Assert.Equal("customer", first.Dimensions[0].Key);
+        Assert.Equal("month", first.Dimensions[1].Key);
+        Assert.StartsWith("客户 #", first.Dimensions[0].Label);
+    }
+
+    [Fact]
+    public async Task PreviewAsync_分组覆盖冲突_拒绝()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedPrivilegedUser(db, "owner", "sales-order");
+        var service = BuildService(db);
+        var created = await service.CreateAsync(user, SaveDto("报表", SalesOrderDefinition()));
 
         var execution = BuildExecution(db);
         var ex = await Assert.ThrowsAsync<BusinessException>(() => execution.PreviewAsync(
-            user, new ReportConfigurationPreviewRequest { ConfigurationId = created.Id }));
+            user, new ReportConfigurationPreviewRequest
+            {
+                ConfigurationId = created.Id,
+                GroupBy = "customer",
+                Groupings = new List<string> { "month" },
+            }));
 
         Assert.Equal(ErrorCodes.InvalidParameter, ex.Code);
     }

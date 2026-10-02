@@ -41,7 +41,7 @@ public class ReportConfigurationUiTests
         Assert.Contains("function rccBuildDefinition(state)", js);
         Assert.Contains("aggregates: rccBuildAggregates(state)", js);  // 指标只来自目录 metric 白名单，绝不自由聚合 / SQL
         Assert.Contains("capabilities: []", js);        // 不请求超出目录的能力
-        Assert.Contains("function rccGroupingHtml(groupingKeys, groupBy)", js);
+        Assert.Contains("function rccGroupingHtml(groupingDimensions, groupings)", js);
         Assert.Contains("function rccFilterRowHtml(fields, f, i)", js);
         Assert.DoesNotContain("SELECT ", js);
         Assert.DoesNotContain("localStorage.setItem('rcc", js);   // 绝不使用本地存储替代持久化定义
@@ -179,7 +179,7 @@ public class ReportConfigurationUiTests
 
         Assert.Contains("function rccSelectDataset(key, touch = true)", js);
         Assert.Contains("RCC.filters = []", js);           // 切换数据集重置筛选
-        Assert.Contains("RCC.groupBy = 'none'", js);       // 切换数据集重置分组
+        Assert.Contains("RCC.groupings = []", js);         // 切换数据集重置分组
         Assert.Contains("function rccApplyDefinition(def)", js);
         Assert.Contains("rccSelectFields(RCC.fields, (def && def.fields) || [])", js);  // 加载时丢弃未知字段
     }
@@ -281,6 +281,22 @@ public class ReportConfigurationUiTests
         Assert.Contains("最多 4 个", js);
         Assert.Contains("非全量合计", js);
         Assert.Contains("金额按币种分区", js);
+    }
+
+    // ==================== 12. 复合分组（有序维度选择、构建与渲染接线） ====================
+
+    [Fact]
+    public void 复合分组_有序维度选择与构建接线_有界状态且不自由分组()
+    {
+        var js = File.ReadAllText(Path.Combine(JsDirectory(), "report-configuration.js"));
+
+        Assert.Contains("groupings: []", js);
+        Assert.Contains("function rccOnGrouping(index, value)", js);
+        Assert.Contains("第一分组", js);
+        Assert.Contains("第二分组", js);
+        Assert.Contains("groupings: (state.groupings && state.groupings.length) ? state.groupings : ['none']", js);
+        Assert.Contains("rccEffectiveGroupings(preview)", js);
+        Assert.Contains("function rccEffectiveGroupings(preview)", js);
     }
 
     /// <summary>截取源码中两个锚点之间的片段，便于对单个函数做「不含某内容」的契约断言。</summary>

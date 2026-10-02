@@ -255,8 +255,13 @@ public sealed class ReportConfigurationExcelExporter
         XSSFWorkbook workbook, IReadOnlyList<ReportConfigurationGroupSubtotalDto> groups, Styles styles, CancellationToken cancellationToken)
     {
         var sheet = workbook.CreateSheet(GroupsSheetName);
+        var dimensionKeys = CompositeDimensionKeys(groups);
+        var headers = dimensionKeys.Count > 0
+            ? dimensionKeys.Select(ReportConfigurationGroupingRules.DimensionHeaderLabel)
+                .Concat(new[] { "币种", "条数", "金额", "含税金额", "已分摊金额", "剩余金额", "剩余状态" }).ToArray()
+            : new[] { "分组", "币种", "条数", "金额", "含税金额", "已分摊金额", "剩余金额", "剩余状态" };
+
         var headerRow = sheet.CreateRow(0);
-        var headers = new[] { "分组", "币种", "条数", "金额", "含税金额", "已分摊金额", "剩余金额", "剩余状态" };
         for (var c = 0; c < headers.Length; c++)
         {
             var cell = headerRow.CreateCell(c);
@@ -272,20 +277,39 @@ public sealed class ReportConfigurationExcelExporter
             foreach (var partition in group.Partitions)
             {
                 var row = sheet.CreateRow(rowIndex++);
-                WriteText(row.CreateCell(0), group.Label, styles.Text);
-                WriteText(row.CreateCell(1), partition.Currency, styles.Text);
-                row.CreateCell(2).SetCellValue(partition.Count);
-                row.GetCell(2).CellStyle = styles.Integer;
-                WriteOptionalAmount(row.CreateCell(3), partition.Amount, styles.Number);
-                WriteOptionalAmount(row.CreateCell(4), partition.GrossAmount, styles.Number);
-                WriteOptionalAmount(row.CreateCell(5), partition.EffectiveAllocatedAmount, styles.Number);
-                WriteOptionalAmount(row.CreateCell(6), partition.RemainingAmount, styles.Number);
-                WriteText(row.CreateCell(7), partition.RemainingState, styles.Text);
+                var c = 0;
+                if (dimensionKeys.Count > 0)
+                {
+                    foreach (var dimension in group.Dimensions)
+                        WriteText(row.CreateCell(c++), dimension.Label, styles.Text);
+                }
+                else
+                {
+                    WriteText(row.CreateCell(c++), group.Label, styles.Text);
+                }
+
+                WriteText(row.CreateCell(c++), partition.Currency, styles.Text);
+                row.CreateCell(c).SetCellValue(partition.Count);
+                row.GetCell(c++).CellStyle = styles.Integer;
+                WriteOptionalAmount(row.CreateCell(c++), partition.Amount, styles.Number);
+                WriteOptionalAmount(row.CreateCell(c++), partition.GrossAmount, styles.Number);
+                WriteOptionalAmount(row.CreateCell(c++), partition.EffectiveAllocatedAmount, styles.Number);
+                WriteOptionalAmount(row.CreateCell(c++), partition.RemainingAmount, styles.Number);
+                WriteText(row.CreateCell(c++), partition.RemainingState, styles.Text);
             }
         }
 
         for (var c = 0; c < headers.Length; c++)
             sheet.SetColumnWidth(c, Math.Min(headers[c].Length * 2 + 4, 40) * 256);
+    }
+
+    private static IReadOnlyList<string> CompositeDimensionKeys(IReadOnlyList<ReportConfigurationGroupSubtotalDto> groups)
+    {
+        if (groups is null || groups.Count == 0)
+            return Array.Empty<string>();
+        return (groups[0].Dimensions ?? Array.Empty<ReportConfigurationGroupDimensionValueDto>())
+            .Select(d => d.Key)
+            .ToList();
     }
 
     // ==================== 指标汇总工作表（当前预览页、分组 + 币种分区） ====================
@@ -294,8 +318,14 @@ public sealed class ReportConfigurationExcelExporter
         XSSFWorkbook workbook, IReadOnlyList<ReportConfigurationMetricResultDto> metrics, Styles styles, CancellationToken cancellationToken)
     {
         var sheet = workbook.CreateSheet(MetricsSheetName);
+        var dimensionKeys = CompositeMetricDimensionKeys(metrics);
+        var headers = dimensionKeys.Count > 0
+            ? new[] { "指标" }
+                .Concat(dimensionKeys.Select(ReportConfigurationGroupingRules.DimensionHeaderLabel))
+                .Concat(new[] { "币种", "数值", "已知值条数", "缺失条数", "来源条数", "原因" }).ToArray()
+            : new[] { "指标", "分组", "币种", "数值", "已知值条数", "缺失条数", "来源条数", "原因" };
+
         var headerRow = sheet.CreateRow(0);
-        var headers = new[] { "指标", "分组", "币种", "数值", "已知值条数", "缺失条数", "来源条数", "原因" };
         for (var c = 0; c < headers.Length; c++)
         {
             var cell = headerRow.CreateCell(c);
@@ -312,22 +342,47 @@ public sealed class ReportConfigurationExcelExporter
             foreach (var cell in metric.Cells)
             {
                 var row = sheet.CreateRow(rowIndex++);
-                WriteText(row.CreateCell(0), label, styles.Text);
-                WriteText(row.CreateCell(1), cell.GroupLabel, styles.Text);
-                WriteText(row.CreateCell(2), cell.Currency, styles.Text);
-                WriteOptionalAmount(row.CreateCell(3), cell.Value, styles.Number);
-                row.CreateCell(4).SetCellValue(cell.KnownCount);
-                row.GetCell(4).CellStyle = styles.Integer;
-                row.CreateCell(5).SetCellValue(cell.MissingCount);
-                row.GetCell(5).CellStyle = styles.Integer;
-                row.CreateCell(6).SetCellValue(cell.SourceCount);
-                row.GetCell(6).CellStyle = styles.Integer;
-                WriteText(row.CreateCell(7), cell.Reason, styles.Text);
+                var c = 0;
+                WriteText(row.CreateCell(c++), label, styles.Text);
+                if (dimensionKeys.Count > 0)
+                {
+                    foreach (var dimension in cell.Dimensions)
+                        WriteText(row.CreateCell(c++), dimension.Label, styles.Text);
+                }
+                else
+                {
+                    WriteText(row.CreateCell(c++), cell.GroupLabel, styles.Text);
+                }
+
+                WriteText(row.CreateCell(c++), cell.Currency, styles.Text);
+                WriteOptionalAmount(row.CreateCell(c++), cell.Value, styles.Number);
+                row.CreateCell(c).SetCellValue(cell.KnownCount);
+                row.GetCell(c++).CellStyle = styles.Integer;
+                row.CreateCell(c).SetCellValue(cell.MissingCount);
+                row.GetCell(c++).CellStyle = styles.Integer;
+                row.CreateCell(c).SetCellValue(cell.SourceCount);
+                row.GetCell(c++).CellStyle = styles.Integer;
+                WriteText(row.CreateCell(c++), cell.Reason, styles.Text);
             }
         }
 
         for (var c = 0; c < headers.Length; c++)
             sheet.SetColumnWidth(c, Math.Min(headers[c].Length * 2 + 4, 40) * 256);
+    }
+
+    private static IReadOnlyList<string> CompositeMetricDimensionKeys(IReadOnlyList<ReportConfigurationMetricResultDto> metrics)
+    {
+        if (metrics is null || metrics.Count == 0)
+            return Array.Empty<string>();
+        foreach (var metric in metrics)
+        {
+            foreach (var cell in metric.Cells)
+            {
+                if (cell.Dimensions is { Count: > 0 })
+                    return cell.Dimensions.Select(d => d.Key).ToList();
+            }
+        }
+        return Array.Empty<string>();
     }
 
     private static string MetricTitle(ReportConfigurationMetricResultDto metric)

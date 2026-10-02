@@ -180,12 +180,24 @@ public static class ReportConfigurationMetricRules
         ReportConfigurationDatasetDto dataset,
         IReadOnlyList<Dictionary<string, object?>> rows,
         string groupBy)
+        => Compute(definition, dataset, rows, new[] { groupBy ?? ReportConfigurationConstants.GroupNone });
+
+    /// <summary>
+    /// 对当前预览页行执行用户已选中的聚合，返回仅选中指标的汇总结果（分组 + 币种分区）。
+    /// <para>ERP-271：分组支持 0 / 1 / 2 个有序基础维度；复合分组使用类型化复合键与显式未知桶，绝不使用字符串拼接。</para>
+    /// </summary>
+    public static List<ReportConfigurationMetricResultDto> Compute(
+        ReportConfigurationDefinition definition,
+        ReportConfigurationDatasetDto dataset,
+        IReadOnlyList<Dictionary<string, object?>> rows,
+        IReadOnlyList<string>? groupings)
     {
         var results = new List<ReportConfigurationMetricResultDto>();
         var aggregates = definition?.Aggregates ?? new List<ReportConfigurationAggregate>();
         if (aggregates.Count == 0)
             return results;
 
+        var effective = ReportConfigurationGroupingRules.NormalizeGroupingKeys(groupings);
         var metrics = BuildMetrics(dataset.Fields, dataset.Grain)
             .ToDictionary(m => m.Key, StringComparer.OrdinalIgnoreCase);
 
@@ -193,7 +205,7 @@ public static class ReportConfigurationMetricRules
         {
             if (aggregate is null)
                 continue;
-            var result = ComputeAggregate(aggregate, dataset, metrics, rows, groupBy);
+            var result = ComputeAggregate(aggregate, dataset, metrics, rows, effective);
             if (result is not null)
                 results.Add(result);
         }
@@ -206,7 +218,7 @@ public static class ReportConfigurationMetricRules
         ReportConfigurationDatasetDto dataset,
         IReadOnlyDictionary<string, ReportConfigurationMetricDto> metrics,
         IReadOnlyList<Dictionary<string, object?>> rows,
-        string groupBy)
+        IReadOnlyList<string> groupings)
     {
         var function = (aggregate.Function ?? string.Empty).Trim();
         var fieldKey = (aggregate.FieldKey ?? string.Empty).Trim();
@@ -226,10 +238,10 @@ public static class ReportConfigurationMetricRules
             if (row is null)
                 continue;
 
-            var (groupKey, groupLabel, sortKey) = GroupBucketOf(row, groupBy, dataset);
+            var (groupKey, groupLabel, sortKey, dimensions) = GroupBucketOfComposite(row, groupings, dataset);
             if (!buckets.TryGetValue(groupKey, out var group))
             {
-                group = new GroupAccumulator { Key = groupKey, Label = groupLabel, SortKey = sortKey };
+                group = new GroupAccumulator { Key = groupKey, Label = groupLabel, SortKey = sortKey, Dimensions = dimensions };
                 buckets[groupKey] = group;
             }
 
@@ -303,6 +315,28 @@ public static class ReportConfigurationMetricRules
         }
 
         return ("all", "全部", "0");
+    }
+
+    /// <summary>
+    /// 计算单个事实行的分组桶：0 / 1 个维度沿用旧单分组契约（键 / 标签 / 排序不变），
+    /// 2 个维度走 <see cref="ReportConfigurationGroupingRules.BuildGroupBucket"/> 的类型化复合键。
+    /// </summary>
+    private static (string Key, string Label, string SortKey, IReadOnlyList<ReportConfigurationGroupDimensionValueDto> Dimensions) GroupBucketOfComposite(
+        Dictionary<string, object?> row, IReadOnlyList<string> groupings, ReportConfigurationDatasetDto dataset)
+    {
+        var effective = ReportConfigurationGroupingRules.NormalizeGroupingKeys(groupings);
+        if (effective.Count == 0)
+            return ("all", "全部", "0", Array.Empty<ReportConfigurationGroupDimensionValueDto>());
+
+        if (effective.Count == 1)
+        {
+            var single = GroupBucketOf(row, effective[0], dataset);
+            return (single.Key, single.Label, single.SortKey, Array.Empty<ReportConfigurationGroupDimensionValueDto>());
+        }
+
+        var bucket = ReportConfigurationGroupingRules.BuildGroupBucket(
+            row, effective, ReportConfigurationGroupingRules.ResolveDimensions(dataset));
+        return (bucket.Key, bucket.Label, bucket.SortKey, bucket.Dimensions);
     }
 
     private static object? ReadValue(Dictionary<string, object?> row, string key)
@@ -456,6 +490,7 @@ public static class ReportConfigurationMetricRules
         public string Key = string.Empty;
         public string Label = string.Empty;
         public string SortKey = string.Empty;
+        public IReadOnlyList<ReportConfigurationGroupDimensionValueDto> Dimensions = Array.Empty<ReportConfigurationGroupDimensionValueDto>();
         public Dictionary<string, CellAccumulator> Cells = new(StringComparer.Ordinal);
 
         public CellAccumulator GetOrCreateCell(string? currency, bool partition)
@@ -494,6 +529,7 @@ public static class ReportConfigurationMetricRules
             {
                 GroupKey = group.Key,
                 GroupLabel = group.Label,
+                Dimensions = group.Dimensions.ToList(),
                 Currency = string.IsNullOrEmpty(Currency) ? null : Currency,
                 Value = Finalize(function),
                 KnownCount = KnownCount,

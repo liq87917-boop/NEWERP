@@ -47,7 +47,7 @@ let RCC = {
   computedColumns: [],
   aggregates: [],
   relations: [],
-  groupBy: 'none',
+  groupings: [],
   sortFieldKey: '',
   sortDirection: 'asc',
   page: 1,
@@ -365,13 +365,22 @@ function rccGroupHtml(preview) {
   return '<div class="rcc-groups">' + rows + '</div>';
 }
 
+/* 生效分组维度（兼容旧 groupBy 与新的有序 groupings；none 归一为空列表） */
+function rccEffectiveGroupings(preview) {
+  if (preview && Array.isArray(preview.groupings) && preview.groupings.length) {
+    return preview.groupings.filter(k => k && k !== 'none');
+  }
+  if (preview && preview.groupBy && preview.groupBy !== 'none') return [preview.groupBy];
+  return [];
+}
+
 function rccResultHtml(preview) {
   if (!preview) return rccEmptyHtml();
   const evidence = preview.evidence || {};
   const coverage = evidence.coverage || 'current-page';
   const coverageText = coverage === 'current-page' ? '当前预览页（非全量合计）' : coverage;
   const parts = [];
-  if (preview.groupBy && preview.groupBy !== 'none') parts.push(rccGroupHtml(preview));
+  if (rccEffectiveGroupings(preview).length) parts.push(rccGroupHtml(preview));
   parts.push(rccTableHtml(preview));
   parts.push(rccComputedEvidenceHtml(preview));
   parts.push(rccMetricsHtml(preview));
@@ -448,7 +457,7 @@ function rccBuildFilter(fields, f) {
 function rccBuildDefinition(state) {
   const fields = rccSelectFields(state.fields || [], state.selectedKeys || []);
   const filters = (state.filters || []).map(f => rccBuildFilter(state.fields, f)).filter(Boolean);
-  const grouping = (state.groupBy && state.groupBy !== 'none') ? [state.groupBy] : ['none'];
+  const grouping = (state.groupings && state.groupings.length) ? state.groupings : ['none'];
   return {
     schemaVersion: (state.catalog && state.catalog.schemaVersion) || 1,
     datasetKey: state.datasetKey || '',
@@ -475,7 +484,7 @@ function rccBuildPreviewRequest(state) {
     revisionVersion: state.previewRevision || null,
     page: state.page || 1,
     pageSize: state.pageSize || RCC_DEFAULT_PAGE_SIZE,
-    groupBy: state.groupBy || 'none',
+    groupings: (state.groupings && state.groupings.length) ? state.groupings : ['none'],
   };
 }
 
@@ -522,11 +531,21 @@ function rccFiltersHtml(filters, fields) {
   return filters.map((f, i) => rccFilterRowHtml(fields, f, i)).join('');
 }
 
-function rccGroupingHtml(groupingKeys, groupBy) {
-  const keys = (groupingKeys && groupingKeys.length) ? groupingKeys : ['none', 'customer', 'month'];
-  return '<select onchange="rccOnGroupBy(this.value)">'
-    + keys.map(k => '<option value="' + rccEsc(k) + '" ' + (k === groupBy ? 'selected' : '') + '>' + rccEsc(RCC_GROUP_LABELS[k] || k) + '</option>').join('')
-    + '</select>';
+/* ERP-271：有序复合分组维度选择器（最多两个有区别的基础维度，保持选择顺序） */
+function rccGroupingHtml(groupingDimensions, groupings) {
+  const dims = (groupingDimensions && groupingDimensions.length) ? groupingDimensions
+    : [{ key: 'customer', label: '按客户分组' }, { key: 'month', label: '按月份分组' }];
+  const first = (groupings && groupings[0]) || '';
+  const second = (groupings && groupings[1]) || '';
+  const firstOptions = '<option value="">不分组</option>'
+    + dims.map(d => '<option value="' + rccEsc(d.key) + '" ' + (d.key === first ? 'selected' : '')
+      + '>' + rccEsc(d.label || RCC_GROUP_LABELS[d.key] || d.key) + '</option>').join('');
+  const secondOptions = '<option value="">无（不复合分组）</option>'
+    + dims.filter(d => d.key !== first).map(d => '<option value="' + rccEsc(d.key) + '" ' + (d.key === second ? 'selected' : '')
+      + '>' + rccEsc(d.label || RCC_GROUP_LABELS[d.key] || d.key) + '</option>').join('');
+  return '<div>第一分组：<select onchange="rccOnGrouping(0, this.value)">' + firstOptions + '</select></div>'
+    + '<div>第二分组：<select onchange="rccOnGrouping(1, this.value)" ' + (first ? '' : 'disabled') + '>'
+    + secondOptions + '</select></div>';
 }
 
 /* 排序：仅目录白名单可排序字段（有限持久化键）；切换即重置页码并作废在途旧响应 */
@@ -768,7 +787,7 @@ function rccRenderDesigner(html) {
     + rccRelationsHtml()
     + '<div class="rcc-filters"><label>类型化筛选</label>' + rccFiltersHtml(RCC.filters, RCC.fields)
     + '<button type="button" class="btn" onclick="rccAddFilter()">+ 添加筛选</button></div>'
-    + '<div class="rcc-grouping"><label>分组</label>' + rccGroupingHtml(ds.groupingKeys, RCC.groupBy) + '</div>'
+    + '<div class="rcc-grouping"><label>分组</label>' + rccGroupingHtml(ds.groupingDimensions, RCC.groupings) + '</div>'
     + '<div class="rcc-sorting"><label>排序（仅持久化键）</label>' + rccSortingHtml(ds)
     + '<div class="rcc-hint">' + rccEsc(ds.sortingExplanation || '仅订单 / 发票原生键可排序') + '</div></div>'
     + rccMetricEditorHtml()
@@ -831,7 +850,7 @@ function rccTouch() {
 async function rccInit() {
   RCC = {
     catalog: null, datasets: [], datasetKey: '', fields: [], list: [], current: null, name: '',
-    selectedKeys: [], filters: [], computedColumns: [], aggregates: [], groupBy: 'none', sortFieldKey: '', sortDirection: 'asc', page: 1, pageSize: RCC_DEFAULT_PAGE_SIZE,
+    selectedKeys: [], filters: [], computedColumns: [], aggregates: [], groupings: [], sortFieldKey: '', sortDirection: 'asc', page: 1, pageSize: RCC_DEFAULT_PAGE_SIZE,
     maxPageSize: 200, previewRevision: null, view: null, revisions: [],
     sharedList: [], sharedCurrent: null, grants: [], dirty: false,
     requestSeq: 0, envBlocked: false, busy: false,
@@ -887,7 +906,7 @@ function rccSelectDataset(key, touch = true) {
   RCC.computedColumns = [];
   RCC.aggregates = [];
   RCC.relations = [];
-  RCC.groupBy = 'none';
+  RCC.groupings = [];
   RCC.sortFieldKey = '';
   RCC.sortDirection = 'asc';
   RCC.page = 1;
@@ -957,8 +976,17 @@ function rccOnFilterOp(i, value) {
 function rccOnFilterValue(i, value) { const f = RCC.filters[i]; if (f) { f.value = value; rccTouch(); } }
 function rccOnFilterValue2(i, value) { const f = RCC.filters[i]; if (f) { f.value2 = value; rccTouch(); } }
 
-function rccOnGroupBy(value) {
-  RCC.groupBy = value;
+function rccOnGrouping(index, value) {
+  const key = (value || '').trim();
+  const cur = (RCC.groupings || []).slice(0, 2);
+  if (index === 0) {
+    if (!key) RCC.groupings = [];
+    else if (cur[1] === key) RCC.groupings = [key, cur[0]];
+    else RCC.groupings = [key, cur[1]].filter(Boolean).slice(0, 2);
+  } else {
+    if (!key) RCC.groupings = cur.slice(0, 1);
+    else RCC.groupings = [cur[0], key].filter(Boolean).slice(0, 2);
+  }
   rccTouch();
   rccRenderDesigner();
 }
@@ -972,7 +1000,7 @@ function rccNew() {
   RCC.filters = [];
   RCC.computedColumns = [];
   RCC.aggregates = [];
-  RCC.groupBy = 'none';
+  RCC.groupings = [];
   RCC.sortFieldKey = '';
   RCC.sortDirection = 'asc';
   RCC.page = 1;
@@ -998,8 +1026,7 @@ function rccApplyDefinition(def) {
     value: rccFilterValueToString(f.value),
     value2: f.value2 !== null && f.value2 !== undefined ? String(f.value2) : '',
   }));
-  const g = ((def && def.grouping) || []).filter(k => k && k !== 'none');
-  RCC.groupBy = g.length === 1 ? g[0] : 'none';
+  RCC.groupings = ((def && def.grouping) || []).filter(k => k && k !== 'none').slice(0, 2);
   RCC.page = (def && def.presentation && def.presentation.page) || 1;
   RCC.pageSize = (def && def.presentation && def.presentation.pageSize) || RCC_DEFAULT_PAGE_SIZE;
   RCC.sortFieldKey = (def && def.presentation && def.presentation.sortFieldKey) || '';
