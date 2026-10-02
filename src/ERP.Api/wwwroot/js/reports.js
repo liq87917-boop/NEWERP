@@ -14,7 +14,7 @@ const REPORTS = {
       { key: 'totalAmount', label: '当前价估算金额(币种未知)', type: 'number' },
       { key: 'amountLabel', label: '金额口径' },
     ] },
-  'order-profit': { api: '/api/reports/order-profit', title: '订单利润暂估表',
+  'order-profit': { api: '/api/reports/order-profit', title: '订单利润暂估表', designer: 'order-profit',
     emoji: '💹', kpi: 'gold',
     summary: '原币销售额 · 成本/利润未知(无历史成本依据) · 当前价估算(币种未知，仅估算)',
     columns: [
@@ -198,9 +198,11 @@ async function renderReport(rep, name) {
           ? `<button class="btn btn-neutral" onclick="openQuotationConversionDesigner()" title="打开报价成交率字段设计器（只读预览，按业务员 × 原币分桶）">🎛 字段设计器</button>`
           : rep.designer === 'product-sales-ranking'
             ? `<button class="btn btn-neutral" onclick="openProductSalesRankingDesigner()" title="打开商品销量排名字段设计器（只读预览，发货数量证据，金额估算已排除）">🎛 字段设计器</button>`
-            : rep.designer
-              ? `<button class="btn btn-neutral" onclick="openFollowUpDueDesigner()" title="打开动态跟进提醒字段设计器（只读预览）">🎛 字段设计器</button>`
-              : ''}
+            : rep.designer === 'order-profit'
+              ? `<button class="btn btn-neutral" onclick="openOrderProfitEstimateDesigner()" title="打开订单利润暂估字段设计器（只读预览，原币销售额与未知成本利润证据，当前价估算独立标注）">🎛 字段设计器</button>`
+              : rep.designer
+                ? `<button class="btn btn-neutral" onclick="openFollowUpDueDesigner()" title="打开动态跟进提醒字段设计器（只读预览）">🎛 字段设计器</button>`
+                : ''}
         <button class="btn btn-neutral" onclick="exportReportCSV()" title="导出为 CSV">📤 导出 CSV</button>
         <button class="btn btn-neutral" onclick="window.print()" title="打印报表">🖨 打印</button>
       </div>
@@ -210,7 +212,9 @@ async function renderReport(rep, name) {
       ? `<div id="qcd-designer"></div>`
       : rep.designer === 'product-sales-ranking'
         ? `<div id="psr-designer"></div>`
-        : rep.designer ? `<div id="fud-designer"></div>` : ''}
+        : rep.designer === 'order-profit'
+          ? `<div id="opd-designer"></div>`
+          : rep.designer ? `<div id="fud-designer"></div>` : ''}
 
     <div class="table-wrap" id="report-table">
       <div class="skeleton-row"></div><div class="skeleton-row"></div><div class="skeleton-row"></div>
@@ -2076,6 +2080,365 @@ function openProductSalesRankingDesigner() {
     </div>
     <div id="psr-designer-result"></div>`;
   loadProductSalesRankingDesignerCatalog();
+}
+
+/* ============ 动态订单利润暂估字段设计器（ERP-221：只读、有界的前端字段选择与分页预览 / Excel 导出） ============
+   口径与后端 ERP-221（DynamicOrderProfitEstimateReportController / DynamicOrderProfitEstimateReportRules）一一对应：
+   - 入口复用在「订单利润暂估表」报表（reports.js 的 order-profit，designer: 'order-profit'），不新增菜单 / 架构 / 脚本注册；
+   - 字段选择器只由 GET /api/dynamic-order-profit-estimate-report 返回的有限白名单目录渲染为复选框（name="opd-des-field"），
+     绝无自由填写的字段名或 SQL；勾选状态经 opdSelectFields 规范化（去重、保持顺序、丢弃未知键）；
+   - 筛选仅限开始 / 结束日期（含首尾最多 366 天），分页有界（页码 ≥ 1，每页 1~200），
+     预览走 POST /api/dynamic-order-profit-estimate-report，只发送「白名单字段 + 有界日期 + 有界分页」；
+   - 结果按后端返回的列名与选定字段值渲染（opdTableHtml / opdResultHtml），全部 HTML 转义，null 金额显示「未知」；
+   - 页面覆盖 / 原币口径 / 未知依据始终作为上下文显示（即使对应列被取消选择），绝不展示跨币种总额或实际利润；
+   - 空页 / 授权撤销（权限不足 / 未登录）/ 无效请求 / 网络失败分别可见，且不暴露范围外数据；
+   - 导出复用预览请求体 POST /api/dynamic-order-profit-estimate-report/export，成功（xlsx 附件）触发下载；
+   - 全程只读：不写库、不迁移、不执行任意 SQL。 */
+
+/* 字段设计器状态（纯数据；DOM 访问只在事件处理函数内部发生） */
+let OPD_DYN = {
+  catalog: null,      // GET /api/dynamic-order-profit-estimate-report 返回的目录 DTO
+  fields: [],         // 目录字段（白名单）
+  selectedKeys: [],   // 当前勾选的字段键（默认全选）
+  view: null,         // 最近一次预览结果
+  page: 1,            // 当前预览页（预览 / 翻页复用）
+};
+
+function opdEsc(v) {
+  return String(v ?? '').replace(/[&<>"']/g, c => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[c]));
+}
+
+/* 规范化选定字段（fail closed）：只保留目录白名单内的键、去重、保持请求顺序；未知键丢弃，绝不发送任意字段名 */
+function opdSelectFields(catalogFields, selectedKeys) {
+  const valid = new Set((catalogFields || []).map(f => f && f.key).filter(Boolean));
+  const seen = new Set();
+  const result = [];
+  for (const k of (Array.isArray(selectedKeys) ? selectedKeys : [])) {
+    if (typeof k !== 'string') continue;
+    const key = k.trim();
+    if (!key || !valid.has(key) || seen.has(key)) continue;
+    seen.add(key);
+    result.push(key);
+  }
+  return result;
+}
+
+/* 日期窗口客户端校验（与后端 ValidateDateRange 一致）：必填、结束不早于开始、含首尾最多 366 天 */
+function opdDateError(state) {
+  const start = String(state && state.start || '').trim();
+  const end = String(state && state.end || '').trim();
+  if (!start || !end) return '请填写开始与结束日期';
+  const startMs = Date.parse(start);
+  const endMs = Date.parse(end);
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) return '日期格式无效';
+  if (end < start) return '结束日期不能早于开始日期';
+  if (Math.round((endMs - startMs) / 86400000) + 1 > 366) return '日期范围最多 366 天（含首尾）';
+  return '';
+}
+
+/* 组装有界预览请求体：字段只来自目录、日期仅开始 / 结束、分页有界，绝不接受任意字段名或 SQL */
+function opdBuildRequest(state) {
+  const fields = opdSelectFields(state.catalogFields, state.selectedKeys);
+  const page = Math.max(1, Math.floor(Number(state.page) || 1));
+  const maxPageSize = Number(state.maxPageSize) || 200;
+  let pageSize = Math.floor(Number(state.pageSize));
+  if (!Number.isFinite(pageSize)) pageSize = 20;
+  pageSize = Math.max(1, Math.min(maxPageSize, pageSize));
+  return {
+    fields,
+    page,
+    pageSize,
+    start: String(state.start).slice(0, 10),
+    end: String(state.end).slice(0, 10),
+  };
+}
+
+/* 单元格纯文本：数字合理格式化（整数 / 2 位小数）、日期取 yyyy-MM-dd、其余按字符串呈现 */
+function opdCellText(value, field) {
+  const dataType = (field && field.dataType) || 'text';
+  if (dataType === 'number') {
+    const n = Number(value);
+    if (Number.isFinite(n)) return Number.isInteger(n) ? String(n) : n.toFixed(2);
+    return String(value);
+  }
+  if (dataType === 'date') return fmtDate(value);
+  return String(value);
+}
+
+/* 单元格 HTML（转义后安全渲染；null 金额显式显示「未知」） */
+function opdRenderCell(value, field) {
+  if (value === null || value === undefined) return '<span class="text-muted">未知</span>';
+  return opdEsc(opdCellText(value, field));
+}
+
+/* 结果表格 HTML：表头为返回的列名、单元格为返回的选定字段值，全部经转义 */
+function opdTableHtml(view) {
+  const cols = (view && view.columns) || [];
+  const rows = (view && view.rows) || [];
+  if (!cols.length) return '';
+  const align = c => (c.dataType === 'number') ? ' class="text-right"' : '';
+  const head = cols.map(c => `<th${align(c)}>${opdEsc(c.label || c.key)}</th>`).join('');
+  const body = rows.length
+    ? rows.map(r => `<tr>${cols.map(c => `<td${align(c)}>${opdRenderCell(r[c.key], c)}</td>`).join('')}</tr>`).join('')
+    : '';
+  return `<div class="table-wrap" style="margin-top:8px"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
+}
+
+/* 分页（有界、稳定）：当前页之外仍有记录时标注截断，翻页复用当前字段 / 日期 / 每页条数 */
+function opdPagingHtml(view) {
+  if (!view) return '';
+  const prevDisabled = view.page <= 1 ? ' disabled' : '';
+  const nextDisabled = view.page >= view.totalPages ? ' disabled' : '';
+  return `<div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px">
+      <span class="text-muted">第 ${view.page} 页 / 共 ${view.totalPages} 页${view.truncated ? '（仅当前页，后续仍有分页）' : ''}</span>
+      <div>
+        <button class="btn btn-neutral btn-sm" onclick="opdPage(-1)"${prevDisabled}>← 上一页</button>
+        <button class="btn btn-neutral btn-sm" onclick="opdPage(1)"${nextDisabled}>下一页 →</button>
+      </div></div>`;
+}
+
+/* 空结果提示（显式使用后端 emptyText） */
+function opdEmptyHtml(view) {
+  return `<div class="empty" style="margin:8px 0">${opdEsc((view && view.emptyText) || '没有符合所选日期范围与数据范围的已审核销售订单')}</div>`;
+}
+
+/* 错误提示（授权撤销 / 未登录 / 无效请求 / 网络失败分别可见，且不暴露任何数据） */
+function opdErrorHtml(kind, message) {
+  const labels = {
+    forbidden: '权限不足',
+    unauthorized: '未登录 / 登录已过期',
+    invalid: '请求无效',
+    empty: '导出内容为空',
+    network: '网络请求失败',
+    error: '预览失败',
+  };
+  return `<div class="pd-hint" style="color:#b91c1c;background:#fef2f2;border-color:#fecaca">
+      <b>${opdEsc(labels[kind] || '预览失败')}</b>：${opdEsc(message || '')}</div>`;
+}
+
+/* 业务码 → 错误态分类 */
+function opdKindOfCode(code) {
+  if (code === 2002) return 'forbidden';
+  if (code === 2000 || code === 2003) return 'unauthorized';
+  if (code === 5000) return 'error';
+  return 'invalid';
+}
+
+/* 结果：先显示页面覆盖 / 原币 / 未知依据上下文（即使对应列被取消选择），再显示表格与分页 */
+function opdResultHtml(view) {
+  const ctx = `<div class="pd-hint" style="margin:8px 0">${opdEsc((view && view.pageOnlyText) || '')}</div>
+    <div class="pd-hint" style="margin:0 0 8px">${opdEsc((view && view.currencyContextText) || '')}</div>
+    <div class="pd-hint" style="margin:0 0 8px">${opdEsc((view && view.unknownBasisText) || '')}</div>`;
+  if (!view || !view.columns || !view.columns.length) return ctx;
+  if (!view.rows || !view.rows.length) return ctx + opdEmptyHtml(view);
+  return ctx + opdTableHtml(view) + opdPagingHtml(view);
+}
+
+/* 字段选择器：仅由目录白名单渲染为复选框，无自由填写的字段名 */
+function opdFieldChooserHtml(fields, selectedKeys) {
+  const selected = new Set(selectedKeys || []);
+  return (fields || []).map(f => {
+    const checked = selected.has(f.key) ? 'checked' : '';
+    return `<label style="display:inline-flex;align-items:center;gap:4px;margin:3px 6px 3px 0;padding:2px 8px;border:1px solid #e2e8f0;border-radius:6px;background:#f8fafc;cursor:pointer">
+        <input type="checkbox" name="opd-des-field" value="${opdEsc(f.key)}" ${checked} onchange="opdSyncSelection()">
+        <span>${opdEsc(f.label || f.key)}</span></label>`;
+  }).join('');
+}
+
+function opdLoadingHtml() {
+  return '<div class="pd-hint" style="text-align:center;color:#64748b">正在预览（只读查询）…</div>';
+}
+
+function opdRenderResult(html) {
+  const el = document.getElementById('opd-designer-result');
+  if (el) el.innerHTML = html;
+}
+
+/* 轻量请求封装：返回完整 ApiResponse 信封（保留 code），网络异常抛给调用方 */
+async function opdRequest(path, method = 'GET', body = null) {
+  const headers = { 'Content-Type': 'application/json' };
+  const token = typeof localStorage !== 'undefined' ? (localStorage.getItem('erp_token') || '') : '';
+  if (token) headers['Authorization'] = 'Bearer ' + token;
+  const opts = { method, headers };
+  if (body) opts.body = JSON.stringify(body);
+  const resp = await fetch(path, opts);
+  return await resp.json();
+}
+
+/* 同步勾选状态到 selectedKeys（复选框 onchange） */
+function opdSyncSelection() {
+  const boxes = document.querySelectorAll('input[name="opd-des-field"]');
+  OPD_DYN.selectedKeys = Array.from(boxes).filter(b => b.checked).map(b => b.value);
+}
+
+function opdToggleAll(checked) {
+  const boxes = document.querySelectorAll('input[name="opd-des-field"]');
+  OPD_DYN.selectedKeys = [];
+  boxes.forEach(b => { b.checked = checked; if (checked) OPD_DYN.selectedKeys.push(b.value); });
+}
+
+/* 读取当前字段 / 日期 / 分页状态（预览、翻页与导出复用，单一来源） */
+function opdBuildState(page) {
+  const val = id => { const el = document.getElementById(id); return el ? el.value.trim() : ''; };
+  return {
+    catalogFields: OPD_DYN.fields,
+    selectedKeys: OPD_DYN.selectedKeys,
+    start: val('opd-des-start'),
+    end: val('opd-des-end'),
+    pageSize: val('opd-des-pagesize'),
+    page: page || OPD_DYN.page || 1,
+    maxPageSize: OPD_DYN.catalog && OPD_DYN.catalog.maxPageSize ? OPD_DYN.catalog.maxPageSize : 200,
+  };
+}
+
+/* 预览：组装有界请求 → POST → 安全渲染列名与单元格；授权 / 无效 / 空 / 网络失败均可见 */
+async function opdPreview(page) {
+  const state = opdBuildState(page);
+  const dateError = opdDateError(state);
+  if (dateError) {
+    opdRenderResult(opdErrorHtml('invalid', dateError));
+    return;
+  }
+  const req = opdBuildRequest(state);
+  OPD_DYN.page = req.page;
+
+  opdRenderResult(opdLoadingHtml());
+
+  try {
+    const resp = await opdRequest('/api/dynamic-order-profit-estimate-report', 'POST', req);
+    if (resp.code === 0) {
+      OPD_DYN.view = resp.data;
+      OPD_DYN.page = resp.data.page;
+      opdRenderResult(opdResultHtml(resp.data));
+    } else if (resp.code === 2000 || resp.code === 2003) {
+      if (typeof logout === 'function') logout();
+      opdRenderResult(opdErrorHtml('unauthorized', resp.message));
+    } else {
+      opdRenderResult(opdErrorHtml(opdKindOfCode(resp.code), resp.message));
+    }
+  } catch (err) {
+    opdRenderResult(opdErrorHtml('network', (err && err.message) || '无法连接到服务器'));
+  }
+}
+
+/* 导出当前页选定列为 Excel（ERP-221，只读）：复用预览请求体 POST /api/dynamic-order-profit-estimate-report/export；
+   成功（xlsx 附件）触发下载；授权 / 无效 / 空结果 / 网络失败在结果区可见，不下载任何内容 */
+async function opdExport() {
+  if (!OPD_DYN.view || !OPD_DYN.view.columns || !OPD_DYN.view.columns.length) {
+    opdRenderResult(opdErrorHtml('invalid', '请先预览后再导出 Excel'));
+    return;
+  }
+  if (!OPD_DYN.view.rows || OPD_DYN.view.rows.length === 0) {
+    opdRenderResult(opdErrorHtml('empty', '没有符合所选日期范围的订单利润暂估数据，无法导出（请先预览）'));
+    return;
+  }
+
+  const state = opdBuildState(OPD_DYN.view.page);
+  const dateError = opdDateError(state);
+  if (dateError) {
+    opdRenderResult(opdErrorHtml('invalid', dateError));
+    return;
+  }
+  const req = opdBuildRequest(state);
+  opdRenderResult(opdLoadingHtml());
+
+  try {
+    const headers = { 'Content-Type': 'application/json' };
+    const token = typeof localStorage !== 'undefined' ? (localStorage.getItem('erp_token') || '') : '';
+    if (token) headers['Authorization'] = 'Bearer ' + token;
+    const resp = await fetch('/api/dynamic-order-profit-estimate-report/export', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(req),
+    });
+
+    const contentType = (resp.headers.get('content-type') || '');
+    if (contentType.indexOf('spreadsheetml') >= 0) {
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+      a.href = url;
+      a.download = '订单利润暂估_' + dateStr + '.xlsx';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      opdRenderResult('<div class="pd-hint">已导出当前页为 Excel（xlsx），请查看下载。</div>');
+      return;
+    }
+
+    let envelope = null;
+    try { envelope = await resp.json(); } catch (e) { /* 忽略解析失败 */ }
+    const code = envelope && envelope.code;
+    const message = (envelope && envelope.message) || '导出失败';
+    if (code === 2000 || code === 2003) {
+      if (typeof logout === 'function') logout();
+      opdRenderResult(opdErrorHtml('unauthorized', message));
+      return;
+    }
+    opdRenderResult(opdErrorHtml(opdKindOfCode(code), message));
+  } catch (err) {
+    opdRenderResult(opdErrorHtml('network', (err && err.message) || '无法连接到服务器'));
+  }
+}
+
+/* 翻页（有界：最小第 1 页） */
+function opdPage(delta) {
+  const page = (OPD_DYN.view ? OPD_DYN.view.page : OPD_DYN.page) + delta;
+  if (page < 1) return;
+  opdPreview(page);
+}
+
+/* 加载字段目录（需登录 + 订单利润暂估表菜单授权；授权 / 网络失败 fail closed，不渲染任何字段） */
+async function loadOrderProfitEstimateDesignerCatalog() {
+  try {
+    const resp = await opdRequest('/api/dynamic-order-profit-estimate-report');
+    if (resp.code === 2000 || resp.code === 2003) {
+      if (typeof logout === 'function') logout();
+      opdRenderResult(opdErrorHtml('unauthorized', resp.message));
+      return;
+    }
+    if (resp.code !== 0) {
+      opdRenderResult(opdErrorHtml(opdKindOfCode(resp.code), resp.message));
+      return;
+    }
+    OPD_DYN.catalog = resp.data;
+    OPD_DYN.fields = (resp.data && resp.data.fields) || [];
+    OPD_DYN.selectedKeys = OPD_DYN.fields.map(f => f.key);
+    const el = document.getElementById('opd-designer-fields');
+    if (el) el.innerHTML = opdFieldChooserHtml(OPD_DYN.fields, OPD_DYN.selectedKeys);
+  } catch (err) {
+    opdRenderResult(opdErrorHtml('network', (err && err.message) || '无法连接到服务器'));
+  }
+}
+
+/* 打开动态订单利润暂估字段设计器（从「订单利润暂估表」报表工具栏进入） */
+function openOrderProfitEstimateDesigner() {
+  const el = document.getElementById('opd-designer');
+  if (!el) return;
+  const defStart = new Date(Date.now() - 365 * 86400000).toISOString().slice(0, 10);
+  const defEnd = new Date().toISOString().slice(0, 10);
+  el.innerHTML = `
+    <div class="pd-hint">🎛 字段设计器（只读预览）：勾选可见列 → 选择开始 / 结束日期与每页条数 → 预览授权有界结果（原币销售额与未知成本利润证据，当前价估算独立标注）；绝不跨币种合计，全程只读，不执行任意 SQL。</div>
+    <div class="toolbar" style="margin-top:0">
+      <div class="toolbar-left" style="flex-wrap:wrap;gap:6px;align-items:center;font-size:13px">
+        <label>开始日期 <input type="date" id="opd-des-start" value="${defStart}"></label>
+        <label>结束日期 <input type="date" id="opd-des-end" value="${defEnd}"></label>
+        <label>每页 <input type="number" id="opd-des-pagesize" value="20" min="1" max="200" style="width:70px"></label>
+        <span id="opd-designer-fields">正在加载字段目录…</span>
+      </div>
+      <div class="toolbar-actions">
+        <button class="btn btn-neutral btn-sm" onclick="opdToggleAll(true)">全选</button>
+        <button class="btn btn-neutral btn-sm" onclick="opdToggleAll(false)">清空</button>
+        <button class="btn btn-neutral" onclick="opdExport()" title="导出当前页为 Excel（选定列，复用当前日期与分页）">📥 导出 Excel（当前页）</button>
+        <button class="btn btn-primary" onclick="opdPreview(1)">预览</button>
+      </div>
+    </div>
+    <div id="opd-designer-result"></div>`;
+  loadOrderProfitEstimateDesignerCatalog();
 }
 
 
