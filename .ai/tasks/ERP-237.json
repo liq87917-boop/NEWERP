@@ -1,0 +1,78 @@
+{
+  "title": "Design and export scoped salesman order evidence pages to Excel",
+  "description": "Users open a field designer from the existing salesman-output report, select finite server catalog fields (salesman Id/name, raw currency/label, assigned approved-order count, known signed amount, unknown profit and source/basis evidence), preview stable pages and download page-only Excel. Add narrow DTO/pure rules/controller with current-date window, Page>=1/PageSize1..200 validation and optional positive CustomerId/SalesmanId/supported original Currency filters; reject invalid IDs/unsupported codes before source reads, omitted filters retain known/unknown source. Extend mandatory-scope service with compatible optional filter arguments, intersect customer/salesman/currency predicates before 501-order cap, never grant scope from salesman selection or filter only after aggregation. Catalog/preview/Excel each reauthorize identity/menu/fresh scope; server Total/TotalPages/coverage describe salesman-currency rows and assigned approved-order counts, never all ERP orders. Context always identifies current date/filters/page/source cap/currency/unknown profit even hidden columns. Designer preserves selected order/date/filters/page-size, resets page on filter change and safely handles empty/invalid/denied/network states. Excel reruns current preview independently, exports only selected page fields in order, typed known amounts/counts, explicit null profit/unknown amount and formula-safe names/labels with context worksheet; never sum incompatible currencies or make current-price profit claims. Existing report/home behavior stays compatible. Development only: use the existing salesman-output menu, fresh current-user SalespersonDataScopeService customer scope and approved nondeleted SalesOrders; employee identity is an order attribute, never a broader permission boundary. Existing OperationLogMiddleware records HTTP audit; all endpoints recheck identity/menu/scope and reject invalid/revoked/source-overflow requests without data/file. No client identity/scope/rows/amounts as authority, expanded ERP permissions, arbitrary/model-generated SQL, business table writes, new domain entities or persistence schema, migrations, schema/view/stored-procedure changes, production SQL/real database execution, credentials/secrets/.env/config changes, irreversible actions, production deployment or real browser acceptance. Preserve unrelated modules and uncommitted work. Run focused in-memory service/API/export/UI source-contract tests plus configured safe Release build/test; unavailable external database/browser acceptance is explicitly environment-blocked, never fabricated passed.",
+  "depends_on": [
+    "ERP-236"
+  ],
+  "risk_level": "medium",
+  "priority": "P1",
+  "acceptance_criteria": [
+    "Finite catalog/request validation and optional customer/salesman/known-currency filters use mandatory fresh scope before source caps; preview has stable selected-page rows and server coverage/context without unauthorized names.",
+    "Existing report opens field/date/filter/page designer preserving selected order and error state, always showing original-currency/unknown-profit/assigned-order context independent of selected columns.",
+    "Excel independently reauthorizes and exports only selected current-page typed evidence with formula-safe text and context, explicit nulls and no incompatible totals; filter/API/workbook/UI/source regressions and safe Release build/test pass."
+  ],
+  "criterion_path_map": {
+    "Finite catalog/request validation and optional customer/salesman/known-currency filters use mandatory fresh scope before source caps; preview has stable selected-page rows and server coverage/context without unauthorized names.": [
+      "src/ERP.Application/DTOs/DynamicSalesmanOutputReportDtos.cs",
+      "src/ERP.Application/Services/DynamicSalesmanOutputReportRules.cs",
+      "src/ERP.Api/Controllers/DynamicSalesmanOutputReportController.cs",
+      "src/ERP.Application/Interfaces/IReportService.cs",
+      "src/ERP.Application/Services/ReportService.Sales.cs",
+      "src/ERP.UnitTests/DynamicSalesmanOutputReportTests.cs",
+      "src/ERP.UnitTests/SalesmanOutputScopeTests.cs",
+      "src/ERP.UnitTests/SalesmanOutputQueryBoundsTests.cs"
+    ],
+    "Existing report opens field/date/filter/page designer preserving selected order and error state, always showing original-currency/unknown-profit/assigned-order context independent of selected columns.": [
+      "src/ERP.Api/wwwroot/js/reports.js",
+      "src/ERP.Application/DTOs/DynamicSalesmanOutputReportDtos.cs",
+      "src/ERP.Application/Services/DynamicSalesmanOutputReportRules.cs",
+      "src/ERP.UnitTests/DynamicSalesmanOutputReportUiTests.cs",
+      "src/ERP.UnitTests/SalesmanOutputReportUiTests.cs"
+    ],
+    "Excel independently reauthorizes and exports only selected current-page typed evidence with formula-safe text and context, explicit nulls and no incompatible totals; filter/API/workbook/UI/source regressions and safe Release build/test pass.": [
+      "src/ERP.Api/Controllers/DynamicSalesmanOutputReportController.cs",
+      "src/ERP.Application/DTOs/DynamicSalesmanOutputReportDtos.cs",
+      "src/ERP.Application/Services/DynamicSalesmanOutputReportRules.cs",
+      "src/ERP.Api/wwwroot/js/reports.js",
+      "src/ERP.UnitTests/DynamicSalesmanOutputExcelTests.cs",
+      "src/ERP.UnitTests/DynamicSalesmanOutputReportTests.cs",
+      "src/ERP.UnitTests/DynamicSalesmanOutputReportUiTests.cs",
+      "src/ERP.UnitTests/SalesmanOutputCurrencyEvidenceTests.cs",
+      "src/ERP.UnitTests/ReportServiceTests.cs"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Application/DTOs/DynamicSalesmanOutputReportDtos.cs",
+    "src/ERP.Application/Services/DynamicSalesmanOutputReportRules.cs",
+    "src/ERP.Api/Controllers/DynamicSalesmanOutputReportController.cs",
+    "src/ERP.Application/Interfaces/IReportService.cs",
+    "src/ERP.Application/Services/ReportService.Sales.cs",
+    "src/ERP.UnitTests/DynamicSalesmanOutputReportTests.cs",
+    "src/ERP.UnitTests/SalesmanOutputScopeTests.cs",
+    "src/ERP.UnitTests/SalesmanOutputQueryBoundsTests.cs",
+    "src/ERP.Api/wwwroot/js/reports.js",
+    "src/ERP.UnitTests/DynamicSalesmanOutputReportUiTests.cs",
+    "src/ERP.UnitTests/SalesmanOutputReportUiTests.cs",
+    "src/ERP.UnitTests/DynamicSalesmanOutputExcelTests.cs",
+    "src/ERP.UnitTests/SalesmanOutputCurrencyEvidenceTests.cs",
+    "src/ERP.UnitTests/ReportServiceTests.cs"
+  ],
+  "status": "pending",
+  "max_attempts": 3,
+  "attempts": 0,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only bounded scoped report feature"
+  },
+  "id": "ERP-237",
+  "created_at": "2026-10-02T07:41:53.704629Z"
+}

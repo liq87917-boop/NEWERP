@@ -1,0 +1,74 @@
+{
+  "title": "Separate salesman output original currencies and unknown profit evidence",
+  "description": "Users see one stable row per persisted SalesmanId and raw order original-currency group. Known supported currency amounts retain signed order TotalAmount and OrderCount; unknown/invalid currency buckets retain distinct existing raw keys with amount=null and counts, never zero or exchange-rate conversion. Use narrow pure evidence rules/DTO labels and supported CurrencyAmountRules semantics. TotalProfit becomes nullable unknown for every row because current product SalePrice/CostPrice do not prove historical comparable cost/profit; expose explicit profit-basis reason and remove current-product-price profit computation and unnecessary detail/product reads. Keep 500 scoped order cap; after this header-only change do not impose an irrelevant detail cap; update focused bounds tests accordingly. Stable salesman Id/currency ordering replaces cross-currency amount ranking. Employee name snapshots missing/deleted remain explicit unknown identity evidence without treating orders as another employee. Report table/KPIs retain currency and null basis, never generic cross-currency sum. All three app.js consumers (login ticker today-order count, month-sales ticker, home month KPI) must correctly unwrap ApiResponse data and use assigned approved-order counts rather than row counts; display known amounts with their actual currency or explicit multiple/unknown indication, no hard-coded USD unit or fabricated zero/profit/comparison. Update index.html ticker labels and app.js own rendered labels only as needed, no unrelated layout changes; authorization/network failure clears stale values to explicit unavailable. Preserve existing endpoint/menu and ensure legacy tests use approved scope/header evidence. Development only: use the existing salesman-output menu, fresh current-user SalespersonDataScopeService customer scope and approved nondeleted SalesOrders; employee identity is an order attribute, never a broader permission boundary. Existing OperationLogMiddleware records HTTP audit; all endpoints recheck identity/menu/scope and reject invalid/revoked/source-overflow requests without data/file. No client identity/scope/rows/amounts as authority, expanded ERP permissions, arbitrary/model-generated SQL, business table writes, new domain entities or persistence schema, migrations, schema/view/stored-procedure changes, production SQL/real database execution, credentials/secrets/.env/config changes, irreversible actions, production deployment or real browser acceptance. Preserve unrelated modules and uncommitted work. Run focused in-memory service/API/export/UI source-contract tests plus configured safe Release build/test; unavailable external database/browser acceptance is explicitly environment-blocked, never fabricated passed.",
+  "depends_on": [
+    "ERP-235"
+  ],
+  "risk_level": "medium",
+  "priority": "P1",
+  "acceptance_criteria": [
+    "Service returns per-salesman/original-currency signed order evidence with known amounts or explicit unknown nulls, stable identity/currency ordering and no cross-currency ranking or total.",
+    "Profit remains null with historical-cost evidence explanation, current product prices do not influence results and unnecessary detail/product reads are removed while scoped header/date bounds remain intact.",
+    "Report and existing ticker/home consumers safely render actual currency, assigned-order counts and unknown/unavailable evidence, with no hard-coded USD or fallback-zero aggregation; currency/missing-identity/UI/service regressions and safe Release build/test pass."
+  ],
+  "criterion_path_map": {
+    "Service returns per-salesman/original-currency signed order evidence with known amounts or explicit unknown nulls, stable identity/currency ordering and no cross-currency ranking or total.": [
+      "src/ERP.Application/Interfaces/ReportDtos.cs",
+      "src/ERP.Application/Services/SalesmanOutputEvidenceRules.cs",
+      "src/ERP.Application/Services/ReportService.Sales.cs",
+      "src/ERP.UnitTests/SalesmanOutputCurrencyEvidenceTests.cs",
+      "src/ERP.UnitTests/ReportServiceTests.cs"
+    ],
+    "Profit remains null with historical-cost evidence explanation, current product prices do not influence results and unnecessary detail/product reads are removed while scoped header/date bounds remain intact.": [
+      "src/ERP.Application/Interfaces/ReportDtos.cs",
+      "src/ERP.Application/Services/SalesmanOutputEvidenceRules.cs",
+      "src/ERP.Application/Services/ReportService.Sales.cs",
+      "src/ERP.UnitTests/SalesmanOutputCurrencyEvidenceTests.cs",
+      "src/ERP.UnitTests/SalesmanOutputQueryBoundsTests.cs",
+      "src/ERP.UnitTests/ReportServiceTests.cs"
+    ],
+    "Report and existing ticker/home consumers safely render actual currency, assigned-order counts and unknown/unavailable evidence, with no hard-coded USD or fallback-zero aggregation; currency/missing-identity/UI/service regressions and safe Release build/test pass.": [
+      "src/ERP.Api/wwwroot/js/reports.js",
+      "src/ERP.Api/wwwroot/js/app.js",
+      "src/ERP.Api/wwwroot/index.html",
+      "src/ERP.UnitTests/SalesmanOutputReportUiTests.cs",
+      "src/ERP.UnitTests/SalesmanOutputHomeEvidenceTests.cs",
+      "src/ERP.UnitTests/SalesmanOutputCurrencyEvidenceTests.cs",
+      "src/ERP.UnitTests/SalesmanOutputScopeTests.cs",
+      "src/ERP.UnitTests/SalesmanOutputQueryBoundsTests.cs",
+      "src/ERP.UnitTests/ReportServiceTests.cs"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Application/Interfaces/ReportDtos.cs",
+    "src/ERP.Application/Services/SalesmanOutputEvidenceRules.cs",
+    "src/ERP.Application/Services/ReportService.Sales.cs",
+    "src/ERP.UnitTests/SalesmanOutputCurrencyEvidenceTests.cs",
+    "src/ERP.UnitTests/ReportServiceTests.cs",
+    "src/ERP.UnitTests/SalesmanOutputQueryBoundsTests.cs",
+    "src/ERP.Api/wwwroot/js/reports.js",
+    "src/ERP.Api/wwwroot/js/app.js",
+    "src/ERP.Api/wwwroot/index.html",
+    "src/ERP.UnitTests/SalesmanOutputReportUiTests.cs",
+    "src/ERP.UnitTests/SalesmanOutputHomeEvidenceTests.cs",
+    "src/ERP.UnitTests/SalesmanOutputScopeTests.cs"
+  ],
+  "status": "pending",
+  "max_attempts": 3,
+  "attempts": 0,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only bounded scoped report feature"
+  },
+  "id": "ERP-236",
+  "created_at": "2026-10-02T07:41:53.703994Z"
+}
