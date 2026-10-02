@@ -57,6 +57,12 @@ public class ReportController : ControllerBase
     /// <summary>业务员提成报表要求菜单的中文文案（与既有菜单名一致）</summary>
     private const string SalesCommissionMenuText = "业务员提成表";
 
+    /// <summary>柜量与装柜利用率统计要求菜单的既有菜单编码（与 SeedData / SchemaUpgrader 同源）</summary>
+    private const string ContainerStatsMenuCode = "container-stats";
+
+    /// <summary>柜量与装柜利用率统计要求菜单的中文文案（与既有菜单名一致）</summary>
+    private const string ContainerStatsMenuText = "柜量与装柜利用率统计";
+
     private readonly IReportService _reportService;
     private readonly IErpDbContext? _db;
 
@@ -218,11 +224,31 @@ public class ReportController : ControllerBase
         return Ok(ApiResponse<List<ReportDtos.ArAgingItem>>.Success(result));
     }
 
-    /// <summary>柜量与装柜利用率统计</summary>
+    /// <summary>柜量与装柜利用率统计（ERP-251；每次请求重新校验身份、菜单授权与业务员数据范围，缺失即 fail closed）</summary>
     [HttpGet("container-stats")]
     public async Task<IActionResult> ContainerStats([FromQuery] DateTime start, [FromQuery] DateTime end)
     {
-        var result = await _reportService.GetContainerStatsAsync(start, end);
+        if (_db is null)
+            throw new BusinessException("柜量与装柜利用率统计缺少数据库上下文，无法解析当前账号授权", ErrorCodes.InternalError);
+
+        var db = _db;
+        var userId = CurrentUserId();
+        if (userId is null or <= 0)
+            throw new BusinessException("请先登录后再查看柜量与装柜利用率统计", ErrorCodes.Unauthorized);
+
+        var menuCodes = await CustomerReceivableReconciliationService.LoadAuthorizedMenuCodesAsync(
+            db, userId.Value);
+        if (!menuCodes.Contains(ContainerStatsMenuCode, StringComparer.OrdinalIgnoreCase))
+        {
+            throw new BusinessException(
+                $"当前账号没有「{ContainerStatsMenuText}」（{ContainerStatsMenuCode}）模块授权：拒绝查看柜量与装柜利用率统计"
+                + "（fail closed，不返回任何数据）",
+                ErrorCodes.Forbidden);
+        }
+
+        var scope = await SalespersonDataScopeService.ResolveAsync(db, userId);
+
+        var result = await _reportService.GetContainerStatsAsync(start, end, scope);
         return Ok(ApiResponse<List<ReportDtos.ContainerStatsItem>>.Success(result));
     }
 

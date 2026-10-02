@@ -40,8 +40,12 @@ public interface IReportService
     /// <summary>应收账款账龄分析（截止日期，按销售订单逐笔）</summary>
     Task<List<ReportDtos.ArAgingItem>> GetArAgingAsync(DateTime asOfDate);
 
-    /// <summary>柜量与装柜利用率统计（按柜号聚合）</summary>
-    Task<List<ReportDtos.ContainerStatsItem>> GetContainerStatsAsync(DateTime start, DateTime end);
+    /// <summary>
+    /// 柜量与装柜利用率统计证据桶（ERP-251，只读派生）：仅已审核、未删除、当前账号数据范围内的装柜清单头，
+    /// 按「装柜日历日 × 精确原始非空白柜号」分桶（空白柜号按装柜清单 Id 独立），签名持久化箱数 / 毛重 / 体积分列求和；
+    /// 装载率与柜型恒为未知（无权威容积 / 整柜 / 满载证据）。日期有界，来源探测 501 行上限 500 张，超出即 fail closed。
+    /// </summary>
+    Task<List<ReportDtos.ContainerStatsItem>> GetContainerStatsAsync(DateTime start, DateTime end, SalespersonDataScope scope);
 
     /// <summary>采购成本分析（按供应商聚合采购订单）</summary>
     Task<List<ReportDtos.PurchaseCostItem>> GetPurchaseCostAsync(DateTime start, DateTime end);

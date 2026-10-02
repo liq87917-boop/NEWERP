@@ -208,19 +208,77 @@ public static partial class ReportDtos
         public string Status { get; set; } = string.Empty;
     }
 
-    /// <summary>柜量与装柜利用率统计项（按柜号聚合装柜清单）</summary>
+    /// <summary>
+    /// 柜量与装柜利用率统计证据桶（ERP-251，只读派生）：按「装柜日历日 × 精确原始非空白柜号」分桶；
+    /// 空白 / 纯空白柜号按装柜清单 Id 独立成桶，绝不并入一个伪造的共享柜。装载率与柜型不再从范围客户数推断。
+    /// </summary>
     public class ContainerStatsItem
     {
-        public string ContainerNo { get; set; } = string.Empty;
+        /// <summary>稳定分组键（装柜日历日 + 精确原始非空白柜号；空白柜号按装柜清单 Id 独立）</summary>
+        public string BucketKey { get; set; } = string.Empty;
+
+        /// <summary>装柜日历日（分组键，仅日期部分）</summary>
         public DateTime LoadingDate { get; set; }
-        public int CustomerCount { get; set; }
+
+        /// <summary>精确原始非空白柜号；空白 / 纯空白柜号使用「未填柜号（装柜清单 #Id）」独立标签，绝不并入假共享柜</summary>
+        public string ContainerNo { get; set; } = string.Empty;
+
+        /// <summary>该桶是否为空白 / 纯空白柜号桶（按装柜清单 Id 独立，绝不合并）</summary>
+        public bool ContainerNoBlank { get; set; }
+
+        /// <summary>装柜清单数（该桶内已审核、未删除、授权范围内的装柜清单头数）</summary>
+        public int LoadingListCount { get; set; }
+
+        /// <summary>授权范围客户数（不同正数 CustomerId 计数；仅统计授权范围、CustomerId &gt; 0 的装柜清单头）</summary>
+        public int AuthorizedCustomerCount { get; set; }
+
+        /// <summary>客户身份无效 / 缺失数（CustomerId &lt;= 0 的装柜清单头数）</summary>
+        public int InvalidCustomerCount { get; set; }
+
+        /// <summary>客户身份无效 / 缺失原因标签</summary>
+        public string InvalidCustomerReason { get; set; } = string.Empty;
+
+        /// <summary>箱数（cartons）：签名持久化 TotalCartons 求和（装柜清单头证据，非实际发货 / 实体柜数量）</summary>
         public decimal TotalCartons { get; set; }
+
+        /// <summary>毛重（kg）：签名持久化 TotalWeight 求和（装柜清单头证据，非实际发货 / 实体柜数量）</summary>
         public decimal TotalWeight { get; set; }
+
+        /// <summary>体积（m³）：签名持久化 TotalVolume 求和（装柜清单头证据，非实际发货 / 实体柜数量）</summary>
         public decimal TotalVolume { get; set; }
-        /// <summary>装载率（按 40HQ 68 m³ 基准估算，%）</summary>
-        public decimal Utilization { get; set; }
-        /// <summary>柜型判定（拼柜 = 多客户）</summary>
+
+        /// <summary>装载率（未知：无权威容积 / 整柜 / 满柜证据，绝不按 68m³ 估算）</summary>
+        public decimal? Utilization { get; set; }
+
+        /// <summary>装载率未知原因标签</summary>
+        public string UtilizationReason { get; set; } = string.Empty;
+
+        /// <summary>柜型（未知：不再按范围客户数推断整柜 / 拼柜）</summary>
         public string TypeText { get; set; } = string.Empty;
+
+        /// <summary>柜型未知原因标签</summary>
+        public string TypeReason { get; set; } = string.Empty;
+
+        /// <summary>客户数口径标签：授权范围客户数（不同正数 CustomerId）</summary>
+        public string CustomerCountLabel { get; set; } = string.Empty;
+
+        /// <summary>来源依据标签</summary>
+        public string SourceLabel { get; set; } = string.Empty;
+
+        /// <summary>覆盖依据标签</summary>
+        public string CoverageLabel { get; set; } = string.Empty;
+
+        /// <summary>分组依据标签</summary>
+        public string GroupingLabel { get; set; } = string.Empty;
+
+        /// <summary>容积依据标签（未知：无权威容积 / 整柜 / 满柜证据）</summary>
+        public string CapacityLabel { get; set; } = string.Empty;
+
+        /// <summary>柜型依据标签（未知：不推断整柜 / 拼柜 / 满载状态）</summary>
+        public string TypeLabel { get; set; } = string.Empty;
+
+        /// <summary>数量依据标签（签名持久化头证据，非实际发货 / 实体柜数量）</summary>
+        public string QuantityLabel { get; set; } = string.Empty;
     }
 
     /// <summary>采购成本分析项（按供应商聚合采购订单）</summary>

@@ -83,16 +83,18 @@ const REPORTS = {
 
   /* === 阶段 2 续：运营类报表 === */
   'container-stats': { api: '/api/reports/container-stats', title: '柜量与装柜利用率统计',
-    emoji: '🚢', kpi: 'ocean', summary: '按柜聚合：客户数 / 箱数 / 重量 / 体积 / 装载率（40HQ 68m³ 基准）',
+    emoji: '🚢', kpi: 'ocean', summary: '装柜日历日×原始非空白柜号证据桶 · 空白柜号按清单独立 · 签名头箱数/毛重/体积(非实体柜) · 装载率/柜型未知 · 有界(500清单)',
     columns: [
-      { key: 'containerNo', label: '柜号' },
       { key: 'loadingDate', label: '装柜日期', type: 'date' },
-      { key: 'typeText', label: '柜型' },
-      { key: 'customerCount', label: '客户数', type: 'number' },
-      { key: 'totalCartons', label: '箱数', type: 'number' },
-      { key: 'totalWeight', label: '重量(kg)', type: 'number' },
+      { key: 'containerNo', label: '柜号(原始非空白/未填柜号独立)' },
+      { key: 'loadingListCount', label: '装柜清单数', type: 'number' },
+      { key: 'authorizedCustomerCount', label: '授权范围客户数', type: 'number' },
+      { key: 'invalidCustomerCount', label: '客户身份无效数', type: 'number' },
+      { key: 'totalCartons', label: '箱数(cartons)', type: 'number' },
+      { key: 'totalWeight', label: '毛重(kg)', type: 'number' },
       { key: 'totalVolume', label: '体积(m³)', type: 'number' },
       { key: 'utilization', label: '装载率%', type: 'number' },
+      { key: 'typeText', label: '柜型' },
     ] },
   'purchase-cost': { api: '/api/reports/purchase-cost', title: '采购成本分析表',
     emoji: '🏭', kpi: 'cargo', summary: '按供应商聚合：订单数 / 采购金额 / 平均单笔 / 最近下单',
@@ -200,7 +202,7 @@ async function renderReport(rep, name) {
     <!-- KPI 占位：报表加载后填充 -->
     <div class="kpi-grid" id="report-kpi-grid">
       <div class="kpi-card ${rep.kpi}">
-        <div class="kpi-label"><span class="kpi-emoji">${rep.emoji}</span>记录数</div>
+        <div class="kpi-label"><span class="kpi-emoji">${rep.emoji}</span><span data-rkpi-label="rows">记录数</span></div>
         <div class="kpi-value" data-rkpi="rows">--<span class="unit">行</span></div>
         <div class="kpi-delta flat" data-rkpi="rows-tip">查询中…</div>
       </div>
@@ -295,6 +297,7 @@ function fillReportKpi(code, data) {
   if (code === 'customer-shipment') { fillCustomerShipmentKpi(data); return; }
   if (code === 'salesman-output') { fillSalesmanOutputKpi(data); return; }
   if (code === 'sales-commission') { fillSalesCommissionKpi(data); return; }
+  if (code === 'container-stats') { fillContainerStatsKpi(data); return; }
   if (code === 'balance-sheet' || code === 'income-statement' || code === 'cash-flow') {
     const lines = data.lines || [];
     const total = lines.reduce((s, l) => s + (Number(l.amount) || 0), 0);
@@ -486,6 +489,7 @@ function renderReportData(code, data) {
   if (code === 'customer-shipment') { renderCustomerShipmentData(data); return; }
   if (code === 'salesman-output') { renderSalesmanOutputData(data); return; }
   if (code === 'sales-commission') { renderSalesCommissionData(data); return; }
+  if (code === 'container-stats') { renderContainerStatsData(data); return; }
   const arr = Array.isArray(data) ? data : (data.items || []);
   if (!arr.length) { el.innerHTML = emptyReportHtml('暂无数据', '📭'); return; }
   const rep = REPORTS[code] || {};
@@ -632,6 +636,64 @@ function renderSalesCommissionData(data) {
       <th class="text-right">利润</th><th>利润依据</th><th class="text-right">利润率%</th><th>利润率依据</th>
       <th class="text-right">提成比例%(当前参考)</th><th>提成比例依据</th><th class="text-right">提成额</th><th>提成依据</th><th>来源依据</th>
     </tr></thead><tbody>${body}</tbody></table>`;
+}
+
+/* 柜量与装柜利用率统计：按装柜日历日 × 精确原始非空白柜号分组；空白柜号按装柜清单 Id 独立成桶；
+   箱数/毛重/体积为签名持久化头证据（非实际发货/实体柜数量）；装载率与柜型恒为未知（无权威容积/整柜证据）；
+   清单数与桶数分开呈现，每个数量带单位，绝不按金额格式化、绝不跨单位合计或声称实体柜数量 */
+function renderContainerStatsData(data) {
+  const el = document.getElementById('report-table');
+  const rows = Array.isArray(data) ? data : [];
+  if (!rows.length) { el.innerHTML = emptyReportHtml('暂无数据', '🚢'); return; }
+  const esc = (v) => fudDesEsc(v);
+  const qty = (v) => (v === null || v === undefined || v === '' ? '<span class="text-muted">未知</span>' : Number(v));
+  const first = rows[0] || {};
+  const labels = [first.sourceLabel, first.coverageLabel, first.groupingLabel, first.capacityLabel, first.typeLabel, first.quantityLabel].filter(Boolean);
+  const context = labels.length ? `<div class="text-muted" role="note" style="margin:8px 0">${labels.map(esc).join(' · ')}</div>` : '';
+  const body = rows.map(r => `<tr>
+    <td>${fmtDate(r.loadingDate)}</td>
+    <td>${esc(r.containerNo || '')}${r.containerNoBlank ? ' <span class="text-muted">(未填柜号)</span>' : ''}</td>
+    <td class="text-right">${qty(r.loadingListCount)}</td>
+    <td class="text-right">${qty(r.authorizedCustomerCount)}</td>
+    <td class="text-right">${qty(r.invalidCustomerCount)}</td>
+    <td>${esc(r.invalidCustomerReason || '')}</td>
+    <td class="text-right">${qty(r.totalCartons)}</td>
+    <td class="text-right">${qty(r.totalWeight)}</td>
+    <td class="text-right">${qty(r.totalVolume)}</td>
+    <td class="text-right">${(r.utilization === null || r.utilization === undefined) ? '<span class="text-muted">未知</span>' : (Number(r.utilization) + '%')}</td>
+    <td>${esc(r.utilizationReason || '')}</td>
+    <td>${esc(r.typeText || '未知')}</td>
+    <td>${esc(r.typeReason || '')}</td>
+  </tr>`).join('');
+  el.innerHTML = `${context}<table><thead><tr>
+    <th>装柜日期</th><th>柜号</th>
+    <th class="text-right">装柜清单数</th>
+    <th class="text-right">授权范围客户数</th>
+    <th class="text-right">客户身份无效数</th><th>客户身份无效原因</th>
+    <th class="text-right">箱数(cartons)</th><th class="text-right">毛重(kg)</th><th class="text-right">体积(m³)</th>
+    <th class="text-right">装载率%</th><th>装载率依据</th><th>柜型</th><th>柜型依据</th>
+  </tr></thead><tbody>${body}</tbody></table>`;
+}
+
+/* 柜量与装柜利用率 KPI：分组桶数与装柜清单数分开呈现，每个带单位，绝不按金额格式化或求和异质度量 */
+function fillContainerStatsKpi(data) {
+  const setR = (k, v) => { const el = document.querySelector(`[data-rkpi="${k}"]`); if (el) el.firstChild.nodeValue = String(v); };
+  const setT = (k, v) => { const el = document.querySelector(`[data-rkpi="${k}"]`); if (el) el.textContent = String(v); };
+  const rows = Array.isArray(data) ? data : [];
+  setR('rows', rows.length);
+  setT('rows-tip', '按装柜日历日 × 柜号分组的证据桶数');
+  const rowsLabel = document.querySelector('[data-rkpi-label="rows"]');
+  if (rowsLabel) rowsLabel.textContent = '分组桶数';
+  const label = document.querySelector('[data-rkpi-label="total"]');
+  if (label) label.textContent = '装柜清单数';
+  const unit = document.querySelector('[data-rkpi-unit="total"]');
+  if (unit) unit.textContent = '单';
+  const listCount = rows.reduce((s, r) => s + (Number(r.loadingListCount) || 0), 0);
+  setR('total', listCount);
+  setT('total-tip', '授权范围已审核未删除装柜清单头数');
+  const top = rows[0];
+  setR('top', top ? `${top.containerNo || '--'} · ${fmtDate(top.loadingDate)}` : '--');
+  setT('top-tip', '首个证据桶（装柜日期 × 柜号）');
 }
 
 /* 报表空状态：行业主题 emoji */
