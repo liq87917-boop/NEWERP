@@ -426,6 +426,19 @@ public static class DynamicQuotationConversionReportRules
     /// <summary>上下文表「空页说明」行标签</summary>
     public const string ContextEmptyLabel = "空页说明";
 
+    /// <summary>分币种汇总 Excel 数据工作表名（ERP-210：区别于当前页明细导出，避免混淆）</summary>
+    public const string SummarySheetName = "分币种汇总";
+
+    /// <summary>上下文表「覆盖范围」行标签（ERP-210：显式标注汇总覆盖本次有界来源内的全部匹配分桶）</summary>
+    public const string ContextCoverageLabel = "覆盖范围";
+
+    /// <summary>上下文表「原币证据」行标签（ERP-210：金额均为报价单原币、未知币种独立、绝不跨币种合计）</summary>
+    public const string ContextOriginalCurrencyEvidenceLabel = "原币证据";
+
+    /// <summary>原币证据文案：金额均为报价单原币、未知币种单独分桶、绝不跨币种合计、无任何跨币种金额总计</summary>
+    public const string ContextOriginalCurrencyEvidenceText =
+        "金额均为报价单原币；未知币种单独分桶；绝不跨币种合计，无任何跨币种金额总计";
+
     /// <summary>电子表格公式注入风险首字符（OWASP：= / + / - / @ 及制表符 / 回车 / 换行）</summary>
     private static bool IsFormulaLeadingChar(char c)
         => c is '=' or '+' or '-' or '@' or '\t' or '\r' or '\n';
@@ -455,6 +468,27 @@ public static class DynamicQuotationConversionReportRules
         foreach (var kv in row)
             export[kv.Key] = EscapeFormulaLeading(kv.Value);
         return export;
+    }
+
+    /// <summary>
+    /// 把一条分币种汇总行转成导出行（ERP-210）：币种文本做公式注入转义，
+    /// 计数 / 金额 / 成交率数值原样保留，由 ExcelExporter 按类型写入数值单元格。
+    /// <para>键集合与白名单字段键一致，导出时由「选定汇总列」过滤，绝不把未选金额 / 明细行写入。</para>
+    /// </summary>
+    public static Dictionary<string, object?> BuildSummaryExportRow(DynamicQuotationConversionCurrencySummaryDto row)
+    {
+        return new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["currency"] = EscapeFormulaLeading(row.Currency),
+            ["quotationCount"] = row.QuotationCount,
+            ["convertedCount"] = row.ConvertedCount,
+            ["conversionRate"] = row.ConversionRate,
+            ["expiredCount"] = row.ExpiredCount,
+            ["cancelledCount"] = row.CancelledCount,
+            ["totalAmount"] = row.TotalAmount,
+            ["convertedAmount"] = row.ConvertedAmount,
+            ["avgConvertedAmount"] = row.AvgConvertedAmount,
+        };
     }
 }
 

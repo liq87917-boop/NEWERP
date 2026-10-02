@@ -1,7 +1,7 @@
 {
   "id": "ERP-210",
   "title": "Download scoped quotation currency summaries as Excel",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "low",
   "priority": "P1",
   "description": "A salesperson downloads only the all-matching per-currency summaries from the quotation designer without mistaking a current detail page for the full result. Add a dedicated summary Excel endpoint to the existing controller that reruns the exact validated and freshly authorized preview path and uses ERP-209 summaries; never accept client totals, fetch unscoped data or export all raw quotation rows. Use existing ExcelExporter with typed counts/decimal metrics, selected summary metric order and formula-safe labels/filter context. State date/customer/keyword/currency filters, all-matching scoped bounded-source coverage and original-currency evidence; unknown currencies remain separate and no cross-currency grand money total exists. The designer uses current fields/filters and clearly distinguishes summary download from existing current-page Excel. Invalid/revoked/source-overflow calls return no workbook. Development only: reuse current authenticated ERP identity, the existing quotation menu and freshly resolved SalespersonDataScopeService; audit every endpoint through existing OperationLogMiddleware. No permission expansion, arbitrary/model-generated SQL, direct table or business writes, new entities or persistence schema, migrations, schema/view/stored-procedure edits, production SQL or real database execution, secrets/.env changes, deployment, irreversible operations or real browser acceptance. Preserve unrelated modules and work. Run focused in-memory/service/API/export/UI source-contract tests and configured safe Release build/test; mark unavailable external environments blocked rather than inventing success.",
@@ -42,7 +42,7 @@
     "ERP-209"
   ],
   "max_attempts": 3,
-  "attempts": 0,
+  "attempts": 1,
   "validation_profile": "safe",
   "completion_mode": "build",
   "auto_start": true,

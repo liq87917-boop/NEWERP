@@ -239,4 +239,46 @@ public class DynamicQuotationConversionReportUiTests
         Assert.Contains("if (!cols || !cols.length || !rows || !rows.length) return '';", fn);
         Assert.Contains("summary.coverageText", fn);
     }
+
+    [Fact]
+    public void 汇总导出_入口按钮与函数存在_并区分当前页导出()
+    {
+        var js = Script;
+
+        Assert.Contains("onclick=\"qcdExportSummary()\"", js);
+        Assert.Contains("function qcdExportSummary()", js);
+        Assert.Contains("/api/dynamic-quotation-conversion-report/export-summary", js);
+        // 明确区分「当前页明细导出」与「分币种汇总导出」：按钮文案与下载文件名均不同
+        Assert.Contains("导出 Excel（当前页）", js);
+        Assert.Contains("分币种汇总 Excel", js);
+        Assert.Contains("a.download = '报价成交率分币种汇总_'", js);
+    }
+
+    [Fact]
+    public void 汇总导出_组装当前字段与筛选_复用有界请求体()
+    {
+        var js = Script;
+        var fn = Segment(js, "async function qcdExportSummary()", "/* 翻页");
+
+        Assert.Contains("const state = qcdBuildState(QCD_DYN.page);", fn);
+        Assert.Contains("const req = qcdBuildRequest(state);", fn);
+        Assert.Contains("body: JSON.stringify(req)", fn);
+        Assert.Contains("fetch('/api/dynamic-quotation-conversion-report/export-summary'", fn);
+    }
+
+    [Fact]
+    public void 汇总导出_成功xlsx下载_授权无效网络失败可见_不要求先预览()
+    {
+        var js = Script;
+        var fn = Segment(js, "async function qcdExportSummary()", "/* 翻页");
+
+        Assert.Contains("contentType.indexOf('spreadsheetml') >= 0", fn);
+        Assert.Contains("URL.createObjectURL(blob)", fn);
+        Assert.Contains("a.download = '报价成交率分币种汇总_'", fn);
+        Assert.Contains("qcdErrorHtml('unauthorized', message)", fn);
+        Assert.Contains("qcdErrorHtml(qcdKindOfCode(code), message)", fn);
+        Assert.Contains("qcdErrorHtml('network', (err && err.message) || '无法连接到服务器')", fn);
+        // 与「当前页明细导出」不同：无需先预览（不检查 QCD_DYN.view / 空结果）
+        Assert.DoesNotContain("请先预览后再导出", fn);
+    }
 }

@@ -78,6 +78,24 @@ public class DynamicQuotationConversionReportController : ControllerBase
     }
 
     /// <summary>
+    /// 下载分币种汇总 Excel（ERP-210，只读）：复用与「当前页明细导出」完全相同的已授权预览管线，
+    /// 每次请求重新校验身份 / 报价单菜单授权 / 业务员数据范围 / 字段 / 日期 / 分页 / 应用筛选（fail closed），
+    /// 但使用服务端在全部匹配分桶上派生的 ERP-209 分币种汇总（绝不接受客户端合计、绝不导出全部报价单明细行）。
+    /// 仅导出选定汇总指标列，未知币种单独分桶、绝不追加跨币种金额合计。无效 / 授权撤销 / 来源超限均不返回任何工作簿。
+    /// <para>全程只读，不写库、不执行任意 SQL；请求由既有 <c>OperationLogMiddleware</c> 记录审计（动作「导出」）。</para>
+    /// </summary>
+    [HttpPost("export-summary")]
+    public async Task<IActionResult> ExportSummary([FromBody] DynamicQuotationConversionReportRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var page = await BuildPageAsync(request);
+        var bytes = BuildSummaryWorkbook(page);
+        return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            $"QuotationConversionCurrencySummary_{DateTime.Now:yyyyMMddHHmmss}.xlsx");
+    }
+
+    /// <summary>
     /// 导出当前页为 PDF（ERP-207，只读）：复用「有界、已授权预览」与选定列顺序、日期与原币口径
     /// （每次请求重新校验身份 / 报价单菜单授权 / 业务员数据范围 / 字段 / 日期 / 分页，fail closed），
     /// 仅导出当前页选定列；业务员 × 原币分桶行照实呈现，绝不追加跨币种金额合计。缺失中文字体（SimHei）
@@ -154,6 +172,54 @@ public class DynamicQuotationConversionReportController : ControllerBase
             AddLabel(nextRow++, DynamicQuotationConversionReportRules.ContextFilterLabel, page.FilterText);
 
         if (page.Rows is null || page.Rows.Count == 0)
+            AddLabel(nextRow, DynamicQuotationConversionReportRules.ContextEmptyLabel, page.EmptyText);
+    }
+
+    /// <summary>生成分币种汇总 Excel：数据工作表（币种 + 选定汇总指标列、类型化值、公式注入转义） + 「报表口径」上下文工作表</summary>
+    private static byte[] BuildSummaryWorkbook(DynamicQuotationConversionReportPageDto page)
+    {
+        var summary = page.Summary!;
+        var columns = summary.Columns.Select(c => (c.Key, c.Label)).ToList();
+        var rows = summary.Rows.Select(DynamicQuotationConversionReportRules.BuildSummaryExportRow).ToList();
+        var dataBytes = ExcelExporter.ExportRows(DynamicQuotationConversionReportRules.SummarySheetName, rows, columns);
+
+        using var input = new MemoryStream(dataBytes);
+        using var workbook = new XSSFWorkbook(input);
+        AppendSummaryContextSheet(workbook, page, summary);
+
+        using var output = new MemoryStream();
+        workbook.Write(output);
+        return output.ToArray();
+    }
+
+    /// <summary>追加分币种汇总「报表口径」上下文工作表：日期 / 原币口径 / 筛选 / 覆盖范围 / 原币证据 / 只读声明；空汇总显式标注；绝不追加跨币种金额合计</summary>
+    private static void AppendSummaryContextSheet(
+        XSSFWorkbook workbook, DynamicQuotationConversionReportPageDto page, DynamicQuotationConversionSummaryDto summary)
+    {
+        var sheet = workbook.CreateSheet(DynamicQuotationConversionReportRules.ContextSheetName);
+
+        void AddLabel(int rowIndex, string label, string value)
+        {
+            var row = sheet.CreateRow(rowIndex);
+            row.CreateCell(0).SetCellValue(
+                DynamicQuotationConversionReportRules.EscapeFormulaLeading(label) as string ?? string.Empty);
+            row.CreateCell(1).SetCellValue(
+                DynamicQuotationConversionReportRules.EscapeFormulaLeading(value) as string ?? string.Empty);
+        }
+
+        var nextRow = 0;
+        AddLabel(nextRow++, DynamicQuotationConversionReportRules.ContextStartLabel, page.Start.ToString("yyyy-MM-dd"));
+        AddLabel(nextRow++, DynamicQuotationConversionReportRules.ContextEndLabel, page.End.ToString("yyyy-MM-dd"));
+        AddLabel(nextRow++, DynamicQuotationConversionReportRules.ContextCurrencyLabel, DynamicQuotationConversionReportRules.ContextCurrencyText);
+
+        if (!string.IsNullOrWhiteSpace(page.FilterText))
+            AddLabel(nextRow++, DynamicQuotationConversionReportRules.ContextFilterLabel, page.FilterText);
+
+        AddLabel(nextRow++, DynamicQuotationConversionReportRules.ContextCoverageLabel, summary.CoverageText);
+        AddLabel(nextRow++, DynamicQuotationConversionReportRules.ContextOriginalCurrencyEvidenceLabel, DynamicQuotationConversionReportRules.ContextOriginalCurrencyEvidenceText);
+        AddLabel(nextRow++, DynamicQuotationConversionReportRules.ContextReadOnlyLabel, page.ReadOnlyText);
+
+        if (summary.Rows is null || summary.Rows.Count == 0)
             AddLabel(nextRow, DynamicQuotationConversionReportRules.ContextEmptyLabel, page.EmptyText);
     }
 
