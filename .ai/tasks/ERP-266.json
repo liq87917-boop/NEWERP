@@ -1,0 +1,110 @@
+{
+  "title": "Configure restricted numeric calculated columns in shared report engine",
+  "description": "Customer builds reusable row-level numeric columns using a structured arithmetic AST with authorized numeric field references, numeric literals and + - * / only; no raw expressions, eval, scripts or SQL. At most 8 computed columns, 64 AST nodes per column, depth 8, absolute literal <=1e12, whole definition <=64KiB; unique keys cannot collide with base fields; computed-to-computed references are rejected. Unknown/hidden/unauthorized/non-numeric inputs are rejected before source read. Dependencies are rechecked under fresh recipient scope and fetched through provider authorization even when omitted from display; return only selected base/computed columns, never hidden dependency values. Checked decimal arithmetic: missing/null inputs, zero divisor and overflow produce null with explicit bounded reason, never silent zero. Addition/subtraction require compatible units and currency semantics; multiplication/division permit dimensionless constants; compatible same-unit ratio is dimensionless. Reject combinations whose currency/unit compatibility cannot be proven. Evaluate only current preview rows before generic rendering; no computed filtering/grouping/aggregation/all-match totals. Advertise only this restricted capability, keep arbitrary formulas/pivot/joins unsupported. JSON persisted drafts and pinned revisions preserve definitions, backward-compatible existing definitions without computed columns. Add structured field/operator/number editor and visible per-column unit/unknown reasons. Generic Excel/PDF inherit outputs and evidence, no dataset-specific exporters. Stage 1 unified platform only; existing sales-order/receivable adapters are engine fixtures, not migration or new bespoke reports. Preserve old report entries until every fixed/dynamic report passes Stage 2 parity. No Agent or cross-business flow work. Server-authenticated identity and fresh existing menu/field/row/data scope remain authoritative, saved definitions/grants never grant ERP permissions. No arbitrary SQL, scripts, joins, tables, mixed currency/unit totals or one-to-many header duplication. No migrations, SchemaUpgrader/SeedData modifications, production SQL/database execution, schema/view/procedure changes, secrets/.env/config changes, deployment or irreversible operations. Use existing HTTP and entity audit conventions. Safe build/test and relevant offline integration tests required; missing actual DB/browser/font environment must be explicitly blocked, never claim the phase complete from build. Preserve unrelated source/work.",
+  "acceptance_criteria": [
+    "Bounded structured formula validation rejects unsupported operations, unauthorized inputs and incompatible units/currencies before queries while older definitions still load.",
+    "Fresh preview/shared execution resolves authorized dependencies and projects only selected calculated outputs with checked decimal/null reasons; grouping/filtering over formulas stays unsupported.",
+    "Structured UI builder, saved/pinned formulas and generic Excel/PDF agree on selected values/unit/unknown evidence; meaningful offline formula/export/UI tests pass safe build/test."
+  ],
+  "criterion_path_map": {
+    "Bounded structured formula validation rejects unsupported operations, unauthorized inputs and incompatible units/currencies before queries while older definitions still load.": [
+      "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
+      "src/ERP.Application/Services/ReportConfigurationRules.cs",
+      "src/ERP.Application/Services/ReportConfigurationFormulaRules.cs",
+      "src/ERP.Application/Services/ReportConfigurationCatalog.cs",
+      "src/ERP.Application/Services/ReportConfigurationService.cs",
+      "src/ERP.Application/Services/ReportConfigurationExecutionService.cs",
+      "src/ERP.Infrastructure/Reports/ReportConfigurationDatasetProvider.cs",
+      "src/ERP.Api/wwwroot/js/report-configuration.js",
+      "src/ERP.Api/Controllers/ReportConfigurationsController.cs",
+      "src/ERP.Application/Interfaces/IReportConfigurationDatasetProvider.cs",
+      "src/ERP.UnitTests/ReportConfigurationFormulaTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationRulesTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationCatalogTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationVersionTests.cs"
+    ],
+    "Fresh preview/shared execution resolves authorized dependencies and projects only selected calculated outputs with checked decimal/null reasons; grouping/filtering over formulas stays unsupported.": [
+      "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
+      "src/ERP.Application/Services/ReportConfigurationRules.cs",
+      "src/ERP.Application/Services/ReportConfigurationFormulaRules.cs",
+      "src/ERP.Application/Services/ReportConfigurationCatalog.cs",
+      "src/ERP.Application/Services/ReportConfigurationService.cs",
+      "src/ERP.Application/Services/ReportConfigurationExecutionService.cs",
+      "src/ERP.Infrastructure/Reports/ReportConfigurationDatasetProvider.cs",
+      "src/ERP.Api/wwwroot/js/report-configuration.js",
+      "src/ERP.Api/Controllers/ReportConfigurationsController.cs",
+      "src/ERP.Application/Interfaces/IReportConfigurationExecutionService.cs",
+      "src/ERP.Application/Services/ReportConfigurationSharingService.cs",
+      "src/ERP.UnitTests/ReportConfigurationFormulaTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationExecutionTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationSharingTests.cs"
+    ],
+    "Structured UI builder, saved/pinned formulas and generic Excel/PDF agree on selected values/unit/unknown evidence; meaningful offline formula/export/UI tests pass safe build/test.": [
+      "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
+      "src/ERP.Application/Services/ReportConfigurationRules.cs",
+      "src/ERP.Application/Services/ReportConfigurationFormulaRules.cs",
+      "src/ERP.Application/Services/ReportConfigurationCatalog.cs",
+      "src/ERP.Application/Services/ReportConfigurationService.cs",
+      "src/ERP.Application/Services/ReportConfigurationExecutionService.cs",
+      "src/ERP.Infrastructure/Reports/ReportConfigurationDatasetProvider.cs",
+      "src/ERP.Api/wwwroot/js/report-configuration.js",
+      "src/ERP.Api/Controllers/ReportConfigurationsController.cs",
+      "src/ERP.Infrastructure/Export/ReportConfigurationExcelExporter.cs",
+      "src/ERP.Infrastructure/Export/ReportConfigurationPdfExporter.cs",
+      "src/ERP.UnitTests/ReportConfigurationFormulaTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationExcelTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationPdfTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationUiTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationApiTests.cs"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
+    "src/ERP.Application/Services/ReportConfigurationRules.cs",
+    "src/ERP.Application/Services/ReportConfigurationFormulaRules.cs",
+    "src/ERP.Application/Services/ReportConfigurationCatalog.cs",
+    "src/ERP.Application/Services/ReportConfigurationService.cs",
+    "src/ERP.Application/Services/ReportConfigurationExecutionService.cs",
+    "src/ERP.Infrastructure/Reports/ReportConfigurationDatasetProvider.cs",
+    "src/ERP.Api/wwwroot/js/report-configuration.js",
+    "src/ERP.Api/Controllers/ReportConfigurationsController.cs",
+    "src/ERP.Application/Interfaces/IReportConfigurationDatasetProvider.cs",
+    "src/ERP.UnitTests/ReportConfigurationFormulaTests.cs",
+    "src/ERP.UnitTests/ReportConfigurationRulesTests.cs",
+    "src/ERP.UnitTests/ReportConfigurationCatalogTests.cs",
+    "src/ERP.UnitTests/ReportConfigurationVersionTests.cs",
+    "src/ERP.Application/Interfaces/IReportConfigurationExecutionService.cs",
+    "src/ERP.Application/Services/ReportConfigurationSharingService.cs",
+    "src/ERP.UnitTests/ReportConfigurationExecutionTests.cs",
+    "src/ERP.UnitTests/ReportConfigurationSharingTests.cs",
+    "src/ERP.Infrastructure/Export/ReportConfigurationExcelExporter.cs",
+    "src/ERP.Infrastructure/Export/ReportConfigurationPdfExporter.cs",
+    "src/ERP.UnitTests/ReportConfigurationExcelTests.cs",
+    "src/ERP.UnitTests/ReportConfigurationPdfTests.cs",
+    "src/ERP.UnitTests/ReportConfigurationUiTests.cs",
+    "src/ERP.UnitTests/ReportConfigurationApiTests.cs"
+  ],
+  "id": "ERP-266",
+  "depends_on": [
+    "ERP-265"
+  ],
+  "status": "pending",
+  "max_attempts": 3,
+  "attempts": 0,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "browser_acceptance": {
+    "required": false
+  },
+  "risk_level": "medium",
+  "priority": "P1",
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Bounded development-only unified reporting increment"
+  },
+  "created_at": "2026-10-02T14:10:34.876279Z"
+}

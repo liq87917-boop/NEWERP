@@ -1,0 +1,72 @@
+{
+  "title": "Add reusable Excel export for saved report configurations",
+  "description": "Customer downloads the current authorized preview page of a saved draft or pinned published revision through one shared endpoint and exporter. Export endpoint re-executes IReportConfigurationExecutionService with authenticated user; never trust client rows, identity, scope or cached preview. Reuse installed NPOI. Generic exporter consumes common preview columns/rows/evidence with no dataset-specific dispatch. Include definition name/version, dataset/grain, normalized query filters/date range, current-page coverage, currency/unit semantics, read-only limits and unknown-value explanation even when related display fields are omitted. Fresh source bounds/cancellation and authorization apply before response; permission loss, invalid revision, unavailable persistence and export failure return controlled errors without stale download. Numeric signed values remain numeric, null unknown stays blank with explanation, dates/booleans remain correctly represented and text cannot become Excel formulas. Group subtotals are current-page only and separated by currency; no all-match total. Add generic workspace download button and retain unsaved controls on failure. Stage 1 unified platform only; existing sales-order/receivable adapters are engine fixtures, not migration or new bespoke reports. Preserve old report entries until every fixed/dynamic report passes Stage 2 parity. No Agent or cross-business flow work. Server-authenticated identity and fresh existing menu/field/row/data scope remain authoritative, saved definitions/grants never grant ERP permissions. No arbitrary SQL, scripts, joins, tables, mixed currency/unit totals or one-to-many header duplication. No migrations, SchemaUpgrader/SeedData modifications, production SQL/database execution, schema/view/procedure changes, secrets/.env/config changes, deployment or irreversible operations. Use existing HTTP and entity audit conventions. Safe build/test and relevant offline integration tests required; missing actual DB/browser/font environment must be explicitly blocked, never claim the phase complete from build. Preserve unrelated source/work.",
+  "acceptance_criteria": [
+    "One authenticated generic Excel endpoint re-runs saved configuration preview and fails closed on invalid/revoked access or unavailable environment.",
+    "Reusable workbook preserves selected order/types/nulls and formula-safe text with mandatory query, currency, scope and current-page evidence.",
+    "Customer workspace downloads the generic workbook and meaningful offline API/workbook/UI tests pass configured safe build/test."
+  ],
+  "criterion_path_map": {
+    "One authenticated generic Excel endpoint re-runs saved configuration preview and fails closed on invalid/revoked access or unavailable environment.": [
+      "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
+      "src/ERP.Api/Controllers/ReportConfigurationsController.cs",
+      "src/ERP.Api/wwwroot/js/report-configuration.js",
+      "src/ERP.Application/Services/ReportConfigurationExecutionService.cs",
+      "src/ERP.Infrastructure/Reports/ReportConfigurationDatasetProvider.cs",
+      "src/ERP.Application/Interfaces/IReportConfigurationExecutionService.cs",
+      "src/ERP.UnitTests/ReportConfigurationApiTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationExecutionTests.cs"
+    ],
+    "Reusable workbook preserves selected order/types/nulls and formula-safe text with mandatory query, currency, scope and current-page evidence.": [
+      "src/ERP.Infrastructure/Export/ReportConfigurationExcelExporter.cs",
+      "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
+      "src/ERP.Application/Services/ReportConfigurationExecutionService.cs",
+      "src/ERP.Infrastructure/Reports/ReportConfigurationDatasetProvider.cs",
+      "src/ERP.UnitTests/ReportConfigurationExcelTests.cs"
+    ],
+    "Customer workspace downloads the generic workbook and meaningful offline API/workbook/UI tests pass configured safe build/test.": [
+      "src/ERP.Api/wwwroot/js/report-configuration.js",
+      "src/ERP.Api/Controllers/ReportConfigurationsController.cs",
+      "src/ERP.Infrastructure/Export/ReportConfigurationExcelExporter.cs",
+      "src/ERP.UnitTests/ReportConfigurationExcelTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationUiTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationApiTests.cs"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
+    "src/ERP.Api/Controllers/ReportConfigurationsController.cs",
+    "src/ERP.Api/wwwroot/js/report-configuration.js",
+    "src/ERP.Application/Services/ReportConfigurationExecutionService.cs",
+    "src/ERP.Infrastructure/Reports/ReportConfigurationDatasetProvider.cs",
+    "src/ERP.Application/Interfaces/IReportConfigurationExecutionService.cs",
+    "src/ERP.UnitTests/ReportConfigurationApiTests.cs",
+    "src/ERP.UnitTests/ReportConfigurationExecutionTests.cs",
+    "src/ERP.Infrastructure/Export/ReportConfigurationExcelExporter.cs",
+    "src/ERP.UnitTests/ReportConfigurationExcelTests.cs",
+    "src/ERP.UnitTests/ReportConfigurationUiTests.cs"
+  ],
+  "id": "ERP-263",
+  "depends_on": [
+    "ERP-262"
+  ],
+  "status": "pending",
+  "max_attempts": 3,
+  "attempts": 0,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "browser_acceptance": {
+    "required": false
+  },
+  "risk_level": "medium",
+  "priority": "P1",
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Bounded development-only unified reporting increment"
+  },
+  "created_at": "2026-10-02T14:10:34.872845Z"
+}
