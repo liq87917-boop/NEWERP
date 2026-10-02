@@ -33,9 +33,6 @@ public partial class ReportService
     /// <summary>业务员产值报表订单头读取上限（范围内已审核、已分配业务员的销售订单）：500 张</summary>
     private const int SalesmanOutputMaxOrders = 500;
 
-    /// <summary>业务员产值报表明细读取上限（范围内非删除订单明细）：10000 条</summary>
-    private const int SalesmanOutputMaxDetails = 10000;
-
     /// <summary>业务员产值报表证据标签：已分配业务员、已审核、未删除、授权客户销售订单证据，非总 ERP 订单 / 产值 / 实际收入 / 出货 / 收款</summary>
     public const string SalesmanOutputEvidenceLabel = "已分配业务员·已审核·未删除·授权客户销售订单证据（非总ERP订单/产值/实际收入/出货/收款）";
 
@@ -201,12 +198,13 @@ public partial class ReportService
     }
 
     /// <summary>
-    /// 业务员产值报表（只读派生，ERP-235）：仅统计已审核、未删除、已分配业务员、当前账号数据范围内的销售订单证据，
-    /// 按业务员分组；未分配业务员的订单不参与（保持既有口径）。金额为订单原币小计，利润沿用既有当前价估算口径
-    /// （币种未知；跨币种语义由 ERP-236 另行修正，本表不扩展）。本表口径为「已分配业务员·已审核·未删除·授权客户
-    /// 销售订单证据」，不是总 ERP 订单 / 产值 / 实际收入 / 出货 / 收款。日期校验先于任何源读取（结束日溢出显式拒绝）；
-    /// 订单头在业务员数据范围之后做 501 行探测（500 张上限），明细按 10001 条探测（10000 条上限），
-    /// 商品 / 业务员姓名按已限定 Id 固定批量查询（无逐单 / 逐行查库、不读取范围外业务员姓名）；超出即 fail closed 且不返回任何行或金额。
+    /// 业务员产值报表（只读派生，ERP-236）：仅统计已审核、未删除、已分配业务员、当前账号数据范围内的销售订单头证据，
+    /// 按业务员 Id × 原始原币分桶；已知币种按签名原币金额小计，未知 / 无效币种保留原始键、金额为 null 仅保留订单头计数，
+    /// 绝不换算汇率、绝不跨币种合计。利润恒为未知（null），当前商品售价 / 成本价不能证明历史可比较成本 / 利润，
+    /// 因此不再读取明细 / 商品。本表口径为「已分配业务员·已审核·未删除·授权客户销售订单证据」，
+    /// 不是总 ERP 订单 / 产值 / 实际收入 / 出货 / 收款。日期校验先于任何源读取（结束日溢出显式拒绝）；
+    /// 订单头在业务员数据范围之后做 501 行探测（500 张上限），业务员姓名按已限定 Id 固定批量查询（无逐单查库）；
+    /// 员工姓名快照缺失 / 已删除显式为「未知业务员」，绝不把订单改派到其他业务员；超出即 fail closed 且不返回任何行或金额。
     /// </summary>
     public async Task<List<ReportDtos.SalesmanOutputItem>> GetSalesmanOutputAsync(
         DateTime start, DateTime end, SalespersonDataScope scope)
@@ -241,7 +239,7 @@ public partial class ReportService
         ordersQuery = SalespersonDataScopeService.FilterByCustomer(ordersQuery, scope, o => o.CustomerId);
 
         var orders = await ordersQuery
-            .OrderBy(o => o.CustomerId)
+            .OrderBy(o => o.SalesmanId)
             .ThenBy(o => o.Id)
             .Take(SalesmanOutputMaxOrders + 1)
             .ToListAsync();
@@ -254,28 +252,7 @@ public partial class ReportService
                 ErrorCodes.RuleConflict);
         }
 
-        // 3) 明细：仅未删除且属于已读取订单头；有界读取（10001 条探测 10000 上限）
-        var orderIds = orders.Select(o => o.Id).ToList();
-        var details = await _db.SalesOrderDetails
-            .Where(d => orderIds.Contains(d.SalesOrderId) && !d.IsDeleted)
-            .OrderBy(d => d.Id)
-            .Take(SalesmanOutputMaxDetails + 1)
-            .ToListAsync();
-
-        if (details.Count > SalesmanOutputMaxDetails)
-        {
-            throw new BusinessException(
-                $"业务员产值报表超出报告上限：范围内非删除订单明细超过 {SalesmanOutputMaxDetails} 条"
-                + "（fail closed，不返回任何行或金额）",
-                ErrorCodes.RuleConflict);
-        }
-
-        // 4) 固定批量查询解析商品与业务员姓名（仅按已限定范围内的 Id 一次查询；无逐单 / 逐行查库、不读取范围外业务员姓名）
-        var productIds = details.Select(d => d.ProductId).Distinct().ToList();
-        var products = await _db.BaseProducts
-            .Where(p => productIds.Contains(p.Id))
-            .ToDictionaryAsync(p => p.Id, p => p);
-
+        // 3) 固定批量查询解析业务员姓名（仅按已限定范围内的 Id 一次查询；无逐单 / 逐行查库、不读取范围外业务员姓名）
         var salesmanIds = orders
             .Where(o => o.SalesmanId.HasValue)
             .Select(o => o.SalesmanId!.Value)
@@ -285,25 +262,42 @@ public partial class ReportService
             .Where(e => salesmanIds.Contains(e.Id))
             .ToDictionaryAsync(e => e.Id, e => e.EmployeeName);
 
-        // 5) 按业务员分组：金额与利润只在已读取的有界证据内合计；未分配业务员的订单已在源头排除（既有口径保持）
+        // 4) 按业务员 × 原币分组：已知币种签名原币金额小计；未知 / 无效币种金额 null 仅计数；利润恒为未知（null）
         var result = new List<ReportDtos.SalesmanOutputItem>();
         foreach (var g in orders.GroupBy(o => o.SalesmanId!.Value))
         {
-            var groupOrders = g.ToList();
-            var groupOrderIds = groupOrders.Select(o => o.Id).ToList();
-            var profit = details
-                .Where(d => groupOrderIds.Contains(d.SalesOrderId))
-                .Sum(d => d.Quantity * (products.TryGetValue(d.ProductId, out var p) ? p.SalePrice - p.CostPrice : 0));
+            var nameKnown = employees.TryGetValue(g.Key, out var name) && !string.IsNullOrWhiteSpace(name);
+            var salesmanName = nameKnown ? name! : SalesmanOutputEvidenceRules.UnknownSalesmanName;
 
-            result.Add(new ReportDtos.SalesmanOutputItem
+            foreach (var cg in g.GroupBy(o => SalesmanOutputEvidenceRules.CurrencyGroupKey(o.Currency))
+                         .OrderBy(x => x.Key, StringComparer.Ordinal))
             {
-                SalesmanId = g.Key,
-                SalesmanName = employees.TryGetValue(g.Key, out var name) ? name : string.Empty,
-                OrderCount = groupOrders.Count,
-                TotalAmount = groupOrders.Sum(o => o.TotalAmount),
-                TotalProfit = profit
-            });
+                var currencyKey = cg.Key;
+                var isKnown = SalesmanOutputEvidenceRules.IsKnownCurrency(cg.First().Currency);
+
+                result.Add(new ReportDtos.SalesmanOutputItem
+                {
+                    SalesmanId = g.Key,
+                    SalesmanName = salesmanName,
+                    Currency = currencyKey,
+                    CurrencyLabel = SalesmanOutputEvidenceRules.CurrencyGroupLabel(currencyKey),
+                    OrderCount = cg.Count(),
+                    TotalAmount = isKnown ? (decimal?)cg.Sum(o => o.TotalAmount) : null,
+                    TotalProfit = null,
+                    AmountLabel = SalesmanOutputEvidenceRules.AmountLabel,
+                    CurrencyEvidence = isKnown
+                        ? SalesmanOutputEvidenceRules.KnownCurrencyEvidence
+                        : SalesmanOutputEvidenceRules.UnknownCurrencyEvidence,
+                    ProfitEvidence = SalesmanOutputEvidenceRules.ProfitEvidence,
+                    SalesmanIdentityEvidence = nameKnown
+                        ? string.Empty
+                        : SalesmanOutputEvidenceRules.UnknownSalesmanIdentityEvidence
+                });
+            }
         }
-        return result.OrderByDescending(x => x.TotalAmount).ThenBy(x => x.SalesmanId).ToList();
+        return result
+            .OrderBy(x => x.SalesmanId)
+            .ThenBy(x => x.Currency, StringComparer.Ordinal)
+            .ToList();
     }
 }

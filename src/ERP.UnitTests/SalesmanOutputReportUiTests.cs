@@ -28,14 +28,17 @@ public class SalesmanOutputReportUiTests
     }
 
     [Fact]
-    public void 报表定义_列标签为证据口径且含当前价估算说明()
+    public void 报表定义_列标签为证据口径且含未知利润依据()
     {
         var reports = File.ReadAllText(Path.Combine(JsDirectory(), "reports.js"));
 
         Assert.Contains("key: 'salesmanName', label: '业务员'", reports);
+        Assert.Contains("key: 'currency', label: '原币币种'", reports);
         Assert.Contains("key: 'orderCount', label: '已审核订单数'", reports);
-        Assert.Contains("key: 'totalAmount', label: '订单金额合计(原币)'", reports);
-        Assert.Contains("key: 'totalProfit', label: '当前价估算利润(币种未知)'", reports);
+        Assert.Contains("key: 'totalAmount', label: '订单金额小计(原币)'", reports);
+        Assert.Contains("key: 'currencyEvidence', label: '币种证据'", reports);
+        Assert.Contains("key: 'totalProfit', label: '利润'", reports);
+        Assert.Contains("key: 'profitEvidence', label: '利润依据'", reports);
     }
 
     [Fact]
@@ -46,6 +49,9 @@ public class SalesmanOutputReportUiTests
         Assert.Contains("function renderSalesmanOutputData(data)", reports);
         Assert.Contains("if (code === 'salesman-output') { renderSalesmanOutputData(data); return; }", reports);
         Assert.Contains("未分配业务员的订单不参与", reports);
+        Assert.Contains("function fillSalesmanOutputKpi(data)", reports);
+        Assert.Contains("if (code === 'salesman-output') { fillSalesmanOutputKpi(data); return; }", reports);
+        Assert.Contains("绝不跨币种合计", reports);
     }
 
     /// <summary>前端脚本目录（沿测试程序集输出目录上溯到仓库根，与 ProductSalesRankingReportUiTests 同一约定）</summary>

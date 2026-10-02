@@ -219,25 +219,16 @@ public class ReportServiceTests
     // ==================== 4. 业务员产值报表 ====================
 
     [Fact]
-    public async Task GetSalesmanOutputAsync_业务员产值与利润_qty乘sale减cost()
+    public async Task GetSalesmanOutputAsync_按业务员与原币分组_已知币种签名小计_利润未知()
     {
         using var db = TestDbFactory.Create();
-        SeedProducts(db);   // 商品1 售价100/成本60、 商品2 售价200/成本120
         var customer = SeedCustomer(db, "C001", "客户");
         var s1 = SeedEmployee(db, "S001", "业务员甲");
         var s2 = SeedEmployee(db, "S002", "业务员乙");
 
         db.SalesOrders.AddRange(
-            new SalesOrder { OrderNo = "SO-1", OrderDate = new DateTime(2026, 9, 5),  CustomerId = customer.Id, SalesmanId = s1.Id, Status = DocumentStatus.Approved, TotalAmount = 1000m },
-            new SalesOrder { OrderNo = "SO-2", OrderDate = new DateTime(2026, 9, 12), CustomerId = customer.Id, SalesmanId = s2.Id, Status = DocumentStatus.Approved, TotalAmount = 4000m }
-        );
-        await db.SaveChangesAsync();
-
-        // 业务员1 产值 1000，利润明细：商品1 × 10 × (100-60) = 400
-        // 业务员2 产值 4000，利润明细：商品2 × 20 × (200-120) = 1600
-        db.SalesOrderDetails.AddRange(
-            new SalesOrderDetail { SalesOrderId = 1, ProductId = 1, Quantity = 10m, UnitPrice = 100m, Amount = 1000m },
-            new SalesOrderDetail { SalesOrderId = 2, ProductId = 2, Quantity = 20m, UnitPrice = 200m, Amount = 4000m }
+            new SalesOrder { OrderNo = "SO-1", OrderDate = new DateTime(2026, 9, 5),  CustomerId = customer.Id, SalesmanId = s1.Id, Status = DocumentStatus.Approved, TotalAmount = 1000m, Currency = Currency.USD },
+            new SalesOrder { OrderNo = "SO-2", OrderDate = new DateTime(2026, 9, 12), CustomerId = customer.Id, SalesmanId = s2.Id, Status = DocumentStatus.Approved, TotalAmount = 4000m, Currency = Currency.USD }
         );
         await db.SaveChangesAsync();
 
@@ -245,13 +236,17 @@ public class ReportServiceTests
         var result = await service.GetSalesmanOutputAsync(Start, End, PrivilegedScope);
 
         Assert.Equal(2, result.Count);
-        // 按产值降序
-        Assert.Equal("业务员乙", result[0].SalesmanName);
-        Assert.Equal(4000m, result[0].TotalAmount);
-        Assert.Equal(1600m, result[0].TotalProfit);
-        Assert.Equal("业务员甲", result[1].SalesmanName);
-        Assert.Equal(1000m, result[1].TotalAmount);
-        Assert.Equal(400m, result[1].TotalProfit);
+        // 稳定身份 / 币种排序（业务员 Id 升序），不再按金额跨币种排名
+        Assert.Equal(s1.Id, result[0].SalesmanId);
+        Assert.Equal("业务员甲", result[0].SalesmanName);
+        Assert.Equal(1000m, result[0].TotalAmount);
+        Assert.Null(result[0].TotalProfit);
+        Assert.Equal(SalesmanOutputEvidenceRules.ProfitEvidence, result[0].ProfitEvidence);
+
+        Assert.Equal(s2.Id, result[1].SalesmanId);
+        Assert.Equal("业务员乙", result[1].SalesmanName);
+        Assert.Equal(4000m, result[1].TotalAmount);
+        Assert.Null(result[1].TotalProfit);
     }
 
     [Fact]
@@ -615,45 +610,48 @@ public class ReportServiceTests
     }
 
     [Fact]
-    public async Task GetSalesmanOutputAsync_销售价低于成本_利润为负()
+    public async Task GetSalesmanOutputAsync_当前商品价格不影响结果_利润恒为未知()
     {
         using var db = TestDbFactory.Create();
-        SeedProducts(db);    // 必须先有商品，否则后面 prod 查询为空
+        SeedProducts(db);
         var customer = SeedCustomer(db, "C001", "客户");
         var s = SeedEmployee(db, "S001", "业务员甲");
 
-        // 商品成本 60，售价 100 改为 50（手动覆盖）
+        // 商品成本 60，售价 100 改为 50：当前商品售价 / 成本价不影响报表结果
         var prod = db.BaseProducts.Single(p => p.ProductCode == "P001");
         prod.SalePrice = 50m;
-        await db.SaveChangesAsync();   // 必须 SaveChanges 才能让 ReportService 读到新的 SalePrice
+        db.SaveChanges();
 
-        db.SalesOrders.Add(new SalesOrder
+        var order = new SalesOrder
         {
             OrderNo = "SO-LOSS",
             OrderDate = new DateTime(2026, 9, 10),
             CustomerId = customer.Id,
             SalesmanId = s.Id,
             Status = DocumentStatus.Approved,
-            TotalAmount = 500m
-        });
-        await db.SaveChangesAsync();
+            TotalAmount = 500m,
+            Currency = Currency.USD
+        };
+        db.SalesOrders.Add(order);
+        db.SaveChanges();
 
         db.SalesOrderDetails.Add(new SalesOrderDetail
         {
-            SalesOrderId = 1,
+            SalesOrderId = order.Id,
             ProductId = prod.Id,
             Quantity = 10m,
             UnitPrice = 50m,
             Amount = 500m
         });
-        await db.SaveChangesAsync();
+        db.SaveChanges();
 
         var service = new ReportService(db);
         var result = await service.GetSalesmanOutputAsync(Start, End, PrivilegedScope);
 
         Assert.Single(result);
         Assert.Equal(500m, result[0].TotalAmount);
-        Assert.Equal(-100m, result[0].TotalProfit);   // 10 × (50 − 60) = −100
+        Assert.Null(result[0].TotalProfit);   // 利润未知：不再用当前售价/成本价计算
+        Assert.Equal(SalesmanOutputEvidenceRules.ProfitEvidence, result[0].ProfitEvidence);
     }
 
     [Fact]

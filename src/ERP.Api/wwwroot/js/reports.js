@@ -50,9 +50,12 @@ const REPORTS = {
     summary: '已分配业务员 · 已审核 · 未删除 · 授权客户销售订单证据（非总ERP订单 / 非产值 / 非实际收入 / 非出货 / 非收款）',
     columns: [
       { key: 'salesmanName', label: '业务员' },
+      { key: 'currency', label: '原币币种' },
       { key: 'orderCount', label: '已审核订单数', type: 'number' },
-      { key: 'totalAmount', label: '订单金额合计(原币)', type: 'money' },
-      { key: 'totalProfit', label: '当前价估算利润(币种未知)', type: 'money' },
+      { key: 'totalAmount', label: '订单金额小计(原币)', type: 'money' },
+      { key: 'currencyEvidence', label: '币种证据' },
+      { key: 'totalProfit', label: '利润', type: 'money' },
+      { key: 'profitEvidence', label: '利润依据' },
     ] },
   'balance-sheet': { api: '/api/reports/balance-sheet', title: '资产负债表',
     emoji: '⚖️', kpi: 'port', summary: '资产 = 负债 + 所有者权益' },
@@ -272,6 +275,7 @@ function fillReportKpi(code, data) {
   if (code === 'product-sales-ranking') { fillProductSalesRankingKpi(data); return; }
   if (code === 'order-profit') { fillOrderProfitKpi(data); return; }
   if (code === 'customer-shipment') { fillCustomerShipmentKpi(data); return; }
+  if (code === 'salesman-output') { fillSalesmanOutputKpi(data); return; }
   if (code === 'balance-sheet' || code === 'income-statement' || code === 'cash-flow') {
     const lines = data.lines || [];
     const total = lines.reduce((s, l) => s + (Number(l.amount) || 0), 0);
@@ -333,6 +337,38 @@ function fillCustomerShipmentKpi(data) {
   const top = rows[0];
   setR('top', top ? `${top.customerName || '--'} · ${top.currency || '未知币种'}` : '--');
   setT('top-tip', '排序首位（客户 Id 升序）');
+}
+
+/* 业务员产值 KPI：按业务员 × 原币分组；金额仅同币种小计、未知币种单列，绝不跨币种合计；利润未知 */
+function fillSalesmanOutputKpi(data) {
+  const setR = (k, v) => { const el = document.querySelector(`[data-rkpi="${k}"]`); if (el) el.firstChild.nodeValue = String(v); };
+  const setT = (k, v) => { const el = document.querySelector(`[data-rkpi="${k}"]`); if (el) el.textContent = String(v); };
+  const rows = Array.isArray(data) ? data : [];
+  setR('rows', rows.length);
+  setT('rows-tip', '业务员 × 原币分组');
+
+  const label = document.querySelector('[data-rkpi-label="total"]');
+  if (label) label.textContent = '原币金额';
+  const unit = document.querySelector('[data-rkpi-unit="total"]');
+  if (unit) unit.textContent = '';
+  const byCurrency = {};
+  let unknownBuckets = 0;
+  rows.forEach(r => {
+    if (r && r.totalAmount !== null && r.totalAmount !== undefined) {
+      const c = String(r.currency || '未知币种');
+      byCurrency[c] = (byCurrency[c] || 0) + Number(r.totalAmount);
+    } else {
+      unknownBuckets += 1;
+    }
+  });
+  const parts = Object.keys(byCurrency).sort().map(c => `${c} ${fmtMoney(byCurrency[c])}`);
+  if (unknownBuckets > 0) parts.push('未知币种');
+  setR('total', parts.length ? parts.join(' / ') : '--');
+  setT('total-tip', '原币分别呈现，禁止跨币种合计金额');
+
+  const top = rows[0];
+  setR('top', top ? `${top.salesmanName || '未知业务员'} · ${top.currency || '未知币种'}` : '--');
+  setT('top-tip', '排序首位（业务员 Id / 币种升序）');
 }
 
 /* 订单利润暂估 KPI：销售额为订单原币，成本/利润/利润率为未知，绝不跨币种合计、绝不展示实际利润口径 */
@@ -496,23 +532,27 @@ function renderCustomerShipmentData(data) {
   </tr></thead><tbody>${body}</tbody></table>`;
 }
 
-/* 业务员产值报表：仅统计已分配业务员、已审核、未删除、授权客户的销售订单证据；
-   金额为订单原币小计，利润为当前价估算（币种未知）；未分配业务员的订单不参与（既有口径）；
-   绝不显示总 ERP 订单 / 产值 / 实际收入 / 出货 / 收款口径 */
+/* 业务员产值报表：按业务员 × 原币分组；金额仅已知币种签名原币小计，未知币种金额为「未知」；
+   利润为未知（null）；未分配业务员的订单不参与（既有口径）；
+   绝不显示总 ERP 订单 / 产值 / 实际收入 / 出货 / 收款口径，绝不跨币种合计 */
 function renderSalesmanOutputData(data) {
   const el = document.getElementById('report-table');
   const rows = Array.isArray(data) ? data : [];
   if (!rows.length) { el.innerHTML = emptyReportHtml('暂无数据', '📊'); return; }
   const esc = (v) => fudDesEsc(v);
+  const num = (v) => (v === null || v === undefined ? '<span class="text-muted">未知</span>' : fmtMoney(v));
   const body = rows.map(r => `<tr>
     <td>${esc(r.salesmanName || '未知业务员')}</td>
+    <td>${esc(r.currencyLabel || r.currency || '未知币种')}</td>
     <td class="text-right">${r.orderCount ?? ''}</td>
-    <td class="text-right">${fmtMoney(r.totalAmount)}</td>
-    <td class="text-right">${fmtMoney(r.totalProfit)}</td>
+    <td class="text-right">${num(r.totalAmount)}</td>
+    <td>${esc(r.currencyEvidence || '')}</td>
+    <td class="text-right">${num(r.totalProfit)}</td>
+    <td>${esc(r.profitEvidence || '')}</td>
   </tr>`).join('');
   el.innerHTML = `<div class="text-muted">已分配业务员 · 已审核 · 未删除 · 授权客户销售订单证据（非总ERP订单 / 非产值 / 非实际收入 / 非出货 / 非收款）；未分配业务员的订单不参与</div>
     <table><thead><tr>
-      <th>业务员</th><th class="text-right">已审核订单数</th><th class="text-right">订单金额合计(原币)</th><th class="text-right">当前价估算利润(币种未知)</th>
+      <th>业务员</th><th>原币币种</th><th class="text-right">已审核订单数</th><th class="text-right">订单金额小计(原币)</th><th>币种证据</th><th class="text-right">利润</th><th>利润依据</th>
     </tr></thead><tbody>${body}</tbody></table>`;
 }
 

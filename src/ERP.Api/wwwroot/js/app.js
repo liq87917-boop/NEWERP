@@ -517,6 +517,29 @@ function spawnLoginParticles() {
   }
 }
 
+/* 业务员产值证据行 → 已分配已审核订单数（按 orderCount 汇总，不是行数） */
+function salesmanOutputApprovedOrderCount(rows) {
+  return (Array.isArray(rows) ? rows : []).reduce((s, x) => s + (Number(x.orderCount) || 0), 0);
+}
+
+/* 业务员产值证据行 → 原币金额展示：单币种给「币种 金额」，多币种/未知给显式多币种或未知，绝不跨币种合计或硬编码单一币种单位 */
+function salesmanOutputCurrencyAmountText(rows) {
+  const list = Array.isArray(rows) ? rows : [];
+  const byCurrency = {};
+  let unknownBuckets = 0;
+  list.forEach(x => {
+    if (x && x.totalAmount !== null && x.totalAmount !== undefined) {
+      const c = String(x.currency || '未知币种');
+      byCurrency[c] = (byCurrency[c] || 0) + Number(x.totalAmount);
+    } else {
+      unknownBuckets += 1;
+    }
+  });
+  const parts = Object.keys(byCurrency).sort().map(c => `${c} ${fmtMoney(byCurrency[c])}`);
+  if (unknownBuckets > 0) parts.push('未知币种');
+  return parts.length ? parts.join(' · ') : '--';
+}
+
 async function loadLoginTicker() {
   const setText = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
   const fmt = n => (n == null || isNaN(n)) ? '--' : Number(n).toLocaleString();
@@ -528,8 +551,10 @@ async function loadLoginTicker() {
     ]);
     if (r.ok) {
       const data = await r.json();
-      const arr = Array.isArray(data) ? data : (data.items || []);
-      setText('tk-orders', fmt(arr.length));
+      if (data && data.code === 0) {
+        const rows = Array.isArray(data.data) ? data.data : [];
+        setText('tk-orders', fmt(salesmanOutputApprovedOrderCount(rows)));
+      }
     }
   } catch (e) { setText('tk-orders', '--'); }
   try {
@@ -553,9 +578,10 @@ async function loadLoginTicker() {
     ]);
     if (r.ok) {
       const data = await r.json();
-      const arr = Array.isArray(data) ? data : (data.items || []);
-      const total = arr.reduce((s, x) => s + (Number(x.amount) || Number(x.totalAmount) || Number(x.salesAmount) || 0), 0);
-      setText('tk-sales', fmt(total.toFixed(2)));
+      if (data && data.code === 0) {
+        const rows = Array.isArray(data.data) ? data.data : [];
+        setText('tk-sales', salesmanOutputCurrencyAmountText(rows));
+      }
     }
   } catch (e) { setText('tk-sales', '--'); }
 }
@@ -690,8 +716,8 @@ function renderHome() {
       <div class="kpi-card gold tech-card">
         <span class="tech-card-corner tl"></span><span class="tech-card-corner tr"></span>
         <span class="tech-card-corner bl"></span><span class="tech-card-corner br"></span>
-        <div class="kpi-label"><span class="kpi-emoji">💰</span>本月销售（USD）</div>
-        <div class="kpi-value" data-ykpi="sales-month">--<span class="unit">USD</span></div>
+        <div class="kpi-label"><span class="kpi-emoji">💰</span>本月销售（原币）</div>
+        <div class="kpi-value" data-ykpi="sales-month">--<span class="unit">原币</span></div>
         <div class="kpi-delta up" data-ykpi="sales-month-d">↑ 较上月</div>
       </div>
     </div>
@@ -840,17 +866,19 @@ async function loadPortalData() {
     const t = document.querySelector('[data-ps="skus"]');
     if (t) t.textContent = ((r.total || 0) * 1).toLocaleString();
   } catch (e) { /* 保留占位 */ }
-  // 本月销售额
+  // 本月销售额（原币分别呈现，绝不跨币种合计或硬编码单一币种单位）
   try {
     const start = new Date(); start.setDate(1);
     const s = start.toISOString().slice(0, 10);
     const e = new Date().toISOString().slice(0, 10);
     const r = await api(`/api/reports/salesman-output?start=${s}&end=${e}`);
-    const arr = Array.isArray(r) ? r : (r.items || []);
-    const total = arr.reduce((s2, x) => s2 + (Number(x.amount) || Number(x.totalAmount) || Number(x.salesAmount) || 0), 0);
+    const rows = Array.isArray(r) ? r : [];
     const t = document.querySelector('[data-ykpi="sales-month"]');
-    if (t) t.firstChild.nodeValue = total.toFixed(2);
-  } catch (e) { /* 保留占位 */ }
+    if (t) t.firstChild.nodeValue = salesmanOutputCurrencyAmountText(rows);
+  } catch (e) {
+    const t = document.querySelector('[data-ykpi="sales-month"]');
+    if (t) t.firstChild.nodeValue = '--';
+  }
 }
 
 async function loadHomeKpis() {
@@ -858,8 +886,7 @@ async function loadHomeKpis() {
 }
 
 function sumSales(r) {
-  if (!Array.isArray(r)) return 0;
-  return r.reduce((s, x) => s + (Number(x.amount) || Number(x.totalAmount) || Number(x.salesAmount) || 0), 0).toFixed(2);
+  return salesmanOutputCurrencyAmountText(r);
 }
 function setKpi(key, val) {
   const el = document.querySelector(`[data-kpi="${key}"]`);

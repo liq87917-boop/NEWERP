@@ -53,9 +53,9 @@
     "src/ERP.UnitTests/SalesmanOutputHomeEvidenceTests.cs",
     "src/ERP.UnitTests/SalesmanOutputScopeTests.cs"
   ],
-  "status": "pending",
+  "status": "completed",
   "max_attempts": 3,
-  "attempts": 0,
+  "attempts": 2,
   "validation_profile": "safe",
   "completion_mode": "build",
   "auto_start": true,

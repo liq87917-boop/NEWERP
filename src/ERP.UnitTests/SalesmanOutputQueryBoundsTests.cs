@@ -8,11 +8,11 @@ using Xunit;
 namespace ERP.UnitTests;
 
 /// <summary>
-/// 业务员产值报表（ERP-235）日期窗口 / 有界读取 / 固定批量查询单元测试：
+/// 业务员产值报表（ERP-236）日期窗口 / 有界读取 / 固定批量查询单元测试：
 /// 日期校验（含结束日溢出防护）先于任何源读取；结束日按排他上界（&lt; 结束日次日）比较；
-/// 订单头在业务员数据范围之后按 CustomerId / Id 稳定排序做 501 行探测（500 张上限），
-/// 明细按 10001 条探测（10000 条上限），超出即 fail closed 且不返回任何行或金额；
-/// 商品 / 业务员姓名按 Id 集合一次固定批量查询，无逐单 / 逐行查库、只读不写库。
+/// 订单头在业务员数据范围之后按 SalesmanId / Id 稳定排序做 501 行探测（500 张上限），
+/// 超出即 fail closed 且不返回任何行或金额；不再读取明细 / 商品、不设明细上限；
+/// 业务员姓名按 Id 集合一次固定批量查询，无逐单 / 逐行查库、只读不写库。
 /// <para>全部使用内存数据库（TestDbFactory），不连接 SQL Server、不启动 API、不执行任何 SQL / seed、不运行浏览器验收。</para>
 /// </summary>
 public class SalesmanOutputQueryBoundsTests
@@ -147,13 +147,14 @@ public class SalesmanOutputQueryBoundsTests
     }
 
     [Fact]
-    public async Task 明细数超过10000_报告上限错误()
+    public async Task 明细数量不参与上限_仅订单头500上限()
     {
         using var db = TestDbFactory.Create();
         var customer = SeedCustomer(db, "C001", "客户");
         var emp = SeedEmployee(db, "S001", "业务员甲");
         var order = SeedOrder(db, "SO-BIG", customer.Id, emp.Id, new DateTime(2026, 9, 10), 100m);
 
+        // 报表只读订单头：大量明细不触发任何明细上限（不再读取明细 / 商品）
         for (var i = 1; i <= 10001; i++)
         {
             db.SalesOrderDetails.Add(new SalesOrderDetail
@@ -168,11 +169,11 @@ public class SalesmanOutputQueryBoundsTests
         db.SaveChanges();
 
         var service = new ReportService(db);
-        var ex = await Assert.ThrowsAsync<BusinessException>(() =>
-            service.GetSalesmanOutputAsync(Start, End, PrivilegedScope));
+        var result = await service.GetSalesmanOutputAsync(Start, End, PrivilegedScope);
 
-        Assert.Equal(ErrorCodes.RuleConflict, ex.Code);
-        Assert.Contains("10000", ex.Message);
+        var row = Assert.Single(result);
+        Assert.Equal(100m, row.TotalAmount);
+        Assert.Equal(1, row.OrderCount);
     }
 
     [Fact]
@@ -218,18 +219,13 @@ public class SalesmanOutputQueryBoundsTests
         db.SalesOrders.AddRange(order1, order2);
         db.SaveChanges();
 
-        db.SalesOrderDetails.AddRange(
-            new SalesOrderDetail { SalesOrderId = order1.Id, ProductId = 1, ProductName = "热销商品", Quantity = 1m, Unit = "PCS" },
-            new SalesOrderDetail { SalesOrderId = order2.Id, ProductId = 2, ProductName = "平销商品", Quantity = 1m, Unit = "PCS" });
-        db.SaveChanges();
-
         var counting = InventoryMovementReportTests.CountingDbContext.Wrap(db);
         var service = new ReportService(counting.Proxy);
         var result = await service.GetSalesmanOutputAsync(Start, End, PrivilegedScope);
 
         Assert.Single(result);
-        // 固定 4 次数据集访问：SalesOrders + SalesOrderDetails + BaseProducts + BaseEmployees；无逐单 / 逐行查库
-        Assert.Equal(4, counting.DatasetReads);
+        // 固定 2 次数据集访问：SalesOrders + BaseEmployees；不再读取明细 / 商品、无逐单 / 逐行查库
+        Assert.Equal(2, counting.DatasetReads);
         Assert.Equal(0, counting.WriteCalls);
     }
 }

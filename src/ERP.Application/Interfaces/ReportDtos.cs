@@ -135,14 +135,44 @@ public static partial class ReportDtos
         public string QuantityLabel { get; set; } = string.Empty;
     }
 
-    /// <summary>业务员产值项</summary>
+    /// <summary>
+    /// 业务员产值项（按业务员 Id × 原始原币分桶；金额仅已知币种按签名原币小计，未知 / 无效币种金额为 null 仅保留计数；
+    /// 利润恒为未知（null），当前商品售价 / 成本价不能证明历史可比较成本 / 利润）
+    /// </summary>
     public class SalesmanOutputItem
     {
+        /// <summary>业务员 Id（订单持久化属性，仅分组身份，非权限边界）</summary>
         public long SalesmanId { get; set; }
+
+        /// <summary>业务员姓名快照（员工缺失 / 已删除时显式为「未知业务员」）</summary>
         public string SalesmanName { get; set; } = string.Empty;
+
+        /// <summary>原币币种编码（已知枚举码如 USD；未知 / 无效币种保留原始键，如 "999"）</summary>
+        public string Currency { get; set; } = string.Empty;
+
+        /// <summary>原币币种标签（如「USD 美元」；未知为「未知币种」）</summary>
+        public string CurrencyLabel { get; set; } = string.Empty;
+
+        /// <summary>该业务员/币种分组内已审核、未删除、已分配业务员的销售订单头数量</summary>
         public int OrderCount { get; set; }
-        public decimal TotalAmount { get; set; }
-        public decimal TotalProfit { get; set; }
+
+        /// <summary>原币订单金额小计（签名，仅已知币种）；未知 / 无效币种为 null（绝不回落为 0）</summary>
+        public decimal? TotalAmount { get; set; }
+
+        /// <summary>利润（未知：当前商品售价/成本价不能证明历史可比较成本/利润，绝不回落为 0）</summary>
+        public decimal? TotalProfit { get; set; }
+
+        /// <summary>金额口径证据标签：已审核订单金额（原币），非实际收款金额</summary>
+        public string AmountLabel { get; set; } = string.Empty;
+
+        /// <summary>币种证据标签（已知原币 / 未知币种原因）</summary>
+        public string CurrencyEvidence { get; set; } = string.Empty;
+
+        /// <summary>利润证据标签（未知原因）</summary>
+        public string ProfitEvidence { get; set; } = string.Empty;
+
+        /// <summary>业务员身份证据标签（姓名快照缺失 / 已删除时为未知身份说明）</summary>
+        public string SalesmanIdentityEvidence { get; set; } = string.Empty;
     }
 
     /// <summary>财务报表（通用：资产/负债/损益/现金流）</summary>
