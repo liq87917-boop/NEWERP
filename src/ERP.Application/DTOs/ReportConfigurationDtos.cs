@@ -94,7 +94,14 @@ public sealed record ReportConfigurationFieldDto(
     bool Filterable,
     bool Aggregatable,
     bool Hidden,
-    IReadOnlyList<string> FilterOperators);
+    IReadOnlyList<string> FilterOperators)
+{
+    /// <summary>是否可作为保存排序的有限持久化字段（仅原生持久化键；计算列 / 关系 / 派生金额字段不可排序）。</summary>
+    public bool Sortable { get; init; }
+
+    /// <summary>不可排序时的人类可读说明（计算列 / 关系 / 派生金额字段）。</summary>
+    public string? SortUnavailableReason { get; init; }
+}
 
 /// <summary>
 /// 指标描述符（有限、只读）：从已授权字段派生，携带稳定的字段键 / 中文标签 / 类型 / 行粒度 /
@@ -142,6 +149,9 @@ public sealed record ReportConfigurationDatasetDto(
 
     /// <summary>受控关系目录（ERP-268）：稳定关系元数据与允许字段清单；空表示该数据集不暴露任何关系。</summary>
     public List<ReportConfigurationRelationDto> Relations { get; init; } = new();
+
+    /// <summary>排序口径说明：列出有限可排序字段，并说明计算列 / 关系 / 派生金额字段不可排序的原因。</summary>
+    public string? SortingExplanation { get; init; }
 }
 
 /// <summary>
@@ -458,7 +468,9 @@ public sealed class ReportConfigurationPreviewRequest
 public sealed record ReportConfigurationPreviewParameters(
     int Page,
     int PageSize,
-    string GroupBy);
+    string GroupBy,
+    string? SortFieldKey,
+    string? SortDirection);
 
 /// <summary>通用报表列（有界、只读）：有限字段键 + 真实中文标签 / 类型 / 币种单位语义；计算列附未知值口径说明</summary>
 public sealed record ReportConfigurationColumnDto(
@@ -590,6 +602,15 @@ public sealed class ReportConfigurationPreviewDto
 
     /// <summary>规范化日期范围文本（仅日期筛选字段；无日期筛选为空字符串）</summary>
     public string DateRangeText { get; set; } = string.Empty;
+
+    /// <summary>生效排序字段键（保存的有限持久化排序字段；无排序时为空）</summary>
+    public string? SortFieldKey { get; set; }
+
+    /// <summary>生效排序方向（asc / desc；无排序时为空）</summary>
+    public string? SortDirection { get; set; }
+
+    /// <summary>规范化排序证据文本（含默认排序与并列身份决断；供 UI / Excel / PDF 共用同一口径）</summary>
+    public string SortEvidence { get; set; } = string.Empty;
 
     /// <summary>数据集键</summary>
     public string DatasetKey { get; set; } = string.Empty;

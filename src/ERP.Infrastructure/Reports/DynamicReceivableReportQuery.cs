@@ -37,7 +37,7 @@ public sealed class DynamicReceivableReportQuery : IDynamicReceivableReportQuery
         // 1) 身份 + 既有「客户资料」菜单授权（无身份 / 无角色 / 无菜单授权 → fail closed）
         await EnsureAuthorizedAsync(userId, cancellationToken);
 
-        // 2) 字段 / 筛选 / 页大小校验（全部在读取发票 / 分摊证据之前完成）
+        // 2) 字段 / 筛选 / 页大小 / 排序校验（全部在读取发票 / 分摊证据之前完成）
         var fieldKeys = DynamicReceivableReportRules.NormalizeFields(request.Fields);
         DynamicReceivableReportRules.ValidateCustomerId(request.CustomerId);
         var currency = DynamicReceivableReportRules.NormalizeCurrency(request.Currency);
@@ -46,6 +46,7 @@ public sealed class DynamicReceivableReportQuery : IDynamicReceivableReportQuery
         DynamicReceivableReportRules.ValidateDateRange(request.StartDate, request.EndDate);
         DynamicReceivableReportRules.ValidatePageSize(request.PageSize);
         var page = request.Page < 1 ? 1 : request.Page;
+        DynamicReceivableReportRules.NormalizeSort(request.SortFieldKey, request.SortDirection);
 
         // 3) 每次请求重新解析当前账号业务员数据范围（特权账号不过滤）
         var scope = await SalespersonDataScopeService.ResolveAsync(_db, userId);
@@ -63,7 +64,8 @@ public sealed class DynamicReceivableReportQuery : IDynamicReceivableReportQuery
             PageSize = request.PageSize,
         };
 
-        var (rows, total) = await CustomerReceivableReconciliationService.ForScopedPreviewAsync(_db, query, scope);
+        var (rows, total) = await CustomerReceivableReconciliationService.ForScopedPreviewAsync(
+            _db, query, scope, request.SortFieldKey, request.SortDirection, cancellationToken);
 
         var columns = fieldKeys.Select(key => DynamicReceivableReportRules.GetField(key)!).ToList();
         var mapped = rows.Select(row => DynamicReceivableReportRules.BuildRow(row, fieldKeys)).ToList();

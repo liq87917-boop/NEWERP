@@ -48,6 +48,8 @@ let RCC = {
   aggregates: [],
   relations: [],
   groupBy: 'none',
+  sortFieldKey: '',
+  sortDirection: 'asc',
   page: 1,
   pageSize: RCC_DEFAULT_PAGE_SIZE,
   maxPageSize: 200,
@@ -377,6 +379,7 @@ function rccResultHtml(preview) {
     + ' · ' + rccEsc(evidence.currencyUnitSemantics || '')
     + ' · 覆盖口径：' + rccEsc(coverageText) + '</div>');
   if (evidence.disclaimerText) parts.push('<div class="rcc-disclaimer">' + rccEsc(evidence.disclaimerText) + '</div>');
+  if (preview.sortEvidence) parts.push('<div class="rcc-sort-evidence">' + rccEsc(preview.sortEvidence) + '</div>');
   parts.push('<div class="rcc-meta">第 ' + rccEsc(preview.page) + '/' + rccEsc(preview.totalPages)
     + ' 页 · 共 ' + rccEsc(preview.total) + ' 条</div>');
   return parts.join('');
@@ -456,7 +459,12 @@ function rccBuildDefinition(state) {
     capabilities: [],
     computedColumns: rccBuildComputedColumns(state),
     relations: rccBuildRelations(state),
-    presentation: { page: 1, pageSize: state.pageSize || RCC_DEFAULT_PAGE_SIZE },
+    presentation: {
+      page: 1,
+      pageSize: state.pageSize || RCC_DEFAULT_PAGE_SIZE,
+      sortFieldKey: state.sortFieldKey || null,
+      sortDirection: state.sortFieldKey ? (state.sortDirection || 'asc') : null,
+    },
   };
 }
 
@@ -519,6 +527,36 @@ function rccGroupingHtml(groupingKeys, groupBy) {
   return '<select onchange="rccOnGroupBy(this.value)">'
     + keys.map(k => '<option value="' + rccEsc(k) + '" ' + (k === groupBy ? 'selected' : '') + '>' + rccEsc(RCC_GROUP_LABELS[k] || k) + '</option>').join('')
     + '</select>';
+}
+
+/* 排序：仅目录白名单可排序字段（有限持久化键）；切换即重置页码并作废在途旧响应 */
+function rccSortingHtml(dataset) {
+  const sortable = ((dataset && dataset.fields) || []).filter(f => f && !f.hidden && f.sortable);
+  const opts = sortable.map(f =>
+    '<option value="' + rccEsc(f.key) + '" ' + (f.key === RCC.sortFieldKey ? 'selected' : '') + '>' + rccEsc(f.label) + '</option>').join('');
+  return '<select onchange="rccOnSortField(this.value)">'
+    + '<option value="" ' + (!RCC.sortFieldKey ? 'selected' : '') + '>默认排序</option>'
+    + opts
+    + '</select>'
+    + '<select onchange="rccOnSortDirection(this.value)" ' + (RCC.sortFieldKey ? '' : 'disabled') + '>'
+    + '<option value="asc" ' + (RCC.sortDirection === 'asc' ? 'selected' : '') + '>升序</option>'
+    + '<option value="desc" ' + (RCC.sortDirection === 'desc' ? 'selected' : '') + '>降序</option>'
+    + '</select>';
+}
+
+function rccOnSortField(value) {
+  RCC.sortFieldKey = value || '';
+  RCC.sortDirection = 'asc';
+  RCC.page = 1;                     // 切换排序：重置页码
+  rccTouch();                        // 作废在途旧预览 / 旧配置响应
+  rccRenderDesigner();
+}
+
+function rccOnSortDirection(value) {
+  RCC.sortDirection = value === 'desc' ? 'desc' : 'asc';
+  RCC.page = 1;                     // 切换排序方向：重置页码
+  rccTouch();
+  rccRenderDesigner();
 }
 
 /* ==================== 指标汇总（ERP-267）：目录驱动、仅当前预览页、分组 + 币种分区 ==================== */
@@ -731,6 +769,8 @@ function rccRenderDesigner(html) {
     + '<div class="rcc-filters"><label>类型化筛选</label>' + rccFiltersHtml(RCC.filters, RCC.fields)
     + '<button type="button" class="btn" onclick="rccAddFilter()">+ 添加筛选</button></div>'
     + '<div class="rcc-grouping"><label>分组</label>' + rccGroupingHtml(ds.groupingKeys, RCC.groupBy) + '</div>'
+    + '<div class="rcc-sorting"><label>排序（仅持久化键）</label>' + rccSortingHtml(ds)
+    + '<div class="rcc-hint">' + rccEsc(ds.sortingExplanation || '仅订单 / 发票原生键可排序') + '</div></div>'
     + rccMetricEditorHtml()
     + rccUnsupportedHtml(ds);
 }
@@ -791,7 +831,7 @@ function rccTouch() {
 async function rccInit() {
   RCC = {
     catalog: null, datasets: [], datasetKey: '', fields: [], list: [], current: null, name: '',
-    selectedKeys: [], filters: [], computedColumns: [], aggregates: [], groupBy: 'none', page: 1, pageSize: RCC_DEFAULT_PAGE_SIZE,
+    selectedKeys: [], filters: [], computedColumns: [], aggregates: [], groupBy: 'none', sortFieldKey: '', sortDirection: 'asc', page: 1, pageSize: RCC_DEFAULT_PAGE_SIZE,
     maxPageSize: 200, previewRevision: null, view: null, revisions: [],
     sharedList: [], sharedCurrent: null, grants: [], dirty: false,
     requestSeq: 0, envBlocked: false, busy: false,
@@ -848,6 +888,8 @@ function rccSelectDataset(key, touch = true) {
   RCC.aggregates = [];
   RCC.relations = [];
   RCC.groupBy = 'none';
+  RCC.sortFieldKey = '';
+  RCC.sortDirection = 'asc';
   RCC.page = 1;
   if (touch) rccTouch();
   rccRenderDesigner();
@@ -931,6 +973,8 @@ function rccNew() {
   RCC.computedColumns = [];
   RCC.aggregates = [];
   RCC.groupBy = 'none';
+  RCC.sortFieldKey = '';
+  RCC.sortDirection = 'asc';
   RCC.page = 1;
   RCC.dirty = false;
   RCC.revisions = [];
@@ -958,6 +1002,8 @@ function rccApplyDefinition(def) {
   RCC.groupBy = g.length === 1 ? g[0] : 'none';
   RCC.page = (def && def.presentation && def.presentation.page) || 1;
   RCC.pageSize = (def && def.presentation && def.presentation.pageSize) || RCC_DEFAULT_PAGE_SIZE;
+  RCC.sortFieldKey = (def && def.presentation && def.presentation.sortFieldKey) || '';
+  RCC.sortDirection = (def && def.presentation && def.presentation.sortDirection) || 'asc';
   RCC.computedColumns = ((def && def.computedColumns) || []).map(c => ({
     key: String(c.key || '').trim(),
     label: String(c.label || ''),
@@ -1462,6 +1508,9 @@ if (typeof module !== 'undefined' && module.exports) {
     rccFilterRowHtml,
     rccFiltersHtml,
     rccGroupingHtml,
+    rccSortingHtml,
+    rccOnSortField,
+    rccOnSortDirection,
     rccDatasetLabel,
     rccRenderDesigner,
     rccRenderList,

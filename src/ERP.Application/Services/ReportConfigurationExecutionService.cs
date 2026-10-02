@@ -296,6 +296,9 @@ public sealed class ReportConfigurationExecutionService : IReportConfigurationEx
         preview.Version = version;
         preview.NormalizedFiltersText = BuildNormalizedFiltersText(definition, dataset);
         preview.DateRangeText = BuildNormalizedDateRangeText(definition, dataset);
+        preview.SortFieldKey = parameters.SortFieldKey;
+        preview.SortDirection = parameters.SortDirection;
+        preview.SortEvidence = BuildNormalizedSortText(parameters, dataset);
         return preview;
     }
 
@@ -390,7 +393,24 @@ public sealed class ReportConfigurationExecutionService : IReportConfigurationEx
                 $"分组键 {groupBy} 不是数据集 {dataset.DatasetKey} 支持的分组（仅支持 {string.Join(" / ", dataset.GroupingKeys)}）");
         }
 
-        return new ReportConfigurationPreviewParameters(page, pageSize, groupBy);
+        var (sortFieldKey, sortDirection) = ResolveSort(definition);
+        return new ReportConfigurationPreviewParameters(page, pageSize, groupBy, sortFieldKey, sortDirection);
+    }
+
+    /// <summary>解析保存的排序（排序在纯校验器中已按目录校验为有限可排序字段；无排序时返回空）。</summary>
+    private static (string? FieldKey, string? Direction) ResolveSort(ReportConfigurationDefinition definition)
+    {
+        var presentation = definition.Presentation;
+        var fieldKey = string.IsNullOrWhiteSpace(presentation?.SortFieldKey)
+            ? null
+            : presentation.SortFieldKey.Trim();
+        if (fieldKey is null)
+            return (null, null);
+
+        var direction = string.IsNullOrWhiteSpace(presentation?.SortDirection)
+            ? "asc"
+            : presentation.SortDirection.Trim();
+        return (fieldKey, direction);
     }
 
     private static string ResolveGroupBy(string? overrideGroupBy, ReportConfigurationDefinition definition)
@@ -469,6 +489,26 @@ public sealed class ReportConfigurationExecutionService : IReportConfigurationEx
         if (start.HasValue)
             return $"{start.Value.Date:yyyy-MM-dd} 起";
         return $"截至 {end!.Value.Date:yyyy-MM-dd}";
+    }
+
+    private static string BuildNormalizedSortText(
+        ReportConfigurationPreviewParameters parameters, ReportConfigurationDatasetDto dataset)
+    {
+        var isReceivable = string.Equals(
+            dataset.DatasetKey, ReportConfigurationConstants.DatasetReceivable, StringComparison.OrdinalIgnoreCase);
+        var identityLabel = isReceivable ? "发票 Id" : "订单 Id";
+
+        var fieldKey = parameters.SortFieldKey;
+        if (string.IsNullOrWhiteSpace(fieldKey))
+        {
+            return isReceivable
+                ? "默认排序：按客户 / 币种 / 开票日期降序 / 发票 Id 降序（既有默认口径）"
+                : "默认排序：按订单 Id 升序（稳定分页）";
+        }
+
+        var label = TryGetField(dataset, fieldKey, out var field) ? field.Label : fieldKey;
+        var descending = string.Equals(parameters.SortDirection, "desc", StringComparison.OrdinalIgnoreCase);
+        return $"排序：{label} {(descending ? "降序" : "升序")}；并列时按 {identityLabel} 升序稳定分页";
     }
 
     private static string? BuildFilterText(ReportConfigurationFilter filter, ReportConfigurationDatasetDto dataset)

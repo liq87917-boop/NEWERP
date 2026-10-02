@@ -74,6 +74,23 @@ public sealed class SalesOrderReportConfigurationDatasetProvider : IReportConfig
         "id", "customerId", "salesmanId", "portId",
     };
 
+    private static readonly HashSet<string> SortableFields = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "id", "orderDate", "customerId",
+    };
+
+    private const string SortingExplanation =
+        "仅订单 Id / 订单日期 / 客户 Id（原生持久化键）可排序；金额 / 比例 / 派生 / 关系字段不可排序；并列时按订单 Id 升序稳定分页";
+
+    private static (bool Sortable, string? Reason) SortabilityOf(string key)
+    {
+        if (SortableFields.Contains(key))
+            return (true, null);
+        if (CurrencyUnits.ContainsKey(key))
+            return (false, "金额 / 比例 / 币种字段不可排序（非原生可排序键）");
+        return (false, "仅订单 Id / 订单日期 / 客户 Id 可排序");
+    }
+
     /// <inheritdoc />
     public async Task<ReportConfigurationDatasetDto?> GetDatasetAsync(
         long? userId, CancellationToken cancellationToken = default)
@@ -109,6 +126,8 @@ public sealed class SalesOrderReportConfigurationDatasetProvider : IReportConfig
             Page = parameters.Page,
             PageSize = parameters.PageSize,
             GroupBy = groupBy,
+            SortFieldKey = parameters.SortFieldKey,
+            SortDirection = parameters.SortDirection,
         };
 
         MapFilters(definition.Filters, request);
@@ -294,6 +313,7 @@ public sealed class SalesOrderReportConfigurationDatasetProvider : IReportConfig
             {
                 ReportConfigurationRelationRules.BuildCustomerRelation(Grain),
             },
+            SortingExplanation = SortingExplanation,
         };
     }
 
@@ -302,6 +322,7 @@ public sealed class SalesOrderReportConfigurationDatasetProvider : IReportConfig
         CurrencyUnits.TryGetValue(key, out var currencyUnit);
         var aggregatable = string.Equals(dataType, ReportConfigurationConstants.TypeNumber, StringComparison.OrdinalIgnoreCase)
             && !NonAggregatable.Contains(key);
+        var sortability = SortabilityOf(key);
 
         return new ReportConfigurationFieldDto(
             key,
@@ -311,7 +332,11 @@ public sealed class SalesOrderReportConfigurationDatasetProvider : IReportConfig
             filterable,
             aggregatable,
             Hidden: false,
-            ReportConfigurationRules.GetOperatorsForType(dataType));
+            ReportConfigurationRules.GetOperatorsForType(dataType))
+        {
+            Sortable = sortability.Sortable,
+            SortUnavailableReason = sortability.Reason,
+        };
     }
 }
 
@@ -378,6 +403,23 @@ public sealed class ReceivableReportConfigurationDatasetProvider : IReportConfig
         "invoiceId", "customerId", "amountDecimals", "status",
     };
 
+    private static readonly HashSet<string> SortableFields = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "invoiceId", "invoiceDate", "customerId",
+    };
+
+    private const string SortingExplanation =
+        "仅发票 Id / 开票日期 / 客户 Id（原生持久化键）可排序；金额 / 精度 / 派生 / 关系字段不可排序；并列时按发票 Id 升序稳定分页";
+
+    private static (bool Sortable, string? Reason) SortabilityOf(string key)
+    {
+        if (SortableFields.Contains(key))
+            return (true, null);
+        if (CurrencyUnits.ContainsKey(key))
+            return (false, "金额 / 币种字段不可排序（非原生可排序键）");
+        return (false, "仅发票 Id / 开票日期 / 客户 Id 可排序");
+    }
+
     /// <inheritdoc />
     public async Task<ReportConfigurationDatasetDto?> GetDatasetAsync(
         long? userId, CancellationToken cancellationToken = default)
@@ -413,6 +455,8 @@ public sealed class ReceivableReportConfigurationDatasetProvider : IReportConfig
             Page = parameters.Page,
             PageSize = parameters.PageSize,
             GroupBy = groupBy,
+            SortFieldKey = parameters.SortFieldKey,
+            SortDirection = parameters.SortDirection,
         };
 
         MapFilters(definition.Filters, request);
@@ -599,6 +643,7 @@ public sealed class ReceivableReportConfigurationDatasetProvider : IReportConfig
             {
                 ReportConfigurationRelationRules.BuildCustomerRelation(Grain),
             },
+            SortingExplanation = SortingExplanation,
         };
     }
 
@@ -607,6 +652,7 @@ public sealed class ReceivableReportConfigurationDatasetProvider : IReportConfig
         CurrencyUnits.TryGetValue(key, out var currencyUnit);
         var aggregatable = string.Equals(dataType, ReportConfigurationConstants.TypeNumber, StringComparison.OrdinalIgnoreCase)
             && !NonAggregatable.Contains(key);
+        var sortability = SortabilityOf(key);
 
         return new ReportConfigurationFieldDto(
             key,
@@ -616,7 +662,11 @@ public sealed class ReceivableReportConfigurationDatasetProvider : IReportConfig
             filterable,
             aggregatable,
             Hidden: false,
-            ReportConfigurationRules.GetOperatorsForType(dataType));
+            ReportConfigurationRules.GetOperatorsForType(dataType))
+        {
+            Sortable = sortability.Sortable,
+            SortUnavailableReason = sortability.Reason,
+        };
     }
 }
 

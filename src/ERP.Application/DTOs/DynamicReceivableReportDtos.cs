@@ -51,6 +51,12 @@ public sealed class DynamicReceivableReportRequest
 
     /// <summary>每页条数（1 ~ 100，超出直接拒绝）</summary>
     public int PageSize { get; set; } = 20;
+
+    /// <summary>排序字段键（可选；仅 invoiceId / invoiceDate / customerId，非法取值在源读取前拒绝）</summary>
+    public string? SortFieldKey { get; set; }
+
+    /// <summary>排序方向（可选：asc / desc；缺省 asc）</summary>
+    public string? SortDirection { get; set; }
 }
 
 /// <summary>

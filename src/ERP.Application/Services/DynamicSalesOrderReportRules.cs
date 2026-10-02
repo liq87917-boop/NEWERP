@@ -195,6 +195,29 @@ public static class DynamicSalesOrderReportRules
             throw BusinessException.InvalidParameter($"每页条数必须在 1~{MaxPageSize} 之间");
     }
 
+    // ==================== 4.1 排序（ERP-270：有限持久化排序，身份并列决断） ====================
+
+    /// <summary>有限可排序字段键（仅原生持久化键：订单 Id / 订单日期 / 客户 Id）</summary>
+    public static IReadOnlyList<string> SortableFieldKeys { get; } = new[] { "id", "orderDate", "customerId" };
+
+    /// <summary>
+    /// 规范化保存的排序（fail closed）：空 = 默认按订单 Id 升序；仅接受可排序字段与 asc / desc，非法取值显式拒绝。
+    /// </summary>
+    public static (string FieldKey, bool Descending) NormalizeSort(string? fieldKey, string? direction)
+    {
+        if (string.IsNullOrWhiteSpace(fieldKey))
+            return ("id", false);
+
+        var key = fieldKey.Trim();
+        foreach (var candidate in SortableFieldKeys)
+        {
+            if (string.Equals(candidate, key, StringComparison.OrdinalIgnoreCase))
+                return (candidate, string.Equals(direction?.Trim(), "desc", StringComparison.OrdinalIgnoreCase));
+        }
+
+        throw BusinessException.InvalidParameter($"数据集 {ReportConfigurationConstants.DatasetSalesOrder} 不支持的排序字段: {fieldKey}");
+    }
+
     // ==================== 5. 行映射 ====================
 
     /// <summary>读取指定字段的值（未知字段 fail closed）</summary>

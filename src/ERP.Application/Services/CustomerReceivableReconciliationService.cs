@@ -83,7 +83,10 @@ public static class CustomerReceivableReconciliationService
         ForScopedPreviewAsync(
             IErpDbContext db,
             CustomerReceivableReconciliationQuery query,
-            SalespersonDataScope scope)
+            SalespersonDataScope scope,
+            string? sortFieldKey = null,
+            string? sortDirection = null,
+            CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(db);
         ArgumentNullException.ThrowIfNull(query);
@@ -96,24 +99,37 @@ public static class CustomerReceivableReconciliationService
         // 业务员数据范围硬边界：先过滤允许客户，再 Count / Skip / Take（绝不返回范围外客户）
         source = SalespersonDataScopeService.FilterByCustomer(source, scope, i => i.CustomerId);
 
-        var total = await source.CountAsync();
+        var total = await source.CountAsync(cancellationToken);
 
-        var pageIds = await source
-            .OrderBy(i => i.CustomerId)
-            .ThenBy(i => i.Currency)
-            .ThenByDescending(i => i.InvoiceDate)
-            .ThenByDescending(i => i.Id)
-            .Skip((query.Page - 1) * query.PageSize)
+        // 有限类型化源侧排序（先于 Skip/Take）：无排序沿用既有默认口径；有排序附带不可变身份并列决断。
+        IOrderedQueryable<CustomerSalesInvoiceEvidence> ordered;
+        if (string.IsNullOrWhiteSpace(sortFieldKey))
+        {
+            ordered = source
+                .OrderBy(i => i.CustomerId)
+                .ThenBy(i => i.Currency)
+                .ThenByDescending(i => i.InvoiceDate)
+                .ThenByDescending(i => i.Id);
+        }
+        else
+        {
+            var sort = DynamicReceivableReportRules.NormalizeSort(sortFieldKey, sortDirection);
+            ordered = ApplyPreviewSort(source, sort);
+        }
+
+        var offset = CheckedPageOffset(query.Page, query.PageSize);
+        var pageIds = await ordered
+            .Skip(offset)
             .Take(query.PageSize)
             .Select(i => i.Id)
-            .ToListAsync();
+            .ToListAsync(cancellationToken);
 
         var invoices = new List<CustomerSalesInvoiceEvidence>();
         if (pageIds.Count > 0)
         {
             var loaded = await db.CustomerSalesInvoiceEvidences.AsNoTracking()
                 .Where(i => pageIds.Contains(i.Id))
-                .ToListAsync();
+                .ToListAsync(cancellationToken);
             var byId = loaded.ToDictionary(i => i.Id);
             invoices = pageIds.Where(byId.ContainsKey).Select(id => byId[id]).ToList();
         }
@@ -122,6 +138,36 @@ public static class CustomerReceivableReconciliationService
         var rows = invoices.Select(i => MapInvoice(i, context, asOfDate)).ToList();
 
         return (rows, total);
+    }
+
+    /// <summary>有限类型化源侧排序：仅 invoiceId / invoiceDate / customerId，附带不可变身份并列决断（Id 升序）。</summary>
+    private static IOrderedQueryable<CustomerSalesInvoiceEvidence> ApplyPreviewSort(
+        IQueryable<CustomerSalesInvoiceEvidence> source, (string FieldKey, bool Descending) sort)
+    {
+        switch (sort.FieldKey)
+        {
+            case "invoiceDate":
+                return sort.Descending
+                    ? source.OrderByDescending(i => i.InvoiceDate).ThenBy(i => i.Id)
+                    : source.OrderBy(i => i.InvoiceDate).ThenBy(i => i.Id);
+            case "customerId":
+                return sort.Descending
+                    ? source.OrderByDescending(i => i.CustomerId).ThenBy(i => i.Id)
+                    : source.OrderBy(i => i.CustomerId).ThenBy(i => i.Id);
+            default:
+                return sort.Descending
+                    ? source.OrderByDescending(i => i.Id)
+                    : source.OrderBy(i => i.Id);
+        }
+    }
+
+    /// <summary>安全分页偏移（拒绝算术溢出，绝不回绕负数 / 小偏移）。</summary>
+    private static int CheckedPageOffset(int page, int pageSize)
+    {
+        var offset = (long)(page - 1) * pageSize;
+        if (offset > int.MaxValue)
+            throw BusinessException.InvalidParameter("分页偏移超出安全范围");
+        return (int)offset;
     }
 
     /// <summary>

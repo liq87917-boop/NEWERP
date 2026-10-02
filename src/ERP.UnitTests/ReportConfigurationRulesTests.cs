@@ -20,9 +20,12 @@ public class ReportConfigurationRulesTests
         { "custom-formula", "cross-dataset-join", "pivot", "all-match-total" };
 
     private static ReportConfigurationFieldDto Field(
-        string key, string type, bool filterable = false, bool aggregatable = false, bool hidden = false)
+        string key, string type, bool filterable = false, bool aggregatable = false, bool hidden = false, bool sortable = false)
         => new(key, key, type, null, filterable, aggregatable, hidden,
-            ReportConfigurationRules.GetOperatorsForType(type));
+            ReportConfigurationRules.GetOperatorsForType(type))
+        {
+            Sortable = sortable,
+        };
 
     private static ReportConfigurationDatasetDto BuildDataset(
         IReadOnlyList<string>? groupingKeys = null,
@@ -386,6 +389,44 @@ public class ReportConfigurationRulesTests
             SortDirection = "up",
         };
         AssertInvalid(definition);
+    }
+
+    [Fact]
+    public void Validate_排序字段不可排序_拒绝()
+    {
+        var definition = ValidDefinition();
+        definition.Presentation = new ReportConfigurationPresentation
+        {
+            SortFieldKey = "amount",
+            SortDirection = "asc",
+        };
+        AssertInvalid(definition);
+    }
+
+    [Fact]
+    public void Validate_排序字段可排序且方向合法_通过()
+    {
+        var definition = ValidDefinition();
+        definition.Presentation = new ReportConfigurationPresentation
+        {
+            SortFieldKey = "orderDate",
+            SortDirection = "desc",
+        };
+
+        var dataset = BuildDataset(fields: new List<ReportConfigurationFieldDto>
+        {
+            Field("customerName", ReportConfigurationConstants.TypeText, filterable: true),
+            Field("amount", ReportConfigurationConstants.TypeNumber, filterable: true, aggregatable: true),
+            Field("orderDate", ReportConfigurationConstants.TypeDate, filterable: true, sortable: true),
+            Field("status", ReportConfigurationConstants.TypeEnum, filterable: true),
+            Field("isActive", ReportConfigurationConstants.TypeBoolean, filterable: true),
+            Field("aggregatableDate", ReportConfigurationConstants.TypeDate, aggregatable: true),
+            Field("nonFilterable", ReportConfigurationConstants.TypeText, filterable: false),
+            Field("nonAggregatableId", ReportConfigurationConstants.TypeNumber, filterable: false, aggregatable: false),
+            Field("hiddenField", ReportConfigurationConstants.TypeText, hidden: true),
+        });
+
+        ReportConfigurationRules.Validate(definition, dataset);
     }
 
     // ==================== 9. 序列化大小上限（64KiB） ====================

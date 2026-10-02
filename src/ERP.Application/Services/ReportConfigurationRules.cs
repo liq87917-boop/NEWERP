@@ -344,21 +344,41 @@ public static class ReportConfigurationRules
         if (presentation.PageSize is < 1 || presentation.PageSize > dataset.MaxPageSize)
             throw BusinessException.InvalidParameter($"每页条数必须在 1 ~ {dataset.MaxPageSize} 之间");
 
-        if (!string.IsNullOrWhiteSpace(presentation.SortFieldKey))
+        var sortFieldKey = string.IsNullOrWhiteSpace(presentation.SortFieldKey)
+            ? null
+            : presentation.SortFieldKey.Trim();
+        var sortDirection = string.IsNullOrWhiteSpace(presentation.SortDirection)
+            ? null
+            : presentation.SortDirection.Trim();
+
+        // 方向必须伴随字段；字段必须存在、未隐藏、已选择且为有限持久化可排序字段（拒绝前不读源）
+        if (sortFieldKey is null)
         {
-            var selected = (definition.Fields ?? new List<string>())
-                .Where(f => !string.IsNullOrWhiteSpace(f))
-                .Select(f => f.Trim());
-            if (!selected.Contains(presentation.SortFieldKey.Trim(), StringComparer.OrdinalIgnoreCase))
-                throw BusinessException.InvalidParameter($"排序字段 {presentation.SortFieldKey} 必须属于已选字段");
+            if (sortDirection is not null)
+                throw BusinessException.InvalidParameter("排序方向必须伴随排序字段（当前缺少排序字段）");
+            return;
         }
 
-        if (!string.IsNullOrWhiteSpace(presentation.SortDirection))
+        if (sortDirection is not null
+            && !string.Equals(sortDirection, "asc", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(sortDirection, "desc", StringComparison.OrdinalIgnoreCase))
+            throw BusinessException.InvalidParameter($"排序方向仅支持 asc / desc：{presentation.SortDirection}");
+
+        var selected = (definition.Fields ?? new List<string>())
+            .Where(f => !string.IsNullOrWhiteSpace(f))
+            .Select(f => f.Trim());
+        if (!selected.Contains(sortFieldKey, StringComparer.OrdinalIgnoreCase))
+            throw BusinessException.InvalidParameter($"排序字段 {sortFieldKey} 必须属于已选字段");
+
+        if (!TryGetField(dataset, sortFieldKey, out var sortableField) || sortableField.Hidden)
+            throw BusinessException.InvalidParameter($"排序字段 {sortFieldKey} 不存在或已隐藏（数据集 {dataset.DatasetKey}）");
+
+        if (!sortableField.Sortable)
         {
-            var direction = presentation.SortDirection.Trim();
-            if (!string.Equals(direction, "asc", StringComparison.OrdinalIgnoreCase)
-                && !string.Equals(direction, "desc", StringComparison.OrdinalIgnoreCase))
-                throw BusinessException.InvalidParameter($"排序方向仅支持 asc / desc：{presentation.SortDirection}");
+            var reason = string.IsNullOrWhiteSpace(sortableField.SortUnavailableReason)
+                ? "非持久化排序字段"
+                : sortableField.SortUnavailableReason;
+            throw BusinessException.InvalidParameter($"排序字段 {sortFieldKey} 不支持排序：{reason}");
         }
     }
 

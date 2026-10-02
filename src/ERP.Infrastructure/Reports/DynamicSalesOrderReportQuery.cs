@@ -2,6 +2,7 @@ using ERP.Application.Common;
 using ERP.Application.DTOs;
 using ERP.Application.Interfaces;
 using ERP.Application.Services;
+using ERP.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 
 namespace ERP.Infrastructure.Reports;
@@ -38,13 +39,15 @@ public sealed class DynamicSalesOrderReportQuery : IDynamicSalesOrderReportQuery
         // 1) 身份 + 既有销售订单菜单授权（无身份 / 无角色 / 无菜单授权 → fail closed）
         await EnsureAuthorizedAsync(userId, cancellationToken);
 
-        // 2) 字段 / 筛选 / 页大小校验（全部在读取销售订单之前完成）
+        // 2) 字段 / 筛选 / 页大小 / 排序校验（全部在读取销售订单之前完成）
         var fieldKeys = DynamicSalesOrderReportRules.NormalizeFields(request.Fields);
         var status = DynamicSalesOrderReportRules.NormalizeStatus(request.Status);
         var currency = DynamicSalesOrderReportRules.NormalizeCurrency(request.Currency);
         DynamicSalesOrderReportRules.ValidateDateRange(request.StartDate, request.EndDate);
         DynamicSalesOrderReportRules.ValidatePageSize(request.PageSize);
         if (request.Page < 1) request.Page = 1;
+        var sort = DynamicSalesOrderReportRules.NormalizeSort(request.SortFieldKey, request.SortDirection);
+        var offset = CheckedPageOffset(request.Page, request.PageSize);
 
         // 3) 解析当前账号业务员数据范围（特权账号不过滤）
         var scope = await SalespersonDataScopeService.ResolveAsync(_db, userId);
@@ -59,11 +62,10 @@ public sealed class DynamicSalesOrderReportQuery : IDynamicSalesOrderReportQuery
         if (status.HasValue) source = source.Where(o => o.Status == status.Value);
         if (currency.HasValue) source = source.Where(o => o.Currency == currency.Value);
 
-        // 5) 稳定分页（按 Id 升序）与只读行映射
+        // 5) 有限类型化源侧排序（先于 Skip/Take）+ 不可变身份并列决断 + 稳定分页
         var total = await source.CountAsync(cancellationToken);
-        var pageOrders = await source
-            .OrderBy(o => o.Id)
-            .Skip((request.Page - 1) * request.PageSize)
+        var pageOrders = await ApplySort(source, sort)
+            .Skip(offset)
             .Take(request.PageSize)
             .ToListAsync(cancellationToken);
 
@@ -80,6 +82,35 @@ public sealed class DynamicSalesOrderReportQuery : IDynamicSalesOrderReportQuery
             DynamicSalesOrderReportRules.ReadOnlyText,
             DynamicSalesOrderReportRules.BoundaryText,
             DynamicSalesOrderReportRules.DisclaimerText);
+    }
+
+    /// <summary>有限类型化源侧排序：仅 id / orderDate / customerId，附带不可变身份并列决断（Id 升序）。</summary>
+    private static IQueryable<SalesOrder> ApplySort(IQueryable<SalesOrder> source, (string FieldKey, bool Descending) sort)
+    {
+        switch (sort.FieldKey)
+        {
+            case "orderDate":
+                return sort.Descending
+                    ? source.OrderByDescending(o => o.OrderDate).ThenBy(o => o.Id)
+                    : source.OrderBy(o => o.OrderDate).ThenBy(o => o.Id);
+            case "customerId":
+                return sort.Descending
+                    ? source.OrderByDescending(o => o.CustomerId).ThenBy(o => o.Id)
+                    : source.OrderBy(o => o.CustomerId).ThenBy(o => o.Id);
+            default:
+                return sort.Descending
+                    ? source.OrderByDescending(o => o.Id)
+                    : source.OrderBy(o => o.Id);
+        }
+    }
+
+    /// <summary>安全分页偏移（拒绝算术溢出，绝不回绕负数 / 小偏移）。</summary>
+    private static int CheckedPageOffset(int page, int pageSize)
+    {
+        var offset = (long)(page - 1) * pageSize;
+        if (offset > int.MaxValue)
+            throw BusinessException.InvalidParameter("分页偏移超出安全范围");
+        return (int)offset;
     }
 
     /// <summary>身份 + 既有「角色 → 菜单」销售订单模块授权（fail closed，绝不猜测身份）</summary>

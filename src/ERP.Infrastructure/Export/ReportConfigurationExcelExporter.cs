@@ -376,6 +376,8 @@ public sealed class ReportConfigurationExcelExporter
             string.IsNullOrWhiteSpace(preview.NormalizedFiltersText) ? "无筛选" : preview.NormalizedFiltersText, styles);
         AddLabel(sheet, ref nextRow, "日期范围",
             string.IsNullOrWhiteSpace(preview.DateRangeText) ? "无日期筛选" : preview.DateRangeText, styles);
+        AddLabel(sheet, ref nextRow, "排序",
+            string.IsNullOrWhiteSpace(preview.SortEvidence) ? "默认排序（稳定分页）" : preview.SortEvidence, styles);
         AddLabel(sheet, ref nextRow, "页面覆盖",
             $"第 {preview.Page} 页 · 每页 {preview.PageSize} 条 · 命中 {preview.Total} 条 · 共 {preview.TotalPages} 页 · 当前预览页（非全量合计）",
             styles);
