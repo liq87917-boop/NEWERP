@@ -1,7 +1,7 @@
 {
   "id": "ERP-213",
   "title": "Design and download scoped product shipment quantities as Excel",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "medium",
   "priority": "P1",
   "description": "A user opens a visual field selector from the existing product sales ranking and previews/downloads a bounded Top result. Define a finite quantity-evidence catalog (rank, product ID/code/name, spec, unit and shipment quantity) with ordered selected keys, dates and Top; exclude the legacy current-price money estimate from this designer. Validate unknown/duplicate/empty keys and date/Top before reads. New catalog/preview/Excel endpoints independently require current identity, product-sales-ranking menu and fresh salesperson customer scope and reuse the prerequisite application method; no parallel raw/unscoped source query. The preview and Excel must clearly label Top-limited results, approved shipment evidence, date context and incompatible units; never claim completeness beyond Top or combine quantities across units. Designer retains dates, Top and selected order between preview and Excel and shows loading/denied/validation/empty/network errors using safe text. Reuse ExcelExporter for typed numeric quantities/rank and formula-safe labels; no new dependency or DI registration is required for the controller. Development only: reuse existing ERP report services, the product-sales-ranking menu and current-user SalespersonDataScopeService; existing OperationLogMiddleware records HTTP audit. No arbitrary/model-generated SQL, permission expansion, direct table/business writes, new domain entities or persistence schema, schema/view/stored-procedure edits, migrations, production SQL or real database execution, secrets/.env/config changes, irreversible actions, production deployment or real browser acceptance. Keep unrelated work. Run focused in-memory API/service/export/UI source-contract tests and configured safe Release build/test; unavailable external environments must be marked blocked, never fabricated passed.",
@@ -46,7 +46,7 @@
     "ERP-212"
   ],
   "max_attempts": 3,
-  "attempts": 0,
+  "attempts": 1,
   "validation_profile": "safe",
   "completion_mode": "build",
   "auto_start": true,

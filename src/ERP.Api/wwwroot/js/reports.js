@@ -1,7 +1,7 @@
 /* ============ 报表模块（义乌小商品外贸行业化）============ */
 const REPORTS = {
   /* === 通用财务报表 === */
-  'product-sales-ranking': { api: '/api/reports/product-sales-ranking', title: '爆款 SKU 销售排行',
+  'product-sales-ranking': { api: '/api/reports/product-sales-ranking', title: '爆款 SKU 销售排行', designer: 'product-sales-ranking',
     emoji: '🔥', kpi: 'cargo',
     summary: 'TOP SKU · 已审核销售出库 · 当前授权客户 · 单位独立不合并 · 金额为当前价估算(币种未知，非实际发货收入)',
     columns: [
@@ -182,9 +182,11 @@ async function renderReport(rep, name) {
       <div class="toolbar-actions">
         ${rep.designer === 'quotation'
           ? `<button class="btn btn-neutral" onclick="openQuotationConversionDesigner()" title="打开报价成交率字段设计器（只读预览，按业务员 × 原币分桶）">🎛 字段设计器</button>`
-          : rep.designer
-            ? `<button class="btn btn-neutral" onclick="openFollowUpDueDesigner()" title="打开动态跟进提醒字段设计器（只读预览）">🎛 字段设计器</button>`
-            : ''}
+          : rep.designer === 'product-sales-ranking'
+            ? `<button class="btn btn-neutral" onclick="openProductSalesRankingDesigner()" title="打开商品销量排名字段设计器（只读预览，发货数量证据，金额估算已排除）">🎛 字段设计器</button>`
+            : rep.designer
+              ? `<button class="btn btn-neutral" onclick="openFollowUpDueDesigner()" title="打开动态跟进提醒字段设计器（只读预览）">🎛 字段设计器</button>`
+              : ''}
         <button class="btn btn-neutral" onclick="exportReportCSV()" title="导出为 CSV">📤 导出 CSV</button>
         <button class="btn btn-neutral" onclick="window.print()" title="打印报表">🖨 打印</button>
       </div>
@@ -192,7 +194,9 @@ async function renderReport(rep, name) {
 
     ${rep.designer === 'quotation'
       ? `<div id="qcd-designer"></div>`
-      : rep.designer ? `<div id="fud-designer"></div>` : ''}
+      : rep.designer === 'product-sales-ranking'
+        ? `<div id="psr-designer"></div>`
+        : rep.designer ? `<div id="fud-designer"></div>` : ''}
 
     <div class="table-wrap" id="report-table">
       <div class="skeleton-row"></div><div class="skeleton-row"></div><div class="skeleton-row"></div>
@@ -1519,6 +1523,359 @@ function openQuotationConversionDesigner() {
     </div>
     <div id="qcd-designer-result"></div>`;
   loadQuotationConversionDesignerCatalog();
+}
+
+/* ============ 动态商品销量排名字段设计器（ERP-213：只读、有界的前端字段选择与 Top 预览 / Excel 导出） ============
+   口径与后端 ERP-213（DynamicProductSalesRankingReportController / DynamicProductSalesRankingReportRules）一一对应：
+   - 入口复用在「商品销量排名榜」报表（reports.js 的 product-sales-ranking，designer: 'product-sales-ranking'），不新增菜单 / 架构 / 脚本注册；
+   - 字段选择器只由 GET /api/dynamic-product-sales-ranking-report 返回的有限白名单目录渲染为复选框（name="psr-des-field"），
+     绝无自由填写的字段名或 SQL；勾选状态经 psrSelectFields 规范化（去重、保持顺序、丢弃未知键）；
+   - 筛选仅限开始 / 结束日期（含首尾最多 366 天）与 Top（1~200），预览走 POST /api/dynamic-product-sales-ranking-report，
+     只发送「白名单字段 + 有界日期 + 有界 Top」；金额估算已排除、单位不兼容不跨单位合计；
+   - 结果按后端返回的列名与选定字段值渲染（psrTableHtml / psrResultHtml），全部 HTML 转义；
+   - 空结果 / 授权撤销（权限不足 / 未登录）/ 无效请求 / 网络失败分别可见，且不暴露范围外数据；
+   - 导出复用预览请求体 POST /api/dynamic-product-sales-ranking-report/export，成功（xlsx 附件）触发下载；
+   - 全程只读：不写库、不迁移、不执行任意 SQL。 */
+
+/* 字段设计器状态（纯数据；DOM 访问只在事件处理函数内部发生） */
+let PSR_DYN = {
+  catalog: null,      // GET /api/dynamic-product-sales-ranking-report 返回的目录 DTO
+  fields: [],         // 目录字段（白名单）
+  selectedKeys: [],   // 当前勾选的字段键（默认全选）
+  view: null,         // 最近一次预览结果
+};
+
+function psrEsc(v) {
+  return String(v ?? '').replace(/[&<>"']/g, c => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[c]));
+}
+
+/* 规范化选定字段（fail closed）：只保留目录白名单内的键、去重、保持请求顺序；未知键丢弃，绝不发送任意字段名 */
+function psrSelectFields(catalogFields, selectedKeys) {
+  const valid = new Set((catalogFields || []).map(f => f && f.key).filter(Boolean));
+  const seen = new Set();
+  const result = [];
+  for (const k of (Array.isArray(selectedKeys) ? selectedKeys : [])) {
+    if (typeof k !== 'string') continue;
+    const key = k.trim();
+    if (!key || !valid.has(key) || seen.has(key)) continue;
+    seen.add(key);
+    result.push(key);
+  }
+  return result;
+}
+
+/* 日期窗口客户端校验（与后端 ValidateDateRange 一致）：必填、结束不早于开始、含首尾最多 366 天 */
+function psrDateError(state) {
+  const start = String(state && state.start || '').trim();
+  const end = String(state && state.end || '').trim();
+  if (!start || !end) return '请填写开始与结束日期';
+  const startMs = Date.parse(start);
+  const endMs = Date.parse(end);
+  if (Number.isNaN(startMs) || Number.isNaN(endMs)) return '日期格式无效';
+  if (endMs < startMs) return '结束日期不能早于开始日期';
+  const days = Math.floor((endMs - startMs) / 86400000) + 1;
+  if (days > 366) return '日期范围最多 366 天（含首尾）';
+  return '';
+}
+
+/* Top 客户端校验（与后端 ValidateTop 一致）：1 ~ 200，超出直接拒绝 */
+function psrTopError(state) {
+  const s = String(state && state.top || '').trim();
+  if (s === '') return '';
+  const n = Number(s);
+  if (!Number.isInteger(n)) return 'Top 必须是整数';
+  const maxTop = Number(state && state.maxTop) || 200;
+  if (n < 1 || n > maxTop) return 'Top 必须在 1 到 ' + maxTop + ' 之间';
+  return '';
+}
+
+/* 日期 / Top 客户端校验错误文案（空串 = 通过） */
+function psrFilterError(state) {
+  const dateError = psrDateError(state);
+  if (dateError) return dateError;
+  return psrTopError(state);
+}
+
+/* 读取当前字段 / 日期 / Top 状态（预览与导出复用，单一来源） */
+function psrBuildState() {
+  const val = id => { const el = document.getElementById(id); return el ? el.value.trim() : ''; };
+  return {
+    catalogFields: PSR_DYN.fields,
+    selectedKeys: PSR_DYN.selectedKeys,
+    start: val('psr-des-start'),
+    end: val('psr-des-end'),
+    top: val('psr-des-top'),
+    maxTop: PSR_DYN.catalog && PSR_DYN.catalog.maxTop ? PSR_DYN.catalog.maxTop : 200,
+  };
+}
+
+/* 组装有界预览请求体：字段只来自目录、日期有界、Top 有界（1~200），绝不接受任意字段名或 SQL */
+function psrBuildRequest(state) {
+  const fields = psrSelectFields(state.catalogFields, state.selectedKeys);
+  let top = Math.floor(Number(state.top));
+  if (!Number.isFinite(top)) top = 10;
+  const maxTop = Number(state.maxTop) || 200;
+  top = Math.max(1, Math.min(maxTop, top));
+  return {
+    fields,
+    start: String(state.start).slice(0, 10),
+    end: String(state.end).slice(0, 10),
+    top,
+  };
+}
+
+/* 单元格纯文本：数字合理格式化（整数 / 2 位小数）、其余按字符串呈现（null 显示为空） */
+function psrCellText(value, field) {
+  const dataType = (field && field.dataType) || 'text';
+  if (value === null || value === undefined) return '';
+  if (dataType === 'number') {
+    const n = Number(value);
+    if (Number.isFinite(n)) return Number.isInteger(n) ? String(n) : n.toFixed(2);
+    return String(value);
+  }
+  return String(value);
+}
+
+/* 单元格 HTML（转义后安全渲染） */
+function psrRenderCell(value, field) {
+  return psrEsc(psrCellText(value, field));
+}
+
+/* 结果表格 HTML：表头为返回的列名、单元格为返回的选定字段值，全部经转义 */
+function psrTableHtml(view) {
+  const cols = (view && view.columns) || [];
+  const rows = (view && view.rows) || [];
+  if (!cols.length) return '';
+  const align = c => (c.dataType === 'number') ? ' class="text-right"' : '';
+  const head = cols.map(c => `<th${align(c)}>${psrEsc(c.label || c.key)}</th>`).join('');
+  const body = rows.length
+    ? rows.map(r => `<tr>${cols.map(c => `<td${align(c)}>${psrRenderCell(r[c.key], c)}</td>`).join('')}</tr>`).join('')
+    : '';
+  return `<div class="table-wrap" style="margin-top:8px"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
+}
+
+/* 空结果提示（显式使用后端 emptyText） */
+function psrEmptyHtml(view) {
+  return `<div class="empty" style="margin:8px 0">${psrEsc((view && view.emptyText) || '没有符合日期范围与数据范围的已审核发货证据')}</div>`;
+}
+
+/* 错误提示（授权撤销 / 未登录 / 无效请求 / 网络失败分别可见，且不暴露任何数据） */
+function psrErrorHtml(kind, message) {
+  const labels = {
+    forbidden: '权限不足',
+    unauthorized: '未登录 / 登录已过期',
+    invalid: '请求无效',
+    empty: '导出内容为空',
+    network: '网络请求失败',
+    error: '预览失败',
+  };
+  return `<div class="pd-hint" style="color:#b91c1c;background:#fef2f2;border-color:#fecaca">
+      <b>${psrEsc(labels[kind] || '预览失败')}</b>：${psrEsc(message || '')}</div>`;
+}
+
+/* 业务码 → 错误态分类 */
+function psrKindOfCode(code) {
+  if (code === 2002) return 'forbidden';
+  if (code === 2000 || code === 2003) return 'unauthorized';
+  if (code === 5000) return 'error';
+  return 'invalid';
+}
+
+function psrLoadingHtml() {
+  return '<div class="pd-hint" style="text-align:center;color:#64748b">正在预览（只读查询）…</div>';
+}
+
+function psrRenderResult(html) {
+  const el = document.getElementById('psr-designer-result');
+  if (el) el.innerHTML = html;
+}
+
+/* 轻量请求封装：返回完整 ApiResponse 信封（保留 code），网络异常抛给调用方 */
+async function psrRequest(path, method = 'GET', body = null) {
+  const headers = { 'Content-Type': 'application/json' };
+  const token = typeof localStorage !== 'undefined' ? (localStorage.getItem('erp_token') || '') : '';
+  if (token) headers['Authorization'] = 'Bearer ' + token;
+  const opts = { method, headers };
+  if (body) opts.body = JSON.stringify(body);
+  const resp = await fetch(path, opts);
+  return await resp.json();
+}
+
+/* 字段选择器：仅由目录白名单渲染为复选框，无自由填写的字段名 */
+function psrFieldChooserHtml(fields, selectedKeys) {
+  const selected = new Set(selectedKeys || []);
+  return (fields || []).map(f => {
+    const checked = selected.has(f.key) ? 'checked' : '';
+    return `<label style="display:inline-flex;align-items:center;gap:4px;margin:3px 6px 3px 0;padding:2px 8px;border:1px solid #e2e8f0;border-radius:6px;background:#f8fafc;cursor:pointer">
+        <input type="checkbox" name="psr-des-field" value="${psrEsc(f.key)}" ${checked} onchange="psrSyncSelection()">
+        <span>${psrEsc(f.label || f.key)}</span></label>`;
+  }).join('');
+}
+
+/* 预览结果（只读 / 边界 / 免责 / Top 限定 / 发货证据 / 单位口径 / 空结果 + 表格） */
+function psrResultHtml(view) {
+  const readOnly = view && view.readOnlyText ? `<div class="pd-hint">${psrEsc(view.readOnlyText)}</div>` : '';
+  const boundary = view && view.boundaryText ? `<div class="pd-hint">${psrEsc(view.boundaryText)}</div>` : '';
+  const disclaimer = view && view.disclaimerText ? `<div class="pd-hint" style="color:#64748b">${psrEsc(view.disclaimerText)}</div>` : '';
+  const topLine = view
+    ? `<div class="text-muted" style="margin:6px 0">Top ${psrEsc(view.top)} 限定 · 返回 ${psrEsc(view.total)} 行${view.topLimited ? ' · 可能存在 Top 之外更多排名（不声称完整）' : ' · 已覆盖全部匹配排名'} · 期间 ${psrEsc(String(view.start || '').slice(0, 10))} 至 ${psrEsc(String(view.end || '').slice(0, 10))}</div>`
+    : '';
+  const approved = view && view.approvedShipmentText ? `<div class="pd-hint">✅ ${psrEsc(view.approvedShipmentText)}</div>` : '';
+  const unit = view && view.unitContextText ? `<div class="pd-hint" style="color:#b45309;background:#fffbeb;border-color:#fde68a">⚠️ ${psrEsc(view.unitContextText)}</div>` : '';
+  const empty = view && (!view.rows || view.rows.length === 0) ? psrEmptyHtml(view) : '';
+  return `${readOnly}${boundary}${disclaimer}${topLine}${approved}${unit}${empty}${psrTableHtml(view)}`;
+}
+
+/* 同步勾选状态到 selectedKeys（复选框 onchange） */
+function psrSyncSelection() {
+  const boxes = document.querySelectorAll('input[name="psr-des-field"]');
+  PSR_DYN.selectedKeys = Array.from(boxes).filter(b => b.checked).map(b => b.value);
+}
+
+function psrToggleAll(checked) {
+  const boxes = document.querySelectorAll('input[name="psr-des-field"]');
+  PSR_DYN.selectedKeys = [];
+  boxes.forEach(b => { b.checked = checked; if (checked) PSR_DYN.selectedKeys.push(b.value); });
+}
+
+/* 预览：组装有界请求 → POST → 安全渲染列名与单元格；授权 / 无效 / 空 / 网络失败均可见 */
+async function psrPreview() {
+  const state = psrBuildState();
+  const filterError = psrFilterError(state);
+  if (filterError) {
+    psrRenderResult(psrErrorHtml('invalid', filterError));
+    return;
+  }
+  const req = psrBuildRequest(state);
+  psrRenderResult(psrLoadingHtml());
+
+  try {
+    const resp = await psrRequest('/api/dynamic-product-sales-ranking-report', 'POST', req);
+    if (resp.code === 0) {
+      PSR_DYN.view = resp.data;
+      psrRenderResult(psrResultHtml(resp.data));
+    } else if (resp.code === 2000 || resp.code === 2003) {
+      if (typeof logout === 'function') logout();
+      psrRenderResult(psrErrorHtml('unauthorized', resp.message));
+    } else {
+      psrRenderResult(psrErrorHtml(psrKindOfCode(resp.code), resp.message));
+    }
+  } catch (err) {
+    psrRenderResult(psrErrorHtml('network', (err && err.message) || '无法连接到服务器'));
+  }
+}
+
+/* 导出选定 Top 结果为 Excel（ERP-213，只读）：复用预览请求体 POST /api/dynamic-product-sales-ranking-report/export；
+   成功（xlsx 附件）触发下载；授权 / 无效 / 空结果 / 网络失败在结果区可见，不下载任何内容 */
+async function psrExport() {
+  if (!PSR_DYN.view || !PSR_DYN.view.columns || !PSR_DYN.view.columns.length) {
+    psrRenderResult(psrErrorHtml('invalid', '请先预览后再导出 Excel'));
+    return;
+  }
+  if (!PSR_DYN.view.rows || PSR_DYN.view.rows.length === 0) {
+    psrRenderResult(psrErrorHtml('empty', '没有符合日期范围与数据范围的已审核发货证据，无法导出（请先预览）'));
+    return;
+  }
+
+  const state = psrBuildState();
+  const filterError = psrFilterError(state);
+  if (filterError) {
+    psrRenderResult(psrErrorHtml('invalid', filterError));
+    return;
+  }
+  const req = psrBuildRequest(state);
+  psrRenderResult(psrLoadingHtml());
+
+  try {
+    const headers = { 'Content-Type': 'application/json' };
+    const token = typeof localStorage !== 'undefined' ? (localStorage.getItem('erp_token') || '') : '';
+    if (token) headers['Authorization'] = 'Bearer ' + token;
+    const resp = await fetch('/api/dynamic-product-sales-ranking-report/export', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(req),
+    });
+
+    const contentType = (resp.headers.get('content-type') || '');
+    if (contentType.indexOf('spreadsheetml') >= 0) {
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+      a.href = url;
+      a.download = '商品销量排名_' + dateStr + '.xlsx';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      psrRenderResult('<div class="pd-hint">已导出 Top 结果为 Excel（xlsx），请查看下载。</div>');
+      return;
+    }
+
+    let envelope = null;
+    try { envelope = await resp.json(); } catch (e) { /* 忽略解析失败 */ }
+    const code = envelope && envelope.code;
+    const message = (envelope && envelope.message) || '导出失败';
+    if (code === 2000 || code === 2003) {
+      if (typeof logout === 'function') logout();
+      psrRenderResult(psrErrorHtml('unauthorized', message));
+      return;
+    }
+    psrRenderResult(psrErrorHtml(psrKindOfCode(code), message));
+  } catch (err) {
+    psrRenderResult(psrErrorHtml('network', (err && err.message) || '无法连接到服务器'));
+  }
+}
+
+/* 加载字段目录（需登录 + 商品销量排名榜菜单授权；授权 / 网络失败 fail closed，不渲染任何字段） */
+async function loadProductSalesRankingDesignerCatalog() {
+  try {
+    const resp = await psrRequest('/api/dynamic-product-sales-ranking-report');
+    if (resp.code === 2000 || resp.code === 2003) {
+      if (typeof logout === 'function') logout();
+      psrRenderResult(psrErrorHtml('unauthorized', resp.message));
+      return;
+    }
+    if (resp.code !== 0) {
+      psrRenderResult(psrErrorHtml(psrKindOfCode(resp.code), resp.message));
+      return;
+    }
+    PSR_DYN.catalog = resp.data;
+    PSR_DYN.fields = (resp.data && resp.data.fields) || [];
+    PSR_DYN.selectedKeys = PSR_DYN.fields.map(f => f.key);
+    const el = document.getElementById('psr-designer-fields');
+    if (el) el.innerHTML = psrFieldChooserHtml(PSR_DYN.fields, PSR_DYN.selectedKeys);
+  } catch (err) {
+    psrRenderResult(psrErrorHtml('network', (err && err.message) || '无法连接到服务器'));
+  }
+}
+
+/* 打开动态商品销量排名字段设计器（从「商品销量排名榜」报表工具栏进入） */
+function openProductSalesRankingDesigner() {
+  const el = document.getElementById('psr-designer');
+  if (!el) return;
+  const defStart = new Date(Date.now() - 365 * 86400000).toISOString().slice(0, 10);
+  const defEnd = new Date().toISOString().slice(0, 10);
+  el.innerHTML = `
+    <div class="pd-hint">🎛 字段设计器（只读预览）：勾选可见列 → 选择开始 / 结束日期与 Top → 预览授权有界发货数量证据；金额估算已排除，单位不兼容不跨单位合计；全程只读，不执行任意 SQL。</div>
+    <div class="toolbar" style="margin-top:0">
+      <div class="toolbar-left" style="flex-wrap:wrap;gap:6px;align-items:center;font-size:13px">
+        <label>开始日期 <input type="date" id="psr-des-start" value="${defStart}"></label>
+        <label>结束日期 <input type="date" id="psr-des-end" value="${defEnd}"></label>
+        <label>Top <input type="number" id="psr-des-top" value="10" min="1" max="200" style="width:80px"></label>
+        <span id="psr-designer-fields">正在加载字段目录…</span>
+      </div>
+      <div class="toolbar-actions">
+        <button class="btn btn-neutral btn-sm" onclick="psrToggleAll(true)">全选</button>
+        <button class="btn btn-neutral btn-sm" onclick="psrToggleAll(false)">清空</button>
+        <button class="btn btn-neutral" onclick="psrExport()" title="导出 Top 结果为 Excel（选定列，复用当前日期与 Top）">📥 导出 Excel（Top 结果）</button>
+        <button class="btn btn-primary" onclick="psrPreview()">预览</button>
+      </div>
+    </div>
+    <div id="psr-designer-result"></div>`;
+  loadProductSalesRankingDesignerCatalog();
 }
 
 
