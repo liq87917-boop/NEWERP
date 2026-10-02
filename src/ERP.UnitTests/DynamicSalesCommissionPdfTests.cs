@@ -452,6 +452,29 @@ public class DynamicSalesCommissionPdfTests
         // 汇总绝不为当前页下载追加额外页（保留既有当前页 PDF 语义）
         Assert.Equal(withoutPdf.Pages.Count, withPdf.Pages.Count);
     }
+
+    [Fact]
+    public async Task ExportPdf_姓名关键字_上下文保留关键字并正常渲染_即使业务员列隐藏()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedAuthorizedUser(db, "sc-pdf-kw", "Priv", isSystemRole: true);
+        var customer = SeedCustomer(db, "C001", "客户");
+        var emp1 = SeedEmployee(db, "S001", "张三丰");
+        var emp2 = SeedEmployee(db, "S002", "李四");
+        SeedOrder(db, "SO-1", customer.Id, emp1.Id, Currency.USD, 100m);
+        SeedOrder(db, "SO-2", customer.Id, emp2.Id, Currency.CNY, 200m);
+
+        var ctl = NewController(db);
+        TestAuth.SetUser(ctl, user.Id);
+
+        // 只选币种列（隐藏业务员列），规范化关键字上下文仍进入 PDF 头注释并正常渲染
+        var file = PdfOk(await ctl.ExportPdf(Request(
+            fields: new List<string> { "currency" },
+            filter: new SalesCommissionFilterDto { SalesmanName = "  张三  " })));
+
+        using var pdf = OpenPdf(file.FileContents);
+        Assert.True(pdf.Pages.Count >= 1);
+    }
 }
 
 

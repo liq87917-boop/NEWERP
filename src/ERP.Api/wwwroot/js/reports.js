@@ -4299,7 +4299,7 @@ function scdDateError(state) {
   return '';
 }
 
-/* 客户 Id / 业务员 Id / 原币币种客户端校验（与后端 NormalizeFilter 一致）：非法取值在发送前可见拒绝 */
+/* 客户 Id / 业务员 Id / 业务员姓名关键字 / 原币币种客户端校验（与后端 NormalizeFilter 一致）：非法取值在发送前可见拒绝 */
 function scdFilterError(state) {
   const customerId = String(state && state.customerId || '').trim();
   if (customerId !== '') {
@@ -4311,6 +4311,11 @@ function scdFilterError(state) {
     const s = Number(salesmanId);
     if (!Number.isInteger(s) || s <= 0) return '业务员 Id 必须是正整数（大于 0）';
   }
+  const salesmanName = String(state && state.salesmanName || '').trim();
+  if (salesmanName !== '') {
+    if (salesmanName.length > 80) return '业务员姓名关键字最多 80 个字符';
+    if (/[\u0000-\u001f\u007f]/.test(salesmanName)) return '业务员姓名关键字不能包含控制字符';
+  }
   const currency = String(state && state.currency || '').trim();
   if (currency !== '') {
     if (!/^(CNY|USD|EUR|HKD|GBP|JPY)$/i.test(currency)) return '原币币种仅支持 CNY / USD / EUR / HKD / GBP / JPY';
@@ -4318,16 +4323,18 @@ function scdFilterError(state) {
   return '';
 }
 
-/* 组装可选应用筛选（只发送规范化后的客户 Id / 业务员 Id / 原币币种；全部留空 = null，保持既有业务员提成行为） */
+/* 组装可选应用筛选（只发送规范化后的客户 Id / 业务员 Id / 业务员姓名关键字 / 原币币种；全部留空 = null，保持既有业务员提成行为） */
 function scdBuildFilter(state) {
   const customerId = String(state && state.customerId || '').trim();
   const salesmanId = String(state && state.salesmanId || '').trim();
+  const salesmanName = String(state && state.salesmanName || '').trim();
   const currency = String(state && state.currency || '').trim();
   const filter = {};
   if (customerId !== '') filter.customerId = Number(customerId);
   if (salesmanId !== '') filter.salesmanId = Number(salesmanId);
+  if (salesmanName !== '') filter.salesmanName = salesmanName;
   if (currency !== '') filter.currency = currency.toUpperCase();
-  return (filter.customerId === undefined && filter.salesmanId === undefined && filter.currency === undefined) ? null : filter;
+  return (filter.customerId === undefined && filter.salesmanId === undefined && filter.salesmanName === undefined && filter.currency === undefined) ? null : filter;
 }
 
 /* 组装有界预览请求体：字段只来自目录、日期仅开始 / 结束、分页有界，绝不接受任意字段名或 SQL */
@@ -4555,6 +4562,7 @@ function scdBuildState(page) {
     end: val('scd-des-end'),
     customerId: val('scd-des-customer-id'),
     salesmanId: val('scd-des-salesman-id'),
+    salesmanName: val('scd-des-salesman-name'),
     currency: val('scd-des-currency'),
     pageSize: val('scd-des-pagesize'),
     page: page || SCD_DYN.page || 1,
@@ -4906,6 +4914,7 @@ function openSalesCommissionDesigner() {
           <label>结束日期 <input type="date" id="scd-des-end" value="${scdEsc(new Date().toISOString().slice(0, 10))}" onchange="scdResetPage()"></label>
           <label>客户 Id <input type="number" id="scd-des-customer-id" min="1" style="width:90px" placeholder="全部客户" onchange="scdResetPage()"></label>
           <label>业务员 Id <input type="number" id="scd-des-salesman-id" min="1" style="width:90px" placeholder="全部业务员" onchange="scdResetPage()"></label>
+          <label>业务员姓名 <input type="text" id="scd-des-salesman-name" maxlength="80" style="width:140px" placeholder="业务员姓名关键字" onchange="scdResetPage()"></label>
           <label>原币 <select id="scd-des-currency" onchange="scdResetPage()">
             <option value="">全部币种</option>
             <option value="CNY">CNY 人民币</option>

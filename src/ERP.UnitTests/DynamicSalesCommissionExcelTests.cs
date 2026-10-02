@@ -545,6 +545,40 @@ public class DynamicSalesCommissionExcelTests
             }
         }
     }
+
+    [Fact]
+    public async Task Export_姓名关键字_上下文表保留关键字_即使业务员列隐藏()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedAuthorizedUser(db, "priv", "Priv", isSystemRole: true);
+        var customer = SeedCustomer(db, "C001", "客户");
+        var emp1 = SeedEmployee(db, "S001", "张三丰");
+        var emp2 = SeedEmployee(db, "S002", "李四");
+        SeedOrder(db, "SO-1", customer.Id, emp1.Id, Currency.USD, 100m);
+        SeedOrder(db, "SO-2", customer.Id, emp2.Id, Currency.CNY, 200m);
+
+        var ctl = BuildController(db, user.Id);
+        TestAuth.SetUser(ctl, user.Id);
+
+        // 只选币种列（隐藏业务员列），规范化关键字上下文仍保留在「报表口径」工作表
+        var file = ExportOk(await ctl.Export(Request(
+            fields: new List<string> { "currency" },
+            filter: new SalesCommissionFilterDto { SalesmanName = "  张三  " })));
+
+        var workbook = OpenWorkbook(file.FileContents);
+        var sheet = workbook.GetSheet(DynamicSalesCommissionReportRules.ContextSheetName);
+        string? filterValue = null;
+        for (var r = 0; r <= sheet.LastRowNum; r++)
+        {
+            var row = sheet.GetRow(r);
+            if (row?.GetCell(0)?.StringCellValue == DynamicSalesCommissionReportRules.ContextFilterLabel)
+            {
+                filterValue = row.GetCell(1)?.StringCellValue;
+                break;
+            }
+        }
+        Assert.Equal("业务员姓名关键字 张三", filterValue);
+    }
 }
 
 

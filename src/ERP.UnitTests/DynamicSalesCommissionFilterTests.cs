@@ -101,4 +101,45 @@ public class DynamicSalesCommissionFilterTests
 
         Assert.Equal("客户 Id 11；业务员 Id 22；原币币种 USD", text);
     }
+
+    [Fact]
+    public void NormalizeSalesmanNameKeyword_留空去空白超长控制字符()
+    {
+        Assert.Null(DynamicSalesCommissionReportRules.NormalizeSalesmanNameKeyword(null));
+        Assert.Null(DynamicSalesCommissionReportRules.NormalizeSalesmanNameKeyword(""));
+        Assert.Null(DynamicSalesCommissionReportRules.NormalizeSalesmanNameKeyword("   "));
+        Assert.Equal("张三", DynamicSalesCommissionReportRules.NormalizeSalesmanNameKeyword("  张三  "));
+
+        var over = new string('张', DynamicSalesCommissionReportRules.MaxFilterKeywordLength + 1);
+        var ex = Assert.Throws<BusinessException>(() =>
+            DynamicSalesCommissionReportRules.NormalizeSalesmanNameKeyword(over));
+        Assert.Equal(ErrorCodes.InvalidParameter, ex.Code);
+
+        Assert.Throws<BusinessException>(() =>
+            DynamicSalesCommissionReportRules.NormalizeSalesmanNameKeyword("张\u0001三"));
+    }
+
+    [Fact]
+    public void NormalizeFilter_姓名关键字_去空白并保留字面百分号下划线()
+    {
+        var result = DynamicSalesCommissionReportRules.NormalizeFilter(new SalesCommissionFilterDto
+        {
+            SalesmanName = "  100%_  ",
+        });
+        Assert.NotNull(result);
+        Assert.Equal("100%_", result!.SalesmanName);
+    }
+
+    [Fact]
+    public void BuildFilterContext_含姓名关键字()
+    {
+        var text = DynamicSalesCommissionReportRules.BuildFilterContext(new SalesCommissionFilterDto
+        {
+            CustomerId = 11,
+            SalesmanId = 22,
+            SalesmanName = "张三",
+            Currency = "USD",
+        });
+        Assert.Equal("客户 Id 11；业务员 Id 22；业务员姓名关键字 张三；原币币种 USD", text);
+    }
 }

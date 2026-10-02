@@ -95,8 +95,9 @@ public class DynamicSalesCommissionReportUiTests
 
         Assert.Contains("filter.customerId", fn);
         Assert.Contains("filter.salesmanId", fn);
+        Assert.Contains("filter.salesmanName = salesmanName", fn);
         Assert.Contains("filter.currency = currency.toUpperCase()", fn);
-        Assert.Contains("=== undefined && filter.currency === undefined) ? null : filter", fn);
+        Assert.Contains("filter.salesmanName === undefined && filter.currency === undefined) ? null : filter", fn);
     }
 
     [Fact]
@@ -106,6 +107,8 @@ public class DynamicSalesCommissionReportUiTests
         var err = Segment(js, "function scdFilterError(", "function scdBuildFilter(");
         Assert.Contains("客户 Id 必须是正整数（大于 0）", err);
         Assert.Contains("业务员 Id 必须是正整数（大于 0）", err);
+        Assert.Contains("业务员姓名关键字最多 80 个字符", err);
+        Assert.Contains("业务员姓名关键字不能包含控制字符", err);
         Assert.Contains("原币币种仅支持 CNY / USD / EUR / HKD / GBP / JPY", err);
     }
 
@@ -308,5 +311,34 @@ public class DynamicSalesCommissionReportUiTests
         Assert.Contains("if (SCD_DYN.view)", fn);
         Assert.Contains("scdResultHtml(SCD_DYN.view)", fn);
         Assert.DoesNotContain("SCD_DYN.view = null", fn);
+    }
+
+    // ==================== 10. 业务员姓名关键字（ERP-250，前端契约） ====================
+
+    [Fact]
+    public void 姓名关键字_输入框存在_变更重置页_字面转义_下载复用状态()
+    {
+        var js = Script;
+
+        // 设计器提供业务员姓名关键字输入框（80 字符上限），变更重置到第 1 页
+        Assert.Contains("id=\"scd-des-salesman-name\"", js);
+        Assert.Contains("maxlength=\"80\"", js);
+        Assert.Contains("onchange=\"scdResetPage()\"", js);
+
+        // 请求组装：姓名关键字仅作为字面文本进入 filter，不拼任意 SQL / 通配符
+        var bf = Segment(js, "function scdBuildFilter(", "function scdBuildRequest(");
+        Assert.Contains("filter.salesmanName = salesmanName", bf);
+        Assert.DoesNotContain("FromSql", bf);
+        Assert.DoesNotContain("SqlCommand", bf);
+
+        // 下载（Excel / PDF / 汇总 Excel / 汇总 PDF）复用同一请求状态，保留关键字上下文
+        Assert.Contains("scdBuildRequest(state)",
+            Segment(js, "function scdExportExcel(", "function loadSalesCommissionDesignerCatalog("));
+        Assert.Contains("scdBuildRequest(state)",
+            Segment(js, "function scdExportPdf(", "function loadSalesCommissionDesignerCatalog("));
+        Assert.Contains("scdBuildRequest(state)",
+            Segment(js, "function scdExportSummaryExcel(", "function loadSalesCommissionDesignerCatalog("));
+        Assert.Contains("scdBuildRequest(state)",
+            Segment(js, "function scdExportSummaryPdf(", "function loadSalesCommissionDesignerCatalog("));
     }
 }

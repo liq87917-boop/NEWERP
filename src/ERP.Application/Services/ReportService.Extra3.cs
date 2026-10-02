@@ -214,8 +214,11 @@ public partial class ReportService
     }
 
     /// <summary>
-    /// 应用 ERP-244 可选筛选（在业务员数据范围之后、501 订单头上限探测之前）：客户 Id / 业务员 Id / 原币币种精确匹配。
+    /// 应用 ERP-244 可选筛选（在业务员数据范围之后、501 订单头上限探测之前）：客户 Id / 业务员 Id / 业务员姓名关键字 / 原币币种精确匹配。
     /// 全部为参数化 EF 谓词，非任意 SQL。业务员 Id 仅订单属性（非权限边界），不会扩展客户范围，也不会在聚合后再筛选。
+    /// <para>姓名关键字使用对持久化 <c>SalesmanId</c> 的关联 <c>BaseEmployees.Any</c> 谓词（未删除员工 + 字面
+    /// <c>EmployeeName.Contains</c>），在范围 / 客户 / 业务员 / 币种谓词之后、501 订单头上限探测之前相交；
+    /// 不建立单独员工目录 / 客户端身份权威、不产生逐单 / 逐行额外员工读取。<c>%</c> / <c>_</c> 按字面文本匹配。</para>
     /// </summary>
     private IQueryable<SalesOrder> ApplySalesCommissionFilter(IQueryable<SalesOrder> source, SalesCommissionFilterDto? filter)
     {
@@ -227,6 +230,15 @@ public partial class ReportService
 
         if (filter.SalesmanId is > 0)
             source = source.Where(o => o.SalesmanId == filter.SalesmanId.Value);
+
+        if (!string.IsNullOrEmpty(filter.SalesmanName))
+        {
+            var keyword = filter.SalesmanName;
+            source = source.Where(o => o.SalesmanId != null
+                && _db.BaseEmployees.Any(e => e.Id == o.SalesmanId
+                                              && !e.IsDeleted
+                                              && e.EmployeeName.Contains(keyword)));
+        }
 
         if (!string.IsNullOrEmpty(filter.Currency)
             && Enum.TryParse<Currency>(filter.Currency, true, out var currency))

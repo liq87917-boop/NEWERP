@@ -520,4 +520,28 @@ public class DynamicSalesCommissionSummaryExcelTests
             Assert.NotEqual("业务员身份依据", label);
         }
     }
+
+    [Fact]
+    public async Task 导出汇总_姓名关键字_上下文表保留关键字_即使业务员列隐藏()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedAuthorizedUser(db, "priv", "Priv", isSystemRole: true);
+        var customer = SeedCustomer(db, "C001", "客户");
+        var emp1 = SeedEmployee(db, "S001", "张三丰");
+        var emp2 = SeedEmployee(db, "S002", "李四");
+        SeedOrder(db, "SO-1", customer.Id, emp1.Id, Currency.USD, 100m);
+        SeedOrder(db, "SO-2", customer.Id, emp2.Id, Currency.CNY, 200m);
+
+        var ctl = BuildController(db, user.Id);
+        TestAuth.SetUser(ctl, user.Id);
+
+        // 汇总本身无员工明细列，关键字上下文仍保留在「报表口径」工作表
+        var file = SummaryOk(await ctl.ExportSummary(Request(
+            fields: new List<string> { "currency" },
+            filter: new SalesCommissionFilterDto { SalesmanName = "  张三  " })));
+
+        var workbook = OpenWorkbook(file.FileContents);
+        Assert.Equal("业务员姓名关键字 张三",
+            ContextValue(workbook, DynamicSalesCommissionReportRules.ContextFilterLabel)!.StringCellValue);
+    }
 }

@@ -13,7 +13,7 @@ namespace ERP.Api.Controllers;
 /// 动态业务员提成证据报表（ERP-244）控制器：只读的字段目录与预览接口。
 /// <list type="number">
 /// <item><b>GET /api/dynamic-sales-commission-report</b>：返回业务员提成证据字段白名单目录（需登录 + 业务员提成表菜单授权 + 业务员数据范围）；</item>
-/// <item><b>POST /api/dynamic-sales-commission-report</b>：按选定字段与有界日期窗口（start / end）及可选筛选（客户 / 业务员 / 原币）预览当前账号数据范围内的业务员桶 × 原币证据行，稳定分页。</item>
+/// <item><b>POST /api/dynamic-sales-commission-report</b>：按选定字段与有界日期窗口（start / end）及可选筛选（客户 / 业务员 / 业务员姓名关键字 / 原币）预览当前账号数据范围内的业务员桶 × 原币证据行，稳定分页。</item>
 /// </list>
 /// <para>复用既有「业务员提成表」（sales-commission）菜单授权与 <see cref="SalespersonDataScopeService"/>（ERP-097）业务员数据范围；
 /// 每次目录 / 预览请求都重新校验身份、菜单授权与业务员数据范围（fail closed），

@@ -33,6 +33,9 @@ public static class DynamicSalesCommissionReportRules
     /// <summary>允许的订单日期区间最大跨度（含首尾日历日）：366 天，与既有业务员提成口径一致</summary>
     public const int MaxDateRangeDays = 366;
 
+    /// <summary>业务员姓名关键字筛选最大长度（有界：去首尾空白后最多 80 字符，超出直接拒绝）</summary>
+    public const int MaxFilterKeywordLength = 80;
+
     /// <summary>支持的原币币种码列表（与 <see cref="Currency"/> 枚举 / <see cref="SalesCommissionEvidenceRules"/> 已知码同源）</summary>
     public const string SupportedCurrencyText = "CNY / USD / EUR / HKD / GBP / JPY";
 
@@ -51,7 +54,7 @@ public static class DynamicSalesCommissionReportRules
     /// <summary>边界口径文案</summary>
     public const string BoundaryText =
         "口径：字段仅限业务员提成证据字段白名单（业务员桶 / 原币 / 订单数 / 已知原币金额小计 / 未知利润 / 未知利润率 / 当前参考提成比例 / 未知提成额 / 显式来源依据）；" +
-        "筛选仅限开始 / 结束日期（含首尾最多 366 天）、客户 Id（正整数）、业务员 Id（正整数）与原币币种（" + SupportedCurrencyText + "），分页页码 ≥ 1、每页 1~200；" +
+        "筛选仅限开始 / 结束日期（含首尾最多 366 天）、客户 Id（正整数）、业务员 Id（正整数）、业务员姓名关键字（去首尾空白最多 80 字符、字面文本、拒绝控制字符）与原币币种（" + SupportedCurrencyText + "），分页页码 ≥ 1、每页 1~200；" +
         "结果限定在当前账号业务员数据范围（特权账号不受限）；金额按业务员桶 × 原币独立小计、利润 / 利润率 / 提成额恒为未知，绝不跨币种合计；不执行任意 SQL、不做写入";
 
     /// <summary>免责文案</summary>
@@ -184,11 +187,12 @@ public static class DynamicSalesCommissionReportRules
 
     /// <summary>目录口径：支持的筛选能力说明（仅能力说明，不含任何业务员 / 订单 / 金额数据）</summary>
     public const string SupportedFilterText =
-        "可选应用筛选：客户 Id（正整数）、业务员 Id（正整数）与原币币种（" + SupportedCurrencyText + "）；留空 = 不过滤（保留全部已审核销售订单证据）";
+        "可选应用筛选：客户 Id（正整数）、业务员 Id（正整数）、业务员姓名关键字（去首尾空白最多 80 字符、字面文本）与原币币种（" + SupportedCurrencyText + "）；留空 = 不过滤（保留全部已审核销售订单证据）";
 
     /// <summary>
-    /// 规范化可选应用筛选（fail closed）：客户 Id / 业务员 Id 必须为正整数、原币币种仅接受空白（全部）/ 已知 <see cref="Currency"/> 枚举码；
-    /// 非法 / 数字 / 未知取值直接拒绝，绝不静默丢弃或回退币种。三项全部留空时返回 null（表示不过滤）。
+    /// 规范化可选应用筛选（fail closed）：客户 Id / 业务员 Id 必须为正整数、业务员姓名关键字去首尾空白后最多
+    /// <see cref="MaxFilterKeywordLength"/> 字符且不含控制字符、原币币种仅接受空白（全部）/ 已知 <see cref="Currency"/> 枚举码；
+    /// 非法 / 数字 / 未知取值直接拒绝，绝不静默丢弃或回退币种。四项全部留空时返回 null（表示不过滤）。
     /// </summary>
     public static SalesCommissionFilterDto? NormalizeFilter(SalesCommissionFilterDto? filter)
     {
@@ -197,15 +201,17 @@ public static class DynamicSalesCommissionReportRules
 
         var customerId = ValidateFilterCustomerId(filter.CustomerId);
         var salesmanId = ValidateFilterSalesmanId(filter.SalesmanId);
+        var salesmanName = NormalizeSalesmanNameKeyword(filter.SalesmanName);
         var currency = NormalizeCurrencyFilter(filter.Currency);
 
-        if (customerId is null && salesmanId is null && currency is null)
+        if (customerId is null && salesmanId is null && salesmanName is null && currency is null)
             return null;
 
         return new SalesCommissionFilterDto
         {
             CustomerId = customerId,
             SalesmanId = salesmanId,
+            SalesmanName = salesmanName,
             Currency = currency,
         };
     }
@@ -224,6 +230,27 @@ public static class DynamicSalesCommissionReportRules
         if (salesmanId is <= 0)
             throw BusinessException.InvalidParameter("业务员 Id 筛选必须是正整数（大于 0）");
         return salesmanId;
+    }
+
+    /// <summary>
+    /// 规范化业务员姓名关键字（fail closed）：留空 / 全空白 = 不过滤；否则去首尾空白，长度最多
+    /// <see cref="MaxFilterKeywordLength"/> 字符、不得包含控制字符，超出 / 非法直接拒绝（先于任何订单读取）。
+    /// <c>%</c> / <c>_</c> 保留为字面文本，不做 SQL 通配符语义；大小写沿用数据库既有排序规则，不做额外归一化承诺。
+    /// </summary>
+    public static string? NormalizeSalesmanNameKeyword(string? keyword)
+    {
+        if (string.IsNullOrWhiteSpace(keyword))
+            return null;
+
+        var trimmed = keyword.Trim();
+        if (trimmed.Length > MaxFilterKeywordLength)
+            throw BusinessException.InvalidParameter(
+                $"业务员姓名关键字筛选最多 {MaxFilterKeywordLength} 个字符（收到 {trimmed.Length} 个字符）");
+
+        if (trimmed.Any(char.IsControl))
+            throw BusinessException.InvalidParameter("业务员姓名关键字筛选不能包含控制字符");
+
+        return trimmed;
     }
 
     /// <summary>
@@ -247,7 +274,7 @@ public static class DynamicSalesCommissionReportRules
             $"无效的原币币种筛选: {currency}（可选：{SupportedCurrencyText}）");
     }
 
-    /// <summary>把已规范化的应用筛选渲染为上下文文案（客户 Id / 业务员 Id / 原币币种）；无筛选时返回空串。</summary>
+    /// <summary>把已规范化的应用筛选渲染为上下文文案（客户 Id / 业务员 Id / 业务员姓名关键字 / 原币币种）；无筛选时返回空串。</summary>
     public static string BuildFilterContext(SalesCommissionFilterDto? filter)
     {
         if (filter is null)
@@ -258,6 +285,8 @@ public static class DynamicSalesCommissionReportRules
             parts.Add($"客户 Id {filter.CustomerId.Value}");
         if (filter.SalesmanId.HasValue)
             parts.Add($"业务员 Id {filter.SalesmanId.Value}");
+        if (!string.IsNullOrEmpty(filter.SalesmanName))
+            parts.Add($"业务员姓名关键字 {filter.SalesmanName}");
         if (!string.IsNullOrEmpty(filter.Currency))
             parts.Add($"原币币种 {filter.Currency}");
 
