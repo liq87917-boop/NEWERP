@@ -1,0 +1,101 @@
+{
+  "title": "Execute configurable metrics and grouped aggregates in unified report engine",
+  "description": "Customer chooses catalogued metrics and sum/count/avg/min/max with supported single grouping in the common workspace, saves them and sees the same current-page summaries in preview/Excel/PDF. Current definitions have Aggregates but execution only reuses adapter fixed subtotal functions: implement generic validated metric execution, not another bespoke report. Build metric descriptors from authorized provider fields with stable key/Chinese label/type/grain/unit/currency behavior/allowed functions and explicit current-page coverage. No new accounting algorithms or all-match total; reuse proven receivable remaining/allocation values with their unknown states. At most four aggregates; accept only authorized aggregatable numeric fields (count may count authorized non-null field values), no IDs/status as numeric sums. Fetch required authorized dependencies even when not displayed, revalidate after shared-grant resolution and return no hidden raw dependency values. Count means non-null valid values and disclose source/missing counts; avg uses known-value count, empty/all-null sum/min/max/avg stays null. Checked decimal overflow returns explicit unknown or controlled error, never silent zero. Monetary summaries partition by currency, unknown currency quarantined separately with reason; incompatible units are rejected. Group on supported customer or month only, no composite grouping/pivot/new joins. Keep existing adapter subtotal contract backward compatible and clearly distinguish new selected metrics; don't render metrics not selected by user. Persist ordinary JSON definitions without schema changes, retain drafts/pinned sharing and restricted formula boundaries from ERP-266: no formula aggregation yet. Stable group ordering and explicit current-page quantities prevent global-total claims. Stage 1 unified platform only; existing sales-order/receivable adapters are engine fixtures, not migration or new bespoke reports. Preserve old report entries until every fixed/dynamic report passes Stage 2 parity. No Agent or cross-business flow work. Server-authenticated identity and fresh existing menu/field/row/data scope remain authoritative, saved definitions/grants never grant ERP permissions. No arbitrary SQL, scripts, joins, tables, mixed currency/unit totals or one-to-many header duplication. No migrations, SchemaUpgrader/SeedData modifications, production SQL/database execution, schema/view/procedure changes, secrets/.env/config changes, deployment or irreversible operations. Use existing HTTP and entity audit conventions. Safe build/test and relevant offline integration tests required; missing actual DB/browser/font environment must be explicitly blocked, never claim the phase complete from build. Preserve unrelated source/work.",
+  "acceptance_criteria": [
+    "Authorized catalog exposes metric grain/unit/currency/function contracts and validates persisted selected aggregates before source reads.",
+    "Generic execution computes only selected current-page metrics with correct known/null counts, currency partitioning, empty/overflow behavior and fresh shared-user scope.",
+    "Workspace preview and generic Excel/PDF show matching selected metrics and coverage; offline persistence/execution/export/UI tests and safe build/test pass."
+  ],
+  "criterion_path_map": {
+    "Authorized catalog exposes metric grain/unit/currency/function contracts and validates persisted selected aggregates before source reads.": [
+      "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
+      "src/ERP.Application/Services/ReportConfigurationRules.cs",
+      "src/ERP.Application/Services/ReportConfigurationCatalog.cs",
+      "src/ERP.Application/Interfaces/IReportConfigurationDatasetProvider.cs",
+      "src/ERP.Infrastructure/Reports/ReportConfigurationDatasetProvider.cs",
+      "src/ERP.Application/Services/ReportConfigurationExecutionService.cs",
+      "src/ERP.Api/Controllers/ReportConfigurationsController.cs",
+      "src/ERP.Api/wwwroot/js/report-configuration.js",
+      "src/ERP.Application/Services/ReportConfigurationMetricRules.cs",
+      "src/ERP.UnitTests/ReportConfigurationMetricTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationRulesTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationCatalogTests.cs"
+    ],
+    "Generic execution computes only selected current-page metrics with correct known/null counts, currency partitioning, empty/overflow behavior and fresh shared-user scope.": [
+      "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
+      "src/ERP.Application/Services/ReportConfigurationRules.cs",
+      "src/ERP.Application/Services/ReportConfigurationCatalog.cs",
+      "src/ERP.Application/Interfaces/IReportConfigurationDatasetProvider.cs",
+      "src/ERP.Infrastructure/Reports/ReportConfigurationDatasetProvider.cs",
+      "src/ERP.Application/Services/ReportConfigurationExecutionService.cs",
+      "src/ERP.Api/Controllers/ReportConfigurationsController.cs",
+      "src/ERP.Api/wwwroot/js/report-configuration.js",
+      "src/ERP.Application/Services/ReportConfigurationMetricRules.cs",
+      "src/ERP.UnitTests/ReportConfigurationMetricTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationExecutionTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationSharingTests.cs"
+    ],
+    "Workspace preview and generic Excel/PDF show matching selected metrics and coverage; offline persistence/execution/export/UI tests and safe build/test pass.": [
+      "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
+      "src/ERP.Application/Services/ReportConfigurationRules.cs",
+      "src/ERP.Application/Services/ReportConfigurationCatalog.cs",
+      "src/ERP.Application/Interfaces/IReportConfigurationDatasetProvider.cs",
+      "src/ERP.Infrastructure/Reports/ReportConfigurationDatasetProvider.cs",
+      "src/ERP.Application/Services/ReportConfigurationExecutionService.cs",
+      "src/ERP.Api/Controllers/ReportConfigurationsController.cs",
+      "src/ERP.Api/wwwroot/js/report-configuration.js",
+      "src/ERP.Infrastructure/Export/ReportConfigurationExcelExporter.cs",
+      "src/ERP.Infrastructure/Export/ReportConfigurationPdfExporter.cs",
+      "src/ERP.UnitTests/ReportConfigurationMetricTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationVersionTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationExcelTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationPdfTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationUiTests.cs"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
+    "src/ERP.Application/Services/ReportConfigurationRules.cs",
+    "src/ERP.Application/Services/ReportConfigurationCatalog.cs",
+    "src/ERP.Application/Interfaces/IReportConfigurationDatasetProvider.cs",
+    "src/ERP.Infrastructure/Reports/ReportConfigurationDatasetProvider.cs",
+    "src/ERP.Application/Services/ReportConfigurationExecutionService.cs",
+    "src/ERP.Api/Controllers/ReportConfigurationsController.cs",
+    "src/ERP.Api/wwwroot/js/report-configuration.js",
+    "src/ERP.Application/Services/ReportConfigurationMetricRules.cs",
+    "src/ERP.UnitTests/ReportConfigurationMetricTests.cs",
+    "src/ERP.UnitTests/ReportConfigurationRulesTests.cs",
+    "src/ERP.UnitTests/ReportConfigurationCatalogTests.cs",
+    "src/ERP.UnitTests/ReportConfigurationExecutionTests.cs",
+    "src/ERP.UnitTests/ReportConfigurationSharingTests.cs",
+    "src/ERP.Infrastructure/Export/ReportConfigurationExcelExporter.cs",
+    "src/ERP.Infrastructure/Export/ReportConfigurationPdfExporter.cs",
+    "src/ERP.UnitTests/ReportConfigurationVersionTests.cs",
+    "src/ERP.UnitTests/ReportConfigurationExcelTests.cs",
+    "src/ERP.UnitTests/ReportConfigurationPdfTests.cs",
+    "src/ERP.UnitTests/ReportConfigurationUiTests.cs"
+  ],
+  "id": "ERP-267",
+  "depends_on": [
+    "ERP-266"
+  ],
+  "status": "pending",
+  "max_attempts": 3,
+  "attempts": 0,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "browser_acceptance": {
+    "required": false
+  },
+  "risk_level": "medium",
+  "priority": "P1",
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Bounded development-only unified reporting increment"
+  },
+  "created_at": "2026-10-02T15:07:24.721382Z"
+}

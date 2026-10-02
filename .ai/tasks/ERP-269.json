@@ -1,0 +1,108 @@
+{
+  "title": "Bound unified report preview and export execution with actionable failures",
+  "description": "Add server-owned execution budgets to common report configuration requests so customers get explicit timeout/busy/result-too-large errors instead of hanging or stale downloads. Fixed initial bounds: 30 seconds per operation including saved/grant resolution, authorization, provider lookup and rendering; at most two simultaneous execution operations per authenticated user; current preview page <=200 rows and selected columns <=32 (computed columns within same visible limit), serialized preview <=1MiB and generated file <=10MiB. These are platform constants, not client-increasable or environment/config changes. One outer request lease per preview/export, no double-acquiring when export calls common execution; share deadline across all work. Propagate linked cancellation into every async EF/provider operation and rendering loops; scope helpers without cancellation remain unaltered unless required provider changes can carry token safely. A noncooperative operation must retain its slot until actually finishes; never claim cancellation stopped underlying work. Safely release slots on success/exception/disconnect and evict idle user entries without racing leases; no global denial or unlimited per-user cache. Never cache authorized rows across users. Check byte/row/column bounds before sending bytes; no partial workbook/PDF. Distinguish timeout, caller cancellation, busy, size limit, permission, persistence environment and rendering failures with safe error code and correlation ID, no SQL/stack/private values. UI clears stale results, preserves configuration edits, prevents repeated clicks and permits explicit retry. Existing HTTP audit plus structured logger event records server user/config/pinned revision/dataset/operation/outcome/duration/count/relation keys only, not row/filter values or credentials; no new audit tables. End-to-end configured safe build/test with deterministic fake clock/blocked provider cancellation tests; missing external environment never presented as passed. Stage 1 unified platform only; existing sales-order/receivable adapters are engine fixtures, not migration or new bespoke reports. Preserve old report entries until every fixed/dynamic report passes Stage 2 parity. No Agent or cross-business flow work. Server-authenticated identity and fresh existing menu/field/row/data scope remain authoritative, saved definitions/grants never grant ERP permissions. No arbitrary SQL, scripts, joins, tables, mixed currency/unit totals or one-to-many header duplication. No migrations, SchemaUpgrader/SeedData modifications, production SQL/database execution, schema/view/procedure changes, secrets/.env/config changes, deployment or irreversible operations. Use existing HTTP and entity audit conventions. Safe build/test and relevant offline integration tests required; missing actual DB/browser/font environment must be explicitly blocked, never claim the phase complete from build. Preserve unrelated source/work.",
+  "acceptance_criteria": [
+    "Per-user leases and server deadline/size bounds cover preview/shared/export exactly once, retain slots for unfinished work and release safely across exceptions and cancellation.",
+    "API and workspace distinguish bounded failure outcomes with correlation IDs, prevent stale/partial results and retain edits without logging sensitive values.",
+    "Deterministic offline concurrency/deadline/result-byte/render tests cover success, failure, disconnect, retry and fresh recipient scope; generic Excel/PDF and safe build/test pass."
+  ],
+  "criterion_path_map": {
+    "Per-user leases and server deadline/size bounds cover preview/shared/export exactly once, retain slots for unfinished work and release safely across exceptions and cancellation.": [
+      "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
+      "src/ERP.Application/Services/ReportConfigurationRules.cs",
+      "src/ERP.Application/Services/ReportConfigurationCatalog.cs",
+      "src/ERP.Application/Interfaces/IReportConfigurationDatasetProvider.cs",
+      "src/ERP.Infrastructure/Reports/ReportConfigurationDatasetProvider.cs",
+      "src/ERP.Application/Services/ReportConfigurationExecutionService.cs",
+      "src/ERP.Api/Controllers/ReportConfigurationsController.cs",
+      "src/ERP.Api/wwwroot/js/report-configuration.js",
+      "src/ERP.Application/Services/ReportConfigurationExecutionBudget.cs",
+      "src/ERP.Infrastructure/DependencyInjection.cs",
+      "src/ERP.Application/Interfaces/IReportConfigurationExecutionService.cs",
+      "src/ERP.Infrastructure/Export/ReportConfigurationExcelExporter.cs",
+      "src/ERP.Infrastructure/Export/ReportConfigurationPdfExporter.cs",
+      "src/ERP.UnitTests/ReportConfigurationBudgetTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationExecutionTests.cs"
+    ],
+    "API and workspace distinguish bounded failure outcomes with correlation IDs, prevent stale/partial results and retain edits without logging sensitive values.": [
+      "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
+      "src/ERP.Application/Services/ReportConfigurationRules.cs",
+      "src/ERP.Application/Services/ReportConfigurationCatalog.cs",
+      "src/ERP.Application/Interfaces/IReportConfigurationDatasetProvider.cs",
+      "src/ERP.Infrastructure/Reports/ReportConfigurationDatasetProvider.cs",
+      "src/ERP.Application/Services/ReportConfigurationExecutionService.cs",
+      "src/ERP.Api/Controllers/ReportConfigurationsController.cs",
+      "src/ERP.Api/wwwroot/js/report-configuration.js",
+      "src/ERP.Application/Services/ReportConfigurationExecutionBudget.cs",
+      "src/ERP.Infrastructure/DependencyInjection.cs",
+      "src/ERP.Infrastructure/Export/ReportConfigurationExcelExporter.cs",
+      "src/ERP.Infrastructure/Export/ReportConfigurationPdfExporter.cs",
+      "src/ERP.UnitTests/ReportConfigurationBudgetTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationApiTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationUiTests.cs"
+    ],
+    "Deterministic offline concurrency/deadline/result-byte/render tests cover success, failure, disconnect, retry and fresh recipient scope; generic Excel/PDF and safe build/test pass.": [
+      "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
+      "src/ERP.Application/Services/ReportConfigurationRules.cs",
+      "src/ERP.Application/Services/ReportConfigurationCatalog.cs",
+      "src/ERP.Application/Interfaces/IReportConfigurationDatasetProvider.cs",
+      "src/ERP.Infrastructure/Reports/ReportConfigurationDatasetProvider.cs",
+      "src/ERP.Application/Services/ReportConfigurationExecutionService.cs",
+      "src/ERP.Api/Controllers/ReportConfigurationsController.cs",
+      "src/ERP.Api/wwwroot/js/report-configuration.js",
+      "src/ERP.Application/Services/ReportConfigurationExecutionBudget.cs",
+      "src/ERP.Infrastructure/DependencyInjection.cs",
+      "src/ERP.Infrastructure/Export/ReportConfigurationExcelExporter.cs",
+      "src/ERP.Infrastructure/Export/ReportConfigurationPdfExporter.cs",
+      "src/ERP.UnitTests/ReportConfigurationBudgetTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationExcelTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationPdfTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationSharingTests.cs"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
+    "src/ERP.Application/Services/ReportConfigurationRules.cs",
+    "src/ERP.Application/Services/ReportConfigurationCatalog.cs",
+    "src/ERP.Application/Interfaces/IReportConfigurationDatasetProvider.cs",
+    "src/ERP.Infrastructure/Reports/ReportConfigurationDatasetProvider.cs",
+    "src/ERP.Application/Services/ReportConfigurationExecutionService.cs",
+    "src/ERP.Api/Controllers/ReportConfigurationsController.cs",
+    "src/ERP.Api/wwwroot/js/report-configuration.js",
+    "src/ERP.Application/Services/ReportConfigurationExecutionBudget.cs",
+    "src/ERP.Infrastructure/DependencyInjection.cs",
+    "src/ERP.Application/Interfaces/IReportConfigurationExecutionService.cs",
+    "src/ERP.Infrastructure/Export/ReportConfigurationExcelExporter.cs",
+    "src/ERP.Infrastructure/Export/ReportConfigurationPdfExporter.cs",
+    "src/ERP.UnitTests/ReportConfigurationBudgetTests.cs",
+    "src/ERP.UnitTests/ReportConfigurationExecutionTests.cs",
+    "src/ERP.UnitTests/ReportConfigurationApiTests.cs",
+    "src/ERP.UnitTests/ReportConfigurationUiTests.cs",
+    "src/ERP.UnitTests/ReportConfigurationExcelTests.cs",
+    "src/ERP.UnitTests/ReportConfigurationPdfTests.cs",
+    "src/ERP.UnitTests/ReportConfigurationSharingTests.cs"
+  ],
+  "id": "ERP-269",
+  "depends_on": [
+    "ERP-268"
+  ],
+  "status": "pending",
+  "max_attempts": 3,
+  "attempts": 0,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "browser_acceptance": {
+    "required": false
+  },
+  "risk_level": "medium",
+  "priority": "P1",
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Bounded development-only unified reporting increment"
+  },
+  "created_at": "2026-10-02T15:07:24.724776Z"
+}
