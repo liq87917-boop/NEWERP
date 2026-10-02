@@ -1,8 +1,8 @@
 {
   "schema_version": 2,
   "project": "NEWERP",
-  "updated_at": "2026-10-02T17:36:26.590019Z",
-  "phase": "ready",
+  "updated_at": "2026-10-02T17:36:31.098608Z",
+  "phase": "remote_degraded",
   "current_task": null,
   "queue": [],
   "completed": [
@@ -283,16 +283,19 @@
   },
   "git_sync": {
     "branch": "main",
-    "local_sha": "7c03efa",
+    "local_sha": "6197ed0",
     "status": "pending",
-    "ahead": 13,
+    "ahead": 14,
     "behind": 1,
-    "last_attempt_at": "2026-10-02T17:36:26.480401Z",
-    "last_error": null
+    "last_attempt_at": "2026-10-02T17:36:30.985787Z",
+    "last_error": "push_failed",
+    "task": "ERP-272"
   },
   "next_recommended_tasks": [],
   "runner": {
     "status": "stopped",
     "pid": null
-  }
+  },
+  "blocker": null,
+  "finish_reason": "remote_sync_degraded"
 }
