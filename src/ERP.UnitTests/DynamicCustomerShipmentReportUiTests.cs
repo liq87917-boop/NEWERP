@@ -186,4 +186,40 @@ public class DynamicCustomerShipmentReportUiTests
         Assert.Contains("csdErrorHtml('empty', '没有符合所选日期范围与数据范围的已审核销售订单，无法导出（请先预览）')", fn);
         Assert.Contains("csdErrorHtml('network', (err && err.message) || '无法连接到服务器')", fn);
     }
+
+    // ==================== 7. PDF 下载（无需先预览，复用当前字段 / 日期 / 分页） ====================
+
+    [Fact]
+    public void 导出PDF_无需先预览_按当前字段日期分页组装请求_成功下载pdf附件_无自由SQL()
+    {
+        var js = Script;
+
+        Assert.Contains("function csdExportPdf()", js);
+        Assert.Contains("/api/dynamic-customer-shipment-report/pdf", js);
+        Assert.Contains("contentType.indexOf('application/pdf') >= 0", js);
+        Assert.Contains("URL.createObjectURL(blob)", js);
+        Assert.Contains("a.download = '客户出货量证据_'", js);
+
+        var fn = Segment(js, "function csdExportPdf()", "function loadCustomerShipmentDesignerCatalog(");
+        Assert.Contains("csdBuildState(CSD_DYN.page || 1)", fn);
+        Assert.Contains("csdBuildRequest(state)", fn);
+        Assert.Contains("method: 'POST'", fn);
+        Assert.DoesNotContain("请先预览后再导出", fn);
+        Assert.DoesNotContain("FromSql", fn);
+        Assert.DoesNotContain("ExecuteSql", fn);
+        Assert.DoesNotContain("SqlCommand", fn);
+        Assert.DoesNotContain("localStorage.setItem", fn);
+    }
+
+    [Fact]
+    public void 导出PDF_授权无效网络失败可见_不下载任何内容()
+    {
+        var js = Script;
+
+        var fn = Segment(js, "function csdExportPdf()", "function loadCustomerShipmentDesignerCatalog(");
+        Assert.Contains("csdErrorHtml('invalid', dateError)", fn);
+        Assert.Contains("csdErrorHtml(csdKindOfCode(code), message)", fn);
+        Assert.Contains("csdErrorHtml('network', (err && err.message) || '无法连接到服务器')", fn);
+        Assert.Contains("'PDF 下载失败'", fn);
+    }
 }

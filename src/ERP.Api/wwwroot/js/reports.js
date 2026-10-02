@@ -2794,6 +2794,7 @@ function openOrderProfitEstimateDesigner() {
    - 原币 / 单位 / 未知 / 来源口径与去重客户 / 订单上下文始终显示（即使对应列被取消选择），绝不展示跨币种 / 跨单位总额或实际出库 / 收款；
    - 空页 / 授权撤销（权限不足 / 未登录）/ 无效请求 / 网络失败分别可见，且不暴露范围外数据；
    - 导出复用预览请求体 POST /api/dynamic-customer-shipment-report/export，成功（xlsx 附件）触发下载；
+   - 下载 PDF 无需先预览：复用当前字段 / 日期 / 分页 POST /api/dynamic-customer-shipment-report/pdf，成功（application/pdf 附件）触发下载，字体缺失 / 授权撤销 / 无效 / 网络失败在结果区可见；
    - 全程只读：不写库、不迁移、不执行任意 SQL。 */
 
 /* 字段设计器状态（纯数据；DOM 访问只在事件处理函数内部发生） */
@@ -3125,6 +3126,58 @@ async function csdExport() {
   }
 }
 
+/* 下载当前页为中文 PDF（ERP-230，只读）：无需先预览，按当前字段 / 日期 / 分页组装请求体
+   POST /api/dynamic-customer-shipment-report/pdf；成功（application/pdf 附件）触发下载；
+   授权撤销 / 无效 / 网络失败 / 字体缺失在结果区可见，不下载任何损坏文件，且不丢失当前表单状态 */
+async function csdExportPdf() {
+  const state = csdBuildState(CSD_DYN.page || 1);
+  const dateError = csdDateError(state);
+  if (dateError) {
+    csdRenderResult(csdErrorHtml('invalid', dateError));
+    return;
+  }
+  const req = csdBuildRequest(state);
+  csdRenderResult(csdLoadingHtml());
+
+  try {
+    const headers = { 'Content-Type': 'application/json' };
+    const token = typeof localStorage !== 'undefined' ? (localStorage.getItem('erp_token') || '') : '';
+    if (token) headers['Authorization'] = 'Bearer ' + token;
+    const resp = await fetch('/api/dynamic-customer-shipment-report/pdf', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(req),
+    });
+
+    const contentType = (resp.headers.get('content-type') || '');
+    if (contentType.indexOf('application/pdf') >= 0) {
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+      a.href = url;
+      a.download = '客户出货量证据_' + dateStr + '.pdf';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      csdRenderResult(CSD_DYN.view ? csdResultHtml(CSD_DYN.view) : '');
+      return;
+    }
+
+    let message = 'PDF 下载失败';
+    let code;
+    try {
+      const data = await resp.json();
+      message = (data && data.message) || message;
+      code = data && data.code;
+    } catch (e) { /* 非 JSON 响应，沿用默认提示 */ }
+    csdRenderResult(csdErrorHtml(csdKindOfCode(code), message));
+  } catch (err) {
+    csdRenderResult(csdErrorHtml('network', (err && err.message) || '无法连接到服务器'));
+  }
+}
+
 /* 加载字段目录（白名单，有限、只读），失败时区分未登录 / 权限不足 / 网络错误 */
 async function loadCustomerShipmentDesignerCatalog() {
   csdRenderResult(csdLoadingHtml());
@@ -3168,6 +3221,7 @@ function openCustomerShipmentDesigner() {
         <div style="margin:8px 0">
           <button class="btn btn-primary" onclick="csdPreview(1)">🔍 预览</button>
           <button class="btn btn-neutral" onclick="csdExport()">📤 导出当前页 Excel</button>
+          <button class="btn btn-neutral" onclick="csdExportPdf()" title="下载当前页为中文 PDF（选定列，复用当前日期与分页，无需先预览）">📄 下载 PDF（当前页）</button>
         </div>
         <div id="csd-des-result"></div>
       </div>

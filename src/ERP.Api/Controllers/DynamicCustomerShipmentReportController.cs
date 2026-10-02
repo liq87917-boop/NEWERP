@@ -16,6 +16,7 @@ namespace ERP.Api.Controllers;
 /// <item><b>GET /api/dynamic-customer-shipment-report</b>：返回客户出货量证据字段白名单目录（需登录 + 客户出货量统计表菜单授权 + 业务员数据范围）；</item>
 /// <item><b>POST /api/dynamic-customer-shipment-report</b>：按选定字段与有界日期窗口（start / end）预览当前账号数据范围内的客户 × 原币证据行，稳定分页。</item>
 /// <item><b>POST /api/dynamic-customer-shipment-report/export</b>：导出当前选定页为 Excel（xlsx，只读，复用有界授权预览与选定列顺序，含日期 / 分页 / 来源上限 / 原币 / 单位 / 未知 / 来源上下文工作表，绝不追加跨币种 / 跨单位合计）。</item>
+/// <item><b>POST /api/dynamic-customer-shipment-report/pdf</b>：下载当前选定页为分页中文 PDF（只读，复用有界授权预览与选定列顺序，分页渲染行与宽列，字体缺失显式失败，绝不跨币种 / 跨单位合计或声称实际出库 / 装柜 / 收款）。</item>
 /// </list>
 /// <para>复用既有「客户出货量统计表」（customer-shipment）菜单授权与 <see cref="SalespersonDataScopeService"/>（ERP-097）业务员数据范围；
 /// 每次目录 / 预览 / 导出请求都重新校验身份、菜单授权与业务员数据范围（fail closed），
@@ -75,6 +76,25 @@ public class DynamicCustomerShipmentReportController : ControllerBase
         var bytes = BuildWorkbook(page);
         return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             $"CustomerShipmentEvidence_{DateTime.Now:yyyyMMddHHmmss}.xlsx");
+    }
+
+    /// <summary>
+    /// 下载当前页为中文 PDF（ERP-230，只读）：复用同一有界、已授权预览与选定列顺序，仅导出当前页选定列；
+    /// 分页渲染行与宽列，中文字体固定使用 Windows 黑体（SimHei），字体缺失或渲染失败显式失败（不产出乱码 / 缺字 / 损坏 PDF）；
+    /// 保持原币 / 单位 / 未知 / 日期 / 分页 / 来源上限 / 已审核订单证据上下文（即使对应列被取消选择），绝不追加跨币种 / 跨单位合计、
+    /// 绝不声称实际出库 / 装柜 / 收款。每次请求重新校验身份 / 客户出货量统计表菜单授权 / 业务员数据范围 / 字段 / 日期 / 分页（fail closed），
+    /// 授权撤销 / 无效 / 越界请求返回错误、不返回任何文件。
+    /// <para>全程只读，不写库、不执行任意 SQL；请求由既有 <c>OperationLogMiddleware</c> 记录审计（动作「下载 PDF」）。</para>
+    /// </summary>
+    [HttpPost("pdf")]
+    public async Task<IActionResult> ExportPdf([FromBody] DynamicCustomerShipmentReportRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var page = await BuildPageAsync(request);
+        var bytes = DynamicCustomerShipmentPdfExporter.Export(page);
+        return File(bytes, "application/pdf",
+            $"CustomerShipmentEvidence_{DateTime.Now:yyyyMMddHHmmss}.pdf");
     }
 
     /// <summary>复用同一有界、已授权预览管线：先校验字段 / 日期 / 分页，再每次重新校验身份 / 菜单授权 / 数据范围，最后只读查询当前页</summary>
