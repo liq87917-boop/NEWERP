@@ -123,7 +123,7 @@ public class ReportServiceTests
         await db.SaveChangesAsync();
 
         var service = new ReportService(db);
-        var result = await service.GetOrderProfitEstimateAsync(Start, End);
+        var result = await service.GetOrderProfitEstimateAsync(Start, End, PrivilegedScope);
 
         Assert.Single(result);
         Assert.Equal(5000m, result[0].SalesAmount);
@@ -146,7 +146,7 @@ public class ReportServiceTests
         await db.SaveChangesAsync();
 
         var service = new ReportService(db);
-        var result = await service.GetOrderProfitEstimateAsync(Start, End);
+        var result = await service.GetOrderProfitEstimateAsync(Start, End, PrivilegedScope);
 
         Assert.Single(result);
         Assert.Equal("SO-A", result[0].OrderNo);
@@ -170,7 +170,7 @@ public class ReportServiceTests
         await db.SaveChangesAsync();
 
         var service = new ReportService(db);
-        var result = await service.GetOrderProfitEstimateAsync(Start, End);
+        var result = await service.GetOrderProfitEstimateAsync(Start, End, PrivilegedScope);
 
         Assert.Single(result);
         Assert.Equal(0m, result[0].ProfitRate);   // 分母保护：0 除以 0 不抛

@@ -112,19 +112,77 @@ public partial class ReportService : IReportService
         return result;
     }
 
-    /// <summary>订单利润暂估表（销售额 - 商品成本）</summary>
-    public async Task<List<ReportDtos.OrderProfitItem>> GetOrderProfitEstimateAsync(DateTime start, DateTime end)
+    /// <summary>订单利润暂估表允许的日期区间最大跨度（含首尾日历日）：366 天</summary>
+    private const int OrderProfitMaxDateRangeDays = 366;
+
+    /// <summary>订单利润暂估表单次最多返回的订单头数（有界：读取 501 探测 500 上限）</summary>
+    private const int OrderProfitMaxOrders = 500;
+
+    /// <summary>订单利润暂估表单次最多关联的非删除明细数（有界：读取 10001 探测 10000 上限）</summary>
+    private const int OrderProfitMaxDetails = 10000;
+
+    /// <summary>
+    /// 订单利润暂估表（销售额 - 商品成本，只读派生）：仅统计已审核、未删除、当前账号数据范围内的销售订单头，
+    /// 再关联未删除明细按商品成本价求和（成本 / 金额估算口径沿用既有实现，货币语义由依赖的货币任务处理）。
+    /// 日期校验（含溢出防护）先于任何源读取；订单 / 明细均为有界读取，超出上限立即 fail closed，不返回部分行或金额；
+    /// 订单头在 SQL 端按 OrderDate 降序、Id 降序稳定排序后，才用固定批量查询解析商品 / 客户，无逐单查库。
+    /// </summary>
+    public async Task<List<ReportDtos.OrderProfitItem>> GetOrderProfitEstimateAsync(
+        DateTime start, DateTime end, SalespersonDataScope scope)
     {
-        var orders = await _db.SalesOrders
-            .Where(o => !o.IsDeleted && o.OrderDate >= start && o.OrderDate <= end
-                        && o.Status != DocumentStatus.Cancelled)
+        ArgumentNullException.ThrowIfNull(scope);
+
+        // 1) 日期校验先于任何源读取（fail closed，含日期溢出防护）
+        var startDate = start.Date;
+        var endDate = end.Date;
+        if (endDate < startDate)
+            throw new BusinessException("订单利润暂估表的结束日期不能早于开始日期", ErrorCodes.InvalidParameter);
+
+        var inclusiveDays = (endDate - startDate).Days + 1;
+        if (inclusiveDays > OrderProfitMaxDateRangeDays)
+            throw new BusinessException($"订单利润暂估表的日期范围最多 {OrderProfitMaxDateRangeDays} 天（含首尾）", ErrorCodes.InvalidParameter);
+
+        // 结束日按排他上界（含首尾，即 < 结束日次日）；窗口已限制在 366 天内，此处加一不会溢出
+        var endExclusive = endDate.AddDays(1);
+
+        // 2) 订单头：已审核、未删除、日期窗口、业务员数据范围；稳定排序后做有界读取（501 探测 500 上限）
+        var ordersQuery = _db.SalesOrders
+            .Where(o => !o.IsDeleted
+                        && o.Status == DocumentStatus.Approved
+                        && o.OrderDate >= startDate
+                        && o.OrderDate < endExclusive);
+        ordersQuery = SalespersonDataScopeService.FilterByCustomer(ordersQuery, scope, o => o.CustomerId);
+
+        var orders = await ordersQuery
+            .OrderByDescending(o => o.OrderDate)
+            .ThenByDescending(o => o.Id)
+            .Take(OrderProfitMaxOrders + 1)
             .ToListAsync();
 
+        if (orders.Count > OrderProfitMaxOrders)
+        {
+            throw new BusinessException(
+                $"订单利润暂估表超出报告上限：范围内已审核销售订单超过 {OrderProfitMaxOrders} 张"
+                + "（fail closed，不返回任何行或金额）",
+                ErrorCodes.RuleConflict);
+        }
+
+        // 3) 明细：仅未删除且属于已读取订单头；有界读取（10001 探测 10000 上限）
         var orderIds = orders.Select(o => o.Id).ToList();
         var details = await _db.SalesOrderDetails
             .Where(d => orderIds.Contains(d.SalesOrderId) && !d.IsDeleted)
+            .Take(OrderProfitMaxDetails + 1)
             .ToListAsync();
 
+        if (details.Count > OrderProfitMaxDetails)
+        {
+            throw new BusinessException(
+                $"订单利润暂估表超出报告上限：范围内非删除订单明细超过 {OrderProfitMaxDetails} 条"
+                + "（fail closed，不返回任何行或金额）",
+                ErrorCodes.RuleConflict);
+        }
+
+        // 4) 固定批量查询解析商品 / 客户（各一次整表按 Id 集合查询，无逐单查库）
         var productIds = details.Select(d => d.ProductId).Distinct().ToList();
         var products = await _db.BaseProducts
             .Where(p => productIds.Contains(p.Id))
@@ -135,6 +193,7 @@ public partial class ReportService : IReportService
             .Where(c => customerIds.Contains(c.Id))
             .ToDictionaryAsync(c => c.Id, c => c.CustomerName);
 
+        // 5) 按已稳定排序的订单头映射（保留 SQL 端 OrderDate 降序、Id 降序顺序）
         var result = new List<ReportDtos.OrderProfitItem>();
         foreach (var order in orders)
         {
@@ -153,6 +212,6 @@ public partial class ReportService : IReportService
                 ProfitRate = order.TotalAmount == 0 ? 0 : Math.Round(profit / order.TotalAmount * 100, 2)
             });
         }
-        return result.OrderByDescending(x => x.OrderDate).ToList();
+        return result;
     }
 }

@@ -33,6 +33,12 @@ public class ReportController : ControllerBase
     /// <summary>商品销量排名报表要求菜单的中文文案（与既有菜单名一致）</summary>
     private const string ProductSalesRankingMenuText = "商品销量排名榜";
 
+    /// <summary>订单利润暂估报表要求的既有菜单编码（与 SeedData / SchemaUpgrader 同源）</summary>
+    private const string OrderProfitMenuCode = "order-profit";
+
+    /// <summary>订单利润暂估报表要求菜单的中文文案（与既有菜单名一致）</summary>
+    private const string OrderProfitMenuText = "订单利润暂估表";
+
     private readonly IReportService _reportService;
     private readonly IErpDbContext? _db;
 
@@ -78,11 +84,31 @@ public class ReportController : ControllerBase
         return Ok(ApiResponse<List<ReportDtos.ProductSalesRankItem>>.Success(result));
     }
 
-    /// <summary>订单利润暂估表</summary>
+    /// <summary>订单利润暂估表（每次请求重新校验身份、菜单授权与业务员数据范围，缺失即 fail closed）</summary>
     [HttpGet("order-profit")]
     public async Task<IActionResult> OrderProfit([FromQuery] DateTime start, [FromQuery] DateTime end)
     {
-        var result = await _reportService.GetOrderProfitEstimateAsync(start, end);
+        if (_db is null)
+            throw new BusinessException("订单利润暂估表缺少数据库上下文，无法解析当前账号授权", ErrorCodes.InternalError);
+
+        var db = _db;
+        var userId = CurrentUserId();
+        if (userId is null or <= 0)
+            throw new BusinessException("请先登录后再查看订单利润暂估表", ErrorCodes.Unauthorized);
+
+        var menuCodes = await CustomerReceivableReconciliationService.LoadAuthorizedMenuCodesAsync(
+            db, userId.Value);
+        if (!menuCodes.Contains(OrderProfitMenuCode, StringComparer.OrdinalIgnoreCase))
+        {
+            throw new BusinessException(
+                $"当前账号没有「{OrderProfitMenuText}」（{OrderProfitMenuCode}）模块授权：拒绝查看订单利润暂估表"
+                + "（fail closed，不返回任何数据）",
+                ErrorCodes.Forbidden);
+        }
+
+        var scope = await SalespersonDataScopeService.ResolveAsync(db, userId);
+
+        var result = await _reportService.GetOrderProfitEstimateAsync(start, end, scope);
         return Ok(ApiResponse<List<ReportDtos.OrderProfitItem>>.Success(result));
     }
 
