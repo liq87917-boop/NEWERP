@@ -1621,6 +1621,12 @@ function psrFilterError(state) {
   return '';
 }
 
+/* 分组键白名单（与后端 NormalizeGroupBy 一致：none / unit；未知取值不回传，由后端 fail closed 兜底） */
+function psrGroupKey(v) {
+  const s = String(v || '').trim();
+  return (s === 'none' || s === 'unit') ? s : '';
+}
+
 /* 读取当前字段 / 日期 / Top 状态（预览与导出复用，单一来源） */
 function psrBuildState() {
   const val = id => { const el = document.getElementById(id); return el ? el.value.trim() : ''; };
@@ -1633,6 +1639,7 @@ function psrBuildState() {
     customerId: val('psr-des-customer-id'),
     productId: val('psr-des-product-id'),
     unit: val('psr-des-unit'),
+    groupBy: val('psr-des-group'),
     maxTop: PSR_DYN.catalog && PSR_DYN.catalog.maxTop ? PSR_DYN.catalog.maxTop : 200,
   };
 }
@@ -1651,20 +1658,23 @@ function psrBuildFilter(state) {
     : filter;
 }
 
-/* 组装有界预览请求体：字段只来自目录、日期有界、Top 有界（1~200）、筛选有界，绝不接受任意字段名或 SQL */
+/* 组装有界预览请求体：字段只来自目录、日期有界、Top 有界（1~200）、筛选有界、分组仅白名单，绝不接受任意字段名或 SQL */
 function psrBuildRequest(state) {
   const fields = psrSelectFields(state.catalogFields, state.selectedKeys);
   let top = Math.floor(Number(state.top));
   if (!Number.isFinite(top)) top = 10;
   const maxTop = Number(state.maxTop) || 200;
   top = Math.max(1, Math.min(maxTop, top));
-  return {
+  const req = {
     fields,
     start: String(state.start).slice(0, 10),
     end: String(state.end).slice(0, 10),
     top,
     filter: psrBuildFilter(state),
   };
+  const groupBy = psrGroupKey(state.groupBy);
+  if (groupBy && groupBy !== 'none') req.groupBy = groupBy;
+  return req;
 }
 
 /* 单元格纯文本：数字合理格式化（整数 / 2 位小数）、其余按字符串呈现（null 显示为空） */
@@ -1700,6 +1710,31 @@ function psrTableHtml(view) {
 /* 空结果提示（显式使用后端 emptyText） */
 function psrEmptyHtml(view) {
   return `<div class="empty" style="margin:8px 0">${psrEsc((view && view.emptyText) || '没有符合日期范围与数据范围的已审核发货证据')}</div>`;
+}
+
+/* 按单位分组汇总（ERP-216）：仅针对当前 Top 结果（绝非完整日期范围），按精确单位独立呈现排名桶数与同单位签名数量小计；
+   未知 / 空单位仅呈现桶数（数量显示为 —，null 语义）；绝不跨单位合计数量、绝不含金额；无跨单位总计与比较图；标签与数值全部转义 */
+function psrGroupsHtml(view) {
+  const groupBy = view && view.groupBy;
+  const groups = (view && view.groups) || [];
+  if (!groupBy || groupBy === 'none' || !Array.isArray(groups) || groups.length === 0) return '';
+  const context = view && view.groupContextText
+    ? `<div class="pd-hint" style="color:#b45309;background:#fffbeb;border-color:#fde68a">📊 ${psrEsc(view.groupContextText)}</div>`
+    : '';
+  const rows = groups.map(g => {
+    const label = (g && g.label) || (g && g.unit) || '';
+    const count = Number(g && g.rankingBucketCount) || 0;
+    const hasQty = g && g.totalQuantity !== null && g.totalQuantity !== undefined;
+    const qty = hasQty ? psrCellText(g.totalQuantity, { dataType: 'number' }) : '—';
+    return `<tr>
+      <td>${psrEsc(label)}</td>
+      <td class="text-right">${count}</td>
+      <td class="text-right">${psrEsc(qty)}</td>
+    </tr>`;
+  }).join('');
+  return `${context}<div class="table-wrap" style="margin-top:8px"><table>
+    <thead><tr><th>单位</th><th class="text-right">排名桶数</th><th class="text-right">同单位数量小计</th></tr></thead>
+    <tbody>${rows}</tbody></table></div>`;
 }
 
 /* 错误提示（授权撤销 / 未登录 / 无效请求 / 网络失败分别可见，且不暴露任何数据） */
@@ -1766,8 +1801,9 @@ function psrResultHtml(view) {
   const filterLine = view && view.filterText ? `<div class="pd-hint" style="color:#0f766e;background:#f0fdfa;border-color:#99f6e4">🔍 ${psrEsc(view.filterText)}</div>` : '';
   const approved = view && view.approvedShipmentText ? `<div class="pd-hint">✅ ${psrEsc(view.approvedShipmentText)}</div>` : '';
   const unit = view && view.unitContextText ? `<div class="pd-hint" style="color:#b45309;background:#fffbeb;border-color:#fde68a">⚠️ ${psrEsc(view.unitContextText)}</div>` : '';
+  const groups = psrGroupsHtml(view);
   const empty = view && (!view.rows || view.rows.length === 0) ? psrEmptyHtml(view) : '';
-  return `${readOnly}${boundary}${disclaimer}${filterLine}${topLine}${approved}${unit}${empty}${psrTableHtml(view)}`;
+  return `${readOnly}${boundary}${disclaimer}${filterLine}${topLine}${approved}${unit}${groups}${empty}${psrTableHtml(view)}`;
 }
 
 /* 同步勾选状态到 selectedKeys（复选框 onchange） */
@@ -1964,6 +2000,10 @@ function openProductSalesRankingDesigner() {
         <label>客户 Id <input type="number" id="psr-des-customer-id" min="1" style="width:90px" placeholder="全部客户"></label>
         <label>商品 Id <input type="number" id="psr-des-product-id" min="1" style="width:90px" placeholder="全部商品"></label>
         <label>单位 <input type="text" id="psr-des-unit" maxlength="30" style="width:90px" placeholder="全部单位"></label>
+        <label>分组 <select id="psr-des-group" onchange="psrPreview()">
+          <option value="none">不分组</option>
+          <option value="unit">按单位</option>
+        </select></label>
         <span id="psr-designer-fields">正在加载字段目录…</span>
       </div>
       <div class="toolbar-actions">

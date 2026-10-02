@@ -33,6 +33,17 @@ public static class DynamicProductSalesRankingReportRules
     /// <summary>单位筛选最大长度（有界文本；超长直接拒绝，绝不静默截断）</summary>
     public const int MaxUnitFilterLength = 30;
 
+    // ==================== 0.1 分组键（ERP-216） ====================
+
+    /// <summary>不分组（默认）</summary>
+    public const string GroupNone = "none";
+
+    /// <summary>按精确单位分组（区分大小写 / 空白，绝不合并或换算单位）</summary>
+    public const string GroupUnit = "unit";
+
+    /// <summary>空白 / 未知单位的显式桶标签</summary>
+    public const string UnknownUnitLabel = "未知单位";
+
     // ==================== 1. 文案 ====================
 
     /// <summary>只读声明（接口与文档统一声明）</summary>
@@ -58,6 +69,15 @@ public static class DynamicProductSalesRankingReportRules
     /// <summary>已审核发货证据口径文案</summary>
     public const string ApprovedShipmentText =
         "已审核销售出库（发货）证据：仅统计已审核、未删除、当前账号数据范围内的销售出库明细；发货数量按商品 / 规格 / 单位独立分桶";
+
+    /// <summary>
+    /// 按单位分组口径文案（ERP-216）：仅针对当前 Top 结果（绝非完整日期范围）；每单位独立呈现排名桶数
+    /// （同一商品/规格/单位各算一桶，非唯一商品或单据数）与同单位签名数量小计；绝不跨单位合计数量、也不含金额；
+    /// 空白 / 未知单位仅呈现桶数（数量为 null）。
+    /// </summary>
+    public const string GroupContextText =
+        "分组仅针对当前 Top 结果（绝不声称完整日期范围）：每单位独立呈现排名桶数（同一商品/规格/单位各算一桶，非唯一商品或单据数）"
+        + "与同单位签名数量小计；绝不跨单位合计数量、也不含金额；空白 / 未知单位仅呈现桶数（数量为空）";
 
     // ==================== 2. 字段白名单（有限、有序） ====================
 
@@ -260,6 +280,76 @@ public static class DynamicProductSalesRankingReportRules
             ? def.Selector(item)
             : throw BusinessException.InvalidParameter($"未知字段: {key}");
 
+    // ==================== 5.1 分组汇总（ERP-216） ====================
+
+    /// <summary>
+    /// 规范化分组键（fail closed）：空 / 留空 = 不分组（none）；仅接受 none / unit（大小写不敏感）；未知取值显式拒绝（先于任何源读取）。
+    /// </summary>
+    public static string NormalizeGroupBy(string? groupBy)
+    {
+        if (string.IsNullOrWhiteSpace(groupBy))
+            return GroupNone;
+
+        var normalized = groupBy.Trim();
+        if (string.Equals(normalized, GroupNone, StringComparison.OrdinalIgnoreCase)) return GroupNone;
+        if (string.Equals(normalized, GroupUnit, StringComparison.OrdinalIgnoreCase)) return GroupUnit;
+
+        throw BusinessException.InvalidParameter(
+            $"无效的分组键: {groupBy}（可选：none / unit）");
+    }
+
+    /// <summary>
+    /// 按精确单位分组汇总（ERP-216）：仅针对当前 Top 结果（绝非完整日期范围）。空白 / 未知单位归入独立「未知单位」桶
+    /// （数量恒为 null，仅呈现排名桶数）；已知单位按精确文本（区分大小写 / 空白）独立成组，绝不合并或换算单位、
+    /// 绝不跨单位合计数量、绝不包含金额。排名桶数 = 该单位内的排名行数（同一商品/规格/单位各算一桶，非唯一商品或单据数）。
+    /// <para>确定排序：已知单位按签名数量小计降序、再按单位文本升序；未知单位桶恒在末尾（存在时才出现）。none / 空页返回空列表。</para>
+    /// </summary>
+    public static List<DynamicProductSalesRankingReportGroupDto> BuildGroups(
+        IReadOnlyList<ReportDtos.ProductSalesRankItem> items, string groupBy)
+    {
+        var list = items ?? Array.Empty<ReportDtos.ProductSalesRankItem>();
+        var normalized = NormalizeGroupBy(groupBy);
+        if (normalized != GroupUnit)
+            return new List<DynamicProductSalesRankingReportGroupDto>();
+
+        var byUnit = new Dictionary<string, (int Count, decimal Total)>(StringComparer.Ordinal);
+        var unknownCount = 0;
+        foreach (var item in list)
+        {
+            if (string.IsNullOrWhiteSpace(item.Unit))
+            {
+                unknownCount++;
+                continue;
+            }
+
+            byUnit.TryGetValue(item.Unit, out var acc);
+            byUnit[item.Unit] = (acc.Count + 1, acc.Total + item.TotalQuantity);
+        }
+
+        var groups = byUnit
+            .OrderByDescending(kv => kv.Value.Total)
+            .ThenBy(kv => kv.Key, StringComparer.Ordinal)
+            .Select(kv => new DynamicProductSalesRankingReportGroupDto(
+                kv.Key,
+                kv.Key,
+                kv.Value.Count,
+                kv.Value.Total,
+                false))
+            .ToList();
+
+        if (unknownCount > 0)
+        {
+            groups.Add(new DynamicProductSalesRankingReportGroupDto(
+                string.Empty,
+                UnknownUnitLabel,
+                unknownCount,
+                null,
+                true));
+        }
+
+        return groups;
+    }
+
     /// <summary>
     /// 把既有的商品销量排名结果投影为预览页（只读、纯映射）。稳定排序由既有
     /// <see cref="ReportService.GetProductSalesRankingAsync"/> 保证（发货数量降序 / 商品Id / 名称 / 规格 / 单位升序）。
@@ -271,12 +361,15 @@ public static class DynamicProductSalesRankingReportRules
         int top,
         DateTime start,
         DateTime end,
-        string filterText = "")
+        string filterText = "",
+        string groupBy = GroupNone)
     {
         var all = items ?? Array.Empty<ReportDtos.ProductSalesRankItem>();
+        var normalizedGroupBy = NormalizeGroupBy(groupBy);
         var columns = fieldKeys.Select(k => GetField(k)!).ToList();
         var rows = all.Select(i => BuildRow(i, fieldKeys)).ToList();
         var topLimited = rows.Count >= top;
+        var groups = BuildGroups(all, normalizedGroupBy);
 
         return new DynamicProductSalesRankingReportPageDto(
             columns,
@@ -292,7 +385,10 @@ public static class DynamicProductSalesRankingReportRules
             ApprovedShipmentText,
             start,
             end,
-            filterText);
+            filterText,
+            normalizedGroupBy,
+            groups,
+            groups.Count == 0 ? string.Empty : GroupContextText);
     }
 
     // ==================== 6. Excel 导出（ERP-213） ====================

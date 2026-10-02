@@ -57,6 +57,9 @@ public sealed class DynamicProductSalesRankingReportRequest
 
     /// <summary>可选应用筛选（客户 Id / 商品 Id / 单位；留空 = 不过滤，保持既有排名行为）</summary>
     public ProductSalesRankingFilterDto? Filter { get; set; }
+
+    /// <summary>分组键（仅 none / unit；留空 = none 不分组；未知取值由服务端 fail closed 拒绝）</summary>
+    public string? GroupBy { get; set; }
 }
 
 /// <summary>
@@ -71,12 +74,28 @@ public sealed record DynamicProductSalesRankingReportCatalogDto(
     string BoundaryText);
 
 /// <summary>
+/// 商品销量排名「按单位分组」汇总桶（ERP-216，只读派生）：仅针对当前 Top 结果（绝非完整日期范围）。
+/// <see cref="Unit"/> 为精确单位文本（区分大小写 / 空白，绝不合并或换算）；<see cref="RankingBucketCount"/> 为排名桶数
+/// （同一商品/规格/单位的排名行数，非唯一商品或单据数）；<see cref="TotalQuantity"/> 为同单位签名数量小计（可为负 / 零）；
+/// 空白或未知单位进入 <see cref="IsUnknown"/> 桶，其数量恒为 null（仅呈现桶数），绝不含金额。
+/// </summary>
+public sealed record DynamicProductSalesRankingReportGroupDto(
+    string Unit,
+    string Label,
+    int RankingBucketCount,
+    decimal? TotalQuantity,
+    bool IsUnknown);
+
+/// <summary>
 /// 商品销量排名报表预览结果页（ERP-213，只读）：按请求顺序返回选定列与 Top 有界行；行内仅包含选定的白名单字段值，
 /// 不泄露范围外 / 未分配 / 空客户记录。<see cref="Total"/> 为本次实际返回的排名行数（≤ Top），
 /// <see cref="TopLimited"/> 表示返回行数已达 Top、可能存在 Top 之外的排名（绝不声称 Top 之外完整）；
 /// <see cref="EmptyText"/> 在空结果时显式说明；<see cref="Start"/> / <see cref="End"/> 为已规范化的日期上下文；
 /// <see cref="UnitContextText"/> 显式声明单位不兼容、绝不跨单位合计数量；<see cref="ApprovedShipmentText"/> 显式声明发货证据口径；
 /// <see cref="FilterText"/> 为已规范化的客户 / 商品 / 单位筛选上下文（只含 Id 与单位文本，绝不泄露范围外客户名称）。
+/// <para>ERP-216：<see cref="GroupBy"/> 为规范化分组键（none / unit）；<see cref="Groups"/> 仅在 unit 分组时给出
+/// 「当前 Top 结果」按精确单位汇总的排名桶数与签名数量小计（空白 / 未知单位数量为 null）；<see cref="GroupContextText"/>
+/// 显式声明该分组只针对当前 Top 结果、排名桶数非唯一商品 / 单据数、绝不跨单位合计数量也不含金额。</para>
 /// </summary>
 public sealed record DynamicProductSalesRankingReportPageDto(
     List<DynamicProductSalesRankingReportFieldDto> Columns,
@@ -92,4 +111,7 @@ public sealed record DynamicProductSalesRankingReportPageDto(
     string ApprovedShipmentText,
     DateTime Start,
     DateTime End,
-    string FilterText = "");
+    string FilterText = "",
+    string GroupBy = "none",
+    List<DynamicProductSalesRankingReportGroupDto>? Groups = null,
+    string GroupContextText = "");

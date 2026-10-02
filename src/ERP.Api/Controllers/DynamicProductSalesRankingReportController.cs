@@ -99,11 +99,12 @@ public class DynamicProductSalesRankingReportController : ControllerBase
     private async Task<DynamicProductSalesRankingReportPageDto> BuildPageAsync(
         DynamicProductSalesRankingReportRequest request)
     {
-        // 1) 纯校验先于任何发货数据读取（fail closed；含 ERP-215 客户 / 商品 / 单位筛选校验）
+        // 1) 纯校验先于任何发货数据读取（fail closed；含 ERP-215 客户 / 商品 / 单位筛选校验与 ERP-216 分组键校验）
         var fieldKeys = DynamicProductSalesRankingReportRules.NormalizeFields(request.Fields);
         var (start, end) = DynamicProductSalesRankingReportRules.ValidateDateRange(request.Start, request.End);
         var top = DynamicProductSalesRankingReportRules.ValidateTop(request.Top);
         var filter = DynamicProductSalesRankingReportRules.NormalizeFilter(request.Filter);
+        var groupBy = DynamicProductSalesRankingReportRules.NormalizeGroupBy(request.GroupBy);
 
         // 2) 每次重新校验身份 + 商品销量排名榜菜单授权 + 业务员数据范围
         var scope = await EnsureAuthorizedAsync(CurrentUserId());
@@ -112,7 +113,7 @@ public class DynamicProductSalesRankingReportController : ControllerBase
         var items = await _reportService.GetProductSalesRankingAsync(start, end, top, scope, filter);
 
         var filterText = DynamicProductSalesRankingReportRules.BuildFilterContext(filter);
-        return DynamicProductSalesRankingReportRules.BuildPage(items, fieldKeys, top, start, end, filterText);
+        return DynamicProductSalesRankingReportRules.BuildPage(items, fieldKeys, top, start, end, filterText, groupBy);
     }
 
     /// <summary>生成 Excel：数据工作表（选定列顺序 + 类型化值 + 公式注入转义） + 「报表口径」上下文工作表</summary>
