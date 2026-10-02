@@ -321,6 +321,9 @@ public static class DynamicSalesmanOutputReportRules
             items.Sum(x => x.OrderCount),
             SourceEvidenceBasis);
 
+        // ERP-239：在分页 / 选定列投影之前，基于同一份完整有界作用域化列表纯派生「全匹配」原币汇总。
+        var summary = DynamicSalesmanOutputSummaryRules.BuildSummary(items);
+
         return new DynamicSalesmanOutputReportPageDto(
             columns,
             rows,
@@ -343,7 +346,8 @@ public static class DynamicSalesmanOutputReportRules
             SourceContextText,
             SourceLimitText,
             filterText,
-            context);
+            context,
+            summary);
     }
 
     // ==================== 6. Excel 导出 ====================

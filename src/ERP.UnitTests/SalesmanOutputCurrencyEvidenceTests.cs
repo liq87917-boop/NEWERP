@@ -191,4 +191,19 @@ public class SalesmanOutputCurrencyEvidenceTests
         Assert.Equal(SalesmanOutputEvidenceRules.UnknownSalesmanName, row.SalesmanName);
         Assert.Equal(SalesmanOutputEvidenceRules.UnknownSalesmanIdentityEvidence, row.SalesmanIdentityEvidence);
     }
+
+    // ==================== 纯规则：利润 / 利润率证据（ERP-239） ====================
+
+    [Fact]
+    public void 利润与利润率证据_恒未知_不回落为0_不做当前价推算()
+    {
+        Assert.Contains("利润未知", SalesmanOutputEvidenceRules.ProfitEvidence);
+        Assert.Contains("历史", SalesmanOutputEvidenceRules.ProfitEvidence);
+        Assert.Contains("不回落为0", SalesmanOutputEvidenceRules.ProfitEvidence);
+
+        Assert.Contains("利润率未知", SalesmanOutputEvidenceRules.ProfitRateEvidence);
+        Assert.Contains("与利润同源", SalesmanOutputEvidenceRules.ProfitRateEvidence);
+        Assert.Contains("历史", SalesmanOutputEvidenceRules.ProfitRateEvidence);
+        Assert.Contains("不回落为0", SalesmanOutputEvidenceRules.ProfitRateEvidence);
+    }
 }

@@ -354,6 +354,29 @@ public class DynamicSalesmanOutputExcelTests
         Assert.Equal(1, sheet.LastRowNum);   // 仅当前页 1 行，绝不出现跨币种合计行
         Assert.DoesNotContain("合计", sheet.GetRow(0).Cells.Select(c => c.StringCellValue));
     }
+
+    [Fact]
+    public async Task Export_明细导出仍仅当前页_绝不追加全匹配汇总工作表()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedAuthorizedUser(db, "priv", "Priv", isSystemRole: true);
+        var customer = SeedCustomer(db, "C001", "客户");
+        var emp = SeedEmployee(db, "S001", "业务员甲");
+
+        SeedOrder(db, "SO-USD", customer.Id, emp.Id, Currency.USD, 100m);
+        SeedOrder(db, "SO-CNY", customer.Id, emp.Id, Currency.CNY, 200m);
+
+        var ctl = NewController(db);
+        TestAuth.SetUser(ctl, user.Id);
+
+        var req = Request(new List<string> { "currency", "totalAmount" });
+        req.PageSize = 1;
+        var file = ExportOk(await ctl.Export(req));
+        var workbook = OpenWorkbook(file.FileContents);
+
+        Assert.Equal(2, workbook.NumberOfSheets);   // 数据 + 报表口径，绝不追加全匹配汇总工作表
+        Assert.Equal(1, workbook.GetSheetAt(0).LastRowNum);   // 仅当前页 1 行
+    }
 }
 
 

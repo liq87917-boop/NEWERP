@@ -173,4 +173,61 @@ public class DynamicSalesmanOutputReportUiTests
         Assert.Contains("📄 导出当前页 PDF", js);
     }
 
+    // ==================== 6. ERP-239 全匹配汇总渲染 ====================
+
+    [Fact]
+    public void 汇总渲染_仅后端summary列与指标_不读取当前页明细行或选定列()
+    {
+        var js = Script;
+
+        Assert.Contains("function sodSummaryPanelHtml(", js);
+        Assert.Contains("function sodCurrencySummaryHtml(", js);
+
+        var fn = Segment(js, "function sodSummaryPanelHtml(", "function sodResultHtml(");
+        Assert.Contains("summary && summary.currencyColumns", js);
+        Assert.Contains("summary && summary.currencyRows", js);
+        Assert.Contains("summary.coverageText", fn);
+        Assert.Contains("summary.profitBasisText", fn);
+        // 只渲染后端返回的 summary 列与指标，绝不读取当前页明细行或选定列
+        Assert.DoesNotContain("view.rows", fn);
+        Assert.DoesNotContain("view.columns", fn);
+    }
+
+    [Fact]
+    public void 汇总渲染_全部转义_金额利润利润率未知显式渲染()
+    {
+        var js = Script;
+        var fn = Segment(js, "function sodSummaryPanelHtml(", "function sodCurrencySummaryHtml(");
+
+        Assert.Contains("sodEsc(c.label || c.key)", fn);
+        Assert.Contains("sodRenderCell(r[c.key], c)", fn);
+        Assert.Contains("sodEsc(summary.coverageText)", fn);
+        Assert.Contains("sodEsc(summary.profitBasisText)", fn);
+        Assert.Contains("全匹配原币汇总", js);
+    }
+
+    [Fact]
+    public void 结果区_插入全匹配汇总_独立于当前页明细与选定列()
+    {
+        var js = Script;
+        var fn = Segment(js, "function sodResultHtml(", "function sodFieldChooserHtml(");
+
+        Assert.Contains("const summaryHtml = sodCurrencySummaryHtml(view);", fn);
+        Assert.Contains("${summaryHtml}${body}", fn);
+    }
+
+    [Fact]
+    public void 汇总面板_始终显示日期筛选来源上限与覆盖范围_独立于选定列()
+    {
+        var js = Script;
+        var fn = Segment(js, "function sodCurrencySummaryHtml(", "function sodResultHtml(");
+
+        Assert.Contains("view.start", fn);
+        Assert.Contains("view.end", fn);
+        Assert.Contains("fmtDate(view.start)", fn);
+        Assert.Contains("view.filterText", fn);
+        Assert.Contains("view.sourceLimitText", fn);
+        Assert.Contains("summary.coverageText", js);
+    }
+
 }

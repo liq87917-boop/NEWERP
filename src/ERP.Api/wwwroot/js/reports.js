@@ -3686,6 +3686,32 @@ function sodScopeLine(view) {
   return `${sodEsc(c.label || '')}：行 ${c.salesmanCurrencyRows} · 去重业务员 ${c.uniqueSalesmen} · 已分配已审核订单 ${c.assignedApprovedOrders} · ${sodEsc(c.evidenceBasis || '')}`;
 }
 
+/* ERP-239 全匹配原币汇总面板：独立于当前页明细行与选定列渲染，仅渲染后端返回的 summary 列与指标，全部转义；空 / 无汇总不渲染 */
+function sodSummaryPanelHtml(summary, title, columns, rows, context) {
+  if (!summary || !columns || !columns.length) return '';
+  const align = c => (c.dataType === 'number') ? ' class="text-right"' : '';
+  const head = columns.map(c => `<th${align(c)}>${sodEsc(c.label || c.key)}</th>`).join('');
+  const body = (rows && rows.length)
+    ? rows.map(r => `<tr>${columns.map(c => `<td${align(c)}>${sodRenderCell(r[c.key], c)}</td>`).join('')}</tr>`).join('')
+    : '';
+  const ctx = context ? `<div class="text-muted" style="margin:6px 0">${context}</div>` : '';
+  const coverage = summary.coverageText ? `<div class="text-muted" style="margin:6px 0">${sodEsc(summary.coverageText)}</div>` : '';
+  const profitBasis = summary.profitBasisText ? `<div class="text-muted" style="margin:6px 0">${sodEsc(summary.profitBasisText)}</div>` : '';
+  return `<div class="pd-hint" style="margin-top:10px"><b>${sodEsc(title)}</b></div>${ctx}${coverage}${profitBasis}<div class="table-wrap"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
+}
+
+/* ERP-239 全匹配原币汇总：按原始原币合并全部匹配业务员 × 原币证据行；金额仅在此汇总面板出现；始终显示日期 / 应用筛选 / 来源上限与覆盖范围 */
+function sodCurrencySummaryHtml(view) {
+  const summary = view && view.summary;
+  if (!summary) return '';
+  const ctx = [
+    (view && view.start && view.end) ? `日期 ${fmtDate(view.start)} ~ ${fmtDate(view.end)}` : '',
+    (view && view.filterText) ? sodEsc(view.filterText) : '',
+    (view && view.sourceLimitText) ? sodEsc(view.sourceLimitText) : '',
+  ].filter(Boolean).join('；');
+  return sodSummaryPanelHtml(summary, '全匹配原币汇总（按原始原币合并全部匹配业务员 × 原币证据行）', summary.currencyColumns, summary.currencyRows, ctx);
+}
+
 /* 结果区渲染：先给范围 / 口径提示（即使对应列被取消选择也始终显示），再渲染空态或表格 + 分页 */
 function sodResultHtml(view) {
   if (!view) return '';
@@ -3700,10 +3726,11 @@ function sodResultHtml(view) {
     view.sourceContextText,
   ].filter(Boolean).map(t => `<div class="pd-hint" style="margin:0 0 8px">${sodEsc(t)}</div>`).join('');
   const scope = `<div class="pd-hint" style="margin:0 0 8px">${sodScopeLine(view)}</div>`;
+  const summaryHtml = sodCurrencySummaryHtml(view);
   const body = view.rows && view.rows.length
     ? sodTableHtml(view) + sodPagingHtml(view)
     : sodEmptyHtml(view);
-  return `${scope}${filterLine}${hints}${body}`;
+  return `${scope}${filterLine}${hints}${summaryHtml}${body}`;
 }
 
 /* 字段选择器：只由目录白名单渲染为复选框，绝不渲染自由输入框或 SQL */

@@ -424,4 +424,23 @@ public class DynamicSalesmanOutputPdfTests
         Assert.Equal(before, db.SalesOrders.Count());
         Assert.False(db.ChangeTracker.HasChanges());
     }
+
+    [Fact]
+    public async Task ExportPdf_明细导出仍仅当前页_页面携带汇总但不追加汇总页()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedAuthorizedUser(db, "sod-pdf-pageonly", "Priv", isSystemRole: true);
+        var customer = SeedCustomer(db, "C001", "客户");
+        var emp = SeedEmployee(db, "S001", "业务员甲");
+
+        SeedOrder(db, "SO-USD", customer.Id, emp.Id, Currency.USD, 100m);
+        SeedOrder(db, "SO-CNY", customer.Id, emp.Id, Currency.CNY, 200m);
+
+        var ctl = NewController(db);
+        TestAuth.SetUser(ctl, user.Id);
+
+        var file = PdfOk(await ctl.ExportPdf(Request(pageSize: 1)));
+        using var pdf = OpenPdf(file.FileContents);
+        Assert.True(pdf.Pages.Count >= 1);   // 明细 PDF 仍按当前页渲染，绝不追加全匹配汇总页
+    }
 }

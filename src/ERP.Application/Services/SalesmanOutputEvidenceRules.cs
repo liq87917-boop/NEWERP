@@ -32,6 +32,9 @@ public static class SalesmanOutputEvidenceRules
     /// <summary>利润证据标签（未知原因）</summary>
     public const string ProfitEvidence = "利润未知：当前商品售价/成本价不能证明历史可比较成本/利润，不回落为0";
 
+    /// <summary>利润率证据标签（未知原因：与利润同源，当前商品售价/成本价不能证明历史可比较成本/利润）</summary>
+    public const string ProfitRateEvidence = "利润率未知：与利润同源，当前商品售价/成本价不能证明历史可比较成本/利润，不回落为0";
+
     /// <summary>原币分组键：保留原始枚举键（已知为名称如 USD；未知 / 无效为原始数值如 999），绝不折叠为默认币种或推断汇率</summary>
     public static string CurrencyGroupKey(Currency currency) => currency.ToString();
 

@@ -126,4 +126,5 @@ public sealed record DynamicSalesmanOutputReportPageDto(
     string SourceContextText,
     string SourceLimitText,
     string FilterText,
-    DynamicSalesmanOutputReportContextDto Context);
+    DynamicSalesmanOutputReportContextDto Context,
+    DynamicSalesmanOutputSummaryDto? Summary = null);

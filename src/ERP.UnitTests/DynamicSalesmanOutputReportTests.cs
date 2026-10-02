@@ -391,6 +391,38 @@ public class DynamicSalesmanOutputReportTests
         var previewEx = await Assert.ThrowsAsync<BusinessException>(() => ctl.Preview(Request()));
         Assert.Equal(ErrorCodes.Forbidden, previewEx.Code);
     }
+
+    [Fact]
+    public async Task 预览_全匹配汇总覆盖全部匹配行_与分页和选定列无关()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedAuthorizedUser(db, "priv", "Priv", isSystemRole: true);
+        var customer = SeedCustomer(db, "C001", "客户");
+        var emp1 = SeedEmployee(db, "S001", "业务员甲");
+        var emp2 = SeedEmployee(db, "S002", "业务员乙");
+
+        SeedOrder(db, "SO-1", customer.Id, emp1.Id, Currency.USD, 1000m);
+        SeedOrder(db, "SO-2", customer.Id, emp2.Id, Currency.USD, -200m);
+        SeedOrder(db, "SO-3", customer.Id, emp1.Id, Currency.CNY, 500m);
+
+        var ctl = BuildController(db, user.Id);
+        TestAuth.SetUser(ctl, user.Id);
+
+        // 越界页 + 隐藏字段（仅选定 currency）时汇总仍覆盖全部匹配行
+        var page = OkPage(await ctl.Preview(Request(fields: new List<string> { "currency" }, page: 9, pageSize: 1)));
+
+        Assert.NotNull(page.Summary);
+        Assert.Single(page.Columns);
+        Assert.Empty(page.Rows);
+        Assert.Equal(2, page.Summary.CurrencyRows.Count);
+
+        var usd = Assert.Single(page.Summary.CurrencyRows.Where(r => r.Currency == "USD"));
+        Assert.Equal(800m, usd.TotalAmount);       // 1000 + (-200)，覆盖全部匹配行
+        Assert.Equal(2, usd.SalesmanCount);
+        Assert.Equal(2, usd.OrderCount);
+        Assert.Null(usd.TotalProfit);
+        Assert.Null(usd.ProfitRate);
+    }
 }
 
 
