@@ -1,0 +1,78 @@
+{
+  "title": "Design and export scoped order profit evidence pages to Excel",
+  "description": "A user opens a field designer from the existing order-profit report and selects approved order evidence columns for preview/Excel. Introduce narrow DTO/rules/controller files with a finite field whitelist derived from ERP-220 row DTOs (identity/date/customer/original currency/sales and explicit cost/profit unknown evidence; any current-price estimate remains separately labeled). Preserve selected field order; date validation and source caps must reuse the authorized bounded service, with Page>=1 and PageSize 1..200, stable page slicing and server Total/PageOnly metadata. Catalog/preview/Excel each recheck identity/order-profit menu/fresh ERP scope; no cached permission or client-supplied totals. Designer supports dates, fields, page controls, empty/denied/invalid/network states and safe text, showing page-only coverage, original currency and unknown basis even when corresponding columns are deselected. Excel reruns the same preview, exports selected page fields in order as numeric/date/formula-safe text cells, and records date/page/source limits and missing cost basis; null amount is unknown rather than numeric zero, no cross-currency sums. Do not add production DB configuration or new menus. Development only: reuse existing ERP order-profit menu, current-user SalespersonDataScopeService and existing OperationLogMiddleware HTTP audit; remain read-only. No client-supplied identity/scope/rows/amount totals, permission expansion, arbitrary/model-generated SQL, direct table/business writes, new domain entities or persistence schema, schema/view/stored-procedure changes, migrations, production SQL or real database execution, secrets/.env/config changes, irreversible operations, production deployment or real browser acceptance. Keep unrelated work. Run focused in-memory unit/API/export/UI source-contract tests plus configured safe Release build/test. Unavailable external environment acceptance must be marked environment-blocked, never fabricated passed.",
+  "depends_on": [
+    "ERP-220"
+  ],
+  "risk_level": "medium",
+  "priority": "P1",
+  "acceptance_criteria": [
+    "Finite catalog and validated fields/dates/Page/PageSize drive a freshly authorized bounded service preview; stable selected-page rows retain original currency and unknown-cost evidence with server-derived Total/PageOnly metadata.",
+    "Existing order-profit entry opens a field/date/page designer preserving selection order and effective server context, with safe text and clear unknown/empty/denied/error states; no cross-currency totals or profit claims.",
+    "Excel independently rechecks authorization/validation and exports only selected page fields with typed values, formula-safe labels, explicit null/unknown values and date/page/currency/basis context; API/workbook/UI regressions and safe Release build/test pass."
+  ],
+  "criterion_path_map": {
+    "Finite catalog and validated fields/dates/Page/PageSize drive a freshly authorized bounded service preview; stable selected-page rows retain original currency and unknown-cost evidence with server-derived Total/PageOnly metadata.": [
+      "src/ERP.Application/DTOs/DynamicOrderProfitEstimateReportDtos.cs",
+      "src/ERP.Application/Services/DynamicOrderProfitEstimateReportRules.cs",
+      "src/ERP.Api/Controllers/DynamicOrderProfitEstimateReportController.cs",
+      "src/ERP.Application/Interfaces/IReportService.cs",
+      "src/ERP.Application/Services/ReportService.cs",
+      "src/ERP.Application/Interfaces/ReportDtos.cs",
+      "src/ERP.UnitTests/DynamicOrderProfitEstimateReportTests.cs"
+    ],
+    "Existing order-profit entry opens a field/date/page designer preserving selection order and effective server context, with safe text and clear unknown/empty/denied/error states; no cross-currency totals or profit claims.": [
+      "src/ERP.Api/wwwroot/js/reports.js",
+      "src/ERP.Application/DTOs/DynamicOrderProfitEstimateReportDtos.cs",
+      "src/ERP.Application/Services/DynamicOrderProfitEstimateReportRules.cs",
+      "src/ERP.UnitTests/DynamicOrderProfitEstimateReportUiTests.cs",
+      "src/ERP.UnitTests/OrderProfitEstimateReportUiTests.cs"
+    ],
+    "Excel independently rechecks authorization/validation and exports only selected page fields with typed values, formula-safe labels, explicit null/unknown values and date/page/currency/basis context; API/workbook/UI regressions and safe Release build/test pass.": [
+      "src/ERP.Api/Controllers/DynamicOrderProfitEstimateReportController.cs",
+      "src/ERP.Application/DTOs/DynamicOrderProfitEstimateReportDtos.cs",
+      "src/ERP.Application/Services/DynamicOrderProfitEstimateReportRules.cs",
+      "src/ERP.Api/wwwroot/js/reports.js",
+      "src/ERP.UnitTests/DynamicOrderProfitEstimateExcelTests.cs",
+      "src/ERP.UnitTests/DynamicOrderProfitEstimateReportTests.cs",
+      "src/ERP.UnitTests/DynamicOrderProfitEstimateReportUiTests.cs",
+      "src/ERP.UnitTests/OrderProfitEstimateCurrencyTests.cs",
+      "src/ERP.UnitTests/OrderProfitEstimateScopeTests.cs",
+      "src/ERP.UnitTests/OrderProfitEstimateQueryBoundsTests.cs"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Application/DTOs/DynamicOrderProfitEstimateReportDtos.cs",
+    "src/ERP.Application/Services/DynamicOrderProfitEstimateReportRules.cs",
+    "src/ERP.Api/Controllers/DynamicOrderProfitEstimateReportController.cs",
+    "src/ERP.Application/Interfaces/IReportService.cs",
+    "src/ERP.Application/Services/ReportService.cs",
+    "src/ERP.Application/Interfaces/ReportDtos.cs",
+    "src/ERP.UnitTests/DynamicOrderProfitEstimateReportTests.cs",
+    "src/ERP.Api/wwwroot/js/reports.js",
+    "src/ERP.UnitTests/DynamicOrderProfitEstimateReportUiTests.cs",
+    "src/ERP.UnitTests/OrderProfitEstimateReportUiTests.cs",
+    "src/ERP.UnitTests/DynamicOrderProfitEstimateExcelTests.cs",
+    "src/ERP.UnitTests/OrderProfitEstimateCurrencyTests.cs",
+    "src/ERP.UnitTests/OrderProfitEstimateScopeTests.cs",
+    "src/ERP.UnitTests/OrderProfitEstimateQueryBoundsTests.cs"
+  ],
+  "status": "pending",
+  "max_attempts": 3,
+  "attempts": 0,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only scoped read/report feature"
+  },
+  "id": "ERP-221",
+  "created_at": "2026-10-02T03:39:56.618723Z"
+}

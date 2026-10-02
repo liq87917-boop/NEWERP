@@ -1,0 +1,66 @@
+{
+  "title": "Download scoped designed order profit evidence pages as PDF",
+  "description": "A user downloads the current order-profit evidence design as a Chinese PDF. Add a PDF endpoint to the existing dynamic controller and a narrow Infrastructure exporter using existing PDFsharp/SimHeiPdfFontResolver. Revalidate fields/dates/page and reauthorize identity/order-profit menu/fresh ERP scope on every request, using the same server-derived preview even when no preview was requested. Preserve selected field order and current page/date/source-limit coverage; retain explicit original-currency/unknown-cost warnings regardless of selected columns. Render numeric known sales and unknown cost/profit distinctly, paginate rows and wide column bands, give explicit empty evidence, never combine currencies or claim realized profit. Missing font/render failures return a clear error with no corrupt file. Designer retains current request values and handles errors; Excel remains compatible. Development only: reuse existing ERP order-profit menu, current-user SalespersonDataScopeService and existing OperationLogMiddleware HTTP audit; remain read-only. No client-supplied identity/scope/rows/amount totals, permission expansion, arbitrary/model-generated SQL, direct table/business writes, new domain entities or persistence schema, schema/view/stored-procedure changes, migrations, production SQL or real database execution, secrets/.env/config changes, irreversible operations, production deployment or real browser acceptance. Keep unrelated work. Run focused in-memory unit/API/export/UI source-contract tests plus configured safe Release build/test. Unavailable external environment acceptance must be marked environment-blocked, never fabricated passed.",
+  "depends_on": [
+    "ERP-221"
+  ],
+  "risk_level": "low",
+  "priority": "P1",
+  "acceptance_criteria": [
+    "PDF revalidates the current selected fields/date/page request and rechecks current identity/menu/customer scope via the same preview; revoked or invalid requests return no file.",
+    "Infrastructure PDF preserves selected columns, row/column pagination, original-currency and unknown-basis labels plus page-only/source-limit context and empty evidence; missing font/render failures are explicit.",
+    "Designer sends current fields/dates/page to PDF and preserves state on download errors; PDF/UI and Excel compatibility tests plus safe Release build/test pass."
+  ],
+  "criterion_path_map": {
+    "PDF revalidates the current selected fields/date/page request and rechecks current identity/menu/customer scope via the same preview; revoked or invalid requests return no file.": [
+      "src/ERP.Api/Controllers/DynamicOrderProfitEstimateReportController.cs",
+      "src/ERP.Application/DTOs/DynamicOrderProfitEstimateReportDtos.cs",
+      "src/ERP.Application/Services/DynamicOrderProfitEstimateReportRules.cs",
+      "src/ERP.UnitTests/DynamicOrderProfitEstimatePdfTests.cs",
+      "src/ERP.UnitTests/DynamicOrderProfitEstimateReportTests.cs"
+    ],
+    "Infrastructure PDF preserves selected columns, row/column pagination, original-currency and unknown-basis labels plus page-only/source-limit context and empty evidence; missing font/render failures are explicit.": [
+      "src/ERP.Infrastructure/Export/DynamicOrderProfitEstimatePdfExporter.cs",
+      "src/ERP.Application/DTOs/DynamicOrderProfitEstimateReportDtos.cs",
+      "src/ERP.Application/Services/DynamicOrderProfitEstimateReportRules.cs",
+      "src/ERP.UnitTests/DynamicOrderProfitEstimatePdfTests.cs"
+    ],
+    "Designer sends current fields/dates/page to PDF and preserves state on download errors; PDF/UI and Excel compatibility tests plus safe Release build/test pass.": [
+      "src/ERP.Api/wwwroot/js/reports.js",
+      "src/ERP.Api/Controllers/DynamicOrderProfitEstimateReportController.cs",
+      "src/ERP.Infrastructure/Export/DynamicOrderProfitEstimatePdfExporter.cs",
+      "src/ERP.UnitTests/DynamicOrderProfitEstimateReportUiTests.cs",
+      "src/ERP.UnitTests/DynamicOrderProfitEstimatePdfTests.cs",
+      "src/ERP.UnitTests/DynamicOrderProfitEstimateExcelTests.cs"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/DynamicOrderProfitEstimateReportController.cs",
+    "src/ERP.Application/DTOs/DynamicOrderProfitEstimateReportDtos.cs",
+    "src/ERP.Application/Services/DynamicOrderProfitEstimateReportRules.cs",
+    "src/ERP.UnitTests/DynamicOrderProfitEstimatePdfTests.cs",
+    "src/ERP.UnitTests/DynamicOrderProfitEstimateReportTests.cs",
+    "src/ERP.Infrastructure/Export/DynamicOrderProfitEstimatePdfExporter.cs",
+    "src/ERP.Api/wwwroot/js/reports.js",
+    "src/ERP.UnitTests/DynamicOrderProfitEstimateReportUiTests.cs",
+    "src/ERP.UnitTests/DynamicOrderProfitEstimateExcelTests.cs"
+  ],
+  "status": "pending",
+  "max_attempts": 3,
+  "attempts": 0,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only scoped read/report feature"
+  },
+  "id": "ERP-222",
+  "created_at": "2026-10-02T03:39:56.618780Z"
+}

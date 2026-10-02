@@ -1,0 +1,67 @@
+{
+  "title": "Show original currency and unknown cost basis in order profit evidence",
+  "description": "A user can distinguish original-currency approved order amounts from unsupported cost/profit calculations in the existing order-profit report. Current BaseProduct.CostPrice has no currency metadata, so never assume it matches order Currency, subtract it from original-currency sales or claim FOB/CIF/DDP actual profit. Add order/customer IDs, original Currency code/label and explicit cost/profit evidence labels to report DTOs. Keep SalesAmount as order.TotalAmount in its original currency; CostAmount, Profit and ProfitRate are nullable unknown until a trustworthy comparable historical cost basis exists, and must not fall back to zero. Optionally expose the legacy quantity times current CostPrice solely as a separately named current-price estimate with currency-unknown label; if details/product are missing/deleted/incomplete the estimate is null with an explicit reason. Do not invent FX conversion, change totals/prices or introduce historical costing. UI uses explicit unknown markers, safe text and per-row currency; remove generic cross-currency totals/profit rate KPI and misleading logistics-profit language for this report. Existing report service/API signatures remain compatible with ERP-219 scope enforcement. Development only: reuse existing ERP order-profit menu, current-user SalespersonDataScopeService and existing OperationLogMiddleware HTTP audit; remain read-only. No client-supplied identity/scope/rows/amount totals, permission expansion, arbitrary/model-generated SQL, direct table/business writes, new domain entities or persistence schema, schema/view/stored-procedure changes, migrations, production SQL or real database execution, secrets/.env/config changes, irreversible operations, production deployment or real browser acceptance. Keep unrelated work. Run focused in-memory unit/API/export/UI source-contract tests plus configured safe Release build/test. Unavailable external environment acceptance must be marked environment-blocked, never fabricated passed.",
+  "depends_on": [
+    "ERP-219"
+  ],
+  "risk_level": "medium",
+  "priority": "P1",
+  "acceptance_criteria": [
+    "Rows retain order/customer identity and original order currency; sales stays in original currency, incomparable CostAmount/Profit/ProfitRate are null with explicit evidence reason and never computed by subtracting unknown-currency current cost.",
+    "Any exposed current-price estimate has its own unknown-currency label and becomes unknown for unavailable product/detail evidence; UI renders nulls/currency safely without cross-currency grand totals or actual-profit claims.",
+    "Tests cover mixed currencies, unknown enum currency, missing/deleted products, empty/incomplete details, known zero versus unknown cost and unchanged stored order amounts; scope/bounds regressions and safe Release build/test pass."
+  ],
+  "criterion_path_map": {
+    "Rows retain order/customer identity and original order currency; sales stays in original currency, incomparable CostAmount/Profit/ProfitRate are null with explicit evidence reason and never computed by subtracting unknown-currency current cost.": [
+      "src/ERP.Application/Interfaces/ReportDtos.cs",
+      "src/ERP.Application/Services/ReportService.cs",
+      "src/ERP.Api/Controllers/ReportController.cs",
+      "src/ERP.UnitTests/OrderProfitEstimateCurrencyTests.cs",
+      "src/ERP.UnitTests/ReportServiceTests.cs"
+    ],
+    "Any exposed current-price estimate has its own unknown-currency label and becomes unknown for unavailable product/detail evidence; UI renders nulls/currency safely without cross-currency grand totals or actual-profit claims.": [
+      "src/ERP.Application/Interfaces/ReportDtos.cs",
+      "src/ERP.Application/Services/ReportService.cs",
+      "src/ERP.Api/wwwroot/js/reports.js",
+      "src/ERP.UnitTests/OrderProfitEstimateCurrencyTests.cs",
+      "src/ERP.UnitTests/OrderProfitEstimateReportUiTests.cs",
+      "src/ERP.UnitTests/ReportServiceTests.cs"
+    ],
+    "Tests cover mixed currencies, unknown enum currency, missing/deleted products, empty/incomplete details, known zero versus unknown cost and unchanged stored order amounts; scope/bounds regressions and safe Release build/test pass.": [
+      "src/ERP.UnitTests/OrderProfitEstimateCurrencyTests.cs",
+      "src/ERP.UnitTests/OrderProfitEstimateReportUiTests.cs",
+      "src/ERP.UnitTests/OrderProfitEstimateScopeTests.cs",
+      "src/ERP.UnitTests/OrderProfitEstimateQueryBoundsTests.cs",
+      "src/ERP.UnitTests/ReportServiceTests.cs"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Application/Interfaces/ReportDtos.cs",
+    "src/ERP.Application/Services/ReportService.cs",
+    "src/ERP.Api/Controllers/ReportController.cs",
+    "src/ERP.UnitTests/OrderProfitEstimateCurrencyTests.cs",
+    "src/ERP.UnitTests/ReportServiceTests.cs",
+    "src/ERP.Api/wwwroot/js/reports.js",
+    "src/ERP.UnitTests/OrderProfitEstimateReportUiTests.cs",
+    "src/ERP.UnitTests/OrderProfitEstimateScopeTests.cs",
+    "src/ERP.UnitTests/OrderProfitEstimateQueryBoundsTests.cs"
+  ],
+  "status": "pending",
+  "max_attempts": 3,
+  "attempts": 0,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only scoped read/report feature"
+  },
+  "id": "ERP-220",
+  "created_at": "2026-10-02T03:39:56.618670Z"
+}

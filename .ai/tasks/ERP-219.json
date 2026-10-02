@@ -1,0 +1,64 @@
+{
+  "title": "Scope and bound approved sales order profit evidence queries",
+  "description": "A user opens the existing order-profit report and sees only approved nondeleted sales orders within the current ERP customer scope. Recheck identity and existing order-profit menu each HTTP request; missing db/user/menu or unmapped user must fail closed. Require resolved scope in the existing report service and update all existing callers/tests; do not expose a scope-free bypass. Validate an inclusive date window of at most 366 days before reads, including date overflow; use end-next-day exclusive SQL comparison and stable OrderDate descending/Id tie order. Read at most 501 scoped headers to enforce a 500-order cap and at most 10001 nondeleted details to enforce a 10000-detail cap; overflow returns an explicit report-limit error and no partial/misleading rows or amounts. Only then resolve product/customer data by scoped IDs using fixed batch queries, with no per-order reads or unbounded loading. Existing estimation arithmetic is addressed by the dependent monetary-semantics task; this increment establishes authorized bounded order evidence. Development only: reuse existing ERP order-profit menu, current-user SalespersonDataScopeService and existing OperationLogMiddleware HTTP audit; remain read-only. No client-supplied identity/scope/rows/amount totals, permission expansion, arbitrary/model-generated SQL, direct table/business writes, new domain entities or persistence schema, schema/view/stored-procedure changes, migrations, production SQL or real database execution, secrets/.env/config changes, irreversible operations, production deployment or real browser acceptance. Keep unrelated work. Run focused in-memory unit/API/export/UI source-contract tests plus configured safe Release build/test. Unavailable external environment acceptance must be marked environment-blocked, never fabricated passed.",
+  "depends_on": [
+    "ERP-097"
+  ],
+  "risk_level": "medium",
+  "priority": "P1",
+  "acceptance_criteria": [
+    "Every legacy order-profit HTTP request rechecks identity/menu/current ERP scope and the service requires scope; only approved nondeleted scoped orders and nondeleted details contribute, with no unauthorized names or amounts.",
+    "Inclusive dates are limited to 366 days and validated before reads; scoped SQL queries enforce 500 orders/10000 details, fail explicitly on overflow without partial rows and use stable date/Id ordering with fixed batch lookups.",
+    "Tests cover missing identity/db/menu, unmapped/revoked scope, excluded draft/cancelled/deleted records, date boundaries, stable ties and cap overflow; existing report tests and safe Release build/test pass."
+  ],
+  "criterion_path_map": {
+    "Every legacy order-profit HTTP request rechecks identity/menu/current ERP scope and the service requires scope; only approved nondeleted scoped orders and nondeleted details contribute, with no unauthorized names or amounts.": [
+      "src/ERP.Api/Controllers/ReportController.cs",
+      "src/ERP.Application/Interfaces/IReportService.cs",
+      "src/ERP.Application/Services/ReportService.cs",
+      "src/ERP.UnitTests/OrderProfitEstimateScopeTests.cs",
+      "src/ERP.UnitTests/ReportServiceTests.cs"
+    ],
+    "Inclusive dates are limited to 366 days and validated before reads; scoped SQL queries enforce 500 orders/10000 details, fail explicitly on overflow without partial rows and use stable date/Id ordering with fixed batch lookups.": [
+      "src/ERP.Application/Services/ReportService.cs",
+      "src/ERP.Application/Interfaces/IReportService.cs",
+      "src/ERP.UnitTests/OrderProfitEstimateScopeTests.cs",
+      "src/ERP.UnitTests/OrderProfitEstimateQueryBoundsTests.cs",
+      "src/ERP.UnitTests/ReportServiceTests.cs"
+    ],
+    "Tests cover missing identity/db/menu, unmapped/revoked scope, excluded draft/cancelled/deleted records, date boundaries, stable ties and cap overflow; existing report tests and safe Release build/test pass.": [
+      "src/ERP.Api/Controllers/ReportController.cs",
+      "src/ERP.Application/Interfaces/IReportService.cs",
+      "src/ERP.Application/Services/ReportService.cs",
+      "src/ERP.UnitTests/OrderProfitEstimateScopeTests.cs",
+      "src/ERP.UnitTests/OrderProfitEstimateQueryBoundsTests.cs",
+      "src/ERP.UnitTests/ReportServiceTests.cs"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/ReportController.cs",
+    "src/ERP.Application/Interfaces/IReportService.cs",
+    "src/ERP.Application/Services/ReportService.cs",
+    "src/ERP.UnitTests/OrderProfitEstimateScopeTests.cs",
+    "src/ERP.UnitTests/ReportServiceTests.cs",
+    "src/ERP.UnitTests/OrderProfitEstimateQueryBoundsTests.cs"
+  ],
+  "status": "pending",
+  "max_attempts": 3,
+  "attempts": 0,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only scoped read/report feature"
+  },
+  "id": "ERP-219",
+  "created_at": "2026-10-02T03:39:56.618162Z"
+}
