@@ -1,0 +1,71 @@
+{
+  "title": "Export Top-only product shipment unit summaries to PDF",
+  "description": "A user downloads the current product ranking design with unit-separated quantity summary evidence as PDF. Extend the existing PDF endpoint/exporter using the same freshly authorized preview and existing PDFsharp/SimHeiPdfFontResolver. When unit grouping is selected render stable group sections with bucket counts, signed known-unit subtotals and explicit unknown quantities, with row/page pagination and current Top/filter/date/unit context. Retain selected detail column order and none-group PDF compatibility. Never include money, cross-unit grand quantity or full-range completeness claims; missing font/render failures return a clear error with no corrupt file. Designer sends all current request values and reports failure; Excel remains compatible. Development only: reuse approved nondeleted StockOut/StockOutDetails evidence, the product-sales-ranking menu and fresh current-user SalespersonDataScopeService; retain existing OperationLogMiddleware HTTP audit. Never widen ERP permissions or accept client rows/aggregates as authority. No arbitrary/model-generated SQL, direct business/table writes, new domain entities or persistence schema, schema/view/stored-procedure changes, migrations, production SQL or real database execution, production deployment, secrets/.env/config changes, irreversible operations or real browser acceptance. Keep unrelated work. Run focused in-memory unit/API/export/UI source-contract tests plus configured safe Release build/test. Any external environment acceptance that cannot run must be marked environment-blocked, never fabricated passed.",
+  "depends_on": [
+    "ERP-217"
+  ],
+  "risk_level": "low",
+  "priority": "P1",
+  "acceptance_criteria": [
+    "PDF reruns current authorization/validation and consumes server-derived filtered Top groups, rejecting revoked/invalid requests without a file and retaining none-group compatibility.",
+    "Infrastructure PDF exporter renders exact-unit Top-only counts and signed known quantities with unknown-unit evidence, pagination and normalized filter context, preserving detail columns and explicit font/render failure.",
+    "Designer preserves current grouping/filter/date/Top/fields in PDF requests and error states; focused PDF/UI and Excel compatibility tests plus safe Release build/test pass."
+  ],
+  "criterion_path_map": {
+    "PDF reruns current authorization/validation and consumes server-derived filtered Top groups, rejecting revoked/invalid requests without a file and retaining none-group compatibility.": [
+      "src/ERP.Api/Controllers/DynamicProductSalesRankingReportController.cs",
+      "src/ERP.Application/DTOs/DynamicProductSalesRankingReportDtos.cs",
+      "src/ERP.Application/Services/DynamicProductSalesRankingReportRules.cs",
+      "src/ERP.UnitTests/DynamicProductSalesRankingGroupedPdfTests.cs",
+      "src/ERP.UnitTests/DynamicProductSalesRankingPdfTests.cs"
+    ],
+    "Infrastructure PDF exporter renders exact-unit Top-only counts and signed known quantities with unknown-unit evidence, pagination and normalized filter context, preserving detail columns and explicit font/render failure.": [
+      "src/ERP.Infrastructure/Export/DynamicProductSalesRankingPdfExporter.cs",
+      "src/ERP.Application/DTOs/DynamicProductSalesRankingReportDtos.cs",
+      "src/ERP.Application/Services/DynamicProductSalesRankingReportRules.cs",
+      "src/ERP.UnitTests/DynamicProductSalesRankingGroupedPdfTests.cs",
+      "src/ERP.UnitTests/DynamicProductSalesRankingPdfTests.cs"
+    ],
+    "Designer preserves current grouping/filter/date/Top/fields in PDF requests and error states; focused PDF/UI and Excel compatibility tests plus safe Release build/test pass.": [
+      "src/ERP.Api/wwwroot/js/reports.js",
+      "src/ERP.Api/Controllers/DynamicProductSalesRankingReportController.cs",
+      "src/ERP.UnitTests/DynamicProductSalesRankingReportUiTests.cs",
+      "src/ERP.UnitTests/DynamicProductSalesRankingGroupUiTests.cs",
+      "src/ERP.UnitTests/DynamicProductSalesRankingGroupedPdfTests.cs",
+      "src/ERP.UnitTests/DynamicProductSalesRankingPdfTests.cs",
+      "src/ERP.UnitTests/DynamicProductSalesRankingGroupedExcelTests.cs",
+      "src/ERP.UnitTests/DynamicProductSalesRankingExcelTests.cs"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/DynamicProductSalesRankingReportController.cs",
+    "src/ERP.Application/DTOs/DynamicProductSalesRankingReportDtos.cs",
+    "src/ERP.Application/Services/DynamicProductSalesRankingReportRules.cs",
+    "src/ERP.UnitTests/DynamicProductSalesRankingGroupedPdfTests.cs",
+    "src/ERP.UnitTests/DynamicProductSalesRankingPdfTests.cs",
+    "src/ERP.Infrastructure/Export/DynamicProductSalesRankingPdfExporter.cs",
+    "src/ERP.Api/wwwroot/js/reports.js",
+    "src/ERP.UnitTests/DynamicProductSalesRankingReportUiTests.cs",
+    "src/ERP.UnitTests/DynamicProductSalesRankingGroupUiTests.cs",
+    "src/ERP.UnitTests/DynamicProductSalesRankingGroupedExcelTests.cs",
+    "src/ERP.UnitTests/DynamicProductSalesRankingExcelTests.cs"
+  ],
+  "status": "pending",
+  "max_attempts": 3,
+  "attempts": 0,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only bounded read/report feature"
+  },
+  "id": "ERP-218",
+  "created_at": "2026-10-02T02:39:47.672807Z"
+}

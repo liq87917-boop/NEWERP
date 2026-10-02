@@ -1,0 +1,64 @@
+{
+  "title": "Export Top-only product shipment unit summaries to Excel",
+  "description": "A user downloads the current product ranking design with an optional exact-unit summary worksheet. Extend the existing Excel endpoint to rerun the current validated/authorized preview, append server-derived unit groups only when unit grouping is selected, and preserve detail column order and filters/date/Top context. Unit summary has ranking-bucket count, signed quantity subtotal for known units and explicit unknown quantity for blank units; all group context says current Top only. Text must be formula-safe, count and known quantity numeric, unknown quantity not zero; no money or cross-unit grand quantity. Designer Excel sends current GroupBy even without prior preview, preserves form state on errors and keeps none-group export compatible. Development only: reuse approved nondeleted StockOut/StockOutDetails evidence, the product-sales-ranking menu and fresh current-user SalespersonDataScopeService; retain existing OperationLogMiddleware HTTP audit. Never widen ERP permissions or accept client rows/aggregates as authority. No arbitrary/model-generated SQL, direct business/table writes, new domain entities or persistence schema, schema/view/stored-procedure changes, migrations, production SQL or real database execution, production deployment, secrets/.env/config changes, irreversible operations or real browser acceptance. Keep unrelated work. Run focused in-memory unit/API/export/UI source-contract tests plus configured safe Release build/test. Any external environment acceptance that cannot run must be marked environment-blocked, never fabricated passed.",
+  "depends_on": [
+    "ERP-216"
+  ],
+  "risk_level": "low",
+  "priority": "P1",
+  "acceptance_criteria": [
+    "Excel reruns authorization/validation and uses the same server-derived exact-unit groups for current filtered Top evidence; grouping none retains legacy detail workbook behavior.",
+    "Summary worksheet preserves stable unit order, typed count/known quantity, explicit unknown quantity, formula-safe labels and Top/filter/date context without money or cross-unit grand quantity.",
+    "Designer sends current GroupBy/filters/fields/date/Top on Excel downloads and surfaces errors; workbook tests cover hidden fields/negative values/unknown units/empty results/revoked permission and safe Release build/test passes."
+  ],
+  "criterion_path_map": {
+    "Excel reruns authorization/validation and uses the same server-derived exact-unit groups for current filtered Top evidence; grouping none retains legacy detail workbook behavior.": [
+      "src/ERP.Api/Controllers/DynamicProductSalesRankingReportController.cs",
+      "src/ERP.Application/DTOs/DynamicProductSalesRankingReportDtos.cs",
+      "src/ERP.Application/Services/DynamicProductSalesRankingReportRules.cs",
+      "src/ERP.UnitTests/DynamicProductSalesRankingGroupedExcelTests.cs",
+      "src/ERP.UnitTests/DynamicProductSalesRankingExcelTests.cs"
+    ],
+    "Summary worksheet preserves stable unit order, typed count/known quantity, explicit unknown quantity, formula-safe labels and Top/filter/date context without money or cross-unit grand quantity.": [
+      "src/ERP.Api/Controllers/DynamicProductSalesRankingReportController.cs",
+      "src/ERP.Application/DTOs/DynamicProductSalesRankingReportDtos.cs",
+      "src/ERP.Application/Services/DynamicProductSalesRankingReportRules.cs",
+      "src/ERP.UnitTests/DynamicProductSalesRankingGroupedExcelTests.cs"
+    ],
+    "Designer sends current GroupBy/filters/fields/date/Top on Excel downloads and surfaces errors; workbook tests cover hidden fields/negative values/unknown units/empty results/revoked permission and safe Release build/test passes.": [
+      "src/ERP.Api/wwwroot/js/reports.js",
+      "src/ERP.UnitTests/DynamicProductSalesRankingReportUiTests.cs",
+      "src/ERP.UnitTests/DynamicProductSalesRankingGroupUiTests.cs",
+      "src/ERP.UnitTests/DynamicProductSalesRankingGroupedExcelTests.cs",
+      "src/ERP.UnitTests/DynamicProductSalesRankingExcelTests.cs"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/DynamicProductSalesRankingReportController.cs",
+    "src/ERP.Application/DTOs/DynamicProductSalesRankingReportDtos.cs",
+    "src/ERP.Application/Services/DynamicProductSalesRankingReportRules.cs",
+    "src/ERP.UnitTests/DynamicProductSalesRankingGroupedExcelTests.cs",
+    "src/ERP.UnitTests/DynamicProductSalesRankingExcelTests.cs",
+    "src/ERP.Api/wwwroot/js/reports.js",
+    "src/ERP.UnitTests/DynamicProductSalesRankingReportUiTests.cs",
+    "src/ERP.UnitTests/DynamicProductSalesRankingGroupUiTests.cs"
+  ],
+  "status": "pending",
+  "max_attempts": 3,
+  "attempts": 0,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only bounded read/report feature"
+  },
+  "id": "ERP-217",
+  "created_at": "2026-10-02T02:39:47.672768Z"
+}
