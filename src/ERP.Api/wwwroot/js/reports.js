@@ -1066,7 +1066,20 @@ function qcdKindOfCode(code) {
   return 'invalid';
 }
 
-/* 预览结果（只读 / 边界 / 免责文案 + 摘要 + 空结果 + 表格 + 分页） */
+/* ERP-209 分币种汇总：独立于当前页明细行渲染，仅渲染后端返回的 summary 列与指标，全部转义；空 / 无汇总不渲染 */
+function qcdSummaryHtml(view) {
+  const summary = view && view.summary;
+  const cols = summary && summary.columns;
+  const rows = summary && summary.rows;
+  if (!cols || !cols.length || !rows || !rows.length) return '';
+  const align = c => (c.dataType === 'number') ? ' class="text-right"' : '';
+  const head = cols.map(c => `<th${align(c)}>${qcdEsc(c.label || c.key)}</th>`).join('');
+  const body = rows.map(r => `<tr>${cols.map(c => `<td${align(c)}>${qcdRenderCell(r[c.key], c)}</td>`).join('')}</tr>`).join('');
+  const coverage = summary.coverageText ? `<div class="text-muted" style="margin:6px 0">${qcdEsc(summary.coverageText)}</div>` : '';
+  return `<div class="pd-hint" style="margin-top:10px"><b>分币种汇总</b>（按原币合并全部匹配分桶）</div>${coverage}<div class="table-wrap"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
+}
+
+/* 预览结果（只读 / 边界 / 免责文案 + 摘要 + 分币种汇总 + 空结果 + 表格 + 分页） */
 function qcdResultHtml(view) {
   const readOnly = view && view.readOnlyText ? `<div class="pd-hint">${qcdEsc(view.readOnlyText)}</div>` : '';
   const boundary = view && view.boundaryText ? `<div class="pd-hint">${qcdEsc(view.boundaryText)}</div>` : '';
@@ -1074,8 +1087,9 @@ function qcdResultHtml(view) {
   const summary = view
     ? `<div class="text-muted" style="margin:6px 0">共 ${view.total} 行 · 第 ${view.page} 页 · 每页 ${view.pageSize} 行 · 共 ${view.totalPages} 页${view.truncated ? ' · 后续仍有分页' : ''} · 期间 ${String(view.start || '').slice(0, 10)} 至 ${String(view.end || '').slice(0, 10)}</div>`
     : '';
+  const currencySummary = qcdSummaryHtml(view);
   const empty = view && (!view.rows || view.rows.length === 0) ? qcdEmptyHtml(view) : '';
-  return `${readOnly}${boundary}${disclaimer}${summary}${empty}${qcdTableHtml(view)}${qcdPagingHtml(view)}`;
+  return `${readOnly}${boundary}${disclaimer}${summary}${currencySummary}${empty}${qcdTableHtml(view)}${qcdPagingHtml(view)}`;
 }
 
 /* 字段选择器：仅由目录白名单渲染为复选框，无自由填写的字段名 */

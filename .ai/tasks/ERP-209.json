@@ -1,7 +1,7 @@
 {
   "id": "ERP-209",
   "title": "Summarize all matching quotation conversion buckets by currency",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "low",
   "priority": "P1",
   "description": "A user sees per-original-currency totals for every matching authorized quotation conversion bucket alongside the paged designer rows. Extend the existing preview with a separate summary result built from the bounded source service result after all ERP-208 filters but before group-row pagination. Merge only equal canonical currency keys, retain an explicit unknown currency bucket, and calculate effective/converted/expired/cancelled counts plus original-currency amounts; conversion rate must be total converted count divided by total effective count and average converted amount total converted amount divided by total converted count, never average salesperson rates or averages. Return only summary metrics selected by the finite field selection, omitting unselected monetary metrics; currency grouping keys are explicit context. Label coverage all matching scoped buckets within the successful bounded source; source overflow returns no partial summary. Preview renders currency summaries separately from current-page detail and handles empty/loading/denied/errors. Existing current-page Excel/PDF downloads retain their detail semantics; summary-specific downloads are later dependent tasks. Development only: reuse current authenticated ERP identity, the existing quotation menu and freshly resolved SalespersonDataScopeService; audit every endpoint through existing OperationLogMiddleware. No permission expansion, arbitrary/model-generated SQL, direct table or business writes, new entities or persistence schema, migrations, schema/view/stored-procedure edits, production SQL or real database execution, secrets/.env changes, deployment, irreversible operations or real browser acceptance. Preserve unrelated modules and work. Run focused in-memory/service/API/export/UI source-contract tests and configured safe Release build/test; mark unavailable external environments blocked rather than inventing success.",
@@ -47,7 +47,7 @@
     "ERP-208"
   ],
   "max_attempts": 3,
-  "attempts": 0,
+  "attempts": 1,
   "validation_profile": "safe",
   "completion_mode": "build",
   "auto_start": true,

@@ -370,6 +370,42 @@ public class DynamicQuotationConversionReportTests
         Assert.Equal(ErrorCodes.InvalidParameter, ex.Code);
         Assert.Contains("缩小日期范围", ex.Message);
     }
+
+    [Fact]
+    public async Task 预览_分币种汇总_覆盖全部匹配分桶且不跨币种合计()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedAuthorizedUser(db, "qcd-summary", "Priv", isSystemRole: true);
+        SeedQuotation(db, "QT-A", "张三", Currency.USD, 1000m);
+        SeedQuotation(db, "QT-B", "李四", Currency.USD, 500m);
+        SeedQuotation(db, "QT-C", "王五", Currency.EUR, 2000m);
+
+        var ctl = BuildController(db, user.Id);
+        var page = OkPage(await ctl.Preview(new DynamicQuotationConversionReportRequest
+        {
+            Fields = new List<string> { "salesmanName", "currency", "quotationCount", "totalAmount" },
+            Start = Start,
+            End = End,
+            Page = 1,
+            PageSize = 2
+        }));
+
+        // 当前页仅 2 行（分页截断），汇总覆盖全部 3 个分桶
+        Assert.Equal(2, page.Rows.Count);
+        Assert.True(page.Truncated);
+
+        Assert.NotNull(page.Summary);
+        Assert.Equal(2, page.Summary!.CurrencyCount);
+        Assert.DoesNotContain(page.Summary!.Columns, c => c.Key == "salesmanName");
+
+        var usd = page.Summary.Rows.Single(r => r.Currency == "USD");
+        Assert.Equal(2, usd.QuotationCount);
+        Assert.Equal(1500m, usd.TotalAmount);
+
+        var eur = page.Summary.Rows.Single(r => r.Currency == "EUR");
+        Assert.Equal(1, eur.QuotationCount);
+        Assert.Equal(2000m, eur.TotalAmount);
+    }
 }
 
 

@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace ERP.Application.DTOs;
 
 /// <summary>
@@ -58,6 +60,7 @@ public sealed record DynamicQuotationConversionReportCatalogDto(
 /// 不泄露范围外 / 空客户记录。<see cref="Total"/> 为范围内分桶行总数（分页前），
 /// <see cref="Truncated"/> 表示本页之外仍有更多分桶行，<see cref="EmptyText"/> 在空页时显式说明；
 /// <see cref="Start"/> / <see cref="End"/> 为已规范化的日期上下文（供 Excel 导出标注日期口径）。
+/// <see cref="Summary"/> 为 ERP-209 分币种汇总（在全部匹配分桶之上、分页之前派生，绝不跨币种合计）。
 /// </summary>
 public sealed record DynamicQuotationConversionReportPageDto(
     List<DynamicQuotationConversionReportFieldDto> Columns,
@@ -73,4 +76,58 @@ public sealed record DynamicQuotationConversionReportPageDto(
     string DisclaimerText,
     DateTime Start,
     DateTime End,
-    string FilterText = "");
+    string FilterText = "",
+    DynamicQuotationConversionSummaryDto? Summary = null);
+
+/// <summary>
+/// 报价成交率分币种汇总项（ERP-209，只读派生）：把同一原币的全部匹配分桶合并为一枚汇总行。
+/// 仅填充选定字段对应的汇总指标（未选定的金额 / 计数指标为 null，即「省略未选指标」）；
+/// <see cref="Currency"/> 为显式分组上下文，始终存在。金额均为报价单原币，绝不跨币种合计。
+/// </summary>
+public sealed class DynamicQuotationConversionCurrencySummaryDto
+{
+    /// <summary>原币币种（规范化大写；空值 / 未知取值显式保留为「未知币种」，绝不默认币种）</summary>
+    public string Currency { get; set; } = string.Empty;
+
+    /// <summary>有效报价数（= 全部匹配分桶有效报价数合计）</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? QuotationCount { get; set; }
+
+    /// <summary>已转出数（= 全部匹配分桶已转出数合计）</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? ConvertedCount { get; set; }
+
+    /// <summary>成交率% = 已转出总数 ÷ 有效报价总数 × 100（保留 2 位；分母为 0 时为 0；绝不按业务员成交率求平均）</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public decimal? ConversionRate { get; set; }
+
+    /// <summary>已过期未成交（= 全部匹配分桶已过期未成交合计）</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? ExpiredCount { get; set; }
+
+    /// <summary>已作废（= 全部匹配分桶已作废合计）</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? CancelledCount { get; set; }
+
+    /// <summary>有效报价金额合计（原币）= 全部匹配分桶有效报价金额合计</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public decimal? TotalAmount { get; set; }
+
+    /// <summary>已转出金额合计（原币）= 全部匹配分桶已转出金额合计</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public decimal? ConvertedAmount { get; set; }
+
+    /// <summary>单笔成交均价（原币）= 已转出金额合计 ÷ 已转出总数（保留 2 位；分母为 0 时为 0；绝不按业务员均价求平均）</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public decimal? AvgConvertedAmount { get; set; }
+}
+
+/// <summary>
+/// 报价成交率分币种汇总结果（ERP-209，只读派生）：在全部匹配分桶（ERP-208 筛选后）基础上按规范化原币合并，
+/// 在分页前完成，绝不跨币种合计。仅返回选定字段对应的汇总列与指标；<see cref="CoverageText"/> 显式声明覆盖范围。
+/// </summary>
+public sealed record DynamicQuotationConversionSummaryDto(
+    List<DynamicQuotationConversionReportFieldDto> Columns,
+    List<DynamicQuotationConversionCurrencySummaryDto> Rows,
+    int CurrencyCount,
+    string CoverageText);

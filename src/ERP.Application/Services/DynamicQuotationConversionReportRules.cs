@@ -326,7 +326,77 @@ public static class DynamicQuotationConversionReportRules
             DisclaimerText,
             start,
             end,
-            filterText);
+            filterText,
+            BuildSummary(all, fieldKeys));
+    }
+
+    // ==================== 5.1 分币种汇总（ERP-209，纯规则） ====================
+
+    /// <summary>分币种汇总覆盖文案：显式声明汇总覆盖本次有界来源内的全部匹配分桶</summary>
+    public const string CurrencySummaryCoverageText =
+        "分币种汇总覆盖本次预览的全部匹配报价成交率分桶（按原币合并业务员分桶，金额均为原币，绝不跨币种合计）";
+
+    /// <summary>可纳入分币种汇总的指标字段键（除业务员与币种外的其余白名单字段）</summary>
+    private static readonly HashSet<string> CurrencySummaryMetricKeys = new(
+        new[] { "quotationCount", "convertedCount", "conversionRate", "expiredCount", "cancelledCount", "totalAmount", "convertedAmount", "avgConvertedAmount" },
+        StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// 分币种汇总（ERP-209，纯规则）：把全部匹配分桶（ERP-208 筛选后、分页前）按规范化原币键合并，
+    /// 仅合并相等规范币种键、显式保留未知币种桶，绝不跨币种合计。
+    /// 成交率% = 已转出总数 ÷ 有效报价总数 × 100；单笔成交均价 = 已转出金额合计 ÷ 已转出总数
+    /// （两者都基于合计值计算，绝不按业务员成交率 / 均价求平均）。
+    /// 仅填充选定字段对应的汇总指标（未选定的金额 / 计数指标省略为 null）。
+    /// </summary>
+    public static DynamicQuotationConversionSummaryDto BuildSummary(
+        IReadOnlyList<ReportDtos.QuotationConversionItem> items,
+        IReadOnlyList<string> fieldKeys)
+    {
+        var all = items ?? Array.Empty<ReportDtos.QuotationConversionItem>();
+        var selectedMetrics = fieldKeys
+            .Where(k => CurrencySummaryMetricKeys.Contains(k))
+            .ToList();
+
+        var columns = new List<DynamicQuotationConversionReportFieldDto> { GetField("currency")! };
+        columns.AddRange(selectedMetrics.Select(k => GetField(k)!));
+
+        var groups = new Dictionary<string, (
+            int Effective, int Converted, int Expired, int Cancelled, decimal Total, decimal ConvertedAmount)>(
+            StringComparer.Ordinal);
+
+        foreach (var item in all)
+        {
+            var currency = ReportService.NormalizeCurrencyCode(item.Currency);
+            groups.TryGetValue(currency, out var acc);
+            groups[currency] = (
+                acc.Effective + item.QuotationCount,
+                acc.Converted + item.ConvertedCount,
+                acc.Expired + item.ExpiredCount,
+                acc.Cancelled + item.CancelledCount,
+                acc.Total + item.TotalAmount,
+                acc.ConvertedAmount + item.ConvertedAmount);
+        }
+
+        var rows = new List<DynamicQuotationConversionCurrencySummaryDto>();
+        foreach (var currency in groups.Keys.OrderBy(k => k, StringComparer.Ordinal))
+        {
+            var acc = groups[currency];
+            var conversionRate = acc.Effective == 0 ? 0m : Math.Round(acc.Converted * 100m / acc.Effective, 2);
+            var avgConvertedAmount = acc.Converted == 0 ? 0m : Math.Round(acc.ConvertedAmount / acc.Converted, 2);
+
+            var row = new DynamicQuotationConversionCurrencySummaryDto { Currency = currency };
+            if (selectedMetrics.Contains("quotationCount")) row.QuotationCount = acc.Effective;
+            if (selectedMetrics.Contains("convertedCount")) row.ConvertedCount = acc.Converted;
+            if (selectedMetrics.Contains("conversionRate")) row.ConversionRate = conversionRate;
+            if (selectedMetrics.Contains("expiredCount")) row.ExpiredCount = acc.Expired;
+            if (selectedMetrics.Contains("cancelledCount")) row.CancelledCount = acc.Cancelled;
+            if (selectedMetrics.Contains("totalAmount")) row.TotalAmount = acc.Total;
+            if (selectedMetrics.Contains("convertedAmount")) row.ConvertedAmount = acc.ConvertedAmount;
+            if (selectedMetrics.Contains("avgConvertedAmount")) row.AvgConvertedAmount = avgConvertedAmount;
+            rows.Add(row);
+        }
+
+        return new DynamicQuotationConversionSummaryDto(columns, rows, rows.Count, CurrencySummaryCoverageText);
     }
 
     // ==================== 6. Excel 导出（ERP-206） ====================

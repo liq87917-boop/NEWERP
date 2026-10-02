@@ -200,4 +200,43 @@ public class DynamicQuotationConversionReportUiTests
         Assert.Contains("filter,", build);
     }
 
+    [Fact]
+    public void 汇总_独立渲染分币种汇总_与当前页明细分离()
+    {
+        var js = Script;
+
+        Assert.Contains("function qcdSummaryHtml(", js);
+        Assert.Contains("const currencySummary = qcdSummaryHtml(view);", js);
+        Assert.Contains("分币种汇总", js);
+
+        var result = Segment(js, "function qcdResultHtml(", "function qcdFieldChooserHtml(");
+        // 汇总渲染在明细表格之前，二者分离；仅在视图存在时渲染
+        Assert.True(result.IndexOf("qcdSummaryHtml(view)", StringComparison.Ordinal)
+            < result.IndexOf("qcdTableHtml(view)", StringComparison.Ordinal));
+        Assert.Contains("${currencySummary}${empty}${qcdTableHtml(view)}", result);
+    }
+
+    [Fact]
+    public void 汇总_安全文本渲染_全转义_无自由SQL()
+    {
+        var js = Script;
+        var fn = Segment(js, "function qcdSummaryHtml(", "function qcdResultHtml(");
+
+        Assert.Contains("qcdEsc(c.label || c.key)", fn);
+        Assert.Contains("qcdRenderCell(r[c.key], c)", fn);
+        Assert.Contains("qcdEsc(summary.coverageText)", fn);
+        Assert.DoesNotContain("FromSql", fn);
+        Assert.DoesNotContain("ExecuteSql", fn);
+        Assert.DoesNotContain("SqlCommand", fn);
+    }
+
+    [Fact]
+    public void 汇总_空或无汇总_不渲染汇总表()
+    {
+        var js = Script;
+        var fn = Segment(js, "function qcdSummaryHtml(", "function qcdResultHtml(");
+
+        Assert.Contains("if (!cols || !cols.length || !rows || !rows.length) return '';", fn);
+        Assert.Contains("summary.coverageText", fn);
+    }
 }
