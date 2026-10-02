@@ -2,6 +2,8 @@ using ERP.Application.Common;
 using ERP.Application.DTOs;
 using ERP.Application.Interfaces;
 using ERP.Application.Services;
+using System.Globalization;
+using System.Text.Json;
 
 namespace ERP.Infrastructure.Reports;
 
@@ -87,6 +89,115 @@ public sealed class SalesOrderReportConfigurationDatasetProvider : IReportConfig
         }
 
         return BuildDataset(catalog);
+    }
+
+    /// <inheritdoc />
+    public async Task<ReportConfigurationPreviewDto> PreviewAsync(
+        ReportConfigurationDefinition definition,
+        ReportConfigurationPreviewParameters parameters,
+        long? userId,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(definition);
+        ArgumentNullException.ThrowIfNull(parameters);
+
+        var groupBy = DynamicSalesOrderReportRules.NormalizeGroupBy(parameters.GroupBy);
+        var request = new DynamicSalesOrderReportRequest
+        {
+            Fields = BuildFields(definition.Fields, groupBy),
+            Page = parameters.Page,
+            PageSize = parameters.PageSize,
+            GroupBy = groupBy,
+        };
+
+        MapFilters(definition.Filters, request);
+        DynamicSalesOrderReportRules.ValidateDateRange(request.StartDate, request.EndDate);
+
+        var page = await _query.PreviewAsync(request, userId, cancellationToken);
+
+        var groups = groupBy == DynamicSalesOrderReportRules.GroupNone
+            ? null
+            : DynamicSalesOrderReportRules.BuildGroupSubtotals(page.Rows, groupBy);
+
+        return new ReportConfigurationPreviewDto
+        {
+            DatasetKey = DatasetKey,
+            Columns = page.Columns.Select(c => new ReportConfigurationColumnDto(
+                c.Key, c.Label, c.DataType, CurrencyUnitOf(c.Key))).ToList(),
+            Rows = page.Rows,
+            Total = page.Total,
+            Page = page.Page,
+            PageSize = page.PageSize,
+            TotalPages = page.TotalPages,
+            GroupBy = groupBy,
+            Groups = groups?.Select(g => new ReportConfigurationGroupSubtotalDto(
+                g.Key,
+                g.Label,
+                g.Subtotals.Select(s => new ReportConfigurationCurrencyPartitionDto(
+                    s.Currency, s.Count, s.Amount, null, null, null, string.Empty)).ToList())).ToList(),
+            Evidence = new ReportConfigurationEvidenceContextDto(
+                DatasetKey, Grain, CurrencyUnitSemantics,
+                page.ReadOnlyText, page.BoundaryText, page.DisclaimerText,
+                ReportConfigurationConstants.CoverageCurrentPage),
+        };
+    }
+
+    private static List<string> BuildFields(IReadOnlyList<string> fields, string groupBy)
+    {
+        var selected = (fields ?? new List<string>())
+            .Where(f => !string.IsNullOrWhiteSpace(f))
+            .Select(f => f.Trim())
+            .ToList();
+
+        if (groupBy != DynamicSalesOrderReportRules.GroupNone)
+            return DynamicSalesOrderReportRules.EnsureGroupingFields(selected, groupBy) ?? selected;
+
+        return selected;
+    }
+
+    private static string? CurrencyUnitOf(string key)
+        => CurrencyUnits.TryGetValue(key, out var unit) ? unit : null;
+
+    private static void MapFilters(IReadOnlyList<ReportConfigurationFilter>? filters, DynamicSalesOrderReportRequest request)
+    {
+        DateTime? start = null;
+        DateTime? end = null;
+
+        if (filters is not null)
+        {
+            foreach (var filter in filters)
+            {
+                if (filter is null)
+                    continue;
+
+                var key = (filter.FieldKey ?? string.Empty).Trim();
+                switch (key.ToLowerInvariant())
+                {
+                    case "orderdate":
+                        ReportConfigurationDatasetTranslation.ApplyDateFilter(
+                            filter, "orderDate", ref start, ref end);
+                        break;
+                    case "customerid":
+                        ReportConfigurationDatasetTranslation.EnsureOperator(filter, ReportConfigurationConstants.OperatorEq);
+                        request.CustomerId = ReportConfigurationDatasetTranslation.RequireLong(filter.Value, "customerId");
+                        break;
+                    case "currency":
+                        ReportConfigurationDatasetTranslation.EnsureOperator(filter, ReportConfigurationConstants.OperatorEq);
+                        request.Currency = ReportConfigurationDatasetTranslation.RequireString(filter.Value, "currency");
+                        break;
+                    case "status":
+                        ReportConfigurationDatasetTranslation.EnsureOperator(filter, ReportConfigurationConstants.OperatorEq);
+                        request.Status = ReportConfigurationDatasetTranslation.RequireString(filter.Value, "status");
+                        break;
+                    default:
+                        throw BusinessException.InvalidParameter(
+                            $"数据集 {ReportConfigurationConstants.DatasetSalesOrder} 不支持的筛选字段: {key}");
+                }
+            }
+        }
+
+        request.StartDate = start;
+        request.EndDate = end;
     }
 
     private static ReportConfigurationDatasetDto BuildDataset(DynamicSalesOrderReportCatalogDto catalog)
@@ -210,6 +321,116 @@ public sealed class ReceivableReportConfigurationDatasetProvider : IReportConfig
         return BuildDataset(catalog);
     }
 
+    /// <inheritdoc />
+    public async Task<ReportConfigurationPreviewDto> PreviewAsync(
+        ReportConfigurationDefinition definition,
+        ReportConfigurationPreviewParameters parameters,
+        long? userId,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(definition);
+        ArgumentNullException.ThrowIfNull(parameters);
+
+        var groupBy = DynamicReceivableReportRules.NormalizeGroupBy(parameters.GroupBy);
+        var request = new DynamicReceivableReportRequest
+        {
+            Fields = BuildFields(definition.Fields, groupBy),
+            Page = parameters.Page,
+            PageSize = parameters.PageSize,
+            GroupBy = groupBy,
+        };
+
+        MapFilters(definition.Filters, request);
+        DynamicReceivableReportRules.ValidateDateRange(request.StartDate, request.EndDate);
+
+        var page = await _query.PreviewAsync(request, userId, cancellationToken);
+
+        var groups = groupBy == DynamicReceivableReportRules.GroupNone
+            ? null
+            : DynamicReceivableReportRules.BuildGroupSubtotals(page.Rows, groupBy);
+
+        return new ReportConfigurationPreviewDto
+        {
+            DatasetKey = DatasetKey,
+            Columns = page.Columns.Select(c => new ReportConfigurationColumnDto(
+                c.Key, c.Label, c.DataType, CurrencyUnitOf(c.Key))).ToList(),
+            Rows = page.Rows,
+            Total = page.Total,
+            Page = page.Page,
+            PageSize = page.PageSize,
+            TotalPages = page.TotalPages,
+            GroupBy = groupBy,
+            Groups = groups?.Select(g => new ReportConfigurationGroupSubtotalDto(
+                g.Key,
+                g.Label,
+                g.Subtotals.Select(s => new ReportConfigurationCurrencyPartitionDto(
+                    s.Currency, s.Count, null, s.GrossAmount, s.EffectiveAllocatedAmount,
+                    s.RemainingAmount, s.RemainingState)).ToList())).ToList(),
+            Evidence = new ReportConfigurationEvidenceContextDto(
+                DatasetKey, Grain, CurrencyUnitSemantics,
+                page.ReadOnlyText, page.BoundaryText, page.DisclaimerText,
+                ReportConfigurationConstants.CoverageCurrentPage),
+        };
+    }
+
+    private static List<string> BuildFields(IReadOnlyList<string> fields, string groupBy)
+    {
+        var selected = (fields ?? new List<string>())
+            .Where(f => !string.IsNullOrWhiteSpace(f))
+            .Select(f => f.Trim())
+            .ToList();
+
+        if (groupBy != DynamicReceivableReportRules.GroupNone)
+            return DynamicReceivableReportRules.EnsureGroupingFields(selected, groupBy) ?? selected;
+
+        return selected;
+    }
+
+    private static string? CurrencyUnitOf(string key)
+        => CurrencyUnits.TryGetValue(key, out var unit) ? unit : null;
+
+    private static void MapFilters(IReadOnlyList<ReportConfigurationFilter>? filters, DynamicReceivableReportRequest request)
+    {
+        DateTime? start = null;
+        DateTime? end = null;
+
+        if (filters is not null)
+        {
+            foreach (var filter in filters)
+            {
+                if (filter is null)
+                    continue;
+
+                var key = (filter.FieldKey ?? string.Empty).Trim();
+                switch (key.ToLowerInvariant())
+                {
+                    case "invoicedate":
+                        ReportConfigurationDatasetTranslation.ApplyDateFilter(
+                            filter, "invoiceDate", ref start, ref end);
+                        break;
+                    case "customerid":
+                        ReportConfigurationDatasetTranslation.EnsureOperator(filter, ReportConfigurationConstants.OperatorEq);
+                        request.CustomerId = ReportConfigurationDatasetTranslation.RequireLong(filter.Value, "customerId");
+                        break;
+                    case "currency":
+                        ReportConfigurationDatasetTranslation.EnsureOperator(filter, ReportConfigurationConstants.OperatorEq);
+                        request.Currency = ReportConfigurationDatasetTranslation.RequireString(filter.Value, "currency");
+                        break;
+                    case "allocationstate":
+                        ReportConfigurationDatasetTranslation.EnsureOperator(filter, ReportConfigurationConstants.OperatorEq);
+                        request.AllocationState = ReportConfigurationDatasetTranslation.RequireString(filter.Value, "allocationState");
+                        break;
+                    default:
+                        throw BusinessException.InvalidParameter(
+                            $"数据集 {ReportConfigurationConstants.DatasetReceivable} 不支持的筛选字段: {key}");
+                }
+            }
+        }
+
+        request.StartDate = start;
+        request.EndDate = end;
+    }
+
     private static ReportConfigurationDatasetDto BuildDataset(DynamicReceivableReportCatalogDto catalog)
     {
         var fields = catalog.Fields
@@ -250,4 +471,118 @@ public sealed class ReceivableReportConfigurationDatasetProvider : IReportConfig
             ReportConfigurationRules.GetOperatorsForType(dataType));
     }
 }
+
+/// <summary>
+/// 通用报表配置数据集的「有界类型化值翻译」辅助：把反序列化定义中的有限筛选值安全还原为 CLR 值，
+/// 只支持适配器显式声明的有限字段 / 操作符；任何不兼容操作显式拒绝（fail closed）。
+/// </summary>
+internal static class ReportConfigurationDatasetTranslation
+{
+    public static void EnsureOperator(ReportConfigurationFilter filter, string supportedOperator)
+    {
+        var op = (filter.Operator ?? string.Empty).Trim();
+        if (!string.Equals(op, supportedOperator, StringComparison.OrdinalIgnoreCase))
+        {
+            throw BusinessException.InvalidParameter(
+                $"字段 {filter.FieldKey} 在当前数据集适配中仅支持操作符 {supportedOperator}（收到 {op}）");
+        }
+    }
+
+    public static string RequireString(object? value, string context)
+    {
+        var v = ToClr(value);
+        if (v is string s)
+            return s;
+        throw BusinessException.InvalidParameter($"{context} 必须是字符串");
+    }
+
+    public static long RequireLong(object? value, string context)
+    {
+        var v = ToClr(value);
+        switch (v)
+        {
+            case long l: return l;
+            case int i: return i;
+            case short s: return s;
+            case byte b: return b;
+            case decimal m when m == decimal.Truncate(m): return (long)m;
+            case double d when d == Math.Truncate(d): return (long)d;
+            default:
+                throw BusinessException.InvalidParameter($"{context} 必须是整数");
+        }
+    }
+
+    public static DateTime RequireDate(object? value, string context)
+    {
+        var v = ToClr(value);
+        switch (v)
+        {
+            case DateTime dt: return dt;
+            case DateTimeOffset dto: return dto.DateTime;
+            case string s when DateTime.TryParse(s, CultureInfo.InvariantCulture,
+                DateTimeStyles.AllowWhiteSpaces | DateTimeStyles.RoundtripKind, out var parsed):
+                return parsed;
+            default:
+                throw BusinessException.InvalidParameter($"{context} 必须是日期");
+        }
+    }
+
+    public static void ApplyDateFilter(
+        ReportConfigurationFilter filter, string fieldKey, ref DateTime? start, ref DateTime? end)
+    {
+        var op = (filter.Operator ?? string.Empty).Trim();
+        switch (op)
+        {
+            case ReportConfigurationConstants.OperatorEq:
+                var eq = RequireDate(filter.Value, fieldKey).Date;
+                start = eq;
+                end = eq;
+                break;
+            case ReportConfigurationConstants.OperatorGte:
+                start = RequireDate(filter.Value, fieldKey).Date;
+                break;
+            case ReportConfigurationConstants.OperatorLte:
+                end = RequireDate(filter.Value, fieldKey).Date;
+                break;
+            case ReportConfigurationConstants.OperatorGt:
+                start = RequireDate(filter.Value, fieldKey).Date.AddDays(1);
+                break;
+            case ReportConfigurationConstants.OperatorLt:
+                end = RequireDate(filter.Value, fieldKey).Date.AddDays(-1);
+                break;
+            case ReportConfigurationConstants.OperatorBetween:
+                start = RequireDate(filter.Value, fieldKey).Date;
+                end = RequireDate(filter.Value2, fieldKey).Date;
+                break;
+            default:
+                throw BusinessException.InvalidParameter($"字段 {fieldKey} 不支持的日期筛选操作符: {op}");
+        }
+    }
+
+    private static object? ToClr(object? value)
+        => value is JsonElement element ? JsonElementToClr(element) : value;
+
+    private static object? JsonElementToClr(JsonElement element)
+    {
+        switch (element.ValueKind)
+        {
+            case JsonValueKind.String:
+                return element.GetString();
+            case JsonValueKind.True:
+                return true;
+            case JsonValueKind.False:
+                return false;
+            case JsonValueKind.Number:
+                return element.TryGetInt64(out var l) ? l : element.GetDecimal();
+            case JsonValueKind.Array:
+                return element.EnumerateArray().Select(JsonElementToClr).ToList();
+            case JsonValueKind.Null:
+            case JsonValueKind.Undefined:
+            case JsonValueKind.Object:
+            default:
+                return null;
+        }
+    }
+}
+
 

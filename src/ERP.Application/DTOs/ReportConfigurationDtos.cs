@@ -61,6 +61,9 @@ public static class ReportConfigurationConstants
     /// <summary>全匹配合计（all-match total）：Stage 1 明确不支持（不提供惰性成功）</summary>
     public const string CapabilityAllMatchTotal = "all-match-total";
 
+    /// <summary>预览页面覆盖口径：小计仅覆盖「当前预览页」，绝不声称全匹配合计</summary>
+    public const string CoverageCurrentPage = "current-page";
+
     // ==================== 既有数据集键（适配器夹具，非数据库全量发现） ====================
 
     public const string DatasetSalesOrder = "sales-order";
@@ -293,4 +296,120 @@ public sealed class ReportConfigurationRevisionDto
 
     /// <summary>已反序列化的被固定定义快照</summary>
     public ReportConfigurationDefinition? Definition { get; set; }
+}
+
+// ==================== ERP-261 Stage 1：通用执行 / 预览契约 ====================
+
+/// <summary>
+/// 私有报表配置预览请求（客户端提交；所有者 Id 由服务端认证注入）。
+/// <para><see cref="RevisionVersion"/> 为空 = 预览当前草稿定义；非空 = 预览指定的不可变发布修订快照。</para>
+/// </summary>
+public sealed class ReportConfigurationPreviewRequest
+{
+    /// <summary>要预览的私有报表配置 Id</summary>
+    public long ConfigurationId { get; set; }
+
+    /// <summary>固定发布版本号（可选；空 = 当前草稿定义）</summary>
+    public int? RevisionVersion { get; set; }
+
+    /// <summary>页码覆盖（可选；空 = 使用已保存展示分页 / 数据集默认）</summary>
+    public int? Page { get; set; }
+
+    /// <summary>每页条数覆盖（可选；空 = 使用已保存展示分页 / 数据集默认；受数据集上限约束）</summary>
+    public int? PageSize { get; set; }
+
+    /// <summary>分组键覆盖（可选；空 = 使用已保存分组；仅 none / customer / month）</summary>
+    public string? GroupBy { get; set; }
+}
+
+/// <summary>经执行服务解析、校验后的预览参数（有界、只读）</summary>
+public sealed record ReportConfigurationPreviewParameters(
+    int Page,
+    int PageSize,
+    string GroupBy);
+
+/// <summary>通用报表列（有界、只读）：有限字段键 + 真实中文标签 / 类型 / 币种单位语义</summary>
+public sealed record ReportConfigurationColumnDto(
+    string Key,
+    string Label,
+    string Type,
+    string? CurrencyUnit);
+
+/// <summary>分组页面小计的「币种分区」：金额只对同币种求和，绝不跨币种换算或相加</summary>
+public sealed record ReportConfigurationCurrencyPartitionDto(
+    string Currency,
+    int Count,
+    decimal? Amount,
+    decimal? GrossAmount,
+    decimal? EffectiveAllocatedAmount,
+    decimal? RemainingAmount,
+    string RemainingState);
+
+/// <summary>分组页面小计（仅当前预览页，非全量合计；组内按币种分区）</summary>
+public sealed record ReportConfigurationGroupSubtotalDto(
+    string Key,
+    string Label,
+    IReadOnlyList<ReportConfigurationCurrencyPartitionDto> Partitions);
+
+/// <summary>
+/// 预览证据上下文：数据集键 / 行粒度 / 币种单位口径 / 只读与边界文案 / 页面覆盖口径。
+/// <para>页面小计只来自「同一批有界、已授权预览行」，<see cref="Coverage"/> 明确标注覆盖范围。</para>
+/// </summary>
+public sealed record ReportConfigurationEvidenceContextDto(
+    string DatasetKey,
+    string Grain,
+    string CurrencyUnitSemantics,
+    string ReadOnlyText,
+    string BoundaryText,
+    string DisclaimerText,
+    string Coverage);
+
+/// <summary>通用报表配置预览结果（有界、只读）</summary>
+public sealed class ReportConfigurationPreviewDto
+{
+    /// <summary>所属私有报表配置 Id</summary>
+    public long ConfigurationId { get; set; }
+
+    /// <summary>固定发布版本号（仅当 <see cref="IsPinnedRevision"/> 为 true 时非空）</summary>
+    public int? PinnedRevisionVersion { get; set; }
+
+    /// <summary>是否为固定发布修订预览（false = 当前草稿）</summary>
+    public bool IsPinnedRevision { get; set; }
+
+    /// <summary>数据集键</summary>
+    public string DatasetKey { get; set; } = string.Empty;
+
+    /// <summary>通用类型化列（按选定字段顺序）</summary>
+    public List<ReportConfigurationColumnDto> Columns { get; set; } = new();
+
+    /// <summary>当前预览页行（仅含选定字段值）</summary>
+    public List<Dictionary<string, object?>> Rows { get; set; } = new();
+
+    /// <summary>总命中条数（分页前）</summary>
+    public int Total { get; set; }
+
+    /// <summary>当前页码</summary>
+    public int Page { get; set; }
+
+    /// <summary>每页条数</summary>
+    public int PageSize { get; set; }
+
+    /// <summary>总页数</summary>
+    public int TotalPages { get; set; }
+
+    /// <summary>生效分组键（none / customer / month）</summary>
+    public string GroupBy { get; set; } = ReportConfigurationConstants.GroupNone;
+
+    /// <summary>当前预览页分组小计（分组时才非空；组内按币种分区，绝不跨币种相加）</summary>
+    public List<ReportConfigurationGroupSubtotalDto>? Groups { get; set; }
+
+    /// <summary>证据上下文（数据集键 / 粒度 / 币种单位口径 / 只读 / 覆盖口径）</summary>
+    public ReportConfigurationEvidenceContextDto? Evidence { get; set; }
+}
+
+/// <summary>重命名私有报表配置请求契约</summary>
+public sealed class ReportConfigurationRenameDto
+{
+    /// <summary>新名称（1 ~ 200 字符）</summary>
+    public string Name { get; set; } = string.Empty;
 }

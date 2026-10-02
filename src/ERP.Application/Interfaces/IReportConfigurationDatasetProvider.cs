@@ -18,4 +18,15 @@ public interface IReportConfigurationDatasetProvider
     /// 无身份时抛出未认证异常（fail closed）。
     /// </summary>
     Task<ReportConfigurationDatasetDto?> GetDatasetAsync(long? userId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 把已通过当前目录校验的有界定义翻译为既有数据集查询请求并执行预览，返回统一类型化结果页。
+    /// <para>每次调用都重新校验既有菜单授权与数据范围（fail closed）；只映射数据集支持的字段 / 筛选 / 分组，
+    /// 不支持的能力显式拒绝；金额 / 单位按原币分区，绝不跨币种换算或合并。</para>
+    /// </summary>
+    Task<ReportConfigurationPreviewDto> PreviewAsync(
+        ReportConfigurationDefinition definition,
+        ReportConfigurationPreviewParameters parameters,
+        long? userId,
+        CancellationToken cancellationToken = default);
 }
