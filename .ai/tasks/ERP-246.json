@@ -1,0 +1,61 @@
+{
+  "id": "ERP-246",
+  "title": "Download selected salesman commission evidence page as Chinese PDF",
+  "description": "Users download the selected field order and current evidence page as a Chinese PDF from the existing designer. Reuse the same request, pure validation, fresh authorization and bounded source as preview/Excel; dedicated PDF endpoint rebuilds the current page, not client rows/preview cache. Add narrow DynamicSalesCommissionPdfExporter with direct construction by controller using existing PDFsharp and existing local SimHei font resolution; no package/config/font asset writes. Render Chinese headings and signed original-currency numbers, explicit unknowns and distinguish configured numeric zero reference rate from absent/invalid rate. Always print dates/normalized filters/current-page coverage/500-order source cap/source and raw currency grouping/current-reference-rate and unknown historical-profit/payout context even evidence fields hidden. Wide finite columns split across column pages with identity/coverage context; tall pages repeat headers and avoid clipped overlapping text, no unselected detail columns or cross-currency totals. Font unavailable or rendering failure explicitly rejects download, never empty-success or missing-glyph success. Page downloads PDF with current selection/filter/page and shows errors while preserving state. Tests inspect generated PDF bytes/text/page structure where supported and deterministic renderer inputs/layout calculations, not screenshots or real-browser acceptance. Development only. Reuse existing sales-commission menu, current-user SalespersonDataScopeService customer scope, approved nondeleted SalesOrders and OperationLogMiddleware HTTP audit; each endpoint rechecks identity, menu and fresh scope and validates the current request, failing closed without data/file on revocation, invalid input or source overflow. Salesman filters are order attributes and never expand customer scope. Current parameter rate is reference information, not a historical agreed rate, actual payout, customer agency fee or ledger entry. No client identity/scope/rows/aggregates as authority, arbitrary/model-generated SQL, business writes, new domain entities or persistence schema, migrations, schema/view/stored-procedure changes, production SQL or real database execution, credentials/secrets/.env/config changes, irreversible operations, production deployment or real browser acceptance. Preserve unrelated modules and uncommitted work. Run focused in-memory service/API/export and UI source-contract tests plus configured safe Release build/test; unavailable external database/browser acceptance is environment-blocked, never fabricated passed.",
+  "depends_on": [
+    "ERP-245"
+  ],
+  "risk_level": "low",
+  "priority": "P1",
+  "acceptance_criteria": [
+    "PDF endpoint validates current request and rechecks fresh identity/menu/customer scope, rebuilding the same bounded selected page and refusing permission/cap/render failures.",
+    "Chinese PDF preserves selected order, signed values and explicit unknowns with mandatory context, paginated wide/tall content and explicit font failures.",
+    "Existing page PDF download preserves selected/filter/page state and shows explicit errors; PDF/controller/UI tests plus safe build/test pass without pretending external browser/database acceptance."
+  ],
+  "criterion_path_map": {
+    "PDF endpoint validates current request and rechecks fresh identity/menu/customer scope, rebuilding the same bounded selected page and refusing permission/cap/render failures.": [
+      "src/ERP.Api/Controllers/DynamicSalesCommissionReportController.cs",
+      "src/ERP.Application/DTOs/DynamicSalesCommissionReportDtos.cs",
+      "src/ERP.Application/Services/DynamicSalesCommissionReportRules.cs",
+      "src/ERP.UnitTests/DynamicSalesCommissionPdfTests.cs"
+    ],
+    "Chinese PDF preserves selected order, signed values and explicit unknowns with mandatory context, paginated wide/tall content and explicit font failures.": [
+      "src/ERP.Infrastructure/Export/DynamicSalesCommissionPdfExporter.cs",
+      "src/ERP.Application/DTOs/DynamicSalesCommissionReportDtos.cs",
+      "src/ERP.UnitTests/DynamicSalesCommissionPdfTests.cs"
+    ],
+    "Existing page PDF download preserves selected/filter/page state and shows explicit errors; PDF/controller/UI tests plus safe build/test pass without pretending external browser/database acceptance.": [
+      "src/ERP.Api/wwwroot/js/reports.js",
+      "src/ERP.UnitTests/DynamicSalesCommissionPdfTests.cs",
+      "src/ERP.UnitTests/DynamicSalesCommissionReportUiTests.cs",
+      "src/ERP.UnitTests/DynamicSalesCommissionReportTests.cs"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/DynamicSalesCommissionReportController.cs",
+    "src/ERP.Application/DTOs/DynamicSalesCommissionReportDtos.cs",
+    "src/ERP.Application/Services/DynamicSalesCommissionReportRules.cs",
+    "src/ERP.UnitTests/DynamicSalesCommissionPdfTests.cs",
+    "src/ERP.Infrastructure/Export/DynamicSalesCommissionPdfExporter.cs",
+    "src/ERP.Api/wwwroot/js/reports.js",
+    "src/ERP.UnitTests/DynamicSalesCommissionReportUiTests.cs",
+    "src/ERP.UnitTests/DynamicSalesCommissionReportTests.cs"
+  ],
+  "status": "pending",
+  "max_attempts": 3,
+  "attempts": 0,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only bounded scoped report feature"
+  },
+  "created_at": "2026-10-02T09:46:03.453225Z"
+}

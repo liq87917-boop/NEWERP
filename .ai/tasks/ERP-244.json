@@ -1,0 +1,69 @@
+{
+  "id": "ERP-244",
+  "title": "Design scoped salesman commission evidence fields and filters",
+  "description": "Add a finite field selector and preview to the existing salesman commission page, reusing the preceding bounded currency evidence source. New DTOs and pure rules declare finite ordered fields, required context and optional positive customer/salesman IDs and supported currency filter, blank=absent; invalid IDs, unknown currency codes, arbitrary expressions/SQL, unknown/duplicate/empty field selections and page sizes outside 1..200 fail before source reads. Filters intersect fresh customer scope and source status/date predicates before Take(501), not after materialization; optional absent filters retain unassigned/unknown identity buckets. Add catalog and preview endpoints in a dedicated automatically discovered controller using existing IReportService; catalog also checks current permission. Stable salesman bucket/raw-currency pagination, total count and current page coverage; selected projection only, but date/normalized filter/source limit/source meaning/currency grouping/unknown cost-payout/current-reference-rate context remains visible even evidence columns hidden. UI preserves selected order and filter state, resets page on field/filter changes, clears stale data after failures and escapes labels; implement behavior using existing page patterns without unrelated layout work. No extra employee directory or persistence. Development only. Reuse existing sales-commission menu, current-user SalespersonDataScopeService customer scope, approved nondeleted SalesOrders and OperationLogMiddleware HTTP audit; each endpoint rechecks identity, menu and fresh scope and validates the current request, failing closed without data/file on revocation, invalid input or source overflow. Salesman filters are order attributes and never expand customer scope. Current parameter rate is reference information, not a historical agreed rate, actual payout, customer agency fee or ledger entry. No client identity/scope/rows/aggregates as authority, arbitrary/model-generated SQL, business writes, new domain entities or persistence schema, migrations, schema/view/stored-procedure changes, production SQL or real database execution, credentials/secrets/.env/config changes, irreversible operations, production deployment or real browser acceptance. Preserve unrelated modules and uncommitted work. Run focused in-memory service/API/export and UI source-contract tests plus configured safe Release build/test; unavailable external database/browser acceptance is environment-blocked, never fabricated passed.",
+  "depends_on": [
+    "ERP-243"
+  ],
+  "risk_level": "medium",
+  "priority": "P1",
+  "acceptance_criteria": [
+    "Finite field and filter request validation applies customer/salesman/currency predicates to the authorized source before caps, with absent-filter compatibility.",
+    "Authorized catalog and stable paged preview expose selected fields and mandatory normalized evidence context, rejecting revoked permissions and malformed requests.",
+    "Existing report page provides field ordering, filters and pagination with safe stale/error state; service/API/UI source-contract tests and safe build/test pass."
+  ],
+  "criterion_path_map": {
+    "Finite field and filter request validation applies customer/salesman/currency predicates to the authorized source before caps, with absent-filter compatibility.": [
+      "src/ERP.Application/DTOs/DynamicSalesCommissionReportDtos.cs",
+      "src/ERP.Application/Services/DynamicSalesCommissionReportRules.cs",
+      "src/ERP.Application/Interfaces/IReportService.cs",
+      "src/ERP.Application/Services/ReportService.Extra3.cs",
+      "src/ERP.UnitTests/DynamicSalesCommissionFilterTests.cs",
+      "src/ERP.UnitTests/SalesCommissionQueryBoundsTests.cs"
+    ],
+    "Authorized catalog and stable paged preview expose selected fields and mandatory normalized evidence context, rejecting revoked permissions and malformed requests.": [
+      "src/ERP.Application/DTOs/DynamicSalesCommissionReportDtos.cs",
+      "src/ERP.Application/Services/DynamicSalesCommissionReportRules.cs",
+      "src/ERP.Api/Controllers/DynamicSalesCommissionReportController.cs",
+      "src/ERP.UnitTests/DynamicSalesCommissionReportTests.cs"
+    ],
+    "Existing report page provides field ordering, filters and pagination with safe stale/error state; service/API/UI source-contract tests and safe build/test pass.": [
+      "src/ERP.Api/wwwroot/js/reports.js",
+      "src/ERP.UnitTests/DynamicSalesCommissionReportUiTests.cs",
+      "src/ERP.UnitTests/DynamicSalesCommissionReportTests.cs",
+      "src/ERP.UnitTests/DynamicSalesCommissionFilterTests.cs",
+      "src/ERP.UnitTests/SalesCommissionScopeTests.cs",
+      "src/ERP.UnitTests/SalesCommissionQueryBoundsTests.cs"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Application/DTOs/DynamicSalesCommissionReportDtos.cs",
+    "src/ERP.Application/Services/DynamicSalesCommissionReportRules.cs",
+    "src/ERP.Application/Interfaces/IReportService.cs",
+    "src/ERP.Application/Services/ReportService.Extra3.cs",
+    "src/ERP.UnitTests/DynamicSalesCommissionFilterTests.cs",
+    "src/ERP.UnitTests/SalesCommissionQueryBoundsTests.cs",
+    "src/ERP.Api/Controllers/DynamicSalesCommissionReportController.cs",
+    "src/ERP.UnitTests/DynamicSalesCommissionReportTests.cs",
+    "src/ERP.Api/wwwroot/js/reports.js",
+    "src/ERP.UnitTests/DynamicSalesCommissionReportUiTests.cs",
+    "src/ERP.UnitTests/SalesCommissionScopeTests.cs"
+  ],
+  "status": "pending",
+  "max_attempts": 3,
+  "attempts": 0,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only bounded scoped report feature"
+  },
+  "created_at": "2026-10-02T09:46:03.452202Z"
+}

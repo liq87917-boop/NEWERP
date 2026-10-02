@@ -1,0 +1,61 @@
+{
+  "id": "ERP-245",
+  "title": "Export selected salesman commission evidence page to Excel",
+  "description": "Users download the currently selected field order and current preview page as Excel using a dedicated export endpoint that rebuilds fresh bounded authorized evidence from the request, never posted rows or a preview cache. Reuse preceding DTO/rules/service and NPOI already referenced by the solution; add a narrow DynamicSalesCommissionExcelExporter helper in Infrastructure with direct construction from the controller (no new DI registration/package/config). Numeric known signed original-currency values and counts retain numeric cells; null amount/profit/rate/payout are explicitly unknown, configured zero rate remains numeric zero but labelled current reference only. Always include normalized dates/filters/page coverage/source count and cap/current-user restricted approved-order source/current-reference-rate and unknown historical-profit/payout explanations even context fields unselected. No full-match or cross-currency total and no appended unselected employee detail columns; escape formula-like untrusted employee/context strings as literal cells, keep text and numeric distinctions. Existing page downloads Excel with current selection/filter/page, preserving state and showing permission/overflow/export failure without stale download. Use existing HTTP OperationLogMiddleware audit without writing duplicate business records. Development only. Reuse existing sales-commission menu, current-user SalespersonDataScopeService customer scope, approved nondeleted SalesOrders and OperationLogMiddleware HTTP audit; each endpoint rechecks identity, menu and fresh scope and validates the current request, failing closed without data/file on revocation, invalid input or source overflow. Salesman filters are order attributes and never expand customer scope. Current parameter rate is reference information, not a historical agreed rate, actual payout, customer agency fee or ledger entry. No client identity/scope/rows/aggregates as authority, arbitrary/model-generated SQL, business writes, new domain entities or persistence schema, migrations, schema/view/stored-procedure changes, production SQL or real database execution, credentials/secrets/.env/config changes, irreversible operations, production deployment or real browser acceptance. Preserve unrelated modules and uncommitted work. Run focused in-memory service/API/export and UI source-contract tests plus configured safe Release build/test; unavailable external database/browser acceptance is environment-blocked, never fabricated passed.",
+  "depends_on": [
+    "ERP-244"
+  ],
+  "risk_level": "low",
+  "priority": "P1",
+  "acceptance_criteria": [
+    "Excel endpoint revalidates current selection/page/filter and fresh identity/menu/customer scope, rebuilding the same bounded page without trusting client rows or stale previews.",
+    "Excel workbook preserves selected column order, signed numeric values, explicit unknowns and mandatory evidence context with formula-safe literal strings and no unsupported totals.",
+    "Existing page downloads Excel with current state and explicit failures; workbook/controller/UI tests cover revocation, caps, negative/unknown/zero values and formula-like labels, and safe build/test pass."
+  ],
+  "criterion_path_map": {
+    "Excel endpoint revalidates current selection/page/filter and fresh identity/menu/customer scope, rebuilding the same bounded page without trusting client rows or stale previews.": [
+      "src/ERP.Api/Controllers/DynamicSalesCommissionReportController.cs",
+      "src/ERP.Application/DTOs/DynamicSalesCommissionReportDtos.cs",
+      "src/ERP.Application/Services/DynamicSalesCommissionReportRules.cs",
+      "src/ERP.UnitTests/DynamicSalesCommissionExcelTests.cs"
+    ],
+    "Excel workbook preserves selected column order, signed numeric values, explicit unknowns and mandatory evidence context with formula-safe literal strings and no unsupported totals.": [
+      "src/ERP.Infrastructure/Export/DynamicSalesCommissionExcelExporter.cs",
+      "src/ERP.Application/DTOs/DynamicSalesCommissionReportDtos.cs",
+      "src/ERP.UnitTests/DynamicSalesCommissionExcelTests.cs"
+    ],
+    "Existing page downloads Excel with current state and explicit failures; workbook/controller/UI tests cover revocation, caps, negative/unknown/zero values and formula-like labels, and safe build/test pass.": [
+      "src/ERP.Api/wwwroot/js/reports.js",
+      "src/ERP.UnitTests/DynamicSalesCommissionExcelTests.cs",
+      "src/ERP.UnitTests/DynamicSalesCommissionReportUiTests.cs",
+      "src/ERP.UnitTests/DynamicSalesCommissionReportTests.cs"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/DynamicSalesCommissionReportController.cs",
+    "src/ERP.Application/DTOs/DynamicSalesCommissionReportDtos.cs",
+    "src/ERP.Application/Services/DynamicSalesCommissionReportRules.cs",
+    "src/ERP.UnitTests/DynamicSalesCommissionExcelTests.cs",
+    "src/ERP.Infrastructure/Export/DynamicSalesCommissionExcelExporter.cs",
+    "src/ERP.Api/wwwroot/js/reports.js",
+    "src/ERP.UnitTests/DynamicSalesCommissionReportUiTests.cs",
+    "src/ERP.UnitTests/DynamicSalesCommissionReportTests.cs"
+  ],
+  "status": "pending",
+  "max_attempts": 3,
+  "attempts": 0,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only bounded scoped report feature"
+  },
+  "created_at": "2026-10-02T09:46:03.452718Z"
+}
