@@ -215,4 +215,60 @@ public class DynamicSalesmanOutputSummaryTests
         Assert.Equal(new[] { "1000", "999", "CNY", "USD" },
             summary.CurrencyRows.Select(r => r.Currency).ToArray());
     }
+
+    // ==================== 4. ERP-240 汇总导出行 ====================
+
+    [Fact]
+    public void 汇总导出行_已知金额签名数值_计数为整数_未知金额利润利润率显式文本()
+    {
+        var export = DynamicSalesmanOutputSummaryRules.BuildCurrencySummaryExportRow(
+            new DynamicSalesmanOutputCurrencySummaryDto
+            {
+                Currency = "USD",
+                CurrencyLabel = "USD 美元",
+                SalesmanCount = 2,
+                OrderCount = 3,
+                TotalAmount = 800m,
+                TotalProfit = null,
+                ProfitRate = null,
+                Evidence = SalesmanOutputEvidenceRules.KnownCurrencyEvidence,
+                ProfitBasis = DynamicSalesmanOutputSummaryRules.ProfitBasisText,
+            });
+
+        Assert.Equal("USD", export["currency"]);
+        Assert.Equal("USD 美元", export["currencyLabel"]);
+        Assert.Equal(2, export["salesmanCount"]);
+        Assert.Equal(3, export["orderCount"]);
+        Assert.Equal(800m, export["totalAmount"]);
+        Assert.Equal(DynamicSalesmanOutputReportRules.UnknownValueText, export["totalProfit"]);
+        Assert.Equal(DynamicSalesmanOutputReportRules.UnknownValueText, export["profitRate"]);
+        Assert.Equal(SalesmanOutputEvidenceRules.KnownCurrencyEvidence, export["evidence"]);
+        Assert.Contains("利润未知", (string)export["profitBasis"]!);
+    }
+
+    [Fact]
+    public void 汇总导出行_公式前导文本转义_绝不写入数值零()
+    {
+        var export = DynamicSalesmanOutputSummaryRules.BuildCurrencySummaryExportRow(
+            new DynamicSalesmanOutputCurrencySummaryDto
+            {
+                Currency = "=1+1",
+                CurrencyLabel = "+USD",
+                SalesmanCount = 1,
+                OrderCount = 1,
+                TotalAmount = null,
+                TotalProfit = null,
+                ProfitRate = null,
+                Evidence = "@已知原币",
+                ProfitBasis = "-利润未知",
+            });
+
+        Assert.Equal("'=1+1", export["currency"]);
+        Assert.Equal("'+USD", export["currencyLabel"]);
+        Assert.Equal("'@已知原币", export["evidence"]);
+        Assert.Equal("'-利润未知", export["profitBasis"]);
+        Assert.Equal(DynamicSalesmanOutputReportRules.UnknownValueText, export["totalAmount"]);
+        Assert.Equal(DynamicSalesmanOutputReportRules.UnknownValueText, export["totalProfit"]);
+        Assert.Equal(DynamicSalesmanOutputReportRules.UnknownValueText, export["profitRate"]);
+    }
 }

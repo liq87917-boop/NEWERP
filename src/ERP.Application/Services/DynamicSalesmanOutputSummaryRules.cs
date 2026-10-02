@@ -84,4 +84,43 @@ public static class DynamicSalesmanOutputSummaryRules
             SummaryCoverageText,
             ProfitBasisText);
     }
+
+    // ==================== ERP-240 全匹配汇总 Excel 导出 ====================
+
+    /// <summary>全匹配原币汇总 Excel 数据工作表名（ERP-240：区别于当前页明细导出的「业务员产值报表」工作表）</summary>
+    public const string SummaryCurrencySheetName = "全匹配原币汇总";
+
+    /// <summary>汇总上下文表「覆盖范围」行标签（ERP-240：显式标注汇总覆盖本次有界来源内的全部匹配业务员 × 原币证据行，区别于明细页「页面覆盖」）</summary>
+    public const string ContextCoverageLabel = "覆盖范围";
+
+    /// <summary>汇总上下文表「利润依据」行标签（ERP-240：显式标注利润 / 利润率恒未知、不做当前价推算、绝无利润总计）</summary>
+    public const string ContextProfitBasisLabel = "利润依据";
+
+    /// <summary>无应用筛选时的显式上下文（ERP-240：不过滤 = 保留全部已审核、未删除、已分配业务员的销售订单证据）</summary>
+    public const string ContextNoFilterText =
+        "无（不过滤，保留全部已审核、未删除、已分配业务员的销售订单证据）";
+
+    /// <summary>
+    /// 把一条全匹配原币汇总行转成导出行（ERP-240）：币种原始键 / 标签 / 金额证据 / 利润依据文本做公式注入转义；
+    /// 业务员数 / 已分配已审核订单数为整数数值；已知币种金额为签名数值，未知金额 / 利润 / 利润率显式转为「未知」
+    /// （绝不写成数值 0、绝不跨币种求和、绝无总计行）。
+    /// <para>键集合与 <see cref="CurrencySummaryColumns"/> 一致
+    /// （currency / currencyLabel / salesmanCount / orderCount / totalAmount / totalProfit / profitRate / evidence / profitBasis）。</para>
+    /// </summary>
+    public static Dictionary<string, object?> BuildCurrencySummaryExportRow(DynamicSalesmanOutputCurrencySummaryDto row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+        return new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["currency"] = DynamicSalesmanOutputReportRules.EscapeFormulaLeading(row.Currency),
+            ["currencyLabel"] = DynamicSalesmanOutputReportRules.EscapeFormulaLeading(row.CurrencyLabel),
+            ["salesmanCount"] = row.SalesmanCount,
+            ["orderCount"] = row.OrderCount,
+            ["totalAmount"] = row.TotalAmount is null ? DynamicSalesmanOutputReportRules.UnknownValueText : row.TotalAmount,
+            ["totalProfit"] = row.TotalProfit is null ? DynamicSalesmanOutputReportRules.UnknownValueText : row.TotalProfit,
+            ["profitRate"] = row.ProfitRate is null ? DynamicSalesmanOutputReportRules.UnknownValueText : row.ProfitRate,
+            ["evidence"] = DynamicSalesmanOutputReportRules.EscapeFormulaLeading(row.Evidence),
+            ["profitBasis"] = DynamicSalesmanOutputReportRules.EscapeFormulaLeading(row.ProfitBasis),
+        };
+    }
 }

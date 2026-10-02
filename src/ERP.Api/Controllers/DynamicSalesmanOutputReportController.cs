@@ -5,6 +5,7 @@ using ERP.Application.Services;
 using ERP.Infrastructure.Export;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using NPOI.SS.UserModel;
 using NPOI.XSSF.UserModel;
 using System.Security.Claims;
 
@@ -96,6 +97,29 @@ public class DynamicSalesmanOutputReportController : ControllerBase
         return File(bytes, "application/pdf", $"SalesmanOutputEvidence_{DateTime.Now:yyyyMMddHHmmss}.pdf");
     }
 
+    /// <summary>
+    /// 下载当前筛选集的全匹配汇总为 Excel（ERP-240，只读）：独立重新校验身份 / 业务员产值报表菜单授权 /
+    /// 业务员数据范围 / 字段 / 日期 / 分页 / 应用筛选，并复用同一服务端在全部匹配业务员 × 原币证据行上派生的
+    /// ERP-239 全匹配原币汇总（与当前页 / 选定列无关，无需先预览、绝不含业务员 / 客户明细行）；绝不信任客户端行 / 金额 / 身份 / 数据范围。
+    /// 工作簿含「全匹配原币汇总」数据工作表（已知金额 / 计数为数值，未知金额 / 利润 / 利润率显式「未知」）
+    /// 与「报表口径」上下文工作表（日期 / 来源上限 / 覆盖范围 / 来源证据 / 未知口径 / 利润依据 / 应用筛选 / 空汇总 / 只读声明）；
+    /// 绝不跨币种合计、绝无任何总计行、绝不做利润推算。授权撤销 / 无效输入 / 来源超限返回错误、不返回任何工作簿。
+    /// <para>全程只读，不写库、不执行任意 SQL；请求由既有 <c>OperationLogMiddleware</c> 记录审计（动作「导出全匹配汇总」）。</para>
+    /// </summary>
+    [HttpPost("export-summary")]
+    public async Task<IActionResult> ExportSummary([FromBody] DynamicSalesmanOutputReportRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        // 复用同一有界、已授权管线：重新校验字段 / 日期 / 分页 / 应用筛选与身份 / 菜单授权 / 数据范围，
+        // 并由服务端同一 BuildPageAsync 派生覆盖全部匹配业务员 × 原币证据行的全匹配汇总
+        // （绝不相信客户端行 / 金额 / 身份 / 数据范围；即使未先预览或详情页越界，汇总仍覆盖全部匹配行）
+        var page = await BuildPageAsync(request);
+        var bytes = BuildSummaryWorkbook(page);
+        return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            $"SalesmanOutputEvidenceSummary_{DateTime.Now:yyyyMMddHHmmss}.xlsx");
+    }
+
     /// <summary>复用同一有界、已授权预览管线：先校验字段 / 日期 / 分页 / 应用筛选，再每次重新校验身份 / 菜单授权 / 数据范围，最后只读查询当前页</summary>
     private async Task<DynamicSalesmanOutputReportPageDto> BuildPageAsync(
         DynamicSalesmanOutputReportRequest request)
@@ -167,6 +191,115 @@ public class DynamicSalesmanOutputReportController : ControllerBase
 
         if (!string.IsNullOrWhiteSpace(page.EmptyText))
             AddLabel(nextRow, DynamicSalesmanOutputReportRules.ContextEmptyLabel, page.EmptyText);
+    }
+
+    /// <summary>生成全匹配原币汇总 Excel（ERP-240）：数据工作表（固定汇总列 + 类型化值 + 公式注入转义 + null 显式未知）+ 报表口径上下文工作表</summary>
+    private static byte[] BuildSummaryWorkbook(DynamicSalesmanOutputReportPageDto page)
+    {
+        var summary = page.Summary
+            ?? throw new BusinessException("全匹配原币汇总不可用", ErrorCodes.RuleConflict);
+
+        var columns = summary.CurrencyColumns.Select(c => (c.Key, c.Label)).ToList();
+        var rows = summary.CurrencyRows
+            .Select(DynamicSalesmanOutputSummaryRules.BuildCurrencySummaryExportRow)
+            .ToList();
+
+        using var workbook = new XSSFWorkbook();
+        AppendSummaryDataSheet(workbook, DynamicSalesmanOutputSummaryRules.SummaryCurrencySheetName, columns, rows);
+        AppendSummaryContextSheet(workbook, page, summary);
+
+        using var output = new MemoryStream();
+        workbook.Write(output);
+        return output.ToArray();
+    }
+
+    /// <summary>追加一张汇总数据工作表：表头文本做公式注入转义，已知金额 / 计数按类型写入数值单元格，未知显式文本（绝不写成 0）</summary>
+    private static void AppendSummaryDataSheet(
+        XSSFWorkbook workbook,
+        string sheetName,
+        List<(string Key, string Label)> columns,
+        List<Dictionary<string, object?>> rows)
+    {
+        var sheet = workbook.CreateSheet(sheetName);
+
+        var header = sheet.CreateRow(0);
+        for (var c = 0; c < columns.Count; c++)
+            header.CreateCell(c).SetCellValue(SafeText(columns[c].Label));
+
+        for (var r = 0; r < rows.Count; r++)
+        {
+            var row = sheet.CreateRow(r + 1);
+            for (var c = 0; c < columns.Count; c++)
+            {
+                var value = rows[r].TryGetValue(columns[c].Key, out var v) ? v : null;
+                SetTypedCell(row.CreateCell(c), value);
+            }
+        }
+    }
+
+    /// <summary>追加全匹配汇总「报表口径」上下文工作表：日期 / 来源上限 / 覆盖范围 / 来源证据 / 未知口径 / 利润依据 / 应用筛选 / 空汇总 / 只读声明</summary>
+    private static void AppendSummaryContextSheet(
+        XSSFWorkbook workbook,
+        DynamicSalesmanOutputReportPageDto page,
+        DynamicSalesmanOutputSummaryDto summary)
+    {
+        var sheet = workbook.CreateSheet(DynamicSalesmanOutputReportRules.ContextSheetName);
+
+        void AddLabel(int rowIndex, string label, string value)
+        {
+            var row = sheet.CreateRow(rowIndex);
+            row.CreateCell(0).SetCellValue(SafeText(label));
+            row.CreateCell(1).SetCellValue(SafeText(value));
+        }
+
+        var nextRow = 0;
+        AddLabel(nextRow++, DynamicSalesmanOutputReportRules.ContextStartLabel, page.Start.ToString("yyyy-MM-dd"));
+        AddLabel(nextRow++, DynamicSalesmanOutputReportRules.ContextEndLabel, page.End.ToString("yyyy-MM-dd"));
+        AddLabel(nextRow++, DynamicSalesmanOutputReportRules.ContextSourceLimitLabel, page.SourceLimitText);
+        AddLabel(nextRow++, DynamicSalesmanOutputSummaryRules.ContextCoverageLabel, summary.CoverageText);
+        AddLabel(nextRow++, DynamicSalesmanOutputReportRules.ContextSourceLabel, page.SourceContextText);
+        AddLabel(nextRow++, DynamicSalesmanOutputReportRules.ContextUnknownLabel, page.UnknownContextText);
+        AddLabel(nextRow++, DynamicSalesmanOutputSummaryRules.ContextProfitBasisLabel, summary.ProfitBasisText);
+        AddLabel(nextRow++, DynamicSalesmanOutputReportRules.ContextFilterLabel,
+            string.IsNullOrWhiteSpace(page.FilterText) ? DynamicSalesmanOutputSummaryRules.ContextNoFilterText : page.FilterText);
+
+        if (summary.CurrencyRows.Count == 0)
+            AddLabel(nextRow++, DynamicSalesmanOutputReportRules.ContextEmptyLabel, page.EmptyText);
+
+        AddLabel(nextRow, DynamicSalesmanOutputReportRules.ContextReadOnlyLabel, page.ReadOnlyText);
+    }
+
+    /// <summary>文本标签统一做公式注入转义（保持字面文本，与数据单元格同口径）</summary>
+    private static string SafeText(string? value)
+        => DynamicSalesmanOutputReportRules.EscapeFormulaLeading(value) as string ?? string.Empty;
+
+    /// <summary>按值类型写入单元格：整数 / 小数写入数值单元格，其余写入文本；null 不写成 0（由导出行保证未知显式文本）</summary>
+    private static void SetTypedCell(ICell cell, object? value)
+    {
+        switch (value)
+        {
+            case null or DBNull:
+                cell.SetCellValue(string.Empty);
+                break;
+            case int i:
+                cell.SetCellValue(i);
+                break;
+            case long l:
+                cell.SetCellValue(l);
+                break;
+            case decimal m:
+                cell.SetCellValue((double)m);
+                break;
+            case double d:
+                cell.SetCellValue(d);
+                break;
+            case float f:
+                cell.SetCellValue((double)f);
+                break;
+            default:
+                cell.SetCellValue(value.ToString() ?? string.Empty);
+                break;
+        }
     }
 
     /// <summary>身份 + 既有「角色 → 菜单」业务员产值报表模块授权 + 业务员数据范围（fail closed，绝不猜测身份）</summary>
