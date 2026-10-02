@@ -94,6 +94,29 @@ public class DynamicSalesCommissionReportController : ControllerBase
         return File(bytes, "application/pdf", $"SalesCommissionEvidence_{DateTime.Now:yyyyMMddHHmmss}.pdf");
     }
 
+    /// <summary>
+    /// 下载全匹配原币汇总为 Excel（ERP-248，只读）：不依赖之前预览 / 当前页 / 选定明细列，每次请求重新校验身份 / 菜单授权 /
+    /// 业务员数据范围 / 字段 / 日期 / 分页 / 可选筛选与 500 订单来源上限（fail closed），基于同一有界、作用域化、已筛选证据
+    /// 纯派生「全匹配」原币汇总并导出（复用 ERP-247 汇总 DTO / 规则）。已知签名原币金额 / 计数 / 显式 0 当前参考比例写入数值单元格，
+    /// null 金额 / 利润 / 利润率 / 提成额显式「未知」（绝不写成 0）；无员工明细行 / 跨币种合计金额 / 编造提成；
+    /// 上下文工作表始终标注规范化日期 / 应用筛选 / 全匹配覆盖 / 来源上限 / 全局去重业务员桶 / 已审核订单 / 来源 / 原币 /
+    /// 当前参考比例 / 未知历史利润与提成依据（文字公式转义）。授权撤销 / 无效输入 / 来源超限返回错误、不返回任何文件。
+    /// <para>全程只读，请求由既有 <c>OperationLogMiddleware</c> 记录审计（动作「导出汇总」）。</para>
+    /// </summary>
+    [HttpPost("export-summary")]
+    public async Task<IActionResult> ExportSummary([FromBody] DynamicSalesCommissionReportRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var page = await BuildPageAsync(request);
+        var summary = page.Summary ?? DynamicSalesCommissionSummaryRules.BuildSummary(
+            Array.Empty<ReportDtos.SalesCommissionItem>());
+
+        var bytes = new DynamicSalesCommissionSummaryExcelExporter().Build(summary, page);
+        return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            $"SalesCommissionSummary_{DateTime.Now:yyyyMMddHHmmss}.xlsx");
+    }
+
     /// <summary>每次重新校验身份 + 菜单授权 + 业务员数据范围，再交由服务层校验请求并只读查询当前页</summary>
     private async Task<DynamicSalesCommissionReportPageDto> BuildPageAsync(DynamicSalesCommissionReportRequest request)
     {

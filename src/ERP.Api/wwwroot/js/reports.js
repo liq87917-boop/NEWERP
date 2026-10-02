@@ -4741,6 +4741,68 @@ async function scdExportPdf() {
 }
 
 
+/* 下载全匹配原币汇总为 Excel（ERP-248，只读）：复用当前字段 / 日期 / 筛选 / 分页状态（不要求先预览），
+   POST /api/dynamic-sales-commission-report/export-summary；成功（xlsx 附件）触发下载；
+   授权 / 无效 / 来源超限 / 网络失败在结果区可见，绝不下载任何内容、绝不使用旧预览行、绝不信任客户端行 */
+async function scdExportSummaryExcel() {
+  const state = scdBuildState(SCD_DYN.page || 1);
+  const dateError = scdDateError(state);
+  if (dateError) {
+    scdRenderResult(scdErrorHtml('invalid', dateError));
+    return;
+  }
+  const filterError = scdFilterError(state);
+  if (filterError) {
+    scdRenderResult(scdErrorHtml('invalid', filterError));
+    return;
+  }
+  const req = scdBuildRequest(state);
+  scdRenderResult(scdLoadingHtml());
+
+  try {
+    const headers = { 'Content-Type': 'application/json' };
+    const token = typeof localStorage !== 'undefined' ? (localStorage.getItem('erp_token') || '') : '';
+    if (token) headers['Authorization'] = 'Bearer ' + token;
+    const resp = await fetch('/api/dynamic-sales-commission-report/export-summary', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(req),
+    });
+
+    const contentType = (resp.headers.get('content-type') || '');
+    if (contentType.indexOf('spreadsheetml') >= 0) {
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+      a.href = url;
+      a.download = '业务员提成全匹配汇总_' + dateStr + '.xlsx';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      if (SCD_DYN.view) {
+        scdRenderResult(scdResultHtml(SCD_DYN.view));
+      } else {
+        scdRenderResult('<div class="pd-hint" style="margin:8px 0">已开始下载全匹配原币汇总 Excel</div>');
+      }
+      return;
+    }
+
+    let message = '导出失败';
+    let code;
+    try {
+      const data = await resp.json();
+      message = (data && data.message) || message;
+      code = data && data.code;
+    } catch (e) { /* 非 JSON 响应，沿用默认提示 */ }
+    scdRenderResult(scdErrorHtml(scdKindOfCode(code), message));
+  } catch (err) {
+    scdRenderResult(scdErrorHtml('network', (err && err.message) || '无法连接到服务器'));
+  }
+}
+
+
 /* 加载字段目录（白名单，有限、只读），失败时区分未登录 / 权限不足 / 网络错误 */
 async function loadSalesCommissionDesignerCatalog() {
   scdRenderResult(scdLoadingHtml());
@@ -4799,6 +4861,7 @@ function openSalesCommissionDesigner() {
           <button class="btn btn-primary" onclick="scdPreview(1)">🔍 预览</button>
           <button class="btn btn-neutral" onclick="scdExportExcel()" title="导出当前页选定字段为 Excel（只读）：复用当前字段 / 日期 / 筛选 / 分页，原币金额签名呈现、未知金额 / 利润 / 提成显式「未知」、无跨币种合计">📤 导出当前页 Excel</button>
           <button class="btn btn-neutral" onclick="scdExportPdf()" title="下载当前页选定字段为中文 PDF（只读）：复用当前字段 / 日期 / 筛选 / 分页，分页中文渲染、未知显式「未知」、无跨币种合计">📥 下载当前页 PDF</button>
+          <button class="btn btn-neutral" onclick="scdExportSummaryExcel()" title="下载全匹配原币汇总为 Excel（只读）：独立于当前页 / 选定明细列，复用当前字段 / 日期 / 筛选状态，全部匹配证据按原币汇总、未知显式「未知」、无员工明细与跨币种合计">📊 下载全匹配汇总 Excel</button>
         </div>
         <div id="scd-des-result"></div>
       </div>

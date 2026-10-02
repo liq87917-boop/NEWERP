@@ -170,4 +170,54 @@ public static class DynamicSalesCommissionSummaryRules
 
         return allConsistent ? (distinctKnown[0], RateKnownReason) : (null, RateMissingReason);
     }
+
+    // ==================== 汇总 Excel 导出 ====================
+
+    /// <summary>全匹配原币汇总 Excel 数据工作表名（与明细「业务员提成证据」工作表刻意区分）</summary>
+    public const string SummarySheetName = "全匹配原币汇总";
+
+    /// <summary>全匹配汇总 Excel 上下文表「覆盖范围」行标签</summary>
+    public const string ContextCoverageLabel = "覆盖范围";
+
+    /// <summary>全匹配汇总 Excel 上下文表「全局去重业务员桶」行标签</summary>
+    public const string ContextGlobalBucketsLabel = "全局去重业务员桶";
+
+    /// <summary>全匹配汇总 Excel 上下文表「全局已审核订单」行标签</summary>
+    public const string ContextGlobalOrdersLabel = "全局已审核订单";
+
+    /// <summary>全匹配汇总 Excel 上下文表「当前参考比例依据」行标签</summary>
+    public const string ContextRateReasonLabel = "当前参考比例依据";
+
+    /// <summary>全匹配汇总 Excel 上下文表「未知历史利润/提成依据」行标签</summary>
+    public const string ContextProfitBasisLabel = "未知历史利润/提成依据";
+
+    /// <summary>
+    /// 把一条全匹配原币汇总行转成导出行（键与 <see cref="CurrencySummaryColumns"/> 一致）：
+    /// 已知计数 / 已知签名原币金额按类型保留数值；null 金额 / 利润 / 利润率 / 提成额显式「未知」（绝不写成数值 0）；
+    /// 文本单元格做公式注入转义（字面文本）。
+    /// </summary>
+    public static Dictionary<string, object?> BuildExportRow(DynamicSalesCommissionCurrencySummaryDto row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+
+        return new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["currency"] = DynamicSalesCommissionReportRules.EscapeFormulaLeading(row.Currency),
+            ["currencyLabel"] = DynamicSalesCommissionReportRules.EscapeFormulaLeading(row.CurrencyLabel),
+            ["approvedOrders"] = row.ApprovedOrders,
+            ["uniqueSalesmanBuckets"] = row.UniqueSalesmanBuckets,
+            ["salesAmount"] = NumberOrUnknown(row.SalesAmount),
+            ["profit"] = NumberOrUnknown(row.Profit),
+            ["profitRate"] = NumberOrUnknown(row.ProfitRate),
+            ["commissionAmount"] = NumberOrUnknown(row.CommissionAmount),
+            ["amountCompletenessText"] = DynamicSalesCommissionReportRules.EscapeFormulaLeading(row.AmountCompletenessText),
+            ["profitReasonText"] = DynamicSalesCommissionReportRules.EscapeFormulaLeading(row.ProfitReasonText),
+            ["profitRateReasonText"] = DynamicSalesCommissionReportRules.EscapeFormulaLeading(row.ProfitRateReasonText),
+            ["commissionAmountReasonText"] = DynamicSalesCommissionReportRules.EscapeFormulaLeading(row.CommissionAmountReasonText),
+        };
+    }
+
+    /// <summary>已知可空数值保留数值、null 显式「未知」（绝不写成数值 0）。</summary>
+    private static object? NumberOrUnknown(decimal? value)
+        => value.HasValue ? (object?)value.Value : DynamicSalesCommissionReportRules.UnknownValueText;
 }
