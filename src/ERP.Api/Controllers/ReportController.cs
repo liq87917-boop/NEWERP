@@ -45,6 +45,12 @@ public class ReportController : ControllerBase
     /// <summary>客户出货量统计报表要求菜单的中文文案（与既有菜单名一致）</summary>
     private const string CustomerShipmentMenuText = "客户出货量统计表";
 
+    /// <summary>业务员产值报表要求的既有菜单编码（与 SeedData / SchemaUpgrader 同源）</summary>
+    private const string SalesmanOutputMenuCode = "salesman-output";
+
+    /// <summary>业务员产值报表要求菜单的中文文案（与既有菜单名一致）</summary>
+    private const string SalesmanOutputMenuText = "业务员产值报表";
+
     private readonly IReportService _reportService;
     private readonly IErpDbContext? _db;
 
@@ -146,11 +152,31 @@ public class ReportController : ControllerBase
         return Ok(ApiResponse<List<ReportDtos.CustomerShipmentItem>>.Success(result));
     }
 
-    /// <summary>业务员产值报表</summary>
+    /// <summary>业务员产值报表（ERP-235；每次请求重新校验身份、菜单授权与业务员数据范围，缺失即 fail closed；仅已分配业务员、已审核、未删除、授权客户的销售订单证据）</summary>
     [HttpGet("salesman-output")]
     public async Task<IActionResult> SalesmanOutput([FromQuery] DateTime start, [FromQuery] DateTime end)
     {
-        var result = await _reportService.GetSalesmanOutputAsync(start, end);
+        if (_db is null)
+            throw new BusinessException("业务员产值报表缺少数据库上下文，无法解析当前账号授权", ErrorCodes.InternalError);
+
+        var db = _db;
+        var userId = CurrentUserId();
+        if (userId is null or <= 0)
+            throw new BusinessException("请先登录后再查看业务员产值报表", ErrorCodes.Unauthorized);
+
+        var menuCodes = await CustomerReceivableReconciliationService.LoadAuthorizedMenuCodesAsync(
+            db, userId.Value);
+        if (!menuCodes.Contains(SalesmanOutputMenuCode, StringComparer.OrdinalIgnoreCase))
+        {
+            throw new BusinessException(
+                $"当前账号没有「{SalesmanOutputMenuText}」（{SalesmanOutputMenuCode}）模块授权：拒绝查看业务员产值报表"
+                + "（fail closed，不返回任何数据）",
+                ErrorCodes.Forbidden);
+        }
+
+        var scope = await SalespersonDataScopeService.ResolveAsync(db, userId);
+
+        var result = await _reportService.GetSalesmanOutputAsync(start, end, scope);
         return Ok(ApiResponse<List<ReportDtos.SalesmanOutputItem>>.Success(result));
     }
 

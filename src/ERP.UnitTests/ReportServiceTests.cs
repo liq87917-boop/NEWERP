@@ -242,7 +242,7 @@ public class ReportServiceTests
         await db.SaveChangesAsync();
 
         var service = new ReportService(db);
-        var result = await service.GetSalesmanOutputAsync(Start, End);
+        var result = await service.GetSalesmanOutputAsync(Start, End, PrivilegedScope);
 
         Assert.Equal(2, result.Count);
         // 按产值降序
@@ -268,7 +268,7 @@ public class ReportServiceTests
         await db.SaveChangesAsync();
 
         var service = new ReportService(db);
-        var result = await service.GetSalesmanOutputAsync(Start, End);
+        var result = await service.GetSalesmanOutputAsync(Start, End, PrivilegedScope);
 
         // SO-YES 会被算到一个不存在的业务员（id=99），SO-NO 被排除
         Assert.Single(result);
@@ -649,7 +649,7 @@ public class ReportServiceTests
         await db.SaveChangesAsync();
 
         var service = new ReportService(db);
-        var result = await service.GetSalesmanOutputAsync(Start, End);
+        var result = await service.GetSalesmanOutputAsync(Start, End, PrivilegedScope);
 
         Assert.Single(result);
         Assert.Equal(500m, result[0].TotalAmount);

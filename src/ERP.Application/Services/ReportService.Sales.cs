@@ -27,6 +27,18 @@ public partial class ReportService
     /// <summary>客户出货量统计表金额口径证据标签：已审核订单金额（原币），非实际收款金额</summary>
     public const string CustomerShipmentAmountLabel = "已审核订单金额合计（原币，非实际收款金额）";
 
+    /// <summary>业务员产值报表允许的日期区间最大跨度（含首尾日历日）：366 天</summary>
+    private const int SalesmanOutputMaxDateRangeDays = 366;
+
+    /// <summary>业务员产值报表订单头读取上限（范围内已审核、已分配业务员的销售订单）：500 张</summary>
+    private const int SalesmanOutputMaxOrders = 500;
+
+    /// <summary>业务员产值报表明细读取上限（范围内非删除订单明细）：10000 条</summary>
+    private const int SalesmanOutputMaxDetails = 10000;
+
+    /// <summary>业务员产值报表证据标签：已分配业务员、已审核、未删除、授权客户销售订单证据，非总 ERP 订单 / 产值 / 实际收入 / 出货 / 收款</summary>
+    public const string SalesmanOutputEvidenceLabel = "已分配业务员·已审核·未删除·授权客户销售订单证据（非总ERP订单/产值/实际收入/出货/收款）";
+
     /// <summary>
     /// 客户出货量统计表（只读派生）：仅统计已审核、未删除、当前账号数据范围内的销售订单头，按客户 × 原币分组；
     /// 已知币种按签名原币合计金额、未知 / 无效币种金额为 null 仅保留订单头计数；精确单位数量分组由非删除明细派生，
@@ -188,32 +200,94 @@ public partial class ReportService
         return source;
     }
 
-    /// <summary>业务员产值报表</summary>
-    public async Task<List<ReportDtos.SalesmanOutputItem>> GetSalesmanOutputAsync(DateTime start, DateTime end)
+    /// <summary>
+    /// 业务员产值报表（只读派生，ERP-235）：仅统计已审核、未删除、已分配业务员、当前账号数据范围内的销售订单证据，
+    /// 按业务员分组；未分配业务员的订单不参与（保持既有口径）。金额为订单原币小计，利润沿用既有当前价估算口径
+    /// （币种未知；跨币种语义由 ERP-236 另行修正，本表不扩展）。本表口径为「已分配业务员·已审核·未删除·授权客户
+    /// 销售订单证据」，不是总 ERP 订单 / 产值 / 实际收入 / 出货 / 收款。日期校验先于任何源读取（结束日溢出显式拒绝）；
+    /// 订单头在业务员数据范围之后做 501 行探测（500 张上限），明细按 10001 条探测（10000 条上限），
+    /// 商品 / 业务员姓名按已限定 Id 固定批量查询（无逐单 / 逐行查库、不读取范围外业务员姓名）；超出即 fail closed 且不返回任何行或金额。
+    /// </summary>
+    public async Task<List<ReportDtos.SalesmanOutputItem>> GetSalesmanOutputAsync(
+        DateTime start, DateTime end, SalespersonDataScope scope)
     {
-        var orders = await _db.SalesOrders
-            .Where(o => !o.IsDeleted && o.OrderDate >= start && o.OrderDate <= end
-                        && o.Status != DocumentStatus.Cancelled)
+        ArgumentNullException.ThrowIfNull(scope);
+
+        // 1) 日期校验先于任何源读取（fail closed，含结束日溢出防护）
+        var startDate = start.Date;
+        var endDate = end.Date;
+        if (endDate < startDate)
+            throw new BusinessException("业务员产值报表的结束日期不能早于开始日期", ErrorCodes.InvalidParameter);
+
+        var inclusiveDays = (endDate - startDate).Days + 1;
+        if (inclusiveDays > SalesmanOutputMaxDateRangeDays)
+            throw new BusinessException(
+                $"业务员产值报表的日期范围最多 {SalesmanOutputMaxDateRangeDays} 天（含首尾）",
+                ErrorCodes.InvalidParameter);
+
+        // 结束日按排他上界处理（含首尾，即 < 结束日次日）；结束日为最大日期时次日溢出，显式拒绝而非运行时异常
+        if (endDate == DateTime.MaxValue.Date)
+            throw new BusinessException("业务员产值报表的结束日期无效（结束日次日溢出）", ErrorCodes.InvalidParameter);
+
+        var endExclusive = endDate.AddDays(1);
+
+        // 2) 订单头：已审核、未删除、已分配业务员、日期窗口；先按业务员数据范围过滤，再做 501 行稳定探测（500 张上限）
+        var ordersQuery = _db.SalesOrders
+            .Where(o => !o.IsDeleted
+                        && o.Status == DocumentStatus.Approved
+                        && o.SalesmanId != null
+                        && o.OrderDate >= startDate
+                        && o.OrderDate < endExclusive);
+        ordersQuery = SalespersonDataScopeService.FilterByCustomer(ordersQuery, scope, o => o.CustomerId);
+
+        var orders = await ordersQuery
+            .OrderBy(o => o.CustomerId)
+            .ThenBy(o => o.Id)
+            .Take(SalesmanOutputMaxOrders + 1)
             .ToListAsync();
 
+        if (orders.Count > SalesmanOutputMaxOrders)
+        {
+            throw new BusinessException(
+                $"业务员产值报表超出报告上限：范围内已审核、已分配业务员的销售订单超过 {SalesmanOutputMaxOrders} 张"
+                + "（fail closed，不返回任何行或金额）",
+                ErrorCodes.RuleConflict);
+        }
+
+        // 3) 明细：仅未删除且属于已读取订单头；有界读取（10001 条探测 10000 上限）
         var orderIds = orders.Select(o => o.Id).ToList();
         var details = await _db.SalesOrderDetails
             .Where(d => orderIds.Contains(d.SalesOrderId) && !d.IsDeleted)
+            .OrderBy(d => d.Id)
+            .Take(SalesmanOutputMaxDetails + 1)
             .ToListAsync();
 
+        if (details.Count > SalesmanOutputMaxDetails)
+        {
+            throw new BusinessException(
+                $"业务员产值报表超出报告上限：范围内非删除订单明细超过 {SalesmanOutputMaxDetails} 条"
+                + "（fail closed，不返回任何行或金额）",
+                ErrorCodes.RuleConflict);
+        }
+
+        // 4) 固定批量查询解析商品与业务员姓名（仅按已限定范围内的 Id 一次查询；无逐单 / 逐行查库、不读取范围外业务员姓名）
         var productIds = details.Select(d => d.ProductId).Distinct().ToList();
         var products = await _db.BaseProducts
             .Where(p => productIds.Contains(p.Id))
             .ToDictionaryAsync(p => p.Id, p => p);
 
-        var salesmanIds = orders.Where(o => o.SalesmanId.HasValue)
-            .Select(o => o.SalesmanId!.Value).Distinct().ToList();
+        var salesmanIds = orders
+            .Where(o => o.SalesmanId.HasValue)
+            .Select(o => o.SalesmanId!.Value)
+            .Distinct()
+            .ToList();
         var employees = await _db.BaseEmployees
             .Where(e => salesmanIds.Contains(e.Id))
             .ToDictionaryAsync(e => e.Id, e => e.EmployeeName);
 
+        // 5) 按业务员分组：金额与利润只在已读取的有界证据内合计；未分配业务员的订单已在源头排除（既有口径保持）
         var result = new List<ReportDtos.SalesmanOutputItem>();
-        foreach (var g in orders.Where(o => o.SalesmanId.HasValue).GroupBy(o => o.SalesmanId!.Value))
+        foreach (var g in orders.GroupBy(o => o.SalesmanId!.Value))
         {
             var groupOrders = g.ToList();
             var groupOrderIds = groupOrders.Select(o => o.Id).ToList();
@@ -230,6 +304,6 @@ public partial class ReportService
                 TotalProfit = profit
             });
         }
-        return result.OrderByDescending(x => x.TotalAmount).ToList();
+        return result.OrderByDescending(x => x.TotalAmount).ThenBy(x => x.SalesmanId).ToList();
     }
 }

@@ -46,7 +46,14 @@ const REPORTS = {
       { key: 'quantityLabel', label: '数量口径' },
     ] },
   'salesman-output': { api: '/api/reports/salesman-output', title: '业务员产值报表',
-    emoji: '📊', kpi: 'lc', summary: '业务员产值 · 按月汇总' },
+    emoji: '📊', kpi: 'lc',
+    summary: '已分配业务员 · 已审核 · 未删除 · 授权客户销售订单证据（非总ERP订单 / 非产值 / 非实际收入 / 非出货 / 非收款）',
+    columns: [
+      { key: 'salesmanName', label: '业务员' },
+      { key: 'orderCount', label: '已审核订单数', type: 'number' },
+      { key: 'totalAmount', label: '订单金额合计(原币)', type: 'money' },
+      { key: 'totalProfit', label: '当前价估算利润(币种未知)', type: 'money' },
+    ] },
   'balance-sheet': { api: '/api/reports/balance-sheet', title: '资产负债表',
     emoji: '⚖️', kpi: 'port', summary: '资产 = 负债 + 所有者权益' },
   'income-statement': { api: '/api/reports/income-statement', title: '利润表',
@@ -401,6 +408,7 @@ function renderReportData(code, data) {
   }
   if (code === 'order-profit') { renderOrderProfitData(data); return; }
   if (code === 'customer-shipment') { renderCustomerShipmentData(data); return; }
+  if (code === 'salesman-output') { renderSalesmanOutputData(data); return; }
   const arr = Array.isArray(data) ? data : (data.items || []);
   if (!arr.length) { el.innerHTML = emptyReportHtml('暂无数据', '📭'); return; }
   const rep = REPORTS[code] || {};
@@ -486,6 +494,26 @@ function renderCustomerShipmentData(data) {
     <th>客户</th><th>原币币种</th><th class="text-right">订单数</th><th class="text-right">原币金额小计</th>
     <th>币种证据</th><th>金额口径</th><th>单位分组</th><th class="text-right">旧数量合计</th><th>数量完整度</th><th>数量口径</th>
   </tr></thead><tbody>${body}</tbody></table>`;
+}
+
+/* 业务员产值报表：仅统计已分配业务员、已审核、未删除、授权客户的销售订单证据；
+   金额为订单原币小计，利润为当前价估算（币种未知）；未分配业务员的订单不参与（既有口径）；
+   绝不显示总 ERP 订单 / 产值 / 实际收入 / 出货 / 收款口径 */
+function renderSalesmanOutputData(data) {
+  const el = document.getElementById('report-table');
+  const rows = Array.isArray(data) ? data : [];
+  if (!rows.length) { el.innerHTML = emptyReportHtml('暂无数据', '📊'); return; }
+  const esc = (v) => fudDesEsc(v);
+  const body = rows.map(r => `<tr>
+    <td>${esc(r.salesmanName || '未知业务员')}</td>
+    <td class="text-right">${r.orderCount ?? ''}</td>
+    <td class="text-right">${fmtMoney(r.totalAmount)}</td>
+    <td class="text-right">${fmtMoney(r.totalProfit)}</td>
+  </tr>`).join('');
+  el.innerHTML = `<div class="text-muted">已分配业务员 · 已审核 · 未删除 · 授权客户销售订单证据（非总ERP订单 / 非产值 / 非实际收入 / 非出货 / 非收款）；未分配业务员的订单不参与</div>
+    <table><thead><tr>
+      <th>业务员</th><th class="text-right">已审核订单数</th><th class="text-right">订单金额合计(原币)</th><th class="text-right">当前价估算利润(币种未知)</th>
+    </tr></thead><tbody>${body}</tbody></table>`;
 }
 
 /* 报表空状态：行业主题 emoji */
