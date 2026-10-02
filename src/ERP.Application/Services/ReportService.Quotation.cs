@@ -1,3 +1,4 @@
+using ERP.Application.Common;
 using ERP.Application.Interfaces;
 using ERP.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
@@ -27,30 +28,71 @@ public partial class ReportService
     /// <summary>未指定业务员时的分组名称</summary>
     private const string NoSalesmanGroup = "未指定业务员";
 
-    /// <summary>报价成交率分析（按业务员聚合）</summary>
-    public async Task<List<ReportDtos.QuotationConversionItem>> GetQuotationConversionAsync(DateTime start, DateTime end)
+    /// <summary>允许的报价日期区间最大跨度（含首尾日历日）：366 天</summary>
+    private const int MaxDateRangeDays = 366;
+
+    /// <summary>单次报表允许物化的报价单上限（当前账号范围内）</summary>
+    private const int MaxScopedQuotations = 2000;
+
+    /// <summary>为检测超限额外多读一条（2001）</summary>
+    private const int ScopedQuotationReadLimit = MaxScopedQuotations + 1;
+
+    /// <summary>PI / 销售订单转换链接查询的分批大小（远低于 SQL Server 2100 参数上限）</summary>
+    private const int LinkBatchSize = 1000;
+
+    /// <summary>报价成交率分析（按业务员聚合；显式传入当前账号业务员数据范围）</summary>
+    public async Task<List<ReportDtos.QuotationConversionItem>> GetQuotationConversionAsync(
+        DateTime start, DateTime end, SalespersonDataScope scope)
     {
+        ArgumentNullException.ThrowIfNull(scope);
+
+        // 1) 日期校验先于任何报价单读取（fail closed；含首尾日历日最多 366 天）
         var startDate = start.Date;
         var endDate = end.Date;
+        if (endDate < startDate)
+            throw new BusinessException("报价成交率报表的结束日期不能早于开始日期", ErrorCodes.InvalidParameter);
 
-        var quotations = await _db.Quotations.AsNoTracking()
-            .Where(q => !q.IsDeleted && q.QuotationDate >= startDate && q.QuotationDate <= endDate)
-            .ToListAsync();
+        var inclusiveDays = (endDate - startDate).Days + 1;
+        if (inclusiveDays > MaxDateRangeDays)
+            throw new BusinessException($"报价成交率报表的日期范围最多 {MaxDateRangeDays} 天（含首尾）", ErrorCodes.InvalidParameter);
+
+        var endExclusive = endDate.AddDays(1);
+
+        // 2) 只在当前账号业务员数据范围内读取报价单；受限制业务员仅其被分配客户，空客户不可见（fail closed）。
+        var source = _db.Quotations.AsNoTracking()
+            .Where(q => !q.IsDeleted && q.QuotationDate >= startDate && q.QuotationDate < endExclusive);
+        source = SalespersonDataScopeService.FilterByCustomer(source, scope, q => q.CustomerId);
+
+        var quotations = await source.Take(ScopedQuotationReadLimit).ToListAsync();
+        if (quotations.Count > MaxScopedQuotations)
+        {
+            throw new BusinessException(
+                $"报价成交率报表在所选期间内的报价单超过 {MaxScopedQuotations} 张，请缩小日期范围后再查询",
+                ErrorCodes.InvalidParameter);
+        }
         if (quotations.Count == 0) return new List<ReportDtos.QuotationConversionItem>();
 
         var ids = quotations.Select(q => q.Id).ToList();
 
-        // 已转 PI：以报价单外键为准（转 PI 时写入，见 QuotationController.ToProformaInvoice）
-        var piQuotationIds = await _db.ProformaInvoices.AsNoTracking()
-            .Where(p => !p.IsDeleted && p.QuotationId != null && ids.Contains(p.QuotationId.Value))
-            .Select(p => p.QuotationId!.Value)
-            .ToListAsync();
+        // 3) 已转 PI / 已转销售订单：只查 scoped 报价单 Id，分批避免 SQL Server 参数上限。
+        var piQuotationIds = new List<long>();
+        var orderQuotationIds = new List<long>();
+        foreach (var batch in ids.Chunk(LinkBatchSize))
+        {
+            var batchList = batch.ToList();
 
-        // 已转销售订单：以销售订单来源字段为准（ERP-010 / ERP-008 来源留痕）
-        var orderQuotationIds = await _db.SalesOrders.AsNoTracking()
-            .Where(o => !o.IsDeleted && o.SourceQuotationId != null && ids.Contains(o.SourceQuotationId.Value))
-            .Select(o => o.SourceQuotationId!.Value)
-            .ToListAsync();
+            // 已转 PI：以报价单外键为准（转 PI 时写入，见 QuotationController.ToProformaInvoice）
+            piQuotationIds.AddRange(await _db.ProformaInvoices.AsNoTracking()
+                .Where(p => !p.IsDeleted && p.QuotationId != null && batchList.Contains(p.QuotationId.Value))
+                .Select(p => p.QuotationId!.Value)
+                .ToListAsync());
+
+            // 已转销售订单：以销售订单来源字段为准（ERP-010 / ERP-008 来源留痕）
+            orderQuotationIds.AddRange(await _db.SalesOrders.AsNoTracking()
+                .Where(o => !o.IsDeleted && o.SourceQuotationId != null && batchList.Contains(o.SourceQuotationId.Value))
+                .Select(o => o.SourceQuotationId!.Value)
+                .ToListAsync());
+        }
 
         var convertedIds = new HashSet<long>(piQuotationIds);
         foreach (var id in orderQuotationIds) convertedIds.Add(id);

@@ -57,8 +57,8 @@ public interface IReportService
     Task<DynamicFollowUpDueReportPageDto> GetDynamicFollowUpDueReportAsync(
         DynamicFollowUpDueReportRequest request, SalespersonDataScope scope);
 
-    /// <summary>报价成交率分析（ERP-018，按业务员聚合；分子 = 已转 PI / 已转销售订单 / 状态已完成）</summary>
-    Task<List<ReportDtos.QuotationConversionItem>> GetQuotationConversionAsync(DateTime start, DateTime end);
+    /// <summary>报价成交率分析（ERP-018，按业务员聚合；分子 = 已转 PI / 已转销售订单 / 状态已完成；按当前账号业务员数据范围过滤）</summary>
+    Task<List<ReportDtos.QuotationConversionItem>> GetQuotationConversionAsync(DateTime start, DateTime end, SalespersonDataScope scope);
 
     /// <summary>
     /// 库存移动与呆滞报表（ERP-029，只读派生）：主表为库存行，出入库 / 最后移动日期 / 停滞天数取自库存流水台账；

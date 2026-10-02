@@ -23,6 +23,9 @@ public class QuotationGovernanceTests
     private static readonly DateTime PeriodStart = new(2026, 9, 1);
     private static readonly DateTime PeriodEnd = new(2026, 9, 30);
 
+    /// <summary>成交率口径测试使用的特权数据范围（不过滤客户），只用于验证换算口径本身。</summary>
+    private static readonly SalespersonDataScope PrivilegedScope = new() { IsPrivileged = true, AllowedCustomerIds = null };
+
     // ==================== 1. 打印数据（GET /api/sales/quotations/{id}/print） ====================
 
     [Fact]
@@ -267,7 +270,7 @@ public class QuotationGovernanceTests
         });
         await db.SaveChangesAsync();
 
-        var rows = await new ReportService(db).GetQuotationConversionAsync(PeriodStart, PeriodEnd);
+        var rows = await new ReportService(db).GetQuotationConversionAsync(PeriodStart, PeriodEnd, PrivilegedScope);
 
         var row = Assert.Single(rows);
         Assert.Equal("业务员 A", row.SalesmanName);
@@ -289,7 +292,7 @@ public class QuotationGovernanceTests
             DocumentStatus.Completed, new DateTime(2026, 9, 8)));
         await db.SaveChangesAsync();
 
-        var rows = await new ReportService(db).GetQuotationConversionAsync(PeriodStart, PeriodEnd);
+        var rows = await new ReportService(db).GetQuotationConversionAsync(PeriodStart, PeriodEnd, PrivilegedScope);
 
         var row = Assert.Single(rows);
         Assert.Equal(1, row.QuotationCount);
@@ -306,7 +309,7 @@ public class QuotationGovernanceTests
             NewQuotation("QT-C2", "业务员 C", PeriodEnd.AddDays(30), 200m, DocumentStatus.Cancelled, new DateTime(2026, 9, 4)));
         await db.SaveChangesAsync();
 
-        var rows = await new ReportService(db).GetQuotationConversionAsync(PeriodStart, PeriodEnd);
+        var rows = await new ReportService(db).GetQuotationConversionAsync(PeriodStart, PeriodEnd, PrivilegedScope);
 
         var row = Assert.Single(rows);
         Assert.Equal(0, row.QuotationCount);
@@ -328,7 +331,7 @@ public class QuotationGovernanceTests
         db.Quotations.AddRange(expired, valid, deleted, outOfRange);
         await db.SaveChangesAsync();
 
-        var rows = await new ReportService(db).GetQuotationConversionAsync(PeriodStart, PeriodEnd);
+        var rows = await new ReportService(db).GetQuotationConversionAsync(PeriodStart, PeriodEnd, PrivilegedScope);
 
         var row = Assert.Single(rows);
         Assert.Equal(2, row.QuotationCount);            // 期间内 2 张（软删除与期间外各排除 1 张）
@@ -346,7 +349,7 @@ public class QuotationGovernanceTests
             NewQuotation("QT-N2", "业务员 E", PeriodEnd.AddDays(30), 600m, DocumentStatus.Approved, new DateTime(2026, 9, 7)));
         await db.SaveChangesAsync();
 
-        var rows = await new ReportService(db).GetQuotationConversionAsync(PeriodStart, PeriodEnd);
+        var rows = await new ReportService(db).GetQuotationConversionAsync(PeriodStart, PeriodEnd, PrivilegedScope);
 
         Assert.Equal(2, rows.Count);
         Assert.Contains(rows, r => r.SalesmanName == "未指定业务员" && r.QuotationCount == 1);
@@ -358,7 +361,7 @@ public class QuotationGovernanceTests
     {
         using var db = TestDbFactory.Create();
 
-        var rows = await new ReportService(db).GetQuotationConversionAsync(PeriodStart, PeriodEnd);
+        var rows = await new ReportService(db).GetQuotationConversionAsync(PeriodStart, PeriodEnd, PrivilegedScope);
 
         Assert.Empty(rows);
     }
@@ -367,10 +370,33 @@ public class QuotationGovernanceTests
     public async Task 成交率报表端点_经报表控制器可访问且路由为quotation_conversion()
     {
         using var db = TestDbFactory.Create();
+        // 端点现在每次请求都重新校验身份与「报价单」菜单授权；用系统内置角色的特权账号 + 报价单菜单通过校验
+        var role = new SysRole { RoleName = "报价单测试特权角色", RoleCode = "Quotation-Privileged", IsSystem = true };
+        db.SysRoles.Add(role);
+        db.SaveChanges();
+        var user = new SysUser
+        {
+            UserName = "quotation-priv",
+            PasswordHash = "hash",
+            PasswordSalt = "salt",
+            DisplayName = "报价单测试用户",
+            Status = UserStatus.Enabled
+        };
+        db.SysUsers.Add(user);
+        db.SaveChanges();
+        db.SysUserRoles.Add(new SysUserRole { UserId = user.Id, RoleId = role.Id });
+        db.SaveChanges();
+        var menu = new SysMenu { MenuName = "报价单", MenuCode = "quotation", MenuType = MenuType.Menu };
+        db.SysMenus.Add(menu);
+        db.SaveChanges();
+        db.SysRoleMenus.Add(new SysRoleMenu { RoleId = role.Id, MenuId = menu.Id });
+        db.SaveChanges();
+
         db.Quotations.Add(NewQuotation("QT-API", "业务员 F", PeriodEnd.AddDays(30), 1200m,
             DocumentStatus.Approved, new DateTime(2026, 9, 9)));
         await db.SaveChangesAsync();
-        var controller = new ReportController(new ReportService(db));
+        var controller = new ReportController(new ReportService(db), db);
+        TestAuth.SetUser(controller, user.Id);
 
         var rows = GetData<List<ReportDtos.QuotationConversionItem>>(
             await controller.QuotationConversion(PeriodStart, PeriodEnd));

@@ -1,7 +1,7 @@
 {
   "id": "ERP-204",
   "title": "Scope and bound quotation conversion report queries",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "medium",
   "priority": "P1",
   "description": "A salesperson opens the existing quotation conversion report and sees only quotations for customers currently assigned to them. Require a positive authenticated user, existing quotation menu permission and freshly resolved salesperson scope on every HTTP call; fail closed for missing context, revoked permission or unmapped users. Add a mandatory explicit scope argument to the application method and update its existing callers/tests. Validate start/end before source reads, allow at most 366 inclusive calendar days and use an exclusive upper-date boundary. Bound materialization to 2000 scoped quotations (read at most 2001 to detect overflow); over-limit requests must ask the user to narrow the date range and return no partial metrics. Query PI/order conversion links only for scoped IDs in finite chunks below SQL Server parameter limits; preserve current conversion, cancellation and expiry rules. No source entity or persistence model change is needed. Development only: reuse existing ERP services, current-user menu permissions and SalespersonDataScopeService; OperationLogMiddleware audits API calls. No new authorization privileges, direct table writes, arbitrary SQL, schema/migration/stored-procedure/view changes, production SQL, real database execution, irreversible actions, secrets/.env changes, deployment or real browser acceptance. Verify focused in-memory or source-contract tests and the configured safe Release build/test; unavailable external environments must be marked blocked, never reported passed. Preserve unrelated work.",
@@ -42,7 +42,7 @@
     "ERP-097"
   ],
   "max_attempts": 3,
-  "attempts": 0,
+  "attempts": 1,
   "validation_profile": "safe",
   "completion_mode": "build",
   "auto_start": true,

@@ -21,6 +21,12 @@ public class ReportController : ControllerBase
     /// <summary>跟进提醒报表要求菜单的中文文案（与既有菜单名一致）</summary>
     private const string FollowUpDueMenuText = "跟进提醒";
 
+    /// <summary>报价成交率报表要求的既有菜单编码（与 SeedData / SchemaUpgrader 同源）</summary>
+    private const string QuotationConversionMenuCode = "quotation";
+
+    /// <summary>报价成交率报表要求菜单的中文文案（与既有菜单名一致）</summary>
+    private const string QuotationConversionMenuText = "报价单";
+
     private readonly IReportService _reportService;
     private readonly IErpDbContext? _db;
 
@@ -173,11 +179,31 @@ public class ReportController : ControllerBase
         return Ok(ApiResponse<List<ReportDtos.FollowUpDueItem>>.Success(result));
     }
 
-    /// <summary>报价成交率分析（ERP-018；按业务员聚合，计算口径见 docs/报价单与PI设计方案.md §10.3）</summary>
+    /// <summary>报价成交率分析（ERP-018；按业务员聚合，计算口径见 docs/报价单与PI设计方案.md §10.3；每次请求重新校验身份、菜单授权与业务员数据范围）</summary>
     [HttpGet("quotation-conversion")]
     public async Task<IActionResult> QuotationConversion([FromQuery] DateTime start, [FromQuery] DateTime end)
     {
-        var result = await _reportService.GetQuotationConversionAsync(start, end);
+        if (_db is null)
+            throw new BusinessException("报价成交率报表缺少数据库上下文，无法解析当前账号授权", ErrorCodes.InternalError);
+
+        var db = _db;
+        var userId = CurrentUserId();
+        if (userId is null or <= 0)
+            throw new BusinessException("请先登录后再查看报价成交率报表", ErrorCodes.Unauthorized);
+
+        var menuCodes = await CustomerReceivableReconciliationService.LoadAuthorizedMenuCodesAsync(
+            db, userId.Value);
+        if (!menuCodes.Contains(QuotationConversionMenuCode, StringComparer.OrdinalIgnoreCase))
+        {
+            throw new BusinessException(
+                $"当前账号没有「{QuotationConversionMenuText}」（{QuotationConversionMenuCode}）模块授权：拒绝查看报价成交率报表"
+                + "（fail closed，不返回任何数据）",
+                ErrorCodes.Forbidden);
+        }
+
+        var scope = await SalespersonDataScopeService.ResolveAsync(db, userId);
+
+        var result = await _reportService.GetQuotationConversionAsync(start, end, scope);
         return Ok(ApiResponse<List<ReportDtos.QuotationConversionItem>>.Success(result));
     }
 
