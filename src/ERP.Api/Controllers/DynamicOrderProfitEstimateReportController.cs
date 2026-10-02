@@ -17,6 +17,7 @@ namespace ERP.Api.Controllers;
 /// <item><b>POST /api/dynamic-order-profit-estimate-report</b>：按选定字段与有界日期窗口（start / end）预览当前账号数据范围内的订单行，稳定分页。</item>
 /// <item><b>POST /api/dynamic-order-profit-estimate-report/export</b>：导出当前选定页为 Excel（xlsx，只读，复用有界授权预览与选定列顺序，含日期 / 分页 / 来源上限 / 原币 / 依据上下文工作表，绝不追加跨币种金额合计）。</item>
 /// <item><b>POST /api/dynamic-order-profit-estimate-report/pdf</b>：下载当前选定页为分页中文 PDF（只读，复用有界授权预览与选定列顺序，分页渲染，字体缺失显式失败，绝不跨币种合计或声称已实现利润）。</item>
+/// <item><b>POST /api/dynamic-order-profit-estimate-report/export-summary</b>：下载当前筛选集的分币种汇总为 Excel（xlsx，只读，复用服务端派生的全部匹配已审核订单原币汇总，绝不跨币种合计、绝不含成本 / 利润 / 当前价估算，区别于当前页明细导出）。</item>
 /// </list>
 /// <para>复用既有「订单利润暂估表」（order-profit）菜单授权与 <see cref="SalespersonDataScopeService"/>（ERP-097）业务员数据范围；
 /// 每次目录 / 预览 / 导出请求都重新校验身份、菜单授权与业务员数据范围（fail closed），
@@ -76,6 +77,28 @@ public class DynamicOrderProfitEstimateReportController : ControllerBase
         var bytes = BuildWorkbook(page);
         return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             $"OrderProfitEstimate_{DateTime.Now:yyyyMMddHHmmss}.xlsx");
+    }
+
+    /// <summary>
+    /// 下载当前筛选集的分币种汇总为 Excel（ERP-225，只读）：独立重新校验身份 / 订单利润暂估表菜单授权 /
+    /// 业务员数据范围 / 日期 / 应用筛选，并复用同一服务端派生分币种汇总（ERP-224，覆盖全部匹配已审核订单，
+    /// 与当前页 / 选定列无关）；绝不信任客户端行 / 金额 / 身份 / 数据范围，也绝不要求先预览。
+    /// 数据表为稳定「原币币种 / 已审核订单数 / 销售额(原币)」（已知币种金额为签名数值、未知币种金额显式「未知」），
+    /// 并追加「报表口径」上下文工作表标注日期 / 筛选 / 来源上限 / 原币 / 未知成本依据 / 覆盖范围 / 只读声明；
+    /// 绝不追加跨币种金额合计，也绝不含成本 / 当前价估算 / 利润汇总或换算。授权撤销 / 无效输入 / 来源超限返回错误、不返回任何工作簿。
+    /// <para>全程只读，不写库、不执行任意 SQL；请求由既有 <c>OperationLogMiddleware</c> 记录审计（动作「导出分币种汇总」）。</para>
+    /// </summary>
+    [HttpPost("export-summary")]
+    public async Task<IActionResult> ExportSummary([FromBody] DynamicOrderProfitEstimateReportRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        // 复用同一有界、已授权管线：重新校验字段 / 日期 / 分页 / 应用筛选与身份 / 菜单授权 / 数据范围，
+        // 并由服务端同一 BuildPageAsync 派生覆盖全部匹配订单的分币种汇总（绝不相信客户端行 / 金额 / 身份 / 数据范围）
+        var page = await BuildPageAsync(request);
+        var bytes = BuildSummaryWorkbook(page);
+        return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            $"OrderProfitCurrencySummary_{DateTime.Now:yyyyMMddHHmmss}.xlsx");
     }
 
     /// <summary>
@@ -166,6 +189,57 @@ public class DynamicOrderProfitEstimateReportController : ControllerBase
             AddLabel(nextRow++, DynamicOrderProfitEstimateReportRules.ContextFilterLabel, page.FilterText);
 
         if (page.Rows is null || page.Rows.Count == 0)
+            AddLabel(nextRow, DynamicOrderProfitEstimateReportRules.ContextEmptyLabel, page.EmptyText);
+    }
+
+    /// <summary>生成分币种汇总 Excel（ERP-225）：数据工作表（稳定原币 / 订单数 / 销售额，未知金额显式「未知」）+「报表口径」上下文工作表</summary>
+    private static byte[] BuildSummaryWorkbook(DynamicOrderProfitEstimateReportPageDto page)
+    {
+        var summary = page.Summary
+            ?? throw new BusinessException("分币种汇总不可用", ErrorCodes.RuleConflict);
+
+        var columns = summary.Columns.Select(c => (c.Key, c.Label)).ToList();
+        var rows = summary.Rows.Select(DynamicOrderProfitEstimateReportRules.BuildSummaryExportRow).ToList();
+        var dataBytes = ExcelExporter.ExportRows(DynamicOrderProfitEstimateReportRules.SummarySheetName, rows, columns);
+
+        using var input = new MemoryStream(dataBytes);
+        using var workbook = new XSSFWorkbook(input);
+        AppendSummaryContextSheet(workbook, page, summary);
+
+        using var output = new MemoryStream();
+        workbook.Write(output);
+        return output.ToArray();
+    }
+
+    /// <summary>追加分币种汇总「报表口径」上下文工作表：日期 / 来源上限 / 原币 / 未知成本依据 / 覆盖范围 / 原币证据 / 只读声明；筛选与空汇总显式标注；绝不追加跨币种金额合计</summary>
+    private static void AppendSummaryContextSheet(
+        XSSFWorkbook workbook, DynamicOrderProfitEstimateReportPageDto page, DynamicOrderProfitEstimateSummaryDto summary)
+    {
+        var sheet = workbook.CreateSheet(DynamicOrderProfitEstimateReportRules.ContextSheetName);
+
+        void AddLabel(int rowIndex, string label, string value)
+        {
+            var row = sheet.CreateRow(rowIndex);
+            row.CreateCell(0).SetCellValue(
+                DynamicOrderProfitEstimateReportRules.EscapeFormulaLeading(label) as string ?? string.Empty);
+            row.CreateCell(1).SetCellValue(
+                DynamicOrderProfitEstimateReportRules.EscapeFormulaLeading(value) as string ?? string.Empty);
+        }
+
+        var nextRow = 0;
+        AddLabel(nextRow++, DynamicOrderProfitEstimateReportRules.ContextStartLabel, page.Start.ToString("yyyy-MM-dd"));
+        AddLabel(nextRow++, DynamicOrderProfitEstimateReportRules.ContextEndLabel, page.End.ToString("yyyy-MM-dd"));
+        AddLabel(nextRow++, DynamicOrderProfitEstimateReportRules.ContextSourceLimitLabel, page.SourceLimitText);
+        AddLabel(nextRow++, DynamicOrderProfitEstimateReportRules.ContextCurrencyLabel, page.CurrencyContextText);
+        AddLabel(nextRow++, DynamicOrderProfitEstimateReportRules.ContextMissingCostBasisLabel, DynamicOrderProfitEstimateReportRules.MissingCostBasisText);
+        AddLabel(nextRow++, DynamicOrderProfitEstimateReportRules.SummaryCoverageLabel, summary.CoverageText);
+        AddLabel(nextRow++, DynamicOrderProfitEstimateReportRules.ContextOriginalCurrencyEvidenceLabel, DynamicOrderProfitEstimateReportRules.ContextOriginalCurrencyEvidenceText);
+        AddLabel(nextRow++, DynamicOrderProfitEstimateReportRules.ContextReadOnlyLabel, page.ReadOnlyText);
+
+        if (!string.IsNullOrWhiteSpace(page.FilterText))
+            AddLabel(nextRow++, DynamicOrderProfitEstimateReportRules.ContextFilterLabel, page.FilterText);
+
+        if (summary.Rows is null || summary.Rows.Count == 0)
             AddLabel(nextRow, DynamicOrderProfitEstimateReportRules.ContextEmptyLabel, page.EmptyText);
     }
 

@@ -471,4 +471,34 @@ public static class DynamicOrderProfitEstimateReportRules
             export[kv.Key] = kv.Value is null ? UnknownAmountText : EscapeFormulaLeading(kv.Value);
         return export;
     }
+
+    // ==================== 6.1 分币种汇总 Excel（ERP-225） ====================
+
+    /// <summary>分币种汇总 Excel 数据工作表名（ERP-225：区别于「当前页明细导出」的「订单利润暂估表」工作表）</summary>
+    public const string SummarySheetName = "分币种汇总";
+
+    /// <summary>上下文表「覆盖范围」行标签（ERP-225：显式标注汇总覆盖本次有界来源内的全部匹配订单，区别于明细页「页面覆盖」）</summary>
+    public const string SummaryCoverageLabel = "覆盖范围";
+
+    /// <summary>上下文表「原币证据」行标签（ERP-225：金额均为订单原币、未知币种独立、绝不跨币种合计）</summary>
+    public const string ContextOriginalCurrencyEvidenceLabel = "原币证据";
+
+    /// <summary>原币证据文案：金额均为订单原币、未知币种单独分桶、绝不跨币种合计、无任何跨币种金额总计</summary>
+    public const string ContextOriginalCurrencyEvidenceText =
+        "金额均为订单原币；未知币种单独分桶；绝不跨币种合计，无任何跨币种金额总计";
+
+    /// <summary>
+    /// 把一条分币种汇总行转成导出行（ERP-225）：币种文本做公式注入转义，订单数为整数数值；
+    /// 已知币种销售额为签名数值、未知币种金额显式转为「未知」（绝不写成数值 0、绝不跨币种求和）。
+    /// <para>键集合与汇总列白名单一致（currency / orderCount / salesAmount），绝不含成本 / 利润 / 当前价估算。</para>
+    /// </summary>
+    public static Dictionary<string, object?> BuildSummaryExportRow(DynamicOrderProfitEstimateCurrencySummaryDto row)
+    {
+        return new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            ["currency"] = EscapeFormulaLeading(row.Currency),
+            ["orderCount"] = row.OrderCount,
+            ["salesAmount"] = row.SalesAmount is null ? UnknownAmountText : row.SalesAmount,
+        };
+    }
 }

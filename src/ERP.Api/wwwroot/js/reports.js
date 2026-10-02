@@ -2511,6 +2511,67 @@ async function opdExportPdf() {
   }
 }
 
+/* 下载分币种汇总 Excel（ERP-225，只读）：复用当前日期 / 应用筛选组装请求体 POST
+   /api/dynamic-order-profit-estimate-report/export-summary；成功（xlsx 附件）触发下载；
+   授权 / 无效 / 网络失败在结果区可见，不下载任何内容。区别于「导出 Excel（当前页）」：
+   本按钮导出服务端在全部匹配已审核订单上派生的分币种汇总，无需先预览、绝不含明细行，
+   并保留当前字段 / 日期 / 分页状态（不清空 OPD_DYN.view）。 */
+async function opdExportSummary() {
+  const state = opdBuildState(OPD_DYN.page);
+  const dateError = opdDateError(state);
+  if (dateError) {
+    opdRenderResult(opdErrorHtml('invalid', dateError));
+    return;
+  }
+  const filterError = opdFilterError(state);
+  if (filterError) {
+    opdRenderResult(opdErrorHtml('invalid', filterError));
+    return;
+  }
+  const req = opdBuildRequest(state);
+  opdRenderResult(opdLoadingHtml());
+
+  try {
+    const headers = { 'Content-Type': 'application/json' };
+    const token = typeof localStorage !== 'undefined' ? (localStorage.getItem('erp_token') || '') : '';
+    if (token) headers['Authorization'] = 'Bearer ' + token;
+    const resp = await fetch('/api/dynamic-order-profit-estimate-report/export-summary', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(req),
+    });
+
+    const contentType = (resp.headers.get('content-type') || '');
+    if (contentType.indexOf('spreadsheetml') >= 0) {
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+      a.href = url;
+      a.download = '订单利润暂估分币种汇总_' + dateStr + '.xlsx';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      opdRenderResult('<div class="pd-hint">已下载分币种汇总 Excel（按订单原币合并全部匹配已审核订单，绝不含明细行、绝不跨币种合计），请查看下载。</div>');
+      return;
+    }
+
+    let envelope = null;
+    try { envelope = await resp.json(); } catch (e) { /* 忽略解析失败 */ }
+    const code = envelope && envelope.code;
+    const message = (envelope && envelope.message) || '下载失败';
+    if (code === 2000 || code === 2003) {
+      if (typeof logout === 'function') logout();
+      opdRenderResult(opdErrorHtml('unauthorized', message));
+      return;
+    }
+    opdRenderResult(opdErrorHtml(opdKindOfCode(code), message));
+  } catch (err) {
+    opdRenderResult(opdErrorHtml('network', (err && err.message) || '无法连接到服务器'));
+  }
+}
+
 /* 翻页（有界：最小第 1 页） */
 function opdPage(delta) {
   const page = (OPD_DYN.view ? OPD_DYN.view.page : OPD_DYN.page) + delta;
@@ -2571,6 +2632,7 @@ function openOrderProfitEstimateDesigner() {
         <button class="btn btn-neutral btn-sm" onclick="opdToggleAll(false)">清空</button>
         <button class="btn btn-neutral" onclick="opdExport()" title="导出当前页为 Excel（选定列，复用当前日期与分页）">📥 导出 Excel（当前页）</button>
         <button class="btn btn-neutral" onclick="opdExportPdf()" title="下载当前页为中文 PDF（选定列，复用当前日期与分页）">📄 下载 PDF（当前页）</button>
+        <button class="btn btn-neutral" onclick="opdExportSummary()" title="下载当前筛选集的分币种汇总 Excel（按订单原币合并全部匹配已审核订单，无需先预览，绝不含明细行）">📊 下载分币种汇总 Excel</button>
         <button class="btn btn-primary" onclick="opdPreview(1)">预览</button>
       </div>
     </div>

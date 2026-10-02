@@ -65,4 +65,52 @@ public class OrderProfitCurrencySummaryUiTests
         Assert.Contains("filterLine + ctx + currencySummary + opdEmptyHtml(view)", fn);
         Assert.Contains("filterLine + ctx + currencySummary + opdTableHtml(view) + opdPagingHtml(view)", fn);
     }
+
+    [Fact]
+    public void 汇总下载按钮_存在且文案区分于当前页明细导出()
+    {
+        var js = Script;
+
+        Assert.Contains("onclick=\"opdExportSummary()\"", js);
+        Assert.Contains("function opdExportSummary()", js);
+        Assert.Contains("/api/dynamic-order-profit-estimate-report/export-summary", js);
+        // 明确区分于「当前页明细导出」：按钮文案与明细导出按钮不同，且汇总按钮强调无需先预览、绝不含明细行
+        Assert.Contains("下载分币种汇总 Excel", js);
+        Assert.Contains("导出 Excel（当前页）", js);
+        Assert.Contains("无需先预览", js);
+        Assert.Contains("绝不含明细行", js);
+    }
+
+    [Fact]
+    public void 汇总下载函数_发送当前筛选_无需先预览_保留状态()
+    {
+        var js = Script;
+        var fn = Segment(js, "async function opdExportSummary()", "function opdPage(");
+
+        Assert.Contains("const state = opdBuildState(OPD_DYN.page);", fn);
+        Assert.Contains("const req = opdBuildRequest(state);", fn);
+        Assert.Contains("body: JSON.stringify(req)", fn);
+        Assert.Contains("contentType.indexOf('spreadsheetml') >= 0", fn);
+        Assert.Contains("a.download = '订单利润暂估分币种汇总_'", fn);
+        Assert.Contains("opdErrorHtml('unauthorized', message)", fn);
+        Assert.Contains("opdErrorHtml(opdKindOfCode(code), message)", fn);
+        Assert.Contains("opdErrorHtml('network', (err && err.message) || '无法连接到服务器')", fn);
+        // 不要求先预览：绝不含「请先预览」提示
+        Assert.DoesNotContain("请先预览", fn);
+        // 保留表单 / 分页状态：绝不清空 OPD_DYN.view
+        Assert.DoesNotContain("OPD_DYN.view = null", fn);
+        Assert.DoesNotContain("OPD_DYN.view = {", fn);
+    }
+
+    [Fact]
+    public void 汇总下载函数_复用日期与筛选校验_无效输入可见()
+    {
+        var js = Script;
+        var fn = Segment(js, "async function opdExportSummary()", "function opdPage(");
+
+        Assert.Contains("const dateError = opdDateError(state);", fn);
+        Assert.Contains("opdRenderResult(opdErrorHtml('invalid', dateError));", fn);
+        Assert.Contains("const filterError = opdFilterError(state);", fn);
+        Assert.Contains("opdRenderResult(opdErrorHtml('invalid', filterError));", fn);
+    }
 }
