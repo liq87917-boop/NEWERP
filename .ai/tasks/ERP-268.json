@@ -1,0 +1,111 @@
+{
+  "title": "Configure allowlisted customer dimension relationships without multiplying report facts",
+  "description": "Add reusable controlled relationship catalog and resolver inside unified platform. First prove it with existing sales-order and receivable adapter fixtures referencing BaseCustomers by persisted CustomerId to unique BaseCustomer.Id; do not migrate any old report or create a new dedicated controller/query/designer. Read only customer code and country as finite optional dimension fields, never address/contact/bank/private details; require customer's existing menu/field eligibility and fresh salesperson customer scope. If a fixture cannot prove its persisted customer identity and the recipient's authorization, exclude that relation explicitly. Each catalog relation describes stable key, source fact grain/key, target dimension unique key, many-to-one cardinality, target permission, labels/types, permitted field list and missing/deleted semantics; no SQL/table/key text from client. Customer chooses relation key and its finite fields, saved/pinned definitions validate under fresh recipient rights and provider advertises supported fields. Preserve original fact rows, order, page total and metric amounts: batch lookup only customer IDs present in authorized current page, AsNoTracking, at most page-size distinct IDs, zero N+1 queries; no one-to-many/fact joins. Missing/deleted/forbidden dimension shows null with reason, cannot enumerate other customers or leak names through errors; duplicate target identity fails closed. Dependencies for lookup never exposed unless selected and authorized. Related text is nonaggregatable, no related-field filters/sorts/grouping/formulas yet; explicitly reject unsupported operations instead of local post-page filtering. Generic metrics and Excel/PDF use enriched selected columns without bespoke branches. No new entities/tables required: existing BaseCustomer and IErpDbContext.BaseCustomers are read only. Record relation key/status in common execution audit without private values. Stage 1 unified platform only; existing sales-order/receivable adapters are engine fixtures, not migration or new bespoke reports. Preserve old report entries until every fixed/dynamic report passes Stage 2 parity. No Agent or cross-business flow work. Server-authenticated identity and fresh existing menu/field/row/data scope remain authoritative, saved definitions/grants never grant ERP permissions. No arbitrary SQL, scripts, joins, tables, mixed currency/unit totals or one-to-many header duplication. No migrations, SchemaUpgrader/SeedData modifications, production SQL/database execution, schema/view/procedure changes, secrets/.env/config changes, deployment or irreversible operations. Use existing HTTP and entity audit conventions. Safe build/test and relevant offline integration tests required; missing actual DB/browser/font environment must be explicitly blocked, never claim the phase complete from build. Preserve unrelated source/work.",
+  "acceptance_criteria": [
+    "Reusable allowlisted relation metadata validates selected related fields and existing target permissions; arbitrary/cardinality-unsafe/unsupported relational definitions fail closed.",
+    "Resolver batches only authorized current-page persisted customer IDs through existing BaseCustomers, preserves fact grain/count/amount and returns controlled missing/deleted/forbidden states without hidden dependencies.",
+    "Unified UI can choose finite customer dimensions and persist/reload pinned selections; generic Excel/PDF and offline permissions/cardinality/empty tests pass safe build/test."
+  ],
+  "criterion_path_map": {
+    "Reusable allowlisted relation metadata validates selected related fields and existing target permissions; arbitrary/cardinality-unsafe/unsupported relational definitions fail closed.": [
+      "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
+      "src/ERP.Application/Services/ReportConfigurationRules.cs",
+      "src/ERP.Application/Services/ReportConfigurationCatalog.cs",
+      "src/ERP.Application/Interfaces/IReportConfigurationDatasetProvider.cs",
+      "src/ERP.Infrastructure/Reports/ReportConfigurationDatasetProvider.cs",
+      "src/ERP.Application/Services/ReportConfigurationExecutionService.cs",
+      "src/ERP.Api/Controllers/ReportConfigurationsController.cs",
+      "src/ERP.Api/wwwroot/js/report-configuration.js",
+      "src/ERP.Infrastructure/Reports/ReportConfigurationRelationResolver.cs",
+      "src/ERP.Application/Services/ReportConfigurationRelationRules.cs",
+      "src/ERP.Application/Interfaces/IReportConfigurationRelationResolver.cs",
+      "src/ERP.Infrastructure/DependencyInjection.cs",
+      "src/ERP.UnitTests/ReportConfigurationRelationTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationCatalogTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationRulesTests.cs"
+    ],
+    "Resolver batches only authorized current-page persisted customer IDs through existing BaseCustomers, preserves fact grain/count/amount and returns controlled missing/deleted/forbidden states without hidden dependencies.": [
+      "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
+      "src/ERP.Application/Services/ReportConfigurationRules.cs",
+      "src/ERP.Application/Services/ReportConfigurationCatalog.cs",
+      "src/ERP.Application/Interfaces/IReportConfigurationDatasetProvider.cs",
+      "src/ERP.Infrastructure/Reports/ReportConfigurationDatasetProvider.cs",
+      "src/ERP.Application/Services/ReportConfigurationExecutionService.cs",
+      "src/ERP.Api/Controllers/ReportConfigurationsController.cs",
+      "src/ERP.Api/wwwroot/js/report-configuration.js",
+      "src/ERP.Infrastructure/Reports/ReportConfigurationRelationResolver.cs",
+      "src/ERP.Application/Services/ReportConfigurationRelationRules.cs",
+      "src/ERP.Application/Interfaces/IReportConfigurationRelationResolver.cs",
+      "src/ERP.Infrastructure/DependencyInjection.cs",
+      "src/ERP.UnitTests/ReportConfigurationRelationTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationExecutionTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationSharingTests.cs"
+    ],
+    "Unified UI can choose finite customer dimensions and persist/reload pinned selections; generic Excel/PDF and offline permissions/cardinality/empty tests pass safe build/test.": [
+      "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
+      "src/ERP.Application/Services/ReportConfigurationRules.cs",
+      "src/ERP.Application/Services/ReportConfigurationCatalog.cs",
+      "src/ERP.Application/Interfaces/IReportConfigurationDatasetProvider.cs",
+      "src/ERP.Infrastructure/Reports/ReportConfigurationDatasetProvider.cs",
+      "src/ERP.Application/Services/ReportConfigurationExecutionService.cs",
+      "src/ERP.Api/Controllers/ReportConfigurationsController.cs",
+      "src/ERP.Api/wwwroot/js/report-configuration.js",
+      "src/ERP.Infrastructure/Reports/ReportConfigurationRelationResolver.cs",
+      "src/ERP.Infrastructure/Export/ReportConfigurationExcelExporter.cs",
+      "src/ERP.Infrastructure/Export/ReportConfigurationPdfExporter.cs",
+      "src/ERP.UnitTests/ReportConfigurationRelationTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationVersionTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationExcelTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationPdfTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationUiTests.cs"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
+    "src/ERP.Application/Services/ReportConfigurationRules.cs",
+    "src/ERP.Application/Services/ReportConfigurationCatalog.cs",
+    "src/ERP.Application/Interfaces/IReportConfigurationDatasetProvider.cs",
+    "src/ERP.Infrastructure/Reports/ReportConfigurationDatasetProvider.cs",
+    "src/ERP.Application/Services/ReportConfigurationExecutionService.cs",
+    "src/ERP.Api/Controllers/ReportConfigurationsController.cs",
+    "src/ERP.Api/wwwroot/js/report-configuration.js",
+    "src/ERP.Infrastructure/Reports/ReportConfigurationRelationResolver.cs",
+    "src/ERP.Application/Services/ReportConfigurationRelationRules.cs",
+    "src/ERP.Application/Interfaces/IReportConfigurationRelationResolver.cs",
+    "src/ERP.Infrastructure/DependencyInjection.cs",
+    "src/ERP.UnitTests/ReportConfigurationRelationTests.cs",
+    "src/ERP.UnitTests/ReportConfigurationCatalogTests.cs",
+    "src/ERP.UnitTests/ReportConfigurationRulesTests.cs",
+    "src/ERP.UnitTests/ReportConfigurationExecutionTests.cs",
+    "src/ERP.UnitTests/ReportConfigurationSharingTests.cs",
+    "src/ERP.Infrastructure/Export/ReportConfigurationExcelExporter.cs",
+    "src/ERP.Infrastructure/Export/ReportConfigurationPdfExporter.cs",
+    "src/ERP.UnitTests/ReportConfigurationVersionTests.cs",
+    "src/ERP.UnitTests/ReportConfigurationExcelTests.cs",
+    "src/ERP.UnitTests/ReportConfigurationPdfTests.cs",
+    "src/ERP.UnitTests/ReportConfigurationUiTests.cs"
+  ],
+  "id": "ERP-268",
+  "depends_on": [
+    "ERP-267"
+  ],
+  "status": "pending",
+  "max_attempts": 3,
+  "attempts": 0,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "browser_acceptance": {
+    "required": false
+  },
+  "risk_level": "medium",
+  "priority": "P1",
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Bounded development-only unified reporting increment"
+  },
+  "created_at": "2026-10-02T15:07:24.723349Z"
+}
