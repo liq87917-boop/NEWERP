@@ -2385,6 +2385,69 @@ async function opdExport() {
   }
 }
 
+/* 下载当前页选定列为中文 PDF（ERP-222，只读）：复用预览请求体 POST /api/dynamic-order-profit-estimate-report/pdf；
+   成功（application/pdf 附件）触发下载；授权 / 无效 / 空结果 / 字体缺失 / 网络失败在结果区可见，不下载任何内容，
+   并保留当前字段 / 日期 / 分页状态（不清空 OPD_DYN.view） */
+async function opdExportPdf() {
+  if (!OPD_DYN.view || !OPD_DYN.view.columns || !OPD_DYN.view.columns.length) {
+    opdRenderResult(opdErrorHtml('invalid', '请先预览后再下载 PDF'));
+    return;
+  }
+  if (!OPD_DYN.view.rows || OPD_DYN.view.rows.length === 0) {
+    opdRenderResult(opdErrorHtml('empty', '没有符合所选日期范围的订单利润暂估数据，无法下载 PDF（请先预览）'));
+    return;
+  }
+
+  const state = opdBuildState(OPD_DYN.view.page);
+  const dateError = opdDateError(state);
+  if (dateError) {
+    opdRenderResult(opdErrorHtml('invalid', dateError));
+    return;
+  }
+  const req = opdBuildRequest(state);
+  opdRenderResult(opdLoadingHtml());
+
+  try {
+    const headers = { 'Content-Type': 'application/json' };
+    const token = typeof localStorage !== 'undefined' ? (localStorage.getItem('erp_token') || '') : '';
+    if (token) headers['Authorization'] = 'Bearer ' + token;
+    const resp = await fetch('/api/dynamic-order-profit-estimate-report/pdf', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(req),
+    });
+
+    const contentType = (resp.headers.get('content-type') || '');
+    if (contentType.indexOf('application/pdf') >= 0) {
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+      a.href = url;
+      a.download = '订单利润暂估_' + dateStr + '.pdf';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      opdRenderResult('<div class="pd-hint">已下载当前页为中文 PDF，请查看下载。</div>');
+      return;
+    }
+
+    let envelope = null;
+    try { envelope = await resp.json(); } catch (e) { /* 忽略解析失败 */ }
+    const code = envelope && envelope.code;
+    const message = (envelope && envelope.message) || '下载失败';
+    if (code === 2000 || code === 2003) {
+      if (typeof logout === 'function') logout();
+      opdRenderResult(opdErrorHtml('unauthorized', message));
+      return;
+    }
+    opdRenderResult(opdErrorHtml(opdKindOfCode(code), message));
+  } catch (err) {
+    opdRenderResult(opdErrorHtml('network', (err && err.message) || '无法连接到服务器'));
+  }
+}
+
 /* 翻页（有界：最小第 1 页） */
 function opdPage(delta) {
   const page = (OPD_DYN.view ? OPD_DYN.view.page : OPD_DYN.page) + delta;
@@ -2434,6 +2497,7 @@ function openOrderProfitEstimateDesigner() {
         <button class="btn btn-neutral btn-sm" onclick="opdToggleAll(true)">全选</button>
         <button class="btn btn-neutral btn-sm" onclick="opdToggleAll(false)">清空</button>
         <button class="btn btn-neutral" onclick="opdExport()" title="导出当前页为 Excel（选定列，复用当前日期与分页）">📥 导出 Excel（当前页）</button>
+        <button class="btn btn-neutral" onclick="opdExportPdf()" title="下载当前页为中文 PDF（选定列，复用当前日期与分页）">📄 下载 PDF（当前页）</button>
         <button class="btn btn-primary" onclick="opdPreview(1)">预览</button>
       </div>
     </div>

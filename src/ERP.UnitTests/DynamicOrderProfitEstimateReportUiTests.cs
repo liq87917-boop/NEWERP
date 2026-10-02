@@ -140,4 +140,37 @@ public class DynamicOrderProfitEstimateReportUiTests
         Assert.Contains("opdErrorHtml(opdKindOfCode(code), message)", fn);
         Assert.Contains("opdErrorHtml('network', (err && err.message) || '无法连接到服务器')", fn);
     }
+
+    [Fact]
+    public void 导出PDF_入口按钮与函数存在_复用有界请求体()
+    {
+        var js = Script;
+
+        Assert.Contains("onclick=\"opdExportPdf()\"", js);
+        Assert.Contains("function opdExportPdf()", js);
+        Assert.Contains("/api/dynamic-order-profit-estimate-report/pdf", js);
+        Assert.Contains("下载 PDF（当前页）", js);
+
+        var fn = Segment(js, "async function opdExportPdf()", "function opdPage(");
+        Assert.Contains("const state = opdBuildState(OPD_DYN.view.page);", fn);
+        Assert.Contains("const req = opdBuildRequest(state);", fn);
+        Assert.Contains("body: JSON.stringify(req)", fn);
+    }
+
+    [Fact]
+    public void 导出PDF_成功pdf下载_授权无效网络失败可见_要求先预览并保留状态()
+    {
+        var js = Script;
+
+        var fn = Segment(js, "async function opdExportPdf()", "function opdPage(");
+        Assert.Contains("请先预览后再下载 PDF", fn);
+        Assert.Contains("contentType.indexOf('application/pdf') >= 0", fn);
+        Assert.Contains("URL.createObjectURL(blob)", fn);
+        Assert.Contains("a.download = '订单利润暂估_'", fn);
+        Assert.Contains("opdErrorHtml('unauthorized', message)", fn);
+        Assert.Contains("opdErrorHtml(opdKindOfCode(code), message)", fn);
+        Assert.Contains("opdErrorHtml('network', (err && err.message) || '无法连接到服务器')", fn);
+        Assert.DoesNotContain("OPD_DYN.view = null", fn);
+        Assert.DoesNotContain("OPD_DYN.view = {", fn);
+    }
 }

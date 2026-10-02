@@ -16,6 +16,7 @@ namespace ERP.Api.Controllers;
 /// <item><b>GET /api/dynamic-order-profit-estimate-report</b>：返回订单利润暂估字段白名单目录（需登录 + 订单利润暂估表菜单授权 + 业务员数据范围）；</item>
 /// <item><b>POST /api/dynamic-order-profit-estimate-report</b>：按选定字段与有界日期窗口（start / end）预览当前账号数据范围内的订单行，稳定分页。</item>
 /// <item><b>POST /api/dynamic-order-profit-estimate-report/export</b>：导出当前选定页为 Excel（xlsx，只读，复用有界授权预览与选定列顺序，含日期 / 分页 / 来源上限 / 原币 / 依据上下文工作表，绝不追加跨币种金额合计）。</item>
+/// <item><b>POST /api/dynamic-order-profit-estimate-report/pdf</b>：下载当前选定页为分页中文 PDF（只读，复用有界授权预览与选定列顺序，分页渲染，字体缺失显式失败，绝不跨币种合计或声称已实现利润）。</item>
 /// </list>
 /// <para>复用既有「订单利润暂估表」（order-profit）菜单授权与 <see cref="SalespersonDataScopeService"/>（ERP-097）业务员数据范围；
 /// 每次目录 / 预览 / 导出请求都重新校验身份、菜单授权与业务员数据范围（fail closed），
@@ -75,6 +76,27 @@ public class DynamicOrderProfitEstimateReportController : ControllerBase
         var bytes = BuildWorkbook(page);
         return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             $"OrderProfitEstimate_{DateTime.Now:yyyyMMddHHmmss}.xlsx");
+    }
+
+    /// <summary>
+    /// 下载当前页为分页中文 PDF（ERP-222，只读）：复用同一有界、已授权预览与选定列顺序，仅导出当前页选定列；
+    /// 已知销售额按数值、未知成本 / 利润 / 利润率显式「未知」呈现；原币口径 / 未知成本利润依据 / 页面覆盖 / 来源上限
+    /// 上下文始终呈现（即使对应列被取消选择），宽列集跨页拆分，绝不跨币种合计、绝不声称已实现利润；空证据显式说明。
+    /// 每次请求重新校验身份 / 订单利润暂估表菜单授权 / 业务员数据范围 / 字段 / 日期 / 分页（fail closed）；
+    /// 字体缺失或渲染失败返回清晰错误、不返回任何（损坏）文件。
+    /// <para>全程只读，不写库、不执行任意 SQL；请求由既有 <c>OperationLogMiddleware</c> 记录审计（动作「下载 PDF」）。</para>
+    /// </summary>
+    [HttpPost("pdf")]
+    public async Task<IActionResult> ExportPdf([FromBody] DynamicOrderProfitEstimateReportRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        // 复用同一有界、已授权预览：即使未先预览，也重新校验身份 / 菜单授权 / 业务员数据范围 / 字段 / 日期 / 分页，
+        // 由服务端同一 BuildPageAsync 派生当前页证据（绝不相信客户端字段 / 行 / 金额 / 身份 / 数据范围）
+        var page = await BuildPageAsync(request);
+
+        var bytes = DynamicOrderProfitEstimatePdfExporter.Export(page);
+        return File(bytes, "application/pdf", $"OrderProfitEstimate_{DateTime.Now:yyyyMMddHHmmss}.pdf");
     }
 
     /// <summary>复用同一有界、已授权预览管线：先校验字段 / 日期 / 分页，再每次重新校验身份 / 菜单授权 / 数据范围，最后只读查询当前页</summary>
