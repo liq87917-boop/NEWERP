@@ -1,0 +1,60 @@
+{
+  "id": "ERP-204",
+  "title": "Scope and bound quotation conversion report queries",
+  "status": "pending",
+  "risk_level": "medium",
+  "priority": "P1",
+  "description": "A salesperson opens the existing quotation conversion report and sees only quotations for customers currently assigned to them. Require a positive authenticated user, existing quotation menu permission and freshly resolved salesperson scope on every HTTP call; fail closed for missing context, revoked permission or unmapped users. Add a mandatory explicit scope argument to the application method and update its existing callers/tests. Validate start/end before source reads, allow at most 366 inclusive calendar days and use an exclusive upper-date boundary. Bound materialization to 2000 scoped quotations (read at most 2001 to detect overflow); over-limit requests must ask the user to narrow the date range and return no partial metrics. Query PI/order conversion links only for scoped IDs in finite chunks below SQL Server parameter limits; preserve current conversion, cancellation and expiry rules. No source entity or persistence model change is needed. Development only: reuse existing ERP services, current-user menu permissions and SalespersonDataScopeService; OperationLogMiddleware audits API calls. No new authorization privileges, direct table writes, arbitrary SQL, schema/migration/stored-procedure/view changes, production SQL, real database execution, irreversible actions, secrets/.env changes, deployment or real browser acceptance. Verify focused in-memory or source-contract tests and the configured safe Release build/test; unavailable external environments must be marked blocked, never reported passed. Preserve unrelated work.",
+  "acceptance_criteria": [
+    "Every quotation-conversion HTTP call validates identity and the existing quotation menu permission and resolves current customer scope; restricted or unmapped accounts cannot see other or null-customer quotations.",
+    "Mandatory scope and inclusive date validation (maximum 366 days) precede reads; at most 2001 scoped quotations are read and more than 2000 produce an explicit narrow-range error rather than partial totals; conversion links use bounded batches.",
+    "Existing quotation governance callers/tests explicitly provide scope; focused tests cover revoked access, unmapped users, null customers, dates, overflow, link batching and unchanged conversion rules, and safe Release build/test passes."
+  ],
+  "criterion_path_map": {
+    "Every quotation-conversion HTTP call validates identity and the existing quotation menu permission and resolves current customer scope; restricted or unmapped accounts cannot see other or null-customer quotations.": [
+      "src/ERP.Api/Controllers/ReportController.cs",
+      "src/ERP.Application/Interfaces/IReportService.cs",
+      "src/ERP.Application/Services/ReportService.Quotation.cs",
+      "src/ERP.UnitTests/QuotationConversionScopeTests.cs"
+    ],
+    "Mandatory scope and inclusive date validation (maximum 366 days) precede reads; at most 2001 scoped quotations are read and more than 2000 produce an explicit narrow-range error rather than partial totals; conversion links use bounded batches.": [
+      "src/ERP.Application/Interfaces/IReportService.cs",
+      "src/ERP.Application/Services/ReportService.Quotation.cs",
+      "src/ERP.UnitTests/QuotationConversionScopeTests.cs"
+    ],
+    "Existing quotation governance callers/tests explicitly provide scope; focused tests cover revoked access, unmapped users, null customers, dates, overflow, link batching and unchanged conversion rules, and safe Release build/test passes.": [
+      "src/ERP.UnitTests/QuotationGovernanceTests.cs",
+      "src/ERP.UnitTests/QuotationConversionScopeTests.cs",
+      "src/ERP.Api/Controllers/ReportController.cs",
+      "src/ERP.Application/Interfaces/IReportService.cs",
+      "src/ERP.Application/Services/ReportService.Quotation.cs"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/ReportController.cs",
+    "src/ERP.Application/Interfaces/IReportService.cs",
+    "src/ERP.Application/Services/ReportService.Quotation.cs",
+    "src/ERP.UnitTests/QuotationConversionScopeTests.cs",
+    "src/ERP.UnitTests/QuotationGovernanceTests.cs"
+  ],
+  "depends_on": [
+    "ERP-018",
+    "ERP-097"
+  ],
+  "max_attempts": 3,
+  "attempts": 0,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only bounded read/report feature"
+  },
+  "created_at": "2026-10-02T00:13:24.657031Z"
+}

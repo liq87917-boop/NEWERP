@@ -1,0 +1,60 @@
+{
+  "id": "ERP-207",
+  "title": "Download designed quotation conversion reports as PDF",
+  "status": "pending",
+  "risk_level": "low",
+  "priority": "P1",
+  "description": "A user downloads the currently designed scoped quotation conversion report as PDF with the same selected columns, date context and original-currency buckets as preview/Excel. Add a PDF endpoint to the prerequisite controller that independently validates and reauthorizes and obtains server-derived bounded preview data. Add one narrow Infrastructure exporter using existing PDFsharp and SimHeiPdfFontResolver without package or font-secret changes. Paginate rows and wide columns, render empty evidence, label original currencies and never produce a mixed-currency money grand total. Missing font/render failure must return a clear error with no corrupt or misleading file. The existing designer retains current field order/date context in the PDF request and surfaces download failures; no new persistence or DB model is needed. Development only: reuse existing ERP services, current-user menu permissions and SalespersonDataScopeService; OperationLogMiddleware audits API calls. No new authorization privileges, direct table writes, arbitrary SQL, schema/migration/stored-procedure/view changes, production SQL, real database execution, irreversible actions, secrets/.env changes, deployment or real browser acceptance. Verify focused in-memory or source-contract tests and the configured safe Release build/test; unavailable external environments must be marked blocked, never reported passed. Preserve unrelated work.",
+  "acceptance_criteria": [
+    "PDF requests independently validate selected fields/dates and recheck current quotation-menu/customer scope, use the same bounded server preview and refuse revoked, invalid or source-limit requests without a file.",
+    "A narrow PDF exporter renders selected-column order, dates, salesperson/currency buckets, row/column pagination and empty evidence without cross-currency totals; missing fonts or rendering failures fail explicitly.",
+    "The designer preserves current fields/dates on PDF download and reports errors; focused PDF/UI tests cover scope revocation, invalid input, mixed currencies, empty and multi-page output, font failure and safe Release build/test passes."
+  ],
+  "criterion_path_map": {
+    "PDF requests independently validate selected fields/dates and recheck current quotation-menu/customer scope, use the same bounded server preview and refuse revoked, invalid or source-limit requests without a file.": [
+      "src/ERP.Api/Controllers/DynamicQuotationConversionReportController.cs",
+      "src/ERP.UnitTests/DynamicQuotationConversionPdfTests.cs"
+    ],
+    "A narrow PDF exporter renders selected-column order, dates, salesperson/currency buckets, row/column pagination and empty evidence without cross-currency totals; missing fonts or rendering failures fail explicitly.": [
+      "src/ERP.Infrastructure/Export/DynamicQuotationConversionPdfExporter.cs",
+      "src/ERP.Application/DTOs/DynamicQuotationConversionReportDtos.cs",
+      "src/ERP.Application/Services/DynamicQuotationConversionReportRules.cs",
+      "src/ERP.UnitTests/DynamicQuotationConversionPdfTests.cs"
+    ],
+    "The designer preserves current fields/dates on PDF download and reports errors; focused PDF/UI tests cover scope revocation, invalid input, mixed currencies, empty and multi-page output, font failure and safe Release build/test passes.": [
+      "src/ERP.Api/wwwroot/js/reports.js",
+      "src/ERP.UnitTests/DynamicQuotationConversionReportUiTests.cs",
+      "src/ERP.Api/Controllers/DynamicQuotationConversionReportController.cs",
+      "src/ERP.Infrastructure/Export/DynamicQuotationConversionPdfExporter.cs",
+      "src/ERP.UnitTests/DynamicQuotationConversionPdfTests.cs"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/DynamicQuotationConversionReportController.cs",
+    "src/ERP.UnitTests/DynamicQuotationConversionPdfTests.cs",
+    "src/ERP.Infrastructure/Export/DynamicQuotationConversionPdfExporter.cs",
+    "src/ERP.Application/DTOs/DynamicQuotationConversionReportDtos.cs",
+    "src/ERP.Application/Services/DynamicQuotationConversionReportRules.cs",
+    "src/ERP.Api/wwwroot/js/reports.js",
+    "src/ERP.UnitTests/DynamicQuotationConversionReportUiTests.cs"
+  ],
+  "depends_on": [
+    "ERP-206"
+  ],
+  "max_attempts": 3,
+  "attempts": 0,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only bounded read/report feature"
+  },
+  "created_at": "2026-10-02T00:13:24.657326Z"
+}

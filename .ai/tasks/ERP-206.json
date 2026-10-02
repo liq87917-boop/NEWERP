@@ -1,0 +1,62 @@
+{
+  "id": "ERP-206",
+  "title": "Design and export scoped quotation conversion reports to Excel",
+  "status": "pending",
+  "risk_level": "medium",
+  "priority": "P1",
+  "description": "A salesperson uses a visual field selector in the existing quotation report to preview and download a bounded original-currency conversion report. Add a finite server-defined field catalog and request/page DTO with start/end and ordered selected field keys; grouping remains the established salesperson/currency buckets. Validate duplicate/unknown/empty keys, bounded dates and output shape before reads. New preview and Excel endpoints must independently recheck authenticated identity, quotation menu and current customer scope and invoke the prerequisite service; no model-generated queries or client-provided totals. The designer retains field order and dates across preview and Excel, displays source-limit/error/empty states, and is reachable from the existing report action. Excel uses the existing ExcelExporter, numeric counts/decimals, safe formula-leading labels, date context and explicit original-currency grouping; it never appends mixed-currency grand money totals or silently exports unbounded details. No new DB model or registration is required; the controller reuses injected IReportService and IErpDbContext. Development only: reuse existing ERP services, current-user menu permissions and SalespersonDataScopeService; OperationLogMiddleware audits API calls. No new authorization privileges, direct table writes, arbitrary SQL, schema/migration/stored-procedure/view changes, production SQL, real database execution, irreversible actions, secrets/.env changes, deployment or real browser acceptance. Verify focused in-memory or source-contract tests and the configured safe Release build/test; unavailable external environments must be marked blocked, never reported passed. Preserve unrelated work.",
+  "acceptance_criteria": [
+    "A finite catalog and validated request/page DTO support ordered field selection; preview validates inputs and rechecks current identity/menu/customer scope before using bounded salesperson/currency conversion data.",
+    "The existing quotation report action opens a field-selection designer that retains dates and column order across preview/Excel and shows loading, denied, validation, source-limit and empty states with safe text rendering.",
+    "Excel independently reauthorizes and validates, exports only server-derived preview rows using typed cells and formula-safe text, and labels dates/original currency without mixed-currency money totals; focused API/workbook/UI tests and safe Release build/test pass."
+  ],
+  "criterion_path_map": {
+    "A finite catalog and validated request/page DTO support ordered field selection; preview validates inputs and rechecks current identity/menu/customer scope before using bounded salesperson/currency conversion data.": [
+      "src/ERP.Application/DTOs/DynamicQuotationConversionReportDtos.cs",
+      "src/ERP.Application/Services/DynamicQuotationConversionReportRules.cs",
+      "src/ERP.Api/Controllers/DynamicQuotationConversionReportController.cs",
+      "src/ERP.UnitTests/DynamicQuotationConversionReportTests.cs"
+    ],
+    "The existing quotation report action opens a field-selection designer that retains dates and column order across preview/Excel and shows loading, denied, validation, source-limit and empty states with safe text rendering.": [
+      "src/ERP.Api/wwwroot/js/reports.js",
+      "src/ERP.UnitTests/DynamicQuotationConversionReportUiTests.cs"
+    ],
+    "Excel independently reauthorizes and validates, exports only server-derived preview rows using typed cells and formula-safe text, and labels dates/original currency without mixed-currency money totals; focused API/workbook/UI tests and safe Release build/test pass.": [
+      "src/ERP.Api/Controllers/DynamicQuotationConversionReportController.cs",
+      "src/ERP.Application/DTOs/DynamicQuotationConversionReportDtos.cs",
+      "src/ERP.Application/Services/DynamicQuotationConversionReportRules.cs",
+      "src/ERP.UnitTests/DynamicQuotationConversionExcelTests.cs",
+      "src/ERP.UnitTests/DynamicQuotationConversionReportTests.cs",
+      "src/ERP.UnitTests/DynamicQuotationConversionReportUiTests.cs",
+      "src/ERP.Api/wwwroot/js/reports.js"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Application/DTOs/DynamicQuotationConversionReportDtos.cs",
+    "src/ERP.Application/Services/DynamicQuotationConversionReportRules.cs",
+    "src/ERP.Api/Controllers/DynamicQuotationConversionReportController.cs",
+    "src/ERP.UnitTests/DynamicQuotationConversionReportTests.cs",
+    "src/ERP.Api/wwwroot/js/reports.js",
+    "src/ERP.UnitTests/DynamicQuotationConversionReportUiTests.cs",
+    "src/ERP.UnitTests/DynamicQuotationConversionExcelTests.cs"
+  ],
+  "depends_on": [
+    "ERP-205"
+  ],
+  "max_attempts": 3,
+  "attempts": 0,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only bounded read/report feature"
+  },
+  "created_at": "2026-10-02T00:13:24.657229Z"
+}
