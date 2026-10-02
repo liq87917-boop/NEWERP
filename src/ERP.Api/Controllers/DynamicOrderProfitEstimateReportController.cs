@@ -18,6 +18,7 @@ namespace ERP.Api.Controllers;
 /// <item><b>POST /api/dynamic-order-profit-estimate-report/export</b>：导出当前选定页为 Excel（xlsx，只读，复用有界授权预览与选定列顺序，含日期 / 分页 / 来源上限 / 原币 / 依据上下文工作表，绝不追加跨币种金额合计）。</item>
 /// <item><b>POST /api/dynamic-order-profit-estimate-report/pdf</b>：下载当前选定页为分页中文 PDF（只读，复用有界授权预览与选定列顺序，分页渲染，字体缺失显式失败，绝不跨币种合计或声称已实现利润）。</item>
 /// <item><b>POST /api/dynamic-order-profit-estimate-report/export-summary</b>：下载当前筛选集的分币种汇总为 Excel（xlsx，只读，复用服务端派生的全部匹配已审核订单原币汇总，绝不跨币种合计、绝不含成本 / 利润 / 当前价估算，区别于当前页明细导出）。</item>
+/// <item><b>POST /api/dynamic-order-profit-estimate-report/export-summary-pdf</b>：下载当前筛选集的分币种汇总为中文 PDF（只读，复用服务端派生的全部匹配已审核订单原币汇总，稳定币种行 / 未知币种显式「未知」，绝不跨币种合计、绝不含成本 / 利润 / 当前价估算，区别于当前页明细 PDF）。</item>
 /// </list>
 /// <para>复用既有「订单利润暂估表」（order-profit）菜单授权与 <see cref="SalespersonDataScopeService"/>（ERP-097）业务员数据范围；
 /// 每次目录 / 预览 / 导出请求都重新校验身份、菜单授权与业务员数据范围（fail closed），
@@ -99,6 +100,29 @@ public class DynamicOrderProfitEstimateReportController : ControllerBase
         var bytes = BuildSummaryWorkbook(page);
         return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             $"OrderProfitCurrencySummary_{DateTime.Now:yyyyMMddHHmmss}.xlsx");
+    }
+
+    /// <summary>
+    /// 下载分币种汇总 PDF（ERP-226，只读）：复用与「分币种汇总 Excel」完全相同的已授权预览管线，
+    /// 每次请求重新校验身份 / 订单利润暂估表菜单授权 / 业务员数据范围 / 日期 / 应用筛选（fail closed），
+    /// 但使用服务端在全部匹配已审核订单上派生的 ERP-224 分币种汇总（绝不接受客户端行 / 金额 / 身份 / 数据范围，
+    /// 绝不导出全部明细行）。稳定币种行（原币 / 订单数 / 销售额）照实呈现，未知币种金额显式「未知」，
+    /// 绝不合并币种、绝不追加跨币种金额合计、绝不含成本 / 利润 / 当前价估算。无身份 / 授权撤销 / 来源超限均不返回任何文件；
+    /// 字体缺失或渲染失败时显式失败（不返回损坏文件）。
+    /// <para>全程只读，不写库、不执行任意 SQL；请求由既有 <c>OperationLogMiddleware</c> 记录审计（动作「下载分币种汇总 PDF」）。</para>
+    /// </summary>
+    [HttpPost("export-summary-pdf")]
+    public async Task<IActionResult> ExportSummaryPdf([FromBody] DynamicOrderProfitEstimateReportRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        // 复用同一有界、已授权管线：重新校验字段 / 日期 / 分页 / 应用筛选与身份 / 菜单授权 / 数据范围，
+        // 并由服务端同一 BuildPageAsync 派生覆盖全部匹配订单的分币种汇总（绝不相信客户端行 / 金额 / 身份 / 数据范围）
+        var page = await BuildPageAsync(request);
+        var summary = page.Summary
+            ?? throw new BusinessException("分币种汇总不可用", ErrorCodes.RuleConflict);
+        var bytes = OrderProfitCurrencySummaryPdfExporter.Export(summary, page);
+        return File(bytes, "application/pdf", $"OrderProfitCurrencySummary_{DateTime.Now:yyyyMMddHHmmss}.pdf");
     }
 
     /// <summary>

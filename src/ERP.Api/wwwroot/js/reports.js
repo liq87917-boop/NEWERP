@@ -2579,6 +2579,67 @@ function opdPage(delta) {
   opdPreview(page);
 }
 
+/* 下载分币种汇总 PDF（ERP-226，只读）：复用当前日期 / 应用筛选组装请求体 POST
+   /api/dynamic-order-profit-estimate-report/export-summary-pdf；成功（application/pdf 附件）触发下载；
+   授权 / 无效 / 字体缺失 / 网络失败在结果区可见，不下载任何内容。区别于「下载 PDF（当前页）」与「分币种汇总 Excel」：
+   本按钮导出服务端在全部匹配已审核订单上派生的分币种汇总（无需先预览、绝不含明细行、绝不跨币种合计），
+   并保留当前字段 / 日期 / 分页状态（不清空 OPD_DYN.view）。 */
+async function opdExportSummaryPdf() {
+  const state = opdBuildState(OPD_DYN.page);
+  const dateError = opdDateError(state);
+  if (dateError) {
+    opdRenderResult(opdErrorHtml('invalid', dateError));
+    return;
+  }
+  const filterError = opdFilterError(state);
+  if (filterError) {
+    opdRenderResult(opdErrorHtml('invalid', filterError));
+    return;
+  }
+  const req = opdBuildRequest(state);
+  opdRenderResult(opdLoadingHtml());
+
+  try {
+    const headers = { 'Content-Type': 'application/json' };
+    const token = typeof localStorage !== 'undefined' ? (localStorage.getItem('erp_token') || '') : '';
+    if (token) headers['Authorization'] = 'Bearer ' + token;
+    const resp = await fetch('/api/dynamic-order-profit-estimate-report/export-summary-pdf', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(req),
+    });
+
+    const contentType = (resp.headers.get('content-type') || '');
+    if (contentType.indexOf('application/pdf') >= 0) {
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+      a.href = url;
+      a.download = '订单利润暂估分币种汇总_' + dateStr + '.pdf';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      opdRenderResult('<div class="pd-hint">已下载分币种汇总 PDF（按订单原币合并全部匹配已审核订单，绝不含明细行、绝不跨币种合计），请查看下载。</div>');
+      return;
+    }
+
+    let envelope = null;
+    try { envelope = await resp.json(); } catch (e) { /* 忽略解析失败 */ }
+    const code = envelope && envelope.code;
+    const message = (envelope && envelope.message) || '下载失败';
+    if (code === 2000 || code === 2003) {
+      if (typeof logout === 'function') logout();
+      opdRenderResult(opdErrorHtml('unauthorized', message));
+      return;
+    }
+    opdRenderResult(opdErrorHtml(opdKindOfCode(code), message));
+  } catch (err) {
+    opdRenderResult(opdErrorHtml('network', (err && err.message) || '无法连接到服务器'));
+  }
+}
+
 /* 加载字段目录（需登录 + 订单利润暂估表菜单授权；授权 / 网络失败 fail closed，不渲染任何字段） */
 async function loadOrderProfitEstimateDesignerCatalog() {
   try {
@@ -2633,6 +2694,7 @@ function openOrderProfitEstimateDesigner() {
         <button class="btn btn-neutral" onclick="opdExport()" title="导出当前页为 Excel（选定列，复用当前日期与分页）">📥 导出 Excel（当前页）</button>
         <button class="btn btn-neutral" onclick="opdExportPdf()" title="下载当前页为中文 PDF（选定列，复用当前日期与分页）">📄 下载 PDF（当前页）</button>
         <button class="btn btn-neutral" onclick="opdExportSummary()" title="下载当前筛选集的分币种汇总 Excel（按订单原币合并全部匹配已审核订单，无需先预览，绝不含明细行）">📊 下载分币种汇总 Excel</button>
+        <button class="btn btn-neutral" onclick="opdExportSummaryPdf()" title="下载当前筛选集的分币种汇总 PDF（按订单原币合并全部匹配已审核订单，无需先预览，绝不含明细行）">📄 下载分币种汇总 PDF</button>
         <button class="btn btn-primary" onclick="opdPreview(1)">预览</button>
       </div>
     </div>

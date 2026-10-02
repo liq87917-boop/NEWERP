@@ -113,4 +113,40 @@ public class OrderProfitCurrencySummaryUiTests
         Assert.Contains("const filterError = opdFilterError(state);", fn);
         Assert.Contains("opdRenderResult(opdErrorHtml('invalid', filterError));", fn);
     }
+
+    [Fact]
+    public void 汇总PDF下载按钮_存在且区分明细PDF与汇总Excel()
+    {
+        var js = Script;
+
+        Assert.Contains("onclick=\"opdExportSummaryPdf()\"", js);
+        Assert.Contains("function opdExportSummaryPdf()", js);
+        Assert.Contains("/api/dynamic-order-profit-estimate-report/export-summary-pdf", js);
+        // 明确区分「当前页 PDF」「分币种汇总 Excel」「分币种汇总 PDF」：按钮文案与下载文件名均不同
+        Assert.Contains("下载 PDF（当前页）", js);
+        Assert.Contains("下载分币种汇总 Excel", js);
+        Assert.Contains("下载分币种汇总 PDF", js);
+        Assert.Contains("a.download = '订单利润暂估分币种汇总_'", js);
+    }
+
+    [Fact]
+    public void 汇总PDF下载函数_发送当前筛选_无需先预览_保留状态()
+    {
+        var js = Script;
+        var fn = Segment(js, "async function opdExportSummaryPdf()", "function loadOrderProfitEstimateDesignerCatalog(");
+
+        Assert.Contains("const state = opdBuildState(OPD_DYN.page);", fn);
+        Assert.Contains("const req = opdBuildRequest(state);", fn);
+        Assert.Contains("body: JSON.stringify(req)", fn);
+        Assert.Contains("contentType.indexOf('application/pdf') >= 0", fn);
+        Assert.Contains("a.download = '订单利润暂估分币种汇总_'", fn);
+        Assert.Contains("opdErrorHtml('unauthorized', message)", fn);
+        Assert.Contains("opdErrorHtml(opdKindOfCode(code), message)", fn);
+        Assert.Contains("opdErrorHtml('network', (err && err.message) || '无法连接到服务器')", fn);
+        // 不要求先预览：绝不含「请先预览」提示
+        Assert.DoesNotContain("请先预览", fn);
+        // 保留表单 / 分页状态：绝不清空 OPD_DYN.view
+        Assert.DoesNotContain("OPD_DYN.view = null", fn);
+        Assert.DoesNotContain("OPD_DYN.view = {", fn);
+    }
 }
