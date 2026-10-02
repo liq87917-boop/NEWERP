@@ -1,4 +1,5 @@
 using ERP.Application.Interfaces;
+using System.Text.Json.Serialization;
 
 namespace ERP.Application.DTOs;
 
@@ -101,4 +102,35 @@ public sealed record DynamicOrderProfitEstimateReportPageDto(
     string CurrencyContextText,
     string UnknownBasisText,
     string SourceLimitText,
-    string FilterText = "");
+    string FilterText = "",
+    DynamicOrderProfitEstimateSummaryDto? Summary = null);
+
+/// <summary>
+/// 订单利润暂估分币种汇总项（ERP-224，只读派生）：把同一原币的全部匹配已审核销售订单合并为一枚汇总行。
+/// 汇总覆盖全部匹配的有界来源订单（与明细页 / 选定列无关），金额均为订单原币，绝不跨币种合计；
+/// <see cref="Currency"/> 为显式分组上下文，始终存在；未知 / 空 / 非法币种为显式「未知币种」桶：
+/// 有订单数、金额为 null（绝不回落为 0）；已知币种金额为签名销售额小计（可为负）。
+/// </summary>
+public sealed class DynamicOrderProfitEstimateCurrencySummaryDto
+{
+    /// <summary>原币币种（规范化大写；空值 / 未知取值显式保留为「未知币种」，绝不默认币种）</summary>
+    public string Currency { get; set; } = string.Empty;
+
+    /// <summary>已审核订单数（= 全部匹配有界来源订单数，与当前页 / 选定列无关）</summary>
+    public int OrderCount { get; set; }
+
+    /// <summary>销售额小计（原币、签名；未知币种为 null，绝不回落为 0）</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public decimal? SalesAmount { get; set; }
+}
+
+/// <summary>
+/// 订单利润暂估分币种汇总结果（ERP-224，只读派生）：在全部匹配已审核销售订单（ERP-223 筛选后）基础上按规范化原币合并，
+/// 在分页前完成，绝不跨币种合计、绝不产生成本 / 利润 / 当前价估算或跨币种总额；
+/// 汇总列固定为「原币币种 / 已审核订单数 / 销售额(原币)」，与明细页选定列无关；<see cref="CoverageText"/> 显式声明覆盖范围。
+/// </summary>
+public sealed record DynamicOrderProfitEstimateSummaryDto(
+    List<DynamicOrderProfitEstimateReportFieldDto> Columns,
+    List<DynamicOrderProfitEstimateCurrencySummaryDto> Rows,
+    int CurrencyCount,
+    string CoverageText);

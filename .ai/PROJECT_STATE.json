@@ -1,11 +1,10 @@
 {
   "schema_version": 2,
   "project": "NEWERP",
-  "updated_at": "2026-10-02T04:51:23.455528Z",
+  "updated_at": "2026-10-02T04:59:56.817165Z",
   "phase": "ready",
   "current_task": null,
   "queue": [
-    "ERP-224",
     "ERP-225",
     "ERP-226"
   ],
@@ -212,7 +211,8 @@
     "ERP-220",
     "ERP-221",
     "ERP-222",
-    "ERP-223"
+    "ERP-223",
+    "ERP-224"
   ],
   "blocked": [
     {
@@ -223,12 +223,12 @@
     }
   ],
   "last_build": {
-    "task": "ERP-223",
+    "task": "ERP-224",
     "profile": "safe",
     "status": "passed",
     "exit_code": 0,
-    "log": ".ai\\logs\\ERP-223-validation-1.log",
-    "at": "2026-10-02T04:51:17.728599Z"
+    "log": ".ai\\logs\\ERP-224-validation-1.log",
+    "at": "2026-10-02T04:59:56.270131Z"
   },
   "last_error": null,
   "last_deepseek_fix": {
@@ -239,15 +239,14 @@
   },
   "git_sync": {
     "branch": "main",
-    "local_sha": "45eed36",
-    "status": "synced",
+    "local_sha": "3a71c1b",
+    "status": "pending",
     "ahead": 0,
     "behind": 0,
-    "last_attempt_at": "2026-10-02T04:51:23.343897Z",
+    "last_attempt_at": "2026-10-02T04:59:56.712088Z",
     "last_error": null
   },
   "next_recommended_tasks": [
-    "ERP-224",
     "ERP-225",
     "ERP-226"
   ],

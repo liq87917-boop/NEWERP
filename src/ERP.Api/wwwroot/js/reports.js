@@ -2251,15 +2251,29 @@ function opdKindOfCode(code) {
   return 'invalid';
 }
 
-/* 结果：先显示筛选 / 页面覆盖 / 原币 / 未知依据上下文（即使对应列被取消选择），再显示表格与分页 */
+/* ERP-224 分币种汇总：独立于当前页明细行与选定列渲染，仅渲染后端返回的 summary 列与指标，全部转义；空 / 无汇总不渲染 */
+function opdSummaryHtml(view) {
+  const summary = view && view.summary;
+  const cols = summary && summary.columns;
+  const rows = summary && summary.rows;
+  if (!cols || !cols.length || !rows || !rows.length) return '';
+  const align = c => (c.dataType === 'number') ? ' class="text-right"' : '';
+  const head = cols.map(c => `<th${align(c)}>${opdEsc(c.label || c.key)}</th>`).join('');
+  const body = rows.map(r => `<tr>${cols.map(c => `<td${align(c)}>${opdRenderCell(r[c.key], c)}</td>`).join('')}</tr>`).join('');
+  const coverage = summary.coverageText ? `<div class="text-muted" style="margin:6px 0">${opdEsc(summary.coverageText)}</div>` : '';
+  return `<div class="pd-hint" style="margin-top:10px"><b>分币种汇总</b>（按订单原币合并全部匹配已审核订单）</div>${coverage}<div class="table-wrap"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
+}
+
+/* 结果：先显示筛选 / 页面覆盖 / 原币 / 未知依据上下文（即使对应列被取消选择），再显示分币种汇总、表格与分页 */
 function opdResultHtml(view) {
   const filterLine = view && view.filterText ? `<div class="pd-hint" style="color:#0f766e;background:#f0fdfa;border-color:#99f6e4">🔍 ${opdEsc(view.filterText)}</div>` : '';
   const ctx = `<div class="pd-hint" style="margin:8px 0">${opdEsc((view && view.pageOnlyText) || '')}</div>
     <div class="pd-hint" style="margin:0 0 8px">${opdEsc((view && view.currencyContextText) || '')}</div>
     <div class="pd-hint" style="margin:0 0 8px">${opdEsc((view && view.unknownBasisText) || '')}</div>`;
-  if (!view || !view.columns || !view.columns.length) return filterLine + ctx;
-  if (!view.rows || !view.rows.length) return filterLine + ctx + opdEmptyHtml(view);
-  return filterLine + ctx + opdTableHtml(view) + opdPagingHtml(view);
+  const currencySummary = opdSummaryHtml(view);
+  if (!view || !view.columns || !view.columns.length) return filterLine + ctx + currencySummary;
+  if (!view.rows || !view.rows.length) return filterLine + ctx + currencySummary + opdEmptyHtml(view);
+  return filterLine + ctx + currencySummary + opdTableHtml(view) + opdPagingHtml(view);
 }
 
 /* 字段选择器：仅由目录白名单渲染为复选框，无自由填写的字段名 */

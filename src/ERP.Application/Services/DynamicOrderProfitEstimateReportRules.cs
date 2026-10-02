@@ -326,7 +326,73 @@ public static class DynamicOrderProfitEstimateReportRules
             CurrencyContextText,
             UnknownBasisText,
             SourceLimitText,
-            filterText);
+            filterText,
+            BuildSummary(all));
+    }
+
+    // ==================== 5.1 分币种汇总（ERP-224，纯规则） ====================
+
+    /// <summary>分币种汇总覆盖文案：显式声明汇总覆盖本次有界来源内全部匹配的已审核销售订单</summary>
+    public const string CurrencySummaryCoverageText =
+        "分币种汇总覆盖本次有界来源内全部匹配的已审核销售订单（在 500 张订单 / 10000 条明细上限内，按订单原币合并，绝不跨币种合计）";
+
+    /// <summary>分币种汇总「原币币种」列（显式分组上下文，始终存在）</summary>
+    private static readonly DynamicOrderProfitEstimateReportFieldDto CurrencySummaryCurrencyColumn =
+        new("currency", "原币币种", "text", false);
+
+    /// <summary>分币种汇总「已审核订单数」列（计数指标，始终存在，与明细页选定列无关）</summary>
+    private static readonly DynamicOrderProfitEstimateReportFieldDto CurrencySummaryOrderCountColumn =
+        new("orderCount", "已审核订单数", "number", false);
+
+    /// <summary>分币种汇总「销售额(原币)」列（金额指标，始终存在；未知币种为 null，绝不回落为 0）</summary>
+    private static readonly DynamicOrderProfitEstimateReportFieldDto CurrencySummarySalesAmountColumn =
+        new("salesAmount", "销售额(原币)", "number", false);
+
+    /// <summary>
+    /// 分币种汇总（ERP-224，纯规则）：把全部匹配的已审核销售订单（ERP-223 筛选后、分页前）按规范化原币键合并，
+    /// 仅合并相等规范币种键、显式保留未知币种桶（有订单数、金额为 null，绝不回落为 0），绝不跨币种合计；
+    /// 已知币种金额为签名销售额小计（可为负），绝不汇总成本 / 利润 / 当前价估算，也绝不换算汇率或合并不同币种。
+    /// 汇总与明细页选定列 / 页码 / 每页条数无关，稳定按币种键升序排列。
+    /// </summary>
+    public static DynamicOrderProfitEstimateSummaryDto BuildSummary(
+        IReadOnlyList<ReportDtos.OrderProfitItem> items)
+    {
+        var all = items ?? Array.Empty<ReportDtos.OrderProfitItem>();
+
+        var groups = new Dictionary<string, (int OrderCount, decimal SalesAmount)>(StringComparer.Ordinal);
+        foreach (var item in all)
+        {
+            var currency = ReportService.NormalizeCurrencyCode(item.Currency);
+            var isKnown = !string.Equals(currency, ReportService.UnknownCurrencyGroup, StringComparison.Ordinal);
+            groups.TryGetValue(currency, out var acc);
+            groups[currency] = (
+                acc.OrderCount + 1,
+                acc.SalesAmount + (isKnown ? item.SalesAmount : 0m));
+        }
+
+        var rows = new List<DynamicOrderProfitEstimateCurrencySummaryDto>();
+        foreach (var currency in groups.Keys.OrderBy(k => k, StringComparer.Ordinal))
+        {
+            var acc = groups[currency];
+            var isKnown = !string.Equals(currency, ReportService.UnknownCurrencyGroup, StringComparison.Ordinal);
+            rows.Add(new DynamicOrderProfitEstimateCurrencySummaryDto
+            {
+                Currency = currency,
+                OrderCount = acc.OrderCount,
+                SalesAmount = isKnown ? acc.SalesAmount : null,
+            });
+        }
+
+        return new DynamicOrderProfitEstimateSummaryDto(
+            new List<DynamicOrderProfitEstimateReportFieldDto>
+            {
+                CurrencySummaryCurrencyColumn,
+                CurrencySummaryOrderCountColumn,
+                CurrencySummarySalesAmountColumn,
+            },
+            rows,
+            rows.Count,
+            CurrencySummaryCoverageText);
     }
 
     /// <summary>把分页上下文渲染为 Excel 口径文案（页面 / 每页条数 / 总数 / 是否截断）</summary>
