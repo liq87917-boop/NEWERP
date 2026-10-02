@@ -310,6 +310,20 @@ public interface IErpDbContext
     DbSet<FinanceReceipt> FinanceReceipts { get; }
     DbSet<FinanceComplaint> FinanceComplaints { get; }
 
+    // ============ 通用报表配置平台（ERP-260 Stage 1：私有报表配置与不可变发布修订） ============
+
+    /// <summary>
+    /// 私有报表配置（ERP-260）：用户个人工作区保存的报表定义（草稿 / 已发布），只属于一位已认证用户；
+    /// 定义在保存前按当前账号已授权数据集目录做有界校验，绝不授权数据集本身。
+    /// </summary>
+    DbSet<ReportConfiguration> ReportConfigurations { get; }
+
+    /// <summary>
+    /// 私有报表配置的不可变发布修订快照（ERP-260）：每次发布 / 恢复追加一条精确固定的已校验定义快照，
+    /// 版本号在同一配置内单调递增；草稿编辑不静默替换已发布修订。
+    /// </summary>
+    DbSet<ReportConfigurationRevision> ReportConfigurationRevisions { get; }
+
     /// <summary>保存变更（返回受影响行数）</summary>
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 }

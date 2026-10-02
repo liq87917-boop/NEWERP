@@ -1,3 +1,5 @@
+using ERP.Domain.Entities;
+
 namespace ERP.Application.DTOs;
 
 /// <summary>
@@ -180,4 +182,115 @@ public sealed class ReportConfigurationPresentation
 
     /// <summary>每页条数（1 ~ 数据集上限）</summary>
     public int? PageSize { get; set; }
+}
+
+
+// ==================== ERP-260 Stage 1：私有报表配置服务契约 ====================
+
+/// <summary>
+/// 保存 / 更新私有报表配置的请求契约（客户端提交；所有者 Id 由服务端认证注入，客户端不得提交）。
+/// </summary>
+public sealed class ReportConfigurationSaveDto
+{
+    /// <summary>配置名称（1 ~ 200 字符）</summary>
+    public string Name { get; set; } = string.Empty;
+
+    /// <summary>有界报表定义（保存前按当前账号已授权数据集目录校验）</summary>
+    public ReportConfigurationDefinition? Definition { get; set; }
+}
+
+/// <summary>私有报表配置详情（加载 / 保存后返回；含已反序列化的定义与预期版本令牌）。</summary>
+public sealed class ReportConfigurationDto
+{
+    /// <summary>配置 Id</summary>
+    public long Id { get; set; }
+
+    /// <summary>所有者用户 Id（服务端认证写入）</summary>
+    public long OwnerUserId { get; set; }
+
+    /// <summary>配置名称</summary>
+    public string Name { get; set; } = string.Empty;
+
+    /// <summary>数据集键</summary>
+    public string DatasetKey { get; set; } = string.Empty;
+
+    /// <summary>schema 版本</summary>
+    public int SchemaVersion { get; set; }
+
+    /// <summary>生命周期状态（草稿 / 已发布）</summary>
+    public ReportConfigurationStatus Status { get; set; }
+
+    /// <summary>当前预期版本令牌（后续更新 / 发布 / 恢复 / 删除需原样回传）</summary>
+    public int Version { get; set; }
+
+    /// <summary>最近一次已发布修订版本号（0 = 从未发布）</summary>
+    public int CurrentPublishedVersion { get; set; }
+
+    /// <summary>已反序列化的有界定义（与保存 JSON 一致）</summary>
+    public ReportConfigurationDefinition? Definition { get; set; }
+
+    /// <summary>创建时间</summary>
+    public DateTime CreatedAt { get; set; }
+
+    /// <summary>更新时间</summary>
+    public DateTime? UpdatedAt { get; set; }
+}
+
+/// <summary>私有报表配置列表项（owner-only；不含定义正文，避免列表把定义整体拉回）。</summary>
+public sealed class ReportConfigurationSummaryDto
+{
+    /// <summary>配置 Id</summary>
+    public long Id { get; set; }
+
+    /// <summary>配置名称</summary>
+    public string Name { get; set; } = string.Empty;
+
+    /// <summary>数据集键</summary>
+    public string DatasetKey { get; set; } = string.Empty;
+
+    /// <summary>生命周期状态（草稿 / 已发布）</summary>
+    public ReportConfigurationStatus Status { get; set; }
+
+    /// <summary>当前预期版本令牌</summary>
+    public int Version { get; set; }
+
+    /// <summary>最近一次已发布修订版本号（0 = 从未发布）</summary>
+    public int CurrentPublishedVersion { get; set; }
+
+    /// <summary>创建时间</summary>
+    public DateTime CreatedAt { get; set; }
+
+    /// <summary>更新时间</summary>
+    public DateTime? UpdatedAt { get; set; }
+}
+
+/// <summary>私有报表配置发布修订项（不可变快照；含已反序列化的定义）。</summary>
+public sealed class ReportConfigurationRevisionDto
+{
+    /// <summary>修订 Id</summary>
+    public long Id { get; set; }
+
+    /// <summary>所属配置 Id</summary>
+    public long ReportConfigurationId { get; set; }
+
+    /// <summary>发布版本号（同一配置内单调递增）</summary>
+    public int Version { get; set; }
+
+    /// <summary>发布时的配置名称快照</summary>
+    public string Name { get; set; } = string.Empty;
+
+    /// <summary>发布时的数据集键快照</summary>
+    public string DatasetKey { get; set; } = string.Empty;
+
+    /// <summary>schema 版本快照</summary>
+    public int SchemaVersion { get; set; }
+
+    /// <summary>发布时间</summary>
+    public DateTime PublishedAt { get; set; }
+
+    /// <summary>发布人 Id</summary>
+    public long PublishedBy { get; set; }
+
+    /// <summary>已反序列化的被固定定义快照</summary>
+    public ReportConfigurationDefinition? Definition { get; set; }
 }

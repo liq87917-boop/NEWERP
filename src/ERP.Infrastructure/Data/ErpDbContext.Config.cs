@@ -1211,6 +1211,9 @@ public partial class ErpDbContext
             .HasIndex(x => x.QuoteId)
             .IsUnique().HasDatabaseName("UX_PurchaseQuoteDecisions_QuoteId")
             .HasFilter("IsDeleted = 0");
+
+        // ============ ERP-260：通用报表配置平台（私有配置 + 不可变发布修订） ============
+        ConfigureReporting(modelBuilder);
     }
 
     /// <summary>保存变更：自动填充审计字段</summary>
