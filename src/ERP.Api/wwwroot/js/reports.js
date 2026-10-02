@@ -1535,6 +1535,7 @@ function openQuotationConversionDesigner() {
    - 结果按后端返回的列名与选定字段值渲染（psrTableHtml / psrResultHtml），全部 HTML 转义；
    - 空结果 / 授权撤销（权限不足 / 未登录）/ 无效请求 / 网络失败分别可见，且不暴露范围外数据；
    - 导出复用预览请求体 POST /api/dynamic-product-sales-ranking-report/export，成功（xlsx 附件）触发下载；
+   - 下载复用当前字段 / 日期 / Top 组装请求体 POST /api/dynamic-product-sales-ranking-report/pdf，成功（application/pdf 附件）触发下载；
    - 全程只读：不写库、不迁移、不执行任意 SQL。 */
 
 /* 字段设计器状态（纯数据；DOM 访问只在事件处理函数内部发生） */
@@ -1829,6 +1830,60 @@ async function psrExport() {
   }
 }
 
+/* 下载选定 Top 结果为中文 PDF（ERP-214，只读）：复用当前字段 / 开始 / 结束日期 / Top 组装请求体
+   POST /api/dynamic-product-sales-ranking-report/pdf；接口会重新校验并重跑有界授权预览（不要求先预览）；
+   成功（application/pdf 附件）触发下载；授权 / 无效 / 字体缺失 / 网络失败在结果区可见，不下载任何内容 */
+async function psrExportPdf() {
+  const state = psrBuildState();
+  const filterError = psrFilterError(state);
+  if (filterError) {
+    psrRenderResult(psrErrorHtml('invalid', filterError));
+    return;
+  }
+  const req = psrBuildRequest(state);
+  psrRenderResult(psrLoadingHtml());
+
+  try {
+    const headers = { 'Content-Type': 'application/json' };
+    const token = typeof localStorage !== 'undefined' ? (localStorage.getItem('erp_token') || '') : '';
+    if (token) headers['Authorization'] = 'Bearer ' + token;
+    const resp = await fetch('/api/dynamic-product-sales-ranking-report/pdf', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(req),
+    });
+
+    const contentType = (resp.headers.get('content-type') || '');
+    if (contentType.indexOf('application/pdf') >= 0) {
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+      a.href = url;
+      a.download = '商品销量排名_' + dateStr + '.pdf';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      psrRenderResult('<div class="pd-hint">已下载 Top 结果为中文 PDF，请查看下载。</div>');
+      return;
+    }
+
+    let envelope = null;
+    try { envelope = await resp.json(); } catch (e) { /* 忽略解析失败 */ }
+    const code = envelope && envelope.code;
+    const message = (envelope && envelope.message) || '下载失败';
+    if (code === 2000 || code === 2003) {
+      if (typeof logout === 'function') logout();
+      psrRenderResult(psrErrorHtml('unauthorized', message));
+      return;
+    }
+    psrRenderResult(psrErrorHtml(psrKindOfCode(code), message));
+  } catch (err) {
+    psrRenderResult(psrErrorHtml('network', (err && err.message) || '无法连接到服务器'));
+  }
+}
+
 /* 加载字段目录（需登录 + 商品销量排名榜菜单授权；授权 / 网络失败 fail closed，不渲染任何字段） */
 async function loadProductSalesRankingDesignerCatalog() {
   try {
@@ -1871,6 +1926,7 @@ function openProductSalesRankingDesigner() {
         <button class="btn btn-neutral btn-sm" onclick="psrToggleAll(true)">全选</button>
         <button class="btn btn-neutral btn-sm" onclick="psrToggleAll(false)">清空</button>
         <button class="btn btn-neutral" onclick="psrExport()" title="导出 Top 结果为 Excel（选定列，复用当前日期与 Top）">📥 导出 Excel（Top 结果）</button>
+        <button class="btn btn-neutral" onclick="psrExportPdf()" title="下载 Top 结果为中文 PDF（选定列，复用当前日期与 Top）">📄 下载 PDF（Top 结果）</button>
         <button class="btn btn-primary" onclick="psrPreview()">预览</button>
       </div>
     </div>

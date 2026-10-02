@@ -112,4 +112,48 @@ public class DynamicProductSalesRankingReportUiTests
         Assert.Contains("单位不兼容不跨单位合计", js);
         Assert.Contains("绝不跨单位合计数量", js);
     }
+
+    // ==================== PDF 下载（ERP-214） ====================
+
+    [Fact]
+    public void PDF下载_入口_设计器提供下载按钮_不新增菜单或脚本注册()
+    {
+        var js = Script;
+
+        Assert.Contains("function psrExportPdf()", js);
+        Assert.Contains("onclick=\"psrExportPdf()\"", js);
+        Assert.Contains("/api/dynamic-product-sales-ranking-report/pdf", js);
+    }
+
+    [Fact]
+    public void PDF下载_复用当前字段日期Top请求_无自由SQL_不要求先预览()
+    {
+        var js = Script;
+
+        var fn = Segment(js, "async function psrExportPdf()", "/* 加载字段目录（需登录 + 商品销量排名榜菜单授权；授权 / 网络失败 fail closed，不渲染任何字段） */");
+        Assert.Contains("psrBuildState()", fn);
+        Assert.Contains("psrFilterError(state)", fn);
+        Assert.Contains("psrBuildRequest(state)", fn);
+        Assert.Contains("method: 'POST'", fn);
+        Assert.DoesNotContain("PSR_DYN.view", fn);
+        Assert.DoesNotContain("FromSql", fn);
+        Assert.DoesNotContain("ExecuteSql", fn);
+        Assert.DoesNotContain("SqlCommand", fn);
+        Assert.DoesNotContain("localStorage.setItem", fn);
+    }
+
+    [Fact]
+    public void PDF下载_成功下载pdf附件_授权无效网络失败可见()
+    {
+        var js = Script;
+
+        var fn = Segment(js, "async function psrExportPdf()", "/* 加载字段目录（需登录 + 商品销量排名榜菜单授权；授权 / 网络失败 fail closed，不渲染任何字段） */");
+        Assert.Contains("contentType.indexOf('application/pdf') >= 0", fn);
+        Assert.Contains("URL.createObjectURL(blob)", fn);
+        Assert.Contains("a.download = '商品销量排名_'", fn);
+        Assert.Contains("psrErrorHtml('unauthorized', message)", fn);
+        Assert.Contains("psrErrorHtml('invalid', filterError)", fn);
+        Assert.Contains("psrErrorHtml(psrKindOfCode(code), message)", fn);
+        Assert.Contains("psrErrorHtml('network', (err && err.message) || '无法连接到服务器')", fn);
+    }
 }

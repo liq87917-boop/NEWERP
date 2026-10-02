@@ -16,6 +16,7 @@ namespace ERP.Api.Controllers;
 /// <item><b>GET /api/dynamic-product-sales-ranking-report</b>：返回发货数量证据字段白名单目录（需登录 + 商品销量排名榜菜单授权 + 业务员数据范围）；</item>
 /// <item><b>POST /api/dynamic-product-sales-ranking-report</b>：按选定字段与有界日期窗口（start / end）与 Top 预览当前账号数据范围内的排名行（发货数量证据，排除金额估算）；</item>
 /// <item><b>POST /api/dynamic-product-sales-ranking-report/export</b>：导出选定 Top 结果为 Excel（xlsx，只读，复用有界授权预览与选定列顺序，含日期 / Top / 单位与发货证据口径上下文工作表，绝不追加金额合计）。</item>
+/// <item><b>POST /api/dynamic-product-sales-ranking-report/pdf</b>：下载选定 Top 结果为中文 PDF（只读，复用有界授权预览与选定列顺序，分页渲染，字体缺失显式失败，绝不追加金额合计）。</item>
 /// </list>
 /// <para>复用既有「商品销量排名榜」菜单授权与 <see cref="SalespersonDataScopeService"/>（ERP-097）业务员数据范围；
 /// 每次目录 / 预览 / 导出请求都重新校验身份、菜单授权与业务员数据范围（fail closed），
@@ -74,6 +75,24 @@ public class DynamicProductSalesRankingReportController : ControllerBase
         var bytes = BuildWorkbook(page);
         return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             $"ProductSalesRanking_{DateTime.Now:yyyyMMddHHmmss}.xlsx");
+    }
+
+    /// <summary>
+    /// 下载选定 Top 结果为中文 PDF（ERP-214，只读）：复用同一有界、已授权预览管线，每次请求重新校验身份 /
+    /// 商品销量排名榜菜单授权 / 业务员数据范围 / 字段 / 日期 / Top（fail closed），仅导出选定 Top 结果字段；
+    /// 选定列顺序、中文标签、日期窗口 / Top 限定 / 单位口径 / 已审核发货证据口径与空结果说明显式保留，宽列集 / 行数超出按
+    /// 列页 / 行页分页，绝不追加金额估算合计、绝不跨单位合计数量。
+    /// <para>中文字体固定使用 Windows 黑体（SimHei，共享解析器），字体缺失或渲染失败时显式失败（不产出乱码 / 缺字 / 损坏 PDF）。</para>
+    /// <para>全程只读，不写库、不执行任意 SQL；请求由既有 <c>OperationLogMiddleware</c> 记录审计（动作「导出」）。</para>
+    /// </summary>
+    [HttpPost("pdf")]
+    public async Task<IActionResult> ExportPdf([FromBody] DynamicProductSalesRankingReportRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var page = await BuildPageAsync(request);
+        var bytes = DynamicProductSalesRankingPdfExporter.Export(page);
+        return File(bytes, "application/pdf", $"ProductSalesRanking_{DateTime.Now:yyyyMMddHHmmss}.pdf");
     }
 
     /// <summary>复用同一有界、已授权预览管线：先校验字段 / 日期 / Top，再每次重新校验身份 / 菜单授权 / 数据范围，最后只读查询 Top 排名</summary>
