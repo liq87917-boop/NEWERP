@@ -28,6 +28,9 @@ public sealed class ReportConfigurationExcelExporter
     /// <summary>指标汇总工作表名（仅选中指标时追加；当前预览页、分组 + 币种分区）</summary>
     public const string MetricsSheetName = "指标汇总（当前页）";
 
+    /// <summary>透视矩阵工作表名（仅透视时追加；当前预览页、类型化轴 + 币种分区）</summary>
+    public const string PivotSheetName = "透视（当前页）";
+
     /// <summary>报表口径上下文工作表名</summary>
     public const string ContextSheetName = "报表口径";
 
@@ -54,6 +57,9 @@ public sealed class ReportConfigurationExcelExporter
 
         if (preview.Metrics is { Count: > 0 })
             BuildMetricsSheet(workbook, preview.Metrics, styles, cancellationToken);
+
+        if (preview.Pivot is not null)
+            BuildPivotSheet(workbook, preview.Pivot, styles, cancellationToken);
 
         BuildContextSheet(workbook, preview, styles, cancellationToken);
 
@@ -389,6 +395,71 @@ public sealed class ReportConfigurationExcelExporter
     {
         var unit = string.IsNullOrWhiteSpace(metric.Unit) ? string.Empty : $"（{metric.Unit}）";
         return $"{metric.Label}（{ReportConfigurationMetricRules.FunctionLabel(metric.Function)}）{unit}";
+    }
+
+    // ==================== 透视矩阵工作表（当前预览页、类型化轴 + 币种分区） ====================
+
+    private static void BuildPivotSheet(
+        XSSFWorkbook workbook, ReportConfigurationPivotResultDto pivot, Styles styles, CancellationToken cancellationToken)
+    {
+        var sheet = workbook.CreateSheet(PivotSheetName);
+        var sheetRow = 0;
+
+        foreach (var metric in pivot.Metrics)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (sheetRow > 0)
+                sheetRow++;   // 指标矩阵之间空一行
+
+            var titleRow = sheet.CreateRow(sheetRow++);
+            WriteText(titleRow.CreateCell(0), ReportConfigurationPivotRules.MetricTitle(metric), styles.Text);
+
+            var headerRow = sheet.CreateRow(sheetRow++);
+            var c = 0;
+            WriteText(headerRow.CreateCell(c++), ReportConfigurationGroupingRules.DimensionHeaderLabel(pivot.RowDimension), styles.Header);
+            foreach (var column in pivot.ColumnAxis)
+                WriteText(headerRow.CreateCell(c++), column.Label, styles.Header);
+
+            var byCell = GroupPivotCells(metric.Cells);
+            for (var rowIndex = 0; rowIndex < pivot.RowAxis.Count; rowIndex++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var row = sheet.CreateRow(sheetRow++);
+                c = 0;
+                WriteText(row.CreateCell(c++), pivot.RowAxis[rowIndex].Label, styles.Text);
+                for (var columnIndex = 0; columnIndex < pivot.ColumnAxis.Count; columnIndex++)
+                {
+                    byCell.TryGetValue((rowIndex, columnIndex), out var partitions);
+                    WriteText(row.CreateCell(c++), ReportConfigurationPivotRules.FormatCellText(partitions), styles.Text);
+                }
+            }
+
+            var summaryRow = sheet.CreateRow(sheetRow++);
+            WriteText(summaryRow.CreateCell(0),
+                $"已知 {metric.KnownCount} · 缺失 {metric.MissingCount} · 来源 {metric.SourceCount} · 覆盖 {pivot.Coverage}（非全量合计）",
+                styles.Text);
+        }
+
+        var columnCount = pivot.ColumnAxis.Count + 1;
+        for (var c = 0; c < columnCount; c++)
+            sheet.SetColumnWidth(c, Math.Min(40, 20) * 256);
+    }
+
+    private static Dictionary<(int Row, int Column), List<ReportConfigurationPivotCellDto>> GroupPivotCells(
+        IReadOnlyList<ReportConfigurationPivotCellDto> cells)
+    {
+        var map = new Dictionary<(int, int), List<ReportConfigurationPivotCellDto>>();
+        foreach (var cell in cells)
+        {
+            var key = (cell.RowIndex, cell.ColumnIndex);
+            if (!map.TryGetValue(key, out var list))
+            {
+                list = new List<ReportConfigurationPivotCellDto>();
+                map[key] = list;
+            }
+            list.Add(cell);
+        }
+        return map;
     }
 
     private static void WriteOptionalAmount(ICell cell, decimal? value, ICellStyle style)

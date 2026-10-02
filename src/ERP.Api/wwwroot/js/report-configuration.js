@@ -29,7 +29,7 @@ const RCC_GROUP_LABELS = {
 const RCC_UNSUPPORTED_REASONS = {
   'custom-formula': '自定义公式：本阶段不支持，只能选择目录白名单字段，绝不执行任意公式 / SQL / 脚本',
   'cross-dataset-join': '跨数据集联接：本阶段不支持，单个报表配置只绑定一个已授权数据集',
-  'pivot': '透视表：本阶段不支持，只提供有限字段 / 筛选 / 单一分组键',
+  'pivot': '任意透视：本阶段不支持（仅提供有界透视：一个行维度 + 一个不同列维度 + 最多 4 个基础指标）',
   'all-match-total': '全匹配合计：本阶段不支持，页面小计只覆盖当前预览页（非全量合计）',
 };
 
@@ -48,6 +48,7 @@ let RCC = {
   aggregates: [],
   relations: [],
   groupings: [],
+  pivot: { rowDimension: '', columnDimension: '' },
   sortFieldKey: '',
   sortDirection: 'asc',
   page: 1,
@@ -381,6 +382,7 @@ function rccResultHtml(preview) {
   const coverageText = coverage === 'current-page' ? '当前预览页（非全量合计）' : coverage;
   const parts = [];
   if (rccEffectiveGroupings(preview).length) parts.push(rccGroupHtml(preview));
+  parts.push(rccPivotResultHtml(preview));
   parts.push(rccTableHtml(preview));
   parts.push(rccComputedEvidenceHtml(preview));
   parts.push(rccMetricsHtml(preview));
@@ -468,6 +470,7 @@ function rccBuildDefinition(state) {
     capabilities: [],
     computedColumns: rccBuildComputedColumns(state),
     relations: rccBuildRelations(state),
+    pivot: rccBuildPivot(state),
     presentation: {
       page: 1,
       pageSize: state.pageSize || RCC_DEFAULT_PAGE_SIZE,
@@ -548,6 +551,39 @@ function rccGroupingHtml(groupingDimensions, groupings) {
     + secondOptions + '</select></div>';
 }
 
+/* ERP-272：有界透视选择器（仅目录分组维度；行 / 列不同；与普通分组互斥由后端校验兜底） */
+function rccPivotHtml() {
+  const ds = rccCurrentDataset();
+  const dims = (ds && ds.groupingDimensions && ds.groupingDimensions.length) ? ds.groupingDimensions
+    : [{ key: 'customer', label: '按客户分组' }, { key: 'month', label: '按月份分组' }];
+  if (!dims || dims.length < 2) return '';
+  const p = RCC.pivot || { rowDimension: '', columnDimension: '' };
+  const rowOptions = '<option value="">不透视</option>'
+    + dims.map(d => '<option value="' + rccEsc(d.key) + '" ' + (d.key === p.rowDimension ? 'selected' : '')
+      + '>' + rccEsc(d.label || RCC_GROUP_LABELS[d.key] || d.key) + '</option>').join('');
+  const columnOptions = '<option value="">不透视</option>'
+    + dims.filter(d => d.key !== p.rowDimension).map(d => '<option value="' + rccEsc(d.key) + '" '
+      + (d.key === p.columnDimension ? 'selected' : '') + '>' + rccEsc(d.label || RCC_GROUP_LABELS[d.key] || d.key) + '</option>').join('');
+  return '<div class="rcc-pivot"><label>透视（有界：1 行维度 + 1 不同列维度 + 指标，最多 4 个指标）</label>'
+    + '<div>行维度：<select onchange="rccOnPivotDimension(\'row\', this.value)">' + rowOptions + '</select></div>'
+    + '<div>列维度：<select onchange="rccOnPivotDimension(\'column\', this.value)" ' + (p.rowDimension ? '' : 'disabled') + '>'
+    + columnOptions + '</select></div></div>';
+}
+
+function rccOnPivotDimension(axis, value) {
+  const key = String(value || '').trim();
+  RCC.pivot = RCC.pivot || { rowDimension: '', columnDimension: '' };
+  if (axis === 'row') {
+    RCC.pivot.rowDimension = key;
+    if (!key || RCC.pivot.columnDimension === key) RCC.pivot.columnDimension = '';
+  } else {
+    RCC.pivot.columnDimension = key;
+  }
+  RCC.page = 1;
+  rccTouch();
+  rccRenderDesigner();
+}
+
 /* 排序：仅目录白名单可排序字段（有限持久化键）；切换即重置页码并作废在途旧响应 */
 function rccSortingHtml(dataset) {
   const sortable = ((dataset && dataset.fields) || []).filter(f => f && !f.hidden && f.sortable);
@@ -617,6 +653,15 @@ function rccBuildRelations(state) {
     r.fields = r.fields.filter(f => allowed.has(f));
     return r.fields.length > 0;
   });
+}
+
+/* ERP-272：有界透视（一个行维度 + 一个不同列维度；维度只来自目录分组维度，指标复用 rccBuildAggregates） */
+function rccBuildPivot(state) {
+  const p = (state && state.pivot) || {};
+  const row = String(p.rowDimension || '').trim();
+  const column = String(p.columnDimension || '').trim();
+  if (!row || !column || row === column) return null;
+  return { schemaVersion: 1, rowDimension: row, columnDimension: column };
 }
 
 /* 受控关系选择器：仅目录 relation 白名单 + 允许字段，绝不渲染任意关系 / 联接 / SQL */
@@ -742,6 +787,43 @@ function rccMetricsHtml(preview) {
   return '<div class="rcc-metrics"><div class="rcc-metrics-title">指标汇总（当前预览页 · 非全量合计）</div>' + rows + '</div>';
 }
 
+/* ERP-272：透视结果矩阵（与 Excel / PDF 同一份轴 / 单元格 / 汇总 / 覆盖证据） */
+function rccPivotCellText(parts) {
+  if (!parts || !parts.length) return '';
+  const sorted = parts.slice().sort((a, b) => String(a.currency || '').localeCompare(String(b.currency || '')));
+  return sorted.map(p => {
+    const v = (p.value === null || p.value === undefined) ? '' : rccNumberText(p.value);
+    return p.currency ? (v === '' ? p.currency : p.currency + ' ' + v) : v;
+  }).join(' / ');
+}
+
+function rccPivotResultHtml(preview) {
+  const pivot = preview && preview.pivot;
+  if (!pivot || !(pivot.metrics || []).length) return '';
+  const dimLabels = { customer: '客户', month: '月份' };
+  const rowHead = dimLabels[pivot.rowDimension] || pivot.rowDimension;
+  const head = '<tr><th>' + rccEsc(rowHead) + '</th>'
+    + (pivot.columnAxis || []).map(c => '<th>' + rccEsc(c.label) + '</th>').join('') + '</tr>';
+  const blocks = (pivot.metrics || []).map(m => {
+    const byCell = {};
+    (m.cells || []).forEach(c => {
+      const k = c.rowIndex + ':' + c.columnIndex;
+      byCell[k] = byCell[k] || [];
+      byCell[k].push(c);
+    });
+    const body = (pivot.rowAxis || []).map((r, ri) => '<tr><td>' + rccEsc(r.label) + '</td>'
+      + (pivot.columnAxis || []).map((c, ci) => '<td>' + rccEsc(rccPivotCellText(byCell[ri + ':' + ci] || [])) + '</td>').join('')
+      + '</tr>').join('');
+    const unit = m.unit ? '（' + rccEsc(m.unit) + '）' : '';
+    const title = '<div class="rcc-pivot-metric"><b>' + rccEsc(m.label) + '（' + rccEsc(rccFunctionLabel(m.function)) + '）' + unit + '</b></div>';
+    const summary = '<div class="rcc-partition">已知 ' + rccEsc(m.knownCount) + ' · 缺失 ' + rccEsc(m.missingCount)
+      + ' · 来源 ' + rccEsc(m.sourceCount) + ' · 覆盖 ' + rccEsc(pivot.coverage || 'current-page') + '（非全量合计）</div>';
+    return title + '<div class="rcc-table-wrap"><table class="rcc-table"><thead>' + head
+      + '</thead><tbody>' + body + '</tbody></table></div>' + summary;
+  }).join('');
+  return '<div class="rcc-pivot-result"><div class="rcc-pivot-title">透视（当前页 · 非全量合计）</div>' + blocks + '</div>';
+}
+
 function rccDatasetLabel(key) {
   const ds = (RCC.datasets || []).find(d => d.datasetKey === key);
   return ds ? ds.label : key;
@@ -788,6 +870,7 @@ function rccRenderDesigner(html) {
     + '<div class="rcc-filters"><label>类型化筛选</label>' + rccFiltersHtml(RCC.filters, RCC.fields)
     + '<button type="button" class="btn" onclick="rccAddFilter()">+ 添加筛选</button></div>'
     + '<div class="rcc-grouping"><label>分组</label>' + rccGroupingHtml(ds.groupingDimensions, RCC.groupings) + '</div>'
+    + rccPivotHtml()
     + '<div class="rcc-sorting"><label>排序（仅持久化键）</label>' + rccSortingHtml(ds)
     + '<div class="rcc-hint">' + rccEsc(ds.sortingExplanation || '仅订单 / 发票原生键可排序') + '</div></div>'
     + rccMetricEditorHtml()
@@ -907,6 +990,7 @@ function rccSelectDataset(key, touch = true) {
   RCC.aggregates = [];
   RCC.relations = [];
   RCC.groupings = [];
+  RCC.pivot = { rowDimension: '', columnDimension: '' };
   RCC.sortFieldKey = '';
   RCC.sortDirection = 'asc';
   RCC.page = 1;
@@ -1001,6 +1085,7 @@ function rccNew() {
   RCC.computedColumns = [];
   RCC.aggregates = [];
   RCC.groupings = [];
+  RCC.pivot = { rowDimension: '', columnDimension: '' };
   RCC.sortFieldKey = '';
   RCC.sortDirection = 'asc';
   RCC.page = 1;
@@ -1044,6 +1129,10 @@ function rccApplyDefinition(def) {
     relationKey: String(r.relationKey || '').trim(),
     fields: ((r && r.fields) || []).map(f => String(f || '').trim()).filter(Boolean),
   })).filter(r => r.relationKey && r.fields.length);
+  RCC.pivot = {
+    rowDimension: String(((def && def.pivot) || {}).rowDimension || '').trim(),
+    columnDimension: String(((def && def.pivot) || {}).columnDimension || '').trim(),
+  };
 }
 
 async function rccLoadConfiguration(id) {
@@ -1535,6 +1624,11 @@ if (typeof module !== 'undefined' && module.exports) {
     rccFilterRowHtml,
     rccFiltersHtml,
     rccGroupingHtml,
+    rccBuildPivot,
+    rccPivotHtml,
+    rccOnPivotDimension,
+    rccPivotCellText,
+    rccPivotResultHtml,
     rccSortingHtml,
     rccOnSortField,
     rccOnSortDirection,

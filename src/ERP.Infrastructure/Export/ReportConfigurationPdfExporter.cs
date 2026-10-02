@@ -117,6 +117,7 @@ public static class ReportConfigurationPdfExporter
             DrawReport(document, preview, cancellationToken);
             DrawSubtotalSection(document, preview, cancellationToken);
             DrawMetricsSection(document, preview, cancellationToken);
+            DrawPivotSection(document, preview, cancellationToken);
 
             cancellationToken.ThrowIfCancellationRequested();
 
@@ -638,6 +639,126 @@ public static class ReportConfigurationPdfExporter
         {
             gfx.Dispose();
         }
+    }
+
+    // ==================== 透视矩阵（当前页、类型化轴 + 币种分区） ====================
+
+    private static void DrawPivotSection(PdfDocument document, ReportConfigurationPreviewDto preview, CancellationToken cancellationToken)
+    {
+        var pivot = preview.Pivot;
+        if (pivot is null || pivot.Metrics is null || pivot.Metrics.Count == 0)
+            return;
+
+        var titleFont = new XFont(FontFamily, TitleSize, XFontStyleEx.Bold);
+        var metaFont = new XFont(FontFamily, MetaSize, XFontStyleEx.Regular);
+        var headerFont = new XFont(FontFamily, HeaderSize, XFontStyleEx.Bold);
+        var cellFont = new XFont(FontFamily, CellSize, XFontStyleEx.Regular);
+
+        var borderPen = new XPen(XColor.FromArgb(0xC4, 0xC4, 0xC4), 0.4);
+        var headerBrush = new XSolidBrush(XColor.FromArgb(0xED, 0xED, 0xED));
+
+        var usableWidth = Mm(PageWidthMm - MarginLeftMm - MarginRightMm);
+        var lineHeight = Mm(DataLineHeightMm);
+
+        foreach (var metric in pivot.Metrics)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var columns = BuildPivotColumns(pivot);
+            var rows = BuildPivotRows(pivot, metric);
+
+            var gfx = NewPage(document);
+            try
+            {
+                var widths = ComputeSubtotalWidths(columns, rows, usableWidth);
+
+                var y = Mm(MarginTopMm);
+                gfx.DrawString("透视（当前页）", titleFont, XBrushes.Black,
+                    new XRect(Mm(MarginLeftMm), y, usableWidth, Mm(TitleHeightMm)), XStringFormats.TopCenter);
+                y += Mm(TitleHeightMm);
+
+                gfx.DrawString(
+                    $"{ReportConfigurationPivotRules.MetricTitle(metric)} · 仅当前预览页；金额按币种分区，绝不跨币种 / 单位相加，绝不等于全匹配合计。",
+                    metaFont, XBrushes.Black,
+                    new XRect(Mm(MarginLeftMm), y, usableWidth, Mm(MetaHeightMm)), XStringFormats.TopLeft);
+                y += Mm(MetaHeightMm + 2);
+
+                y = DrawColumnHeaders(gfx, headerFont, headerBrush, borderPen, columns, widths, y);
+
+                foreach (var row in rows)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+
+                    var height = RowHeightPoints(columns, widths, row, 0, lineHeight);
+                    DrawDataRow(gfx, cellFont, borderPen, columns, widths, row, 0, y, height, lineHeight);
+                    y += height;
+                }
+
+                gfx.DrawString(
+                    $"已知 {metric.KnownCount} · 缺失 {metric.MissingCount} · 来源 {metric.SourceCount} · 覆盖 {pivot.Coverage}（非全量合计）",
+                    metaFont, XBrushes.Black,
+                    new XRect(Mm(MarginLeftMm), y + Mm(2), usableWidth, Mm(DataLineHeightMm)), XStringFormats.TopLeft);
+            }
+            finally
+            {
+                gfx.Dispose();
+            }
+        }
+    }
+
+    /// <summary>透视矩阵表列（与 Excel「透视（当前页）」同口径）。</summary>
+    public static IReadOnlyList<ReportConfigurationColumnDto> BuildPivotColumns(ReportConfigurationPivotResultDto pivot)
+    {
+        var columns = new List<ReportConfigurationColumnDto>
+        {
+            new ReportConfigurationColumnDto(
+                "__pivotRow__",
+                ReportConfigurationGroupingRules.DimensionHeaderLabel(pivot.RowDimension),
+                ReportConfigurationConstants.TypeText,
+                null),
+        };
+
+        foreach (var column in pivot.ColumnAxis)
+            columns.Add(new ReportConfigurationColumnDto(column.Key, column.Label, ReportConfigurationConstants.TypeText, null));
+
+        return columns;
+    }
+
+    /// <summary>把透视单指标拍平为导出行（行轴标签 + 每列单元格文本；空交叉点留空）。</summary>
+    public static IReadOnlyList<Dictionary<string, object?>> BuildPivotRows(
+        ReportConfigurationPivotResultDto pivot,
+        ReportConfigurationPivotMetricDto metric)
+    {
+        var byCell = new Dictionary<(int Row, int Column), List<ReportConfigurationPivotCellDto>>();
+        foreach (var cell in metric.Cells)
+        {
+            var key = (cell.RowIndex, cell.ColumnIndex);
+            if (!byCell.TryGetValue(key, out var list))
+            {
+                list = new List<ReportConfigurationPivotCellDto>();
+                byCell[key] = list;
+            }
+            list.Add(cell);
+        }
+
+        var rows = new List<Dictionary<string, object?>>(pivot.RowAxis.Count);
+        for (var rowIndex = 0; rowIndex < pivot.RowAxis.Count; rowIndex++)
+        {
+            var row = new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["__pivotRow__"] = pivot.RowAxis[rowIndex].Label,
+            };
+
+            for (var columnIndex = 0; columnIndex < pivot.ColumnAxis.Count; columnIndex++)
+            {
+                byCell.TryGetValue((rowIndex, columnIndex), out var partitions);
+                row[pivot.ColumnAxis[columnIndex].Key] = ReportConfigurationPivotRules.FormatCellText(partitions);
+            }
+
+            rows.Add(row);
+        }
+
+        return rows;
     }
 
     // ==================== 绘制 ====================

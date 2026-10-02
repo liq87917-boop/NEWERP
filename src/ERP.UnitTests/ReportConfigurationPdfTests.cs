@@ -359,6 +359,47 @@ public class ReportConfigurationPdfTests
         Assert.Equal("2026年9月", metricRow["month"]);
     }
 
+    [Fact]
+    public void BuildPivotRows_行轴与单元格文本_与Excel同口径()
+    {
+        var pivot = new ReportConfigurationPivotResultDto
+        {
+            RowDimension = ReportConfigurationConstants.GroupCustomer,
+            ColumnDimension = ReportConfigurationConstants.GroupMonth,
+            RowAxis = new List<ReportConfigurationPivotAxisDto>
+            {
+                new() { Key = "1", Label = "客户 #1", SortKey = "1" },
+            },
+            ColumnAxis = new List<ReportConfigurationPivotAxisDto>
+            {
+                new() { Key = "m1", Label = "2026年9月", SortKey = "202609" },
+                new() { Key = "m2", Label = "2026年10月", SortKey = "202610" },
+            },
+        };
+        var metric = new ReportConfigurationPivotMetricDto
+        {
+            Key = "totalAmount",
+            Function = ReportConfigurationConstants.AggregateSum,
+            Label = "金额",
+            Unit = "原币金额",
+            Cells = new List<ReportConfigurationPivotCellDto>
+            {
+                new() { RowIndex = 0, ColumnIndex = 0, Currency = "USD", Value = 100m },
+                new() { RowIndex = 0, ColumnIndex = 1, Currency = "CNY", Value = 200m },
+            },
+        };
+
+        var columns = ReportConfigurationPdfExporter.BuildPivotColumns(pivot);
+        Assert.Equal("客户", columns[0].Label);
+        Assert.Equal("2026年9月", columns[1].Label);
+
+        var rows = ReportConfigurationPdfExporter.BuildPivotRows(pivot, metric);
+        var row = Assert.Single(rows);
+        Assert.Equal("客户 #1", row["__pivotRow__"]);
+        Assert.Equal("USD 100", row["m1"]);
+        Assert.Equal("CNY 200", row["m2"]);
+    }
+
     // ==================== 3. 字体缺失 / 渲染失败 ====================
 
     [Fact]

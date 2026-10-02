@@ -288,8 +288,13 @@ public sealed class ReportConfigurationExecutionService : IReportConfigurationEx
         // 分发执行（适配器内部再次走既有查询的菜单授权 + 数据范围，并保留币种 / 单位口径）
         var preview = await provider.PreviewAsync(definition, parameters, userId, cancellationToken);
         preview.Groupings = parameters.Groupings.ToList();
+
+        // 透视（ERP-272）：在指标汇总剥离隐藏依赖前，从当前页事实行构建有界透视结果（与普通行分离存储）。
+        if (definition.Pivot is not null)
+            preview.Pivot = ReportConfigurationPivotRules.Build(definition, dataset, preview.Rows, cancellationToken);
+
         ApplyMetrics(definition, dataset, parameters.Groupings, preview);
-        if (parameters.Groupings.Count >= 2)
+        if (parameters.Groupings.Count >= 2 || definition.Pivot is not null)
             StripCompositeDependencies(definition, preview);
         await ApplyRelationsAsync(definition, preview, userId, cancellationToken);
         preview.ConfigurationId = configurationId;

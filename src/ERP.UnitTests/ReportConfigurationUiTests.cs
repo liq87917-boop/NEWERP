@@ -55,7 +55,7 @@ public class ReportConfigurationUiTests
         Assert.Contains("function rccUnsupportedHtml(dataset)", js);
         Assert.Contains("为什么不支持", js);
         Assert.Contains("自定义公式：本阶段不支持", js);
-        Assert.Contains("透视表：本阶段不支持", js);
+        Assert.Contains("任意透视：本阶段不支持", js);
         Assert.Contains("跨数据集联接：本阶段不支持", js);
         Assert.DoesNotContain("共享：本阶段仅支持私有配置", js);   // 共享已是真实能力，不再列入不支持清单
         Assert.DoesNotContain("导出：本阶段不支持导出", js);   // 导出已成为真实能力，不再列入不支持清单
@@ -297,6 +297,24 @@ public class ReportConfigurationUiTests
         Assert.Contains("groupings: (state.groupings && state.groupings.length) ? state.groupings : ['none']", js);
         Assert.Contains("rccEffectiveGroupings(preview)", js);
         Assert.Contains("function rccEffectiveGroupings(preview)", js);
+    }
+
+    [Fact]
+    public void 透视_有界选择器与结果渲染接线_不自由透视()
+    {
+        var js = File.ReadAllText(Path.Combine(JsDirectory(), "report-configuration.js"));
+
+        Assert.Contains("function rccBuildPivot(state)", js);
+        Assert.Contains("pivot: rccBuildPivot(state)", js);
+        Assert.Contains("function rccPivotHtml()", js);
+        Assert.Contains("function rccOnPivotDimension(axis, value)", js);
+        Assert.Contains("行维度", js);
+        Assert.Contains("列维度", js);
+        Assert.Contains("function rccPivotResultHtml(preview)", js);
+        Assert.Contains("rccPivotResultHtml(preview)", js);
+        Assert.Contains("function rccPivotCellText(parts)", js);
+        Assert.Contains("透视（当前页 · 非全量合计）", js);
+        Assert.Contains("已知", js);
     }
 
     /// <summary>截取源码中两个锚点之间的片段，便于对单个函数做「不含某内容」的契约断言。</summary>

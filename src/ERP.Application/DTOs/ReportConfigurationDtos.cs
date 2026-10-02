@@ -281,6 +281,13 @@ public sealed class ReportConfigurationDefinition
 
     /// <summary>受控关系选择（ERP-268）：关系键 + 有限字段；旧定义不含此属性时向后兼容为空。</summary>
     public List<ReportConfigurationRelationSelection> Relations { get; set; } = new();
+
+    /// <summary>
+    /// 有界透视定义（ERP-272，可选；旧定义不含此属性时向后兼容为 null = 非透视）。
+    /// <para>只选择「一个行维度 + 一个不同的列维度」，并复用 <see cref="Aggregates"/> 作为选中的基础指标；</para>
+    /// <para>绝不承载任意公式 / SQL / 脚本 / 跨事实联接 / 全匹配合计。</para>
+    /// </summary>
+    public ReportConfigurationPivotDefinition? Pivot { get; set; }
 }
 
 /// <summary>类型化筛选：字段键 + 有限操作符 + 与字段类型匹配的值。</summary>
@@ -712,6 +719,9 @@ public sealed class ReportConfigurationPreviewDto
     /// <summary>选中的指标汇总（仅用户已选择的聚合；按当前页计算，分组 + 币种分区，绝不追加全匹配合计）</summary>
     public List<ReportConfigurationMetricResultDto> Metrics { get; set; } = new();
 
+    /// <summary>有界透视结果（ERP-272，仅透视定义时非空；与普通行 / 指标汇总分离存储，绝不混入全匹配合计）</summary>
+    public ReportConfigurationPivotResultDto? Pivot { get; set; }
+
     /// <summary>计算列证据（有界：键 / 标签 / 单位 / 未知值口径 / 依赖）；无计算列为空</summary>
     public List<ReportConfigurationComputedColumnEvidenceDto> ComputedColumns { get; set; } = new();
 
@@ -723,6 +733,131 @@ public sealed class ReportConfigurationPreviewDto
 
     /// <summary>证据上下文（数据集键 / 粒度 / 币种单位口径 / 只读 / 覆盖口径）</summary>
     public ReportConfigurationEvidenceContextDto? Evidence { get; set; }
+}
+
+// ==================== ERP-272 Stage 1：有界透视契约 ====================
+
+/// <summary>
+/// 有界透视定义（schema 版本化，与 <see cref="ReportConfigurationDefinition"/> 一同持久化）：
+/// 一个授权行维度 + 一个不同的授权列维度；选中指标复用 <see cref="ReportConfigurationDefinition.Aggregates"/>。
+/// <para>维度仅限数据集授权分组维度（初始 customer / month）；指标仅限已授权可聚合字段 + 有限函数，最多 4 个。</para>
+/// </summary>
+public sealed class ReportConfigurationPivotDefinition
+{
+    /// <summary>透视 schema 版本（只接受当前受支持版本）</summary>
+    public int SchemaVersion { get; set; } = 1;
+
+    /// <summary>行维度键（必须与列维度不同；仅限数据集授权分组维度）</summary>
+    public string RowDimension { get; set; } = string.Empty;
+
+    /// <summary>列维度键（必须与行维度不同；仅限数据集授权分组维度）</summary>
+    public string ColumnDimension { get; set; } = string.Empty;
+}
+
+/// <summary>透视轴桶（行 / 列维度的一个稳定类型化取值；未知桶显式，绝不并入其它维度）。</summary>
+public sealed class ReportConfigurationPivotAxisDto
+{
+    /// <summary>类型化轴键（长度前缀复合键，避免碰撞 / 注入）</summary>
+    public string Key { get; set; } = string.Empty;
+
+    /// <summary>展示标签（转义由渲染层负责）</summary>
+    public string Label { get; set; } = string.Empty;
+
+    /// <summary>确定性排序键（未知桶置后）</summary>
+    public string SortKey { get; set; } = string.Empty;
+
+    /// <summary>有序维度值（单维度：仅一个元素，携带键 / 标签 / 稳定值 / 是否未知）</summary>
+    public List<ReportConfigurationGroupDimensionValueDto> Dimensions { get; set; } = new();
+
+    /// <summary>是否「全未知」桶（维度值缺失 / 非法）</summary>
+    public bool IsUnknown { get; set; }
+}
+
+/// <summary>透视单元格（稀疏：空交叉点不产生单元格 = 无事实，null 聚合值 + 已知计数 0）。</summary>
+public sealed class ReportConfigurationPivotCellDto
+{
+    /// <summary>行轴索引</summary>
+    public int RowIndex { get; set; }
+
+    /// <summary>列轴索引</summary>
+    public int ColumnIndex { get; set; }
+
+    /// <summary>币种（货币指标按币种分区；非货币指标为空）</summary>
+    public string? Currency { get; set; }
+
+    /// <summary>指标值（sum / count / avg / min / max；空 / 全 null / 溢出为 null，绝不静默置零）</summary>
+    public decimal? Value { get; set; }
+
+    /// <summary>已知值条数（参与计算的非 null 值条数；count = 该值）</summary>
+    public int KnownCount { get; set; }
+
+    /// <summary>缺失值条数（null / 缺失）</summary>
+    public int MissingCount { get; set; }
+
+    /// <summary>来源条数（该交叉点 × 币种的总行数 = 已知 + 缺失）</summary>
+    public int SourceCount { get; set; }
+
+    /// <summary>显式原因（未知币种 / 数值溢出等）；无异常为 null</summary>
+    public string? Reason { get; set; }
+}
+
+/// <summary>透视单指标矩阵（当前页：行 × 列 × 币种分区；稀疏单元格列表）。</summary>
+public sealed class ReportConfigurationPivotMetricDto
+{
+    /// <summary>字段键（稳定）</summary>
+    public string Key { get; set; } = string.Empty;
+
+    /// <summary>聚合函数（sum / count / avg / min / max）</summary>
+    public string Function { get; set; } = string.Empty;
+
+    /// <summary>字段中文标签</summary>
+    public string Label { get; set; } = string.Empty;
+
+    /// <summary>单位（原币金额 / % / 空）</summary>
+    public string? Unit { get; set; }
+
+    /// <summary>币种行为（currency-partition / none）</summary>
+    public string CurrencyBehavior { get; set; } = string.Empty;
+
+    /// <summary>稀疏单元格（仅存在事实的交叉点；空交叉点 = 无事实，绝不造 0 / 全量合计）</summary>
+    public List<ReportConfigurationPivotCellDto> Cells { get; set; } = new();
+
+    /// <summary>该指标全部单元格已知值总条数</summary>
+    public int KnownCount { get; set; }
+
+    /// <summary>该指标全部单元格缺失值总条数</summary>
+    public int MissingCount { get; set; }
+
+    /// <summary>该指标全部单元格来源总条数</summary>
+    public int SourceCount { get; set; }
+}
+
+/// <summary>
+/// 有界透视结果（仅当前预览页；绝不声称全匹配合计 / 全局报表合计）。
+/// <para>行 / 列轴有序确定性；单元格按币种分区，绝不跨币种 / 单位合并；空交叉点无单元格。</para>
+/// </summary>
+public sealed class ReportConfigurationPivotResultDto
+{
+    /// <summary>行维度键</summary>
+    public string RowDimension { get; set; } = string.Empty;
+
+    /// <summary>列维度键</summary>
+    public string ColumnDimension { get; set; } = string.Empty;
+
+    /// <summary>行轴（按排序键升序）</summary>
+    public List<ReportConfigurationPivotAxisDto> RowAxis { get; set; } = new();
+
+    /// <summary>列轴（按排序键升序）</summary>
+    public List<ReportConfigurationPivotAxisDto> ColumnAxis { get; set; } = new();
+
+    /// <summary>选中指标矩阵（每个指标一个稀疏矩阵）</summary>
+    public List<ReportConfigurationPivotMetricDto> Metrics { get; set; } = new();
+
+    /// <summary>参与透视的当前页来源事实行数（与分页命中总数分离，绝不声称全局合计）</summary>
+    public int SourceRowCount { get; set; }
+
+    /// <summary>覆盖口径（显式 current-page）</summary>
+    public string Coverage { get; set; } = ReportConfigurationConstants.CoverageCurrentPage;
 }
 
 /// <summary>重命名私有报表配置请求契约</summary>

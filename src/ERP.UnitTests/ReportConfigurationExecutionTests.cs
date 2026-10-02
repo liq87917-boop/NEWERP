@@ -558,4 +558,43 @@ public class ReportConfigurationExecutionTests
         Assert.DoesNotContain(preview.Columns, c => c.Key == "totalAmount");
         Assert.All(preview.Rows, r => Assert.False(r.ContainsKey("totalAmount")));
     }
+
+    [Fact]
+    public async Task PreviewAsync_透视_构建有界矩阵且与普通行分离()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedPrivilegedUser(db, "so-pivot", "sales-order");
+        var customer1 = SeedCustomer(db, "C1", "客户一");
+        var customer2 = SeedCustomer(db, "C2", "客户二");
+        SeedOrder(db, "SO-1", customer1.Id, Currency.USD, 100m, new DateTime(2026, 9, 1));
+        SeedOrder(db, "SO-2", customer1.Id, Currency.USD, 50m, new DateTime(2026, 10, 1));
+        SeedOrder(db, "SO-3", customer2.Id, Currency.CNY, 200m, new DateTime(2026, 9, 1));
+
+        var def = SalesOrderDefinition(fields: new[] { "orderNo" });
+        def.Aggregates = new List<ReportConfigurationAggregate>
+        {
+            new() { Function = ReportConfigurationConstants.AggregateSum, FieldKey = "totalAmount" },
+        };
+        def.Pivot = new ReportConfigurationPivotDefinition
+        {
+            SchemaVersion = 1,
+            RowDimension = ReportConfigurationConstants.GroupCustomer,
+            ColumnDimension = ReportConfigurationConstants.GroupMonth,
+        };
+
+        var service = BuildService(db);
+        var created = await service.CreateAsync(user, SaveDto("透视报表", def));
+        var execution = BuildExecution(db);
+        var preview = await execution.PreviewAsync(user, new ReportConfigurationPreviewRequest { ConfigurationId = created.Id });
+
+        Assert.NotNull(preview.Pivot);
+        Assert.Equal(2, preview.Pivot.RowAxis.Count);
+        Assert.Equal(2, preview.Pivot.ColumnAxis.Count);
+
+        var metric = Assert.Single(preview.Pivot.Metrics);
+        Assert.Equal(3, metric.Cells.Count);
+
+        Assert.DoesNotContain(preview.Columns, c => c.Key == "totalAmount");
+        Assert.All(preview.Rows, r => Assert.False(r.ContainsKey("totalAmount")));
+    }
 }

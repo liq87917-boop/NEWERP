@@ -202,6 +202,7 @@ public static class ReportConfigurationRules
         ValidateFilters(definition, dataset);
         ValidateGrouping(definition, dataset);
         ValidateAggregates(definition, dataset);
+        ReportConfigurationPivotRules.Validate(definition, dataset);
         ValidateCapabilities(definition, dataset);
         ReportConfigurationFormulaRules.ValidateComputedColumns(definition, dataset);
         ValidatePresentation(definition, dataset);

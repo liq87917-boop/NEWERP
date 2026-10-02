@@ -525,4 +525,58 @@ public class ReportConfigurationExcelTests
         Assert.Contains("客户 #1", text);
         Assert.Contains("2026年9月", text);
     }
+
+    [Fact]
+    public void Build_透视矩阵_渲染轴标签与单元格()
+    {
+        var preview = MixedPreview();
+        preview.Pivot = new ReportConfigurationPivotResultDto
+        {
+            RowDimension = ReportConfigurationConstants.GroupCustomer,
+            ColumnDimension = ReportConfigurationConstants.GroupMonth,
+            RowAxis = new List<ReportConfigurationPivotAxisDto>
+            {
+                new() { Key = "1", Label = "客户 #1", SortKey = "1" },
+                new() { Key = "2", Label = "客户 #2", SortKey = "2" },
+            },
+            ColumnAxis = new List<ReportConfigurationPivotAxisDto>
+            {
+                new() { Key = "m1", Label = "2026年9月", SortKey = "202609" },
+                new() { Key = "m2", Label = "2026年10月", SortKey = "202610" },
+            },
+            Metrics = new List<ReportConfigurationPivotMetricDto>
+            {
+                new()
+                {
+                    Key = "totalAmount",
+                    Function = ReportConfigurationConstants.AggregateSum,
+                    Label = "金额",
+                    Unit = "原币金额",
+                    CurrencyBehavior = ReportConfigurationMetricRules.CurrencyBehaviorPartition,
+                    KnownCount = 2,
+                    MissingCount = 0,
+                    SourceCount = 2,
+                    Cells = new List<ReportConfigurationPivotCellDto>
+                    {
+                        new() { RowIndex = 0, ColumnIndex = 0, Currency = "USD", Value = 100m, KnownCount = 1 },
+                        new() { RowIndex = 1, ColumnIndex = 1, Currency = "CNY", Value = 200m, KnownCount = 1 },
+                    },
+                },
+            },
+            SourceRowCount = 2,
+            Coverage = ReportConfigurationConstants.CoverageCurrentPage,
+        };
+
+        using var workbook = OpenWorkbook(new ReportConfigurationExcelExporter().Build(preview));
+        var sheet = workbook.GetSheet(ReportConfigurationExcelExporter.PivotSheetName);
+        Assert.NotNull(sheet);
+        Assert.Equal(ReportConfigurationExcelExporter.PivotSheetName, sheet.SheetName);
+
+        var text = AllSheetText(workbook);
+        Assert.Contains("客户 #1", text);
+        Assert.Contains("2026年9月", text);
+        Assert.Contains("USD 100", text);
+        Assert.Contains("CNY 200", text);
+        Assert.Contains("已知 2", text);
+    }
 }

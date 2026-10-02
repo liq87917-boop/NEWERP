@@ -137,9 +137,14 @@ public sealed class SalesOrderReportConfigurationDatasetProvider : IReportConfig
 
         var compositeGroupings = ReportConfigurationGroupingRules.NormalizeGroupingKeys(parameters.Groupings);
         var groupBy = DynamicSalesOrderReportRules.NormalizeGroupBy(parameters.GroupBy);
-        var compositeFieldKeys = compositeGroupings.Count >= 2
-            ? CompositeFieldKeys(compositeGroupings).Concat(new[] { "currency", "totalAmount" }).ToList()
-            : null;
+        IReadOnlyList<string> pivotDimensionKeys = definition.Pivot is null
+            ? Array.Empty<string>()
+            : CompositeFieldKeys(new[] { definition.Pivot.RowDimension, definition.Pivot.ColumnDimension });
+        List<string>? compositeFieldKeys = null;
+        if (compositeGroupings.Count >= 2)
+            compositeFieldKeys = CompositeFieldKeys(compositeGroupings).Concat(new[] { "currency", "totalAmount" }).ToList();
+        else if (pivotDimensionKeys.Count > 0)
+            compositeFieldKeys = pivotDimensionKeys.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
 
         var request = new DynamicSalesOrderReportRequest
         {
@@ -554,9 +559,14 @@ public sealed class ReceivableReportConfigurationDatasetProvider : IReportConfig
 
         var compositeGroupings = ReportConfigurationGroupingRules.NormalizeGroupingKeys(parameters.Groupings);
         var groupBy = DynamicReceivableReportRules.NormalizeGroupBy(parameters.GroupBy);
-        var compositeFieldKeys = compositeGroupings.Count >= 2
-            ? CompositeFieldKeys(compositeGroupings).Concat(new[] { "currency", "grossAmount" }).ToList()
-            : null;
+        IReadOnlyList<string> pivotDimensionKeys = definition.Pivot is null
+            ? Array.Empty<string>()
+            : CompositeFieldKeys(new[] { definition.Pivot.RowDimension, definition.Pivot.ColumnDimension });
+        List<string>? compositeFieldKeys = null;
+        if (compositeGroupings.Count >= 2)
+            compositeFieldKeys = CompositeFieldKeys(compositeGroupings).Concat(new[] { "currency", "grossAmount" }).ToList();
+        else if (pivotDimensionKeys.Count > 0)
+            compositeFieldKeys = pivotDimensionKeys.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
 
         var request = new DynamicReceivableReportRequest
         {
