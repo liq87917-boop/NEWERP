@@ -1,0 +1,76 @@
+{
+  "id": "ERP-255",
+  "title": "Summarize all matching scoped loading-list evidence by calendar day",
+  "description": "Users in the existing container statistics designer see full matching daily and period evidence summaries alongside current detail page. Add typed summary DTO and pure DynamicContainerStatsSummaryRules, attach Summary to preview DTO without breaking current detail constructors. Build from full bounded authorized ContainerStatsItem sequence before field projection/pagination, no extra reads and no client rows. Each date sorted ascending: evidence-bucket count, approved loading-list count, missing-container-number list count and separate signed recorded cartons/kg/m3 totals; period totals use same facts. Preserve date/exact raw-number grouping and blank-list identity, including raw number '#1' versus blank list ID 1 key collision; ensure disjoint buckets and truthful missing-number counts using typed/disambiguated identity in existing evidence rules if required. Do not total bucket AuthorizedCustomerCount or infer globally distinct customers. Empty summary has no daily rows and explicit no-evidence context; zero recorded totals distinguish no evidence from known recorded zero. Unknown utilization/capacity/type/shipping reasons, normalized dates/filters/full matching coverage/scoped counts/source cap/separate units and grouping basis remain mandatory even hidden detail fields. UI separates full summary from current-page details, recalculates on filters, clears stale summary on error and escapes text. Existing detail Excel/PDF stay current-page detail exports; dedicated summary exports follow separate dependent tasks. Development only, readonly increments in existing container-stats report architecture. Reuse current identity/container-stats menu and freshly resolved SalespersonDataScopeService customer scope on every preview/download; validated customer/raw-number/date filters intersect permission, never expand it. Only approved nondeleted ContainerLoadingList persisted header evidence, dates <=366 inclusive calendar days with whole end day via next-day exclusive overflow-safe boundary, stable Take(501) probe after all source predicates, reject >500 matching authorized headers. No client identity/scope/rows/totals or cached preview as authority. Recorded cartons/kg/m3 are signed list-header measures, not actual shipment, stock-out, physical container totals, revenue or known capacity/type; never infer utilization from 68m3 or scoped customer count. Never add unlike units or bucket customer counts into global unique-customer claims. Existing OperationLogMiddleware HTTP audit, no business writes/audit entities. No new domain entities or persistence/schema/mapping changes required: current ContainerLoadingList already has all read fields. No migrations, schema/view/stored-procedure changes, arbitrary/model SQL, real database execution, production deployment, irreversible data operations, credentials/secrets/.env/config/package/DI changes, XAUUSD/NEWAPP or unrelated refactors. Preserve uncommitted work. Focused in-memory service/controller/export and UI source-contract tests plus configured safe Release restore/build/test; unavailable real database/browser validation is environment-blocked, never fabricated passed.",
+  "depends_on": [
+    "ERP-254"
+  ],
+  "risk_level": "medium",
+  "priority": "P1",
+  "acceptance_criteria": [
+    "Full bounded authorized evidence produces stable daily and period counts and signed separate-unit totals before detail pagination, with distinct blank-list/raw-number identities and no false unique-customer or physical-container totals.",
+    "Preview exposes typed full-match summaries and mandatory date/filter/scope/source/unit/unknown-evidence context on every page and field selection, with explicit no-evidence semantics and fail-closed authorization or source overflow.",
+    "Existing designer shows separate daily/period summaries, preserves detail paging and clears stale data on failure; tests cover cross-page totals, empty/signed values, blank/raw-key collisions, revoked scope and cap boundaries, and safe build/test passes."
+  ],
+  "criterion_path_map": {
+    "Full bounded authorized evidence produces stable daily and period counts and signed separate-unit totals before detail pagination, with distinct blank-list/raw-number identities and no false unique-customer or physical-container totals.": [
+      "src/ERP.Application/DTOs/DynamicContainerStatsReportDtos.cs",
+      "src/ERP.Application/Services/DynamicContainerStatsSummaryRules.cs",
+      "src/ERP.Application/Services/DynamicContainerStatsReportRules.cs",
+      "src/ERP.Application/Services/ReportService.Extra.cs",
+      "src/ERP.Application/Interfaces/ReportDtos.cs",
+      "src/ERP.Application/Services/ContainerStatsEvidenceRules.cs",
+      "src/ERP.UnitTests/DynamicContainerStatsSummaryTests.cs",
+      "src/ERP.UnitTests/ContainerStatsEvidenceTests.cs"
+    ],
+    "Preview exposes typed full-match summaries and mandatory date/filter/scope/source/unit/unknown-evidence context on every page and field selection, with explicit no-evidence semantics and fail-closed authorization or source overflow.": [
+      "src/ERP.Application/DTOs/DynamicContainerStatsReportDtos.cs",
+      "src/ERP.Application/Services/DynamicContainerStatsReportRules.cs",
+      "src/ERP.Api/Controllers/DynamicContainerStatsReportController.cs",
+      "src/ERP.UnitTests/DynamicContainerStatsSummaryTests.cs",
+      "src/ERP.UnitTests/DynamicContainerStatsReportTests.cs"
+    ],
+    "Existing designer shows separate daily/period summaries, preserves detail paging and clears stale data on failure; tests cover cross-page totals, empty/signed values, blank/raw-key collisions, revoked scope and cap boundaries, and safe build/test passes.": [
+      "src/ERP.Api/wwwroot/js/reports.js",
+      "src/ERP.UnitTests/DynamicContainerStatsReportUiTests.cs",
+      "src/ERP.UnitTests/DynamicContainerStatsSummaryTests.cs",
+      "src/ERP.UnitTests/ContainerStatsEvidenceTests.cs",
+      "src/ERP.UnitTests/DynamicContainerStatsReportTests.cs",
+      "src/ERP.UnitTests/ContainerStatsScopeTests.cs",
+      "src/ERP.UnitTests/ContainerStatsQueryBoundsTests.cs"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Application/DTOs/DynamicContainerStatsReportDtos.cs",
+    "src/ERP.Application/Services/DynamicContainerStatsSummaryRules.cs",
+    "src/ERP.Application/Services/DynamicContainerStatsReportRules.cs",
+    "src/ERP.Application/Services/ReportService.Extra.cs",
+    "src/ERP.Application/Interfaces/ReportDtos.cs",
+    "src/ERP.Application/Services/ContainerStatsEvidenceRules.cs",
+    "src/ERP.UnitTests/DynamicContainerStatsSummaryTests.cs",
+    "src/ERP.UnitTests/ContainerStatsEvidenceTests.cs",
+    "src/ERP.Api/Controllers/DynamicContainerStatsReportController.cs",
+    "src/ERP.UnitTests/DynamicContainerStatsReportTests.cs",
+    "src/ERP.Api/wwwroot/js/reports.js",
+    "src/ERP.UnitTests/DynamicContainerStatsReportUiTests.cs",
+    "src/ERP.UnitTests/ContainerStatsScopeTests.cs",
+    "src/ERP.UnitTests/ContainerStatsQueryBoundsTests.cs"
+  ],
+  "status": "pending",
+  "max_attempts": 3,
+  "attempts": 0,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only bounded scoped report feature"
+  },
+  "created_at": "2026-10-02T12:39:39.147976Z"
+}

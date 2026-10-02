@@ -1,0 +1,67 @@
+{
+  "id": "ERP-257",
+  "title": "Download all matching daily loading-list evidence summaries as Chinese PDF",
+  "description": "Add separately labelled summary PDF download and POST export-summary-pdf to existing controller, rebuild fresh bounded authorized full-match Summary from same validated request independent of detail fields/current page. Narrow DynamicContainerStatsSummaryPdfExporter uses installed PDFsharp and current local SimHei resolver through direct call, no font/package/config/DI writes; allow existing detail PDF exporter only for smallest needed reuse of existing font/layout helper, preserving its page-only behavior. Fixed daily summary columns date,bucket/list/missing-number-list counts and signed recorded cartons/kg/m3, separate period totals, never customer/container detail or global distinct-customer totals. Chinese headings and mandatory date/filter/all-match coverage/scope/source cap/unit/grouping/unknown actual capacity/type/shipping context; stable daily order and repeated table headers. Paginate/wrap within margins using measured layout, repeat date identity on column splits if needed, no clipped numbers or concealed daily/period evidence. Empty evidence explicit, zero and negative distinct; unavailable Chinese font/render/layout failure rejects output. Existing detail PDF download stays current-page. Test generated PDF bytes/text/page structure where supported and layout/renderer inputs, not screenshot/browser-only claims. Development only, readonly increments in existing container-stats report architecture. Reuse current identity/container-stats menu and freshly resolved SalespersonDataScopeService customer scope on every preview/download; validated customer/raw-number/date filters intersect permission, never expand it. Only approved nondeleted ContainerLoadingList persisted header evidence, dates <=366 inclusive calendar days with whole end day via next-day exclusive overflow-safe boundary, stable Take(501) probe after all source predicates, reject >500 matching authorized headers. No client identity/scope/rows/totals or cached preview as authority. Recorded cartons/kg/m3 are signed list-header measures, not actual shipment, stock-out, physical container totals, revenue or known capacity/type; never infer utilization from 68m3 or scoped customer count. Never add unlike units or bucket customer counts into global unique-customer claims. Existing OperationLogMiddleware HTTP audit, no business writes/audit entities. No new domain entities or persistence/schema/mapping changes required: current ContainerLoadingList already has all read fields. No migrations, schema/view/stored-procedure changes, arbitrary/model SQL, real database execution, production deployment, irreversible data operations, credentials/secrets/.env/config/package/DI changes, XAUUSD/NEWAPP or unrelated refactors. Preserve uncommitted work. Focused in-memory service/controller/export and UI source-contract tests plus configured safe Release restore/build/test; unavailable real database/browser validation is environment-blocked, never fabricated passed.",
+  "depends_on": [
+    "ERP-256"
+  ],
+  "risk_level": "low",
+  "priority": "P1",
+  "acceptance_criteria": [
+    "Dedicated summary PDF endpoint rebuilds full-match evidence after fresh identity/menu/scope and request validation, independent of detail page/selection, and returns no file on revocation, overflow or rendering failure.",
+    "Chinese PDF preserves fixed daily/period summary semantics, signed separate units and mandatory full coverage/unknown-evidence context with readable repeated headers and explicit font/layout errors.",
+    "Existing UI retains request state and reports errors for separate summary PDF download; PDF/controller/UI tests cover multi-page dates, empty/signed evidence, missing-number counts and fresh scope/cap checks, and safe build/test passes."
+  ],
+  "criterion_path_map": {
+    "Dedicated summary PDF endpoint rebuilds full-match evidence after fresh identity/menu/scope and request validation, independent of detail page/selection, and returns no file on revocation, overflow or rendering failure.": [
+      "src/ERP.Api/Controllers/DynamicContainerStatsReportController.cs",
+      "src/ERP.Application/DTOs/DynamicContainerStatsReportDtos.cs",
+      "src/ERP.Application/Services/DynamicContainerStatsReportRules.cs",
+      "src/ERP.UnitTests/DynamicContainerStatsSummaryPdfTests.cs"
+    ],
+    "Chinese PDF preserves fixed daily/period summary semantics, signed separate units and mandatory full coverage/unknown-evidence context with readable repeated headers and explicit font/layout errors.": [
+      "src/ERP.Infrastructure/Export/DynamicContainerStatsSummaryPdfExporter.cs",
+      "src/ERP.Infrastructure/Export/DynamicContainerStatsPdfExporter.cs",
+      "src/ERP.Application/DTOs/DynamicContainerStatsReportDtos.cs",
+      "src/ERP.Application/Services/DynamicContainerStatsSummaryRules.cs",
+      "src/ERP.UnitTests/DynamicContainerStatsSummaryPdfTests.cs"
+    ],
+    "Existing UI retains request state and reports errors for separate summary PDF download; PDF/controller/UI tests cover multi-page dates, empty/signed evidence, missing-number counts and fresh scope/cap checks, and safe build/test passes.": [
+      "src/ERP.Api/wwwroot/js/reports.js",
+      "src/ERP.UnitTests/DynamicContainerStatsReportUiTests.cs",
+      "src/ERP.UnitTests/DynamicContainerStatsSummaryPdfTests.cs",
+      "src/ERP.UnitTests/DynamicContainerStatsSummaryTests.cs",
+      "src/ERP.UnitTests/DynamicContainerStatsReportTests.cs"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/DynamicContainerStatsReportController.cs",
+    "src/ERP.Application/DTOs/DynamicContainerStatsReportDtos.cs",
+    "src/ERP.Application/Services/DynamicContainerStatsReportRules.cs",
+    "src/ERP.UnitTests/DynamicContainerStatsSummaryPdfTests.cs",
+    "src/ERP.Infrastructure/Export/DynamicContainerStatsSummaryPdfExporter.cs",
+    "src/ERP.Infrastructure/Export/DynamicContainerStatsPdfExporter.cs",
+    "src/ERP.Application/Services/DynamicContainerStatsSummaryRules.cs",
+    "src/ERP.Api/wwwroot/js/reports.js",
+    "src/ERP.UnitTests/DynamicContainerStatsReportUiTests.cs",
+    "src/ERP.UnitTests/DynamicContainerStatsSummaryTests.cs",
+    "src/ERP.UnitTests/DynamicContainerStatsReportTests.cs"
+  ],
+  "status": "pending",
+  "max_attempts": 3,
+  "attempts": 0,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only bounded scoped report feature"
+  },
+  "created_at": "2026-10-02T12:39:39.149313Z"
+}

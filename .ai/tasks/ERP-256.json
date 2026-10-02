@@ -1,0 +1,65 @@
+{
+  "id": "ERP-256",
+  "title": "Export all matching daily loading-list evidence summaries to Excel",
+  "description": "Add separate summary Excel download in the existing designer and POST export-summary on DynamicContainerStatsReportController. Revalidate current request and fresh permissions; reuse BuildPageAsync full-match Summary or shared validated source, independent of current page, selected detail columns and posted/cached totals. Direct narrow DynamicContainerStatsSummaryExcelExporter with existing NPOI, no registration changes. Fixed daily sheet: date, evidence-bucket/list/missing-number-list counts and signed recorded cartons/kg/m3 each separately; separate period totals/context sheet. Do not append customer/container/list detail rows or global unique-customer totals. Dates/numeric counts/signed measures use appropriate cells, zero and negative retained without currency formatting; dangerous formula-like filter/context strings are literal text. Mandatory normalized dates/filters/full coverage/scope/source cap/units/grouping and unknown capacity/type/shipping disclaimers independent of hidden detail fields. Empty evidence workbook explicitly labelled, overflow/revoked authorization/invalid input/export failure produces no file. Separate summary-download label preserves fields/filters/current detail page and reports errors; current-page detail Excel unchanged. Development only, readonly increments in existing container-stats report architecture. Reuse current identity/container-stats menu and freshly resolved SalespersonDataScopeService customer scope on every preview/download; validated customer/raw-number/date filters intersect permission, never expand it. Only approved nondeleted ContainerLoadingList persisted header evidence, dates <=366 inclusive calendar days with whole end day via next-day exclusive overflow-safe boundary, stable Take(501) probe after all source predicates, reject >500 matching authorized headers. No client identity/scope/rows/totals or cached preview as authority. Recorded cartons/kg/m3 are signed list-header measures, not actual shipment, stock-out, physical container totals, revenue or known capacity/type; never infer utilization from 68m3 or scoped customer count. Never add unlike units or bucket customer counts into global unique-customer claims. Existing OperationLogMiddleware HTTP audit, no business writes/audit entities. No new domain entities or persistence/schema/mapping changes required: current ContainerLoadingList already has all read fields. No migrations, schema/view/stored-procedure changes, arbitrary/model SQL, real database execution, production deployment, irreversible data operations, credentials/secrets/.env/config/package/DI changes, XAUUSD/NEWAPP or unrelated refactors. Preserve uncommitted work. Focused in-memory service/controller/export and UI source-contract tests plus configured safe Release restore/build/test; unavailable real database/browser validation is environment-blocked, never fabricated passed.",
+  "depends_on": [
+    "ERP-255"
+  ],
+  "risk_level": "low",
+  "priority": "P1",
+  "acceptance_criteria": [
+    "Dedicated summary Excel endpoint revalidates fresh identity/menu/customer scope and current input, rebuilding full-match summaries independent of selected fields/detail page and rejecting revocation, invalid input or overflow.",
+    "Workbook contains fixed daily summary and separate period context, numeric signed unit measures/counts and literal formula-safe context, with mandatory full coverage and no appended business detail or unsupported totals.",
+    "Existing page offers separately labelled summary Excel download and retains detail state on success/failure; workbook/controller/UI tests cover multiple pages, empty evidence, signed values, missing numbers and permission/source limits, and safe build/test passes."
+  ],
+  "criterion_path_map": {
+    "Dedicated summary Excel endpoint revalidates fresh identity/menu/customer scope and current input, rebuilding full-match summaries independent of selected fields/detail page and rejecting revocation, invalid input or overflow.": [
+      "src/ERP.Api/Controllers/DynamicContainerStatsReportController.cs",
+      "src/ERP.Application/DTOs/DynamicContainerStatsReportDtos.cs",
+      "src/ERP.Application/Services/DynamicContainerStatsReportRules.cs",
+      "src/ERP.UnitTests/DynamicContainerStatsSummaryExcelTests.cs"
+    ],
+    "Workbook contains fixed daily summary and separate period context, numeric signed unit measures/counts and literal formula-safe context, with mandatory full coverage and no appended business detail or unsupported totals.": [
+      "src/ERP.Infrastructure/Export/DynamicContainerStatsSummaryExcelExporter.cs",
+      "src/ERP.Application/DTOs/DynamicContainerStatsReportDtos.cs",
+      "src/ERP.Application/Services/DynamicContainerStatsSummaryRules.cs",
+      "src/ERP.UnitTests/DynamicContainerStatsSummaryExcelTests.cs"
+    ],
+    "Existing page offers separately labelled summary Excel download and retains detail state on success/failure; workbook/controller/UI tests cover multiple pages, empty evidence, signed values, missing numbers and permission/source limits, and safe build/test passes.": [
+      "src/ERP.Api/wwwroot/js/reports.js",
+      "src/ERP.UnitTests/DynamicContainerStatsReportUiTests.cs",
+      "src/ERP.UnitTests/DynamicContainerStatsSummaryExcelTests.cs",
+      "src/ERP.UnitTests/DynamicContainerStatsSummaryTests.cs",
+      "src/ERP.UnitTests/DynamicContainerStatsReportTests.cs"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/DynamicContainerStatsReportController.cs",
+    "src/ERP.Application/DTOs/DynamicContainerStatsReportDtos.cs",
+    "src/ERP.Application/Services/DynamicContainerStatsReportRules.cs",
+    "src/ERP.UnitTests/DynamicContainerStatsSummaryExcelTests.cs",
+    "src/ERP.Infrastructure/Export/DynamicContainerStatsSummaryExcelExporter.cs",
+    "src/ERP.Application/Services/DynamicContainerStatsSummaryRules.cs",
+    "src/ERP.Api/wwwroot/js/reports.js",
+    "src/ERP.UnitTests/DynamicContainerStatsReportUiTests.cs",
+    "src/ERP.UnitTests/DynamicContainerStatsSummaryTests.cs",
+    "src/ERP.UnitTests/DynamicContainerStatsReportTests.cs"
+  ],
+  "status": "pending",
+  "max_attempts": 3,
+  "attempts": 0,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only bounded scoped report feature"
+  },
+  "created_at": "2026-10-02T12:39:39.148645Z"
+}
