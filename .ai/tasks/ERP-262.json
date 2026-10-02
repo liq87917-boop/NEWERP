@@ -1,0 +1,66 @@
+{
+  "id": "ERP-262",
+  "title": "Build shared customer report configuration workspace",
+  "description": "Create independent report-configuration workspace in existing ERP navigation/router. One shared page lets customer list private definitions, create from authorized dataset catalog, choose/reorder fields, configure provider-supported typed filters/grouping, preview and save/copy/rename/delete, inspect revisions and publish/restore pinned definitions. Use server capabilities to hide unsupported custom formulas/pivot/joins/sharing/export until later Stage1 increments; show why unsupported instead of decorative controls. Distinguish draft versus published revision and current page versus grouped coverage; separate currencies/units. Preserve unsaved local edits until save succeeds, detect stale-version conflict without overwriting, escape all user/catalog strings, discard late preview responses after dataset/config changes and clear stale rows on authorization/failure. Use existing app.js for route dispatch/navigation and index.html only for new script inclusion, authorized dataset availability controls page, API remains authoritative. Keep old report menus/URLs unchanged until all Stage2 migrations verified. No new SeedData/menu database writes: reuse current dataset menu authorization for initial workspace access; new dedicated administrator sharing permission is future platform increment. Report configuration DB absence explicitly displayed as environment blocked, no browser-local storage substituted for persisted definitions. Tests of UI source contracts plus relevant controller/in-memory integration; no screenshot-only/browser claims. Stage 1 of user-directed sequence: finish reusable report configuration platform before any existing-report migration, cross-business flow development or embedded Agent task. No new dedicated business report controller/DTO/designer/exporter. Existing sales-order and receivable datasets are two adapter fixtures proving one shared contract, not report-by-report migration; keep existing endpoints/pages unchanged. Reuse server-authenticated user ID, dataset-specific existing menu authorization and fresh customer data scope; permissions are rechecked on catalog/save/load/preview, saved configurations never grant permission. Finite metadata fields/filters/grouping/operators only, no arbitrary SQL, C# scripts, user-selected tables or joins, client identity/scope/data as authority, mixed currencies/units or duplicate order-header totals from one-to-many joins. Fail unsupported capabilities explicitly rather than pretending they run. Preserve unrelated and current executor work. Code, EF mapping and in-memory/offline relational model tests allowed, but no migration, SchemaUpgrader/SeedData modification, production SQL/DB execution, schema/view/stored-procedure mutation, secrets/.env/config changes, production deployment, irreversible operations or real browser-only acceptance. Run meaningful unit/service/API and relevant offline integration tests and configured safe build/test. New metadata tables require later approved database provisioning: absence is an explicit environment blocker for real persistence acceptance, never silently use an in-memory runtime fallback or claim phase complete from build alone. Existing HTTP audit and BaseEntity audit conventions; no ERP business records altered.",
+  "depends_on": [
+    "ERP-261"
+  ],
+  "risk_level": "medium",
+  "priority": "P1",
+  "acceptance_criteria": [
+    "Independent shared workspace route/navigation and authorized catalog drive dataset/field reorder/filter/group/preview without duplicating business report pages or exposing unsupported controls.",
+    "Definition save/copy/rename/delete and revision publish/restore distinguish drafts and handle unsaved/stale/permission/environment errors while escaping strings and dropping late preview responses.",
+    "UI/API contract tests cover changed datasets/fields, out-of-order response protection, revoked access, concurrency conflicts and empty/error state; old entry points remain usable and safe build/test passes."
+  ],
+  "criterion_path_map": {
+    "Independent shared workspace route/navigation and authorized catalog drive dataset/field reorder/filter/group/preview without duplicating business report pages or exposing unsupported controls.": [
+      "src/ERP.Api/wwwroot/js/report-configuration.js",
+      "src/ERP.Api/wwwroot/js/app.js",
+      "src/ERP.Api/Controllers/ReportConfigurationsController.cs",
+      "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
+      "src/ERP.UnitTests/ReportConfigurationUiTests.cs",
+      "src/ERP.Api/wwwroot/index.html"
+    ],
+    "Definition save/copy/rename/delete and revision publish/restore distinguish drafts and handle unsaved/stale/permission/environment errors while escaping strings and dropping late preview responses.": [
+      "src/ERP.Api/wwwroot/js/report-configuration.js",
+      "src/ERP.Api/Controllers/ReportConfigurationsController.cs",
+      "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
+      "src/ERP.UnitTests/ReportConfigurationUiTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationApiTests.cs"
+    ],
+    "UI/API contract tests cover changed datasets/fields, out-of-order response protection, revoked access, concurrency conflicts and empty/error state; old entry points remain usable and safe build/test passes.": [
+      "src/ERP.UnitTests/ReportConfigurationUiTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationApiTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationExecutionTests.cs",
+      "src/ERP.Api/wwwroot/js/report-configuration.js",
+      "src/ERP.Api/wwwroot/js/app.js"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Api/wwwroot/js/report-configuration.js",
+    "src/ERP.Api/wwwroot/js/app.js",
+    "src/ERP.Api/Controllers/ReportConfigurationsController.cs",
+    "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
+    "src/ERP.UnitTests/ReportConfigurationUiTests.cs",
+    "src/ERP.Api/wwwroot/index.html",
+    "src/ERP.UnitTests/ReportConfigurationApiTests.cs",
+    "src/ERP.UnitTests/ReportConfigurationExecutionTests.cs"
+  ],
+  "status": "pending",
+  "max_attempts": 3,
+  "attempts": 0,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only bounded scoped report feature"
+  },
+  "created_at": "2026-10-02T13:01:48.657535Z"
+}

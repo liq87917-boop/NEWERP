@@ -1,0 +1,66 @@
+{
+  "id": "ERP-259",
+  "title": "Build common report configuration catalog and validated definition contract",
+  "description": "Create reusable report definition DTO, authorized dataset/field catalog and pure validator. One shared catalog backed by existing IDynamicSalesOrderReportQuery.GetCatalogAsync and IDynamicReceivableReportQuery.GetCatalogAsync exposes only currently authorized datasets/fields with Chinese label, type, grain, currency/unit semantics, allowed filters/grouping and capability flags. Define IReportConfigurationDatasetProvider and IReportConfigurationCatalog reusable contracts for later generic execution; never expand static catalogs to database-wide discovery. Definition has schema version, dataset key, ordered field keys, typed filters, supported grouping and presentation; limits 64KiB serialized definition, <=32 fields/filters, <=8 groups, <=4 aggregate definitions and existing provider-supported date/page bounds. Reject unknown/duplicate keys, hidden unauthorized fields, incompatible operations, invalid types and SQL/script payloads before saving/execution. Custom formulas, cross-dataset joins, pivot and all-match totals remain explicit unsupported capabilities until their shared engine is implemented in later Stage1 tasks; do not offer inert success. Registry extensible by dataset adapter, not new controllers. Catalog/validator focused tests cover permission change, supported metadata and all rejection boundaries. Wire common catalog/provider through existing Infrastructure dependency registration only. Stage 1 of user-directed sequence: finish reusable report configuration platform before any existing-report migration, cross-business flow development or embedded Agent task. No new dedicated business report controller/DTO/designer/exporter. Existing sales-order and receivable datasets are two adapter fixtures proving one shared contract, not report-by-report migration; keep existing endpoints/pages unchanged. Reuse server-authenticated user ID, dataset-specific existing menu authorization and fresh customer data scope; permissions are rechecked on catalog/save/load/preview, saved configurations never grant permission. Finite metadata fields/filters/grouping/operators only, no arbitrary SQL, C# scripts, user-selected tables or joins, client identity/scope/data as authority, mixed currencies/units or duplicate order-header totals from one-to-many joins. Fail unsupported capabilities explicitly rather than pretending they run. Preserve unrelated and current executor work. Code, EF mapping and in-memory/offline relational model tests allowed, but no migration, SchemaUpgrader/SeedData modification, production SQL/DB execution, schema/view/stored-procedure mutation, secrets/.env/config changes, production deployment, irreversible operations or real browser-only acceptance. Run meaningful unit/service/API and relevant offline integration tests and configured safe build/test. New metadata tables require later approved database provisioning: absence is an explicit environment blocker for real persistence acceptance, never silently use an in-memory runtime fallback or claim phase complete from build alone. Existing HTTP audit and BaseEntity audit conventions; no ERP business records altered.",
+  "depends_on": [],
+  "risk_level": "medium",
+  "priority": "P1",
+  "acceptance_criteria": [
+    "Shared dataset/field catalog exposes fresh authorized Chinese metadata and truthful capability/grain/unit boundaries through reusable provider contracts for two existing fixture datasets.",
+    "Common definition validator enforces bounded schema/ordered fields/typed filters/grouping and rejects unknown, unauthorized or unsupported capabilities without SQL or script execution.",
+    "Catalog/provider and validator tests exercise menu revocation, finite fields and size/type/capability boundaries; existing safe build/test passes without modifying old report behavior."
+  ],
+  "criterion_path_map": {
+    "Shared dataset/field catalog exposes fresh authorized Chinese metadata and truthful capability/grain/unit boundaries through reusable provider contracts for two existing fixture datasets.": [
+      "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
+      "src/ERP.Application/Interfaces/IReportConfigurationCatalog.cs",
+      "src/ERP.Application/Interfaces/IReportConfigurationDatasetProvider.cs",
+      "src/ERP.Application/Services/ReportConfigurationCatalog.cs",
+      "src/ERP.Infrastructure/Reports/ReportConfigurationDatasetProvider.cs",
+      "src/ERP.Infrastructure/DependencyInjection.cs",
+      "src/ERP.UnitTests/ReportConfigurationCatalogTests.cs"
+    ],
+    "Common definition validator enforces bounded schema/ordered fields/typed filters/grouping and rejects unknown, unauthorized or unsupported capabilities without SQL or script execution.": [
+      "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
+      "src/ERP.Application/Services/ReportConfigurationRules.cs",
+      "src/ERP.Application/Interfaces/IReportConfigurationCatalog.cs",
+      "src/ERP.Application/Services/ReportConfigurationCatalog.cs",
+      "src/ERP.UnitTests/ReportConfigurationRulesTests.cs"
+    ],
+    "Catalog/provider and validator tests exercise menu revocation, finite fields and size/type/capability boundaries; existing safe build/test passes without modifying old report behavior.": [
+      "src/ERP.UnitTests/ReportConfigurationCatalogTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationRulesTests.cs",
+      "src/ERP.Infrastructure/Reports/ReportConfigurationDatasetProvider.cs",
+      "src/ERP.Application/Services/ReportConfigurationCatalog.cs",
+      "src/ERP.Application/Services/ReportConfigurationRules.cs"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
+    "src/ERP.Application/Interfaces/IReportConfigurationCatalog.cs",
+    "src/ERP.Application/Interfaces/IReportConfigurationDatasetProvider.cs",
+    "src/ERP.Application/Services/ReportConfigurationCatalog.cs",
+    "src/ERP.Infrastructure/Reports/ReportConfigurationDatasetProvider.cs",
+    "src/ERP.Infrastructure/DependencyInjection.cs",
+    "src/ERP.UnitTests/ReportConfigurationCatalogTests.cs",
+    "src/ERP.Application/Services/ReportConfigurationRules.cs",
+    "src/ERP.UnitTests/ReportConfigurationRulesTests.cs"
+  ],
+  "status": "pending",
+  "max_attempts": 3,
+  "attempts": 0,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only bounded scoped report feature"
+  },
+  "created_at": "2026-10-02T13:01:48.653915Z"
+}

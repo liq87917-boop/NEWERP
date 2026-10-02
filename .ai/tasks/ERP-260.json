@@ -1,0 +1,75 @@
+{
+  "id": "ERP-260",
+  "title": "Persist private report configurations and immutable definition versions",
+  "description": "Users save, list, load, rename, copy, update and soft-delete their private report definitions through reusable application service; saves always validate current authorized catalog. Add BaseEntity-derived ReportConfiguration and ReportConfigurationRevision in one Domain file with authenticated OwnerUserId, name, dataset key, bounded definition JSON/schema version, draft/published lifecycle and monotonically increasing version. No posted ownership accepted. Keep immutable revision snapshots; draft edits do not silently replace published revision, publication pins exact validated snapshot, prior published version can be restored through a new revision. For this increment configurations are private, no role sharing/public templates until subsequent Stage1 tasks. Add IErpDbContext DbSets, narrow ErpDbContext.Reporting.cs model/set helper and minimal OnModelCreating invocation; map names consistent with existing db_owner schema, relationships/delete rules, JSON/name max lengths, index on owner/deleted, unique revision tuple and optimistic expected-version concurrency token to reject stale edits. Application transactions save definition and revision atomically using existing context pattern. Missing new tables must yield actionable environment failure, no SchemaUpgrader modifications or real DB provisioning. Register service; no API/UI until dependent increments. Use EF InMemory service tests plus offline EF relational metadata/model validation, never claim production SQL or real concurrency verified. Stage 1 of user-directed sequence: finish reusable report configuration platform before any existing-report migration, cross-business flow development or embedded Agent task. No new dedicated business report controller/DTO/designer/exporter. Existing sales-order and receivable datasets are two adapter fixtures proving one shared contract, not report-by-report migration; keep existing endpoints/pages unchanged. Reuse server-authenticated user ID, dataset-specific existing menu authorization and fresh customer data scope; permissions are rechecked on catalog/save/load/preview, saved configurations never grant permission. Finite metadata fields/filters/grouping/operators only, no arbitrary SQL, C# scripts, user-selected tables or joins, client identity/scope/data as authority, mixed currencies/units or duplicate order-header totals from one-to-many joins. Fail unsupported capabilities explicitly rather than pretending they run. Preserve unrelated and current executor work. Code, EF mapping and in-memory/offline relational model tests allowed, but no migration, SchemaUpgrader/SeedData modification, production SQL/DB execution, schema/view/stored-procedure mutation, secrets/.env/config changes, production deployment, irreversible operations or real browser-only acceptance. Run meaningful unit/service/API and relevant offline integration tests and configured safe build/test. New metadata tables require later approved database provisioning: absence is an explicit environment blocker for real persistence acceptance, never silently use an in-memory runtime fallback or claim phase complete from build alone. Existing HTTP audit and BaseEntity audit conventions; no ERP business records altered.",
+  "depends_on": [
+    "ERP-259"
+  ],
+  "risk_level": "medium",
+  "priority": "P1",
+  "acceptance_criteria": [
+    "Owner-only configuration CRUD/copy and bounded validated definitions use real Domain entities, DbSets and precise EF schema/index/relationship mappings; client ownership and cross-owner access fail closed.",
+    "Immutable version snapshots and draft/publish/restore transitions preserve published content, recheck current dataset authorization and reject stale expected-version updates atomically.",
+    "Service/model tests cover owner isolation, revocation, stale writes, copy/delete and failed atomic saves with proper audit metadata; safe build/test passes and real DB provisioning remains explicitly environment-blocked."
+  ],
+  "criterion_path_map": {
+    "Owner-only configuration CRUD/copy and bounded validated definitions use real Domain entities, DbSets and precise EF schema/index/relationship mappings; client ownership and cross-owner access fail closed.": [
+      "src/ERP.Domain/Entities/ReportConfiguration.cs",
+      "src/ERP.Application/Interfaces/IErpDbContext.cs",
+      "src/ERP.Application/Interfaces/IReportConfigurationService.cs",
+      "src/ERP.Application/Services/ReportConfigurationService.cs",
+      "src/ERP.Infrastructure/Data/ErpDbContext.Reporting.cs",
+      "src/ERP.Infrastructure/Data/ErpDbContext.Config.cs",
+      "src/ERP.Infrastructure/DependencyInjection.cs",
+      "src/ERP.UnitTests/ReportConfigurationPersistenceTests.cs"
+    ],
+    "Immutable version snapshots and draft/publish/restore transitions preserve published content, recheck current dataset authorization and reject stale expected-version updates atomically.": [
+      "src/ERP.Domain/Entities/ReportConfiguration.cs",
+      "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
+      "src/ERP.Application/Services/ReportConfigurationRules.cs",
+      "src/ERP.Application/Services/ReportConfigurationCatalog.cs",
+      "src/ERP.Application/Interfaces/IReportConfigurationService.cs",
+      "src/ERP.Application/Services/ReportConfigurationService.cs",
+      "src/ERP.Infrastructure/Data/ErpDbContext.Reporting.cs",
+      "src/ERP.UnitTests/ReportConfigurationVersionTests.cs"
+    ],
+    "Service/model tests cover owner isolation, revocation, stale writes, copy/delete and failed atomic saves with proper audit metadata; safe build/test passes and real DB provisioning remains explicitly environment-blocked.": [
+      "src/ERP.UnitTests/ReportConfigurationPersistenceTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationVersionTests.cs",
+      "src/ERP.Application/Services/ReportConfigurationService.cs",
+      "src/ERP.Infrastructure/Data/ErpDbContext.Reporting.cs",
+      "src/ERP.Infrastructure/Data/ErpDbContext.Config.cs"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Domain/Entities/ReportConfiguration.cs",
+    "src/ERP.Application/Interfaces/IErpDbContext.cs",
+    "src/ERP.Application/Interfaces/IReportConfigurationService.cs",
+    "src/ERP.Application/Services/ReportConfigurationService.cs",
+    "src/ERP.Infrastructure/Data/ErpDbContext.Reporting.cs",
+    "src/ERP.Infrastructure/Data/ErpDbContext.Config.cs",
+    "src/ERP.Infrastructure/DependencyInjection.cs",
+    "src/ERP.UnitTests/ReportConfigurationPersistenceTests.cs",
+    "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
+    "src/ERP.Application/Services/ReportConfigurationRules.cs",
+    "src/ERP.Application/Services/ReportConfigurationCatalog.cs",
+    "src/ERP.UnitTests/ReportConfigurationVersionTests.cs"
+  ],
+  "status": "pending",
+  "max_attempts": 3,
+  "attempts": 0,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only bounded scoped report feature"
+  },
+  "created_at": "2026-10-02T13:01:48.655209Z"
+}

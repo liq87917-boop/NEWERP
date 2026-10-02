@@ -1,0 +1,76 @@
+{
+  "id": "ERP-261",
+  "title": "Expose common report configuration API and authorized preview engine",
+  "description": "Add one ReportConfigurationsController for catalog, private definition CRUD/copy/version/publish/restore and preview; authenticated claim ID only. Common ReportConfigurationExecutionService loads selected draft or pinned published revision, validates definition against fresh authorized catalog, and dispatches through reusable registered IReportConfigurationDatasetProvider instead of creating per-business endpoints. Extend initial two fixture adapters to translate finite configuration into existing DynamicSalesOrderReportRequest/PreviewAsync or DynamicReceivableReportRequest/PreviewAsync; map only supported fields/filters/grouping, preserve inherited status/currency/customer/date scope and provider correctness. Return common typed columns/rows/pagination/grouped subtotal/evidence context with separate currency/unit partitions and unknown states; no aggregation over current page represented as all-match totals. Current preview parameters validated, field revocation or deleted/private foreign-owner definition blocks output even if previously published. Query engine async cancellation, finite page limits and precise unsupported-group/formula/relationship errors. Keep adapter query/permission behavior inherited; no custom SQL or extra unbounded dataset reads. Existing OperationLogMiddleware records configuration mutations and POST preview. DI exact registration and API response/error patterns; test generic controller/execution/provider dispatch without real network/DB. Stage 1 of user-directed sequence: finish reusable report configuration platform before any existing-report migration, cross-business flow development or embedded Agent task. No new dedicated business report controller/DTO/designer/exporter. Existing sales-order and receivable datasets are two adapter fixtures proving one shared contract, not report-by-report migration; keep existing endpoints/pages unchanged. Reuse server-authenticated user ID, dataset-specific existing menu authorization and fresh customer data scope; permissions are rechecked on catalog/save/load/preview, saved configurations never grant permission. Finite metadata fields/filters/grouping/operators only, no arbitrary SQL, C# scripts, user-selected tables or joins, client identity/scope/data as authority, mixed currencies/units or duplicate order-header totals from one-to-many joins. Fail unsupported capabilities explicitly rather than pretending they run. Preserve unrelated and current executor work. Code, EF mapping and in-memory/offline relational model tests allowed, but no migration, SchemaUpgrader/SeedData modification, production SQL/DB execution, schema/view/stored-procedure mutation, secrets/.env/config changes, production deployment, irreversible operations or real browser-only acceptance. Run meaningful unit/service/API and relevant offline integration tests and configured safe build/test. New metadata tables require later approved database provisioning: absence is an explicit environment blocker for real persistence acceptance, never silently use an in-memory runtime fallback or claim phase complete from build alone. Existing HTTP audit and BaseEntity audit conventions; no ERP business records altered.",
+  "depends_on": [
+    "ERP-260"
+  ],
+  "risk_level": "medium",
+  "priority": "P1",
+  "acceptance_criteria": [
+    "One authenticated API exposes owner-only CRUD/version operations and catalog with validated payloads, proper response errors and existing HTTP audit conventions.",
+    "Common execution service dispatches validated draft/published definitions through registered dataset providers with fresh permission/scope, preserved currency/unit and truthful page/group coverage.",
+    "API/engine tests reject foreign ownership, revoked fields/menu, stale definitions and unsupported capabilities; fixture providers preserve grouping/date/page validation and safe build/test passes."
+  ],
+  "criterion_path_map": {
+    "One authenticated API exposes owner-only CRUD/version operations and catalog with validated payloads, proper response errors and existing HTTP audit conventions.": [
+      "src/ERP.Api/Controllers/ReportConfigurationsController.cs",
+      "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
+      "src/ERP.Application/Interfaces/IReportConfigurationService.cs",
+      "src/ERP.Application/Services/ReportConfigurationService.cs",
+      "src/ERP.UnitTests/ReportConfigurationApiTests.cs"
+    ],
+    "Common execution service dispatches validated draft/published definitions through registered dataset providers with fresh permission/scope, preserved currency/unit and truthful page/group coverage.": [
+      "src/ERP.Application/Interfaces/IReportConfigurationExecutionService.cs",
+      "src/ERP.Application/Services/ReportConfigurationExecutionService.cs",
+      "src/ERP.Application/Interfaces/IReportConfigurationDatasetProvider.cs",
+      "src/ERP.Infrastructure/Reports/ReportConfigurationDatasetProvider.cs",
+      "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
+      "src/ERP.Application/Services/ReportConfigurationRules.cs",
+      "src/ERP.Application/Services/ReportConfigurationCatalog.cs",
+      "src/ERP.Infrastructure/DependencyInjection.cs",
+      "src/ERP.UnitTests/ReportConfigurationExecutionTests.cs"
+    ],
+    "API/engine tests reject foreign ownership, revoked fields/menu, stale definitions and unsupported capabilities; fixture providers preserve grouping/date/page validation and safe build/test passes.": [
+      "src/ERP.UnitTests/ReportConfigurationApiTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationExecutionTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationCatalogTests.cs",
+      "src/ERP.Api/Controllers/ReportConfigurationsController.cs",
+      "src/ERP.Infrastructure/Reports/ReportConfigurationDatasetProvider.cs",
+      "src/ERP.Application/Services/ReportConfigurationExecutionService.cs"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/ReportConfigurationsController.cs",
+    "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
+    "src/ERP.Application/Interfaces/IReportConfigurationService.cs",
+    "src/ERP.Application/Services/ReportConfigurationService.cs",
+    "src/ERP.UnitTests/ReportConfigurationApiTests.cs",
+    "src/ERP.Application/Interfaces/IReportConfigurationExecutionService.cs",
+    "src/ERP.Application/Services/ReportConfigurationExecutionService.cs",
+    "src/ERP.Application/Interfaces/IReportConfigurationDatasetProvider.cs",
+    "src/ERP.Infrastructure/Reports/ReportConfigurationDatasetProvider.cs",
+    "src/ERP.Application/Services/ReportConfigurationRules.cs",
+    "src/ERP.Application/Services/ReportConfigurationCatalog.cs",
+    "src/ERP.Infrastructure/DependencyInjection.cs",
+    "src/ERP.UnitTests/ReportConfigurationExecutionTests.cs",
+    "src/ERP.UnitTests/ReportConfigurationCatalogTests.cs"
+  ],
+  "status": "pending",
+  "max_attempts": 3,
+  "attempts": 0,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only bounded scoped report feature"
+  },
+  "created_at": "2026-10-02T13:01:48.656632Z"
+}
