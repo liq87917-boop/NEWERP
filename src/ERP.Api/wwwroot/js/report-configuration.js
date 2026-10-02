@@ -819,6 +819,54 @@ async function rccExport() {
   }
 }
 
+/* 导出当前预览页为中文 PDF（ERP-264，只读）：复用预览请求体 POST /api/report-configurations/export/pdf；
+   成功（application/pdf 附件）触发下载；授权 / 无效 / 环境未就绪 / 字体缺失 / 渲染失败在结果区可见，
+   不下载任何内容，且绝不覆盖未保存编辑（保留 dirty 状态与设计器控件）；迟到响应一律丢弃。 */
+async function rccExportPdf() {
+  if (!RCC.current) { rccRenderResult(rccErrorHtml('invalid', '请先选择或保存一个报表配置')); return; }
+  if (RCC.dirty) { rccRenderResult(rccErrorHtml('invalid', '存在未保存编辑，请先保存后再导出')); return; }
+  const seq = ++RCC.requestSeq;   // 本次下载的令牌：迟到响应一律丢弃
+  const req = rccBuildPreviewRequest(RCC);
+  try {
+    const resp = await fetch(RCC_API + '/export/pdf', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + (typeof localStorage !== 'undefined' ? (localStorage.getItem('erp_token') || '') : ''),
+      },
+      body: JSON.stringify(req),
+    });
+
+    if (seq !== RCC.requestSeq) return;   // 数据集 / 配置已变化：丢弃迟到的下载响应
+
+    const contentType = (resp.headers.get('content-type') || '');
+    if (contentType.indexOf('pdf') >= 0) {
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+      a.href = url;
+      a.download = '报表配置_' + dateStr + '.pdf';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      return;   // 导出成功：不触碰任何未保存控件 / 设计器状态
+    }
+
+    let envelope = null;
+    try { envelope = await resp.json(); } catch (e) { /* 忽略解析失败 */ }
+    const code = envelope && envelope.code;
+    const message = (envelope && envelope.message) || '导出失败';
+    if (code === 2000 || code === 2003) { rccOnUnauthorized(message); return; }
+    if (code === 5000) { RCC.envBlocked = true; rccRenderEnvBanner(); rccRenderResult(rccEnvBlockedHtml(message)); return; }
+    rccRenderResult(rccErrorHtml(rccKindOfCode(code), message));   // 失败只显示错误，绝不覆盖未保存编辑
+  } catch (err) {
+    if (seq !== RCC.requestSeq) return;
+    rccRenderResult(rccErrorHtml('network', (err && err.message) || '无法连接到服务器'));
+  }
+}
+
 /* 工作台入口（app.js 路由 code === 'report-configuration' 调用） */
 function renderReportConfigurationWorkspace() {
   document.getElementById('header-title').textContent = '报表配置工作台';
@@ -835,6 +883,7 @@ function renderReportConfigurationWorkspace() {
     + '<button type="button" class="btn" onclick="rccPublish()">发布</button>'
     + '<button type="button" class="btn" onclick="rccPreview()">预览</button>'
     + '<button type="button" class="btn" onclick="rccExport()">导出</button>'
+    + '<button type="button" class="btn" onclick="rccExportPdf()">导出PDF</button>'
     + '<span id="rcc-dirty" class="rcc-dirty"></span>'
     + '</div>'
     + '<div class="rcc-layout">'
@@ -902,6 +951,7 @@ if (typeof module !== 'undefined' && module.exports) {
     rccLoadRevisions,
     rccPreview,
     rccExport,
+    rccExportPdf,
     renderReportConfigurationWorkspace,
   };
 }

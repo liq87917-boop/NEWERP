@@ -184,6 +184,35 @@ public class ReportConfigurationUiTests
         Assert.Contains("rccSelectFields(RCC.fields, (def && def.fields) || [])", js);  // 加载时丢弃未知字段
     }
 
+    // ==================== 8. 中文 PDF 下载按钮与失败保留设计器状态 ====================
+
+    [Fact]
+    public void 导出PDF_按钮与端点接线_不提交客户端行()
+    {
+        var js = File.ReadAllText(Path.Combine(JsDirectory(), "report-configuration.js"));
+
+        Assert.Contains("onclick=\"rccExportPdf()\"", js);
+        Assert.Contains("async function rccExportPdf()", js);
+        Assert.Contains("RCC_API + '/export/pdf'", js);
+        Assert.Contains("rccBuildPreviewRequest(RCC)", js);       // 复用预览请求体，绝不信任客户端行 / 缓存
+        Assert.Contains("contentType.indexOf('pdf') >= 0", js);
+        Assert.Contains("a.download = '报表配置_'", js);
+        Assert.DoesNotContain("rows:", Segment(js, "async function rccExportPdf()", "/* 工作台入口"));
+    }
+
+    [Fact]
+    public void 导出PDF_失败保留未保存编辑_并丢弃迟到下载响应()
+    {
+        var js = File.ReadAllText(Path.Combine(JsDirectory(), "report-configuration.js"));
+        var fn = Segment(js, "async function rccExportPdf()", "/* 工作台入口");
+
+        Assert.Contains("存在未保存编辑，请先保存后再导出", fn);
+        Assert.Contains("if (seq !== RCC.requestSeq) return;", fn);   // 丢弃迟到下载响应
+        Assert.Contains("rccRenderResult(rccErrorHtml(rccKindOfCode(code), message))", fn);
+        Assert.Contains("rccRenderResult(rccErrorHtml('network'", fn);
+        Assert.DoesNotContain("RCC.dirty = false", fn);                // 失败 / 成功路径都不清除未保存标记
+    }
+
     /// <summary>截取源码中两个锚点之间的片段，便于对单个函数做「不含某内容」的契约断言。</summary>
     private static string Segment(string source, string start, string end)
     {

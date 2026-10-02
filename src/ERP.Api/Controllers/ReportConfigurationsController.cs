@@ -160,4 +160,23 @@ public class ReportConfigurationsController : ControllerBase
         return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             $"ReportConfiguration_{DateTime.Now:yyyyMMddHHmmss}.xlsx");
     }
+
+    /// <summary>
+    /// 导出当前页为中文 PDF（ERP-264，只读）：复用同一有界、已授权预览管线，仅导出当前预览页选定列，
+    /// 绝不信任客户端行 / 身份 / 范围 / 预览缓存；宽列集按列页拆分并重复允许标识列 / 表头，文本折行、数值保留符号，
+    /// 分组小计仅覆盖当前预览页且按币种分区（绝不追加全匹配合计），元数据始终包含定义名称 / 版本、数据集 / 行粒度、
+    /// 规范化查询筛选与日期范围、当前页覆盖口径、币种 / 单位语义、只读与边界、未知值说明。
+    /// 每次请求重新校验身份 / 数据集菜单授权 / 数据范围（fail closed）；授权撤销 / 无效修订 / 环境不可用 / 字体缺失 /
+    /// 渲染失败返回受控错误，绝不返回过期或半成品下载。
+    /// <para>全程只读，不写库、不执行任意 SQL；请求由既有 <c>OperationLogMiddleware</c> 记录审计（动作「导出」）。</para>
+    /// </summary>
+    [HttpPost("export/pdf")]
+    public async Task<IActionResult> ExportPdf([FromBody] ReportConfigurationPreviewRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        var preview = await _execution.PreviewAsync(CurrentUserId(), request);
+        var bytes = ReportConfigurationPdfExporter.Export(preview);
+        return File(bytes, "application/pdf",
+            $"ReportConfiguration_{DateTime.Now:yyyyMMddHHmmss}.pdf");
+    }
 }
