@@ -191,4 +191,26 @@ public class DynamicSalesCommissionReportUiTests
         Assert.DoesNotContain("rows:", fn);
         Assert.DoesNotContain("JSON.stringify(SCD_DYN.view)", fn);
     }
+    // ==================== 6. PDF 下载（ERP-246，前端契约） ====================
+
+    [Fact]
+    public void 导出PDF_入口按钮与函数_复用预览请求体_绝不传客户端行或旧预览()
+    {
+        var js = Script;
+
+        Assert.Contains("onclick=\"scdExportPdf()\"", js);
+        Assert.Contains("function scdExportPdf(", js);
+        Assert.Contains("/api/dynamic-sales-commission-report/pdf", js);
+
+        var fn = Segment(js, "function scdExportPdf(", "function loadSalesCommissionDesignerCatalog(");
+        Assert.Contains("scdBuildRequest(state)", fn);
+        Assert.Contains("scdDateError(state)", fn);
+        Assert.Contains("scdFilterError(state)", fn);
+        Assert.Contains("application/pdf", fn);
+        Assert.Contains("createObjectURL", fn);
+        // 绝不把预览行 / 客户端行 / 金额作为请求体（后端按请求重建有界证据）
+        Assert.DoesNotContain("rows:", fn);
+        Assert.DoesNotContain("JSON.stringify(SCD_DYN.view)", fn);
+    }
+
 }

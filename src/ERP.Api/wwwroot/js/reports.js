@@ -4644,6 +4644,73 @@ async function scdExportExcel() {
   }
 }
 
+/* 下载当前页选定列为中文 PDF（ERP-246，只读）：复用预览请求体 POST /api/dynamic-sales-commission-report/pdf；
+   成功（application/pdf 附件）触发下载；授权 / 无效 / 来源超限 / 空结果 / 网络失败在结果区可见，
+   不下载任何内容、绝不使用旧预览行、绝不信任客户端行 */
+async function scdExportPdf() {
+  if (!SCD_DYN.view || !SCD_DYN.view.columns || !SCD_DYN.view.columns.length) {
+    scdRenderResult(scdErrorHtml('invalid', '请先预览后再下载 PDF'));
+    return;
+  }
+  if (!SCD_DYN.view.rows || SCD_DYN.view.rows.length === 0) {
+    scdRenderResult(scdErrorHtml('empty', '没有符合所选日期范围与数据范围的已审核销售订单，无法下载（请先预览）'));
+    return;
+  }
+
+  const state = scdBuildState(SCD_DYN.view.page);
+  const dateError = scdDateError(state);
+  if (dateError) {
+    scdRenderResult(scdErrorHtml('invalid', dateError));
+    return;
+  }
+  const filterError = scdFilterError(state);
+  if (filterError) {
+    scdRenderResult(scdErrorHtml('invalid', filterError));
+    return;
+  }
+  const req = scdBuildRequest(state);
+  scdRenderResult(scdLoadingHtml());
+
+  try {
+    const headers = { 'Content-Type': 'application/json' };
+    const token = typeof localStorage !== 'undefined' ? (localStorage.getItem('erp_token') || '') : '';
+    if (token) headers['Authorization'] = 'Bearer ' + token;
+    const resp = await fetch('/api/dynamic-sales-commission-report/pdf', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(req),
+    });
+
+    const contentType = (resp.headers.get('content-type') || '');
+    if (contentType.indexOf('application/pdf') >= 0) {
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+      a.href = url;
+      a.download = '业务员提成证据_' + dateStr + '.pdf';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      scdRenderResult(scdResultHtml(SCD_DYN.view));
+      return;
+    }
+
+    let message = '下载失败';
+    let code;
+    try {
+      const data = await resp.json();
+      message = (data && data.message) || message;
+      code = data && data.code;
+    } catch (e) { /* 非 JSON 响应，沿用默认提示 */ }
+    scdRenderResult(scdErrorHtml(scdKindOfCode(code), message));
+  } catch (err) {
+    scdRenderResult(scdErrorHtml('network', (err && err.message) || '无法连接到服务器'));
+  }
+}
+
+
 /* 加载字段目录（白名单，有限、只读），失败时区分未登录 / 权限不足 / 网络错误 */
 async function loadSalesCommissionDesignerCatalog() {
   scdRenderResult(scdLoadingHtml());
@@ -4701,6 +4768,7 @@ function openSalesCommissionDesigner() {
         <div style="margin:8px 0">
           <button class="btn btn-primary" onclick="scdPreview(1)">🔍 预览</button>
           <button class="btn btn-neutral" onclick="scdExportExcel()" title="导出当前页选定字段为 Excel（只读）：复用当前字段 / 日期 / 筛选 / 分页，原币金额签名呈现、未知金额 / 利润 / 提成显式「未知」、无跨币种合计">📤 导出当前页 Excel</button>
+          <button class="btn btn-neutral" onclick="scdExportPdf()" title="下载当前页选定字段为中文 PDF（只读）：复用当前字段 / 日期 / 筛选 / 分页，分页中文渲染、未知显式「未知」、无跨币种合计">📥 下载当前页 PDF</button>
         </div>
         <div id="scd-des-result"></div>
       </div>

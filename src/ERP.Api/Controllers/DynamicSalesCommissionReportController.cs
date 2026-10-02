@@ -75,6 +75,25 @@ public class DynamicSalesCommissionReportController : ControllerBase
             $"SalesCommissionEvidence_{DateTime.Now:yyyyMMddHHmmss}.xlsx");
     }
 
+    /// <summary>
+    /// 下载当前页为中文 PDF（ERP-246，只读）：复用同一有界、已授权预览与选定列顺序，重建当前页（绝不信任客户端行 / 预览缓存），
+    /// 以 PDFsharp 分页渲染选定列：已知原币金额按签名数值呈现（绝不跨币种合计），null 金额 / 利润 / 利润率 / 提成比例 / 提成额显式「未知」，
+    /// 配置为 0 的当前参考比例仍按数值 0 呈现；并始终标注规范化日期 / 应用筛选 / 页面覆盖 / 500 订单来源上限 / 来源与原始原币分组 /
+    /// 当前参考比例 / 未知历史利润与提成口径（即使对应列被取消选择也始终包含）。宽列集按可用页宽拆成多个列页（携带身份 / 覆盖上下文），
+    /// 行数超出按行页拆分、每页重复表头，绝不追加未选定列或跨币种合计。字体缺失 / 渲染失败显式拒绝下载，绝不空成功或缺失字形成功。
+    /// 每次请求重新校验身份 / 业务员提成表菜单授权 / 业务员数据范围 / 字段 / 日期 / 分页 / 应用筛选（fail closed），
+    /// 授权撤销 / 无效输入 / 来源超限返回错误、不返回任何文件。全程只读，请求由既有 <c>OperationLogMiddleware</c> 记录审计（动作「导出 PDF」）。
+    /// </summary>
+    [HttpPost("pdf")]
+    public async Task<IActionResult> ExportPdf([FromBody] DynamicSalesCommissionReportRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var page = await BuildPageAsync(request);
+        var bytes = DynamicSalesCommissionPdfExporter.Export(page);
+        return File(bytes, "application/pdf", $"SalesCommissionEvidence_{DateTime.Now:yyyyMMddHHmmss}.pdf");
+    }
+
     /// <summary>每次重新校验身份 + 菜单授权 + 业务员数据范围，再交由服务层校验请求并只读查询当前页</summary>
     private async Task<DynamicSalesCommissionReportPageDto> BuildPageAsync(DynamicSalesCommissionReportRequest request)
     {
