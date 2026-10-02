@@ -1,4 +1,5 @@
 using ERP.Application.Common;
+using ERP.Application.DTOs;
 using ERP.Application.Interfaces;
 using ERP.Domain.Entities;
 using ERP.Domain.Enums;
@@ -92,6 +93,107 @@ public partial class ReportService
         }).ToList();
 
         return ContainerStatsEvidenceRules.BuildBuckets(lists).ToList();
+    }
+
+    /// <summary>
+    /// 动态柜量与装柜利用率证据报表预览（ERP-252，只读派生）：校验全部输入（字段 / 日期 / 分页 / 可选筛选，fail closed）
+    /// 先于任何源读取；装柜清单头在业务员数据范围之后相交客户 / 柜号关键字谓词，稳定排序做 501 行探测（500 张上限），
+    /// 超出即 fail closed；再复用 ERP-251 的「装柜日历日 × 精确原始非空白柜号」证据桶并只投影选定字段与有界分页。
+    /// 柜号关键字为字面文本包含匹配（非 SQL 通配符、非目录泄露）；空白关键字保留缺号（空白柜号）证据桶，
+    /// 非空白关键字仅匹配已持久化的非空白原始柜号。
+    /// </summary>
+    public async Task<DynamicContainerStatsReportPageDto> GetDynamicContainerStatsReportAsync(
+        DynamicContainerStatsReportRequest request, SalespersonDataScope scope)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(scope);
+
+        // 1) 全部校验先于任何源读取（fail closed）
+        var fieldKeys = DynamicContainerStatsReportRules.NormalizeFields(request.Fields);
+        var (startDate, endDate) = DynamicContainerStatsReportRules.ValidateDateRange(request.Start, request.End);
+        DynamicContainerStatsReportRules.ValidatePageBounds(request.Page, request.PageSize);
+        var filter = DynamicContainerStatsReportRules.NormalizeFilter(request.Filter);
+
+        var endExclusive = endDate.AddDays(1);
+        var filterText = DynamicContainerStatsReportRules.BuildFilterContext(filter);
+
+        // 2) 装柜清单头：已审核、未删除、日期窗口、业务员数据范围
+        var listsQuery = _db.ContainerLoadingLists
+            .Where(x => !x.IsDeleted
+                        && x.Status == DocumentStatus.Approved
+                        && x.LoadingDate >= startDate
+                        && x.LoadingDate < endExclusive);
+        listsQuery = SalespersonDataScopeService.FilterByCustomer(listsQuery, scope, x => x.CustomerId);
+
+        // 3) 可选筛选与范围 / 来源状态 / 日期谓词相交，作用在 Take(501) 之前（非物化后）
+        listsQuery = ApplyContainerStatsFilter(listsQuery, filter);
+
+        // 4) 稳定排序 + 501 行探测（500 张上限，超出 fail closed）
+        var probe = await listsQuery
+            .OrderBy(x => x.LoadingDate)
+            .ThenBy(x => x.ContainerNo)
+            .ThenBy(x => x.Id)
+            .Select(x => new
+            {
+                x.Id,
+                x.LoadingDate,
+                x.ContainerNo,
+                x.CustomerId,
+                x.TotalCartons,
+                x.TotalWeight,
+                x.TotalVolume
+            })
+            .Take(ContainerStatsMaxLists + 1)
+            .ToListAsync();
+
+        if (probe.Count > ContainerStatsMaxLists)
+            throw new BusinessException(
+                $"柜量与装柜利用率证据报表的授权范围内装柜清单超过 {ContainerStatsMaxLists} 张，请缩小日期范围或筛选条件后重试",
+                ErrorCodes.RuleConflict);
+
+        if (probe.Count == 0)
+            return DynamicContainerStatsReportRules.BuildPage(
+                new List<ReportDtos.ContainerStatsItem>(), fieldKeys, request.Page, request.PageSize, startDate, endDate, filterText);
+
+        // 5) 内存中复用 ERP-251 的稳定证据桶聚合（仅装柜清单头，无逐行查库）
+        var lists = probe.Select(x => new ContainerLoadingList
+        {
+            Id = x.Id,
+            LoadingDate = x.LoadingDate,
+            ContainerNo = x.ContainerNo,
+            CustomerId = x.CustomerId,
+            TotalCartons = x.TotalCartons,
+            TotalWeight = x.TotalWeight,
+            TotalVolume = x.TotalVolume
+        }).ToList();
+
+        var items = ContainerStatsEvidenceRules.BuildBuckets(lists);
+
+        return DynamicContainerStatsReportRules.BuildPage(
+            items, fieldKeys, request.Page, request.PageSize, startDate, endDate, filterText);
+    }
+
+    /// <summary>
+    /// 应用 ERP-252 可选筛选（在业务员数据范围之后、501 装柜清单头上限探测之前）：客户 Id / 柜号关键字精确匹配。
+    /// 全部为参数化 EF 谓词，非任意 SQL。客户 Id 仅装柜清单头属性（非权限边界），不会扩展客户范围，也不会在聚合后再筛选。
+    /// <para>柜号关键字使用字面 <c>ContainerNo.Contains</c>，仅匹配已持久化的非空白原始柜号；<c>%</c> / <c>_</c> 按字面文本匹配。</para>
+    /// </summary>
+    private static IQueryable<ContainerLoadingList> ApplyContainerStatsFilter(
+        IQueryable<ContainerLoadingList> source, DynamicContainerStatsReportFilterDto? filter)
+    {
+        if (filter is null)
+            return source;
+
+        if (filter.CustomerId is > 0)
+            source = source.Where(x => x.CustomerId == filter.CustomerId.Value);
+
+        if (!string.IsNullOrEmpty(filter.ContainerNo))
+        {
+            var keyword = filter.ContainerNo;
+            source = source.Where(x => !string.IsNullOrEmpty(x.ContainerNo) && x.ContainerNo.Contains(keyword));
+        }
+
+        return source;
     }
 
     /// <summary>采购成本分析（按供应商聚合采购订单，排除已取消/已驳回）</summary>

@@ -47,6 +47,16 @@ public interface IReportService
     /// </summary>
     Task<List<ReportDtos.ContainerStatsItem>> GetContainerStatsAsync(DateTime start, DateTime end, SalespersonDataScope scope);
 
+    /// <summary>
+    /// 动态柜量与装柜利用率证据报表预览（ERP-252，只读派生）：先校验字段 / 日期 / 分页 / 可选应用筛选（fail closed），
+    /// 再按当前账号业务员数据范围在数据库端过滤并应用客户 / 柜号关键字谓词，稳定排序后在 Take(501) 之前做来源上限探测，
+    /// 最后复用 ERP-251 的「装柜日历日 × 精确原始非空白柜号」证据桶、只投影选定字段并返回 total / 分页 / 口径上下文
+    /// （即使证据列被隐藏，规范化日期 / 筛选 / 来源上限 / 来源依据 / 数量单位 / 未知实际容积 / 柜型 / 出运上下文仍始终呈现）。
+    /// 全程只读：无 Add / Update / Remove / SaveChanges，不执行任意 SQL。
+    /// </summary>
+    Task<DynamicContainerStatsReportPageDto> GetDynamicContainerStatsReportAsync(
+        DynamicContainerStatsReportRequest request, SalespersonDataScope scope);
+
     /// <summary>采购成本分析（按供应商聚合采购订单）</summary>
     Task<List<ReportDtos.PurchaseCostItem>> GetPurchaseCostAsync(DateTime start, DateTime end);
 

@@ -82,7 +82,7 @@ const REPORTS = {
     ] },
 
   /* === 阶段 2 续：运营类报表 === */
-  'container-stats': { api: '/api/reports/container-stats', title: '柜量与装柜利用率统计',
+  'container-stats': { api: '/api/reports/container-stats', title: '柜量与装柜利用率统计', designer: 'container-stats',
     emoji: '🚢', kpi: 'ocean', summary: '装柜日历日×原始非空白柜号证据桶 · 空白柜号按清单独立 · 签名头箱数/毛重/体积(非实体柜) · 装载率/柜型未知 · 有界(500清单)',
     columns: [
       { key: 'loadingDate', label: '装柜日期', type: 'date' },
@@ -241,9 +241,11 @@ async function renderReport(rep, name) {
                   ? `<button class="btn btn-neutral" onclick="openSalesmanOutputDesigner()" title="打开业务员产值证据字段设计器（只读预览，业务员×原币证据行，绝不跨币种合计、利润恒为未知）">🎛 字段设计器</button>`
                   : rep.designer === 'sales-commission'
                     ? `<button class="btn btn-neutral" onclick="openSalesCommissionDesigner()" title="打开业务员提成证据字段设计器（只读预览，业务员桶×原币证据行，绝不跨币种合计、利润/提成未知、提成比例为当前参考）">🎛 字段设计器</button>`
-                    : rep.designer
-                      ? `<button class="btn btn-neutral" onclick="openFollowUpDueDesigner()" title="打开动态跟进提醒字段设计器（只读预览）">🎛 字段设计器</button>`
-                      : ''}
+                    : rep.designer === 'container-stats'
+                      ? `<button class="btn btn-neutral" onclick="openContainerStatsDesigner()" title="打开柜量与装柜利用率证据字段设计器（只读预览，装柜日历日×原始柜号证据桶，装载率/柜型未知、非实体柜）">🎛 字段设计器</button>`
+                      : rep.designer
+                        ? `<button class="btn btn-neutral" onclick="openFollowUpDueDesigner()" title="打开动态跟进提醒字段设计器（只读预览）">🎛 字段设计器</button>`
+                        : ''}
         <button class="btn btn-neutral" onclick="exportReportCSV()" title="导出为 CSV">📤 导出 CSV</button>
         <button class="btn btn-neutral" onclick="window.print()" title="打印报表">🖨 打印</button>
       </div>
@@ -261,7 +263,9 @@ async function renderReport(rep, name) {
               ? `<div id="sod-designer"></div>`
               : rep.designer === 'sales-commission'
                 ? `<div id="scd-designer"></div>`
-                : rep.designer ? `<div id="fud-designer"></div>` : ''}
+                : rep.designer === 'container-stats'
+                  ? `<div id="cst-designer"></div>`
+                  : rep.designer ? `<div id="fud-designer"></div>` : ''}
 
     <div class="table-wrap" id="report-table">
       <div class="skeleton-row"></div><div class="skeleton-row"></div><div class="skeleton-row"></div>
@@ -5001,6 +5005,338 @@ function openSalesCommissionDesigner() {
     </div>`;
   loadSalesCommissionDesignerCatalog();
 }
+
+/* ============ 柜量与装柜利用率证据字段设计器（ERP-252：只读、有界的前端字段选择与分页预览） ============
+   口径与后端 ERP-252（DynamicContainerStatsReportController / DynamicContainerStatsReportRules）一一对应：
+   - 入口复用在「柜量与装柜利用率统计」报表（reports.js 的 container-stats，designer: 'container-stats'），不新增菜单 / 架构 / 脚本注册；
+   - 字段选择器只由 GET /api/dynamic-container-stats-report 返回的有限白名单目录渲染为复选框（name="cst-des-field"），
+     绝无自由填写的字段名或 SQL；勾选状态经 cstSelectFields 规范化（去重、保持顺序、丢弃未知键）；
+   - 筛选仅限开始 / 结束日期（含首尾最多 366 天）、客户 Id（正整数）与柜号关键字（去首尾空白最多 80 字符、字面文本），分页有界（页码 ≥ 1，每页 1~200），
+     预览走 POST /api/dynamic-container-stats-report，只发送「白名单字段 + 有界日期 + 有界分页 + 规范化可选筛选」；
+   - 结果按后端返回的列名与选定字段值渲染（cstTableHtml / cstResultHtml），全部 HTML 转义；
+   - 日期 / 规范化筛选 / 来源上限 / 来源依据 / 数量单位 / 未知实际容积 / 柜型 / 出运口径始终显示（即使对应列被取消选择）；
+   - 空页 / 授权撤销（权限不足 / 未登录）/ 无效请求 / 网络失败分别可见，且不暴露范围外数据；
+   - 全程只读：不写库、不迁移、不执行任意 SQL。 */
+
+/* 打开柜量与装柜利用率证据字段设计器（从「柜量与装柜利用率统计」报表工具栏进入） */
+function openContainerStatsDesigner() {
+  const el = document.getElementById('cst-designer');
+  if (!el) return;
+  const today = new Date().toISOString().slice(0, 10);
+  el.innerHTML = `
+    <div class="pd-hint">🎛 字段设计器（只读预览）：勾选可见列 → 选择开始/结束日期、客户 Id、柜号关键字与每页条数 → 预览授权有界结果；全程只读，不执行任意 SQL。</div>
+    <div class="toolbar" style="margin-top:0">
+      <div class="toolbar-left" style="flex-wrap:wrap;gap:6px;align-items:center;font-size:13px">
+        <label>开始日期 <input type="date" id="cst-des-start" value="${today}" onchange="cstResetPage()"></label>
+        <label>结束日期 <input type="date" id="cst-des-end" value="${today}" onchange="cstResetPage()"></label>
+        <label>客户Id <input type="number" id="cst-des-customer-id" min="1" style="width:90px" placeholder="全部客户" onchange="cstResetPage()"></label>
+        <label>柜号关键字 <input type="text" id="cst-des-container-no" maxlength="80" style="width:160px" placeholder="原始柜号字面包含" onchange="cstResetPage()"></label>
+        <label>每页 <input type="number" id="cst-des-pagesize" value="20" min="1" max="200" style="width:70px" onchange="cstResetPage()"></label>
+        <span id="cst-designer-fields">正在加载字段目录…</span>
+      </div>
+      <div class="toolbar-actions">
+        <button class="btn btn-neutral btn-sm" onclick="cstToggleAll(true)">全选</button>
+        <button class="btn btn-neutral btn-sm" onclick="cstToggleAll(false)">清空</button>
+        <button class="btn btn-primary" onclick="cstPreview(1)">预览</button>
+      </div>
+    </div>
+    <div id="cst-des-result"></div>`;
+  loadContainerStatsDesignerCatalog();
+}
+
+/* 字段设计器状态（纯数据；DOM 访问只在事件处理函数内部发生） */
+let CST_DYN = {
+  catalog: null,      // GET /api/dynamic-container-stats-report 返回的目录 DTO
+  fields: [],         // 目录字段（白名单）
+  selectedKeys: [],   // 当前勾选的字段键（默认全选）
+  view: null,         // 最近一次预览结果
+  page: 1,            // 当前预览页（预览 / 翻页复用）
+};
+
+function cstEsc(v) {
+  return String(v ?? '').replace(/[&<>"']/g, c => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[c]));
+}
+
+/* 规范化选定字段（fail closed）：只保留目录白名单内的键、去重、保持请求顺序；未知键丢弃，绝不发送任意字段名 */
+function cstSelectFields(catalogFields, selectedKeys) {
+  const valid = new Set((catalogFields || []).map(f => f && f.key).filter(Boolean));
+  const seen = new Set();
+  const result = [];
+  for (const k of (Array.isArray(selectedKeys) ? selectedKeys : [])) {
+    if (typeof k !== 'string') continue;
+    const key = k.trim();
+    if (!key || !valid.has(key) || seen.has(key)) continue;
+    seen.add(key);
+    result.push(key);
+  }
+  return result;
+}
+
+/* 日期窗口客户端校验（与后端 ValidateDateRange 一致）：必填、结束不早于开始、含首尾最多 366 天 */
+function cstDateError(state) {
+  const start = String(state && state.start || '').trim();
+  const end = String(state && state.end || '').trim();
+  if (!start || !end) return '请填写开始与结束日期';
+  const startMs = Date.parse(start);
+  const endMs = Date.parse(end);
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) return '日期格式无效';
+  if (end < start) return '结束日期不能早于开始日期';
+  if (Math.round((endMs - startMs) / 86400000) + 1 > 366) return '日期范围最多 366 天（含首尾）';
+  return '';
+}
+
+/* 组装有界预览请求体：字段只来自目录、日期仅开始 / 结束、筛选仅客户 Id / 柜号关键字、分页有界，绝不接受任意字段名或 SQL */
+function cstBuildRequest(state) {
+  const fields = cstSelectFields(state.catalogFields, state.selectedKeys);
+  const page = Math.max(1, Math.floor(Number(state.page) || 1));
+  const maxPageSize = Number(state.maxPageSize) || 200;
+  let pageSize = Math.floor(Number(state.pageSize));
+  if (!Number.isFinite(pageSize)) pageSize = 20;
+  pageSize = Math.max(1, Math.min(maxPageSize, pageSize));
+  return {
+    fields,
+    page,
+    pageSize,
+    start: String(state.start).slice(0, 10),
+    end: String(state.end).slice(0, 10),
+    filter: cstBuildFilter(state),
+  };
+}
+
+/* 组装规范化可选筛选：客户 Id 必须为正整数，柜号关键字去首尾空白、最多 80 字符、字面文本，不拼任意 SQL */
+function cstBuildFilter(state) {
+  const filter = {};
+  const customerId = String(state.customerId || '').trim();
+  if (customerId) filter.customerId = Number(customerId);
+  const containerNo = String(state.containerNo || '').trim();
+  if (containerNo) filter.containerNo = containerNo;
+  return filter;
+}
+
+/* 筛选 / 字段 / 日期 / 每页条数变更后重置到第 1 页并清空旧结果（保留其余输入值） */
+function cstResetPage() {
+  CST_DYN.page = 1;
+  CST_DYN.view = null;
+}
+
+/* 单元格纯文本：日期按 yyyy-mm-dd、数字合理格式化、其余按字符串呈现（null 显示为空） */
+function cstCellText(value, field) {
+  const dataType = (field && field.dataType) || 'text';
+  if (value === null || value === undefined) return '';
+  if (dataType === 'date') return String(value).slice(0, 10);
+  if (dataType === 'number') {
+    const n = Number(value);
+    if (Number.isFinite(n)) return Number.isInteger(n) ? String(n) : n.toFixed(2);
+    return String(value);
+  }
+  return String(value);
+}
+
+/* 单元格 HTML（转义后安全渲染） */
+function cstRenderCell(value, field) {
+  return cstEsc(cstCellText(value, field));
+}
+
+/* 结果表格 HTML：表头为返回的列名、单元格为返回的选定字段值，全部经转义 */
+function cstTableHtml(view) {
+  const cols = (view && view.columns) || [];
+  const rows = (view && view.rows) || [];
+  if (!cols.length) return '';
+  const align = c => (c.dataType === 'number') ? ' class="text-right"' : '';
+  const head = cols.map(c => `<th${align(c)}>${cstEsc(c.label || c.key)}</th>`).join('');
+  const body = rows.length
+    ? rows.map(r => `<tr>${cols.map(c => `<td${align(c)}>${cstRenderCell(r[c.key], c)}</td>`).join('')}</tr>`).join('')
+    : '';
+  return `<div class="table-wrap" style="margin-top:8px"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
+}
+
+/* 分页（有界、稳定）：当前页之外仍有记录时标注截断，翻页复用当前字段 / 日期 / 筛选 / 每页条数 */
+function cstPagingHtml(view) {
+  if (!view) return '';
+  const prevDisabled = view.page <= 1 ? ' disabled' : '';
+  const nextDisabled = view.page >= view.totalPages ? ' disabled' : '';
+  return `<div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px">
+      <span class="text-muted">第 ${view.page} 页 / 共 ${view.totalPages} 页${view.truncated ? '（仅当前页，后续仍有分页）' : ''}</span>
+      <div>
+        <button class="btn btn-neutral btn-sm" onclick="cstPage(-1)"${prevDisabled}>← 上一页</button>
+        <button class="btn btn-neutral btn-sm" onclick="cstPage(1)"${nextDisabled}>下一页 →</button>
+      </div></div>`;
+}
+
+/* 空结果提示（显式使用后端 emptyText） */
+function cstEmptyHtml(view) {
+  return `<div class="empty" style="margin:8px 0">${cstEsc((view && view.emptyText) || '没有符合所选日期范围、数据范围与筛选的已审核装柜清单头')}</div>`;
+}
+
+/* 错误提示（授权撤销 / 未登录 / 无效请求 / 网络失败分别可见，且不暴露任何数据） */
+function cstErrorHtml(kind, message) {
+  const labels = {
+    forbidden: '权限不足',
+    unauthorized: '未登录 / 登录已过期',
+    invalid: '请求无效',
+    network: '网络请求失败',
+    error: '预览失败',
+  };
+  return `<div class="pd-hint" style="color:#b91c1c;background:#fef2f2;border-color:#fecaca">
+      <b>${cstEsc(labels[kind] || '预览失败')}</b>：${cstEsc(message || '')}</div>`;
+}
+
+/* 业务码 → 错误态分类 */
+function cstKindOfCode(code) {
+  if (code === 2002) return 'forbidden';
+  if (code === 2000 || code === 2003) return 'unauthorized';
+  if (code === 5000) return 'error';
+  return 'invalid';
+}
+
+/* 预览结果（只读 / 边界 / 免责文案 + 规范化筛选 + 数量单位 / 未知实际容积 / 柜型 / 出运 / 来源 / 来源上限口径 + 空结果 + 表格 + 分页） */
+function cstResultHtml(view) {
+  const readOnly = view && view.readOnlyText ? `<div class="pd-hint">${cstEsc(view.readOnlyText)}</div>` : '';
+  const boundary = view && view.boundaryText ? `<div class="pd-hint">${cstEsc(view.boundaryText)}</div>` : '';
+  const disclaimer = view && view.disclaimerText ? `<div class="pd-hint" style="color:#64748b">${cstEsc(view.disclaimerText)}</div>` : '';
+  const summary = view
+    ? `<div class="text-muted" style="margin:6px 0">共 ${view.total} 行 · 第 ${view.page} 页 · 每页 ${view.pageSize} 行 · 共 ${view.totalPages} 页${view.truncated ? ' · 后续仍有分页' : ''} · 期间 ${String(view.start || '').slice(0, 10)} 至 ${String(view.end || '').slice(0, 10)}</div>`
+    : '';
+  const contextLines = [];
+  if (view && view.filterText) contextLines.push(`应用筛选：${view.filterText}`);
+  if (view && view.unitContextText) contextLines.push(view.unitContextText);
+  if (view && view.unknownCapacityContextText) contextLines.push(view.unknownCapacityContextText);
+  if (view && view.typeContextText) contextLines.push(view.typeContextText);
+  if (view && view.shippingContextText) contextLines.push(view.shippingContextText);
+  if (view && view.sourceContextText) contextLines.push(view.sourceContextText);
+  if (view && view.sourceLimitText) contextLines.push(view.sourceLimitText);
+  const context = contextLines.length
+    ? `<div class="pd-hint" style="margin:6px 0">${contextLines.map(l => `<div>${cstEsc(l)}</div>`).join('')}</div>`
+    : '';
+  const empty = view && (!view.rows || view.rows.length === 0) ? cstEmptyHtml(view) : '';
+  return `${readOnly}${boundary}${disclaimer}${summary}${context}${empty}${cstTableHtml(view)}${cstPagingHtml(view)}`;
+}
+
+/* 字段选择器：仅由目录白名单渲染为复选框，无自由填写的字段名 */
+function cstFieldChooserHtml(fields, selectedKeys) {
+  const selected = new Set(selectedKeys || []);
+  return (fields || []).map(f => {
+    const checked = selected.has(f.key) ? 'checked' : '';
+    return `<label style="display:inline-flex;align-items:center;gap:4px;margin:3px 6px 3px 0;padding:2px 8px;border:1px solid #e2e8f0;border-radius:6px;background:#f8fafc;cursor:pointer">
+        <input type="checkbox" name="cst-des-field" value="${cstEsc(f.key)}" ${checked} onchange="cstSyncSelection(); cstResetPage()">
+        <span>${cstEsc(f.label || f.key)}</span></label>`;
+  }).join('');
+}
+
+function cstLoadingHtml() {
+  return '<div class="pd-hint" style="text-align:center;color:#64748b">正在预览（只读查询）…</div>';
+}
+
+function cstRenderResult(html) {
+  const el = document.getElementById('cst-des-result');
+  if (el) el.innerHTML = html;
+}
+
+/* 轻量请求封装：返回完整 ApiResponse 信封（保留 code），网络异常抛给调用方 */
+async function cstRequest(path, method = 'GET', body = null) {
+  const headers = { 'Content-Type': 'application/json' };
+  const token = typeof localStorage !== 'undefined' ? (localStorage.getItem('erp_token') || '') : '';
+  if (token) headers['Authorization'] = 'Bearer ' + token;
+  const opts = { method, headers };
+  if (body) opts.body = JSON.stringify(body);
+  const resp = await fetch(path, opts);
+  return await resp.json();
+}
+
+/* 同步勾选状态到 selectedKeys（复选框 onchange） */
+function cstSyncSelection() {
+  const boxes = document.querySelectorAll('input[name="cst-des-field"]');
+  CST_DYN.selectedKeys = Array.from(boxes).filter(b => b.checked).map(b => b.value);
+}
+
+/* 全选 / 清空 */
+function cstToggleAll(checked) {
+  const boxes = document.querySelectorAll('input[name="cst-des-field"]');
+  CST_DYN.selectedKeys = [];
+  boxes.forEach(b => { b.checked = checked; if (checked) CST_DYN.selectedKeys.push(b.value); });
+}
+
+/* 读取当前字段 / 日期 / 筛选 / 分页状态（预览与翻页复用，单一来源） */
+function cstBuildState(page) {
+  const val = id => { const el = document.getElementById(id); return el ? el.value.trim() : ''; };
+  return {
+    catalogFields: CST_DYN.fields,
+    selectedKeys: CST_DYN.selectedKeys,
+    start: val('cst-des-start'),
+    end: val('cst-des-end'),
+    customerId: val('cst-des-customer-id'),
+    containerNo: val('cst-des-container-no'),
+    pageSize: val('cst-des-pagesize'),
+    page: page || CST_DYN.page || 1,
+    maxPageSize: CST_DYN.catalog && CST_DYN.catalog.maxPageSize ? CST_DYN.catalog.maxPageSize : 200,
+  };
+}
+
+/* 预览：组装有界请求 → POST → 安全渲染列名与单元格；授权 / 无效 / 空 / 网络失败均可见 */
+async function cstPreview(page) {
+  const state = cstBuildState(page);
+  const dateError = cstDateError(state);
+  if (dateError) {
+    cstRenderResult(cstErrorHtml('invalid', dateError));
+    return;
+  }
+  const req = cstBuildRequest(state);
+  CST_DYN.page = req.page;
+
+  cstRenderResult(cstLoadingHtml());
+
+  try {
+    const resp = await cstRequest('/api/dynamic-container-stats-report', 'POST', req);
+    if (resp.code === 0) {
+      CST_DYN.view = resp.data;
+      CST_DYN.page = resp.data.page;
+      cstRenderResult(cstResultHtml(resp.data));
+    } else if (resp.code === 2000 || resp.code === 2003) {
+      if (typeof logout === 'function') logout();
+      cstRenderResult(cstErrorHtml('unauthorized', resp.message));
+    } else {
+      cstRenderResult(cstErrorHtml(cstKindOfCode(resp.code), resp.message));
+    }
+  } catch (err) {
+    cstRenderResult(cstErrorHtml('network', (err && err.message) || '无法连接到服务器'));
+  }
+}
+
+/* 翻页（有界：最小第 1 页） */
+function cstPage(delta) {
+  const page = (CST_DYN.view ? CST_DYN.view.page : CST_DYN.page) + delta;
+  if (page < 1) return;
+  cstPreview(page);
+}
+
+/* 加载字段目录（需登录 + 柜量与装柜利用率统计菜单授权；授权 / 网络失败 fail closed，不渲染任何字段） */
+async function loadContainerStatsDesignerCatalog() {
+  try {
+    const resp = await cstRequest('/api/dynamic-container-stats-report');
+    if (resp.code === 2000 || resp.code === 2003) {
+      if (typeof logout === 'function') logout();
+      cstRenderResult(cstErrorHtml('unauthorized', resp.message));
+      return;
+    }
+    if (resp.code !== 0) {
+      cstRenderResult(cstErrorHtml(cstKindOfCode(resp.code), resp.message));
+      return;
+    }
+    CST_DYN.catalog = resp.data;
+    CST_DYN.fields = (resp.data && resp.data.fields) || [];
+    CST_DYN.selectedKeys = CST_DYN.fields.map(f => f.key);
+    const el = document.getElementById('cst-designer-fields');
+    if (el) el.innerHTML = cstFieldChooserHtml(CST_DYN.fields, CST_DYN.selectedKeys);
+  } catch (err) {
+    cstRenderResult(cstErrorHtml('network', (err && err.message) || '无法连接到服务器'));
+  }
+}
+
+
+
+
 
 
 

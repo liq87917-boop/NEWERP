@@ -1,0 +1,147 @@
+using Xunit;
+
+namespace ERP.UnitTests;
+
+/// <summary>
+/// ERP-252 动态柜量与装柜利用率证据字段设计器「前端 UI 契约」测试。
+/// <para>只对前端脚本 <c>reports.js</c> 做源码契约断言，覆盖设计器入口、字段选择（仅目录白名单、无自由字段名 / SQL）、
+/// 字段顺序 / 去重、有界请求组装（字段 / 开始结束日期 / 客户 / 柜号关键字 / 分页）、
+/// 字段与筛选变更重置页、失败清空旧数据、上下文始终显示与 HTML 转义。</para>
+/// <para>不连接 SQL Server、不启动 API、不运行浏览器验收、不执行任何 SQL。</para>
+/// </summary>
+public class DynamicContainerStatsReportUiTests
+{
+    private static string RepoFile(params string[] segments)
+        => Path.GetFullPath(Path.Combine(
+            new[] { AppContext.BaseDirectory, "..", "..", "..", "..", ".." }.Concat(segments).ToArray()));
+
+    private static string Script =>
+        File.ReadAllText(RepoFile("src", "ERP.Api", "wwwroot", "js", "reports.js"));
+
+    /// <summary>截取源码中两个锚点之间的片段，便于对单个函数做「不含某内容」的契约断言。</summary>
+    private static string Segment(string source, string start, string end)
+    {
+        var i = source.IndexOf(start, StringComparison.Ordinal);
+        if (i < 0) return string.Empty;
+        var j = source.IndexOf(end, i + start.Length, StringComparison.Ordinal);
+        return j < 0 ? source[i..] : source[i..j];
+    }
+
+    // ==================== 1. 设计器入口 ====================
+
+    [Fact]
+    public void 入口_柜量统计_提供字段设计器入口_不新增菜单或脚本注册()
+    {
+        var js = Script;
+
+        Assert.Contains("'container-stats': { api: '/api/reports/container-stats', title: '柜量与装柜利用率统计', designer: 'container-stats',", js);
+        Assert.Contains("onclick=\"openContainerStatsDesigner()\"", js);
+        Assert.Contains("function openContainerStatsDesigner()", js);
+        Assert.Contains("id=\"cst-designer\"", js);
+        Assert.Contains("function loadContainerStatsDesignerCatalog()", js);
+        Assert.Contains("function cstPreview(", js);
+    }
+
+    // ==================== 2. 字段选择（仅目录白名单、无自由输入 / SQL） ====================
+
+    [Fact]
+    public void 字段选择_仅目录白名单复选框_无自由字段名与SQL()
+    {
+        var js = Script;
+
+        Assert.Contains("function cstFieldChooserHtml(", js);
+        Assert.Contains("name=\"cst-des-field\"", js);
+        Assert.Contains("type=\"checkbox\"", js);
+        Assert.Contains("function cstSelectFields(", js);
+        Assert.Contains("valid.has(key)", js);
+        Assert.Contains("seen.has(key)", js);
+        Assert.DoesNotContain("cst-des-field\" type=\"text\"", js);
+        Assert.DoesNotContain("FromSql", js);
+        Assert.DoesNotContain("ExecuteSql", js);
+        Assert.DoesNotContain("SqlCommand", js);
+    }
+
+    [Fact]
+    public void 字段顺序_保留选定顺序去重_丢弃未知键()
+    {
+        var js = Script;
+        var fn = Segment(js, "function cstSelectFields(", "function cstDateError(");
+        Assert.Contains("valid.has(key)", fn);
+        Assert.Contains("seen.has(key)", fn);
+        Assert.Contains("seen.add(key)", fn);
+        Assert.Contains("result.push(key)", fn);
+        Assert.Contains("continue;", fn);
+    }
+
+    // ==================== 3. 有界请求（字段 / 日期 / 客户 / 柜号关键字 / 分页） ====================
+
+    [Fact]
+    public void 请求_组装有界字段日期分页与筛选_无任意字段名()
+    {
+        var js = Script;
+
+        Assert.Contains("function cstBuildRequest(", js);
+        Assert.Contains("const fields = cstSelectFields(state.catalogFields, state.selectedKeys);", js);
+        Assert.Contains("const page = Math.max(1, Math.floor(Number(state.page) || 1));", js);
+        Assert.Contains("pageSize = Math.max(1, Math.min(maxPageSize, pageSize));", js);
+        Assert.Contains("filter: cstBuildFilter(state),", js);
+    }
+
+    // ==================== 4. 筛选（客户 Id / 柜号关键字，字面、重置页） ====================
+
+    [Fact]
+    public void 筛选_客户Id与柜号关键字输入框存在_变更重置页_字面转义()
+    {
+        var js = Script;
+
+        Assert.Contains("id=\"cst-des-customer-id\"", js);
+        Assert.Contains("min=\"1\"", js);
+        Assert.Contains("id=\"cst-des-container-no\"", js);
+        Assert.Contains("maxlength=\"80\"", js);
+        Assert.Contains("onchange=\"cstResetPage()\"", js);
+
+        var bf = Segment(js, "function cstBuildFilter(", "function cstResetPage(");
+        Assert.Contains("filter.customerId = Number(customerId)", bf);
+        Assert.Contains("filter.containerNo = containerNo", bf);
+        Assert.DoesNotContain("FromSql", bf);
+        Assert.DoesNotContain("SqlCommand", bf);
+    }
+
+    // ==================== 5. 状态维护 / 失败清空 / 转义 / 上下文始终显示 ====================
+
+    [Fact]
+    public void 状态_字段筛选变更重置页_失败清空旧数据_上下文始终显示()
+    {
+        var js = Script;
+
+        var rp = Segment(js, "function cstResetPage(", "function cstCellText(");
+        Assert.Contains("CST_DYN.page = 1", rp);
+        Assert.Contains("CST_DYN.view = null", rp);
+
+        var result = Segment(js, "function cstResultHtml(", "function cstFieldChooserHtml(");
+        Assert.Contains("view.unitContextText", result);
+        Assert.Contains("view.unknownCapacityContextText", result);
+        Assert.Contains("view.typeContextText", result);
+        Assert.Contains("view.shippingContextText", result);
+        Assert.Contains("view.sourceContextText", result);
+        Assert.Contains("view.sourceLimitText", result);
+        Assert.Contains("view.filterText", result);
+    }
+
+    [Fact]
+    public void 渲染_表头与单元格全部转义_分页覆盖总页数与截断()
+    {
+        var js = Script;
+
+        Assert.Contains("function cstEsc(", js);
+        Assert.Contains(".replace(/[&<>\"']/g", js);
+
+        var table = Segment(js, "function cstTableHtml(", "function cstPagingHtml(");
+        Assert.Contains("cstEsc(c.label || c.key)", table);
+        Assert.Contains("cstRenderCell(r[c.key], c)", table);
+
+        var paging = Segment(js, "function cstPagingHtml(", "function cstEmptyHtml(");
+        Assert.Contains("view.totalPages", paging);
+        Assert.Contains("view.truncated", paging);
+    }
+}
