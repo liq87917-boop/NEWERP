@@ -46,10 +46,12 @@ public sealed class DynamicSalesmanOutputReportRequest
 }
 
 /// <summary>
-/// 动态业务员产值证据报表（ERP-237）的可选应用筛选 DTO：客户 Id / 业务员 Id 与原币币种有限选择。
+/// 动态业务员产值证据报表（ERP-237）的可选应用筛选 DTO：客户 Id / 业务员 Id / 业务员姓名关键字与原币币种有限选择。
 /// <para>本 DTO 只描述「如何在既有业务员数据范围 + 日期窗口之外再收窄销售订单读取范围」，不含任何 SQL、连接串或写入语义；
 /// 校验 / 规范化统一由 <see cref="Services.DynamicSalesmanOutputReportRules.NormalizeFilter"/> 完成（fail closed）。</para>
 /// <para>业务员 Id 仅是订单持久化属性（非权限边界）：绝不因业务员筛选而扩展数据范围，也不会在聚合后再筛选。</para>
+/// <para>业务员姓名关键字仅是字面文本筛选（<c>BaseEmployees.EmployeeName.Contains</c> 的字面包含，非 SQL 通配符、非目录泄露），
+/// 绝不因姓名关键字而扩展数据范围，也绝不在聚合后再筛选。</para>
 /// </summary>
 public sealed class SalesmanOutputFilterDto
 {
@@ -58,6 +60,12 @@ public sealed class SalesmanOutputFilterDto
 
     /// <summary>业务员 Id 筛选（可选：正整数；留空 = 不过滤；非法取值由服务端 fail closed 拒绝；仅订单属性，非权限边界）</summary>
     public long? SalesmanId { get; set; }
+
+    /// <summary>
+    /// 业务员姓名关键字筛选（可选：去首尾空白后最多 80 字符、拒绝控制字符；留空 = 不过滤；
+    /// 字面文本匹配，<c>%</c> / <c>_</c> 按字面文本而非 SQL 通配符，匹配沿用数据库既有排序规则）。
+    /// </summary>
+    public string? SalesmanName { get; set; }
 
     /// <summary>
     /// 原币币种筛选（可选：留空 = 全部；仅接受已知 <c>Currency</c> 枚举码 CNY / USD / EUR / HKD / GBP / JPY，

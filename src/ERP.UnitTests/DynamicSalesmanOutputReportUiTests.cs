@@ -302,4 +302,30 @@ public class DynamicSalesmanOutputReportUiTests
         Assert.Contains("'invalid'", fn);
     }
 
+
+    // ==================== 9. ERP-242 业务员姓名关键字（UI 契约） ====================
+
+    [Fact]
+    public void 姓名关键字_输入校验与请求体_变更重置页_翻页下载复用()
+    {
+        var js = Script;
+
+        // 设计器提供姓名关键字输入，变更重置到第 1 页
+        Assert.Contains("id=\"sod-des-salesman-name\"", js);
+        Assert.Contains("onchange=\"sodResetPage()\"", js);
+
+        // 状态组装包含姓名关键字（翻页 / 导出 / 汇总导出均复用 sodBuildState）
+        var state = Segment(js, "function sodBuildState(", "function sodPreview(");
+        Assert.Contains("salesmanName: val('sod-des-salesman-name')", state);
+
+        // 客户端校验：80 字符上限 + 控制字符拒绝
+        var err = Segment(js, "function sodFilterError(", "function sodBuildFilter(");
+        Assert.Contains("业务员姓名关键字最多 80 个字符", err);
+        Assert.Contains("业务员姓名关键字不能包含控制字符", err);
+
+        // 组装筛选：发送 salesmanName，且保留在请求体中
+        var build = Segment(js, "function sodBuildFilter(", "function sodBuildRequest(");
+        Assert.Contains("filter.salesmanName = salesmanName", build);
+    }
+
 }

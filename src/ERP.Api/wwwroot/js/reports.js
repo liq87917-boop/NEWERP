@@ -3509,7 +3509,7 @@ function openCustomerShipmentDesigner() {
    - 入口复用在「业务员产值报表」报表（reports.js 的 salesman-output，designer: 'salesman-output'），不新增菜单 / 架构 / 脚本注册；
    - 字段选择器只由 GET /api/dynamic-salesman-output-report 返回的有限白名单目录渲染为复选框（name="sod-des-field"），
      绝无自由填写的字段名或 SQL；勾选状态经 sodSelectFields 规范化（去重、保持顺序、丢弃未知键）；
-   - 筛选仅限开始 / 结束日期（含首尾最多 366 天）、客户 Id（正整数）、业务员 Id（正整数）与原币币种（CNY / USD / EUR / HKD / GBP / JPY），分页有界（页码 ≥ 1，每页 1~200），
+   - 筛选仅限开始 / 结束日期（含首尾最多 366 天）、客户 Id（正整数）、业务员 Id（正整数）、业务员姓名关键字（去首尾空白最多 80 字符、字面文本、拒绝控制字符）与原币币种（CNY / USD / EUR / HKD / GBP / JPY），分页有界（页码 ≥ 1，每页 1~200），
      预览走 POST /api/dynamic-salesman-output-report，只发送「白名单字段 + 有界日期 + 有界分页 + 规范化可选筛选」；
    - 结果按后端返回的列名与选定字段值渲染（sodTableHtml / sodResultHtml），全部 HTML 转义，null 金额 / 利润显示「未知」；
    - 原币 / 未知 / 未知利润 / 来源口径与去重业务员 / 已分配已审核订单上下文始终显示（即使对应列被取消选择），绝不展示跨币种总额；
@@ -3559,7 +3559,7 @@ function sodDateError(state) {
   return '';
 }
 
-/* 客户 Id / 业务员 Id / 原币币种客户端校验（与后端 NormalizeFilter 一致）：非法取值在发送前可见拒绝 */
+/* 客户 Id / 业务员 Id / 业务员姓名关键字 / 原币币种客户端校验（与后端 NormalizeFilter 一致）：非法取值在发送前可见拒绝 */
 function sodFilterError(state) {
   const customerId = String(state && state.customerId || '').trim();
   if (customerId !== '') {
@@ -3571,6 +3571,11 @@ function sodFilterError(state) {
     const s = Number(salesmanId);
     if (!Number.isInteger(s) || s <= 0) return '业务员 Id 必须是正整数（大于 0）';
   }
+  const salesmanName = String(state && state.salesmanName || '').trim();
+  if (salesmanName !== '') {
+    if (salesmanName.length > 80) return '业务员姓名关键字最多 80 个字符';
+    if (/[\u0000-\u001f\u007f]/.test(salesmanName)) return '业务员姓名关键字不能包含控制字符';
+  }
   const currency = String(state && state.currency || '').trim();
   if (currency !== '') {
     if (!/^(CNY|USD|EUR|HKD|GBP|JPY)$/i.test(currency)) return '原币币种仅支持 CNY / USD / EUR / HKD / GBP / JPY';
@@ -3578,16 +3583,18 @@ function sodFilterError(state) {
   return '';
 }
 
-/* 组装可选应用筛选（只发送规范化后的客户 Id / 业务员 Id / 原币币种；全部留空 = null，保持既有业务员产值行为） */
+/* 组装可选应用筛选（只发送规范化后的客户 Id / 业务员 Id / 业务员姓名关键字 / 原币币种；全部留空 = null，保持既有业务员产值行为） */
 function sodBuildFilter(state) {
   const customerId = String(state && state.customerId || '').trim();
   const salesmanId = String(state && state.salesmanId || '').trim();
+  const salesmanName = String(state && state.salesmanName || '').trim();
   const currency = String(state && state.currency || '').trim();
   const filter = {};
   if (customerId !== '') filter.customerId = Number(customerId);
   if (salesmanId !== '') filter.salesmanId = Number(salesmanId);
+  if (salesmanName !== '') filter.salesmanName = salesmanName;
   if (currency !== '') filter.currency = currency.toUpperCase();
-  return (filter.customerId === undefined && filter.salesmanId === undefined && filter.currency === undefined) ? null : filter;
+  return (filter.customerId === undefined && filter.salesmanId === undefined && filter.salesmanName === undefined && filter.currency === undefined) ? null : filter;
 }
 
 /* 组装有界预览请求体：字段只来自目录、日期仅开始 / 结束、分页有界，绝不接受任意字段名或 SQL */
@@ -3807,6 +3814,7 @@ function sodBuildState(page) {
     end: val('sod-des-end'),
     customerId: val('sod-des-customer-id'),
     salesmanId: val('sod-des-salesman-id'),
+    salesmanName: val('sod-des-salesman-name'),
     currency: val('sod-des-currency'),
     pageSize: val('sod-des-pagesize'),
     page: page || SOD_DYN.page || 1,
@@ -4137,6 +4145,7 @@ function openSalesmanOutputDesigner() {
           <label>结束日期 <input type="date" id="sod-des-end" value="${sodEsc(new Date().toISOString().slice(0, 10))}" onchange="sodResetPage()"></label>
           <label>客户 Id <input type="number" id="sod-des-customer-id" min="1" style="width:90px" placeholder="全部客户" onchange="sodResetPage()"></label>
           <label>业务员 Id <input type="number" id="sod-des-salesman-id" min="1" style="width:90px" placeholder="全部业务员" onchange="sodResetPage()"></label>
+          <label>业务员姓名 <input type="text" id="sod-des-salesman-name" maxlength="80" style="width:120px" placeholder="业务员姓名关键字" onchange="sodResetPage()"></label>
           <label>原币 <select id="sod-des-currency" onchange="sodResetPage()">
             <option value="">全部币种</option>
             <option value="CNY">CNY 人民币</option>

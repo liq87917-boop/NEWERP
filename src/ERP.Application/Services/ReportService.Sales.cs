@@ -239,7 +239,7 @@ public partial class ReportService
         ordersQuery = SalespersonDataScopeService.FilterByCustomer(ordersQuery, scope, o => o.CustomerId);
 
         // 2.1) ERP-237 可选应用筛选：作用在业务员数据范围之后、501 订单头上限探测之前（参数化 EF 谓词）；
-        // 客户 / 业务员 / 原币谓词与范围相交；绝不因业务员筛选而扩展数据范围，也绝不在聚合后再筛选。
+        // 客户 / 业务员 / 业务员姓名关键字 / 原币谓词与范围相交；绝不因业务员筛选而扩展数据范围，也绝不在聚合后再筛选。
         ordersQuery = ApplySalesmanOutputFilter(ordersQuery, filter);
 
         var orders = await ordersQuery
@@ -307,10 +307,14 @@ public partial class ReportService
 
     /// <summary>
     /// 应用 ERP-237 可选筛选（在业务员数据范围之后、501 订单头上限探测之前）：客户 Id 精确匹配、
-    /// 业务员 Id 精确匹配、原币币种已知枚举码精确匹配。筛选已由调用方规范化；全部为参数化 EF 谓词，非任意 SQL。
+    /// 业务员 Id 精确匹配、业务员姓名关键字字面包含匹配、原币币种已知枚举码精确匹配。
+    /// 筛选已由调用方规范化；全部为参数化 EF 谓词，非任意 SQL。
     /// <para>业务员 Id 仅订单属性（非权限边界）：不会因业务员筛选而扩展客户范围，也不会在聚合后再筛选。</para>
+    /// <para>姓名关键字使用对持久化 <c>SalesmanId</c> 的关联 <c>BaseEmployees.Any</c> 谓词（未删除员工 + 字面
+    /// <c>EmployeeName.Contains</c>），在范围 / 客户 / 业务员 / 币种谓词之后、501 订单头上限探测之前相交；
+    /// 不建立单独员工目录 / 客户端身份权威、不产生逐单 / 逐行额外员工读取。<c>%</c> / <c>_</c> 按字面文本匹配。</para>
     /// </summary>
-    private static IQueryable<SalesOrder> ApplySalesmanOutputFilter(
+    private IQueryable<SalesOrder> ApplySalesmanOutputFilter(
         IQueryable<SalesOrder> source, SalesmanOutputFilterDto? filter)
     {
         if (filter is null)
@@ -321,6 +325,15 @@ public partial class ReportService
 
         if (filter.SalesmanId is > 0)
             source = source.Where(o => o.SalesmanId == filter.SalesmanId.Value);
+
+        if (!string.IsNullOrEmpty(filter.SalesmanName))
+        {
+            var keyword = filter.SalesmanName;
+            source = source.Where(o => o.SalesmanId != null
+                && _db.BaseEmployees.Any(e => e.Id == o.SalesmanId
+                                              && !e.IsDeleted
+                                              && e.EmployeeName.Contains(keyword)));
+        }
 
         if (!string.IsNullOrEmpty(filter.Currency)
             && Enum.TryParse<Currency>(filter.Currency, true, out var currency))
