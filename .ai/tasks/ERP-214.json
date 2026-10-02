@@ -1,0 +1,62 @@
+{
+  "id": "ERP-214",
+  "title": "Download scoped product shipment ranking as PDF",
+  "status": "pending",
+  "risk_level": "low",
+  "priority": "P1",
+  "description": "A user downloads the current quantity-only product shipment ranking design as PDF. Add a PDF endpoint to the existing dynamic ranking controller that reruns its validated and freshly authorized preview; use a narrow Infrastructure exporter with existing PDFsharp and SimHeiPdfFontResolver. Preserve selected-column order, effective dates, Top-limited coverage and separate units, paginate wide columns and rows and show explicit empty evidence. Never include current-price money estimates, combine quantities across units or claim full source coverage. Missing fonts/render failures return a clear error and no corrupt file. The designer sends current dates/Top/fields and reports download failures; current Excel remains compatible. Development only: reuse existing ERP report services, the product-sales-ranking menu and current-user SalespersonDataScopeService; existing OperationLogMiddleware records HTTP audit. No arbitrary/model-generated SQL, permission expansion, direct table/business writes, new domain entities or persistence schema, schema/view/stored-procedure edits, migrations, production SQL or real database execution, secrets/.env/config changes, irreversible actions, production deployment or real browser acceptance. Keep unrelated work. Run focused in-memory API/service/export/UI source-contract tests and configured safe Release build/test; unavailable external environments must be marked blocked, never fabricated passed.",
+  "acceptance_criteria": [
+    "PDF independently validates current fields/dates/Top and rechecks identity/menu/customer scope, using the same server-derived bounded quantity preview; revoked/invalid requests return no file.",
+    "The Infrastructure exporter preserves selected order, approved-shipment/date/Top/unit context, row/column pagination and empty evidence, omits money and cross-unit totals and fails explicitly on missing font/render error.",
+    "Designer retains current request values on PDF and surfaces errors; focused PDF/UI and Excel compatibility tests plus safe Release build/test pass."
+  ],
+  "criterion_path_map": {
+    "PDF independently validates current fields/dates/Top and rechecks identity/menu/customer scope, using the same server-derived bounded quantity preview; revoked/invalid requests return no file.": [
+      "src/ERP.Api/Controllers/DynamicProductSalesRankingReportController.cs",
+      "src/ERP.UnitTests/DynamicProductSalesRankingPdfTests.cs"
+    ],
+    "The Infrastructure exporter preserves selected order, approved-shipment/date/Top/unit context, row/column pagination and empty evidence, omits money and cross-unit totals and fails explicitly on missing font/render error.": [
+      "src/ERP.Infrastructure/Export/DynamicProductSalesRankingPdfExporter.cs",
+      "src/ERP.Application/DTOs/DynamicProductSalesRankingReportDtos.cs",
+      "src/ERP.Application/Services/DynamicProductSalesRankingReportRules.cs",
+      "src/ERP.UnitTests/DynamicProductSalesRankingPdfTests.cs"
+    ],
+    "Designer retains current request values on PDF and surfaces errors; focused PDF/UI and Excel compatibility tests plus safe Release build/test pass.": [
+      "src/ERP.Api/wwwroot/js/reports.js",
+      "src/ERP.UnitTests/DynamicProductSalesRankingReportUiTests.cs",
+      "src/ERP.Api/Controllers/DynamicProductSalesRankingReportController.cs",
+      "src/ERP.Infrastructure/Export/DynamicProductSalesRankingPdfExporter.cs",
+      "src/ERP.UnitTests/DynamicProductSalesRankingPdfTests.cs",
+      "src/ERP.UnitTests/DynamicProductSalesRankingExcelTests.cs"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/DynamicProductSalesRankingReportController.cs",
+    "src/ERP.UnitTests/DynamicProductSalesRankingPdfTests.cs",
+    "src/ERP.Infrastructure/Export/DynamicProductSalesRankingPdfExporter.cs",
+    "src/ERP.Application/DTOs/DynamicProductSalesRankingReportDtos.cs",
+    "src/ERP.Application/Services/DynamicProductSalesRankingReportRules.cs",
+    "src/ERP.Api/wwwroot/js/reports.js",
+    "src/ERP.UnitTests/DynamicProductSalesRankingReportUiTests.cs",
+    "src/ERP.UnitTests/DynamicProductSalesRankingExcelTests.cs"
+  ],
+  "depends_on": [
+    "ERP-213"
+  ],
+  "max_attempts": 3,
+  "attempts": 0,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only bounded read/report feature"
+  },
+  "created_at": "2026-10-02T01:44:40.465157Z"
+}
