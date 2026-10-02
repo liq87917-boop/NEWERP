@@ -131,7 +131,7 @@ const REPORTS = {
     ] },
 
   /* === 阶段 2 续：业务员提成 === */
-  'sales-commission': { api: '/api/reports/sales-commission', title: '业务员提成表',
+  'sales-commission': { api: '/api/reports/sales-commission', title: '业务员提成表', designer: 'sales-commission',
     emoji: '💰', kpi: 'gold',
     summary: '按业务员桶 × 原币：已审核订单金额小计（原币）· 利润/提成未知 · 提成比例为当前参考（非历史约定/实际提成）',
     columns: [
@@ -237,9 +237,11 @@ async function renderReport(rep, name) {
                 ? `<button class="btn btn-neutral" onclick="openCustomerShipmentDesigner()" title="打开客户出货量证据字段设计器（只读预览，客户×原币证据行，绝不跨币种/跨单位合计）">🎛 字段设计器</button>`
                 : rep.designer === 'salesman-output'
                   ? `<button class="btn btn-neutral" onclick="openSalesmanOutputDesigner()" title="打开业务员产值证据字段设计器（只读预览，业务员×原币证据行，绝不跨币种合计、利润恒为未知）">🎛 字段设计器</button>`
-                  : rep.designer
-                    ? `<button class="btn btn-neutral" onclick="openFollowUpDueDesigner()" title="打开动态跟进提醒字段设计器（只读预览）">🎛 字段设计器</button>`
-                    : ''}
+                  : rep.designer === 'sales-commission'
+                    ? `<button class="btn btn-neutral" onclick="openSalesCommissionDesigner()" title="打开业务员提成证据字段设计器（只读预览，业务员桶×原币证据行，绝不跨币种合计、利润/提成未知、提成比例为当前参考）">🎛 字段设计器</button>`
+                    : rep.designer
+                      ? `<button class="btn btn-neutral" onclick="openFollowUpDueDesigner()" title="打开动态跟进提醒字段设计器（只读预览）">🎛 字段设计器</button>`
+                      : ''}
         <button class="btn btn-neutral" onclick="exportReportCSV()" title="导出为 CSV">📤 导出 CSV</button>
         <button class="btn btn-neutral" onclick="window.print()" title="打印报表">🖨 打印</button>
       </div>
@@ -255,7 +257,9 @@ async function renderReport(rep, name) {
             ? `<div id="csd-designer"></div>`
             : rep.designer === 'salesman-output'
               ? `<div id="sod-designer"></div>`
-              : rep.designer ? `<div id="fud-designer"></div>` : ''}
+              : rep.designer === 'sales-commission'
+                ? `<div id="scd-designer"></div>`
+                : rep.designer ? `<div id="fud-designer"></div>` : ''}
 
     <div class="table-wrap" id="report-table">
       <div class="skeleton-row"></div><div class="skeleton-row"></div><div class="skeleton-row"></div>
@@ -4239,6 +4243,402 @@ function openSalesmanOutputDesigner() {
       </div>
     </div>`;
   loadSalesmanOutputDesignerCatalog();
+}
+
+/* ============ 业务员提成证据字段设计器（ERP-244：只读、有界的前端字段选择与分页预览） ============
+   口径与后端 ERP-244（DynamicSalesCommissionReportController / DynamicSalesCommissionReportRules）一一对应：
+   - 入口复用在「业务员提成表」报表（reports.js 的 sales-commission，designer: 'sales-commission'），不新增菜单 / 架构 / 脚本注册；
+   - 字段选择器只由 GET /api/dynamic-sales-commission-report 返回的有限白名单目录渲染为复选框（name="scd-des-field"），
+     绝无自由填写的字段名或 SQL；勾选状态经 scdSelectFields 规范化（去重、保持顺序、丢弃未知键）；
+   - 筛选仅限开始 / 结束日期（含首尾最多 366 天）、客户 Id（正整数）、业务员 Id（正整数）与原币币种（CNY / USD / EUR / HKD / GBP / JPY），分页有界（页码 ≥ 1，每页 1~200），
+     预览走 POST /api/dynamic-sales-commission-report，只发送「白名单字段 + 有界日期 + 有界分页 + 规范化可选筛选」；
+   - 结果按后端返回的列名与选定字段值渲染（scdTableHtml / scdResultHtml），全部 HTML 转义，null 金额 / 利润 / 提成显示「未知」；
+   - 日期 / 规范化筛选 / 来源上限 / 来源依据 / 原币 / 未知 / 未知利润 / 当前参考比例口径与业务员桶 / 已审核订单上下文始终显示（即使对应列被取消选择），绝不展示跨币种总额；
+   - 空页 / 授权撤销（权限不足 / 未登录）/ 无效请求 / 网络失败分别可见，且不暴露范围外数据；
+   - 全程只读：不写库、不迁移、不执行任意 SQL。 */
+
+let SCD_DYN = {
+  catalog: null,      // GET /api/dynamic-sales-commission-report 返回的目录 DTO
+  fields: [],         // 目录字段（白名单）
+  selectedKeys: [],   // 当前勾选的字段键（默认全选）
+  view: null,         // 最近一次预览结果
+  page: 1,            // 当前预览页（预览 / 翻页复用）
+};
+
+function scdEsc(v) {
+  return String(v ?? '').replace(/[&<>"']/g, c => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[c]));
+}
+
+/* 规范化选定字段（fail closed）：只保留目录白名单内的键、去重、保持请求顺序；未知键丢弃，绝不发送任意字段名 */
+function scdSelectFields(catalogFields, selectedKeys) {
+  const valid = new Set((catalogFields || []).map(f => f && f.key).filter(Boolean));
+  const seen = new Set();
+  const result = [];
+  for (const k of (Array.isArray(selectedKeys) ? selectedKeys : [])) {
+    if (typeof k !== 'string') continue;
+    const key = k.trim();
+    if (!key || !valid.has(key) || seen.has(key)) continue;
+    seen.add(key);
+    result.push(key);
+  }
+  return result;
+}
+
+/* 日期窗口客户端校验（与后端 ValidateDateRange 一致）：必填、结束不早于开始、含首尾最多 366 天 */
+function scdDateError(state) {
+  const start = String(state && state.start || '').trim();
+  const end = String(state && state.end || '').trim();
+  if (!start || !end) return '请填写开始与结束日期';
+  const startMs = Date.parse(start);
+  const endMs = Date.parse(end);
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) return '日期格式无效';
+  if (end < start) return '结束日期不能早于开始日期';
+  if (Math.round((endMs - startMs) / 86400000) + 1 > 366) return '日期范围最多 366 天（含首尾）';
+  return '';
+}
+
+/* 客户 Id / 业务员 Id / 原币币种客户端校验（与后端 NormalizeFilter 一致）：非法取值在发送前可见拒绝 */
+function scdFilterError(state) {
+  const customerId = String(state && state.customerId || '').trim();
+  if (customerId !== '') {
+    const c = Number(customerId);
+    if (!Number.isInteger(c) || c <= 0) return '客户 Id 必须是正整数（大于 0）';
+  }
+  const salesmanId = String(state && state.salesmanId || '').trim();
+  if (salesmanId !== '') {
+    const s = Number(salesmanId);
+    if (!Number.isInteger(s) || s <= 0) return '业务员 Id 必须是正整数（大于 0）';
+  }
+  const currency = String(state && state.currency || '').trim();
+  if (currency !== '') {
+    if (!/^(CNY|USD|EUR|HKD|GBP|JPY)$/i.test(currency)) return '原币币种仅支持 CNY / USD / EUR / HKD / GBP / JPY';
+  }
+  return '';
+}
+
+/* 组装可选应用筛选（只发送规范化后的客户 Id / 业务员 Id / 原币币种；全部留空 = null，保持既有业务员提成行为） */
+function scdBuildFilter(state) {
+  const customerId = String(state && state.customerId || '').trim();
+  const salesmanId = String(state && state.salesmanId || '').trim();
+  const currency = String(state && state.currency || '').trim();
+  const filter = {};
+  if (customerId !== '') filter.customerId = Number(customerId);
+  if (salesmanId !== '') filter.salesmanId = Number(salesmanId);
+  if (currency !== '') filter.currency = currency.toUpperCase();
+  return (filter.customerId === undefined && filter.salesmanId === undefined && filter.currency === undefined) ? null : filter;
+}
+
+/* 组装有界预览请求体：字段只来自目录、日期仅开始 / 结束、分页有界，绝不接受任意字段名或 SQL */
+function scdBuildRequest(state) {
+  const fields = scdSelectFields(state.catalogFields, state.selectedKeys);
+  const page = Math.max(1, Math.floor(Number(state.page) || 1));
+  const maxPageSize = Number(state.maxPageSize) || 200;
+  let pageSize = Math.floor(Number(state.pageSize));
+  if (!Number.isFinite(pageSize)) pageSize = 20;
+  pageSize = Math.max(1, Math.min(maxPageSize, pageSize));
+  return {
+    fields,
+    page,
+    pageSize,
+    start: String(state.start).slice(0, 10),
+    end: String(state.end).slice(0, 10),
+    filter: scdBuildFilter(state),
+  };
+}
+
+/* 单元格纯文本：数字合理格式化（整数 / 2 位小数）、日期取 yyyy-MM-dd、其余按字符串呈现 */
+function scdCellText(value, field) {
+  const dataType = (field && field.dataType) || 'text';
+  if (dataType === 'number') {
+    const n = Number(value);
+    if (Number.isFinite(n)) return Number.isInteger(n) ? String(n) : n.toFixed(2);
+    return String(value);
+  }
+  if (dataType === 'date') return fmtDate(value);
+  return String(value);
+}
+
+/* 单元格 HTML（转义后安全渲染；null 金额 / 利润 / 提成显式显示「未知」） */
+function scdRenderCell(value, field) {
+  if (value === null || value === undefined) return '<span class="text-muted">未知</span>';
+  return scdEsc(scdCellText(value, field));
+}
+
+/* 结果表格 HTML：表头为返回的列名、单元格为返回的选定字段值，全部经转义 */
+function scdTableHtml(view) {
+  const cols = (view && view.columns) || [];
+  const rows = (view && view.rows) || [];
+  if (!cols.length) return '';
+  const align = c => (c.dataType === 'number') ? ' class="text-right"' : '';
+  const head = cols.map(c => `<th${align(c)}>${scdEsc(c.label || c.key)}</th>`).join('');
+  const body = rows.length
+    ? rows.map(r => `<tr>${cols.map(c => `<td${align(c)}>${scdRenderCell(r[c.key], c)}</td>`).join('')}</tr>`).join('')
+    : '';
+  return `<div class="table-wrap" style="margin-top:8px"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
+}
+
+/* 分页（有界、稳定）：当前页之外仍有记录时标注截断，翻页复用当前字段 / 日期 / 每页条数 */
+function scdPagingHtml(view) {
+  if (!view) return '';
+  const prevDisabled = view.page <= 1 ? ' disabled' : '';
+  const nextDisabled = view.page >= view.totalPages ? ' disabled' : '';
+  return `<div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px">
+      <span class="text-muted">第 ${view.page} 页 / 共 ${view.totalPages} 页${view.truncated ? '（仅当前页，后续仍有分页）' : ''}</span>
+      <div>
+        <button class="btn btn-neutral btn-sm" onclick="scdPage(-1)"${prevDisabled}>← 上一页</button>
+        <button class="btn btn-neutral btn-sm" onclick="scdPage(1)"${nextDisabled}>下一页 →</button>
+      </div></div>`;
+}
+
+/* 空结果提示（显式使用后端 emptyText） */
+function scdEmptyHtml(view) {
+  return `<div class="empty" style="margin:8px 0">${scdEsc((view && view.emptyText) || '没有符合所选日期范围与数据范围的已审核销售订单')}</div>`;
+}
+
+/* 错误提示（授权撤销 / 未登录 / 无效请求 / 网络失败分别可见，且不暴露任何数据） */
+function scdErrorHtml(kind, message) {
+  const labels = {
+    forbidden: '权限不足',
+    unauthorized: '未登录 / 登录已过期',
+    invalid: '请求无效',
+    network: '网络请求失败',
+    error: '预览失败',
+  };
+  return `<div class="pd-hint" style="color:#b91c1c;background:#fef2f2;border-color:#fecaca">
+      <b>${scdEsc(labels[kind] || '预览失败')}</b>：${scdEsc(message || '')}</div>`;
+}
+
+/* 业务码 → 错误态分类 */
+function scdKindOfCode(code) {
+  if (code === 2002) return 'forbidden';
+  if (code === 2000 || code === 2003) return 'unauthorized';
+  if (code === 5000) return 'error';
+  return 'invalid';
+}
+
+/* 服务端范围上下文：区分「业务员桶 × 原币证据行」与「去重业务员桶 / 已审核订单数」，并显式声明证据依据 */
+function scdScopeLine(view) {
+  const c = view && view.context;
+  if (!c) return '';
+  return `${scdEsc(c.label || '')}：行 ${c.salesmanCurrencyRows} · 去重业务员桶 ${c.uniqueSalesmanBuckets} · 已审核订单 ${c.approvedOrders} · ${scdEsc(c.evidenceBasis || '')}`;
+}
+
+/* 结果区渲染：先给范围 / 口径提示（即使对应列被取消选择也始终显示），再渲染空态或表格 + 分页 */
+function scdResultHtml(view) {
+  if (!view) return '';
+  const filterLine = view && view.filterText
+    ? `<div class="pd-hint" style="color:#0f766e;background:#f0fdfa;border-color:#99f6e4;margin:0 0 8px">🔍 ${scdEsc(view.filterText)}</div>`
+    : '';
+  const dateLine = (view && view.start && view.end) ? `日期 ${fmtDate(view.start)} ~ ${fmtDate(view.end)}` : '';
+  const hints = [
+    dateLine,
+    view.pageOnlyText,
+    view.currencyContextText,
+    view.unknownContextText,
+    view.profitContextText,
+    view.commissionContextText,
+    view.rateContextText,
+    view.sourceContextText,
+    view.sourceLimitText,
+  ].filter(Boolean).map(t => `<div class="pd-hint" style="margin:0 0 8px">${scdEsc(t)}</div>`).join('');
+  const scope = `<div class="pd-hint" style="margin:0 0 8px">${scdScopeLine(view)}</div>`;
+  const body = view.rows && view.rows.length
+    ? scdTableHtml(view) + scdPagingHtml(view)
+    : scdEmptyHtml(view);
+  return `${scope}${filterLine}${hints}${body}`;
+}
+
+/* 字段选择器：只由目录白名单渲染为复选框，绝不渲染自由输入框或 SQL */
+function scdFieldChooserHtml(fields, selectedKeys) {
+  const selected = new Set(Array.isArray(selectedKeys) ? selectedKeys : []);
+  const boxes = (fields || []).map(f => {
+    const checked = selected.has(f.key) ? ' checked' : '';
+    return `<label class="checkbox-chip"><input type="checkbox" name="scd-des-field" value="${scdEsc(f.key)}"${checked} onchange="scdResetPage(); scdSyncSelection()"> ${scdEsc(f.label)}</label>`;
+  }).join('');
+  return `<div class="pd-hint"><b>字段</b>（仅目录白名单，无自由字段名）</div>
+      <div class="checkbox-group">${boxes}</div>
+      <div style="margin:8px 0">
+        <button class="btn btn-neutral btn-sm" onclick="scdToggleAll(true)">全选</button>
+        <button class="btn btn-neutral btn-sm" onclick="scdToggleAll(false)">清空</button>
+      </div>`;
+}
+
+/* 加载中提示 */
+function scdLoadingHtml() {
+  return '<div class="empty" style="margin:8px 0">加载中，请稍候…</div>';
+}
+
+/* 设计器结果区：预览结果渲染到 #scd-des-result（字段选择器与日期 / 分页表单保持不动） */
+function scdRenderResult(html) {
+  const el = document.getElementById('scd-des-result');
+  if (el) el.innerHTML = html;
+}
+
+/* 字段选择器渲染到 #scd-des-fields */
+function scdRenderFields(html) {
+  const el = document.getElementById('scd-des-fields');
+  if (el) el.innerHTML = html;
+}
+
+/* 统一 JSON 请求（GET 目录 / POST 预览），带登录 token；响应解析为后端 ApiResponse */
+async function scdRequest(path, method, body) {
+  const headers = { 'Content-Type': 'application/json' };
+  const token = typeof localStorage !== 'undefined' ? (localStorage.getItem('erp_token') || '') : '';
+  if (token) headers['Authorization'] = 'Bearer ' + token;
+  const resp = await fetch(path, {
+    method,
+    headers,
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  return await resp.json();
+}
+
+/* 勾选状态 → SCD_DYN.selectedKeys（保持勾选顺序） */
+function scdSyncSelection() {
+  const boxes = Array.from(document.querySelectorAll('input[name="scd-des-field"]'));
+  SCD_DYN.selectedKeys = boxes.filter(b => b.checked).map(b => b.value);
+}
+
+/* 全选 / 清空 */
+function scdToggleAll(checked) {
+  const boxes = Array.from(document.querySelectorAll('input[name="scd-des-field"]'));
+  boxes.forEach(b => { b.checked = checked; });
+  scdSyncSelection();
+}
+
+/* 筛选 / 字段 / 日期 / 每页条数变更后重置到第 1 页并清空旧结果（保留其余输入值） */
+function scdResetPage() {
+  SCD_DYN.page = 1;
+  SCD_DYN.view = null;
+}
+
+/* 读取当前字段 / 日期 / 每页条数 / 分页状态（预览与翻页复用，单一来源） */
+function scdBuildState(page) {
+  const val = id => { const el = document.getElementById(id); return el ? el.value.trim() : ''; };
+  return {
+    catalogFields: SCD_DYN.fields,
+    selectedKeys: SCD_DYN.selectedKeys,
+    start: val('scd-des-start'),
+    end: val('scd-des-end'),
+    customerId: val('scd-des-customer-id'),
+    salesmanId: val('scd-des-salesman-id'),
+    currency: val('scd-des-currency'),
+    pageSize: val('scd-des-pagesize'),
+    page: page || SCD_DYN.page || 1,
+    maxPageSize: SCD_DYN.catalog && SCD_DYN.catalog.maxPageSize ? SCD_DYN.catalog.maxPageSize : 200,
+  };
+}
+
+/* 预览：组装有界请求 → POST → 安全渲染列名与单元格；授权 / 无效 / 空 / 网络失败均可见，失败清空旧数据 */
+async function scdPreview(page) {
+  const state = scdBuildState(page);
+  const dateError = scdDateError(state);
+  if (dateError) {
+    SCD_DYN.view = null;
+    scdRenderResult(scdErrorHtml('invalid', dateError));
+    return;
+  }
+  const filterError = scdFilterError(state);
+  if (filterError) {
+    SCD_DYN.view = null;
+    scdRenderResult(scdErrorHtml('invalid', filterError));
+    return;
+  }
+  const req = scdBuildRequest(state);
+  SCD_DYN.page = req.page;
+
+  scdRenderResult(scdLoadingHtml());
+
+  try {
+    const resp = await scdRequest('/api/dynamic-sales-commission-report', 'POST', req);
+    if (resp.code === 0) {
+      SCD_DYN.view = resp.data;
+      SCD_DYN.page = resp.data.page;
+      scdRenderResult(scdResultHtml(resp.data));
+    } else if (resp.code === 2000 || resp.code === 2003) {
+      SCD_DYN.view = null;
+      if (typeof logout === 'function') logout();
+      scdRenderResult(scdErrorHtml('unauthorized', resp.message));
+    } else {
+      SCD_DYN.view = null;
+      scdRenderResult(scdErrorHtml(scdKindOfCode(resp.code), resp.message));
+    }
+  } catch (err) {
+    SCD_DYN.view = null;
+    scdRenderResult(scdErrorHtml('network', (err && err.message) || '无法连接到服务器'));
+  }
+}
+
+/* 翻页（有界：最小第 1 页，最大总页数） */
+function scdPage(delta) {
+  const next = (SCD_DYN.page || 1) + delta;
+  SCD_DYN.page = Math.max(1, next);
+  scdPreview(SCD_DYN.page);
+}
+
+/* 加载字段目录（白名单，有限、只读），失败时区分未登录 / 权限不足 / 网络错误 */
+async function loadSalesCommissionDesignerCatalog() {
+  scdRenderResult(scdLoadingHtml());
+  try {
+    const resp = await scdRequest('/api/dynamic-sales-commission-report', 'GET');
+    if (resp.code === 0) {
+      SCD_DYN.catalog = resp.data;
+      SCD_DYN.fields = (resp.data && resp.data.fields) || [];
+      SCD_DYN.selectedKeys = SCD_DYN.fields.map(f => f.key);
+      SCD_DYN.page = 1;
+      SCD_DYN.view = null;
+      scdRenderFields(scdFieldChooserHtml(SCD_DYN.fields, SCD_DYN.selectedKeys));
+      scdSyncSelection();
+      const filterHint = document.getElementById('scd-des-filter-hint');
+      if (filterHint) filterHint.textContent = (resp.data && resp.data.filterText) || '';
+      return;
+    }
+    if (resp.code === 2000 || resp.code === 2003) {
+      if (typeof logout === 'function') logout();
+      scdRenderResult(scdErrorHtml('unauthorized', resp.message));
+    } else {
+      scdRenderResult(scdErrorHtml(scdKindOfCode(resp.code), resp.message));
+    }
+  } catch (err) {
+    scdRenderResult(scdErrorHtml('network', (err && err.message) || '无法连接到服务器'));
+  }
+}
+
+/* 打开业务员提成证据字段设计器（仅渲染容器，字段目录由目录接口加载） */
+function openSalesCommissionDesigner() {
+  const host = document.getElementById('scd-designer');
+  if (!host) return;
+  host.innerHTML = `
+    <div class="card" style="margin:16px 0">
+      <div class="card-head"><h3>业务员提成证据字段设计器（只读预览）</h3></div>
+      <div class="card-body">
+        <div id="scd-des-fields"></div>
+        <div class="form-row" style="margin:12px 0">
+          <label>开始日期 <input type="date" id="scd-des-start" value="${scdEsc(new Date().toISOString().slice(0, 10))}" onchange="scdResetPage()"></label>
+          <label>结束日期 <input type="date" id="scd-des-end" value="${scdEsc(new Date().toISOString().slice(0, 10))}" onchange="scdResetPage()"></label>
+          <label>客户 Id <input type="number" id="scd-des-customer-id" min="1" style="width:90px" placeholder="全部客户" onchange="scdResetPage()"></label>
+          <label>业务员 Id <input type="number" id="scd-des-salesman-id" min="1" style="width:90px" placeholder="全部业务员" onchange="scdResetPage()"></label>
+          <label>原币 <select id="scd-des-currency" onchange="scdResetPage()">
+            <option value="">全部币种</option>
+            <option value="CNY">CNY 人民币</option>
+            <option value="USD">USD 美元</option>
+            <option value="EUR">EUR 欧元</option>
+            <option value="HKD">HKD 港币</option>
+            <option value="GBP">GBP 英镑</option>
+            <option value="JPY">JPY 日元</option>
+          </select></label>
+          <label>每页条数 <input type="number" id="scd-des-pagesize" value="20" min="1" max="200" style="width:90px" onchange="scdResetPage()"></label>
+        </div>
+        <div id="scd-des-filter-hint" class="pd-hint" style="margin:8px 0"></div>
+        <div style="margin:8px 0">
+          <button class="btn btn-primary" onclick="scdPreview(1)">🔍 预览</button>
+        </div>
+        <div id="scd-des-result"></div>
+      </div>
+    </div>`;
+  loadSalesCommissionDesignerCatalog();
 }
 
 
