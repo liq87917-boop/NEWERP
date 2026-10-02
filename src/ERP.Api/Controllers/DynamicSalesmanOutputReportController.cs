@@ -18,6 +18,7 @@ namespace ERP.Api.Controllers;
 /// <item><b>POST /api/dynamic-salesman-output-report</b>：按选定字段与有界日期窗口（start / end）预览当前账号数据范围内的业务员 × 原币证据行，稳定分页。</item>
 /// <item><b>POST /api/dynamic-salesman-output-report/export</b>：导出当前选定页为 Excel（xlsx，只读，复用有界授权预览与选定列顺序，含日期 / 分页 / 来源上限 / 原币 / 未知 / 未知利润 / 来源上下文工作表，绝不追加跨币种合计）。</item>
 /// <item><b>POST /api/dynamic-salesman-output-report/pdf</b>：下载当前选定页为分页中文 PDF（只读，复用有界授权预览与选定列顺序，分页渲染，字体缺失显式失败，绝不跨币种合计或声称实际出货 / 收款 / 已实现利润）。</item>
+/// <item><b>POST /api/dynamic-salesman-output-report/export-summary-pdf</b>：下载当前筛选集的全匹配原币汇总为分页中文 PDF（只读，独立重新校验身份 / 菜单 / 数据范围 / 字段 / 日期 / 分页 / 应用筛选，复用同一服务端全匹配汇总，绝不含业务员 / 客户明细行）。</item>
 /// </list>
 /// <para>复用既有「业务员产值报表」（salesman-output）菜单授权与 <see cref="SalespersonDataScopeService"/>（ERP-097）业务员数据范围；
 /// 每次目录 / 预览 / 导出请求都重新校验身份、菜单授权与业务员数据范围（fail closed），
@@ -118,6 +119,27 @@ public class DynamicSalesmanOutputReportController : ControllerBase
         var bytes = BuildSummaryWorkbook(page);
         return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             $"SalesmanOutputEvidenceSummary_{DateTime.Now:yyyyMMddHHmmss}.xlsx");
+    }
+
+    /// <summary>
+    /// 下载当前筛选集的全匹配汇总为中文 PDF（ERP-241，只读）：独立重新校验身份 / 业务员产值报表菜单授权 /
+    /// 业务员数据范围 / 字段 / 日期 / 分页 / 应用筛选，并复用同一服务端在全部匹配业务员 × 原币证据行上派生的
+    /// ERP-239 全匹配原币汇总（与当前页 / 选定列无关，无需先预览、绝不含业务员 / 客户明细行）；绝不信任客户端行 / 金额 / 身份 / 数据范围。
+    /// PDF 分页渲染稳定原币汇总表（已知签名金额 / 已分配已审核订单数 / 去重业务员数为数值，未知金额 / 利润 / 利润率 / 依据显式「未知」），
+    /// 标注日期 / 应用筛选 / 来源上限 / 全匹配覆盖 / 来源证据 / 利润依据 / 只读声明上下文；绝不跨币种合计、绝无总计行、绝不做利润推算。
+    /// 授权撤销 / 无效输入 / 来源超限返回错误、不返回任何文件；字体缺失 / 渲染失败显式失败、不产出损坏文件。
+    /// <para>全程只读，不写库、不执行任意 SQL；请求由既有 <c>OperationLogMiddleware</c> 记录审计（动作「导出全匹配汇总 PDF」）。</para>
+    /// </summary>
+    [HttpPost("export-summary-pdf")]
+    public async Task<IActionResult> ExportSummaryPdf([FromBody] DynamicSalesmanOutputReportRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var page = await BuildPageAsync(request);
+        var summary = page.Summary
+            ?? throw new BusinessException("全匹配原币汇总不可用", ErrorCodes.RuleConflict);
+        var bytes = DynamicSalesmanOutputSummaryPdfExporter.Export(summary, page);
+        return File(bytes, "application/pdf", $"SalesmanOutputEvidenceSummary_{DateTime.Now:yyyyMMddHHmmss}.pdf");
     }
 
     /// <summary>复用同一有界、已授权预览管线：先校验字段 / 日期 / 分页 / 应用筛选，再每次重新校验身份 / 菜单授权 / 数据范围，最后只读查询当前页</summary>

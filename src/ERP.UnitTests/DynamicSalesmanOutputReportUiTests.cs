@@ -266,4 +266,40 @@ public class DynamicSalesmanOutputReportUiTests
         Assert.Contains("'invalid'", fn);
     }
 
+    // ==================== 8. ERP-241 全匹配汇总 PDF 导出 ====================
+
+    [Fact]
+    public void 导出汇总PDF_按钮与函数存在_无需先预览_仅下载pdf()
+    {
+        var js = Script;
+
+        Assert.Contains("function sodExportSummaryPdf()", js);
+        Assert.Contains("onclick=\"sodExportSummaryPdf()\"", js);
+        Assert.Contains("下载全匹配汇总 PDF", js);
+        Assert.Contains("/api/dynamic-salesman-output-report/export-summary-pdf", js);
+
+        // 汇总 PDF 导出独立于详情页预览：绝无「请先预览」守卫，也不读取当前页明细行 / 选定列
+        var fn = Segment(js, "function sodExportSummaryPdf()", "function loadSalesmanOutputDesignerCatalog()");
+        Assert.Contains("contentType.indexOf('application/pdf') >= 0", fn);
+        Assert.Contains("业务员产值证据汇总_' + dateStr + '.pdf'", fn);
+        Assert.DoesNotContain("请先预览后再导出", fn);
+        Assert.DoesNotContain("view.rows", fn);
+        Assert.DoesNotContain("view.columns", fn);
+    }
+
+    [Fact]
+    public void 导出汇总PDF_复用当前字段日期筛选分页请求体_保留输入_失败可见()
+    {
+        var js = Script;
+        var fn = Segment(js, "function sodExportSummaryPdf()", "function loadSalesmanOutputDesignerCatalog()");
+
+        Assert.Contains("sodBuildState(SOD_DYN.page || 1)", fn);
+        Assert.Contains("sodDateError(state)", fn);
+        Assert.Contains("sodFilterError(state)", fn);
+        Assert.Contains("sodBuildRequest(state)", fn);
+        Assert.Contains("sodErrorHtml(sodKindOfCode(code), message)", fn);
+        Assert.Contains("sodErrorHtml('network'", fn);
+        Assert.Contains("'invalid'", fn);
+    }
+
 }

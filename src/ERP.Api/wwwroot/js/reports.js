@@ -4036,6 +4036,65 @@ async function sodExportSummary() {
   }
 }
 
+/* 下载全匹配原币汇总 PDF（ERP-241，只读）：无需先预览，复用当前字段 / 日期 / 分页 / 应用筛选组装请求体
+   POST /api/dynamic-salesman-output-report/export-summary-pdf；成功（application/pdf 附件）触发下载；
+   授权 / 无效 / 来源超限 / 网络 / 字体缺失失败在结果区可见、保留当前输入、不下载任何内容。
+   区别于「导出当前页 PDF」：本按钮导出服务端在全部匹配业务员 × 原币证据行上派生的
+   全匹配原币汇总，绝不含业务员 / 客户明细行、绝不跨币种合计、绝无总计行。 */
+async function sodExportSummaryPdf() {
+  const state = sodBuildState(SOD_DYN.page || 1);
+  const dateError = sodDateError(state);
+  if (dateError) {
+    sodRenderResult(sodErrorHtml('invalid', dateError));
+    return;
+  }
+  const filterError = sodFilterError(state);
+  if (filterError) {
+    sodRenderResult(sodErrorHtml('invalid', filterError));
+    return;
+  }
+  const req = sodBuildRequest(state);
+  sodRenderResult(sodLoadingHtml());
+
+  try {
+    const headers = { 'Content-Type': 'application/json' };
+    const token = typeof localStorage !== 'undefined' ? (localStorage.getItem('erp_token') || '') : '';
+    if (token) headers['Authorization'] = 'Bearer ' + token;
+    const resp = await fetch('/api/dynamic-salesman-output-report/export-summary-pdf', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(req),
+    });
+
+    const contentType = (resp.headers.get('content-type') || '');
+    if (contentType.indexOf('application/pdf') >= 0) {
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+      a.href = url;
+      a.download = '业务员产值证据汇总_' + dateStr + '.pdf';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      sodRenderResult(SOD_DYN.view ? sodResultHtml(SOD_DYN.view) : '<div class="pd-hint">已下载全匹配原币汇总 PDF，请查看下载。</div>');
+      return;
+    }
+
+    let message = '汇总 PDF 下载失败';
+    let code;
+    try {
+      const data = await resp.json();
+      message = (data && data.message) || message;
+      code = data && data.code;
+    } catch (e) { /* 非 JSON 响应，沿用默认提示 */ }
+    sodRenderResult(sodErrorHtml(sodKindOfCode(code), message));
+  } catch (err) {
+    sodRenderResult(sodErrorHtml('network', (err && err.message) || '无法连接到服务器'));
+  }
+}
+
 /* 加载字段目录（白名单，有限、只读），失败时区分未登录 / 权限不足 / 网络错误 */
 async function loadSalesmanOutputDesignerCatalog() {
   sodRenderResult(sodLoadingHtml());
@@ -4095,6 +4154,7 @@ function openSalesmanOutputDesigner() {
           <button class="btn btn-neutral" onclick="sodExport()">📤 导出当前页 Excel</button>
           <button class="btn btn-neutral" onclick="sodExportPdf()" title="导出当前预览页为中文 PDF（只读）：复用当前字段 / 日期 / 筛选 / 分页，原币金额签名呈现、未知金额 / 利润显式「未知」、无跨币种合计">📄 导出当前页 PDF</button>
           <button class="btn btn-neutral" onclick="sodExportSummary()" title="下载全匹配原币汇总 Excel（按原始原币合并全部匹配业务员 × 原币证据行，无需先预览，绝不含业务员 / 客户明细行）">📊 下载全匹配汇总 Excel</button>
+          <button class="btn btn-neutral" onclick="sodExportSummaryPdf()" title="下载全匹配原币汇总 PDF（按原始原币合并全部匹配业务员 × 原币证据行，无需先预览，绝不含业务员 / 客户明细行，无跨币种合计）">📄 下载全匹配汇总 PDF</button>
         </div>
         <div id="sod-des-result"></div>
       </div>
