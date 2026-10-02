@@ -1,0 +1,84 @@
+{
+  "title": "Filter scoped salesman evidence and summaries by employee name",
+  "description": "Users find an assigned salesman by a literal employee-name keyword in the existing field designer instead of knowing an employee ID. Extend existing SalesmanOutputFilterDto with optional trimmed name keyword, blank=absent, at most 80 characters, reject control characters and invalid lengths before source reads. Reuse one normalization rule for source service/catalog/preview/detail Excel/detail PDF/summary Excel/summary PDF. Intersect keyword with existing customer scope and customer/salesman/currency/date/status predicates before the 501-order cap using an EF-translatable correlated BaseEmployees.Any predicate for persisted SalesmanId with nondeleted employee and literal EmployeeName.Contains; no separate broad employee directory or client identity authority. Percent/underscore are literal text, not SQL wildcard instructions; matching follows existing database collation, do not promise case-insensitive normalization. Missing/deleted employee names do not match nonblank keyword; omitted keyword retains existing unknown-identity rows. No extra employee/source N+1 reads. Catalog describes finite keyword ability, normalized context propagated in preview/all downloads even salesman field hidden; UI preserves keyword across pagination/download/error and resets page on change, escapes text/Excel/PDF context. Verify scope intersection, invalid input, matching before cap, unknown-identity defaults, literal metacharacters, both summary and detail downloads; check generated SQL translation offline without database connection if feasible, otherwise mark external provider acceptance blocked, never claim real database passed. Development only: reuse the existing salesman-output menu, current-user SalespersonDataScopeService customer scope, approved nondeleted assigned-salesman SalesOrders and existing OperationLogMiddleware HTTP audit. Every endpoint validates current requests and rechecks identity/menu/fresh scope, rejecting invalid/revoked/500-order-cap overflow without data/file. Employee filters never broaden ERP permissions. Evidence remains assigned approved sales orders, not all ERP orders, production, actual revenue/shipment/receipts. No client identity/scope/rows/aggregates as authority, arbitrary/model-generated SQL, direct table/business writes, new domain entities or persistence schema, migrations, schema/view/stored-procedure changes, production SQL or real database execution, credentials/secrets/.env/config changes, irreversible operations, production deployment or real browser acceptance. Preserve unrelated modules and uncommitted work. Run focused in-memory service/API/export/UI source-contract tests plus configured safe Release build/test; unavailable external database/browser acceptance must be explicitly environment-blocked, never fabricated passed.",
+  "depends_on": [
+    "ERP-241"
+  ],
+  "risk_level": "medium",
+  "priority": "P1",
+  "acceptance_criteria": [
+    "Validated optional literal employee-name keyword intersects current scope and existing filters in the EF source before cap probes; no directory leak, arbitrary SQL or expanded permission, with omitted-keyword compatibility.",
+    "Catalog/preview/designer and all detail/summary Excel/PDF requests preserve the same normalized keyword context and safe page-reset/error state, with formula/HTML/PDF-safe labels.",
+    "Focused service/API/export/UI tests cover invalid/blank keywords, scope revocation, missing/deleted employee names, literal wildcard characters and filtering before caps; offline query translation where feasible and safe Release build/test pass."
+  ],
+  "criterion_path_map": {
+    "Validated optional literal employee-name keyword intersects current scope and existing filters in the EF source before cap probes; no directory leak, arbitrary SQL or expanded permission, with omitted-keyword compatibility.": [
+      "src/ERP.Application/DTOs/DynamicSalesmanOutputReportDtos.cs",
+      "src/ERP.Application/Services/DynamicSalesmanOutputReportRules.cs",
+      "src/ERP.Application/Interfaces/IReportService.cs",
+      "src/ERP.Application/Services/ReportService.Sales.cs",
+      "src/ERP.UnitTests/SalesmanOutputKeywordFilterTests.cs",
+      "src/ERP.UnitTests/SalesmanOutputScopeTests.cs",
+      "src/ERP.UnitTests/SalesmanOutputQueryBoundsTests.cs"
+    ],
+    "Catalog/preview/designer and all detail/summary Excel/PDF requests preserve the same normalized keyword context and safe page-reset/error state, with formula/HTML/PDF-safe labels.": [
+      "src/ERP.Application/DTOs/DynamicSalesmanOutputReportDtos.cs",
+      "src/ERP.Application/Services/DynamicSalesmanOutputReportRules.cs",
+      "src/ERP.Api/Controllers/DynamicSalesmanOutputReportController.cs",
+      "src/ERP.Api/wwwroot/js/reports.js",
+      "src/ERP.Infrastructure/Export/DynamicSalesmanOutputPdfExporter.cs",
+      "src/ERP.Infrastructure/Export/DynamicSalesmanOutputSummaryPdfExporter.cs",
+      "src/ERP.UnitTests/SalesmanOutputKeywordFilterTests.cs",
+      "src/ERP.UnitTests/DynamicSalesmanOutputReportTests.cs",
+      "src/ERP.UnitTests/DynamicSalesmanOutputReportUiTests.cs"
+    ],
+    "Focused service/API/export/UI tests cover invalid/blank keywords, scope revocation, missing/deleted employee names, literal wildcard characters and filtering before caps; offline query translation where feasible and safe Release build/test pass.": [
+      "src/ERP.UnitTests/SalesmanOutputKeywordFilterTests.cs",
+      "src/ERP.UnitTests/DynamicSalesmanOutputReportTests.cs",
+      "src/ERP.UnitTests/DynamicSalesmanOutputReportUiTests.cs",
+      "src/ERP.UnitTests/DynamicSalesmanOutputExcelTests.cs",
+      "src/ERP.UnitTests/DynamicSalesmanOutputPdfTests.cs",
+      "src/ERP.UnitTests/DynamicSalesmanOutputSummaryExcelTests.cs",
+      "src/ERP.UnitTests/DynamicSalesmanOutputSummaryPdfTests.cs",
+      "src/ERP.UnitTests/SalesmanOutputScopeTests.cs",
+      "src/ERP.UnitTests/SalesmanOutputQueryBoundsTests.cs"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Application/DTOs/DynamicSalesmanOutputReportDtos.cs",
+    "src/ERP.Application/Services/DynamicSalesmanOutputReportRules.cs",
+    "src/ERP.Application/Interfaces/IReportService.cs",
+    "src/ERP.Application/Services/ReportService.Sales.cs",
+    "src/ERP.UnitTests/SalesmanOutputKeywordFilterTests.cs",
+    "src/ERP.UnitTests/SalesmanOutputScopeTests.cs",
+    "src/ERP.UnitTests/SalesmanOutputQueryBoundsTests.cs",
+    "src/ERP.Api/Controllers/DynamicSalesmanOutputReportController.cs",
+    "src/ERP.Api/wwwroot/js/reports.js",
+    "src/ERP.Infrastructure/Export/DynamicSalesmanOutputPdfExporter.cs",
+    "src/ERP.Infrastructure/Export/DynamicSalesmanOutputSummaryPdfExporter.cs",
+    "src/ERP.UnitTests/DynamicSalesmanOutputReportTests.cs",
+    "src/ERP.UnitTests/DynamicSalesmanOutputReportUiTests.cs",
+    "src/ERP.UnitTests/DynamicSalesmanOutputExcelTests.cs",
+    "src/ERP.UnitTests/DynamicSalesmanOutputPdfTests.cs",
+    "src/ERP.UnitTests/DynamicSalesmanOutputSummaryExcelTests.cs",
+    "src/ERP.UnitTests/DynamicSalesmanOutputSummaryPdfTests.cs"
+  ],
+  "status": "pending",
+  "max_attempts": 3,
+  "attempts": 0,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only bounded scoped report feature"
+  },
+  "id": "ERP-242",
+  "created_at": "2026-10-02T08:41:43.414891Z"
+}

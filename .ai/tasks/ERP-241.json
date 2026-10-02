@@ -1,0 +1,76 @@
+{
+  "title": "Download all matching salesman currency evidence summaries as PDF",
+  "description": "Users download Chinese all-matching salesman original-currency summary PDF for the current customer/salesman/currency/date filters. Add dedicated export-summary-pdf endpoint and narrow Infrastructure exporter reusing PDFsharp/SimHeiPdfFontResolver. Independently validate current request and recheck identity/menu/fresh customer scope and bounded ERP-239 summaries, no prior preview/client rows. Render stable original-currency summary table: known signed decimals, assigned approved-order counts, distinct salesman counts and explicit unknown amount/profit/rate/basis; never employee detail rows, incompatible currency totals, current-product-price profit or receipt/revenue claims. Keep dates/current normalized filters/500-order-limit/all-matching coverage/source evidence visible. Paginate rows/wide columns with repeated headings and safe text, explicit empty dataset. Missing font/render failure returns clear error and no corrupt file. Out-of-range detail page does not hide all-matching summaries. Designer sends current fields/filter/date values and retains state on denial/overflow/invalid/network/font errors; summary Excel and detail Excel/PDF remain compatible. Development only: reuse the existing salesman-output menu, current-user SalespersonDataScopeService customer scope, approved nondeleted assigned-salesman SalesOrders and existing OperationLogMiddleware HTTP audit. Every endpoint validates current requests and rechecks identity/menu/fresh scope, rejecting invalid/revoked/500-order-cap overflow without data/file. Employee filters never broaden ERP permissions. Evidence remains assigned approved sales orders, not all ERP orders, production, actual revenue/shipment/receipts. No client identity/scope/rows/aggregates as authority, arbitrary/model-generated SQL, direct table/business writes, new domain entities or persistence schema, migrations, schema/view/stored-procedure changes, production SQL or real database execution, credentials/secrets/.env/config changes, irreversible operations, production deployment or real browser acceptance. Preserve unrelated modules and uncommitted work. Run focused in-memory service/API/export/UI source-contract tests plus configured safe Release build/test; unavailable external database/browser acceptance must be explicitly environment-blocked, never fabricated passed.",
+  "depends_on": [
+    "ERP-240"
+  ],
+  "risk_level": "low",
+  "priority": "P1",
+  "acceptance_criteria": [
+    "Summary PDF independently validates and reauthorizes current identity/menu/scope/filters/date/source caps using the same server all-matching summaries, returning no file on failure.",
+    "Chinese Infrastructure exporter paginates stable currency summary with signed known values, explicit unknown/empty evidence and all-matching filter/date/cap/source context, with clear font/render errors.",
+    "Designer uses current request values and preserves state on failure; PDF/API/UI, font failure and summary/detail Excel compatibility tests plus safe Release build/test pass."
+  ],
+  "criterion_path_map": {
+    "Summary PDF independently validates and reauthorizes current identity/menu/scope/filters/date/source caps using the same server all-matching summaries, returning no file on failure.": [
+      "src/ERP.Api/Controllers/DynamicSalesmanOutputReportController.cs",
+      "src/ERP.Application/DTOs/DynamicSalesmanOutputReportDtos.cs",
+      "src/ERP.Application/Services/DynamicSalesmanOutputReportRules.cs",
+      "src/ERP.Application/DTOs/DynamicSalesmanOutputSummaryDtos.cs",
+      "src/ERP.Application/Services/DynamicSalesmanOutputSummaryRules.cs",
+      "src/ERP.UnitTests/DynamicSalesmanOutputSummaryPdfTests.cs",
+      "src/ERP.UnitTests/DynamicSalesmanOutputReportTests.cs"
+    ],
+    "Chinese Infrastructure exporter paginates stable currency summary with signed known values, explicit unknown/empty evidence and all-matching filter/date/cap/source context, with clear font/render errors.": [
+      "src/ERP.Infrastructure/Export/DynamicSalesmanOutputSummaryPdfExporter.cs",
+      "src/ERP.Application/DTOs/DynamicSalesmanOutputSummaryDtos.cs",
+      "src/ERP.Application/Services/DynamicSalesmanOutputSummaryRules.cs",
+      "src/ERP.UnitTests/DynamicSalesmanOutputSummaryPdfTests.cs",
+      "src/ERP.UnitTests/DynamicSalesmanOutputSummaryTests.cs"
+    ],
+    "Designer uses current request values and preserves state on failure; PDF/API/UI, font failure and summary/detail Excel compatibility tests plus safe Release build/test pass.": [
+      "src/ERP.Api/wwwroot/js/reports.js",
+      "src/ERP.Api/Controllers/DynamicSalesmanOutputReportController.cs",
+      "src/ERP.Infrastructure/Export/DynamicSalesmanOutputSummaryPdfExporter.cs",
+      "src/ERP.UnitTests/DynamicSalesmanOutputReportUiTests.cs",
+      "src/ERP.UnitTests/DynamicSalesmanOutputSummaryPdfTests.cs",
+      "src/ERP.UnitTests/DynamicSalesmanOutputSummaryExcelTests.cs",
+      "src/ERP.UnitTests/DynamicSalesmanOutputExcelTests.cs",
+      "src/ERP.UnitTests/DynamicSalesmanOutputPdfTests.cs"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/DynamicSalesmanOutputReportController.cs",
+    "src/ERP.Application/DTOs/DynamicSalesmanOutputReportDtos.cs",
+    "src/ERP.Application/Services/DynamicSalesmanOutputReportRules.cs",
+    "src/ERP.Application/DTOs/DynamicSalesmanOutputSummaryDtos.cs",
+    "src/ERP.Application/Services/DynamicSalesmanOutputSummaryRules.cs",
+    "src/ERP.UnitTests/DynamicSalesmanOutputSummaryPdfTests.cs",
+    "src/ERP.UnitTests/DynamicSalesmanOutputReportTests.cs",
+    "src/ERP.Infrastructure/Export/DynamicSalesmanOutputSummaryPdfExporter.cs",
+    "src/ERP.UnitTests/DynamicSalesmanOutputSummaryTests.cs",
+    "src/ERP.Api/wwwroot/js/reports.js",
+    "src/ERP.UnitTests/DynamicSalesmanOutputReportUiTests.cs",
+    "src/ERP.UnitTests/DynamicSalesmanOutputSummaryExcelTests.cs",
+    "src/ERP.UnitTests/DynamicSalesmanOutputExcelTests.cs",
+    "src/ERP.UnitTests/DynamicSalesmanOutputPdfTests.cs"
+  ],
+  "status": "pending",
+  "max_attempts": 3,
+  "attempts": 0,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only bounded scoped report feature"
+  },
+  "id": "ERP-241",
+  "created_at": "2026-10-02T08:41:43.414181Z"
+}

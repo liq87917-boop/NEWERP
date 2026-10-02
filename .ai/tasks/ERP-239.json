@@ -1,0 +1,80 @@
+{
+  "title": "Summarize all matching salesman order evidence by original currency",
+  "description": "Users see an all-matching original-currency summary alongside current-page salesman/currency details. Add narrow summary DTOs and pure rules, derive the summary from the same complete bounded authorized filtered SalesmanOutputItem list before selected-column projection or paging; no second source query and no client/page-row aggregation. One bucket per persisted raw Currency key; known currencies sum signed decimal TotalAmount without rounding each salesman first, assigned approved-order count sums disjoint OrderCount, salesman count is distinct SalesmanId within bucket. Unknown/invalid raw currency keys remain distinct with amount=null and explicit unknown-order count, never assumed CNY or zero. Profit and profit rate remain null for all buckets with historical-cost-basis explanation; no current-price cost/profit calculation. Stable raw-key ordering, no cross-currency grand total/comparison. Always show date/current customer/salesman/currency filters/source caps and all-matching coverage, independent of selected fields or current page. Empty matching dataset differs from empty/out-of-range detail page; summary remains populated on an empty page when source matches. Preserve detail page-only Excel/PDF and existing report/home behavior. Development only: reuse the existing salesman-output menu, current-user SalespersonDataScopeService customer scope, approved nondeleted assigned-salesman SalesOrders and existing OperationLogMiddleware HTTP audit. Every endpoint validates current requests and rechecks identity/menu/fresh scope, rejecting invalid/revoked/500-order-cap overflow without data/file. Employee filters never broaden ERP permissions. Evidence remains assigned approved sales orders, not all ERP orders, production, actual revenue/shipment/receipts. No client identity/scope/rows/aggregates as authority, arbitrary/model-generated SQL, direct table/business writes, new domain entities or persistence schema, migrations, schema/view/stored-procedure changes, production SQL or real database execution, credentials/secrets/.env/config changes, irreversible operations, production deployment or real browser acceptance. Preserve unrelated modules and uncommitted work. Run focused in-memory service/API/export/UI source-contract tests plus configured safe Release build/test; unavailable external database/browser acceptance must be explicitly environment-blocked, never fabricated passed.",
+  "depends_on": [
+    "ERP-238"
+  ],
+  "risk_level": "medium",
+  "priority": "P1",
+  "acceptance_criteria": [
+    "Pure summary rules aggregate the complete bounded scoped filtered source before paging, with per-original-currency signed known amount and distinct salesman/disjoint order counts, preserving raw unknown buckets.",
+    "Unknown currency amounts and all profit/rate metrics remain explicit null with basis/count evidence; no incompatible currency sum, current-price profit inference or selected-page-only summary.",
+    "Preview/designer render a separate all-matching summary with date/filter/cap/coverage context on hidden fields and empty detail pages; summary/API/UI/detail-export regressions and safe Release build/test pass."
+  ],
+  "criterion_path_map": {
+    "Pure summary rules aggregate the complete bounded scoped filtered source before paging, with per-original-currency signed known amount and distinct salesman/disjoint order counts, preserving raw unknown buckets.": [
+      "src/ERP.Application/DTOs/DynamicSalesmanOutputSummaryDtos.cs",
+      "src/ERP.Application/Services/DynamicSalesmanOutputSummaryRules.cs",
+      "src/ERP.Application/DTOs/DynamicSalesmanOutputReportDtos.cs",
+      "src/ERP.Application/Services/DynamicSalesmanOutputReportRules.cs",
+      "src/ERP.UnitTests/DynamicSalesmanOutputSummaryTests.cs",
+      "src/ERP.UnitTests/DynamicSalesmanOutputReportTests.cs"
+    ],
+    "Unknown currency amounts and all profit/rate metrics remain explicit null with basis/count evidence; no incompatible currency sum, current-price profit inference or selected-page-only summary.": [
+      "src/ERP.Application/DTOs/DynamicSalesmanOutputSummaryDtos.cs",
+      "src/ERP.Application/Services/DynamicSalesmanOutputSummaryRules.cs",
+      "src/ERP.Application/Services/SalesmanOutputEvidenceRules.cs",
+      "src/ERP.UnitTests/DynamicSalesmanOutputSummaryTests.cs",
+      "src/ERP.UnitTests/SalesmanOutputCurrencyEvidenceTests.cs"
+    ],
+    "Preview/designer render a separate all-matching summary with date/filter/cap/coverage context on hidden fields and empty detail pages; summary/API/UI/detail-export regressions and safe Release build/test pass.": [
+      "src/ERP.Application/DTOs/DynamicSalesmanOutputReportDtos.cs",
+      "src/ERP.Application/Services/DynamicSalesmanOutputReportRules.cs",
+      "src/ERP.Api/Controllers/DynamicSalesmanOutputReportController.cs",
+      "src/ERP.Api/wwwroot/js/reports.js",
+      "src/ERP.Application/DTOs/DynamicSalesmanOutputSummaryDtos.cs",
+      "src/ERP.Application/Services/DynamicSalesmanOutputSummaryRules.cs",
+      "src/ERP.UnitTests/DynamicSalesmanOutputReportTests.cs",
+      "src/ERP.UnitTests/DynamicSalesmanOutputReportUiTests.cs",
+      "src/ERP.UnitTests/DynamicSalesmanOutputExcelTests.cs",
+      "src/ERP.UnitTests/DynamicSalesmanOutputPdfTests.cs",
+      "src/ERP.UnitTests/SalesmanOutputScopeTests.cs",
+      "src/ERP.UnitTests/SalesmanOutputQueryBoundsTests.cs"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Application/DTOs/DynamicSalesmanOutputSummaryDtos.cs",
+    "src/ERP.Application/Services/DynamicSalesmanOutputSummaryRules.cs",
+    "src/ERP.Application/DTOs/DynamicSalesmanOutputReportDtos.cs",
+    "src/ERP.Application/Services/DynamicSalesmanOutputReportRules.cs",
+    "src/ERP.UnitTests/DynamicSalesmanOutputSummaryTests.cs",
+    "src/ERP.UnitTests/DynamicSalesmanOutputReportTests.cs",
+    "src/ERP.Application/Services/SalesmanOutputEvidenceRules.cs",
+    "src/ERP.UnitTests/SalesmanOutputCurrencyEvidenceTests.cs",
+    "src/ERP.Api/Controllers/DynamicSalesmanOutputReportController.cs",
+    "src/ERP.Api/wwwroot/js/reports.js",
+    "src/ERP.UnitTests/DynamicSalesmanOutputReportUiTests.cs",
+    "src/ERP.UnitTests/DynamicSalesmanOutputExcelTests.cs",
+    "src/ERP.UnitTests/DynamicSalesmanOutputPdfTests.cs",
+    "src/ERP.UnitTests/SalesmanOutputScopeTests.cs",
+    "src/ERP.UnitTests/SalesmanOutputQueryBoundsTests.cs"
+  ],
+  "status": "pending",
+  "max_attempts": 3,
+  "attempts": 0,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only bounded scoped report feature"
+  },
+  "id": "ERP-239",
+  "created_at": "2026-10-02T08:41:43.411898Z"
+}
