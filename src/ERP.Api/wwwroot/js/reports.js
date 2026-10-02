@@ -30,7 +30,7 @@ const REPORTS = {
       { key: 'currentPriceEstimate', label: '当前价估算(币种未知)', type: 'money' },
       { key: 'currentPriceEstimateReason', label: '估算说明' },
     ] },
-  'customer-shipment': { api: '/api/reports/customer-shipment', title: '客户出货量统计表',
+  'customer-shipment': { api: '/api/reports/customer-shipment', title: '客户出货量统计表', designer: 'customer-shipment',
     emoji: '🚢', kpi: 'ocean',
     summary: '已审核销售订单证据 · 非实际出库 / 非实际装柜 / 非实际收款 · 授权客户 · 按客户×原币分组 · 精确单位分组 · 有界(500单/10000明细)',
     columns: [
@@ -213,9 +213,11 @@ async function renderReport(rep, name) {
             ? `<button class="btn btn-neutral" onclick="openProductSalesRankingDesigner()" title="打开商品销量排名字段设计器（只读预览，发货数量证据，金额估算已排除）">🎛 字段设计器</button>`
             : rep.designer === 'order-profit'
               ? `<button class="btn btn-neutral" onclick="openOrderProfitEstimateDesigner()" title="打开订单利润暂估字段设计器（只读预览，原币销售额与未知成本利润证据，当前价估算独立标注）">🎛 字段设计器</button>`
-              : rep.designer
-                ? `<button class="btn btn-neutral" onclick="openFollowUpDueDesigner()" title="打开动态跟进提醒字段设计器（只读预览）">🎛 字段设计器</button>`
-                : ''}
+              : rep.designer === 'customer-shipment'
+                ? `<button class="btn btn-neutral" onclick="openCustomerShipmentDesigner()" title="打开客户出货量证据字段设计器（只读预览，客户×原币证据行，绝不跨币种/跨单位合计）">🎛 字段设计器</button>`
+                : rep.designer
+                  ? `<button class="btn btn-neutral" onclick="openFollowUpDueDesigner()" title="打开动态跟进提醒字段设计器（只读预览）">🎛 字段设计器</button>`
+                  : ''}
         <button class="btn btn-neutral" onclick="exportReportCSV()" title="导出为 CSV">📤 导出 CSV</button>
         <button class="btn btn-neutral" onclick="window.print()" title="打印报表">🖨 打印</button>
       </div>
@@ -227,7 +229,9 @@ async function renderReport(rep, name) {
         ? `<div id="psr-designer"></div>`
         : rep.designer === 'order-profit'
           ? `<div id="opd-designer"></div>`
-          : rep.designer ? `<div id="fud-designer"></div>` : ''}
+          : rep.designer === 'customer-shipment'
+            ? `<div id="csd-designer"></div>`
+            : rep.designer ? `<div id="fud-designer"></div>` : ''}
 
     <div class="table-wrap" id="report-table">
       <div class="skeleton-row"></div><div class="skeleton-row"></div><div class="skeleton-row"></div>
@@ -2776,5 +2780,399 @@ function openOrderProfitEstimateDesigner() {
 
 
 
+
+
+
+/* ============ 动态客户出货量证据字段设计器（ERP-229：只读、有界的前端字段选择与分页预览 / Excel 导出） ============
+   口径与后端 ERP-229（DynamicCustomerShipmentReportController / DynamicCustomerShipmentReportRules）一一对应：
+   - 入口复用在「客户出货量统计表」报表（reports.js 的 customer-shipment，designer: 'customer-shipment'），不新增菜单 / 架构 / 脚本注册；
+   - 字段选择器只由 GET /api/dynamic-customer-shipment-report 返回的有限白名单目录渲染为复选框（name="csd-des-field"），
+     绝无自由填写的字段名或 SQL；勾选状态经 csdSelectFields 规范化（去重、保持顺序、丢弃未知键）；
+   - 筛选仅限开始 / 结束日期（含首尾最多 366 天），分页有界（页码 ≥ 1，每页 1~200），
+     预览走 POST /api/dynamic-customer-shipment-report，只发送「白名单字段 + 有界日期 + 有界分页」；
+   - 结果按后端返回的列名与选定字段值渲染（csdTableHtml / csdResultHtml），全部 HTML 转义，null 金额 / 数量显示「未知」；
+   - 原币 / 单位 / 未知 / 来源口径与去重客户 / 订单上下文始终显示（即使对应列被取消选择），绝不展示跨币种 / 跨单位总额或实际出库 / 收款；
+   - 空页 / 授权撤销（权限不足 / 未登录）/ 无效请求 / 网络失败分别可见，且不暴露范围外数据；
+   - 导出复用预览请求体 POST /api/dynamic-customer-shipment-report/export，成功（xlsx 附件）触发下载；
+   - 全程只读：不写库、不迁移、不执行任意 SQL。 */
+
+/* 字段设计器状态（纯数据；DOM 访问只在事件处理函数内部发生） */
+let CSD_DYN = {
+  catalog: null,      // GET /api/dynamic-customer-shipment-report 返回的目录 DTO
+  fields: [],         // 目录字段（白名单）
+  selectedKeys: [],   // 当前勾选的字段键（默认全选）
+  view: null,         // 最近一次预览结果
+  page: 1,            // 当前预览页（预览 / 翻页复用）
+};
+
+function csdEsc(v) {
+  return String(v ?? '').replace(/[&<>"']/g, c => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[c]));
+}
+
+/* 规范化选定字段（fail closed）：只保留目录白名单内的键、去重、保持请求顺序；未知键丢弃，绝不发送任意字段名 */
+function csdSelectFields(catalogFields, selectedKeys) {
+  const valid = new Set((catalogFields || []).map(f => f && f.key).filter(Boolean));
+  const seen = new Set();
+  const result = [];
+  for (const k of (Array.isArray(selectedKeys) ? selectedKeys : [])) {
+    if (typeof k !== 'string') continue;
+    const key = k.trim();
+    if (!key || !valid.has(key) || seen.has(key)) continue;
+    seen.add(key);
+    result.push(key);
+  }
+  return result;
+}
+
+/* 日期窗口客户端校验（与后端 ValidateDateRange 一致）：必填、结束不早于开始、含首尾最多 366 天 */
+function csdDateError(state) {
+  const start = String(state && state.start || '').trim();
+  const end = String(state && state.end || '').trim();
+  if (!start || !end) return '请填写开始与结束日期';
+  const startMs = Date.parse(start);
+  const endMs = Date.parse(end);
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) return '日期格式无效';
+  if (end < start) return '结束日期不能早于开始日期';
+  if (Math.round((endMs - startMs) / 86400000) + 1 > 366) return '日期范围最多 366 天（含首尾）';
+  return '';
+}
+
+/* 组装有界预览请求体：字段只来自目录、日期仅开始 / 结束、分页有界，绝不接受任意字段名或 SQL */
+function csdBuildRequest(state) {
+  const fields = csdSelectFields(state.catalogFields, state.selectedKeys);
+  const page = Math.max(1, Math.floor(Number(state.page) || 1));
+  const maxPageSize = Number(state.maxPageSize) || 200;
+  let pageSize = Math.floor(Number(state.pageSize));
+  if (!Number.isFinite(pageSize)) pageSize = 20;
+  pageSize = Math.max(1, Math.min(maxPageSize, pageSize));
+  return {
+    fields,
+    page,
+    pageSize,
+    start: String(state.start).slice(0, 10),
+    end: String(state.end).slice(0, 10),
+  };
+}
+
+/* 单元格纯文本：数字合理格式化（整数 / 2 位小数）、日期取 yyyy-MM-dd、其余按字符串呈现 */
+function csdCellText(value, field) {
+  const dataType = (field && field.dataType) || 'text';
+  if (dataType === 'number') {
+    const n = Number(value);
+    if (Number.isFinite(n)) return Number.isInteger(n) ? String(n) : n.toFixed(2);
+    return String(value);
+  }
+  if (dataType === 'date') return fmtDate(value);
+  return String(value);
+}
+
+/* 单元格 HTML（转义后安全渲染；null 金额 / 数量显式显示「未知」） */
+function csdRenderCell(value, field) {
+  if (value === null || value === undefined) return '<span class="text-muted">未知</span>';
+  return csdEsc(csdCellText(value, field));
+}
+
+/* 结果表格 HTML：表头为返回的列名、单元格为返回的选定字段值，全部经转义 */
+function csdTableHtml(view) {
+  const cols = (view && view.columns) || [];
+  const rows = (view && view.rows) || [];
+  if (!cols.length) return '';
+  const align = c => (c.dataType === 'number') ? ' class="text-right"' : '';
+  const head = cols.map(c => `<th${align(c)}>${csdEsc(c.label || c.key)}</th>`).join('');
+  const body = rows.length
+    ? rows.map(r => `<tr>${cols.map(c => `<td${align(c)}>${csdRenderCell(r[c.key], c)}</td>`).join('')}</tr>`).join('')
+    : '';
+  return `<div class="table-wrap" style="margin-top:8px"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`;
+}
+
+/* 分页（有界、稳定）：当前页之外仍有记录时标注截断，翻页复用当前字段 / 日期 / 每页条数 */
+function csdPagingHtml(view) {
+  if (!view) return '';
+  const prevDisabled = view.page <= 1 ? ' disabled' : '';
+  const nextDisabled = view.page >= view.totalPages ? ' disabled' : '';
+  return `<div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px">
+      <span class="text-muted">第 ${view.page} 页 / 共 ${view.totalPages} 页${view.truncated ? '（仅当前页，后续仍有分页）' : ''}</span>
+      <div>
+        <button class="btn btn-neutral btn-sm" onclick="csdPage(-1)"${prevDisabled}>← 上一页</button>
+        <button class="btn btn-neutral btn-sm" onclick="csdPage(1)"${nextDisabled}>下一页 →</button>
+      </div></div>`;
+}
+
+/* 空结果提示（显式使用后端 emptyText） */
+function csdEmptyHtml(view) {
+  return `<div class="empty" style="margin:8px 0">${csdEsc((view && view.emptyText) || '没有符合所选日期范围与数据范围的已审核销售订单')}</div>`;
+}
+
+/* 错误提示（授权撤销 / 未登录 / 无效请求 / 网络失败分别可见，且不暴露任何数据） */
+function csdErrorHtml(kind, message) {
+  const labels = {
+    forbidden: '权限不足',
+    unauthorized: '未登录 / 登录已过期',
+    invalid: '请求无效',
+    empty: '导出内容为空',
+    network: '网络请求失败',
+    error: '预览失败',
+  };
+  return `<div class="pd-hint" style="color:#b91c1c;background:#fef2f2;border-color:#fecaca">
+      <b>${csdEsc(labels[kind] || '预览失败')}</b>：${csdEsc(message || '')}</div>`;
+}
+
+/* 业务码 → 错误态分类 */
+function csdKindOfCode(code) {
+  if (code === 2002) return 'forbidden';
+  if (code === 2000 || code === 2003) return 'unauthorized';
+  if (code === 5000) return 'error';
+  return 'invalid';
+}
+
+/* 服务端范围上下文：区分「客户 × 原币证据行」与「去重客户数 / 去重订单数」，并显式声明证据依据 */
+function csdScopeLine(view) {
+  const c = view && view.context;
+  if (!c) return '';
+  return `${csdEsc(c.label || '')}：行 ${c.customerCurrencyRows} · 去重客户 ${c.uniqueCustomers} · 去重订单 ${c.uniqueOrders} · ${csdEsc(c.evidenceBasis || '')}`;
+}
+
+
+/* 结果区渲染：先给范围 / 口径提示（即使对应列被取消选择也始终显示），再渲染空态或表格 + 分页 */
+function csdResultHtml(view) {
+  if (!view) return '';
+  const hints = [
+    view.pageOnlyText,
+    view.currencyContextText,
+    view.unitContextText,
+    view.unknownContextText,
+    view.sourceContextText,
+  ].filter(Boolean).map(t => `<div class="pd-hint" style="margin:0 0 8px">${csdEsc(t)}</div>`).join('');
+  const scope = `<div class="pd-hint" style="margin:0 0 8px">${csdScopeLine(view)}</div>`;
+  const body = view.rows && view.rows.length
+    ? csdTableHtml(view) + csdPagingHtml(view)
+    : csdEmptyHtml(view);
+  return `${scope}${hints}${body}`;
+}
+
+/* 字段选择器：只由目录白名单渲染为复选框，绝不渲染自由输入框或 SQL */
+function csdFieldChooserHtml(fields, selectedKeys) {
+  const selected = new Set(Array.isArray(selectedKeys) ? selectedKeys : []);
+  const boxes = (fields || []).map(f => {
+    const checked = selected.has(f.key) ? ' checked' : '';
+    return `<label class="checkbox-chip"><input type="checkbox" name="csd-des-field" value="${csdEsc(f.key)}"${checked} onchange="csdSyncSelection()"> ${csdEsc(f.label)}</label>`;
+  }).join('');
+  return `<div class="pd-hint"><b>字段</b>（仅目录白名单，无自由字段名）</div>
+      <div class="checkbox-group">${boxes}</div>
+      <div style="margin:8px 0">
+        <button class="btn btn-neutral btn-sm" onclick="csdToggleAll(true)">全选</button>
+        <button class="btn btn-neutral btn-sm" onclick="csdToggleAll(false)">清空</button>
+      </div>`;
+}
+
+/* 加载中提示 */
+function csdLoadingHtml() {
+  return '<div class="empty" style="margin:8px 0">加载中，请稍候…</div>';
+}
+
+/* 设计器结果区：预览结果渲染到 #csd-des-result（字段选择器与日期 / 分页表单保持不动） */
+function csdRenderResult(html) {
+  const el = document.getElementById('csd-des-result');
+  if (el) el.innerHTML = html;
+}
+
+/* 字段选择器渲染到 #csd-des-fields */
+function csdRenderFields(html) {
+  const el = document.getElementById('csd-des-fields');
+  if (el) el.innerHTML = html;
+}
+
+/* 统一 JSON 请求（GET 目录 / POST 预览），带登录 token；响应解析为后端 ApiResponse */
+async function csdRequest(path, method, body) {
+  const headers = { 'Content-Type': 'application/json' };
+  const token = typeof localStorage !== 'undefined' ? (localStorage.getItem('erp_token') || '') : '';
+  if (token) headers['Authorization'] = 'Bearer ' + token;
+  const resp = await fetch(path, {
+    method,
+    headers,
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  return await resp.json();
+}
+
+/* 勾选状态 → CSD_DYN.selectedKeys（保持勾选顺序） */
+function csdSyncSelection() {
+  const boxes = Array.from(document.querySelectorAll('input[name="csd-des-field"]'));
+  CSD_DYN.selectedKeys = boxes.filter(b => b.checked).map(b => b.value);
+}
+
+/* 全选 / 清空 */
+function csdToggleAll(checked) {
+  const boxes = Array.from(document.querySelectorAll('input[name="csd-des-field"]'));
+  boxes.forEach(b => { b.checked = checked; });
+  csdSyncSelection();
+}
+
+/* 重置回第 1 页（字段 / 日期 / 每页条数变更后调用） */
+function csdResetPage() {
+  CSD_DYN.page = 1;
+}
+
+/* 读取当前字段 / 日期 / 每页条数 / 分页状态（预览与翻页复用，单一来源） */
+function csdBuildState(page) {
+  const val = id => { const el = document.getElementById(id); return el ? el.value.trim() : ''; };
+  return {
+    catalogFields: CSD_DYN.fields,
+    selectedKeys: CSD_DYN.selectedKeys,
+    start: val('csd-des-start'),
+    end: val('csd-des-end'),
+    pageSize: val('csd-des-pagesize'),
+    page: page || CSD_DYN.page || 1,
+    maxPageSize: CSD_DYN.catalog && CSD_DYN.catalog.maxPageSize ? CSD_DYN.catalog.maxPageSize : 200,
+  };
+}
+
+
+/* 预览：组装有界请求 → POST → 安全渲染列名与单元格；授权 / 无效 / 空 / 网络失败均可见 */
+async function csdPreview(page) {
+  const state = csdBuildState(page);
+  const dateError = csdDateError(state);
+  if (dateError) {
+    csdRenderResult(csdErrorHtml('invalid', dateError));
+    return;
+  }
+  const req = csdBuildRequest(state);
+  CSD_DYN.page = req.page;
+
+  csdRenderResult(csdLoadingHtml());
+
+  try {
+    const resp = await csdRequest('/api/dynamic-customer-shipment-report', 'POST', req);
+    if (resp.code === 0) {
+      CSD_DYN.view = resp.data;
+      CSD_DYN.page = resp.data.page;
+      csdRenderResult(csdResultHtml(resp.data));
+    } else if (resp.code === 2000 || resp.code === 2003) {
+      if (typeof logout === 'function') logout();
+      csdRenderResult(csdErrorHtml('unauthorized', resp.message));
+    } else {
+      csdRenderResult(csdErrorHtml(csdKindOfCode(resp.code), resp.message));
+    }
+  } catch (err) {
+    csdRenderResult(csdErrorHtml('network', (err && err.message) || '无法连接到服务器'));
+  }
+}
+
+/* 翻页（有界：最小第 1 页，最大总页数） */
+function csdPage(delta) {
+  const next = (CSD_DYN.page || 1) + delta;
+  CSD_DYN.page = Math.max(1, next);
+  csdPreview(CSD_DYN.page);
+}
+
+/* 导出当前页选定列为 Excel（ERP-229，只读）：复用预览请求体 POST /api/dynamic-customer-shipment-report/export；
+   成功（xlsx 附件）触发下载；授权 / 无效 / 空结果 / 网络失败在结果区可见，不下载任何内容 */
+async function csdExport() {
+  if (!CSD_DYN.view || !CSD_DYN.view.columns || !CSD_DYN.view.columns.length) {
+    csdRenderResult(csdErrorHtml('invalid', '请先预览后再导出 Excel'));
+    return;
+  }
+  if (!CSD_DYN.view.rows || CSD_DYN.view.rows.length === 0) {
+    csdRenderResult(csdErrorHtml('empty', '没有符合所选日期范围与数据范围的已审核销售订单，无法导出（请先预览）'));
+    return;
+  }
+
+  const state = csdBuildState(CSD_DYN.view.page);
+  const dateError = csdDateError(state);
+  if (dateError) {
+    csdRenderResult(csdErrorHtml('invalid', dateError));
+    return;
+  }
+  const req = csdBuildRequest(state);
+  csdRenderResult(csdLoadingHtml());
+
+  try {
+    const headers = { 'Content-Type': 'application/json' };
+    const token = typeof localStorage !== 'undefined' ? (localStorage.getItem('erp_token') || '') : '';
+    if (token) headers['Authorization'] = 'Bearer ' + token;
+    const resp = await fetch('/api/dynamic-customer-shipment-report/export', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(req),
+    });
+
+    const contentType = (resp.headers.get('content-type') || '');
+    if (contentType.indexOf('spreadsheetml') >= 0) {
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+      a.href = url;
+      a.download = '客户出货量证据_' + dateStr + '.xlsx';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      csdRenderResult(csdResultHtml(CSD_DYN.view));
+      return;
+    }
+
+    let message = '导出失败';
+    try {
+      const data = await resp.json();
+      message = (data && data.message) || message;
+    } catch (e) { /* 非 JSON 响应，沿用默认提示 */ }
+    csdRenderResult(csdErrorHtml(csdKindOfCode(resp.code), message));
+  } catch (err) {
+    csdRenderResult(csdErrorHtml('network', (err && err.message) || '无法连接到服务器'));
+  }
+}
+
+/* 加载字段目录（白名单，有限、只读），失败时区分未登录 / 权限不足 / 网络错误 */
+async function loadCustomerShipmentDesignerCatalog() {
+  csdRenderResult(csdLoadingHtml());
+  try {
+    const resp = await csdRequest('/api/dynamic-customer-shipment-report', 'GET');
+    if (resp.code === 0) {
+      CSD_DYN.catalog = resp.data;
+      CSD_DYN.fields = (resp.data && resp.data.fields) || [];
+      CSD_DYN.selectedKeys = CSD_DYN.fields.map(f => f.key);
+      CSD_DYN.page = 1;
+      CSD_DYN.view = null;
+      csdRenderFields(csdFieldChooserHtml(CSD_DYN.fields, CSD_DYN.selectedKeys));
+      csdSyncSelection();
+      return;
+    }
+    if (resp.code === 2000 || resp.code === 2003) {
+      if (typeof logout === 'function') logout();
+      csdRenderResult(csdErrorHtml('unauthorized', resp.message));
+    } else {
+      csdRenderResult(csdErrorHtml(csdKindOfCode(resp.code), resp.message));
+    }
+  } catch (err) {
+    csdRenderResult(csdErrorHtml('network', (err && err.message) || '无法连接到服务器'));
+  }
+}
+
+/* 打开客户出货量证据字段设计器（仅渲染容器，字段目录由目录接口加载） */
+function openCustomerShipmentDesigner() {
+  const host = document.getElementById('csd-designer');
+  if (!host) return;
+  host.innerHTML = `
+    <div class="card" style="margin:16px 0">
+      <div class="card-head"><h3>客户出货量证据字段设计器（只读预览）</h3></div>
+      <div class="card-body">
+        <div id="csd-des-fields"></div>
+        <div class="form-row" style="margin:12px 0">
+          <label>开始日期 <input type="date" id="csd-des-start" value="${csdEsc(new Date().toISOString().slice(0, 10))}" onchange="csdResetPage()"></label>
+          <label>结束日期 <input type="date" id="csd-des-end" value="${csdEsc(new Date().toISOString().slice(0, 10))}" onchange="csdResetPage()"></label>
+          <label>每页条数 <input type="number" id="csd-des-pagesize" value="20" min="1" max="200" style="width:90px" onchange="csdResetPage()"></label>
+        </div>
+        <div style="margin:8px 0">
+          <button class="btn btn-primary" onclick="csdPreview(1)">🔍 预览</button>
+          <button class="btn btn-neutral" onclick="csdExport()">📤 导出当前页 Excel</button>
+        </div>
+        <div id="csd-des-result"></div>
+      </div>
+    </div>`;
+  loadCustomerShipmentDesignerCatalog();
+}
 
 
