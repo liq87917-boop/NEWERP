@@ -1,0 +1,74 @@
+{
+  "title": "Export all matching customer order evidence summaries to Excel",
+  "description": "Users download the current filtered all-matching customer order evidence summary Excel independently of detail page/field selection and without requiring prior preview. Add a dedicated export-summary POST endpoint reusing current request validation, fresh identity/menu/data scope and bounded source/ERP-232 summary rules. Create separate currency-amount and currency/exact-unit observed-quantity worksheets plus filter/date/caps/coverage/source/unknown/completeness context; omit customer detail rows and any grand total. Known signed decimal amounts/quantities and integer counts are numeric; unknown null values are explicit text, not zero. Currency key/labels/raw unit/unknown reason/context text are formula-safe. Never copy full currency amount into each unit row; never sum different units/currencies. Stable grouping/order, empty-evidence sheet handling, out-of-range detail page still exports all matching summaries; current fields may be validated for compatibility but never select/remove summary evidence. Designer sends current filters/dates, preserves inputs and shows authorization/invalid/source-overflow/network failures with no file. Existing detail Excel/PDF remain page-only and compatible. Development only: reuse the existing customer-shipment menu, fresh current-user SalespersonDataScopeService, approved nondeleted SalesOrders/SalesOrderDetails and existing OperationLogMiddleware HTTP audit. Evidence remains approved sales orders, never actual shipment/stock-out/container/collected-revenue evidence. All endpoints recheck identity/menu/data scope, fail closed on invalid inputs, revoked permissions and bounded source overflow; no client identity/scope/rows/amounts as authority or permission expansion. No arbitrary/model-generated SQL, direct business table writes, domain entities or persistence schema changes, migrations, schema/view/stored-procedure changes, production SQL or real database execution, credentials/secrets/.env/config changes, irreversible operations, production deployment or real browser acceptance. Preserve unrelated modules and uncommitted work. Run focused in-memory service/API/export/UI source-contract tests and configured safe Release build/test; any unavailable external database/browser acceptance must be explicitly environment-blocked, never fabricated passed.",
+  "depends_on": [
+    "ERP-232"
+  ],
+  "risk_level": "low",
+  "priority": "P1",
+  "acceptance_criteria": [
+    "Dedicated summary Excel endpoint validates the current request and reauthorizes fresh menu/scope/source bounds on every call, using all-matching server summaries independently of preview and detail page.",
+    "Workbook contains separate currency and exact-unit summary sheets plus context, typed known values and explicit unknown/completeness evidence with formula-safe labels and no detail rows or incompatible grand total.",
+    "Designer downloads current-filter summaries, retains state on errors and preserves page-only detail exports; workbook/API/UI regressions and safe Release build/test pass."
+  ],
+  "criterion_path_map": {
+    "Dedicated summary Excel endpoint validates the current request and reauthorizes fresh menu/scope/source bounds on every call, using all-matching server summaries independently of preview and detail page.": [
+      "src/ERP.Api/Controllers/DynamicCustomerShipmentReportController.cs",
+      "src/ERP.Application/DTOs/DynamicCustomerShipmentReportDtos.cs",
+      "src/ERP.Application/DTOs/DynamicCustomerShipmentSummaryDtos.cs",
+      "src/ERP.Application/Services/DynamicCustomerShipmentSummaryRules.cs",
+      "src/ERP.Application/Services/DynamicCustomerShipmentReportRules.cs",
+      "src/ERP.UnitTests/DynamicCustomerShipmentSummaryExcelTests.cs",
+      "src/ERP.UnitTests/DynamicCustomerShipmentReportTests.cs",
+      "src/ERP.UnitTests/CustomerShipmentReportFilterTests.cs"
+    ],
+    "Workbook contains separate currency and exact-unit summary sheets plus context, typed known values and explicit unknown/completeness evidence with formula-safe labels and no detail rows or incompatible grand total.": [
+      "src/ERP.Api/Controllers/DynamicCustomerShipmentReportController.cs",
+      "src/ERP.Application/DTOs/DynamicCustomerShipmentSummaryDtos.cs",
+      "src/ERP.Application/Services/DynamicCustomerShipmentSummaryRules.cs",
+      "src/ERP.UnitTests/DynamicCustomerShipmentSummaryExcelTests.cs",
+      "src/ERP.UnitTests/DynamicCustomerShipmentSummaryTests.cs"
+    ],
+    "Designer downloads current-filter summaries, retains state on errors and preserves page-only detail exports; workbook/API/UI regressions and safe Release build/test pass.": [
+      "src/ERP.Api/wwwroot/js/reports.js",
+      "src/ERP.Api/Controllers/DynamicCustomerShipmentReportController.cs",
+      "src/ERP.UnitTests/DynamicCustomerShipmentReportUiTests.cs",
+      "src/ERP.UnitTests/DynamicCustomerShipmentSummaryExcelTests.cs",
+      "src/ERP.UnitTests/DynamicCustomerShipmentExcelTests.cs",
+      "src/ERP.UnitTests/DynamicCustomerShipmentPdfTests.cs"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/DynamicCustomerShipmentReportController.cs",
+    "src/ERP.Application/DTOs/DynamicCustomerShipmentReportDtos.cs",
+    "src/ERP.Application/DTOs/DynamicCustomerShipmentSummaryDtos.cs",
+    "src/ERP.Application/Services/DynamicCustomerShipmentSummaryRules.cs",
+    "src/ERP.Application/Services/DynamicCustomerShipmentReportRules.cs",
+    "src/ERP.UnitTests/DynamicCustomerShipmentSummaryExcelTests.cs",
+    "src/ERP.UnitTests/DynamicCustomerShipmentReportTests.cs",
+    "src/ERP.UnitTests/CustomerShipmentReportFilterTests.cs",
+    "src/ERP.UnitTests/DynamicCustomerShipmentSummaryTests.cs",
+    "src/ERP.Api/wwwroot/js/reports.js",
+    "src/ERP.UnitTests/DynamicCustomerShipmentReportUiTests.cs",
+    "src/ERP.UnitTests/DynamicCustomerShipmentExcelTests.cs",
+    "src/ERP.UnitTests/DynamicCustomerShipmentPdfTests.cs"
+  ],
+  "status": "pending",
+  "max_attempts": 3,
+  "attempts": 0,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only bounded scoped report feature"
+  },
+  "id": "ERP-233",
+  "created_at": "2026-10-02T06:40:47.339442Z"
+}

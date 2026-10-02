@@ -1,0 +1,78 @@
+{
+  "title": "Download all matching customer order evidence summaries as PDF",
+  "description": "Users download Chinese all-matching currency and exact-unit summary PDF for the current customer/original-currency/date filters. Add dedicated export-summary-pdf POST endpoint and narrow Infrastructure PDF exporter, reuse existing PDFsharp/SimHeiPdfFontResolver; independently validate current request and reauthorize menu/fresh data scope and bounded ERP-232 source summaries without prior preview. Render separate currency amounts and currency/exact-unit observed quantity sections, no customer detail rows or total across incompatible currencies/units; explicitly display unknown currency/unit and incomplete-detail reasons/counts. Preserve known zero/negative/decimal evidence, never repeat amount across unit rows. Date/filter/caps/all-matching-coverage/approved-order-source context stays visible, pagination handles wide/long groups with repeated headings and safe labels. Empty matches return explicit empty PDF; missing font/rendering failure returns clear error and no corrupt file. Out-of-range detail page does not suppress all-matching summaries. Designer sends current filter/date values, retains fields/page/state and surfaces denial/overflow/invalid/network/font failures; summary Excel and detail Excel/PDF remain compatible. Development only: reuse the existing customer-shipment menu, fresh current-user SalespersonDataScopeService, approved nondeleted SalesOrders/SalesOrderDetails and existing OperationLogMiddleware HTTP audit. Evidence remains approved sales orders, never actual shipment/stock-out/container/collected-revenue evidence. All endpoints recheck identity/menu/data scope, fail closed on invalid inputs, revoked permissions and bounded source overflow; no client identity/scope/rows/amounts as authority or permission expansion. No arbitrary/model-generated SQL, direct business table writes, domain entities or persistence schema changes, migrations, schema/view/stored-procedure changes, production SQL or real database execution, credentials/secrets/.env/config changes, irreversible operations, production deployment or real browser acceptance. Preserve unrelated modules and uncommitted work. Run focused in-memory service/API/export/UI source-contract tests and configured safe Release build/test; any unavailable external database/browser acceptance must be explicitly environment-blocked, never fabricated passed.",
+  "depends_on": [
+    "ERP-233"
+  ],
+  "risk_level": "low",
+  "priority": "P1",
+  "acceptance_criteria": [
+    "Summary PDF endpoint independently validates and reauthorizes current identity/menu/scope/filter/date/source bounds and uses the same all-matching summaries, rejecting errors without a file.",
+    "Chinese Infrastructure PDF paginates separate currency and exact-unit sections with explicit unknown/incomplete/empty evidence and coverage context, preserving signed values without detail rows or duplicated/cross-currency/unit totals.",
+    "Designer sends current filters and preserves state on download failures; PDF/font-failure/API/UI and Excel/detail-export compatibility tests plus safe Release build/test pass."
+  ],
+  "criterion_path_map": {
+    "Summary PDF endpoint independently validates and reauthorizes current identity/menu/scope/filter/date/source bounds and uses the same all-matching summaries, rejecting errors without a file.": [
+      "src/ERP.Api/Controllers/DynamicCustomerShipmentReportController.cs",
+      "src/ERP.Application/DTOs/DynamicCustomerShipmentReportDtos.cs",
+      "src/ERP.Application/DTOs/DynamicCustomerShipmentSummaryDtos.cs",
+      "src/ERP.Application/Services/DynamicCustomerShipmentSummaryRules.cs",
+      "src/ERP.Application/Services/DynamicCustomerShipmentReportRules.cs",
+      "src/ERP.UnitTests/DynamicCustomerShipmentSummaryPdfTests.cs",
+      "src/ERP.UnitTests/DynamicCustomerShipmentReportTests.cs",
+      "src/ERP.UnitTests/CustomerShipmentReportFilterTests.cs"
+    ],
+    "Chinese Infrastructure PDF paginates separate currency and exact-unit sections with explicit unknown/incomplete/empty evidence and coverage context, preserving signed values without detail rows or duplicated/cross-currency/unit totals.": [
+      "src/ERP.Infrastructure/Export/DynamicCustomerShipmentSummaryPdfExporter.cs",
+      "src/ERP.Application/DTOs/DynamicCustomerShipmentSummaryDtos.cs",
+      "src/ERP.Application/Services/DynamicCustomerShipmentSummaryRules.cs",
+      "src/ERP.UnitTests/DynamicCustomerShipmentSummaryPdfTests.cs",
+      "src/ERP.UnitTests/DynamicCustomerShipmentSummaryTests.cs"
+    ],
+    "Designer sends current filters and preserves state on download failures; PDF/font-failure/API/UI and Excel/detail-export compatibility tests plus safe Release build/test pass.": [
+      "src/ERP.Api/wwwroot/js/reports.js",
+      "src/ERP.Api/Controllers/DynamicCustomerShipmentReportController.cs",
+      "src/ERP.Infrastructure/Export/DynamicCustomerShipmentSummaryPdfExporter.cs",
+      "src/ERP.UnitTests/DynamicCustomerShipmentReportUiTests.cs",
+      "src/ERP.UnitTests/DynamicCustomerShipmentSummaryPdfTests.cs",
+      "src/ERP.UnitTests/DynamicCustomerShipmentSummaryExcelTests.cs",
+      "src/ERP.UnitTests/DynamicCustomerShipmentExcelTests.cs",
+      "src/ERP.UnitTests/DynamicCustomerShipmentPdfTests.cs"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/DynamicCustomerShipmentReportController.cs",
+    "src/ERP.Application/DTOs/DynamicCustomerShipmentReportDtos.cs",
+    "src/ERP.Application/DTOs/DynamicCustomerShipmentSummaryDtos.cs",
+    "src/ERP.Application/Services/DynamicCustomerShipmentSummaryRules.cs",
+    "src/ERP.Application/Services/DynamicCustomerShipmentReportRules.cs",
+    "src/ERP.UnitTests/DynamicCustomerShipmentSummaryPdfTests.cs",
+    "src/ERP.UnitTests/DynamicCustomerShipmentReportTests.cs",
+    "src/ERP.UnitTests/CustomerShipmentReportFilterTests.cs",
+    "src/ERP.Infrastructure/Export/DynamicCustomerShipmentSummaryPdfExporter.cs",
+    "src/ERP.UnitTests/DynamicCustomerShipmentSummaryTests.cs",
+    "src/ERP.Api/wwwroot/js/reports.js",
+    "src/ERP.UnitTests/DynamicCustomerShipmentReportUiTests.cs",
+    "src/ERP.UnitTests/DynamicCustomerShipmentSummaryExcelTests.cs",
+    "src/ERP.UnitTests/DynamicCustomerShipmentExcelTests.cs",
+    "src/ERP.UnitTests/DynamicCustomerShipmentPdfTests.cs"
+  ],
+  "status": "pending",
+  "max_attempts": 3,
+  "attempts": 0,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "browser_acceptance": {
+    "required": false
+  },
+  "human_gate": {
+    "required": false,
+    "level": "L1",
+    "status": "not_required",
+    "reason": "Development-only bounded scoped report feature"
+  },
+  "id": "ERP-234",
+  "created_at": "2026-10-02T06:40:47.340345Z"
+}
