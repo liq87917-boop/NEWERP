@@ -1050,6 +1050,15 @@ try {
             }
         }
 
+        # Persist planner supply requests even when quarantined failures are the
+        # only remaining tasks. This probe never launches development or resets
+        # recovery budgets; the pipeline lock prevents racing an active runner.
+        if (-not $pipelineProcess -and -not $paused -and
+            (-not $script:lastSupplyProbe -or ((Get-Date) - $script:lastSupplyProbe).TotalSeconds -ge 30)) {
+            & py -3 -B (Join-Path $scriptDir 'ai_pipeline.py') replenishment-status 2>$null | Out-Null
+            $script:lastSupplyProbe = Get-Date
+            $state = Get-ProjectState
+        }
         $mode = Get-AgentMode $state $head $gitInfo $recoverPreserved
         Write-AgentRuntime $state $head $gitInfo $mode
         Write-Status $state $tasks $head $gitInfo

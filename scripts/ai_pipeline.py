@@ -554,10 +554,51 @@ def git_checkpoint(message: str, paths: list[str]) -> None:
         if completed.returncode != 0: raise RuntimeError("Could not create pipeline control checkpoint.")
 
 
-def mark_queue_replenishing() -> None:
-    # AI_SUPERVISOR is the sole queue replenishment writer.
-    # Keep repository clean while waiting for the next DeepSeek batch.
-    return
+def mark_queue_replenishing(*, idle: bool = False) -> dict[str, Any]:
+    """Request planner supply without inventing work or bypassing failure recovery.
+
+    Caller holds pipeline_lock. Runtime evidence belongs in ignored logs; it must
+    not dirty business files or overwrite the runner/current task on a low queue.
+    """
+    config, state = load_json(CONFIG_PATH), load_json(STATE_PATH)
+    policy = config.get("rolling_queue", {})
+    entries = task_entries()
+    effective = {t["id"] for _, t in entries
+                 if t.get("status") in RUNNABLE_STATUSES | ACTIVE_STATUSES}
+    by_id = {t["id"]: t for _, t in entries}
+    current = state.get("current_task")
+    if current and current in by_id and by_id[current].get("status") not in TERMINAL_STATUSES | FAILURE_STATUSES:
+        effective.add(current)
+    low = int(policy.get("low_watermark", 2))
+    target = int(config.get("queue_target_size", policy.get("batch_size", 4)))
+    required = bool(policy.get("enabled", False)) and len(effective) < low
+    path = LOGS_DIR / "queue-replenishment.json"
+    previous = load_json(path) if path.exists() else {}
+    now = utc_now()
+    since = previous.get("requested_at") if previous.get("required") and required else now
+    seconds = max(0, (datetime.now(timezone.utc) - datetime.fromisoformat(since.replace("Z", "+00:00"))).total_seconds())
+    failures = [{"task": t["id"], "status": t.get("status"),
+                 "recovery_cycles": t.get("supervised_recovery_cycles", 0),
+                 "reason": t.get("blocker") or t.get("last_error")}
+                for _, t in entries if t.get("status") in FAILURE_STATUSES]
+    value = {"updated_at": now, "executor_root": str(ROOT), "required": required,
+             "owner": policy.get("replenishment_owner", "ChatGPT"),
+             "effective_tasks": sorted(effective), "effective_count": len(effective),
+             "requested_count": max(0, target - len(effective)) if required else 0,
+             "requested_at": since if required else None,
+             "overdue": required and seconds >= int(policy.get("replenishment_timeout_seconds", 1800)),
+             "reason": "queue_empty" if required and not effective else "low_watermark" if required else "queue_sufficient",
+             "failures": failures, "remote_sync": state.get("git_sync", {}),
+             "constraints": "Only verified, nonduplicate current-stage tasks; do not restore deferred work or pass environment acceptance."}
+    save_json(path, value)
+    # The remote-sync result remains a separate field. An empty local queue is
+    # planner work, not a remote-sync failure or a request to repeat old repairs.
+    if idle and required and not current and not state.get("conversation_control", {}).get("paused", False) and state.get("phase") in {"ready", "remote_degraded", "replenishing"}:
+        state.update(phase="replenishing", finish_reason="planner_supply_required")
+        if state != load_json(STATE_PATH):
+            state["updated_at"] = now
+            save_json(STATE_PATH, state)
+    return value
 
 
 def run_all() -> int:
@@ -583,13 +624,15 @@ def run_all() -> int:
             except ValueError as exc:
                 print(f"Queue metadata error: {exc}", file=sys.stderr); return 10
             if item is None and reason == "queue_empty":
-                mark_queue_replenishing()
-                print("Current rolling batch completed; agent remains alive and waits for DeepSeek replenishment.")
+                mark_queue_replenishing(idle=True)
+                print("Planner supply required; see .ai/logs/queue-replenishment.json.")
                 return 0
             if item is None:
+                mark_queue_replenishing(idle=True)
                 audit("pipeline_waiting", reason=reason)
                 print(f"[pipeline] no dependency-safe runnable task: {reason}")
                 return 0
+            mark_queue_replenishing()
             task_id = item[1]["id"]
             print(f"[pipeline] starting {task_id}", flush=True)
             completed = run([sys.executable, str(ORCHESTRATOR), "run-next"])
@@ -717,6 +760,7 @@ def main() -> int:
     sub.add_parser("retry-push")
     sub.add_parser("self-test")
     sub.add_parser("queue")
+    sub.add_parser("replenishment-status")
     cp = sub.add_parser("create")
     cp.add_argument("--title", required=True); cp.add_argument("--description", required=True)
     cp.add_argument("--accept", action="append", required=True); cp.add_argument("--allow", action="append", required=True)
@@ -731,6 +775,10 @@ def main() -> int:
     if args.command == "retry-push": return retry_push()
     if args.command == "self-test": return self_test()
     if args.command == "queue": return queue_status()
+    if args.command == "replenishment-status":
+        with pipeline_lock():
+            print(json.dumps(mark_queue_replenishing(idle=True), ensure_ascii=False, indent=2))
+        return 0
     if args.command == "create": return create_task(args.title, args.description, args.accept, args.allow, args.profile, args.risk, args.depends_on, args.gate, args.completion_mode, args.browser_scenario)
     if args.command == "defer": return defer_task(args.task_id, args.by, args.note)
     return retry_task(args.task_id, args.by, args.note)

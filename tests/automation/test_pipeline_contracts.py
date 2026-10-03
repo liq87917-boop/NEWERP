@@ -415,6 +415,7 @@ class PipelineContracts(unittest.TestCase):
              patch.object(pipeline, "schedule_provider_retries"), \
              patch.object(pipeline, "recover_blocked_with_deepseek"), \
              patch.object(pipeline, "queue_head", return_value=(task, "ready")), \
+             patch.object(pipeline, "mark_queue_replenishing"), \
              patch.object(pipeline, "run", return_value=failed) as run, \
              patch.object(pipeline, "audit"), \
              patch.object(pipeline.time, "sleep") as sleep:
