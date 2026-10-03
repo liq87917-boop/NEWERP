@@ -1,4 +1,4 @@
-param(
+﻿param(
     [int]$RefreshSeconds = 2,
     [int]$SyncSeconds = 30,
     [switch]$Once,
@@ -970,7 +970,12 @@ try {
         $recoverBrowser = Test-RecoverableBrowserFailure $state $head
         $recoverDeferredFailedHead = Test-RecoverableDeferredFailedHead $state $head
         $recoverPreserved = Get-RecoverablePreservedWork $tasks $gitInfo
-        $recoverExisting = $recoverPathGuard -or $recoverInterrupted -or $recoverBrowser -or $recoverDeferredFailedHead -or ($null -ne $recoverPreserved)
+        $recoverCheckpoint = $false
+        if ($gitInfo.Dirty -and -not $pipelineProcess) {
+            & py -3 -B $orchestratorScript checkpoint-status 2>$null | Out-Null
+            $recoverCheckpoint = ($LASTEXITCODE -eq 0)
+        }
+        $recoverExisting = $recoverPathGuard -or $recoverInterrupted -or $recoverBrowser -or $recoverDeferredFailedHead -or ($null -ne $recoverPreserved) -or $recoverCheckpoint
         $recoveryKey = $null
         if ($recoverExisting) {
             $recoveryTask = if ($recoverPreserved) { $recoverPreserved } else { $head }

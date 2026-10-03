@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import fnmatch
+import hashlib
 import json
 import os
 import subprocess
@@ -312,6 +313,81 @@ def recoverable_interrupted_task(config: dict[str, Any], state: dict[str, Any]) 
     if not changed_paths() or path_violations(task, config):
         return None
     return path, task
+
+
+def checkpoint_content_signature(config: dict[str, Any]) -> str:
+    digest = hashlib.sha256()
+    for path in business_changed_paths(config):
+        digest.update(path.encode())
+        file = ROOT / path
+        digest.update(file.read_bytes() if file.is_file() else b"<deleted>")
+    return digest.hexdigest()
+
+
+def recoverable_completed_checkpoint(config: dict[str, Any], state: dict[str, Any]) -> tuple[Path, dict[str, Any]] | None:
+    """Recover only the validated task whose completion file is still uncommitted."""
+    build = state.get("last_build") or {}
+    task_id = build.get("task")
+    if build.get("status") != "passed" or build.get("exit_code") != 0 or not task_id:
+        return None
+    path = TASKS_DIR / f"{task_id}.json"
+    result_path = RESULTS_DIR / f"{task_id}.json"
+    if not path.exists() or not result_path.exists():
+        return None
+    task, result = load_json(path), load_json(result_path)
+    if task.get("status") != "completed" or result.get("status") != "completed" or result.get("task") != task_id:
+        return None
+    dirty = changed_paths()
+    # Legacy runs lack a manifest: require uncommitted task completion evidence.
+    if f".ai/tasks/{task_id}.json" not in dirty or not business_changed_paths(config):
+        return None
+    try:
+        validate_task(task, config)
+    except ValueError:
+        return None
+    if path_violations(task, config) or not gate_is_approved(task, config):
+        return None
+    return path, task
+
+
+def recover_completed_checkpoint(config: dict[str, Any], state: dict[str, Any]) -> int | None:
+    item = recoverable_completed_checkpoint(config, state)
+    if item is None:
+        return None
+    _, task = item
+    task_id = task["id"]
+    signature = checkpoint_content_signature(config)
+    prior = state.get("checkpoint_recovery") or {}
+    cycles = int(prior.get("cycles", 0)) if prior.get("signature") == signature else 0
+    maximum = int(config.get("autonomy", {}).get("max_supervised_recovery_cycles", 2))
+    if cycles >= maximum:
+        return 8
+    state["checkpoint_recovery"] = {"task": task_id, "signature": signature, "cycles": cycles + 1}
+    save_json(STATE_PATH, state)
+    audit("completed_checkpoint_recovery_started", task=task_id)
+    # Revalidate the current content; historical success cannot authorize new edits.
+    code, log, summary = run_validation(task, "checkpoint-recovery")
+    if code or path_violations(task, config) or checkpoint_content_signature(config) != signature:
+        set_state(state, phase="blocked", blocker="Completed checkpoint revalidation failed",
+                  last_error={"task": task_id, "kind": "checkpoint_revalidation", "log": log, "summary": summary})
+        return 8
+    paths = [p for p in changed_paths() if not matches(p, config["ignored_change_paths"])]
+    staged = git_lines("diff", "--cached", "--name-only")
+    if any(p not in paths for p in staged):
+        raise RuntimeError("Unrelated staged changes prevent completed checkpoint recovery")
+    for attempt in range(3):
+        added = run(["git", "add", "--", *paths])
+        committed = run(["git", "commit", "-m", f"{task_id}: recover validated checkpoint"]) if added.returncode == 0 else added
+        if committed.returncode == 0:
+            set_state(state, phase="ready", current_task=None, blocker=None, last_error=None,
+                      finish_reason="completed_checkpoint_recovered")
+            audit("completed_checkpoint_recovered", task=task_id, log=log)
+            checkpoint_control_files("chore: record completed checkpoint recovery")
+            return 0
+        time.sleep(0.2 * (attempt + 1))
+    set_state(state, phase="blocked", blocker="Validated checkpoint commit retry exhausted",
+              last_error={"task": task_id, "kind": "checkpoint_commit", "summary": (committed.stderr or committed.stdout)[-4000:]})
+    return 8
 
 
 def recoverable_dirty_task(config: dict[str, Any], state: dict[str, Any]) -> tuple[Path, dict[str, Any]] | None:
@@ -699,6 +775,9 @@ def recover_push_pending(config: dict[str, Any], state: dict[str, Any]) -> int |
 
 def run_next(dry_run: bool) -> int:
     config, state = load_json(CONFIG_PATH), load_json(STATE_PATH)
+    if not dry_run:
+        checkpoint = recover_completed_checkpoint(config, state)
+        if checkpoint is not None: return checkpoint
     recovered = recover_push_pending(config, state)
     if recovered is not None: return recovered
     # A failed remote push or transient Git lock may leave only scheduler state
@@ -992,7 +1071,13 @@ def main() -> int:
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("status"); runner = sub.add_parser("run-next"); runner.add_argument("--dry-run", action="store_true")
     approval = sub.add_parser("approve"); approval.add_argument("task_id"); approval.add_argument("--by", required=True); approval.add_argument("--note", required=True)
+    sub.add_parser("checkpoint-status")
+    sub.add_parser("recover-checkpoint")
     args = parser.parse_args()
+    if args.command == "checkpoint-status":
+        return 0 if recoverable_completed_checkpoint(load_json(CONFIG_PATH), load_json(STATE_PATH)) else 1
+    if args.command == "recover-checkpoint":
+        return recover_completed_checkpoint(load_json(CONFIG_PATH), load_json(STATE_PATH)) or 0
     if args.command == "status": return status()
     if args.command == "approve": return approve(args.task_id, args.by, args.note)
     return run_next(args.dry_run)
