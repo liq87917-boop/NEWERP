@@ -1,0 +1,52 @@
+{
+  "id": "ERP-277",
+  "title": "Reject invalid configured filters without silently changing common report requests",
+  "status": "pending",
+  "risk_level": "low",
+  "description": "Stage 1 common report configuration platform failure handling only. Verified rccBuildFilter returns null for numeric abc and rccBuildDefinition filters out null; typed in-list 1,abc,2 silently becomes 1,2. Fix configured filter validation and action handling as one generic increment, not a bespoke business report. Client must not broaden or change intended query due to invalid input. Keep server catalog/row/column/data scope authoritative; no new grants, SQL, arbitrary relations, business writes or special report endpoints. Preserve unsaved edits and existing OperationLogMiddleware audit on valid API actions. No persistence/schema/migration/SchemaUpgrader/SeedData edits, real database execution, production SQL, deployment, secrets/.env/config modifications or Agent work. Execute offline Node behavior fixtures (Node is installed) integrated into existing .NET unit tests; static source assertions alone are insufficient. Real browser and database acceptance remains environment blocked; build never completes the whole phase. Preserve unrelated work.",
+  "acceptance_criteria": [
+    "Configured filter rows must fail closed on missing/unknown field or operator, invalid numeric/boolean/date values, incomplete or reversed between bounds and any invalid in-list member. Never drop a configured filter or silently shrink its values; clearing/removing a row is an explicit user action.",
+    "Save and every common preview/export submission catch filter validation failures before network requests, show actionable row feedback and preserve edits; busy/request sequencing remains recoverable and valid numeric zero, boolean false and complete typed filter values serialize unchanged. Reuse current ERP permissions and existing audit endpoints.",
+    "Execute actual JavaScript helper and submission behavior in offline Node fixtures from the normal unit test suite: invalid filter cannot produce a broader request, mixed valid/invalid in-list cannot silently narrow, invalid between/boolean/date and unknown catalog keys fail; valid filters and corrections pass, no network request for invalid save. Safe Release build/test passes; missing real browser/database acceptance is explicitly environment blocked."
+  ],
+  "criterion_path_map": {
+    "Configured filter rows must fail closed on missing/unknown field or operator, invalid numeric/boolean/date values, incomplete or reversed between bounds and any invalid in-list member. Never drop a configured filter or silently shrink its values; clearing/removing a row is an explicit user action.": [
+      "src/ERP.Api/wwwroot/js/report-configuration.js",
+      "src/ERP.UnitTests/ReportConfigurationFilterValidationTests.cs"
+    ],
+    "Save and every common preview/export submission catch filter validation failures before network requests, show actionable row feedback and preserve edits; busy/request sequencing remains recoverable and valid numeric zero, boolean false and complete typed filter values serialize unchanged. Reuse current ERP permissions and existing audit endpoints.": [
+      "src/ERP.Api/wwwroot/js/report-configuration.js",
+      "src/ERP.UnitTests/ReportConfigurationFilterValidationTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationUiTests.cs"
+    ],
+    "Execute actual JavaScript helper and submission behavior in offline Node fixtures from the normal unit test suite: invalid filter cannot produce a broader request, mixed valid/invalid in-list cannot silently narrow, invalid between/boolean/date and unknown catalog keys fail; valid filters and corrections pass, no network request for invalid save. Safe Release build/test passes; missing real browser/database acceptance is explicitly environment blocked.": [
+      "src/ERP.Api/wwwroot/js/report-configuration.js",
+      "src/ERP.UnitTests/ReportConfigurationFilterValidationTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationUiTests.cs"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Api/wwwroot/js/report-configuration.js",
+    "src/ERP.UnitTests/ReportConfigurationFilterValidationTests.cs",
+    "src/ERP.UnitTests/ReportConfigurationUiTests.cs"
+  ],
+  "validation_profile": "safe",
+  "depends_on": [
+    "ERP-276"
+  ],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "completion_mode": "build",
+  "max_attempts": 3,
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "human_gate": {
+    "required": false,
+    "status": "not_required",
+    "level": "L1"
+  },
+  "attempts": 0,
+  "created_at": "2026-10-03T23:24:03.325727Z"
+}
