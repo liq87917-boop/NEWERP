@@ -519,6 +519,13 @@ public static class ReportConfigurationRules
         }
     }
 
+    /// <summary>
+    /// 校验纯展示文本（报表名称 / 标题 / 计算列键与标签）不含 SQL / 脚本载荷。
+    /// <para>导入可移植定义时对信封展示字段追加此校验；字段 / 筛选等结构性载荷已由 <see cref="Validate"/> 覆盖。</para>
+    /// </summary>
+    public static void ValidateSafeText(string? value, string context)
+        => EnsureNoSqlOrScript(value, context);
+
     private static void EnsureNoSqlOrScript(string? value, string context)
     {
         if (string.IsNullOrEmpty(value))

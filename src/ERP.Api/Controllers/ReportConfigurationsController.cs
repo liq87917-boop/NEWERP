@@ -27,6 +27,7 @@ public class ReportConfigurationsController : ControllerBase
     private readonly IReportConfigurationService _service;
     private readonly IReportConfigurationExecutionService _execution;
     private readonly IReportConfigurationSharingService _sharing;
+    private readonly IReportConfigurationTransferService? _transfer;
     private readonly IReportConfigurationExecutionBudget _budget;
     private readonly ILogger<ReportConfigurationsController>? _logger;
 
@@ -36,12 +37,14 @@ public class ReportConfigurationsController : ControllerBase
         IReportConfigurationExecutionService execution,
         IReportConfigurationSharingService sharing,
         IReportConfigurationExecutionBudget? budget = null,
-        ILogger<ReportConfigurationsController>? logger = null)
+        ILogger<ReportConfigurationsController>? logger = null,
+        IReportConfigurationTransferService? transfer = null)
     {
         _catalog = catalog;
         _service = service;
         _execution = execution;
         _sharing = sharing;
+        _transfer = transfer;
         _budget = budget ?? new ReportConfigurationExecutionBudget();
         _logger = logger;
     }
@@ -193,6 +196,34 @@ public class ReportConfigurationsController : ControllerBase
     {
         var result = await _sharing.CopySharedAsync(CurrentUserId(), configurationId);
         return Ok(ApiResponse<ReportConfigurationDto>.Success(result, "复制成功"));
+    }
+
+    /// <summary>
+    /// 导出可移植报表定义信封（自有草稿 / 自有发布修订 / 被共享的固定发布快照，只读）。
+    /// <para>只返回格式 / schema 版本 / 安全名称 / 结构化定义；绝不返回 ERP 行、身份、授权、历史、SQL 连接或附件；
+    /// 共享来源撤销后导出失败（fail closed）。</para>
+    /// </summary>
+    [HttpPost("transfer/export")]
+    public async Task<IActionResult> ExportDefinition([FromBody] ReportConfigurationTransferExportRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        var transfer = _transfer
+            ?? throw new BusinessException("报表配置传输服务未初始化", ErrorCodes.InternalError);
+        var result = await transfer.ExportAsync(CurrentUserId(), request);
+        return Ok(ApiResponse<ReportConfigurationTransferEnvelopeDto>.Success(result));
+    }
+
+    /// <summary>
+    /// 导入可移植报表定义信封为当前用户新的私有草稿（严格校验；绝不覆盖 / 发布 / 授予任何权限）。
+    /// </summary>
+    [HttpPost("transfer/import")]
+    public async Task<IActionResult> ImportDefinition([FromBody] ReportConfigurationTransferImportRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        var transfer = _transfer
+            ?? throw new BusinessException("报表配置传输服务未初始化", ErrorCodes.InternalError);
+        var result = await transfer.ImportAsync(CurrentUserId(), request);
+        return Ok(ApiResponse<ReportConfigurationDto>.Success(result, "导入成功"));
     }
 
     /// <summary>预览：草稿（默认）或指定发布修订；每次重新校验身份 / 数据集授权 / 数据范围（fail closed）</summary>

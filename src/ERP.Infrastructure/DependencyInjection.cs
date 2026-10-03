@@ -84,6 +84,9 @@ public static class DependencyInjection
         // 通用报表配置平台（ERP-265 Stage 1）：只读共享授权服务（owner grant/revoke + recipient 只读 / 复制）
         services.AddScoped<IReportConfigurationSharingService, ReportConfigurationSharingService>();
 
+        // 通用报表配置平台（ERP-276 Stage 1）：可移植报表定义导入 / 导出（自有草稿 / 自有发布修订 / 共享固定快照 → 有界 JSON 信封）
+        services.AddScoped<IReportConfigurationTransferService, ReportConfigurationTransferService>();
+
         // 库存移动与成本服务（ERP-009：库存单据审核/销审统一经此维护库存与流水）
         services.AddScoped<IInventoryService, InventoryService>();
 

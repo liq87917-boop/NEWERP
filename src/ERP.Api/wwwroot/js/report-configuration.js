@@ -1613,6 +1613,82 @@ async function rccExportPdf() {
   }
 }
 
+/* 导出可移植报表定义信封（ERP-276，只读）：自有草稿 / 自有发布修订 / 共享固定快照 →
+   POST /api/report-configurations/transfer/export，成功后触发 JSON 文件下载；
+   失败只显示错误、保留未保存编辑，绝不下载过期内容、绝不覆盖设计器状态。 */
+async function rccExportDefinition() {
+  if (RCC.busy) return;
+  const source = RCC.sharedCurrent
+    ? { configurationId: RCC.sharedCurrent.reportConfigurationId }
+    : (RCC.current ? { configurationId: RCC.current.id } : null);
+  if (!source) { rccRenderResult(rccErrorHtml('invalid', '请先选择一个自有报表或共享报表')); return; }
+  const seq = ++RCC.requestSeq;
+  RCC.lastAction = 'exportDefinition';
+  RCC.busy = true;
+  try {
+    const env = await rccFetch(RCC_API + '/transfer/export', 'POST', source);
+    if (seq !== RCC.requestSeq) return;   // 数据集 / 配置已变化：丢弃迟到的下载响应
+    if (env.code === 2000 || env.code === 2003) { rccOnUnauthorized(env.message); return; }
+    if (env.code !== 0) {
+      rccRenderResult(rccErrorHtml(rccKindOfCode(env.code), env.message || '导出定义失败'));
+      return;   // 失败只显示错误，绝不覆盖未保存编辑
+    }
+    const blob = new Blob([JSON.stringify(env.data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    const safeName = (env.data && env.data.name) ? String(env.data.name).replace(/[\\/:*?"<>|]/g, '_') : '报表配置';
+    a.href = url;
+    a.download = '报表定义_' + safeName + '_' + dateStr + '.json';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  } catch (err) {
+    if (seq !== RCC.requestSeq) return;
+    rccRenderResult(rccErrorHtml('network', (err && err.message) || '无法连接到服务器'));
+  } finally {
+    RCC.busy = false;
+  }
+}
+
+/* 选择本地定义文件后读取其文本并交给导入；不使用浏览器本地存储替代持久化定义。 */
+function rccOnImportFile(input) {
+  const file = input && input.files && input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = function () { rccImportDefinition(String(reader.result || '')); };
+  reader.onerror = function () { rccRenderResult(rccErrorHtml('invalid', '无法读取所选文件')); };
+  reader.readAsText(file, 'utf-8');
+  input.value = '';   // 允许重复选择同一文件
+}
+
+/* 导入可移植报表定义信封（ERP-276）：POST /api/report-configurations/transfer/import；
+   成功创建新的私有草稿后刷新列表；失败只显示错误、保留未保存编辑，绝不覆盖设计器状态。 */
+async function rccImportDefinition(json) {
+  if (RCC.busy) return;
+  if (!json || !String(json).trim()) { rccRenderResult(rccErrorHtml('invalid', '请选择要导入的 JSON 文件')); return; }
+  const seq = ++RCC.requestSeq;
+  RCC.lastAction = 'importDefinition';
+  RCC.busy = true;
+  try {
+    const env = await rccFetch(RCC_API + '/transfer/import', 'POST', { json: String(json) });
+    if (seq !== RCC.requestSeq) return;
+    if (env.code === 2000 || env.code === 2003) { rccOnUnauthorized(env.message); return; }
+    if (env.code !== 0) {
+      rccRenderResult(rccErrorHtml(rccKindOfCode(env.code), env.message || '导入定义失败'));
+      return;   // 失败只显示错误，绝不覆盖未保存编辑
+    }
+    toast('已导入为新的私有草稿');
+    await rccLoadList();
+  } catch (err) {
+    if (seq !== RCC.requestSeq) return;
+    rccRenderResult(rccErrorHtml('network', (err && err.message) || '无法连接到服务器'));
+  } finally {
+    RCC.busy = false;
+  }
+}
+
 /* 工作台入口（app.js 路由 code === 'report-configuration' 调用） */
 function renderReportConfigurationWorkspace() {
   document.getElementById('header-title').textContent = '报表配置工作台';
@@ -1630,6 +1706,9 @@ function renderReportConfigurationWorkspace() {
     + '<button type="button" class="btn" onclick="rccPreview()">预览</button>'
     + '<button type="button" class="btn" onclick="rccExport()">导出</button>'
     + '<button type="button" class="btn" onclick="rccExportPdf()">导出PDF</button>'
+    + '<button type="button" class="btn" onclick="rccExportDefinition()">导出定义</button>'
+    + '<button type="button" class="btn" onclick="document.getElementById(\'rcc-import-file\').click()">导入定义</button>'
+    + '<input type="file" id="rcc-import-file" accept="application/json,.json" style="display:none" onchange="rccOnImportFile(this)">'
     + '<span id="rcc-dirty" class="rcc-dirty"></span>'
     + '</div>'
     + '<div class="rcc-layout">'

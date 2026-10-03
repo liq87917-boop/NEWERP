@@ -93,6 +93,9 @@ public static class ReportConfigurationConstants
 
     /// <summary>关系基数：多对一（有限；拒绝任意 / 一对多 / 事实联接）</summary>
     public const string CardinalityManyToOne = "many-to-one";
+
+    /// <summary>可移植报表定义传输格式标识（ERP-276：信封 format 字段的唯一合法取值）</summary>
+    public const string TransferFormat = "report-configuration";
 }
 
 /// <summary>
@@ -1025,4 +1028,42 @@ public sealed class ReportConfigurationSharedDetailDto
 
     /// <summary>已反序列化的被固定定义快照</summary>
     public ReportConfigurationDefinition? Definition { get; set; }
+}
+
+// ==================== ERP-276 Stage 1：可移植报表定义传输契约 ====================
+
+/// <summary>
+/// 可移植报表定义信封：只包含格式标识、schema 版本、安全展示名称与结构化报表定义。
+/// <para>绝不包含 ERP 数据行、内部授权 / 所有者 Id、审计身份、连接 / SQL 数据、修订历史或附件。</para>
+/// </summary>
+public sealed class ReportConfigurationTransferEnvelopeDto
+{
+    /// <summary>传输格式标识（当前仅 report-configuration）</summary>
+    public string Format { get; set; } = ReportConfigurationConstants.TransferFormat;
+
+    /// <summary>schema 版本（与 ReportConfigurationRules.CurrentSchemaVersion 一致）</summary>
+    public int SchemaVersion { get; set; } = 1;
+
+    /// <summary>安全展示名称（1 ~ 200 字符）</summary>
+    public string Name { get; set; } = string.Empty;
+
+    /// <summary>结构化报表定义（有界、已通过当前目录校验）</summary>
+    public ReportConfigurationDefinition? Definition { get; set; }
+}
+
+/// <summary>导出请求：指定要导出的报表配置（自有草稿 / 自有发布修订 / 被共享的固定发布快照）。</summary>
+public sealed class ReportConfigurationTransferExportRequest
+{
+    /// <summary>要导出的报表配置 Id</summary>
+    public long ConfigurationId { get; set; }
+
+    /// <summary>固定发布修订版本号（可选；空 = 导出自有当前草稿）</summary>
+    public int? RevisionVersion { get; set; }
+}
+
+/// <summary>导入请求：客户端上传的可移植报表定义信封原文（严格 UTF-8 JSON）。</summary>
+public sealed class ReportConfigurationTransferImportRequest
+{
+    /// <summary>信封 JSON 原文（≤64KiB；depth ≤16；顶层键仅 format / schemaVersion / name / definition）</summary>
+    public string Json { get; set; } = string.Empty;
 }
