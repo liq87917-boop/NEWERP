@@ -1,9 +1,9 @@
 {
   "schema_version": 2,
   "project": "NEWERP",
-  "updated_at": "2026-10-02T18:18:58.482225Z",
-  "phase": "blocked",
-  "current_task": "ERP-275",
+  "updated_at": "2026-10-03T11:51:14.956346Z",
+  "phase": "ready",
+  "current_task": null,
   "queue": [
     "ERP-275",
     "ERP-276"
@@ -288,9 +288,9 @@
   },
   "git_sync": {
     "branch": "main",
-    "local_sha": "73e47e2",
+    "local_sha": "374b1e2",
     "status": "pending",
-    "ahead": 18,
+    "ahead": 20,
     "behind": 3,
     "last_attempt_at": "2026-10-02T18:18:56.497650Z",
     "last_error": null
@@ -303,11 +303,6 @@
     "status": "stopped",
     "pid": null
   },
-  "blocker": "Working tree is not clean",
-  "finish_reason": "dirty_worktree",
-  "checkpoint_recovery": {
-    "task": "ERP-274",
-    "signature": "c80e486da00de9a2fadc6ab623f1e54a52ef81f1c321fe5b90a7d189d4892dac",
-    "cycles": 1
-  }
+  "blocker": null,
+  "finish_reason": "completed_checkpoint_recovered"
 }
