@@ -65,6 +65,7 @@ let RCC = {
   requestSeq: 0,
   lastAction: '',
   envBlocked: false,
+  filterErrors: [],
   busy: false,
 };
 
@@ -441,14 +442,28 @@ function rccTypedScalar(field, raw) {
   const s = String(raw).trim();
   if (s === '') return null;
   if (field && field.type === 'number') { const n = Number(s); return Number.isFinite(n) ? n : null; }
-  if (field && field.type === 'boolean') return s === 'true' || s === '1';
+  if (field && field.type === 'boolean') {
+    if (s === 'true' || s === '1') return true;
+    if (s === 'false' || s === '0') return false;
+    return null;   // 未知布尔值 fail closed，绝不静默落为 false
+  }
+  if (field && field.type === 'date') {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return null;
+    const p = s.split('-').map(Number);
+    const dt = new Date(Date.UTC(p[0], p[1] - 1, p[2]));
+    const valid = dt.getUTCFullYear() === p[0] && dt.getUTCMonth() === p[1] - 1 && dt.getUTCDate() === p[2];
+    return valid ? s : null;
+  }
   return s;
 }
 
 function rccTypedValue(field, operator, raw) {
   if (operator === 'in') {
-    const parts = String(raw ?? '').split(',').map(x => rccTypedScalar(field, x)).filter(v => v !== null);
-    return parts.length ? parts : null;
+    const s = String(raw ?? '').trim();
+    if (s === '') return null;
+    const parts = s.split(',').map(x => rccTypedScalar(field, x));
+    if (parts.some(v => v === null)) return null;   // 任一成员无效即整体失效，绝不静默缩小
+    return parts;
   }
   return rccTypedScalar(field, raw);
 }
@@ -459,18 +474,42 @@ function rccFilterValueToString(value) {
   return String(value);
 }
 
-function rccBuildFilter(fields, f) {
-  if (!f || !f.fieldKey || !f.operator) return null;
+/* 单行筛选校验（fail closed）：返回错误文案，合法返回 null；绝不静默丢弃或缩小值 */
+function rccValidateFilter(fields, f) {
+  if (!f || !f.fieldKey || !String(f.fieldKey).trim()) return '未选择筛选字段';
   const field = (fields || []).find(x => x.key === f.fieldKey);
-  if (!field) return null;
-  const value = rccTypedValue(field, f.operator, f.value);
-  if (value === null) return null;
-  const result = { fieldKey: field.key, operator: f.operator, value };
+  if (!field) return '筛选字段不在当前目录中';
+  const ops = field.filterOperators || [];
+  if (!f.operator || ops.indexOf(f.operator) < 0) return '筛选操作符无效';
   if (f.operator === 'between') {
+    const lower = rccTypedScalar(field, f.value);
     const upper = rccTypedScalar(field, f.value2);
-    if (upper === null) return null;
-    result.value2 = upper;
+    if (lower === null || upper === null) return 'between 上下界必须完整且为有效值';
+    if (lower > upper) return 'between 下界不能大于上界';
+    return null;
   }
+  if (rccTypedValue(field, f.operator, f.value) === null) return '筛选值无效';
+  return null;
+}
+
+/* 整组筛选校验：返回 [{ index, fieldKey, message }]，供行级反馈与提交前阻断 */
+function rccValidateFilters(state) {
+  const fields = (state && state.fields) || [];
+  const filters = (state && state.filters) || [];
+  const errors = [];
+  for (let i = 0; i < filters.length; i++) {
+    const message = rccValidateFilter(fields, filters[i]);
+    if (message) errors.push({ index: i, fieldKey: filters[i] && filters[i].fieldKey, message });
+  }
+  return errors;
+}
+
+function rccBuildFilter(fields, f) {
+  if (rccValidateFilter(fields, f)) return null;
+  const field = (fields || []).find(x => x.key === f.fieldKey);
+  const value = rccTypedValue(field, f.operator, f.value);
+  const result = { fieldKey: field.key, operator: f.operator, value };
+  if (f.operator === 'between') result.value2 = rccTypedScalar(field, f.value2);
   return result;
 }
 
@@ -542,11 +581,14 @@ function rccFilterRowHtml(fields, f, i) {
   const fieldOpts = (fields || []).filter(x => x.filterable)
     .map(x => '<option value="' + rccEsc(x.key) + '" ' + (x.key === f.fieldKey ? 'selected' : '') + '>' + rccEsc(x.label) + '</option>').join('');
   const opOpts = ops.map(o => '<option value="' + rccEsc(o) + '" ' + (o === f.operator ? 'selected' : '') + '>' + rccEsc(o) + '</option>').join('');
+  const error = ((RCC.filterErrors || []).find(e => e.index === i) || {}).message || '';
   return '<div class="rcc-filter-row">'
     + '<select onchange="rccOnFilterField(' + i + ', this.value)">' + fieldOpts + '</select>'
     + '<select onchange="rccOnFilterOp(' + i + ', this.value)">' + opOpts + '</select>'
     + rccFilterValueHtml(field, f, i)
-    + '<button type="button" class="btn" onclick="rccRemoveFilter(' + i + ')">删除</button></div>';
+    + '<button type="button" class="btn" onclick="rccRemoveFilter(' + i + ')">删除</button>'
+    + (error ? '<div class="rcc-filter-error">' + rccEsc(error) + '</div>' : '')
+    + '</div>';
 }
 
 function rccFiltersHtml(filters, fields) {
@@ -1075,12 +1117,14 @@ function rccAddFilter() {
   const field = (ds && (ds.fields || []).filter(f => f.filterable))[0];
   if (!field) { toast('没有可筛选字段', 'error'); return; }
   RCC.filters.push({ fieldKey: field.key, operator: (field.filterOperators || [])[0] || 'eq', value: '', value2: '' });
+  RCC.filterErrors = [];
   rccTouch();
   rccRenderDesigner();
 }
 
 function rccRemoveFilter(i) {
   RCC.filters.splice(i, 1);
+  RCC.filterErrors = [];
   rccTouch();
   rccRenderDesigner();
 }
@@ -1093,6 +1137,7 @@ function rccOnFilterField(i, value) {
   f.operator = field ? ((field.filterOperators || [])[0] || 'eq') : 'eq';
   f.value = '';
   f.value2 = '';
+  RCC.filterErrors = [];
   rccTouch();
   rccRenderDesigner();
 }
@@ -1103,12 +1148,29 @@ function rccOnFilterOp(i, value) {
   f.operator = value;
   f.value = '';
   f.value2 = '';
+  RCC.filterErrors = [];
   rccTouch();
   rccRenderDesigner();
 }
 
-function rccOnFilterValue(i, value) { const f = RCC.filters[i]; if (f) { f.value = value; rccTouch(); } }
-function rccOnFilterValue2(i, value) { const f = RCC.filters[i]; if (f) { f.value2 = value; rccTouch(); } }
+function rccOnFilterValue(i, value) { const f = RCC.filters[i]; if (f) { f.value = value; RCC.filterErrors = []; rccTouch(); } }
+function rccOnFilterValue2(i, value) { const f = RCC.filters[i]; if (f) { f.value2 = value; RCC.filterErrors = []; rccTouch(); } }
+
+/* 提交前统一校验筛选：非法则展示行级反馈并阻断，绝不发起网络请求；合法则清空旧错误 */
+function rccHasFilterErrors() {
+  const errors = rccValidateFilters(RCC);
+  if (!errors.length) { RCC.filterErrors = []; return false; }
+  RCC.filterErrors = errors;
+  rccRenderDesigner();
+  rccRenderResult(rccErrorHtml('invalid', '筛选条件无效，请修正后再继续'));
+  if (typeof toast === 'function') toast('筛选条件无效，请修正后再继续', 'error');
+  return true;
+}
+
+function rccShowFilterErrors(errors) {
+  RCC.filterErrors = (errors || []).slice();
+  rccRenderDesigner();
+}
 
 function rccOnGrouping(index, value) {
   const key = (value || '').trim();
@@ -1213,6 +1275,7 @@ async function rccSave() {
   if (RCC.busy) return;
   const name = (RCC.name || '').trim();
   if (!name) { toast('请输入配置名称', 'error'); return; }
+  if (rccHasFilterErrors()) return;
   const definition = rccBuildDefinition(RCC);
   if (!definition.fields.length) { toast('请至少选择一个字段', 'error'); return; }
   RCC.busy = true;
@@ -1480,6 +1543,7 @@ async function rccPreview() {
   if (RCC.busy) return;
   if (!RCC.current) { rccRenderResult(rccErrorHtml('invalid', '请先选择或保存一个报表配置')); return; }
   if (RCC.dirty) { rccRenderResult(rccErrorHtml('invalid', '存在未保存编辑，请先保存后再预览')); return; }
+  if (rccHasFilterErrors()) return;
   const seq = ++RCC.requestSeq;   // 本次预览的令牌：迟到响应一律丢弃
   RCC.lastAction = 'preview';
   RCC.busy = true;
@@ -1515,6 +1579,7 @@ async function rccExport() {
   if (RCC.busy) return;
   if (!RCC.current) { rccRenderResult(rccErrorHtml('invalid', '请先选择或保存一个报表配置')); return; }
   if (RCC.dirty) { rccRenderResult(rccErrorHtml('invalid', '存在未保存编辑，请先保存后再导出')); return; }
+  if (rccHasFilterErrors()) return;
   const seq = ++RCC.requestSeq;   // 本次下载的令牌：迟到响应一律丢弃
   RCC.lastAction = 'export';
   RCC.busy = true;
@@ -1567,6 +1632,7 @@ async function rccExportPdf() {
   if (RCC.busy) return;
   if (!RCC.current) { rccRenderResult(rccErrorHtml('invalid', '请先选择或保存一个报表配置')); return; }
   if (RCC.dirty) { rccRenderResult(rccErrorHtml('invalid', '存在未保存编辑，请先保存后再导出')); return; }
+  if (rccHasFilterErrors()) return;
   const seq = ++RCC.requestSeq;   // 本次下载的令牌：迟到响应一律丢弃
   RCC.lastAction = 'exportPdf';
   RCC.busy = true;
@@ -1726,6 +1792,7 @@ function renderReportConfigurationWorkspace() {
 /* Node 单测导出（浏览器中 module 为 undefined，自动跳过） */
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
+    RCC,
     RCC_API,
     RCC_DEFAULT_PAGE_SIZE,
     RCC_GROUP_LABELS,
@@ -1750,6 +1817,10 @@ if (typeof module !== 'undefined' && module.exports) {
     rccTypedScalar,
     rccTypedValue,
     rccFilterValueToString,
+    rccValidateFilter,
+    rccValidateFilters,
+    rccHasFilterErrors,
+    rccShowFilterErrors,
     rccBuildFilter,
     rccBuildDefinition,
     rccBuildPreviewRequest,
