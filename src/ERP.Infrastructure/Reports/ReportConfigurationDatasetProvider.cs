@@ -535,16 +535,19 @@ public sealed class SalesOrderReportConfigurationDatasetProvider : IReportConfig
         var pageRows = snapshot.Rows.Skip(offset).Take(parameters.PageSize).ToList();
         var baseColumns = snapshot.Columns.Select(c => (c.Key, c.Label, c.Type)).ToList();
 
+        // ERP-274：matched-set 覆盖时分组小计来自完整匹配集事实（snapshot.Rows），展示页仍为选中页；
+        // 因此切换页码 / 每页条数不改变分组小计。
+        var summaryRows = snapshot.Rows;
         List<ReportConfigurationGroupSubtotalDto>? groups = null;
         if (compositeGroupings.Count >= 2)
         {
             groups = ReportConfigurationGroupingRules.BuildCompositeGroupSubtotals(
-                pageRows, compositeGroupings, GroupingDimensions,
+                summaryRows, compositeGroupings, GroupingDimensions,
                 row => ReadCurrency(row), row => ReadDecimalValue(row, "totalAmount"));
         }
         else if (groupBy != DynamicSalesOrderReportRules.GroupNone)
         {
-            groups = DynamicSalesOrderReportRules.BuildGroupSubtotals(pageRows, groupBy)
+            groups = DynamicSalesOrderReportRules.BuildGroupSubtotals(summaryRows, groupBy)
                 .Select(g => new ReportConfigurationGroupSubtotalDto(
                     g.Key, g.Label,
                     g.Subtotals.Select(s => new ReportConfigurationCurrencyPartitionDto(
@@ -1263,16 +1266,19 @@ public sealed class ReceivableReportConfigurationDatasetProvider : IReportConfig
         var pageRows = snapshot.Rows.Skip(offset).Take(parameters.PageSize).ToList();
         var baseColumns = snapshot.Columns.Select(c => (c.Key, c.Label, c.Type)).ToList();
 
+        // ERP-274：matched-set 覆盖时分组小计来自完整匹配集事实（snapshot.Rows），展示页仍为选中页；
+        // 因此切换页码 / 每页条数不改变分组小计。
+        var summaryRows = snapshot.Rows;
         List<ReportConfigurationGroupSubtotalDto>? groups = null;
         if (compositeGroupings.Count >= 2)
         {
             groups = ReportConfigurationGroupingRules.BuildCompositeGroupSubtotals(
-                pageRows, compositeGroupings, GroupingDimensions,
+                summaryRows, compositeGroupings, GroupingDimensions,
                 row => ReadCurrency(row), row => ReadDecimalValue(row, "grossAmount"));
         }
         else if (groupBy != DynamicReceivableReportRules.GroupNone)
         {
-            groups = DynamicReceivableReportRules.BuildGroupSubtotals(pageRows, groupBy)
+            groups = DynamicReceivableReportRules.BuildGroupSubtotals(summaryRows, groupBy)
                 .Select(g => new ReportConfigurationGroupSubtotalDto(
                     g.Key, g.Label,
                     g.Subtotals.Select(s => new ReportConfigurationCurrencyPartitionDto(

@@ -31,6 +31,15 @@ public sealed class ReportConfigurationExcelExporter
     /// <summary>透视矩阵工作表名（仅透视时追加；当前预览页、类型化轴 + 币种分区）</summary>
     public const string PivotSheetName = "透视（当前页）";
 
+    /// <summary>分组小计工作表名（matched-set：全部匹配事实、按币种分区）</summary>
+    public const string GroupsSheetNameMatched = "分组小计（匹配集）";
+
+    /// <summary>指标汇总工作表名（matched-set：全部匹配事实、分组 + 币种分区）</summary>
+    public const string MetricsSheetNameMatched = "指标汇总（匹配集）";
+
+    /// <summary>透视矩阵工作表名（matched-set：全部匹配事实、类型化轴 + 币种分区）</summary>
+    public const string PivotSheetNameMatched = "透视（匹配集）";
+
     /// <summary>报表口径上下文工作表名</summary>
     public const string ContextSheetName = "报表口径";
 
@@ -52,14 +61,16 @@ public sealed class ReportConfigurationExcelExporter
 
         BuildDataSheet(workbook, preview, styles, cancellationToken);
 
+        var matchedSet = IsMatchedSet(preview);
+
         if (preview.Groups is { Count: > 0 })
-            BuildGroupsSheet(workbook, preview.Groups, styles, cancellationToken);
+            BuildGroupsSheet(workbook, preview.Groups, matchedSet ? GroupsSheetNameMatched : GroupsSheetName, styles, cancellationToken);
 
         if (preview.Metrics is { Count: > 0 })
-            BuildMetricsSheet(workbook, preview.Metrics, styles, cancellationToken);
+            BuildMetricsSheet(workbook, preview.Metrics, matchedSet ? MetricsSheetNameMatched : MetricsSheetName, styles, cancellationToken);
 
         if (preview.Pivot is not null)
-            BuildPivotSheet(workbook, preview.Pivot, styles, cancellationToken);
+            BuildPivotSheet(workbook, preview.Pivot, matchedSet ? PivotSheetNameMatched : PivotSheetName, styles, cancellationToken);
 
         BuildContextSheet(workbook, preview, styles, cancellationToken);
 
@@ -258,9 +269,9 @@ public sealed class ReportConfigurationExcelExporter
     // ==================== 分组页面小计工作表（当前预览页、按币种分区） ====================
 
     private static void BuildGroupsSheet(
-        XSSFWorkbook workbook, IReadOnlyList<ReportConfigurationGroupSubtotalDto> groups, Styles styles, CancellationToken cancellationToken)
+        XSSFWorkbook workbook, IReadOnlyList<ReportConfigurationGroupSubtotalDto> groups, string sheetName, Styles styles, CancellationToken cancellationToken)
     {
-        var sheet = workbook.CreateSheet(GroupsSheetName);
+        var sheet = workbook.CreateSheet(sheetName);
         var dimensionKeys = CompositeDimensionKeys(groups);
         var headers = dimensionKeys.Count > 0
             ? dimensionKeys.Select(ReportConfigurationGroupingRules.DimensionHeaderLabel)
@@ -321,9 +332,9 @@ public sealed class ReportConfigurationExcelExporter
     // ==================== 指标汇总工作表（当前预览页、分组 + 币种分区） ====================
 
     private static void BuildMetricsSheet(
-        XSSFWorkbook workbook, IReadOnlyList<ReportConfigurationMetricResultDto> metrics, Styles styles, CancellationToken cancellationToken)
+        XSSFWorkbook workbook, IReadOnlyList<ReportConfigurationMetricResultDto> metrics, string sheetName, Styles styles, CancellationToken cancellationToken)
     {
-        var sheet = workbook.CreateSheet(MetricsSheetName);
+        var sheet = workbook.CreateSheet(sheetName);
         var dimensionKeys = CompositeMetricDimensionKeys(metrics);
         var headers = dimensionKeys.Count > 0
             ? new[] { "指标" }
@@ -400,9 +411,9 @@ public sealed class ReportConfigurationExcelExporter
     // ==================== 透视矩阵工作表（当前预览页、类型化轴 + 币种分区） ====================
 
     private static void BuildPivotSheet(
-        XSSFWorkbook workbook, ReportConfigurationPivotResultDto pivot, Styles styles, CancellationToken cancellationToken)
+        XSSFWorkbook workbook, ReportConfigurationPivotResultDto pivot, string sheetName, Styles styles, CancellationToken cancellationToken)
     {
-        var sheet = workbook.CreateSheet(PivotSheetName);
+        var sheet = workbook.CreateSheet(sheetName);
         var sheetRow = 0;
 
         foreach (var metric in pivot.Metrics)
@@ -483,6 +494,15 @@ public sealed class ReportConfigurationExcelExporter
 
     // ==================== 报表口径上下文工作表 ====================
 
+    private static bool IsMatchedSet(ReportConfigurationPreviewDto preview)
+        => string.Equals(preview?.Evidence?.Coverage,
+            ReportConfigurationConstants.CoverageMatchedSet, StringComparison.OrdinalIgnoreCase);
+
+    private static string CoverageText(ReportConfigurationPreviewDto preview)
+        => IsMatchedSet(preview)
+            ? "有界匹配集（≤1000 条一致快照 · 汇总覆盖全部匹配事实）"
+            : "当前预览页（非全量合计）";
+
     private static void BuildContextSheet(XSSFWorkbook workbook, ReportConfigurationPreviewDto preview, Styles styles, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -504,9 +524,18 @@ public sealed class ReportConfigurationExcelExporter
             string.IsNullOrWhiteSpace(preview.DateRangeText) ? "无日期筛选" : preview.DateRangeText, styles);
         AddLabel(sheet, ref nextRow, "排序",
             string.IsNullOrWhiteSpace(preview.SortEvidence) ? "默认排序（稳定分页）" : preview.SortEvidence, styles);
+        AddLabel(sheet, ref nextRow, "覆盖口径",
+            CoverageText(preview), styles);
         AddLabel(sheet, ref nextRow, "页面覆盖",
-            $"第 {preview.Page} 页 · 每页 {preview.PageSize} 条 · 命中 {preview.Total} 条 · 共 {preview.TotalPages} 页 · 当前预览页（非全量合计）",
+            $"第 {preview.Page} 页 · 每页 {preview.PageSize} 条 · 命中 {preview.Total} 条 · 共 {preview.TotalPages} 页 · 本页 {preview.Rows.Count} 行",
             styles);
+        AddLabel(sheet, ref nextRow, "汇总依据",
+            IsMatchedSet(preview)
+                ? $"完整匹配集 {preview.MatchedCount} 条事实（有界一致快照，绝不聚合独立采样页）"
+                : $"当前预览页 {preview.Rows.Count} 行（非全量合计）",
+            styles);
+        if (!string.IsNullOrWhiteSpace(preview.CorrelationId))
+            AddLabel(sheet, ref nextRow, "关联 ID", preview.CorrelationId, styles);
         AddLabel(sheet, ref nextRow, "币种/单位口径", evidence?.CurrencyUnitSemantics ?? string.Empty, styles);
 
         var computedText = BuildComputedEvidenceText(preview.ComputedColumns);

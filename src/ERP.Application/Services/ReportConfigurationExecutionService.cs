@@ -142,6 +142,12 @@ public sealed class ReportConfigurationExecutionService : IReportConfigurationEx
                 $"报表结果行数超出上限（{preview.Rows.Count} > {ReportConfigurationExecutionLimits.MaxPreviewRows}），请缩小筛选范围（关联ID：{correlationId}）",
                 ReportConfigurationExecutionLimits.ErrorCodeResultTooLarge);
 
+        // ERP-274：分组输出同样受 200 行上限约束；全匹配集分组超限返回受控 reduce-range 错误，绝不 top-N 冒充足量。
+        if (preview.Groups is { Count: > ReportConfigurationExecutionLimits.MaxPreviewRows })
+            throw new BusinessException(
+                $"报表分组数超出上限（{preview.Groups.Count} > {ReportConfigurationExecutionLimits.MaxPreviewRows}），请缩小筛选范围或减少分组维度（关联ID：{correlationId}）",
+                ReportConfigurationExecutionLimits.ErrorCodeResultTooLarge);
+
         if (SerializePreviewBytes(preview) > ReportConfigurationExecutionLimits.MaxSerializedPreviewBytes)
             throw new BusinessException(
                 "报表结果过大，已拒绝返回，请减少所选字段或缩小筛选范围（关联ID：" + correlationId + "）",
@@ -319,6 +325,8 @@ public sealed class ReportConfigurationExecutionService : IReportConfigurationEx
         preview.SortDirection = parameters.SortDirection;
         preview.SortEvidence = BuildNormalizedSortText(parameters, dataset);
         preview.MatchedCount = preview.Total;
+        preview.CorrelationId = correlationId;
+        preview.SourceEvidenceCount = preview.Rows.Count;
         return preview;
     }
 
@@ -358,10 +366,17 @@ public sealed class ReportConfigurationExecutionService : IReportConfigurationEx
             var preview = provider.RenderMatchedPage(snapshot, definition, parameters);
             preview.Groupings = parameters.Groupings.ToList();
 
-            if (definition.Pivot is not null)
-                preview.Pivot = ReportConfigurationPivotRules.Build(definition, dataset, preview.Rows, cancellationToken);
+            // ERP-274：全匹配集汇总必须从同一一致快照的「完整匹配事实」计算（≤1000 条，绝不聚合独立采样页）；
+            // 展示页（preview.Rows）仍为选中页，因此页面 / 每页条数变化不会改变指标 / 分组 / 透视汇总。
+            var summaryRows = snapshot.Rows;
 
-            ApplyMetrics(definition, dataset, parameters.Groupings, preview);
+            if (definition.Pivot is not null)
+            {
+                preview.Pivot = ReportConfigurationPivotRules.Build(definition, dataset, summaryRows, cancellationToken);
+                preview.Pivot.Coverage = ReportConfigurationConstants.CoverageMatchedSet;
+            }
+
+            ApplyMetrics(definition, dataset, parameters.Groupings, preview, summaryRows);
             if (parameters.Groupings.Count >= 2 || definition.Pivot is not null)
                 StripCompositeDependencies(definition, preview);
             await ApplyRelationsAsync(definition, preview, userId, cancellationToken);
@@ -377,6 +392,8 @@ public sealed class ReportConfigurationExecutionService : IReportConfigurationEx
             preview.SortDirection = parameters.SortDirection;
             preview.SortEvidence = BuildNormalizedSortText(parameters, dataset);
             preview.MatchedCount = snapshot.MatchedCount;
+            preview.CorrelationId = correlationId;
+            preview.SourceEvidenceCount = snapshot.MatchedCount;
 
             // 完成事务后再做最终新鲜授权复核（授权 / 菜单 / 数据范围变更即拒绝整个响应）
             await snapshot.CompleteAsync(cancellationToken);
@@ -426,13 +443,16 @@ public sealed class ReportConfigurationExecutionService : IReportConfigurationEx
         ReportConfigurationDefinition definition,
         ReportConfigurationDatasetDto dataset,
         IReadOnlyList<string> groupings,
-        ReportConfigurationPreviewDto preview)
+        ReportConfigurationPreviewDto preview,
+        IReadOnlyList<Dictionary<string, object?>>? summaryRows = null)
     {
         var aggregates = definition.Aggregates ?? new List<ReportConfigurationAggregate>();
         if (aggregates.Count == 0)
             return;
 
-        preview.Metrics = ReportConfigurationMetricRules.Compute(definition, dataset, preview.Rows, groupings);
+        // ERP-274：matched-set 覆盖时汇总来自完整匹配集事实；current-page 沿用当前预览页事实（旧行为不变）。
+        preview.Metrics = ReportConfigurationMetricRules.Compute(
+            definition, dataset, summaryRows ?? preview.Rows, groupings);
 
         var selected = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var field in definition.Fields ?? new List<string>())

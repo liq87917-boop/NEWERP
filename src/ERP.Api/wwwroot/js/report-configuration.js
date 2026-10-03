@@ -353,6 +353,10 @@ function rccTableHtml(preview) {
 function rccGroupHtml(preview) {
   const groups = (preview && preview.groups) || [];
   if (!groups.length) return '';
+  const coverage = (preview && preview.evidence && preview.evidence.coverage) || 'current-page';
+  const titleText = coverage === 'matched-set'
+    ? '分组小计（匹配集 · 全部 ≤1000 条事实）'
+    : '分组小计（当前预览页 · 非全量合计）';
   const rows = groups.map(g => {
     const parts = ((g && g.partitions) || []).map(p => {
       const amounts = [];
@@ -365,7 +369,7 @@ function rccGroupHtml(preview) {
     }).join('');
     return '<div class="rcc-group"><b>' + rccEsc(g.label) + '</b>' + parts + '</div>';
   }).join('');
-  return '<div class="rcc-groups">' + rows + '</div>';
+  return '<div class="rcc-groups"><div class="rcc-groups-title">' + titleText + '</div>' + rows + '</div>';
 }
 
 /* 生效分组维度（兼容旧 groupBy 与新的有序 groupings；none 归一为空列表） */
@@ -382,7 +386,7 @@ function rccResultHtml(preview) {
   const evidence = preview.evidence || {};
   const coverage = evidence.coverage || 'current-page';
   const coverageText = coverage === 'matched-set'
-    ? '有界匹配集（≤1000 条一致快照，非全量合计）'
+    ? '有界匹配集（≤1000 条一致快照 · 汇总覆盖全部匹配事实）'
     : (coverage === 'current-page' ? '当前预览页（非全量合计）' : coverage);
   const parts = [];
   if (rccEffectiveGroupings(preview).length) parts.push(rccGroupHtml(preview));
@@ -395,11 +399,19 @@ function rccResultHtml(preview) {
     + ' · 覆盖口径：' + rccEsc(coverageText) + '</div>');
   if (evidence.disclaimerText) parts.push('<div class="rcc-disclaimer">' + rccEsc(evidence.disclaimerText) + '</div>');
   if (preview.sortEvidence) parts.push('<div class="rcc-sort-evidence">' + rccEsc(preview.sortEvidence) + '</div>');
-  const matchedSuffix = coverage === 'matched-set'
+  const evidenceCount = coverage === 'matched-set'
+    ? (preview.sourceEvidenceCount !== undefined ? preview.sourceEvidenceCount : preview.matchedCount)
+    : (preview.sourceEvidenceCount !== undefined ? preview.sourceEvidenceCount : preview.total);
+  const renderedCount = (preview.rows || []).length;
+  const matchedText = coverage === 'matched-set'
     ? ' · 匹配 ' + rccEsc(preview.matchedCount !== undefined ? preview.matchedCount : preview.total) + ' 条'
     : '';
+  const correlationText = preview.correlationId ? ' · 关联 ' + rccEsc(preview.correlationId) : '';
   parts.push('<div class="rcc-meta">第 ' + rccEsc(preview.page) + '/' + rccEsc(preview.totalPages)
-    + ' 页 · 共 ' + rccEsc(preview.total) + ' 条' + matchedSuffix + '</div>');
+    + ' 页 · 命中 ' + rccEsc(preview.total) + ' 条'
+    + ' · 汇总依据 ' + rccEsc(evidenceCount) + ' 条'
+    + ' · 本页 ' + rccEsc(renderedCount) + ' 行'
+    + matchedText + correlationText + '</div>');
   return parts.join('');
 }
 
@@ -792,7 +804,11 @@ function rccMetricsHtml(preview) {
       + '</div>').join('');
     return '<div class="rcc-group">' + title + cells + '</div>';
   }).join('');
-  return '<div class="rcc-metrics"><div class="rcc-metrics-title">指标汇总（当前预览页 · 非全量合计）</div>' + rows + '</div>';
+  const coverage = (preview && preview.evidence && preview.evidence.coverage) || 'current-page';
+  const metricsTitle = coverage === 'matched-set'
+    ? '指标汇总（匹配集 · 全部 ≤1000 条事实）'
+    : '指标汇总（当前预览页 · 非全量合计）';
+  return '<div class="rcc-metrics"><div class="rcc-metrics-title">' + metricsTitle + '</div>' + rows + '</div>';
 }
 
 /* ERP-272：透视结果矩阵（与 Excel / PDF 同一份轴 / 单元格 / 汇总 / 覆盖证据） */
@@ -810,6 +826,11 @@ function rccPivotResultHtml(preview) {
   if (!pivot || !(pivot.metrics || []).length) return '';
   const dimLabels = { customer: '客户', month: '月份' };
   const rowHead = dimLabels[pivot.rowDimension] || pivot.rowDimension;
+  const coverage = pivot.coverage || 'current-page';
+  const pivotTitle = coverage === 'matched-set'
+    ? '透视（匹配集 · 全部 ≤1000 条事实）'
+    : '透视（当前页 · 非全量合计）';
+  const coverageNote = coverage === 'matched-set' ? '（汇总覆盖全部匹配事实）' : '（非全量合计）';
   const head = '<tr><th>' + rccEsc(rowHead) + '</th>'
     + (pivot.columnAxis || []).map(c => '<th>' + rccEsc(c.label) + '</th>').join('') + '</tr>';
   const blocks = (pivot.metrics || []).map(m => {
@@ -825,11 +846,11 @@ function rccPivotResultHtml(preview) {
     const unit = m.unit ? '（' + rccEsc(m.unit) + '）' : '';
     const title = '<div class="rcc-pivot-metric"><b>' + rccEsc(m.label) + '（' + rccEsc(rccFunctionLabel(m.function)) + '）' + unit + '</b></div>';
     const summary = '<div class="rcc-partition">已知 ' + rccEsc(m.knownCount) + ' · 缺失 ' + rccEsc(m.missingCount)
-      + ' · 来源 ' + rccEsc(m.sourceCount) + ' · 覆盖 ' + rccEsc(pivot.coverage || 'current-page') + '（非全量合计）</div>';
+      + ' · 来源 ' + rccEsc(m.sourceCount) + ' · 覆盖 ' + rccEsc(coverage) + coverageNote + '</div>';
     return title + '<div class="rcc-table-wrap"><table class="rcc-table"><thead>' + head
       + '</thead><tbody>' + body + '</tbody></table></div>' + summary;
   }).join('');
-  return '<div class="rcc-pivot-result"><div class="rcc-pivot-title">透视（当前页 · 非全量合计）</div>' + blocks + '</div>';
+  return '<div class="rcc-pivot-result"><div class="rcc-pivot-title">' + pivotTitle + '</div>' + blocks + '</div>';
 }
 
 function rccDatasetLabel(key) {
@@ -870,7 +891,7 @@ function rccCoverageHtml(ds) {
     + '<option value="current-page" ' + (cur === 'current-page' ? 'selected' : '') + '>当前预览页（默认）</option>'
     + '<option value="matched-set" ' + (cur === 'matched-set' ? 'selected' : '') + '>有界匹配集（≤1000 条一致快照）</option>'
     + '</select>'
-    + '<div class="rcc-hint">有界匹配集读取 ≤1000 条一致快照，仍只展示选中页；全量合计后续版本提供</div></div>';
+    + '<div class="rcc-hint">有界匹配集读取 ≤1000 条一致快照：页面仅展示选中页，指标 / 分组 / 透视汇总覆盖全部匹配事实（绝不聚合独立采样页或截断冒充足量）</div></div>';
 }
 
 function rccSetCoverage(v) {

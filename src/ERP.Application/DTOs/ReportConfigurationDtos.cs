@@ -698,6 +698,12 @@ public sealed class ReportConfigurationPreviewDto
     /// <summary>数据集键</summary>
     public string DatasetKey { get; set; } = string.Empty;
 
+    /// <summary>本次执行的关联 ID（受控追踪，绝不泄露 SQL / 栈 / 私有值）。</summary>
+    public string CorrelationId { get; set; } = string.Empty;
+
+    /// <summary>汇总所基于的来源证据条数（matched-set = 完整匹配事实数；current-page = 当前预览页行数）。</summary>
+    public int SourceEvidenceCount { get; set; }
+
     /// <summary>通用类型化列（按选定字段顺序）</summary>
     public List<ReportConfigurationColumnDto> Columns { get; set; } = new();
 

@@ -353,6 +353,52 @@ public class ReportConfigurationRulesTests
         AssertInvalid(definition, BuildDataset(supportedCapabilities: new[] { "preview", "grouping", "date-range" }));
     }
 
+    // ==================== 7.1 覆盖口径（ERP-274：仅快照能力数据集可全匹配集；旧定义保持当前页） ====================
+
+    [Fact]
+    public void Validate_匹配集覆盖_数据集支持快照_通过()
+    {
+        var definition = ValidDefinition();
+        definition.Coverage = ReportConfigurationConstants.CoverageMatchedSet;
+
+        var dataset = BuildDataset(supportedCapabilities: new[]
+        {
+            "preview", "grouping", "date-range", "paging", "matched-set",
+        });
+
+        ReportConfigurationRules.Validate(definition, dataset);
+    }
+
+    [Fact]
+    public void Validate_匹配集覆盖_数据集不支持快照_拒绝()
+    {
+        var definition = ValidDefinition();
+        definition.Coverage = ReportConfigurationConstants.CoverageMatchedSet;
+
+        AssertInvalid(definition, BuildDataset());
+    }
+
+    [Fact]
+    public void Validate_未知覆盖口径_拒绝()
+    {
+        var definition = ValidDefinition();
+        definition.Coverage = "all";
+
+        AssertInvalid(definition, BuildDataset(supportedCapabilities: new[]
+        {
+            "preview", "grouping", "date-range", "paging", "matched-set",
+        }));
+    }
+
+    [Fact]
+    public void Validate_旧定义缺省覆盖_默认当前页_通过()
+    {
+        var definition = ValidDefinition();
+        definition.Coverage = string.Empty;
+
+        ReportConfigurationRules.Validate(definition, BuildDataset());
+    }
+
     // ==================== 8. 展示 / 分页边界 ====================
 
     [Fact]

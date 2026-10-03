@@ -354,7 +354,7 @@ public class ReportConfigurationUiTests
         Assert.Contains("coverage: state.coverage || 'current-page'", js);
         Assert.Contains("有界匹配集", js);
         Assert.Contains("覆盖口径：", js);
-        Assert.Contains("全量合计后续版本提供", js);
+        Assert.Contains("汇总覆盖全部匹配事实", js);
         Assert.Contains("if (code === 5002) return 'environment'", js);
     }
 

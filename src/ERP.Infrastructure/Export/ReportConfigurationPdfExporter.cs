@@ -359,6 +359,20 @@ public static class ReportConfigurationPdfExporter
 
     // ==================== 头部元数据 ====================
 
+    private static bool IsMatchedSet(ReportConfigurationPreviewDto preview)
+        => string.Equals(preview?.Evidence?.Coverage,
+            ReportConfigurationConstants.CoverageMatchedSet, StringComparison.OrdinalIgnoreCase);
+
+    private static string CoverageText(ReportConfigurationPreviewDto preview)
+        => IsMatchedSet(preview)
+            ? "有界匹配集（≤1000 条一致快照 · 汇总覆盖全部匹配事实）"
+            : "当前预览页（非全量合计）";
+
+    private static string SummaryNote(ReportConfigurationPreviewDto preview)
+        => IsMatchedSet(preview)
+            ? "完整匹配集（≤1000 条一致快照）；金额按币种分区，绝不跨币种 / 单位相加。"
+            : "仅当前预览页；金额按币种分区，绝不跨币种 / 单位相加，绝不等于全匹配合计。";
+
     private static List<string> BuildHeadNotes(ReportConfigurationPreviewDto preview)
     {
         var evidence = preview.Evidence;
@@ -379,7 +393,13 @@ public static class ReportConfigurationPdfExporter
         notes.Add($"查询筛选：{(string.IsNullOrWhiteSpace(preview.NormalizedFiltersText) ? "无筛选" : preview.NormalizedFiltersText)}");
         notes.Add($"日期范围：{(string.IsNullOrWhiteSpace(preview.DateRangeText) ? "无日期筛选" : preview.DateRangeText)}");
         notes.Add($"排序：{(string.IsNullOrWhiteSpace(preview.SortEvidence) ? "默认排序（稳定分页）" : preview.SortEvidence)}");
-        notes.Add($"页面覆盖：第 {preview.Page} 页 · 每页 {preview.PageSize} 条 · 命中 {preview.Total} 条 · 共 {preview.TotalPages} 页 · 当前预览页（非全量合计）");
+        notes.Add($"覆盖口径：{CoverageText(preview)}");
+        notes.Add($"页面覆盖：第 {preview.Page} 页 · 每页 {preview.PageSize} 条 · 命中 {preview.Total} 条 · 共 {preview.TotalPages} 页 · 本页 {preview.Rows.Count} 行");
+        notes.Add($"汇总依据：{(IsMatchedSet(preview)
+            ? $"完整匹配集 {preview.MatchedCount} 条事实（有界一致快照，绝不聚合独立采样页）"
+            : $"当前预览页 {preview.Rows.Count} 行（非全量合计）")}");
+        if (!string.IsNullOrWhiteSpace(preview.CorrelationId))
+            notes.Add($"关联 ID：{preview.CorrelationId}");
 
         var readOnly = evidence?.ReadOnlyText ?? string.Empty;
         var boundary = evidence?.BoundaryText ?? string.Empty;
@@ -615,11 +635,11 @@ public static class ReportConfigurationPdfExporter
             var widths = ComputeSubtotalWidths(columns, rows, usableWidth);
 
             var y = Mm(MarginTopMm);
-            gfx.DrawString("指标汇总（当前页）", titleFont, XBrushes.Black,
+            gfx.DrawString(IsMatchedSet(preview) ? "指标汇总（匹配集）" : "指标汇总（当前页）", titleFont, XBrushes.Black,
                 new XRect(Mm(MarginLeftMm), y, usableWidth, Mm(TitleHeightMm)), XStringFormats.TopCenter);
             y += Mm(TitleHeightMm);
 
-            gfx.DrawString("仅当前预览页；金额按币种分区，绝不跨币种 / 单位相加，绝不等于全匹配合计。",
+            gfx.DrawString(SummaryNote(preview),
                 metaFont, XBrushes.Black,
                 new XRect(Mm(MarginLeftMm), y, usableWidth, Mm(MetaHeightMm)), XStringFormats.TopLeft);
             y += Mm(MetaHeightMm + 2);
@@ -673,12 +693,12 @@ public static class ReportConfigurationPdfExporter
                 var widths = ComputeSubtotalWidths(columns, rows, usableWidth);
 
                 var y = Mm(MarginTopMm);
-                gfx.DrawString("透视（当前页）", titleFont, XBrushes.Black,
+                gfx.DrawString(IsMatchedSet(preview) ? "透视（匹配集）" : "透视（当前页）", titleFont, XBrushes.Black,
                     new XRect(Mm(MarginLeftMm), y, usableWidth, Mm(TitleHeightMm)), XStringFormats.TopCenter);
                 y += Mm(TitleHeightMm);
 
                 gfx.DrawString(
-                    $"{ReportConfigurationPivotRules.MetricTitle(metric)} · 仅当前预览页；金额按币种分区，绝不跨币种 / 单位相加，绝不等于全匹配合计。",
+                    $"{ReportConfigurationPivotRules.MetricTitle(metric)} · {SummaryNote(preview)}",
                     metaFont, XBrushes.Black,
                     new XRect(Mm(MarginLeftMm), y, usableWidth, Mm(MetaHeightMm)), XStringFormats.TopLeft);
                 y += Mm(MetaHeightMm + 2);
@@ -695,7 +715,8 @@ public static class ReportConfigurationPdfExporter
                 }
 
                 gfx.DrawString(
-                    $"已知 {metric.KnownCount} · 缺失 {metric.MissingCount} · 来源 {metric.SourceCount} · 覆盖 {pivot.Coverage}（非全量合计）",
+                    $"已知 {metric.KnownCount} · 缺失 {metric.MissingCount} · 来源 {metric.SourceCount} · 覆盖 {pivot.Coverage}"
+                    + (IsMatchedSet(preview) ? "（汇总覆盖全部匹配事实）" : "（非全量合计）"),
                     metaFont, XBrushes.Black,
                     new XRect(Mm(MarginLeftMm), y + Mm(2), usableWidth, Mm(DataLineHeightMm)), XStringFormats.TopLeft);
             }
@@ -1047,11 +1068,11 @@ public static class ReportConfigurationPdfExporter
             var widths = ComputeSubtotalWidths(columns, rows, usableWidth);
 
             var y = Mm(MarginTopMm);
-            gfx.DrawString("分组小计（当前页 · 按币种分区）", titleFont, XBrushes.Black,
+            gfx.DrawString(IsMatchedSet(preview) ? "分组小计（匹配集 · 按币种分区）" : "分组小计（当前页 · 按币种分区）", titleFont, XBrushes.Black,
                 new XRect(Mm(MarginLeftMm), y, usableWidth, Mm(TitleHeightMm)), XStringFormats.TopCenter);
             y += Mm(TitleHeightMm);
 
-            gfx.DrawString("仅当前预览页；金额按币种分区，绝不跨币种 / 单位相加，绝不等于全匹配合计。",
+            gfx.DrawString(SummaryNote(preview),
                 metaFont, XBrushes.Black,
                 new XRect(Mm(MarginLeftMm), y, usableWidth, Mm(MetaHeightMm)), XStringFormats.TopLeft);
             y += Mm(MetaHeightMm + 2);
