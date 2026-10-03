@@ -27,4 +27,15 @@ public interface IReportConfigurationExecutionService
         long ownerUserId,
         ReportConfigurationPreviewRequest request,
         IReportConfigurationExecutionLease lease);
+
+    /// <summary>
+    /// 在已获取的执行租约内构建服务端内部导出结果（ERP-275）：复用同一租约与截止时间，绝不二次获取租约。
+    /// <para>全匹配覆盖时获取一次有界一致快照，由同一快照派生完整事实（≤1000）与全部选中指标 / 分组 / 透视汇总；
+    /// 普通当前页覆盖维持 ≤200 行且不改变预览 / 默认上限。返回前重新校验已保存 / 固定 / 授权定义、接收人
+    /// 字段 / 菜单 / 数据范围与最终撤销（fail closed），绝不把页面子集冒充全量合计。</para>
+    /// </summary>
+    Task<ReportConfigurationExportResultDto> BuildExportResultAsync(
+        long ownerUserId,
+        ReportConfigurationPreviewRequest request,
+        IReportConfigurationExecutionLease lease);
 }

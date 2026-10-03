@@ -90,6 +90,20 @@ public class ReportConfigurationUiTests
         Assert.DoesNotContain("rccTouch()", fn);                 // 失败不触发数据集 / 配置变化，保留设计器控件
     }
 
+    [Fact]
+    public void 导出_两种模式均丢弃迟到响应_防陈旧下载()
+    {
+        var js = File.ReadAllText(Path.Combine(JsDirectory(), "report-configuration.js"));
+
+        var excelFn = Segment(js, "async function rccExport()", "/* 工作台入口");
+        var pdfFn = Segment(js, "async function rccExportPdf()", "/* 工作台入口");
+
+        Assert.Contains("const seq = ++RCC.requestSeq", excelFn);   // 当前页 / 匹配集下载都携带请求序号令牌
+        Assert.Contains("seq !== RCC.requestSeq", excelFn);
+        Assert.Contains("const seq = ++RCC.requestSeq", pdfFn);
+        Assert.Contains("seq !== RCC.requestSeq", pdfFn);
+    }
+
     // ==================== 3. 保存 / 复制 / 重命名 / 删除 / 发布 / 恢复 / 修订 ====================
 
     [Fact]

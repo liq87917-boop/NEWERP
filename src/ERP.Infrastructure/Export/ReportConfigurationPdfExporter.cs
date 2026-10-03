@@ -87,6 +87,25 @@ public static class ReportConfigurationPdfExporter
     public static byte[] Export(ReportConfigurationPreviewDto preview, CancellationToken cancellationToken)
         => Export(preview, SimHeiPdfFontResolver.FindFontPath(), cancellationToken);
 
+    /// <summary>导出服务端内部导出结果为 PDF 字节流（ERP-275：完整匹配事实 ≤1000 或当前页 ≤200；字体缺失显式失败）。</summary>
+    public static byte[] Export(ReportConfigurationExportResultDto result)
+        => Export(result, SimHeiPdfFontResolver.FindFontPath(), CancellationToken.None);
+
+    /// <summary>导出服务端内部导出结果为 PDF 字节流（可传播联动取消令牌到渲染循环；字体缺失显式失败）。</summary>
+    public static byte[] Export(ReportConfigurationExportResultDto result, CancellationToken cancellationToken)
+        => Export(result, SimHeiPdfFontResolver.FindFontPath(), cancellationToken);
+
+    /// <summary>导出服务端内部导出结果为 PDF 字节流；<paramref name="fontPath"/> 为空或文件不存在时显式失败。</summary>
+    public static byte[] Export(ReportConfigurationExportResultDto result, string? fontPath)
+        => Export(result, fontPath, CancellationToken.None);
+
+    /// <summary>导出服务端内部导出结果为 PDF 字节流（字体缺失显式失败；渲染循环可传播取消）。</summary>
+    public static byte[] Export(ReportConfigurationExportResultDto result, string? fontPath, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(result);
+        return Export(result.ToRenderPreview(), fontPath, cancellationToken);
+    }
+
     /// <summary>
     /// 导出当前预览页为 PDF 字节流；<paramref name="fontPath"/> 为空或文件不存在时显式失败。
     /// <para>公开该重载以便单元测试注入「字体缺失」路径，以及显式控制字体文件位置。</para>

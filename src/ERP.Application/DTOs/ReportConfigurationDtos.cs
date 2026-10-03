@@ -756,6 +756,43 @@ public sealed class ReportConfigurationPreviewDto
     public ReportConfigurationEvidenceContextDto? Evidence { get; set; }
 }
 
+// ==================== ERP-275 Stage 1：服务端内部导出结果契约 ====================
+
+/// <summary>
+/// 服务端内部导出结果契约（ERP-275）：与 ≤200 行普通预览分离，可承载 ≤1000 条完整匹配事实（或矩阵）。
+/// <para>仅由导出端点与通用导出器消费，绝不作为普通预览返回给客户端；普通预览上限 / 默认值保持不变。</para>
+/// <para><see cref="Preview"/> 已携带同一有界一致快照派生的列 / 汇总（指标 / 分组 / 透视）/ 证据上下文与定义 / 版本 /
+/// 查询 / 排序 / 粒度 / 匹配计数证据；<see cref="Facts"/> 为导出要渲染的完整事实行（matched-set = 全部 ≤1000 条；
+/// current-page = 当前预览页 ≤200 行），绝不把页面子集冒充全量合计。</para>
+/// </summary>
+public sealed class ReportConfigurationExportResultDto
+{
+    /// <summary>已构建的完整导出渲染数据（列 / 汇总 / 证据上下文 + 定义名称 / 版本 / 查询 / 排序 / 粒度 / 匹配计数证据）。</summary>
+    public ReportConfigurationPreviewDto Preview { get; set; } = new();
+
+    /// <summary>导出要渲染的完整事实行（matched-set = 全部 ≤1000 条；current-page = 当前预览页 ≤200 行）。</summary>
+    public List<Dictionary<string, object?>> Facts { get; set; } = new();
+
+    /// <summary>覆盖口径（current-page / matched-set）。</summary>
+    public string Coverage { get; set; } = ReportConfigurationConstants.CoverageCurrentPage;
+
+    /// <summary>有界匹配事实命中条数（≤ 1000）。</summary>
+    public int MatchedCount { get; set; }
+
+    /// <summary>导出渲染所基于的来源证据条数（= <see cref="Facts"/> 条数）。</summary>
+    public int SourceEvidenceCount { get; set; }
+
+    /// <summary>投影为通用导出器可直接消费的渲染预览（Rows 已是完整事实，绝不截断）。</summary>
+    public ReportConfigurationPreviewDto ToRenderPreview()
+    {
+        if (Facts is not null)
+            Preview.Rows = Facts;
+        Preview.SourceEvidenceCount = SourceEvidenceCount;
+        Preview.MatchedCount = MatchedCount;
+        return Preview;
+    }
+}
+
 // ==================== ERP-272 Stage 1：有界透视契约 ====================
 
 /// <summary>

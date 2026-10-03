@@ -1515,6 +1515,7 @@ async function rccExport() {
   if (RCC.busy) return;
   if (!RCC.current) { rccRenderResult(rccErrorHtml('invalid', '请先选择或保存一个报表配置')); return; }
   if (RCC.dirty) { rccRenderResult(rccErrorHtml('invalid', '存在未保存编辑，请先保存后再导出')); return; }
+  const seq = ++RCC.requestSeq;   // 本次下载的令牌：迟到响应一律丢弃
   RCC.lastAction = 'export';
   RCC.busy = true;
   const req = rccBuildPreviewRequest(RCC);
@@ -1527,6 +1528,8 @@ async function rccExport() {
       },
       body: JSON.stringify(req),
     });
+
+    if (seq !== RCC.requestSeq) return;   // 数据集 / 配置已变化：丢弃迟到的下载响应
 
     const contentType = (resp.headers.get('content-type') || '');
     if (contentType.indexOf('spreadsheetml') >= 0) {

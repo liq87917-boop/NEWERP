@@ -242,18 +242,20 @@ public class ReportConfigurationsController : ControllerBase
         {
             return await _budget.ExecuteAsync<IActionResult>(userId, HttpContext.RequestAborted, async lease =>
             {
-                var preview = await _execution.PreviewAsync(userId, request, lease);
+                // ERP-275：导出复用同一执行租约；全匹配覆盖时由同一有界一致快照派生完整事实（≤1000）与全部选中汇总，
+                // 普通当前页覆盖维持 ≤200 行；绝不二次获取租约、绝不信任客户端行。
+                var result = await _execution.BuildExportResultAsync(userId, request, lease);
 
                 var bytes = exportKind == "pdf"
-                    ? RenderPdf(preview, lease)
-                    : RenderExcel(preview, lease);
+                    ? RenderPdf(result, lease)
+                    : RenderExcel(result, lease);
 
                 if (bytes.Length > ReportConfigurationExecutionLimits.MaxGeneratedFileBytes)
                     throw new BusinessException(
                         "报表文件过大，已拒绝下载（关联ID：" + lease.CorrelationId + "）",
                         ReportConfigurationExecutionLimits.ErrorCodeResultTooLarge);
 
-                LogExport(userId, request, preview, exportKind, ReportConfigurationExecutionOutcomes.Success, stopwatch.ElapsedMilliseconds);
+                LogExport(userId, request, result.Preview, exportKind, ReportConfigurationExecutionOutcomes.Success, stopwatch.ElapsedMilliseconds);
 
                 return exportKind == "pdf"
                     ? File(bytes, "application/pdf", $"ReportConfiguration_{DateTime.Now:yyyyMMddHHmmss}.pdf")
@@ -278,11 +280,11 @@ public class ReportConfigurationsController : ControllerBase
         }
     }
 
-    private static byte[] RenderExcel(ReportConfigurationPreviewDto preview, IReportConfigurationExecutionLease lease)
+    private static byte[] RenderExcel(ReportConfigurationExportResultDto result, IReportConfigurationExecutionLease lease)
     {
         try
         {
-            return new ReportConfigurationExcelExporter().Build(preview, lease.Token);
+            return new ReportConfigurationExcelExporter().Build(result, lease.Token);
         }
         catch (OperationCanceledException)
         {
@@ -300,11 +302,11 @@ public class ReportConfigurationsController : ControllerBase
         }
     }
 
-    private static byte[] RenderPdf(ReportConfigurationPreviewDto preview, IReportConfigurationExecutionLease lease)
+    private static byte[] RenderPdf(ReportConfigurationExportResultDto result, IReportConfigurationExecutionLease lease)
     {
         try
         {
-            return ReportConfigurationPdfExporter.Export(preview, lease.Token);
+            return ReportConfigurationPdfExporter.Export(result, lease.Token);
         }
         catch (OperationCanceledException)
         {

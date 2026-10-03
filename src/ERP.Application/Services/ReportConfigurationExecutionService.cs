@@ -94,6 +94,59 @@ public sealed class ReportConfigurationExecutionService : IReportConfigurationEx
         return await PreviewWithinLeaseCoreAsync(ownerUserId, request, lease);
     }
 
+    /// <inheritdoc />
+    public async Task<ReportConfigurationExportResultDto> BuildExportResultAsync(
+        long ownerUserId,
+        ReportConfigurationPreviewRequest request,
+        IReportConfigurationExecutionLease lease)
+    {
+        ArgumentNullException.ThrowIfNull(lease);
+        var stopwatch = Stopwatch.StartNew();
+        ReportConfigurationExportResultDto? result = null;
+        try
+        {
+            result = await BuildExportResultCoreAsync(ownerUserId, request, lease);
+
+            LogExecution(ownerUserId, request, result.Preview, ReportConfigurationExecutionOutcomes.Success, stopwatch.ElapsedMilliseconds);
+            return result;
+        }
+        catch (BusinessException ex)
+        {
+            LogExecution(ownerUserId, request, result?.Preview, ReportConfigurationExecutionOutcomes.For(ex.Code), stopwatch.ElapsedMilliseconds);
+            throw;
+        }
+        catch (OperationCanceledException)
+        {
+            LogExecution(ownerUserId, request, result?.Preview, ReportConfigurationExecutionOutcomes.Cancelled, stopwatch.ElapsedMilliseconds);
+            throw;
+        }
+        catch (Exception)
+        {
+            LogExecution(ownerUserId, request, result?.Preview, ReportConfigurationExecutionOutcomes.Error, stopwatch.ElapsedMilliseconds);
+            throw;
+        }
+    }
+
+    private async Task<ReportConfigurationExportResultDto> BuildExportResultCoreAsync(
+        long ownerUserId,
+        ReportConfigurationPreviewRequest request,
+        IReportConfigurationExecutionLease lease)
+    {
+        // 导出复用同一执行租约；renderAllFacts=true 表示全匹配覆盖时渲染完整事实（≤1000），
+        // 普通预览路径不受影响（仍 ≤200 行）。
+        var preview = await PreviewResolvedAsync(
+            ownerUserId, request, lease.Token, lease.CorrelationId, renderAllFacts: true);
+
+        return new ReportConfigurationExportResultDto
+        {
+            Preview = preview,
+            Facts = preview.Rows,
+            Coverage = preview.Evidence?.Coverage ?? ReportConfigurationConstants.CoverageCurrentPage,
+            MatchedCount = preview.MatchedCount,
+            SourceEvidenceCount = preview.SourceEvidenceCount,
+        };
+    }
+
     private async Task<ReportConfigurationPreviewDto> PreviewWithinLeaseCoreAsync(
         long ownerUserId,
         ReportConfigurationPreviewRequest request,
@@ -108,7 +161,8 @@ public sealed class ReportConfigurationExecutionService : IReportConfigurationEx
         long ownerUserId,
         ReportConfigurationPreviewRequest request,
         CancellationToken cancellationToken,
-        string correlationId)
+        string correlationId,
+        bool renderAllFacts = false)
     {
         EnsureAuthenticated(ownerUserId);
         ArgumentNullException.ThrowIfNull(request);
@@ -121,10 +175,10 @@ public sealed class ReportConfigurationExecutionService : IReportConfigurationEx
                 cancellationToken);
 
         if (config is not null)
-            return await PreviewOwnedAsync(ownerUserId, request, config, cancellationToken, correlationId);
+            return await PreviewOwnedAsync(ownerUserId, request, config, cancellationToken, correlationId, renderAllFacts);
 
         // 2) 否则按被授权人共享解析（每次重新校验授权与固定修订，绝不暴露草稿 / 其它修订 / 历史）
-        return await PreviewSharedAsync(ownerUserId, request, cancellationToken, correlationId);
+        return await PreviewSharedAsync(ownerUserId, request, cancellationToken, correlationId, renderAllFacts);
     }
 
     private static void CheckPreviewBounds(ReportConfigurationPreviewDto preview, string correlationId)
@@ -206,7 +260,7 @@ public sealed class ReportConfigurationExecutionService : IReportConfigurationEx
 
     private async Task<ReportConfigurationPreviewDto> PreviewOwnedAsync(
         long ownerUserId, ReportConfigurationPreviewRequest request, ReportConfiguration config,
-        CancellationToken cancellationToken, string correlationId)
+        CancellationToken cancellationToken, string correlationId, bool renderAllFacts)
     {
         // 选定定义：草稿 or 固定发布修订（修订必须属于该配置且未被软删除）
         ReportConfigurationDefinition definition;
@@ -236,12 +290,13 @@ public sealed class ReportConfigurationExecutionService : IReportConfigurationEx
         }
 
         return await ExecutePreviewAsync(ownerUserId, config.Id, datasetKey, definition, name,
-            pinnedRevision, pinnedRevision ?? config.Version, request, cancellationToken, correlationId, isShared: false);
+            pinnedRevision, pinnedRevision ?? config.Version, request, cancellationToken, correlationId,
+            isShared: false, renderAllFacts);
     }
 
     private async Task<ReportConfigurationPreviewDto> PreviewSharedAsync(
         long recipientUserId, ReportConfigurationPreviewRequest request,
-        CancellationToken cancellationToken, string correlationId)
+        CancellationToken cancellationToken, string correlationId, bool renderAllFacts)
     {
         // 被授权人必须为现有激活用户（fail closed）
         var recipient = await _db.SysUsers.AsNoTracking()
@@ -269,13 +324,14 @@ public sealed class ReportConfigurationExecutionService : IReportConfigurationEx
 
         // 共享预览始终使用固定修订（忽略客户端 RevisionVersion），绝不暴露其它修订 / 草稿
         return await ExecutePreviewAsync(recipientUserId, config.Id, revision.DatasetKey, definition,
-            revision.Name, revision.Version, revision.Version, request, cancellationToken, correlationId, isShared: true);
+            revision.Name, revision.Version, revision.Version, request, cancellationToken, correlationId,
+            isShared: true, renderAllFacts);
     }
 
     private async Task<ReportConfigurationPreviewDto> ExecutePreviewAsync(
         long userId, long configurationId, string datasetKey, ReportConfigurationDefinition definition,
         string name, int? pinnedRevision, int version, ReportConfigurationPreviewRequest request,
-        CancellationToken cancellationToken, string correlationId, bool isShared)
+        CancellationToken cancellationToken, string correlationId, bool isShared, bool renderAllFacts)
     {
         // 定位对应数据集适配器（未知数据集 fail closed）
         var provider = _providers.FirstOrDefault(p =>
@@ -299,7 +355,8 @@ public sealed class ReportConfigurationExecutionService : IReportConfigurationEx
         {
             return await ExecuteMatchedSetPreviewAsync(
                 userId, configurationId, datasetKey, definition, name, pinnedRevision, version,
-                request, parameters, dataset, provider, correlationId, isShared, cancellationToken);
+                request, parameters, dataset, provider, correlationId, isShared, renderAllFacts,
+                cancellationToken);
         }
 
         // 分发执行（适配器内部再次走既有查询的菜单授权 + 数据范围，并保留币种 / 单位口径）
@@ -335,7 +392,7 @@ public sealed class ReportConfigurationExecutionService : IReportConfigurationEx
         string name, int? pinnedRevision, int version, ReportConfigurationPreviewRequest request,
         ReportConfigurationPreviewParameters parameters, ReportConfigurationDatasetDto dataset,
         IReportConfigurationDatasetProvider provider, string correlationId, bool isShared,
-        CancellationToken cancellationToken)
+        bool renderAllFacts, CancellationToken cancellationToken)
     {
         if (!provider.SupportsReadSnapshot)
         {
@@ -363,7 +420,18 @@ public sealed class ReportConfigurationExecutionService : IReportConfigurationEx
 
         await using (snapshot)
         {
-            var preview = provider.RenderMatchedPage(snapshot, definition, parameters);
+            // ERP-275：导出全匹配覆盖时以「单页 = 完整匹配事实」渲染（≤1000），绝不把页面子集冒充全量；
+            // 普通预览仍按原页码 / 每页条数渲染选中页（≤200）。
+            var renderParameters = renderAllFacts
+                ? new ReportConfigurationPreviewParameters(
+                    1, Math.Max(1, snapshot.MatchedCount), parameters.GroupBy,
+                    parameters.SortFieldKey, parameters.SortDirection)
+                {
+                    Groupings = parameters.Groupings,
+                }
+                : parameters;
+
+            var preview = provider.RenderMatchedPage(snapshot, definition, renderParameters);
             preview.Groupings = parameters.Groupings.ToList();
 
             // ERP-274：全匹配集汇总必须从同一一致快照的「完整匹配事实」计算（≤1000 条，绝不聚合独立采样页）；

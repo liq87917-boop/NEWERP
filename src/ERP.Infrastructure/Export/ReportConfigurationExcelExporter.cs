@@ -81,6 +81,17 @@ public sealed class ReportConfigurationExcelExporter
         return output.ToArray();
     }
 
+    /// <summary>生成服务端内部导出结果工作簿（ERP-275：完整匹配事实 ≤1000 或当前页 ≤200）。</summary>
+    public byte[] Build(ReportConfigurationExportResultDto result)
+        => Build(result, CancellationToken.None);
+
+    /// <summary>生成服务端内部导出结果工作簿（只读；可传播联动取消令牌到渲染循环，超时 / 断连时提前停止）。</summary>
+    public byte[] Build(ReportConfigurationExportResultDto result, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(result);
+        return Build(result.ToRenderPreview(), cancellationToken);
+    }
+
     // ==================== 样式 ====================
 
     private static Styles CreateStyles(XSSFWorkbook workbook)
