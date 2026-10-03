@@ -357,13 +357,13 @@ def recover_completed_checkpoint(config: dict[str, Any], state: dict[str, Any]) 
     _, task = item
     task_id = task["id"]
     signature = checkpoint_content_signature(config)
-    prior = state.get("checkpoint_recovery") or {}
+    prior = task.get("checkpoint_recovery") or state.get("checkpoint_recovery") or {}
     cycles = int(prior.get("cycles", 0)) if prior.get("signature") == signature else 0
     maximum = int(config.get("autonomy", {}).get("max_supervised_recovery_cycles", 2))
     if cycles >= maximum:
         return 8
-    state["checkpoint_recovery"] = {"task": task_id, "signature": signature, "cycles": cycles + 1}
-    save_json(STATE_PATH, state)
+    task["checkpoint_recovery"] = {"task": task_id, "signature": signature, "cycles": cycles + 1}
+    save_json(TASKS_DIR / f"{task_id}.json", task)
     audit("completed_checkpoint_recovery_started", task=task_id)
     # Revalidate the current content; historical success cannot authorize new edits.
     code, log, summary = run_validation(task, "checkpoint-recovery")
