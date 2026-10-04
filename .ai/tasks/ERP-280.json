@@ -1,7 +1,7 @@
 {
   "id": "ERP-280",
   "title": "Make common report SQL persistence usable on an isolated fresh database",
-  "status": "pending",
+  "status": "retry",
   "description": "Stage 1 common report platform runtime persistence increment. A real dedicated localdb probe found fresh startup blocked by a legacy EF table-name mismatch in SchemaUpgrader, before report APIs are usable. User 2026-10-04 autonomous authorization permits this exact development-only bootstrap repair; it is not a bespoke business report or audit-only task. Modify only the named upgrade code and regression/integration tests. No production DB connection, arbitrary SQL, secrets/config/.env modifications, migrations, schema changes executed outside the isolated test instance, business writes outside test fixtures, Agent, deployment or stage-2 migration. Preserve all existing fields and permissions and do not suppress startup errors. Existing reporting Domain/Application/Infrastructure mappings require no changes. Localdb SQL Server 15.0.4382.1 has been created separately from MSSQLSERVER. Set test flags and connection only in child processes, include dedicated target guard, and retain ERP-190 completion and deferred ERP-257/258.",
   "acceptance_criteria": [
     "A fresh isolated SQL Server database can finish NEWERP startup so the common report configuration module is usable. Correct the proven SchemaUpgrader section 28 mismatch: EF maps db_owner.ContainerBookings but twelve COL_LENGTH/ALTER checks address nonexistent db_owner.ContainerBooking (SQL error 4902 at line 1406). Align the existing upgrade target with EF mapping without creating a duplicate singular table, moving entities, hiding exceptions, skipping upgrades wholesale, or changing business behavior. Verify rerun is idempotent.",
@@ -49,5 +49,83 @@
     "required": false,
     "scenarios": []
   },
-  "created_at": "2026-10-04T07:22:56.193399Z"
+  "created_at": "2026-10-04T07:22:56.193399Z",
+  "preserved_work": {
+    "execution_copy": "D:\\VSCodeProject\\NEWERP.executor.continue-erp-190-20260930080457",
+    "changed_paths": [
+      ".ai/PROJECT_STATE.json",
+      ".ai/tasks/ERP-280.json",
+      "src/ERP.Infrastructure/Data/SchemaUpgrader.cs",
+      "src/ERP.IntegrationTests/ReportConfigurationSqlServerTests.cs",
+      "src/ERP.UnitTests/ContainerShipmentTrackingTests.cs",
+      "src/ERP.UnitTests/DatabaseBootstrapMappingTests.cs"
+    ],
+    "diff": ".ai\\logs\\ERP-280-preserved-work.diff",
+    "preserved_at": "2026-10-04T07:32:50.020814Z"
+  },
+  "failure_kind": "path_guard_failure",
+  "failed_transport_version": 2,
+  "recovery_history": [
+    {
+      "remediation_task": "ERP-280-RECOVERY-1",
+      "cycle": 1,
+      "at": "2026-10-04T07:32:50.220159Z",
+      "evidence": {
+        "failure_kind": "path_guard_failure",
+        "summary": "Path guard failed:\noutside allowed_paths: src/ERP.UnitTests/ContainerShipmentTrackingTests.cs",
+        "result": ".ai\\results\\ERP-280.json",
+        "attempt_logs": [
+          ".ai/logs/ERP-280-attempt-1.jsonl"
+        ],
+        "validation_logs": [],
+        "latest_state_error": {
+          "task": "ERP-280",
+          "kind": "automatic_repair_pending",
+          "summary": "Path guard failed:\noutside allowed_paths: src/ERP.UnitTests/ContainerShipmentTrackingTests.cs"
+        },
+        "latest_build": null,
+        "task_context": ".ai\\tasks\\ERP-280.json",
+        "changed_paths": [
+          ".ai/PROJECT_STATE.json",
+          ".ai/tasks/ERP-280.json",
+          "src/ERP.Infrastructure/Data/SchemaUpgrader.cs",
+          "src/ERP.IntegrationTests/ReportConfigurationSqlServerTests.cs",
+          "src/ERP.UnitTests/ContainerShipmentTrackingTests.cs",
+          "src/ERP.UnitTests/DatabaseBootstrapMappingTests.cs"
+        ],
+        "diff": ".ai\\logs\\ERP-280-preserved-work.diff",
+        "execution_copy": "D:\\VSCodeProject\\NEWERP.executor.continue-erp-190-20260930080457"
+      }
+    }
+  ],
+  "supervised_recovery_cycles": 1,
+  "recovery_context": {
+    "remediation_task": "ERP-280-RECOVERY-1",
+    "failure_kind": "path_guard_failure",
+    "summary": "Path guard failed:\noutside allowed_paths: src/ERP.UnitTests/ContainerShipmentTrackingTests.cs",
+    "result": ".ai\\results\\ERP-280.json",
+    "attempt_logs": [
+      ".ai/logs/ERP-280-attempt-1.jsonl"
+    ],
+    "validation_logs": [],
+    "latest_state_error": {
+      "task": "ERP-280",
+      "kind": "automatic_repair_pending",
+      "summary": "Path guard failed:\noutside allowed_paths: src/ERP.UnitTests/ContainerShipmentTrackingTests.cs"
+    },
+    "latest_build": null,
+    "task_context": ".ai\\tasks\\ERP-280.json",
+    "changed_paths": [
+      ".ai/PROJECT_STATE.json",
+      ".ai/tasks/ERP-280.json",
+      "src/ERP.Infrastructure/Data/SchemaUpgrader.cs",
+      "src/ERP.IntegrationTests/ReportConfigurationSqlServerTests.cs",
+      "src/ERP.UnitTests/ContainerShipmentTrackingTests.cs",
+      "src/ERP.UnitTests/DatabaseBootstrapMappingTests.cs"
+    ],
+    "diff": ".ai\\logs\\ERP-280-preserved-work.diff",
+    "execution_copy": "D:\\VSCodeProject\\NEWERP.executor.continue-erp-190-20260930080457",
+    "repair_allowed_paths": [],
+    "instruction": "DeepSeek supervisor recovery: inspect the referenced complete logs, diagnose the root cause, and implement a different safe repair within allowed_paths. Rebuild and rerun the configured tests; if validation fails, use the newest log as the next repair input. Do not repeat the failed approach. Do not edit task/state/result files or relax production and irreversible-operation gates. "
+  }
 }
