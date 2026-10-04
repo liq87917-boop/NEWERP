@@ -79,6 +79,7 @@ let RCC = {
   envBlocked: false,
   filterErrors: [],
   busy: false,
+  activeAbort: null,
 };
 
 /* ==================== 纯函数（可在 Node 中逐条单测） ==================== */
@@ -1010,15 +1011,19 @@ function rccRenderRevisions() {
 }
 
 /* 请求封装：返回 { code, message, data } 信封；网络失败返回 code -1，不静默吞错误 */
-async function rccFetch(path, method = 'GET', body = null) {
+async function rccFetch(path, method = 'GET', body = null, signal = null) {
   const headers = { 'Content-Type': 'application/json' };
   const token = (typeof localStorage !== 'undefined') ? (localStorage.getItem('erp_token') || '') : '';
   if (token) headers['Authorization'] = 'Bearer ' + token;
   const opts = { method, headers };
   if (body !== null) opts.body = JSON.stringify(body);
+  if (signal) opts.signal = signal;          // 请求作用域取消信号：仅用于只读预览 / 导出
   let resp;
   try { resp = await fetch(path, opts); }
-  catch (err) { return { code: -1, message: (err && err.message) || '无法连接到服务器' }; }
+  catch (err) {
+    if (err && err.name === 'AbortError') throw err;   // 取消 / 离开：交由调用方按 cancelled 处理
+    return { code: -1, message: (err && err.message) || '无法连接到服务器' };
+  }
   let envelope = null;
   try { envelope = await resp.json(); } catch (e) { envelope = null; }
   return envelope || { code: 5000, message: '服务器无响应' };
@@ -1046,12 +1051,38 @@ function rccOnUnauthorized(message) {
 function rccTouch() {
   RCC.dirty = true;
   RCC.requestSeq++;                        // 使在途的旧预览 / 旧配置响应全部过期
+  rccAbortActive();                        // 切换数据集 / 配置即中止在途只读 / 导出请求
   RCC.view = null;
   rccRenderResult(rccEmptyHtml());          // 数据集 / 配置变化后清除过期预览行
   rccRenderDirty();
 }
 
+/* 中止当前在途的只读预览 / 导出请求并立即释放本地忙态（不触碰已提交的生命周期写入） */
+function rccAbortActive() {
+  if (!RCC.activeAbort) return;
+  try { RCC.activeAbort.abort(); } catch (e) { /* 忽略重复中止 */ }
+  RCC.activeAbort = null;
+  RCC.busy = false;
+}
+
+/* 取消当前预览 / Excel / PDF 只读请求：立即释放本地忙态、保留已保存定义与未保存编辑，允许继续操作 */
+function rccCancel() {
+  if (!RCC.busy) return;
+  if (RCC.lastAction !== 'preview' && RCC.lastAction !== 'export' && RCC.lastAction !== 'exportPdf') return;   // 已提交的生命周期写入绝不取消
+  RCC.requestSeq++;                        // 作废本次在途请求，使迟到响应 / 导出 blob 全部失效
+  rccAbortActive();                        // 中止底层 fetch / 响应体读取
+  rccRenderResult(rccErrorHtml('cancelled', '已取消预览 / 导出请求'));   // 显式取消结果，与授权 / 校验 / 网络错误区分
+}
+
+/* 切换 / 离开工作台时释放活动只读 / 导出请求（重新进入工作台也会调用） */
+function rccDisposeWorkspace() {
+  if (!RCC.activeAbort) return;
+  RCC.requestSeq++;                        // 作废在途只读 / 导出请求，杜绝迟到下载或覆盖预览
+  rccAbortActive();
+}
+
 async function rccInit() {
+  rccDisposeWorkspace();   // 重新进入工作台：先释放上一次会话的活动只读 / 导出请求
   RCC = {
     catalog: null, datasets: [], datasetKey: '', fields: [], list: [], current: null, name: '',
     selectedKeys: [], filters: [], computedColumns: [], aggregates: [], groupings: [], coverage: 'current-page', sortFieldKey: '', sortDirection: 'asc', page: 1, pageSize: RCC_DEFAULT_PAGE_SIZE,
@@ -1061,7 +1092,7 @@ async function rccInit() {
     sharedCursor: null, sharedHasMore: false, sharedSeq: 0,
     revisionsCursor: null, revisionsHasMore: false, revisionsSeq: 0,
     grantsCursor: null, grantsHasMore: false, grantsSeq: 0,
-    dirty: false, requestSeq: 0, envBlocked: false, busy: false,
+    dirty: false, requestSeq: 0, envBlocked: false, busy: false, activeAbort: null,
   };
   rccRenderDesigner();
   rccRenderList();
@@ -1627,9 +1658,11 @@ async function rccPreview() {
   const seq = ++RCC.requestSeq;   // 本次预览的令牌：迟到响应一律丢弃
   RCC.lastAction = 'preview';
   RCC.busy = true;
+  const controller = new AbortController();
+  RCC.activeAbort = controller;   // 请求作用域信号：取消 / 离开工作台即中止本次只读请求
   rccRenderResult(rccLoadingHtml());
   try {
-    const env = await rccFetch(RCC_API + '/preview', 'POST', rccBuildPreviewRequest(RCC));
+    const env = await rccFetch(RCC_API + '/preview', 'POST', rccBuildPreviewRequest(RCC), controller.signal);
     if (seq !== RCC.requestSeq) return;   // 数据集 / 配置已变化：丢弃迟到的预览响应
     if (env.code === 2000 || env.code === 2003) { rccOnUnauthorized(env.message); return; }
     if (env.code === 5000) { RCC.envBlocked = true; rccRenderEnvBanner(); rccRenderResult(rccEnvBlockedHtml(env.message)); return; }
@@ -1640,10 +1673,14 @@ async function rccPreview() {
     RCC.view = env.data;
     rccRenderResult(rccResultHtml(RCC.view));
   } catch (err) {
-    if (seq !== RCC.requestSeq) return;
-    rccRenderResult(rccErrorHtml('network', (err && err.message) || '无法连接到服务器'));
+    if (seq !== RCC.requestSeq) return;   // 已取消 / 已离开：不覆盖最新预览
+    if (err && err.name === 'AbortError') {
+      rccRenderResult(rccErrorHtml('cancelled', (err && err.message) || '请求已取消'));
+    } else {
+      rccRenderResult(rccErrorHtml('network', (err && err.message) || '无法连接到服务器'));
+    }
   } finally {
-    RCC.busy = false;
+    if (RCC.activeAbort === controller) { RCC.activeAbort = null; RCC.busy = false; }   // 仅当仍是最新操作时才复位忙态
   }
 }
 
@@ -1663,6 +1700,8 @@ async function rccExport() {
   const seq = ++RCC.requestSeq;   // 本次下载的令牌：迟到响应一律丢弃
   RCC.lastAction = 'export';
   RCC.busy = true;
+  const controller = new AbortController();
+  RCC.activeAbort = controller;   // 请求作用域信号：取消 / 离开工作台即中止本次只读请求
   const req = rccBuildPreviewRequest(RCC);
   try {
     const resp = await fetch(RCC_API + '/export', {
@@ -1672,6 +1711,7 @@ async function rccExport() {
         'Authorization': 'Bearer ' + (typeof localStorage !== 'undefined' ? (localStorage.getItem('erp_token') || '') : ''),
       },
       body: JSON.stringify(req),
+      signal: controller.signal,
     });
 
     if (seq !== RCC.requestSeq) return;   // 数据集 / 配置已变化：丢弃迟到的下载响应
@@ -1679,6 +1719,7 @@ async function rccExport() {
     const contentType = (resp.headers.get('content-type') || '');
     if (contentType.indexOf('spreadsheetml') >= 0) {
       const blob = await resp.blob();
+      if (seq !== RCC.requestSeq) return;   // 读取 blob 期间被取消 / 离开：绝不触发下载
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
@@ -1699,9 +1740,14 @@ async function rccExport() {
     if (code === 5000) { RCC.envBlocked = true; rccRenderEnvBanner(); rccRenderResult(rccEnvBlockedHtml(message)); return; }
     rccRenderResult(rccErrorHtml(rccKindOfCode(code), message));   // 失败只显示错误，绝不覆盖未保存编辑
   } catch (err) {
-    rccRenderResult(rccErrorHtml('network', (err && err.message) || '无法连接到服务器'));
+    if (seq !== RCC.requestSeq) return;   // 已取消 / 已离开：不覆盖最新状态
+    if (err && err.name === 'AbortError') {
+      rccRenderResult(rccErrorHtml('cancelled', (err && err.message) || '请求已取消'));
+    } else {
+      rccRenderResult(rccErrorHtml('network', (err && err.message) || '无法连接到服务器'));
+    }
   } finally {
-    RCC.busy = false;
+    if (RCC.activeAbort === controller) { RCC.activeAbort = null; RCC.busy = false; }   // 仅当仍是最新操作时才复位忙态
   }
 }
 
@@ -1716,6 +1762,8 @@ async function rccExportPdf() {
   const seq = ++RCC.requestSeq;   // 本次下载的令牌：迟到响应一律丢弃
   RCC.lastAction = 'exportPdf';
   RCC.busy = true;
+  const controller = new AbortController();
+  RCC.activeAbort = controller;   // 请求作用域信号：取消 / 离开工作台即中止本次只读请求
   const req = rccBuildPreviewRequest(RCC);
   try {
     const resp = await fetch(RCC_API + '/export/pdf', {
@@ -1725,6 +1773,7 @@ async function rccExportPdf() {
         'Authorization': 'Bearer ' + (typeof localStorage !== 'undefined' ? (localStorage.getItem('erp_token') || '') : ''),
       },
       body: JSON.stringify(req),
+      signal: controller.signal,
     });
 
     if (seq !== RCC.requestSeq) return;   // 数据集 / 配置已变化：丢弃迟到的下载响应
@@ -1732,6 +1781,7 @@ async function rccExportPdf() {
     const contentType = (resp.headers.get('content-type') || '');
     if (contentType.indexOf('pdf') >= 0) {
       const blob = await resp.blob();
+      if (seq !== RCC.requestSeq) return;   // 读取 blob 期间被取消 / 离开：绝不触发下载
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
@@ -1752,10 +1802,14 @@ async function rccExportPdf() {
     if (code === 5000) { RCC.envBlocked = true; rccRenderEnvBanner(); rccRenderResult(rccEnvBlockedHtml(message)); return; }
     rccRenderResult(rccErrorHtml(rccKindOfCode(code), message));   // 失败只显示错误，绝不覆盖未保存编辑
   } catch (err) {
-    if (seq !== RCC.requestSeq) return;
-    rccRenderResult(rccErrorHtml('network', (err && err.message) || '无法连接到服务器'));
+    if (seq !== RCC.requestSeq) return;   // 已取消 / 已离开：不覆盖最新状态
+    if (err && err.name === 'AbortError') {
+      rccRenderResult(rccErrorHtml('cancelled', (err && err.message) || '请求已取消'));
+    } else {
+      rccRenderResult(rccErrorHtml('network', (err && err.message) || '无法连接到服务器'));
+    }
   } finally {
-    RCC.busy = false;
+    if (RCC.activeAbort === controller) { RCC.activeAbort = null; RCC.busy = false; }   // 仅当仍是最新操作时才复位忙态
   }
 }
 
@@ -1852,6 +1906,7 @@ function renderReportConfigurationWorkspace() {
     + '<button type="button" class="btn" onclick="rccPreview()">预览</button>'
     + '<button type="button" class="btn" onclick="rccExport()">导出</button>'
     + '<button type="button" class="btn" onclick="rccExportPdf()">导出PDF</button>'
+    + '<button type="button" class="btn" onclick="rccCancel()">取消</button>'
     + '<button type="button" class="btn" onclick="rccExportDefinition()">导出定义</button>'
     + '<button type="button" class="btn" onclick="document.getElementById(\'rcc-import-file\').click()">导入定义</button>'
     + '<input type="file" id="rcc-import-file" accept="application/json,.json" style="display:none" onchange="rccOnImportFile(this)">'
@@ -1866,7 +1921,28 @@ function renderReportConfigurationWorkspace() {
     + '<section class="rcc-grants" id="rcc-grants"></section>'
     + '</div>'
     + '</div>';
+  rccAttachLeaveObserver();
   rccInit();
+}
+
+/* 离开工作台（路由切换替换 #content）时释放活动只读 / 导出请求 */
+let rccLeaveObserver = null;
+function rccAttachLeaveObserver() {
+  if (typeof MutationObserver === 'undefined') return;
+  if (!rccLeaveObserver) {
+    rccLeaveObserver = new MutationObserver(function (mutations) {
+      for (const m of mutations) {
+        for (const node of m.removedNodes) {
+          if (node && node.nodeType === 1 && node.classList && node.classList.contains('rcc-workspace')) {
+            rccDisposeWorkspace();
+            return;
+          }
+        }
+      }
+    });
+  }
+  const content = document.getElementById('content');
+  if (content) rccLeaveObserver.observe(content, { childList: true });
 }
 
 /* Node 单测导出（浏览器中 module 为 undefined，自动跳过） */
@@ -1917,6 +1993,7 @@ if (typeof module !== 'undefined' && module.exports) {
     rccOnSortField,
     rccOnSortDirection,
     rccDatasetLabel,
+    rccTouch,
     rccRenderDesigner,
     rccRenderList,
     rccRenderRevisions,
@@ -1953,6 +2030,9 @@ if (typeof module !== 'undefined' && module.exports) {
     rccPreview,
     rccExport,
     rccExportPdf,
+    rccAbortActive,
+    rccCancel,
+    rccDisposeWorkspace,
     renderReportConfigurationWorkspace,
   };
 }

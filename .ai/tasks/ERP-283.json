@@ -1,7 +1,7 @@
 {
   "id": "ERP-283",
   "title": "Allow users to cancel generic report preview and export requests",
-  "status": "pending",
+  "status": "completed",
   "description": "Stage 1 generic reporting platform error/query-boundary increment. Code inspection verifies this gap: lifecycle controller calls omit existing cancellation tokens; workspace fetch has no AbortController; lifecycle services directly SaveChangesAsync without mapping EF concurrency failures. Implement only the gap named in this title. Preserve concurrent work, established report contracts and existing ERP permissions. No bespoke report, new dataset, Agent, deployment, production connection, secrets or .env changes. Domain entities and EF mappings already support existing tokens and require no modification.",
   "acceptance_criteria": [
     "The common report workspace exposes a cancel action during preview, Excel and PDF requests using AbortController and request-scoped signals. Cancel releases local busy controls immediately, preserves saved definition and unsaved edits, and allows a subsequent operation. Never add cancellation to already-committed lifecycle writes or broaden permissions.",
@@ -37,7 +37,7 @@
   "validation_profile": "safe",
   "completion_mode": "build",
   "max_attempts": 3,
-  "attempts": 0,
+  "attempts": 1,
   "auto_start": true,
   "requires_human_approval": false,
   "human_gate": {
