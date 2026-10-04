@@ -1,0 +1,54 @@
+{
+  "title": "Propagate request cancellation into the generic report preview endpoint",
+  "description": "Stage-1 query-boundary gap verified in code: every generic reporting controller endpoint except the preview endpoint passes HttpContext.RequestAborted to its Application interface via WithRequestCancellationAsync (catalog/list/get/create/update/rename/copy/delete/publish/restore/revisions/grants/grant/revoke/shared/shared-detail/copy-shared/transfer-export/transfer-import), and the export endpoints pass it via ExportBoundedAsync; only the preview endpoint calls _execution.PreviewAsync(CurrentUserId(), request) with the default CancellationToken.None. The preview is the most expensive read (it runs the dataset SQL query), so a client abort/disconnect cannot cancel the query and only the fixed 30s server deadline applies. Implement the missing token propagation into the existing execution service; do not change lifecycle writes, add a timeout helper that abandons a still-running query, or broaden permissions.",
+  "acceptance_criteria": [
+    "The common report preview endpoint passes the actual HttpContext.RequestAborted token to the existing IReportConfigurationExecutionService.PreviewAsync. Pre-cancelled preview requests must not acquire an execution lease or run the dataset query; normal previews still succeed. Preserve identity injection, dataset menu authorization, current-user data scope and existing route contracts; do not wrap the call in a timeout helper that abandons a still-running query.",
+    "Genuine caller cancellation during preview converges to the existing controlled cancelled (1007) BusinessException, distinct from timeout (1006), authorization and validation errors; the 30s server deadline and per-user concurrency lease still apply. Do not claim cancellation stops a non-cooperative query; non-cancellation failures retain their existing codes.",
+    "Add executable controller coverage proving the preview endpoint captures the exact RequestAborted token (pre-cancelled -> cancelled code with no lease/query work, normal success, non-cancellation failures unchanged), preserving existing request-cancellation and API regression tests. Run safe Release build/test and scheduler self-test/contracts; real browser acceptance remains a separate genuine phase gate."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/ReportConfigurationsController.cs",
+    "src/ERP.UnitTests/ReportConfigurationRequestCancellationTests.cs",
+    "src/ERP.UnitTests/ReportConfigurationApiTests.cs"
+  ],
+  "criterion_path_map": {
+    "The common report preview endpoint passes the actual HttpContext.RequestAborted token to the existing IReportConfigurationExecutionService.PreviewAsync. Pre-cancelled preview requests must not acquire an execution lease or run the dataset query; normal previews still succeed. Preserve identity injection, dataset menu authorization, current-user data scope and existing route contracts; do not wrap the call in a timeout helper that abandons a still-running query.": [
+      "src/ERP.Api/Controllers/ReportConfigurationsController.cs",
+      "src/ERP.UnitTests/ReportConfigurationRequestCancellationTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationApiTests.cs"
+    ],
+    "Genuine caller cancellation during preview converges to the existing controlled cancelled (1007) BusinessException, distinct from timeout (1006), authorization and validation errors; the 30s server deadline and per-user concurrency lease still apply. Do not claim cancellation stops a non-cooperative query; non-cancellation failures retain their existing codes.": [
+      "src/ERP.Api/Controllers/ReportConfigurationsController.cs",
+      "src/ERP.UnitTests/ReportConfigurationRequestCancellationTests.cs"
+    ],
+    "Add executable controller coverage proving the preview endpoint captures the exact RequestAborted token (pre-cancelled -> cancelled code with no lease/query work, normal success, non-cancellation failures unchanged), preserving existing request-cancellation and API regression tests. Run safe Release build/test and scheduler self-test/contracts; real browser acceptance remains a separate genuine phase gate.": [
+      "src/ERP.Api/Controllers/ReportConfigurationsController.cs",
+      "src/ERP.UnitTests/ReportConfigurationRequestCancellationTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationApiTests.cs"
+    ]
+  },
+  "depends_on": [
+    "ERP-283"
+  ],
+  "risk": "low",
+  "planning_stage": 1,
+  "implementation_evidence": "src/ERP.Api/Controllers/ReportConfigurationsController.cs:279-285 [HttpPost(\"preview\")] calls _execution.PreviewAsync(CurrentUserId(), request) with no CancellationToken (default None), while all other endpoints wrap via WithRequestCancellationAsync (e.g. Catalog :114, Create :139, Shared :230) and export passes HttpContext.RequestAborted via ExportBoundedAsync (:318-323); src/ERP.Application/Interfaces/IReportConfigurationExecutionService.cs:18-21 exposes PreviewAsync(long, ReportConfigurationPreviewRequest, CancellationToken cancellationToken = default); src/ERP.Application/Services/ReportConfigurationExecutionService.cs:53-66 forwards that token into _budget.ExecuteAsync, so preview currently runs with CancellationToken.None and only the 30s deadline (src/ERP.Application/Services/ReportConfigurationExecutionBudget.cs:333-334 linked deadline token) can stop it; src/ERP.UnitTests/ReportConfigurationRequestCancellationTests.cs covers Create/Publish/Grant/Update cancellation but has no preview-endpoint token assertion.",
+  "id": "ERP-291",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-04T10:37:22.933972Z"
+}
