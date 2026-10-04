@@ -14,18 +14,21 @@ using Xunit;
 namespace ERP.UnitTests;
 
 /// <summary>
-/// ERP-188 动态代理服务费月度汇总报表「当前页按对账月份 / 客户分组计数 Excel 导出」单元测试。
+/// ERP-190 动态代理服务费月度汇总报表「当前页按对账月份 / 客户分组原币金额 Excel 导出」单元测试。
 /// <para>语义：<see cref="DynamicAgencyServiceFeeMonthlyReportController.Export"/> 复用同一有界、已授权预览，
-/// none 模式保持既有单工作表不变；month / customer 分组模式在选定列证据工作表之后追加「分组计数」工作表
-/// （复用 ERP-184 同一批有界、已授权分组计数），分组标签 + 原币 + 月度行数与已登记 / 草稿 / 已作废 / 总计张数
-/// 全部为数值单元格，文本单元格做公式注入转义，并显式标注空页 / 截断 / 仅本页；不含金额列、不声明跨页合计。</para>
-/// <para>覆盖：按月份 / 按客户分组、none 不变、混合币种、隐藏维度列、公式前导标签、空页、截断页、不含金额列、
-/// 无身份 / 无菜单授权 / 无效分组键拒绝、业务员数据范围、只读不写库。全部使用内存数据库（TestDbFactory），
-/// 不连接 SQL Server、不执行任何 SQL。</para>
+/// none 模式保持既有单工作表不变；month / customer 分组模式在选定列证据工作表之后，于「分组计数」工作表
+/// （ERP-188）之外再追加「分组金额」工作表（复用 ERP-186 同一批有界、已授权分组金额），分组标签 + 原币 +
+/// 已登记 / 草稿 / 已作废原币金额全部为按币种精度的数值单元格，文本单元格做公式注入转义，并显式标注空页 /
+/// 截断 / 仅本页；不含计数列、绝不跨币种 / 跨页合计。</para>
+/// <para>覆盖：按月份 / 按客户分组、none 不变、混合币种、精确小数、隐藏金额字段、公式前导标签、空页、截断页、
+/// 不含计数列与合计、无身份 / 无菜单授权 / 无效分组键拒绝、业务员数据范围、只读不写库。全部使用内存数据库
+/// （TestDbFactory），不连接 SQL Server、不执行任何 SQL。</para>
 /// </summary>
-public class DynamicAgencyServiceFeeMonthlyGroupedExcelTests
+public class DynamicAgencyServiceFeeMonthlyGroupedAmountExcelTests
 {
+    private const string DataSheetName = "代理服务费月度汇总";
     private const string GroupCountSheetName = "分组计数";
+    private const string GroupAmountSheetName = "分组金额";
 
     // ==================== 0. 测试脚手架 ====================
 
@@ -73,7 +76,7 @@ public class DynamicAgencyServiceFeeMonthlyGroupedExcelTests
     }
 
     /// <summary>播种一个「客户资料菜单授权 + 系统内置角色（特权）」的登录用户并返回其用户 Id（特权 → 不过滤客户）</summary>
-    private static long SeedAuthorizedUser(ErpDbContext db, string userName = "grouped-excel-user")
+    private static long SeedAuthorizedUser(ErpDbContext db, string userName = "grouped-amt-excel-user")
     {
         var user = SeedUser(db, userName);
         var role = SeedRole(db, $"Role-{userName}", isSystem: true);
@@ -172,17 +175,15 @@ public class DynamicAgencyServiceFeeMonthlyGroupedExcelTests
         return sheet!;
     }
 
-    /// <summary>分组计数工作表表头：分组标签 + 原币 + 月度行数 + 已登记 / 草稿 / 已作废 / 总计张数（不含金额列）</summary>
-    private static void AssertHeader(ISheet sheet)
+    /// <summary>分组金额工作表表头：分组标签 + 原币 + 已登记 / 草稿 / 已作废原币金额（不含计数列、不含合计列）</summary>
+    private static void AssertAmountHeader(ISheet sheet)
     {
         var header = sheet.GetRow(0);
         Assert.Equal("分组标签", header.GetCell(0).StringCellValue);
         Assert.Equal("原币", header.GetCell(1).StringCellValue);
-        Assert.Equal("月度行数", header.GetCell(2).StringCellValue);
-        Assert.Equal("已登记张数", header.GetCell(3).StringCellValue);
-        Assert.Equal("草稿张数", header.GetCell(4).StringCellValue);
-        Assert.Equal("已作废张数", header.GetCell(5).StringCellValue);
-        Assert.Equal("对账单总张数", header.GetCell(6).StringCellValue);
+        Assert.Equal("已登记原币金额", header.GetCell(2).StringCellValue);
+        Assert.Equal("草稿原币金额", header.GetCell(3).StringCellValue);
+        Assert.Equal("已作废原币金额", header.GetCell(4).StringCellValue);
     }
 
     // ==================== 1. none 保持既有工作簿 ====================
@@ -204,15 +205,15 @@ public class DynamicAgencyServiceFeeMonthlyGroupedExcelTests
 
         using var workbook = OpenWorkbook(file.FileContents);
         Assert.Equal(1, workbook.NumberOfSheets);
-        Assert.Equal("代理服务费月度汇总", workbook.GetSheetAt(0).SheetName);
-        Assert.Equal("客户名称", workbook.GetSheetAt(0).GetRow(0).GetCell(0).StringCellValue);
+        Assert.Equal(DataSheetName, workbook.GetSheetAt(0).SheetName);
         Assert.Null(workbook.GetSheet(GroupCountSheetName));
+        Assert.Null(workbook.GetSheet(GroupAmountSheetName));
     }
 
     // ==================== 2. 按对账月份分组 ====================
 
     [Fact]
-    public async Task Export_按对账月份分组_追加分组计数工作表()
+    public async Task Export_按对账月份分组_追加分组金额工作表()
     {
         using var db = TestDbFactory.Create();
         var uid = SeedAuthorizedUser(db);
@@ -237,32 +238,25 @@ public class DynamicAgencyServiceFeeMonthlyGroupedExcelTests
 
         using var workbook = OpenWorkbook(file.FileContents);
         Assert.Equal(3, workbook.NumberOfSheets);
-        Assert.Equal("代理服务费月度汇总", workbook.GetSheetAt(0).SheetName);
-        Assert.Equal("分组计数", workbook.GetSheetAt(1).SheetName);
-        Assert.Equal("分组金额", workbook.GetSheetAt(2).SheetName);
-        Assert.Equal("代理服务费月度汇总", workbook.GetSheetAt(0).SheetName);
+        Assert.Equal(DataSheetName, workbook.GetSheetAt(0).SheetName);
+        Assert.NotNull(workbook.GetSheet(GroupCountSheetName));
 
-        var sheet = RequireSheet(workbook, GroupCountSheetName);
-        AssertHeader(sheet);
+        var sheet = RequireSheet(workbook, GroupAmountSheetName);
+        AssertAmountHeader(sheet);
 
         var aug = sheet.GetRow(1);
         Assert.Equal("2026-08", aug.GetCell(0).StringCellValue);
         Assert.Equal("USD", aug.GetCell(1).StringCellValue);
         Assert.Equal(CellType.Numeric, aug.GetCell(2).CellType);
-        Assert.Equal(2.0, aug.GetCell(2).NumericCellValue, 6);
-        Assert.Equal(2.0, aug.GetCell(3).NumericCellValue, 6);
-        Assert.Equal(1.0, aug.GetCell(4).NumericCellValue, 6);
-        Assert.Equal(0.0, aug.GetCell(5).NumericCellValue, 6);
-        Assert.Equal(3.0, aug.GetCell(6).NumericCellValue, 6);
+        Assert.Equal(150.0, aug.GetCell(2).NumericCellValue, 6);
+        Assert.Equal(30.0, aug.GetCell(3).NumericCellValue, 6);
+        Assert.Equal(0.0, aug.GetCell(4).NumericCellValue, 6);
 
         var sep = sheet.GetRow(2);
         Assert.Equal("2026-09", sep.GetCell(0).StringCellValue);
-        Assert.Equal("USD", sep.GetCell(1).StringCellValue);
-        Assert.Equal(1.0, sep.GetCell(2).NumericCellValue, 6);
-        Assert.Equal(1.0, sep.GetCell(3).NumericCellValue, 6);
+        Assert.Equal(20.0, sep.GetCell(2).NumericCellValue, 6);
+        Assert.Equal(0.0, sep.GetCell(3).NumericCellValue, 6);
         Assert.Equal(0.0, sep.GetCell(4).NumericCellValue, 6);
-        Assert.Equal(0.0, sep.GetCell(5).NumericCellValue, 6);
-        Assert.Equal(1.0, sep.GetCell(6).NumericCellValue, 6);
 
         Assert.StartsWith("本工作表只统计当前授权预览页", sheet.GetRow(3).GetCell(0).StringCellValue);
     }
@@ -270,7 +264,7 @@ public class DynamicAgencyServiceFeeMonthlyGroupedExcelTests
     // ==================== 3. 按客户分组 ====================
 
     [Fact]
-    public async Task Export_按客户分组_追加分组计数工作表()
+    public async Task Export_按客户分组_追加分组金额工作表()
     {
         using var db = TestDbFactory.Create();
         var uid = SeedAuthorizedUser(db);
@@ -292,31 +286,27 @@ public class DynamicAgencyServiceFeeMonthlyGroupedExcelTests
         }));
 
         using var workbook = OpenWorkbook(file.FileContents);
-        var sheet = RequireSheet(workbook, GroupCountSheetName);
-        AssertHeader(sheet);
+        var sheet = RequireSheet(workbook, GroupAmountSheetName);
+        AssertAmountHeader(sheet);
 
         var row1 = sheet.GetRow(1);
         Assert.Equal("客户一", row1.GetCell(0).StringCellValue);
         Assert.Equal("USD", row1.GetCell(1).StringCellValue);
-        Assert.Equal(2.0, row1.GetCell(2).NumericCellValue, 6);
-        Assert.Equal(1.0, row1.GetCell(3).NumericCellValue, 6);
-        Assert.Equal(1.0, row1.GetCell(4).NumericCellValue, 6);
-        Assert.Equal(0.0, row1.GetCell(5).NumericCellValue, 6);
-        Assert.Equal(2.0, row1.GetCell(6).NumericCellValue, 6);
+        Assert.Equal(100.0, row1.GetCell(2).NumericCellValue, 6);
+        Assert.Equal(30.0, row1.GetCell(3).NumericCellValue, 6);
+        Assert.Equal(0.0, row1.GetCell(4).NumericCellValue, 6);
 
         var row2 = sheet.GetRow(2);
         Assert.Equal("客户二", row2.GetCell(0).StringCellValue);
-        Assert.Equal(1.0, row2.GetCell(2).NumericCellValue, 6);
+        Assert.Equal(0.0, row2.GetCell(2).NumericCellValue, 6);
         Assert.Equal(0.0, row2.GetCell(3).NumericCellValue, 6);
-        Assert.Equal(0.0, row2.GetCell(4).NumericCellValue, 6);
-        Assert.Equal(1.0, row2.GetCell(5).NumericCellValue, 6);
-        Assert.Equal(1.0, row2.GetCell(6).NumericCellValue, 6);
+        Assert.Equal(20.0, row2.GetCell(4).NumericCellValue, 6);
     }
 
-    // ==================== 4. 混合币种分别成组 ====================
+    // ==================== 4. 混合币种分别成组、绝不跨币种合计 ====================
 
     [Fact]
-    public async Task Export_混合币种_分组计数分别成组()
+    public async Task Export_混合币种_分组金额分别成组且不跨币种合计()
     {
         using var db = TestDbFactory.Create();
         var uid = SeedAuthorizedUser(db);
@@ -335,8 +325,8 @@ public class DynamicAgencyServiceFeeMonthlyGroupedExcelTests
         }));
 
         using var workbook = OpenWorkbook(file.FileContents);
-        var sheet = RequireSheet(workbook, GroupCountSheetName);
-        AssertHeader(sheet);
+        var sheet = RequireSheet(workbook, GroupAmountSheetName);
+        AssertAmountHeader(sheet);
 
         var currencies = new[]
         {
@@ -345,14 +335,48 @@ public class DynamicAgencyServiceFeeMonthlyGroupedExcelTests
         };
         Assert.Contains("USD", currencies);
         Assert.Contains("JPY", currencies);
-        Assert.Equal(1.0, sheet.GetRow(1).GetCell(2).NumericCellValue, 6);
-        Assert.Equal(1.0, sheet.GetRow(2).GetCell(2).NumericCellValue, 6);
+
+        var usdRow = currencies[0] == "USD" ? sheet.GetRow(1) : sheet.GetRow(2);
+        var jpyRow = currencies[0] == "JPY" ? sheet.GetRow(1) : sheet.GetRow(2);
+        Assert.Equal(100.0, usdRow.GetCell(2).NumericCellValue, 6);
+        Assert.Equal(1200.0, jpyRow.GetCell(2).NumericCellValue, 6);
+        Assert.Equal(0.0, usdRow.GetCell(3).NumericCellValue, 6);
+        Assert.Equal(0.0, jpyRow.GetCell(3).NumericCellValue, 6);
     }
 
-    // ==================== 5. 隐藏维度列 ====================
+    // ==================== 5. 精确小数（按币种精度） ====================
 
     [Fact]
-    public async Task Export_隐藏维度列_分组计数仍来自当前页源行()
+    public async Task Export_精确小数_金额按原币精度写入数值单元格()
+    {
+        using var db = TestDbFactory.Create();
+        var uid = SeedAuthorizedUser(db);
+        var c1 = SeedCustomer(db, "C001", "客户一");
+        SeedStatement(db, "ASF-1", c1.Id, 123.45m, customerCode: "C001", customerName: "客户一");
+        SeedStatement(db, "ASF-2", c1.Id, 6.7m, status: AgencyServiceFeeStatementRules.StatusDraft,
+            customerCode: "C001", customerName: "客户一");
+
+        var ctl = BuildController(db, uid);
+        var file = ExportOk(await ctl.Export(new DynamicAgencyServiceFeeMonthlyReportRequest
+        {
+            Fields = new() { "currency" },
+            GroupBy = DynamicAgencyServiceFeeMonthlyReportRules.GroupByCustomer,
+            PageSize = 100,
+        }));
+
+        using var workbook = OpenWorkbook(file.FileContents);
+        var sheet = RequireSheet(workbook, GroupAmountSheetName);
+        var row = sheet.GetRow(1);
+        Assert.Equal(CellType.Numeric, row.GetCell(2).CellType);
+        Assert.Equal(123.45, row.GetCell(2).NumericCellValue, 6);
+        Assert.Equal(6.7, row.GetCell(3).NumericCellValue, 6);
+        Assert.Equal(0.0, row.GetCell(4).NumericCellValue, 6);
+    }
+
+    // ==================== 6. 隐藏金额字段 ====================
+
+    [Fact]
+    public async Task Export_隐藏金额字段_分组金额仍来自当前页源行()
     {
         using var db = TestDbFactory.Create();
         var uid = SeedAuthorizedUser(db);
@@ -364,18 +388,20 @@ public class DynamicAgencyServiceFeeMonthlyGroupedExcelTests
         var ctl = BuildController(db, uid);
         var file = ExportOk(await ctl.Export(new DynamicAgencyServiceFeeMonthlyReportRequest
         {
-            Fields = new() { "currency" }, // 不选择客户维度列，分组计数仍应来自同一当前页源行
+            Fields = new() { "currency" }, // 不选择任何金额字段，分组金额仍应来自同一当前页源行
             GroupBy = DynamicAgencyServiceFeeMonthlyReportRules.GroupByCustomer,
             PageSize = 100,
         }));
 
         using var workbook = OpenWorkbook(file.FileContents);
-        var sheet = RequireSheet(workbook, GroupCountSheetName);
+        var sheet = RequireSheet(workbook, GroupAmountSheetName);
         Assert.Equal("客户一", sheet.GetRow(1).GetCell(0).StringCellValue);
+        Assert.Equal(100.0, sheet.GetRow(1).GetCell(2).NumericCellValue, 6);
         Assert.Equal("客户二", sheet.GetRow(2).GetCell(0).StringCellValue);
+        Assert.Equal(200.0, sheet.GetRow(2).GetCell(2).NumericCellValue, 6);
     }
 
-    // ==================== 6. 公式前导标签转义 ====================
+    // ==================== 7. 公式前导标签转义 ====================
 
     [Fact]
     public async Task Export_分组标签公式前导_转义()
@@ -394,16 +420,16 @@ public class DynamicAgencyServiceFeeMonthlyGroupedExcelTests
         }));
 
         using var workbook = OpenWorkbook(file.FileContents);
-        var sheet = RequireSheet(workbook, GroupCountSheetName);
+        var sheet = RequireSheet(workbook, GroupAmountSheetName);
         var cell = sheet.GetRow(1).GetCell(0);
         Assert.Equal(CellType.String, cell.CellType);
         Assert.Equal("'=1+1", cell.StringCellValue);
     }
 
-    // ==================== 7. 空页 ====================
+    // ==================== 8. 空页 ====================
 
     [Fact]
-    public async Task Export_空页_分组计数含空页说明()
+    public async Task Export_空页_分组金额含空页说明()
     {
         using var db = TestDbFactory.Create();
         var uid = SeedAuthorizedUser(db);
@@ -418,19 +444,16 @@ public class DynamicAgencyServiceFeeMonthlyGroupedExcelTests
 
         using var workbook = OpenWorkbook(file.FileContents);
         Assert.Equal(3, workbook.NumberOfSheets);
-        Assert.Equal("代理服务费月度汇总", workbook.GetSheetAt(0).SheetName);
-        Assert.Equal("分组计数", workbook.GetSheetAt(1).SheetName);
-        Assert.Equal("分组金额", workbook.GetSheetAt(2).SheetName);
-        var sheet = RequireSheet(workbook, GroupCountSheetName);
-        AssertHeader(sheet);
+        var sheet = RequireSheet(workbook, GroupAmountSheetName);
+        AssertAmountHeader(sheet);
         Assert.Contains("空页", sheet.GetRow(1).GetCell(0).StringCellValue);
         Assert.StartsWith("本工作表只统计当前授权预览页", sheet.GetRow(2).GetCell(0).StringCellValue);
     }
 
-    // ==================== 8. 截断页 ====================
+    // ==================== 9. 截断页 ====================
 
     [Fact]
-    public async Task Export_截断页_分组计数含截断说明()
+    public async Task Export_截断页_分组金额含截断说明()
     {
         using var db = TestDbFactory.Create();
         var uid = SeedAuthorizedUser(db);
@@ -450,8 +473,8 @@ public class DynamicAgencyServiceFeeMonthlyGroupedExcelTests
         }));
 
         using var workbook = OpenWorkbook(file.FileContents);
-        var sheet = RequireSheet(workbook, GroupCountSheetName);
-        AssertHeader(sheet);
+        var sheet = RequireSheet(workbook, GroupAmountSheetName);
+        AssertAmountHeader(sheet);
 
         // 表头 + 两个分组行 + 截断说明 + 仅本页说明
         Assert.Equal(4, sheet.LastRowNum);
@@ -461,10 +484,10 @@ public class DynamicAgencyServiceFeeMonthlyGroupedExcelTests
         Assert.StartsWith("本工作表只统计当前授权预览页", sheet.GetRow(4).GetCell(0).StringCellValue);
     }
 
-    // ==================== 9. 不含金额列 ====================
+    // ==================== 10. 不含计数列与合计 ====================
 
     [Fact]
-    public async Task Export_分组工作表不含金额列()
+    public async Task Export_分组金额工作表不含计数列与合计()
     {
         using var db = TestDbFactory.Create();
         var uid = SeedAuthorizedUser(db);
@@ -480,17 +503,17 @@ public class DynamicAgencyServiceFeeMonthlyGroupedExcelTests
         }));
 
         using var workbook = OpenWorkbook(file.FileContents);
-        var sheet = RequireSheet(workbook, GroupCountSheetName);
+        var sheet = RequireSheet(workbook, GroupAmountSheetName);
         var header = sheet.GetRow(0);
-        Assert.Equal(7, header.LastCellNum);
+        Assert.Equal(5, header.LastCellNum);
 
         var headers = Enumerable.Range(0, header.LastCellNum)
             .Select(i => header.GetCell(i).StringCellValue)
             .ToList();
-        Assert.DoesNotContain(headers, h => h.Contains("金额") || h.Contains("合计"));
+        Assert.DoesNotContain(headers, h => h.Contains("张数") || h.Contains("合计") || h.Contains("月度行数"));
     }
 
-    // ==================== 10. 拒绝（fail closed） ====================
+    // ==================== 11. 拒绝（fail closed） ====================
 
     [Fact]
     public async Task Export_无效分组键_读取源数据前拒绝()
@@ -535,10 +558,10 @@ public class DynamicAgencyServiceFeeMonthlyGroupedExcelTests
         Assert.Equal(ErrorCodes.Unauthorized, ex.Code);
     }
 
-    // ==================== 11. 业务员数据范围 ====================
+    // ==================== 12. 业务员数据范围 ====================
 
     [Fact]
-    public async Task Export_受限制业务员_分组计数只含被分配客户()
+    public async Task Export_受限制业务员_分组金额只含被分配客户()
     {
         using var db = TestDbFactory.Create();
         var user = SeedUser(db, "alice");
@@ -561,13 +584,14 @@ public class DynamicAgencyServiceFeeMonthlyGroupedExcelTests
         }));
 
         using var workbook = OpenWorkbook(file.FileContents);
-        var sheet = RequireSheet(workbook, GroupCountSheetName);
+        var sheet = RequireSheet(workbook, GroupAmountSheetName);
         Assert.Equal("我的客户", sheet.GetRow(1).GetCell(0).StringCellValue);
-        Assert.Equal(1.0, sheet.GetRow(1).GetCell(2).NumericCellValue, 6);
+        Assert.Equal(100.0, sheet.GetRow(1).GetCell(2).NumericCellValue, 6);
+        Assert.Equal(2, sheet.LastRowNum); // 表头 + 1 个分组行 + 仅本页说明
         Assert.StartsWith("本工作表只统计当前授权预览页", sheet.GetRow(2).GetCell(0).StringCellValue);
     }
 
-    // ==================== 12. 只读 ====================
+    // ==================== 13. 只读 ====================
 
     [Fact]
     public async Task Export_分组导出_只读不写库()
@@ -589,6 +613,7 @@ public class DynamicAgencyServiceFeeMonthlyGroupedExcelTests
         Assert.DoesNotContain(db.ChangeTracker.Entries(), e => e.State != EntityState.Unchanged);
     }
 }
+
 
 
 

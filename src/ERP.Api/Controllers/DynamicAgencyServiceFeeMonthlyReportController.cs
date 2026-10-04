@@ -183,10 +183,30 @@ public class DynamicAgencyServiceFeeMonthlyReportController : ControllerBase
     /// <summary>截断显式说明（后续分页未计入本工作表）</summary>
     private const string GroupCountTruncatedNote = "当前页已被截断，后续分页未计入本工作表（仅本页）";
 
+    /// <summary>分组金额工作表名称（ERP-190，仅 month / customer 分组时追加）</summary>
+    private const string GroupAmountSheetName = "分组金额";
+
+    /// <summary>分组金额工作表列标题（金额为数值单元格；标签 / 币种为公式安全文本；不含计数列、绝不声明跨页合计）</summary>
+    private const string RegisteredAmountColumn = "已登记原币金额";
+    private const string DraftAmountColumn = "草稿原币金额";
+    private const string VoidedAmountColumn = "已作废原币金额";
+
+    /// <summary>分组金额仅本页说明（金额只是证据数字，绝不跨币种 / 跨页合计，不代表收入 / 应收 / 已收款）</summary>
+    private const string GroupAmountPageOnlyNote =
+        "本工作表只统计当前授权预览页的月度汇总行，不覆盖整份报表，也绝不跨币种、跨页合计；"
+        + "金额按原币保留精度，只是证据数字，不代表收入 / 应收 / 已收款等会计结论。";
+
+    /// <summary>分组金额空页显式说明（当前页没有符合分组条件的对账单证据）</summary>
+    private const string GroupAmountEmptyNote = "当前页没有符合分组条件的对账单证据（空页）";
+
+    /// <summary>分组金额截断显式说明（后续分页未计入本工作表）</summary>
+    private const string GroupAmountTruncatedNote = "当前页已被截断，后续分页未计入本工作表（仅本页）";
+
     /// <summary>
-    /// 生成 Excel 工作簿（ERP-182 / ERP-188，只读）：复用有界、已授权预览；none 模式保持既有单工作表不变；
+    /// 生成 Excel 工作簿（ERP-182 / ERP-188 / ERP-190，只读）：复用有界、已授权预览；none 模式保持既有单工作表不变；
     /// month / customer 分组模式在选定列证据工作表之后追加「分组计数」工作表（复用 ERP-184 同一批有界、已授权分组计数，
-    /// 只计数、不含金额列、绝不声明跨页合计）。
+    /// 只计数、不含金额列）与「分组金额」工作表（复用 ERP-186 同一批有界、已授权分组金额，只按原币分列已登记 / 草稿 /
+    /// 已作废金额、绝不跨币种 / 跨页合计）。
     /// </summary>
     private static byte[] BuildWorkbook(DynamicAgencyServiceFeeMonthlyReportPageDto page)
     {
@@ -198,6 +218,7 @@ public class DynamicAgencyServiceFeeMonthlyReportController : ControllerBase
         using var input = new MemoryStream(dataBytes);
         using var workbook = new XSSFWorkbook(input);
         AppendCountGroupSheet(workbook, page);
+        AppendAmountGroupSheet(workbook, page);
 
         using var output = new MemoryStream();
         workbook.Write(output);
@@ -272,6 +293,51 @@ public class DynamicAgencyServiceFeeMonthlyReportController : ControllerBase
         var pageOnlyRow = sheet.CreateRow(rowIndex);
         pageOnlyRow.CreateCell(0).SetCellValue(SafeGroupText(GroupCountPageOnlyNote));
     }
+
+    /// <summary>追加「分组金额」工作表：分组标签 + 原币 + 已登记 / 草稿 / 已作废原币金额（数值单元格、按币种精度），
+    /// 并显式标注空页 / 截断 / 仅本页；不含计数列、绝不跨币种 / 跨页合计。</summary>
+    private static void AppendAmountGroupSheet(XSSFWorkbook workbook, DynamicAgencyServiceFeeMonthlyReportPageDto page)
+    {
+        var sheet = workbook.CreateSheet(GroupAmountSheetName);
+
+        var header = sheet.CreateRow(0);
+        header.CreateCell(0).SetCellValue(GroupLabelColumn);
+        header.CreateCell(1).SetCellValue(CurrencyColumn);
+        header.CreateCell(2).SetCellValue(RegisteredAmountColumn);
+        header.CreateCell(3).SetCellValue(DraftAmountColumn);
+        header.CreateCell(4).SetCellValue(VoidedAmountColumn);
+
+        var groups = page.GroupCounts ?? new List<DynamicAgencyServiceFeeMonthlyReportGroupCountDto>();
+        var rowIndex = 1;
+        foreach (var group in groups)
+        {
+            var row = sheet.CreateRow(rowIndex++);
+            row.CreateCell(0).SetCellValue(SafeGroupText(GroupLabel(group)));
+            row.CreateCell(1).SetCellValue(SafeGroupText(group.Currency));
+            row.CreateCell(2).SetCellValue(AmountCellValue(group.RegisteredTotalAmount, group.Currency));
+            row.CreateCell(3).SetCellValue(AmountCellValue(group.DraftTotalAmount, group.Currency));
+            row.CreateCell(4).SetCellValue(AmountCellValue(group.VoidedTotalAmount, group.Currency));
+        }
+
+        if (groups.Count == 0)
+        {
+            var emptyRow = sheet.CreateRow(rowIndex++);
+            emptyRow.CreateCell(0).SetCellValue(SafeGroupText(GroupAmountEmptyNote));
+        }
+
+        if (page.Truncated)
+        {
+            var truncatedRow = sheet.CreateRow(rowIndex++);
+            truncatedRow.CreateCell(0).SetCellValue(SafeGroupText(GroupAmountTruncatedNote));
+        }
+
+        var pageOnlyRow = sheet.CreateRow(rowIndex);
+        pageOnlyRow.CreateCell(0).SetCellValue(SafeGroupText(GroupAmountPageOnlyNote));
+    }
+
+    /// <summary>金额单元格数值：按币种精度四舍五入后写入数值单元格（原币，绝不换算 / 跨币种合计）</summary>
+    private static double AmountCellValue(decimal amount, string? currency)
+        => (double)CurrencyAmountRules.RoundAmount(amount, currency);
 
     /// <summary>分组标签：month → 年月文案（yyyy-MM）；customer → 客户名称（回退客户编码）</summary>
     private static string GroupLabel(DynamicAgencyServiceFeeMonthlyReportGroupCountDto group)

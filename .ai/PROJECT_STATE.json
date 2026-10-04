@@ -1,8 +1,8 @@
 {
   "schema_version": 2,
   "project": "NEWERP",
-  "updated_at": "2026-10-04T02:47:23.760076Z",
-  "phase": "remote_degraded",
+  "updated_at": "2026-10-04T06:53:54.403721Z",
+  "phase": "ready",
   "current_task": null,
   "queue": [],
   "completed": [
@@ -176,6 +176,7 @@
     "ERP-187",
     "ERP-188",
     "ERP-189",
+    "ERP-190",
     "ERP-191",
     "ERP-192",
     "ERP-193",
@@ -264,45 +265,34 @@
     "ERP-278",
     "ERP-279"
   ],
-  "blocked": [
-    {
-      "task": "ERP-190",
-      "status": "blocked",
-      "reason": "Automatic repair budget exhausted; preserved work remains in D:\\VSCodeProject\\NEWERP.executor",
-      "attempts": 3
-    }
-  ],
+  "blocked": [],
   "last_build": {
-    "task": "ERP-279",
+    "task": "ERP-190",
     "profile": "safe",
     "status": "passed",
     "exit_code": 0,
-    "log": ".ai\\logs\\ERP-279-validation-1.log",
-    "at": "2026-10-04T02:47:18.361244Z"
+    "log": ".ai\\logs\\ERP-190-validation-3.log",
+    "at": "2026-10-04T06:53:53.840807Z"
   },
   "last_error": null,
   "last_deepseek_fix": {
-    "task": "ERP-268",
-    "attempt": 2,
-    "model": "deepseek-v4-pro",
-    "exit_code": 0,
-    "finished_at": "2026-10-02T16:21:07.878432Z"
+    "task": "ERP-190",
+    "attempts": 3,
+    "status": "retry_pending",
+    "at": "2026-10-04T06:53:02.163538Z"
   },
   "git_sync": {
     "branch": "main",
-    "local_sha": "4bd1856",
+    "local_sha": "ac4c3d7",
     "status": "pending",
-    "ahead": 35,
+    "ahead": 37,
     "behind": 3,
-    "last_attempt_at": "2026-10-04T02:47:23.629007Z",
-    "last_error": "push_failed",
-    "task": "ERP-279"
+    "last_attempt_at": "2026-10-04T06:53:54.288382Z",
+    "last_error": null
   },
   "next_recommended_tasks": [],
   "runner": {
     "status": "stopped",
     "pid": null
-  },
-  "blocker": null,
-  "finish_reason": "remote_sync_degraded"
+  }
 }
