@@ -1,0 +1,52 @@
+{
+  "title": "Render bounded per-cell null reasons from preview.cellReasons in the generic report browser table instead of silent blanks",
+  "description": "Stage-1 genuine functional gap confirmed by the newest browser acceptance logs (.ai/logs/report-stage1-browser-formula-relation-20261004.json remaining_stage_gate 'bounded null-reason UI rendering'; .ai/logs/report-stage1-browser-recipient-20261004.json remaining_gate 'null cell reasons UI rendering') and verified in source. The backend already emits preview.cellReasons (ReportConfigurationDtos.cs:753-754, a List<Dictionary<string,string?>> parallel to Rows) for two bounded cases: computed-column null cells (ReportConfigurationComputedProjection.Apply at ReportConfigurationDatasetProvider.cs:1689-1692) and controlled relation null cells (ReportConfigurationRelationResolver.cs:81-82 writes 缺失/已删除/越权). The browser table renderer ignores this field entirely: rccRenderCell (report-configuration.js:349-351) renders '<td>' + rccEsc(rccCellText(...)) + '</td>' with no reason, and rccTableHtml (report-configuration.js:360-366) maps rows only through row[c.key] without ever reading preview.cellReasons, so null relation/formula cells appear as silent blanks. Only the column-level unknownReason is surfaced today (rccColumnHeadHtml, report-configuration.js:353-358). Fix is frontend-only: consume the parallel cellReasons list in the table renderer and show the bounded reason for null cells with a recorded reason, fully HTML-escaped, without changing resolved cells, without inventing reasons for payloads that lack the field, and without exposing forbidden/private values. No schema, SQL, secrets, permission, env, or production change; no new backend surface.",
+  "acceptance_criteria": [
+    "The generic report workspace table (rccTableHtml -> rccRenderCell) reads preview.cellReasons (parallel to preview.rows) and, for every null cell that carries a recorded reason, renders that bounded reason text visibly inside the cell using the existing rccEsc escaping; resolved non-null cells and null cells with no recorded reason render exactly as before and never gain a reason marker.",
+    "Rendering never leaks forbidden or private values: relation cells are limited to the backend bounded status labels (缺失/已删除/越权) and computed-column cells to the formula engine bounded unknown-reason text; a preview payload that omits cellReasons (backward-compatible) renders without error and without inventing reasons.",
+    "Add executable regression coverage: a static source assertion in ReportConfigurationUiTests that the table renderer consumes preview.cellReasons, plus a Node VM render fixture (reusing the existing report-configuration.js VM pattern from ReportConfigurationFormulaEditorTests) proving a null cell with a recorded reason renders the escaped reason and a resolved cell renders none; run safe Release build + ERP.UnitTests (including existing ReportConfigurationRelationTests, ReportConfigurationFormulaEditorTests and ReportConfigurationFormulaTests) and scheduler self-test/contracts with no regressions. Real browser replay remains a separate acceptance gate."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/wwwroot/js/report-configuration.js",
+    "src/ERP.UnitTests/ReportConfigurationUiTests.cs"
+  ],
+  "criterion_path_map": {
+    "The generic report workspace table (rccTableHtml -> rccRenderCell) reads preview.cellReasons (parallel to preview.rows) and, for every null cell that carries a recorded reason, renders that bounded reason text visibly inside the cell using the existing rccEsc escaping; resolved non-null cells and null cells with no recorded reason render exactly as before and never gain a reason marker.": [
+      "src/ERP.Api/wwwroot/js/report-configuration.js",
+      "src/ERP.UnitTests/ReportConfigurationUiTests.cs"
+    ],
+    "Rendering never leaks forbidden or private values: relation cells are limited to the backend bounded status labels (缺失/已删除/越权) and computed-column cells to the formula engine bounded unknown-reason text; a preview payload that omits cellReasons (backward-compatible) renders without error and without inventing reasons.": [
+      "src/ERP.Api/wwwroot/js/report-configuration.js",
+      "src/ERP.UnitTests/ReportConfigurationUiTests.cs"
+    ],
+    "Add executable regression coverage: a static source assertion in ReportConfigurationUiTests that the table renderer consumes preview.cellReasons, plus a Node VM render fixture (reusing the existing report-configuration.js VM pattern from ReportConfigurationFormulaEditorTests) proving a null cell with a recorded reason renders the escaped reason and a resolved cell renders none; run safe Release build + ERP.UnitTests (including existing ReportConfigurationRelationTests, ReportConfigurationFormulaEditorTests and ReportConfigurationFormulaTests) and scheduler self-test/contracts with no regressions. Real browser replay remains a separate acceptance gate.": [
+      "src/ERP.Api/wwwroot/js/report-configuration.js",
+      "src/ERP.UnitTests/ReportConfigurationUiTests.cs"
+    ]
+  },
+  "depends_on": [
+    "ERP-268",
+    "ERP-292"
+  ],
+  "risk": "low",
+  "planning_stage": 1,
+  "implementation_evidence": "src/ERP.Api/wwwroot/js/report-configuration.js:349-351 rccRenderCell returns '<td>' + rccEsc(rccCellText(value, type, currencyUnit)) + '</td>' (null -> empty string via rccCellText :342-343) with no reason; :360-366 rccTableHtml builds body rows as rows.map(row => '<tr>' + columns.map(c => rccRenderCell(row[c.key], ...)) ...) and never references preview.cellReasons, while :353-358 rccColumnHeadHtml already surfaces only the column-level c.unknownReason. Backend already produces the parallel data: ReportConfigurationDtos.cs:753-754 declares public List<Dictionary<string,string?>> CellReasons; ReportConfigurationRelationResolver.cs:81-82 sets preview.CellReasons[i][columnKey] = reason (缺失/已删除/越权) after ResolveCell (:78); ReportConfigurationDatasetProvider.cs:1689-1692 (ReportConfigurationComputedProjection.Apply) fills cellReasons from the formula engine Reasons. The Node VM test ReportConfigurationFormulaEditorTests.cs:31-62 already loads report-configuration.js in vm and can call the renderer directly. Live proof the gap remains after ERP-292: .ai/logs/report-stage1-browser-formula-relation-20261004.json remaining_stage_gate includes 'bounded null-reason UI rendering'; .ai/logs/report-stage1-browser-recipient-20261004.json remaining_gate includes 'null cell reasons UI rendering'; .ai/logs/verified-relation-proposal-20261004.json criterion #2 explicitly records 'JS rccTableHtml omits cellReasons'.",
+  "id": "ERP-293",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-04T11:52:05.940772Z"
+}
