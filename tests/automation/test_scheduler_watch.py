@@ -29,6 +29,18 @@ class RecoveryPolicyTests(unittest.TestCase):
             self.assertFalse(p.automatic_recovery_allowed({'status':status,'failure_kind':'validation_failure'}))
         self.assertFalse(p.automatic_recovery_allowed({'status':'error','human_gate':{'level':'L4'}}))
 
+class PipelineLockTests(unittest.TestCase):
+    def test_live_pipeline_contention_reports_busy_and_releases_after_owner(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            with patch.object(p, 'ROOT', root), patch.object(p, 'load_json', return_value={}):
+                with p.pipeline_lock():
+                    with self.assertRaisesRegex(RuntimeError, 'automation pipeline is already running'):
+                        with p.pipeline_lock():
+                            self.fail('Concurrent pipeline acquired the owner lock')
+                with p.pipeline_lock():
+                    pass
+
 class WatchTests(unittest.TestCase):
     def test_transient_exception_is_retried_then_success_resets_backoff(self):
         with tempfile.TemporaryDirectory() as d, patch.object(w,'cycle',side_effect=[OSError('locked'),{'status':'healthy'}]) as cycle, patch.object(w.time,'sleep',side_effect=[None,KeyboardInterrupt]):

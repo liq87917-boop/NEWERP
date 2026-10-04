@@ -551,9 +551,11 @@ def pipeline_lock() -> Iterator[None]:
     lock_path = ROOT / relative
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     with lock_path.open("a+b") as stream:
-        stream.seek(0)
-        if stream.read(1) == b"":
-            stream.seek(0); stream.write(b"0"); stream.flush()
+        # Windows byte-range locks also reject reads of the locked byte.
+        # Inspect length without reading it, so contention reaches our busy handler.
+        stream.seek(0, os.SEEK_END)
+        if stream.tell() == 0:
+            stream.write(b"0"); stream.flush()
         stream.seek(0)
         try:
             if os.name == "nt": msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
