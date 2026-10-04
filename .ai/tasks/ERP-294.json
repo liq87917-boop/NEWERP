@@ -1,0 +1,53 @@
+{
+  "title": "Repair generic report browser Blob download lifetime and bounded resource cleanup",
+  "description": "Stage 1 generic platform reliability increment. Current source immediately removes the download anchor and revokes its Blob URL in the same initiating JavaScript turn in rccExport, rccExportPdf and rccExportDefinition. A real IAB normal HTTP download baseline returned C:/Users/Admin/Downloads/synthetic.xlsx (6335 bytes), while the authenticated generic ERP Excel export click on config 35 still timed out waiting for a download event after 10 seconds. This disproves the blanket assumption that no downloads are possible, but does not prove synchronous revocation is the sole cause. Investigate and repair the fragile Blob lifecycle using a shared bounded cleanup helper, keeping API/security/permissions unchanged. Test asynchronous browser consumption with executable VM fixtures and then attempt genuine browser artifact capture; do not substitute baseline/API files for ERP browser acceptance. No schema, production database, migration, environment/secrets, new dataset or dedicated business report. No unrelated backend refactor. The existing isolated runtime and fixtures are authorized development-only resources.",
+  "acceptance_criteria": [
+    "Generic Excel, PDF and definition downloads use a shared browser download lifecycle that keeps the Blob URL and attached anchor alive beyond the initiating click, then releases both exactly once after a bounded delay. Diagnose the immediate-revoke race without claiming browser acceptance from a unit test.",
+    "Preserve authenticated POST requests, current-user scope, server audit, safe filenames, request sequence and cancellation checks, dirty-state guards and bounded error handling. Failed, stale, cancelled and unauthorized responses never initiate downloads; cleanup also handles a throwing anchor click without leaking a Blob URL.",
+    "Add executable Node VM regression tests for all three export entry points covering deferred cleanup, repeated exports, click exceptions and stale/cancelled response suppression. Run safe Release build/unit tests and scheduler self-test/contracts. Replay real browser Excel and PDF downloads against the existing isolated loopback LocalDB runtime, validate actual downloaded content, and retain an accurate environment blocker if either artifact is still missing."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/wwwroot/js/report-configuration.js",
+    "src/ERP.UnitTests/ReportConfigurationDownloadLifecycleTests.cs"
+  ],
+  "criterion_path_map": {
+    "Generic Excel, PDF and definition downloads use a shared browser download lifecycle that keeps the Blob URL and attached anchor alive beyond the initiating click, then releases both exactly once after a bounded delay. Diagnose the immediate-revoke race without claiming browser acceptance from a unit test.": [
+      "src/ERP.Api/wwwroot/js/report-configuration.js",
+      "src/ERP.UnitTests/ReportConfigurationDownloadLifecycleTests.cs"
+    ],
+    "Preserve authenticated POST requests, current-user scope, server audit, safe filenames, request sequence and cancellation checks, dirty-state guards and bounded error handling. Failed, stale, cancelled and unauthorized responses never initiate downloads; cleanup also handles a throwing anchor click without leaking a Blob URL.": [
+      "src/ERP.Api/wwwroot/js/report-configuration.js",
+      "src/ERP.UnitTests/ReportConfigurationDownloadLifecycleTests.cs"
+    ],
+    "Add executable Node VM regression tests for all three export entry points covering deferred cleanup, repeated exports, click exceptions and stale/cancelled response suppression. Run safe Release build/unit tests and scheduler self-test/contracts. Replay real browser Excel and PDF downloads against the existing isolated loopback LocalDB runtime, validate actual downloaded content, and retain an accurate environment blocker if either artifact is still missing.": [
+      "src/ERP.Api/wwwroot/js/report-configuration.js",
+      "src/ERP.UnitTests/ReportConfigurationDownloadLifecycleTests.cs"
+    ]
+  },
+  "depends_on": [
+    "ERP-263",
+    "ERP-264",
+    "ERP-293"
+  ],
+  "risk": "low",
+  "planning_stage": 1,
+  "implementation_evidence": "report-configuration.js:1732-1739 and 1794-1801 create Blob URL, append/click anchor, immediately remove and revoke; the identical definition export pattern occurs around1854. Positive normal HTTP download baseline at C:/Users/Admin/Downloads/synthetic.xlsx is 6335 bytes, last write 2026-10-05 07:48:59 local. Fresh authenticated ERP Excel click succeeded but waitForEvent(download,{timeoutMs:10000}) timed out. Existing API artifacts and stage reconciliation remain valid but insufficient for browser gate. Immediate revocation is a concrete fragile resource lifetime, and its contribution to the actual symptom must be verified, not assumed.",
+  "id": "ERP-294",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-04T23:55:32.376050Z"
+}
