@@ -1,7 +1,7 @@
 {
   "id": "ERP-284",
   "title": "Return controlled conflicts for concurrent report lifecycle mutations",
-  "status": "pending",
+  "status": "completed",
   "description": "Stage 1 generic reporting platform error/query-boundary increment. Code inspection verifies this gap: lifecycle controller calls omit existing cancellation tokens; workspace fetch has no AbortController; lifecycle services directly SaveChangesAsync without mapping EF concurrency failures. Implement only the gap named in this title. Preserve concurrent work, established report contracts and existing ERP permissions. No bespoke report, new dataset, Agent, deployment, production connection, secrets or .env changes. Domain entities and EF mappings already support existing tokens and require no modification.",
   "acceptance_criteria": [
     "Map actual EF DbUpdateConcurrencyException from private report update, rename, delete, publish and restore plus existing-grant pin/revoke writes to the existing RuleConflict business response with a refresh/retry message. Preserve expected-version and rowversion checks; never automatically retry an unsafe stale mutation or overwrite the winning state. New-grant unique-insert races and unrelated database exceptions are outside this increment.",
@@ -41,7 +41,7 @@
   "validation_profile": "safe",
   "completion_mode": "build",
   "max_attempts": 3,
-  "attempts": 0,
+  "attempts": 1,
   "auto_start": true,
   "requires_human_approval": false,
   "human_gate": {

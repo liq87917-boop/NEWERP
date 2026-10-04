@@ -98,7 +98,7 @@ public sealed class ReportConfigurationService : IReportConfigurationService
         config.UpdatedAt = DateTime.Now;
         config.UpdatedBy = ownerUserId;
 
-        await _db.SaveChangesAsync(cancellationToken);
+        await SaveChangesWithConcurrencyGuardAsync(cancellationToken);
 
         return Map(config, definition);
     }
@@ -121,7 +121,7 @@ public sealed class ReportConfigurationService : IReportConfigurationService
         config.UpdatedAt = DateTime.Now;
         config.UpdatedBy = ownerUserId;
 
-        await _db.SaveChangesAsync(cancellationToken);
+        await SaveChangesWithConcurrencyGuardAsync(cancellationToken);
 
         return Map(config, Deserialize(config.DefinitionJson));
     }
@@ -241,7 +241,7 @@ public sealed class ReportConfigurationService : IReportConfigurationService
             revision.UpdatedBy = ownerUserId;
         }
 
-        await _db.SaveChangesAsync(cancellationToken);
+        await SaveChangesWithConcurrencyGuardAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
     }
 
@@ -268,14 +268,18 @@ public sealed class ReportConfigurationService : IReportConfigurationService
         var now = DateTime.Now;
         await using var transaction = await _db.Database.BeginTransactionAsync(cancellationToken);
 
-        _db.ReportConfigurationRevisions.Add(revision);
+        // 先推进父配置：并发令牌 / rowversion 在此率先校验，败者在此抛出并发冲突，绝不先插入幽灵修订
         config.Status = ReportConfigurationStatus.Published;
         config.CurrentPublishedVersion = newVersion;
         config.Version++;
         config.UpdatedAt = now;
         config.UpdatedBy = ownerUserId;
 
+        await SaveChangesWithConcurrencyGuardAsync(cancellationToken);
+
+        _db.ReportConfigurationRevisions.Add(revision);
         await _db.SaveChangesAsync(cancellationToken);
+
         await transaction.CommitAsync(cancellationToken);
 
         return Map(config, definition);
@@ -312,7 +316,7 @@ public sealed class ReportConfigurationService : IReportConfigurationService
         var now = DateTime.Now;
         await using var transaction = await _db.Database.BeginTransactionAsync(cancellationToken);
 
-        _db.ReportConfigurationRevisions.Add(revision);
+        // 先推进父配置：并发令牌 / rowversion 在此率先校验，败者在此抛出并发冲突，绝不先插入幽灵修订
         // 恢复只回退定义内容（数据集键 / 定义 / schema 版本），不覆盖当前名称
         config.DatasetKey = target.DatasetKey;
         config.DefinitionJson = target.DefinitionJson;
@@ -323,7 +327,11 @@ public sealed class ReportConfigurationService : IReportConfigurationService
         config.UpdatedAt = now;
         config.UpdatedBy = ownerUserId;
 
+        await SaveChangesWithConcurrencyGuardAsync(cancellationToken);
+
+        _db.ReportConfigurationRevisions.Add(revision);
         await _db.SaveChangesAsync(cancellationToken);
+
         await transaction.CommitAsync(cancellationToken);
 
         return Map(config, historical);
@@ -410,6 +418,22 @@ public sealed class ReportConfigurationService : IReportConfigurationService
     {
         if (config.Version != expectedVersion)
             throw BusinessException.RuleConflict("报表配置已被其他操作修改（预期版本不一致），请刷新后重试");
+    }
+
+    /// <summary>
+    /// 落库并发守卫：把数据库级乐观并发失败（预期版本 / rowversion 冲突）统一映射为业务规则冲突。
+    /// 绝不自动重试、绝不覆盖赢家状态，也不向调用方暴露提供程序消息 / 连接串 / SQL。
+    /// </summary>
+    private async Task SaveChangesWithConcurrencyGuardAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _db.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            throw BusinessException.RuleConflict("报表配置已被其他操作修改（并发冲突），请刷新后重试");
+        }
     }
 
     private async Task<ReportConfigurationDatasetDto> RequireDatasetAsync(

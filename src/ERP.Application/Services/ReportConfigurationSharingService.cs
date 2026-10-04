@@ -121,7 +121,7 @@ public sealed class ReportConfigurationSharingService : IReportConfigurationShar
             existing.Version++;
             existing.UpdatedAt = now;
             existing.UpdatedBy = ownerUserId;
-            await _db.SaveChangesAsync(cancellationToken);
+            await SaveChangesWithConcurrencyGuardAsync(cancellationToken);
             return MapGrant(existing, new Dictionary<long, SysUser> { [recipient.Id] = recipient });
         }
 
@@ -166,7 +166,7 @@ public sealed class ReportConfigurationSharingService : IReportConfigurationShar
         grant.Version++;
         grant.UpdatedAt = now;
         grant.UpdatedBy = ownerUserId;
-        await _db.SaveChangesAsync(cancellationToken);
+        await SaveChangesWithConcurrencyGuardAsync(cancellationToken);
     }
 
     // ==================== 被授权人只读 / 复制 ====================
@@ -438,6 +438,22 @@ public sealed class ReportConfigurationSharingService : IReportConfigurationShar
     {
         if (grant.Version != expectedVersion)
             throw BusinessException.RuleConflict("授权已被其他操作修改（预期版本不一致），请刷新后重试");
+    }
+
+    /// <summary>
+    /// 落库并发守卫：把数据库级乐观并发失败（预期版本 / rowversion 冲突）统一映射为业务规则冲突。
+    /// 绝不自动重试、绝不覆盖赢家状态，也不向调用方暴露提供程序消息 / 连接串 / SQL。
+    /// </summary>
+    private async Task SaveChangesWithConcurrencyGuardAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _db.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            throw BusinessException.RuleConflict("授权已被其他操作修改（并发冲突），请刷新后重试");
+        }
     }
 
     private static ReportConfigurationGrantDto MapGrant(
