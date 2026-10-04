@@ -651,7 +651,10 @@ def run_all() -> int:
                 print(f"Queue metadata error: {exc}", file=sys.stderr); return 10
             if item is None and reason == "queue_empty":
                 mark_queue_replenishing(idle=True)
-                print("Planner supply required; see .ai/logs/queue-replenishment.json.")
+                from ai_queue_planner import replenish
+                if config.get("autonomy", {}).get("auto_planner_enabled", False) and replenish(__import__("types").SimpleNamespace(**globals())):
+                    continue
+                print("Autonomous planner evidence: .ai/logs/autonomous-planner.json.")
                 return 0
             if item is None:
                 mark_queue_replenishing(idle=True)

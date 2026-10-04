@@ -155,6 +155,7 @@
     "human_gate_scope": "production_and_irreversible_only",
     "remote_failure_mode": "degraded_continue_local",
     "quarantine_failed_work": true,
-    "ui_blocks_development": false
+    "ui_blocks_development": false,
+    "auto_planner_enabled": true
   }
 }
