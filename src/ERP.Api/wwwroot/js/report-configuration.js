@@ -260,9 +260,9 @@ function rccFormulaNodeHtml(node, colIndex, path) {
   if (kind === 'literal') {
     return kindSelect + ' <input type="number" step="any" value="' + rccEsc(node.literal ?? '') + '" oninput="rccOnFormulaLiteral(' + colIndex + ', \'' + path + '\', this.value)">';
   }
-  return kindSelect + ' ( ' + rccFormulaNodeHtml(node.left, colIndex, path + '.left')
+  return kindSelect + ' ( ' + rccFormulaNodeHtml(node.left, colIndex, (path ? path + '.' : '') + 'left')
     + ' <b>' + rccEsc(RCC_FORMULA_NODE_KINDS[kind]) + '</b> '
-    + rccFormulaNodeHtml(node.right, colIndex, path + '.right') + ' )';
+    + rccFormulaNodeHtml(node.right, colIndex, (path ? path + '.' : '') + 'right') + ' )';
 }
 
 function rccComputedColumnsHtml() {
