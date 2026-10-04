@@ -118,14 +118,14 @@ public class ReportConfigurationUiTests
         Assert.Contains("/rename?version=", js);
         Assert.Contains("/publish?version=", js);
         Assert.Contains("/restore?version=", js);
-        Assert.Contains("'/revisions'", js);
+        Assert.Contains("'/revisions?limit=25'", js);
         Assert.Contains("function rccSave()", js);
         Assert.Contains("function rccCopy()", js);
         Assert.Contains("function rccRename()", js);
         Assert.Contains("function rccDelete()", js);
         Assert.Contains("function rccPublish()", js);
         Assert.Contains("function rccRestore(version)", js);
-        Assert.Contains("function rccLoadRevisions(id)", js);
+        Assert.Contains("function rccLoadRevisions(id, cursor)", js);
         Assert.Contains("function rccPreview()", js);
     }
 
@@ -237,8 +237,8 @@ public class ReportConfigurationUiTests
         Assert.Contains("function rccRenderShared()", js);
         Assert.Contains("共享给我的", js);
         Assert.Contains("class=\"status status-info\">共享</span>", js);   // shared 与 owned 区分
-        Assert.Contains("async function rccLoadShared()", js);
-        Assert.Contains("RCC_API + '/shared'", js);
+        Assert.Contains("async function rccLoadShared(cursor)", js);
+        Assert.Contains("RCC_API + '/shared?limit=25'", js);
         Assert.Contains("function rccCopyShared(id)", js);
         Assert.Contains("RCC_API + '/shared/' + id + '/copy'", js);
         Assert.Contains("sharedCurrent", js);
@@ -252,7 +252,7 @@ public class ReportConfigurationUiTests
         Assert.Contains("function rccRenderGrants()", js);
         Assert.Contains("共享授权（owner-only）", js);
         Assert.Contains("function rccGrant()", js);
-        Assert.Contains("RCC_API + '/' + RCC.current.id + '/grants'", js);
+        Assert.Contains("RCC_API + '/' + RCC.current.id + '/grants?limit=25'", js);
         Assert.Contains("function rccRevoke(recipientUserId, version)", js);
         Assert.Contains("'/grants/' + recipientUserId + '?version=' + version", js);
         Assert.Contains("rccEsc(g.recipientDisplayName", js);   // 授权列表值转义，防注入
@@ -329,6 +329,27 @@ public class ReportConfigurationUiTests
         Assert.Contains("function rccPivotCellText(parts)", js);
         Assert.Contains("透视（当前页 · 非全量合计）", js);
         Assert.Contains("已知", js);
+    }
+
+    [Fact]
+    public void 有界集合分页_工作台使用分页契约与加载更多_不暴露无界回退()
+    {
+        var js = File.ReadAllText(Path.Combine(JsDirectory(), "report-configuration.js"));
+
+        Assert.Contains("function rccPageData(data)", js);
+        Assert.Contains("function rccLoadMoreHtml(handler)", js);
+        Assert.Contains("?limit=25", js);
+        Assert.Contains("&cursor=", js);
+        Assert.Contains("function rccLoadMoreList()", js);
+        Assert.Contains("function rccLoadMoreShared()", js);
+        Assert.Contains("function rccLoadMoreRevisions()", js);
+        Assert.Contains("function rccLoadMoreGrants()", js);
+        Assert.Contains("RCC.listHasMore", js);
+        Assert.Contains("RCC.sharedHasMore", js);
+        Assert.Contains("RCC.revisionsHasMore", js);
+        Assert.Contains("RCC.grantsHasMore", js);
+        Assert.Contains("RCC.list = cursor ? (RCC.list || []).concat(page.items) : page.items;", js);
+        Assert.DoesNotContain("RCC.list = env.data || [];", js);   // 不再把无界列表直接写回状态
     }
 
     /// <summary>截取源码中两个锚点之间的片段，便于对单个函数做「不含某内容」的契约断言。</summary>

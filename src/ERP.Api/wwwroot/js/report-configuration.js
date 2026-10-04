@@ -61,6 +61,18 @@ let RCC = {
   sharedList: [],
   sharedCurrent: null,
   grants: [],
+  listCursor: null,
+  listHasMore: false,
+  listSeq: 0,
+  sharedCursor: null,
+  sharedHasMore: false,
+  sharedSeq: 0,
+  revisionsCursor: null,
+  revisionsHasMore: false,
+  revisionsSeq: 0,
+  grantsCursor: null,
+  grantsHasMore: false,
+  grantsSeq: 0,
   dirty: false,
   requestSeq: 0,
   lastAction: '',
@@ -969,29 +981,32 @@ function rccRenderDesigner(html) {
     + rccUnsupportedHtml(ds);
 }
 
-function rccRenderList(list) {
+function rccRenderList() {
   const el = document.getElementById('rcc-list');
   if (!el) return;
-  if (!list || !list.length) { el.innerHTML = '<div class="empty">暂无私有配置</div>'; return; }
+  const list = RCC.list || [];
+  if (!list.length && !RCC.listHasMore) { el.innerHTML = '<div class="empty">暂无私有配置</div>'; return; }
   el.innerHTML = list.map(item => ''
     + '<div class="rcc-list-item">'
     + '<div class="rcc-list-title">' + rccEsc(item.name) + ' ' + rccStatusBadge(item.status) + '</div>'
     + '<div class="rcc-list-meta">' + rccEsc(rccDatasetLabel(item.datasetKey)) + ' · v' + rccEsc(item.version) + '</div>'
     + '<div class="rcc-list-actions"><button type="button" class="btn" onclick="rccLoadConfiguration(' + item.id + ')">加载</button></div>'
-    + '</div>').join('');
+    + '</div>').join('')
+    + (RCC.listHasMore ? rccLoadMoreHtml('rccLoadMoreList') : '');
 }
 
 function rccRenderRevisions() {
   const el = document.getElementById('rcc-revisions');
   if (!el) return;
   const revisions = RCC.revisions || [];
-  if (!revisions.length) { el.innerHTML = '<div class="empty">暂无发布修订</div>'; return; }
+  if (!revisions.length && !RCC.revisionsHasMore) { el.innerHTML = '<div class="empty">暂无发布修订</div>'; return; }
   el.innerHTML = '<div class="rcc-revisions-title">发布修订</div>'
     + revisions.map(r => '<div class="rcc-revision-row">'
       + '<span>v' + rccEsc(r.version) + ' · ' + rccEsc(r.name) + ' · ' + rccEsc(String((r.publishedAt || '')).slice(0, 10)) + '</span>'
       + '<button type="button" class="btn" onclick="rccPreviewRevision(' + r.version + ')">预览</button>'
       + '<button type="button" class="btn" onclick="rccRestore(' + r.version + ')">恢复</button>'
-      + '</div>').join('');
+      + '</div>').join('')
+    + (RCC.revisionsHasMore ? rccLoadMoreHtml('rccLoadMoreRevisions') : '');
 }
 
 /* 请求封装：返回 { code, message, data } 信封；网络失败返回 code -1，不静默吞错误 */
@@ -1007,6 +1022,20 @@ async function rccFetch(path, method = 'GET', body = null) {
   let envelope = null;
   try { envelope = await resp.json(); } catch (e) { envelope = null; }
   return envelope || { code: 5000, message: '服务器无响应' };
+}
+
+/* 有界集合分页信封 → { items, nextCursor, hasMore }（ERP-279，无全量 Count） */
+function rccPageData(data) {
+  return {
+    items: (data && Array.isArray(data.items)) ? data.items : [],
+    nextCursor: (data && typeof data.nextCursor === 'string' && data.nextCursor) ? data.nextCursor : null,
+    hasMore: !!(data && data.hasMore),
+  };
+}
+
+/* 集合「加载更多」按钮（仅当 hasMore 时渲染） */
+function rccLoadMoreHtml(handler) {
+  return '<div class="rcc-pager"><button type="button" class="btn" onclick="' + handler + '()">加载更多</button></div>';
 }
 
 function rccOnUnauthorized(message) {
@@ -1027,11 +1056,15 @@ async function rccInit() {
     catalog: null, datasets: [], datasetKey: '', fields: [], list: [], current: null, name: '',
     selectedKeys: [], filters: [], computedColumns: [], aggregates: [], groupings: [], coverage: 'current-page', sortFieldKey: '', sortDirection: 'asc', page: 1, pageSize: RCC_DEFAULT_PAGE_SIZE,
     maxPageSize: 200, previewRevision: null, view: null, revisions: [],
-    sharedList: [], sharedCurrent: null, grants: [], dirty: false,
-    requestSeq: 0, envBlocked: false, busy: false,
+    sharedList: [], sharedCurrent: null, grants: [],
+    listCursor: null, listHasMore: false, listSeq: 0,
+    sharedCursor: null, sharedHasMore: false, sharedSeq: 0,
+    revisionsCursor: null, revisionsHasMore: false, revisionsSeq: 0,
+    grantsCursor: null, grantsHasMore: false, grantsSeq: 0,
+    dirty: false, requestSeq: 0, envBlocked: false, busy: false,
   };
   rccRenderDesigner();
-  rccRenderList([]);
+  rccRenderList();
   rccRenderShared();
   rccRenderGrants();
   rccRenderResult(rccEmptyHtml());
@@ -1058,16 +1091,27 @@ async function rccLoadCatalog() {
   return true;
 }
 
-async function rccLoadList() {
-  const env = await rccFetch(RCC_API);
+async function rccLoadList(cursor) {
+  const seq = ++RCC.listSeq;
+  const url = RCC_API + '?limit=25' + (cursor ? '&cursor=' + encodeURIComponent(cursor) : '');
+  const env = await rccFetch(url);
+  if (seq !== RCC.listSeq) return;                     // 丢弃迟到的列表响应，保留最新一次请求结果
   if (env.code === 2000 || env.code === 2003) { rccOnUnauthorized(env.message); return; }
   if (env.code !== 0) {
     if (env.code === 5000) { RCC.envBlocked = true; rccRenderEnvBanner(); }
-    rccRenderList([]);
+    RCC.list = []; RCC.listCursor = null; RCC.listHasMore = false;
+    rccRenderList();
     return;
   }
-  RCC.list = env.data || [];
-  rccRenderList(RCC.list);
+  const page = rccPageData(env.data);
+  RCC.list = cursor ? (RCC.list || []).concat(page.items) : page.items;
+  RCC.listCursor = page.nextCursor;
+  RCC.listHasMore = page.hasMore;
+  rccRenderList();
+}
+
+function rccLoadMoreList() {
+  if (RCC.listHasMore && RCC.listCursor) rccLoadList(RCC.listCursor);
 }
 
 function rccSelectDataset(key, touch = true) {
@@ -1372,13 +1416,25 @@ async function rccPublish() {
   await rccLoadRevisions(RCC.current.id);
 }
 
-async function rccLoadRevisions(id) {
-  const env = await rccFetch(RCC_API + '/' + id + '/revisions');
+async function rccLoadRevisions(id, cursor) {
+  const seq = ++RCC.revisionsSeq;
+  const url = RCC_API + '/' + id + '/revisions?limit=25' + (cursor ? '&cursor=' + encodeURIComponent(cursor) : '');
+  const env = await rccFetch(url);
+  if (seq !== RCC.revisionsSeq) return;                  // 丢弃迟到的修订响应（切换配置后旧页作废）
   if (env.code === 2000 || env.code === 2003) { rccOnUnauthorized(env.message); return; }
   if (env.code === 5000) { RCC.envBlocked = true; rccRenderEnvBanner(); return; }
-  if (env.code !== 0) { rccRenderRevisions(); return; }
-  RCC.revisions = env.data || [];
+  if (env.code !== 0) { RCC.revisions = []; RCC.revisionsCursor = null; RCC.revisionsHasMore = false; rccRenderRevisions(); return; }
+  const page = rccPageData(env.data);
+  RCC.revisions = cursor ? (RCC.revisions || []).concat(page.items) : page.items;
+  RCC.revisionsCursor = page.nextCursor;
+  RCC.revisionsHasMore = page.hasMore;
   rccRenderRevisions();
+}
+
+function rccLoadMoreRevisions() {
+  if (RCC.revisionsHasMore && RCC.revisionsCursor && RCC.current && RCC.current.id) {
+    rccLoadRevisions(RCC.current.id, RCC.revisionsCursor);
+  }
 }
 
 async function rccRestore(version) {
@@ -1403,7 +1459,7 @@ function rccRenderShared() {
   const el = document.getElementById('rcc-shared');
   if (!el) return;
   const list = RCC.sharedList || [];
-  if (!list.length) {
+  if (!list.length && !RCC.sharedHasMore) {
     el.innerHTML = '<div class="rcc-shared-title">共享给我的</div><div class="empty">暂无共享报表</div>';
     return;
   }
@@ -1415,20 +1471,31 @@ function rccRenderShared() {
       + '<div class="rcc-list-actions">'
       + '<button type="button" class="btn" onclick="rccOpenShared(' + item.reportConfigurationId + ')">查看</button>'
       + '<button type="button" class="btn" onclick="rccCopyShared(' + item.reportConfigurationId + ')">复制为草稿</button>'
-      + '</div></div>').join('');
+      + '</div></div>').join('')
+    + (RCC.sharedHasMore ? rccLoadMoreHtml('rccLoadMoreShared') : '');
 }
 
-async function rccLoadShared() {
-  const env = await rccFetch(RCC_API + '/shared');
+async function rccLoadShared(cursor) {
+  const seq = ++RCC.sharedSeq;
+  const url = RCC_API + '/shared?limit=25' + (cursor ? '&cursor=' + encodeURIComponent(cursor) : '');
+  const env = await rccFetch(url);
+  if (seq !== RCC.sharedSeq) return;                     // 丢弃迟到的共享列表响应
   if (env.code === 2000 || env.code === 2003) { rccOnUnauthorized(env.message); return; }
   if (env.code !== 0) {
     if (env.code === 5000) { RCC.envBlocked = true; rccRenderEnvBanner(); }
-    RCC.sharedList = [];
+    RCC.sharedList = []; RCC.sharedCursor = null; RCC.sharedHasMore = false;
     rccRenderShared();
     return;
   }
-  RCC.sharedList = env.data || [];
+  const page = rccPageData(env.data);
+  RCC.sharedList = cursor ? (RCC.sharedList || []).concat(page.items) : page.items;
+  RCC.sharedCursor = page.nextCursor;
+  RCC.sharedHasMore = page.hasMore;
   rccRenderShared();
+}
+
+function rccLoadMoreShared() {
+  if (RCC.sharedHasMore && RCC.sharedCursor) rccLoadShared(RCC.sharedCursor);
 }
 
 function rccSharedViewHtml(dto) {
@@ -1486,28 +1553,41 @@ function rccRenderGrants() {
         + ' · 固定修订 v' + rccEsc(g.revisionVersion) + '</span>'
         + '<button type="button" class="btn btn-danger" onclick="rccRevoke(' + g.recipientUserId + ', ' + g.version + ')">撤销</button>'
         + '</div>').join('')
-    : '<div class="rcc-hint">暂无共享授权</div>';
+    : (RCC.grantsHasMore ? '' : '<div class="rcc-hint">暂无共享授权</div>');
   el.innerHTML = '<div class="rcc-grants-title">共享授权（owner-only）</div>'
     + '<div class="rcc-grant-form">'
     + '<input id="rcc-grant-recipient" placeholder="被授权用户 Id">'
     + '<input id="rcc-grant-revision" placeholder="固定发布修订号">'
     + '<button type="button" class="btn" onclick="rccGrant()">授权</button>'
     + '</div>'
-    + rows;
+    + rows
+    + (RCC.grantsHasMore ? rccLoadMoreHtml('rccLoadMoreGrants') : '');
 }
 
-async function rccLoadGrants() {
-  if (!RCC.current || !RCC.current.id || RCC.sharedCurrent) { RCC.grants = []; rccRenderGrants(); return; }
-  const env = await rccFetch(RCC_API + '/' + RCC.current.id + '/grants');
+async function rccLoadGrants(cursor) {
+  if (!RCC.current || !RCC.current.id || RCC.sharedCurrent) {
+    RCC.grants = []; RCC.grantsCursor = null; RCC.grantsHasMore = false; rccRenderGrants(); return;
+  }
+  const seq = ++RCC.grantsSeq;
+  const url = RCC_API + '/' + RCC.current.id + '/grants?limit=25' + (cursor ? '&cursor=' + encodeURIComponent(cursor) : '');
+  const env = await rccFetch(url);
+  if (seq !== RCC.grantsSeq) return;                     // 丢弃迟到的授权列表响应
   if (env.code === 2000 || env.code === 2003) { rccOnUnauthorized(env.message); return; }
   if (env.code !== 0) {
     if (env.code === 5000) { RCC.envBlocked = true; rccRenderEnvBanner(); }
-    RCC.grants = [];
+    RCC.grants = []; RCC.grantsCursor = null; RCC.grantsHasMore = false;
     rccRenderGrants();
     return;
   }
-  RCC.grants = env.data || [];
+  const page = rccPageData(env.data);
+  RCC.grants = cursor ? (RCC.grants || []).concat(page.items) : page.items;
+  RCC.grantsCursor = page.nextCursor;
+  RCC.grantsHasMore = page.hasMore;
   rccRenderGrants();
+}
+
+function rccLoadMoreGrants() {
+  if (RCC.grantsHasMore && RCC.grantsCursor) rccLoadGrants(RCC.grantsCursor);
 }
 
 async function rccGrant() {
@@ -1844,6 +1924,8 @@ if (typeof module !== 'undefined' && module.exports) {
     rccRenderGrants,
     rccRenderResult,
     rccFetch,
+    rccPageData,
+    rccLoadMoreHtml,
     rccInit,
     rccLoadCatalog,
     rccLoadList,
@@ -1862,6 +1944,10 @@ if (typeof module !== 'undefined' && module.exports) {
     rccRestore,
     rccLoadRevisions,
     rccLoadGrants,
+    rccLoadMoreList,
+    rccLoadMoreShared,
+    rccLoadMoreRevisions,
+    rccLoadMoreGrants,
     rccGrant,
     rccRevoke,
     rccPreview,

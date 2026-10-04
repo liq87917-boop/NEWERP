@@ -40,17 +40,39 @@ public sealed class ReportConfigurationSharingService : IReportConfigurationShar
     public async Task<List<ReportConfigurationGrantDto>> ListGrantsAsync(
         long ownerUserId, long configurationId, CancellationToken cancellationToken = default)
     {
+        var page = await ListGrantsPageAsync(ownerUserId, configurationId, ReportConfigurationPaging.MaxPageSize, null, cancellationToken);
+        return ReportConfigurationPaging.CompleteOrThrow(page, "共享授权列表");
+    }
+
+    public async Task<ReportConfigurationPage<ReportConfigurationGrantDto>> ListGrantsPageAsync(
+        long ownerUserId, long configurationId, int? limit = null, string? cursor = null,
+        CancellationToken cancellationToken = default)
+    {
         EnsureAuthenticated(ownerUserId);
+        var pageSize = ReportConfigurationPaging.ValidateLimit(limit);
+        var afterId = ReportConfigurationPaging.DecodeCursor(cursor);
         await LoadOwnedAsync(ownerUserId, configurationId, cancellationToken);
 
+        // 身份 / 软删除过滤在 SQL Take 之前应用；授权按 Id 稳定递增
         var grants = await _db.ReportConfigurationGrants.AsNoTracking()
-            .Where(g => g.ReportConfigurationId == configurationId && !g.IsDeleted)
+            .Where(g => g.ReportConfigurationId == configurationId && !g.IsDeleted
+                && (afterId == null || g.Id > afterId.Value))
             .OrderBy(g => g.Id)
+            .Take(pageSize + 1)
             .ToListAsync(cancellationToken);
+
+        var hasMore = grants.Count > pageSize;
+        if (hasMore)
+            grants.RemoveAt(grants.Count - 1);
 
         var users = await LoadUsersAsync(grants.Select(g => g.RecipientUserId).Distinct().ToList(), cancellationToken);
 
-        return grants.Select(g => MapGrant(g, users)).ToList();
+        var items = grants.Select(g => MapGrant(g, users)).ToList();
+        var nextCursor = hasMore && grants.Count > 0
+            ? ReportConfigurationPaging.EncodeCursor(grants[^1].Id)
+            : null;
+
+        return ReportConfigurationPaging.Page(items, hasMore, nextCursor);
     }
 
     public async Task<ReportConfigurationGrantDto> GrantAsync(
@@ -152,23 +174,44 @@ public sealed class ReportConfigurationSharingService : IReportConfigurationShar
     public async Task<List<ReportConfigurationSharedSummaryDto>> ListSharedAsync(
         long recipientUserId, CancellationToken cancellationToken = default)
     {
-        EnsureAuthenticated(recipientUserId);
-        if (!await IsActiveUserAsync(recipientUserId, cancellationToken))
-            return new List<ReportConfigurationSharedSummaryDto>();
+        var page = await ListSharedPageAsync(recipientUserId, ReportConfigurationPaging.MaxPageSize, null, cancellationToken);
+        return ReportConfigurationPaging.CompleteOrThrow(page, "共享报表列表");
+    }
 
+    public async Task<ReportConfigurationPage<ReportConfigurationSharedSummaryDto>> ListSharedPageAsync(
+        long recipientUserId, int? limit = null, string? cursor = null,
+        CancellationToken cancellationToken = default)
+    {
+        EnsureAuthenticated(recipientUserId);
+        var pageSize = ReportConfigurationPaging.ValidateLimit(limit);
+        var afterId = ReportConfigurationPaging.DecodeCursor(cursor);
+
+        if (!await IsActiveUserAsync(recipientUserId, cancellationToken))
+            return ReportConfigurationPaging.Page(new List<ReportConfigurationSharedSummaryDto>(), false, null);
+
+        // 有界候选物化：身份 / 软删除过滤在 SQL Take 之前应用，单次最多扫描 200 条候选
         var grants = await _db.ReportConfigurationGrants.AsNoTracking()
-            .Where(g => g.RecipientUserId == recipientUserId && !g.IsDeleted)
+            .Where(g => g.RecipientUserId == recipientUserId && !g.IsDeleted
+                && (afterId == null || g.Id > afterId.Value))
             .OrderBy(g => g.Id)
+            .Take(ReportConfigurationPaging.MaxScanCandidates)
             .ToListAsync(cancellationToken);
 
-        var result = new List<ReportConfigurationSharedSummaryDto>();
+        var visible = new List<ReportConfigurationSharedSummaryDto>();
+        long? lastScannedId = afterId;
+        var pageFull = false;
+        var scanned = 0;
+
         foreach (var grant in grants)
         {
-            var snapshot = await ResolveSharedSnapshotAsync(grant, cancellationToken);
-            if (snapshot is null)
-                continue; // 配置被删除 / 固定修订丢失 → 该共享不再可见（fail closed）
+            lastScannedId = grant.Id;
+            scanned++;
 
-            result.Add(new ReportConfigurationSharedSummaryDto
+            var snapshot = await ResolveSharedSnapshotForRecipientAsync(grant, recipientUserId, cancellationToken);
+            if (snapshot is null)
+                continue; // 配置删除 / 固定修订丢失 / 数据集授权撤销 → 不可见（fail closed），游标仍推进
+
+            visible.Add(new ReportConfigurationSharedSummaryDto
             {
                 ReportConfigurationId = snapshot.ReportConfigurationId,
                 Name = snapshot.Name,
@@ -178,9 +221,23 @@ public sealed class ReportConfigurationSharingService : IReportConfigurationShar
                 OwnerUserId = snapshot.OwnerUserId,
                 OwnerDisplayName = snapshot.OwnerDisplayName,
             });
+
+            if (visible.Count >= pageSize)
+            {
+                pageFull = true;
+                break;
+            }
         }
 
-        return result;
+        var moreCandidatesPossible = grants.Count == ReportConfigurationPaging.MaxScanCandidates;
+        var unscannedInBatch = pageFull && scanned < grants.Count;
+        var hasMore = moreCandidatesPossible || unscannedInBatch;
+
+        var nextCursor = hasMore && lastScannedId.HasValue
+            ? ReportConfigurationPaging.EncodeCursor(lastScannedId.Value)
+            : null;
+
+        return ReportConfigurationPaging.Page(visible, hasMore, nextCursor);
     }
 
     public async Task<ReportConfigurationSharedDetailDto> GetSharedAsync(
@@ -309,6 +366,21 @@ public sealed class ReportConfigurationSharingService : IReportConfigurationShar
             OwnerDisplayName = ownerDisplayName,
             Definition = definition,
         };
+    }
+
+    /// <summary>共享列表解析：在固定快照解析基础上，再按被授权人当前数据集授权重新校验（撤销后立即收敛）。</summary>
+    private async Task<ResolvedShared?> ResolveSharedSnapshotForRecipientAsync(
+        ReportConfigurationGrant grant, long recipientUserId, CancellationToken cancellationToken)
+    {
+        var snapshot = await ResolveSharedSnapshotAsync(grant, cancellationToken);
+        if (snapshot is null)
+            return null;
+
+        var dataset = await _catalog.GetDatasetAsync(snapshot.DatasetKey, recipientUserId, cancellationToken);
+        if (dataset is null)
+            return null; // 数据集授权撤销 → 共享不可见（fail closed），绝不泄露所有者定义
+
+        return snapshot;
     }
 
     private static void EnsureAuthenticated(long userId)

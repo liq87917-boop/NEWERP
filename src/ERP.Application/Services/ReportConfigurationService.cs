@@ -174,10 +174,21 @@ public sealed class ReportConfigurationService : IReportConfigurationService
     public async Task<List<ReportConfigurationSummaryDto>> ListAsync(
         long ownerUserId, CancellationToken cancellationToken = default)
     {
-        EnsureAuthenticated(ownerUserId);
+        var page = await ListPageAsync(ownerUserId, ReportConfigurationPaging.MaxPageSize, null, cancellationToken);
+        return ReportConfigurationPaging.CompleteOrThrow(page, "报表配置列表");
+    }
 
-        return await _db.ReportConfigurations.AsNoTracking()
-            .Where(c => !c.IsDeleted && c.OwnerUserId == ownerUserId)
+    public async Task<ReportConfigurationPage<ReportConfigurationSummaryDto>> ListPageAsync(
+        long ownerUserId, int? limit = null, string? cursor = null, CancellationToken cancellationToken = default)
+    {
+        EnsureAuthenticated(ownerUserId);
+        var pageSize = ReportConfigurationPaging.ValidateLimit(limit);
+        var afterId = ReportConfigurationPaging.DecodeCursor(cursor);
+
+        // 身份 / 软删除过滤在 SQL Take 之前应用；keyset 续读（最新在前）+ 多取一条用于判断是否还有后续
+        var rows = await _db.ReportConfigurations.AsNoTracking()
+            .Where(c => !c.IsDeleted && c.OwnerUserId == ownerUserId
+                && (afterId == null || c.Id < afterId.Value))
             .OrderByDescending(c => c.Id)
             .Select(c => new ReportConfigurationSummaryDto
             {
@@ -190,7 +201,18 @@ public sealed class ReportConfigurationService : IReportConfigurationService
                 CreatedAt = c.CreatedAt,
                 UpdatedAt = c.UpdatedAt,
             })
+            .Take(pageSize + 1)
             .ToListAsync(cancellationToken);
+
+        var hasMore = rows.Count > pageSize;
+        if (hasMore)
+            rows.RemoveAt(rows.Count - 1);
+
+        var nextCursor = hasMore && rows.Count > 0
+            ? ReportConfigurationPaging.EncodeCursor(rows[^1].Id)
+            : null;
+
+        return ReportConfigurationPaging.Page(rows, hasMore, nextCursor);
     }
 
 
@@ -310,17 +332,33 @@ public sealed class ReportConfigurationService : IReportConfigurationService
     public async Task<List<ReportConfigurationRevisionDto>> ListRevisionsAsync(
         long ownerUserId, long id, CancellationToken cancellationToken = default)
     {
+        var page = await ListRevisionsPageAsync(ownerUserId, id, ReportConfigurationPaging.MaxPageSize, null, cancellationToken);
+        return ReportConfigurationPaging.CompleteOrThrow(page, "发布修订列表");
+    }
+
+    public async Task<ReportConfigurationPage<ReportConfigurationRevisionDto>> ListRevisionsPageAsync(
+        long ownerUserId, long id, int? limit = null, string? cursor = null, CancellationToken cancellationToken = default)
+    {
         EnsureAuthenticated(ownerUserId);
+        var pageSize = ReportConfigurationPaging.ValidateLimit(limit);
+        var afterVersion = ReportConfigurationPaging.DecodeCursor(cursor);
 
         var config = await LoadOwnedAsync(ownerUserId, id, cancellationToken);
         await RequireCurrentDatasetAsync(config, ownerUserId, cancellationToken);
 
+        // 身份 / 软删除过滤在 SQL Take 之前应用；修订在同一配置内按版本号稳定递增
         var revisions = await _db.ReportConfigurationRevisions.AsNoTracking()
-            .Where(r => r.ReportConfigurationId == id && !r.IsDeleted)
+            .Where(r => r.ReportConfigurationId == id && !r.IsDeleted
+                && (afterVersion == null || r.Version > afterVersion.Value))
             .OrderBy(r => r.Version)
+            .Take(pageSize + 1)
             .ToListAsync(cancellationToken);
 
-        return revisions.Select(r => new ReportConfigurationRevisionDto
+        var hasMore = revisions.Count > pageSize;
+        if (hasMore)
+            revisions.RemoveAt(revisions.Count - 1);
+
+        var items = revisions.Select(r => new ReportConfigurationRevisionDto
         {
             Id = r.Id,
             ReportConfigurationId = r.ReportConfigurationId,
@@ -332,6 +370,12 @@ public sealed class ReportConfigurationService : IReportConfigurationService
             PublishedBy = r.PublishedBy,
             Definition = Deserialize(r.DefinitionJson),
         }).ToList();
+
+        var nextCursor = hasMore && revisions.Count > 0
+            ? ReportConfigurationPaging.EncodeCursor(revisions[^1].Version)
+            : null;
+
+        return ReportConfigurationPaging.Page(items, hasMore, nextCursor);
     }
 
 

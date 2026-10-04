@@ -32,6 +32,10 @@ public interface IReportConfigurationService
     /// <summary>列表当前用户的全部未删除私有报表配置（owner-only）。</summary>
     Task<List<ReportConfigurationSummaryDto>> ListAsync(long ownerUserId, CancellationToken cancellationToken = default);
 
+    /// <summary>有界 keyset 分页列表当前用户的未删除私有报表配置（owner-only；默认 25、最大 100）。</summary>
+    Task<ReportConfigurationPage<ReportConfigurationSummaryDto>> ListPageAsync(
+        long ownerUserId, int? limit = null, string? cursor = null, CancellationToken cancellationToken = default);
+
     /// <summary>软删除私有报表配置及其全部发布修订（需匹配 <paramref name="expectedVersion"/>）。</summary>
     Task DeleteAsync(long ownerUserId, long id, int expectedVersion, CancellationToken cancellationToken = default);
 
@@ -46,4 +50,8 @@ public interface IReportConfigurationService
     /// <summary>列出单条私有报表配置的全部发布修订（重新校验当前数据集授权）。</summary>
     Task<List<ReportConfigurationRevisionDto>> ListRevisionsAsync(long ownerUserId, long id,
         CancellationToken cancellationToken = default);
+
+    /// <summary>有界 keyset 分页列出单条私有报表配置的发布修订（owner-only；默认 25、最大 100）。</summary>
+    Task<ReportConfigurationPage<ReportConfigurationRevisionDto>> ListRevisionsPageAsync(
+        long ownerUserId, long id, int? limit = null, string? cursor = null, CancellationToken cancellationToken = default);
 }

@@ -220,12 +220,12 @@ public class ReportConfigurationApiTests
         var publishResult = await ctl.Publish(createdResp.Id, createdResp.Version);
         Assert.IsType<OkObjectResult>(publishResult);
 
-        var revisionsResult = await ctl.Revisions(createdResp.Id);
-        var revisions = Assert.IsType<ApiResponse<List<ReportConfigurationRevisionDto>>>(
+        var revisionsResult = await ctl.Revisions(createdResp.Id, null, null);
+        var revisions = Assert.IsType<ApiResponse<ReportConfigurationPage<ReportConfigurationRevisionDto>>>(
             Assert.IsType<OkObjectResult>(revisionsResult).Value).Data!;
 
-        Assert.Single(revisions);
-        Assert.Equal(1, revisions[0].Version);
+        Assert.Single(revisions.Items);
+        Assert.Equal(1, revisions.Items[0].Version);
     }
 
     [Fact]
@@ -366,14 +366,14 @@ public class ReportConfigurationApiTests
         Assert.Equal(recipient, grantData.RecipientUserId);
         Assert.Equal(1, grantData.RevisionVersion);
 
-        var list = await ctlOwner.Grants(id);
-        Assert.Single(Assert.IsType<ApiResponse<List<ReportConfigurationGrantDto>>>(
-            Assert.IsType<OkObjectResult>(list).Value).Data!);
+        var list = await ctlOwner.Grants(id, null, null);
+        Assert.Single(Assert.IsType<ApiResponse<ReportConfigurationPage<ReportConfigurationGrantDto>>>(
+            Assert.IsType<OkObjectResult>(list).Value).Data!.Items);
 
         await ctlOwner.Revoke(id, recipient, grantData.Version);
-        var after = await ctlOwner.Grants(id);
-        Assert.Empty(Assert.IsType<ApiResponse<List<ReportConfigurationGrantDto>>>(
-            Assert.IsType<OkObjectResult>(after).Value).Data!);
+        var after = await ctlOwner.Grants(id, null, null);
+        Assert.Empty(Assert.IsType<ApiResponse<ReportConfigurationPage<ReportConfigurationGrantDto>>>(
+            Assert.IsType<OkObjectResult>(after).Value).Data!.Items);
     }
 
     [Fact]
@@ -394,9 +394,9 @@ public class ReportConfigurationApiTests
         var ctlRecipient = BuildController(db);
         TestAuth.SetUser(ctlRecipient, recipient);
 
-        var list = await ctlRecipient.Shared();
-        var items = Assert.IsType<ApiResponse<List<ReportConfigurationSharedSummaryDto>>>(
-            Assert.IsType<OkObjectResult>(list).Value).Data!;
+        var list = await ctlRecipient.Shared(null, null);
+        var items = Assert.IsType<ApiResponse<ReportConfigurationPage<ReportConfigurationSharedSummaryDto>>>(
+            Assert.IsType<OkObjectResult>(list).Value).Data!.Items;
         var item = Assert.Single(items);
         Assert.Equal(id, item.ReportConfigurationId);
         Assert.Equal("报表", item.Name);
@@ -452,9 +452,9 @@ public class ReportConfigurationApiTests
 
         var ctlStranger = BuildController(db);
         TestAuth.SetUser(ctlStranger, stranger);
-        var list = await ctlStranger.Shared();
-        Assert.Empty(Assert.IsType<ApiResponse<List<ReportConfigurationSharedSummaryDto>>>(
-            Assert.IsType<OkObjectResult>(list).Value).Data!);
+        var list = await ctlStranger.Shared(null, null);
+        Assert.Empty(Assert.IsType<ApiResponse<ReportConfigurationPage<ReportConfigurationSharedSummaryDto>>>(
+            Assert.IsType<OkObjectResult>(list).Value).Data!.Items);
 
         var ex = await Assert.ThrowsAsync<BusinessException>(() => ctlStranger.SharedDetail(id));
         Assert.Equal(ErrorCodes.NotFound, ex.Code);

@@ -15,6 +15,11 @@ public interface IReportConfigurationSharingService
     Task<List<ReportConfigurationGrantDto>> ListGrantsAsync(
         long ownerUserId, long configurationId, CancellationToken cancellationToken = default);
 
+    /// <summary>有界 keyset 分页列出某条私有报表配置的有效只读授权（owner-only；默认 25、最大 100）。</summary>
+    Task<ReportConfigurationPage<ReportConfigurationGrantDto>> ListGrantsPageAsync(
+        long ownerUserId, long configurationId, int? limit = null, string? cursor = null,
+        CancellationToken cancellationToken = default);
+
     /// <summary>授予 / 变更某个固定发布修订的只读访问（owner-only；变更 pin 需回传预期版本）。</summary>
     Task<ReportConfigurationGrantDto> GrantAsync(
         long ownerUserId, long configurationId, ReportConfigurationGrantRequestDto request,
@@ -28,6 +33,11 @@ public interface IReportConfigurationSharingService
     /// <summary>列出当前用户被共享的只读发布快照（recipient-only；只暴露固定快照）。</summary>
     Task<List<ReportConfigurationSharedSummaryDto>> ListSharedAsync(
         long recipientUserId, CancellationToken cancellationToken = default);
+
+    /// <summary>有界 keyset 分页列出当前用户被共享的只读发布快照（recipient-only；默认 25、最大 100）。</summary>
+    Task<ReportConfigurationPage<ReportConfigurationSharedSummaryDto>> ListSharedPageAsync(
+        long recipientUserId, int? limit = null, string? cursor = null,
+        CancellationToken cancellationToken = default);
 
     /// <summary>加载当前用户被共享的只读发布快照详情（recipient-only）。</summary>
     Task<ReportConfigurationSharedDetailDto> GetSharedAsync(

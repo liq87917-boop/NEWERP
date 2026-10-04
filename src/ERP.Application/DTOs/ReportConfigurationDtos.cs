@@ -1,3 +1,4 @@
+using ERP.Application.Common;
 using ERP.Domain.Entities;
 
 namespace ERP.Application.DTOs;
@@ -1066,4 +1067,89 @@ public sealed class ReportConfigurationTransferImportRequest
 {
     /// <summary>信封 JSON 原文（≤64KiB；depth ≤16；顶层键仅 format / schemaVersion / name / definition）</summary>
     public string Json { get; set; } = string.Empty;
+}
+
+// ==================== ERP-279 Stage 1：有界集合分页契约 ====================
+
+/// <summary>
+/// 有界集合分页结果（ERP-279）：只返回当前页条目与安全续读游标，绝不返回全量 Count / 无界列表。
+/// <para><see cref="Items"/> 不超过请求 limit（默认 25、最大 100）；<see cref="NextCursor"/> 为 keyset 续读游标，
+/// 为空且 <see cref="HasMore"/> 为 false 时表示已到末尾。</para>
+/// </summary>
+public sealed class ReportConfigurationPage<T>
+{
+    /// <summary>当前页条目（≤ 请求 limit，最多 100）。</summary>
+    public List<T> Items { get; set; } = new();
+
+    /// <summary>keyset 续读游标；为空表示已到末尾（配合 <see cref="HasMore"/> 使用）。</summary>
+    public string? NextCursor { get; set; }
+
+    /// <summary>是否还有后续条目（false 且 NextCursor 为空 = 末尾）。</summary>
+    public bool HasMore { get; set; }
+}
+
+/// <summary>
+/// 通用报表配置集合分页契约的校验 / 游标辅助（ERP-279）：keyset 游标用 base64 编码单调递增主键，
+/// 只用于「从上一页最后一条之后续读」，绝不编码任意 SQL / 过滤条件。
+/// </summary>
+public static class ReportConfigurationPaging
+{
+    /// <summary>默认每页可见条目数。</summary>
+    public const int DefaultPageSize = 25;
+
+    /// <summary>单页最大可见条目数。</summary>
+    public const int MaxPageSize = 100;
+
+    /// <summary>单次请求最多物化 / 校验的候选行数（共享列表可能因授权撤销 / 数据集授权失效而过滤候选）。</summary>
+    public const int MaxScanCandidates = 200;
+
+    /// <summary>校验请求 limit：缺省 25，范围 [1, 100]；负数 / 越界显式失败。</summary>
+    public static int ValidateLimit(int? limit)
+    {
+        var value = limit ?? DefaultPageSize;
+        if (value < 1 || value > MaxPageSize)
+            throw BusinessException.InvalidParameter($"limit 必须在 1 ~ {MaxPageSize} 之间");
+        return value;
+    }
+
+    /// <summary>编码续读游标（单调递增主键）。</summary>
+    public static string EncodeCursor(long key)
+        => Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(
+            key.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+
+    /// <summary>解码续读游标；空 / 空白 = 从头开始；负数或非法编码显式失败。</summary>
+    public static long? DecodeCursor(string? cursor, string paramName = "cursor")
+    {
+        if (string.IsNullOrWhiteSpace(cursor))
+            return null;
+
+        try
+        {
+            var text = System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(cursor));
+            if (long.TryParse(text, System.Globalization.NumberStyles.None,
+                    System.Globalization.CultureInfo.InvariantCulture, out var value)
+                && value > 0)
+            {
+                return value;
+            }
+        }
+        catch
+        {
+            // 非法游标按参数错误处理
+        }
+
+        throw BusinessException.InvalidParameter($"{paramName} 无效");
+    }
+
+    /// <summary>创建分页结果。</summary>
+    public static ReportConfigurationPage<T> Page<T>(List<T> items, bool hasMore, string? nextCursor)
+        => new() { Items = items, HasMore = hasMore, NextCursor = nextCursor };
+
+    /// <summary>有界兼容包装：超过有界上限时显式拒绝（绝不静默截断或无界回退）。</summary>
+    public static List<T> CompleteOrThrow<T>(ReportConfigurationPage<T> page, string subject)
+    {
+        if (page.HasMore)
+            throw BusinessException.RuleConflict($"{subject}超过单次有界上限（{MaxPageSize}），请改用分页接口");
+        return page.Items;
+    }
 }
