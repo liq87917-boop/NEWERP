@@ -369,6 +369,32 @@ def confirmed_baseline_unit_failure(task: dict[str, Any], evidence: dict[str, An
     }
 
 
+def automatic_recovery_allowed(task: dict[str, Any]) -> bool:
+    """Engineering failures are recoverable regardless of the blocker wording.
+
+    External prerequisites and intentional deferrals are not code repairs.
+    Never reset their budgets or authorize changes to protected resources.
+    """
+    if task.get("status") not in RECOVERY_SCAN_STATUSES or not task.get("auto_start", True):
+        return False
+    if task.get("requires_human_approval", False) or str(task.get("human_gate", {}).get("level", "L1")).upper() in {"L3", "L4"}:
+        return False
+    kind = str(task.get("failure_kind") or "").lower()
+    if kind in {"provider_unavailable", "environment_blocked", "browser_infrastructure_blocked",
+                "missing_credentials", "dependency_blocked", "human_approval_required"}:
+        return False
+    reason = str(task.get("blocker") or "") + " " + str(task.get("last_error") or "")
+    if re.search(r"insufficient (?:balance|credits|quota)|quota exceeded|billing hard limit|missing credentials|"
+                 r"environment blocked|browser infrastructure|dependency.*(?:not completed|blocked)|"
+                 r"working tree is not clean|waiting.*approval|production.*approval", reason, re.IGNORECASE):
+        return False
+    # A blocked task with no engineering evidence may be a business/planning gate.
+    return task.get("status") != "blocked" or kind in {
+        "validation_failure", "path_guard_failure", "prompt_transport_failure",
+        "no_checkpoint_changes", "unclassified_engineering_failure",
+    } or bool(task.get("last_error")) or str(task.get("blocker", "")).startswith("Automatic repair budget exhausted")
+
+
 def recover_blocked_with_deepseek(config: dict[str, Any]) -> list[str]:
     """Turn recoverable failures into bounded, evidence-rich DeepSeek repair work."""
     autonomy = config.get("autonomy", {})
@@ -384,9 +410,7 @@ def recover_blocked_with_deepseek(config: dict[str, Any]) -> list[str]:
         if is_provider_failure(task):
             # Billing/quota recovery needs a timed probe, not a code repair cycle.
             continue
-        if status == "blocked" and task.get("blocker") != "Automatic repair budget exhausted":
-            continue
-        if task.get("requires_human_approval", False) or str(task.get("human_gate", {}).get("level", "L1")).upper() in {"L3", "L4"}:
+        if not automatic_recovery_allowed(task):
             continue
         cycles = int(task.get("supervised_recovery_cycles", 0) or 0)
         if cycles >= maximum:

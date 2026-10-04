@@ -915,6 +915,12 @@ function Write-Status {
 
 Set-Location $root
 
+# Independent resident watch reloads scheduler fixes each cycle. Its own lock
+# prevents duplicate watches; pipeline.lock prevents duplicate development.
+if (-not $NoExecute -and -not $Once) {
+    Start-Process -FilePath 'py' -ArgumentList @('-3', '-B', ('"' + (Join-Path $controlRoot 'scripts\ai_scheduler_watch.py') + '"'), '--root', ('"' + $controlRoot + '"')) -WindowStyle Hidden | Out-Null
+}
+
 try {
     while ($true) {
         if ($pipelineProcess -and $pipelineProcess.HasExited) {
