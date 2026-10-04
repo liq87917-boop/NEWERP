@@ -10,6 +10,9 @@ class PlannerTests(unittest.TestCase):
   self.assertEqual([],planner.parse(text)['tasks'])
  def test_malformed_final_is_rejected(self):
   with self.assertRaises(ValueError):planner.parse('{"type":"run_result","text":"done"}')
+ def test_src_test_project_is_not_business_code(self):
+  t=self.candidate();t['allowed_paths']=['src/ERP.IntegrationTests/NewFixture.cs','src/ERP.UnitTests/NewRegressionTests.cs']
+  with self.assertRaisesRegex(ValueError,'No business code'):planner.validate(t,[{'id':'ERP-285'}],ROOT)
  def test_valid_exact_mapping(self):planner.validate(self.candidate(),[{'id':'ERP-285','title':'completed'}],ROOT)
  def test_duplicate_and_later_phase_rejected(self):
   t=self.candidate()
