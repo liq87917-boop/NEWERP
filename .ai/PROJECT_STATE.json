@@ -1,12 +1,10 @@
 {
   "schema_version": 2,
   "project": "NEWERP",
-  "updated_at": "2026-10-04T10:28:27.720356Z",
+  "updated_at": "2026-10-04T10:29:06.233046Z",
   "phase": "ready",
   "current_task": null,
-  "queue": [
-    "ERP-287"
-  ],
+  "queue": [],
   "completed": [
     "ERP-000",
     "ERP-001",
@@ -272,44 +270,37 @@
     "ERP-283",
     "ERP-284",
     "ERP-285",
-    "ERP-286"
+    "ERP-286",
+    "ERP-287"
   ],
   "blocked": [],
   "last_build": {
-    "task": "ERP-286",
+    "task": "ERP-287",
     "profile": "safe",
     "status": "passed",
     "exit_code": 0,
-    "log": ".ai\\logs\\ERP-286-validation-1.log",
-    "at": "2026-10-04T09:33:02.785450Z"
+    "log": ".ai\\logs\\ERP-287-validation-1.log",
+    "at": "2026-10-04T10:29:05.623266Z"
   },
-  "last_error": {
-    "task": "ERP-287",
-    "kind": "automatic_repair_pending",
-    "summary": "Path guard failed:\noutside allowed_paths: scripts/ai_queue_planner.py\noutside allowed_paths: tests/automation/test_queue_planner.py"
-  },
+  "last_error": null,
   "last_deepseek_fix": {
     "task": "ERP-287",
-    "attempts": 3,
-    "status": "retry_pending",
-    "at": "2026-10-04T10:28:27.412058Z"
+    "attempt": 2,
+    "model": "deepseek-v4-pro",
+    "started_at": "2026-10-04T10:28:29.244927Z"
   },
   "git_sync": {
     "branch": "main",
-    "local_sha": "ed01c68",
-    "status": "synced",
-    "ahead": 2,
+    "local_sha": "616d66d",
+    "status": "pending",
+    "ahead": 0,
     "behind": 0,
-    "last_attempt_at": "2026-10-04T09:33:07.932651Z",
+    "last_attempt_at": "2026-10-04T10:29:06.107552Z",
     "last_error": null
   },
-  "next_recommended_tasks": [
-    "ERP-287"
-  ],
+  "next_recommended_tasks": [],
   "runner": {
     "status": "stopped",
     "pid": null
-  },
-  "blocker": null,
-  "finish_reason": "deepseek_supervisor_recovery"
+  }
 }
