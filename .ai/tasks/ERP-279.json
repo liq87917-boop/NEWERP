@@ -1,0 +1,87 @@
+{
+  "id": "ERP-279",
+  "title": "Bound and paginate common report configuration collections",
+  "status": "pending",
+  "risk_level": "low",
+  "description": "Stage 1 common report platform query boundary and usable configuration management increment. Verified own configuration ListAsync, ListRevisionsAsync, ListGrantsAsync and ListSharedAsync materialize complete matching sets with ToListAsync; shared processing performs per-grant permission resolution after this unbounded read. Add bounded page contracts and shared scanning continuation in the existing Application EF query services, controller and common workspace. Not report-data paging, Stage 2 migration, bespoke report work, audit-only or UI styling. Existing IErpDbContext sets/entities/mappings suffice: no new persistent field/entity/DbSet/schema. Reuse current authenticated owner/recipient, active user, current dataset/menu/field/row/data scope, immutable shared pinned revisions and existing audit/error conventions. No grants expanded by a cursor or saved definition. No SQL/scripts, arbitrary joins, migrations, SchemaUpgrader/SeedData edits, production database execution, secrets/.env/config modifications, deployment, Agent or unrelated business modules. Preserve existing small-list clients via bounded wrappers, make overflow explicit. Maximum 200 candidate rows and permission checks per request, use cursor continuation without unbounded total count. Preserve unrelated work and unsaved designer edits; missing real SQL Server/browser tests are environment blocked.",
+  "acceptance_criteria": [
+    "Common own-configuration, revision-history, owner-grant and received-shared collections have validated bounded keyset paging, default 25 and maximum 100 visible items, stable unique ordering and safe continuation metadata. Apply identity/owner/recipient/deleted filters before SQL Take; bound candidate materialization and authorization checks to at most 200 per request with no unbounded Count/list query. Shared current-menu/field/dataset revalidation can remove candidates; advance continuation through scanned candidates so hidden/revoked records never leak or cause infinite empty pages.",
+    "Generic API and workspace use paged collection contracts for own/shared list, revisions and grants. Invalid/negative cursor or limit fails clearly, page navigation preserves designer edits and handles late responses, empty and permission-revoked pages. Preserve existing small-list contracts through bounded compatibility wrappers and reject legacy overflow explicitly rather than silently truncate or expose an unbounded fallback. Existing definition CRUD/publication/share semantics and audit remain unchanged.",
+    "Offline fixtures beyond 200 records cover ownership, inactive recipient, deletion/revocation, stable navigation without duplicates/omissions on a fixed fixture, shared empty-page continuation, bounded scan and cancellation, invalid cursor/limit and legacy overflow. Exercise API and meaningful workspace state behavior; focused tests and safe Release build/test pass. Missing real database/browser acceptance remains environment blocked and never implies Stage 1 complete."
+  ],
+  "criterion_path_map": {
+    "Common own-configuration, revision-history, owner-grant and received-shared collections have validated bounded keyset paging, default 25 and maximum 100 visible items, stable unique ordering and safe continuation metadata. Apply identity/owner/recipient/deleted filters before SQL Take; bound candidate materialization and authorization checks to at most 200 per request with no unbounded Count/list query. Shared current-menu/field/dataset revalidation can remove candidates; advance continuation through scanned candidates so hidden/revoked records never leak or cause infinite empty pages.": [
+      "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
+      "src/ERP.Application/Services/ReportConfigurationService.cs",
+      "src/ERP.Application/Services/ReportConfigurationSharingService.cs",
+      "src/ERP.Application/Interfaces/IReportConfigurationService.cs",
+      "src/ERP.Application/Interfaces/IReportConfigurationSharingService.cs",
+      "src/ERP.UnitTests/ReportConfigurationCollectionPagingTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationApiTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationPersistenceTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationVersionTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationSharingTests.cs"
+    ],
+    "Generic API and workspace use paged collection contracts for own/shared list, revisions and grants. Invalid/negative cursor or limit fails clearly, page navigation preserves designer edits and handles late responses, empty and permission-revoked pages. Preserve existing small-list contracts through bounded compatibility wrappers and reject legacy overflow explicitly rather than silently truncate or expose an unbounded fallback. Existing definition CRUD/publication/share semantics and audit remain unchanged.": [
+      "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
+      "src/ERP.Application/Services/ReportConfigurationService.cs",
+      "src/ERP.Application/Services/ReportConfigurationSharingService.cs",
+      "src/ERP.Application/Interfaces/IReportConfigurationService.cs",
+      "src/ERP.Application/Interfaces/IReportConfigurationSharingService.cs",
+      "src/ERP.Api/Controllers/ReportConfigurationsController.cs",
+      "src/ERP.Api/wwwroot/js/report-configuration.js",
+      "src/ERP.UnitTests/ReportConfigurationCollectionPagingTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationApiTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationUiTests.cs"
+    ],
+    "Offline fixtures beyond 200 records cover ownership, inactive recipient, deletion/revocation, stable navigation without duplicates/omissions on a fixed fixture, shared empty-page continuation, bounded scan and cancellation, invalid cursor/limit and legacy overflow. Exercise API and meaningful workspace state behavior; focused tests and safe Release build/test pass. Missing real database/browser acceptance remains environment blocked and never implies Stage 1 complete.": [
+      "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
+      "src/ERP.Application/Services/ReportConfigurationService.cs",
+      "src/ERP.Application/Services/ReportConfigurationSharingService.cs",
+      "src/ERP.Application/Interfaces/IReportConfigurationService.cs",
+      "src/ERP.Application/Interfaces/IReportConfigurationSharingService.cs",
+      "src/ERP.Api/Controllers/ReportConfigurationsController.cs",
+      "src/ERP.Api/wwwroot/js/report-configuration.js",
+      "src/ERP.UnitTests/ReportConfigurationCollectionPagingTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationApiTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationPersistenceTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationVersionTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationSharingTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationUiTests.cs"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
+    "src/ERP.Application/Services/ReportConfigurationService.cs",
+    "src/ERP.Application/Services/ReportConfigurationSharingService.cs",
+    "src/ERP.Application/Interfaces/IReportConfigurationService.cs",
+    "src/ERP.Application/Interfaces/IReportConfigurationSharingService.cs",
+    "src/ERP.Api/Controllers/ReportConfigurationsController.cs",
+    "src/ERP.Api/wwwroot/js/report-configuration.js",
+    "src/ERP.UnitTests/ReportConfigurationCollectionPagingTests.cs",
+    "src/ERP.UnitTests/ReportConfigurationApiTests.cs",
+    "src/ERP.UnitTests/ReportConfigurationPersistenceTests.cs",
+    "src/ERP.UnitTests/ReportConfigurationVersionTests.cs",
+    "src/ERP.UnitTests/ReportConfigurationSharingTests.cs",
+    "src/ERP.UnitTests/ReportConfigurationUiTests.cs"
+  ],
+  "depends_on": [
+    "ERP-278"
+  ],
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "human_gate": {
+    "required": false,
+    "status": "not_required",
+    "level": "L1"
+  },
+  "attempts": 0,
+  "created_at": "2026-10-04T02:29:20.591487Z"
+}

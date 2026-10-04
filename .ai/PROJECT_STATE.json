@@ -1,10 +1,12 @@
 {
   "schema_version": 2,
   "project": "NEWERP",
-  "updated_at": "2026-10-04T01:10:32.385337Z",
-  "phase": "remote_degraded",
+  "updated_at": "2026-10-04T02:29:20.592717Z",
+  "phase": "ready",
   "current_task": null,
-  "queue": [],
+  "queue": [
+    "ERP-279"
+  ],
   "completed": [
     "ERP-000",
     "ERP-001",
@@ -297,11 +299,13 @@
     "last_error": "push_failed",
     "task": "ERP-278"
   },
-  "next_recommended_tasks": [],
+  "next_recommended_tasks": [
+    "ERP-279"
+  ],
   "runner": {
     "status": "stopped",
     "pid": null
   },
   "blocker": null,
-  "finish_reason": "remote_sync_degraded"
+  "finish_reason": "task_queued"
 }
