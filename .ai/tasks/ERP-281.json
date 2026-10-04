@@ -1,0 +1,53 @@
+{
+  "id": "ERP-281",
+  "title": "Bootstrap common report persistence on existing ERP databases",
+  "status": "pending",
+  "description": "Stage 1 generic persistence runtime gap verified in code: EF EnsureCreated only creates an empty database; SchemaUpgrader currently has no ReportConfiguration bootstrap while existing ErpDbContext.Reporting already maps the three entities. User autonomous authorization permits this exact development bootstrap increment. Use existing Domain/Application contracts; no new model, business report, migration rollout or production execution. Depends on ERP-280 startup repair to prevent overlapping schema edits. Preserve existing data and concurrency semantics.",
+  "acceptance_criteria": [
+    "For an existing ERP database with legacy tables but absent common report tables, add idempotent startup bootstrap for db_owner.ReportConfigurations, ReportConfigurationRevisions and ReportConfigurationGrants. Match existing Domain properties and ErpDbContext.Reporting mappings exactly, including rowversion, defaults, keys, relationships and paging indexes. Preserve all existing tables and business data; rerunning startup must leave definitions, revisions and grants intact. Do not recreate databases, suppress errors or change existing Domain semantics.",
+    "On a dedicated exact (localdb)\\NEWERP_AutoAcceptance instance and NEWERP_AUTOTEST-prefixed database, reproduce existing-database bootstrap with only these report tables absent, then verify save/read, publication, pinned recipient sharing/revocation and stale-version rejection using the existing application services. Assert target identity before every destructive fixture setup; never use production fallback. Verify SQL column/index metadata and repeated bootstrap data preservation with offline mapping tests and filtered real SQL tests.",
+    "Run scheduler self-test/contracts, focused unit/SQL tests and safe Release build/test. Record exact commands, isolated target and genuine results; do not claim first-stage or browser acceptance. No production connection, deployment, migration execution outside isolated localdb, .env/appsettings changes, new report-specific endpoints, new datasets or Agent work."
+  ],
+  "criterion_path_map": {
+    "For an existing ERP database with legacy tables but absent common report tables, add idempotent startup bootstrap for db_owner.ReportConfigurations, ReportConfigurationRevisions and ReportConfigurationGrants. Match existing Domain properties and ErpDbContext.Reporting mappings exactly, including rowversion, defaults, keys, relationships and paging indexes. Preserve all existing tables and business data; rerunning startup must leave definitions, revisions and grants intact. Do not recreate databases, suppress errors or change existing Domain semantics.": [
+      "src/ERP.Infrastructure/Data/SchemaUpgrader.cs",
+      "src/ERP.UnitTests/DatabaseBootstrapMappingTests.cs"
+    ],
+    "On a dedicated exact (localdb)\\NEWERP_AutoAcceptance instance and NEWERP_AUTOTEST-prefixed database, reproduce existing-database bootstrap with only these report tables absent, then verify save/read, publication, pinned recipient sharing/revocation and stale-version rejection using the existing application services. Assert target identity before every destructive fixture setup; never use production fallback. Verify SQL column/index metadata and repeated bootstrap data preservation with offline mapping tests and filtered real SQL tests.": [
+      "src/ERP.Infrastructure/Data/SchemaUpgrader.cs",
+      "src/ERP.UnitTests/DatabaseBootstrapMappingTests.cs",
+      "src/ERP.IntegrationTests/ReportConfigurationExistingDatabaseTests.cs"
+    ],
+    "Run scheduler self-test/contracts, focused unit/SQL tests and safe Release build/test. Record exact commands, isolated target and genuine results; do not claim first-stage or browser acceptance. No production connection, deployment, migration execution outside isolated localdb, .env/appsettings changes, new report-specific endpoints, new datasets or Agent work.": [
+      "src/ERP.Infrastructure/Data/SchemaUpgrader.cs",
+      "src/ERP.UnitTests/DatabaseBootstrapMappingTests.cs",
+      "src/ERP.IntegrationTests/ReportConfigurationExistingDatabaseTests.cs"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Infrastructure/Data/SchemaUpgrader.cs",
+    "src/ERP.UnitTests/DatabaseBootstrapMappingTests.cs",
+    "src/ERP.IntegrationTests/ReportConfigurationExistingDatabaseTests.cs"
+  ],
+  "depends_on": [
+    "ERP-280"
+  ],
+  "risk": "medium",
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "max_attempts": 3,
+  "attempts": 0,
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required",
+    "reason": "User-authorized development repair, isolated test database only."
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-04T08:07:16.874574Z"
+}

@@ -2,7 +2,7 @@
   "id": "ERP-280",
   "title": "Make common report SQL persistence usable on an isolated fresh database",
   "status": "retry",
-  "description": "Stage 1 common report platform runtime persistence increment. A real dedicated localdb probe found fresh startup blocked by a legacy EF table-name mismatch in SchemaUpgrader, before report APIs are usable. User 2026-10-04 autonomous authorization permits this exact development-only bootstrap repair; it is not a bespoke business report or audit-only task. Modify only the named upgrade code and regression/integration tests. No production DB connection, arbitrary SQL, secrets/config/.env modifications, migrations, schema changes executed outside the isolated test instance, business writes outside test fixtures, Agent, deployment or stage-2 migration. Preserve all existing fields and permissions and do not suppress startup errors. Existing reporting Domain/Application/Infrastructure mappings require no changes. Localdb SQL Server 15.0.4382.1 has been created separately from MSSQLSERVER. Set test flags and connection only in child processes, include dedicated target guard, and retain ERP-190 completion and deferred ERP-257/258.",
+  "description": "Stage 1 common report platform runtime persistence increment. A real dedicated localdb probe found fresh startup blocked by a legacy EF table-name mismatch in SchemaUpgrader, before report APIs are usable. User 2026-10-04 autonomous authorization permits this exact development-only bootstrap repair; it is not a bespoke business report or audit-only task. Modify only the named upgrade code and regression/integration tests. No production DB connection, arbitrary SQL, secrets/config/.env modifications, migrations, schema changes executed outside the isolated test instance, business writes outside test fixtures, Agent, deployment or stage-2 migration. Preserve all existing fields and permissions and do not suppress startup errors. Existing reporting Domain/Application/Infrastructure mappings require no changes. Localdb SQL Server 15.0.4382.1 has been created separately from MSSQLSERVER. Set test flags and connection only in child processes, include dedicated target guard, and retain ERP-190 completion and deferred ERP-257/258. User 2026-10-04 autonomous repair authorization includes the exact existing ContainerShipmentTrackingTests regression file. Change its singular table assertions to the verified EF plural table; retain all tracking-column and no-historical-backfill checks. Do not add dead SQL/comments to satisfy stale assertions.",
   "acceptance_criteria": [
     "A fresh isolated SQL Server database can finish NEWERP startup so the common report configuration module is usable. Correct the proven SchemaUpgrader section 28 mismatch: EF maps db_owner.ContainerBookings but twelve COL_LENGTH/ALTER checks address nonexistent db_owner.ContainerBooking (SQL error 4902 at line 1406). Align the existing upgrade target with EF mapping without creating a duplicate singular table, moving entities, hiding exceptions, skipping upgrades wholesale, or changing business behavior. Verify rerun is idempotent.",
     "Add meaningful offline mapping/bootstrap regression coverage and dedicated SQL Server integration coverage for common report definition save/read, draft version update and published revision persistence with owner scope and unauthorized read rejection. Fixtures must assert a dedicated localdb NEWERP_AutoAcceptance instance and NEWERP_AUTOTEST-prefixed database before writes; use process-only test connection settings, never appsettings/.env or production credentials. Existing report entities/DbSets/mappings/services suffice; no new persistence model or business dataset.",
@@ -11,7 +11,8 @@
   "criterion_path_map": {
     "A fresh isolated SQL Server database can finish NEWERP startup so the common report configuration module is usable. Correct the proven SchemaUpgrader section 28 mismatch: EF maps db_owner.ContainerBookings but twelve COL_LENGTH/ALTER checks address nonexistent db_owner.ContainerBooking (SQL error 4902 at line 1406). Align the existing upgrade target with EF mapping without creating a duplicate singular table, moving entities, hiding exceptions, skipping upgrades wholesale, or changing business behavior. Verify rerun is idempotent.": [
       "src/ERP.Infrastructure/Data/SchemaUpgrader.cs",
-      "src/ERP.UnitTests/DatabaseBootstrapMappingTests.cs"
+      "src/ERP.UnitTests/DatabaseBootstrapMappingTests.cs",
+      "src/ERP.UnitTests/ContainerShipmentTrackingTests.cs"
     ],
     "Add meaningful offline mapping/bootstrap regression coverage and dedicated SQL Server integration coverage for common report definition save/read, draft version update and published revision persistence with owner scope and unauthorized read rejection. Fixtures must assert a dedicated localdb NEWERP_AutoAcceptance instance and NEWERP_AUTOTEST-prefixed database before writes; use process-only test connection settings, never appsettings/.env or production credentials. Existing report entities/DbSets/mappings/services suffice; no new persistence model or business dataset.": [
       "src/ERP.IntegrationTests/ReportConfigurationSqlServerTests.cs",
@@ -26,7 +27,8 @@
   "allowed_paths": [
     "src/ERP.Infrastructure/Data/SchemaUpgrader.cs",
     "src/ERP.UnitTests/DatabaseBootstrapMappingTests.cs",
-    "src/ERP.IntegrationTests/ReportConfigurationSqlServerTests.cs"
+    "src/ERP.IntegrationTests/ReportConfigurationSqlServerTests.cs",
+    "src/ERP.UnitTests/ContainerShipmentTrackingTests.cs"
   ],
   "depends_on": [
     "ERP-279",
@@ -58,12 +60,13 @@
       ".ai/tasks/ERP-280.json",
       "src/ERP.Infrastructure/Data/SchemaUpgrader.cs",
       "src/ERP.IntegrationTests/ReportConfigurationSqlServerTests.cs",
+      "src/ERP.UnitTests/ContainerShipmentTrackingTests.cs",
       "src/ERP.UnitTests/DatabaseBootstrapMappingTests.cs"
     ],
     "diff": ".ai\\logs\\ERP-280-preserved-work.diff",
-    "preserved_at": "2026-10-04T07:52:22.750024Z"
+    "preserved_at": "2026-10-04T08:07:16.061094Z"
   },
-  "failure_kind": "validation_failure",
+  "failure_kind": "path_guard_failure",
   "failed_transport_version": 2,
   "recovery_history": [
     {
@@ -143,44 +146,21 @@
   ],
   "supervised_recovery_cycles": 2,
   "recovery_context": {
-    "remediation_task": "ERP-280-RECOVERY-2",
-    "failure_kind": "validation_failure",
-    "summary": "Engineering validation failed with code 1. Full log: .ai\\logs\\ERP-280-validation-3.log\nStructured error summary:\n[validate] dotnet restore NEWERP.sln\n  正在确定要还原的项目…\n  所有项目均是最新的，无法还原。\n[validate] dotnet build NEWERP.sln -c Release --no-restore --no-incremental /p:TreatWarningsAsErrors=true /p:RunAnalyzersDuringBuild=true\n  ERP.Domain -> D:\\VSCodeProject\\NEWERP.executor.continue-erp-190-20260930080457\\src\\ERP.Domain\\bin\\Release\\net8.0\\ERP.Domain.dll\n  ERP.Application -> D:\\VSCodeProject\\NEWERP.executor.continue-erp-190-20260930080457\\src\\ERP.Application\\bin\\Release\\net8.0\\ERP.Application.dll\n  ERP.Infrastructure -> D:\\VSCodeProject\\NEWERP.executor.continue-erp-190-20260930080457\\src\\ERP.Infrastructure\\bin\\Release\\net8.0\\ERP.Infrastructure.dll\n  ERP.IntegrationTests -> D:\\VSCodeProject\\NEWERP.executor.continue-erp-190-20260930080457\\src\\ERP.IntegrationTests\\bin\\Release\\net8.0\\ERP.IntegrationTests.dll\n  ERP.Api -> D:\\VSCodeProject\\NEWERP.executor.continue-erp-190-20260930080457\\src\\ERP.Api\\bin\\Release\\net8.0\\ERP.Api.dll\n  ERP.UnitTests -> D:\\VSCodeProject\\NEWERP.executor.continue-erp-190-20260930080457\\src\\ERP.UnitTests\\bin\\Release\\net8.0\\ERP.UnitTests.dll\n已成功生成。\n    0 个警告\n    0 个错误\n已用时间 00:00:05.43\n有可用的工作负载更新。有关详细信息，请运行 `dotnet workload list`。\n[validate] dotnet test src/ERP.UnitTests/ERP.UnitTests.csproj -c Release --no-build --verbosity minimal\nD:\\VSCodeProject\\NEWERP.executor.continue-erp-190-20260930080457\\src\\ERP.UnitTests\\bin\\Release\\net8.0\\ERP.UnitTests.dll (.NETCoreApp,Version=v8.0)的测试运行\nVSTest 版本 17.11.0 (x64)\n正在启动测试执行，请稍候...\n总共 1 个测试文件与指定模式相匹配。\n[xUnit.net 00:00:09.03]     ERP.UnitTests.ContainerShipmentTrackingTests.SchemaUpgrader_订柜跟踪列幂等补齐且不回填历史数据 [FAIL]\n  失败 ERP.UnitTests.ContainerShipmentTrackingTests.SchemaUpgrader_订柜跟踪列幂等补齐且不回填历史数据 [8 ms]\n  错误消息:\n   Assert.Contains() Failure: Sub-string not found\nString:    \"using Microsoft.EntityFrameworkCore;\\r\\n\\r\\nn\"···\nNot found: \"IF COL_LENGTH('db_owner.ContainerBooking'\"···\n  堆栈跟踪:\n     at ERP.UnitTests.ContainerShipmentTrackingTests.SchemaUpgrader_订柜跟踪列幂等补齐且不回填历史数据() in D:\\VSCodeProject\\NEWERP.executor.continue-erp-190-20260930080457\\src\\ERP.UnitTests\\ContainerShipmentTrackingTests.cs:line 734\n   at System.RuntimeMethodHandle.InvokeMethod(Object target, Void** arguments, Signature sig, Boolean isConstructor)\n   at System.Reflection.MethodBaseInvoker.InvokeWithNoArgs(Object obj, BindingFlags invokeAttr)\n失败!  - 失败:     1，通过:  4442，已跳过:     0，总计:  4443，持续时间: 25 s - ERP.UnitTests.dll (net8.0)\n有可用的工作负载更新。有关详细信息，请运行 `dotnet workload list`。",
-    "result": ".ai\\results\\ERP-280.json",
-    "attempt_logs": [
-      ".ai/logs/ERP-280-attempt-1.jsonl",
-      ".ai/logs/ERP-280-attempt-2.jsonl",
-      ".ai/logs/ERP-280-attempt-3.jsonl"
+    "remediation_task": "ERP-280-SCOPE-REPAIR-1",
+    "summary": "Permission diagnosis complete: update existing schema tracking regression assertions to ContainerBookings, keeping all meaningful assertions. Actual SQL 5/5 previously passed; rerun full safe and SQL tests.",
+    "repair_allowed_paths": [
+      "src/ERP.UnitTests/ContainerShipmentTrackingTests.cs"
     ],
     "validation_logs": [
+      ".ai/logs/ERP-280-validation-1.log",
       ".ai/logs/ERP-280-validation-2.log",
       ".ai/logs/ERP-280-validation-3.log"
-    ],
-    "latest_state_error": {
-      "task": "ERP-280",
-      "kind": "automatic_repair_pending",
-      "summary": "Engineering validation failed with code 1. Full log: .ai\\logs\\ERP-280-validation-3.log\nStructured error summary:\n[validate] dotnet restore NEWERP.sln\n  正在确定要还原的项目…\n  所有项目均是最新的，无法还原。\n[validate] dotnet build NEWERP.sln -c Release --no-restore --no-incremental /p:TreatWarningsAsErrors=true /p:RunAnalyzersDuringBuild=true\n  ERP.Domain -> D:\\VSCodeProject\\NEWERP.executor.continue-erp-190-20260930080457\\src\\ERP.Domain\\bin\\Release\\net8.0\\ERP.Domain.dll\n  ERP.Application -> D:\\VSCodeProject\\NEWERP.executor.continue-erp-190-20260930080457\\src\\ERP.Application\\bin\\Release\\net8.0\\ERP.Application.dll\n  ERP.Infrastructure -> D:\\VSCodeProject\\NEWERP.executor.continue-erp-190-20260930080457\\src\\ERP.Infrastructure\\bin\\Release\\net8.0\\ERP.Infrastructure.dll\n  ERP.IntegrationTests -> D:\\VSCodeProject\\NEWERP.executor.continue-erp-190-20260930080457\\src\\ERP.IntegrationTests\\bin\\Release\\net8.0\\ERP.IntegrationTests.dll\n  ERP.Api -> D:\\VSCodeProject\\NEWERP.executor.continue-erp-190-20260930080457\\src\\ERP.Api\\bin\\Release\\net8.0\\ERP.Api.dll\n  ERP.UnitTests -> D:\\VSCodeProject\\NEWERP.executor.continue-erp-190-20260930080457\\src\\ERP.UnitTests\\bin\\Release\\net8.0\\ERP.UnitTests.dll\n已成功生成。\n    0 个警告\n    0 个错误\n已用时间 00:00:05.43\n有可用的工作负载更新。有关详细信息，请运行 `dotnet workload list`。\n[validate] dotnet test src/ERP.UnitTests/ERP.UnitTests.csproj -c Release --no-build --verbosity minimal\nD:\\VSCodeProject\\NEWERP.executor.continue-erp-190-20260930080457\\src\\ERP.UnitTests\\bin\\Release\\net8.0\\ERP.UnitTests.dll (.NETCoreApp,Version=v8.0)的测试运行\nVSTest 版本 17.11.0 (x64)\n正在启动测试执行，请稍候...\n总共 1 个测试文件与指定模式相匹配。\n[xUnit.net 00:00:09.03]     ERP.UnitTests.ContainerShipmentTrackingTests.SchemaUpgrader_订柜跟踪列幂等补齐且不回填历史数据 [FAIL]\n  失败 ERP.UnitTests.ContainerShipmentTrackingTests.SchemaUpgrader_订柜跟踪列幂等补齐且不回填历史数据 [8 ms]\n  错误消息:\n   Assert.Contains() Failure: Sub-string not found\nString:    \"using Microsoft.EntityFrameworkCore;\\r\\n\\r\\nn\"···\nNot found: \"IF COL_LENGTH('db_owner.ContainerBooking'\"···\n  堆栈跟踪:\n     at ERP.UnitTests.ContainerShipmentTrackingTests.SchemaUpgrader_订柜跟踪列幂等补齐且不回填历史数据() in D:\\VSCodeProject\\NEWERP.executor.continue-erp-190-20260930080457\\src\\ERP.UnitTests\\ContainerShipmentTrackingTests.cs:line 734\n   at System.RuntimeMethodHandle.InvokeMethod(Object target, Void** arguments, Signature sig, Boolean isConstructor)\n   at System.Reflection.MethodBaseInvoker.InvokeWithNoArgs(Object obj, BindingFlags invokeAttr)\n失败!  - 失败:     1，通过:  4442，已跳过:     0，总计:  4443，持续时间: 25 s - ERP.UnitTests.dll (net8.0)\n有可用的工作负载更新。有关详细信息，请运行 `dotnet workload list`。"
-    },
-    "latest_build": {
-      "task": "ERP-280",
-      "profile": "safe",
-      "status": "failed",
-      "exit_code": 1,
-      "log": ".ai\\logs\\ERP-280-validation-3.log",
-      "at": "2026-10-04T07:52:22.431696Z"
-    },
-    "task_context": ".ai\\tasks\\ERP-280.json",
-    "changed_paths": [
-      ".ai/PROJECT_STATE.json",
-      ".ai/results/ERP-280.json",
-      ".ai/tasks/ERP-280.json",
-      "src/ERP.Infrastructure/Data/SchemaUpgrader.cs",
-      "src/ERP.IntegrationTests/ReportConfigurationSqlServerTests.cs",
-      "src/ERP.UnitTests/DatabaseBootstrapMappingTests.cs"
-    ],
-    "diff": ".ai\\logs\\ERP-280-preserved-work.diff",
-    "execution_copy": "D:\\VSCodeProject\\NEWERP.executor.continue-erp-190-20260930080457",
-    "repair_allowed_paths": [],
-    "instruction": "DeepSeek supervisor recovery: inspect the referenced complete logs, diagnose the root cause, and implement a different safe repair within allowed_paths. Rebuild and rerun the configured tests; if validation fails, use the newest log as the next repair input. Do not repeat the failed approach. Do not edit task/state/result files or relax production and irreversible-operation gates. "
+    ]
+  },
+  "user_authorized_scope_repair": {
+    "id": "ERP-280-SCOPE-REPAIR-1",
+    "at": "2026-10-04T08:07:16.852475Z",
+    "path": "src/ERP.UnitTests/ContainerShipmentTrackingTests.cs",
+    "reason": "Full safe validation proves stale singular name assertion contradicts verified SQL fix; bounded recovery cycles remain unchanged."
   }
 }
