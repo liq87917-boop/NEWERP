@@ -1,8 +1,8 @@
 {
   "schema_version": 2,
   "project": "NEWERP",
-  "updated_at": "2026-10-04T06:53:58.533031Z",
-  "phase": "remote_degraded",
+  "updated_at": "2026-10-04T07:22:56.194556Z",
+  "phase": "ready",
   "current_task": null,
   "queue": [],
   "completed": [
@@ -297,5 +297,5 @@
     "pid": null
   },
   "blocker": null,
-  "finish_reason": "remote_sync_degraded"
+  "finish_reason": "task_queued"
 }
