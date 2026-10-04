@@ -58,11 +58,42 @@ public class ReportConfigurationsController : ControllerBase
         throw new BusinessException("无法获取当前用户信息", ErrorCodes.Unauthorized);
     }
 
+    /// <summary>
+    /// 在请求生命周期内执行报表配置操作：把 <see cref="HttpContext.RequestAborted"/> 原样传给既有应用接口，
+    /// 并把「调用方取消」统一转换为受控的「已取消」业务异常（1007）。绝不包装成会丢弃仍在提交的写操作的超时助手，
+    /// 也绝不把已经提交的事务谎称为已回滚。
+    /// </summary>
+    private async Task<T> WithRequestCancellationAsync<T>(Func<CancellationToken, Task<T>> work)
+    {
+        var token = HttpContext?.RequestAborted ?? CancellationToken.None;
+        try
+        {
+            return await work(token);
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested)
+        {
+            throw new BusinessException("报表配置操作已取消", ReportConfigurationExecutionLimits.ErrorCodeCancelled);
+        }
+    }
+
+    private async Task WithRequestCancellationAsync(Func<CancellationToken, Task> work)
+    {
+        var token = HttpContext?.RequestAborted ?? CancellationToken.None;
+        try
+        {
+            await work(token);
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested)
+        {
+            throw new BusinessException("报表配置操作已取消", ReportConfigurationExecutionLimits.ErrorCodeCancelled);
+        }
+    }
+
     /// <summary>数据集目录（有限、只读；仅当前账号已授权数据集）</summary>
     [HttpGet("catalog")]
     public async Task<IActionResult> Catalog()
     {
-        var catalog = await _catalog.GetCatalogAsync(CurrentUserId());
+        var catalog = await WithRequestCancellationAsync(ct => _catalog.GetCatalogAsync(CurrentUserId(), ct));
         return Ok(ApiResponse<ReportConfigurationCatalogDto>.Success(catalog));
     }
 
@@ -70,7 +101,7 @@ public class ReportConfigurationsController : ControllerBase
     [HttpGet]
     public async Task<IActionResult> List([FromQuery] int? limit, [FromQuery] string? cursor)
     {
-        var result = await _service.ListPageAsync(CurrentUserId(), limit, cursor);
+        var result = await WithRequestCancellationAsync(ct => _service.ListPageAsync(CurrentUserId(), limit, cursor, ct));
         return Ok(ApiResponse<ReportConfigurationPage<ReportConfigurationSummaryDto>>.Success(result));
     }
 
@@ -78,7 +109,7 @@ public class ReportConfigurationsController : ControllerBase
     [HttpGet("{id:long}")]
     public async Task<IActionResult> Get(long id)
     {
-        var result = await _service.GetAsync(CurrentUserId(), id);
+        var result = await WithRequestCancellationAsync(ct => _service.GetAsync(CurrentUserId(), id, ct));
         return Ok(ApiResponse<ReportConfigurationDto>.Success(result));
     }
 
@@ -87,7 +118,7 @@ public class ReportConfigurationsController : ControllerBase
     public async Task<IActionResult> Create([FromBody] ReportConfigurationSaveDto dto)
     {
         ArgumentNullException.ThrowIfNull(dto);
-        var result = await _service.CreateAsync(CurrentUserId(), dto);
+        var result = await WithRequestCancellationAsync(ct => _service.CreateAsync(CurrentUserId(), dto, ct));
         return Ok(ApiResponse<ReportConfigurationDto>.Success(result, "保存成功"));
     }
 
@@ -96,7 +127,7 @@ public class ReportConfigurationsController : ControllerBase
     public async Task<IActionResult> Update(long id, [FromQuery] int version, [FromBody] ReportConfigurationSaveDto dto)
     {
         ArgumentNullException.ThrowIfNull(dto);
-        var result = await _service.UpdateAsync(CurrentUserId(), id, version, dto);
+        var result = await WithRequestCancellationAsync(ct => _service.UpdateAsync(CurrentUserId(), id, version, dto, ct));
         return Ok(ApiResponse<ReportConfigurationDto>.Success(result, "更新成功"));
     }
 
@@ -105,7 +136,7 @@ public class ReportConfigurationsController : ControllerBase
     public async Task<IActionResult> Rename(long id, [FromQuery] int version, [FromBody] ReportConfigurationRenameDto dto)
     {
         ArgumentNullException.ThrowIfNull(dto);
-        var result = await _service.RenameAsync(CurrentUserId(), id, version, dto.Name);
+        var result = await WithRequestCancellationAsync(ct => _service.RenameAsync(CurrentUserId(), id, version, dto.Name, ct));
         return Ok(ApiResponse<ReportConfigurationDto>.Success(result, "重命名成功"));
     }
 
@@ -113,7 +144,7 @@ public class ReportConfigurationsController : ControllerBase
     [HttpPost("{id:long}/copy")]
     public async Task<IActionResult> Copy(long id)
     {
-        var result = await _service.CopyAsync(CurrentUserId(), id);
+        var result = await WithRequestCancellationAsync(ct => _service.CopyAsync(CurrentUserId(), id, ct));
         return Ok(ApiResponse<ReportConfigurationDto>.Success(result, "复制成功"));
     }
 
@@ -121,7 +152,7 @@ public class ReportConfigurationsController : ControllerBase
     [HttpDelete("{id:long}")]
     public async Task<IActionResult> Delete(long id, [FromQuery] int version)
     {
-        await _service.DeleteAsync(CurrentUserId(), id, version);
+        await WithRequestCancellationAsync(ct => _service.DeleteAsync(CurrentUserId(), id, version, ct));
         return Ok(ApiResponse<object>.Success(null, "删除成功"));
     }
 
@@ -129,7 +160,7 @@ public class ReportConfigurationsController : ControllerBase
     [HttpPost("{id:long}/publish")]
     public async Task<IActionResult> Publish(long id, [FromQuery] int version)
     {
-        var result = await _service.PublishAsync(CurrentUserId(), id, version);
+        var result = await WithRequestCancellationAsync(ct => _service.PublishAsync(CurrentUserId(), id, version, ct));
         return Ok(ApiResponse<ReportConfigurationDto>.Success(result, "发布成功"));
     }
 
@@ -137,7 +168,7 @@ public class ReportConfigurationsController : ControllerBase
     [HttpPost("{id:long}/restore")]
     public async Task<IActionResult> Restore(long id, [FromQuery] int version, [FromQuery] int revisionVersion)
     {
-        var result = await _service.RestoreAsync(CurrentUserId(), id, version, revisionVersion);
+        var result = await WithRequestCancellationAsync(ct => _service.RestoreAsync(CurrentUserId(), id, version, revisionVersion, ct));
         return Ok(ApiResponse<ReportConfigurationDto>.Success(result, "恢复成功"));
     }
 
@@ -145,7 +176,7 @@ public class ReportConfigurationsController : ControllerBase
     [HttpGet("{id:long}/revisions")]
     public async Task<IActionResult> Revisions(long id, [FromQuery] int? limit, [FromQuery] string? cursor)
     {
-        var result = await _service.ListRevisionsPageAsync(CurrentUserId(), id, limit, cursor);
+        var result = await WithRequestCancellationAsync(ct => _service.ListRevisionsPageAsync(CurrentUserId(), id, limit, cursor, ct));
         return Ok(ApiResponse<ReportConfigurationPage<ReportConfigurationRevisionDto>>.Success(result));
     }
 
@@ -153,7 +184,7 @@ public class ReportConfigurationsController : ControllerBase
     [HttpGet("{id:long}/grants")]
     public async Task<IActionResult> Grants(long id, [FromQuery] int? limit, [FromQuery] string? cursor)
     {
-        var result = await _sharing.ListGrantsPageAsync(CurrentUserId(), id, limit, cursor);
+        var result = await WithRequestCancellationAsync(ct => _sharing.ListGrantsPageAsync(CurrentUserId(), id, limit, cursor, ct));
         return Ok(ApiResponse<ReportConfigurationPage<ReportConfigurationGrantDto>>.Success(result));
     }
 
@@ -162,7 +193,7 @@ public class ReportConfigurationsController : ControllerBase
     public async Task<IActionResult> Grant(long id, [FromBody] ReportConfigurationGrantRequestDto request)
     {
         ArgumentNullException.ThrowIfNull(request);
-        var result = await _sharing.GrantAsync(CurrentUserId(), id, request);
+        var result = await WithRequestCancellationAsync(ct => _sharing.GrantAsync(CurrentUserId(), id, request, ct));
         return Ok(ApiResponse<ReportConfigurationGrantDto>.Success(result, "授权成功"));
     }
 
@@ -170,7 +201,7 @@ public class ReportConfigurationsController : ControllerBase
     [HttpDelete("{id:long}/grants/{recipientUserId:long}")]
     public async Task<IActionResult> Revoke(long id, long recipientUserId, [FromQuery] int version)
     {
-        await _sharing.RevokeAsync(CurrentUserId(), id, recipientUserId, version);
+        await WithRequestCancellationAsync(ct => _sharing.RevokeAsync(CurrentUserId(), id, recipientUserId, version, ct));
         return Ok(ApiResponse<object>.Success(null, "撤销授权成功"));
     }
 
@@ -178,7 +209,7 @@ public class ReportConfigurationsController : ControllerBase
     [HttpGet("shared")]
     public async Task<IActionResult> Shared([FromQuery] int? limit, [FromQuery] string? cursor)
     {
-        var result = await _sharing.ListSharedPageAsync(CurrentUserId(), limit, cursor);
+        var result = await WithRequestCancellationAsync(ct => _sharing.ListSharedPageAsync(CurrentUserId(), limit, cursor, ct));
         return Ok(ApiResponse<ReportConfigurationPage<ReportConfigurationSharedSummaryDto>>.Success(result));
     }
 
@@ -186,7 +217,7 @@ public class ReportConfigurationsController : ControllerBase
     [HttpGet("shared/{configurationId:long}")]
     public async Task<IActionResult> SharedDetail(long configurationId)
     {
-        var result = await _sharing.GetSharedAsync(CurrentUserId(), configurationId);
+        var result = await WithRequestCancellationAsync(ct => _sharing.GetSharedAsync(CurrentUserId(), configurationId, ct));
         return Ok(ApiResponse<ReportConfigurationSharedDetailDto>.Success(result));
     }
 
@@ -194,7 +225,7 @@ public class ReportConfigurationsController : ControllerBase
     [HttpPost("shared/{configurationId:long}/copy")]
     public async Task<IActionResult> CopyShared(long configurationId)
     {
-        var result = await _sharing.CopySharedAsync(CurrentUserId(), configurationId);
+        var result = await WithRequestCancellationAsync(ct => _sharing.CopySharedAsync(CurrentUserId(), configurationId, ct));
         return Ok(ApiResponse<ReportConfigurationDto>.Success(result, "复制成功"));
     }
 
@@ -209,7 +240,7 @@ public class ReportConfigurationsController : ControllerBase
         ArgumentNullException.ThrowIfNull(request);
         var transfer = _transfer
             ?? throw new BusinessException("报表配置传输服务未初始化", ErrorCodes.InternalError);
-        var result = await transfer.ExportAsync(CurrentUserId(), request);
+        var result = await WithRequestCancellationAsync(ct => transfer.ExportAsync(CurrentUserId(), request, ct));
         return Ok(ApiResponse<ReportConfigurationTransferEnvelopeDto>.Success(result));
     }
 
@@ -222,7 +253,7 @@ public class ReportConfigurationsController : ControllerBase
         ArgumentNullException.ThrowIfNull(request);
         var transfer = _transfer
             ?? throw new BusinessException("报表配置传输服务未初始化", ErrorCodes.InternalError);
-        var result = await transfer.ImportAsync(CurrentUserId(), request);
+        var result = await WithRequestCancellationAsync(ct => transfer.ImportAsync(CurrentUserId(), request, ct));
         return Ok(ApiResponse<ReportConfigurationDto>.Success(result, "导入成功"));
     }
 
@@ -302,7 +333,7 @@ public class ReportConfigurationsController : ControllerBase
         catch (OperationCanceledException)
         {
             LogExport(userId, request, null, exportKind, ReportConfigurationExecutionOutcomes.Cancelled, stopwatch.ElapsedMilliseconds);
-            throw;
+            throw new BusinessException("报表导出已取消", ReportConfigurationExecutionLimits.ErrorCodeCancelled);
         }
         catch (Exception)
         {
