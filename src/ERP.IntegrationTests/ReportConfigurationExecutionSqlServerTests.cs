@@ -630,7 +630,8 @@ public sealed class ReportConfigurationExecutionSqlServerFixture : IAsyncLifetim
         var server = builder.DataSource ?? string.Empty;
         var database = builder.InitialCatalog ?? string.Empty;
 
-        Assert.Contains(InstanceMarker, server, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal($"(localdb)\\{InstanceMarker}", server, ignoreCase: true);
+        Assert.True(builder.IntegratedSecurity);
         Assert.StartsWith(DatabasePrefix, database, StringComparison.OrdinalIgnoreCase);
     }
 }
