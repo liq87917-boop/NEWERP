@@ -1,0 +1,51 @@
+{
+  "title": "Prove generic receivable report grouping/currency-partition and matched-set snapshot parity with nonempty isolated SQL data",
+  "description": "Stage-1 genuine database validation gap. The receivable dataset path (ReceivableReportConfigurationDatasetProvider -> DynamicReceivableReportQuery -> CustomerReceivableReconciliationService) is only exercised offline in-memory; with an empty isolated database its nonempty per-currency group subtotals, aggregation and the matched-set consistent-read snapshot (OpenReadSnapshotAsync/RenderMatchedPage) are unproven. Implement a self-contained receivable fixture (activated customers + non-deleted invoices/receipts reconciliation evidence) on the dedicated isolated localdb and drive both the current-page preview and matched-set coverage snapshot, asserting nonempty rows, per-currency subtotals (gross / effective allocated / remaining amount and remaining state) and stable pagination. No production data, arbitrary SQL, secrets/.env changes, permission expansion or schema change; no SeedData*.cs / SchemaUpgrader.cs edits.",
+  "acceptance_criteria": [
+    "A self-contained fixture seeds activated customers and non-deleted receivable/invoice reconciliation evidence into the dedicated (localdb)\\NEWERP_AutoAcceptance / NEWERP_AUTOTEST-prefixed database with target identity asserted before writes and process-only connection settings; re-seeding is idempotent and never touches SeedData*.cs or SchemaUpgrader.cs.",
+    "The generic receivable preview with nonempty data returns the expected rows and per-currency group subtotals (gross / effective allocated / remaining amount and remaining state) equal to the offline grouping fixtures, and grouping/aggregation never top-N fakes a full matched set.",
+    "Matched-set coverage opens the bounded consistent read snapshot and renders the selected page plus full-fact summary from the same snapshot (≤1000), with columns/rows bounded; run focused SQL tests, safe Release build/test and scheduler self-test/contracts. Do not claim full stage-1 or real-browser acceptance."
+  ],
+  "allowed_paths": [
+    "src/ERP.IntegrationTests/ReportConfigurationReceivableSqlServerTests.cs",
+    "src/ERP.UnitTests/ReportConfigurationGroupingTests.cs",
+    "src/ERP.UnitTests/ReportConfigurationMatchedSummaryTests.cs"
+  ],
+  "criterion_path_map": {
+    "A self-contained fixture seeds activated customers and non-deleted receivable/invoice reconciliation evidence into the dedicated (localdb)\\NEWERP_AutoAcceptance / NEWERP_AUTOTEST-prefixed database with target identity asserted before writes and process-only connection settings; re-seeding is idempotent and never touches SeedData*.cs or SchemaUpgrader.cs.": [
+      "src/ERP.IntegrationTests/ReportConfigurationReceivableSqlServerTests.cs"
+    ],
+    "The generic receivable preview with nonempty data returns the expected rows and per-currency group subtotals (gross / effective allocated / remaining amount and remaining state) equal to the offline grouping fixtures, and grouping/aggregation never top-N fakes a full matched set.": [
+      "src/ERP.IntegrationTests/ReportConfigurationReceivableSqlServerTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationGroupingTests.cs"
+    ],
+    "Matched-set coverage opens the bounded consistent read snapshot and renders the selected page plus full-fact summary from the same snapshot (≤1000), with columns/rows bounded; run focused SQL tests, safe Release build/test and scheduler self-test/contracts. Do not claim full stage-1 or real-browser acceptance.": [
+      "src/ERP.IntegrationTests/ReportConfigurationReceivableSqlServerTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationMatchedSummaryTests.cs"
+    ]
+  },
+  "depends_on": [
+    "ERP-286"
+  ],
+  "risk": "medium",
+  "planning_stage": 1,
+  "implementation_evidence": "src/ERP.Infrastructure/Reports/ReportConfigurationDatasetProvider.cs receivable provider PreviewAsync (lines ~872-971) and OpenReadSnapshotAsync/RenderMatchedPage (lines ~1190-1310) build currency-partitioned subtotals and the Serializable matched-set snapshot but have no real-SQL test driving them with nonempty rows; .ai/logs/report-stage1-browser-20261004T0917.json 'remaining' lists 'nonempty SQL data/permission/export'; .ai/logs/stage1-followup-planning-20261004T0847.json records 'Real HTTP fixture had zero rows: nonempty SQL preview ... remain unverified'.",
+  "id": "ERP-288",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-04T10:19:00.251319Z"
+}

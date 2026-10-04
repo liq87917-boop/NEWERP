@@ -1,0 +1,53 @@
+{
+  "title": "Prove Excel/PDF export with nonempty rows and current-user scope on isolated SQL",
+  "description": "Stage-1 genuine database validation gap. Export endpoints passed HTTP acceptance only with zero rows (Excel 6042 bytes, PDF 69137 bytes), so nonempty cell rendering, current-user data scope, numeric sign preservation and formula-injection escaping on real text are unproven. Implement a self-contained fixture with customers and non-deleted sales orders (including text cells with leading formula-like characters and signed amounts) on the dedicated isolated localdb, drive Excel and PDF export through the existing export path (ReportConfigurationExcelExporter / ReportConfigurationPdfExporter) and assert nonempty cell values, current-user scoped rows, numeric sign preservation and injection-escaped text. No production data, arbitrary SQL, secrets/.env changes, permission expansion or schema change; no SeedData*.cs / SchemaUpgrader.cs edits.",
+  "acceptance_criteria": [
+    "A self-contained fixture seeds activated customers and non-deleted sales orders (including text values with leading formula-like characters and signed amounts) on the dedicated (localdb)\\NEWERP_AutoAcceptance / NEWERP_AUTOTEST-prefixed database with target identity asserted before writes; process-only settings, idempotent, never touching SeedData*.cs or SchemaUpgrader.cs.",
+    "Excel export with nonempty rows writes the selected nonempty cell values with numeric sign preserved and text escaped against formula injection; PDF export renders nonempty rows with the same bounded preview pipeline (columns/rows bounded, current-user scope applied, read-only).",
+    "Exports reflect the current user's data scope (never the owner's full set when scoped) and never return stale downloads after revocation; run focused SQL tests, safe Release build/test and scheduler self-test/contracts. Do not claim full stage-1 or real-browser acceptance."
+  ],
+  "allowed_paths": [
+    "src/ERP.IntegrationTests/ReportConfigurationExportSqlServerTests.cs",
+    "src/ERP.UnitTests/ReportConfigurationExcelTests.cs",
+    "src/ERP.UnitTests/ReportConfigurationPdfTests.cs"
+  ],
+  "criterion_path_map": {
+    "A self-contained fixture seeds activated customers and non-deleted sales orders (including text values with leading formula-like characters and signed amounts) on the dedicated (localdb)\\NEWERP_AutoAcceptance / NEWERP_AUTOTEST-prefixed database with target identity asserted before writes; process-only settings, idempotent, never touching SeedData*.cs or SchemaUpgrader.cs.": [
+      "src/ERP.IntegrationTests/ReportConfigurationExportSqlServerTests.cs"
+    ],
+    "Excel export with nonempty rows writes the selected nonempty cell values with numeric sign preserved and text escaped against formula injection; PDF export renders nonempty rows with the same bounded preview pipeline (columns/rows bounded, current-user scope applied, read-only).": [
+      "src/ERP.IntegrationTests/ReportConfigurationExportSqlServerTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationExcelTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationPdfTests.cs"
+    ],
+    "Exports reflect the current user's data scope (never the owner's full set when scoped) and never return stale downloads after revocation; run focused SQL tests, safe Release build/test and scheduler self-test/contracts. Do not claim full stage-1 or real-browser acceptance.": [
+      "src/ERP.IntegrationTests/ReportConfigurationExportSqlServerTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationExcelTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationPdfTests.cs"
+    ]
+  },
+  "depends_on": [
+    "ERP-286"
+  ],
+  "risk": "medium",
+  "planning_stage": 1,
+  "implementation_evidence": ".ai/logs/report-platform-http-acceptance-20261004T0847.json records export bytes 6042 (xlsx) and 69137 (pdf) for preview rows=0, so nonempty export parity is unproven; src/ERP.Api/Controllers/ReportConfigurationsController.cs Export/ExportPdf (lines ~295-316) and RenderExcel/RenderPdf (lines ~363-405) drive ReportConfigurationExcelExporter/ReportConfigurationPdfExporter with no real-SQL test asserting nonempty cells or scoped exports.",
+  "id": "ERP-290",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-04T10:19:00.253264Z"
+}

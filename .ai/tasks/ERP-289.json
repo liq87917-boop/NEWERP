@@ -1,0 +1,50 @@
+{
+  "title": "Prove shared-report recipient preview and recipient data-scope with nonempty isolated SQL data",
+  "description": "Stage-1 genuine database validation gap. Sharing persistence (grant/revoke/pin) is SQL-tested but the recipient read path (ReportConfigurationExecutionService.PreviewSharedAsync -> pinned revision) is never driven with nonempty data on real SQL, so pinned-revision fidelity and recipient (not owner) data-scope are unproven. Implement a self-contained fixture with an owner, a second activated recipient with restricted salesperson data scope, customers and non-deleted sales orders on the dedicated isolated localdb, publish a revision, grant it, then preview as the recipient and assert only the pinned snapshot rows and only the recipient's allowed customers are returned; revocation converges to fail-closed. No production data, arbitrary SQL, secrets/.env changes, permission expansion or schema change; no SeedData*.cs / SchemaUpgrader.cs edits.",
+  "acceptance_criteria": [
+    "A self-contained fixture seeds an owner, a second activated recipient with restricted salesperson data scope, customers and non-deleted sales orders on the dedicated (localdb)\\NEWERP_AutoAcceptance / NEWERP_AUTOTEST-prefixed database with target identity asserted before writes; process-only connection settings, idempotent, never touching SeedData*.cs or SchemaUpgrader.cs.",
+    "Recipient preview resolves the fixed published revision (ignoring client RevisionVersion and never exposing draft/other revisions), returns the pinned nonempty rows, and applies the recipient's (not owner's) salesperson data scope; owner-only grant/revoke concurrency semantics are preserved.",
+    "After revocation the recipient preview fails closed (as not found) and no stale rows leak; run focused SQL tests, safe Release build/test and scheduler self-test/contracts. Do not claim full stage-1 or real-browser acceptance."
+  ],
+  "allowed_paths": [
+    "src/ERP.IntegrationTests/ReportConfigurationSharingSqlServerTests.cs",
+    "src/ERP.UnitTests/ReportConfigurationSharingTests.cs"
+  ],
+  "criterion_path_map": {
+    "A self-contained fixture seeds an owner, a second activated recipient with restricted salesperson data scope, customers and non-deleted sales orders on the dedicated (localdb)\\NEWERP_AutoAcceptance / NEWERP_AUTOTEST-prefixed database with target identity asserted before writes; process-only connection settings, idempotent, never touching SeedData*.cs or SchemaUpgrader.cs.": [
+      "src/ERP.IntegrationTests/ReportConfigurationSharingSqlServerTests.cs"
+    ],
+    "Recipient preview resolves the fixed published revision (ignoring client RevisionVersion and never exposing draft/other revisions), returns the pinned nonempty rows, and applies the recipient's (not owner's) salesperson data scope; owner-only grant/revoke concurrency semantics are preserved.": [
+      "src/ERP.IntegrationTests/ReportConfigurationSharingSqlServerTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationSharingTests.cs"
+    ],
+    "After revocation the recipient preview fails closed (as not found) and no stale rows leak; run focused SQL tests, safe Release build/test and scheduler self-test/contracts. Do not claim full stage-1 or real-browser acceptance.": [
+      "src/ERP.IntegrationTests/ReportConfigurationSharingSqlServerTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationSharingTests.cs"
+    ]
+  },
+  "depends_on": [
+    "ERP-286"
+  ],
+  "risk": "medium",
+  "planning_stage": 1,
+  "implementation_evidence": "src/ERP.Application/Services/ReportConfigurationExecutionService.cs:180-181 and PreviewSharedAsync (lines ~300-329) resolve the shared pinned revision and re-apply recipient identity, but no real-SQL test drives it with nonempty data or a scoped recipient; .ai/logs/stage1-followup-planning-20261004T0847.json records 'permissions, sharing and browser remain unverified'; .ai/logs/report-platform-browser-acceptance-20261004T1000.json 'limitation' records zero-row smoke does not prove data-scope.",
+  "id": "ERP-289",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-04T10:19:00.252361Z"
+}
