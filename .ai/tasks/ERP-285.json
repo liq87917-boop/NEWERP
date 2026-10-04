@@ -1,0 +1,60 @@
+{
+  "id": "ERP-285",
+  "title": "Bound generic report request bodies before model binding",
+  "status": "pending",
+  "description": "Stage 1 query/resource boundary gap verified in code: ReportConfigurationRules.MaxSerializedBytes limits normalized definitions only after binding, while the generic controller has no request size ceiling. Implement generic transport rejection, not a new business report. Existing Domain/Application models suffice; no persistence/schema changes or unrelated API changes. Preserve concurrent work, production boundaries and ERP permissions. Test only dedicated NEWERP_AutoAcceptance localdb target through process-only settings; no production, secrets/.env or deployment.",
+  "acceptance_criteria": [
+    "Enforce a documented 512 KiB UTF-8 wire-body ceiling before JSON model binding for generic reporting POST/PUT routes, independent of Content-Length, including chunked input. Existing normalized 64 KiB definition limit remains separately enforced. Legitimate bounded create/update/import requests must remain accepted. Do not read an unbounded request into memory to implement the ceiling; use ASP.NET request limits and preserve authentication, current-user data scope, version checks and cancellation.",
+    "Return a bounded controlled 413 response for oversized report requests and a clear workspace input-too-large message; no echo of user payload, SQL or secrets and no persistence/preview/export work after rejection. Scope exception mapping to the report module; preserve unrelated middleware behavior and audit rejection rather than success. The wire limit must cover transfer envelope escaping and normal wrapper overhead without silently truncating definitions.",
+    "Add meaningful regression coverage for body limits on every reporting POST/PUT action family, normal boundary input, unknown-length body rejection, controlled module error mapping and client failure state. Run safe Release build/test, focused tests and scheduler self-test/contracts. Run actual HTTP oversized-body checks on the isolated local test API after its validated build is available; record genuine results and retain incomplete real browser/phase acceptance markers."
+  ],
+  "criterion_path_map": {
+    "Enforce a documented 512 KiB UTF-8 wire-body ceiling before JSON model binding for generic reporting POST/PUT routes, independent of Content-Length, including chunked input. Existing normalized 64 KiB definition limit remains separately enforced. Legitimate bounded create/update/import requests must remain accepted. Do not read an unbounded request into memory to implement the ceiling; use ASP.NET request limits and preserve authentication, current-user data scope, version checks and cancellation.": [
+      "src/ERP.Api/Controllers/ReportConfigurationsController.cs",
+      "src/ERP.UnitTests/ReportConfigurationWireBodyTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationApiTests.cs"
+    ],
+    "Return a bounded controlled 413 response for oversized report requests and a clear workspace input-too-large message; no echo of user payload, SQL or secrets and no persistence/preview/export work after rejection. Scope exception mapping to the report module; preserve unrelated middleware behavior and audit rejection rather than success. The wire limit must cover transfer envelope escaping and normal wrapper overhead without silently truncating definitions.": [
+      "src/ERP.Api/Middleware/ExceptionHandlingMiddleware.cs",
+      "src/ERP.Api/wwwroot/js/report-configuration.js",
+      "src/ERP.UnitTests/ReportConfigurationWireBodyTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationUiTests.cs"
+    ],
+    "Add meaningful regression coverage for body limits on every reporting POST/PUT action family, normal boundary input, unknown-length body rejection, controlled module error mapping and client failure state. Run safe Release build/test, focused tests and scheduler self-test/contracts. Run actual HTTP oversized-body checks on the isolated local test API after its validated build is available; record genuine results and retain incomplete real browser/phase acceptance markers.": [
+      "src/ERP.Api/Controllers/ReportConfigurationsController.cs",
+      "src/ERP.Api/Middleware/ExceptionHandlingMiddleware.cs",
+      "src/ERP.Api/wwwroot/js/report-configuration.js",
+      "src/ERP.UnitTests/ReportConfigurationWireBodyTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationApiTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationUiTests.cs"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/ReportConfigurationsController.cs",
+    "src/ERP.Api/Middleware/ExceptionHandlingMiddleware.cs",
+    "src/ERP.Api/wwwroot/js/report-configuration.js",
+    "src/ERP.UnitTests/ReportConfigurationWireBodyTests.cs",
+    "src/ERP.UnitTests/ReportConfigurationApiTests.cs",
+    "src/ERP.UnitTests/ReportConfigurationUiTests.cs"
+  ],
+  "depends_on": [
+    "ERP-284"
+  ],
+  "risk": "medium",
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "max_attempts": 3,
+  "attempts": 0,
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-04T08:55:19.586113Z"
+}
