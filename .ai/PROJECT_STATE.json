@@ -1,14 +1,11 @@
 {
   "schema_version": 2,
   "project": "NEWERP",
-  "updated_at": "2026-10-04T10:19:11.700300Z",
-  "phase": "developing",
-  "current_task": "ERP-287",
+  "updated_at": "2026-10-04T10:28:27.720356Z",
+  "phase": "ready",
+  "current_task": null,
   "queue": [
-    "ERP-287",
-    "ERP-288",
-    "ERP-289",
-    "ERP-290"
+    "ERP-287"
   ],
   "completed": [
     "ERP-000",
@@ -286,32 +283,33 @@
     "log": ".ai\\logs\\ERP-286-validation-1.log",
     "at": "2026-10-04T09:33:02.785450Z"
   },
-  "last_error": null,
+  "last_error": {
+    "task": "ERP-287",
+    "kind": "automatic_repair_pending",
+    "summary": "Path guard failed:\noutside allowed_paths: scripts/ai_queue_planner.py\noutside allowed_paths: tests/automation/test_queue_planner.py"
+  },
   "last_deepseek_fix": {
-    "task": "ERP-280",
+    "task": "ERP-287",
     "attempts": 3,
     "status": "retry_pending",
-    "at": "2026-10-04T08:07:16.063033Z"
+    "at": "2026-10-04T10:28:27.412058Z"
   },
   "git_sync": {
     "branch": "main",
-    "local_sha": "527d9c8",
+    "local_sha": "ed01c68",
     "status": "synced",
-    "ahead": 1,
+    "ahead": 2,
     "behind": 0,
     "last_attempt_at": "2026-10-04T09:33:07.932651Z",
     "last_error": null
   },
   "next_recommended_tasks": [
-    "ERP-287",
-    "ERP-288",
-    "ERP-289",
-    "ERP-290"
+    "ERP-287"
   ],
   "runner": {
     "status": "stopped",
     "pid": null
   },
   "blocker": null,
-  "finish_reason": null
+  "finish_reason": "deepseek_supervisor_recovery"
 }
