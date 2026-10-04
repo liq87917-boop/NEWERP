@@ -345,6 +345,9 @@ public sealed class SalesOrderReportConfigurationDatasetProvider : IReportConfig
     {
         DateTime? start = null;
         DateTime? end = null;
+        long? customerId = null;
+        string? currency = null;
+        string? status = null;
 
         if (filters is not null)
         {
@@ -362,15 +365,18 @@ public sealed class SalesOrderReportConfigurationDatasetProvider : IReportConfig
                         break;
                     case "customerid":
                         ReportConfigurationDatasetTranslation.EnsureOperator(filter, ReportConfigurationConstants.OperatorEq);
-                        request.CustomerId = ReportConfigurationDatasetTranslation.RequireLong(filter.Value, "customerId");
+                        customerId = ReportConfigurationDatasetTranslation.CoalesceLong(
+                            customerId, filter.Value, "customerId");
                         break;
                     case "currency":
                         ReportConfigurationDatasetTranslation.EnsureOperator(filter, ReportConfigurationConstants.OperatorEq);
-                        request.Currency = ReportConfigurationDatasetTranslation.RequireString(filter.Value, "currency");
+                        currency = ReportConfigurationDatasetTranslation.CoalesceString(
+                            currency, filter.Value, "currency");
                         break;
                     case "status":
                         ReportConfigurationDatasetTranslation.EnsureOperator(filter, ReportConfigurationConstants.OperatorEq);
-                        request.Status = ReportConfigurationDatasetTranslation.RequireString(filter.Value, "status");
+                        status = ReportConfigurationDatasetTranslation.CoalesceString(
+                            status, filter.Value, "status");
                         break;
                     default:
                         throw BusinessException.InvalidParameter(
@@ -381,6 +387,9 @@ public sealed class SalesOrderReportConfigurationDatasetProvider : IReportConfig
 
         request.StartDate = start;
         request.EndDate = end;
+        request.CustomerId = customerId;
+        request.Currency = currency;
+        request.Status = status;
     }
 
     private static ReportConfigurationDatasetDto BuildDataset(DynamicSalesOrderReportCatalogDto catalog)
@@ -1073,6 +1082,9 @@ public sealed class ReceivableReportConfigurationDatasetProvider : IReportConfig
     {
         DateTime? start = null;
         DateTime? end = null;
+        long? customerId = null;
+        string? currency = null;
+        string? allocationState = null;
 
         if (filters is not null)
         {
@@ -1090,15 +1102,18 @@ public sealed class ReceivableReportConfigurationDatasetProvider : IReportConfig
                         break;
                     case "customerid":
                         ReportConfigurationDatasetTranslation.EnsureOperator(filter, ReportConfigurationConstants.OperatorEq);
-                        request.CustomerId = ReportConfigurationDatasetTranslation.RequireLong(filter.Value, "customerId");
+                        customerId = ReportConfigurationDatasetTranslation.CoalesceLong(
+                            customerId, filter.Value, "customerId");
                         break;
                     case "currency":
                         ReportConfigurationDatasetTranslation.EnsureOperator(filter, ReportConfigurationConstants.OperatorEq);
-                        request.Currency = ReportConfigurationDatasetTranslation.RequireString(filter.Value, "currency");
+                        currency = ReportConfigurationDatasetTranslation.CoalesceString(
+                            currency, filter.Value, "currency");
                         break;
                     case "allocationstate":
                         ReportConfigurationDatasetTranslation.EnsureOperator(filter, ReportConfigurationConstants.OperatorEq);
-                        request.AllocationState = ReportConfigurationDatasetTranslation.RequireString(filter.Value, "allocationState");
+                        allocationState = ReportConfigurationDatasetTranslation.CoalesceString(
+                            allocationState, filter.Value, "allocationState");
                         break;
                     default:
                         throw BusinessException.InvalidParameter(
@@ -1109,6 +1124,9 @@ public sealed class ReceivableReportConfigurationDatasetProvider : IReportConfig
 
         request.StartDate = start;
         request.EndDate = end;
+        request.CustomerId = customerId;
+        request.Currency = currency;
+        request.AllocationState = allocationState;
     }
 
     private static ReportConfigurationDatasetDto BuildDataset(DynamicReceivableReportCatalogDto catalog)
@@ -1485,6 +1503,26 @@ internal static class ReportConfigurationDatasetTranslation
         }
     }
 
+    public static long CoalesceLong(long? current, object? value, string fieldKey)
+    {
+        var parsed = RequireLong(value, fieldKey);
+        if (current is null)
+            return parsed;
+        if (current.Value != parsed)
+            throw BusinessException.InvalidParameter($"字段 {fieldKey} 的重复相等筛选值冲突（{current.Value} 与 {parsed}），无法合并");
+        return current.Value;
+    }
+
+    public static string CoalesceString(string? current, object? value, string fieldKey)
+    {
+        var parsed = RequireString(value, fieldKey);
+        if (current is null)
+            return parsed;
+        if (!string.Equals(current, parsed, StringComparison.OrdinalIgnoreCase))
+            throw BusinessException.InvalidParameter($"字段 {fieldKey} 的重复相等筛选值冲突（{current} 与 {parsed}），无法合并");
+        return current;
+    }
+
     public static void ApplyDateFilter(
         ReportConfigurationFilter filter, string fieldKey, ref DateTime? start, ref DateTime? end)
     {
@@ -1492,28 +1530,64 @@ internal static class ReportConfigurationDatasetTranslation
         switch (op)
         {
             case ReportConfigurationConstants.OperatorEq:
+            {
                 var eq = RequireDate(filter.Value, fieldKey).Date;
-                start = eq;
-                end = eq;
+                IntersectDayRange(ref start, ref end, eq, eq);
                 break;
+            }
             case ReportConfigurationConstants.OperatorGte:
-                start = RequireDate(filter.Value, fieldKey).Date;
+                IntersectLowerDay(ref start, RequireDate(filter.Value, fieldKey).Date);
                 break;
             case ReportConfigurationConstants.OperatorLte:
-                end = RequireDate(filter.Value, fieldKey).Date;
+                IntersectUpperDay(ref end, RequireDate(filter.Value, fieldKey).Date);
                 break;
             case ReportConfigurationConstants.OperatorGt:
-                start = RequireDate(filter.Value, fieldKey).Date.AddDays(1);
+                IntersectLowerDay(ref start, SafeAddDays(RequireDate(filter.Value, fieldKey).Date, 1, fieldKey, "严格大于"));
                 break;
             case ReportConfigurationConstants.OperatorLt:
-                end = RequireDate(filter.Value, fieldKey).Date.AddDays(-1);
+                IntersectUpperDay(ref end, SafeAddDays(RequireDate(filter.Value, fieldKey).Date, -1, fieldKey, "严格小于"));
                 break;
             case ReportConfigurationConstants.OperatorBetween:
-                start = RequireDate(filter.Value, fieldKey).Date;
-                end = RequireDate(filter.Value2, fieldKey).Date;
+            {
+                var lower = RequireDate(filter.Value, fieldKey).Date;
+                var upper = RequireDate(filter.Value2, fieldKey).Date;
+                if (lower > upper)
+                    throw BusinessException.InvalidParameter($"字段 {fieldKey} 的 between 下界不能大于上界");
+                IntersectDayRange(ref start, ref end, lower, upper);
                 break;
+            }
             default:
                 throw BusinessException.InvalidParameter($"字段 {fieldKey} 不支持的日期筛选操作符: {op}");
+        }
+    }
+
+    private static void IntersectLowerDay(ref DateTime? start, DateTime lower)
+    {
+        if (start is null || lower > start.Value)
+            start = lower;
+    }
+
+    private static void IntersectUpperDay(ref DateTime? end, DateTime upper)
+    {
+        if (end is null || upper < end.Value)
+            end = upper;
+    }
+
+    private static void IntersectDayRange(ref DateTime? start, ref DateTime? end, DateTime lower, DateTime upper)
+    {
+        IntersectLowerDay(ref start, lower);
+        IntersectUpperDay(ref end, upper);
+    }
+
+    private static DateTime SafeAddDays(DateTime date, int days, string fieldKey, string context)
+    {
+        try
+        {
+            return date.AddDays(days);
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            throw BusinessException.InvalidParameter($"字段 {fieldKey} 的日期边界超出日历可表示范围（{context}）");
         }
     }
 

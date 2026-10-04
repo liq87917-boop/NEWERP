@@ -1,7 +1,7 @@
 {
   "id": "ERP-278",
   "title": "Preserve conjunctive semantics for repeated common report filters",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "low",
   "description": "Stage 1 unified report configuration engine correctness increment. Verified ValidateFilters validates each predicate independently; both MapFilters methods assign repeated CustomerId/Currency/status equality values into one request, while ApplyDateFilter replaces start/end instead of intersecting prior bounds. This can broaden an earlier configured restriction depending on row order. Repair common rules and controlled translation as a single generic task; do not build bespoke report functionality. Reuse current identity/menu/field/row/data scope and existing OperationLogMiddleware audit and BusinessException error handling. No arbitrary SQL, extra joins, schema/entity/persistence changes, migration, SchemaUpgrader/SeedData edit, real database execution, production SQL, secrets/.env/config changes, deployment, Agent work, other business modules or irreversible operations. Date bounds at calendar extremes must fail safely without overflow. Preserve unrelated work and prior definitions where semantics are representable; otherwise explicitly reject and explain conflict. Existing adapters are offline engine verification only, not Stage 2 migration. Safe build/test plus meaningful behavior tests required; real database/browser acceptance must remain explicitly environment blocked.",
   "acceptance_criteria": [
@@ -57,6 +57,6 @@
     "status": "not_required",
     "level": "L1"
   },
-  "attempts": 0,
+  "attempts": 1,
   "created_at": "2026-10-04T00:59:17.727298Z"
 }

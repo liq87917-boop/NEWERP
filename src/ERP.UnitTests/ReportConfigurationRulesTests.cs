@@ -246,6 +246,66 @@ public class ReportConfigurationRulesTests
         AssertInvalid(definition);
     }
 
+    [Fact]
+    public void Validate_重复相等筛选_相同值_合并通过()
+    {
+        var definition = ValidDefinition();
+        definition.Filters = new()
+        {
+            new ReportConfigurationFilter { FieldKey = "status", Operator = "eq", Value = "Pending" },
+            new ReportConfigurationFilter { FieldKey = "status", Operator = "eq", Value = "pending" },
+        };
+        ReportConfigurationRules.Validate(definition, BuildDataset());
+    }
+
+    [Fact]
+    public void Validate_重复相等筛选_冲突值_拒绝()
+    {
+        var definition = ValidDefinition();
+        definition.Filters = new()
+        {
+            new ReportConfigurationFilter { FieldKey = "status", Operator = "eq", Value = "Pending" },
+            new ReportConfigurationFilter { FieldKey = "status", Operator = "eq", Value = "Submitted" },
+        };
+        AssertInvalid(definition);
+    }
+
+    [Fact]
+    public void Validate_日期筛选_重复下界交集_通过()
+    {
+        var definition = ValidDefinition();
+        definition.Filters = new()
+        {
+            new ReportConfigurationFilter { FieldKey = "orderDate", Operator = "gte", Value = new DateTime(2026, 2, 1) },
+            new ReportConfigurationFilter { FieldKey = "orderDate", Operator = "gte", Value = new DateTime(2026, 1, 1) },
+        };
+        ReportConfigurationRules.Validate(definition, BuildDataset());
+    }
+
+    [Fact]
+    public void Validate_日期筛选_重复上界交集_通过()
+    {
+        var definition = ValidDefinition();
+        definition.Filters = new()
+        {
+            new ReportConfigurationFilter { FieldKey = "orderDate", Operator = "lte", Value = new DateTime(2026, 1, 31) },
+            new ReportConfigurationFilter { FieldKey = "orderDate", Operator = "lte", Value = new DateTime(2026, 2, 28) },
+        };
+        ReportConfigurationRules.Validate(definition, BuildDataset());
+    }
+
+    [Fact]
+    public void Validate_日期筛选_交集为空_拒绝()
+    {
+        var definition = ValidDefinition();
+        definition.Filters = new()
+        {
+            new ReportConfigurationFilter { FieldKey = "orderDate", Operator = "gte", Value = new DateTime(2026, 3, 1) },
+            new ReportConfigurationFilter { FieldKey = "orderDate", Operator = "lte", Value = new DateTime(2026, 2, 1) },
+        };
+        AssertInvalid(definition);
+    }
+
     // ==================== 5. 分组边界 ====================
 
     [Fact]

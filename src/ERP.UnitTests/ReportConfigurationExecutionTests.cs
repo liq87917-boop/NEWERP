@@ -597,4 +597,48 @@ public class ReportConfigurationExecutionTests
         Assert.DoesNotContain(preview.Columns, c => c.Key == "totalAmount");
         Assert.All(preview.Rows, r => Assert.False(r.ContainsKey("totalAmount")));
     }
+
+    [Fact]
+    public async Task PreviewAsync_保存时冲突标量相等_拒绝()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedPrivilegedUser(db, "so-conflict", "sales-order");
+        var def = SalesOrderDefinition(fields: new[] { "orderNo" });
+        def.Filters = new List<ReportConfigurationFilter>
+        {
+            new() { FieldKey = "status", Operator = ReportConfigurationConstants.OperatorEq, Value = "Pending" },
+            new() { FieldKey = "status", Operator = ReportConfigurationConstants.OperatorEq, Value = "Submitted" },
+        };
+
+        var service = BuildService(db);
+        var ex = await Assert.ThrowsAsync<BusinessException>(() =>
+            service.CreateAsync(user, SaveDto("冲突报表", def)));
+
+        Assert.Equal(ErrorCodes.InvalidParameter, ex.Code);
+    }
+
+    [Fact]
+    public async Task PreviewAsync_日期重复上界_交集而非最后写入()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedPrivilegedUser(db, "so-lte-conj", "sales-order");
+        var customer = SeedCustomer(db, "C1", "客户");
+        SeedOrder(db, "SO-1", customer.Id, Currency.USD, 10m, new DateTime(2026, 1, 15));
+        SeedOrder(db, "SO-2", customer.Id, Currency.USD, 20m, new DateTime(2026, 2, 15));
+
+        var def = SalesOrderDefinition(fields: new[] { "orderNo", "orderDate" });
+        def.Filters = new List<ReportConfigurationFilter>
+        {
+            new() { FieldKey = "orderDate", Operator = ReportConfigurationConstants.OperatorLte, Value = new DateTime(2026, 1, 31) },
+            new() { FieldKey = "orderDate", Operator = ReportConfigurationConstants.OperatorLte, Value = new DateTime(2026, 2, 28) },
+        };
+
+        var service = BuildService(db);
+        var created = await service.CreateAsync(user, SaveDto("日期交集报表", def));
+        var execution = BuildExecution(db);
+        var preview = await execution.PreviewAsync(user, new ReportConfigurationPreviewRequest { ConfigurationId = created.Id });
+
+        var row = Assert.Single(preview.Rows);
+        Assert.Equal("SO-1", row["orderNo"]);
+    }
 }

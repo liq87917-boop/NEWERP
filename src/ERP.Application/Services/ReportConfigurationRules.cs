@@ -250,6 +250,10 @@ public static class ReportConfigurationRules
 
         foreach (var filter in filters)
             ValidateFilter(filter, dataset);
+
+        // ERP-278：逐谓词校验之后，再按字段做「合取语义」交叉校验（重复相等值 / 日期边界交集），
+        // 绝不使用 last-write-wins，也绝不静默丢弃任何一个谓词。
+        ValidateFilterConjunctions(definition, dataset);
     }
 
     private static void ValidateFilter(ReportConfigurationFilter filter, ReportConfigurationDatasetDto dataset)
@@ -288,6 +292,164 @@ public static class ReportConfigurationRules
         }
     }
 
+
+    private static void ValidateFilterConjunctions(ReportConfigurationDefinition definition, ReportConfigurationDatasetDto dataset)
+    {
+        var filters = definition.Filters ?? new List<ReportConfigurationFilter>();
+        var grouped = new Dictionary<string, List<ReportConfigurationFilter>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var filter in filters)
+        {
+            if (filter is null)
+                continue;
+            var key = filter.FieldKey.Trim();
+            if (!grouped.TryGetValue(key, out var list))
+            {
+                list = new List<ReportConfigurationFilter>();
+                grouped.Add(key, list);
+            }
+            list.Add(filter);
+        }
+
+        foreach (var pair in grouped)
+        {
+            if (!TryGetField(dataset, pair.Key, out var field))
+                continue;
+
+            if (string.Equals(field.Type, ReportConfigurationConstants.TypeDate, StringComparison.OrdinalIgnoreCase))
+                ValidateDateConjunction(field, pair.Value);
+            else if (pair.Value.Count > 1)
+                ValidateScalarEqualityConjunction(field, pair.Value);
+        }
+    }
+
+    private static void ValidateScalarEqualityConjunction(ReportConfigurationFieldDto field, IReadOnlyList<ReportConfigurationFilter> filters)
+    {
+        object? first = null;
+        var seen = false;
+        foreach (var filter in filters)
+        {
+            var op = (filter.Operator ?? string.Empty).Trim();
+            if (!string.Equals(op, ReportConfigurationConstants.OperatorEq, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            var value = NormalizeScalar(field, filter.Value, "筛选值");
+            if (!seen)
+            {
+                first = value;
+                seen = true;
+                continue;
+            }
+
+            if (!ScalarValuesEquivalent(first, value))
+                throw BusinessException.InvalidParameter($"字段 {field.Key} 的重复相等筛选值冲突（{FormatScalar(first)} 与 {FormatScalar(value)}），无法合并");
+        }
+    }
+
+    private static void ValidateDateConjunction(ReportConfigurationFieldDto field, IReadOnlyList<ReportConfigurationFilter> filters)
+    {
+        DateTime? start = null;
+        DateTime? end = null;
+
+        foreach (var filter in filters)
+        {
+            var op = (filter.Operator ?? string.Empty).Trim();
+            switch (op)
+            {
+                case ReportConfigurationConstants.OperatorEq:
+                {
+                    var eq = RequireRuleDate(field, filter.Value).Date;
+                    IntersectDayRange(ref start, ref end, eq, eq);
+                    break;
+                }
+                case ReportConfigurationConstants.OperatorGte:
+                    IntersectLowerDay(ref start, RequireRuleDate(field, filter.Value).Date);
+                    break;
+                case ReportConfigurationConstants.OperatorLte:
+                    IntersectUpperDay(ref end, RequireRuleDate(field, filter.Value).Date);
+                    break;
+                case ReportConfigurationConstants.OperatorGt:
+                    IntersectLowerDay(ref start, SafeAddDays(RequireRuleDate(field, filter.Value).Date, 1, field.Key, "严格大于"));
+                    break;
+                case ReportConfigurationConstants.OperatorLt:
+                    IntersectUpperDay(ref end, SafeAddDays(RequireRuleDate(field, filter.Value).Date, -1, field.Key, "严格小于"));
+                    break;
+                case ReportConfigurationConstants.OperatorBetween:
+                {
+                    var lower = RequireRuleDate(field, filter.Value).Date;
+                    var upper = RequireRuleDate(field, filter.Value2).Date;
+                    IntersectDayRange(ref start, ref end, lower, upper);
+                    break;
+                }
+            }
+        }
+
+        if (start.HasValue && end.HasValue && start.Value > end.Value)
+            throw BusinessException.InvalidParameter($"字段 {field.Key} 的日期筛选条件互相矛盾（交集为空）");
+    }
+
+    private static DateTime RequireRuleDate(ReportConfigurationFieldDto field, object? raw)
+    {
+        var value = NormalizeScalar(field, raw, "筛选值");
+        return value is DateTime dt ? dt : Convert.ToDateTime(value, CultureInfo.InvariantCulture);
+    }
+
+    private static DateTime SafeAddDays(DateTime date, int days, string fieldKey, string context)
+    {
+        try
+        {
+            return date.AddDays(days);
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            throw BusinessException.InvalidParameter($"字段 {fieldKey} 的日期边界超出日历可表示范围（{context}）");
+        }
+    }
+
+    private static void IntersectLowerDay(ref DateTime? start, DateTime lower)
+    {
+        if (start is null || lower > start.Value)
+            start = lower;
+    }
+
+    private static void IntersectUpperDay(ref DateTime? end, DateTime upper)
+    {
+        if (end is null || upper < end.Value)
+            end = upper;
+    }
+
+    private static void IntersectDayRange(ref DateTime? start, ref DateTime? end, DateTime lower, DateTime upper)
+    {
+        IntersectLowerDay(ref start, lower);
+        IntersectUpperDay(ref end, upper);
+    }
+
+    private static bool ScalarValuesEquivalent(object? a, object? b)
+    {
+        if (a is null || b is null)
+            return a is null && b is null;
+        if (IsNumeric(a) && IsNumeric(b))
+            return Convert.ToDecimal(a, CultureInfo.InvariantCulture) == Convert.ToDecimal(b, CultureInfo.InvariantCulture);
+        if (a is DateTime da && b is DateTime db)
+            return da == db;
+        if (a is DateTimeOffset doa && b is DateTimeOffset dob)
+            return doa == dob;
+        if (a is bool ba && b is bool bb)
+            return ba == bb;
+        if (a is string sa && b is string sb)
+            return string.Equals(sa, sb, StringComparison.OrdinalIgnoreCase);
+        return Equals(a, b);
+    }
+
+    private static string FormatScalar(object? value)
+    {
+        return value switch
+        {
+            null => "null",
+            string s => s,
+            DateTime dt => dt.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+            _ => Convert.ToString(value, CultureInfo.InvariantCulture) ?? string.Empty,
+        };
+    }
 
     // ==================== 4. 分组 / 聚合 / 能力 / 展示 ====================
 

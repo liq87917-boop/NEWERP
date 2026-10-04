@@ -337,6 +337,59 @@ public class ReportConfigurationSnapshotTests
         Assert.Contains(ReportConfigurationConstants.CapabilityMatchedSet, dataset.SupportedCapabilities);
     }
 
+    [Fact]
+    public async Task 快照_日期重复上界_交集而非最后写入()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedPrivilegedUser(db, "snap-lte-conj", "sales-order");
+        var customer = SeedCustomer(db, "C1", "客户");
+        db.SalesOrders.Add(new SalesOrder { OrderNo = "SO-1", CustomerId = customer.Id, OrderDate = new DateTime(2026, 1, 15), Status = DocumentStatus.Pending, Currency = Currency.CNY, TotalAmount = 10m });
+        db.SalesOrders.Add(new SalesOrder { OrderNo = "SO-2", CustomerId = customer.Id, OrderDate = new DateTime(2026, 2, 15), Status = DocumentStatus.Pending, Currency = Currency.CNY, TotalAmount = 20m });
+        db.SaveChanges();
+
+        var definition = MatchedSalesOrderDefinition(new[] { "orderNo", "orderDate" });
+        definition.Filters = new List<ReportConfigurationFilter>
+        {
+            new() { FieldKey = "orderDate", Operator = ReportConfigurationConstants.OperatorLte, Value = new DateTime(2026, 1, 31) },
+            new() { FieldKey = "orderDate", Operator = ReportConfigurationConstants.OperatorLte, Value = new DateTime(2026, 2, 28) },
+        };
+
+        var service = BuildService(db);
+        var created = await service.CreateAsync(user, new ReportConfigurationSaveDto { Name = "日期交集快照", Definition = definition });
+        var execution = BuildExecution(db);
+        var preview = await execution.PreviewAsync(user, new ReportConfigurationPreviewRequest { ConfigurationId = created.Id });
+
+        Assert.Equal(1, preview.Total);
+        Assert.Equal(1, preview.MatchedCount);
+        var row = Assert.Single(preview.Rows);
+        Assert.Equal("SO-1", row["orderNo"]);
+    }
+
+    [Fact]
+    public async Task 快照_重复标量相等_相同值_合并通过()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedPrivilegedUser(db, "snap-eq-conj", "sales-order");
+        var customer = SeedCustomer(db, "C1", "客户");
+        db.SalesOrders.Add(new SalesOrder { OrderNo = "SO-1", CustomerId = customer.Id, OrderDate = new DateTime(2026, 9, 1), Status = DocumentStatus.Pending, Currency = Currency.CNY, TotalAmount = 10m });
+        db.SaveChanges();
+
+        var definition = MatchedSalesOrderDefinition(new[] { "orderNo" });
+        definition.Filters = new List<ReportConfigurationFilter>
+        {
+            new() { FieldKey = "customerId", Operator = ReportConfigurationConstants.OperatorEq, Value = customer.Id },
+            new() { FieldKey = "customerId", Operator = ReportConfigurationConstants.OperatorEq, Value = customer.Id },
+        };
+
+        var service = BuildService(db);
+        var created = await service.CreateAsync(user, new ReportConfigurationSaveDto { Name = "标量合并快照", Definition = definition });
+        var execution = BuildExecution(db);
+        var preview = await execution.PreviewAsync(user, new ReportConfigurationPreviewRequest { ConfigurationId = created.Id });
+
+        Assert.Equal(1, preview.Total);
+        Assert.Equal(1, preview.MatchedCount);
+    }
+
     /// <summary>不实现快照能力的旧数据集适配器（测试替身）：沿用默认不支持实现，保持编译。</summary>
     private sealed class LegacyProvider : IReportConfigurationDatasetProvider
     {
