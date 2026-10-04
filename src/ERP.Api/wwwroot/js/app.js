@@ -114,6 +114,7 @@ async function initApp() {
     document.getElementById('header-user').textContent = PROFILE.displayName || PROFILE.userName;
     console.log('[initApp] PROFILE.menus:', (PROFILE.menus || []).length);
     renderMenu(PROFILE.menus || []);
+    loadReportConfigurationEntry();   // 授权目录决定是否展示通用报表配置入口（fail closed）
     goHome();               // 初始进入首页门户（同时登记「首页」标签）
     loadLogo();
   } catch (err) {
@@ -279,6 +280,40 @@ function createNavItem(m) {
   return item;
 }
 
+/* ============ 通用报表配置工作台授权入口（ERP-286 Stage 1） ============
+   登录后按服务端报表配置目录授权决定是否展示一个「通用」入口（不是每个数据集一个菜单）：
+   - 仅当当前账号至少拥有一个后端已授权数据集时展示（fail closed）；
+   - 目录请求失败 / 空目录 / 无授权数据集均不展示任何可点击入口；
+   - 展示前移除既有同名入口，重复渲染 / 注销重登绝不残留或重复；
+   - 点击复用既有 navigate('report-configuration') → renderPage 分派到工作台，
+     并沿用 addTab 去重与标签生命周期；绝不新增权限 / 菜单 / seed。 */
+function hasAuthorizedReportDataset(catalog) {
+  return !!(catalog && Array.isArray(catalog.datasets) && catalog.datasets.length > 0);
+}
+
+async function loadReportConfigurationEntry() {
+  try {
+    const catalog = await api('/api/report-configurations/catalog');
+    if (hasAuthorizedReportDataset(catalog)) addReportConfigurationNavEntry();
+  } catch (e) {
+    /* 目录失败（网络 / 未授权 / 环境未就绪）一律不展示入口（fail closed） */
+  }
+}
+
+function addReportConfigurationNavEntry() {
+  const nav = document.getElementById('sidebar-nav');
+  if (!nav) return;
+  // 去重：重复渲染 / 注销重登后移除陈旧入口，绝不叠加
+  nav.querySelectorAll('[data-code="report-configuration-entry"]').forEach(el => el.remove());
+  const group = createNavGroup({
+    menuCode: 'report-configuration-entry',
+    menuName: '报表配置',
+    children: [{ menuCode: 'report-configuration', menuName: '报表配置工作台' }],
+  });
+  group.dataset.code = 'report-configuration-entry';
+  nav.appendChild(group);
+}
+
 /* 菜单编码 -> 图标名映射 */
 const CODE_ICON = {
   system: 'settings', user: 'users', role: 'shield', 'user-permission': 'key',
@@ -322,6 +357,7 @@ const CODE_ICON = {
   'customer-shipment': 'pie-chart', 'salesman-output': 'user-round',
   'balance-sheet': 'scale', 'income-statement': 'chart-line', 'cash-flow': 'waves',
   'quotation-conversion': 'trending-up',
+  'report-configuration': 'bar-chart', 'report-configuration-entry': 'bar-chart',
 };
 
 function iconOf(code) {
@@ -901,3 +937,15 @@ function monthStartISO() {
 
 /* ============ 启动 ============ */
 if (TOKEN) initApp().catch(() => {});
+
+/* Node 单测导出（浏览器中 module 为 undefined，自动跳过） */
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = {
+    renderMenu,
+    addReportConfigurationNavEntry,
+    loadReportConfigurationEntry,
+    hasAuthorizedReportDataset,
+    addTab,
+    getOpenTabs: function () { return openTabs.slice(); },
+  };
+}

@@ -1,7 +1,7 @@
 {
   "id": "ERP-286",
   "title": "Expose the generic report workspace through permission-aware ERP navigation",
-  "status": "pending",
+  "status": "completed",
   "description": "Stage 1 functional reachability defect found during real browser acceptance: app.js dispatches report-configuration but renderMenu only consumes PROFILE.menus, and no seed menu has this code. Isolated admin catalog contains sales-order and receivable yet no visible workspace entry. Add an authorized generic launch point using existing server catalog, without permission expansion or schema/seed changes. No bespoke report, Agent, stage-2 entrance switch, production or secrets changes. Existing Domain/Application/Infrastructure/API contracts suffice.",
   "acceptance_criteria": [
     "A user with at least one backend-authorized common report dataset can reach the existing unified reporting workspace from normal ERP navigation after login. Real isolated browser validation proves the admin sidebar currently has no report-configuration entry even though the render route and API are implemented. Integrate one generic entry, not a dedicated report menu per dataset, using current catalog authorization and existing navigation/tab lifecycle. Do not invent a new ERP permission, grant a role/menu or replace old report entries before stage 2.",
@@ -37,7 +37,7 @@
   "validation_profile": "safe",
   "completion_mode": "build",
   "max_attempts": 3,
-  "attempts": 0,
+  "attempts": 1,
   "auto_start": true,
   "requires_human_approval": false,
   "human_gate": {
