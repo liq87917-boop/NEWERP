@@ -1,0 +1,54 @@
+{
+  "id": "ERP-282",
+  "title": "Propagate report configuration request cancellation across lifecycle APIs",
+  "status": "pending",
+  "description": "Stage 1 generic reporting platform error/query-boundary increment. Code inspection verifies this gap: lifecycle controller calls omit existing cancellation tokens; workspace fetch has no AbortController; lifecycle services directly SaveChangesAsync without mapping EF concurrency failures. Implement only the gap named in this title. Preserve concurrent work, established report contracts and existing ERP permissions. No bespoke report, new dataset, Agent, deployment, production connection, secrets or .env changes. Domain entities and EF mappings already support existing tokens and require no modification.",
+  "acceptance_criteria": [
+    "Catalog, private lifecycle CRUD/version operations, paged lists, sharing and definition transfer endpoints pass the actual HttpContext.RequestAborted token to their existing Application interfaces. Aborted requests before work starts must not persist drafts, revisions or grants. Preserve identity injection, owner/recipient permissions, expected versions and existing route contracts; do not wrap writes in a timeout helper that abandons a still-running commit.",
+    "Handle genuine request cancellation consistently within the generic controller so it does not become InternalError or a success response; distinguish cancellation from provider/validation failures and retain existing safe audit behavior. Do not claim cancellation rolls back a transaction already committed. Add tests that capture the exact token on each endpoint family and verify pre-cancelled operations, normal success and non-cancellation failures.",
+    "Run focused API and lifecycle tests, scheduler self-test/contracts and safe Release build/test. No schema changes, production access or unrelated middleware behavior changes."
+  ],
+  "criterion_path_map": {
+    "Catalog, private lifecycle CRUD/version operations, paged lists, sharing and definition transfer endpoints pass the actual HttpContext.RequestAborted token to their existing Application interfaces. Aborted requests before work starts must not persist drafts, revisions or grants. Preserve identity injection, owner/recipient permissions, expected versions and existing route contracts; do not wrap writes in a timeout helper that abandons a still-running commit.": [
+      "src/ERP.Api/Controllers/ReportConfigurationsController.cs",
+      "src/ERP.UnitTests/ReportConfigurationApiTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationRequestCancellationTests.cs"
+    ],
+    "Handle genuine request cancellation consistently within the generic controller so it does not become InternalError or a success response; distinguish cancellation from provider/validation failures and retain existing safe audit behavior. Do not claim cancellation rolls back a transaction already committed. Add tests that capture the exact token on each endpoint family and verify pre-cancelled operations, normal success and non-cancellation failures.": [
+      "src/ERP.Api/Controllers/ReportConfigurationsController.cs",
+      "src/ERP.UnitTests/ReportConfigurationApiTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationRequestCancellationTests.cs"
+    ],
+    "Run focused API and lifecycle tests, scheduler self-test/contracts and safe Release build/test. No schema changes, production access or unrelated middleware behavior changes.": [
+      "src/ERP.Api/Controllers/ReportConfigurationsController.cs",
+      "src/ERP.UnitTests/ReportConfigurationApiTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationRequestCancellationTests.cs"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/ReportConfigurationsController.cs",
+    "src/ERP.UnitTests/ReportConfigurationApiTests.cs",
+    "src/ERP.UnitTests/ReportConfigurationRequestCancellationTests.cs"
+  ],
+  "depends_on": [
+    "ERP-281"
+  ],
+  "risk": "low",
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "max_attempts": 3,
+  "attempts": 0,
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required",
+    "reason": "User-authorized isolated development increment."
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-04T08:21:44.773659Z"
+}

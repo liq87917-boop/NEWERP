@@ -3121,5 +3121,113 @@ IF NOT EXISTS (SELECT 1 FROM sys.indexes
         WHERE IsDeleted = 0;
 ");
 
+        // 47. ERP-260 / ERP-265：通用报表配置平台三表启动补齐（已有库缺表时幂等建表 + 索引 + 级联外键）。
+        //     与 ErpDbContext.Reporting 的精确映射完全一致（表名 / schema / 列长 / rowversion / 默认值 /
+        //     主键 / 级联外键 / 分页与唯一索引）。只新增缺失结构，绝不重建库、不删除或改写既有表与业务数据，
+        //     也不改动既有 Domain 语义。
+        await db.Database.ExecuteSqlRawAsync(@"
+IF OBJECT_ID('db_owner.ReportConfigurations') IS NULL
+BEGIN
+    CREATE TABLE db_owner.ReportConfigurations (
+        Id BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+        OwnerUserId BIGINT NOT NULL,
+        Name NVARCHAR(200) NOT NULL DEFAULT N'',
+        DatasetKey NVARCHAR(50) NOT NULL DEFAULT N'',
+        DefinitionJson NVARCHAR(MAX) NOT NULL DEFAULT N'',
+        SchemaVersion INT NOT NULL DEFAULT 1,
+        Status INT NOT NULL DEFAULT 0,
+        Version INT NOT NULL DEFAULT 0,
+        CurrentPublishedVersion INT NOT NULL DEFAULT 0,
+        CreatedAt DATETIME2 NOT NULL DEFAULT GETDATE(),
+        CreatedBy BIGINT NULL,
+        UpdatedAt DATETIME2 NULL,
+        UpdatedBy BIGINT NULL,
+        IsDeleted BIT NOT NULL DEFAULT 0,
+        RowVersion ROWVERSION NOT NULL
+    );
+END
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes
+               WHERE name = 'IX_ReportConfigurations_OwnerUserId_IsDeleted'
+                 AND object_id = OBJECT_ID('db_owner.ReportConfigurations'))
+    CREATE INDEX IX_ReportConfigurations_OwnerUserId_IsDeleted
+        ON db_owner.ReportConfigurations(OwnerUserId, IsDeleted);
+
+IF OBJECT_ID('db_owner.ReportConfigurationRevisions') IS NULL
+BEGIN
+    CREATE TABLE db_owner.ReportConfigurationRevisions (
+        Id BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+        ReportConfigurationId BIGINT NOT NULL,
+        OwnerUserId BIGINT NOT NULL,
+        Version INT NOT NULL DEFAULT 0,
+        Name NVARCHAR(200) NOT NULL DEFAULT N'',
+        DatasetKey NVARCHAR(50) NOT NULL DEFAULT N'',
+        DefinitionJson NVARCHAR(MAX) NOT NULL DEFAULT N'',
+        SchemaVersion INT NOT NULL DEFAULT 1,
+        PublishedAt DATETIME2 NOT NULL DEFAULT GETDATE(),
+        PublishedBy BIGINT NOT NULL,
+        CreatedAt DATETIME2 NOT NULL DEFAULT GETDATE(),
+        CreatedBy BIGINT NULL,
+        UpdatedAt DATETIME2 NULL,
+        UpdatedBy BIGINT NULL,
+        IsDeleted BIT NOT NULL DEFAULT 0,
+        RowVersion ROWVERSION NOT NULL,
+        CONSTRAINT FK_ReportConfigurationRevisions_ReportConfigurations_ReportConfigurationId
+            FOREIGN KEY (ReportConfigurationId) REFERENCES db_owner.ReportConfigurations(Id)
+    );
+END
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes
+               WHERE name = 'UX_ReportConfigurationRevisions_ConfigurationId_Version'
+                 AND object_id = OBJECT_ID('db_owner.ReportConfigurationRevisions'))
+    CREATE UNIQUE INDEX UX_ReportConfigurationRevisions_ConfigurationId_Version
+        ON db_owner.ReportConfigurationRevisions(ReportConfigurationId, Version);
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes
+               WHERE name = 'IX_ReportConfigurationRevisions_ConfigurationId'
+                 AND object_id = OBJECT_ID('db_owner.ReportConfigurationRevisions'))
+    CREATE INDEX IX_ReportConfigurationRevisions_ConfigurationId
+        ON db_owner.ReportConfigurationRevisions(ReportConfigurationId);
+
+IF OBJECT_ID('db_owner.ReportConfigurationGrants') IS NULL
+BEGIN
+    CREATE TABLE db_owner.ReportConfigurationGrants (
+        Id BIGINT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+        RecipientUserId BIGINT NOT NULL,
+        ReportConfigurationId BIGINT NOT NULL,
+        RevisionVersion INT NOT NULL DEFAULT 0,
+        GrantedByUserId BIGINT NOT NULL,
+        Version INT NOT NULL DEFAULT 0,
+        CreatedAt DATETIME2 NOT NULL DEFAULT GETDATE(),
+        CreatedBy BIGINT NULL,
+        UpdatedAt DATETIME2 NULL,
+        UpdatedBy BIGINT NULL,
+        IsDeleted BIT NOT NULL DEFAULT 0,
+        RowVersion ROWVERSION NOT NULL,
+        CONSTRAINT FK_ReportConfigurationGrants_ReportConfigurations_ReportConfigurationId
+            FOREIGN KEY (ReportConfigurationId) REFERENCES db_owner.ReportConfigurations(Id)
+    );
+END
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes
+               WHERE name = 'UX_ReportConfigurationGrants_Recipient_Configuration'
+                 AND object_id = OBJECT_ID('db_owner.ReportConfigurationGrants'))
+    CREATE UNIQUE INDEX UX_ReportConfigurationGrants_Recipient_Configuration
+        ON db_owner.ReportConfigurationGrants(RecipientUserId, ReportConfigurationId)
+        WHERE IsDeleted = 0;
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes
+               WHERE name = 'IX_ReportConfigurationGrants_ConfigurationId_IsDeleted'
+                 AND object_id = OBJECT_ID('db_owner.ReportConfigurationGrants'))
+    CREATE INDEX IX_ReportConfigurationGrants_ConfigurationId_IsDeleted
+        ON db_owner.ReportConfigurationGrants(ReportConfigurationId, IsDeleted);
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes
+               WHERE name = 'IX_ReportConfigurationGrants_RecipientUserId_IsDeleted'
+                 AND object_id = OBJECT_ID('db_owner.ReportConfigurationGrants'))
+    CREATE INDEX IX_ReportConfigurationGrants_RecipientUserId_IsDeleted
+        ON db_owner.ReportConfigurationGrants(RecipientUserId, IsDeleted);
+");
+
     }
 }

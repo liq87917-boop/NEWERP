@@ -1,7 +1,7 @@
 {
   "id": "ERP-281",
   "title": "Bootstrap common report persistence on existing ERP databases",
-  "status": "pending",
+  "status": "completed",
   "description": "Stage 1 generic persistence runtime gap verified in code: EF EnsureCreated only creates an empty database; SchemaUpgrader currently has no ReportConfiguration bootstrap while existing ErpDbContext.Reporting already maps the three entities. User autonomous authorization permits this exact development bootstrap increment. Use existing Domain/Application contracts; no new model, business report, migration rollout or production execution. Depends on ERP-280 startup repair to prevent overlapping schema edits. Preserve existing data and concurrency semantics.",
   "acceptance_criteria": [
     "For an existing ERP database with legacy tables but absent common report tables, add idempotent startup bootstrap for db_owner.ReportConfigurations, ReportConfigurationRevisions and ReportConfigurationGrants. Match existing Domain properties and ErpDbContext.Reporting mappings exactly, including rowversion, defaults, keys, relationships and paging indexes. Preserve all existing tables and business data; rerunning startup must leave definitions, revisions and grants intact. Do not recreate databases, suppress errors or change existing Domain semantics.",
@@ -36,7 +36,7 @@
   "validation_profile": "safe",
   "completion_mode": "build",
   "max_attempts": 3,
-  "attempts": 0,
+  "attempts": 1,
   "auto_start": true,
   "requires_human_approval": false,
   "human_gate": {

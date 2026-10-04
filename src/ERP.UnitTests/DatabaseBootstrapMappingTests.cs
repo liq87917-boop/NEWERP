@@ -77,4 +77,94 @@ public class DatabaseBootstrapMappingTests
         var withoutPluralTarget = source.Replace("db_owner.ContainerBookings", string.Empty, StringComparison.Ordinal);
         Assert.DoesNotContain("db_owner.ContainerBooking", withoutPluralTarget, StringComparison.Ordinal);
     }
+
+    // ==================== ERP-281：报表配置三表引导映射（离线） ====================
+
+    /// <summary>SchemaUpgrader 第 47 段补齐的报表配置索引名（与 <see cref="ErpDbContext.Reporting"/> 映射一致）。</summary>
+    private static readonly string[] ReportIndexNames =
+    {
+        "IX_ReportConfigurations_OwnerUserId_IsDeleted",
+        "UX_ReportConfigurationRevisions_ConfigurationId_Version",
+        "IX_ReportConfigurationRevisions_ConfigurationId",
+        "UX_ReportConfigurationGrants_Recipient_Configuration",
+        "IX_ReportConfigurationGrants_ConfigurationId_IsDeleted",
+        "IX_ReportConfigurationGrants_RecipientUserId_IsDeleted",
+    };
+
+    /// <summary>EF 映射：报表配置三表必须落在 <c>db_owner</c> 下，列长 / 并发令牌 / 索引 / 级联外键与领域一致。</summary>
+    [Fact]
+    public void EF模型映射_报表配置三表映射到db_owner且列索引关系一致()
+    {
+        var options = new DbContextOptionsBuilder<ErpDbContext>()
+            .UseSqlServer("Server=localhost;Database=__offline_bootstrap__;Trusted_Connection=True;Encrypt=False;")
+            .Options;
+        using var db = new ErpDbContext(options);
+
+        // 私有报表配置
+        var configType = db.Model.FindEntityType(typeof(ReportConfiguration));
+        Assert.NotNull(configType);
+        Assert.Equal("ReportConfigurations", configType!.GetTableName());
+        Assert.Equal("db_owner", configType.GetSchema());
+        Assert.Equal(200, configType.FindProperty(nameof(ReportConfiguration.Name))!.GetMaxLength());
+        Assert.Equal(50, configType.FindProperty(nameof(ReportConfiguration.DatasetKey))!.GetMaxLength());
+        Assert.Equal("nvarchar(max)", configType.FindProperty(nameof(ReportConfiguration.DefinitionJson))!.GetColumnType());
+        Assert.True(configType.FindProperty(nameof(ReportConfiguration.Version))!.IsConcurrencyToken);
+        Assert.Contains(configType.GetIndexes(),
+            i => i.Properties.Select(p => p.Name).SequenceEqual(new[] { "OwnerUserId", "IsDeleted" }));
+
+        // 不可变发布修订快照
+        var revisionType = db.Model.FindEntityType(typeof(ReportConfigurationRevision));
+        Assert.NotNull(revisionType);
+        Assert.Equal("ReportConfigurationRevisions", revisionType!.GetTableName());
+        Assert.Equal("db_owner", revisionType.GetSchema());
+        Assert.Equal(200, revisionType.FindProperty(nameof(ReportConfigurationRevision.Name))!.GetMaxLength());
+        Assert.Equal(50, revisionType.FindProperty(nameof(ReportConfigurationRevision.DatasetKey))!.GetMaxLength());
+        Assert.Contains(revisionType.GetIndexes(),
+            i => i.IsUnique && i.Properties.Select(p => p.Name).SequenceEqual(new[] { "ReportConfigurationId", "Version" }));
+        var revisionFk = Assert.Single(revisionType.GetForeignKeys());
+        Assert.Equal(typeof(ReportConfiguration), revisionFk.PrincipalEntityType.ClrType);
+        Assert.Equal(DeleteBehavior.Cascade, revisionFk.DeleteBehavior);
+
+        // 只读共享授权
+        var grantType = db.Model.FindEntityType(typeof(ReportConfigurationGrant));
+        Assert.NotNull(grantType);
+        Assert.Equal("ReportConfigurationGrants", grantType!.GetTableName());
+        Assert.Equal("db_owner", grantType.GetSchema());
+        Assert.True(grantType.FindProperty(nameof(ReportConfigurationGrant.Version))!.IsConcurrencyToken);
+
+        var uniqueGrantIndex = grantType.GetIndexes().Single(
+            i => i.IsUnique && i.Properties.Select(p => p.Name).SequenceEqual(new[] { "RecipientUserId", "ReportConfigurationId" }));
+        Assert.Equal("[IsDeleted] = 0", uniqueGrantIndex.GetFilter());
+
+        Assert.Contains(grantType.GetIndexes(),
+            i => i.Properties.Select(p => p.Name).SequenceEqual(new[] { "ReportConfigurationId", "IsDeleted" }));
+        Assert.Contains(grantType.GetIndexes(),
+            i => i.Properties.Select(p => p.Name).SequenceEqual(new[] { "RecipientUserId", "IsDeleted" }));
+        var grantFk = Assert.Single(grantType.GetForeignKeys());
+        Assert.Equal(typeof(ReportConfiguration), grantFk.PrincipalEntityType.ClrType);
+        Assert.Equal(DeleteBehavior.Cascade, grantFk.DeleteBehavior);
+    }
+
+    /// <summary>升级器第 47 段：报表配置三表只做复数表名的幂等补齐，绝不残留单数 <c>db_owner.ReportConfiguration</c> 目标。</summary>
+    [Fact]
+    public void SchemaUpgrader第47段_报表三表幂等补齐且无单数残留()
+    {
+        var source = File.ReadAllText(SchemaUpgraderPath());
+
+        Assert.Contains("IF OBJECT_ID('db_owner.ReportConfigurations') IS NULL", source);
+        Assert.Contains("IF OBJECT_ID('db_owner.ReportConfigurationRevisions') IS NULL", source);
+        Assert.Contains("IF OBJECT_ID('db_owner.ReportConfigurationGrants') IS NULL", source);
+
+        foreach (var indexName in ReportIndexNames)
+        {
+            Assert.Contains(indexName, source);
+        }
+
+        Assert.Contains("FK_ReportConfigurationRevisions_ReportConfigurations_ReportConfigurationId", source);
+        Assert.Contains("FK_ReportConfigurationGrants_ReportConfigurations_ReportConfigurationId", source);
+
+        // 无单数 db_owner.ReportConfiguration 表目标残留（三表都是 ReportConfigurations / Revisions / Grants 后缀）
+        Assert.DoesNotContain("'db_owner.ReportConfiguration'", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("db_owner.ReportConfiguration ", source, StringComparison.Ordinal);
+    }
 }

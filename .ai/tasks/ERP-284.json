@@ -1,0 +1,58 @@
+{
+  "id": "ERP-284",
+  "title": "Return controlled conflicts for concurrent report lifecycle mutations",
+  "status": "pending",
+  "description": "Stage 1 generic reporting platform error/query-boundary increment. Code inspection verifies this gap: lifecycle controller calls omit existing cancellation tokens; workspace fetch has no AbortController; lifecycle services directly SaveChangesAsync without mapping EF concurrency failures. Implement only the gap named in this title. Preserve concurrent work, established report contracts and existing ERP permissions. No bespoke report, new dataset, Agent, deployment, production connection, secrets or .env changes. Domain entities and EF mappings already support existing tokens and require no modification.",
+  "acceptance_criteria": [
+    "Map actual EF DbUpdateConcurrencyException from private report update, rename, delete, publish and restore plus existing-grant pin/revoke writes to the existing RuleConflict business response with a refresh/retry message. Preserve expected-version and rowversion checks; never automatically retry an unsafe stale mutation or overwrite the winning state. New-grant unique-insert races and unrelated database exceptions are outside this increment.",
+    "Ensure failed publication/restore cannot leave an extra immutable revision and losing grant/delete mutations cannot change the winning row. Preserve application permissions and audit attribution, and do not expose provider messages, connection strings or SQL. Other database faults retain their existing failure semantics.",
+    "Use deterministic two-context SQL concurrency coverage against the exact isolated localdb NEWERP_AutoAcceptance instance and NEWERP_AUTOTEST-prefixed database, guarded before writes; test winner state/version, loser RuleConflict, no phantom publication revision and grant pin/revoke conflicts. Add focused offline regression tests and run filtered real SQL tests, existing safe Release build/test and scheduler self-test/contracts. No production or schema execution."
+  ],
+  "criterion_path_map": {
+    "Map actual EF DbUpdateConcurrencyException from private report update, rename, delete, publish and restore plus existing-grant pin/revoke writes to the existing RuleConflict business response with a refresh/retry message. Preserve expected-version and rowversion checks; never automatically retry an unsafe stale mutation or overwrite the winning state. New-grant unique-insert races and unrelated database exceptions are outside this increment.": [
+      "src/ERP.Application/Services/ReportConfigurationService.cs",
+      "src/ERP.Application/Services/ReportConfigurationSharingService.cs",
+      "src/ERP.UnitTests/ReportConfigurationConcurrencyTests.cs",
+      "src/ERP.IntegrationTests/ReportConfigurationConcurrencySqlServerTests.cs"
+    ],
+    "Ensure failed publication/restore cannot leave an extra immutable revision and losing grant/delete mutations cannot change the winning row. Preserve application permissions and audit attribution, and do not expose provider messages, connection strings or SQL. Other database faults retain their existing failure semantics.": [
+      "src/ERP.Application/Services/ReportConfigurationService.cs",
+      "src/ERP.Application/Services/ReportConfigurationSharingService.cs",
+      "src/ERP.UnitTests/ReportConfigurationConcurrencyTests.cs",
+      "src/ERP.IntegrationTests/ReportConfigurationConcurrencySqlServerTests.cs"
+    ],
+    "Use deterministic two-context SQL concurrency coverage against the exact isolated localdb NEWERP_AutoAcceptance instance and NEWERP_AUTOTEST-prefixed database, guarded before writes; test winner state/version, loser RuleConflict, no phantom publication revision and grant pin/revoke conflicts. Add focused offline regression tests and run filtered real SQL tests, existing safe Release build/test and scheduler self-test/contracts. No production or schema execution.": [
+      "src/ERP.Application/Services/ReportConfigurationService.cs",
+      "src/ERP.Application/Services/ReportConfigurationSharingService.cs",
+      "src/ERP.UnitTests/ReportConfigurationConcurrencyTests.cs",
+      "src/ERP.IntegrationTests/ReportConfigurationConcurrencySqlServerTests.cs"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Application/Services/ReportConfigurationService.cs",
+    "src/ERP.Application/Services/ReportConfigurationSharingService.cs",
+    "src/ERP.UnitTests/ReportConfigurationConcurrencyTests.cs",
+    "src/ERP.IntegrationTests/ReportConfigurationConcurrencySqlServerTests.cs"
+  ],
+  "depends_on": [
+    "ERP-283"
+  ],
+  "risk": "medium",
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "max_attempts": 3,
+  "attempts": 0,
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required",
+    "reason": "User-authorized isolated development increment."
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-04T08:21:44.776021Z"
+}

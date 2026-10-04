@@ -1,0 +1,54 @@
+{
+  "id": "ERP-283",
+  "title": "Allow users to cancel generic report preview and export requests",
+  "status": "pending",
+  "description": "Stage 1 generic reporting platform error/query-boundary increment. Code inspection verifies this gap: lifecycle controller calls omit existing cancellation tokens; workspace fetch has no AbortController; lifecycle services directly SaveChangesAsync without mapping EF concurrency failures. Implement only the gap named in this title. Preserve concurrent work, established report contracts and existing ERP permissions. No bespoke report, new dataset, Agent, deployment, production connection, secrets or .env changes. Domain entities and EF mappings already support existing tokens and require no modification.",
+  "acceptance_criteria": [
+    "The common report workspace exposes a cancel action during preview, Excel and PDF requests using AbortController and request-scoped signals. Cancel releases local busy controls immediately, preserves saved definition and unsaved edits, and allows a subsequent operation. Never add cancellation to already-committed lifecycle writes or broaden permissions.",
+    "Late responses or export blobs from superseded/cancelled operations cannot replace the current preview, trigger downloads, show success or clear a newer operation busy state. Switching/leaving the workspace disposes active read/export requests. An explicit cancelled result is distinct from authorization, validation and network errors. Reuse existing server cancellation/query budgets.",
+    "Add meaningful executable workspace-state coverage for cancel before headers, during export blob read, late response, re-entry, next operation success and normal errors. Preserve existing UI and export tests. Run JS syntax checks, focused tests, safe Release build/test and scheduler contracts; real browser acceptance remains a separate genuine phase gate."
+  ],
+  "criterion_path_map": {
+    "The common report workspace exposes a cancel action during preview, Excel and PDF requests using AbortController and request-scoped signals. Cancel releases local busy controls immediately, preserves saved definition and unsaved edits, and allows a subsequent operation. Never add cancellation to already-committed lifecycle writes or broaden permissions.": [
+      "src/ERP.Api/wwwroot/js/report-configuration.js",
+      "src/ERP.UnitTests/ReportConfigurationUiTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationUiCancellationTests.cs"
+    ],
+    "Late responses or export blobs from superseded/cancelled operations cannot replace the current preview, trigger downloads, show success or clear a newer operation busy state. Switching/leaving the workspace disposes active read/export requests. An explicit cancelled result is distinct from authorization, validation and network errors. Reuse existing server cancellation/query budgets.": [
+      "src/ERP.Api/wwwroot/js/report-configuration.js",
+      "src/ERP.UnitTests/ReportConfigurationUiTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationUiCancellationTests.cs"
+    ],
+    "Add meaningful executable workspace-state coverage for cancel before headers, during export blob read, late response, re-entry, next operation success and normal errors. Preserve existing UI and export tests. Run JS syntax checks, focused tests, safe Release build/test and scheduler contracts; real browser acceptance remains a separate genuine phase gate.": [
+      "src/ERP.Api/wwwroot/js/report-configuration.js",
+      "src/ERP.UnitTests/ReportConfigurationUiTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationUiCancellationTests.cs"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Api/wwwroot/js/report-configuration.js",
+    "src/ERP.UnitTests/ReportConfigurationUiTests.cs",
+    "src/ERP.UnitTests/ReportConfigurationUiCancellationTests.cs"
+  ],
+  "depends_on": [
+    "ERP-282"
+  ],
+  "risk": "low",
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "max_attempts": 3,
+  "attempts": 0,
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required",
+    "reason": "User-authorized isolated development increment."
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-04T08:21:44.774991Z"
+}
