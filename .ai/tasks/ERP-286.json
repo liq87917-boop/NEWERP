@@ -1,0 +1,53 @@
+{
+  "id": "ERP-286",
+  "title": "Expose the generic report workspace through permission-aware ERP navigation",
+  "status": "pending",
+  "description": "Stage 1 functional reachability defect found during real browser acceptance: app.js dispatches report-configuration but renderMenu only consumes PROFILE.menus, and no seed menu has this code. Isolated admin catalog contains sales-order and receivable yet no visible workspace entry. Add an authorized generic launch point using existing server catalog, without permission expansion or schema/seed changes. No bespoke report, Agent, stage-2 entrance switch, production or secrets changes. Existing Domain/Application/Infrastructure/API contracts suffice.",
+  "acceptance_criteria": [
+    "A user with at least one backend-authorized common report dataset can reach the existing unified reporting workspace from normal ERP navigation after login. Real isolated browser validation proves the admin sidebar currently has no report-configuration entry even though the render route and API are implemented. Integrate one generic entry, not a dedicated report menu per dataset, using current catalog authorization and existing navigation/tab lifecycle. Do not invent a new ERP permission, grant a role/menu or replace old report entries before stage 2.",
+    "Users with no authorized datasets receive no actionable report entry; catalog failure, revoked access, logout/login and repeated menu rendering fail closed and do not retain stale entries or duplicate tabs. Backend dataset/owner/recipient/row-column checks remain authoritative. Preserve existing sidebar, menus, tab selection and report request cancellation on leaving the workspace.",
+    "Add executable navigation tests for authorized/non-authorized catalogs, failure, logout/re-entry and duplicate prevention, preserving existing UI contracts. Run safe Release build/test and scheduler self-test/contracts; then verify genuine isolated browser login and opening the workspace through the visible entry. Do not claim full first-stage acceptance from that navigation check."
+  ],
+  "criterion_path_map": {
+    "A user with at least one backend-authorized common report dataset can reach the existing unified reporting workspace from normal ERP navigation after login. Real isolated browser validation proves the admin sidebar currently has no report-configuration entry even though the render route and API are implemented. Integrate one generic entry, not a dedicated report menu per dataset, using current catalog authorization and existing navigation/tab lifecycle. Do not invent a new ERP permission, grant a role/menu or replace old report entries before stage 2.": [
+      "src/ERP.Api/wwwroot/js/app.js",
+      "src/ERP.UnitTests/ReportConfigurationUiTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationNavigationTests.cs"
+    ],
+    "Users with no authorized datasets receive no actionable report entry; catalog failure, revoked access, logout/login and repeated menu rendering fail closed and do not retain stale entries or duplicate tabs. Backend dataset/owner/recipient/row-column checks remain authoritative. Preserve existing sidebar, menus, tab selection and report request cancellation on leaving the workspace.": [
+      "src/ERP.Api/wwwroot/js/app.js",
+      "src/ERP.UnitTests/ReportConfigurationUiTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationNavigationTests.cs"
+    ],
+    "Add executable navigation tests for authorized/non-authorized catalogs, failure, logout/re-entry and duplicate prevention, preserving existing UI contracts. Run safe Release build/test and scheduler self-test/contracts; then verify genuine isolated browser login and opening the workspace through the visible entry. Do not claim full first-stage acceptance from that navigation check.": [
+      "src/ERP.Api/wwwroot/js/app.js",
+      "src/ERP.UnitTests/ReportConfigurationUiTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationNavigationTests.cs"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Api/wwwroot/js/app.js",
+    "src/ERP.UnitTests/ReportConfigurationUiTests.cs",
+    "src/ERP.UnitTests/ReportConfigurationNavigationTests.cs"
+  ],
+  "depends_on": [
+    "ERP-285"
+  ],
+  "risk": "low",
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "max_attempts": 3,
+  "attempts": 0,
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-04T09:21:33.262908Z"
+}

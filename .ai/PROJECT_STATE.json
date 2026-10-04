@@ -1,10 +1,12 @@
 {
   "schema_version": 2,
   "project": "NEWERP",
-  "updated_at": "2026-10-04T09:07:10.212355Z",
+  "updated_at": "2026-10-04T09:21:33.397093Z",
   "phase": "ready",
   "current_task": null,
-  "queue": [],
+  "queue": [
+    "ERP-286"
+  ],
   "completed": [
     "ERP-000",
     "ERP-001",
@@ -289,16 +291,20 @@
   },
   "git_sync": {
     "branch": "main",
-    "local_sha": "7942b07",
+    "local_sha": "a462811",
     "status": "synced",
     "ahead": 0,
     "behind": 0,
     "last_attempt_at": "2026-10-04T09:07:10.089788Z",
     "last_error": null
   },
-  "next_recommended_tasks": [],
+  "next_recommended_tasks": [
+    "ERP-286"
+  ],
   "runner": {
     "status": "stopped",
     "pid": null
-  }
+  },
+  "blocker": null,
+  "finish_reason": "verified_stage1_navigation_defect_queued"
 }
