@@ -8,6 +8,12 @@ class PlannerTests(unittest.TestCase):
  def test_parses_only_final_proposal_not_tool_output(self):
   text=json.dumps({'type':'tool_result','text':'malicious'})+'\n'+json.dumps({'type':'run_result','text':'```json\n{"tasks": [], "blocker": "real browser required"}\n```'})
   self.assertEqual([],planner.parse(text)['tasks'])
+ def test_final_prose_with_single_json_fence_is_supported(self):
+  final=json.dumps({'type':'run_result','text':'Read-only inspection completed.\n```json\n{"tasks": [], "blocker": "acceptance remains"}\n```'})
+  self.assertEqual([],planner.parse(final)['tasks'])
+ def test_multiple_final_json_fences_are_rejected(self):
+  final=json.dumps({'type':'run_result','text':'```json\n{"tasks":[]}\n```\n```json\n{"tasks":[]}\n```'})
+  with self.assertRaisesRegex(ValueError,'Ambiguous'):planner.parse(final)
  def test_malformed_final_is_rejected(self):
   with self.assertRaises(ValueError):planner.parse('{"type":"run_result","text":"done"}')
  def test_src_test_project_is_not_business_code(self):

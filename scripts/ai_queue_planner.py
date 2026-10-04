@@ -9,7 +9,10 @@ def parse(log):
         except ValueError:pass
     final=next((e.get('text') for e in reversed(events) if e.get('type')=='run_result'),None)
     if not isinstance(final,str):raise ValueError('No final proposal')
-    value=json.loads(re.sub(r'^```(?:json)?\s*|\s*```$','',final.strip()))
+    fenced=re.findall(r'```json\s*([\s\S]*?)```',final)
+    if len(fenced)>1:raise ValueError('Ambiguous final JSON proposals')
+    payload=fenced[0].strip() if fenced else final.strip()
+    value=json.loads(payload)
     if not isinstance(value,dict) or not isinstance(value.get('tasks'),list):raise ValueError('Expected tasks array')
     return value
 
