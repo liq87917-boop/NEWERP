@@ -280,7 +280,7 @@ public class ReportConfigurationsController : ControllerBase
     public async Task<IActionResult> Preview([FromBody] ReportConfigurationPreviewRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
-        var result = await _execution.PreviewAsync(CurrentUserId(), request);
+        var result = await WithRequestCancellationAsync(ct => _execution.PreviewAsync(CurrentUserId(), request, ct));
         return Ok(ApiResponse<ReportConfigurationPreviewDto>.Success(result));
     }
 

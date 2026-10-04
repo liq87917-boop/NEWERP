@@ -34,7 +34,7 @@
   "planning_stage": 1,
   "implementation_evidence": "src/ERP.Api/Controllers/ReportConfigurationsController.cs:279-285 [HttpPost(\"preview\")] calls _execution.PreviewAsync(CurrentUserId(), request) with no CancellationToken (default None), while all other endpoints wrap via WithRequestCancellationAsync (e.g. Catalog :114, Create :139, Shared :230) and export passes HttpContext.RequestAborted via ExportBoundedAsync (:318-323); src/ERP.Application/Interfaces/IReportConfigurationExecutionService.cs:18-21 exposes PreviewAsync(long, ReportConfigurationPreviewRequest, CancellationToken cancellationToken = default); src/ERP.Application/Services/ReportConfigurationExecutionService.cs:53-66 forwards that token into _budget.ExecuteAsync, so preview currently runs with CancellationToken.None and only the 30s deadline (src/ERP.Application/Services/ReportConfigurationExecutionBudget.cs:333-334 linked deadline token) can stop it; src/ERP.UnitTests/ReportConfigurationRequestCancellationTests.cs covers Create/Publish/Grant/Update cancellation but has no preview-endpoint token assertion.",
   "id": "ERP-291",
-  "status": "in_progress",
+  "status": "completed",
   "attempts": 1,
   "max_attempts": 3,
   "validation_profile": "safe",

@@ -92,6 +92,15 @@ public class ReportConfigurationRequestCancellationTests
             new ReportConfigurationExecutionService(db, BuildProviders(db)),
             new ReportConfigurationSharingService(db, new ReportConfigurationCatalog(BuildProviders(db))));
 
+    private static ReportConfigurationsController BuildControllerWithBudget(
+        ErpDbContext db, IReportConfigurationExecutionBudget budget)
+        => new(
+            new ReportConfigurationCatalog(BuildProviders(db)),
+            new ReportConfigurationService(db, new ReportConfigurationCatalog(BuildProviders(db))),
+            new ReportConfigurationExecutionService(db, BuildProviders(db), budget: budget),
+            new ReportConfigurationSharingService(db, new ReportConfigurationCatalog(BuildProviders(db))),
+            budget);
+
     private static ReportConfigurationSaveDto SaveDto(string name)
         => new() { Name = name, Definition = SalesOrderDefinition() };
 
@@ -223,15 +232,53 @@ public class ReportConfigurationRequestCancellationTests
             => Task.FromResult<ReportConfigurationExportResultDto>(null!);
     }
 
+    private sealed class RecordingExecution : IReportConfigurationExecutionService
+    {
+        public CancellationToken LastToken { get; private set; }
+
+        public Task<ReportConfigurationPreviewDto> PreviewAsync(long ownerUserId, ReportConfigurationPreviewRequest request, CancellationToken cancellationToken = default)
+        {
+            LastToken = cancellationToken;
+            return Task.FromResult<ReportConfigurationPreviewDto>(null!);
+        }
+
+        public Task<ReportConfigurationPreviewDto> PreviewAsync(long ownerUserId, ReportConfigurationPreviewRequest request, IReportConfigurationExecutionLease lease)
+            => Task.FromResult<ReportConfigurationPreviewDto>(null!);
+
+        public Task<ReportConfigurationExportResultDto> BuildExportResultAsync(long ownerUserId, ReportConfigurationPreviewRequest request, IReportConfigurationExecutionLease lease)
+            => Task.FromResult<ReportConfigurationExportResultDto>(null!);
+    }
+
+    private sealed class SentinelExecutionDatasetProvider : IReportConfigurationDatasetProvider
+    {
+        public bool PreviewInvoked { get; private set; }
+
+        public string DatasetKey => ReportConfigurationConstants.DatasetSalesOrder;
+
+        public Task<ReportConfigurationDatasetDto?> GetDatasetAsync(long? userId, CancellationToken cancellationToken = default)
+            => Task.FromResult<ReportConfigurationDatasetDto?>(null);
+
+        public Task<ReportConfigurationPreviewDto> PreviewAsync(
+            ReportConfigurationDefinition definition,
+            ReportConfigurationPreviewParameters parameters,
+            long? userId,
+            CancellationToken cancellationToken = default)
+        {
+            PreviewInvoked = true;
+            throw new InvalidOperationException("数据集查询不应在预取消请求中执行");
+        }
+    }
+
     private static ReportConfigurationsController BuildRecordingController(
         RecordingCatalog catalog,
         RecordingService service,
         RecordingSharing sharing,
         RecordingTransfer transfer,
-        long userId)
+        long userId,
+        IReportConfigurationExecutionService? execution = null)
     {
         var ctl = new ReportConfigurationsController(
-            catalog, service, new StubExecution(), sharing, transfer: transfer);
+            catalog, service, execution ?? new StubExecution(), sharing, transfer: transfer);
         TestAuth.SetUser(ctl, userId);
         return ctl;
     }
@@ -345,6 +392,19 @@ public class ReportConfigurationRequestCancellationTests
         Assert.Equal(cts.Token, transfer.LastToken);
     }
 
+    [Fact]
+    public async Task Preview_传递RequestAborted给预览接口()
+    {
+        var execution = new RecordingExecution();
+        var ctl = BuildRecordingController(new RecordingCatalog(), new RecordingService(), new RecordingSharing(), new RecordingTransfer(), 42, execution);
+        using var cts = new CancellationTokenSource();
+        ctl.HttpContext.RequestAborted = cts.Token;
+
+        await ctl.Preview(new ReportConfigurationPreviewRequest { ConfigurationId = 1 });
+
+        Assert.Equal(cts.Token, execution.LastToken);
+    }
+
     // ==================== 3. 预取消：开始工作前不落草稿 / 修订 / 授权 ====================
 
     [Fact]
@@ -399,6 +459,27 @@ public class ReportConfigurationRequestCancellationTests
         Assert.Empty(db.ReportConfigurationGrants);
     }
 
+    [Fact]
+    public async Task Preview_预取消_抛已取消且不执行数据集查询()
+    {
+        using var db = TestDbFactory.Create();
+        var sentinel = new SentinelExecutionDatasetProvider();
+        var providers = new IReportConfigurationDatasetProvider[] { sentinel };
+        var ctl = new ReportConfigurationsController(
+            new ReportConfigurationCatalog(providers),
+            new ReportConfigurationService(db, new ReportConfigurationCatalog(providers)),
+            new ReportConfigurationExecutionService(db, providers),
+            new ReportConfigurationSharingService(db, new ReportConfigurationCatalog(providers)));
+        TestAuth.SetUser(ctl, 42);
+        ctl.HttpContext.RequestAborted = new CancellationToken(canceled: true);
+
+        var ex = await Assert.ThrowsAsync<BusinessException>(() =>
+            ctl.Preview(new ReportConfigurationPreviewRequest { ConfigurationId = 123 }));
+
+        Assert.Equal(ReportConfigurationExecutionLimits.ErrorCodeCancelled, ex.Code);
+        Assert.False(sentinel.PreviewInvoked);
+    }
+
     // ==================== 4. 未取消正常成功 & 非取消失败不误判 ====================
 
     [Fact]
@@ -433,5 +514,46 @@ public class ReportConfigurationRequestCancellationTests
         var ex = await Assert.ThrowsAsync<BusinessException>(() => ctl.Update(id, 999, SaveDto("改名")));
 
         Assert.Equal(ErrorCodes.RuleConflict, ex.Code);
+    }
+
+    [Fact]
+    public async Task Preview_未取消_正常成功()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedAuthorizedUser(db, "owner", "sales-order");
+        var ctl = BuildController(db);
+        TestAuth.SetUser(ctl, user);
+        using var cts = new CancellationTokenSource();
+        ctl.HttpContext.RequestAborted = cts.Token;
+
+        var id = CreatedId(await ctl.Create(SaveDto("草稿")));
+
+        var result = await ctl.Preview(new ReportConfigurationPreviewRequest { ConfigurationId = id });
+
+        var resp = Assert.IsType<ApiResponse<ReportConfigurationPreviewDto>>(Assert.IsType<OkObjectResult>(result).Value);
+        Assert.NotNull(resp.Data);
+    }
+
+    [Fact]
+    public async Task Preview_非取消_繁忙_仍按繁忙拒绝而非取消()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedAuthorizedUser(db, "owner", "sales-order");
+        var service = new ReportConfigurationService(db, new ReportConfigurationCatalog(BuildProviders(db)));
+        var created = await service.CreateAsync(user, SaveDto("草稿"));
+
+        var budget = new ReportConfigurationExecutionBudget();
+        var ctl = BuildControllerWithBudget(db, budget);
+        TestAuth.SetUser(ctl, user);
+        using var cts = new CancellationTokenSource();
+        ctl.HttpContext.RequestAborted = cts.Token;
+
+        using var first = budget.Acquire(user);
+        using var second = budget.Acquire(user);
+
+        var ex = await Assert.ThrowsAsync<BusinessException>(() =>
+            ctl.Preview(new ReportConfigurationPreviewRequest { ConfigurationId = created.Id }));
+
+        Assert.Equal(ReportConfigurationExecutionLimits.ErrorCodeBusy, ex.Code);
     }
 }
