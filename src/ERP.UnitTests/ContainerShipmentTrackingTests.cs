@@ -731,7 +731,7 @@ public class ContainerShipmentTrackingTests
             "Etd", "Eta", "Atd", "Ata", "TruckerName", "CustomsBrokerId", "CustomsBrokerName",
             "InspectionRequired", "InspectionDate", "CustomsReleaseDate" })
         {
-            Assert.Contains($"IF COL_LENGTH('db_owner.ContainerBooking', '{column}') IS NULL", sql);
+            Assert.Contains($"IF COL_LENGTH('db_owner.ContainerBookings', '{column}') IS NULL", sql);
             Assert.Contains($"ADD {column} ", sql);
         }
 
@@ -743,7 +743,7 @@ public class ContainerShipmentTrackingTests
         Assert.Contains("ADD InspectionRequired BIT NULL;", sql);
 
         // 不回填历史数据、不臆造任何日期，也不给预装柜单 / 装柜清单另加跟踪列
-        Assert.DoesNotContain("UPDATE db_owner.ContainerBooking SET", sql);
+        Assert.DoesNotContain("UPDATE db_owner.ContainerBookings SET", sql);
         Assert.DoesNotContain("ALTER TABLE db_owner.ContainerPreLoading", sql);
         Assert.DoesNotContain("ALTER TABLE db_owner.ContainerLoadingList", sql);
     }

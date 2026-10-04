@@ -1,11 +1,10 @@
 {
   "schema_version": 2,
   "project": "NEWERP",
-  "updated_at": "2026-10-04T08:07:17.002880Z",
+  "updated_at": "2026-10-04T08:07:59.781501Z",
   "phase": "ready",
   "current_task": null,
   "queue": [
-    "ERP-280",
     "ERP-281"
   ],
   "completed": [
@@ -266,22 +265,19 @@
     "ERP-276",
     "ERP-277",
     "ERP-278",
-    "ERP-279"
+    "ERP-279",
+    "ERP-280"
   ],
   "blocked": [],
   "last_build": {
     "task": "ERP-280",
     "profile": "safe",
-    "status": "failed",
-    "exit_code": 1,
-    "log": ".ai\\logs\\ERP-280-validation-2.log",
-    "at": "2026-10-04T08:01:40.956465Z"
+    "status": "passed",
+    "exit_code": 0,
+    "log": ".ai\\logs\\ERP-280-validation-1.log",
+    "at": "2026-10-04T08:07:59.162368Z"
   },
-  "last_error": {
-    "task": "ERP-280",
-    "kind": "automatic_repair_pending",
-    "summary": "Path guard failed:\noutside allowed_paths: src/ERP.UnitTests/ContainerShipmentTrackingTests.cs"
-  },
+  "last_error": null,
   "last_deepseek_fix": {
     "task": "ERP-280",
     "attempts": 3,
@@ -290,21 +286,18 @@
   },
   "git_sync": {
     "branch": "main",
-    "local_sha": "a3a989d",
+    "local_sha": "1ead997",
     "status": "pending",
-    "ahead": 44,
+    "ahead": 45,
     "behind": 3,
-    "last_attempt_at": "2026-10-04T06:53:58.407368Z",
-    "last_error": "push_failed"
+    "last_attempt_at": "2026-10-04T08:07:59.660606Z",
+    "last_error": null
   },
   "next_recommended_tasks": [
-    "ERP-280",
     "ERP-281"
   ],
   "runner": {
     "status": "stopped",
     "pid": null
-  },
-  "blocker": null,
-  "finish_reason": "autonomous_scope_correction_and_stage1_supply"
+  }
 }
