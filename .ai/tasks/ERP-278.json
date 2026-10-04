@@ -1,0 +1,62 @@
+{
+  "id": "ERP-278",
+  "title": "Preserve conjunctive semantics for repeated common report filters",
+  "status": "pending",
+  "risk_level": "low",
+  "description": "Stage 1 unified report configuration engine correctness increment. Verified ValidateFilters validates each predicate independently; both MapFilters methods assign repeated CustomerId/Currency/status equality values into one request, while ApplyDateFilter replaces start/end instead of intersecting prior bounds. This can broaden an earlier configured restriction depending on row order. Repair common rules and controlled translation as a single generic task; do not build bespoke report functionality. Reuse current identity/menu/field/row/data scope and existing OperationLogMiddleware audit and BusinessException error handling. No arbitrary SQL, extra joins, schema/entity/persistence changes, migration, SchemaUpgrader/SeedData edit, real database execution, production SQL, secrets/.env/config changes, deployment, Agent work, other business modules or irreversible operations. Date bounds at calendar extremes must fail safely without overflow. Preserve unrelated work and prior definitions where semantics are representable; otherwise explicitly reject and explain conflict. Existing adapters are offline engine verification only, not Stage 2 migration. Safe build/test plus meaningful behavior tests required; real database/browser acceptance must remain explicitly environment blocked.",
+  "acceptance_criteria": [
+    "Repeated configured predicates never use last-write-wins. Shared controlled translation intersects every date lower/upper/eq/between predicate irrespective of input order and preserves inclusive/exclusive calendar-day semantics. Repeated scalar equality values are either identical and coalesced or conflicting and rejected as an invalid definition before source reads. Contradictory or unrepresentable conjunctions fail closed with actionable errors, never silently drop a predicate.",
+    "Common saved/imported/published/shared definition validation and preview, matched summaries and Excel/PDF execution preserve conjunctive semantics through the existing controlled provider contracts. The existing sales-order and receivable adapters serve only as common engine fixtures. Fresh row/column/menu/data scope remains mandatory; no new special report API, client SQL or expanded permissions. Invalid definitions use existing BusinessException error/audit behavior, with no partial output or query widening.",
+    "Offline rules/provider/execution fixtures verify permutations of repeated date bounds, eq plus range, gt/lt, equal and conflicting scalar predicates, disjoint ranges and invalid boundary dates before source reads; compare page and matched snapshot filter behavior and existing single-filter compatibility. Focused tests and safe Release build/test pass. Real SQL Server/browser acceptance remains environment blocked when unavailable; no whole-phase completion claim."
+  ],
+  "criterion_path_map": {
+    "Repeated configured predicates never use last-write-wins. Shared controlled translation intersects every date lower/upper/eq/between predicate irrespective of input order and preserves inclusive/exclusive calendar-day semantics. Repeated scalar equality values are either identical and coalesced or conflicting and rejected as an invalid definition before source reads. Contradictory or unrepresentable conjunctions fail closed with actionable errors, never silently drop a predicate.": [
+      "src/ERP.Application/Services/ReportConfigurationRules.cs",
+      "src/ERP.Infrastructure/Reports/ReportConfigurationDatasetProvider.cs",
+      "src/ERP.UnitTests/ReportConfigurationFilterConjunctionTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationRulesTests.cs"
+    ],
+    "Common saved/imported/published/shared definition validation and preview, matched summaries and Excel/PDF execution preserve conjunctive semantics through the existing controlled provider contracts. The existing sales-order and receivable adapters serve only as common engine fixtures. Fresh row/column/menu/data scope remains mandatory; no new special report API, client SQL or expanded permissions. Invalid definitions use existing BusinessException error/audit behavior, with no partial output or query widening.": [
+      "src/ERP.Application/Services/ReportConfigurationRules.cs",
+      "src/ERP.Infrastructure/Reports/ReportConfigurationDatasetProvider.cs",
+      "src/ERP.UnitTests/ReportConfigurationFilterConjunctionTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationExecutionTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationSnapshotTests.cs"
+    ],
+    "Offline rules/provider/execution fixtures verify permutations of repeated date bounds, eq plus range, gt/lt, equal and conflicting scalar predicates, disjoint ranges and invalid boundary dates before source reads; compare page and matched snapshot filter behavior and existing single-filter compatibility. Focused tests and safe Release build/test pass. Real SQL Server/browser acceptance remains environment blocked when unavailable; no whole-phase completion claim.": [
+      "src/ERP.Application/Services/ReportConfigurationRules.cs",
+      "src/ERP.Infrastructure/Reports/ReportConfigurationDatasetProvider.cs",
+      "src/ERP.UnitTests/ReportConfigurationFilterConjunctionTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationRulesTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationExecutionTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationSnapshotTests.cs"
+    ]
+  },
+  "allowed_paths": [
+    "src/ERP.Application/Services/ReportConfigurationRules.cs",
+    "src/ERP.Infrastructure/Reports/ReportConfigurationDatasetProvider.cs",
+    "src/ERP.UnitTests/ReportConfigurationFilterConjunctionTests.cs",
+    "src/ERP.UnitTests/ReportConfigurationRulesTests.cs",
+    "src/ERP.UnitTests/ReportConfigurationExecutionTests.cs",
+    "src/ERP.UnitTests/ReportConfigurationSnapshotTests.cs"
+  ],
+  "depends_on": [
+    "ERP-277"
+  ],
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "human_gate": {
+    "required": false,
+    "status": "not_required",
+    "level": "L1"
+  },
+  "attempts": 0,
+  "created_at": "2026-10-04T00:59:17.727298Z"
+}
