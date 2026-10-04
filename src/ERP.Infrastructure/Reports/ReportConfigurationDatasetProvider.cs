@@ -191,8 +191,16 @@ public sealed class SalesOrderReportConfigurationDatasetProvider : IReportConfig
             var baseColumns = page.Columns
                 .Select(c => (c.Key, c.Label, c.DataType))
                 .ToList();
+            // 受控关系（ERP-292）：计算列投影只返回「已选字段 + 计算列」，会在关系解析前丢掉隐藏来源事实键
+            // customerId；这里在投影时显式保留 customerId，由关系解析器在补全后剥离，绝不返回隐藏依赖值。
+            var projectionFields = (definition.Fields ?? new List<string>()).ToList();
+            if (definition.Relations is { Count: > 0 }
+                && !projectionFields.Contains(ReportConfigurationRelationRules.SourceFactKey, StringComparer.OrdinalIgnoreCase))
+            {
+                projectionFields.Add(ReportConfigurationRelationRules.SourceFactKey);
+            }
             var projection = ReportConfigurationComputedProjection.Apply(
-                definition.Fields, baseColumns, page.Rows, definition.ComputedColumns, CurrencyUnitOf);
+                projectionFields, baseColumns, page.Rows, definition.ComputedColumns, CurrencyUnitOf);
 
             return new ReportConfigurationPreviewDto
             {
@@ -928,8 +936,16 @@ public sealed class ReceivableReportConfigurationDatasetProvider : IReportConfig
             var baseColumns = page.Columns
                 .Select(c => (c.Key, c.Label, c.DataType))
                 .ToList();
+            // 受控关系（ERP-292）：计算列投影只返回「已选字段 + 计算列」，会在关系解析前丢掉隐藏来源事实键
+            // customerId；这里在投影时显式保留 customerId，由关系解析器在补全后剥离，绝不返回隐藏依赖值。
+            var projectionFields = (definition.Fields ?? new List<string>()).ToList();
+            if (definition.Relations is { Count: > 0 }
+                && !projectionFields.Contains(ReportConfigurationRelationRules.SourceFactKey, StringComparer.OrdinalIgnoreCase))
+            {
+                projectionFields.Add(ReportConfigurationRelationRules.SourceFactKey);
+            }
             var projection = ReportConfigurationComputedProjection.Apply(
-                definition.Fields, baseColumns, page.Rows, definition.ComputedColumns, CurrencyUnitOf);
+                projectionFields, baseColumns, page.Rows, definition.ComputedColumns, CurrencyUnitOf);
 
             return new ReportConfigurationPreviewDto
             {

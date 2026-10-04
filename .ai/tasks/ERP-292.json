@@ -35,7 +35,7 @@
   "planning_stage": 1,
   "implementation_evidence": "src/ERP.Infrastructure/Reports/ReportConfigurationDatasetProvider.cs:158 (SalesOrder BuildFields adds customerId to the FETCH list when relations exist, but :194-195 passes definition.Fields — not BuildFields output — into ReportConfigurationComputedProjection.Apply, and :1625-1703 projects only selected fields + computed-column keys, dropping customerId); Receivable provider mirrors this at :931-932 with BuildFields at :1023-1025; src/ERP.Application/Services/ReportConfigurationExecutionService.cs:370-373 (current-page) and :447-450 (matched-set) run ApplyMetrics then StripCompositeDependencies (which at :560-586 removes any non-selected key incl. customerId when Groupings.Count>=2 or Pivot!=null) BEFORE ApplyRelationsAsync (:373/:450 -> :588-600 -> RelationResolver.EnrichAsync); src/ERP.Infrastructure/Reports/ReportConfigurationRelationResolver.cs:132-142 ReadCustomerId returns null when customerId was already stripped, yielding the '缺失/missing' reason at :163-164. Live proof: .ai/logs/report-stage1-browser-formula-relation-20261004.json relation_issue { customer.code: missing, customer.country: missing } with cause 'ComputedProjection strips hidden customerId before RelationResolver ... Requires functional repair'. Existing relation unit tests (ReportConfigurationRelationTests.cs:319-356) cover relations WITHOUT computed columns so they never exercise this path.",
   "id": "ERP-292",
-  "status": "in_progress",
+  "status": "completed",
   "attempts": 1,
   "max_attempts": 3,
   "validation_profile": "safe",

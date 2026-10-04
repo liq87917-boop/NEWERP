@@ -161,6 +161,63 @@ public class ReportConfigurationRelationTests
     private static ReportConfigurationRelationSelection CustomerRelation(params string[] fields)
         => new() { RelationKey = ReportConfigurationConstants.RelationCustomer, Fields = fields.ToList() };
 
+    private static ReportConfigurationFormulaNode FormulaField(string key)
+        => new() { Kind = ReportConfigurationFormulaRules.NodeField, FieldKey = key };
+
+    private static ReportConfigurationFormulaNode FormulaLiteral(decimal value)
+        => new() { Kind = ReportConfigurationFormulaRules.NodeLiteral, Literal = value };
+
+    private static ReportConfigurationFormulaNode FormulaMultiply(
+        ReportConfigurationFormulaNode left, ReportConfigurationFormulaNode right)
+        => new() { Kind = ReportConfigurationFormulaRules.NodeMultiply, Left = left, Right = right };
+
+    private static ReportConfigurationComputedColumn ComputedColumn(
+        string key, ReportConfigurationFormulaNode expression, string label = "")
+        => new() { Key = key, Label = label, Expression = expression };
+
+    private static ReportConfigurationDefinition ReceivableDefinition(
+        string[]? fields = null,
+        IReadOnlyList<ReportConfigurationRelationSelection>? relations = null,
+        IReadOnlyList<ReportConfigurationComputedColumn>? computedColumns = null)
+        => new()
+        {
+            SchemaVersion = ReportConfigurationRules.CurrentSchemaVersion,
+            DatasetKey = ReportConfigurationConstants.DatasetReceivable,
+            Fields = fields is { Length: > 0 } ? fields.ToList() : new List<string> { "invoiceId", "grossAmount" },
+            Filters = new List<ReportConfigurationFilter>(),
+            Grouping = new List<string> { ReportConfigurationConstants.GroupNone },
+            Aggregates = new List<ReportConfigurationAggregate>(),
+            Capabilities = new List<string>(),
+            Relations = relations?.ToList() ?? new List<ReportConfigurationRelationSelection>(),
+            ComputedColumns = computedColumns?.ToList() ?? new List<ReportConfigurationComputedColumn>(),
+        };
+
+    private static CustomerSalesInvoiceEvidence SeedReceivableInvoice(
+        ErpDbContext db, string invoiceNumber, long customerId, decimal grossAmount,
+        string currency = "USD", DateTime? invoiceDate = null)
+    {
+        var invoice = new CustomerSalesInvoiceEvidence
+        {
+            InvoiceType = "普票",
+            InvoiceCode = string.Empty,
+            InvoiceNumber = invoiceNumber,
+            NormalizedInvoiceNumber = invoiceNumber.Replace("-", "").ToUpperInvariant(),
+            InvoiceDate = invoiceDate ?? new DateTime(2026, 8, 20),
+            CustomerId = customerId,
+            CustomerCode = "C001",
+            CustomerName = "义乌进出口",
+            Currency = currency,
+            NetAmount = grossAmount * 0.9m,
+            TaxAmount = grossAmount * 0.1m,
+            GrossAmount = grossAmount,
+            Status = CustomerSalesInvoiceEvidenceRules.StatusRecorded,
+            IsDeleted = false,
+        };
+        db.CustomerSalesInvoiceEvidences.Add(invoice);
+        db.SaveChanges();
+        return invoice;
+    }
+
     private static ReportConfigurationDatasetDto TestDataset(
         IReadOnlyList<ReportConfigurationRelationDto>? relations = null)
         => new(
@@ -438,6 +495,134 @@ public class ReportConfigurationRelationTests
         Assert.Equal("越权", preview.CellReasons[0]["customer.code"]);
         Assert.Equal("C-IN", preview.Rows[1]["customer.code"]);
     }
+
+    [Fact]
+    public async Task 解析器_销售订单计算列投影_保留来源事实键_关系补全且不泄露customerId()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedPrivilegedUser(db, "so-rel-calc", "sales-order", "customer");
+        var customer = SeedCustomer(db, "C001", "义乌进出口", "中国");
+        SeedOrder(db, "SO-1", customer.Id, Currency.USD, 100m);
+        SeedOrder(db, "SO-2", 9999, Currency.USD, 60m);
+
+        var def = SalesOrderDefinition(
+            fields: new[] { "orderNo", "totalAmount" },
+            relations: new[] { CustomerRelation("code", "country") });
+        def.ComputedColumns = new List<ReportConfigurationComputedColumn>
+        {
+            ComputedColumn("doubleAmount", FormulaMultiply(FormulaField("totalAmount"), FormulaLiteral(2m)), "双倍金额"),
+        };
+
+        var service = BuildService(db);
+        var created = await service.CreateAsync(user, SaveDto("销售订单计算列关系", def));
+        var execution = BuildExecution(db);
+        var preview = await execution.PreviewAsync(user, new ReportConfigurationPreviewRequest { ConfigurationId = created.Id });
+
+        Assert.Equal(2, preview.Rows.Count);
+        Assert.DoesNotContain(preview.Columns, c => c.Key == "customerId");
+        for (var i = 0; i < preview.Rows.Count; i++)
+        {
+            var row = preview.Rows[i];
+            Assert.False(row.ContainsKey("customerId"));
+            if (Equals(row["orderNo"], "SO-1"))
+            {
+                Assert.Equal("C001", row["customer.code"]);
+                Assert.Equal("中国", row["customer.country"]);
+                Assert.Equal(200m, row["doubleAmount"]);
+                Assert.False(preview.CellReasons[i].ContainsKey("customer.code"));
+            }
+            else
+            {
+                Assert.Null(row["customer.code"]);
+                Assert.Equal("缺失", preview.CellReasons[i]["customer.code"]);
+                Assert.Equal(120m, row["doubleAmount"]);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task 解析器_销售订单复合分组_关系补全先于隐藏依赖剥离且不泄露customerId()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedPrivilegedUser(db, "so-rel-composite", "sales-order", "customer");
+        var customer = SeedCustomer(db, "C001", "义乌进出口", "中国");
+        SeedOrder(db, "SO-1", customer.Id, Currency.USD, 100m);
+        SeedOrder(db, "SO-2", customer.Id, Currency.CNY, 200m);
+
+        var def = SalesOrderDefinition(
+            fields: new[] { "orderNo" },
+            relations: new[] { CustomerRelation("code", "country") });
+        def.Grouping = new List<string>
+        {
+            ReportConfigurationConstants.GroupCustomer,
+            ReportConfigurationConstants.GroupMonth,
+        };
+
+        var service = BuildService(db);
+        var created = await service.CreateAsync(user, SaveDto("销售订单复合分组关系", def));
+        var execution = BuildExecution(db);
+        var preview = await execution.PreviewAsync(user, new ReportConfigurationPreviewRequest { ConfigurationId = created.Id });
+
+        Assert.Equal(2, preview.Rows.Count);
+        Assert.DoesNotContain(preview.Columns, c => c.Key == "customerId");
+        Assert.DoesNotContain(preview.Columns, c => c.Key == "orderDate");
+        Assert.DoesNotContain(preview.Columns, c => c.Key == "currency");
+        Assert.DoesNotContain(preview.Columns, c => c.Key == "totalAmount");
+        foreach (var row in preview.Rows)
+        {
+            Assert.False(row.ContainsKey("customerId"));
+            Assert.False(row.ContainsKey("orderDate"));
+            Assert.False(row.ContainsKey("currency"));
+            Assert.False(row.ContainsKey("totalAmount"));
+            Assert.Equal("C001", row["customer.code"]);
+            Assert.Equal("中国", row["customer.country"]);
+        }
+    }
+
+    [Fact]
+    public async Task 解析器_应收账款计算列投影_保留来源事实键_关系补全且不泄露customerId()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedPrivilegedUser(db, "ar-rel-calc", "customer");
+        var customer = SeedCustomer(db, "C001", "义乌进出口", "中国");
+        SeedReceivableInvoice(db, "INV-1", customer.Id, 100m);
+        SeedReceivableInvoice(db, "INV-2", 9999, 80m);
+
+        var def = ReceivableDefinition(
+            fields: new[] { "invoiceNumber", "grossAmount" },
+            relations: new[] { CustomerRelation("code", "country") });
+        def.ComputedColumns = new List<ReportConfigurationComputedColumn>
+        {
+            ComputedColumn("doubleAmount", FormulaMultiply(FormulaField("grossAmount"), FormulaLiteral(2m)), "双倍金额"),
+        };
+
+        var service = BuildService(db);
+        var created = await service.CreateAsync(user, SaveDto("应收账款计算列关系", def));
+        var execution = BuildExecution(db);
+        var preview = await execution.PreviewAsync(user, new ReportConfigurationPreviewRequest { ConfigurationId = created.Id });
+
+        Assert.Equal(2, preview.Rows.Count);
+        Assert.DoesNotContain(preview.Columns, c => c.Key == "customerId");
+        for (var i = 0; i < preview.Rows.Count; i++)
+        {
+            var row = preview.Rows[i];
+            Assert.False(row.ContainsKey("customerId"));
+            if (Equals(row["invoiceNumber"], "INV-1"))
+            {
+                Assert.Equal("C001", row["customer.code"]);
+                Assert.Equal("中国", row["customer.country"]);
+                Assert.Equal(200m, row["doubleAmount"]);
+                Assert.False(preview.CellReasons[i].ContainsKey("customer.code"));
+            }
+            else
+            {
+                Assert.Null(row["customer.code"]);
+                Assert.Equal("缺失", preview.CellReasons[i]["customer.code"]);
+                Assert.Equal(160m, row["doubleAmount"]);
+            }
+        }
+    }
+
 
     // ==================== 4. 前端接线（源码静态断言） ====================
 

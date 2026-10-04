@@ -368,9 +368,9 @@ public sealed class ReportConfigurationExecutionService : IReportConfigurationEx
             preview.Pivot = ReportConfigurationPivotRules.Build(definition, dataset, preview.Rows, cancellationToken);
 
         ApplyMetrics(definition, dataset, parameters.Groupings, preview);
+        await ApplyRelationsAsync(definition, preview, userId, cancellationToken);
         if (parameters.Groupings.Count >= 2 || definition.Pivot is not null)
             StripCompositeDependencies(definition, preview);
-        await ApplyRelationsAsync(definition, preview, userId, cancellationToken);
         preview.ConfigurationId = configurationId;
         preview.PinnedRevisionVersion = pinnedRevision;
         preview.IsPinnedRevision = pinnedRevision.HasValue;
@@ -445,9 +445,9 @@ public sealed class ReportConfigurationExecutionService : IReportConfigurationEx
             }
 
             ApplyMetrics(definition, dataset, parameters.Groupings, preview, summaryRows);
+            await ApplyRelationsAsync(definition, preview, userId, cancellationToken);
             if (parameters.Groupings.Count >= 2 || definition.Pivot is not null)
                 StripCompositeDependencies(definition, preview);
-            await ApplyRelationsAsync(definition, preview, userId, cancellationToken);
 
             preview.ConfigurationId = configurationId;
             preview.PinnedRevisionVersion = pinnedRevision;
@@ -569,6 +569,18 @@ public sealed class ReportConfigurationExecutionService : IReportConfigurationEx
         {
             if (column is not null && !string.IsNullOrWhiteSpace(column.Key))
                 selected.Add(column.Key.Trim());
+        }
+        // 受控关系（ERP-292）：关系解析在剥离前已把目标列（如 customer.code / customer.country）写入预览，
+        // 这里必须保留关系目标列，只剥离隐藏来源事实键（customerId）与其它复合分组依赖。
+        foreach (var relation in definition.Relations ?? new List<ReportConfigurationRelationSelection>())
+        {
+            if (relation is null || string.IsNullOrWhiteSpace(relation.RelationKey))
+                continue;
+            foreach (var fieldKey in relation.Fields ?? new List<string>())
+            {
+                if (!string.IsNullOrWhiteSpace(fieldKey))
+                    selected.Add($"{relation.RelationKey.Trim()}.{fieldKey.Trim()}");
+            }
         }
 
         preview.Columns = preview.Columns
