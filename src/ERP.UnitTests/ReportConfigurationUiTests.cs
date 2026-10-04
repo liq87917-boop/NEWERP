@@ -380,6 +380,17 @@ public class ReportConfigurationUiTests
     }
 
     [Fact]
+    public void 请求体上限_前端把输入过大映射为受控失败态()
+    {
+        var js = File.ReadAllText(Path.Combine(JsDirectory(), "report-configuration.js"));
+
+        Assert.Contains("if (code === 1009) return 'input-too-large'", js);
+        Assert.Contains("'input-too-large': '输入过大'", js);
+        // 输入过大不可重试（重试不能缩小载荷），只显示受控错误、绝不覆盖未保存编辑
+        Assert.Contains("const retryable = ['busy', 'timeout', 'network', 'rendering'].indexOf(kind) >= 0;", js);
+    }
+
+    [Fact]
     public void 匹配集覆盖_设计器切换与结果标注_不含全量合计()
     {
         var js = File.ReadAllText(Path.Combine(JsDirectory(), "report-configuration.js"));

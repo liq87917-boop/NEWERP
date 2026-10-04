@@ -4,7 +4,9 @@ using ERP.Application.Interfaces;
 using ERP.Application.Services;
 using ERP.Infrastructure.Export;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.Filters;
 using Microsoft.Extensions.Logging;
 using System.Diagnostics;
 using System.Security.Claims;
@@ -21,8 +23,24 @@ namespace ERP.Api.Controllers;
 [ApiController]
 [Route("api/report-configurations")]
 [Authorize]
+[ReportRequestBodyLimit]
 public class ReportConfigurationsController : ControllerBase
 {
+    /// <summary>
+    /// 通用报表配置写请求的 UTF-8 传输层体积上限（512 KiB）：在 JSON 模型绑定之前由
+    /// <see cref="ReportRequestBodyLimitAttribute"/> 通过 ASP.NET 请求体积限制（Kestrel 的
+    /// IHttpMaxRequestBodySizeFeature）强制执行，独立于 Content-Length（含 chunked），
+    /// 绝不把无界请求读入内存。512 KiB = 8 × 归一化定义上限（64 KiB），足以覆盖传输信封转义
+    /// 与普通包装开销而不会静默截断定义。
+    /// </summary>
+    public const long MaxWireBodyBytes = 512 * 1024;
+
+    /// <summary>请求体过大（工作台输入过大）的受控业务错误码（1009）。</summary>
+    public const int ErrorCodeInputTooLarge = 1009;
+
+    /// <summary>请求体过大（工作台输入过大）的受控提示文案（绝不回声载荷 / SQL / 密钥）。</summary>
+    public const string InputTooLargeMessage = "报表配置请求体过大，已拒绝：工作台输入过大（超过 512 KiB 上限，请精简定义后重试）";
+
     private readonly IReportConfigurationCatalog _catalog;
     private readonly IReportConfigurationService _service;
     private readonly IReportConfigurationExecutionService _execution;
@@ -425,5 +443,45 @@ public class ReportConfigurationsController : ControllerBase
             .Where(k => !string.IsNullOrWhiteSpace(k))
             .Distinct(StringComparer.Ordinal)
             .ToArray();
+    }
+}
+
+/// <summary>
+/// 通用报表配置写请求的传输层体积护栏（ERP-285 Stage 1）：在 JSON 模型绑定之前把 ASP.NET
+/// 请求体积上限收紧到 <see cref="ReportConfigurationsController.MaxWireBodyBytes"/>（512 KiB UTF-8），
+/// 并把超限导致的 413 <see cref="BadHttpRequestException"/> 映射为受控的模块内 413 响应
+/// （HTTP 413 + { code, message, data } 信封）。绝不把无界请求读入内存，也不影响其他模块的异常映射。
+/// </summary>
+[AttributeUsage(AttributeTargets.Class | AttributeTargets.Method, AllowMultiple = false)]
+public sealed class ReportRequestBodyLimitAttribute : Attribute, IAuthorizationFilter, IExceptionFilter
+{
+    /// <summary>在模型绑定之前通过 ASP.NET 请求体积限制收紧传输层上限（Kestrel 强制执行，含 chunked）。</summary>
+    public void OnAuthorization(AuthorizationFilterContext context)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+
+        var feature = context.HttpContext.Features.Get<IHttpMaxRequestBodySizeFeature>();
+        if (feature is { IsReadOnly: false })
+        {
+            feature.MaxRequestBodySize = ReportConfigurationsController.MaxWireBodyBytes;
+        }
+    }
+
+    /// <summary>把超限 413 映射为受控的模块内响应；其余异常原样放行给全局异常中间件。</summary>
+    public void OnException(ExceptionContext context)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+
+        if (context.Exception is BadHttpRequestException { StatusCode: StatusCodes.Status413PayloadTooLarge })
+        {
+            context.Result = new JsonResult(new ApiResponse<object>(
+                ReportConfigurationsController.ErrorCodeInputTooLarge,
+                ReportConfigurationsController.InputTooLargeMessage,
+                null))
+            {
+                StatusCode = StatusCodes.Status413PayloadTooLarge
+            };
+            context.ExceptionHandled = true;
+        }
     }
 }

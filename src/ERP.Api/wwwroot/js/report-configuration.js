@@ -132,6 +132,7 @@ function rccKindOfCode(code) {
   if (code === 1006) return 'timeout';
   if (code === 1007) return 'cancelled';
   if (code === 1008) return 'too-large';
+  if (code === 1009) return 'input-too-large';
   if (code === 5000) return 'environment';
   if (code === 5001) return 'rendering';
   if (code === 5002) return 'environment';
@@ -158,6 +159,7 @@ function rccErrorHtml(kind, message) {
     timeout: '执行超时',
     cancelled: '请求已取消',
     'too-large': '结果过大',
+    'input-too-large': '输入过大',
     rendering: '文件生成失败',
     network: '网络请求失败',
     unknown: '操作失败',

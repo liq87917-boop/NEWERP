@@ -1,7 +1,7 @@
 {
   "id": "ERP-285",
   "title": "Bound generic report request bodies before model binding",
-  "status": "pending",
+  "status": "completed",
   "description": "Stage 1 query/resource boundary gap verified in code: ReportConfigurationRules.MaxSerializedBytes limits normalized definitions only after binding, while the generic controller has no request size ceiling. Implement generic transport rejection, not a new business report. Existing Domain/Application models suffice; no persistence/schema changes or unrelated API changes. Preserve concurrent work, production boundaries and ERP permissions. Test only dedicated NEWERP_AutoAcceptance localdb target through process-only settings; no production, secrets/.env or deployment.",
   "acceptance_criteria": [
     "Enforce a documented 512 KiB UTF-8 wire-body ceiling before JSON model binding for generic reporting POST/PUT routes, independent of Content-Length, including chunked input. Existing normalized 64 KiB definition limit remains separately enforced. Legitimate bounded create/update/import requests must remain accepted. Do not read an unbounded request into memory to implement the ceiling; use ASP.NET request limits and preserve authentication, current-user data scope, version checks and cancellation.",
@@ -44,7 +44,7 @@
   "validation_profile": "safe",
   "completion_mode": "build",
   "max_attempts": 3,
-  "attempts": 0,
+  "attempts": 1,
   "auto_start": true,
   "requires_human_approval": false,
   "human_gate": {
