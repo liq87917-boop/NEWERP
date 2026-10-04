@@ -346,8 +346,13 @@ function rccCellText(value, type, currencyUnit) {
   return String(value);
 }
 
-function rccRenderCell(value, type, currencyUnit) {
-  return '<td>' + rccEsc(rccCellText(value, type, currencyUnit)) + '</td>';
+function rccRenderCell(value, type, currencyUnit, reason) {
+  const text = rccCellText(value, type, currencyUnit);
+  const isNull = value === null || value === undefined;
+  // 仅 null 单元格才呈现有界原因（缺失/已删除/越权或公式引擎未知值口径），
+  // 绝不把原因加到已解析非空单元格上；缺失原因时与历史行为一致（空单元格）。
+  const reasonText = isNull && reason ? rccEsc(reason) : '';
+  return '<td>' + (reasonText || rccEsc(text)) + '</td>';
 }
 
 function rccColumnHeadHtml(c) {
@@ -360,8 +365,9 @@ function rccColumnHeadHtml(c) {
 function rccTableHtml(preview) {
   const columns = (preview && preview.columns) || [];
   const rows = (preview && preview.rows) || [];
+  const cellReasons = (preview && preview.cellReasons) || [];
   const head = '<tr>' + columns.map(c => rccColumnHeadHtml(c)).join('') + '</tr>';
-  const body = rows.map(row => '<tr>' + columns.map(c => rccRenderCell(row[c.key], c.type, c.currencyUnit)).join('') + '</tr>').join('');
+  const body = rows.map((row, i) => '<tr>' + columns.map(c => rccRenderCell(row[c.key], c.type, c.currencyUnit, (cellReasons[i] || {})[c.key])).join('') + '</tr>').join('');
   return '<div class="rcc-table-wrap"><table class="rcc-table"><thead>' + head + '</thead><tbody>' + body + '</tbody></table></div>';
 }
 

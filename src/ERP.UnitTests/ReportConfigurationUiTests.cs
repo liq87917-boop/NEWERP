@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Xunit;
 
 namespace ERP.UnitTests;
@@ -403,6 +404,73 @@ public class ReportConfigurationUiTests
         Assert.Contains("汇总覆盖全部匹配事实", js);
         Assert.Contains("if (code === 5002) return 'environment'", js);
     }
+
+    // ==================== 13. 表格渲染消费平行 cellReasons（有界 null 单元格原因） ====================
+
+    [Fact]
+    public void 表格渲染_消费平行cellReasons_仅null单元格呈现有界原因()
+    {
+        var js = File.ReadAllText(Path.Combine(JsDirectory(), "report-configuration.js"));
+        var fn = Segment(js, "function rccTableHtml(preview)", "function rccGroupHtml(preview)");
+
+        Assert.Contains("cellReasons", fn);                             // rccTableHtml 读取 preview.cellReasons
+        Assert.Contains("(cellReasons[i] || {})[c.key]", fn);           // 与 rows 平行的每行原因字典，按列键取值
+        Assert.Contains("function rccRenderCell(value, type, currencyUnit, reason)", js);
+        Assert.Contains("isNull && reason", js);                        // 仅 null 单元格呈现有界原因
+        Assert.Contains("rccEsc(reason)", js);                          // 原因文本经过现有转义
+    }
+
+    [Fact]
+    public void 表格渲染_NodeVM验证_null单元格呈现转义原因且非空单元格无原因()
+    {
+        var js = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+            "..", "..", "..", "..", "..", "src", "ERP.Api", "wwwroot", "js", "report-configuration.js"));
+        var script = Path.Combine(Path.GetTempPath(), "rcc-cellreasons-" + Guid.NewGuid().ToString("N") + ".js");
+        try
+        {
+            File.WriteAllText(script, CellReasonsFixture);
+            var start = new ProcessStartInfo("node") { RedirectStandardOutput = true,
+                RedirectStandardError = true, UseShellExecute = false, CreateNoWindow = true };
+            start.ArgumentList.Add(script);
+            start.ArgumentList.Add(js);
+            using var process = Process.Start(start)!;
+            var output = process.StandardOutput.ReadToEnd();
+            var error = process.StandardError.ReadToEnd();
+            process.WaitForExit();
+            Assert.True(process.ExitCode == 0, output + error);
+            Assert.Contains("CELL_REASONS_OK", output);
+        }
+        finally { if (File.Exists(script)) File.Delete(script); }
+    }
+
+    private const string CellReasonsFixture = """
+const fs = require('fs'), vm = require('vm'), assert = require('assert');
+const ctx = vm.createContext({console});
+vm.runInContext(fs.readFileSync(process.argv[2], 'utf8'), ctx);
+
+assert.strictEqual(vm.runInContext("rccRenderCell(null, 'text', undefined, '缺失')", ctx), '<td>缺失</td>');
+assert.strictEqual(vm.runInContext("rccRenderCell(null, 'text', undefined, '<img src=x onerror=alert(1)>')", ctx), '<td>&lt;img src=x onerror=alert(1)&gt;</td>');
+assert.strictEqual(vm.runInContext("rccRenderCell('已解析', 'text', undefined, '缺失')", ctx), '<td>已解析</td>');
+assert.strictEqual(vm.runInContext("rccRenderCell(null, 'text', undefined, undefined)", ctx), '<td></td>');
+
+const table = vm.runInContext(`rccTableHtml({
+  columns: [{key:'a', label:'A', type:'text'}, {key:'b', label:'B', type:'text'}],
+  rows: [{a:null, b:'ok'}],
+  cellReasons: [{a:'缺失', b:'<b>不应出现</b>'}]
+})`, ctx);
+assert(table.includes('<td>缺失</td>'), 'null cell must render its bounded reason');
+assert(table.includes('<td>ok</td>'), 'resolved cell must render its value');
+assert(!table.includes('不应出现'), 'resolved cell must never render a reason');
+assert(!table.includes('<b>不应出现</b>'), 'reason must never leak raw markup');
+
+const legacy = vm.runInContext(`rccTableHtml({
+  columns: [{key:'a', label:'A', type:'text'}],
+  rows: [{a:null}]
+})`, ctx);
+assert(legacy.includes('<td></td>'), 'payload without cellReasons renders blank cell, no invented reason');
+
+console.log('CELL_REASONS_OK');
+""";
 
     /// <summary>前端脚本目录（沿测试程序集输出目录上溯到仓库根，与 CustomerShipmentReportUiTests 同一约定）</summary>
     private static string JsDirectory() => Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
