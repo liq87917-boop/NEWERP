@@ -1,0 +1,83 @@
+{
+  "title": "Render authorized saved print layouts with reusable generic report definition bindings",
+  "description": "Users print or download existing generic saved report definitions through compatible existing print templates. Provide shared bounded standard/grid-layout rendering for multiple supported template families using the prior controlled binding catalog and authorized execution services; not a new individual business report. Stage 2 only. Keep legacy routes until every migration is genuinely accepted. No production, secrets/env, arbitrary SQL, permission expansion, new schema or unrelated refactor. Preserve concurrent work.",
+  "allowed_paths": [
+    "src/ERP.Application/DTOs/ReportConfigurationPrintTemplateDtos.cs",
+    "src/ERP.Application/DTOs/ReportConfigurationPrintRenderDtos.cs",
+    "src/ERP.Application/Interfaces/IReportConfigurationPrintRenderService.cs",
+    "src/ERP.Application/Services/ReportConfigurationPrintRenderService.cs",
+    "src/ERP.Infrastructure/Export/ReportConfigurationPrintPdfExporter.cs",
+    "src/ERP.Infrastructure/DependencyInjection.cs",
+    "src/ERP.Api/Controllers/ReportConfigurationPrintTemplatesController.cs",
+    "src/ERP.Api/wwwroot/js/report-configuration.js",
+    "src/ERP.UnitTests/ReportConfigurationPrintRenderTests.cs",
+    "src/ERP.IntegrationTests/ReportConfigurationPrintRenderSqlServerTests.cs"
+  ],
+  "acceptance_criteria": [
+    "Accept only existing definition ID/optional published revision plus saved template ID. Before rendering revalidate ownership/sharing/current menu/row/column scope through existing execution lease and catalog; family mismatch, unsupported alias, denied/revoked field or template fails without partial output. No direct business-table reads, schema changes or arbitrary SQL.",
+    "Implement finite standard and LayoutJson grid rendering over already authorized selected fields with literal text and closed placeholder aliases only. Preserve field order, company/title/footer, paper and bounded font/spacing options, currency/unit/null semantics and source provenance. Reject executable formulas, script/HTML, arbitrary property paths, malformed spans/coordinates and oversized grids; cap cells/pages/bytes with cancellation and audit outcomes.",
+    "Offer shared generic preview and PDF download in existing report workspace for at least two supported families. Test real nonempty bindings, denied private/shared revision, missing/null/long fields, safe literal escaping, malformed layouts and all-or-nothing output. Guard SQL writes to dedicated localdb NEWERP_AUTOTEST only; safe Release/related tests/scheduler contracts and genuine browser/download evidence. Keep all unsupported layouts and unverified compatibility explicit."
+  ],
+  "criterion_path_map": {
+    "Accept only existing definition ID/optional published revision plus saved template ID. Before rendering revalidate ownership/sharing/current menu/row/column scope through existing execution lease and catalog; family mismatch, unsupported alias, denied/revoked field or template fails without partial output. No direct business-table reads, schema changes or arbitrary SQL.": [
+      "src/ERP.Application/DTOs/ReportConfigurationPrintTemplateDtos.cs",
+      "src/ERP.Application/DTOs/ReportConfigurationPrintRenderDtos.cs",
+      "src/ERP.Application/Interfaces/IReportConfigurationPrintRenderService.cs",
+      "src/ERP.Application/Services/ReportConfigurationPrintRenderService.cs",
+      "src/ERP.Infrastructure/Export/ReportConfigurationPrintPdfExporter.cs",
+      "src/ERP.Infrastructure/DependencyInjection.cs",
+      "src/ERP.Api/Controllers/ReportConfigurationPrintTemplatesController.cs",
+      "src/ERP.Api/wwwroot/js/report-configuration.js",
+      "src/ERP.UnitTests/ReportConfigurationPrintRenderTests.cs",
+      "src/ERP.IntegrationTests/ReportConfigurationPrintRenderSqlServerTests.cs"
+    ],
+    "Implement finite standard and LayoutJson grid rendering over already authorized selected fields with literal text and closed placeholder aliases only. Preserve field order, company/title/footer, paper and bounded font/spacing options, currency/unit/null semantics and source provenance. Reject executable formulas, script/HTML, arbitrary property paths, malformed spans/coordinates and oversized grids; cap cells/pages/bytes with cancellation and audit outcomes.": [
+      "src/ERP.Application/DTOs/ReportConfigurationPrintTemplateDtos.cs",
+      "src/ERP.Application/DTOs/ReportConfigurationPrintRenderDtos.cs",
+      "src/ERP.Application/Interfaces/IReportConfigurationPrintRenderService.cs",
+      "src/ERP.Application/Services/ReportConfigurationPrintRenderService.cs",
+      "src/ERP.Infrastructure/Export/ReportConfigurationPrintPdfExporter.cs",
+      "src/ERP.Infrastructure/DependencyInjection.cs",
+      "src/ERP.Api/Controllers/ReportConfigurationPrintTemplatesController.cs",
+      "src/ERP.Api/wwwroot/js/report-configuration.js",
+      "src/ERP.UnitTests/ReportConfigurationPrintRenderTests.cs",
+      "src/ERP.IntegrationTests/ReportConfigurationPrintRenderSqlServerTests.cs"
+    ],
+    "Offer shared generic preview and PDF download in existing report workspace for at least two supported families. Test real nonempty bindings, denied private/shared revision, missing/null/long fields, safe literal escaping, malformed layouts and all-or-nothing output. Guard SQL writes to dedicated localdb NEWERP_AUTOTEST only; safe Release/related tests/scheduler contracts and genuine browser/download evidence. Keep all unsupported layouts and unverified compatibility explicit.": [
+      "src/ERP.Application/DTOs/ReportConfigurationPrintTemplateDtos.cs",
+      "src/ERP.Application/DTOs/ReportConfigurationPrintRenderDtos.cs",
+      "src/ERP.Application/Interfaces/IReportConfigurationPrintRenderService.cs",
+      "src/ERP.Application/Services/ReportConfigurationPrintRenderService.cs",
+      "src/ERP.Infrastructure/Export/ReportConfigurationPrintPdfExporter.cs",
+      "src/ERP.Infrastructure/DependencyInjection.cs",
+      "src/ERP.Api/Controllers/ReportConfigurationPrintTemplatesController.cs",
+      "src/ERP.Api/wwwroot/js/report-configuration.js",
+      "src/ERP.UnitTests/ReportConfigurationPrintRenderTests.cs",
+      "src/ERP.IntegrationTests/ReportConfigurationPrintRenderSqlServerTests.cs"
+    ]
+  },
+  "depends_on": [
+    "ERP-312"
+  ],
+  "risk": "medium",
+  "planning_stage": 2,
+  "implementation_evidence": "bill-print.js and pd-grid.js render saved SysPrintTemplate standard/grid layouts using legacy bill objects. Generic ReportConfigurationsController and report-configuration.js have no safe saved-template render binding. Existing report execution and new finite catalog are reusable prerequisites; source/history confirms shared render path absent.",
+  "id": "ERP-313",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-05T04:54:15.182210Z"
+}

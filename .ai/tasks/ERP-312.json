@@ -1,0 +1,79 @@
+{
+  "title": "Expose authorized legacy print templates through a reusable controlled binding catalog",
+  "description": "Users need to discover and bind existing saved print templates to compatible controlled report datasets without leaking unauthorized bill families or executing layout expressions. Implement bounded read-only template catalog and finite family/field-alias mapping used by generic output workflows; existing template writes remain unchanged. Stage 2 only. Keep legacy routes until every migration is genuinely accepted. No production, secrets/env, arbitrary SQL, permission expansion, new schema or unrelated refactor. Preserve concurrent work.",
+  "allowed_paths": [
+    "src/ERP.Application/DTOs/ReportMigrationRegistryDtos.cs",
+    "src/ERP.Application/Services/ReportMigrationRegistry.cs",
+    "src/ERP.Application/DTOs/ReportConfigurationPrintTemplateDtos.cs",
+    "src/ERP.Application/Interfaces/IReportConfigurationPrintTemplateCatalog.cs",
+    "src/ERP.Application/Services/ReportConfigurationPrintTemplateCatalog.cs",
+    "src/ERP.Infrastructure/DependencyInjection.cs",
+    "src/ERP.Api/Controllers/ReportConfigurationPrintTemplatesController.cs",
+    "src/ERP.UnitTests/ReportConfigurationPrintTemplateCatalogTests.cs",
+    "src/ERP.IntegrationTests/ReportConfigurationPrintTemplateSqlServerTests.cs"
+  ],
+  "acceptance_criteria": [
+    "Enumerate active SysPrintTemplates through a bounded authenticated catalog with current existing menu authorization and closed BillType mappings from actual PrintTemplateController PrintableTitles and LegacyBillExportCatalog. Every template/family is represented as compatible or explicit unsupported, never falsely parity-passed. Preserve saved template identity/default/order/paper/font/header/footer settings; no template writes or permission grants.",
+    "For supported families use exact existing controlled dataset keys and finite legacy field aliases; recheck provider catalog column permissions on each binding request. Reject unknown/unauthorized field aliases, incompatible datasets, malformed/oversized FieldKeys/LayoutJson and unavailable ownership mappings. Unsupported master/quotation/PI families remain explicit blockers rather than guessed joins or silent fallback.",
+    "Integrate finite print-template families into migration registry with genuine compatibility statuses and fail-closed retirement. Unit and guarded isolated SQL tests cover nonempty saved templates, exact menu denials, unsupported families, field ordering and alias injection; related tests, safe Release and scheduler self-test/contracts. Real browser/database limitations remain accurately unaccepted."
+  ],
+  "criterion_path_map": {
+    "Enumerate active SysPrintTemplates through a bounded authenticated catalog with current existing menu authorization and closed BillType mappings from actual PrintTemplateController PrintableTitles and LegacyBillExportCatalog. Every template/family is represented as compatible or explicit unsupported, never falsely parity-passed. Preserve saved template identity/default/order/paper/font/header/footer settings; no template writes or permission grants.": [
+      "src/ERP.Application/DTOs/ReportMigrationRegistryDtos.cs",
+      "src/ERP.Application/Services/ReportMigrationRegistry.cs",
+      "src/ERP.Application/DTOs/ReportConfigurationPrintTemplateDtos.cs",
+      "src/ERP.Application/Interfaces/IReportConfigurationPrintTemplateCatalog.cs",
+      "src/ERP.Application/Services/ReportConfigurationPrintTemplateCatalog.cs",
+      "src/ERP.Infrastructure/DependencyInjection.cs",
+      "src/ERP.Api/Controllers/ReportConfigurationPrintTemplatesController.cs",
+      "src/ERP.UnitTests/ReportConfigurationPrintTemplateCatalogTests.cs",
+      "src/ERP.IntegrationTests/ReportConfigurationPrintTemplateSqlServerTests.cs"
+    ],
+    "For supported families use exact existing controlled dataset keys and finite legacy field aliases; recheck provider catalog column permissions on each binding request. Reject unknown/unauthorized field aliases, incompatible datasets, malformed/oversized FieldKeys/LayoutJson and unavailable ownership mappings. Unsupported master/quotation/PI families remain explicit blockers rather than guessed joins or silent fallback.": [
+      "src/ERP.Application/DTOs/ReportMigrationRegistryDtos.cs",
+      "src/ERP.Application/Services/ReportMigrationRegistry.cs",
+      "src/ERP.Application/DTOs/ReportConfigurationPrintTemplateDtos.cs",
+      "src/ERP.Application/Interfaces/IReportConfigurationPrintTemplateCatalog.cs",
+      "src/ERP.Application/Services/ReportConfigurationPrintTemplateCatalog.cs",
+      "src/ERP.Infrastructure/DependencyInjection.cs",
+      "src/ERP.Api/Controllers/ReportConfigurationPrintTemplatesController.cs",
+      "src/ERP.UnitTests/ReportConfigurationPrintTemplateCatalogTests.cs",
+      "src/ERP.IntegrationTests/ReportConfigurationPrintTemplateSqlServerTests.cs"
+    ],
+    "Integrate finite print-template families into migration registry with genuine compatibility statuses and fail-closed retirement. Unit and guarded isolated SQL tests cover nonempty saved templates, exact menu denials, unsupported families, field ordering and alias injection; related tests, safe Release and scheduler self-test/contracts. Real browser/database limitations remain accurately unaccepted.": [
+      "src/ERP.Application/DTOs/ReportMigrationRegistryDtos.cs",
+      "src/ERP.Application/Services/ReportMigrationRegistry.cs",
+      "src/ERP.Application/DTOs/ReportConfigurationPrintTemplateDtos.cs",
+      "src/ERP.Application/Interfaces/IReportConfigurationPrintTemplateCatalog.cs",
+      "src/ERP.Application/Services/ReportConfigurationPrintTemplateCatalog.cs",
+      "src/ERP.Infrastructure/DependencyInjection.cs",
+      "src/ERP.Api/Controllers/ReportConfigurationPrintTemplatesController.cs",
+      "src/ERP.UnitTests/ReportConfigurationPrintTemplateCatalogTests.cs",
+      "src/ERP.IntegrationTests/ReportConfigurationPrintTemplateSqlServerTests.cs"
+    ]
+  },
+  "depends_on": [
+    "ERP-308"
+  ],
+  "risk": "medium",
+  "planning_stage": 2,
+  "implementation_evidence": "PrintTemplateController.cs PrintableTitles covers 16 bill families plus 7 master families, quotation, proforma-invoice and doc-center; SysPrintTemplate includes FieldKeys/LayoutJson and print options. ReportMigrationRegistryDtos only has trade print/export entries; no controlled saved print-template binding catalog exists in source/tasks. LegacyBillExportCatalog now provides finite bill dataset/menu mappings.",
+  "id": "ERP-312",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-05T04:54:15.158087Z"
+}

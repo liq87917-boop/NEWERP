@@ -1,0 +1,63 @@
+{
+  "title": "Preserve readable bounded column bands across generic single and bundle PDF exports",
+  "description": "Users exporting wide authorized report definitions must receive every selected field in readable ordered column bands, with stable row identity and repeated section/header/provenance; this is shared export data preservation for all datasets, not a dedicated report or UI styling task. Stage 2 only. Keep legacy routes until every migration is genuinely accepted. No production, secrets/env, arbitrary SQL, permission expansion, new schema or unrelated refactor. Preserve concurrent work.",
+  "allowed_paths": [
+    "src/ERP.Infrastructure/Export/ReportConfigurationPdfExporter.cs",
+    "src/ERP.Infrastructure/Export/ReportConfigurationBundlePdfExporter.cs",
+    "src/ERP.Infrastructure/Export/ReportConfigurationPdfColumnLayout.cs",
+    "src/ERP.UnitTests/ReportConfigurationPdfColumnLayoutTests.cs",
+    "src/ERP.UnitTests/ReportConfigurationBundleTests.cs"
+  ],
+  "acceptance_criteria": [
+    "Apply a reusable finite width and row-identity-aware horizontal column-band layout to both existing PDF exporters. All selected fields, field order and rows appear once per logical column band; repeat an authorized identity field when available, otherwise stable row ordinal. Never query hidden identity fields or drop/truncate columns; bounded pages and cancellation remain enforced.",
+    "Preserve independent section currency/unit, null versus zero, numeric formatting, summary/evidence coverage and nonempty/empty sections. Repeat readable headers at vertical page breaks, title and band/page provenance. Bound long cells without overlapping footer or silently clipping values; no cross-section arithmetic.",
+    "Test narrow and 27-plus-column multi-section inputs, long Chinese text, row continuity, numeric/null semantics, exact column coverage, cancellation and file limits. Run related tests and safe Release build/unit suite; generate real PDF and inspect rendered readability with actual artifacts before claiming layout acceptance."
+  ],
+  "criterion_path_map": {
+    "Apply a reusable finite width and row-identity-aware horizontal column-band layout to both existing PDF exporters. All selected fields, field order and rows appear once per logical column band; repeat an authorized identity field when available, otherwise stable row ordinal. Never query hidden identity fields or drop/truncate columns; bounded pages and cancellation remain enforced.": [
+      "src/ERP.Infrastructure/Export/ReportConfigurationPdfExporter.cs",
+      "src/ERP.Infrastructure/Export/ReportConfigurationBundlePdfExporter.cs",
+      "src/ERP.Infrastructure/Export/ReportConfigurationPdfColumnLayout.cs",
+      "src/ERP.UnitTests/ReportConfigurationPdfColumnLayoutTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationBundleTests.cs"
+    ],
+    "Preserve independent section currency/unit, null versus zero, numeric formatting, summary/evidence coverage and nonempty/empty sections. Repeat readable headers at vertical page breaks, title and band/page provenance. Bound long cells without overlapping footer or silently clipping values; no cross-section arithmetic.": [
+      "src/ERP.Infrastructure/Export/ReportConfigurationPdfExporter.cs",
+      "src/ERP.Infrastructure/Export/ReportConfigurationBundlePdfExporter.cs",
+      "src/ERP.Infrastructure/Export/ReportConfigurationPdfColumnLayout.cs",
+      "src/ERP.UnitTests/ReportConfigurationPdfColumnLayoutTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationBundleTests.cs"
+    ],
+    "Test narrow and 27-plus-column multi-section inputs, long Chinese text, row continuity, numeric/null semantics, exact column coverage, cancellation and file limits. Run related tests and safe Release build/unit suite; generate real PDF and inspect rendered readability with actual artifacts before claiming layout acceptance.": [
+      "src/ERP.Infrastructure/Export/ReportConfigurationPdfExporter.cs",
+      "src/ERP.Infrastructure/Export/ReportConfigurationBundlePdfExporter.cs",
+      "src/ERP.Infrastructure/Export/ReportConfigurationPdfColumnLayout.cs",
+      "src/ERP.UnitTests/ReportConfigurationPdfColumnLayoutTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationBundleTests.cs"
+    ]
+  },
+  "depends_on": [
+    "ERP-307"
+  ],
+  "risk": "medium",
+  "planning_stage": 2,
+  "implementation_evidence": "ReportConfigurationBundlePdfExporter.cs ColumnWidths divides A4 usable width by all columns; real ERP-307 API .ai/logs/ERP-307-runtime-api-acceptance-20261005/bundle.pdf has 27-column sections and SO identifiers broken into 3-character lines. Generic exporters lack shared horizontal bands; all task history checked, no such shared capability.",
+  "id": "ERP-311",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-05T04:54:15.135680Z"
+}
