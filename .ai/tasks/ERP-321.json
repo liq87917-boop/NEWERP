@@ -1,0 +1,57 @@
+{
+  "title": "Wire migrated sales-document print families (quotation and proforma-invoice) into the print-template binding catalog",
+  "description": "Stage 2 completion of ERP-318: quotation and proforma-invoice now have controlled datasets (sales-document:{familyKey}), presets and authoritative header/detail field whitelists via ReportConfigurationSalesDocumentCatalog, but ReportPrintTemplateFamilies still maps them through Unsupported('quotation'/'proforma-invoice', ..., UnsupportedReasonStage3) with the now-false '阶段 3 EF 主子表单据尚无受控打印数据集' reason, an empty DatasetKey and Supported=false. Saved SysPrintTemplates for these two sales-document families therefore cannot be bound or rendered through the generic print path, and their print-template:{familyKey} registry entries stay permanently pending. Fix the binding catalog to map quotation and proforma-invoice to sales-document:quotation / sales-document:proforma-invoice with the exact ReportSalesDocumentColumn whitelist (key/title/type, preserving header vs detail grain), reuse the existing quotation/PI menu authorization, and keep legacy print routes and unsupported-layout declarations fail-closed. No new controller/designer/exporter, no arbitrary SQL, no schema/seed/migration changes, no secrets/env, no permission expansion; only the binding catalog plus regression tests. Not audit-only: it makes the two migrated sales-document print families actually bindable/renderable.",
+  "acceptance_criteria": [
+    "ReportPrintTemplateFamilies resolves quotation and proforma-invoice as supported families with DatasetKey sales-document:quotation / sales-document:proforma-invoice and field aliases exactly matching ReportConfigurationSalesDocumentCatalog columns in key/title/type order (identity/header/detail grain preserved), with the original quotation/PI menu authorization and currency/unit semantics.",
+    "The binding catalog and ERP-313 render path accept and validate saved quotation/PI templates against the controlled sales-document datasets (fail-closed on unknown/malformed aliases, revoked menus, unavailable datasets, and cross-family mismatch), and the print-template:{familyKey} registry entries reach at least preset-ready instead of pending, never parity-passed by declaration alone.",
+    "Add/update executable unit coverage in ReportConfigurationPrintTemplateCatalogTests asserting quotation and proforma-invoice are supported with the correct dataset keys and ordered header/detail aliases, the stale stage-3 blocker is gone, denied/revoked menu and alias-injection still fail closed, and existing sales-document migration tests keep passing. Run related tests plus the safe Release build/unit suite and scheduler self-test/contracts."
+  ],
+  "allowed_paths": [
+    "src/ERP.Application/Services/ReportConfigurationPrintTemplateCatalog.cs",
+    "src/ERP.Application/Services/ReportConfigurationSalesDocumentCatalog.cs",
+    "src/ERP.UnitTests/ReportConfigurationPrintTemplateCatalogTests.cs",
+    "src/ERP.UnitTests/ReportConfigurationSalesDocumentMigrationTests.cs"
+  ],
+  "criterion_path_map": {
+    "ReportPrintTemplateFamilies resolves quotation and proforma-invoice as supported families with DatasetKey sales-document:quotation / sales-document:proforma-invoice and field aliases exactly matching ReportConfigurationSalesDocumentCatalog columns in key/title/type order (identity/header/detail grain preserved), with the original quotation/PI menu authorization and currency/unit semantics.": [
+      "src/ERP.Application/Services/ReportConfigurationPrintTemplateCatalog.cs",
+      "src/ERP.Application/Services/ReportConfigurationSalesDocumentCatalog.cs",
+      "src/ERP.UnitTests/ReportConfigurationPrintTemplateCatalogTests.cs"
+    ],
+    "The binding catalog and ERP-313 render path accept and validate saved quotation/PI templates against the controlled sales-document datasets (fail-closed on unknown/malformed aliases, revoked menus, unavailable datasets, and cross-family mismatch), and the print-template:{familyKey} registry entries reach at least preset-ready instead of pending, never parity-passed by declaration alone.": [
+      "src/ERP.Application/Services/ReportConfigurationPrintTemplateCatalog.cs",
+      "src/ERP.Application/Services/ReportConfigurationSalesDocumentCatalog.cs",
+      "src/ERP.UnitTests/ReportConfigurationPrintTemplateCatalogTests.cs"
+    ],
+    "Add/update executable unit coverage in ReportConfigurationPrintTemplateCatalogTests asserting quotation and proforma-invoice are supported with the correct dataset keys and ordered header/detail aliases, the stale stage-3 blocker is gone, denied/revoked menu and alias-injection still fail closed, and existing sales-document migration tests keep passing. Run related tests plus the safe Release build/unit suite and scheduler self-test/contracts.": [
+      "src/ERP.UnitTests/ReportConfigurationPrintTemplateCatalogTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationSalesDocumentMigrationTests.cs",
+      "src/ERP.Application/Services/ReportConfigurationPrintTemplateCatalog.cs"
+    ]
+  },
+  "depends_on": [
+    "ERP-312",
+    "ERP-318"
+  ],
+  "risk": "medium",
+  "planning_stage": 2,
+  "implementation_evidence": "src/ERP.Application/Services/ReportConfigurationPrintTemplateCatalog.cs:98-99 adds Unsupported('quotation', '报价单', UnsupportedReasonStage3) and Unsupported('proforma-invoice', '形式发票 PI', UnsupportedReasonStage3), and :20 still defines UnsupportedReasonStage3='阶段 3 EF 主子表单据尚无受控打印数据集，显式阻塞'. src/ERP.Application/Services/ReportConfigurationSalesDocumentCatalog.cs:52,69-82 and the quotation/PI column builders expose sales-document:quotation / sales-document:proforma-invoice datasets with full ordered header/detail ReportSalesDocumentColumn whitelists, but ReportPrintTemplateFamilies never references them. Consequence: saved quotation/PI print templates remain unrenderable via the generic path and their print-template:{familyKey} registry entries stay pending despite ERP-318.",
+  "id": "ERP-321",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-05T08:13:30.093872Z"
+}

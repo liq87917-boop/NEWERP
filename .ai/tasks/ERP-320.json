@@ -1,0 +1,57 @@
+{
+  "title": "Wire migrated master-data print families into the controlled print-template binding catalog",
+  "description": "Stage 2 completion of ERP-317: the 7 master-data print families (customer/supplier/employee/expense-account/warehouse/product/other-info) already have controlled datasets (master:{familyKey}), immutable presets and ordered field whitelists via ReportConfigurationMasterDataCatalog, but ReportPrintTemplateFamilies still maps them through Master(...) => Unsupported(...) with an empty DatasetKey and Supported=false. As a result the print-template binding catalog and ERP-313 print rendering reject saved SysPrintTemplates for these families, and the print-template:{familyKey} migration-registry entries stay permanently pending (empty DatasetKey -> GetDatasetAsync returns null). Fix the binding catalog to map each of the 7 master families to its master:{familyKey} dataset key and its authoritative ReportMasterDataColumn whitelist (converted to ReportPrintTemplateFieldAlias with the exact same key/title/type order), reuse the existing family menu authorization, and keep the registry/legacy print routes fail-closed. No new controller/designer/exporter, no arbitrary SQL, no schema/seed/migration changes, no secrets/env, no permission expansion; only the print-template binding catalog plus regression tests. This is not an audit-only task: it makes saved master-data print templates actually bindable and renderable through the generic platform.",
+  "acceptance_criteria": [
+    "Each of the 7 master-data print families (customer, supplier, employee, expense-account, warehouse, product, other-info) resolves in ReportPrintTemplateFamilies to a supported family whose DatasetKey equals master:{familyKey} and whose field aliases exactly match ReportConfigurationMasterDataCatalog columns in key/title/type order, preserving the existing RequiredMenuCodes/RequiredMenuText and currency/unit semantics.",
+    "The print-template binding catalog and ERP-313 render path now accept and validate saved master-data templates against the controlled master datasets (fail-closed on unknown/malformed field aliases, revoked menus and unavailable datasets), and the print-template:{familyKey} registry entries reach at least preset-ready instead of pending, without ever marking parity-passed from declarations alone.",
+    "Add/update executable unit coverage in ReportConfigurationPrintTemplateCatalogTests asserting the 7 master families are supported with the correct dataset keys and ordered aliases, denied/revoked menu and alias-injection still fail closed, and existing master-data migration tests keep passing. Run related tests plus the safe Release build/unit suite and scheduler self-test/contracts."
+  ],
+  "allowed_paths": [
+    "src/ERP.Application/Services/ReportConfigurationPrintTemplateCatalog.cs",
+    "src/ERP.Application/Services/ReportConfigurationMasterDataCatalog.cs",
+    "src/ERP.UnitTests/ReportConfigurationPrintTemplateCatalogTests.cs",
+    "src/ERP.UnitTests/ReportConfigurationMasterDataMigrationTests.cs"
+  ],
+  "criterion_path_map": {
+    "Each of the 7 master-data print families (customer, supplier, employee, expense-account, warehouse, product, other-info) resolves in ReportPrintTemplateFamilies to a supported family whose DatasetKey equals master:{familyKey} and whose field aliases exactly match ReportConfigurationMasterDataCatalog columns in key/title/type order, preserving the existing RequiredMenuCodes/RequiredMenuText and currency/unit semantics.": [
+      "src/ERP.Application/Services/ReportConfigurationPrintTemplateCatalog.cs",
+      "src/ERP.Application/Services/ReportConfigurationMasterDataCatalog.cs",
+      "src/ERP.UnitTests/ReportConfigurationPrintTemplateCatalogTests.cs"
+    ],
+    "The print-template binding catalog and ERP-313 render path now accept and validate saved master-data templates against the controlled master datasets (fail-closed on unknown/malformed field aliases, revoked menus and unavailable datasets), and the print-template:{familyKey} registry entries reach at least preset-ready instead of pending, without ever marking parity-passed from declarations alone.": [
+      "src/ERP.Application/Services/ReportConfigurationPrintTemplateCatalog.cs",
+      "src/ERP.Application/Services/ReportConfigurationMasterDataCatalog.cs",
+      "src/ERP.UnitTests/ReportConfigurationPrintTemplateCatalogTests.cs"
+    ],
+    "Add/update executable unit coverage in ReportConfigurationPrintTemplateCatalogTests asserting the 7 master families are supported with the correct dataset keys and ordered aliases, denied/revoked menu and alias-injection still fail closed, and existing master-data migration tests keep passing. Run related tests plus the safe Release build/unit suite and scheduler self-test/contracts.": [
+      "src/ERP.UnitTests/ReportConfigurationPrintTemplateCatalogTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationMasterDataMigrationTests.cs",
+      "src/ERP.Application/Services/ReportConfigurationPrintTemplateCatalog.cs"
+    ]
+  },
+  "depends_on": [
+    "ERP-312",
+    "ERP-317"
+  ],
+  "risk": "medium",
+  "planning_stage": 2,
+  "implementation_evidence": "src/ERP.Application/Services/ReportConfigurationPrintTemplateCatalog.cs:90-96 adds Master('customer'/'supplier'/'employee'/'expense-account'/'warehouse'/'product'/'other-info') and :114-115 Master(...) => Unsupported(familyKey, title, UnsupportedReasonMaster) maps them to empty DatasetKey + Supported=false; :35-52 BuildRegistryEntries then derives print-template:{familyKey} entries with the '无受控数据集' semantics so they stay pending. src/ERP.Application/Services/ReportConfigurationMasterDataCatalog.cs:37,58-67,128-178 already exposes the 7 families with DatasetKeyPrefix 'master:' and ordered ReportMasterDataColumn whitelists, but ReportPrintTemplateFamilies never references it. Consequence: ReportConfigurationPrintTemplateCatalog binding and ReportConfigurationPrintRenderService reject saved master-data print templates even though ERP-317 datasets + presets exist.",
+  "id": "ERP-320",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-05T08:13:30.092765Z"
+}

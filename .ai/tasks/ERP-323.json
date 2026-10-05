@@ -1,0 +1,55 @@
+{
+  "title": "Fix migration-registry parity menu matching for multi-menu legacy export entries",
+  "description": "Stage 2 registry defect: ReportMigrationRegistry.SemanticsMatch requires definition.RequiredMenuCodes.Count == 1 and compares only RequiredMenuCodes[0] to dataset.RequiredMenuCode. The three legacy export families sales-order/purchase-order/inquiry declare two required menus each (base menu + dedicated export menu) via LegacyBillExportCatalog, so menuMatch is always false for them and they can never reach parity-passed even though their controlled datasets, presets and declared Excel compatibility all exist. Fix SemanticsMatch so multi-menu entries are evaluated against the full declared required-menu set (all required menus must be authorized for the entry, consistent with IsMenuAuthorized), preserving the currency/unit and compatibility checks and never deriving parity-passed without the existing four-dimension comparison evidence. Keep single-menu entries unchanged and legacy routes fail-closed. No new controller/designer/exporter, no arbitrary SQL, no schema/seed/migration changes, no secrets/env, no permission expansion; only the registry parity semantics plus tests. Not audit-only: it unblocks correct parity derivation for three genuine migrated export families.",
+  "acceptance_criteria": [
+    "ReportMigrationRegistry.SemanticsMatch evaluates multi-menu entries (sales-order/purchase-order/inquiry bill-export families) against the full declared RequiredMenuCodes set rather than requiring exactly one menu code, so those entries can advance from preset-ready toward parity-passed when dataset + preset + declared compatibility and comparison evidence all exist.",
+    "The corrected matching stays consistent with IsMenuAuthorized (all declared menus required, fail-closed), keeps currency/unit semantic matching and the compatibility-declared check intact, never derives parity-passed without the four-dimension comparison evidence, and leaves single-menu entries behavior unchanged.",
+    "Add/update executable unit coverage in ReportMigrationRegistryTests and ReportConfigurationLegacyBillMigrationTests asserting multi-menu bill-export entries match semantics correctly, missing either base or export menu still fails closed, and the existing single-menu and currency/unit parity tests keep passing. Run related tests plus the safe Release build/unit suite and scheduler self-test/contracts."
+  ],
+  "allowed_paths": [
+    "src/ERP.Application/Services/ReportMigrationRegistry.cs",
+    "src/ERP.UnitTests/ReportMigrationRegistryTests.cs",
+    "src/ERP.UnitTests/ReportConfigurationLegacyBillMigrationTests.cs"
+  ],
+  "criterion_path_map": {
+    "ReportMigrationRegistry.SemanticsMatch evaluates multi-menu entries (sales-order/purchase-order/inquiry bill-export families) against the full declared RequiredMenuCodes set rather than requiring exactly one menu code, so those entries can advance from preset-ready toward parity-passed when dataset + preset + declared compatibility and comparison evidence all exist.": [
+      "src/ERP.Application/Services/ReportMigrationRegistry.cs",
+      "src/ERP.UnitTests/ReportMigrationRegistryTests.cs"
+    ],
+    "The corrected matching stays consistent with IsMenuAuthorized (all declared menus required, fail-closed), keeps currency/unit semantic matching and the compatibility-declared check intact, never derives parity-passed without the four-dimension comparison evidence, and leaves single-menu entries behavior unchanged.": [
+      "src/ERP.Application/Services/ReportMigrationRegistry.cs",
+      "src/ERP.UnitTests/ReportMigrationRegistryTests.cs"
+    ],
+    "Add/update executable unit coverage in ReportMigrationRegistryTests and ReportConfigurationLegacyBillMigrationTests asserting multi-menu bill-export entries match semantics correctly, missing either base or export menu still fails closed, and the existing single-menu and currency/unit parity tests keep passing. Run related tests plus the safe Release build/unit suite and scheduler self-test/contracts.": [
+      "src/ERP.UnitTests/ReportMigrationRegistryTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationLegacyBillMigrationTests.cs",
+      "src/ERP.Application/Services/ReportMigrationRegistry.cs"
+    ]
+  },
+  "depends_on": [
+    "ERP-295",
+    "ERP-296",
+    "ERP-308"
+  ],
+  "risk": "medium",
+  "planning_stage": 2,
+  "implementation_evidence": "src/ERP.Application/Services/ReportMigrationRegistry.cs:121-135 SemanticsMatch computes menuMatch = definition.RequiredMenuCodes.Count == 1 && string.Equals(definition.RequiredMenuCodes[0], dataset.RequiredMenuCode, OrdinalIgnoreCase), so any entry with two required menus fails. src/ERP.Application/Services/LegacyBillExportCatalog.cs:157-174 defines sales-order/purchase-order/inquiry with new[] { 'sales-order','sales-order-export' } / { 'purchase-order','purchase-order-export' } / { 'inquiry','inquiry-export' } and :40-52 BuildRegistryEntries propagates those two-menu sets into export:bill-proc:{familyKey} registry entries. src/ERP.Application/DTOs/ReportMigrationRegistryDtos.cs:251 packet:customer-report-packet also declares two menus ('sales-order','customer'). IsMenuAuthorized (ReportMigrationRegistry.cs:142-156) already requires all menus, proving the single-menu parity check is an inconsistency that permanently blocks these migrated entries from parity-passed.",
+  "id": "ERP-323",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-05T08:13:30.095900Z"
+}
