@@ -1,0 +1,87 @@
+{
+  "title": "Migrate follow-up, quotation conversion and salesman output through shared controlled datasets and presets",
+  "description": "Stage 2 controlled family migration, not a new dedicated business report. Verified IReportService.GetFollowUpDueAsync/GetQuotationConversionAsync/GetSalesmanOutputAsync and existing dynamic rules; menu codes follow-up-due, quotation and salesman-output respectively. Registry fixed and dynamic entries exist; no corresponding providers/presets or duplicate queued family task exists. No dedicated controller/designer/exporter, arbitrary SQL, new business algorithms, schema/migrations/production DB operations, secrets/env edits, permission expansion or unrelated changes. Serialize common files through dependencies. Generic exports and bounded errors must reuse existing platform contracts.",
+  "acceptance_criteria": [
+    "Expose this existing report family through finite controlled dataset adapters and immutable presets keyed to every corresponding fixed/dynamic registry entry. Reuse original calculation/query services and field/grain semantics, retain all legacy routes, and truthfully disclose unsupported capabilities.",
+    "Revalidate original menu authorization and current-user row/column/data scope on catalog, preview and generic Excel/PDF export; fail closed for unknown fields/filters, oversized pages/dates and unavailable services. Preserve currency/unit partitions, nullable evidence and one-to-many amount cardinality with existing audit.",
+    "Authorized users can create private definitions from these presets using existing orchestration. Presence means readiness only; do not mark parity-passed or switch legacy entry points from declarations or incomplete comparisons.",
+    "Implement executable legacy-versus-generic preview/Excel/PDF comparisons for all family datasets, paging/empty/null cases, unauthorized/revoked menus and currency/unit semantics. Add isolated SQL fixtures strictly guarded to (localdb)\\NEWERP_AutoAcceptance and NEWERP_AUTOTEST_* databases; execute related tests, safe Release build/unit tests and scheduler self-test/contracts. Missing genuine SQL/browser acceptance stays unverified; no stage completion claim."
+  ],
+  "allowed_paths": [
+    "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
+    "src/ERP.Application/Services/ReportConfigurationPresetCatalog.cs",
+    "src/ERP.Infrastructure/DependencyInjection.cs",
+    "src/ERP.Infrastructure/Reports/FollowUpDueReportConfigurationDatasetProvider.cs",
+    "src/ERP.Infrastructure/Reports/QuotationConversionReportConfigurationDatasetProvider.cs",
+    "src/ERP.Infrastructure/Reports/SalesmanOutputReportConfigurationDatasetProvider.cs",
+    "src/ERP.UnitTests/ReportConfigurationWorkflowMigrationTests.cs",
+    "src/ERP.IntegrationTests/ReportConfigurationWorkflowMigrationTestsSqlServerTests.cs"
+  ],
+  "criterion_path_map": {
+    "Expose this existing report family through finite controlled dataset adapters and immutable presets keyed to every corresponding fixed/dynamic registry entry. Reuse original calculation/query services and field/grain semantics, retain all legacy routes, and truthfully disclose unsupported capabilities.": [
+      "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
+      "src/ERP.Application/Services/ReportConfigurationPresetCatalog.cs",
+      "src/ERP.Infrastructure/DependencyInjection.cs",
+      "src/ERP.Infrastructure/Reports/FollowUpDueReportConfigurationDatasetProvider.cs",
+      "src/ERP.Infrastructure/Reports/QuotationConversionReportConfigurationDatasetProvider.cs",
+      "src/ERP.Infrastructure/Reports/SalesmanOutputReportConfigurationDatasetProvider.cs",
+      "src/ERP.UnitTests/ReportConfigurationWorkflowMigrationTests.cs",
+      "src/ERP.IntegrationTests/ReportConfigurationWorkflowMigrationTestsSqlServerTests.cs"
+    ],
+    "Revalidate original menu authorization and current-user row/column/data scope on catalog, preview and generic Excel/PDF export; fail closed for unknown fields/filters, oversized pages/dates and unavailable services. Preserve currency/unit partitions, nullable evidence and one-to-many amount cardinality with existing audit.": [
+      "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
+      "src/ERP.Application/Services/ReportConfigurationPresetCatalog.cs",
+      "src/ERP.Infrastructure/DependencyInjection.cs",
+      "src/ERP.Infrastructure/Reports/FollowUpDueReportConfigurationDatasetProvider.cs",
+      "src/ERP.Infrastructure/Reports/QuotationConversionReportConfigurationDatasetProvider.cs",
+      "src/ERP.Infrastructure/Reports/SalesmanOutputReportConfigurationDatasetProvider.cs",
+      "src/ERP.UnitTests/ReportConfigurationWorkflowMigrationTests.cs",
+      "src/ERP.IntegrationTests/ReportConfigurationWorkflowMigrationTestsSqlServerTests.cs"
+    ],
+    "Authorized users can create private definitions from these presets using existing orchestration. Presence means readiness only; do not mark parity-passed or switch legacy entry points from declarations or incomplete comparisons.": [
+      "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
+      "src/ERP.Application/Services/ReportConfigurationPresetCatalog.cs",
+      "src/ERP.Infrastructure/DependencyInjection.cs",
+      "src/ERP.Infrastructure/Reports/FollowUpDueReportConfigurationDatasetProvider.cs",
+      "src/ERP.Infrastructure/Reports/QuotationConversionReportConfigurationDatasetProvider.cs",
+      "src/ERP.Infrastructure/Reports/SalesmanOutputReportConfigurationDatasetProvider.cs",
+      "src/ERP.UnitTests/ReportConfigurationWorkflowMigrationTests.cs",
+      "src/ERP.IntegrationTests/ReportConfigurationWorkflowMigrationTestsSqlServerTests.cs"
+    ],
+    "Implement executable legacy-versus-generic preview/Excel/PDF comparisons for all family datasets, paging/empty/null cases, unauthorized/revoked menus and currency/unit semantics. Add isolated SQL fixtures strictly guarded to (localdb)\\NEWERP_AutoAcceptance and NEWERP_AUTOTEST_* databases; execute related tests, safe Release build/unit tests and scheduler self-test/contracts. Missing genuine SQL/browser acceptance stays unverified; no stage completion claim.": [
+      "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
+      "src/ERP.Application/Services/ReportConfigurationPresetCatalog.cs",
+      "src/ERP.Infrastructure/DependencyInjection.cs",
+      "src/ERP.Infrastructure/Reports/FollowUpDueReportConfigurationDatasetProvider.cs",
+      "src/ERP.Infrastructure/Reports/QuotationConversionReportConfigurationDatasetProvider.cs",
+      "src/ERP.Infrastructure/Reports/SalesmanOutputReportConfigurationDatasetProvider.cs",
+      "src/ERP.UnitTests/ReportConfigurationWorkflowMigrationTests.cs",
+      "src/ERP.IntegrationTests/ReportConfigurationWorkflowMigrationTestsSqlServerTests.cs"
+    ]
+  },
+  "depends_on": [
+    "ERP-296",
+    "ERP-301"
+  ],
+  "risk": "medium",
+  "planning_stage": 2,
+  "implementation_evidence": "Verified IReportService.GetFollowUpDueAsync/GetQuotationConversionAsync/GetSalesmanOutputAsync and existing dynamic rules; menu codes follow-up-due, quotation and salesman-output respectively. Registry fixed and dynamic entries exist; no corresponding providers/presets or duplicate queued family task exists.",
+  "id": "ERP-302",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-05T01:52:33.412173Z"
+}
