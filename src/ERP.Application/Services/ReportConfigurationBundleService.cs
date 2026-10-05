@@ -22,13 +22,16 @@ public sealed class ReportConfigurationBundleService : IReportConfigurationBundl
 
     private readonly IReportConfigurationExecutionService _execution;
     private readonly IReportConfigurationExecutionBudget _budget;
+    private readonly IReportConfigurationCompositionReadScopeFactory? _compositionReadScopeFactory;
 
     public ReportConfigurationBundleService(
         IReportConfigurationExecutionService execution,
-        IReportConfigurationExecutionBudget? budget = null)
+        IReportConfigurationExecutionBudget? budget = null,
+        IReportConfigurationCompositionReadScopeFactory? compositionReadScopeFactory = null)
     {
         _execution = execution ?? throw new ArgumentNullException(nameof(execution));
         _budget = budget ?? new ReportConfigurationExecutionBudget();
+        _compositionReadScopeFactory = compositionReadScopeFactory;
     }
 
     /// <inheritdoc />
@@ -262,8 +265,46 @@ public sealed class ReportConfigurationBundleService : IReportConfigurationBundl
     {
         var scenario = ResolveScenario(request);
 
-        // 表头 / 明细两节复用既有执行服务在同一租约内重新校验归属 / 共享授权 / 固定修订 / 数据集菜单授权与数据范围（fail closed）。
-        var headerPreview = await _execution.PreviewAsync(ownerUserId, new ReportConfigurationPreviewRequest
+        // ERP-335 Stage 2：当已注入组合一致读取作用域工厂时，把两次有限读取 + 最终授权复核包在同一个
+        // 受支持的一致只读事务内，避免两次独立读取之间源数据变化而产出混合表头 / 明细结果。
+        if (_compositionReadScopeFactory is not null)
+        {
+            await using var scope = await _compositionReadScopeFactory.OpenAsync(
+                ownerUserId, lease.CorrelationId, lease.Token);
+
+            var scopedHeader = await ReadCompositionHeaderAsync(ownerUserId, request, lease);
+            lease.Token.ThrowIfCancellationRequested();
+            var scopedDetail = await ReadCompositionDetailAsync(ownerUserId, request, lease);
+            lease.Token.ThrowIfCancellationRequested();
+
+            await scope.RecheckAsync(
+                ownerUserId,
+                new[]
+                {
+                    new ReportConfigurationCompositionReadTarget(
+                        request.HeaderConfigurationId, request.HeaderRevisionVersion, scopedHeader.DatasetKey),
+                    new ReportConfigurationCompositionReadTarget(
+                        request.DetailConfigurationId, request.DetailRevisionVersion, scopedDetail.DatasetKey),
+                },
+                lease.Token);
+            await scope.CompleteAsync(lease.Token);
+
+            return ComposeValidated(scenario, request, scopedHeader, scopedDetail, lease);
+        }
+
+        // 无作用域工厂时保留既有行为（如内存库单元测试）：仍为同一租约内的两次独立预览，不新增保护。
+        var headerPreview = await ReadCompositionHeaderAsync(ownerUserId, request, lease);
+        lease.Token.ThrowIfCancellationRequested();
+        var detailPreview = await ReadCompositionDetailAsync(ownerUserId, request, lease);
+        lease.Token.ThrowIfCancellationRequested();
+        return ComposeValidated(scenario, request, headerPreview, detailPreview, lease);
+    }
+
+    private Task<ReportConfigurationPreviewDto> ReadCompositionHeaderAsync(
+        long ownerUserId,
+        ReportConfigurationBundleCompositionRequest request,
+        IReportConfigurationExecutionLease lease)
+        => _execution.PreviewAsync(ownerUserId, new ReportConfigurationPreviewRequest
         {
             ConfigurationId = request.HeaderConfigurationId,
             RevisionVersion = request.HeaderRevisionVersion,
@@ -271,9 +312,11 @@ public sealed class ReportConfigurationBundleService : IReportConfigurationBundl
             PageSize = ReportConfigurationBundleCompositionLimits.MaxParents,
         }, lease);
 
-        lease.Token.ThrowIfCancellationRequested();
-
-        var detailPreview = await _execution.PreviewAsync(ownerUserId, new ReportConfigurationPreviewRequest
+    private Task<ReportConfigurationPreviewDto> ReadCompositionDetailAsync(
+        long ownerUserId,
+        ReportConfigurationBundleCompositionRequest request,
+        IReportConfigurationExecutionLease lease)
+        => _execution.PreviewAsync(ownerUserId, new ReportConfigurationPreviewRequest
         {
             ConfigurationId = request.DetailConfigurationId,
             RevisionVersion = request.DetailRevisionVersion,
@@ -281,8 +324,13 @@ public sealed class ReportConfigurationBundleService : IReportConfigurationBundl
             PageSize = ReportConfigurationBundleCompositionLimits.MaxTotalChildren,
         }, lease);
 
-        lease.Token.ThrowIfCancellationRequested();
-
+    private static ReportConfigurationBundleCompositionPreviewDto ComposeValidated(
+        ReportConfigurationBundleCompositionScenario scenario,
+        ReportConfigurationBundleCompositionRequest request,
+        ReportConfigurationPreviewDto headerPreview,
+        ReportConfigurationPreviewDto detailPreview,
+        IReportConfigurationExecutionLease lease)
+    {
         // 不兼容组合显式拒绝：两节数据集必须与场景声明一致，绝不静默跨数据集组合。
         if (!string.Equals(headerPreview?.DatasetKey, scenario.HeaderDatasetKey, StringComparison.OrdinalIgnoreCase))
             throw BusinessException.RuleConflict(

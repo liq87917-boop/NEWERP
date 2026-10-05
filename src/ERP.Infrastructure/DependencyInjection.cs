@@ -123,6 +123,10 @@ public static class DependencyInjection
         // 通用报表配置平台（ERP-307 Stage 2）：有界多节捆绑（复用既有执行服务编排既有定义 / 版本，无新实体 / 无新 SQL）
         services.AddScoped<IReportConfigurationBundleService, ReportConfigurationBundleService>();
 
+        // 通用报表配置平台（ERP-335 Stage 2）：表头 / 明细组合一致读取作用域工厂
+        // （在既有作用域 DbContext 上获取 Snapshot 一致只读事务；后端 / 隔离级别不支持时 fail closed）
+        services.AddScoped<IReportConfigurationCompositionReadScopeFactory, ReportConfigurationCompositionReadScopeFactory>();
+
         // 通用报表配置平台（ERP-310 Stage 2）：有界多节捆绑预设（有限模板 + 共享参数绑定 + 私有物化；复用既有捆绑引擎，无新实体 / 无新 SQL）
         services.AddScoped<IReportConfigurationBundlePresetCatalog, ReportConfigurationBundlePresetCatalog>();
 
