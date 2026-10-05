@@ -148,6 +148,9 @@ public static class DependencyInjection
         // 通用报表配置平台（ERP-312 Stage 2）：受控打印模板绑定目录（只读枚举 + 只读绑定校验；复用既有菜单授权与受控数据集列权限）
         services.AddScoped<IReportConfigurationPrintTemplateCatalog, ReportConfigurationPrintTemplateCatalog>();
 
+        // 通用报表配置平台（ERP-313 Stage 2）：受控打印渲染服务（复用既有执行服务与受控打印模板绑定目录；只读，不写库）
+        services.AddScoped<IReportConfigurationPrintRenderService, ReportConfigurationPrintRenderService>();
+
         // 库存移动与成本服务（ERP-009：库存单据审核/销审统一经此维护库存与流水）
         services.AddScoped<IInventoryService, InventoryService>();
 

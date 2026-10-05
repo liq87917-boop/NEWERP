@@ -81,6 +81,12 @@ let RCC = {
   filterErrors: [],
   busy: false,
   activeAbort: null,
+  printCatalog: null,
+  printFamilyKey: '',
+  printTemplateId: 0,
+  printView: null,
+  printBusy: false,
+  printActiveAbort: null,
 };
 
 /* ==================== 纯函数（可在 Node 中逐条单测） ==================== */
@@ -1068,14 +1074,28 @@ function rccTouch() {
 
 /* 中止当前在途的只读预览 / 导出请求并立即释放本地忙态（不触碰已提交的生命周期写入） */
 function rccAbortActive() {
-  if (!RCC.activeAbort) return;
-  try { RCC.activeAbort.abort(); } catch (e) { /* 忽略重复中止 */ }
-  RCC.activeAbort = null;
-  RCC.busy = false;
+  if (RCC.activeAbort) {
+    try { RCC.activeAbort.abort(); } catch (e) { /* 忽略重复中止 */ }
+    RCC.activeAbort = null;
+    RCC.busy = false;
+  }
+  if (RCC.printActiveAbort) {
+    try { RCC.printActiveAbort.abort(); } catch (e) { /* 忽略重复中止 */ }
+    RCC.printActiveAbort = null;
+    RCC.printBusy = false;
+  }
 }
 
 /* 取消当前预览 / Excel / PDF 只读请求：立即释放本地忙态、保留已保存定义与未保存编辑，允许继续操作 */
 function rccCancel() {
+  if (RCC.printBusy && (RCC.lastAction === 'printPreview' || RCC.lastAction === 'printExportPdf')) {
+    RCC.requestSeq++;
+    if (RCC.printActiveAbort) { try { RCC.printActiveAbort.abort(); } catch (e) { /* 忽略重复中止 */ } }
+    RCC.printActiveAbort = null;
+    RCC.printBusy = false;
+    rccPrintRenderResult(rccErrorHtml('cancelled', '已取消打印预览 / 下载请求'));
+    return;
+  }
   if (!RCC.busy) return;
   if (RCC.lastAction !== 'preview' && RCC.lastAction !== 'export' && RCC.lastAction !== 'exportPdf') return;   // 已提交的生命周期写入绝不取消
   RCC.requestSeq++;                        // 作废本次在途请求，使迟到响应 / 导出 blob 全部失效
@@ -1085,7 +1105,7 @@ function rccCancel() {
 
 /* 切换 / 离开工作台时释放活动只读 / 导出请求（重新进入工作台也会调用） */
 function rccDisposeWorkspace() {
-  if (!RCC.activeAbort) return;
+  if (!RCC.activeAbort && !RCC.printActiveAbort) return;
   RCC.requestSeq++;                        // 作废在途只读 / 导出请求，杜绝迟到下载或覆盖预览
   rccAbortActive();
 }
@@ -1104,6 +1124,7 @@ async function rccInit() {
     grantsCursor: null, grantsHasMore: false, grantsSeq: 0,
     bundle: { sections: [], candidates: [], view: null },
     bundlePresets: [],
+    printCatalog: null, printFamilyKey: '', printTemplateId: 0, printView: null, printBusy: false, printActiveAbort: null,
     dirty: false, requestSeq: 0, envBlocked: false, busy: false, activeAbort: null,
   };
   rccRenderDesigner();
@@ -1972,6 +1993,240 @@ function rccBundleCandidates() {
   return own.concat(shared);
 }
 
+/* ============ 打印模板渲染（ERP-313 Stage 2）：只读目录 + 预览 / PDF 下载 ============ */
+
+function rccSupportedPrintFamilies() {
+  return ((RCC.printCatalog && RCC.printCatalog.families) || []).filter(function (f) { return f && f.supported; });
+}
+
+function rccPrintRequest() {
+  const shared = RCC.sharedCurrent;
+  const owned = RCC.current;
+  const configurationId = shared ? shared.reportConfigurationId : (owned ? owned.id : 0);
+  return {
+    configurationId: configurationId,
+    revisionVersion: shared ? null : (RCC.previewRevision || null),
+    templateId: RCC.printTemplateId,
+  };
+}
+
+function rccPrintRenderResult(html) {
+  const el = document.getElementById('rcc-print-result');
+  if (el) el.innerHTML = html;
+}
+
+async function rccLoadPrintTemplates() {
+  const el = document.getElementById('rcc-print-templates');
+  if (el) el.innerHTML = rccLoadingHtml();
+  try {
+    const env = await rccFetch('/api/report-configuration-print-templates/catalog');
+    if (env.code === 2000 || env.code === 2003) { rccOnUnauthorized(env.message); return; }
+    if (env.code !== 0) {
+      if (el) el.innerHTML = rccErrorHtml(rccKindOfCode(env.code), env.message || '读取打印模板失败');
+      return;
+    }
+    RCC.printCatalog = env.data;
+    rccRenderPrintTemplates();
+  } catch (err) {
+    if (el) el.innerHTML = rccErrorHtml('network', (err && err.message) || '无法连接到服务器');
+  }
+}
+
+function rccRenderPrintTemplates() {
+  const el = document.getElementById('rcc-print-templates');
+  if (!el) return;
+  const families = rccSupportedPrintFamilies();
+  const currentConfig = RCC.current || RCC.sharedCurrent;
+  if (families.length && !families.some(function (f) { return f.familyKey === RCC.printFamilyKey; })) {
+    RCC.printFamilyKey = families[0].familyKey;
+    RCC.printTemplateId = 0;
+    RCC.printView = null;
+  }
+  const selectedFamily = families.find(function (f) { return f.familyKey === RCC.printFamilyKey; }) || null;
+  const templates = selectedFamily ? (selectedFamily.templates || []) : [];
+  if (templates.length && !templates.some(function (t) { return t.id === RCC.printTemplateId; })) {
+    RCC.printTemplateId = templates[0].id;
+    RCC.printView = null;
+  }
+
+  const familyOptions = families.map(function (f) {
+    return '<option value="' + rccEsc(f.familyKey) + '" ' + (f.familyKey === RCC.printFamilyKey ? 'selected' : '') + '>'
+      + rccEsc(f.title) + ' · ' + rccEsc(f.datasetKey) + '</option>';
+  }).join('');
+  const templateOptions = templates.map(function (t) {
+    return '<option value="' + t.id + '" ' + (t.id === RCC.printTemplateId ? 'selected' : '') + '>'
+      + rccEsc(t.templateName) + (t.isDefault ? '（默认）' : '') + '</option>';
+  }).join('');
+
+  el.innerHTML = '<div class="rcc-bundle-title">打印模板渲染（共享通用预览 / PDF 下载）</div>'
+    + '<div class="rcc-print-hint">请先在「私有配置」中选择一个已保存报表配置（或共享快照），再选择打印模板族与模板；仅支持兼容（compatible）的受控打印模板族，不支持族显式隐藏。</div>'
+    + (families.length
+        ? '<div class="rcc-bundle-builder">'
+          + '<select id="rcc-print-family" onchange="rccOnPrintFamily(this.value)">' + familyOptions + '</select>'
+          + '<select id="rcc-print-template" onchange="rccOnPrintTemplate(this.value)">' + templateOptions + '</select>'
+          + '</div>'
+        : '<div class="empty">当前账号没有兼容的打印模板族</div>')
+    + '<div class="rcc-bundle-toolbar">'
+    + '<button type="button" class="btn btn-primary" onclick="rccPrintPreview()">预览</button>'
+    + '<button type="button" class="btn" onclick="rccPrintExportPdf()">下载PDF</button>'
+    + '<button type="button" class="btn" onclick="rccCancel()">取消</button>'
+    + '</div>'
+    + '<div id="rcc-print-result">' + (RCC.printView ? rccPrintResultHtml(RCC.printView) : (currentConfig ? rccEmptyHtml() : rccErrorHtml('invalid', '请先选择一个报表配置'))) + '</div>';
+}
+
+function rccOnPrintFamily(value) {
+  RCC.printFamilyKey = value || '';
+  RCC.printTemplateId = 0;
+  RCC.printView = null;
+  rccRenderPrintTemplates();
+}
+
+function rccOnPrintTemplate(value) {
+  RCC.printTemplateId = Number(value) || 0;
+  RCC.printView = null;
+  rccRenderPrintTemplates();
+}
+
+function rccPrintGridHtml(block) {
+  const colWidths = (block && block.colWidths) || [];
+  const rowHeights = (block && block.rowHeights) || [];
+  const cells = (block && block.cells) || [];
+  const grid = [];
+  for (let r = 0; r < rowHeights.length; r++) grid[r] = new Array(colWidths.length).fill(null);
+  cells.forEach(function (c) { if (c.row >= 0 && c.col >= 0 && grid[c.row]) grid[c.row][c.col] = c; });
+  const covered = {};
+  cells.forEach(function (c) {
+    for (let r = c.row; r < c.row + (c.rowSpan || 1); r++) {
+      for (let cc = c.col; cc < c.col + (c.colSpan || 1); cc++) {
+        if (r !== c.row || cc !== c.col) covered[r + '_' + cc] = true;
+      }
+    }
+  });
+  const rowsHtml = rowHeights.map(function (h, r) {
+    const tds = [];
+    for (let c = 0; c < colWidths.length; c++) {
+      if (covered[r + '_' + c]) continue;
+      const cell = grid[r][c];
+      if (!cell) { tds.push('<td></td>'); continue; }
+      const style = [];
+      if (cell.bold) style.push('font-weight:bold');
+      if (cell.align === 'center') style.push('text-align:center');
+      if (cell.align === 'right') style.push('text-align:right');
+      tds.push('<td'
+        + (cell.rowSpan > 1 ? ' rowspan="' + cell.rowSpan + '"' : '')
+        + (cell.colSpan > 1 ? ' colspan="' + cell.colSpan + '"' : '')
+        + (style.length ? ' style="' + style.join(';') + '"' : '')
+        + '>' + rccEsc(cell.text) + '</td>');
+    }
+    return '<tr style="height:' + rccEsc(h) + 'px">' + tds.join('') + '</tr>';
+  }).join('');
+  return '<div class="rcc-print-block"><table class="rcc-table"><tbody>' + rowsHtml + '</tbody></table>'
+    + (block && block.footerText ? '<div class="rcc-disclaimer">' + rccEsc(block.footerText) + '</div>' : '') + '</div>';
+}
+
+function rccPrintResultHtml(render) {
+  if (!render) return rccEmptyHtml();
+  const meta = '<div class="rcc-meta">'
+    + rccEsc(render.title || render.templateName || '打印') + ' · 模板 ' + rccEsc(render.templateName || '')
+    + ' · 数据集 ' + rccEsc(render.datasetKey || '')
+    + ' · 布局 ' + (render.layout === 'grid' ? '网格' : '标准')
+    + ' · 汇总依据 ' + rccEsc(render.sourceEvidenceCount !== undefined ? render.sourceEvidenceCount : 0) + ' 条'
+    + (render.correlationId ? ' · 关联 ' + rccEsc(render.correlationId) : '') + '</div>';
+
+  if (render.layout === 'grid') {
+    const blocks = (render.gridBlocks || []).map(rccPrintGridHtml).join('');
+    return meta + blocks;
+  }
+
+  const columns = (render.columns || []);
+  const rows = (render.rows || []);
+  const head = '<tr>' + columns.map(function (c) {
+    return '<th>' + rccEsc(c.title || c.columnKey) + (c.currencyUnit ? '（' + rccEsc(c.currencyUnit) + '）' : '') + '</th>';
+  }).join('') + '</tr>';
+  const body = rows.map(function (row) {
+    return '<tr>' + columns.map(function (c) {
+      return '<td>' + rccEsc(rccCellText(row[c.columnKey], c.type, c.currencyUnit)) + '</td>';
+    }).join('') + '</tr>';
+  }).join('');
+  return meta
+    + '<div class="rcc-table-wrap"><table class="rcc-table"><thead>' + head + '</thead><tbody>' + body + '</tbody></table></div>'
+    + (render.footerText ? '<div class="rcc-disclaimer">' + rccEsc(render.footerText) + '</div>' : '');
+}
+
+async function rccPrintPreview() {
+  if (RCC.printBusy) return;
+  const req = rccPrintRequest();
+  if (!req.configurationId) { rccPrintRenderResult(rccErrorHtml('invalid', '请先选择一个报表配置')); return; }
+  if (!req.templateId) { rccPrintRenderResult(rccErrorHtml('invalid', '请选择一个打印模板')); return; }
+  const seq = ++RCC.requestSeq;
+  RCC.lastAction = 'printPreview';
+  RCC.printBusy = true;
+  const controller = new AbortController();
+  RCC.printActiveAbort = controller;
+  rccPrintRenderResult(rccLoadingHtml());
+  try {
+    const env = await rccFetch('/api/report-configuration-print-templates/render/preview', 'POST', req, controller.signal);
+    if (seq !== RCC.requestSeq) return;
+    if (env.code === 2000 || env.code === 2003) { rccOnUnauthorized(env.message); return; }
+    if (env.code !== 0) { rccPrintRenderResult(rccErrorHtml(rccKindOfCode(env.code), env.message || '打印预览失败')); return; }
+    RCC.printView = env.data;
+    rccPrintRenderResult(rccPrintResultHtml(RCC.printView));
+  } catch (err) {
+    if (seq !== RCC.requestSeq) return;
+    if (err && err.name === 'AbortError') rccPrintRenderResult(rccErrorHtml('cancelled', '请求已取消'));
+    else rccPrintRenderResult(rccErrorHtml('network', (err && err.message) || '无法连接到服务器'));
+  } finally {
+    if (RCC.printActiveAbort === controller) { RCC.printActiveAbort = null; RCC.printBusy = false; }
+  }
+}
+
+async function rccPrintExportPdf() {
+  if (RCC.printBusy) return;
+  const req = rccPrintRequest();
+  if (!req.configurationId) { rccPrintRenderResult(rccErrorHtml('invalid', '请先选择一个报表配置')); return; }
+  if (!req.templateId) { rccPrintRenderResult(rccErrorHtml('invalid', '请选择一个打印模板')); return; }
+  const seq = ++RCC.requestSeq;
+  RCC.lastAction = 'printExportPdf';
+  RCC.printBusy = true;
+  const controller = new AbortController();
+  RCC.printActiveAbort = controller;
+  try {
+    const resp = await fetch('/api/report-configuration-print-templates/render/export-pdf', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + (typeof localStorage !== 'undefined' ? (localStorage.getItem('erp_token') || '') : ''),
+      },
+      body: JSON.stringify(req),
+      signal: controller.signal,
+    });
+    if (seq !== RCC.requestSeq) return;
+    const contentType = (resp.headers.get('content-type') || '');
+    if (contentType.indexOf('pdf') >= 0) {
+      const blob = await resp.blob();
+      if (seq !== RCC.requestSeq) return;
+      const a = document.createElement('a');
+      const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+      a.download = '打印模板_' + dateStr + '.pdf';
+      rccTriggerDownload(blob, a);
+      return;
+    }
+    let envelope = null;
+    try { envelope = await resp.json(); } catch (e) { /* 忽略解析失败 */ }
+    const code = envelope && envelope.code;
+    const message = (envelope && envelope.message) || '打印导出失败';
+    if (code === 2000 || code === 2003) { rccOnUnauthorized(message); return; }
+    rccPrintRenderResult(rccErrorHtml(rccKindOfCode(code), message));
+  } catch (err) {
+    if (seq !== RCC.requestSeq) return;
+    if (err && err.name === 'AbortError') rccPrintRenderResult(rccErrorHtml('cancelled', '请求已取消'));
+    else rccPrintRenderResult(rccErrorHtml('network', (err && err.message) || '无法连接到服务器'));
+  } finally {
+    if (RCC.printActiveAbort === controller) { RCC.printActiveAbort = null; RCC.printBusy = false; }
+  }
+}
+
+
 function rccRenderBundles() {
   const el = document.getElementById('rcc-bundles');
   if (!el) return;
@@ -2339,6 +2594,7 @@ function renderReportConfigurationWorkspace() {
     + '<button type="button" class="rcc-tab rcc-tab-active" id="rcc-tab-private" onclick="rccShowPrivate()">私有配置</button>'
     + '<button type="button" class="rcc-tab" id="rcc-tab-presets" onclick="rccShowPresets()">预设模板</button>'
     + '<button type="button" class="rcc-tab" id="rcc-tab-bundles" onclick="rccShowBundles()">报表捆绑</button>'
+    + '<button type="button" class="rcc-tab" id="rcc-tab-print" onclick="rccShowPrintTemplates()">打印模板</button>'
     + '</div>'
     + '<div class="rcc-toolbar" id="rcc-toolbar">'
     + '<button type="button" class="btn" onclick="rccNew()">新建</button>'
@@ -2366,6 +2622,7 @@ function renderReportConfigurationWorkspace() {
     + '</div>'
     + '<section class="rcc-presets" id="rcc-presets" style="display:none"></section>'
     + '<section class="rcc-bundles" id="rcc-bundles" style="display:none"></section>'
+    + '<section class="rcc-print-templates" id="rcc-print-templates" style="display:none"></section>'
     + '</div>';
   rccAttachLeaveObserver();
   rccInit();
@@ -2376,17 +2633,21 @@ function rccShowPrivate() {
   const panel = document.getElementById('rcc-private-panel');
   const presets = document.getElementById('rcc-presets');
   const bundles = document.getElementById('rcc-bundles');
+  const printTemplates = document.getElementById('rcc-print-templates');
   const toolbar = document.getElementById('rcc-toolbar');
   const tabPrivate = document.getElementById('rcc-tab-private');
   const tabPresets = document.getElementById('rcc-tab-presets');
   const tabBundles = document.getElementById('rcc-tab-bundles');
+  const tabPrint = document.getElementById('rcc-tab-print');
   if (panel) panel.style.display = '';
   if (presets) presets.style.display = 'none';
   if (bundles) bundles.style.display = 'none';
+  if (printTemplates) printTemplates.style.display = 'none';
   if (toolbar) toolbar.style.display = '';
   if (tabPrivate) tabPrivate.classList.add('rcc-tab-active');
   if (tabPresets) tabPresets.classList.remove('rcc-tab-active');
   if (tabBundles) tabBundles.classList.remove('rcc-tab-active');
+  if (tabPrint) tabPrint.classList.remove('rcc-tab-active');
   RCC.presetView = false;
 }
 
@@ -2394,17 +2655,21 @@ function rccShowPresets() {
   const panel = document.getElementById('rcc-private-panel');
   const presets = document.getElementById('rcc-presets');
   const bundles = document.getElementById('rcc-bundles');
+  const printTemplates = document.getElementById('rcc-print-templates');
   const toolbar = document.getElementById('rcc-toolbar');
   const tabPrivate = document.getElementById('rcc-tab-private');
   const tabPresets = document.getElementById('rcc-tab-presets');
   const tabBundles = document.getElementById('rcc-tab-bundles');
+  const tabPrint = document.getElementById('rcc-tab-print');
   if (panel) panel.style.display = 'none';
   if (presets) presets.style.display = '';
   if (bundles) bundles.style.display = 'none';
+  if (printTemplates) printTemplates.style.display = 'none';
   if (toolbar) toolbar.style.display = 'none';
   if (tabPrivate) tabPrivate.classList.remove('rcc-tab-active');
   if (tabPresets) tabPresets.classList.add('rcc-tab-active');
   if (tabBundles) tabBundles.classList.remove('rcc-tab-active');
+  if (tabPrint) tabPrint.classList.remove('rcc-tab-active');
   RCC.presetView = true;
   rccLoadPresets();
 }
@@ -2413,20 +2678,47 @@ function rccShowBundles() {
   const panel = document.getElementById('rcc-private-panel');
   const presets = document.getElementById('rcc-presets');
   const bundles = document.getElementById('rcc-bundles');
+  const printTemplates = document.getElementById('rcc-print-templates');
   const toolbar = document.getElementById('rcc-toolbar');
   const tabPrivate = document.getElementById('rcc-tab-private');
   const tabPresets = document.getElementById('rcc-tab-presets');
   const tabBundles = document.getElementById('rcc-tab-bundles');
+  const tabPrint = document.getElementById('rcc-tab-print');
   if (panel) panel.style.display = 'none';
   if (presets) presets.style.display = 'none';
   if (bundles) bundles.style.display = '';
+  if (printTemplates) printTemplates.style.display = 'none';
   if (toolbar) toolbar.style.display = 'none';
   if (tabPrivate) tabPrivate.classList.remove('rcc-tab-active');
   if (tabPresets) tabPresets.classList.remove('rcc-tab-active');
   if (tabBundles) tabBundles.classList.add('rcc-tab-active');
+  if (tabPrint) tabPrint.classList.remove('rcc-tab-active');
   RCC.presetView = false;
   rccRenderBundles();
   rccLoadBundlePresets();
+}
+
+function rccShowPrintTemplates() {
+  const panel = document.getElementById('rcc-private-panel');
+  const presets = document.getElementById('rcc-presets');
+  const bundles = document.getElementById('rcc-bundles');
+  const printTemplates = document.getElementById('rcc-print-templates');
+  const toolbar = document.getElementById('rcc-toolbar');
+  const tabPrivate = document.getElementById('rcc-tab-private');
+  const tabPresets = document.getElementById('rcc-tab-presets');
+  const tabBundles = document.getElementById('rcc-tab-bundles');
+  const tabPrint = document.getElementById('rcc-tab-print');
+  if (panel) panel.style.display = 'none';
+  if (presets) presets.style.display = 'none';
+  if (bundles) bundles.style.display = 'none';
+  if (printTemplates) printTemplates.style.display = '';
+  if (toolbar) toolbar.style.display = 'none';
+  if (tabPrivate) tabPrivate.classList.remove('rcc-tab-active');
+  if (tabPresets) tabPresets.classList.remove('rcc-tab-active');
+  if (tabBundles) tabBundles.classList.remove('rcc-tab-active');
+  if (tabPrint) tabPrint.classList.add('rcc-tab-active');
+  RCC.presetView = false;
+  rccLoadPrintTemplates();
 }
 
 /* 离开工作台（路由切换替换 #content）时释放活动只读 / 导出请求 */
