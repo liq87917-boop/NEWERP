@@ -68,7 +68,7 @@
   "planning_stage": 2,
   "implementation_evidence": "IReportService.GetContainerStatsAsync/GetDynamicContainerStatsReportAsync and GetCustomerShipmentStatsAsync supply existing bounded semantics. DynamicShipmentFinanceReportController and SalesOrderShipmentFinanceReport project read-only shipment/finance evidence using DynamicShipmentFinanceReportRules. Registry entries container-stats, customer-shipment and shipment-finance exist but have no controlled providers/presets. Shared platform adaptation must retain shipment grain and avoid multiplying order-head amounts across one-to-many rows. Verified registry in src/ERP.Application/DTOs/ReportMigrationRegistryDtos.cs, providers in src/ERP.Infrastructure/DependencyInjection.cs and existing preset manifest in src/ERP.Application/Services/ReportConfigurationPresetCatalog.cs. Search existing task history excludes this family: ERP-297 is purchase/supplier and ERP-298 is financial statements/ar-aging.",
   "id": "ERP-301",
-  "status": "in_progress",
+  "status": "completed",
   "attempts": 1,
   "max_attempts": 3,
   "validation_profile": "safe",

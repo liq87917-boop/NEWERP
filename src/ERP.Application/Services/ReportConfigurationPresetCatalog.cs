@@ -99,6 +99,36 @@ internal static class ReportConfigurationPresetManifest
             "动态业务员提成证据报表（迁移预设）",
             ReportConfigurationConstants.DatasetSalesCommission,
             SalesCommissionPresetDefinition()),
+        new ReportConfigurationPresetSeed(
+            "container-stats",
+            "report:container-stats",
+            "柜量与装柜利用率统计（迁移预设）",
+            ReportConfigurationConstants.DatasetContainerStats,
+            ContainerStatsPresetDefinition()),
+        new ReportConfigurationPresetSeed(
+            "container-stats-dynamic",
+            "dynamic:container-stats",
+            "动态柜量与装柜利用率证据报表（迁移预设）",
+            ReportConfigurationConstants.DatasetContainerStats,
+            ContainerStatsPresetDefinition()),
+        new ReportConfigurationPresetSeed(
+            "customer-shipment",
+            "report:customer-shipment",
+            "客户出货量统计表（迁移预设）",
+            ReportConfigurationConstants.DatasetCustomerShipment,
+            CustomerShipmentPresetDefinition()),
+        new ReportConfigurationPresetSeed(
+            "customer-shipment-dynamic",
+            "dynamic:customer-shipment",
+            "动态客户出货量统计报表（迁移预设）",
+            ReportConfigurationConstants.DatasetCustomerShipment,
+            CustomerShipmentPresetDefinition()),
+        new ReportConfigurationPresetSeed(
+            "shipment-finance",
+            "dynamic:shipment-finance",
+            "动态销售订单出货/财务进度报表（迁移预设）",
+            ReportConfigurationConstants.DatasetShipmentFinance,
+            ShipmentFinancePresetDefinition()),
     };
 
     private static ReportConfigurationDefinition SalesOrderPresetDefinition() => new()
@@ -214,6 +244,59 @@ internal static class ReportConfigurationPresetManifest
         {
             "salesmanName", "currency", "orderCount", "salesAmount",
             "commissionRate", "commissionAmount", "sourceLabel",
+        },
+        Filters = new List<ReportConfigurationFilter>(),
+        Grouping = new List<string> { ReportConfigurationConstants.GroupNone },
+        Aggregates = new List<ReportConfigurationAggregate>(),
+        Capabilities = new List<string> { ReportConfigurationConstants.CapabilityPreview },
+        Presentation = new ReportConfigurationPresentation { Page = 1, PageSize = 20 },
+    };
+
+    private static ReportConfigurationDefinition ContainerStatsPresetDefinition() => new()
+    {
+        SchemaVersion = ReportConfigurationRules.CurrentSchemaVersion,
+        DatasetKey = ReportConfigurationConstants.DatasetContainerStats,
+        Fields = new List<string>
+        {
+            "loadingDate", "containerNo", "loadingListCount", "authorizedCustomerCount",
+            "totalCartons", "totalWeight", "totalVolume", "utilizationType", "reasons",
+        },
+        Filters = new List<ReportConfigurationFilter>(),
+        Grouping = new List<string> { ReportConfigurationConstants.GroupNone },
+        Aggregates = new List<ReportConfigurationAggregate>(),
+        Capabilities = new List<string> { ReportConfigurationConstants.CapabilityPreview },
+        Presentation = new ReportConfigurationPresentation { Page = 1, PageSize = 20 },
+    };
+
+    private static ReportConfigurationDefinition CustomerShipmentPresetDefinition() => new()
+    {
+        SchemaVersion = ReportConfigurationRules.CurrentSchemaVersion,
+        DatasetKey = ReportConfigurationConstants.DatasetCustomerShipment,
+        Fields = new List<string>
+        {
+            "customerId", "customerName", "currency", "currencyLabel", "orderCount",
+            "totalAmount", "currencyEvidence", "amountLabel", "unitGroups", "totalQuantity",
+            "quantityCompletenessReason", "quantityLabel",
+        },
+        Filters = new List<ReportConfigurationFilter>(),
+        Grouping = new List<string> { ReportConfigurationConstants.GroupNone },
+        Aggregates = new List<ReportConfigurationAggregate>(),
+        Capabilities = new List<string> { ReportConfigurationConstants.CapabilityPreview },
+        Presentation = new ReportConfigurationPresentation { Page = 1, PageSize = 20 },
+    };
+
+    private static ReportConfigurationDefinition ShipmentFinancePresetDefinition() => new()
+    {
+        SchemaVersion = ReportConfigurationRules.CurrentSchemaVersion,
+        DatasetKey = ReportConfigurationConstants.DatasetShipmentFinance,
+        Fields = new List<string>
+        {
+            "orderId", "orderNo", "orderDate", "status", "customerId", "customerName", "currency",
+            "orderAmount", "recordedDepositAmount", "orderedQuantity", "shippedQuantity",
+            "pendingShipmentQuantity", "outstandingQuantity", "shipmentStatus", "hasApprovedShipment",
+            "shipmentDocumentCount", "approvedShipmentCount", "financeLinkStatus", "financeLinkReason",
+            "linkedAmount", "uncoveredAmount", "submittedAmount", "otherCurrencyRecordCount",
+            "unapprovedRecordCount", "unattributedRecordCount", "overReceived", "note",
         },
         Filters = new List<ReportConfigurationFilter>(),
         Grouping = new List<string> { ReportConfigurationConstants.GroupNone },

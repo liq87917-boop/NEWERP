@@ -84,6 +84,10 @@ public static class DependencyInjection
         services.AddScoped<IReportConfigurationDatasetProvider, ProductSalesRankingReportConfigurationDatasetProvider>();
         services.AddScoped<IReportConfigurationDatasetProvider, OrderProfitEstimateReportConfigurationDatasetProvider>();
         services.AddScoped<IReportConfigurationDatasetProvider, SalesCommissionReportConfigurationDatasetProvider>();
+        // 柜量统计 / 客户出货量 / 出货财务进度（ERP-301）：复用既有报表服务语义，复用既有报表菜单授权（fail closed）
+        services.AddScoped<IReportConfigurationDatasetProvider, ContainerStatsReportConfigurationDatasetProvider>();
+        services.AddScoped<IReportConfigurationDatasetProvider, CustomerShipmentReportConfigurationDatasetProvider>();
+        services.AddScoped<IReportConfigurationDatasetProvider, ShipmentFinanceReportConfigurationDatasetProvider>();
 
         // 通用报表配置平台（ERP-260 Stage 1）：私有报表配置服务（保存/列表/加载/复制/发布/恢复/软删除）
         services.AddScoped<IReportConfigurationService, ReportConfigurationService>();

@@ -99,6 +99,9 @@ public static class ReportConfigurationConstants
     public const string DatasetProductSalesRanking = "product-sales-ranking";
     public const string DatasetOrderProfit = "order-profit";
     public const string DatasetSalesCommission = "sales-commission";
+    public const string DatasetContainerStats = "container-stats";
+    public const string DatasetCustomerShipment = "customer-shipment";
+    public const string DatasetShipmentFinance = "shipment-finance";
 
     // ==================== 受控关系（ERP-268：客户维度） ====================
 
