@@ -45,7 +45,8 @@
       "src/ERP.Application/Services/ReportConfigurationPresetCatalog.cs",
       "src/ERP.Application/Services/ReportConfigurationBundlePresetCatalog.cs",
       "src/ERP.UnitTests/ReportConfigurationSalesDocumentMigrationTests.cs",
-      "src/ERP.IntegrationTests/ReportConfigurationSalesDocumentMigrationSqlServerTests.cs"
+      "src/ERP.IntegrationTests/ReportConfigurationSalesDocumentMigrationSqlServerTests.cs",
+      "src/ERP.Application/DTOs/ReportConfigurationBundleDtos.cs"
     ],
     "Bind existing saved print templates to these controlled families and reuse generic preview, Excel/PDF and provenance, preserving legacy routes. Verify real guarded SQL with multiple documents, ordered lines, empty details, cross-currency separation and denied customer scope for both families, compare selected snapshot fields to original print models, and inspect actual artifacts; run focused and safe Release tests. Unsupported legacy layout options remain explicit gaps and do not imply full migration acceptance.": [
       "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
