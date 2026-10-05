@@ -74,7 +74,7 @@ public sealed class ReportMigrationParityEvidenceSqlServerTests
         await using var db = _fixture.CreateDbContext();
         var user = new SysUser
         {
-            UserName = "ERP332-NOMENU",
+            UserName = "ERP332-NOMENU-" + Guid.NewGuid().ToString("N"),
             PasswordHash = "hash",
             PasswordSalt = "salt",
             DisplayName = "ERP332 无菜单账号",
@@ -83,9 +83,17 @@ public sealed class ReportMigrationParityEvidenceSqlServerTests
         db.SysUsers.Add(user);
         await db.SaveChangesAsync();
 
-        var evidence = await BuildService(db).GetEvidenceAsync("dynamic:sales-order", user.Id);
-
-        Assert.Null(evidence);
+        try
+        {
+            var evidence = await BuildService(db).GetEvidenceAsync("dynamic:sales-order", user.Id);
+            Assert.Null(evidence);
+        }
+        finally
+        {
+            Guard();
+            db.SysUsers.Remove(user);
+            await db.SaveChangesAsync();
+        }
     }
 
     [Fact]
