@@ -226,6 +226,33 @@ public class ReportConfigurationPrintTemplateCatalogTests
         return new FakeCatalog(datasets);
     }
 
+    private static ReportConfigurationDatasetDto BuildTradeDocumentDataset()
+    {
+        var fields = new[]
+        {
+            "docNo", "docType", "status", "issueDate", "customerName", "salesOrderNo", "refNo", "declareNo",
+            "amount", "currency", "departurePort", "destinationPort", "issuedBy", "copies", "fileNote", "remark",
+        }.Select(k => new ReportConfigurationFieldDto(
+            k, k, ReportConfigurationConstants.TypeText, null, false, false, false, Array.Empty<string>())).ToList();
+
+        return new ReportConfigurationDatasetDto(
+            ReportConfigurationConstants.DatasetTradeDocument,
+            "出口单证中心",
+            "出口单证中心（表头粒度一行一张单证）",
+            "金额按原币呈现；数量按基础单位；不跨币种换算或合并",
+            "doc-center",
+            "单证中心",
+            fields,
+            Array.Empty<string>(), Array.Empty<string>(), Array.Empty<string>(),
+            20, 200, string.Empty, string.Empty);
+    }
+
+    private static IReportConfigurationCatalog TradeDocumentCatalog()
+        => new FakeCatalog(new Dictionary<string, ReportConfigurationDatasetDto?>
+        {
+            [ReportConfigurationConstants.DatasetTradeDocument] = BuildTradeDocumentDataset(),
+        });
+
     // ==================== 1. 封闭族清单 ====================
 
     [Fact]
@@ -790,6 +817,42 @@ public class ReportConfigurationPrintTemplateCatalogTests
             Assert.Equal("print-template:" + family.FamilyKey, preset!.LegacyKey);
             Assert.Equal("bill-export:" + family.FamilyKey, preset.DatasetKey);
         }
+
+        Assert.False(await registry.CanRetireLegacyRoutesAsync(user.Id));
+    }
+
+    [Fact]
+    public async Task 迁移预设_单证中心打印模板已注册()
+    {
+        var presets = new ReportMigrationPresetCatalog();
+
+        Assert.True(await presets.HasPresetAsync("print-template:doc-center", userId: 1));
+    }
+
+    [Fact]
+    public async Task 迁移登记册_单证中心打印模板达preset_ready且不parity通过()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedAuthorizedUser(db, "doc-print-registry", "doc-center");
+
+        var catalog = TradeDocumentCatalog();
+        var registry = new ReportMigrationRegistry(
+            catalog, db, new ReportMigrationPresetCatalog(), new EmptyReportMigrationParityEvidenceProvider());
+
+        var result = await registry.GetRegistryAsync(user.Id);
+
+        var entry = Assert.Single(result.Entries, e => e.LegacyKey == "print-template:doc-center");
+        Assert.Equal(ReportMigrationRegistryCategories.PrintTemplate, entry.Category);
+        Assert.Equal(ReportConfigurationConstants.DatasetTradeDocument, entry.DatasetKey);
+        Assert.Equal(ReportMigrationParityStatusText.PresetReady, entry.ParityStatus);
+
+        // 预设编排可解析到受控数据集键，复用 TradeDocumentPrintPresetDefinition 的数据集键。
+        var service = new ReportConfigurationService(db, catalog);
+        var presets = new ReportConfigurationPresetCatalog(catalog, registry, service);
+        var preset = await presets.GetPresetAsync("print-template:doc-center", user.Id);
+        Assert.NotNull(preset);
+        Assert.Equal("print-template:doc-center", preset!.LegacyKey);
+        Assert.Equal(ReportConfigurationConstants.DatasetTradeDocument, preset.DatasetKey);
 
         Assert.False(await registry.CanRetireLegacyRoutesAsync(user.Id));
     }

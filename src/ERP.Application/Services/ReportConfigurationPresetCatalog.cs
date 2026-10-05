@@ -414,6 +414,12 @@ internal static class ReportConfigurationPresetManifest
                 [ReportConfigurationPresetConstants.ParameterDate] = new("docDate", ReportConfigurationConstants.OperatorBetween),
                 [ReportConfigurationPresetConstants.ParameterStatus] = new("status", ReportConfigurationConstants.OperatorEq),
             }),
+        new ReportConfigurationPresetSeed(
+            "print-template:doc-center",
+            "print-template:doc-center",
+            "出口单证打印模板（迁移预设）",
+            ReportConfigurationConstants.DatasetTradeDocument,
+            TradeDocumentPrintPresetDefinition()),
     };
 
     private static ReportConfigurationDefinition SalesOrderPresetDefinition() => new()
