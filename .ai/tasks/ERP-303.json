@@ -1,11 +1,12 @@
 {
   "title": "Migrate agency fee monthly and receipt reconciliation through shared controlled datasets and presets",
-  "description": "Stage 2 controlled family migration, not a new dedicated business report. Verified AgencyServiceFeeMonthlySummaryService.ForQueryAsync is an existing Application static query with customer authorization. Receipt reconciliation original query is SalesOrderReceiptReconciliation.ForQueryAsync in Api/Controllers and uses SalesOrderProgress; do not duplicate it or reference Api from Infrastructure. Implement the receipt provider as a plain IReportConfigurationDatasetProvider in existing Api layer and register it in Program.cs, preserving helper/legacy endpoints; this is not a new controller. Monthly provider remains in Infrastructure. Original menu codes customer and sales-order. Preserve unlinked receipt evidence as separate bounded evidence, never allocate it to orders or replace unknown amounts with zero. Existing registry dynamic entries have no providers/presets. No dedicated controller/designer/exporter, arbitrary SQL, new business algorithms, schema/migrations/production DB operations, secrets/env edits, permission expansion or unrelated changes. Serialize common files through dependencies. Generic exports and bounded errors must reuse existing platform contracts.",
+  "description": "Stage 2 controlled family migration, not a new dedicated business report. Verified AgencyServiceFeeMonthlySummaryService.ForQueryAsync is an existing Application static query with customer authorization. Receipt reconciliation original query is SalesOrderReceiptReconciliation.ForQueryAsync in Api/Controllers and uses SalesOrderProgress; do not duplicate it or reference Api from Infrastructure. Implement the receipt provider as a plain IReportConfigurationDatasetProvider in existing Api layer and register it in Program.cs, preserving helper/legacy endpoints; this is not a new controller. Monthly provider remains in Infrastructure. Original menu codes customer and sales-order. Preserve unlinked receipt evidence as separate bounded evidence, never allocate it to orders or replace unknown amounts with zero. Existing registry dynamic entries have no providers/presets. No dedicated controller/designer/exporter, arbitrary SQL, new business algorithms, schema/migrations/production DB operations, secrets/env edits, permission expansion or unrelated changes. Serialize common files through dependencies. Generic exports and bounded errors must reuse existing platform contracts. Boundary correction from completed ERP-301 review: its Infrastructure ShipmentFinance provider copied approximately 300 lines of the Api SalesOrderProgress derivation. During this serialized task correct the runtime registration and reuse the existing Api helpers alongside the receipt reconciliation adaptation; do not present a copied algorithm as shared-service reuse. Preserve any compatibility type needed by existing tests, but prove the production runtime path uses the original authoritative helper.",
   "acceptance_criteria": [
     "Expose this existing report family through finite controlled dataset adapters and immutable presets keyed to every corresponding fixed/dynamic registry entry. Reuse original calculation/query services and field/grain semantics, retain all legacy routes, and truthfully disclose unsupported capabilities.",
     "Revalidate original menu authorization and current-user row/column/data scope on catalog, preview and generic Excel/PDF export; fail closed for unknown fields/filters, oversized pages/dates and unavailable services. Preserve currency/unit partitions, nullable evidence and one-to-many amount cardinality with existing audit.",
     "Authorized users can create private definitions from these presets using existing orchestration. Presence means readiness only; do not mark parity-passed or switch legacy entry points from declarations or incomplete comparisons.",
-    "Implement executable legacy-versus-generic preview/Excel/PDF comparisons for all family datasets, paging/empty/null cases, unauthorized/revoked menus and currency/unit semantics. Add isolated SQL fixtures strictly guarded to (localdb)\\NEWERP_AutoAcceptance and NEWERP_AUTOTEST_* databases; execute related tests, safe Release build/unit tests and scheduler self-test/contracts. Missing genuine SQL/browser acceptance stays unverified; no stage completion claim."
+    "Implement executable legacy-versus-generic preview/Excel/PDF comparisons for all family datasets, paging/empty/null cases, unauthorized/revoked menus and currency/unit semantics. Add isolated SQL fixtures strictly guarded to (localdb)\\NEWERP_AutoAcceptance and NEWERP_AUTOTEST_* databases; execute related tests, safe Release build/unit tests and scheduler self-test/contracts. Missing genuine SQL/browser acceptance stays unverified; no stage completion claim.",
+    "Correct ERP-301 shipment-finance runtime adaptation to reuse SalesOrderShipmentFinanceReport/SalesOrderProgress existing helpers through a plain Api-layer controlled dataset provider, as receipt reconciliation also requires. Replace Infrastructure registration with Api Program registration, without duplicating algorithms or adding a controller; retain old routes and regression tests. Add tests proving the registered runtime provider delegates to original helpers and preserves bounded authorization, amounts, nulls and cardinality. The copied Infrastructure algorithm must not remain the registered runtime path."
   ],
   "allowed_paths": [
     "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
@@ -15,7 +16,10 @@
     "src/ERP.Api/Controllers/ReceiptReconciliationReportConfigurationDatasetProvider.cs",
     "src/ERP.Api/Program.cs",
     "src/ERP.UnitTests/ReportConfigurationReconciliationMigrationTests.cs",
-    "src/ERP.IntegrationTests/ReportConfigurationReconciliationMigrationTestsSqlServerTests.cs"
+    "src/ERP.IntegrationTests/ReportConfigurationReconciliationMigrationTestsSqlServerTests.cs",
+    "src/ERP.Api/Controllers/ShipmentFinanceReportConfigurationDatasetProvider.cs",
+    "src/ERP.Infrastructure/Reports/ShipmentFinanceReportConfigurationDatasetProvider.cs",
+    "src/ERP.UnitTests/ReportConfigurationFulfillmentMigrationTests.cs"
   ],
   "criterion_path_map": {
     "Expose this existing report family through finite controlled dataset adapters and immutable presets keyed to every corresponding fixed/dynamic registry entry. Reuse original calculation/query services and field/grain semantics, retain all legacy routes, and truthfully disclose unsupported capabilities.": [
@@ -57,6 +61,14 @@
       "src/ERP.Api/Program.cs",
       "src/ERP.UnitTests/ReportConfigurationReconciliationMigrationTests.cs",
       "src/ERP.IntegrationTests/ReportConfigurationReconciliationMigrationTestsSqlServerTests.cs"
+    ],
+    "Correct ERP-301 shipment-finance runtime adaptation to reuse SalesOrderShipmentFinanceReport/SalesOrderProgress existing helpers through a plain Api-layer controlled dataset provider, as receipt reconciliation also requires. Replace Infrastructure registration with Api Program registration, without duplicating algorithms or adding a controller; retain old routes and regression tests. Add tests proving the registered runtime provider delegates to original helpers and preserves bounded authorization, amounts, nulls and cardinality. The copied Infrastructure algorithm must not remain the registered runtime path.": [
+      "src/ERP.Api/Controllers/ShipmentFinanceReportConfigurationDatasetProvider.cs",
+      "src/ERP.Api/Program.cs",
+      "src/ERP.Infrastructure/DependencyInjection.cs",
+      "src/ERP.Infrastructure/Reports/ShipmentFinanceReportConfigurationDatasetProvider.cs",
+      "src/ERP.UnitTests/ReportConfigurationFulfillmentMigrationTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationReconciliationMigrationTests.cs"
     ]
   },
   "depends_on": [
@@ -65,7 +77,7 @@
   ],
   "risk": "medium",
   "planning_stage": 2,
-  "implementation_evidence": "Verified AgencyServiceFeeMonthlySummaryService.ForQueryAsync is an existing Application static query with customer authorization. Receipt reconciliation original query is SalesOrderReceiptReconciliation.ForQueryAsync in Api/Controllers and uses SalesOrderProgress; do not duplicate it or reference Api from Infrastructure. Implement the receipt provider as a plain IReportConfigurationDatasetProvider in existing Api layer and register it in Program.cs, preserving helper/legacy endpoints; this is not a new controller. Monthly provider remains in Infrastructure. Original menu codes customer and sales-order. Preserve unlinked receipt evidence as separate bounded evidence, never allocate it to orders or replace unknown amounts with zero. Existing registry dynamic entries have no providers/presets.",
+  "implementation_evidence": "Verified AgencyServiceFeeMonthlySummaryService.ForQueryAsync is an existing Application static query with customer authorization. Receipt reconciliation original query is SalesOrderReceiptReconciliation.ForQueryAsync in Api/Controllers and uses SalesOrderProgress; do not duplicate it or reference Api from Infrastructure. Implement the receipt provider as a plain IReportConfigurationDatasetProvider in existing Api layer and register it in Program.cs, preserving helper/legacy endpoints; this is not a new controller. Monthly provider remains in Infrastructure. Original menu codes customer and sales-order. Preserve unlinked receipt evidence as separate bounded evidence, never allocate it to orders or replace unknown amounts with zero. Existing registry dynamic entries have no providers/presets. ERP-301 provider DeriveAsync/BuildShipmentResult/BuildFinanceResult duplicates existing Api/Controllers/SalesOrderProgress.cs logic; completed task now permits dependent repair after ERP-302, avoiding current shared-file edits.",
   "id": "ERP-303",
   "status": "pending",
   "attempts": 0,
@@ -83,5 +95,17 @@
     "required": false,
     "scenarios": []
   },
-  "created_at": "2026-10-05T01:52:33.434788Z"
+  "created_at": "2026-10-05T01:52:33.434788Z",
+  "recovery_context": {
+    "remediation_task": "ERP-303-SHARED-HELPER-REUSE-20261005T0206",
+    "source_task": "ERP-301",
+    "failure_signature": "shipment_finance_duplicate_authoritative_calculation",
+    "evidence_paths": [
+      "src/ERP.Infrastructure/Reports/ShipmentFinanceReportConfigurationDatasetProvider.cs",
+      "src/ERP.Api/Controllers/SalesOrderProgress.cs",
+      "src/ERP.Api/Controllers/SalesOrderShipmentFinanceReport.cs",
+      ".ai/logs/heartbeat-20261005T0156.json"
+    ],
+    "strategy": "Reuse existing helper in Api controlled provider and register only that runtime path; preserve compatibility tests, genuine acceptance gates and unrelated running work."
+  }
 }
