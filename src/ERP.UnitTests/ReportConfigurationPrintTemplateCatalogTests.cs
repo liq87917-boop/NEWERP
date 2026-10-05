@@ -133,6 +133,30 @@ public class ReportConfigurationPrintTemplateCatalogTests
         ErpDbContext db, IReportConfigurationCatalog catalog)
         => new(db, catalog);
 
+    private static ReportConfigurationDatasetDto BuildBillExportDataset(string familyKey)
+    {
+        var family = LegacyBillExportCatalog.Resolve(familyKey);
+        var fields = family.Columns.Select(c => new ReportConfigurationFieldDto(
+            c.Key, c.Title, c.Type, null, false, false, false, Array.Empty<string>())).ToList();
+        return new ReportConfigurationDatasetDto(
+            family.DatasetKey, family.Title, "一行一条单据表",
+            "金额按原币呈现；数量按基础单位；不跨币种换算或合并",
+            family.RequiredMenuCodes[0], family.RequiredMenuText, fields,
+            Array.Empty<string>(), Array.Empty<string>(), Array.Empty<string>(),
+            20, 200, string.Empty, string.Empty);
+    }
+
+    private static IReportConfigurationCatalog BillExportCatalog()
+    {
+        var datasets = new Dictionary<string, ReportConfigurationDatasetDto?>();
+        foreach (var family in LegacyBillExportCatalog.Families)
+        {
+            var dataset = BuildBillExportDataset(family.FamilyKey);
+            datasets[dataset.DatasetKey] = dataset;
+        }
+        return new FakeCatalog(datasets);
+    }
+
     private static IReportConfigurationCatalog SalesOrderCatalog()
         => new FakeCatalog(new Dictionary<string, ReportConfigurationDatasetDto?>
         {
@@ -696,11 +720,76 @@ public class ReportConfigurationPrintTemplateCatalogTests
         var supported = Assert.Single(result.Entries, e => e.LegacyKey == "print-template:sales-order");
         Assert.Equal(ReportMigrationRegistryCategories.PrintTemplate, supported.Category);
         Assert.Equal("bill-export:sales-order", supported.DatasetKey);
-        Assert.Equal(ReportMigrationParityStatusText.DatasetReady, supported.ParityStatus);
+        Assert.Equal(ReportMigrationParityStatusText.PresetReady, supported.ParityStatus);
 
         var master = Assert.Single(result.Entries, e => e.LegacyKey == "print-template:customer");
         Assert.Equal("master:customer", master.DatasetKey);
         Assert.Equal(ReportMigrationParityStatusText.PresetReady, master.ParityStatus);
+
+        Assert.False(await registry.CanRetireLegacyRoutesAsync(user.Id));
+    }
+
+    [Theory]
+    [InlineData("print-template:sales-order")]
+    [InlineData("print-template:purchase-order")]
+    [InlineData("print-template:inquiry")]
+    [InlineData("print-template:stock-in")]
+    [InlineData("print-template:stock-out")]
+    [InlineData("print-template:receipt")]
+    [InlineData("print-template:payment")]
+    [InlineData("print-template:deposit-apply")]
+    [InlineData("print-template:payment-apply")]
+    [InlineData("print-template:container-settlement")]
+    [InlineData("print-template:bulk-settlement")]
+    [InlineData("print-template:complaint")]
+    [InlineData("print-template:receiving-plan")]
+    [InlineData("print-template:booking")]
+    [InlineData("print-template:pre-loading")]
+    [InlineData("print-template:loading-list")]
+    public async Task 迁移预设_十六个旧单据导出打印族均已注册(string legacyKey)
+    {
+        var presets = new ReportMigrationPresetCatalog();
+
+        Assert.True(await presets.HasPresetAsync(legacyKey, userId: 1));
+    }
+
+    [Fact]
+    public async Task 迁移登记册_十六个旧单据导出打印族均达preset_ready且数据集键正确()
+    {
+        using var db = TestDbFactory.Create();
+        var menuCodes = LegacyBillExportCatalog.Families
+            .SelectMany(f => f.RequiredMenuCodes)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        var user = SeedAuthorizedUser(db, "bill-print-16", menuCodes);
+
+        var catalog = BillExportCatalog();
+        var registry = new ReportMigrationRegistry(
+            catalog, db, new ReportMigrationPresetCatalog(), new EmptyReportMigrationParityEvidenceProvider());
+
+        var result = await registry.GetRegistryAsync(user.Id);
+
+        var billPrint = LegacyBillExportCatalog.Families
+            .Select(f => Assert.Single(result.Entries, e => e.LegacyKey == "print-template:" + f.FamilyKey))
+            .ToList();
+
+        Assert.Equal(16, billPrint.Count);
+        Assert.All(billPrint, e =>
+        {
+            Assert.Equal(ReportMigrationRegistryCategories.PrintTemplate, e.Category);
+            Assert.Equal(ReportMigrationParityStatusText.PresetReady, e.ParityStatus);
+        });
+
+        // 预设编排可解析到对应受控数据集键（复用 BillExportPresetDefinition 的数据集键），证明清单按族一一对应。
+        var service = new ReportConfigurationService(db, catalog);
+        var presets = new ReportConfigurationPresetCatalog(catalog, registry, service);
+        foreach (var family in LegacyBillExportCatalog.Families)
+        {
+            var preset = await presets.GetPresetAsync("print-template:" + family.FamilyKey, user.Id);
+            Assert.NotNull(preset);
+            Assert.Equal("print-template:" + family.FamilyKey, preset!.LegacyKey);
+            Assert.Equal("bill-export:" + family.FamilyKey, preset.DatasetKey);
+        }
 
         Assert.False(await registry.CanRetireLegacyRoutesAsync(user.Id));
     }
