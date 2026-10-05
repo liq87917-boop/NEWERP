@@ -34,6 +34,7 @@ class PipelineContracts(unittest.TestCase):
         state = {"phase": "developing", "current_task": "ERP-295", "runner": {"pid": 123}}
         active = self.task("ERP-295", "in_progress")
         with ExitStack() as stack:
+            stack.enter_context(patch.object(orchestrator, "legacy_executor_is_running", return_value=False))
             stack.enter_context(patch.object(orchestrator, "load_json", side_effect=[config, state]))
             stack.enter_context(patch.object(orchestrator, "changed_paths", return_value=[]))
             stack.enter_context(patch.object(orchestrator, "all_tasks", return_value=[(Path("active.json"), active)]))

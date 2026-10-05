@@ -21,7 +21,7 @@ class OrchestratorLeaseContracts(unittest.TestCase):
                      f"s=importlib.util.spec_from_file_location('lease_child',{str(SOURCE)!r}); "
                      "m=importlib.util.module_from_spec(s); s.loader.exec_module(m); "
                      f"m.LOGS_DIR=Path({str(logs)!r}); "
-                     "m.run_next_owned=lambda dry: 23; raise SystemExit(m.run_next(False))")
+                     "m.legacy_executor_is_running=lambda: False; m.run_next_owned=lambda dry: 23; raise SystemExit(m.run_next(False))")
             with patch.object(orchestrator, "LOGS_DIR", logs):
                 with orchestrator.execution_lease() as acquired:
                     self.assertTrue(acquired)
@@ -33,8 +33,14 @@ class OrchestratorLeaseContracts(unittest.TestCase):
 
     def test_exception_releases_lease(self):
         with tempfile.TemporaryDirectory() as directory, patch.object(orchestrator, "LOGS_DIR", Path(directory)):
-            with patch.object(orchestrator, "run_next_owned", side_effect=ValueError("diagnostic")):
+            with patch.object(orchestrator, "legacy_executor_is_running", return_value=False), patch.object(orchestrator, "run_next_owned", side_effect=ValueError("diagnostic")):
                 with self.assertRaisesRegex(ValueError, "diagnostic"):
                     orchestrator.run_next(False)
             with orchestrator.execution_lease() as acquired:
                 self.assertTrue(acquired)
+
+    def test_pre_lease_executor_preserves_state_and_never_enters_recovery(self):
+        with tempfile.TemporaryDirectory() as directory, patch.object(orchestrator, "LOGS_DIR", Path(directory)):
+            with patch.object(orchestrator, "legacy_executor_is_running", return_value=True), patch.object(orchestrator, "run_next_owned") as execute:
+                self.assertEqual(0, orchestrator.run_next(False))
+                execute.assert_not_called()

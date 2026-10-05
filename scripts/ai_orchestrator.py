@@ -813,10 +813,34 @@ def execution_lease():
                 fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
 
 
+def legacy_executor_is_running() -> bool:
+    """Bridge rollout to processes started before execution leases existed."""
+    if os.name != "nt":
+        return False
+    # Read only PIDs; command lines stay inside PowerShell, never enter logs.
+    script = ("$needle = $env:NEWERP_EXECUTOR_SCRIPT; "
+              "Get-CimInstance Win32_Process -ErrorAction Stop | "
+              "Where-Object { $_.Name -eq 'python.exe' -and "
+              f"$_.ProcessId -ne {os.getpid()} -and "
+              "$_.CommandLine -and $_.CommandLine.Contains($needle) -and "
+              "$_.CommandLine -match 'run-next' } | "
+              "Select-Object -ExpandProperty ProcessId")
+    env = os.environ.copy()
+    env["NEWERP_EXECUTOR_SCRIPT"] = str(Path(__file__).resolve())
+    result = subprocess.run(["powershell.exe", "-NoLogo", "-NoProfile", "-Command", script],
+                            env=env, capture_output=True, text=True, timeout=20)
+    if result.returncode != 0:
+        raise RuntimeError("Cannot verify existing NEWERP task executor ownership.")
+    return bool(result.stdout.strip())
+
+
 def run_next(dry_run: bool) -> int:
     with execution_lease() as acquired:
         if not acquired:
             print("Another NEWERP task executor owns the execution lease.")
+            return 0
+        if legacy_executor_is_running():
+            print("An existing NEWERP task executor is still running.")
             return 0
         return run_next_owned(dry_run)
 
