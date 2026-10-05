@@ -126,7 +126,7 @@ public sealed class ReportConfigurationPresetParameterSqlServerTests : IClassFix
         Assert.Equal(2, salesOrder.Definition!.Filters.Count);
 
         var salesPreview = await execution.PreviewAsync(_fixture.PrivilegedUserId,
-            new ReportConfigurationPreviewRequest { ConfigurationId = salesOrder.Id, PageSize = 200 });
+            new ReportConfigurationPreviewRequest { ConfigurationId = salesOrder.Id, PageSize = 100 });
         Assert.Equal(ReportConfigurationConstants.DatasetSalesOrder, salesPreview.DatasetKey);
         Assert.True(salesPreview.Rows.Count > 0);
         Assert.All(salesPreview.Rows, r => Assert.Equal(_fixture.CustomerAId, Convert.ToInt64(r["customerId"]!)));
@@ -148,7 +148,7 @@ public sealed class ReportConfigurationPresetParameterSqlServerTests : IClassFix
         Assert.Equal(2, receivable.Definition!.Filters.Count);
 
         var receivablePreview = await execution.PreviewAsync(_fixture.PrivilegedUserId,
-            new ReportConfigurationPreviewRequest { ConfigurationId = receivable.Id, PageSize = 200 });
+            new ReportConfigurationPreviewRequest { ConfigurationId = receivable.Id, PageSize = 100 });
         Assert.Equal(ReportConfigurationConstants.DatasetReceivable, receivablePreview.DatasetKey);
         Assert.True(receivablePreview.Rows.Count > 0);
         Assert.Contains(receivablePreview.Rows, r => Convert.ToString(r["invoiceNumber"]) == "ERP314-INV-OCT");
@@ -184,7 +184,7 @@ public sealed class ReportConfigurationPresetParameterSqlServerTests : IClassFix
         using (var lease = new ReportConfigurationExecutionBudget().Acquire(_fixture.PrivilegedUserId))
         {
             var export = await execution.BuildExportResultAsync(_fixture.PrivilegedUserId,
-                new ReportConfigurationPreviewRequest { ConfigurationId = parameterized.Id, PageSize = 200 }, lease);
+                new ReportConfigurationPreviewRequest { ConfigurationId = parameterized.Id, PageSize = 100 }, lease);
 
             var excel = new ReportConfigurationExcelExporter().Build(export);
             Assert.True(excel.Length > 0);
@@ -206,7 +206,7 @@ public sealed class ReportConfigurationPresetParameterSqlServerTests : IClassFix
         Assert.Empty(noParam.Definition!.Filters);
 
         var noParamPreview = await execution.PreviewAsync(_fixture.PrivilegedUserId,
-            new ReportConfigurationPreviewRequest { ConfigurationId = noParam.Id, PageSize = 200 });
+            new ReportConfigurationPreviewRequest { ConfigurationId = noParam.Id, PageSize = 100 });
         Assert.True(noParamPreview.Rows.Count > 0);
 
         // 无效输入（日期倒置）：显式失败且绝不新增草稿。
