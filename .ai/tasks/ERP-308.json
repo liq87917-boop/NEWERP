@@ -71,8 +71,8 @@
   "planning_stage": 2,
   "implementation_evidence": "Verified BillProcController.cs Bills contains 16 types, Export.cs ExportColumns and Export GET route use finite tables but user-supplied dateField/SELECT * and no menu-specific adapter. ReportMigrationRegistryDtos.cs export:bill-proc has empty RequiredMenuCodes and only one aggregate key; existing providers/presets/tasks 295-307 have no BillProc family migration. Existing legacy db_owner columns use Oid while EF uses Id: verify exact shape and fail closed, no schema modification. SeedData.Menus.cs lines33-61 verifies all16 exact functional menus; sales-order/purchase-order/inquiry also have separate export menu grants, which must be retained rather than substituting general menu alone.",
   "id": "ERP-308",
-  "status": "retry",
-  "attempts": 0,
+  "status": "completed",
+  "attempts": 2,
   "max_attempts": 3,
   "validation_profile": "safe",
   "completion_mode": "build",
@@ -88,29 +88,6 @@
     "scenarios": []
   },
   "created_at": "2026-10-05T03:35:02.657872+00:00",
-  "preserved_work": {
-    "execution_copy": "D:\\VSCodeProject\\NEWERP.executor.continue-erp-190-20260930080457",
-    "changed_paths": [
-      ".ai/PROJECT_STATE.json",
-      ".ai/tasks/ERP-308.json",
-      "src/ERP.Application/DTOs/LegacyBillExportDtos.cs",
-      "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
-      "src/ERP.Application/DTOs/ReportMigrationRegistryDtos.cs",
-      "src/ERP.Application/Interfaces/ILegacyBillExportReadService.cs",
-      "src/ERP.Application/Services/LegacyBillExportCatalog.cs",
-      "src/ERP.Application/Services/ReportConfigurationPresetCatalog.cs",
-      "src/ERP.Infrastructure/DependencyInjection.cs",
-      "src/ERP.Infrastructure/Reports/LegacyBillExportReadService.cs",
-      "src/ERP.Infrastructure/Reports/LegacyBillExportReportConfigurationDatasetProvider.cs",
-      "src/ERP.IntegrationTests/ReportConfigurationLegacyBillMigrationSqlServerTests.cs",
-      "src/ERP.UnitTests/ReportConfigurationLegacyBillMigrationTests.cs",
-      "src/ERP.UnitTests/ReportMigrationRegistryTests.cs"
-    ],
-    "diff": ".ai\\logs\\ERP-308-preserved-work.diff",
-    "preserved_at": "2026-10-05T04:18:46.330539Z"
-  },
-  "failure_kind": "path_guard_failure",
-  "failed_transport_version": 2,
   "recovery_history": [
     {
       "remediation_task": "ERP-308-RECOVERY-1",
@@ -152,42 +129,5 @@
       }
     }
   ],
-  "supervised_recovery_cycles": 1,
-  "recovery_context": {
-    "remediation_task": "ERP-308-RECOVERY-1",
-    "failure_kind": "path_guard_failure",
-    "summary": "Path guard failed:\noutside allowed_paths: src/ERP.UnitTests/ReportMigrationRegistryTests.cs",
-    "result": ".ai\\results\\ERP-308.json",
-    "attempt_logs": [
-      ".ai/logs/ERP-308-attempt-1.jsonl"
-    ],
-    "validation_logs": [],
-    "latest_state_error": {
-      "task": "ERP-308",
-      "kind": "automatic_repair_pending",
-      "summary": "Path guard failed:\noutside allowed_paths: src/ERP.UnitTests/ReportMigrationRegistryTests.cs"
-    },
-    "latest_build": null,
-    "task_context": ".ai\\tasks\\ERP-308.json",
-    "changed_paths": [
-      ".ai/PROJECT_STATE.json",
-      ".ai/tasks/ERP-308.json",
-      "src/ERP.Application/DTOs/LegacyBillExportDtos.cs",
-      "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
-      "src/ERP.Application/DTOs/ReportMigrationRegistryDtos.cs",
-      "src/ERP.Application/Interfaces/ILegacyBillExportReadService.cs",
-      "src/ERP.Application/Services/LegacyBillExportCatalog.cs",
-      "src/ERP.Application/Services/ReportConfigurationPresetCatalog.cs",
-      "src/ERP.Infrastructure/DependencyInjection.cs",
-      "src/ERP.Infrastructure/Reports/LegacyBillExportReadService.cs",
-      "src/ERP.Infrastructure/Reports/LegacyBillExportReportConfigurationDatasetProvider.cs",
-      "src/ERP.IntegrationTests/ReportConfigurationLegacyBillMigrationSqlServerTests.cs",
-      "src/ERP.UnitTests/ReportConfigurationLegacyBillMigrationTests.cs",
-      "src/ERP.UnitTests/ReportMigrationRegistryTests.cs"
-    ],
-    "diff": ".ai\\logs\\ERP-308-preserved-work.diff",
-    "execution_copy": "D:\\VSCodeProject\\NEWERP.executor.continue-erp-190-20260930080457",
-    "repair_allowed_paths": [],
-    "instruction": "DeepSeek supervisor recovery: inspect the referenced complete logs, diagnose the root cause, and implement a different safe repair within allowed_paths. Rebuild and rerun the configured tests; if validation fails, use the newest log as the next repair input. Do not repeat the failed approach. Do not edit task/state/result files or relax production and irreversible-operation gates. "
-  }
+  "supervised_recovery_cycles": 1
 }

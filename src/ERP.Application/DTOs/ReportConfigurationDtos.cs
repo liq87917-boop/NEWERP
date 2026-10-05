@@ -112,6 +112,9 @@ public static class ReportConfigurationConstants
     public const string DatasetProductExportFieldCompleteness = "product-export-field-completeness";
     public const string DatasetTradeDocument = "trade-document";
 
+    /// <summary>旧单据导出族（ERP-308 Stage 2）受控数据集键前缀：<c>bill-export:{familyKey}</c>。</summary>
+    public const string DatasetBillExportPrefix = "bill-export:";
+
     // ==================== 受控关系（ERP-268：客户维度） ====================
 
     /// <summary>客户维度关系键（稳定、受控；唯一允许的关系键）</summary>

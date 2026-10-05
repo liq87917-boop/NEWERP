@@ -101,6 +101,17 @@ public static class DependencyInjection
         // 出口字段完整度 / 单证中心打印与台账导出（ERP-306 Stage 2）：复用既有完整度规则与 TradeDocumentPrintModel.From 持久快照语义，复用既有菜单授权（fail closed）
         services.AddScoped<IReportConfigurationDatasetProvider, ProductExportCompletenessReportConfigurationDatasetProvider>();
         services.AddScoped<IReportConfigurationDatasetProvider, TradeDocumentReportConfigurationDatasetProvider>();
+        // 旧单据导出族（ERP-308 Stage 2）：受控只读族目录 + 每族一个数据集适配器（复用既有菜单授权与特权全量数据范围，fail closed）
+        services.AddScoped<ILegacyBillExportReadService, LegacyBillExportReadService>();
+        foreach (var family in LegacyBillExportCatalog.Families)
+        {
+            var billExportDatasetKey = family.DatasetKey;
+            services.AddScoped<IReportConfigurationDatasetProvider>(sp =>
+                new LegacyBillExportReportConfigurationDatasetProvider(
+                    sp.GetRequiredService<IErpDbContext>(),
+                    sp.GetRequiredService<ILegacyBillExportReadService>(),
+                    billExportDatasetKey));
+        }
 
         // 通用报表配置平台（ERP-260 Stage 1）：私有报表配置服务（保存/列表/加载/复制/发布/恢复/软删除）
         services.AddScoped<IReportConfigurationService, ReportConfigurationService>();
