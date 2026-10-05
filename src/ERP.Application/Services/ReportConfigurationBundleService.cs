@@ -291,7 +291,18 @@ public sealed class ReportConfigurationBundleService : IReportConfigurationBundl
             throw BusinessException.RuleConflict(
                 $"组合不兼容：明细节数据集必须是 {scenario.DetailDatasetKey}，实际为 {detailPreview?.DatasetKey}");
 
+        RequireCompleteCompositionSection(headerPreview!, "表头");
+        RequireCompleteCompositionSection(detailPreview!, "明细");
         return ComposeCore(scenario, request, headerPreview, detailPreview, lease);
+    }
+
+    private static void RequireCompleteCompositionSection(ReportConfigurationPreviewDto preview, string section)
+    {
+        // A page may fit the row limit while omitting further matches. Never compose partial totals.
+        if (preview.Total != preview.Rows.Count || preview.MatchedCount != preview.Rows.Count)
+            throw new BusinessException(
+                $"组合{section}匹配行未完整返回；请收窄筛选范围后重试，禁止以分页子集生成组合合计",
+                ReportConfigurationExecutionLimits.ErrorCodeResultTooLarge);
     }
 
     private static ReportConfigurationBundleCompositionScenario ResolveScenario(

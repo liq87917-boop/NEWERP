@@ -130,6 +130,30 @@ public class ReportConfigurationBundleCompositionTests
         return (header.Id, detail.Id);
     }
 
+    [Theory]
+    [InlineData(51, 0)]
+    [InlineData(1, 101)]
+    public async Task Composition_rejects_truncated_header_or_detail_page(int parentCount, int detailCount)
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedAuthorizedUser(db, "compose-truncated", "doc-center");
+        for (var i = 1; i <= parentCount; i++)
+            SeedDocument(db, i, "TD-BOUND-" + i, "invoice", 200m, "USD");
+        for (var i = 1; i <= detailCount; i++)
+            SeedItem(db, 1000 + i, 1, i, "P" + i, 1m, "PCS", lineAmount: 1m);
+        await db.SaveChangesAsync();
+        var (_, configs, bundle) = BuildServices(db);
+        var (headerId, detailId) = await CreateCompositionPairAsync(configs, user.Id);
+        var error = await Assert.ThrowsAsync<BusinessException>(() => bundle.ComposePreviewAsync(user.Id,
+            new ReportConfigurationBundleCompositionRequest
+            {
+                CompositionKey = ReportConfigurationBundleCompositionManifest.TradeDocumentHeaderDetail,
+                HeaderConfigurationId = headerId,
+                DetailConfigurationId = detailId,
+            }));
+        Assert.Equal(ReportConfigurationExecutionLimits.ErrorCodeResultTooLarge, error.Code);
+    }
+
     // ==================== 1. 组合与独立合计 ====================
 
     [Fact]
