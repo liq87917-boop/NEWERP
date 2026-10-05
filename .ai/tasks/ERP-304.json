@@ -1,15 +1,19 @@
 {
   "title": "Complete procurement and financial family presets for existing controlled datasets",
-  "description": "Stage 2 functional preset coverage. ERP-297 and ERP-298 created seven controlled datasets but their allowed paths excluded ReportConfigurationPresetCatalog.cs; current manifest lacks those presets. Add corresponding immutable presets through existing orchestration only. No new algorithms/entities/schema/migrations, production operations, secrets/env, permissions expansion or old entry switch. Tests may seed only explicitly guarded NEWERP_AUTOTEST_* databases on (localdb)\\NEWERP_AutoAcceptance.",
+  "description": "Stage 2 functional preset coverage. ERP-297 and ERP-298 created seven controlled datasets but their allowed paths excluded ReportConfigurationPresetCatalog.cs; current manifest lacks those presets. Add corresponding immutable presets through existing orchestration only. No new algorithms/entities/schema/migrations, production operations, secrets/env, permissions expansion or old entry switch. Tests may seed only explicitly guarded NEWERP_AUTOTEST_* databases on (localdb)\\NEWERP_AutoAcceptance. Necessary security repair before exposing these presets: FinancialStatementReportConfigurationDatasetProvider and ArAgingReportConfigurationDatasetProvider currently perform menu-only checks and call legacy global queries; implement fail-closed current-user data scope using existing scope service, never post-filter aggregated global financial data.",
   "acceptance_criteria": [
     "Add immutable user-visible presets for all registry entries backed by ERP-297 purchase-order/supplier-aging/supplier-exposure and ERP-298 balance-sheet/income-statement/cash-flow/ar-aging controlled providers. Use live catalog field/filter keys, original field order and meaningful defaults; do not create new queries or dedicated report UI/exporters.",
     "Preset discovery and private copying must reuse original menu/data/column permission checks and existing definition validation; inaccessible datasets are hidden and revoked access fails closed. Preserve original currency/unit and summary scope, retaining legacy routes and existing audit.",
-    "Verify every related registry key resolves to a valid authorized preset/private definition and generic preview/export across mocked providers and isolated SQL fixtures; cover absent/revoked permissions, immutable seeds, invalid keys and empty data. Execute related tests, safe Release build/unit suite and scheduler self-test/contracts. Presence is readiness, never parity-passed or full-stage acceptance; genuine browser/SQL gaps remain unverified."
+    "Verify every related registry key resolves to a valid authorized preset/private definition and generic preview/export across mocked providers and isolated SQL fixtures; cover absent/revoked permissions, immutable seeds, invalid keys and empty data. Execute related tests, safe Release build/unit suite and scheduler self-test/contracts. Presence is readiness, never parity-passed or full-stage acceptance; genuine browser/SQL gaps remain unverified.",
+    "Before exposing ERP-298 financial presets, fix its four dataset providers current-user data-scope boundary: current EnsureAuthorizedAsync validates only the menu and calls unscoped legacy financial queries. Resolve existing SalespersonDataScopeService scope on every catalog/preview/export path; reject restricted or unresolved scope before any global legacy query unless an already proven scoped service exists. Do not expand user permissions or filter global summaries after aggregation. Add restricted-user-with-valid-menu and revoked-scope tests asserting no global query/row leakage; keep authorized full-scope behavior and old routes intact."
   ],
   "allowed_paths": [
     "src/ERP.Application/Services/ReportConfigurationPresetCatalog.cs",
     "src/ERP.UnitTests/ReportConfigurationProcurementFinancialPresetTests.cs",
-    "src/ERP.IntegrationTests/ReportConfigurationProcurementFinancialPresetSqlServerTests.cs"
+    "src/ERP.IntegrationTests/ReportConfigurationProcurementFinancialPresetSqlServerTests.cs",
+    "src/ERP.Infrastructure/Reports/FinancialStatementReportConfigurationDatasetProvider.cs",
+    "src/ERP.Infrastructure/Reports/ArAgingReportConfigurationDatasetProvider.cs",
+    "src/ERP.UnitTests/ReportConfigurationFinancialStatementAdapterTests.cs"
   ],
   "criterion_path_map": {
     "Add immutable user-visible presets for all registry entries backed by ERP-297 purchase-order/supplier-aging/supplier-exposure and ERP-298 balance-sheet/income-statement/cash-flow/ar-aging controlled providers. Use live catalog field/filter keys, original field order and meaningful defaults; do not create new queries or dedicated report UI/exporters.": [
@@ -24,6 +28,13 @@
     ],
     "Verify every related registry key resolves to a valid authorized preset/private definition and generic preview/export across mocked providers and isolated SQL fixtures; cover absent/revoked permissions, immutable seeds, invalid keys and empty data. Execute related tests, safe Release build/unit suite and scheduler self-test/contracts. Presence is readiness, never parity-passed or full-stage acceptance; genuine browser/SQL gaps remain unverified.": [
       "src/ERP.Application/Services/ReportConfigurationPresetCatalog.cs",
+      "src/ERP.UnitTests/ReportConfigurationProcurementFinancialPresetTests.cs",
+      "src/ERP.IntegrationTests/ReportConfigurationProcurementFinancialPresetSqlServerTests.cs"
+    ],
+    "Before exposing ERP-298 financial presets, fix its four dataset providers current-user data-scope boundary: current EnsureAuthorizedAsync validates only the menu and calls unscoped legacy financial queries. Resolve existing SalespersonDataScopeService scope on every catalog/preview/export path; reject restricted or unresolved scope before any global legacy query unless an already proven scoped service exists. Do not expand user permissions or filter global summaries after aggregation. Add restricted-user-with-valid-menu and revoked-scope tests asserting no global query/row leakage; keep authorized full-scope behavior and old routes intact.": [
+      "src/ERP.Infrastructure/Reports/FinancialStatementReportConfigurationDatasetProvider.cs",
+      "src/ERP.Infrastructure/Reports/ArAgingReportConfigurationDatasetProvider.cs",
+      "src/ERP.UnitTests/ReportConfigurationFinancialStatementAdapterTests.cs",
       "src/ERP.UnitTests/ReportConfigurationProcurementFinancialPresetTests.cs",
       "src/ERP.IntegrationTests/ReportConfigurationProcurementFinancialPresetSqlServerTests.cs"
     ]
@@ -53,5 +64,15 @@
     "required": false,
     "scenarios": []
   },
-  "created_at": "2026-10-05T01:52:33.456698Z"
+  "created_at": "2026-10-05T01:52:33.456698Z",
+  "recovery_context": {
+    "remediation_task": "ERP-304-FINANCIAL-DATA-SCOPE-20261005T0226",
+    "source_task": "ERP-298",
+    "failure_signature": "financial_controlled_providers_menu_only_global_query",
+    "evidence_paths": [
+      "src/ERP.Infrastructure/Reports/FinancialStatementReportConfigurationDatasetProvider.cs",
+      "src/ERP.Infrastructure/Reports/ArAgingReportConfigurationDatasetProvider.cs"
+    ],
+    "strategy": "Validate current-user scope before unscoped query, reject restricted scope with bounded failure and prove no query executed; preserve authorized full-scope existing calculations."
+  }
 }
