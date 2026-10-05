@@ -142,6 +142,10 @@ public static class DependencyInjection
         services.AddSingleton<IReportMigrationParityEvidenceProvider, EmptyReportMigrationParityEvidenceProvider>();
         services.AddScoped<IReportMigrationRegistry, ReportMigrationRegistry>();
 
+        // 旧报表来源统一接缝（ERP-330 Stage 2）：服务端受控登记册把每个旧报表条目映射到既有读取服务，
+        // 并归一化为有界旧结果快照（复用既有菜单授权 + 行/数据范围，fail closed）。
+        services.AddScoped<ILegacyReportSource, LegacyReportSourceRegistry>();
+
         // 通用报表配置平台（ERP-296 Stage 2）：报表预设模板编排（只读列出 + 私有物化；数据驱动，不新增每报表控制器/设计器/导出器）
         services.AddScoped<IReportConfigurationPresetCatalog, ReportConfigurationPresetCatalog>();
 
