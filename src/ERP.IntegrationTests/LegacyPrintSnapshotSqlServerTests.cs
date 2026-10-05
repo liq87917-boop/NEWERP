@@ -110,7 +110,7 @@ public sealed class LegacyPrintSnapshotSqlServerTests
         Assert.Null(line1.Cells[Col(snapshot, "totalAmount")]);
 
         Assert.Equal(2, snapshot.Rows[2].Cells[Col(snapshot, "sortNo")]);
-        Assert.DoesNotContain(snapshot.Rows, r => (int)r.Cells[Col(snapshot, "sortNo")]! == 3);
+        Assert.DoesNotContain(snapshot.Rows, r => r.Cells[Col(snapshot, "sortNo")] is int sortNo && sortNo == 3);
     }
 
     [Fact]

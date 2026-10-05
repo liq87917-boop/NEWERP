@@ -201,6 +201,7 @@ public sealed class LegacyPrintSnapshotReadService : ILegacyPrintSnapshotReadSer
         var details = await _db.QuotationDetails.AsNoTracking()
             .Where(d => !d.IsDeleted && headerIds.Contains(d.QuotationId))
             .OrderBy(d => d.QuotationId).ThenBy(d => d.SortNo).ThenBy(d => d.Id)
+            .Take(MaxSalesLines + 1)
             .ToListAsync(cancellationToken);
         if (details.Count > MaxSalesLines)
             throw new BusinessException(
@@ -244,6 +245,7 @@ public sealed class LegacyPrintSnapshotReadService : ILegacyPrintSnapshotReadSer
         var details = await _db.ProformaInvoiceDetails.AsNoTracking()
             .Where(d => !d.IsDeleted && headerIds.Contains(d.PiId))
             .OrderBy(d => d.PiId).ThenBy(d => d.SortNo).ThenBy(d => d.Id)
+            .Take(MaxSalesLines + 1)
             .ToListAsync(cancellationToken);
         if (details.Count > MaxSalesLines)
             throw new BusinessException(
