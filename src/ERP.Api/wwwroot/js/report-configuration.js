@@ -18,6 +18,7 @@
 
 const RCC_API = '/api/report-configurations';
 const RCC_DEFAULT_PAGE_SIZE = 20;
+const RCC_DOWNLOAD_CLEANUP_DELAY_MS = 1000;
 
 const RCC_GROUP_LABELS = {
   none: '不分组',
@@ -1697,6 +1698,26 @@ function rccPreviewRevision(version) {
   rccPreview();
 }
 
+/* 共享有界下载生命周期（ERP-294）：Blob URL 与已附加锚点越过发起点击后继续存活，
+   在固定有界延迟后各释放一次；点击抛异常仍先回收，绝不泄漏 Blob URL。 */
+function rccTriggerDownload(blob, a) {
+  const url = URL.createObjectURL(blob);
+  a.href = url;
+  let released = false;
+  const release = function () {
+    if (released) return;   // 幂等：恰好释放一次
+    released = true;
+    try { a.remove(); } catch (e) { /* 忽略重复移除 */ }
+    URL.revokeObjectURL(url);
+  };
+  try {
+    document.body.appendChild(a);
+    a.click();
+  } finally {
+    setTimeout(release, RCC_DOWNLOAD_CLEANUP_DELAY_MS);   // 越过发起点击后延迟释放
+  }
+}
+
 /* 导出当前预览页为 Excel（ERP-263，只读）：复用预览请求体 POST /api/report-configurations/export；
    成功（xlsx 附件）触发下载；授权 / 无效 / 环境未就绪 / 网络失败在结果区可见，不下载任何内容，
    且绝不覆盖未保存编辑（保留 dirty 状态与设计器控件）。 */
@@ -1728,15 +1749,10 @@ async function rccExport() {
     if (contentType.indexOf('spreadsheetml') >= 0) {
       const blob = await resp.blob();
       if (seq !== RCC.requestSeq) return;   // 读取 blob 期间被取消 / 离开：绝不触发下载
-      const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-      a.href = url;
       a.download = '报表配置_' + dateStr + '.xlsx';
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
+      rccTriggerDownload(blob, a);
       return;   // 导出成功：不触碰任何未保存控件 / 设计器状态
     }
 
@@ -1790,15 +1806,10 @@ async function rccExportPdf() {
     if (contentType.indexOf('pdf') >= 0) {
       const blob = await resp.blob();
       if (seq !== RCC.requestSeq) return;   // 读取 blob 期间被取消 / 离开：绝不触发下载
-      const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-      a.href = url;
       a.download = '报表配置_' + dateStr + '.pdf';
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
+      rccTriggerDownload(blob, a);
       return;   // 导出成功：不触碰任何未保存控件 / 设计器状态
     }
 
@@ -1842,16 +1853,11 @@ async function rccExportDefinition() {
       return;   // 失败只显示错误，绝不覆盖未保存编辑
     }
     const blob = new Blob([JSON.stringify(env.data, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
     const safeName = (env.data && env.data.name) ? String(env.data.name).replace(/[\\/:*?"<>|]/g, '_') : '报表配置';
-    a.href = url;
     a.download = '报表定义_' + safeName + '_' + dateStr + '.json';
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
+    rccTriggerDownload(blob, a);
   } catch (err) {
     if (seq !== RCC.requestSeq) return;
     rccRenderResult(rccErrorHtml('network', (err && err.message) || '无法连接到服务器'));
@@ -2038,6 +2044,9 @@ if (typeof module !== 'undefined' && module.exports) {
     rccPreview,
     rccExport,
     rccExportPdf,
+    rccExportDefinition,
+    rccTriggerDownload,
+    RCC_DOWNLOAD_CLEANUP_DELAY_MS,
     rccAbortActive,
     rccCancel,
     rccDisposeWorkspace,
