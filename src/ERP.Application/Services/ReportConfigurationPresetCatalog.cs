@@ -33,6 +33,36 @@ internal static class ReportConfigurationPresetManifest
             "客户应收账款证据（迁移预设）",
             ReportConfigurationConstants.DatasetReceivable,
             ReceivablePresetDefinition()),
+        new ReportConfigurationPresetSeed(
+            "inventory-movement",
+            "report:inventory-movement",
+            "库存移动与呆滞报表（迁移预设）",
+            ReportConfigurationConstants.DatasetInventoryMovement,
+            InventoryMovementPresetDefinition()),
+        new ReportConfigurationPresetSeed(
+            "inventory-aging",
+            "report:inventory-aging",
+            "库存库龄与成本估值报表（迁移预设）",
+            ReportConfigurationConstants.DatasetInventoryAging,
+            InventoryAgingPresetDefinition()),
+        new ReportConfigurationPresetSeed(
+            "stock-alert",
+            "report:stock-alert",
+            "库存预警表（迁移预设）",
+            ReportConfigurationConstants.DatasetStockAlert,
+            StockAlertPresetDefinition()),
+        new ReportConfigurationPresetSeed(
+            "inventory-movement-dynamic",
+            "dynamic:inventory-movement",
+            "动态库存移动报表（迁移预设）",
+            ReportConfigurationConstants.DatasetInventoryMovement,
+            InventoryMovementPresetDefinition()),
+        new ReportConfigurationPresetSeed(
+            "inventory-aging-dynamic",
+            "dynamic:inventory-aging",
+            "动态库存库龄报表（迁移预设）",
+            ReportConfigurationConstants.DatasetInventoryAging,
+            InventoryAgingPresetDefinition()),
     };
 
     private static ReportConfigurationDefinition SalesOrderPresetDefinition() => new()
@@ -52,6 +82,56 @@ internal static class ReportConfigurationPresetManifest
         SchemaVersion = ReportConfigurationRules.CurrentSchemaVersion,
         DatasetKey = ReportConfigurationConstants.DatasetReceivable,
         Fields = new List<string> { "invoiceNumber", "invoiceDate", "customerName", "currency", "grossAmount", "remainingAmount", "statusText" },
+        Filters = new List<ReportConfigurationFilter>(),
+        Grouping = new List<string> { ReportConfigurationConstants.GroupNone },
+        Aggregates = new List<ReportConfigurationAggregate>(),
+        Capabilities = new List<string> { ReportConfigurationConstants.CapabilityPreview },
+        Presentation = new ReportConfigurationPresentation { Page = 1, PageSize = 20 },
+    };
+
+    private static ReportConfigurationDefinition InventoryMovementPresetDefinition() => new()
+    {
+        SchemaVersion = ReportConfigurationRules.CurrentSchemaVersion,
+        DatasetKey = ReportConfigurationConstants.DatasetInventoryMovement,
+        Fields = new List<string>
+        {
+            "warehouseName", "productCode", "productName", "spec", "unit",
+            "currentQuantity", "inboundQuantity", "outboundQuantity", "netQuantity",
+            "lastMovementDate", "inactivityDays", "classification",
+        },
+        Filters = new List<ReportConfigurationFilter>(),
+        Grouping = new List<string> { ReportConfigurationConstants.GroupNone },
+        Aggregates = new List<ReportConfigurationAggregate>(),
+        Capabilities = new List<string> { ReportConfigurationConstants.CapabilityPreview },
+        Presentation = new ReportConfigurationPresentation { Page = 1, PageSize = 20 },
+    };
+
+    private static ReportConfigurationDefinition InventoryAgingPresetDefinition() => new()
+    {
+        SchemaVersion = ReportConfigurationRules.CurrentSchemaVersion,
+        DatasetKey = ReportConfigurationConstants.DatasetInventoryAging,
+        Fields = new List<string>
+        {
+            "warehouseName", "productCode", "productName", "spec", "unit",
+            "currentQuantity", "knownAgedQuantity", "unknownAgeQuantity",
+            "authoritativeAmount", "agedAmount", "unknownAgeAmount", "evidenceStatus", "costStatus",
+        },
+        Filters = new List<ReportConfigurationFilter>(),
+        Grouping = new List<string> { ReportConfigurationConstants.GroupNone },
+        Aggregates = new List<ReportConfigurationAggregate>(),
+        Capabilities = new List<string> { ReportConfigurationConstants.CapabilityPreview },
+        Presentation = new ReportConfigurationPresentation { Page = 1, PageSize = 20 },
+    };
+
+    private static ReportConfigurationDefinition StockAlertPresetDefinition() => new()
+    {
+        SchemaVersion = ReportConfigurationRules.CurrentSchemaVersion,
+        DatasetKey = ReportConfigurationConstants.DatasetStockAlert,
+        Fields = new List<string>
+        {
+            "productName", "spec", "unit", "warehouseName",
+            "quantity", "minStock", "maxStock", "diff", "alertLevel",
+        },
         Filters = new List<ReportConfigurationFilter>(),
         Grouping = new List<string> { ReportConfigurationConstants.GroupNone },
         Aggregates = new List<ReportConfigurationAggregate>(),

@@ -68,7 +68,7 @@
   "planning_stage": 2,
   "implementation_evidence": "Inventory movement/aging legacy services are IReportService.GetInventoryMovementReportAsync/GetInventoryAgingReportAsync; fixed stock-alert is GetStockAlertAsync. Existing legacy registry entries report:inventory-movement, report:inventory-aging, report:stock-alert and dynamic inventory keys exist, but no controlled providers or corresponding presets are registered. Verified registry in src/ERP.Application/DTOs/ReportMigrationRegistryDtos.cs, providers in src/ERP.Infrastructure/DependencyInjection.cs and existing preset manifest in src/ERP.Application/Services/ReportConfigurationPresetCatalog.cs. Search existing task history excludes this family: ERP-297 is purchase/supplier and ERP-298 is financial statements/ar-aging.",
   "id": "ERP-299",
-  "status": "in_progress",
+  "status": "completed",
   "attempts": 1,
   "max_attempts": 3,
   "validation_profile": "safe",

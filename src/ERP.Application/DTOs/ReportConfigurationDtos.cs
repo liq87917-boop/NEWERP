@@ -93,6 +93,9 @@ public static class ReportConfigurationConstants
     public const string DatasetIncomeStatement = "income-statement";
     public const string DatasetCashFlow = "cash-flow";
     public const string DatasetArAging = "ar-aging";
+    public const string DatasetInventoryMovement = "inventory-movement";
+    public const string DatasetInventoryAging = "inventory-aging";
+    public const string DatasetStockAlert = "stock-alert";
 
     // ==================== 受控关系（ERP-268：客户维度） ====================
 
