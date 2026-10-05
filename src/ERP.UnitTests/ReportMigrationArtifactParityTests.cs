@@ -42,6 +42,34 @@ public class ReportMigrationArtifactParityTests
         Assert.False(result.OutputSemanticsMatched);
     }
 
+    [Fact]
+    public void Highly_compressed_excel_xml_is_rejected_before_workbook_materialization()
+    {
+        var rows = new[] { new object?[] { "SAFE" } };
+        var generic = Generic(new[] { ("orderNo", "Order", Text, (string?)null) }, rows);
+        var snapshot = Legacy(new[] { ("orderNo", (string?)null, (string?)null) }, rows);
+        using var buffer = new MemoryStream();
+        var original = LegacyExcel(new[] { ("orderNo", "Order") }, rows);
+        buffer.Write(original);
+        using (var archive = new System.IO.Compression.ZipArchive(buffer,
+            System.IO.Compression.ZipArchiveMode.Update, leaveOpen: true))
+        {
+            var sheet = archive.GetEntry("xl/worksheets/sheet1.xml")!;
+            string xml;
+            using (var reader = new StreamReader(sheet.Open())) xml = reader.ReadToEnd();
+            sheet.Delete();
+            using var writer = new StreamWriter(archive.CreateEntry("xl/worksheets/sheet1.xml").Open());
+            var declarationEnd = xml.IndexOf("?>", StringComparison.Ordinal) + 2;
+            writer.Write(xml[..declarationEnd]);
+            var spaces = new string(' ', 1024 * 1024);
+            for (var i = 0; i < 65; i++) writer.Write(spaces);
+            writer.Write(xml[declarationEnd..]);
+        }
+        var result = _comparator.Compare(generic, snapshot, true, false,
+            legacyArtifacts: new(buffer.ToArray(), null));
+        Assert.False(result.OutputSemanticsMatched);
+    }
+
     // ==================== 脚手架 ====================
 
     private static ReportConfigurationPreviewDto Generic(

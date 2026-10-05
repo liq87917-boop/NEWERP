@@ -353,6 +353,44 @@ public sealed class ReportMigrationOutputSemanticsComparator : IReportMigrationO
 
         try
         {
+            const long maxExpandedBytes = 64L * 1024 * 1024;
+            using (var archiveStream = new MemoryStream(bytes, writable: false))
+            using (var archive = new System.IO.Compression.ZipArchive(archiveStream,
+                System.IO.Compression.ZipArchiveMode.Read))
+            {
+                if (archive.Entries.Count > 1024)
+                {
+                    evidence.Add($"{side} exceeds the archive entry boundary.");
+                    return null;
+                }
+                long declaredBytes = 0;
+                foreach (var entry in archive.Entries)
+                {
+                    if (entry.Length > maxExpandedBytes - declaredBytes)
+                    {
+                        evidence.Add($"{side} exceeds the expanded workbook byte boundary.");
+                        return null;
+                    }
+                    declaredBytes += entry.Length;
+                }
+                // Count actual decompression as well; central-directory sizes alone are not proof.
+                var buffer = new byte[8192];
+                long expandedBytes = 0;
+                foreach (var entry in archive.Entries)
+                {
+                    using var entryStream = entry.Open();
+                    int read;
+                    while ((read = entryStream.Read(buffer, 0, buffer.Length)) > 0)
+                    {
+                        expandedBytes += read;
+                        if (expandedBytes > maxExpandedBytes)
+                        {
+                            evidence.Add($"{side} exceeds the actual decompression byte boundary.");
+                            return null;
+                        }
+                    }
+                }
+            }
             using var stream = new MemoryStream(bytes);
             using var workbook = new XSSFWorkbook(stream);
             if (workbook.NumberOfSheets == 0)
