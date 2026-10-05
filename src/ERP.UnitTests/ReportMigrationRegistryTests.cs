@@ -43,6 +43,23 @@ public class ReportMigrationRegistryTests
         "dynamic:supplier-exposure",
     };
 
+    public static TheoryData<string> DriftedLegacyKeys => new()
+    {
+        "report:product-sales-ranking",
+        "dynamic:product-sales-ranking",
+        "report:order-profit",
+        "dynamic:order-profit",
+        "report:salesman-output",
+        "dynamic:salesman-output",
+        "report:sales-commission",
+        "dynamic:sales-commission",
+        "report:follow-up-due",
+        "dynamic:follow-up-due",
+        "report:quotation-conversion",
+        "dynamic:quotation-conversion",
+        "dynamic:receivable",
+    };
+
     private static SysUser SeedUser(ErpDbContext db, string userName)
     {
         var user = new SysUser
@@ -94,6 +111,22 @@ public class ReportMigrationRegistryTests
             new SalesOrderReportConfigurationDatasetProvider(new DynamicSalesOrderReportQuery(db)),
             new ReceivableReportConfigurationDatasetProvider(new DynamicReceivableReportQuery(db)),
         });
+
+    private static IReportConfigurationDatasetProvider BuildDriftedProvider(ErpDbContext db, string datasetKey)
+    {
+        var reportService = new ReportService(db);
+        return datasetKey switch
+        {
+            ReportConfigurationConstants.DatasetProductSalesRanking => new ProductSalesRankingReportConfigurationDatasetProvider(reportService, db),
+            ReportConfigurationConstants.DatasetOrderProfit => new OrderProfitEstimateReportConfigurationDatasetProvider(reportService, db),
+            ReportConfigurationConstants.DatasetSalesmanOutput => new SalesmanOutputReportConfigurationDatasetProvider(reportService, db),
+            ReportConfigurationConstants.DatasetSalesCommission => new SalesCommissionReportConfigurationDatasetProvider(reportService, db),
+            ReportConfigurationConstants.DatasetFollowUpDue => new FollowUpDueReportConfigurationDatasetProvider(reportService, db),
+            ReportConfigurationConstants.DatasetQuotationConversion => new QuotationConversionReportConfigurationDatasetProvider(reportService, db),
+            ReportConfigurationConstants.DatasetReceivable => new ReceivableReportConfigurationDatasetProvider(new DynamicReceivableReportQuery(db)),
+            _ => throw new ArgumentOutOfRangeException(nameof(datasetKey)),
+        };
+    }
 
     private static ReportMigrationRegistry BuildRegistry(
         ErpDbContext db, IReportConfigurationCatalog catalog, IReportMigrationPresetCatalog? presets = null,
@@ -236,6 +269,86 @@ public class ReportMigrationRegistryTests
         // 被取代的单一聚合键不得再出现在清单里（16 个族条目是旧单据导出的唯一表示）。
         Assert.DoesNotContain(ReportMigrationRegistryManifest.Entries,
             e => e.LegacyKey == "export:bill-proc");
+    }
+
+    // ==================== 1.5 币种/单位语义对齐（ERP-326） ====================
+
+    [Theory]
+    [MemberData(nameof(DriftedLegacyKeys))]
+    public async Task Manifest_13条漂移条目_币种单位语义与数据集提供者完全一致(string legacyKey)
+    {
+        using var db = TestDbFactory.Create();
+        var entry = Assert.Single(ReportMigrationRegistryManifest.Entries, e => e.LegacyKey == legacyKey);
+        var menuCode = Assert.Single(entry.RequiredMenuCodes);
+        var user = SeedUserWithMenus(db, "sem-" + legacyKey.Replace(':', '-'), menuCode);
+        var provider = BuildDriftedProvider(db, entry.DatasetKey);
+
+        var dataset = await provider.GetDatasetAsync(user.Id);
+
+        Assert.NotNull(dataset);
+        Assert.Equal(entry.CurrencyUnitSemantics, dataset!.CurrencyUnitSemantics);
+    }
+
+    [Fact]
+    public void Manifest_已对齐条目的币种单位语义保持不变()
+    {
+        var expected = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["report:customer-shipment"] = "金额按原币呈现；数量按基础单位；不跨币种换算或合并",
+            ["dynamic:customer-shipment"] = "金额按原币呈现；数量按基础单位；不跨币种换算或合并",
+            ["report:container-stats"] = "箱数/毛重/体积按原始单位；装载率与柜型未知；不跨币种换算",
+            ["dynamic:container-stats"] = "箱数/毛重/体积按原始单位；装载率与柜型未知；不跨币种换算",
+            ["report:inventory-movement"] = "数量按基础单位；成本按移动加权平均；不跨币种合并",
+            ["dynamic:inventory-movement"] = "数量按基础单位；成本按移动加权平均；不跨币种合并",
+            ["report:inventory-aging"] = "数量按基础单位；成本/金额按移动加权平均；不跨币种合并",
+            ["dynamic:inventory-aging"] = "数量按基础单位；成本/金额按移动加权平均；不跨币种合并",
+            ["report:ar-aging"] = "金额按原币呈现；账龄按自然日；不跨币种换算或合并",
+            ["report:purchase-cost"] = "金额按原币呈现；按供应商聚合；不跨币种换算或合并",
+            ["report:tax-refund-summary"] = "金额按原币呈现；按退税期间聚合；不跨币种换算或合并",
+            ["report:balance-sheet"] = "金额按单据金额直接汇总（资产/负债/权益）；不跨币种换算",
+            ["report:income-statement"] = "金额按单据金额直接汇总（收入-成本-费用）；不跨币种换算",
+            ["report:cash-flow"] = "金额按单据金额直接汇总（流入-流出）；不跨币种换算",
+            ["report:stock-alert"] = "数量按基础单位；无金额/币种",
+            ["dynamic:agency-service-fee-monthly"] = "金额按原币呈现；按对账月份/客户分组；不跨币种换算或合并",
+            ["dynamic:receipt-reconciliation"] = "金额按原币呈现；订单与收款核对；不跨币种换算或合并",
+            ["dynamic:purchase-order"] = "金额按订单原币呈现，不跨币种换算或合并",
+            ["dynamic:supplier-aging"] = "金额按原币呈现；账龄按自然日；不跨币种换算或合并",
+            ["dynamic:supplier-exposure"] = "金额按原币呈现；不跨币种换算或合并",
+            ["dynamic:shipment-finance"] = "数量按基础单位；金额按原币呈现；不跨币种换算或合并",
+            ["dynamic:sales-order"] = "金额按订单原币呈现，不跨币种换算或合并",
+            ["export:product-export-field-completeness"] = "只读字段完整度（无金额/币种）",
+            ["document:trade-document-print"] = "金额按原币呈现；数量按基础单位；不跨币种换算或合并",
+            ["document:trade-document-export-excel"] = "金额按原币呈现；数量按基础单位；不跨币种换算或合并",
+        };
+
+        Assert.Equal(25, expected.Count);
+        foreach (var (key, semantics) in expected)
+        {
+            var entry = Assert.Single(ReportMigrationRegistryManifest.Entries, e => e.LegacyKey == key);
+            Assert.Equal(semantics, entry.CurrencyUnitSemantics);
+        }
+    }
+
+    [Fact]
+    public async Task Parity_漂移条目币种单位仍不匹配_完整证据仍preset_ready()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedUserWithMenus(db, "drift-mismatch", "customer");
+
+        var catalog = new FakeCatalog(new Dictionary<string, ReportConfigurationDatasetDto?>
+        {
+            ["receivable"] = Dataset("receivable", "customer", "金额按原币呈现（故意不同口径）"),
+        });
+        var evidence = new FakeEvidenceProvider(key => key == "dynamic:receivable"
+            ? new ReportMigrationParityEvidenceDto(true, true, true, true)
+            : null);
+        var registry = BuildRegistry(db, catalog,
+            new FakePresetCatalog(k => k == "dynamic:receivable"), evidence);
+
+        var result = await registry.GetRegistryAsync(user.Id);
+
+        var entry = Assert.Single(result.Entries, e => e.LegacyKey == "dynamic:receivable");
+        Assert.Equal(ReportMigrationParityStatusText.PresetReady, entry.ParityStatus);
     }
 
     // ==================== 2. 菜单 fail-closed ====================
@@ -425,7 +538,7 @@ public class ReportMigrationRegistryTests
         var catalog = new FakeCatalog(new Dictionary<string, ReportConfigurationDatasetDto?>
         {
             ["product-sales-ranking"] = Dataset("product-sales-ranking", "product-sales-ranking",
-                "金额按原币呈现；数量按基础单位；不跨币种换算或合并"),
+                "发货数量按基础单位独立（绝不跨单位合计）；金额为数量 × 商品当前售价的估算（币种未知，仅估算）"),
         });
         var evidence = new FakeEvidenceProvider(key => key == "report:product-sales-ranking"
             ? new ReportMigrationParityEvidenceDto(true, true, true, true)
@@ -471,7 +584,7 @@ public class ReportMigrationRegistryTests
         var catalog = new FakeCatalog(new Dictionary<string, ReportConfigurationDatasetDto?>
         {
             ["product-sales-ranking"] = Dataset("product-sales-ranking", "product-sales-ranking",
-                "金额按原币呈现；数量按基础单位；不跨币种换算或合并"),
+                "发货数量按基础单位独立（绝不跨单位合计）；金额为数量 × 商品当前售价的估算（币种未知，仅估算）"),
         });
         // 无旧 Excel/PDF（false,false）是有效（真空）兼容声明，但无四维比对证据仍绝不 parity-passed（fail closed）。
         var registry = BuildRegistry(db, catalog,
