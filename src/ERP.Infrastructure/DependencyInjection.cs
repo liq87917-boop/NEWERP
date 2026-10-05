@@ -68,6 +68,9 @@ public static class DependencyInjection
         services.AddScoped<IReportConfigurationCatalog, ReportConfigurationCatalog>();
         services.AddScoped<IReportConfigurationDatasetProvider, SalesOrderReportConfigurationDatasetProvider>();
         services.AddScoped<IReportConfigurationDatasetProvider, ReceivableReportConfigurationDatasetProvider>();
+        services.AddScoped<IReportConfigurationDatasetProvider, PurchaseOrderReportConfigurationDatasetProvider>();
+        services.AddScoped<IReportConfigurationDatasetProvider, SupplierAgingReportConfigurationDatasetProvider>();
+        services.AddScoped<IReportConfigurationDatasetProvider, SupplierExposureReportConfigurationDatasetProvider>();
 
         // 通用报表配置平台（ERP-260 Stage 1）：私有报表配置服务（保存/列表/加载/复制/发布/恢复/软删除）
         services.AddScoped<IReportConfigurationService, ReportConfigurationService>();

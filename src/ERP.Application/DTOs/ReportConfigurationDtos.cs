@@ -86,6 +86,9 @@ public static class ReportConfigurationConstants
 
     public const string DatasetSalesOrder = "sales-order";
     public const string DatasetReceivable = "receivable";
+    public const string DatasetPurchaseOrder = "purchase-order";
+    public const string DatasetSupplierAging = "supplier-aging";
+    public const string DatasetSupplierExposure = "supplier-exposure";
 
     // ==================== 受控关系（ERP-268：客户维度） ====================
 

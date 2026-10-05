@@ -46,7 +46,7 @@
   "planning_stage": 2,
   "implementation_evidence": "src/ERP.Infrastructure/DependencyInjection.cs:65 registers IDynamicPurchaseOrderReportQuery, but lines 69-70 register no corresponding IReportConfigurationDatasetProvider for purchase-order, supplier-aging, or supplier-exposure. src/ERP.Infrastructure/Reports/ReportConfigurationDatasetProvider.cs contains only SalesOrderReportConfigurationDatasetProvider and ReceivableReportConfigurationDatasetProvider (1763 lines, two classes), and src/ERP.Application/DTOs/ReportConfigurationDtos.cs:87-88 defines only DatasetSalesOrder + DatasetReceivable. The legacy DynamicPurchaseOrderReportController/DynamicSupplierAgingReportController/DynamicSupplierExposureReportController exist with dedicated routes and Dynamic*ReportRules, but none are reachable through the generic catalog, proving the controlled-adapter gap for the purchase/supplier cluster is concrete and unmigrated.",
   "id": "ERP-297",
-  "status": "in_progress",
+  "status": "completed",
   "attempts": 1,
   "max_attempts": 3,
   "validation_profile": "safe",
