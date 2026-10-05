@@ -1,7 +1,7 @@
 {
   "schema_version": 2,
   "project": "NEWERP",
-  "updated_at": "2026-10-05T06:51:51.655135Z",
+  "updated_at": "2026-10-05T07:08:03.490552Z",
   "phase": "ready",
   "current_task": null,
   "queue": [
@@ -312,17 +312,20 @@
     "log": ".ai\\logs\\ERP-316-validation-1.log",
     "at": "2026-10-05T06:51:45.667407Z"
   },
-  "last_error": null,
+  "last_error": {
+    "task": "ERP-317",
+    "kind": "automatic_repair_pending",
+    "summary": "Path guard failed:\noutside allowed_paths: src/ERP.UnitTests/TestResults/Admin_ADMIN-TIAN_2026-10-05_15_07_41.trx"
+  },
   "last_deepseek_fix": {
-    "task": "ERP-313",
-    "attempt": 2,
-    "model": "deepseek-v4-pro",
-    "exit_code": 0,
-    "finished_at": "2026-10-05T05:56:13.455866Z"
+    "task": "ERP-317",
+    "attempts": 3,
+    "status": "retry_pending",
+    "at": "2026-10-05T07:08:03.176515Z"
   },
   "git_sync": {
     "branch": "main",
-    "local_sha": "99dc7f6",
+    "local_sha": "80984d3",
     "status": "synced",
     "ahead": 0,
     "behind": 0,
@@ -337,5 +340,7 @@
   "runner": {
     "status": "stopped",
     "pid": null
-  }
+  },
+  "blocker": null,
+  "finish_reason": "deepseek_supervisor_recovery"
 }
