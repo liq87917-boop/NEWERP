@@ -1,8 +1,8 @@
 {
   "schema_version": 2,
   "project": "NEWERP",
-  "updated_at": "2026-10-05T09:09:04.659010Z",
-  "phase": "ready",
+  "updated_at": "2026-10-05T09:09:09.621077Z",
+  "phase": "replenishing",
   "current_task": null,
   "queue": [],
   "completed": [
@@ -338,5 +338,6 @@
   "runner": {
     "status": "stopped",
     "pid": null
-  }
+  },
+  "finish_reason": "planner_supply_required"
 }
