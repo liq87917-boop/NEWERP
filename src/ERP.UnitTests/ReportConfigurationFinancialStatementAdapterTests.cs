@@ -35,9 +35,9 @@ public class ReportConfigurationFinancialStatementAdapterTests
         return user;
     }
 
-    private static SysRole SeedRole(ErpDbContext db, string code)
+    private static SysRole SeedRole(ErpDbContext db, string code, bool isSystem = false)
     {
-        var role = new SysRole { RoleName = code, RoleCode = code, IsSystem = false };
+        var role = new SysRole { RoleName = code, RoleCode = code, IsSystem = isSystem };
         db.SysRoles.Add(role);
         db.SaveChanges();
         return role;
@@ -68,7 +68,17 @@ public class ReportConfigurationFinancialStatementAdapterTests
     private static SysUser SeedAuthorizedUser(ErpDbContext db, string name, params string[] menuCodes)
     {
         var user = SeedUser(db, name);
-        var role = SeedRole(db, name + "-role");
+        var role = SeedRole(db, name + "-role", isSystem: true);
+        SeedUserRole(db, user.Id, role.Id);
+        foreach (var code in menuCodes)
+            SeedRoleMenu(db, role.Id, SeedMenu(db, code).Id);
+        return user;
+    }
+
+    private static SysUser SeedRestrictedAuthorizedUser(ErpDbContext db, string name, params string[] menuCodes)
+    {
+        var user = SeedUser(db, name);
+        var role = SeedRole(db, name + "-restricted", isSystem: false);
         SeedUserRole(db, user.Id, role.Id);
         foreach (var code in menuCodes)
             SeedRoleMenu(db, role.Id, SeedMenu(db, code).Id);
@@ -77,9 +87,81 @@ public class ReportConfigurationFinancialStatementAdapterTests
 
     private static IReportService NewReportService(ErpDbContext db) => new ReportService(db);
 
-    private static IReportConfigurationDatasetProvider BuildProvider(ErpDbContext db, string datasetKey)
+    /// <summary>
+    /// 用于证明「受限制 / 撤销范围」路径绝不执行全局财务报表查询的哨兵报表服务：
+    /// 四个财务报表方法一旦被调用就置位 <see cref="FinancialQueryExecuted"/> 并抛异常。
+    /// </summary>
+    private sealed class NoQueryReportService : IReportService
     {
-        var reportService = NewReportService(db);
+        public bool FinancialQueryExecuted { get; private set; }
+
+        private static T NotCalled<T>() => throw new NotSupportedException("本测试不应调用非财务报表查询");
+
+        private Task<ReportDtos.FinancialStatement> FailStatement()
+        {
+            FinancialQueryExecuted = true;
+            return Task.FromException<ReportDtos.FinancialStatement>(
+                new InvalidOperationException("全局财务报表查询被执行（数据范围边界失效）"));
+        }
+
+        private Task<List<ReportDtos.ArAgingItem>> FailArAging()
+        {
+            FinancialQueryExecuted = true;
+            return Task.FromException<List<ReportDtos.ArAgingItem>>(
+                new InvalidOperationException("全局应收账龄查询被执行（数据范围边界失效）"));
+        }
+
+        public Task<ReportDtos.FinancialStatement> GetBalanceSheetAsync(DateTime asOfDate) => FailStatement();
+        public Task<ReportDtos.FinancialStatement> GetIncomeStatementAsync(DateTime start, DateTime end) => FailStatement();
+        public Task<ReportDtos.FinancialStatement> GetCashFlowStatementAsync(DateTime start, DateTime end) => FailStatement();
+        public Task<List<ReportDtos.ArAgingItem>> GetArAgingAsync(DateTime asOfDate) => FailArAging();
+
+        public Task<List<ReportDtos.ProductSalesRankItem>> GetProductSalesRankingAsync(
+            DateTime start, DateTime end, int top, SalespersonDataScope scope, ProductSalesRankingFilterDto? filter = null)
+            => NotCalled<Task<List<ReportDtos.ProductSalesRankItem>>>();
+        public Task<List<ReportDtos.OrderProfitItem>> GetOrderProfitEstimateAsync(
+            DateTime start, DateTime end, SalespersonDataScope scope, OrderProfitEstimateFilterDto? filter = null)
+            => NotCalled<Task<List<ReportDtos.OrderProfitItem>>>();
+        public Task<List<ReportDtos.CustomerShipmentItem>> GetCustomerShipmentStatsAsync(
+            DateTime start, DateTime end, SalespersonDataScope scope, CustomerShipmentFilterDto? filter = null)
+            => NotCalled<Task<List<ReportDtos.CustomerShipmentItem>>>();
+        public Task<List<ReportDtos.SalesmanOutputItem>> GetSalesmanOutputAsync(
+            DateTime start, DateTime end, SalespersonDataScope scope, SalesmanOutputFilterDto? filter = null)
+            => NotCalled<Task<List<ReportDtos.SalesmanOutputItem>>>();
+        public Task<List<ReportDtos.ContainerStatsItem>> GetContainerStatsAsync(DateTime start, DateTime end, SalespersonDataScope scope)
+            => NotCalled<Task<List<ReportDtos.ContainerStatsItem>>>();
+        public Task<DynamicContainerStatsReportPageDto> GetDynamicContainerStatsReportAsync(DynamicContainerStatsReportRequest request, SalespersonDataScope scope)
+            => NotCalled<Task<DynamicContainerStatsReportPageDto>>();
+        public Task<List<ReportDtos.PurchaseCostItem>> GetPurchaseCostAsync(DateTime start, DateTime end)
+            => NotCalled<Task<List<ReportDtos.PurchaseCostItem>>>();
+        public Task<List<ReportDtos.TaxRefundSummaryItem>> GetTaxRefundSummaryAsync()
+            => NotCalled<Task<List<ReportDtos.TaxRefundSummaryItem>>>();
+        public Task<List<ReportDtos.StockAlertItem>> GetStockAlertAsync()
+            => NotCalled<Task<List<ReportDtos.StockAlertItem>>>();
+        public Task<List<ReportDtos.SalesCommissionItem>> GetSalesCommissionAsync(DateTime start, DateTime end, SalespersonDataScope scope)
+            => NotCalled<Task<List<ReportDtos.SalesCommissionItem>>>();
+        public Task<DynamicSalesCommissionReportPageDto> GetDynamicSalesCommissionReportAsync(DynamicSalesCommissionReportRequest request, SalespersonDataScope scope)
+            => NotCalled<Task<DynamicSalesCommissionReportPageDto>>();
+        public Task<List<ReportDtos.FollowUpDueItem>> GetFollowUpDueAsync(DateTime asOfDate, int aheadDays, SalespersonDataScope scope)
+            => NotCalled<Task<List<ReportDtos.FollowUpDueItem>>>();
+        public Task<DynamicFollowUpDueReportPageDto> GetDynamicFollowUpDueReportAsync(DynamicFollowUpDueReportRequest request, SalespersonDataScope scope)
+            => NotCalled<Task<DynamicFollowUpDueReportPageDto>>();
+        public Task<List<ReportDtos.QuotationConversionItem>> GetQuotationConversionAsync(
+            DateTime start, DateTime end, SalespersonDataScope scope, QuotationConversionFilterDto? filter = null)
+            => NotCalled<Task<List<ReportDtos.QuotationConversionItem>>>();
+        public Task<ReportDtos.InventoryMovementReport> GetInventoryMovementReportAsync(
+            ReportDtos.InventoryMovementReportQuery query, CancellationToken cancellationToken = default)
+            => NotCalled<Task<ReportDtos.InventoryMovementReport>>();
+        public Task<ReportDtos.InventoryAgingReport> GetInventoryAgingReportAsync(
+            ReportDtos.InventoryAgingReportQuery query, CancellationToken cancellationToken = default)
+            => NotCalled<Task<ReportDtos.InventoryAgingReport>>();
+    }
+
+    private static IReportConfigurationDatasetProvider BuildProvider(ErpDbContext db, string datasetKey)
+        => BuildProvider(NewReportService(db), db, datasetKey);
+
+    private static IReportConfigurationDatasetProvider BuildProvider(IReportService reportService, ErpDbContext db, string datasetKey)
+    {
         return datasetKey switch
         {
             ReportConfigurationConstants.DatasetBalanceSheet => new BalanceSheetReportConfigurationDatasetProvider(reportService, db),
@@ -403,6 +485,49 @@ public class ReportConfigurationFinancialStatementAdapterTests
             Definition(ReportConfigurationConstants.DatasetBalanceSheet, "lineName", "amount"),
             Params(), null));
         Assert.Equal(ErrorCodes.Unauthorized, ex.Code);
+    }
+
+    // ==================== 5. 数据范围边界（ERP-304：受限制 / 撤销范围 fail closed，不执行全局查询） ====================
+
+    [Theory]
+    [InlineData(ReportConfigurationConstants.DatasetBalanceSheet, "balance-sheet")]
+    [InlineData(ReportConfigurationConstants.DatasetIncomeStatement, "income-statement")]
+    [InlineData(ReportConfigurationConstants.DatasetCashFlow, "cash-flow")]
+    [InlineData(ReportConfigurationConstants.DatasetArAging, "ar-aging")]
+    public async Task 受限制用户_有菜单_数据集不暴露且预览拒绝(string datasetKey, string menuCode)
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedRestrictedAuthorizedUser(db, "restricted-" + datasetKey, menuCode);
+        var reportService = new NoQueryReportService();
+        var provider = BuildProvider(reportService, db, datasetKey);
+
+        Assert.Null(await provider.GetDatasetAsync(user.Id));
+
+        var ex = await Assert.ThrowsAsync<BusinessException>(() => provider.PreviewAsync(
+            Definition(datasetKey, DefaultFields(datasetKey).ToArray()),
+            Params(), user.Id));
+        Assert.Equal(ErrorCodes.Forbidden, ex.Code);
+        Assert.False(reportService.FinancialQueryExecuted);
+    }
+
+    [Fact]
+    public async Task 特权角色撤销后_预览拒绝且不执行全局查询()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedAuthorizedUser(db, "revoke-scope", "balance-sheet");
+        var reportService = new NoQueryReportService();
+        var provider = new BalanceSheetReportConfigurationDatasetProvider(reportService, db);
+
+        // 撤销特权角色：移除系统内置角色链接 → 范围解析收敛为受限制（fail closed）。
+        var link = Assert.Single(db.SysUserRoles.ToList());
+        db.SysUserRoles.Remove(link);
+        db.SaveChanges();
+
+        var ex = await Assert.ThrowsAsync<BusinessException>(() => provider.PreviewAsync(
+            Definition(ReportConfigurationConstants.DatasetBalanceSheet, "lineName", "amount"),
+            Params(), user.Id));
+        Assert.Equal(ErrorCodes.Forbidden, ex.Code);
+        Assert.False(reportService.FinancialQueryExecuted);
     }
 
 

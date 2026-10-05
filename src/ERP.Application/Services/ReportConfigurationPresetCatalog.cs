@@ -177,6 +177,48 @@ internal static class ReportConfigurationPresetManifest
             "动态客户订单与收款核对报表（迁移预设）",
             ReportConfigurationConstants.DatasetReceiptReconciliation,
             ReceiptReconciliationPresetDefinition()),
+        new ReportConfigurationPresetSeed(
+            "purchase-order",
+            "dynamic:purchase-order",
+            "采购订单（迁移预设）",
+            ReportConfigurationConstants.DatasetPurchaseOrder,
+            PurchaseOrderPresetDefinition()),
+        new ReportConfigurationPresetSeed(
+            "supplier-aging",
+            "dynamic:supplier-aging",
+            "供应商对账与账龄（迁移预设）",
+            ReportConfigurationConstants.DatasetSupplierAging,
+            SupplierAgingPresetDefinition()),
+        new ReportConfigurationPresetSeed(
+            "supplier-exposure",
+            "dynamic:supplier-exposure",
+            "供应商采购敞口（迁移预设）",
+            ReportConfigurationConstants.DatasetSupplierExposure,
+            SupplierExposurePresetDefinition()),
+        new ReportConfigurationPresetSeed(
+            "balance-sheet",
+            "report:balance-sheet",
+            "资产负债表（迁移预设）",
+            ReportConfigurationConstants.DatasetBalanceSheet,
+            BalanceSheetPresetDefinition()),
+        new ReportConfigurationPresetSeed(
+            "income-statement",
+            "report:income-statement",
+            "利润表（迁移预设）",
+            ReportConfigurationConstants.DatasetIncomeStatement,
+            IncomeStatementPresetDefinition()),
+        new ReportConfigurationPresetSeed(
+            "cash-flow",
+            "report:cash-flow",
+            "现金流量表（迁移预设）",
+            ReportConfigurationConstants.DatasetCashFlow,
+            CashFlowPresetDefinition()),
+        new ReportConfigurationPresetSeed(
+            "ar-aging",
+            "report:ar-aging",
+            "应收账龄分析表（迁移预设）",
+            ReportConfigurationConstants.DatasetArAging,
+            ArAgingPresetDefinition()),
     };
 
     private static ReportConfigurationDefinition SalesOrderPresetDefinition() => new()
@@ -430,6 +472,105 @@ internal static class ReportConfigurationPresetManifest
         {
             "salesmanId", "salesmanName", "currency", "currencyLabel", "orderCount", "totalAmount",
             "totalProfit", "amountLabel", "currencyEvidence", "profitEvidence", "salesmanIdentityEvidence", "sourceEvidence",
+        },
+        Filters = new List<ReportConfigurationFilter>(),
+        Grouping = new List<string> { ReportConfigurationConstants.GroupNone },
+        Aggregates = new List<ReportConfigurationAggregate>(),
+        Capabilities = new List<string> { ReportConfigurationConstants.CapabilityPreview },
+        Presentation = new ReportConfigurationPresentation { Page = 1, PageSize = 20 },
+    };
+
+    private static ReportConfigurationDefinition PurchaseOrderPresetDefinition() => new()
+    {
+        SchemaVersion = ReportConfigurationRules.CurrentSchemaVersion,
+        DatasetKey = ReportConfigurationConstants.DatasetPurchaseOrder,
+        Fields = new List<string>
+        {
+            "orderNo", "orderDate", "supplierId", "currency", "totalAmount", "contractNo", "status", "remark",
+        },
+        Filters = new List<ReportConfigurationFilter>(),
+        Grouping = new List<string> { ReportConfigurationConstants.GroupNone },
+        Aggregates = new List<ReportConfigurationAggregate>(),
+        Capabilities = new List<string> { ReportConfigurationConstants.CapabilityPreview },
+        Presentation = new ReportConfigurationPresentation { Page = 1, PageSize = 20 },
+    };
+
+    private static ReportConfigurationDefinition SupplierAgingPresetDefinition() => new()
+    {
+        SchemaVersion = ReportConfigurationRules.CurrentSchemaVersion,
+        DatasetKey = ReportConfigurationConstants.DatasetSupplierAging,
+        Fields = new List<string>
+        {
+            "invoiceNumber", "invoiceDate", "supplierName", "currency", "grossAmount",
+            "dueDate", "agingBucket", "overdueDays", "remainingAmount", "note",
+        },
+        Filters = new List<ReportConfigurationFilter>(),
+        Grouping = new List<string> { ReportConfigurationConstants.GroupNone },
+        Aggregates = new List<ReportConfigurationAggregate>(),
+        Capabilities = new List<string> { ReportConfigurationConstants.CapabilityPreview },
+        Presentation = new ReportConfigurationPresentation { Page = 1, PageSize = 20 },
+    };
+
+    private static ReportConfigurationDefinition SupplierExposurePresetDefinition() => new()
+    {
+        SchemaVersion = ReportConfigurationRules.CurrentSchemaVersion,
+        DatasetKey = ReportConfigurationConstants.DatasetSupplierExposure,
+        Fields = new List<string>
+        {
+            "orderNo", "orderDate", "supplierName", "currency", "orderedAmount",
+            "linkStatus", "settledAmount", "outstandingAmount", "note",
+        },
+        Filters = new List<ReportConfigurationFilter>(),
+        Grouping = new List<string> { ReportConfigurationConstants.GroupNone },
+        Aggregates = new List<ReportConfigurationAggregate>(),
+        Capabilities = new List<string> { ReportConfigurationConstants.CapabilityPreview },
+        Presentation = new ReportConfigurationPresentation { Page = 1, PageSize = 20 },
+    };
+
+    private static ReportConfigurationDefinition BalanceSheetPresetDefinition() => new()
+    {
+        SchemaVersion = ReportConfigurationRules.CurrentSchemaVersion,
+        DatasetKey = ReportConfigurationConstants.DatasetBalanceSheet,
+        Fields = new List<string> { "lineName", "amount" },
+        Filters = new List<ReportConfigurationFilter>(),
+        Grouping = new List<string> { ReportConfigurationConstants.GroupNone },
+        Aggregates = new List<ReportConfigurationAggregate>(),
+        Capabilities = new List<string> { ReportConfigurationConstants.CapabilityPreview },
+        Presentation = new ReportConfigurationPresentation { Page = 1, PageSize = 20 },
+    };
+
+    private static ReportConfigurationDefinition IncomeStatementPresetDefinition() => new()
+    {
+        SchemaVersion = ReportConfigurationRules.CurrentSchemaVersion,
+        DatasetKey = ReportConfigurationConstants.DatasetIncomeStatement,
+        Fields = new List<string> { "lineName", "amount" },
+        Filters = new List<ReportConfigurationFilter>(),
+        Grouping = new List<string> { ReportConfigurationConstants.GroupNone },
+        Aggregates = new List<ReportConfigurationAggregate>(),
+        Capabilities = new List<string> { ReportConfigurationConstants.CapabilityPreview },
+        Presentation = new ReportConfigurationPresentation { Page = 1, PageSize = 20 },
+    };
+
+    private static ReportConfigurationDefinition CashFlowPresetDefinition() => new()
+    {
+        SchemaVersion = ReportConfigurationRules.CurrentSchemaVersion,
+        DatasetKey = ReportConfigurationConstants.DatasetCashFlow,
+        Fields = new List<string> { "lineName", "amount" },
+        Filters = new List<ReportConfigurationFilter>(),
+        Grouping = new List<string> { ReportConfigurationConstants.GroupNone },
+        Aggregates = new List<ReportConfigurationAggregate>(),
+        Capabilities = new List<string> { ReportConfigurationConstants.CapabilityPreview },
+        Presentation = new ReportConfigurationPresentation { Page = 1, PageSize = 20 },
+    };
+
+    private static ReportConfigurationDefinition ArAgingPresetDefinition() => new()
+    {
+        SchemaVersion = ReportConfigurationRules.CurrentSchemaVersion,
+        DatasetKey = ReportConfigurationConstants.DatasetArAging,
+        Fields = new List<string>
+        {
+            "customerName", "orderNo", "currency", "orderAmount",
+            "receivedAmount", "balance", "agingDays", "bucket", "status",
         },
         Filters = new List<ReportConfigurationFilter>(),
         Grouping = new List<string> { ReportConfigurationConstants.GroupNone },

@@ -48,7 +48,7 @@
   "planning_stage": 2,
   "implementation_evidence": "Read ERP-297/298 task definitions, current ReportConfigurationPresetManifest and ReportMigrationRegistryDtos.cs; provider registrations exist, procurement/financial preset keys are absent. New tasks 302/303 cover separate remaining workflow/reconciliation families.",
   "id": "ERP-304",
-  "status": "in_progress",
+  "status": "completed",
   "attempts": 1,
   "max_attempts": 3,
   "validation_profile": "safe",
@@ -64,15 +64,5 @@
     "required": false,
     "scenarios": []
   },
-  "created_at": "2026-10-05T01:52:33.456698Z",
-  "recovery_context": {
-    "remediation_task": "ERP-304-FINANCIAL-DATA-SCOPE-20261005T0226",
-    "source_task": "ERP-298",
-    "failure_signature": "financial_controlled_providers_menu_only_global_query",
-    "evidence_paths": [
-      "src/ERP.Infrastructure/Reports/FinancialStatementReportConfigurationDatasetProvider.cs",
-      "src/ERP.Infrastructure/Reports/ArAgingReportConfigurationDatasetProvider.cs"
-    ],
-    "strategy": "Validate current-user scope before unscoped query, reject restricted scope with bounded failure and prove no query executed; preserve authorized full-scope existing calculations."
-  }
+  "created_at": "2026-10-05T01:52:33.456698Z"
 }

@@ -144,6 +144,18 @@ public abstract class FinancialStatementReportConfigurationDatasetProviderBase :
                 + "（fail closed，不返回任何数据）",
                 ErrorCodes.Forbidden);
         }
+
+        // ERP-304：财务报表为全局汇总口径（无按客户 / 业务员范围化的既有查询）。
+        // 解析当前账号业务员数据范围；仅特权（全量）账号可执行全局汇总查询，
+        // 受限制 / 未解析范围一律 fail closed，绝不事后过滤全局汇总结果。
+        var scope = await SalespersonDataScopeService.ResolveAsync(_db, userId.Value);
+        if (!scope.IsPrivileged)
+        {
+            throw new BusinessException(
+                $"当前账号不是全量数据范围账号：拒绝预览{Label}"
+                + "（fail closed，不执行全局汇总查询）",
+                ErrorCodes.Forbidden);
+        }
     }
 
 
