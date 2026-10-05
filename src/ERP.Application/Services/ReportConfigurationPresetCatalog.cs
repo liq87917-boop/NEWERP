@@ -231,6 +231,24 @@ internal static class ReportConfigurationPresetManifest
             "退税汇总表（迁移预设）",
             ReportConfigurationConstants.DatasetTaxRefundSummary,
             TaxRefundSummaryPresetDefinition()),
+        new ReportConfigurationPresetSeed(
+            "product-export-field-completeness",
+            "export:product-export-field-completeness",
+            "出口字段完整度工作台（迁移预设）",
+            ReportConfigurationConstants.DatasetProductExportFieldCompleteness,
+            ProductExportFieldCompletenessPresetDefinition()),
+        new ReportConfigurationPresetSeed(
+            "trade-document-print",
+            "document:trade-document-print",
+            "出口单证打印数据（迁移预设）",
+            ReportConfigurationConstants.DatasetTradeDocument,
+            TradeDocumentPrintPresetDefinition()),
+        new ReportConfigurationPresetSeed(
+            "trade-document-export-excel",
+            "document:trade-document-export-excel",
+            "出口单证台账导出（迁移预设）",
+            ReportConfigurationConstants.DatasetTradeDocument,
+            TradeDocumentExportExcelPresetDefinition()),
     };
 
     private static ReportConfigurationDefinition SalesOrderPresetDefinition() => new()
@@ -614,6 +632,54 @@ internal static class ReportConfigurationPresetManifest
         {
             "refundPeriod", "recordCount", "declaredCount", "refundedCount",
             "exportAmount", "refundableAmount", "refundedAmount", "unrefundedAmount",
+        },
+        Filters = new List<ReportConfigurationFilter>(),
+        Grouping = new List<string> { ReportConfigurationConstants.GroupNone },
+        Aggregates = new List<ReportConfigurationAggregate>(),
+        Capabilities = new List<string> { ReportConfigurationConstants.CapabilityPreview },
+        Presentation = new ReportConfigurationPresentation { Page = 1, PageSize = 20 },
+    };
+
+    private static ReportConfigurationDefinition ProductExportFieldCompletenessPresetDefinition() => new()
+    {
+        SchemaVersion = ReportConfigurationRules.CurrentSchemaVersion,
+        DatasetKey = ReportConfigurationConstants.DatasetProductExportFieldCompleteness,
+        Fields = new List<string>
+        {
+            "productId", "productCode", "productName", "spec", "unit",
+            "completeness", "gapCount", "fieldCount",
+        },
+        Filters = new List<ReportConfigurationFilter>(),
+        Grouping = new List<string> { ReportConfigurationConstants.GroupNone },
+        Aggregates = new List<ReportConfigurationAggregate>(),
+        Capabilities = new List<string> { ReportConfigurationConstants.CapabilityPreview },
+        Presentation = new ReportConfigurationPresentation { Page = 1, PageSize = 20 },
+    };
+
+    private static ReportConfigurationDefinition TradeDocumentPrintPresetDefinition() => new()
+    {
+        SchemaVersion = ReportConfigurationRules.CurrentSchemaVersion,
+        DatasetKey = ReportConfigurationConstants.DatasetTradeDocument,
+        Fields = new List<string>
+        {
+            "docNo", "docType", "status", "issueDate", "customerName", "salesOrderNo", "refNo", "declareNo",
+            "amount", "currency", "departurePort", "destinationPort", "issuedBy", "copies", "fileNote", "remark",
+        },
+        Filters = new List<ReportConfigurationFilter>(),
+        Grouping = new List<string> { ReportConfigurationConstants.GroupNone },
+        Aggregates = new List<ReportConfigurationAggregate>(),
+        Capabilities = new List<string> { ReportConfigurationConstants.CapabilityPreview },
+        Presentation = new ReportConfigurationPresentation { Page = 1, PageSize = 20 },
+    };
+
+    private static ReportConfigurationDefinition TradeDocumentExportExcelPresetDefinition() => new()
+    {
+        SchemaVersion = ReportConfigurationRules.CurrentSchemaVersion,
+        DatasetKey = ReportConfigurationConstants.DatasetTradeDocument,
+        Fields = new List<string>
+        {
+            "docNo", "docType", "issueDate", "salesOrderNo", "refNo", "declareNo", "customerName",
+            "amount", "currency", "departurePort", "destinationPort", "issuedBy", "copies", "status", "fileNote", "remark",
         },
         Filters = new List<ReportConfigurationFilter>(),
         Grouping = new List<string> { ReportConfigurationConstants.GroupNone },

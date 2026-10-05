@@ -98,6 +98,9 @@ public static class DependencyInjection
         // 采购成本 / 退税汇总（ERP-305 Stage 2）：复用既有固定报表服务语义，复用既有报表菜单授权（fail closed；混合币种分区拒绝）
         services.AddScoped<IReportConfigurationDatasetProvider, PurchaseCostReportConfigurationDatasetProvider>();
         services.AddScoped<IReportConfigurationDatasetProvider, TaxRefundSummaryReportConfigurationDatasetProvider>();
+        // 出口字段完整度 / 单证中心打印与台账导出（ERP-306 Stage 2）：复用既有完整度规则与 TradeDocumentPrintModel.From 持久快照语义，复用既有菜单授权（fail closed）
+        services.AddScoped<IReportConfigurationDatasetProvider, ProductExportCompletenessReportConfigurationDatasetProvider>();
+        services.AddScoped<IReportConfigurationDatasetProvider, TradeDocumentReportConfigurationDatasetProvider>();
 
         // 通用报表配置平台（ERP-260 Stage 1）：私有报表配置服务（保存/列表/加载/复制/发布/恢复/软删除）
         services.AddScoped<IReportConfigurationService, ReportConfigurationService>();
