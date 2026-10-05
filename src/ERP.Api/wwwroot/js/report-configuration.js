@@ -1102,6 +1102,7 @@ async function rccInit() {
     sharedCursor: null, sharedHasMore: false, sharedSeq: 0,
     revisionsCursor: null, revisionsHasMore: false, revisionsSeq: 0,
     grantsCursor: null, grantsHasMore: false, grantsSeq: 0,
+    bundle: { sections: [], candidates: [], view: null },
     dirty: false, requestSeq: 0, envBlocked: false, busy: false, activeAbort: null,
   };
   rccRenderDesigner();
@@ -1957,6 +1958,187 @@ async function rccImportDefinition(json) {
   }
 }
 
+/* ============ 报表捆绑（ERP-307 Stage 2）：有界有序多节预览 / 导出 ============ */
+
+/* 候选定义：自有私有配置（草稿 / 发布修订）+ 共享给我的固定发布快照 */
+function rccBundleCandidates() {
+  const own = (RCC.list || []).map(function (item) {
+    return { key: 'own-' + item.id, configurationId: item.id, revisionVersion: null, name: item.name, datasetKey: item.datasetKey, kind: '私有' };
+  });
+  const shared = (RCC.sharedList || []).map(function (item) {
+    return { key: 'shared-' + item.reportConfigurationId, configurationId: item.reportConfigurationId, revisionVersion: item.revisionVersion, name: item.name, datasetKey: item.datasetKey, kind: '共享' };
+  });
+  return own.concat(shared);
+}
+
+function rccRenderBundles() {
+  const el = document.getElementById('rcc-bundles');
+  if (!el) return;
+  const candidates = rccBundleCandidates();
+  RCC.bundle.candidates = candidates;
+  const options = candidates.map(function (c, i) {
+    return '<option value="' + i + '">' + rccEsc(c.kind) + ' · ' + rccEsc(c.name) + ' · ' + rccEsc(rccDatasetLabel(c.datasetKey)) + (c.revisionVersion ? ' · v' + rccEsc(c.revisionVersion) : '') + '</option>';
+  }).join('');
+  const sections = (RCC.bundle.sections || []).map(function (s, i) {
+    return '<div class="rcc-bundle-row">'
+      + '<span>' + rccEsc(i + 1) + '.</span>'
+      + '<input value="' + rccEsc(s.title || '') + '" oninput="rccBundleOnTitle(' + i + ', this.value)" placeholder="节标题">'
+      + '<span class="rcc-bundle-meta">' + rccEsc(s.name || '') + ' · ' + rccEsc(rccDatasetLabel(s.datasetKey || '')) + (s.revisionVersion ? ' · v' + rccEsc(s.revisionVersion) : '') + '</span>'
+      + '<button type="button" class="btn" onclick="rccBundleMove(' + i + ', -1)" ' + (i === 0 ? 'disabled' : '') + '>↑</button>'
+      + '<button type="button" class="btn" onclick="rccBundleMove(' + i + ', 1)" ' + (i === (RCC.bundle.sections || []).length - 1 ? 'disabled' : '') + '>↓</button>'
+      + '<button type="button" class="btn btn-danger" onclick="rccBundleRemove(' + i + ')">删除</button>'
+      + '</div>';
+  }).join('');
+  el.innerHTML = '<div class="rcc-bundle-title">报表捆绑（有界多节 · 1~8 节 · 每节复用既有定义 / 版本）</div>'
+    + '<div class="rcc-bundle-builder">'
+    + (candidates.length
+        ? '<select id="rcc-bundle-candidate">' + options + '</select>'
+          + '<button type="button" class="btn" onclick="rccBundleAdd()">添加节</button>'
+        : '<div class="empty">暂无可选报表配置</div>')
+    + '</div>'
+    + '<div class="rcc-bundle-toolbar">'
+    + '<button type="button" class="btn btn-primary" onclick="rccBundlePreview()">预览</button>'
+    + '<button type="button" class="btn" onclick="rccBundleExport()">导出Excel</button>'
+    + '<button type="button" class="btn" onclick="rccBundleExportPdf()">导出PDF</button>'
+    + '<button type="button" class="btn" onclick="rccCancel()">取消</button>'
+    + '</div>'
+    + '<div class="rcc-bundle-sections">' + (sections || '<div class="empty">请添加至少一个节</div>') + '</div>'
+    + '<div id="rcc-bundle-result"></div>';
+}
+
+function rccBundleAdd() {
+  const sel = document.getElementById('rcc-bundle-candidate');
+  const idx = sel ? Number(sel.value) : NaN;
+  const c = (RCC.bundle.candidates || [])[idx];
+  if (!c) { if (typeof toast === 'function') toast('请选择要添加的报表配置', 'error'); return; }
+  if ((RCC.bundle.sections || []).length >= 8) { if (typeof toast === 'function') toast('最多允许 8 个节', 'error'); return; }
+  RCC.bundle.sections = (RCC.bundle.sections || []).concat([{ configurationId: c.configurationId, revisionVersion: c.revisionVersion || null, title: c.name, name: c.name, datasetKey: c.datasetKey }]);
+  rccRenderBundles();
+}
+
+function rccBundleOnTitle(i, value) {
+  const s = (RCC.bundle.sections || [])[i];
+  if (s) s.title = value;
+}
+
+function rccBundleRemove(i) {
+  (RCC.bundle.sections || []).splice(i, 1);
+  rccRenderBundles();
+}
+
+function rccBundleMove(i, delta) {
+  const arr = RCC.bundle.sections || [];
+  const j = i + delta;
+  if (j < 0 || j >= arr.length) return;
+  const tmp = arr[i]; arr[i] = arr[j]; arr[j] = tmp;
+  rccRenderBundles();
+}
+
+/* 组装有界捆绑请求：只提交既有定义 Id / 固定版本 / 展示标题，绝不提交定义正文 / 字段 / SQL */
+function rccBuildBundleRequest() {
+  return { sections: (RCC.bundle.sections || []).map(function (s) {
+    return { configurationId: s.configurationId, revisionVersion: s.revisionVersion || null, title: s.title || null, page: 1 };
+  }) };
+}
+
+function rccRenderBundleResult(html) {
+  const el = document.getElementById('rcc-bundle-result');
+  if (el) el.innerHTML = html;
+}
+
+function rccBundleResultHtml(dto) {
+  if (!dto) return rccEmptyHtml();
+  const sections = (dto && dto.sections) || [];
+  const header = '<div class="rcc-meta">' + rccEsc(dto.name || '报表配置捆绑')
+    + ' · ' + rccEsc(dto.sectionCount) + ' 节 · 合计 ' + rccEsc(dto.totalRowCount) + ' 行'
+    + (dto.correlationId ? ' · 关联 ' + rccEsc(dto.correlationId) : '') + '</div>';
+  const body = sections.map(function (s) {
+    return '<div class="rcc-bundle-section"><div class="rcc-bundle-section-title">' + rccEsc(s.ordinal) + '. ' + rccEsc(s.title) + '</div>'
+      + rccResultHtml(s.preview) + '</div>';
+  }).join('');
+  return header + body;
+}
+
+/* 预览捆绑：全部节通过后才渲染；失败只显示错误，绝不渲染部分节 */
+async function rccBundlePreview() {
+  if (RCC.busy) return;
+  if (!(RCC.bundle.sections || []).length) { rccRenderBundleResult(rccErrorHtml('invalid', '请先添加至少一个节')); return; }
+  const seq = ++RCC.requestSeq;
+  RCC.lastAction = 'preview';
+  RCC.busy = true;
+  const controller = new AbortController();
+  RCC.activeAbort = controller;
+  rccRenderBundleResult(rccLoadingHtml());
+  try {
+    const env = await rccFetch('/api/report-configuration-bundles/preview', 'POST', rccBuildBundleRequest(), controller.signal);
+    if (seq !== RCC.requestSeq) return;
+    if (env.code === 2000 || env.code === 2003) { rccOnUnauthorized(env.message); return; }
+    if (env.code === 5000) { RCC.envBlocked = true; rccRenderEnvBanner(); rccRenderBundleResult(rccEnvBlockedHtml(env.message)); return; }
+    if (env.code !== 0) { rccRenderBundleResult(rccErrorHtml(rccKindOfCode(env.code), env.message || '预览失败')); return; }
+    RCC.bundle.view = env.data;
+    rccRenderBundleResult(rccBundleResultHtml(RCC.bundle.view));
+  } catch (err) {
+    if (seq !== RCC.requestSeq) return;
+    if (err && err.name === 'AbortError') rccRenderBundleResult(rccErrorHtml('cancelled', (err && err.message) || '请求已取消'));
+    else rccRenderBundleResult(rccErrorHtml('network', (err && err.message) || '无法连接到服务器'));
+  } finally {
+    if (RCC.activeAbort === controller) { RCC.activeAbort = null; RCC.busy = false; }
+  }
+}
+
+/* 导出捆绑 Excel / PDF：复用同一有界、已授权管线；成功触发下载，失败可见，绝不下载部分文件 */
+async function rccBundleExport() { return rccBundleExportKind('excel'); }
+async function rccBundleExportPdf() { return rccBundleExportKind('pdf'); }
+
+async function rccBundleExportKind(kind) {
+  if (RCC.busy) return;
+  if (!(RCC.bundle.sections || []).length) { rccRenderBundleResult(rccErrorHtml('invalid', '请先添加至少一个节')); return; }
+  const seq = ++RCC.requestSeq;
+  RCC.lastAction = 'export';
+  RCC.busy = true;
+  const controller = new AbortController();
+  RCC.activeAbort = controller;
+  const req = rccBuildBundleRequest();
+  const url = '/api/report-configuration-bundles/export' + (kind === 'pdf' ? '/pdf' : '');
+  try {
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + (typeof localStorage !== 'undefined' ? (localStorage.getItem('erp_token') || '') : ''),
+      },
+      body: JSON.stringify(req),
+      signal: controller.signal,
+    });
+    if (seq !== RCC.requestSeq) return;
+    const contentType = (resp.headers.get('content-type') || '');
+    const isPdf = kind === 'pdf' && contentType.indexOf('pdf') >= 0;
+    const isExcel = kind === 'excel' && contentType.indexOf('spreadsheetml') >= 0;
+    if (isPdf || isExcel) {
+      const blob = await resp.blob();
+      if (seq !== RCC.requestSeq) return;
+      const a = document.createElement('a');
+      const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+      a.download = '报表配置捆绑_' + dateStr + (kind === 'pdf' ? '.pdf' : '.xlsx');
+      rccTriggerDownload(blob, a);
+      return;
+    }
+    let envelope = null;
+    try { envelope = await resp.json(); } catch (e) { /* 忽略解析失败 */ }
+    const code = envelope && envelope.code;
+    const message = (envelope && envelope.message) || '导出失败';
+    if (code === 2000 || code === 2003) { rccOnUnauthorized(message); return; }
+    if (code === 5000) { RCC.envBlocked = true; rccRenderEnvBanner(); rccRenderBundleResult(rccEnvBlockedHtml(message)); return; }
+    rccRenderBundleResult(rccErrorHtml(rccKindOfCode(code), message));
+  } catch (err) {
+    if (seq !== RCC.requestSeq) return;
+    if (err && err.name === 'AbortError') rccRenderBundleResult(rccErrorHtml('cancelled', (err && err.message) || '请求已取消'));
+    else rccRenderBundleResult(rccErrorHtml('network', (err && err.message) || '无法连接到服务器'));
+  } finally {
+    if (RCC.activeAbort === controller) { RCC.activeAbort = null; RCC.busy = false; }
+  }
+}
+
 /* 工作台入口（app.js 路由 code === 'report-configuration' 调用） */
 function renderReportConfigurationWorkspace() {
   document.getElementById('header-title').textContent = '报表配置工作台';
@@ -1967,6 +2149,7 @@ function renderReportConfigurationWorkspace() {
     + '<div class="rcc-tabs">'
     + '<button type="button" class="rcc-tab rcc-tab-active" id="rcc-tab-private" onclick="rccShowPrivate()">私有配置</button>'
     + '<button type="button" class="rcc-tab" id="rcc-tab-presets" onclick="rccShowPresets()">预设模板</button>'
+    + '<button type="button" class="rcc-tab" id="rcc-tab-bundles" onclick="rccShowBundles()">报表捆绑</button>'
     + '</div>'
     + '<div class="rcc-toolbar" id="rcc-toolbar">'
     + '<button type="button" class="btn" onclick="rccNew()">新建</button>'
@@ -1993,39 +2176,67 @@ function renderReportConfigurationWorkspace() {
     + '<section class="rcc-grants" id="rcc-grants"></section>'
     + '</div>'
     + '<section class="rcc-presets" id="rcc-presets" style="display:none"></section>'
+    + '<section class="rcc-bundles" id="rcc-bundles" style="display:none"></section>'
     + '</div>';
   rccAttachLeaveObserver();
   rccInit();
 }
 
-/* 切换工作台标签：私有配置 / 预设模板（预设标签绝不覆盖未保存编辑，仅切换视图） */
+/* 切换工作台标签：私有配置 / 预设模板 / 报表捆绑（标签切换绝不覆盖未保存编辑，仅切换视图） */
 function rccShowPrivate() {
   const panel = document.getElementById('rcc-private-panel');
   const presets = document.getElementById('rcc-presets');
+  const bundles = document.getElementById('rcc-bundles');
   const toolbar = document.getElementById('rcc-toolbar');
   const tabPrivate = document.getElementById('rcc-tab-private');
   const tabPresets = document.getElementById('rcc-tab-presets');
+  const tabBundles = document.getElementById('rcc-tab-bundles');
   if (panel) panel.style.display = '';
   if (presets) presets.style.display = 'none';
+  if (bundles) bundles.style.display = 'none';
   if (toolbar) toolbar.style.display = '';
   if (tabPrivate) tabPrivate.classList.add('rcc-tab-active');
   if (tabPresets) tabPresets.classList.remove('rcc-tab-active');
+  if (tabBundles) tabBundles.classList.remove('rcc-tab-active');
   RCC.presetView = false;
 }
 
 function rccShowPresets() {
   const panel = document.getElementById('rcc-private-panel');
   const presets = document.getElementById('rcc-presets');
+  const bundles = document.getElementById('rcc-bundles');
   const toolbar = document.getElementById('rcc-toolbar');
   const tabPrivate = document.getElementById('rcc-tab-private');
   const tabPresets = document.getElementById('rcc-tab-presets');
+  const tabBundles = document.getElementById('rcc-tab-bundles');
   if (panel) panel.style.display = 'none';
   if (presets) presets.style.display = '';
+  if (bundles) bundles.style.display = 'none';
   if (toolbar) toolbar.style.display = 'none';
   if (tabPrivate) tabPrivate.classList.remove('rcc-tab-active');
   if (tabPresets) tabPresets.classList.add('rcc-tab-active');
+  if (tabBundles) tabBundles.classList.remove('rcc-tab-active');
   RCC.presetView = true;
   rccLoadPresets();
+}
+
+function rccShowBundles() {
+  const panel = document.getElementById('rcc-private-panel');
+  const presets = document.getElementById('rcc-presets');
+  const bundles = document.getElementById('rcc-bundles');
+  const toolbar = document.getElementById('rcc-toolbar');
+  const tabPrivate = document.getElementById('rcc-tab-private');
+  const tabPresets = document.getElementById('rcc-tab-presets');
+  const tabBundles = document.getElementById('rcc-tab-bundles');
+  if (panel) panel.style.display = 'none';
+  if (presets) presets.style.display = 'none';
+  if (bundles) bundles.style.display = '';
+  if (toolbar) toolbar.style.display = 'none';
+  if (tabPrivate) tabPrivate.classList.remove('rcc-tab-active');
+  if (tabPresets) tabPresets.classList.remove('rcc-tab-active');
+  if (tabBundles) tabBundles.classList.add('rcc-tab-active');
+  RCC.presetView = false;
+  rccRenderBundles();
 }
 
 /* 离开工作台（路由切换替换 #content）时释放活动只读 / 导出请求 */
@@ -2112,9 +2323,21 @@ if (typeof module !== 'undefined' && module.exports) {
     rccLoadShared,
     rccShowPrivate,
     rccShowPresets,
+    rccShowBundles,
     rccRenderPresets,
     rccLoadPresets,
     rccMaterializePreset,
+    rccBundleCandidates,
+    rccRenderBundles,
+    rccBundleAdd,
+    rccBundleOnTitle,
+    rccBundleRemove,
+    rccBundleMove,
+    rccBuildBundleRequest,
+    rccBundleResultHtml,
+    rccBundlePreview,
+    rccBundleExport,
+    rccBundleExportPdf,
     rccSelectDataset,
     rccApplyDefinition,
     rccLoadConfiguration,
