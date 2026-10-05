@@ -1,0 +1,87 @@
+{
+  "title": "Migrate remaining purchase cost and tax summary into controlled financial datasets",
+  "description": "Expose the two remaining fixed financial report families via existing generic platform. Reuse existing IReportService calculations for demonstrably safe source partitions; do not copy new business algorithms. Legacy purchase-cost groups only supplier, tax-summary only period although both sources have currency. Reject ambiguous or mixed-currency grain before calling legacy sums, disclose the compatibility limitation rather than emitting unsafe totals. Any additional legacy read-only overload must preserve old methods/routes and share original calculations. Stage 2 only; no dedicated business-report controller/designer/exporter, arbitrary SQL, schema/migrations/production operations, secrets/env edits, permission expansion or unrelated changes. Preserve old entries until every migration has genuine parity acceptance. Tests may write only guarded (localdb)\\NEWERP_AutoAcceptance / NEWERP_AUTOTEST_* databases.",
+  "allowed_paths": [
+    "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
+    "src/ERP.Application/Services/ReportConfigurationPresetCatalog.cs",
+    "src/ERP.Infrastructure/DependencyInjection.cs",
+    "src/ERP.Application/Interfaces/IReportService.cs",
+    "src/ERP.Application/Interfaces/ReportDtos.cs",
+    "src/ERP.Application/Services/ReportService.Extra.cs",
+    "src/ERP.Application/Services/ReportService.Extra2.cs",
+    "src/ERP.Infrastructure/Reports/PurchaseCostReportConfigurationDatasetProvider.cs",
+    "src/ERP.Infrastructure/Reports/TaxRefundSummaryReportConfigurationDatasetProvider.cs",
+    "src/ERP.UnitTests/ReportConfigurationCostTaxMigrationTests.cs",
+    "src/ERP.IntegrationTests/ReportConfigurationCostTaxMigrationSqlServerTests.cs"
+  ],
+  "acceptance_criteria": [
+    "Provide finite purchase-cost and tax-refund-summary dataset catalogs, metrics, bounded preview and immutable presets for both fixed registry keys, preserving original fields, date/status rules and unknown values with generic Excel/PDF output.",
+    "Recheck original purchase-cost/tax-refund-summary menu authorization and current-user data scope before each catalog/query/export. Global unscoped legacy calculations must fail closed for restricted users. Currency/unit mixtures or ambiguous supplier/period identity must be rejected before aggregation, never silently mixed or relabeled; retain evidence and bounded audited errors.",
+    "Verify legacy-versus-generic semantics on safe uniform-currency partitions, mixed-currency rejection before unsafe service calls, missing/revoked authorization, dates/pages and empty rows. Add real isolated SQL fixtures and export assertions; run related tests, safe Release build/unit suite and scheduler self-test/contracts. Mark incomplete browser/source compatibility accurately; presence is readiness only, not parity-passed or phase completion."
+  ],
+  "criterion_path_map": {
+    "Provide finite purchase-cost and tax-refund-summary dataset catalogs, metrics, bounded preview and immutable presets for both fixed registry keys, preserving original fields, date/status rules and unknown values with generic Excel/PDF output.": [
+      "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
+      "src/ERP.Application/Services/ReportConfigurationPresetCatalog.cs",
+      "src/ERP.Infrastructure/DependencyInjection.cs",
+      "src/ERP.Application/Interfaces/IReportService.cs",
+      "src/ERP.Application/Interfaces/ReportDtos.cs",
+      "src/ERP.Application/Services/ReportService.Extra.cs",
+      "src/ERP.Application/Services/ReportService.Extra2.cs",
+      "src/ERP.Infrastructure/Reports/PurchaseCostReportConfigurationDatasetProvider.cs",
+      "src/ERP.Infrastructure/Reports/TaxRefundSummaryReportConfigurationDatasetProvider.cs",
+      "src/ERP.UnitTests/ReportConfigurationCostTaxMigrationTests.cs",
+      "src/ERP.IntegrationTests/ReportConfigurationCostTaxMigrationSqlServerTests.cs"
+    ],
+    "Recheck original purchase-cost/tax-refund-summary menu authorization and current-user data scope before each catalog/query/export. Global unscoped legacy calculations must fail closed for restricted users. Currency/unit mixtures or ambiguous supplier/period identity must be rejected before aggregation, never silently mixed or relabeled; retain evidence and bounded audited errors.": [
+      "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
+      "src/ERP.Application/Services/ReportConfigurationPresetCatalog.cs",
+      "src/ERP.Infrastructure/DependencyInjection.cs",
+      "src/ERP.Application/Interfaces/IReportService.cs",
+      "src/ERP.Application/Interfaces/ReportDtos.cs",
+      "src/ERP.Application/Services/ReportService.Extra.cs",
+      "src/ERP.Application/Services/ReportService.Extra2.cs",
+      "src/ERP.Infrastructure/Reports/PurchaseCostReportConfigurationDatasetProvider.cs",
+      "src/ERP.Infrastructure/Reports/TaxRefundSummaryReportConfigurationDatasetProvider.cs",
+      "src/ERP.UnitTests/ReportConfigurationCostTaxMigrationTests.cs",
+      "src/ERP.IntegrationTests/ReportConfigurationCostTaxMigrationSqlServerTests.cs"
+    ],
+    "Verify legacy-versus-generic semantics on safe uniform-currency partitions, mixed-currency rejection before unsafe service calls, missing/revoked authorization, dates/pages and empty rows. Add real isolated SQL fixtures and export assertions; run related tests, safe Release build/unit suite and scheduler self-test/contracts. Mark incomplete browser/source compatibility accurately; presence is readiness only, not parity-passed or phase completion.": [
+      "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
+      "src/ERP.Application/Services/ReportConfigurationPresetCatalog.cs",
+      "src/ERP.Infrastructure/DependencyInjection.cs",
+      "src/ERP.Application/Interfaces/IReportService.cs",
+      "src/ERP.Application/Interfaces/ReportDtos.cs",
+      "src/ERP.Application/Services/ReportService.Extra.cs",
+      "src/ERP.Application/Services/ReportService.Extra2.cs",
+      "src/ERP.Infrastructure/Reports/PurchaseCostReportConfigurationDatasetProvider.cs",
+      "src/ERP.Infrastructure/Reports/TaxRefundSummaryReportConfigurationDatasetProvider.cs",
+      "src/ERP.UnitTests/ReportConfigurationCostTaxMigrationTests.cs",
+      "src/ERP.IntegrationTests/ReportConfigurationCostTaxMigrationSqlServerTests.cs"
+    ]
+  },
+  "depends_on": [
+    "ERP-304"
+  ],
+  "risk": "medium",
+  "planning_stage": 2,
+  "implementation_evidence": "Verified ReportController fixed routes, IReportService.cs signatures, ReportService.Extra.cs:GetPurchaseCostAsync and Extra2.cs:GetTaxRefundSummaryAsync. ReportMigrationRegistryDtos has both keys; current catalog/preset/providers and existing task history have neither. PurchaseCostItem/TaxRefundSummaryItem have no currency and legacy grouping omits it; BaseTaxRefund.Currency and PurchaseOrder.Currency exist, requiring explicit safety boundary.",
+  "id": "ERP-305",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-05T02:49:43.171274Z"
+}

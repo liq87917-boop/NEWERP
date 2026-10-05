@@ -1,0 +1,71 @@
+{
+  "title": "Adapt document snapshots and product export completeness to shared controlled datasets",
+  "description": "Reuse existing product field completeness rules and trade document persisted header/line snapshot semantics through two controlled datasets and presets. Document print and ledger exports are separate registry entries; preserve grain and truthful unsupported document-layout features. Do not regenerate trade documents, rewrite snapshots or introduce new calculations. Stage 2 only; no dedicated business-report controller/designer/exporter, arbitrary SQL, schema/migrations/production operations, secrets/env edits, permission expansion or unrelated changes. Preserve old entries until every migration has genuine parity acceptance. Tests may write only guarded (localdb)\\NEWERP_AutoAcceptance / NEWERP_AUTOTEST_* databases.",
+  "allowed_paths": [
+    "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
+    "src/ERP.Application/Services/ReportConfigurationPresetCatalog.cs",
+    "src/ERP.Infrastructure/DependencyInjection.cs",
+    "src/ERP.Infrastructure/Reports/ProductExportCompletenessReportConfigurationDatasetProvider.cs",
+    "src/ERP.Infrastructure/Reports/TradeDocumentReportConfigurationDatasetProvider.cs",
+    "src/ERP.UnitTests/ReportConfigurationDocumentQualityMigrationTests.cs",
+    "src/ERP.IntegrationTests/ReportConfigurationDocumentQualityMigrationSqlServerTests.cs"
+  ],
+  "acceptance_criteria": [
+    "Expose finite product-export-field-completeness and trade-document controlled catalogs and presets for export:product-export-field-completeness, document:trade-document-print and document:trade-document-export-excel. Reuse ProductExportFieldCompletenessRules.BuildRow/group rules and TradeDocumentPrintModel.From with persisted snapshots; retain original endpoints and distinguish header/line grain.",
+    "On every catalog/preview/export recheck product or doc-center menu and current-user data scope. Reject unresolved or unsupported restricted scope before reading global source data. Bound document/product selections, line/page counts and dates; preserve null legacy snapshots, original currency/unit and prevent header amounts repeated across detail aggregation. No unrestricted joins or reconstructed missing evidence; bounded errors and audit remain active.",
+    "Compare generic preview/Excel/PDF semantic fields to existing completeness and document print/export fixtures, including truncation, missing snapshots, denied/revoked menus, safe grouping, multiple currency/unit and header cardinality. Run isolated SQL fixtures, related tests, safe Release build/unit suite and scheduler self-test/contracts. Layout/legacy export compatibility not yet reproduced must stay unsupported/unverified and must not mark migration parity-passed."
+  ],
+  "criterion_path_map": {
+    "Expose finite product-export-field-completeness and trade-document controlled catalogs and presets for export:product-export-field-completeness, document:trade-document-print and document:trade-document-export-excel. Reuse ProductExportFieldCompletenessRules.BuildRow/group rules and TradeDocumentPrintModel.From with persisted snapshots; retain original endpoints and distinguish header/line grain.": [
+      "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
+      "src/ERP.Application/Services/ReportConfigurationPresetCatalog.cs",
+      "src/ERP.Infrastructure/DependencyInjection.cs",
+      "src/ERP.Infrastructure/Reports/ProductExportCompletenessReportConfigurationDatasetProvider.cs",
+      "src/ERP.Infrastructure/Reports/TradeDocumentReportConfigurationDatasetProvider.cs",
+      "src/ERP.UnitTests/ReportConfigurationDocumentQualityMigrationTests.cs",
+      "src/ERP.IntegrationTests/ReportConfigurationDocumentQualityMigrationSqlServerTests.cs"
+    ],
+    "On every catalog/preview/export recheck product or doc-center menu and current-user data scope. Reject unresolved or unsupported restricted scope before reading global source data. Bound document/product selections, line/page counts and dates; preserve null legacy snapshots, original currency/unit and prevent header amounts repeated across detail aggregation. No unrestricted joins or reconstructed missing evidence; bounded errors and audit remain active.": [
+      "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
+      "src/ERP.Application/Services/ReportConfigurationPresetCatalog.cs",
+      "src/ERP.Infrastructure/DependencyInjection.cs",
+      "src/ERP.Infrastructure/Reports/ProductExportCompletenessReportConfigurationDatasetProvider.cs",
+      "src/ERP.Infrastructure/Reports/TradeDocumentReportConfigurationDatasetProvider.cs",
+      "src/ERP.UnitTests/ReportConfigurationDocumentQualityMigrationTests.cs",
+      "src/ERP.IntegrationTests/ReportConfigurationDocumentQualityMigrationSqlServerTests.cs"
+    ],
+    "Compare generic preview/Excel/PDF semantic fields to existing completeness and document print/export fixtures, including truncation, missing snapshots, denied/revoked menus, safe grouping, multiple currency/unit and header cardinality. Run isolated SQL fixtures, related tests, safe Release build/unit suite and scheduler self-test/contracts. Layout/legacy export compatibility not yet reproduced must stay unsupported/unverified and must not mark migration parity-passed.": [
+      "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
+      "src/ERP.Application/Services/ReportConfigurationPresetCatalog.cs",
+      "src/ERP.Infrastructure/DependencyInjection.cs",
+      "src/ERP.Infrastructure/Reports/ProductExportCompletenessReportConfigurationDatasetProvider.cs",
+      "src/ERP.Infrastructure/Reports/TradeDocumentReportConfigurationDatasetProvider.cs",
+      "src/ERP.UnitTests/ReportConfigurationDocumentQualityMigrationTests.cs",
+      "src/ERP.IntegrationTests/ReportConfigurationDocumentQualityMigrationSqlServerTests.cs"
+    ]
+  },
+  "depends_on": [
+    "ERP-305"
+  ],
+  "risk": "medium",
+  "planning_stage": 2,
+  "implementation_evidence": "Verified existing ProductExportFieldCompleteness.cs controller bounded query and Application ProductExportFieldCompletenessRules; TradeDocumentController.GetPrint/ExportExcel and Application.Interfaces.TradeDocumentPrintDtos.cs provide persisted snapshot model. Registry includes three keys but no corresponding providers/presets. Existing tasks 297-304 cover different families; no document/product migration task exists.",
+  "id": "ERP-306",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-05T02:49:43.195375Z"
+}

@@ -1,0 +1,96 @@
+{
+  "title": "Add reusable bounded report bundles for migration of multi-section outputs",
+  "description": "Implement generic ordered multi-section preview and Excel/PDF output over existing authorized private/shared report definitions and pinned published versions, to enable existing customer packets and document outputs to migrate without dedicated exporters. Stateless bundle request references existing definition IDs/versions; no new entities or database schema. Keep legacy packet/document routes and their specialized layouts until genuine parity is proven. This increment adds reusable capability, not an individual customer-packet report. Stage 2 only; no dedicated business-report controller/designer/exporter, arbitrary SQL, schema/migrations/production operations, secrets/env edits, permission expansion or unrelated changes. Preserve old entries until every migration has genuine parity acceptance. Tests may write only guarded (localdb)\\NEWERP_AutoAcceptance / NEWERP_AUTOTEST_* databases.",
+  "allowed_paths": [
+    "src/ERP.Application/DTOs/ReportConfigurationBundleDtos.cs",
+    "src/ERP.Application/Interfaces/IReportConfigurationBundleService.cs",
+    "src/ERP.Application/Services/ReportConfigurationBundleService.cs",
+    "src/ERP.Infrastructure/DependencyInjection.cs",
+    "src/ERP.Infrastructure/Export/ReportConfigurationBundleExcelExporter.cs",
+    "src/ERP.Infrastructure/Export/ReportConfigurationBundlePdfExporter.cs",
+    "src/ERP.Api/Controllers/ReportConfigurationBundlesController.cs",
+    "src/ERP.Api/wwwroot/js/report-configuration.js",
+    "src/ERP.UnitTests/ReportConfigurationBundleTests.cs",
+    "src/ERP.IntegrationTests/ReportConfigurationBundleSqlServerTests.cs"
+  ],
+  "acceptance_criteria": [
+    "Users can select an ordered bounded list of existing definitions/versions in the generic report configuration UI and preview named sections using existing IReportConfigurationExecutionService. Validate 1-8 sections, finite IDs/versions, bounded per-section pages and total rows; no arbitrary SQL, joins, cross-dataset arithmetic or new report-specific query logic.",
+    "Revalidate each definition sharing/version access plus current menu/row/column/data scope on every request. Load all authorized validated sections before producing any output; one denied/revoked/invalid section fails the entire bundle without partial data or downloads. Preserve independent currency/unit/grain/evidence and existing query/audit boundaries.",
+    "Provide one generic multi-sheet Excel and one multi-section PDF with safe stable section titles, field order, numeric/null semantics, formulas escaped, readable headings/page boundaries and provenance. Reuse existing generic exporters and PDF infrastructure; do not mark old packet/document parity from bundle availability or switch old routes.",
+    "Test at least two different authorized datasets together, pinned/shared versions, empty sections, denial/revocation of one section, count/row/byte limits, Excel sheet semantics and PDF content. Add guarded isolated SQL fixtures, run related tests, safe Release build/unit suite and scheduler self-test/contracts; actual browser download compatibility remains genuinely tested or explicitly unverified."
+  ],
+  "criterion_path_map": {
+    "Users can select an ordered bounded list of existing definitions/versions in the generic report configuration UI and preview named sections using existing IReportConfigurationExecutionService. Validate 1-8 sections, finite IDs/versions, bounded per-section pages and total rows; no arbitrary SQL, joins, cross-dataset arithmetic or new report-specific query logic.": [
+      "src/ERP.Application/DTOs/ReportConfigurationBundleDtos.cs",
+      "src/ERP.Application/Interfaces/IReportConfigurationBundleService.cs",
+      "src/ERP.Application/Services/ReportConfigurationBundleService.cs",
+      "src/ERP.Infrastructure/DependencyInjection.cs",
+      "src/ERP.Infrastructure/Export/ReportConfigurationBundleExcelExporter.cs",
+      "src/ERP.Infrastructure/Export/ReportConfigurationBundlePdfExporter.cs",
+      "src/ERP.Api/Controllers/ReportConfigurationBundlesController.cs",
+      "src/ERP.Api/wwwroot/js/report-configuration.js",
+      "src/ERP.UnitTests/ReportConfigurationBundleTests.cs",
+      "src/ERP.IntegrationTests/ReportConfigurationBundleSqlServerTests.cs"
+    ],
+    "Revalidate each definition sharing/version access plus current menu/row/column/data scope on every request. Load all authorized validated sections before producing any output; one denied/revoked/invalid section fails the entire bundle without partial data or downloads. Preserve independent currency/unit/grain/evidence and existing query/audit boundaries.": [
+      "src/ERP.Application/DTOs/ReportConfigurationBundleDtos.cs",
+      "src/ERP.Application/Interfaces/IReportConfigurationBundleService.cs",
+      "src/ERP.Application/Services/ReportConfigurationBundleService.cs",
+      "src/ERP.Infrastructure/DependencyInjection.cs",
+      "src/ERP.Infrastructure/Export/ReportConfigurationBundleExcelExporter.cs",
+      "src/ERP.Infrastructure/Export/ReportConfigurationBundlePdfExporter.cs",
+      "src/ERP.Api/Controllers/ReportConfigurationBundlesController.cs",
+      "src/ERP.Api/wwwroot/js/report-configuration.js",
+      "src/ERP.UnitTests/ReportConfigurationBundleTests.cs",
+      "src/ERP.IntegrationTests/ReportConfigurationBundleSqlServerTests.cs"
+    ],
+    "Provide one generic multi-sheet Excel and one multi-section PDF with safe stable section titles, field order, numeric/null semantics, formulas escaped, readable headings/page boundaries and provenance. Reuse existing generic exporters and PDF infrastructure; do not mark old packet/document parity from bundle availability or switch old routes.": [
+      "src/ERP.Application/DTOs/ReportConfigurationBundleDtos.cs",
+      "src/ERP.Application/Interfaces/IReportConfigurationBundleService.cs",
+      "src/ERP.Application/Services/ReportConfigurationBundleService.cs",
+      "src/ERP.Infrastructure/DependencyInjection.cs",
+      "src/ERP.Infrastructure/Export/ReportConfigurationBundleExcelExporter.cs",
+      "src/ERP.Infrastructure/Export/ReportConfigurationBundlePdfExporter.cs",
+      "src/ERP.Api/Controllers/ReportConfigurationBundlesController.cs",
+      "src/ERP.Api/wwwroot/js/report-configuration.js",
+      "src/ERP.UnitTests/ReportConfigurationBundleTests.cs",
+      "src/ERP.IntegrationTests/ReportConfigurationBundleSqlServerTests.cs"
+    ],
+    "Test at least two different authorized datasets together, pinned/shared versions, empty sections, denial/revocation of one section, count/row/byte limits, Excel sheet semantics and PDF content. Add guarded isolated SQL fixtures, run related tests, safe Release build/unit suite and scheduler self-test/contracts; actual browser download compatibility remains genuinely tested or explicitly unverified.": [
+      "src/ERP.Application/DTOs/ReportConfigurationBundleDtos.cs",
+      "src/ERP.Application/Interfaces/IReportConfigurationBundleService.cs",
+      "src/ERP.Application/Services/ReportConfigurationBundleService.cs",
+      "src/ERP.Infrastructure/DependencyInjection.cs",
+      "src/ERP.Infrastructure/Export/ReportConfigurationBundleExcelExporter.cs",
+      "src/ERP.Infrastructure/Export/ReportConfigurationBundlePdfExporter.cs",
+      "src/ERP.Api/Controllers/ReportConfigurationBundlesController.cs",
+      "src/ERP.Api/wwwroot/js/report-configuration.js",
+      "src/ERP.UnitTests/ReportConfigurationBundleTests.cs",
+      "src/ERP.IntegrationTests/ReportConfigurationBundleSqlServerTests.cs"
+    ]
+  },
+  "depends_on": [
+    "ERP-306"
+  ],
+  "risk": "medium",
+  "planning_stage": 2,
+  "implementation_evidence": "Existing generic execution interface only previews one definition; Excel/PDF exporters accept one preview. CustomerReportPacketController composes sales/receivable sections with dedicated outputs, TradeDocumentController print/export has document layout. Current generic UI and task history have no reusable bounded multi-section definition-reference bundle; this is prerequisite shared platform capability for those migration categories, not an old-route switch.",
+  "id": "ERP-307",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-05T02:49:43.219434Z"
+}
