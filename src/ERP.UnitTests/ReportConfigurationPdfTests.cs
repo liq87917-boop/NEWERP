@@ -572,4 +572,14 @@ public class ReportConfigurationPdfTests
         using var pdf = OpenPdf(bytes);
         Assert.True(pdf.Pages.Count >= 1);
     }
+
+    [Fact]
+    public void Export_已取消令牌_抛出取消()
+    {
+        Assert.Throws<OperationCanceledException>(() =>
+            ReportConfigurationPdfExporter.Export(
+                new ReportConfigurationPreviewDto(),
+                SimHeiPdfFontResolver.FindFontPath(),
+                new CancellationToken(true)));
+    }
 }

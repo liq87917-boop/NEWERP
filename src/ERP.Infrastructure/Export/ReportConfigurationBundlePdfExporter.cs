@@ -74,12 +74,17 @@ public static class ReportConfigurationBundlePdfExporter
 
             var renderer = new Renderer(document);
             var sections = bundle.Sections ?? new List<ReportConfigurationBundleSectionExportDto>();
-            foreach (var section in sections)
+            if (sections.Count == 0)
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                renderer.DrawSection(section, cancellationToken);
-                if (!ReferenceEquals(section, sections[^1]))
-                    renderer.NewPage();
+                renderer.NewPage();
+            }
+            else
+            {
+                foreach (var section in sections)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    renderer.DrawSection(section, cancellationToken);
+                }
             }
 
             cancellationToken.ThrowIfCancellationRequested();
@@ -131,7 +136,6 @@ public static class ReportConfigurationBundlePdfExporter
             _usableWidth = Mm(PageWidthMm - MarginLeftMm - MarginRightMm);
             _contentBottom = Mm(PageHeightMm - MarginBottomMm);
             _lineHeight = Mm(DataLineHeightMm);
-            NewPage();
         }
 
         public void NewPage()
@@ -142,12 +146,6 @@ public static class ReportConfigurationBundlePdfExporter
             _y = Mm(MarginTopMm);
         }
 
-        private void EnsureSpace(double height)
-        {
-            if (_y + height > _contentBottom)
-                NewPage();
-        }
-
         public void DrawSection(ReportConfigurationBundleSectionExportDto section, CancellationToken cancellationToken)
         {
             var columns = section.Preview?.Columns ?? new List<ReportConfigurationColumnDto>();
@@ -155,35 +153,108 @@ public static class ReportConfigurationBundlePdfExporter
                 ? section.Facts
                 : (section.Preview?.Rows ?? new List<Dictionary<string, object?>>());
 
-            var widths = ColumnWidths(columns.Count);
             var metaText = BuildMetaText(section);
 
-            EnsureSpace(Mm(TitleHeightMm + MetaHeightMm + HeaderRowHeightMm) + _lineHeight);
-            DrawTitle(section.Ordinal, section.Title);
-            DrawMeta(metaText);
-            DrawHeaderRow(columns, widths);
+            // 每节从新页开始，避免与上一节共用页面；节间不再由外层补空白页。
+            NewPage();
 
             if (columns.Count == 0)
             {
+                DrawTitle(section.Ordinal, section.Title);
+                DrawMeta(metaText);
                 DrawNote("（空节：无选定列）");
                 return;
             }
 
+            var bands = ReportConfigurationPdfColumnLayout.Layout(columns, rows, _usableWidth);
+
             if (rows.Count == 0)
             {
+                var emptyBand = bands[0];
+                DrawSectionHead(section, metaText, 0, bands.Count, 0, 1);
+                DrawHeaderRow(emptyBand.Columns, emptyBand.Widths);
                 DrawNote("没有符合条件的数据");
                 return;
             }
 
-            for (var r = 0; r < rows.Count; r++)
+            for (var cp = 0; cp < bands.Count; cp++)
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                var rowHeight = RowHeight(columns, widths, rows[r], r + 1);
-                EnsureSpace(rowHeight);
-                DrawDataRow(columns, widths, rows[r], r + 1, rowHeight);
+                var band = bands[cp];
+                var rowPages = PartitionRows(band.Columns, band.Widths, rows);
+
+                for (var rp = 0; rp < rowPages.Count; rp++)
+                {
+                    NewPage();
+                    DrawSectionHead(section, metaText, cp, bands.Count, rp, rowPages.Count);
+                    DrawHeaderRow(band.Columns, band.Widths);
+
+                    var (start, count) = rowPages[rp];
+                    for (var i = 0; i < count; i++)
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+
+                        var rowIndex = start + i;
+                        var rowHeight = RowHeight(band.Columns, band.Widths, rows[rowIndex], rowIndex + 1);
+                        DrawDataRow(band.Columns, band.Widths, rows[rowIndex], rowIndex + 1, rowHeight);
+                    }
+                }
+            }
+        }
+
+        private void DrawSectionHead(
+            ReportConfigurationBundleSectionExportDto section,
+            string metaText,
+            int band,
+            int bandCount,
+            int rowPage,
+            int rowPageCount)
+        {
+            var title = $"{section.Ordinal}. {section.Title}";
+            if (bandCount > 1)
+                title += $"（列 {band + 1}/{bandCount}）";
+
+            _gfx.DrawString(title, _titleFont, XBrushes.Black,
+                new XRect(Mm(MarginLeftMm), _y, _usableWidth, Mm(TitleHeightMm)), XStringFormats.TopLeft);
+            _y += Mm(TitleHeightMm);
+
+            var meta = metaText;
+            if (bandCount > 1)
+                meta += $" · 列 {band + 1}/{bandCount}";
+            meta += $" · 行 {rowPage + 1}/{rowPageCount}";
+
+            _gfx.DrawString(meta, _metaFont, XBrushes.Black,
+                new XRect(Mm(MarginLeftMm), _y, _usableWidth, Mm(MetaHeightMm)), XStringFormats.TopLeft);
+            _y += Mm(MetaHeightMm);
+        }
+
+        private List<(int Start, int Count)> PartitionRows(
+            IReadOnlyList<ReportConfigurationColumnDto> columns,
+            double[] widths,
+            IReadOnlyList<Dictionary<string, object?>> rows)
+        {
+            var contentHeight = Math.Max(_lineHeight,
+                _contentBottom - Mm(MarginTopMm) - Mm(TitleHeightMm + MetaHeightMm) - Mm(HeaderRowHeightMm));
+
+            var pages = new List<(int, int)>();
+            var start = 0;
+            var used = 0d;
+
+            for (var i = 0; i < rows.Count; i++)
+            {
+                var height = RowHeight(columns, widths, rows[i], i + 1);
+                if (i > start && used + height > contentHeight)
+                {
+                    pages.Add((start, i - start));
+                    start = i;
+                    used = 0d;
+                }
+                used += height;
             }
 
-            _y += Mm(2);
+            if (start < rows.Count || pages.Count == 0)
+                pages.Add((start, rows.Count - start));
+
+            return pages;
         }
 
         private void DrawTitle(int ordinal, string title)
@@ -289,18 +360,6 @@ public static class ReportConfigurationBundlePdfExporter
             }
 
             return Math.Max(_lineHeight, maxLines * _lineHeight + Mm(1.2));
-        }
-
-        private double[] ColumnWidths(int count)
-        {
-            if (count <= 0)
-                return Array.Empty<double>();
-
-            var width = Math.Min(Mm(80), _usableWidth / count);
-            var widths = new double[count];
-            for (var i = 0; i < count; i++)
-                widths[i] = width;
-            return widths;
         }
 
         private static double SumWidths(double[] widths, int end)

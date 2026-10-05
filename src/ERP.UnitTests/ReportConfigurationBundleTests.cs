@@ -487,5 +487,90 @@ public class ReportConfigurationBundleTests
         using var pdf = PdfReader.Open(new MemoryStream(bytes));
         Assert.True(pdf.Pages.Count >= 2);
     }
+
+    [Fact]
+    public void 导出_PDF_宽节_列带拆分与长文本_可读PDF()
+    {
+        var fontPath = SimHeiPdfFontResolver.FindFontPath();
+        if (fontPath is null)
+            return;   // 字体缺失已在单独用例覆盖（Windows CI 有 SimHei）
+
+        var columns = new List<ReportConfigurationColumnDto> { new("orderNo", "订单号", ReportConfigurationConstants.TypeText, null) };
+        for (var i = 1; i <= 27; i++)
+            columns.Add(new($"f{i}", $"字段{i}超长中文说明用于验证列带拆分", ReportConfigurationConstants.TypeText, null));
+
+        var evidence = new ReportConfigurationEvidenceContextDto(
+            ReportConfigurationConstants.DatasetSalesOrder, "grain", "原币金额，不跨币种", "只读", "边界", "免责", ReportConfigurationConstants.CoverageCurrentPage);
+
+        var longText = "这是一个非常长的中文单元格文本用于验证导出时折行而不丢失任何字符同时保持行连续完整可读";
+
+        Dictionary<string, object?> WideRow(string orderNo, string? text, decimal? amount)
+        {
+            var row = new Dictionary<string, object?>(StringComparer.Ordinal) { ["orderNo"] = orderNo };
+            for (var i = 1; i <= 27; i++)
+            {
+                if (i == 1) row[$"f{i}"] = text;
+                else if (i == 2) row[$"f{i}"] = amount;
+                else row[$"f{i}"] = $"值{i}";
+            }
+            return row;
+        }
+
+        var bundle = new ReportConfigurationBundleExportResultDto
+        {
+            Name = "宽列捆绑",
+            SectionCount = 2,
+            TotalRowCount = 3,
+            Sections = new List<ReportConfigurationBundleSectionExportDto>
+            {
+                new()
+                {
+                    Ordinal = 1, Title = "宽节", ConfigurationId = 1,
+                    Preview = new ReportConfigurationPreviewDto
+                    {
+                        Name = "宽列报表", Version = 1, DatasetKey = ReportConfigurationConstants.DatasetSalesOrder,
+                        Columns = columns, Evidence = evidence,
+                    },
+                    Facts = new List<Dictionary<string, object?>>
+                    {
+                        WideRow("SO-1", longText, null),
+                        WideRow("SO-2", "零值行", 0m),
+                    },
+                },
+                new()
+                {
+                    Ordinal = 2, Title = "窄节", ConfigurationId = 2,
+                    Preview = new ReportConfigurationPreviewDto
+                    {
+                        Name = "窄报表", Version = 1, DatasetKey = ReportConfigurationConstants.DatasetReceivable,
+                        Columns = new List<ReportConfigurationColumnDto>
+                        {
+                            new("invoiceNumber", "发票号", ReportConfigurationConstants.TypeText, null),
+                            new("grossAmount", "含税金额", ReportConfigurationConstants.TypeNumber, null),
+                        },
+                        Evidence = evidence,
+                    },
+                    Facts = new List<Dictionary<string, object?>>
+                    {
+                        new(StringComparer.Ordinal) { ["invoiceNumber"] = "INV-1", ["grossAmount"] = 500m },
+                    },
+                },
+            },
+        };
+
+        var bytes = ReportConfigurationBundlePdfExporter.Export(bundle, fontPath);
+        Assert.StartsWith("%PDF-", Encoding.ASCII.GetString(bytes));
+
+        using var pdf = PdfReader.Open(new MemoryStream(bytes));
+        Assert.True(pdf.Pages.Count >= 3);   // 宽节多个列带页 + 窄节一页
+    }
+
+    [Fact]
+    public void 导出_PDF_已取消_抛出取消()
+    {
+        var bundle = SyntheticBundle();
+        Assert.Throws<OperationCanceledException>(() =>
+            ReportConfigurationBundlePdfExporter.Export(bundle, SimHeiPdfFontResolver.FindFontPath(), new CancellationToken(true)));
+    }
 }
 

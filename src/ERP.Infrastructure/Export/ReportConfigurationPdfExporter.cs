@@ -24,10 +24,10 @@ namespace ERP.Infrastructure.Export;
 public static class ReportConfigurationPdfExporter
 {
     /// <summary>无允许标识列时回退的「当前页行序号」列键（合成列，不映射任何数据集字段）</summary>
-    public const string RowOrdinalColumnKey = "__rowOrdinal__";
+    public const string RowOrdinalColumnKey = ReportConfigurationPdfColumnLayout.RowOrdinalColumnKey;
 
     /// <summary>无允许标识列时回退的「当前页行序号」列标签</summary>
-    public const string RowOrdinalLabel = "本页序号";
+    public const string RowOrdinalLabel = ReportConfigurationPdfColumnLayout.RowOrdinalLabel;
 
     /// <summary>未知值说明（null 在数据 / 小计中留空，绝不写成 0 或推算值）</summary>
     public const string UnknownValueText = "空单元格表示未知（null），绝不写成 0 或推算值";
@@ -57,27 +57,21 @@ public static class ReportConfigurationPdfExporter
 
     /// <summary>列宽有界（毫米）：最小保证中文标签可读；文本最大避免单列独占整页，超宽靠「列页」拆分而非挤压；
     /// 数值列允许更宽，避免裁切符号 / 数值。</summary>
-    private const double MinColumnWidthMm = 20;
-    private const double MaxColumnWidthMm = 45;
-    private const double MaxNumberColumnWidthMm = 70;
+    private const double MinColumnWidthMm = ReportConfigurationPdfColumnLayout.MinColumnWidthMm;
+    private const double MaxColumnWidthMm = ReportConfigurationPdfColumnLayout.MaxColumnWidthMm;
+    private const double MaxNumberColumnWidthMm = ReportConfigurationPdfColumnLayout.MaxNumberColumnWidthMm;
 
-    private const double CellPaddingPoints = 3;
+    private const double CellPaddingPoints = ReportConfigurationPdfColumnLayout.CellPaddingPoints;
 
-    private const double PointsPerMillimeter = 72.0 / 25.4;
-
-    private static readonly HashSet<string> IdentityColumnKeys = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "id", "orderNo", "orderNumber", "invoiceId", "invoiceNumber", "invoiceCode",
-        "identityText", "receiptNo", "statementNo",
-    };
+    private const double PointsPerMillimeter = ReportConfigurationPdfColumnLayout.PointsPerMillimeter;
 
     /// <summary>字段键是否为允许的「行标识」列（用于跨列页重复，仅限已授权选定列）。</summary>
     public static bool IsIdentityColumn(string? key)
-        => !string.IsNullOrWhiteSpace(key) && IdentityColumnKeys.Contains(key);
+        => ReportConfigurationPdfColumnLayout.IsIdentityColumn(key);
 
     /// <summary>合成「当前页行序号」列（无允许标识列时回退使用）。</summary>
     public static ReportConfigurationColumnDto RowOrdinalColumn()
-        => new(RowOrdinalColumnKey, RowOrdinalLabel, ReportConfigurationConstants.TypeNumber, null);
+        => ReportConfigurationPdfColumnLayout.RowOrdinalColumn();
 
     /// <summary>导出当前预览页为 PDF 字节流（只读；字体缺失显式失败）</summary>
     public static byte[] Export(ReportConfigurationPreviewDto preview)
@@ -221,98 +215,10 @@ public static class ReportConfigurationPdfExporter
     public static IReadOnlyList<IReadOnlyList<ReportConfigurationColumnDto>> SplitColumnPages(
         IReadOnlyList<ReportConfigurationColumnDto> columns,
         IReadOnlyList<Dictionary<string, object?>> rows)
-    {
-        columns ??= Array.Empty<ReportConfigurationColumnDto>();
-        rows ??= Array.Empty<Dictionary<string, object?>>();
-
-        var identity = ResolveIdentity(columns);
-        return SplitBands(columns, identity, rows, Mm(PageWidthMm - MarginLeftMm - MarginRightMm));
-    }
-
-    private static List<ReportConfigurationColumnDto> ResolveIdentity(IReadOnlyList<ReportConfigurationColumnDto> columns)
-    {
-        var identity = columns.Where(c => IsIdentityColumn(c.Key)).ToList();
-        if (identity.Count == 0)
-            identity.Add(RowOrdinalColumn());
-        return identity;
-    }
-
-    private static bool IsIdentity(string key)
-        => IsIdentityColumn(key) || string.Equals(key, RowOrdinalColumnKey, StringComparison.Ordinal);
-
-    private static List<List<ReportConfigurationColumnDto>> SplitBands(
-        IReadOnlyList<ReportConfigurationColumnDto> columns,
-        IReadOnlyList<ReportConfigurationColumnDto> identity,
-        IReadOnlyList<Dictionary<string, object?>> rows,
-        double usableWidth)
-    {
-        var data = columns.Where(c => !IsIdentityColumn(c.Key)).ToList();
-
-        var identityWidth = identity.Sum(c => ColumnWidthPoints(c, rows, usableWidth));
-        var dataUsable = Math.Max(MinColumnWidthPoints, usableWidth - identityWidth);
-
-        var pages = new List<List<ReportConfigurationColumnDto>>();
-        var current = new List<ReportConfigurationColumnDto>();
-        var used = 0d;
-
-        foreach (var column in data)
-        {
-            var width = ColumnWidthPoints(column, rows, dataUsable);
-            if (current.Count > 0 && used + width > dataUsable)
-            {
-                pages.Add(new List<ReportConfigurationColumnDto>(identity).Concat(current).ToList());
-                current = new List<ReportConfigurationColumnDto>();
-                used = 0d;
-            }
-
-            current.Add(column);
-            used += width;
-        }
-
-        if (current.Count > 0 || pages.Count == 0)
-            pages.Add(new List<ReportConfigurationColumnDto>(identity).Concat(current).ToList());
-
-        return pages;
-    }
-
-    private static double[] ComputeBandWidths(
-        IReadOnlyList<ReportConfigurationColumnDto> band,
-        IReadOnlyList<ReportConfigurationColumnDto> identity,
-        IReadOnlyList<Dictionary<string, object?>> rows,
-        double usableWidth)
-    {
-        var identityWidth = identity.Sum(c => ColumnWidthPoints(c, rows, usableWidth));
-        var dataUsable = Math.Max(MinColumnWidthPoints, usableWidth - identityWidth);
-
-        return band.Select(c =>
-            IsIdentity(c.Key)
-                ? ColumnWidthPoints(c, rows, usableWidth)
-                : ColumnWidthPoints(c, rows, dataUsable)).ToArray();
-    }
-
-    private static double ColumnWidthPoints(
-        ReportConfigurationColumnDto column,
-        IReadOnlyList<Dictionary<string, object?>> rows,
-        double maxWidthPoints)
-    {
-        var max = EstimateWidthPoints(HeaderText(column), HeaderSize) + CellPaddingPoints * 2;
-        foreach (var row in rows)
-        {
-            var width = EstimateWidthPoints(FormatCellValue(column, row), CellSize) + CellPaddingPoints * 2;
-            if (width > max)
-                max = width;
-        }
-
-        var isNumber = string.Equals(column.Type, ReportConfigurationConstants.TypeNumber, StringComparison.OrdinalIgnoreCase);
-        var maxMm = isNumber ? MaxNumberColumnWidthMm : MaxColumnWidthMm;
-        var capMm = Math.Min(maxMm, maxWidthPoints / PointsPerMillimeter);
-        var mm = Math.Clamp(max / PointsPerMillimeter, MinColumnWidthMm, Math.Max(MinColumnWidthMm, capMm));
-        return Mm(mm);
-    }
+        => ReportConfigurationPdfColumnLayout.SplitColumnBands(
+            columns, rows, Mm(PageWidthMm - MarginLeftMm - MarginRightMm));
 
     // ==================== 折行与宽度估算 ====================
-
-    private static double MinColumnWidthPoints => Mm(MinColumnWidthMm);
 
     /// <summary>按纯文本宽度估算折行（逐字符、绝不丢字；负号始终保留在首行，绝不裁切）。</summary>
     public static IReadOnlyList<string> WrapText(string? text, double size, double maxWidthPoints)
@@ -825,8 +731,7 @@ public static class ReportConfigurationPdfExporter
         var headHeight = Mm(TitleHeightMm + MetaHeightMm) + noteLines.Count * Mm(NoteLineHeightMm);
         var contentHeight = Math.Max(lineHeight, contentBottom - Mm(MarginTopMm) - headHeight - headerHeight);
 
-        var identity = ResolveIdentity(columns);
-        var bands = SplitBands(columns, identity, rows, usableWidth);
+        var bands = ReportConfigurationPdfColumnLayout.Layout(columns, rows, usableWidth);
 
         var graphics = new List<XGraphics>();
         try
@@ -834,11 +739,10 @@ public static class ReportConfigurationPdfExporter
             if (rows.Count == 0)
             {
                 var band = bands[0];
-                var widths = ComputeBandWidths(band, identity, rows, usableWidth);
                 var gfx = NewPage(document);
                 graphics.Add(gfx);
                 var y = DrawPageHead(gfx, titleFont, metaFont, preview, 0, bands.Count, 0, 1, noteLines, usableWidth);
-                y = DrawColumnHeaders(gfx, headerFont, headerBrush, borderPen, band, widths, y);
+                y = DrawColumnHeaders(gfx, headerFont, headerBrush, borderPen, band.Columns, band.Widths, y);
                 DrawEmptyNote(gfx, cellFont, usableWidth, y);
             }
             else
@@ -846,15 +750,14 @@ public static class ReportConfigurationPdfExporter
                 for (var cp = 0; cp < bands.Count; cp++)
                 {
                     var band = bands[cp];
-                    var widths = ComputeBandWidths(band, identity, rows, usableWidth);
-                    var rowPages = PartitionRows(band, widths, rows, contentHeight, lineHeight);
+                    var rowPages = PartitionRows(band.Columns, band.Widths, rows, contentHeight, lineHeight);
 
                     for (var rp = 0; rp < rowPages.Count; rp++)
                     {
                         var gfx = NewPage(document);
                         graphics.Add(gfx);
                         var y = DrawPageHead(gfx, titleFont, metaFont, preview, cp, bands.Count, rp, rowPages.Count, noteLines, usableWidth);
-                        y = DrawColumnHeaders(gfx, headerFont, headerBrush, borderPen, band, widths, y);
+                        y = DrawColumnHeaders(gfx, headerFont, headerBrush, borderPen, band.Columns, band.Widths, y);
 
                         var (start, count) = rowPages[rp];
                         var rowY = y;
@@ -863,8 +766,8 @@ public static class ReportConfigurationPdfExporter
                             cancellationToken.ThrowIfCancellationRequested();
 
                             var rowIndex = start + i;
-                            var rowHeight = RowHeightPoints(band, widths, rows[rowIndex], rowIndex + 1, lineHeight);
-                            DrawDataRow(gfx, cellFont, borderPen, band, widths, rows[rowIndex], rowIndex + 1, rowY, rowHeight, lineHeight);
+                            var rowHeight = RowHeightPoints(band.Columns, band.Widths, rows[rowIndex], rowIndex + 1, lineHeight);
+                            DrawDataRow(gfx, cellFont, borderPen, band.Columns, band.Widths, rows[rowIndex], rowIndex + 1, rowY, rowHeight, lineHeight);
                             rowY += rowHeight;
                         }
                     }
