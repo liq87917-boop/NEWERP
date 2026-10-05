@@ -330,7 +330,11 @@ public sealed class ReportMigrationOutputSemanticsComparator : IReportMigrationO
         if (!CompareSemantics(genericPreview, legacySnapshot, evidence))
             matched = false;
 
-        return matched;
+        if (!matched)
+            return false;
+
+        evidence.Add("Actual PDF cell/layout extraction is unavailable; input snapshots and embedded-font markers cannot prove output parity.");
+        return false;
     }
 
     private ReportMigrationArtifactDto? DecodeExcel(byte[] bytes, string side, List<string> evidence)

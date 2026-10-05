@@ -18,6 +18,18 @@ public class ReportMigrationArtifactParityTests
 
     private readonly ReportMigrationOutputSemanticsComparator _comparator = new();
 
+    [Fact]
+    public void Pdf_with_different_actual_cells_cannot_pass_from_matching_input_snapshots()
+    {
+        var generic = Generic(new[] { ("orderNo", "Order", Text, (string?)null) }, new[] { new object?[] { "EXPECTED" } });
+        var wrong = Generic(new[] { ("orderNo", "Order", Text, (string?)null) }, new[] { new object?[] { "DIFFERENT" } });
+        var snapshot = Legacy(new[] { ("orderNo", (string?)null, (string?)null) }, new[] { new object?[] { "EXPECTED" } });
+        var bytes = ReportConfigurationPdfExporter.Export(wrong, @"C:\Windows\Fonts\simhei.ttf");
+        var result = _comparator.Compare(generic, snapshot, false, true,
+            fontPath: @"C:\Windows\Fonts\simhei.ttf", legacyArtifacts: new(null, bytes));
+        Assert.False(result.OutputSemanticsMatched);
+    }
+
     // ==================== 脚手架 ====================
 
     private static ReportConfigurationPreviewDto Generic(

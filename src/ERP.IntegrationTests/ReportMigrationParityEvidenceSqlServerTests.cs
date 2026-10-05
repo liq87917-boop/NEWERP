@@ -47,12 +47,7 @@ public sealed class ReportMigrationParityEvidenceSqlServerTests
 
         var evidence = await BuildService(db).GetEvidenceAsync("dynamic:sales-order", _fixture.PrivilegedUserId);
 
-        Assert.NotNull(evidence);
-        Assert.True(evidence!.Complete);
-        Assert.True(evidence.DataGrainMatched);
-        Assert.True(evidence.CurrencyUnitMatched);
-        Assert.True(evidence.PermissionsMatched);
-        Assert.True(evidence.OutputSemanticsMatched);
+        Assert.Null(evidence); // No actual legacy artifact seam was supplied; snapshot-only proof is insufficient.
     }
 
     [Fact]
@@ -63,8 +58,7 @@ public sealed class ReportMigrationParityEvidenceSqlServerTests
 
         var evidence = await BuildService(db).GetEvidenceAsync("report:product-sales-ranking", _fixture.PrivilegedUserId);
 
-        Assert.NotNull(evidence);
-        Assert.True(evidence!.Complete);
+        Assert.Null(evidence); // Unsupported canonical artifact source must remain blocked.
     }
 
     [Fact]

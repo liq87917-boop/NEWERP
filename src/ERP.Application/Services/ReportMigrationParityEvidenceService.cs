@@ -131,6 +131,9 @@ public sealed class ReportMigrationParityEvidenceService : IReportMigrationParit
             }
         }
 
+        if ((definition.ExcelCompatible || definition.PdfCompatible) && legacyArtifacts is null)
+            return null;
+
         var output = _outputComparator.Compare(
             BuildNormalizedPreview(preview, legacy, mappings),
             legacy,

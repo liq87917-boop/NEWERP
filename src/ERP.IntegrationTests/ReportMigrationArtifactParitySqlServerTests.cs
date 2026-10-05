@@ -47,11 +47,11 @@ public sealed class ReportMigrationArtifactParitySqlServerTests
         var evidence = await BuildService(db).GetEvidenceAsync("dynamic:sales-order", _fixture.PrivilegedUserId);
 
         Assert.NotNull(evidence);
-        Assert.True(evidence!.Complete);
+        Assert.False(evidence!.Complete); // PDF cells/layout cannot yet be extracted for actual parity.
         Assert.True(evidence.DataGrainMatched);
         Assert.True(evidence.CurrencyUnitMatched);
         Assert.True(evidence.PermissionsMatched);
-        Assert.True(evidence.OutputSemanticsMatched);
+        Assert.False(evidence.OutputSemanticsMatched);
     }
 
     [Fact]
