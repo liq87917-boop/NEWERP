@@ -71,6 +71,11 @@ public static class DependencyInjection
         services.AddScoped<IReportConfigurationDatasetProvider, PurchaseOrderReportConfigurationDatasetProvider>();
         services.AddScoped<IReportConfigurationDatasetProvider, SupplierAgingReportConfigurationDatasetProvider>();
         services.AddScoped<IReportConfigurationDatasetProvider, SupplierExposureReportConfigurationDatasetProvider>();
+        // 简化财务报表 + 应收账龄（ERP-298）：预览委托既有固定报表服务语义，复用既有报表菜单授权（fail closed）
+        services.AddScoped<IReportConfigurationDatasetProvider, BalanceSheetReportConfigurationDatasetProvider>();
+        services.AddScoped<IReportConfigurationDatasetProvider, IncomeStatementReportConfigurationDatasetProvider>();
+        services.AddScoped<IReportConfigurationDatasetProvider, CashFlowReportConfigurationDatasetProvider>();
+        services.AddScoped<IReportConfigurationDatasetProvider, ArAgingReportConfigurationDatasetProvider>();
 
         // 通用报表配置平台（ERP-260 Stage 1）：私有报表配置服务（保存/列表/加载/复制/发布/恢复/软删除）
         services.AddScoped<IReportConfigurationService, ReportConfigurationService>();

@@ -1,10 +1,14 @@
 {
   "schema_version": 2,
   "project": "NEWERP",
-  "updated_at": "2026-10-05T01:07:44.130661Z",
+  "updated_at": "2026-10-05T01:13:09.242774Z",
   "phase": "ready",
   "current_task": null,
-  "queue": [],
+  "queue": [
+    "ERP-299",
+    "ERP-300",
+    "ERP-301"
+  ],
   "completed": [
     "ERP-000",
     "ERP-001",
@@ -288,7 +292,7 @@
     "status": "passed",
     "exit_code": 0,
     "log": ".ai\\logs\\ERP-298-validation-1.log",
-    "at": "2026-10-05T01:07:43.531053Z"
+    "at": "2026-10-05T01:13:08.698060Z"
   },
   "last_error": null,
   "last_deepseek_fix": {
@@ -300,14 +304,18 @@
   },
   "git_sync": {
     "branch": "main",
-    "local_sha": "d656e90",
+    "local_sha": "09c6b13",
     "status": "pending",
-    "ahead": 1,
+    "ahead": 0,
     "behind": 0,
-    "last_attempt_at": "2026-10-05T01:07:44.010465Z",
+    "last_attempt_at": "2026-10-05T01:13:09.129502Z",
     "last_error": null
   },
-  "next_recommended_tasks": [],
+  "next_recommended_tasks": [
+    "ERP-299",
+    "ERP-300",
+    "ERP-301"
+  ],
   "runner": {
     "status": "stopped",
     "pid": null
