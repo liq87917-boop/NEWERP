@@ -181,6 +181,17 @@ public class ReportConfigurationBundleTests
     // ==================== 1. 有界有序多节预览 ====================
 
     [Fact]
+    public void Pdf_NonemptySections_DoNotCreateBlankLeadingPages()
+    {
+        var fontPath = SimHeiPdfFontResolver.FindFontPath();
+        if (fontPath is null) return;
+        var bytes = ReportConfigurationBundlePdfExporter.Export(SyntheticBundle(), fontPath);
+        using var pdf = PdfReader.Open(new MemoryStream(bytes));
+        foreach (var page in pdf.Pages)
+            Assert.True(page.Contents.Elements.Count > 0, "Every rendered section page must contain content.");
+    }
+
+    [Fact]
     public async Task 预览_两个不同授权数据集_保留节标题与行数()
     {
         using var db = TestDbFactory.Create();

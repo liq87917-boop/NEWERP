@@ -156,10 +156,9 @@ public static class ReportConfigurationBundlePdfExporter
             var metaText = BuildMetaText(section);
 
             // 每节从新页开始，避免与上一节共用页面；节间不再由外层补空白页。
-            NewPage();
-
             if (columns.Count == 0)
             {
+                NewPage();
                 DrawTitle(section.Ordinal, section.Title);
                 DrawMeta(metaText);
                 DrawNote("（空节：无选定列）");
@@ -170,6 +169,7 @@ public static class ReportConfigurationBundlePdfExporter
 
             if (rows.Count == 0)
             {
+                NewPage();
                 var emptyBand = bands[0];
                 DrawSectionHead(section, metaText, 0, bands.Count, 0, 1);
                 DrawHeaderRow(emptyBand.Columns, emptyBand.Widths);
