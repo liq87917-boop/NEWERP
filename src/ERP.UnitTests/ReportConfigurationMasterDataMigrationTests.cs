@@ -311,7 +311,7 @@ public class ReportConfigurationMasterDataMigrationTests
     }
 
     [Fact]
-    public async Task 迁移登记册_基础资料族_经通用目录暴露_且遗留打印入口保持pending()
+    public async Task 迁移登记册_基础资料族_经通用目录暴露_且遗留打印入口保持preset_ready()
     {
         using var db = TestDbFactory.Create();
         var user = SeedAuthorizedUser(db, "registry", privileged: true, "customer", "product");
@@ -325,16 +325,16 @@ public class ReportConfigurationMasterDataMigrationTests
             ReportConfigurationMasterDataCatalog.Resolve("product").DatasetKey, user.Id);
         Assert.NotNull(productDataset);
 
-        // 遗留打印入口保持不变（mapping availability 不标记迁移 parity 通过；fail-closed 退役）
+        // 遗留打印入口经通用目录绑定后达到 preset-ready（数据集 + 预设均就绪），但绝不只凭声明通过 parity；fail-closed 退役
         var registry = new ReportMigrationRegistry(
             catalog, db, new ReportMigrationPresetCatalog(), new EmptyReportMigrationParityEvidenceProvider());
         var result = await registry.GetRegistryAsync(user.Id);
 
         var customer = Assert.Single(result.Entries, e => e.LegacyKey == "print-template:customer");
-        Assert.Equal(ReportMigrationParityStatusText.Pending, customer.ParityStatus);
+        Assert.Equal(ReportMigrationParityStatusText.PresetReady, customer.ParityStatus);
 
         var product = Assert.Single(result.Entries, e => e.LegacyKey == "print-template:product");
-        Assert.Equal(ReportMigrationParityStatusText.Pending, product.ParityStatus);
+        Assert.Equal(ReportMigrationParityStatusText.PresetReady, product.ParityStatus);
 
         Assert.False(await registry.CanRetireLegacyRoutesAsync(user.Id));
     }

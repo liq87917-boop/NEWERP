@@ -1,10 +1,14 @@
 {
   "schema_version": 2,
   "project": "NEWERP",
-  "updated_at": "2026-10-05T08:05:08.840357Z",
-  "phase": "replenishing",
+  "updated_at": "2026-10-05T08:20:49.748454Z",
+  "phase": "ready",
   "current_task": null,
-  "queue": [],
+  "queue": [
+    "ERP-321",
+    "ERP-322",
+    "ERP-323"
+  ],
   "completed": [
     "ERP-000",
     "ERP-001",
@@ -300,16 +304,17 @@
     "ERP-316",
     "ERP-317",
     "ERP-318",
-    "ERP-319"
+    "ERP-319",
+    "ERP-320"
   ],
   "blocked": [],
   "last_build": {
-    "task": "ERP-319",
+    "task": "ERP-320",
     "profile": "safe",
     "status": "passed",
     "exit_code": 0,
-    "log": ".ai\\logs\\ERP-319-validation-1.log",
-    "at": "2026-10-05T08:04:56.331479Z"
+    "log": ".ai\\logs\\ERP-320-validation-1.log",
+    "at": "2026-10-05T08:20:49.160687Z"
   },
   "last_error": null,
   "last_deepseek_fix": {
@@ -321,17 +326,20 @@
   },
   "git_sync": {
     "branch": "main",
-    "local_sha": "60b77a7",
-    "status": "synced",
-    "ahead": 0,
+    "local_sha": "78bda13",
+    "status": "pending",
+    "ahead": 1,
     "behind": 0,
-    "last_attempt_at": "2026-10-05T08:05:02.200479Z",
+    "last_attempt_at": "2026-10-05T08:20:49.629763Z",
     "last_error": null
   },
-  "next_recommended_tasks": [],
+  "next_recommended_tasks": [
+    "ERP-321",
+    "ERP-322",
+    "ERP-323"
+  ],
   "runner": {
     "status": "stopped",
     "pid": null
-  },
-  "finish_reason": "planner_supply_required"
+  }
 }

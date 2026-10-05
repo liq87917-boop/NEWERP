@@ -139,24 +139,83 @@ public class ReportConfigurationPrintTemplateCatalogTests
             [LegacyBillExportCatalog.Resolve("sales-order").DatasetKey] = BuildSalesOrderDataset(),
         });
 
+    private static ReportConfigurationDatasetDto BuildMasterDataset(string familyKey)
+    {
+        var family = ReportConfigurationMasterDataCatalog.Resolve(familyKey);
+        var fields = family.Columns.Select(c => new ReportConfigurationFieldDto(
+            c.Key, c.Title, c.Type, null, false, false, false, Array.Empty<string>())).ToList();
+        return new ReportConfigurationDatasetDto(
+            family.DatasetKey, family.Title, "基础资料（一行一条记录；按受控字段白名单顺序；null 原样保留）",
+            ReportConfigurationMasterDataCatalog.CurrencyUnitSemantics,
+            family.RequiredMenuCodes[0], family.RequiredMenuText, fields,
+            Array.Empty<string>(), Array.Empty<string>(), Array.Empty<string>(),
+            20, 200, string.Empty, string.Empty);
+    }
+
+    private static IReportConfigurationCatalog MasterCatalog(params string[] familyKeys)
+    {
+        var datasets = new Dictionary<string, ReportConfigurationDatasetDto?>();
+        foreach (var key in familyKeys)
+        {
+            var dataset = BuildMasterDataset(key);
+            datasets[dataset.DatasetKey] = dataset;
+        }
+        return new FakeCatalog(datasets);
+    }
+
+    private static IReportConfigurationCatalog CombinedCatalog(params string[] masterFamilyKeys)
+    {
+        var datasets = new Dictionary<string, ReportConfigurationDatasetDto?>
+        {
+            [LegacyBillExportCatalog.Resolve("sales-order").DatasetKey] = BuildSalesOrderDataset(),
+        };
+        foreach (var key in masterFamilyKeys)
+        {
+            var dataset = BuildMasterDataset(key);
+            datasets[dataset.DatasetKey] = dataset;
+        }
+        return new FakeCatalog(datasets);
+    }
+
     // ==================== 1. 封闭族清单 ====================
 
     [Fact]
-    public void Families_封闭清单_17支持加9显式不支持()
+    public void Families_封闭清单_24支持加2显式不支持()
     {
         var families = ReportPrintTemplateFamilies.Families;
 
         Assert.Equal(26, families.Count);
-        Assert.Equal(17, families.Count(f => f.Supported));
-        Assert.Equal(9, families.Count(f => !f.Supported));
+        Assert.Equal(24, families.Count(f => f.Supported));
+        Assert.Equal(2, families.Count(f => !f.Supported));
         Assert.Equal(families.Count, families.Select(f => f.FamilyKey).Distinct(StringComparer.OrdinalIgnoreCase).Count());
 
         var masters = new[] { "customer", "supplier", "employee", "expense-account", "warehouse", "product", "other-info" };
         foreach (var key in masters)
-            Assert.False(Assert.Single(families, f => f.FamilyKey == key).Supported);
+            Assert.True(Assert.Single(families, f => f.FamilyKey == key).Supported);
         Assert.False(Assert.Single(families, f => f.FamilyKey == "quotation").Supported);
         Assert.False(Assert.Single(families, f => f.FamilyKey == "proforma-invoice").Supported);
         Assert.True(Assert.Single(families, f => f.FamilyKey == "doc-center").Supported);
+    }
+
+    [Fact]
+    public void Families_七个基础资料族_受控支持且数据集键与有序列别名一致()
+    {
+        foreach (var master in ReportConfigurationMasterDataCatalog.Families)
+        {
+            var family = Assert.Single(ReportPrintTemplateFamilies.Families, f => f.FamilyKey == master.FamilyKey);
+
+            Assert.True(family.Supported);
+            Assert.Equal(string.Empty, family.UnsupportedReason);
+            Assert.Equal(master.DatasetKey, family.DatasetKey);
+            Assert.Equal(master.RequiredMenuCodes.ToArray(), family.RequiredMenuCodes.ToArray());
+            Assert.Equal(master.RequiredMenuText, family.RequiredMenuText);
+
+            Assert.Equal(master.Columns.Count, family.FieldAliases.Count);
+            Assert.Equal(master.Columns.Select(c => c.Key).ToArray(), family.FieldAliases.Select(a => a.ColumnKey).ToArray());
+            Assert.Equal(master.Columns.Select(c => c.Title).ToArray(), family.FieldAliases.Select(a => a.Title).ToArray());
+            Assert.Equal(master.Columns.Select(c => c.Type).ToArray(), family.FieldAliases.Select(a => a.Type).ToArray());
+            Assert.Equal(master.Columns.Select(c => c.Key).ToArray(), family.FieldAliases.Select(a => a.LegacyKey).ToArray());
+        }
     }
 
     // ==================== 2. 目录枚举 ====================
@@ -209,7 +268,7 @@ public class ReportConfigurationPrintTemplateCatalogTests
     }
 
     [Fact]
-    public async Task Catalog_不支持族_显式阻塞()
+    public async Task Catalog_基础资料族_受控支持且报价单仍阻塞()
     {
         using var db = TestDbFactory.Create();
         var user = SeedAuthorizedUser(db, "unsupported", "customer", "quotation");
@@ -217,14 +276,17 @@ public class ReportConfigurationPrintTemplateCatalogTests
         var result = await BuildService(db, SalesOrderCatalog()).GetCatalogAsync(user.Id);
 
         var customer = Assert.Single(result.Families, f => f.FamilyKey == "customer");
-        Assert.False(customer.Supported);
-        Assert.Equal(ReportPrintTemplateCompatibilityText.Unsupported, customer.CompatibilityStatus);
-        Assert.NotEmpty(customer.UnsupportedReason);
-        Assert.Empty(customer.FieldAliases);
+        Assert.True(customer.Supported);
+        Assert.Equal(ReportPrintTemplateCompatibilityText.Compatible, customer.CompatibilityStatus);
+        Assert.Equal("master:customer", customer.DatasetKey);
+        Assert.NotEmpty(customer.FieldAliases);
 
         var quotation = Assert.Single(result.Families, f => f.FamilyKey == "quotation");
         Assert.False(quotation.Supported);
+        Assert.Equal(ReportPrintTemplateCompatibilityText.Unsupported, quotation.CompatibilityStatus);
+        Assert.NotEmpty(quotation.UnsupportedReason);
         Assert.Equal(string.Empty, quotation.DatasetKey);
+        Assert.Empty(quotation.FieldAliases);
     }
 
     [Fact]
@@ -372,10 +434,10 @@ public class ReportConfigurationPrintTemplateCatalogTests
     public async Task Bind_不支持族_显式阻塞()
     {
         using var db = TestDbFactory.Create();
-        var user = SeedAuthorizedUser(db, "block", "customer");
+        var user = SeedAuthorizedUser(db, "block", "quotation");
 
         var ex = await Assert.ThrowsAsync<BusinessException>(() => BuildService(db, SalesOrderCatalog()).BindAsync(
-            new ReportPrintTemplateBindingRequest { FamilyKey = "customer", TemplateId = 1 }, user.Id));
+            new ReportPrintTemplateBindingRequest { FamilyKey = "quotation", TemplateId = 1 }, user.Id));
 
         Assert.Equal(ErrorCodes.RuleConflict, ex.Code);
     }
@@ -420,6 +482,65 @@ public class ReportConfigurationPrintTemplateCatalogTests
         Assert.Equal(ErrorCodes.Forbidden, ex.Code);
     }
 
+    [Fact]
+    public async Task Bind_基础资料族_成功绑定且默认全列顺序()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedAuthorizedUser(db, "master-bind", "customer");
+        var template = SeedTemplate(db, "customer", "客户打印模板");
+
+        var result = await BuildService(db, MasterCatalog("customer")).BindAsync(
+            Bind(template.Id, "customer"), user.Id);
+
+        Assert.Equal("master:customer", result.DatasetKey);
+        var expected = ReportConfigurationMasterDataCatalog.Resolve("customer").Columns.Select(c => c.Key).ToArray();
+        Assert.Equal(expected, result.BoundColumns.Select(c => c.ColumnKey).ToArray());
+    }
+
+    [Fact]
+    public async Task Bind_基础资料族_字段顺序保留()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedAuthorizedUser(db, "master-order", "customer");
+        var template = SeedTemplate(db, "customer", "客户打印模板");
+
+        var result = await BuildService(db, MasterCatalog("customer")).BindAsync(
+            Bind(template.Id, "customer", "customerName", "customerCode"), user.Id);
+
+        Assert.Equal(2, result.BoundColumns.Count);
+        Assert.Equal("customerName", result.BoundColumns[0].ColumnKey);
+        Assert.Equal("customerCode", result.BoundColumns[1].ColumnKey);
+    }
+
+    [Fact]
+    public async Task Bind_基础资料族_未知字段与别名注入_拒绝()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedAuthorizedUser(db, "master-inject", "customer");
+        var template = SeedTemplate(db, "customer", "客户打印模板");
+
+        var exUnknown = await Assert.ThrowsAsync<BusinessException>(() => BuildService(db, MasterCatalog("customer")).BindAsync(
+            Bind(template.Id, "customer", "SecretColumn"), user.Id));
+        Assert.Equal(ErrorCodes.InvalidParameter, exUnknown.Code);
+
+        var exInject = await Assert.ThrowsAsync<BusinessException>(() => BuildService(db, MasterCatalog("customer")).BindAsync(
+            Bind(template.Id, "customer", "customerCode; DROP TABLE"), user.Id));
+        Assert.Equal(ErrorCodes.InvalidParameter, exInject.Code);
+    }
+
+    [Fact]
+    public async Task Bind_基础资料族_菜单未授权_拒绝()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedAuthorizedUser(db, "master-deny", "product");
+        var template = SeedTemplate(db, "customer", "客户打印模板");
+
+        var ex = await Assert.ThrowsAsync<BusinessException>(() => BuildService(db, MasterCatalog("customer")).BindAsync(
+            Bind(template.Id, "customer", "customerCode"), user.Id));
+
+        Assert.Equal(ErrorCodes.Forbidden, ex.Code);
+    }
+
     // ==================== 4. 迁移登记册集成 ====================
 
     [Fact]
@@ -428,7 +549,7 @@ public class ReportConfigurationPrintTemplateCatalogTests
         using var db = TestDbFactory.Create();
         var user = SeedAuthorizedUser(db, "registry", "sales-order", "sales-order-export", "customer");
         var registry = new ReportMigrationRegistry(
-            SalesOrderCatalog(), db, new ReportMigrationPresetCatalog(), new EmptyReportMigrationParityEvidenceProvider());
+            CombinedCatalog("customer"), db, new ReportMigrationPresetCatalog(), new EmptyReportMigrationParityEvidenceProvider());
 
         var result = await registry.GetRegistryAsync(user.Id);
 
@@ -437,8 +558,9 @@ public class ReportConfigurationPrintTemplateCatalogTests
         Assert.Equal("bill-export:sales-order", supported.DatasetKey);
         Assert.Equal(ReportMigrationParityStatusText.DatasetReady, supported.ParityStatus);
 
-        var unsupported = Assert.Single(result.Entries, e => e.LegacyKey == "print-template:customer");
-        Assert.Equal(ReportMigrationParityStatusText.Pending, unsupported.ParityStatus);
+        var master = Assert.Single(result.Entries, e => e.LegacyKey == "print-template:customer");
+        Assert.Equal("master:customer", master.DatasetKey);
+        Assert.Equal(ReportMigrationParityStatusText.PresetReady, master.ParityStatus);
 
         Assert.False(await registry.CanRetireLegacyRoutesAsync(user.Id));
     }

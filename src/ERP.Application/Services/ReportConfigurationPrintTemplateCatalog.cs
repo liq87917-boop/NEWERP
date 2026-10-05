@@ -9,14 +9,14 @@ using Microsoft.EntityFrameworkCore;
 namespace ERP.Application.Services;
 
 /// <summary>
-/// 受控打印模板族目录（ERP-312 Stage 2）：<c>PrintTemplateController.PrintableTitles</c> 封闭清单的服务端唯一受控映射。
+/// 受控打印模板族目录（ERP-312 / ERP-320 Stage 2）：<c>PrintTemplateController.PrintableTitles</c> 封闭清单的服务端唯一受控映射。
 /// 支持族 = 16 个旧单据导出族（复用 <see cref="LegacyBillExportCatalog"/> 的精确受控数据集键与有限字段白名单）
-/// + 单证中心（<c>trade-document</c>）；不支持族 = 7 个基础资料 + 报价单 + 形式发票 PI，一律显式阻塞。
+/// + 7 个基础资料（复用 <see cref="ReportConfigurationMasterDataCatalog"/> 的受控数据集键与有序列白名单）
+/// + 单证中心（<c>trade-document</c>）；不支持族 = 报价单 + 形式发票 PI（阶段 3 主子表单据），一律显式阻塞。
 /// <para>全部为服务端编译期常量，绝不来自客户端、绝不落到数据库全量元数据发现。</para>
 /// </summary>
 public static class ReportPrintTemplateFamilies
 {
-    private const string UnsupportedReasonMaster = "基础资料打印尚未迁入受控打印数据集，显式阻塞";
     private const string UnsupportedReasonStage3 = "阶段 3 EF 主子表单据尚无受控打印数据集，显式阻塞";
 
     /// <summary>封闭打印模板族（顺序稳定：16 个旧单据族 → 7 个基础资料 → 报价单 → 形式发票 PI → 单证中心）。</summary>
@@ -44,12 +44,21 @@ public static class ReportPrintTemplateFamilies
                 f.DatasetKey,
                 f.RequiredMenuCodes,
                 f.RequiredMenuText,
-                f.Supported
-                    ? "金额按原币呈现；数量按基础单位；不跨币种换算或合并"
-                    : "无受控数据集（基础资料 / 阶段 3 未迁移，显式阻塞）",
+                CurrencyUnitSemantics(f),
                 false,
                 f.Supported))
             .ToList();
+
+    private static string CurrencyUnitSemantics(ReportPrintTemplateFamilyDefinition family)
+    {
+        if (!family.Supported)
+            return "无受控数据集（阶段 3 主子表单据未迁移，显式阻塞）";
+
+        if (ReportConfigurationMasterDataCatalog.TryResolve(family.FamilyKey, out _))
+            return ReportConfigurationMasterDataCatalog.CurrencyUnitSemantics;
+
+        return "金额按原币呈现；数量按基础单位；不跨币种换算或合并";
+    }
 
     /// <summary>按族键解析（未知 / 空白 / 畸形一律拒绝；在打开任何查询之前调用）。</summary>
     public static ReportPrintTemplateFamilyDefinition Resolve(string? familyKey)
@@ -87,13 +96,13 @@ public static class ReportPrintTemplateFamilies
                 bill.Columns.Select(c => Alias(c.Key, c.Key, c.Title, c.Type)).ToList()));
         }
 
-        families.Add(Master("customer", "客户资料"));
-        families.Add(Master("supplier", "供应商资料"));
-        families.Add(Master("employee", "员工资料"));
-        families.Add(Master("expense-account", "费用科目"));
-        families.Add(Master("warehouse", "仓库资料"));
-        families.Add(Master("product", "商品资料"));
-        families.Add(Master("other-info", "其他资料"));
+        families.Add(Master("customer"));
+        families.Add(Master("supplier"));
+        families.Add(Master("employee"));
+        families.Add(Master("expense-account"));
+        families.Add(Master("warehouse"));
+        families.Add(Master("product"));
+        families.Add(Master("other-info"));
 
         families.Add(Unsupported("quotation", "报价单", UnsupportedReasonStage3));
         families.Add(Unsupported("proforma-invoice", "形式发票 PI", UnsupportedReasonStage3));
@@ -111,8 +120,19 @@ public static class ReportPrintTemplateFamilies
         return families;
     }
 
-    private static ReportPrintTemplateFamilyDefinition Master(string familyKey, string title)
-        => Unsupported(familyKey, title, UnsupportedReasonMaster);
+    private static ReportPrintTemplateFamilyDefinition Master(string familyKey)
+    {
+        var master = ReportConfigurationMasterDataCatalog.Resolve(familyKey);
+        return new ReportPrintTemplateFamilyDefinition(
+            master.FamilyKey,
+            master.Title,
+            master.DatasetKey,
+            true,
+            string.Empty,
+            master.RequiredMenuCodes,
+            master.RequiredMenuText,
+            master.Columns.Select(c => Alias(c.Key, c.Key, c.Title, c.Type)).ToList());
+    }
 
     private static ReportPrintTemplateFamilyDefinition Unsupported(
         string familyKey, string title, string reason)
