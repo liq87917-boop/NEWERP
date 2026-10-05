@@ -1,4 +1,4 @@
-using ERP.Application.Common;
+﻿using ERP.Application.Common;
 using ERP.Application.DTOs;
 using ERP.Application.Interfaces;
 using ERP.Application.Services;
@@ -166,6 +166,63 @@ public sealed class ReportConfigurationCompositionConsistencySqlServerTests
             Guard();
             var ex = await Assert.ThrowsAsync<BusinessException>(
                 () => bundle.ComposePreviewAsync(userId, Request(headerId, detailId)));
+            Assert.Equal(ErrorCodes.Forbidden, ex.Code);
+        }
+        finally
+        {
+            await using var restoreDb = _fixture.CreateDbContext();
+            if (!await restoreDb.SysRoleMenus.AnyAsync(rm => rm.RoleId == roleId && rm.MenuId == menuId && !rm.IsDeleted))
+            {
+                restoreDb.SysRoleMenus.Add(new SysRoleMenu { RoleId = roleId, MenuId = menuId });
+                await restoreDb.SaveChangesAsync();
+            }
+        }
+    }
+    [Fact]
+    public async Task 组合_SQLServer_快照读取后权限撤销_最终复核拒绝()
+    {
+        Guard();
+        await using var db = _fixture.CreateDbContext();
+        var userId = _fixture.PrivilegedUserId;
+
+        var providers = BuildProviders(db);
+        var catalog = new ReportConfigurationCatalog(providers);
+        var execution = new ReportConfigurationExecutionService(db, providers);
+        var configs = new ReportConfigurationService(db, catalog);
+        var factory = new ReportConfigurationCompositionReadScopeFactory(db, providers);
+        var bundle = new ReportConfigurationBundleService(execution, compositionReadScopeFactory: factory);
+
+        var (headerId, detailId) = await CreatePairAsync(configs, userId, "revoke");
+        Guard();
+
+        await using var readScope = await factory.OpenAsync(userId, "erp335-mid-read-revocation");
+        _ = await execution.PreviewAsync(userId, new ReportConfigurationPreviewRequest
+        {
+            ConfigurationId = headerId, Page = 1, PageSize = 100,
+        });
+
+        var roleId = await db.SysUserRoles.Where(r => r.UserId == userId).Select(r => r.RoleId).FirstAsync();
+        var menuId = await db.SysMenus.Where(m => m.MenuCode == "doc-center" && !m.IsDeleted)
+            .Select(m => m.Id).FirstAsync();
+
+        await using (var revokeDb = _fixture.CreateDbContext())
+        {
+            var link = await revokeDb.SysRoleMenus.FirstOrDefaultAsync(
+                rm => rm.RoleId == roleId && rm.MenuId == menuId && !rm.IsDeleted);
+            Assert.NotNull(link);
+            revokeDb.SysRoleMenus.Remove(link!);
+            await revokeDb.SaveChangesAsync();
+        }
+
+        try
+        {
+            Guard();
+            var ex = await Assert.ThrowsAsync<BusinessException>(
+                () => readScope.RecheckAsync(userId, new[]
+                {
+                    new ReportConfigurationCompositionReadTarget(headerId, null, ReportConfigurationConstants.DatasetTradeDocument),
+                    new ReportConfigurationCompositionReadTarget(detailId, null, ReportConfigurationConstants.DatasetTradeDocument),
+                }));
             Assert.Equal(ErrorCodes.Forbidden, ex.Code);
         }
         finally

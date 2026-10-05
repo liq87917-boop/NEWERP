@@ -1,4 +1,4 @@
-using ERP.Application.Common;
+﻿using ERP.Application.Common;
 using ERP.Application.Interfaces;
 using ERP.Application.Services;
 using Microsoft.EntityFrameworkCore;
@@ -109,6 +109,13 @@ public sealed class ReportConfigurationCompositionReadScopeFactory : IReportConf
             ArgumentNullException.ThrowIfNull(targets);
             if (targets.Count == 0)
                 throw BusinessException.InvalidParameter("组合读取目标不能为空");
+
+            // The materialized header/detail remain from one snapshot. End that read-only
+            // transaction before authorization queries so revocations committed during
+            // the reads are visible; checking inside Snapshot would reuse stale grants.
+            cancellationToken.ThrowIfCancellationRequested();
+            await CompleteAsync(cancellationToken);
+            await DisposeAsync();
 
             // 1) 新鲜菜单复核（fail closed）
             foreach (var target in targets)
