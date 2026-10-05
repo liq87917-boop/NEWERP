@@ -28,6 +28,26 @@ provider = load_module("ai_provider_availability_contract", ROOT / "scripts" / "
 
 
 class PipelineContracts(unittest.TestCase):
+    def test_concurrent_launcher_preserves_active_owner_state(self):
+        from contextlib import ExitStack
+        config = {"ignored_change_paths": [], "orchestrator_paths": []}
+        state = {"phase": "developing", "current_task": "ERP-295", "runner": {"pid": 123}}
+        active = self.task("ERP-295", "in_progress")
+        with ExitStack() as stack:
+            stack.enter_context(patch.object(orchestrator, "load_json", side_effect=[config, state]))
+            stack.enter_context(patch.object(orchestrator, "changed_paths", return_value=[]))
+            stack.enter_context(patch.object(orchestrator, "all_tasks", return_value=[(Path("active.json"), active)]))
+            for name in ["recover_completed_checkpoint", "recover_push_pending", "normalize_failed_head_for_deferred_browser", "recoverable_dirty_task", "recoverable_path_guard_task", "recoverable_interrupted_task", "recoverable_browser_failure_task", "recoverable_deferred_failed_head"]:
+                stack.enter_context(patch.object(orchestrator, name, return_value=None))
+            update = stack.enter_context(patch.object(orchestrator, "set_state"))
+            save = stack.enter_context(patch.object(orchestrator, "save_json"))
+            launch = stack.enter_context(patch.object(orchestrator, "run"))
+            audit = stack.enter_context(patch.object(orchestrator, "audit"))
+            self.assertEqual(0, orchestrator.run_next(False))
+            update.assert_not_called(); save.assert_not_called(); launch.assert_not_called()
+            self.assertEqual("developing", state["phase"])
+            audit.assert_called_once_with("queue_active_execution", reason="ERP-295 status=in_progress is an active execution")
+
     def task(self, task_id: str, status: str = "pending", depends_on=None, gate="L1"):
         return {
             "id": task_id,

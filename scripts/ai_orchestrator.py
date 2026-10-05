@@ -138,6 +138,10 @@ def honor_terminal_completion(task_path: Path, task: dict[str, Any], state: dict
     return True
 
 
+class ActiveExecution(ValueError):
+    """A concurrent launcher must yield without replacing the running worker state."""
+
+
 def next_task(config: dict[str, Any]) -> tuple[Path, dict[str, Any]] | None:
     """Select a dependency-safe task; failed/gated/blocked tasks do not globally stop work."""
     for path, task in all_tasks(config):
@@ -145,7 +149,7 @@ def next_task(config: dict[str, Any]) -> tuple[Path, dict[str, Any]] | None:
         if status in TERMINAL_STATUSES:
             continue
         if status in {"in_progress", "code_ready"}:
-            raise ValueError(f"{task.get('id')} status={status} is an active execution")
+            raise ActiveExecution(f"{task.get('id')} status={status} is an active execution")
         if status not in {"pending", "retry"}:
             continue
         dependencies_ok, _ = dependencies_completed(task, config)
@@ -840,6 +844,11 @@ def run_next(dry_run: bool) -> int:
                         else:
                             try:
                                 item = next_task(config)
+                            except ActiveExecution as exc:
+                                # The task owner continues running. A duplicate launcher is
+                                # neither a task failure nor permission to overwrite its state.
+                                audit("queue_active_execution", reason=str(exc))
+                                return 0
                             except ValueError as exc:
                                 set_state(state, phase="blocked", blocker=str(exc), finish_reason="queue_head_blocked")
                                 audit("queue_head_blocked", reason=str(exc)); return 10
