@@ -1,10 +1,11 @@
 {
   "title": "Build reusable preset template orchestration to migrate legacy reports into shared immutable presets",
-  "description": "Add a generic preset-template orchestration layer to the Stage-1 generic platform (currently owner-scoped private configs only). A code-level IReportConfigurationPresetCatalog (no new DB table / SchemaUpgrader change) seeds a finite, immutable set of preset definitions that re-express migrated legacy reports as validated ReportConfigurationDefinition payloads over controlled datasets, each keyed to a migration-registry entry and gated by its parity status. Expose GET /api/report-configurations/presets (read-only, rechecks the preset's dataset menu authorization fail-closed) and POST /api/report-configurations/presets/{presetKey}/materialize, which copies the preset definition into the current user's private ReportConfiguration via the existing ReportConfigurationService.CreateAsync path after revalidating against the current authorized dataset catalog (never trusts the preset payload). Materialize is blocked while the preset's registry entry is below parity-passed, and legacy routes remain untouched. Seed the mechanism with presets for the already-migrated sales-order and receivable datasets to prove the orchestration, and wire a preset tab into the existing report-configuration.js workspace (reuse rcc* helpers and the hasAuthorizedReportDataset gate in app.js). No new per-report controller/designer/exporter; presets are data-driven definitions over the shared catalog. Register via existing Infrastructure DI. Add unit tests for preset listing authorization, parity gating, and materialize-copy semantics.",
+  "description": "Add a generic preset-template orchestration layer to the Stage-1 generic platform (currently owner-scoped private configs only). A code-level IReportConfigurationPresetCatalog (no new DB table / SchemaUpgrader change) seeds a finite, immutable set of preset definitions that re-express migrated legacy reports as validated ReportConfigurationDefinition payloads over controlled datasets, each keyed to a migration-registry entry and gated by its parity status. Expose GET /api/report-configurations/presets (read-only, rechecks the preset's dataset menu authorization fail-closed) and POST /api/report-configurations/presets/{presetKey}/materialize, which copies the preset definition into the current user's private ReportConfiguration via the existing ReportConfigurationService.CreateAsync path after revalidating against the current authorized dataset catalog (never trusts the preset payload). Materialize is blocked while the preset's registry entry is below parity-passed, and legacy routes remain untouched. Seed the mechanism with presets for the already-migrated sales-order and receivable datasets to prove the orchestration, and wire a preset tab into the existing report-configuration.js workspace (reuse rcc* helpers and the hasAuthorizedReportDataset gate in app.js). No new per-report controller/designer/exporter; presets are data-driven definitions over the shared catalog. Register via existing Infrastructure DI. Add unit tests for preset listing authorization, parity gating, and materialize-copy semantics. Planning correction after dependency review: depend on ERP-295 before consuming its registry. Distinguish dataset/preset readiness from verified migration parity. Catalog presence and a declared compatibility manifest alone MUST NOT imply parity-passed or enable old-route switching. Registry entries remain parity-pending until genuine legacy-versus-platform fixture comparison evidence covers data/grain, currency/unit, current-user permissions and output semantics. Private materialization for migration validation may proceed for a ready controlled dataset/preset after live authorization and definition validation; this never activates legacy routing. Avoid circular registry/preset DI dependencies: registry exposes legacy requirements and verification state; orchestration consults that registry and the dataset catalog, without either depending on its own materialization result. Preserve all legacy routes until the entire inventory has genuine parity evidence. This task may minimally refine registry DTO/service/interface created by ERP-295 under the added exact allowed paths.",
   "acceptance_criteria": [
-    "A preset catalog seeds immutable preset definitions keyed to migration-registry entries over controlled datasets, with read-only listing that rechecks each preset's dataset menu authorization fail-closed and hides unauthorized/parity-blocked presets.",
-    "Materialize copies a preset into the current user's private ReportConfiguration after revalidating the definition against the live authorized dataset catalog, and refuses materialization while the preset's registry parity is below parity-passed; legacy routes are never changed.",
-    "The existing report-configuration workspace gains a preset tab reusing the authorized-dataset gate; unit tests cover listing authorization, parity gating, materialize-copy, and menu revocation, and the safe Release build and ERP.UnitTests pass without regressing existing save/load/preview behavior."
+    "A preset catalog supplies immutable definitions keyed to complete migration-registry entries over controlled datasets; read-only listing rechecks dataset and original menu authorization per request, hides unauthorized or unready presets, and never grants permission through a template.",
+    "Materialization validates the live authorized dataset and definition before creating the current user private copy. Dataset/preset readiness permits isolated parity validation but never implies verified parity. Missing adapter, invalid definition or revoked menu fails closed; no circular dependency between registry and preset catalog.",
+    "Registry parity-passed requires actual legacy-versus-generic comparison evidence for data/grain, amount currency/unit, permissions and export semantics, rather than catalog presence or a declared flag. Preserve every legacy route until all entries have verified parity; tests reject declared-only parity and incomplete inventory readiness.",
+    "The existing generic workspace lists authorized presets and can create private copies with bounded failures and existing audit behavior. Run related executable preset/registry tests, safe Release build/unit suite and scheduler contracts without regressing save/load/preview or existing reports."
   ],
   "allowed_paths": [
     "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
@@ -14,36 +15,78 @@
     "src/ERP.Api/Controllers/ReportConfigurationsController.cs",
     "src/ERP.Infrastructure/DependencyInjection.cs",
     "src/ERP.Api/wwwroot/js/report-configuration.js",
-    "src/ERP.UnitTests/ReportConfigurationPresetTests.cs"
+    "src/ERP.UnitTests/ReportConfigurationPresetTests.cs",
+    "src/ERP.Application/DTOs/ReportMigrationRegistryDtos.cs",
+    "src/ERP.Application/Interfaces/IReportMigrationRegistry.cs",
+    "src/ERP.Application/Services/ReportMigrationRegistry.cs",
+    "src/ERP.UnitTests/ReportMigrationRegistryTests.cs"
   ],
   "criterion_path_map": {
-    "A preset catalog seeds immutable preset definitions keyed to migration-registry entries over controlled datasets, with read-only listing that rechecks each preset's dataset menu authorization fail-closed and hides unauthorized/parity-blocked presets.": [
+    "A preset catalog supplies immutable definitions keyed to complete migration-registry entries over controlled datasets; read-only listing rechecks dataset and original menu authorization per request, hides unauthorized or unready presets, and never grants permission through a template.": [
+      "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
       "src/ERP.Application/Interfaces/IReportConfigurationPresetCatalog.cs",
       "src/ERP.Application/Services/ReportConfigurationPresetCatalog.cs",
-      "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
-      "src/ERP.Api/Controllers/ReportConfigurationsController.cs",
-      "src/ERP.UnitTests/ReportConfigurationPresetTests.cs"
-    ],
-    "Materialize copies a preset into the current user's private ReportConfiguration after revalidating the definition against the live authorized dataset catalog, and refuses materialization while the preset's registry parity is below parity-passed; legacy routes are never changed.": [
       "src/ERP.Application/Services/ReportConfigurationService.cs",
-      "src/ERP.Application/Services/ReportConfigurationPresetCatalog.cs",
-      "src/ERP.Api/Controllers/ReportConfigurationsController.cs",
-      "src/ERP.UnitTests/ReportConfigurationPresetTests.cs"
-    ],
-    "The existing report-configuration workspace gains a preset tab reusing the authorized-dataset gate; unit tests cover listing authorization, parity gating, materialize-copy, and menu revocation, and the safe Release build and ERP.UnitTests pass without regressing existing save/load/preview behavior.": [
-      "src/ERP.Api/wwwroot/js/report-configuration.js",
       "src/ERP.Api/Controllers/ReportConfigurationsController.cs",
       "src/ERP.Infrastructure/DependencyInjection.cs",
-      "src/ERP.UnitTests/ReportConfigurationPresetTests.cs"
+      "src/ERP.Api/wwwroot/js/report-configuration.js",
+      "src/ERP.UnitTests/ReportConfigurationPresetTests.cs",
+      "src/ERP.Application/DTOs/ReportMigrationRegistryDtos.cs",
+      "src/ERP.Application/Interfaces/IReportMigrationRegistry.cs",
+      "src/ERP.Application/Services/ReportMigrationRegistry.cs",
+      "src/ERP.UnitTests/ReportMigrationRegistryTests.cs"
+    ],
+    "Materialization validates the live authorized dataset and definition before creating the current user private copy. Dataset/preset readiness permits isolated parity validation but never implies verified parity. Missing adapter, invalid definition or revoked menu fails closed; no circular dependency between registry and preset catalog.": [
+      "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
+      "src/ERP.Application/Interfaces/IReportConfigurationPresetCatalog.cs",
+      "src/ERP.Application/Services/ReportConfigurationPresetCatalog.cs",
+      "src/ERP.Application/Services/ReportConfigurationService.cs",
+      "src/ERP.Api/Controllers/ReportConfigurationsController.cs",
+      "src/ERP.Infrastructure/DependencyInjection.cs",
+      "src/ERP.Api/wwwroot/js/report-configuration.js",
+      "src/ERP.UnitTests/ReportConfigurationPresetTests.cs",
+      "src/ERP.Application/DTOs/ReportMigrationRegistryDtos.cs",
+      "src/ERP.Application/Interfaces/IReportMigrationRegistry.cs",
+      "src/ERP.Application/Services/ReportMigrationRegistry.cs",
+      "src/ERP.UnitTests/ReportMigrationRegistryTests.cs"
+    ],
+    "Registry parity-passed requires actual legacy-versus-generic comparison evidence for data/grain, amount currency/unit, permissions and export semantics, rather than catalog presence or a declared flag. Preserve every legacy route until all entries have verified parity; tests reject declared-only parity and incomplete inventory readiness.": [
+      "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
+      "src/ERP.Application/Interfaces/IReportConfigurationPresetCatalog.cs",
+      "src/ERP.Application/Services/ReportConfigurationPresetCatalog.cs",
+      "src/ERP.Application/Services/ReportConfigurationService.cs",
+      "src/ERP.Api/Controllers/ReportConfigurationsController.cs",
+      "src/ERP.Infrastructure/DependencyInjection.cs",
+      "src/ERP.Api/wwwroot/js/report-configuration.js",
+      "src/ERP.UnitTests/ReportConfigurationPresetTests.cs",
+      "src/ERP.Application/DTOs/ReportMigrationRegistryDtos.cs",
+      "src/ERP.Application/Interfaces/IReportMigrationRegistry.cs",
+      "src/ERP.Application/Services/ReportMigrationRegistry.cs",
+      "src/ERP.UnitTests/ReportMigrationRegistryTests.cs"
+    ],
+    "The existing generic workspace lists authorized presets and can create private copies with bounded failures and existing audit behavior. Run related executable preset/registry tests, safe Release build/unit suite and scheduler contracts without regressing save/load/preview or existing reports.": [
+      "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
+      "src/ERP.Application/Interfaces/IReportConfigurationPresetCatalog.cs",
+      "src/ERP.Application/Services/ReportConfigurationPresetCatalog.cs",
+      "src/ERP.Application/Services/ReportConfigurationService.cs",
+      "src/ERP.Api/Controllers/ReportConfigurationsController.cs",
+      "src/ERP.Infrastructure/DependencyInjection.cs",
+      "src/ERP.Api/wwwroot/js/report-configuration.js",
+      "src/ERP.UnitTests/ReportConfigurationPresetTests.cs",
+      "src/ERP.Application/DTOs/ReportMigrationRegistryDtos.cs",
+      "src/ERP.Application/Interfaces/IReportMigrationRegistry.cs",
+      "src/ERP.Application/Services/ReportMigrationRegistry.cs",
+      "src/ERP.UnitTests/ReportMigrationRegistryTests.cs"
     ]
   },
   "depends_on": [
     "ERP-259",
-    "ERP-260"
+    "ERP-260",
+    "ERP-295"
   ],
   "risk": "medium",
   "planning_stage": 2,
-  "implementation_evidence": "src/ERP.Domain/Entities/ReportConfiguration.cs:21-22 explicitly documents '不提供角色共享 / 公共模板（后续 Stage 1 任务再扩展）' and the entity carries only OwnerUserId/private Status, so no preset/shared template exists. src/ERP.Application/Services/ReportConfigurationService.cs:40-71 CreateAsync is strictly owner-scoped (client cannot submit owner) and there is no preset materialize path; src/ERP.Api/Controllers/ReportConfigurationsController.cs exposes only private-config operations (no /presets or /presets/{key}/materialize). src/ERP.Api/wwwroot/js/report-configuration.js renderReportConfigurationWorkspace (line 1907) has no preset tab, and src/ERP.Api/wwwroot/js/app.js:290-313 gates the workspace only on hasAuthorizedReportDataset(catalog). The Stage-2 directive requires migrating legacy reports 'as preset templates ... in the generic platform', but the platform has no preset orchestration, confirming this gap.",
+  "implementation_evidence": "src/ERP.Domain/Entities/ReportConfiguration.cs:21-22 explicitly documents '不提供角色共享 / 公共模板（后续 Stage 1 任务再扩展）' and the entity carries only OwnerUserId/private Status, so no preset/shared template exists. src/ERP.Application/Services/ReportConfigurationService.cs:40-71 CreateAsync is strictly owner-scoped (client cannot submit owner) and there is no preset materialize path; src/ERP.Api/Controllers/ReportConfigurationsController.cs exposes only private-config operations (no /presets or /presets/{key}/materialize). src/ERP.Api/wwwroot/js/report-configuration.js renderReportConfigurationWorkspace (line 1907) has no preset tab, and src/ERP.Api/wwwroot/js/app.js:290-313 gates the workspace only on hasAuthorizedReportDataset(catalog). The Stage-2 directive requires migrating legacy reports 'as preset templates ... in the generic platform', but the platform has no preset orchestration, confirming this gap. Follow-up feasibility review: ERP-296 consumes ERP-295 registry types but originally omitted that dependency and the registry paths; readiness and declared compatibility alone would also falsely satisfy a genuine parity gate. Exact registry paths and tests now explicitly authorized, with validated private-copy orchestration separated from evidence-based old-route gating.",
   "id": "ERP-296",
   "status": "pending",
   "attempts": 0,
