@@ -87,6 +87,10 @@ public static class DependencyInjection
         // 通用报表配置平台（ERP-276 Stage 1）：可移植报表定义导入 / 导出（自有草稿 / 自有发布修订 / 共享固定快照 → 有界 JSON 信封）
         services.AddScoped<IReportConfigurationTransferService, ReportConfigurationTransferService>();
 
+        // 通用报表配置平台（ERP-295 Stage 2）：报表迁移登记册（编译期清单 + 运行时派生；预设目录当前为空，旧路由绝不提前退役）
+        services.AddScoped<IReportMigrationPresetCatalog, EmptyReportMigrationPresetCatalog>();
+        services.AddScoped<IReportMigrationRegistry, ReportMigrationRegistry>();
+
         // 库存移动与成本服务（ERP-009：库存单据审核/销审统一经此维护库存与流水）
         services.AddScoped<IInventoryService, InventoryService>();
 

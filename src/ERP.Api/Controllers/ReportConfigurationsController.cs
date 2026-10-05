@@ -47,6 +47,7 @@ public class ReportConfigurationsController : ControllerBase
     private readonly IReportConfigurationSharingService _sharing;
     private readonly IReportConfigurationTransferService? _transfer;
     private readonly IReportConfigurationExecutionBudget _budget;
+    private readonly IReportMigrationRegistry? _migrationRegistry;
     private readonly ILogger<ReportConfigurationsController>? _logger;
 
     public ReportConfigurationsController(
@@ -56,7 +57,8 @@ public class ReportConfigurationsController : ControllerBase
         IReportConfigurationSharingService sharing,
         IReportConfigurationExecutionBudget? budget = null,
         ILogger<ReportConfigurationsController>? logger = null,
-        IReportConfigurationTransferService? transfer = null)
+        IReportConfigurationTransferService? transfer = null,
+        IReportMigrationRegistry? migrationRegistry = null)
     {
         _catalog = catalog;
         _service = service;
@@ -65,6 +67,7 @@ public class ReportConfigurationsController : ControllerBase
         _transfer = transfer;
         _budget = budget ?? new ReportConfigurationExecutionBudget();
         _logger = logger;
+        _migrationRegistry = migrationRegistry;
     }
 
     /// <summary>当前登录用户 Id（缺失或非正数时抛未认证，绝不猜测身份）</summary>
@@ -113,6 +116,20 @@ public class ReportConfigurationsController : ControllerBase
     {
         var catalog = await WithRequestCancellationAsync(ct => _catalog.GetCatalogAsync(CurrentUserId(), ct));
         return Ok(ApiResponse<ReportConfigurationCatalogDto>.Success(catalog));
+    }
+
+    /// <summary>
+    /// 只读迁移登记册（ERP-295 Stage 2）：逐条按当前账号重检菜单授权（fail closed），
+    /// 未授权 / 未声明菜单的旧报表条目被隐藏；返回授权条目的派生 parity 与旧路由退役门。
+    /// </summary>
+    [HttpGet("migration-registry")]
+    public async Task<IActionResult> MigrationRegistry()
+    {
+        if (_migrationRegistry is null)
+            throw new BusinessException("报表迁移登记册未注册", ErrorCodes.InternalError);
+
+        var registry = await WithRequestCancellationAsync(ct => _migrationRegistry.GetRegistryAsync(CurrentUserId(), ct));
+        return Ok(ApiResponse<ReportMigrationRegistryDto>.Success(registry));
     }
 
     /// <summary>有界 keyset 分页列出当前用户未删除私有报表配置（owner-only；limit 默认 25、最大 100）</summary>

@@ -1,0 +1,162 @@
+using ERP.Application.Common;
+using ERP.Application.DTOs;
+using ERP.Application.Interfaces;
+
+namespace ERP.Application.Services;
+
+/// <summary>
+/// 报表迁移登记册（ERP-295 Stage 2）实现：编译期清单 + 运行时派生。
+/// <list type="number">
+/// <item><b>菜单授权重检</b>：每次调用都按当前账号重新加载既有菜单授权，未声明菜单（空清单）或任一必需菜单缺失的条目被隐藏（fail closed，绝不泄露未授权报表的存在性）。</item>
+/// <item><b>parity 派生</b>：从注册的数据集适配器目录 + 预设目录 + 逐条声明的兼容性清单派生 parity。</item>
+/// <item><b>旧路由门控消费</b>：只有全部条目 parity-passed 才允许旧路由退役。</item>
+/// </list>
+/// </summary>
+public sealed class ReportMigrationRegistry : IReportMigrationRegistry
+{
+    private readonly IReportConfigurationCatalog _catalog;
+    private readonly IErpDbContext _db;
+    private readonly IReportMigrationPresetCatalog _presets;
+
+    public ReportMigrationRegistry(
+        IReportConfigurationCatalog catalog,
+        IErpDbContext db,
+        IReportMigrationPresetCatalog presets)
+    {
+        _catalog = catalog;
+        _db = db;
+        _presets = presets;
+    }
+
+    /// <inheritdoc />
+    public async Task<ReportMigrationRegistryDto> GetRegistryAsync(
+        long? userId, CancellationToken cancellationToken = default)
+    {
+        EnsureAuthenticated(userId);
+
+        var menuCodes = await CustomerReceivableReconciliationService.LoadAuthorizedMenuCodesAsync(
+            _db, userId!.Value);
+
+        var entries = new List<ReportMigrationRegistryEntryDto>();
+        foreach (var definition in ReportMigrationRegistryManifest.Entries)
+        {
+            if (!IsMenuAuthorized(definition, menuCodes))
+                continue;
+
+            var parity = await DeriveParityAsync(definition, userId.Value, cancellationToken);
+            entries.Add(new ReportMigrationRegistryEntryDto(
+                definition.LegacyKey,
+                definition.Title,
+                definition.Category,
+                definition.DatasetKey,
+                definition.RequiredMenuCodes,
+                definition.RequiredMenuText,
+                definition.CurrencyUnitSemantics,
+                definition.ExcelCompatible,
+                definition.PdfCompatible,
+                ReportMigrationParityStatusText.Of(parity)));
+        }
+
+        var retirable = await CanRetireLegacyRoutesCoreAsync(userId, cancellationToken);
+        return new ReportMigrationRegistryDto(
+            ReportConfigurationRules.CurrentSchemaVersion,
+            entries,
+            retirable);
+    }
+
+    /// <inheritdoc />
+    public Task<bool> CanRetireLegacyRoutesAsync(long? userId, CancellationToken cancellationToken = default)
+        => CanRetireLegacyRoutesCoreAsync(userId, cancellationToken);
+
+    /// <summary>全量清单逐条派生：任一未 parity-passed（或无身份）即不可退役。</summary>
+    private async Task<bool> CanRetireLegacyRoutesCoreAsync(long? userId, CancellationToken cancellationToken)
+    {
+        if (userId is null or <= 0)
+            return false;
+
+        foreach (var definition in ReportMigrationRegistryManifest.Entries)
+        {
+            var parity = await DeriveParityAsync(definition, userId.Value, cancellationToken);
+            if (parity != ReportMigrationParityStatus.ParityPassed)
+                return false;
+        }
+
+        return true;
+    }
+
+    /// <summary>从注册的数据集适配器目录 + 预设目录 + 逐条兼容性清单派生 parity（单调递进）。</summary>
+    private async Task<ReportMigrationParityStatus> DeriveParityAsync(
+        ReportMigrationRegistryEntryDefinition definition,
+        long userId,
+        CancellationToken cancellationToken)
+    {
+        var dataset = await _catalog.GetDatasetAsync(definition.DatasetKey, userId, cancellationToken);
+        if (dataset is null)
+            return ReportMigrationParityStatus.Pending;
+
+        var presetExists = await _presets.HasPresetAsync(definition.LegacyKey, userId, cancellationToken);
+        if (!presetExists)
+            return ReportMigrationParityStatus.DatasetReady;
+
+        if (!SemanticsMatch(definition, dataset) || !CompatibilityDeclared(definition))
+            return ReportMigrationParityStatus.PresetReady;
+
+        return ReportMigrationParityStatus.ParityPassed;
+    }
+
+    /// <summary>旧语义匹配：权限（必需菜单与受控数据集必需菜单一致）+ 币种 / 单位口径一致。</summary>
+    private static bool SemanticsMatch(
+        ReportMigrationRegistryEntryDefinition definition,
+        ReportConfigurationDatasetDto dataset)
+    {
+        var menuMatch = definition.RequiredMenuCodes.Count == 1
+            && string.Equals(
+                definition.RequiredMenuCodes[0],
+                dataset.RequiredMenuCode,
+                StringComparison.OrdinalIgnoreCase);
+        var currencyUnitMatch = string.Equals(
+            definition.CurrencyUnitSemantics,
+            dataset.CurrencyUnitSemantics,
+            StringComparison.Ordinal);
+        return menuMatch && currencyUnitMatch;
+    }
+
+    /// <summary>兼容性声明：至少声明一种 Excel / PDF 兼容性（未声明视为未匹配，fail closed）。</summary>
+    private static bool CompatibilityDeclared(ReportMigrationRegistryEntryDefinition definition)
+        => definition.ExcelCompatible || definition.PdfCompatible;
+
+    /// <summary>菜单授权重检（fail closed）：未声明菜单或任一必需菜单缺失 → 隐藏。</summary>
+    private static bool IsMenuAuthorized(
+        ReportMigrationRegistryEntryDefinition definition,
+        HashSet<string> authorizedMenuCodes)
+    {
+        if (definition.RequiredMenuCodes.Count == 0)
+            return false;
+
+        foreach (var code in definition.RequiredMenuCodes)
+        {
+            if (!authorizedMenuCodes.Contains(code))
+                return false;
+        }
+
+        return true;
+    }
+
+    private static void EnsureAuthenticated(long? userId)
+    {
+        if (userId is null or <= 0)
+            throw new BusinessException("请先登录后再访问报表迁移登记册", ErrorCodes.Unauthorized);
+    }
+}
+
+/// <summary>
+/// 空预设目录（ERP-295 Stage 2 默认）：预设尚未落地，恒返回 false —— 任何条目都无法达到 preset-ready / parity-passed，
+/// 因此旧路由绝不会被提前移除。仅作为 parity 派生的前置接缝存在，不新增权限或存储。
+/// </summary>
+public sealed class EmptyReportMigrationPresetCatalog : IReportMigrationPresetCatalog
+{
+    /// <inheritdoc />
+    public Task<bool> HasPresetAsync(string legacyKey, long? userId, CancellationToken cancellationToken = default)
+        => Task.FromResult(false);
+}
+
