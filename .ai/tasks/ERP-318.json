@@ -16,7 +16,8 @@
     "src/ERP.Application/Services/ReportConfigurationPresetCatalog.cs",
     "src/ERP.Application/Services/ReportConfigurationBundlePresetCatalog.cs",
     "src/ERP.UnitTests/ReportConfigurationSalesDocumentMigrationTests.cs",
-    "src/ERP.IntegrationTests/ReportConfigurationSalesDocumentMigrationSqlServerTests.cs"
+    "src/ERP.IntegrationTests/ReportConfigurationSalesDocumentMigrationSqlServerTests.cs",
+    "src/ERP.Application/DTOs/ReportConfigurationBundleDtos.cs"
   ],
   "acceptance_criteria": [
     "Users migrate existing quotation and proforma-invoice print selections via a shared finite sales-document catalog and generic presets. Read authoritative persisted headers and active details in original SortNo and stable ID order, reuse existing print snapshot semantics and customer scope, and expose only registered authorized fields/aliases. No approval, conversion, pricing, total recalculation, new sales workflows or dedicated controllers/exporters.",
@@ -77,5 +78,6 @@
     "required": false,
     "scenarios": []
   },
-  "created_at": "2026-10-05T06:39:00.221167Z"
+  "created_at": "2026-10-05T06:39:00.221167Z",
+  "composition_repair_evidence": "Shared finite quotation/PI scenarios registered and verified with 4890 unit tests plus strictly guarded ERP318 real SQL composition/artifacts. All-family parity/browser migration acceptance remains unverified."
 }

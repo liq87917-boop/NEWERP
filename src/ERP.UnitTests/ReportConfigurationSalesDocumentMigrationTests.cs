@@ -19,6 +19,56 @@ namespace ERP.UnitTests;
 /// </summary>
 public class ReportConfigurationSalesDocumentMigrationTests
 {
+    [Theory]
+    [InlineData("quotation", ReportConfigurationBundleCompositionManifest.QuotationHeaderDetail)]
+    [InlineData("proforma-invoice", ReportConfigurationBundleCompositionManifest.ProformaInvoiceHeaderDetail)]
+    public async Task Shared_composition_preserves_sales_headers_lines_and_empty_documents(string familyKey, string compositionKey)
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedAuthorizedUser(db, "compose-sales", privileged: true, familyKey);
+        long sourceId;
+        if (familyKey == "quotation")
+        {
+            var doc = SeedQuotation(db, "Q-COMPOSE", null, "Customer", Currency.USD, 500m);
+            sourceId = doc.Id;
+            SeedQuotationDetail(db, doc.Id, doc.QuotationNo, 2, "P2", "PCS", 2m, 20m, 40m);
+            SeedQuotationDetail(db, doc.Id, doc.QuotationNo, 1, "P1", "BOX", 1m, 60m, 60m);
+            SeedQuotation(db, "Q-EMPTY", null, "Customer", Currency.EUR, 200m);
+        }
+        else
+        {
+            var doc = SeedProformaInvoice(db, "PI-COMPOSE", null, "Customer", "Q-SRC", Currency.USD, 500m, 0m, 0m);
+            sourceId = doc.Id;
+            SeedProformaInvoiceDetail(db, doc.Id, doc.PiNo, 2, "P2", "PCS", 2m, 20m, 40m);
+            SeedProformaInvoiceDetail(db, doc.Id, doc.PiNo, 1, "P1", "BOX", 1m, 60m, 60m);
+            SeedProformaInvoice(db, "PI-EMPTY", null, "Customer", "Q-SRC", Currency.EUR, 200m, 0m, 0m);
+        }
+        var provider = new SalesDocumentReportConfigurationDatasetProvider(db, ReportConfigurationSalesDocumentCatalog.Resolve(familyKey).DatasetKey);
+        var providers = new IReportConfigurationDatasetProvider[] { provider };
+        var configs = new ReportConfigurationService(db, new ReportConfigurationCatalog(providers));
+        var header = await configs.CreateAsync(user.Id, new() { Name = "Headers", Definition = Definition(familyKey, new[] { "id", "totalAmount", "currency" }) });
+        var detail = await configs.CreateAsync(user.Id, new() { Name = "Details", Definition = Definition(familyKey, new[] { "id", "sortNo", "amount", "currency", "quantity", "unit" }) });
+        var bundle = new ReportConfigurationBundleService(new ReportConfigurationExecutionService(db, providers));
+        var result = await bundle.ComposePreviewAsync(user.Id, new() { CompositionKey = compositionKey, HeaderConfigurationId = header.Id, DetailConfigurationId = detail.Id });
+        Assert.Equal(2, result.ParentCount);
+        Assert.Equal(2, result.DetailCount);
+        var composed = Assert.Single(result.Parents, x => Convert.ToInt64(x.Header["id"]) == sourceId);
+        Assert.Equal(500m, composed.Totals.HeaderAmount);
+        Assert.Equal(100m, Assert.Single(composed.Totals.DetailAmounts).Amount);
+        Assert.Equal("USD", Assert.Single(composed.Totals.DetailAmounts).Currency);
+        Assert.Equal(2, composed.Totals.DetailQuantities.Count);
+        Assert.Equal(new[] { 1, 2 }, composed.Details.Select(x => Convert.ToInt32(x["sortNo"])));
+        var empty = Assert.Single(result.Parents, x => !x.HasDetails);
+        Assert.Equal(200m, empty.Totals.HeaderAmount);
+        Assert.Equal("EUR", empty.Totals.HeaderCurrency);
+        Assert.Empty(empty.Details);
+        Assert.NotNull(empty.EmptyDetailsEvidence);
+        var link = db.SysRoleMenus.First();
+        db.SysRoleMenus.Remove(link);
+        await db.SaveChangesAsync();
+        await Assert.ThrowsAsync<BusinessException>(() => bundle.ComposePreviewAsync(user.Id, new() { CompositionKey = compositionKey, HeaderConfigurationId = header.Id, DetailConfigurationId = detail.Id }));
+    }
+
     private static SysUser SeedUser(ErpDbContext db, string userName)
     {
         var user = new SysUser

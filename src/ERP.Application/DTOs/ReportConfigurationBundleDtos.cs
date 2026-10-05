@@ -283,6 +283,8 @@ public static class ReportConfigurationBundleCompositionManifest
 {
     /// <summary>出口单证中心（表头 + 明细）组合场景键</summary>
     public const string TradeDocumentHeaderDetail = "trade-document-header-detail";
+    public const string QuotationHeaderDetail = "quotation-header-detail";
+    public const string ProformaInvoiceHeaderDetail = "proforma-invoice-header-detail";
 
     public static readonly IReadOnlyList<ReportConfigurationBundleCompositionScenario> Scenarios =
         new ReportConfigurationBundleCompositionScenario[]
@@ -306,7 +308,20 @@ public static class ReportConfigurationBundleCompositionManifest
                 "只读出口单证中心组合：仅读取单证台账持久表头与明细行快照，不新增 / 修改 / 删除任何记录，不重建缺失证据",
                 "口径：表头按单证一次呈现，明细行按行序置于对应单证之下；表头金额只在表头粒度出现，明细金额按原币分区、数量按基础单位分区，绝不把表头金额摊入明细或跨币种合并；无明细行的单证明确标注为空明细，不臆造合计",
                 "本组合为只读单证中心证据：金额按原币、数量按基础单位呈现，不跨币种换算或合并，不构成报关、清关、退税或财务结论"),
+            SalesDocument(QuotationHeaderDetail, "quotation"),
+            SalesDocument(ProformaInvoiceHeaderDetail, "proforma-invoice"),
         };
+
+    private static ReportConfigurationBundleCompositionScenario SalesDocument(string key, string familyKey)
+    {
+        var family = ReportConfigurationSalesDocumentCatalog.Resolve(familyKey);
+        return new(key, family.Title + "（表头 + 明细）", family.DatasetKey, family.DatasetKey,
+            "id", "id", "sortNo", "totalAmount", "currency", "amount", "currency", "quantity", "unit",
+            family.RequiredMenuCodes, ReportConfigurationSalesDocumentCatalog.CurrencyUnitSemantics,
+            "只读既有销售单据持久表头与有效明细，不修改业务记录",
+            "表头总额独立呈现一次；明细按单据 Id 关联、原行序排列，原币金额与原单位数量分区；无明细保留空证据；超过有界完整匹配范围拒绝组合",
+            "原币原单位只读证据，不跨币种或单位混加，不构成财务结论");
+    }
 
     /// <summary>按场景键查找（忽略大小写；未知返回 null，fail closed）。</summary>
     public static ReportConfigurationBundleCompositionScenario? Find(string? key)
