@@ -1,0 +1,88 @@
+{
+  "title": "Migrate inventory movement, inventory aging and stock alert through shared controlled datasets and presets",
+  "description": "Stage2 reusable family migration; no dedicated controller/designer/exporter or new independent business report. Inventory movement/aging legacy services are IReportService.GetInventoryMovementReportAsync/GetInventoryAgingReportAsync; fixed stock-alert is GetStockAlertAsync. Existing legacy registry entries report:inventory-movement, report:inventory-aging, report:stock-alert and dynamic inventory keys exist, but no controlled providers or corresponding presets are registered. Use the existing provider contract and generic Excel/PDF exporters. Do not rewrite legacy queries/algorithms or add new business calculations. Do not change schema, migration scripts, production databases, secrets/env, user permissions or unrelated modules. All new implementation is limited to the exact provider/constants/preset/DI/test paths. Dependencies serialize shared constants/preset/DI modifications. Full inventory parity is required before switching old entries.",
+  "acceptance_criteria": [
+    "Migrate the inventory movement, inventory aging and stock alert report family as finite controlled dataset adapters and immutable presets in the existing generic platform; cover every corresponding fixed and dynamic registry entry and original field/grain semantics. Reuse legacy calculations, disclose unsupported capabilities truthfully, and retain all existing routes.",
+    "Every catalog, preview and export request revalidates the original menu permission and current-user row/column/data scope. Reject unknown fields/filters, excess date/page bounds and unavailable services with bounded failure results. Preserve currency/unit partitions, null evidence and one-to-many amount cardinality; generic query/export audit stays intact.",
+    "Add presets keyed to the corresponding registry entries and live catalog keys, allowing authorized private copies through the existing preset orchestration. Adapter/preset presence means readiness only: never mark parity-passed or switch a legacy route based on declarations or incomplete comparisons.",
+    "Add executable ReportConfigurationInventoryMigrationTests comparisons between legacy service output and generic preview/Excel/PDF semantics, including paging, empty rows, unauthorized/revoked menus, currency/unit and nullable evidence. Add isolated SQL fixtures guarded to the existing named LocalDB test instance/database, never default production connections; run related tests, safe Release build/unit suite and scheduler self-test/contracts. Missing genuine database/browser coverage remains accurately unverified, with no phase completion claim."
+  ],
+  "allowed_paths": [
+    "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
+    "src/ERP.Application/Services/ReportConfigurationPresetCatalog.cs",
+    "src/ERP.Infrastructure/DependencyInjection.cs",
+    "src/ERP.Infrastructure/Reports/InventoryMovementReportConfigurationDatasetProvider.cs",
+    "src/ERP.Infrastructure/Reports/InventoryAgingReportConfigurationDatasetProvider.cs",
+    "src/ERP.Infrastructure/Reports/StockAlertReportConfigurationDatasetProvider.cs",
+    "src/ERP.UnitTests/ReportConfigurationInventoryMigrationTests.cs",
+    "src/ERP.IntegrationTests/ReportConfigurationInventoryMigrationTestsSqlServerTests.cs"
+  ],
+  "criterion_path_map": {
+    "Migrate the inventory movement, inventory aging and stock alert report family as finite controlled dataset adapters and immutable presets in the existing generic platform; cover every corresponding fixed and dynamic registry entry and original field/grain semantics. Reuse legacy calculations, disclose unsupported capabilities truthfully, and retain all existing routes.": [
+      "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
+      "src/ERP.Application/Services/ReportConfigurationPresetCatalog.cs",
+      "src/ERP.Infrastructure/DependencyInjection.cs",
+      "src/ERP.Infrastructure/Reports/InventoryMovementReportConfigurationDatasetProvider.cs",
+      "src/ERP.Infrastructure/Reports/InventoryAgingReportConfigurationDatasetProvider.cs",
+      "src/ERP.Infrastructure/Reports/StockAlertReportConfigurationDatasetProvider.cs",
+      "src/ERP.UnitTests/ReportConfigurationInventoryMigrationTests.cs",
+      "src/ERP.IntegrationTests/ReportConfigurationInventoryMigrationTestsSqlServerTests.cs"
+    ],
+    "Every catalog, preview and export request revalidates the original menu permission and current-user row/column/data scope. Reject unknown fields/filters, excess date/page bounds and unavailable services with bounded failure results. Preserve currency/unit partitions, null evidence and one-to-many amount cardinality; generic query/export audit stays intact.": [
+      "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
+      "src/ERP.Application/Services/ReportConfigurationPresetCatalog.cs",
+      "src/ERP.Infrastructure/DependencyInjection.cs",
+      "src/ERP.Infrastructure/Reports/InventoryMovementReportConfigurationDatasetProvider.cs",
+      "src/ERP.Infrastructure/Reports/InventoryAgingReportConfigurationDatasetProvider.cs",
+      "src/ERP.Infrastructure/Reports/StockAlertReportConfigurationDatasetProvider.cs",
+      "src/ERP.UnitTests/ReportConfigurationInventoryMigrationTests.cs",
+      "src/ERP.IntegrationTests/ReportConfigurationInventoryMigrationTestsSqlServerTests.cs"
+    ],
+    "Add presets keyed to the corresponding registry entries and live catalog keys, allowing authorized private copies through the existing preset orchestration. Adapter/preset presence means readiness only: never mark parity-passed or switch a legacy route based on declarations or incomplete comparisons.": [
+      "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
+      "src/ERP.Application/Services/ReportConfigurationPresetCatalog.cs",
+      "src/ERP.Infrastructure/DependencyInjection.cs",
+      "src/ERP.Infrastructure/Reports/InventoryMovementReportConfigurationDatasetProvider.cs",
+      "src/ERP.Infrastructure/Reports/InventoryAgingReportConfigurationDatasetProvider.cs",
+      "src/ERP.Infrastructure/Reports/StockAlertReportConfigurationDatasetProvider.cs",
+      "src/ERP.UnitTests/ReportConfigurationInventoryMigrationTests.cs",
+      "src/ERP.IntegrationTests/ReportConfigurationInventoryMigrationTestsSqlServerTests.cs"
+    ],
+    "Add executable ReportConfigurationInventoryMigrationTests comparisons between legacy service output and generic preview/Excel/PDF semantics, including paging, empty rows, unauthorized/revoked menus, currency/unit and nullable evidence. Add isolated SQL fixtures guarded to the existing named LocalDB test instance/database, never default production connections; run related tests, safe Release build/unit suite and scheduler self-test/contracts. Missing genuine database/browser coverage remains accurately unverified, with no phase completion claim.": [
+      "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
+      "src/ERP.Application/Services/ReportConfigurationPresetCatalog.cs",
+      "src/ERP.Infrastructure/DependencyInjection.cs",
+      "src/ERP.Infrastructure/Reports/InventoryMovementReportConfigurationDatasetProvider.cs",
+      "src/ERP.Infrastructure/Reports/InventoryAgingReportConfigurationDatasetProvider.cs",
+      "src/ERP.Infrastructure/Reports/StockAlertReportConfigurationDatasetProvider.cs",
+      "src/ERP.UnitTests/ReportConfigurationInventoryMigrationTests.cs",
+      "src/ERP.IntegrationTests/ReportConfigurationInventoryMigrationTestsSqlServerTests.cs"
+    ]
+  },
+  "depends_on": [
+    "ERP-296",
+    "ERP-297",
+    "ERP-298"
+  ],
+  "risk": "medium",
+  "planning_stage": 2,
+  "implementation_evidence": "Inventory movement/aging legacy services are IReportService.GetInventoryMovementReportAsync/GetInventoryAgingReportAsync; fixed stock-alert is GetStockAlertAsync. Existing legacy registry entries report:inventory-movement, report:inventory-aging, report:stock-alert and dynamic inventory keys exist, but no controlled providers or corresponding presets are registered. Verified registry in src/ERP.Application/DTOs/ReportMigrationRegistryDtos.cs, providers in src/ERP.Infrastructure/DependencyInjection.cs and existing preset manifest in src/ERP.Application/Services/ReportConfigurationPresetCatalog.cs. Search existing task history excludes this family: ERP-297 is purchase/supplier and ERP-298 is financial statements/ar-aging.",
+  "id": "ERP-299",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-05T01:09:29.001422Z"
+}
