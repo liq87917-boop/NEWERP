@@ -1,0 +1,59 @@
+{
+  "title": "Build reusable report migration registry/catalog with parity model gating legacy-route preservation",
+  "description": "Stage 2 foundation: a functional (runtime) migration registry — not an audit-only inventory. Enumerate EVERY legacy report entry across fixed reports, the 18 dynamic reports, exports (BillProcController.Export, ProductExportFieldCompleteness), packets (CustomerReportPacket), documents (TradeDocument print/export), and financial statements (balance-sheet/income-statement/cash-flow plus ar-aging/purchase-cost/tax-refund-summary/stock-alert). Each entry carries: legacy key/title, category, target dataset key, required menu code + menu text, currency/unit semantics, Excel/PDF compatibility flag, and a parity status (pending / dataset-ready / preset-ready / parity-passed). Parity is DERIVED at runtime from the registered dataset adapter catalog (IReportConfigurationCatalog.GetDatasetAsync) and the preset catalog, plus a per-entry declared compatibility manifest; an entry reaches parity-passed only when its controlled dataset adapter, preset template, and Excel/PDF declaration all exist AND match the legacy semantics (currency/unit, permissions, compatibility). The registry is consumed by preset orchestration and by legacy-route gating so old routes are never removed until parity passes. Expose a read-only GET endpoint on the existing ReportConfigurationsController that rechecks each entry's menu authorization fail-closed (no menu -> entry hidden, never leaking existence of unauthorized reports). No schema, SQL, secrets, or permission expansion; the registry is a compile-time manifest + runtime derivation, so no SchemaUpgrader/protected-source change is needed. Register via existing Infrastructure DI. Add unit tests proving full inventory coverage (not just the 18 dynamic reports), menu fail-closed behavior, and parity derivation boundaries.",
+  "acceptance_criteria": [
+    "The migration registry enumerates every legacy report entry (fixed reports, all 18 dynamic reports, exports, packets, documents, and financial statements) with legacy key/title, category, dataset key, required menu code, currency/unit semantics, Excel/PDF compatibility flag, and a derived parity status; no entry is omitted and no static audit-only markdown is produced.",
+    "The read-only registry endpoint rechecks each entry's existing menu authorization per request (fail-closed, unauthorized entries hidden) and returns only authorized entries; saved definitions or presets grant no permission.",
+    "Parity status is derived from the registered dataset adapter catalog + preset catalog + declared compatibility manifest, and is consumed (not just reported) so legacy routes are preserved until every entry reaches parity-passed; unit tests cover full inventory, menu revocation, and parity derivation, and the safe Release build and ERP.UnitTests pass without modifying existing report behavior."
+  ],
+  "allowed_paths": [
+    "src/ERP.Application/DTOs/ReportMigrationRegistryDtos.cs",
+    "src/ERP.Application/Interfaces/IReportMigrationRegistry.cs",
+    "src/ERP.Application/Services/ReportMigrationRegistry.cs",
+    "src/ERP.Api/Controllers/ReportConfigurationsController.cs",
+    "src/ERP.Infrastructure/DependencyInjection.cs",
+    "src/ERP.UnitTests/ReportMigrationRegistryTests.cs"
+  ],
+  "criterion_path_map": {
+    "The migration registry enumerates every legacy report entry (fixed reports, all 18 dynamic reports, exports, packets, documents, and financial statements) with legacy key/title, category, dataset key, required menu code, currency/unit semantics, Excel/PDF compatibility flag, and a derived parity status; no entry is omitted and no static audit-only markdown is produced.": [
+      "src/ERP.Application/DTOs/ReportMigrationRegistryDtos.cs",
+      "src/ERP.Application/Interfaces/IReportMigrationRegistry.cs",
+      "src/ERP.Application/Services/ReportMigrationRegistry.cs",
+      "src/ERP.UnitTests/ReportMigrationRegistryTests.cs"
+    ],
+    "The read-only registry endpoint rechecks each entry's existing menu authorization per request (fail-closed, unauthorized entries hidden) and returns only authorized entries; saved definitions or presets grant no permission.": [
+      "src/ERP.Api/Controllers/ReportConfigurationsController.cs",
+      "src/ERP.Application/Services/ReportMigrationRegistry.cs",
+      "src/ERP.UnitTests/ReportMigrationRegistryTests.cs"
+    ],
+    "Parity status is derived from the registered dataset adapter catalog + preset catalog + declared compatibility manifest, and is consumed (not just reported) so legacy routes are preserved until every entry reaches parity-passed; unit tests cover full inventory, menu revocation, and parity derivation, and the safe Release build and ERP.UnitTests pass without modifying existing report behavior.": [
+      "src/ERP.Application/Services/ReportMigrationRegistry.cs",
+      "src/ERP.Infrastructure/DependencyInjection.cs",
+      "src/ERP.UnitTests/ReportMigrationRegistryTests.cs"
+    ]
+  },
+  "depends_on": [
+    "ERP-259"
+  ],
+  "risk": "medium",
+  "planning_stage": 2,
+  "implementation_evidence": "No migration registry/catalog exists anywhere in src/ (search for Migration/registry/preset in report context returns only unrelated scripts). src/ERP.Infrastructure/DependencyInjection.cs:69-70 registers only SalesOrderReportConfigurationDatasetProvider and ReceivableReportConfigurationDatasetProvider, and src/ERP.Application/DTOs/ReportConfigurationDtos.cs:87-88 defines only DatasetSalesOrder + DatasetReceivable constants, so the generic platform has no inventory of the remaining legacy reports. src/ERP.Domain/Entities/ReportConfiguration.cs:21-22 states '不提供角色共享 / 公共模板（后续 Stage 1 任务再扩展）' confirming presets are absent. src/ERP.Api/Controllers/ReportConfigurationsController.cs exposes catalog/save/list/load/preview/export but no migration-registry endpoint. Fixed financial statements live in src/ERP.Application/Services/ReportService.Finance.cs and src/ERP.Api/Controllers/ReportController.cs:196-222 (BalanceSheet/ArAging), exports/packets/documents in CustomerReportPacketController/TradeDocumentController/BillProcController.Export/ProductExportFieldCompleteness, and 18 Dynamic*ReportControllers each carry dedicated routes — none are represented as controlled datasets, proving the registry gap is concrete and pre-existing.",
+  "id": "ERP-295",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-05T00:17:05.029286Z"
+}

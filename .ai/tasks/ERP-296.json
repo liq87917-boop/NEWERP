@@ -1,0 +1,65 @@
+{
+  "title": "Build reusable preset template orchestration to migrate legacy reports into shared immutable presets",
+  "description": "Add a generic preset-template orchestration layer to the Stage-1 generic platform (currently owner-scoped private configs only). A code-level IReportConfigurationPresetCatalog (no new DB table / SchemaUpgrader change) seeds a finite, immutable set of preset definitions that re-express migrated legacy reports as validated ReportConfigurationDefinition payloads over controlled datasets, each keyed to a migration-registry entry and gated by its parity status. Expose GET /api/report-configurations/presets (read-only, rechecks the preset's dataset menu authorization fail-closed) and POST /api/report-configurations/presets/{presetKey}/materialize, which copies the preset definition into the current user's private ReportConfiguration via the existing ReportConfigurationService.CreateAsync path after revalidating against the current authorized dataset catalog (never trusts the preset payload). Materialize is blocked while the preset's registry entry is below parity-passed, and legacy routes remain untouched. Seed the mechanism with presets for the already-migrated sales-order and receivable datasets to prove the orchestration, and wire a preset tab into the existing report-configuration.js workspace (reuse rcc* helpers and the hasAuthorizedReportDataset gate in app.js). No new per-report controller/designer/exporter; presets are data-driven definitions over the shared catalog. Register via existing Infrastructure DI. Add unit tests for preset listing authorization, parity gating, and materialize-copy semantics.",
+  "acceptance_criteria": [
+    "A preset catalog seeds immutable preset definitions keyed to migration-registry entries over controlled datasets, with read-only listing that rechecks each preset's dataset menu authorization fail-closed and hides unauthorized/parity-blocked presets.",
+    "Materialize copies a preset into the current user's private ReportConfiguration after revalidating the definition against the live authorized dataset catalog, and refuses materialization while the preset's registry parity is below parity-passed; legacy routes are never changed.",
+    "The existing report-configuration workspace gains a preset tab reusing the authorized-dataset gate; unit tests cover listing authorization, parity gating, materialize-copy, and menu revocation, and the safe Release build and ERP.UnitTests pass without regressing existing save/load/preview behavior."
+  ],
+  "allowed_paths": [
+    "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
+    "src/ERP.Application/Interfaces/IReportConfigurationPresetCatalog.cs",
+    "src/ERP.Application/Services/ReportConfigurationPresetCatalog.cs",
+    "src/ERP.Application/Services/ReportConfigurationService.cs",
+    "src/ERP.Api/Controllers/ReportConfigurationsController.cs",
+    "src/ERP.Infrastructure/DependencyInjection.cs",
+    "src/ERP.Api/wwwroot/js/report-configuration.js",
+    "src/ERP.UnitTests/ReportConfigurationPresetTests.cs"
+  ],
+  "criterion_path_map": {
+    "A preset catalog seeds immutable preset definitions keyed to migration-registry entries over controlled datasets, with read-only listing that rechecks each preset's dataset menu authorization fail-closed and hides unauthorized/parity-blocked presets.": [
+      "src/ERP.Application/Interfaces/IReportConfigurationPresetCatalog.cs",
+      "src/ERP.Application/Services/ReportConfigurationPresetCatalog.cs",
+      "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
+      "src/ERP.Api/Controllers/ReportConfigurationsController.cs",
+      "src/ERP.UnitTests/ReportConfigurationPresetTests.cs"
+    ],
+    "Materialize copies a preset into the current user's private ReportConfiguration after revalidating the definition against the live authorized dataset catalog, and refuses materialization while the preset's registry parity is below parity-passed; legacy routes are never changed.": [
+      "src/ERP.Application/Services/ReportConfigurationService.cs",
+      "src/ERP.Application/Services/ReportConfigurationPresetCatalog.cs",
+      "src/ERP.Api/Controllers/ReportConfigurationsController.cs",
+      "src/ERP.UnitTests/ReportConfigurationPresetTests.cs"
+    ],
+    "The existing report-configuration workspace gains a preset tab reusing the authorized-dataset gate; unit tests cover listing authorization, parity gating, materialize-copy, and menu revocation, and the safe Release build and ERP.UnitTests pass without regressing existing save/load/preview behavior.": [
+      "src/ERP.Api/wwwroot/js/report-configuration.js",
+      "src/ERP.Api/Controllers/ReportConfigurationsController.cs",
+      "src/ERP.Infrastructure/DependencyInjection.cs",
+      "src/ERP.UnitTests/ReportConfigurationPresetTests.cs"
+    ]
+  },
+  "depends_on": [
+    "ERP-259",
+    "ERP-260"
+  ],
+  "risk": "medium",
+  "planning_stage": 2,
+  "implementation_evidence": "src/ERP.Domain/Entities/ReportConfiguration.cs:21-22 explicitly documents '不提供角色共享 / 公共模板（后续 Stage 1 任务再扩展）' and the entity carries only OwnerUserId/private Status, so no preset/shared template exists. src/ERP.Application/Services/ReportConfigurationService.cs:40-71 CreateAsync is strictly owner-scoped (client cannot submit owner) and there is no preset materialize path; src/ERP.Api/Controllers/ReportConfigurationsController.cs exposes only private-config operations (no /presets or /presets/{key}/materialize). src/ERP.Api/wwwroot/js/report-configuration.js renderReportConfigurationWorkspace (line 1907) has no preset tab, and src/ERP.Api/wwwroot/js/app.js:290-313 gates the workspace only on hasAuthorizedReportDataset(catalog). The Stage-2 directive requires migrating legacy reports 'as preset templates ... in the generic platform', but the platform has no preset orchestration, confirming this gap.",
+  "id": "ERP-296",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-05T00:17:05.030587Z"
+}

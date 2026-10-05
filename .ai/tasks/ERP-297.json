@@ -1,0 +1,66 @@
+{
+  "title": "Add controlled dataset adapters for purchase/supplier dynamic reports to the generic platform",
+  "description": "Extend the generic platform beyond its two Stage-1 fixtures by adding reusable IReportConfigurationDatasetProvider adapters for the purchase/supplier dynamic-report cluster: purchase-order (query IDynamicPurchaseOrderReportQuery already registered at ERP-125), supplier-aging, and supplier-exposure. Each adapter exposes a finite field whitelist, truthful grain/capability/currency-unit semantics, and the same required menu authorization + data scope as the legacy Dynamic*ReportController (reuse the existing DynamicPurchaseOrderReportRules / DynamicSupplierAgingReportRules / DynamicSupplierExposureReportRules and the legacy controller query semantics via IErpDbContext; do NOT build a new controller, designer, or exporter). Register the new providers in the existing DependencyInjection alongside the sales-order/receivable providers and add the corresponding dataset key constants to ReportConfigurationConstants. PreviewAsync must delegate to the same bounded read-only query each legacy report uses, revalidate menu/scope per request (fail-closed), and never cross-currency merge. Add unit tests that each adapter's catalog and preview mirror the legacy report semantics (menu revocation, finite fields, currency partition, paging bounds) without regressing existing catalog/preview tests. This proves the controlled-adapter mechanism scales; the migration registry marks these entries dataset-ready so later preset work can consume them.",
+  "acceptance_criteria": [
+    "Purchase-order, supplier-aging, and supplier-exposure each gain a controlled dataset adapter exposing a finite authorized field whitelist and truthful grain/capability/currency-unit semantics matching their legacy dynamic report, with dataset key constants added and providers registered in the existing catalog aggregation.",
+    "Each adapter's preview reuses the legacy report's bounded read-only query and revalidates the existing menu authorization and data scope per request (fail-closed, no cross-currency merge, no new controller/designer/exporter).",
+    "Unit tests cover catalog exposure, preview parity with legacy semantics, menu revocation, currency partition, and paging bounds for all three datasets; the safe Release build and ERP.UnitTests pass without modifying existing report endpoints."
+  ],
+  "allowed_paths": [
+    "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
+    "src/ERP.Infrastructure/Reports/PurchaseOrderReportConfigurationDatasetProvider.cs",
+    "src/ERP.Infrastructure/Reports/SupplierAgingReportConfigurationDatasetProvider.cs",
+    "src/ERP.Infrastructure/Reports/SupplierExposureReportConfigurationDatasetProvider.cs",
+    "src/ERP.Infrastructure/DependencyInjection.cs",
+    "src/ERP.UnitTests/ReportConfigurationMigrationAdaptersTests.cs"
+  ],
+  "criterion_path_map": {
+    "Purchase-order, supplier-aging, and supplier-exposure each gain a controlled dataset adapter exposing a finite authorized field whitelist and truthful grain/capability/currency-unit semantics matching their legacy dynamic report, with dataset key constants added and providers registered in the existing catalog aggregation.": [
+      "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
+      "src/ERP.Infrastructure/Reports/PurchaseOrderReportConfigurationDatasetProvider.cs",
+      "src/ERP.Infrastructure/Reports/SupplierAgingReportConfigurationDatasetProvider.cs",
+      "src/ERP.Infrastructure/Reports/SupplierExposureReportConfigurationDatasetProvider.cs",
+      "src/ERP.Infrastructure/DependencyInjection.cs",
+      "src/ERP.UnitTests/ReportConfigurationMigrationAdaptersTests.cs"
+    ],
+    "Each adapter's preview reuses the legacy report's bounded read-only query and revalidates the existing menu authorization and data scope per request (fail-closed, no cross-currency merge, no new controller/designer/exporter).": [
+      "src/ERP.Infrastructure/Reports/PurchaseOrderReportConfigurationDatasetProvider.cs",
+      "src/ERP.Infrastructure/Reports/SupplierAgingReportConfigurationDatasetProvider.cs",
+      "src/ERP.Infrastructure/Reports/SupplierExposureReportConfigurationDatasetProvider.cs",
+      "src/ERP.UnitTests/ReportConfigurationMigrationAdaptersTests.cs"
+    ],
+    "Unit tests cover catalog exposure, preview parity with legacy semantics, menu revocation, currency partition, and paging bounds for all three datasets; the safe Release build and ERP.UnitTests pass without modifying existing report endpoints.": [
+      "src/ERP.UnitTests/ReportConfigurationMigrationAdaptersTests.cs",
+      "src/ERP.Infrastructure/Reports/PurchaseOrderReportConfigurationDatasetProvider.cs",
+      "src/ERP.Infrastructure/Reports/SupplierAgingReportConfigurationDatasetProvider.cs",
+      "src/ERP.Infrastructure/Reports/SupplierExposureReportConfigurationDatasetProvider.cs",
+      "src/ERP.Infrastructure/DependencyInjection.cs"
+    ]
+  },
+  "depends_on": [
+    "ERP-259",
+    "ERP-268",
+    "ERP-273"
+  ],
+  "risk": "medium",
+  "planning_stage": 2,
+  "implementation_evidence": "src/ERP.Infrastructure/DependencyInjection.cs:65 registers IDynamicPurchaseOrderReportQuery, but lines 69-70 register no corresponding IReportConfigurationDatasetProvider for purchase-order, supplier-aging, or supplier-exposure. src/ERP.Infrastructure/Reports/ReportConfigurationDatasetProvider.cs contains only SalesOrderReportConfigurationDatasetProvider and ReceivableReportConfigurationDatasetProvider (1763 lines, two classes), and src/ERP.Application/DTOs/ReportConfigurationDtos.cs:87-88 defines only DatasetSalesOrder + DatasetReceivable. The legacy DynamicPurchaseOrderReportController/DynamicSupplierAgingReportController/DynamicSupplierExposureReportController exist with dedicated routes and Dynamic*ReportRules, but none are reachable through the generic catalog, proving the controlled-adapter gap for the purchase/supplier cluster is concrete and unmigrated.",
+  "id": "ERP-297",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-05T00:17:05.031553Z"
+}
