@@ -68,7 +68,7 @@
   "planning_stage": 2,
   "implementation_evidence": "Legacy fixed ranking/profit methods are IReportService.GetProductSalesRankingAsync/GetOrderProfitEstimateAsync; commission includes GetSalesCommissionAsync/GetDynamicSalesCommissionReportAsync and bounded DynamicSalesCommissionReportRules. Existing registry fixed and dynamic keys have no controlled dataset adapters or presets. Reuse the original algorithms and preserve nullable cost/profit evidence rather than treating missing cost as zero. Verified registry in src/ERP.Application/DTOs/ReportMigrationRegistryDtos.cs, providers in src/ERP.Infrastructure/DependencyInjection.cs and existing preset manifest in src/ERP.Application/Services/ReportConfigurationPresetCatalog.cs. Search existing task history excludes this family: ERP-297 is purchase/supplier and ERP-298 is financial statements/ar-aging.",
   "id": "ERP-300",
-  "status": "in_progress",
+  "status": "completed",
   "attempts": 1,
   "max_attempts": 3,
   "validation_profile": "safe",

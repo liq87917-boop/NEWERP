@@ -63,6 +63,42 @@ internal static class ReportConfigurationPresetManifest
             "动态库存库龄报表（迁移预设）",
             ReportConfigurationConstants.DatasetInventoryAging,
             InventoryAgingPresetDefinition()),
+        new ReportConfigurationPresetSeed(
+            "product-sales-ranking",
+            "report:product-sales-ranking",
+            "商品销量排名榜（迁移预设）",
+            ReportConfigurationConstants.DatasetProductSalesRanking,
+            ProductSalesRankingPresetDefinition()),
+        new ReportConfigurationPresetSeed(
+            "product-sales-ranking-dynamic",
+            "dynamic:product-sales-ranking",
+            "动态商品销量排名报表（迁移预设）",
+            ReportConfigurationConstants.DatasetProductSalesRanking,
+            ProductSalesRankingPresetDefinition()),
+        new ReportConfigurationPresetSeed(
+            "order-profit",
+            "report:order-profit",
+            "订单利润暂估表（迁移预设）",
+            ReportConfigurationConstants.DatasetOrderProfit,
+            OrderProfitPresetDefinition()),
+        new ReportConfigurationPresetSeed(
+            "order-profit-dynamic",
+            "dynamic:order-profit",
+            "动态订单利润暂估报表（迁移预设）",
+            ReportConfigurationConstants.DatasetOrderProfit,
+            OrderProfitPresetDefinition()),
+        new ReportConfigurationPresetSeed(
+            "sales-commission",
+            "report:sales-commission",
+            "业务员提成表（迁移预设）",
+            ReportConfigurationConstants.DatasetSalesCommission,
+            SalesCommissionPresetDefinition()),
+        new ReportConfigurationPresetSeed(
+            "sales-commission-dynamic",
+            "dynamic:sales-commission",
+            "动态业务员提成证据报表（迁移预设）",
+            ReportConfigurationConstants.DatasetSalesCommission,
+            SalesCommissionPresetDefinition()),
     };
 
     private static ReportConfigurationDefinition SalesOrderPresetDefinition() => new()
@@ -131,6 +167,53 @@ internal static class ReportConfigurationPresetManifest
         {
             "productName", "spec", "unit", "warehouseName",
             "quantity", "minStock", "maxStock", "diff", "alertLevel",
+        },
+        Filters = new List<ReportConfigurationFilter>(),
+        Grouping = new List<string> { ReportConfigurationConstants.GroupNone },
+        Aggregates = new List<ReportConfigurationAggregate>(),
+        Capabilities = new List<string> { ReportConfigurationConstants.CapabilityPreview },
+        Presentation = new ReportConfigurationPresentation { Page = 1, PageSize = 20 },
+    };
+
+    private static ReportConfigurationDefinition ProductSalesRankingPresetDefinition() => new()
+    {
+        SchemaVersion = ReportConfigurationRules.CurrentSchemaVersion,
+        DatasetKey = ReportConfigurationConstants.DatasetProductSalesRanking,
+        Fields = new List<string>
+        {
+            "rank", "productCode", "productName", "spec", "unit", "totalQuantity",
+        },
+        Filters = new List<ReportConfigurationFilter>(),
+        Grouping = new List<string> { ReportConfigurationConstants.GroupNone },
+        Aggregates = new List<ReportConfigurationAggregate>(),
+        Capabilities = new List<string> { ReportConfigurationConstants.CapabilityPreview },
+        Presentation = new ReportConfigurationPresentation { Page = 1, PageSize = 20 },
+    };
+
+    private static ReportConfigurationDefinition OrderProfitPresetDefinition() => new()
+    {
+        SchemaVersion = ReportConfigurationRules.CurrentSchemaVersion,
+        DatasetKey = ReportConfigurationConstants.DatasetOrderProfit,
+        Fields = new List<string>
+        {
+            "orderNo", "orderDate", "customerName", "currency", "salesAmount",
+            "costAmount", "profit", "profitRate", "currentPriceEstimate",
+        },
+        Filters = new List<ReportConfigurationFilter>(),
+        Grouping = new List<string> { ReportConfigurationConstants.GroupNone },
+        Aggregates = new List<ReportConfigurationAggregate>(),
+        Capabilities = new List<string> { ReportConfigurationConstants.CapabilityPreview },
+        Presentation = new ReportConfigurationPresentation { Page = 1, PageSize = 20 },
+    };
+
+    private static ReportConfigurationDefinition SalesCommissionPresetDefinition() => new()
+    {
+        SchemaVersion = ReportConfigurationRules.CurrentSchemaVersion,
+        DatasetKey = ReportConfigurationConstants.DatasetSalesCommission,
+        Fields = new List<string>
+        {
+            "salesmanName", "currency", "orderCount", "salesAmount",
+            "commissionRate", "commissionAmount", "sourceLabel",
         },
         Filters = new List<ReportConfigurationFilter>(),
         Grouping = new List<string> { ReportConfigurationConstants.GroupNone },

@@ -96,6 +96,9 @@ public static class ReportConfigurationConstants
     public const string DatasetInventoryMovement = "inventory-movement";
     public const string DatasetInventoryAging = "inventory-aging";
     public const string DatasetStockAlert = "stock-alert";
+    public const string DatasetProductSalesRanking = "product-sales-ranking";
+    public const string DatasetOrderProfit = "order-profit";
+    public const string DatasetSalesCommission = "sales-commission";
 
     // ==================== 受控关系（ERP-268：客户维度） ====================
 
