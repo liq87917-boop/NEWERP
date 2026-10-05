@@ -754,6 +754,10 @@ public sealed class ReportConfigurationExecutionService : IReportConfigurationEx
         var fieldKey = parameters.SortFieldKey;
         if (string.IsNullOrWhiteSpace(fieldKey))
         {
+            if (dataset.DatasetKey.StartsWith("master:", StringComparison.OrdinalIgnoreCase)
+                && !string.IsNullOrWhiteSpace(dataset.SortingExplanation))
+                return dataset.SortingExplanation;
+
             return isReceivable
                 ? "默认排序：按客户 / 币种 / 开票日期降序 / 发票 Id 降序（既有默认口径）"
                 : "默认排序：按订单 Id 升序（稳定分页）";
