@@ -45,6 +45,9 @@ public static class ReportConfigurationBundlePresetConstants
 
     /// <summary>状态参数最大长度。</summary>
     public const int MaxStatusLength = 100;
+
+    /// <summary>物化失败后事务回滚（清理）的有界超时：独立于已取消的请求令牌，取消态下仍能完成清理且绝不无限等待。</summary>
+    public static readonly TimeSpan CleanupTimeout = TimeSpan.FromSeconds(5);
 }
 
 /// <summary>捆绑预设的共享参数元数据（只读、有限）：键 / 类型 / 中文标签 / 是否必填。</summary>

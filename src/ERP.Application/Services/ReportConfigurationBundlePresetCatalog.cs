@@ -1,6 +1,8 @@
 using ERP.Application.Common;
 using ERP.Application.DTOs;
 using ERP.Application.Interfaces;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 
 namespace ERP.Application.Services;
 
@@ -153,7 +155,7 @@ internal static class ReportConfigurationBundlePresetManifest
 /// 物化先确认预设 preset-ready，再对每一节重新校验数据集授权、参数绑定与有界定义（绝不信任预设载荷），
 /// 全部通过后才落为当前用户私有草稿；任何一节失败即整体回滚本次新建的私有草稿。
 /// </summary>
-public sealed class ReportConfigurationBundlePresetCatalog : IReportConfigurationBundlePresetCatalog
+public class ReportConfigurationBundlePresetCatalog : IReportConfigurationBundlePresetCatalog
 {
     private readonly IReportConfigurationCatalog _catalog;
     private readonly IReportConfigurationService _service;
@@ -219,24 +221,27 @@ public sealed class ReportConfigurationBundlePresetCatalog : IReportConfiguratio
         {
             Sections = new List<ReportConfigurationBundleSectionRequest>(sections.Count),
         };
-        var created = new List<long>(sections.Count);
 
+        // 全有或全无（ERP-315）：共享 EF 数据库事务。逐节 CreateAsync 的 SaveChanges 只入队到当前事务，
+        // 统一 Commit 后才落库；取消 / 任一节失败 / 提交失败都整体回滚，绝不留下本次新建的部分可用草稿。
+        await using var transaction = await _db.Database.BeginTransactionAsync(cancellationToken);
         try
         {
             foreach (var section in sections)
             {
                 var dto = await _service.CreateAsync(userId.Value, section.Save, cancellationToken);
-                created.Add(dto.Id);
                 bundle.Sections.Add(new ReportConfigurationBundleSectionRequest
                 {
                     ConfigurationId = dto.Id,
                     Title = section.Title,
                 });
             }
+
+            await CommitAsync(transaction, cancellationToken);
         }
-        catch
+        catch (Exception original)
         {
-            await RollbackAsync(userId.Value, created, cancellationToken);
+            await RollbackPreservingAsync(transaction, original);
             throw;
         }
 
@@ -558,18 +563,28 @@ public sealed class ReportConfigurationBundlePresetCatalog : IReportConfiguratio
         return preset;
     }
 
-    private async Task RollbackAsync(long userId, IReadOnlyList<long> createdIds, CancellationToken cancellationToken)
+    private const string CleanupFailureDataKey = "BundlePreset.CleanupFailure";
+
+    /// <summary>事务提交接缝（可被测试重写注入提交失败）；生产路径直接提交当前共享事务。</summary>
+    protected virtual Task CommitAsync(IDbContextTransaction transaction, CancellationToken cancellationToken)
+        => transaction.CommitAsync(cancellationToken);
+
+    /// <summary>事务回滚接缝（可被测试重写注入清理失败）；生产路径直接回滚当前共享事务。</summary>
+    protected virtual Task RollbackAsync(IDbContextTransaction transaction, CancellationToken cleanupToken)
+        => transaction.RollbackAsync(cleanupToken);
+
+    private async Task RollbackPreservingAsync(IDbContextTransaction transaction, Exception original)
     {
-        foreach (var id in createdIds)
+        // 有界清理令牌独立于已取消的请求：取消后仍能完成回滚，且绝不无限等待。
+        using var cleanupCts = new CancellationTokenSource(ReportConfigurationBundlePresetConstants.CleanupTimeout);
+        try
         {
-            try
-            {
-                await _service.DeleteAsync(userId, id, expectedVersion: 1, cancellationToken);
-            }
-            catch
-            {
-                // 尽力回滚：绝不掩盖原始失败，也绝不清除非本次创建的配置。
-            }
+            await RollbackAsync(transaction, cleanupCts.Token);
+        }
+        catch (Exception rollbackFailure)
+        {
+            // 绝不静默吞掉回滚失败：保留原始失败 / 取消与审计结果，把清理失败作为诊断证据挂到原异常上。
+            original.Data[CleanupFailureDataKey] = rollbackFailure;
         }
     }
 

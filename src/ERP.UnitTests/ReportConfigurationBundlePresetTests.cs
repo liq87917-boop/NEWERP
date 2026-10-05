@@ -7,6 +7,7 @@ using ERP.Domain.Entities;
 using ERP.Domain.Enums;
 using ERP.Infrastructure.Data;
 using ERP.Infrastructure.Reports;
+using Microsoft.EntityFrameworkCore.Storage;
 using System.Text.Json;
 using Xunit;
 
@@ -401,34 +402,88 @@ public class ReportConfigurationBundlePresetTests
         var user = SeedAuthorizedUser(db, "bp-rollback", "sales-order");
         var catalog = BuildRealCatalog(db);
         var fake = new FailingAfterFirstCreateService();
-        var presets = new ReportConfigurationBundlePresetCatalog(catalog, fake, db);
+        var presets = new RecordingRollbackCatalog(catalog, fake, db);
 
         var ex = await Assert.ThrowsAsync<BusinessException>(() => presets.MaterializeAsync("receipt-reconciliation",
             new ReportConfigurationBundlePresetMaterializeRequest { CustomerId = 1 }, user));
 
         Assert.Equal(ErrorCodes.RuleConflict, ex.Code);
-        Assert.Single(fake.DeletedIds);
-        Assert.Equal(1, fake.DeletedIds[0]);
+        Assert.Equal(2, fake.CreateCalls);
+        Assert.Equal(1, presets.RollbackCalls);
         Assert.Empty(db.ReportConfigurations);
+    }
+
+    [Fact]
+    public async Task Materialize_SecondSectionCancelled_UsesIndependentBoundedCleanupToken()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedAuthorizedUser(db, "bp-cancel", "sales-order");
+        var catalog = BuildRealCatalog(db);
+        using var request = new CancellationTokenSource();
+        var fake = new CancellingAfterFirstCreateService(request);
+        var presets = new RecordingRollbackCatalog(catalog, fake, db);
+
+        var ex = await Assert.ThrowsAsync<OperationCanceledException>(() => presets.MaterializeAsync(
+            "receipt-reconciliation",
+            new ReportConfigurationBundlePresetMaterializeRequest { CustomerId = 1 }, user, request.Token));
+
+        Assert.True(request.IsCancellationRequested);
+        Assert.Equal(2, fake.CreateCalls);
+        Assert.Equal(1, presets.RollbackCalls);
+        Assert.False(presets.LastCleanupToken.IsCancellationRequested);
+        Assert.NotEqual(request.Token, presets.LastCleanupToken);
+    }
+
+    [Fact]
+    public async Task Materialize_CommitFails_RollsBackAndPreservesOriginalError()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedAuthorizedUser(db, "bp-commit", "sales-order");
+        var catalog = BuildRealCatalog(db);
+        var fake = new RecordingCreateService();
+        var presets = new FailingCommitCatalog(catalog, fake, db);
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => presets.MaterializeAsync(
+            "receipt-reconciliation",
+            new ReportConfigurationBundlePresetMaterializeRequest { CustomerId = 1 }, user));
+
+        Assert.Contains("commit fault", ex.Message);
+        Assert.Equal(2, fake.CreateCalls);
+        Assert.Equal(1, presets.RollbackCalls);
+    }
+
+    [Fact]
+    public async Task Materialize_CleanupFails_PreservesOriginalErrorAndRetainsDiagnosticEvidence()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedAuthorizedUser(db, "bp-cleanup", "sales-order");
+        var catalog = BuildRealCatalog(db);
+        var fake = new FailingAfterFirstCreateService();
+        var presets = new FailingCleanupCatalog(catalog, fake, db);
+
+        var ex = await Assert.ThrowsAsync<BusinessException>(() => presets.MaterializeAsync(
+            "receipt-reconciliation",
+            new ReportConfigurationBundlePresetMaterializeRequest { CustomerId = 1 }, user));
+
+        Assert.Equal(ErrorCodes.RuleConflict, ex.Code);
+        var evidence = ex.Data.Values.Cast<object>().OfType<Exception>()
+            .SingleOrDefault(e => e.Message.Contains("cleanup fault"));
+        Assert.NotNull(evidence);
     }
 
     private sealed class FailingAfterFirstCreateService : IReportConfigurationService
     {
-        public List<long> DeletedIds { get; } = new();
-        private int _creates;
+        public int CreateCalls { get; private set; }
 
         public Task<ReportConfigurationDto> CreateAsync(long ownerUserId, ReportConfigurationSaveDto dto, CancellationToken cancellationToken = default)
         {
-            if (++_creates >= 2)
+            if (++CreateCalls >= 2)
                 throw BusinessException.RuleConflict("模拟第二节失败");
-            return Task.FromResult(new ReportConfigurationDto { Id = _creates, OwnerUserId = ownerUserId, Name = dto.Name });
+            return Task.FromResult(new ReportConfigurationDto { Id = CreateCalls, OwnerUserId = ownerUserId, Name = dto.Name });
         }
 
         public Task DeleteAsync(long ownerUserId, long id, int expectedVersion, CancellationToken cancellationToken = default)
-        {
-            DeletedIds.Add(id);
-            return Task.CompletedTask;
-        }
+            => Task.CompletedTask;
 
         public Task<ReportConfigurationDto> UpdateAsync(long ownerUserId, long id, int expectedVersion, ReportConfigurationSaveDto dto, CancellationToken cancellationToken = default)
             => throw new NotImplementedException();
@@ -450,5 +505,104 @@ public class ReportConfigurationBundlePresetTests
             => throw new NotImplementedException();
         public Task<ReportConfigurationPage<ReportConfigurationRevisionDto>> ListRevisionsPageAsync(long ownerUserId, long id, int? limit = null, string? cursor = null, CancellationToken cancellationToken = default)
             => throw new NotImplementedException();
+    }
+
+    private abstract class StubReportConfigurationService : IReportConfigurationService
+    {
+        public abstract Task<ReportConfigurationDto> CreateAsync(long ownerUserId, ReportConfigurationSaveDto dto, CancellationToken cancellationToken = default);
+
+        public virtual Task DeleteAsync(long ownerUserId, long id, int expectedVersion, CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
+
+        public virtual Task<ReportConfigurationDto> UpdateAsync(long ownerUserId, long id, int expectedVersion, ReportConfigurationSaveDto dto, CancellationToken cancellationToken = default)
+            => throw new NotImplementedException();
+        public virtual Task<ReportConfigurationDto> RenameAsync(long ownerUserId, long id, int expectedVersion, string name, CancellationToken cancellationToken = default)
+            => throw new NotImplementedException();
+        public virtual Task<ReportConfigurationDto> CopyAsync(long ownerUserId, long id, CancellationToken cancellationToken = default)
+            => throw new NotImplementedException();
+        public virtual Task<ReportConfigurationDto> GetAsync(long ownerUserId, long id, CancellationToken cancellationToken = default)
+            => throw new NotImplementedException();
+        public virtual Task<List<ReportConfigurationSummaryDto>> ListAsync(long ownerUserId, CancellationToken cancellationToken = default)
+            => throw new NotImplementedException();
+        public virtual Task<ReportConfigurationPage<ReportConfigurationSummaryDto>> ListPageAsync(long ownerUserId, int? limit = null, string? cursor = null, CancellationToken cancellationToken = default)
+            => throw new NotImplementedException();
+        public virtual Task<ReportConfigurationDto> PublishAsync(long ownerUserId, long id, int expectedVersion, CancellationToken cancellationToken = default)
+            => throw new NotImplementedException();
+        public virtual Task<ReportConfigurationDto> RestoreAsync(long ownerUserId, long id, int expectedVersion, int versionNumber, CancellationToken cancellationToken = default)
+            => throw new NotImplementedException();
+        public virtual Task<List<ReportConfigurationRevisionDto>> ListRevisionsAsync(long ownerUserId, long id, CancellationToken cancellationToken = default)
+            => throw new NotImplementedException();
+        public virtual Task<ReportConfigurationPage<ReportConfigurationRevisionDto>> ListRevisionsPageAsync(long ownerUserId, long id, int? limit = null, string? cursor = null, CancellationToken cancellationToken = default)
+            => throw new NotImplementedException();
+    }
+
+    private sealed class CancellingAfterFirstCreateService : StubReportConfigurationService
+    {
+        private readonly CancellationTokenSource _request;
+
+        public CancellingAfterFirstCreateService(CancellationTokenSource request) => _request = request;
+
+        public int CreateCalls { get; private set; }
+
+        public override Task<ReportConfigurationDto> CreateAsync(long ownerUserId, ReportConfigurationSaveDto dto, CancellationToken cancellationToken = default)
+        {
+            if (++CreateCalls == 1)
+            {
+                _request.Cancel();
+                return Task.FromResult(new ReportConfigurationDto { Id = 1, OwnerUserId = ownerUserId, Name = dto.Name });
+            }
+
+            throw new OperationCanceledException(cancellationToken);
+        }
+    }
+
+    private sealed class RecordingCreateService : StubReportConfigurationService
+    {
+        public int CreateCalls { get; private set; }
+
+        public override Task<ReportConfigurationDto> CreateAsync(long ownerUserId, ReportConfigurationSaveDto dto, CancellationToken cancellationToken = default)
+            => Task.FromResult(new ReportConfigurationDto { Id = ++CreateCalls, OwnerUserId = ownerUserId, Name = dto.Name });
+    }
+
+    private sealed class RecordingRollbackCatalog : ReportConfigurationBundlePresetCatalog
+    {
+        public int RollbackCalls { get; private set; }
+        public CancellationToken LastCleanupToken { get; private set; }
+
+        public RecordingRollbackCatalog(IReportConfigurationCatalog catalog, IReportConfigurationService service, IErpDbContext db)
+            : base(catalog, service, db) { }
+
+        protected override Task RollbackAsync(IDbContextTransaction transaction, CancellationToken cleanupToken)
+        {
+            RollbackCalls++;
+            LastCleanupToken = cleanupToken;
+            return base.RollbackAsync(transaction, cleanupToken);
+        }
+    }
+
+    private sealed class FailingCommitCatalog : ReportConfigurationBundlePresetCatalog
+    {
+        public int RollbackCalls { get; private set; }
+
+        public FailingCommitCatalog(IReportConfigurationCatalog catalog, IReportConfigurationService service, IErpDbContext db)
+            : base(catalog, service, db) { }
+
+        protected override Task CommitAsync(IDbContextTransaction transaction, CancellationToken cancellationToken)
+            => throw new InvalidOperationException("commit fault injected");
+
+        protected override Task RollbackAsync(IDbContextTransaction transaction, CancellationToken cleanupToken)
+        {
+            RollbackCalls++;
+            return base.RollbackAsync(transaction, cleanupToken);
+        }
+    }
+
+    private sealed class FailingCleanupCatalog : ReportConfigurationBundlePresetCatalog
+    {
+        public FailingCleanupCatalog(IReportConfigurationCatalog catalog, IReportConfigurationService service, IErpDbContext db)
+            : base(catalog, service, db) { }
+
+        protected override Task RollbackAsync(IDbContextTransaction transaction, CancellationToken cleanupToken)
+            => throw new InvalidOperationException("cleanup fault injected");
     }
 }

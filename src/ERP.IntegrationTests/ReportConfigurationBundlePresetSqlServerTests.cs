@@ -137,4 +137,98 @@ public sealed class ReportConfigurationBundlePresetSqlServerTests : IClassFixtur
             Assert.StartsWith("%PDF-", Encoding.ASCII.GetString(pdf));
         }
     }
+
+    [Fact]
+    public async Task 捆绑预设_第二节失败_真实SQL回滚不留部分草稿且他人配置不变()
+    {
+        Guard();
+        await using var db = _fixture.CreateDbContext();
+
+        await EnsureCustomerMenuAsync(db, _fixture);
+        await SeedReceivableInvoicesAsync(db, _fixture);
+
+        var providers = BuildProviders(db);
+        var catalog = new ReportConfigurationCatalog(providers);
+        var real = new ReportConfigurationService(db, catalog);
+        var failing = new FailingAfterFirstWriteService(real);
+        var presets = new ReportConfigurationBundlePresetCatalog(catalog, failing, db);
+
+        // 他人既有私有草稿：物化失败绝不能触碰
+        var other = await real.CreateAsync(_fixture.SalespersonUserId, new ReportConfigurationSaveDto
+        {
+            Name = "ERP315-他人草稿",
+            Definition = SalesOrderDefinition(),
+        });
+
+        var beforeConfigs = await db.ReportConfigurations.CountAsync(c => !c.IsDeleted);
+        var beforeRevisions = await db.ReportConfigurationRevisions.CountAsync();
+
+        Guard();
+        var ex = await Assert.ThrowsAsync<BusinessException>(() => presets.MaterializeAsync("customer-report-packet",
+            new ReportConfigurationBundlePresetMaterializeRequest { CustomerId = _fixture.CustomerAId },
+            _fixture.PrivilegedUserId));
+
+        Assert.Equal(ErrorCodes.RuleConflict, ex.Code);
+
+        // 真实 SQL 校验：失败后本次新建的部分草稿全部回滚（定义 / 版本行数不变）
+        Assert.Equal(beforeConfigs, await db.ReportConfigurations.CountAsync(c => !c.IsDeleted));
+        Assert.Equal(beforeRevisions, await db.ReportConfigurationRevisions.CountAsync());
+
+        // 他人私有定义未被改动
+        var otherStill = await db.ReportConfigurations.SingleAsync(c => c.Id == other.Id);
+        Assert.False(otherStill.IsDeleted);
+        Assert.Equal("ERP315-他人草稿", otherStill.Name);
+    }
+
+    private static ReportConfigurationDefinition SalesOrderDefinition() => new()
+    {
+        SchemaVersion = ReportConfigurationRules.CurrentSchemaVersion,
+        DatasetKey = ReportConfigurationConstants.DatasetSalesOrder,
+        Fields = new List<string> { "orderNo", "currency", "totalAmount" },
+        Filters = new List<ReportConfigurationFilter>(),
+        Grouping = new List<string> { ReportConfigurationConstants.GroupNone },
+        Aggregates = new List<ReportConfigurationAggregate>(),
+        Capabilities = new List<string> { ReportConfigurationConstants.CapabilityPreview },
+        Presentation = new ReportConfigurationPresentation { Page = 1, PageSize = 20 },
+    };
+
+    private sealed class FailingAfterFirstWriteService : IReportConfigurationService
+    {
+        private readonly IReportConfigurationService _inner;
+        private int _creates;
+
+        public FailingAfterFirstWriteService(IReportConfigurationService inner) => _inner = inner;
+
+        public async Task<ReportConfigurationDto> CreateAsync(long ownerUserId, ReportConfigurationSaveDto dto, CancellationToken cancellationToken = default)
+        {
+            if (++_creates >= 2)
+                throw BusinessException.RuleConflict("模拟第二节失败");
+
+            return await _inner.CreateAsync(ownerUserId, dto, cancellationToken);
+        }
+
+        public Task DeleteAsync(long ownerUserId, long id, int expectedVersion, CancellationToken cancellationToken = default)
+            => _inner.DeleteAsync(ownerUserId, id, expectedVersion, cancellationToken);
+
+        public Task<ReportConfigurationDto> UpdateAsync(long ownerUserId, long id, int expectedVersion, ReportConfigurationSaveDto dto, CancellationToken cancellationToken = default)
+            => throw new NotImplementedException();
+        public Task<ReportConfigurationDto> RenameAsync(long ownerUserId, long id, int expectedVersion, string name, CancellationToken cancellationToken = default)
+            => throw new NotImplementedException();
+        public Task<ReportConfigurationDto> CopyAsync(long ownerUserId, long id, CancellationToken cancellationToken = default)
+            => throw new NotImplementedException();
+        public Task<ReportConfigurationDto> GetAsync(long ownerUserId, long id, CancellationToken cancellationToken = default)
+            => throw new NotImplementedException();
+        public Task<List<ReportConfigurationSummaryDto>> ListAsync(long ownerUserId, CancellationToken cancellationToken = default)
+            => throw new NotImplementedException();
+        public Task<ReportConfigurationPage<ReportConfigurationSummaryDto>> ListPageAsync(long ownerUserId, int? limit = null, string? cursor = null, CancellationToken cancellationToken = default)
+            => throw new NotImplementedException();
+        public Task<ReportConfigurationDto> PublishAsync(long ownerUserId, long id, int expectedVersion, CancellationToken cancellationToken = default)
+            => throw new NotImplementedException();
+        public Task<ReportConfigurationDto> RestoreAsync(long ownerUserId, long id, int expectedVersion, int versionNumber, CancellationToken cancellationToken = default)
+            => throw new NotImplementedException();
+        public Task<List<ReportConfigurationRevisionDto>> ListRevisionsAsync(long ownerUserId, long id, CancellationToken cancellationToken = default)
+            => throw new NotImplementedException();
+        public Task<ReportConfigurationPage<ReportConfigurationRevisionDto>> ListRevisionsPageAsync(long ownerUserId, long id, int? limit = null, string? cursor = null, CancellationToken cancellationToken = default)
+            => throw new NotImplementedException();
+    }
 }
