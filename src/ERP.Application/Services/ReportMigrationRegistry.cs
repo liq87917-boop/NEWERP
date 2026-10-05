@@ -174,16 +174,44 @@ public sealed class ReportMigrationRegistry : IReportMigrationRegistry
         ReportMigrationRegistryEntryDefinition definition,
         ReportConfigurationDatasetDto dataset)
     {
-        var menuMatch = definition.RequiredMenuCodes.Count == 1
-            && string.Equals(
-                definition.RequiredMenuCodes[0],
-                dataset.RequiredMenuCode,
-                StringComparison.OrdinalIgnoreCase);
+        var menuMatch = RequiredMenuCodesMatch(definition.RequiredMenuCodes, dataset.RequiredMenuCode);
         var currencyUnitMatch = string.Equals(
             definition.CurrencyUnitSemantics,
             dataset.CurrencyUnitSemantics,
             StringComparison.Ordinal);
         return menuMatch && currencyUnitMatch;
+    }
+
+    /// <summary>
+    /// 菜单语义匹配（fail closed，与 <see cref="IsMenuAuthorized"/> 一致地按集合语义）：
+    /// 条目声明的必需菜单集合必须与受控数据集的必需菜单集合完全一致；单菜单条目行为与旧实现一致，
+    /// 多菜单条目（旧单据导出族）按完整声明集合逐项比对，任一必需菜单缺失即不匹配。
+    /// <para>受控数据集对多菜单族用 '+' 连接必需菜单（见 LegacyBillExport / MasterData 数据集适配器）。</para>
+    /// </summary>
+    private static bool RequiredMenuCodesMatch(
+        IReadOnlyList<string> declaredMenuCodes,
+        string datasetRequiredMenuCode)
+    {
+        if (declaredMenuCodes is null || declaredMenuCodes.Count == 0)
+            return false;
+
+        if (string.IsNullOrWhiteSpace(datasetRequiredMenuCode))
+            return false;
+
+        var datasetMenuCodes = new HashSet<string>(
+            datasetRequiredMenuCode.Split('+', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
+            StringComparer.OrdinalIgnoreCase);
+
+        if (declaredMenuCodes.Count != datasetMenuCodes.Count)
+            return false;
+
+        foreach (var code in declaredMenuCodes)
+        {
+            if (!datasetMenuCodes.Contains(code))
+                return false;
+        }
+
+        return true;
     }
 
     /// <summary>兼容性声明：至少声明一种 Excel / PDF 兼容性（未声明视为未匹配，fail closed）。</summary>

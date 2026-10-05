@@ -314,6 +314,58 @@ public class ReportConfigurationLegacyBillMigrationTests
         Assert.All(billEntries, e => Assert.Equal(ReportMigrationParityStatusText.PresetReady, e.ParityStatus));
     }
 
+    [Fact]
+    public async Task 迁移登记册_多菜单导出族_完整证据_parity_passed()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedAuthorizedUser(db, "registry-multi-parity",
+            "sales-order", "sales-order-export",
+            "purchase-order", "purchase-order-export",
+            "inquiry", "inquiry-export");
+
+        var evidence = new FakeParityEvidenceProvider(key =>
+            key is "export:bill-proc:sales-order" or "export:bill-proc:purchase-order" or "export:bill-proc:inquiry"
+                ? new ReportMigrationParityEvidenceDto(true, true, true, true)
+                : null);
+
+        var registry = new ReportMigrationRegistry(
+            BuildCatalog(db), db, new ReportMigrationPresetCatalog(), evidence);
+
+        var result = await registry.GetRegistryAsync(user.Id);
+
+        Assert.Equal(ReportMigrationParityStatusText.ParityPassed,
+            result.Entries.Single(e => e.LegacyKey == "export:bill-proc:sales-order").ParityStatus);
+        Assert.Equal(ReportMigrationParityStatusText.ParityPassed,
+            result.Entries.Single(e => e.LegacyKey == "export:bill-proc:purchase-order").ParityStatus);
+        Assert.Equal(ReportMigrationParityStatusText.ParityPassed,
+            result.Entries.Single(e => e.LegacyKey == "export:bill-proc:inquiry").ParityStatus);
+    }
+
+    [Theory]
+    [InlineData("registry-missing-base", "sales-order-export")]
+    [InlineData("registry-missing-export", "sales-order")]
+    public async Task 迁移登记册_多菜单导出族_缺失任一必需菜单_隐藏(string name, string menuCode)
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedAuthorizedUser(db, name, menuCode);
+
+        var registry = new ReportMigrationRegistry(
+            BuildCatalog(db), db, new ReportMigrationPresetCatalog(), new EmptyReportMigrationParityEvidenceProvider());
+
+        var result = await registry.GetRegistryAsync(user.Id);
+
+        Assert.DoesNotContain(result.Entries, e => e.LegacyKey == "export:bill-proc:sales-order");
+    }
+
+    private sealed class FakeParityEvidenceProvider : IReportMigrationParityEvidenceProvider
+    {
+        private readonly Func<string, ReportMigrationParityEvidenceDto?> _evidence;
+
+        public FakeParityEvidenceProvider(Func<string, ReportMigrationParityEvidenceDto?> evidence) => _evidence = evidence;
+
+        public ReportMigrationParityEvidenceDto? GetEvidence(string legacyKey) => _evidence(legacyKey);
+    }
+
     private sealed class FakeBillExportReader : ILegacyBillExportReadService
     {
         public LegacyBillExportQuery? LastQuery { get; private set; }

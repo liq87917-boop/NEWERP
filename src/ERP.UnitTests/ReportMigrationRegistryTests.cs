@@ -386,6 +386,77 @@ public class ReportMigrationRegistryTests
         Assert.Equal(ReportMigrationParityStatusText.ParityPassed, entry.ParityStatus);
     }
 
+    [Fact]
+    public async Task Parity_多菜单导出族_完整菜单集合_parity_passed()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedUserWithMenus(db, "multi-passed", "sales-order", "sales-order-export");
+
+        var catalog = new FakeCatalog(new Dictionary<string, ReportConfigurationDatasetDto?>
+        {
+            ["bill-export:sales-order"] = Dataset("bill-export:sales-order", "sales-order+sales-order-export",
+                "金额按原币呈现；数量按基础单位；不跨币种换算或合并"),
+        });
+        var evidence = new FakeEvidenceProvider(key => key == "export:bill-proc:sales-order"
+            ? new ReportMigrationParityEvidenceDto(true, true, true, true)
+            : null);
+        var registry = BuildRegistry(db, catalog,
+            new FakePresetCatalog(k => k == "export:bill-proc:sales-order"), evidence);
+
+        var result = await registry.GetRegistryAsync(user.Id);
+
+        var entry = Assert.Single(result.Entries, e => e.LegacyKey == "export:bill-proc:sales-order");
+        Assert.Equal(ReportMigrationParityStatusText.ParityPassed, entry.ParityStatus);
+    }
+
+    [Fact]
+    public async Task Parity_多菜单导出族_缺失基础菜单_语义不匹配_preset_ready()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedUserWithMenus(db, "multi-missing-base", "sales-order", "sales-order-export");
+
+        var catalog = new FakeCatalog(new Dictionary<string, ReportConfigurationDatasetDto?>
+        {
+            // 数据集只声明专用导出菜单（缺失基础菜单），语义匹配必须失败（fail closed）。
+            ["bill-export:sales-order"] = Dataset("bill-export:sales-order", "sales-order-export",
+                "金额按原币呈现；数量按基础单位；不跨币种换算或合并"),
+        });
+        var evidence = new FakeEvidenceProvider(key => key == "export:bill-proc:sales-order"
+            ? new ReportMigrationParityEvidenceDto(true, true, true, true)
+            : null);
+        var registry = BuildRegistry(db, catalog,
+            new FakePresetCatalog(k => k == "export:bill-proc:sales-order"), evidence);
+
+        var result = await registry.GetRegistryAsync(user.Id);
+
+        var entry = Assert.Single(result.Entries, e => e.LegacyKey == "export:bill-proc:sales-order");
+        Assert.Equal(ReportMigrationParityStatusText.PresetReady, entry.ParityStatus);
+    }
+
+    [Fact]
+    public async Task Parity_多菜单导出族_缺失专用导出菜单_语义不匹配_preset_ready()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedUserWithMenus(db, "multi-missing-export", "sales-order", "sales-order-export");
+
+        var catalog = new FakeCatalog(new Dictionary<string, ReportConfigurationDatasetDto?>
+        {
+            // 数据集只声明基础菜单（缺失专用导出菜单），语义匹配必须失败（fail closed）。
+            ["bill-export:sales-order"] = Dataset("bill-export:sales-order", "sales-order",
+                "金额按原币呈现；数量按基础单位；不跨币种换算或合并"),
+        });
+        var evidence = new FakeEvidenceProvider(key => key == "export:bill-proc:sales-order"
+            ? new ReportMigrationParityEvidenceDto(true, true, true, true)
+            : null);
+        var registry = BuildRegistry(db, catalog,
+            new FakePresetCatalog(k => k == "export:bill-proc:sales-order"), evidence);
+
+        var result = await registry.GetRegistryAsync(user.Id);
+
+        var entry = Assert.Single(result.Entries, e => e.LegacyKey == "export:bill-proc:sales-order");
+        Assert.Equal(ReportMigrationParityStatusText.PresetReady, entry.ParityStatus);
+    }
+
     // ==================== 3.5 捆绑组合条目 parity 派生（ERP-322） ====================
 
     private static ReportConfigurationBundlePresetDto PacketBundlePreset(
