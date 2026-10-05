@@ -122,6 +122,9 @@ public static class DependencyInjection
         // 通用报表配置平台（ERP-307 Stage 2）：有界多节捆绑（复用既有执行服务编排既有定义 / 版本，无新实体 / 无新 SQL）
         services.AddScoped<IReportConfigurationBundleService, ReportConfigurationBundleService>();
 
+        // 通用报表配置平台（ERP-310 Stage 2）：有界多节捆绑预设（有限模板 + 共享参数绑定 + 私有物化；复用既有捆绑引擎，无新实体 / 无新 SQL）
+        services.AddScoped<IReportConfigurationBundlePresetCatalog, ReportConfigurationBundlePresetCatalog>();
+
         // 通用报表配置平台（ERP-269 Stage 1）：服务端执行预算（每用户并发租约 + 截止时间 + 大小上限；单例共享，平台常量）
         services.AddSingleton<IReportConfigurationExecutionBudget>(_ => new ReportConfigurationExecutionBudget());
 

@@ -25,15 +25,18 @@ namespace ERP.Api.Controllers;
 public class ReportConfigurationBundlesController : ControllerBase
 {
     private readonly IReportConfigurationBundleService _bundle;
+    private readonly IReportConfigurationBundlePresetCatalog _presets;
     private readonly IReportConfigurationExecutionBudget _budget;
     private readonly ILogger<ReportConfigurationBundlesController>? _logger;
 
     public ReportConfigurationBundlesController(
         IReportConfigurationBundleService bundle,
+        IReportConfigurationBundlePresetCatalog presets,
         IReportConfigurationExecutionBudget? budget = null,
         ILogger<ReportConfigurationBundlesController>? logger = null)
     {
         _bundle = bundle ?? throw new ArgumentNullException(nameof(bundle));
+        _presets = presets ?? throw new ArgumentNullException(nameof(presets));
         _budget = budget ?? new ReportConfigurationExecutionBudget();
         _logger = logger;
     }
@@ -82,6 +85,71 @@ public class ReportConfigurationBundlesController : ControllerBase
     {
         ArgumentNullException.ThrowIfNull(request);
         return await ExportBoundedAsync(CurrentUserId(), request, exportKind: "pdf");
+    }
+
+    /// <summary>只读列出当前账号已授权的捆绑预设（未授权隐藏；readiness 见 DTO，绝不 presence-only parity-passed）。</summary>
+    [HttpGet("presets")]
+    public async Task<IActionResult> ListPresets()
+    {
+        var result = await WithRequestCancellationAsync(ct => _presets.ListPresetsAsync(CurrentUserId(), ct));
+        return Ok(ApiResponse<List<ReportConfigurationBundlePresetDto>>.Success(result));
+    }
+
+    /// <summary>取得单条已授权捆绑预设；未知 / 未授权显式拒绝（fail closed）。</summary>
+    [HttpGet("presets/{presetKey}")]
+    public async Task<IActionResult> GetPreset(string presetKey)
+    {
+        var dto = await WithRequestCancellationAsync(ct => _presets.GetPresetAsync(presetKey, CurrentUserId(), ct))
+            ?? throw BusinessException.NotFound("捆绑预设不存在或无权访问");
+        return Ok(ApiResponse<ReportConfigurationBundlePresetDto>.Success(dto));
+    }
+
+    /// <summary>按有限参数把捆绑预设物化为当前用户私有多节草稿（全有或全无；失败整体回滚本次新建草稿）。</summary>
+    [HttpPost("presets/{presetKey}/materialize")]
+    public async Task<IActionResult> MaterializePreset(string presetKey, [FromBody] ReportConfigurationBundlePresetMaterializeRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        var result = await WithRequestCancellationAsync(ct =>
+            _presets.MaterializeAsync(presetKey, request, CurrentUserId(), ct));
+        return Ok(ApiResponse<ReportConfigurationBundlePresetMaterializationDto>.Success(result));
+    }
+
+    /// <summary>物化捆绑预设并预览：复用既有有界、已授权捆绑预览；全部节通过后才返回，绝不返回部分节。</summary>
+    [HttpPost("presets/{presetKey}/preview")]
+    public async Task<IActionResult> PreviewPreset(string presetKey, [FromBody] ReportConfigurationBundlePresetMaterializeRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        var userId = CurrentUserId();
+        var preview = await WithRequestCancellationAsync(async ct =>
+        {
+            var materialized = await _presets.MaterializeAsync(presetKey, request, userId, ct);
+            return await _bundle.PreviewAsync(userId, materialized.Bundle, ct);
+        });
+        return Ok(ApiResponse<ReportConfigurationBundlePreviewDto>.Success(preview));
+    }
+
+    /// <summary>物化捆绑预设并导出为多工作表 Excel（只读）：复用同一有界、已授权导出管线。</summary>
+    [HttpPost("presets/{presetKey}/export")]
+    public async Task<IActionResult> ExportPreset(string presetKey, [FromBody] ReportConfigurationBundlePresetMaterializeRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        return await ExportPresetBoundedAsync(presetKey, request, exportKind: "excel");
+    }
+
+    /// <summary>物化捆绑预设并导出为多节中文 PDF（只读）：复用同一有界、已授权导出管线。</summary>
+    [HttpPost("presets/{presetKey}/export/pdf")]
+    public async Task<IActionResult> ExportPresetPdf(string presetKey, [FromBody] ReportConfigurationBundlePresetMaterializeRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        return await ExportPresetBoundedAsync(presetKey, request, exportKind: "pdf");
+    }
+
+    private async Task<IActionResult> ExportPresetBoundedAsync(
+        string presetKey, ReportConfigurationBundlePresetMaterializeRequest request, string exportKind)
+    {
+        var userId = CurrentUserId();
+        var materialized = await _presets.MaterializeAsync(presetKey, request, userId, HttpContext.RequestAborted);
+        return await ExportBoundedAsync(userId, materialized.Bundle, exportKind);
     }
 
     private async Task<IActionResult> ExportBoundedAsync(long userId, ReportConfigurationBundleRequest request, string exportKind)

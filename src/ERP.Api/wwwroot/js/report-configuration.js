@@ -1103,6 +1103,7 @@ async function rccInit() {
     revisionsCursor: null, revisionsHasMore: false, revisionsSeq: 0,
     grantsCursor: null, grantsHasMore: false, grantsSeq: 0,
     bundle: { sections: [], candidates: [], view: null },
+    bundlePresets: [],
     dirty: false, requestSeq: 0, envBlocked: false, busy: false, activeAbort: null,
   };
   rccRenderDesigner();
@@ -1989,7 +1990,9 @@ function rccRenderBundles() {
       + '<button type="button" class="btn btn-danger" onclick="rccBundleRemove(' + i + ')">删除</button>'
       + '</div>';
   }).join('');
-  el.innerHTML = '<div class="rcc-bundle-title">报表捆绑（有界多节 · 1~8 节 · 每节复用既有定义 / 版本）</div>'
+  el.innerHTML = '<div class="rcc-bundle-presets-title">捆绑预设（多节模板 · 参数化物化）</div>'
+    + '<div id="rcc-bundle-preset-list"></div>'
+    + '<div class="rcc-bundle-title">报表捆绑（有界多节 · 1~8 节 · 每节复用既有定义 / 版本）</div>'
     + '<div class="rcc-bundle-builder">'
     + (candidates.length
         ? '<select id="rcc-bundle-candidate">' + options + '</select>'
@@ -2139,6 +2142,192 @@ async function rccBundleExportKind(kind) {
   }
 }
 
+/* ============ 捆绑预设（ERP-310 Stage 2）：多节模板 + 参数化物化，复用既有捆绑预览 / 导出 ============ */
+async function rccLoadBundlePresets() {
+  const env = await rccFetch('/api/report-configuration-bundles/presets');
+  if (env.code === 2000 || env.code === 2003) { rccOnUnauthorized(env.message); return; }
+  if (env.code !== 0) {
+    RCC.bundlePresets = [];
+    rccRenderBundlePresets();
+    const el = document.getElementById('rcc-bundle-preset-list');
+    if (el) el.innerHTML = rccErrorHtml(rccKindOfCode(env.code), env.message || '捆绑预设加载失败');
+    return;
+  }
+  RCC.bundlePresets = (env.data && Array.isArray(env.data)) ? env.data : [];
+  rccRenderBundlePresets();
+}
+
+function rccBundlePresetParamHtml(presetKey, param) {
+  const id = function (suffix) { return 'rbp-' + rccEsc(presetKey) + '-' + suffix; };
+  if (param.key === 'customer') {
+    return '<input id="' + id('customer') + '" type="number" min="1" placeholder="客户Id' + (param.required ? '（必填）' : '') + '">';
+  }
+  if (param.key === 'date') {
+    return '<input id="' + id('start') + '" type="date" placeholder="开始日期">'
+      + '<input id="' + id('end') + '" type="date" placeholder="结束日期">';
+  }
+  if (param.key === 'status') {
+    return '<input id="' + id('status') + '" placeholder="' + rccEsc(param.label || '状态') + '">';
+  }
+  return '';
+}
+
+function rccRenderBundlePresets() {
+  const el = document.getElementById('rcc-bundle-preset-list');
+  if (!el) return;
+  const presets = RCC.bundlePresets || [];
+  if (!presets.length) { el.innerHTML = '<div class="empty">当前账号没有任何已授权捆绑预设</div>'; return; }
+  el.innerHTML = presets.map(function (p) {
+    const params = (p.parameters || []).map(function (prm) {
+      return '<label class="rcc-bundle-preset-param">' + rccEsc(prm.label || prm.key)
+        + rccBundlePresetParamHtml(p.presetKey, prm) + '</label>';
+    }).join('');
+    const sections = (p.sections || []).map(function (s, i) {
+      return '<div class="rcc-bundle-preset-section">' + (i + 1) + '. ' + rccEsc(s.title)
+        + ' · ' + rccEsc(s.datasetLabel || s.datasetKey)
+        + '（' + rccEsc((s.fieldKeys || []).length) + ' 列）</div>';
+    }).join('');
+    const prerequisites = (p.prerequisites || []).map(function (pr) {
+      return '<span class="rcc-bundle-preset-prereq' + (pr.satisfied ? '' : ' rcc-missing') + '">'
+        + rccEsc(pr.label || pr.code) + (pr.satisfied ? '✓' : '✗') + '</span>';
+    }).join(' ');
+    return '<div class="rcc-bundle-preset-row">'
+      + '<div class="rcc-bundle-preset-main">'
+      + '<div class="rcc-bundle-preset-name">' + rccEsc(p.name) + '</div>'
+      + '<div class="rcc-bundle-preset-meta">' + rccEsc(p.readiness || '') + ' · ' + rccEsc(p.legacyKey || '') + '</div>'
+      + '<div class="rcc-bundle-preset-params">' + params + '</div>'
+      + '<div class="rcc-bundle-preset-sections">' + sections + '</div>'
+      + '<div class="rcc-bundle-preset-prereqs">' + prerequisites + '</div>'
+      + '</div>'
+      + '<div class="rcc-bundle-preset-actions">'
+      + '<button type="button" class="btn btn-primary" onclick="rccBundlePresetMaterialize(\'' + rccEsc(p.presetKey) + '\')">物化</button>'
+      + '<button type="button" class="btn" onclick="rccBundlePresetPreview(\'' + rccEsc(p.presetKey) + '\')">预览</button>'
+      + '<button type="button" class="btn" onclick="rccBundlePresetExport(\'' + rccEsc(p.presetKey) + '\', \'excel\')">导出Excel</button>'
+      + '<button type="button" class="btn" onclick="rccBundlePresetExport(\'' + rccEsc(p.presetKey) + '\', \'pdf\')">导出PDF</button>'
+      + '</div>'
+      + '</div>';
+  }).join('');
+}
+
+function rccBundlePresetRequest(presetKey) {
+  const get = function (suffix) {
+    const node = document.getElementById('rbp-' + presetKey + '-' + suffix);
+    return node ? node.value : '';
+  };
+  const customer = get('customer');
+  const start = get('start');
+  const end = get('end');
+  const status = get('status');
+  return {
+    customerId: customer ? Number(customer) : null,
+    startDate: start || null,
+    endDate: end || null,
+    status: status || null,
+  };
+}
+
+async function rccBundlePresetMaterialize(presetKey) {
+  if (RCC.busy) return;
+  RCC.busy = true;
+  const seq = ++RCC.requestSeq;
+  RCC.lastAction = 'materializeBundlePreset';
+  try {
+    const env = await rccFetch('/api/report-configuration-bundles/presets/' + encodeURIComponent(presetKey) + '/materialize', 'POST', rccBundlePresetRequest(presetKey));
+    if (seq !== RCC.requestSeq) return;
+    if (env.code === 2000 || env.code === 2003) { rccOnUnauthorized(env.message); return; }
+    if (env.code !== 0) { rccRenderBundleResult(rccErrorHtml(rccKindOfCode(env.code), env.message || '捆绑预设物化失败')); return; }
+    const bundle = env.data && env.data.bundle;
+    if (bundle && bundle.sections) {
+      const meta = (env.data && env.data.sections) || [];
+      RCC.bundle.sections = bundle.sections.map(function (s, i) {
+        return {
+          configurationId: s.configurationId,
+          revisionVersion: s.revisionVersion || null,
+          title: s.title || (meta[i] && meta[i].title) || '',
+          name: s.title || (meta[i] && meta[i].title) || '',
+          datasetKey: (meta[i] && meta[i].datasetKey) || '',
+        };
+      });
+    }
+    rccRenderBundles();
+    rccRenderBundlePresets();
+    if (typeof toast === 'function') toast('捆绑预设已物化为私有草稿', 'success');
+  } finally {
+    if (seq === RCC.requestSeq) RCC.busy = false;
+  }
+}
+
+async function rccBundlePresetPreview(presetKey) {
+  if (RCC.busy) return;
+  RCC.busy = true;
+  const seq = ++RCC.requestSeq;
+  RCC.lastAction = 'preview';
+  const controller = new AbortController();
+  RCC.activeAbort = controller;
+  rccRenderBundleResult(rccLoadingHtml());
+  try {
+    const env = await rccFetch('/api/report-configuration-bundles/presets/' + encodeURIComponent(presetKey) + '/preview', 'POST', rccBundlePresetRequest(presetKey), controller.signal);
+    if (seq !== RCC.requestSeq) return;
+    if (env.code === 2000 || env.code === 2003) { rccOnUnauthorized(env.message); return; }
+    if (env.code === 5000) { RCC.envBlocked = true; rccRenderEnvBanner(); rccRenderBundleResult(rccEnvBlockedHtml(env.message)); return; }
+    if (env.code !== 0) { rccRenderBundleResult(rccErrorHtml(rccKindOfCode(env.code), env.message || '预览失败')); return; }
+    rccRenderBundleResult(rccBundleResultHtml(env.data));
+  } catch (err) {
+    if (seq !== RCC.requestSeq) return;
+    if (err && err.name === 'AbortError') rccRenderBundleResult(rccErrorHtml('cancelled', (err && err.message) || '请求已取消'));
+    else rccRenderBundleResult(rccErrorHtml('network', (err && err.message) || '无法连接到服务器'));
+  } finally {
+    if (RCC.activeAbort === controller) { RCC.activeAbort = null; RCC.busy = false; }
+  }
+}
+
+async function rccBundlePresetExport(presetKey, kind) {
+  if (RCC.busy) return;
+  RCC.busy = true;
+  const seq = ++RCC.requestSeq;
+  RCC.lastAction = 'export';
+  const controller = new AbortController();
+  RCC.activeAbort = controller;
+  const url = '/api/report-configuration-bundles/presets/' + encodeURIComponent(presetKey) + '/export' + (kind === 'pdf' ? '/pdf' : '');
+  try {
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + (typeof localStorage !== 'undefined' ? (localStorage.getItem('erp_token') || '') : ''),
+      },
+      body: JSON.stringify(rccBundlePresetRequest(presetKey)),
+      signal: controller.signal,
+    });
+    if (seq !== RCC.requestSeq) return;
+    const contentType = (resp.headers.get('content-type') || '');
+    const isPdf = kind === 'pdf' && contentType.indexOf('pdf') >= 0;
+    const isExcel = kind === 'excel' && contentType.indexOf('spreadsheetml') >= 0;
+    if (isPdf || isExcel) {
+      const blob = await resp.blob();
+      if (seq !== RCC.requestSeq) return;
+      const a = document.createElement('a');
+      const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+      a.download = '捆绑预设_' + dateStr + (kind === 'pdf' ? '.pdf' : '.xlsx');
+      rccTriggerDownload(blob, a);
+      return;
+    }
+    let envelope = null;
+    try { envelope = await resp.json(); } catch (e) { /* 忽略解析失败 */ }
+    const code = envelope && envelope.code;
+    const message = (envelope && envelope.message) || '导出失败';
+    if (code === 2000 || code === 2003) { rccOnUnauthorized(message); return; }
+    if (code === 5000) { RCC.envBlocked = true; rccRenderEnvBanner(); rccRenderBundleResult(rccEnvBlockedHtml(message)); return; }
+    rccRenderBundleResult(rccErrorHtml(rccKindOfCode(code), message));
+  } catch (err) {
+    if (seq !== RCC.requestSeq) return;
+    if (err && err.name === 'AbortError') rccRenderBundleResult(rccErrorHtml('cancelled', (err && err.message) || '请求已取消'));
+    else rccRenderBundleResult(rccErrorHtml('network', (err && err.message) || '无法连接到服务器'));
+  } finally {
+    if (RCC.activeAbort === controller) { RCC.activeAbort = null; RCC.busy = false; }
+  }
+}
+
 /* 工作台入口（app.js 路由 code === 'report-configuration' 调用） */
 function renderReportConfigurationWorkspace() {
   document.getElementById('header-title').textContent = '报表配置工作台';
@@ -2237,6 +2426,7 @@ function rccShowBundles() {
   if (tabBundles) tabBundles.classList.add('rcc-tab-active');
   RCC.presetView = false;
   rccRenderBundles();
+  rccLoadBundlePresets();
 }
 
 /* 离开工作台（路由切换替换 #content）时释放活动只读 / 导出请求 */
@@ -2338,6 +2528,12 @@ if (typeof module !== 'undefined' && module.exports) {
     rccBundlePreview,
     rccBundleExport,
     rccBundleExportPdf,
+    rccLoadBundlePresets,
+    rccRenderBundlePresets,
+    rccBundlePresetRequest,
+    rccBundlePresetMaterialize,
+    rccBundlePresetPreview,
+    rccBundlePresetExport,
     rccSelectDataset,
     rccApplyDefinition,
     rccLoadConfiguration,
