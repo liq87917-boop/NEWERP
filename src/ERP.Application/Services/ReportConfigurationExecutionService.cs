@@ -754,7 +754,8 @@ public sealed class ReportConfigurationExecutionService : IReportConfigurationEx
         var fieldKey = parameters.SortFieldKey;
         if (string.IsNullOrWhiteSpace(fieldKey))
         {
-            if (dataset.DatasetKey.StartsWith("master:", StringComparison.OrdinalIgnoreCase)
+            if ((dataset.DatasetKey.StartsWith("master:", StringComparison.OrdinalIgnoreCase)
+                 || dataset.DatasetKey.StartsWith("sales-document:", StringComparison.OrdinalIgnoreCase))
                 && !string.IsNullOrWhiteSpace(dataset.SortingExplanation))
                 return dataset.SortingExplanation;
 
