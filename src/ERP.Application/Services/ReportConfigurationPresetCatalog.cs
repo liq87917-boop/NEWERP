@@ -129,6 +129,42 @@ internal static class ReportConfigurationPresetManifest
             "动态销售订单出货/财务进度报表（迁移预设）",
             ReportConfigurationConstants.DatasetShipmentFinance,
             ShipmentFinancePresetDefinition()),
+        new ReportConfigurationPresetSeed(
+            "follow-up-due",
+            "report:follow-up-due",
+            "跟进提醒（迁移预设）",
+            ReportConfigurationConstants.DatasetFollowUpDue,
+            FollowUpDuePresetDefinition()),
+        new ReportConfigurationPresetSeed(
+            "follow-up-due-dynamic",
+            "dynamic:follow-up-due",
+            "动态跟进提醒报表（迁移预设）",
+            ReportConfigurationConstants.DatasetFollowUpDue,
+            FollowUpDuePresetDefinition()),
+        new ReportConfigurationPresetSeed(
+            "quotation-conversion",
+            "report:quotation-conversion",
+            "报价成交率分析（迁移预设）",
+            ReportConfigurationConstants.DatasetQuotationConversion,
+            QuotationConversionPresetDefinition()),
+        new ReportConfigurationPresetSeed(
+            "quotation-conversion-dynamic",
+            "dynamic:quotation-conversion",
+            "动态报价成交率报表（迁移预设）",
+            ReportConfigurationConstants.DatasetQuotationConversion,
+            QuotationConversionPresetDefinition()),
+        new ReportConfigurationPresetSeed(
+            "salesman-output",
+            "report:salesman-output",
+            "业务员产值报表（迁移预设）",
+            ReportConfigurationConstants.DatasetSalesmanOutput,
+            SalesmanOutputPresetDefinition()),
+        new ReportConfigurationPresetSeed(
+            "salesman-output-dynamic",
+            "dynamic:salesman-output",
+            "动态业务员产值证据报表（迁移预设）",
+            ReportConfigurationConstants.DatasetSalesmanOutput,
+            SalesmanOutputPresetDefinition()),
     };
 
     private static ReportConfigurationDefinition SalesOrderPresetDefinition() => new()
@@ -297,6 +333,54 @@ internal static class ReportConfigurationPresetManifest
             "shipmentDocumentCount", "approvedShipmentCount", "financeLinkStatus", "financeLinkReason",
             "linkedAmount", "uncoveredAmount", "submittedAmount", "otherCurrencyRecordCount",
             "unapprovedRecordCount", "unattributedRecordCount", "overReceived", "note",
+        },
+        Filters = new List<ReportConfigurationFilter>(),
+        Grouping = new List<string> { ReportConfigurationConstants.GroupNone },
+        Aggregates = new List<ReportConfigurationAggregate>(),
+        Capabilities = new List<string> { ReportConfigurationConstants.CapabilityPreview },
+        Presentation = new ReportConfigurationPresentation { Page = 1, PageSize = 20 },
+    };
+
+    private static ReportConfigurationDefinition FollowUpDuePresetDefinition() => new()
+    {
+        SchemaVersion = ReportConfigurationRules.CurrentSchemaVersion,
+        DatasetKey = ReportConfigurationConstants.DatasetFollowUpDue,
+        Fields = new List<string>
+        {
+            "id", "followNo", "followDate", "customerId", "customerName", "followType", "contactPerson",
+            "salesmanId", "salesmanName", "subject", "content", "result", "nextFollowDate", "dueDays", "dueStatus", "remark",
+        },
+        Filters = new List<ReportConfigurationFilter>(),
+        Grouping = new List<string> { ReportConfigurationConstants.GroupNone },
+        Aggregates = new List<ReportConfigurationAggregate>(),
+        Capabilities = new List<string> { ReportConfigurationConstants.CapabilityPreview },
+        Presentation = new ReportConfigurationPresentation { Page = 1, PageSize = 20 },
+    };
+
+    private static ReportConfigurationDefinition QuotationConversionPresetDefinition() => new()
+    {
+        SchemaVersion = ReportConfigurationRules.CurrentSchemaVersion,
+        DatasetKey = ReportConfigurationConstants.DatasetQuotationConversion,
+        Fields = new List<string>
+        {
+            "salesmanName", "currency", "quotationCount", "convertedCount", "conversionRate",
+            "expiredCount", "cancelledCount", "totalAmount", "convertedAmount", "avgConvertedAmount",
+        },
+        Filters = new List<ReportConfigurationFilter>(),
+        Grouping = new List<string> { ReportConfigurationConstants.GroupNone },
+        Aggregates = new List<ReportConfigurationAggregate>(),
+        Capabilities = new List<string> { ReportConfigurationConstants.CapabilityPreview },
+        Presentation = new ReportConfigurationPresentation { Page = 1, PageSize = 20 },
+    };
+
+    private static ReportConfigurationDefinition SalesmanOutputPresetDefinition() => new()
+    {
+        SchemaVersion = ReportConfigurationRules.CurrentSchemaVersion,
+        DatasetKey = ReportConfigurationConstants.DatasetSalesmanOutput,
+        Fields = new List<string>
+        {
+            "salesmanId", "salesmanName", "currency", "currencyLabel", "orderCount", "totalAmount",
+            "totalProfit", "amountLabel", "currencyEvidence", "profitEvidence", "salesmanIdentityEvidence", "sourceEvidence",
         },
         Filters = new List<ReportConfigurationFilter>(),
         Grouping = new List<string> { ReportConfigurationConstants.GroupNone },

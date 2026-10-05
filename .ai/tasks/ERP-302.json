@@ -67,7 +67,7 @@
   "planning_stage": 2,
   "implementation_evidence": "Verified IReportService.GetFollowUpDueAsync/GetQuotationConversionAsync/GetSalesmanOutputAsync and existing dynamic rules; menu codes follow-up-due, quotation and salesman-output respectively. Registry fixed and dynamic entries exist; no corresponding providers/presets or duplicate queued family task exists.",
   "id": "ERP-302",
-  "status": "in_progress",
+  "status": "completed",
   "attempts": 1,
   "max_attempts": 3,
   "validation_profile": "safe",

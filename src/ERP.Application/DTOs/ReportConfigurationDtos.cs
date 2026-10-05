@@ -102,6 +102,9 @@ public static class ReportConfigurationConstants
     public const string DatasetContainerStats = "container-stats";
     public const string DatasetCustomerShipment = "customer-shipment";
     public const string DatasetShipmentFinance = "shipment-finance";
+    public const string DatasetFollowUpDue = "follow-up-due";
+    public const string DatasetQuotationConversion = "quotation-conversion";
+    public const string DatasetSalesmanOutput = "salesman-output";
 
     // ==================== 受控关系（ERP-268：客户维度） ====================
 
