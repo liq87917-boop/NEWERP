@@ -165,6 +165,18 @@ internal static class ReportConfigurationPresetManifest
             "动态业务员产值证据报表（迁移预设）",
             ReportConfigurationConstants.DatasetSalesmanOutput,
             SalesmanOutputPresetDefinition()),
+        new ReportConfigurationPresetSeed(
+            "agency-service-fee-monthly",
+            "dynamic:agency-service-fee-monthly",
+            "动态代理服务费月度汇总报表（迁移预设）",
+            ReportConfigurationConstants.DatasetAgencyServiceFeeMonthly,
+            AgencyServiceFeeMonthlyPresetDefinition()),
+        new ReportConfigurationPresetSeed(
+            "receipt-reconciliation",
+            "dynamic:receipt-reconciliation",
+            "动态客户订单与收款核对报表（迁移预设）",
+            ReportConfigurationConstants.DatasetReceiptReconciliation,
+            ReceiptReconciliationPresetDefinition()),
     };
 
     private static ReportConfigurationDefinition SalesOrderPresetDefinition() => new()
@@ -333,6 +345,43 @@ internal static class ReportConfigurationPresetManifest
             "shipmentDocumentCount", "approvedShipmentCount", "financeLinkStatus", "financeLinkReason",
             "linkedAmount", "uncoveredAmount", "submittedAmount", "otherCurrencyRecordCount",
             "unapprovedRecordCount", "unattributedRecordCount", "overReceived", "note",
+        },
+        Filters = new List<ReportConfigurationFilter>(),
+        Grouping = new List<string> { ReportConfigurationConstants.GroupNone },
+        Aggregates = new List<ReportConfigurationAggregate>(),
+        Capabilities = new List<string> { ReportConfigurationConstants.CapabilityPreview },
+        Presentation = new ReportConfigurationPresentation { Page = 1, PageSize = 20 },
+    };
+
+    private static ReportConfigurationDefinition AgencyServiceFeeMonthlyPresetDefinition() => new()
+    {
+        SchemaVersion = ReportConfigurationRules.CurrentSchemaVersion,
+        DatasetKey = ReportConfigurationConstants.DatasetAgencyServiceFeeMonthly,
+        Fields = new List<string>
+        {
+            "statementYear", "statementMonthText", "customerId", "customerCode", "customerName",
+            "currency", "registeredCount", "registeredTotalAmount", "draftCount", "draftTotalAmount",
+            "voidedCount", "voidedTotalAmount", "statementCount",
+        },
+        Filters = new List<ReportConfigurationFilter>(),
+        Grouping = new List<string> { ReportConfigurationConstants.GroupNone },
+        Aggregates = new List<ReportConfigurationAggregate>(),
+        Capabilities = new List<string> { ReportConfigurationConstants.CapabilityPreview },
+        Presentation = new ReportConfigurationPresentation { Page = 1, PageSize = 20 },
+    };
+
+    private static ReportConfigurationDefinition ReceiptReconciliationPresetDefinition() => new()
+    {
+        SchemaVersion = ReportConfigurationRules.CurrentSchemaVersion,
+        DatasetKey = ReportConfigurationConstants.DatasetReceiptReconciliation,
+        Fields = new List<string>
+        {
+            "orderId", "orderNo", "orderDate", "status", "customerId", "customerName", "currency",
+            "orderAmount", "recordedDepositAmount", "orderedQuantity", "shippedQuantity",
+            "pendingShipmentQuantity", "outstandingQuantity", "shipmentStatus", "hasApprovedShipment",
+            "receiptCoverageStatus", "linkedReceiptAmount", "pendingReceiptAmount", "uncoveredAmount",
+            "receiptAllocationStatus", "recordedReceiptAllocationAmount", "invoiceEvidenceStatus",
+            "recordedInvoicedAmount", "overReceived", "note",
         },
         Filters = new List<ReportConfigurationFilter>(),
         Grouping = new List<string> { ReportConfigurationConstants.GroupNone },

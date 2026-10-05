@@ -208,7 +208,7 @@ public class ReportConfigurationFulfillmentMigrationTests
         {
             ReportConfigurationConstants.DatasetContainerStats => new ContainerStatsReportConfigurationDatasetProvider(reportService, db),
             ReportConfigurationConstants.DatasetCustomerShipment => new CustomerShipmentReportConfigurationDatasetProvider(reportService, db),
-            ReportConfigurationConstants.DatasetShipmentFinance => new ShipmentFinanceReportConfigurationDatasetProvider(db),
+            ReportConfigurationConstants.DatasetShipmentFinance => new ERP.Infrastructure.Reports.ShipmentFinanceReportConfigurationDatasetProvider(db),
             _ => throw new ArgumentOutOfRangeException(nameof(datasetKey)),
         };
     }

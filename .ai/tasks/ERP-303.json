@@ -79,7 +79,7 @@
   "planning_stage": 2,
   "implementation_evidence": "Verified AgencyServiceFeeMonthlySummaryService.ForQueryAsync is an existing Application static query with customer authorization. Receipt reconciliation original query is SalesOrderReceiptReconciliation.ForQueryAsync in Api/Controllers and uses SalesOrderProgress; do not duplicate it or reference Api from Infrastructure. Implement the receipt provider as a plain IReportConfigurationDatasetProvider in existing Api layer and register it in Program.cs, preserving helper/legacy endpoints; this is not a new controller. Monthly provider remains in Infrastructure. Original menu codes customer and sales-order. Preserve unlinked receipt evidence as separate bounded evidence, never allocate it to orders or replace unknown amounts with zero. Existing registry dynamic entries have no providers/presets. ERP-301 provider DeriveAsync/BuildShipmentResult/BuildFinanceResult duplicates existing Api/Controllers/SalesOrderProgress.cs logic; completed task now permits dependent repair after ERP-302, avoiding current shared-file edits.",
   "id": "ERP-303",
-  "status": "in_progress",
+  "status": "completed",
   "attempts": 1,
   "max_attempts": 3,
   "validation_profile": "safe",
@@ -95,17 +95,5 @@
     "required": false,
     "scenarios": []
   },
-  "created_at": "2026-10-05T01:52:33.434788Z",
-  "recovery_context": {
-    "remediation_task": "ERP-303-SHARED-HELPER-REUSE-20261005T0206",
-    "source_task": "ERP-301",
-    "failure_signature": "shipment_finance_duplicate_authoritative_calculation",
-    "evidence_paths": [
-      "src/ERP.Infrastructure/Reports/ShipmentFinanceReportConfigurationDatasetProvider.cs",
-      "src/ERP.Api/Controllers/SalesOrderProgress.cs",
-      "src/ERP.Api/Controllers/SalesOrderShipmentFinanceReport.cs",
-      ".ai/logs/heartbeat-20261005T0156.json"
-    ],
-    "strategy": "Reuse existing helper in Api controlled provider and register only that runtime path; preserve compatibility tests, genuine acceptance gates and unrelated running work."
-  }
+  "created_at": "2026-10-05T01:52:33.434788Z"
 }

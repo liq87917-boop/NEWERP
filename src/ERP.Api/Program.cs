@@ -1,3 +1,5 @@
+using ERP.Api.Controllers;
+using ERP.Application.Interfaces;
 using ERP.Application.Services;
 using ERP.Infrastructure;
 using ERP.Infrastructure.Data;
@@ -61,6 +63,11 @@ builder.Services.AddSwaggerGen(options =>
 
 // ============ 基础设施（数据库 + 服务） ============
 builder.Services.AddInfrastructure(builder.Configuration);
+
+// 出货财务进度（ERP-301 修正）/ 客户订单与收款核对（ERP-303 Stage 2）：Api 层受控数据集适配器，
+// 直接复用 SalesOrderShipmentFinanceReport / SalesOrderReceiptReconciliation（权威派生），不在基础设施层复制算法。
+builder.Services.AddScoped<IReportConfigurationDatasetProvider, ShipmentFinanceReportConfigurationDatasetProvider>();
+builder.Services.AddScoped<IReportConfigurationDatasetProvider, ReceiptReconciliationReportConfigurationDatasetProvider>();
 
 // 库位 + 批次库存基础（ERP-096：只读派生 + 校验，不新增/修改表结构、不执行生产 SQL）
 builder.Services.AddScoped<IInventoryLocationLotService, InventoryLocationLotService>();

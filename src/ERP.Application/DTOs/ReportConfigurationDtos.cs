@@ -105,6 +105,8 @@ public static class ReportConfigurationConstants
     public const string DatasetFollowUpDue = "follow-up-due";
     public const string DatasetQuotationConversion = "quotation-conversion";
     public const string DatasetSalesmanOutput = "salesman-output";
+    public const string DatasetAgencyServiceFeeMonthly = "agency-service-fee-monthly";
+    public const string DatasetReceiptReconciliation = "receipt-reconciliation";
 
     // ==================== 受控关系（ERP-268：客户维度） ====================
 

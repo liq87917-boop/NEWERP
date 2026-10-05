@@ -84,14 +84,17 @@ public static class DependencyInjection
         services.AddScoped<IReportConfigurationDatasetProvider, ProductSalesRankingReportConfigurationDatasetProvider>();
         services.AddScoped<IReportConfigurationDatasetProvider, OrderProfitEstimateReportConfigurationDatasetProvider>();
         services.AddScoped<IReportConfigurationDatasetProvider, SalesCommissionReportConfigurationDatasetProvider>();
-        // 柜量统计 / 客户出货量 / 出货财务进度（ERP-301）：复用既有报表服务语义，复用既有报表菜单授权（fail closed）
+        // 柜量统计 / 客户出货量（ERP-301）：复用既有报表服务语义，复用既有报表菜单授权（fail closed）
         services.AddScoped<IReportConfigurationDatasetProvider, ContainerStatsReportConfigurationDatasetProvider>();
         services.AddScoped<IReportConfigurationDatasetProvider, CustomerShipmentReportConfigurationDatasetProvider>();
-        services.AddScoped<IReportConfigurationDatasetProvider, ShipmentFinanceReportConfigurationDatasetProvider>();
+        // 出货财务进度（ERP-301）运行时路径已修正为 Api 层适配器（复用 SalesOrderShipmentFinanceReport/SalesOrderProgress），
+        // 在 Program.cs 中注册；此处基础设施层同名类型仅作为既有单测兼容类型保留，不再注册为运行时路径。
         // 跟进提醒 / 报价成交率 / 业务员产值（ERP-302）：复用既有报表服务语义，复用既有报表菜单授权（fail closed）
         services.AddScoped<IReportConfigurationDatasetProvider, FollowUpDueReportConfigurationDatasetProvider>();
         services.AddScoped<IReportConfigurationDatasetProvider, QuotationConversionReportConfigurationDatasetProvider>();
         services.AddScoped<IReportConfigurationDatasetProvider, SalesmanOutputReportConfigurationDatasetProvider>();
+        // 代理服务费月度汇总（ERP-303 Stage 2）：复用既有 Application 静态查询语义，复用既有报表菜单授权（fail closed）
+        services.AddScoped<IReportConfigurationDatasetProvider, AgencyServiceFeeMonthlyReportConfigurationDatasetProvider>();
 
         // 通用报表配置平台（ERP-260 Stage 1）：私有报表配置服务（保存/列表/加载/复制/发布/恢复/软删除）
         services.AddScoped<IReportConfigurationService, ReportConfigurationService>();
