@@ -18,6 +18,7 @@ public sealed class ReportMigrationRegistry : IReportMigrationRegistry
     private readonly IErpDbContext _db;
     private readonly IReportMigrationPresetCatalog _presets;
     private readonly IReportMigrationParityEvidenceProvider? _evidence;
+    private readonly IReportMigrationParityEvidenceService? _evidenceService;
     private readonly IReportConfigurationBundlePresetCatalog? _bundlePresets;
 
     public ReportMigrationRegistry(
@@ -25,12 +26,14 @@ public sealed class ReportMigrationRegistry : IReportMigrationRegistry
         IErpDbContext db,
         IReportMigrationPresetCatalog presets,
         IReportMigrationParityEvidenceProvider? evidence = null,
-        IReportConfigurationBundlePresetCatalog? bundlePresets = null)
+        IReportConfigurationBundlePresetCatalog? bundlePresets = null,
+        IReportMigrationParityEvidenceService? evidenceService = null)
     {
         _catalog = catalog;
         _db = db;
         _presets = presets;
         _evidence = evidence;
+        _evidenceService = evidenceService;
         _bundlePresets = bundlePresets;
     }
 
@@ -113,7 +116,9 @@ public sealed class ReportMigrationRegistry : IReportMigrationRegistry
 
         // ERP-296：parity-passed 需要真实「旧路由 vs 通用平台」夹具比对证据（数据/粒度、币种/单位、权限、导出语义）；
         // 目录存在 / 预设存在 / 兼容性声明绝不构成 parity；证据缺失或任一维度缺失一律停在 preset-ready（fail closed）。
-        var evidence = _evidence?.GetEvidence(definition.LegacyKey);
+        var evidence = _evidenceService is not null
+            ? await _evidenceService.GetEvidenceAsync(definition.LegacyKey, userId, cancellationToken)
+            : _evidence?.GetEvidence(definition.LegacyKey);
         if (evidence is not { Complete: true })
             return ReportMigrationParityStatus.PresetReady;
 
@@ -148,7 +153,9 @@ public sealed class ReportMigrationRegistry : IReportMigrationRegistry
         if (!CompatibilityDeclared(definition))
             return ReportMigrationParityStatus.PresetReady;
 
-        var evidence = _evidence?.GetEvidence(definition.LegacyKey);
+        var evidence = _evidenceService is not null
+            ? await _evidenceService.GetEvidenceAsync(definition.LegacyKey, userId, cancellationToken)
+            : _evidence?.GetEvidence(definition.LegacyKey);
         if (evidence is not { Complete: true })
             return ReportMigrationParityStatus.PresetReady;
 

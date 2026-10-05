@@ -139,6 +139,63 @@ public class ReportMigrationParityEvidenceProviderTests
         Assert.Null(provider.GetEvidence("invented:outside-manifest"));
     }
 
+    [Fact]
+    public async Task Registry_requires_fresh_current_user_evidence_instead_of_global_cache()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedUserWithMenus(db, "fresh-evidence", "sales-order");
+        var definition = Resolve("dynamic:sales-order");
+        var cached = new ReportMigrationParityEvidenceProvider();
+        cached.Record(definition.LegacyKey, new(true, true, true, true));
+        var fresh = new FreshEvidenceService(user.Id);
+        var registry = new ReportMigrationRegistry(new FakeCatalog(definition), db,
+            new FakePresetCatalog(k => k == definition.LegacyKey), cached,
+            evidenceService: fresh);
+        var first = await registry.GetRegistryAsync(user.Id);
+        Assert.Equal(ReportMigrationParityStatusText.ParityPassed,
+            Assert.Single(first.Entries, e => e.LegacyKey == definition.LegacyKey).ParityStatus);
+        fresh.Matched = false;
+        var second = await registry.GetRegistryAsync(user.Id);
+        Assert.Equal(ReportMigrationParityStatusText.PresetReady,
+            Assert.Single(second.Entries, e => e.LegacyKey == definition.LegacyKey).ParityStatus);
+        Assert.All(fresh.Users, id => Assert.Equal(user.Id, id));
+        Assert.False(await registry.CanRetireLegacyRoutesAsync(user.Id));
+    }
+
+    [Fact]
+    public async Task Registry_does_not_reuse_another_users_complete_evidence()
+    {
+        using var db = TestDbFactory.Create();
+        var firstUser = SeedUserWithMenus(db, "evidence-owner", "sales-order");
+        var secondUser = SeedUserWithMenus(db, "evidence-other", "sales-order");
+        var definition = Resolve("dynamic:sales-order");
+        var cached = new ReportMigrationParityEvidenceProvider();
+        cached.Record(definition.LegacyKey, new(true, true, true, true));
+        var fresh = new FreshEvidenceService(firstUser.Id);
+        var registry = new ReportMigrationRegistry(new FakeCatalog(definition), db,
+            new FakePresetCatalog(k => k == definition.LegacyKey), cached,
+            evidenceService: fresh);
+        var result = await registry.GetRegistryAsync(secondUser.Id);
+        Assert.Equal(ReportMigrationParityStatusText.PresetReady,
+            Assert.Single(result.Entries, e => e.LegacyKey == definition.LegacyKey).ParityStatus);
+        Assert.Contains(secondUser.Id, fresh.Users);
+    }
+
+    private sealed class FreshEvidenceService(long permittedUser) : IReportMigrationParityEvidenceService
+    {
+        public bool Matched { get; set; } = true;
+        public List<long> Users { get; } = new();
+        public Task<ReportMigrationParityEvidenceDto?> GetEvidenceAsync(
+            string legacyKey, long userId, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Users.Add(userId);
+            return Task.FromResult<ReportMigrationParityEvidenceDto?>(
+                Matched && userId == permittedUser && legacyKey == "dynamic:sales-order"
+                    ? new(true, true, true, true) : null);
+        }
+    }
+
     // ==================== 脚手架 ====================
 
     private static ReportMigrationRegistryEntryDefinition Resolve(string legacyKey)
