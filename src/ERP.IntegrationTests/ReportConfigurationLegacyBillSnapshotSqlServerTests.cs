@@ -167,21 +167,29 @@ public sealed class ReportConfigurationLegacyBillSnapshotSqlServerTests
         await snapshot.DisposeAsync();
 
         await using var db = _fixture.CreateDbContext();
-        await db.Database.ExecuteSqlRawAsync(
-            "IF NOT EXISTS (SELECT 1 FROM db_owner.FinanceReceipt WHERE BillNo = 'ERP319-RC-4') " +
-            "INSERT INTO db_owner.FinanceReceipt (BillNo, ReceiptDate, CustomerId, Amount, Currency, PaymentMethod, BankAccount, Status, Remark) " +
-            "VALUES ('ERP319-RC-4', '2026-09-04', 1004, 120.00, 1, N'电汇', 'ACCT-4', 1, N'隔离写入');");
+        try
+        {
+            await db.Database.ExecuteSqlRawAsync(
+                "IF NOT EXISTS (SELECT 1 FROM db_owner.FinanceReceipt WHERE BillNo = 'ERP319-RC-4') " +
+                "INSERT INTO db_owner.FinanceReceipt (BillNo, ReceiptDate, CustomerId, Amount, Currency, PaymentMethod, BankAccount, Status, Remark) " +
+                "VALUES ('ERP319-RC-4', '2026-09-04', 1004, 120.00, 1, N'电汇', 'ACCT-4', 1, N'隔离写入');");
 
-        // 已物化快照保持原一致视图，绝不因后续写入而漂移。
-        Assert.Equal(3, snapshot.MatchedCount);
+            // 已物化快照保持原一致视图，绝不因后续写入而漂移。
+            Assert.Equal(3, snapshot.MatchedCount);
 
-        var fresh = await reader.ReadSnapshotAsync(
-            new LegacyBillExportQuery { FamilyKey = "receipt" },
-            "corr-319-fresh", "privileged", columns, Evidence(family.DatasetKey));
-        Assert.Equal(4, fresh.MatchedCount);
+            var fresh = await reader.ReadSnapshotAsync(
+                new LegacyBillExportQuery { FamilyKey = "receipt" },
+                "corr-319-fresh", "privileged", columns, Evidence(family.DatasetKey));
+            Assert.Equal(4, fresh.MatchedCount);
 
-        await fresh.CompleteAsync();
-        await fresh.DisposeAsync();
+            await fresh.CompleteAsync();
+            await fresh.DisposeAsync();
+        }
+        finally
+        {
+            Guard();
+            await db.Database.ExecuteSqlRawAsync("DELETE FROM db_owner.FinanceReceipt WHERE BillNo = 'ERP319-RC-4'");
+        }
     }
 
     [Fact]
@@ -208,7 +216,7 @@ public sealed class ReportConfigurationLegacyBillSnapshotSqlServerTests
         using var cts = new CancellationTokenSource();
         cts.Cancel();
 
-        await Assert.ThrowsAsync<OperationCanceledException>(() => reader.ReadSnapshotAsync(
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => reader.ReadSnapshotAsync(
             new LegacyBillExportQuery { FamilyKey = "receipt" },
             "corr-319-cancel", "privileged", columns,
             Evidence(LegacyBillExportCatalog.Resolve("receipt").DatasetKey), cts.Token));
