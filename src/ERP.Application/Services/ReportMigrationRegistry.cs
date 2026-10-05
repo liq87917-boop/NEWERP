@@ -214,9 +214,15 @@ public sealed class ReportMigrationRegistry : IReportMigrationRegistry
         return true;
     }
 
-    /// <summary>兼容性声明：至少声明一种 Excel / PDF 兼容性（未声明视为未匹配，fail closed）。</summary>
+    /// <summary>
+    /// 兼容性声明：至少声明一种 Excel / PDF 兼容性，或显式声明两者均不支持。两者均 false 表示旧路由本就不产出
+    /// Excel / PDF（固定报表 / 财务报表 / 字段完整度等仅 JSON/tables 的旧路由），通用平台作为超集补齐 Excel / PDF，
+    /// 故为真空兼容（有效声明），不阻断 parity-passed。parity-passed 的 fail-closed 由后续四维比对证据门控单独保证。
+    /// </summary>
     private static bool CompatibilityDeclared(ReportMigrationRegistryEntryDefinition definition)
-        => definition.ExcelCompatible || definition.PdfCompatible;
+        => definition.ExcelCompatible
+            || definition.PdfCompatible
+            || (!definition.ExcelCompatible && !definition.PdfCompatible);
 
     /// <summary>菜单授权重检（fail closed）：未声明菜单或任一必需菜单缺失 → 隐藏。</summary>
     private static bool IsMenuAuthorized(

@@ -417,6 +417,73 @@ public class ReportMigrationRegistryTests
     }
 
     [Fact]
+    public async Task Parity_固定报表无旧ExcelPdf_完整证据_parity_passed()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedUserWithMenus(db, "fixed-passed", "product-sales-ranking");
+
+        var catalog = new FakeCatalog(new Dictionary<string, ReportConfigurationDatasetDto?>
+        {
+            ["product-sales-ranking"] = Dataset("product-sales-ranking", "product-sales-ranking",
+                "金额按原币呈现；数量按基础单位；不跨币种换算或合并"),
+        });
+        var evidence = new FakeEvidenceProvider(key => key == "report:product-sales-ranking"
+            ? new ReportMigrationParityEvidenceDto(true, true, true, true)
+            : null);
+        var registry = BuildRegistry(db, catalog,
+            new FakePresetCatalog(k => k == "report:product-sales-ranking"), evidence);
+
+        var result = await registry.GetRegistryAsync(user.Id);
+
+        var entry = Assert.Single(result.Entries, e => e.LegacyKey == "report:product-sales-ranking");
+        Assert.Equal(ReportMigrationParityStatusText.ParityPassed, entry.ParityStatus);
+    }
+
+    [Fact]
+    public async Task Parity_财务报表无旧ExcelPdf_完整证据_parity_passed()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedUserWithMenus(db, "financial-passed", "balance-sheet");
+
+        var catalog = new FakeCatalog(new Dictionary<string, ReportConfigurationDatasetDto?>
+        {
+            ["balance-sheet"] = Dataset("balance-sheet", "balance-sheet",
+                "金额按单据金额直接汇总（资产/负债/权益）；不跨币种换算"),
+        });
+        var evidence = new FakeEvidenceProvider(key => key == "report:balance-sheet"
+            ? new ReportMigrationParityEvidenceDto(true, true, true, true)
+            : null);
+        var registry = BuildRegistry(db, catalog,
+            new FakePresetCatalog(k => k == "report:balance-sheet"), evidence);
+
+        var result = await registry.GetRegistryAsync(user.Id);
+
+        var entry = Assert.Single(result.Entries, e => e.LegacyKey == "report:balance-sheet");
+        Assert.Equal(ReportMigrationParityStatusText.ParityPassed, entry.ParityStatus);
+    }
+
+    [Fact]
+    public async Task Parity_无旧ExcelPdf_无证据_仍preset_ready()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedUserWithMenus(db, "fixed-no-evidence", "product-sales-ranking");
+
+        var catalog = new FakeCatalog(new Dictionary<string, ReportConfigurationDatasetDto?>
+        {
+            ["product-sales-ranking"] = Dataset("product-sales-ranking", "product-sales-ranking",
+                "金额按原币呈现；数量按基础单位；不跨币种换算或合并"),
+        });
+        // 无旧 Excel/PDF（false,false）是有效（真空）兼容声明，但无四维比对证据仍绝不 parity-passed（fail closed）。
+        var registry = BuildRegistry(db, catalog,
+            new FakePresetCatalog(k => k == "report:product-sales-ranking"));
+
+        var result = await registry.GetRegistryAsync(user.Id);
+
+        var entry = Assert.Single(result.Entries, e => e.LegacyKey == "report:product-sales-ranking");
+        Assert.Equal(ReportMigrationParityStatusText.PresetReady, entry.ParityStatus);
+    }
+
+    [Fact]
     public async Task Parity_多菜单导出族_完整菜单集合_parity_passed()
     {
         using var db = TestDbFactory.Create();
