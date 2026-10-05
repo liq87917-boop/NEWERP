@@ -87,6 +87,31 @@ public class ReportConfigurationBundlesController : ControllerBase
         return await ExportBoundedAsync(CurrentUserId(), request, exportKind: "pdf");
     }
 
+    /// <summary>组合预览：按服务端声明场景组合表头 / 明细两节；全部校验通过后才返回，绝不返回部分父项。</summary>
+    [HttpPost("compose/preview")]
+    public async Task<IActionResult> ComposePreview([FromBody] ReportConfigurationBundleCompositionRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        var result = await WithRequestCancellationAsync(ct => _bundle.ComposePreviewAsync(CurrentUserId(), request, ct));
+        return Ok(ApiResponse<ReportConfigurationBundleCompositionPreviewDto>.Success(result));
+    }
+
+    /// <summary>导出组合为多工作表 Excel（只读）：复用同一有界、已授权组合管线，绝不信任客户端行 / 缓存。</summary>
+    [HttpPost("compose/export")]
+    public async Task<IActionResult> ComposeExport([FromBody] ReportConfigurationBundleCompositionRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        return await ComposeExportBoundedAsync(CurrentUserId(), request, exportKind: "excel");
+    }
+
+    /// <summary>导出组合为中文 PDF（只读）：复用同一有界、已授权组合管线，字体缺失 / 渲染失败显式失败。</summary>
+    [HttpPost("compose/export/pdf")]
+    public async Task<IActionResult> ComposeExportPdf([FromBody] ReportConfigurationBundleCompositionRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        return await ComposeExportBoundedAsync(CurrentUserId(), request, exportKind: "pdf");
+    }
+
     /// <summary>只读列出当前账号已授权的捆绑预设（未授权隐藏；readiness 见 DTO，绝不 presence-only parity-passed）。</summary>
     [HttpGet("presets")]
     public async Task<IActionResult> ListPresets()
@@ -193,6 +218,132 @@ public class ReportConfigurationBundlesController : ControllerBase
         {
             LogExport(userId, request, exportKind, ReportConfigurationExecutionOutcomes.Error, stopwatch.ElapsedMilliseconds);
             throw;
+        }
+    }
+
+
+    private async Task<IActionResult> ComposeExportBoundedAsync(
+        long userId,
+        ReportConfigurationBundleCompositionRequest request,
+        string exportKind)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        try
+        {
+            return await _budget.ExecuteAsync<IActionResult>(userId, HttpContext.RequestAborted, async lease =>
+            {
+                var result = await _bundle.BuildCompositionExportResultAsync(userId, request, lease);
+
+                var bytes = exportKind == "pdf"
+                    ? RenderComposedPdf(result.Preview, lease)
+                    : RenderComposedExcel(result.Preview, lease);
+
+                if (bytes.Length > ReportConfigurationExecutionLimits.MaxGeneratedFileBytes)
+                    throw new BusinessException(
+                        "报表组合文件过大，已拒绝下载（关联ID：" + lease.CorrelationId + "）",
+                        ReportConfigurationExecutionLimits.ErrorCodeResultTooLarge);
+
+                LogComposeExport(userId, request, exportKind, ReportConfigurationExecutionOutcomes.Success, stopwatch.ElapsedMilliseconds);
+
+                return exportKind == "pdf"
+                    ? File(bytes, "application/pdf", $"ReportConfigurationComposition_{DateTime.Now:yyyyMMddHHmmss}.pdf")
+                    : File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        $"ReportConfigurationComposition_{DateTime.Now:yyyyMMddHHmmss}.xlsx");
+            });
+        }
+        catch (BusinessException ex)
+        {
+            LogComposeExport(userId, request, exportKind, ReportConfigurationExecutionOutcomes.For(ex.Code), stopwatch.ElapsedMilliseconds);
+            throw;
+        }
+        catch (OperationCanceledException)
+        {
+            LogComposeExport(userId, request, exportKind, ReportConfigurationExecutionOutcomes.Cancelled, stopwatch.ElapsedMilliseconds);
+            throw new BusinessException("报表组合导出已取消", ReportConfigurationExecutionLimits.ErrorCodeCancelled);
+        }
+        catch (Exception)
+        {
+            LogComposeExport(userId, request, exportKind, ReportConfigurationExecutionOutcomes.Error, stopwatch.ElapsedMilliseconds);
+            throw;
+        }
+    }
+
+    private static byte[] RenderComposedExcel(
+        ReportConfigurationBundleCompositionPreviewDto result,
+        IReportConfigurationExecutionLease lease)
+    {
+        try
+        {
+            return new ReportConfigurationBundleExcelExporter().BuildComposed(result, lease.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (BusinessException)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            throw new BusinessException(
+                "Excel 导出渲染失败（关联ID：" + lease.CorrelationId + "）",
+                ReportConfigurationExecutionLimits.ErrorCodeRenderingFailed);
+        }
+    }
+
+    private static byte[] RenderComposedPdf(
+        ReportConfigurationBundleCompositionPreviewDto result,
+        IReportConfigurationExecutionLease lease)
+    {
+        try
+        {
+            return ReportConfigurationBundlePdfExporter.ExportComposed(result, lease.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (BusinessException)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            throw new BusinessException(
+                "PDF 导出渲染失败（关联ID：" + lease.CorrelationId + "）",
+                ReportConfigurationExecutionLimits.ErrorCodeRenderingFailed);
+        }
+    }
+
+    private void LogComposeExport(
+        long userId,
+        ReportConfigurationBundleCompositionRequest request,
+        string operation,
+        string outcome,
+        long durationMs)
+    {
+        if (_logger is null)
+            return;
+
+        try
+        {
+            _logger.LogInformation(
+                "ReportConfigurationBundleComposition {@Execution}",
+                new
+                {
+                    UserId = userId,
+                    CompositionKey = request.CompositionKey,
+                    HeaderConfigurationId = request.HeaderConfigurationId,
+                    DetailConfigurationId = request.DetailConfigurationId,
+                    Operation = operation,
+                    Outcome = outcome,
+                    DurationMs = durationMs,
+                });
+        }
+        catch
+        {
+            // 日志失败不影响主流程
         }
     }
 

@@ -403,6 +403,348 @@ public static class ReportConfigurationBundlePdfExporter
             return string.Join(" · ", parts);
         }
     }
+
+    // ==================== ERP-316 Stage 2：表头 / 明细组合导出 ====================
+
+    /// <summary>导出组合为 PDF 字节流（只读；字体缺失显式失败）。</summary>
+    public static byte[] ExportComposed(ReportConfigurationBundleCompositionPreviewDto composition)
+        => ExportComposed(composition, SimHeiPdfFontResolver.FindFontPath(), CancellationToken.None);
+
+    /// <summary>导出组合为 PDF 字节流（可传播联动取消令牌）。</summary>
+    public static byte[] ExportComposed(
+        ReportConfigurationBundleCompositionPreviewDto composition,
+        CancellationToken cancellationToken)
+        => ExportComposed(composition, SimHeiPdfFontResolver.FindFontPath(), cancellationToken);
+
+    /// <summary>导出组合为 PDF 字节流；<paramref name="fontPath"/> 为空或文件不存在时显式失败。</summary>
+    public static byte[] ExportComposed(
+        ReportConfigurationBundleCompositionPreviewDto composition,
+        string? fontPath)
+        => ExportComposed(composition, fontPath, CancellationToken.None);
+
+    /// <summary>导出组合为 PDF 字节流（字体缺失显式失败；渲染循环可传播取消）。</summary>
+    public static byte[] ExportComposed(
+        ReportConfigurationBundleCompositionPreviewDto composition,
+        string? fontPath,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(composition);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        if (string.IsNullOrWhiteSpace(fontPath) || !File.Exists(fontPath))
+        {
+            throw new BusinessException(
+                "PDF 导出失败：未找到中文字体 SimHei（黑体）。请在 Windows 字体目录安装 simhei.ttf 后重试，避免生成乱码或缺字 PDF。",
+                ErrorCodes.InternalError);
+        }
+
+        SimHeiPdfFontResolver.Ensure(fontPath);
+
+        try
+        {
+            using var document = new PdfDocument();
+            document.Info.Title = string.IsNullOrWhiteSpace(composition.Name) ? "报表配置组合" : composition.Name;
+
+            var renderer = new ComposedRenderer(document);
+            renderer.Draw(composition, cancellationToken);
+
+            cancellationToken.ThrowIfCancellationRequested();
+
+            using var stream = new MemoryStream();
+            document.Save(stream, false);
+            return stream.ToArray();
+        }
+        catch (BusinessException)
+        {
+            throw;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception)
+        {
+            throw new BusinessException(
+                "PDF 导出失败：渲染组合报表时发生错误，未生成任何文件，请稍后重试。",
+                ErrorCodes.InternalError);
+        }
+    }
+
+
+    private sealed class ComposedRenderer
+    {
+        private readonly PdfDocument _document;
+        private readonly XFont _titleFont;
+        private readonly XFont _metaFont;
+        private readonly XFont _headerFont;
+        private readonly XFont _cellFont;
+        private readonly XPen _borderPen;
+        private readonly XSolidBrush _headerBrush;
+        private readonly double _usableWidth;
+        private readonly double _contentBottom;
+        private readonly double _lineHeight;
+        private XGraphics _gfx = null!;
+        private double _y;
+
+        public ComposedRenderer(PdfDocument document)
+        {
+            _document = document;
+            _titleFont = new XFont(FontFamily, TitleSize, XFontStyleEx.Bold);
+            _metaFont = new XFont(FontFamily, MetaSize, XFontStyleEx.Regular);
+            _headerFont = new XFont(FontFamily, HeaderSize, XFontStyleEx.Bold);
+            _cellFont = new XFont(FontFamily, CellSize, XFontStyleEx.Regular);
+            _borderPen = new XPen(XColor.FromArgb(0xC4, 0xC4, 0xC4), 0.4);
+            _headerBrush = new XSolidBrush(XColor.FromArgb(0xED, 0xED, 0xED));
+            _usableWidth = Mm(PageWidthMm - MarginLeftMm - MarginRightMm);
+            _contentBottom = Mm(PageHeightMm - MarginBottomMm);
+            _lineHeight = Mm(DataLineHeightMm);
+        }
+
+        public void Draw(ReportConfigurationBundleCompositionPreviewDto composition, CancellationToken cancellationToken)
+        {
+            NewPage();
+            DrawHeading(composition.CompositionName, _titleFont, TitleSize, TitleHeightMm);
+            DrawHeading(
+                $"父项 {composition.ParentCount} · 明细 {composition.DetailCount} · 单元格 {composition.CellCount}",
+                _metaFont, MetaSize, MetaHeightMm);
+            DrawHeading($"币种/单位：{composition.CurrencyUnitSemantics}", _metaFont, MetaSize, MetaHeightMm);
+
+            var parents = composition.Parents ?? new List<ReportConfigurationBundleComposedHeaderDto>();
+            for (var i = 0; i < parents.Count; i++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (i > 0)
+                    NewPage();
+
+                DrawHeaderBlock(composition.HeaderTitle, composition.HeaderColumns, parents[i], cancellationToken);
+                DrawDetailBlock(composition.DetailTitle, composition.DetailColumns, parents[i], cancellationToken);
+            }
+        }
+
+        private void NewPage()
+        {
+            var page = _document.AddPage();
+            page.Size = PdfSharp.PageSize.A4;
+            _gfx = XGraphics.FromPdfPage(page);
+            _y = Mm(MarginTopMm);
+        }
+
+        private void DrawHeading(string text, XFont font, double size, double heightMm)
+        {
+            if (string.IsNullOrWhiteSpace(text))
+                return;
+
+            var lines = ReportConfigurationPdfExporter.WrapText(text, size, _usableWidth);
+            foreach (var line in lines)
+            {
+                EnsureSpace(heightMm);
+                _gfx.DrawString(line, font, XBrushes.Black,
+                    new XRect(Mm(MarginLeftMm), _y, _usableWidth, heightMm), XStringFormats.TopLeft);
+                _y += heightMm;
+            }
+        }
+
+
+        private void DrawHeaderBlock(
+            string title,
+            IReadOnlyList<ReportConfigurationColumnDto> columns,
+            ReportConfigurationBundleComposedHeaderDto parent,
+            CancellationToken cancellationToken)
+        {
+            DrawHeading(title, _headerFont, HeaderSize, HeaderRowHeightMm);
+            var rows = new List<Dictionary<string, object?>> { parent.Header };
+            DrawTable(columns, rows, cancellationToken);
+        }
+
+        private void DrawDetailBlock(
+            string title,
+            IReadOnlyList<ReportConfigurationColumnDto> columns,
+            ReportConfigurationBundleComposedHeaderDto parent,
+            CancellationToken cancellationToken)
+        {
+            if (!parent.HasDetails)
+            {
+                DrawNote(parent.EmptyDetailsEvidence ?? "该单证没有明细行");
+                return;
+            }
+
+            DrawHeading(title, _headerFont, HeaderSize, HeaderRowHeightMm);
+            DrawTable(columns, parent.Details, cancellationToken);
+            DrawTotals(parent);
+        }
+
+        private void DrawTable(
+            IReadOnlyList<ReportConfigurationColumnDto> columns,
+            IReadOnlyList<Dictionary<string, object?>> rows,
+            CancellationToken cancellationToken)
+        {
+            if (columns is null || columns.Count == 0)
+                return;
+
+            var widths = ComputeWidths(columns);
+            DrawHeaderRow(columns, widths);
+
+            for (var r = 0; r < rows.Count; r++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var height = RowHeight(columns, widths, rows[r], r + 1);
+                if (_y + height > _contentBottom)
+                    NewPage();
+                DrawDataRow(columns, widths, rows[r], r + 1, height);
+            }
+
+            _y += Mm(2);
+        }
+
+        private double[] ComputeWidths(IReadOnlyList<ReportConfigurationColumnDto> columns)
+        {
+            var widths = new double[columns.Count];
+            if (columns.Count == 0)
+                return widths;
+
+            var totalWeight = 0d;
+            foreach (var column in columns)
+                totalWeight += Math.Max(4, column.Label.Length);
+
+            for (var c = 0; c < columns.Count; c++)
+                widths[c] = _usableWidth * Math.Max(4, columns[c].Label.Length) / totalWeight;
+
+            var min = Mm(12);
+            for (var c = 0; c < widths.Length; c++)
+                widths[c] = Math.Max(min, widths[c]);
+
+            var sum = widths.Sum();
+            if (sum > _usableWidth)
+            {
+                var scale = _usableWidth / sum;
+                for (var c = 0; c < widths.Length; c++)
+                    widths[c] *= scale;
+            }
+
+            return widths;
+        }
+
+        private void DrawHeaderRow(IReadOnlyList<ReportConfigurationColumnDto> columns, double[] widths)
+        {
+            if (_y + Mm(HeaderRowHeightMm) > _contentBottom)
+                NewPage();
+
+            var left = Mm(MarginLeftMm);
+            for (var c = 0; c < columns.Count; c++)
+            {
+                var rect = new XRect(left + SumWidths(widths, c), _y, widths[c], Mm(HeaderRowHeightMm));
+                _gfx.DrawRectangle(_borderPen, _headerBrush, rect);
+                _gfx.DrawString(ReportConfigurationPdfExporter.HeaderText(columns[c]), _headerFont,
+                    XBrushes.Black, rect, XStringFormats.Center);
+            }
+
+            _y += Mm(HeaderRowHeightMm);
+        }
+
+
+        private void DrawDataRow(
+            IReadOnlyList<ReportConfigurationColumnDto> columns,
+            double[] widths,
+            Dictionary<string, object?> row,
+            int rowOrdinal,
+            double rowHeight)
+        {
+            var left = Mm(MarginLeftMm);
+            for (var c = 0; c < columns.Count; c++)
+            {
+                var rect = new XRect(left + SumWidths(widths, c), _y, widths[c], rowHeight);
+                _gfx.DrawRectangle(_borderPen, rect);
+
+                var text = ReportConfigurationPdfExporter.FormatCellValue(columns[c], row);
+                var isNumber = string.Equals(columns[c].Type, ReportConfigurationConstants.TypeNumber, StringComparison.OrdinalIgnoreCase);
+                DrawCellText(text, rect, isNumber ? XStringFormats.CenterRight : XStringFormats.CenterLeft);
+            }
+
+            _y += rowHeight;
+        }
+
+        private void DrawCellText(string text, XRect rect, XStringFormat format)
+        {
+            if (string.IsNullOrEmpty(text))
+                return;
+
+            var maxWidth = Math.Max(0, rect.Width - CellPaddingPoints * 2);
+            var lines = ReportConfigurationPdfExporter.WrapText(text, CellSize, maxWidth);
+
+            var verticalPadding = Math.Max(0, (rect.Height - lines.Count * _lineHeight) / 2);
+            var lineRect = new XRect(
+                rect.X + CellPaddingPoints,
+                rect.Y + verticalPadding,
+                Math.Max(0, rect.Width - CellPaddingPoints * 2),
+                _lineHeight);
+
+            foreach (var line in lines)
+            {
+                _gfx.DrawString(line, _cellFont, XBrushes.Black, lineRect, format);
+                lineRect.Y += _lineHeight;
+            }
+        }
+
+        private double RowHeight(
+            IReadOnlyList<ReportConfigurationColumnDto> columns,
+            double[] widths,
+            Dictionary<string, object?> row,
+            int rowOrdinal)
+        {
+            var maxLines = 1;
+            for (var c = 0; c < columns.Count; c++)
+            {
+                var text = ReportConfigurationPdfExporter.FormatCellValue(columns[c], row);
+                if (string.IsNullOrEmpty(text))
+                    continue;
+                var lines = ReportConfigurationPdfExporter.WrapText(text, CellSize, Math.Max(0, widths[c] - CellPaddingPoints * 2)).Count;
+                if (lines > maxLines)
+                    maxLines = lines;
+            }
+
+            return Math.Max(_lineHeight, maxLines * _lineHeight + Mm(1.2));
+        }
+
+        private void DrawTotals(ReportConfigurationBundleComposedHeaderDto parent)
+        {
+            var totals = parent.Totals ?? new ReportConfigurationBundleComposedTotalsDto();
+            var headerText = totals.HeaderAmount.HasValue
+                ? $"表头金额：{totals.HeaderAmount.Value} {totals.HeaderCurrency ?? string.Empty}".Trim()
+                : "表头金额：空";
+            DrawNote(headerText);
+
+            var amounts = (totals.DetailAmounts ?? new List<ReportConfigurationBundleComposedAmountDto>())
+                .Select(a => $"{a.Currency} {a.Amount}（{a.Count} 行）");
+            DrawNote("明细金额（按币种）：" + string.Join("；", amounts));
+
+            var quantities = (totals.DetailQuantities ?? new List<ReportConfigurationBundleComposedQuantityDto>())
+                .Select(q => $"{q.Unit} {q.Quantity}（{q.Count} 行）");
+            DrawNote("明细数量（按单位）：" + string.Join("；", quantities));
+        }
+
+        private void DrawNote(string note)
+        {
+            EnsureSpace(_lineHeight + Mm(4));
+            _gfx.DrawString(note, _cellFont, XBrushes.Black,
+                new XRect(Mm(MarginLeftMm), _y + Mm(2), _usableWidth, _lineHeight), XStringFormats.TopLeft);
+            _y += _lineHeight + Mm(4);
+        }
+
+        private void EnsureSpace(double heightMm)
+        {
+            if (_y + heightMm > _contentBottom)
+                NewPage();
+        }
+
+        private static double SumWidths(double[] widths, int end)
+        {
+            var sum = 0d;
+            for (var i = 0; i < end; i++)
+                sum += widths[i];
+            return sum;
+        }
+    }
+
 }
 
 

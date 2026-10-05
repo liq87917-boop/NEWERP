@@ -30,4 +30,22 @@ public interface IReportConfigurationBundleService
         long ownerUserId,
         ReportConfigurationBundleRequest request,
         IReportConfigurationExecutionLease lease);
+
+    /// <summary>组合预览：按服务端声明场景组合表头 / 明细两节（自动获取单一执行租约）。</summary>
+    Task<ReportConfigurationBundleCompositionPreviewDto> ComposePreviewAsync(
+        long ownerUserId,
+        ReportConfigurationBundleCompositionRequest request,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>在已获取的执行租约内组合预览（导出复用同一租约，共享截止时间，绝不二次获取租约）。</summary>
+    Task<ReportConfigurationBundleCompositionPreviewDto> ComposePreviewAsync(
+        long ownerUserId,
+        ReportConfigurationBundleCompositionRequest request,
+        IReportConfigurationExecutionLease lease);
+
+    /// <summary>在已获取的执行租约内构建组合导出结果（复用同一租约，绝不二次获取租约）。</summary>
+    Task<ReportConfigurationBundleCompositionExportDto> BuildCompositionExportResultAsync(
+        long ownerUserId,
+        ReportConfigurationBundleCompositionRequest request,
+        IReportConfigurationExecutionLease lease);
 }

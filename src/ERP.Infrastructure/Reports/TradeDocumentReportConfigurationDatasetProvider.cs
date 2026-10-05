@@ -404,6 +404,7 @@ public sealed class TradeDocumentReportConfigurationDatasetProvider : IReportCon
         Set("refNo", document.RefNo);
         Set("declareNo", document.DeclareNo);
         foreach (var key in HeaderOnlyFields) Set(key, null);
+        Set("id", document.Id);
 
         Set("lineNo", line.LineNo);
         Set("productCode", line.ProductCode);

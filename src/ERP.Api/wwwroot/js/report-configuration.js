@@ -2798,6 +2798,121 @@ function rccAttachLeaveObserver() {
   if (content) rccLeaveObserver.observe(content, { childList: true });
 }
 
+
+/* ==================== ERP-316：表头 / 明细组合（复用服务端声明场景，绝不提交任意联接 / 字段键） ====================
+   口径与后端 ReportConfigurationBundlesController / ReportConfigurationBundleService.Compose* 一一对应：
+   - 客户端只提交服务端声明的组合场景键 + 既有表头 / 明细报表配置 Id（与固定修订），
+     绝不提交父身份 / 明细外键 / 隐藏字段键 / SQL / 联接；
+   - 预览走 POST /api/report-configuration-bundles/compose/preview；导出走 .../compose/export（Excel）与
+     .../compose/export/pdf（PDF），复用同一有界、已授权组合管线；
+   - 表头按单证一次呈现，明细行按行序置于对应单证之下；表头金额独立于明细合计，明细金额按币种、数量按单位分区。 */
+
+const RCC_COMPOSE_API = '/api/report-configuration-bundles/compose';
+
+function rccComposeBuildRequest(opts) {
+  return {
+    compositionKey: (opts && opts.compositionKey) || '',
+    headerConfigurationId: (opts && opts.headerConfigurationId) || 0,
+    headerRevisionVersion: (opts && opts.headerRevisionVersion) || null,
+    detailConfigurationId: (opts && opts.detailConfigurationId) || 0,
+    detailRevisionVersion: (opts && opts.detailRevisionVersion) || null,
+    headerTitle: (opts && opts.headerTitle) || null,
+    detailTitle: (opts && opts.detailTitle) || null,
+  };
+}
+
+function rccComposeAmountText(amounts) {
+  const list = (amounts || []).map(a => (a.currency || '未知') + ' ' + rccNumberText(a.amount) + '（' + a.count + ' 行）').join('；');
+  return list || '无';
+}
+
+function rccComposeQuantityText(quantities) {
+  const list = (quantities || []).map(q => (q.unit || '未知') + ' ' + rccNumberText(q.quantity) + '（' + q.count + ' 行）').join('；');
+  return list || '无';
+}
+
+function rccComposeParentHtml(p, headerColumns, detailColumns) {
+  const headerHead = (headerColumns || []).map(c => rccColumnHeadHtml(c)).join('');
+  const headerCells = (headerColumns || []).map(c => '<td>' + rccEsc(rccCellText((p.header || {})[c.key], c.type, c.currencyUnit)) + '</td>').join('');
+  const detailHead = (detailColumns || []).map(c => rccColumnHeadHtml(c)).join('');
+  const detailRows = (p.details || []).map(d => '<tr>' + (detailColumns || []).map(c => '<td>' + rccEsc(rccCellText(d[c.key], c.type, c.currencyUnit)) + '</td>').join('') + '</tr>').join('');
+  const details = p.hasDetails
+    ? '<div class="rcc-table-wrap"><table class="rcc-table"><thead><tr>' + detailHead + '</tr></thead><tbody>' + detailRows + '</tbody></table></div>'
+    : '<div class="rcc-note">' + rccEsc(p.emptyDetailsEvidence || '该单证没有明细行') + '</div>';
+  const totals = p.totals || {};
+  const headerAmount = (totals.headerAmount === null || totals.headerAmount === undefined)
+    ? '空'
+    : rccEsc(rccNumberText(totals.headerAmount) + ' ' + (totals.headerCurrency || ''));
+  return '<div class="rcc-compose-parent">'
+    + '<div class="rcc-compose-header"><div class="rcc-table-wrap"><table class="rcc-table"><thead><tr>' + headerHead + '</tr></thead><tbody><tr>' + headerCells + '</tr></tbody></table></div></div>'
+    + details
+    + '<div class="rcc-partition">表头金额：' + headerAmount
+    + ' · 明细金额（按币种）：' + rccEsc(rccComposeAmountText(totals.detailAmounts))
+    + ' · 明细数量（按单位）：' + rccEsc(rccComposeQuantityText(totals.detailQuantities)) + '</div>'
+    + '</div>';
+}
+
+function rccComposeResultHtml(dto) {
+  if (!dto || !(dto.parents && dto.parents.length)) return rccEmptyHtml();
+  const blocks = (dto.parents || []).map(p => rccComposeParentHtml(p, dto.headerColumns, dto.detailColumns)).join('');
+  return '<div class="rcc-compose-result">'
+    + '<div class="rcc-compose-title">' + rccEsc(dto.compositionName || dto.name || '报表配置组合') + '</div>'
+    + '<div class="rcc-partition">父项 ' + rccEsc(String(dto.parentCount || 0))
+    + ' · 明细 ' + rccEsc(String(dto.detailCount || 0))
+    + ' · 单元格 ' + rccEsc(String(dto.cellCount || 0)) + '</div>'
+    + blocks + '</div>';
+}
+
+async function rccComposePreview(request) {
+  if (RCC.busy) return;
+  RCC.busy = true;
+  const seq = ++RCC.requestSeq;
+  try {
+    const envelope = await rccFetch(RCC_COMPOSE_API + '/preview', 'POST', request, RCC.activeAbort && RCC.activeAbort.signal);
+    if (seq !== RCC.requestSeq) return;   // 迟到响应丢弃
+    if (!envelope || envelope.code !== 0) {
+      if (envelope && envelope.code === 2000) { rccOnUnauthorized(envelope.message); return; }
+      rccRenderResult(rccErrorHtml('compose', (envelope && envelope.message) || '组合预览失败'));
+      return;
+    }
+    rccRenderResult(rccComposeResultHtml(envelope.data));
+  } catch (err) {
+    if (err && err.name === 'AbortError') return;
+    if (seq === RCC.requestSeq) rccRenderResult(rccErrorHtml('compose', '组合预览失败'));
+  } finally {
+    if (seq === RCC.requestSeq) RCC.busy = false;
+  }
+}
+
+async function rccComposeDownload(request, kind) {
+  if (RCC.busy) return;
+  const seq = ++RCC.requestSeq;
+  RCC.busy = true;
+  const path = kind === 'pdf' ? RCC_COMPOSE_API + '/export/pdf' : RCC_COMPOSE_API + '/export';
+  try {
+    const resp = await fetch(path, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + ((typeof localStorage !== 'undefined') ? (localStorage.getItem('erp_token') || '') : ''),
+      },
+      body: JSON.stringify(request),
+    });
+    if (seq !== RCC.requestSeq) return;   // 迟到响应丢弃
+    if (!resp.ok) { rccRenderResult(rccErrorHtml('compose', '组合导出失败')); return; }
+    const blob = await resp.blob();
+    const a = document.createElement('a');
+    const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    a.download = '报表组合_' + dateStr + (kind === 'pdf' ? '.pdf' : '.xlsx');
+    rccTriggerDownload(blob, a);
+  } catch (err) {
+    if (err && err.name === 'AbortError') return;
+    if (seq === RCC.requestSeq) rccRenderResult(rccErrorHtml('compose', '组合导出失败'));
+  } finally {
+    if (seq === RCC.requestSeq) RCC.busy = false;
+  }
+}
+
 /* Node 单测导出（浏览器中 module 为 undefined，自动跳过） */
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
@@ -2913,5 +3028,10 @@ if (typeof module !== 'undefined' && module.exports) {
     rccCancel,
     rccDisposeWorkspace,
     renderReportConfigurationWorkspace,
+    RCC_COMPOSE_API,
+    rccComposeBuildRequest,
+    rccComposeResultHtml,
+    rccComposePreview,
+    rccComposeDownload,
   };
 }

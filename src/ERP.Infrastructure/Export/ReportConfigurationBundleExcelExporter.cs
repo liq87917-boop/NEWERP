@@ -49,6 +49,157 @@ public sealed class ReportConfigurationBundleExcelExporter
         return output.ToArray();
     }
 
+    // ==================== ERP-316 Stage 2：表头 / 明细组合导出 ====================
+
+    /// <summary>生成组合工作簿（只读；表头一次、明细按父项有序、口径与合计独立）。</summary>
+    public byte[] BuildComposed(ReportConfigurationBundleCompositionPreviewDto composition)
+        => BuildComposed(composition, CancellationToken.None);
+
+    /// <summary>生成组合工作簿（只读；可传播联动取消令牌）。</summary>
+    public byte[] BuildComposed(
+        ReportConfigurationBundleCompositionPreviewDto composition,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(composition);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        using var workbook = new XSSFWorkbook();
+        var styles = CreateStyles(workbook);
+
+        BuildComposedHeaderSheet(workbook, composition, styles, cancellationToken);
+        BuildComposedDetailSheet(workbook, composition, styles, cancellationToken);
+        BuildComposedProvenanceSheet(workbook, composition, styles);
+
+        cancellationToken.ThrowIfCancellationRequested();
+
+        using var output = new MemoryStream();
+        workbook.Write(output);
+        return output.ToArray();
+    }
+
+    private static void BuildComposedHeaderSheet(
+        XSSFWorkbook workbook,
+        ReportConfigurationBundleCompositionPreviewDto composition,
+        Styles styles,
+        CancellationToken cancellationToken)
+    {
+        var sheet = workbook.CreateSheet(SafeSectionSheetName(0, composition.HeaderTitle));
+        var columns = composition.HeaderColumns ?? new List<ReportConfigurationColumnDto>();
+
+        var header = sheet.CreateRow(0);
+        for (var c = 0; c < columns.Count; c++)
+        {
+            var cell = header.CreateCell(c);
+            cell.SetCellValue(EscapeFormulaLeading(HeaderText(columns[c])));
+            cell.CellStyle = styles.Header;
+        }
+
+        var parents = composition.Parents ?? new List<ReportConfigurationBundleComposedHeaderDto>();
+        for (var r = 0; r < parents.Count; r++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var row = sheet.CreateRow(r + 1);
+            for (var c = 0; c < columns.Count; c++)
+            {
+                var value = parents[r].Header is not null && parents[r].Header.TryGetValue(columns[c].Key, out var v)
+                    ? v
+                    : null;
+                WriteCell(row.CreateCell(c), value, styles);
+            }
+        }
+
+        for (var c = 0; c < columns.Count; c++)
+            sheet.SetColumnWidth(c, Math.Min(60, Math.Max(12, columns[c].Label.Length * 2 + 4)) * 256);
+    }
+
+    private static void BuildComposedDetailSheet(
+        XSSFWorkbook workbook,
+        ReportConfigurationBundleCompositionPreviewDto composition,
+        Styles styles,
+        CancellationToken cancellationToken)
+    {
+        var sheet = workbook.CreateSheet(SafeSectionSheetName(1, composition.DetailTitle));
+        var columns = composition.DetailColumns ?? new List<ReportConfigurationColumnDto>();
+
+        var header = sheet.CreateRow(0);
+        for (var c = 0; c < columns.Count; c++)
+        {
+            var cell = header.CreateCell(c);
+            cell.SetCellValue(EscapeFormulaLeading(HeaderText(columns[c])));
+            cell.CellStyle = styles.Header;
+        }
+
+        var parents = composition.Parents ?? new List<ReportConfigurationBundleComposedHeaderDto>();
+        var nextRow = 1;
+        foreach (var parent in parents)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            foreach (var detail in parent.Details ?? new List<Dictionary<string, object?>>())
+            {
+                var row = sheet.CreateRow(nextRow++);
+                for (var c = 0; c < columns.Count; c++)
+                {
+                    var value = detail is not null && detail.TryGetValue(columns[c].Key, out var v) ? v : null;
+                    WriteCell(row.CreateCell(c), value, styles);
+                }
+            }
+        }
+
+        for (var c = 0; c < columns.Count; c++)
+            sheet.SetColumnWidth(c, Math.Min(60, Math.Max(12, columns[c].Label.Length * 2 + 4)) * 256);
+    }
+
+
+
+    private static void BuildComposedProvenanceSheet(
+        XSSFWorkbook workbook,
+        ReportConfigurationBundleCompositionPreviewDto composition,
+        Styles styles)
+    {
+        var sheet = workbook.CreateSheet(ProvenanceSheetName);
+        var nextRow = 0;
+
+        AddLabel(sheet, ref nextRow, "组合名称", composition.CompositionName ?? string.Empty, styles);
+        AddLabel(sheet, ref nextRow, "组合场景键", composition.CompositionKey ?? string.Empty, styles);
+        AddLabel(sheet, ref nextRow, "表头节标题", composition.HeaderTitle ?? string.Empty, styles);
+        AddLabel(sheet, ref nextRow, "明细节标题", composition.DetailTitle ?? string.Empty, styles);
+        AddLabel(sheet, ref nextRow, "父项数", composition.ParentCount.ToString(), styles);
+        AddLabel(sheet, ref nextRow, "明细行总数", composition.DetailCount.ToString(), styles);
+        AddLabel(sheet, ref nextRow, "单元格总数", composition.CellCount.ToString(), styles);
+        AddLabel(sheet, ref nextRow, "表头字段顺序", string.Join(", ", composition.HeaderColumns.Select(c => c.Key)), styles);
+        AddLabel(sheet, ref nextRow, "明细字段顺序", string.Join(", ", composition.DetailColumns.Select(c => c.Key)), styles);
+        AddLabel(sheet, ref nextRow, "币种/单位口径", composition.CurrencyUnitSemantics ?? string.Empty, styles);
+        AddLabel(sheet, ref nextRow, "只读声明", composition.ReadOnlyText ?? string.Empty, styles);
+        AddLabel(sheet, ref nextRow, "边界口径", composition.BoundaryText ?? string.Empty, styles);
+        AddLabel(sheet, ref nextRow, "免责声明", composition.DisclaimerText ?? string.Empty, styles);
+        AddLabel(sheet, ref nextRow, "未知值说明", UnknownValueText, styles);
+        if (!string.IsNullOrWhiteSpace(composition.CorrelationId))
+            AddLabel(sheet, ref nextRow, "关联 ID", composition.CorrelationId, styles);
+
+        foreach (var parent in composition.Parents ?? new List<ReportConfigurationBundleComposedHeaderDto>())
+        {
+            AddLabel(sheet, ref nextRow, string.Empty, string.Empty, styles);
+            AddLabel(sheet, ref nextRow, $"父项 #{parent.Ordinal} 身份", parent.ParentKey ?? string.Empty, styles);
+            var headerAmount = parent.Totals?.HeaderAmount;
+            var headerCurrency = parent.Totals?.HeaderCurrency;
+            AddLabel(sheet, ref nextRow, $"父项 #{parent.Ordinal} 表头金额",
+                headerAmount.HasValue
+                    ? $"{headerAmount.Value} {headerCurrency ?? string.Empty}".Trim()
+                    : "空", styles);
+            AddLabel(sheet, ref nextRow, $"父项 #{parent.Ordinal} 明细金额（按币种）",
+                string.Join("；", (parent.Totals?.DetailAmounts ?? new List<ReportConfigurationBundleComposedAmountDto>())
+                    .Select(a => $"{a.Currency} {a.Amount}（{a.Count} 行）")), styles);
+            AddLabel(sheet, ref nextRow, $"父项 #{parent.Ordinal} 明细数量（按单位）",
+                string.Join("；", (parent.Totals?.DetailQuantities ?? new List<ReportConfigurationBundleComposedQuantityDto>())
+                    .Select(q => $"{q.Unit} {q.Quantity}（{q.Count} 行）")), styles);
+            if (!parent.HasDetails && !string.IsNullOrWhiteSpace(parent.EmptyDetailsEvidence))
+                AddLabel(sheet, ref nextRow, $"父项 #{parent.Ordinal} 空明细证据", parent.EmptyDetailsEvidence, styles);
+        }
+
+        sheet.SetColumnWidth(0, 18 * 256);
+        sheet.SetColumnWidth(1, 120 * 256);
+    }
+
     private static void BuildSectionSheet(
         XSSFWorkbook workbook,
         ReportConfigurationBundleSectionExportDto section,
