@@ -1,9 +1,9 @@
 {
   "schema_version": 2,
   "project": "NEWERP",
-  "updated_at": "2026-10-05T00:41:42.525876Z",
-  "phase": "ready",
-  "current_task": null,
+  "updated_at": "2026-10-05T00:41:47.767965Z",
+  "phase": "developing",
+  "current_task": "ERP-297",
   "queue": [
     "ERP-297",
     "ERP-298"
@@ -301,7 +301,7 @@
   },
   "git_sync": {
     "branch": "main",
-    "local_sha": "4fefb3d",
+    "local_sha": "2c06831",
     "status": "synced",
     "ahead": 0,
     "behind": 0,
@@ -315,5 +315,7 @@
   "runner": {
     "status": "stopped",
     "pid": null
-  }
+  },
+  "blocker": null,
+  "finish_reason": null
 }
