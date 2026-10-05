@@ -1,0 +1,91 @@
+{
+  "title": "Adapt finite legacy document export families to controlled datasets",
+  "description": "Users select existing legacy document export families and configure approved columns/date/status filters in generic reporting. Adapt ALL 16 BillProc Bills entries through one trusted read-only family catalog, not one business report. Reuse verified existing export column/order/null semantics. Never invoke their write stored procedures. Stage 2 only. Preserve every existing route until ALL fixed/dynamic migrations have actual data, permission and Excel/PDF compatibility. No dedicated report controller/designer/exporter, arbitrary SQL/identifiers/joins, production operations, schema/seed/migration changes, secrets/env changes or permission expansion. Keep existing Domain/Application/Infrastructure/Api layering. Real writes in tests only after guard (localdb)\\NEWERP_AutoAcceptance and NEWERP_AUTOTEST_*; missing legacy schema/browser acceptance is an accurate environment blocker, not passed parity.",
+  "allowed_paths": [
+    "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
+    "src/ERP.Application/DTOs/ReportMigrationRegistryDtos.cs",
+    "src/ERP.Application/Services/ReportConfigurationPresetCatalog.cs",
+    "src/ERP.Application/Services/ReportMigrationRegistry.cs",
+    "src/ERP.Infrastructure/DependencyInjection.cs",
+    "src/ERP.Application/DTOs/LegacyBillExportDtos.cs",
+    "src/ERP.Application/Interfaces/ILegacyBillExportReadService.cs",
+    "src/ERP.Application/Services/LegacyBillExportCatalog.cs",
+    "src/ERP.Infrastructure/Reports/LegacyBillExportReadService.cs",
+    "src/ERP.Infrastructure/Reports/LegacyBillExportReportConfigurationDatasetProvider.cs",
+    "src/ERP.UnitTests/ReportConfigurationLegacyBillMigrationTests.cs",
+    "src/ERP.IntegrationTests/ReportConfigurationLegacyBillMigrationSqlServerTests.cs"
+  ],
+  "acceptance_criteria": [
+    "Create a finite server-owned catalog for all 16 Bills entries and ExportColumns sets, exact known table/column/date mappings and one preset per family. Expand export:bill-proc inventory into explicit family keys so the aggregate cannot hide omitted families. Reject unknown/malformed identifiers before opening a query; bound rows/time/page/date ranges. Use parameterized values and only trusted constant identifiers, no SELECT * or model-supplied SQL.",
+    "Map every family to real existing functional menu code(s) verified in source. Recheck identity, enabled account/roles/menu and SalespersonDataScopeService before catalog/query/export. Unscoped legacy tables require privileged full scope; restricted users fail closed until exact ownership mapping exists. Missing menu/schema/legacy Oid-vs-Id incompatibility yields bounded audited errors, never guesses or grants. Do not touch old write routes or production tables.",
+    "Preserve legacy field order, raw currency/unit values, nulls, status/date/keyword semantics and one-row-per-header grain through generic exports. Tests cover every finite family, injection attempts, missing columns, denied/revoked rights, source bounds and nonempty safe data/output comparisons; guarded isolated SQL fixture covers trusted reader. Run related tests and safe Release build/unit suite; record actual schema/browser gaps without declaring parity from catalog availability."
+  ],
+  "criterion_path_map": {
+    "Create a finite server-owned catalog for all 16 Bills entries and ExportColumns sets, exact known table/column/date mappings and one preset per family. Expand export:bill-proc inventory into explicit family keys so the aggregate cannot hide omitted families. Reject unknown/malformed identifiers before opening a query; bound rows/time/page/date ranges. Use parameterized values and only trusted constant identifiers, no SELECT * or model-supplied SQL.": [
+      "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
+      "src/ERP.Application/DTOs/ReportMigrationRegistryDtos.cs",
+      "src/ERP.Application/Services/ReportConfigurationPresetCatalog.cs",
+      "src/ERP.Application/Services/ReportMigrationRegistry.cs",
+      "src/ERP.Infrastructure/DependencyInjection.cs",
+      "src/ERP.Application/DTOs/LegacyBillExportDtos.cs",
+      "src/ERP.Application/Interfaces/ILegacyBillExportReadService.cs",
+      "src/ERP.Application/Services/LegacyBillExportCatalog.cs",
+      "src/ERP.Infrastructure/Reports/LegacyBillExportReadService.cs",
+      "src/ERP.Infrastructure/Reports/LegacyBillExportReportConfigurationDatasetProvider.cs",
+      "src/ERP.UnitTests/ReportConfigurationLegacyBillMigrationTests.cs",
+      "src/ERP.IntegrationTests/ReportConfigurationLegacyBillMigrationSqlServerTests.cs"
+    ],
+    "Map every family to real existing functional menu code(s) verified in source. Recheck identity, enabled account/roles/menu and SalespersonDataScopeService before catalog/query/export. Unscoped legacy tables require privileged full scope; restricted users fail closed until exact ownership mapping exists. Missing menu/schema/legacy Oid-vs-Id incompatibility yields bounded audited errors, never guesses or grants. Do not touch old write routes or production tables.": [
+      "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
+      "src/ERP.Application/DTOs/ReportMigrationRegistryDtos.cs",
+      "src/ERP.Application/Services/ReportConfigurationPresetCatalog.cs",
+      "src/ERP.Application/Services/ReportMigrationRegistry.cs",
+      "src/ERP.Infrastructure/DependencyInjection.cs",
+      "src/ERP.Application/DTOs/LegacyBillExportDtos.cs",
+      "src/ERP.Application/Interfaces/ILegacyBillExportReadService.cs",
+      "src/ERP.Application/Services/LegacyBillExportCatalog.cs",
+      "src/ERP.Infrastructure/Reports/LegacyBillExportReadService.cs",
+      "src/ERP.Infrastructure/Reports/LegacyBillExportReportConfigurationDatasetProvider.cs",
+      "src/ERP.UnitTests/ReportConfigurationLegacyBillMigrationTests.cs",
+      "src/ERP.IntegrationTests/ReportConfigurationLegacyBillMigrationSqlServerTests.cs"
+    ],
+    "Preserve legacy field order, raw currency/unit values, nulls, status/date/keyword semantics and one-row-per-header grain through generic exports. Tests cover every finite family, injection attempts, missing columns, denied/revoked rights, source bounds and nonempty safe data/output comparisons; guarded isolated SQL fixture covers trusted reader. Run related tests and safe Release build/unit suite; record actual schema/browser gaps without declaring parity from catalog availability.": [
+      "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
+      "src/ERP.Application/DTOs/ReportMigrationRegistryDtos.cs",
+      "src/ERP.Application/Services/ReportConfigurationPresetCatalog.cs",
+      "src/ERP.Application/Services/ReportMigrationRegistry.cs",
+      "src/ERP.Infrastructure/DependencyInjection.cs",
+      "src/ERP.Application/DTOs/LegacyBillExportDtos.cs",
+      "src/ERP.Application/Interfaces/ILegacyBillExportReadService.cs",
+      "src/ERP.Application/Services/LegacyBillExportCatalog.cs",
+      "src/ERP.Infrastructure/Reports/LegacyBillExportReadService.cs",
+      "src/ERP.Infrastructure/Reports/LegacyBillExportReportConfigurationDatasetProvider.cs",
+      "src/ERP.UnitTests/ReportConfigurationLegacyBillMigrationTests.cs",
+      "src/ERP.IntegrationTests/ReportConfigurationLegacyBillMigrationSqlServerTests.cs"
+    ]
+  },
+  "depends_on": [
+    "ERP-306"
+  ],
+  "risk": "medium",
+  "planning_stage": 2,
+  "implementation_evidence": "Verified BillProcController.cs Bills contains 16 types, Export.cs ExportColumns and Export GET route use finite tables but user-supplied dateField/SELECT * and no menu-specific adapter. ReportMigrationRegistryDtos.cs export:bill-proc has empty RequiredMenuCodes and only one aggregate key; existing providers/presets/tasks 295-307 have no BillProc family migration. Existing legacy db_owner columns use Oid while EF uses Id: verify exact shape and fail closed, no schema modification.",
+  "id": "ERP-308",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-05T03:35:02.657872+00:00"
+}

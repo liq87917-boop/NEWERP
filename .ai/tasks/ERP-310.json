@@ -1,0 +1,99 @@
+{
+  "title": "Add reusable parameter-bound bundle presets for multi-section migration",
+  "description": "Users materialize a generic multi-section preset into their own authorized definitions and execute it with existing bundle engine. Add shared customer/date/status parameter binding and trusted section templates to support existing customer report packets and receipt reconciliation outputs as template compositions, not dedicated endpoints/exporters. Stage 2 only. Preserve every existing route until ALL fixed/dynamic migrations have actual data, permission and Excel/PDF compatibility. No dedicated report controller/designer/exporter, arbitrary SQL/identifiers/joins, production operations, schema/seed/migration changes, secrets/env changes or permission expansion. Keep existing Domain/Application/Infrastructure/Api layering. Real writes in tests only after guard (localdb)\\NEWERP_AutoAcceptance and NEWERP_AUTOTEST_*; missing legacy schema/browser acceptance is an accurate environment blocker, not passed parity.",
+  "allowed_paths": [
+    "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
+    "src/ERP.Application/DTOs/ReportMigrationRegistryDtos.cs",
+    "src/ERP.Application/Services/ReportConfigurationPresetCatalog.cs",
+    "src/ERP.Application/Services/ReportMigrationRegistry.cs",
+    "src/ERP.Infrastructure/DependencyInjection.cs",
+    "src/ERP.Application/DTOs/ReportConfigurationBundlePresetDtos.cs",
+    "src/ERP.Application/Interfaces/IReportConfigurationBundlePresetCatalog.cs",
+    "src/ERP.Application/Services/ReportConfigurationBundlePresetCatalog.cs",
+    "src/ERP.Application/DTOs/ReportConfigurationBundleDtos.cs",
+    "src/ERP.Application/Services/ReportConfigurationBundleService.cs",
+    "src/ERP.Api/Controllers/ReportConfigurationBundlesController.cs",
+    "src/ERP.Api/wwwroot/js/report-configuration.js",
+    "src/ERP.UnitTests/ReportConfigurationBundlePresetTests.cs",
+    "src/ERP.IntegrationTests/ReportConfigurationBundlePresetSqlServerTests.cs"
+  ],
+  "acceptance_criteria": [
+    "Provide immutable bounded bundle preset catalog, previewable section metadata and materialization over existing generic datasets/presets. Include at least customer-report-packet sales-order/receivable composition and receipt-reconciliation order/unlinked-receipt composition with original section labels/order/column choices. Declare prerequisites/readiness independently for each legacy key; no presence-only parity-passed flags.",
+    "Bind only finite typed shared customer/date/status parameters validated against EVERY authorized section field catalog; reject mismatched or unsupported bindings before persisting. Customer packet requires original sales-order plus customer permission and current customer visibility; materialized definitions remain current-user private with pinned/shared access still enforced at execution. All-or-nothing materialization cleans up only new private drafts on failure; no broad deletion, cross-user edits or expansion of permissions.",
+    "Expose generic bundle-preset selection, finite parameters, materialize/preview/download with existing bundle service and generic Excel/PDF. Preserve independent currency/unit/evidence and legacy packet/receipt section provenance; errors/denials bounded and audited. Verify two template families, private ownership, unknown/revoked parameters/menus, rollback and genuine guarded SQL nonempty sections/output; run focused tests and safe Release build/unit suite. Keep old entries and all compatibility limitations until whole inventory actual acceptance."
+  ],
+  "criterion_path_map": {
+    "Provide immutable bounded bundle preset catalog, previewable section metadata and materialization over existing generic datasets/presets. Include at least customer-report-packet sales-order/receivable composition and receipt-reconciliation order/unlinked-receipt composition with original section labels/order/column choices. Declare prerequisites/readiness independently for each legacy key; no presence-only parity-passed flags.": [
+      "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
+      "src/ERP.Application/DTOs/ReportMigrationRegistryDtos.cs",
+      "src/ERP.Application/Services/ReportConfigurationPresetCatalog.cs",
+      "src/ERP.Application/Services/ReportMigrationRegistry.cs",
+      "src/ERP.Infrastructure/DependencyInjection.cs",
+      "src/ERP.Application/DTOs/ReportConfigurationBundlePresetDtos.cs",
+      "src/ERP.Application/Interfaces/IReportConfigurationBundlePresetCatalog.cs",
+      "src/ERP.Application/Services/ReportConfigurationBundlePresetCatalog.cs",
+      "src/ERP.Application/DTOs/ReportConfigurationBundleDtos.cs",
+      "src/ERP.Application/Services/ReportConfigurationBundleService.cs",
+      "src/ERP.Api/Controllers/ReportConfigurationBundlesController.cs",
+      "src/ERP.Api/wwwroot/js/report-configuration.js",
+      "src/ERP.UnitTests/ReportConfigurationBundlePresetTests.cs",
+      "src/ERP.IntegrationTests/ReportConfigurationBundlePresetSqlServerTests.cs"
+    ],
+    "Bind only finite typed shared customer/date/status parameters validated against EVERY authorized section field catalog; reject mismatched or unsupported bindings before persisting. Customer packet requires original sales-order plus customer permission and current customer visibility; materialized definitions remain current-user private with pinned/shared access still enforced at execution. All-or-nothing materialization cleans up only new private drafts on failure; no broad deletion, cross-user edits or expansion of permissions.": [
+      "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
+      "src/ERP.Application/DTOs/ReportMigrationRegistryDtos.cs",
+      "src/ERP.Application/Services/ReportConfigurationPresetCatalog.cs",
+      "src/ERP.Application/Services/ReportMigrationRegistry.cs",
+      "src/ERP.Infrastructure/DependencyInjection.cs",
+      "src/ERP.Application/DTOs/ReportConfigurationBundlePresetDtos.cs",
+      "src/ERP.Application/Interfaces/IReportConfigurationBundlePresetCatalog.cs",
+      "src/ERP.Application/Services/ReportConfigurationBundlePresetCatalog.cs",
+      "src/ERP.Application/DTOs/ReportConfigurationBundleDtos.cs",
+      "src/ERP.Application/Services/ReportConfigurationBundleService.cs",
+      "src/ERP.Api/Controllers/ReportConfigurationBundlesController.cs",
+      "src/ERP.Api/wwwroot/js/report-configuration.js",
+      "src/ERP.UnitTests/ReportConfigurationBundlePresetTests.cs",
+      "src/ERP.IntegrationTests/ReportConfigurationBundlePresetSqlServerTests.cs"
+    ],
+    "Expose generic bundle-preset selection, finite parameters, materialize/preview/download with existing bundle service and generic Excel/PDF. Preserve independent currency/unit/evidence and legacy packet/receipt section provenance; errors/denials bounded and audited. Verify two template families, private ownership, unknown/revoked parameters/menus, rollback and genuine guarded SQL nonempty sections/output; run focused tests and safe Release build/unit suite. Keep old entries and all compatibility limitations until whole inventory actual acceptance.": [
+      "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
+      "src/ERP.Application/DTOs/ReportMigrationRegistryDtos.cs",
+      "src/ERP.Application/Services/ReportConfigurationPresetCatalog.cs",
+      "src/ERP.Application/Services/ReportMigrationRegistry.cs",
+      "src/ERP.Infrastructure/DependencyInjection.cs",
+      "src/ERP.Application/DTOs/ReportConfigurationBundlePresetDtos.cs",
+      "src/ERP.Application/Interfaces/IReportConfigurationBundlePresetCatalog.cs",
+      "src/ERP.Application/Services/ReportConfigurationBundlePresetCatalog.cs",
+      "src/ERP.Application/DTOs/ReportConfigurationBundleDtos.cs",
+      "src/ERP.Application/Services/ReportConfigurationBundleService.cs",
+      "src/ERP.Api/Controllers/ReportConfigurationBundlesController.cs",
+      "src/ERP.Api/wwwroot/js/report-configuration.js",
+      "src/ERP.UnitTests/ReportConfigurationBundlePresetTests.cs",
+      "src/ERP.IntegrationTests/ReportConfigurationBundlePresetSqlServerTests.cs"
+    ]
+  },
+  "depends_on": [
+    "ERP-309"
+  ],
+  "risk": "medium",
+  "planning_stage": 2,
+  "implementation_evidence": "Verified CustomerReportPacketController.cs and CustomerReportPacketDtos.cs compose bounded customerId/startDate/endDate sales and invoice/receipt sections through existing service. ERP307 introduces stateless definition-ID bundles only; no template catalog, shared typed parameter binding or multi-definition materialization. Receipt original two-section output cannot be represented by reduced single preset; ERP309 supplies independent bounded evidence catalog prerequisite. Existing immutable ReportConfigurationPresetCatalog and registry can host controlled readiness, not fabricated compatibility.",
+  "id": "ERP-310",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-05T03:35:02.710503+00:00"
+}

@@ -1,0 +1,99 @@
+{
+  "title": "Complete reusable evidence catalogs and independent receipt sections",
+  "description": "Bring controlled evidence catalogs to compatibility with existing dynamic source catalogs, and expose customer-level unlinked receipt evidence as an independent bounded section usable by generic bundles. Apply to shipment-finance and receipt-reconciliation together; reuse original SalesOrderProgress, SalesOrderShipmentFinanceReport and SalesOrderReceiptReconciliation helpers, no copied algorithms. Stage 2 only. Preserve every existing route until ALL fixed/dynamic migrations have actual data, permission and Excel/PDF compatibility. No dedicated report controller/designer/exporter, arbitrary SQL/identifiers/joins, production operations, schema/seed/migration changes, secrets/env changes or permission expansion. Keep existing Domain/Application/Infrastructure/Api layering. Real writes in tests only after guard (localdb)\\NEWERP_AutoAcceptance and NEWERP_AUTOTEST_*; missing legacy schema/browser acceptance is an accurate environment blocker, not passed parity.",
+  "allowed_paths": [
+    "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
+    "src/ERP.Application/DTOs/ReportMigrationRegistryDtos.cs",
+    "src/ERP.Application/Services/ReportConfigurationPresetCatalog.cs",
+    "src/ERP.Application/Services/ReportMigrationRegistry.cs",
+    "src/ERP.Infrastructure/DependencyInjection.cs",
+    "src/ERP.Api/Program.cs",
+    "src/ERP.Api/Controllers/ReceiptReconciliationReportConfigurationDatasetProvider.cs",
+    "src/ERP.Api/Controllers/ShipmentFinanceReportConfigurationDatasetProvider.cs",
+    "src/ERP.Api/Controllers/UnlinkedReceiptReportConfigurationDatasetProvider.cs",
+    "src/ERP.Application/DTOs/ReportConfigurationBundleDtos.cs",
+    "src/ERP.Application/Services/ReportConfigurationBundleService.cs",
+    "src/ERP.UnitTests/ReportConfigurationEvidenceCatalogParityTests.cs",
+    "src/ERP.UnitTests/ReportConfigurationFulfillmentMigrationTests.cs",
+    "src/ERP.UnitTests/ReportConfigurationReconciliationMigrationTests.cs"
+  ],
+  "acceptance_criteria": [
+    "Compare every legacy catalog field in DynamicShipmentFinanceReportRules and DynamicReceiptReconciliationReportRules with the controlled providers; restore missing allocation, invoice, known/unknown, label/note/count and truncation fields with original keys/types/null and currency semantics. Preserve generic selected column validation and presets, never invent replacement calculations.",
+    "Expose a finite independent unlinked-receipt dataset section using original SalesOrderReceiptReconciliation.ForQueryAsync result for the SAME bounded scoped order-page customers/filter set. Preserve separate receipt grain, original currency, source truncation, reference and no-order-attribution semantics; never join receipt amounts into order totals or infer allocation. Revalidate sales-order menu, current-user scope and finite field/filter bounds on every request; API-level provider registration avoids Infrastructure depending on Api.",
+    "Enable generic bundle sections to carry matching finite source-page filters without hidden joins; all sections validate first and fail together on denied/revoked fields/menu/scope. Compare complete field catalogs and source-helper rows, separate empty/nonempty receipt sections, unknown values and truncated evidence in focused unit fixtures and generic Excel/PDF; safe Release build/unit suite and contracts pass. Actual browser/SQL/output parity remains unverified until real proof; keep old routes."
+  ],
+  "criterion_path_map": {
+    "Compare every legacy catalog field in DynamicShipmentFinanceReportRules and DynamicReceiptReconciliationReportRules with the controlled providers; restore missing allocation, invoice, known/unknown, label/note/count and truncation fields with original keys/types/null and currency semantics. Preserve generic selected column validation and presets, never invent replacement calculations.": [
+      "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
+      "src/ERP.Application/DTOs/ReportMigrationRegistryDtos.cs",
+      "src/ERP.Application/Services/ReportConfigurationPresetCatalog.cs",
+      "src/ERP.Application/Services/ReportMigrationRegistry.cs",
+      "src/ERP.Infrastructure/DependencyInjection.cs",
+      "src/ERP.Api/Program.cs",
+      "src/ERP.Api/Controllers/ReceiptReconciliationReportConfigurationDatasetProvider.cs",
+      "src/ERP.Api/Controllers/ShipmentFinanceReportConfigurationDatasetProvider.cs",
+      "src/ERP.Api/Controllers/UnlinkedReceiptReportConfigurationDatasetProvider.cs",
+      "src/ERP.Application/DTOs/ReportConfigurationBundleDtos.cs",
+      "src/ERP.Application/Services/ReportConfigurationBundleService.cs",
+      "src/ERP.UnitTests/ReportConfigurationEvidenceCatalogParityTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationFulfillmentMigrationTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationReconciliationMigrationTests.cs"
+    ],
+    "Expose a finite independent unlinked-receipt dataset section using original SalesOrderReceiptReconciliation.ForQueryAsync result for the SAME bounded scoped order-page customers/filter set. Preserve separate receipt grain, original currency, source truncation, reference and no-order-attribution semantics; never join receipt amounts into order totals or infer allocation. Revalidate sales-order menu, current-user scope and finite field/filter bounds on every request; API-level provider registration avoids Infrastructure depending on Api.": [
+      "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
+      "src/ERP.Application/DTOs/ReportMigrationRegistryDtos.cs",
+      "src/ERP.Application/Services/ReportConfigurationPresetCatalog.cs",
+      "src/ERP.Application/Services/ReportMigrationRegistry.cs",
+      "src/ERP.Infrastructure/DependencyInjection.cs",
+      "src/ERP.Api/Program.cs",
+      "src/ERP.Api/Controllers/ReceiptReconciliationReportConfigurationDatasetProvider.cs",
+      "src/ERP.Api/Controllers/ShipmentFinanceReportConfigurationDatasetProvider.cs",
+      "src/ERP.Api/Controllers/UnlinkedReceiptReportConfigurationDatasetProvider.cs",
+      "src/ERP.Application/DTOs/ReportConfigurationBundleDtos.cs",
+      "src/ERP.Application/Services/ReportConfigurationBundleService.cs",
+      "src/ERP.UnitTests/ReportConfigurationEvidenceCatalogParityTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationFulfillmentMigrationTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationReconciliationMigrationTests.cs"
+    ],
+    "Enable generic bundle sections to carry matching finite source-page filters without hidden joins; all sections validate first and fail together on denied/revoked fields/menu/scope. Compare complete field catalogs and source-helper rows, separate empty/nonempty receipt sections, unknown values and truncated evidence in focused unit fixtures and generic Excel/PDF; safe Release build/unit suite and contracts pass. Actual browser/SQL/output parity remains unverified until real proof; keep old routes.": [
+      "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
+      "src/ERP.Application/DTOs/ReportMigrationRegistryDtos.cs",
+      "src/ERP.Application/Services/ReportConfigurationPresetCatalog.cs",
+      "src/ERP.Application/Services/ReportMigrationRegistry.cs",
+      "src/ERP.Infrastructure/DependencyInjection.cs",
+      "src/ERP.Api/Program.cs",
+      "src/ERP.Api/Controllers/ReceiptReconciliationReportConfigurationDatasetProvider.cs",
+      "src/ERP.Api/Controllers/ShipmentFinanceReportConfigurationDatasetProvider.cs",
+      "src/ERP.Api/Controllers/UnlinkedReceiptReportConfigurationDatasetProvider.cs",
+      "src/ERP.Application/DTOs/ReportConfigurationBundleDtos.cs",
+      "src/ERP.Application/Services/ReportConfigurationBundleService.cs",
+      "src/ERP.UnitTests/ReportConfigurationEvidenceCatalogParityTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationFulfillmentMigrationTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationReconciliationMigrationTests.cs"
+    ]
+  },
+  "depends_on": [
+    "ERP-307"
+  ],
+  "risk": "medium",
+  "planning_stage": 2,
+  "implementation_evidence": "Live API acceptance evidence .ai/logs/ERP-303-runtime-api-acceptance-20261005 proves 2 admin rows and recipient42 scoped row, but generic receipt preset omits numerous legacy allocation/invoice/coverage fields and legacy receiptRows section. ReceiptReconciliationReportConfigurationDatasetProvider.cs only maps selected reduced fields from report.Groups and drops unlinked receipt result. Shipment provider also requires full catalog comparison; ERP307 only bundles existing definitions, no evidence completeness/independent receipt adapter.",
+  "id": "ERP-309",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-05T03:35:02.684889+00:00"
+}
