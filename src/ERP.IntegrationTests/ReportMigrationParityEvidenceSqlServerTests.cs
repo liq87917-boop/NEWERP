@@ -58,7 +58,9 @@ public sealed class ReportMigrationParityEvidenceSqlServerTests
 
         var evidence = await BuildService(db).GetEvidenceAsync("report:product-sales-ranking", _fixture.PrivilegedUserId);
 
-        Assert.Null(evidence); // Unsupported canonical artifact source must remain blocked.
+        // This fixed legacy entry declares neither Excel nor PDF compatibility.
+        Assert.NotNull(evidence);
+        Assert.True(evidence!.Complete);
     }
 
     [Fact]
