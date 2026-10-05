@@ -508,6 +508,10 @@ public static class ReportConfigurationBundlePdfExporter
                 $"父项 {composition.ParentCount} · 明细 {composition.DetailCount} · 单元格 {composition.CellCount}",
                 _metaFont, MetaSize, MetaHeightMm);
             DrawHeading($"币种/单位：{composition.CurrencyUnitSemantics}", _metaFont, MetaSize, MetaHeightMm);
+            DrawHeading($"关联 ID：{composition.CorrelationId}", _metaFont, MetaSize, MetaHeightMm);
+            DrawHeading($"只读声明：{composition.ReadOnlyText}", _metaFont, MetaSize, MetaHeightMm);
+            DrawHeading($"边界口径：{composition.BoundaryText}", _metaFont, MetaSize, MetaHeightMm);
+            DrawHeading($"免责声明：{composition.DisclaimerText}", _metaFont, MetaSize, MetaHeightMm);
 
             var parents = composition.Parents ?? new List<ReportConfigurationBundleComposedHeaderDto>();
             for (var i = 0; i < parents.Count; i++)
