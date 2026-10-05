@@ -19,6 +19,7 @@ public sealed class ReportMigrationParityEvidenceService : IReportMigrationParit
     private readonly IReportMigrationOutputComparator _outputComparator;
     private readonly IReportConfigurationExecutionBudget _budget;
     private readonly IReportMigrationParityEvidenceStore _store;
+    private readonly ILegacyReportArtifactSource? _artifactSource;
 
     public ReportMigrationParityEvidenceService(
         ILegacyReportSource legacySource,
@@ -26,7 +27,8 @@ public sealed class ReportMigrationParityEvidenceService : IReportMigrationParit
         IReportMigrationParityComparator comparator,
         IReportMigrationOutputComparator outputComparator,
         IReportConfigurationExecutionBudget budget,
-        IReportMigrationParityEvidenceStore store)
+        IReportMigrationParityEvidenceStore store,
+        ILegacyReportArtifactSource? artifactSource = null)
     {
         _legacySource = legacySource ?? throw new ArgumentNullException(nameof(legacySource));
         _providers = (providers ?? Array.Empty<IReportConfigurationDatasetProvider>())
@@ -36,6 +38,7 @@ public sealed class ReportMigrationParityEvidenceService : IReportMigrationParit
         _outputComparator = outputComparator ?? throw new ArgumentNullException(nameof(outputComparator));
         _budget = budget ?? throw new ArgumentNullException(nameof(budget));
         _store = store ?? throw new ArgumentNullException(nameof(store));
+        _artifactSource = artifactSource;
     }
 
     /// <inheritdoc />
@@ -115,11 +118,25 @@ public sealed class ReportMigrationParityEvidenceService : IReportMigrationParit
 
         var generic = ToSnapshot(preview, legacy, mappings);
 
+        LegacyReportArtifactBytesDto? legacyArtifacts = null;
+        if (_artifactSource is not null)
+        {
+            try
+            {
+                legacyArtifacts = await _artifactSource.ReadArtifactsAsync(request, cancellationToken);
+            }
+            catch (BusinessException)
+            {
+                legacyArtifacts = null;
+            }
+        }
+
         var output = _outputComparator.Compare(
             BuildNormalizedPreview(preview, legacy, mappings),
             legacy,
             definition.ExcelCompatible,
-            definition.PdfCompatible);
+            definition.PdfCompatible,
+            legacyArtifacts: legacyArtifacts);
 
         var comparison = _comparator.Compare(legacy, generic, output.OutputSemanticsMatched);
         var evidence = comparison.Evidence;
@@ -184,7 +201,7 @@ public sealed class ReportMigrationParityEvidenceService : IReportMigrationParit
 
     // ==================== 旧列键 -> 通用字段键对齐 ====================
 
-    private sealed record FieldMapping(string LegacyKey, string FieldKey, string Type);
+    private sealed record FieldMapping(string LegacyKey, string FieldKey, string Type, string Label);
 
     private static List<FieldMapping>? BuildFieldMappings(
         IReadOnlyList<ReportMigrationParityColumnDto> legacyColumns,
@@ -197,7 +214,7 @@ public sealed class ReportMigrationParityEvidenceService : IReportMigrationParit
             if (field is null)
                 return null;
 
-            mappings.Add(new FieldMapping(column.Key, field.Key, field.Type));
+            mappings.Add(new FieldMapping(column.Key, field.Key, field.Type, field.Label));
         }
 
         return mappings;
@@ -300,8 +317,13 @@ public sealed class ReportMigrationParityEvidenceService : IReportMigrationParit
         ReportMigrationParitySnapshotDto legacy,
         IReadOnlyList<FieldMapping> mappings)
     {
+        var labelByKey = mappings.ToDictionary(m => m.LegacyKey, m => m.Label, StringComparer.Ordinal);
         var columns = legacy.Columns
-            .Select(c => new ReportConfigurationColumnDto(c.Key, c.Key, c.Type, null))
+            .Select(c => new ReportConfigurationColumnDto(
+                c.Key,
+                labelByKey.TryGetValue(c.Key, out var label) ? label : c.Key,
+                c.Type,
+                null))
             .ToList();
 
         var rows = preview.Rows
