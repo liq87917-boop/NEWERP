@@ -89,6 +89,10 @@ public static class ReportConfigurationConstants
     public const string DatasetPurchaseOrder = "purchase-order";
     public const string DatasetSupplierAging = "supplier-aging";
     public const string DatasetSupplierExposure = "supplier-exposure";
+    public const string DatasetBalanceSheet = "balance-sheet";
+    public const string DatasetIncomeStatement = "income-statement";
+    public const string DatasetCashFlow = "cash-flow";
+    public const string DatasetArAging = "ar-aging";
 
     // ==================== 受控关系（ERP-268：客户维度） ====================
 
