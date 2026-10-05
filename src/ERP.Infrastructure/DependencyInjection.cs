@@ -145,6 +145,9 @@ public static class DependencyInjection
         // 通用报表配置平台（ERP-296 Stage 2）：报表预设模板编排（只读列出 + 私有物化；数据驱动，不新增每报表控制器/设计器/导出器）
         services.AddScoped<IReportConfigurationPresetCatalog, ReportConfigurationPresetCatalog>();
 
+        // 通用报表配置平台（ERP-312 Stage 2）：受控打印模板绑定目录（只读枚举 + 只读绑定校验；复用既有菜单授权与受控数据集列权限）
+        services.AddScoped<IReportConfigurationPrintTemplateCatalog, ReportConfigurationPrintTemplateCatalog>();
+
         // 库存移动与成本服务（ERP-009：库存单据审核/销审统一经此维护库存与流水）
         services.AddScoped<IInventoryService, InventoryService>();
 

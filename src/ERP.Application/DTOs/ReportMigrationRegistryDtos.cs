@@ -60,6 +60,9 @@ public static class ReportMigrationRegistryCategories
 
     /// <summary>财务报表（资产负债表 / 利润表 / 现金流量表 + 应收账龄 / 采购成本 / 退税汇总 / 库存预警）。</summary>
     public const string FinancialStatement = "financial-statement";
+
+    /// <summary>打印模板（SysPrintTemplate 受控绑定；ERP-312）。</summary>
+    public const string PrintTemplate = "print-template";
 }
 
 /// <summary>

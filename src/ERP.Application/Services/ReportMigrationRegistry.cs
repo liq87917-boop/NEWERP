@@ -41,7 +41,9 @@ public sealed class ReportMigrationRegistry : IReportMigrationRegistry
             _db, userId!.Value);
 
         var entries = new List<ReportMigrationRegistryEntryDto>();
-        foreach (var definition in ReportMigrationRegistryManifest.Entries.Concat(LegacyBillExportCatalog.RegistryEntries))
+        foreach (var definition in ReportMigrationRegistryManifest.Entries
+            .Concat(LegacyBillExportCatalog.RegistryEntries)
+            .Concat(ReportPrintTemplateFamilies.RegistryEntries))
         {
             if (!IsMenuAuthorized(definition, menuCodes))
                 continue;
@@ -77,7 +79,9 @@ public sealed class ReportMigrationRegistry : IReportMigrationRegistry
         if (userId is null or <= 0)
             return false;
 
-        foreach (var definition in ReportMigrationRegistryManifest.Entries.Concat(LegacyBillExportCatalog.RegistryEntries))
+        foreach (var definition in ReportMigrationRegistryManifest.Entries
+            .Concat(LegacyBillExportCatalog.RegistryEntries)
+            .Concat(ReportPrintTemplateFamilies.RegistryEntries))
         {
             var parity = await DeriveParityAsync(definition, userId.Value, cancellationToken);
             if (parity != ReportMigrationParityStatus.ParityPassed)
