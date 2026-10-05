@@ -186,12 +186,12 @@ public class ReportMigrationRegistryTests
     {
         var entries = ReportMigrationRegistryManifest.Entries;
 
-        Assert.Equal(40, entries.Count);
+        Assert.Equal(39, entries.Count);
         Assert.Equal(entries.Count, entries.Select(e => e.LegacyKey).Distinct(StringComparer.Ordinal).Count());
 
         Assert.Equal(10, entries.Count(e => e.Category == ReportMigrationRegistryCategories.FixedReport));
         Assert.Equal(18, entries.Count(e => e.Category == ReportMigrationRegistryCategories.DynamicReport));
-        Assert.Equal(2, entries.Count(e => e.Category == ReportMigrationRegistryCategories.Export));
+        Assert.Equal(1, entries.Count(e => e.Category == ReportMigrationRegistryCategories.Export));
         Assert.Equal(1, entries.Count(e => e.Category == ReportMigrationRegistryCategories.Packet));
         Assert.Equal(2, entries.Count(e => e.Category == ReportMigrationRegistryCategories.Document));
         Assert.Equal(7, entries.Count(e => e.Category == ReportMigrationRegistryCategories.FinancialStatement));
@@ -206,6 +206,36 @@ public class ReportMigrationRegistryTests
             Assert.False(string.IsNullOrWhiteSpace(e.Category));
             Assert.False(string.IsNullOrWhiteSpace(e.DatasetKey));
         });
+    }
+
+    [Fact]
+    public void Manifest_不含被取代的聚合单据导出占位()
+    {
+        Assert.DoesNotContain(ReportMigrationRegistryManifest.Entries,
+            e => e.LegacyKey == "export:bill-proc");
+        Assert.DoesNotContain(ReportMigrationRegistryManifest.Entries,
+            e => e.DatasetKey == "bill-export");
+    }
+
+    [Fact]
+    public void LegacyBillExportCatalog_16个族条目是旧单据导出的唯一表示()
+    {
+        var entries = LegacyBillExportCatalog.RegistryEntries;
+
+        Assert.Equal(16, entries.Count);
+        Assert.Equal(entries.Count, entries.Select(e => e.LegacyKey).Distinct(StringComparer.Ordinal).Count());
+
+        Assert.All(entries, e =>
+        {
+            Assert.StartsWith("export:bill-proc:", e.LegacyKey);
+            Assert.StartsWith("bill-export:", e.DatasetKey);
+            Assert.NotEmpty(e.RequiredMenuCodes);
+            Assert.True(e.ExcelCompatible);
+        });
+
+        // 被取代的单一聚合键不得再出现在清单里（16 个族条目是旧单据导出的唯一表示）。
+        Assert.DoesNotContain(ReportMigrationRegistryManifest.Entries,
+            e => e.LegacyKey == "export:bill-proc");
     }
 
     // ==================== 2. 菜单 fail-closed ====================
@@ -457,6 +487,48 @@ public class ReportMigrationRegistryTests
         Assert.Equal(ReportMigrationParityStatusText.PresetReady, entry.ParityStatus);
     }
 
+    [Fact]
+    public async Task Parity_16个单据导出族_完整数据预设证据_全部parity_passed()
+    {
+        using var db = TestDbFactory.Create();
+
+        var billEntries = LegacyBillExportCatalog.RegistryEntries;
+        var menuCodes = billEntries
+            .SelectMany(e => e.RequiredMenuCodes)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        var user = SeedUserWithMenus(db, "all-bill-families", menuCodes);
+
+        var datasets = new Dictionary<string, ReportConfigurationDatasetDto?>();
+        foreach (var entry in billEntries)
+        {
+            datasets[entry.DatasetKey] = Dataset(
+                entry.DatasetKey,
+                string.Join('+', entry.RequiredMenuCodes),
+                entry.CurrencyUnitSemantics);
+        }
+
+        var billLegacyKeys = new HashSet<string>(
+            billEntries.Select(e => e.LegacyKey),
+            StringComparer.Ordinal);
+
+        var registry = BuildRegistry(
+            db,
+            new FakeCatalog(datasets),
+            new FakePresetCatalog(billLegacyKeys.Contains),
+            new FakeEvidenceProvider(key => billLegacyKeys.Contains(key)
+                ? new ReportMigrationParityEvidenceDto(true, true, true, true)
+                : null));
+
+        var result = await registry.GetRegistryAsync(user.Id);
+
+        var passed = result.Entries
+            .Where(e => e.LegacyKey.StartsWith("export:bill-proc:", StringComparison.Ordinal))
+            .ToList();
+        Assert.Equal(16, passed.Count);
+        Assert.All(passed, e => Assert.Equal(ReportMigrationParityStatusText.ParityPassed, e.ParityStatus));
+    }
+
     // ==================== 3.5 捆绑组合条目 parity 派生（ERP-322） ====================
 
     private static ReportConfigurationBundlePresetDto PacketBundlePreset(
@@ -594,6 +666,18 @@ public class ReportMigrationRegistryTests
         var registry = BuildRegistry(db, catalog, new FakePresetCatalog(k => k == "dynamic:sales-order"));
 
         Assert.False(await registry.CanRetireLegacyRoutesAsync(user.Id));
+    }
+
+    [Fact]
+    public void CanRetireLegacyRoutes_门控清单不含被取代的聚合占位()
+    {
+        var gateDefinitions = ReportMigrationRegistryManifest.Entries
+            .Concat(LegacyBillExportCatalog.RegistryEntries)
+            .Concat(ReportPrintTemplateFamilies.RegistryEntries)
+            .ToList();
+
+        Assert.DoesNotContain(gateDefinitions, d => d.LegacyKey == "export:bill-proc");
+        Assert.DoesNotContain(gateDefinitions, d => d.DatasetKey == "bill-export");
     }
 }
 

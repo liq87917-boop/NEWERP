@@ -239,9 +239,6 @@ public static class ReportMigrationRegistryManifest
 
 
             // ==================== 导出 ====================
-            new("export:bill-proc", "通用单据 Excel 导出", ReportMigrationRegistryCategories.Export,
-                "bill-export", Array.Empty<string>(), string.Empty,
-                "金额按原币呈现；数量按基础单位；不跨币种换算或合并", true, false),
             new("export:product-export-field-completeness", "出口字段完整度工作台", ReportMigrationRegistryCategories.Export,
                 "product-export-field-completeness", new[] { "product" }, "商品资料",
                 "只读字段完整度（无金额/币种）", false, false),
