@@ -1,0 +1,71 @@
+{
+  "title": "Decode actual PDF cells and layout in the shared canonical output comparator",
+  "description": "Stage 2 shared migration engine only; preserve all old routes, four-stage gate, user row/column/menu/data-scope permissions and concurrent work. No arbitrary SQL/joins, independent report, new database/schema, production access/deployment or fabricated proof. Retain exact failure/audit evidence and existing execution budget/cancellation. An authorized migration reviewer must compare actual canonical legacy and generic PDF bytes. Implement a bounded managed PDF decoder (existing PdfSharp or a minimal maintained primary-source dependency) for Unicode/CMap text, ordered headers, cell text/null representation, currency/unit labels, page/band continuation and layout boundaries. Use actual decoded content from both artifacts; input snapshots are cross-checks only. Remove the deliberate unsupported-PDF block only for supported decoded structures; malformed/encrypted/images-only/unextractable/font/oversize cases remain accurately blocked. Do not use external machine paths as parser dependencies or raw compressed bytes/font markers as proof. Compare differently paginated legitimate column bands semantically without losing columns. Record precise comparison reasons and isolated SQL/artifact evidence.",
+  "implementation_evidence": "383b8c0 regression Pdf_with_different_actual_cells showed DIFFERENT PDF cells accepted with EXPECTED input snapshots; ComparePdfArtifacts now correctly returns false because DecodePdf exposes no cells/layout. ERP333 completed build but actual PDF capability is missing.",
+  "allowed_paths": [
+    "src/ERP.Application/DTOs/ReportMigrationArtifactDtos.cs",
+    "src/ERP.Infrastructure/Export/ReportMigrationOutputSemanticsComparator.cs",
+    "src/ERP.Infrastructure/Export/ReportMigrationPdfArtifactDecoder.cs",
+    "src/ERP.Infrastructure/ERP.Infrastructure.csproj",
+    "src/ERP.UnitTests/ReportMigrationArtifactParityTests.cs",
+    "src/ERP.UnitTests/ReportMigrationPdfArtifactDecoderTests.cs",
+    "src/ERP.IntegrationTests/ReportMigrationArtifactParitySqlServerTests.cs"
+  ],
+  "depends_on": [
+    "ERP-333"
+  ],
+  "acceptance_criteria": [
+    "Actual PDF decoding compares real ordered cells/headers and currency/unit/layout; changed cell, missing header or band/page truncation rejects even with matching input snapshots.",
+    "Identical supported actual canonical/generic PDFs can match; encrypted, malformed, unsupported glyph mapping or extraction and resource overflow fail closed with accurate reasons and current permissions unchanged.",
+    "Prove supported positive and negative cases with real generated PDF bytes and guarded isolated SQL data; safe Release build/unit suite plus scheduler self-test/contracts pass; missing browser/full-family parity remains recorded, no stage completion claim."
+  ],
+  "criterion_path_map": {
+    "Actual PDF decoding compares real ordered cells/headers and currency/unit/layout; changed cell, missing header or band/page truncation rejects even with matching input snapshots.": [
+      "src/ERP.Application/DTOs/ReportMigrationArtifactDtos.cs",
+      "src/ERP.Infrastructure/Export/ReportMigrationOutputSemanticsComparator.cs",
+      "src/ERP.Infrastructure/Export/ReportMigrationPdfArtifactDecoder.cs",
+      "src/ERP.Infrastructure/ERP.Infrastructure.csproj",
+      "src/ERP.UnitTests/ReportMigrationArtifactParityTests.cs",
+      "src/ERP.UnitTests/ReportMigrationPdfArtifactDecoderTests.cs",
+      "src/ERP.IntegrationTests/ReportMigrationArtifactParitySqlServerTests.cs"
+    ],
+    "Identical supported actual canonical/generic PDFs can match; encrypted, malformed, unsupported glyph mapping or extraction and resource overflow fail closed with accurate reasons and current permissions unchanged.": [
+      "src/ERP.Application/DTOs/ReportMigrationArtifactDtos.cs",
+      "src/ERP.Infrastructure/Export/ReportMigrationOutputSemanticsComparator.cs",
+      "src/ERP.Infrastructure/Export/ReportMigrationPdfArtifactDecoder.cs",
+      "src/ERP.Infrastructure/ERP.Infrastructure.csproj",
+      "src/ERP.UnitTests/ReportMigrationArtifactParityTests.cs",
+      "src/ERP.UnitTests/ReportMigrationPdfArtifactDecoderTests.cs",
+      "src/ERP.IntegrationTests/ReportMigrationArtifactParitySqlServerTests.cs"
+    ],
+    "Prove supported positive and negative cases with real generated PDF bytes and guarded isolated SQL data; safe Release build/unit suite plus scheduler self-test/contracts pass; missing browser/full-family parity remains recorded, no stage completion claim.": [
+      "src/ERP.Application/DTOs/ReportMigrationArtifactDtos.cs",
+      "src/ERP.Infrastructure/Export/ReportMigrationOutputSemanticsComparator.cs",
+      "src/ERP.Infrastructure/Export/ReportMigrationPdfArtifactDecoder.cs",
+      "src/ERP.Infrastructure/ERP.Infrastructure.csproj",
+      "src/ERP.UnitTests/ReportMigrationArtifactParityTests.cs",
+      "src/ERP.UnitTests/ReportMigrationPdfArtifactDecoderTests.cs",
+      "src/ERP.IntegrationTests/ReportMigrationArtifactParitySqlServerTests.cs"
+    ]
+  },
+  "planning_stage": 2,
+  "risk": "medium",
+  "id": "ERP-336",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-05T12:10:30.806152Z"
+}

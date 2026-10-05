@@ -1,0 +1,76 @@
+{
+  "title": "Complete finite canonical artifact adapters across the existing shared migration catalog",
+  "description": "Stage 2 shared migration engine only; preserve all old routes, four-stage gate, user row/column/menu/data-scope permissions and concurrent work. No arbitrary SQL/joins, independent report, new database/schema, production access/deployment or fabricated proof. Retain exact failure/audit evidence and existing execution budget/cancellation. Existing LegacyReportArtifactSource supports only dynamic:sales-order. Extend the finite shared adapter registry for ALL existing families that declare Excel/PDF compatibility and possess canonical exporters: the existing dynamic query/export families, 16 bill exports, master exports and document/packet exports. Resolve exact existing query/converter/exporter from API/source/history; use real legacy exporter bytes and typed/null/currency/unit values, never generic exporter as old output. Reuse existing scoped services and canonical validation, no business formula reimplementation. Print/browser-only families without obtainable canonical artifacts stay precisely blocked and cannot promote the gate. No new individual report or controller route. Clamp and verify completeness rather than truncation, reject unknown keys before queries, audit failures and cancellation. Keep a finite executable catalog capability matrix and tests that cover each supported family plus unknown/denied/missing exporter.",
+  "implementation_evidence": "LegacyReportArtifactSource.ResolveKey validates keys but ReadArtifactsAsync binds only dynamic:sales-order; every other compatible source returns null. ReportMigrationParityEvidenceService now rejects missing required artifact bytes after 383b8c0. Existing canonical exporters under Infrastructure/Export and registered legacy report queries already exist.",
+  "allowed_paths": [
+    "src/ERP.Application/DTOs/ReportMigrationArtifactDtos.cs",
+    "src/ERP.Application/Interfaces/ILegacyReportArtifactSource.cs",
+    "src/ERP.Infrastructure/Export/LegacyReportArtifactSource.cs",
+    "src/ERP.Infrastructure/Export/LegacyReportArtifactAdapters.cs",
+    "src/ERP.Infrastructure/DependencyInjection.cs",
+    "src/ERP.UnitTests/LegacyReportArtifactCatalogTests.cs",
+    "src/ERP.UnitTests/ReportMigrationArtifactParityTests.cs",
+    "src/ERP.IntegrationTests/LegacyReportArtifactCatalogSqlServerTests.cs"
+  ],
+  "depends_on": [
+    "ERP-333",
+    "ERP-334"
+  ],
+  "acceptance_criteria": [
+    "Finite adapters bind existing canonical exporters for all obtainable compatible legacy families with exact current-user permission/filter/page semantics; no generic-as-legacy output or independent report.",
+    "Unknown, denied, incomplete bounded page, missing canonical renderer/artifact/font and cancelled cases reject with accurate audit/reasons; unsupported print/browser sources cannot mark parity-passed.",
+    "Execute representative real canonical outputs across dynamic/bill/master/document families using guarded isolated SQL and typed/null/currency fixtures; safe Release/unit and scheduler/contracts pass; maintain precise per-family supported/blocked matrix and preserve old routes."
+  ],
+  "criterion_path_map": {
+    "Finite adapters bind existing canonical exporters for all obtainable compatible legacy families with exact current-user permission/filter/page semantics; no generic-as-legacy output or independent report.": [
+      "src/ERP.Application/DTOs/ReportMigrationArtifactDtos.cs",
+      "src/ERP.Application/Interfaces/ILegacyReportArtifactSource.cs",
+      "src/ERP.Infrastructure/Export/LegacyReportArtifactSource.cs",
+      "src/ERP.Infrastructure/Export/LegacyReportArtifactAdapters.cs",
+      "src/ERP.Infrastructure/DependencyInjection.cs",
+      "src/ERP.UnitTests/LegacyReportArtifactCatalogTests.cs",
+      "src/ERP.UnitTests/ReportMigrationArtifactParityTests.cs",
+      "src/ERP.IntegrationTests/LegacyReportArtifactCatalogSqlServerTests.cs"
+    ],
+    "Unknown, denied, incomplete bounded page, missing canonical renderer/artifact/font and cancelled cases reject with accurate audit/reasons; unsupported print/browser sources cannot mark parity-passed.": [
+      "src/ERP.Application/DTOs/ReportMigrationArtifactDtos.cs",
+      "src/ERP.Application/Interfaces/ILegacyReportArtifactSource.cs",
+      "src/ERP.Infrastructure/Export/LegacyReportArtifactSource.cs",
+      "src/ERP.Infrastructure/Export/LegacyReportArtifactAdapters.cs",
+      "src/ERP.Infrastructure/DependencyInjection.cs",
+      "src/ERP.UnitTests/LegacyReportArtifactCatalogTests.cs",
+      "src/ERP.UnitTests/ReportMigrationArtifactParityTests.cs",
+      "src/ERP.IntegrationTests/LegacyReportArtifactCatalogSqlServerTests.cs"
+    ],
+    "Execute representative real canonical outputs across dynamic/bill/master/document families using guarded isolated SQL and typed/null/currency fixtures; safe Release/unit and scheduler/contracts pass; maintain precise per-family supported/blocked matrix and preserve old routes.": [
+      "src/ERP.Application/DTOs/ReportMigrationArtifactDtos.cs",
+      "src/ERP.Application/Interfaces/ILegacyReportArtifactSource.cs",
+      "src/ERP.Infrastructure/Export/LegacyReportArtifactSource.cs",
+      "src/ERP.Infrastructure/Export/LegacyReportArtifactAdapters.cs",
+      "src/ERP.Infrastructure/DependencyInjection.cs",
+      "src/ERP.UnitTests/LegacyReportArtifactCatalogTests.cs",
+      "src/ERP.UnitTests/ReportMigrationArtifactParityTests.cs",
+      "src/ERP.IntegrationTests/LegacyReportArtifactCatalogSqlServerTests.cs"
+    ]
+  },
+  "planning_stage": 2,
+  "risk": "medium",
+  "id": "ERP-337",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-05T12:10:30.811693Z"
+}

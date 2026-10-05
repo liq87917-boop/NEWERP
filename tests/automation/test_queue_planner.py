@@ -23,6 +23,10 @@ class PlannerTests(unittest.TestCase):
   t=self.candidate();t['allowed_paths']=['src/ERP.IntegrationTests/NewFixture.cs','src/ERP.UnitTests/NewRegressionTests.cs']
   with self.assertRaisesRegex(ValueError,'No business code'):planner.validate(t,[{'id':'ERP-285'}],ROOT)
  def test_valid_exact_mapping(self):planner.validate(self.candidate(),[{'id':'ERP-285','title':'completed'}],ROOT)
+ def test_exact_project_dependency_path_is_supported_with_business_code(self):
+  t=self.candidate();path='src/ERP.Infrastructure/ERP.Infrastructure.csproj'
+  t['allowed_paths'].append(path);t['criterion_path_map']['controlled behavior'].append(path)
+  planner.validate(t,[{'id':'ERP-285'}],ROOT)
  def test_duplicate_and_later_phase_rejected(self):
   t=self.candidate()
   with self.assertRaises(ValueError):planner.validate(t,[{'id':'ERP-285','title':t['title']}],ROOT)

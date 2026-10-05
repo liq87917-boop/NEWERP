@@ -1,0 +1,81 @@
+{
+  "title": "Compare legacy generic and artifact reads within one bounded current-user snapshot scope",
+  "description": "Stage 2 shared migration engine only; preserve all old routes, four-stage gate, user row/column/menu/data-scope permissions and concurrent work. No arbitrary SQL/joins, independent report, new database/schema, production access/deployment or fabricated proof. Retain exact failure/audit evidence and existing execution budget/cancellation. The evidence service currently reads legacy source, generic preview and legacy artifact in three independent queries. Provide a reusable read scope on the existing scoped database/context so all three reads use the same supported consistent transaction/snapshot and finite parameters. Reuse ERP335 scope behavior where suitable without expanding business write rights; explicitly handle nested transaction/backend limitations and cancellation. Verify matched totals against returned rows on both sides: partial first-page equality cannot prove whole bounded fixture parity. Recheck current menu/data scope after read before recording evidence, retain deterministic disposal and audit correlation; failure invalidates proof rather than returning stale cache. No new schema/database, arbitrary query or modified production isolation settings. Unsupported environment/isolation blocks honestly.",
+  "implementation_evidence": "ReportMigrationParityEvidenceService.ComputeAsync performs ReadAsync, PreviewAsync and ReadArtifactsAsync separately and ToSnapshot carries the legacy scope fingerprint. ERP335 spans only header/detail composition, not this three-side parity read. Legacy/generic page counts must not silently hide records beyond comparison page.",
+  "allowed_paths": [
+    "src/ERP.Application/Interfaces/IReportMigrationParityReadScopeFactory.cs",
+    "src/ERP.Application/Services/ReportMigrationParityEvidenceService.cs",
+    "src/ERP.Application/DTOs/LegacyReportSourceDtos.cs",
+    "src/ERP.Infrastructure/Reports/ReportMigrationParityReadScopeFactory.cs",
+    "src/ERP.Infrastructure/Reports/LegacyReportSourceRegistry.cs",
+    "src/ERP.Infrastructure/Export/LegacyReportArtifactSource.cs",
+    "src/ERP.Infrastructure/DependencyInjection.cs",
+    "src/ERP.UnitTests/ReportMigrationParityConsistencyTests.cs",
+    "src/ERP.IntegrationTests/ReportMigrationParityConsistencySqlServerTests.cs"
+  ],
+  "depends_on": [
+    "ERP-332",
+    "ERP-333",
+    "ERP-335"
+  ],
+  "acceptance_criteria": [
+    "Legacy snapshot, generic preview and actual legacy output share one bounded supported read scope and normalized current-user parameters; mismatched/full-total truncation is rejected rather than compared as complete.",
+    "Source mutation between reads produces a consistent result or accurate rejection; permission revocation/nested transaction/unsupported isolation/cancellation fail closed with audit correlation and no cached cross-user promotion.",
+    "Use owned idempotent SQL fixtures with controlled concurrent mutation and permission revocation in guarded NEWERP_AUTOTEST LocalDB; safe Release/unit and scheduler/contracts pass; no production configuration or stage gate change."
+  ],
+  "criterion_path_map": {
+    "Legacy snapshot, generic preview and actual legacy output share one bounded supported read scope and normalized current-user parameters; mismatched/full-total truncation is rejected rather than compared as complete.": [
+      "src/ERP.Application/Interfaces/IReportMigrationParityReadScopeFactory.cs",
+      "src/ERP.Application/Services/ReportMigrationParityEvidenceService.cs",
+      "src/ERP.Application/DTOs/LegacyReportSourceDtos.cs",
+      "src/ERP.Infrastructure/Reports/ReportMigrationParityReadScopeFactory.cs",
+      "src/ERP.Infrastructure/Reports/LegacyReportSourceRegistry.cs",
+      "src/ERP.Infrastructure/Export/LegacyReportArtifactSource.cs",
+      "src/ERP.Infrastructure/DependencyInjection.cs",
+      "src/ERP.UnitTests/ReportMigrationParityConsistencyTests.cs",
+      "src/ERP.IntegrationTests/ReportMigrationParityConsistencySqlServerTests.cs"
+    ],
+    "Source mutation between reads produces a consistent result or accurate rejection; permission revocation/nested transaction/unsupported isolation/cancellation fail closed with audit correlation and no cached cross-user promotion.": [
+      "src/ERP.Application/Interfaces/IReportMigrationParityReadScopeFactory.cs",
+      "src/ERP.Application/Services/ReportMigrationParityEvidenceService.cs",
+      "src/ERP.Application/DTOs/LegacyReportSourceDtos.cs",
+      "src/ERP.Infrastructure/Reports/ReportMigrationParityReadScopeFactory.cs",
+      "src/ERP.Infrastructure/Reports/LegacyReportSourceRegistry.cs",
+      "src/ERP.Infrastructure/Export/LegacyReportArtifactSource.cs",
+      "src/ERP.Infrastructure/DependencyInjection.cs",
+      "src/ERP.UnitTests/ReportMigrationParityConsistencyTests.cs",
+      "src/ERP.IntegrationTests/ReportMigrationParityConsistencySqlServerTests.cs"
+    ],
+    "Use owned idempotent SQL fixtures with controlled concurrent mutation and permission revocation in guarded NEWERP_AUTOTEST LocalDB; safe Release/unit and scheduler/contracts pass; no production configuration or stage gate change.": [
+      "src/ERP.Application/Interfaces/IReportMigrationParityReadScopeFactory.cs",
+      "src/ERP.Application/Services/ReportMigrationParityEvidenceService.cs",
+      "src/ERP.Application/DTOs/LegacyReportSourceDtos.cs",
+      "src/ERP.Infrastructure/Reports/ReportMigrationParityReadScopeFactory.cs",
+      "src/ERP.Infrastructure/Reports/LegacyReportSourceRegistry.cs",
+      "src/ERP.Infrastructure/Export/LegacyReportArtifactSource.cs",
+      "src/ERP.Infrastructure/DependencyInjection.cs",
+      "src/ERP.UnitTests/ReportMigrationParityConsistencyTests.cs",
+      "src/ERP.IntegrationTests/ReportMigrationParityConsistencySqlServerTests.cs"
+    ]
+  },
+  "planning_stage": 2,
+  "risk": "medium",
+  "id": "ERP-338",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-05T12:10:30.817544Z"
+}

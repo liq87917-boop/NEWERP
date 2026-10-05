@@ -62,7 +62,7 @@ def validate(t,existing,root):
     for path in paths:
         if not isinstance(path,str) or ':' in path or '\\' in path or '..' in Path(path).parts or any(x in path for x in '*?') or path.startswith('/'):
             raise ValueError('Only exact relative files')
-        if not path.startswith(('src/','tests/','docs/')) or not path.endswith(('.cs','.js','.html','.md','.py')):raise ValueError('Forbidden path')
+        if not path.startswith(('src/','tests/','docs/')) or not path.endswith(('.cs','.csproj','.js','.html','.md','.py')):raise ValueError('Forbidden path')
         if '/SeedData' in path or '/Migrations/' in path or not (root/path).parent.is_dir():raise ValueError('Protected/unknown path')
     if not any(x.startswith(('src/ERP.Domain/','src/ERP.Application/','src/ERP.Infrastructure/','src/ERP.Api/')) and x.endswith(('.cs','.js','.html')) for x in paths):raise ValueError('No business code; test projects under src are not functional increments')
     if not isinstance(t['acceptance_criteria'],list) or len(t['acceptance_criteria'])<2:raise ValueError('Insufficient criteria')
