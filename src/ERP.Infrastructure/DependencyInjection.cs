@@ -157,6 +157,10 @@ public static class DependencyInjection
         // 并归一化为有界旧结果快照（复用既有菜单授权 + 行/数据范围，fail closed）。
         services.AddScoped<ILegacyReportSource, LegacyReportSourceRegistry>();
 
+        // 旧打印快照统一读取（ERP-334 Stage 2）：复用既有基础资料控制器与报价单/PI GetPrint 语义，
+        // 把注册的基础资料与销售单据打印族归一化为同一个有界旧打印快照（fresh 菜单 + 列 + 数据范围校验，fail closed）。
+        services.AddScoped<ILegacyPrintSnapshotReadService, LegacyPrintSnapshotReadService>();
+
         // 旧报表实际产物来源（ERP-333 Stage 2）：有界有限登记册，经既有规范旧导出器产出真实旧 Excel/PDF 字节；
         // 缺失旧导出 / 字体 / 超限 fail closed，绝不使用通用导出器充当旧导出器。
         services.AddScoped<ILegacyReportArtifactSource, LegacyReportArtifactSource>();

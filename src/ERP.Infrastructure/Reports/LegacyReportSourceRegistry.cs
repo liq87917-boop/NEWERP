@@ -29,6 +29,7 @@ public sealed class LegacyReportSourceRegistry : ILegacyReportSource
     private readonly IDynamicReceivableReportQuery _receivableQuery;
     private readonly IDynamicPurchaseOrderReportQuery _purchaseOrderQuery;
     private readonly ILegacyBillExportReadService _billExportReader;
+    private readonly ILegacyPrintSnapshotReadService? _printSnapshotReader;
 
     private readonly Dictionary<string, SourceHandler> _handlers =
         new(StringComparer.OrdinalIgnoreCase);
@@ -42,7 +43,8 @@ public sealed class LegacyReportSourceRegistry : ILegacyReportSource
         IDynamicSalesOrderReportQuery salesOrderQuery,
         IDynamicReceivableReportQuery receivableQuery,
         IDynamicPurchaseOrderReportQuery purchaseOrderQuery,
-        ILegacyBillExportReadService billExportReader)
+        ILegacyBillExportReadService billExportReader,
+        ILegacyPrintSnapshotReadService? printSnapshotReader = null)
     {
         _db = db ?? throw new ArgumentNullException(nameof(db));
         _reports = reports ?? throw new ArgumentNullException(nameof(reports));
@@ -50,6 +52,7 @@ public sealed class LegacyReportSourceRegistry : ILegacyReportSource
         _receivableQuery = receivableQuery ?? throw new ArgumentNullException(nameof(receivableQuery));
         _purchaseOrderQuery = purchaseOrderQuery ?? throw new ArgumentNullException(nameof(purchaseOrderQuery));
         _billExportReader = billExportReader ?? throw new ArgumentNullException(nameof(billExportReader));
+        _printSnapshotReader = printSnapshotReader;
 
         RegisterFixedReports();
         RegisterFinancialStatements();
@@ -319,9 +322,56 @@ public sealed class LegacyReportSourceRegistry : ILegacyReportSource
             {
                 Register(legacyKey, (r, ct) => ReadTradeDocumentAsync(r, ct));
             }
-            // 其余打印模板族（基础资料 / 销售单据）当前阶段无独立旧读取接缝 → 保留为 environment-blocked。
+            else if (_printSnapshotReader is not null
+                     && (ReportConfigurationMasterDataCatalog.TryResolve(family.FamilyKey, out _)
+                         || ReportConfigurationSalesDocumentCatalog.TryResolve(family.FamilyKey, out _)))
+            {
+                var sourceKey = legacyKey;
+                Register(legacyKey, (r, ct) => ReadPrintSnapshotAsync(sourceKey, r, ct));
+            }
+            // 其余打印模板族当前阶段无独立旧读取接缝 → 保留为 environment-blocked。
         }
     }
+
+    private async Task<ReportMigrationParitySnapshotDto> ReadPrintSnapshotAsync(
+        string sourceKey, LegacyReportSourceRequest request, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var result = await _printSnapshotReader!.ReadAsync(new LegacyPrintSnapshotRequest
+        {
+            SourceKey = sourceKey,
+            UserId = request.UserId,
+            Page = PageOf(request),
+            PageSize = ClampPageSize(request.PageSize, MaxPageSize),
+            Start = request.Start,
+            End = request.End,
+            Keyword = request.Keyword,
+            DocumentId = request.DocumentId,
+        }, cancellationToken);
+
+        if (result.Status == LegacyPrintSnapshotStatus.Success && result.Snapshot is not null)
+            return ToParitySnapshot(result.Snapshot);
+
+        if (result.Status == LegacyPrintSnapshotStatus.EnvironmentBlocked)
+            throw new BusinessException(
+                result.ErrorMessage ?? "旧打印快照来源环境不可用",
+                ReportConfigurationExecutionLimits.ErrorCodeEnvironmentUnsupported);
+
+        throw new BusinessException(
+            result.ErrorMessage ?? "旧打印快照来源读取被拒绝",
+            result.ErrorCode ?? ErrorCodes.Forbidden);
+    }
+
+    private static ReportMigrationParitySnapshotDto ToParitySnapshot(LegacyPrintSnapshot snapshot)
+        => new(
+            snapshot.Columns
+                .Select(c => new ReportMigrationParityColumnDto(c.Key, c.Type, c.Currency, c.Unit))
+                .ToList(),
+            snapshot.Rows
+                .Select(r => new ReportMigrationParityRowDto(r.RowKeys, r.Currency, r.Unit, r.Cells))
+                .ToList(),
+            snapshot.Permissions);
 
     // ==================== 归一化：有界旧结果快照 ====================
 

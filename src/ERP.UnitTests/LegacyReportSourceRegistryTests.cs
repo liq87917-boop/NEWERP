@@ -96,7 +96,8 @@ public class LegacyReportSourceRegistryTests
             new DynamicSalesOrderReportQuery(db),
             new DynamicReceivableReportQuery(db),
             new DynamicPurchaseOrderReportQuery(db),
-            billReader ?? new FakeBillExportReader());
+            billReader ?? new FakeBillExportReader(),
+            new LegacyPrintSnapshotReadService(db));
 
     private sealed class FakeBillExportReader : ILegacyBillExportReadService
     {
