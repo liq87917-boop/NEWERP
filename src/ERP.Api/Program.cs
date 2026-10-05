@@ -68,6 +68,8 @@ builder.Services.AddInfrastructure(builder.Configuration);
 // 直接复用 SalesOrderShipmentFinanceReport / SalesOrderReceiptReconciliation（权威派生），不在基础设施层复制算法。
 builder.Services.AddScoped<IReportConfigurationDatasetProvider, ShipmentFinanceReportConfigurationDatasetProvider>();
 builder.Services.AddScoped<IReportConfigurationDatasetProvider, ReceiptReconciliationReportConfigurationDatasetProvider>();
+// 客户级未关联收款证据（ERP-309 Stage 2）：独立有界数据集，复用 SalesOrderReceiptReconciliation.ForQueryAsync 的 UnlinkedReceipts（无隐藏联接）
+builder.Services.AddScoped<IReportConfigurationDatasetProvider, UnlinkedReceiptReportConfigurationDatasetProvider>();
 
 // 库位 + 批次库存基础（ERP-096：只读派生 + 校验，不新增/修改表结构、不执行生产 SQL）
 builder.Services.AddScoped<IInventoryLocationLotService, InventoryLocationLotService>();

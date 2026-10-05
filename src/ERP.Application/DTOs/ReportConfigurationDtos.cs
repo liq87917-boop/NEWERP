@@ -107,6 +107,7 @@ public static class ReportConfigurationConstants
     public const string DatasetSalesmanOutput = "salesman-output";
     public const string DatasetAgencyServiceFeeMonthly = "agency-service-fee-monthly";
     public const string DatasetReceiptReconciliation = "receipt-reconciliation";
+    public const string DatasetUnlinkedReceipt = "unlinked-receipt";
     public const string DatasetPurchaseCost = "purchase-cost";
     public const string DatasetTaxRefundSummary = "tax-refund-summary";
     public const string DatasetProductExportFieldCompleteness = "product-export-field-completeness";
