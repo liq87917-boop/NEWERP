@@ -63,7 +63,7 @@
   "planning_stage": 2,
   "implementation_evidence": "bill-print.js and pd-grid.js render saved SysPrintTemplate standard/grid layouts using legacy bill objects. Generic ReportConfigurationsController and report-configuration.js have no safe saved-template render binding. Existing report execution and new finite catalog are reusable prerequisites; source/history confirms shared render path absent.",
   "id": "ERP-313",
-  "status": "pending",
+  "status": "retry",
   "attempts": 0,
   "max_attempts": 3,
   "validation_profile": "safe",
@@ -79,5 +79,101 @@
     "required": false,
     "scenarios": []
   },
-  "created_at": "2026-10-05T04:54:15.182210Z"
+  "created_at": "2026-10-05T04:54:15.182210Z",
+  "preserved_work": {
+    "execution_copy": "D:\\VSCodeProject\\NEWERP.executor.continue-erp-190-20260930080457",
+    "changed_paths": [
+      ".ai/PROJECT_STATE.json",
+      ".ai/tasks/ERP-313.json",
+      "src/ERP.Api/Controllers/ReportConfigurationPrintTemplatesController.cs",
+      "src/ERP.Api/wwwroot/js/report-configuration.js",
+      "src/ERP.Application/DTOs/ReportConfigurationPrintRenderDtos.cs",
+      "src/ERP.Application/Interfaces/IReportConfigurationPrintRenderService.cs",
+      "src/ERP.Application/Services/ReportConfigurationPrintRenderService.cs",
+      "src/ERP.Infrastructure/DependencyInjection.cs",
+      "src/ERP.Infrastructure/Export/ReportConfigurationBundlePdfExporter.cs",
+      "src/ERP.Infrastructure/Export/ReportConfigurationPrintPdfExporter.cs",
+      "src/ERP.IntegrationTests/ReportConfigurationPrintRenderSqlServerTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationPrintRenderTests.cs"
+    ],
+    "diff": ".ai\\logs\\ERP-313-preserved-work.diff",
+    "preserved_at": "2026-10-05T05:53:43.925166Z"
+  },
+  "failure_kind": "path_guard_failure",
+  "failed_transport_version": 2,
+  "recovery_history": [
+    {
+      "remediation_task": "ERP-313-RECOVERY-1",
+      "cycle": 1,
+      "at": "2026-10-05T05:53:44.110933Z",
+      "evidence": {
+        "failure_kind": "path_guard_failure",
+        "summary": "Path guard failed:\noutside allowed_paths: src/ERP.Infrastructure/Export/ReportConfigurationBundlePdfExporter.cs",
+        "result": ".ai\\results\\ERP-313.json",
+        "attempt_logs": [
+          ".ai/logs/ERP-313-attempt-1.jsonl"
+        ],
+        "validation_logs": [],
+        "latest_state_error": {
+          "task": "ERP-313",
+          "kind": "automatic_repair_pending",
+          "summary": "Path guard failed:\noutside allowed_paths: src/ERP.Infrastructure/Export/ReportConfigurationBundlePdfExporter.cs"
+        },
+        "latest_build": null,
+        "task_context": ".ai\\tasks\\ERP-313.json",
+        "changed_paths": [
+          ".ai/PROJECT_STATE.json",
+          ".ai/tasks/ERP-313.json",
+          "src/ERP.Api/Controllers/ReportConfigurationPrintTemplatesController.cs",
+          "src/ERP.Api/wwwroot/js/report-configuration.js",
+          "src/ERP.Application/DTOs/ReportConfigurationPrintRenderDtos.cs",
+          "src/ERP.Application/Interfaces/IReportConfigurationPrintRenderService.cs",
+          "src/ERP.Application/Services/ReportConfigurationPrintRenderService.cs",
+          "src/ERP.Infrastructure/DependencyInjection.cs",
+          "src/ERP.Infrastructure/Export/ReportConfigurationBundlePdfExporter.cs",
+          "src/ERP.Infrastructure/Export/ReportConfigurationPrintPdfExporter.cs",
+          "src/ERP.IntegrationTests/ReportConfigurationPrintRenderSqlServerTests.cs",
+          "src/ERP.UnitTests/ReportConfigurationPrintRenderTests.cs"
+        ],
+        "diff": ".ai\\logs\\ERP-313-preserved-work.diff",
+        "execution_copy": "D:\\VSCodeProject\\NEWERP.executor.continue-erp-190-20260930080457"
+      }
+    }
+  ],
+  "supervised_recovery_cycles": 1,
+  "recovery_context": {
+    "remediation_task": "ERP-313-RECOVERY-1",
+    "failure_kind": "path_guard_failure",
+    "summary": "Path guard failed:\noutside allowed_paths: src/ERP.Infrastructure/Export/ReportConfigurationBundlePdfExporter.cs",
+    "result": ".ai\\results\\ERP-313.json",
+    "attempt_logs": [
+      ".ai/logs/ERP-313-attempt-1.jsonl"
+    ],
+    "validation_logs": [],
+    "latest_state_error": {
+      "task": "ERP-313",
+      "kind": "automatic_repair_pending",
+      "summary": "Path guard failed:\noutside allowed_paths: src/ERP.Infrastructure/Export/ReportConfigurationBundlePdfExporter.cs"
+    },
+    "latest_build": null,
+    "task_context": ".ai\\tasks\\ERP-313.json",
+    "changed_paths": [
+      ".ai/PROJECT_STATE.json",
+      ".ai/tasks/ERP-313.json",
+      "src/ERP.Api/Controllers/ReportConfigurationPrintTemplatesController.cs",
+      "src/ERP.Api/wwwroot/js/report-configuration.js",
+      "src/ERP.Application/DTOs/ReportConfigurationPrintRenderDtos.cs",
+      "src/ERP.Application/Interfaces/IReportConfigurationPrintRenderService.cs",
+      "src/ERP.Application/Services/ReportConfigurationPrintRenderService.cs",
+      "src/ERP.Infrastructure/DependencyInjection.cs",
+      "src/ERP.Infrastructure/Export/ReportConfigurationBundlePdfExporter.cs",
+      "src/ERP.Infrastructure/Export/ReportConfigurationPrintPdfExporter.cs",
+      "src/ERP.IntegrationTests/ReportConfigurationPrintRenderSqlServerTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationPrintRenderTests.cs"
+    ],
+    "diff": ".ai\\logs\\ERP-313-preserved-work.diff",
+    "execution_copy": "D:\\VSCodeProject\\NEWERP.executor.continue-erp-190-20260930080457",
+    "repair_allowed_paths": [],
+    "instruction": "DeepSeek supervisor recovery: inspect the referenced complete logs, diagnose the root cause, and implement a different safe repair within allowed_paths. Rebuild and rerun the configured tests; if validation fails, use the newest log as the next repair input. Do not repeat the failed approach. Do not edit task/state/result files or relax production and irreversible-operation gates. "
+  }
 }

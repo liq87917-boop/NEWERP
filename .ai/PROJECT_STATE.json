@@ -1,11 +1,14 @@
 {
   "schema_version": 2,
   "project": "NEWERP",
-  "updated_at": "2026-10-05T05:29:20.396982Z",
+  "updated_at": "2026-10-05T05:53:44.224916Z",
   "phase": "ready",
   "current_task": null,
   "queue": [
-    "ERP-313"
+    "ERP-313",
+    "ERP-314",
+    "ERP-315",
+    "ERP-316"
   ],
   "completed": [
     "ERP-000",
@@ -306,17 +309,20 @@
     "log": ".ai\\logs\\ERP-312-validation-1.log",
     "at": "2026-10-05T05:29:14.830005Z"
   },
-  "last_error": null,
+  "last_error": {
+    "task": "ERP-313",
+    "kind": "automatic_repair_pending",
+    "summary": "Path guard failed:\noutside allowed_paths: src/ERP.Infrastructure/Export/ReportConfigurationBundlePdfExporter.cs"
+  },
   "last_deepseek_fix": {
-    "task": "ERP-308",
-    "attempt": 2,
-    "model": "deepseek-v4-pro",
-    "exit_code": 0,
-    "finished_at": "2026-10-05T04:26:52.788053Z"
+    "task": "ERP-313",
+    "attempts": 3,
+    "status": "retry_pending",
+    "at": "2026-10-05T05:53:43.926838Z"
   },
   "git_sync": {
     "branch": "main",
-    "local_sha": "824d86e",
+    "local_sha": "9d28e39",
     "status": "synced",
     "ahead": 0,
     "behind": 0,
@@ -324,10 +330,15 @@
     "last_error": null
   },
   "next_recommended_tasks": [
-    "ERP-313"
+    "ERP-313",
+    "ERP-314",
+    "ERP-315",
+    "ERP-316"
   ],
   "runner": {
     "status": "stopped",
     "pid": null
-  }
+  },
+  "blocker": null,
+  "finish_reason": "deepseek_supervisor_recovery"
 }
