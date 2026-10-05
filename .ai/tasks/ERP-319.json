@@ -1,0 +1,81 @@
+{
+  "title": "Provide bounded consistent matched snapshots for the registered legacy export catalog",
+  "description": "Stage 2 migration only through the existing generic reporting platform. Preserve legacy entry points until every fixed/dynamic/export/print family passes real parity. No dedicated report, arbitrary SQL or joins, business workflow changes, schema/seed/protected files, permission expansion, production access or deployment. Preserve concurrent work. Reuse current-user authorization and existing execution/audit conventions; errors must be explicit with correlation evidence. Isolated database writes only after strict LocalDB instance, NEWERP_AUTOTEST_* name and integrated-security guards. Missing real database/browser/artifact parity stays unverified.",
+  "implementation_evidence": "ILegacyBillExportReadService has only ReadPageAsync; LegacyBillExportReadService.cs executes separate count/page SQL without a consistent read transaction, while LegacyBillExportReportConfigurationDatasetProvider implements only IReportConfigurationDatasetProvider and lists allMatchTotal as unsupported. Generic ERP-274 already has snapshot execution but only original sales/receivable providers; ERP-308 adds sixteen current-page legacy families, not full matched snapshots. ERP-313 print rendering needs export completeness for matching facts beyond a page. This is one generic capability across the existing finite catalog, not another report.",
+  "depends_on": [
+    "ERP-274",
+    "ERP-308",
+    "ERP-313"
+  ],
+  "allowed_paths": [
+    "src/ERP.Application/DTOs/LegacyBillExportDtos.cs",
+    "src/ERP.Application/Interfaces/ILegacyBillExportReadService.cs",
+    "src/ERP.Infrastructure/Reports/LegacyBillExportReadService.cs",
+    "src/ERP.Infrastructure/Reports/LegacyBillExportReportConfigurationDatasetProvider.cs",
+    "src/ERP.Infrastructure/Reports/ReportConfigurationReadSnapshot.cs",
+    "src/ERP.Application/Services/ReportConfigurationPresetCatalog.cs",
+    "src/ERP.UnitTests/ReportConfigurationLegacyBillSnapshotTests.cs",
+    "src/ERP.UnitTests/ReportConfigurationLegacyBillMigrationTests.cs",
+    "src/ERP.IntegrationTests/ReportConfigurationLegacyBillSnapshotSqlServerTests.cs"
+  ],
+  "acceptance_criteria": [
+    "Users explicitly request complete matched export facts through the generic snapshot contract for any supported registered legacy bill family, retaining current-page behavior. Extend the shared read service with a consistent bounded read-only transaction and stable Oid order, finite catalog table/column mappings and parameterized values only. Probe count/fact/byte limits before materialization and fail overflow, missing schema, cancellation or unsupported isolation precisely rather than silently truncate or retry without consistency.",
+    "Implement existing snapshot provider lifecycle and capability discovery for the sixteen finite families, retaining the exact ERP-308 menu/export-menu and privileged row scope boundary and selected-column checks on every open/read/export. Dispose snapshot resources reliably, distinguish match count from displayed page, include correlation/audit coverage evidence, and do not allow arbitrary joins, grouping/formulas or mixed currency/unit totals merely because complete facts are available.",
+    "Generic Excel/PDF and saved print rendering use complete bounded authorized snapshots only when explicitly requested, retaining old routes and exact original column order/nulls/raw currencies/units. Test beyond-page data, count/row consistency under concurrent isolated writes, denied/revoked access, zero rows, bounds and cancellation; nonempty guarded SQL tests across at least two legacy families, inspect real artifact row counts, and run focused plus safe Release tests. Full migration parity remains unverified until all registered entries pass comparison."
+  ],
+  "criterion_path_map": {
+    "Users explicitly request complete matched export facts through the generic snapshot contract for any supported registered legacy bill family, retaining current-page behavior. Extend the shared read service with a consistent bounded read-only transaction and stable Oid order, finite catalog table/column mappings and parameterized values only. Probe count/fact/byte limits before materialization and fail overflow, missing schema, cancellation or unsupported isolation precisely rather than silently truncate or retry without consistency.": [
+      "src/ERP.Application/DTOs/LegacyBillExportDtos.cs",
+      "src/ERP.Application/Interfaces/ILegacyBillExportReadService.cs",
+      "src/ERP.Infrastructure/Reports/LegacyBillExportReadService.cs",
+      "src/ERP.Infrastructure/Reports/LegacyBillExportReportConfigurationDatasetProvider.cs",
+      "src/ERP.Infrastructure/Reports/ReportConfigurationReadSnapshot.cs",
+      "src/ERP.Application/Services/ReportConfigurationPresetCatalog.cs",
+      "src/ERP.UnitTests/ReportConfigurationLegacyBillSnapshotTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationLegacyBillMigrationTests.cs",
+      "src/ERP.IntegrationTests/ReportConfigurationLegacyBillSnapshotSqlServerTests.cs"
+    ],
+    "Implement existing snapshot provider lifecycle and capability discovery for the sixteen finite families, retaining the exact ERP-308 menu/export-menu and privileged row scope boundary and selected-column checks on every open/read/export. Dispose snapshot resources reliably, distinguish match count from displayed page, include correlation/audit coverage evidence, and do not allow arbitrary joins, grouping/formulas or mixed currency/unit totals merely because complete facts are available.": [
+      "src/ERP.Application/DTOs/LegacyBillExportDtos.cs",
+      "src/ERP.Application/Interfaces/ILegacyBillExportReadService.cs",
+      "src/ERP.Infrastructure/Reports/LegacyBillExportReadService.cs",
+      "src/ERP.Infrastructure/Reports/LegacyBillExportReportConfigurationDatasetProvider.cs",
+      "src/ERP.Infrastructure/Reports/ReportConfigurationReadSnapshot.cs",
+      "src/ERP.Application/Services/ReportConfigurationPresetCatalog.cs",
+      "src/ERP.UnitTests/ReportConfigurationLegacyBillSnapshotTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationLegacyBillMigrationTests.cs",
+      "src/ERP.IntegrationTests/ReportConfigurationLegacyBillSnapshotSqlServerTests.cs"
+    ],
+    "Generic Excel/PDF and saved print rendering use complete bounded authorized snapshots only when explicitly requested, retaining old routes and exact original column order/nulls/raw currencies/units. Test beyond-page data, count/row consistency under concurrent isolated writes, denied/revoked access, zero rows, bounds and cancellation; nonempty guarded SQL tests across at least two legacy families, inspect real artifact row counts, and run focused plus safe Release tests. Full migration parity remains unverified until all registered entries pass comparison.": [
+      "src/ERP.Application/DTOs/LegacyBillExportDtos.cs",
+      "src/ERP.Application/Interfaces/ILegacyBillExportReadService.cs",
+      "src/ERP.Infrastructure/Reports/LegacyBillExportReadService.cs",
+      "src/ERP.Infrastructure/Reports/LegacyBillExportReportConfigurationDatasetProvider.cs",
+      "src/ERP.Infrastructure/Reports/ReportConfigurationReadSnapshot.cs",
+      "src/ERP.Application/Services/ReportConfigurationPresetCatalog.cs",
+      "src/ERP.UnitTests/ReportConfigurationLegacyBillSnapshotTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationLegacyBillMigrationTests.cs",
+      "src/ERP.IntegrationTests/ReportConfigurationLegacyBillSnapshotSqlServerTests.cs"
+    ]
+  },
+  "risk": "medium",
+  "planning_stage": 2,
+  "id": "ERP-319",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-05T06:39:00.226825Z"
+}

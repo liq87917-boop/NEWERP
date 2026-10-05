@@ -1,0 +1,76 @@
+{
+  "title": "Migrate registered master-data print families through one controlled generic catalog",
+  "description": "Stage 2 migration only through the existing generic reporting platform. Preserve legacy entry points until every fixed/dynamic/export/print family passes real parity. No dedicated report, arbitrary SQL or joins, business workflow changes, schema/seed/protected files, permission expansion, production access or deployment. Preserve concurrent work. Reuse current-user authorization and existing execution/audit conventions; errors must be explicit with correlation evidence. Isolated database writes only after strict LocalDB instance, NEWERP_AUTOTEST_* name and integrated-security guards. Missing real database/browser/artifact parity stays unverified.",
+  "implementation_evidence": "ReportConfigurationPrintTemplateCatalog.cs BuildFamilies/Master explicitly leaves customer, supplier, employee, expense-account, warehouse, product and other-info unsupported with empty dataset/alias mappings. IErpDbContext already exposes all seven Base* DbSets; no generic master provider exists in Infrastructure/Reports. ERP-312 only inventories and rejects these families; ERP-107 and ERP-306 product completeness are different evidence grain, not master print data. Full backlog and all task definitions/results checked.",
+  "depends_on": [
+    "ERP-312",
+    "ERP-313"
+  ],
+  "allowed_paths": [
+    "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
+    "src/ERP.Application/Services/ReportConfigurationMasterDataCatalog.cs",
+    "src/ERP.Infrastructure/Reports/MasterDataReportConfigurationDatasetProvider.cs",
+    "src/ERP.Infrastructure/DependencyInjection.cs",
+    "src/ERP.Application/Services/ReportConfigurationPrintTemplateCatalog.cs",
+    "src/ERP.Application/Services/ReportConfigurationPresetCatalog.cs",
+    "src/ERP.UnitTests/ReportConfigurationMasterDataMigrationTests.cs",
+    "src/ERP.IntegrationTests/ReportConfigurationMasterDataMigrationSqlServerTests.cs"
+  ],
+  "acceptance_criteria": [
+    "Users select any of the seven existing master print families via one finite server-owned catalog and generic preset. Verify authoritative existing field names, order, nulls, soft deletion, labels and aliases against original Base* entities, controllers and print models before implementation; never guess unsupported fields or expose secrets, payroll, bank, credentials or contact fields beyond existing rights. Register exact controlled datasets and print aliases without new dedicated routes.",
+    "Every catalog, preview, template bind and export applies the original menu, field and salesperson/customer data scope through existing authorization. Bounded read-only EF queries use stable identifiers, selected authorized columns, cancellation and existing snapshot limits; privileged-only fallback must fail closed where original row ownership cannot be reproduced. Unknown filters/aliases and unavailable sources return precise errors with audit correlation, never full-table fallback.",
+    "Reuse generic definitions, Excel/PDF and ERP-313 print layouts. Test all seven catalog mappings and denied/revoked menus/columns, soft deletion, nulls, ordered fields and bounded results; perform nonempty guarded SQL tests across at least two master families plus actual artifacts, related and safe Release tests. Keep financial amounts/unit fields partitioned and legacy entries unchanged; mapping availability does not mark migration parity passed."
+  ],
+  "criterion_path_map": {
+    "Users select any of the seven existing master print families via one finite server-owned catalog and generic preset. Verify authoritative existing field names, order, nulls, soft deletion, labels and aliases against original Base* entities, controllers and print models before implementation; never guess unsupported fields or expose secrets, payroll, bank, credentials or contact fields beyond existing rights. Register exact controlled datasets and print aliases without new dedicated routes.": [
+      "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
+      "src/ERP.Application/Services/ReportConfigurationMasterDataCatalog.cs",
+      "src/ERP.Infrastructure/Reports/MasterDataReportConfigurationDatasetProvider.cs",
+      "src/ERP.Infrastructure/DependencyInjection.cs",
+      "src/ERP.Application/Services/ReportConfigurationPrintTemplateCatalog.cs",
+      "src/ERP.Application/Services/ReportConfigurationPresetCatalog.cs",
+      "src/ERP.UnitTests/ReportConfigurationMasterDataMigrationTests.cs",
+      "src/ERP.IntegrationTests/ReportConfigurationMasterDataMigrationSqlServerTests.cs"
+    ],
+    "Every catalog, preview, template bind and export applies the original menu, field and salesperson/customer data scope through existing authorization. Bounded read-only EF queries use stable identifiers, selected authorized columns, cancellation and existing snapshot limits; privileged-only fallback must fail closed where original row ownership cannot be reproduced. Unknown filters/aliases and unavailable sources return precise errors with audit correlation, never full-table fallback.": [
+      "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
+      "src/ERP.Application/Services/ReportConfigurationMasterDataCatalog.cs",
+      "src/ERP.Infrastructure/Reports/MasterDataReportConfigurationDatasetProvider.cs",
+      "src/ERP.Infrastructure/DependencyInjection.cs",
+      "src/ERP.Application/Services/ReportConfigurationPrintTemplateCatalog.cs",
+      "src/ERP.Application/Services/ReportConfigurationPresetCatalog.cs",
+      "src/ERP.UnitTests/ReportConfigurationMasterDataMigrationTests.cs",
+      "src/ERP.IntegrationTests/ReportConfigurationMasterDataMigrationSqlServerTests.cs"
+    ],
+    "Reuse generic definitions, Excel/PDF and ERP-313 print layouts. Test all seven catalog mappings and denied/revoked menus/columns, soft deletion, nulls, ordered fields and bounded results; perform nonempty guarded SQL tests across at least two master families plus actual artifacts, related and safe Release tests. Keep financial amounts/unit fields partitioned and legacy entries unchanged; mapping availability does not mark migration parity passed.": [
+      "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
+      "src/ERP.Application/Services/ReportConfigurationMasterDataCatalog.cs",
+      "src/ERP.Infrastructure/Reports/MasterDataReportConfigurationDatasetProvider.cs",
+      "src/ERP.Infrastructure/DependencyInjection.cs",
+      "src/ERP.Application/Services/ReportConfigurationPrintTemplateCatalog.cs",
+      "src/ERP.Application/Services/ReportConfigurationPresetCatalog.cs",
+      "src/ERP.UnitTests/ReportConfigurationMasterDataMigrationTests.cs",
+      "src/ERP.IntegrationTests/ReportConfigurationMasterDataMigrationSqlServerTests.cs"
+    ]
+  },
+  "risk": "medium",
+  "planning_stage": 2,
+  "id": "ERP-317",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-05T06:39:00.215356Z"
+}

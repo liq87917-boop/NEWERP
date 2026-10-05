@@ -1,0 +1,81 @@
+{
+  "title": "Migrate existing sales document print snapshots through shared controlled composition",
+  "description": "Stage 2 migration only through the existing generic reporting platform. Preserve legacy entry points until every fixed/dynamic/export/print family passes real parity. No dedicated report, arbitrary SQL or joins, business workflow changes, schema/seed/protected files, permission expansion, production access or deployment. Preserve concurrent work. Reuse current-user authorization and existing execution/audit conventions; errors must be explicit with correlation evidence. Isolated database writes only after strict LocalDB instance, NEWERP_AUTOTEST_* name and integrated-security guards. Missing real database/browser/artifact parity stays unverified.",
+  "implementation_evidence": "QuotationController.cs GetPrint and ProformaInvoiceController.cs GetPrint already return persisted active header/details with existing ResolveScopeAsync customer checks; backlog ERP-018 records both canonical print sources as implemented. ReportPrintTemplateFamilies still explicitly rejects quotation/proforma-invoice with an outdated stage-3 blocker. ERP-316 introduces generic composition only for trade-document, and no task/provider adapts these two existing sales print families. This migrates existing data only, not new sales business flows.",
+  "depends_on": [
+    "ERP-312",
+    "ERP-313",
+    "ERP-316"
+  ],
+  "allowed_paths": [
+    "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
+    "src/ERP.Application/Services/ReportConfigurationSalesDocumentCatalog.cs",
+    "src/ERP.Infrastructure/Reports/SalesDocumentReportConfigurationDatasetProvider.cs",
+    "src/ERP.Infrastructure/DependencyInjection.cs",
+    "src/ERP.Application/Services/ReportConfigurationPrintTemplateCatalog.cs",
+    "src/ERP.Application/Services/ReportConfigurationPresetCatalog.cs",
+    "src/ERP.Application/Services/ReportConfigurationBundlePresetCatalog.cs",
+    "src/ERP.UnitTests/ReportConfigurationSalesDocumentMigrationTests.cs",
+    "src/ERP.IntegrationTests/ReportConfigurationSalesDocumentMigrationSqlServerTests.cs"
+  ],
+  "acceptance_criteria": [
+    "Users migrate existing quotation and proforma-invoice print selections via a shared finite sales-document catalog and generic presets. Read authoritative persisted headers and active details in original SortNo and stable ID order, reuse existing print snapshot semantics and customer scope, and expose only registered authorized fields/aliases. No approval, conversion, pricing, total recalculation, new sales workflows or dedicated controllers/exporters.",
+    "Register both header/detail datasets in ERP-316 shared controlled composition using exact known parent/detail identities. Header totals occur once, stored line quantities/amounts preserve original units/currencies and nulls; never multiply totals or mix currencies. Recheck menu/column/customer scope on every read and export, including revoked access, absent customer ownership, deleted detail and inaccessible document failures. All reads bounded/cancellable under the existing execution lease and audit correlation.",
+    "Bind existing saved print templates to these controlled families and reuse generic preview, Excel/PDF and provenance, preserving legacy routes. Verify real guarded SQL with multiple documents, ordered lines, empty details, cross-currency separation and denied customer scope for both families, compare selected snapshot fields to original print models, and inspect actual artifacts; run focused and safe Release tests. Unsupported legacy layout options remain explicit gaps and do not imply full migration acceptance."
+  ],
+  "criterion_path_map": {
+    "Users migrate existing quotation and proforma-invoice print selections via a shared finite sales-document catalog and generic presets. Read authoritative persisted headers and active details in original SortNo and stable ID order, reuse existing print snapshot semantics and customer scope, and expose only registered authorized fields/aliases. No approval, conversion, pricing, total recalculation, new sales workflows or dedicated controllers/exporters.": [
+      "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
+      "src/ERP.Application/Services/ReportConfigurationSalesDocumentCatalog.cs",
+      "src/ERP.Infrastructure/Reports/SalesDocumentReportConfigurationDatasetProvider.cs",
+      "src/ERP.Infrastructure/DependencyInjection.cs",
+      "src/ERP.Application/Services/ReportConfigurationPrintTemplateCatalog.cs",
+      "src/ERP.Application/Services/ReportConfigurationPresetCatalog.cs",
+      "src/ERP.Application/Services/ReportConfigurationBundlePresetCatalog.cs",
+      "src/ERP.UnitTests/ReportConfigurationSalesDocumentMigrationTests.cs",
+      "src/ERP.IntegrationTests/ReportConfigurationSalesDocumentMigrationSqlServerTests.cs"
+    ],
+    "Register both header/detail datasets in ERP-316 shared controlled composition using exact known parent/detail identities. Header totals occur once, stored line quantities/amounts preserve original units/currencies and nulls; never multiply totals or mix currencies. Recheck menu/column/customer scope on every read and export, including revoked access, absent customer ownership, deleted detail and inaccessible document failures. All reads bounded/cancellable under the existing execution lease and audit correlation.": [
+      "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
+      "src/ERP.Application/Services/ReportConfigurationSalesDocumentCatalog.cs",
+      "src/ERP.Infrastructure/Reports/SalesDocumentReportConfigurationDatasetProvider.cs",
+      "src/ERP.Infrastructure/DependencyInjection.cs",
+      "src/ERP.Application/Services/ReportConfigurationPrintTemplateCatalog.cs",
+      "src/ERP.Application/Services/ReportConfigurationPresetCatalog.cs",
+      "src/ERP.Application/Services/ReportConfigurationBundlePresetCatalog.cs",
+      "src/ERP.UnitTests/ReportConfigurationSalesDocumentMigrationTests.cs",
+      "src/ERP.IntegrationTests/ReportConfigurationSalesDocumentMigrationSqlServerTests.cs"
+    ],
+    "Bind existing saved print templates to these controlled families and reuse generic preview, Excel/PDF and provenance, preserving legacy routes. Verify real guarded SQL with multiple documents, ordered lines, empty details, cross-currency separation and denied customer scope for both families, compare selected snapshot fields to original print models, and inspect actual artifacts; run focused and safe Release tests. Unsupported legacy layout options remain explicit gaps and do not imply full migration acceptance.": [
+      "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
+      "src/ERP.Application/Services/ReportConfigurationSalesDocumentCatalog.cs",
+      "src/ERP.Infrastructure/Reports/SalesDocumentReportConfigurationDatasetProvider.cs",
+      "src/ERP.Infrastructure/DependencyInjection.cs",
+      "src/ERP.Application/Services/ReportConfigurationPrintTemplateCatalog.cs",
+      "src/ERP.Application/Services/ReportConfigurationPresetCatalog.cs",
+      "src/ERP.Application/Services/ReportConfigurationBundlePresetCatalog.cs",
+      "src/ERP.UnitTests/ReportConfigurationSalesDocumentMigrationTests.cs",
+      "src/ERP.IntegrationTests/ReportConfigurationSalesDocumentMigrationSqlServerTests.cs"
+    ]
+  },
+  "risk": "medium",
+  "planning_stage": 2,
+  "id": "ERP-318",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-05T06:39:00.221167Z"
+}
