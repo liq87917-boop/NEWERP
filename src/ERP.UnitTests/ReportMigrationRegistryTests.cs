@@ -96,8 +96,9 @@ public class ReportMigrationRegistryTests
         });
 
     private static ReportMigrationRegistry BuildRegistry(
-        ErpDbContext db, IReportConfigurationCatalog catalog, IReportMigrationPresetCatalog? presets = null)
-        => new(catalog, db, presets ?? new EmptyReportMigrationPresetCatalog());
+        ErpDbContext db, IReportConfigurationCatalog catalog, IReportMigrationPresetCatalog? presets = null,
+        IReportMigrationParityEvidenceProvider? evidence = null)
+        => new(catalog, db, presets ?? new EmptyReportMigrationPresetCatalog(), evidence);
 
     private static ReportConfigurationDatasetDto Dataset(string key, string menuCode, string semantics)
         => new(key, key, key, semantics, menuCode, menuCode,
@@ -130,6 +131,15 @@ public class ReportMigrationRegistryTests
 
         public Task<bool> HasPresetAsync(string legacyKey, long? userId, CancellationToken cancellationToken = default)
             => Task.FromResult(_hasPreset(legacyKey));
+    }
+
+    private sealed class FakeEvidenceProvider : IReportMigrationParityEvidenceProvider
+    {
+        private readonly Func<string, ReportMigrationParityEvidenceDto?> _evidence;
+
+        public FakeEvidenceProvider(Func<string, ReportMigrationParityEvidenceDto?> evidence) => _evidence = evidence;
+
+        public ReportMigrationParityEvidenceDto? GetEvidence(string legacyKey) => _evidence(legacyKey);
     }
 
     // ==================== 1. 完整清单覆盖 ====================
@@ -301,7 +311,25 @@ public class ReportMigrationRegistryTests
     }
 
     [Fact]
-    public async Task Parity_适配器预设兼容性全部匹配_parity_passed()
+    public async Task Parity_适配器预设兼容性声明匹配_但无证据_拒绝parity_passed()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedUserWithMenus(db, "declared-only", "sales-order");
+
+        var catalog = new FakeCatalog(new Dictionary<string, ReportConfigurationDatasetDto?>
+        {
+            ["sales-order"] = Dataset("sales-order", "sales-order", "金额按订单原币呈现，不跨币种换算或合并"),
+        });
+        var registry = BuildRegistry(db, catalog, new FakePresetCatalog(k => k == "dynamic:sales-order"));
+
+        var result = await registry.GetRegistryAsync(user.Id);
+
+        var entry = Assert.Single(result.Entries, e => e.LegacyKey == "dynamic:sales-order");
+        Assert.Equal(ReportMigrationParityStatusText.PresetReady, entry.ParityStatus);
+    }
+
+    [Fact]
+    public async Task Parity_完整比对证据_parity_passed()
     {
         using var db = TestDbFactory.Create();
         var user = SeedUserWithMenus(db, "parity-passed", "sales-order");
@@ -310,7 +338,10 @@ public class ReportMigrationRegistryTests
         {
             ["sales-order"] = Dataset("sales-order", "sales-order", "金额按订单原币呈现，不跨币种换算或合并"),
         });
-        var registry = BuildRegistry(db, catalog, new FakePresetCatalog(k => k == "dynamic:sales-order"));
+        var evidence = new FakeEvidenceProvider(key => key == "dynamic:sales-order"
+            ? new ReportMigrationParityEvidenceDto(true, true, true, true)
+            : null);
+        var registry = BuildRegistry(db, catalog, new FakePresetCatalog(k => k == "dynamic:sales-order"), evidence);
 
         var result = await registry.GetRegistryAsync(user.Id);
 

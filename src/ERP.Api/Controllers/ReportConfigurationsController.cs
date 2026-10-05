@@ -48,6 +48,7 @@ public class ReportConfigurationsController : ControllerBase
     private readonly IReportConfigurationTransferService? _transfer;
     private readonly IReportConfigurationExecutionBudget _budget;
     private readonly IReportMigrationRegistry? _migrationRegistry;
+    private readonly IReportConfigurationPresetCatalog? _presetCatalog;
     private readonly ILogger<ReportConfigurationsController>? _logger;
 
     public ReportConfigurationsController(
@@ -58,7 +59,8 @@ public class ReportConfigurationsController : ControllerBase
         IReportConfigurationExecutionBudget? budget = null,
         ILogger<ReportConfigurationsController>? logger = null,
         IReportConfigurationTransferService? transfer = null,
-        IReportMigrationRegistry? migrationRegistry = null)
+        IReportMigrationRegistry? migrationRegistry = null,
+        IReportConfigurationPresetCatalog? presetCatalog = null)
     {
         _catalog = catalog;
         _service = service;
@@ -68,6 +70,7 @@ public class ReportConfigurationsController : ControllerBase
         _budget = budget ?? new ReportConfigurationExecutionBudget();
         _logger = logger;
         _migrationRegistry = migrationRegistry;
+        _presetCatalog = presetCatalog;
     }
 
     /// <summary>当前登录用户 Id（缺失或非正数时抛未认证，绝不猜测身份）</summary>
@@ -130,6 +133,34 @@ public class ReportConfigurationsController : ControllerBase
 
         var registry = await WithRequestCancellationAsync(ct => _migrationRegistry.GetRegistryAsync(CurrentUserId(), ct));
         return Ok(ApiResponse<ReportMigrationRegistryDto>.Success(registry));
+    }
+
+    /// <summary>
+    /// 只读列出当前账号已授权且 ready 的报表预设模板（ERP-296 Stage 2）：逐条重新校验原始菜单授权与数据集授权，
+    /// 未授权 / 未 ready 预设被隐藏；预设绝不授予权限。
+    /// </summary>
+    [HttpGet("presets")]
+    public async Task<IActionResult> Presets()
+    {
+        if (_presetCatalog is null)
+            throw new BusinessException("报表预设模板未注册", ErrorCodes.InternalError);
+
+        var presets = await WithRequestCancellationAsync(ct => _presetCatalog.ListPresetsAsync(CurrentUserId(), ct));
+        return Ok(ApiResponse<List<ReportConfigurationPresetDto>>.Success(presets));
+    }
+
+    /// <summary>
+    /// 把指定预设物化为当前用户私有副本（ERP-296 Stage 2）：重新校验当前授权数据集与定义（绝不信任预设载荷），
+    /// 经既有 <see cref="IReportConfigurationService.CreateAsync"/> 落为私有草稿；未 ready / 未授权 fail closed。
+    /// </summary>
+    [HttpPost("presets/{presetKey}/materialize")]
+    public async Task<IActionResult> MaterializePreset(string presetKey)
+    {
+        if (_presetCatalog is null)
+            throw new BusinessException("报表预设模板未注册", ErrorCodes.InternalError);
+
+        var result = await WithRequestCancellationAsync(ct => _presetCatalog.MaterializeAsync(presetKey, CurrentUserId(), ct));
+        return Ok(ApiResponse<ReportConfigurationDto>.Success(result, "物化成功"));
     }
 
     /// <summary>有界 keyset 分页列出当前用户未删除私有报表配置（owner-only；limit 默认 25、最大 100）</summary>

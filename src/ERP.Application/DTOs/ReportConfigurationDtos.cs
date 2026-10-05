@@ -1069,6 +1069,34 @@ public sealed class ReportConfigurationTransferImportRequest
     public string Json { get; set; } = string.Empty;
 }
 
+// ==================== ERP-296 Stage 2：报表预设模板编排契约 ====================
+
+/// <summary>
+/// 报表预设模板（ERP-296 Stage 2，只读）：把迁移登记册条目重新表达为可物化的私有报表配置定义。
+/// <para>只暴露稳定键 / 名称 / 数据集与 parity 状态，绝不把定义正文当成「授予权限的凭证」下发给客户端；
+/// 物化时由服务端对当前授权数据集重新校验定义，绝不信任预设载荷。</para>
+/// </summary>
+public sealed class ReportConfigurationPresetDto
+{
+    /// <summary>稳定预设键（物化端点路径参数；与迁移登记册条目一一对应）。</summary>
+    public string PresetKey { get; set; } = string.Empty;
+
+    /// <summary>迁移登记册条目键（legacy key）。</summary>
+    public string LegacyKey { get; set; } = string.Empty;
+
+    /// <summary>预设模板名称（物化后作为私有配置名称）。</summary>
+    public string Name { get; set; } = string.Empty;
+
+    /// <summary>受控数据集键。</summary>
+    public string DatasetKey { get; set; } = string.Empty;
+
+    /// <summary>受控数据集中文标签。</summary>
+    public string DatasetLabel { get; set; } = string.Empty;
+
+    /// <summary>迁移登记册派生 parity 状态（pending / dataset-ready / preset-ready / parity-passed）。</summary>
+    public string ParityStatus { get; set; } = ReportMigrationParityStatusText.Pending;
+}
+
 // ==================== ERP-279 Stage 1：有界集合分页契约 ====================
 
 /// <summary>

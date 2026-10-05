@@ -1097,6 +1097,7 @@ async function rccInit() {
     selectedKeys: [], filters: [], computedColumns: [], aggregates: [], groupings: [], coverage: 'current-page', sortFieldKey: '', sortDirection: 'asc', page: 1, pageSize: RCC_DEFAULT_PAGE_SIZE,
     maxPageSize: 200, previewRevision: null, view: null, revisions: [],
     sharedList: [], sharedCurrent: null, grants: [],
+    presets: [], presetView: false,
     listCursor: null, listHasMore: false, listSeq: 0,
     sharedCursor: null, sharedHasMore: false, sharedSeq: 0,
     revisionsCursor: null, revisionsHasMore: false, revisionsSeq: 0,
@@ -1152,6 +1153,59 @@ async function rccLoadList(cursor) {
 
 function rccLoadMoreList() {
   if (RCC.listHasMore && RCC.listCursor) rccLoadList(RCC.listCursor);
+}
+
+/* 预设模板（ERP-296）：只读列出已授权且 ready 的预设；物化 = 服务端私有副本，绝不信任预设载荷 */
+function rccRenderPresets() {
+  const el = document.getElementById('rcc-presets');
+  if (!el) return;
+  const presets = RCC.presets || [];
+  if (!presets.length) { el.innerHTML = '<div class="empty">当前账号没有任何已授权预设模板</div>'; return; }
+  el.innerHTML = '<div class="rcc-presets-title">预设模板（只读 · 物化为私有副本）</div>'
+    + presets.map(p => ''
+      + '<div class="rcc-preset-row">'
+      + '<div class="rcc-preset-main">'
+      + '<div class="rcc-preset-name">' + rccEsc(p.name) + '</div>'
+      + '<div class="rcc-preset-meta">' + rccEsc(p.datasetLabel || p.datasetKey) + ' · ' + rccEsc(p.parityStatus || '') + '</div>'
+      + '</div>'
+      + '<button type="button" class="btn btn-primary" onclick="rccMaterializePreset(\'' + rccEsc(p.presetKey) + '\')">物化为私有副本</button>'
+      + '</div>').join('');
+}
+
+async function rccLoadPresets() {
+  const env = await rccFetch(RCC_API + '/presets');
+  if (env.code === 2000 || env.code === 2003) { rccOnUnauthorized(env.message); return; }
+  if (env.code !== 0) {
+    RCC.presets = [];
+    rccRenderPresets();
+    const el = document.getElementById('rcc-presets');
+    if (el) el.innerHTML = rccErrorHtml(rccKindOfCode(env.code), env.message || '预设模板加载失败');
+    return;
+  }
+  RCC.presets = (env.data && Array.isArray(env.data)) ? env.data : [];
+  rccRenderPresets();
+}
+
+async function rccMaterializePreset(presetKey) {
+  if (RCC.busy) return;
+  RCC.busy = true;
+  const seq = ++RCC.requestSeq;
+  RCC.lastAction = 'materializePreset';
+  try {
+    const env = await rccFetch(RCC_API + '/presets/' + encodeURIComponent(presetKey) + '/materialize', 'POST');
+    if (seq !== RCC.requestSeq) return;               // 视图已切换：丢弃迟到响应
+    if (env.code === 2000 || env.code === 2003) { rccOnUnauthorized(env.message); return; }
+    if (env.code !== 0) {
+      const el = document.getElementById('rcc-presets');
+      if (el) el.innerHTML = rccErrorHtml(rccKindOfCode(env.code), env.message || '物化失败');
+      return;
+    }
+    await rccLoadPresets();                            // 物化成功：刷新预设列表（幂等）
+    rccShowPrivate();                                  // 切回私有配置，展示刚创建的私有副本
+    await rccLoadList();
+  } finally {
+    if (seq === RCC.requestSeq) RCC.busy = false;      // 仅当仍是最新操作时才复位忙态
+  }
 }
 
 function rccSelectDataset(key, touch = true) {
@@ -1910,7 +1964,11 @@ function renderReportConfigurationWorkspace() {
   content.innerHTML = ''
     + '<div class="card rcc-workspace">'
     + '<div id="rcc-env-banner"></div>'
-    + '<div class="rcc-toolbar">'
+    + '<div class="rcc-tabs">'
+    + '<button type="button" class="rcc-tab rcc-tab-active" id="rcc-tab-private" onclick="rccShowPrivate()">私有配置</button>'
+    + '<button type="button" class="rcc-tab" id="rcc-tab-presets" onclick="rccShowPresets()">预设模板</button>'
+    + '</div>'
+    + '<div class="rcc-toolbar" id="rcc-toolbar">'
     + '<button type="button" class="btn" onclick="rccNew()">新建</button>'
     + '<button type="button" class="btn btn-primary" onclick="rccSave()">保存</button>'
     + '<button type="button" class="btn" onclick="rccCopy()">复制</button>'
@@ -1926,7 +1984,7 @@ function renderReportConfigurationWorkspace() {
     + '<input type="file" id="rcc-import-file" accept="application/json,.json" style="display:none" onchange="rccOnImportFile(this)">'
     + '<span id="rcc-dirty" class="rcc-dirty"></span>'
     + '</div>'
-    + '<div class="rcc-layout">'
+    + '<div class="rcc-layout" id="rcc-private-panel">'
     + '<aside class="rcc-list" id="rcc-list"></aside>'
     + '<aside class="rcc-shared" id="rcc-shared"></aside>'
     + '<section class="rcc-designer" id="rcc-designer"></section>'
@@ -1934,9 +1992,40 @@ function renderReportConfigurationWorkspace() {
     + '<section class="rcc-revisions" id="rcc-revisions"></section>'
     + '<section class="rcc-grants" id="rcc-grants"></section>'
     + '</div>'
+    + '<section class="rcc-presets" id="rcc-presets" style="display:none"></section>'
     + '</div>';
   rccAttachLeaveObserver();
   rccInit();
+}
+
+/* 切换工作台标签：私有配置 / 预设模板（预设标签绝不覆盖未保存编辑，仅切换视图） */
+function rccShowPrivate() {
+  const panel = document.getElementById('rcc-private-panel');
+  const presets = document.getElementById('rcc-presets');
+  const toolbar = document.getElementById('rcc-toolbar');
+  const tabPrivate = document.getElementById('rcc-tab-private');
+  const tabPresets = document.getElementById('rcc-tab-presets');
+  if (panel) panel.style.display = '';
+  if (presets) presets.style.display = 'none';
+  if (toolbar) toolbar.style.display = '';
+  if (tabPrivate) tabPrivate.classList.add('rcc-tab-active');
+  if (tabPresets) tabPresets.classList.remove('rcc-tab-active');
+  RCC.presetView = false;
+}
+
+function rccShowPresets() {
+  const panel = document.getElementById('rcc-private-panel');
+  const presets = document.getElementById('rcc-presets');
+  const toolbar = document.getElementById('rcc-toolbar');
+  const tabPrivate = document.getElementById('rcc-tab-private');
+  const tabPresets = document.getElementById('rcc-tab-presets');
+  if (panel) panel.style.display = 'none';
+  if (presets) presets.style.display = '';
+  if (toolbar) toolbar.style.display = 'none';
+  if (tabPrivate) tabPrivate.classList.remove('rcc-tab-active');
+  if (tabPresets) tabPresets.classList.add('rcc-tab-active');
+  RCC.presetView = true;
+  rccLoadPresets();
 }
 
 /* 离开工作台（路由切换替换 #content）时释放活动只读 / 导出请求 */
@@ -2021,6 +2110,11 @@ if (typeof module !== 'undefined' && module.exports) {
     rccLoadCatalog,
     rccLoadList,
     rccLoadShared,
+    rccShowPrivate,
+    rccShowPresets,
+    rccRenderPresets,
+    rccLoadPresets,
+    rccMaterializePreset,
     rccSelectDataset,
     rccApplyDefinition,
     rccLoadConfiguration,

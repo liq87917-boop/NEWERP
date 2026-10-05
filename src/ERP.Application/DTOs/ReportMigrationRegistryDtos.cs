@@ -98,6 +98,21 @@ public sealed record ReportMigrationRegistryDto(
     bool LegacyRoutesRetirable);
 
 /// <summary>
+/// 迁移 parity 比对证据（ERP-296 Stage 2）：一条旧报表是否已有真实的「旧路由 vs 通用平台」夹具比对证据。
+/// <para>四个维度必须全部具备才算完整（<see cref="Complete"/>）；仅目录存在 / 兼容性声明 / 预设存在绝不构成证据。</para>
+/// </summary>
+public sealed record ReportMigrationParityEvidenceDto(
+    bool DataGrainMatched,
+    bool CurrencyUnitMatched,
+    bool PermissionsMatched,
+    bool OutputSemanticsMatched)
+{
+    /// <summary>四个维度是否全部具备（任一缺失即不完整，fail closed）。</summary>
+    public bool Complete =>
+        DataGrainMatched && CurrencyUnitMatched && PermissionsMatched && OutputSemanticsMatched;
+}
+
+/// <summary>
 /// 报表迁移登记册的编译期清单（ERP-295 Stage 2）：完整枚举所有旧报表条目，作为运行时 parity 派生的唯一输入。
 /// <para>这不是审计用的静态 markdown，而是被 <c>ReportMigrationRegistry</c> 在运行时逐条派生 parity 并被旧路由门控消费的编译期清单。</para>
 /// </summary>

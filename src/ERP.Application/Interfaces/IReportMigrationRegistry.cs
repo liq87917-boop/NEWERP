@@ -20,11 +20,21 @@ public interface IReportMigrationRegistry
 }
 
 /// <summary>
-/// 报表预设目录接缝（ERP-295 Stage 2）：为迁移登记册提供「某旧报表是否已有预设模板」的运行时查询。
-/// <para>Stage 2 阶段预设尚未落地，因此默认实现为空目录（恒 false），只作为 parity 派生的前置接缝，不新增任何权限或存储。</para>
+/// 报表预设目录接缝（ERP-295 / ERP-296 Stage 2）：为迁移登记册提供「某旧报表是否已有预设模板」的运行时查询。
+/// <para>只读、无状态，只作为 parity 派生的前置接缝，不新增任何权限或存储，也绝不依赖预设编排或物化结果。</para>
 /// </summary>
 public interface IReportMigrationPresetCatalog
 {
     /// <summary>旧报表（按 <c>LegacyKey</c>）是否已有预设模板。</summary>
     Task<bool> HasPresetAsync(string legacyKey, long? userId, CancellationToken cancellationToken = default);
+}
+
+/// <summary>
+/// 迁移 parity 比对证据源（ERP-296 Stage 2）：为迁移登记册提供「某旧报表是否已有真实夹具比对证据」的运行时查询。
+/// <para>默认实现为空（恒 null）——parity-passed 只有存在真实比对证据才可达；目录 / 预设 / 兼容性声明绝不授予 parity。</para>
+/// </summary>
+public interface IReportMigrationParityEvidenceProvider
+{
+    /// <summary>返回指定旧报表的比对证据；无证据返回 null（fail closed）。</summary>
+    ReportMigrationParityEvidenceDto? GetEvidence(string legacyKey);
 }

@@ -17,15 +17,18 @@ public sealed class ReportMigrationRegistry : IReportMigrationRegistry
     private readonly IReportConfigurationCatalog _catalog;
     private readonly IErpDbContext _db;
     private readonly IReportMigrationPresetCatalog _presets;
+    private readonly IReportMigrationParityEvidenceProvider? _evidence;
 
     public ReportMigrationRegistry(
         IReportConfigurationCatalog catalog,
         IErpDbContext db,
-        IReportMigrationPresetCatalog presets)
+        IReportMigrationPresetCatalog presets,
+        IReportMigrationParityEvidenceProvider? evidence = null)
     {
         _catalog = catalog;
         _db = db;
         _presets = presets;
+        _evidence = evidence;
     }
 
     /// <inheritdoc />
@@ -101,6 +104,12 @@ public sealed class ReportMigrationRegistry : IReportMigrationRegistry
         if (!SemanticsMatch(definition, dataset) || !CompatibilityDeclared(definition))
             return ReportMigrationParityStatus.PresetReady;
 
+        // ERP-296：parity-passed 需要真实「旧路由 vs 通用平台」夹具比对证据（数据/粒度、币种/单位、权限、导出语义）；
+        // 目录存在 / 预设存在 / 兼容性声明绝不构成 parity；证据缺失或任一维度缺失一律停在 preset-ready（fail closed）。
+        var evidence = _evidence?.GetEvidence(definition.LegacyKey);
+        if (evidence is not { Complete: true })
+            return ReportMigrationParityStatus.PresetReady;
+
         return ReportMigrationParityStatus.ParityPassed;
     }
 
@@ -158,5 +167,15 @@ public sealed class EmptyReportMigrationPresetCatalog : IReportMigrationPresetCa
     /// <inheritdoc />
     public Task<bool> HasPresetAsync(string legacyKey, long? userId, CancellationToken cancellationToken = default)
         => Task.FromResult(false);
+}
+
+/// <summary>
+/// 空比对证据源（ERP-296 Stage 2 默认）：迁移 parity 尚无真实夹具比对证据，恒返回 null —— 任何条目都无法达到
+/// parity-passed，因此旧路由绝不会被提前移除。仅作为 parity 派生的事前接缝存在，不新增权限或存储。
+/// </summary>
+public sealed class EmptyReportMigrationParityEvidenceProvider : IReportMigrationParityEvidenceProvider
+{
+    /// <inheritdoc />
+    public ReportMigrationParityEvidenceDto? GetEvidence(string legacyKey) => null;
 }
 
