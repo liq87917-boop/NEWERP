@@ -11,6 +11,7 @@ import subprocess
 import sys
 import time
 from datetime import datetime, timezone
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -777,7 +778,50 @@ def recover_push_pending(config: dict[str, Any], state: dict[str, Any]) -> int |
     return 0
 
 
+@contextmanager
+def execution_lease():
+    """Serialize direct host and pipeline launches, including dirty recovery.
+
+    A separate lock avoids recursively acquiring the pipeline parent's lock.
+    The OS releases it on process exit so interrupted work remains resumable.
+    """
+    lock_path = LOGS_DIR / "orchestrator-execution.lock"
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with lock_path.open("a+b") as stream:
+        stream.seek(0, os.SEEK_END)
+        if stream.tell() == 0:
+            stream.write(b"0")
+            stream.flush()
+        stream.seek(0)
+        try:
+            if os.name == "nt":
+                import msvcrt
+                msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            yield False
+            return
+        try:
+            yield True
+        finally:
+            stream.seek(0)
+            if os.name == "nt":
+                msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
+
+
 def run_next(dry_run: bool) -> int:
+    with execution_lease() as acquired:
+        if not acquired:
+            print("Another NEWERP task executor owns the execution lease.")
+            return 0
+        return run_next_owned(dry_run)
+
+
+def run_next_owned(dry_run: bool) -> int:
     config, state = load_json(CONFIG_PATH), load_json(STATE_PATH)
     if not dry_run:
         checkpoint = recover_completed_checkpoint(config, state)

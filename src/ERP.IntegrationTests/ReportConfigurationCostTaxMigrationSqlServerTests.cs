@@ -137,6 +137,11 @@ public sealed class ReportConfigurationCostTaxMigrationSqlServerTests
 
     private static async Task<long> SeedRestrictedUserAsync(ErpDbContext db, string userName)
     {
+        // 幂等：专用 localdb 夹具跨测试运行持续存在，重复执行时复用既有受限制用户，绝不重复插入同名用户。
+        var existing = await db.SysUsers.FirstOrDefaultAsync(u => u.UserName == userName && !u.IsDeleted);
+        if (existing is not null)
+            return existing.Id;
+
         var user = new SysUser { UserName = userName, PasswordHash = "hash", PasswordSalt = "salt", DisplayName = userName, Status = UserStatus.Enabled };
         db.SysUsers.Add(user);
         await db.SaveChangesAsync();
