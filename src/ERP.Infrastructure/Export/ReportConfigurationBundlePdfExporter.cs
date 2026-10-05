@@ -535,12 +535,13 @@ public static class ReportConfigurationBundlePdfExporter
                 return;
 
             var lines = ReportConfigurationPdfExporter.WrapText(text, size, _usableWidth);
+            var height = Mm(heightMm);
             foreach (var line in lines)
             {
-                EnsureSpace(heightMm);
+                EnsureSpace(height);
                 _gfx.DrawString(line, font, XBrushes.Black,
-                    new XRect(Mm(MarginLeftMm), _y, _usableWidth, heightMm), XStringFormats.TopLeft);
-                _y += heightMm;
+                    new XRect(Mm(MarginLeftMm), _y, _usableWidth, height), XStringFormats.TopLeft);
+                _y += height;
             }
         }
 
