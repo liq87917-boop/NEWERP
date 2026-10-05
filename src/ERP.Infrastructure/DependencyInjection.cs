@@ -1,6 +1,7 @@
 using ERP.Application.Interfaces;
 using ERP.Application.Services;
 using ERP.Infrastructure.Data;
+using ERP.Infrastructure.Export;
 using ERP.Infrastructure.Reports;
 using ERP.Infrastructure.Security;
 using Microsoft.EntityFrameworkCore;
@@ -139,7 +140,17 @@ public static class DependencyInjection
 
         // 通用报表配置平台（ERP-295 Stage 2）：报表迁移登记册（编译期清单 + 运行时派生；parity-passed 需要真实比对证据，绝不只凭声明）
         services.AddScoped<IReportMigrationPresetCatalog, ReportMigrationPresetCatalog>();
-        services.AddSingleton<IReportMigrationParityEvidenceProvider, EmptyReportMigrationParityEvidenceProvider>();
+        // 迁移 parity 四维比对接缝（ERP-329 / ERP-331）：数据粒度 / 币种单位 / 权限 + Excel/PDF 输出语义
+        services.AddSingleton<IReportMigrationParityComparator, ReportMigrationParityComparator>();
+        services.AddSingleton<IReportMigrationOutputComparator, ReportMigrationOutputSemanticsComparator>();
+        // 迁移 parity 证据源（ERP-332 Stage 2）：真实「旧路由 vs 通用平台」四维比对证据（数据粒度 / 币种单位 / 权限 / 输出语义）；
+        // 证据服务按旧报表键在同一有界隔离夹具上运行两侧并比对；证据源只读、有界，无证据恒 null（fail closed）。
+        services.AddSingleton<ReportMigrationParityEvidenceProvider>();
+        services.AddSingleton<IReportMigrationParityEvidenceProvider>(sp =>
+            sp.GetRequiredService<ReportMigrationParityEvidenceProvider>());
+        services.AddSingleton<IReportMigrationParityEvidenceStore>(sp =>
+            sp.GetRequiredService<ReportMigrationParityEvidenceProvider>());
+        services.AddScoped<IReportMigrationParityEvidenceService, ReportMigrationParityEvidenceService>();
         services.AddScoped<IReportMigrationRegistry, ReportMigrationRegistry>();
 
         // 旧报表来源统一接缝（ERP-330 Stage 2）：服务端受控登记册把每个旧报表条目映射到既有读取服务，
