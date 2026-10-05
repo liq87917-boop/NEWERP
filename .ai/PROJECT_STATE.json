@@ -1,7 +1,7 @@
 {
   "schema_version": 2,
   "project": "NEWERP",
-  "updated_at": "2026-10-05T03:59:55.828648Z",
+  "updated_at": "2026-10-05T04:18:46.611721Z",
   "phase": "ready",
   "current_task": null,
   "queue": [
@@ -303,17 +303,20 @@
     "log": ".ai\\logs\\ERP-307-validation-2.log",
     "at": "2026-10-05T03:59:50.099633Z"
   },
-  "last_error": null,
+  "last_error": {
+    "task": "ERP-308",
+    "kind": "automatic_repair_pending",
+    "summary": "Path guard failed:\noutside allowed_paths: src/ERP.UnitTests/ReportMigrationRegistryTests.cs"
+  },
   "last_deepseek_fix": {
-    "task": "ERP-307",
-    "attempt": 2,
-    "model": "deepseek-v4-pro",
-    "exit_code": 0,
-    "finished_at": "2026-10-05T03:59:20.562909Z"
+    "task": "ERP-308",
+    "attempts": 3,
+    "status": "retry_pending",
+    "at": "2026-10-05T04:18:46.332082Z"
   },
   "git_sync": {
     "branch": "main",
-    "local_sha": "a23c69a",
+    "local_sha": "51a2381",
     "status": "synced",
     "ahead": 0,
     "behind": 0,
@@ -328,5 +331,7 @@
   "runner": {
     "status": "stopped",
     "pid": null
-  }
+  },
+  "blocker": null,
+  "finish_reason": "deepseek_supervisor_recovery"
 }
