@@ -19,6 +19,22 @@ public class LegacyReportSourceRegistryTests
 {
     // ==================== 0. 测试脚手架 ====================
 
+    [Fact]
+    public async Task Legacy_source_rejects_oversized_snapshot_instead_of_passing_partial_parity()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedAuthorizedUser(db, "oversized", "sales-order", "sales-order-export");
+        var page = new LegacyBillExportPage
+        {
+            Columns = new List<LegacyBillExportColumn> { new("BillNo", "Bill No", ReportConfigurationConstants.TypeText) },
+            Rows = Enumerable.Range(1, 201).Select(i => new Dictionary<string, object?> { ["BillNo"] = "BOUND-" + i }).ToList(),
+            Total = 201, Page = 1, PageSize = 200, TotalPages = 2,
+        };
+        var registry = BuildRegistry(db, new FakeBillExportReader(page));
+        var ex = await Assert.ThrowsAsync<BusinessException>(() => registry.ReadAsync(Req("export:bill-proc:sales-order", user.Id)));
+        Assert.Equal(ReportConfigurationExecutionLimits.ErrorCodeResultTooLarge, ex.Code);
+    }
+
     private static SysUser SeedUser(ErpDbContext db, string userName)
     {
         var user = new SysUser

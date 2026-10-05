@@ -96,6 +96,11 @@ public sealed class LegacyReportSourceRegistry : ILegacyReportSource
         {
             cancellationToken.ThrowIfCancellationRequested();
             var snapshot = await handler(request, cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
+            if (snapshot.Rows.Count > MaxPageSize)
+                throw new BusinessException(
+                    $"旧报表来源结果超过有界比较上限（{MaxPageSize} 行）；请收窄筛选范围，禁止截断后声明匹配",
+                    ReportConfigurationExecutionLimits.ErrorCodeResultTooLarge);
             return Result(request.LegacyKey, definition, LegacyReportSourceStatus.Success,
                 null, null, snapshot);
         }
