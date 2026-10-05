@@ -219,6 +219,18 @@ internal static class ReportConfigurationPresetManifest
             "应收账龄分析表（迁移预设）",
             ReportConfigurationConstants.DatasetArAging,
             ArAgingPresetDefinition()),
+        new ReportConfigurationPresetSeed(
+            "purchase-cost",
+            "report:purchase-cost",
+            "采购成本分析表（迁移预设）",
+            ReportConfigurationConstants.DatasetPurchaseCost,
+            PurchaseCostPresetDefinition()),
+        new ReportConfigurationPresetSeed(
+            "tax-refund-summary",
+            "report:tax-refund-summary",
+            "退税汇总表（迁移预设）",
+            ReportConfigurationConstants.DatasetTaxRefundSummary,
+            TaxRefundSummaryPresetDefinition()),
     };
 
     private static ReportConfigurationDefinition SalesOrderPresetDefinition() => new()
@@ -571,6 +583,37 @@ internal static class ReportConfigurationPresetManifest
         {
             "customerName", "orderNo", "currency", "orderAmount",
             "receivedAmount", "balance", "agingDays", "bucket", "status",
+        },
+        Filters = new List<ReportConfigurationFilter>(),
+        Grouping = new List<string> { ReportConfigurationConstants.GroupNone },
+        Aggregates = new List<ReportConfigurationAggregate>(),
+        Capabilities = new List<string> { ReportConfigurationConstants.CapabilityPreview },
+        Presentation = new ReportConfigurationPresentation { Page = 1, PageSize = 20 },
+    };
+
+    private static ReportConfigurationDefinition PurchaseCostPresetDefinition() => new()
+    {
+        SchemaVersion = ReportConfigurationRules.CurrentSchemaVersion,
+        DatasetKey = ReportConfigurationConstants.DatasetPurchaseCost,
+        Fields = new List<string>
+        {
+            "supplierName", "supplierType", "orderCount", "totalAmount", "avgAmount", "lastOrderDate",
+        },
+        Filters = new List<ReportConfigurationFilter>(),
+        Grouping = new List<string> { ReportConfigurationConstants.GroupNone },
+        Aggregates = new List<ReportConfigurationAggregate>(),
+        Capabilities = new List<string> { ReportConfigurationConstants.CapabilityPreview },
+        Presentation = new ReportConfigurationPresentation { Page = 1, PageSize = 20 },
+    };
+
+    private static ReportConfigurationDefinition TaxRefundSummaryPresetDefinition() => new()
+    {
+        SchemaVersion = ReportConfigurationRules.CurrentSchemaVersion,
+        DatasetKey = ReportConfigurationConstants.DatasetTaxRefundSummary,
+        Fields = new List<string>
+        {
+            "refundPeriod", "recordCount", "declaredCount", "refundedCount",
+            "exportAmount", "refundableAmount", "refundedAmount", "unrefundedAmount",
         },
         Filters = new List<ReportConfigurationFilter>(),
         Grouping = new List<string> { ReportConfigurationConstants.GroupNone },

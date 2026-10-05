@@ -95,6 +95,9 @@ public static class DependencyInjection
         services.AddScoped<IReportConfigurationDatasetProvider, SalesmanOutputReportConfigurationDatasetProvider>();
         // 代理服务费月度汇总（ERP-303 Stage 2）：复用既有 Application 静态查询语义，复用既有报表菜单授权（fail closed）
         services.AddScoped<IReportConfigurationDatasetProvider, AgencyServiceFeeMonthlyReportConfigurationDatasetProvider>();
+        // 采购成本 / 退税汇总（ERP-305 Stage 2）：复用既有固定报表服务语义，复用既有报表菜单授权（fail closed；混合币种分区拒绝）
+        services.AddScoped<IReportConfigurationDatasetProvider, PurchaseCostReportConfigurationDatasetProvider>();
+        services.AddScoped<IReportConfigurationDatasetProvider, TaxRefundSummaryReportConfigurationDatasetProvider>();
 
         // 通用报表配置平台（ERP-260 Stage 1）：私有报表配置服务（保存/列表/加载/复制/发布/恢复/软删除）
         services.AddScoped<IReportConfigurationService, ReportConfigurationService>();
