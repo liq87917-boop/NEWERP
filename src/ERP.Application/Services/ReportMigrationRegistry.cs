@@ -18,17 +18,20 @@ public sealed class ReportMigrationRegistry : IReportMigrationRegistry
     private readonly IErpDbContext _db;
     private readonly IReportMigrationPresetCatalog _presets;
     private readonly IReportMigrationParityEvidenceProvider? _evidence;
+    private readonly IReportConfigurationBundlePresetCatalog? _bundlePresets;
 
     public ReportMigrationRegistry(
         IReportConfigurationCatalog catalog,
         IErpDbContext db,
         IReportMigrationPresetCatalog presets,
-        IReportMigrationParityEvidenceProvider? evidence = null)
+        IReportMigrationParityEvidenceProvider? evidence = null,
+        IReportConfigurationBundlePresetCatalog? bundlePresets = null)
     {
         _catalog = catalog;
         _db = db;
         _presets = presets;
         _evidence = evidence;
+        _bundlePresets = bundlePresets;
     }
 
     /// <inheritdoc />
@@ -99,7 +102,7 @@ public sealed class ReportMigrationRegistry : IReportMigrationRegistry
     {
         var dataset = await _catalog.GetDatasetAsync(definition.DatasetKey, userId, cancellationToken);
         if (dataset is null)
-            return ReportMigrationParityStatus.Pending;
+            return await DeriveBundleParityAsync(definition, userId, cancellationToken);
 
         var presetExists = await _presets.HasPresetAsync(definition.LegacyKey, userId, cancellationToken);
         if (!presetExists)
@@ -115,6 +118,55 @@ public sealed class ReportMigrationRegistry : IReportMigrationRegistry
             return ReportMigrationParityStatus.PresetReady;
 
         return ReportMigrationParityStatus.ParityPassed;
+    }
+
+    /// <summary>
+    /// 捆绑组合条目 parity 派生（ERP-322）：单一数据集未注册时，改从捆绑预设目录（ERP-310）按 LegacyKey
+    /// 解析多节预设，并逐节按当前账号重新校验受控数据集授权（fail closed，绝不信任预设载荷）。
+    /// 全部节数据集就绪 → preset-ready；任一节缺失 / 被撤销 → pending；parity-passed 仍须现有四维比对证据。
+    /// </summary>
+    private async Task<ReportMigrationParityStatus> DeriveBundleParityAsync(
+        ReportMigrationRegistryEntryDefinition definition,
+        long userId,
+        CancellationToken cancellationToken)
+    {
+        var bundle = await ResolveBundlePresetByLegacyKeyAsync(definition.LegacyKey, userId, cancellationToken);
+        if (bundle is null || bundle.Sections is not { Count: > 0 })
+            return ReportMigrationParityStatus.Pending;
+
+        // 逐节重检：任一节数据集缺失 / 未授权即 fail closed（pending），绝不信任捆绑预设自报的 readiness。
+        foreach (var section in bundle.Sections)
+        {
+            if (string.IsNullOrWhiteSpace(section.DatasetKey))
+                return ReportMigrationParityStatus.Pending;
+
+            if (await _catalog.GetDatasetAsync(section.DatasetKey, userId, cancellationToken) is null)
+                return ReportMigrationParityStatus.Pending;
+        }
+
+        // 兼容性声明缺失仍不达 parity-passed（fail closed），与单数据集路径一致。
+        if (!CompatibilityDeclared(definition))
+            return ReportMigrationParityStatus.PresetReady;
+
+        var evidence = _evidence?.GetEvidence(definition.LegacyKey);
+        if (evidence is not { Complete: true })
+            return ReportMigrationParityStatus.PresetReady;
+
+        return ReportMigrationParityStatus.ParityPassed;
+    }
+
+    /// <summary>按 LegacyKey 从捆绑预设目录解析多节预设（未注册 / 未列出均 fail closed → null）。</summary>
+    private async Task<ReportConfigurationBundlePresetDto?> ResolveBundlePresetByLegacyKeyAsync(
+        string legacyKey,
+        long userId,
+        CancellationToken cancellationToken)
+    {
+        if (_bundlePresets is null)
+            return null;
+
+        var presets = await _bundlePresets.ListPresetsAsync(userId, cancellationToken);
+        return presets?.FirstOrDefault(p =>
+            string.Equals(p.LegacyKey, legacyKey, StringComparison.OrdinalIgnoreCase));
     }
 
     /// <summary>旧语义匹配：权限（必需菜单与受控数据集必需菜单一致）+ 币种 / 单位口径一致。</summary>

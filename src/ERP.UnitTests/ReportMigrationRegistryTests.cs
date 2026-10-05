@@ -97,8 +97,9 @@ public class ReportMigrationRegistryTests
 
     private static ReportMigrationRegistry BuildRegistry(
         ErpDbContext db, IReportConfigurationCatalog catalog, IReportMigrationPresetCatalog? presets = null,
-        IReportMigrationParityEvidenceProvider? evidence = null)
-        => new(catalog, db, presets ?? new EmptyReportMigrationPresetCatalog(), evidence);
+        IReportMigrationParityEvidenceProvider? evidence = null,
+        IReportConfigurationBundlePresetCatalog? bundlePresets = null)
+        => new(catalog, db, presets ?? new EmptyReportMigrationPresetCatalog(), evidence, bundlePresets);
 
     private static ReportConfigurationDatasetDto Dataset(string key, string menuCode, string semantics)
         => new(key, key, key, semantics, menuCode, menuCode,
@@ -141,6 +142,42 @@ public class ReportMigrationRegistryTests
 
         public ReportMigrationParityEvidenceDto? GetEvidence(string legacyKey) => _evidence(legacyKey);
     }
+
+    private sealed class FakeBundlePresetCatalog : IReportConfigurationBundlePresetCatalog
+    {
+        private readonly IReadOnlyList<ReportConfigurationBundlePresetDto> _presets;
+
+        public FakeBundlePresetCatalog(params ReportConfigurationBundlePresetDto[] presets) => _presets = presets;
+
+        public Task<List<ReportConfigurationBundlePresetDto>> ListPresetsAsync(long? userId, CancellationToken cancellationToken = default)
+            => Task.FromResult(_presets.ToList());
+
+        public Task<ReportConfigurationBundlePresetDto?> GetPresetAsync(string presetKey, long? userId, CancellationToken cancellationToken = default)
+            => Task.FromResult<ReportConfigurationBundlePresetDto?>(null);
+
+        public Task<ReportConfigurationBundlePresetMaterializationDto> MaterializeAsync(
+            string presetKey,
+            ReportConfigurationBundlePresetMaterializeRequest request,
+            long? userId,
+            CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+    }
+
+    private static ReportConfigurationBundlePresetDto BundlePreset(
+        string legacyKey, string readiness, params string[] sectionDatasetKeys)
+        => new()
+        {
+            PresetKey = "customer-report-packet",
+            LegacyKey = legacyKey,
+            Name = "客户报告包",
+            Readiness = readiness,
+            Sections = sectionDatasetKeys.Select(k => new ReportConfigurationBundlePresetSectionDto
+            {
+                SectionKey = k,
+                Title = k,
+                DatasetKey = k,
+            }).ToList(),
+        };
 
     // ==================== 1. 完整清单覆盖 ====================
 
@@ -346,6 +383,118 @@ public class ReportMigrationRegistryTests
         var result = await registry.GetRegistryAsync(user.Id);
 
         var entry = Assert.Single(result.Entries, e => e.LegacyKey == "dynamic:sales-order");
+        Assert.Equal(ReportMigrationParityStatusText.ParityPassed, entry.ParityStatus);
+    }
+
+    // ==================== 3.5 捆绑组合条目 parity 派生（ERP-322） ====================
+
+    private static ReportConfigurationBundlePresetDto PacketBundlePreset(
+        string readiness, params string[] sectionDatasetKeys)
+        => BundlePreset("packet:customer-report-packet", readiness, sectionDatasetKeys);
+
+    [Fact]
+    public async Task Packet_单数据集缺失但捆绑预设各节就绪_preset_ready()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedUserWithMenus(db, "packet-ready", "sales-order", "customer");
+
+        var catalog = new FakeCatalog(new Dictionary<string, ReportConfigurationDatasetDto?>
+        {
+            ["sales-order"] = Dataset("sales-order", "sales-order", "金额按订单原币呈现，不跨币种换算或合并"),
+            ["receivable"] = Dataset("receivable", "customer", "金额按原币呈现"),
+        });
+        var bundlePresets = new FakeBundlePresetCatalog(
+            PacketBundlePreset(ReportConfigurationBundlePresetConstants.ReadinessPresetReady, "sales-order", "receivable"));
+        var registry = BuildRegistry(db, catalog, bundlePresets: bundlePresets);
+
+        var result = await registry.GetRegistryAsync(user.Id);
+
+        var entry = Assert.Single(result.Entries, e => e.LegacyKey == "packet:customer-report-packet");
+        Assert.Equal(ReportMigrationParityStatusText.PresetReady, entry.ParityStatus);
+    }
+
+    [Fact]
+    public async Task Packet_单数据集缺失_任一节数据集缺失_pending()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedUserWithMenus(db, "packet-missing", "sales-order", "customer");
+
+        var catalog = new FakeCatalog(new Dictionary<string, ReportConfigurationDatasetDto?>
+        {
+            ["sales-order"] = Dataset("sales-order", "sales-order", "金额按订单原币呈现，不跨币种换算或合并"),
+        });
+        var bundlePresets = new FakeBundlePresetCatalog(
+            PacketBundlePreset(ReportConfigurationBundlePresetConstants.ReadinessPresetReady, "sales-order", "receivable"));
+        var registry = BuildRegistry(db, catalog, bundlePresets: bundlePresets);
+
+        var result = await registry.GetRegistryAsync(user.Id);
+
+        var entry = Assert.Single(result.Entries, e => e.LegacyKey == "packet:customer-report-packet");
+        Assert.Equal(ReportMigrationParityStatusText.Pending, entry.ParityStatus);
+    }
+
+    [Fact]
+    public async Task Packet_单数据集缺失_捆绑预设未列出_pending()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedUserWithMenus(db, "packet-no-preset", "sales-order", "customer");
+
+        var catalog = new FakeCatalog(new Dictionary<string, ReportConfigurationDatasetDto?>
+        {
+            ["sales-order"] = Dataset("sales-order", "sales-order", "金额按订单原币呈现，不跨币种换算或合并"),
+            ["receivable"] = Dataset("receivable", "customer", "金额按原币呈现"),
+        });
+        var registry = BuildRegistry(db, catalog, bundlePresets: new FakeBundlePresetCatalog());
+
+        var result = await registry.GetRegistryAsync(user.Id);
+
+        var entry = Assert.Single(result.Entries, e => e.LegacyKey == "packet:customer-report-packet");
+        Assert.Equal(ReportMigrationParityStatusText.Pending, entry.ParityStatus);
+    }
+
+    [Fact]
+    public async Task Packet_捆绑预设各节就绪_无证据_拒绝parity_passed()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedUserWithMenus(db, "packet-no-evidence", "sales-order", "customer");
+
+        var catalog = new FakeCatalog(new Dictionary<string, ReportConfigurationDatasetDto?>
+        {
+            ["sales-order"] = Dataset("sales-order", "sales-order", "金额按订单原币呈现，不跨币种换算或合并"),
+            ["receivable"] = Dataset("receivable", "customer", "金额按原币呈现"),
+        });
+        var bundlePresets = new FakeBundlePresetCatalog(
+            PacketBundlePreset(ReportConfigurationBundlePresetConstants.ReadinessPresetReady, "sales-order", "receivable"));
+        var registry = BuildRegistry(db, catalog, bundlePresets: bundlePresets);
+
+        var result = await registry.GetRegistryAsync(user.Id);
+
+        var entry = Assert.Single(result.Entries, e => e.LegacyKey == "packet:customer-report-packet");
+        Assert.Equal(ReportMigrationParityStatusText.PresetReady, entry.ParityStatus);
+        Assert.False(await registry.CanRetireLegacyRoutesAsync(user.Id));
+    }
+
+    [Fact]
+    public async Task Packet_捆绑预设各节就绪_有完整证据_parity_passed()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedUserWithMenus(db, "packet-evidence", "sales-order", "customer");
+
+        var catalog = new FakeCatalog(new Dictionary<string, ReportConfigurationDatasetDto?>
+        {
+            ["sales-order"] = Dataset("sales-order", "sales-order", "金额按订单原币呈现，不跨币种换算或合并"),
+            ["receivable"] = Dataset("receivable", "customer", "金额按原币呈现"),
+        });
+        var bundlePresets = new FakeBundlePresetCatalog(
+            PacketBundlePreset(ReportConfigurationBundlePresetConstants.ReadinessPresetReady, "sales-order", "receivable"));
+        var evidence = new FakeEvidenceProvider(key => key == "packet:customer-report-packet"
+            ? new ReportMigrationParityEvidenceDto(true, true, true, true)
+            : null);
+        var registry = BuildRegistry(db, catalog, evidence: evidence, bundlePresets: bundlePresets);
+
+        var result = await registry.GetRegistryAsync(user.Id);
+
+        var entry = Assert.Single(result.Entries, e => e.LegacyKey == "packet:customer-report-packet");
         Assert.Equal(ReportMigrationParityStatusText.ParityPassed, entry.ParityStatus);
     }
 
