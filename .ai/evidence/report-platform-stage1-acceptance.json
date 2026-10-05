@@ -1,0 +1,248 @@
+{
+  "at": "2026-10-05T00:13:07.928036Z",
+  "stage": 1,
+  "stage_complete": true,
+  "phase2_authorized_by_gate": true,
+  "matrix": [
+    {
+      "criterion": "definition_persistence_version_draft_publish_share",
+      "implementation_tasks": [
+        "ERP-260",
+        "ERP-265",
+        "ERP-279"
+      ],
+      "implementation_completed": true,
+      "regression_sources": [
+        "src/ERP.UnitTests/ReportConfigurationPersistenceTests.cs",
+        "src/ERP.UnitTests/ReportConfigurationVersionTests.cs",
+        "src/ERP.UnitTests/ReportConfigurationSharingTests.cs"
+      ],
+      "existing_evidence": [
+        ".ai/logs/report-platform-lifecycle-catalog-20261004T1231.json",
+        ".ai/logs/report-stage1-browser-recipient-20261004.json"
+      ],
+      "acceptance_status": "passed"
+    },
+    {
+      "criterion": "dataset_field_metric_controlled_relations",
+      "implementation_tasks": [
+        "ERP-259",
+        "ERP-267",
+        "ERP-268",
+        "ERP-292"
+      ],
+      "implementation_completed": true,
+      "regression_sources": [
+        "src/ERP.UnitTests/ReportConfigurationCatalogTests.cs",
+        "src/ERP.UnitTests/ReportConfigurationMetricTests.cs",
+        "src/ERP.UnitTests/ReportConfigurationRelationTests.cs"
+      ],
+      "existing_evidence": [
+        ".ai/logs/report-stage1-browser-latest-20261004.json",
+        ".ai/logs/report-platform-real-boundaries-20261004T1221.json"
+      ],
+      "acceptance_status": "passed"
+    },
+    {
+      "criterion": "user_fields_filters_grouping_summary_restricted_formula_preview",
+      "implementation_tasks": [
+        "ERP-261",
+        "ERP-262",
+        "ERP-266",
+        "ERP-270",
+        "ERP-271",
+        "ERP-272",
+        "ERP-273",
+        "ERP-274",
+        "ERP-277",
+        "ERP-278"
+      ],
+      "implementation_completed": true,
+      "regression_sources": [
+        "src/ERP.UnitTests/ReportConfigurationGroupingTests.cs",
+        "src/ERP.UnitTests/ReportConfigurationPivotTests.cs",
+        "src/ERP.UnitTests/ReportConfigurationFilterValidationTests.cs",
+        "src/ERP.UnitTests/ReportConfigurationFilterConjunctionTests.cs",
+        "src/ERP.UnitTests/ReportConfigurationFormulaEditorTests.cs"
+      ],
+      "existing_evidence": [
+        ".ai/logs/report-stage1-browser-latest-20261004.json",
+        ".ai/logs/heartbeat-grouped-preview-20261004T1201.json",
+        ".ai/logs/latest-report-acceptance-20261004/latest-platform-real-sql.trx"
+      ],
+      "acceptance_status": "passed"
+    },
+    {
+      "criterion": "excel_pdf",
+      "implementation_tasks": [
+        "ERP-263",
+        "ERP-264",
+        "ERP-275",
+        "ERP-294"
+      ],
+      "implementation_completed": true,
+      "regression_sources": [],
+      "existing_evidence": [
+        ".ai/logs/report-platform-heartbeat-20261004T1201.json",
+        ".ai/logs/report-platform-stage1-gate-20261004T1211.json",
+        ".ai/logs/browser-downloads-20261005T0008/evidence.json"
+      ],
+      "acceptance_status": "passed"
+    },
+    {
+      "criterion": "current_user_row_column_data_scope",
+      "implementation_tasks": [
+        "ERP-265",
+        "ERP-268",
+        "ERP-286"
+      ],
+      "implementation_completed": true,
+      "regression_sources": [
+        "src/ERP.UnitTests/ReportConfigurationSharingTests.cs",
+        "src/ERP.UnitTests/ReportConfigurationRelationTests.cs"
+      ],
+      "existing_evidence": [
+        ".ai/logs/report-stage1-browser-recipient-20261004.json",
+        ".ai/logs/report-platform-real-boundaries-20261004T1221.json",
+        ".ai/logs/latest-report-acceptance-20261004/latest-platform-real-sql.trx"
+      ],
+      "acceptance_status": "passed"
+    },
+    {
+      "criterion": "errors_query_bounds_audit_build_test",
+      "implementation_tasks": [
+        "ERP-269",
+        "ERP-282",
+        "ERP-283",
+        "ERP-284",
+        "ERP-285",
+        "ERP-291",
+        "ERP-293"
+      ],
+      "implementation_completed": true,
+      "regression_sources": [
+        "src/ERP.UnitTests/ReportConfigurationBudgetTests.cs",
+        "src/ERP.UnitTests/ReportConfigurationRequestCancellationTests.cs",
+        "src/ERP.UnitTests/ReportConfigurationUiCancellationTests.cs"
+      ],
+      "existing_evidence": [
+        ".ai/logs/report-platform-real-boundaries-20261004T1221.json",
+        ".ai/logs/ERP-293-validation-1.log",
+        ".ai/logs/heartbeat-20261004T1201-self-test.log",
+        ".ai/logs/heartbeat-20261004T1201-contracts.log"
+      ],
+      "acceptance_status": "passed"
+    }
+  ],
+  "regression": {
+    "unit_tests_passed": 4492,
+    "real_sql_tests_passed": 13,
+    "scheduler_contracts_passed": 62
+  },
+  "unresolved_gate": {},
+  "queued_functional_tasks": [],
+  "deferred_tasks_retained": [
+    "ERP-257",
+    "ERP-258",
+    "ERP-288",
+    "ERP-289",
+    "ERP-290"
+  ],
+  "root_stale_failures": "ERP-096/102/103 are already completed in selected executor and must not be replayed.",
+  "browser_downloads": {
+    "at": "2026-10-05T00:10Z",
+    "task": "ERP-294",
+    "source_commit": "5f9e1ea",
+    "actual_browser": "Codex IAB tab5 http://127.0.0.1:5070/",
+    "fixture": "NEWERP_AUTOTEST_20261004 isolated LocalDB",
+    "configuration": 35,
+    "excel_click_utc": "2026-10-05T00:08:12Z",
+    "pdf_click_utc": "2026-10-05T00:08:38Z",
+    "download_event_wait": "Both event waits timed out after15s, but actual browser files exist with matching creation timestamps and filenames. Event timeout is a tool-observation failure, not export failure.",
+    "files": {
+      "xlsx": {
+        "source": "C:\\Users\\Admin\\Downloads\\报表配置_20261005.xlsx",
+        "path": "D:\\VSCodeProject\\NEWERP.executor.continue-erp-190-20260930080457\\.ai\\logs\\browser-downloads-20261005T0008\\报表配置_20261005.xlsx",
+        "bytes": 6335,
+        "sha256": "c5a6e99ef591d4d25121a11ce397ead83c8e7b50276dd6c275bd0d44e81d240e",
+        "created_after_browser_click": true
+      },
+      "pdf": {
+        "source": "C:\\Users\\Admin\\Downloads\\报表配置_20261005.pdf",
+        "path": "D:\\VSCodeProject\\NEWERP.executor.continue-erp-190-20260930080457\\.ai\\logs\\browser-downloads-20261005T0008\\报表配置_20261005.pdf",
+        "bytes": 72987,
+        "sha256": "c77ff07fa2f5a4044a164c9be8a6c9f477cc7d9d0eec8c579fddd959be3435c9",
+        "created_after_browser_click": true,
+        "pages": 1,
+        "content_assertions": "passed"
+      }
+    },
+    "actual_browser_artifacts_captured": true,
+    "not_api_or_baseline_substitution": true,
+    "excel_values": "two rows USD25/30, calc50/60, controlled customer code/country match preview"
+  },
+  "proof_files": [
+    {
+      "path": ".ai/logs/ERP-293-validation-1.log",
+      "sha256": "34575d06ce2d76bc89806e24deb9c12250c8ac37ca19107680680f75274dfbfe"
+    },
+    {
+      "path": ".ai/logs/ERP-294-validation-1.log",
+      "sha256": "ab6e00204db3dfd8224fa30ad7534ab8a8f84fc9d47bf0f09fef764e8f02f284"
+    },
+    {
+      "path": ".ai/logs/browser-downloads-20261005T0008/evidence.json",
+      "sha256": "aea2f4d4f5bdfbe8346d71cf86e7df22c017947ccdf277c2a196d74e27bfe171"
+    },
+    {
+      "path": ".ai/logs/browser-downloads-20261005T0008/报表配置_20261005.pdf",
+      "sha256": "c77ff07fa2f5a4044a164c9be8a6c9f477cc7d9d0eec8c579fddd959be3435c9"
+    },
+    {
+      "path": ".ai/logs/browser-downloads-20261005T0008/报表配置_20261005.xlsx",
+      "sha256": "c5a6e99ef591d4d25121a11ce397ead83c8e7b50276dd6c275bd0d44e81d240e"
+    },
+    {
+      "path": ".ai/logs/heartbeat-20261004T1201-contracts.log",
+      "sha256": "ec9aec6b89f384deb44f88a3c11468d0a4a216f83eec566ea58b9af2f68cd491"
+    },
+    {
+      "path": ".ai/logs/heartbeat-20261004T1201-self-test.log",
+      "sha256": "dcabab5be2e2c887f201588105916ce8def55384300d2a98ed6954e71a642ddc"
+    },
+    {
+      "path": ".ai/logs/heartbeat-grouped-preview-20261004T1201.json",
+      "sha256": "aaea9985e38a8ef139676bbb6e29931edf752589c1b92422c001f92e71c116c8"
+    },
+    {
+      "path": ".ai/logs/latest-report-acceptance-20261004/latest-platform-real-sql.trx",
+      "sha256": "220750e4ae10f4b525333851529d38f3d657baef4e42d1bcd98dfd665ebf0ddd"
+    },
+    {
+      "path": ".ai/logs/report-platform-heartbeat-20261004T1201.json",
+      "sha256": "8fca84fb9e132a6ee54fe97ed0ec42f2535a4440fc69e0a7bdbb85a6b0d1946d"
+    },
+    {
+      "path": ".ai/logs/report-platform-lifecycle-catalog-20261004T1231.json",
+      "sha256": "c3c1e34be6c19d75dd8893211359d276adaa2620a267270dfa8c2eced7aa0e32"
+    },
+    {
+      "path": ".ai/logs/report-platform-real-boundaries-20261004T1221.json",
+      "sha256": "44998928d8cf6ac599fa59cd02c9798a413f6ffb5e2e3c85efa27cd11ccfed2b"
+    },
+    {
+      "path": ".ai/logs/report-platform-stage1-gate-20261004T1211.json",
+      "sha256": "8b2b489047430dc36b9d02238e0daa7a0576ecac3a8cf6a0b959a900e7992c03"
+    },
+    {
+      "path": ".ai/logs/report-stage1-browser-latest-20261004.json",
+      "sha256": "5522eb26a95c5a3f5649bfc3ffb2f967a2499605ba416c487003118a540a2cdf"
+    },
+    {
+      "path": ".ai/logs/report-stage1-browser-recipient-20261004.json",
+      "sha256": "cf0d99466932b3ca3e65a45ca5a7dafc3c454c72ea8b5e86e3b0999cf8dd678d"
+    }
+  ],
+  "visual_pdf_review": "Browser PDF page rendered and inspected: Chinese headers and context readable, two complete rows, no overlap or clipping.",
+  "scope": "Stage1 generic platform accepted only. No existing report migration or phase3/4 acceptance implied."
+}

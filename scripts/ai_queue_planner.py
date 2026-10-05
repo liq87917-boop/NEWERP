@@ -16,10 +16,46 @@ def parse(log):
     if not isinstance(value,dict) or not isinstance(value.get('tasks'),list):raise ValueError('Expected tasks array')
     return value
 
+STAGE1_CRITERIA = {
+    'definition_persistence_version_draft_publish_share',
+    'dataset_field_metric_controlled_relations',
+    'user_fields_filters_grouping_summary_restricted_formula_preview',
+    'excel_pdf', 'current_user_row_column_data_scope',
+    'errors_query_bounds_audit_build_test',
+}
+
+def planning_stage(root):
+    """Advance only after the recorded genuine gate and hashed evidence survive review."""
+    gate_path = root/'.ai/evidence/report-platform-stage1-acceptance.json'
+    try:
+        gate = json.loads(gate_path.read_text(encoding='utf-8'))
+        if gate.get('stage') != 1 or gate.get('stage_complete') is not True or gate.get('unresolved_gate'):
+            return 1
+        matrix = gate.get('matrix', [])
+        if {x.get('criterion') for x in matrix} != STAGE1_CRITERIA or any(x.get('acceptance_status') != 'passed' for x in matrix):
+            return 1
+        if gate.get('browser_downloads', {}).get('actual_browser_artifacts_captured') is not True:
+            return 1
+        if not all(gate.get('regression', {}).get(k, 0) > 0 for k in ['unit_tests_passed','real_sql_tests_passed','scheduler_contracts_passed']):
+            return 1
+        proofs = gate.get('proof_files', [])
+        if not proofs:
+            return 1
+        for proof in proofs:
+            name = proof['path']
+            target = (root/name).resolve()
+            if Path(name).is_absolute() or not target.is_relative_to(root.resolve()):
+                return 1
+            if hashlib.sha256(target.read_bytes()).hexdigest() != proof['sha256']:
+                return 1
+        return 2
+    except (OSError, ValueError, KeyError, TypeError):
+        return 1
+
 def validate(t,existing,root):
     for key in ['title','description','acceptance_criteria','allowed_paths','criterion_path_map','implementation_evidence']:
         if not t.get(key):raise ValueError('Missing '+key)
-    if t.get('planning_stage')!=1 or t.get('risk') not in ['low','medium']:raise ValueError('Phase/risk violation')
+    if t.get('planning_stage')!=planning_stage(root) or t.get('risk') not in ['low','medium']:raise ValueError('Phase/risk violation')
     if any(x.get('title','').strip().casefold()==t['title'].strip().casefold() for x in existing):raise ValueError('Duplicate task')
     paths=t['allowed_paths']
     if not isinstance(paths,list):raise ValueError('Paths must be a list')
@@ -51,11 +87,12 @@ def replenish(p):
     attempt=int(previous.get('attempt',0))+1;log=p.LOGS_DIR/f'planner-{attempt}.jsonl'
     evidence={'status':'planning','attempt':attempt,'started_at':p.utc_now(),'retry_after_epoch':time.time()+900}
     p.save_json(status,evidence)
+    stage=planning_stage(p.ROOT)
     prompt="""User authorizes fully autonomous NEWERP development. You are a READ-ONLY planning step. Read backlog/docs, current source, ALL task/result definitions and recent full logs. Never edit files, run write commands, publish tasks, change state, commit or access production/credentials. Final text must be ONLY JSON {"tasks":[...],"blocker":...}.
-Current stage strictly 1: complete generic configurable reporting (definition persistence/version/draft/publish/share, controlled dataset/field/metric/relations, select/filter/group/aggregate/restricted formulas/preview, Excel/PDF, current-user row/column/data scope, errors/query boundaries/audit and genuine database/browser validation). No Agent, stage-2 migrations, business-flow tasks, renamed single-report tasks, pure audit/tests/screenshots/control-plane tasks or optional features to inflate queue. Do not restore ERP-257/258 or completed ERP-190/256. No stage transitions without real acceptance. Inspect .ai/logs/report-stage1-browser*, report-platform* and newest test logs.
+Current stage is selected by the validated persisted gate, and included below. Stage 1: generic configurable reporting and genuine isolated SQL/browser acceptance. Stage 2 only after stage1 proof: inventory ALL fixed and dynamic reports including exports/packets/document and financial statements, migrate them as preset templates and controlled datasets/metrics in the generic platform. Compare original data semantics, currency/units, permissions and Excel/PDF compatibility for every entry before changing old routes. Never treat the 18 dynamic reports as complete coverage. Functional increments may build a reusable migration registry/catalog, controlled adapters and preset template orchestration; do not create individual-report dedicated controllers/designers/exporters or audit-only inventory tasks. Keep legacy entries until ALL migration parity passes. Do not develop business flows or Agent in stage2. No renamed dedicated report, pure audit/tests/screenshots/control-plane task or optional filler. Do not restore ERP-257/258 or completed ERP-190/256. Read .ai/evidence/report-platform-stage1-acceptance.json and supporting hashed evidence; no transition based only on build.
 Find concrete code defects/remaining functional gaps. Test-only fixtures and acceptance-only work are not queue increments, even when test projects live under src/. If only genuine acceptance remains, return no tasks and provide exact isolated fixture actions for the acceptance runner. Deduplicate ALL tasks, including completed/deferred/failed. Propose enough verified increments for queue target 4, using request below. If features are genuinely implemented, return no tasks and exact remaining acceptance blocker plus concrete next fixture/test actions; never invent completion or repeat generic no-candidate wording.
-Each task: title, description, acceptance_criteria array, allowed_paths exact relative files (existing parents), criterion_path_map mapping EVERY exact acceptance string to all required layers/files, depends_on EXISTING task IDs, risk low/medium, planning_stage 1, implementation_evidence exact code locations proving gap. Include required Domain/Application/Infrastructure/Api and old regression tests; no missing permissions. No arbitrary SQL, production operations/deploy, secrets/env changes, permission expansion, unrelated code. Only explicitly authorized minimal SchemaUpgrader development repair may touch protected source. IDs/defaults/publication handled by guarded publisher.
-Request: """+json.dumps(request)
+Each task: title, description, acceptance_criteria array, allowed_paths exact relative files (existing parents), criterion_path_map mapping EVERY exact acceptance string to all required layers/files, depends_on EXISTING task IDs, risk low/medium, planning_stage matching Current stage, implementation_evidence exact code locations proving gap. Include required Domain/Application/Infrastructure/Api and old regression tests; no missing permissions. No arbitrary SQL, production operations/deploy, secrets/env changes, permission expansion, unrelated code. Only explicitly authorized minimal SchemaUpgrader development repair may touch protected source. IDs/defaults/publication handled by guarded publisher.
+Current stage: """+str(stage)+"\nRequest: "+json.dumps(request)
     before=fingerprint(p)
     try:
         command=[p.resolve_cline_command(config['cline_command']),'--json','--auto-approve','true','--provider',os.environ.get('AI_CLINE_PROVIDER','deepseek'),'--model',os.environ.get('AI_CLINE_MODEL','deepseek-v4-pro'),'--cwd',str(p.ROOT),'--timeout',str(config['cline_timeout_seconds']),prompt]
