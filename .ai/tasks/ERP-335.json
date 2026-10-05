@@ -1,0 +1,73 @@
+{
+  "id": "ERP-335",
+  "title": "Read shared header detail compositions within one bounded consistent read scope",
+  "description": "Stage 2 reusable platform migration only. No standalone report, arbitrary SQL/joins, production database/deployment, secret/config edits or permission expansion; preserve concurrent work, all old routes and four-stage order. ComposePreviewCoreAsync issues two independent PreviewAsync reads. Truncation rejection does not prevent changing source between header/detail reads. Add a reusable IReportConfigurationCompositionReadScopeFactory and relational implementation on the existing scoped context. Acquire an explicit supported read transaction or consistent snapshot spanning both finite registered reads plus final authorization recheck, using existing lease/cancellation/bounds and deterministic disposal. Unsupported backend/isolation fails closed rather than silently reverting. Do not create schema/database or expand write/business permissions. Verify actual guarded SQL concurrency: an owned synthetic record changes between reads and output is consistent or explicitly rejected, never a mixed header/line result. Include permission revocation and idempotent fixture cleanup.",
+  "implementation_evidence": "ComposePreviewCoreAsync issues two independent PreviewAsync reads. Truncation rejection does not prevent changing source between header/detail reads. Add a reusable IReportConfigurationCompositionReadScopeFactory and relational implementation on the existing scoped context. Acquire an explicit supported read transaction or consistent snapshot spanning both finite registered reads plus final authorization recheck, using existing lease/cancellation/bounds and deterministic disposal. Unsupported backend/isolation fails closed rather than silently reverting. Do not create schema/database or expand write/business permissions. Verify actual guarded SQL concurrency: an owned synthetic record changes between reads and output is consistent or explicitly rejected, never a mixed header/line result. Include permission revocation and idempotent fixture cleanup.",
+  "depends_on": [
+    "ERP-316",
+    "ERP-318",
+    "ERP-332"
+  ],
+  "allowed_paths": [
+    "src/ERP.Application/Interfaces/IReportConfigurationCompositionReadScopeFactory.cs",
+    "src/ERP.Application/Services/ReportConfigurationBundleService.cs",
+    "src/ERP.Infrastructure/Reports/ReportConfigurationCompositionReadScopeFactory.cs",
+    "src/ERP.Infrastructure/DependencyInjection.cs",
+    "src/ERP.UnitTests/ReportConfigurationCompositionConsistencyTests.cs",
+    "src/ERP.UnitTests/ReportConfigurationBundleCompositionTests.cs",
+    "src/ERP.IntegrationTests/ReportConfigurationCompositionConsistencySqlServerTests.cs"
+  ],
+  "acceptance_criteria": [
+    "ComposePreviewCoreAsync issues two independent PreviewAsync reads. Truncation rejection does not prevent changing source between header/detail reads. Add a reusable IReportConfigurationCompositionReadScopeFactory and relational implementation on the existing scoped context. Acquire an explicit supported read transaction or consistent snapshot spanning both finite registered reads plus final authorization recheck, using existing lease/cancellation/bounds and deterministic disposal. Unsupported backend/isolation fails closed rather than silently reverting. Do not create schema/database or expand write/business permissions. Verify actual guarded SQL concurrency: an owned synthetic record changes between reads and output is consistent or explicitly rejected, never a mixed header/line result. Include permission revocation and idempotent fixture cleanup.",
+    "Real executable tests cover matched and divergent results, missing source evidence, menu/column/data-scope revocation, raw null versus zero and segregated original currency/unit; actual SQL fixtures are guarded by dedicated LocalDB NEWERP_AutoAcceptance plus NEWERP_AUTOTEST_* database and integrated security. No fabricated environment pass.",
+    "Related existing API/provider/export tests and safe Release build/test pass with pipeline self-test and automation contracts. Preserve audit correlation and unrelated users/configurations. All-family migration and browser validation still required before route retirement."
+  ],
+  "criterion_path_map": {
+    "ComposePreviewCoreAsync issues two independent PreviewAsync reads. Truncation rejection does not prevent changing source between header/detail reads. Add a reusable IReportConfigurationCompositionReadScopeFactory and relational implementation on the existing scoped context. Acquire an explicit supported read transaction or consistent snapshot spanning both finite registered reads plus final authorization recheck, using existing lease/cancellation/bounds and deterministic disposal. Unsupported backend/isolation fails closed rather than silently reverting. Do not create schema/database or expand write/business permissions. Verify actual guarded SQL concurrency: an owned synthetic record changes between reads and output is consistent or explicitly rejected, never a mixed header/line result. Include permission revocation and idempotent fixture cleanup.": [
+      "src/ERP.Application/Interfaces/IReportConfigurationCompositionReadScopeFactory.cs",
+      "src/ERP.Application/Services/ReportConfigurationBundleService.cs",
+      "src/ERP.Infrastructure/Reports/ReportConfigurationCompositionReadScopeFactory.cs",
+      "src/ERP.Infrastructure/DependencyInjection.cs",
+      "src/ERP.UnitTests/ReportConfigurationCompositionConsistencyTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationBundleCompositionTests.cs",
+      "src/ERP.IntegrationTests/ReportConfigurationCompositionConsistencySqlServerTests.cs"
+    ],
+    "Real executable tests cover matched and divergent results, missing source evidence, menu/column/data-scope revocation, raw null versus zero and segregated original currency/unit; actual SQL fixtures are guarded by dedicated LocalDB NEWERP_AutoAcceptance plus NEWERP_AUTOTEST_* database and integrated security. No fabricated environment pass.": [
+      "src/ERP.Application/Interfaces/IReportConfigurationCompositionReadScopeFactory.cs",
+      "src/ERP.Application/Services/ReportConfigurationBundleService.cs",
+      "src/ERP.Infrastructure/Reports/ReportConfigurationCompositionReadScopeFactory.cs",
+      "src/ERP.Infrastructure/DependencyInjection.cs",
+      "src/ERP.UnitTests/ReportConfigurationCompositionConsistencyTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationBundleCompositionTests.cs",
+      "src/ERP.IntegrationTests/ReportConfigurationCompositionConsistencySqlServerTests.cs"
+    ],
+    "Related existing API/provider/export tests and safe Release build/test pass with pipeline self-test and automation contracts. Preserve audit correlation and unrelated users/configurations. All-family migration and browser validation still required before route retirement.": [
+      "src/ERP.Application/Interfaces/IReportConfigurationCompositionReadScopeFactory.cs",
+      "src/ERP.Application/Services/ReportConfigurationBundleService.cs",
+      "src/ERP.Infrastructure/Reports/ReportConfigurationCompositionReadScopeFactory.cs",
+      "src/ERP.Infrastructure/DependencyInjection.cs",
+      "src/ERP.UnitTests/ReportConfigurationCompositionConsistencyTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationBundleCompositionTests.cs",
+      "src/ERP.IntegrationTests/ReportConfigurationCompositionConsistencySqlServerTests.cs"
+    ]
+  },
+  "planning_stage": 2,
+  "risk": "medium",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-05T10:53:35.478193+00:00"
+}

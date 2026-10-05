@@ -1,0 +1,92 @@
+{
+  "id": "ERP-334",
+  "title": "Complete canonical master and sales print snapshot seams in the finite shared legacy registry",
+  "description": "Stage 2 reusable platform migration only. No standalone report, arbitrary SQL/joins, production database/deployment, secret/config edits or permission expansion; preserve concurrent work, all old routes and four-stage order. ERP330 RegisterPrintTemplateFamilies only binds bill families and doc-center; existing master-data and quotation/PI print families remain unavailable. Add one reusable finite canonical print snapshot reader covering registered master and sales families and base-data I/O sources. Reuse or extract actual BaseDataIoController/BaseDataControllers and QuotationController/GetPrint, ProformaInvoiceController/GetPrint logic with fresh current-user menu, column and salesperson/customer scope checks; retain old routes and response semantics. Do not call generic dataset providers as the old side or invent business calculations. Exact original header/detail identities, stable SortNo/Id order, null, currency/unit, raw amounts and empty documents are preserved. Unknown/deleted/inaccessible sources fail closed under execution bounds/cancellation and audit correlation.",
+  "implementation_evidence": "ERP330 RegisterPrintTemplateFamilies only binds bill families and doc-center; existing master-data and quotation/PI print families remain unavailable. Add one reusable finite canonical print snapshot reader covering registered master and sales families and base-data I/O sources. Reuse or extract actual BaseDataIoController/BaseDataControllers and QuotationController/GetPrint, ProformaInvoiceController/GetPrint logic with fresh current-user menu, column and salesperson/customer scope checks; retain old routes and response semantics. Do not call generic dataset providers as the old side or invent business calculations. Exact original header/detail identities, stable SortNo/Id order, null, currency/unit, raw amounts and empty documents are preserved. Unknown/deleted/inaccessible sources fail closed under execution bounds/cancellation and audit correlation.",
+  "depends_on": [
+    "ERP-330",
+    "ERP-332"
+  ],
+  "allowed_paths": [
+    "src/ERP.Application/DTOs/LegacyPrintSnapshotDtos.cs",
+    "src/ERP.Application/Interfaces/ILegacyPrintSnapshotReadService.cs",
+    "src/ERP.Infrastructure/Reports/LegacyPrintSnapshotReadService.cs",
+    "src/ERP.Infrastructure/Reports/LegacyReportSourceRegistry.cs",
+    "src/ERP.Infrastructure/DependencyInjection.cs",
+    "src/ERP.Api/Controllers/BaseDataIoController.cs",
+    "src/ERP.Api/Controllers/BaseDataControllers.cs",
+    "src/ERP.Api/Controllers/QuotationController.cs",
+    "src/ERP.Api/Controllers/ProformaInvoiceController.cs",
+    "src/ERP.UnitTests/LegacyPrintSnapshotSourceTests.cs",
+    "src/ERP.UnitTests/LegacyReportSourceRegistryTests.cs",
+    "src/ERP.IntegrationTests/LegacyPrintSnapshotSqlServerTests.cs"
+  ],
+  "acceptance_criteria": [
+    "ERP330 RegisterPrintTemplateFamilies only binds bill families and doc-center; existing master-data and quotation/PI print families remain unavailable. Add one reusable finite canonical print snapshot reader covering registered master and sales families and base-data I/O sources. Reuse or extract actual BaseDataIoController/BaseDataControllers and QuotationController/GetPrint, ProformaInvoiceController/GetPrint logic with fresh current-user menu, column and salesperson/customer scope checks; retain old routes and response semantics. Do not call generic dataset providers as the old side or invent business calculations. Exact original header/detail identities, stable SortNo/Id order, null, currency/unit, raw amounts and empty documents are preserved. Unknown/deleted/inaccessible sources fail closed under execution bounds/cancellation and audit correlation.",
+    "Real executable tests cover matched and divergent results, missing source evidence, menu/column/data-scope revocation, raw null versus zero and segregated original currency/unit; actual SQL fixtures are guarded by dedicated LocalDB NEWERP_AutoAcceptance plus NEWERP_AUTOTEST_* database and integrated security. No fabricated environment pass.",
+    "Related existing API/provider/export tests and safe Release build/test pass with pipeline self-test and automation contracts. Preserve audit correlation and unrelated users/configurations. All-family migration and browser validation still required before route retirement."
+  ],
+  "criterion_path_map": {
+    "ERP330 RegisterPrintTemplateFamilies only binds bill families and doc-center; existing master-data and quotation/PI print families remain unavailable. Add one reusable finite canonical print snapshot reader covering registered master and sales families and base-data I/O sources. Reuse or extract actual BaseDataIoController/BaseDataControllers and QuotationController/GetPrint, ProformaInvoiceController/GetPrint logic with fresh current-user menu, column and salesperson/customer scope checks; retain old routes and response semantics. Do not call generic dataset providers as the old side or invent business calculations. Exact original header/detail identities, stable SortNo/Id order, null, currency/unit, raw amounts and empty documents are preserved. Unknown/deleted/inaccessible sources fail closed under execution bounds/cancellation and audit correlation.": [
+      "src/ERP.Application/DTOs/LegacyPrintSnapshotDtos.cs",
+      "src/ERP.Application/Interfaces/ILegacyPrintSnapshotReadService.cs",
+      "src/ERP.Infrastructure/Reports/LegacyPrintSnapshotReadService.cs",
+      "src/ERP.Infrastructure/Reports/LegacyReportSourceRegistry.cs",
+      "src/ERP.Infrastructure/DependencyInjection.cs",
+      "src/ERP.Api/Controllers/BaseDataIoController.cs",
+      "src/ERP.Api/Controllers/BaseDataControllers.cs",
+      "src/ERP.Api/Controllers/QuotationController.cs",
+      "src/ERP.Api/Controllers/ProformaInvoiceController.cs",
+      "src/ERP.UnitTests/LegacyPrintSnapshotSourceTests.cs",
+      "src/ERP.UnitTests/LegacyReportSourceRegistryTests.cs",
+      "src/ERP.IntegrationTests/LegacyPrintSnapshotSqlServerTests.cs"
+    ],
+    "Real executable tests cover matched and divergent results, missing source evidence, menu/column/data-scope revocation, raw null versus zero and segregated original currency/unit; actual SQL fixtures are guarded by dedicated LocalDB NEWERP_AutoAcceptance plus NEWERP_AUTOTEST_* database and integrated security. No fabricated environment pass.": [
+      "src/ERP.Application/DTOs/LegacyPrintSnapshotDtos.cs",
+      "src/ERP.Application/Interfaces/ILegacyPrintSnapshotReadService.cs",
+      "src/ERP.Infrastructure/Reports/LegacyPrintSnapshotReadService.cs",
+      "src/ERP.Infrastructure/Reports/LegacyReportSourceRegistry.cs",
+      "src/ERP.Infrastructure/DependencyInjection.cs",
+      "src/ERP.Api/Controllers/BaseDataIoController.cs",
+      "src/ERP.Api/Controllers/BaseDataControllers.cs",
+      "src/ERP.Api/Controllers/QuotationController.cs",
+      "src/ERP.Api/Controllers/ProformaInvoiceController.cs",
+      "src/ERP.UnitTests/LegacyPrintSnapshotSourceTests.cs",
+      "src/ERP.UnitTests/LegacyReportSourceRegistryTests.cs",
+      "src/ERP.IntegrationTests/LegacyPrintSnapshotSqlServerTests.cs"
+    ],
+    "Related existing API/provider/export tests and safe Release build/test pass with pipeline self-test and automation contracts. Preserve audit correlation and unrelated users/configurations. All-family migration and browser validation still required before route retirement.": [
+      "src/ERP.Application/DTOs/LegacyPrintSnapshotDtos.cs",
+      "src/ERP.Application/Interfaces/ILegacyPrintSnapshotReadService.cs",
+      "src/ERP.Infrastructure/Reports/LegacyPrintSnapshotReadService.cs",
+      "src/ERP.Infrastructure/Reports/LegacyReportSourceRegistry.cs",
+      "src/ERP.Infrastructure/DependencyInjection.cs",
+      "src/ERP.Api/Controllers/BaseDataIoController.cs",
+      "src/ERP.Api/Controllers/BaseDataControllers.cs",
+      "src/ERP.Api/Controllers/QuotationController.cs",
+      "src/ERP.Api/Controllers/ProformaInvoiceController.cs",
+      "src/ERP.UnitTests/LegacyPrintSnapshotSourceTests.cs",
+      "src/ERP.UnitTests/LegacyReportSourceRegistryTests.cs",
+      "src/ERP.IntegrationTests/LegacyPrintSnapshotSqlServerTests.cs"
+    ]
+  },
+  "planning_stage": 2,
+  "risk": "medium",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-05T10:53:35.477282+00:00"
+}

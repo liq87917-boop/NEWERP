@@ -1,0 +1,88 @@
+{
+  "id": "ERP-333",
+  "title": "Compare actual canonical legacy and generic artifacts in the shared parity pipeline",
+  "description": "Stage 2 reusable platform migration only. No standalone report, arbitrary SQL/joins, production database/deployment, secret/config edits or permission expansion; preserve concurrent work, all old routes and four-stage order. ERP331 only renders generic bytes and compares legacy input snapshots, so equal inputs can incorrectly pass output parity without any old artifact. Implement a bounded finite ILegacyReportArtifactSource and typed artifact DTO using existing canonical exporters. Decode actual old and generic Excel/PDF bytes and compare ordered headers, typed/null cells, formula-safe labels, original currency/unit labels and supported layout semantics. Never use the generic exporter as old exporter or a caller proof boolean. Missing legacy bytes/exporter/font, malformed or oversized output and unextractable formats fail closed. Wire actual artifact comparison into the existing evidence service, retain declared unsupported formats and all old routes.",
+  "implementation_evidence": "ERP331 only renders generic bytes and compares legacy input snapshots, so equal inputs can incorrectly pass output parity without any old artifact. Implement a bounded finite ILegacyReportArtifactSource and typed artifact DTO using existing canonical exporters. Decode actual old and generic Excel/PDF bytes and compare ordered headers, typed/null cells, formula-safe labels, original currency/unit labels and supported layout semantics. Never use the generic exporter as old exporter or a caller proof boolean. Missing legacy bytes/exporter/font, malformed or oversized output and unextractable formats fail closed. Wire actual artifact comparison into the existing evidence service, retain declared unsupported formats and all old routes.",
+  "depends_on": [
+    "ERP-331",
+    "ERP-332"
+  ],
+  "allowed_paths": [
+    "src/ERP.Application/DTOs/ReportMigrationArtifactDtos.cs",
+    "src/ERP.Application/Interfaces/ILegacyReportArtifactSource.cs",
+    "src/ERP.Application/Interfaces/IReportMigrationOutputComparator.cs",
+    "src/ERP.Infrastructure/Export/LegacyReportArtifactSource.cs",
+    "src/ERP.Infrastructure/Export/ReportMigrationOutputSemanticsComparator.cs",
+    "src/ERP.Infrastructure/ERP.Infrastructure.csproj",
+    "src/ERP.Infrastructure/DependencyInjection.cs",
+    "src/ERP.Application/Services/ReportMigrationParityEvidenceService.cs",
+    "src/ERP.UnitTests/ReportMigrationArtifactParityTests.cs",
+    "src/ERP.UnitTests/ReportMigrationOutputSemanticsComparatorTests.cs",
+    "src/ERP.IntegrationTests/ReportMigrationArtifactParitySqlServerTests.cs"
+  ],
+  "acceptance_criteria": [
+    "ERP331 only renders generic bytes and compares legacy input snapshots, so equal inputs can incorrectly pass output parity without any old artifact. Implement a bounded finite ILegacyReportArtifactSource and typed artifact DTO using existing canonical exporters. Decode actual old and generic Excel/PDF bytes and compare ordered headers, typed/null cells, formula-safe labels, original currency/unit labels and supported layout semantics. Never use the generic exporter as old exporter or a caller proof boolean. Missing legacy bytes/exporter/font, malformed or oversized output and unextractable formats fail closed. Wire actual artifact comparison into the existing evidence service, retain declared unsupported formats and all old routes.",
+    "Real executable tests cover matched and divergent results, missing source evidence, menu/column/data-scope revocation, raw null versus zero and segregated original currency/unit; actual SQL fixtures are guarded by dedicated LocalDB NEWERP_AutoAcceptance plus NEWERP_AUTOTEST_* database and integrated security. No fabricated environment pass.",
+    "Related existing API/provider/export tests and safe Release build/test pass with pipeline self-test and automation contracts. Preserve audit correlation and unrelated users/configurations. All-family migration and browser validation still required before route retirement."
+  ],
+  "criterion_path_map": {
+    "ERP331 only renders generic bytes and compares legacy input snapshots, so equal inputs can incorrectly pass output parity without any old artifact. Implement a bounded finite ILegacyReportArtifactSource and typed artifact DTO using existing canonical exporters. Decode actual old and generic Excel/PDF bytes and compare ordered headers, typed/null cells, formula-safe labels, original currency/unit labels and supported layout semantics. Never use the generic exporter as old exporter or a caller proof boolean. Missing legacy bytes/exporter/font, malformed or oversized output and unextractable formats fail closed. Wire actual artifact comparison into the existing evidence service, retain declared unsupported formats and all old routes.": [
+      "src/ERP.Application/DTOs/ReportMigrationArtifactDtos.cs",
+      "src/ERP.Application/Interfaces/ILegacyReportArtifactSource.cs",
+      "src/ERP.Application/Interfaces/IReportMigrationOutputComparator.cs",
+      "src/ERP.Infrastructure/Export/LegacyReportArtifactSource.cs",
+      "src/ERP.Infrastructure/Export/ReportMigrationOutputSemanticsComparator.cs",
+      "src/ERP.Infrastructure/ERP.Infrastructure.csproj",
+      "src/ERP.Infrastructure/DependencyInjection.cs",
+      "src/ERP.Application/Services/ReportMigrationParityEvidenceService.cs",
+      "src/ERP.UnitTests/ReportMigrationArtifactParityTests.cs",
+      "src/ERP.UnitTests/ReportMigrationOutputSemanticsComparatorTests.cs",
+      "src/ERP.IntegrationTests/ReportMigrationArtifactParitySqlServerTests.cs"
+    ],
+    "Real executable tests cover matched and divergent results, missing source evidence, menu/column/data-scope revocation, raw null versus zero and segregated original currency/unit; actual SQL fixtures are guarded by dedicated LocalDB NEWERP_AutoAcceptance plus NEWERP_AUTOTEST_* database and integrated security. No fabricated environment pass.": [
+      "src/ERP.Application/DTOs/ReportMigrationArtifactDtos.cs",
+      "src/ERP.Application/Interfaces/ILegacyReportArtifactSource.cs",
+      "src/ERP.Application/Interfaces/IReportMigrationOutputComparator.cs",
+      "src/ERP.Infrastructure/Export/LegacyReportArtifactSource.cs",
+      "src/ERP.Infrastructure/Export/ReportMigrationOutputSemanticsComparator.cs",
+      "src/ERP.Infrastructure/ERP.Infrastructure.csproj",
+      "src/ERP.Infrastructure/DependencyInjection.cs",
+      "src/ERP.Application/Services/ReportMigrationParityEvidenceService.cs",
+      "src/ERP.UnitTests/ReportMigrationArtifactParityTests.cs",
+      "src/ERP.UnitTests/ReportMigrationOutputSemanticsComparatorTests.cs",
+      "src/ERP.IntegrationTests/ReportMigrationArtifactParitySqlServerTests.cs"
+    ],
+    "Related existing API/provider/export tests and safe Release build/test pass with pipeline self-test and automation contracts. Preserve audit correlation and unrelated users/configurations. All-family migration and browser validation still required before route retirement.": [
+      "src/ERP.Application/DTOs/ReportMigrationArtifactDtos.cs",
+      "src/ERP.Application/Interfaces/ILegacyReportArtifactSource.cs",
+      "src/ERP.Application/Interfaces/IReportMigrationOutputComparator.cs",
+      "src/ERP.Infrastructure/Export/LegacyReportArtifactSource.cs",
+      "src/ERP.Infrastructure/Export/ReportMigrationOutputSemanticsComparator.cs",
+      "src/ERP.Infrastructure/ERP.Infrastructure.csproj",
+      "src/ERP.Infrastructure/DependencyInjection.cs",
+      "src/ERP.Application/Services/ReportMigrationParityEvidenceService.cs",
+      "src/ERP.UnitTests/ReportMigrationArtifactParityTests.cs",
+      "src/ERP.UnitTests/ReportMigrationOutputSemanticsComparatorTests.cs",
+      "src/ERP.IntegrationTests/ReportMigrationArtifactParitySqlServerTests.cs"
+    ]
+  },
+  "planning_stage": 2,
+  "risk": "medium",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-05T10:53:35.476344+00:00"
+}
