@@ -1,0 +1,55 @@
+{
+  "title": "Add the doc-center print-template migration preset so its registry entry leaves dataset-ready",
+  "description": "Stage 2 registry gap: the 'print-template:doc-center' registry entry (DatasetKey 'trade-document', Supported=true) reaches only dataset-ready because ReportConfigurationPresetManifest.Presets has no preset keyed to 'print-template:doc-center' — the trade-document presets are keyed 'document:trade-document-print' and 'document:trade-document-export-excel' only (ReportConfigurationPresetCatalog.cs:279-289). ReportMigrationPresetCatalog.HasPresetAsync matches strictly by LegacyKey (ReportConfigurationPresetCatalog.cs:865-872), so the doc-center print-template entry can never reach preset-ready/parity-passed and keeps the legacy doc-center print route from retiring. Add a preset keyed 'print-template:doc-center' with DatasetKey 'trade-document' reusing the existing TradeDocumentPrintPresetDefinition(), preserving fail-closed behavior (never parity-passed without four-dimension evidence). No new controller/designer/exporter, no arbitrary SQL, no schema/seed/migration changes, no secrets/env, no permission expansion; only the preset manifest plus regression tests. Not audit-only: it unblocks correct parity derivation for the migrated doc-center print-template entry.",
+  "acceptance_criteria": [
+    "ReportConfigurationPresetManifest.Presets contains a preset with LegacyKey 'print-template:doc-center' and DatasetKey 'trade-document' reusing the existing trade-document print definition, so HasPresetAsync('print-template:doc-center') returns true.",
+    "The 'print-template:doc-center' registry entry advances from dataset-ready to preset-ready when its doc-center menu authorization and the trade-document dataset are present, never reaches parity-passed without complete four-dimension evidence, and existing 'document:trade-document-print' / 'document:trade-document-export-excel' presets and parity derivation remain unchanged and fail-closed.",
+    "Add/update executable unit coverage asserting the doc-center print-template preset is registered and the entry reaches preset-ready, with no regression in the existing print-template and document-quality migration tests. Run related tests plus the safe Release build/unit suite and scheduler self-test/contracts."
+  ],
+  "allowed_paths": [
+    "src/ERP.Application/Services/ReportConfigurationPresetCatalog.cs",
+    "src/ERP.UnitTests/ReportConfigurationPrintTemplateCatalogTests.cs",
+    "src/ERP.UnitTests/ReportConfigurationDocumentQualityMigrationTests.cs"
+  ],
+  "criterion_path_map": {
+    "ReportConfigurationPresetManifest.Presets contains a preset with LegacyKey 'print-template:doc-center' and DatasetKey 'trade-document' reusing the existing trade-document print definition, so HasPresetAsync('print-template:doc-center') returns true.": [
+      "src/ERP.Application/Services/ReportConfigurationPresetCatalog.cs",
+      "src/ERP.UnitTests/ReportConfigurationPrintTemplateCatalogTests.cs"
+    ],
+    "The 'print-template:doc-center' registry entry advances from dataset-ready to preset-ready when its doc-center menu authorization and the trade-document dataset are present, never reaches parity-passed without complete four-dimension evidence, and existing 'document:trade-document-print' / 'document:trade-document-export-excel' presets and parity derivation remain unchanged and fail-closed.": [
+      "src/ERP.Application/Services/ReportConfigurationPresetCatalog.cs",
+      "src/ERP.UnitTests/ReportConfigurationPrintTemplateCatalogTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationDocumentQualityMigrationTests.cs"
+    ],
+    "Add/update executable unit coverage asserting the doc-center print-template preset is registered and the entry reaches preset-ready, with no regression in the existing print-template and document-quality migration tests. Run related tests plus the safe Release build/unit suite and scheduler self-test/contracts.": [
+      "src/ERP.UnitTests/ReportConfigurationPrintTemplateCatalogTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationDocumentQualityMigrationTests.cs",
+      "src/ERP.Application/Services/ReportConfigurationPresetCatalog.cs"
+    ]
+  },
+  "depends_on": [
+    "ERP-306",
+    "ERP-312"
+  ],
+  "risk": "low",
+  "planning_stage": 2,
+  "implementation_evidence": "src/ERP.Application/Services/ReportConfigurationPrintTemplateCatalog.cs:112-120 adds doc-center with Supported=true and DatasetKey=ReportConfigurationConstants.DatasetTradeDocument; :37-49 derives LegacyKey 'print-template:doc-center'. src/ERP.Application/Services/ReportConfigurationPresetCatalog.cs:279-289 registers trade-document presets only under 'document:trade-document-print'/'document:trade-document-export-excel', never 'print-template:doc-center', so ReportMigrationPresetCatalog.HasPresetAsync (ReportConfigurationPresetCatalog.cs:865-872) returns false for 'print-template:doc-center'. src/ERP.UnitTests/ReportConfigurationPrintTemplateCatalogTests.cs:696-705 exercises the print-template registry entries without any doc-center preset, leaving the entry at dataset-ready.",
+  "id": "ERP-328",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-05T09:32:54.286695Z"
+}

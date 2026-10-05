@@ -1,0 +1,55 @@
+{
+  "title": "Add print-template migration presets for the 16 legacy bill-export families so their registry entries leave dataset-ready",
+  "description": "Stage 2 registry gap: the 16 print-template registry entries for the legacy bill-export families (LegacyKey 'print-template:{familyKey}', DatasetKey 'bill-export:{familyKey}') reach only dataset-ready because ReportConfigurationPresetManifest.Presets has no preset keyed to their 'print-template:{familyKey}' LegacyKeys — the bill-export presets are keyed 'export:bill-proc:{familyKey}' instead (ReportConfigurationPresetCatalog.cs:291-323). ReportMigrationPresetCatalog.HasPresetAsync matches strictly by LegacyKey (ReportConfigurationPresetCatalog.cs:865-872), so those 16 entries can never advance to preset-ready/parity-passed and CanRetireLegacyRoutes stays permanently false for the print-template dimension. Add one preset per LegacyBillExportCatalog.Families entry reusing the existing BillExportPresetDefinition(familyKey), keyed 'print-template:{familyKey}' with DatasetKey equal to the family's bill-export dataset key, so the 16 entries reach preset-ready; preserve fail-closed behavior (never parity-passed without four-dimension evidence). No new controller/designer/exporter, no arbitrary SQL, no schema/seed/migration changes, no secrets/env, no permission expansion; only the preset manifest plus regression tests. Not audit-only: it unblocks correct parity derivation for 16 genuinely migrated print-template entries.",
+  "acceptance_criteria": [
+    "ReportConfigurationPresetManifest.Presets contains a preset for each of the 16 LegacyBillExportCatalog.Families with LegacyKey 'print-template:{familyKey}', DatasetKey equal to the family's bill-export dataset key, and a definition reusing BillExportPresetDefinition(familyKey), so HasPresetAsync('print-template:{familyKey}') returns true for all 16 families.",
+    "The 16 'print-template:{familyKey}' registry entries advance from dataset-ready to preset-ready when their dataset and menu authorization are present, never reach parity-passed without complete four-dimension evidence, and existing 'export:bill-proc:{familyKey}' presets plus single-dataset parity derivation remain unchanged and fail-closed.",
+    "Add/update executable unit coverage asserting all 16 print-template bill-family presets are registered and the corresponding entries reach preset-ready, with no regression in the existing print-template and legacy bill-export migration tests. Run related tests plus the safe Release build/unit suite and scheduler self-test/contracts."
+  ],
+  "allowed_paths": [
+    "src/ERP.Application/Services/ReportConfigurationPresetCatalog.cs",
+    "src/ERP.UnitTests/ReportConfigurationPrintTemplateCatalogTests.cs",
+    "src/ERP.UnitTests/ReportConfigurationLegacyBillMigrationTests.cs"
+  ],
+  "criterion_path_map": {
+    "ReportConfigurationPresetManifest.Presets contains a preset for each of the 16 LegacyBillExportCatalog.Families with LegacyKey 'print-template:{familyKey}', DatasetKey equal to the family's bill-export dataset key, and a definition reusing BillExportPresetDefinition(familyKey), so HasPresetAsync('print-template:{familyKey}') returns true for all 16 families.": [
+      "src/ERP.Application/Services/ReportConfigurationPresetCatalog.cs",
+      "src/ERP.UnitTests/ReportConfigurationPrintTemplateCatalogTests.cs"
+    ],
+    "The 16 'print-template:{familyKey}' registry entries advance from dataset-ready to preset-ready when their dataset and menu authorization are present, never reach parity-passed without complete four-dimension evidence, and existing 'export:bill-proc:{familyKey}' presets plus single-dataset parity derivation remain unchanged and fail-closed.": [
+      "src/ERP.Application/Services/ReportConfigurationPresetCatalog.cs",
+      "src/ERP.UnitTests/ReportConfigurationPrintTemplateCatalogTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationLegacyBillMigrationTests.cs"
+    ],
+    "Add/update executable unit coverage asserting all 16 print-template bill-family presets are registered and the corresponding entries reach preset-ready, with no regression in the existing print-template and legacy bill-export migration tests. Run related tests plus the safe Release build/unit suite and scheduler self-test/contracts.": [
+      "src/ERP.UnitTests/ReportConfigurationPrintTemplateCatalogTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationLegacyBillMigrationTests.cs",
+      "src/ERP.Application/Services/ReportConfigurationPresetCatalog.cs"
+    ]
+  },
+  "depends_on": [
+    "ERP-308",
+    "ERP-312"
+  ],
+  "risk": "medium",
+  "planning_stage": 2,
+  "implementation_evidence": "src/ERP.Application/Services/ReportConfigurationPrintTemplateCatalog.cs:88-99 adds the 16 LegacyBillExportCatalog families with Supported=true and DatasetKey=bill.DatasetKey; :37-49 derives LegacyKey 'print-template:'+f.FamilyKey. src/ERP.Application/Services/ReportConfigurationPresetCatalog.cs:291-323 registers bill-export presets only under LegacyKey 'export:bill-proc:{familyKey}', and :324-362 registers print-template presets only for the 7 master + 2 sales-document families, so ReportMigrationPresetCatalog.HasPresetAsync (ReportConfigurationPresetCatalog.cs:865-872, strict OrdinalIgnoreCase LegacyKey match) returns false for every 'print-template:{billFamilyKey}'. src/ERP.UnitTests/ReportConfigurationPrintTemplateCatalogTests.cs:696-699 asserts print-template:sales-order stays DatasetReady, proving the missing preset.",
+  "id": "ERP-327",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-05T09:32:54.285369Z"
+}
