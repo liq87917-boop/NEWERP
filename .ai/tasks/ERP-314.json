@@ -1,0 +1,72 @@
+{
+  "title": "Bind finite typed runtime parameters to reusable single-section migration presets",
+  "description": "Users reproduce legacy date/customer/status report requests through the generic preset workspace rather than manually editing saved filters. Stage 2 only. Shared generic reporting capability, not a dedicated business report. Preserve existing legacy routes until full migration acceptance. Recheck current-user menu, row and column scope; no arbitrary SQL/joins, new schema, permission expansion, production or protected files. Preserve concurrent work and truthful environment limitations.",
+  "allowed_paths": [
+    "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
+    "src/ERP.Application/Interfaces/IReportConfigurationPresetCatalog.cs",
+    "src/ERP.Application/Services/ReportConfigurationPresetCatalog.cs",
+    "src/ERP.Api/Controllers/ReportConfigurationsController.cs",
+    "src/ERP.Api/wwwroot/js/report-configuration.js",
+    "src/ERP.UnitTests/ReportConfigurationPresetParameterTests.cs",
+    "src/ERP.IntegrationTests/ReportConfigurationPresetParameterSqlServerTests.cs"
+  ],
+  "acceptance_criteria": [
+    "Expose finite parameter metadata and a typed materialization request for existing single-section presets. Bind only declared authorized customer/date/status fields; maintain the original no-parameter API compatibility and immutable template definitions. Validate both endpoints, inverted/out-of-range dates, unknown or unsupported parameters and revoked fields before any draft creation; preserve conjunctive filters.",
+    "Reproduce supported legacy start/end and customer/status restrictions for multiple preset families using authoritative existing dataset field semantics, including documented date inclusivity and business timezone. Reject a family whose required original parameter cannot be represented rather than silently omitting it. Persist private drafts through the existing service; no parity-passed based on readiness alone.",
+    "Provide generic workspace parameter controls with explicit validation errors, cancellation and existing audit outcomes. Verify at least two families with nonempty isolated SQL rows on date boundaries and current-user scope, no-parameter compatibility, no mutation on invalid input, and Excel/PDF result equivalence for the parameterized definition. Run focused tests and safe Release suite."
+  ],
+  "criterion_path_map": {
+    "Expose finite parameter metadata and a typed materialization request for existing single-section presets. Bind only declared authorized customer/date/status fields; maintain the original no-parameter API compatibility and immutable template definitions. Validate both endpoints, inverted/out-of-range dates, unknown or unsupported parameters and revoked fields before any draft creation; preserve conjunctive filters.": [
+      "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
+      "src/ERP.Application/Interfaces/IReportConfigurationPresetCatalog.cs",
+      "src/ERP.Application/Services/ReportConfigurationPresetCatalog.cs",
+      "src/ERP.Api/Controllers/ReportConfigurationsController.cs",
+      "src/ERP.Api/wwwroot/js/report-configuration.js",
+      "src/ERP.UnitTests/ReportConfigurationPresetParameterTests.cs",
+      "src/ERP.IntegrationTests/ReportConfigurationPresetParameterSqlServerTests.cs"
+    ],
+    "Reproduce supported legacy start/end and customer/status restrictions for multiple preset families using authoritative existing dataset field semantics, including documented date inclusivity and business timezone. Reject a family whose required original parameter cannot be represented rather than silently omitting it. Persist private drafts through the existing service; no parity-passed based on readiness alone.": [
+      "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
+      "src/ERP.Application/Interfaces/IReportConfigurationPresetCatalog.cs",
+      "src/ERP.Application/Services/ReportConfigurationPresetCatalog.cs",
+      "src/ERP.Api/Controllers/ReportConfigurationsController.cs",
+      "src/ERP.Api/wwwroot/js/report-configuration.js",
+      "src/ERP.UnitTests/ReportConfigurationPresetParameterTests.cs",
+      "src/ERP.IntegrationTests/ReportConfigurationPresetParameterSqlServerTests.cs"
+    ],
+    "Provide generic workspace parameter controls with explicit validation errors, cancellation and existing audit outcomes. Verify at least two families with nonempty isolated SQL rows on date boundaries and current-user scope, no-parameter compatibility, no mutation on invalid input, and Excel/PDF result equivalence for the parameterized definition. Run focused tests and safe Release suite.": [
+      "src/ERP.Application/DTOs/ReportConfigurationDtos.cs",
+      "src/ERP.Application/Interfaces/IReportConfigurationPresetCatalog.cs",
+      "src/ERP.Application/Services/ReportConfigurationPresetCatalog.cs",
+      "src/ERP.Api/Controllers/ReportConfigurationsController.cs",
+      "src/ERP.Api/wwwroot/js/report-configuration.js",
+      "src/ERP.UnitTests/ReportConfigurationPresetParameterTests.cs",
+      "src/ERP.IntegrationTests/ReportConfigurationPresetParameterSqlServerTests.cs"
+    ]
+  },
+  "depends_on": [
+    "ERP-296",
+    "ERP-310"
+  ],
+  "risk": "medium",
+  "planning_stage": 2,
+  "implementation_evidence": "IReportConfigurationPresetCatalog.MaterializeAsync and ReportConfigurationsController.MaterializePreset accept only preset key/user; unlike ERP-310 bundle presets they expose no typed original legacy request parameters. Backlog/report controller and complete ERP-259..313 history checked; single-section parameter binding is missing.",
+  "id": "ERP-314",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-05T05:34:29.731750Z"
+}

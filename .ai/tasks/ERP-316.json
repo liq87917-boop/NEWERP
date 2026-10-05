@@ -1,0 +1,90 @@
+{
+  "title": "Compose bounded authorized header and detail sections through generic report bundles",
+  "description": "Users migrate legacy document outputs with header facts and detail lines while preserving their association, order and independent amounts through the existing generic platform. Stage 2 only. Shared generic reporting capability, not a dedicated business report. Preserve existing legacy routes until full migration acceptance. Recheck current-user menu, row and column scope; no arbitrary SQL/joins, new schema, permission expansion, production or protected files. Preserve concurrent work and truthful environment limitations.",
+  "allowed_paths": [
+    "src/ERP.Application/DTOs/ReportConfigurationBundleDtos.cs",
+    "src/ERP.Application/Interfaces/IReportConfigurationBundleService.cs",
+    "src/ERP.Application/Services/ReportConfigurationBundleService.cs",
+    "src/ERP.Application/Services/ReportConfigurationBundlePresetCatalog.cs",
+    "src/ERP.Infrastructure/Reports/TradeDocumentReportConfigurationDatasetProvider.cs",
+    "src/ERP.Infrastructure/Export/ReportConfigurationBundleExcelExporter.cs",
+    "src/ERP.Infrastructure/Export/ReportConfigurationBundlePdfExporter.cs",
+    "src/ERP.Api/Controllers/ReportConfigurationBundlesController.cs",
+    "src/ERP.Api/wwwroot/js/report-configuration.js",
+    "src/ERP.UnitTests/ReportConfigurationBundleCompositionTests.cs",
+    "src/ERP.IntegrationTests/ReportConfigurationBundleCompositionSqlServerTests.cs"
+  ],
+  "acceptance_criteria": [
+    "Add a finite server-declared header/detail composition contract to existing generic bundles over already authorized snapshots. Allow only explicitly registered stable parent identities and exact detail foreign keys from controlled datasets, never client arbitrary joins or hidden field queries. Validate current-user access to both sections and keys before composition, with bounded parents/children/cells and cancellation under one execution lease.",
+    "Preserve original header once per document and ordered details beneath the correct parent, distinguishing empty detail sets, unavailable identities, duplicate keys and orphan rows with explicit failures/evidence. Keep header amount separate from detail sums and partition quantities by unit and amounts by currency; reject incompatible composition rather than multiply header totals. Populate existing trade-document family as an engine scenario using its authoritative print snapshots, not a new standalone report.",
+    "Expose reusable composed preview and Excel/PDF export preserving section labels, header fields, detail field order, document totals and provenance. Test at least two parent documents with different currencies/units and multiple lines, empty details, revoked menus/keys and bounds. Verify nonempty guarded SQL and actual artifacts for association and totals, plus focused and safe Release tests. Retain old document entry and explicit formatting compatibility gaps."
+  ],
+  "criterion_path_map": {
+    "Add a finite server-declared header/detail composition contract to existing generic bundles over already authorized snapshots. Allow only explicitly registered stable parent identities and exact detail foreign keys from controlled datasets, never client arbitrary joins or hidden field queries. Validate current-user access to both sections and keys before composition, with bounded parents/children/cells and cancellation under one execution lease.": [
+      "src/ERP.Application/DTOs/ReportConfigurationBundleDtos.cs",
+      "src/ERP.Application/Interfaces/IReportConfigurationBundleService.cs",
+      "src/ERP.Application/Services/ReportConfigurationBundleService.cs",
+      "src/ERP.Application/Services/ReportConfigurationBundlePresetCatalog.cs",
+      "src/ERP.Infrastructure/Reports/TradeDocumentReportConfigurationDatasetProvider.cs",
+      "src/ERP.Infrastructure/Export/ReportConfigurationBundleExcelExporter.cs",
+      "src/ERP.Infrastructure/Export/ReportConfigurationBundlePdfExporter.cs",
+      "src/ERP.Api/Controllers/ReportConfigurationBundlesController.cs",
+      "src/ERP.Api/wwwroot/js/report-configuration.js",
+      "src/ERP.UnitTests/ReportConfigurationBundleCompositionTests.cs",
+      "src/ERP.IntegrationTests/ReportConfigurationBundleCompositionSqlServerTests.cs"
+    ],
+    "Preserve original header once per document and ordered details beneath the correct parent, distinguishing empty detail sets, unavailable identities, duplicate keys and orphan rows with explicit failures/evidence. Keep header amount separate from detail sums and partition quantities by unit and amounts by currency; reject incompatible composition rather than multiply header totals. Populate existing trade-document family as an engine scenario using its authoritative print snapshots, not a new standalone report.": [
+      "src/ERP.Application/DTOs/ReportConfigurationBundleDtos.cs",
+      "src/ERP.Application/Interfaces/IReportConfigurationBundleService.cs",
+      "src/ERP.Application/Services/ReportConfigurationBundleService.cs",
+      "src/ERP.Application/Services/ReportConfigurationBundlePresetCatalog.cs",
+      "src/ERP.Infrastructure/Reports/TradeDocumentReportConfigurationDatasetProvider.cs",
+      "src/ERP.Infrastructure/Export/ReportConfigurationBundleExcelExporter.cs",
+      "src/ERP.Infrastructure/Export/ReportConfigurationBundlePdfExporter.cs",
+      "src/ERP.Api/Controllers/ReportConfigurationBundlesController.cs",
+      "src/ERP.Api/wwwroot/js/report-configuration.js",
+      "src/ERP.UnitTests/ReportConfigurationBundleCompositionTests.cs",
+      "src/ERP.IntegrationTests/ReportConfigurationBundleCompositionSqlServerTests.cs"
+    ],
+    "Expose reusable composed preview and Excel/PDF export preserving section labels, header fields, detail field order, document totals and provenance. Test at least two parent documents with different currencies/units and multiple lines, empty details, revoked menus/keys and bounds. Verify nonempty guarded SQL and actual artifacts for association and totals, plus focused and safe Release tests. Retain old document entry and explicit formatting compatibility gaps.": [
+      "src/ERP.Application/DTOs/ReportConfigurationBundleDtos.cs",
+      "src/ERP.Application/Interfaces/IReportConfigurationBundleService.cs",
+      "src/ERP.Application/Services/ReportConfigurationBundleService.cs",
+      "src/ERP.Application/Services/ReportConfigurationBundlePresetCatalog.cs",
+      "src/ERP.Infrastructure/Reports/TradeDocumentReportConfigurationDatasetProvider.cs",
+      "src/ERP.Infrastructure/Export/ReportConfigurationBundleExcelExporter.cs",
+      "src/ERP.Infrastructure/Export/ReportConfigurationBundlePdfExporter.cs",
+      "src/ERP.Api/Controllers/ReportConfigurationBundlesController.cs",
+      "src/ERP.Api/wwwroot/js/report-configuration.js",
+      "src/ERP.UnitTests/ReportConfigurationBundleCompositionTests.cs",
+      "src/ERP.IntegrationTests/ReportConfigurationBundleCompositionSqlServerTests.cs"
+    ]
+  },
+  "depends_on": [
+    "ERP-307",
+    "ERP-306",
+    "ERP-311",
+    "ERP-313"
+  ],
+  "risk": "medium",
+  "planning_stage": 2,
+  "implementation_evidence": "TradeDocumentReportConfigurationDatasetProvider builds header and line rows separately; ERP-307/310 bundles only independent flat sections and ERP-313 renders a saved selected-field layout. Existing manifest includes document print/export and backlog requires legacy compatibility; no generic parent/detail composition appears in ERP-259..313 definitions or bundle implementation.",
+  "id": "ERP-316",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-05T05:34:29.743375Z"
+}

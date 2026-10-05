@@ -1,0 +1,67 @@
+{
+  "title": "Make shared bundle preset draft creation atomic under cancellation and storage failure",
+  "description": "Users materializing multiple report sections must either obtain every owned draft or leave no partial usable definitions after a failed request. Stage 2 only. Shared generic reporting capability, not a dedicated business report. Preserve existing legacy routes until full migration acceptance. Recheck current-user menu, row and column scope; no arbitrary SQL/joins, new schema, permission expansion, production or protected files. Preserve concurrent work and truthful environment limitations.",
+  "allowed_paths": [
+    "src/ERP.Application/Interfaces/IReportConfigurationService.cs",
+    "src/ERP.Application/Services/ReportConfigurationService.cs",
+    "src/ERP.Application/Services/ReportConfigurationBundlePresetCatalog.cs",
+    "src/ERP.Application/DTOs/ReportConfigurationBundlePresetDtos.cs",
+    "src/ERP.UnitTests/ReportConfigurationBundlePresetTests.cs",
+    "src/ERP.IntegrationTests/ReportConfigurationBundlePresetSqlServerTests.cs"
+  ],
+  "acceptance_criteria": [
+    "Correct the existing ERP-310 all-or-nothing materialization guarantee using the existing shared EF database transaction and original authorized creation rules. Validate every section before writes; commit only complete current-user private drafts and versions. Roll back on cancellation, section failure or commit failure with a bounded cleanup token independent of the canceled request. Do not delete or alter preexisting/concurrently changed definitions.",
+    "Preserve the original exception/cancellation and audit outcome without silently swallowing a failed rollback; return a bounded truthful failure and retain diagnostic evidence if storage cleanup fails. No successful bundle response or orphan usable drafts after partial creation. Keep transaction ownership explicit to avoid nested transactions and support the existing test contexts without changing business permission semantics.",
+    "Use fault-injected tests for cancellation after the first section, failure after partial SaveChanges, failed cleanup/commit and success, plus guarded real SQL verification of definitions and version rows before/after failure. Assert unrelated and other-user configurations unchanged, focused tests and safe Release build/unit suite."
+  ],
+  "criterion_path_map": {
+    "Correct the existing ERP-310 all-or-nothing materialization guarantee using the existing shared EF database transaction and original authorized creation rules. Validate every section before writes; commit only complete current-user private drafts and versions. Roll back on cancellation, section failure or commit failure with a bounded cleanup token independent of the canceled request. Do not delete or alter preexisting/concurrently changed definitions.": [
+      "src/ERP.Application/Interfaces/IReportConfigurationService.cs",
+      "src/ERP.Application/Services/ReportConfigurationService.cs",
+      "src/ERP.Application/Services/ReportConfigurationBundlePresetCatalog.cs",
+      "src/ERP.Application/DTOs/ReportConfigurationBundlePresetDtos.cs",
+      "src/ERP.UnitTests/ReportConfigurationBundlePresetTests.cs",
+      "src/ERP.IntegrationTests/ReportConfigurationBundlePresetSqlServerTests.cs"
+    ],
+    "Preserve the original exception/cancellation and audit outcome without silently swallowing a failed rollback; return a bounded truthful failure and retain diagnostic evidence if storage cleanup fails. No successful bundle response or orphan usable drafts after partial creation. Keep transaction ownership explicit to avoid nested transactions and support the existing test contexts without changing business permission semantics.": [
+      "src/ERP.Application/Interfaces/IReportConfigurationService.cs",
+      "src/ERP.Application/Services/ReportConfigurationService.cs",
+      "src/ERP.Application/Services/ReportConfigurationBundlePresetCatalog.cs",
+      "src/ERP.Application/DTOs/ReportConfigurationBundlePresetDtos.cs",
+      "src/ERP.UnitTests/ReportConfigurationBundlePresetTests.cs",
+      "src/ERP.IntegrationTests/ReportConfigurationBundlePresetSqlServerTests.cs"
+    ],
+    "Use fault-injected tests for cancellation after the first section, failure after partial SaveChanges, failed cleanup/commit and success, plus guarded real SQL verification of definitions and version rows before/after failure. Assert unrelated and other-user configurations unchanged, focused tests and safe Release build/unit suite.": [
+      "src/ERP.Application/Interfaces/IReportConfigurationService.cs",
+      "src/ERP.Application/Services/ReportConfigurationService.cs",
+      "src/ERP.Application/Services/ReportConfigurationBundlePresetCatalog.cs",
+      "src/ERP.Application/DTOs/ReportConfigurationBundlePresetDtos.cs",
+      "src/ERP.UnitTests/ReportConfigurationBundlePresetTests.cs",
+      "src/ERP.IntegrationTests/ReportConfigurationBundlePresetSqlServerTests.cs"
+    ]
+  },
+  "depends_on": [
+    "ERP-310"
+  ],
+  "risk": "medium",
+  "planning_stage": 2,
+  "implementation_evidence": "ReportConfigurationBundlePresetCatalog.cs RollbackAsync passes the original canceled token to DeleteAsync and catches all cleanup errors; sequential CreateAsync calls commit partial drafts individually. This can leave partial usable drafts despite ERP-310 atomic acceptance criterion. Existing atomic service operations use _db.Database transactions; no dedicated cancellation/storage-failure rollback implementation in task history.",
+  "id": "ERP-315",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-05T05:34:29.737811Z"
+}
