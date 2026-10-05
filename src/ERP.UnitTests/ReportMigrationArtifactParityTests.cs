@@ -30,6 +30,18 @@ public class ReportMigrationArtifactParityTests
         Assert.False(result.OutputSemanticsMatched);
     }
 
+    [Fact]
+    public void Actual_excel_over_200_rows_cannot_pass_the_bounded_comparison()
+    {
+        var rows = Enumerable.Range(1, 201).Select(i => new object?[] { "ROW-" + i }).ToArray();
+        var generic = Generic(new[] { ("orderNo", "Order", Text, (string?)null) }, rows);
+        var snapshot = Legacy(new[] { ("orderNo", (string?)null, (string?)null) }, rows);
+        var bytes = LegacyExcel(new[] { ("orderNo", "Order") }, rows);
+        var result = _comparator.Compare(generic, snapshot, true, false,
+            legacyArtifacts: new(bytes, null));
+        Assert.False(result.OutputSemanticsMatched);
+    }
+
     // ==================== 脚手架 ====================
 
     private static ReportConfigurationPreviewDto Generic(

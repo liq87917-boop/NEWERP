@@ -362,6 +362,11 @@ public sealed class ReportMigrationOutputSemanticsComparator : IReportMigrationO
             }
 
             var sheet = workbook.GetSheetAt(0);
+            if (sheet.LastRowNum > 200)
+            {
+                evidence.Add($"{side} exceeds the 200-row comparison boundary; narrow the query without truncating proof.");
+                return null;
+            }
             var headers = new List<string>();
             var columnCount = 0;
             var headerRow = sheet.GetRow(0);
