@@ -1,0 +1,58 @@
+{
+  "title": "Add a reusable legacy-vs-generic four-dimension parity comparator over bounded result snapshots",
+  "description": "Stage 2 gap: the migration registry only derives preset-ready from DECLARED metadata (SemanticsMatch compares RequiredMenuCodes + CurrencyUnitSemantics strings, ReportMigrationRegistry.cs:172-183) and never compares ACTUAL legacy output against generic output. ReportMigrationParityEvidenceDto (ReportMigrationRegistryDtos.cs:107-116) declares four dimensions (DataGrainMatched/CurrencyUnitMatched/PermissionsMatched/OutputSemanticsMatched) but no code ever constructs it; only EmptyReportMigrationParityEvidenceProvider returns null (ReportMigrationRegistry.cs:262-270). Build a reusable, generic comparator that takes a bounded legacy result snapshot and a bounded generic preview snapshot and computes the data-grain (column keys/types + row keys + null-aware cell values), currency/unit (per-partition currencies/units never merged) and permissions (current-user row ownership/data-scope equivalence) dimensions, returning ReportMigrationParityEvidenceDto plus a deterministic mismatch detail list. OutputSemanticsMatched is supplied by the separate output-comparator seam built later. Pure read-only comparison over existing entities: no per-report controller/designer/exporter, no arbitrary SQL/joins, no new schema/entity, no permission expansion, no secrets/env. No new Domain entity or Api endpoint is required (existing migration-registry endpoint already surfaces the derived parity).",
+  "acceptance_criteria": [
+    "A new reusable comparator interface + implementation compares a bounded legacy result snapshot (ordered columns with key/type/currency/unit and rows) against a bounded generic preview snapshot and returns ReportMigrationParityEvidenceDto with DataGrainMatched/CurrencyUnitMatched/PermissionsMatched computed, plus a deterministic mismatch detail list (column key/type/row/currency/unit/scope), without touching the database or expanding permissions.",
+    "Data grain matching is exact: column keys and types must align, row counts and stable row keys must match, and cell values compare null-aware (null == null, values compared by declared type); currency/unit matching fails closed whenever the same row/group would merge across currencies or units on one side but not the other; permissions matching compares current-user row ownership/data-scope equivalence and fails closed on any divergence.",
+    "Add executable unit coverage for equal/unequal columns, row-key mismatches, null-aware cell equality, cross-currency/unit merge rejection and data-scope divergence, with no regression in existing ReportMigrationRegistryTests; the safe Release build/unit suite and scheduler self-test/contracts pass."
+  ],
+  "allowed_paths": [
+    "src/ERP.Application/DTOs/ReportMigrationParityComparisonDtos.cs",
+    "src/ERP.Application/Interfaces/IReportMigrationParityComparator.cs",
+    "src/ERP.Application/Services/ReportMigrationParityComparator.cs",
+    "src/ERP.UnitTests/ReportMigrationParityComparatorTests.cs"
+  ],
+  "criterion_path_map": {
+    "A new reusable comparator interface + implementation compares a bounded legacy result snapshot (ordered columns with key/type/currency/unit and rows) against a bounded generic preview snapshot and returns ReportMigrationParityEvidenceDto with DataGrainMatched/CurrencyUnitMatched/PermissionsMatched computed, plus a deterministic mismatch detail list (column key/type/row/currency/unit/scope), without touching the database or expanding permissions.": [
+      "src/ERP.Application/DTOs/ReportMigrationParityComparisonDtos.cs",
+      "src/ERP.Application/Interfaces/IReportMigrationParityComparator.cs",
+      "src/ERP.Application/Services/ReportMigrationParityComparator.cs",
+      "src/ERP.UnitTests/ReportMigrationParityComparatorTests.cs"
+    ],
+    "Data grain matching is exact: column keys and types must align, row counts and stable row keys must match, and cell values compare null-aware (null == null, values compared by declared type); currency/unit matching fails closed whenever the same row/group would merge across currencies or units on one side but not the other; permissions matching compares current-user row ownership/data-scope equivalence and fails closed on any divergence.": [
+      "src/ERP.Application/Services/ReportMigrationParityComparator.cs",
+      "src/ERP.Application/DTOs/ReportMigrationParityComparisonDtos.cs",
+      "src/ERP.UnitTests/ReportMigrationParityComparatorTests.cs"
+    ],
+    "Add executable unit coverage for equal/unequal columns, row-key mismatches, null-aware cell equality, cross-currency/unit merge rejection and data-scope divergence, with no regression in existing ReportMigrationRegistryTests; the safe Release build/unit suite and scheduler self-test/contracts pass.": [
+      "src/ERP.UnitTests/ReportMigrationParityComparatorTests.cs",
+      "src/ERP.Application/Services/ReportMigrationParityComparator.cs",
+      "src/ERP.Application/DTOs/ReportMigrationParityComparisonDtos.cs"
+    ]
+  },
+  "depends_on": [
+    "ERP-295",
+    "ERP-296"
+  ],
+  "risk": "medium",
+  "planning_stage": 2,
+  "implementation_evidence": "src/ERP.Application/Services/ReportMigrationRegistry.cs:172-183 SemanticsMatch only compares declared RequiredMenuCodes and CurrencyUnitSemantics strings, never actual data; :114-120 DeriveParityAsync consumes _evidence.GetEvidence and stays PresetReady when evidence is null/not Complete. src/ERP.Application/DTOs/ReportMigrationRegistryDtos.cs:107-116 declares ReportMigrationParityEvidenceDto (DataGrainMatched/CurrencyUnitMatched/PermissionsMatched/OutputSemanticsMatched, Complete = all four) but no type constructs it; search for ReportMigrationParityComparator yields no results. src/ERP.Application/Services/ReportMigrationRegistry.cs:262-270 EmptyReportMigrationParityEvidenceProvider.GetEvidence always returns null; src/ERP.Infrastructure/DependencyInjection.cs:142 registers that empty singleton.",
+  "id": "ERP-329",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-05T10:05:55.479050Z"
+}

@@ -1,0 +1,56 @@
+{
+  "title": "Add a reusable Excel/PDF output-semantics comparator for legacy vs generic exports",
+  "description": "Stage 2 gap: ReportMigrationParityEvidenceDto.OutputSemanticsMatched is never computed. The manifest's ExcelCompatible/PdfCompatible booleans are only checked vacuously by CompatibilityDeclared (ReportMigrationRegistry.cs:217-225: ExcelCompatible || PdfCompatible || both-false), never verified against real rendered output, so the Excel/PDF compatibility dimension required for parity-passed has no producer. Build a reusable output comparator that renders the generic export (ReportConfigurationExcelExporter + ReportConfigurationPdfExporter over the generic preview) and the legacy export (existing legacy exporters reached through the legacy source seam) for the same bounded fixture, comparing column headers, ordered row cell values and currency/unit labels, returning OutputSemanticsMatched. Reuse SimHeiPdfFontResolver and existing exporters; no new per-report exporters/controllers, no arbitrary SQL, no new schema/entity, no permission expansion, no secrets/env. No new Domain entity or Api endpoint is required.",
+  "acceptance_criteria": [
+    "A new reusable output-semantics comparator renders the generic Excel/PDF (ReportConfigurationExcelExporter / ReportConfigurationPdfExporter) and the legacy export for the same bounded fixture and returns OutputSemanticsMatched by comparing header labels, ordered row cell values and currency/unit labels; missing font or unavailable legacy exporter fails closed (not matched) with explicit evidence, never guessed.",
+    "Excel/PDF compatibility is judged per the legacy entry's declared ExcelCompatible/PdfCompatible flags: entries declared incompatible must not be forced to match, and entries declared compatible must produce matching header/cell content; any header/cell/currency/unit divergence fails the dimension.",
+    "Add executable unit coverage for header mismatch, cell-value mismatch, currency/unit label mismatch, font-missing fail-closed and a full-match case, with no regression in existing Excel/PDF export tests; the safe Release build/unit suite and scheduler self-test/contracts pass."
+  ],
+  "allowed_paths": [
+    "src/ERP.Application/Interfaces/IReportMigrationOutputComparator.cs",
+    "src/ERP.Infrastructure/Export/ReportMigrationOutputSemanticsComparator.cs",
+    "src/ERP.UnitTests/ReportMigrationOutputSemanticsComparatorTests.cs"
+  ],
+  "criterion_path_map": {
+    "A new reusable output-semantics comparator renders the generic Excel/PDF (ReportConfigurationExcelExporter / ReportConfigurationPdfExporter) and the legacy export for the same bounded fixture and returns OutputSemanticsMatched by comparing header labels, ordered row cell values and currency/unit labels; missing font or unavailable legacy exporter fails closed (not matched) with explicit evidence, never guessed.": [
+      "src/ERP.Application/Interfaces/IReportMigrationOutputComparator.cs",
+      "src/ERP.Infrastructure/Export/ReportMigrationOutputSemanticsComparator.cs",
+      "src/ERP.UnitTests/ReportMigrationOutputSemanticsComparatorTests.cs"
+    ],
+    "Excel/PDF compatibility is judged per the legacy entry's declared ExcelCompatible/PdfCompatible flags: entries declared incompatible must not be forced to match, and entries declared compatible must produce matching header/cell content; any header/cell/currency/unit divergence fails the dimension.": [
+      "src/ERP.Infrastructure/Export/ReportMigrationOutputSemanticsComparator.cs",
+      "src/ERP.Application/Interfaces/IReportMigrationOutputComparator.cs",
+      "src/ERP.UnitTests/ReportMigrationOutputSemanticsComparatorTests.cs"
+    ],
+    "Add executable unit coverage for header mismatch, cell-value mismatch, currency/unit label mismatch, font-missing fail-closed and a full-match case, with no regression in existing Excel/PDF export tests; the safe Release build/unit suite and scheduler self-test/contracts pass.": [
+      "src/ERP.UnitTests/ReportMigrationOutputSemanticsComparatorTests.cs",
+      "src/ERP.Infrastructure/Export/ReportMigrationOutputSemanticsComparator.cs"
+    ]
+  },
+  "depends_on": [
+    "ERP-263",
+    "ERP-264",
+    "ERP-308"
+  ],
+  "risk": "medium",
+  "planning_stage": 2,
+  "implementation_evidence": "src/ERP.Application/Services/ReportMigrationRegistry.cs:217-225 CompatibilityDeclared returns true vacuously (ExcelCompatible || PdfCompatible || (!ExcelCompatible && !PdfCompatible)) and is never verified against rendered output. ReportMigrationParityEvidenceDto.OutputSemanticsMatched (src/ERP.Application/DTOs/ReportMigrationRegistryDtos.cs:111) has no producer anywhere (search for OutputSemanticsMatched yields only the DTO declaration). Generic exporters exist (src/ERP.Infrastructure/Export/ReportConfigurationExcelExporter.cs, ReportConfigurationPdfExporter.cs, SimHeiPdfFontResolver.cs, ReportConfigurationBundleExcelExporter.cs, ReportConfigurationBundlePdfExporter.cs) and legacy exporters exist (src/ERP.Infrastructure/Export/Dynamic*PdfExporter.cs, CustomerReportPacketPdfExporter.cs, ProductExcelExporter.cs, ExcelExporter.cs), but nothing compares them (search for ReportMigrationOutputSemanticsComparator yields no results).",
+  "id": "ERP-331",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-05T10:05:55.481439Z"
+}

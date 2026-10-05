@@ -1,0 +1,68 @@
+{
+  "title": "Wire a real four-dimension parity evidence provider into the registry so entries can reach parity-passed",
+  "description": "Stage 2 gap: IReportMigrationParityEvidenceProvider is registered as EmptyReportMigrationParityEvidenceProvider (DependencyInjection.cs:142), so GetEvidence always returns null, no entry ever reaches parity-passed, and CanRetireLegacyRoutesAsync is permanently false (heartbeat nextWork: 'Actual legacy/generic parity comparisons; availability and preset mappings alone cannot pass gate'). Implement ReportMigrationParityEvidenceService (async, bounded, read-only) that, for each registry entry, runs the legacy source seam and the generic dataset provider preview over the same bounded isolated fixture (current-user menu + data scope, uniform date/page params, existing execution budget + cancellation), feeds both into the parity comparator (data-grain/currency/unit/permissions) and the output comparator (Excel/PDF), and produces ReportMigrationParityEvidenceDto; implement ReportMigrationParityEvidenceProvider that serves this evidence per legacy key (fail-closed: no evidence => null) and replace the empty singleton in DI. Keep the legacy routes gated: CanRetireLegacyRoutesAsync only returns true when every manifest/catalog/print-template entry has complete evidence. No new controllers/designers/exporters, no arbitrary SQL (isolated NEWERP_AUTOTEST_* LocalDB only, per existing convention), no new schema/entity, no permission expansion, no secrets/env, no production access. No new Api endpoint is required: the existing migration-registry endpoint surfaces the derived parity and the gate automatically.",
+  "acceptance_criteria": [
+    "A real IReportMigrationParityEvidenceProvider replaces EmptyReportMigrationParityEvidenceProvider in DependencyInjection.cs and returns a complete four-dimension ReportMigrationParityEvidenceDto only for entries with genuine legacy-vs-generic comparison evidence (data grain, currency/unit, permissions, Excel/PDF output), null otherwise (fail closed), so entries can reach parity-passed and the existing migration-registry endpoint surfaces it.",
+    "ReportMigrationParityEvidenceService runs both sides over the same bounded isolated fixture (current-user menu + data scope, uniform date/page params, existing execution budget/cancellation) without arbitrary SQL or new schema, and CanRetireLegacyRoutesAsync flips true only when every manifest/catalog/print-template entry has complete evidence; any missing/divergent dimension keeps the whole gate false.",
+    "Add guarded real-SQL integration tests (NEWERP_AUTOTEST_* isolated LocalDB only, no production) and unit regression tests proving at least one representative entry per category (fixed, dynamic, bill-export, packet/document, financial statement, print-template) reaches parity-passed with matched four dimensions, a divergent or permission-revoked entry fails closed, and unrelated/other-user configurations are unchanged; no regression in existing ReportMigrationRegistryTests/ReportConfiguration*MigrationTests, safe Release build/unit suite and scheduler self-test/contracts pass."
+  ],
+  "allowed_paths": [
+    "src/ERP.Application/Interfaces/IReportMigrationParityEvidenceService.cs",
+    "src/ERP.Application/Services/ReportMigrationParityEvidenceService.cs",
+    "src/ERP.Application/Services/ReportMigrationParityEvidenceProvider.cs",
+    "src/ERP.Infrastructure/DependencyInjection.cs",
+    "src/ERP.UnitTests/ReportMigrationParityEvidenceProviderTests.cs",
+    "src/ERP.IntegrationTests/ReportMigrationParityEvidenceSqlServerTests.cs"
+  ],
+  "criterion_path_map": {
+    "A real IReportMigrationParityEvidenceProvider replaces EmptyReportMigrationParityEvidenceProvider in DependencyInjection.cs and returns a complete four-dimension ReportMigrationParityEvidenceDto only for entries with genuine legacy-vs-generic comparison evidence (data grain, currency/unit, permissions, Excel/PDF output), null otherwise (fail closed), so entries can reach parity-passed and the existing migration-registry endpoint surfaces it.": [
+      "src/ERP.Application/Services/ReportMigrationParityEvidenceProvider.cs",
+      "src/ERP.Application/Interfaces/IReportMigrationParityEvidenceService.cs",
+      "src/ERP.Application/Services/ReportMigrationParityEvidenceService.cs",
+      "src/ERP.Infrastructure/DependencyInjection.cs",
+      "src/ERP.UnitTests/ReportMigrationParityEvidenceProviderTests.cs"
+    ],
+    "ReportMigrationParityEvidenceService runs both sides over the same bounded isolated fixture (current-user menu + data scope, uniform date/page params, existing execution budget/cancellation) without arbitrary SQL or new schema, and CanRetireLegacyRoutesAsync flips true only when every manifest/catalog/print-template entry has complete evidence; any missing/divergent dimension keeps the whole gate false.": [
+      "src/ERP.Application/Services/ReportMigrationParityEvidenceService.cs",
+      "src/ERP.Application/Interfaces/IReportMigrationParityEvidenceService.cs",
+      "src/ERP.Application/Services/ReportMigrationParityEvidenceProvider.cs",
+      "src/ERP.Infrastructure/DependencyInjection.cs",
+      "src/ERP.UnitTests/ReportMigrationParityEvidenceProviderTests.cs"
+    ],
+    "Add guarded real-SQL integration tests (NEWERP_AUTOTEST_* isolated LocalDB only, no production) and unit regression tests proving at least one representative entry per category (fixed, dynamic, bill-export, packet/document, financial statement, print-template) reaches parity-passed with matched four dimensions, a divergent or permission-revoked entry fails closed, and unrelated/other-user configurations are unchanged; no regression in existing ReportMigrationRegistryTests/ReportConfiguration*MigrationTests, safe Release build/unit suite and scheduler self-test/contracts pass.": [
+      "src/ERP.IntegrationTests/ReportMigrationParityEvidenceSqlServerTests.cs",
+      "src/ERP.UnitTests/ReportMigrationParityEvidenceProviderTests.cs",
+      "src/ERP.Application/Services/ReportMigrationParityEvidenceService.cs",
+      "src/ERP.Infrastructure/DependencyInjection.cs"
+    ]
+  },
+  "depends_on": [
+    "ERP-295",
+    "ERP-296",
+    "ERP-308",
+    "ERP-312",
+    "ERP-317",
+    "ERP-318"
+  ],
+  "risk": "medium",
+  "planning_stage": 2,
+  "implementation_evidence": "src/ERP.Infrastructure/DependencyInjection.cs:142 registers services.AddSingleton<IReportMigrationParityEvidenceProvider, EmptyReportMigrationParityEvidenceProvider>(). src/ERP.Application/Services/ReportMigrationRegistry.cs:114-120 (DeriveParityAsync) and :151-156 (DeriveBundleParityAsync) both return PresetReady when _evidence?.GetEvidence(...) is null or not Complete; :80-95 CanRetireLegacyRoutesCoreAsync requires every entry ParityPassed, so the gate is permanently false. src/ERP.Application/Interfaces/IReportMigrationRegistry.cs:36-40 declares IReportMigrationParityEvidenceProvider.GetEvidence but no real implementation exists (only EmptyReportMigrationParityEvidenceProvider at ReportMigrationRegistry.cs:262-270). Existing isolated comparison precedent: src/ERP.IntegrationTests/ReportConfigurationCommercialMigrationTestsSqlServerTests.cs:47-51 already compares reportService.GetProductSalesRankingAsync(...) against ProductSalesRankingReportConfigurationDatasetProvider preview count, but it is not wired to any evidence provider, so parity-passed remains unreachable.",
+  "id": "ERP-332",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-05T10:05:55.482443Z"
+}

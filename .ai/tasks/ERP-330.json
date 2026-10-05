@@ -1,0 +1,60 @@
+{
+  "title": "Expose a uniform bounded legacy report source so every registry entry can be executed for parity comparison",
+  "description": "Stage 2 gap: there is no uniform seam to run an arbitrary legacy report, so a parity evidence provider cannot obtain the legacy side to compare. Fixed reports live in IReportService (ReportService.cs / ReportService.Ar.cs / ReportService.Finance.cs / ReportService.Inventory.cs / ReportService.InventoryAging.cs / ReportService.Quotation.cs / ReportService.Sales.cs / ReportService.Extra*.cs) with ~30 heterogeneous method signatures and return types (List<ReportDtos.*>, ReportDtos.FinancialStatement, Dynamic*ReportPageDto); the 18 dynamic reports live in Dynamic*ReportQuery implementations (DynamicSalesOrderReportQuery.cs and peers) each with its own request/response; legacy bill exports live in ILegacyBillExportReadService.ReadPageAsync (raw SqlConnection, LegacyBillExportReadService.cs:31-33); the packet lives in CustomerReportPacketRules; documents live in TradeDocument read paths; financial statements live in ReportService.Finance/Ar. Build a controlled ILegacyReportSource seam plus a server-owned registry that maps each ReportMigrationRegistryManifest / LegacyBillExportCatalog / ReportPrintTemplateFamilies entry (by LegacyKey or category) to its existing read service, normalizing every result into the same bounded legacy result snapshot shape consumed by the parity comparator, applying the current-user menu + row/data-scope authorization (fail closed) and existing bounded page/date limits. No new controllers/designers/exporters, no arbitrary SQL beyond the existing LegacyBillExportReadService, no new schema/entity, no permission expansion, no secrets/env.",
+  "acceptance_criteria": [
+    "A new ILegacyReportSource seam plus a server-owned registry maps every legacy report category (fixed report, 18 dynamic reports, bill-export families, packet, document, financial statement, print-template families) to its existing read service and returns a uniform bounded legacy result snapshot (columns+rows) preserving original currency/unit/field semantics, rechecking current-user menu and row/data-scope authorization fail-closed.",
+    "Unknown/blank/malformed legacy keys are rejected with precise errors before any query opens; unavailable sources (e.g., environment-blocked legacy table with Oid-vs-Id mismatch) return explicit environment-blocked errors, never full-table fallback; every read is bounded by the existing page size/date-range limits and honored cancellation token.",
+    "Add executable unit coverage asserting each category resolves to a non-null snapshot for an authorized seeded user, menu-revoked sources fail closed, unknown keys are rejected, and the normalized snapshot keys/rows match the original legacy read for representative families; no regression in existing ReportConfiguration*MigrationTests, safe Release build/unit suite and scheduler self-test/contracts pass."
+  ],
+  "allowed_paths": [
+    "src/ERP.Application/DTOs/LegacyReportSourceDtos.cs",
+    "src/ERP.Application/Interfaces/ILegacyReportSource.cs",
+    "src/ERP.Infrastructure/Reports/LegacyReportSourceRegistry.cs",
+    "src/ERP.Infrastructure/DependencyInjection.cs",
+    "src/ERP.UnitTests/LegacyReportSourceRegistryTests.cs"
+  ],
+  "criterion_path_map": {
+    "A new ILegacyReportSource seam plus a server-owned registry maps every legacy report category (fixed report, 18 dynamic reports, bill-export families, packet, document, financial statement, print-template families) to its existing read service and returns a uniform bounded legacy result snapshot (columns+rows) preserving original currency/unit/field semantics, rechecking current-user menu and row/data-scope authorization fail-closed.": [
+      "src/ERP.Application/Interfaces/ILegacyReportSource.cs",
+      "src/ERP.Application/DTOs/LegacyReportSourceDtos.cs",
+      "src/ERP.Infrastructure/Reports/LegacyReportSourceRegistry.cs",
+      "src/ERP.Infrastructure/DependencyInjection.cs",
+      "src/ERP.UnitTests/LegacyReportSourceRegistryTests.cs"
+    ],
+    "Unknown/blank/malformed legacy keys are rejected with precise errors before any query opens; unavailable sources (e.g., environment-blocked legacy table with Oid-vs-Id mismatch) return explicit environment-blocked errors, never full-table fallback; every read is bounded by the existing page size/date-range limits and honored cancellation token.": [
+      "src/ERP.Infrastructure/Reports/LegacyReportSourceRegistry.cs",
+      "src/ERP.Application/Interfaces/ILegacyReportSource.cs",
+      "src/ERP.UnitTests/LegacyReportSourceRegistryTests.cs"
+    ],
+    "Add executable unit coverage asserting each category resolves to a non-null snapshot for an authorized seeded user, menu-revoked sources fail closed, unknown keys are rejected, and the normalized snapshot keys/rows match the original legacy read for representative families; no regression in existing ReportConfiguration*MigrationTests, safe Release build/unit suite and scheduler self-test/contracts pass.": [
+      "src/ERP.UnitTests/LegacyReportSourceRegistryTests.cs",
+      "src/ERP.Infrastructure/Reports/LegacyReportSourceRegistry.cs",
+      "src/ERP.Infrastructure/DependencyInjection.cs"
+    ]
+  },
+  "depends_on": [
+    "ERP-295",
+    "ERP-308"
+  ],
+  "risk": "medium",
+  "planning_stage": 2,
+  "implementation_evidence": "src/ERP.Application/Interfaces/IReportService.cs:12-113 exposes ~30 legacy report methods with heterogeneous return types (List<ReportDtos.ProductSalesRankItem>, List<ReportDtos.OrderProfitItem>, ReportDtos.FinancialStatement, List<ReportDtos.ArAgingItem>, DynamicContainerStatsReportPageDto, DynamicSalesCommissionReportPageDto, ...). src/ERP.Application/Interfaces/ILegacyBillExportReadService.cs:12-14 exposes only ReadPageAsync for bill-export. src/ERP.Infrastructure/Reports/LegacyBillExportReadService.cs:31-33 returns LegacyBillExportPage via raw SqlConnection. src/ERP.Application/Services/CustomerReportPacketRules.cs, TradeDocument read paths and Dynamic*ReportQuery.cs implementations are separate seams. No ILegacyReportSource or LegacyReportSourceRegistry type exists (search yields no results), so a parity evidence provider has no uniform legacy entry point.",
+  "id": "ERP-330",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-05T10:05:55.480303Z"
+}
