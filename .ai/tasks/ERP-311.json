@@ -6,7 +6,8 @@
     "src/ERP.Infrastructure/Export/ReportConfigurationBundlePdfExporter.cs",
     "src/ERP.Infrastructure/Export/ReportConfigurationPdfColumnLayout.cs",
     "src/ERP.UnitTests/ReportConfigurationPdfColumnLayoutTests.cs",
-    "src/ERP.UnitTests/ReportConfigurationBundleTests.cs"
+    "src/ERP.UnitTests/ReportConfigurationBundleTests.cs",
+    "src/ERP.UnitTests/ReportConfigurationPdfTests.cs"
   ],
   "acceptance_criteria": [
     "Apply a reusable finite width and row-identity-aware horizontal column-band layout to both existing PDF exporters. All selected fields, field order and rows appear once per logical column band; repeat an authorized identity field when available, otherwise stable row ordinal. Never query hidden identity fields or drop/truncate columns; bounded pages and cancellation remain enforced.",
@@ -19,21 +20,24 @@
       "src/ERP.Infrastructure/Export/ReportConfigurationBundlePdfExporter.cs",
       "src/ERP.Infrastructure/Export/ReportConfigurationPdfColumnLayout.cs",
       "src/ERP.UnitTests/ReportConfigurationPdfColumnLayoutTests.cs",
-      "src/ERP.UnitTests/ReportConfigurationBundleTests.cs"
+      "src/ERP.UnitTests/ReportConfigurationBundleTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationPdfTests.cs"
     ],
     "Preserve independent section currency/unit, null versus zero, numeric formatting, summary/evidence coverage and nonempty/empty sections. Repeat readable headers at vertical page breaks, title and band/page provenance. Bound long cells without overlapping footer or silently clipping values; no cross-section arithmetic.": [
       "src/ERP.Infrastructure/Export/ReportConfigurationPdfExporter.cs",
       "src/ERP.Infrastructure/Export/ReportConfigurationBundlePdfExporter.cs",
       "src/ERP.Infrastructure/Export/ReportConfigurationPdfColumnLayout.cs",
       "src/ERP.UnitTests/ReportConfigurationPdfColumnLayoutTests.cs",
-      "src/ERP.UnitTests/ReportConfigurationBundleTests.cs"
+      "src/ERP.UnitTests/ReportConfigurationBundleTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationPdfTests.cs"
     ],
     "Test narrow and 27-plus-column multi-section inputs, long Chinese text, row continuity, numeric/null semantics, exact column coverage, cancellation and file limits. Run related tests and safe Release build/unit suite; generate real PDF and inspect rendered readability with actual artifacts before claiming layout acceptance.": [
       "src/ERP.Infrastructure/Export/ReportConfigurationPdfExporter.cs",
       "src/ERP.Infrastructure/Export/ReportConfigurationBundlePdfExporter.cs",
       "src/ERP.Infrastructure/Export/ReportConfigurationPdfColumnLayout.cs",
       "src/ERP.UnitTests/ReportConfigurationPdfColumnLayoutTests.cs",
-      "src/ERP.UnitTests/ReportConfigurationBundleTests.cs"
+      "src/ERP.UnitTests/ReportConfigurationBundleTests.cs",
+      "src/ERP.UnitTests/ReportConfigurationPdfTests.cs"
     ]
   },
   "depends_on": [
