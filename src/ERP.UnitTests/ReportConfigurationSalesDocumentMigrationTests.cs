@@ -434,7 +434,7 @@ public class ReportConfigurationSalesDocumentMigrationTests
     }
 
     [Fact]
-    public async Task 迁移登记册_销售单据族_经通用目录暴露_且遗留打印入口保持pending()
+    public async Task 迁移登记册_销售单据族_经通用目录暴露_且遗留打印入口到达preset_ready()
     {
         using var db = TestDbFactory.Create();
         var user = SeedAuthorizedUser(db, "registry", privileged: true, "quotation", "proforma-invoice");
@@ -448,16 +448,19 @@ public class ReportConfigurationSalesDocumentMigrationTests
             ReportConfigurationSalesDocumentCatalog.Resolve("proforma-invoice").DatasetKey, user.Id);
         Assert.NotNull(piDataset);
 
-        // 遗留打印入口保持不变（mapping availability 不标记迁移 parity 通过；fail-closed 退役）
+        // 打印模板族已接入绑定目录：数据集 + 预设 + 兼容性声明齐备，parity 至少到 preset-ready；
+        // 无真实比对证据，绝不 parity-passed（fail-closed 退役）。
         var registry = new ReportMigrationRegistry(
             catalog, db, new ReportMigrationPresetCatalog(), new EmptyReportMigrationParityEvidenceProvider());
         var result = await registry.GetRegistryAsync(user.Id);
 
         var quotation = Assert.Single(result.Entries, e => e.LegacyKey == "print-template:quotation");
-        Assert.Equal(ReportMigrationParityStatusText.Pending, quotation.ParityStatus);
+        Assert.Equal("sales-document:quotation", quotation.DatasetKey);
+        Assert.Equal(ReportMigrationParityStatusText.PresetReady, quotation.ParityStatus);
 
         var pi = Assert.Single(result.Entries, e => e.LegacyKey == "print-template:proforma-invoice");
-        Assert.Equal(ReportMigrationParityStatusText.Pending, pi.ParityStatus);
+        Assert.Equal("sales-document:proforma-invoice", pi.DatasetKey);
+        Assert.Equal(ReportMigrationParityStatusText.PresetReady, pi.ParityStatus);
 
         Assert.False(await registry.CanRetireLegacyRoutesAsync(user.Id));
     }

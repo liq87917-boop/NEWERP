@@ -177,23 +177,48 @@ public class ReportConfigurationPrintTemplateCatalogTests
         return new FakeCatalog(datasets);
     }
 
+    private static ReportConfigurationDatasetDto BuildSalesDocumentDataset(string familyKey)
+    {
+        var family = ReportConfigurationSalesDocumentCatalog.Resolve(familyKey);
+        var fields = family.Columns.Select(c => new ReportConfigurationFieldDto(
+            c.Key, c.Title, c.Type, null, false, false, false, Array.Empty<string>())).ToList();
+        return new ReportConfigurationDatasetDto(
+            family.DatasetKey, family.Title,
+            $"{family.Title}（表头粒度一行一张单据；明细行粒度一行一条行快照，二者通过字段区分，绝不混写）",
+            ReportConfigurationSalesDocumentCatalog.CurrencyUnitSemantics,
+            family.RequiredMenuCodes[0], family.RequiredMenuText, fields,
+            Array.Empty<string>(), Array.Empty<string>(), Array.Empty<string>(),
+            20, 200, string.Empty, string.Empty);
+    }
+
+    private static IReportConfigurationCatalog SalesDocumentCatalog(params string[] familyKeys)
+    {
+        var datasets = new Dictionary<string, ReportConfigurationDatasetDto?>();
+        foreach (var key in familyKeys)
+        {
+            var dataset = BuildSalesDocumentDataset(key);
+            datasets[dataset.DatasetKey] = dataset;
+        }
+        return new FakeCatalog(datasets);
+    }
+
     // ==================== 1. 封闭族清单 ====================
 
     [Fact]
-    public void Families_封闭清单_24支持加2显式不支持()
+    public void Families_封闭清单_26个受控支持族()
     {
         var families = ReportPrintTemplateFamilies.Families;
 
         Assert.Equal(26, families.Count);
-        Assert.Equal(24, families.Count(f => f.Supported));
-        Assert.Equal(2, families.Count(f => !f.Supported));
+        Assert.Equal(26, families.Count(f => f.Supported));
+        Assert.Equal(0, families.Count(f => !f.Supported));
         Assert.Equal(families.Count, families.Select(f => f.FamilyKey).Distinct(StringComparer.OrdinalIgnoreCase).Count());
 
         var masters = new[] { "customer", "supplier", "employee", "expense-account", "warehouse", "product", "other-info" };
         foreach (var key in masters)
             Assert.True(Assert.Single(families, f => f.FamilyKey == key).Supported);
-        Assert.False(Assert.Single(families, f => f.FamilyKey == "quotation").Supported);
-        Assert.False(Assert.Single(families, f => f.FamilyKey == "proforma-invoice").Supported);
+        Assert.True(Assert.Single(families, f => f.FamilyKey == "quotation").Supported);
+        Assert.True(Assert.Single(families, f => f.FamilyKey == "proforma-invoice").Supported);
         Assert.True(Assert.Single(families, f => f.FamilyKey == "doc-center").Supported);
     }
 
@@ -215,6 +240,31 @@ public class ReportConfigurationPrintTemplateCatalogTests
             Assert.Equal(master.Columns.Select(c => c.Title).ToArray(), family.FieldAliases.Select(a => a.Title).ToArray());
             Assert.Equal(master.Columns.Select(c => c.Type).ToArray(), family.FieldAliases.Select(a => a.Type).ToArray());
             Assert.Equal(master.Columns.Select(c => c.Key).ToArray(), family.FieldAliases.Select(a => a.LegacyKey).ToArray());
+        }
+    }
+
+    [Fact]
+    public void Families_两个销售单据族_受控支持且数据集键与有序列别名一致()
+    {
+        foreach (var sales in ReportConfigurationSalesDocumentCatalog.Families)
+        {
+            var family = Assert.Single(ReportPrintTemplateFamilies.Families, f => f.FamilyKey == sales.FamilyKey);
+
+            Assert.True(family.Supported);
+            Assert.Equal(string.Empty, family.UnsupportedReason);
+            Assert.Equal(sales.DatasetKey, family.DatasetKey);
+            Assert.Equal(sales.RequiredMenuCodes.ToArray(), family.RequiredMenuCodes.ToArray());
+            Assert.Equal(sales.RequiredMenuText, family.RequiredMenuText);
+
+            Assert.Equal(sales.Columns.Count, family.FieldAliases.Count);
+            Assert.Equal(sales.Columns.Select(c => c.Key).ToArray(), family.FieldAliases.Select(a => a.ColumnKey).ToArray());
+            Assert.Equal(sales.Columns.Select(c => c.Title).ToArray(), family.FieldAliases.Select(a => a.Title).ToArray());
+            Assert.Equal(sales.Columns.Select(c => c.Type).ToArray(), family.FieldAliases.Select(a => a.Type).ToArray());
+            Assert.Equal(sales.Columns.Select(c => c.Key).ToArray(), family.FieldAliases.Select(a => a.LegacyKey).ToArray());
+
+            // 粒度顺序保留（identity → header → detail，与受控目录完全同序）。
+            Assert.Equal(sales.Columns.Select(c => c.Grain).ToArray(),
+                family.FieldAliases.Select((_, i) => sales.Columns[i].Grain).ToArray());
         }
     }
 
@@ -268,12 +318,12 @@ public class ReportConfigurationPrintTemplateCatalogTests
     }
 
     [Fact]
-    public async Task Catalog_基础资料族_受控支持且报价单仍阻塞()
+    public async Task Catalog_销售单据族_受控支持()
     {
         using var db = TestDbFactory.Create();
-        var user = SeedAuthorizedUser(db, "unsupported", "customer", "quotation");
+        var user = SeedAuthorizedUser(db, "sales-doc", "customer", "quotation");
 
-        var result = await BuildService(db, SalesOrderCatalog()).GetCatalogAsync(user.Id);
+        var result = await BuildService(db, SalesDocumentCatalog("quotation")).GetCatalogAsync(user.Id);
 
         var customer = Assert.Single(result.Families, f => f.FamilyKey == "customer");
         Assert.True(customer.Supported);
@@ -282,11 +332,11 @@ public class ReportConfigurationPrintTemplateCatalogTests
         Assert.NotEmpty(customer.FieldAliases);
 
         var quotation = Assert.Single(result.Families, f => f.FamilyKey == "quotation");
-        Assert.False(quotation.Supported);
-        Assert.Equal(ReportPrintTemplateCompatibilityText.Unsupported, quotation.CompatibilityStatus);
-        Assert.NotEmpty(quotation.UnsupportedReason);
-        Assert.Equal(string.Empty, quotation.DatasetKey);
-        Assert.Empty(quotation.FieldAliases);
+        Assert.True(quotation.Supported);
+        Assert.Equal(ReportPrintTemplateCompatibilityText.Compatible, quotation.CompatibilityStatus);
+        Assert.Equal(string.Empty, quotation.UnsupportedReason);
+        Assert.Equal("sales-document:quotation", quotation.DatasetKey);
+        Assert.NotEmpty(quotation.FieldAliases);
     }
 
     [Fact]
@@ -431,15 +481,105 @@ public class ReportConfigurationPrintTemplateCatalogTests
 
 
     [Fact]
-    public async Task Bind_不支持族_显式阻塞()
+    public async Task Bind_销售单据族_报价单_成功绑定并保留字段顺序()
     {
         using var db = TestDbFactory.Create();
-        var user = SeedAuthorizedUser(db, "block", "quotation");
+        var user = SeedAuthorizedUser(db, "sd-order", "quotation");
+        var template = SeedTemplate(db, "quotation", "报价单打印模板");
 
-        var ex = await Assert.ThrowsAsync<BusinessException>(() => BuildService(db, SalesOrderCatalog()).BindAsync(
-            new ReportPrintTemplateBindingRequest { FamilyKey = "quotation", TemplateId = 1 }, user.Id));
+        var result = await BuildService(db, SalesDocumentCatalog("quotation")).BindAsync(
+            Bind(template.Id, "quotation", "docDate", "docNo"), user.Id);
 
-        Assert.Equal(ErrorCodes.RuleConflict, ex.Code);
+        Assert.Equal("sales-document:quotation", result.DatasetKey);
+        Assert.Equal(2, result.BoundColumns.Count);
+        Assert.Equal("docDate", result.BoundColumns[0].ColumnKey);
+        Assert.Equal("docNo", result.BoundColumns[1].ColumnKey);
+    }
+
+    [Fact]
+    public async Task Bind_销售单据族_保存字段顺序_与受控目录一致()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedAuthorizedUser(db, "sd-saved", "proforma-invoice");
+        var template = SeedTemplate(db, "proforma-invoice", "PI打印模板",
+            fieldKeys: "[\"docNo\",\"docDate\",\"customerName\",\"productName\"]");
+
+        var result = await BuildService(db, SalesDocumentCatalog("proforma-invoice")).BindAsync(
+            Bind(template.Id, "proforma-invoice"), user.Id);
+
+        Assert.Equal("sales-document:proforma-invoice", result.DatasetKey);
+        Assert.Equal(new[] { "docNo", "docDate", "customerName", "productName" },
+            result.BoundColumns.Select(c => c.ColumnKey).ToArray());
+    }
+
+    [Fact]
+    public async Task Bind_销售单据族_菜单未授权或已撤销_拒绝()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedAuthorizedUser(db, "sd-menu-deny", "sales-order");
+        var template = SeedTemplate(db, "quotation", "报价单打印模板");
+
+        var exDenied = await Assert.ThrowsAsync<BusinessException>(() => BuildService(db, SalesDocumentCatalog("quotation")).BindAsync(
+            Bind(template.Id, "quotation", "docNo"), user.Id));
+        Assert.Equal(ErrorCodes.Forbidden, exDenied.Code);
+
+        // 撤销授权后立即收敛（fail closed）。
+        var granted = SeedAuthorizedUser(db, "sd-menu-revoke", "quotation");
+        var grantedTemplate = SeedTemplate(db, "quotation", "报价单打印模板");
+        var ok = await BuildService(db, SalesDocumentCatalog("quotation")).BindAsync(
+            Bind(grantedTemplate.Id, "quotation", "docNo"), granted.Id);
+        Assert.Equal("sales-document:quotation", ok.DatasetKey);
+
+        foreach (var link in db.SysRoleMenus.ToList())
+            link.IsDeleted = true;
+        db.SaveChanges();
+
+        var exRevoked = await Assert.ThrowsAsync<BusinessException>(() => BuildService(db, SalesDocumentCatalog("quotation")).BindAsync(
+            Bind(grantedTemplate.Id, "quotation", "docNo"), granted.Id));
+        Assert.Equal(ErrorCodes.Forbidden, exRevoked.Code);
+    }
+
+    [Fact]
+    public async Task Bind_销售单据族_未知字段与别名注入_拒绝()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedAuthorizedUser(db, "sd-inject", "quotation");
+        var template = SeedTemplate(db, "quotation", "报价单打印模板");
+
+        var exUnknown = await Assert.ThrowsAsync<BusinessException>(() => BuildService(db, SalesDocumentCatalog("quotation")).BindAsync(
+            Bind(template.Id, "quotation", "SecretColumn"), user.Id));
+        Assert.Equal(ErrorCodes.InvalidParameter, exUnknown.Code);
+
+        var exInject = await Assert.ThrowsAsync<BusinessException>(() => BuildService(db, SalesDocumentCatalog("quotation")).BindAsync(
+            Bind(template.Id, "quotation", "docNo; DROP TABLE"), user.Id));
+        Assert.Equal(ErrorCodes.InvalidParameter, exInject.Code);
+    }
+
+    [Fact]
+    public async Task Bind_销售单据族_数据集不可用_拒绝()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedAuthorizedUser(db, "sd-no-dataset", "quotation");
+        var template = SeedTemplate(db, "quotation", "报价单打印模板");
+        var emptyCatalog = new FakeCatalog(new Dictionary<string, ReportConfigurationDatasetDto?>());
+
+        var ex = await Assert.ThrowsAsync<BusinessException>(() => BuildService(db, emptyCatalog).BindAsync(
+            Bind(template.Id, "quotation", "docNo"), user.Id));
+
+        Assert.Equal(ErrorCodes.Forbidden, ex.Code);
+    }
+
+    [Fact]
+    public async Task Bind_销售单据族_跨族模板_拒绝()
+    {
+        using var db = TestDbFactory.Create();
+        var user = SeedAuthorizedUser(db, "sd-mismatch", "quotation", "proforma-invoice");
+        var piTemplate = SeedTemplate(db, "proforma-invoice", "PI打印模板");
+
+        var ex = await Assert.ThrowsAsync<BusinessException>(() => BuildService(db, SalesDocumentCatalog("quotation", "proforma-invoice")).BindAsync(
+            Bind(piTemplate.Id, "quotation", "docNo"), user.Id));
+
+        Assert.Equal(ErrorCodes.InvalidParameter, ex.Code);
     }
 
     [Fact]
