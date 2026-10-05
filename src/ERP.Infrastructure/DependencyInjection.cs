@@ -161,6 +161,16 @@ public static class DependencyInjection
                     masterDatasetKey));
         }
 
+        // 通用报表配置平台（ERP-318 Stage 2）：销售单据打印族受控数据集适配器（报价单 / 形式发票 PI；复用既有销售单据菜单授权与客户业务员数据范围，fail closed）
+        foreach (var family in ReportConfigurationSalesDocumentCatalog.Families)
+        {
+            var salesDocumentDatasetKey = family.DatasetKey;
+            services.AddScoped<IReportConfigurationDatasetProvider>(sp =>
+                new SalesDocumentReportConfigurationDatasetProvider(
+                    sp.GetRequiredService<IErpDbContext>(),
+                    salesDocumentDatasetKey));
+        }
+
         // 库存移动与成本服务（ERP-009：库存单据审核/销审统一经此维护库存与流水）
         services.AddScoped<IInventoryService, InventoryService>();
 

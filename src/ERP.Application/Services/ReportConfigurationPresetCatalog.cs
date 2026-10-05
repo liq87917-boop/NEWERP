@@ -335,6 +335,50 @@ internal static class ReportConfigurationPresetManifest
             "商品资料（迁移预设）", ReportConfigurationMasterDataCatalog.Resolve("product").DatasetKey, MasterDataPresetDefinition("product")),
         new ReportConfigurationPresetSeed("master:other-info", "print-template:other-info",
             "其他资料（迁移预设）", ReportConfigurationMasterDataCatalog.Resolve("other-info").DatasetKey, MasterDataPresetDefinition("other-info")),
+
+        // ERP-318：销售单据打印族（报价单 / 形式发票 PI），复用既有销售单据菜单授权与客户业务员数据范围。
+        new ReportConfigurationPresetSeed(
+            "sales-document:quotation",
+            "print-template:quotation",
+            "报价单（迁移预设）",
+            ReportConfigurationSalesDocumentCatalog.Resolve("quotation").DatasetKey,
+            SalesDocumentPresetDefinition("quotation"),
+            new ReportConfigurationPresetParameterSeed[]
+            {
+                new(ReportConfigurationPresetConstants.ParameterCustomer,
+                    ReportConfigurationPresetConstants.ParameterTypeNumber, "客户", Required: false),
+                new(ReportConfigurationPresetConstants.ParameterDate,
+                    ReportConfigurationPresetConstants.ParameterTypeDate, "日期区间", Required: false),
+                new(ReportConfigurationPresetConstants.ParameterStatus,
+                    ReportConfigurationPresetConstants.ParameterTypeText, "状态", Required: false),
+            },
+            new Dictionary<string, ReportConfigurationPresetParameterBindingSeed>(StringComparer.OrdinalIgnoreCase)
+            {
+                [ReportConfigurationPresetConstants.ParameterCustomer] = new("customerId", ReportConfigurationConstants.OperatorEq),
+                [ReportConfigurationPresetConstants.ParameterDate] = new("docDate", ReportConfigurationConstants.OperatorBetween),
+                [ReportConfigurationPresetConstants.ParameterStatus] = new("status", ReportConfigurationConstants.OperatorEq),
+            }),
+        new ReportConfigurationPresetSeed(
+            "sales-document:proforma-invoice",
+            "print-template:proforma-invoice",
+            "形式发票 PI（迁移预设）",
+            ReportConfigurationSalesDocumentCatalog.Resolve("proforma-invoice").DatasetKey,
+            SalesDocumentPresetDefinition("proforma-invoice"),
+            new ReportConfigurationPresetParameterSeed[]
+            {
+                new(ReportConfigurationPresetConstants.ParameterCustomer,
+                    ReportConfigurationPresetConstants.ParameterTypeNumber, "客户", Required: false),
+                new(ReportConfigurationPresetConstants.ParameterDate,
+                    ReportConfigurationPresetConstants.ParameterTypeDate, "日期区间", Required: false),
+                new(ReportConfigurationPresetConstants.ParameterStatus,
+                    ReportConfigurationPresetConstants.ParameterTypeText, "状态", Required: false),
+            },
+            new Dictionary<string, ReportConfigurationPresetParameterBindingSeed>(StringComparer.OrdinalIgnoreCase)
+            {
+                [ReportConfigurationPresetConstants.ParameterCustomer] = new("customerId", ReportConfigurationConstants.OperatorEq),
+                [ReportConfigurationPresetConstants.ParameterDate] = new("docDate", ReportConfigurationConstants.OperatorBetween),
+                [ReportConfigurationPresetConstants.ParameterStatus] = new("status", ReportConfigurationConstants.OperatorEq),
+            }),
     };
 
     private static ReportConfigurationDefinition SalesOrderPresetDefinition() => new()
@@ -791,6 +835,21 @@ internal static class ReportConfigurationPresetManifest
         SchemaVersion = ReportConfigurationRules.CurrentSchemaVersion,
         DatasetKey = ReportConfigurationMasterDataCatalog.Resolve(familyKey).DatasetKey,
         Fields = ReportConfigurationMasterDataCatalog.Resolve(familyKey).Columns.Select(c => c.Key).ToList(),
+        Filters = new List<ReportConfigurationFilter>(),
+        Grouping = new List<string> { ReportConfigurationConstants.GroupNone },
+        Aggregates = new List<ReportConfigurationAggregate>(),
+        Capabilities = new List<string> { ReportConfigurationConstants.CapabilityPreview },
+        Presentation = new ReportConfigurationPresentation { Page = 1, PageSize = 20 },
+    };
+
+    private static ReportConfigurationDefinition SalesDocumentPresetDefinition(string familyKey) => new()
+    {
+        SchemaVersion = ReportConfigurationRules.CurrentSchemaVersion,
+        DatasetKey = ReportConfigurationSalesDocumentCatalog.Resolve(familyKey).DatasetKey,
+        Fields = ReportConfigurationSalesDocumentCatalog.Resolve(familyKey).Columns
+            .Where(c => c.Grain != ReportSalesDocumentGrain.Detail)
+            .Select(c => c.Key)
+            .ToList(),
         Filters = new List<ReportConfigurationFilter>(),
         Grouping = new List<string> { ReportConfigurationConstants.GroupNone },
         Aggregates = new List<ReportConfigurationAggregate>(),
