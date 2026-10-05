@@ -180,7 +180,9 @@ public static class ReportConfigurationBundlePdfExporter
             for (var cp = 0; cp < bands.Count; cp++)
             {
                 var band = bands[cp];
-                var rowPages = PartitionRows(band.Columns, band.Widths, rows);
+                var headHeight = HeadingHeight(SectionTitle(section, cp, bands.Count), TitleSize, TitleHeightMm)
+                    + HeadingHeight(SectionMeta(metaText, cp, bands.Count, int.MaxValue - 1, int.MaxValue), MetaSize, MetaHeightMm);
+                var rowPages = PartitionRows(band.Columns, band.Widths, rows, headHeight);
 
                 for (var rp = 0; rp < rowPages.Count; rp++)
                 {
@@ -209,31 +211,41 @@ public static class ReportConfigurationBundlePdfExporter
             int rowPage,
             int rowPageCount)
         {
-            var title = $"{section.Ordinal}. {section.Title}";
-            if (bandCount > 1)
-                title += $"（列 {band + 1}/{bandCount}）";
+            DrawWrappedHeading(SectionTitle(section, band, bandCount), _titleFont, TitleSize, TitleHeightMm);
+            DrawWrappedHeading(SectionMeta(metaText, band, bandCount, rowPage, rowPageCount), _metaFont, MetaSize, MetaHeightMm);
+        }
 
-            _gfx.DrawString(title, _titleFont, XBrushes.Black,
-                new XRect(Mm(MarginLeftMm), _y, _usableWidth, Mm(TitleHeightMm)), XStringFormats.TopLeft);
-            _y += Mm(TitleHeightMm);
+        private static string SectionTitle(ReportConfigurationBundleSectionExportDto section, int band, int bandCount)
+            => $"{section.Ordinal}. {section.Title}" + (bandCount > 1 ? $"（列 {band + 1}/{bandCount}）" : string.Empty);
 
-            var meta = metaText;
-            if (bandCount > 1)
-                meta += $" · 列 {band + 1}/{bandCount}";
-            meta += $" · 行 {rowPage + 1}/{rowPageCount}";
+        private static string SectionMeta(string text, int band, int bandCount, int rowPage, int rowPageCount)
+            => text + (bandCount > 1 ? $" · 列 {band + 1}/{bandCount}" : string.Empty) + $" · 行 {rowPage + 1}/{rowPageCount}";
 
-            _gfx.DrawString(meta, _metaFont, XBrushes.Black,
-                new XRect(Mm(MarginLeftMm), _y, _usableWidth, Mm(MetaHeightMm)), XStringFormats.TopLeft);
-            _y += Mm(MetaHeightMm);
+        private double HeadingHeight(string text, double fontSize, double lineHeightMm)
+            => ReportConfigurationPdfExporter.WrapText(text, fontSize, _usableWidth).Count * Mm(lineHeightMm);
+
+        private void DrawWrappedHeading(string text, XFont font, double fontSize, double lineHeightMm)
+        {
+            var lines = ReportConfigurationPdfExporter.WrapText(text, fontSize, _usableWidth);
+            var height = Mm(lineHeightMm);
+            if (_y + lines.Count * height > _contentBottom)
+                throw new BusinessException("PDF heading exceeds the bounded page area.", ErrorCodes.InvalidParameter);
+            foreach (var line in lines)
+            {
+                _gfx.DrawString(line, font, XBrushes.Black,
+                    new XRect(Mm(MarginLeftMm), _y, _usableWidth, height), XStringFormats.TopLeft);
+                _y += height;
+            }
         }
 
         private List<(int Start, int Count)> PartitionRows(
             IReadOnlyList<ReportConfigurationColumnDto> columns,
             double[] widths,
-            IReadOnlyList<Dictionary<string, object?>> rows)
+            IReadOnlyList<Dictionary<string, object?>> rows, double headHeight)
         {
-            var contentHeight = Math.Max(_lineHeight,
-                _contentBottom - Mm(MarginTopMm) - Mm(TitleHeightMm + MetaHeightMm) - Mm(HeaderRowHeightMm));
+            var contentHeight = _contentBottom - Mm(MarginTopMm) - headHeight - Mm(HeaderRowHeightMm);
+            if (contentHeight < _lineHeight)
+                throw new BusinessException("PDF heading leaves no bounded data area.", ErrorCodes.InvalidParameter);
 
             var pages = new List<(int, int)>();
             var start = 0;
@@ -242,6 +254,8 @@ public static class ReportConfigurationBundlePdfExporter
             for (var i = 0; i < rows.Count; i++)
             {
                 var height = RowHeight(columns, widths, rows[i], i + 1);
+                if (height > contentHeight)
+                    throw new BusinessException("PDF row exceeds the bounded page area.", ErrorCodes.InvalidParameter);
                 if (i > start && used + height > contentHeight)
                 {
                     pages.Add((start, i - start));
@@ -259,16 +273,12 @@ public static class ReportConfigurationBundlePdfExporter
 
         private void DrawTitle(int ordinal, string title)
         {
-            _gfx.DrawString($"{ordinal}. {title}", _titleFont, XBrushes.Black,
-                new XRect(Mm(MarginLeftMm), _y, _usableWidth, Mm(TitleHeightMm)), XStringFormats.TopLeft);
-            _y += Mm(TitleHeightMm);
+            DrawWrappedHeading($"{ordinal}. {title}", _titleFont, TitleSize, TitleHeightMm);
         }
 
         private void DrawMeta(string metaText)
         {
-            _gfx.DrawString(metaText, _metaFont, XBrushes.Black,
-                new XRect(Mm(MarginLeftMm), _y, _usableWidth, Mm(MetaHeightMm)), XStringFormats.TopLeft);
-            _y += Mm(MetaHeightMm);
+            DrawWrappedHeading(metaText, _metaFont, MetaSize, MetaHeightMm);
         }
 
         private void DrawHeaderRow(IReadOnlyList<ReportConfigurationColumnDto> columns, double[] widths)
