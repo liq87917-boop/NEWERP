@@ -14,7 +14,7 @@ namespace ERP.Infrastructure.Reports;
 /// 原币 / 原单位 / null 原样与一行一条表头粒度；绝不调用写存储过程。</para>
 /// <para>每次目录 / 预览调用都重新校验：身份 + 启用账号 + 全部必需菜单授权 + 特权全量数据范围（fail closed）。</para>
 /// </summary>
-public sealed class LegacyBillExportReportConfigurationDatasetProvider : IReportConfigurationDatasetProvider
+public sealed class LegacyBillExportReportConfigurationDatasetProvider : IReportConfigurationSnapshotDatasetProvider
 {
     private readonly IErpDbContext _db;
     private readonly ILegacyBillExportReadService _reader;
@@ -57,6 +57,7 @@ public sealed class LegacyBillExportReportConfigurationDatasetProvider : IReport
         ReportConfigurationConstants.CapabilityPreview,
         ReportConfigurationConstants.CapabilityPaging,
         ReportConfigurationConstants.CapabilityDateRange,
+        ReportConfigurationConstants.CapabilityMatchedSet,
     };
 
     private static readonly IReadOnlyList<string> UnsupportedCapabilities = new[]
@@ -138,6 +139,84 @@ public sealed class LegacyBillExportReportConfigurationDatasetProvider : IReport
                 _family.DatasetKey, Grain, CurrencyUnitSemantics,
                 ReadOnlyText, BoundaryText, DisclaimerText,
                 ReportConfigurationConstants.CoverageCurrentPage),
+        };
+    }
+
+    /// <inheritdoc />
+    public bool SupportsReadSnapshot => true;
+
+    /// <inheritdoc />
+    public async Task<IReportConfigurationReadSnapshot> OpenReadSnapshotAsync(
+        ReportConfigurationDefinition definition,
+        ReportConfigurationPreviewParameters parameters,
+        long? userId,
+        string correlationId,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(definition);
+        ArgumentNullException.ThrowIfNull(parameters);
+
+        // 每次打开快照都重新校验：身份 + 启用账号 + 全部必需菜单 + 特权全量数据范围（fail closed）。
+        await EnsureAuthorizedAsync(userId, cancellationToken);
+        ReportConfigurationRules.Validate(definition, BuildDataset());
+
+        var fieldKeys = NormalizeFields(definition.Fields);
+        var columns = fieldKeys.Select(BuildColumn).ToList();
+
+        var keyword = ResolveKeyword(definition);
+        var status = ResolveStatus(definition);
+        var (start, end) = ResolveDateRange(definition);
+
+        var query = new LegacyBillExportQuery
+        {
+            FamilyKey = _family.FamilyKey,
+            Fields = fieldKeys,
+            Keyword = keyword,
+            Status = status,
+            StartDate = start,
+            EndDate = end,
+        };
+
+        var evidence = new ReportConfigurationEvidenceContextDto(
+            _family.DatasetKey, Grain, CurrencyUnitSemantics,
+            ReadOnlyText, BoundaryText, DisclaimerText,
+            ReportConfigurationConstants.CoverageMatchedSet);
+
+        // 旧导出为全局只读：EnsureAuthorizedAsync 已确保特权全量范围，故范围指纹恒为 privileged。
+        return await _reader.ReadSnapshotAsync(
+            query, correlationId, "privileged", columns, evidence, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public ReportConfigurationPreviewDto RenderMatchedPage(
+        IReportConfigurationReadSnapshot snapshot,
+        ReportConfigurationDefinition definition,
+        ReportConfigurationPreviewParameters parameters)
+    {
+        ArgumentNullException.ThrowIfNull(snapshot);
+        ArgumentNullException.ThrowIfNull(definition);
+        ArgumentNullException.ThrowIfNull(parameters);
+
+        var offset = CheckedPageOffset(parameters.Page, parameters.PageSize);
+        var pageRows = snapshot.Rows.Skip(offset).Take(parameters.PageSize).ToList();
+        var totalPages = snapshot.MatchedCount == 0
+            ? 0
+            : (int)Math.Ceiling(snapshot.MatchedCount / (double)parameters.PageSize);
+
+        return new ReportConfigurationPreviewDto
+        {
+            DatasetKey = _family.DatasetKey,
+            Columns = snapshot.Columns.ToList(),
+            Rows = pageRows,
+            Total = snapshot.MatchedCount,
+            MatchedCount = snapshot.MatchedCount,
+            Page = parameters.Page,
+            PageSize = parameters.PageSize,
+            TotalPages = totalPages,
+            GroupBy = ReportConfigurationConstants.GroupNone,
+            Groupings = new List<string>(),
+            Groups = null,
+            Evidence = snapshot.Evidence,
         };
     }
 
@@ -245,6 +324,14 @@ public sealed class LegacyBillExportReportConfigurationDatasetProvider : IReport
         if (parameters.PageSize < 1 || parameters.PageSize > MaxPageSize)
             throw BusinessException.InvalidParameter($"每页条数必须在 1 ~ {MaxPageSize} 之间（收到 {parameters.PageSize}）");
         return (parameters.Page, parameters.PageSize);
+    }
+
+    private static int CheckedPageOffset(int page, int pageSize)
+    {
+        var offset = (long)(page - 1) * pageSize;
+        if (offset > int.MaxValue)
+            throw BusinessException.InvalidParameter("分页偏移超出安全范围");
+        return (int)offset;
     }
 
     private IReadOnlyList<string> NormalizeFields(IReadOnlyList<string>? fields)
