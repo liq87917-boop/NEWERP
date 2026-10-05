@@ -1,0 +1,51 @@
+{
+  "title": "Remove the superseded aggregate export:bill-proc registry entry so the legacy-route retirement gate no longer counts a permanently-pending placeholder",
+  "description": "Stage 2 registry defect: ReportMigrationRegistryManifest.Entries still carries the pre-ERP-308 aggregate entry (LegacyKey 'export:bill-proc', 通用单据 Excel 导出) with Array.Empty<string>() RequiredMenuCodes and DatasetKey 'bill-export'. ERP-308's LegacyBillExportCatalog.RegistryEntries explicitly replaced that single aggregate with 16 family-specific entries (export:bill-proc:{familyKey} -> dataset bill-export:{familyKey}). No dataset provider is registered for the bare 'bill-export' key and no bundle preset carries LegacyKey 'export:bill-proc', so DeriveParityAsync returns Pending for it forever. Because CanRetireLegacyRoutesCoreAsync iterates ReportMigrationRegistryManifest.Entries (without the IsMenuAuthorized filter used by GetRegistryAsync), this placeholder makes LegacyRoutesRetirable permanently false even after every real entry reaches parity-passed. Fix the manifest by removing the superseded aggregate entry (the 16 family entries remain the sole representation of legacy bill export) and keep the gate fail-closed. No new controller/designer/exporter, no arbitrary SQL, no schema/seed/migration changes, no secrets/env, no permission expansion; only the manifest plus regression tests. Not audit-only: it unblocks correct derivation of the legacy-route retirement gate.",
+  "acceptance_criteria": [
+    "ReportMigrationRegistryManifest.Entries no longer contains the aggregate 'export:bill-proc' entry (empty RequiredMenuCodes + DatasetKey 'bill-export'); the 16 family-specific 'export:bill-proc:{familyKey}' entries from LegacyBillExportCatalog.RegistryEntries remain the sole representation of legacy bill export.",
+    "CanRetireLegacyRoutes no longer returns false solely because of the superseded placeholder: with fake catalog/preset/evidence providers marking every remaining manifest entry parity-passed the gate returns true, while existing single-menu, multi-menu, packet and bundle parity tests keep passing.",
+    "Add/update executable unit coverage in ReportMigrationRegistryTests asserting the manifest has no aggregate bill-export entry, that all 16 family entries are present, and that the retirement gate is no longer blocked by the placeholder. Run the related tests plus the safe Release build/unit suite and scheduler self-test/contracts."
+  ],
+  "allowed_paths": [
+    "src/ERP.Application/DTOs/ReportMigrationRegistryDtos.cs",
+    "src/ERP.UnitTests/ReportMigrationRegistryTests.cs"
+  ],
+  "criterion_path_map": {
+    "ReportMigrationRegistryManifest.Entries no longer contains the aggregate 'export:bill-proc' entry (empty RequiredMenuCodes + DatasetKey 'bill-export'); the 16 family-specific 'export:bill-proc:{familyKey}' entries from LegacyBillExportCatalog.RegistryEntries remain the sole representation of legacy bill export.": [
+      "src/ERP.Application/DTOs/ReportMigrationRegistryDtos.cs"
+    ],
+    "CanRetireLegacyRoutes no longer returns false solely because of the superseded placeholder: with fake catalog/preset/evidence providers marking every remaining manifest entry parity-passed the gate returns true, while existing single-menu, multi-menu, packet and bundle parity tests keep passing.": [
+      "src/ERP.Application/DTOs/ReportMigrationRegistryDtos.cs",
+      "src/ERP.UnitTests/ReportMigrationRegistryTests.cs"
+    ],
+    "Add/update executable unit coverage in ReportMigrationRegistryTests asserting the manifest has no aggregate bill-export entry, that all 16 family entries are present, and that the retirement gate is no longer blocked by the placeholder. Run the related tests plus the safe Release build/unit suite and scheduler self-test/contracts.": [
+      "src/ERP.UnitTests/ReportMigrationRegistryTests.cs"
+    ]
+  },
+  "depends_on": [
+    "ERP-308",
+    "ERP-322",
+    "ERP-323"
+  ],
+  "risk": "low",
+  "planning_stage": 2,
+  "implementation_evidence": "src/ERP.Application/DTOs/ReportMigrationRegistryDtos.cs:242-244 defines new(\"export:bill-proc\", ..., \"bill-export\", Array.Empty<string>(), string.Empty, ..., true, false) — empty RequiredMenuCodes and a bare DatasetKey that no provider registers. src/ERP.Application/Services/LegacyBillExportCatalog.cs:34-52 BuildRegistryEntries() emits 16 export:bill-proc:{familyKey} entries and its comment states the single aggregate key was '取代' (replaced) by explicit family keys. src/ERP.Application/Services/ReportMigrationRegistry.cs:85-95 CanRetireLegacyRoutesCoreAsync iterates ReportMigrationRegistryManifest.Entries without the IsMenuAuthorized filter, and DeriveParityAsync (98-121) returns Pending for the stale entry because GetDatasetAsync('bill-export') is null and ResolveBundlePresetByLegacyKeyAsync('export:bill-proc') finds no bundle preset.",
+  "id": "ERP-324",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-05T08:52:07.969221Z"
+}

@@ -1,0 +1,52 @@
+{
+  "title": "Fix the parity compatibility gate so legacy entries with no Excel/PDF export (fixed reports, financial statements, field completeness) can reach parity-passed",
+  "description": "Stage 2 parity defect: ReportMigrationRegistry.CompatibilityDeclared requires ExcelCompatible || PdfCompatible. 18 manifest entries are declared ExcelCompatible=false, PdfCompatible=false because their legacy routes expose only JSON/tables (the 10 fixed ReportController GET endpoints report:product-sales-ranking/order-profit/customer-shipment/salesman-output/sales-commission/container-stats/follow-up-due/quotation-conversion/inventory-movement/inventory-aging; the 7 financial statements report:balance-sheet/income-statement/cash-flow/ar-aging/purchase-cost/tax-refund-summary/stock-alert; and export:product-export-field-completeness). These entries therefore always fail CompatibilityDeclared and are permanently stuck at preset-ready — they can never reach parity-passed even with complete four-dimension evidence, which contradicts the stage-2 requirement to migrate ALL fixed and financial reports to parity. Fix the parity derivation so an entry declaring no legacy Excel/PDF (both false) is a valid declaration (vacuous Excel/PDF compatibility, since the generic platform adds Excel/PDF as a superset), preserving fail-closed behavior and never deriving parity-passed without the four-dimension comparison evidence. No new controller/designer/exporter, no arbitrary SQL, no schema/seed/migration changes, no secrets/env, no permission expansion; only the registry parity logic plus regression tests. Not audit-only: it makes fixed-report and financial-statement parity actually reachable.",
+  "acceptance_criteria": [
+    "ReportMigrationRegistry parity derivation treats an entry declared ExcelCompatible=false and PdfCompatible=false as a valid compatibility declaration (vacuous — no legacy Excel/PDF to preserve), so fixed-report and financial-statement entries are no longer permanently stuck at preset-ready and advance to parity-passed when the four-dimension evidence is complete.",
+    "Entries declaring at least one Excel/PDF capability keep existing behavior (dynamic reports, bill-export families, packet, documents), and no entry reaches parity-passed without complete four-dimension evidence (fail closed).",
+    "Add/update executable unit coverage asserting a fixed report (e.g. report:product-sales-ranking or report:balance-sheet) reaches parity-passed with complete evidence, that a false/false entry without evidence stays preset-ready, and that existing dynamic/export parity tests keep passing. Run the related tests plus the safe Release build/unit suite and scheduler self-test/contracts."
+  ],
+  "allowed_paths": [
+    "src/ERP.Application/Services/ReportMigrationRegistry.cs",
+    "src/ERP.UnitTests/ReportMigrationRegistryTests.cs"
+  ],
+  "criterion_path_map": {
+    "ReportMigrationRegistry parity derivation treats an entry declared ExcelCompatible=false and PdfCompatible=false as a valid compatibility declaration (vacuous — no legacy Excel/PDF to preserve), so fixed-report and financial-statement entries are no longer permanently stuck at preset-ready and advance to parity-passed when the four-dimension evidence is complete.": [
+      "src/ERP.Application/Services/ReportMigrationRegistry.cs",
+      "src/ERP.UnitTests/ReportMigrationRegistryTests.cs"
+    ],
+    "Entries declaring at least one Excel/PDF capability keep existing behavior (dynamic reports, bill-export families, packet, documents), and no entry reaches parity-passed without complete four-dimension evidence (fail closed).": [
+      "src/ERP.Application/Services/ReportMigrationRegistry.cs",
+      "src/ERP.UnitTests/ReportMigrationRegistryTests.cs"
+    ],
+    "Add/update executable unit coverage asserting a fixed report (e.g. report:product-sales-ranking or report:balance-sheet) reaches parity-passed with complete evidence, that a false/false entry without evidence stays preset-ready, and that existing dynamic/export parity tests keep passing. Run the related tests plus the safe Release build/unit suite and scheduler self-test/contracts.": [
+      "src/ERP.UnitTests/ReportMigrationRegistryTests.cs",
+      "src/ERP.Application/Services/ReportMigrationRegistry.cs"
+    ]
+  },
+  "depends_on": [
+    "ERP-295",
+    "ERP-296"
+  ],
+  "risk": "medium",
+  "planning_stage": 2,
+  "implementation_evidence": "src/ERP.Application/Services/ReportMigrationRegistry.cs:218-219 CompatibilityDeclared(definition) => definition.ExcelCompatible || definition.PdfCompatible, and :111-112 gates parity-passed behind !CompatibilityDeclared(definition) -> PresetReady. src/ERP.Application/DTOs/ReportMigrationRegistryDtos.cs:129-158 declares all 10 fixed reports with '..., false, false)'; :161-181 declares the 7 financial statements with '..., false, false)'; :245-247 declares export:product-export-field-completeness with '..., false, false)'. The ReportController fixed endpoints (ReportController.cs:84-389) expose only JSON ApiResponse (no Excel/PDF routes), so false,false is the correct legacy declaration and must not block parity-passed.",
+  "id": "ERP-325",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-05T08:52:07.970529Z"
+}
