@@ -1101,6 +1101,72 @@ public sealed class ReportConfigurationTransferImportRequest
 // ==================== ERP-296 Stage 2：报表预设模板编排契约 ====================
 
 /// <summary>
+/// 单节报表预设（ERP-296 / ERP-314 Stage 2）的有限参数词汇：把已迁移旧报表的
+/// customer / date / status 原始运行时限制重新表达为有限、类型化的物化参数。
+/// <para>参数键 / 类型 / 状态只允许本类中的有限枚举，绝不接受任意 SQL、字段名、标识符或联接语义。</para>
+/// </summary>
+public static class ReportConfigurationPresetConstants
+{
+    // ==================== 参数键（有限、类型化） ====================
+
+    /// <summary>客户参数：正整数客户 Id，按 eq 绑定到已授权的客户字段。</summary>
+    public const string ParameterCustomer = "customer";
+
+    /// <summary>日期参数：可选日期区间（起 / 止），按 between / gte / lte 绑定到已授权的日期字段。</summary>
+    public const string ParameterDate = "date";
+
+    /// <summary>状态参数：有限状态文本，按 eq 绑定到已授权的状态字段。</summary>
+    public const string ParameterStatus = "status";
+
+    // ==================== 参数类型（有限、与目录 DataType 对齐） ====================
+
+    public const string ParameterTypeNumber = ReportConfigurationConstants.TypeNumber;
+    public const string ParameterTypeDate = ReportConfigurationConstants.TypeDate;
+    public const string ParameterTypeText = ReportConfigurationConstants.TypeText;
+
+    /// <summary>单个预设最多声明的参数数（3：customer / date / status）。</summary>
+    public const int MaxParameters = 3;
+
+    /// <summary>状态参数最大长度。</summary>
+    public const int MaxStatusLength = 100;
+}
+
+/// <summary>单节报表预设的有限参数元数据（只读）：键 / 类型 / 中文标签 / 是否必填。</summary>
+public sealed class ReportConfigurationPresetParameterDto
+{
+    /// <summary>参数键（customer / date / status）。</summary>
+    public string Key { get; set; } = string.Empty;
+
+    /// <summary>参数类型（number / date / text，与目录 DataType 对齐）。</summary>
+    public string Type { get; set; } = string.Empty;
+
+    /// <summary>参数中文标签。</summary>
+    public string Label { get; set; } = string.Empty;
+
+    /// <summary>是否必填（物化时必须提供且合法）。</summary>
+    public bool Required { get; set; }
+}
+
+/// <summary>
+/// 单节报表预设物化请求（客户端提交有限参数值；所有者 Id 由服务端认证注入，客户端不得提交）。
+/// <para>保持原无参数端点兼容：请求为 null / 空时按原模板定义物化，绝不把参数当权限凭证。</para>
+/// </summary>
+public sealed class ReportConfigurationPresetMaterializeRequest
+{
+    /// <summary>客户 Id（仅 customer 参数；正整数）。</summary>
+    public long? CustomerId { get; set; }
+
+    /// <summary>日期起（仅 date 参数；含当日）。</summary>
+    public DateTime? StartDate { get; set; }
+
+    /// <summary>日期止（仅 date 参数；含当日）。</summary>
+    public DateTime? EndDate { get; set; }
+
+    /// <summary>状态（仅 status 参数；有限文本）。</summary>
+    public string? Status { get; set; }
+}
+
+/// <summary>
 /// 报表预设模板（ERP-296 Stage 2，只读）：把迁移登记册条目重新表达为可物化的私有报表配置定义。
 /// <para>只暴露稳定键 / 名称 / 数据集与 parity 状态，绝不把定义正文当成「授予权限的凭证」下发给客户端；
 /// 物化时由服务端对当前授权数据集重新校验定义，绝不信任预设载荷。</para>
@@ -1124,6 +1190,9 @@ public sealed class ReportConfigurationPresetDto
 
     /// <summary>迁移登记册派生 parity 状态（pending / dataset-ready / preset-ready / parity-passed）。</summary>
     public string ParityStatus { get; set; } = ReportMigrationParityStatusText.Pending;
+
+    /// <summary>有限参数元数据（有序；未声明任何参数的预设为空列表）。</summary>
+    public List<ReportConfigurationPresetParameterDto> Parameters { get; set; } = new();
 }
 
 // ==================== ERP-279 Stage 1：有界集合分页契约 ====================

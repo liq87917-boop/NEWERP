@@ -154,12 +154,17 @@ public class ReportConfigurationsController : ControllerBase
     /// 经既有 <see cref="IReportConfigurationService.CreateAsync"/> 落为私有草稿；未 ready / 未授权 fail closed。
     /// </summary>
     [HttpPost("presets/{presetKey}/materialize")]
-    public async Task<IActionResult> MaterializePreset(string presetKey)
+    public async Task<IActionResult> MaterializePreset(
+        string presetKey,
+        [FromBody] ReportConfigurationPresetMaterializeRequest? request)
     {
         if (_presetCatalog is null)
             throw new BusinessException("报表预设模板未注册", ErrorCodes.InternalError);
 
-        var result = await WithRequestCancellationAsync(ct => _presetCatalog.MaterializeAsync(presetKey, CurrentUserId(), ct));
+        // 保持原无参数端点兼容：请求体为空时按原模板定义物化；提供参数时按有限类型化参数物化。
+        var result = request is null
+            ? await WithRequestCancellationAsync(ct => _presetCatalog.MaterializeAsync(presetKey, CurrentUserId(), ct))
+            : await WithRequestCancellationAsync(ct => _presetCatalog.MaterializeAsync(presetKey, request, CurrentUserId(), ct));
         return Ok(ApiResponse<ReportConfigurationDto>.Success(result, "物化成功"));
     }
 

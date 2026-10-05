@@ -1178,7 +1178,7 @@ function rccLoadMoreList() {
   if (RCC.listHasMore && RCC.listCursor) rccLoadList(RCC.listCursor);
 }
 
-/* 预设模板（ERP-296）：只读列出已授权且 ready 的预设；物化 = 服务端私有副本，绝不信任预设载荷 */
+/* 预设模板（ERP-296 / ERP-314）：只读列出已授权且 ready 的预设；物化 = 服务端私有副本，绝不信任预设载荷 */
 function rccRenderPresets() {
   const el = document.getElementById('rcc-presets');
   if (!el) return;
@@ -1190,9 +1190,33 @@ function rccRenderPresets() {
       + '<div class="rcc-preset-main">'
       + '<div class="rcc-preset-name">' + rccEsc(p.name) + '</div>'
       + '<div class="rcc-preset-meta">' + rccEsc(p.datasetLabel || p.datasetKey) + ' · ' + rccEsc(p.parityStatus || '') + '</div>'
+      + rccPresetParamsHtml(p)
       + '</div>'
       + '<button type="button" class="btn btn-primary" onclick="rccMaterializePreset(\'' + rccEsc(p.presetKey) + '\')">物化为私有副本</button>'
       + '</div>').join('');
+}
+
+/* 单节预设的有限参数控件（ERP-314）：仅渲染服务端声明的 customer / date / status 元数据，绝不自由填字段名 / SQL */
+function rccPresetParamsHtml(preset) {
+  const params = (preset && Array.isArray(preset.parameters)) ? preset.parameters : [];
+  if (!params.length) return '';
+  const fields = params.map(function (param) {
+    const id = rccPresetParamId(preset.presetKey, param.key);
+    const label = rccEsc(param.label || param.key);
+    if (param.key === 'date') {
+      return '<label class="rcc-preset-field"><span>' + label + '</span>'
+        + '<input type="date" id="' + id + '-start" placeholder="开始日期">'
+        + '<input type="date" id="' + id + '-end" placeholder="结束日期"></label>';
+    }
+    const type = (param.type === 'number') ? 'number' : 'text';
+    return '<label class="rcc-preset-field"><span>' + label + '</span>'
+      + '<input type="' + type + '" id="' + id + '" placeholder="' + label + '"></label>';
+  }).join('');
+  return '<div class="rcc-preset-params">' + fields + '</div>';
+}
+
+function rccPresetParamId(presetKey, key) {
+  return 'rcc-preset-' + String(presetKey || '') + '-' + String(key || '');
 }
 
 async function rccLoadPresets() {
@@ -1211,11 +1235,14 @@ async function rccLoadPresets() {
 
 async function rccMaterializePreset(presetKey) {
   if (RCC.busy) return;
+  const preset = (RCC.presets || []).find(p => p.presetKey === presetKey);
+  const body = rccCollectPresetParams(preset);
+  if (body === false) return;                          // 客户端校验失败：已就地提示，不发请求
   RCC.busy = true;
   const seq = ++RCC.requestSeq;
   RCC.lastAction = 'materializePreset';
   try {
-    const env = await rccFetch(RCC_API + '/presets/' + encodeURIComponent(presetKey) + '/materialize', 'POST');
+    const env = await rccFetch(RCC_API + '/presets/' + encodeURIComponent(presetKey) + '/materialize', 'POST', body);
     if (seq !== RCC.requestSeq) return;               // 视图已切换：丢弃迟到响应
     if (env.code === 2000 || env.code === 2003) { rccOnUnauthorized(env.message); return; }
     if (env.code !== 0) {
@@ -1229,6 +1256,36 @@ async function rccMaterializePreset(presetKey) {
   } finally {
     if (seq === RCC.requestSeq) RCC.busy = false;      // 仅当仍是最新操作时才复位忙态
   }
+}
+
+/* 收集单节预设参数（ERP-314）：只读服务端声明的有限键；非法日期区间就地显式提示，绝不提交 */
+function rccCollectPresetParams(preset) {
+  const params = (preset && Array.isArray(preset.parameters)) ? preset.parameters : [];
+  if (!params.length) return null;                     // 无参数预设：维持原无参数请求体
+  const body = {};
+  let start = null;
+  let end = null;
+  for (const param of params) {
+    const id = rccPresetParamId(preset.presetKey, param.key);
+    if (param.key === 'date') {
+      const startEl = document.getElementById(id + '-start');
+      const endEl = document.getElementById(id + '-end');
+      if (startEl && startEl.value) { start = startEl.value; body.startDate = start; }
+      if (endEl && endEl.value) { end = endEl.value; body.endDate = end; }
+    } else if (param.key === 'customer') {
+      const el = document.getElementById(id);
+      if (el && el.value !== '') body.customerId = Number(el.value);
+    } else if (param.key === 'status') {
+      const el = document.getElementById(id);
+      if (el && el.value !== '') body.status = el.value.trim();
+    }
+  }
+  if (start && end && start > end) {
+    const el = document.getElementById('rcc-presets');
+    if (el) el.innerHTML = rccErrorHtml('invalid', '开始日期不能晚于结束日期');
+    return false;
+  }
+  return body;
 }
 
 function rccSelectDataset(key, touch = true) {

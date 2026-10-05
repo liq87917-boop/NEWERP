@@ -20,4 +20,16 @@ public interface IReportConfigurationPresetCatalog
 
     /// <summary>把指定预设物化为当前用户私有副本（重新校验当前授权数据集与定义，绝不信任预设载荷）。</summary>
     Task<ReportConfigurationDto> MaterializeAsync(string presetKey, long? userId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 把指定预设按有限参数物化为当前用户私有草稿（ERP-314 Stage 2）：先逐项重检原始菜单授权与数据集授权，
+    /// 再把已声明的 customer / date / status 参数绑定到当前授权数据集的既有字段（fail closed），
+    /// 校验通过后才经既有 <see cref="IReportConfigurationService.CreateAsync"/> 落为私有草稿；
+    /// 未声明 / 不支持 / 越界 / 撤销字段在创建草稿之前显式失败，绝不静默省略参数、绝不创建部分结果。
+    /// </summary>
+    Task<ReportConfigurationDto> MaterializeAsync(
+        string presetKey,
+        ReportConfigurationPresetMaterializeRequest request,
+        long? userId,
+        CancellationToken cancellationToken = default);
 }

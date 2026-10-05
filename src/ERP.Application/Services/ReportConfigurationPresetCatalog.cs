@@ -9,12 +9,20 @@ namespace ERP.Application.Services;
 /// 把已迁移旧报表重新表达为受控数据集上的可校验 <see cref="ReportConfigurationDefinition"/>。
 /// <para>预设只作为「数据驱动的定义」存在，绝不新增权限 / 存储 / 每报表控制器或导出器。</para>
 /// </summary>
+/// <summary>单节预设共享参数的编译期元数据（ERP-314 Stage 2）：键 / 类型 / 中文标签 / 是否必填。</summary>
+internal sealed record ReportConfigurationPresetParameterSeed(string Key, string Type, string Label, bool Required);
+
+/// <summary>单节预设共享参数的编译期绑定（字段键 + 有限操作符）。</summary>
+internal sealed record ReportConfigurationPresetParameterBindingSeed(string FieldKey, string Operator);
+
 internal sealed record ReportConfigurationPresetSeed(
     string PresetKey,
     string LegacyKey,
     string Name,
     string DatasetKey,
-    ReportConfigurationDefinition Definition);
+    ReportConfigurationDefinition Definition,
+    IReadOnlyList<ReportConfigurationPresetParameterSeed>? Parameters = null,
+    IReadOnlyDictionary<string, ReportConfigurationPresetParameterBindingSeed>? ParameterBindings = null);
 
 internal static class ReportConfigurationPresetManifest
 {
@@ -26,13 +34,43 @@ internal static class ReportConfigurationPresetManifest
             "dynamic:sales-order",
             "销售订单（迁移预设）",
             ReportConfigurationConstants.DatasetSalesOrder,
-            SalesOrderPresetDefinition()),
+            SalesOrderPresetDefinition(),
+            new ReportConfigurationPresetParameterSeed[]
+            {
+                new(ReportConfigurationPresetConstants.ParameterCustomer,
+                    ReportConfigurationPresetConstants.ParameterTypeNumber, "客户", Required: false),
+                new(ReportConfigurationPresetConstants.ParameterDate,
+                    ReportConfigurationPresetConstants.ParameterTypeDate, "日期区间", Required: false),
+                new(ReportConfigurationPresetConstants.ParameterStatus,
+                    ReportConfigurationPresetConstants.ParameterTypeText, "状态", Required: false),
+            },
+            new Dictionary<string, ReportConfigurationPresetParameterBindingSeed>(StringComparer.OrdinalIgnoreCase)
+            {
+                [ReportConfigurationPresetConstants.ParameterCustomer] = new("customerId", ReportConfigurationConstants.OperatorEq),
+                [ReportConfigurationPresetConstants.ParameterDate] = new("orderDate", ReportConfigurationConstants.OperatorBetween),
+                [ReportConfigurationPresetConstants.ParameterStatus] = new("status", ReportConfigurationConstants.OperatorEq),
+            }),
         new ReportConfigurationPresetSeed(
             "receivable",
             "dynamic:receivable",
             "客户应收账款证据（迁移预设）",
             ReportConfigurationConstants.DatasetReceivable,
-            ReceivablePresetDefinition()),
+            ReceivablePresetDefinition(),
+            new ReportConfigurationPresetParameterSeed[]
+            {
+                new(ReportConfigurationPresetConstants.ParameterCustomer,
+                    ReportConfigurationPresetConstants.ParameterTypeNumber, "客户", Required: false),
+                new(ReportConfigurationPresetConstants.ParameterDate,
+                    ReportConfigurationPresetConstants.ParameterTypeDate, "日期区间", Required: false),
+                new(ReportConfigurationPresetConstants.ParameterStatus,
+                    ReportConfigurationPresetConstants.ParameterTypeText, "分配状态", Required: false),
+            },
+            new Dictionary<string, ReportConfigurationPresetParameterBindingSeed>(StringComparer.OrdinalIgnoreCase)
+            {
+                [ReportConfigurationPresetConstants.ParameterCustomer] = new("customerId", ReportConfigurationConstants.OperatorEq),
+                [ReportConfigurationPresetConstants.ParameterDate] = new("invoiceDate", ReportConfigurationConstants.OperatorBetween),
+                [ReportConfigurationPresetConstants.ParameterStatus] = new("allocationState", ReportConfigurationConstants.OperatorEq),
+            }),
         new ReportConfigurationPresetSeed(
             "inventory-movement",
             "report:inventory-movement",
@@ -819,20 +857,227 @@ public sealed class ReportConfigurationPresetCatalog : IReportConfigurationPrese
         EnsureAuthenticated(userId);
 
         var preset = await RequireReadyPresetAsync(presetKey, userId!.Value, cancellationToken);
+        return await MaterializeCoreAsync(preset, new ReportConfigurationPresetMaterializeRequest(), userId.Value, cancellationToken);
+    }
 
-        // 绝不信任预设载荷：对当前授权数据集重新校验定义，缺失适配器 / 无效定义 / 撤销菜单一律 fail closed。
+    /// <inheritdoc />
+    public async Task<ReportConfigurationDto> MaterializeAsync(
+        string presetKey,
+        ReportConfigurationPresetMaterializeRequest request,
+        long? userId,
+        CancellationToken cancellationToken = default)
+    {
+        EnsureAuthenticated(userId);
+        ArgumentNullException.ThrowIfNull(request);
+
+        var preset = await RequireReadyPresetAsync(presetKey, userId!.Value, cancellationToken);
+        ValidateDeclaredParameters(preset, request);
+
+        return await MaterializeCoreAsync(preset, request, userId.Value, cancellationToken);
+    }
+
+    /// <summary>
+    /// 物化核心：绝不信任预设载荷，先对当前授权数据集重新校验定义与参数绑定（fail closed），
+    /// 再经既有 <see cref="IReportConfigurationService.CreateAsync"/> 落为当前用户私有草稿。
+    /// <para>模板定义不可变：这里总是新建一份定义并替换 <c>Filters</c>，绝不改写共享预设清单。</para>
+    /// </summary>
+    private async Task<ReportConfigurationDto> MaterializeCoreAsync(
+        ReportConfigurationPresetSeed preset,
+        ReportConfigurationPresetMaterializeRequest request,
+        long userId,
+        CancellationToken cancellationToken)
+    {
         var dataset = await _catalog.GetDatasetAsync(preset.DatasetKey, userId, cancellationToken)
             ?? throw BusinessException.InvalidParameter($"数据集 {preset.DatasetKey} 不存在或未授权");
-        ReportConfigurationRules.Validate(preset.Definition, dataset);
+
+        foreach (var (parameterKey, binding) in preset.ParameterBindings ?? new Dictionary<string, ReportConfigurationPresetParameterBindingSeed>())
+            ValidateBinding(parameterKey, binding, dataset);
+
+        var definition = BuildDefinition(preset, BuildFilters(preset, request));
+        ReportConfigurationRules.Validate(definition, dataset);
 
         var saveDto = new ReportConfigurationSaveDto
         {
             Name = preset.Name,
-            Definition = preset.Definition,
+            Definition = definition,
         };
 
-        return await _service.CreateAsync(userId.Value, saveDto, cancellationToken);
+        return await _service.CreateAsync(userId, saveDto, cancellationToken);
     }
+
+    private static void ValidateDeclaredParameters(
+        ReportConfigurationPresetSeed preset,
+        ReportConfigurationPresetMaterializeRequest request)
+    {
+        var declared = (preset.Parameters ?? Array.Empty<ReportConfigurationPresetParameterSeed>())
+            .Select(p => p.Key)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        if (request.CustomerId.HasValue
+            && !declared.Contains(ReportConfigurationPresetConstants.ParameterCustomer))
+            throw BusinessException.InvalidParameter("该预设不支持客户参数");
+
+        if ((request.StartDate.HasValue || request.EndDate.HasValue)
+            && !declared.Contains(ReportConfigurationPresetConstants.ParameterDate))
+            throw BusinessException.InvalidParameter("该预设不支持日期参数");
+
+        if (!string.IsNullOrWhiteSpace(request.Status)
+            && !declared.Contains(ReportConfigurationPresetConstants.ParameterStatus))
+            throw BusinessException.InvalidParameter("该预设不支持状态参数");
+
+        if (request.CustomerId is <= 0)
+            throw BusinessException.InvalidParameter("客户 Id 必须为正整数");
+
+        if (request.StartDate.HasValue && request.EndDate.HasValue
+            && request.StartDate.Value.Date > request.EndDate.Value.Date)
+            throw BusinessException.InvalidParameter("开始日期不能晚于结束日期");
+
+        if (request.Status is { Length: > ReportConfigurationPresetConstants.MaxStatusLength })
+            throw BusinessException.InvalidParameter(
+                $"状态参数最长 {ReportConfigurationPresetConstants.MaxStatusLength} 个字符");
+
+        foreach (var parameter in (preset.Parameters ?? Array.Empty<ReportConfigurationPresetParameterSeed>()).Where(p => p.Required))
+        {
+            if (string.Equals(parameter.Key, ReportConfigurationPresetConstants.ParameterCustomer, StringComparison.OrdinalIgnoreCase)
+                && request.CustomerId is null)
+                throw BusinessException.InvalidParameter($"参数 {parameter.Label} 为必填");
+        }
+    }
+
+    private static void ValidateBinding(
+        string parameterKey,
+        ReportConfigurationPresetParameterBindingSeed binding,
+        ReportConfigurationDatasetDto dataset)
+    {
+        var field = dataset.Fields.FirstOrDefault(f =>
+            string.Equals(f.Key, binding.FieldKey, StringComparison.OrdinalIgnoreCase));
+        if (field is null)
+            throw BusinessException.InvalidParameter(
+                $"预设参数 {parameterKey} 绑定的字段 {binding.FieldKey} 不在数据集 {dataset.DatasetKey} 的字段目录中");
+        if (field.Hidden)
+            throw BusinessException.InvalidParameter(
+                $"预设参数 {parameterKey} 绑定的字段 {binding.FieldKey} 已隐藏");
+        if (!field.Filterable)
+            throw BusinessException.InvalidParameter(
+                $"预设参数 {parameterKey} 绑定的字段 {binding.FieldKey} 不可筛选");
+        if (field.FilterOperators is null
+            || !field.FilterOperators.Contains(binding.Operator, StringComparer.OrdinalIgnoreCase))
+            throw BusinessException.InvalidParameter(
+                $"预设参数 {parameterKey} 绑定的字段 {binding.FieldKey} 不支持操作符 {binding.Operator}");
+        if (!TypeMatches(parameterKey, field.Type))
+            throw BusinessException.InvalidParameter(
+                $"预设参数 {parameterKey} 的类型与字段 {binding.FieldKey} 类型（{field.Type}）不匹配");
+    }
+
+    private static bool TypeMatches(string parameterKey, string fieldType)
+    {
+        return parameterKey switch
+        {
+            ReportConfigurationPresetConstants.ParameterCustomer =>
+                string.Equals(fieldType, ReportConfigurationConstants.TypeNumber, StringComparison.OrdinalIgnoreCase),
+            ReportConfigurationPresetConstants.ParameterDate =>
+                string.Equals(fieldType, ReportConfigurationConstants.TypeDate, StringComparison.OrdinalIgnoreCase),
+            ReportConfigurationPresetConstants.ParameterStatus =>
+                string.Equals(fieldType, ReportConfigurationConstants.TypeText, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(fieldType, ReportConfigurationConstants.TypeEnum, StringComparison.OrdinalIgnoreCase),
+            _ => false,
+        };
+    }
+
+
+    private static ReportConfigurationDefinition BuildDefinition(
+        ReportConfigurationPresetSeed preset,
+        IReadOnlyList<ReportConfigurationFilter> filters)
+    {
+        var template = preset.Definition;
+        return new ReportConfigurationDefinition
+        {
+            SchemaVersion = template.SchemaVersion,
+            DatasetKey = template.DatasetKey,
+            Fields = template.Fields.ToList(),
+            Filters = filters.ToList(),
+            Grouping = template.Grouping.ToList(),
+            Aggregates = template.Aggregates.ToList(),
+            ComputedColumns = template.ComputedColumns.ToList(),
+            Capabilities = template.Capabilities.ToList(),
+            Presentation = template.Presentation,
+            Relations = template.Relations.ToList(),
+            Pivot = template.Pivot,
+            Coverage = template.Coverage,
+        };
+    }
+
+    private static List<ReportConfigurationFilter> BuildFilters(
+        ReportConfigurationPresetSeed preset,
+        ReportConfigurationPresetMaterializeRequest request)
+    {
+        var bindings = preset.ParameterBindings ?? new Dictionary<string, ReportConfigurationPresetParameterBindingSeed>(StringComparer.OrdinalIgnoreCase);
+        var filters = new List<ReportConfigurationFilter>();
+
+        if (bindings.TryGetValue(ReportConfigurationPresetConstants.ParameterCustomer, out var customerBinding)
+            && request.CustomerId.HasValue)
+        {
+            filters.Add(new ReportConfigurationFilter
+            {
+                FieldKey = customerBinding.FieldKey,
+                Operator = customerBinding.Operator,
+                Value = request.CustomerId.Value,
+            });
+        }
+
+        if (bindings.TryGetValue(ReportConfigurationPresetConstants.ParameterDate, out var dateBinding))
+            AddDateFilters(filters, dateBinding, request.StartDate, request.EndDate);
+
+        if (bindings.TryGetValue(ReportConfigurationPresetConstants.ParameterStatus, out var statusBinding)
+            && !string.IsNullOrWhiteSpace(request.Status))
+        {
+            filters.Add(new ReportConfigurationFilter
+            {
+                FieldKey = statusBinding.FieldKey,
+                Operator = statusBinding.Operator,
+                Value = request.Status.Trim(),
+            });
+        }
+
+        return filters;
+    }
+
+    private static void AddDateFilters(
+        List<ReportConfigurationFilter> filters,
+        ReportConfigurationPresetParameterBindingSeed binding,
+        DateTime? start,
+        DateTime? end)
+    {
+        if (start.HasValue && end.HasValue)
+        {
+            filters.Add(new ReportConfigurationFilter
+            {
+                FieldKey = binding.FieldKey,
+                Operator = ReportConfigurationConstants.OperatorBetween,
+                Value = start.Value,
+                Value2 = end.Value,
+            });
+        }
+        else if (start.HasValue)
+        {
+            filters.Add(new ReportConfigurationFilter
+            {
+                FieldKey = binding.FieldKey,
+                Operator = ReportConfigurationConstants.OperatorGte,
+                Value = start.Value,
+            });
+        }
+        else if (end.HasValue)
+        {
+            filters.Add(new ReportConfigurationFilter
+            {
+                FieldKey = binding.FieldKey,
+                Operator = ReportConfigurationConstants.OperatorLte,
+                Value = end.Value,
+            });
+        }
+    }
+
 
     private async Task<ReportConfigurationPresetDto?> TryBuildAsync(
         ReportConfigurationPresetSeed preset,
@@ -858,6 +1103,15 @@ public sealed class ReportConfigurationPresetCatalog : IReportConfigurationPrese
             DatasetKey = preset.DatasetKey,
             DatasetLabel = dataset.Label,
             ParityStatus = entry.ParityStatus,
+            Parameters = (preset.Parameters ?? Array.Empty<ReportConfigurationPresetParameterSeed>())
+                .Select(p => new ReportConfigurationPresetParameterDto
+                {
+                    Key = p.Key,
+                    Type = p.Type,
+                    Label = p.Label,
+                    Required = p.Required,
+                })
+                .ToList(),
         };
     }
 
