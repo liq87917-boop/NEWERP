@@ -151,6 +151,16 @@ public static class DependencyInjection
         // 通用报表配置平台（ERP-313 Stage 2）：受控打印渲染服务（复用既有执行服务与受控打印模板绑定目录；只读，不写库）
         services.AddScoped<IReportConfigurationPrintRenderService, ReportConfigurationPrintRenderService>();
 
+        // 通用报表配置平台（ERP-317 Stage 2）：基础资料打印族受控数据集适配器（7 族；复用既有基础资料菜单授权与客户业务员数据范围，fail closed）
+        foreach (var family in ReportConfigurationMasterDataCatalog.Families)
+        {
+            var masterDatasetKey = family.DatasetKey;
+            services.AddScoped<IReportConfigurationDatasetProvider>(sp =>
+                new MasterDataReportConfigurationDatasetProvider(
+                    sp.GetRequiredService<IErpDbContext>(),
+                    masterDatasetKey));
+        }
+
         // 库存移动与成本服务（ERP-009：库存单据审核/销审统一经此维护库存与流水）
         services.AddScoped<IInventoryService, InventoryService>();
 

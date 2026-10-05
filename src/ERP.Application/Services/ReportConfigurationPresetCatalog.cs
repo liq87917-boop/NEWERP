@@ -321,6 +321,20 @@ internal static class ReportConfigurationPresetManifest
             "预装柜单导出（迁移预设）", LegacyBillExportCatalog.Resolve("pre-loading").DatasetKey, BillExportPresetDefinition("pre-loading")),
         new ReportConfigurationPresetSeed("bill-export:loading-list", "export:bill-proc:loading-list",
             "装柜清单导出（迁移预设）", LegacyBillExportCatalog.Resolve("loading-list").DatasetKey, BillExportPresetDefinition("loading-list")),
+        new ReportConfigurationPresetSeed("master:customer", "print-template:customer",
+            "客户资料（迁移预设）", ReportConfigurationMasterDataCatalog.Resolve("customer").DatasetKey, MasterDataPresetDefinition("customer")),
+        new ReportConfigurationPresetSeed("master:supplier", "print-template:supplier",
+            "供应商资料（迁移预设）", ReportConfigurationMasterDataCatalog.Resolve("supplier").DatasetKey, MasterDataPresetDefinition("supplier")),
+        new ReportConfigurationPresetSeed("master:employee", "print-template:employee",
+            "员工资料（迁移预设）", ReportConfigurationMasterDataCatalog.Resolve("employee").DatasetKey, MasterDataPresetDefinition("employee")),
+        new ReportConfigurationPresetSeed("master:expense-account", "print-template:expense-account",
+            "费用科目（迁移预设）", ReportConfigurationMasterDataCatalog.Resolve("expense-account").DatasetKey, MasterDataPresetDefinition("expense-account")),
+        new ReportConfigurationPresetSeed("master:warehouse", "print-template:warehouse",
+            "仓库资料（迁移预设）", ReportConfigurationMasterDataCatalog.Resolve("warehouse").DatasetKey, MasterDataPresetDefinition("warehouse")),
+        new ReportConfigurationPresetSeed("master:product", "print-template:product",
+            "商品资料（迁移预设）", ReportConfigurationMasterDataCatalog.Resolve("product").DatasetKey, MasterDataPresetDefinition("product")),
+        new ReportConfigurationPresetSeed("master:other-info", "print-template:other-info",
+            "其他资料（迁移预设）", ReportConfigurationMasterDataCatalog.Resolve("other-info").DatasetKey, MasterDataPresetDefinition("other-info")),
     };
 
     private static ReportConfigurationDefinition SalesOrderPresetDefinition() => new()
@@ -765,6 +779,18 @@ internal static class ReportConfigurationPresetManifest
         SchemaVersion = ReportConfigurationRules.CurrentSchemaVersion,
         DatasetKey = LegacyBillExportCatalog.Resolve(familyKey).DatasetKey,
         Fields = LegacyBillExportCatalog.Resolve(familyKey).Columns.Select(c => c.Key).ToList(),
+        Filters = new List<ReportConfigurationFilter>(),
+        Grouping = new List<string> { ReportConfigurationConstants.GroupNone },
+        Aggregates = new List<ReportConfigurationAggregate>(),
+        Capabilities = new List<string> { ReportConfigurationConstants.CapabilityPreview },
+        Presentation = new ReportConfigurationPresentation { Page = 1, PageSize = 20 },
+    };
+
+    private static ReportConfigurationDefinition MasterDataPresetDefinition(string familyKey) => new()
+    {
+        SchemaVersion = ReportConfigurationRules.CurrentSchemaVersion,
+        DatasetKey = ReportConfigurationMasterDataCatalog.Resolve(familyKey).DatasetKey,
+        Fields = ReportConfigurationMasterDataCatalog.Resolve(familyKey).Columns.Select(c => c.Key).ToList(),
         Filters = new List<ReportConfigurationFilter>(),
         Grouping = new List<string> { ReportConfigurationConstants.GroupNone },
         Aggregates = new List<ReportConfigurationAggregate>(),
