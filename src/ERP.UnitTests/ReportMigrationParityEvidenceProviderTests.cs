@@ -117,6 +117,28 @@ public class ReportMigrationParityEvidenceProviderTests
     }
 
 
+    [Theory]
+    [InlineData(false, true, true, true)]
+    [InlineData(true, false, true, true)]
+    [InlineData(true, true, false, true)]
+    [InlineData(true, true, true, false)]
+    public void Incomplete_evidence_invalidates_previous_complete_evidence(
+        bool grain, bool currency, bool permissions, bool output)
+    {
+        var provider = new ReportMigrationParityEvidenceProvider();
+        provider.Record("dynamic:sales-order", new(true, true, true, true));
+        provider.Record("dynamic:sales-order", new(grain, currency, permissions, output));
+        Assert.Null(provider.GetEvidence("dynamic:sales-order"));
+    }
+
+    [Fact]
+    public void Unknown_legacy_key_cannot_publish_complete_evidence()
+    {
+        var provider = new ReportMigrationParityEvidenceProvider();
+        provider.Record("invented:outside-manifest", new(true, true, true, true));
+        Assert.Null(provider.GetEvidence("invented:outside-manifest"));
+    }
+
     // ==================== 脚手架 ====================
 
     private static ReportMigrationRegistryEntryDefinition Resolve(string legacyKey)

@@ -38,9 +38,22 @@ public sealed class ReportMigrationParityEvidenceProvider
     /// <inheritdoc />
     public void Record(string legacyKey, ReportMigrationParityEvidenceDto evidence)
     {
-        if (string.IsNullOrWhiteSpace(legacyKey) || evidence is null)
+        if (string.IsNullOrWhiteSpace(legacyKey))
             return;
 
-        _evidence[legacyKey] = evidence;
+        var key = legacyKey.Trim();
+        if (!ReportMigrationRegistryManifest.Entries
+            .Concat(LegacyBillExportCatalog.RegistryEntries)
+            .Concat(ReportPrintTemplateFamilies.RegistryEntries)
+            .Any(entry => string.Equals(entry.LegacyKey, key, StringComparison.OrdinalIgnoreCase)))
+            return;
+
+        if (evidence is not { Complete: true })
+        {
+            _evidence.TryRemove(key, out _);
+            return;
+        }
+
+        _evidence[key] = evidence;
     }
 }
