@@ -1,0 +1,93 @@
+{
+  "title": "Select authoritative sales order sources in purchase order forms",
+  "description": "Stage3 core business workflow integrity. Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance.",
+  "acceptance_criteria": [
+    "Add bounded purchase-order sales source candidate and exact stored-source resolution APIs using live enabled identity, existing purchase-order permission and current customer scope. Reuse PurchaseSalesOrderLinkRules eligibility: approved nondeleted noncancelled sales order, authoritative customer, product/unit compatibility on final save. Apply scope before count/paging, return safe DTO only. Do not require matching currencies or change original commercial prices. Stored historical source unavailable annotations must not disclose foreign customer/order fields.",
+    "Wire optional owning sales-order selector into existing purchase-order create/edit/detail forms. Authoritative customer/order number comes from chosen source; customer changes invalidate selection, outdated responses cannot restore previous context. Preserve existing stored historical link on reopen and amounts on selection; explicit unlink only while editable. Final locked create/update validation remains authoritative and rejects forged IDs. Real SQL API own/foreign/revoked/disabled/cancelled/unapproved and save denial, executable JS create/edit/reopen/customer-change/stale/unlink/error tests, unit and safe Release verification; browser evidence or accurate blocker.",
+    "Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/PurchaseOrderController.cs",
+    "src/ERP.Application/DTOs/PurchaseOrderSalesOrderSourceDtos.cs",
+    "src/ERP.Application/Services/PurchaseOrderSalesOrderSourceService.cs",
+    "src/ERP.Application/Services/PurchaseSalesOrderLinkRules.cs",
+    "src/ERP.Application/Services/PurchaseOrderAuthorizationRules.cs",
+    "src/ERP.Api/wwwroot/js/purchase-order-sales-order-source.js",
+    "src/ERP.Api/wwwroot/js/modules-doc.js",
+    "src/ERP.Api/wwwroot/index.html",
+    "src/ERP.UnitTests/PurchaseOrderSalesOrderSourceTests.cs",
+    "src/ERP.IntegrationTests/PurchaseOrderSalesOrderSourceSqlServerTests.cs",
+    "tests/purchase-order-sales-order-source.test.js",
+    "docs/purchase-order-sales-order-source.md"
+  ],
+  "criterion_path_map": {
+    "Add bounded purchase-order sales source candidate and exact stored-source resolution APIs using live enabled identity, existing purchase-order permission and current customer scope. Reuse PurchaseSalesOrderLinkRules eligibility: approved nondeleted noncancelled sales order, authoritative customer, product/unit compatibility on final save. Apply scope before count/paging, return safe DTO only. Do not require matching currencies or change original commercial prices. Stored historical source unavailable annotations must not disclose foreign customer/order fields.": [
+      "src/ERP.Api/Controllers/PurchaseOrderController.cs",
+      "src/ERP.Application/DTOs/PurchaseOrderSalesOrderSourceDtos.cs",
+      "src/ERP.Application/Services/PurchaseOrderSalesOrderSourceService.cs",
+      "src/ERP.Application/Services/PurchaseSalesOrderLinkRules.cs",
+      "src/ERP.Application/Services/PurchaseOrderAuthorizationRules.cs",
+      "src/ERP.Api/wwwroot/js/purchase-order-sales-order-source.js",
+      "src/ERP.Api/wwwroot/js/modules-doc.js",
+      "src/ERP.Api/wwwroot/index.html",
+      "src/ERP.UnitTests/PurchaseOrderSalesOrderSourceTests.cs",
+      "src/ERP.IntegrationTests/PurchaseOrderSalesOrderSourceSqlServerTests.cs",
+      "tests/purchase-order-sales-order-source.test.js",
+      "docs/purchase-order-sales-order-source.md"
+    ],
+    "Wire optional owning sales-order selector into existing purchase-order create/edit/detail forms. Authoritative customer/order number comes from chosen source; customer changes invalidate selection, outdated responses cannot restore previous context. Preserve existing stored historical link on reopen and amounts on selection; explicit unlink only while editable. Final locked create/update validation remains authoritative and rejects forged IDs. Real SQL API own/foreign/revoked/disabled/cancelled/unapproved and save denial, executable JS create/edit/reopen/customer-change/stale/unlink/error tests, unit and safe Release verification; browser evidence or accurate blocker.": [
+      "src/ERP.Api/Controllers/PurchaseOrderController.cs",
+      "src/ERP.Application/DTOs/PurchaseOrderSalesOrderSourceDtos.cs",
+      "src/ERP.Application/Services/PurchaseOrderSalesOrderSourceService.cs",
+      "src/ERP.Application/Services/PurchaseSalesOrderLinkRules.cs",
+      "src/ERP.Application/Services/PurchaseOrderAuthorizationRules.cs",
+      "src/ERP.Api/wwwroot/js/purchase-order-sales-order-source.js",
+      "src/ERP.Api/wwwroot/js/modules-doc.js",
+      "src/ERP.Api/wwwroot/index.html",
+      "src/ERP.UnitTests/PurchaseOrderSalesOrderSourceTests.cs",
+      "src/ERP.IntegrationTests/PurchaseOrderSalesOrderSourceSqlServerTests.cs",
+      "tests/purchase-order-sales-order-source.test.js",
+      "docs/purchase-order-sales-order-source.md"
+    ],
+    "Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance.": [
+      "src/ERP.Api/Controllers/PurchaseOrderController.cs",
+      "src/ERP.Application/DTOs/PurchaseOrderSalesOrderSourceDtos.cs",
+      "src/ERP.Application/Services/PurchaseOrderSalesOrderSourceService.cs",
+      "src/ERP.Application/Services/PurchaseSalesOrderLinkRules.cs",
+      "src/ERP.Application/Services/PurchaseOrderAuthorizationRules.cs",
+      "src/ERP.Api/wwwroot/js/purchase-order-sales-order-source.js",
+      "src/ERP.Api/wwwroot/js/modules-doc.js",
+      "src/ERP.Api/wwwroot/index.html",
+      "src/ERP.UnitTests/PurchaseOrderSalesOrderSourceTests.cs",
+      "src/ERP.IntegrationTests/PurchaseOrderSalesOrderSourceSqlServerTests.cs",
+      "tests/purchase-order-sales-order-source.test.js",
+      "docs/purchase-order-sales-order-source.md"
+    ]
+  },
+  "implementation_evidence": "modules-doc.js purchase-order form exposes OwningSalesOrderId as a raw number and separately editable OwningSalesOrderNo; PurchaseSalesOrderLinkRules already validates approved source/customer/product/unit and deliberately allows different commercial currencies. No bounded source picker exists in PurchaseOrderController.",
+  "depends_on": [
+    "ERP-392",
+    "ERP-371",
+    "ERP-346"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "id": "ERP-393",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-08T17:03:40.201939Z"
+}
