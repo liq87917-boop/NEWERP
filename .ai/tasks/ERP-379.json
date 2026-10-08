@@ -1,0 +1,64 @@
+{
+  "title": "Serialize supplier payment submit and approval with payment mutations",
+  "description": "Stage3 core finance closure. Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance.",
+  "acceptance_criteria": [
+    "Make payment submit and approve use the existing compatible payment-row lock and atomic transaction before loading status and checking authorization. Reread enabled current identity, payment menu, authoritative source customer scope and allowed transition under that transaction; validate persisted amount/currency/source using existing rules without inventing new approval requirements. Failed/denied transitions leave fields, status, deletion and audit untouched.",
+    "Preserve ERP351 shared order/invoice allocation budget, effective evidence guards and explicit void history. Verify two independent SQL connections for submit racing edit/delete and approve racing cancel with consistent serialized outcomes, no stale write restoring a cancelled/deleted payment and no new financial posting. Test revoked menu, disabled identity, foreign source, invalid source, repeat transition and failure rollback through actual controller SQL tests and meaningful unit tests. Run safe Release validation; record browser evidence or exact blocker without declaring stage acceptance.",
+    "Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/FinancePaymentController.cs",
+    "src/ERP.Application/Services/SupplierPaymentLifecycleRules.cs",
+    "src/ERP.UnitTests/SupplierPaymentTransitionConcurrencyTests.cs",
+    "src/ERP.IntegrationTests/SupplierPaymentTransitionConcurrencySqlServerTests.cs",
+    "docs/supplier-payment-transition-concurrency.md"
+  ],
+  "criterion_path_map": {
+    "Make payment submit and approve use the existing compatible payment-row lock and atomic transaction before loading status and checking authorization. Reread enabled current identity, payment menu, authoritative source customer scope and allowed transition under that transaction; validate persisted amount/currency/source using existing rules without inventing new approval requirements. Failed/denied transitions leave fields, status, deletion and audit untouched.": [
+      "src/ERP.Api/Controllers/FinancePaymentController.cs",
+      "src/ERP.Application/Services/SupplierPaymentLifecycleRules.cs",
+      "src/ERP.UnitTests/SupplierPaymentTransitionConcurrencyTests.cs",
+      "src/ERP.IntegrationTests/SupplierPaymentTransitionConcurrencySqlServerTests.cs",
+      "docs/supplier-payment-transition-concurrency.md"
+    ],
+    "Preserve ERP351 shared order/invoice allocation budget, effective evidence guards and explicit void history. Verify two independent SQL connections for submit racing edit/delete and approve racing cancel with consistent serialized outcomes, no stale write restoring a cancelled/deleted payment and no new financial posting. Test revoked menu, disabled identity, foreign source, invalid source, repeat transition and failure rollback through actual controller SQL tests and meaningful unit tests. Run safe Release validation; record browser evidence or exact blocker without declaring stage acceptance.": [
+      "src/ERP.Api/Controllers/FinancePaymentController.cs",
+      "src/ERP.Application/Services/SupplierPaymentLifecycleRules.cs",
+      "src/ERP.UnitTests/SupplierPaymentTransitionConcurrencyTests.cs",
+      "src/ERP.IntegrationTests/SupplierPaymentTransitionConcurrencySqlServerTests.cs",
+      "docs/supplier-payment-transition-concurrency.md"
+    ],
+    "Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance.": [
+      "src/ERP.Api/Controllers/FinancePaymentController.cs",
+      "src/ERP.Application/Services/SupplierPaymentLifecycleRules.cs",
+      "src/ERP.UnitTests/SupplierPaymentTransitionConcurrencyTests.cs",
+      "src/ERP.IntegrationTests/SupplierPaymentTransitionConcurrencySqlServerTests.cs",
+      "docs/supplier-payment-transition-concurrency.md"
+    ]
+  },
+  "implementation_evidence": "ERP351 locks FinancePaymentController Update/Cancel/Delete and supplier allocation writers, but Submit and Approve still read status and save without a compatible transaction or payment row lock. Stale transitions can overwrite cancellation or approve an edited/deleted payment.",
+  "depends_on": [
+    "ERP-351",
+    "ERP-378"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "id": "ERP-379",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-08T13:32:14.671896Z"
+}

@@ -1,0 +1,72 @@
+{
+  "title": "Serialize receipt lifecycle with customer and agency funding allocations",
+  "description": "Stage3 core finance closure. Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance.",
+  "acceptance_criteria": [
+    "Wrap receipt update/submit/approve/cancel/delete in compatible existing receipt-row locking and one atomic transaction; acquire lock before loading authoritative status, customer, currency and amount. Recheck live enabled identity, receipt menu and current customer scope inside the transaction. Preserve stored and proposed scope checks, currency precision, positive amounts, original audit, allowed transitions and soft-delete semantics. Do not change the complaint controller sharing this file.",
+    "Use the same lock ordering as customer and agency receipt allocation and void services so cancellation/deletion or evidence-breaking customer/currency/amount changes cannot invalidate effective evidence. Preserve ERP350 one shared same-currency budget, require explicit void to release evidence and keep history. Demonstrate two independent SQL connections for assignment racing cancel, edit racing submit and approve racing cancel, with one consistent serialized result and no orphan allocation, over-budget funding or partial writes. Denied/revoked/disabled requests and losing mutations preserve status, original fields and audit. Include actual controller SQL tests, meaningful unit tests, safe Release validation and accurate browser acceptance evidence or blocker.",
+    "Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/FinanceReceiptComplaintControllers.cs",
+    "src/ERP.Application/Services/CustomerReceiptLifecycleRules.cs",
+    "src/ERP.Application/Services/CustomerReceiptAllocationService.cs",
+    "src/ERP.Application/Services/AgencyServiceFeeCollectionAllocationService.cs",
+    "src/ERP.UnitTests/ReceiptLifecycleConcurrencyTests.cs",
+    "src/ERP.IntegrationTests/ReceiptLifecycleConcurrencySqlServerTests.cs",
+    "docs/receipt-lifecycle-concurrency.md"
+  ],
+  "criterion_path_map": {
+    "Wrap receipt update/submit/approve/cancel/delete in compatible existing receipt-row locking and one atomic transaction; acquire lock before loading authoritative status, customer, currency and amount. Recheck live enabled identity, receipt menu and current customer scope inside the transaction. Preserve stored and proposed scope checks, currency precision, positive amounts, original audit, allowed transitions and soft-delete semantics. Do not change the complaint controller sharing this file.": [
+      "src/ERP.Api/Controllers/FinanceReceiptComplaintControllers.cs",
+      "src/ERP.Application/Services/CustomerReceiptLifecycleRules.cs",
+      "src/ERP.Application/Services/CustomerReceiptAllocationService.cs",
+      "src/ERP.Application/Services/AgencyServiceFeeCollectionAllocationService.cs",
+      "src/ERP.UnitTests/ReceiptLifecycleConcurrencyTests.cs",
+      "src/ERP.IntegrationTests/ReceiptLifecycleConcurrencySqlServerTests.cs",
+      "docs/receipt-lifecycle-concurrency.md"
+    ],
+    "Use the same lock ordering as customer and agency receipt allocation and void services so cancellation/deletion or evidence-breaking customer/currency/amount changes cannot invalidate effective evidence. Preserve ERP350 one shared same-currency budget, require explicit void to release evidence and keep history. Demonstrate two independent SQL connections for assignment racing cancel, edit racing submit and approve racing cancel, with one consistent serialized result and no orphan allocation, over-budget funding or partial writes. Denied/revoked/disabled requests and losing mutations preserve status, original fields and audit. Include actual controller SQL tests, meaningful unit tests, safe Release validation and accurate browser acceptance evidence or blocker.": [
+      "src/ERP.Api/Controllers/FinanceReceiptComplaintControllers.cs",
+      "src/ERP.Application/Services/CustomerReceiptLifecycleRules.cs",
+      "src/ERP.Application/Services/CustomerReceiptAllocationService.cs",
+      "src/ERP.Application/Services/AgencyServiceFeeCollectionAllocationService.cs",
+      "src/ERP.UnitTests/ReceiptLifecycleConcurrencyTests.cs",
+      "src/ERP.IntegrationTests/ReceiptLifecycleConcurrencySqlServerTests.cs",
+      "docs/receipt-lifecycle-concurrency.md"
+    ],
+    "Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance.": [
+      "src/ERP.Api/Controllers/FinanceReceiptComplaintControllers.cs",
+      "src/ERP.Application/Services/CustomerReceiptLifecycleRules.cs",
+      "src/ERP.Application/Services/CustomerReceiptAllocationService.cs",
+      "src/ERP.Application/Services/AgencyServiceFeeCollectionAllocationService.cs",
+      "src/ERP.UnitTests/ReceiptLifecycleConcurrencyTests.cs",
+      "src/ERP.IntegrationTests/ReceiptLifecycleConcurrencySqlServerTests.cs",
+      "docs/receipt-lifecycle-concurrency.md"
+    ]
+  },
+  "implementation_evidence": "ERP349 implements identity and allocation guards but FinanceReceiptController Update/Submit/Approve/Cancel/Delete perform read-check-save without the receipt row lock already held by ERP350 allocation writers. Cancellation or commercial edits can race assignment and leave effective allocations backed by cancelled or changed receipts.",
+  "depends_on": [
+    "ERP-349",
+    "ERP-350"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "id": "ERP-378",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-08T13:32:14.664647Z"
+}
