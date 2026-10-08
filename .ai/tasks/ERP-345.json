@@ -1,0 +1,63 @@
+{
+  "title": "阻止采购订单在有效入库或付款履约存在时直接取消",
+  "description": "Stage3 core operational closure under explicit 2026-10-08 user priority. Reuse existing entities/layers/services and audit, no new report/Agent/schema/production actions or permission expansion. Fix verified source-link/state gaps with minimal complete files.",
+  "acceptance_criteria": [
+    "In existing purchase-order cancellation route validate current identity/menu/customer scope and live document state. Refuse cancellation while explicit live approved unreversed receipts or effective supplier payment/invoice allocations remain; list only authorized concise reason, never infer links from strings or sum currencies.",
+    "Run check and state change atomically with same-order approval coordination used by ERP342; concurrent receipt approval and source cancellation cannot both succeed creating invalid fulfillment. Null/unlinked historical evidence not guessed; canceled/reversed/deleted evidence only ignored when authoritative existing workflow marks it inactive. Existing reversal services must be used; cancellation guard itself never silently reverses stock or finance.",
+    "Keep original order lines/amounts and audit route. Verify no-dependent cancellation, active receipt/payment refusal, explicitly reversed/canceled release, denied user, repeated operation and two-connection cancellation-versus-approval race under exact dedicated NEWERP_AUTOTEST LocalDB; safe Release and relevant units pass."
+  ],
+  "allowed_paths": [
+    "src/ERP.Application/Services/PurchaseOrderCancellationRules.cs",
+    "src/ERP.Api/Controllers/PurchaseOrderController.cs",
+    "src/ERP.UnitTests/PurchaseOrderCancellationTests.cs",
+    "src/ERP.IntegrationTests/PurchaseOrderCancellationSqlServerTests.cs",
+    "docs/purchase-order-cancellation.md"
+  ],
+  "criterion_path_map": {
+    "In existing purchase-order cancellation route validate current identity/menu/customer scope and live document state. Refuse cancellation while explicit live approved unreversed receipts or effective supplier payment/invoice allocations remain; list only authorized concise reason, never infer links from strings or sum currencies.": [
+      "src/ERP.Application/Services/PurchaseOrderCancellationRules.cs",
+      "src/ERP.Api/Controllers/PurchaseOrderController.cs",
+      "src/ERP.UnitTests/PurchaseOrderCancellationTests.cs",
+      "src/ERP.IntegrationTests/PurchaseOrderCancellationSqlServerTests.cs",
+      "docs/purchase-order-cancellation.md"
+    ],
+    "Run check and state change atomically with same-order approval coordination used by ERP342; concurrent receipt approval and source cancellation cannot both succeed creating invalid fulfillment. Null/unlinked historical evidence not guessed; canceled/reversed/deleted evidence only ignored when authoritative existing workflow marks it inactive. Existing reversal services must be used; cancellation guard itself never silently reverses stock or finance.": [
+      "src/ERP.Application/Services/PurchaseOrderCancellationRules.cs",
+      "src/ERP.Api/Controllers/PurchaseOrderController.cs",
+      "src/ERP.UnitTests/PurchaseOrderCancellationTests.cs",
+      "src/ERP.IntegrationTests/PurchaseOrderCancellationSqlServerTests.cs",
+      "docs/purchase-order-cancellation.md"
+    ],
+    "Keep original order lines/amounts and audit route. Verify no-dependent cancellation, active receipt/payment refusal, explicitly reversed/canceled release, denied user, repeated operation and two-connection cancellation-versus-approval race under exact dedicated NEWERP_AUTOTEST LocalDB; safe Release and relevant units pass.": [
+      "src/ERP.Application/Services/PurchaseOrderCancellationRules.cs",
+      "src/ERP.Api/Controllers/PurchaseOrderController.cs",
+      "src/ERP.UnitTests/PurchaseOrderCancellationTests.cs",
+      "src/ERP.IntegrationTests/PurchaseOrderCancellationSqlServerTests.cs",
+      "docs/purchase-order-cancellation.md"
+    ]
+  },
+  "depends_on": [
+    "ERP-342"
+  ],
+  "implementation_evidence": "PurchaseOrderController has no Cancel override; DocumentControllerBase.Cancel sets Cancelled unconditionally without checking active StockIns, stock movements or explicit supplier payment/invoice allocation links. Existing approved receipts and payment evidence can outlive a canceled source with no operational guard.",
+  "risk": "medium",
+  "planning_stage": 3,
+  "id": "ERP-345",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-08T02:11:35.402681Z"
+}

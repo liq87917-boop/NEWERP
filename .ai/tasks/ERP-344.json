@@ -1,0 +1,67 @@
+{
+  "title": "采购入库显式来源失效时拒绝审核并保留历史证据",
+  "description": "Stage3 core operational closure under explicit 2026-10-08 user priority. Reuse existing entities/layers/services and audit, no new report/Agent/schema/production actions or permission expansion. Fix verified source-link/state gaps with minimal complete files.",
+  "acceptance_criteria": [
+    "New explicit PurchaseOrderId links on create/update must be positive, current-user authorized, existent, live approved and supplier/product/unit compatible. Null unlinked history stays supported. At approval invalid or changed explicit source fails before inventory writes; never skip quantity guard because source metadata is ambiguous. Do not rewrite historical links or replace permission checks.",
+    "Keep ERP033 cost fallback for valid fulfillment sources whose price/exchange-rate valuation is unavailable; separate valuation ambiguity from order identity/quantity authorization. Repair affected legacy tests to distinguish valid costing fallback from invalid fulfillment links; never delete tests or weaken source guards to make old assertions green.",
+    "Use bounded authoritative prior approved receipts with proven base units; reject ambiguous historic quantities rather than summing incompatible units. Preserve transactional cumulative guard, cancellation/reversal, audit and useful error response. Prove invalid ID/source status/supplier/product/unit, duplicate source lines, post-submit source changes and no stock/movement/status mutation; guarded real SQL plus safe Release build/unit."
+  ],
+  "allowed_paths": [
+    "src/ERP.Application/Services/StockInOrderFulfillmentRules.cs",
+    "src/ERP.Api/Controllers/StockInController.cs",
+    "src/ERP.UnitTests/StockInOrderFulfillmentTests.cs",
+    "src/ERP.UnitTests/PurchaseStockInCostTests.cs",
+    "src/ERP.IntegrationTests/StockInOrderFulfillmentSqlServerTests.cs",
+    "docs/stockin-order-fulfillment.md"
+  ],
+  "criterion_path_map": {
+    "New explicit PurchaseOrderId links on create/update must be positive, current-user authorized, existent, live approved and supplier/product/unit compatible. Null unlinked history stays supported. At approval invalid or changed explicit source fails before inventory writes; never skip quantity guard because source metadata is ambiguous. Do not rewrite historical links or replace permission checks.": [
+      "src/ERP.Application/Services/StockInOrderFulfillmentRules.cs",
+      "src/ERP.Api/Controllers/StockInController.cs",
+      "src/ERP.UnitTests/StockInOrderFulfillmentTests.cs",
+      "src/ERP.UnitTests/PurchaseStockInCostTests.cs",
+      "src/ERP.IntegrationTests/StockInOrderFulfillmentSqlServerTests.cs",
+      "docs/stockin-order-fulfillment.md"
+    ],
+    "Keep ERP033 cost fallback for valid fulfillment sources whose price/exchange-rate valuation is unavailable; separate valuation ambiguity from order identity/quantity authorization. Repair affected legacy tests to distinguish valid costing fallback from invalid fulfillment links; never delete tests or weaken source guards to make old assertions green.": [
+      "src/ERP.Application/Services/StockInOrderFulfillmentRules.cs",
+      "src/ERP.Api/Controllers/StockInController.cs",
+      "src/ERP.UnitTests/StockInOrderFulfillmentTests.cs",
+      "src/ERP.UnitTests/PurchaseStockInCostTests.cs",
+      "src/ERP.IntegrationTests/StockInOrderFulfillmentSqlServerTests.cs",
+      "docs/stockin-order-fulfillment.md"
+    ],
+    "Use bounded authoritative prior approved receipts with proven base units; reject ambiguous historic quantities rather than summing incompatible units. Preserve transactional cumulative guard, cancellation/reversal, audit and useful error response. Prove invalid ID/source status/supplier/product/unit, duplicate source lines, post-submit source changes and no stock/movement/status mutation; guarded real SQL plus safe Release build/unit.": [
+      "src/ERP.Application/Services/StockInOrderFulfillmentRules.cs",
+      "src/ERP.Api/Controllers/StockInController.cs",
+      "src/ERP.UnitTests/StockInOrderFulfillmentTests.cs",
+      "src/ERP.UnitTests/PurchaseStockInCostTests.cs",
+      "src/ERP.IntegrationTests/StockInOrderFulfillmentSqlServerTests.cs",
+      "docs/stockin-order-fulfillment.md"
+    ]
+  },
+  "depends_on": [
+    "ERP-342"
+  ],
+  "implementation_evidence": "ERP342 TryResolveAuthoritativeLinkAsync returns null and ValidateApprovalAsync skips all enforcement for missing/unapproved/mismatched/duplicate/incompatible explicit sources. Worker run_result acknowledges weakening required fail-closed acceptance to satisfy ERP033 historical cost tests; CREATE/UPDATE currently lack ValidateLink. This is a real operational bypass, not report polish.",
+  "risk": "medium",
+  "planning_stage": 3,
+  "id": "ERP-344",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-08T02:11:35.396055Z"
+}
