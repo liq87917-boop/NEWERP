@@ -48,3 +48,22 @@ public sealed record ReportMigrationArtifactDto(
 public sealed record LegacyReportArtifactBytesDto(
     byte[]? ExcelBytes,
     byte[]? PdfBytes);
+
+/// <summary>
+/// 从实际 PDF 字节解码出的单个单元格（ERP-336）：实际抽取的文本 + 原始 null 表示（空单元格绝不回落为 0 / 文本）。
+/// <para>PDF 中 null 与空字符串均渲染为空单元格（无文本），统一表示为 <see cref="IsNull"/> = true。</para>
+/// </summary>
+public sealed record ReportMigrationPdfCellDto(
+    string Text,
+    bool IsNull);
+
+/// <summary>
+/// 从实际 PDF 字节解码出的有界产物（ERP-336）：有序列头 + 有序数据行 + 空单元格 / 文本 + 页 / 列带 / 行延续语义。
+/// <para>只描述从实际内容流 + ToUnicode CMap 抽取出的结构化表格（绝不携带任意 SQL / 凭据 / 原始压缩字节）。</para>
+/// </summary>
+public sealed record ReportMigrationPdfArtifactDto(
+    int PageCount,
+    bool EmbeddedFont,
+    bool HasContent,
+    IReadOnlyList<string> Headers,
+    IReadOnlyList<IReadOnlyList<ReportMigrationPdfCellDto>> Rows);

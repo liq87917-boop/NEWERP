@@ -47,11 +47,11 @@ public sealed class ReportMigrationArtifactParitySqlServerTests
         var evidence = await BuildService(db).GetEvidenceAsync("dynamic:sales-order", _fixture.PrivilegedUserId);
 
         Assert.NotNull(evidence);
-        Assert.False(evidence!.Complete); // PDF cells/layout cannot yet be extracted for actual parity.
+        Assert.False(evidence!.Complete); // 全家族 / 浏览器 parity 仍缺失，不宣告阶段完成。
         Assert.True(evidence.DataGrainMatched);
         Assert.True(evidence.CurrencyUnitMatched);
         Assert.True(evidence.PermissionsMatched);
-        Assert.False(evidence.OutputSemanticsMatched);
+        Assert.False(evidence.OutputSemanticsMatched); // 动态销售订单家族实际 PDF 语义尚未对齐。
     }
 
     [Fact]

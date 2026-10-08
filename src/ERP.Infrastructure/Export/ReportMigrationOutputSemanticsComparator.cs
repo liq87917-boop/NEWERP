@@ -29,10 +29,12 @@ public sealed class ReportMigrationOutputSemanticsComparator : IReportMigrationO
     private static readonly object NullCellSentinel = new();
 
     private readonly int _maxArtifactBytes;
+    private readonly ReportMigrationPdfArtifactDecoder _pdfDecoder;
 
     public ReportMigrationOutputSemanticsComparator(int maxArtifactBytes = DefaultMaxArtifactBytes)
     {
         _maxArtifactBytes = maxArtifactBytes > 0 ? maxArtifactBytes : DefaultMaxArtifactBytes;
+        _pdfDecoder = new ReportMigrationPdfArtifactDecoder(_maxArtifactBytes);
     }
 
     /// <inheritdoc />
@@ -222,7 +224,7 @@ public sealed class ReportMigrationOutputSemanticsComparator : IReportMigrationO
         if (legacyArtifact is null)
             return false;
 
-        return ComparePdfArtifacts(genericArtifact, legacyArtifact, genericPreview, legacySnapshot, evidence);
+        return ComparePdfArtifacts(genericArtifact, legacyArtifact, evidence);
     }
 
     private static string? ResolveFont(string? fontPath, List<string> evidence)
@@ -307,10 +309,8 @@ public sealed class ReportMigrationOutputSemanticsComparator : IReportMigrationO
     }
 
     private static bool ComparePdfArtifacts(
-        ReportMigrationArtifactDto generic,
-        ReportMigrationArtifactDto legacy,
-        ReportConfigurationPreviewDto genericPreview,
-        ReportMigrationParitySnapshotDto legacySnapshot,
+        ReportMigrationPdfArtifactDto generic,
+        ReportMigrationPdfArtifactDto legacy,
         List<string> evidence)
     {
         var matched = true;
@@ -319,22 +319,59 @@ public sealed class ReportMigrationOutputSemanticsComparator : IReportMigrationO
         {
             matched = false;
             evidence.Add("PDF 内容为空或不可提取（unextractable）");
+            return false;
         }
 
-        if (!generic.EmbeddedFont || !legacy.EmbeddedFont)
+        if (generic.Headers.Count != legacy.Headers.Count)
         {
             matched = false;
-            evidence.Add("PDF 未内嵌中文字体 SimHei（缺字 / 乱码风险，fail closed）");
+            evidence.Add($"PDF 列数不一致：通用 {generic.Headers.Count} 列 vs 旧导出 {legacy.Headers.Count} 列");
         }
 
-        if (!CompareSemantics(genericPreview, legacySnapshot, evidence))
+        var alignedColumnCount = Math.Min(generic.Headers.Count, legacy.Headers.Count);
+        for (var c = 0; c < alignedColumnCount; c++)
+        {
+            if (!string.Equals(generic.Headers[c], legacy.Headers[c], StringComparison.Ordinal))
+            {
+                matched = false;
+                evidence.Add($"PDF 第 {c} 列头不一致：通用 '{generic.Headers[c]}' vs 旧导出 '{legacy.Headers[c]}'");
+            }
+        }
+
+        if (generic.Rows.Count != legacy.Rows.Count)
+        {
             matched = false;
+            evidence.Add($"PDF 行数不一致：通用 {generic.Rows.Count} 行 vs 旧导出 {legacy.Rows.Count} 行");
+        }
+        else
+        {
+            for (var r = 0; r < generic.Rows.Count; r++)
+            {
+                var genericRow = generic.Rows[r];
+                var legacyRow = legacy.Rows[r];
 
-        if (!matched)
-            return false;
+                if (genericRow.Count != legacyRow.Count)
+                {
+                    matched = false;
+                    evidence.Add($"PDF 第 {r} 行单元格数不一致：通用 {genericRow.Count} vs 旧导出 {legacyRow.Count}");
+                }
 
-        evidence.Add("Actual PDF cell/layout extraction is unavailable; input snapshots and embedded-font markers cannot prove output parity.");
-        return false;
+                var cellCount = Math.Min(genericRow.Count, legacyRow.Count);
+                for (var c = 0; c < cellCount; c++)
+                {
+                    var g = genericRow[c];
+                    var l = legacyRow[c];
+
+                    if (g.IsNull != l.IsNull || !string.Equals(g.Text, l.Text, StringComparison.Ordinal))
+                    {
+                        matched = false;
+                        evidence.Add($"PDF 第 {r} 行第 {c} 列单元格不一致：通用 '{(g.IsNull ? "null" : g.Text)}' vs 旧导出 '{(l.IsNull ? "null" : l.Text)}'");
+                    }
+                }
+            }
+        }
+
+        return matched;
     }
 
     private ReportMigrationArtifactDto? DecodeExcel(byte[] bytes, string side, List<string> evidence)
@@ -443,54 +480,8 @@ public sealed class ReportMigrationOutputSemanticsComparator : IReportMigrationO
         }
     }
 
-    private ReportMigrationArtifactDto? DecodePdf(byte[] bytes, string side, List<string> evidence)
-    {
-        if (bytes is null || bytes.Length == 0)
-        {
-            evidence.Add($"{side} 为空");
-            return null;
-        }
-
-        if (bytes.Length > _maxArtifactBytes)
-        {
-            evidence.Add($"{side} 超限（oversized）：{bytes.Length} 字节，拒绝比对（fail closed）");
-            return null;
-        }
-
-        try
-        {
-            using var stream = new MemoryStream(bytes);
-            using var document = PdfReader.Open(stream, PdfDocumentOpenMode.Import);
-
-            var pageCount = document.PageCount;
-            var ascii = Encoding.ASCII.GetString(bytes);
-            var embeddedFont = ascii.Contains("SimHei", StringComparison.Ordinal)
-                && ascii.Contains("FontFile2", StringComparison.Ordinal);
-
-            var hasContent = false;
-            for (var i = 0; i < pageCount; i++)
-            {
-                if (document.Pages[i].Contents.Elements.Count > 0)
-                {
-                    hasContent = true;
-                    break;
-                }
-            }
-
-            return new ReportMigrationArtifactDto(
-                ReportMigrationArtifactFormat.Pdf,
-                Array.Empty<string>(),
-                Array.Empty<IReadOnlyList<ReportMigrationArtifactCellDto>>(),
-                pageCount,
-                embeddedFont,
-                hasContent);
-        }
-        catch (Exception ex)
-        {
-            evidence.Add($"{side} 解码失败（malformed / unextractable）：{ex.Message}");
-            return null;
-        }
-    }
+    private ReportMigrationPdfArtifactDto? DecodePdf(byte[] bytes, string side, List<string> evidence)
+        => _pdfDecoder.Decode(bytes, side, evidence);
 
     private static string ReadHeaderText(ICell? cell)
     {

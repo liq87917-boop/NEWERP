@@ -51,8 +51,8 @@
   "planning_stage": 2,
   "risk": "medium",
   "id": "ERP-336",
-  "status": "retry",
-  "attempts": 0,
+  "status": "completed",
+  "attempts": 1,
   "max_attempts": 3,
   "validation_profile": "safe",
   "completion_mode": "build",
@@ -90,23 +90,5 @@
       }
     }
   ],
-  "supervised_recovery_cycles": 1,
-  "recovery_context": {
-    "remediation_task": "ERP-336-RECOVERY-1",
-    "failure_kind": "unclassified_engineering_failure",
-    "summary": "",
-    "result": null,
-    "attempt_logs": [
-      ".ai/logs/ERP-336-attempt-1.jsonl"
-    ],
-    "validation_logs": [],
-    "latest_state_error": null,
-    "latest_build": null,
-    "task_context": ".ai\\tasks\\ERP-336.json",
-    "changed_paths": [],
-    "diff": null,
-    "execution_copy": null,
-    "repair_allowed_paths": [],
-    "instruction": "DeepSeek supervisor recovery: inspect the referenced complete logs, diagnose the root cause, and implement a different safe repair within allowed_paths. Rebuild and rerun the configured tests; if validation fails, use the newest log as the next repair input. Do not repeat the failed approach. Do not edit task/state/result files or relax production and irreversible-operation gates. "
-  }
+  "supervised_recovery_cycles": 1
 }

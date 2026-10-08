@@ -1,11 +1,10 @@
 {
   "schema_version": 2,
   "project": "NEWERP",
-  "updated_at": "2026-10-08T00:26:40.980448Z",
+  "updated_at": "2026-10-08T00:44:10.388535Z",
   "phase": "ready",
   "current_task": null,
   "queue": [
-    "ERP-336",
     "ERP-337",
     "ERP-338"
   ],
@@ -320,16 +319,17 @@
     "ERP-332",
     "ERP-333",
     "ERP-334",
-    "ERP-335"
+    "ERP-335",
+    "ERP-336"
   ],
   "blocked": [],
   "last_build": {
-    "task": "ERP-335",
+    "task": "ERP-336",
     "profile": "safe",
     "status": "passed",
     "exit_code": 0,
-    "log": ".ai\\logs\\ERP-335-validation-1.log",
-    "at": "2026-10-05T12:28:19.565057Z"
+    "log": ".ai\\logs\\ERP-336-validation-1.log",
+    "at": "2026-10-08T00:44:09.802066Z"
   },
   "last_error": null,
   "last_deepseek_fix": {
@@ -341,22 +341,19 @@
   },
   "git_sync": {
     "branch": "main",
-    "local_sha": "8a5d58f",
-    "status": "synced",
-    "ahead": 0,
+    "local_sha": "01fb4fa",
+    "status": "pending",
+    "ahead": 1,
     "behind": 0,
-    "last_attempt_at": "2026-10-05T12:28:25.431074Z",
+    "last_attempt_at": "2026-10-08T00:44:10.272934Z",
     "last_error": null
   },
   "next_recommended_tasks": [
-    "ERP-336",
     "ERP-337",
     "ERP-338"
   ],
   "runner": {
     "status": "stopped",
     "pid": null
-  },
-  "blocker": null,
-  "finish_reason": "deepseek_supervisor_recovery"
+  }
 }
