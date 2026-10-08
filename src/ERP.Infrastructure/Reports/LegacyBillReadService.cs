@@ -154,6 +154,43 @@ public sealed class LegacyBillReadService : ILegacyBillReadService
     }
 
     /// <inheritdoc />
+    public async Task<Dictionary<string, object?>?> ReadAuthoritativeHeaderAsync(
+        string familyKey, long oid, SalespersonDataScope scope,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(scope);
+
+        var family = LegacyBillReadCatalog.Resolve(familyKey);
+        var anchor = ValidateOid(oid);
+        var scopeClause = ResolveScopeClause(family, scope);
+
+        var table = Table(family);
+        var selectList = string.Join(", ", family.HeaderColumns.Select(Quote));
+        var sql = $"SELECT TOP (1) {selectList} FROM {table} "
+                  + $"WHERE {Quote(Oid)} = @oid AND {scopeClause.Sql} ORDER BY {Quote(Oid)} DESC";
+
+        try
+        {
+            using var conn = new SqlConnection(_sp.GetConnectionString());
+            await conn.OpenAsync(cancellationToken);
+
+            using var cmd = new SqlCommand(sql, conn) { CommandTimeout = CommandTimeoutSeconds };
+            AddParameters(cmd, scopeClause.Parameters);
+            cmd.Parameters.AddWithValue("@oid", anchor);
+            using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
+
+            // 越权 / 不存在：同一结果（不区分，避免泄露锚点存在性）；绝不读取任何副表。
+            return await reader.ReadAsync(cancellationToken)
+                ? ReadRow(reader, family.HeaderColumns)
+                : null;
+        }
+        catch (SqlException ex)
+        {
+            throw MapSqlException(ex, family);
+        }
+    }
+
+    /// <inheritdoc />
     public async Task<LegacyBillNavigateResult> NavigateAsync(
         string familyKey, long oid, string? direction, SalespersonDataScope scope,
         CancellationToken cancellationToken = default)

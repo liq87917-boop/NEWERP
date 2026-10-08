@@ -30,6 +30,22 @@ public interface ILegacyBillReadService
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// 读取指定旧单据族在调用方数据范围内的<strong>权威表头行</strong>（仅授权表头列，绝不读取任何副表）。
+    /// <para>越权 / 不存在返回 <c>null</c>（不区分，避免泄露锚点存在性）；缺表 / 缺列映射为显式 environment-blocked。
+    /// 供 ERP-406 旧单据操作历史在读取任何单号 / 计数 / 历史之前，先核验 Oid 命中调用方范围内的权威旧库行。</para>
+    /// <para>默认实现复用 <see cref="ReadDetailAsync"/> 并只取表头；实现方应覆盖为只读表头的有限参数化查询。</para>
+    /// </summary>
+    async Task<Dictionary<string, object?>?> ReadAuthoritativeHeaderAsync(
+        string familyKey,
+        long oid,
+        SalespersonDataScope scope,
+        CancellationToken cancellationToken = default)
+    {
+        var detail = await ReadDetailAsync(familyKey, oid, scope, cancellationToken);
+        return detail?.Main;
+    }
+
+    /// <summary>
     /// 翻页导航（<c>first</c> / <c>last</c> / <c>prev</c> / <c>next</c>，大小写不敏感）；
     /// <c>prev</c> / <c>next</c> 会先在同范围内核验锚点，不可访问锚点与「没有更多」返回同一结果。
     /// </summary>

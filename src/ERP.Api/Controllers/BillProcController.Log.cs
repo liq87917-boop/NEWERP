@@ -1,5 +1,6 @@
 using ERP.Application.Common;
 using ERP.Application.Interfaces;
+using ERP.Application.Services;
 using ERP.Domain.Entities;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.SqlClient;
@@ -84,45 +85,65 @@ public partial class BillProcController
         }
     }
 
-    /// <summary>查询指定单据的操作日志（按单据号模糊匹配，含主表与明细操作）</summary>
+    /// <summary>
+    /// 查询指定单据的操作日志（ERP-406：精确单据身份 + 有限模块 / 路径边界）。
+    /// <para>顺序：有限族解析 → 复用 ERP-405 读侧门禁（实时身份 + 该族既有功能菜单 + 客户数据范围）→ 正数 Oid →
+    /// 调用方数据范围内的权威旧库行 → 仅按「精确单据路径（含有限动作段）+ 族既有模块标题 + 权威单号」交叉过滤后计数 / 分页。</para>
+    /// <para>越权 / 不存在 / 缺结构不返回任何单号、客户提示与历史；零 / 负数 Oid 拒绝全局历史（既有入口为 <c>api/sys/logs</c>）；
+    /// 统一只返回受控业务时间线字段（绝不含请求体等原始载荷 / 令牌 / 密钥）。</para>
+    /// </summary>
     [HttpGet("{billType}/{oid:long}/logs")]
     public async Task<IActionResult> GetBillLogs(string billType, long oid,
-        [FromQuery] int page = 1, [FromQuery] int pageSize = 50)
+        [FromQuery] int page = 1, [FromQuery] int pageSize = LegacyBillHistoryRules.DefaultPageSize)
     {
-        if (!Bills.TryGetValue(billType, out var meta))
+        if (!Bills.TryGetValue(billType, out _))
+            return Ok(ApiResponse<object>.Fail("未知单据类型", ErrorCodes.InvalidParameter));
+        if (!BillTitles.TryGetValue(billType, out var moduleTitle))
             return Ok(ApiResponse<object>.Fail("未知单据类型", ErrorCodes.InvalidParameter));
 
-        if (page < 1) page = 1;
-        if (pageSize < 1 || pageSize > 500) pageSize = 50;
-
-        // 未传 Oid（=0）时退回按单据类型查询全部操作日志
-        var source = _db.SysOperationLogs.AsNoTracking().Where(l => !l.IsDeleted);
-        if (oid > 0)
+        try
         {
-            var billNo = await ReadBillNoAsync(meta.Table, oid);
-            if (!string.IsNullOrEmpty(billNo))
-                source = source.Where(l => l.BillNo == billNo || l.Path == $"/api/v2/bills/{billType}/{oid}");
-            else
-                source = source.Where(l => l.Path == $"/api/v2/bills/{billType}/{oid}");
-        }
-        else
-        {
-            source = source.Where(l => l.Path.StartsWith($"/api/v2/bills/{billType}/"));
-        }
+            // 1) 复用 ERP-405 读侧门禁：在任何单号读取 / 计数 / 历史读取之前完成实时身份 + 既有功能菜单 + 客户数据范围。
+            var scope = await LegacyBillAuthorizationRules.EnsureReadAuthorizedAsync(_db, CurrentUserId(), billType);
 
-        var total = await source.CountAsync();
-        var items = await source.OrderByDescending(l => l.Id)
-            .Skip((page - 1) * pageSize).Take(pageSize)
-            .Select(l => new
+            // 2) 精确单据的有限允许路径（正数 Oid；零 / 负数在此拒绝，绝不返回全局历史）。
+            var allowedPaths = LegacyBillHistoryRules.BuildDocumentPaths(billType, oid).ToArray();
+
+            // 3) 权威旧库行必须在调用方数据范围内：越权 / 不存在 / 缺结构都不返回单号与历史。
+            var header = await _legacyReads.ReadAuthoritativeHeaderAsync(billType, oid, scope, RequestCancellation());
+            if (header is null || !header.TryGetValue("BillNo", out var rawBillNo))
+                return Ok(ApiResponse<object>.Fail("单据不存在", ErrorCodes.NotFound));
+            var billNo = rawBillNo?.ToString() ?? string.Empty;
+
+            // 4) 有界分页（页码 / 页大小收敛 + 偏移检查运算）。
+            var (normalizedPage, normalizedSize, offset) = LegacyBillHistoryRules.ResolvePaging(page, pageSize);
+
+            // 5) 精确文档身份：族既有模块标题 + 权威单号 + 有限精确路径（绝不按单号单独匹配 / 前缀碰撞 / 任意查询）。
+            var source = _db.SysOperationLogs.AsNoTracking()
+                .Where(l => !l.IsDeleted
+                    && l.Module == moduleTitle
+                    && l.BillNo == billNo
+                    && allowedPaths.Contains(l.Path));
+
+            var total = await source.CountAsync();
+            var items = await source.OrderByDescending(l => l.Id)
+                .Skip(offset).Take(normalizedSize)
+                .Select(l => new
+                {
+                    l.Id, l.UserName, l.Module, l.Action, l.BillNo, l.Path,
+                    l.IpAddress, l.CreatedAt, l.DurationMs, l.StatusCode
+                }).ToListAsync();
+
+            return Ok(ApiResponse<object>.Success(new
             {
-                l.Id, l.UserName, l.Module, l.Action, l.BillNo, l.Path,
-                l.IpAddress, l.CreatedAt, l.DurationMs, l.StatusCode
-            }).ToListAsync();
-
-        return Ok(ApiResponse<object>.Success(new
+                items, total, page = normalizedPage, pageSize = normalizedSize,
+                totalPages = total == 0 ? 0 : (int)Math.Ceiling(total / (double)normalizedSize)
+            }));
+        }
+        catch (BusinessException ex)
         {
-            items, total, page, pageSize,
-            totalPages = (int)Math.Ceiling(total / (double)pageSize)
-        }));
+            LogLegacyReadDenied("操作历史", billType, ex);
+            return Ok(ApiResponse<object>.Fail(ex.Message, ex.Code));
+        }
     }
 }

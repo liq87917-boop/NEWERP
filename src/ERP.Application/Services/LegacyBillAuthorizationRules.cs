@@ -111,6 +111,14 @@ public static class LegacyBillAuthorizationRules
         + "（导出类菜单 *-export 绝不当作模块权限）与业务员客户数据范围；"
         + "受限账号在无权威客户归属的族上 fail closed，普通读取绝不放开为不受限。";
 
+    /// <summary>旧单据操作历史口径文案（接口 / 文档同源，ERP-406）。</summary>
+    public const string HistoryRuleText =
+        "旧单据操作历史（{billType}/{oid}/logs）在返回任何单号 / 客户提示 / 计数之前，"
+        + "先复用旧单据读侧门禁（实时身份 + 该族既有功能菜单 + 业务员客户数据范围），"
+        + "并要求正数 Oid 命中调用方数据范围内的权威旧库行；随后只返回精确单据路径（含有限动作段）"
+        + "与族既有模块标题、权威单号交叉匹配的历史行；零 / 负数 Oid 拒绝全局历史（既有入口为 api/sys/logs），"
+        + "绝不新增任何用户授权或提供匿名 / 管理员降级，也不返回请求体等原始载荷。";
+
     /// <summary>
     /// 旧单据<strong>读侧</strong>授权（fail closed）：解析受控读侧族目录（未知 / 畸形族标识在访问任何数据之前拒绝），
     /// 再复用 <see cref="EnsureModuleAuthorizedAsync"/> 的实时身份 + 既有功能菜单口径，返回当前账号的数据范围
