@@ -1,0 +1,91 @@
+{
+  "title": "Scope dedicated legacy sales order paging and navigation through controlled read service",
+  "description": "Stage3 core business workflow integrity. Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance.",
+  "acceptance_criteria": [
+    "Reuse ERP405 live existing sales-order menu, enabled identity, exact legacy CustId ownership scope and finite controlled ILegacyBillReadService for this dedicated controller. Scope before count/page/navigation and validate prev/next anchor access; restricted unresolved legacy schema/ownership fails closed and privileged behavior needs live module permission. No extra export grants or legacy Oid/canonical Id inference, no unrestricted fallback.",
+    "Preserve dedicated route response projection and ordinary authorized paging/navigation contract using server-owned finite columns, parameterized values and safe page arithmetic; no arbitrary SQL, identifiers or joins. Preserve exact currency/unit/deposit/null amount meaning and ordering. Missing tables/columns has an accurate environment failure, no redirection to canonical records. Canonical order services and reporting retirement gate unchanged.",
+    "Real isolated SQL tests with two customers prove list total/page and all navigation directions, foreign/absent anchor, revoked/disabled/no identity/module and malformed/overflow input. Test privileged authorized behavior and dedicated-vs-generic legacy read parity for same authorized records. Unit legacy-read regressions and safe Release/full unit; document actual browser/environment blockers.",
+    "Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/SalesOrderProcController.cs",
+    "src/ERP.Application/Services/LegacyBillAuthorizationRules.cs",
+    "src/ERP.Api/Controllers/SalesOrderProcController.Query.cs",
+    "src/ERP.Application/Interfaces/ILegacyBillReadService.cs",
+    "src/ERP.Application/DTOs/LegacyBillReadDtos.cs",
+    "src/ERP.Infrastructure/Reports/LegacyBillReadService.cs",
+    "src/ERP.UnitTests/SalesOrderProcReadTests.cs",
+    "src/ERP.IntegrationTests/SalesOrderProcReadSqlServerTests.cs",
+    "docs/sales-order-proc-read-scope.md"
+  ],
+  "criterion_path_map": {
+    "Reuse ERP405 live existing sales-order menu, enabled identity, exact legacy CustId ownership scope and finite controlled ILegacyBillReadService for this dedicated controller. Scope before count/page/navigation and validate prev/next anchor access; restricted unresolved legacy schema/ownership fails closed and privileged behavior needs live module permission. No extra export grants or legacy Oid/canonical Id inference, no unrestricted fallback.": [
+      "src/ERP.Api/Controllers/SalesOrderProcController.cs",
+      "src/ERP.Application/Services/LegacyBillAuthorizationRules.cs",
+      "src/ERP.Api/Controllers/SalesOrderProcController.Query.cs",
+      "src/ERP.Application/Interfaces/ILegacyBillReadService.cs",
+      "src/ERP.Application/DTOs/LegacyBillReadDtos.cs",
+      "src/ERP.Infrastructure/Reports/LegacyBillReadService.cs",
+      "src/ERP.UnitTests/SalesOrderProcReadTests.cs",
+      "src/ERP.IntegrationTests/SalesOrderProcReadSqlServerTests.cs",
+      "docs/sales-order-proc-read-scope.md"
+    ],
+    "Preserve dedicated route response projection and ordinary authorized paging/navigation contract using server-owned finite columns, parameterized values and safe page arithmetic; no arbitrary SQL, identifiers or joins. Preserve exact currency/unit/deposit/null amount meaning and ordering. Missing tables/columns has an accurate environment failure, no redirection to canonical records. Canonical order services and reporting retirement gate unchanged.": [
+      "src/ERP.Api/Controllers/SalesOrderProcController.cs",
+      "src/ERP.Application/Services/LegacyBillAuthorizationRules.cs",
+      "src/ERP.Api/Controllers/SalesOrderProcController.Query.cs",
+      "src/ERP.Application/Interfaces/ILegacyBillReadService.cs",
+      "src/ERP.Application/DTOs/LegacyBillReadDtos.cs",
+      "src/ERP.Infrastructure/Reports/LegacyBillReadService.cs",
+      "src/ERP.UnitTests/SalesOrderProcReadTests.cs",
+      "src/ERP.IntegrationTests/SalesOrderProcReadSqlServerTests.cs",
+      "docs/sales-order-proc-read-scope.md"
+    ],
+    "Real isolated SQL tests with two customers prove list total/page and all navigation directions, foreign/absent anchor, revoked/disabled/no identity/module and malformed/overflow input. Test privileged authorized behavior and dedicated-vs-generic legacy read parity for same authorized records. Unit legacy-read regressions and safe Release/full unit; document actual browser/environment blockers.": [
+      "src/ERP.Api/Controllers/SalesOrderProcController.cs",
+      "src/ERP.Application/Services/LegacyBillAuthorizationRules.cs",
+      "src/ERP.Api/Controllers/SalesOrderProcController.Query.cs",
+      "src/ERP.Application/Interfaces/ILegacyBillReadService.cs",
+      "src/ERP.Application/DTOs/LegacyBillReadDtos.cs",
+      "src/ERP.Infrastructure/Reports/LegacyBillReadService.cs",
+      "src/ERP.UnitTests/SalesOrderProcReadTests.cs",
+      "src/ERP.IntegrationTests/SalesOrderProcReadSqlServerTests.cs",
+      "docs/sales-order-proc-read-scope.md"
+    ],
+    "Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance.": [
+      "src/ERP.Api/Controllers/SalesOrderProcController.cs",
+      "src/ERP.Application/Services/LegacyBillAuthorizationRules.cs",
+      "src/ERP.Api/Controllers/SalesOrderProcController.Query.cs",
+      "src/ERP.Application/Interfaces/ILegacyBillReadService.cs",
+      "src/ERP.Application/DTOs/LegacyBillReadDtos.cs",
+      "src/ERP.Infrastructure/Reports/LegacyBillReadService.cs",
+      "src/ERP.UnitTests/SalesOrderProcReadTests.cs",
+      "src/ERP.IntegrationTests/SalesOrderProcReadSqlServerTests.cs",
+      "docs/sales-order-proc-read-scope.md"
+    ]
+  },
+  "implementation_evidence": "SalesOrderProcController.Query GetPaged globally counts legacy SalesOrder and Navigate scans first/last/prev/next without live module or customer scope. ERP405 fixed only BillProc routes; this dedicated api/v2/sales-orders read surface independently leaks foreign customer counts, amounts and identifiers.",
+  "depends_on": [
+    "ERP-410"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "id": "ERP-411",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-08T20:39:11.145110Z"
+}

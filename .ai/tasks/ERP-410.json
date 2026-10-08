@@ -1,0 +1,79 @@
+{
+  "title": "Close dedicated legacy sales order mutation bypass through existing business policy",
+  "description": "Stage3 core business workflow integrity. Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance.",
+  "acceptance_criteria": [
+    "Apply ERP404 finite sales-order mutation policy at this dedicated legacy endpoint before any SP call, default/number write or success response. Use live enabled identity and existing sales-order module authority, retaining server action/Oid identity. Reuse existing LegacyBillMutationRules rather than a second policy or business implementation. Without a safely verified canonical adapter and authoritative legacy-to-canonical mapping, return the same stable actionable business error; never infer Oid=Id, trust client header totals or silently convert unsupported request fields.",
+    "All five existing write actions must fail safely or call an already verified canonical business service with identical quantity/amount/source/downstream/state/transaction checks; no raw stored procedure mutation survives. Core canonical sales order and conversion workflows remain usable. Inspect/document actual dedicated-route callers and compatibility impact, preserve read/export/report endpoints until their own authorization/migration gates pass. No schema/SP/menu grants or production changes.",
+    "Meaningful unit and real isolated SQL controller tests cover all actions, live menu/disabled/revoked/foreign denial, forged old identifiers and monetary payloads, zero SP/business/detail/inventory/number changes, and existing canonical order creation/approval/cancellation regressions. Any safe adapter additionally requires canonical-versus-legacy races and rollback. Safe Release/full unit and accurate browser blockers.",
+    "Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/SalesOrderProcController.cs",
+    "src/ERP.Application/Services/LegacyBillAuthorizationRules.cs",
+    "src/ERP.Application/Services/LegacyBillMutationRules.cs",
+    "src/ERP.UnitTests/SalesOrderProcMutationTests.cs",
+    "src/ERP.IntegrationTests/SalesOrderProcMutationSqlServerTests.cs",
+    "docs/sales-order-proc-mutation-boundary.md"
+  ],
+  "criterion_path_map": {
+    "Apply ERP404 finite sales-order mutation policy at this dedicated legacy endpoint before any SP call, default/number write or success response. Use live enabled identity and existing sales-order module authority, retaining server action/Oid identity. Reuse existing LegacyBillMutationRules rather than a second policy or business implementation. Without a safely verified canonical adapter and authoritative legacy-to-canonical mapping, return the same stable actionable business error; never infer Oid=Id, trust client header totals or silently convert unsupported request fields.": [
+      "src/ERP.Api/Controllers/SalesOrderProcController.cs",
+      "src/ERP.Application/Services/LegacyBillAuthorizationRules.cs",
+      "src/ERP.Application/Services/LegacyBillMutationRules.cs",
+      "src/ERP.UnitTests/SalesOrderProcMutationTests.cs",
+      "src/ERP.IntegrationTests/SalesOrderProcMutationSqlServerTests.cs",
+      "docs/sales-order-proc-mutation-boundary.md"
+    ],
+    "All five existing write actions must fail safely or call an already verified canonical business service with identical quantity/amount/source/downstream/state/transaction checks; no raw stored procedure mutation survives. Core canonical sales order and conversion workflows remain usable. Inspect/document actual dedicated-route callers and compatibility impact, preserve read/export/report endpoints until their own authorization/migration gates pass. No schema/SP/menu grants or production changes.": [
+      "src/ERP.Api/Controllers/SalesOrderProcController.cs",
+      "src/ERP.Application/Services/LegacyBillAuthorizationRules.cs",
+      "src/ERP.Application/Services/LegacyBillMutationRules.cs",
+      "src/ERP.UnitTests/SalesOrderProcMutationTests.cs",
+      "src/ERP.IntegrationTests/SalesOrderProcMutationSqlServerTests.cs",
+      "docs/sales-order-proc-mutation-boundary.md"
+    ],
+    "Meaningful unit and real isolated SQL controller tests cover all actions, live menu/disabled/revoked/foreign denial, forged old identifiers and monetary payloads, zero SP/business/detail/inventory/number changes, and existing canonical order creation/approval/cancellation regressions. Any safe adapter additionally requires canonical-versus-legacy races and rollback. Safe Release/full unit and accurate browser blockers.": [
+      "src/ERP.Api/Controllers/SalesOrderProcController.cs",
+      "src/ERP.Application/Services/LegacyBillAuthorizationRules.cs",
+      "src/ERP.Application/Services/LegacyBillMutationRules.cs",
+      "src/ERP.UnitTests/SalesOrderProcMutationTests.cs",
+      "src/ERP.IntegrationTests/SalesOrderProcMutationSqlServerTests.cs",
+      "docs/sales-order-proc-mutation-boundary.md"
+    ],
+    "Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance.": [
+      "src/ERP.Api/Controllers/SalesOrderProcController.cs",
+      "src/ERP.Application/Services/LegacyBillAuthorizationRules.cs",
+      "src/ERP.Application/Services/LegacyBillMutationRules.cs",
+      "src/ERP.UnitTests/SalesOrderProcMutationTests.cs",
+      "src/ERP.IntegrationTests/SalesOrderProcMutationSqlServerTests.cs",
+      "docs/sales-order-proc-mutation-boundary.md"
+    ]
+  },
+  "implementation_evidence": "SalesOrderProcController api/v2/sales-orders save/delete/audit/void/restore directly executes sp_Biz_SalesOrder with only class Authorize. It is a separate controller from ERP404 BillProc and remains uncovered by its mutation gate; request header TotalAmount and legacy Oid bypass canonical source, fulfillment and cancellation guards.",
+  "depends_on": [
+    "ERP-409",
+    "ERP-408",
+    "ERP-404",
+    "ERP-405"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "id": "ERP-410",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-08T20:39:11.138761Z"
+}

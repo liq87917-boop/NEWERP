@@ -1,0 +1,96 @@
+{
+  "title": "Serialize attachment reference registration and void with authoritative parent changes",
+  "description": "Stage3 core business workflow integrity. Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance.",
+  "acceptance_criteria": [
+    "Add existing transaction and deterministic exact parent-to-reference lock discipline to metadata-only Create/Void, consistent with ERP409 parent locks. Under lock reread live identity/menu/owner scope and authoritative parent before snapshot and write; original parent identity never changes. Parent soft deletion/ownership reassignment racing create must produce legal consistent registration or zero-write denial. No parent commercial/status fields changed merely to lock; no new schema or index.",
+    "Reuse the existing filtered active-identity unique index and map expected duplicate race to stable business conflict with complete transaction rollback; do not expose SqlException/internal paths. Identical active parent/category/reference requests yield one active identity, two concurrent voids retain one original reason/time and loser cannot overwrite. After explicit void, allowed registration semantics remain existing policy and history stays immutable. Failed requests preserve source acknowledgement/evidence/audit, no remote objects touched or file store operations.",
+    "Meaningful real SQL two independent connections cover duplicate create, create versus parent delete/ownership change, competing voids, explicit re-registration after void, fresh permission revocation and DB write failure. Assert exactly-one active identity, original void reason, zero partial writes and parent/inventory/finance unchanged. Relevant metadata-reference and attachment-owner/content regressions, safe Release/full unit, precise browser blockers.",
+    "Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/DocumentAttachmentReferenceController.cs",
+    "src/ERP.Application/Services/DocumentAttachmentReferenceService.cs",
+    "src/ERP.Application/Services/DocumentAttachmentReferenceRules.cs",
+    "src/ERP.Application/Services/AttachmentOwnerAuthorizationRules.cs",
+    "src/ERP.Application/Services/AttachmentEvidenceMutationRules.cs",
+    "src/ERP.Application/Services/DocumentAttachmentReferenceMutationRules.cs",
+    "src/ERP.UnitTests/DocumentAttachmentReferenceMutationTests.cs",
+    "src/ERP.UnitTests/DocumentAttachmentReferenceTests.cs",
+    "src/ERP.IntegrationTests/DocumentAttachmentReferenceMutationSqlServerTests.cs",
+    "docs/document-attachment-reference-atomicity.md"
+  ],
+  "criterion_path_map": {
+    "Add existing transaction and deterministic exact parent-to-reference lock discipline to metadata-only Create/Void, consistent with ERP409 parent locks. Under lock reread live identity/menu/owner scope and authoritative parent before snapshot and write; original parent identity never changes. Parent soft deletion/ownership reassignment racing create must produce legal consistent registration or zero-write denial. No parent commercial/status fields changed merely to lock; no new schema or index.": [
+      "src/ERP.Api/Controllers/DocumentAttachmentReferenceController.cs",
+      "src/ERP.Application/Services/DocumentAttachmentReferenceService.cs",
+      "src/ERP.Application/Services/DocumentAttachmentReferenceRules.cs",
+      "src/ERP.Application/Services/AttachmentOwnerAuthorizationRules.cs",
+      "src/ERP.Application/Services/AttachmentEvidenceMutationRules.cs",
+      "src/ERP.Application/Services/DocumentAttachmentReferenceMutationRules.cs",
+      "src/ERP.UnitTests/DocumentAttachmentReferenceMutationTests.cs",
+      "src/ERP.UnitTests/DocumentAttachmentReferenceTests.cs",
+      "src/ERP.IntegrationTests/DocumentAttachmentReferenceMutationSqlServerTests.cs",
+      "docs/document-attachment-reference-atomicity.md"
+    ],
+    "Reuse the existing filtered active-identity unique index and map expected duplicate race to stable business conflict with complete transaction rollback; do not expose SqlException/internal paths. Identical active parent/category/reference requests yield one active identity, two concurrent voids retain one original reason/time and loser cannot overwrite. After explicit void, allowed registration semantics remain existing policy and history stays immutable. Failed requests preserve source acknowledgement/evidence/audit, no remote objects touched or file store operations.": [
+      "src/ERP.Api/Controllers/DocumentAttachmentReferenceController.cs",
+      "src/ERP.Application/Services/DocumentAttachmentReferenceService.cs",
+      "src/ERP.Application/Services/DocumentAttachmentReferenceRules.cs",
+      "src/ERP.Application/Services/AttachmentOwnerAuthorizationRules.cs",
+      "src/ERP.Application/Services/AttachmentEvidenceMutationRules.cs",
+      "src/ERP.Application/Services/DocumentAttachmentReferenceMutationRules.cs",
+      "src/ERP.UnitTests/DocumentAttachmentReferenceMutationTests.cs",
+      "src/ERP.UnitTests/DocumentAttachmentReferenceTests.cs",
+      "src/ERP.IntegrationTests/DocumentAttachmentReferenceMutationSqlServerTests.cs",
+      "docs/document-attachment-reference-atomicity.md"
+    ],
+    "Meaningful real SQL two independent connections cover duplicate create, create versus parent delete/ownership change, competing voids, explicit re-registration after void, fresh permission revocation and DB write failure. Assert exactly-one active identity, original void reason, zero partial writes and parent/inventory/finance unchanged. Relevant metadata-reference and attachment-owner/content regressions, safe Release/full unit, precise browser blockers.": [
+      "src/ERP.Api/Controllers/DocumentAttachmentReferenceController.cs",
+      "src/ERP.Application/Services/DocumentAttachmentReferenceService.cs",
+      "src/ERP.Application/Services/DocumentAttachmentReferenceRules.cs",
+      "src/ERP.Application/Services/AttachmentOwnerAuthorizationRules.cs",
+      "src/ERP.Application/Services/AttachmentEvidenceMutationRules.cs",
+      "src/ERP.Application/Services/DocumentAttachmentReferenceMutationRules.cs",
+      "src/ERP.UnitTests/DocumentAttachmentReferenceMutationTests.cs",
+      "src/ERP.UnitTests/DocumentAttachmentReferenceTests.cs",
+      "src/ERP.IntegrationTests/DocumentAttachmentReferenceMutationSqlServerTests.cs",
+      "docs/document-attachment-reference-atomicity.md"
+    ],
+    "Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance.": [
+      "src/ERP.Api/Controllers/DocumentAttachmentReferenceController.cs",
+      "src/ERP.Application/Services/DocumentAttachmentReferenceService.cs",
+      "src/ERP.Application/Services/DocumentAttachmentReferenceRules.cs",
+      "src/ERP.Application/Services/AttachmentOwnerAuthorizationRules.cs",
+      "src/ERP.Application/Services/AttachmentEvidenceMutationRules.cs",
+      "src/ERP.Application/Services/DocumentAttachmentReferenceMutationRules.cs",
+      "src/ERP.UnitTests/DocumentAttachmentReferenceMutationTests.cs",
+      "src/ERP.UnitTests/DocumentAttachmentReferenceTests.cs",
+      "src/ERP.IntegrationTests/DocumentAttachmentReferenceMutationSqlServerTests.cs",
+      "docs/document-attachment-reference-atomicity.md"
+    ]
+  },
+  "implementation_evidence": "ERP408 adds parent scope checks, but DocumentAttachmentReferenceService.CreateAsync still resolves/checks authority and duplicate identity before separate SaveChanges. Existing filtered unique index protects active identity only at persistence, with no controlled race loser result or parent serialization. VoidAsync reads active status then saves without row serialization, permitting concurrent reason overwrite. ERP409 handles binary AttachmentEvidence, not metadata DocumentAttachmentReferences.",
+  "depends_on": [
+    "ERP-411"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "id": "ERP-412",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-08T20:39:11.151747Z"
+}
