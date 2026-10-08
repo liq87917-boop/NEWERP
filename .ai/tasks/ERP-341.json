@@ -1,0 +1,73 @@
+{
+  "title": "Normalize and verify canonical artifact query scope before publishing parity evidence",
+  "description": "Stage 2 reusable migration platform only. Preserve all legacy routes until every family passes actual parity. Reuse existing canonical business reads/exporters, current menu/row/column/data-scope checks and audit correlation. No standalone report, arbitrary SQL/joins, schema or production operations, permission expansion or Agent work. Missing canonical/encoding/environment evidence fails closed with precise reason, never caller proof booleans. LegacyReportArtifactAdapters.ClampPageSize silently caps some canonical dynamic reads at 100 while ReportMigrationParityEvidenceService builds generic Preview parameters (1,200); artifacts contain only a selected page and do not report source total count/scope metadata. Shared comparisons must prove the same finite read scope and reject unproved truncation rather than infer full coverage from equal first-page bytes.",
+  "implementation_evidence": "LegacyReportArtifactAdapters.ClampPageSize silently caps some canonical dynamic reads at 100 while ReportMigrationParityEvidenceService builds generic Preview parameters (1,200); artifacts contain only a selected page and do not report source total count/scope metadata. Shared comparisons must prove the same finite read scope and reject unproved truncation rather than infer full coverage from equal first-page bytes.",
+  "acceptance_criteria": [
+    "Carry a bounded normalized finite request and canonical query result scope metadata across legacy snapshot, generic preview and actual artifacts: exact date/filter/page/page size, selected-page or all-match mode, total versus returned rows and canonical bounds. Reuse ERP-338 consistent read scope and final fresh authorization checks.",
+    "Reject silent clamp, differing scope, missing counts, incomplete all-match results, total/returned inconsistencies, over-budget or changed permission evidence; preserve original selected-page APIs and do not claim all-match completion from a prefix. Audit correlated reason without secrets or business permission expansion.",
+    "Prove nonempty guarded LocalDB cases above canonical 100-row boundaries, exact final page, filters and all-match overflow, revocation/cancellation and idempotent owned cleanup; actual artifact positive/negative byte parity and safe Release/unit plus scheduler/contracts pass. No stage gate or legacy route retirement until genuine complete acceptance."
+  ],
+  "allowed_paths": [
+    "src/ERP.Application/DTOs/ReportMigrationArtifactDtos.cs",
+    "src/ERP.Application/DTOs/LegacyReportSourceDtos.cs",
+    "src/ERP.Application/Services/ReportMigrationParityEvidenceService.cs",
+    "src/ERP.Infrastructure/Export/LegacyReportArtifactAdapters.cs",
+    "src/ERP.Infrastructure/Export/LegacyReportArtifactSource.cs",
+    "src/ERP.UnitTests/ReportMigrationArtifactScopeTests.cs",
+    "src/ERP.IntegrationTests/ReportMigrationArtifactScopeSqlServerTests.cs"
+  ],
+  "criterion_path_map": {
+    "Carry a bounded normalized finite request and canonical query result scope metadata across legacy snapshot, generic preview and actual artifacts: exact date/filter/page/page size, selected-page or all-match mode, total versus returned rows and canonical bounds. Reuse ERP-338 consistent read scope and final fresh authorization checks.": [
+      "src/ERP.Application/DTOs/ReportMigrationArtifactDtos.cs",
+      "src/ERP.Application/DTOs/LegacyReportSourceDtos.cs",
+      "src/ERP.Application/Services/ReportMigrationParityEvidenceService.cs",
+      "src/ERP.Infrastructure/Export/LegacyReportArtifactAdapters.cs",
+      "src/ERP.Infrastructure/Export/LegacyReportArtifactSource.cs",
+      "src/ERP.UnitTests/ReportMigrationArtifactScopeTests.cs",
+      "src/ERP.IntegrationTests/ReportMigrationArtifactScopeSqlServerTests.cs"
+    ],
+    "Reject silent clamp, differing scope, missing counts, incomplete all-match results, total/returned inconsistencies, over-budget or changed permission evidence; preserve original selected-page APIs and do not claim all-match completion from a prefix. Audit correlated reason without secrets or business permission expansion.": [
+      "src/ERP.Application/DTOs/ReportMigrationArtifactDtos.cs",
+      "src/ERP.Application/DTOs/LegacyReportSourceDtos.cs",
+      "src/ERP.Application/Services/ReportMigrationParityEvidenceService.cs",
+      "src/ERP.Infrastructure/Export/LegacyReportArtifactAdapters.cs",
+      "src/ERP.Infrastructure/Export/LegacyReportArtifactSource.cs",
+      "src/ERP.UnitTests/ReportMigrationArtifactScopeTests.cs",
+      "src/ERP.IntegrationTests/ReportMigrationArtifactScopeSqlServerTests.cs"
+    ],
+    "Prove nonempty guarded LocalDB cases above canonical 100-row boundaries, exact final page, filters and all-match overflow, revocation/cancellation and idempotent owned cleanup; actual artifact positive/negative byte parity and safe Release/unit plus scheduler/contracts pass. No stage gate or legacy route retirement until genuine complete acceptance.": [
+      "src/ERP.Application/DTOs/ReportMigrationArtifactDtos.cs",
+      "src/ERP.Application/DTOs/LegacyReportSourceDtos.cs",
+      "src/ERP.Application/Services/ReportMigrationParityEvidenceService.cs",
+      "src/ERP.Infrastructure/Export/LegacyReportArtifactAdapters.cs",
+      "src/ERP.Infrastructure/Export/LegacyReportArtifactSource.cs",
+      "src/ERP.UnitTests/ReportMigrationArtifactScopeTests.cs",
+      "src/ERP.IntegrationTests/ReportMigrationArtifactScopeSqlServerTests.cs"
+    ]
+  },
+  "depends_on": [
+    "ERP-338",
+    "ERP-337",
+    "ERP-340"
+  ],
+  "risk": "medium",
+  "planning_stage": 2,
+  "id": "ERP-341",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-08T01:06:36.256159Z"
+}

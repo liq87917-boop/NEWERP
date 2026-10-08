@@ -1,0 +1,64 @@
+{
+  "title": "Decode canonical PDF font resources and code spaces with page-scoped identity",
+  "description": "Stage 2 reusable migration platform only. Preserve all legacy routes until every family passes actual parity. Reuse existing canonical business reads/exporters, current menu/row/column/data-scope checks and audit correlation. No standalone report, arbitrary SQL/joins, schema or production operations, permission expansion or Agent work. Missing canonical/encoding/environment evidence fails closed with precise reason, never caller proof booleans. ERP-336 real SQL diagnostics .ai/logs/ERP-336-canonical-artifact-diagnostics-20261008T0053.json reject actual legacy sales-order PDF glyph mapping after cell-boundary fix a52d5db. ReportMigrationPdfArtifactDecoder.DecodeText assumes two-byte codes for every ToUnicode map and caches maps by fontName across pages; font resource names are page-local. Extend actual font/CMap decoding without guessing glyphs or trusting input snapshots.",
+  "implementation_evidence": "ERP-336 real SQL diagnostics .ai/logs/ERP-336-canonical-artifact-diagnostics-20261008T0053.json reject actual legacy sales-order PDF glyph mapping after cell-boundary fix a52d5db. ReportMigrationPdfArtifactDecoder.DecodeText assumes two-byte codes for every ToUnicode map and caches maps by fontName across pages; font resource names are page-local. Extend actual font/CMap decoding without guessing glyphs or trusting input snapshots.",
+  "acceptance_criteria": [
+    "Decode real canonical and generic PDF bytes using explicit font object/page resource identity, actual codespace lengths and ToUnicode mappings including supported bfchar/bfrange structures; no ASCII or Unicode guessing for unsupported encodings. Preserve cell/null/currency/unit/band/page comparison and bounded decompression/parser work.",
+    "Prove real generated canonical PDF positive parity where the decoded layout is genuinely supported; reject changed glyph/cell/header, reused resource names with different page fonts, malformed maps, unextractable glyphs, encrypted/image-only and oversized streams. Unsupported canonical layouts remain explicitly blocked, never mark all families complete.",
+    "Run relevant real-byte unit tests and guarded nonempty NEWERP_AUTOTEST LocalDB artifact tests including current permission denial; safe Release build/unit plus scheduler/contracts pass; retain original diagnostics and owned idempotent fixtures."
+  ],
+  "allowed_paths": [
+    "src/ERP.Infrastructure/Export/ReportMigrationPdfArtifactDecoder.cs",
+    "src/ERP.Infrastructure/Export/ReportMigrationOutputSemanticsComparator.cs",
+    "src/ERP.UnitTests/ReportMigrationPdfArtifactDecoderTests.cs",
+    "src/ERP.UnitTests/ReportMigrationArtifactParityTests.cs",
+    "src/ERP.IntegrationTests/ReportMigrationArtifactParitySqlServerTests.cs"
+  ],
+  "criterion_path_map": {
+    "Decode real canonical and generic PDF bytes using explicit font object/page resource identity, actual codespace lengths and ToUnicode mappings including supported bfchar/bfrange structures; no ASCII or Unicode guessing for unsupported encodings. Preserve cell/null/currency/unit/band/page comparison and bounded decompression/parser work.": [
+      "src/ERP.Infrastructure/Export/ReportMigrationPdfArtifactDecoder.cs",
+      "src/ERP.Infrastructure/Export/ReportMigrationOutputSemanticsComparator.cs",
+      "src/ERP.UnitTests/ReportMigrationPdfArtifactDecoderTests.cs",
+      "src/ERP.UnitTests/ReportMigrationArtifactParityTests.cs",
+      "src/ERP.IntegrationTests/ReportMigrationArtifactParitySqlServerTests.cs"
+    ],
+    "Prove real generated canonical PDF positive parity where the decoded layout is genuinely supported; reject changed glyph/cell/header, reused resource names with different page fonts, malformed maps, unextractable glyphs, encrypted/image-only and oversized streams. Unsupported canonical layouts remain explicitly blocked, never mark all families complete.": [
+      "src/ERP.Infrastructure/Export/ReportMigrationPdfArtifactDecoder.cs",
+      "src/ERP.Infrastructure/Export/ReportMigrationOutputSemanticsComparator.cs",
+      "src/ERP.UnitTests/ReportMigrationPdfArtifactDecoderTests.cs",
+      "src/ERP.UnitTests/ReportMigrationArtifactParityTests.cs",
+      "src/ERP.IntegrationTests/ReportMigrationArtifactParitySqlServerTests.cs"
+    ],
+    "Run relevant real-byte unit tests and guarded nonempty NEWERP_AUTOTEST LocalDB artifact tests including current permission denial; safe Release build/unit plus scheduler/contracts pass; retain original diagnostics and owned idempotent fixtures.": [
+      "src/ERP.Infrastructure/Export/ReportMigrationPdfArtifactDecoder.cs",
+      "src/ERP.Infrastructure/Export/ReportMigrationOutputSemanticsComparator.cs",
+      "src/ERP.UnitTests/ReportMigrationPdfArtifactDecoderTests.cs",
+      "src/ERP.UnitTests/ReportMigrationArtifactParityTests.cs",
+      "src/ERP.IntegrationTests/ReportMigrationArtifactParitySqlServerTests.cs"
+    ]
+  },
+  "depends_on": [
+    "ERP-336",
+    "ERP-338"
+  ],
+  "risk": "medium",
+  "planning_stage": 2,
+  "id": "ERP-339",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-08T01:06:36.244691Z"
+}

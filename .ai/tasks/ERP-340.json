@@ -1,0 +1,68 @@
+{
+  "title": "Bind remaining existing dynamic families in the shared canonical artifact registry",
+  "description": "Stage 2 reusable migration platform only. Preserve all legacy routes until every family passes actual parity. Reuse existing canonical business reads/exporters, current menu/row/column/data-scope checks and audit correlation. No standalone report, arbitrary SQL/joins, schema or production operations, permission expansion or Agent work. Missing canonical/encoding/environment evidence fails closed with precise reason, never caller proof booleans. ERP-337 LegacyReportArtifactCatalog.BuildCapabilities supports only sales-order, receivable and purchase-order dynamic artifacts while BlockedDynamicKeys retains fifteen existing families. Their existing API canonical rules/renderers and source handlers already exist. Extend finite shared adapters for those existing families as one platform increment; ERP-337 completion is not complete dynamic migration.",
+  "implementation_evidence": "ERP-337 LegacyReportArtifactCatalog.BuildCapabilities supports only sales-order, receivable and purchase-order dynamic artifacts while BlockedDynamicKeys retains fifteen existing families. Their existing API canonical rules/renderers and source handlers already exist. Extend finite shared adapters for those existing families as one platform increment; ERP-337 completion is not complete dynamic migration.",
+  "acceptance_criteria": [
+    "Resolve every existing BlockedDynamicKeys family to its existing permission-aware canonical business query and actual Excel/PDF renderer through finite shared bindings; preserve raw null, grouped totals, currency/unit and selected-page versus all-match meaning. No generic exporter used as legacy output and no per-report controllers or new report families.",
+    "Keep precise unsupported capability reasons only for genuinely unavailable source/renderers; missing dependencies, revoked permissions, cancellation, invalid scope and over-budget reads return no promotable artifact evidence with correlated audit. Current-user checks occur in original service paths and before returning bytes.",
+    "Verify the finite existing dynamic catalog matrix, each canonical mapping and negative authorization/boundary cases with actual bytes and guarded nonempty local SQL fixtures; safe Release/unit and automation contracts pass. Keep all legacy entries until all fixed/dynamic/export/print families migrate."
+  ],
+  "allowed_paths": [
+    "src/ERP.Infrastructure/Export/LegacyReportArtifactAdapters.cs",
+    "src/ERP.Infrastructure/Export/LegacyReportArtifactSource.cs",
+    "src/ERP.Infrastructure/Export/LegacyDynamicArtifactQueryBindings.cs",
+    "src/ERP.Infrastructure/DependencyInjection.cs",
+    "src/ERP.UnitTests/LegacyReportArtifactCatalogTests.cs",
+    "src/ERP.IntegrationTests/LegacyReportArtifactCatalogSqlServerTests.cs"
+  ],
+  "criterion_path_map": {
+    "Resolve every existing BlockedDynamicKeys family to its existing permission-aware canonical business query and actual Excel/PDF renderer through finite shared bindings; preserve raw null, grouped totals, currency/unit and selected-page versus all-match meaning. No generic exporter used as legacy output and no per-report controllers or new report families.": [
+      "src/ERP.Infrastructure/Export/LegacyReportArtifactAdapters.cs",
+      "src/ERP.Infrastructure/Export/LegacyReportArtifactSource.cs",
+      "src/ERP.Infrastructure/Export/LegacyDynamicArtifactQueryBindings.cs",
+      "src/ERP.Infrastructure/DependencyInjection.cs",
+      "src/ERP.UnitTests/LegacyReportArtifactCatalogTests.cs",
+      "src/ERP.IntegrationTests/LegacyReportArtifactCatalogSqlServerTests.cs"
+    ],
+    "Keep precise unsupported capability reasons only for genuinely unavailable source/renderers; missing dependencies, revoked permissions, cancellation, invalid scope and over-budget reads return no promotable artifact evidence with correlated audit. Current-user checks occur in original service paths and before returning bytes.": [
+      "src/ERP.Infrastructure/Export/LegacyReportArtifactAdapters.cs",
+      "src/ERP.Infrastructure/Export/LegacyReportArtifactSource.cs",
+      "src/ERP.Infrastructure/Export/LegacyDynamicArtifactQueryBindings.cs",
+      "src/ERP.Infrastructure/DependencyInjection.cs",
+      "src/ERP.UnitTests/LegacyReportArtifactCatalogTests.cs",
+      "src/ERP.IntegrationTests/LegacyReportArtifactCatalogSqlServerTests.cs"
+    ],
+    "Verify the finite existing dynamic catalog matrix, each canonical mapping and negative authorization/boundary cases with actual bytes and guarded nonempty local SQL fixtures; safe Release/unit and automation contracts pass. Keep all legacy entries until all fixed/dynamic/export/print families migrate.": [
+      "src/ERP.Infrastructure/Export/LegacyReportArtifactAdapters.cs",
+      "src/ERP.Infrastructure/Export/LegacyReportArtifactSource.cs",
+      "src/ERP.Infrastructure/Export/LegacyDynamicArtifactQueryBindings.cs",
+      "src/ERP.Infrastructure/DependencyInjection.cs",
+      "src/ERP.UnitTests/LegacyReportArtifactCatalogTests.cs",
+      "src/ERP.IntegrationTests/LegacyReportArtifactCatalogSqlServerTests.cs"
+    ]
+  },
+  "depends_on": [
+    "ERP-337",
+    "ERP-338"
+  ],
+  "risk": "medium",
+  "planning_stage": 2,
+  "id": "ERP-340",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-08T01:06:36.250759Z"
+}
