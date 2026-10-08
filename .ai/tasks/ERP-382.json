@@ -1,0 +1,91 @@
+{
+  "title": "Serialize supplier invoice evidence and payment allocation capacity",
+  "description": "Stage3 core finance closure. Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance.",
+  "acceptance_criteria": [
+    "Add compatible deterministic source-order, application/payment and invoice locks with atomic transactions around supplier invoice edit, order allocation replacement, record, void and payment-to-invoice assignment/void. Audit all relevant lock callers and document one global order to avoid deadlocks. Recheck authoritative invoice status, supplier, currency, allocated invoice/order totals and payment eligibility under locks. Concurrent distinct payments cannot collectively exceed invoice same-currency capacity; concurrent invoices cannot exceed order invoice capacity. Preserve ERP351 shared payment budget and ERP380 application source guard; no double counting, conversion, ledger posting or destructive history edits.",
+    "At every public purchase invoice API entry require current enabled identity, existing purchase-order module authorization and authoritative procurement ownership/customer scope before counts, candidates, preview or writes. All linked source orders must be allowed; restricted users cannot read or mutate invoices lacking provable source ownership, while genuinely unrestricted authorized users retain historical unlinked access. Validate complete stored and proposed allocation scope before replacement, and never grant permissions. Actual SQL two-connection assignment vs void, two distinct payment assignments, draft edit vs record, allocation replacement vs record and two invoices targeting one order must yield coherent evidence or atomic denial. Preserve void reason and frozen audit; denied/revoked/disabled requests leave rows unchanged. Run relevant unit and safe Release tests; record browser evidence or exact blocker.",
+    "Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/PurchaseInvoiceController.cs",
+    "src/ERP.Application/Services/PurchaseInvoiceService.cs",
+    "src/ERP.Application/Services/PurchaseInvoiceAuthorizationRules.cs",
+    "src/ERP.Application/Services/PurchaseInvoiceConcurrencyRules.cs",
+    "src/ERP.Application/Services/SupplierPaymentInvoiceAllocationService.cs",
+    "src/ERP.Application/Services/SupplierPaymentLifecycleRules.cs",
+    "src/ERP.Application/Services/SupplierPaymentAllocationService.cs",
+    "src/ERP.Application/Services/PurchaseOrderCancellationRules.cs",
+    "src/ERP.UnitTests/PurchaseInvoiceConcurrencyTests.cs",
+    "src/ERP.IntegrationTests/PurchaseInvoiceConcurrencySqlServerTests.cs",
+    "docs/purchase-invoice-concurrency.md"
+  ],
+  "criterion_path_map": {
+    "Add compatible deterministic source-order, application/payment and invoice locks with atomic transactions around supplier invoice edit, order allocation replacement, record, void and payment-to-invoice assignment/void. Audit all relevant lock callers and document one global order to avoid deadlocks. Recheck authoritative invoice status, supplier, currency, allocated invoice/order totals and payment eligibility under locks. Concurrent distinct payments cannot collectively exceed invoice same-currency capacity; concurrent invoices cannot exceed order invoice capacity. Preserve ERP351 shared payment budget and ERP380 application source guard; no double counting, conversion, ledger posting or destructive history edits.": [
+      "src/ERP.Api/Controllers/PurchaseInvoiceController.cs",
+      "src/ERP.Application/Services/PurchaseInvoiceService.cs",
+      "src/ERP.Application/Services/PurchaseInvoiceAuthorizationRules.cs",
+      "src/ERP.Application/Services/PurchaseInvoiceConcurrencyRules.cs",
+      "src/ERP.Application/Services/SupplierPaymentInvoiceAllocationService.cs",
+      "src/ERP.Application/Services/SupplierPaymentLifecycleRules.cs",
+      "src/ERP.Application/Services/SupplierPaymentAllocationService.cs",
+      "src/ERP.Application/Services/PurchaseOrderCancellationRules.cs",
+      "src/ERP.UnitTests/PurchaseInvoiceConcurrencyTests.cs",
+      "src/ERP.IntegrationTests/PurchaseInvoiceConcurrencySqlServerTests.cs",
+      "docs/purchase-invoice-concurrency.md"
+    ],
+    "At every public purchase invoice API entry require current enabled identity, existing purchase-order module authorization and authoritative procurement ownership/customer scope before counts, candidates, preview or writes. All linked source orders must be allowed; restricted users cannot read or mutate invoices lacking provable source ownership, while genuinely unrestricted authorized users retain historical unlinked access. Validate complete stored and proposed allocation scope before replacement, and never grant permissions. Actual SQL two-connection assignment vs void, two distinct payment assignments, draft edit vs record, allocation replacement vs record and two invoices targeting one order must yield coherent evidence or atomic denial. Preserve void reason and frozen audit; denied/revoked/disabled requests leave rows unchanged. Run relevant unit and safe Release tests; record browser evidence or exact blocker.": [
+      "src/ERP.Api/Controllers/PurchaseInvoiceController.cs",
+      "src/ERP.Application/Services/PurchaseInvoiceService.cs",
+      "src/ERP.Application/Services/PurchaseInvoiceAuthorizationRules.cs",
+      "src/ERP.Application/Services/PurchaseInvoiceConcurrencyRules.cs",
+      "src/ERP.Application/Services/SupplierPaymentInvoiceAllocationService.cs",
+      "src/ERP.Application/Services/SupplierPaymentLifecycleRules.cs",
+      "src/ERP.Application/Services/SupplierPaymentAllocationService.cs",
+      "src/ERP.Application/Services/PurchaseOrderCancellationRules.cs",
+      "src/ERP.UnitTests/PurchaseInvoiceConcurrencyTests.cs",
+      "src/ERP.IntegrationTests/PurchaseInvoiceConcurrencySqlServerTests.cs",
+      "docs/purchase-invoice-concurrency.md"
+    ],
+    "Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance.": [
+      "src/ERP.Api/Controllers/PurchaseInvoiceController.cs",
+      "src/ERP.Application/Services/PurchaseInvoiceService.cs",
+      "src/ERP.Application/Services/PurchaseInvoiceAuthorizationRules.cs",
+      "src/ERP.Application/Services/PurchaseInvoiceConcurrencyRules.cs",
+      "src/ERP.Application/Services/SupplierPaymentInvoiceAllocationService.cs",
+      "src/ERP.Application/Services/SupplierPaymentLifecycleRules.cs",
+      "src/ERP.Application/Services/SupplierPaymentAllocationService.cs",
+      "src/ERP.Application/Services/PurchaseOrderCancellationRules.cs",
+      "src/ERP.UnitTests/PurchaseInvoiceConcurrencyTests.cs",
+      "src/ERP.IntegrationTests/PurchaseInvoiceConcurrencySqlServerTests.cs",
+      "docs/purchase-invoice-concurrency.md"
+    ]
+  },
+  "implementation_evidence": "PurchaseInvoiceService Update/SaveAllocations/Record/Void perform check-save without shared source/invoice locks. SupplierPaymentInvoiceAllocationService locks payment but not the invoice capacity row, allowing different payments to overfund an invoice and invoice void to race assignment.",
+  "depends_on": [
+    "ERP-380",
+    "ERP-351",
+    "ERP-065",
+    "ERP-066",
+    "ERP-381"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "id": "ERP-382",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-08T14:10:43.194269Z"
+}

@@ -1,0 +1,97 @@
+{
+  "title": "Secure customer invoice mutations and serialize receipt funding evidence",
+  "description": "Stage3 core finance closure. Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance.",
+  "acceptance_criteria": [
+    "Require current enabled identity, existing sales-order module permission and authoritative customer scope on every customer invoice route before reads/counts/candidates/preview/write. Check stored and proposed customer, all linked sales orders and explicit trade document ownership; mixed customer sources require every relevant customer allowed. Restrict commercial invoice candidates through existing authoritative trade-document/loading participant scope, no new grants or guessed source. Denied edit or allocation replacement preserves original evidence and audit; preserve historical unavailable sources explicitly without exposing unauthorized fields.",
+    "Serialize invoice edit/record/void/order allocation replacement and receipt-to-invoice assignment/void under a compatible documented global sales-order/receipt/invoice lock order; audit callers to avoid inversion. Revalidate authoritative status and same-currency invoice/order capacity under locks. Distinct receipts cannot overfund the same invoice and concurrent invoices cannot exceed source sales-order amount. Reuse receipt lifecycle protection and existing allocations; keep original void history, explicit reason, shared customer/agency funding conventions and frozen recorded evidence. Actual SQL two independent connection assignment vs invoice void, distinct receipt assignments, edit vs record, replacement vs record and invoice order-capacity races plus live own/foreign/mixed/revoked/disabled denial. No tax service, bank action, accounting, stock posting or schema; run relevant unit and safe Release verification, browser evidence or accurate blocker.",
+    "Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/CustomerSalesInvoiceEvidenceController.cs",
+    "src/ERP.Application/Services/CustomerSalesInvoiceEvidenceService.cs",
+    "src/ERP.Application/Services/CustomerSalesInvoiceAuthorizationRules.cs",
+    "src/ERP.Application/Services/CustomerSalesInvoiceConcurrencyRules.cs",
+    "src/ERP.Application/Services/CustomerSalesInvoiceCollectionAllocationService.cs",
+    "src/ERP.Application/Services/CustomerReceiptLifecycleRules.cs",
+    "src/ERP.Application/Services/CustomerReceiptAllocationService.cs",
+    "src/ERP.Application/Services/AgencyServiceFeeCollectionAllocationService.cs",
+    "src/ERP.Application/Services/SalesOrderCancellationRules.cs",
+    "src/ERP.UnitTests/CustomerSalesInvoiceConcurrencyTests.cs",
+    "src/ERP.IntegrationTests/CustomerSalesInvoiceConcurrencySqlServerTests.cs",
+    "docs/customer-sales-invoice-concurrency.md"
+  ],
+  "criterion_path_map": {
+    "Require current enabled identity, existing sales-order module permission and authoritative customer scope on every customer invoice route before reads/counts/candidates/preview/write. Check stored and proposed customer, all linked sales orders and explicit trade document ownership; mixed customer sources require every relevant customer allowed. Restrict commercial invoice candidates through existing authoritative trade-document/loading participant scope, no new grants or guessed source. Denied edit or allocation replacement preserves original evidence and audit; preserve historical unavailable sources explicitly without exposing unauthorized fields.": [
+      "src/ERP.Api/Controllers/CustomerSalesInvoiceEvidenceController.cs",
+      "src/ERP.Application/Services/CustomerSalesInvoiceEvidenceService.cs",
+      "src/ERP.Application/Services/CustomerSalesInvoiceAuthorizationRules.cs",
+      "src/ERP.Application/Services/CustomerSalesInvoiceConcurrencyRules.cs",
+      "src/ERP.Application/Services/CustomerSalesInvoiceCollectionAllocationService.cs",
+      "src/ERP.Application/Services/CustomerReceiptLifecycleRules.cs",
+      "src/ERP.Application/Services/CustomerReceiptAllocationService.cs",
+      "src/ERP.Application/Services/AgencyServiceFeeCollectionAllocationService.cs",
+      "src/ERP.Application/Services/SalesOrderCancellationRules.cs",
+      "src/ERP.UnitTests/CustomerSalesInvoiceConcurrencyTests.cs",
+      "src/ERP.IntegrationTests/CustomerSalesInvoiceConcurrencySqlServerTests.cs",
+      "docs/customer-sales-invoice-concurrency.md"
+    ],
+    "Serialize invoice edit/record/void/order allocation replacement and receipt-to-invoice assignment/void under a compatible documented global sales-order/receipt/invoice lock order; audit callers to avoid inversion. Revalidate authoritative status and same-currency invoice/order capacity under locks. Distinct receipts cannot overfund the same invoice and concurrent invoices cannot exceed source sales-order amount. Reuse receipt lifecycle protection and existing allocations; keep original void history, explicit reason, shared customer/agency funding conventions and frozen recorded evidence. Actual SQL two independent connection assignment vs invoice void, distinct receipt assignments, edit vs record, replacement vs record and invoice order-capacity races plus live own/foreign/mixed/revoked/disabled denial. No tax service, bank action, accounting, stock posting or schema; run relevant unit and safe Release verification, browser evidence or accurate blocker.": [
+      "src/ERP.Api/Controllers/CustomerSalesInvoiceEvidenceController.cs",
+      "src/ERP.Application/Services/CustomerSalesInvoiceEvidenceService.cs",
+      "src/ERP.Application/Services/CustomerSalesInvoiceAuthorizationRules.cs",
+      "src/ERP.Application/Services/CustomerSalesInvoiceConcurrencyRules.cs",
+      "src/ERP.Application/Services/CustomerSalesInvoiceCollectionAllocationService.cs",
+      "src/ERP.Application/Services/CustomerReceiptLifecycleRules.cs",
+      "src/ERP.Application/Services/CustomerReceiptAllocationService.cs",
+      "src/ERP.Application/Services/AgencyServiceFeeCollectionAllocationService.cs",
+      "src/ERP.Application/Services/SalesOrderCancellationRules.cs",
+      "src/ERP.UnitTests/CustomerSalesInvoiceConcurrencyTests.cs",
+      "src/ERP.IntegrationTests/CustomerSalesInvoiceConcurrencySqlServerTests.cs",
+      "docs/customer-sales-invoice-concurrency.md"
+    ],
+    "Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance.": [
+      "src/ERP.Api/Controllers/CustomerSalesInvoiceEvidenceController.cs",
+      "src/ERP.Application/Services/CustomerSalesInvoiceEvidenceService.cs",
+      "src/ERP.Application/Services/CustomerSalesInvoiceAuthorizationRules.cs",
+      "src/ERP.Application/Services/CustomerSalesInvoiceConcurrencyRules.cs",
+      "src/ERP.Application/Services/CustomerSalesInvoiceCollectionAllocationService.cs",
+      "src/ERP.Application/Services/CustomerReceiptLifecycleRules.cs",
+      "src/ERP.Application/Services/CustomerReceiptAllocationService.cs",
+      "src/ERP.Application/Services/AgencyServiceFeeCollectionAllocationService.cs",
+      "src/ERP.Application/Services/SalesOrderCancellationRules.cs",
+      "src/ERP.UnitTests/CustomerSalesInvoiceConcurrencyTests.cs",
+      "src/ERP.IntegrationTests/CustomerSalesInvoiceConcurrencySqlServerTests.cs",
+      "docs/customer-sales-invoice-concurrency.md"
+    ]
+  },
+  "implementation_evidence": "CustomerSalesInvoiceEvidenceController scopes list/detail but Create/Update/Record/Void/order-candidates/allocation preview-save/commercial-invoice candidates bypass live scope. CustomerSalesInvoiceEvidenceService and CustomerSalesInvoiceCollectionAllocationService have unprotected check-save windows for invoice/order capacity and receipt assignment versus invoice void.",
+  "depends_on": [
+    "ERP-380",
+    "ERP-378",
+    "ERP-055",
+    "ERP-073",
+    "ERP-347",
+    "ERP-381",
+    "ERP-382"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "id": "ERP-383",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-08T14:10:43.200927Z"
+}
