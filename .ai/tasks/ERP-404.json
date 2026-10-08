@@ -1,0 +1,82 @@
+{
+  "title": "Prevent legacy stored-procedure document writes bypassing canonical lifecycle guards",
+  "description": "Stage3 core business workflow integrity. Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance.",
+  "acceptance_criteria": [
+    "Apply a finite server-owned mutation policy to all 16 legacy bill families and Save/Action/Import entry points before defaults, number reservation, SQL procedure invocation, logs or notifications. Require live enabled authenticated identity and existing module authorization; never grant export permissions as module permissions or infer legacy Oid equals canonical Id. Caller Fields must never override reserved command identity/action. Inventory, source linkage, downstream dependencies, quantities, amounts and lifecycle rules must be identical to existing canonical business services for any supported adapter.",
+    "Reuse canonical business workflows for safely supported explicit adapters only. Where no authoritative identity mapping and validated business adapter exists, fail closed with a stable actionable business error and finite existing canonical route guidance, without executing sp_Biz_* or silently remapping IDs. Inspect actual legacy page callers and document compatibility impact; keep core canonical workflows usable. Do not disable legacy report/export routes or change migration retirement gate. No stored-procedure/schema edits or duplicated standalone ERP implementation.",
+    "Cover Save and every transition plus Excel import with meaningful unit and real isolated SQL tests: all families, foreign/disabled/revoked accounts, reserved Action/Oid injection, ineligible/downstream documents and unsafe legacy ID mapping must make zero business/detail/number/success-log/notification changes. Any implemented adapter requires genuine quantity/amount/rollback and two-connection canonical-versus-legacy race tests. Retain original failure logs and safe Release/full unit validation; browser compatibility evidence or precise blocker.",
+    "Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/BillProcController.cs",
+    "src/ERP.Application/Services/LegacyBillAuthorizationRules.cs",
+    "src/ERP.Api/Controllers/BillProcController.Import.cs",
+    "src/ERP.Application/Services/LegacyBillMutationRules.cs",
+    "src/ERP.UnitTests/LegacyBillMutationTests.cs",
+    "src/ERP.IntegrationTests/LegacyBillMutationSqlServerTests.cs",
+    "docs/legacy-bill-mutation-boundary.md"
+  ],
+  "criterion_path_map": {
+    "Apply a finite server-owned mutation policy to all 16 legacy bill families and Save/Action/Import entry points before defaults, number reservation, SQL procedure invocation, logs or notifications. Require live enabled authenticated identity and existing module authorization; never grant export permissions as module permissions or infer legacy Oid equals canonical Id. Caller Fields must never override reserved command identity/action. Inventory, source linkage, downstream dependencies, quantities, amounts and lifecycle rules must be identical to existing canonical business services for any supported adapter.": [
+      "src/ERP.Api/Controllers/BillProcController.cs",
+      "src/ERP.Application/Services/LegacyBillAuthorizationRules.cs",
+      "src/ERP.Api/Controllers/BillProcController.Import.cs",
+      "src/ERP.Application/Services/LegacyBillMutationRules.cs",
+      "src/ERP.UnitTests/LegacyBillMutationTests.cs",
+      "src/ERP.IntegrationTests/LegacyBillMutationSqlServerTests.cs",
+      "docs/legacy-bill-mutation-boundary.md"
+    ],
+    "Reuse canonical business workflows for safely supported explicit adapters only. Where no authoritative identity mapping and validated business adapter exists, fail closed with a stable actionable business error and finite existing canonical route guidance, without executing sp_Biz_* or silently remapping IDs. Inspect actual legacy page callers and document compatibility impact; keep core canonical workflows usable. Do not disable legacy report/export routes or change migration retirement gate. No stored-procedure/schema edits or duplicated standalone ERP implementation.": [
+      "src/ERP.Api/Controllers/BillProcController.cs",
+      "src/ERP.Application/Services/LegacyBillAuthorizationRules.cs",
+      "src/ERP.Api/Controllers/BillProcController.Import.cs",
+      "src/ERP.Application/Services/LegacyBillMutationRules.cs",
+      "src/ERP.UnitTests/LegacyBillMutationTests.cs",
+      "src/ERP.IntegrationTests/LegacyBillMutationSqlServerTests.cs",
+      "docs/legacy-bill-mutation-boundary.md"
+    ],
+    "Cover Save and every transition plus Excel import with meaningful unit and real isolated SQL tests: all families, foreign/disabled/revoked accounts, reserved Action/Oid injection, ineligible/downstream documents and unsafe legacy ID mapping must make zero business/detail/number/success-log/notification changes. Any implemented adapter requires genuine quantity/amount/rollback and two-connection canonical-versus-legacy race tests. Retain original failure logs and safe Release/full unit validation; browser compatibility evidence or precise blocker.": [
+      "src/ERP.Api/Controllers/BillProcController.cs",
+      "src/ERP.Application/Services/LegacyBillAuthorizationRules.cs",
+      "src/ERP.Api/Controllers/BillProcController.Import.cs",
+      "src/ERP.Application/Services/LegacyBillMutationRules.cs",
+      "src/ERP.UnitTests/LegacyBillMutationTests.cs",
+      "src/ERP.IntegrationTests/LegacyBillMutationSqlServerTests.cs",
+      "docs/legacy-bill-mutation-boundary.md"
+    ],
+    "Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance.": [
+      "src/ERP.Api/Controllers/BillProcController.cs",
+      "src/ERP.Application/Services/LegacyBillAuthorizationRules.cs",
+      "src/ERP.Api/Controllers/BillProcController.Import.cs",
+      "src/ERP.Application/Services/LegacyBillMutationRules.cs",
+      "src/ERP.UnitTests/LegacyBillMutationTests.cs",
+      "src/ERP.IntegrationTests/LegacyBillMutationSqlServerTests.cs",
+      "docs/legacy-bill-mutation-boundary.md"
+    ]
+  },
+  "implementation_evidence": "BillProcController.Save forwards arbitrary Fields including reserved @Action/@Oid to sp_Biz_* without live menu/customer authority or canonical source, quantity, money, transaction and lifecycle checks; Action performs stored-procedure transitions before checking state and VerifyActionAsync returns true on verification error. BillProcController.Import independently loops Save calls, allowing the same bypass. Legacy singular table Oid is not the canonical EF Id.",
+  "depends_on": [
+    "ERP-403",
+    "ERP-308"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "id": "ERP-404",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-08T19:21:56.091052Z"
+}

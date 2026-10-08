@@ -1,0 +1,96 @@
+{
+  "title": "Prevent foreign document operation history disclosure through legacy bill routes",
+  "description": "Stage3 core business workflow integrity. Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance.",
+  "acceptance_criteria": [
+    "Secure the existing business document history endpoint using the preceding live module/legacy source row scope policy before ReadBillNo or log count/read. Positive Oid must identify an accessible authoritative legacy row; missing/foreign/revoked/disabled access returns no bill number, customer hints or history. Reject zero/negative Oid global history unless an explicit existing authorized administrative path is genuinely available; never broaden normal business user permission.",
+    "Filter exact document and finite module/path identity before count/page. Same BillNo in another family or customer must not match; descendant action paths require a validated finite path boundary, not prefix collisions or arbitrary query. For historical logs lacking an authoritative record identifier, only return rows whose provenance is safely established, otherwise omit with documented limitation. Preserve legal business timeline fields and ordering, bounded page size and checked arithmetic; no raw payload/token/secret disclosure.",
+    "This is a repair of an existing business endpoint data authorization vulnerability, not an audit-only replenishment or new monitoring module. Add meaningful unit and real isolated SQL tests for two customers, identical BillNo across families, exact versus colliding paths, zero/negative/missing/foreign Oid, permission revocation/disabled identity, pagination/count and unavailable historical source. Assert no writes or notifications; existing document-history and legacy-read regressions and safe Release/full unit pass; accurate browser/environment blockers retained.",
+    "Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/BillProcController.cs",
+    "src/ERP.Application/Services/LegacyBillAuthorizationRules.cs",
+    "src/ERP.Api/Controllers/BillProcController.Log.cs",
+    "src/ERP.Application/Interfaces/ILegacyBillReadService.cs",
+    "src/ERP.Application/DTOs/LegacyBillReadDtos.cs",
+    "src/ERP.Infrastructure/Reports/LegacyBillReadService.cs",
+    "src/ERP.Application/Services/LegacyBillHistoryRules.cs",
+    "src/ERP.UnitTests/LegacyBillHistoryTests.cs",
+    "src/ERP.IntegrationTests/LegacyBillHistorySqlServerTests.cs",
+    "docs/legacy-bill-history-scope.md"
+  ],
+  "criterion_path_map": {
+    "Secure the existing business document history endpoint using the preceding live module/legacy source row scope policy before ReadBillNo or log count/read. Positive Oid must identify an accessible authoritative legacy row; missing/foreign/revoked/disabled access returns no bill number, customer hints or history. Reject zero/negative Oid global history unless an explicit existing authorized administrative path is genuinely available; never broaden normal business user permission.": [
+      "src/ERP.Api/Controllers/BillProcController.cs",
+      "src/ERP.Application/Services/LegacyBillAuthorizationRules.cs",
+      "src/ERP.Api/Controllers/BillProcController.Log.cs",
+      "src/ERP.Application/Interfaces/ILegacyBillReadService.cs",
+      "src/ERP.Application/DTOs/LegacyBillReadDtos.cs",
+      "src/ERP.Infrastructure/Reports/LegacyBillReadService.cs",
+      "src/ERP.Application/Services/LegacyBillHistoryRules.cs",
+      "src/ERP.UnitTests/LegacyBillHistoryTests.cs",
+      "src/ERP.IntegrationTests/LegacyBillHistorySqlServerTests.cs",
+      "docs/legacy-bill-history-scope.md"
+    ],
+    "Filter exact document and finite module/path identity before count/page. Same BillNo in another family or customer must not match; descendant action paths require a validated finite path boundary, not prefix collisions or arbitrary query. For historical logs lacking an authoritative record identifier, only return rows whose provenance is safely established, otherwise omit with documented limitation. Preserve legal business timeline fields and ordering, bounded page size and checked arithmetic; no raw payload/token/secret disclosure.": [
+      "src/ERP.Api/Controllers/BillProcController.cs",
+      "src/ERP.Application/Services/LegacyBillAuthorizationRules.cs",
+      "src/ERP.Api/Controllers/BillProcController.Log.cs",
+      "src/ERP.Application/Interfaces/ILegacyBillReadService.cs",
+      "src/ERP.Application/DTOs/LegacyBillReadDtos.cs",
+      "src/ERP.Infrastructure/Reports/LegacyBillReadService.cs",
+      "src/ERP.Application/Services/LegacyBillHistoryRules.cs",
+      "src/ERP.UnitTests/LegacyBillHistoryTests.cs",
+      "src/ERP.IntegrationTests/LegacyBillHistorySqlServerTests.cs",
+      "docs/legacy-bill-history-scope.md"
+    ],
+    "This is a repair of an existing business endpoint data authorization vulnerability, not an audit-only replenishment or new monitoring module. Add meaningful unit and real isolated SQL tests for two customers, identical BillNo across families, exact versus colliding paths, zero/negative/missing/foreign Oid, permission revocation/disabled identity, pagination/count and unavailable historical source. Assert no writes or notifications; existing document-history and legacy-read regressions and safe Release/full unit pass; accurate browser/environment blockers retained.": [
+      "src/ERP.Api/Controllers/BillProcController.cs",
+      "src/ERP.Application/Services/LegacyBillAuthorizationRules.cs",
+      "src/ERP.Api/Controllers/BillProcController.Log.cs",
+      "src/ERP.Application/Interfaces/ILegacyBillReadService.cs",
+      "src/ERP.Application/DTOs/LegacyBillReadDtos.cs",
+      "src/ERP.Infrastructure/Reports/LegacyBillReadService.cs",
+      "src/ERP.Application/Services/LegacyBillHistoryRules.cs",
+      "src/ERP.UnitTests/LegacyBillHistoryTests.cs",
+      "src/ERP.IntegrationTests/LegacyBillHistorySqlServerTests.cs",
+      "docs/legacy-bill-history-scope.md"
+    ],
+    "Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance.": [
+      "src/ERP.Api/Controllers/BillProcController.cs",
+      "src/ERP.Application/Services/LegacyBillAuthorizationRules.cs",
+      "src/ERP.Api/Controllers/BillProcController.Log.cs",
+      "src/ERP.Application/Interfaces/ILegacyBillReadService.cs",
+      "src/ERP.Application/DTOs/LegacyBillReadDtos.cs",
+      "src/ERP.Infrastructure/Reports/LegacyBillReadService.cs",
+      "src/ERP.Application/Services/LegacyBillHistoryRules.cs",
+      "src/ERP.UnitTests/LegacyBillHistoryTests.cs",
+      "src/ERP.IntegrationTests/LegacyBillHistorySqlServerTests.cs",
+      "docs/legacy-bill-history-scope.md"
+    ]
+  },
+  "implementation_evidence": "BillProcController.Log.GetBillLogs resolves BillNo without row authorization, combines BillNo equality with path equality without family restriction, and oid=0 returns every log for a family. A same-number record in another module and scoped customer history can leak to any authenticated user.",
+  "depends_on": [
+    "ERP-405"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "id": "ERP-406",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-08T19:21:56.104217Z"
+}
