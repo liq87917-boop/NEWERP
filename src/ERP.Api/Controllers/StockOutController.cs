@@ -62,7 +62,8 @@ public class StockOutController : DocumentControllerBase<StockOut>
     [HttpGet("{id:long}/movements")]
     public async Task<IActionResult> GetMovements(long id)
     {
-        await GetOrThrowAsync(id, "出库单不存在");
+        var entity = await GetOrThrowAsync(id, "出库单不存在");
+        await EnsureCustomerScopeAsync(entity.CustomerId);
         var movements = await _inventory.ListMovementsAsync(InventoryDocumentHelper.StockOutType, id);
         return Ok(ApiResponse<IReadOnlyList<StockMovement>>.Success(movements));
     }
@@ -71,6 +72,7 @@ public class StockOutController : DocumentControllerBase<StockOut>
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] StockOut entity)
     {
+        await EnsureCustomerScopeAsync(entity.CustomerId);
         entity.Id = 0;
         entity.StockOutNo = await _noService.GenerateAsync(DocumentType.StockOut);
         entity.Status = DocumentStatus.Pending;
@@ -90,6 +92,8 @@ public class StockOutController : DocumentControllerBase<StockOut>
         var existing = await Db.StockOuts.Include(o => o.Details)
             .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
             ?? throw BusinessException.NotFound("出库单不存在");
+        await EnsureCustomerScopeAsync(existing.CustomerId);
+        await EnsureCustomerScopeAsync(entity.CustomerId);
         if (GetStatus(existing) != DocumentStatus.Pending)
             throw BusinessException.RuleConflict("仅待提交状态的单据可修改");
 
@@ -122,6 +126,7 @@ public class StockOutController : DocumentControllerBase<StockOut>
         var entity = await Db.StockOuts.Include(o => o.Details)
             .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
             ?? throw BusinessException.NotFound("出库单不存在");
+        await EnsureCustomerScopeAsync(entity.CustomerId);
         if (GetStatus(entity) != DocumentStatus.Submitted)
             throw BusinessException.RuleConflict("当前状态不允许该操作");
 
@@ -197,6 +202,7 @@ public class StockOutController : DocumentControllerBase<StockOut>
         var entity = await Db.StockOuts.Include(o => o.Details)
             .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
             ?? throw BusinessException.NotFound("出库单不存在");
+        await EnsureCustomerScopeAsync(entity.CustomerId);
         var status = GetStatus(entity);
         if (status == DocumentStatus.Cancelled)
             throw BusinessException.RuleConflict("出库单已取消");
@@ -214,6 +220,28 @@ public class StockOutController : DocumentControllerBase<StockOut>
     /// 重复冲销由流水的 <c>IsReversed</c> 标记兜住）；本次改造前审核的历史单据没有流水，
     /// 退化为按明细基础单位原路恢复，避免库存台账漂移。
     /// </summary>
+    private async Task EnsureCustomerScopeAsync(long customerId)
+    {
+        if (!(await ResolveScopeAsync()).AllowsCustomer(customerId))
+            throw BusinessException.NotFound("出库单不存在");
+    }
+
+    [HttpPost("{id:long}/submit")]
+    public override async Task<IActionResult> Submit(long id)
+    {
+        var entity = await GetOrThrowAsync(id, "出库单不存在");
+        await EnsureCustomerScopeAsync(entity.CustomerId);
+        return await base.Submit(id);
+    }
+
+    [HttpDelete("{id:long}")]
+    public override async Task<IActionResult> Delete(long id)
+    {
+        var entity = await GetOrThrowAsync(id, "出库单不存在");
+        await EnsureCustomerScopeAsync(entity.CustomerId);
+        return await base.Delete(id);
+    }
+
     private async Task ReverseStockAsync(StockOut entity)
     {
         var reversals = await _inventory.ReverseAsync(InventoryDocumentHelper.StockOutType, entity.Id,

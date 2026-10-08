@@ -406,7 +406,7 @@ public class StockInOutMovementLedgerTests
         => new(db, new DocumentNumberService(db), new InventoryService(db));
 
     private static StockOutController NewStockOutController(ErpDbContext db)
-        => new(db, new DocumentNumberService(db), new InventoryService(db));
+        => StockOutTestAuthorization.Create(db);
 
     private static async Task<long> CreateStockInAsync(StockInController ctl, decimal quantity, string unit,
         long? purchaseOrderId)

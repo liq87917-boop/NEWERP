@@ -307,7 +307,7 @@ public class StockOutOrderFulfillmentTests
     // ==================== 辅助 ====================
 
     private static StockOutController NewController(ErpDbContext db)
-        => new(db, new DocumentNumberService(db), new InventoryService(db));
+        => StockOutTestAuthorization.Create(db);
 
     private static StockOut NewStockOut(long customerId, long? salesOrderId,
         params (long ProductId, string Unit, decimal Quantity)[] lines)
