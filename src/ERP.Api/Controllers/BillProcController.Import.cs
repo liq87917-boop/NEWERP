@@ -1,4 +1,5 @@
 using ERP.Application.Common;
+using ERP.Application.Services;
 using ERP.Infrastructure.Export;
 using Microsoft.AspNetCore.Mvc;
 
@@ -48,6 +49,11 @@ public partial class BillProcController
     {
         if (!Bills.TryGetValue(billType, out var meta))
             return Ok(ApiResponse<object>.Fail("未知单据类型", ErrorCodes.InvalidParameter));
+
+        // ERP-404：Excel 导入与 Save 同源，必须在解析 / 默认值 / sp_Biz_* / 日志 / 通知之前 fail closed。
+        var denied = await GuardLegacyMutationAsync(billType, LegacyBillOperation.Import);
+        if (denied is not null) return denied;
+
         if (file is null || file.Length == 0)
             return Ok(ApiResponse<object>.Fail("请选择要导入的 Excel 文件", ErrorCodes.InvalidParameter));
         if (!file.FileName.EndsWith(".xlsx", StringComparison.OrdinalIgnoreCase))

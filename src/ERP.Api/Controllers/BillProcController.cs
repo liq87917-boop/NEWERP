@@ -1,4 +1,5 @@
 using ERP.Application.Common;
+using ERP.Application.Services;
 using ERP.Domain.Enums;
 using ERP.Infrastructure.Data;
 using Microsoft.AspNetCore.Authorization;
@@ -59,6 +60,34 @@ public partial class BillProcController : ControllerBase
         _dingTalk = dingTalk;
     }
 
+    /// <summary>当前登录账号 Id（缺失 / 非法 = <c>null</c>，绝不当作匿名或管理员）。</summary>
+    private long? CurrentUserId()
+        => long.TryParse(User?.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value, out var id) && id > 0
+            ? id
+            : null;
+
+    /// <summary>
+    /// ERP-404 旧单据有限变更策略门禁：在默认值兜底、单号预约、任何 <c>sp_Biz_*</c> 调用、操作日志与钉钉通知
+    /// <b>之前</b>调用；被拒绝时返回受控 <see cref="ApiResponse{T}"/> 失败信封（保持既有「HTTP 200 + 业务错误码」
+    /// 契约，不执行任何写入），放行时返回 <c>null</c>（仅当存在已验证业务适配器时才会发生）。
+    /// </summary>
+    private async Task<IActionResult?> GuardLegacyMutationAsync(
+        string billType, LegacyBillOperation operation, IDictionary<string, object?>? callerFields = null)
+    {
+        try
+        {
+            await LegacyBillMutationRules.AuthorizeAsync(_db, CurrentUserId(), billType, operation, callerFields);
+            return null;
+        }
+        catch (BusinessException ex)
+        {
+            Serilog.Log.Warning(
+                "旧单据写入门禁拒绝：{BillType} / {Operation}（错误码 {Code}）；未执行 sp_Biz_*、未占用单号、未写日志、未通知",
+                billType, operation, ex.Code);
+            return Ok(ApiResponse<object>.Fail(ex.Message, ex.Code));
+        }
+    }
+
     /// <summary>保存（新增/更新）</summary>
     [HttpPost("{billType}/save")]
     public async Task<IActionResult> Save(string billType, [FromBody] BillSaveRequest request)
@@ -66,6 +95,12 @@ public partial class BillProcController : ControllerBase
         if (!Bills.TryGetValue(billType, out var meta))
             return Ok(ApiResponse<object>.Fail("未知单据类型", ErrorCodes.InvalidParameter));
 
+        // ERP-404：有限服务端变更策略必须在默认值兜底、单号预约、sp_Biz_* 调用、日志与通知之前裁决。
+        var denied = await GuardLegacyMutationAsync(billType, LegacyBillOperation.Save, request.Fields);
+        if (denied is not null) return denied;
+
+        // 今天不存在任何已验证适配器（策略 HasValidatedAdapter 恒为 false），以下旧写路径不可达；
+        // 仅当目录里显式登记了「权威旧 Oid ↔ 规范 Id 映射 + 已验证业务适配器」后才会接管。
         var parameters = new Dictionary<string, object?> { ["@Action"] = "Save", ["@Oid"] = request.Oid };
         foreach (var kv in request.Fields)
             parameters["@" + kv.Key] = kv.Value;
@@ -107,6 +142,11 @@ public partial class BillProcController : ControllerBase
             ["delete"] = "Delete", ["audit"] = "Audit",
             ["unaudit"] = "UnAudit", ["void"] = "Void", ["restore"] = "Restore"
         };
+
+        // ERP-404：状态流转同样必须在任何 sp_Biz_* 调用、状态读取、日志与通知之前 fail closed。
+        var denied = await GuardLegacyMutationAsync(billType, LegacyBillMutationRules.ParseOperation(op));
+        if (denied is not null) return denied;
+
         var result = await _sp.ExecuteAsync(meta.Proc, new Dictionary<string, object?>
         {
             ["@Action"] = actionMap[op],
@@ -171,7 +211,7 @@ public partial class BillProcController : ControllerBase
         catch (Exception ex)
         {
             Serilog.Log.Warning(ex, "校验单据状态失败：{Table} / {Oid}", table, oid);
-            return true; // 校验失败不阻塞业务（以存储过程返回结果为准）
+            return false; // ERP-404：状态无法确认时 fail closed，绝不把「校验失败」当作成功
         }
     }
 
