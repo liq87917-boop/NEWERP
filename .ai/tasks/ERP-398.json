@@ -1,0 +1,79 @@
+{
+  "title": "Enforce live PI permissions and customer scope through sales order conversion",
+  "description": "Stage3 core business workflow integrity. Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance.",
+  "acceptance_criteria": [
+    "Add reusable Application PI authorization and complete controller coverage for list/detail/create/update/submit/approve/unaudit/cancel/void/delete/batch and print/order-prefill/to-order. Require live enabled identity and existing proforma-invoice menu/customer scope before counts, numbering, reads/writes. Conversion additionally requires existing sales-order authority and target customer in scope, never grants target rights from source access. Verify both original and proposed customer on updates, unknown/unowned customers fail closed per existing scope convention. No new menu grants or schema, preserve legacy business permissions for genuinely authorized users.",
+    "Actual controller SQL own/foreign/revoked/disabled/no identity and source-only/target-only conversion denial; denied batch/conversion/update preserves source/target status, details, money and number/audit evidence. Keep original calculation/deposit/currency/unit and existing conversion eligibility; bounded scope before paging/export and no hidden field disclosure. Update affected existing unit fixtures to genuine existing authorized identities only, safe Release/full unit and relevant existing conversion regressions; browser evidence or exact blocker.",
+    "Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/ProformaInvoiceController.cs",
+    "src/ERP.Api/Controllers/SalesOrderConversion.cs",
+    "src/ERP.Application/Services/ProformaInvoiceAuthorizationRules.cs",
+    "src/ERP.UnitTests/ProformaInvoiceAuthorizationTests.cs",
+    "src/ERP.UnitTests/ProformaInvoiceControllerTests.cs",
+    "src/ERP.UnitTests/SalesOrderConversionTests.cs",
+    "src/ERP.UnitTests/QuotationConversionScopeTests.cs",
+    "src/ERP.IntegrationTests/ProformaInvoiceAuthorizationSqlServerTests.cs",
+    "docs/proforma-invoice-authorization.md"
+  ],
+  "criterion_path_map": {
+    "Add reusable Application PI authorization and complete controller coverage for list/detail/create/update/submit/approve/unaudit/cancel/void/delete/batch and print/order-prefill/to-order. Require live enabled identity and existing proforma-invoice menu/customer scope before counts, numbering, reads/writes. Conversion additionally requires existing sales-order authority and target customer in scope, never grants target rights from source access. Verify both original and proposed customer on updates, unknown/unowned customers fail closed per existing scope convention. No new menu grants or schema, preserve legacy business permissions for genuinely authorized users.": [
+      "src/ERP.Api/Controllers/ProformaInvoiceController.cs",
+      "src/ERP.Api/Controllers/SalesOrderConversion.cs",
+      "src/ERP.Application/Services/ProformaInvoiceAuthorizationRules.cs",
+      "src/ERP.UnitTests/ProformaInvoiceAuthorizationTests.cs",
+      "src/ERP.UnitTests/ProformaInvoiceControllerTests.cs",
+      "src/ERP.UnitTests/SalesOrderConversionTests.cs",
+      "src/ERP.UnitTests/QuotationConversionScopeTests.cs",
+      "src/ERP.IntegrationTests/ProformaInvoiceAuthorizationSqlServerTests.cs",
+      "docs/proforma-invoice-authorization.md"
+    ],
+    "Actual controller SQL own/foreign/revoked/disabled/no identity and source-only/target-only conversion denial; denied batch/conversion/update preserves source/target status, details, money and number/audit evidence. Keep original calculation/deposit/currency/unit and existing conversion eligibility; bounded scope before paging/export and no hidden field disclosure. Update affected existing unit fixtures to genuine existing authorized identities only, safe Release/full unit and relevant existing conversion regressions; browser evidence or exact blocker.": [
+      "src/ERP.Api/Controllers/ProformaInvoiceController.cs",
+      "src/ERP.Api/Controllers/SalesOrderConversion.cs",
+      "src/ERP.Application/Services/ProformaInvoiceAuthorizationRules.cs",
+      "src/ERP.UnitTests/ProformaInvoiceAuthorizationTests.cs",
+      "src/ERP.UnitTests/ProformaInvoiceControllerTests.cs",
+      "src/ERP.UnitTests/SalesOrderConversionTests.cs",
+      "src/ERP.UnitTests/QuotationConversionScopeTests.cs",
+      "src/ERP.IntegrationTests/ProformaInvoiceAuthorizationSqlServerTests.cs",
+      "docs/proforma-invoice-authorization.md"
+    ],
+    "Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance.": [
+      "src/ERP.Api/Controllers/ProformaInvoiceController.cs",
+      "src/ERP.Api/Controllers/SalesOrderConversion.cs",
+      "src/ERP.Application/Services/ProformaInvoiceAuthorizationRules.cs",
+      "src/ERP.UnitTests/ProformaInvoiceAuthorizationTests.cs",
+      "src/ERP.UnitTests/ProformaInvoiceControllerTests.cs",
+      "src/ERP.UnitTests/SalesOrderConversionTests.cs",
+      "src/ERP.UnitTests/QuotationConversionScopeTests.cs",
+      "src/ERP.IntegrationTests/ProformaInvoiceAuthorizationSqlServerTests.cs",
+      "docs/proforma-invoice-authorization.md"
+    ]
+  },
+  "implementation_evidence": "ProformaInvoiceController uses inherited ResolveScopeAsync on selected reads but create/update/approve/unaudit/void/to-order paths do not explicitly recheck enabled identity and existing PI menu. ToSalesOrder loads source and calls conversion then writes target without a live source/target menu check.",
+  "depends_on": [
+    "ERP-397"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "id": "ERP-398",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-08T17:49:50.149494Z"
+}

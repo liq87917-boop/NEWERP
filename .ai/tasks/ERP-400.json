@@ -1,0 +1,107 @@
+{
+  "title": "Protect quotation revisions and conversions with live authority and atomic source lifecycle",
+  "description": "Stage3 core business workflow integrity. Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance.",
+  "acceptance_criteria": [
+    "Enforce live enabled existing quotation/menu and customer scope on all CRUD, lifecycle, revision, due list, print and prefill/conversion entries before reads/counts/numbers; require existing PI or sales-order target menu/customer authorization for respective conversions. Use authoritative IDs and existing quotation revision/current-version/conversion eligibility; do not guess links from numbers or broaden customer scope. Serialize source edit/approve/unaudit/cancel/delete/revision/to-pi/to-order with deterministic existing source/target lock order compatible with PI locks, full transaction and reread.",
+    "Duplicate equivalent conversion creates at most one complete target and marks source consistently; preserve existing rules for distinct conversion kinds and version lineage rather than invent a blanket one-target rule. Converted downstream links prevent invalidating source snapshots; no automatic downstream reversal. Two independent SQL connections duplicate conversion, revision/convert, cancel/convert, edit/approve plus forbidden/revoked/disabled/mixed batch denial, rollback and exact quantity/currency/unit/deposit snapshots. Existing quotation/PI/conversion unit fixtures retain genuine permission checks, safe Release/full unit; browser evidence or accurate blocker.",
+    "Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/QuotationController.cs",
+    "src/ERP.Api/Controllers/SalesOrderConversion.cs",
+    "src/ERP.Application/Services/QuotationRevisionService.cs",
+    "src/ERP.Application/Services/QuotationRevisionRules.cs",
+    "src/ERP.Application/Services/QuotationAuthorizationRules.cs",
+    "src/ERP.Application/Services/QuotationMutationRules.cs",
+    "src/ERP.Application/Services/ProformaInvoiceMutationRules.cs",
+    "src/ERP.UnitTests/QuotationMutationTests.cs",
+    "src/ERP.UnitTests/QuotationToPiTests.cs",
+    "src/ERP.UnitTests/QuotationRevisionTests.cs",
+    "src/ERP.UnitTests/QuotationGovernanceTests.cs",
+    "src/ERP.UnitTests/QuotationCrudRegressionTests.cs",
+    "src/ERP.UnitTests/QuotationConversionScopeTests.cs",
+    "src/ERP.UnitTests/SalesOrderConversionTests.cs",
+    "src/ERP.IntegrationTests/QuotationMutationSqlServerTests.cs",
+    "docs/quotation-mutations.md"
+  ],
+  "criterion_path_map": {
+    "Enforce live enabled existing quotation/menu and customer scope on all CRUD, lifecycle, revision, due list, print and prefill/conversion entries before reads/counts/numbers; require existing PI or sales-order target menu/customer authorization for respective conversions. Use authoritative IDs and existing quotation revision/current-version/conversion eligibility; do not guess links from numbers or broaden customer scope. Serialize source edit/approve/unaudit/cancel/delete/revision/to-pi/to-order with deterministic existing source/target lock order compatible with PI locks, full transaction and reread.": [
+      "src/ERP.Api/Controllers/QuotationController.cs",
+      "src/ERP.Api/Controllers/SalesOrderConversion.cs",
+      "src/ERP.Application/Services/QuotationRevisionService.cs",
+      "src/ERP.Application/Services/QuotationRevisionRules.cs",
+      "src/ERP.Application/Services/QuotationAuthorizationRules.cs",
+      "src/ERP.Application/Services/QuotationMutationRules.cs",
+      "src/ERP.Application/Services/ProformaInvoiceMutationRules.cs",
+      "src/ERP.UnitTests/QuotationMutationTests.cs",
+      "src/ERP.UnitTests/QuotationToPiTests.cs",
+      "src/ERP.UnitTests/QuotationRevisionTests.cs",
+      "src/ERP.UnitTests/QuotationGovernanceTests.cs",
+      "src/ERP.UnitTests/QuotationCrudRegressionTests.cs",
+      "src/ERP.UnitTests/QuotationConversionScopeTests.cs",
+      "src/ERP.UnitTests/SalesOrderConversionTests.cs",
+      "src/ERP.IntegrationTests/QuotationMutationSqlServerTests.cs",
+      "docs/quotation-mutations.md"
+    ],
+    "Duplicate equivalent conversion creates at most one complete target and marks source consistently; preserve existing rules for distinct conversion kinds and version lineage rather than invent a blanket one-target rule. Converted downstream links prevent invalidating source snapshots; no automatic downstream reversal. Two independent SQL connections duplicate conversion, revision/convert, cancel/convert, edit/approve plus forbidden/revoked/disabled/mixed batch denial, rollback and exact quantity/currency/unit/deposit snapshots. Existing quotation/PI/conversion unit fixtures retain genuine permission checks, safe Release/full unit; browser evidence or accurate blocker.": [
+      "src/ERP.Api/Controllers/QuotationController.cs",
+      "src/ERP.Api/Controllers/SalesOrderConversion.cs",
+      "src/ERP.Application/Services/QuotationRevisionService.cs",
+      "src/ERP.Application/Services/QuotationRevisionRules.cs",
+      "src/ERP.Application/Services/QuotationAuthorizationRules.cs",
+      "src/ERP.Application/Services/QuotationMutationRules.cs",
+      "src/ERP.Application/Services/ProformaInvoiceMutationRules.cs",
+      "src/ERP.UnitTests/QuotationMutationTests.cs",
+      "src/ERP.UnitTests/QuotationToPiTests.cs",
+      "src/ERP.UnitTests/QuotationRevisionTests.cs",
+      "src/ERP.UnitTests/QuotationGovernanceTests.cs",
+      "src/ERP.UnitTests/QuotationCrudRegressionTests.cs",
+      "src/ERP.UnitTests/QuotationConversionScopeTests.cs",
+      "src/ERP.UnitTests/SalesOrderConversionTests.cs",
+      "src/ERP.IntegrationTests/QuotationMutationSqlServerTests.cs",
+      "docs/quotation-mutations.md"
+    ],
+    "Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance.": [
+      "src/ERP.Api/Controllers/QuotationController.cs",
+      "src/ERP.Api/Controllers/SalesOrderConversion.cs",
+      "src/ERP.Application/Services/QuotationRevisionService.cs",
+      "src/ERP.Application/Services/QuotationRevisionRules.cs",
+      "src/ERP.Application/Services/QuotationAuthorizationRules.cs",
+      "src/ERP.Application/Services/QuotationMutationRules.cs",
+      "src/ERP.Application/Services/ProformaInvoiceMutationRules.cs",
+      "src/ERP.UnitTests/QuotationMutationTests.cs",
+      "src/ERP.UnitTests/QuotationToPiTests.cs",
+      "src/ERP.UnitTests/QuotationRevisionTests.cs",
+      "src/ERP.UnitTests/QuotationGovernanceTests.cs",
+      "src/ERP.UnitTests/QuotationCrudRegressionTests.cs",
+      "src/ERP.UnitTests/QuotationConversionScopeTests.cs",
+      "src/ERP.UnitTests/SalesOrderConversionTests.cs",
+      "src/ERP.IntegrationTests/QuotationMutationSqlServerTests.cs",
+      "docs/quotation-mutations.md"
+    ]
+  },
+  "implementation_evidence": "QuotationController has separate to-pi and to-order writes and legacy inherited transitions; quotation revision service can branch persisted versions. Selected reads ResolveScopeAsync do not constitute a live existing quotation/source-target authorization boundary for every mutation and generated target.",
+  "depends_on": [
+    "ERP-399"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "id": "ERP-400",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-08T17:49:50.161820Z"
+}
