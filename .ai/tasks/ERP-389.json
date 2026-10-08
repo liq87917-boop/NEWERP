@@ -1,0 +1,87 @@
+{
+  "title": "Add authorized sales order selection to the customer complaint workflow",
+  "description": "Stage3 core settlement and exception closure. Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance.",
+  "acceptance_criteria": [
+    "Add bounded paged sales-order candidate endpoint under complaint API, using ERP388 live complaint identity/menu/customer scope plus existing sales-order permission. Exact requested customer, nondeleted eligible order state, keyword/pagination normalized before counts, bounded DTO fields only; never return arbitrary customer orders or permit bypass via guessed Id. New selection does not require permissions beyond existing menus. Revalidate selected exact source on final save through ERP388 lifecycle rules; candidate selection is not authorization.",
+    "Wire an actual optional salesOrderId selector into the existing complaint create/edit form using established hooks. Customer changes invalidate prior selection; async responses cannot restore stale customer results. Reopening existing complaints preserves exact stored link including historical cancelled/unavailable source with clear annotation; never silently clear/rebind historical IDs. Provide explicit unlink choice on editable pending complaints and source display in read/detail context; failures preserve form state with useful error. No guessed order numbers or automatic quantity/amount changes. SQL actual candidate API scope/status/forged source rejection, executable JS integration behavior tests for create/edit/reopen/customer switch/stale response/denied candidate, relevant unit and safe Release verification; real browser evidence or accurate blocker.",
+    "Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/FinanceReceiptComplaintControllers.cs",
+    "src/ERP.Application/DTOs/ComplaintSalesOrderSourceDtos.cs",
+    "src/ERP.Application/Services/ComplaintSalesOrderSourceService.cs",
+    "src/ERP.Application/Services/FinanceComplaintLifecycleRules.cs",
+    "src/ERP.Api/wwwroot/js/complaint-sales-order-source.js",
+    "src/ERP.Api/wwwroot/js/modules-finance.js",
+    "src/ERP.Api/wwwroot/index.html",
+    "src/ERP.UnitTests/ComplaintSalesOrderSourceTests.cs",
+    "src/ERP.IntegrationTests/ComplaintSalesOrderSourceSqlServerTests.cs",
+    "tests/complaint-sales-order-source.test.js",
+    "docs/complaint-sales-order-source.md"
+  ],
+  "criterion_path_map": {
+    "Add bounded paged sales-order candidate endpoint under complaint API, using ERP388 live complaint identity/menu/customer scope plus existing sales-order permission. Exact requested customer, nondeleted eligible order state, keyword/pagination normalized before counts, bounded DTO fields only; never return arbitrary customer orders or permit bypass via guessed Id. New selection does not require permissions beyond existing menus. Revalidate selected exact source on final save through ERP388 lifecycle rules; candidate selection is not authorization.": [
+      "src/ERP.Api/Controllers/FinanceReceiptComplaintControllers.cs",
+      "src/ERP.Application/DTOs/ComplaintSalesOrderSourceDtos.cs",
+      "src/ERP.Application/Services/ComplaintSalesOrderSourceService.cs",
+      "src/ERP.Application/Services/FinanceComplaintLifecycleRules.cs",
+      "src/ERP.Api/wwwroot/js/complaint-sales-order-source.js",
+      "src/ERP.Api/wwwroot/js/modules-finance.js",
+      "src/ERP.Api/wwwroot/index.html",
+      "src/ERP.UnitTests/ComplaintSalesOrderSourceTests.cs",
+      "src/ERP.IntegrationTests/ComplaintSalesOrderSourceSqlServerTests.cs",
+      "tests/complaint-sales-order-source.test.js",
+      "docs/complaint-sales-order-source.md"
+    ],
+    "Wire an actual optional salesOrderId selector into the existing complaint create/edit form using established hooks. Customer changes invalidate prior selection; async responses cannot restore stale customer results. Reopening existing complaints preserves exact stored link including historical cancelled/unavailable source with clear annotation; never silently clear/rebind historical IDs. Provide explicit unlink choice on editable pending complaints and source display in read/detail context; failures preserve form state with useful error. No guessed order numbers or automatic quantity/amount changes. SQL actual candidate API scope/status/forged source rejection, executable JS integration behavior tests for create/edit/reopen/customer switch/stale response/denied candidate, relevant unit and safe Release verification; real browser evidence or accurate blocker.": [
+      "src/ERP.Api/Controllers/FinanceReceiptComplaintControllers.cs",
+      "src/ERP.Application/DTOs/ComplaintSalesOrderSourceDtos.cs",
+      "src/ERP.Application/Services/ComplaintSalesOrderSourceService.cs",
+      "src/ERP.Application/Services/FinanceComplaintLifecycleRules.cs",
+      "src/ERP.Api/wwwroot/js/complaint-sales-order-source.js",
+      "src/ERP.Api/wwwroot/js/modules-finance.js",
+      "src/ERP.Api/wwwroot/index.html",
+      "src/ERP.UnitTests/ComplaintSalesOrderSourceTests.cs",
+      "src/ERP.IntegrationTests/ComplaintSalesOrderSourceSqlServerTests.cs",
+      "tests/complaint-sales-order-source.test.js",
+      "docs/complaint-sales-order-source.md"
+    ],
+    "Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance.": [
+      "src/ERP.Api/Controllers/FinanceReceiptComplaintControllers.cs",
+      "src/ERP.Application/DTOs/ComplaintSalesOrderSourceDtos.cs",
+      "src/ERP.Application/Services/ComplaintSalesOrderSourceService.cs",
+      "src/ERP.Application/Services/FinanceComplaintLifecycleRules.cs",
+      "src/ERP.Api/wwwroot/js/complaint-sales-order-source.js",
+      "src/ERP.Api/wwwroot/js/modules-finance.js",
+      "src/ERP.Api/wwwroot/index.html",
+      "src/ERP.UnitTests/ComplaintSalesOrderSourceTests.cs",
+      "src/ERP.IntegrationTests/ComplaintSalesOrderSourceSqlServerTests.cs",
+      "tests/complaint-sales-order-source.test.js",
+      "docs/complaint-sales-order-source.md"
+    ]
+  },
+  "implementation_evidence": "modules-finance.js complaint form has CustomerId but no SalesOrderId field, despite existing persisted FinanceComplaint.SalesOrderId and controller support; users cannot create explicit complaint-to-order traceability through the actual current UI. Existing source pickers prove the reusable form pattern; do not build a dedicated report.",
+  "depends_on": [
+    "ERP-388"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "id": "ERP-389",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-08T15:40:04.274914Z"
+}
