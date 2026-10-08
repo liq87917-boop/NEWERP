@@ -67,6 +67,12 @@ public interface IInventoryService
     /// <summary>取（或按仓库 + 商品新建）库存行</summary>
     Task<Stock> GetOrCreateStockAsync(long warehouseId, long productId, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// 读取权威当前库存数量（库存行不存在按 0）：只读，不创建库存行、不改变数量 / 金额 / 成本。
+    /// 用于盘点过账前的「账面数量基线」核验（ERP-355）。
+    /// </summary>
+    Task<decimal> GetCurrentQuantityAsync(long warehouseId, long productId, CancellationToken cancellationToken = default);
+
     /// <summary>按来源单据取成本单价（来源入库/出库流水成本）；无来源或无流水时返回 0</summary>
     Task<decimal> ResolveSourceCostAsync(string sourceDocType, long sourceDocId, long? productId,
         CancellationToken cancellationToken = default);
@@ -139,6 +145,14 @@ public sealed class InventoryService : IInventoryService
         _db.Stocks.Add(stock);
         return stock;
     }
+
+    /// <inheritdoc />
+    public async Task<decimal> GetCurrentQuantityAsync(long warehouseId, long productId,
+        CancellationToken cancellationToken = default)
+        => await _db.Stocks.AsNoTracking()
+            .Where(s => s.WarehouseId == warehouseId && s.ProductId == productId && !s.IsDeleted)
+            .Select(s => (decimal?)s.Quantity)
+            .FirstOrDefaultAsync(cancellationToken) ?? 0m;
 
     /// <inheritdoc />
     public async Task<decimal> ResolveSourceCostAsync(string sourceDocType, long sourceDocId, long? productId,

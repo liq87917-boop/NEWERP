@@ -670,8 +670,13 @@ public class InventoryMovementTests
 
     // ==================== 测试辅助 ====================
 
+    // ERP-355：盘点单全部路由都要求真实已授权身份（既有「库存查询」菜单）与在用仓库 / 商品；
+    // 这里注入测试授权身份并播种主数据，保留原有全部数量 / 成本 / 冲销断言，不绕过鉴权。
     private static StockAdjustmentController NewAdjustmentController(ErpDbContext db)
-        => new(db, new DocumentNumberService(db), new InventoryService(db));
+    {
+        StockAdjustmentTestAuthorization.SeedMasterData(db, WarehouseA, Product1, Product2);
+        return StockAdjustmentTestAuthorization.CreateAuthorized(db);
+    }
 
     // ERP-354：调拨单全部路由都要求真实已授权身份（既有「库存查询」菜单），
     // 这里注入测试授权身份，保留原有全部数量 / 成本 / 冲销断言，不改业务规则、不绕过鉴权。
