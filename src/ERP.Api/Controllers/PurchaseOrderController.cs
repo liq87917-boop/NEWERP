@@ -197,17 +197,34 @@ public class PurchaseOrderController : DocumentControllerBase<PurchaseOrder>
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] PurchaseOrder entity)
     {
-        entity.Id = 0;
-        entity.OrderNo = await _noService.GenerateAsync(DocumentType.PurchaseOrder);
-        entity.Status = DocumentStatus.Pending;
-        entity.CreatedAt = DateTime.Now;
-        foreach (var d in entity.Details) d.Amount = d.Quantity * d.UnitPrice;   // 与 Update 对齐：补齐明细金额
-        if (entity.OwningSalesOrderId is not null)
-            await PurchaseSalesOrderLinkRules.ApplyLinkAsync(Db, entity, CurrentUserId());   // ERP-346：解析并统一归属销售订单来源
-        Calculate(entity);
-        Validate(entity);
-        Db.PurchaseOrders.Add(entity);
-        await Db.SaveChangesAsync();
+        if (entity.OwningSalesOrderId is null)
+            return await CreateUnlinkedAsync(entity);
+
+        // ERP-347：显式归属销售订单的采购创建与「来源销售订单取消」使用同一把销售订单行锁（UPDLOCK/HOLDLOCK），
+        // 在可串行化事务内先锁来源订单行，再解析权威来源；并发时「来源取消」与「采购创建」只能成功其一。
+        await using var transaction = await Db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
+        try
+        {
+            await AcquireSalesOrderLinkLockAsync(entity.OwningSalesOrderId.Value);
+
+            entity.Id = 0;
+            entity.OrderNo = await _noService.GenerateAsync(DocumentType.PurchaseOrder);
+            entity.Status = DocumentStatus.Pending;
+            entity.CreatedAt = DateTime.Now;
+            foreach (var d in entity.Details) d.Amount = d.Quantity * d.UnitPrice;
+            await PurchaseSalesOrderLinkRules.ApplyLinkAsync(Db, entity, CurrentUserId());
+            Calculate(entity);
+            Validate(entity);
+            Db.PurchaseOrders.Add(entity);
+            await Db.SaveChangesAsync();
+            await transaction.CommitAsync();
+        }
+        catch
+        {
+            await transaction.RollbackAsync();
+            throw;
+        }
+
         return Ok(ApiResponse<object>.Success(new { entity.Id, entity.OrderNo }, "采购订单创建成功"));
     }
 
@@ -215,14 +232,94 @@ public class PurchaseOrderController : DocumentControllerBase<PurchaseOrder>
     [HttpPut("{id:long}")]
     public async Task<IActionResult> Update(long id, [FromBody] PurchaseOrder entity)
     {
+        if (entity.OwningSalesOrderId is null)
+            return await UpdateUnlinkedAsync(id, entity);
+
+        // ERP-347：与创建同口径——显式归属销售订单的采购更新与「来源销售订单取消」使用同一把销售订单行锁串行化。
+        await using var transaction = await Db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
+        try
+        {
+            await AcquireSalesOrderLinkLockAsync(entity.OwningSalesOrderId.Value);
+
+            var existing = await Db.PurchaseOrders.Include(o => o.Details)
+                .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
+                ?? throw BusinessException.NotFound("采购订单不存在");
+            if (GetStatus(existing) != DocumentStatus.Pending)
+                throw BusinessException.RuleConflict("仅待提交状态的单据可修改");
+
+            await PurchaseSalesOrderLinkRules.ApplyLinkAsync(Db, entity, CurrentUserId());
+
+            existing.OrderDate = entity.OrderDate;
+            existing.SupplierId = entity.SupplierId;
+            existing.BuyerId = entity.BuyerId;
+            existing.Currency = entity.Currency;
+            existing.ExchangeRate = entity.ExchangeRate;
+            existing.PaymentTerms = entity.PaymentTerms;
+            existing.DeliveryDate = entity.DeliveryDate;
+            existing.PortId = entity.PortId;
+            existing.Remark = entity.Remark;
+
+            // 采购执行与结算追溯（ERP-008）
+            existing.OwningCustomerId = entity.OwningCustomerId;
+            existing.OwningCustomerName = entity.OwningCustomerName;
+            existing.OwningSalesOrderId = entity.OwningSalesOrderId;
+            existing.OwningSalesOrderNo = entity.OwningSalesOrderNo;
+            existing.AdvanceOnBehalf = entity.AdvanceOnBehalf;
+            existing.SupplierConfirmedDate = entity.SupplierConfirmedDate;
+            existing.TaxRate = entity.TaxRate;
+            existing.TaxIncluded = entity.TaxIncluded;
+            existing.ArrivalProgress = entity.ArrivalProgress;
+            existing.QcStatus = entity.QcStatus;
+            existing.ContractNo = entity.ContractNo;
+            existing.SettlementProgress = entity.SettlementProgress;
+
+            Db.PurchaseOrderDetails.RemoveRange(existing.Details);
+            foreach (var d in entity.Details)
+            {
+                d.Id = 0;
+                d.PurchaseOrderId = id;
+                d.CreatedAt = DateTime.Now;
+                d.Amount = d.Quantity * d.UnitPrice;
+            }
+            existing.Details = entity.Details;
+            Calculate(existing);
+            Validate(existing);
+            existing.UpdatedAt = DateTime.Now;
+            await Db.SaveChangesAsync();
+            await transaction.CommitAsync();
+        }
+        catch
+        {
+            await transaction.RollbackAsync();
+            throw;
+        }
+
+        return Ok(ApiResponse<object>.Success(null, "采购订单更新成功"));
+    }
+
+    /// <summary>无归属销售订单的采购创建（保持历史行为，不加锁、不开事务）。</summary>
+    private async Task<IActionResult> CreateUnlinkedAsync(PurchaseOrder entity)
+    {
+        entity.Id = 0;
+        entity.OrderNo = await _noService.GenerateAsync(DocumentType.PurchaseOrder);
+        entity.Status = DocumentStatus.Pending;
+        entity.CreatedAt = DateTime.Now;
+        foreach (var d in entity.Details) d.Amount = d.Quantity * d.UnitPrice;
+        Calculate(entity);
+        Validate(entity);
+        Db.PurchaseOrders.Add(entity);
+        await Db.SaveChangesAsync();
+        return Ok(ApiResponse<object>.Success(new { entity.Id, entity.OrderNo }, "采购订单创建成功"));
+    }
+
+    /// <summary>无归属销售订单的采购更新（保持历史行为，不加锁、不开事务）。</summary>
+    private async Task<IActionResult> UpdateUnlinkedAsync(long id, PurchaseOrder entity)
+    {
         var existing = await Db.PurchaseOrders.Include(o => o.Details)
             .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
             ?? throw BusinessException.NotFound("采购订单不存在");
         if (GetStatus(existing) != DocumentStatus.Pending)
             throw BusinessException.RuleConflict("仅待提交状态的单据可修改");
-
-        if (entity.OwningSalesOrderId is not null)
-            await PurchaseSalesOrderLinkRules.ApplyLinkAsync(Db, entity, CurrentUserId());   // ERP-346：先解析来源与权限，失败不改动现有单据
 
         existing.OrderDate = entity.OrderDate;
         existing.SupplierId = entity.SupplierId;
@@ -262,6 +359,20 @@ public class PurchaseOrderController : DocumentControllerBase<PurchaseOrder>
         existing.UpdatedAt = DateTime.Now;
         await Db.SaveChangesAsync();
         return Ok(ApiResponse<object>.Success(null, "采购订单更新成功"));
+    }
+
+    /// <summary>
+    /// 对归属销售订单行加更新锁（UPDLOCK, HOLDLOCK），把同单并发「来源取消 / 采购归属关联」串行化在同一事务内；
+    /// 非关系型提供程序（内存库）无法执行表提示，跳过即可（事务本身等价无事务）。
+    /// </summary>
+    private async Task AcquireSalesOrderLinkLockAsync(long salesOrderId)
+    {
+        if (!Db.Database.IsRelational()) return;
+        await Db.Database
+            .SqlQueryRaw<long>(
+                "SELECT Id FROM db_owner.SalesOrders WITH (UPDLOCK, HOLDLOCK) WHERE Id = {0}",
+                salesOrderId)
+            .ToListAsync();
     }
 
     /// <summary>打印数据（主表 + 明细；打印模板由 /api/sys/print-templates/purchase-order 提供）</summary>

@@ -7,6 +7,7 @@ using ERP.Domain.Enums;
 using ERP.Infrastructure.Export;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.Data;
 
 namespace ERP.Api.Controllers;
 
@@ -272,6 +273,55 @@ public class SalesOrderController : DocumentControllerBase<SalesOrder>
         existing.UpdatedAt = DateTime.Now;
         await Db.SaveChangesAsync();
         return Ok(ApiResponse<object>.Success(null, "销售订单更新成功"));
+    }
+
+    /// <summary>
+    /// 取消销售订单（ERP-347）：在可串行化事务内对订单行加更新锁，把「拒绝判定」与「状态变更」做成一个原子步骤，
+    /// 并与同单出库审核（ERP-343）、采购归属关联（ERP-346）与收款引用登记（ERP-053）串行化——
+    /// 并发场景下「履约生效」与「来源取消」不可能同时成功。
+    /// <para>只把状态改为已取消，<strong>不改动</strong>订单明细 / 金额 / 客户 / 币种等原始字段；
+    /// 存在已审核且未冲销的出库、未删除且未取消的采购履约或有效客户收款引用证据时拒绝，且本方法<strong>绝不</strong>
+    /// 静默取消采购、冲销库存或财务，冲销 / 作废只走既有显式工作流。</para>
+    /// </summary>
+    [HttpPost("{id:long}/cancel")]
+    public override async Task<IActionResult> Cancel(long id)
+    {
+        await using var transaction = await Db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
+        try
+        {
+            await AcquireOrderCancellationLockAsync(id);
+
+            var entity = await Db.SalesOrders.Include(o => o.Details)
+                .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
+                ?? throw BusinessException.NotFound("销售订单不存在");
+
+            await SalesOrderCancellationRules.ValidateCancellationAsync(Db, entity, CurrentUserId());
+
+            SetStatus(entity, DocumentStatus.Cancelled);
+            await Db.SaveChangesAsync();
+            await transaction.CommitAsync();
+        }
+        catch
+        {
+            await transaction.RollbackAsync();
+            throw;
+        }
+
+        return Ok(ApiResponse<object>.Success(null, "已取消"));
+    }
+
+    /// <summary>
+    /// 对销售订单行加更新锁（UPDLOCK, HOLDLOCK），把同单并发「出库审核 / 取消」串行化在同一事务内；
+    /// 非关系型提供程序（内存库）无法执行表提示，跳过即可（事务本身等价无事务）。
+    /// </summary>
+    private async Task AcquireOrderCancellationLockAsync(long orderId)
+    {
+        if (!Db.Database.IsRelational()) return;
+        await Db.Database
+            .SqlQueryRaw<long>(
+                "SELECT Id FROM db_owner.SalesOrders WITH (UPDLOCK, HOLDLOCK) WHERE Id = {0}",
+                orderId)
+            .ToListAsync();
     }
 
     /// <summary>打印数据（主表 + 明细；打印模板由 /api/sys/print-templates/sales-order 提供）</summary>
