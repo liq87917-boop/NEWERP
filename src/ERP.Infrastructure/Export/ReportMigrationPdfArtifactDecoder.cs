@@ -73,13 +73,14 @@ public sealed class ReportMigrationPdfArtifactDecoder
                 return null;
             }
 
-            var cmapCache = new Dictionary<string, Dictionary<int, string>?>(StringComparer.Ordinal);
             var grids = new List<Grid>();
             var embeddedFont = false;
 
             for (var pageIndex = 0; pageIndex < document.PageCount; pageIndex++)
             {
                 var page = document.Pages[pageIndex];
+                // 字体资源名是页内局部（page-local）：每页使用独立 CMap 缓存，绝不跨页复用同名映射。
+                var cmapCache = new Dictionary<string, ToUnicodeMap?>(StringComparer.Ordinal);
                 var grid = ExtractPage(page, pageIndex, side, cmapCache, evidence);
                 if (grid is null)
                     return null;
@@ -123,7 +124,7 @@ public sealed class ReportMigrationPdfArtifactDecoder
         PdfPage page,
         int pageIndex,
         string side,
-        Dictionary<string, Dictionary<int, string>?> cmapCache,
+        Dictionary<string, ToUnicodeMap?> cmapCache,
         List<string> evidence)
     {
         CSequence content;
@@ -265,7 +266,7 @@ public sealed class ReportMigrationPdfArtifactDecoder
         double y,
         string? fontName,
         PdfPage page,
-        Dictionary<string, Dictionary<int, string>?> cmapCache)
+        Dictionary<string, ToUnicodeMap?> cmapCache)
     {
         if (operand is not CString text)
             return false;
@@ -281,11 +282,13 @@ public sealed class ReportMigrationPdfArtifactDecoder
         return false;
     }
 
+    private static readonly ToUnicodeMap WinAnsiEncodingMap = BuildWinAnsiEncoding();
+
     private static string? DecodeText(
         CString text,
         string? fontName,
         PdfPage page,
-        Dictionary<string, Dictionary<int, string>?> cmapCache)
+        Dictionary<string, ToUnicodeMap?> cmapCache)
     {
         var value = text.Value;
         if (string.IsNullOrEmpty(value))
@@ -304,27 +307,24 @@ public sealed class ReportMigrationPdfArtifactDecoder
         if (raw.Length >= 2 && raw[0] == 0xFE && raw[1] == 0xFF)
             return Encoding.BigEndianUnicode.GetString(raw, 2, raw.Length - 2);
 
-        // 优先走 ToUnicode CMap（字形码 / CID → Unicode）
-        var cmap = GetToUnicodeMap(fontName, page, cmapCache);
-        if (cmap is not null)
+        var font = ResolveFont(page, fontName);
+
+        // 存在 ToUnicode 时严格按其 codespace / bfchar / bfrange 解码；解析失败即 fail closed，绝不回落猜测。
+        if (font is not null && font.Elements.GetDictionary("/ToUnicode")?.Stream is not null)
         {
-            if (raw.Length % 2 != 0)
-                return null; // 奇数字节 → 无法按 2 字节字形码对齐
+            var cmap = GetToUnicodeMap(fontName, font, cmapCache);
+            if (cmap is null)
+                return null; // 畸形 / 不可解析的 ToUnicode → unsupported glyph mapping
 
-            var builder = new StringBuilder(raw.Length / 2);
-            for (var i = 0; i < raw.Length; i += 2)
-            {
-                var code = (raw[i] << 8) | raw[i + 1];
-                if (!cmap.TryGetValue(code, out var mapped))
-                    return null; // 未映射字形 → unsupported glyph mapping
-
-                builder.Append(mapped);
-            }
-
-            return builder.ToString();
+            return DecodeWithMap(raw, cmap);
         }
 
-        // 无 CMap：纯 ASCII 才可安全直读，否则 fail closed。
+        // 无 ToUnicode：简单字体按标准 /Encoding（WinAnsi）逐字节解码；其它编码一律 fail closed。
+        var simpleEncoding = GetSimpleFontEncoding(font);
+        if (simpleEncoding is not null)
+            return DecodeWithMap(raw, simpleEncoding);
+
+        // 无任何可用映射：仅纯 ASCII 可安全直读，否则 fail closed（绝不猜测）。
         for (var i = 0; i < raw.Length; i++)
         {
             if (raw[i] >= 0x80)
@@ -334,10 +334,105 @@ public sealed class ReportMigrationPdfArtifactDecoder
         return Encoding.ASCII.GetString(raw);
     }
 
-    private static Dictionary<int, string>? GetToUnicodeMap(
+    private static string? DecodeWithMap(byte[] raw, ToUnicodeMap map)
+    {
+        var codeLength = map.CodeLength;
+        if (codeLength <= 0 || raw.Length % codeLength != 0)
+            return null; // 无法按实际 codespace 长度对齐 → unsupported glyph mapping
+
+        var builder = new StringBuilder(raw.Length / codeLength);
+        for (var i = 0; i < raw.Length; i += codeLength)
+        {
+            var code = 0;
+            for (var b = 0; b < codeLength; b++)
+                code = (code << 8) | raw[i + b];
+
+            if (!map.Map.TryGetValue(code, out var mapped))
+                return null; // 未映射字形 → unsupported glyph mapping
+
+            builder.Append(mapped);
+        }
+
+        return builder.ToString();
+    }
+
+    private static PdfDictionary? ResolveFont(PdfPage page, string? fontName)
+    {
+        if (string.IsNullOrEmpty(fontName))
+            return null;
+
+        try
+        {
+            var key = fontName[0] == '/' ? fontName : "/" + fontName;
+            var fonts = page.Resources?.Elements.GetDictionary("/Font");
+            return fonts?.Elements.GetDictionary(key);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static ToUnicodeMap? GetSimpleFontEncoding(PdfDictionary? font)
+    {
+        if (font is null)
+            return null;
+
+        // 简单字体（非 Type0/CID）按标准编码逐字节解码；这里支持实际产出的 WinAnsi。
+        if (font.Elements["/Encoding"] is PdfName encodingName
+            && string.Equals(encodingName.Value, "/WinAnsiEncoding", StringComparison.Ordinal))
+            return WinAnsiEncodingMap;
+
+        // 其它（MacRoman / MacExpert / 差异数组 / 符号）不支持：fail closed，绝不猜测。
+        return null;
+    }
+
+    private static ToUnicodeMap BuildWinAnsiEncoding()
+    {
+        var map = new ToUnicodeMap { CodeLength = 1 };
+        for (var c = 0x20; c <= 0x7E; c++)
+            map.Map[c] = ((char)c).ToString();
+        for (var c = 0xA0; c <= 0xFF; c++)
+            map.Map[c] = ((char)c).ToString(); // Latin-1
+
+        AddWinAnsi(map, 0x80, '\u20AC');
+        AddWinAnsi(map, 0x82, '\u201A');
+        AddWinAnsi(map, 0x83, '\u0192');
+        AddWinAnsi(map, 0x84, '\u201E');
+        AddWinAnsi(map, 0x85, '\u2026');
+        AddWinAnsi(map, 0x86, '\u2020');
+        AddWinAnsi(map, 0x87, '\u2021');
+        AddWinAnsi(map, 0x88, '\u02C6');
+        AddWinAnsi(map, 0x89, '\u2030');
+        AddWinAnsi(map, 0x8A, '\u0160');
+        AddWinAnsi(map, 0x8B, '\u2039');
+        AddWinAnsi(map, 0x8C, '\u0152');
+        AddWinAnsi(map, 0x8E, '\u017D');
+        AddWinAnsi(map, 0x91, '\u2018');
+        AddWinAnsi(map, 0x92, '\u2019');
+        AddWinAnsi(map, 0x93, '\u201C');
+        AddWinAnsi(map, 0x94, '\u201D');
+        AddWinAnsi(map, 0x95, '\u2022');
+        AddWinAnsi(map, 0x96, '\u2013');
+        AddWinAnsi(map, 0x97, '\u2014');
+        AddWinAnsi(map, 0x98, '\u02DC');
+        AddWinAnsi(map, 0x99, '\u2122');
+        AddWinAnsi(map, 0x9A, '\u0161');
+        AddWinAnsi(map, 0x9B, '\u203A');
+        AddWinAnsi(map, 0x9C, '\u0153');
+        AddWinAnsi(map, 0x9E, '\u017E');
+        AddWinAnsi(map, 0x9F, '\u0178');
+
+        return map;
+    }
+
+    private static void AddWinAnsi(ToUnicodeMap map, int code, char ch)
+        => map.Map[code] = ch.ToString();
+
+    private static ToUnicodeMap? GetToUnicodeMap(
         string? fontName,
-        PdfPage page,
-        Dictionary<string, Dictionary<int, string>?> cmapCache)
+        PdfDictionary? font,
+        Dictionary<string, ToUnicodeMap?> cmapCache)
     {
         if (string.IsNullOrEmpty(fontName))
             return null;
@@ -345,14 +440,9 @@ public sealed class ReportMigrationPdfArtifactDecoder
         if (cmapCache.TryGetValue(fontName, out var cached))
             return cached;
 
-        Dictionary<int, string>? cmap = null;
+        ToUnicodeMap? cmap = null;
         try
         {
-            var key = !string.IsNullOrEmpty(fontName) && fontName[0] == '/'
-                ? fontName
-                : "/" + fontName;
-            var fonts = page.Resources?.Elements.GetDictionary("/Font");
-            var font = fonts?.Elements.GetDictionary(key);
             var toUnicode = font?.Elements.GetDictionary("/ToUnicode");
             var stream = toUnicode?.Stream;
             if (stream is not null)
@@ -381,14 +471,52 @@ public sealed class ReportMigrationPdfArtifactDecoder
     }
 
 
-    private static Dictionary<int, string>? ParseToUnicodeCmap(string text)
+    private static ToUnicodeMap? ParseToUnicodeCmap(string text)
     {
-        var map = new Dictionary<int, string>();
+        var codeLength = ParseCodeSpaceLength(text);
+        if (codeLength is null or <= 0)
+            return null; // 无法确定 codespace 实际长度（缺失 / 不一致）→ malformed / unsupported
 
-        ParseBfchar(text, map);
-        ParseBfrange(text, map);
+        var cmap = new ToUnicodeMap { CodeLength = codeLength.Value };
 
-        return map.Count == 0 ? null : map;
+        ParseBfchar(text, cmap.Map);
+        ParseBfrange(text, cmap.Map);
+
+        return cmap.Map.Count == 0 ? null : cmap;
+    }
+
+    private static int? ParseCodeSpaceLength(string text)
+    {
+        int? length = null;
+        var start = 0;
+        while (true)
+        {
+            var begin = text.IndexOf("begincodespacerange", start, StringComparison.Ordinal);
+            if (begin < 0)
+                return length;
+
+            var end = text.IndexOf("endcodespacerange", begin, StringComparison.Ordinal);
+            if (end < 0)
+                return null; // 畸形：无 endcodespacerange
+
+            var section = text.Substring(begin + "begincodespacerange".Length, end - begin - "begincodespacerange".Length);
+            foreach (var groups in ExtractHexGroups(section))
+            {
+                if (groups.Count < 2)
+                    continue;
+
+                if (groups[0].Length % 2 != 0 || groups[0].Length == 0 || groups[1].Length != groups[0].Length)
+                    return null; // 畸形：长度不一致 / 非整字节
+
+                var byteLength = groups[0].Length / 2;
+                if (length is null)
+                    length = byteLength;
+                else if (length.Value != byteLength)
+                    return null; // 多种 codespace 长度 → unsupported（fail closed）
+            }
+
+            start = end + "endcodespacerange".Length;
+        }
     }
 
     private static void ParseBfchar(string text, Dictionary<int, string> map)
@@ -434,13 +562,26 @@ public sealed class ReportMigrationPdfArtifactDecoder
             var section = text.Substring(begin + "beginbfrange".Length, end - begin - "beginbfrange".Length);
             foreach (var groups in ExtractHexGroups(section))
             {
+                if (groups.Count < 3)
+                    continue;
+
+                var lo = int.Parse(groups[0], Hex);
+                var hi = int.Parse(groups[1], Hex);
+
                 if (groups.Count == 3)
                 {
-                    var lo = int.Parse(groups[0], Hex);
-                    var hi = int.Parse(groups[1], Hex);
+                    // 连续码点形式：<lo> <hi> <dstCode>（dstCode 作为首个连续 Unicode 码点）
                     var dst = int.Parse(groups[2], Hex);
                     for (var code = lo; code <= hi; code++)
                         map[code] = new string((char)(dst + (code - lo)), 1);
+                }
+                else
+                {
+                    // 数组形式：<lo> <hi> [<dst1> <dst2> ...]
+                    var destinations = groups.Skip(2).ToList();
+                    var count = Math.Min(hi - lo + 1, destinations.Count);
+                    for (var offset = 0; offset < count; offset++)
+                        map[lo + offset] = HexToUnicode(destinations[offset]);
                 }
             }
 
@@ -665,6 +806,12 @@ public sealed class ReportMigrationPdfArtifactDecoder
         }
 
         return new Table(headers, rows);
+    }
+
+    private sealed class ToUnicodeMap
+    {
+        public Dictionary<int, string> Map { get; } = new();
+        public int CodeLength { get; set; } = 2;
     }
 
     private sealed record TextToken(double X, double Y, string Text);

@@ -217,6 +217,137 @@ public class ReportMigrationPdfArtifactDecoderTests
             decoded.Rows[0].Select(c => c.Text));
     }
 
+    [Fact]
+    public void Decode_真实旧销售订单PDF_完整字段_成功解码()
+    {
+        var catalog = DynamicSalesOrderReportRules.GetCatalogDto();
+        var columns = catalog.Fields.Select(f => (f.Key, f.Label, f.DataType)).ToArray();
+        var row = new object?[columns.Length];
+        for (var i = 0; i < columns.Length; i++)
+        {
+            row[i] = columns[i].DataType switch
+            {
+                "number" => 1m,
+                "date" => DateTime.Today,
+                "enum" => "USD",
+                _ => "样例",
+            };
+        }
+
+        var bytes = LegacySalesOrderPdf(columns, new[] { row });
+
+        var evidence = new List<string>();
+        var artifact = _decoder.Decode(bytes, "旧PDF", evidence);
+
+        Assert.NotNull(artifact);
+        Assert.Empty(evidence);
+        Assert.Single(artifact!.Rows);
+        Assert.NotEmpty(artifact.Headers);
+    }
+
+    [Fact]
+    public void Decode_多页旧销售订单PDF_成功解码()
+    {
+        var columns = new[] { ("orderNo", "订单号", Text) };
+        var rows = Enumerable.Range(1, 120).Select(i => new object?[] { "SO-" + i }).ToArray();
+        var bytes = LegacySalesOrderPdf(columns, rows);
+
+        var evidence = new List<string>();
+        var artifact = _decoder.Decode(bytes, "旧PDF", evidence);
+
+        Assert.NotNull(artifact);
+        Assert.Empty(evidence);
+        Assert.Equal(rows.Length, artifact!.Rows.Count);
+    }
+
+    [Fact]
+    public void Compare_真实旧销售订单与通用PDF_单列_正parity()
+    {
+        var generic = Generic(
+            new[] { ("orderNo", "订单号", Text, (string?)null) },
+            new object?[][] { new object?[] { "SO-1" } });
+
+        var snapshot = Legacy(
+            new[] { ("orderNo", (string?)null, (string?)null) },
+            new object?[][] { new object?[] { "SO-1" } });
+
+        var legacyBytes = LegacySalesOrderPdf(
+            new[] { ("orderNo", "订单号", Text) },
+            new object?[][] { new object?[] { "SO-1" } });
+
+        var result = _comparator.Compare(generic, snapshot, excelCompatible: false, pdfCompatible: true,
+            fontPath: Font, legacyArtifacts: new LegacyReportArtifactBytesDto(null, legacyBytes));
+
+        Assert.True(result.OutputSemanticsMatched, string.Join(" | ", result.Evidence));
+        Assert.Empty(result.Evidence);
+    }
+
+    [Fact]
+    public void ParseToUnicodeCmap_一字节codespace_bfchar_正确()
+    {
+        var cmap = ParseCmap(
+            "1 begincodespacerange\n<00><FF>\nendcodespacerange\n"
+            + "2 beginbfchar\n<41><4E00>\n<42><4E8C>\nendbfchar");
+
+        Assert.NotNull(cmap);
+        Assert.Equal(1, cmap!.Value.CodeLength);
+        Assert.Equal("\u4E00", cmap.Value.Map[0x41]);
+        Assert.Equal("\u4E8C", cmap.Value.Map[0x42]);
+    }
+
+    [Fact]
+    public void ParseToUnicodeCmap_bfrange数组形式_正确()
+    {
+        var cmap = ParseCmap(
+            "1 begincodespacerange\n<0000><FFFF>\nendcodespacerange\n"
+            + "1 beginbfrange\n<0041><0043>[<4E00><4E8C><4E09>]\nendbfrange");
+
+        Assert.NotNull(cmap);
+        Assert.Equal(2, cmap!.Value.CodeLength);
+        Assert.Equal("\u4E00", cmap.Value.Map[0x41]);
+        Assert.Equal("\u4E8C", cmap.Value.Map[0x42]);
+        Assert.Equal("\u4E09", cmap.Value.Map[0x43]);
+    }
+
+    [Fact]
+    public void ParseToUnicodeCmap_缺失codespace_返回null()
+    {
+        Assert.Null(ParseCmap("1 beginbfchar\n<0041><4E00>\nendbfchar"));
+    }
+
+    private static byte[] LegacySalesOrderPdf(
+        (string Key, string Label, string Type)[] columns,
+        object?[][] rows)
+    {
+        var fields = columns.Select(c => new DynamicSalesOrderReportFieldDto(c.Key, c.Label, c.Type, false)).ToList();
+        var dictRows = rows.Select(r =>
+        {
+            var dict = new Dictionary<string, object?>(StringComparer.Ordinal);
+            for (var i = 0; i < columns.Length; i++)
+                dict[columns[i].Key] = r[i];
+            return dict;
+        }).ToList();
+        var page = new DynamicSalesOrderReportPageDto(fields, dictRows, dictRows.Count, 1, 20, 1, "", "", "", "none", null);
+        return DynamicSalesOrderPdfExporter.Export(page, null, "none", Font);
+    }
+
+    private static (int CodeLength, Dictionary<int, string> Map)? ParseCmap(string text)
+    {
+        var type = typeof(ReportMigrationPdfArtifactDecoder);
+        var method = type.GetMethod("ParseToUnicodeCmap",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+        Assert.NotNull(method);
+
+        var result = method!.Invoke(null, new object[] { text });
+        if (result is null)
+            return null;
+
+        var resultType = result.GetType();
+        var codeLength = (int)resultType.GetProperty("CodeLength")!.GetValue(result)!;
+        var map = (Dictionary<int, string>)resultType.GetProperty("Map")!.GetValue(result)!;
+        return (codeLength, map);
+    }
+
     private static byte[] BuildEncryptedPdf()
     {
         using var document = new PdfDocument();
