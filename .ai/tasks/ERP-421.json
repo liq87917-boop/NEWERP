@@ -1,0 +1,79 @@
+{
+  "title": "Serialize canonical manual sales order draft and status mutations",
+  "description": "Stage3 core canonical sales order workflow. Use existing authenticated live ERP permissions, no new grants or HTTP/test identity bypass. Preserve source audit and all original failure logs. Relevant units, guarded genuine SQL on exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and fresh GUID-owned NEWERP_AUTOTEST database only; reject existing/wrong targets before access, never drop/reset/read production configuration. Safe Release build/full unit suite required. Build completion is not full stage acceptance.",
+  "acceptance_criteria": [
+    "Use existing DbContext transaction and deterministic quotation then PI then sales-order row lock protocol for update/delete/submit/approve regardless of manual/history/resolved source. Under lock reread current header/details/status/source and live authority before mutation. Preserve source binding eligibility and no silent lineage clear; reject changed preliminary sources or safely resolve in established lock order. No nested transactions or reversed downstream locks. Create writes header/details atomically with existing source locks where relevant.",
+    "Legal transitions remain pending edit/delete, pending to submitted, submitted to approved. Reject stale edit/delete after competing submit/approve/cancel. Mixed header/detail replacement and failure after delete/insert/save rolls back completely and clears tracked partial mutations. Deleted/cancelled records cannot revive. Retain existing audit/source/downstream records and shared canonical order lock compatibility with trade documents/procurement/cancellation.",
+    "Two independent genuine SQL connections exercise manual edit versus submit/delete, submit versus delete, approve versus cancel, linked and unresolved-history status races, and forced detail replacement save failure. Check controlled losers, exactly one valid final status, coherent full detail set and original lineage, no orphan/revival or downstream writes. Units and safe Release/full suite required.",
+    "Use existing authenticated live ERP permissions, no new grants or HTTP/test identity bypass. Preserve source audit and all original failure logs. Relevant units, guarded genuine SQL on exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and fresh GUID-owned NEWERP_AUTOTEST database only; reject existing/wrong targets before access, never drop/reset/read production configuration. Safe Release build/full unit suite required. Build completion is not full stage acceptance."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/SalesOrderController.cs",
+    "src/ERP.Application/Services/SalesOrderMutationRules.cs",
+    "src/ERP.Application/Services/SalesOrderSourceLineageRules.cs",
+    "src/ERP.Application/Services/SalesOrderMutationAuthorizationRules.cs",
+    "src/ERP.Application/Services/SalesOrderCancellationRules.cs",
+    "src/ERP.UnitTests/SalesOrderMutationTests.cs",
+    "src/ERP.IntegrationTests/SalesOrderMutationSqlServerTests.cs",
+    "src/ERP.UnitTests/SalesOrderSourceLineageTests.cs",
+    "src/ERP.IntegrationTests/SalesOrderSourceLineageSqlServerTests.cs",
+    "src/ERP.UnitTests/SalesOrderControllerTests.cs",
+    "src/ERP.IntegrationTests/TradeDocumentGenerationMutationSqlServerTests.cs",
+    "docs/sales-order-mutation-atomicity.md"
+  ],
+  "criterion_path_map": {
+    "Use existing DbContext transaction and deterministic quotation then PI then sales-order row lock protocol for update/delete/submit/approve regardless of manual/history/resolved source. Under lock reread current header/details/status/source and live authority before mutation. Preserve source binding eligibility and no silent lineage clear; reject changed preliminary sources or safely resolve in established lock order. No nested transactions or reversed downstream locks. Create writes header/details atomically with existing source locks where relevant.": [
+      "src/ERP.Api/Controllers/SalesOrderController.cs",
+      "src/ERP.Application/Services/SalesOrderMutationRules.cs",
+      "src/ERP.Application/Services/SalesOrderSourceLineageRules.cs",
+      "src/ERP.Application/Services/SalesOrderMutationAuthorizationRules.cs"
+    ],
+    "Legal transitions remain pending edit/delete, pending to submitted, submitted to approved. Reject stale edit/delete after competing submit/approve/cancel. Mixed header/detail replacement and failure after delete/insert/save rolls back completely and clears tracked partial mutations. Deleted/cancelled records cannot revive. Retain existing audit/source/downstream records and shared canonical order lock compatibility with trade documents/procurement/cancellation.": [
+      "src/ERP.Api/Controllers/SalesOrderController.cs",
+      "src/ERP.Application/Services/SalesOrderMutationRules.cs",
+      "src/ERP.Application/Services/SalesOrderCancellationRules.cs"
+    ],
+    "Two independent genuine SQL connections exercise manual edit versus submit/delete, submit versus delete, approve versus cancel, linked and unresolved-history status races, and forced detail replacement save failure. Check controlled losers, exactly one valid final status, coherent full detail set and original lineage, no orphan/revival or downstream writes. Units and safe Release/full suite required.": [
+      "src/ERP.UnitTests/SalesOrderMutationTests.cs",
+      "src/ERP.IntegrationTests/SalesOrderMutationSqlServerTests.cs",
+      "src/ERP.UnitTests/SalesOrderSourceLineageTests.cs",
+      "src/ERP.IntegrationTests/SalesOrderSourceLineageSqlServerTests.cs",
+      "src/ERP.UnitTests/SalesOrderControllerTests.cs",
+      "src/ERP.IntegrationTests/TradeDocumentGenerationMutationSqlServerTests.cs",
+      "docs/sales-order-mutation-atomicity.md"
+    ],
+    "Use existing authenticated live ERP permissions, no new grants or HTTP/test identity bypass. Preserve source audit and all original failure logs. Relevant units, guarded genuine SQL on exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and fresh GUID-owned NEWERP_AUTOTEST database only; reject existing/wrong targets before access, never drop/reset/read production configuration. Safe Release build/full unit suite required. Build completion is not full stage acceptance.": [
+      "src/ERP.UnitTests/SalesOrderMutationTests.cs",
+      "src/ERP.IntegrationTests/SalesOrderMutationSqlServerTests.cs",
+      "src/ERP.UnitTests/SalesOrderSourceLineageTests.cs",
+      "src/ERP.IntegrationTests/SalesOrderSourceLineageSqlServerTests.cs",
+      "src/ERP.UnitTests/SalesOrderControllerTests.cs",
+      "src/ERP.IntegrationTests/TradeDocumentGenerationMutationSqlServerTests.cs",
+      "docs/sales-order-mutation-atomicity.md"
+    ]
+  },
+  "implementation_evidence": "SalesOrderController.Update takes source/order transaction locks only for resolved preliminary sources; no-source and unresolved-history detail replacement runs outside shared order lock. RunLineageGuardedStatusChangeAsync no-source branch reads then saves without transaction; inherited Delete does likewise. Even linked status branch retains tracked pre-lock entity and does not explicitly recheck latest status. ERP347/369 cancellation, ERP397 trade generation and ERP401 linked writes already use order locks; ordinary mutations must join protocol.",
+  "depends_on": [
+    "ERP-420"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "id": "ERP-421",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-08T22:38:03.865494Z"
+}

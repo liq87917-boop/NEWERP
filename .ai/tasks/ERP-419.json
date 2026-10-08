@@ -1,0 +1,74 @@
+{
+  "title": "Preserve historical supplier approval deletion freeze without actor metadata exemption",
+  "description": "Stage3 core canonical sales order workflow. Use existing authenticated live ERP permissions, no new grants or HTTP/test identity bypass. Preserve source audit and all original failure logs. Relevant units, guarded genuine SQL on exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and fresh GUID-owned NEWERP_AUTOTEST database only; reject existing/wrong targets before access, never drop/reset/read production configuration. Safe Release build/full unit suite required. Build completion is not full stage acceptance.",
+  "acceptance_criteria": [
+    "Delete and batch-delete freeze every valid persisted supplier approval/rejection decision regardless of CreatedBy null/zero or actor snapshots, while converted rows remain immutable. Missing historical actor metadata is unknown attribution, never permission to delete an approved source. Preserve all decisions and source quote history, no retroactive invented actor or automatic audit repair. Retain real live authority and transaction/quote row locks from ERP416/417/418, no change to commercial edit freeze or valid undecided draft deletion.",
+    "Repair conflicting ERP416 authorization-only fixture: allowed owned deletion must use truly undecided/unconverted draft; approved history with missing creator must explicitly reject deletion. Do not weaken original foreign/revoked/disabled menu/customer tests or use actor nullness as approval validity. Update ERP417 historical-deletion tests to assert source retained, decision retained and mixed batch entirely unchanged. Existing actor provenance uses authenticated live account only.",
+    "Genuine guarded SQL covers valid approved/rejected historical decisions with null/zero creator, mixed decided/undecided deletion rollback, conversion versus attempted historical deletion and permitted undecided draft deletion under live scope. Two independent connections ensure no disappearing approved procurement source. Safe Release/full units and exact evidence preserve original ERP417 logs without claiming full stage acceptance.",
+    "Use existing authenticated live ERP permissions, no new grants or HTTP/test identity bypass. Preserve source audit and all original failure logs. Relevant units, guarded genuine SQL on exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and fresh GUID-owned NEWERP_AUTOTEST database only; reject existing/wrong targets before access, never drop/reset/read production configuration. Safe Release build/full unit suite required. Build completion is not full stage acceptance."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/PurchaseQuoteController.cs",
+    "src/ERP.Application/Services/PurchaseQuoteMutationRules.cs",
+    "src/ERP.Api/Controllers/PurchaseQuoteApproval.cs",
+    "src/ERP.UnitTests/PurchaseQuoteAuthorizationTests.cs",
+    "src/ERP.UnitTests/PurchaseQuoteMutationTests.cs",
+    "src/ERP.UnitTests/PurchaseQuoteApprovalTests.cs",
+    "src/ERP.IntegrationTests/PurchaseQuoteMutationSqlServerTests.cs",
+    "src/ERP.IntegrationTests/PurchaseQuoteAuthorizationSqlServerTests.cs",
+    "src/ERP.IntegrationTests/PurchaseQuoteConversionMutationSqlServerTests.cs",
+    "docs/purchase-quote-approval-atomicity.md"
+  ],
+  "criterion_path_map": {
+    "Delete and batch-delete freeze every valid persisted supplier approval/rejection decision regardless of CreatedBy null/zero or actor snapshots, while converted rows remain immutable. Missing historical actor metadata is unknown attribution, never permission to delete an approved source. Preserve all decisions and source quote history, no retroactive invented actor or automatic audit repair. Retain real live authority and transaction/quote row locks from ERP416/417/418, no change to commercial edit freeze or valid undecided draft deletion.": [
+      "src/ERP.Api/Controllers/PurchaseQuoteController.cs",
+      "src/ERP.Application/Services/PurchaseQuoteMutationRules.cs",
+      "src/ERP.Api/Controllers/PurchaseQuoteApproval.cs"
+    ],
+    "Repair conflicting ERP416 authorization-only fixture: allowed owned deletion must use truly undecided/unconverted draft; approved history with missing creator must explicitly reject deletion. Do not weaken original foreign/revoked/disabled menu/customer tests or use actor nullness as approval validity. Update ERP417 historical-deletion tests to assert source retained, decision retained and mixed batch entirely unchanged. Existing actor provenance uses authenticated live account only.": [
+      "src/ERP.UnitTests/PurchaseQuoteAuthorizationTests.cs",
+      "src/ERP.UnitTests/PurchaseQuoteMutationTests.cs",
+      "src/ERP.UnitTests/PurchaseQuoteApprovalTests.cs"
+    ],
+    "Genuine guarded SQL covers valid approved/rejected historical decisions with null/zero creator, mixed decided/undecided deletion rollback, conversion versus attempted historical deletion and permitted undecided draft deletion under live scope. Two independent connections ensure no disappearing approved procurement source. Safe Release/full units and exact evidence preserve original ERP417 logs without claiming full stage acceptance.": [
+      "src/ERP.IntegrationTests/PurchaseQuoteMutationSqlServerTests.cs",
+      "src/ERP.IntegrationTests/PurchaseQuoteAuthorizationSqlServerTests.cs",
+      "src/ERP.IntegrationTests/PurchaseQuoteConversionMutationSqlServerTests.cs",
+      "docs/purchase-quote-approval-atomicity.md"
+    ],
+    "Use existing authenticated live ERP permissions, no new grants or HTTP/test identity bypass. Preserve source audit and all original failure logs. Relevant units, guarded genuine SQL on exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and fresh GUID-owned NEWERP_AUTOTEST database only; reject existing/wrong targets before access, never drop/reset/read production configuration. Safe Release build/full unit suite required. Build completion is not full stage acceptance.": [
+      "src/ERP.UnitTests/PurchaseQuoteAuthorizationTests.cs",
+      "src/ERP.UnitTests/PurchaseQuoteMutationTests.cs",
+      "src/ERP.UnitTests/PurchaseQuoteApprovalTests.cs",
+      "src/ERP.IntegrationTests/PurchaseQuoteMutationSqlServerTests.cs",
+      "src/ERP.IntegrationTests/PurchaseQuoteAuthorizationSqlServerTests.cs",
+      "src/ERP.IntegrationTests/PurchaseQuoteConversionMutationSqlServerTests.cs",
+      "docs/purchase-quote-approval-atomicity.md"
+    ]
+  },
+  "implementation_evidence": "ERP417 attempt1 path guard omitted PurchaseQuoteAuthorizationTests.cs. Attempt2 removed that fixture change and introduced IsAttributedDecision with CreatedBy>0 as deletion criterion, allowing approved historical quotes with valid approval decision but absent creator metadata to be deleted. ERP417 criteria require original approval history immutable and after any valid decision deletion denied. Legacy missing actor does not prove no approval. This is a concrete remaining business integrity defect despite 6398 green units; preserve both attempts and recovery records.",
+  "depends_on": [
+    "ERP-418",
+    "ERP-417"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "id": "ERP-419",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-08T22:38:03.850294Z"
+}
