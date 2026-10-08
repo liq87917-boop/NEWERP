@@ -5,9 +5,11 @@ using ERP.Application.Services;
 using ERP.Domain.Entities;
 using ERP.Domain.Enums;
 using ERP.Infrastructure.Data;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using System.Reflection;
+using System.Security.Claims;
 using Xunit;
 
 namespace ERP.UnitTests;
@@ -25,7 +27,83 @@ public class DocumentAttachmentReferenceTests
 {
     // ==================== 0. 测试脚手架 ====================
 
-    private static DocumentAttachmentReferenceController BuildController(ErpDbContext db) => new(db);
+    private static DocumentAttachmentReferenceController BuildController(ErpDbContext db)
+    {
+        var userId = EnsureAuthorizedActor(db);
+        var http = new DefaultHttpContext();
+        http.User = new ClaimsPrincipal(new ClaimsIdentity(
+            new[] { new Claim(ClaimTypes.NameIdentifier, userId.ToString()) }, "Test"));
+
+        return new DocumentAttachmentReferenceController(db)
+        {
+            ControllerContext = new ControllerContext { HttpContext = http }
+        };
+    }
+
+    /// <summary>
+    /// 播种（幂等）一个**实时启用**的系统内置账号：既有「角色 → 菜单」授权覆盖全部父单据类型，
+    /// 系统内置角色 = 特权数据范围（客户范围不受限），保证既有 ERP-045 登记 / 读取口径契约测试继续有效。
+    /// <para>ERP-408 起控制器每个路由都要求实时授权，因此既有测试也必须携带实时启用身份（绝不匿名 / 管理员兜底）。</para>
+    /// </summary>
+    private static long EnsureAuthorizedActor(ErpDbContext db)
+    {
+        const string userName = "erp408-test-actor";
+        var existing = db.SysUsers.FirstOrDefault(u => u.UserName == userName && !u.IsDeleted);
+        if (existing is not null) return existing.Id;
+
+        var user = new SysUser
+        {
+            UserName = userName,
+            PasswordHash = "hash",
+            PasswordSalt = "salt",
+            DisplayName = "ERP-408 测试账号",
+            Status = UserStatus.Enabled
+        };
+        db.SysUsers.Add(user);
+        db.SaveChanges();
+
+        var role = new SysRole
+        {
+            RoleName = "ERP-408 系统角色",
+            RoleCode = $"SYS-{Guid.NewGuid():N}",
+            IsSystem = true
+        };
+        db.SysRoles.Add(role);
+        db.SaveChanges();
+        db.SysUserRoles.Add(new SysUserRole { UserId = user.Id, RoleId = role.Id });
+        db.SaveChanges();
+
+        foreach (var code in new[]
+                 {
+                     DocumentAttachmentReferenceRules.MenuCodeSalesOrder,
+                     DocumentAttachmentReferenceRules.MenuCodePurchaseOrder,
+                     DocumentAttachmentReferenceRules.MenuCodeContainerLoadingList,
+                     DocumentAttachmentReferenceRules.MenuCodeTradeDocument
+                 })
+        {
+            var menu = db.SysMenus.FirstOrDefault(m => m.MenuCode == code && !m.IsDeleted);
+            if (menu is null)
+            {
+                menu = new SysMenu
+                {
+                    ParentId = 0,
+                    MenuName = $"菜单 {code}",
+                    MenuCode = code,
+                    Path = $"/{code}",
+                    Icon = "test",
+                    SortOrder = 1,
+                    MenuType = MenuType.Menu
+                };
+                db.SysMenus.Add(menu);
+                db.SaveChanges();
+            }
+
+            db.SysRoleMenus.Add(new SysRoleMenu { RoleId = role.Id, MenuId = menu.Id });
+        }
+
+        db.SaveChanges();
+        return user.Id;
+    }
 
     private static SalesOrder SeedSalesOrder(
         ErpDbContext db, string orderNo = "SO2026001", bool deleted = false, string remark = "")

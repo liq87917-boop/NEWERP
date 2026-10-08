@@ -41,6 +41,40 @@ public sealed class AttachmentOwnerAccessContext
 }
 
 /// <summary>
+/// 附件引用登记（<c>DocumentAttachmentReferences</c>，ERP-045）的实时授权上下文（ERP-408）：
+/// 「实时启用身份 + 既有父单据模块菜单授权 + ERP-097 当前客户数据范围」的权威快照，
+/// 与 <see cref="AttachmentOwnerAccessContext"/> 完全同一口径，只是把归属类型收敛为附件引用登记册支持的
+/// 四个父单据家族（销售订单 / 采购订单 / 装柜清单 / 出口单证）。绝不缓存，每次请求重新解析。
+/// <para>身份只来自已认证请求主体（<c>ClaimTypes.NameIdentifier</c>），请求体中的任何字段
+/// （含来源授权确认 <c>SourceAuthorizationAcknowledged</c>）都不能指定或扩大身份与范围。</para>
+/// </summary>
+public sealed class DocumentReferenceAccessContext
+{
+    /// <summary>当前登录账号 Id（正整数）</summary>
+    public required long UserId { get; init; }
+
+    /// <summary>当前登录账号名（已按既有口径去首尾空白；缺失时为空串）</summary>
+    public required string UserName { get; init; }
+
+    /// <summary>当前账号的客户数据范围（ERP-097 唯一权威口径）</summary>
+    public required SalespersonDataScope Scope { get; init; }
+
+    /// <summary>当前账号已获既有菜单授权的父单据类型（白名单子集；可能为空 = 无任何引用登记可见类型）</summary>
+    public required List<string> AuthorizedParentTypes { get; init; }
+
+    /// <summary>是否特权账号（保留既有历史可见性，但仍受既有菜单限制）</summary>
+    public bool IsPrivileged => Scope.IsPrivileged;
+
+    /// <summary>当前账号是否已获该父单据类型的既有模块菜单授权（未知 / 空类型一律不授权）</summary>
+    public bool AllowsParentType(string? parentType)
+    {
+        var type = (parentType ?? string.Empty).Trim();
+        return type.Length > 0
+               && AuthorizedParentTypes.Contains(type, StringComparer.OrdinalIgnoreCase);
+    }
+}
+
+/// <summary>
 /// 附件证据归属授权规则（ERP-407，<strong>唯一权威口径</strong>）：为 ERP-061 / ERP-062 / ERP-063 / ERP-064
 /// 交付的<strong>同一</strong>附件证据模型补齐「实时身份 + 既有父单据模块菜单 + 当前客户数据范围」三重授权，
 /// 且一律在读取元数据 / 计数 / 文件名 / 摘要 / 内容 / 存储，或写入任何内容之前生效。
@@ -62,6 +96,12 @@ public sealed class AttachmentOwnerAccessContext
 /// <para><b>边界</b>：本类只做纯判定与有界只读查询（<c>AsNoTracking</c>、无写入、无存储访问、无通知）；
 /// 不新增表 / 列 / 菜单 / 权限模型，不改写任何父单据的状态 / 金额 / 明细 / 库存 / 财务记录，
 /// 也不清理或删除任何历史证据。</para>
+/// <para><b>ERP-408 扩展</b>：同一口径被复用为<strong>仅元数据</strong>的附件引用登记册
+/// （<c>DocumentAttachmentReferences</c>，ERP-045：销售订单 / 采购订单 / 装柜清单 / 出口单证）的访问护栏：
+/// <see cref="DocumentReferenceAccessContext"/> 承载「实时启用身份 + 父单据类型既有模块菜单 + ERP-097 客户数据范围」，
+/// <see cref="ApplyReferenceScope"/> 在计数 / 分页 / 候选 / 父单据清单之前下推范围，
+/// <see cref="EnsureReferenceParentScopeAsync"/> 与 <see cref="EnsureReferenceAuthorizedAsync"/> 在登记 / 作废 / 精确读取之前
+/// 复核权威父单据。装柜清单复用 ERP-364 既有参与方 + 显式上游订柜口径，采购订单复用 ERP-371 权威口径。</para>
 /// </summary>
 public static class AttachmentOwnerAuthorizationRules
 {
@@ -210,20 +250,36 @@ public static class AttachmentOwnerAuthorizationRules
         IErpDbContext db, long? userId, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(db);
-        if (userId is null or <= 0) return new List<string>();
+
+        var codes = await LoadAuthorizedMenuCodesAsync(db, userId, cancellationToken);
+        if (codes.Count == 0) return new List<string>();
+
+        return AttachmentEvidenceRules.SupportedOwnerTypes
+            .Where(type => codes.Contains(AttachmentEvidenceRules.RequiredMenuCodeOf(type)))
+            .ToList();
+    }
+
+    /// <summary>
+    /// 当前账号已获的既有菜单编码集合（复用既有「角色 → 菜单」授权，忽略按钮型菜单与已删除记录）；
+    /// 无身份 / 无角色 / 无菜单一律返回空集合（fail closed，不授权任何模块）。
+    /// </summary>
+    private static async Task<HashSet<string>> LoadAuthorizedMenuCodesAsync(
+        IErpDbContext db, long? userId, CancellationToken cancellationToken = default)
+    {
+        if (userId is null or <= 0) return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         var roleIds = await db.SysUserRoles.AsNoTracking()
             .Where(ur => ur.UserId == userId.Value && !ur.IsDeleted)
             .Select(ur => ur.RoleId)
             .ToListAsync(cancellationToken);
-        if (roleIds.Count == 0) return new List<string>();
+        if (roleIds.Count == 0) return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         var roleSet = roleIds.ToHashSet();
         var menuIds = await db.SysRoleMenus.AsNoTracking()
             .Where(rm => roleSet.Contains(rm.RoleId) && !rm.IsDeleted)
             .Select(rm => rm.MenuId)
             .ToListAsync(cancellationToken);
-        if (menuIds.Count == 0) return new List<string>();
+        if (menuIds.Count == 0) return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         var menuIdSet = menuIds.ToHashSet();
         var menuCodes = await db.SysMenus.AsNoTracking()
@@ -231,14 +287,10 @@ public static class AttachmentOwnerAuthorizationRules
             .Select(m => m.MenuCode)
             .ToListAsync(cancellationToken);
 
-        var codes = menuCodes
+        return menuCodes
             .Where(code => !string.IsNullOrWhiteSpace(code))
             .Select(code => code.Trim())
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-        return AttachmentEvidenceRules.SupportedOwnerTypes
-            .Where(type => codes.Contains(AttachmentEvidenceRules.RequiredMenuCodeOf(type)))
-            .ToList();
     }
 
     /// <summary>
@@ -660,6 +712,345 @@ public static class AttachmentOwnerAuthorizationRules
 
         var visibleSet = visible.ToHashSet();
         return ids.Where(visibleSet.Contains).ToList();
+    }
+
+    // ==================== 6. ERP-408：附件引用登记（ERP-045）的元数据引用授权 ====================
+
+    /// <summary>附件引用身份缺失 / 非法的拒绝文案</summary>
+    public const string ReferenceUnauthorizedText = "请先登录后再访问附件引用登记（fail closed）";
+
+    /// <summary>附件引用账号不存在 / 已删除的拒绝文案</summary>
+    public const string ReferenceUserDeletedText = "登录账号不存在或已删除，禁止访问附件引用登记（fail closed）";
+
+    /// <summary>附件引用账号已禁用的拒绝文案</summary>
+    public const string ReferenceUserDisabledText = "登录账号已禁用，禁止访问附件引用登记（fail closed）";
+
+    /// <summary>受限账号遇到权威父单据缺失 / 越界 / 无权威归属的拒绝文案（fail closed，不披露存在性）</summary>
+    public const string ReferenceOutOfScopeText =
+        "该附件引用的父单据不在当前账号的客户数据范围内或权威归属缺失：拒绝访问"
+        + "（fail closed，不泄露范围外父单据的引用记录、计数与父单据清单）";
+
+    /// <summary>
+    /// 未授权父单据类型的拒绝文案（不披露父单据 / 引用 Id 与存在性；说明所需既有菜单）。
+    /// </summary>
+    public static string ReferenceMenuDeniedText(string? parentType)
+    {
+        var typeText = DocumentAttachmentReferenceRules.ParentTypeText(parentType);
+        var code = DocumentAttachmentReferenceRules.RequiredMenuCodeOf(parentType);
+        var menuText = DocumentAttachmentReferenceRules.RequiredMenuTextOf(parentType);
+        var typeLabel = typeText.Length == 0 ? (parentType ?? string.Empty).Trim() : typeText;
+        return $"当前账号没有「{typeLabel}」所依赖的既有模块菜单授权（{menuText} / "
+               + (code.Length == 0 ? "无对应菜单" : code)
+               + "）：拒绝访问该类父单据的附件引用（fail closed，不返回 / 不修改任何引用记录与计数）";
+    }
+
+    /// <summary>
+    /// 实时身份校验（只校验身份与账号状态，供不读取任何记录的模块元数据路由使用）：
+    /// 缺失 / 非法按未认证拒绝，账号不存在 / 已删除按未认证拒绝，账号已禁用按权限不足拒绝。
+    /// </summary>
+    public static async Task EnsureLiveReferenceIdentityAsync(
+        IErpDbContext db, long? userId, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        if (userId is null or <= 0)
+            throw new BusinessException(ReferenceUnauthorizedText, ErrorCodes.Unauthorized);
+
+        var user = await db.SysUsers.AsNoTracking()
+            .Where(u => u.Id == userId.Value && !u.IsDeleted)
+            .Select(u => new { u.Status })
+            .FirstOrDefaultAsync(cancellationToken);
+        if (user is null)
+            throw new BusinessException(ReferenceUserDeletedText, ErrorCodes.Unauthorized);
+        if (user.Status != UserStatus.Enabled)
+            throw new BusinessException(ReferenceUserDisabledText, ErrorCodes.Forbidden);
+    }
+
+    /// <summary>
+    /// 解析附件引用登记的权威访问上下文（fail closed）：实时身份（缺失 / 已删除 → 未认证，已禁用 → 权限不足）
+    /// + ERP-097 客户数据范围 + 既有菜单授权父单据类型。
+    /// </summary>
+    public static async Task<DocumentReferenceAccessContext> ResolveDocumentReferenceAccessAsync(
+        IErpDbContext db, long? userId, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        if (userId is null or <= 0)
+            throw new BusinessException(ReferenceUnauthorizedText, ErrorCodes.Unauthorized);
+
+        var user = await db.SysUsers.AsNoTracking()
+            .Where(u => u.Id == userId.Value && !u.IsDeleted)
+            .Select(u => new { u.UserName, u.Status })
+            .FirstOrDefaultAsync(cancellationToken);
+        if (user is null)
+            throw new BusinessException(ReferenceUserDeletedText, ErrorCodes.Unauthorized);
+        if (user.Status != UserStatus.Enabled)
+            throw new BusinessException(ReferenceUserDisabledText, ErrorCodes.Forbidden);
+
+        var scope = await SalespersonDataScopeService.ResolveAsync(db, userId.Value);
+        var authorized = await LoadAuthorizedReferenceParentTypesAsync(db, userId.Value, cancellationToken);
+
+        return new DocumentReferenceAccessContext
+        {
+            UserId = userId.Value,
+            UserName = (user.UserName ?? string.Empty).Trim(),
+            Scope = scope,
+            AuthorizedParentTypes = authorized
+        };
+    }
+
+    /// <summary>
+    /// 当前账号已获既有菜单授权的附件引用父单据类型（复用既有「角色 → 菜单」授权，忽略按钮型菜单与已删除记录）；
+    /// 无身份 / 无角色 / 无菜单一律返回空集合（fail closed，不授权任何父单据类型）。
+    /// </summary>
+    public static async Task<List<string>> LoadAuthorizedReferenceParentTypesAsync(
+        IErpDbContext db, long? userId, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+
+        var codes = await LoadAuthorizedMenuCodesAsync(db, userId, cancellationToken);
+        if (codes.Count == 0) return new List<string>();
+
+        return DocumentAttachmentReferenceRules.SupportedParentTypes
+            .Where(type => codes.Contains(DocumentAttachmentReferenceRules.RequiredMenuCodeOf(type)))
+            .ToList();
+    }
+
+    /// <summary>
+    /// 父单据类型必须落在当前账号既有菜单授权内，否则 fail closed 拒绝（授权不足；
+    /// 不返回任何引用记录 / 计数 / 父单据清单）。
+    /// </summary>
+    public static void EnsureReferenceParentTypeAuthorized(
+        DocumentReferenceAccessContext access, string? parentType)
+    {
+        ArgumentNullException.ThrowIfNull(access);
+        if (access.AllowsParentType(parentType)) return;
+
+        throw new BusinessException(ReferenceMenuDeniedText(parentType), ErrorCodes.Forbidden);
+    }
+
+    /// <summary>
+    /// 父单据类型授权复核（不披露存在性）：未授权一律按「不存在」处理，避免把
+    /// 「存在但无权访问」与「不存在」区分出来。
+    /// </summary>
+    public static void EnsureReferenceParentTypeAuthorizedOrNotFound(
+        DocumentReferenceAccessContext access, string? parentType)
+    {
+        ArgumentNullException.ThrowIfNull(access);
+        if (access.AllowsParentType(parentType)) return;
+
+        throw BusinessException.NotFound(ReferenceOutOfScopeText);
+    }
+
+    /// <summary>
+    /// 已装载附件引用行的授权复核（详情 / 作废用）：先复核父单据类型菜单授权，再按**持久化**父单据复核
+    /// 权威归属客户范围；未授权 / 范围外 / 父单据缺失一律按「不存在」处理（fail closed，不披露存在性）。
+    /// </summary>
+    public static async Task EnsureReferenceAuthorizedAsync(
+        IErpDbContext db, DocumentReferenceAccessContext access, DocumentAttachmentReference row,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(access);
+        ArgumentNullException.ThrowIfNull(row);
+
+        EnsureReferenceParentTypeAuthorizedOrNotFound(access, row.ParentType);
+        await EnsureReferenceParentScopeAsync(db, access, row.ParentType, row.ParentId, true, cancellationToken);
+    }
+
+    /// <summary>
+    /// 父单据权威归属范围复核（fail closed）：特权账号保留既有历史可见性；受限账号遇到父单据缺失 / 已删除、
+    /// 权威归属缺失或越界时一律拒绝。销售订单 / 出口单证按持久化客户归属判定；采购订单复用 ERP-371
+    /// 既有权威口径（显式归属客户 + 权威来源销售订单客户）；装柜清单复用 ERP-364 既有口径
+    /// （有效参与方客户 + 显式上游订柜客户）。<strong>绝不</strong>按父单据号码快照或自由文本推断归属。
+    /// </summary>
+    public static async Task EnsureReferenceParentScopeAsync(
+        IErpDbContext db, DocumentReferenceAccessContext access, string? parentType, long parentId,
+        bool denyAsNotFound = false, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(access);
+
+        var type = DocumentAttachmentReferenceRules.NormalizeParentType(parentType);
+
+        // 菜单是唯一收敛维度：即使特权账号也先复核父单据类型既有菜单授权
+        EnsureReferenceParentTypeAuthorized(access, type);
+
+        // 特权账号保留既有历史可见性（含历史无主 / 已删除父单据），不改派、不静默修复
+        if (access.IsPrivileged) return;
+        if (parentId <= 0) throw Denied(denyAsNotFound);
+
+        switch (type)
+        {
+            case DocumentAttachmentReferenceRules.ParentTypeSalesOrder:
+            {
+                var customerId = await db.SalesOrders.AsNoTracking()
+                    .Where(o => o.Id == parentId && !o.IsDeleted)
+                    .Select(o => (long?)o.CustomerId)
+                    .FirstOrDefaultAsync(cancellationToken);
+                if (customerId is null or <= 0 || !access.Scope.AllowsCustomer(customerId))
+                    throw Denied(denyAsNotFound);
+                return;
+            }
+
+            case DocumentAttachmentReferenceRules.ParentTypePurchaseOrder:
+            {
+                var row = await db.PurchaseOrders.AsNoTracking()
+                    .Where(o => o.Id == parentId && !o.IsDeleted)
+                    .Select(o => new { o.OwningCustomerId, o.OwningSalesOrderId })
+                    .FirstOrDefaultAsync(cancellationToken);
+                if (row is null) throw Denied(denyAsNotFound);
+
+                var stub = new PurchaseOrder
+                {
+                    Id = parentId,
+                    OwningCustomerId = row.OwningCustomerId,
+                    OwningSalesOrderId = row.OwningSalesOrderId
+                };
+                try
+                {
+                    await PurchaseOrderAuthorizationRules.EnsureOrderScopeAllowedAsync(
+                        db, access.Scope, stub, cancellationToken);
+                }
+                catch (BusinessException)
+                {
+                    throw Denied(denyAsNotFound);
+                }
+
+                return;
+            }
+
+            case DocumentAttachmentReferenceRules.ParentTypeContainerLoadingList:
+            {
+                var list = await db.ContainerLoadingLists.AsNoTracking()
+                    .FirstOrDefaultAsync(o => o.Id == parentId && !o.IsDeleted, cancellationToken);
+                if (list is null) throw Denied(denyAsNotFound);
+
+                try
+                {
+                    await LoadingListAuthorizationRules.EnsureStoredScopeAllowedAsync(
+                        db, access.Scope, list, cancellationToken);
+                }
+                catch (BusinessException)
+                {
+                    throw Denied(denyAsNotFound);
+                }
+
+                return;
+            }
+
+            default:
+            {
+                var customerId = await db.TradeDocuments.AsNoTracking()
+                    .Where(d => d.Id == parentId && !d.IsDeleted)
+                    .Select(d => d.CustomerId)
+                    .FirstOrDefaultAsync(cancellationToken);
+                if (customerId is null or <= 0 || !access.Scope.AllowsCustomer(customerId))
+                    throw Denied(denyAsNotFound);
+                return;
+            }
+        }
+    }
+
+    /// <summary>
+    /// 附件引用查询范围下推（计数 / 分页 / 候选 / 父单据清单之前调用）：只保留「当前账号已获既有菜单授权的
+    /// 父单据类型」，受限账号再按权威父单据客户范围收敛（未映射业务员 / 无可见客户 → 空结果）。
+    /// <paramref name="requiredParentType"/> 非空时只允许该类型（未授权 → 授权不足拒绝）。
+    /// </summary>
+    public static IQueryable<DocumentAttachmentReference> ApplyReferenceScope(
+        IErpDbContext db, IQueryable<DocumentAttachmentReference> source,
+        DocumentReferenceAccessContext access, string? requiredParentType)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(source);
+        ArgumentNullException.ThrowIfNull(access);
+
+        string? required = null;
+        if (!string.IsNullOrWhiteSpace(requiredParentType))
+        {
+            required = DocumentAttachmentReferenceRules.NormalizeParentType(requiredParentType);
+            EnsureReferenceParentTypeAuthorized(access, required);
+        }
+
+        var types = required is null ? access.AuthorizedParentTypes : new List<string> { required };
+        if (types.Count == 0) return source.Where(r => false);
+
+        if (access.IsPrivileged)
+            return source.Where(r => types.Contains(r.ParentType));
+
+        var allowed = access.Scope.AllowedCustomerIds;
+        if (allowed is null || allowed.Count == 0) return source.Where(r => false);
+
+        var predicate = BuildRestrictedReferencePredicate(
+            db,
+            allowed.ToList(),
+            access.Scope,
+            Has(types, DocumentAttachmentReferenceRules.ParentTypeSalesOrder),
+            Has(types, DocumentAttachmentReferenceRules.ParentTypePurchaseOrder),
+            Has(types, DocumentAttachmentReferenceRules.ParentTypeContainerLoadingList),
+            Has(types, DocumentAttachmentReferenceRules.ParentTypeTradeDocument));
+
+        return predicate is null ? source.Where(r => false) : source.Where(predicate);
+    }
+
+    /// <summary>
+    /// 受限账号的附件引用归属谓词：按权威父单据客户范围逐类型收敛（只构造已授权类型的子查询）。
+    /// 销售订单 / 出口单证按持久化客户归属；采购订单复用 ERP-371 权威口径；装柜清单复用 ERP-364 口径。
+    /// </summary>
+    private static Expression<Func<DocumentAttachmentReference, bool>>? BuildRestrictedReferencePredicate(
+        IErpDbContext db, List<long> allowedList, SalespersonDataScope scope,
+        bool includeSales, bool includePurchase, bool includeLoading, bool includeDocument)
+    {
+        Expression<Func<DocumentAttachmentReference, bool>>? predicate = null;
+
+        if (includeSales)
+        {
+            var types = new List<string> { DocumentAttachmentReferenceRules.ParentTypeSalesOrder };
+            var ids = db.SalesOrders.AsNoTracking()
+                .Where(o => !o.IsDeleted && allowedList.Contains(o.CustomerId))
+                .Select(o => o.Id);
+            predicate = Or(predicate, r => types.Contains(r.ParentType) && ids.Contains(r.ParentId));
+        }
+
+        if (includePurchase)
+        {
+            var types = new List<string> { DocumentAttachmentReferenceRules.ParentTypePurchaseOrder };
+            var existingSoIds = db.SalesOrders.AsNoTracking().Where(o => !o.IsDeleted).Select(o => o.Id);
+            var scopedSoIds = db.SalesOrders.AsNoTracking()
+                .Where(o => !o.IsDeleted && allowedList.Contains(o.CustomerId))
+                .Select(o => o.Id);
+            var ids = db.PurchaseOrders.AsNoTracking()
+                .Where(o => !o.IsDeleted
+                    && (o.OwningCustomerId.HasValue || o.OwningSalesOrderId.HasValue)
+                    && (!o.OwningCustomerId.HasValue || allowedList.Contains(o.OwningCustomerId.Value))
+                    && !(o.OwningSalesOrderId.HasValue
+                         && existingSoIds.Contains(o.OwningSalesOrderId.Value)
+                         && !scopedSoIds.Contains(o.OwningSalesOrderId.Value)))
+                .Select(o => o.Id);
+            predicate = Or(predicate, r => types.Contains(r.ParentType) && ids.Contains(r.ParentId));
+        }
+
+        if (includeLoading)
+        {
+            var types = new List<string> { DocumentAttachmentReferenceRules.ParentTypeContainerLoadingList };
+            var ids = LoadingListAuthorizationRules
+                .ApplyScope(db.ContainerLoadingLists.AsNoTracking().Where(l => !l.IsDeleted), db, scope)
+                .Select(l => l.Id);
+            predicate = Or(predicate, r => types.Contains(r.ParentType) && ids.Contains(r.ParentId));
+        }
+
+        if (includeDocument)
+        {
+            var types = new List<string> { DocumentAttachmentReferenceRules.ParentTypeTradeDocument };
+            var ids = db.TradeDocuments.AsNoTracking()
+                .Where(d => !d.IsDeleted && d.CustomerId.HasValue && allowedList.Contains(d.CustomerId.Value))
+                .Select(d => d.Id);
+            predicate = Or(predicate, r => types.Contains(r.ParentType) && ids.Contains(r.ParentId));
+        }
+
+        return predicate;
     }
 
     private static Expression<Func<T, bool>> Or<T>(

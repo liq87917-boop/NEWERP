@@ -42,7 +42,8 @@ public static class DocumentAttachmentReferenceService
     /// <para>本方法<strong>不</strong>访问对象存储、<strong>不</strong>上传或下载任何内容，也<strong>不</strong>改写父单据。</para>
     /// </summary>
     public static async Task<DocumentAttachmentReferenceDto> CreateAsync(
-        IErpDbContext db, DocumentAttachmentReferenceSaveDto dto)
+        IErpDbContext db, DocumentAttachmentReferenceSaveDto dto,
+        DocumentReferenceAccessContext? access = null, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(db);
         ArgumentNullException.ThrowIfNull(dto);
@@ -52,10 +53,20 @@ public static class DocumentAttachmentReferenceService
             throw BusinessException.InvalidParameter(
                 "请选择要登记附件引用的父单据（销售订单 / 采购订单 / 装柜清单 / 出口单证）");
 
+        // ERP-408：先复核父单据类型的既有模块菜单授权（fail closed，先于任何父单据读取 / 写入）。
+        // 调用方在请求体里的来源授权确认（AuthorizedBy / SourceAuthorizationAcknowledged）**不能**替代本授权。
+        if (access is not null)
+            AttachmentOwnerAuthorizationRules.EnsureReferenceParentTypeAuthorized(access, parentType);
+
         var parent = await ResolveParentAsync(db, parentType, dto.ParentId)
             ?? throw BusinessException.NotFound(
                 $"{DocumentAttachmentReferenceRules.ParentTypeText(parentType)}（Id={dto.ParentId}）不存在或已删除："
                 + "只能对存在且未删除的父单据登记附件引用");
+
+        // ERP-408：持久化之前复核**原始权威父单据**与**实时**客户数据范围（不受调用方声明影响）
+        if (access is not null)
+            await AttachmentOwnerAuthorizationRules.EnsureReferenceParentScopeAsync(
+                db, access, parentType, parent.ParentId, false, cancellationToken);
 
         var category = DocumentAttachmentReferenceRules.NormalizeCategory(dto.Category);
         var displayName = DocumentAttachmentReferenceRules.NormalizeDisplayName(dto.DisplayName);
@@ -117,13 +128,33 @@ public static class DocumentAttachmentReferenceService
         return value;
     }
 
+    /// <summary>
+    /// 空页（ERP-408）：显式传入未授权父单据类型时按「无可见记录」返回（不披露该类型的记录与计数）。
+    /// </summary>
+    private static PagedResult<DocumentAttachmentReferenceDto> EmptyPage(int page, int pageSize)
+        => new()
+        {
+            Items = new List<DocumentAttachmentReferenceDto>(),
+            Total = 0,
+            Page = page,
+            PageSize = pageSize
+        };
+
     // ==================== 2. 台账读取 ====================
 
     /// <summary>附件引用详情（含父单据可用性与引用安全标注；只读，不写库）</summary>
-    public static async Task<DocumentAttachmentReferenceDto> GetAsync(IErpDbContext db, long id)
+    public static async Task<DocumentAttachmentReferenceDto> GetAsync(
+        IErpDbContext db, long id,
+        DocumentReferenceAccessContext? access = null, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(db);
         var entity = await LoadAsync(db, id);
+
+        // ERP-408：按**持久化**父单据复核菜单授权与权威归属范围（未授权一律按「不存在」，fail closed）
+        if (access is not null)
+            await AttachmentOwnerAuthorizationRules.EnsureReferenceAuthorizedAsync(
+                db, access, entity, cancellationToken);
+
         return await MapAsync(db, entity);
     }
 
@@ -132,7 +163,8 @@ public static class DocumentAttachmentReferenceService
     /// 默认包含已作废历史（证据保留可读），父单据可用性与引用安全性都是**只读标注**。
     /// </summary>
     public static async Task<PagedResult<DocumentAttachmentReferenceDto>> ListAsync(
-        IErpDbContext db, DocumentAttachmentReferenceQuery query)
+        IErpDbContext db, DocumentAttachmentReferenceQuery query,
+        DocumentReferenceAccessContext? access = null, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(db);
         ArgumentNullException.ThrowIfNull(query);
@@ -140,10 +172,24 @@ public static class DocumentAttachmentReferenceService
         var (page, pageSize) = NormalizePaging(query.Page, query.PageSize);
         var source = db.DocumentAttachmentReferences.AsNoTracking().Where(x => !x.IsDeleted);
 
+        string? requestedParentType = null;
         if (!string.IsNullOrWhiteSpace(query.ParentType))
+            requestedParentType = DocumentAttachmentReferenceRules.NormalizeParentType(query.ParentType);
+
+        if (access is null)
         {
-            var parentType = DocumentAttachmentReferenceRules.NormalizeParentType(query.ParentType);
-            source = source.Where(x => x.ParentType == parentType);
+            if (requestedParentType is not null)
+                source = source.Where(x => x.ParentType == requestedParentType);
+        }
+        else
+        {
+            // ERP-408：显式未授权类型按「无可见记录」返回空页（不披露该类型的记录与计数）；
+            // 父单据类型 + 客户范围在计数 / 分页之前下推（范围外父单据既不计数也不返回）
+            if (requestedParentType is not null && !access.AllowsParentType(requestedParentType))
+                return EmptyPage(page, pageSize);
+
+            source = AttachmentOwnerAuthorizationRules.ApplyReferenceScope(
+                db, source, access, requestedParentType);
         }
 
         if (query.ParentId is not null)
@@ -200,12 +246,24 @@ public static class DocumentAttachmentReferenceService
     /// <para>返回的每条都明确标注「这是元数据引用，不是文件可用的证明」；父单据可用性与引用安全性均为只读标注。</para>
     /// </summary>
     public static async Task<List<DocumentAttachmentReferenceDto>> ListForParentAsync(
-        IErpDbContext db, string? parentType, long parentId, int? status = null, int take = DocumentAttachmentReferenceRules.MaxPerParent)
+        IErpDbContext db, string? parentType, long parentId, int? status = null,
+        int take = DocumentAttachmentReferenceRules.MaxPerParent,
+        DocumentReferenceAccessContext? access = null, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(db);
         if (parentId <= 0) throw BusinessException.InvalidParameter("请选择父单据（Id 不合法）");
 
         var type = DocumentAttachmentReferenceRules.NormalizeParentType(parentType);
+
+        // ERP-408：父单据详情工作流的清单：先复核父单据类型菜单授权与权威归属范围（fail closed），
+        // 再读取任何引用行（范围与授权先于任何读取）。
+        if (access is not null)
+        {
+            AttachmentOwnerAuthorizationRules.EnsureReferenceParentTypeAuthorized(access, type);
+            await AttachmentOwnerAuthorizationRules.EnsureReferenceParentScopeAsync(
+                db, access, type, parentId, false, cancellationToken);
+        }
+
         var size = take <= 0 ? DocumentAttachmentReferenceRules.MaxPerParent
             : Math.Min(take, DocumentAttachmentReferenceRules.MaxPerParent);
 
@@ -238,11 +296,19 @@ public static class DocumentAttachmentReferenceService
     /// <para>作废<strong>不</strong>改写父单据，也<strong>不</strong>改动库存、财务、出运与审批数据。</para>
     /// </summary>
     public static async Task<DocumentAttachmentReferenceDto> VoidAsync(
-        IErpDbContext db, long id, string? reason)
+        IErpDbContext db, long id, string? reason,
+        DocumentReferenceAccessContext? access = null, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(db);
 
         var entity = await LoadAsync(db, id);
+
+        // ERP-408：作废写入之前，按**持久化**父单据复核父单据类型菜单授权与权威归属范围
+        // （未授权 / 范围外一律按「不存在」，fail closed；不改派、不静默修复）
+        if (access is not null)
+            await AttachmentOwnerAuthorizationRules.EnsureReferenceAuthorizedAsync(
+                db, access, entity, cancellationToken);
+
         DocumentAttachmentReferenceRules.EnsureVoidable(entity.Status, Label(entity));
         var reasonText = DocumentAttachmentReferenceRules.NormalizeVoidReason(reason);
 
@@ -263,11 +329,15 @@ public static class DocumentAttachmentReferenceService
     /// 关键字只匹配单据号码，不做模糊跨字段扫描、不按相似度猜测归属。
     /// </summary>
     public static async Task<List<DocumentAttachmentReferenceParentOptionDto>> ListParentOptionsAsync(
-        IErpDbContext db, string? parentType, string? keyword, int take = MaxParentOptions)
+        IErpDbContext db, string? parentType, string? keyword, int take = MaxParentOptions,
+        DocumentReferenceAccessContext? access = null, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(db);
 
         var type = DocumentAttachmentReferenceRules.NormalizeParentType(parentType);
+        if (access is not null)
+            AttachmentOwnerAuthorizationRules.EnsureReferenceParentTypeAuthorized(access, type);
+
         var keywordText = NormalizeKeyword(keyword);
         var size = take <= 0 ? MaxParentOptions : Math.Min(take, MaxParentOptions);
 
@@ -276,6 +346,8 @@ public static class DocumentAttachmentReferenceService
             case DocumentAttachmentReferenceRules.ParentTypeSalesOrder:
             {
                 var source = db.SalesOrders.AsNoTracking().Where(o => !o.IsDeleted);
+                if (access is not null)
+                    source = AttachmentOwnerAuthorizationRules.ApplySalesOrderScope(source, access.Scope);
                 if (keywordText.Length > 0) source = source.Where(o => o.OrderNo.Contains(keywordText));
                 var rows = await source.OrderByDescending(o => o.Id).Take(size).ToListAsync();
                 return rows.Select(o => Option(type, o.Id, o.OrderNo, StatusText(o.Status),
@@ -285,6 +357,8 @@ public static class DocumentAttachmentReferenceService
             case DocumentAttachmentReferenceRules.ParentTypePurchaseOrder:
             {
                 var source = db.PurchaseOrders.AsNoTracking().Where(o => !o.IsDeleted);
+                if (access is not null)
+                    source = AttachmentOwnerAuthorizationRules.ApplyPurchaseOrderScope(db, source, access.Scope);
                 if (keywordText.Length > 0) source = source.Where(o => o.OrderNo.Contains(keywordText));
                 var rows = await source.OrderByDescending(o => o.Id).Take(size).ToListAsync();
                 return rows.Select(o => Option(type, o.Id, o.OrderNo, StatusText(o.Status),
@@ -297,6 +371,8 @@ public static class DocumentAttachmentReferenceService
             case DocumentAttachmentReferenceRules.ParentTypeContainerLoadingList:
             {
                 var source = db.ContainerLoadingLists.AsNoTracking().Where(o => !o.IsDeleted);
+                if (access is not null)
+                    source = LoadingListAuthorizationRules.ApplyScope(source, db, access.Scope);
                 if (keywordText.Length > 0) source = source.Where(o => o.LoadingListNo.Contains(keywordText));
                 var rows = await source.OrderByDescending(o => o.Id).Take(size).ToListAsync();
                 return rows.Select(o => Option(type, o.Id, o.LoadingListNo, StatusText(o.Status),
@@ -306,6 +382,8 @@ public static class DocumentAttachmentReferenceService
             default:
             {
                 var source = db.TradeDocuments.AsNoTracking().Where(o => !o.IsDeleted);
+                if (access is not null)
+                    source = AttachmentOwnerAuthorizationRules.ApplyTradeDocumentScope(source, access.Scope);
                 if (keywordText.Length > 0) source = source.Where(o => o.DocNo.Contains(keywordText));
                 var rows = await source.OrderByDescending(o => o.Id).Take(size).ToListAsync();
                 return rows.Select(o => Option(type, o.Id, o.DocNo,

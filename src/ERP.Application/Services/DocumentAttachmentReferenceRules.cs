@@ -34,6 +34,43 @@ public static class DocumentAttachmentReferenceRules
         ParentTypeTradeDocument
     };
 
+    // ==================== 0.1 实时授权：父单据类型 → 既有模块菜单（ERP-408） ====================
+
+    /// <summary>父单据类型「销售订单」所需的既有菜单编码（与 <c>SysMenus.MenuCode</c> 同名）</summary>
+    public const string MenuCodeSalesOrder = "sales-order";
+
+    /// <summary>父单据类型「采购订单」所需的既有菜单编码</summary>
+    public const string MenuCodePurchaseOrder = "purchase-order";
+
+    /// <summary>父单据类型「装柜清单」所需的既有菜单编码</summary>
+    public const string MenuCodeContainerLoadingList = LoadingListAuthorizationRules.RequiredMenuCode;
+
+    /// <summary>父单据类型「出口单证」所需的既有菜单编码（单证中心）</summary>
+    public const string MenuCodeTradeDocument = "doc-center";
+
+    /// <summary>
+    /// 父单据类型 → 访问该类型附件引用所需的**既有模块菜单编码**（复用既有「角色 → 菜单」授权，
+    /// **不新增**任何菜单 / 角色 / 用户授权）；未知 / 历史类型返回空串（一律不授权，绝不借用别的模块权限）。
+    /// </summary>
+    public static string RequiredMenuCodeOf(string? parentType) => parentType?.Trim() switch
+    {
+        ParentTypeSalesOrder => MenuCodeSalesOrder,
+        ParentTypePurchaseOrder => MenuCodePurchaseOrder,
+        ParentTypeContainerLoadingList => MenuCodeContainerLoadingList,
+        ParentTypeTradeDocument => MenuCodeTradeDocument,
+        _ => string.Empty
+    };
+
+    /// <summary>父单据类型所需的既有模块菜单文案（与界面同源；未知类型返回「未知来源菜单」而不是猜测）</summary>
+    public static string RequiredMenuTextOf(string? parentType) => parentType?.Trim() switch
+    {
+        ParentTypeSalesOrder => "销售订单菜单",
+        ParentTypePurchaseOrder => "采购订单菜单",
+        ParentTypeContainerLoadingList => "装柜清单菜单",
+        ParentTypeTradeDocument => "单证中心菜单",
+        _ => "未知来源菜单"
+    };
+
     // ==================== 1. 白名单：附件分类 ====================
 
     /// <summary>分类：合同 / 协议</summary>
