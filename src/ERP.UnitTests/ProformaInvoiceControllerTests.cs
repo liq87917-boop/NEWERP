@@ -353,7 +353,46 @@ public class ProformaInvoiceControllerTests
         Assert.Equal(1000m, resp.Data.TotalAmount);
     }
 
+    // ==================== 已链接销售订单的冻结（ERP-399） ====================
+
+    [Fact]
+    public async Task 取消_已链接销售订单的PI_被冻结且零改写()
+    {
+        using var db = TestDbFactory.Create();
+        var (pi, _) = SeedPi(db, "PI-LINK-CANCEL", DocumentStatus.Approved);
+        db.SalesOrders.Add(new SalesOrder
+        {
+            OrderNo = "SO-LINK-1",
+            OrderDate = DateTime.Today,
+            CustomerId = pi.CustomerId ?? 0,
+            SourcePiId = pi.Id,
+            SourcePiNo = pi.PiNo,
+            Status = DocumentStatus.Pending
+        });
+        db.SaveChanges();
+
+        var ex = await Assert.ThrowsAsync<BusinessException>(() => NewController(db).Cancel(pi.Id));
+        Assert.Equal(ErrorCodes.RuleConflict, ex.Code);
+        Assert.Equal(ProformaInvoiceMutationRules.DownstreamLinkedText, ex.Message);
+
+        // 保留显式历史：来源 PI 状态与目标订单都不被改写（绝不反向冲销取消目标订单）。
+        Assert.Equal(DocumentStatus.Approved, db.ProformaInvoices.Single().Status);
+        Assert.Equal(DocumentStatus.Pending, db.SalesOrders.Single().Status);
+        Assert.Equal(pi.Id, db.SalesOrders.Single().SourcePiId);
+    }
+
+    [Fact]
+    public async Task 取消_无下游链接时_仍按既有口径放行()
+    {
+        using var db = TestDbFactory.Create();
+        var (pi, _) = SeedPi(db, "PI-NOLINK-CANCEL", DocumentStatus.Approved);
+
+        Assert.IsType<OkObjectResult>(await NewController(db).Cancel(pi.Id));
+        Assert.Equal(DocumentStatus.Cancelled, db.ProformaInvoices.Single().Status);
+    }
+
     // ==================== 种子与工厂 ====================
+
 
     private static ProformaInvoiceController NewController(ErpDbContext db)
     {

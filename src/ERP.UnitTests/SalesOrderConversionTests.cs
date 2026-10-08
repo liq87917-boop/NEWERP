@@ -517,6 +517,34 @@ public class SalesOrderConversionTests
     }
 
     /// <summary>前端脚本目录（沿测试程序集输出目录上溯到仓库根，与 UiTestFixture 同一约定）</summary>
+    // ==================== ERP-399 转换结果权威一致性 ====================
+
+    [Fact]
+    public async Task PI转换草稿_与锁内权威来源逐项一致_篡改任一字段即判定不一致()
+    {
+        using var db = TestDbFactory.Create();
+        var customer = SeedCustomer(db);
+        var pi = SeedPi(db, customer.Id);
+
+        var draft = await SalesOrderConversion.FromProformaInvoiceAsync(db, pi);
+        // 落库前必须逐项复核：显式 SourcePiId / 来源单号 / 币种 / 汇率 / 明细数量 / 合计 / 定金。
+        SalesOrderConversion.EnsureDraftMatchesSource(pi, draft);
+        Assert.Equal(pi.Id, draft.SourcePiId);
+        Assert.Equal(1000m, draft.TotalAmount);
+        Assert.Equal(300m, draft.DepositAmount);
+
+        var tamperedSource = await SalesOrderConversion.FromProformaInvoiceAsync(db, pi);
+        tamperedSource.SourcePiId = null;
+        Assert.Equal(SalesOrderConversion.DraftMismatchText,
+            Assert.Throws<BusinessException>(() =>
+                SalesOrderConversion.EnsureDraftMatchesSource(pi, tamperedSource)).Message);
+
+        var tamperedQuantity = await SalesOrderConversion.FromProformaInvoiceAsync(db, pi);
+        tamperedQuantity.Details[0].Quantity += 1m;
+        Assert.Throws<BusinessException>(() =>
+            SalesOrderConversion.EnsureDraftMatchesSource(pi, tamperedQuantity));
+    }
+
     private static string JsDirectory() => Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
         "..", "..", "..", "..", "..", "src", "ERP.Api", "wwwroot", "js"));
 

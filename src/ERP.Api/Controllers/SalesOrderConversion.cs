@@ -51,6 +51,45 @@ public static class SalesOrderConversion
         ProformaInvoiceAuthorizationRules.EnsureTargetCustomerInScope(scope, targetCustomerId);
     }
 
+    /// <summary>
+    /// 转换结果与来源 PI 的权威重读不一致时的拒绝文案（ERP-399）。
+    /// </summary>
+    public const string DraftMismatchText =
+        "转换结果与来源 PI 的权威重读不一致（来源留痕 / 币种 / 汇率 / 明细数量 / 合计 / 定金）：原子拒绝，" +
+        "绝不写入与来源不符的销售订单";
+
+    /// <summary>
+    /// 转换结果的权威一致性复核（ERP-399）：落库的销售订单必须**完全**来自本次锁内权威重读的 PI ——
+    /// 显式 <c>SourcePiId</c> / 来源 PI 号、币种、汇率、明细数量合计、合计金额与定金口径逐项一致；
+    /// 任一不一致即判定为陈旧 / 撕裂证据并原子拒绝（绝不写入与来源不符的订单，也绝不改写来源 PI）。
+    /// </summary>
+    public static void EnsureDraftMatchesSource(ProformaInvoice pi, SalesOrder order)
+    {
+        ArgumentNullException.ThrowIfNull(pi);
+        ArgumentNullException.ThrowIfNull(order);
+
+        if (order.SourcePiId != pi.Id
+            || !string.Equals(order.SourcePiNo ?? string.Empty, Clamp(pi.PiNo, 50), StringComparison.Ordinal)
+            || order.Currency != pi.Currency)
+            throw BusinessException.RuleConflict(DraftMismatchText);
+
+        var expectedRate = pi.ExchangeRate > 0 ? pi.ExchangeRate : DefaultExchangeRate;
+        if (order.ExchangeRate != expectedRate)
+            throw BusinessException.RuleConflict(DraftMismatchText);
+
+        var activeDetails = pi.Details.Where(d => !d.IsDeleted).ToList();
+        if (order.Details.Sum(d => d.Quantity) != activeDetails.Sum(d => d.Quantity))
+            throw BusinessException.RuleConflict(DraftMismatchText);
+
+        var expectedAmount = activeDetails.Sum(d => d.Quantity * d.UnitPrice);
+        if (order.TotalAmount != expectedAmount)
+            throw BusinessException.RuleConflict(DraftMismatchText);
+
+        var expectedDeposit = order.TotalAmount * order.DepositRatio / 100m;
+        if (order.DepositAmount != expectedDeposit)
+            throw BusinessException.RuleConflict(DraftMismatchText);
+    }
+
     /// <summary>汇率缺省值：来源单据汇率为 0（未维护）时按 1 处理，避免销售订单金额折算异常</summary>
     private const decimal DefaultExchangeRate = 1m;
 
