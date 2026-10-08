@@ -190,6 +190,63 @@ public sealed class ShipmentReferenceConcurrencySqlServerTests
             revisions.Select(r => r.Reason).OrderBy(r => r, StringComparer.Ordinal).ToArray());
     }
 
+    [Fact]
+    public async Task Missing_identity_cannot_read_or_register_reference_and_leaves_no_evidence()
+    {
+        Guard();
+        await using var db = _fixture.CreateDbContext();
+        var booking = await SeedBookingAsync(db, $"DG-CSR-DENIED-{Guid.NewGuid():N}");
+        var controller = ControllerFor(db, null);
+        await Assert.ThrowsAsync<BusinessException>(() => controller.GetPaged(new ContainerShipmentReferenceQuery()));
+        await Assert.ThrowsAsync<BusinessException>(() => controller.SourceCandidates(
+            ContainerShipmentReferenceRules.SourceTypeBooking, null));
+        await Assert.ThrowsAsync<BusinessException>(() => controller.Create(
+            NewDto(ContainerShipmentReferenceRules.SourceTypeBooking, booking.Id, "FCL")));
+        Assert.Equal(0, await db.ContainerShipmentReferences.CountAsync(r =>
+            r.SourceType == ContainerShipmentReferenceRules.SourceTypeBooking && r.SourceId == booking.Id));
+        Assert.Equal(DocumentStatus.Pending, (await db.ContainerBookings.AsNoTracking()
+            .SingleAsync(b => b.Id == booking.Id)).Status);
+    }
+
+    [Fact]
+    public async Task Cancelled_source_preserves_readable_history_but_rejects_new_registration()
+    {
+        Guard();
+        long userId;
+        long bookingId;
+        long referenceId;
+        await using (var db = _fixture.CreateDbContext())
+        {
+            userId = await ResolveSeededAdminIdAsync(db);
+            var booking = await SeedBookingAsync(db, $"DG-CSR-CANCEL-{Guid.NewGuid():N}");
+            bookingId = booking.Id;
+            var controller = ControllerFor(db, userId);
+            await controller.Create(NewDto(ContainerShipmentReferenceRules.SourceTypeBooking, bookingId, "FCL"));
+            referenceId = await db.ContainerShipmentReferences.Where(r =>
+                r.SourceType == ContainerShipmentReferenceRules.SourceTypeBooking && r.SourceId == bookingId)
+                .Select(r => r.Id).SingleAsync();
+            await controller.Void(referenceId, new ContainerShipmentReferenceVoidRequest { Reason = "录入纠正" });
+            booking.Status = DocumentStatus.Cancelled;
+            await db.SaveChangesAsync();
+        }
+        await using var verify = _fixture.CreateDbContext();
+        var historyController = ControllerFor(verify, userId);
+        Assert.IsType<OkObjectResult>(await historyController.GetById(referenceId));
+        await Assert.ThrowsAsync<BusinessException>(() => historyController.Create(
+            NewDto(ContainerShipmentReferenceRules.SourceTypeBooking, bookingId, "LCL")));
+        var stored = await verify.ContainerShipmentReferences.AsNoTracking()
+            .SingleAsync(r => r.SourceType == ContainerShipmentReferenceRules.SourceTypeBooking && r.SourceId == bookingId);
+        Assert.Equal(referenceId, stored.Id);
+        Assert.Equal(ContainerShipmentReferenceRules.StatusVoided, stored.Status);
+        Assert.Equal("FCL", stored.ShipmentMode);
+        Assert.Equal("录入纠正", stored.VoidReason);
+        Assert.Equal(1, stored.RevisionNo);
+        Assert.Equal(0, await verify.ContainerShipmentReferenceRevisions.CountAsync(r =>
+            r.ContainerShipmentReferenceId == referenceId));
+        Assert.Equal(DocumentStatus.Cancelled, (await verify.ContainerBookings.AsNoTracking()
+            .SingleAsync(b => b.Id == bookingId)).Status);
+    }
+
     // ==================== 4. 脚手架：真实控制器 / 真实身份 / 两条独立连接 ====================
 
     private static ContainerShipmentReferenceController ControllerFor(ErpDbContext db, long? userId)
