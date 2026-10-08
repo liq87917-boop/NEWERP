@@ -168,6 +168,10 @@ public static class DependencyInjection
         // 把注册的基础资料与销售单据打印族归一化为同一个有界旧打印快照（fresh 菜单 + 列 + 数据范围校验，fail closed）。
         services.AddScoped<ILegacyPrintSnapshotReadService, LegacyPrintSnapshotReadService>();
 
+        // 旧单据读侧受控只读服务（ERP-405 Stage 3）：复用 ERP-308 有限族目录 + 既有功能菜单授权 + 业务员客户数据范围，
+        // 计数 / 分页 / 导航 / 详情全部先受范围约束（受限账号在无权威客户归属族上 fail closed）。
+        services.AddScoped<ILegacyBillReadService, LegacyBillReadService>();
+
         // 旧报表实际产物来源（ERP-333 / ERP-337 Stage 2）：有界有限登记册，经既有规范旧导出器产出真实旧 Excel/PDF 字节；
         // 缺失旧导出 / 字体 / 超限 fail closed，绝不使用通用导出器充当旧导出器。
         services.AddScoped<ILegacyReportArtifactSource>(sp => new LegacyReportArtifactSource(

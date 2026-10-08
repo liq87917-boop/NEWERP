@@ -30,6 +30,7 @@ public partial class BillProcController : ControllerBase
     private readonly StoredProcedureService _sp;
     private readonly ERP.Application.Interfaces.IErpDbContext _db;
     private readonly Services.DingTalkService _dingTalk;
+    private readonly ERP.Application.Interfaces.ILegacyBillReadService _legacyReads;
 
     /// <summary>单据元数据配置</summary>
     private static readonly Dictionary<string, BillMeta> Bills = new()
@@ -52,12 +53,25 @@ public partial class BillProcController : ControllerBase
         ["loading-list"] = new BillMeta { Table = "ContainerLoadingList", Proc = "db_owner.sp_Biz_ContainerLoadingList", DetailTable = "ContainerLoadingDetail", DetailFk = "LoadingListId" },
     };
 
+    /// <summary>
+    /// 兼容构造：读侧（ERP-405）使用由连接配置构建的受控只读服务；生产 DI 会选用下方显式注入的构造。
+    /// </summary>
     public BillProcController(StoredProcedureService sp, ERP.Application.Interfaces.IErpDbContext db,
         Services.DingTalkService dingTalk)
+        : this(sp, db, dingTalk, new ERP.Infrastructure.Reports.LegacyBillReadService(sp))
+    {
+    }
+
+    /// <summary>
+    /// 通用单据控制器构造：额外注入旧单据读侧受控只读服务（ERP-405：查询 / 翻页导航 / 详情）。
+    /// </summary>
+    public BillProcController(StoredProcedureService sp, ERP.Application.Interfaces.IErpDbContext db,
+        Services.DingTalkService dingTalk, ERP.Application.Interfaces.ILegacyBillReadService legacyReads)
     {
         _sp = sp;
         _db = db;
         _dingTalk = dingTalk;
+        _legacyReads = legacyReads ?? new ERP.Infrastructure.Reports.LegacyBillReadService(sp);
     }
 
     /// <summary>当前登录账号 Id（缺失 / 非法 = <c>null</c>，绝不当作匿名或管理员）。</summary>
@@ -226,12 +240,25 @@ public partial class BillProcController : ControllerBase
         return value is null or DBNull ? null : Convert.ToInt32(value);
     }
 
-    /// <summary>获取单据默认值（默认币种、默认汇率，取自系统参数）</summary>
+    /// <summary>
+    /// 获取单据默认值（默认币种、默认汇率，取自系统参数）。ERP-405：与查询 / 翻页 / 详情共用同一读侧门禁
+    /// （实时身份 + 既有功能菜单 + 客户数据范围），默认值本身无行数据但仍须先授权。
+    /// </summary>
     [HttpGet("{billType}/defaults")]
     public async Task<IActionResult> GetDefaults(string billType)
     {
         if (!Bills.TryGetValue(billType, out _))
             return Ok(ApiResponse<object>.Fail("未知单据类型", ErrorCodes.InvalidParameter));
+
+        try
+        {
+            await LegacyBillAuthorizationRules.EnsureReadAuthorizedAsync(_db, CurrentUserId(), billType);
+        }
+        catch (BusinessException ex)
+        {
+            LogLegacyReadDenied("默认值", billType, ex);
+            return Ok(ApiResponse<object>.Fail(ex.Message, ex.Code));
+        }
 
         var (currency, exchangeRate) = await LoadCurrencyDefaultsAsync();
         return Ok(ApiResponse<object>.Success(new { currency, exchangeRate }));

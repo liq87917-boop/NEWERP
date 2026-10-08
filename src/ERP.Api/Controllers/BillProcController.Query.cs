@@ -1,6 +1,7 @@
 using ERP.Application.Common;
+using ERP.Application.DTOs;
+using ERP.Application.Services;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Data.SqlClient;
 
 namespace ERP.Api.Controllers;
 
@@ -9,120 +10,104 @@ namespace ERP.Api.Controllers;
 /// </summary>
 public partial class BillProcController
 {
-    /// <summary>分页查询（BillNo 搜索 + 状态筛选）</summary>
+    /// <summary>
+    /// 分页查询（BillNo 搜索 + 状态筛选）。ERP-405：先做读侧门禁（实时身份 + 该族既有功能菜单 + 客户数据范围），
+    /// 再由受控只读服务在范围约束下完成计数与分页；被拒绝的行 / 越权结果绝不出现，响应只含有限授权列。
+    /// </summary>
     [HttpGet("{billType}")]
     public async Task<IActionResult> GetPaged(string billType, [FromQuery] PageQuery query, [FromQuery] int? status)
     {
-        if (!Bills.TryGetValue(billType, out var meta))
+        if (!Bills.TryGetValue(billType, out _))
             return Ok(ApiResponse<object>.Fail("未知单据类型", ErrorCodes.InvalidParameter));
 
-        query.Normalize();
-        using var conn = new SqlConnection(_sp.GetConnectionString());
-        await conn.OpenAsync();
-        var where = "1=1";
-        if (!string.IsNullOrWhiteSpace(query.Keyword)) where += " AND BillNo LIKE @kw";
-        if (status.HasValue) where += " AND Status = @st";
-
-        using var countCmd = new SqlCommand($"SELECT COUNT(*) FROM db_owner.{meta.Table} WHERE {where}", conn);
-        if (!string.IsNullOrWhiteSpace(query.Keyword)) countCmd.Parameters.AddWithValue("@kw", $"%{query.Keyword}%");
-        if (status.HasValue) countCmd.Parameters.AddWithValue("@st", status.Value);
-        var total = (int)(await countCmd.ExecuteScalarAsync() ?? 0);
-
-        var listSql = $@"SELECT * FROM db_owner.{meta.Table} WHERE {where}
-                         ORDER BY Oid DESC OFFSET @off ROWS FETCH NEXT @size ROWS ONLY";
-        using var listCmd = new SqlCommand(listSql, conn);
-        if (!string.IsNullOrWhiteSpace(query.Keyword)) listCmd.Parameters.AddWithValue("@kw", $"%{query.Keyword}%");
-        if (status.HasValue) listCmd.Parameters.AddWithValue("@st", status.Value);
-        listCmd.Parameters.AddWithValue("@off", (query.Page - 1) * query.PageSize);
-        listCmd.Parameters.AddWithValue("@size", query.PageSize);
-
-        var items = new List<Dictionary<string, object?>>();
-        using var reader = await listCmd.ExecuteReaderAsync();
-        while (await reader.ReadAsync())
+        try
         {
-            var row = new Dictionary<string, object?>();
-            for (var i = 0; i < reader.FieldCount; i++)
-                row[reader.GetName(i)] = reader.IsDBNull(i) ? null : reader.GetValue(i);
-            items.Add(row);
+            var scope = await LegacyBillAuthorizationRules.EnsureReadAuthorizedAsync(_db, CurrentUserId(), billType);
+            query.Normalize();
+
+            var page = await _legacyReads.ReadPageAsync(billType, new LegacyBillReadQuery
+            {
+                Keyword = query.Keyword,
+                Status = status,
+                Page = query.Page,
+                PageSize = query.PageSize,
+            }, scope, RequestCancellation());
+
+            return Ok(ApiResponse<object>.Success(new
+            {
+                items = page.Items,
+                total = page.Total,
+                page = page.Page,
+                pageSize = page.PageSize,
+            }));
         }
-        return Ok(ApiResponse<object>.Success(new { items, total, page = query.Page, pageSize = query.PageSize }));
+        catch (BusinessException ex)
+        {
+            LogLegacyReadDenied("查询", billType, ex);
+            return Ok(ApiResponse<object>.Fail(ex.Message, ex.Code));
+        }
     }
 
-    /// <summary>翻页导航（first/last/prev/next）</summary>
+    /// <summary>
+    /// 翻页导航（first/last/prev/next）。ERP-405：范围先于读取；prev/next 会在同一范围内核验锚点，
+    /// 不可访问（越权 / 不存在）锚点与「没有更多」返回同一结果，绝不泄露锚点存在性。
+    /// </summary>
     [HttpGet("{billType}/navigate")]
     public async Task<IActionResult> Navigate(string billType, [FromQuery] long oid, [FromQuery] string direction)
     {
-        if (!Bills.TryGetValue(billType, out var meta))
+        if (!Bills.TryGetValue(billType, out _))
             return Ok(ApiResponse<object>.Fail("未知单据类型", ErrorCodes.InvalidParameter));
 
-        string sql = direction switch
+        try
         {
-            "first" => $"SELECT TOP 1 * FROM db_owner.{meta.Table} ORDER BY Oid ASC",
-            "last" => $"SELECT TOP 1 * FROM db_owner.{meta.Table} ORDER BY Oid DESC",
-            "prev" => $"SELECT TOP 1 * FROM db_owner.{meta.Table} WHERE Oid < @oid ORDER BY Oid DESC",
-            "next" => $"SELECT TOP 1 * FROM db_owner.{meta.Table} WHERE Oid > @oid ORDER BY Oid ASC",
-            _ => throw BusinessException.InvalidParameter("方向参数无效")
-        };
+            var scope = await LegacyBillAuthorizationRules.EnsureReadAuthorizedAsync(_db, CurrentUserId(), billType);
 
-        using var conn = new SqlConnection(_sp.GetConnectionString());
-        await conn.OpenAsync();
-        using var cmd = new SqlCommand(sql, conn);
-        if (direction is "prev" or "next") cmd.Parameters.AddWithValue("@oid", oid);
-        using var reader = await cmd.ExecuteReaderAsync();
-        if (await reader.ReadAsync())
-        {
-            var row = new Dictionary<string, object?>();
-            for (var i = 0; i < reader.FieldCount; i++)
-                row[reader.GetName(i)] = reader.IsDBNull(i) ? null : reader.GetValue(i);
-            return Ok(ApiResponse<object>.Success(row));
+            var navigation = await _legacyReads.NavigateAsync(billType, oid, direction, scope, RequestCancellation());
+            if (!navigation.Found || navigation.Row is null)
+                return Ok(ApiResponse<object>.Fail("没有更多单据", ErrorCodes.NotFound));
+
+            return Ok(ApiResponse<object>.Success(navigation.Row));
         }
-        return Ok(ApiResponse<object>.Fail("没有更多单据", ErrorCodes.NotFound));
+        catch (BusinessException ex)
+        {
+            LogLegacyReadDenied("翻页导航", billType, ex);
+            return Ok(ApiResponse<object>.Fail(ex.Message, ex.Code));
+        }
     }
 
-    /// <summary>详情（主表 + 副表明细）</summary>
+    /// <summary>
+    /// 详情（主表 + 副表明细）。ERP-405：表头先受范围约束；越权 / 不存在的 Oid 返回「单据不存在」，
+    /// 且绝不读取任何副表；响应只含有限授权列（无 <c>SELECT *</c> 敏感列泄露）。
+    /// </summary>
     [HttpGet("{billType}/{oid:long}")]
     public async Task<IActionResult> GetDetail(string billType, long oid)
     {
-        if (!Bills.TryGetValue(billType, out var meta))
+        if (!Bills.TryGetValue(billType, out _))
             return Ok(ApiResponse<object>.Fail("未知单据类型", ErrorCodes.InvalidParameter));
 
-        using var conn = new SqlConnection(_sp.GetConnectionString());
-        await conn.OpenAsync();
-
-        // 主表
-        var main = new Dictionary<string, object?>();
-        using (var cmd = new SqlCommand($"SELECT * FROM db_owner.{meta.Table} WHERE Oid = @oid", conn))
+        try
         {
-            cmd.Parameters.AddWithValue("@oid", oid);
-            using var reader = await cmd.ExecuteReaderAsync();
-            if (await reader.ReadAsync())
-            {
-                for (var i = 0; i < reader.FieldCount; i++)
-                    main[reader.GetName(i)] = reader.IsDBNull(i) ? null : reader.GetValue(i);
-            }
-            else
-            {
+            var scope = await LegacyBillAuthorizationRules.EnsureReadAuthorizedAsync(_db, CurrentUserId(), billType);
+
+            var detail = await _legacyReads.ReadDetailAsync(billType, oid, scope, RequestCancellation());
+            if (detail is null)
                 return Ok(ApiResponse<object>.Fail("单据不存在", ErrorCodes.NotFound));
-            }
-        }
 
-        // 副表明细
-        var details = new List<Dictionary<string, object?>>();
-        if (!string.IsNullOrEmpty(meta.DetailTable) && !string.IsNullOrEmpty(meta.DetailFk))
+            return Ok(ApiResponse<object>.Success(new { main = detail.Main, details = detail.Details }));
+        }
+        catch (BusinessException ex)
         {
-            using var cmd = new SqlCommand(
-                $"SELECT * FROM db_owner.{meta.DetailTable} WHERE {meta.DetailFk} = @oid ORDER BY Oid", conn);
-            cmd.Parameters.AddWithValue("@oid", oid);
-            using var reader = await cmd.ExecuteReaderAsync();
-            while (await reader.ReadAsync())
-            {
-                var row = new Dictionary<string, object?>();
-                for (var i = 0; i < reader.FieldCount; i++)
-                    row[reader.GetName(i)] = reader.IsDBNull(i) ? null : reader.GetValue(i);
-                details.Add(row);
-            }
+            LogLegacyReadDenied("详情", billType, ex);
+            return Ok(ApiResponse<object>.Fail(ex.Message, ex.Code));
         }
-
-        return Ok(ApiResponse<object>.Success(new { main, details }));
     }
+
+    /// <summary>请求取消令牌（直接实例化控制器的单元测试无 HttpContext 时安全退化为 <see cref="CancellationToken.None"/>）。</summary>
+    private CancellationToken RequestCancellation()
+        => HttpContext?.RequestAborted ?? CancellationToken.None;
+
+    /// <summary>读侧门禁拒绝的结构化告警（只记录受控取值，不写库、不影响主流程）。</summary>
+    private static void LogLegacyReadDenied(string operation, string billType, BusinessException ex)
+        => Serilog.Log.Warning(
+            "旧单据读侧门禁拒绝：{BillType} / {Operation}（错误码 {Code}）", billType, operation, ex.Code);
 }
