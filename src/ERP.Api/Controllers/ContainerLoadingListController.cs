@@ -539,6 +539,8 @@ public class ContainerLoadingListController : DocumentControllerBase<ContainerLo
                 ?? throw BusinessException.NotFound("装柜清单不存在");
 
             await LoadingListAuthorizationRules.EnsureStoredScopeAllowedAsync(Db, scope, entity);
+            // ERP-384：存在未删除且未取消的装柜结算单引用本清单时，拒绝取消装柜清单（先取消结算单释放）。
+            await FinanceContainerSettlementLifecycleRules.EnsureNoActiveSettlementForLoadingListAsync(Db, id);
 
             SetStatus(entity, DocumentStatus.Cancelled);
             await Db.SaveChangesAsync();
