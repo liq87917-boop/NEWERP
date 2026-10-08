@@ -1,0 +1,96 @@
+{
+  "title": "Freeze supplier comparison commercial terms under atomic approval decisions",
+  "description": "Stage3 core business workflow integrity. Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance.",
+  "acceptance_criteria": [
+    "Implement explicit supplier quote CRUD and decision lifecycle through existing DbContext transactions and deterministic quote-row locks shared by conversion. Pending comparison draft edits validate positive finite representable quantity, nonnegative representable price, supported currency, coherent selection/status and server-calculated total at EF precision; reject client-forged ConvertedStatus, RefOrderNo conversion evidence and audit fields. Preserve optional master references without inventing source identities. Bulk delete validates and locks all ids then commits all or none. Preserve bounded CRUD response contracts.",
+    "Read live identity/module/customer authority inside locks. Approval/rejection appends exactly one decision and takes DecidedBy/DecidedByName from authenticated live account; ignore forged actor input. After any valid decision, reject commercial edits/reassignment/batch changes/selection changes and deletion rather than allowing approval of one supplier to procure another. Converted rows and original approval history are immutable; no new reopen/approve override or hard delete. Safe noncommercial remark edits only if explicitly mapped and not overwriting lineage. Use existing schema, no migration/index requirement.",
+    "Two independent SQL connection tests prove approve versus reject has one decision/controlled loser, approval versus commercial edit yields a consistently approved unchanged snapshot or edit-first terms, approval versus deletion and mixed batch deletion are atomic, forged actor ignored and forced save failure rolls back all quote/decision mutations. Unit validation and workflow regressions plus genuine guarded SQL tests and safe Release/full unit suite. Keep original failed logs and exact validation evidence.",
+    "Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/PurchaseQuoteController.cs",
+    "src/ERP.Api/Controllers/PurchaseQuoteDecisionController.cs",
+    "src/ERP.Api/Controllers/PurchaseQuoteApproval.cs",
+    "src/ERP.Api/Controllers/PurchaseQuoteDecisionModels.cs",
+    "src/ERP.Application/Services/PurchaseQuoteAuthorizationRules.cs",
+    "src/ERP.Application/Services/PurchaseQuoteMutationRules.cs",
+    "src/ERP.UnitTests/PurchaseQuoteMutationTests.cs",
+    "src/ERP.UnitTests/PurchaseQuoteApprovalTests.cs",
+    "src/ERP.IntegrationTests/PurchaseQuoteMutationSqlServerTests.cs",
+    "docs/purchase-quote-approval-atomicity.md"
+  ],
+  "criterion_path_map": {
+    "Implement explicit supplier quote CRUD and decision lifecycle through existing DbContext transactions and deterministic quote-row locks shared by conversion. Pending comparison draft edits validate positive finite representable quantity, nonnegative representable price, supported currency, coherent selection/status and server-calculated total at EF precision; reject client-forged ConvertedStatus, RefOrderNo conversion evidence and audit fields. Preserve optional master references without inventing source identities. Bulk delete validates and locks all ids then commits all or none. Preserve bounded CRUD response contracts.": [
+      "src/ERP.Api/Controllers/PurchaseQuoteController.cs",
+      "src/ERP.Api/Controllers/PurchaseQuoteDecisionController.cs",
+      "src/ERP.Api/Controllers/PurchaseQuoteApproval.cs",
+      "src/ERP.Api/Controllers/PurchaseQuoteDecisionModels.cs",
+      "src/ERP.Application/Services/PurchaseQuoteAuthorizationRules.cs",
+      "src/ERP.Application/Services/PurchaseQuoteMutationRules.cs",
+      "src/ERP.UnitTests/PurchaseQuoteMutationTests.cs",
+      "src/ERP.UnitTests/PurchaseQuoteApprovalTests.cs",
+      "src/ERP.IntegrationTests/PurchaseQuoteMutationSqlServerTests.cs",
+      "docs/purchase-quote-approval-atomicity.md"
+    ],
+    "Read live identity/module/customer authority inside locks. Approval/rejection appends exactly one decision and takes DecidedBy/DecidedByName from authenticated live account; ignore forged actor input. After any valid decision, reject commercial edits/reassignment/batch changes/selection changes and deletion rather than allowing approval of one supplier to procure another. Converted rows and original approval history are immutable; no new reopen/approve override or hard delete. Safe noncommercial remark edits only if explicitly mapped and not overwriting lineage. Use existing schema, no migration/index requirement.": [
+      "src/ERP.Api/Controllers/PurchaseQuoteController.cs",
+      "src/ERP.Api/Controllers/PurchaseQuoteDecisionController.cs",
+      "src/ERP.Api/Controllers/PurchaseQuoteApproval.cs",
+      "src/ERP.Api/Controllers/PurchaseQuoteDecisionModels.cs",
+      "src/ERP.Application/Services/PurchaseQuoteAuthorizationRules.cs",
+      "src/ERP.Application/Services/PurchaseQuoteMutationRules.cs",
+      "src/ERP.UnitTests/PurchaseQuoteMutationTests.cs",
+      "src/ERP.UnitTests/PurchaseQuoteApprovalTests.cs",
+      "src/ERP.IntegrationTests/PurchaseQuoteMutationSqlServerTests.cs",
+      "docs/purchase-quote-approval-atomicity.md"
+    ],
+    "Two independent SQL connection tests prove approve versus reject has one decision/controlled loser, approval versus commercial edit yields a consistently approved unchanged snapshot or edit-first terms, approval versus deletion and mixed batch deletion are atomic, forged actor ignored and forced save failure rolls back all quote/decision mutations. Unit validation and workflow regressions plus genuine guarded SQL tests and safe Release/full unit suite. Keep original failed logs and exact validation evidence.": [
+      "src/ERP.Api/Controllers/PurchaseQuoteController.cs",
+      "src/ERP.Api/Controllers/PurchaseQuoteDecisionController.cs",
+      "src/ERP.Api/Controllers/PurchaseQuoteApproval.cs",
+      "src/ERP.Api/Controllers/PurchaseQuoteDecisionModels.cs",
+      "src/ERP.Application/Services/PurchaseQuoteAuthorizationRules.cs",
+      "src/ERP.Application/Services/PurchaseQuoteMutationRules.cs",
+      "src/ERP.UnitTests/PurchaseQuoteMutationTests.cs",
+      "src/ERP.UnitTests/PurchaseQuoteApprovalTests.cs",
+      "src/ERP.IntegrationTests/PurchaseQuoteMutationSqlServerTests.cs",
+      "docs/purchase-quote-approval-atomicity.md"
+    ],
+    "Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance.": [
+      "src/ERP.Api/Controllers/PurchaseQuoteController.cs",
+      "src/ERP.Api/Controllers/PurchaseQuoteDecisionController.cs",
+      "src/ERP.Api/Controllers/PurchaseQuoteApproval.cs",
+      "src/ERP.Api/Controllers/PurchaseQuoteDecisionModels.cs",
+      "src/ERP.Application/Services/PurchaseQuoteAuthorizationRules.cs",
+      "src/ERP.Application/Services/PurchaseQuoteMutationRules.cs",
+      "src/ERP.UnitTests/PurchaseQuoteMutationTests.cs",
+      "src/ERP.UnitTests/PurchaseQuoteApprovalTests.cs",
+      "src/ERP.IntegrationTests/PurchaseQuoteMutationSqlServerTests.cs",
+      "docs/purchase-quote-approval-atomicity.md"
+    ]
+  },
+  "implementation_evidence": "PurchaseQuoteApproval.DecideAsync checks current state and absence of decision then saves without a transaction/quote lock; request.DecidedBy fields are persisted untrusted. Inherited generic update/delete/batch-delete can alter supplier/price/quantity/currency/selection/batch/customer or remove a quote after approval and before conversion. BuildDraftAsync checks Approved but does not compare changed SupplierId with SelectedSupplierId. Existing ERP095 append-only intent is not enforced against ordinary quote CRUD or races.",
+  "depends_on": [
+    "ERP-416"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "id": "ERP-417",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-08T21:47:42.190030Z"
+}

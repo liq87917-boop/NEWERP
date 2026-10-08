@@ -1,0 +1,121 @@
+{
+  "title": "Serialize supplier comparison single and batch procurement conversion",
+  "description": "Stage3 core business workflow integrity. Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance.",
+  "acceptance_criteria": [
+    "Implement single and batch conversion with shared existing transaction protocol: deterministically lock resolved authoritative owning sales orders before source quote rows where applicable, reread immutable batch membership, live permissions, source availability, selected approved decision/supplier, master references, quantity/price/units, recognized currency and destination PurchaseSalesOrderLinkRules before number generation and writes. Reject unknown currency rather than defaulting CNY. Explicit ambiguous/deleted/unavailable ownership remains controlled and cannot silently create a differently owned order. Coordinate locks with previous quote CRUD/decision task and existing sales cancellation/ordinary procurement order protocol.",
+    "One committed generated order lineage per eligible source row for competing single/single, single/batch and overlapping batch calls; loser gets controlled stale/duplicate outcome with no orphan or partial orders. Preserve compatible grouping, ineligible line explicit skip semantics within authorized scope and first committed conversion evidence. A failure after any group/detail/line write rolls back complete conversion. Exact source markers and decision reference remain, source quantities/prices/approved terms unchanged. Prefill/plan stay read-only and cannot reserve numbers or change decisions.",
+    "Preserve per-order currency/unit accounting and remove or make explicitly unknown cross-currency batch aggregate TotalAmount; update existing nested DTO contracts in PurchaseQuoteConversion.cs and purchase-order-conversion.js batchPlanText to show totals separated by currency without mixed sum, never present mixed currency sum as money. Two independent genuine SQL connections test competing single and overlapping batches, source edit/approval/deletion and owning sales cancellation, unknown currency, invalid supplier/product/unit/master and forced mid-batch failure. Check exactly generated headers/details/source links, no inventory/finance writes, correct destination authorization and server totals. Relevant existing units, new real SQL tests and safe Release/full unit.",
+    "Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/PurchaseQuoteController.cs",
+    "src/ERP.Api/Controllers/PurchaseQuoteConversion.cs",
+    "src/ERP.Api/Controllers/PurchaseQuoteApproval.cs",
+    "src/ERP.Application/Services/PurchaseQuoteAuthorizationRules.cs",
+    "src/ERP.Application/Services/PurchaseQuoteMutationRules.cs",
+    "src/ERP.Application/Services/PurchaseQuoteConversionMutationRules.cs",
+    "src/ERP.Application/Services/PurchaseOrderAuthorizationRules.cs",
+    "src/ERP.Application/Services/PurchaseSalesOrderLinkRules.cs",
+    "src/ERP.UnitTests/PurchaseQuoteConversionTests.cs",
+    "src/ERP.UnitTests/PurchaseQuoteConversionBatchTests.cs",
+    "src/ERP.UnitTests/PurchaseQuoteConversionMutationTests.cs",
+    "src/ERP.IntegrationTests/PurchaseQuoteConversionMutationSqlServerTests.cs",
+    "docs/purchase-quote-conversion-atomicity.md",
+    "src/ERP.Api/wwwroot/js/purchase-order-conversion.js",
+    "src/ERP.UnitTests/PurchaseQuoteConversionUiTests.cs"
+  ],
+  "criterion_path_map": {
+    "Implement single and batch conversion with shared existing transaction protocol: deterministically lock resolved authoritative owning sales orders before source quote rows where applicable, reread immutable batch membership, live permissions, source availability, selected approved decision/supplier, master references, quantity/price/units, recognized currency and destination PurchaseSalesOrderLinkRules before number generation and writes. Reject unknown currency rather than defaulting CNY. Explicit ambiguous/deleted/unavailable ownership remains controlled and cannot silently create a differently owned order. Coordinate locks with previous quote CRUD/decision task and existing sales cancellation/ordinary procurement order protocol.": [
+      "src/ERP.Api/Controllers/PurchaseQuoteController.cs",
+      "src/ERP.Api/Controllers/PurchaseQuoteConversion.cs",
+      "src/ERP.Api/Controllers/PurchaseQuoteApproval.cs",
+      "src/ERP.Application/Services/PurchaseQuoteAuthorizationRules.cs",
+      "src/ERP.Application/Services/PurchaseQuoteMutationRules.cs",
+      "src/ERP.Application/Services/PurchaseQuoteConversionMutationRules.cs",
+      "src/ERP.Application/Services/PurchaseOrderAuthorizationRules.cs",
+      "src/ERP.Application/Services/PurchaseSalesOrderLinkRules.cs",
+      "src/ERP.UnitTests/PurchaseQuoteConversionTests.cs",
+      "src/ERP.UnitTests/PurchaseQuoteConversionBatchTests.cs",
+      "src/ERP.UnitTests/PurchaseQuoteConversionMutationTests.cs",
+      "src/ERP.IntegrationTests/PurchaseQuoteConversionMutationSqlServerTests.cs",
+      "docs/purchase-quote-conversion-atomicity.md",
+      "src/ERP.Api/wwwroot/js/purchase-order-conversion.js",
+      "src/ERP.UnitTests/PurchaseQuoteConversionUiTests.cs"
+    ],
+    "One committed generated order lineage per eligible source row for competing single/single, single/batch and overlapping batch calls; loser gets controlled stale/duplicate outcome with no orphan or partial orders. Preserve compatible grouping, ineligible line explicit skip semantics within authorized scope and first committed conversion evidence. A failure after any group/detail/line write rolls back complete conversion. Exact source markers and decision reference remain, source quantities/prices/approved terms unchanged. Prefill/plan stay read-only and cannot reserve numbers or change decisions.": [
+      "src/ERP.Api/Controllers/PurchaseQuoteController.cs",
+      "src/ERP.Api/Controllers/PurchaseQuoteConversion.cs",
+      "src/ERP.Api/Controllers/PurchaseQuoteApproval.cs",
+      "src/ERP.Application/Services/PurchaseQuoteAuthorizationRules.cs",
+      "src/ERP.Application/Services/PurchaseQuoteMutationRules.cs",
+      "src/ERP.Application/Services/PurchaseQuoteConversionMutationRules.cs",
+      "src/ERP.Application/Services/PurchaseOrderAuthorizationRules.cs",
+      "src/ERP.Application/Services/PurchaseSalesOrderLinkRules.cs",
+      "src/ERP.UnitTests/PurchaseQuoteConversionTests.cs",
+      "src/ERP.UnitTests/PurchaseQuoteConversionBatchTests.cs",
+      "src/ERP.UnitTests/PurchaseQuoteConversionMutationTests.cs",
+      "src/ERP.IntegrationTests/PurchaseQuoteConversionMutationSqlServerTests.cs",
+      "docs/purchase-quote-conversion-atomicity.md",
+      "src/ERP.Api/wwwroot/js/purchase-order-conversion.js",
+      "src/ERP.UnitTests/PurchaseQuoteConversionUiTests.cs"
+    ],
+    "Preserve per-order currency/unit accounting and remove or make explicitly unknown cross-currency batch aggregate TotalAmount; update existing nested DTO contracts in PurchaseQuoteConversion.cs and purchase-order-conversion.js batchPlanText to show totals separated by currency without mixed sum, never present mixed currency sum as money. Two independent genuine SQL connections test competing single and overlapping batches, source edit/approval/deletion and owning sales cancellation, unknown currency, invalid supplier/product/unit/master and forced mid-batch failure. Check exactly generated headers/details/source links, no inventory/finance writes, correct destination authorization and server totals. Relevant existing units, new real SQL tests and safe Release/full unit.": [
+      "src/ERP.Api/Controllers/PurchaseQuoteController.cs",
+      "src/ERP.Api/Controllers/PurchaseQuoteConversion.cs",
+      "src/ERP.Api/Controllers/PurchaseQuoteApproval.cs",
+      "src/ERP.Application/Services/PurchaseQuoteAuthorizationRules.cs",
+      "src/ERP.Application/Services/PurchaseQuoteMutationRules.cs",
+      "src/ERP.Application/Services/PurchaseQuoteConversionMutationRules.cs",
+      "src/ERP.Application/Services/PurchaseOrderAuthorizationRules.cs",
+      "src/ERP.Application/Services/PurchaseSalesOrderLinkRules.cs",
+      "src/ERP.UnitTests/PurchaseQuoteConversionTests.cs",
+      "src/ERP.UnitTests/PurchaseQuoteConversionBatchTests.cs",
+      "src/ERP.UnitTests/PurchaseQuoteConversionMutationTests.cs",
+      "src/ERP.IntegrationTests/PurchaseQuoteConversionMutationSqlServerTests.cs",
+      "docs/purchase-quote-conversion-atomicity.md",
+      "src/ERP.Api/wwwroot/js/purchase-order-conversion.js",
+      "src/ERP.UnitTests/PurchaseQuoteConversionUiTests.cs"
+    ],
+    "Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance.": [
+      "src/ERP.Api/Controllers/PurchaseQuoteController.cs",
+      "src/ERP.Api/Controllers/PurchaseQuoteConversion.cs",
+      "src/ERP.Api/Controllers/PurchaseQuoteApproval.cs",
+      "src/ERP.Application/Services/PurchaseQuoteAuthorizationRules.cs",
+      "src/ERP.Application/Services/PurchaseQuoteMutationRules.cs",
+      "src/ERP.Application/Services/PurchaseQuoteConversionMutationRules.cs",
+      "src/ERP.Application/Services/PurchaseOrderAuthorizationRules.cs",
+      "src/ERP.Application/Services/PurchaseSalesOrderLinkRules.cs",
+      "src/ERP.UnitTests/PurchaseQuoteConversionTests.cs",
+      "src/ERP.UnitTests/PurchaseQuoteConversionBatchTests.cs",
+      "src/ERP.UnitTests/PurchaseQuoteConversionMutationTests.cs",
+      "src/ERP.IntegrationTests/PurchaseQuoteConversionMutationSqlServerTests.cs",
+      "docs/purchase-quote-conversion-atomicity.md",
+      "src/ERP.Api/wwwroot/js/purchase-order-conversion.js",
+      "src/ERP.UnitTests/PurchaseQuoteConversionUiTests.cs"
+    ]
+  },
+  "implementation_evidence": "PurchaseQuoteController.ToPurchaseOrder performs load/build/number/add/MarkConverted/save with no shared transaction/quote lock. PurchaseQuoteConversion.ConvertBatchAsync builds untracked rows then separately re-queries tracked rows and writes without rereading eligibility under locks. Single versus batch conversion can both create orders; approval checks survive supplier/terms changes. ParseCurrency silently falls back CNY and batch TotalAmount sums different currency groups. ERP020/027 unit guards do not provide SQL concurrency integrity. Existing purchase-order-conversion.js batchPlanText displays plan.totalAmount as one money total across all groups; nested plan/result DTOs reside in PurchaseQuoteConversion.cs.",
+  "depends_on": [
+    "ERP-417"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "id": "ERP-418",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-08T21:47:42.197543Z"
+}
