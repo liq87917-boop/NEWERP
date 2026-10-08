@@ -6,6 +6,7 @@ using ERP.Domain.Entities;
 using ERP.Domain.Enums;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.Data;
 
 namespace ERP.Api.Controllers;
 
@@ -116,6 +117,52 @@ public class ContainerPreLoadingController : DocumentControllerBase<ContainerPre
             Db, ContainerShipmentReferenceRules.SourceTypePreLoading, entity.Id, includeHistory, historyTake);
         return Ok(ApiResponse<ContainerShipmentTimelineDetailDto>.Success(
             detail, "已按显式源记录返回出运证据时间线（只读：计划与实际分开标注，缺失事件显示「无 / 未知」）"));
+    }
+
+    /// <summary>
+    /// 取消：在同一可串行化事务内先对预装柜单行加 UPDLOCK/HOLDLOCK，再校验是否存在
+    /// 「以本单为来源、未删除、已审核」的装柜清单；存在则拒绝，与同源装柜清单审核串行化。
+    /// 本方法只改状态为已取消，不写库存 / 财务、不改写装柜清单与明细。
+    /// </summary>
+    [HttpPost("{id:long}/cancel")]
+    public override async Task<IActionResult> Cancel(long id)
+    {
+        await using var transaction = await Db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
+        try
+        {
+            await AcquirePreLoadingCancellationLockAsync(id);
+
+            var entity = await Db.ContainerPreLoadings.Include(o => o.Details)
+                .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
+                ?? throw BusinessException.NotFound("预装柜单不存在");
+
+            await ContainerLoadingFulfillmentRules.ValidateSourceCancellationAsync(Db, entity, CurrentUserId());
+
+            SetStatus(entity, DocumentStatus.Cancelled);
+            await Db.SaveChangesAsync();
+            await transaction.CommitAsync();
+        }
+        catch
+        {
+            await transaction.RollbackAsync();
+            throw;
+        }
+
+        return Ok(ApiResponse<object>.Success(null, "已取消"));
+    }
+
+    /// <summary>
+    /// 对预装柜单行加更新锁（UPDLOCK, HOLDLOCK），把同源并发「装柜审核 / 来源取消」串行化在同一事务内；
+    /// 非关系型提供程序（内存库）无法执行表提示，跳过即可（事务本身等价无事务）。
+    /// </summary>
+    private async Task AcquirePreLoadingCancellationLockAsync(long preLoadingId)
+    {
+        if (!Db.Database.IsRelational()) return;
+        await Db.Database
+            .SqlQueryRaw<long>(
+                "SELECT Id FROM db_owner.ContainerPreLoadings WITH (UPDLOCK, HOLDLOCK) WHERE Id = {0}",
+                preLoadingId)
+            .ToListAsync();
     }
 
     private static void Calculate(ContainerPreLoading entity)

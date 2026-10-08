@@ -6,6 +6,7 @@ using ERP.Domain.Entities;
 using ERP.Domain.Enums;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.Data;
 
 namespace ERP.Api.Controllers;
 
@@ -64,6 +65,7 @@ public class ContainerLoadingListController : DocumentControllerBase<ContainerLo
         entity.LoadingListNo = await _noService.GenerateAsync(DocumentType.LoadingList);
         entity.Status = DocumentStatus.Pending;
         entity.CreatedAt = DateTime.Now;
+        await ContainerLoadingFulfillmentRules.ValidateLinkAsync(Db, entity, CurrentUserId());
         Calculate(entity);
         Db.ContainerLoadingLists.Add(entity);
         await Db.SaveChangesAsync();
@@ -78,6 +80,8 @@ public class ContainerLoadingListController : DocumentControllerBase<ContainerLo
             ?? throw BusinessException.NotFound("装柜清单不存在");
         if (GetStatus(existing) != DocumentStatus.Pending)
             throw BusinessException.RuleConflict("仅待提交状态的单据可修改");
+
+        await ContainerLoadingFulfillmentRules.ValidateLinkAsync(Db, entity, CurrentUserId());
 
         existing.PreLoadingId = entity.PreLoadingId;
         existing.LoadingDate = entity.LoadingDate;
@@ -292,6 +296,94 @@ public class ContainerLoadingListController : DocumentControllerBase<ContainerLo
         return Ok(ApiResponse<object>.Success(null, "参与方已删除（历史记录保留）"));
     }
 
+
+    /// <summary>提交：提交前重新解析已审核权威来源并校验当前账号身份 / 菜单 / 客户范围。</summary>
+    [HttpPost("{id:long}/submit")]
+    public override async Task<IActionResult> Submit(long id)
+    {
+        var entity = await Db.ContainerLoadingLists.Include(o => o.Details)
+            .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
+            ?? throw BusinessException.NotFound("装柜清单不存在");
+        if (GetStatus(entity) != DocumentStatus.Pending)
+            throw BusinessException.RuleConflict("当前状态不允许该操作");
+
+        await ContainerLoadingFulfillmentRules.ValidateLinkAsync(Db, entity, CurrentUserId());
+
+        SetStatus(entity, DocumentStatus.Submitted);
+        await Db.SaveChangesAsync();
+        return Ok(ApiResponse<object>.Success(null, "提交成功"));
+    }
+
+    /// <summary>
+    /// 审核：把「累计已审核装柜数量 ≤ 预装柜单授权数量」的判定放进同一个可串行化事务，
+    /// 并对预装柜单行加 UPDLOCK/HOLDLOCK 串行化同源并发审核与来源取消；任一步失败整体回滚，状态不变。
+    /// </summary>
+    [HttpPost("{id:long}/approve")]
+    public override async Task<IActionResult> Approve(long id)
+    {
+        var header = await Db.ContainerLoadingLists.AsNoTracking()
+            .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
+            ?? throw BusinessException.NotFound("装柜清单不存在");
+
+        await using var transaction = await Db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
+        try
+        {
+            await AcquirePreLoadingApprovalLockAsync(header.PreLoadingId);
+
+            // 锁内重新加载本单：同源并发审核 / 来源取消串行化后，后到者能看到先到者已提交的状态与数量。
+            var entity = await Db.ContainerLoadingLists.Include(o => o.Details)
+                .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
+                ?? throw BusinessException.NotFound("装柜清单不存在");
+
+            if (GetStatus(entity) != DocumentStatus.Submitted)
+                throw BusinessException.RuleConflict("当前状态不允许该操作");
+
+            await ContainerLoadingFulfillmentRules.ValidateApprovalAsync(Db, entity, CurrentUserId());
+
+            SetStatus(entity, DocumentStatus.Approved);
+            await Db.SaveChangesAsync();
+            await transaction.CommitAsync();
+        }
+        catch
+        {
+            await transaction.RollbackAsync();
+            throw;
+        }
+
+        return Ok(ApiResponse<object>.Success(null, "审核通过"));
+    }
+
+    /// <summary>取消：校验当前账号身份 / 菜单 / 客户范围；已审核数量由审核累计查询按状态自动释放，不写库存 / 财务。</summary>
+    [HttpPost("{id:long}/cancel")]
+    public override async Task<IActionResult> Cancel(long id)
+    {
+        var entity = await Db.ContainerLoadingLists.Include(o => o.Details)
+            .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
+            ?? throw BusinessException.NotFound("装柜清单不存在");
+
+        await ContainerLoadingFulfillmentRules.EnsureAuthorizedAsync(Db, entity, CurrentUserId());
+
+        SetStatus(entity, DocumentStatus.Cancelled);
+        await Db.SaveChangesAsync();
+        return Ok(ApiResponse<object>.Success(null, "已取消"));
+    }
+
+    /// <summary>
+    /// 对来源预装柜单行加更新锁（UPDLOCK, HOLDLOCK），把同源并发「装柜审核 / 来源取消」串行化在同一事务内。
+    /// 未链接时无需加锁；非关系型提供程序（内存库）无法执行表提示，跳过即可（事务本身等价无事务）。
+    /// </summary>
+    private async Task AcquirePreLoadingApprovalLockAsync(long? preLoadingId)
+    {
+        if (preLoadingId is not > 0) return;
+        if (!Db.Database.IsRelational()) return;
+
+        // 来源行不存在时无需加锁：ValidateApprovalAsync 会对显式链接 fail closed 抛异常，在取得任何写入前拒绝履约。
+        await Db.Database
+            .SqlQueryRaw<long>(
+                "SELECT Id FROM db_owner.ContainerPreLoadings WITH (UPDLOCK, HOLDLOCK) WHERE Id = {0}",
+                preLoadingId.Value)
+            .ToListAsync();
+    }
 
     private static void Calculate(ContainerLoadingList entity)
     {
