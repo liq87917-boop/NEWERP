@@ -1,11 +1,14 @@
 {
   "schema_version": 2,
   "project": "NEWERP",
-  "updated_at": "2026-10-08T20:36:43.644436Z",
+  "updated_at": "2026-10-08T20:49:30.147909Z",
   "phase": "ready",
   "current_task": null,
   "queue": [
-    "ERP-409"
+    "ERP-409",
+    "ERP-410",
+    "ERP-411",
+    "ERP-412"
   ],
   "completed": [
     "ERP-000",
@@ -400,17 +403,20 @@
     "log": ".ai\\logs\\ERP-408-validation-1.log",
     "at": "2026-10-08T20:36:37.914100Z"
   },
-  "last_error": null,
+  "last_error": {
+    "task": "ERP-409",
+    "kind": "automatic_repair_pending",
+    "summary": "Path guard failed:\noutside allowed_paths: TestResults/erp409-sql.trx\noutside allowed_paths: TestResults/erp409-sql2.trx\noutside allowed_paths: TestResults/erp409.trx\noutside allowed_paths: TestResults/erp409b.trx"
+  },
   "last_deepseek_fix": {
-    "task": "ERP-400",
-    "attempt": 2,
-    "model": "deepseek-flash",
-    "exit_code": 0,
-    "finished_at": "2026-10-08T18:44:48.199031Z"
+    "task": "ERP-409",
+    "attempts": 3,
+    "status": "retry_pending",
+    "at": "2026-10-08T20:49:29.790984Z"
   },
   "git_sync": {
     "branch": "main",
-    "local_sha": "0419aef",
+    "local_sha": "6e1b932",
     "status": "synced",
     "ahead": 0,
     "behind": 0,
@@ -418,10 +424,15 @@
     "last_error": null
   },
   "next_recommended_tasks": [
-    "ERP-409"
+    "ERP-409",
+    "ERP-410",
+    "ERP-411",
+    "ERP-412"
   ],
   "runner": {
     "status": "stopped",
     "pid": null
-  }
+  },
+  "blocker": null,
+  "finish_reason": "deepseek_supervisor_recovery"
 }

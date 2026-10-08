@@ -76,7 +76,7 @@
   "risk": "medium",
   "planning_stage": 3,
   "id": "ERP-409",
-  "status": "pending",
+  "status": "retry",
   "attempts": 0,
   "max_attempts": 3,
   "validation_profile": "safe",
@@ -92,5 +92,107 @@
     "required": false,
     "scenarios": []
   },
-  "created_at": "2026-10-08T20:00:13.952216Z"
+  "created_at": "2026-10-08T20:00:13.952216Z",
+  "preserved_work": {
+    "execution_copy": "D:\\VSCodeProject\\NEWERP.executor.continue-erp-190-20260930080457",
+    "changed_paths": [
+      ".ai/PROJECT_STATE.json",
+      ".ai/tasks/ERP-409.json",
+      "TestResults/erp409-sql.trx",
+      "TestResults/erp409-sql2.trx",
+      "TestResults/erp409.trx",
+      "TestResults/erp409b.trx",
+      "docs/attachment-evidence-atomicity.md",
+      "src/ERP.Api/Controllers/AttachmentEvidenceController.cs",
+      "src/ERP.Application/Interfaces/IAttachmentContentStore.cs",
+      "src/ERP.Application/Services/AttachmentEvidenceMutationRules.cs",
+      "src/ERP.Application/Services/AttachmentEvidenceService.cs",
+      "src/ERP.Infrastructure/Storage/IsolatedLocalAttachmentContentStore.cs",
+      "src/ERP.IntegrationTests/AttachmentEvidenceMutationSqlServerTests.cs",
+      "src/ERP.UnitTests/AttachmentEvidenceMutationTests.cs"
+    ],
+    "diff": ".ai\\logs\\ERP-409-preserved-work.diff",
+    "preserved_at": "2026-10-08T20:49:29.789090Z"
+  },
+  "failure_kind": "path_guard_failure",
+  "failed_transport_version": 2,
+  "recovery_history": [
+    {
+      "remediation_task": "ERP-409-RECOVERY-1",
+      "cycle": 1,
+      "at": "2026-10-08T20:49:30.020000Z",
+      "evidence": {
+        "failure_kind": "path_guard_failure",
+        "summary": "Path guard failed:\noutside allowed_paths: TestResults/erp409-sql.trx\noutside allowed_paths: TestResults/erp409-sql2.trx\noutside allowed_paths: TestResults/erp409.trx\noutside allowed_paths: TestResults/erp409b.trx",
+        "result": ".ai\\results\\ERP-409.json",
+        "attempt_logs": [
+          ".ai/logs/ERP-409-attempt-1.jsonl"
+        ],
+        "validation_logs": [],
+        "latest_state_error": {
+          "task": "ERP-409",
+          "kind": "automatic_repair_pending",
+          "summary": "Path guard failed:\noutside allowed_paths: TestResults/erp409-sql.trx\noutside allowed_paths: TestResults/erp409-sql2.trx\noutside allowed_paths: TestResults/erp409.trx\noutside allowed_paths: TestResults/erp409b.trx"
+        },
+        "latest_build": null,
+        "task_context": ".ai\\tasks\\ERP-409.json",
+        "changed_paths": [
+          ".ai/PROJECT_STATE.json",
+          ".ai/tasks/ERP-409.json",
+          "TestResults/erp409-sql.trx",
+          "TestResults/erp409-sql2.trx",
+          "TestResults/erp409.trx",
+          "TestResults/erp409b.trx",
+          "docs/attachment-evidence-atomicity.md",
+          "src/ERP.Api/Controllers/AttachmentEvidenceController.cs",
+          "src/ERP.Application/Interfaces/IAttachmentContentStore.cs",
+          "src/ERP.Application/Services/AttachmentEvidenceMutationRules.cs",
+          "src/ERP.Application/Services/AttachmentEvidenceService.cs",
+          "src/ERP.Infrastructure/Storage/IsolatedLocalAttachmentContentStore.cs",
+          "src/ERP.IntegrationTests/AttachmentEvidenceMutationSqlServerTests.cs",
+          "src/ERP.UnitTests/AttachmentEvidenceMutationTests.cs"
+        ],
+        "diff": ".ai\\logs\\ERP-409-preserved-work.diff",
+        "execution_copy": "D:\\VSCodeProject\\NEWERP.executor.continue-erp-190-20260930080457"
+      }
+    }
+  ],
+  "supervised_recovery_cycles": 1,
+  "recovery_context": {
+    "remediation_task": "ERP-409-RECOVERY-1",
+    "failure_kind": "path_guard_failure",
+    "summary": "Path guard failed:\noutside allowed_paths: TestResults/erp409-sql.trx\noutside allowed_paths: TestResults/erp409-sql2.trx\noutside allowed_paths: TestResults/erp409.trx\noutside allowed_paths: TestResults/erp409b.trx",
+    "result": ".ai\\results\\ERP-409.json",
+    "attempt_logs": [
+      ".ai/logs/ERP-409-attempt-1.jsonl"
+    ],
+    "validation_logs": [],
+    "latest_state_error": {
+      "task": "ERP-409",
+      "kind": "automatic_repair_pending",
+      "summary": "Path guard failed:\noutside allowed_paths: TestResults/erp409-sql.trx\noutside allowed_paths: TestResults/erp409-sql2.trx\noutside allowed_paths: TestResults/erp409.trx\noutside allowed_paths: TestResults/erp409b.trx"
+    },
+    "latest_build": null,
+    "task_context": ".ai\\tasks\\ERP-409.json",
+    "changed_paths": [
+      ".ai/PROJECT_STATE.json",
+      ".ai/tasks/ERP-409.json",
+      "TestResults/erp409-sql.trx",
+      "TestResults/erp409-sql2.trx",
+      "TestResults/erp409.trx",
+      "TestResults/erp409b.trx",
+      "docs/attachment-evidence-atomicity.md",
+      "src/ERP.Api/Controllers/AttachmentEvidenceController.cs",
+      "src/ERP.Application/Interfaces/IAttachmentContentStore.cs",
+      "src/ERP.Application/Services/AttachmentEvidenceMutationRules.cs",
+      "src/ERP.Application/Services/AttachmentEvidenceService.cs",
+      "src/ERP.Infrastructure/Storage/IsolatedLocalAttachmentContentStore.cs",
+      "src/ERP.IntegrationTests/AttachmentEvidenceMutationSqlServerTests.cs",
+      "src/ERP.UnitTests/AttachmentEvidenceMutationTests.cs"
+    ],
+    "diff": ".ai\\logs\\ERP-409-preserved-work.diff",
+    "execution_copy": "D:\\VSCodeProject\\NEWERP.executor.continue-erp-190-20260930080457",
+    "repair_allowed_paths": [],
+    "instruction": "DeepSeek supervisor recovery: inspect the referenced complete logs, diagnose the root cause, and implement a different safe repair within allowed_paths. Rebuild and rerun the configured tests; if validation fails, use the newest log as the next repair input. Do not repeat the failed approach. Do not edit task/state/result files or relax production and irreversible-operation gates. "
+  }
 }
