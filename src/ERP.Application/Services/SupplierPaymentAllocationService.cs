@@ -44,7 +44,19 @@ public static class SupplierPaymentAllocationService
         if (dto.PaymentId <= 0) throw BusinessException.InvalidParameter("请选择要引用的付款单");
         if (dto.PurchaseOrderId <= 0) throw BusinessException.InvalidParameter("请选择要引用的采购订单");
 
+        // 与付款单生命周期（取消 / 修改 / 删除）互斥：在同一事务内先对付款单行加排它行锁，
+        // 再读权威金额与状态，避免「登记引用证据」与「付款单被取消 / 改金额」并发竞态。
+        await using var transaction = SupplierPaymentLifecycleRules.IsRelationalProvider(db)
+            ? await db.Database.BeginTransactionAsync()
+            : null;
+
+        await SupplierPaymentLifecycleRules.LockPaymentRowAsync(db, dto.PaymentId);
+
         var payment = await LoadPaymentAsync(db, dto.PaymentId);
+        if (payment.Status == DocumentStatus.Cancelled)
+            throw BusinessException.RuleConflict(
+                $"付款单「{payment.PaymentNo}」已取消，不能登记新的付款引用（历史引用仍可读，不再新增）");
+
         var currency = SupplierPaymentAllocationRules.NormalizeCurrencyStrict(payment.Currency.ToString());
         var amount = SupplierPaymentAllocationRules.NormalizeAllocationAmount(dto.AllocatedAmount, currency);
         var remark = SupplierPaymentAllocationRules.NormalizeRemark(dto.Remark);
@@ -72,12 +84,16 @@ public static class SupplierPaymentAllocationService
                 + "同一订单在同一付款单内只能有一条有效引用行（如需更正请先作废原行，再登记新行；作废保留历史）");
 
         var paymentAmount = SupplierPaymentAllocationRules.AuthoritativePaymentAmount(payment.Amount, currency);
-        var allocated = activeRows.Sum(a => a.AllocatedAmount);
+        // 唯一、同币种分摊额度（ERP-351）：同一付款单的「付款单 → 采购订单」与「付款单 → 供应商采购发票」
+        // 两套有效引用行在付款单行锁下共同占用同一额度，因此这里取两套合计（绝不跨币种、绝不重复计算）。
+        var funding = await SupplierPaymentLifecycleRules.LoadPaymentFundingAsync(db, payment.Id);
+        var allocated = funding.CombinedAllocated;
         var total = allocated + amount;
         if (total > paymentAmount)
             throw BusinessException.RuleConflict(
                 $"付款单「{payment.PaymentNo}」的引用金额合计 {total} 超过付款单金额 {paymentAmount} {currency}"
-                + $"（已引用 {allocated}，本次 {amount}）：请调整引用金额"
+                + $"（已引用 {allocated}，其中「付款单 → 采购订单」{funding.OrderAllocated}，"
+                + $"「付款单 → 供应商采购发票」{funding.InvoiceAllocated}；本次 {amount}）：请调整引用金额"
                 + "（付款单允许部分或全部未被引用，未引用部分保持为未引用金额）");
 
         var supplier = await db.BaseSuppliers.AsNoTracking()
@@ -109,6 +125,7 @@ public static class SupplierPaymentAllocationService
         db.SupplierPaymentAllocations.Add(row);
         await db.SaveChangesAsync();
 
+        if (transaction is not null) await transaction.CommitAsync();
         return await MapAsync(db, row);
     }
 
