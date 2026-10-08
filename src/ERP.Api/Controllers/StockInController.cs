@@ -1,4 +1,5 @@
 using ERP.Application.Common;
+using ERP.Application.DTOs;
 using ERP.Application.Interfaces;
 using ERP.Application.Services;
 using ERP.Domain.Entities;
@@ -17,6 +18,9 @@ namespace ERP.Api.Controllers;
 /// <para>ERP-033：审核时按入库单持久化的采购订单链接（<see cref="StockIn.PurchaseOrderId"/>）解析
 /// 基础单位成本并带入库存流水，口径见 <see cref="PurchaseStockInCostSource"/>；语义不明确时保持
 /// ERP-025 的移动加权平均兜底，不臆造成本单价、不改写历史流水数量与金额。</para>
+/// <para>ERP-375：新增只读、有界的采购订单来源候选 / 详情端点（既有「采购入库」+「采购订单」菜单 + ERP-371 权威客户范围），
+/// 供业务表单显式选择来源并回填权威供应商与可收货商品行；候选选择绝不臆造成本，也绝不改动 ERP-033 成本口径与
+/// ERP-342 收货容量口径。表单「未选择来源」（数字 0）归一为 <c>null</c>，保持历史无来源入库单语义。</para>
 /// </summary>
 [Route("api/stock-ins")]
 public class StockInController : DocumentControllerBase<StockIn>
@@ -71,10 +75,57 @@ public class StockInController : DocumentControllerBase<StockIn>
         return Ok(ApiResponse<IReadOnlyList<StockMovement>>.Success(movements));
     }
 
+    // ==================== ERP-375：来源候选 / 详情（只读、有界） ====================
+
+    /// <summary>
+    /// 可收货来源候选（只读、有界）：返回当前账号客户数据范围内、供应商匹配且关键字命中的
+    /// 「已审核、未删除」采购订单可收货商品行，按「来源采购订单 + 商品」聚合给出剩余可收数量（ERP-342 口径）。
+    /// <para>授权口径：既有「采购入库」菜单 + 既有「采购订单」菜单（实时校验，撤销后立即收敛）+
+    /// ERP-371 权威归属客户范围（在计数 / 取数<b>之前</b>下推到数据库）；不新增用户授权，
+    /// 也不提供匿名 / 管理员降级；重复 / 歧义明细、单位未知、已收货满额的候选显式标记不可用，绝不猜容量。</para>
+    /// </summary>
+    [HttpGet("source-candidates")]
+    public async Task<IActionResult> GetSourceCandidates([FromQuery] long? supplierId,
+        [FromQuery] string? keyword, [FromQuery] int take = 0)
+    {
+        await StockInAuthorizationRules.EnsureSourceMenuAuthorizedAsync(Db, CurrentInboundUserId());
+        var scoped = await ApplyProcurementScopeAsync();
+
+        var candidates = (await StockInOrderFulfillmentRules.QuerySourceCandidatesAsync(
+            Db, scoped, supplierId, keyword, take)).ToList();
+        return Ok(ApiResponse<List<StockInSourceCandidateDto>>.Success(
+            candidates, "已返回可收货的已审核采购订单来源（只读：重复 / 歧义明细、单位未知、已收货满额标记为不可用，绝不猜容量）"));
+    }
+
+    /// <summary>
+    /// 来源详情（只读、有界）：返回一张权威来源采购订单的表头 + 逐商品剩余可收行，供业务表单在显式选择后
+    /// 回填权威来源 Id / 单号 / 供应商与可收货商品行。范围外 / 不存在 / 已删除按「不存在」拒绝，
+    /// 未审核 / 已取消 / 已驳回按冲突拒绝；任一失败都不改写已保存的来源链接。
+    /// </summary>
+    [HttpGet("source-candidates/{purchaseOrderId:long}")]
+    public async Task<IActionResult> GetSourceCandidateDetail(long purchaseOrderId)
+    {
+        await StockInAuthorizationRules.EnsureSourceMenuAuthorizedAsync(Db, CurrentInboundUserId());
+        var scoped = await ApplyProcurementScopeAsync();
+
+        var detail = await StockInOrderFulfillmentRules.ResolveSourceDetailAsync(Db, scoped, purchaseOrderId);
+        return Ok(ApiResponse<StockInSourceDetailDto>.Success(
+            detail, "已返回来源采购订单的可收货详情（只读：不可用行带原因，绝不猜成本）"));
+    }
+
+    /// <summary>列表 / 候选的权威客户范围下推（计数 / 取数之前）：复用 ERP-371 唯一权威口径，绝不内存过滤。</summary>
+    private async Task<IQueryable<PurchaseOrder>> ApplyProcurementScopeAsync()
+        => await PurchaseOrderAuthorizationRules.ApplyScopeAsync(
+            Db, Db.PurchaseOrders.AsNoTracking(), CurrentInboundUserId());
+
     /// <summary>创建</summary>
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] StockIn entity)
     {
+        // ERP-375：业务表单「未选择来源」以数字 0 表示（数字字段留空 → 0）；归一为 null，
+        // 保持历史「无来源」入库单语义（null），绝不把 0 当成无效显式链接拒绝。
+        NormalizePurchaseOrderLink(entity);
+
         // 授权与来源校验先于单号生成：被拒绝方绝不消耗单据号（ERP-352）。
         await StockInAuthorizationRules.EnsureAuthorizedAsync(
             Db, CurrentInboundUserId(), entity.SupplierId, entity.WarehouseId, entity.PurchaseOrderId);
@@ -113,6 +164,9 @@ public class StockInController : DocumentControllerBase<StockIn>
     [HttpPut("{id:long}")]
     public async Task<IActionResult> Update(long id, [FromBody] StockIn entity)
     {
+        // ERP-375：与创建同一口径——表单「未选择来源」（0）归一为 null，保持历史无来源语义。
+        NormalizePurchaseOrderLink(entity);
+
         var existing = await Db.StockIns.Include(o => o.Details)
             .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
             ?? throw BusinessException.NotFound("入库单不存在");
@@ -319,6 +373,15 @@ public class StockInController : DocumentControllerBase<StockIn>
         => entity.PurchaseOrderId is > 0
             ? $"采购入库单审核入库（采购订单 Id {entity.PurchaseOrderId}，成本来源：{cost.RemarkText}）"
             : "采购入库单审核入库";
+
+    /// <summary>
+    /// ERP-375：把业务表单「未选择来源」的数字 0 归一为 <c>null</c>（历史「无来源」语义），
+    /// 负数等非法值保持原样交由 <see cref="StockInOrderFulfillmentRules.ValidateLinkAsync"/> fail closed 拒绝。
+    /// </summary>
+    private static void NormalizePurchaseOrderLink(StockIn entity)
+    {
+        if (entity.PurchaseOrderId == 0) entity.PurchaseOrderId = null;
+    }
 
     private static void Calculate(StockIn entity)
     {

@@ -41,6 +41,19 @@ const RETURN_DETAIL_FIELDS = [
 ];
 const RETURN_DETAIL_AMOUNT = { qty: 'quantity', price: 'unitPrice', amount: 'amount', totalId: 'detail-total' };
 
+/* ERP-375：采购入库明细列（数量 = 收货数量，按基础单位；成本由服务端按来源采购订单 / 加权平均兜底，本页不录入单价） */
+const STOCK_IN_DETAIL_FIELDS = [
+  { key: 'productId', label: '商品ID', type: 'number', width: '90px' },
+  { key: 'productName', label: '商品名称', width: '170px' },
+  { key: 'spec', label: '规格', width: '100px' },
+  { key: 'unit', label: '单位', width: '60px' },
+  { key: 'quantity', label: '数量', type: 'number', width: '80px' },
+  { key: 'weight', label: '毛重(kg)', type: 'number', width: '90px' },
+  { key: 'volume', label: '体积(m³)', type: 'number', width: '90px' },
+  { key: 'batchNo', label: '批次号', width: '100px' },
+  { key: 'remark', label: '备注', width: '110px' },
+];
+
 Object.assign(MODULES, {
   'stock-in': {
     title: '采购入库', api: '/api/stock-ins', canSubmit: true,
@@ -50,10 +63,17 @@ Object.assign(MODULES, {
       { key: 'totalQuantity', label: '总数量', type: 'money' }, { key: 'status', label: '状态', status: true },
     ],
     fields: [
-      { key: 'stockInDate', label: '入库日期', type: 'date' }, { key: 'supplierId', label: '供应商Id', type: 'number' },
+      { key: 'stockInDate', label: '入库日期', type: 'date' },
+      /* ERP-375：来源由「选择来源」有界选择器显式回填（也可手工填写 Id）；选择器只回填权威来源 Id 与可收货商品行，
+         绝不臆造成本（成本仍由服务端 ERP-033 口径按来源采购订单兜底）；留空（未选择）保持「无来源」语义 */
+      { key: 'purchaseOrderId', label: '来源采购订单 ID（可留空；建议用「选择来源」）', type: 'number', selector: 'stock-in-source' },
+      { key: 'supplierId', label: '供应商Id', type: 'number' },
       { key: 'warehouseId', label: '仓库Id', type: 'number' }, { key: 'totalQuantity', label: '总数量', type: 'number' },
       { key: 'totalWeight', label: '总毛重(kg)', type: 'number' }, { key: 'totalVolume', label: '总体积(m³)', type: 'number' },
     ],
+    detailKey: 'details',
+    detailTitle: '入库明细（数量 = 收货数量，按基础单位；成本由服务端按来源采购订单 / 加权平均兜底）',
+    detailFields: STOCK_IN_DETAIL_FIELDS,
   },
   'stock-out': {
     title: '销售出库', api: '/api/stock-outs', canSubmit: true,

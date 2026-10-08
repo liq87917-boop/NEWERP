@@ -22,6 +22,12 @@ public static class StockInAuthorizationRules
     /// <summary>采购入库模块菜单中文文案（与既有菜单名一致）</summary>
     public const string RequiredMenuText = "采购入库";
 
+    /// <summary>读取 / 选择入库来源所需既有菜单编码（与既有「采购订单」菜单同源，绝不新增权限模型）</summary>
+    public const string SourceRequiredMenuCode = "purchase-order";
+
+    /// <summary>采购订单模块菜单中文文案（与既有菜单名一致）</summary>
+    public const string SourceRequiredMenuText = "采购订单";
+
     /// <summary>授权与数据范围口径文案（接口 / 文档同源）</summary>
     public const string RuleText =
         "采购入库单授权与数据范围护栏：读取 / 创建 / 修改 / 提交 / 审核 / 取消 / 删除 / 流水每一路由都会重新校验当前身份" +
@@ -58,6 +64,27 @@ public static class StockInAuthorizationRules
             throw new BusinessException(
                 $"当前账号没有「{RequiredMenuText}」（{RequiredMenuCode}）模块授权：拒绝访问采购入库" +
                 "（fail closed，不执行任何写入）",
+                ErrorCodes.Forbidden);
+        }
+    }
+
+    /// <summary>
+    /// 读取 / 选择入库来源所需授权（fail closed，ERP-375）：先复用采购入库（<c>stock-in</c>）身份 / 账号状态 / 菜单校验，
+    /// 再要求当前账号实时具备既有「采购订单」（<c>purchase-order</c>）菜单授权；撤销任一授权后下一次请求立即收敛。
+    /// <para>绝不新增用户授权，也不提供匿名 / 管理员降级；每次请求重新解析角色 → 菜单，不缓存。</para>
+    /// </summary>
+    public static async Task EnsureSourceMenuAuthorizedAsync(IErpDbContext db, long? userId,
+        CancellationToken ct = default)
+    {
+        // 采购入库权限（身份 / 账号状态 / stock-in 菜单）先 fail closed。
+        await EnsureMenuAuthorizedAsync(db, userId, ct);
+
+        var menuCodes = await CustomerReceivableReconciliationService.LoadAuthorizedMenuCodesAsync(db, userId!.Value);
+        if (!menuCodes.Contains(SourceRequiredMenuCode, StringComparer.OrdinalIgnoreCase))
+        {
+            throw new BusinessException(
+                $"当前账号没有「{SourceRequiredMenuText}」（{SourceRequiredMenuCode}）模块授权：拒绝读取采购入库来源候选" +
+                "（fail closed，不返回任何来源证据）",
                 ErrorCodes.Forbidden);
         }
     }
