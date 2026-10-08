@@ -1,0 +1,80 @@
+{
+  "title": "Enforce live booking authorization and customer scope across logistics lifecycle",
+  "description": "Stage3 core inventory closure. Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance.",
+  "acceptance_criteria": [
+    "An existing booking operator must resolve current enabled nondeleted user and real booking menu on every list/detail/timeline/options/create/update/submit/approve/cancel/delete route before counts, number generation, source reads or mutation. Reuse SalespersonDataScopeService and authoritative CustomerId; database-side scope precedes pagination/count. Restricted users can only read/write own-customer booking; missing identity, unmapped user or revoked menu fail closed, never global/admin fallback.",
+    "Validate required customer and optional supplier against enabled live masterdata before new/update/state-changing operations, preserve historical reads with explicit unavailable evidence. Edit cannot move a booking into another customer scope. Serialize booking state mutations under the ERP353 booking row lock; preserve preloading/loading cancellation protection, shipment fields and original audit. No grants, new schema or external operations. Verify actual controllers with real SQL own/foreign identities, disabled source, revocation, failed edit unchanged and concurrent state transitions.",
+    "Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/ContainerControllers.cs",
+    "src/ERP.Application/Services/BookingAuthorizationRules.cs",
+    "src/ERP.Application/Services/PreLoadingBookingLinkRules.cs",
+    "src/ERP.UnitTests/BookingAuthorizationTests.cs",
+    "src/ERP.UnitTests/ContainerShipmentTrackingTests.cs",
+    "src/ERP.UnitTests/PreLoadingBookingLinkTests.cs",
+    "src/ERP.IntegrationTests/BookingAuthorizationSqlServerTests.cs",
+    "src/ERP.IntegrationTests/ERP.IntegrationTests.csproj",
+    "docs/booking-authorization.md"
+  ],
+  "criterion_path_map": {
+    "An existing booking operator must resolve current enabled nondeleted user and real booking menu on every list/detail/timeline/options/create/update/submit/approve/cancel/delete route before counts, number generation, source reads or mutation. Reuse SalespersonDataScopeService and authoritative CustomerId; database-side scope precedes pagination/count. Restricted users can only read/write own-customer booking; missing identity, unmapped user or revoked menu fail closed, never global/admin fallback.": [
+      "src/ERP.Api/Controllers/ContainerControllers.cs",
+      "src/ERP.Application/Services/BookingAuthorizationRules.cs",
+      "src/ERP.Application/Services/PreLoadingBookingLinkRules.cs",
+      "src/ERP.UnitTests/BookingAuthorizationTests.cs",
+      "src/ERP.UnitTests/ContainerShipmentTrackingTests.cs",
+      "src/ERP.UnitTests/PreLoadingBookingLinkTests.cs",
+      "src/ERP.IntegrationTests/BookingAuthorizationSqlServerTests.cs",
+      "src/ERP.IntegrationTests/ERP.IntegrationTests.csproj",
+      "docs/booking-authorization.md"
+    ],
+    "Validate required customer and optional supplier against enabled live masterdata before new/update/state-changing operations, preserve historical reads with explicit unavailable evidence. Edit cannot move a booking into another customer scope. Serialize booking state mutations under the ERP353 booking row lock; preserve preloading/loading cancellation protection, shipment fields and original audit. No grants, new schema or external operations. Verify actual controllers with real SQL own/foreign identities, disabled source, revocation, failed edit unchanged and concurrent state transitions.": [
+      "src/ERP.Api/Controllers/ContainerControllers.cs",
+      "src/ERP.Application/Services/BookingAuthorizationRules.cs",
+      "src/ERP.Application/Services/PreLoadingBookingLinkRules.cs",
+      "src/ERP.UnitTests/BookingAuthorizationTests.cs",
+      "src/ERP.UnitTests/ContainerShipmentTrackingTests.cs",
+      "src/ERP.UnitTests/PreLoadingBookingLinkTests.cs",
+      "src/ERP.IntegrationTests/BookingAuthorizationSqlServerTests.cs",
+      "src/ERP.IntegrationTests/ERP.IntegrationTests.csproj",
+      "docs/booking-authorization.md"
+    ],
+    "Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance.": [
+      "src/ERP.Api/Controllers/ContainerControllers.cs",
+      "src/ERP.Application/Services/BookingAuthorizationRules.cs",
+      "src/ERP.Application/Services/PreLoadingBookingLinkRules.cs",
+      "src/ERP.UnitTests/BookingAuthorizationTests.cs",
+      "src/ERP.UnitTests/ContainerShipmentTrackingTests.cs",
+      "src/ERP.UnitTests/PreLoadingBookingLinkTests.cs",
+      "src/ERP.IntegrationTests/BookingAuthorizationSqlServerTests.cs",
+      "src/ERP.IntegrationTests/ERP.IntegrationTests.csproj",
+      "docs/booking-authorization.md"
+    ]
+  },
+  "implementation_evidence": "ContainerBookingController.GetPaged/GetById/Create/Update and inherited Submit/Approve/Delete do not resolve live booking menu/customer data scope; ERP353 only protects linked preloading and booking cancellation.",
+  "depends_on": [
+    "ERP-040",
+    "ERP-353"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "id": "ERP-360",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-08T09:38:36.364627Z"
+}

@@ -1,0 +1,88 @@
+{
+  "title": "Serialize shipment reference registration revision and void against live sources",
+  "description": "Stage3 core inventory closure. Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance.",
+  "acceptance_criteria": [
+    "An authorized logistics operator registering a reference must validate exact allowlisted source type/id and live eligible source under the same source lock and transaction as effective-reference uniqueness. Reject cancelled/deleted/missing source for new registration, preserve readable historical references. Two concurrent registrations for one source can create only one recorded reference; after explicit void a fresh record is permitted and previous evidence remains unchanged. No fuzzy matching or upstream/finance/inventory writes.",
+    "Serialize revision and void against the same reference row/transaction. Each successful revision preserves the immediately preceding values and monotonic revision sequence; revision racing void cannot rewrite voided evidence, duplicate void fails clearly, later validation failure rolls back both evidence and revision history. Apply existing actual source-module menu/current enabled user/customer scope to reads/candidates/history and writes, no invented permission grants or privilege expansion. Use actual controllers/services for real two-connection create/create, update/void and repeated revision tests with full original evidence retained.",
+    "Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/ContainerShipmentReferenceController.cs",
+    "src/ERP.Application/Services/ContainerShipmentReferenceService.cs",
+    "src/ERP.Application/Services/ContainerShipmentReferenceRules.cs",
+    "src/ERP.Application/Services/ShipmentReferenceAuthorizationRules.cs",
+    "src/ERP.Application/Services/BookingAuthorizationRules.cs",
+    "src/ERP.Application/DTOs/ContainerShipmentReferenceDtos.cs",
+    "src/ERP.UnitTests/ContainerShipmentReferenceTests.cs",
+    "src/ERP.UnitTests/ShipmentReferenceConcurrencyTests.cs",
+    "src/ERP.IntegrationTests/ShipmentReferenceConcurrencySqlServerTests.cs",
+    "src/ERP.IntegrationTests/ERP.IntegrationTests.csproj",
+    "docs/shipment-reference-concurrency.md"
+  ],
+  "criterion_path_map": {
+    "An authorized logistics operator registering a reference must validate exact allowlisted source type/id and live eligible source under the same source lock and transaction as effective-reference uniqueness. Reject cancelled/deleted/missing source for new registration, preserve readable historical references. Two concurrent registrations for one source can create only one recorded reference; after explicit void a fresh record is permitted and previous evidence remains unchanged. No fuzzy matching or upstream/finance/inventory writes.": [
+      "src/ERP.Api/Controllers/ContainerShipmentReferenceController.cs",
+      "src/ERP.Application/Services/ContainerShipmentReferenceService.cs",
+      "src/ERP.Application/Services/ContainerShipmentReferenceRules.cs",
+      "src/ERP.Application/Services/ShipmentReferenceAuthorizationRules.cs",
+      "src/ERP.Application/Services/BookingAuthorizationRules.cs",
+      "src/ERP.Application/DTOs/ContainerShipmentReferenceDtos.cs",
+      "src/ERP.UnitTests/ContainerShipmentReferenceTests.cs",
+      "src/ERP.UnitTests/ShipmentReferenceConcurrencyTests.cs",
+      "src/ERP.IntegrationTests/ShipmentReferenceConcurrencySqlServerTests.cs",
+      "src/ERP.IntegrationTests/ERP.IntegrationTests.csproj",
+      "docs/shipment-reference-concurrency.md"
+    ],
+    "Serialize revision and void against the same reference row/transaction. Each successful revision preserves the immediately preceding values and monotonic revision sequence; revision racing void cannot rewrite voided evidence, duplicate void fails clearly, later validation failure rolls back both evidence and revision history. Apply existing actual source-module menu/current enabled user/customer scope to reads/candidates/history and writes, no invented permission grants or privilege expansion. Use actual controllers/services for real two-connection create/create, update/void and repeated revision tests with full original evidence retained.": [
+      "src/ERP.Api/Controllers/ContainerShipmentReferenceController.cs",
+      "src/ERP.Application/Services/ContainerShipmentReferenceService.cs",
+      "src/ERP.Application/Services/ContainerShipmentReferenceRules.cs",
+      "src/ERP.Application/Services/ShipmentReferenceAuthorizationRules.cs",
+      "src/ERP.Application/Services/BookingAuthorizationRules.cs",
+      "src/ERP.Application/DTOs/ContainerShipmentReferenceDtos.cs",
+      "src/ERP.UnitTests/ContainerShipmentReferenceTests.cs",
+      "src/ERP.UnitTests/ShipmentReferenceConcurrencyTests.cs",
+      "src/ERP.IntegrationTests/ShipmentReferenceConcurrencySqlServerTests.cs",
+      "src/ERP.IntegrationTests/ERP.IntegrationTests.csproj",
+      "docs/shipment-reference-concurrency.md"
+    ],
+    "Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance.": [
+      "src/ERP.Api/Controllers/ContainerShipmentReferenceController.cs",
+      "src/ERP.Application/Services/ContainerShipmentReferenceService.cs",
+      "src/ERP.Application/Services/ContainerShipmentReferenceRules.cs",
+      "src/ERP.Application/Services/ShipmentReferenceAuthorizationRules.cs",
+      "src/ERP.Application/Services/BookingAuthorizationRules.cs",
+      "src/ERP.Application/DTOs/ContainerShipmentReferenceDtos.cs",
+      "src/ERP.UnitTests/ContainerShipmentReferenceTests.cs",
+      "src/ERP.UnitTests/ShipmentReferenceConcurrencyTests.cs",
+      "src/ERP.IntegrationTests/ShipmentReferenceConcurrencySqlServerTests.cs",
+      "src/ERP.IntegrationTests/ERP.IntegrationTests.csproj",
+      "docs/shipment-reference-concurrency.md"
+    ]
+  },
+  "implementation_evidence": "ContainerShipmentReferenceService.CreateAsync reads duplicate effective reference then inserts without a source/registry transaction. UpdateAsync revision and VoidAsync read current status without mutual locking; LoadSourceAsync checks existence/deletion but permits cancelled sources.",
+  "depends_on": [
+    "ERP-057",
+    "ERP-360"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "id": "ERP-362",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-08T09:38:36.376424Z"
+}
