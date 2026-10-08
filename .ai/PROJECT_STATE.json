@@ -1,7 +1,7 @@
 {
   "schema_version": 2,
   "project": "NEWERP",
-  "updated_at": "2026-10-08T04:44:51.290412Z",
+  "updated_at": "2026-10-08T05:01:55.305189Z",
   "phase": "ready",
   "current_task": null,
   "queue": [
@@ -340,16 +340,20 @@
     "log": ".ai\\logs\\ERP-348-validation-1.log",
     "at": "2026-10-08T04:44:42.931513Z"
   },
-  "last_error": null,
+  "last_error": {
+    "task": "ERP-349",
+    "kind": "automatic_repair_pending",
+    "summary": "Path guard failed:\noutside allowed_paths: src/ERP.Application/ERP.Application.csproj"
+  },
   "last_deepseek_fix": {
-    "task": "ERP-344",
-    "attempt": 2,
-    "model": "deepseek-v4-pro",
-    "started_at": "2026-10-08T03:24:13.198697Z"
+    "task": "ERP-349",
+    "attempts": 3,
+    "status": "retry_pending",
+    "at": "2026-10-08T05:01:54.850062Z"
   },
   "git_sync": {
     "branch": "main",
-    "local_sha": "259a279",
+    "local_sha": "54c8f62",
     "status": "synced",
     "ahead": 0,
     "behind": 0,
@@ -362,5 +366,7 @@
   "runner": {
     "status": "stopped",
     "pid": null
-  }
+  },
+  "blocker": null,
+  "finish_reason": "deepseek_supervisor_recovery"
 }
