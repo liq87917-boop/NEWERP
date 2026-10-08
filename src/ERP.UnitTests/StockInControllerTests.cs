@@ -20,7 +20,7 @@ public class StockInControllerTests
     public async Task Create_正常创建_汇总TotalQuantity_Weight_Volume_Status_Pending()
     {
         using var db = TestDbFactory.Create();
-        var ctl = new StockInController(db, new DocumentNumberService(db), new InventoryService(db));
+        var ctl = StockInLegacyTestFixture.Create(db, 999999L, 999999L);
 
         var stockIn = new StockIn
         {
@@ -50,7 +50,7 @@ public class StockInControllerTests
     public async Task GetById_不存在_抛NotFound()
     {
         using var db = TestDbFactory.Create();
-        var ctl = new StockInController(db, new DocumentNumberService(db), new InventoryService(db));
+        var ctl = StockInLegacyTestFixture.Create(db, 999999L, 999999L);
         await Assert.ThrowsAsync<BusinessException>(() => ctl.GetById(999));
     }
 
@@ -59,7 +59,7 @@ public class StockInControllerTests
     {
         using var db = TestDbFactory.Create();
         var (stockIn, _) = SeedStockIn(db, "SI-1", DocumentStatus.Pending);
-        var ctl = new StockInController(db, new DocumentNumberService(db), new InventoryService(db));
+        var ctl = StockInLegacyTestFixture.Create(db, 999999L, 999999L);
 
         // 审核前：Submitted → Approved + 增加库存
         await ctl.Submit(stockIn.Id);
@@ -78,7 +78,7 @@ public class StockInControllerTests
     {
         using var db = TestDbFactory.Create();
         var (stockIn, _) = SeedStockIn(db, "SI-2", DocumentStatus.Pending);
-        var ctl = new StockInController(db, new DocumentNumberService(db), new InventoryService(db));
+        var ctl = StockInLegacyTestFixture.Create(db, 999999L, 999999L);
 
         var ex = await Assert.ThrowsAsync<BusinessException>(() => ctl.Approve(stockIn.Id));
         Assert.Equal(ErrorCodes.RuleConflict, ex.Code);
@@ -90,7 +90,7 @@ public class StockInControllerTests
     {
         using var db = TestDbFactory.Create();
         var (stockIn, _) = SeedStockIn(db, "SI-3", DocumentStatus.Pending);
-        var ctl = new StockInController(db, new DocumentNumberService(db), new InventoryService(db));
+        var ctl = StockInLegacyTestFixture.Create(db, 999999L, 999999L);
 
         await ctl.Delete(stockIn.Id);
         Assert.True(db.StockIns.Single().IsDeleted);

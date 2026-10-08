@@ -15,7 +15,7 @@ public class StockUnitConversionTests
     {
         using var db = TestDbFactory.Create();
         var product = Product(db, "PCS", "CTN", 12);
-        var controller = new StockInController(db, new DocumentNumberService(db), new InventoryService(db));
+        var controller = StockInLegacyTestFixture.Create(db, 1L, 7L);
         var document = new StockIn
         {
             SupplierId = 1, WarehouseId = 7,

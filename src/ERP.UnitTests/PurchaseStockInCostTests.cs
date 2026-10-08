@@ -494,7 +494,7 @@ public class PurchaseStockInCostTests
     // ==================== 助手 ====================
 
     private static StockInController NewController(ErpDbContext db)
-        => new(db, new DocumentNumberService(db), new InventoryService(db));
+        => StockInLegacyTestFixture.Create(db, SupplierA, WarehouseA);
 
     private static Task<PurchaseStockInCostSource> LoadSourceAsync(ErpDbContext db, long? purchaseOrderId,
         params long[] productIds)

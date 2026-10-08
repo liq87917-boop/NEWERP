@@ -403,7 +403,7 @@ public class StockInOutMovementLedgerTests
     // ==================== 测试辅助 ====================
 
     private static StockInController NewStockInController(ErpDbContext db)
-        => new(db, new DocumentNumberService(db), new InventoryService(db));
+        => StockInLegacyTestFixture.Create(db, 1L, WarehouseA);
 
     private static StockOutController NewStockOutController(ErpDbContext db)
         => StockOutTestAuthorization.Create(db);

@@ -16,7 +16,10 @@
     "src/ERP.UnitTests/StockInOrderFulfillmentTests.cs",
     "src/ERP.UnitTests/StockUnitConversionTests.cs",
     "src/ERP.IntegrationTests/StockInAuthorizationSqlServerTests.cs",
-    "docs/stock-in-authorization.md"
+    "docs/stock-in-authorization.md",
+    "src/ERP.UnitTests/PurchaseStockInCostTests.cs",
+    "src/ERP.UnitTests/StockInLegacyTestFixture.cs",
+    "src/ERP.UnitTests/StockInMissingContextTests.cs"
   ],
   "criterion_path_map": {
     "Each existing inbound receipt read/create/update/submit/approve/cancel/delete/movements route must fail closed for missing/disabled/unmapped user or missing existing stock-in module permission. Apply existing actual supplier/warehouse/customer scope rules; linked procurement owning customer cannot expose a customer outside current user scope. Do not invent new permissions or treat null identity as administrative. A legitimately unlinked stocking receipt remains allowed only to existing authorized inbound operators.": [
@@ -50,7 +53,10 @@
       "src/ERP.UnitTests/StockInOrderFulfillmentTests.cs",
       "src/ERP.UnitTests/StockUnitConversionTests.cs",
       "src/ERP.IntegrationTests/StockInAuthorizationSqlServerTests.cs",
-      "docs/stock-in-authorization.md"
+      "docs/stock-in-authorization.md",
+      "src/ERP.UnitTests/PurchaseStockInCostTests.cs",
+      "src/ERP.UnitTests/StockInLegacyTestFixture.cs",
+      "src/ERP.UnitTests/StockInMissingContextTests.cs"
     ],
     "Real SQL fixtures must require exact (localdb)\\NEWERP_AutoAcceptance, IntegratedSecurity and NEWERP_AUTOTEST prefix before access. Create only a new GUID-owned database, reject existing database, never drop/reset any database or read production settings. Use SQL generated identities, fail wrong-target guards before access, retain complete logs. Execute relevant unit and safe Release build/test plus real SQL scenarios; build completion does not mean stage acceptance.": [
       "src/ERP.Application/Services/StockInAuthorizationRules.cs",
@@ -61,7 +67,10 @@
       "src/ERP.UnitTests/StockInOrderFulfillmentTests.cs",
       "src/ERP.UnitTests/StockUnitConversionTests.cs",
       "src/ERP.IntegrationTests/StockInAuthorizationSqlServerTests.cs",
-      "docs/stock-in-authorization.md"
+      "docs/stock-in-authorization.md",
+      "src/ERP.UnitTests/PurchaseStockInCostTests.cs",
+      "src/ERP.UnitTests/StockInLegacyTestFixture.cs",
+      "src/ERP.UnitTests/StockInMissingContextTests.cs"
     ]
   },
   "depends_on": [
@@ -69,12 +78,12 @@
     "ERP-344",
     "ERP-345"
   ],
-  "implementation_evidence": "StockInController.GetPaged/GetById/GetMovements query unscoped receipts. Create/Update/Approve/Cancel have no current-user menu/data-scope checks; inherited Submit/Delete are likewise unscoped. ERP342/344 quantity/source rules validate business identity of linked order but not caller authorization; StockOut has a live scope repair9733b69 and inbound counterpart still missing.",
+  "implementation_evidence": "StockInController.GetPaged/GetById/GetMovements query unscoped receipts. Create/Update/Approve/Cancel have no current-user menu/data-scope checks; inherited Submit/Delete are likewise unscoped. ERP342/344 quantity/source rules validate business identity of linked order but not caller authorization; StockOut has a live scope repair9733b69 and inbound counterpart still missing.\n2026-10-08 safe validation1 failed49 old inventory/cost/fulfillment tests due to direct controller construction without authenticated HTTP context and unseeded supplier/warehouse. Full log .ai/logs/ERP-352-validation-1.log preserved. Precisely authorize PurchaseStockInCostTests and a reusable real privileged-user/master-data fixture plus missing-context unauthorized regression. Preserve all original stock/cost/quantity assertions; do not bypass authorization or loosen source checks. Independent local implementation proceeds while provider Insufficient Balance remains accurately blocked.",
   "risk": "medium",
   "planning_stage": 3,
   "id": "ERP-352",
-  "status": "pending",
-  "attempts": 0,
+  "status": "in_progress",
+  "attempts": 1,
   "max_attempts": 3,
   "validation_profile": "safe",
   "completion_mode": "build",
@@ -89,5 +98,28 @@
     "required": false,
     "scenarios": []
   },
-  "created_at": "2026-10-08T05:31:23.148166Z"
+  "created_at": "2026-10-08T05:31:23.148166Z",
+  "failure_kind": "provider_unavailable",
+  "blocker": "Model provider quota unavailable; timed retry pending",
+  "last_error": "Insufficient Balance (request_id: b9d85656-0012-433f-b8a6-2d07f330eb69)",
+  "provider_retry": {
+    "probe_count": 30,
+    "cooldown_seconds": 300,
+    "next_probe_at": "2026-10-08T07:33:59.326875Z",
+    "last_seen_at": "2026-10-08T07:28:59.326875Z"
+  },
+  "preserved_work": {
+    "execution_copy": "D:\\VSCodeProject\\NEWERP.executor.continue-erp-190-20260930080457",
+    "changed_paths": [
+      ".ai/PROJECT_STATE.json",
+      ".ai/results/ERP-352.json",
+      ".ai/tasks/ERP-352.json",
+      "src/ERP.Api/Controllers/StockInController.cs",
+      "src/ERP.Application/Services/StockInAuthorizationRules.cs",
+      "src/ERP.UnitTests/StockInAuthorizationTests.cs"
+    ],
+    "diff": ".ai\\logs\\ERP-352-preserved-work.diff",
+    "preserved_at": "2026-10-08T07:28:59.501137Z"
+  },
+  "updated_at": "2026-10-08T07:19:28.614455Z"
 }

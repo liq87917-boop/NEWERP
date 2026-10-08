@@ -300,7 +300,7 @@ public class StockInOrderFulfillmentTests
     // ==================== 辅助 ====================
 
     private static StockInController NewController(ErpDbContext db)
-        => new(db, new DocumentNumberService(db), new InventoryService(db));
+        => StockInLegacyTestFixture.Create(db, SupplierA, WarehouseA, SupplierB);
 
     private static StockIn NewStockIn(long supplierId, long? purchaseOrderId,
         params (long ProductId, string Unit, decimal Quantity)[] lines)

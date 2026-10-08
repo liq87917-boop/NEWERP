@@ -21,6 +21,8 @@ namespace ERP.Api.Controllers;
 [Route("api/stock-ins")]
 public class StockInController : DocumentControllerBase<StockIn>
 {
+    private long? CurrentInboundUserId() => ControllerContext.HttpContext is null ? null : CurrentUserId();
+
     private readonly IDocumentNumberService _noService;
     private readonly IInventoryService _inventory;
 
@@ -36,7 +38,8 @@ public class StockInController : DocumentControllerBase<StockIn>
     public async Task<IActionResult> GetPaged([FromQuery] PageQuery query, [FromQuery] DocumentStatus? status)
     {
         query.Normalize();
-        var source = Set.AsNoTracking().Where(o => !o.IsDeleted);
+        var source = await StockInAuthorizationRules.ApplyScopeAsync(
+            Db, Set.AsNoTracking().Where(o => !o.IsDeleted), CurrentInboundUserId());
         if (status.HasValue) source = source.Where(o => o.Status == status.Value);
         if (!string.IsNullOrWhiteSpace(query.Keyword)) source = source.Where(o => o.StockInNo.Contains(query.Keyword));
 
@@ -54,6 +57,7 @@ public class StockInController : DocumentControllerBase<StockIn>
         var entity = await Set.AsNoTracking().Include(o => o.Details)
             .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
             ?? throw BusinessException.NotFound("入库单不存在");
+        await StockInAuthorizationRules.EnsureAuthorizedAsync(Db, CurrentInboundUserId(), entity);
         return Ok(ApiResponse<StockIn>.Success(entity));
     }
 
@@ -61,7 +65,8 @@ public class StockInController : DocumentControllerBase<StockIn>
     [HttpGet("{id:long}/movements")]
     public async Task<IActionResult> GetMovements(long id)
     {
-        await GetOrThrowAsync(id, "入库单不存在");
+        var entity = await GetOrThrowAsync(id, "入库单不存在");
+        await StockInAuthorizationRules.EnsureAuthorizedAsync(Db, CurrentInboundUserId(), entity);
         var movements = await _inventory.ListMovementsAsync(InventoryDocumentHelper.StockInType, id);
         return Ok(ApiResponse<IReadOnlyList<StockMovement>>.Success(movements));
     }
@@ -70,16 +75,38 @@ public class StockInController : DocumentControllerBase<StockIn>
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] StockIn entity)
     {
+        // 授权与来源校验先于单号生成：被拒绝方绝不消耗单据号（ERP-352）。
+        await StockInAuthorizationRules.EnsureAuthorizedAsync(
+            Db, CurrentInboundUserId(), entity.SupplierId, entity.WarehouseId, entity.PurchaseOrderId);
         entity.Id = 0;
-        entity.StockInNo = await _noService.GenerateAsync(DocumentType.StockIn);
-        entity.Status = DocumentStatus.Pending;
-        entity.CreatedAt = DateTime.Now;
         await StockUnitConversion.NormalizeAsync(Db, entity.Details);
         Calculate(entity);
         await StockInOrderFulfillmentRules.ValidateLinkAsync(Db, entity);
+
+        entity.StockInNo = await _noService.GenerateAsync(DocumentType.StockIn);
+        entity.Status = DocumentStatus.Pending;
+        entity.CreatedAt = DateTime.Now;
         Db.StockIns.Add(entity);
         await Db.SaveChangesAsync();
         return Ok(ApiResponse<object>.Success(new { entity.Id, entity.StockInNo }, "入库单创建成功"));
+    }
+
+    /// <summary>提交：先校验实时授权与来源归属，再走基类状态流转。</summary>
+    [HttpPost("{id:long}/submit")]
+    public override async Task<IActionResult> Submit(long id)
+    {
+        var entity = await GetOrThrowAsync(id, "入库单不存在");
+        await StockInAuthorizationRules.EnsureAuthorizedAsync(Db, CurrentInboundUserId(), entity);
+        return await base.Submit(id);
+    }
+
+    /// <summary>删除：先校验实时授权与来源归属，再走基类软删除。</summary>
+    [HttpDelete("{id:long}")]
+    public override async Task<IActionResult> Delete(long id)
+    {
+        var entity = await GetOrThrowAsync(id, "入库单不存在");
+        await StockInAuthorizationRules.EnsureAuthorizedAsync(Db, CurrentInboundUserId(), entity);
+        return await base.Delete(id);
     }
 
     /// <summary>更新</summary>
@@ -89,6 +116,12 @@ public class StockInController : DocumentControllerBase<StockIn>
         var existing = await Db.StockIns.Include(o => o.Details)
             .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
             ?? throw BusinessException.NotFound("入库单不存在");
+
+        // 校验「已存」与「请求」两侧的归属：既有来源客户不可越界，新来源也必须落在当前账号范围内。
+        await StockInAuthorizationRules.EnsureAuthorizedAsync(Db, CurrentInboundUserId(), existing);
+        await StockInAuthorizationRules.EnsureAuthorizedAsync(
+            Db, CurrentInboundUserId(), entity.SupplierId, entity.WarehouseId, entity.PurchaseOrderId);
+
         if (GetStatus(existing) != DocumentStatus.Pending)
             throw BusinessException.RuleConflict("仅待提交状态的单据可修改");
 
@@ -138,6 +171,9 @@ public class StockInController : DocumentControllerBase<StockIn>
         try
         {
             await AcquireOrderApprovalLockAsync(entity.PurchaseOrderId);
+
+            // ERP-352：锁内复核实时授权与来源归属（授权 / 范围 / 来源变更立即收敛）。
+            await StockInAuthorizationRules.EnsureAuthorizedAsync(Db, CurrentInboundUserId(), entity);
 
             // 幂等护栏放进锁内：同单并发审核时，后到者在拿到锁后能看到先到者已产生的流水，从而被拒绝。
             if (await _inventory.CountActiveMovementsAsync(InventoryDocumentHelper.StockInType, entity.Id) > 0)
@@ -204,15 +240,32 @@ public class StockInController : DocumentControllerBase<StockIn>
         var entity = await Db.StockIns.Include(o => o.Details)
             .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
             ?? throw BusinessException.NotFound("入库单不存在");
-        var status = GetStatus(entity);
-        if (status == DocumentStatus.Cancelled)
-            throw BusinessException.RuleConflict("入库单已取消");
-        if (status == DocumentStatus.Approved)
-            await ReverseStockAsync(entity);
-        else if (status is not (DocumentStatus.Pending or DocumentStatus.Submitted))
-            throw BusinessException.RuleConflict("当前状态不允许取消");
-        SetStatus(entity, DocumentStatus.Cancelled);
-        await Db.SaveChangesAsync();
+
+        await StockInAuthorizationRules.EnsureAuthorizedAsync(Db, CurrentInboundUserId(), entity);
+
+        // 冲销与状态变更放进同一个可串行化事务，并在事务内再次复核实时授权与来源归属。
+        await using var transaction = await Db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
+        try
+        {
+            await StockInAuthorizationRules.EnsureAuthorizedAsync(Db, CurrentInboundUserId(), entity);
+
+            var status = GetStatus(entity);
+            if (status == DocumentStatus.Cancelled)
+                throw BusinessException.RuleConflict("入库单已取消");
+            if (status == DocumentStatus.Approved)
+                await ReverseStockAsync(entity);
+            else if (status is not (DocumentStatus.Pending or DocumentStatus.Submitted))
+                throw BusinessException.RuleConflict("当前状态不允许取消");
+            SetStatus(entity, DocumentStatus.Cancelled);
+            await Db.SaveChangesAsync();
+            await transaction.CommitAsync();
+        }
+        catch
+        {
+            await transaction.RollbackAsync();
+            throw;
+        }
+
         return Ok(ApiResponse<object>.Success(null, "已取消，库存已按基础单位冲回"));
     }
 
