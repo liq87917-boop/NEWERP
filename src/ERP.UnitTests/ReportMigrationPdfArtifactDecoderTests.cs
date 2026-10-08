@@ -198,6 +198,25 @@ public class ReportMigrationPdfArtifactDecoderTests
         Assert.NotEmpty(evidence);
     }
 
+    [Fact]
+    public void Wide_column_bands_keep_adjacent_text_in_its_own_cell()
+    {
+        var columns = new List<(string Key, string Label, string Type, string? CurrencyUnit)>
+        {
+            ("id", "ID", Number, null), ("orderNo", "Order No", Text, null),
+        };
+        columns.AddRange(Enumerable.Range(0, 24).Select(i => ($"field{i}", $"Field {i}", Number, (string?)null)));
+        var values = new object?[] { 1, "SO-BOUNDARY" }.Concat(Enumerable.Range(0, 24).Select(i => (object?)(100 + i))).ToArray();
+        var bytes = ReportConfigurationPdfExporter.Export(Generic(columns.ToArray(), new[] { values }), Font);
+        var evidence = new List<string>();
+        var decoded = _decoder.Decode(bytes, "PDF", evidence);
+        Assert.NotNull(decoded);
+        Assert.Empty(evidence);
+        Assert.Single(decoded!.Rows);
+        Assert.Equal(values.Select(v => Convert.ToString(v, System.Globalization.CultureInfo.InvariantCulture)),
+            decoded.Rows[0].Select(c => c.Text));
+    }
+
     private static byte[] BuildEncryptedPdf()
     {
         using var document = new PdfDocument();

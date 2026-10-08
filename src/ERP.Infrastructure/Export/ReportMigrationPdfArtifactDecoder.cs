@@ -516,7 +516,7 @@ public sealed class ReportMigrationPdfArtifactDecoder
     private static IEnumerable<string> TokensIn(CellRect rect, List<TextToken> tokens)
         => tokens
             .Where(t => t.X >= rect.X - CellEpsilon
-                        && t.X <= rect.X + rect.Width + CellEpsilon
+                        && t.X < rect.X + rect.Width
                         && t.Y >= rect.Y - CellEpsilon
                         && t.Y <= rect.Y + rect.Height + CellEpsilon)
             .OrderByDescending(t => t.Y)
