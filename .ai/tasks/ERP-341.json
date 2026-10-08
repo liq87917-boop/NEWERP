@@ -53,7 +53,7 @@
   "risk": "medium",
   "planning_stage": 2,
   "id": "ERP-341",
-  "status": "pending",
+  "status": "deferred",
   "attempts": 0,
   "max_attempts": 3,
   "validation_profile": "safe",
@@ -69,5 +69,6 @@
     "required": false,
     "scenarios": []
   },
-  "created_at": "2026-10-08T01:06:36.256159Z"
+  "created_at": "2026-10-08T01:06:36.256159Z",
+  "blocker": "2026-10-08 explicit user prioritizes stage3; retain unfinished stage2 acceptance"
 }

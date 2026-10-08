@@ -50,6 +50,13 @@ class PlannerTests(unittest.TestCase):
    gate={'stage':1,'stage_complete':True,'unresolved_gate':{},'matrix':[{'criterion':k,'acceptance_status':'passed'} for k in planner.STAGE1_CRITERIA],'browser_downloads':{'actual_browser_artifacts_captured':True},'regression':{'unit_tests_passed':1,'real_sql_tests_passed':1,'scheduler_contracts_passed':1},'proof_files':[{'path':'proof.txt','sha256':hashlib.sha256(proof.read_bytes()).hexdigest()}]}
    target=evidence/'report-platform-stage1-acceptance.json';target.write_text(json.dumps(gate))
    self.assertEqual(2,planner.planning_stage(root))
+   decisions=root/'.ai/decisions';decisions.mkdir()
+   override=decisions/'STAGE3_PRIORITY_AUTHORIZED.json'
+   override.write_text(json.dumps({'authorization':'explicit_user_instruction','development_stage':3,'stage2_accepted':False,'preserve_legacy_entry_gate':True}))
+   self.assertEqual(3,planner.planning_stage(root))
+   override.write_text(json.dumps({'authorization':'explicit_user_instruction','development_stage':4,'stage2_accepted':False,'preserve_legacy_entry_gate':True}))
+   self.assertEqual(2,planner.planning_stage(root))
+   override.write_text(json.dumps({'authorization':'explicit_user_instruction','development_stage':3,'stage2_accepted':False,'preserve_legacy_entry_gate':True}))
    proof.write_text('changed');self.assertEqual(1,planner.planning_stage(root))
    gate['proof_files'][0]['sha256']=hashlib.sha256(proof.read_bytes()).hexdigest();gate['browser_downloads']['actual_browser_artifacts_captured']=False;target.write_text(json.dumps(gate))
    self.assertEqual(1,planner.planning_stage(root))

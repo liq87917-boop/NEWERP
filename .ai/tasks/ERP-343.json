@@ -1,0 +1,67 @@
+{
+  "title": "销售出库衔接来源订单并防止累计超发",
+  "description": "Stage3 priority explicitly authorized 2026-10-08. Complete operational order-to-inventory linkage using existing layered architecture and existing document workflow; no report or Agent work. First deliver core usable partial/full stock workflow; postpone visual/style/export polish.",
+  "acceptance_criteria": [
+    "Use existing StockOut create/update/approve flow and explicit SalesOrderId; when linked validate live approved SalesOrder, compatible customer/supplier, product identity and basic/package units without guessing ambiguous duplicate order lines. Preserve historical unlinked documents; fail closed on invalid new explicit links. Keep current menu and salesperson/customer scope; no permission expansion.",
+    "At approval enforce cumulative active approved StockOut quantities plus this document never exceed linked order authorized quantities by compatible product/unit. Partial batches allowed; canceled/reversed documents release remaining capacity; no cross-unit or currency totals. Serialize same-order concurrent approvals in existing relational transaction so concurrent documents cannot overrun; failed validation leaves stock, movements and status unchanged. Do not rewrite order original quantity, legacy history or add new schema.",
+    "Integrate useful conflict messages in existing API and preserve audit/current-user trace through existing workflow. Verify partial/full, repeated approval, cancellation, invalid/missing/foreign source, packaging, duplicate source lines, concurrent overrun and permission denial using meaningful units and guarded NEWERP_AUTOTEST SQL tests; run safe Release build/unit and retain real environment limitations."
+  ],
+  "allowed_paths": [
+    "src/ERP.Application/Services/StockOutOrderFulfillmentRules.cs",
+    "src/ERP.Api/Controllers/StockOutController.cs",
+    "src/ERP.Api/Controllers/StockUnitConversion.cs",
+    "src/ERP.UnitTests/StockOutOrderFulfillmentTests.cs",
+    "src/ERP.IntegrationTests/StockOutOrderFulfillmentSqlServerTests.cs",
+    "docs/stockout-order-fulfillment.md"
+  ],
+  "criterion_path_map": {
+    "Use existing StockOut create/update/approve flow and explicit SalesOrderId; when linked validate live approved SalesOrder, compatible customer/supplier, product identity and basic/package units without guessing ambiguous duplicate order lines. Preserve historical unlinked documents; fail closed on invalid new explicit links. Keep current menu and salesperson/customer scope; no permission expansion.": [
+      "src/ERP.Application/Services/StockOutOrderFulfillmentRules.cs",
+      "src/ERP.Api/Controllers/StockOutController.cs",
+      "src/ERP.Api/Controllers/StockUnitConversion.cs",
+      "src/ERP.UnitTests/StockOutOrderFulfillmentTests.cs",
+      "src/ERP.IntegrationTests/StockOutOrderFulfillmentSqlServerTests.cs",
+      "docs/stockout-order-fulfillment.md"
+    ],
+    "At approval enforce cumulative active approved StockOut quantities plus this document never exceed linked order authorized quantities by compatible product/unit. Partial batches allowed; canceled/reversed documents release remaining capacity; no cross-unit or currency totals. Serialize same-order concurrent approvals in existing relational transaction so concurrent documents cannot overrun; failed validation leaves stock, movements and status unchanged. Do not rewrite order original quantity, legacy history or add new schema.": [
+      "src/ERP.Application/Services/StockOutOrderFulfillmentRules.cs",
+      "src/ERP.Api/Controllers/StockOutController.cs",
+      "src/ERP.Api/Controllers/StockUnitConversion.cs",
+      "src/ERP.UnitTests/StockOutOrderFulfillmentTests.cs",
+      "src/ERP.IntegrationTests/StockOutOrderFulfillmentSqlServerTests.cs",
+      "docs/stockout-order-fulfillment.md"
+    ],
+    "Integrate useful conflict messages in existing API and preserve audit/current-user trace through existing workflow. Verify partial/full, repeated approval, cancellation, invalid/missing/foreign source, packaging, duplicate source lines, concurrent overrun and permission denial using meaningful units and guarded NEWERP_AUTOTEST SQL tests; run safe Release build/unit and retain real environment limitations.": [
+      "src/ERP.Application/Services/StockOutOrderFulfillmentRules.cs",
+      "src/ERP.Api/Controllers/StockOutController.cs",
+      "src/ERP.Api/Controllers/StockUnitConversion.cs",
+      "src/ERP.UnitTests/StockOutOrderFulfillmentTests.cs",
+      "src/ERP.IntegrationTests/StockOutOrderFulfillmentSqlServerTests.cs",
+      "docs/stockout-order-fulfillment.md"
+    ]
+  },
+  "implementation_evidence": "src/ERP.Api/Controllers/StockOutController.cs Approve normalizes units and writes inventory but uses SalesOrderId only as remark/cost source; no authoritative cumulative source order quantity guard. Existing ERP025 ledger and ERP033 costs are completed and must be reused. Reviewed ALL task definitions and existing quantity/status/source history.",
+  "depends_on": [
+    "ERP-025"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "id": "ERP-343",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-08T01:26:21.951285Z"
+}

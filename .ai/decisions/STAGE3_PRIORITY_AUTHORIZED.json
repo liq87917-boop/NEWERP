@@ -1,0 +1,15 @@
+{
+  "authorization": "explicit_user_instruction",
+  "at": "2026-10-08T01:26:21.894674Z",
+  "user_instruction": "要加快进度，细节上的东西留待后续再来完善吧，先把第三阶段跑起来",
+  "development_stage": 3,
+  "stage2_accepted": false,
+  "preserve_legacy_entry_gate": true,
+  "retain_security_transactions_and_real_validation": true,
+  "deferred_stage2_tasks": [
+    "ERP-340",
+    "ERP-341"
+  ],
+  "finish_existing_active_task_safely": true,
+  "agent_stage": 4
+}
