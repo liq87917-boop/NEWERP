@@ -1,0 +1,78 @@
+{
+  "title": "Authorize canonical sales order execution evidence at every record entry",
+  "description": "Stage3 core business workflow integrity. Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance.",
+  "acceptance_criteria": [
+    "For canonical single-order execution routes, resolve live enabled nondeleted identity and existing sales-order menu with existing SalespersonDataScopeService, then authorize the persisted CustomerId before reading any timeline, progress, return, invoice, receipt or finance evidence. Centralize a finite canonical-order guard; no permission grants or legacy Oid inference. Include list/detail and bounded explicit-id evidence summaries where the same order selector is exposed; reject mixed foreign ids before evidence derivation, without counts or partial rows revealing inaccessible orders.",
+    "Preserve existing operational evidence calculations, currency/unit separation, null-as-unknown and response DTO contracts. Foreign or missing orders have the same controlled non-disclosing error. Preserve lawful authorized historical access and ordinary workflows; no schema, source writes or report migration/entry switch. Each denied request is bounded and logged without financial payloads/secrets. This is securing operational record entry points, not publishing another report.",
+    "Real isolated SQL authenticated controller tests cover own/foreign order on every affected endpoint, disabled/deleted/revoked/module-missing identity, mixed explicit ids, legal privileged access and unchanged source/stock/finance on denial. Assert permitted derivations retain existing partial shipment/returns/invoice/receipt semantics. Relevant unit regressions and safe Release/full unit validation; report browser limitation accurately.",
+    "Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/SalesOrderController.cs",
+    "src/ERP.Application/Services/SalesOrderExecutionAuthorizationRules.cs",
+    "src/ERP.Application/Services/SalespersonDataScopeService.cs",
+    "src/ERP.UnitTests/SalesOrderExecutionAuthorizationTests.cs",
+    "src/ERP.IntegrationTests/SalesOrderExecutionAuthorizationSqlServerTests.cs",
+    "docs/sales-order-execution-authority.md"
+  ],
+  "criterion_path_map": {
+    "For canonical single-order execution routes, resolve live enabled nondeleted identity and existing sales-order menu with existing SalespersonDataScopeService, then authorize the persisted CustomerId before reading any timeline, progress, return, invoice, receipt or finance evidence. Centralize a finite canonical-order guard; no permission grants or legacy Oid inference. Include list/detail and bounded explicit-id evidence summaries where the same order selector is exposed; reject mixed foreign ids before evidence derivation, without counts or partial rows revealing inaccessible orders.": [
+      "src/ERP.Api/Controllers/SalesOrderController.cs",
+      "src/ERP.Application/Services/SalesOrderExecutionAuthorizationRules.cs",
+      "src/ERP.Application/Services/SalespersonDataScopeService.cs",
+      "src/ERP.UnitTests/SalesOrderExecutionAuthorizationTests.cs",
+      "src/ERP.IntegrationTests/SalesOrderExecutionAuthorizationSqlServerTests.cs",
+      "docs/sales-order-execution-authority.md"
+    ],
+    "Preserve existing operational evidence calculations, currency/unit separation, null-as-unknown and response DTO contracts. Foreign or missing orders have the same controlled non-disclosing error. Preserve lawful authorized historical access and ordinary workflows; no schema, source writes or report migration/entry switch. Each denied request is bounded and logged without financial payloads/secrets. This is securing operational record entry points, not publishing another report.": [
+      "src/ERP.Api/Controllers/SalesOrderController.cs",
+      "src/ERP.Application/Services/SalesOrderExecutionAuthorizationRules.cs",
+      "src/ERP.Application/Services/SalespersonDataScopeService.cs",
+      "src/ERP.UnitTests/SalesOrderExecutionAuthorizationTests.cs",
+      "src/ERP.IntegrationTests/SalesOrderExecutionAuthorizationSqlServerTests.cs",
+      "docs/sales-order-execution-authority.md"
+    ],
+    "Real isolated SQL authenticated controller tests cover own/foreign order on every affected endpoint, disabled/deleted/revoked/module-missing identity, mixed explicit ids, legal privileged access and unchanged source/stock/finance on denial. Assert permitted derivations retain existing partial shipment/returns/invoice/receipt semantics. Relevant unit regressions and safe Release/full unit validation; report browser limitation accurately.": [
+      "src/ERP.Api/Controllers/SalesOrderController.cs",
+      "src/ERP.Application/Services/SalesOrderExecutionAuthorizationRules.cs",
+      "src/ERP.Application/Services/SalespersonDataScopeService.cs",
+      "src/ERP.UnitTests/SalesOrderExecutionAuthorizationTests.cs",
+      "src/ERP.IntegrationTests/SalesOrderExecutionAuthorizationSqlServerTests.cs",
+      "docs/sales-order-execution-authority.md"
+    ],
+    "Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance.": [
+      "src/ERP.Api/Controllers/SalesOrderController.cs",
+      "src/ERP.Application/Services/SalesOrderExecutionAuthorizationRules.cs",
+      "src/ERP.Application/Services/SalespersonDataScopeService.cs",
+      "src/ERP.UnitTests/SalesOrderExecutionAuthorizationTests.cs",
+      "src/ERP.IntegrationTests/SalesOrderExecutionAuthorizationSqlServerTests.cs",
+      "docs/sales-order-execution-authority.md"
+    ]
+  },
+  "implementation_evidence": "SalesOrderController Timeline, FinanceReconciliation, Progress, ReturnImpact and invoice/receipt evidence single-record routes call static derivation helpers without ResolveScopeAsync or live module authorization. GetPaged/GetById have only the inherited scope resolver. ERP410/411 cover separate legacy api/v2 controllers, not canonical api/sales-orders; knowing a foreign canonical Id exposes shipment, return and finance evidence.",
+  "depends_on": [
+    "ERP-412",
+    "ERP-401",
+    "ERP-047"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "id": "ERP-413",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-08T21:11:01.578492Z"
+}

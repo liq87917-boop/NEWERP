@@ -1,0 +1,96 @@
+{
+  "title": "Authorize sales order change request proposals through live source ownership",
+  "description": "Stage3 core business workflow integrity. Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance.",
+  "acceptance_criteria": [
+    "Require genuine current enabled identity and existing sales-order menu for all change-request data and mutation routes. Reuse canonical source authorization from the preceding task and existing SalespersonDataScopeService. Scope before request count/page/source-options and by-source; stored explicit SalesOrderId and live source CustomerId control access. Proposed customer fields do not grant ownership. Historical snapshot customer is not authority after source reassignment. Restricted users cannot read requests whose live source is missing or unresolvable; lawful unrestricted historical behavior stays explicit.",
+    "Authorize persisted and proposed source before number generation, draft details replacement, submit/cancel or success response. Reject foreign explicit source/request ids with uniform non-disclosing failure and leave source, proposal, numbers, inventory and finance unchanged on authorization failure. Preserve ERP047 proposed-only boundary: no approval, application, auto conversion, hard deletion or commercial source mutation. Existing cancelled and submitted snapshots remain read-only evidence for authorized users.",
+    "Meaningful SQL controller tests cover own/foreign list/detail/by-source/options, malformed/missing identity, revoked/disabled/module denial, source ownership reassignment, deleted source history and forged proposed customer/source ids. Verify exact permitted proposal values and original source unchanged for create/update/submit/cancel. Unit workflow regressions and safe Release/full unit; explicit environment blockers.",
+    "Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/SalesOrderChangeRequestController.cs",
+    "src/ERP.Application/Services/SalesOrderChangeRequestService.cs",
+    "src/ERP.Application/Services/SalesOrderChangeRequestRules.cs",
+    "src/ERP.Application/Services/SalesOrderExecutionAuthorizationRules.cs",
+    "src/ERP.Application/Services/SalesOrderChangeRequestAuthorizationRules.cs",
+    "src/ERP.Application/DTOs/SalesOrderChangeRequestDtos.cs",
+    "src/ERP.UnitTests/SalesOrderChangeRequestTests.cs",
+    "src/ERP.UnitTests/SalesOrderChangeRequestAuthorizationTests.cs",
+    "src/ERP.IntegrationTests/SalesOrderChangeRequestAuthorizationSqlServerTests.cs",
+    "docs/sales-order-change-request-authority.md"
+  ],
+  "criterion_path_map": {
+    "Require genuine current enabled identity and existing sales-order menu for all change-request data and mutation routes. Reuse canonical source authorization from the preceding task and existing SalespersonDataScopeService. Scope before request count/page/source-options and by-source; stored explicit SalesOrderId and live source CustomerId control access. Proposed customer fields do not grant ownership. Historical snapshot customer is not authority after source reassignment. Restricted users cannot read requests whose live source is missing or unresolvable; lawful unrestricted historical behavior stays explicit.": [
+      "src/ERP.Api/Controllers/SalesOrderChangeRequestController.cs",
+      "src/ERP.Application/Services/SalesOrderChangeRequestService.cs",
+      "src/ERP.Application/Services/SalesOrderChangeRequestRules.cs",
+      "src/ERP.Application/Services/SalesOrderExecutionAuthorizationRules.cs",
+      "src/ERP.Application/Services/SalesOrderChangeRequestAuthorizationRules.cs",
+      "src/ERP.Application/DTOs/SalesOrderChangeRequestDtos.cs",
+      "src/ERP.UnitTests/SalesOrderChangeRequestTests.cs",
+      "src/ERP.UnitTests/SalesOrderChangeRequestAuthorizationTests.cs",
+      "src/ERP.IntegrationTests/SalesOrderChangeRequestAuthorizationSqlServerTests.cs",
+      "docs/sales-order-change-request-authority.md"
+    ],
+    "Authorize persisted and proposed source before number generation, draft details replacement, submit/cancel or success response. Reject foreign explicit source/request ids with uniform non-disclosing failure and leave source, proposal, numbers, inventory and finance unchanged on authorization failure. Preserve ERP047 proposed-only boundary: no approval, application, auto conversion, hard deletion or commercial source mutation. Existing cancelled and submitted snapshots remain read-only evidence for authorized users.": [
+      "src/ERP.Api/Controllers/SalesOrderChangeRequestController.cs",
+      "src/ERP.Application/Services/SalesOrderChangeRequestService.cs",
+      "src/ERP.Application/Services/SalesOrderChangeRequestRules.cs",
+      "src/ERP.Application/Services/SalesOrderExecutionAuthorizationRules.cs",
+      "src/ERP.Application/Services/SalesOrderChangeRequestAuthorizationRules.cs",
+      "src/ERP.Application/DTOs/SalesOrderChangeRequestDtos.cs",
+      "src/ERP.UnitTests/SalesOrderChangeRequestTests.cs",
+      "src/ERP.UnitTests/SalesOrderChangeRequestAuthorizationTests.cs",
+      "src/ERP.IntegrationTests/SalesOrderChangeRequestAuthorizationSqlServerTests.cs",
+      "docs/sales-order-change-request-authority.md"
+    ],
+    "Meaningful SQL controller tests cover own/foreign list/detail/by-source/options, malformed/missing identity, revoked/disabled/module denial, source ownership reassignment, deleted source history and forged proposed customer/source ids. Verify exact permitted proposal values and original source unchanged for create/update/submit/cancel. Unit workflow regressions and safe Release/full unit; explicit environment blockers.": [
+      "src/ERP.Api/Controllers/SalesOrderChangeRequestController.cs",
+      "src/ERP.Application/Services/SalesOrderChangeRequestService.cs",
+      "src/ERP.Application/Services/SalesOrderChangeRequestRules.cs",
+      "src/ERP.Application/Services/SalesOrderExecutionAuthorizationRules.cs",
+      "src/ERP.Application/Services/SalesOrderChangeRequestAuthorizationRules.cs",
+      "src/ERP.Application/DTOs/SalesOrderChangeRequestDtos.cs",
+      "src/ERP.UnitTests/SalesOrderChangeRequestTests.cs",
+      "src/ERP.UnitTests/SalesOrderChangeRequestAuthorizationTests.cs",
+      "src/ERP.IntegrationTests/SalesOrderChangeRequestAuthorizationSqlServerTests.cs",
+      "docs/sales-order-change-request-authority.md"
+    ],
+    "Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance.": [
+      "src/ERP.Api/Controllers/SalesOrderChangeRequestController.cs",
+      "src/ERP.Application/Services/SalesOrderChangeRequestService.cs",
+      "src/ERP.Application/Services/SalesOrderChangeRequestRules.cs",
+      "src/ERP.Application/Services/SalesOrderExecutionAuthorizationRules.cs",
+      "src/ERP.Application/Services/SalesOrderChangeRequestAuthorizationRules.cs",
+      "src/ERP.Application/DTOs/SalesOrderChangeRequestDtos.cs",
+      "src/ERP.UnitTests/SalesOrderChangeRequestTests.cs",
+      "src/ERP.UnitTests/SalesOrderChangeRequestAuthorizationTests.cs",
+      "src/ERP.IntegrationTests/SalesOrderChangeRequestAuthorizationSqlServerTests.cs",
+      "docs/sales-order-change-request-authority.md"
+    ]
+  },
+  "implementation_evidence": "SalesOrderChangeRequestController has only class Authorize. List, source-options, by-source, get, create, edit, submit and cancel call SalesOrderChangeRequestService without caller scope; service queries all source orders and request snapshots. ERP047 implements register semantics but no live source-owner permission guard; ERP401 lineage validation does not cover this register.",
+  "depends_on": [
+    "ERP-413"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "id": "ERP-414",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-08T21:11:01.585296Z"
+}
