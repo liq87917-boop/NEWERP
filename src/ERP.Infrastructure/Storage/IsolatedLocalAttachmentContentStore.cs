@@ -87,6 +87,79 @@ public sealed class IsolatedLocalAttachmentContentStore : IAttachmentContentStor
         return Task.FromResult<long?>(info.Exists ? info.Length : null);
     }
 
+    /// <summary>
+    /// 有界补偿（ERP-409）：删除<strong>本次请求新建</strong>的不透明键，仅用于「元数据写入已被确认回滚」之后。
+    /// <para>安全口径（三层防护）：① 生产提供程序一律拒绝；② 键必须是本实现生成的不透明形态
+    /// （<c>yyyyMMdd/{32hex}{.pdf|.png|.jpg|.jpeg}</c>）——空键、超长键、绝对路径、路径穿越、盘符、
+    /// 反斜杠、目录形态与任意文件名一律返回 <c>false</c>；③ <see cref="ResolvePath"/> 再次确认解析结果
+    /// 落在隔离根目录之内。只调用 <see cref="File.Delete(string)"/> 删除<strong>单个文件</strong>：
+    /// 绝不做目录扫荡、通配删除或任何目录内其它文件的删除。</para>
+    /// <para>返回 <c>false</c> 表示「未删除任何内容」（键非法 / 越界 / 不存在 / 生产提供程序 / 删除失败）：
+    /// 上层据此判定「清理未成功」并保留可恢复的内部证据，绝不谎报已清理。</para>
+    /// </summary>
+    public Task<bool> TryRemoveRequestOwnedAsync(
+        string? storageKey, CancellationToken cancellationToken = default)
+    {
+        if (IsProductionProvider) return Task.FromResult(false);
+
+        var key = (storageKey ?? string.Empty).Trim();
+        if (!IsOpaqueStorageKey(key)) return Task.FromResult(false);
+
+        string fullPath;
+        try
+        {
+            fullPath = ResolvePath(key);   // 复核：仅不透明相对键，且解析后必须位于隔离根目录之内
+        }
+        catch (InvalidOperationException)
+        {
+            return Task.FromResult(false);
+        }
+
+        if (!File.Exists(fullPath)) return Task.FromResult(false);
+
+        try
+        {
+            File.Delete(fullPath);
+            return Task.FromResult(true);
+        }
+        catch (IOException)
+        {
+            return Task.FromResult(false);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Task.FromResult(false);
+        }
+    }
+
+    /// <summary>
+    /// 不透明键形态判定（与 <see cref="SaveAsync"/> 的生成口径同源）：
+    /// <c>yyyyMMdd/{32 位小写十六进制}{.pdf|.png|.jpg|.jpeg}</c>，长度有界。
+    /// 该判定保证补偿删除的输入只可能是「服务端生成的内容键」，而不是任意路径或任意文件名。
+    /// </summary>
+    private static bool IsOpaqueStorageKey(string key)
+    {
+        if (key.Length == 0 || key.Length > AttachmentEvidenceRules.MaxStorageKeyLength) return false;
+
+        const int dateLength = 8;
+        if (key.Length <= dateLength + 1 || key[dateLength] != '/') return false;
+        for (var i = 0; i < dateLength; i++)
+        {
+            if (!char.IsAsciiDigit(key[i])) return false;
+        }
+
+        var fileName = key[(dateLength + 1)..];
+        var dot = fileName.IndexOf('.');
+        if (dot != 32) return false;
+        for (var i = 0; i < dot; i++)
+        {
+            if (!char.IsAsciiHexDigitLower(fileName[i])) return false;
+        }
+
+        var extension = fileName[dot..];
+        return AttachmentEvidenceRules.SupportedExtensions.Contains(extension);
+    }
+
     /// <summary>扩展名白名单（隔离存储只接受 PDF / PNG / JPEG）</summary>
     private static string NormalizeExtension(string? extension)
     {

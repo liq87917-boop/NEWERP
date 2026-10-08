@@ -240,7 +240,8 @@ public class AttachmentEvidenceController : ControllerBase
                 CurrentUserName(),
                 CurrentUserId(),
                 cancellationToken,
-                access);
+                access,
+                CurrentUserId());   // ERP-409：锁内按真实身份重新解析权限（撤销 / 禁用立即收敛）
         }
 
         return Ok(ApiResponse<AttachmentEvidenceDto>.Success(
@@ -273,7 +274,9 @@ public class AttachmentEvidenceController : ControllerBase
         long id, [FromBody] AttachmentEvidenceVoidRequest? request, CancellationToken cancellationToken = default)
         => Ok(ApiResponse<AttachmentEvidenceDto>.Success(
             await AttachmentEvidenceService.VoidAsync(
-                _db, id, request?.Reason, cancellationToken, await ResolveAccessAsync(cancellationToken)),
+                _db, id, request?.Reason, cancellationToken,
+                await ResolveAccessAsync(cancellationToken),
+                CurrentUserId()),   // ERP-409：锁内按真实身份重新解析权限（撤销 / 禁用立即收敛）
             "附件证据已作废（原始文件名 / 摘要 / 登记历史保留可读；内容不再提供下载，不提供硬删除与二进制替换）"));
 
     /// <summary>

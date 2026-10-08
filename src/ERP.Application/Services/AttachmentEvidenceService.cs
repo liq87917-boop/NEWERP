@@ -54,9 +54,13 @@ public static class AttachmentEvidenceService
 
     /// <summary>
     /// 上传一条附件证据：全部校验通过后才写内容与元数据。
-    /// <para>校验顺序：存储提供程序（必须是非生产隔离提供程序）→ 归属单据类型白名单 →
-    /// 归属单据存在且未删除 → 有界读取内容（超限中止）→ 文件名 / 扩展名 / 声明类型 / 文件签名一致
-    /// → 内容落盘（服务端生成存储键）→ 元数据落库。</para>
+    /// <para>校验顺序：存储提供程序（必须是非生产隔离提供程序）→ 归属单据类型白名单（实时菜单授权）→
+    /// **原子事务 + 归属（父）业务单据行锁** → 锁内重新读取实时父单据状态与权威归属（存在 / 未删除 +
+    /// ERP-407 客户数据范围）→ 有界读取内容（超限中止）→ 文件名 / 扩展名 / 声明类型 / 文件签名一致
+    /// → 内容落盘（服务端生成存储键）→ 元数据落库（锁内）→ 提交。</para>
+    /// <para>失败语义（ERP-409）：元数据写入被<strong>确认回滚</strong>时，只对本次请求新建的不透明键做一次性
+    /// 有界补偿；提交结果不确定（提交异常 / 取消 / 回滚失败）时<strong>绝不删除</strong>可能已提交的内容，
+    /// 并保留可恢复的精确内部证据（存储键 / 路径绝不进入用户可见响应）。</para>
     /// </summary>
     public static async Task<AttachmentEvidenceDto> UploadAsync(
         IErpDbContext db,
@@ -65,7 +69,8 @@ public static class AttachmentEvidenceService
         string? uploadedBy,
         long? uploadedById,
         CancellationToken cancellationToken = default,
-        AttachmentOwnerAccessContext? access = null)
+        AttachmentOwnerAccessContext? access = null,
+        long? actingUserId = null)
     {
         ArgumentNullException.ThrowIfNull(db);
         ArgumentNullException.ThrowIfNull(store);
@@ -79,57 +84,123 @@ public static class AttachmentEvidenceService
         if (access is not null)
             AttachmentOwnerAuthorizationRules.EnsureOwnerTypeAuthorized(access, ownerType);
 
-        // 1) 归属单据：白名单类型 + 必须指向存在且未删除的权威单据（服务端复核，不接受客户端快照）
-        var owner = await LoadOwnerAsync(db, ownerType, request.OwnerId, cancellationToken);
+        var ownerId = request.OwnerId;
+        if (ownerId <= 0)
+            throw BusinessException.InvalidParameter(
+                $"请显式选择归属单据（{AttachmentEvidenceRules.OwnerTypeText(ownerType)}）后再上传附件证据");
 
-        if (access is not null)
-            await AttachmentOwnerAuthorizationRules.EnsureOwnershipScopeAsync(
-                db, access, owner.Ownership(), false, cancellationToken);
+        // ERP-409：原子事务 + 归属（父）业务单据行锁。锁内**重新读取**实时父单据状态与权威归属，
+        // 把「父单据并发删除 / 归属客户变更 / 权限撤销」与本次登记串行化在同一事务内。
+        var transaction = await AttachmentEvidenceMutationRules.BeginMutationTransactionAsync(db, cancellationToken);
+        string? requestOwnedKey = null;
+        string? digest = null;
+        long contentLength = 0;
+        var metadataCommitted = false;
 
-        // 2) 有界读取内容：声明长度先做快速拒绝，实际读取超限立即中止（不保存任何内容）
-        var content = await ReadBoundedAsync(request.Content, request.DeclaredLength, cancellationToken);
-
-        // 3) 文件名 / 格式校验：扩展名、声明 Content-Type、文件签名三者一致；拒绝可执行与标记类格式
-        var probeLength = Math.Min(content.Length, AttachmentEvidenceRules.SignatureProbeLength);
-        var identity = AttachmentEvidenceRules.ValidateUpload(
-            request.FileName, request.DeclaredContentType, content.AsSpan(0, probeLength));
-
-        var fileName = AttachmentEvidenceRules.SanitizeFileName(request.FileName);
-        var description = AttachmentEvidenceRules.NormalizeDescription(request.Description);
-        var digest = Convert.ToHexString(SHA256.HashData(content)).ToLowerInvariant();
-
-        // 4) 内容落盘：键与扩展名都由服务端决定（不传客户端文件名、不传任何路径）
-        string storageKey;
-        await using (var buffer = new MemoryStream(content, writable: false))
+        try
         {
-            storageKey = await store.SaveAsync(buffer, identity.Extension, cancellationToken);
+            // 1) 归属（父）业务单据行锁：不存在 / 已删除即原子拒绝（**绝不为加锁而改写父单据业务字段**）
+            var locked = await AttachmentEvidenceMutationRules.LockOwnerRowAsync(db, ownerType, ownerId);
+            if (!locked)
+            {
+                await AttachmentEvidenceMutationRules.TryRollbackAsync(transaction, db);
+                throw BusinessException.NotFound(
+                    $"{AttachmentEvidenceMutationRules.OwnerUnavailableText}"
+                    + $"（{AttachmentEvidenceRules.OwnerTypeText(ownerType)} Id={ownerId}）");
+            }
+
+            // 2) 锁内重新读取**实时**身份 / 权限 / 父单据状态与权威归属（绝不信任加锁前的授权快照）：
+            //    菜单撤销、账号禁用 / 删除、客户范围变更在本请求提交前一律立即收敛（fail closed）。
+            var liveAccess = access is not null && actingUserId is > 0
+                ? await AttachmentOwnerAuthorizationRules.ResolveAsync(db, actingUserId, cancellationToken)
+                : access;
+            if (liveAccess is not null)
+                AttachmentOwnerAuthorizationRules.EnsureOwnerTypeAuthorized(liveAccess, ownerType);
+
+            var owner = await LoadOwnerAsync(db, ownerType, ownerId, cancellationToken);
+
+            if (liveAccess is not null)
+                await AttachmentOwnerAuthorizationRules.EnsureOwnershipScopeAsync(
+                    db, liveAccess, owner.Ownership(), false, cancellationToken);
+
+            // 3) 有界读取内容：声明长度先做快速拒绝，实际读取超限立即中止（不保存任何内容）
+            var content = await ReadBoundedAsync(request.Content, request.DeclaredLength, cancellationToken);
+
+            // 4) 文件名 / 格式校验：扩展名、声明 Content-Type、文件签名三者一致；拒绝可执行与标记类格式
+            var probeLength = Math.Min(content.Length, AttachmentEvidenceRules.SignatureProbeLength);
+            var identity = AttachmentEvidenceRules.ValidateUpload(
+                request.FileName, request.DeclaredContentType, content.AsSpan(0, probeLength));
+
+            var fileName = AttachmentEvidenceRules.SanitizeFileName(request.FileName);
+            var description = AttachmentEvidenceRules.NormalizeDescription(request.Description);
+            digest = Convert.ToHexString(SHA256.HashData(content)).ToLowerInvariant();
+            contentLength = content.LongLength;
+
+            // 5) 内容落盘：键与扩展名都由服务端决定（不传客户端文件名、不传任何路径）
+            await using (var buffer = new MemoryStream(content, writable: false))
+            {
+                requestOwnedKey = await store.SaveAsync(buffer, identity.Extension, cancellationToken);
+            }
+
+            // 6) 元数据落库（锁内）：摘要 / 长度 / 媒体类型 / 归属快照 / 上传人 / 登记时间全部服务端写入
+            var row = new AttachmentEvidence
+            {
+                OwnerType = ownerType,
+                OwnerId = owner.Id,
+                OwnerNo = TrimTo(owner.No, AttachmentEvidenceRules.MaxOwnerNoLength),
+                OwnerTypeText = AttachmentEvidenceRules.OwnerTypeText(ownerType),
+                OriginalFileName = fileName,
+                MediaType = identity.MediaType,
+                SizeBytes = contentLength,
+                Sha256 = digest,
+                Description = description,
+                StorageKey = requestOwnedKey,
+                StorageProvider = store.ProviderCode,
+                UploadedBy = AttachmentEvidenceRules.NormalizeUploadedBy(uploadedBy),
+                RecordedAt = DateTime.Now,
+                Status = AttachmentEvidenceRules.StatusActive,
+                CreatedAt = DateTime.Now,
+                CreatedBy = uploadedById
+            };
+
+            db.AttachmentEvidences.Add(row);
+            await db.SaveChangesAsync(cancellationToken);
+
+            // 7) 提交：仅当提交成功后 metadataCommitted 才置真（提交异常 = 结果不确定 → 绝不删除内容）
+            await AttachmentEvidenceMutationRules.CommitAsync(transaction, cancellationToken);
+            metadataCommitted = true;
+
+            return Map(row, ownerAvailable: true);
         }
-
-        // 5) 元数据落库：摘要 / 长度 / 媒体类型 / 归属快照 / 上传人 / 登记时间全部服务端写入
-        var row = new AttachmentEvidence
+        catch (Exception ex)
         {
-            OwnerType = ownerType,
-            OwnerId = owner.Id,
-            OwnerNo = TrimTo(owner.No, AttachmentEvidenceRules.MaxOwnerNoLength),
-            OwnerTypeText = AttachmentEvidenceRules.OwnerTypeText(ownerType),
-            OriginalFileName = fileName,
-            MediaType = identity.MediaType,
-            SizeBytes = content.LongLength,
-            Sha256 = digest,
-            Description = description,
-            StorageKey = storageKey,
-            StorageProvider = store.ProviderCode,
-            UploadedBy = AttachmentEvidenceRules.NormalizeUploadedBy(uploadedBy),
-            RecordedAt = DateTime.Now,
-            Status = AttachmentEvidenceRules.StatusActive,
-            CreatedAt = DateTime.Now,
-            CreatedBy = uploadedById
-        };
+            // 提交成功后（或本层无事务控制权时）绝不再回滚 / 补偿：保留可能已提交的证据与内容
+            if (metadataCommitted) throw;
 
-        db.AttachmentEvidences.Add(row);
-        await db.SaveChangesAsync(cancellationToken);
+            var rollbackConfirmed = await AttachmentEvidenceMutationRules.TryRollbackAsync(transaction, db);
+            var ambiguous = ex is OperationCanceledException || !rollbackConfirmed;
 
-        return Map(row, ownerAvailable: true);
+            if (ambiguous)
+            {
+                // 取消 / 回滚结果不确定：**保留**可能已提交的内容，绝不删除；保留可恢复的精确内部证据
+                throw AttachmentEvidenceMutationRules.AmbiguousRetention(
+                    ownerType, ownerId, requestOwnedKey, digest, contentLength, store.ProviderCode,
+                    stage: ex is OperationCanceledException ? "cancelled-retention" : "rollback-uncertain-retention",
+                    reason: ex is OperationCanceledException ? "请求被取消" : "回滚结果不确定（未确认回滚）",
+                    inner: ex);
+            }
+
+            // 元数据已**确认回滚**：只对本次请求新建的键做一次性有界补偿（绝无既有键 / 越界删除）
+            if (!string.IsNullOrEmpty(requestOwnedKey))
+            {
+                var removed = await AttachmentEvidenceMutationRules.TryCompensateContentAsync(store, requestOwnedKey);
+                if (!removed)
+                    throw AttachmentEvidenceMutationRules.CompensationFailed(
+                        ownerType, ownerId, requestOwnedKey, digest, contentLength, store.ProviderCode, ex);
+            }
+
+            throw;
+        }
     }
 
     /// <summary>
@@ -387,35 +458,70 @@ public static class AttachmentEvidenceService
     /// <summary>
     /// 作废证据：必须填写原因；只改状态与作废留痕，保留原始文件名快照、摘要、媒体类型、长度、
     /// 存储键、归属与上传人，不物理删除、不替换内容、不改派归属；重复作废拒绝。
+    /// <para>ERP-409：作废在<strong>原子事务</strong>内先对<strong>证据行加锁</strong>，锁内重新读取证据状态与
+    /// 实时归属授权后才写入。两个并发作废请求只有一个能提交：<strong>输家</strong>在锁内读到的已是「已作废」，
+    /// 一律拒绝，<strong>绝不覆盖</strong>赢家已保留的原始作废原因与时间戳。</para>
     /// </summary>
     public static async Task<AttachmentEvidenceDto> VoidAsync(
         IErpDbContext db, long id, string? reason, CancellationToken cancellationToken = default,
-        AttachmentOwnerAccessContext? access = null)
+        AttachmentOwnerAccessContext? access = null, long? actingUserId = null)
     {
         ArgumentNullException.ThrowIfNull(db);
+        if (id <= 0)
+            throw BusinessException.InvalidParameter("附件证据 Id 无效：必须为正整数");
 
-        var row = await LoadAsync(db, id, cancellationToken);
+        var transaction = await AttachmentEvidenceMutationRules.BeginMutationTransactionAsync(db, cancellationToken);
+        var committed = false;
+        try
+        {
+            // 1) 证据行锁：不存在 / 已删除（含并发删除）即原子拒绝
+            var locked = await AttachmentEvidenceMutationRules.LockEvidenceRowAsync(db, id);
+            if (!locked)
+            {
+                await AttachmentEvidenceMutationRules.TryRollbackAsync(transaction, db);
+                throw BusinessException.NotFound($"附件证据不存在或已删除（Id={id}）");
+            }
 
-        // ERP-407：写入（作废）之前必须先复核归属类型菜单授权与权威归属客户范围
-        if (access is not null)
-            await AttachmentOwnerAuthorizationRules.EnsureEvidenceAuthorizedAsync(
-                db, access, row, cancellationToken);
+            // 2) 锁内重新读取证据（tracked）+ **实时**重解析身份 / 权限 + 权威归属授权复核（fail closed）：
+            //    菜单撤销、账号禁用 / 删除、客户范围变更在本请求提交前一律立即收敛。
+            var row = await LoadAsync(db, id, cancellationToken);
 
-        if (row.Status == AttachmentEvidenceRules.StatusVoided)
-            throw BusinessException.Duplicate(
-                $"该附件证据已作废（{row.VoidedAt:yyyy-MM-dd HH:mm}，原因：{row.VoidReason}）：不重复作废；"
-                + "系统不提供硬删除，也不提供二进制替换或改派归属");
+            var liveAccess = access is not null && actingUserId is > 0
+                ? await AttachmentOwnerAuthorizationRules.ResolveAsync(db, actingUserId, cancellationToken)
+                : access;
 
-        var voidReason = AttachmentEvidenceRules.NormalizeVoidReason(reason);
+            if (liveAccess is not null)
+                await AttachmentOwnerAuthorizationRules.EnsureEvidenceAuthorizedAsync(
+                    db, liveAccess, row, cancellationToken);
 
-        row.Status = AttachmentEvidenceRules.StatusVoided;
-        row.VoidedAt = DateTime.Now;
-        row.VoidReason = voidReason;
-        row.UpdatedAt = DateTime.Now;
-        await db.SaveChangesAsync(cancellationToken);
+            if (row.Status == AttachmentEvidenceRules.StatusVoided)
+            {
+                // 并发作废的输家 / 重复作废：不覆盖赢家保留的原始原因与时间戳
+                await AttachmentEvidenceMutationRules.TryRollbackAsync(transaction, db);
+                throw BusinessException.Duplicate(
+                    $"该附件证据已作废（{row.VoidedAt:yyyy-MM-dd HH:mm}，原因：{row.VoidReason}）：不重复作废；"
+                    + "系统不提供硬删除，也不提供二进制替换或改派归属");
+            }
 
-        var ownerAvailable = await IsOwnerAvailableAsync(db, row.OwnerType, row.OwnerId, cancellationToken);
-        return Map(row, ownerAvailable);
+            var voidReason = AttachmentEvidenceRules.NormalizeVoidReason(reason);
+
+            row.Status = AttachmentEvidenceRules.StatusVoided;
+            row.VoidedAt = DateTime.Now;
+            row.VoidReason = voidReason;
+            row.UpdatedAt = DateTime.Now;
+            await db.SaveChangesAsync(cancellationToken);
+
+            await AttachmentEvidenceMutationRules.CommitAsync(transaction, cancellationToken);
+            committed = true;
+
+            var ownerAvailable = await IsOwnerAvailableAsync(db, row.OwnerType, row.OwnerId, cancellationToken);
+            return Map(row, ownerAvailable);
+        }
+        catch (Exception)
+        {
+            if (!committed) await AttachmentEvidenceMutationRules.TryRollbackAsync(transaction, db);
+            throw;
+        }
     }
 
     // ==================== 5. 模块元数据（口径与界面同源） ====================

@@ -42,4 +42,19 @@ public interface IAttachmentContentStore
 
     /// <summary>读取对象长度（元数据，用于下载前的一致性校验；不可用时返回 null）</summary>
     Task<long?> GetLengthAsync(string storageKey, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// 有界补偿接缝（ERP-409）：删除<strong>本次请求新建</strong>的不透明内容键（形如
+    /// <c>yyyyMMdd/{32hex}{.pdf|.png|.jpg|.jpeg}</c>），<strong>仅</strong>用于「元数据写入已被确认回滚」之后的
+    /// 一次性补偿。
+    /// <para>调用契约（调用方必须遵守）：只传<strong>同一次登记操作内</strong>刚刚由 <see cref="SaveAsync"/>
+    /// 返回的键；<strong>绝不</strong>传既有键、已受理证据键、用户输入或任何路径。</para>
+    /// <para>实现契约（实现方必须遵守）：校验键形态；解析并确认落在隔离根目录之内；只删除那一个文件，
+    /// <strong>绝不</strong>做目录扫荡、通配删除或任意路径删除；生产提供程序与不支持该能力的实现一律返回
+    /// <c>false</c>（上层据此判定「清理未成功」并保留可恢复的内部证据，绝不谎报已清理）。</para>
+    /// <para>默认实现返回 <c>false</c>（不支持补偿）：这让既有实现无需改动即可继续编译，同时保证
+    /// 「默认不删除任何内容」是最安全的失败姿态。</para>
+    /// </summary>
+    Task<bool> TryRemoveRequestOwnedAsync(string? storageKey, CancellationToken cancellationToken = default)
+        => Task.FromResult(false);
 }
