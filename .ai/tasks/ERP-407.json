@@ -1,0 +1,103 @@
+{
+  "title": "Enforce current business owner authority on attachment evidence and content",
+  "description": "Stage3 core business workflow integrity. Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance.",
+  "acceptance_criteria": [
+    "Add reusable Application authoritative owner authorization for every ordinary and center attachment route, using live enabled identity, existing parent module menus and current customer scope before metadata/count/filename/summary/content/store access or mutation. Resolve exact canonical SalesOrder, PurchaseOrder, TradeDocument, procurement QC owner and Sample; purchase ownership uses authoritative OwningCustomerId and existing privileged rules. Sample ownership must use persisted CustomerId where present, unresolved restricted ownership fails closed. Never infer ownership from owner number, snapshots, free text or file name; no new permissions.",
+    "Apply owner scope before global count/page/options/center-summary, including mixed owner-summary requests with no foreign existence/count leakage. Positive evidence Id requires fresh parent authorization for metadata/download/void; upload checks before reading file or saving content. Missing/deleted historical parents retain immutable evidence but do not grant access through snapshots; keep only genuinely authorized historical visibility. Authorized existing uploads/downloads remain usable and security headers/signature/length/hash validation remain. No parent state/amount/inventory/finance writes, no production OSS or second store.",
+    "Real isolated SQL tests with two customers prove every list/count/options/summary/ordinary and center download/write denial, direct known evidence Id, revoked/disabled/menu-less identities, valid procurement/trade/QC ownership and authorized privileged cases. Counting store spy proves denied requests never touch bytes. Include safe Release/full unit plus existing Sales/Purchase/Trade/QC/Sample attachment regressions; document exact browser/storage blockers.",
+    "Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/AttachmentEvidenceController.cs",
+    "src/ERP.Application/Services/AttachmentEvidenceService.cs",
+    "src/ERP.Application/Services/AttachmentOwnerAuthorizationRules.cs",
+    "src/ERP.Application/Services/SalespersonDataScopeService.cs",
+    "src/ERP.UnitTests/AttachmentOwnerAuthorizationTests.cs",
+    "src/ERP.UnitTests/AttachmentEvidenceTests.cs",
+    "src/ERP.UnitTests/TradeDocumentAttachmentEvidenceTests.cs",
+    "src/ERP.UnitTests/QualityInspectionSampleAttachmentEvidenceTests.cs",
+    "src/ERP.UnitTests/AttachmentCenterWorkspaceTests.cs",
+    "src/ERP.IntegrationTests/AttachmentOwnerAuthorizationSqlServerTests.cs",
+    "docs/attachment-owner-authorization.md"
+  ],
+  "criterion_path_map": {
+    "Add reusable Application authoritative owner authorization for every ordinary and center attachment route, using live enabled identity, existing parent module menus and current customer scope before metadata/count/filename/summary/content/store access or mutation. Resolve exact canonical SalesOrder, PurchaseOrder, TradeDocument, procurement QC owner and Sample; purchase ownership uses authoritative OwningCustomerId and existing privileged rules. Sample ownership must use persisted CustomerId where present, unresolved restricted ownership fails closed. Never infer ownership from owner number, snapshots, free text or file name; no new permissions.": [
+      "src/ERP.Api/Controllers/AttachmentEvidenceController.cs",
+      "src/ERP.Application/Services/AttachmentEvidenceService.cs",
+      "src/ERP.Application/Services/AttachmentOwnerAuthorizationRules.cs",
+      "src/ERP.Application/Services/SalespersonDataScopeService.cs",
+      "src/ERP.UnitTests/AttachmentOwnerAuthorizationTests.cs",
+      "src/ERP.UnitTests/AttachmentEvidenceTests.cs",
+      "src/ERP.UnitTests/TradeDocumentAttachmentEvidenceTests.cs",
+      "src/ERP.UnitTests/QualityInspectionSampleAttachmentEvidenceTests.cs",
+      "src/ERP.UnitTests/AttachmentCenterWorkspaceTests.cs",
+      "src/ERP.IntegrationTests/AttachmentOwnerAuthorizationSqlServerTests.cs",
+      "docs/attachment-owner-authorization.md"
+    ],
+    "Apply owner scope before global count/page/options/center-summary, including mixed owner-summary requests with no foreign existence/count leakage. Positive evidence Id requires fresh parent authorization for metadata/download/void; upload checks before reading file or saving content. Missing/deleted historical parents retain immutable evidence but do not grant access through snapshots; keep only genuinely authorized historical visibility. Authorized existing uploads/downloads remain usable and security headers/signature/length/hash validation remain. No parent state/amount/inventory/finance writes, no production OSS or second store.": [
+      "src/ERP.Api/Controllers/AttachmentEvidenceController.cs",
+      "src/ERP.Application/Services/AttachmentEvidenceService.cs",
+      "src/ERP.Application/Services/AttachmentOwnerAuthorizationRules.cs",
+      "src/ERP.Application/Services/SalespersonDataScopeService.cs",
+      "src/ERP.UnitTests/AttachmentOwnerAuthorizationTests.cs",
+      "src/ERP.UnitTests/AttachmentEvidenceTests.cs",
+      "src/ERP.UnitTests/TradeDocumentAttachmentEvidenceTests.cs",
+      "src/ERP.UnitTests/QualityInspectionSampleAttachmentEvidenceTests.cs",
+      "src/ERP.UnitTests/AttachmentCenterWorkspaceTests.cs",
+      "src/ERP.IntegrationTests/AttachmentOwnerAuthorizationSqlServerTests.cs",
+      "docs/attachment-owner-authorization.md"
+    ],
+    "Real isolated SQL tests with two customers prove every list/count/options/summary/ordinary and center download/write denial, direct known evidence Id, revoked/disabled/menu-less identities, valid procurement/trade/QC ownership and authorized privileged cases. Counting store spy proves denied requests never touch bytes. Include safe Release/full unit plus existing Sales/Purchase/Trade/QC/Sample attachment regressions; document exact browser/storage blockers.": [
+      "src/ERP.Api/Controllers/AttachmentEvidenceController.cs",
+      "src/ERP.Application/Services/AttachmentEvidenceService.cs",
+      "src/ERP.Application/Services/AttachmentOwnerAuthorizationRules.cs",
+      "src/ERP.Application/Services/SalespersonDataScopeService.cs",
+      "src/ERP.UnitTests/AttachmentOwnerAuthorizationTests.cs",
+      "src/ERP.UnitTests/AttachmentEvidenceTests.cs",
+      "src/ERP.UnitTests/TradeDocumentAttachmentEvidenceTests.cs",
+      "src/ERP.UnitTests/QualityInspectionSampleAttachmentEvidenceTests.cs",
+      "src/ERP.UnitTests/AttachmentCenterWorkspaceTests.cs",
+      "src/ERP.IntegrationTests/AttachmentOwnerAuthorizationSqlServerTests.cs",
+      "docs/attachment-owner-authorization.md"
+    ],
+    "Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance.": [
+      "src/ERP.Api/Controllers/AttachmentEvidenceController.cs",
+      "src/ERP.Application/Services/AttachmentEvidenceService.cs",
+      "src/ERP.Application/Services/AttachmentOwnerAuthorizationRules.cs",
+      "src/ERP.Application/Services/SalespersonDataScopeService.cs",
+      "src/ERP.UnitTests/AttachmentOwnerAuthorizationTests.cs",
+      "src/ERP.UnitTests/AttachmentEvidenceTests.cs",
+      "src/ERP.UnitTests/TradeDocumentAttachmentEvidenceTests.cs",
+      "src/ERP.UnitTests/QualityInspectionSampleAttachmentEvidenceTests.cs",
+      "src/ERP.UnitTests/AttachmentCenterWorkspaceTests.cs",
+      "src/ERP.IntegrationTests/AttachmentOwnerAuthorizationSqlServerTests.cs",
+      "docs/attachment-owner-authorization.md"
+    ]
+  },
+  "implementation_evidence": "AttachmentEvidenceController ordinary list/by-owner/options/summary/get/upload/content/void calls services without authenticated identity authorization; CurrentUserId is only upload audit. AttachmentEvidenceService center authorization filters owner types by menu only and lacks current customer scope or live enabled user checks. Thus a foreign sales/purchase/trade document attachment can bypass the canonical parent controllers.",
+  "depends_on": [
+    "ERP-406",
+    "ERP-394",
+    "ERP-371"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "id": "ERP-407",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-08T20:00:13.938337Z"
+}

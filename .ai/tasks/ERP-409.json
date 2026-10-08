@@ -1,0 +1,96 @@
+{
+  "title": "Make attachment registration and explicit void atomic with business owner changes",
+  "description": "Stage3 core business workflow integrity. Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance.",
+  "acceptance_criteria": [
+    "Use existing transaction and deterministic owner-to-evidence locks for registration and void, consistent with parent mutation locks. Fresh live ownership/permission and parent state must be reread under locks before content publication and metadata commit. No parent business field mutation merely to lock. Two simultaneous void requests yield exactly one preserved original void reason/timestamp; the loser fails without overwriting evidence. Keep historical files and accepted metadata immutable; no hard delete, replacement or reparenting.",
+    "Extend the existing isolated storage seam only as needed for bounded compensation of a newly created request-owned opaque key after confirmed metadata rollback, never existing keys or accepted evidence. On ambiguous commit, cancellation or cleanup failure retain recoverable precise internal evidence and never delete potentially committed content; hide storage keys and paths from user responses. Validate keys and resolved isolated root before local removal. No production OSS activation, arbitrary filesystem deletion, new storage/database/entity, or directory sweeps; injected failures must leave neither a falsely successful registration nor invisible unrecoverable partial business state.",
+    "Real SQL two independent connections cover registration versus parent deletion/ownership change, concurrent void, permission revocation before commit, metadata write failure and rollback; isolated real-file tests cover request-owned cleanup, rejected/outside-root keys, ambiguous commit retention and failure evidence. Record counts/content digest and original reason before/after. Preserve quantities/amounts/source audit/parent lifecycle; existing content safety and owner authorization regressions, safe Release/full units plus accurate browser/environment blockers.",
+    "Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/AttachmentEvidenceController.cs",
+    "src/ERP.Application/Services/AttachmentEvidenceService.cs",
+    "src/ERP.Application/Services/AttachmentOwnerAuthorizationRules.cs",
+    "src/ERP.Application/Interfaces/IAttachmentContentStore.cs",
+    "src/ERP.Infrastructure/Storage/IsolatedLocalAttachmentContentStore.cs",
+    "src/ERP.Application/Services/AttachmentEvidenceMutationRules.cs",
+    "src/ERP.UnitTests/AttachmentEvidenceMutationTests.cs",
+    "src/ERP.UnitTests/AttachmentEvidenceTests.cs",
+    "src/ERP.IntegrationTests/AttachmentEvidenceMutationSqlServerTests.cs",
+    "docs/attachment-evidence-atomicity.md"
+  ],
+  "criterion_path_map": {
+    "Use existing transaction and deterministic owner-to-evidence locks for registration and void, consistent with parent mutation locks. Fresh live ownership/permission and parent state must be reread under locks before content publication and metadata commit. No parent business field mutation merely to lock. Two simultaneous void requests yield exactly one preserved original void reason/timestamp; the loser fails without overwriting evidence. Keep historical files and accepted metadata immutable; no hard delete, replacement or reparenting.": [
+      "src/ERP.Api/Controllers/AttachmentEvidenceController.cs",
+      "src/ERP.Application/Services/AttachmentEvidenceService.cs",
+      "src/ERP.Application/Services/AttachmentOwnerAuthorizationRules.cs",
+      "src/ERP.Application/Interfaces/IAttachmentContentStore.cs",
+      "src/ERP.Infrastructure/Storage/IsolatedLocalAttachmentContentStore.cs",
+      "src/ERP.Application/Services/AttachmentEvidenceMutationRules.cs",
+      "src/ERP.UnitTests/AttachmentEvidenceMutationTests.cs",
+      "src/ERP.UnitTests/AttachmentEvidenceTests.cs",
+      "src/ERP.IntegrationTests/AttachmentEvidenceMutationSqlServerTests.cs",
+      "docs/attachment-evidence-atomicity.md"
+    ],
+    "Extend the existing isolated storage seam only as needed for bounded compensation of a newly created request-owned opaque key after confirmed metadata rollback, never existing keys or accepted evidence. On ambiguous commit, cancellation or cleanup failure retain recoverable precise internal evidence and never delete potentially committed content; hide storage keys and paths from user responses. Validate keys and resolved isolated root before local removal. No production OSS activation, arbitrary filesystem deletion, new storage/database/entity, or directory sweeps; injected failures must leave neither a falsely successful registration nor invisible unrecoverable partial business state.": [
+      "src/ERP.Api/Controllers/AttachmentEvidenceController.cs",
+      "src/ERP.Application/Services/AttachmentEvidenceService.cs",
+      "src/ERP.Application/Services/AttachmentOwnerAuthorizationRules.cs",
+      "src/ERP.Application/Interfaces/IAttachmentContentStore.cs",
+      "src/ERP.Infrastructure/Storage/IsolatedLocalAttachmentContentStore.cs",
+      "src/ERP.Application/Services/AttachmentEvidenceMutationRules.cs",
+      "src/ERP.UnitTests/AttachmentEvidenceMutationTests.cs",
+      "src/ERP.UnitTests/AttachmentEvidenceTests.cs",
+      "src/ERP.IntegrationTests/AttachmentEvidenceMutationSqlServerTests.cs",
+      "docs/attachment-evidence-atomicity.md"
+    ],
+    "Real SQL two independent connections cover registration versus parent deletion/ownership change, concurrent void, permission revocation before commit, metadata write failure and rollback; isolated real-file tests cover request-owned cleanup, rejected/outside-root keys, ambiguous commit retention and failure evidence. Record counts/content digest and original reason before/after. Preserve quantities/amounts/source audit/parent lifecycle; existing content safety and owner authorization regressions, safe Release/full units plus accurate browser/environment blockers.": [
+      "src/ERP.Api/Controllers/AttachmentEvidenceController.cs",
+      "src/ERP.Application/Services/AttachmentEvidenceService.cs",
+      "src/ERP.Application/Services/AttachmentOwnerAuthorizationRules.cs",
+      "src/ERP.Application/Interfaces/IAttachmentContentStore.cs",
+      "src/ERP.Infrastructure/Storage/IsolatedLocalAttachmentContentStore.cs",
+      "src/ERP.Application/Services/AttachmentEvidenceMutationRules.cs",
+      "src/ERP.UnitTests/AttachmentEvidenceMutationTests.cs",
+      "src/ERP.UnitTests/AttachmentEvidenceTests.cs",
+      "src/ERP.IntegrationTests/AttachmentEvidenceMutationSqlServerTests.cs",
+      "docs/attachment-evidence-atomicity.md"
+    ],
+    "Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance.": [
+      "src/ERP.Api/Controllers/AttachmentEvidenceController.cs",
+      "src/ERP.Application/Services/AttachmentEvidenceService.cs",
+      "src/ERP.Application/Services/AttachmentOwnerAuthorizationRules.cs",
+      "src/ERP.Application/Interfaces/IAttachmentContentStore.cs",
+      "src/ERP.Infrastructure/Storage/IsolatedLocalAttachmentContentStore.cs",
+      "src/ERP.Application/Services/AttachmentEvidenceMutationRules.cs",
+      "src/ERP.UnitTests/AttachmentEvidenceMutationTests.cs",
+      "src/ERP.UnitTests/AttachmentEvidenceTests.cs",
+      "src/ERP.IntegrationTests/AttachmentEvidenceMutationSqlServerTests.cs",
+      "docs/attachment-evidence-atomicity.md"
+    ]
+  },
+  "implementation_evidence": "AttachmentEvidenceService.UploadAsync resolves owner, saves bytes then independently SaveChanges metadata, without transaction/owner recheck or a safe cleanup seam on DB failure; VoidAsync checks active status then saves without row serialization, so concurrent void requests can overwrite original reason. Parent deletion/ownership change can race registration after an earlier permission check.",
+  "depends_on": [
+    "ERP-408"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "id": "ERP-409",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-08T20:00:13.952216Z"
+}
