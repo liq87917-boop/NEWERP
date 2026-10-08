@@ -1,0 +1,95 @@
+{
+  "title": "Create purchase returns from authorized receipt selection and remaining capacity",
+  "description": "Stage3 core inventory closure. Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance.",
+  "acceptance_criteria": [
+    "Add bounded purchase-return source receipt candidate/detail endpoints requiring live enabled purchase-return and stock-in permissions and existing receipt/procurement ownership scope before counts/rows. Resolve exact approved nondeleted receipt id/no, supplier/warehouse/product/spec/base unit and remaining return capacity from effective approved returns with duplicate source products aggregated safely. Zero capacity, corrupt/unknown units, cancelled/deleted/unapproved and foreign-owned receipts are unavailable. Reuse ERP358 unit/cost and scope conventions without new grants or schema.",
+    "Add functional explicit receipt selection to purchase-return create/edit, authoritative SourceStockInId/no/supplier/warehouse and eligible product lines with positive partial quantities. Save/reopen keeps exact source, explicit clearing retains legacy unlinked semantics and no text matching. Preserve existing unit/cost/amount calculations; no synthetic AP payments, stock or finance posting from selection. Actual create/submit/approval rechecks eligibility and cumulative return capacity under existing source locks; stale source cancellation, revoked access, concurrent returns and invalid edits roll back without altering original document/stock/ledger. Retain form input on failure and avoid repeated clicks. Real SQL atomic denial, partial/duplicate/foreign/revoked/stale/race and executable JS selection/save/reopen tests plus browser evidence or accurate blocker.",
+    "Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/wwwroot/js/modules-doc2.js",
+    "src/ERP.Api/wwwroot/js/bill-edit.js",
+    "src/ERP.Api/wwwroot/index.html",
+    "src/ERP.Api/wwwroot/js/purchase-return-source-picker.js",
+    "src/ERP.Api/Controllers/PurchaseReturnController.cs",
+    "src/ERP.Application/Services/PurchaseReturnSourceRules.cs",
+    "src/ERP.Application/Services/StockInAuthorizationRules.cs",
+    "src/ERP.Application/DTOs/PurchaseReturnSourceCandidateDtos.cs",
+    "src/ERP.UnitTests/PurchaseReturnSourceSelectionTests.cs",
+    "src/ERP.IntegrationTests/PurchaseReturnSourceSelectionSqlServerTests.cs",
+    "tests/automation/purchase-return-source-picker.test.js",
+    "docs/purchase-return-source-selection.md"
+  ],
+  "criterion_path_map": {
+    "Add bounded purchase-return source receipt candidate/detail endpoints requiring live enabled purchase-return and stock-in permissions and existing receipt/procurement ownership scope before counts/rows. Resolve exact approved nondeleted receipt id/no, supplier/warehouse/product/spec/base unit and remaining return capacity from effective approved returns with duplicate source products aggregated safely. Zero capacity, corrupt/unknown units, cancelled/deleted/unapproved and foreign-owned receipts are unavailable. Reuse ERP358 unit/cost and scope conventions without new grants or schema.": [
+      "src/ERP.Api/wwwroot/js/modules-doc2.js",
+      "src/ERP.Api/wwwroot/js/bill-edit.js",
+      "src/ERP.Api/wwwroot/index.html",
+      "src/ERP.Api/wwwroot/js/purchase-return-source-picker.js",
+      "src/ERP.Api/Controllers/PurchaseReturnController.cs",
+      "src/ERP.Application/Services/PurchaseReturnSourceRules.cs",
+      "src/ERP.Application/Services/StockInAuthorizationRules.cs",
+      "src/ERP.Application/DTOs/PurchaseReturnSourceCandidateDtos.cs",
+      "src/ERP.UnitTests/PurchaseReturnSourceSelectionTests.cs",
+      "src/ERP.IntegrationTests/PurchaseReturnSourceSelectionSqlServerTests.cs",
+      "tests/automation/purchase-return-source-picker.test.js",
+      "docs/purchase-return-source-selection.md"
+    ],
+    "Add functional explicit receipt selection to purchase-return create/edit, authoritative SourceStockInId/no/supplier/warehouse and eligible product lines with positive partial quantities. Save/reopen keeps exact source, explicit clearing retains legacy unlinked semantics and no text matching. Preserve existing unit/cost/amount calculations; no synthetic AP payments, stock or finance posting from selection. Actual create/submit/approval rechecks eligibility and cumulative return capacity under existing source locks; stale source cancellation, revoked access, concurrent returns and invalid edits roll back without altering original document/stock/ledger. Retain form input on failure and avoid repeated clicks. Real SQL atomic denial, partial/duplicate/foreign/revoked/stale/race and executable JS selection/save/reopen tests plus browser evidence or accurate blocker.": [
+      "src/ERP.Api/wwwroot/js/modules-doc2.js",
+      "src/ERP.Api/wwwroot/js/bill-edit.js",
+      "src/ERP.Api/wwwroot/index.html",
+      "src/ERP.Api/wwwroot/js/purchase-return-source-picker.js",
+      "src/ERP.Api/Controllers/PurchaseReturnController.cs",
+      "src/ERP.Application/Services/PurchaseReturnSourceRules.cs",
+      "src/ERP.Application/Services/StockInAuthorizationRules.cs",
+      "src/ERP.Application/DTOs/PurchaseReturnSourceCandidateDtos.cs",
+      "src/ERP.UnitTests/PurchaseReturnSourceSelectionTests.cs",
+      "src/ERP.IntegrationTests/PurchaseReturnSourceSelectionSqlServerTests.cs",
+      "tests/automation/purchase-return-source-picker.test.js",
+      "docs/purchase-return-source-selection.md"
+    ],
+    "Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance.": [
+      "src/ERP.Api/wwwroot/js/modules-doc2.js",
+      "src/ERP.Api/wwwroot/js/bill-edit.js",
+      "src/ERP.Api/wwwroot/index.html",
+      "src/ERP.Api/wwwroot/js/purchase-return-source-picker.js",
+      "src/ERP.Api/Controllers/PurchaseReturnController.cs",
+      "src/ERP.Application/Services/PurchaseReturnSourceRules.cs",
+      "src/ERP.Application/Services/StockInAuthorizationRules.cs",
+      "src/ERP.Application/DTOs/PurchaseReturnSourceCandidateDtos.cs",
+      "src/ERP.UnitTests/PurchaseReturnSourceSelectionTests.cs",
+      "src/ERP.IntegrationTests/PurchaseReturnSourceSelectionSqlServerTests.cs",
+      "tests/automation/purchase-return-source-picker.test.js",
+      "docs/purchase-return-source-selection.md"
+    ]
+  },
+  "implementation_evidence": "ERP358 secures SourceStockInId and ERP359 source cancellation, but purchase-return form only requests raw source receipt ID/no; PurchaseReturnController lacks bounded authorized receipt/product remaining-return candidate projection.",
+  "depends_on": [
+    "ERP-358",
+    "ERP-359",
+    "ERP-374",
+    "ERP-375",
+    "ERP-376"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "id": "ERP-377",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-08T12:49:57.914517Z"
+}
