@@ -1,0 +1,90 @@
+{
+  "title": "Select and persist outbound evidence from the loading list business screen",
+  "description": "Stage3 core inventory closure. Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance.",
+  "acceptance_criteria": [
+    "Add saved-draft loading-list outbound-evidence action using existing UI/dialog infrastructure and persisted line ids. Search bounded authorized stock-out-candidates; show actual stock-out/order/customer/product/spec/base unit, approved returned quantity and remaining link capacity. Assign or explicitly clear each exact source stock-out detail through stock-out-links then reload persisted evidence. Save newly created draft before linking; do not type arbitrary ids, text-match sources or auto-link legacy rows. Respect all effective participant customer scopes; no client-side permission authority.",
+    "Preserve explicit evidence through regular loading-list edit/reopen and render original null or unavailable links accurately. Approved/cancelled documents read-only. Unit/product/customer mismatch, returned or cancelled source, stale capacity, revoked access, partial failure and network errors leave existing persisted evidence intact and retain dialog inputs; refresh from authoritative response after success and prevent duplicate clicks. Keep existing stock/finance posting semantics. Real SQL controller round-trip/atomic rejection and executable JS interaction tests plus isolated browser save-link-reopen flow or accurate environment blocker are required.",
+    "Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/wwwroot/js/modules-doc2.js",
+    "src/ERP.Api/wwwroot/js/bill-edit.js",
+    "src/ERP.Api/wwwroot/index.html",
+    "src/ERP.Api/wwwroot/js/loading-outbound-links.js",
+    "src/ERP.Api/Controllers/ContainerLoadingListController.cs",
+    "src/ERP.Application/Services/LoadingStockOutLinkRules.cs",
+    "src/ERP.Application/DTOs/LoadingStockOutLinkDtos.cs",
+    "src/ERP.UnitTests/LoadingOutboundWorkflowTests.cs",
+    "src/ERP.IntegrationTests/LoadingOutboundWorkflowSqlServerTests.cs",
+    "tests/automation/loading-outbound-links.test.js",
+    "docs/loading-outbound-workflow.md"
+  ],
+  "criterion_path_map": {
+    "Add saved-draft loading-list outbound-evidence action using existing UI/dialog infrastructure and persisted line ids. Search bounded authorized stock-out-candidates; show actual stock-out/order/customer/product/spec/base unit, approved returned quantity and remaining link capacity. Assign or explicitly clear each exact source stock-out detail through stock-out-links then reload persisted evidence. Save newly created draft before linking; do not type arbitrary ids, text-match sources or auto-link legacy rows. Respect all effective participant customer scopes; no client-side permission authority.": [
+      "src/ERP.Api/wwwroot/js/modules-doc2.js",
+      "src/ERP.Api/wwwroot/js/bill-edit.js",
+      "src/ERP.Api/wwwroot/index.html",
+      "src/ERP.Api/wwwroot/js/loading-outbound-links.js",
+      "src/ERP.Api/Controllers/ContainerLoadingListController.cs",
+      "src/ERP.Application/Services/LoadingStockOutLinkRules.cs",
+      "src/ERP.Application/DTOs/LoadingStockOutLinkDtos.cs",
+      "src/ERP.UnitTests/LoadingOutboundWorkflowTests.cs",
+      "src/ERP.IntegrationTests/LoadingOutboundWorkflowSqlServerTests.cs",
+      "tests/automation/loading-outbound-links.test.js",
+      "docs/loading-outbound-workflow.md"
+    ],
+    "Preserve explicit evidence through regular loading-list edit/reopen and render original null or unavailable links accurately. Approved/cancelled documents read-only. Unit/product/customer mismatch, returned or cancelled source, stale capacity, revoked access, partial failure and network errors leave existing persisted evidence intact and retain dialog inputs; refresh from authoritative response after success and prevent duplicate clicks. Keep existing stock/finance posting semantics. Real SQL controller round-trip/atomic rejection and executable JS interaction tests plus isolated browser save-link-reopen flow or accurate environment blocker are required.": [
+      "src/ERP.Api/wwwroot/js/modules-doc2.js",
+      "src/ERP.Api/wwwroot/js/bill-edit.js",
+      "src/ERP.Api/wwwroot/index.html",
+      "src/ERP.Api/wwwroot/js/loading-outbound-links.js",
+      "src/ERP.Api/Controllers/ContainerLoadingListController.cs",
+      "src/ERP.Application/Services/LoadingStockOutLinkRules.cs",
+      "src/ERP.Application/DTOs/LoadingStockOutLinkDtos.cs",
+      "src/ERP.UnitTests/LoadingOutboundWorkflowTests.cs",
+      "src/ERP.IntegrationTests/LoadingOutboundWorkflowSqlServerTests.cs",
+      "tests/automation/loading-outbound-links.test.js",
+      "docs/loading-outbound-workflow.md"
+    ],
+    "Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance.": [
+      "src/ERP.Api/wwwroot/js/modules-doc2.js",
+      "src/ERP.Api/wwwroot/js/bill-edit.js",
+      "src/ERP.Api/wwwroot/index.html",
+      "src/ERP.Api/wwwroot/js/loading-outbound-links.js",
+      "src/ERP.Api/Controllers/ContainerLoadingListController.cs",
+      "src/ERP.Application/Services/LoadingStockOutLinkRules.cs",
+      "src/ERP.Application/DTOs/LoadingStockOutLinkDtos.cs",
+      "src/ERP.UnitTests/LoadingOutboundWorkflowTests.cs",
+      "src/ERP.IntegrationTests/LoadingOutboundWorkflowSqlServerTests.cs",
+      "tests/automation/loading-outbound-links.test.js",
+      "docs/loading-outbound-workflow.md"
+    ]
+  },
+  "implementation_evidence": "ERP366 provides stock-out-candidates and stock-out-links but loading-list business row actions and editor expose no SourceStockOutDetailId selection. Explicit shipment proof is inaccessible in a normal operator workflow.",
+  "depends_on": [
+    "ERP-366",
+    "ERP-367",
+    "ERP-370",
+    "ERP-372"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "id": "ERP-373",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-08T12:14:07.830987Z"
+}

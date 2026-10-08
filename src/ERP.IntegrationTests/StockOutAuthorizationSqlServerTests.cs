@@ -29,12 +29,12 @@ public sealed class StockOutAuthorizationSqlServerTests : IClassFixture<StockOut
 {
     private readonly StockOutAuthorizationSqlServerFixture _fixture;
 
-    private const long CustomerA = 944001L;
-    private const long CustomerB = 944002L;
-    private const long WarehouseA = 944101L;
-    private const long ProductA = 944201L;
-    private const long RaceWarehouse = 944111L;
-    private const long RaceProduct = 944211L;
+    private long CustomerA;
+    private long CustomerB;
+    private long WarehouseA;
+    private long ProductA;
+    private long RaceWarehouse;
+    private long RaceProduct;
 
     public StockOutAuthorizationSqlServerTests(StockOutAuthorizationSqlServerFixture fixture)
         => _fixture = fixture;
@@ -49,6 +49,23 @@ public sealed class StockOutAuthorizationSqlServerTests : IClassFixture<StockOut
         Assert.True(target.IntegratedSecurity);
     }
 
+    // Each test owns real generated master ids, including separate inventory keys.
+    private async Task InitializeMastersAsync()
+    {
+        await using var db = _fixture.CreateDbContext();
+        var key = Guid.NewGuid().ToString("N");
+        var a = new BaseCustomer { CustomerCode = $"AUTH-A-{key}", CustomerName = "Owned", Status = 1 };
+        var b = new BaseCustomer { CustomerCode = $"AUTH-B-{key}", CustomerName = "Foreign", Status = 1 };
+        var warehouse = new BaseWarehouse { WarehouseCode = $"AUTH-W-{key}", WarehouseName = "Authorization", Status = 1 };
+        var raceWarehouse = new BaseWarehouse { WarehouseCode = $"AUTH-RW-{key}", WarehouseName = "Race", Status = 1 };
+        var product = new BaseProduct { ProductCode = $"AUTH-P-{key}", ProductName = "Product", Spec = "规格A", Unit = "PCS" };
+        var raceProduct = new BaseProduct { ProductCode = $"AUTH-RP-{key}", ProductName = "Race product", Spec = "规格A", Unit = "PCS" };
+        db.AddRange(a, b, warehouse, raceWarehouse, product, raceProduct);
+        await db.SaveChangesAsync();
+        CustomerA = a.Id; CustomerB = b.Id; WarehouseA = warehouse.Id;
+        RaceWarehouse = raceWarehouse.Id; ProductA = product.Id; RaceProduct = raceProduct.Id;
+    }
+
     // ==================== 1. 身份 / 账号状态 / 菜单 fail closed ====================
 
     [Theory]
@@ -58,6 +75,7 @@ public sealed class StockOutAuthorizationSqlServerTests : IClassFixture<StockOut
     public async Task Live_identity_menu_and_status_denials_leave_inventory_unchanged(string scenario)
     {
         Guard();
+        await InitializeMastersAsync();
         await using var db = _fixture.CreateDbContext();
         long? userId = null;
         if (scenario != "missing")
@@ -93,6 +111,7 @@ public sealed class StockOutAuthorizationSqlServerTests : IClassFixture<StockOut
     public async Task Seeded_admin_with_existing_stock_out_menu_is_admitted()
     {
         Guard();
+        await InitializeMastersAsync();
         await using var db = _fixture.CreateDbContext();
         var adminId = await ResolveSeededAdminIdAsync(db);
         var menuCodes = await CustomerReceivableReconciliationService.LoadAuthorizedMenuCodesAsync(db, adminId);
@@ -114,6 +133,7 @@ public sealed class StockOutAuthorizationSqlServerTests : IClassFixture<StockOut
     public async Task Real_two_connections_racing_approve_and_edit_keep_single_posting()
     {
         Guard();
+        await InitializeMastersAsync();
         long adminId;
         long documentId;
         await using (var seeding = _fixture.CreateDbContext())
@@ -152,6 +172,7 @@ public sealed class StockOutAuthorizationSqlServerTests : IClassFixture<StockOut
     public async Task Real_two_connections_racing_submit_and_delete_leave_one_consistent_state()
     {
         Guard();
+        await InitializeMastersAsync();
         long adminId;
         long documentId;
         await using (var seeding = _fixture.CreateDbContext())
@@ -194,6 +215,7 @@ public sealed class StockOutAuthorizationSqlServerTests : IClassFixture<StockOut
     public async Task Restricted_operator_cannot_touch_foreign_customer_document()
     {
         Guard();
+        await InitializeMastersAsync();
         await using var db = _fixture.CreateDbContext();
         var operatorId = await SeedRestrictedOperatorAsync(db, CustomerA);
         var foreign = await SeedStockOutAsync(db, $"DG-AUTH-FOREIGN-{Guid.NewGuid():N}", CustomerB,
@@ -271,7 +293,7 @@ public sealed class StockOutAuthorizationSqlServerTests : IClassFixture<StockOut
         };
     }
 
-    private static StockOut NewStockOut(long customerId, long warehouseId, long productId = ProductA, decimal quantity = 5m)
+    private StockOut NewStockOut(long customerId, long warehouseId, long? productId = null, decimal quantity = 5m)
         => new()
         {
             StockOutDate = DateTime.Today,
@@ -279,7 +301,7 @@ public sealed class StockOutAuthorizationSqlServerTests : IClassFixture<StockOut
             WarehouseId = warehouseId,
             Details = new List<StockOutDetail>
             {
-                new() { ProductId = productId, ProductName = $"商品{productId}", Spec = "规格A", Unit = "PCS", Quantity = quantity }
+                new() { ProductId = productId ?? ProductA, ProductName = $"商品{productId}", Spec = "规格A", Unit = "PCS", Quantity = quantity }
             }
         };
 
@@ -294,7 +316,7 @@ public sealed class StockOutAuthorizationSqlServerTests : IClassFixture<StockOut
         var suffix = Guid.NewGuid().ToString("N");
         var user = new SysUser
         {
-            UserName = $"{name}-{suffix}",
+            UserName = $"auth-{suffix}",
             PasswordHash = "hash",
             PasswordSalt = "salt",
             DisplayName = name,
@@ -328,14 +350,9 @@ public sealed class StockOutAuthorizationSqlServerTests : IClassFixture<StockOut
             .Select(ur => ur.RoleId).FirstAsync();
         Assert.True(roleId > 0);
 
-        db.BaseCustomers.Add(new BaseCustomer
-        {
-            Id = ownedCustomerId,
-            CustomerCode = $"SQLC-{ownedCustomerId}",
-            CustomerName = $"SQL 客户{ownedCustomerId}",
-            EmpId = employee.Id,
-            Status = 1
-        });
+        employee.EmployeeCode = await db.SysUsers.Where(u => u.Id == userId).Select(u => u.UserName).SingleAsync();
+        var customer = await db.BaseCustomers.SingleAsync(c => c.Id == ownedCustomerId);
+        customer.EmpId = employee.Id;
         await db.SaveChangesAsync();
         return userId;
     }
@@ -351,16 +368,17 @@ public sealed class StockOutAuthorizationSqlServerTests : IClassFixture<StockOut
     }
 
     /// <summary>播种销售出库单（显式链接为空的历史口径），并确保商品主数据存在。</summary>
-    private static async Task<StockOut> SeedStockOutAsync(ErpDbContext db, string no, long customerId,
-        DocumentStatus status, long warehouseId = WarehouseA, long productId = ProductA, decimal quantity = 5m)
+    private async Task<StockOut> SeedStockOutAsync(ErpDbContext db, string no, long customerId,
+        DocumentStatus status, long? warehouseId = null, long? productId = null, decimal quantity = 5m)
     {
-        await EnsureProductAsync(db, productId);
+        var resolvedProductId = productId ?? ProductA;
+        await EnsureProductAsync(db, resolvedProductId);
         var document = new StockOut
         {
-            StockOutNo = no,
+            StockOutNo = $"AUTH-{Guid.NewGuid():N}",
             StockOutDate = DateTime.Today,
             CustomerId = customerId,
-            WarehouseId = warehouseId,
+            WarehouseId = warehouseId ?? WarehouseA,
             TotalQuantity = quantity,
             Status = status
         };
@@ -369,7 +387,7 @@ public sealed class StockOutAuthorizationSqlServerTests : IClassFixture<StockOut
         db.StockOutDetails.Add(new StockOutDetail
         {
             StockOutId = document.Id,
-            ProductId = productId,
+            ProductId = resolvedProductId,
             ProductName = $"商品{productId}",
             Spec = "规格A",
             Unit = "PCS",
@@ -390,20 +408,11 @@ public sealed class StockOutAuthorizationSqlServerTests : IClassFixture<StockOut
 
     private static async Task EnsureProductAsync(ErpDbContext db, long productId)
     {
-        if (await db.BaseProducts.AsNoTracking().AnyAsync(p => p.Id == productId && !p.IsDeleted)) return;
-        db.BaseProducts.Add(new BaseProduct
-        {
-            Id = productId,
-            ProductCode = $"AUTH-P-{productId}-{Guid.NewGuid():N}",
-            ProductName = $"商品{productId}",
-            Spec = "规格A",
-            Unit = "PCS"
-        });
-        await db.SaveChangesAsync();
+        Assert.True(await db.BaseProducts.AsNoTracking().AnyAsync(p => p.Id == productId && !p.IsDeleted));
     }
 
     /// <summary>经真实控制器创建并提交一张出库单（商品与库存就绪），返回已持久化单据。</summary>
-    private static async Task<StockOut> CreateAndSubmitAsync(ErpDbContext db, long userId)
+    private async Task<StockOut> CreateAndSubmitAsync(ErpDbContext db, long userId)
     {
         await EnsureProductAsync(db, ProductA);
         if (!await db.Stocks.AsNoTracking().AnyAsync(s => s.WarehouseId == WarehouseA && s.ProductId == ProductA))
@@ -513,3 +522,5 @@ public sealed class StockOutAuthorizationTargetGuardTests
     public void Rejects_non_dedicated_targets_before_database_access(string connection)
         => Assert.ThrowsAny<Exception>(() => StockOutAuthorizationSqlServerFixture.AssertDedicatedTarget(connection));
 }
+
+
