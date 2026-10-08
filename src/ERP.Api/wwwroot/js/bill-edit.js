@@ -14,8 +14,16 @@ const DETAIL_COLUMNS = [
 
 /* ERP-372：预装柜单的明细行额外暴露「需求来源（已审核销售订单明细 Id）」列 ——
    需求来源是**持久化证据**，只能在「需求来源」工作台（preloading-demand-links.js）中显式指派 / 清除，
-   本编辑器只负责原样携带并在保存时回传，绝不因明细编辑而静默清空链接；其它单据完全不受影响。 */
+   本编辑器只负责原样携带并在保存时回传，绝不因明细编辑而静默清空链接；其它单据完全不受影响。
+   ERP-373：装柜清单的明细行额外暴露「出运证据（已审核销售出库明细 Id）」列 ——
+   出运证据是**持久化证据**，只能在「出运证据」工作台（loading-outbound-links.js）中显式指派 / 清除，
+   本编辑器只负责原样携带并在保存时回传，绝不因明细编辑而静默清空链接。 */
 function detailColumnsFor(code) {
+  if (code === 'loading-list') {
+    return DETAIL_COLUMNS.concat([
+      { key: 'SourceStockOutDetailId', label: '出运证据（销售出库明细Id）', type: 'outbound-evidence', readonly: true },
+    ]);
+  }
   if (code !== 'pre-loading') return DETAIL_COLUMNS;
   return DETAIL_COLUMNS.concat([
     { key: 'SourceSalesOrderDetailId', label: '需求来源（销售订单明细Id）', type: 'demand-source', readonly: true },
@@ -36,6 +44,22 @@ function renderDemandSourceCell(data) {
     : `<button type="button" class="btn btn-neutral btn-sm" disabled ` +
       `title="请先保存该预装柜单，再登记需求来源（不为未保存单据臆造明细 Id）">需求来源</button>`;
   return `<td><div class="demand-source-cell"><span class="text-muted">${escapeHtml(demandSourceText(data))}</span>${button}</div></td>`;
+}
+
+function outboundEvidenceText(data) {
+  const sid = data && Number(data.SourceStockOutDetailId) > 0 ? Number(data.SourceStockOutDetailId) : 0;
+  return sid > 0 ? String(sid) : '未链接（历史 / 未登记出运证据）';
+}
+
+/* 出运证据单元格：只读展示持久化链接 + 行操作入口（未保存单据不给入口，绝不臆造明细 Id） */
+function renderOutboundEvidenceCell(data) {
+  const saved = Number(BILL_EDIT_OID) > 0;
+  const button = saved
+    ? `<button type="button" class="btn btn-neutral btn-sm" onclick="openLoadingOutboundLinks(${BILL_EDIT_OID})" ` +
+      `title="打开出运证据工作台：为该明细行显式指派 / 清除已审核销售出库出运证据（仅待提交可维护）">出运证据</button>`
+    : `<button type="button" class="btn btn-neutral btn-sm" disabled ` +
+      `title="请先保存该装柜清单，再登记出运证据（不为未保存单据臆造明细 Id）">出运证据</button>`;
+  return `<td><div class="outbound-evidence-cell"><span class="text-muted">${escapeHtml(outboundEvidenceText(data))}</span>${button}</div></td>`;
 }
 
 /* 引用字段映射（字段 key -> 基础资料类型） */
@@ -366,13 +390,18 @@ function addDetailRow(data) {
   const tbody = document.getElementById('detail-tbody');
   const tr = document.createElement('tr');
   tr.dataset.rowIndex = tbody.querySelectorAll('tr').length;
-  /* ERP-372：持久化的需求来源随行携带，保存时原样回传（绝不因明细编辑而静默清空链接） */
+  /* ERP-372：持久化的需求来源随行携带，保存时原样回传（绝不因明细编辑而静默清空链接）
+     ERP-373：装柜清单持久化的出运证据同样随行携带，保存时原样回传 */
   const persistedSource = data && Number(data.SourceSalesOrderDetailId) > 0
     ? String(Number(data.SourceSalesOrderDetailId)) : '';
   if (persistedSource) tr.dataset.sourceSalesOrderDetailId = persistedSource;
+  const persistedOutbound = data && Number(data.SourceStockOutDetailId) > 0
+    ? String(Number(data.SourceStockOutDetailId)) : '';
+  if (persistedOutbound) tr.dataset.sourceStockOutDetailId = persistedOutbound;
   tr.innerHTML = detailColumnsFor(BILL_CODE).map(c => {
     if (c.type === 'product') return renderProductCell(data);
     if (c.type === 'demand-source') return renderDemandSourceCell(data);
+    if (c.type === 'outbound-evidence') return renderOutboundEvidenceCell(data);
     const val = data ? (data[c.key] ?? '') : '';
     const ro = c.readonly ? ' readonly style="background:#f8fafc;cursor:not-allowed"' : '';
     const type = c.type === 'number' ? 'number' : 'text';
@@ -445,8 +474,10 @@ async function saveBillEdit() {
 /* 收集副表明细行 */
 function collectDetails() {
   const details = [];
-  /* ERP-372：预装柜单的持久化需求来源随行回传，明细编辑 / 保存不得静默清空链接 */
+  /* ERP-372：预装柜单的持久化需求来源随行回传，明细编辑 / 保存不得静默清空链接
+     ERP-373：装柜清单的持久化出运证据随行回传，明细编辑 / 保存不得静默清空链接 */
   const preserveDemandSource = BILL_CODE === 'pre-loading';
+  const preserveOutboundEvidence = BILL_CODE === 'loading-list';
   document.querySelectorAll('#detail-tbody tr').forEach(tr => {
     const d = {};
     let hasValue = false;
@@ -461,6 +492,10 @@ function collectDetails() {
     if (preserveDemandSource) {
       const persisted = tr.dataset.sourceSalesOrderDetailId;
       if (persisted) d.SourceSalesOrderDetailId = Number(persisted);
+    }
+    if (preserveOutboundEvidence) {
+      const persisted = tr.dataset.sourceStockOutDetailId;
+      if (persisted) d.SourceStockOutDetailId = Number(persisted);
     }
     details.push(d);
   });

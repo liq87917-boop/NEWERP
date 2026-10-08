@@ -90,6 +90,29 @@ public static class LoadingStockOutLinkRules
         "本护栏只新增「来源出库取消前的装柜链接判定」：不改变库存成本口径（移动加权平均）与既有 ERP-359 退货引用护栏，" +
         "不重写装柜历史数量与状态、不改写商品 / 客户 / 销售订单 / 出库单主数据、不删除任何审计证据，也不新增表 / 列 / 菜单 / 权限。";
 
+    /// <summary>未链接（历史 / 无出运证据）证据文案（ERP-373；界面原样展示，绝不回填）</summary>
+    public const string UnlinkedEvidenceText = "未链接（历史 / 无出运证据；保持显式未链接，绝不回填）";
+
+    /// <summary>已链接且来源仍为有效已审核出运证据文案（ERP-373）</summary>
+    public const string LinkedEvidenceText = "已链接（有效出运证据）";
+
+    /// <summary>
+    /// 显式链接的来源已不可用（来源销售出库明细已删除 / 出库单已取消或撤销审核 / 来源无法解析）文案
+    /// （ERP-373）：原链接与 <c>SourceStockOutDetailId</c> **原样保留**，只暴露「不可用」而不静默清除。
+    /// </summary>
+    public const string UnavailableEvidenceText =
+        "来源不可用（来源销售出库明细已删除或出库单已取消 / 撤销审核；原链接原样保留，绝不静默清除）";
+
+    /// <summary>
+    /// 链接证据可用性文案（ERP-373 单一事实来源）：<c>null / 非正</c> = 显式未链接；
+    /// 正数且可解析为有效已审核出运证据 = 已链接；正数但来源已不可用 = 来源不可用。
+    /// </summary>
+    public static string SourceAvailabilityTextOf(long? sourceStockOutDetailId, bool sourceAvailable)
+        => sourceStockOutDetailId is > 0
+            ? (sourceAvailable ? LinkedEvidenceText : UnavailableEvidenceText)
+            : UnlinkedEvidenceText;
+
+
     /// <summary>
     /// 取消 / 冲销来源销售出库单前的实时判定（ERP-367）：存在「已审核、未删除」装柜清单明细通过
     /// <see cref="ContainerLoadingDetail.SourceStockOutDetailId"/> 显式链接到本出库单明细时，抛
@@ -422,6 +445,8 @@ public static class LoadingStockOutLinkRules
     /// <summary>
     /// 回显装柜清单全部明细的最终链接状态（含历史未链接行）：<c>SourceStockOutDetailId</c> 为空 =
     /// 显式未链接，作为「无出运证据」的显式事实返回，绝不臆造来源单号。
+    /// <para>ERP-373：同时给出链接证据可用性（<c>SourceAvailable</c> / <c>SourceAvailabilityText</c>）——
+    /// 来源明细删除或出库单取消 / 撤销审核时，原链接**原样保留**并显式标注「来源不可用」，绝不静默清除。</para>
     /// </summary>
     public static async Task<List<LoadingStockOutLinkLineDto>> DescribeLinksAsync(
         IErpDbContext db, ContainerLoadingList entity, CancellationToken ct = default)
@@ -452,12 +477,17 @@ public static class LoadingStockOutLinkRules
         {
             long? stockOutId = null;
             var stockOutNo = string.Empty;
+            var sourceAvailable = false;
             if (detail.SourceStockOutDetailId is > 0
                 && sourceByDetailId.TryGetValue(detail.SourceStockOutDetailId.Value, out var source)
                 && shipmentById.TryGetValue(source.StockOutId, out var shipment))
             {
                 stockOutId = shipment.Id;
                 stockOutNo = shipment.StockOutNo;
+                // ERP-373：只有「来源明细未删除 + 父出库单未删除且已审核」才算仍可用的有效出运证据；
+                // 否则（明细删除 / 出库单取消 / 撤销审核）明确暴露「来源不可用」，但绝不清除原链接。
+                sourceAvailable = !source.IsDeleted && !shipment.IsDeleted
+                    && shipment.Status == DocumentStatus.Approved;
             }
 
             results.Add(new LoadingStockOutLinkLineDto
@@ -468,7 +498,9 @@ public static class LoadingStockOutLinkRules
                 Quantity = detail.Quantity,
                 SourceStockOutDetailId = detail.SourceStockOutDetailId,
                 StockOutId = stockOutId,
-                StockOutNo = stockOutNo
+                StockOutNo = stockOutNo,
+                SourceAvailable = sourceAvailable,
+                SourceAvailabilityText = SourceAvailabilityTextOf(detail.SourceStockOutDetailId, sourceAvailable)
             });
         }
         return results;

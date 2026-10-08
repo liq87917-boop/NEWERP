@@ -118,14 +118,20 @@ public class ContainerLoadingListController : DocumentControllerBase<ContainerLo
             existing.ShippingMark = entity.ShippingMark;
             existing.Remark = entity.Remark;
 
-            Db.ContainerLoadingDetails.RemoveRange(existing.Details);
-            foreach (var d in entity.Details)
+            // ERP-373：未携带明细 = 仅更新主表 —— 保留既有明细与其显式出运证据链接
+            // （SourceStockOutDetailId），绝不因主表编辑而静默清空出运证据。
+            // 携带明细 = 既有「整体替换」语义（替换前已由 ValidateLinksAsync 统一校验）。
+            if (entity.Details is { Count: > 0 })
             {
-                d.Id = 0;
-                d.LoadingListId = id;
-                d.CreatedAt = DateTime.Now;
+                Db.ContainerLoadingDetails.RemoveRange(existing.Details);
+                foreach (var d in entity.Details)
+                {
+                    d.Id = 0;
+                    d.LoadingListId = id;
+                    d.CreatedAt = DateTime.Now;
+                }
+                existing.Details = entity.Details;
             }
-            existing.Details = entity.Details;
             Calculate(existing);
             existing.UpdatedAt = DateTime.Now;
             await Db.SaveChangesAsync();
@@ -603,6 +609,30 @@ public class ContainerLoadingListController : DocumentControllerBase<ContainerLo
         var candidates = await LoadingStockOutLinkRules.QueryCandidatesAsync(Db, entity, scope, keyword, take);
         return Ok(ApiResponse<List<LoadingStockOutCandidateDto>>.Success(
             candidates, "已返回可链接的已审核销售出库证据（只读：缺失即无可用容量，绝不猜测来源）"));
+    }
+
+    /// <summary>
+    /// ERP-373：回显本装柜清单**全部明细行**的显式出运证据链接状态（只读、有界），供业务界面打开 /
+    /// 重新加载出运证据工作台时读取**服务端持久化结果**：未链接（<c>null</c>）是显式历史事实，来源已不可用
+    /// （明细删除 / 出库单取消 / 撤销审核）时原链接**原样保留**并显式标注 —— 绝不清除、绝不猜测来源。
+    /// 复用既有「装柜清单」菜单授权 + 实时客户数据范围；存在显式链接时额外要求既有「销售出库」菜单授权
+    /// （不新增任何用户授权，也不提供匿名 / 管理员降级）。
+    /// </summary>
+    [HttpGet("{id:long}/stock-out-links")]
+    public async Task<IActionResult> GetStockOutLinks(long id)
+    {
+        var scope = await LoadingListAuthorizationRules.EnsureAuthorizedAsync(Db, CurrentUserId());
+        var entity = await Set.AsNoTracking().Include(o => o.Details)
+            .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
+            ?? throw BusinessException.NotFound("装柜清单不存在");
+        await LoadingListAuthorizationRules.EnsureStoredScopeAllowedAsync(Db, scope, entity);
+
+        if (entity.Details.Any(d => !d.IsDeleted && d.SourceStockOutDetailId is > 0))
+            await LoadingStockOutLinkRules.EnsureSourceMenuAuthorizedAsync(Db, CurrentUserId());
+
+        var lines = await LoadingStockOutLinkRules.DescribeLinksAsync(Db, entity);
+        return Ok(ApiResponse<List<LoadingStockOutLinkLineDto>>.Success(
+            lines, "已返回全部装柜明细的显式出运证据链接状态（未链接 = 显式事实，绝不回填猜测）"));
     }
 
     /// <summary>

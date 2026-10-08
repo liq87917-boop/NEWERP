@@ -203,6 +203,8 @@ Object.assign(MODULES, {
        ERP-040：物流跟踪只读回显（装柜清单 → 预装柜单 → 订柜信息 的持久化引用链，未关联显示「未知」）
        ERP-041：一柜多客户参与方维护（只维护客户归属与兼容客户字段；不按体积 / 重量 / 金额分摊费用） */
     rowActions: [
+      /* ERP-373：逐行显式维护「出运证据」（等保存成功拿到服务端明细 Id 后可用；已提交 / 已审核 / 已取消只读） */
+      { label: '出运证据', icon: '🔗', title: '为该装柜明细行显式指派 / 清除已审核销售出库出运证据（只接受显式选择的销售出库明细 Id，绝不按出库单号 / 商品 / 文本猜测来源；未链接行保持「未链接」，来源不可用时原链接原样保留；仅待提交可维护）', onclick: 'openLoadingOutboundLinks' },
       { label: '多客户参与方', icon: '👥', title: '维护该柜的参与客户与主参与方（只改客户归属与兼容客户字段：不分摊费用、不改动装柜明细 / 跟踪值 / 单证 / 库存）', onclick: 'openLoadingListParticipants' },
       { label: '物流跟踪', icon: '🚢', title: '按持久化引用链只读查看该柜的外贸与物流跟踪值（未关联订柜信息时显示「未知」）', onclick: 'showShipmentTracking' },
       { label: '生成单证', icon: '📋', title: '由该装柜清单生成装箱单 / 提单 / 报关单 / 订舱确认等单证中心记录（同一柜号同一类型只生成一张）', onclick: 'generateTradeDocsFromSource', statuses: ['Pending', 'Submitted', 'Approved'] },

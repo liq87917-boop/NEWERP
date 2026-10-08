@@ -125,4 +125,16 @@ public class LoadingStockOutLinkLineDto
 
     /// <summary>来源销售出库单号（为空串 = 未链接或来源已不可解析）</summary>
     public string StockOutNo { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 该行显式链接的来源出运证据当前是否**可解析为有效证据**（ERP-373）：
+    /// true = 已链接且来源出库明细仍为「存在、未删除」，其父出库单仍为「存在、未删除、已审核」；
+    /// false = 未链接（历史 / 无证据）或来源已不可用（明细删除 / 出库单取消或撤销审核）。
+    /// <para>注意：不可用**不等于**未链接 —— 即使不可用，原 <see cref="SourceStockOutDetailId"/> 仍原样保留，
+    /// 界面必须显式展示为「来源不可用」，绝不静默清除。</para>
+    /// </summary>
+    public bool SourceAvailable { get; set; }
+
+    /// <summary>链接证据可用性文案（服务端权威判定，界面原样展示，绝不臆造来源）</summary>
+    public string SourceAvailabilityText { get; set; } = string.Empty;
 }

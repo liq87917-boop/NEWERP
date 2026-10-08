@@ -268,6 +268,10 @@
        只接受显式选择的销售订单明细 Id，绝不按单号 / 文本猜测；未链接保持「未链接」，来源不可用时原链接原样保留；
        仅「待提交」可维护；失败保留草稿输入并显式展示服务端失败；不是库存预留、不生成库存流水） -->
   <script src="/js/preloading-demand-links.js"></script>
+  <!-- ERP-373：装柜明细 → 已审核销售出库明细 显式出运证据 链接工作台（行操作入口「出运证据」；
+       只接受显式选择的销售出库明细 Id，绝不按单号 / 文本猜测；未链接保持「未链接」，来源不可用时原链接原样保留；
+       仅「待提交」可维护；失败保留草稿输入并显式展示服务端失败；不改库存 / 财务 / 单证） -->
+  <script src="/js/loading-outbound-links.js"></script>
   <script src="/js/loading-list-participants.js"></script>
   <script src="/js/print-design.js"></script>
   <script src="/js/pd-grid.js"></script>
