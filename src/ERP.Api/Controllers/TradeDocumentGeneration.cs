@@ -274,6 +274,9 @@ public static class TradeDocumentGeneration
     /// → 重复生成（同一来源 + 同一类型）；任一类型已生成即整体拒绝（不产生半成品数据）。</para>
     /// <para>生成后返回新建单证的 Id / 编号 / 类型 / 明细行数（可在单证中心继续人工维护明细行，
     /// 但绝不改写来源单据、商品资料与任何库存 / 财务记录）。</para>
+    /// <para>本重载为**进程内 / 既有单元测试口径**（不加来源行锁，也不做锁内权威重读）；HTTP 生成入口一律走
+    /// <see cref="GenerateAtomicAsync"/>：先对来源单据行加锁、锁内权威重读来源（状态 / 客户 / 金额 /
+    /// 数量 / 单位）后，在同一原子事务内完成重复检测、编号预约、表头与明细行写入。</para>
     /// </summary>
     /// <exception cref="BusinessException">
     /// 重复生成、来源明细非法 / 超限（错误码 RuleConflict）；未选择类型、类型不受支持（错误码 InvalidParameter）。
@@ -288,6 +291,107 @@ public static class TradeDocumentGeneration
 
         var docTypes = NormalizeDocTypes(sourceType, requestedDocTypes);
 
+        await EnsureNoConflictsAsync(db, sourceType, salesOrderNo, containerNo, loadingListNo, docTypes, ct);
+
+        // 先把全部单证草稿与明细行快照在内存中构造并校验完成：来源明细非法 / 超限直接拒绝，不写任何半成品数据
+        var created = new List<TradeDocument>();
+        var lineResults = new List<TradeDocumentLineSnapshotResult>();
+        foreach (var docType in docTypes)
+        {
+            var (doc, lines) = await BuildDocumentAsync(db, docType, buildDraft, buildLines, targetScope, ct);
+            created.Add(doc);
+            lineResults.Add(lines);
+        }
+
+        // 父单证与明细行快照在同一事务内写库（明细行需要父单证 Id，因此分两次 SaveChanges，但同一事务）：
+        // 任一步失败都回滚，既不会留下没有明细的半成品单证，也不会留下孤儿明细行
+        await PersistAsync(db, created, lineResults, ct);
+
+        return BuildResult(sourceType, sourceId, sourceNo, created, lineResults);
+    }
+
+    /// <summary>
+    /// HTTP 生成入口（ERP-397）：在**确定性来源行锁 + 同一原子事务**内完成
+    /// 「锁内权威重读来源 → 重复生成检测 → 单证编号预约 → 表头与明细行构造 → 写入」。
+    /// <para>锁序：来源单据行 → 新建单证行（<c>INSERT</c>，不取既有单证行锁），与 ERP-395 父单证行锁互不反向获取；
+    /// 来源行锁与既有「来源取消 / 编辑 / 删除」共用同一把锁，因此同一来源的并发生成与来源失效不可能同时成功。</para>
+    /// <para>锁内权威复核：来源状态（已作废 fail closed）、来源客户实时范围、表头金额 / 客户与明细行数量 / 单位
+    /// 必须全部取自 <paramref name="reloadSource"/> 在锁内的重读结果；任一步失败整体回滚，
+    /// 表头 / 明细行 / 已预约单证编号一起回滚（不留半成品单证、孤儿明细行或已占用编号）。</para>
+    /// </summary>
+    /// <param name="db">数据访问上下文（与既有生成同源）。</param>
+    /// <param name="sourceType">来源单据类型（<see cref="SalesOrderSourceType"/> / <see cref="LoadingListSourceType"/>）。</param>
+    /// <param name="sourceId">来源单据 Id（用于来源行锁；正数）。</param>
+    /// <param name="requestedDocTypes">请求的单证类型（空 = 来源默认类型）。</param>
+    /// <param name="reloadSource">锁内权威重读委托（返回 <c>null</c> = 来源已被并发删除）。</param>
+    /// <param name="targetScope">当前账号实时客户数据范围（<c>null</c> = 进程内调用，保持既有内部口径）。</param>
+    /// <param name="ct">取消令牌。</param>
+    /// <exception cref="BusinessException">
+    /// 来源不存在 / 已删除（<c>NotFound</c>）；来源已作废、重复生成、来源被并发改写、明细行非法 / 超限（<c>RuleConflict</c>）；
+    /// 未选择类型 / 类型不受支持（<c>InvalidParameter</c>）；受限账号来源越界（<c>Forbidden</c>）。
+    /// </exception>
+    public static async Task<TradeDocGenerateResult> GenerateAtomicAsync(IErpDbContext db, string sourceType,
+        long sourceId, IReadOnlyList<string>? requestedDocTypes,
+        Func<CancellationToken, Task<TradeDocumentGenerationSource?>> reloadSource,
+        SalespersonDataScope? targetScope = null, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(reloadSource);
+        if (sourceId <= 0)
+            throw BusinessException.InvalidParameter($"请指定{SourceLabel(sourceType)}");
+
+        // 类型归一化（纯校验，不读库）：未选择类型 / 类型不受支持在加锁与任何写入之前 fail closed。
+        var docTypes = NormalizeDocTypes(sourceType, requestedDocTypes);
+
+        await using var transaction =
+            await TradeDocumentGenerationMutationRules.BeginGenerationTransactionAsync(db, ct);
+        try
+        {
+            // 1) 确定性来源行锁（与来源取消 / 编辑 / 删除共用同一把来源行锁；锁序：来源行先行）。
+            if (!await TradeDocumentGenerationMutationRules.LockSourceRowAsync(db, sourceType, sourceId, ct))
+                throw BusinessException.NotFound(TradeDocumentGenerationMutationRules.SourceMissingText);
+
+            // 2) 锁内权威重读：状态 / 客户 / 金额 / 数量 / 单位全部以本次重读为准（绝不复用锁前快照）。
+            var source = await reloadSource(ct)
+                ?? throw BusinessException.NotFound(TradeDocumentGenerationMutationRules.SourceMissingText);
+            TradeDocumentGenerationMutationRules.EnsureSourceStable(source, sourceType, sourceId);
+            TradeDocumentGenerationMutationRules.EnsureSourceScopeAllowed(targetScope, source);
+
+            // 3) 锁内重复生成检测：同一来源 + 同一单证类型只允许一套完整单证（既有冲突语义不变）。
+            await EnsureNoConflictsAsync(db, sourceType, source.SalesOrderNo, source.ContainerNo,
+                source.LoadingListNo, docTypes, ct);
+
+            // 4) 表头 + 明细行构造（全部来自本次权威重读；编号预约在锁内完成），并在写入前复核一致性。
+            var created = new List<TradeDocument>();
+            var lineResults = new List<TradeDocumentLineSnapshotResult>();
+            foreach (var docType in docTypes)
+            {
+                var (doc, lines) = await BuildDocumentAsync(db, docType, source.BuildDraft, source.BuildLines,
+                    targetScope, ct);
+                TradeDocumentGenerationMutationRules.EnsureDraftMatchesSource(source, doc);
+                TradeDocumentGenerationMutationRules.EnsureLinesMatchSource(source, lines);
+                created.Add(doc);
+                lineResults.Add(lines);
+            }
+
+            // 5) 同一事务写入（复用既有写入体，不嵌套事务）：失败整体回滚表头 / 明细行 / 已预约编号。
+            await WriteDocumentsAsync(db, created, lineResults, ct);
+            if (transaction is not null) await transaction.CommitAsync(ct);
+
+            return BuildResult(source.SourceType, source.SourceId, source.SourceNo, created, lineResults);
+        }
+        catch
+        {
+            if (transaction is not null) await transaction.RollbackAsync(ct);
+            TradeDocumentMutationRules.DiscardTrackedChanges(db);
+            throw;
+        }
+    }
+
+    /// <summary>重复生成守卫：请求类型中任一类型已生成即整体拒绝（不产生任何半成品数据）。</summary>
+    private static async Task EnsureNoConflictsAsync(IErpDbContext db, string sourceType, string? salesOrderNo,
+        string? containerNo, string? loadingListNo, IReadOnlyList<string> docTypes, CancellationToken ct)
+    {
         var conflicts = new List<string>();
         foreach (var docType in docTypes)
         {
@@ -298,54 +402,99 @@ public static class TradeDocumentGeneration
             throw BusinessException.RuleConflict(
                 $"该{SourceLabel(sourceType)}已生成 {string.Join("、", conflicts)}，不能重复生成；" +
                 "如需多份请调整既有单证的「份数」，如需其他单证请另选类型");
+    }
 
-        // 先把全部单证草稿与明细行快照在内存中构造并校验完成：来源明细非法 / 超限直接拒绝，不写任何半成品数据
-        var created = new List<TradeDocument>();
-        var lineResults = new List<TradeDocumentLineSnapshotResult>();
-        foreach (var docType in docTypes)
-        {
-            var doc = buildDraft(docType);
-            doc.Status = DraftStatus;
-            doc.CreatedAt = DateTime.Now;
-            // ERP-394：生成目标必须归属到来源单据的权威客户并在实时范围内（受限账号无主 / 越界 fail closed），
-            // 在唯一编号守卫与任何写入之前校验，绝不产生半成品单证或绕过目标授权。
-            EnsureGeneratedTargetAuthorized(targetScope, doc);
-            await EnsureUniqueDocNoAsync(db, doc, ct);
+    /// <summary>
+    /// 构造单张单证草稿 + 明细行快照：目标授权 → 唯一编号预约 → 明细行有界校验，并把表头加入跟踪上下文
+    /// （尚未写库，由调用方在同一事务内统一提交）。
+    /// </summary>
+    private static async Task<(TradeDocument Document, TradeDocumentLineSnapshotResult Lines)> BuildDocumentAsync(
+        IErpDbContext db, string docType, Func<string, TradeDocument> buildDraft,
+        Func<string, TradeDocumentLineSnapshotResult>? buildLines, SalespersonDataScope? targetScope,
+        CancellationToken ct)
+    {
+        var doc = buildDraft(docType);
+        doc.Status = DraftStatus;
+        doc.CreatedAt = DateTime.Now;
+        // ERP-394：生成目标必须归属到来源单据的权威客户并在实时范围内（受限账号无主 / 越界 fail closed），
+        // 在唯一编号守卫与任何写入之前校验，绝不产生半成品单证或绕过目标授权。
+        EnsureGeneratedTargetAuthorized(targetScope, doc);
+        await EnsureUniqueDocNoAsync(db, doc, ct);
 
-            var lines = buildLines?.Invoke(docType) ?? new TradeDocumentLineSnapshotResult { DocType = docType };
-            if (lines.Lines.Count > TradeDocumentItemRules.MaxLinesPerDocument)
-                throw BusinessException.RuleConflict(
-                    $"「{docType}」带入的明细行超过 {TradeDocumentItemRules.MaxLinesPerDocument} 行上限："
-                    + "系统不截断写入，请拆分来源单据后分别生成单证");
+        var lines = buildLines?.Invoke(docType) ?? new TradeDocumentLineSnapshotResult { DocType = docType };
+        EnsureLineBound(docType, lines);
 
-            created.Add(doc);
-            lineResults.Add(lines);
-            db.TradeDocuments.Add(doc);
-        }
+        db.TradeDocuments.Add(doc);
+        return (doc, lines);
+    }
 
-        // 父单证与明细行快照在同一事务内写库（明细行需要父单证 Id，因此分两次 SaveChanges，但同一事务）：
-        // 任一步失败都回滚，既不会留下没有明细的半成品单证，也不会留下孤儿明细行
+    /// <summary>明细行快照行数有界校验：超出上限一律拒绝（不截断写入、不静默丢弃来源明细行）。</summary>
+    private static void EnsureLineBound(string docType, TradeDocumentLineSnapshotResult lines)
+    {
+        if (lines.Lines.Count > TradeDocumentItemRules.MaxLinesPerDocument)
+            throw BusinessException.RuleConflict(
+                $"「{docType}」带入的明细行超过 {TradeDocumentItemRules.MaxLinesPerDocument} 行上限："
+                + "系统不截断写入，请拆分来源单据后分别生成单证");
+    }
+
+    /// <summary>
+    /// 父单证与明细行快照在同一事务内写库（明细行需要父单证 Id，因此分两次 SaveChanges，但同一事务；
+    /// 任一步失败都回滚，既不会留下没有明细的半成品单证，也不会留下孤儿明细行）。
+    /// </summary>
+    private static async Task PersistAsync(IErpDbContext db, IReadOnlyList<TradeDocument> created,
+        IReadOnlyList<TradeDocumentLineSnapshotResult> lineResults, CancellationToken ct)
+    {
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
         try
         {
-            await db.SaveChangesAsync(ct);
-
-            for (var index = 0; index < created.Count; index++)
-            {
-                foreach (var line in lineResults[index].Lines)
-                {
-                    line.TradeDocumentId = created[index].Id;
-                    db.TradeDocumentItems.Add(line);
-                }
-            }
-
-            await db.SaveChangesAsync(ct);
+            await WriteDocumentsAsync(db, created, lineResults, ct);
             await transaction.CommitAsync(ct);
         }
         catch
         {
             await transaction.RollbackAsync(ct);
             throw;
+        }
+    }
+
+    /// <summary>
+    /// 表头 + 明细行快照的分两次写入体（调用方负责事务边界）：来源行锁路径复用本方法以共享既有事务，
+    /// 绝不嵌套事务。
+    /// </summary>
+    private static async Task WriteDocumentsAsync(IErpDbContext db, IReadOnlyList<TradeDocument> created,
+        IReadOnlyList<TradeDocumentLineSnapshotResult> lineResults, CancellationToken ct)
+    {
+        await db.SaveChangesAsync(ct);
+
+        for (var index = 0; index < created.Count; index++)
+        {
+            foreach (var line in lineResults[index].Lines)
+            {
+                line.TradeDocumentId = created[index].Id;
+                db.TradeDocumentItems.Add(line);
+            }
+        }
+
+        await db.SaveChangesAsync(ct);
+    }
+
+    /// <summary>生成结果组装（单证清单 + 明细行统计 + 行口径文案）。</summary>
+    private static TradeDocGenerateResult BuildResult(string sourceType, long sourceId, string sourceNo,
+        IReadOnlyList<TradeDocument> created, IReadOnlyList<TradeDocumentLineSnapshotResult> lineResults)
+    {
+        var documents = new List<TradeDocGeneratedItem>(created.Count);
+        for (var index = 0; index < created.Count; index++)
+        {
+            documents.Add(new TradeDocGeneratedItem
+            {
+                Id = created[index].Id,
+                DocNo = created[index].DocNo,
+                DocType = created[index].DocType,
+                Status = created[index].Status,
+                LineCount = lineResults[index].Lines.Count,
+                LineSummaryText = lineResults[index].SummaryText,
+                LineEvidenceText = lineResults[index].EvidenceText,
+            });
         }
 
         return new TradeDocGenerateResult
@@ -354,19 +503,12 @@ public static class TradeDocumentGeneration
             SourceId = sourceId,
             SourceNo = sourceNo,
             LineRuleText = TradeDocumentPrintSemantics.DetailRuleText,
-            TotalLineCount = lineResults.Sum(r => r.Lines.Count),
-            Documents = created.Select((d, index) => new TradeDocGeneratedItem
-            {
-                Id = d.Id,
-                DocNo = d.DocNo,
-                DocType = d.DocType,
-                Status = d.Status,
-                LineCount = lineResults[index].Lines.Count,
-                LineSummaryText = lineResults[index].SummaryText,
-                LineEvidenceText = lineResults[index].EvidenceText,
-            }).ToList()
+            TotalLineCount = lineResults.Sum(result => result.Lines.Count),
+            Documents = documents,
         };
     }
+
+
 
     /// <summary>
     /// 重复生成守卫的判定口径：

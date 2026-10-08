@@ -78,7 +78,10 @@ public static class TradeDocumentMutationRules
         };
 
     /// <summary>行锁重试次数（乐观并发令牌过期时重读权威行后有界重试；行锁语义 = 阻塞后成功）</summary>
-    private const int LockRetryAttempts = 8;
+    public const int RowLockRetryAttempts = 8;
+
+    /// <summary>行锁重试次数（乐观并发令牌过期时重读权威行后有界重试；行锁语义 = 阻塞后成功）</summary>
+    private const int LockRetryAttempts = RowLockRetryAttempts;
 
     // ==================== 1. 关系型判定 / 事务 ====================
 

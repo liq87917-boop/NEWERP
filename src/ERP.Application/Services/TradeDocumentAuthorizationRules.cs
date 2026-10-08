@@ -208,6 +208,14 @@ public static class TradeDocumentAuthorizationRules
     }
 
     /// <summary>
+    /// ERP-397：生成入口在取得**来源行锁**、锁内权威重读来源之后再次复核来源客户实时范围 ——
+    /// 与生成前的来源范围预检（<see cref="EnsureSourceScopeAllowed"/>）同口径，保证并发「来源客户改写」
+    /// 不会让生成落到范围外客户；<c>null</c> 范围（进程内调用）保持既有内部口径，绝不把空身份当作匿名或管理员。
+    /// </summary>
+    public static void EnsureLockedSourceScopeAllowed(SalespersonDataScope? scope, long? sourceCustomerId)
+        => EnsureSourceScopeAllowed(scope, sourceCustomerId);
+
+    /// <summary>
     /// 按 Id 精确解析权威客户：必须真实存在、未删除且启用，否则一律拒绝（绝不按自由文本猜测客户）。
     /// </summary>
     public static async Task<BaseCustomer> EnsureCustomerAvailableAsync(

@@ -184,45 +184,83 @@ public class ContainerLoadingListController : DocumentControllerBase<ContainerLo
     }
 
     /// <summary>
-    /// 生成单证（ERP-019；ERP-052 增加明细行快照）：按装柜清单生成单证中心台账记录（默认装箱单），
+    /// 生成单证（ERP-019；ERP-052 增加明细行快照；ERP-397 原子化）：按装柜清单生成单证中心台账记录（默认装箱单），
     /// 并在**同一事务**内写入由清单明细构造的装箱单行快照（数量 / 箱数 / 毛重；净重与价格口径不含）。
-    /// 守卫：已作废清单拒绝；来源明细非法 / 超限拒绝；同一柜号（或同一装柜清单）+ 同一单证类型只允许一张，
-    /// 重复点击不会产生重复单证；单证落库状态统一为「待制作」，生成后仍可人工修改。
+    /// <para>ERP-397：先取来源清单行锁并在锁内权威重读来源（状态 / 客户 / 金额 / 数量 / 单位），
+    /// 再把「重复生成检测 → 单证编号预约 → 表头与明细行构造 → 写入」放在同一原子事务内；
+    /// 同一柜号（或同一装柜清单）+ 同一单证类型只允许一套完整单证（重复点击被守卫拒绝、失败整体回滚），
+    /// 已作废清单拒绝；单证落库状态统一为「待制作」，生成后仍可人工修改。</para>
     /// </summary>
     [HttpPost("{id:long}/trade-documents")]
     [TradeDocumentRequestAuthorizationFilter]
     public async Task<IActionResult> GenerateTradeDocuments(long id, [FromBody] TradeDocGenerateRequest? request)
     {
         var scope = TradeDocumentRequestAuthorizationFilter.ScopeFrom(HttpContext);
+
+        // 生成前的有界预读（存在性 / 未作废 / 来源客户实时范围）：权威复核在来源行锁内再次执行（ERP-397）。
         var list = await GetOrThrowAsync(id, "装柜清单不存在");
         if (list.Status == DocumentStatus.Cancelled)
-            throw BusinessException.RuleConflict("已作废的装柜清单不能生成单证");
+            throw BusinessException.RuleConflict(TradeDocumentGenerationMutationRules.SourceCancelledText(
+                TradeDocumentGeneration.LoadingListSourceType));
         // ERP-394：受限账号的来源客户必须在单证中心权威范围内（fail closed，生成目标不得绕过目标授权）。
+        // ERP-397：共享装柜（一柜多客户）的参与方口径不变 —— 权威客户仍取锁内重读的清单兼容客户字段。
         TradeDocumentAuthorizationRules.EnsureSourceScopeAllowed(scope, list.CustomerId);
 
-        var customer = await TradeDocumentGeneration.LoadCustomerAsync(Db, list.CustomerId);
-        var booking = await TradeDocumentGeneration.LoadBookingAsync(Db, list);
-
-        // 单证草稿与明细行快照共用同一份映射：币种取自草稿，保证行快照与单证台账币种一致
-        var drafts = TradeDocumentGeneration.LoadingListDocTypes
-            .Select(docType => TradeDocumentGeneration.BuildFromLoadingList(list, customer, booking, docType))
-            .ToList();
-        var details = await TradeDocumentLineSnapshotRules.LoadLoadingListDetailsAsync(Db, list.Id);
-        var products = await TradeDocumentLineSnapshotRules.LoadProductsAsync(
-            Db, TradeDocumentLineSnapshotRules.ProductIdsOf(details));
-
-        var result = await TradeDocumentGeneration.GenerateAsync(Db,
-            TradeDocumentGeneration.LoadingListSourceType, list.Id, list.LoadingListNo,
-            containerNo: list.ContainerNo, salesOrderNo: null, loadingListNo: list.LoadingListNo,
-            requestedDocTypes: request?.DocTypes,
-            buildDraft: docType => TradeDocumentGeneration.BuildFromLoadingList(list, customer, booking, docType),
-            buildLines: docType => TradeDocumentLineSnapshotRules.BuildFromLoadingList(
-                list, details, products, docType, DraftCurrencyOf(drafts, docType)),
+        // ERP-397：先取来源清单行锁（与修改 / 提交 / 审核 / 取消 / 删除 / 参与方维护同一把锁）并在锁内权威重读来源，
+        // 再在同一原子事务内完成重复检测、编号预约、表头与明细行构造与写入。
+        var result = await TradeDocumentGeneration.GenerateAtomicAsync(Db,
+            TradeDocumentGeneration.LoadingListSourceType, list.Id, request?.DocTypes,
+            reloadSource: ct => ReloadLoadingListSourceAsync(list.Id, ct),
             targetScope: scope);
 
         var numbers = string.Join("、", result.Documents.Select(d => d.DocNo));
         return Ok(ApiResponse<TradeDocGenerateResult>.Success(result,
             $"已生成单证：{numbers}（明细行快照 {result.TotalLineCount} 行）"));
+    }
+
+    /// <summary>
+    /// ERP-397：来源行锁内的**权威重读**（装柜清单 → 客户档案 → 订柜信息 → 来源明细 → 商品资料），并绑定单证草稿 /
+    /// 明细行快照构造；返回 <c>null</c> 表示清单已被并发删除（生成 fail closed）。
+    /// <para>绝不重用加锁前的内存实体，也绝不按柜号文本推断归属：表头客户 / 金额与明细行数量 / 单位
+    /// 一律来自本次重读；锁内复核见 <see cref="TradeDocumentGenerationMutationRules"/>。</para>
+    /// </summary>
+    private async Task<TradeDocumentGenerationSource?> ReloadLoadingListSourceAsync(
+        long loadingListId, CancellationToken ct)
+    {
+        var list = await Db.ContainerLoadingLists.AsNoTracking()
+            .FirstOrDefaultAsync(o => o.Id == loadingListId && !o.IsDeleted, ct);
+        if (list is null) return null;
+
+        var customer = await TradeDocumentGeneration.LoadCustomerAsync(Db, list.CustomerId, ct);
+        var booking = await TradeDocumentGeneration.LoadBookingAsync(Db, list, ct);
+        var details = await TradeDocumentLineSnapshotRules.LoadLoadingListDetailsAsync(Db, list.Id, ct);
+        var products = await TradeDocumentLineSnapshotRules.LoadProductsAsync(
+            Db, TradeDocumentLineSnapshotRules.ProductIdsOf(details), ct);
+
+        // 单证草稿与明细行快照共用同一份映射：币种取自草稿，保证行快照与单证台账币种一致
+        var drafts = TradeDocumentGeneration.LoadingListDocTypes
+            .Select(docType => TradeDocumentGeneration.BuildFromLoadingList(list, customer, booking, docType))
+            .ToList();
+
+        return new TradeDocumentGenerationSource
+        {
+            SourceType = TradeDocumentGeneration.LoadingListSourceType,
+            SourceId = list.Id,
+            SourceNo = list.LoadingListNo,
+            ContainerNo = list.ContainerNo,
+            SalesOrderNo = null,
+            LoadingListNo = list.LoadingListNo,
+            CustomerId = list.CustomerId,
+            Status = list.Status,
+            ExpectedAmount = 0m,
+            ExpectedLineQuantityTotal =
+                TradeDocumentGenerationMutationRules.LineQuantityTotal(details.Select(d => d.Quantity)),
+            AuthoritativeUnits = TradeDocumentGenerationMutationRules.LineUnits(
+                details.Select(d => (d.ProductId, (string?)null)), products),
+            BuildDraft = docType => TradeDocumentGeneration.BuildFromLoadingList(list, customer, booking, docType),
+            BuildLines = docType => TradeDocumentLineSnapshotRules.BuildFromLoadingList(
+                list, details, products, docType, DraftCurrencyOf(drafts, docType)),
+        };
     }
 
     /// <summary>取某单证类型的草稿币种（明细行快照与单证台账币种保持同一口径；缺失时回退空值由规则层规范化）</summary>
@@ -795,6 +833,9 @@ public class ContainerLoadingListController : DocumentControllerBase<ContainerLo
     /// <summary>
     /// 对装柜清单行加更新锁（UPDLOCK, HOLDLOCK），把同单并发「修改 / 提交 / 审核 / 取消 / 删除 / 参与方维护」
     /// 串行化在同一事务内；非关系型提供程序（内存库）无法执行表提示，跳过即可（事务本身等价无事务）。
+    /// <para>ERP-397：本语句与「来源生成」使用的
+    /// <see cref="TradeDocumentGenerationMutationRules.LoadingListRowLockSql"/> 必须逐字一致（同一把清单行锁），
+    /// 由 <c>TradeDocumentGenerationMutationTests</c> 的接线契约测试守住。</para>
     /// </summary>
     private async Task AcquireLoadingListRowLockAsync(long loadingListId)
     {

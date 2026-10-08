@@ -387,46 +387,83 @@ public class SalesOrderController : DocumentControllerBase<SalesOrder>
     }
 
     /// <summary>
-    /// 生成单证（ERP-019；ERP-052 增加明细行快照）：按销售订单生成单证中心台账记录（默认商业发票 + 装箱单），
+    /// 生成单证（ERP-019；ERP-052 增加明细行快照；ERP-397 原子化）：按销售订单生成单证中心台账记录（默认商业发票 + 装箱单），
     /// 并在**同一事务**内写入由订单明细构造的行快照（商业发票含服务端计算行金额，装箱单不含价格口径）。
-    /// 守卫：已作废订单拒绝；来源明细非法 / 超限拒绝；同一订单 + 同一单证类型只允许一张（重复点击不会产生重复单证）；
-    /// 单证落库状态统一为「待制作」，生成后仍可在单证中心人工修改后再流转。
+    /// <para>ERP-397：先取来源订单行锁并在锁内权威重读来源（状态 / 客户 / 金额 / 数量 / 单位），
+    /// 再把「重复生成检测 → 单证编号预约 → 表头与明细行构造 → 写入」放在同一原子事务内；
+    /// 已作废订单拒绝、来源明细非法 / 超限拒绝、同一订单 + 同一单证类型只允许一套完整单证
+    /// （重复点击不会产生重复单证、失败整体回滚且不占用编号）；单证落库状态统一为「待制作」。</para>
     /// </summary>
     [HttpPost("{id:long}/trade-documents")]
     [TradeDocumentRequestAuthorizationFilter]
     public async Task<IActionResult> GenerateTradeDocuments(long id, [FromBody] TradeDocGenerateRequest? request)
     {
         var scope = TradeDocumentRequestAuthorizationFilter.ScopeFrom(HttpContext);
+
+        // 生成前的有界预读（存在性 / 未作废 / 来源客户实时范围）：权威复核在来源行锁内再次执行（ERP-397）。
         var order = await Set.AsNoTracking()
             .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted, default)
             ?? throw BusinessException.NotFound("销售订单不存在");
         if (order.Status == DocumentStatus.Cancelled)
-            throw BusinessException.RuleConflict("已作废的销售订单不能生成单证");
+            throw BusinessException.RuleConflict(TradeDocumentGenerationMutationRules.SourceCancelledText(
+                TradeDocumentGeneration.SalesOrderSourceType));
         // ERP-394：受限账号的来源客户必须在单证中心权威范围内（fail closed，生成目标不得绕过目标授权）。
         TradeDocumentAuthorizationRules.EnsureSourceScopeAllowed(scope, order.CustomerId);
 
-        var customer = await TradeDocumentGeneration.LoadCustomerAsync(Db, order.CustomerId);
-
-        // 单证草稿与明细行快照共用同一份映射：币种取自草稿，保证行快照与单证台账币种一致
-        var drafts = TradeDocumentGeneration.SalesOrderDocTypes
-            .Select(docType => TradeDocumentGeneration.BuildFromSalesOrder(order, customer, docType))
-            .ToList();
-        var details = await TradeDocumentLineSnapshotRules.LoadSalesOrderDetailsAsync(Db, order.Id);
-        var products = await TradeDocumentLineSnapshotRules.LoadProductsAsync(
-            Db, TradeDocumentLineSnapshotRules.ProductIdsOf(details));
-
-        var result = await TradeDocumentGeneration.GenerateAsync(Db,
-            TradeDocumentGeneration.SalesOrderSourceType, order.Id, order.OrderNo,
-            containerNo: null, salesOrderNo: order.OrderNo, loadingListNo: null,
-            requestedDocTypes: request?.DocTypes,
-            buildDraft: docType => TradeDocumentGeneration.BuildFromSalesOrder(order, customer, docType),
-            buildLines: docType => TradeDocumentLineSnapshotRules.BuildFromSalesOrder(
-                order, details, products, docType, DraftCurrencyOf(drafts, docType)),
+        // ERP-397：先取来源订单行锁（与取消 / 编辑 / 删除同一把锁）并在锁内权威重读来源，
+        // 再在同一原子事务内完成重复检测、编号预约、表头与明细行构造与写入。
+        var result = await TradeDocumentGeneration.GenerateAtomicAsync(Db,
+            TradeDocumentGeneration.SalesOrderSourceType, order.Id, request?.DocTypes,
+            reloadSource: ct => ReloadSalesOrderSourceAsync(order.Id, ct),
             targetScope: scope);
 
         var numbers = string.Join("、", result.Documents.Select(d => d.DocNo));
         return Ok(ApiResponse<TradeDocGenerateResult>.Success(result,
             $"已生成单证：{numbers}（明细行快照 {result.TotalLineCount} 行）"));
+    }
+
+    /// <summary>
+    /// ERP-397：来源行锁内的**权威重读**（销售订单 → 客户档案 → 来源明细 → 商品资料），并绑定单证草稿 /
+    /// 明细行快照构造；返回 <c>null</c> 表示订单已被并发删除（生成 fail closed）。
+    /// <para>绝不重用加锁前的内存实体，也绝不按单号文本推断归属：表头客户 / 金额与明细行数量 / 单位
+    /// 一律来自本次重读；锁内复核见 <see cref="TradeDocumentGenerationMutationRules"/>。</para>
+    /// </summary>
+    private async Task<TradeDocumentGenerationSource?> ReloadSalesOrderSourceAsync(
+        long orderId, CancellationToken ct)
+    {
+        var order = await Db.SalesOrders.AsNoTracking()
+            .FirstOrDefaultAsync(o => o.Id == orderId && !o.IsDeleted, ct);
+        if (order is null) return null;
+
+        var customer = await TradeDocumentGeneration.LoadCustomerAsync(Db, order.CustomerId, ct);
+        var details = await TradeDocumentLineSnapshotRules.LoadSalesOrderDetailsAsync(Db, order.Id, ct);
+        var products = await TradeDocumentLineSnapshotRules.LoadProductsAsync(
+            Db, TradeDocumentLineSnapshotRules.ProductIdsOf(details), ct);
+
+        // 单证草稿与明细行快照共用同一份映射：币种取自草稿，保证行快照与单证台账币种一致
+        var drafts = TradeDocumentGeneration.SalesOrderDocTypes
+            .Select(docType => TradeDocumentGeneration.BuildFromSalesOrder(order, customer, docType))
+            .ToList();
+
+        return new TradeDocumentGenerationSource
+        {
+            SourceType = TradeDocumentGeneration.SalesOrderSourceType,
+            SourceId = order.Id,
+            SourceNo = order.OrderNo,
+            SalesOrderNo = order.OrderNo,
+            ContainerNo = null,
+            LoadingListNo = null,
+            CustomerId = order.CustomerId,
+            Status = order.Status,
+            ExpectedAmount = order.TotalAmount,
+            ExpectedLineQuantityTotal =
+                TradeDocumentGenerationMutationRules.LineQuantityTotal(details.Select(d => d.Quantity)),
+            AuthoritativeUnits = TradeDocumentGenerationMutationRules.LineUnits(
+                details.Select(d => (d.ProductId, (string?)d.Unit)), products),
+            BuildDraft = docType => TradeDocumentGeneration.BuildFromSalesOrder(order, customer, docType),
+            BuildLines = docType => TradeDocumentLineSnapshotRules.BuildFromSalesOrder(
+                order, details, products, docType, DraftCurrencyOf(drafts, docType)),
+        };
     }
 
     /// <summary>取某单证类型的草稿币种（明细行快照与单证台账币种保持同一口径；缺失时回退空值由规则层规范化）</summary>
