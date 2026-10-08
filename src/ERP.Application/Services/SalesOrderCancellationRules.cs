@@ -19,6 +19,9 @@ namespace ERP.Application.Services;
 /// <para>链接只按既有显式引用字段判定（出库单 <c>SalesOrderId</c> / 采购单 <c>OwningSalesOrderId</c> /
 /// 收款引用行 <c>SalesOrderId</c> / 预装柜明细 <c>SourceSalesOrderDetailId</c>），绝不按单号文本、金额或相似度猜测链接，
 /// 也绝不跨币种合计金额；已取消 / 已冲销 / 已作废 / 已删除的证据只有在既有权威工作流显式标记其失效时才被忽略。</para>
+/// <para>ERP-388：客诉单（<see cref="FinanceComplaint.SalesOrderId"/>）<b>不</b>属于上述阻断证据——客诉只是投诉 /
+/// 质量反馈追溯，取消销售订单时绝不因存在客诉而拒绝，也绝不清除 / 重绑定客诉链接（见
+/// <see cref="ComplaintNonBlockingText"/>）。</para>
 /// </summary>
 public static class SalesOrderCancellationRules
 {
@@ -45,6 +48,17 @@ public static class SalesOrderCancellationRules
         "或存在「未删除、已审核」且明细显式链接本单明细的预装柜需求计划证据时拒绝取消；" +
         "已取消 / 已冲销 / 已作废 / 已删除的证据只有在既有权威工作流显式标记其失效后才被忽略，绝不按字符串或金额猜测链接、绝不跨币种合计；" +
         "取消本身不冲销库存或财务，冲销只走既有冲销 / 作废工作流。";
+
+    /// <summary>
+    /// 客诉单<b>不构成</b>销售订单取消的阻断证据（ERP-388）：<see cref="FinanceComplaint.SalesOrderId"/> 只是
+    /// 「投诉 / 质量反馈」的追溯链接，不是库存出运 / 采购履约 / 收款引用 / 定金申请 / 预装柜需求承诺等履约证据；
+    /// 因此取消销售订单时<b>绝不</b>因存在客诉单而拒绝。取消只改销售订单状态，原样保留客诉历史与其来源链接
+    /// （客诉单后续可按显式状态只读展示，含「来源已取消」），也绝不清除或重绑定任何客诉链接。
+    /// </summary>
+    public const string ComplaintNonBlockingText =
+        "客诉单（FinanceComplaint.SalesOrderId）不构成销售订单取消的阻断证据：客诉只是投诉 / 质量反馈追溯，"
+        + "不是库存出运、采购履约、收款引用、定金申请或预装柜需求承诺证据；取消销售订单绝不因客诉存在而拒绝，"
+        + "也不改写 / 清除 / 重绑定任何客诉链接。";
 
     /// <summary>
     /// 拒绝文案中允许列举的预装柜单数量上限（有界：绝不无界输出单据明细，超出时只给出总数）。
