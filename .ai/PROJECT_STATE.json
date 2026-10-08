@@ -1,7 +1,7 @@
 {
   "schema_version": 2,
   "project": "NEWERP",
-  "updated_at": "2026-10-08T02:44:09.391067Z",
+  "updated_at": "2026-10-08T03:22:39.939042Z",
   "phase": "ready",
   "current_task": null,
   "queue": [
@@ -330,27 +330,27 @@
   ],
   "blocked": [],
   "last_build": {
-    "task": "ERP-343",
+    "task": "ERP-344",
     "profile": "safe",
-    "status": "passed",
-    "exit_code": 0,
-    "log": ".ai\\logs\\ERP-343-validation-2.log",
-    "at": "2026-10-08T02:24:31.884458Z"
+    "status": "failed",
+    "exit_code": 1,
+    "log": ".ai\\logs\\ERP-344-validation-3.log",
+    "at": "2026-10-08T03:22:39.084378Z"
   },
   "last_error": {
     "task": "ERP-344",
     "kind": "automatic_repair_pending",
-    "summary": "Path guard failed:\noutside allowed_paths: src/ERP.UnitTests/StockInOutMovementLedgerTests.cs"
+    "summary": "Engineering validation failed with code 1. Full log: .ai\\logs\\ERP-344-validation-3.log\nStructured error summary:\n[validate] dotnet restore NEWERP.sln\n  正在确定要还原的项目…\n  所有项目均是最新的，无法还原。\n[validate] dotnet build NEWERP.sln -c Release --no-restore --no-incremental /p:TreatWarningsAsErrors=true /p:RunAnalyzersDuringBuild=true\n  ERP.Domain -> D:\\VSCodeProject\\NEWERP.executor.continue-erp-190-20260930080457\\src\\ERP.Domain\\bin\\Release\\net8.0\\ERP.Domain.dll\n  ERP.Application -> D:\\VSCodeProject\\NEWERP.executor.continue-erp-190-20260930080457\\src\\ERP.Application\\bin\\Release\\net8.0\\ERP.Application.dll\n  ERP.Infrastructure -> D:\\VSCodeProject\\NEWERP.executor.continue-erp-190-20260930080457\\src\\ERP.Infrastructure\\bin\\Release\\net8.0\\ERP.Infrastructure.dll\n  ERP.IntegrationTests -> D:\\VSCodeProject\\NEWERP.executor.continue-erp-190-20260930080457\\src\\ERP.IntegrationTests\\bin\\Release\\net8.0\\ERP.IntegrationTests.dll\n  ERP.Api -> D:\\VSCodeProject\\NEWERP.executor.continue-erp-190-20260930080457\\src\\ERP.Api\\bin\\Release\\net8.0\\ERP.Api.dll\n  ERP.UnitTests -> D:\\VSCodeProject\\NEWERP.executor.continue-erp-190-20260930080457\\src\\ERP.UnitTests\\bin\\Release\\net8.0\\ERP.UnitTests.dll\n已成功生成。\n    0 个警告\n    0 个错误\n已用时间 00:00:41.33\n有可用的工作负载更新。有关详细信息，请运行 `dotnet workload list`。\n[validate] dotnet test src/ERP.UnitTests/ERP.UnitTests.csproj -c Release --no-build --verbosity minimal\nD:\\VSCodeProject\\NEWERP.executor.continue-erp-190-20260930080457\\src\\ERP.UnitTests\\bin\\Release\\net8.0\\ERP.UnitTests.dll (.NETCoreApp,Version=v8.0)的测试运行\nVSTest 版本 17.11.0 (x64)\n正在启动测试执行，请稍候...\n总共 1 个测试文件与指定模式相匹配。\n[xUnit.net 00:00:23.65]     ERP.UnitTests.StockInOutMovementLedgerTests.采购入库_审核_写流水且库存与流水金额一致 [FAIL]\n  失败 ERP.UnitTests.StockInOutMovementLedgerTests.采购入库_审核_写流水且库存与流水金额一致 [59 ms]\n  错误消息:\n   ERP.Application.Common.BusinessException : 来源采购订单不存在或已删除\n  堆栈跟踪:\n     at ERP.Application.Services.StockInOrderFulfillmentRules.ResolveAuthoritativeLinkOrThrowAsync(IErpDbContext db, StockIn entity, CancellationToken ct) in D:\\VSCodeProject\\NEWERP.executor.continue-erp-190-20260930080457\\src\\ERP.Application\\Services\\StockInOrderFulfillmentRules.cs:line 68\n   at ERP.Application.Services.StockInOrderFulfillmentRules.ValidateLinkAsync(IErpDbContext db, StockIn entity, CancellationToken ct) in D:\\VSCodeProject\\NEWERP.executor.continue-erp-190-20260930080457\\src\\ERP.Application\\Services\\StockInOrderFulfillmentRules.cs:line 60\n   at ERP.Api.Controllers.StockInController.Create(StockIn entity) in D:\\VSCodeProject\\NEWERP.executor.continue-erp-190-20260930080457\\src\\ERP.Api\\Controllers\\StockInController.cs:line 79\n   at ERP.UnitTests.StockInOutMovementLedgerTests.CreateStockInAsync(StockInController ctl, Decimal quantity, String unit, Nullable`1 purchaseOrderId) in D:\\VSCodeProject\\NEWERP.executor.continue-erp-190-20260930080457\\src\\ERP.UnitTests\\StockInOutMovementLedgerTests.cs:line 391\n   at ERP.UnitTests.StockInOutMovementLedgerTests.采购入库_审核_写流水且库存与流水金额一致() in D:\\VSCodeProject\\NEWERP.executor.continue-erp-190-20260930080457\\src\\ERP.UnitTests\\StockInOutMovementLedgerTests.cs:line 36\n--- End of stack trace from previous location ---\n[xUnit.net 00:00:24.11]     ERP.UnitTests.StockInOutMovementLedgerTests.销售出库_审核_按当前加权平均成本核减并写流水 [FAIL]\n  失败 ERP.UnitTests.StockInOutMovementLedgerTests.销售出库_审核_按当前加权平均成本核减并写流水 [96 ms]\n  错误消息:\n   ERP.Application.Common.BusinessException : 来源销售订单不存在或已删除\n  堆栈跟踪:\n     at ERP.Application.Services.StockOutOrderFulfillmentRules.ResolveAuthoritativeLinkOrThrowAsync(IErpDbContext db, StockOut entity, CancellationToken ct) in D:\\VSCodeProject\\NEWERP.executor.continue-erp-190-20260930080457\\src\\ERP.Application\\Services\\StockOutOrderFulfillmentRules.cs:line 66\n   at ERP.Application.Services.StockOutOrderFulfillmentRules.ValidateLinkAsync(IErpDbContext db, StockOut entity, CancellationToken ct) in D:\\VSCodeProject\\NEWERP.executor.continue-erp-190-20260930080457\\src\\ERP.Application\\Services\\StockOutOrderFulfillmentRules.cs:line 58\n   at ERP.Api.Controllers.StockOutController.Create(StockOut entity) in D:\\VSCodeProject\\NEWERP.executor.continue-erp-190-20260930080457\\src\\ERP.Api\\Controllers\\StockOutController.cs:line 80\n   at ERP.UnitTests.StockInOutMovementLedgerTests.CreateStockOutAsync(StockOutController ctl, Decimal quantity, String unit, Nullable`1 salesOrderId) in D:\\VSCodeProject\\NEWERP.executor.continue-erp-190-20260930080457\\src\\ERP.UnitTests\\StockInOutMovementLedgerTests.cs:line 409\n   at ERP.UnitTests.StockInOutMovementLedgerTests.销售出库_审核_按当前加权平均成本核减并写流水() in D:\\VSCodeProject\\NEWERP.executor.continue-erp-190-20260930080457\\src\\ERP.UnitTests\\StockInOutMovementLedgerTests.cs:line 165\n--- End of stack trace from previous location ---\n失败!  - 失败:     2，通过:  5046，已跳过:     0，总计:  5048，持续时间: 1 m 48 s - ERP.UnitTests.dll (net8.0)\n有可用的工作负载更新。有关详细信息，请运行 `dotnet workload list`。"
   },
   "last_deepseek_fix": {
     "task": "ERP-344",
     "attempts": 3,
     "status": "retry_pending",
-    "at": "2026-10-08T02:44:08.923920Z"
+    "at": "2026-10-08T03:22:39.409279Z"
   },
   "git_sync": {
     "branch": "main",
-    "local_sha": "53fa6e0",
+    "local_sha": "b57c3c6",
     "status": "synced",
     "ahead": 0,
     "behind": 0,
