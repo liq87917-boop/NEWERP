@@ -512,6 +512,10 @@ public class ContainerLoadingListController : DocumentControllerBase<ContainerLo
     /// <summary>
     /// 取消：在同一可串行化事务与行锁内校验当前账号身份 / 菜单 / 权威客户范围；
     /// 已审核数量由审核累计查询按状态自动释放，不写库存 / 财务。
+    /// <para>ERP-367：取消只把状态置为「已取消」—— 装柜明细的显式出运证据链接
+    /// （<see cref="ContainerLoadingDetail.SourceStockOutDetailId"/>）与历史数量<b>原样保留</b>
+    /// （绝不回填 / 重写 / 删除），来源出库单取消护栏据此在状态不再是「已审核」后即时释放；
+    /// 释放后来源出库单仍按既有流程恢复库存并写红字流水。</para>
     /// </summary>
     [HttpPost("{id:long}/cancel")]
     public override async Task<IActionResult> Cancel(long id)

@@ -21,6 +21,9 @@ namespace ERP.Application.Services;
 /// <para>本类只做<b>纯判定与有界只读查询 + 行锁 SQL 常量</b>：不落库、不改单据 / 明细 / 状态 / 库存 / 财务，
 /// 不新增表 / 列 / 菜单 / 权限。锁序（上游销售出库行 → 装柜清单行 <c>UPDLOCK, HOLDLOCK</c>）与可串行化事务
 /// 由调用方（<c>ContainerLoadingListController</c>）负责。</para>
+/// <para>ERP-367 追加<b>取消方向</b>的只读判定：来源销售出库单取消 / 冲销前，若仍存在「已审核、未删除」装柜清单明细
+/// 显式链接到本单明细（<see cref="EnsureNoEffectiveApprovedLoadingAsync"/>），则 fail closed 拒绝并给出可执行的
+/// 装柜撤销要求；装柜取消后护栏即时释放，但链接与历史证据原样保留。</para>
 /// </summary>
 public static class LoadingStockOutLinkRules
 {
@@ -66,6 +69,61 @@ public static class LoadingStockOutLinkRules
     /// <summary>上游销售出库单行锁语句（与销售退货审核 / 销审 / 取消共用同一把来源行锁）。</summary>
     public const string LockStockOutRowSql =
         "SELECT Id FROM db_owner.StockOuts WITH (UPDLOCK, HOLDLOCK) WHERE Id = {0}";
+
+    /// <summary>
+    /// 取消 / 冲销来源销售出库单时，若仍存在「已审核、未删除」装柜清单明细显式链接到本单明细，
+    /// 给出的可执行处置要求（先取消装柜清单，再取消来源出库单；装柜历史证据保留、不删除）。
+    /// </summary>
+    public const string LoadingReversalRequirementText =
+        "请先取消已审核装柜清单（历史装柜证据与链接原样保留、不删除），再取消来源出库单";
+
+    /// <summary>ERP-367 取消前装柜引用护栏口径文案（接口 / 文档同源）</summary>
+    public const string CancellationRuleText =
+        "取消 / 冲销来源销售出库单前，必须在与装柜审核同一把「上游销售出库单行（UPDLOCK, HOLDLOCK）」与同一可串行化事务内，" +
+        "用实时数据确认没有仍然生效的「已审核、未删除」装柜清单明细显式链接（ContainerLoadingDetail.SourceStockOutDetailId）到本出库单明细；" +
+        "存在时 fail closed 拒绝并给出可执行的装柜撤销要求，绝不先冲销库存 / 改状态 / 写红字流水；" +
+        "null 来源（历史 / 无证据）明细、未审核（待提交 / 已提交）、已取消、已删除的装柜清单，以及链接到其它出库单明细的行一律不阻断；" +
+        "绝不按商品 / 单据号 / 相似度猜测来源；合法出运后销售退货仍可登记 / 审核，后续装柜容量仍按来源数量扣除已生效退货。";
+
+    /// <summary>ERP-367 取消前装柜引用护栏边界文案（不改估值口径、不改主数据、不删历史证据）</summary>
+    public const string CancellationBoundaryText =
+        "本护栏只新增「来源出库取消前的装柜链接判定」：不改变库存成本口径（移动加权平均）与既有 ERP-359 退货引用护栏，" +
+        "不重写装柜历史数量与状态、不改写商品 / 客户 / 销售订单 / 出库单主数据、不删除任何审计证据，也不新增表 / 列 / 菜单 / 权限。";
+
+    /// <summary>
+    /// 取消 / 冲销来源销售出库单前的实时判定（ERP-367）：存在「已审核、未删除」装柜清单明细通过
+    /// <see cref="ContainerLoadingDetail.SourceStockOutDetailId"/> 显式链接到本出库单明细时，抛
+    /// <see cref="BusinessException"/>（<see cref="ErrorCodes.RuleConflict"/>）并给出可执行的装柜撤销要求。
+    /// <para>只认显式链接：<c>null</c> 来源（历史 / 无证据）明细、未审核（待提交 / 已提交）、已取消、已删除的装柜清单，
+    /// 以及链接到其它出库单明细的行一律不阻断；绝不按商品 / 单据号 / 相似度猜测来源。</para>
+    /// <para>只读判定：被拒绝时不改单据 / 明细 / 状态 / 库存 / 流水与装柜历史证据。判定必须在与装柜审核同一把
+    /// 上游出库单行锁（<see cref="LockStockOutRowSql"/>）与同一可串行化事务内执行，保证并发只出现一种一致结果。</para>
+    /// </summary>
+    public static async Task EnsureNoEffectiveApprovedLoadingAsync(IErpDbContext db, long stockOutId,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        ct.ThrowIfCancellationRequested();
+
+        // 只按显式链接（ContainerLoadingDetail.SourceStockOutDetailId → StockOutDetails.Id）判定：
+        // 装柜清单须「已审核、未删除」，装柜明细须未删除；绝不按商品 / 单号 / 相似度推断归属。
+        var blocking = await (
+                from l in db.ContainerLoadingLists
+                join d in db.ContainerLoadingDetails on l.Id equals d.LoadingListId
+                join s in db.StockOutDetails on d.SourceStockOutDetailId equals (long?)s.Id
+                where !l.IsDeleted && l.Status == DocumentStatus.Approved
+                      && !d.IsDeleted && d.SourceStockOutDetailId != null
+                      && s.StockOutId == stockOutId
+                orderby l.Id, d.Id
+                select new { ListId = l.Id, l.LoadingListNo, DetailId = d.Id })
+            .FirstOrDefaultAsync(ct);
+
+        if (blocking is null) return;
+
+        throw BusinessException.RuleConflict(
+            $"来源销售出库单已被已审核装柜清单 [{blocking.LoadingListNo}]（Id {blocking.ListId}，装柜明细 Id {blocking.DetailId}）" +
+            $"显式引用，冲销会破坏已证明出运证据与库存台账：{LoadingReversalRequirementText}");
+    }
 
     /// <summary>
     /// 读取 / 链接销售出库证据所需的既有「销售出库」菜单授权（非特权账号必须显式具备，

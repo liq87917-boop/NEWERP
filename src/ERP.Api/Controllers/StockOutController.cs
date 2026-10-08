@@ -201,6 +201,10 @@ public class StockOutController : DocumentControllerBase<StockOut>
     /// 锁内先复核实时授权 / 客户范围，再确认没有仍然生效的已审核销售退货单显式引用本出库单（
     /// <see cref="ReturnSourceCancellationRules.EnsureNoEffectiveApprovedSalesReturnAsync"/>）；
     /// 存在时 fail closed 拒绝，单据 / 明细 / 状态 / 库存 / 流水全部保持原样，绝不先冲销再校验。</para>
+    /// <para>ERP-367：同一把行锁与事务内追加「装柜物理出运证据」判定 —— 存在「已审核、未删除」装柜清单明细显式链接
+    /// （<see cref="ContainerLoadingDetail.SourceStockOutDetailId"/>）到本出库单明细时同样 fail closed 拒绝并给出可执行的
+    /// 装柜撤销要求（<see cref="LoadingStockOutLinkRules.EnsureNoEffectiveApprovedLoadingAsync"/>）；
+    /// 与装柜审核共用同一把上游出库单行锁，故并发「装柜审核」与「来源取消」被串行化，只出现一种一致结果。</para>
     /// </summary>
     [HttpPost("{id:long}/cancel")]
     public override async Task<IActionResult> Cancel(long id)
@@ -211,7 +215,8 @@ public class StockOutController : DocumentControllerBase<StockOut>
             .FirstOrDefaultAsync() ?? throw BusinessException.NotFound("出库单不存在");
         await EnsureCustomerScopeAsync(probe.CustomerId);
 
-        // 确定性锁序：来源出库单行（与销售退货审核 / 销审同一把锁）→ 退货单行（只读判定）。任一步失败整体回滚。
+        // 确定性锁序：来源出库单行（与销售退货审核 / 销审 / 装柜审核同一把锁）→ 退货单行 / 装柜明细行（只读判定）。
+        // 任一步失败整体回滚，装柜历史证据与出库单据原样保留。
         await using var transaction = await Db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
         try
         {
@@ -226,8 +231,9 @@ public class StockOutController : DocumentControllerBase<StockOut>
             if (status == DocumentStatus.Cancelled)
                 throw BusinessException.RuleConflict("出库单已取消");
 
-            // 在锁内、在任何库存冲销 / 状态变更之前判定退货引用：被拒绝时不留任何半成品写入。
+            // 在锁内、在任何库存冲销 / 状态变更之前判定引用：被拒绝时不留任何半成品写入。
             await ReturnSourceCancellationRules.EnsureNoEffectiveApprovedSalesReturnAsync(Db, id);
+            await LoadingStockOutLinkRules.EnsureNoEffectiveApprovedLoadingAsync(Db, id);
 
             if (status == DocumentStatus.Approved)
                 await ReverseStockAsync(entity);

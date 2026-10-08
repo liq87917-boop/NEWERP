@@ -5,6 +5,7 @@ using ERP.Domain.Entities;
 using ERP.Domain.Enums;
 using ERP.Infrastructure.Data;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using Xunit;
 
 namespace ERP.UnitTests;
@@ -475,6 +476,85 @@ public class StockInOutMovementLedgerTests
         Assert.Single(db.StockMovements);
         Assert.False(db.StockMovements.Single().IsReversed);
         Assert.Equal(DocumentStatus.Approved, db.StockOuts.Single().Status);
+    }
+
+    // ==================== ERP-367：来源出库仍被已审核装柜清单显式引用 ====================
+
+    [Fact]
+    public async Task 销售出库_存在已审核装柜清单显式引用_取消被拒绝且库存与流水不变()
+    {
+        using var db = TestDbFactory.Create();
+        SeedStock(db, WarehouseA, Product1, quantity: 10m, totalCost: 100m);
+        var ctl = NewStockOutController(db);
+        var id = await CreateStockOutAsync(ctl, quantity: 5m, unit: "PCS", salesOrderId: null);
+        await ctl.Submit(id);
+        await ctl.Approve(id);
+        Assert.Equal(5m, db.Stocks.Single(s => s.ProductId == Product1).Quantity);
+
+        // 已审核装柜清单明细显式链接本出库单明细：构成物理出运证据，取消来源出库会破坏证据链
+        var sourceDetailId = db.StockOutDetails.Single(d => d.StockOutId == id).Id;
+        db.ContainerLoadingLists.Add(new ContainerLoadingList
+        {
+            LoadingListNo = "ZQ-LEDGER-0001",
+            LoadingDate = DateTime.Today,
+            CustomerId = 1L,
+            Status = DocumentStatus.Approved,
+            Details = new List<ContainerLoadingDetail>
+            {
+                new() { ProductId = Product1, ProductName = "P1", Quantity = 5m,
+                    SourceStockOutDetailId = sourceDetailId }
+            }
+        });
+        db.SaveChanges();
+
+        var ex = await Assert.ThrowsAsync<BusinessException>(() => ctl.Cancel(id));
+        Assert.Equal(ErrorCodes.RuleConflict, ex.Code);
+        Assert.Contains("装柜", ex.Message);
+        // 拒绝先于任何冲销 / 状态变更：库存、流水、状态全部保持原样
+        Assert.Equal(5m, db.Stocks.Single(s => s.ProductId == Product1).Quantity);
+        Assert.Single(db.StockMovements);
+        Assert.False(db.StockMovements.Single().IsReversed);
+        Assert.Equal(DocumentStatus.Approved, db.StockOuts.Single().Status);
+    }
+
+    [Fact]
+    public async Task 销售出库_装柜清单取消后放行_红字冲销流水与装柜链接证据保留()
+    {
+        using var db = TestDbFactory.Create();
+        SeedStock(db, WarehouseA, Product1, quantity: 10m, totalCost: 100m);
+        var ctl = NewStockOutController(db);
+        var id = await CreateStockOutAsync(ctl, quantity: 5m, unit: "PCS", salesOrderId: null);
+        await ctl.Submit(id);
+        await ctl.Approve(id);
+
+        var sourceDetailId = db.StockOutDetails.Single(d => d.StockOutId == id).Id;
+        var list = new ContainerLoadingList
+        {
+            LoadingListNo = "ZQ-LEDGER-0002",
+            LoadingDate = DateTime.Today,
+            CustomerId = 1L,
+            Status = DocumentStatus.Approved,
+            Details = new List<ContainerLoadingDetail>
+            {
+                new() { ProductId = Product1, ProductName = "P1", Quantity = 5m,
+                    SourceStockOutDetailId = sourceDetailId }
+            }
+        };
+        db.ContainerLoadingLists.Add(list);
+        db.SaveChanges();
+
+        // 装柜清单取消（只改状态）：护栏即时释放，但装柜链接证据原样保留
+        list.Status = DocumentStatus.Cancelled;
+        db.SaveChanges();
+
+        Assert.IsType<OkObjectResult>(await ctl.Cancel(id));
+        Assert.Equal(DocumentStatus.Cancelled, db.StockOuts.Single().Status);
+        Assert.Equal(10m, db.Stocks.Single(s => s.ProductId == Product1).Quantity);
+        Assert.Equal(2, db.StockMovements.Count());
+        Assert.Single(db.StockMovements.Where(m => m.IsReversal));
+        var preservedDetail = db.ContainerLoadingDetails.AsNoTracking().Single();
+        Assert.Equal(sourceDetailId, preservedDetail.SourceStockOutDetailId);
+        Assert.Equal(5m, preservedDetail.Quantity);
     }
 
     // ==================== 测试辅助 ====================
