@@ -7,6 +7,7 @@ using ERP.Domain.Enums;
 using ERP.Infrastructure.Export;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.Data;
 
 namespace ERP.Api.Controllers;
 
@@ -344,5 +345,52 @@ public class PurchaseOrderController : DocumentControllerBase<PurchaseOrder>
     {
         if (entity.TaxRate < 0 || entity.TaxRate > 100)
             throw BusinessException.InvalidParameter("税率必须在 0~100 之间");
+    }
+
+    /// <summary>
+    /// 取消采购订单（ERP-345）：在可串行化事务内对订单行加更新锁，把「拒绝判定」与「状态变更」做成一个原子步骤，
+    /// 并与同单入库审核（ERP-342）串行化——并发场景下「入库审核通过」与「来源取消」不可能同时成功。
+    /// <para>只把状态改为已取消，<strong>不改动</strong>订单明细 / 金额 / 供应商 / 币种等原始字段；
+    /// 存在已审核且未冲销的入库或有效付款 / 发票引用证据时拒绝，且本方法<strong>绝不</strong>静默冲销库存或财务。</para>
+    /// </summary>
+    [HttpPost("{id:long}/cancel")]
+    public override async Task<IActionResult> Cancel(long id)
+    {
+        await using var transaction = await Db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
+        try
+        {
+            await AcquireOrderCancellationLockAsync(id);
+
+            var entity = await Db.PurchaseOrders.Include(o => o.Details)
+                .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
+                ?? throw BusinessException.NotFound("采购订单不存在");
+
+            await PurchaseOrderCancellationRules.ValidateCancellationAsync(Db, entity, CurrentUserId());
+
+            SetStatus(entity, DocumentStatus.Cancelled);
+            await Db.SaveChangesAsync();
+            await transaction.CommitAsync();
+        }
+        catch
+        {
+            await transaction.RollbackAsync();
+            throw;
+        }
+
+        return Ok(ApiResponse<object>.Success(null, "已取消"));
+    }
+
+    /// <summary>
+    /// 对采购订单行加更新锁（UPDLOCK, HOLDLOCK），把同单并发「入库审核 / 取消」串行化在同一事务内；
+    /// 非关系型提供程序（内存库）无法执行表提示，跳过即可（事务本身等价无事务）。
+    /// </summary>
+    private async Task AcquireOrderCancellationLockAsync(long orderId)
+    {
+        if (!Db.Database.IsRelational()) return;
+        await Db.Database
+            .SqlQueryRaw<long>(
+                "SELECT Id FROM db_owner.PurchaseOrders WITH (UPDLOCK, HOLDLOCK) WHERE Id = {0}",
+                orderId)
+            .ToListAsync();
     }
 }
