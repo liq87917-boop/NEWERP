@@ -17,6 +17,11 @@ namespace ERP.Application.Services;
 /// <para>付款单金额是同一张付款单的<b>唯一、同币种分摊额度</b>：「付款单 → 采购订单」与
 /// 「付款单 → 供应商采购发票」两套有效引用行在付款单行锁下共同占用同一额度，任一写入都必须把两套
 /// 有效行合计后与付款单权威金额比较（绝不跨币种合计、绝不重复计算证据）。</para>
+/// <para>ERP-379：付款单的<b>提交 / 审核</b>与已有的修改 / 取消 / 删除一样，都在同一个事务内先取付款单行锁
+/// （<see cref="LockPaymentRowAsync"/>），再加载权威状态，并在锁内重新复核<strong>实时启用身份</strong>
+/// （账号存在、未删除且启用）、付款单（payment）菜单授权、权威来源客户数据范围与允许的状态流转，
+/// 再用既有规则校验持久化的金额 / 币种 / 来源（<see cref="EnsurePersistedPaymentConsistentAsync"/>，
+/// 不新增任何审批要求）；任一校验失败整体回滚，状态、原始字段、删除标记与审计不变。</para>
 /// <para>本类只做<b>纯判定与有界只读查询</b>；不落库、不改写付款单与引用行；「判定 + 状态变更」的原子性与
 /// 同单并发串行化由调用方在同一可串行化事务内对付款单行加排它行锁完成。</para>
 /// </summary>
@@ -35,7 +40,10 @@ public static class SupplierPaymentLifecycleRules
         "提供货款申请单 Id 时按 Id 解析既有、未删除且未取消的申请单，并校验币种与金额兼容与客户数据范围（绝不按单号文本或金额猜测来源）；" +
         "只要存在有效的「付款单 → 采购订单」或「付款单 → 供应商采购发票」付款引用证据，就拒绝取消 / 删除或修改供应商 / 币种 / 金额，" +
         "必须先走既有显式作废服务释放限制（作废保留历史、绝不物理删除）；" +
-        "付款单生命周期与两套引用证据写入通过付款单行锁 + 可串行化事务串行化，两套证据共同占用同一付款额度，绝不跨币种合计、绝不重复计算证据。";
+        "付款单的修改 / 提交 / 审核 / 取消 / 删除都在同一事务内先取付款单行锁再加载权威状态与字段，" +
+        "并在锁内重新校验实时启用身份、付款单菜单授权、权威来源客户数据范围与允许的状态流转，再用既有规则复核持久化金额 / 币种 / 来源（不新增审批要求），" +
+        "失败整体回滚、状态与审计不变；" +
+        "付款单生命周期与两套引用证据写入使用同一锁序（先付款单行、后引用行），两套证据共同占用同一付款额度，绝不跨币种合计、绝不重复计算证据。";
 
     /// <summary>模块边界文案（不付款 / 不记账 / 不核销，也不改写采购订单、发票、库存或供应商余额）</summary>
     public const string BoundaryText =
@@ -91,12 +99,25 @@ public static class SupplierPaymentLifecycleRules
 
     // ==================== 2. 身份 / 菜单 / 客户数据范围（fail closed） ====================
 
-    /// <summary>校验当前账号具备付款单（payment）菜单授权；无身份 / 无角色 / 无授权一律拒绝。</summary>
+    /// <summary>
+    /// 校验当前账号的<strong>实时启用身份</strong>与付款单（payment）菜单授权：无身份 / 账号不存在或被删除 /
+    /// 账号被禁用 / 无角色 / 无授权一律拒绝（fail closed，绝不退化为匿名或管理员）。
+    /// <para>每次调用都重新查询 <c>SysUsers</c> 与「角色 → 菜单」授权（无缓存），因此账号停用或授权撤销后
+    /// 下一次请求立即收敛；付款单的修改 / 提交 / 审核 / 取消 / 删除会在同一事务内、取得付款单行锁之后再调用本方法，
+    /// 用实时身份与授权覆盖「先读后写」窗口。</para>
+    /// </summary>
     public static async Task EnsureMenuAuthorizedAsync(IErpDbContext db, long? userId)
     {
         ArgumentNullException.ThrowIfNull(db);
         if (userId is null or <= 0)
             throw new BusinessException("请先登录后再访问付款单", ErrorCodes.Unauthorized);
+
+        var user = await db.SysUsers.AsNoTracking()
+            .FirstOrDefaultAsync(u => u.Id == userId.Value && !u.IsDeleted);
+        if (user is null)
+            throw new BusinessException("登录账号不存在或已删除，禁止操作付款单", ErrorCodes.Unauthorized);
+        if (user.Status != UserStatus.Enabled)
+            throw new BusinessException("登录账号已禁用，禁止操作付款单（fail closed）", ErrorCodes.Forbidden);
 
         var menuCodes = await CustomerReceivableReconciliationService.LoadAuthorizedMenuCodesAsync(db, userId.Value);
         if (!menuCodes.Contains(RequiredMenuCode, StringComparer.OrdinalIgnoreCase))
@@ -173,6 +194,23 @@ public static class SupplierPaymentLifecycleRules
                 + $"{applyAmount} {applyCurrency}：不能引用（系统不做超额付款、不自动调整差额）");
 
         return apply;
+    }
+
+    /// <summary>
+    /// 用既有规则复核<strong>已持久化</strong>付款单的金额 / 币种 / 来源一致性（只读，不写库、不新增审批要求）：
+    /// 币种必须在既有系统币种口径内，金额按币种精度取整后必须大于 0，关联货款申请单（若存在）必须仍可按 Id 解析到
+    /// 既有、未删除且未取消的申请单且币种一致、付款金额不超过申请金额；未关联申请单的历史付款场景保持不变。
+    /// <para>提交 / 审核会在付款单行锁与同一事务内调用本方法，防止在锁外被改写的非法持久化数据被流转放行；
+    /// 不使用任何新阈值、新审批人或新单据状态。</para>
+    /// </summary>
+    public static async Task EnsurePersistedPaymentConsistentAsync(IErpDbContext db, FinancePayment payment)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(payment);
+
+        var currency = NormalizePaymentCurrency(payment.Currency);
+        var amount = NormalizePaymentAmount(payment.Amount, currency);
+        await ResolvePaymentApplyAsync(db, payment.PaymentApplyId, currency, amount);
     }
 
     /// <summary>付款单当前派生的客户 Id：未关联货款申请单时为 null；关联申请单已删除时也为 null（fail closed）。</summary>
@@ -312,6 +350,10 @@ public static class SupplierPaymentLifecycleRules
     /// UPDATE，从而取得排它行锁（X 锁，持有至事务结束），语义等价于 <c>SELECT ... WITH (UPDLOCK, HOLDLOCK)</c>；
     /// <c>UpdatedAt</c> 是技术审计字段、不是引用证据，因此不构成对引用证据的静默改写。
     /// 内存库等非关系型提供程序无行锁语义，直接跳过（事务等价无事务）。</para>
+    /// <para><b>锁序（ERP-379，全模块统一）</b>：付款单生命周期动作（修改 / 提交 / 审核 / 取消 / 删除）与两套
+    /// 付款引用证据写入都必须先取本锁、再读写引用行（<b>先付款单行、后引用行</b>），绝不反向获取下游锁；
+    /// 因此「提交 / 审核 / 取消 / 删除 / 改动供应商 / 币种 / 金额」与「登记引用证据」只能串行执行，
+    /// 不会产生孤儿引用、超额度付款或半成品写入。</para>
     /// </summary>
     public static async Task LockPaymentRowAsync(IErpDbContext db, long paymentId)
     {

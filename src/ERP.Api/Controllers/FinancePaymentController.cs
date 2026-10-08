@@ -136,30 +136,78 @@ public class FinancePaymentController : DocumentControllerBase<FinancePayment>
         }
     }
 
-    /// <summary>提交：重新校验身份 / 菜单 / 客户范围后，仅待提交 → 已提交。</summary>
+    /// <summary>
+    /// 提交（ERP-379）：同一事务内先取付款单行锁，再读权威状态，并在锁内重新校验实时启用身份 / 付款单菜单授权 /
+    /// 权威来源客户数据范围与允许的状态流转，再用既有规则复核持久化金额 / 币种 / 来源；仅待提交 → 已提交，
+    /// 失败整体回滚（状态、字段、删除标记与审计不变）。
+    /// </summary>
     [HttpPost("{id:long}/submit")]
     public override async Task<IActionResult> Submit(long id)
     {
-        var entity = await GetOrThrowAsync(id, "付款单不存在");
-        await EnsurePaymentAuthorizedAsync(entity);
-        if (GetStatus(entity) != DocumentStatus.Pending)
-            throw BusinessException.RuleConflict("当前状态不允许该操作");
-        SetStatus(entity, DocumentStatus.Submitted);
-        await Db.SaveChangesAsync();
-        return Ok(ApiResponse<object>.Success(null, "提交成功"));
+        await using var transaction = SupplierPaymentLifecycleRules.IsRelationalProvider(Db)
+            ? await Db.Database.BeginTransactionAsync()
+            : null;
+        try
+        {
+            await SupplierPaymentLifecycleRules.LockPaymentRowAsync(Db, id);
+
+            var entity = await Db.FinancePayments
+                .FirstOrDefaultAsync(p => p.Id == id && !p.IsDeleted)
+                ?? throw BusinessException.NotFound("付款单不存在");
+
+            await EnsurePaymentAuthorizedAsync(entity);
+            if (GetStatus(entity) != DocumentStatus.Pending)
+                throw BusinessException.RuleConflict("当前状态不允许该操作");
+            await SupplierPaymentLifecycleRules.EnsurePersistedPaymentConsistentAsync(Db, entity);
+
+            SetStatus(entity, DocumentStatus.Submitted);
+            await Db.SaveChangesAsync();
+
+            if (transaction is not null) await transaction.CommitAsync();
+            return Ok(ApiResponse<object>.Success(null, "提交成功"));
+        }
+        catch
+        {
+            if (transaction is not null) await transaction.RollbackAsync();
+            throw;
+        }
     }
 
-    /// <summary>审核：重新校验身份 / 菜单 / 客户范围后，仅已提交 → 已审核。</summary>
+    /// <summary>
+    /// 审核（ERP-379）：同一事务内先取付款单行锁，再读权威状态，并在锁内重新校验实时启用身份 / 付款单菜单授权 /
+    /// 权威来源客户数据范围与允许的状态流转，再用既有规则复核持久化金额 / 币种 / 来源；仅已提交 → 已审核，
+    /// 与并发取消互斥且失败整体回滚。
+    /// </summary>
     [HttpPost("{id:long}/approve")]
     public override async Task<IActionResult> Approve(long id)
     {
-        var entity = await GetOrThrowAsync(id, "付款单不存在");
-        await EnsurePaymentAuthorizedAsync(entity);
-        if (GetStatus(entity) != DocumentStatus.Submitted)
-            throw BusinessException.RuleConflict("当前状态不允许该操作");
-        SetStatus(entity, DocumentStatus.Approved);
-        await Db.SaveChangesAsync();
-        return Ok(ApiResponse<object>.Success(null, "审核通过"));
+        await using var transaction = SupplierPaymentLifecycleRules.IsRelationalProvider(Db)
+            ? await Db.Database.BeginTransactionAsync()
+            : null;
+        try
+        {
+            await SupplierPaymentLifecycleRules.LockPaymentRowAsync(Db, id);
+
+            var entity = await Db.FinancePayments
+                .FirstOrDefaultAsync(p => p.Id == id && !p.IsDeleted)
+                ?? throw BusinessException.NotFound("付款单不存在");
+
+            await EnsurePaymentAuthorizedAsync(entity);
+            if (GetStatus(entity) != DocumentStatus.Submitted)
+                throw BusinessException.RuleConflict("当前状态不允许该操作");
+            await SupplierPaymentLifecycleRules.EnsurePersistedPaymentConsistentAsync(Db, entity);
+
+            SetStatus(entity, DocumentStatus.Approved);
+            await Db.SaveChangesAsync();
+
+            if (transaction is not null) await transaction.CommitAsync();
+            return Ok(ApiResponse<object>.Success(null, "审核通过"));
+        }
+        catch
+        {
+            if (transaction is not null) await transaction.RollbackAsync();
+            throw;
+        }
     }
 
     /// <summary>取消：重新校验身份 / 菜单 / 客户范围，并拒绝存在有效付款引用证据的取消；重复取消被拒绝。</summary>
