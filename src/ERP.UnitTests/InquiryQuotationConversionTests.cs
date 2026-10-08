@@ -85,8 +85,54 @@ public class InquiryQuotationConversionTests
         Assert.Contains("/api/inquiries/${id}/to-quotation", script);
     }
 
+    [Fact]
+    public async Task Unauthenticated_conversion_and_prefill_are_rejected_without_mutation()
+    {
+        using var db = TestDbFactory.Create();
+        var inquiry = Seed(db, DocumentStatus.Approved);
+        var controller = Controller(db, null);   // 无身份：fail closed
+
+        await Assert.ThrowsAsync<BusinessException>(() => controller.ToQuotation(inquiry.Id));
+        await Assert.ThrowsAsync<BusinessException>(() => controller.QuotationPrefill(inquiry.Id));
+
+        Assert.Empty(db.Quotations);
+        Assert.Equal(DocumentStatus.Approved, db.Inquiries.AsNoTracking().Single().Status);
+    }
+
+    [Fact]
+    public async Task Converted_source_is_frozen_for_cancel_edit_delete_and_reconvert()
+    {
+        using var db = TestDbFactory.Create();
+        var inquiry = Seed(db, DocumentStatus.Approved);
+        var controller = Controller(db);
+        await controller.ToQuotation(inquiry.Id);
+
+        await Assert.ThrowsAsync<BusinessException>(() => controller.Cancel(inquiry.Id));
+        await Assert.ThrowsAsync<BusinessException>(() =>
+            controller.Update(inquiry.Id, new Inquiry { CustomerId = inquiry.CustomerId }));
+        await Assert.ThrowsAsync<BusinessException>(() => controller.Delete(inquiry.Id));
+        await Assert.ThrowsAsync<BusinessException>(() => controller.QuotationPrefill(inquiry.Id));
+        await Assert.ThrowsAsync<BusinessException>(() => controller.ToQuotation(inquiry.Id));
+
+        var stored = db.Inquiries.AsNoTracking().Single();
+        Assert.Equal(DocumentStatus.Completed, stored.Status);
+        Assert.False(stored.IsDeleted);
+        Assert.Single(db.Quotations.Where(q => !q.IsDeleted));
+    }
+
     private static InquiryController Controller(ERP.Infrastructure.Data.ErpDbContext db)
-        => new(db, new DocumentNumberService(db));
+    {
+        var controller = new InquiryController(db, new DocumentNumberService(db));
+        TestAuth.SetUser(controller, TestAuth.SeedPrivilegedUser(db));
+        return controller;
+    }
+
+    private static InquiryController Controller(ERP.Infrastructure.Data.ErpDbContext db, long? userId)
+    {
+        var controller = new InquiryController(db, new DocumentNumberService(db));
+        TestAuth.SetUser(controller, userId);
+        return controller;
+    }
 
     private static Inquiry Seed(ERP.Infrastructure.Data.ErpDbContext db, DocumentStatus status)
     {

@@ -412,6 +412,24 @@ public static class QuotationMutationRules
         + "（db_owner.Quotations WITH (UPDLOCK, HOLDLOCK)，等价实现为审计时间戳刷新的 UPDATE），"
         + "再按需要取 PI / 销售订单行锁（恒定锁序「报价单 → PI / 销售订单」），与「报价单 → 销售订单」直接转换"
         + "共用同一把来源行锁：并发人工保存与直接转换串行化在同一原子事务内，同一报价单至多一张完整目标订单。";
+
+    /// <summary>
+    /// 来源询价单行锁语句（引用 ERP-402 同一把询价单来源行锁，跨单据链的<b>第一把锁</b>）：
+    /// 询价单生命周期变更 / 批量删除 / 转报价单与报价单自身生命周期共用同一锁序，绝不反向获取上游锁。
+    /// </summary>
+    public const string InquiryRowLockSql = InquiryMutationRules.InquiryRowLockSql;
+
+    /// <summary>
+    /// 「询价单 → 报价单 → PI / 销售订单」的确定锁序口径（接口 / 文档同源，ERP-402）：
+    /// 恒定先取「询价单来源行锁」，再取「报价单来源行锁」（与本类生命周期 / 版本 / 转换同一把），
+    /// 之后才是 PI / 销售订单行锁；写路径绝不反向获取上游锁，因此不存在锁环。
+    /// </summary>
+    public const string InquiryToQuotationLockOrderText =
+        "ERP-402：询价单生命周期变更 / 批量删除 / 转报价单恒定先取「询价单来源行锁」"
+        + "（db_owner.Inquiries WITH (UPDLOCK, HOLDLOCK)，等价实现为审计时间戳刷新的 UPDATE），"
+        + "再取「报价单来源行锁」（db_owner.Quotations，与 ERP-400 生命周期 / 版本 / 转换同一把），"
+        + "跨单据链恒定锁序为「询价单行锁 → 报价单行锁 → PI 行锁 / 销售订单行锁」，"
+        + "同一询价单的并发转换与报价单生命周期变更因此串行化在同一原子事务内，绝不反向获取上游锁。";
 }
 
 
