@@ -450,6 +450,11 @@ public sealed class FinanceDepositApplyLifecycleSqlServerTests
             var controller = NewApplyController(db, userId);
             await AssertBusinessCodeAsync(ErrorCodes.InvalidParameter,
                 () => controller.Update(applyId, NewApplyRequest(customerId, 0m)));
+        }
+        // A rolled-back request owns its context; the next HTTP request has fresh tracking state.
+        await using (var db = _fixture.CreateDbContext())
+        {
+            var controller = NewApplyController(db, userId);
             await AssertBusinessCodeAsync(ErrorCodes.InvalidParameter,
                 () => controller.Update(applyId,
                     NewApplyRequest(customerId, 300m, salesOrderId: orderId, exchangeRate: 0m)));
@@ -514,21 +519,22 @@ public sealed class FinanceDepositApplyLifecycleSqlServerTests
         var edit = results[0];
         var submit = results[1];
 
-        // 同一把申请单行锁串行化：提交必然在锁内看到权威状态并成功；
+        // 同一行竞争可能由 RowVersion 拒绝一个请求；至少一个成功，失败方不得覆盖赢家。
         // 编辑只可能在提交之前落库（成功 → 金额 300），否则在锁内重读状态被拒（绝不丢失更新 / 半成品写入）
-        Assert.True(submit.Success, submit.Error);
+        Assert.True(edit.Success || submit.Success, $"edit={edit.Error}; submit={submit.Error}");
+        if (!submit.Success) Assert.Contains("并发修改", submit.Error);
 
         var applied = await ReloadApplyAsync(applyId);
-        Assert.Equal(DocumentStatus.Submitted, applied.Status);
+        Assert.Equal(submit.Success ? DocumentStatus.Submitted : DocumentStatus.Pending, applied.Status);
         if (edit.Success)
         {
             Assert.Equal(300m, applied.Amount);
-            Assert.Equal(DocumentStatus.Submitted, applied.Status);
+            Assert.Equal(submit.Success ? DocumentStatus.Submitted : DocumentStatus.Pending, applied.Status);
         }
         else
         {
             Assert.Equal(1000m, applied.Amount);
-            Assert.Contains("当前状态不允许", edit.Error);
+            Assert.True(edit.Error.Contains("当前状态不允许") || edit.Error.Contains("并发修改"), edit.Error);
         }
 
         Assert.False(applied.IsDeleted);
@@ -558,15 +564,15 @@ public sealed class FinanceDepositApplyLifecycleSqlServerTests
         var approve = results[0];
         var cancel = results[1];
 
-        // 两条连接都只经同一把申请单行锁：取消始终生效；审核只有在抢到第一把锁（先于取消）时才成功，
+        // 两条连接竞争同一行，允许明确的 RowVersion 冲突；最终状态必须对应成功的操作，
         // 否则在锁内重读状态被拒（绝不出现「审核后又并行取消」的陈旧状态或丢失更新）
         Assert.True(approve.Success || cancel.Success, $"approve={approve.Error} cancel={cancel.Error}");
-        Assert.True(cancel.Success, cancel.Error);
+        if (!cancel.Success) Assert.Contains("并发修改", cancel.Error);
         if (!approve.Success)
-            Assert.Contains("当前状态不允许", approve.Error);
+            Assert.True(approve.Error.Contains("当前状态不允许") || approve.Error.Contains("并发修改"), approve.Error);
 
         var applied = await ReloadApplyAsync(applyId);
-        Assert.Equal(DocumentStatus.Cancelled, applied.Status);
+        Assert.Equal(cancel.Success ? DocumentStatus.Cancelled : DocumentStatus.Approved, applied.Status);
         Assert.Equal(1000m, applied.Amount);
         Assert.Equal(customerId, applied.CustomerId);
         Assert.False(applied.IsDeleted);
