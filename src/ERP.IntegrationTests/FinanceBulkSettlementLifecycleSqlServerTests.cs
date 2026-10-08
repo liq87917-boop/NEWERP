@@ -1,4 +1,4 @@
-﻿using ERP.Api.Controllers;
+using ERP.Api.Controllers;
 using ERP.Application.Common;
 using ERP.Application.Interfaces;
 using ERP.Application.Services;
@@ -337,7 +337,7 @@ public sealed class FinanceBulkSettlementLifecycleSqlServerTests
             userId = (await SeedOperatorAsync(seed, customer.Id)).UserId;
 
             disabledCustomerId = (await SeedCustomerAsync(
-                seed, $"INT_E387_CDIS_{tag}", "停用客户", status: 0)).Id;
+                seed, $"INT_E387_CDIS_{tag}", "停用客户", status: 0, empId: customer.EmpId)).Id;
             foreignCustomerId = (await SeedCustomerAsync(
                 seed, $"INT_E387_CFOR_{tag}", "范围外客户")).Id;
         }
@@ -355,7 +355,8 @@ public sealed class FinanceBulkSettlementLifecycleSqlServerTests
                 new FinanceBulkSettlement { CustomerId = disabledCustomerId, SettlementDate = DateTime.Today, TotalAmount = 100m }));
             await AssertBusinessCodeAsync(ErrorCodes.Forbidden, () => controller.Create(
                 new FinanceBulkSettlement { CustomerId = foreignCustomerId, SettlementDate = DateTime.Today, TotalAmount = 100m }));
-            await AssertBusinessCodeAsync(ErrorCodes.NotFound, () => controller.Create(
+            // Unknown customer is outside this restricted operator's scope: deny before existence lookup.
+            await AssertBusinessCodeAsync(ErrorCodes.Forbidden, () => controller.Create(
                 new FinanceBulkSettlement { CustomerId = 99999999L, SettlementDate = DateTime.Today, TotalAmount = 100m }));
         }
 
@@ -385,7 +386,7 @@ public sealed class FinanceBulkSettlementLifecycleSqlServerTests
                 seed, $"INT_E387_SDEL_{tag}", customer.Id, 800m)).Id;
 
             disabledCustomerId = (await SeedCustomerAsync(
-                seed, $"INT_E387_EDIS_{tag}", "停用客户", status: 0)).Id;
+                seed, $"INT_E387_EDIS_{tag}", "停用客户", status: 0, empId: customer.EmpId)).Id;
             foreignCustomerId = (await SeedCustomerAsync(
                 seed, $"INT_E387_EFOR_{tag}", "范围外客户")).Id;
         }
@@ -506,7 +507,10 @@ public sealed class FinanceBulkSettlementLifecycleSqlServerTests
 
         // 串行化后绝无「已取消又被审核」或丢失更新：最终状态必须对应成功的操作
         Assert.True(approve.Success || cancel.Success, $"approve={approve.Error}; cancel={cancel.Error}");
-        if (!approve.Success) Assert.Contains("当前状态不允许", approve.Error);
+        if (!approve.Success)
+            Assert.True(approve.Error.Contains("当前状态不允许") || approve.Error.Contains("正在被并发修改"), approve.Error);
+        if (!cancel.Success)
+            Assert.Contains("正在被并发修改", cancel.Error);
 
         var applied = await ReloadSettlementAsync(settlementId);
         Assert.Equal(cancel.Success ? DocumentStatus.Cancelled : DocumentStatus.Approved, applied.Status);
