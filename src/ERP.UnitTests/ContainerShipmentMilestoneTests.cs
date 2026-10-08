@@ -30,7 +30,13 @@ public class ContainerShipmentMilestoneTests
     /// <summary>默认事件时间（各用例统一口径）</summary>
     private static readonly DateTime DefaultEventAt = new(2026, 9, 12, 10, 30, 0);
 
-    private static ContainerShipmentMilestoneController BuildController(ErpDbContext db) => new(db);
+    private static ContainerShipmentMilestoneController BuildController(ErpDbContext db)
+    {
+        // ERP-365：本模块每个路由都先实时授权，测试用既有特权账号（系统内置角色，不新增任何用户授权）。
+        var controller = new ContainerShipmentMilestoneController(db);
+        TestAuth.SetUser(controller, TestAuth.SeedPrivilegedUser(db));
+        return controller;
+    }
 
     private static ContainerBooking SeedBooking(
         ErpDbContext db, string bookingNo, DocumentStatus status = DocumentStatus.Pending, bool deleted = false)
@@ -715,8 +721,11 @@ public class ContainerShipmentMilestoneTests
         await db.SaveChangesAsync();
 
         var counting = CountingDbContext.Wrap(db);
+        // ERP-365：读写同口径授权；特权账号（全部三种源类型 + 不限客户）不应产生额外的行级范围查询。
+        var userId = TestAuth.SeedPrivilegedUser(db);
+        var access = await ShipmentReferenceAuthorizationRules.EnsureAuthorizedAsync(db, userId);
         var single = await ContainerShipmentMilestoneService.ListAsync(
-            counting.Proxy, new ContainerShipmentMilestoneQuery { PageSize = 1 });
+            counting.Proxy, new ContainerShipmentMilestoneQuery { PageSize = 1 }, access);
         var singleReads = counting.DatasetReads;
 
         Assert.Equal(1, single.Total);
@@ -745,7 +754,7 @@ public class ContainerShipmentMilestoneTests
         await db.SaveChangesAsync();
 
         var large = await ContainerShipmentMilestoneService.ListAsync(
-            counting.Proxy, new ContainerShipmentMilestoneQuery { PageSize = 200 });
+            counting.Proxy, new ContainerShipmentMilestoneQuery { PageSize = 200 }, access);
         var largeReads = counting.DatasetReads - singleReads;
 
         Assert.Equal(301, large.Total);

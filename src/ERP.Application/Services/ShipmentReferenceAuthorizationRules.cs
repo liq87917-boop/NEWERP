@@ -314,4 +314,62 @@ public static class ShipmentReferenceAuthorizationRules
         EnsureScopeAllowsCustomer(
             access, customerId, ContainerShipmentReferenceRules.SourceTypeText(sourceType));
     }
+
+    // ==================== 里程碑证据（ERP-058 / ERP-365）：同一授权口径 ====================
+
+    /// <summary>父出运引用已被物理删除时的拒绝文案（无法解析权威客户归属，受限账号 fail closed）</summary>
+    public const string MilestoneParentMissingText =
+        "父出运引用已不存在，无法解析其源记录的权威客户归属（受限账号 fail closed）";
+
+    /// <summary>当前账号是否具备全部三种既有源模块菜单授权（特权账号继承全部三种）</summary>
+    private static bool HasAllSourceMenus(ShipmentReferenceAccess access)
+        => ContainerShipmentReferenceRules.SupportedSourceTypes.All(access.AllowsSourceType);
+
+    /// <summary>
+    /// 把同一套授权与数据范围下推到**里程碑台账**（ERP-058）：受限账号只返回「父出运引用指向本人客户
+    /// 源记录」的里程碑行，且父出运引用的源记录类型必须在其既有源模块菜单授权内
+    /// （在 <c>Count</c> / 分页之前，绝不「先查全量再内存过滤」）。
+    /// <para>只按**持久化的父出运引用 Id** 关联判定（绝不按柜号 / S/O / B/L 等自由文本匹配，
+    /// 也绝不改派父记录）；父出运引用或源记录被删除 / 取消后历史里程碑仍保留可读，
+    /// 但只有落在本人客户范围内的受限账号可见 —— 无法解析权威客户的孤儿父记录对受限账号 fail closed，
+    /// 绝不降级为全局可见。</para>
+    /// <para>特权账号（全部三种源类型 + 不限客户）不做行级过滤，不产生额外数据集访问。</para>
+    /// </summary>
+    public static IQueryable<ContainerShipmentMilestone> ApplyScopeToMilestones(
+        IErpDbContext db, IQueryable<ContainerShipmentMilestone> source, ShipmentReferenceAccess access)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(source);
+        ArgumentNullException.ThrowIfNull(access);
+
+        // 特权 / 全域账号：不做行级过滤（等价于 ApplyScope 的空过滤分支），避免额外数据集访问。
+        if (access.Scope.AllowedCustomerIds is null && HasAllSourceMenus(access)) return source;
+
+        var parents = ApplyScope(db, db.ContainerShipmentReferences.AsNoTracking(), access);
+        return source.Where(m => parents.Any(r => r.Id == m.ContainerShipmentReferenceId));
+    }
+
+    /// <summary>
+    /// 单条里程碑的父出运引用授权守卫（读 / 写同口径）：父引用缺失（历史异常 / 物理删除）时，
+    /// 受限账号无法解析权威客户归属 → fail closed，特权账号照常（仅用于历史证据的显式更正）；
+    /// 父引用存在时按**持久化的源记录类型 + Id** 校验既有源模块菜单与权威客户数据范围，
+    /// 绝不按自由文本匹配、也不改派。
+    /// </summary>
+    public static async Task EnsureScopeAllowsParentReferenceAsync(
+        IErpDbContext db, ShipmentReferenceAccess access, ContainerShipmentReference? parent,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(access);
+
+        if (parent is null)
+        {
+            if (access.Scope.AllowedCustomerIds is null && HasAllSourceMenus(access)) return;
+            throw new BusinessException($"{OutOfScopeText}（{MilestoneParentMissingText}）",
+                ErrorCodes.Forbidden);
+        }
+
+        RequireSourceType(access, parent.SourceType);
+        await EnsureScopeAllowsSourceAsync(db, access, parent.SourceType, parent.SourceId, ct);
+    }
 }

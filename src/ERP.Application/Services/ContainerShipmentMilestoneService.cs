@@ -21,8 +21,15 @@ namespace ERP.Application.Services;
 /// </list>
 /// <para>审计口径：ERP-057 已建立唯一权威的出运引用登记册，本服务只在其<strong>之下</strong>追加
 /// 操作性事件证据：<strong>不</strong>新建出运 / 跟踪主数据、<strong>不</strong>在装柜三单或出运引用上加列。</para>
-/// <para>边界（重要）：本服务只读写 <c>ContainerShipmentMilestones</c> 一张表（读取时只读父出运引用），
-/// <strong>不</strong>改写父出运引用、订柜信息 / 预装柜单 / 装柜清单的任何列、状态与工作流，
+/// <para>授权与串行化（ERP-365，复用 ERP-362 口径）：五个入口（<see cref="CreateAsync"/> /
+/// <see cref="VoidAsync"/> / <see cref="ListAsync"/> / <see cref="GetAsync"/> /
+/// <see cref="ListParentCandidatesAsync"/>）都先按父出运引用<strong>持久化</strong>的源记录类型 + Id 授权
+/// （既有源模块菜单 + 权威客户数据范围），再读取任何计数 / 证据字段；受限账号的范围在
+/// <c>Count</c> / 分页 / <c>Take</c> 之前下推到数据库。写路径由控制器在可序列化事务内先对
+/// <b>父引用行</b>与<b>源记录行</b>加 <c>UPDLOCK, HOLDLOCK</c>（作废时对<b>里程碑行</b>加锁）后调用本服务。</para>
+/// <para>边界（重要）：本服务只读写 <c>ContainerShipmentMilestones</c> 一张表（读取时只读父出运引用，
+/// 以及经 <see cref="ContainerShipmentReferenceService.ResolveSourceStateAsync"/> 读取父引用**源记录**的
+/// 只读资格快照），<strong>不</strong>改写父出运引用、订柜信息 / 预装柜单 / 装柜清单的任何列、状态与工作流，
 /// <strong>不</strong>自动推进任何业务单据，也<strong>不</strong>改写销售订单、采购订单、库存与库存成本、
 /// 库存流水、单证中心、发票、费用与分摊、收付款、税务与结算记录，更<strong>不</strong>轮询承运人、海关、
 /// 货代或任何外部系统（里程碑不是承运人 / 海关确认，也不是出运许可）。</para>
@@ -34,14 +41,21 @@ public static class ContainerShipmentMilestoneService
     /// <summary>
     /// 登记一条里程碑证据：全部校验通过后才写一行证据；事件时间与登记时间由服务端权威写入，
     /// 可选字段（来源说明 / 备注 / 记录人）留空时保持空串 = 未知，绝不推断。
-    /// <para>校验顺序：父出运引用 Id → 事件类型（allowlist）→ 事件时间（必填 + 有界）→
-    /// 父记录存在且未删除未作废 → 重复有效证据（同父 + 同类型 + 同时间）拒绝。</para>
+    /// <para>校验顺序（ERP-365）：父出运引用 Id → 事件类型（allowlist）→ 事件时间（必填 + 有界）→
+    /// 父出运引用存在且未删除未作废 → <b>既有源模块菜单授权</b>（按父引用持久化的源记录类型）→
+    /// <b>权威客户数据范围</b> → <b>父引用源记录资格</b>（存在 / 未删除 / 未取消）→
+    /// 重复有效证据（同父 + 同类型 + 同时间）拒绝。</para>
+    /// <para>授权与资格校验全部先于任何计数 / 证据读取：先授权再读，绝不「先读再判」。</para>
+    /// <para>调用方（控制器）必须在可串行化事务内先对**父引用行**与**源记录行**加
+    /// <c>UPDLOCK, HOLDLOCK</c> 后再调用本方法：父引用资格、源记录资格与「同父 + 同类型 + 同时间」
+    /// 唯一性都落在同一把锁与同一事务内（并发登记只能成功一条）。</para>
     /// </summary>
     public static async Task<ContainerShipmentMilestoneDto> CreateAsync(
-        IErpDbContext db, ContainerShipmentMilestoneSaveDto dto)
+        IErpDbContext db, ContainerShipmentMilestoneSaveDto dto, ShipmentReferenceAccess access)
     {
         ArgumentNullException.ThrowIfNull(db);
         ArgumentNullException.ThrowIfNull(dto);
+        ArgumentNullException.ThrowIfNull(access);
 
         if (dto.ContainerShipmentReferenceId <= 0)
             throw BusinessException.InvalidParameter(
@@ -53,6 +67,16 @@ public static class ContainerShipmentMilestoneService
         var parent = await LoadParentAsync(db, dto.ContainerShipmentReferenceId);
         var parentLabel = $"{ContainerShipmentReferenceRules.SourceTypeText(parent.SourceType)}"
                           + $"「{parent.SourceNo}」";
+
+        // ERP-365：授权先于任何计数 / 证据读取 —— 父引用持久化的源记录类型必须落在既有源模块菜单内，
+        // 受限账号还必须命中该源记录的权威客户范围（fail closed，不泄露范围外证据）。
+        ShipmentReferenceAuthorizationRules.RequireSourceType(access, parent.SourceType);
+        await ShipmentReferenceAuthorizationRules.EnsureScopeAllowsSourceAsync(
+            db, access, parent.SourceType, parent.SourceId);
+
+        // ERP-365：父出运引用的**源记录**也必须仍在资格内（存在、未删除、未取消），否则拒绝新增证据
+        // （历史里程碑照常可读，也绝不因此改写源记录 / 改派父记录）。
+        await EnsureParentSourceEligibleAsync(db, parent);
 
         // 同一父记录 + 事件类型 + 事件时间：不允许重复有效证据（重复直接拒绝，不静默合并、
         // 也不覆盖既有来源说明 / 备注 / 记录人）；已作废行不占用额度，作废后可重新登记。
@@ -79,7 +103,9 @@ public static class ContainerShipmentMilestoneService
             RecordedBy = ContainerShipmentMilestoneRules.NormalizeRecordedBy(dto.RecordedBy),
             RecordedAt = DateTime.Now,
             Status = ContainerShipmentMilestoneRules.StatusRecorded,
-            CreatedAt = DateTime.Now
+            CreatedAt = DateTime.Now,
+            CreatedBy = access.UserId,
+            UpdatedBy = access.UserId
         };
 
         db.ContainerShipmentMilestones.Add(row);
@@ -96,20 +122,31 @@ public static class ContainerShipmentMilestoneService
     /// 不提供硬删除，也不提供改写已作废证据的接口。
     /// </summary>
     public static async Task<ContainerShipmentMilestoneDto> VoidAsync(
-        IErpDbContext db, long id, string? reason)
+        IErpDbContext db, long id, string? reason, ShipmentReferenceAccess access)
     {
         ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(access);
         if (id <= 0) throw BusinessException.InvalidParameter("请指定要作废的里程碑证据");
 
         var row = await LoadAsync(db, id);
+
+        // ERP-365：按父出运引用**持久化的源记录类型 + Id** 授权（读 / 写同口径）；父引用被物理删除时
+        // 受限账号无法解析权威客户归属 → fail closed，特权账号照常（仅用于历史证据的显式更正）。
+        var parent = await db.ContainerShipmentReferences.AsNoTracking()
+            .FirstOrDefaultAsync(o => o.Id == row.ContainerShipmentReferenceId);
+        await ShipmentReferenceAuthorizationRules.EnsureScopeAllowsParentReferenceAsync(db, access, parent);
+
         ContainerShipmentMilestoneRules.EnsureRecordedForVoid(row.Status);
 
         var voidReason = ContainerShipmentMilestoneRules.NormalizeVoidReason(reason);
+        var now = DateTime.Now;
 
+        // 只改本行状态与作废留痕：原始事件类型 / 事件时间 / 来源说明 / 备注 / 记录人 / 登记时间照常保留。
         row.Status = ContainerShipmentMilestoneRules.StatusVoided;
-        row.VoidedAt = DateTime.Now;
+        row.VoidedAt = now;
         row.VoidReason = voidReason;
-        row.UpdatedAt = DateTime.Now;
+        row.UpdatedAt = now;
+        row.UpdatedBy = access.UserId;
         await db.SaveChangesAsync();
 
         return await MapSingleAsync(db, row);
@@ -139,6 +176,26 @@ public static class ContainerShipmentMilestoneService
         => await db.ContainerShipmentMilestones.FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
            ?? throw BusinessException.NotFound($"里程碑证据不存在（Id={id}）");
 
+    /// <summary>
+    /// 父出运引用的**源记录**资格守卫（ERP-365，与 ERP-057 登记口径同源）：源记录只按显式类型 + Id
+    /// 读取（绝不按柜号 / S/O / B/L 等自由文本匹配），不存在 → 数据不存在；已删除 / 已取消 →
+    /// 业务规则冲突（拒绝**新增**里程碑证据，历史里程碑照常可读）。只读快照，不改写源记录任何列。
+    /// </summary>
+    private static async Task EnsureParentSourceEligibleAsync(
+        IErpDbContext db, ContainerShipmentReference parent)
+    {
+        var sourceTypeText = ContainerShipmentReferenceRules.SourceTypeText(parent.SourceType);
+        var state = await ContainerShipmentReferenceService.ResolveSourceStateAsync(
+            db, parent.SourceType, parent.SourceId);
+        var (eligible, text) = ContainerShipmentMilestoneRules.EvaluateParentSourceEligibility(
+            state.Exists, state.Deleted, state.Cancelled, sourceTypeText);
+        if (eligible) return;
+
+        var detail = $"{sourceTypeText}「{parent.SourceNo}」（源记录 Id={parent.SourceId}）";
+        if (!state.Exists) throw BusinessException.NotFound($"{text}：{detail}");
+        throw BusinessException.RuleConflict($"{text}：{detail}");
+    }
+
     // ==================== 4. 台账 / 详情（只读，分页有界，批量装载） ====================
 
     /// <summary>
@@ -146,12 +203,15 @@ public static class ContainerShipmentMilestoneService
     /// 默认包含已作废历史（证据保留可读）。单页内的父记录信息（源记录类型 / 单号 / 柜号 / 状态 /
     /// 可用性）一律**批量装载**（固定数量查询），不产生逐行数据库访问。
     /// <para>排序按事件时间倒序（同一时间按 Id 倒序）：时间线一眼可读，且结果稳定可复现。</para>
+    /// <para>ERP-365：受限账号的既有源模块菜单授权与权威客户数据范围在 <c>Count</c> 与分页**之前**
+    /// 下推到数据库（按持久化的父出运引用 Id 关联判定），绝不「先查全量再内存过滤」。</para>
     /// </summary>
     public static async Task<PagedResult<ContainerShipmentMilestoneDto>> ListAsync(
-        IErpDbContext db, ContainerShipmentMilestoneQuery query)
+        IErpDbContext db, ContainerShipmentMilestoneQuery query, ShipmentReferenceAccess access)
     {
         ArgumentNullException.ThrowIfNull(db);
         ArgumentNullException.ThrowIfNull(query);
+        ArgumentNullException.ThrowIfNull(access);
         query.Normalize();
 
         var keyword = ContainerShipmentMilestoneRules.NormalizeKeyword(query.Keyword);
@@ -159,6 +219,8 @@ public static class ContainerShipmentMilestoneService
         var eventType = ContainerShipmentMilestoneRules.NormalizeEventTypeFilter(query.EventType);
 
         var source = db.ContainerShipmentMilestones.AsNoTracking().Where(o => !o.IsDeleted);
+        // ERP-365：受限账号的既有源模块菜单 + 权威客户数据范围先于计数与分页下推到数据库。
+        source = ShipmentReferenceAuthorizationRules.ApplyScopeToMilestones(db, source, access);
         if (query.ContainerShipmentReferenceId is > 0)
             source = source.Where(o => o.ContainerShipmentReferenceId == query.ContainerShipmentReferenceId!.Value);
         if (eventType is not null) source = source.Where(o => o.EventType == eventType);
@@ -195,15 +257,23 @@ public static class ContainerShipmentMilestoneService
     /// <summary>
     /// 里程碑详情（只读）：当前证据 + 父记录关联口径 / 证据语义 / 模块边界文案。
     /// <para>里程碑不提供修改接口：更正走显式作废（必填原因），已作废证据保留原始值可读。</para>
+    /// <para>ERP-365：先按父出运引用**持久化的源记录类型 + Id** 授权（读 / 写同口径），再标注；
+    /// 父引用缺失时受限账号 fail closed，特权账号照常（历史证据显式标注不可用）。</para>
     /// </summary>
-    public static async Task<ContainerShipmentMilestoneDetailDto> GetAsync(IErpDbContext db, long id)
+    public static async Task<ContainerShipmentMilestoneDetailDto> GetAsync(
+        IErpDbContext db, long id, ShipmentReferenceAccess access)
     {
         ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(access);
         if (id <= 0) throw BusinessException.InvalidParameter("请指定要查看的里程碑证据");
 
         var row = await db.ContainerShipmentMilestones.AsNoTracking()
             .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
             ?? throw BusinessException.NotFound($"里程碑证据不存在（Id={id}）");
+
+        var parent = await db.ContainerShipmentReferences.AsNoTracking()
+            .FirstOrDefaultAsync(o => o.Id == row.ContainerShipmentReferenceId);
+        await ShipmentReferenceAuthorizationRules.EnsureScopeAllowsParentReferenceAsync(db, access, parent);
 
         await AnnotateAsync(db, new[] { row });
 
@@ -222,18 +292,26 @@ public static class ContainerShipmentMilestoneService
     /// 并按父记录**批量统计**里程碑条数与有效条数（固定数量查询，无逐行访问）。
     /// <para>用于**显式选择**父记录：系统<strong>不</strong>按柜号 / S/O / B/L 或任何自由文本
     /// 自动挑选父记录；没有任何里程碑的历史出运引用照常出现在候选中，不需要任何回填。</para>
+    /// <para>ERP-365：候选同样受既有源模块菜单与权威客户数据范围约束（受限账号只列出本人客户的源记录，
+    /// 范围先于 <c>Take</c> 下推到数据库）。</para>
     /// </summary>
     public static async Task<List<ContainerShipmentMilestoneParentCandidateDto>> ListParentCandidatesAsync(
-        IErpDbContext db, string? keyword, int take = ContainerShipmentMilestoneRules.MaxParentCandidates)
+        IErpDbContext db, string? keyword, ShipmentReferenceAccess access,
+        int take = ContainerShipmentMilestoneRules.MaxParentCandidates)
     {
         ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(access);
 
         var filter = ContainerShipmentMilestoneRules.NormalizeKeyword(keyword);
         var limit = take <= 0 ? ContainerShipmentMilestoneRules.MaxParentCandidates
             : Math.Min(take, ContainerShipmentMilestoneRules.MaxParentCandidates);
 
-        var rows = await db.ContainerShipmentReferences.AsNoTracking()
-            .Where(r => !r.IsDeleted && r.Status == ContainerShipmentReferenceRules.StatusRecorded)
+        var source = db.ContainerShipmentReferences.AsNoTracking()
+            .Where(r => !r.IsDeleted && r.Status == ContainerShipmentReferenceRules.StatusRecorded);
+        // ERP-365：既有源模块菜单 + 权威客户数据范围先于 Take 下推（受限账号只见本人客户）。
+        source = ShipmentReferenceAuthorizationRules.ApplyScope(db, source, access);
+
+        var rows = await source
             .Where(r => filter.Length == 0 || r.SourceNo.Contains(filter)
                         || r.ContainerNo.Contains(filter)
                         || r.BillOfLadingNo.Contains(filter)
@@ -349,7 +427,8 @@ public static class ContainerShipmentMilestoneService
                 ? ContainerShipmentMilestoneRules.ParentStatusText(parent!.Status)
                 : string.Empty;
             row.ParentAvailabilityText = ContainerShipmentMilestoneRules.ParentAvailabilityText(
-                available, parentVoided);
+                available, parentVoided,
+                available ? ContainerShipmentReferenceRules.SourceTypeText(parent!.SourceType) : string.Empty);
         }
     }
 

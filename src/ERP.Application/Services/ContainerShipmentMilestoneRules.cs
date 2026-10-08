@@ -96,7 +96,8 @@ public static class ContainerShipmentMilestoneRules
         "登记口径：每条里程碑显式挂在一条既有、未删除且未作废的出运引用之下；事件类型只接受"
         + "实际开船 / 实际到港 / 查验 / 放行，其他取值一律拒绝；事件时间必填且有界，"
         + "同一父记录 + 事件类型 + 事件时间不允许重复有效登记；更正走显式作废（必填原因），"
-        + "不提供硬删除与静默改写。";
+        + "不提供硬删除与静默改写；新增证据前还会复核父出运引用的**源记录**仍在资格内"
+        + "（存在、未删除、未取消），源记录不可用时历史里程碑照常可读。";
 
     /// <summary>查验 / 放行类事件的显式标注（仓库证据，不是权威结论）</summary>
     public const string InspectionAndReleaseEvidenceText =
@@ -249,12 +250,47 @@ public static class ContainerShipmentMilestoneRules
     }
 
     /// <summary>父记录可用性文案（被删除 / 不存在时照实说明，历史里程碑快照仍可读）</summary>
-    public static string ParentAvailabilityText(bool available, bool parentVoided) => (available, parentVoided) switch
+    public static string ParentAvailabilityText(bool available, bool parentVoided)
+        => ParentAvailabilityText(available, parentVoided, string.Empty);
+
+    /// <summary>
+    /// 父出运引用与其**源记录**的可用性文案（ERP-365）：显式标注父引用（及源记录）是否仍可用，
+    /// 历史里程碑证据一律保留可读、绝不改派；新增证据前还会再次校验源记录资格（未删除 / 未取消），
+    /// 因此可用状态下的文案显式说明「新增前复核」，不把「父引用可用」当作「源记录一定可新增」。
+    /// </summary>
+    public static string ParentAvailabilityText(bool available, bool parentVoided, string? sourceTypeText)
     {
-        (true, true) => "父出运引用已作废：历史里程碑证据保留可读，但不能新增里程碑，也不能改派到别的出运引用",
-        (true, false) => "父出运引用可用（只读关联，不会改写该出运引用）",
-        _ => "父出运引用已删除或不存在：历史里程碑证据仍可读，但不能新增里程碑，也不能改派到别的出运引用"
-    };
+        var source = string.IsNullOrWhiteSpace(sourceTypeText) ? "源记录" : sourceTypeText.Trim();
+        return (available, parentVoided) switch
+        {
+            (true, true) =>
+                $"父出运引用已作废（其{source}也不再接受新增证据）：历史里程碑证据保留可读，"
+                + "但不能新增里程碑，也不能改派到别的出运引用",
+            (true, false) =>
+                $"父出运引用可用（只读关联，不会改写该出运引用及其{source}；新增证据前会复核该{source}"
+                + "未删除 / 未取消）",
+            _ =>
+                $"父出运引用已删除或不存在（无法解析其{source}归属）：历史里程碑证据仍可读，"
+                + "但不能新增里程碑，也不能改派到别的出运引用"
+        };
+    }
+
+    /// <summary>
+    /// 父出运引用**源记录**的资格判定（ERP-365，与 ERP-057 登记口径同源）：只有存在、未删除且未取消的
+    /// 源记录才能承载**新增**的里程碑证据；已取消 / 已删除的源记录拒绝新增（历史里程碑证据照常可读、
+    /// 显式标注不可用），也绝不改写源记录本身。
+    /// </summary>
+    public static (bool Eligible, string Text) EvaluateParentSourceEligibility(
+        bool exists, bool deleted, bool cancelled, string sourceTypeText)
+    {
+        if (!exists)
+            return (false, $"父出运引用的{sourceTypeText}源记录不存在，不能新增里程碑证据（历史里程碑仍可读）");
+        if (deleted)
+            return (false, $"父出运引用的{sourceTypeText}源记录已删除，不能新增里程碑证据（历史里程碑仍可读）");
+        if (cancelled)
+            return (false, $"父出运引用的{sourceTypeText}源记录已取消，不能新增里程碑证据（历史里程碑仍可读）");
+        return (true, $"父出运引用的{sourceTypeText}源记录可挂里程碑（只读关联，不会改写该记录）");
+    }
 
     /// <summary>
     /// 父出运引用状态文案（读取侧）：未知状态码<strong>照实说明</strong>而不是抛异常，

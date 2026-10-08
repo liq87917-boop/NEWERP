@@ -752,6 +752,67 @@ public static class ContainerShipmentReferenceService
                 : row.BoundaryText);
     }
 
+    // ==================== 8. 源记录资格快照（ERP-365：里程碑复用同一资格口径） ====================
+
+    /// <summary>
+    /// 源记录的**只读资格快照**（ERP-365）：存在 / 已删除 / 已取消 + 权威客户 Id。
+    /// <para>与 ERP-057 登记出运引用时同一资格口径（存在、未删除、未取消）：挂在出运引用之下的
+    /// 里程碑证据在**新登记**前用它复核父出运引用的源记录是否仍然可承载新证据
+    /// （已取消 / 已删除的源记录拒绝新增证据）；既有历史证据照常可读，绝不因此改写任何源记录。</para>
+    /// </summary>
+    public sealed record SourceState(bool Exists, bool Deleted, bool Cancelled, long? CustomerId);
+
+    /// <summary>
+    /// 按显式类型 + Id 读取源记录资格快照（只读、单条，不按自由文本匹配）：
+    /// 不存在返回 <c>Exists=false</c>；预装柜单的客户取所链接订柜信息的客户（无链接 = 未知）。
+    /// </summary>
+    public static async Task<SourceState> ResolveSourceStateAsync(
+        IErpDbContext db, string sourceType, long sourceId, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+
+        switch (sourceType)
+        {
+            case ContainerShipmentReferenceRules.SourceTypeBooking:
+            {
+                var booking = await db.ContainerBookings.AsNoTracking()
+                    .FirstOrDefaultAsync(o => o.Id == sourceId, ct);
+                return booking is null
+                    ? new SourceState(false, false, false, null)
+                    : new SourceState(true, booking.IsDeleted,
+                        booking.Status == DocumentStatus.Cancelled, booking.CustomerId);
+            }
+
+            case ContainerShipmentReferenceRules.SourceTypePreLoading:
+            {
+                var preLoading = await db.ContainerPreLoadings.AsNoTracking()
+                    .FirstOrDefaultAsync(o => o.Id == sourceId, ct);
+                if (preLoading is null) return new SourceState(false, false, false, null);
+                var customerId = preLoading.BookingId is > 0
+                    ? await db.ContainerBookings.AsNoTracking()
+                        .Where(o => o.Id == preLoading.BookingId!.Value)
+                        .Select(o => (long?)o.CustomerId)
+                        .FirstOrDefaultAsync(ct)
+                    : null;
+                return new SourceState(true, preLoading.IsDeleted,
+                    preLoading.Status == DocumentStatus.Cancelled, customerId);
+            }
+
+            case ContainerShipmentReferenceRules.SourceTypeLoadingList:
+            {
+                var loadingList = await db.ContainerLoadingLists.AsNoTracking()
+                    .FirstOrDefaultAsync(o => o.Id == sourceId, ct);
+                return loadingList is null
+                    ? new SourceState(false, false, false, null)
+                    : new SourceState(true, loadingList.IsDeleted,
+                        loadingList.Status == DocumentStatus.Cancelled, loadingList.CustomerId);
+            }
+
+            default:
+                return new SourceState(false, false, false, null);
+        }
+    }
+
     /// <summary>修订留痕实体 → DTO（纯映射，不写库）</summary>
     private static ContainerShipmentReferenceRevisionDto MapRevision(ContainerShipmentReferenceRevision row)
     {
