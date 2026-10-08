@@ -5,6 +5,7 @@ using ERP.Domain.Entities;
 using ERP.Domain.Enums;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.Data;
 
 namespace ERP.Api.Controllers;
 
@@ -124,31 +125,67 @@ public class StockOutController : DocumentControllerBase<StockOut>
 
         await StockUnitConversion.NormalizeAsync(Db, entity.Details);
         Calculate(entity);
-        // 幂等护栏：已产生有效流水的单据不允许再次审核（状态被人工改回同样兜住，与 ERP-009 四类单据同一口径）
-        if (await _inventory.CountActiveMovementsAsync(InventoryDocumentHelper.StockOutType, entity.Id) > 0)
-            throw BusinessException.RuleConflict("该出库单已产生库存流水，不能重复审核");
 
-        foreach (var d in entity.Details.Where(d => !d.IsDeleted))
+        // ERP-343：把「累计已审核出库 ≤ 来源订单授权数量」的判定与库存写入放进同一个可串行化事务，
+        // 并对来源订单行加 UPDLOCK/HOLDLOCK 串行化同单并发审核；任一步失败整体回滚，库存、流水、状态都不变。
+        await using var transaction = await Db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
+        try
         {
-            // 零数量明细（旧版页面允许留空行）不产生库存变动；负数属于数据错误，直接拒绝
-            if (d.Quantity < 0)
-                throw BusinessException.InvalidParameter($"商品 [{d.ProductName}] 的出库数量不能为负数");
-            if (d.Quantity == 0) continue;
+            await AcquireOrderApprovalLockAsync(entity.SalesOrderId);
 
-            var product = await InventoryDocumentHelper.ResolveProductAsync(Db, d.ProductId, d.ProductName, d.Spec, d.Unit);
-            var context = await InventoryDocumentHelper.BuildContextAsync(Db,
-                InventoryDocumentHelper.StockOutType, entity.Id, entity.StockOutNo,
-                InventoryMovementType.SalesOut, entity.WarehouseId, d.ProductId, product.Code, product.Name,
-                product.Spec, product.Unit, entity.StockOutDate, MovementRemark(entity));
+            // 幂等护栏放进锁内：同单并发审核时，后到者在拿到锁后能看到先到者已产生的流水，从而被拒绝。
+            if (await _inventory.CountActiveMovementsAsync(InventoryDocumentHelper.StockOutType, entity.Id) > 0)
+                throw BusinessException.RuleConflict("该出库单已产生库存流水，不能重复审核");
 
-            // 出库成本基准：出库单明细没有成本列 → 由 InventoryService 按当前加权平均成本核减
-            // （ERP-009 移动加权平均口径）；库存不足时服务抛业务异常，整单不落半截数据。
-            await _inventory.DecreaseAsync(context, d.Quantity, 0m);
+            await StockOutOrderFulfillmentRules.ValidateApprovalAsync(Db, entity);
+
+            foreach (var d in entity.Details.Where(d => !d.IsDeleted))
+            {
+                // 零数量明细（旧版页面允许留空行）不产生库存变动；负数属于数据错误，直接拒绝
+                if (d.Quantity < 0)
+                    throw BusinessException.InvalidParameter($"商品 [{d.ProductName}] 的出库数量不能为负数");
+                if (d.Quantity == 0) continue;
+
+                var product = await InventoryDocumentHelper.ResolveProductAsync(Db, d.ProductId, d.ProductName, d.Spec, d.Unit);
+                var context = await InventoryDocumentHelper.BuildContextAsync(Db,
+                    InventoryDocumentHelper.StockOutType, entity.Id, entity.StockOutNo,
+                    InventoryMovementType.SalesOut, entity.WarehouseId, d.ProductId, product.Code, product.Name,
+                    product.Spec, product.Unit, entity.StockOutDate, MovementRemark(entity));
+
+                // 出库成本基准：出库单明细没有成本列 → 由 InventoryService 按当前加权平均成本核减
+                // （ERP-009 移动加权平均口径）；库存不足时服务抛业务异常，整单不落半截数据。
+                await _inventory.DecreaseAsync(context, d.Quantity, 0m);
+            }
+
+            SetStatus(entity, DocumentStatus.Approved);
+            await Db.SaveChangesAsync();
+            await transaction.CommitAsync();
+        }
+        catch
+        {
+            await transaction.RollbackAsync();
+            throw;
         }
 
-        SetStatus(entity, DocumentStatus.Approved);
-        await Db.SaveChangesAsync();
         return Ok(ApiResponse<object>.Success(null, "审核通过，库存已扣减并写入库存流水"));
+    }
+
+    /// <summary>
+    /// 对来源销售订单行加更新锁（UPDLOCK, HOLDLOCK），把同单并发审核串行化在同一事务内。
+    /// 未链接订单时无需加锁；非关系型提供程序（内存库）无法执行表提示，跳过即可（事务本身等价无事务）。
+    /// </summary>
+    private async Task AcquireOrderApprovalLockAsync(long? salesOrderId)
+    {
+        if (salesOrderId is not > 0) return;
+        if (!Db.Database.IsRelational()) return;
+
+        // 订单行不存在时无需加锁：ValidateApprovalAsync 会把链接判为非权威并跳过累计校验，
+        // 不因链接悬空而阻断出库。
+        await Db.Database
+            .SqlQueryRaw<long>(
+                "SELECT Id FROM db_owner.SalesOrders WITH (UPDLOCK, HOLDLOCK) WHERE Id = {0}",
+                salesOrderId.Value)
+            .ToListAsync();
     }
 
     /// <summary>取消：已审核单据按库存流水冲销（无流水的历史单据按基础单位原路恢复）。</summary>

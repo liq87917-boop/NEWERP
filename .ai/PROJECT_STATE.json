@@ -1,11 +1,10 @@
 {
   "schema_version": 2,
   "project": "NEWERP",
-  "updated_at": "2026-10-08T02:17:45.506867Z",
+  "updated_at": "2026-10-08T02:24:32.463018Z",
   "phase": "ready",
   "current_task": null,
   "queue": [
-    "ERP-343",
     "ERP-344",
     "ERP-345",
     "ERP-346"
@@ -326,39 +325,36 @@
     "ERP-337",
     "ERP-338",
     "ERP-339",
-    "ERP-342"
+    "ERP-342",
+    "ERP-343"
   ],
   "blocked": [],
   "last_build": {
-    "task": "ERP-342",
+    "task": "ERP-343",
     "profile": "safe",
     "status": "passed",
     "exit_code": 0,
-    "log": ".ai\\logs\\ERP-342-validation-1.log",
-    "at": "2026-10-08T02:06:55.163526Z"
+    "log": ".ai\\logs\\ERP-343-validation-2.log",
+    "at": "2026-10-08T02:24:31.884458Z"
   },
-  "last_error": {
-    "task": "ERP-343",
-    "kind": "automatic_repair_pending",
-    "summary": "Path guard failed:\noutside allowed_paths: src/ERP.IntegrationTests/StockInOrderFulfillmentSqlServerTests.cs"
-  },
+  "last_error": null,
   "last_deepseek_fix": {
     "task": "ERP-343",
-    "attempts": 3,
-    "status": "retry_pending",
-    "at": "2026-10-08T02:17:45.009377Z"
+    "attempt": 2,
+    "model": "deepseek-v4-pro",
+    "exit_code": 0,
+    "finished_at": "2026-10-08T02:23:00.988299Z"
   },
   "git_sync": {
     "branch": "main",
-    "local_sha": "f9939a1",
-    "status": "synced",
+    "local_sha": "a09b1ec",
+    "status": "pending",
     "ahead": 0,
     "behind": 0,
-    "last_attempt_at": "2026-10-08T02:07:00.937720Z",
+    "last_attempt_at": "2026-10-08T02:24:32.344724Z",
     "last_error": null
   },
   "next_recommended_tasks": [
-    "ERP-343",
     "ERP-344",
     "ERP-345",
     "ERP-346"
@@ -366,7 +362,5 @@
   "runner": {
     "status": "stopped",
     "pid": null
-  },
-  "blocker": null,
-  "finish_reason": "deepseek_supervisor_recovery"
+  }
 }
