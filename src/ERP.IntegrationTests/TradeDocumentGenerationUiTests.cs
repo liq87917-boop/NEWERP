@@ -403,6 +403,7 @@ public class TradeDocumentGenerationUiTests
     {
         var body = JsonSerializer.Serialize(new
         {
+            orderNo = "UI-" + tag, // Required request field; the server assigns the authoritative number.
             orderDate = DateTime.Today.ToString("yyyy-MM-dd") + "T00:00:00",
             customerId = customerId,
             currency = "USD",
@@ -430,6 +431,7 @@ public class TradeDocumentGenerationUiTests
     {
         var body = JsonSerializer.Serialize(new
         {
+            loadingListNo = "UI-" + tag, // Required request field; the server assigns the authoritative number.
             loadingDate = DateTime.Today.ToString("yyyy-MM-dd") + "T00:00:00",
             containerNo = containerNo,
             customerId = customerId,
@@ -600,7 +602,10 @@ public class TradeDocumentGenerationUiTests
     {
         using var doc = JsonDocument.Parse(Api(method, path, bodyJson));
         var root = doc.RootElement;
-        Assert.Equal(0, root.GetProperty("code").GetInt32());
+        Assert.True(root.TryGetProperty("code", out var code),
+            $"{method} {path} did not return a business response: {root.GetRawText()}");
+        Assert.True(code.GetInt32() == 0,
+            $"{method} {path} failed: {root.GetRawText()}");
         return root.GetProperty("data").Clone();
     }
 
