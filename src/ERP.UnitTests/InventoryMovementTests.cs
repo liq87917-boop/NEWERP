@@ -327,6 +327,8 @@ public class InventoryMovementTests
     {
         using var db = TestDbFactory.Create();
         var ctl = NewSalesReturnController(db);
+        SalesReturnTestAuthorization.SeedApprovedStockOut(db, 88L, "CK2609230001", 1L, WarehouseA,
+            (Product1, "PCS", 10m));
         var id = await CreateSalesReturnAsync(ctl, quantity: 4m, unitPrice: 25m, unitCost: 8m,
             sourceStockOutId: 88L, sourceNo: "CK2609230001");
 
@@ -366,16 +368,9 @@ public class InventoryMovementTests
     public async Task 销售退货_明细未填成本_按来源出库流水成本计价()
     {
         using var db = TestDbFactory.Create();
-        // 来源销售出库单（真实单据行，用于来源单号回填）+ 来源出库流水（成本 6）
-        db.StockOuts.Add(new StockOut
-        {
-            Id = 501L,
-            StockOutNo = "CK2609230501",
-            StockOutDate = DateTime.Today,
-            CustomerId = 1L,
-            WarehouseId = WarehouseA,
-            TotalQuantity = 10m
-        });
+        // 来源销售出库单（真实单据行，用于来源单号 / 可退容量回取）+ 来源出库流水（成本 6）
+        SalesReturnTestAuthorization.SeedApprovedStockOut(db, 501L, "CK2609230501", 1L, WarehouseA,
+            (Product1, "PCS", 10m));
         db.StockMovements.Add(new StockMovement
         {
             MovementDate = DateTime.Today,
@@ -599,6 +594,7 @@ public class InventoryMovementTests
         var result = await ctl.Create(new SalesReturn
         {
             ReturnDate = DateTime.Today,
+            CustomerId = 1L,
             CustomerName = "客户A",
             WarehouseId = WarehouseA,
             ReturnReason = "质量",
@@ -685,8 +681,16 @@ public class InventoryMovementTests
     private static StockTransferController NewTransferController(ErpDbContext db)
         => StockTransferTestAuthorization.CreateAuthorized(db);
 
+    // ERP-357：销售退货全部路由都要求真实已授权身份（既有「销售退货」菜单）与客户数据范围，
+    // 来源单必须构成权威来源；这里播种真实业务员身份 + 主数据与来源出库单，保留原有全部数量 / 成本 / 冲销断言。
     private static SalesReturnController NewSalesReturnController(ErpDbContext db)
-        => new(db, new DocumentNumberService(db), new InventoryService(db));
+    {
+        SalesReturnTestAuthorization.SeedWarehouse(db, WarehouseA, "仓A");
+        SalesReturnTestAuthorization.SeedWarehouse(db, WarehouseB, "仓B");
+        SalesReturnTestAuthorization.SeedProduct(db, Product1, "INV-P1", "PCS");
+        SalesReturnTestAuthorization.SeedProduct(db, Product2, "INV-P2", "PCS");
+        return SalesReturnTestAuthorization.CreateAuthorized(db, 1L);
+    }
 
     private static PurchaseReturnController NewPurchaseReturnController(ErpDbContext db)
         => new(db, new DocumentNumberService(db), new InventoryService(db));
@@ -759,6 +763,7 @@ public class InventoryMovementTests
         var result = await ctl.Create(new SalesReturn
         {
             ReturnDate = DateTime.Today,
+            CustomerId = 1L,
             CustomerName = "客户A",
             WarehouseId = WarehouseA,
             SourceStockOutId = sourceStockOutId,

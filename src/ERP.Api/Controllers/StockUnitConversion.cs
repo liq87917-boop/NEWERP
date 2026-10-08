@@ -19,6 +19,14 @@ public static class StockUnitConversion
         => NormalizeAsync(db, details.Select(d => new MutableLine(d.ProductId, () => d.Unit,
             value => d.Unit = value, () => d.Quantity, value => d.Quantity = value)));
 
+    /// <summary>
+    /// 销售退货明细同口径折算（ERP-357）：明细单位等于商品 PackageUnit 时按 UnitsPerPackage 折算为基础 Unit，
+    /// 保证退货数量与来源出库数量都以商品基础单位对齐、可直接合计比较。
+    /// </summary>
+    public static Task NormalizeAsync(IErpDbContext db, IEnumerable<SalesReturnDetail> details)
+        => NormalizeAsync(db, details.Select(d => new MutableLine(d.ProductId ?? 0, () => d.Unit,
+            value => d.Unit = value, () => d.Quantity, value => d.Quantity = value)));
+
     private static async Task NormalizeAsync(IErpDbContext db, IEnumerable<MutableLine> source)
     {
         var lines = source.ToList();
