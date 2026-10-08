@@ -84,6 +84,10 @@ public class ContainerReceivingPlanController : DocumentControllerBase<Container
 /// 文本与日期一律「未填写 = 未知」，不由任何自由文本推断。
 /// <para>ERP-353：本单是预装柜单的**上游权威来源**，取消走同一可串行化事务 + 订柜行锁，
 /// 只要存在已审核且未取消的预装柜单（或以其为来源的已审核装柜清单）就拒绝，绝不静默失效下游履约证据。</para>
+/// <para>ERP-360：本控制器**每一个**路由（列表 / 详情 / 出运时间线 / 报关行选项 / 新增 / 修改 / 提交 / 审核 / 取消 / 删除）
+/// 都先解析实时身份、账号状态、既有「订柜信息」（booking）菜单授权与权威客户数据范围（复用 ERP-097），
+/// 列表在 <c>Count</c> / 分页之前把范围下推到数据库；新增 / 修改 / 状态变更前校验客户（必填）与供应商（可选）
+/// 是否真实可用；提交 / 审核 / 取消 / 删除共用同一把订柜行锁 + 可串行化事务，保留原始审计与下游取消护栏。</para>
 /// </remarks>
 [Route("api/container/bookings")]
 public class ContainerBookingController : DocumentControllerBase<ContainerBooking>
@@ -98,8 +102,12 @@ public class ContainerBookingController : DocumentControllerBase<ContainerBookin
     [HttpGet]
     public async Task<IActionResult> GetPaged([FromQuery] PageQuery query, [FromQuery] DocumentStatus? status)
     {
+        // ERP-360：身份 / 账号状态 / 既有「订柜信息」菜单 + 权威客户数据范围，
+        // 先于任何计数与分页；范围在数据库侧下推（受限制账号只统计本人客户）。
+        var scope = await BookingAuthorizationRules.EnsureAuthorizedAsync(Db, CurrentUserId());
+
         query.Normalize();
-        var source = Set.AsNoTracking().Where(o => !o.IsDeleted);
+        var source = BookingAuthorizationRules.ApplyScope(Set.AsNoTracking().Where(o => !o.IsDeleted), scope);
         if (status.HasValue) source = source.Where(o => o.Status == status.Value);
         if (!string.IsNullOrWhiteSpace(query.Keyword)) source = source.Where(o => o.BookingNo.Contains(query.Keyword));
         var total = await source.CountAsync();
@@ -107,17 +115,23 @@ public class ContainerBookingController : DocumentControllerBase<ContainerBookin
             .Skip((query.Page - 1) * query.PageSize).Take(query.PageSize).ToListAsync();
         // ERP-040：列表补充报关行引用可用性标注（只读，一次查询解析全部引用，不写库）
         await ContainerShipmentTrackingService.AnnotateAsync(Db, items);
+        // ERP-360：历史订柜信息的主数据不可用证据（只读照常返回，绝不隐藏 / 回填历史单据）
+        var evidence = await BookingAuthorizationRules.DescribeUnavailableMasterDataAsync(Db, items);
         return Ok(ApiResponse<PagedResult<ContainerBooking>>.Success(
-            new PagedResult<ContainerBooking> { Items = items, Total = total, Page = query.Page, PageSize = query.PageSize }));
+            new PagedResult<ContainerBooking> { Items = items, Total = total, Page = query.Page, PageSize = query.PageSize },
+            WithEvidence("操作成功", evidence)));
     }
 
-    /// <summary>订柜信息详情（补充报关行引用可用性标注，不写库）</summary>
+    /// <summary>订柜信息详情（补充报关行引用可用性标注与主数据不可用证据，不写库）</summary>
     [HttpGet("{id:long}")]
     public async Task<IActionResult> GetById(long id)
     {
+        var scope = await BookingAuthorizationRules.EnsureAuthorizedAsync(Db, CurrentUserId());
         var entity = await GetOrThrowAsync(id, "订柜信息不存在");
+        BookingAuthorizationRules.EnsureScopeAllowsBooking(scope, entity);
         await ContainerShipmentTrackingService.AnnotateAsync(Db, new[] { entity });
-        return Ok(ApiResponse<ContainerBooking>.Success(entity));
+        var evidence = await BookingAuthorizationRules.DescribeUnavailableMasterDataAsync(Db, new[] { entity });
+        return Ok(ApiResponse<ContainerBooking>.Success(entity, WithEvidence("操作成功", evidence)));
     }
 
     /// <summary>
@@ -131,17 +145,23 @@ public class ContainerBookingController : DocumentControllerBase<ContainerBookin
         [FromQuery] bool includeHistory = true,
         [FromQuery] int historyTake = ContainerShipmentTimelineRules.MaxHistoryEvents)
     {
+        var scope = await BookingAuthorizationRules.EnsureAuthorizedAsync(Db, CurrentUserId());
         var entity = await GetOrThrowAsync(id, "订柜信息不存在");
+        BookingAuthorizationRules.EnsureScopeAllowsBooking(scope, entity);
         var detail = await ContainerShipmentTimelineService.GetForSourceAsync(
             Db, ContainerShipmentReferenceRules.SourceTypeBooking, entity.Id, includeHistory, historyTake);
+        var evidence = await BookingAuthorizationRules.DescribeUnavailableMasterDataAsync(Db, new[] { entity });
         return Ok(ApiResponse<ContainerShipmentTimelineDetailDto>.Success(
-            detail, "已按显式源记录返回出运证据时间线（只读：计划与实际分开标注，缺失事件显示「无 / 未知」）"));
+            detail,
+            WithEvidence("已按显式源记录返回出运证据时间线（只读：计划与实际分开标注，缺失事件显示「无 / 未知」）", evidence)));
     }
 
     /// <summary>报关行下拉选项（只返回未删除、已启用、类型为 CustomsBroker 的字典项；只读不写库）</summary>
     [HttpGet("customs-broker-options")]
     public async Task<IActionResult> GetCustomsBrokerOptions()
     {
+        // ERP-360：选项路由同样先解析身份 / 菜单（字典项不按客户分范围）
+        await BookingAuthorizationRules.EnsureAuthorizedAsync(Db, CurrentUserId());
         var options = await ContainerShipmentTrackingService.LoadCustomsBrokerOptionsAsync(Db);
         return Ok(ApiResponse<List<OtherInfoOptionDto>>.Success(options));
     }
@@ -154,6 +174,11 @@ public class ContainerBookingController : DocumentControllerBase<ContainerBookin
     public async Task<IActionResult> Create([FromBody] ContainerBooking entity)
     {
         entity.Id = 0;
+        // 供应商为可选项：0 与 null 同义（未指定）
+        if (entity.SupplierId is <= 0) entity.SupplierId = null;
+        // ERP-360：身份 / 菜单 / 数据范围 + 客户 / 供应商实时主数据校验，
+        // 先于跟踪字段校验与单据号生成（不合格不占用单据号流水、不落任何数据）。
+        await BookingAuthorizationRules.EnsureWriteAuthorizedAsync(Db, CurrentUserId(), entity, storedCustomerId: null);
         // 先校验：不合格直接拒绝，不占用单据号流水
         await ContainerShipmentTrackingService.ApplyAsync(Db, entity, stored: null);
         entity.BookingNo = await _noService.GenerateAsync(DocumentType.ContainerBooking);
@@ -171,27 +196,97 @@ public class ContainerBookingController : DocumentControllerBase<ContainerBookin
     [HttpPut("{id:long}")]
     public async Task<IActionResult> Update(long id, [FromBody] ContainerBooking entity)
     {
-        var existing = await GetOrThrowAsync(id, "订柜信息不存在");
-        if (GetStatus(existing) != DocumentStatus.Pending)
-            throw BusinessException.RuleConflict("仅待提交状态的单据可修改");
+        // 供应商为可选项：0 与 null 同义（未指定）
+        if (entity.SupplierId is <= 0) entity.SupplierId = null;
 
-        // 先校验：不合格直接拒绝（库中记录保持原样，不产生半更新）
-        await ContainerShipmentTrackingService.ApplyAsync(Db, entity, existing);
+        // ERP-360：身份 / 菜单 / 数据范围先于任何读取与写入（事务之外先解析一次）。
+        var scope = await BookingAuthorizationRules.EnsureAuthorizedAsync(Db, CurrentUserId());
 
-        existing.BookingDate = entity.BookingDate;
-        existing.CustomerId = entity.CustomerId;
-        existing.SupplierId = entity.SupplierId;
-        existing.ContainerType = entity.ContainerType;
-        existing.ShippingCompany = entity.ShippingCompany;
-        existing.VoyageNo = entity.VoyageNo;
-        existing.SailingDate = entity.SailingDate;
-        existing.DeparturePort = entity.DeparturePort;
-        existing.DestinationPort = entity.DestinationPort;
-        CopyTrackingFields(entity, existing);
-        existing.Remark = entity.Remark;
-        existing.UpdatedAt = DateTime.Now;
-        await Db.SaveChangesAsync();
+        await using var transaction = await Db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
+        try
+        {
+            // 与订柜取消 / 预装柜审核共用同一把订柜行锁（ERP-353）：串行化同一订柜信息的并发变更。
+            await AcquireBookingRowLockAsync(id);
+
+            var existing = await GetOrThrowAsync(id, "订柜信息不存在");
+            if (GetStatus(existing) != DocumentStatus.Pending)
+                throw BusinessException.RuleConflict("仅待提交状态的单据可修改");
+
+            // ERP-360：修改不能把订柜信息移入 / 移出当前账号的客户范围；
+            // 客户 / 供应商必须真实可用（历史记录照常可读，但不能再次用于修改）。
+            await BookingAuthorizationRules.EnsureWriteAllowedAsync(Db, scope, entity, existing.CustomerId);
+
+            // 先校验：不合格直接拒绝（库中记录保持原样，不产生半更新）
+            await ContainerShipmentTrackingService.ApplyAsync(Db, entity, existing);
+
+            existing.BookingDate = entity.BookingDate;
+            existing.CustomerId = entity.CustomerId;
+            existing.SupplierId = entity.SupplierId;
+            existing.ContainerType = entity.ContainerType;
+            existing.ShippingCompany = entity.ShippingCompany;
+            existing.VoyageNo = entity.VoyageNo;
+            existing.SailingDate = entity.SailingDate;
+            existing.DeparturePort = entity.DeparturePort;
+            existing.DestinationPort = entity.DestinationPort;
+            CopyTrackingFields(entity, existing);
+            existing.Remark = entity.Remark;
+            existing.UpdatedAt = DateTime.Now;
+            await Db.SaveChangesAsync();
+            await transaction.CommitAsync();
+        }
+        catch
+        {
+            await transaction.RollbackAsync();
+            throw;
+        }
+
         return Ok(ApiResponse<object>.Success(null, "订柜信息更新成功"));
+    }
+
+    /// <summary>
+    /// 提交（ERP-360）：与取消 / 删除 / 审核共用同一把订柜行锁与可串行化事务，锁内重新加载本单后
+    /// 才复核状态、授权 / 客户范围与客户 / 供应商可用性。
+    /// </summary>
+    [HttpPost("{id:long}/submit")]
+    public override async Task<IActionResult> Submit(long id)
+        => await ChangeBookingStateAsync(id, DocumentStatus.Pending, DocumentStatus.Submitted, "提交成功");
+
+    /// <summary>审核通过（ERP-360：锁内复核状态 + 授权 / 客户范围 / 客户·供应商可用性）。</summary>
+    [HttpPost("{id:long}/approve")]
+    public override async Task<IActionResult> Approve(long id)
+        => await ChangeBookingStateAsync(id, DocumentStatus.Submitted, DocumentStatus.Approved, "审核通过");
+
+    /// <summary>
+    /// 删除（软删除，仅待提交状态可删；ERP-360：同一把订柜行锁 + 可串行化事务 + 授权 / 范围 / 主数据复核）。
+    /// </summary>
+    [HttpDelete("{id:long}")]
+    public override async Task<IActionResult> Delete(long id)
+    {
+        var scope = await BookingAuthorizationRules.EnsureAuthorizedAsync(Db, CurrentUserId());
+
+        await using var transaction = await Db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
+        try
+        {
+            await AcquireBookingRowLockAsync(id);
+
+            var entity = await GetOrThrowAsync(id, "订柜信息不存在");
+            if (GetStatus(entity) != DocumentStatus.Pending)
+                throw BusinessException.RuleConflict("仅待提交状态的单据可删除");
+
+            await BookingAuthorizationRules.EnsureWriteAllowedAsync(Db, scope, entity, storedCustomerId: null);
+
+            entity.IsDeleted = true;
+            entity.UpdatedAt = DateTime.Now;
+            await Db.SaveChangesAsync();
+            await transaction.CommitAsync();
+        }
+        catch
+        {
+            await transaction.RollbackAsync();
+            throw;
+        }
+
+        return Ok(ApiResponse<object>.Success(null, "删除成功"));
     }
 
     /// <summary>
@@ -204,13 +299,17 @@ public class ContainerBookingController : DocumentControllerBase<ContainerBookin
     [HttpPost("{id:long}/cancel")]
     public override async Task<IActionResult> Cancel(long id)
     {
+        // ERP-360：身份 / 菜单 / 客户范围先于任何状态变更
+        var scope = await BookingAuthorizationRules.EnsureAuthorizedAsync(Db, CurrentUserId());
+
         await using var transaction = await Db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
         try
         {
-            await AcquireBookingCancellationLockAsync(id);
+            await AcquireBookingRowLockAsync(id);
 
             var entity = await GetOrThrowAsync(id, "订柜信息不存在");
 
+            await BookingAuthorizationRules.EnsureWriteAllowedAsync(Db, scope, entity, storedCustomerId: null);
             await PreLoadingBookingLinkRules.ValidateBookingCancellationAsync(Db, entity, CurrentUserId());
 
             SetStatus(entity, DocumentStatus.Cancelled);
@@ -226,11 +325,42 @@ public class ContainerBookingController : DocumentControllerBase<ContainerBookin
         return Ok(ApiResponse<object>.Success(null, "已取消"));
     }
 
+    /// <summary>提交 / 审核共用：授权 → 行锁 → 锁内重新加载 → 状态 / 范围 / 主数据复核 → 状态变更。</summary>
+    private async Task<IActionResult> ChangeBookingStateAsync(
+        long id, DocumentStatus from, DocumentStatus to, string successMessage)
+    {
+        var scope = await BookingAuthorizationRules.EnsureAuthorizedAsync(Db, CurrentUserId());
+
+        await using var transaction = await Db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
+        try
+        {
+            await AcquireBookingRowLockAsync(id);
+
+            var entity = await GetOrThrowAsync(id, "订柜信息不存在");
+            if (GetStatus(entity) != from)
+                throw BusinessException.RuleConflict("当前状态不允许该操作");
+
+            await BookingAuthorizationRules.EnsureWriteAllowedAsync(Db, scope, entity, storedCustomerId: null);
+
+            SetStatus(entity, to);
+            await Db.SaveChangesAsync();
+            await transaction.CommitAsync();
+        }
+        catch
+        {
+            await transaction.RollbackAsync();
+            throw;
+        }
+
+        return Ok(ApiResponse<object>.Success(null, successMessage));
+    }
+
     /// <summary>
-    /// 对订柜信息行加更新锁（UPDLOCK, HOLDLOCK），把同一订柜下的并发「预装柜审核 / 订柜取消」串行化在
-    /// 同一事务内；非关系型提供程序（内存库）无法执行表提示，跳过即可（事务本身等价无事务）。
+    /// 对订柜信息行加更新锁（UPDLOCK, HOLDLOCK），把同一订柜下的并发状态变更（提交 / 审核 / 取消 / 删除）
+    /// 与既有「预装柜审核 / 订柜取消」串行化在同一事务内（ERP-353 同一把行锁）；
+    /// 非关系型提供程序（内存库）无法执行表提示，跳过即可（事务本身等价无事务）。
     /// </summary>
-    private async Task AcquireBookingCancellationLockAsync(long bookingId)
+    private async Task AcquireBookingRowLockAsync(long bookingId)
     {
         if (!Db.Database.IsRelational()) return;
 
@@ -240,6 +370,12 @@ public class ContainerBookingController : DocumentControllerBase<ContainerBookin
                 bookingId)
             .ToListAsync();
     }
+
+    /// <summary>只读响应文案：主数据不可用时追加显式证据（不改变 data 结构，不写库）。</summary>
+    private static string WithEvidence(string message, string evidence)
+        => string.IsNullOrEmpty(evidence)
+            ? message
+            : message + BookingAuthorizationRules.UnavailableEvidencePrefix + evidence;
 
     /// <summary>
     /// 把（已校验 / 已规范化的）ERP-040 跟踪字段复制到库中实体。

@@ -706,6 +706,7 @@ public class PreLoadingBookingLinkTests
     {
         using var db = TestDbFactory.Create();
         var userId = TestAuth.SeedPrivilegedUser(db);
+        SeedCustomer(db, CustomerA, "C-CXL-1", "取消订柜客户");
         var booking = SeedBooking(db, "DG-CXL-1", DocumentStatus.Approved);
         SeedPreLoading(db, "YZ-CXL-1", booking.Id, DocumentStatus.Approved, "CTN-CXL");
         var ctl = NewBookingController(db, userId);
@@ -723,6 +724,7 @@ public class PreLoadingBookingLinkTests
     {
         using var db = TestDbFactory.Create();
         var userId = TestAuth.SeedPrivilegedUser(db);
+        SeedCustomer(db, CustomerA, "C-CXL-2", "取消订柜客户");
         var booking = SeedBooking(db, "DG-CXL-2", DocumentStatus.Approved);
         SeedPreLoading(db, "YZ-CXL-2A", booking.Id, DocumentStatus.Pending, "CTN-CXL2A");
         SeedPreLoading(db, "YZ-CXL-2B", booking.Id, DocumentStatus.Submitted, "CTN-CXL2B");
@@ -741,6 +743,7 @@ public class PreLoadingBookingLinkTests
     {
         using var db = TestDbFactory.Create();
         var userId = TestAuth.SeedPrivilegedUser(db);
+        SeedCustomer(db, CustomerA, "C-CXL-3", "取消订柜客户");
         var booking = SeedBooking(db, "DG-CXL-3", DocumentStatus.Approved);
         // 历史数据不一致场景：预装柜单未审核，但其下游装柜清单已审核 → 仍必须拒绝取消订柜
         var entity = SeedPreLoading(db, "YZ-CXL-3", booking.Id, DocumentStatus.Submitted, "CTN-CXL3");
@@ -759,6 +762,7 @@ public class PreLoadingBookingLinkTests
     {
         using var db = TestDbFactory.Create();
         var userId = TestAuth.SeedPrivilegedUser(db);
+        SeedCustomer(db, CustomerA, "C-CXL-4", "取消订柜客户");
         var booking = SeedBooking(db, "DG-CXL-4", DocumentStatus.Approved);
         var entity = SeedPreLoading(db, "YZ-CXL-4", booking.Id, DocumentStatus.Submitted, "CTN-CXL4");
         SeedLoadingList(db, "ZQ-CXL-4", entity.Id, DocumentStatus.Cancelled);
@@ -775,6 +779,7 @@ public class PreLoadingBookingLinkTests
     {
         using var db = TestDbFactory.Create();
         var userId = TestAuth.SeedPrivilegedUser(db);
+        SeedCustomer(db, CustomerA, "C-CXL-5", "取消订柜客户");
         var booking = SeedBooking(db, "DG-CXL-5", DocumentStatus.Approved);
         var entity = SeedPreLoading(db, "YZ-CXL-5", booking.Id, DocumentStatus.Approved, "CTN-CXL5");
         var bookingCtl = NewBookingController(db, userId);
@@ -841,6 +846,7 @@ public class PreLoadingBookingLinkTests
     {
         using var db = TestDbFactory.Create();
         var userId = TestAuth.SeedPrivilegedUser(db);
+        SeedCustomer(db, CustomerA, "C-CXL-6", "取消订柜客户");
         var booking = SeedBooking(db, "DG-CXL-6", DocumentStatus.Approved);
         var ctl = NewBookingController(db, userId);
 

@@ -241,27 +241,16 @@ public static class PreLoadingBookingLinkRules
     }
 
     /// <summary>取消订柜信息的身份 / 既有「订柜信息」菜单授权 / 客户数据范围校验（不写库）。</summary>
+    /// <remarks>
+    /// ERP-360：订柜信息模块的授权口径统一收敛到 <see cref="BookingAuthorizationRules.EnsureAuthorizedAsync"/>
+    /// （实时身份 → 账号状态 → 既有「订柜信息」菜单 → 权威客户数据范围；特权账号继承既有全部访问，
+    /// 非特权账号未映射业务员 fail closed），避免同一模块出现两套口径。
+    /// </remarks>
     private static async Task EnsureBookingAuthorizedAsync(
         IErpDbContext db, ContainerBooking booking, long? userId, CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
-        if (userId is null or <= 0)
-            throw new BusinessException($"请先登录后再取消{BookingRequiredMenuText}", ErrorCodes.Unauthorized);
-
-        var scope = await SalespersonDataScopeService.ResolveAsync(db, userId.Value);
-        if (!scope.IsPrivileged)
-        {
-            var menuCodes = await CustomerReceivableReconciliationService
-                .LoadAuthorizedMenuCodesAsync(db, userId.Value);
-            if (!menuCodes.Contains(BookingRequiredMenuCode, StringComparer.OrdinalIgnoreCase))
-            {
-                throw new BusinessException(
-                    $"当前账号没有「{BookingRequiredMenuText}」（{BookingRequiredMenuCode}）模块授权：" +
-                    "拒绝取消订柜信息（fail closed，不执行任何状态变更）",
-                    ErrorCodes.Forbidden);
-            }
-        }
-
+        var scope = await BookingAuthorizationRules.EnsureAuthorizedAsync(db, userId, ct);
         EnsureScopeAllowsBooking(scope, booking);
     }
 

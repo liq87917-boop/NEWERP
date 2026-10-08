@@ -797,9 +797,35 @@ public class ContainerShipmentTrackingTests
 
     // ==================== 工厂与种子数据 ====================
 
-    /// <summary>订柜信息控制器（内存库 + 单据号服务）</summary>
+    /// <summary>
+    /// 订柜信息控制器（内存库 + 单据号服务 + ERP-360 特权登录身份）。
+    /// <para>ERP-360 起订柜信息每个路由都先解析实时身份；本文件聚焦 ERP-040 跟踪语义，
+    /// 因此统一注入「特权（系统内置角色）」登录身份，并补齐新增 / 修改引用的基础客户资料。</para>
+    /// </summary>
     private static ContainerBookingController BuildBookingController(ErpDbContext db)
-        => new(db, new DocumentNumberService(db));
+    {
+        SeedBookingMasterData(db);
+        var controller = new ContainerBookingController(db, new DocumentNumberService(db));
+        TestAuth.SetUser(controller, TestAuth.SeedPrivilegedUser(db));
+        return controller;
+    }
+
+    /// <summary>补齐本文件用到的客户资料（Id=7 / 8，与既有用例一致），幂等。</summary>
+    private static void SeedBookingMasterData(ErpDbContext db)
+    {
+        foreach (var id in new long[] { 7, 8 })
+        {
+            if (db.BaseCustomers.Any(c => c.Id == id)) continue;
+            db.BaseCustomers.Add(new BaseCustomer
+            {
+                Id = id,
+                CustomerCode = $"IT-SHIP-{id}",
+                CustomerName = $"装柜跟踪客户{id}",
+                Status = 1
+            });
+        }
+        db.SaveChanges();
+    }
 
     /// <summary>预装柜单控制器（内存库 + 单据号服务）</summary>
     private static ContainerPreLoadingController BuildPreLoadingController(ErpDbContext db)
