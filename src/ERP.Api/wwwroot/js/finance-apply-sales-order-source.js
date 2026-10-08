@@ -1,8 +1,8 @@
 /* ==================================================================================
-   ====== 财务申请单（定金申请单）→ 来源销售订单 显式选择器（ERP-390） ======
+   ====== 财务申请单（定金申请单 / 货款申请单）→ 来源销售订单 共享显式选择器（ERP-390 / ERP-391） ======
    ==================================================================================
    定位：把「定金申请单来源销售订单」从「只能手工填 Id」升级为**显式有界选择**：服务端只读分页候选接口
-        在既有「定金申请单」+「销售订单」菜单与实时客户数据范围之内，按**精确客户 + 归一化币种**返回
+        在既有「定金申请单 / 货款申请单」+「销售订单」菜单与实时客户数据范围之内，按**精确客户 + 归一化币种**返回
         「未删除」销售订单候选，操作员显式选定后表单只回填**权威来源 Id**（已取消 / 币种不一致不可选）。
    规则（与 FinanceApplySalesOrderSourceService / FinanceDepositApplyLifecycleRules 同口径，服务端为唯一权威）：
      1. 只接受**显式选择**的来源销售订单 Id：候选全部来自服务端有界只读分页查询，
@@ -31,9 +31,36 @@ const FAS_PAGE_SIZE_MAX = 100;
 const FAS_READONLY_TEXT = '当前申请单不是「待提交（草稿）」：来源只读，如需更换请先另建待提交申请单。';
 const FAS_ERROR_PREFIX = { network: '无法连接服务器', unauthorized: '登录已过期或权限不足', server: '服务端拒绝' };
 
+/* 共享选择器服务的财务申请单类型（ERP-391）：同一脚本同时服务定金申请单与货款申请单，
+   按「当前模块编码」路由只读接口与界面文案；未知 / 缺失编码一律退回定金申请单口径，绝不放宽权限。 */
+const FAS_APPLY_KINDS = {
+  'deposit-apply': { api: '/api/finance/deposit-applies', title: '定金申请单' },
+  'payment-apply': { api: '/api/finance/payment-applies', title: '货款申请单' },
+};
+
+function fasResolveApplyKind(moduleCode) {
+  const code = moduleCode === null || moduleCode === undefined ? '' : String(moduleCode);
+  return Object.prototype.hasOwnProperty.call(FAS_APPLY_KINDS, code) ? code : 'deposit-apply';
+}
+
+function fasCurrentModuleCode() {
+  if (typeof CURRENT_MODULE_CODE !== 'undefined' && CURRENT_MODULE_CODE) return String(CURRENT_MODULE_CODE);
+  if (typeof window !== 'undefined' && window.CURRENT_MODULE_CODE) return String(window.CURRENT_MODULE_CODE);
+  return '';
+}
+
+/* 当前对话的申请单类型：优先显式记录（打开时捕获），否则按当前模块编码推断 */
+function fasApplyKind() {
+  return FAS.applyKind ? fasResolveApplyKind(FAS.applyKind) : fasResolveApplyKind(fasCurrentModuleCode());
+}
+
+function fasApplyConfig() { return FAS_APPLY_KINDS[fasApplyKind()]; }
+function fasApiBase() { return fasApplyConfig().api; }
+function fasApplyTitle() { return fasApplyConfig().title; }
+
 /* 一次对话 = 一个申请单表单；candidates 为服务端权威候选，stored / selected 为来源链接状态 */
 let FAS = {
-  applyId: 0, status: '', customerId: 0, currency: '', selectedContext: null,
+  applyId: 0, applyKind: '', status: '', customerId: 0, currency: '', selectedContext: null,
   keyword: '', page: 1, pageSize: FAS_PAGE_SIZE_DEFAULT, total: 0,
   candidates: [], stored: null, selected: null,
   loading: false, readonly: false, error: '', result: '', open: false, requestSeq: 0,
@@ -67,7 +94,7 @@ function fasReadonlyReason(status) {
 function fasGuardApplyId(applyId) {
   if (applyId === null || applyId === undefined || applyId === '') return '';
   const n = Number(applyId);
-  if (!Number.isInteger(n) || n < 0) return '定金申请单 Id 非法：拒绝选择来源（绝不臆造单据）';
+  if (!Number.isInteger(n) || n < 0) return `${fasApplyTitle()} Id 非法：拒绝选择来源（绝不臆造单据）`;
   return '';
 }
 
@@ -250,7 +277,7 @@ function fasModalHtml() {
   const rows = (FAS.candidates || []).map(fasCandidateRowHtml).join('')
     || `<tr><td colspan="8" class="text-muted">没有匹配的来源销售订单候选（严格按精确客户 + 币种返回）</td></tr>`;
   return `<div class="modal modal-lg">
-    <div class="modal-head"><span>选择来源销售订单（定金申请单）</span><button type="button" class="btn btn-neutral btn-sm" onclick="fasCloseModal()">关闭</button></div>
+    <div class="modal-head"><span>选择来源销售订单（${fasApplyTitle()}）</span><button type="button" class="btn btn-neutral btn-sm" onclick="fasCloseModal()">关闭</button></div>
     <div class="modal-body">
       ${warning}${error}${result}
       <div style="margin-bottom:8px">客户 Id：<b>${fasEsc(FAS.customerId)}</b>；币种：<b>${fasEsc(fasNormalizeCurrency(FAS.currency) || '（未指定）')}</b>；只显示该客户名下「未删除」的销售订单（已取消 / 币种不一致不可选）</div>
@@ -288,7 +315,7 @@ async function fasLoadStatus(applyId) {
   FAS.readonly = false;
   if (!(applyId > 0)) return;
   try {
-    const row = await api(`/api/finance/deposit-applies/${applyId}`);
+    const row = await api(`${fasApiBase()}/${applyId}`);
     FAS.status = fasNormalizeStatus(row && row.status);
     FAS.readonly = !fasIsEditableStatus(FAS.status);
   } catch (err) {
@@ -301,7 +328,7 @@ async function fasLoadStoredSource(applyId) {
   FAS.stored = null;
   if (!(applyId > 0)) return;
   try {
-    FAS.stored = await api(`/api/finance/deposit-applies/${applyId}/sales-order-source`) || null;
+    FAS.stored = await api(`${fasApiBase()}/${applyId}/sales-order-source`) || null;
   } catch (err) {
     FAS.stored = null;
     FAS.error = fasErrorMessage(err).message;   // 只读展示失败显式可见，保留表单状态
@@ -323,7 +350,7 @@ async function fasLoadCandidates() {
   const kw = fasNormalizeKeyword(FAS.keyword);
   if (kw) params.push('keyword=' + encodeURIComponent(kw));
   try {
-    const res = await api('/api/finance/deposit-applies/sales-order-candidates?' + params.join('&'));
+    const res = await api(`${fasApiBase()}/sales-order-candidates?` + params.join('&'));
     // 陈旧响应（客户 / 币种已切换）一律丢弃，绝不回填陈旧上下文结果
     if (!fasShouldAcceptResponse(seq, FAS.requestSeq, requestCustomerId, FAS.customerId,
       requestCurrency, FAS.currency)) return;
@@ -420,6 +447,7 @@ async function openFinanceApplySalesOrderSourcePicker(applyId) {
   const customerId = fasCustomerId(fasFieldValue('customerId'));
   const currency = fasNormalizeCurrency(fasFieldValue('currency'));
   FAS.open = true;
+  FAS.applyKind = fasResolveApplyKind(fasCurrentModuleCode());
   FAS.applyId = Number(applyId) || 0;
   FAS.customerId = customerId;
   FAS.currency = currency;
@@ -453,7 +481,7 @@ async function openFinanceApplySalesOrderSourcePicker(applyId) {
    只包裹既有全局函数，不新增模块 / 菜单，也不影响其它单据。 */
 function fasSourceButtonHtml() {
   return `<div class="form-item full"><label>来源销售订单选择</label>`
-    + `<button type="button" class="btn btn-neutral" onclick="openFinanceApplySalesOrderSourcePicker(window.__fasCurrentId || 0)">选择来源销售订单（按客户 + 币种有界候选）</button>`
+    + `<button type="button" class="btn btn-neutral" onclick="openFinanceApplySalesOrderSourcePicker(window.__fasCurrentId || 0)">选择来源销售订单（${fasApplyTitle()}：按客户 + 币种有界候选）</button>`
     + `<span class="text-muted" style="margin-left:8px">仅回填权威来源 Id；已取消 / 币种不一致不可选；可显式断开；不自动改金额 / 汇率</span>`
     + `</div>`;
 }
@@ -491,6 +519,7 @@ if (typeof window !== 'undefined' && typeof window.fieldHtml === 'function') fas
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     FAS_EDITABLE_STATUS, FAS_PAGE_SIZE_DEFAULT, FAS_PAGE_SIZE_MAX, FAS_READONLY_TEXT, FAS_ERROR_PREFIX,
+    FAS_APPLY_KINDS, fasResolveApplyKind, fasCurrentModuleCode, fasApplyKind, fasApiBase, fasApplyTitle,
     fasNormalizeStatus, fasStatusText, fasIsEditableStatus, fasReadonlyReason,
     fasGuardApplyId, fasIsPositiveId, fasCustomerId, fasNormalizeCurrency,
     fasNormalizePage, fasNormalizePageSize, fasNormalizeKeyword,

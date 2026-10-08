@@ -406,11 +406,65 @@ public class FinancePaymentApplyController : DocumentControllerBase<FinancePayme
     }
 
     /// <summary>
+    /// 来源销售订单候选（ERP-391，只读、有界、分页）：在既有「货款申请单」菜单 + 既有「销售订单」菜单 +
+    /// 实时客户数据范围之内，按<b>精确客户 Id</b>返回「未删除」销售订单候选（已取消 / 币种不一致显式标记不可选）；
+    /// 关键字 / 页码 / 每页条数先归一化再计数，只返回有界 DTO 字段。
+    /// <para><b>候选选择不等于授权</b>：候选只供显式选择，最终保存仍按货款申请单生命周期规则复核精确来源；
+    /// 不返回任意客户订单，也不提供按猜测 Id 直取候选的旁路；<b>不新增任何用户授权，也不提供匿名 / 管理员降级</b>。</para>
+    /// </summary>
+    [HttpGet("sales-order-candidates")]
+    public async Task<IActionResult> GetSalesOrderCandidates(
+        [FromQuery] long? customerId, [FromQuery] string? currency, [FromQuery] string? keyword,
+        [FromQuery] int page = 0, [FromQuery] int pageSize = 0)
+    {
+        await FinancePaymentApplyLifecycleRules.EnsureMenuAuthorizedAsync(Db, CurrentUserId());
+        await FinancePaymentApplyLifecycleRules.EnsureSourceMenuAuthorizedAsync(Db, CurrentUserId());
+        if (customerId is not > 0)
+            throw BusinessException.InvalidParameter(FinancePaymentApplyLifecycleRules.ExactCustomerRequiredText);
+        // 客户数据范围先于任何计数 / 取数：范围外客户按权限不足拒绝，不泄露归属。
+        var scope = await SalespersonDataScopeService.ResolveAsync(Db, CurrentUserId());
+        FinancePaymentApplyLifecycleRules.EnsureCustomerInScope(scope, customerId.Value);
+
+        // 币种按既有系统口径归一化（可空：不传则只按客户做有界展示；传入则按归一化币种精确比对可选性）。
+        var normalizedCurrency = string.IsNullOrWhiteSpace(currency)
+            ? null
+            : FinancePaymentApplyLifecycleRules.NormalizeApplyCurrency(currency);
+
+        var result = await FinanceApplySalesOrderSourceService.QueryCandidatesAsync(
+            Db, customerId.Value, normalizedCurrency, keyword, page, pageSize,
+            default, FinancePaymentApplyLifecycleRules.SourceCancelledCandidateText);
+        return Ok(ApiResponse<FinanceApplySalesOrderCandidatePageDto>.Success(
+            result, FinanceApplySalesOrderSourceService.CandidateRuleText));
+    }
+
+    /// <summary>
+    /// 已存储来源的只读展示（详情 / 重开，ERP-391）：按申请单权威客户做实时身份 / 菜单授权 / 客户数据范围复核后，
+    /// 返回持久化来源 Id 与显式状态文案（未关联 / 已关联 / 来源已取消 / 来源不可用）；历史已取消 / 不可用来源
+    /// 原样保留、只读可读，绝不静默清除 / 重绑定，也不改写任何字段。
+    /// </summary>
+    [HttpGet("{id:long}/sales-order-source")]
+    public async Task<IActionResult> GetStoredSalesOrderSource(long id)
+    {
+        await FinancePaymentApplyLifecycleRules.EnsureMenuAuthorizedAsync(Db, CurrentUserId());
+        var entity = await Set.AsNoTracking()
+            .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
+            ?? throw BusinessException.NotFound("货款申请单不存在");
+        var scope = await SalespersonDataScopeService.ResolveAsync(Db, CurrentUserId());
+        FinancePaymentApplyLifecycleRules.EnsureCustomerInScope(scope, entity.CustomerId);
+
+        var view = await FinanceApplySalesOrderSourceService.DescribeStoredSourceAsync(Db, entity);
+        return Ok(ApiResponse<FinanceApplySalesOrderSourceViewDto>.Success(
+            view, FinanceApplySalesOrderSourceService.StoredSourceRuleText));
+    }
+
+    /// <summary>
     /// 创建：在生成申请单号之前先完成身份 / 菜单授权 / 客户数据范围与商业字段 / 来源链接校验（授权与校验失败绝不消耗单号）。
     /// </summary>
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] FinancePaymentApply entity)
     {
+        // ERP-391：表单显式断开链接（留空 → 0）归一化为 null，保留历史「未关联来源」语义。
+        entity.SalesOrderId = entity.SalesOrderId is > 0 ? entity.SalesOrderId : null;
         var currency = FinancePaymentApplyLifecycleRules.NormalizeApplyCurrency(entity.Currency);
         var amount = FinancePaymentApplyLifecycleRules.NormalizeApplyAmount(entity.Amount, currency);
         var exchangeRate = FinancePaymentApplyLifecycleRules.NormalizeExchangeRate(entity.ExchangeRate);
@@ -444,6 +498,8 @@ public class FinancePaymentApplyController : DocumentControllerBase<FinancePayme
     [HttpPut("{id:long}")]
     public async Task<IActionResult> Update(long id, [FromBody] FinancePaymentApply entity)
     {
+        // ERP-391：表单显式断开链接（留空 → 0）归一化为 null，保留历史「未关联来源」语义。
+        entity.SalesOrderId = entity.SalesOrderId is > 0 ? entity.SalesOrderId : null;
         await using var transaction = FinancePaymentApplyLifecycleRules.IsRelationalProvider(Db)
             ? await Db.Database.BeginTransactionAsync()
             : null;

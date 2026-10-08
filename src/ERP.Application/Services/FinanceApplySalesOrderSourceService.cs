@@ -2,6 +2,7 @@ using ERP.Application.Common;
 using ERP.Application.DTOs;
 using ERP.Application.Interfaces;
 using ERP.Domain.Entities;
+using ERP.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
 
 namespace ERP.Application.Services;
@@ -74,10 +75,12 @@ public static class FinanceApplySalesOrderSourceService
     /// <para>关键字 / 页码 / 每页条数都会先归一化，再统计总数与取当页；排序按 Id 倒序保证确定性。
     /// <paramref name="normalizedCurrency"/> 为 <c>null</c> 时只按客户返回（币种仅作展示），
     /// 非空时按既有币种口径精确比对决定可选性（调用方已用生命周期规则归一化，本方法不再重复校验币种范围）。</para>
+    /// <para><paramref name="sourceCancelledText"/> 为已取消来源的不可选原因文案（定金 / 货款申请单各自的
+    /// 生命周期规则文案）；未提供时退回定金申请单文案，保持既有行为不变。</para>
     /// </summary>
     public static async Task<FinanceApplySalesOrderCandidatePageDto> QueryCandidatesAsync(
         IErpDbContext db, long customerId, string? normalizedCurrency, string? keyword, int page, int pageSize,
-        CancellationToken ct = default)
+        CancellationToken ct = default, string? sourceCancelledText = null)
     {
         ArgumentNullException.ThrowIfNull(db);
         if (customerId <= 0)
@@ -87,6 +90,7 @@ public static class FinanceApplySalesOrderSourceService
         var kw = NormalizeKeyword(keyword);
         var normalizedPage = NormalizePage(page);
         var normalizedSize = NormalizePageSize(pageSize);
+        var cancelledText = sourceCancelledText ?? FinanceDepositApplyLifecycleRules.SourceCancelledCandidateText;
 
         var source = db.SalesOrders.AsNoTracking()
             .Where(o => !o.IsDeleted && o.CustomerId == customerId);
@@ -113,7 +117,7 @@ public static class FinanceApplySalesOrderSourceService
         var items = orders.Select(o =>
         {
             var orderCurrency = CurrencyAmountRules.NormalizeCurrency(o.Currency.ToString());
-            var stateEligible = FinanceDepositApplyLifecycleRules.IsEligibleNewSource(o.Status);
+            var stateEligible = o.Status != DocumentStatus.Cancelled;
             var currencyMatches = normalizedCurrency is null
                 || string.Equals(orderCurrency, normalizedCurrency, StringComparison.Ordinal);
             var eligible = stateEligible && currencyMatches;
@@ -129,9 +133,7 @@ public static class FinanceApplySalesOrderSourceService
                 Eligible = eligible,
                 IneligibleReason = eligible
                     ? string.Empty
-                    : (stateEligible
-                        ? CurrencyMismatchCandidateText
-                        : FinanceDepositApplyLifecycleRules.SourceCancelledCandidateText)
+                    : (stateEligible ? CurrencyMismatchCandidateText : cancelledText)
             };
         }).ToList();
 
@@ -190,6 +192,59 @@ public static class FinanceApplySalesOrderSourceService
             Linked = true,
             Unavailable = false,
             EligibleForNewLink = FinanceDepositApplyLifecycleRules.IsEligibleNewSource(order.Status)
+                && currencyMatches,
+            Annotation = annotation
+        };
+    }
+
+    /// <summary>
+    /// 已存储来源的只读展示（货款申请单，ERP-391）：复用
+    /// <see cref="FinancePaymentApplyLifecycleRules.DescribeStoredSourceAsync"/> 的显式状态文案，
+    /// 并补充结构化的订单号 / 日期 / 币种 / 状态 / 可用性，供表单重开与详情原样回显。
+    /// <para>历史已取消 / 已删除来源绝不抛异常、绝不写库、绝不静默清除 / 重绑定；
+    /// 绝不因订单号文本、金额或相似度猜测来源。</para>
+    /// </summary>
+    public static async Task<FinanceApplySalesOrderSourceViewDto> DescribeStoredSourceAsync(
+        IErpDbContext db, FinancePaymentApply apply, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(apply);
+
+        var annotation = await FinancePaymentApplyLifecycleRules.DescribeStoredSourceAsync(db, apply, ct);
+        if (apply.SalesOrderId is null or <= 0)
+            return new FinanceApplySalesOrderSourceViewDto { Linked = false, Annotation = annotation };
+
+        var order = await db.SalesOrders.AsNoTracking()
+            .Where(o => o.Id == apply.SalesOrderId.Value && !o.IsDeleted)
+            .Select(o => new { o.OrderNo, o.OrderDate, o.Currency, o.Status })
+            .FirstOrDefaultAsync(ct);
+
+        if (order is null)
+        {
+            return new FinanceApplySalesOrderSourceViewDto
+            {
+                SalesOrderId = apply.SalesOrderId.Value,
+                Linked = true,
+                Unavailable = true,
+                EligibleForNewLink = false,
+                Annotation = annotation
+            };
+        }
+
+        var orderCurrency = CurrencyAmountRules.NormalizeCurrency(order.Currency.ToString());
+        var applyCurrency = CurrencyAmountRules.NormalizeCurrency(apply.Currency.ToString());
+        var currencyMatches = string.Equals(orderCurrency, applyCurrency, StringComparison.Ordinal);
+
+        return new FinanceApplySalesOrderSourceViewDto
+        {
+            SalesOrderId = apply.SalesOrderId.Value,
+            OrderNo = order.OrderNo,
+            OrderDate = order.OrderDate,
+            Currency = orderCurrency,
+            Status = order.Status.ToString(),
+            Linked = true,
+            Unavailable = false,
+            EligibleForNewLink = FinancePaymentApplyLifecycleRules.IsEligibleNewSource(order.Status)
                 && currencyMatches,
             Annotation = annotation
         };
