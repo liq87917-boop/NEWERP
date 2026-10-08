@@ -58,8 +58,8 @@
   "risk": "medium",
   "planning_stage": 3,
   "id": "ERP-350",
-  "status": "in_progress",
-  "attempts": 2,
+  "status": "retry",
+  "attempts": 0,
   "max_attempts": 3,
   "validation_profile": "safe",
   "completion_mode": "build",
@@ -75,5 +75,112 @@
     "scenarios": []
   },
   "created_at": "2026-10-08T05:31:23.145274Z",
-  "updated_at": "2026-10-08T06:01:40.031454Z"
+  "updated_at": "2026-10-08T06:01:40.031454Z",
+  "preserved_work": {
+    "execution_copy": "D:\\VSCodeProject\\NEWERP.executor.continue-erp-190-20260930080457",
+    "changed_paths": [
+      ".ai/PROJECT_STATE.json",
+      "docs/customer-receipt-lifecycle.md",
+      "src/ERP.Application/Services/AgencyServiceFeeCollectionAllocationRules.cs",
+      "src/ERP.Application/Services/AgencyServiceFeeCollectionAllocationService.cs",
+      "src/ERP.Application/Services/CustomerReceiptAllocationService.cs",
+      "src/ERP.Application/Services/CustomerReceiptLifecycleRules.cs",
+      "src/ERP.IntegrationTests/CustomerReceiptSharedFundingSqlServerTests.cs",
+      "src/ERP.UnitTests/AgencyServiceFeeCollectionAllocationTests.cs",
+      "src/ERP.UnitTests/CustomerReceiptSharedFundingTests.cs"
+    ],
+    "diff": ".ai\\logs\\ERP-350-preserved-work.diff",
+    "preserved_at": "2026-10-08T06:08:50.420640Z"
+  },
+  "failure_kind": "path_guard_failure",
+  "failed_transport_version": 2,
+  "recovery_history": [
+    {
+      "remediation_task": "ERP-350-RECOVERY-1",
+      "cycle": 1,
+      "at": "2026-10-08T06:08:50.686205Z",
+      "evidence": {
+        "failure_kind": "path_guard_failure",
+        "summary": "Path guard failed:\noutside allowed_paths: src/ERP.Application/Services/AgencyServiceFeeCollectionAllocationRules.cs",
+        "result": ".ai\\results\\ERP-350.json",
+        "attempt_logs": [
+          ".ai/logs/ERP-350-attempt-1.jsonl",
+          ".ai/logs/ERP-350-attempt-2.jsonl"
+        ],
+        "validation_logs": [
+          ".ai/logs/ERP-350-validation-1.log"
+        ],
+        "latest_state_error": {
+          "task": "ERP-350",
+          "kind": "automatic_repair_pending",
+          "summary": "Path guard failed:\noutside allowed_paths: src/ERP.Application/Services/AgencyServiceFeeCollectionAllocationRules.cs"
+        },
+        "latest_build": {
+          "task": "ERP-350",
+          "profile": "safe",
+          "status": "failed",
+          "exit_code": 1,
+          "log": ".ai\\logs\\ERP-350-validation-1.log",
+          "at": "2026-10-08T05:56:33.037342Z"
+        },
+        "task_context": ".ai\\tasks\\ERP-350.json",
+        "changed_paths": [
+          ".ai/PROJECT_STATE.json",
+          "docs/customer-receipt-lifecycle.md",
+          "src/ERP.Application/Services/AgencyServiceFeeCollectionAllocationRules.cs",
+          "src/ERP.Application/Services/AgencyServiceFeeCollectionAllocationService.cs",
+          "src/ERP.Application/Services/CustomerReceiptAllocationService.cs",
+          "src/ERP.Application/Services/CustomerReceiptLifecycleRules.cs",
+          "src/ERP.IntegrationTests/CustomerReceiptSharedFundingSqlServerTests.cs",
+          "src/ERP.UnitTests/AgencyServiceFeeCollectionAllocationTests.cs",
+          "src/ERP.UnitTests/CustomerReceiptSharedFundingTests.cs"
+        ],
+        "diff": ".ai\\logs\\ERP-350-preserved-work.diff",
+        "execution_copy": "D:\\VSCodeProject\\NEWERP.executor.continue-erp-190-20260930080457"
+      }
+    }
+  ],
+  "supervised_recovery_cycles": 1,
+  "recovery_context": {
+    "remediation_task": "ERP-350-RECOVERY-1",
+    "failure_kind": "path_guard_failure",
+    "summary": "Path guard failed:\noutside allowed_paths: src/ERP.Application/Services/AgencyServiceFeeCollectionAllocationRules.cs",
+    "result": ".ai\\results\\ERP-350.json",
+    "attempt_logs": [
+      ".ai/logs/ERP-350-attempt-1.jsonl",
+      ".ai/logs/ERP-350-attempt-2.jsonl"
+    ],
+    "validation_logs": [
+      ".ai/logs/ERP-350-validation-1.log"
+    ],
+    "latest_state_error": {
+      "task": "ERP-350",
+      "kind": "automatic_repair_pending",
+      "summary": "Path guard failed:\noutside allowed_paths: src/ERP.Application/Services/AgencyServiceFeeCollectionAllocationRules.cs"
+    },
+    "latest_build": {
+      "task": "ERP-350",
+      "profile": "safe",
+      "status": "failed",
+      "exit_code": 1,
+      "log": ".ai\\logs\\ERP-350-validation-1.log",
+      "at": "2026-10-08T05:56:33.037342Z"
+    },
+    "task_context": ".ai\\tasks\\ERP-350.json",
+    "changed_paths": [
+      ".ai/PROJECT_STATE.json",
+      "docs/customer-receipt-lifecycle.md",
+      "src/ERP.Application/Services/AgencyServiceFeeCollectionAllocationRules.cs",
+      "src/ERP.Application/Services/AgencyServiceFeeCollectionAllocationService.cs",
+      "src/ERP.Application/Services/CustomerReceiptAllocationService.cs",
+      "src/ERP.Application/Services/CustomerReceiptLifecycleRules.cs",
+      "src/ERP.IntegrationTests/CustomerReceiptSharedFundingSqlServerTests.cs",
+      "src/ERP.UnitTests/AgencyServiceFeeCollectionAllocationTests.cs",
+      "src/ERP.UnitTests/CustomerReceiptSharedFundingTests.cs"
+    ],
+    "diff": ".ai\\logs\\ERP-350-preserved-work.diff",
+    "execution_copy": "D:\\VSCodeProject\\NEWERP.executor.continue-erp-190-20260930080457",
+    "repair_allowed_paths": [],
+    "instruction": "DeepSeek supervisor recovery: inspect the referenced complete logs, diagnose the root cause, and implement a different safe repair within allowed_paths. Rebuild and rerun the configured tests; if validation fails, use the newest log as the next repair input. Do not repeat the failed approach. Do not edit task/state/result files or relax production and irreversible-operation gates. "
+  }
 }
