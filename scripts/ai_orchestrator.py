@@ -17,6 +17,7 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from ai_state import refresh_project_state, save_json
+from ai_console_panel import show_console_panel
 from ai_provider_availability import next_retry, provider_failure_from_log
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -975,6 +976,8 @@ def run_next_owned(dry_run: bool) -> int:
             print(f"Stopped stale worker for already completed {task['id']}.")
             return 0
         task["attempts"] = attempt; save_json(task_path, task)
+        panel = show_console_panel(ROOT)
+        audit("console_panel_requested", task=task["id"], attempt=attempt, **panel)
         if validate_existing_first:
             validate_existing_first = False
             audit("path_guard_recovery_validation_started", task=task["id"], attempt=attempt)
