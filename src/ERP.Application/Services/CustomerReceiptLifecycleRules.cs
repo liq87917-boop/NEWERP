@@ -172,6 +172,7 @@ public static class CustomerReceiptLifecycleRules
     public static async Task<ReceiptFunding> LoadReceiptFundingAsync(IErpDbContext db, long receiptId)
     {
         ArgumentNullException.ThrowIfNull(db);
+        await EnsureValidFundingEvidenceAsync(db, new[] { receiptId });
 
         var customer = await db.CustomerReceiptAllocations.AsNoTracking()
             .Where(a => !a.IsDeleted && a.ReceiptId == receiptId
@@ -203,6 +204,7 @@ public static class CustomerReceiptLifecycleRules
         ArgumentNullException.ThrowIfNull(db);
         var ids = receiptIds.Distinct().ToList();
         if (ids.Count == 0) return new Dictionary<long, ReceiptFunding>();
+        await EnsureValidFundingEvidenceAsync(db, ids);
 
         var customer = await db.CustomerReceiptAllocations.AsNoTracking()
             .Where(a => !a.IsDeleted && a.Status == CustomerReceiptAllocationRules.StatusActive
@@ -227,6 +229,32 @@ public static class CustomerReceiptLifecycleRules
         }
 
         return map;
+    }
+
+    // Reject corrupt active evidence before aggregating either consumer; never repair or convert it implicitly.
+    private static async Task EnsureValidFundingEvidenceAsync(IErpDbContext db, IReadOnlyList<long> ids)
+    {
+        var receipts = await db.FinanceReceipts.AsNoTracking()
+            .Where(r => ids.Contains(r.Id) && !r.IsDeleted).ToListAsync();
+        foreach (var id in ids)
+        {
+            var customerRows = db.CustomerReceiptAllocations.AsNoTracking()
+                .Where(a => a.ReceiptId == id && !a.IsDeleted && a.Status == CustomerReceiptAllocationRules.StatusActive);
+            var agencyRows = db.AgencyServiceFeeCollectionAllocations.AsNoTracking()
+                .Where(a => a.ReceiptId == id && !a.IsDeleted && a.Status == AgencyServiceFeeCollectionAllocationRules.StatusActive);
+            var receipt = receipts.FirstOrDefault(r => r.Id == id);
+            if (receipt is null)
+            {
+                if (await customerRows.AnyAsync() || await agencyRows.AnyAsync())
+                    throw BusinessException.RuleConflict("有效分摊证据缺少权威收款单，不能计算或使用资金余额");
+                continue;
+            }
+            var currency = receipt.Currency.ToString();
+            if (!Enum.IsDefined(receipt.Currency)
+                || await customerRows.AnyAsync(a => a.CustomerId != receipt.CustomerId || a.Currency != currency || a.AllocatedAmount <= 0m)
+                || await agencyRows.AnyAsync(a => a.CustomerId != receipt.CustomerId || a.Currency != currency || a.AllocatedAmount <= 0m))
+                throw BusinessException.RuleConflict("有效分摊证据的客户、币种或金额异常，请先通过授权业务流程处理，不能计算或使用资金余额");
+        }
     }
 
     // ==================== 4. 收款单行锁（与分摊证据写入 / 生命周期串行化） ====================
