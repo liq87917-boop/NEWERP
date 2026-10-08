@@ -47,7 +47,7 @@
   "risk": "medium",
   "planning_stage": 3,
   "id": "ERP-343",
-  "status": "pending",
+  "status": "retry",
   "attempts": 0,
   "max_attempts": 3,
   "validation_profile": "safe",
@@ -63,5 +63,89 @@
     "required": false,
     "scenarios": []
   },
-  "created_at": "2026-10-08T01:26:21.951285Z"
+  "created_at": "2026-10-08T01:26:21.951285Z",
+  "preserved_work": {
+    "execution_copy": "D:\\VSCodeProject\\NEWERP.executor.continue-erp-190-20260930080457",
+    "changed_paths": [
+      ".ai/PROJECT_STATE.json",
+      ".ai/tasks/ERP-343.json",
+      "docs/stockout-order-fulfillment.md",
+      "src/ERP.Api/Controllers/StockOutController.cs",
+      "src/ERP.Application/Services/StockOutOrderFulfillmentRules.cs",
+      "src/ERP.IntegrationTests/StockInOrderFulfillmentSqlServerTests.cs",
+      "src/ERP.IntegrationTests/StockOutOrderFulfillmentSqlServerTests.cs",
+      "src/ERP.UnitTests/StockOutOrderFulfillmentTests.cs"
+    ],
+    "diff": ".ai\\logs\\ERP-343-preserved-work.diff",
+    "preserved_at": "2026-10-08T02:17:45.006568Z"
+  },
+  "failure_kind": "path_guard_failure",
+  "failed_transport_version": 2,
+  "recovery_history": [
+    {
+      "remediation_task": "ERP-343-RECOVERY-1",
+      "cycle": 1,
+      "at": "2026-10-08T02:17:45.340474Z",
+      "evidence": {
+        "failure_kind": "path_guard_failure",
+        "summary": "Path guard failed:\noutside allowed_paths: src/ERP.IntegrationTests/StockInOrderFulfillmentSqlServerTests.cs",
+        "result": ".ai\\results\\ERP-343.json",
+        "attempt_logs": [
+          ".ai/logs/ERP-343-attempt-1.jsonl"
+        ],
+        "validation_logs": [],
+        "latest_state_error": {
+          "task": "ERP-343",
+          "kind": "automatic_repair_pending",
+          "summary": "Path guard failed:\noutside allowed_paths: src/ERP.IntegrationTests/StockInOrderFulfillmentSqlServerTests.cs"
+        },
+        "latest_build": null,
+        "task_context": ".ai\\tasks\\ERP-343.json",
+        "changed_paths": [
+          ".ai/PROJECT_STATE.json",
+          ".ai/tasks/ERP-343.json",
+          "docs/stockout-order-fulfillment.md",
+          "src/ERP.Api/Controllers/StockOutController.cs",
+          "src/ERP.Application/Services/StockOutOrderFulfillmentRules.cs",
+          "src/ERP.IntegrationTests/StockInOrderFulfillmentSqlServerTests.cs",
+          "src/ERP.IntegrationTests/StockOutOrderFulfillmentSqlServerTests.cs",
+          "src/ERP.UnitTests/StockOutOrderFulfillmentTests.cs"
+        ],
+        "diff": ".ai\\logs\\ERP-343-preserved-work.diff",
+        "execution_copy": "D:\\VSCodeProject\\NEWERP.executor.continue-erp-190-20260930080457"
+      }
+    }
+  ],
+  "supervised_recovery_cycles": 1,
+  "recovery_context": {
+    "remediation_task": "ERP-343-RECOVERY-1",
+    "failure_kind": "path_guard_failure",
+    "summary": "Path guard failed:\noutside allowed_paths: src/ERP.IntegrationTests/StockInOrderFulfillmentSqlServerTests.cs",
+    "result": ".ai\\results\\ERP-343.json",
+    "attempt_logs": [
+      ".ai/logs/ERP-343-attempt-1.jsonl"
+    ],
+    "validation_logs": [],
+    "latest_state_error": {
+      "task": "ERP-343",
+      "kind": "automatic_repair_pending",
+      "summary": "Path guard failed:\noutside allowed_paths: src/ERP.IntegrationTests/StockInOrderFulfillmentSqlServerTests.cs"
+    },
+    "latest_build": null,
+    "task_context": ".ai\\tasks\\ERP-343.json",
+    "changed_paths": [
+      ".ai/PROJECT_STATE.json",
+      ".ai/tasks/ERP-343.json",
+      "docs/stockout-order-fulfillment.md",
+      "src/ERP.Api/Controllers/StockOutController.cs",
+      "src/ERP.Application/Services/StockOutOrderFulfillmentRules.cs",
+      "src/ERP.IntegrationTests/StockInOrderFulfillmentSqlServerTests.cs",
+      "src/ERP.IntegrationTests/StockOutOrderFulfillmentSqlServerTests.cs",
+      "src/ERP.UnitTests/StockOutOrderFulfillmentTests.cs"
+    ],
+    "diff": ".ai\\logs\\ERP-343-preserved-work.diff",
+    "execution_copy": "D:\\VSCodeProject\\NEWERP.executor.continue-erp-190-20260930080457",
+    "repair_allowed_paths": [],
+    "instruction": "DeepSeek supervisor recovery: inspect the referenced complete logs, diagnose the root cause, and implement a different safe repair within allowed_paths. Rebuild and rerun the configured tests; if validation fails, use the newest log as the next repair input. Do not repeat the failed approach. Do not edit task/state/result files or relax production and irreversible-operation gates. "
+  }
 }
