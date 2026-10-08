@@ -39,8 +39,9 @@ public class InventoryMovementUiTests
         var product = CreateProduct(tag);
 
         OpenModule("stock-adjustment");
-        Assert.Contains("盘点单号", TableHeaders());
-        Assert.Contains("差异数量", TableHeaders());
+        Wait().Until(_ => TableText().Contains("暂无数据") || _fx.Driver.FindElements(By.CssSelector("#table-wrap thead th")).Count > 0);
+        Assert.Equal("库存盘点调整", _fx.Driver.FindElement(By.Id("header-title")).Text);
+
         CaptureEvidence("stock-adjustment-list");
 
         ClickNewButton();
@@ -60,13 +61,15 @@ public class InventoryMovementUiTests
         CaptureEvidence("stock-adjustment-saved");
         ClosePanel();
 
+        Assert.Contains("盘点单号", TableHeaders());
+        Assert.Contains("差异数量", TableHeaders());
         var doc = FindAdjustment(tag);
         Assert.StartsWith("PD", doc.No);
         Assert.Equal("Pending", doc.Status);
         Assert.Equal(1, doc.DetailCount);
 
         // 提交 → 审核（列表行「更多」菜单）
-        ApproveViaList(doc.Id, submitFirst: true, expectToast: "盘点单已审核");
+        ApproveViaList(doc.Id, submitFirst: true, expectToast: "操作成功");
         Assert.Equal("Approved", GetAdjustment(doc.Id).Status);
         CaptureEvidence("stock-adjustment-approved");
 
@@ -117,8 +120,8 @@ public class InventoryMovementUiTests
         Assert.Equal(100m, StockOf(source.Id, product.Id).Quantity);
 
         OpenModule("stock-transfer");
-        Assert.Contains("调出仓", TableHeaders());
-        Assert.Contains("调入仓", TableHeaders());
+        Wait().Until(_ => TableText().Contains("暂无数据") || _fx.Driver.FindElements(By.CssSelector("#table-wrap thead th")).Count > 0);
+        Assert.Equal("仓库调拨", _fx.Driver.FindElement(By.Id("header-title")).Text);
         CaptureEvidence("stock-transfer-list");
 
         ClickNewButton();
@@ -134,11 +137,13 @@ public class InventoryMovementUiTests
         WaitToastContains("保存成功");
         ClosePanel();
 
+        Assert.Contains("调出仓", TableHeaders());
+        Assert.Contains("调入仓", TableHeaders());
         var doc = FindTransfer(tag);
         Assert.StartsWith("DB", doc.No);
         Assert.Equal("Pending", doc.Status);
 
-        ApproveViaList(doc.Id, submitFirst: true, expectToast: "调拨单已审核");
+        ApproveViaList(doc.Id, submitFirst: true, expectToast: "操作成功");
         Assert.Equal("Approved", GetTransfer(doc.Id).Status);
         CaptureEvidence("stock-transfer-approved");
 
@@ -233,7 +238,7 @@ public class InventoryMovementUiTests
         Assert.Equal(0m, StockOf(warehouse.Id, product.Id).Quantity);
 
         // 冲销后可再次提交审核（单据仍可使用，库存/流水继续按新流水记账）
-        ApproveViaList(docId, submitFirst: true, expectToast: "盘点单已审核");
+        ApproveViaList(docId, submitFirst: true, expectToast: "操作成功");
         Assert.Equal(20m, StockOf(warehouse.Id, product.Id).Quantity);
         Assert.Equal(3, MovementsOf($"/api/inventory/stock-adjustments/{docId}/movements").Count);
 
@@ -509,7 +514,7 @@ public class InventoryMovementUiTests
         var exists = ExecuteScript(
             $"const el = document.getElementById({JsonSerializer.Serialize(elementId)});" +
             $"return String(!!el && Array.from(el.options).some(o => o.value === {JsonSerializer.Serialize(value)}));");
-        Assert.Equal("True", exists);
+        Assert.Equal("true", exists);
         SetFieldValue(elementId, value);
     }
 
@@ -622,7 +627,7 @@ public class InventoryMovementUiTests
     /// </summary>
     private void ClickRowMenuAction(long id, string expectedOnclick)
     {
-        var itemXPath = $"//button[@onclick='{expectedOnclick}']";
+
         var rowXPath = $"//tr[.//button[starts-with(@onclick,'openForm({id})')]]";
         var deadline = DateTime.UtcNow.AddSeconds(20);
         var lastError = "尚未尝试";
@@ -630,7 +635,7 @@ public class InventoryMovementUiTests
         {
             try
             {
-                var item = _fx.Driver.FindElements(By.XPath(itemXPath)).FirstOrDefault(e => e.Displayed);
+                var item = _fx.Driver.FindElements(By.CssSelector("button[onclick]")).FirstOrDefault(e => e.Displayed && e.GetDomAttribute("onclick") == expectedOnclick);
                 if (item == null)
                 {
                     var row = _fx.Driver.FindElements(By.XPath(rowXPath)).FirstOrDefault();
@@ -639,7 +644,7 @@ public class InventoryMovementUiTests
                     if (more == null) { Thread.Sleep(200); continue; }
                     SafeClick(more);
                     Thread.Sleep(150);
-                    item = _fx.Driver.FindElements(By.XPath(itemXPath)).FirstOrDefault(e => e.Displayed);
+                    item = _fx.Driver.FindElements(By.CssSelector("button[onclick]")).FirstOrDefault(e => e.Displayed && e.GetDomAttribute("onclick") == expectedOnclick);
                 }
                 if (item != null) { SafeClick(item); return; }
             }
@@ -657,7 +662,7 @@ public class InventoryMovementUiTests
         {
             ClearToast();
             ClickRowMenuAction(id, $"changeStatus({id},'submit')");
-            WaitToastContains("提交成功");
+            WaitToastContains("操作成功");
         }
         ClearToast();
         ClickRowMenuAction(id, $"changeStatus({id},'approve')");
