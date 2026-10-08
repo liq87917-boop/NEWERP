@@ -490,7 +490,7 @@ def preserve_failed_work(
     result = {
         "task": task["id"], "status": "retry_pending", "execution_outcome": "automatic_repair_pending",
         "attempts": max_attempts, "last_error": previous_error[-12000:], "failure_kind": failure_kind,
-        "attempted_fix": {"provider": "deepseek", "model": os.environ.get("AI_CLINE_MODEL", "deepseek-v4-pro")},
+        "attempted_fix": {"provider": "deepseek", "model": (config.get("cline_model") or os.environ.get("AI_CLINE_MODEL", "deepseek-flash"))},
         "preserved_work": task["preserved_work"], "finished_at": utc_now(),
     }
     save_json(RESULTS_DIR / f"{task['id']}.json", result)
@@ -1022,7 +1022,7 @@ def run_next_owned(dry_run: bool) -> int:
             log_path = LOGS_DIR / f"{task['id']}-attempt-{attempt}.jsonl"; LOGS_DIR.mkdir(parents=True, exist_ok=True)
             last_executor_log = log_path
             provider = os.environ.get("AI_CLINE_PROVIDER", "deepseek")
-            model = os.environ.get("AI_CLINE_MODEL", "deepseek-v4-pro")
+            model = (config.get("cline_model") or os.environ.get("AI_CLINE_MODEL", "deepseek-flash"))
             command = [
                 cline_command,
                 "--json",

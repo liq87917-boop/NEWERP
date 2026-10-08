@@ -17,7 +17,7 @@ echo.
 
 rem Local development runtime. Values identify the provider/model only; secrets remain in ignored env files.
 set AI_CLINE_PROVIDER=deepseek
-set AI_CLINE_MODEL=deepseek-v4-pro
+set AI_CLINE_MODEL=deepseek-flash
 set PYTHONUTF8=1
 set DOTNET_NOLOGO=true
 set DOTNET_CLI_TELEMETRY_OPTOUT=true

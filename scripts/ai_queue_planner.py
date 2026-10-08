@@ -104,7 +104,7 @@ Each task: title, description, acceptance_criteria array, allowed_paths exact re
 Current stage: """+str(stage)+"\nRequest: "+json.dumps(request)
     before=fingerprint(p)
     try:
-        command=[p.resolve_cline_command(config['cline_command']),'--json','--auto-approve','true','--provider',os.environ.get('AI_CLINE_PROVIDER','deepseek'),'--model',os.environ.get('AI_CLINE_MODEL','deepseek-v4-pro'),'--cwd',str(p.ROOT),'--timeout',str(config['cline_timeout_seconds']),prompt]
+        command=[p.resolve_cline_command(config['cline_command']),'--json','--auto-approve','true','--provider',os.environ.get('AI_CLINE_PROVIDER','deepseek'),'--model',(config.get('cline_model') or os.environ.get('AI_CLINE_MODEL','deepseek-flash')),'--cwd',str(p.ROOT),'--timeout',str(config['cline_timeout_seconds']),prompt]
         with log.open('w',encoding='utf-8') as out:done=subprocess.run(command,cwd=p.ROOT,stdout=out,stderr=subprocess.STDOUT)
         if before!=fingerprint(p):raise ValueError('Planner changed repo; preserve changes and reject publication')
         if done.returncode:raise ValueError('Planner failed; complete log '+str(log))

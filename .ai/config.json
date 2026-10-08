@@ -1,5 +1,6 @@
 {
   "project": "NEWERP",
+  "cline_model": "deepseek-flash",
   "task_prefix": "ERP",
   "max_attempts": 3,
   "cline_timeout_seconds": 3600,
