@@ -44,18 +44,31 @@ public static class SupplierPaymentAllocationService
         if (dto.PaymentId <= 0) throw BusinessException.InvalidParameter("请选择要引用的付款单");
         if (dto.PurchaseOrderId <= 0) throw BusinessException.InvalidParameter("请选择要引用的采购订单");
 
-        // 与付款单生命周期（取消 / 修改 / 删除）互斥：在同一事务内先对付款单行加排它行锁，
-        // 再读权威金额与状态，避免「登记引用证据」与「付款单被取消 / 改金额」并发竞态。
+        // 与付款单生命周期（取消 / 修改 / 删除）及来源货款申请单的商业改动 / 取消互斥：ERP-380 统一锁序为
+        // 「先来源申请单行、后付款单行」，再读权威金额与状态，避免「登记引用证据」与
+        // 「付款单被取消 / 改金额 / 来源申请单被取消」并发竞态。
         await using var transaction = SupplierPaymentLifecycleRules.IsRelationalProvider(db)
             ? await db.Database.BeginTransactionAsync()
             : null;
 
+        var sourceApplyId = await FinancePaymentApplyLifecycleRules.ReadPaymentApplyIdAsync(db, dto.PaymentId);
+        if (sourceApplyId is > 0)
+            await FinancePaymentApplyLifecycleRules.LockApplyRowAsync(db, sourceApplyId.Value);
+
         await SupplierPaymentLifecycleRules.LockPaymentRowAsync(db, dto.PaymentId);
 
         var payment = await LoadPaymentAsync(db, dto.PaymentId);
+        if ((payment.PaymentApplyId ?? 0L) != (sourceApplyId ?? 0L))
+            throw BusinessException.RuleConflict(
+                "付款单的来源货款申请单在并发中已被变更，本次操作未生效：请刷新后重试（原始付款单与引用证据均未改变）");
         if (payment.Status == DocumentStatus.Cancelled)
             throw BusinessException.RuleConflict(
                 $"付款单「{payment.PaymentNo}」已取消，不能登记新的付款引用（历史引用仍可读，不再新增）");
+
+        // 锁内重新复核来源申请单仍可用（未删除且未取消）：分配合格性绝不基于陈旧 / 孤立的来源；
+        // 未关联申请单的历史付款场景保持既有语义（不新增限制）。
+        await FinancePaymentApplyLifecycleRules.EnsureSourceApplyUsableAsync(
+            db, payment.PaymentApplyId, "登记付款引用");
 
         var currency = SupplierPaymentAllocationRules.NormalizeCurrencyStrict(payment.Currency.ToString());
         var amount = SupplierPaymentAllocationRules.NormalizeAllocationAmount(dto.AllocatedAmount, currency);
