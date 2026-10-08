@@ -97,8 +97,7 @@ public static class PurchaseOrderAuthorizationRules
     {
         ArgumentNullException.ThrowIfNull(order);
         var scope = await EnsureMenuAuthorizedAsync(db, userId, ct);
-        var (explicitId, linkedId) = await ResolveOwningCustomerIdsAsync(db, order, ct);
-        EnsureCustomerScope(scope, explicitId, linkedId);
+        await EnsureOrderScopeAllowedAsync(db, scope, order, ct);
     }
 
     /// <summary>批量单据级授权：菜单 / 身份只解析一次，逐单复核权威归属客户范围（列表外批量派生视图使用）。</summary>
@@ -108,10 +107,32 @@ public static class PurchaseOrderAuthorizationRules
         ArgumentNullException.ThrowIfNull(orders);
         var scope = await EnsureMenuAuthorizedAsync(db, userId, ct);
         foreach (var order in orders)
-        {
-            var (explicitId, linkedId) = await ResolveOwningCustomerIdsAsync(db, order, ct);
-            EnsureCustomerScope(scope, explicitId, linkedId);
-        }
+            await EnsureOrderScopeAllowedAsync(db, scope, order, ct);
+    }
+
+    /// <summary>
+    /// 已解析数据范围的可用性（ERP-393 复用）：特权账号放行；受限账号未映射为业务员（采购操作员）时
+    /// 一律 fail closed（不泄露任何单据），与 <see cref="ApplyScopeAsync"/> 的列表口径完全一致。
+    /// </summary>
+    public static void EnsureScopeUsable(SalespersonDataScope scope)
+    {
+        ArgumentNullException.ThrowIfNull(scope);
+        if (!scope.IsPrivileged && scope.SalesmanId is null or <= 0)
+            throw new BusinessException(UnmappedOperatorText, ErrorCodes.Forbidden);
+    }
+
+    /// <summary>
+    /// 单据级范围复核（ERP-393 复用）：在调用方已解析数据范围（例如候选接口已做身份 / 菜单校验）时，
+    /// 按「显式归属客户 + 权威归属销售订单客户」两侧复核本单是否落在范围内，任一越界即 fail closed。
+    /// 复用本类唯一权威的 <see cref="EnsureCustomerScope"/> 口径，供只读来源解析等派生接口使用。
+    /// </summary>
+    public static async Task EnsureOrderScopeAllowedAsync(IErpDbContext db, SalespersonDataScope scope,
+        PurchaseOrder order, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(scope);
+        ArgumentNullException.ThrowIfNull(order);
+        var (explicitId, linkedId) = await ResolveOwningCustomerIdsAsync(db, order, ct);
+        EnsureCustomerScope(scope, explicitId, linkedId);
     }
 
     /// <summary>
@@ -141,8 +162,7 @@ public static class PurchaseOrderAuthorizationRules
         var scope = await EnsureMenuAuthorizedAsync(db, userId, ct);
         if (scope.IsPrivileged)
             return source;
-        if (scope.SalesmanId is null or <= 0)
-            throw new BusinessException(UnmappedOperatorText, ErrorCodes.Forbidden);
+        EnsureScopeUsable(scope);
 
         var allowed = scope.AllowedCustomerIds?.ToList() ?? new List<long>();
         if (allowed.Count == 0)

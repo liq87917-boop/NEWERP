@@ -64,6 +64,48 @@ public class PurchaseOrderController : DocumentControllerBase<PurchaseOrder>
         return Ok(ApiResponse<PurchaseOrder>.Success(entity));
     }
 
+    /// <summary>
+    /// 来源销售订单候选（ERP-393，只读、有界、分页）：在实时启用身份 + 既有「采购订单」菜单 + 当前客户数据范围之内，
+    /// 返回「已审核、未删除、未取消」销售订单候选（复用 <see cref="PurchaseSalesOrderLinkRules"/> 的可选性口径；
+    /// 不要求币种一致、不做汇率换算，币种仅供展示）。可选用精确归属客户过滤（<paramref name="customerId"/>）。
+    /// <para>客户数据范围先于计数 / 分页下推到数据库；关键字 / 页码 / 每页条数先归一化再计数。
+    /// <b>候选选择不等于授权</b>：最终保存仍按 <see cref="PurchaseSalesOrderLinkRules.ApplyLinkAsync"/> 复核精确来源、
+    /// 权威客户与商品 / 单位兼容性；不返回范围外订单，也不提供按猜测 Id 直取候选的旁路；
+    /// <b>不新增任何用户授权，也不提供匿名 / 管理员降级</b>（缺失 / 已删除身份按未认证拒绝，禁用 / 无菜单按权限不足拒绝）。</para>
+    /// </summary>
+    [HttpGet("sales-order-source-candidates")]
+    public async Task<IActionResult> GetSalesOrderSourceCandidates(
+        [FromQuery] long? customerId, [FromQuery] string? keyword,
+        [FromQuery] int page = 0, [FromQuery] int pageSize = 0)
+    {
+        // ERP-393：实时启用身份 + 既有「采购订单」菜单 + 权威客户数据范围（fail closed）。
+        var scope = await PurchaseOrderAuthorizationRules.EnsureMenuAuthorizedAsync(Db, CurrentUserId());
+        return Ok(ApiResponse<PurchaseOrderSalesOrderSourceCandidatePageDto>.Success(
+            await PurchaseOrderSalesOrderSourceService.QueryCandidatesAsync(
+                Db, scope, customerId, keyword, page, pageSize),
+            PurchaseOrderSalesOrderSourceService.CandidateRuleText));
+    }
+
+    /// <summary>
+    /// 已存储来源（归属销售订单）的只读解析（ERP-393，详情 / 重开用）：按本单持久化的 <c>OwningSalesOrderId</c> 精确解析，
+    /// 返回显式状态文案（未关联 / 已关联 / 来源已取消 / 来源不可用）；历史已取消 / 不可用来源原样保留、只读可读，
+    /// 绝不静默清除 / 重绑定。来源不可用（已删除 / 已取消 / 未审核 / 不在当前账号客户数据范围之内）时
+    /// <b>绝不泄露</b>范围外来源的客户 / 订单字段。身份 / 菜单 / 权威归属客户范围先于任何解析。
+    /// </summary>
+    [HttpGet("{id:long}/sales-order-source")]
+    public async Task<IActionResult> GetStoredSalesOrderSource(long id)
+    {
+        var entity = await Set.AsNoTracking()
+            .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
+            ?? throw BusinessException.NotFound("采购订单不存在");
+        // ERP-393：实时启用身份 + 既有「采购订单」菜单 + 本单权威归属客户范围（显式归属客户 + 权威来源客户，fail closed）。
+        var scope = await PurchaseOrderAuthorizationRules.EnsureMenuAuthorizedAsync(Db, CurrentUserId());
+        await PurchaseOrderAuthorizationRules.EnsureOrderScopeAllowedAsync(Db, scope, entity);
+        return Ok(ApiResponse<PurchaseOrderSalesOrderSourceViewDto>.Success(
+            await PurchaseOrderSalesOrderSourceService.DescribeStoredSourceAsync(Db, scope, entity),
+            PurchaseOrderSalesOrderSourceService.StoredSourceRuleText));
+    }
+
     /// <summary>从现有订单、供应商确认交期和采购入库记录派生只读执行时间线。</summary>
     [HttpGet("{id:long}/timeline")]
     public async Task<IActionResult> Timeline(long id)

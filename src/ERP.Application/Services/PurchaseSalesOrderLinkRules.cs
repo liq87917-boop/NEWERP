@@ -36,6 +36,27 @@ public static class PurchaseSalesOrderLinkRules
         + "原始商业币种 / 单价保持不变，采购总额仍按既有 Calculate 口径（Σ 数量 × 单价）计算，不强制币种相等、不跨币种合计，"
         + "不静默改写销售 / 库存 / 财务数据；更新时重新解析来源与权限，已提交或已审核单据的冻结规则保持不变。";
 
+    /// <summary>来源销售订单不存在 / 已删除的拒绝文案（ERP-393 候选 / 已存储来源解析同源复用）</summary>
+    public const string SourceNotFoundText = "归属销售订单不存在或已删除，不能作为采购备货来源";
+
+    /// <summary>来源销售订单已取消的拒绝文案（ERP-393 候选 / 已存储来源解析同源复用）</summary>
+    public const string SourceCancelledText = "归属销售订单已取消，不能作为采购备货来源";
+
+    /// <summary>来源销售订单未审核的拒绝文案（ERP-393 候选 / 已存储来源解析同源复用）</summary>
+    public const string SourceNotApprovedText = "归属销售订单未审核，不能作为采购备货来源";
+
+    /// <summary>
+    /// 来源销售订单是否可作为<b>新</b>归属来源（ERP-393 候选 / 已存储来源解析复用）：仅「已审核」满足，
+    /// 已取消 / 未审核 / 已驳回 / 已完成一律不可作为新来源（历史已记录的链接只读保留）。
+    /// </summary>
+    public static bool IsEligibleNewSource(DocumentStatus status) => status == DocumentStatus.Approved;
+
+    /// <summary>来源销售订单不可作为新来源时的权威原因文案（已审核返回空串）。</summary>
+    public static string SourceIneligibleReason(DocumentStatus status)
+        => status == DocumentStatus.Cancelled ? SourceCancelledText
+            : status == DocumentStatus.Approved ? string.Empty
+            : SourceNotApprovedText;
+
     /// <summary>
     /// 在保存前解析并应用归属销售订单链接。未链接（null）直接返回，保持历史行为；
     /// 显式链接必须为正整数且构成权威来源，否则 fail closed 抛业务异常，不落库、不改任何状态。
@@ -74,11 +95,11 @@ public static class PurchaseSalesOrderLinkRules
 
         var order = await db.SalesOrders.AsNoTracking()
             .FirstOrDefaultAsync(o => o.Id == owningSalesOrderId.Value && !o.IsDeleted, ct)
-            ?? throw BusinessException.RuleConflict("归属销售订单不存在或已删除，不能作为采购备货来源");
+            ?? throw BusinessException.RuleConflict(SourceNotFoundText);
         if (order.Status == DocumentStatus.Cancelled)
-            throw BusinessException.RuleConflict("归属销售订单已取消，不能作为采购备货来源");
+            throw BusinessException.RuleConflict(SourceCancelledText);
         if (order.Status != DocumentStatus.Approved)
-            throw BusinessException.RuleConflict("归属销售订单未审核，不能作为采购备货来源");
+            throw BusinessException.RuleConflict(SourceNotApprovedText);
     }
 
 
@@ -93,9 +114,9 @@ public static class PurchaseSalesOrderLinkRules
             .FirstOrDefaultAsync(o => o.Id == entity.OwningSalesOrderId!.Value && !o.IsDeleted, ct)
             ?? throw BusinessException.RuleConflict("归属销售订单不存在或已删除");
         if (order.Status == DocumentStatus.Cancelled)
-            throw BusinessException.RuleConflict("归属销售订单已取消，不能作为采购备货来源");
+            throw BusinessException.RuleConflict(SourceCancelledText);
         if (order.Status != DocumentStatus.Approved)
-            throw BusinessException.RuleConflict("归属销售订单未审核，不能作为采购备货来源");
+            throw BusinessException.RuleConflict(SourceNotApprovedText);
 
         var scope = await SalespersonDataScopeService.ResolveAsync(db, userId!.Value);
         if (!scope.AllowsCustomer(order.CustomerId))

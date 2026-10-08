@@ -241,7 +241,9 @@ Object.assign(MODULES, {
       { key: 'contractNo', label: '采购合同号' },
       { key: 'owningCustomerId', label: '归属客户', type: 'ref', ref: 'customer' },
       { key: 'owningCustomerName', label: '归属客户名称（冗余，可留空）' },
-      { key: 'owningSalesOrderId', label: '归属销售订单 ID', type: 'number' },
+      /* ERP-393：来源销售订单由「选择来源」有界选择器显式回填（也可手工填写 Id）；选择器只回填权威归属来源
+         Id / 单号与归属客户（服务端保存时再按来源权威派生），绝不自动改动币种 / 汇率 / 单价 / 金额 / 明细 */
+      { key: 'owningSalesOrderId', label: '归属销售订单 ID', type: 'number', selector: 'purchase-order-sales-order-source' },
       { key: 'owningSalesOrderNo', label: '归属销售订单号' },
       { key: 'advanceOnBehalf', label: '是否代垫货款', type: 'select', valueType: 'bool', options: YES_NO_OPTS },
       { key: 'currency', label: '币种', type: 'select', options: CURRENCY_NAME_OPTS },
