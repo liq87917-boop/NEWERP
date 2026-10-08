@@ -284,6 +284,10 @@
   <!-- ERP-375：采购入库来源采购订单显式选择器（只读有界候选 + 逐商品剩余可收数量 → 回填权威来源 Id / 单号 /
        供应商与可收货商品行；重复 / 歧义明细、单位未知、已收货满额不可选；保留用户所选仓库；不臆造成本、不写库存） -->
   <script src="/js/stock-in-source-picker.js"></script>
+  <!-- ERP-376：销售出库来源销售订单显式选择器（只读有界候选 + 逐商品剩余可发数量 → 回填权威来源 Id / 单号 /
+       权威客户与可发货商品行；重复 / 歧义明细、单位未知、已发货满额不可选；保留用户所选仓库；
+       不臆造价格、不写库存、不绕过 ERP-343 / ERP-359 / ERP-367 护栏） -->
+  <script src="/js/stock-out-source-picker.js"></script>
   <script src="/js/base-io.js"></script>
   <script src="/js/datepicker.js"></script>
   <script src="/js/expense-allocate.js"></script>

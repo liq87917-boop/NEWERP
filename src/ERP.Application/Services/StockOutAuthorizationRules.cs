@@ -29,6 +29,12 @@ public static class StockOutAuthorizationRules
     /// <summary>销售出库模块菜单中文文案（与既有菜单名一致）</summary>
     public const string RequiredMenuText = "销售出库";
 
+    /// <summary>读取 / 选择出库来源所需既有菜单编码（与既有「销售订单」菜单同源，绝不新增权限模型）</summary>
+    public const string SourceRequiredMenuCode = "sales-order";
+
+    /// <summary>销售订单模块菜单中文文案（与既有菜单名一致）</summary>
+    public const string SourceRequiredMenuText = "销售订单";
+
     /// <summary>
     /// 来源销售出库单行锁（与销售退货审核 / 销审 / 取消 / 装柜审核共用<b>同一</b>把
     /// <c>UPDLOCK, HOLDLOCK</c>）：把「出库审核」「出库修改 / 状态流转」与「来源取消 / 装柜引用」串行化在同一事务内。
@@ -89,6 +95,30 @@ public static class StockOutAuthorizationRules
             var hasAnyRole = await db.SysUserRoles.AsNoTracking()
                 .AnyAsync(ur => ur.UserId == userId.Value && !ur.IsDeleted, ct);
             if (hasAnyRole) throw MenuDenied();
+        }
+
+        return scope;
+    }
+
+    /// <summary>
+    /// 读取 / 选择出库来源所需授权（fail closed，ERP-376）：先复用销售出库（<c>stock-out</c>）身份 / 账号状态 / 菜单校验，
+    /// 再要求当前账号实时具备既有「销售订单」（<c>sales-order</c>）菜单授权；撤销任一授权后下一次请求立即收敛。
+    /// <para>绝不新增用户授权，也不提供匿名 / 管理员降级；每次请求重新解析角色 → 菜单，不缓存。
+    /// 返回解析出的权威数据范围，供调用方在同一请求内复用（绝不缓存）。</para>
+    /// </summary>
+    public static async Task<SalespersonDataScope> EnsureSourceMenuAuthorizedAsync(IErpDbContext db, long? userId,
+        CancellationToken ct = default)
+    {
+        // 销售出库权限（身份 / 账号状态 / stock-out 菜单 + 权威数据范围）先 fail closed。
+        var scope = await EnsureMenuAuthorizedAsync(db, userId, ct);
+
+        var menuCodes = await CustomerReceivableReconciliationService.LoadAuthorizedMenuCodesAsync(db, userId!.Value);
+        if (!menuCodes.Contains(SourceRequiredMenuCode, StringComparer.OrdinalIgnoreCase))
+        {
+            throw new BusinessException(
+                $"当前账号没有「{SourceRequiredMenuText}」（{SourceRequiredMenuCode}）模块授权：拒绝读取销售出库来源候选" +
+                "（fail closed，不返回任何来源证据）",
+                ErrorCodes.Forbidden);
         }
 
         return scope;

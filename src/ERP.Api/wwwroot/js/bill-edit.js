@@ -307,9 +307,15 @@ function renderBillEdit(oid) {
 
   /* ERP-375：采购入库（SP 单据页）来源采购订单显式选择入口 —— 选择器脚本已加载时提供，
      未加载时保持原页面不变（绝不报错）；只影响 stock-in 单据，其它单据不受影响。
-     选择器只回填权威来源 Id / 供应商与可收货商品行，绝不臆造成本，也不改写仓库。 */
-  const sourcePickerHtml = (BILL_CODE === 'stock-in' && typeof sisSourceButtonHtml === 'function')
-    ? sisSourceButtonHtml(BILL_EDIT_OID || 0) : '';
+     选择器只回填权威来源 Id / 供应商与可收货商品行，绝不臆造成本，也不改写仓库。
+     ERP-376：销售出库（SP 单据页）来源销售订单显式选择入口 —— 同一口径，只影响 stock-out 单据；
+     只回填权威来源 Id / 权威客户与可发货商品行，绝不臆造价格，也保留用户所选仓库。 */
+  let sourcePickerHtml = '';
+  if (BILL_CODE === 'stock-in' && typeof sisSourceButtonHtml === 'function') {
+    sourcePickerHtml = sisSourceButtonHtml(BILL_EDIT_OID || 0);
+  } else if (BILL_CODE === 'stock-out' && typeof sosSourceButtonHtml === 'function') {
+    sourcePickerHtml = sosSourceButtonHtml(BILL_EDIT_OID || 0);
+  }
 
   document.getElementById('content').innerHTML = `
     <!-- Hero 标题区 -->

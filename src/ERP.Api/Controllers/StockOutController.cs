@@ -1,4 +1,5 @@
 using ERP.Application.Common;
+using ERP.Application.DTOs;
 using ERP.Application.Interfaces;
 using ERP.Application.Services;
 using ERP.Domain.Entities;
@@ -19,6 +20,10 @@ namespace ERP.Api.Controllers;
 /// 列表在计数 / 分页之前把客户范围下推到数据库；修改 / 提交 / 删除 / 审核与取消共用<b>同一把</b>本出库单行锁
 /// （<c>UPDLOCK, HOLDLOCK</c>）与可串行化事务，使已审核库存 / 流水不会被并发改单穿透。数量护栏仍为 ERP-343，
 /// 取消护栏仍为 ERP-359 / ERP-367。</para>
+/// <para>ERP-376：新增只读、有界的销售订单来源候选 / 详情端点（既有「销售出库」+「销售订单」菜单 + ERP-097 权威客户范围），
+/// 供业务表单显式选择来源并回填权威客户与可发货商品行（ERP-343 剩余可发数量口径）；候选选择绝不臆造价格，
+/// 也绝不改动 ERP-343 发货容量口径、ERP-359 退货护栏与 ERP-367 装柜取消护栏。表单「未选择来源」（数字 0）
+/// 归一为 <c>null</c>，保持历史无来源出库单语义（重开时可见为未链接）。</para>
 /// </summary>
 [Route("api/stock-outs")]
 public class StockOutController : DocumentControllerBase<StockOut>
@@ -73,10 +78,56 @@ public class StockOutController : DocumentControllerBase<StockOut>
         return Ok(ApiResponse<IReadOnlyList<StockMovement>>.Success(movements));
     }
 
+    // ==================== ERP-376：来源候选 / 详情（只读、有界） ====================
+
+    /// <summary>
+    /// 可发货来源候选（只读、有界）：返回当前账号客户数据范围内、客户匹配且关键字命中的
+    /// 「已审核、未删除」销售订单可发货商品行，按「来源销售订单 + 商品」聚合给出剩余可发数量（ERP-343 口径）。
+    /// <para>授权口径：既有「销售出库」菜单 + 既有「销售订单」菜单（实时校验，撤销后立即收敛）+
+    /// ERP-097 权威客户范围（在计数 / 取数<b>之前</b>下推到数据库）；不新增用户授权，
+    /// 也不提供匿名 / 管理员降级；重复 / 歧义明细、单位未知、已发货满额的候选显式标记不可用，绝不猜容量。</para>
+    /// </summary>
+    [HttpGet("source-candidates")]
+    public async Task<IActionResult> GetSourceCandidates([FromQuery] long? customerId,
+        [FromQuery] string? keyword, [FromQuery] int take = 0)
+    {
+        var scope = await StockOutAuthorizationRules.EnsureSourceMenuAuthorizedAsync(Db, CurrentStockOutUserId());
+        var scoped = ApplySalesOrderScope(scope);
+
+        var candidates = (await StockOutOrderFulfillmentRules.QuerySourceCandidatesAsync(
+            Db, scoped, customerId, keyword, take)).ToList();
+        return Ok(ApiResponse<List<StockOutSourceCandidateDto>>.Success(
+            candidates, "已返回可发货的已审核销售订单来源（只读：重复 / 歧义明细、单位未知、已发货满额标记为不可用，绝不猜容量）"));
+    }
+
+    /// <summary>
+    /// 来源详情（只读、有界）：返回一张权威来源销售订单的表头 + 逐商品剩余可发行，供业务表单在显式选择后
+    /// 回填权威来源 Id / 单号 / 客户与可发货商品行。范围外 / 不存在 / 已删除按「不存在」拒绝，
+    /// 未审核 / 已取消 / 已驳回按冲突拒绝；任一失败都不改写已保存的来源链接。
+    /// </summary>
+    [HttpGet("source-candidates/{salesOrderId:long}")]
+    public async Task<IActionResult> GetSourceCandidateDetail(long salesOrderId)
+    {
+        var scope = await StockOutAuthorizationRules.EnsureSourceMenuAuthorizedAsync(Db, CurrentStockOutUserId());
+        var scoped = ApplySalesOrderScope(scope);
+
+        var detail = await StockOutOrderFulfillmentRules.ResolveSourceDetailAsync(Db, scoped, salesOrderId);
+        return Ok(ApiResponse<StockOutSourceDetailDto>.Success(
+            detail, "已返回来源销售订单的可发货详情（只读：不可用行带原因，绝不猜价格）"));
+    }
+
+    /// <summary>候选 / 详情的权威客户范围下推（计数 / 取数之前）：复用 ERP-097 唯一权威口径，绝不内存过滤。</summary>
+    private IQueryable<SalesOrder> ApplySalesOrderScope(SalespersonDataScope scope)
+        => SalespersonDataScopeService.FilterByCustomer(Db.SalesOrders.AsNoTracking(), scope, o => o.CustomerId);
+
     /// <summary>创建</summary>
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] StockOut entity)
     {
+        // ERP-376：业务表单「未选择来源」以数字 0 表示（数字字段留空 → 0）；归一为 null，
+        // 保持历史「无来源」出库单语义（null），绝不把 0 当成无效显式链接拒绝。
+        NormalizeSalesOrderLink(entity);
+
         // ERP-370：授权与客户范围校验先于单号生成——被拒绝方绝不消耗单据号，也绝不落任何明细。
         await StockOutAuthorizationRules.EnsureCustomerAuthorizedAsync(Db, CurrentStockOutUserId(), entity.CustomerId);
         entity.Id = 0;
@@ -101,6 +152,10 @@ public class StockOutController : DocumentControllerBase<StockOut>
     [HttpPut("{id:long}")]
     public async Task<IActionResult> Update(long id, [FromBody] StockOut entity)
     {
+        // ERP-376：与创建同一口径——表单「未选择来源」（0）归一为 null，保持历史无来源语义；
+        // 失败的修改在事务内整体回滚（单据 / 明细 / 库存 / 流水保持原样）。
+        NormalizeSalesOrderLink(entity);
+
         var userId = CurrentStockOutUserId();
 
         // 确定性锁序：来源出库单行（与销售退货审核 / 销审 / 取消 / 装柜审核同一把锁）→ 只读判定。
@@ -384,6 +439,15 @@ public class StockOutController : DocumentControllerBase<StockOut>
             "销售出库单取消冲销");
         if (reversals.Count == 0)
             await RestoreLegacyStockAsync(entity);
+    }
+
+    /// <summary>
+    /// ERP-376：把业务表单「未选择来源」的数字 0 归一为 <c>null</c>（历史「无来源」语义，重开时可见为未链接），
+    /// 负数等非法值保持原样交由 <see cref="StockOutOrderFulfillmentRules.ValidateLinkAsync"/> fail closed 拒绝。
+    /// </summary>
+    private static void NormalizeSalesOrderLink(StockOut entity)
+    {
+        if (entity.SalesOrderId == 0) entity.SalesOrderId = null;
     }
 
     /// <summary>流水备注：带上来源销售订单 Id，便于按流水反查订单执行情况</summary>

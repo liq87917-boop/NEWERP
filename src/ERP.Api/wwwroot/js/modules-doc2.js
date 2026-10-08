@@ -54,6 +54,19 @@ const STOCK_IN_DETAIL_FIELDS = [
   { key: 'remark', label: '备注', width: '110px' },
 ];
 
+/* ERP-376：销售出库明细列（数量 = 发货数量，按基础单位；出库成本由服务端按移动加权平均兜底，本页不录入单价 / 价格） */
+const STOCK_OUT_DETAIL_FIELDS = [
+  { key: 'productId', label: '商品ID', type: 'number', width: '90px' },
+  { key: 'productName', label: '商品名称', width: '170px' },
+  { key: 'spec', label: '规格', width: '100px' },
+  { key: 'unit', label: '单位', width: '60px' },
+  { key: 'quantity', label: '数量', type: 'number', width: '80px' },
+  { key: 'weight', label: '毛重(kg)', type: 'number', width: '90px' },
+  { key: 'volume', label: '体积(m³)', type: 'number', width: '90px' },
+  { key: 'batchNo', label: '批次号', width: '100px' },
+  { key: 'remark', label: '备注', width: '110px' },
+];
+
 Object.assign(MODULES, {
   'stock-in': {
     title: '采购入库', api: '/api/stock-ins', canSubmit: true,
@@ -83,10 +96,17 @@ Object.assign(MODULES, {
       { key: 'totalQuantity', label: '总数量', type: 'money' }, { key: 'status', label: '状态', status: true },
     ],
     fields: [
-      { key: 'stockOutDate', label: '出库日期', type: 'date' }, { key: 'customerId', label: '客户Id', type: 'number' },
+      { key: 'stockOutDate', label: '出库日期', type: 'date' },
+      /* ERP-376：来源由「选择来源」有界选择器显式回填（也可手工填写 Id）；选择器只回填权威来源 Id 与权威客户 /
+         可发货商品行，绝不臆造价格（出库成本仍由服务端移动加权平均口径兜底）；留空（未选择）= 历史未链接语义 */
+      { key: 'salesOrderId', label: '来源销售订单 ID（可留空；建议用「选择来源」；留空 = 历史未链接）', type: 'number', selector: 'stock-out-source' },
+      { key: 'customerId', label: '客户Id（选择来源时按权威客户回填）', type: 'number' },
       { key: 'warehouseId', label: '仓库Id', type: 'number' }, { key: 'totalQuantity', label: '总数量', type: 'number' },
       { key: 'totalWeight', label: '总毛重(kg)', type: 'number' }, { key: 'totalVolume', label: '总体积(m³)', type: 'number' },
     ],
+    detailKey: 'details',
+    detailTitle: '出库明细（数量 = 发货数量，按基础单位；出库成本由服务端按移动加权平均兜底）',
+    detailFields: STOCK_OUT_DETAIL_FIELDS,
   },
   'stock-query': {
     title: '库存查询', api: '/api/stocks', readonly: true,
