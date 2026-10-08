@@ -1,4 +1,4 @@
-using ERP.Api.Controllers;
+﻿using ERP.Api.Controllers;
 using ERP.Application.Common;
 using ERP.Application.Interfaces;
 using ERP.Application.Services;
@@ -362,13 +362,17 @@ public sealed class FinanceContainerSettlementLifecycleSqlServerTests
             Assert.IsType<OkObjectResult>(await NewSettlementController(db, ownerId).GetById(ownSettlementId));
 
         // 范围外客户：详情 / 提交 / 取消拒绝（fail closed）
+        // Each simulated HTTP request owns its DbContext. A rolled-back row lock must
+        // not leave a tracked RowVersion from an earlier denied request in the next one.
         await using (var db = _fixture.CreateDbContext())
-        {
-            var controller = NewSettlementController(db, foreignId);
-            await AssertBusinessCodeAsync(ErrorCodes.Forbidden, () => controller.GetById(ownSettlementId));
-            await AssertBusinessCodeAsync(ErrorCodes.Forbidden, () => controller.Submit(ownSettlementId));
-            await AssertBusinessCodeAsync(ErrorCodes.Forbidden, () => controller.Cancel(ownSettlementId));
-        }
+            await AssertBusinessCodeAsync(ErrorCodes.Forbidden,
+                () => NewSettlementController(db, foreignId).GetById(ownSettlementId));
+        await using (var db = _fixture.CreateDbContext())
+            await AssertBusinessCodeAsync(ErrorCodes.Forbidden,
+                () => NewSettlementController(db, foreignId).Submit(ownSettlementId));
+        await using (var db = _fixture.CreateDbContext())
+            await AssertBusinessCodeAsync(ErrorCodes.Forbidden,
+                () => NewSettlementController(db, foreignId).Cancel(ownSettlementId));
 
         // 撤销菜单授权：拒绝
         await using (var db = _fixture.CreateDbContext())
