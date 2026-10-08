@@ -11,7 +11,15 @@ using System.Data;
 namespace ERP.Api.Controllers;
 
 /// <summary>
-/// 收货计划控制器
+/// 收货计划控制器（ERP-361：实时授权 + 主数据 + 生命周期护栏）。
+/// <para>列表 / 详情 / 新增 / 修改 / 提交 / 审核 / 取消 / 删除每一个路由都先解析实时身份、账号状态、
+/// 既有「收货计划」（receiving-plan）菜单授权与权威数据范围（复用 ERP-097）；供应商计划没有权威业务员归属列，
+/// 未映射业务员的受限账号 fail closed，绝不降级为全局可见。</para>
+/// <para>新增 / 修改 / 提交 / 审核 / 取消 / 删除之前供应商（必填）与目的港（可选）必须真实可用，柜型必须是已知枚举，
+/// 文本字段有界，提交 / 审核要求总件数为正数；全部判定先于计数、单据号生成与写入。修改先校验完整拟议内容，
+/// 被拒绝的供应商 / 数量 / 目的港 / 状态变更不会改动库中收货计划。</para>
+/// <para>订柜单号（BookingNo）只作显式 legacy 文本保留：绝不按单号反查订柜信息、绝不把审核当收货 / 入库 / 出运。
+/// 提交 / 审核 / 取消 / 删除共用同一把收货计划行锁（UPDLOCK, HOLDLOCK）与可串行化事务。</para>
 /// </summary>
 [Route("api/container/receiving-plans")]
 public class ContainerReceivingPlanController : DocumentControllerBase<ContainerReceivingPlan>
@@ -23,9 +31,13 @@ public class ContainerReceivingPlanController : DocumentControllerBase<Container
         _noService = noService;
     }
 
+    /// <summary>列表（ERP-361：授权先于计数与分页，并追加只读主数据不可用证据）。</summary>
     [HttpGet]
     public async Task<IActionResult> GetPaged([FromQuery] PageQuery query, [FromQuery] DocumentStatus? status)
     {
+        // 认证 / 菜单 / 数据范围先于任何计数与分页
+        await ReceivingPlanLifecycleRules.EnsureAuthorizedAsync(Db, CurrentUserId());
+
         query.Normalize();
         var source = Set.AsNoTracking().Where(o => !o.IsDeleted);
         if (status.HasValue) source = source.Where(o => o.Status == status.Value);
@@ -33,19 +45,35 @@ public class ContainerReceivingPlanController : DocumentControllerBase<Container
         var total = await source.CountAsync();
         var items = await source.OrderByDescending(o => o.Id)
             .Skip((query.Page - 1) * query.PageSize).Take(query.PageSize).ToListAsync();
+        // 历史收货计划的主数据不可用证据（只读照常返回，绝不隐藏 / 回填历史单据）
+        var evidence = await ReceivingPlanLifecycleRules.DescribeUnavailableMasterDataAsync(Db, items);
         return Ok(ApiResponse<PagedResult<ContainerReceivingPlan>>.Success(
-            new PagedResult<ContainerReceivingPlan> { Items = items, Total = total, Page = query.Page, PageSize = query.PageSize }));
+            new PagedResult<ContainerReceivingPlan> { Items = items, Total = total, Page = query.Page, PageSize = query.PageSize },
+            WithEvidence("操作成功", evidence)));
     }
 
+    /// <summary>详情（ERP-361：先授权，并追加只读主数据不可用证据）。</summary>
     [HttpGet("{id:long}")]
     public async Task<IActionResult> GetById(long id)
-        => Ok(ApiResponse<ContainerReceivingPlan>.Success(await GetOrThrowAsync(id, "收货计划不存在")));
+    {
+        await ReceivingPlanLifecycleRules.EnsureAuthorizedAsync(Db, CurrentUserId());
+        var entity = await GetOrThrowAsync(id, "收货计划不存在");
+        var evidence = await ReceivingPlanLifecycleRules.DescribeUnavailableMasterDataAsync(Db, new[] { entity });
+        return Ok(ApiResponse<ContainerReceivingPlan>.Success(entity, WithEvidence("操作成功", evidence)));
+    }
 
+    /// <summary>新增（ERP-361）：授权 + 完整主数据 / 边界校验严格先于单据号生成与落库。</summary>
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] ContainerReceivingPlan entity)
     {
+        await ReceivingPlanLifecycleRules.EnsureAuthorizedAsync(Db, CurrentUserId());
+
+        // 先校验「完整拟提交内容」：供应商 / 目的港 / 柜型 / 有界文本；不合格不占单据号、不落库。
+        var validated = await ReceivingPlanLifecycleRules.ValidateProposedAsync(Db, entity);
+
         entity.Id = 0;
         entity.PlanNo = await _noService.GenerateAsync(DocumentType.ReceivingPlan);
+        ReceivingPlanLifecycleRules.ApplyValidated(entity, validated);
         entity.Status = DocumentStatus.Pending;
         entity.CreatedAt = DateTime.Now;
         Db.ContainerReceivingPlans.Add(entity);
@@ -53,26 +81,148 @@ public class ContainerReceivingPlanController : DocumentControllerBase<Container
         return Ok(ApiResponse<object>.Success(new { entity.Id, entity.PlanNo }, "收货计划创建成功"));
     }
 
+    /// <summary>
+    /// 修改（ERP-361）：授权 → 状态检查 → **先校验完整的拟议内容**，全部通过后才把已规范化字段复制到库中实体；
+    /// 被拒绝的供应商 / 数量 / 目的港 / 状态变更不会改动库中收货计划。
+    /// </summary>
     [HttpPut("{id:long}")]
     public async Task<IActionResult> Update(long id, [FromBody] ContainerReceivingPlan entity)
     {
+        await ReceivingPlanLifecycleRules.EnsureAuthorizedAsync(Db, CurrentUserId());
+
         var existing = await GetOrThrowAsync(id, "收货计划不存在");
         if (GetStatus(existing) != DocumentStatus.Pending)
             throw BusinessException.RuleConflict("仅待提交状态的单据可修改");
-        existing.PlanDate = entity.PlanDate;
-        existing.SupplierId = entity.SupplierId;
-        existing.BookingNo = entity.BookingNo;
-        existing.ContainerType = entity.ContainerType;
-        existing.ContainerNo = entity.ContainerNo;
-        existing.ExpectedArrivalDate = entity.ExpectedArrivalDate;
-        existing.PortId = entity.PortId;
-        existing.Destination = entity.Destination;
-        existing.TotalQuantity = entity.TotalQuantity;
-        existing.Remark = entity.Remark;
+
+        // 校验先于赋值：任何失败都发生在跟踪字段被改写之前。
+        var validated = await ReceivingPlanLifecycleRules.ValidateProposedAsync(Db, entity);
+        ReceivingPlanLifecycleRules.ApplyValidated(existing, validated);
         existing.UpdatedAt = DateTime.Now;
         await Db.SaveChangesAsync();
         return Ok(ApiResponse<object>.Success(null, "收货计划更新成功"));
     }
+
+    /// <summary>提交（ERP-361）：同一把收货计划行锁 + 可串行化事务，锁内复核状态 / 数量 / 主数据。</summary>
+    [HttpPost("{id:long}/submit")]
+    public override Task<IActionResult> Submit(long id)
+        => ChangePlanStateAsync(id, DocumentStatus.Pending, DocumentStatus.Submitted, "提交成功");
+
+    /// <summary>审核通过（ERP-361：同一把行锁 + 锁内复核状态 / 数量 / 主数据）。</summary>
+    [HttpPost("{id:long}/approve")]
+    public override Task<IActionResult> Approve(long id)
+        => ChangePlanStateAsync(id, DocumentStatus.Submitted, DocumentStatus.Approved, "审核通过");
+
+    /// <summary>取消（ERP-361：同一把收货计划行锁 + 可串行化事务 + 主数据复核）。</summary>
+    [HttpPost("{id:long}/cancel")]
+    public override async Task<IActionResult> Cancel(long id)
+    {
+        await ReceivingPlanLifecycleRules.EnsureAuthorizedAsync(Db, CurrentUserId());
+
+        await using var transaction = await Db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
+        try
+        {
+            await AcquirePlanRowLockAsync(id);
+
+            var entity = await GetOrThrowAsync(id, "收货计划不存在");
+            await ReceivingPlanLifecycleRules.EnsureTransitionAllowedAsync(
+                Db, entity, requirePositiveQuantity: false);
+
+            SetStatus(entity, DocumentStatus.Cancelled);
+            await Db.SaveChangesAsync();
+            await transaction.CommitAsync();
+        }
+        catch
+        {
+            await transaction.RollbackAsync();
+            throw;
+        }
+
+        return Ok(ApiResponse<object>.Success(null, "已取消"));
+    }
+
+    /// <summary>删除（软删除，仅待提交状态；ERP-361：同一把行锁 + 可串行化事务 + 主数据复核）。</summary>
+    [HttpDelete("{id:long}")]
+    public override async Task<IActionResult> Delete(long id)
+    {
+        await ReceivingPlanLifecycleRules.EnsureAuthorizedAsync(Db, CurrentUserId());
+
+        await using var transaction = await Db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
+        try
+        {
+            await AcquirePlanRowLockAsync(id);
+
+            var entity = await GetOrThrowAsync(id, "收货计划不存在");
+            if (GetStatus(entity) != DocumentStatus.Pending)
+                throw BusinessException.RuleConflict("仅待提交状态的单据可删除");
+
+            await ReceivingPlanLifecycleRules.EnsureTransitionAllowedAsync(
+                Db, entity, requirePositiveQuantity: false);
+
+            entity.IsDeleted = true;
+            entity.UpdatedAt = DateTime.Now;
+            await Db.SaveChangesAsync();
+            await transaction.CommitAsync();
+        }
+        catch
+        {
+            await transaction.RollbackAsync();
+            throw;
+        }
+
+        return Ok(ApiResponse<object>.Success(null, "删除成功"));
+    }
+
+    /// <summary>提交 / 审核共用：授权 → 行锁 → 锁内重新加载 → 状态 / 数量 / 主数据复核 → 状态变更。</summary>
+    private async Task<IActionResult> ChangePlanStateAsync(
+        long id, DocumentStatus from, DocumentStatus to, string successMessage)
+    {
+        await ReceivingPlanLifecycleRules.EnsureAuthorizedAsync(Db, CurrentUserId());
+
+        await using var transaction = await Db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
+        try
+        {
+            await AcquirePlanRowLockAsync(id);
+
+            var entity = await GetOrThrowAsync(id, "收货计划不存在");
+            if (GetStatus(entity) != from)
+                throw BusinessException.RuleConflict("当前状态不允许该操作");
+
+            await ReceivingPlanLifecycleRules.EnsureTransitionAllowedAsync(
+                Db, entity, requirePositiveQuantity: true);
+
+            SetStatus(entity, to);
+            await Db.SaveChangesAsync();
+            await transaction.CommitAsync();
+        }
+        catch
+        {
+            await transaction.RollbackAsync();
+            throw;
+        }
+
+        return Ok(ApiResponse<object>.Success(null, successMessage));
+    }
+
+    /// <summary>
+    /// 对收货计划行加更新锁（UPDLOCK, HOLDLOCK），把同一收货计划的并发状态变更（提交 / 审核 / 取消 / 删除）
+    /// 串行化在同一可串行化事务内；非关系型提供程序（内存库）无法执行表提示，跳过即可。
+    /// </summary>
+    private async Task AcquirePlanRowLockAsync(long planId)
+    {
+        if (!Db.Database.IsRelational()) return;
+
+        await Db.Database
+            .SqlQueryRaw<long>(
+                "SELECT Id FROM db_owner.ContainerReceivingPlans WITH (UPDLOCK, HOLDLOCK) WHERE Id = {0}",
+                planId)
+            .ToListAsync();
+    }
+
+    /// <summary>只读响应文案：主数据不可用时追加显式证据（不改变 data 结构，不写库）。</summary>
+    private static string WithEvidence(string message, string evidence)
+        => string.IsNullOrEmpty(evidence)
+            ? message
+            : message + ReceivingPlanLifecycleRules.UnavailableEvidencePrefix + evidence;
 }
 
 /// <summary>
