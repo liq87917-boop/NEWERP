@@ -1,5 +1,7 @@
 import importlib.util
 import json
+import io
+import contextlib
 import subprocess
 import tempfile
 import unittest
@@ -40,6 +42,17 @@ class PipelineLockTests(unittest.TestCase):
                             self.fail('Concurrent pipeline acquired the owner lock')
                 with p.pipeline_lock():
                     pass
+
+    def test_replenishment_probe_is_nonfatal_and_never_mutates_active_owner(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            output = io.StringIO()
+            with patch.object(p, 'ROOT', root), patch.object(p, 'load_json', return_value={}):
+                with p.pipeline_lock(), patch.object(p, 'mark_queue_replenishing') as mark:
+                    with patch('sys.argv', ['ai_pipeline.py', 'replenishment-status']), contextlib.redirect_stdout(output):
+                        self.assertEqual(0, p.main())
+                    mark.assert_not_called()
+            self.assertEqual('busy', json.loads(output.getvalue())['status'])
 
 class WatchTests(unittest.TestCase):
     def test_transient_exception_is_retried_then_success_resets_backoff(self):

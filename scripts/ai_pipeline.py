@@ -805,8 +805,15 @@ def main() -> int:
     if args.command == "self-test": return self_test()
     if args.command == "queue": return queue_status()
     if args.command == "replenishment-status":
-        with pipeline_lock():
-            print(json.dumps(mark_queue_replenishing(idle=True), ensure_ascii=False, indent=2))
+        try:
+            with pipeline_lock():
+                print(json.dumps(mark_queue_replenishing(idle=True), ensure_ascii=False, indent=2))
+        except RuntimeError as exc:
+            if str(exc) != "Another NEWERP automation pipeline is already running.":
+                raise
+            # Contention is expected when the resident watcher owns development.
+            # Report busy without stderr, task/state mutations or host termination.
+            print(json.dumps({"status": "busy", "reason": str(exc)}))
         return 0
     if args.command == "create": return create_task(args.title, args.description, args.accept, args.allow, args.profile, args.risk, args.depends_on, args.gate, args.completion_mode, args.browser_scenario)
     if args.command == "defer": return defer_task(args.task_id, args.by, args.note)
