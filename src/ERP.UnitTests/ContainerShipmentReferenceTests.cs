@@ -26,7 +26,13 @@ public class ContainerShipmentReferenceTests
 {
     // ==================== 0. 测试脚手架 ====================
 
-    private static ContainerShipmentReferenceController BuildController(ErpDbContext db) => new(db);
+    private static ContainerShipmentReferenceController BuildController(ErpDbContext db)
+    {
+        // ERP-362：本模块每个路由都先授权，测试用既有特权账号（系统内置角色，不新增任何菜单授权）。
+        var controller = new ContainerShipmentReferenceController(db);
+        TestAuth.SetUser(controller, TestAuth.SeedPrivilegedUser(db));
+        return controller;
+    }
 
     private static ContainerBooking SeedBooking(
         ErpDbContext db, string bookingNo, DateTime? bookingDate = null,
@@ -1029,9 +1035,12 @@ public class ContainerShipmentReferenceTests
         Assert.Throws<BusinessException>(() => ContainerShipmentReferenceRules.NormalizeKeyword(new string('K', 101)));
 
         // 源记录资格 / 可用性与报关行文案（未知一律照实说明）
-        Assert.True(ContainerShipmentReferenceRules.EvaluateSourceEligibility(true, false, "订柜信息").Eligible);
-        Assert.False(ContainerShipmentReferenceRules.EvaluateSourceEligibility(false, false, "订柜信息").Eligible);
-        Assert.False(ContainerShipmentReferenceRules.EvaluateSourceEligibility(true, true, "订柜信息").Eligible);
+        Assert.True(ContainerShipmentReferenceRules.EvaluateSourceEligibility(true, false, false, "订柜信息").Eligible);
+        Assert.False(ContainerShipmentReferenceRules.EvaluateSourceEligibility(false, false, false, "订柜信息").Eligible);
+        Assert.False(ContainerShipmentReferenceRules.EvaluateSourceEligibility(true, true, false, "订柜信息").Eligible);
+        var cancelled = ContainerShipmentReferenceRules.EvaluateSourceEligibility(true, false, true, "订柜信息");
+        Assert.False(cancelled.Eligible);
+        Assert.Contains("已取消", cancelled.Text);
         Assert.Contains("已删除", ContainerShipmentReferenceRules.SourceAvailabilityText(false, "订柜信息"));
         Assert.Contains("未指定报关行", ContainerShipmentReferenceRules.CustomsBrokerAvailabilityText(true, " "));
         Assert.Contains("已停用", ContainerShipmentReferenceRules.CustomsBrokerAvailabilityText(false, "宁波报关行"));

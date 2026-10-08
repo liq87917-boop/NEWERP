@@ -249,14 +249,20 @@ public static class ContainerShipmentReferenceRules
         _ => $"未知（{status}）"
     };
 
-    /// <summary>源记录资格判定：只有存在且未删除的源记录才能被登记 / 继续引用</summary>
+    /// <summary>
+    /// 源记录资格判定：只有「存在、未删除且未取消」的源记录才能被**新登记**引用。
+    /// <para>已取消的源记录不能再承载新的出运引用证据（无法再出运的柜不应新登记出运证据），
+    /// 但历史上的引用证据照常可读（快照与可用性标注不受影响），也绝不改写源记录状态。</para>
+    /// </summary>
     public static (bool Eligible, string Text) EvaluateSourceEligibility(
-        bool exists, bool deleted, string sourceTypeText)
+        bool exists, bool deleted, bool cancelled, string sourceTypeText)
     {
         if (!exists)
             return (false, $"指定的{sourceTypeText}记录不存在，不能登记出运引用（历史证据仍可读）");
         if (deleted)
             return (false, $"指定的{sourceTypeText}记录已删除，不能登记出运引用（历史证据仍可读）");
+        if (cancelled)
+            return (false, $"指定的{sourceTypeText}记录已取消，不能登记出运引用（历史证据仍可读）");
         return (true, $"{sourceTypeText}记录可引用（只读关联，不会改写该记录）");
     }
 

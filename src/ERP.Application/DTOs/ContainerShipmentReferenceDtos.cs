@@ -214,7 +214,7 @@ public sealed record ContainerShipmentReferenceDetailDto(
     string BoundaryText);
 
 /// <summary>
-/// 可登记出运引用的源记录候选（ERP-057，只读有界）：只列出该类型下**未删除**的既有记录，
+/// 可登记出运引用的源记录候选（ERP-057，只读有界）：只列出该类型下**未删除且未取消**的既有记录，
 /// 并标注是否已有有效出运引用。
 /// <para>候选列表只用于**显式选择**：系统<strong>不</strong>按柜号 / 订单号 / 单证号等自由文本
 /// 自动挑选或匹配记录（与 ERP-040 的「未关联不猜引用」同一口径）。</para>

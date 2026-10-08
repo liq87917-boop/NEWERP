@@ -2,6 +2,7 @@ using ERP.Application.Common;
 using ERP.Application.DTOs;
 using ERP.Application.Interfaces;
 using ERP.Domain.Entities;
+using ERP.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
 
 namespace ERP.Application.Services;
@@ -9,7 +10,8 @@ namespace ERP.Application.Services;
 /// <summary>
 /// 装柜出运引用证据登记服务（ERP-057）。职责：
 /// <list type="number">
-/// <item><b>登记引用</b>（<see cref="CreateAsync"/>）：源记录必须是显式类型下**存在且未删除**的既有记录
+/// <item><b>登记引用</b>（<see cref="CreateAsync"/>）：调用方必须已通过既有源模块菜单 + 客户数据范围授权，
+/// 源记录必须是显式类型下**存在、未删除且未取消**的既有记录
 /// （订柜信息 / 预装柜单 / 装柜清单），且同一条源记录最多保留 1 条有效引用；出运证据字段全部可选，
 /// 服务端只做规范化与边界校验（出运方式只接受 LCL / FCL / 未指定，计划时间必须先后一致）；</item>
 /// <item><b>修订引用</b>（<see cref="UpdateAsync"/>）：先把修订前的**原值**写入只追加的修订留痕
@@ -36,22 +38,30 @@ public static class ContainerShipmentReferenceService
     /// <summary>
     /// 登记一条出运引用证据：全部校验通过后才写一行证据，源记录单号 / 日期 / 状态 / 柜号快照与
     /// 报关行名称快照一律由服务端权威写入。
-    /// <para>校验顺序：源记录类型（allowlist）→ 源记录 Id → 源记录存在且未删除 → 有效引用唯一性
-    /// （同一源记录最多 1 条有效引用）→ 出运证据字段（规范化 / 长度 / 出运方式 / 计划时间一致性）→
-    /// 报关行引用可选用性。</para>
+    /// <para>校验顺序：既有源模块菜单授权（fail closed）→ 源记录类型（allowlist）→ 源记录 Id →
+    /// 源记录**存在、未删除且未取消** → 客户数据范围 → 有效引用唯一性（同一源记录最多 1 条有效引用）→
+    /// 出运证据字段（规范化 / 长度 / 出运方式 / 计划时间一致性）→ 报关行引用可选用性。</para>
+    /// <para>调用方（控制器）必须在可串行化事务内先对**源记录行**加 <c>UPDLOCK, HOLDLOCK</c> 后再调用本方法，
+    /// 从而使「源记录有效性判定」「有效引用唯一性判定」与「插入证据行」落在同一把源记录锁与同一事务内：
+    /// 同一源记录的并发登记只能成功一条（后到者在锁内看到已登记的有效引用并被明确拒绝）。</para>
     /// </summary>
     public static async Task<ContainerShipmentReferenceDto> CreateAsync(
-        IErpDbContext db, ContainerShipmentReferenceSaveDto dto)
+        IErpDbContext db, ContainerShipmentReferenceSaveDto dto, ShipmentReferenceAccess access)
     {
         ArgumentNullException.ThrowIfNull(db);
         ArgumentNullException.ThrowIfNull(dto);
+        ArgumentNullException.ThrowIfNull(access);
 
         var sourceType = ContainerShipmentReferenceRules.NormalizeSourceType(dto.SourceType);
+        ShipmentReferenceAuthorizationRules.RequireSourceType(access, sourceType);
         if (dto.SourceId <= 0)
             throw BusinessException.InvalidParameter("请选择要登记出运引用的源记录（订柜信息 / 预装柜单 / 装柜清单）");
 
         var source = await LoadSourceAsync(db, sourceType, dto.SourceId);
         var sourceTypeText = ContainerShipmentReferenceRules.SourceTypeText(sourceType);
+
+        // 客户数据范围：受限账号只能为本人客户的源记录登记引用（fail closed，不泄露范围外单据）。
+        ShipmentReferenceAuthorizationRules.EnsureScopeAllowsCustomer(access, source.CustomerId, sourceTypeText);
 
         // 同一源记录最多 1 条有效引用（已作废行不占额度：作废后可重新登记，新旧并存可查）
         var existing = await db.ContainerShipmentReferences.AsNoTracking()
@@ -76,7 +86,9 @@ public static class ContainerShipmentReferenceService
             Status = ContainerShipmentReferenceRules.StatusRecorded,
             RecordedAt = DateTime.Now,
             RevisionNo = 1,
-            CreatedAt = DateTime.Now
+            CreatedAt = DateTime.Now,
+            CreatedBy = access.UserId,
+            UpdatedBy = access.UserId
         };
 
         // 先校验 / 规范化证据字段（不合格直接拒绝，不产生半条记录）
@@ -95,15 +107,24 @@ public static class ContainerShipmentReferenceService
     /// 再写回新值并递增修订号。
     /// <para>不允许改派源记录（类型 / Id 必须与库中一致）；已作废引用只读；修订只改本登记册自己的两行数据，
     /// <strong>不</strong>改写源记录与任何下游单据。</para>
+    /// <para>调用方（控制器）必须在可串行化事务内先对**本引用行**加 <c>UPDLOCK, HOLDLOCK</c> 后再调用本方法：
+    /// 修订与作废因此按同一把引用行锁串行化 —— 并发「修订 vs 作废」只能成功其一，且作废一旦生效，
+    /// 后到者（或已作废后再发起的）修订在锁内重新加载时看到已作废状态并 fail closed，
+    /// 绝不改写已作废证据；任一步校验失败都随事务回滚，留痕与新值都不落库。</para>
     /// </summary>
     public static async Task<ContainerShipmentReferenceDto> UpdateAsync(
-        IErpDbContext db, long id, ContainerShipmentReferenceUpdateDto dto)
+        IErpDbContext db, long id, ContainerShipmentReferenceUpdateDto dto, ShipmentReferenceAccess access)
     {
         ArgumentNullException.ThrowIfNull(db);
         ArgumentNullException.ThrowIfNull(dto);
+        ArgumentNullException.ThrowIfNull(access);
         if (id <= 0) throw BusinessException.InvalidParameter("请指定要修订的出运引用");
 
         var row = await LoadAsync(db, id);
+        ShipmentReferenceAuthorizationRules.RequireSourceType(access, row.SourceType);
+        await ShipmentReferenceAuthorizationRules.EnsureScopeAllowsSourceAsync(
+            db, access, row.SourceType, row.SourceId);
+
         var sourceTypeText = ContainerShipmentReferenceRules.SourceTypeText(row.SourceType);
         ContainerShipmentReferenceRules.EnsureRecordedForChange(
             row.Status, $"{sourceTypeText}「{row.SourceNo}」");
@@ -140,7 +161,8 @@ public static class ContainerShipmentReferenceService
             CustomsBrokerId = row.CustomsBrokerId,
             CustomsBrokerName = row.CustomsBrokerName,
             Remark = row.Remark,
-            CreatedAt = DateTime.Now
+            CreatedAt = DateTime.Now,
+            CreatedBy = access.UserId
         };
 
         // 先校验 / 规范化新值（不合格直接拒绝：留痕与新值都不落库）
@@ -150,6 +172,7 @@ public static class ContainerShipmentReferenceService
         row.LastRevisedAt = DateTime.Now;
         row.LastRevisionReason = reason;
         row.UpdatedAt = DateTime.Now;
+        row.UpdatedBy = access.UserId;
 
         db.ContainerShipmentReferenceRevisions.Add(revision);
         await db.SaveChangesAsync();
@@ -162,13 +185,22 @@ public static class ContainerShipmentReferenceService
     /// <summary>
     /// 作废一条已登记出运引用（必须填写原因）：只把状态改为已作废并记录作废时间 / 原因，
     /// 保留原始证据字段、源记录快照与全部修订留痕；重复作废被拒绝，不提供硬删除。
+    /// <para>调用方（控制器）必须在可串行化事务内先对**本引用行**加 <c>UPDLOCK, HOLDLOCK</c> 后再调用本方法：
+    /// 作废与修订按同一把引用行锁串行化，重复作废或「作废 vs 修订」竞争的一方在锁内看到已作废状态并被
+    /// 明确拒绝（重复作废失败信息清晰），已作废证据的原始值 / 修订留痕绝不改写。</para>
     /// </summary>
-    public static async Task<ContainerShipmentReferenceDto> VoidAsync(IErpDbContext db, long id, string? reason)
+    public static async Task<ContainerShipmentReferenceDto> VoidAsync(
+        IErpDbContext db, long id, string? reason, ShipmentReferenceAccess access)
     {
         ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(access);
         if (id <= 0) throw BusinessException.InvalidParameter("请指定要作废的出运引用");
 
         var row = await LoadAsync(db, id);
+        ShipmentReferenceAuthorizationRules.RequireSourceType(access, row.SourceType);
+        await ShipmentReferenceAuthorizationRules.EnsureScopeAllowsSourceAsync(
+            db, access, row.SourceType, row.SourceId);
+
         var sourceTypeText = ContainerShipmentReferenceRules.SourceTypeText(row.SourceType);
         ContainerShipmentReferenceRules.EnsureRecordedForChange(
             row.Status, $"{sourceTypeText}「{row.SourceNo}」");
@@ -179,6 +211,7 @@ public static class ContainerShipmentReferenceService
         row.VoidedAt = DateTime.Now;
         row.VoidReason = voidReason;
         row.UpdatedAt = DateTime.Now;
+        row.UpdatedBy = access.UserId;
         await db.SaveChangesAsync();
 
         return await MapSingleAsync(db, row);
@@ -272,12 +305,18 @@ public static class ContainerShipmentReferenceService
 
     // ==================== 5. 源记录加载（显式类型 + Id，拒绝不存在 / 已删除） ====================
 
-    /// <summary>源记录快照（服务端按源记录权威写入，客户端提交值一律不被采信）</summary>
+    /// <summary>
+    /// 源记录快照（服务端按源记录权威写入，客户端提交值一律不被采信）。
+    /// <para><see cref="CustomerId"/> 是源记录归属的**权威客户**（订柜信息 / 装柜清单取本单客户；
+    /// 预装柜单取所链接订柜信息的客户；没有权威归属时为 <c>null</c>），只用于客户数据范围判定，
+    /// 不写入证据行、不参与任何推断。</para>
+    /// </summary>
     private sealed record SourceSnapshot(
-        long Id, string SourceNo, DateTime SourceDate, int Status, string StatusText, string ContainerNo);
+        long Id, string SourceNo, DateTime SourceDate, int Status, string StatusText, string ContainerNo,
+        long? CustomerId);
 
     /// <summary>
-    /// 按显式类型 + Id 加载源记录并生成快照：不存在 → 数据不存在；已软删除 → 业务规则冲突
+    /// 按显式类型 + Id 加载源记录并生成快照：不存在 → 数据不存在；已软删除 / 已取消 → 业务规则冲突
     /// （历史证据仍可读，但不能新增引用）；<strong>不</strong>按柜号 / 单号等自由文本兜底匹配。
     /// </summary>
     private static async Task<SourceSnapshot> LoadSourceAsync(IErpDbContext db, string sourceType, long sourceId)
@@ -289,38 +328,51 @@ public static class ContainerShipmentReferenceService
             case ContainerShipmentReferenceRules.SourceTypeBooking:
                 var booking = await db.ContainerBookings.AsNoTracking()
                     .FirstOrDefaultAsync(o => o.Id == sourceId);
-                EnsureSourceEligible(booking is not null, booking?.IsDeleted == true, sourceTypeText, sourceId);
+                EnsureSourceEligible(booking is not null, booking?.IsDeleted == true,
+                    booking?.Status == DocumentStatus.Cancelled, sourceTypeText, sourceId);
                 return new SourceSnapshot(booking!.Id, booking.BookingNo ?? string.Empty, booking.BookingDate,
                     (int)booking.Status, ContainerShipmentReferenceRules.DocumentStatusText((int)booking.Status),
-                    string.Empty);
+                    string.Empty, booking.CustomerId);
 
             case ContainerShipmentReferenceRules.SourceTypePreLoading:
                 var preLoading = await db.ContainerPreLoadings.AsNoTracking()
                     .FirstOrDefaultAsync(o => o.Id == sourceId);
                 EnsureSourceEligible(
-                    preLoading is not null, preLoading?.IsDeleted == true, sourceTypeText, sourceId);
-                return new SourceSnapshot(preLoading!.Id, preLoading.PreLoadingNo ?? string.Empty,
+                    preLoading is not null, preLoading?.IsDeleted == true,
+                    preLoading?.Status == DocumentStatus.Cancelled, sourceTypeText, sourceId);
+                var preLoadingCustomerId = preLoading!.BookingId is > 0
+                    ? await db.ContainerBookings.AsNoTracking()
+                        .Where(o => o.Id == preLoading.BookingId!.Value)
+                        .Select(o => (long?)o.CustomerId)
+                        .FirstOrDefaultAsync()
+                    : null;
+                return new SourceSnapshot(preLoading.Id, preLoading.PreLoadingNo ?? string.Empty,
                     preLoading.LoadingDate, (int)preLoading.Status,
                     ContainerShipmentReferenceRules.DocumentStatusText((int)preLoading.Status),
-                    preLoading.ContainerNo ?? string.Empty);
+                    preLoading.ContainerNo ?? string.Empty, preLoadingCustomerId);
 
             default:
                 var loadingList = await db.ContainerLoadingLists.AsNoTracking()
                     .FirstOrDefaultAsync(o => o.Id == sourceId);
                 EnsureSourceEligible(
-                    loadingList is not null, loadingList?.IsDeleted == true, sourceTypeText, sourceId);
+                    loadingList is not null, loadingList?.IsDeleted == true,
+                    loadingList?.Status == DocumentStatus.Cancelled, sourceTypeText, sourceId);
                 return new SourceSnapshot(loadingList!.Id, loadingList.LoadingListNo ?? string.Empty,
                     loadingList.LoadingDate, (int)loadingList.Status,
                     ContainerShipmentReferenceRules.DocumentStatusText((int)loadingList.Status),
-                    loadingList.ContainerNo ?? string.Empty);
+                    loadingList.ContainerNo ?? string.Empty, loadingList.CustomerId);
         }
     }
 
-    /// <summary>源记录资格校验：不存在 → 404；已删除 → 规则冲突（不允许新登记引用）</summary>
-    private static void EnsureSourceEligible(bool exists, bool deleted, string sourceTypeText, long sourceId)
+    /// <summary>
+    /// 源记录资格校验：不存在 → 404；已删除 / 已取消 → 规则冲突（不允许**新登记**引用；
+    /// 既有历史证据照常可读）。
+    /// </summary>
+    private static void EnsureSourceEligible(
+        bool exists, bool deleted, bool cancelled, string sourceTypeText, long sourceId)
     {
         var (eligible, text) = ContainerShipmentReferenceRules.EvaluateSourceEligibility(
-            exists, deleted, sourceTypeText);
+            exists, deleted, cancelled, sourceTypeText);
         if (eligible) return;
         if (!exists) throw BusinessException.NotFound($"{text}（Id={sourceId}）");
         throw BusinessException.RuleConflict($"{text}（Id={sourceId}）");
@@ -337,12 +389,15 @@ public static class ContainerShipmentReferenceService
     /// 出运引用台账（分页，只读）：可按源记录类型 / Id、状态、出运方式、登记日期区间与关键字过滤；
     /// 默认包含已作废历史（证据保留可读）。单页内的源记录可用性、报关行可用性与修订条数
     /// 一律**批量装载**（固定数量查询），不产生逐行数据库访问。
+    /// <para>ERP-362：受限账号的既有源模块菜单授权与客户数据范围在 <c>Count</c> 与分页**之前**下推到数据库，
+    /// 绝不「先查全量再内存过滤」，也不返回范围外来源的引用证据。</para>
     /// </summary>
     public static async Task<PagedResult<ContainerShipmentReferenceDto>> ListAsync(
-        IErpDbContext db, ContainerShipmentReferenceQuery query)
+        IErpDbContext db, ContainerShipmentReferenceQuery query, ShipmentReferenceAccess access)
     {
         ArgumentNullException.ThrowIfNull(db);
         ArgumentNullException.ThrowIfNull(query);
+        ArgumentNullException.ThrowIfNull(access);
         query.Normalize();
 
         var keyword = ContainerShipmentReferenceRules.NormalizeKeyword(query.Keyword);
@@ -353,6 +408,8 @@ public static class ContainerShipmentReferenceService
             : ContainerShipmentReferenceRules.NormalizeSourceType(query.SourceType);
 
         var source = db.ContainerShipmentReferences.AsNoTracking().Where(o => !o.IsDeleted);
+        // ERP-362：受限账号的既有源模块菜单 + 权威客户数据范围先于计数与分页下推到数据库。
+        source = ShipmentReferenceAuthorizationRules.ApplyScope(db, source, access);
         if (sourceType is not null) source = source.Where(o => o.SourceType == sourceType);
         if (query.SourceId is > 0) source = source.Where(o => o.SourceId == query.SourceId!.Value);
         if (status is not null) source = source.Where(o => o.Status == status.Value);
@@ -393,17 +450,22 @@ public static class ContainerShipmentReferenceService
     /// 出运引用详情（只读）：当前证据 + 有界修订留痕（按修订号倒序，最多
     /// <see cref="ContainerShipmentReferenceRules.MaxRevisionTake"/> 条，超出时显式说明被截断）。
     /// </summary>
-    public static async Task<ContainerShipmentReferenceDetailDto> GetAsync(IErpDbContext db, long id)
+    public static async Task<ContainerShipmentReferenceDetailDto> GetAsync(
+        IErpDbContext db, long id, ShipmentReferenceAccess access)
     {
         ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(access);
         if (id <= 0) throw BusinessException.InvalidParameter("请指定要查看的出运引用");
 
         var row = await db.ContainerShipmentReferences.AsNoTracking()
             .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
             ?? throw BusinessException.NotFound($"出运引用不存在（Id={id}）");
+        ShipmentReferenceAuthorizationRules.RequireSourceType(access, row.SourceType);
+        await ShipmentReferenceAuthorizationRules.EnsureScopeAllowsSourceAsync(
+            db, access, row.SourceType, row.SourceId);
 
         await AnnotateAsync(db, new[] { row });
-        var revisions = await ListRevisionsAsync(db, id, ContainerShipmentReferenceRules.MaxRevisionTake);
+        var revisions = await ListRevisionsAsync(db, id, access);
         var revisionCount = row.RevisionCount;
 
         return new ContainerShipmentReferenceDetailDto(
@@ -423,14 +485,19 @@ public static class ContainerShipmentReferenceService
     /// <see cref="ContainerShipmentReferenceRules.MaxRevisionTake"/>）；留痕只追加，不提供修改与删除。
     /// </summary>
     public static async Task<List<ContainerShipmentReferenceRevisionDto>> ListRevisionsAsync(
-        IErpDbContext db, long id, int take = ContainerShipmentReferenceRules.MaxRevisionTake)
+        IErpDbContext db, long id, ShipmentReferenceAccess access,
+        int take = ContainerShipmentReferenceRules.MaxRevisionTake)
     {
         ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(access);
         if (id <= 0) throw BusinessException.InvalidParameter("请指定要查看修订留痕的出运引用");
 
-        var exists = await db.ContainerShipmentReferences.AsNoTracking()
-            .AnyAsync(o => o.Id == id && !o.IsDeleted);
-        if (!exists) throw BusinessException.NotFound($"出运引用不存在（Id={id}）");
+        var reference = await db.ContainerShipmentReferences.AsNoTracking()
+            .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
+            ?? throw BusinessException.NotFound($"出运引用不存在（Id={id}）");
+        ShipmentReferenceAuthorizationRules.RequireSourceType(access, reference.SourceType);
+        await ShipmentReferenceAuthorizationRules.EnsureScopeAllowsSourceAsync(
+            db, access, reference.SourceType, reference.SourceId);
 
         var limit = take <= 0 ? ContainerShipmentReferenceRules.MaxRevisionTake
             : Math.Min(take, ContainerShipmentReferenceRules.MaxRevisionTake);
@@ -447,28 +514,35 @@ public static class ContainerShipmentReferenceService
     // ==================== 7. 源记录候选（只读、有界、显式选择） ====================
 
     /// <summary>
-    /// 可登记出运引用的源记录候选（只读、有界）：只列出指定类型下**未删除**的既有记录，
+    /// 可登记出运引用的源记录候选（只读、有界）：只列出指定类型下**未删除且未取消**的既有记录，
     /// 标注是否已有有效出运引用与资格文案。
     /// <para>用于**显式选择**源记录：系统<strong>不</strong>按柜号 / 订单号 / 单证号等自由文本
     /// 自动挑选或匹配记录（与 ERP-040「未关联不猜引用」同一口径）；没有出运引用的历史记录
     /// 照常出现在候选中，不需要任何回填。</para>
+    /// <para>ERP-362：候选同样受既有源模块菜单与客户数据范围约束（受限账号只列出本人客户的源记录，
+    /// 范围先于 <c>Take</c> 下推到数据库）；已取消的源记录不能承载新的出运引用证据，因此不出现在候选中。</para>
     /// </summary>
     public static async Task<List<ContainerShipmentReferenceSourceCandidateDto>> ListSourceCandidatesAsync(
-        IErpDbContext db, string? sourceType, string? keyword,
+        IErpDbContext db, string? sourceType, string? keyword, ShipmentReferenceAccess access,
         int take = ContainerShipmentReferenceRules.MaxSourceCandidates)
     {
         ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(access);
 
         var type = ContainerShipmentReferenceRules.NormalizeSourceType(sourceType);
+        ShipmentReferenceAuthorizationRules.RequireSourceType(access, type);
         var filter = ContainerShipmentReferenceRules.NormalizeKeyword(keyword);
         var limit = take <= 0 ? ContainerShipmentReferenceRules.MaxSourceCandidates
             : Math.Min(take, ContainerShipmentReferenceRules.MaxSourceCandidates);
 
         if (type == ContainerShipmentReferenceRules.SourceTypeBooking)
         {
-            var rows = await db.ContainerBookings.AsNoTracking()
-                .Where(o => !o.IsDeleted)
-                .Where(o => filter.Length == 0 || o.BookingNo.Contains(filter))
+            var query = ShipmentReferenceAuthorizationRules.ApplyScopeToBookings(
+                db.ContainerBookings.AsNoTracking()
+                    .Where(o => !o.IsDeleted && o.Status != DocumentStatus.Cancelled)
+                    .Where(o => filter.Length == 0 || o.BookingNo.Contains(filter)),
+                access);
+            var rows = await query
                 .OrderByDescending(o => o.Id).Take(limit)
                 .Select(o => new { o.Id, o.BookingNo, o.BookingDate, o.Status })
                 .ToListAsync();
@@ -480,9 +554,14 @@ public static class ContainerShipmentReferenceService
 
         if (type == ContainerShipmentReferenceRules.SourceTypePreLoading)
         {
-            var rows = await db.ContainerPreLoadings.AsNoTracking()
-                .Where(o => !o.IsDeleted)
-                .Where(o => filter.Length == 0 || o.PreLoadingNo.Contains(filter) || o.ContainerNo.Contains(filter))
+            var query = ShipmentReferenceAuthorizationRules.ApplyScopeToPreLoadings(
+                db,
+                db.ContainerPreLoadings.AsNoTracking()
+                    .Where(o => !o.IsDeleted && o.Status != DocumentStatus.Cancelled)
+                    .Where(o => filter.Length == 0 || o.PreLoadingNo.Contains(filter)
+                                || o.ContainerNo.Contains(filter)),
+                access);
+            var rows = await query
                 .OrderByDescending(o => o.Id).Take(limit)
                 .Select(o => new { o.Id, o.PreLoadingNo, o.LoadingDate, o.Status, o.ContainerNo })
                 .ToListAsync();
@@ -492,9 +571,13 @@ public static class ContainerShipmentReferenceService
                 (int)r.Status, r.ContainerNo, references)).ToList();
         }
 
-        var lists = await db.ContainerLoadingLists.AsNoTracking()
-            .Where(o => !o.IsDeleted)
-            .Where(o => filter.Length == 0 || o.LoadingListNo.Contains(filter) || o.ContainerNo.Contains(filter))
+        var listQuery = ShipmentReferenceAuthorizationRules.ApplyScopeToLoadingLists(
+            db.ContainerLoadingLists.AsNoTracking()
+                .Where(o => !o.IsDeleted && o.Status != DocumentStatus.Cancelled)
+                .Where(o => filter.Length == 0 || o.LoadingListNo.Contains(filter)
+                            || o.ContainerNo.Contains(filter)),
+            access);
+        var lists = await listQuery
             .OrderByDescending(o => o.Id).Take(limit)
             .Select(o => new { o.Id, o.LoadingListNo, o.LoadingDate, o.Status, o.ContainerNo })
             .ToListAsync();
