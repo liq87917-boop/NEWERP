@@ -1,0 +1,93 @@
+{
+  "title": "Link preloading demand lines to live explicit sales order detail evidence",
+  "description": "Stage3 core inventory closure. Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance.",
+  "acceptance_criteria": [
+    "Add optional SourceSalesOrderDetailId to preloading detail with exact Domain/EF/idempotent repository schema code and authorized bounded candidate/read evidence. Resolve actual parent order/customer/product and live existing sales-order plus pre-loading permissions/data scope. Null-source historical lines stay explicitly unlinked; never backfill/guess references. Reject invalid/deleted/cancelled/unapproved order, wrong product/customer versus booking and positive quantity violations before any edit assignment; preserve allowed base-unit semantics, no cross-product/unit sums or amount/currency mixing.",
+    "Serialize linked demand approval against upstream sales-order rows and existing booking/preloading boundary in deterministic order; cumulative effective approved linked preloading per source detail may not exceed authorized order detail quantity. Keep cancelled preloading history and release operational planning capacity; explicitly state that this is demand planning evidence, not inventory reservation or shipment. Invalid later line or competing approvals must roll back/limit total. Preserve ERP353 and ERP348 guards, audit, actual enabled identity and all existing menu grants. Verify actual controllers/services on dedicated SQL own/foreign demand, wrong source/product, failed edit unchanged, cumulative overflow and two-connection race; add no production or external operation.",
+    "Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance."
+  ],
+  "allowed_paths": [
+    "src/ERP.Domain/Entities/Container2.cs",
+    "src/ERP.Infrastructure/Data/ErpDbContext.Config.cs",
+    "src/ERP.Infrastructure/Data/SchemaUpgrader.cs",
+    "src/ERP.Application/Services/PreLoadingSalesOrderLinkRules.cs",
+    "src/ERP.Application/Services/PreLoadingAuthorizationRules.cs",
+    "src/ERP.Application/Services/PreLoadingBookingLinkRules.cs",
+    "src/ERP.Application/DTOs/PreLoadingSalesOrderLinkDtos.cs",
+    "src/ERP.Api/Controllers/ContainerPreLoadingController.cs",
+    "src/ERP.UnitTests/PreLoadingSalesOrderLinkTests.cs",
+    "src/ERP.IntegrationTests/PreLoadingSalesOrderLinkSqlServerTests.cs",
+    "src/ERP.IntegrationTests/ERP.IntegrationTests.csproj",
+    "docs/preloading-salesorder-link.md"
+  ],
+  "criterion_path_map": {
+    "Add optional SourceSalesOrderDetailId to preloading detail with exact Domain/EF/idempotent repository schema code and authorized bounded candidate/read evidence. Resolve actual parent order/customer/product and live existing sales-order plus pre-loading permissions/data scope. Null-source historical lines stay explicitly unlinked; never backfill/guess references. Reject invalid/deleted/cancelled/unapproved order, wrong product/customer versus booking and positive quantity violations before any edit assignment; preserve allowed base-unit semantics, no cross-product/unit sums or amount/currency mixing.": [
+      "src/ERP.Domain/Entities/Container2.cs",
+      "src/ERP.Infrastructure/Data/ErpDbContext.Config.cs",
+      "src/ERP.Infrastructure/Data/SchemaUpgrader.cs",
+      "src/ERP.Application/Services/PreLoadingSalesOrderLinkRules.cs",
+      "src/ERP.Application/Services/PreLoadingAuthorizationRules.cs",
+      "src/ERP.Application/Services/PreLoadingBookingLinkRules.cs",
+      "src/ERP.Application/DTOs/PreLoadingSalesOrderLinkDtos.cs",
+      "src/ERP.Api/Controllers/ContainerPreLoadingController.cs",
+      "src/ERP.UnitTests/PreLoadingSalesOrderLinkTests.cs",
+      "src/ERP.IntegrationTests/PreLoadingSalesOrderLinkSqlServerTests.cs",
+      "src/ERP.IntegrationTests/ERP.IntegrationTests.csproj",
+      "docs/preloading-salesorder-link.md"
+    ],
+    "Serialize linked demand approval against upstream sales-order rows and existing booking/preloading boundary in deterministic order; cumulative effective approved linked preloading per source detail may not exceed authorized order detail quantity. Keep cancelled preloading history and release operational planning capacity; explicitly state that this is demand planning evidence, not inventory reservation or shipment. Invalid later line or competing approvals must roll back/limit total. Preserve ERP353 and ERP348 guards, audit, actual enabled identity and all existing menu grants. Verify actual controllers/services on dedicated SQL own/foreign demand, wrong source/product, failed edit unchanged, cumulative overflow and two-connection race; add no production or external operation.": [
+      "src/ERP.Domain/Entities/Container2.cs",
+      "src/ERP.Infrastructure/Data/ErpDbContext.Config.cs",
+      "src/ERP.Infrastructure/Data/SchemaUpgrader.cs",
+      "src/ERP.Application/Services/PreLoadingSalesOrderLinkRules.cs",
+      "src/ERP.Application/Services/PreLoadingAuthorizationRules.cs",
+      "src/ERP.Application/Services/PreLoadingBookingLinkRules.cs",
+      "src/ERP.Application/DTOs/PreLoadingSalesOrderLinkDtos.cs",
+      "src/ERP.Api/Controllers/ContainerPreLoadingController.cs",
+      "src/ERP.UnitTests/PreLoadingSalesOrderLinkTests.cs",
+      "src/ERP.IntegrationTests/PreLoadingSalesOrderLinkSqlServerTests.cs",
+      "src/ERP.IntegrationTests/ERP.IntegrationTests.csproj",
+      "docs/preloading-salesorder-link.md"
+    ],
+    "Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance.": [
+      "src/ERP.Domain/Entities/Container2.cs",
+      "src/ERP.Infrastructure/Data/ErpDbContext.Config.cs",
+      "src/ERP.Infrastructure/Data/SchemaUpgrader.cs",
+      "src/ERP.Application/Services/PreLoadingSalesOrderLinkRules.cs",
+      "src/ERP.Application/Services/PreLoadingAuthorizationRules.cs",
+      "src/ERP.Application/Services/PreLoadingBookingLinkRules.cs",
+      "src/ERP.Application/DTOs/PreLoadingSalesOrderLinkDtos.cs",
+      "src/ERP.Api/Controllers/ContainerPreLoadingController.cs",
+      "src/ERP.UnitTests/PreLoadingSalesOrderLinkTests.cs",
+      "src/ERP.IntegrationTests/PreLoadingSalesOrderLinkSqlServerTests.cs",
+      "src/ERP.IntegrationTests/ERP.IntegrationTests.csproj",
+      "docs/preloading-salesorder-link.md"
+    ]
+  },
+  "implementation_evidence": "ContainerPreLoadingDetail contains product/quantity only; BookingId resolves customer but not sales order demand. Existing sales outbound fulfillment links orders, yet preloading lacks explicit order-line demand trace.",
+  "depends_on": [
+    "ERP-343",
+    "ERP-353",
+    "ERP-363"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "id": "ERP-368",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-08T10:48:34.599000Z"
+}

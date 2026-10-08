@@ -1,0 +1,93 @@
+{
+  "title": "Link loading detail quantities to explicit approved sales stock-out evidence",
+  "description": "Stage3 core inventory closure. Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance.",
+  "acceptance_criteria": [
+    "Persist optional positive SourceStockOutDetailId on each loading detail using existing Domain entity and exact EF mapping plus idempotent repository schema upgrade code. Historical null-source details remain explicitly unlinked with no backfill or guessed document numbers. Existing loading operators select eligible actual approved nondeleted outbound details through a bounded authorized API; return parent StockOutId, SalesOrderId, product, customer and remaining base quantity as explicit evidence. Reuse loading-list and stock-out menus/current user/customer scope; mixed customers require every relevant permission and participant access. No production schema execution or new grants.",
+    "Validate all proposed links before assigning/replacing details: approved live source, matching product/base quantity semantics and authoritative customer membership; new linked quantities positive. Approval locks upstream stock-out rows in deterministic order before loading rows, validates cumulative approved linked loading quantity against source detail quantity less effective linked approved returns (aggregate same product conservatively where returns lack detail ids), and commits atomically. Legacy unlinked quantities cannot be counted as proven physical shipment. Two linked loadings racing capacity admit only valid total; failed later line preserves details/status/history. Loading approval must not post stock again or alter finance. Test actual controllers/services against fresh dedicated SQL with source revocation, wrong customer/product, duplicate lines, overflow, atomic failure and concurrency.",
+    "Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance."
+  ],
+  "allowed_paths": [
+    "src/ERP.Domain/Entities/Container2.cs",
+    "src/ERP.Infrastructure/Data/ErpDbContext.Config.cs",
+    "src/ERP.Infrastructure/Data/SchemaUpgrader.cs",
+    "src/ERP.Application/Services/LoadingStockOutLinkRules.cs",
+    "src/ERP.Application/Services/LoadingListAuthorizationRules.cs",
+    "src/ERP.Application/Services/ContainerLoadingFulfillmentRules.cs",
+    "src/ERP.Application/DTOs/LoadingStockOutLinkDtos.cs",
+    "src/ERP.Api/Controllers/ContainerLoadingListController.cs",
+    "src/ERP.UnitTests/LoadingStockOutLinkTests.cs",
+    "src/ERP.IntegrationTests/LoadingStockOutLinkSqlServerTests.cs",
+    "src/ERP.IntegrationTests/ERP.IntegrationTests.csproj",
+    "docs/loading-stockout-link.md"
+  ],
+  "criterion_path_map": {
+    "Persist optional positive SourceStockOutDetailId on each loading detail using existing Domain entity and exact EF mapping plus idempotent repository schema upgrade code. Historical null-source details remain explicitly unlinked with no backfill or guessed document numbers. Existing loading operators select eligible actual approved nondeleted outbound details through a bounded authorized API; return parent StockOutId, SalesOrderId, product, customer and remaining base quantity as explicit evidence. Reuse loading-list and stock-out menus/current user/customer scope; mixed customers require every relevant permission and participant access. No production schema execution or new grants.": [
+      "src/ERP.Domain/Entities/Container2.cs",
+      "src/ERP.Infrastructure/Data/ErpDbContext.Config.cs",
+      "src/ERP.Infrastructure/Data/SchemaUpgrader.cs",
+      "src/ERP.Application/Services/LoadingStockOutLinkRules.cs",
+      "src/ERP.Application/Services/LoadingListAuthorizationRules.cs",
+      "src/ERP.Application/Services/ContainerLoadingFulfillmentRules.cs",
+      "src/ERP.Application/DTOs/LoadingStockOutLinkDtos.cs",
+      "src/ERP.Api/Controllers/ContainerLoadingListController.cs",
+      "src/ERP.UnitTests/LoadingStockOutLinkTests.cs",
+      "src/ERP.IntegrationTests/LoadingStockOutLinkSqlServerTests.cs",
+      "src/ERP.IntegrationTests/ERP.IntegrationTests.csproj",
+      "docs/loading-stockout-link.md"
+    ],
+    "Validate all proposed links before assigning/replacing details: approved live source, matching product/base quantity semantics and authoritative customer membership; new linked quantities positive. Approval locks upstream stock-out rows in deterministic order before loading rows, validates cumulative approved linked loading quantity against source detail quantity less effective linked approved returns (aggregate same product conservatively where returns lack detail ids), and commits atomically. Legacy unlinked quantities cannot be counted as proven physical shipment. Two linked loadings racing capacity admit only valid total; failed later line preserves details/status/history. Loading approval must not post stock again or alter finance. Test actual controllers/services against fresh dedicated SQL with source revocation, wrong customer/product, duplicate lines, overflow, atomic failure and concurrency.": [
+      "src/ERP.Domain/Entities/Container2.cs",
+      "src/ERP.Infrastructure/Data/ErpDbContext.Config.cs",
+      "src/ERP.Infrastructure/Data/SchemaUpgrader.cs",
+      "src/ERP.Application/Services/LoadingStockOutLinkRules.cs",
+      "src/ERP.Application/Services/LoadingListAuthorizationRules.cs",
+      "src/ERP.Application/Services/ContainerLoadingFulfillmentRules.cs",
+      "src/ERP.Application/DTOs/LoadingStockOutLinkDtos.cs",
+      "src/ERP.Api/Controllers/ContainerLoadingListController.cs",
+      "src/ERP.UnitTests/LoadingStockOutLinkTests.cs",
+      "src/ERP.IntegrationTests/LoadingStockOutLinkSqlServerTests.cs",
+      "src/ERP.IntegrationTests/ERP.IntegrationTests.csproj",
+      "docs/loading-stockout-link.md"
+    ],
+    "Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance.": [
+      "src/ERP.Domain/Entities/Container2.cs",
+      "src/ERP.Infrastructure/Data/ErpDbContext.Config.cs",
+      "src/ERP.Infrastructure/Data/SchemaUpgrader.cs",
+      "src/ERP.Application/Services/LoadingStockOutLinkRules.cs",
+      "src/ERP.Application/Services/LoadingListAuthorizationRules.cs",
+      "src/ERP.Application/Services/ContainerLoadingFulfillmentRules.cs",
+      "src/ERP.Application/DTOs/LoadingStockOutLinkDtos.cs",
+      "src/ERP.Api/Controllers/ContainerLoadingListController.cs",
+      "src/ERP.UnitTests/LoadingStockOutLinkTests.cs",
+      "src/ERP.IntegrationTests/LoadingStockOutLinkSqlServerTests.cs",
+      "src/ERP.IntegrationTests/ERP.IntegrationTests.csproj",
+      "docs/loading-stockout-link.md"
+    ]
+  },
+  "implementation_evidence": "ContainerLoadingDetail has ProductId and Quantity but no explicit stock-out detail source. ERP348 caps only against preloading, leaving physical outbound evidence disconnected from loading.",
+  "depends_on": [
+    "ERP-343",
+    "ERP-348",
+    "ERP-364"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "id": "ERP-366",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-08T10:48:34.584269Z"
+}
