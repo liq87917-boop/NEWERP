@@ -304,7 +304,16 @@ public class FinanceContainerSettlementController : DocumentControllerBase<Finan
 }
 
 /// <summary>
-/// 散货结算单控制器
+/// 散货结算单控制器（ERP-387 生命周期护栏）：列表 / 详情 / 创建 / 修改 / 提交 / 审核 / 取消 / 删除
+/// 都先重新校验实时启用身份（账号存在、未删除且启用）、既有「散货结算单」（<c>bulk-settlement</c>）菜单授权
+/// 与当前权威客户数据范围；创建 / 修改校验真实启用客户，读取 / 状态变更 / 删除前复核已存储客户归属
+/// （受限账号对无权威归属或范围外客户 fail closed，特权账号保留历史访问）。
+/// <para>金额只按既有存储精度（<c>decimal(18,2)</c>，2 位小数）校验：总金额 &gt; 0，海运费 &gt;= 0；
+/// 散货结算单没有币种字段，因此不做任何汇率换算、跨币种聚合或 <c>total = freight</c> 公式，
+/// 也不按备注 / 文本推断装运 / 订单来源。</para>
+/// <para>修改 / 提交 / 审核 / 取消 / 删除都在同一事务内先取散货结算单行锁，锁内重新加载并复核权威状态 / 客户 / 金额；
+/// 失败整体回滚（状态、原始字段与审计不变）。创建在生成单号与写入之前完成全部校验（失败绝不消耗单号）。</para>
+/// <para>本护栏不写库存 / 资金 / 会计，不产生收款、付款、核销、分摊入账或任何流水，只做软删除。</para>
 /// </summary>
 [Route("api/finance/bulk-settlements")]
 public class FinanceBulkSettlementController : DocumentControllerBase<FinanceBulkSettlement>
@@ -316,11 +325,14 @@ public class FinanceBulkSettlementController : DocumentControllerBase<FinanceBul
         _noService = noService;
     }
 
+    /// <summary>分页：身份 / 菜单授权与客户数据范围在计数与取行之前生效（受限制账号看不到范围外结算单）。</summary>
     [HttpGet]
     public async Task<IActionResult> GetPaged([FromQuery] PageQuery query, [FromQuery] DocumentStatus? status)
     {
+        var scope = await FinanceBulkSettlementLifecycleRules.EnsureMenuAuthorizedAsync(Db, CurrentUserId());
         query.Normalize();
-        var source = Set.AsNoTracking().Where(o => !o.IsDeleted);
+        var source = SalespersonDataScopeService.FilterByCustomer(
+            Set.AsNoTracking().Where(o => !o.IsDeleted), scope, o => o.CustomerId);
         if (status.HasValue) source = source.Where(o => o.Status == status.Value);
         if (!string.IsNullOrWhiteSpace(query.Keyword)) source = source.Where(o => o.SettlementNo.Contains(query.Keyword));
         var total = await source.CountAsync();
@@ -330,35 +342,202 @@ public class FinanceBulkSettlementController : DocumentControllerBase<FinanceBul
             new PagedResult<FinanceBulkSettlement> { Items = items, Total = total, Page = query.Page, PageSize = query.PageSize }));
     }
 
+    /// <summary>详情：按结算单权威客户做身份 / 菜单授权 / 客户数据范围复核，越界 fail closed。</summary>
     [HttpGet("{id:long}")]
     public async Task<IActionResult> GetById(long id)
-        => Ok(ApiResponse<FinanceBulkSettlement>.Success(await GetOrThrowAsync(id, "散货结算单不存在")));
+    {
+        var scope = await FinanceBulkSettlementLifecycleRules.EnsureMenuAuthorizedAsync(Db, CurrentUserId());
+        var entity = await Set.AsNoTracking()
+            .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
+            ?? throw BusinessException.NotFound("散货结算单不存在");
+        FinanceBulkSettlementLifecycleRules.EnsureStoredSettlementScopeAllowedAsync(scope, entity);
+        return Ok(ApiResponse<FinanceBulkSettlement>.Success(entity));
+    }
 
+    /// <summary>
+    /// 创建：在生成结算单号之前先完成身份 / 菜单授权 / 客户数据范围 + 金额 + 客户可用性校验
+    /// （授权与校验失败绝不消耗单号、绝不写入）；关系型后端在同一事务内锁内复核客户仍真实可用后才生成单号并落库。
+    /// </summary>
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] FinanceBulkSettlement entity)
     {
-        entity.Id = 0;
-        entity.SettlementNo = await _noService.GenerateAsync(DocumentType.BulkSettlement);
-        entity.Status = DocumentStatus.Pending;
-        entity.CreatedAt = DateTime.Now;
-        Db.FinanceBulkSettlements.Add(entity);
-        await Db.SaveChangesAsync();
-        return Ok(ApiResponse<object>.Success(new { entity.Id, entity.SettlementNo }, "散货结算单创建成功"));
+        var scope = await FinanceBulkSettlementLifecycleRules.EnsureMenuAuthorizedAsync(Db, CurrentUserId());
+        var (totalAmount, freightCost) = FinanceBulkSettlementLifecycleRules.NormalizeAmounts(
+            entity.TotalAmount, entity.FreightCost);
+        FinanceBulkSettlementLifecycleRules.EnsureCustomerInScope(scope, entity.CustomerId);
+        await FinanceBulkSettlementLifecycleRules.EnsureCustomerAvailableAsync(Db, entity.CustomerId);
+
+        await using var transaction = FinanceBulkSettlementLifecycleRules.IsRelationalProvider(Db)
+            ? await Db.Database.BeginTransactionAsync()
+            : null;
+        try
+        {
+            // 锁内复核客户仍真实可用（并发停用 / 删除收敛）；校验一律先于单号预留。
+            await FinanceBulkSettlementLifecycleRules.EnsureCustomerAvailableAsync(Db, entity.CustomerId);
+
+            entity.Id = 0;
+            entity.SettlementNo = await _noService.GenerateAsync(DocumentType.BulkSettlement);
+            entity.Status = DocumentStatus.Pending;
+            entity.TotalAmount = totalAmount;
+            entity.FreightCost = freightCost;
+            entity.CreatedAt = DateTime.Now;
+            Db.FinanceBulkSettlements.Add(entity);
+            await Db.SaveChangesAsync();
+            if (transaction is not null) await transaction.CommitAsync();
+            return Ok(ApiResponse<object>.Success(new { entity.Id, entity.SettlementNo }, "散货结算单创建成功"));
+        }
+        catch
+        {
+            if (transaction is not null) await transaction.RollbackAsync();
+            throw;
+        }
     }
 
+    /// <summary>
+    /// 修改：仅待提交可改；在同一事务内先取散货结算单行锁，锁内重新加载并复核身份 / 菜单授权 / 客户范围 /
+    /// 状态 / 请求客户与金额，失败整体回滚（原字段与审计不变）。
+    /// </summary>
     [HttpPut("{id:long}")]
     public async Task<IActionResult> Update(long id, [FromBody] FinanceBulkSettlement entity)
     {
-        var existing = await GetOrThrowAsync(id, "散货结算单不存在");
-        if (GetStatus(existing) != DocumentStatus.Pending)
-            throw BusinessException.RuleConflict("仅待提交状态的单据可修改");
-        existing.SettlementDate = entity.SettlementDate;
-        existing.CustomerId = entity.CustomerId;
-        existing.TotalAmount = entity.TotalAmount;
-        existing.FreightCost = entity.FreightCost;
-        existing.Remark = entity.Remark;
-        existing.UpdatedAt = DateTime.Now;
-        await Db.SaveChangesAsync();
-        return Ok(ApiResponse<object>.Success(null, "散货结算单更新成功"));
+        var scope = await FinanceBulkSettlementLifecycleRules.EnsureMenuAuthorizedAsync(Db, CurrentUserId());
+        var (totalAmount, freightCost) = FinanceBulkSettlementLifecycleRules.NormalizeAmounts(
+            entity.TotalAmount, entity.FreightCost);
+        FinanceBulkSettlementLifecycleRules.EnsureCustomerInScope(scope, entity.CustomerId);
+        await FinanceBulkSettlementLifecycleRules.EnsureCustomerAvailableAsync(Db, entity.CustomerId);
+
+        await using var transaction = FinanceBulkSettlementLifecycleRules.IsRelationalProvider(Db)
+            ? await Db.Database.BeginTransactionAsync()
+            : null;
+        try
+        {
+            await FinanceBulkSettlementLifecycleRules.LockSettlementRowAsync(Db, id);
+
+            var existing = await Db.FinanceBulkSettlements
+                .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
+                ?? throw BusinessException.NotFound("散货结算单不存在");
+
+            // 锁内复核：既有单据权威客户范围 + 允许的状态 + 请求客户仍真实可用。
+            FinanceBulkSettlementLifecycleRules.EnsureStoredSettlementScopeAllowedAsync(scope, existing);
+            if (GetStatus(existing) != DocumentStatus.Pending)
+                throw BusinessException.RuleConflict("仅待提交状态的单据可修改");
+            await FinanceBulkSettlementLifecycleRules.EnsureCustomerAvailableAsync(Db, entity.CustomerId);
+
+            existing.SettlementDate = entity.SettlementDate;
+            existing.CustomerId = entity.CustomerId;
+            existing.TotalAmount = totalAmount;
+            existing.FreightCost = freightCost;
+            existing.Remark = entity.Remark;
+            existing.UpdatedAt = DateTime.Now;
+            await Db.SaveChangesAsync();
+            if (transaction is not null) await transaction.CommitAsync();
+            return Ok(ApiResponse<object>.Success(null, "散货结算单更新成功"));
+        }
+        catch
+        {
+            if (transaction is not null) await transaction.RollbackAsync();
+            throw;
+        }
     }
+    /// <summary>提交：待提交 → 已提交。同一事务内取散货结算单行锁，锁内复核范围 / 状态 / 金额。</summary>
+    [HttpPost("{id:long}/submit")]
+    public override Task<IActionResult> Submit(long id)
+        => TransitionAsync(id, DocumentStatus.Pending, DocumentStatus.Submitted, "提交成功", validateAmounts: true);
+
+    /// <summary>审核：已提交 → 已审核。锁内复核范围 / 状态 / 金额；本护栏不写库存 / 资金 / 会计。</summary>
+    [HttpPost("{id:long}/approve")]
+    public override Task<IActionResult> Approve(long id)
+        => TransitionAsync(id, DocumentStatus.Submitted, DocumentStatus.Approved, "审核通过", validateAmounts: true);
+
+    /// <summary>
+    /// 取消：把状态置为「已取消」（幂等拒绝重复取消）。历史字段与审计原样保留，绝不物理删除，也不写库存 / 资金。
+    /// </summary>
+    [HttpPost("{id:long}/cancel")]
+    public override Task<IActionResult> Cancel(long id)
+        => TransitionAsync(id, null, DocumentStatus.Cancelled, "已取消", validateAmounts: false);
+
+    /// <summary>删除（软删除）：仅待提交可删；锁内复核范围 / 状态，失败回滚且不改写原字段与审计。</summary>
+    [HttpDelete("{id:long}")]
+    public override async Task<IActionResult> Delete(long id)
+    {
+        var scope = await FinanceBulkSettlementLifecycleRules.EnsureMenuAuthorizedAsync(Db, CurrentUserId());
+
+        await using var transaction = FinanceBulkSettlementLifecycleRules.IsRelationalProvider(Db)
+            ? await Db.Database.BeginTransactionAsync()
+            : null;
+        try
+        {
+            await FinanceBulkSettlementLifecycleRules.LockSettlementRowAsync(Db, id);
+
+            var entity = await Db.FinanceBulkSettlements
+                .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
+                ?? throw BusinessException.NotFound("散货结算单不存在");
+
+            FinanceBulkSettlementLifecycleRules.EnsureStoredSettlementScopeAllowedAsync(scope, entity);
+            if (GetStatus(entity) != DocumentStatus.Pending)
+                throw BusinessException.RuleConflict("仅待提交状态的单据可删除");
+
+            entity.IsDeleted = true;
+            entity.UpdatedAt = DateTime.Now;
+            await Db.SaveChangesAsync();
+            if (transaction is not null) await transaction.CommitAsync();
+            return Ok(ApiResponse<object>.Success(null, "删除成功"));
+        }
+        catch
+        {
+            if (transaction is not null) await transaction.RollbackAsync();
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// 提交 / 审核 / 取消共用：同一事务内先取散货结算单行锁，加载权威单据并在锁内复核
+    /// 身份 / 菜单授权 / 客户范围 / 状态（可选金额），失败整体回滚（状态与审计不变）。
+    /// </summary>
+    private async Task<IActionResult> TransitionAsync(
+        long id, DocumentStatus? from, DocumentStatus to, string message, bool validateAmounts)
+    {
+        var scope = await FinanceBulkSettlementLifecycleRules.EnsureMenuAuthorizedAsync(Db, CurrentUserId());
+
+        await using var transaction = FinanceBulkSettlementLifecycleRules.IsRelationalProvider(Db)
+            ? await Db.Database.BeginTransactionAsync()
+            : null;
+        try
+        {
+            await FinanceBulkSettlementLifecycleRules.LockSettlementRowAsync(Db, id);
+
+            var entity = await Db.FinanceBulkSettlements
+                .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
+                ?? throw BusinessException.NotFound("散货结算单不存在");
+
+            FinanceBulkSettlementLifecycleRules.EnsureStoredSettlementScopeAllowedAsync(scope, entity);
+
+            if (from.HasValue)
+            {
+                if (GetStatus(entity) != from.Value)
+                    throw BusinessException.RuleConflict("当前状态不允许该操作");
+            }
+            else if (to == DocumentStatus.Cancelled && GetStatus(entity) == DocumentStatus.Cancelled)
+            {
+                throw BusinessException.RuleConflict("散货结算单已取消，不能重复取消");
+            }
+
+            if (validateAmounts)
+            {
+                // 锁内复核持久化金额仍满足既有口径（历史合法数据原样保留，绝不改写）。
+                FinanceBulkSettlementLifecycleRules.NormalizeAmounts(entity.TotalAmount, entity.FreightCost);
+            }
+
+            SetStatus(entity, to);
+            await Db.SaveChangesAsync();
+            if (transaction is not null) await transaction.CommitAsync();
+            return Ok(ApiResponse<object>.Success(null, message));
+        }
+        catch
+        {
+            if (transaction is not null) await transaction.RollbackAsync();
+            throw;
+        }
+    }
+
 }
