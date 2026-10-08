@@ -1,0 +1,93 @@
+{
+  "title": "Enforce live authorization on procurement receipt operations",
+  "description": "Stage3 priority: implement a core operational integrity gap through existing business APIs/services. Preserve permissions, audit, original evidence and existing layers; no report, UI polish, Agent or production operations.",
+  "acceptance_criteria": [
+    "Each existing inbound receipt read/create/update/submit/approve/cancel/delete/movements route must fail closed for missing/disabled/unmapped user or missing existing stock-in module permission. Apply existing actual supplier/warehouse/customer scope rules; linked procurement owning customer cannot expose a customer outside current user scope. Do not invent new permissions or treat null identity as administrative. A legitimately unlinked stocking receipt remains allowed only to existing authorized inbound operators.",
+    "Check stored and requested receipt/source ownership before update/delete/status or movement mutation, recheck live authorization and source within approval/reversal transaction. Reuse existing inventory business service for all writes; denied caller cannot change quantities,cost,movements,source status or consume a document number where validation should precede generation. Scope paged lists and detail/movement read consistently, avoid leaking foreign identifiers and retain audit.",
+    "Meaningful tests prove denied/unmapped/disabled caller, authorized inbound operator, foreign owning customer, source link change on edit, access revocation between reads and approval/cancel, no mutation on denial, and authorized quantity/cost/reversal behavior using genuine HTTP identities. Repair existing legacy fixtures only by genuine seeded authorized test users, retain every business assertion; safe Release and real SQL tests required.",
+    "Real SQL fixtures must require exact (localdb)\\NEWERP_AutoAcceptance, IntegratedSecurity and NEWERP_AUTOTEST prefix before access. Create only a new GUID-owned database, reject existing database, never drop/reset any database or read production settings. Use SQL generated identities, fail wrong-target guards before access, retain complete logs. Execute relevant unit and safe Release build/test plus real SQL scenarios; build completion does not mean stage acceptance."
+  ],
+  "allowed_paths": [
+    "src/ERP.Application/Services/StockInAuthorizationRules.cs",
+    "src/ERP.Api/Controllers/StockInController.cs",
+    "src/ERP.UnitTests/StockInAuthorizationTests.cs",
+    "src/ERP.UnitTests/StockInControllerTests.cs",
+    "src/ERP.UnitTests/StockInOutMovementLedgerTests.cs",
+    "src/ERP.UnitTests/StockInOrderFulfillmentTests.cs",
+    "src/ERP.UnitTests/StockUnitConversionTests.cs",
+    "src/ERP.IntegrationTests/StockInAuthorizationSqlServerTests.cs",
+    "docs/stock-in-authorization.md"
+  ],
+  "criterion_path_map": {
+    "Each existing inbound receipt read/create/update/submit/approve/cancel/delete/movements route must fail closed for missing/disabled/unmapped user or missing existing stock-in module permission. Apply existing actual supplier/warehouse/customer scope rules; linked procurement owning customer cannot expose a customer outside current user scope. Do not invent new permissions or treat null identity as administrative. A legitimately unlinked stocking receipt remains allowed only to existing authorized inbound operators.": [
+      "src/ERP.Application/Services/StockInAuthorizationRules.cs",
+      "src/ERP.Api/Controllers/StockInController.cs",
+      "src/ERP.UnitTests/StockInAuthorizationTests.cs",
+      "src/ERP.UnitTests/StockInControllerTests.cs",
+      "src/ERP.UnitTests/StockInOutMovementLedgerTests.cs",
+      "src/ERP.UnitTests/StockInOrderFulfillmentTests.cs",
+      "src/ERP.UnitTests/StockUnitConversionTests.cs",
+      "src/ERP.IntegrationTests/StockInAuthorizationSqlServerTests.cs",
+      "docs/stock-in-authorization.md"
+    ],
+    "Check stored and requested receipt/source ownership before update/delete/status or movement mutation, recheck live authorization and source within approval/reversal transaction. Reuse existing inventory business service for all writes; denied caller cannot change quantities,cost,movements,source status or consume a document number where validation should precede generation. Scope paged lists and detail/movement read consistently, avoid leaking foreign identifiers and retain audit.": [
+      "src/ERP.Application/Services/StockInAuthorizationRules.cs",
+      "src/ERP.Api/Controllers/StockInController.cs",
+      "src/ERP.UnitTests/StockInAuthorizationTests.cs",
+      "src/ERP.UnitTests/StockInControllerTests.cs",
+      "src/ERP.UnitTests/StockInOutMovementLedgerTests.cs",
+      "src/ERP.UnitTests/StockInOrderFulfillmentTests.cs",
+      "src/ERP.UnitTests/StockUnitConversionTests.cs",
+      "src/ERP.IntegrationTests/StockInAuthorizationSqlServerTests.cs",
+      "docs/stock-in-authorization.md"
+    ],
+    "Meaningful tests prove denied/unmapped/disabled caller, authorized inbound operator, foreign owning customer, source link change on edit, access revocation between reads and approval/cancel, no mutation on denial, and authorized quantity/cost/reversal behavior using genuine HTTP identities. Repair existing legacy fixtures only by genuine seeded authorized test users, retain every business assertion; safe Release and real SQL tests required.": [
+      "src/ERP.Application/Services/StockInAuthorizationRules.cs",
+      "src/ERP.Api/Controllers/StockInController.cs",
+      "src/ERP.UnitTests/StockInAuthorizationTests.cs",
+      "src/ERP.UnitTests/StockInControllerTests.cs",
+      "src/ERP.UnitTests/StockInOutMovementLedgerTests.cs",
+      "src/ERP.UnitTests/StockInOrderFulfillmentTests.cs",
+      "src/ERP.UnitTests/StockUnitConversionTests.cs",
+      "src/ERP.IntegrationTests/StockInAuthorizationSqlServerTests.cs",
+      "docs/stock-in-authorization.md"
+    ],
+    "Real SQL fixtures must require exact (localdb)\\NEWERP_AutoAcceptance, IntegratedSecurity and NEWERP_AUTOTEST prefix before access. Create only a new GUID-owned database, reject existing database, never drop/reset any database or read production settings. Use SQL generated identities, fail wrong-target guards before access, retain complete logs. Execute relevant unit and safe Release build/test plus real SQL scenarios; build completion does not mean stage acceptance.": [
+      "src/ERP.Application/Services/StockInAuthorizationRules.cs",
+      "src/ERP.Api/Controllers/StockInController.cs",
+      "src/ERP.UnitTests/StockInAuthorizationTests.cs",
+      "src/ERP.UnitTests/StockInControllerTests.cs",
+      "src/ERP.UnitTests/StockInOutMovementLedgerTests.cs",
+      "src/ERP.UnitTests/StockInOrderFulfillmentTests.cs",
+      "src/ERP.UnitTests/StockUnitConversionTests.cs",
+      "src/ERP.IntegrationTests/StockInAuthorizationSqlServerTests.cs",
+      "docs/stock-in-authorization.md"
+    ]
+  },
+  "depends_on": [
+    "ERP-342",
+    "ERP-344",
+    "ERP-345"
+  ],
+  "implementation_evidence": "StockInController.GetPaged/GetById/GetMovements query unscoped receipts. Create/Update/Approve/Cancel have no current-user menu/data-scope checks; inherited Submit/Delete are likewise unscoped. ERP342/344 quantity/source rules validate business identity of linked order but not caller authorization; StockOut has a live scope repair9733b69 and inbound counterpart still missing.",
+  "risk": "medium",
+  "planning_stage": 3,
+  "id": "ERP-352",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-08T05:31:23.148166Z"
+}

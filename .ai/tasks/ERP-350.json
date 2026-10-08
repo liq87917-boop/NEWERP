@@ -1,0 +1,76 @@
+{
+  "title": "Enforce one receipt funding budget across customer and agency allocations",
+  "description": "Stage3 priority: implement a core operational integrity gap through existing business APIs/services. Preserve permissions, audit, original evidence and existing layers; no report, UI polish, Agent or production operations.",
+  "acceptance_criteria": [
+    "For each real receipt, both existing allocation APIs must use a single authoritative same-currency receipt funding capacity under the already shared receipt lock. Sum effective nondeleted nonvoided allocations from both existing tables exactly once. Reject combined requested amount above authoritative receipt amount, invalid active currency/customer/source evidence must fail closed or remain accurately blocked, never silently drop evidence or convert currencies.",
+    "Keep existing per-order/per-invoice duplicate and maximum row bounds, permissions, source checks, transaction ownership and explicit void history. Expose accurate remaining funding in existing receipt candidate/summary data used for allocation, using necessary existing DTO files if actually needed; no new report or route required. Only explicit void releases capacity, neither table edited by the other writer. Fix the conflicting independent-budget documentation.",
+    "First reproduce customer80 then agency30 against100 and reverse writer order using genuine services. Verify combined exact100, overflow unchanged tables, void release, both currency/customer guards and two-connection cross-consumer race. Preserve original ERP349 tests and extend meaningful regression and real SQL proof; record that ERP349 build completion did not establish this missing invariant.",
+    "Real SQL fixtures must require exact (localdb)\\NEWERP_AutoAcceptance, IntegratedSecurity and NEWERP_AUTOTEST prefix before access. Create only a new GUID-owned database, reject existing database, never drop/reset any database or read production settings. Use SQL generated identities, fail wrong-target guards before access, retain complete logs. Execute relevant unit and safe Release build/test plus real SQL scenarios; build completion does not mean stage acceptance."
+  ],
+  "allowed_paths": [
+    "src/ERP.Application/Services/CustomerReceiptLifecycleRules.cs",
+    "src/ERP.Application/Services/CustomerReceiptAllocationService.cs",
+    "src/ERP.Application/Services/AgencyServiceFeeCollectionAllocationService.cs",
+    "src/ERP.UnitTests/CustomerReceiptSharedFundingTests.cs",
+    "src/ERP.IntegrationTests/CustomerReceiptSharedFundingSqlServerTests.cs",
+    "docs/customer-receipt-lifecycle.md"
+  ],
+  "criterion_path_map": {
+    "For each real receipt, both existing allocation APIs must use a single authoritative same-currency receipt funding capacity under the already shared receipt lock. Sum effective nondeleted nonvoided allocations from both existing tables exactly once. Reject combined requested amount above authoritative receipt amount, invalid active currency/customer/source evidence must fail closed or remain accurately blocked, never silently drop evidence or convert currencies.": [
+      "src/ERP.Application/Services/CustomerReceiptLifecycleRules.cs",
+      "src/ERP.Application/Services/CustomerReceiptAllocationService.cs",
+      "src/ERP.Application/Services/AgencyServiceFeeCollectionAllocationService.cs",
+      "src/ERP.UnitTests/CustomerReceiptSharedFundingTests.cs",
+      "src/ERP.IntegrationTests/CustomerReceiptSharedFundingSqlServerTests.cs",
+      "docs/customer-receipt-lifecycle.md"
+    ],
+    "Keep existing per-order/per-invoice duplicate and maximum row bounds, permissions, source checks, transaction ownership and explicit void history. Expose accurate remaining funding in existing receipt candidate/summary data used for allocation, using necessary existing DTO files if actually needed; no new report or route required. Only explicit void releases capacity, neither table edited by the other writer. Fix the conflicting independent-budget documentation.": [
+      "src/ERP.Application/Services/CustomerReceiptLifecycleRules.cs",
+      "src/ERP.Application/Services/CustomerReceiptAllocationService.cs",
+      "src/ERP.Application/Services/AgencyServiceFeeCollectionAllocationService.cs",
+      "src/ERP.UnitTests/CustomerReceiptSharedFundingTests.cs",
+      "src/ERP.IntegrationTests/CustomerReceiptSharedFundingSqlServerTests.cs",
+      "docs/customer-receipt-lifecycle.md"
+    ],
+    "First reproduce customer80 then agency30 against100 and reverse writer order using genuine services. Verify combined exact100, overflow unchanged tables, void release, both currency/customer guards and two-connection cross-consumer race. Preserve original ERP349 tests and extend meaningful regression and real SQL proof; record that ERP349 build completion did not establish this missing invariant.": [
+      "src/ERP.Application/Services/CustomerReceiptLifecycleRules.cs",
+      "src/ERP.Application/Services/CustomerReceiptAllocationService.cs",
+      "src/ERP.Application/Services/AgencyServiceFeeCollectionAllocationService.cs",
+      "src/ERP.UnitTests/CustomerReceiptSharedFundingTests.cs",
+      "src/ERP.IntegrationTests/CustomerReceiptSharedFundingSqlServerTests.cs",
+      "docs/customer-receipt-lifecycle.md"
+    ],
+    "Real SQL fixtures must require exact (localdb)\\NEWERP_AutoAcceptance, IntegratedSecurity and NEWERP_AUTOTEST prefix before access. Create only a new GUID-owned database, reject existing database, never drop/reset any database or read production settings. Use SQL generated identities, fail wrong-target guards before access, retain complete logs. Execute relevant unit and safe Release build/test plus real SQL scenarios; build completion does not mean stage acceptance.": [
+      "src/ERP.Application/Services/CustomerReceiptLifecycleRules.cs",
+      "src/ERP.Application/Services/CustomerReceiptAllocationService.cs",
+      "src/ERP.Application/Services/AgencyServiceFeeCollectionAllocationService.cs",
+      "src/ERP.UnitTests/CustomerReceiptSharedFundingTests.cs",
+      "src/ERP.IntegrationTests/CustomerReceiptSharedFundingSqlServerTests.cs",
+      "docs/customer-receipt-lifecycle.md"
+    ]
+  },
+  "depends_on": [
+    "ERP-349"
+  ],
+  "implementation_evidence": "ERP349 acquired a shared receipt row lock, but CustomerReceiptAllocationService.CreateAsync still sums only CustomerReceiptAllocations and AgencyServiceFeeCollectionAllocationService sums only its own allocation table. docs/customer-receipt-lifecycle.md section2 item4 explicitly says independent allocation accounting. Same receipt100 can therefore fund customer100 plus agency100 despite serialized writers; this misses ERP349 cross-consumer funding acceptance, so retain original results and correct the implementation rather than declare full acceptance.",
+  "risk": "medium",
+  "planning_stage": 3,
+  "id": "ERP-350",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-08T05:31:23.145274Z"
+}

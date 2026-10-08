@@ -1,0 +1,77 @@
+{
+  "title": "Validate preloading booking linkage before operational state changes",
+  "description": "Stage3 priority: implement a core operational integrity gap through existing business APIs/services. Preserve permissions, audit, original evidence and existing layers; no report, UI polish, Agent or production operations.",
+  "acceptance_criteria": [
+    "Existing authorized preloading operator supplying BookingId must resolve eligible live approved booking and applicable existing module/data scope at create/update/submit/approve. Reject nonpositive/missing/deleted/cancelled/foreign booking and conflicting authoritative container/shipping linkage; derive only fields actually authoritative on booking, never invent seal or participant data. Null genuinely unlinked historical preloading remains supported under existing authorization. Validate current source state before saving, preserve original products/quantities and audit.",
+    "Coordinate booking cancellation with linked preloading approval under the same source booking row lock and atomic transaction. Refuse source cancellation while live effective approved preloading or downstream approved loading references exist, release only through explicit existing cancellation workflows; keep ERP348 downstream source cancellation guard. Do not write inventory, finance or external shipping systems, guess links from booking numbers, or infer departure from approval.",
+    "Verify authorized and denied identities, invalid source, conflicting snapshot, update source changes, null legacy, cancelled/reversed release, unchanged source/details on refusal, and genuine two-connection booking-cancel vs preloading-approve race. Keep current read-only tracking semantics and old regressions, no UI/report enhancements.",
+    "Real SQL fixtures must require exact (localdb)\\NEWERP_AutoAcceptance, IntegratedSecurity and NEWERP_AUTOTEST prefix before access. Create only a new GUID-owned database, reject existing database, never drop/reset any database or read production settings. Use SQL generated identities, fail wrong-target guards before access, retain complete logs. Execute relevant unit and safe Release build/test plus real SQL scenarios; build completion does not mean stage acceptance."
+  ],
+  "allowed_paths": [
+    "src/ERP.Application/Services/PreLoadingBookingLinkRules.cs",
+    "src/ERP.Api/Controllers/ContainerPreLoadingController.cs",
+    "src/ERP.Api/Controllers/ContainerControllers.cs",
+    "src/ERP.UnitTests/PreLoadingBookingLinkTests.cs",
+    "src/ERP.IntegrationTests/PreLoadingBookingLinkSqlServerTests.cs",
+    "docs/preloading-booking-link.md"
+  ],
+  "criterion_path_map": {
+    "Existing authorized preloading operator supplying BookingId must resolve eligible live approved booking and applicable existing module/data scope at create/update/submit/approve. Reject nonpositive/missing/deleted/cancelled/foreign booking and conflicting authoritative container/shipping linkage; derive only fields actually authoritative on booking, never invent seal or participant data. Null genuinely unlinked historical preloading remains supported under existing authorization. Validate current source state before saving, preserve original products/quantities and audit.": [
+      "src/ERP.Application/Services/PreLoadingBookingLinkRules.cs",
+      "src/ERP.Api/Controllers/ContainerPreLoadingController.cs",
+      "src/ERP.Api/Controllers/ContainerControllers.cs",
+      "src/ERP.UnitTests/PreLoadingBookingLinkTests.cs",
+      "src/ERP.IntegrationTests/PreLoadingBookingLinkSqlServerTests.cs",
+      "docs/preloading-booking-link.md"
+    ],
+    "Coordinate booking cancellation with linked preloading approval under the same source booking row lock and atomic transaction. Refuse source cancellation while live effective approved preloading or downstream approved loading references exist, release only through explicit existing cancellation workflows; keep ERP348 downstream source cancellation guard. Do not write inventory, finance or external shipping systems, guess links from booking numbers, or infer departure from approval.": [
+      "src/ERP.Application/Services/PreLoadingBookingLinkRules.cs",
+      "src/ERP.Api/Controllers/ContainerPreLoadingController.cs",
+      "src/ERP.Api/Controllers/ContainerControllers.cs",
+      "src/ERP.UnitTests/PreLoadingBookingLinkTests.cs",
+      "src/ERP.IntegrationTests/PreLoadingBookingLinkSqlServerTests.cs",
+      "docs/preloading-booking-link.md"
+    ],
+    "Verify authorized and denied identities, invalid source, conflicting snapshot, update source changes, null legacy, cancelled/reversed release, unchanged source/details on refusal, and genuine two-connection booking-cancel vs preloading-approve race. Keep current read-only tracking semantics and old regressions, no UI/report enhancements.": [
+      "src/ERP.Application/Services/PreLoadingBookingLinkRules.cs",
+      "src/ERP.Api/Controllers/ContainerPreLoadingController.cs",
+      "src/ERP.Api/Controllers/ContainerControllers.cs",
+      "src/ERP.UnitTests/PreLoadingBookingLinkTests.cs",
+      "src/ERP.IntegrationTests/PreLoadingBookingLinkSqlServerTests.cs",
+      "docs/preloading-booking-link.md"
+    ],
+    "Real SQL fixtures must require exact (localdb)\\NEWERP_AutoAcceptance, IntegratedSecurity and NEWERP_AUTOTEST prefix before access. Create only a new GUID-owned database, reject existing database, never drop/reset any database or read production settings. Use SQL generated identities, fail wrong-target guards before access, retain complete logs. Execute relevant unit and safe Release build/test plus real SQL scenarios; build completion does not mean stage acceptance.": [
+      "src/ERP.Application/Services/PreLoadingBookingLinkRules.cs",
+      "src/ERP.Api/Controllers/ContainerPreLoadingController.cs",
+      "src/ERP.Api/Controllers/ContainerControllers.cs",
+      "src/ERP.UnitTests/PreLoadingBookingLinkTests.cs",
+      "src/ERP.IntegrationTests/PreLoadingBookingLinkSqlServerTests.cs",
+      "docs/preloading-booking-link.md"
+    ]
+  },
+  "depends_on": [
+    "ERP-040",
+    "ERP-348"
+  ],
+  "implementation_evidence": "ContainerPreLoadingController.Create/Update persists BookingId and client ContainerNo/SealNo without resolving live booking; inherited Submit/Approve does not validate linked booking. ERP348 constrains downstream loading vs preloading but does not validate upstream BookingId. ContainerBookingController inherited Cancel can invalidate effective preloading linkage; shipment tracking is read-only and explicitly marks dangling source unknown rather than preventing new invalid fulfillment.",
+  "risk": "medium",
+  "planning_stage": 3,
+  "id": "ERP-353",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-08T05:31:23.149392Z"
+}
