@@ -165,9 +165,14 @@ public static class DependencyInjection
         // 把注册的基础资料与销售单据打印族归一化为同一个有界旧打印快照（fresh 菜单 + 列 + 数据范围校验，fail closed）。
         services.AddScoped<ILegacyPrintSnapshotReadService, LegacyPrintSnapshotReadService>();
 
-        // 旧报表实际产物来源（ERP-333 Stage 2）：有界有限登记册，经既有规范旧导出器产出真实旧 Excel/PDF 字节；
+        // 旧报表实际产物来源（ERP-333 / ERP-337 Stage 2）：有界有限登记册，经既有规范旧导出器产出真实旧 Excel/PDF 字节；
         // 缺失旧导出 / 字体 / 超限 fail closed，绝不使用通用导出器充当旧导出器。
-        services.AddScoped<ILegacyReportArtifactSource, LegacyReportArtifactSource>();
+        services.AddScoped<ILegacyReportArtifactSource>(sp => new LegacyReportArtifactSource(
+            sp.GetRequiredService<IDynamicSalesOrderReportQuery>(),
+            sp.GetRequiredService<IDynamicReceivableReportQuery>(),
+            sp.GetRequiredService<IDynamicPurchaseOrderReportQuery>(),
+            sp.GetRequiredService<ILegacyBillExportReadService>(),
+            sp.GetRequiredService<IErpDbContext>()));
 
         // 通用报表配置平台（ERP-296 Stage 2）：报表预设模板编排（只读列出 + 私有物化；数据驱动，不新增每报表控制器/设计器/导出器）
         services.AddScoped<IReportConfigurationPresetCatalog, ReportConfigurationPresetCatalog>();
