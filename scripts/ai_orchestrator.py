@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from ai_state import refresh_project_state, save_json
+from ai_state import refresh_project_state, save_json as _save_json
 from ai_console_panel import show_console_panel
 from ai_provider_availability import next_retry, provider_failure_from_log
 
@@ -28,6 +28,35 @@ CONFIG_PATH, STATE_PATH = AI_DIR / "config.json", AI_DIR / "PROJECT_STATE.json"
 AUDIT_PATH = AI_DIR / "audit.jsonl"
 TERMINAL_STATUSES = {"completed", "deferred", "skipped", "superseded"}
 RECOVERABLE_DIRTY_STATUSES = {"retry", "retry_pending", "in_progress", "code_ready", "finalizing", "failed", "blocked"}
+
+
+
+def refresh_task_scope(task: dict[str, Any], path: Path | None = None) -> None:
+    """Retain current published scope while the executor owns runtime fields."""
+    task_id = str(task.get("id", ""))
+    if not task_id.startswith("ERP-") or not task_id[4:].isdigit():
+        return
+    path = path or TASKS_DIR / f"{task_id}.json"
+    if path.parent != TASKS_DIR or not path.exists():
+        return
+    latest = load_json(path)
+    if latest.get("id") != task_id:
+        raise ValueError("Published task identity changed")
+    allowed = latest.get("allowed_paths")
+    if not isinstance(allowed, list) or not allowed or not all(isinstance(x, str) and x for x in allowed):
+        raise ValueError("Published task scope is invalid")
+    for key in ("title", "description", "allowed_paths", "acceptance_criteria",
+                "criterion_path_map", "implementation_evidence", "updated_at"):
+        if key in latest:
+            task[key] = latest[key]
+
+
+def save_json(path: Path, value: dict[str, Any]) -> None:
+    # A long running model may finish after an authorized scope amendment.
+    # Do not overwrite that amendment with the model's initial task snapshot.
+    if path.parent == TASKS_DIR:
+        refresh_task_scope(value, path)
+    _save_json(path, value)
 
 
 def utc_now() -> str:
@@ -240,6 +269,7 @@ def dependencies_completed(task: dict[str, Any], config: dict[str, Any]) -> tupl
 
 
 def path_violations(task: dict[str, Any], config: dict[str, Any]) -> list[str]:
+    refresh_task_scope(task)
     violations = []
     recovery = task.get("recovery_context") or {}
     baseline = recovery.get("baseline_test_fix") or {}
