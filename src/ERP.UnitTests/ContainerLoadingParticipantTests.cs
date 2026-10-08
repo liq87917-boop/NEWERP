@@ -25,7 +25,12 @@ public class ContainerLoadingParticipantTests
     // ==================== 0. 测试脚手架 ====================
 
     private static ContainerLoadingListController BuildLoadingListController(ErpDbContext db)
-        => new(db, new DocumentNumberService(db));
+    {
+        var controller = new ContainerLoadingListController(db, new DocumentNumberService(db));
+        // ERP-364：装柜清单全部路由都先实时授权，测试统一注入既有特权身份（系统内置角色，不新增任何用户授权）。
+        TestAuth.SetUser(controller, TestAuth.SeedPrivilegedUser(db));
+        return controller;
+    }
 
     private static BaseCustomer SeedCustomer(
         ErpDbContext db, string code, string name, int status = 1, bool deleted = false)

@@ -83,8 +83,9 @@ public static class ContainerLoadingFulfillmentRules
     }
 
     /// <summary>
-    /// 校验装柜清单当前账号身份 / 菜单 / 客户数据范围（不校验来源链接）。
-    /// 供取消等「只变更状态、不改明细」的路由复用。
+    /// 校验装柜清单当前账号身份 / 账号状态 / 菜单 / 权威客户数据范围（不校验来源链接数量语义）。
+    /// 供创建 / 修改 / 提交 / 审核与取消等路由复用（ERP-364 起统一委托
+    /// <see cref="LoadingListAuthorizationRules"/>：实时身份 + 账号状态 + 既有装柜清单菜单 + 参与方 / 上游客户范围）。
     /// </summary>
     public static async Task EnsureAuthorizedAsync(
         IErpDbContext db, ContainerLoadingList entity, long? userId, CancellationToken ct = default)
@@ -92,30 +93,8 @@ public static class ContainerLoadingFulfillmentRules
         ArgumentNullException.ThrowIfNull(db);
         ArgumentNullException.ThrowIfNull(entity);
 
-        if (userId is null or <= 0)
-            throw new BusinessException("请先登录后再操作装柜清单", ErrorCodes.Unauthorized);
-
-        var scope = await SalespersonDataScopeService.ResolveAsync(db, userId.Value);
-
-        // 特权账号继承既有全部访问（与 ERP-097 数据范围同源），普通账号必须显式具备装柜清单菜单。
-        if (!scope.IsPrivileged)
-        {
-            var menuCodes = await CustomerReceivableReconciliationService.LoadAuthorizedMenuCodesAsync(db, userId.Value);
-            if (!menuCodes.Contains(RequiredMenuCode, StringComparer.OrdinalIgnoreCase))
-            {
-                throw new BusinessException(
-                    $"当前账号没有「{RequiredMenuText}」（{RequiredMenuCode}）模块授权：拒绝操作装柜清单" +
-                    "（fail closed，不执行任何状态变更）",
-                    ErrorCodes.Forbidden);
-            }
-        }
-
-        if (!scope.AllowsCustomer(entity.CustomerId))
-        {
-            throw new BusinessException(
-                "当前账号的客户数据范围不包含该装柜清单的客户：拒绝操作（fail closed，不泄露范围外单据）",
-                ErrorCodes.Forbidden);
-        }
+        var scope = await LoadingListAuthorizationRules.EnsureAuthorizedAsync(db, userId, ct);
+        await LoadingListAuthorizationRules.EnsureStoredScopeAllowedAsync(db, scope, entity, ct);
     }
 
     /// <summary>

@@ -94,7 +94,8 @@ public static class ContainerLoadingParticipantService
     /// 且兼容客户字段会在同一批保存中同步为该客户。
     /// </summary>
     public static async Task<ContainerLoadingParticipantDto> CreateAsync(
-        IErpDbContext db, long loadingListId, ContainerLoadingParticipantSaveDto dto)
+        IErpDbContext db, long loadingListId, ContainerLoadingParticipantSaveDto dto,
+        SalespersonDataScope scope)
     {
         var loadingList = await EnsureLoadingListAsync(db, loadingListId);
         if (dto is null)
@@ -115,6 +116,18 @@ public static class ContainerLoadingParticipantService
         // 主参与方唯一性只针对「启用中的主参与方」判定：停用行即使带标记也不占用主参与方位
         if (status == ContainerLoadingParticipantRules.ActiveStatus)
             ContainerLoadingParticipantRules.EnsurePrimaryUnique(siblings, primary);
+
+        // ERP-364：在改写参与方行与兼容客户字段之前，先校验「完整拟议范围」
+        // （全部有效参与方客户 + 拟议兼容客户 + 显式上游订柜客户都必须落在当前账号范围内）。
+        var proposedActiveCustomerIds = siblings
+            .Where(x => x.Status == ContainerLoadingParticipantRules.ActiveStatus)
+            .Select(x => x.CustomerId)
+            .ToList();
+        if (status == ContainerLoadingParticipantRules.ActiveStatus)
+            proposedActiveCustomerIds.Add(customer.Id);
+        await LoadingListAuthorizationRules.EnsureParticipantScopeAllowedAsync(
+            db, scope, loadingList, proposedActiveCustomerIds,
+            primary ? customer.Id : loadingList.CustomerId);
 
         var entity = new ContainerLoadingListParticipant
         {
@@ -147,7 +160,8 @@ public static class ContainerLoadingParticipantService
     /// 或随「停用 / 删除」在清单不再有启用参与方时回退为历史单客户视图。</para>
     /// </summary>
     public static async Task<ContainerLoadingParticipantDto> UpdateAsync(
-        IErpDbContext db, long loadingListId, long id, ContainerLoadingParticipantSaveDto dto)
+        IErpDbContext db, long loadingListId, long id, ContainerLoadingParticipantSaveDto dto,
+        SalespersonDataScope scope)
     {
         var loadingList = await EnsureLoadingListAsync(db, loadingListId);
         if (dto is null)
@@ -190,6 +204,18 @@ public static class ContainerLoadingParticipantService
             ContainerLoadingParticipantRules.EnsureCustomerPromotable(promotable, promotableId);
         }
 
+        // ERP-364：在改写参与方行与兼容客户字段之前，先校验「完整拟议范围」
+        // （排除本行旧状态，按最终客户 / 状态重算有效参与方，再加拟议兼容客户与显式上游客户）。
+        var proposedCustomerId = customerChanged ? dto.CustomerId : entity.CustomerId;
+        var proposedActiveCustomerIds = siblings
+            .Where(x => x.Id != entity.Id && x.Status == ContainerLoadingParticipantRules.ActiveStatus)
+            .Select(x => x.CustomerId)
+            .ToList();
+        if (status == ContainerLoadingParticipantRules.ActiveStatus)
+            proposedActiveCustomerIds.Add(proposedCustomerId);
+        await LoadingListAuthorizationRules.EnsureParticipantScopeAllowedAsync(
+            db, scope, loadingList, proposedActiveCustomerIds, loadingList.CustomerId);
+
         if (customerChanged)
         {
             entity.CustomerId = customer!.Id;
@@ -218,7 +244,7 @@ public static class ContainerLoadingParticipantService
     /// —— 与列表顺序无关，也不依赖「最后提交者胜出」；同清单主参与方唯一性由服务端判定 + 过滤唯一索引双重兜底。
     /// </summary>
     public static async Task<ContainerLoadingParticipantDto> SetPrimaryAsync(
-        IErpDbContext db, long loadingListId, long id)
+        IErpDbContext db, long loadingListId, long id, SalespersonDataScope scope)
     {
         var loadingList = await EnsureLoadingListAsync(db, loadingListId);
         EnsureMaintainable(loadingList);
@@ -230,7 +256,16 @@ public static class ContainerLoadingParticipantService
         var customer = await LoadCustomerAsync(db, entity.CustomerId);
         ContainerLoadingParticipantRules.EnsureCustomerPromotable(customer, entity.CustomerId);
 
-        await ApplyPrimaryAsync(db, loadingList, entity, await LoadSiblingsAsync(db, loadingListId));
+        // ERP-364：在同步兼容客户字段之前先校验「完整拟议范围」（有效参与方客户 + 拟议主客户 + 显式上游客户）。
+        var siblings = await LoadSiblingsAsync(db, loadingListId);
+        var proposedActiveCustomerIds = siblings
+            .Where(x => x.Status == ContainerLoadingParticipantRules.ActiveStatus)
+            .Select(x => x.CustomerId)
+            .ToList();
+        await LoadingListAuthorizationRules.EnsureParticipantScopeAllowedAsync(
+            db, scope, loadingList, proposedActiveCustomerIds, entity.CustomerId);
+
+        await ApplyPrimaryAsync(db, loadingList, entity, siblings);
         return (await MapAsync(db, loadingList, new List<ContainerLoadingListParticipant> { entity })).Single();
     }
 
@@ -240,7 +275,7 @@ public static class ContainerLoadingParticipantService
     /// 重新启用时要求客户仍可用（未删除且启用），且不会自动恢复主参与方标记。
     /// </summary>
     public static async Task<ContainerLoadingParticipantDto> SetStatusAsync(
-        IErpDbContext db, long loadingListId, long id, int? status)
+        IErpDbContext db, long loadingListId, long id, int? status, SalespersonDataScope scope)
     {
         var loadingList = await EnsureLoadingListAsync(db, loadingListId);
         EnsureMaintainable(loadingList);
@@ -250,9 +285,19 @@ public static class ContainerLoadingParticipantService
         if (normalized == entity.Status)
             return (await MapAsync(db, loadingList, new List<ContainerLoadingListParticipant> { entity })).Single();
 
+        // ERP-364：改写入参与方状态之前，先按「最终状态」重算完整拟议范围并校验。
+        var siblings = await LoadSiblingsAsync(db, loadingListId);
+        var proposedActiveCustomerIds = siblings
+            .Where(x => x.Id != entity.Id && x.Status == ContainerLoadingParticipantRules.ActiveStatus)
+            .Select(x => x.CustomerId)
+            .ToList();
+        if (normalized == ContainerLoadingParticipantRules.ActiveStatus)
+            proposedActiveCustomerIds.Add(entity.CustomerId);
+        await LoadingListAuthorizationRules.EnsureParticipantScopeAllowedAsync(
+            db, scope, loadingList, proposedActiveCustomerIds, loadingList.CustomerId);
+
         if (normalized != ContainerLoadingParticipantRules.ActiveStatus)
         {
-            var siblings = await LoadSiblingsAsync(db, loadingListId);
             ContainerLoadingParticipantRules.EnsurePrimaryRemovable(siblings, entity, "停用");
             entity.Status = ContainerLoadingParticipantRules.DisabledStatus;
             entity.IsPrimary = false;
@@ -274,7 +319,7 @@ public static class ContainerLoadingParticipantService
     /// 订柜跟踪值 / 单证 / 费用 / 库存与客户主数据；删除同时释放主参与方标记，
     /// 且当前主参与方只有在清单不再有其他启用参与方时才允许删除。
     /// </summary>
-    public static async Task DeleteAsync(IErpDbContext db, long loadingListId, long id)
+    public static async Task DeleteAsync(IErpDbContext db, long loadingListId, long id, SalespersonDataScope scope)
     {
         var loadingList = await EnsureLoadingListAsync(db, loadingListId);
         EnsureMaintainable(loadingList);
@@ -282,6 +327,14 @@ public static class ContainerLoadingParticipantService
         var entity = await FindAsync(db, loadingListId, id);
         var siblings = await LoadSiblingsAsync(db, loadingListId);
         ContainerLoadingParticipantRules.EnsurePrimaryRemovable(siblings, entity, "删除");
+
+        // ERP-364：软删除参与方前先校验「完整拟议范围」（本行移除后的有效参与方 + 兼容客户字段 + 显式上游客户）。
+        var proposedActiveCustomerIds = siblings
+            .Where(x => x.Id != entity.Id && x.Status == ContainerLoadingParticipantRules.ActiveStatus)
+            .Select(x => x.CustomerId)
+            .ToList();
+        await LoadingListAuthorizationRules.EnsureParticipantScopeAllowedAsync(
+            db, scope, loadingList, proposedActiveCustomerIds, loadingList.CustomerId);
 
         entity.IsDeleted = true;
         entity.IsPrimary = false;

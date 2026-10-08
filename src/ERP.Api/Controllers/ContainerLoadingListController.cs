@@ -32,8 +32,11 @@ public class ContainerLoadingListController : DocumentControllerBase<ContainerLo
     [HttpGet]
     public async Task<IActionResult> GetPaged([FromQuery] PageQuery query, [FromQuery] DocumentStatus? status)
     {
+        // ERP-364：列表计数 / 分页之前先实时授权，并把权威客户范围（含有效参与方与显式上游客户）下推到 SQL 侧。
+        var scope = await LoadingListAuthorizationRules.EnsureAuthorizedAsync(Db, CurrentUserId());
         query.Normalize();
-        var source = Set.AsNoTracking().Where(o => !o.IsDeleted);
+        var source = LoadingListAuthorizationRules.ApplyScope(
+            Set.AsNoTracking().Where(o => !o.IsDeleted), Db, scope);
         if (status.HasValue) source = source.Where(o => o.Status == status.Value);
         if (!string.IsNullOrWhiteSpace(query.Keyword)) source = source.Where(o => o.LoadingListNo.Contains(query.Keyword));
         var total = await source.CountAsync();
@@ -48,9 +51,12 @@ public class ContainerLoadingListController : DocumentControllerBase<ContainerLo
     [HttpGet("{id:long}")]
     public async Task<IActionResult> GetById(long id)
     {
+        // ERP-364：详情读取之前先实时授权并复核该单（含有效参与方与显式上游客户）的权威客户范围。
+        var scope = await LoadingListAuthorizationRules.EnsureAuthorizedAsync(Db, CurrentUserId());
         var entity = await Set.AsNoTracking().Include(o => o.Details).Include(o => o.Participants)
             .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
             ?? throw BusinessException.NotFound("装柜清单不存在");
+        await LoadingListAuthorizationRules.EnsureStoredScopeAllowedAsync(Db, scope, entity);
 
         // ERP-041：只读标注（不写库）—— 参与方计数 / 主参与方 / 历史单客户视图，以及每个参与方的客户可用性
         await ContainerLoadingParticipantService.AnnotateAsync(Db, new[] { entity });
@@ -61,7 +67,11 @@ public class ContainerLoadingListController : DocumentControllerBase<ContainerLo
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] ContainerLoadingList entity)
     {
+        // ERP-364：单据号生成之前先实时授权，并校验「拟议」权威客户范围（兼容客户字段 + 显式上游共享出运客户）。
+        var scope = await LoadingListAuthorizationRules.EnsureAuthorizedAsync(Db, CurrentUserId());
         entity.Id = 0;
+        await LoadingListAuthorizationRules.EnsureProposedScopeAllowedAsync(
+            Db, scope, entity, entity.CustomerId, entity.PreLoadingId);
         entity.LoadingListNo = await _noService.GenerateAsync(DocumentType.LoadingList);
         entity.Status = DocumentStatus.Pending;
         entity.CreatedAt = DateTime.Now;
@@ -75,32 +85,53 @@ public class ContainerLoadingListController : DocumentControllerBase<ContainerLo
     [HttpPut("{id:long}")]
     public async Task<IActionResult> Update(long id, [FromBody] ContainerLoadingList entity)
     {
+        // ERP-364：修改之前先实时授权 + 复核「已存储」范围；字段 / 明细写入包在可串行化事务与行锁内。
+        var scope = await LoadingListAuthorizationRules.EnsureAuthorizedAsync(Db, CurrentUserId());
+
         var existing = await Db.ContainerLoadingLists.Include(o => o.Details)
             .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
             ?? throw BusinessException.NotFound("装柜清单不存在");
         if (GetStatus(existing) != DocumentStatus.Pending)
             throw BusinessException.RuleConflict("仅待提交状态的单据可修改");
 
-        await ContainerLoadingFulfillmentRules.ValidateLinkAsync(Db, entity, CurrentUserId());
+        await LoadingListAuthorizationRules.EnsureStoredScopeAllowedAsync(Db, scope, existing);
 
-        existing.PreLoadingId = entity.PreLoadingId;
-        existing.LoadingDate = entity.LoadingDate;
-        existing.ContainerNo = entity.ContainerNo;
-        existing.CustomerId = entity.CustomerId;
-        existing.ShippingMark = entity.ShippingMark;
-        existing.Remark = entity.Remark;
-
-        Db.ContainerLoadingDetails.RemoveRange(existing.Details);
-        foreach (var d in entity.Details)
+        await using var transaction = await Db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
+        try
         {
-            d.Id = 0;
-            d.LoadingListId = id;
-            d.CreatedAt = DateTime.Now;
+            await AcquireLoadingListWriteLocksAsync(id, existing.PreLoadingId);
+
+            // 在任何字段 / 明细被改写之前，先校验「拟议」完整范围（有效参与方 + 拟议兼容客户 + 显式上游客户）。
+            await LoadingListAuthorizationRules.EnsureProposedScopeAllowedAsync(
+                Db, scope, existing, entity.CustomerId, entity.PreLoadingId);
+            await ContainerLoadingFulfillmentRules.ValidateLinkAsync(Db, entity, CurrentUserId());
+
+            existing.PreLoadingId = entity.PreLoadingId;
+            existing.LoadingDate = entity.LoadingDate;
+            existing.ContainerNo = entity.ContainerNo;
+            existing.CustomerId = entity.CustomerId;
+            existing.ShippingMark = entity.ShippingMark;
+            existing.Remark = entity.Remark;
+
+            Db.ContainerLoadingDetails.RemoveRange(existing.Details);
+            foreach (var d in entity.Details)
+            {
+                d.Id = 0;
+                d.LoadingListId = id;
+                d.CreatedAt = DateTime.Now;
+            }
+            existing.Details = entity.Details;
+            Calculate(existing);
+            existing.UpdatedAt = DateTime.Now;
+            await Db.SaveChangesAsync();
+            await transaction.CommitAsync();
         }
-        existing.Details = entity.Details;
-        Calculate(existing);
-        existing.UpdatedAt = DateTime.Now;
-        await Db.SaveChangesAsync();
+        catch
+        {
+            await transaction.RollbackAsync();
+            throw;
+        }
+
         return Ok(ApiResponse<object>.Success(null, "装柜清单更新成功"));
     }
 
@@ -201,7 +232,9 @@ public class ContainerLoadingListController : DocumentControllerBase<ContainerLo
         [FromQuery] bool includeHistory = true,
         [FromQuery] int historyTake = ContainerShipmentTimelineRules.MaxHistoryEvents)
     {
+        var scope = await LoadingListAuthorizationRules.EnsureAuthorizedAsync(Db, CurrentUserId());
         var entity = await GetOrThrowAsync(id, "装柜清单不存在");
+        await LoadingListAuthorizationRules.EnsureStoredScopeAllowedAsync(Db, scope, entity);
         var detail = await ContainerShipmentTimelineService.GetForSourceAsync(
             Db, ContainerShipmentReferenceRules.SourceTypeLoadingList, entity.Id, includeHistory, historyTake);
         return Ok(ApiResponse<ContainerShipmentTimelineDetailDto>.Success(
@@ -221,7 +254,9 @@ public class ContainerLoadingListController : DocumentControllerBase<ContainerLo
         [FromQuery] bool includeHistory = true,
         [FromQuery] int historyTake = ContainerExpenseAllocationEvidenceRules.DefaultHistoryTake)
     {
+        var scope = await LoadingListAuthorizationRules.EnsureAuthorizedAsync(Db, CurrentUserId());
         var entity = await GetOrThrowAsync(id, "装柜清单不存在");
+        await LoadingListAuthorizationRules.EnsureStoredScopeAllowedAsync(Db, scope, entity);
         var evidence = await ContainerExpenseAllocationEvidenceService.GetForLoadingListAsync(
             Db, entity.Id, includeHistory, historyTake);
         return Ok(ApiResponse<ContainerExpenseAllocationEvidenceDto>.Success(
@@ -237,6 +272,9 @@ public class ContainerLoadingListController : DocumentControllerBase<ContainerLo
     [HttpGet("{id:long}/participants")]
     public async Task<IActionResult> GetParticipants(long id, [FromQuery] bool activeOnly = false)
     {
+        // ERP-364：参与方读取之前先实时授权并复核权威客户范围（有效参与方 + 显式上游客户）。
+        var scope = await LoadingListAuthorizationRules.EnsureAuthorizedAsync(Db, CurrentUserId());
+        await EnsureStoredLoadingListScopeAsync(id, scope);
         var rows = await ContainerLoadingParticipantService.ListAsync(Db, id, activeOnly);
         return Ok(ApiResponse<List<ContainerLoadingParticipantDto>>.Success(rows));
     }
@@ -245,8 +283,22 @@ public class ContainerLoadingListController : DocumentControllerBase<ContainerLo
     [HttpPost("{id:long}/participants")]
     public async Task<IActionResult> CreateParticipant(long id, [FromBody] ContainerLoadingParticipantSaveDto dto)
     {
-        var created = await ContainerLoadingParticipantService.CreateAsync(Db, id, dto);
-        return Ok(ApiResponse<ContainerLoadingParticipantDto>.Success(created, "参与方新增成功"));
+        var scope = await LoadingListAuthorizationRules.EnsureAuthorizedAsync(Db, CurrentUserId());
+        var preLoadingId = await LoadPreLoadingIdOrThrowAsync(id);
+        await using var transaction = await Db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
+        try
+        {
+            await AcquireLoadingListWriteLocksAsync(id, preLoadingId);
+            await EnsureStoredLoadingListScopeAsync(id, scope);
+            var created = await ContainerLoadingParticipantService.CreateAsync(Db, id, dto, scope);
+            await transaction.CommitAsync();
+            return Ok(ApiResponse<ContainerLoadingParticipantDto>.Success(created, "参与方新增成功"));
+        }
+        catch
+        {
+            await transaction.RollbackAsync();
+            throw;
+        }
     }
 
     /// <summary>修改参与方（更换客户时重新校验；未变更的客户保留历史编码 / 名称快照）</summary>
@@ -254,8 +306,22 @@ public class ContainerLoadingListController : DocumentControllerBase<ContainerLo
     public async Task<IActionResult> UpdateParticipant(
         long id, long participantId, [FromBody] ContainerLoadingParticipantSaveDto dto)
     {
-        var updated = await ContainerLoadingParticipantService.UpdateAsync(Db, id, participantId, dto);
-        return Ok(ApiResponse<ContainerLoadingParticipantDto>.Success(updated, "参与方更新成功"));
+        var scope = await LoadingListAuthorizationRules.EnsureAuthorizedAsync(Db, CurrentUserId());
+        var preLoadingId = await LoadPreLoadingIdOrThrowAsync(id);
+        await using var transaction = await Db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
+        try
+        {
+            await AcquireLoadingListWriteLocksAsync(id, preLoadingId);
+            await EnsureStoredLoadingListScopeAsync(id, scope);
+            var updated = await ContainerLoadingParticipantService.UpdateAsync(Db, id, participantId, dto, scope);
+            await transaction.CommitAsync();
+            return Ok(ApiResponse<ContainerLoadingParticipantDto>.Success(updated, "参与方更新成功"));
+        }
+        catch
+        {
+            await transaction.RollbackAsync();
+            throw;
+        }
     }
 
     /// <summary>
@@ -265,62 +331,136 @@ public class ContainerLoadingListController : DocumentControllerBase<ContainerLo
     [HttpPost("{id:long}/participants/{participantId:long}/primary")]
     public async Task<IActionResult> SetPrimaryParticipant(long id, long participantId)
     {
-        var result = await ContainerLoadingParticipantService.SetPrimaryAsync(Db, id, participantId);
-        return Ok(ApiResponse<ContainerLoadingParticipantDto>.Success(
-            result, "已设为主参与方，并已同步装柜清单的兼容客户字段"));
+        var scope = await LoadingListAuthorizationRules.EnsureAuthorizedAsync(Db, CurrentUserId());
+        var preLoadingId = await LoadPreLoadingIdOrThrowAsync(id);
+        await using var transaction = await Db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
+        try
+        {
+            await AcquireLoadingListWriteLocksAsync(id, preLoadingId);
+            await EnsureStoredLoadingListScopeAsync(id, scope);
+            var result = await ContainerLoadingParticipantService.SetPrimaryAsync(Db, id, participantId, scope);
+            await transaction.CommitAsync();
+            return Ok(ApiResponse<ContainerLoadingParticipantDto>.Success(
+                result, "已设为主参与方，并已同步装柜清单的兼容客户字段"));
+        }
+        catch
+        {
+            await transaction.RollbackAsync();
+            throw;
+        }
     }
 
     /// <summary>停用参与方（历史仍可读；停用当前主参与方要求清单不再有其他启用参与方）</summary>
     [HttpPost("{id:long}/participants/{participantId:long}/disable")]
     public async Task<IActionResult> DisableParticipant(long id, long participantId)
     {
-        var result = await ContainerLoadingParticipantService.SetStatusAsync(
-            Db, id, participantId, ContainerLoadingParticipantRules.DisabledStatus);
-        return Ok(ApiResponse<ContainerLoadingParticipantDto>.Success(result, "参与方已停用"));
+        var scope = await LoadingListAuthorizationRules.EnsureAuthorizedAsync(Db, CurrentUserId());
+        var preLoadingId = await LoadPreLoadingIdOrThrowAsync(id);
+        await using var transaction = await Db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
+        try
+        {
+            await AcquireLoadingListWriteLocksAsync(id, preLoadingId);
+            await EnsureStoredLoadingListScopeAsync(id, scope);
+            var result = await ContainerLoadingParticipantService.SetStatusAsync(
+                Db, id, participantId, ContainerLoadingParticipantRules.DisabledStatus, scope);
+            await transaction.CommitAsync();
+            return Ok(ApiResponse<ContainerLoadingParticipantDto>.Success(result, "参与方已停用"));
+        }
+        catch
+        {
+            await transaction.RollbackAsync();
+            throw;
+        }
     }
 
     /// <summary>重新启用参与方（客户必须仍可用；不会自动恢复主参与方标记）</summary>
     [HttpPost("{id:long}/participants/{participantId:long}/enable")]
     public async Task<IActionResult> EnableParticipant(long id, long participantId)
     {
-        var result = await ContainerLoadingParticipantService.SetStatusAsync(
-            Db, id, participantId, ContainerLoadingParticipantRules.ActiveStatus);
-        return Ok(ApiResponse<ContainerLoadingParticipantDto>.Success(result, "参与方已启用"));
+        var scope = await LoadingListAuthorizationRules.EnsureAuthorizedAsync(Db, CurrentUserId());
+        var preLoadingId = await LoadPreLoadingIdOrThrowAsync(id);
+        await using var transaction = await Db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
+        try
+        {
+            await AcquireLoadingListWriteLocksAsync(id, preLoadingId);
+            await EnsureStoredLoadingListScopeAsync(id, scope);
+            var result = await ContainerLoadingParticipantService.SetStatusAsync(
+                Db, id, participantId, ContainerLoadingParticipantRules.ActiveStatus, scope);
+            await transaction.CommitAsync();
+            return Ok(ApiResponse<ContainerLoadingParticipantDto>.Success(result, "参与方已启用"));
+        }
+        catch
+        {
+            await transaction.RollbackAsync();
+            throw;
+        }
     }
 
     /// <summary>删除参与方（仅本表软删除，保留历史可读；不改写装柜明细 / 跟踪值 / 单证 / 费用 / 库存）</summary>
     [HttpDelete("{id:long}/participants/{participantId:long}")]
     public async Task<IActionResult> DeleteParticipant(long id, long participantId)
     {
-        await ContainerLoadingParticipantService.DeleteAsync(Db, id, participantId);
-        return Ok(ApiResponse<object>.Success(null, "参与方已删除（历史记录保留）"));
+        var scope = await LoadingListAuthorizationRules.EnsureAuthorizedAsync(Db, CurrentUserId());
+        var preLoadingId = await LoadPreLoadingIdOrThrowAsync(id);
+        await using var transaction = await Db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
+        try
+        {
+            await AcquireLoadingListWriteLocksAsync(id, preLoadingId);
+            await EnsureStoredLoadingListScopeAsync(id, scope);
+            await ContainerLoadingParticipantService.DeleteAsync(Db, id, participantId, scope);
+            await transaction.CommitAsync();
+            return Ok(ApiResponse<object>.Success(null, "参与方已删除（历史记录保留）"));
+        }
+        catch
+        {
+            await transaction.RollbackAsync();
+            throw;
+        }
     }
 
 
-    /// <summary>提交：提交前重新解析已审核权威来源并校验当前账号身份 / 菜单 / 客户范围。</summary>
+    /// <summary>提交：提交前在同一可串行化事务与行锁内重新解析已审核权威来源并校验当前账号身份 / 菜单 / 权威客户范围。</summary>
     [HttpPost("{id:long}/submit")]
     public override async Task<IActionResult> Submit(long id)
     {
-        var entity = await Db.ContainerLoadingLists.Include(o => o.Details)
-            .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
-            ?? throw BusinessException.NotFound("装柜清单不存在");
-        if (GetStatus(entity) != DocumentStatus.Pending)
-            throw BusinessException.RuleConflict("当前状态不允许该操作");
+        var scope = await LoadingListAuthorizationRules.EnsureAuthorizedAsync(Db, CurrentUserId());
+        var preLoadingId = await LoadPreLoadingIdOrThrowAsync(id);
 
-        await ContainerLoadingFulfillmentRules.ValidateLinkAsync(Db, entity, CurrentUserId());
+        await using var transaction = await Db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
+        try
+        {
+            await AcquireLoadingListWriteLocksAsync(id, preLoadingId);
 
-        SetStatus(entity, DocumentStatus.Submitted);
-        await Db.SaveChangesAsync();
+            var entity = await Db.ContainerLoadingLists.Include(o => o.Details)
+                .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
+                ?? throw BusinessException.NotFound("装柜清单不存在");
+            if (GetStatus(entity) != DocumentStatus.Pending)
+                throw BusinessException.RuleConflict("当前状态不允许该操作");
+
+            await LoadingListAuthorizationRules.EnsureStoredScopeAllowedAsync(Db, scope, entity);
+            await ContainerLoadingFulfillmentRules.ValidateLinkAsync(Db, entity, CurrentUserId());
+
+            SetStatus(entity, DocumentStatus.Submitted);
+            await Db.SaveChangesAsync();
+            await transaction.CommitAsync();
+        }
+        catch
+        {
+            await transaction.RollbackAsync();
+            throw;
+        }
+
         return Ok(ApiResponse<object>.Success(null, "提交成功"));
     }
 
     /// <summary>
     /// 审核：把「累计已审核装柜数量 ≤ 预装柜单授权数量」的判定放进同一个可串行化事务，
-    /// 并对预装柜单行加 UPDLOCK/HOLDLOCK 串行化同源并发审核与来源取消；任一步失败整体回滚，状态不变。
+    /// 并对预装柜单行 + 本装柜清单行加 UPDLOCK/HOLDLOCK 串行化同源并发审核、来源取消与参与方维护；任一步失败整体回滚，状态不变。
     /// </summary>
     [HttpPost("{id:long}/approve")]
     public override async Task<IActionResult> Approve(long id)
     {
+        var scope = await LoadingListAuthorizationRules.EnsureAuthorizedAsync(Db, CurrentUserId());
         var header = await Db.ContainerLoadingLists.AsNoTracking()
             .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
             ?? throw BusinessException.NotFound("装柜清单不存在");
@@ -329,8 +469,9 @@ public class ContainerLoadingListController : DocumentControllerBase<ContainerLo
         try
         {
             await AcquirePreLoadingApprovalLockAsync(header.PreLoadingId);
+            await AcquireLoadingListRowLockAsync(id);
 
-            // 锁内重新加载本单：同源并发审核 / 来源取消串行化后，后到者能看到先到者已提交的状态与数量。
+            // 锁内重新加载本单：同源并发审核 / 来源取消 / 参与方维护串行化后，后到者能看到先到者已提交的状态与数量。
             var entity = await Db.ContainerLoadingLists.Include(o => o.Details)
                 .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
                 ?? throw BusinessException.NotFound("装柜清单不存在");
@@ -338,6 +479,7 @@ public class ContainerLoadingListController : DocumentControllerBase<ContainerLo
             if (GetStatus(entity) != DocumentStatus.Submitted)
                 throw BusinessException.RuleConflict("当前状态不允许该操作");
 
+            await LoadingListAuthorizationRules.EnsureStoredScopeAllowedAsync(Db, scope, entity);
             await ContainerLoadingFulfillmentRules.ValidateApprovalAsync(Db, entity, CurrentUserId());
 
             SetStatus(entity, DocumentStatus.Approved);
@@ -353,19 +495,75 @@ public class ContainerLoadingListController : DocumentControllerBase<ContainerLo
         return Ok(ApiResponse<object>.Success(null, "审核通过"));
     }
 
-    /// <summary>取消：校验当前账号身份 / 菜单 / 客户范围；已审核数量由审核累计查询按状态自动释放，不写库存 / 财务。</summary>
+    /// <summary>
+    /// 取消：在同一可串行化事务与行锁内校验当前账号身份 / 菜单 / 权威客户范围；
+    /// 已审核数量由审核累计查询按状态自动释放，不写库存 / 财务。
+    /// </summary>
     [HttpPost("{id:long}/cancel")]
     public override async Task<IActionResult> Cancel(long id)
     {
-        var entity = await Db.ContainerLoadingLists.Include(o => o.Details)
-            .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
-            ?? throw BusinessException.NotFound("装柜清单不存在");
+        var scope = await LoadingListAuthorizationRules.EnsureAuthorizedAsync(Db, CurrentUserId());
+        var preLoadingId = await LoadPreLoadingIdOrThrowAsync(id);
 
-        await ContainerLoadingFulfillmentRules.EnsureAuthorizedAsync(Db, entity, CurrentUserId());
+        await using var transaction = await Db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
+        try
+        {
+            await AcquireLoadingListWriteLocksAsync(id, preLoadingId);
 
-        SetStatus(entity, DocumentStatus.Cancelled);
-        await Db.SaveChangesAsync();
+            var entity = await Db.ContainerLoadingLists.Include(o => o.Details)
+                .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
+                ?? throw BusinessException.NotFound("装柜清单不存在");
+
+            await LoadingListAuthorizationRules.EnsureStoredScopeAllowedAsync(Db, scope, entity);
+
+            SetStatus(entity, DocumentStatus.Cancelled);
+            await Db.SaveChangesAsync();
+            await transaction.CommitAsync();
+        }
+        catch
+        {
+            await transaction.RollbackAsync();
+            throw;
+        }
+
         return Ok(ApiResponse<object>.Success(null, "已取消"));
+    }
+
+    /// <summary>
+    /// 删除（软删除，仅待提交状态可删）：在同一可串行化事务与行锁内校验当前账号身份 / 菜单 / 权威客户范围，
+    /// 失败回滚且不改写原单字段与审计时间戳。
+    /// </summary>
+    [HttpDelete("{id:long}")]
+    public override async Task<IActionResult> Delete(long id)
+    {
+        var scope = await LoadingListAuthorizationRules.EnsureAuthorizedAsync(Db, CurrentUserId());
+        var preLoadingId = await LoadPreLoadingIdOrThrowAsync(id);
+
+        await using var transaction = await Db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
+        try
+        {
+            await AcquireLoadingListWriteLocksAsync(id, preLoadingId);
+
+            var entity = await Db.ContainerLoadingLists
+                .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
+                ?? throw BusinessException.NotFound("装柜清单不存在");
+            if (GetStatus(entity) != DocumentStatus.Pending)
+                throw BusinessException.RuleConflict("仅待提交状态的单据可删除");
+
+            await LoadingListAuthorizationRules.EnsureStoredScopeAllowedAsync(Db, scope, entity);
+
+            entity.IsDeleted = true;
+            entity.UpdatedAt = DateTime.Now;
+            await Db.SaveChangesAsync();
+            await transaction.CommitAsync();
+        }
+        catch
+        {
+            await transaction.RollbackAsync();
+            throw;
+        }
+
+        return Ok(ApiResponse<object>.Success(null, "删除成功"));
     }
 
     /// <summary>
@@ -383,6 +581,51 @@ public class ContainerLoadingListController : DocumentControllerBase<ContainerLo
                 "SELECT Id FROM db_owner.ContainerPreLoadings WITH (UPDLOCK, HOLDLOCK) WHERE Id = {0}",
                 preLoadingId.Value)
             .ToListAsync();
+    }
+
+    /// <summary>
+    /// 对装柜清单行加更新锁（UPDLOCK, HOLDLOCK），把同单并发「修改 / 提交 / 审核 / 取消 / 删除 / 参与方维护」
+    /// 串行化在同一事务内；非关系型提供程序（内存库）无法执行表提示，跳过即可（事务本身等价无事务）。
+    /// </summary>
+    private async Task AcquireLoadingListRowLockAsync(long loadingListId)
+    {
+        if (!Db.Database.IsRelational()) return;
+
+        await Db.Database
+            .SqlQueryRaw<long>(
+                "SELECT Id FROM db_owner.ContainerLoadingLists WITH (UPDLOCK, HOLDLOCK) WHERE Id = {0}",
+                loadingListId)
+            .ToListAsync();
+    }
+
+    /// <summary>
+    /// 按固定锁序「预装柜单行 → 装柜清单行」取得写路由的更新锁：与既有审核（<see cref="AcquirePreLoadingApprovalLockAsync"/>）
+    /// 共用同一把预装柜单行锁，并与 ERP-363 上游预装柜写入保持同一锁序，避免锁环。
+    /// </summary>
+    private async Task AcquireLoadingListWriteLocksAsync(long loadingListId, long? preLoadingId)
+    {
+        await AcquirePreLoadingApprovalLockAsync(preLoadingId);
+        await AcquireLoadingListRowLockAsync(loadingListId);
+    }
+
+    /// <summary>读取本单头（用于取 <c>PreLoadingId</c> 以加锁）；单据不存在或已删除时按不存在拒绝。</summary>
+    private async Task<long?> LoadPreLoadingIdOrThrowAsync(long id)
+    {
+        var header = await Db.ContainerLoadingLists.AsNoTracking()
+            .Where(o => o.Id == id && !o.IsDeleted)
+            .Select(o => new { o.PreLoadingId })
+            .FirstOrDefaultAsync()
+            ?? throw BusinessException.NotFound("装柜清单不存在");
+        return header.PreLoadingId;
+    }
+
+    /// <summary>锁内重新加载本单并复核当前账号对「已存储」单据的权威客户范围（含有效参与方与显式上游客户）。</summary>
+    private async Task EnsureStoredLoadingListScopeAsync(long id, SalespersonDataScope scope)
+    {
+        var entity = await Db.ContainerLoadingLists
+            .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
+            ?? throw BusinessException.NotFound("装柜清单不存在");
+        await LoadingListAuthorizationRules.EnsureStoredScopeAllowedAsync(Db, scope, entity);
     }
 
     private static void Calculate(ContainerLoadingList entity)
