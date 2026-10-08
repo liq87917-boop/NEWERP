@@ -1,11 +1,14 @@
 {
   "schema_version": 2,
   "project": "NEWERP",
-  "updated_at": "2026-10-08T18:27:01.782515Z",
+  "updated_at": "2026-10-08T18:42:17.803572Z",
   "phase": "ready",
   "current_task": null,
   "queue": [
-    "ERP-400"
+    "ERP-400",
+    "ERP-401",
+    "ERP-402",
+    "ERP-403"
   ],
   "completed": [
     "ERP-000",
@@ -391,17 +394,20 @@
     "log": ".ai\\logs\\ERP-399-validation-1.log",
     "at": "2026-10-08T18:26:56.112800Z"
   },
-  "last_error": null,
+  "last_error": {
+    "task": "ERP-400",
+    "kind": "automatic_repair_pending",
+    "summary": "Path guard failed:\noutside allowed_paths: TestResults/erp400.trx"
+  },
   "last_deepseek_fix": {
-    "task": "ERP-388",
-    "attempt": 2,
-    "model": "deepseek-flash",
-    "exit_code": 0,
-    "finished_at": "2026-10-08T16:15:35.674125Z"
+    "task": "ERP-400",
+    "attempts": 3,
+    "status": "retry_pending",
+    "at": "2026-10-08T18:42:17.438285Z"
   },
   "git_sync": {
     "branch": "main",
-    "local_sha": "a9abb83",
+    "local_sha": "0f50904",
     "status": "synced",
     "ahead": 0,
     "behind": 0,
@@ -409,10 +415,15 @@
     "last_error": null
   },
   "next_recommended_tasks": [
-    "ERP-400"
+    "ERP-400",
+    "ERP-401",
+    "ERP-402",
+    "ERP-403"
   ],
   "runner": {
     "status": "stopped",
     "pid": null
-  }
+  },
+  "blocker": null,
+  "finish_reason": "deepseek_supervisor_recovery"
 }
