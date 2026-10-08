@@ -52,6 +52,11 @@ public sealed class InventoryMovementContext
 }
 
 /// <summary>
+/// 库存行身份（仓库 + 商品）：用于按<b>确定性顺序</b>锁定库存行，避免对向调拨互相死锁（ERP-354）。
+/// </summary>
+public readonly record struct StockIdentity(long WarehouseId, long ProductId);
+
+/// <summary>
 /// 库存移动与成本服务（ERP-009）：所有库存增减都必须经过本服务，
 /// 保证「库存数量、库存金额、库存流水」三者同步且可审计。
 /// <para>成本口径：移动加权平均法（moving weighted average）——入库按入库成本加权，
@@ -312,6 +317,22 @@ public sealed class InventoryService : IInventoryService
         => await _db.StockMovements.CountAsync(
             m => !m.IsDeleted && m.SourceDocType == sourceDocType && m.SourceDocId == sourceDocId
                  && !m.IsReversal && !m.IsReversed, cancellationToken);
+
+    /// <summary>
+    /// 确定性库存行锁定顺序：过滤非法键、去重后按「仓库 Id 升序 → 商品 Id 升序」排序。
+    /// 纯函数，便于逐条单测（不依赖数据库、不改变任何数量或成本）。
+    /// <para>调用方（仓库调拨控制器）在同一可串行化事务内按此顺序对库存行加 <c>UPDLOCK/HOLDLOCK</c>，
+    /// 因此对向调拨（A→B 与 B→A）与多明细调拨不会形成环形等待。</para>
+    /// </summary>
+    public static IReadOnlyList<StockIdentity> OrderStockIdentities(IEnumerable<StockIdentity> rows)
+    {
+        ArgumentNullException.ThrowIfNull(rows);
+        return rows.Where(r => r.WarehouseId > 0 && r.ProductId > 0)
+            .Distinct()
+            .OrderBy(r => r.WarehouseId)
+            .ThenBy(r => r.ProductId)
+            .ToList();
+    }
 
     // ==================== 私有助手 ====================
 

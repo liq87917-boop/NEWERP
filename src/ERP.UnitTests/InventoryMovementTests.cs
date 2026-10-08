@@ -673,8 +673,10 @@ public class InventoryMovementTests
     private static StockAdjustmentController NewAdjustmentController(ErpDbContext db)
         => new(db, new DocumentNumberService(db), new InventoryService(db));
 
+    // ERP-354：调拨单全部路由都要求真实已授权身份（既有「库存查询」菜单），
+    // 这里注入测试授权身份，保留原有全部数量 / 成本 / 冲销断言，不改业务规则、不绕过鉴权。
     private static StockTransferController NewTransferController(ErpDbContext db)
-        => new(db, new DocumentNumberService(db), new InventoryService(db));
+        => StockTransferTestAuthorization.CreateAuthorized(db);
 
     private static SalesReturnController NewSalesReturnController(ErpDbContext db)
         => new(db, new DocumentNumberService(db), new InventoryService(db));
