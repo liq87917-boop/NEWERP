@@ -6,7 +6,8 @@
     "Keep ERP033 cost fallback for valid fulfillment sources whose price/exchange-rate valuation is unavailable; separate valuation ambiguity from order identity/quantity authorization. Repair affected legacy tests to distinguish valid costing fallback from invalid fulfillment links; never delete tests or weaken source guards to make old assertions green.",
     "Use bounded authoritative prior approved receipts with proven base units; reject ambiguous historic quantities rather than summing incompatible units. Preserve transactional cumulative guard, cancellation/reversal, audit and useful error response. Prove invalid ID/source status/supplier/product/unit, duplicate source lines, post-submit source changes and no stock/movement/status mutation; guarded real SQL plus safe Release build/unit.",
     "Apply the same fail-closed source validation to StockOut explicit SalesOrderId create/update/approval. Reject missing/deleted/unapproved/wrong-customer/out-of-scope sources, incompatible products/units and ambiguous duplicate source lines before stock, movement or status mutation. Preserve historical unlinked outbound documents, existing cost valuation fallback for valid authorized sources, current permissions and transaction/audit routes. A resolver returning null for an invalid explicit link must never silently disable the cumulative quantity guard. Prove invalid source errors, source changes between submit/approve, partial/full batches and two-connection concurrent overrun with meaningful units and isolated real SQL.",
-    "Repair the outbound SQL fixture before any database execution: require exact DataSource (localdb)\\NEWERP_AutoAcceptance, IntegratedSecurity and NEWERP_AUTOTEST database prefix; allocate a fresh GUID-named owned database and fail if it already exists, never DROP or reset an existing database. Use SQL-generated product identities rather than explicit identity inserts. Persist successfully validated partial/full documents as Approved before testing the next cumulative overrun. Replace wrong-customer NoCumulativeEnforcement success with fail-closed rejection and unchanged evidence. Reuse the verified inbound ERP342 fixture pattern and prove wrong-server/production-target rejection before access. Run guarded real SQL plus safe Release build/unit and retain full original failure logs; do not claim stage acceptance from build alone."
+    "Repair the outbound SQL fixture before any database execution: require exact DataSource (localdb)\\NEWERP_AutoAcceptance, IntegratedSecurity and NEWERP_AUTOTEST database prefix; allocate a fresh GUID-named owned database and fail if it already exists, never DROP or reset an existing database. Use SQL-generated product identities rather than explicit identity inserts. Persist successfully validated partial/full documents as Approved before testing the next cumulative overrun. Replace wrong-customer NoCumulativeEnforcement success with fail-closed rejection and unchanged evidence. Reuse the verified inbound ERP342 fixture pattern and prove wrong-server/production-target rejection before access. Run guarded real SQL plus safe Release build/unit and retain full original failure logs; do not claim stage acceptance from build alone.",
+    "Repair only the affected ERP025 StockInOutMovementLedgerTests linked-source fixtures: its purchaseOrderId 321 and salesOrderId 88 currently have no authoritative source orders. Supply live approved compatible authorized sources for linked scenarios and retain all inventory quantity, amount, weighted-average fallback, reversal, ledger, idempotency and unlinked-history assertions. Do not remove assertions or bypass new source validation to preserve dangling dummy IDs. Include genuine valuation-unavailable approved source data where proving historical weighted-average costing fallback."
   ],
   "allowed_paths": [
     "src/ERP.Application/Services/StockInOrderFulfillmentRules.cs",
@@ -19,7 +20,8 @@
     "src/ERP.Api/Controllers/StockOutController.cs",
     "src/ERP.UnitTests/StockOutOrderFulfillmentTests.cs",
     "src/ERP.IntegrationTests/StockOutOrderFulfillmentSqlServerTests.cs",
-    "docs/stockout-order-fulfillment.md"
+    "docs/stockout-order-fulfillment.md",
+    "src/ERP.UnitTests/StockInOutMovementLedgerTests.cs"
   ],
   "criterion_path_map": {
     "New explicit PurchaseOrderId links on create/update must be positive, current-user authorized, existent, live approved and supplier/product/unit compatible. Null unlinked history stays supported. At approval invalid or changed explicit source fails before inventory writes; never skip quantity guard because source metadata is ambiguous. Do not rewrite historical links or replace permission checks.": [
@@ -86,18 +88,23 @@
       "src/ERP.UnitTests/StockOutOrderFulfillmentTests.cs",
       "src/ERP.IntegrationTests/StockOutOrderFulfillmentSqlServerTests.cs",
       "docs/stockout-order-fulfillment.md"
+    ],
+    "Repair only the affected ERP025 StockInOutMovementLedgerTests linked-source fixtures: its purchaseOrderId 321 and salesOrderId 88 currently have no authoritative source orders. Supply live approved compatible authorized sources for linked scenarios and retain all inventory quantity, amount, weighted-average fallback, reversal, ledger, idempotency and unlinked-history assertions. Do not remove assertions or bypass new source validation to preserve dangling dummy IDs. Include genuine valuation-unavailable approved source data where proving historical weighted-average costing fallback.": [
+      "src/ERP.UnitTests/StockInOutMovementLedgerTests.cs",
+      "src/ERP.Api/Controllers/StockInController.cs",
+      "src/ERP.Api/Controllers/StockOutController.cs"
     ]
   },
   "depends_on": [
     "ERP-342",
     "ERP-343"
   ],
-  "implementation_evidence": "ERP342 TryResolveAuthoritativeLinkAsync returns null and ValidateApprovalAsync skips all enforcement for missing/unapproved/mismatched/duplicate/incompatible explicit sources. Worker run_result acknowledges weakening required fail-closed acceptance to satisfy ERP033 historical cost tests; CREATE/UPDATE currently lack ValidateLink. This is a real operational bypass, not report polish. Current ERP343 source independently shows the same TryResolveAuthoritativeLinkAsync null bypass for invalid explicit SalesOrderId. Its SQL fixture explicitly seeds identity ProductA, fails to persist partial/full approvals, weakly Contains-checks the instance and drops existing databases. ERP342 real SQL exposed and fixed identical fixture defects in commit 767c1e4 (8 SQL and 5031 units passed); add complete outbound scope after ERP343 safe completion, leaving its active files untouched.",
+  "implementation_evidence": "ERP342 TryResolveAuthoritativeLinkAsync returns null and ValidateApprovalAsync skips all enforcement for missing/unapproved/mismatched/duplicate/incompatible explicit sources. Worker run_result acknowledges weakening required fail-closed acceptance to satisfy ERP033 historical cost tests; CREATE/UPDATE currently lack ValidateLink. This is a real operational bypass, not report polish. Current ERP343 source independently shows the same TryResolveAuthoritativeLinkAsync null bypass for invalid explicit SalesOrderId. Its SQL fixture explicitly seeds identity ProductA, fails to persist partial/full approvals, weakly Contains-checks the instance and drops existing databases. ERP342 real SQL exposed and fixed identical fixture defects in commit 767c1e4 (8 SQL and 5031 units passed); add complete outbound scope after ERP343 safe completion, leaving its active files untouched. Independently verified ERP025 legacy ledger tests create PurchaseOrderId321 and SalesOrderId88 without source rows (lines 37,167), so complete fail-closed changes require this exact adjacent regression fixture file. Worker is reading the same file at iteration70; expanding boundary preserves the intended guards and all ledger assertions.",
   "risk": "medium",
   "planning_stage": 3,
   "id": "ERP-344",
-  "status": "retry",
-  "attempts": 0,
+  "status": "in_progress",
+  "attempts": 1,
   "max_attempts": 3,
   "validation_profile": "safe",
   "completion_mode": "build",
