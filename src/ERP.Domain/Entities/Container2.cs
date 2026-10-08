@@ -78,6 +78,16 @@ public class ContainerPreLoadingDetail : BaseEntity
     /// <summary>备注</summary>
     [MaxLength(500)]
     public string Remark { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 来源**销售订单明细** Id（ERP-368，可空，刻意不建外键）：
+    /// 显式指向本行认定的**已审核、未删除、未取消**销售订单明细，作为该行数量的**需求计划证据**。
+    /// <para><c>null</c> = **显式未链接**（历史 / 未登记需求来源）：历史明细一律保持 <c>null</c>，
+    /// <strong>绝不回填、绝不按订单号 / 相似度猜测来源</strong>，未链接数量不计入「已链接需求」容量。</para>
+    /// <para><b>边界</b>：本列只是需求计划 / 追溯证据，<b>不是库存预留、不是出运凭证</b> ——
+    /// 不锁库、不生成库存流水、不改财务、不生成单证。</para>
+    /// </summary>
+    public long? SourceSalesOrderDetailId { get; set; }
 }
 
 /// <summary>

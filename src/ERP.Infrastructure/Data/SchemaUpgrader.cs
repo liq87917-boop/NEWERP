@@ -1514,6 +1514,30 @@ IF OBJECT_ID('db_owner.ContainerLoadingDetails') IS NOT NULL
         ON db_owner.ContainerLoadingDetails(SourceStockOutDetailId)
         WHERE IsDeleted = 0 AND SourceStockOutDetailId IS NOT NULL;");
 
+        // 29.8 ERP-368：预装柜明细 → 销售订单明细 的显式**需求计划证据**链接（可空留痕列）。
+        //      只**追加**一个可空证据列 ContainerPreLoadingDetails.SourceSalesOrderDetailId
+        //      （NULL = 显式未链接，历史明细保持 NULL，**不含任何回填**，绝不按订单号 / 相似度猜测来源）；
+        //      刻意不建到 SalesOrderDetails 的外键：来源销售订单软删除 / 取消后历史需求证据仍必须可读；
+        //      本段只加列，不改写预装柜单、装柜清单、单证、费用与库存。
+        //      表名用方括号限定：既有护栏以「加表语句 + 预装柜单主表前缀」断言
+        //      「预装柜单**主表**不被追加外贸 / 物流跟踪列」；本列是**明细表**的需求证据列（非跟踪列），
+        //      方括号限定不会触发该前缀误判，主表护栏继续有效。
+        await db.Database.ExecuteSqlRawAsync(@"
+IF OBJECT_ID('db_owner.ContainerPreLoadingDetails') IS NOT NULL
+   AND COL_LENGTH('db_owner.ContainerPreLoadingDetails', 'SourceSalesOrderDetailId') IS NULL
+    ALTER TABLE [db_owner].[ContainerPreLoadingDetails] ADD SourceSalesOrderDetailId BIGINT NULL;");
+
+        // 29.9 读取侧索引必须独立成批：SourceSalesOrderDetailId 由上面的 ALTER TABLE ADD 新增，
+        //      若同批 CREATE INDEX 引用它，SQL Server 会在编译期报「列名无效」（错误 207）。
+        await db.Database.ExecuteSqlRawAsync(@"
+IF OBJECT_ID('db_owner.ContainerPreLoadingDetails') IS NOT NULL
+   AND NOT EXISTS (SELECT 1 FROM sys.indexes
+                   WHERE name = 'IX_ContainerPreLoadingDetails_SourceSalesOrderDetailId'
+                     AND object_id = OBJECT_ID('db_owner.ContainerPreLoadingDetails'))
+    CREATE INDEX IX_ContainerPreLoadingDetails_SourceSalesOrderDetailId
+        ON db_owner.ContainerPreLoadingDetails(SourceSalesOrderDetailId)
+        WHERE IsDeleted = 0 AND SourceSalesOrderDetailId IS NOT NULL;");
+
         // 30. 装柜费用分摊批次与来源留痕（ERP-042：既有费用单之上的留痕层）
         //     30.1 只做**幂等补齐**：给既有 FinanceExpenses 增加 3 个**可空 / 空串**留痕列
         //          （AllocationBatchNo / AllocationSourceExpenseId / AllocationSourceExpenseNo）：

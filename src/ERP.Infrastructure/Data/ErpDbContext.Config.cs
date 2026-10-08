@@ -237,6 +237,17 @@ public partial class ErpDbContext
             .HasDatabaseName("IX_ContainerLoadingDetails_SourceStockOutDetailId")
             .HasFilter("IsDeleted = 0 AND SourceStockOutDetailId IS NOT NULL");
 
+        // ============ ERP-368：预装柜明细 → 销售订单明细 的显式需求计划证据链接 ============
+        // 设计口径：
+        //   1. SourceSalesOrderDetailId 为**可空**留痕：历史 / 未链接明细保持 NULL = 显式「无需求来源」，
+        //      **不做任何回填**，也绝不按订单号 / 相似度猜测来源；
+        //   2. 刻意**不建**到 SalesOrderDetails 的外键：来源销售订单软删除 / 取消后历史需求证据仍必须可读；
+        //   3. 只建读取侧过滤索引（软删除行不占用），供「按来源销售订单明细累计已链接预装数量」有界检索；
+        //   4. 与 SchemaUpgrader 第 29.8 / 29.9 段的幂等加列 / 建索引保持一致。
+        modelBuilder.Entity<ContainerPreLoadingDetail>().HasIndex(x => x.SourceSalesOrderDetailId)
+            .HasDatabaseName("IX_ContainerPreLoadingDetails_SourceSalesOrderDetailId")
+            .HasFilter("IsDeleted = 0 AND SourceSalesOrderDetailId IS NOT NULL");
+
         // ============ ERP-042：装柜费用分摊批次与分摊行（既有费用单之上的留痕层） ============
         // 设计口径：
         //   1. 分摊结果仍然是既有 FinanceExpense 行（一参与方一行），本两张表只记录

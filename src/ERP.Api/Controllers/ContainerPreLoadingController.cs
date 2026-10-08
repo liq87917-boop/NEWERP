@@ -71,6 +71,8 @@ public class ContainerPreLoadingController : DocumentControllerBase<ContainerPre
 
         await PreLoadingAuthorizationRules.EnsureProposedScopeAllowedAsync(Db, scope, entity);
         await PreLoadingBookingLinkRules.ValidateLinkAsync(Db, entity, CurrentUserId());
+        // ERP-368：显式需求计划证据链接在占用流水 / 落库之前统一校验（未链接的历史单据行为不变）。
+        await PreLoadingSalesOrderLinkRules.ValidateLinksAsync(Db, entity, CurrentUserId());
 
         entity.PreLoadingNo = await _noService.GenerateAsync(DocumentType.PreLoading);
         entity.Status = DocumentStatus.Pending;
@@ -112,6 +114,8 @@ public class ContainerPreLoadingController : DocumentControllerBase<ContainerPre
             await PreLoadingAuthorizationRules.EnsureStoredScopeAllowedAsync(Db, scope, existing);
             await PreLoadingAuthorizationRules.EnsureProposedScopeAllowedAsync(Db, scope, entity);
             await PreLoadingBookingLinkRules.ValidateLinkAsync(Db, entity, CurrentUserId(), id);
+            // ERP-368：在替换任何字段 / 明细之前统一校验显式需求计划证据链接（失败时库中单据原样保留）。
+            await PreLoadingSalesOrderLinkRules.ValidateLinksAsync(Db, entity, CurrentUserId());
 
             existing.LoadingDate = entity.LoadingDate;
             existing.BookingId = entity.BookingId;
@@ -202,6 +206,8 @@ public class ContainerPreLoadingController : DocumentControllerBase<ContainerPre
 
             await PreLoadingAuthorizationRules.EnsureStoredScopeAllowedAsync(Db, scope, entity);
             await PreLoadingBookingLinkRules.ValidateLinkAsync(Db, entity, CurrentUserId(), entity.Id);
+            // ERP-368：提交前复核显式需求计划证据链接（失败直接拒绝并回滚，状态与明细保持不变）。
+            await PreLoadingSalesOrderLinkRules.ValidateLinksAsync(Db, entity, CurrentUserId());
 
             SetStatus(entity, DocumentStatus.Submitted);
             await Db.SaveChangesAsync();
@@ -227,14 +233,18 @@ public class ContainerPreLoadingController : DocumentControllerBase<ContainerPre
     {
         var scope = await PreLoadingAuthorizationRules.EnsureAuthorizedAsync(Db, CurrentUserId());
 
-        var header = await Db.ContainerPreLoadings.AsNoTracking()
+        var header = await Db.ContainerPreLoadings.AsNoTracking().Include(o => o.Details)
             .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
             ?? throw BusinessException.NotFound("预装柜单不存在");
+
+        // ERP-368：确定性锁序 —— 上游销售订单行（按 SalesOrderId 升序）→ 订柜信息行 → 预装柜单行。
+        var linkedSalesOrderIds = await PreLoadingSalesOrderLinkRules.LoadLinkedSalesOrderIdsAsync(Db, header);
 
         await using var transaction = await Db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
         try
         {
-            // 兼容既有锁序：先来源订柜行再本单行。
+            // 兼容既有锁序：先上游销售订单行，再来源订柜行，最后本单行。
+            await AcquireSalesOrderLinkRowLocksAsync(linkedSalesOrderIds);
             await AcquireBookingLinkLockAsync(header.BookingId);
             await AcquirePreLoadingRowLockAsync(id);
 
@@ -248,6 +258,8 @@ public class ContainerPreLoadingController : DocumentControllerBase<ContainerPre
 
             await PreLoadingAuthorizationRules.EnsureStoredScopeAllowedAsync(Db, scope, entity);
             await PreLoadingBookingLinkRules.ValidateApprovalAsync(Db, entity, CurrentUserId());
+            // ERP-368 显式需求计划证据链接与累计容量护栏（按来源销售订单明细逐条；只判定，不锁库 / 不过账）。
+            await PreLoadingSalesOrderLinkRules.ValidateApprovalAsync(Db, entity, CurrentUserId());
 
             SetStatus(entity, DocumentStatus.Approved);
             await Db.SaveChangesAsync();
@@ -342,6 +354,159 @@ public class ContainerPreLoadingController : DocumentControllerBase<ContainerPre
         }
 
         return Ok(ApiResponse<object>.Success(null, "删除成功"));
+    }
+
+    // ==================== ERP-368：预装柜明细 → 销售订单明细 的显式需求计划证据链接 ====================
+
+    /// <summary>
+    /// 可链接需求计划证据候选（<b>只读、有界</b>）：返回本预装柜单权威订柜客户下「已审核、未删除」的
+    /// 销售订单明细，并显式回传父销售订单 / 商品 / 客户与剩余可链接基础单位数量。
+    /// 复用既有「预装柜单」与「销售订单」菜单授权与实时客户数据范围；不写任何表。
+    /// </summary>
+    [HttpGet("{id:long}/sales-order-candidates")]
+    public async Task<IActionResult> GetSalesOrderCandidates(
+        long id, [FromQuery] string? keyword, [FromQuery] int take = 0)
+    {
+        var scope = await PreLoadingAuthorizationRules.EnsureAuthorizedAsync(Db, CurrentUserId());
+        var entity = await GetOrThrowAsync(id, "预装柜单不存在");
+        await PreLoadingAuthorizationRules.EnsureStoredScopeAllowedAsync(Db, scope, entity);
+        // 候选直接暴露销售订单需求证据：非特权账号必须有既有「销售订单」菜单授权。
+        await PreLoadingSalesOrderLinkRules.EnsureSourceMenuAuthorizedAsync(Db, CurrentUserId());
+        var candidates = await PreLoadingSalesOrderLinkRules.QueryCandidatesAsync(Db, entity, scope, keyword, take);
+        return Ok(ApiResponse<List<PreLoadingSalesOrderCandidateDto>>.Success(
+            candidates, "已返回可链接的已审核销售订单需求证据（只读：缺失即无可用容量，绝不猜测来源）"));
+    }
+
+    /// <summary>
+    /// 指派 / 清除预装柜明细的显式需求计划证据链接：在改写任何一行之前先统一校验全部拟议链接
+    /// （来源订单已审核且未删除、商品 / 基础单位一致、客户等于权威订柜客户、新链接数量为正），
+    /// 并在同一可串行化事务内按「上游销售订单行（升序）→ 订柜信息行 → 预装柜单行」确定性锁序提交；
+    /// 任一步失败整体回滚，明细 / 状态 / 历史保持不变。
+    /// </summary>
+    [HttpPost("{id:long}/sales-order-links")]
+    public async Task<IActionResult> AssignSalesOrderLinks(
+        long id, [FromBody] PreLoadingSalesOrderLinkAssignRequest request)
+    {
+        request ??= new PreLoadingSalesOrderLinkAssignRequest();
+        var links = request.Links ?? new List<PreLoadingSalesOrderLinkAssignmentDto>();
+        var scope = await PreLoadingAuthorizationRules.EnsureAuthorizedAsync(Db, CurrentUserId());
+
+        var header = await Db.ContainerPreLoadings.AsNoTracking()
+            .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
+            ?? throw BusinessException.NotFound("预装柜单不存在");
+
+        // 确定性锁序：先解析本次拟议链接涉及的上游订单，再按 Id 升序加锁。
+        var proposedSourceDetailIds = links
+            .Where(l => l.SourceSalesOrderDetailId is > 0)
+            .Select(l => l.SourceSalesOrderDetailId!.Value).ToList();
+        var lockSalesOrderIds = await PreLoadingSalesOrderLinkRules
+            .LoadSalesOrderIdsBySourceDetailIdsAsync(Db, proposedSourceDetailIds);
+
+        await using var transaction = await Db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
+        try
+        {
+            await AcquireSalesOrderLinkRowLocksAsync(lockSalesOrderIds);
+            await AcquireBookingLinkLockAsync(header.BookingId);
+            await AcquirePreLoadingRowLockAsync(id);
+
+            var entity = await Db.ContainerPreLoadings.Include(o => o.Details)
+                .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
+                ?? throw BusinessException.NotFound("预装柜单不存在");
+            if (GetStatus(entity) != DocumentStatus.Pending)
+                throw BusinessException.RuleConflict("仅待提交状态的预装柜单可维护需求计划证据链接");
+
+            await PreLoadingAuthorizationRules.EnsureStoredScopeAllowedAsync(Db, scope, entity);
+
+            var assignments = links
+                .GroupBy(l => l.PreLoadingDetailId)
+                .Select(g => g.Last())
+                .ToList();
+            if (assignments.Count != links.Count)
+                throw BusinessException.InvalidParameter("链接指派存在重复的预装柜明细行");
+
+            // 先在副本上校验全部拟议链接：被拒绝时不改动库中任何一行。
+            var proposed = new ContainerPreLoading
+            {
+                Id = entity.Id,
+                BookingId = entity.BookingId,
+                Details = entity.Details.Where(d => !d.IsDeleted).Select(d => new ContainerPreLoadingDetail
+                {
+                    Id = d.Id,
+                    PreLoadingId = d.PreLoadingId,
+                    ProductId = d.ProductId,
+                    ProductName = d.ProductName,
+                    Quantity = d.Quantity,
+                    Cartons = d.Cartons,
+                    Weight = d.Weight,
+                    Volume = d.Volume,
+                    Remark = d.Remark,
+                    SourceSalesOrderDetailId = d.SourceSalesOrderDetailId
+                }).ToList()
+            };
+
+            foreach (var assignment in assignments)
+            {
+                var target = proposed.Details.FirstOrDefault(d => d.Id == assignment.PreLoadingDetailId)
+                    ?? throw BusinessException.NotFound(
+                        $"预装柜明细 {assignment.PreLoadingDetailId} 不存在或不属于本预装柜单");
+                target.SourceSalesOrderDetailId = assignment.SourceSalesOrderDetailId;
+            }
+
+            await PreLoadingSalesOrderLinkRules.ValidateLinksAsync(Db, proposed, CurrentUserId());
+
+            var linkedCount = 0;
+            var clearedCount = 0;
+            foreach (var assignment in assignments)
+            {
+                var target = entity.Details.First(d => d.Id == assignment.PreLoadingDetailId);
+                if (assignment.SourceSalesOrderDetailId is > 0)
+                {
+                    if (target.SourceSalesOrderDetailId != assignment.SourceSalesOrderDetailId) linkedCount++;
+                    target.SourceSalesOrderDetailId = assignment.SourceSalesOrderDetailId;
+                }
+                else
+                {
+                    if (target.SourceSalesOrderDetailId is not null) clearedCount++;
+                    target.SourceSalesOrderDetailId = null;
+                }
+            }
+
+            entity.UpdatedAt = DateTime.Now;
+            await Db.SaveChangesAsync();
+            await transaction.CommitAsync();
+
+            var lines = await PreLoadingSalesOrderLinkRules.DescribeLinksAsync(Db, entity);
+            return Ok(ApiResponse<PreLoadingSalesOrderLinkAssignResultDto>.Success(
+                new PreLoadingSalesOrderLinkAssignResultDto
+                {
+                    LinkedCount = linkedCount,
+                    ClearedCount = clearedCount,
+                    Items = lines
+                },
+                "需求计划证据链接已更新（历史未链接明细保持显式未链接）"));
+        }
+        catch
+        {
+            await transaction.RollbackAsync();
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// ERP-368：按 <c>SalesOrderId</c> 升序对上游销售订单行加更新锁（<c>UPDLOCK, HOLDLOCK</c>），
+    /// 把并发「预装柜审核 / 链接」与「销售订单取消 / 出库审核」串行化在同一事务内。
+    /// 确定性锁序固定为「上游销售订单行 → 订柜信息行 → 预装柜单行」，避免锁环；非关系型提供程序跳过。
+    /// </summary>
+    private async Task AcquireSalesOrderLinkRowLocksAsync(IEnumerable<long> salesOrderIds)
+    {
+        if (!PreLoadingSalesOrderLinkRules.IsRelationalProvider(Db)) return;
+
+        foreach (var salesOrderId in salesOrderIds.Where(id => id > 0).Distinct().OrderBy(id => id))
+        {
+            await Db.Database
+                .SqlQueryRaw<long>(PreLoadingSalesOrderLinkRules.LockSalesOrderRowSql, salesOrderId)
+                .ToListAsync();
+        }
     }
 
     /// <summary>
