@@ -525,5 +525,25 @@ public class TradeDocumentPrintTests
         db.SaveChanges();
         return document;
     }
+
+    /// <summary>ERP-394：受限范围下打印与列表 / 详情同口径 —— 越界单证的打印件（表头 + 明细快照）一律不返回。</summary>
+    [Fact]
+    public async Task 打印接口_受限范围_越界单证拒绝且不泄露()
+    {
+        using var db = TestDbFactory.Create();
+        var document = SeedDocument(db, "DOC-PRINT-FOREIGN", "商业发票");
+
+        var controller = NewTradeDocumentController(db);
+        var context = new Microsoft.AspNetCore.Http.DefaultHttpContext();
+        context.Items[TradeDocumentRequestAuthorizationFilter.ScopeItemKey] = new SalespersonDataScope
+        {
+            IsPrivileged = false, SalesmanId = 1, AllowedCustomerIds = new HashSet<long> { 10 }
+        };
+        controller.ControllerContext = new ControllerContext { HttpContext = context };
+
+        var error = await Assert.ThrowsAsync<BusinessException>(() => controller.GetPrint(document.Id));
+        Assert.Equal(ErrorCodes.Forbidden, error.Code);
+        Assert.DoesNotContain("DOC-PRINT-FOREIGN", error.Message);
+    }
 }
 

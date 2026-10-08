@@ -356,11 +356,15 @@ public class SalesOrderController : DocumentControllerBase<SalesOrder>
     /// 订单明细非法 / 超过有界行数时明确拒绝，不静默丢弃、不臆造数值。</para>
     /// </summary>
     [HttpGet("{id:long}/trade-documents/prefill")]
+    [TradeDocumentRequestAuthorizationFilter]
     public async Task<IActionResult> TradeDocumentPrefill(long id)
     {
+        var scope = TradeDocumentRequestAuthorizationFilter.ScopeFrom(HttpContext);
         var order = await Set.AsNoTracking()
             .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted, default)
             ?? throw BusinessException.NotFound("销售订单不存在");
+        // ERP-394：受限账号的来源客户必须在单证中心权威范围内（fail closed，不通过预填泄露范围外客户）。
+        TradeDocumentAuthorizationRules.EnsureSourceScopeAllowed(scope, order.CustomerId);
 
         var customer = await TradeDocumentGeneration.LoadCustomerAsync(Db, order.CustomerId);
         var drafts = TradeDocumentGeneration.SalesOrderDocTypes
@@ -376,7 +380,8 @@ public class SalesOrderController : DocumentControllerBase<SalesOrder>
             TradeDocumentGeneration.SalesOrderSourceType, order.Id, order.OrderNo,
             containerNo: null, salesOrderNo: order.OrderNo, loadingListNo: null, drafts: drafts,
             buildLines: docType => TradeDocumentLineSnapshotRules.BuildFromSalesOrder(
-                order, details, products, docType, DraftCurrencyOf(drafts, docType)));
+                order, details, products, docType, DraftCurrencyOf(drafts, docType)),
+            targetScope: scope);
 
         return Ok(ApiResponse<TradeDocPrefillResult>.Success(result, "已按销售订单带入单证草稿与明细行快照预览"));
     }
@@ -388,13 +393,17 @@ public class SalesOrderController : DocumentControllerBase<SalesOrder>
     /// 单证落库状态统一为「待制作」，生成后仍可在单证中心人工修改后再流转。
     /// </summary>
     [HttpPost("{id:long}/trade-documents")]
+    [TradeDocumentRequestAuthorizationFilter]
     public async Task<IActionResult> GenerateTradeDocuments(long id, [FromBody] TradeDocGenerateRequest? request)
     {
+        var scope = TradeDocumentRequestAuthorizationFilter.ScopeFrom(HttpContext);
         var order = await Set.AsNoTracking()
             .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted, default)
             ?? throw BusinessException.NotFound("销售订单不存在");
         if (order.Status == DocumentStatus.Cancelled)
             throw BusinessException.RuleConflict("已作废的销售订单不能生成单证");
+        // ERP-394：受限账号的来源客户必须在单证中心权威范围内（fail closed，生成目标不得绕过目标授权）。
+        TradeDocumentAuthorizationRules.EnsureSourceScopeAllowed(scope, order.CustomerId);
 
         var customer = await TradeDocumentGeneration.LoadCustomerAsync(Db, order.CustomerId);
 
@@ -412,7 +421,8 @@ public class SalesOrderController : DocumentControllerBase<SalesOrder>
             requestedDocTypes: request?.DocTypes,
             buildDraft: docType => TradeDocumentGeneration.BuildFromSalesOrder(order, customer, docType),
             buildLines: docType => TradeDocumentLineSnapshotRules.BuildFromSalesOrder(
-                order, details, products, docType, DraftCurrencyOf(drafts, docType)));
+                order, details, products, docType, DraftCurrencyOf(drafts, docType)),
+            targetScope: scope);
 
         var numbers = string.Join("、", result.Documents.Select(d => d.DocNo));
         return Ok(ApiResponse<TradeDocGenerateResult>.Success(result,

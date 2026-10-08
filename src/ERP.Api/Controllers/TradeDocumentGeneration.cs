@@ -106,6 +106,18 @@ public static class TradeDocumentGeneration
     public static string SourceLabel(string sourceType)
         => sourceType == SalesOrderSourceType ? "销售订单" : "装柜清单";
 
+    /// <summary>
+    /// ERP-394：生成目标（单证草稿）必须归属到范围内客户 —— 受限账号的草稿缺失权威客户归属（<c>CustomerId</c> 为空）
+    /// 或归属越界一律 fail closed。<c>null</c> 范围（进程内直接调用）保持既有内部口径。
+    /// <para>草稿的 <c>CustomerId</c> 只来自来源单据（销售订单 <c>CustomerId</c> / 装柜清单 <c>CustomerId</c>），
+    /// 绝不按单号 / 柜号 / 客户名等自由文本推断，因此本守卫即「生成目标属于授权客户」的权威判定。</para>
+    /// </summary>
+    public static void EnsureGeneratedTargetAuthorized(SalespersonDataScope? scope, TradeDocument target)
+    {
+        ArgumentNullException.ThrowIfNull(target);
+        TradeDocumentAuthorizationRules.EnsureStoredScopeAllowed(scope, target);
+    }
+
     // ==================== 单证草稿构造（映射） ====================
 
     /// <summary>
@@ -208,7 +220,7 @@ public static class TradeDocumentGeneration
     public static async Task<TradeDocPrefillResult> PrefillAsync(IErpDbContext db, string sourceType, long sourceId,
         string sourceNo, string? containerNo, string? salesOrderNo, string? loadingListNo,
         List<TradeDocument> drafts, Func<string, TradeDocumentLineSnapshotResult>? buildLines = null,
-        CancellationToken ct = default)
+        SalespersonDataScope? targetScope = null, CancellationToken ct = default)
     {
         var generated = new List<string>();
         var previews = new List<TradeDocumentPrintLine>();
@@ -218,6 +230,10 @@ public static class TradeDocumentGeneration
 
         foreach (var draft in drafts)
         {
+            // ERP-394：带入预填与直接生成同口径 —— 受限账号的来源 / 目标客户必须在范围内，
+            // 绝不通过预填泄露范围外客户的名称 / 金额 / 明细快照。
+            EnsureGeneratedTargetAuthorized(targetScope, draft);
+
             if (await FindExistingAsync(db, salesOrderNo, containerNo, loadingListNo, draft.DocType, ct) is not null)
                 generated.Add(draft.DocType);
 
@@ -265,7 +281,8 @@ public static class TradeDocumentGeneration
     public static async Task<TradeDocGenerateResult> GenerateAsync(IErpDbContext db, string sourceType, long sourceId,
         string sourceNo, string? containerNo, string? salesOrderNo, string? loadingListNo,
         IReadOnlyList<string>? requestedDocTypes, Func<string, TradeDocument> buildDraft,
-        Func<string, TradeDocumentLineSnapshotResult>? buildLines = null, CancellationToken ct = default)
+        Func<string, TradeDocumentLineSnapshotResult>? buildLines = null,
+        SalespersonDataScope? targetScope = null, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(db);
 
@@ -290,6 +307,9 @@ public static class TradeDocumentGeneration
             var doc = buildDraft(docType);
             doc.Status = DraftStatus;
             doc.CreatedAt = DateTime.Now;
+            // ERP-394：生成目标必须归属到来源单据的权威客户并在实时范围内（受限账号无主 / 越界 fail closed），
+            // 在唯一编号守卫与任何写入之前校验，绝不产生半成品单证或绕过目标授权。
+            EnsureGeneratedTargetAuthorized(targetScope, doc);
             await EnsureUniqueDocNoAsync(db, doc, ct);
 
             var lines = buildLines?.Invoke(docType) ?? new TradeDocumentLineSnapshotResult { DocType = docType };

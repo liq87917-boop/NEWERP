@@ -934,4 +934,36 @@ public class TradeDocumentItemTests
         Assert.Contains("amountMismatchText", script);                // 展示差异提示
         Assert.Contains("escapeHtml", script);                      // 纯文本渲染，避免注入
     }
+
+    // ==================== ERP-394：受限范围下明细行读写复核父单证归属 ====================
+
+    [Fact]
+    public async Task 明细行_受限范围_越界单证读写一律拒绝且不改写()
+    {
+        using var db = TestDbFactory.Create();
+        var foreign = new TradeDocument
+        {
+            DocNo = "DOC-SCOPE-FOREIGN", DocType = "商业发票", Status = "待制作",
+            Currency = "USD", CustomerId = 20
+        };
+        db.TradeDocuments.Add(foreign);
+        db.SaveChanges();
+        var created = await TradeDocumentItemService.CreateAsync(db, foreign.Id, Item(quantity: 2m, unitPrice: 5m));
+
+        var scope = new SalespersonDataScope
+        {
+            IsPrivileged = false, SalesmanId = 1, AllowedCustomerIds = new HashSet<long> { 10 }
+        };
+
+        await AssertBusinessAsync(ErrorCodes.Forbidden, () => TradeDocumentItemService.ListAsync(
+            db, foreign.Id, TradeDocumentItemRules.MaxLinesPerDocument, scope));
+        await AssertBusinessAsync(ErrorCodes.Forbidden, () => TradeDocumentItemService.CreateAsync(
+            db, foreign.Id, Item(quantity: 1m, unitPrice: 1m), scope));
+        await AssertBusinessAsync(ErrorCodes.Forbidden, () => TradeDocumentItemService.UpdateAsync(
+            db, created.Id, Item(quantity: 9m, unitPrice: 9m), scope));
+        await AssertBusinessAsync(ErrorCodes.Forbidden, () => TradeDocumentItemService.DeleteAsync(db, created.Id, scope));
+
+        Assert.Equal(1, db.TradeDocumentItems.Count(i => !i.IsDeleted && i.TradeDocumentId == foreign.Id));
+        Assert.Equal(2m, db.TradeDocumentItems.Single(i => i.Id == created.Id).Quantity);
+    }
 }

@@ -155,9 +155,13 @@ public class ContainerLoadingListController : DocumentControllerBase<ContainerLo
     /// 清单以 0 表示未登记 <strong>不</strong>写成 0；清单明细超过有界行数时明确拒绝。</para>
     /// </summary>
     [HttpGet("{id:long}/trade-documents/prefill")]
+    [TradeDocumentRequestAuthorizationFilter]
     public async Task<IActionResult> TradeDocumentPrefill(long id)
     {
+        var scope = TradeDocumentRequestAuthorizationFilter.ScopeFrom(HttpContext);
         var list = await GetOrThrowAsync(id, "装柜清单不存在");
+        // ERP-394：受限账号的来源客户必须在单证中心权威范围内（fail closed，不通过预填泄露范围外客户）。
+        TradeDocumentAuthorizationRules.EnsureSourceScopeAllowed(scope, list.CustomerId);
         var customer = await TradeDocumentGeneration.LoadCustomerAsync(Db, list.CustomerId);
         var booking = await TradeDocumentGeneration.LoadBookingAsync(Db, list);
         var drafts = TradeDocumentGeneration.LoadingListDocTypes
@@ -173,7 +177,8 @@ public class ContainerLoadingListController : DocumentControllerBase<ContainerLo
             TradeDocumentGeneration.LoadingListSourceType, list.Id, list.LoadingListNo,
             containerNo: list.ContainerNo, salesOrderNo: null, loadingListNo: list.LoadingListNo, drafts: drafts,
             buildLines: docType => TradeDocumentLineSnapshotRules.BuildFromLoadingList(
-                list, details, products, docType, DraftCurrencyOf(drafts, docType)));
+                list, details, products, docType, DraftCurrencyOf(drafts, docType)),
+            targetScope: scope);
 
         return Ok(ApiResponse<TradeDocPrefillResult>.Success(result, "已按装柜清单带入单证草稿与明细行快照预览"));
     }
@@ -185,11 +190,15 @@ public class ContainerLoadingListController : DocumentControllerBase<ContainerLo
     /// 重复点击不会产生重复单证；单证落库状态统一为「待制作」，生成后仍可人工修改。
     /// </summary>
     [HttpPost("{id:long}/trade-documents")]
+    [TradeDocumentRequestAuthorizationFilter]
     public async Task<IActionResult> GenerateTradeDocuments(long id, [FromBody] TradeDocGenerateRequest? request)
     {
+        var scope = TradeDocumentRequestAuthorizationFilter.ScopeFrom(HttpContext);
         var list = await GetOrThrowAsync(id, "装柜清单不存在");
         if (list.Status == DocumentStatus.Cancelled)
             throw BusinessException.RuleConflict("已作废的装柜清单不能生成单证");
+        // ERP-394：受限账号的来源客户必须在单证中心权威范围内（fail closed，生成目标不得绕过目标授权）。
+        TradeDocumentAuthorizationRules.EnsureSourceScopeAllowed(scope, list.CustomerId);
 
         var customer = await TradeDocumentGeneration.LoadCustomerAsync(Db, list.CustomerId);
         var booking = await TradeDocumentGeneration.LoadBookingAsync(Db, list);
@@ -208,7 +217,8 @@ public class ContainerLoadingListController : DocumentControllerBase<ContainerLo
             requestedDocTypes: request?.DocTypes,
             buildDraft: docType => TradeDocumentGeneration.BuildFromLoadingList(list, customer, booking, docType),
             buildLines: docType => TradeDocumentLineSnapshotRules.BuildFromLoadingList(
-                list, details, products, docType, DraftCurrencyOf(drafts, docType)));
+                list, details, products, docType, DraftCurrencyOf(drafts, docType)),
+            targetScope: scope);
 
         var numbers = string.Join("、", result.Documents.Select(d => d.DocNo));
         return Ok(ApiResponse<TradeDocGenerateResult>.Success(result,

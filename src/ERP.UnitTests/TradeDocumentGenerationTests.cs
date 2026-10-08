@@ -733,6 +733,28 @@ public class TradeDocumentGenerationTests
         db.SaveChanges();
         return new LoadingListSeed(list, booking);
     }
+
+    /// <summary>ERP-394：受限范围下由销售订单生成单证必须先复核来源客户，越界来源不得消耗单证编号或落库。</summary>
+    [Fact]
+    public async Task 销售订单生成_受限范围_越界来源拒绝且不落库()
+    {
+        using var db = TestDbFactory.Create();
+        var customer = SeedCustomer(db);
+        var order = SeedSalesOrder(db, "SO-DOC-SCOPE-FOREIGN", customer.Id);
+
+        var controller = NewSalesOrderController(db);
+        var context = new Microsoft.AspNetCore.Http.DefaultHttpContext();
+        context.Items[TradeDocumentRequestAuthorizationFilter.ScopeItemKey] = new SalespersonDataScope
+        {
+            IsPrivileged = false, SalesmanId = 1, AllowedCustomerIds = new HashSet<long> { customer.Id + 1000 }
+        };
+        controller.ControllerContext = new ControllerContext { HttpContext = context };
+
+        var ex = await Assert.ThrowsAsync<BusinessException>(
+            () => controller.GenerateTradeDocuments(order.Id, null));
+        Assert.Equal(ErrorCodes.Forbidden, ex.Code);
+        Assert.Empty(db.TradeDocuments);
+    }
 }
 
 

@@ -33,12 +33,15 @@ public static class TradeDocumentItemService
     /// 「行合计 vs 单证表头金额」提示；单证不存在 / 已删除时返回 404 业务错误。
     /// </summary>
     public static async Task<TradeDocumentItemListDto> ListAsync(
-        IErpDbContext db, long documentId, int take = TradeDocumentItemRules.MaxLinesPerDocument)
+        IErpDbContext db, long documentId, int take = TradeDocumentItemRules.MaxLinesPerDocument,
+        SalespersonDataScope? scope = null)
     {
         ArgumentNullException.ThrowIfNull(db);
         if (documentId <= 0) throw BusinessException.InvalidParameter("请指定要查看明细行的单证");
 
         var document = await LoadDocumentAsync(db, documentId);
+        // ERP-394：读取明细行与读取单证表头同口径 —— 受限账号不得读取范围外 / 无主单证的明细（含合计与商品标注）。
+        TradeDocumentAuthorizationRules.EnsureStoredScopeAllowed(scope, document);
         var limit = NormalizeTake(take);
 
         // 一次查询取回有界明细行（多取一行用于判断是否被截断），再按行序升序展示
@@ -105,13 +108,16 @@ public static class TradeDocumentItemService
     /// 行序留空由服务端追加，显式指定时同一单证内不得重复。
     /// </summary>
     public static async Task<TradeDocumentItemDto> CreateAsync(
-        IErpDbContext db, long documentId, TradeDocumentItemSaveDto dto)
+        IErpDbContext db, long documentId, TradeDocumentItemSaveDto dto,
+        SalespersonDataScope? scope = null)
     {
         ArgumentNullException.ThrowIfNull(db);
         ArgumentNullException.ThrowIfNull(dto);
         if (documentId <= 0) throw BusinessException.InvalidParameter("请指定要新增明细行的单证");
 
         var document = await LoadDocumentAsync(db, documentId);
+        // ERP-394：写入明细行之前复核父单证的权威归属（受限账号不得改范围外 / 无主单证的明细）。
+        TradeDocumentAuthorizationRules.EnsureStoredScopeAllowed(scope, document);
         var pricingAllowed = EnsureMutable(document, out var currency);
 
         var existing = await db.TradeDocumentItems.AsNoTracking()
@@ -169,7 +175,8 @@ public static class TradeDocumentItemService
     /// 行金额一律服务端重算；已提交客户 / 已使用的单证明细一律拒绝修改。
     /// </summary>
     public static async Task<TradeDocumentItemDto> UpdateAsync(
-        IErpDbContext db, long itemId, TradeDocumentItemSaveDto dto)
+        IErpDbContext db, long itemId, TradeDocumentItemSaveDto dto,
+        SalespersonDataScope? scope = null)
     {
         ArgumentNullException.ThrowIfNull(db);
         ArgumentNullException.ThrowIfNull(dto);
@@ -179,6 +186,8 @@ public static class TradeDocumentItemService
             ?? throw BusinessException.NotFound("明细行不存在或已删除：不能修改（历史行请通过清单查看）");
 
         var document = await LoadDocumentAsync(db, item.TradeDocumentId);
+        // ERP-394：修改明细行之前复核父单证的权威归属（失败即不改写任何行值）。
+        TradeDocumentAuthorizationRules.EnsureStoredScopeAllowed(scope, document);
         var pricingAllowed = EnsureMutable(document, out var currency);
 
         var requested = TradeDocumentItemRules.NormalizeLineOrder(dto.LineOrder);
@@ -221,7 +230,8 @@ public static class TradeDocumentItemService
     /// 显式删除一条明细行（软删除，审计字段保留）：只在准备状态允许；已提交客户 / 已使用以及
     /// 不支持明细行的单证类型一律拒绝 —— 已冻结的单证快照既不能修改也不能删除，也不提供静默替换。
     /// </summary>
-    public static async Task<TradeDocumentItemDto> DeleteAsync(IErpDbContext db, long itemId)
+    public static async Task<TradeDocumentItemDto> DeleteAsync(
+        IErpDbContext db, long itemId, SalespersonDataScope? scope = null)
     {
         ArgumentNullException.ThrowIfNull(db);
 
@@ -230,6 +240,8 @@ public static class TradeDocumentItemService
             ?? throw BusinessException.NotFound("明细行不存在或已删除：不能重复删除");
 
         var document = await LoadDocumentAsync(db, item.TradeDocumentId);
+        // ERP-394：删除明细行之前复核父单证的权威归属（失败即不软删除任何行）。
+        TradeDocumentAuthorizationRules.EnsureStoredScopeAllowed(scope, document);
         EnsureMutable(document, out _);
 
         item.IsDeleted = true;
