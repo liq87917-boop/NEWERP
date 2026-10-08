@@ -44,12 +44,12 @@ public sealed class StockInOrderFulfillmentSqlServerTests
     {
         Guard();
         await using var db = _fixture.CreateDbContext();
-        SeedProduct(db, ProductA, "INT_TEST_FULFILL_LINK_PROD", "商品A", "PCS", string.Empty, 0);
+        var productId = SeedProduct(db, "INT_TEST_FULFILL_LINK_PROD", "商品A", "PCS", string.Empty, 0);
         var order = SeedOrder(db, "INT_TEST_FULFILL_LINK_PO", SupplierA, DocumentStatus.Approved,
-            (ProductA, "PCS", 10m, 7.5m));
+            (productId, "PCS", 10m, 7.5m));
 
         var entity = SeedStockIn(db, "INT_TEST_FULFILL_LINK_SI", order.Id, SupplierB, DocumentStatus.Submitted,
-            (ProductA, "PCS", 6m));
+            (productId, "PCS", 6m));
 
         // 供应商不一致 → 非权威链接：不做累计校验，不抛异常（与 ERP-033 成本回退同一口径）
         await StockInOrderFulfillmentRules.ValidateApprovalAsync(db, await ReloadAsync(db, entity.Id));
@@ -60,19 +60,21 @@ public sealed class StockInOrderFulfillmentSqlServerTests
     {
         Guard();
         await using var db = _fixture.CreateDbContext();
-        SeedProduct(db, ProductA, "INT_TEST_FULFILL_CUM_PROD", "商品A", "PCS", string.Empty, 0);
+        var productId = SeedProduct(db, "INT_TEST_FULFILL_CUM_PROD", "商品A", "PCS", string.Empty, 0);
         var order = SeedOrder(db, "INT_TEST_FULFILL_CUM_PO", SupplierA, DocumentStatus.Approved,
-            (ProductA, "PCS", 10m, 7.5m));
+            (productId, "PCS", 10m, 7.5m));
 
         SeedStockIn(db, "INT_TEST_FULFILL_CUM_SI_A", order.Id, SupplierA, DocumentStatus.Approved,
-            (ProductA, "PCS", 6m));
+            (productId, "PCS", 6m));
         var partial = SeedStockIn(db, "INT_TEST_FULFILL_CUM_SI_B", order.Id, SupplierA, DocumentStatus.Submitted,
-            (ProductA, "PCS", 4m));
+            (productId, "PCS", 4m));
 
         await StockInOrderFulfillmentRules.ValidateApprovalAsync(db, await ReloadAsync(db, partial.Id));
+        partial.Status = DocumentStatus.Approved;
+        await db.SaveChangesAsync();
 
         var over = SeedStockIn(db, "INT_TEST_FULFILL_CUM_SI_C", order.Id, SupplierA, DocumentStatus.Submitted,
-            (ProductA, "PCS", 1m));
+            (productId, "PCS", 1m));
         var overEntity = await ReloadAsync(db, over.Id);
         var ex = await Assert.ThrowsAsync<BusinessException>(() =>
             StockInOrderFulfillmentRules.ValidateApprovalAsync(db, overEntity));
@@ -84,17 +86,17 @@ public sealed class StockInOrderFulfillmentSqlServerTests
     {
         Guard();
         await using var db = _fixture.CreateDbContext();
-        SeedProduct(db, ProductA, "INT_TEST_FULFILL_CANCEL_PROD", "商品A", "PCS", string.Empty, 0);
+        var productId = SeedProduct(db, "INT_TEST_FULFILL_CANCEL_PROD", "商品A", "PCS", string.Empty, 0);
         var order = SeedOrder(db, "INT_TEST_FULFILL_CANCEL_PO", SupplierA, DocumentStatus.Approved,
-            (ProductA, "PCS", 10m, 7.5m));
+            (productId, "PCS", 10m, 7.5m));
 
         var cancelled = SeedStockIn(db, "INT_TEST_FULFILL_CANCEL_SI_A", order.Id, SupplierA,
-            DocumentStatus.Approved, (ProductA, "PCS", 6m));
+            DocumentStatus.Approved, (productId, "PCS", 6m));
         cancelled.Status = DocumentStatus.Cancelled;
         await db.SaveChangesAsync();
 
         var full = SeedStockIn(db, "INT_TEST_FULFILL_CANCEL_SI_B", order.Id, SupplierA, DocumentStatus.Submitted,
-            (ProductA, "PCS", 10m));
+            (productId, "PCS", 10m));
 
         // 已取消的单据不计入已审核数量，10 ≤ 10 通过
         await StockInOrderFulfillmentRules.ValidateApprovalAsync(db, await ReloadAsync(db, full.Id));
@@ -105,16 +107,18 @@ public sealed class StockInOrderFulfillmentSqlServerTests
     {
         Guard();
         await using var db = _fixture.CreateDbContext();
-        SeedProduct(db, ProductA, "INT_TEST_FULFILL_PKG_PROD", "商品A", "PCS", "CTN", 12);
+        var productId = SeedProduct(db, "INT_TEST_FULFILL_PKG_PROD", "商品A", "PCS", "CTN", 12);
         var order = SeedOrder(db, "INT_TEST_FULFILL_PKG_PO", SupplierA, DocumentStatus.Approved,
-            (ProductA, "CTN", 1m, 90m));
+            (productId, "CTN", 1m, 90m));
 
         var full = SeedStockIn(db, "INT_TEST_FULFILL_PKG_SI_A", order.Id, SupplierA, DocumentStatus.Submitted,
-            (ProductA, "PCS", 12m));
+            (productId, "PCS", 12m));
         await StockInOrderFulfillmentRules.ValidateApprovalAsync(db, await ReloadAsync(db, full.Id));
+        full.Status = DocumentStatus.Approved;
+        await db.SaveChangesAsync();
 
         var over = SeedStockIn(db, "INT_TEST_FULFILL_PKG_SI_B", order.Id, SupplierA, DocumentStatus.Submitted,
-            (ProductA, "PCS", 1m));
+            (productId, "PCS", 1m));
         var overEntity = await ReloadAsync(db, over.Id);
         var ex = await Assert.ThrowsAsync<BusinessException>(() =>
             StockInOrderFulfillmentRules.ValidateApprovalAsync(db, overEntity));
@@ -126,13 +130,13 @@ public sealed class StockInOrderFulfillmentSqlServerTests
     {
         Guard();
         await using var seed = _fixture.CreateDbContext();
-        SeedProduct(seed, ProductA, "INT_TEST_FULFILL_CONC_PROD", "商品A", "PCS", string.Empty, 0);
+        var productId = SeedProduct(seed, "INT_TEST_FULFILL_CONC_PROD", "商品A", "PCS", string.Empty, 0);
         var order = SeedOrder(seed, "INT_TEST_FULFILL_CONC_PO", SupplierA, DocumentStatus.Approved,
-            (ProductA, "PCS", 10m, 7.5m));
+            (productId, "PCS", 10m, 7.5m));
         var docA = SeedStockIn(seed, "INT_TEST_FULFILL_CONC_SI_A", order.Id, SupplierA, DocumentStatus.Submitted,
-            (ProductA, "PCS", 6m));
+            (productId, "PCS", 6m));
         var docB = SeedStockIn(seed, "INT_TEST_FULFILL_CONC_SI_B", order.Id, SupplierA, DocumentStatus.Submitted,
-            (ProductA, "PCS", 6m));
+            (productId, "PCS", 6m));
 
         var results = await Task.WhenAll(TryApproveAsync(docA.Id, order.Id), TryApproveAsync(docB.Id, order.Id));
 
@@ -171,21 +175,21 @@ public sealed class StockInOrderFulfillmentSqlServerTests
         => await db.StockIns.Include(o => o.Details).AsNoTracking().SingleAsync(s => s.Id == id);
 
 
-    private static void SeedProduct(ErpDbContext db, long id, string code, string name, string unit,
+    private static long SeedProduct(ErpDbContext db, string code, string name, string unit,
         string packageUnit, int unitsPerPackage)
     {
-        if (db.BaseProducts.Any(p => p.Id == id)) return;
-        db.BaseProducts.Add(new BaseProduct
+        var product = new BaseProduct
         {
-            Id = id,
             ProductCode = code,
             ProductName = name,
             Spec = "规格A",
             Unit = unit,
             PackageUnit = packageUnit,
             UnitsPerPackage = unitsPerPackage
-        });
+        };
+        db.BaseProducts.Add(product);
         db.SaveChanges();
+        return product.Id;
     }
 
     private static PurchaseOrder SeedOrder(ErpDbContext db, string orderNo, long supplierId, DocumentStatus status,
@@ -288,15 +292,15 @@ public sealed class StockInOrderFulfillmentSqlServerFixture : IAsyncLifetime
         => new DbContextOptionsBuilder<ErpDbContext>().UseSqlServer(ConnectionString).Options;
 
     private static string BuildDefaultConnectionString()
-        => $"Server=(localdb)\\{InstanceMarker};Initial Catalog={DefaultDatabaseName};Integrated Security=true;TrustServerCertificate=true;";
+        => $"Server=(localdb)\\{InstanceMarker};Initial Catalog={DefaultDatabaseName}_{Guid.NewGuid():N};Integrated Security=true;TrustServerCertificate=true;";
 
-    private static void AssertDedicatedTarget(string connectionString)
+    internal static void AssertDedicatedTarget(string connectionString)
     {
         var builder = new SqlConnectionStringBuilder(connectionString);
         var server = builder.DataSource ?? string.Empty;
         var database = builder.InitialCatalog ?? string.Empty;
 
-        Assert.Contains(InstanceMarker, server, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal($"(localdb)\\{InstanceMarker}", server, ignoreCase: true);
         Assert.StartsWith(DatabasePrefix, database, StringComparison.OrdinalIgnoreCase);
         Assert.True(builder.IntegratedSecurity);
     }
@@ -314,13 +318,12 @@ public sealed class StockInOrderFulfillmentSqlServerFixture : IAsyncLifetime
         {
             await conn.OpenAsync();
             await using var cmd = conn.CreateCommand();
-            cmd.CommandText = $@"
-IF DB_ID(N'{QuoteSqlString(database)}') IS NOT NULL
-BEGIN
-    ALTER DATABASE {QuoteSqlIdentifier(database)} SET SINGLE_USER WITH ROLLBACK IMMEDIATE;
-    DROP DATABASE {QuoteSqlIdentifier(database)};
-END";
-            await cmd.ExecuteNonQueryAsync();
+            // Never destroy a pre-existing fixture or another caller's database.
+            cmd.CommandText = "SELECT DB_ID(@database)";
+            cmd.Parameters.AddWithValue("@database", database);
+            var existing = await cmd.ExecuteScalarAsync();
+            if (existing is not null && existing != DBNull.Value)
+                throw new InvalidOperationException("The isolated fixture database already exists; choose a fresh NEWERP_AUTOTEST database.");
         }
 
         await using (var db = CreateDbContext())
@@ -339,3 +342,13 @@ END";
     private static string QuoteSqlIdentifier(string value) => "[" + value.Replace("]", "]]") + "]";
 }
 
+
+public sealed class StockInOrderFulfillmentTargetGuardTests
+{
+    [Theory]
+    [InlineData("Server=production_NEWERP_AutoAcceptance;Initial Catalog=NEWERP_AUTOTEST_BAD;Integrated Security=true")]
+    [InlineData("Server=(localdb)\\OTHER_NEWERP_AutoAcceptance;Initial Catalog=NEWERP_AUTOTEST_BAD;Integrated Security=true")]
+    [InlineData("Server=(localdb)\\NEWERP_AutoAcceptance;Initial Catalog=Production;Integrated Security=true")]
+    public void Rejects_non_dedicated_targets_before_database_access(string connection)
+        => Assert.ThrowsAny<Exception>(() => StockInOrderFulfillmentSqlServerFixture.AssertDedicatedTarget(connection));
+}
