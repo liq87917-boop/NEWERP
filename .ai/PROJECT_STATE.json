@@ -1,11 +1,10 @@
 {
   "schema_version": 2,
   "project": "NEWERP",
-  "updated_at": "2026-10-08T08:16:22.708211Z",
+  "updated_at": "2026-10-08T08:23:37.040565Z",
   "phase": "ready",
   "current_task": null,
   "queue": [
-    "ERP-352",
     "ERP-353"
   ],
   "completed": [
@@ -333,24 +332,19 @@
     "ERP-348",
     "ERP-349",
     "ERP-350",
-    "ERP-351"
+    "ERP-351",
+    "ERP-352"
   ],
   "blocked": [],
   "last_build": {
     "task": "ERP-352",
     "profile": "safe",
-    "status": "failed",
-    "exit_code": 1,
+    "status": "passed",
+    "exit_code": 0,
     "log": ".ai\\logs\\ERP-352-validation-1.log",
-    "at": "2026-10-08T07:29:34.106655Z"
+    "at": "2026-10-08T08:23:36.406200Z"
   },
-  "last_error": {
-    "task": "ERP-353",
-    "kind": "provider_unavailable",
-    "summary": "Insufficient Balance (request_id: d5832aef-8a59-4c38-a228-bb9a6ac781f0)",
-    "log": ".ai\\logs\\ERP-353-attempt-1.jsonl",
-    "next_probe_at": "2026-10-08T07:37:06.357101Z"
-  },
+  "last_error": null,
   "last_deepseek_fix": {
     "task": "ERP-352",
     "attempt": 2,
@@ -360,21 +354,18 @@
   },
   "git_sync": {
     "branch": "main",
-    "local_sha": "50b0c76",
-    "status": "synced",
-    "ahead": 0,
+    "local_sha": "989abc2",
+    "status": "pending",
+    "ahead": 2,
     "behind": 0,
-    "last_attempt_at": "2026-10-08T06:46:32.842521Z",
+    "last_attempt_at": "2026-10-08T08:23:36.901165Z",
     "last_error": null
   },
   "next_recommended_tasks": [
-    "ERP-352",
     "ERP-353"
   ],
   "runner": {
     "status": "stopped",
     "pid": null
-  },
-  "blocker": null,
-  "finish_reason": "provider_retry_due"
+  }
 }
