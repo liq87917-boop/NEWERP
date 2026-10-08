@@ -142,6 +142,24 @@ public static class SalesOrderChangeRequestRules
     /// <summary>该状态是否可编辑（只读标注，供 DTO 输出）</summary>
     public static bool IsEditable(int status) => status == StatusDraft;
 
+    /// <summary>
+    /// 提交前的拟议快照完整性校验（纯校验，不写库、不访问数据库）：至少保留一行「未删除且未移除」的拟议明细，
+    /// 且有效行数不超过 <see cref="MaxDetailLines"/>。逐行正数与金额由既有权威算法
+    /// （<c>SalesOrderAmountRules</c>）在服务层锁内复核，本方法只做结构性把关。
+    /// </summary>
+    public static void EnsureProposedSnapshotComplete(IEnumerable<SalesOrderChangeRequestDetail>? details)
+    {
+        var lines = (details ?? Enumerable.Empty<SalesOrderChangeRequestDetail>())
+            .Where(d => !d.IsDeleted && !d.ProposedRemoved)
+            .ToList();
+
+        if (lines.Count == 0)
+            throw BusinessException.RuleConflict(
+                "拟议快照为空：至少保留一行有效明细才能提交（如需整体撤销，请取消本申请而不是移除全部明细）");
+        if (lines.Count > MaxDetailLines)
+            throw BusinessException.RuleConflict($"拟议快照明细行数超过上限 {MaxDetailLines} 行，不能提交");
+    }
+
     // ==================== 3. 文本校验（有界；超长一律拒绝，不静默截断） ====================
 
     /// <summary>变更原因校验（必填、有界、拒绝控制字符）</summary>

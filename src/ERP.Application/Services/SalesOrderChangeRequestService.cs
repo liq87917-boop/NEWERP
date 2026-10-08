@@ -48,7 +48,7 @@ public static class SalesOrderChangeRequestService
     /// </summary>
     public static async Task<SalesOrderChangeRequestDto> CreateDraftAsync(
         IErpDbContext db, IDocumentNumberService noService, SalesOrderChangeRequestSaveDto dto,
-        SalespersonDataScope? scope = null, CancellationToken ct = default)
+        SalespersonDataScope? scope = null, long? actingUserId = null, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(db);
         ArgumentNullException.ThrowIfNull(noService);
@@ -62,31 +62,57 @@ public static class SalesOrderChangeRequestService
         await SalesOrderChangeRequestAuthorizationRules.EnsureSourceOrderAllowedAsync(
             db, scope, dto.SalesOrderId, ct);
 
-        var order = await LoadSourceOrderAsync(db, dto.SalesOrderId, ct)
-            ?? throw BusinessException.NotFound(
-                $"销售订单（Id={dto.SalesOrderId}）不存在或已删除：只能对存在且未删除的销售订单登记变更申请");
-        if (order.Status == DocumentStatus.Cancelled)
-            throw BusinessException.RuleConflict("已作废（已取消）的销售订单不能登记变更申请");
+        /* ERP-415 原子事务 + 确定性「来源销售订单行」锁（复用既有规范销售订单行锁协议，绝不改写来源任何字段）。
+           锁内重新读取实时权限与权威来源主表 + 明细之后才发号与冻结快照；任一步失败整体回滚（零部分写入，
+           被拒绝 / 失败的登记绝不消耗申请单号）。 */
+        var transaction = await SalesOrderChangeRequestMutationRules.BeginMutationTransactionAsync(db, ct);
+        var committed = false;
 
-        var reason = SalesOrderChangeRequestRules.NormalizeReason(dto.Reason);
-        var requestNo = await noService.GenerateAsync(DocumentType.SalesOrderChangeRequest);
-
-        var entity = new SalesOrderChangeRequest
+        try
         {
-            RequestNo = requestNo,
-            SalesOrderId = order.Id,
-            Reason = reason,
-            Status = SalesOrderChangeRequestRules.StatusDraft,
-            CreatedAt = DateTime.Now
-        };
+            // 调用方（控制器）已在本事务内锁定来源销售订单行；此处锁内重新解析
+            // 实时身份 / 既有菜单 / 客户数据范围（绝不信任加锁前的授权快照）。
+            var liveScope = await SalesOrderChangeRequestMutationRules.ResolveLiveScopeAsync(
+                db, actingUserId, scope, ct);
+            await SalesOrderChangeRequestAuthorizationRules.EnsureSourceOrderAllowedAsync(
+                db, liveScope, dto.SalesOrderId, ct);
 
-        CaptureSourceSnapshot(entity, order);
-        ApplyProposal(entity, dto);
+            // 锁内重新读取**权威来源主表 + 明细**（来源可用性一致性由同一把来源行锁保证）
+            var order = await LoadSourceOrderAsync(db, dto.SalesOrderId, ct)
+                ?? throw BusinessException.NotFound(
+                    $"销售订单（Id={dto.SalesOrderId}）不存在或已删除：只能对存在且未删除的销售订单登记变更申请");
+            if (order.Status == DocumentStatus.Cancelled)
+                throw BusinessException.RuleConflict("已作废（已取消）的销售订单不能登记变更申请");
 
-        db.SalesOrderChangeRequests.Add(entity);
-        await db.SaveChangesAsync(ct);
+            var reason = SalesOrderChangeRequestRules.NormalizeReason(dto.Reason);
+            var requestNo = await noService.GenerateAsync(DocumentType.SalesOrderChangeRequest);
 
-        return await MapAsync(db, entity, ct);
+            var entity = new SalesOrderChangeRequest
+            {
+                RequestNo = requestNo,
+                SalesOrderId = order.Id,
+                Reason = reason,
+                Status = SalesOrderChangeRequestRules.StatusDraft,
+                CreatedAt = DateTime.Now
+            };
+
+            CaptureSourceSnapshot(entity, order);
+            ApplyProposal(entity, dto);
+
+            db.SalesOrderChangeRequests.Add(entity);
+            await SalesOrderChangeRequestMutationRules.SaveProposalAsync(db, ct);
+
+            await SalesOrderChangeRequestMutationRules.CommitAsync(transaction, ct);
+            committed = true;
+
+            return await MapAsync(db, entity, ct);
+        }
+        catch
+        {
+            if (!committed)
+                await SalesOrderChangeRequestMutationRules.TryRollbackAsync(transaction, db);
+            throw;
+        }
     }
 
     // ==================== 2. 编辑草稿 ====================
@@ -94,38 +120,76 @@ public static class SalesOrderChangeRequestService
     /// <summary>
     /// 编辑草稿的拟议值（含拟议明细整体替换）：仅草稿可编辑；来源快照列保持不变；
     /// 旧的「拟议新增行」按软删除留痕处理，来源行永远保留。
+    /// <para>ERP-415：编辑在**原子事务 + 确定性行锁**（来源销售订单行 → 变更申请行）内完成，
+    /// 锁内重新读取申请（tracked）、实时身份授权与当前状态；并发提交 / 取消的输家在此被状态门拒绝，
+    /// 绝不覆盖赢家冻结的拟议快照；失败整体回滚（零部分写入）。</para>
     /// </summary>
     public static async Task<SalesOrderChangeRequestDto> UpdateDraftAsync(
         IErpDbContext db, long id, SalesOrderChangeRequestSaveDto dto,
-        SalespersonDataScope? scope = null, CancellationToken ct = default)
+        SalespersonDataScope? scope = null, long? actingUserId = null, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(db);
         ArgumentNullException.ThrowIfNull(dto);
 
-        var entity = await LoadAsync(db, id, includeDetails: true, ct);
-        SalesOrderChangeRequestRules.EnsureDraftEditable(entity.Status);
+        // 先只读取得**不可变的持久化来源身份**（用于按确定性锁序先锁来源订单行），绝不复用加锁前的内存实体。
+        var stored = await db.SalesOrderChangeRequests.AsNoTracking()
+            .FirstOrDefaultAsync(r => r.Id == id && !r.IsDeleted, ct)
+            ?? throw BusinessException.NotFound(SalesOrderChangeRequestMutationRules.RequestUnavailableText);
 
         /* ERP-414 授权先于明细替换：持久化来源与（如显式提交）拟议来源都必须通过来源归属复核；
            范围外 / 不存在 / 已删除来源返回同一非披露错误，绝不替换任何拟议明细或写库。 */
         await SalesOrderChangeRequestAuthorizationRules.EnsureSourceOrderAllowedAsync(
-            db, scope, entity.SalesOrderId, ct);
-        if (dto.SalesOrderId > 0 && dto.SalesOrderId != entity.SalesOrderId)
+            db, scope, stored.SalesOrderId, ct);
+        if (dto.SalesOrderId > 0 && dto.SalesOrderId != stored.SalesOrderId)
             await SalesOrderChangeRequestAuthorizationRules.EnsureSourceOrderAllowedAsync(
                 db, scope, dto.SalesOrderId, ct);
 
-        if (dto.SalesOrderId > 0 && dto.SalesOrderId != entity.SalesOrderId)
-            throw BusinessException.InvalidParameter(
-                "不能把变更申请改挂到另一张销售订单（如需更换来源，请取消本申请后重新登记）");
+        /* ERP-415 调用方（控制器）已在本事务内按「来源销售订单行 → 变更申请行」确定性锁序加锁；
+           此处锁内重新读取申请（tracked）+ 实时授权 + 当前状态，失败整体回滚（零部分写入）。 */
+        var transaction = await SalesOrderChangeRequestMutationRules.BeginMutationTransactionAsync(db, ct);
+        var committed = false;
 
-        /* 原因先校验后写入：与拟议值一样，校验失败不给实体留下脏状态 */
-        var reason = SalesOrderChangeRequestRules.NormalizeReason(dto.Reason);
-        ApplyProposal(entity, dto);
-        entity.Reason = reason;
+        try
+        {
+            var entity = await db.SalesOrderChangeRequests.Include(x => x.Details)
+                .FirstOrDefaultAsync(x => x.Id == id && !x.IsDeleted, ct)
+                ?? throw BusinessException.NotFound(SalesOrderChangeRequestMutationRules.RequestUnavailableText);
 
-        entity.UpdatedAt = DateTime.Now;
-        await db.SaveChangesAsync(ct);
+            // 锁内重新解析实时身份 / 既有菜单 / 客户数据范围（绝不信任加锁前的授权快照）
+            var liveScope = await SalesOrderChangeRequestMutationRules.ResolveLiveScopeAsync(
+                db, actingUserId, scope, ct);
+            await SalesOrderChangeRequestAuthorizationRules.EnsureSourceOrderAllowedAsync(
+                db, liveScope, entity.SalesOrderId, ct);
+            if (dto.SalesOrderId > 0 && dto.SalesOrderId != entity.SalesOrderId)
+                await SalesOrderChangeRequestAuthorizationRules.EnsureSourceOrderAllowedAsync(
+                    db, liveScope, dto.SalesOrderId, ct);
 
-        return await MapAsync(db, entity, ct);
+            // 锁内重读当前状态：并发提交 / 取消的输家在这里被状态门拒绝
+            SalesOrderChangeRequestRules.EnsureDraftEditable(entity.Status);
+
+            if (dto.SalesOrderId > 0 && dto.SalesOrderId != entity.SalesOrderId)
+                throw BusinessException.InvalidParameter(
+                    "不能把变更申请改挂到另一张销售订单（如需更换来源，请取消本申请后重新登记）");
+
+            /* 原因先校验后写入：与拟议值一样，校验失败不给实体留下脏状态 */
+            var reason = SalesOrderChangeRequestRules.NormalizeReason(dto.Reason);
+            ApplyProposal(entity, dto);
+            entity.Reason = reason;
+
+            entity.UpdatedAt = DateTime.Now;
+            await SalesOrderChangeRequestMutationRules.SaveProposalAsync(db, ct);
+
+            await SalesOrderChangeRequestMutationRules.CommitAsync(transaction, ct);
+            committed = true;
+
+            return await MapAsync(db, entity, ct);
+        }
+        catch
+        {
+            if (!committed)
+                await SalesOrderChangeRequestMutationRules.TryRollbackAsync(transaction, db);
+            throw;
+        }
     }
 
     // ==================== 3. 提交 / 取消 ====================
@@ -135,49 +199,123 @@ public static class SalesOrderChangeRequestService
     /// <para>提交<strong>不</strong>代表批准、<strong>不</strong>代表套用，也<strong>不</strong>改写来源销售订单。</para>
     /// </summary>
     public static async Task<SalesOrderChangeRequestDto> SubmitAsync(
-        IErpDbContext db, long id, SalespersonDataScope? scope = null, CancellationToken ct = default)
+        IErpDbContext db, long id, SalespersonDataScope? scope = null, long? actingUserId = null,
+        CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(db);
 
-        var entity = await LoadAsync(db, id, includeDetails: true, ct);
+        // 先只读取得**不可变的持久化来源身份**（用于按确定性锁序先锁来源订单行）。
+        var stored = await db.SalesOrderChangeRequests.AsNoTracking()
+            .FirstOrDefaultAsync(r => r.Id == id && !r.IsDeleted, ct)
+            ?? throw BusinessException.NotFound(SalesOrderChangeRequestMutationRules.RequestUnavailableText);
+
         /* ERP-414 授权先于状态变更与成功响应：持久化来源必须先通过来源归属复核。 */
         await SalesOrderChangeRequestAuthorizationRules.EnsureSourceOrderAllowedAsync(
-            db, scope, entity.SalesOrderId, ct);
-        SalesOrderChangeRequestRules.EnsureSubmittable(entity.Status);
+            db, scope, stored.SalesOrderId, ct);
 
-        var now = DateTime.Now;
-        entity.Status = SalesOrderChangeRequestRules.StatusSubmitted;
-        entity.SubmittedAt = now;
-        entity.UpdatedAt = now;
-        await db.SaveChangesAsync(ct);
+        /* ERP-415 调用方（控制器）已在本事务内按「来源销售订单行 → 变更申请行」确定性锁序加锁；
+           此处锁内重读申请（tracked）+ 实时授权 + 当前状态，冻结一个完整正数且经权威算法复核的拟议快照。 */
+        var transaction = await SalesOrderChangeRequestMutationRules.BeginMutationTransactionAsync(db, ct);
+        var committed = false;
 
-        return await MapAsync(db, entity, ct);
+        try
+        {
+            var entity = await db.SalesOrderChangeRequests.Include(x => x.Details)
+                .FirstOrDefaultAsync(x => x.Id == id && !x.IsDeleted, ct)
+                ?? throw BusinessException.NotFound(SalesOrderChangeRequestMutationRules.RequestUnavailableText);
+
+            // 锁内重新解析实时身份 / 既有菜单 / 客户数据范围（绝不信任加锁前的授权快照）
+            var liveScope = await SalesOrderChangeRequestMutationRules.ResolveLiveScopeAsync(
+                db, actingUserId, scope, ct);
+            await SalesOrderChangeRequestAuthorizationRules.EnsureSourceOrderAllowedAsync(
+                db, liveScope, entity.SalesOrderId, ct);
+
+            // 锁内重读当前状态：并发编辑 / 取消的输家与重复提交在这里被状态门拒绝
+            SalesOrderChangeRequestRules.EnsureSubmittable(entity.Status);
+
+            /* 冻结前复核：拟议快照必须完整且为正，金额按既有唯一权威算法（SalesOrderAmountRules）重算
+               （数量 > 0、单价非负、定金 / 佣金比例 0~100，EF 精度），任何失败整体回滚。 */
+            SalesOrderChangeRequestRules.EnsureProposedSnapshotComplete(entity.Details);
+            RecalculateProposal(entity);
+
+            var now = DateTime.Now;
+            entity.Status = SalesOrderChangeRequestRules.StatusSubmitted;
+            entity.SubmittedAt = now;
+            entity.UpdatedAt = now;
+            await SalesOrderChangeRequestMutationRules.SaveProposalAsync(db, ct);
+
+            await SalesOrderChangeRequestMutationRules.CommitAsync(transaction, ct);
+            committed = true;
+
+            return await MapAsync(db, entity, ct);
+        }
+        catch
+        {
+            if (!committed)
+                await SalesOrderChangeRequestMutationRules.TryRollbackAsync(transaction, db);
+            throw;
+        }
     }
 
     /// <summary>
     /// 取消变更申请（草稿与已提交都可取消，必须填写原因）：保留原始与拟议证据，不做硬删除。
+    /// <para>ERP-415：取消在**原子事务 + 确定性行锁**（来源销售订单行 → 变更申请行）内完成，
+    /// 锁内重读实时授权与当前状态；并发取消只有一个赢家，<strong>输家绝不覆盖赢家已保留的原始取消原因与时间戳</strong>。</para>
     /// </summary>
     public static async Task<SalesOrderChangeRequestDto> CancelAsync(
         IErpDbContext db, long id, string? reason,
-        SalespersonDataScope? scope = null, CancellationToken ct = default)
+        SalespersonDataScope? scope = null, long? actingUserId = null, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(db);
 
-        var entity = await LoadAsync(db, id, includeDetails: true, ct);
+        // 先只读取得**不可变的持久化来源身份**（用于按确定性锁序先锁来源订单行）。
+        var stored = await db.SalesOrderChangeRequests.AsNoTracking()
+            .FirstOrDefaultAsync(r => r.Id == id && !r.IsDeleted, ct)
+            ?? throw BusinessException.NotFound(SalesOrderChangeRequestMutationRules.RequestUnavailableText);
+
         /* ERP-414 授权先于取消与成功响应：持久化来源必须先通过来源归属复核。 */
         await SalesOrderChangeRequestAuthorizationRules.EnsureSourceOrderAllowedAsync(
-            db, scope, entity.SalesOrderId, ct);
-        SalesOrderChangeRequestRules.EnsureCancellable(entity.Status);
+            db, scope, stored.SalesOrderId, ct);
 
-        var normalized = SalesOrderChangeRequestRules.NormalizeCancelReason(reason);
-        var now = DateTime.Now;
-        entity.Status = SalesOrderChangeRequestRules.StatusCancelled;
-        entity.CancelledAt = now;
-        entity.CancelledReason = normalized;
-        entity.UpdatedAt = now;
-        await db.SaveChangesAsync(ct);
+        /* ERP-415 调用方（控制器）已在本事务内按「来源销售订单行 → 变更申请行」确定性锁序加锁；
+           此处锁内重读实时授权与当前状态。 */
+        var transaction = await SalesOrderChangeRequestMutationRules.BeginMutationTransactionAsync(db, ct);
+        var committed = false;
 
-        return await MapAsync(db, entity, ct);
+        try
+        {
+            var entity = await db.SalesOrderChangeRequests.Include(x => x.Details)
+                .FirstOrDefaultAsync(x => x.Id == id && !x.IsDeleted, ct)
+                ?? throw BusinessException.NotFound(SalesOrderChangeRequestMutationRules.RequestUnavailableText);
+
+            // 锁内重新解析实时身份 / 既有菜单 / 客户数据范围（绝不信任加锁前的授权快照）
+            var liveScope = await SalesOrderChangeRequestMutationRules.ResolveLiveScopeAsync(
+                db, actingUserId, scope, ct);
+            await SalesOrderChangeRequestAuthorizationRules.EnsureSourceOrderAllowedAsync(
+                db, liveScope, entity.SalesOrderId, ct);
+
+            // 锁内重读当前状态：并发取消的输家在这里被拒绝，绝不覆盖赢家保留的原始取消原因与时间戳
+            SalesOrderChangeRequestRules.EnsureCancellable(entity.Status);
+
+            var normalized = SalesOrderChangeRequestRules.NormalizeCancelReason(reason);
+            var now = DateTime.Now;
+            entity.Status = SalesOrderChangeRequestRules.StatusCancelled;
+            entity.CancelledAt = now;
+            entity.CancelledReason = normalized;
+            entity.UpdatedAt = now;
+            await SalesOrderChangeRequestMutationRules.SaveProposalAsync(db, ct);
+
+            await SalesOrderChangeRequestMutationRules.CommitAsync(transaction, ct);
+            committed = true;
+
+            return await MapAsync(db, entity, ct);
+        }
+        catch
+        {
+            if (!committed)
+                await SalesOrderChangeRequestMutationRules.TryRollbackAsync(transaction, db);
+            throw;
+        }
     }
 
     // ==================== 4. 来源快照（服务端权威写入，冻结后不可改写） ====================
@@ -845,6 +983,21 @@ public static class SalesOrderChangeRequestService
         if (value.Length > MaxKeywordLength)
             throw BusinessException.InvalidParameter($"关键字长度不能超过 {MaxKeywordLength} 个字符");
         return value;
+    }
+
+    /// <summary>
+    /// 解析变更申请的**不可变持久化来源订单 Id**（仅供调用方按确定性锁序先锁「来源销售订单行」）：
+    /// 只做最小只读投影，不存在 / 已删除一律按受控「申请不存在」拒绝；本方法不写库、不做授权判定
+    /// （授权仍由登记 / 编辑 / 提交 / 取消在锁内重新解析）。
+    /// </summary>
+    public static async Task<long> ResolveStoredSourceOrderIdAsync(
+        IErpDbContext db, long requestId, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        var stored = await db.SalesOrderChangeRequests.AsNoTracking()
+            .FirstOrDefaultAsync(r => r.Id == requestId && !r.IsDeleted, ct)
+            ?? throw BusinessException.NotFound(SalesOrderChangeRequestMutationRules.RequestUnavailableText);
+        return stored.SalesOrderId;
     }
 
     /// <summary>装载变更申请（可选含明细；不存在或已删除一律按「不存在」处理）</summary>
