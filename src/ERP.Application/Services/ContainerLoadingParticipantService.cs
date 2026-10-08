@@ -97,6 +97,11 @@ public static class ContainerLoadingParticipantService
         IErpDbContext db, long loadingListId, ContainerLoadingParticipantSaveDto dto,
         SalespersonDataScope scope)
     {
+        // ERP-386：参与方维护与分摊生成争用同一把装柜清单行锁（锁序：装柜清单行 → 参与方行），
+        // 在同一原子事务内完成「授权校验 + 写入」，失败整体回滚（不留半更新，也不与生成交错）。
+        await using var transaction = await ExpenseAllocationConcurrencyRules.BeginTransactionIfRelationalAsync(db);
+        await ExpenseAllocationConcurrencyRules.LockLoadingListRowsAsync(db, new[] { loadingListId });
+
         var loadingList = await EnsureLoadingListAsync(db, loadingListId);
         if (dto is null)
             throw BusinessException.InvalidParameter("参与方数据不能为空");
@@ -148,6 +153,7 @@ public static class ContainerLoadingParticipantService
             loadingList.CustomerId = entity.CustomerId;
 
         await SaveAsync(db);
+        if (transaction is not null) await transaction.CommitAsync();
         return (await MapAsync(db, loadingList, new List<ContainerLoadingListParticipant> { entity })).Single();
     }
 
@@ -163,6 +169,11 @@ public static class ContainerLoadingParticipantService
         IErpDbContext db, long loadingListId, long id, ContainerLoadingParticipantSaveDto dto,
         SalespersonDataScope scope)
     {
+        // ERP-386：锁序「装柜清单行 → 参与方行」+ 同一原子事务（与分摊生成争用同一把清单行锁）。
+        await using var transaction = await ExpenseAllocationConcurrencyRules.BeginTransactionIfRelationalAsync(db);
+        await ExpenseAllocationConcurrencyRules.LockLoadingListRowsAsync(db, new[] { loadingListId });
+        await ExpenseAllocationConcurrencyRules.LockParticipantRowsAsync(db, new[] { id });
+
         var loadingList = await EnsureLoadingListAsync(db, loadingListId);
         if (dto is null)
             throw BusinessException.InvalidParameter("参与方数据不能为空");
@@ -234,6 +245,7 @@ public static class ContainerLoadingParticipantService
         if (requestedPrimary == true && !entity.IsPrimary)
             await ApplyPrimaryAsync(db, loadingList, entity, await LoadSiblingsAsync(db, loadingListId));
 
+        if (transaction is not null) await transaction.CommitAsync();
         return (await MapAsync(db, loadingList, new List<ContainerLoadingListParticipant> { entity })).Single();
     }
 
@@ -246,6 +258,11 @@ public static class ContainerLoadingParticipantService
     public static async Task<ContainerLoadingParticipantDto> SetPrimaryAsync(
         IErpDbContext db, long loadingListId, long id, SalespersonDataScope scope)
     {
+        // ERP-386：锁序「装柜清单行 → 参与方行」+ 同一原子事务（与分摊生成争用同一把清单行锁）。
+        await using var transaction = await ExpenseAllocationConcurrencyRules.BeginTransactionIfRelationalAsync(db);
+        await ExpenseAllocationConcurrencyRules.LockLoadingListRowsAsync(db, new[] { loadingListId });
+        await ExpenseAllocationConcurrencyRules.LockParticipantRowsAsync(db, new[] { id });
+
         var loadingList = await EnsureLoadingListAsync(db, loadingListId);
         EnsureMaintainable(loadingList);
 
@@ -266,6 +283,7 @@ public static class ContainerLoadingParticipantService
             db, scope, loadingList, proposedActiveCustomerIds, entity.CustomerId);
 
         await ApplyPrimaryAsync(db, loadingList, entity, siblings);
+        if (transaction is not null) await transaction.CommitAsync();
         return (await MapAsync(db, loadingList, new List<ContainerLoadingListParticipant> { entity })).Single();
     }
 
@@ -277,6 +295,12 @@ public static class ContainerLoadingParticipantService
     public static async Task<ContainerLoadingParticipantDto> SetStatusAsync(
         IErpDbContext db, long loadingListId, long id, int? status, SalespersonDataScope scope)
     {
+        // ERP-386：锁序「装柜清单行 → 参与方行」+ 同一原子事务（与分摊生成争用同一把清单行锁，
+        // 因此「参与方停用 / 启用 vs 分摊生成」只会得到串行化后的唯一一致结果）。
+        await using var transaction = await ExpenseAllocationConcurrencyRules.BeginTransactionIfRelationalAsync(db);
+        await ExpenseAllocationConcurrencyRules.LockLoadingListRowsAsync(db, new[] { loadingListId });
+        await ExpenseAllocationConcurrencyRules.LockParticipantRowsAsync(db, new[] { id });
+
         var loadingList = await EnsureLoadingListAsync(db, loadingListId);
         EnsureMaintainable(loadingList);
 
@@ -311,6 +335,7 @@ public static class ContainerLoadingParticipantService
         }
 
         await SaveAsync(db);
+        if (transaction is not null) await transaction.CommitAsync();
         return (await MapAsync(db, loadingList, new List<ContainerLoadingListParticipant> { entity })).Single();
     }
 
@@ -318,9 +343,14 @@ public static class ContainerLoadingParticipantService
     /// 删除参与方（<b>只做本表软删除</b>，保留行以便历史可读）：不物理删除、不改写装柜清单明细 / 柜号 /
     /// 订柜跟踪值 / 单证 / 费用 / 库存与客户主数据；删除同时释放主参与方标记，
     /// 且当前主参与方只有在清单不再有其他启用参与方时才允许删除。
+    /// <para>ERP-386：锁序「装柜清单行 → 参与方行」+ 同一原子事务，与分摊生成串行化。</para>
     /// </summary>
     public static async Task DeleteAsync(IErpDbContext db, long loadingListId, long id, SalespersonDataScope scope)
     {
+        await using var transaction = await ExpenseAllocationConcurrencyRules.BeginTransactionIfRelationalAsync(db);
+        await ExpenseAllocationConcurrencyRules.LockLoadingListRowsAsync(db, new[] { loadingListId });
+        await ExpenseAllocationConcurrencyRules.LockParticipantRowsAsync(db, new[] { id });
+
         var loadingList = await EnsureLoadingListAsync(db, loadingListId);
         EnsureMaintainable(loadingList);
 
@@ -339,6 +369,7 @@ public static class ContainerLoadingParticipantService
         entity.IsDeleted = true;
         entity.IsPrimary = false;
         await SaveAsync(db);
+        if (transaction is not null) await transaction.CommitAsync();
     }
 
     /// <summary>

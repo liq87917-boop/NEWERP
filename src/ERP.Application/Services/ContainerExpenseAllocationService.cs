@@ -577,9 +577,29 @@ public static class ContainerExpenseAllocationService
     public static async Task<ContainerExpenseAllocationGenerateResultDto> GenerateAsync(
         IErpDbContext db, ContainerExpenseAllocationRequest request, SalespersonDataScope? scope = null)
     {
+        ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(request);
+        if (request.SourceExpenseId <= 0) throw BusinessException.InvalidParameter("请选择来源费用单");
+        if (request.LoadingListId <= 0) throw BusinessException.InvalidParameter("请选择装柜清单");
+
+        // ERP-386：生成在**同一原子事务**内完成，失败整体回滚（绝不留部分批次 / 分摊行 / 费用单行），
+        // 单号也随回滚释放（单号由数据推导，绝不物理删除或作废任何既有行）。
+        // 锁序（全局唯一，绝不反向获取）：来源费用单行 → 装柜清单行 → 参与方行 → 模块单号键行 → 写入。
+        await using var transaction = await ExpenseAllocationConcurrencyRules.BeginTransactionIfRelationalAsync(db);
+        await ExpenseAllocationConcurrencyRules.LockSourceExpenseRowsAsync(db, new[] { request.SourceExpenseId });
+        await ExpenseAllocationConcurrencyRules.LockLoadingListRowsAsync(db, new[] { request.LoadingListId });
+        await ExpenseAllocationConcurrencyRules.LockParticipantRowsAsync(
+            db, await LoadParticipantLockIdsAsync(db, request.LoadingListId));
+
+        // 锁内重读权威来源费用 / 装柜清单 / 参与方，并重新执行 ERP-385 实时授权、客户可用性与基数校验：
+        // 陈旧权限、已删除 / 已作废来源、被并发改写的金额 / 币种 / 客户 / 参与方一律拒绝（不留任何行）。
         var plan = await BuildPlanAsync(db, request, scope);
         var source = plan.Source;
         var loadingList = plan.LoadingList;
+
+        // ERP-386：模块单号键行锁（既有 expense-bill 菜单行，绝不使用自由文本 RefNo）把
+        // 「重复检查 + 单号保留 + 写入」串行化，因此并发同一来源生成最多一条有效批次、不同请求单号不冲突。
+        await ExpenseAllocationConcurrencyRules.LockModuleNumberKeyAsync(db);
 
         // 业务口径：同一来源费用在同一装柜清单上最多只有一条有效批次（**不区分分摊方法**），
         // 否则同一笔柜级费用会被重复分摊到客户；过滤唯一索引（含方法）作为并发兜底。
@@ -701,6 +721,9 @@ public static class ContainerExpenseAllocationService
             throw BusinessException.Duplicate(DuplicateBatchConflictMessage);
         }
 
+        // ERP-386：批次 + 逐行留痕 + 生成费用单行在同一事务内提交；失败整体回滚（不留半套证据）。
+        if (transaction is not null) await transaction.CommitAsync();
+
         var resultLines = new List<ContainerExpenseAllocationLineDto>(plan.Lines.Count);
         for (var i = 0; i < plan.Lines.Count; i++)
             resultLines.Add(plan.Lines[i] with { ExpenseId = expenses[i].Id, ExpenseNo = expenseNos[i] });
@@ -733,11 +756,29 @@ public static class ContainerExpenseAllocationService
     public static async Task<ContainerExpenseAllocationBatchDto> VoidAsync(
         IErpDbContext db, long batchId, string? reason, SalespersonDataScope? scope = null)
     {
+        ArgumentNullException.ThrowIfNull(db);
         if (batchId <= 0) throw BusinessException.InvalidParameter("分摊批次 Id 不合法");
 
         var reasonText = ContainerExpenseAllocationRules.NormalizeRemark(reason);
         if (reasonText.Length == 0)
             throw BusinessException.InvalidParameter("请填写作废原因：作废会保留历史，必须记录更正原因");
+
+        // ERP-386：作废在**同一原子事务**内完成，并按全局锁序加锁：
+        // 来源费用单行 → 装柜清单行 → 分摊批次行（与生成路径同序，绝不反向获取），
+        // 因此「生成 vs 作废」串行化，且作废不会与来源费用改动 / 参与方维护交错。
+        await using var transaction = await ExpenseAllocationConcurrencyRules.BeginTransactionIfRelationalAsync(db);
+
+        var link = await db.FinanceExpenseAllocationBatches.AsNoTracking()
+            .Where(x => x.Id == batchId && !x.IsDeleted)
+            .Select(x => new { x.SourceExpenseId, x.LoadingListId })
+            .FirstOrDefaultAsync()
+            ?? throw BusinessException.NotFound($"分摊批次（Id={batchId}）不存在或已删除");
+
+        await ExpenseAllocationConcurrencyRules.LockSourceExpenseRowsAsync(db, new[] { link.SourceExpenseId });
+        await ExpenseAllocationConcurrencyRules.LockLoadingListRowsAsync(db, new[] { link.LoadingListId });
+
+        // 锁序第 4 段：批次行锁（锁内重读权威状态，重复作废 / 并发作废只允许一次生效）。
+        await ExpenseAllocationConcurrencyRules.LockBatchRowAsync(db, batchId);
 
         var batch = await db.FinanceExpenseAllocationBatches
             .FirstOrDefaultAsync(x => x.Id == batchId && !x.IsDeleted)
@@ -756,6 +797,9 @@ public static class ContainerExpenseAllocationService
         batch.VoidReason = reasonText;
         batch.UpdatedAt = DateTime.Now;
         await db.SaveChangesAsync();
+
+        // ERP-386：作废状态 / 原因 / 时间在同一事务内提交；失败整体回滚（保留原有效状态与原审计）。
+        if (transaction is not null) await transaction.CommitAsync();
 
         var lines = await db.FinanceExpenseAllocationLines.AsNoTracking()
             .Where(x => !x.IsDeleted && x.BatchId == batch.Id)
@@ -872,6 +916,18 @@ public static class ContainerExpenseAllocationService
         ArgumentNullException.ThrowIfNull(scope);
         return batch.Lines.All(line => scope.AllowsCustomer(line.CustomerId));
     }
+
+    /// <summary>
+    /// 本次生成需要加锁的参与方行 Id（该装柜清单的全部参与方行，含停用行；有界），
+    /// 保证生成的参与方集合在事务内稳定，并与参与方维护争用同一把行锁（Id 升序）。
+    /// </summary>
+    private static async Task<List<long>> LoadParticipantLockIdsAsync(IErpDbContext db, long loadingListId)
+        => await db.ContainerLoadingListParticipants.AsNoTracking()
+            .Where(x => !x.IsDeleted && x.LoadingListId == loadingListId)
+            .OrderBy(x => x.Id)
+            .Take(ContainerExpenseAllocationRules.MaxLinesPerBatch + 1)
+            .Select(x => x.Id)
+            .ToListAsync();
 
     /// <summary>下一个批次号（EAB-yyyyMMdd-序号；按当日已有批次号的最大序号 +1）</summary>
     private static async Task<string> NextBatchNoAsync(IErpDbContext db, DateTime date)

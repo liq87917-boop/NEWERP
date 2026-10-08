@@ -51,6 +51,15 @@ public class ExpenseBillController : BaseCrudController<FinanceExpense>
         // ERP-385：在重复检查、单号生成与任何写入之前完成范围 / 客户 / 币种 / 金额 / 汇率校验。
         await EnsureLegacyAllocateRequestValidAsync(req, write: true);
 
+        // ERP-386：传统分摊的「重复检查 + 单号保留 + 生成写入」必须在**同一原子事务**内完成，
+        // 并在「模块级单号键行」（既有 expense-bill 菜单行）行锁下串行化 —— 锁键只取既有权威行，
+        // 绝不把自由文本 RefNo / 柜号当作权威来源身份或锁键。
+        await using var transaction = await ExpenseAllocationConcurrencyRules.BeginTransactionIfRelationalAsync(_db);
+        await ExpenseAllocationConcurrencyRules.LockModuleNumberKeyAsync(_db);
+
+        // 锁内复核实时授权 / 客户可用性 / 金额口径：陈旧权限或被停用客户一律拒绝，且不占用任何单号。
+        await EnsureLegacyAllocateRequestValidAsync(req, write: true);
+
         var expenseDate = (req.ExpenseDate ?? DateTime.Today).Date;
         var allocated = Calculate(req);
 
@@ -96,6 +105,9 @@ public class ExpenseBillController : BaseCrudController<FinanceExpense>
             created++;
         }
         await _db.SaveChangesAsync();
+
+        // ERP-386：整套费用单 + 单号保留在同一事务内提交；任一步失败整体回滚（不留部分行、不占用单号）。
+        if (transaction is not null) await transaction.CommitAsync();
 
         return Ok(ApiResponse<object>.Success(new { created, items = allocated }, $"已生成 {created} 条费用单"));
     }
@@ -158,11 +170,16 @@ public class ExpenseBillController : BaseCrudController<FinanceExpense>
     /// <summary>
     /// 修改费用单：先复核「已存储」行的权威归属，再校验「拟议」客户范围与金额 / 币种 / 汇率，
     /// 最后从已存储行恢复分摊批次留痕（批次号 / 来源费用）以保证批次生成行的审计不可被客户端改写或清空。
+    /// <para>ERP-386：整段改动在同一原子事务内，并先取来源费用单行锁（与分摊生成同序），
+    /// 因此「来源费用商业修改 vs 分摊批次生成」串行化；有效批次来源费用的权威分摊基数不得被改写。</para>
     /// </summary>
     [HttpPut("{id:long}")]
     public override async Task<IActionResult> Update(long id, [FromBody] FinanceExpense entity)
     {
         var scope = ExpenseRequestScope;
+
+        await using var transaction = await ExpenseAllocationConcurrencyRules.BeginTransactionIfRelationalAsync(_db);
+        await ExpenseAllocationConcurrencyRules.LockSourceExpenseRowsAsync(_db, new[] { id });
 
         var existing = await _db.FinanceExpenses.AsNoTracking()
             .FirstOrDefaultAsync(x => x.Id == id && !x.IsDeleted)
@@ -177,35 +194,67 @@ public class ExpenseBillController : BaseCrudController<FinanceExpense>
         entity.AllocationSourceExpenseId = existing.AllocationSourceExpenseId;
         entity.AllocationSourceExpenseNo = existing.AllocationSourceExpenseNo;
 
+        // ERP-386：有效分摊批次的来源费用，其权威分摊基数（金额 / 币种 / 汇率 / 归属客户 / 柜级身份）
+        // 在批次有效期内保持不变；否则已生成的批次与费用单快照会变成陈旧证据（请先显式作废批次）。
+        if (await ExpenseAllocationConcurrencyRules.HasEffectiveBatchForSourceAsync(_db, id))
+            ExpenseAllocationConcurrencyRules.EnsureSourceAllocationBasisUnchanged(existing, entity);
+
         var result = await Service.UpdateAsync(entity);
+        if (transaction is not null) await transaction.CommitAsync();
         return Ok(ApiResponse<FinanceExpense>.Success(result, "更新成功"));
     }
 
-    /// <summary>删除费用单（软删除）：删除之前复核持久化 CustomerId 的权威归属（越界 / 无主 fail closed）</summary>
+    /// <summary>
+    /// 删除费用单（软删除）：删除之前复核持久化 CustomerId 的权威归属（越界 / 无主 fail closed）。
+    /// <para>ERP-386：在同一原子事务内先取来源费用单行锁；有效分摊批次的来源费用在批次有效期内拒绝删除
+    /// （先显式作废批次释放），因此不会出现「来源已删除但批次仍有效」的陈旧证据。</para>
+    /// </summary>
     [HttpDelete("{id:long}")]
     public override async Task<IActionResult> Delete(long id)
     {
         var scope = ExpenseRequestScope;
+
+        await using var transaction = await ExpenseAllocationConcurrencyRules.BeginTransactionIfRelationalAsync(_db);
+        await ExpenseAllocationConcurrencyRules.LockSourceExpenseRowsAsync(_db, new[] { id });
+
         var entity = await _db.FinanceExpenses.AsNoTracking()
             .FirstOrDefaultAsync(x => x.Id == id && !x.IsDeleted)
             ?? throw BusinessException.NotFound("费用单不存在或已删除");
         ExpenseAuthorizationRules.EnsureStoredExpenseScopeAllowed(scope, entity);
-        return await base.Delete(id);
+        await ExpenseAllocationConcurrencyRules.EnsureSourceDeletableAsync(_db, new[] { id });
+
+        var result = await base.Delete(id);
+        if (transaction is not null) await transaction.CommitAsync();
+        return result;
     }
 
-    /// <summary>批量删除费用单（软删除）：任一行越界 / 无主即整体拒绝，绝不删除任何范围外行</summary>
+    /// <summary>
+    /// 批量删除费用单（软删除）：任一行越界 / 无主 / 为有效分摊批次来源费用即整体拒绝，
+    /// 绝不删除任何范围外行或有效批次来源行；全部在同一原子事务内按 Id 升序加行锁完成。
+    /// </summary>
     [HttpPost("batch-delete")]
     public override async Task<IActionResult> BatchDelete([FromBody] List<long> ids)
     {
         var scope = ExpenseRequestScope;
-        var rows = ids is null
+        var lockIds = ExpenseAllocationConcurrencyRules.MergeRowLockIds(ids);
+
+        await using var transaction = await ExpenseAllocationConcurrencyRules.BeginTransactionIfRelationalAsync(_db);
+        await ExpenseAllocationConcurrencyRules.LockSourceExpenseRowsAsync(_db, lockIds);
+
+        var rows = lockIds.Count == 0
             ? new List<FinanceExpense>()
             : await _db.FinanceExpenses.AsNoTracking()
-                .Where(x => ids.Contains(x.Id) && !x.IsDeleted)
+                .Where(x => lockIds.Contains(x.Id) && !x.IsDeleted)
                 .ToListAsync();
         foreach (var row in rows)
             ExpenseAuthorizationRules.EnsureStoredExpenseScopeAllowed(scope, row);
-        return await base.BatchDelete(ids ?? new List<long>());
+
+        // ERP-386：整批删除前先复核来源证据（任一行是有效批次来源费用即整批拒绝，不删除任何行）。
+        await ExpenseAllocationConcurrencyRules.EnsureSourceDeletableAsync(_db, rows.Select(r => r.Id));
+
+        var result = await base.BatchDelete(ids ?? new List<long>());
+        if (transaction is not null) await transaction.CommitAsync();
+        return result;
     }
 
     /// <summary>新增费用单时忽略客户端提交的分摊批次留痕（批次号 / 来源费用只能由分摊批次服务端写入）</summary>
