@@ -169,6 +169,8 @@ Object.assign(MODULES, {
        ERP-057：出运引用证据（源记录 = 本条预装柜单；只登记证据，不改写本单）
        ERP-059：出运证据时间线（只读：计划与实际分开标注，缺失事件显示「无（未登记）」） */
     rowActions: [
+      /* ERP-372：逐行显式维护「需求来源」（等保存成功拿到服务端明细 Id 后可用；已提交 / 已审核 / 已取消只读） */
+      { label: '需求来源', icon: '🔗', title: '为该预装柜明细行显式指派 / 清除已审核销售订单需求来源（只接受显式选择的销售订单明细 Id，绝不按单号 / 商品 / 文本猜测来源；未链接行保持「未链接」，来源不可用时原链接原样保留；仅待提交可维护）', onclick: 'openPreLoadingDemandLinks' },
       { label: '物流跟踪', icon: '🚢', title: '按持久化订柜引用只读查看该柜的外贸与物流跟踪值（未关联订柜信息时显示「未知」）', onclick: 'showShipmentTracking' },
       { label: '出运引用', icon: '📦', title: '登记 / 查看本条预装柜单的出运引用证据（只写证据，不改写本单、不推进装柜状态）', onclick: 'openContainerShipmentReferences' },
       { label: '时间线', icon: '🧭', title: '按本条预装柜单的显式源记录只读查看出运证据时间线（计划开船 / 到港与实际开船 / 到港 / 查验 / 放行分开标注，缺失事件显示「无（未登记）」，已作废证据只进历史视图）', onclick: 'showContainerShipmentTimeline' },

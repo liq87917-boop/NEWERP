@@ -264,6 +264,10 @@
        不同币种不合并、不换算；缺失显示「无（未登记）」/「未知」，已作废批次只进历史视图；
        装柜结算单金额字段只作原值回显，分摊证据不参与结算计算、也不是记账 / 付款授权 / 结算确认） -->
   <script src="/js/container-expense-allocation-evidence.js"></script>
+  <!-- ERP-372：预装柜明细 → 已审核销售订单需求来源 显式链接工作台（行操作入口「需求来源」；
+       只接受显式选择的销售订单明细 Id，绝不按单号 / 文本猜测；未链接保持「未链接」，来源不可用时原链接原样保留；
+       仅「待提交」可维护；失败保留草稿输入并显式展示服务端失败；不是库存预留、不生成库存流水） -->
+  <script src="/js/preloading-demand-links.js"></script>
   <script src="/js/loading-list-participants.js"></script>
   <script src="/js/print-design.js"></script>
   <script src="/js/pd-grid.js"></script>

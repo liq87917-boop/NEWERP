@@ -12,6 +12,32 @@ const DETAIL_COLUMNS = [
   { key: 'Amount', label: '金额', type: 'number' },
 ];
 
+/* ERP-372：预装柜单的明细行额外暴露「需求来源（已审核销售订单明细 Id）」列 ——
+   需求来源是**持久化证据**，只能在「需求来源」工作台（preloading-demand-links.js）中显式指派 / 清除，
+   本编辑器只负责原样携带并在保存时回传，绝不因明细编辑而静默清空链接；其它单据完全不受影响。 */
+function detailColumnsFor(code) {
+  if (code !== 'pre-loading') return DETAIL_COLUMNS;
+  return DETAIL_COLUMNS.concat([
+    { key: 'SourceSalesOrderDetailId', label: '需求来源（销售订单明细Id）', type: 'demand-source', readonly: true },
+  ]);
+}
+
+function demandSourceText(data) {
+  const sid = data && Number(data.SourceSalesOrderDetailId) > 0 ? Number(data.SourceSalesOrderDetailId) : 0;
+  return sid > 0 ? String(sid) : '未链接（历史 / 未登记需求来源）';
+}
+
+/* 需求来源单元格：只读展示持久化链接 + 行操作入口（未保存单据不给入口，绝不臆造明细 Id） */
+function renderDemandSourceCell(data) {
+  const saved = Number(BILL_EDIT_OID) > 0;
+  const button = saved
+    ? `<button type="button" class="btn btn-neutral btn-sm" onclick="openPreLoadingDemandLinks(${BILL_EDIT_OID})" ` +
+      `title="打开需求来源工作台：为该明细行显式指派 / 清除已审核销售订单需求来源（仅待提交可维护）">需求来源</button>`
+    : `<button type="button" class="btn btn-neutral btn-sm" disabled ` +
+      `title="请先保存该预装柜单，再登记需求来源（不为未保存单据臆造明细 Id）">需求来源</button>`;
+  return `<td><div class="demand-source-cell"><span class="text-muted">${escapeHtml(demandSourceText(data))}</span>${button}</div></td>`;
+}
+
 /* 引用字段映射（字段 key -> 基础资料类型） */
 const REF_FIELD_MAP = {
   CustId: 'customer', CustomerId: 'customer', SupplierId: 'supplier',
@@ -290,7 +316,7 @@ function renderBillEdit(oid) {
       <div class="detail-editor">
         <table>
           <thead><tr>
-            ${DETAIL_COLUMNS.map(c => `<th>${c.label}</th>`).join('')}
+            ${detailColumnsFor(BILL_CODE).map(c => `<th>${c.label}</th>`).join('')}
             <th style="width:50px">操作</th>
           </tr></thead>
           <tbody id="detail-tbody"></tbody>
@@ -340,8 +366,13 @@ function addDetailRow(data) {
   const tbody = document.getElementById('detail-tbody');
   const tr = document.createElement('tr');
   tr.dataset.rowIndex = tbody.querySelectorAll('tr').length;
-  tr.innerHTML = DETAIL_COLUMNS.map(c => {
+  /* ERP-372：持久化的需求来源随行携带，保存时原样回传（绝不因明细编辑而静默清空链接） */
+  const persistedSource = data && Number(data.SourceSalesOrderDetailId) > 0
+    ? String(Number(data.SourceSalesOrderDetailId)) : '';
+  if (persistedSource) tr.dataset.sourceSalesOrderDetailId = persistedSource;
+  tr.innerHTML = detailColumnsFor(BILL_CODE).map(c => {
     if (c.type === 'product') return renderProductCell(data);
+    if (c.type === 'demand-source') return renderDemandSourceCell(data);
     const val = data ? (data[c.key] ?? '') : '';
     const ro = c.readonly ? ' readonly style="background:#f8fafc;cursor:not-allowed"' : '';
     const type = c.type === 'number' ? 'number' : 'text';
@@ -414,6 +445,8 @@ async function saveBillEdit() {
 /* 收集副表明细行 */
 function collectDetails() {
   const details = [];
+  /* ERP-372：预装柜单的持久化需求来源随行回传，明细编辑 / 保存不得静默清空链接 */
+  const preserveDemandSource = BILL_CODE === 'pre-loading';
   document.querySelectorAll('#detail-tbody tr').forEach(tr => {
     const d = {};
     let hasValue = false;
@@ -424,7 +457,12 @@ function collectDetails() {
       d[inp.dataset.key] = v;
       if (v !== '' && v !== 0) hasValue = true;
     });
-    if (hasValue) details.push(d);
+    if (!hasValue) return;
+    if (preserveDemandSource) {
+      const persisted = tr.dataset.sourceSalesOrderDetailId;
+      if (persisted) d.SourceSalesOrderDetailId = Number(persisted);
+    }
+    details.push(d);
   });
   return details;
 }

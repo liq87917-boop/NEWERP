@@ -72,6 +72,28 @@ public static class PreLoadingSalesOrderLinkRules
         "不是出运凭证，不锁库、不生成库存流水、不改财务、不生成单证；装柜清单的物理出运证据由装柜明细的" +
         "销售出库明细链接（ERP-366）单独认定。";
 
+    /// <summary>未链接（历史 / 无需求来源）证据文案（ERP-372；界面原样展示，绝不回填）</summary>
+    public const string UnlinkedEvidenceText = "未链接（历史 / 未登记需求来源；保持显式未链接，绝不回填）";
+
+    /// <summary>已链接且来源仍为有效已审核需求证据文案（ERP-372）</summary>
+    public const string LinkedEvidenceText = "已链接（有效需求计划证据）";
+
+    /// <summary>
+    /// 显式链接的来源已不可用（来源销售订单明细已删除 / 订单已取消或撤销审核 / 来源无法解析）文案
+    /// （ERP-372）：原链接与 <c>SourceSalesOrderDetailId</c> **原样保留**，只暴露「不可用」而不静默清除。
+    /// </summary>
+    public const string UnavailableEvidenceText =
+        "来源不可用（来源销售订单明细已删除或订单已取消 / 撤销审核；原链接原样保留，绝不静默清除）";
+
+    /// <summary>
+    /// 链接证据可用性文案（ERP-372 单一事实来源）：<c>null / 非正</c> = 显式未链接；
+    /// 正数且可解析为有效已审核需求 = 已链接；正数但来源已不可用 = 来源不可用。
+    /// </summary>
+    public static string SourceAvailabilityTextOf(long? sourceSalesOrderDetailId, bool sourceAvailable)
+        => sourceSalesOrderDetailId is > 0
+            ? (sourceAvailable ? LinkedEvidenceText : UnavailableEvidenceText)
+            : UnlinkedEvidenceText;
+
     /// <summary>
     /// 「有效需求承诺证据」口径（ERP-369，接口 / 文档同源）：只有**未删除、已审核**预装柜单中
     /// 明细显式链接（<c>SourceSalesOrderDetailId</c> 非空）到来源销售订单明细的行，才构成「已被消费的需求承诺」；
@@ -356,12 +378,17 @@ public static class PreLoadingSalesOrderLinkRules
         {
             long? orderId = null;
             var orderNo = string.Empty;
+            var sourceAvailable = false;
             if (detail.SourceSalesOrderDetailId is > 0
                 && sourceByDetailId.TryGetValue(detail.SourceSalesOrderDetailId.Value, out var source)
                 && orderById.TryGetValue(source.SalesOrderId, out var order))
             {
                 orderId = order.Id;
                 orderNo = order.OrderNo;
+                // ERP-372：只有「来源明细未删除 + 父订单未删除且已审核」才算仍可用的有效需求证据；
+                // 否则（来源删除 / 订单取消 / 撤销审核）明确暴露「来源不可用」，但绝不清除原链接。
+                sourceAvailable = !source.IsDeleted && !order.IsDeleted
+                    && order.Status == DocumentStatus.Approved;
             }
 
             results.Add(new PreLoadingSalesOrderLinkLineDto
@@ -372,7 +399,9 @@ public static class PreLoadingSalesOrderLinkRules
                 Quantity = detail.Quantity,
                 SourceSalesOrderDetailId = detail.SourceSalesOrderDetailId,
                 SalesOrderId = orderId,
-                OrderNo = orderNo
+                OrderNo = orderNo,
+                SourceAvailable = sourceAvailable,
+                SourceAvailabilityText = SourceAvailabilityTextOf(detail.SourceSalesOrderDetailId, sourceAvailable)
             });
         }
         return results;

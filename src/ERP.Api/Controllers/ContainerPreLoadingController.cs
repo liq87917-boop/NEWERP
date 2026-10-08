@@ -88,6 +88,9 @@ public class ContainerPreLoadingController : DocumentControllerBase<ContainerPre
     /// 先校验「库中已存储单据」与「本次提交的拟议单据」的权威客户范围，再校验 ERP-353 上游链接（含改派到别的
     /// 订柜信息）。任一不合格都在替换字段 / 明细之前拒绝，库中单据 / 柜号 / 封条号 / 状态 / 原始明细数量与审计时间戳
     /// 一律保持不变；全部通过后才写入。
+    /// <para>ERP-372：请求**未携带明细**（<c>null</c> / 空集合）时视为「仅更新主表」，既有明细与其显式需求计划
+    /// 证据链接（<c>SourceSalesOrderDetailId</c>）原样保留 —— 主表编辑绝不静默清空需求来源证据；请求**携带明细**
+    /// 时保持既有「整体替换」语义（替换前仍由 ERP-368 统一校验全部拟议链接）。</para>
     /// </summary>
     [HttpPut("{id:long}")]
     public async Task<IActionResult> Update(long id, [FromBody] ContainerPreLoading entity)
@@ -123,14 +126,20 @@ public class ContainerPreLoadingController : DocumentControllerBase<ContainerPre
             existing.SealNo = entity.SealNo;
             existing.Remark = entity.Remark;
 
-            Db.ContainerPreLoadingDetails.RemoveRange(existing.Details);
-            foreach (var d in entity.Details)
+            // ERP-372：未携带明细 = 仅更新主表 —— 保留既有明细与其显式需求计划证据链接
+            // （SourceSalesOrderDetailId），绝不因主表编辑而静默清空需求来源证据。
+            // 携带明细 = 既有「整体替换」语义（替换前已由 ValidateLinksAsync 统一校验）。
+            if (entity.Details is { Count: > 0 })
             {
-                d.Id = 0;
-                d.PreLoadingId = id;
-                d.CreatedAt = DateTime.Now;
+                Db.ContainerPreLoadingDetails.RemoveRange(existing.Details);
+                foreach (var d in entity.Details)
+                {
+                    d.Id = 0;
+                    d.PreLoadingId = id;
+                    d.CreatedAt = DateTime.Now;
+                }
+                existing.Details = entity.Details;
             }
-            existing.Details = entity.Details;
             Calculate(existing);
             existing.UpdatedAt = DateTime.Now;
             await Db.SaveChangesAsync();
@@ -383,6 +392,30 @@ public class ContainerPreLoadingController : DocumentControllerBase<ContainerPre
         var candidates = await PreLoadingSalesOrderLinkRules.QueryCandidatesAsync(Db, entity, scope, keyword, take);
         return Ok(ApiResponse<List<PreLoadingSalesOrderCandidateDto>>.Success(
             candidates, "已返回可链接的已审核销售订单需求证据（只读：缺失即无可用容量，绝不猜测来源）"));
+    }
+
+    /// <summary>
+    /// ERP-372：回显本预装柜单**全部明细行**的显式需求计划证据链接状态（只读、有界），供业务界面打开 /
+    /// 重新加载需求来源工作台时读取**服务端持久化结果**：未链接（<c>null</c>）是显式历史事实，来源已不可用
+    /// （明细删除 / 订单取消 / 撤销审核）时原链接**原样保留**并显式标注 —— 绝不清除、绝不猜测来源。
+    /// 复用既有「预装柜单」菜单授权 + 实时客户数据范围；存在显式链接时额外要求既有「销售订单」菜单授权
+    /// （不新增任何用户授权，也不提供匿名 / 管理员降级）。
+    /// </summary>
+    [HttpGet("{id:long}/sales-order-links")]
+    public async Task<IActionResult> GetSalesOrderLinks(long id)
+    {
+        var scope = await PreLoadingAuthorizationRules.EnsureAuthorizedAsync(Db, CurrentUserId());
+        var entity = await Set.AsNoTracking().Include(o => o.Details)
+            .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
+            ?? throw BusinessException.NotFound("预装柜单不存在");
+        await PreLoadingAuthorizationRules.EnsureStoredScopeAllowedAsync(Db, scope, entity);
+
+        if (entity.Details.Any(d => !d.IsDeleted && d.SourceSalesOrderDetailId is > 0))
+            await PreLoadingSalesOrderLinkRules.EnsureSourceMenuAuthorizedAsync(Db, CurrentUserId());
+
+        var lines = await PreLoadingSalesOrderLinkRules.DescribeLinksAsync(Db, entity);
+        return Ok(ApiResponse<List<PreLoadingSalesOrderLinkLineDto>>.Success(
+            lines, "已返回全部预装柜明细的显式需求计划证据链接状态（未链接 = 显式事实，绝不回填猜测）"));
     }
 
     /// <summary>
