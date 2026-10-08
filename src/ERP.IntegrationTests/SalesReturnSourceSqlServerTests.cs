@@ -104,7 +104,7 @@ public sealed class SalesReturnSourceSqlServerTests
         Assert.Equal(DocumentStatus.Submitted, await db.SalesReturns.Where(r => r.Id == ret.Id)
             .Select(r => r.Status).SingleAsync());
         Assert.Equal(0m, await db.Stocks.Where(s => s.WarehouseId == warehouseId && s.ProductId == productId)
-            .Select(s => s.Quantity).DefaultIfEmpty(0m).SumAsync());
+            .SumAsync(s => s.Quantity));
     }
 
     // ==================== 2. 权威来源审核 + 精确边界 + 超退拒绝 ====================
@@ -169,7 +169,7 @@ public sealed class SalesReturnSourceSqlServerTests
         {
             Assert.Equal(10m, await db.Stocks.Where(s => s.WarehouseId == warehouseId && s.ProductId == productId)
                 .Select(s => s.Quantity).SingleAsync());
-            Assert.Equal(2, await db.StockMovements.CountAsync(m => !m.IsDeleted && !m.IsReversal));
+            Assert.Equal(2, await db.StockMovements.CountAsync(m => m.WarehouseId == warehouseId && !m.IsDeleted && !m.IsReversal));
             Assert.Equal(DocumentStatus.Submitted, await db.SalesReturns.Where(r => r.Id == over.Id)
                 .Select(r => r.Status).SingleAsync());
         }
@@ -204,7 +204,7 @@ public sealed class SalesReturnSourceSqlServerTests
         }
         await using (var db = _fixture.CreateDbContext())
         {
-            Assert.Equal(0, await db.StockMovements.CountAsync());
+            Assert.Equal(0, await db.StockMovements.CountAsync(m => m.WarehouseId == warehouseId));
             Assert.Equal(DocumentStatus.Submitted, await db.SalesReturns.Where(r => r.Id == ret.Id)
                 .Select(r => r.Status).SingleAsync());
         }
@@ -226,7 +226,7 @@ public sealed class SalesReturnSourceSqlServerTests
         }
         await using (var db = _fixture.CreateDbContext())
         {
-            Assert.Equal(0, await db.StockMovements.CountAsync());
+            Assert.Equal(0, await db.StockMovements.CountAsync(m => m.WarehouseId == warehouseId));
         }
     }
 
@@ -257,7 +257,7 @@ public sealed class SalesReturnSourceSqlServerTests
         }
         await using (var db = _fixture.CreateDbContext())
         {
-            Assert.Equal(0, await db.StockMovements.CountAsync());   // 第一行也不得入库
+            Assert.Equal(0, await db.StockMovements.CountAsync(m => m.WarehouseId == warehouseId));   // 第一行也不得入库
             Assert.Equal(0m, await db.Stocks.Where(s => s.WarehouseId == warehouseId
                 && (s.ProductId == productA || s.ProductId == productB)).SumAsync(s => s.Quantity));
             Assert.Equal(DocumentStatus.Submitted, await db.SalesReturns.Where(r => r.Id == ret.Id)
@@ -301,7 +301,7 @@ public sealed class SalesReturnSourceSqlServerTests
             Assert.True(approvedReturned <= 10m);
             Assert.Equal(6m, await db.Stocks.Where(s => s.WarehouseId == warehouseId && s.ProductId == productId)
                 .Select(s => s.Quantity).SingleAsync());
-            Assert.Equal(1, await db.StockMovements.CountAsync(m => !m.IsDeleted && !m.IsReversal));
+            Assert.Equal(1, await db.StockMovements.CountAsync(m => m.WarehouseId == warehouseId && !m.IsDeleted && !m.IsReversal));
         }
     }
 
@@ -333,7 +333,7 @@ public sealed class SalesReturnSourceSqlServerTests
         {
             Assert.Equal(4m, await db.Stocks.Where(s => s.WarehouseId == warehouseId && s.ProductId == productId)
                 .Select(s => s.Quantity).SingleAsync());
-            Assert.Equal(1, await db.StockMovements.CountAsync(m => !m.IsDeleted && !m.IsReversal));
+            Assert.Equal(1, await db.StockMovements.CountAsync(m => m.WarehouseId == warehouseId && !m.IsDeleted && !m.IsReversal));
             Assert.Equal(DocumentStatus.Approved, await db.SalesReturns.Where(r => r.Id == ret.Id)
                 .Select(r => r.Status).SingleAsync());
         }

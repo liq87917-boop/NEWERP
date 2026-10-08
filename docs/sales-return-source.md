@@ -127,3 +127,7 @@
 - `src/ERP.Api/Controllers/SalesReturnController.cs`：全部端点的实时授权 + 客户范围 + 「来源出库单行 → 退货单行」确定性锁序 + 可串行化事务 + 原子过账。
 - `src/ERP.Api/Controllers/StockUnitConversion.cs`：新增销售退货明细的装箱 → 基础单位折算重载。
 - 复用既有：`SalespersonDataScopeService`（ERP-097 数据范围）、`CustomerReceivableReconciliationService.LoadAuthorizedMenuCodesAsync`（角色 → 菜单）、`InventoryService`（ERP-009 记账与冲销）。
+
+## 真实 SQL 验证整改
+
+原始独立验证 ERP-357-independent-sql.log 暴露测试查询 DefaultIfEmpty(value) 无法由 SQL Server 翻译，以及同一 fixture 保留种子/前序流水导致全局计数失真。空库存改为数据库原生 SumAsync（EF 翻译为空集零值），业务数量断言不变；本场景流水按新建独占仓库检查，保留原有全局无变更比较。禁止清库、删除种子或重写业务结果来适配断言。真实控制器双连接容量、同单重复审核和回滚验证独立保留。
