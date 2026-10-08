@@ -154,3 +154,10 @@ dotnet test src/ERP.UnitTests/ERP.UnitTests.csproj -c Release
   `bill-edit.js`（SP 单据编辑页入口）、`index.html`（脚本注册）。
 - 复用既有：`SalespersonDataScopeService`（ERP-097 数据范围）、`CustomerReceivableReconciliationService.LoadAuthorizedMenuCodesAsync`
   （角色 → 菜单）、`PurchaseStockInCostSource`（ERP-033 成本）、`InventoryService`（ERP-009 / ERP-025 记账与冲销）。
+
+## 2026-10-08 独立 SQL 验证
+
+- 全新 GUID `NEWERP_AUTOTEST` 专用 LocalDB：真实控制器 10 项通过；可执行 JS 89 项断言通过；Release 全量构建 0 警告 / 0 错误，单元测试 5638 项通过。
+- 原始 SQL 执行发现 8 项失败：正向测试账号缺采购订单菜单，且共享数据库的历史库存/流水污染全库空值与总量断言。整改只修改隔离测试：正向场景复用既有种子管理员及其已有授权，不更改业务权限；拒绝请求比较请求前后基线，并发过账断言限定当前仓库/商品/来源单据及 PurchaseIn 流水类型。
+- 日志：`.ai/logs/ERP-375-independent-sql.log`（完整失败原文保留）、`ERP-375-fixture-repair-sql.log`、`ERP-375-independent-js.log`、`ERP-375-fixture-repair-safe-build.log`、`ERP-375-fixture-repair-safe-tests.log`。不访问生产环境、不重置已有数据库。
+- 实际浏览器工作流及第三阶段整体验收仍待完成；以上证据不代表阶段验收。

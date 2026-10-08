@@ -96,12 +96,14 @@ public sealed class StockInSourceSelectionSqlServerTests
         await SeedOrderAsync(db, $"PO-SEL-AUTH-{Tag()}", supplierId, DocumentStatus.Approved, customerId,
             (productId, "PCS", 5m));
 
+        var stocksBefore = await db.Stocks.CountAsync();
+        var movementsBefore = await db.StockMovements.CountAsync();
         var ctl = NewController(db, scenario == "missing" ? null : userId);
         var ex = await Assert.ThrowsAsync<BusinessException>(() => ctl.GetSourceCandidates(null, null, 0));
         Assert.Equal(scenario == "missing" ? ErrorCodes.Unauthorized : ErrorCodes.Forbidden, ex.Code);
 
-        Assert.Empty(await db.Stocks.ToListAsync());
-        Assert.Empty(await db.StockMovements.ToListAsync());
+        Assert.Equal(stocksBefore, await db.Stocks.CountAsync());
+        Assert.Equal(movementsBefore, await db.StockMovements.CountAsync());
     }
 
     // ==================== 2. 候选投影：ERP-342 剩余可收数量（真实 SQL） ====================
@@ -277,8 +279,8 @@ public sealed class StockInSourceSelectionSqlServerTests
         // 单据状态 / 库存 / 流水保持不变（保留用户输入，不产生半成品写入）
         var reloaded = await db.StockIns.AsNoTracking().SingleAsync(s => s.Id == receipt.Id);
         Assert.Equal(DocumentStatus.Submitted, reloaded.Status);
-        Assert.Empty(await db.StockMovements.ToListAsync());
-        Assert.Empty(await db.Stocks.ToListAsync());
+        Assert.Empty(await db.StockMovements.Where(m => m.SourceDocId == receipt.Id && m.MovementType == InventoryMovementType.PurchaseIn).ToListAsync());
+        Assert.Empty(await db.Stocks.Where(s => s.WarehouseId == warehouseId && s.ProductId == productId).ToListAsync());
     }
 
     // ==================== 6. 两条独立连接竞争：同来源两张入库单不超收 ====================
@@ -306,7 +308,7 @@ public sealed class StockInSourceSelectionSqlServerTests
         Assert.Equal(1, results.Count(r => !r.Success && r.Error.Contains("超过来源采购订单授权数量")));
 
         await using var verify = _fixture.CreateDbContext();
-        var posted = await verify.StockMovements.Where(m => !m.IsDeleted).SumAsync(m => m.Quantity);
+        var posted = await verify.StockMovements.Where(m => !m.IsDeleted && m.WarehouseId == warehouseId && m.ProductId == productId && m.MovementType == InventoryMovementType.PurchaseIn).SumAsync(m => m.Quantity);
         Assert.Equal(6m, posted);
     }
 
@@ -334,8 +336,8 @@ public sealed class StockInSourceSelectionSqlServerTests
         await using var verify = _fixture.CreateDbContext();
         var reloaded = await verify.StockIns.AsNoTracking().SingleAsync(s => s.Id == receipt.Id);
         Assert.Equal(DocumentStatus.Approved, reloaded.Status);
-        Assert.Equal(1, await verify.StockMovements.CountAsync(m => !m.IsDeleted));
-        Assert.Equal(4m, await verify.StockMovements.Where(m => !m.IsDeleted).SumAsync(m => m.Quantity));
+        Assert.Equal(1, await verify.StockMovements.CountAsync(m => !m.IsDeleted && m.SourceDocId == receipt.Id && m.MovementType == InventoryMovementType.PurchaseIn));
+        Assert.Equal(4m, await verify.StockMovements.Where(m => !m.IsDeleted && m.WarehouseId == warehouseId && m.ProductId == productId && m.MovementType == InventoryMovementType.PurchaseIn).SumAsync(m => m.Quantity));
     }
 
     private async Task<(bool Success, string Error)> TryApproveAsync(long stockInId, long userId)
@@ -471,30 +473,9 @@ public sealed class StockInSourceSelectionSqlServerTests
 
     /// <summary>播种特权入库操作员（系统内置角色 = 不受数据范围限制）+ 既有「采购入库」菜单。</summary>
     private static async Task<long> SeedPrivilegedOperatorAsync(ErpDbContext db)
-    {
-        var menu = await EnsureMenuAsync(db, StockInAuthorizationRules.RequiredMenuCode,
-            StockInAuthorizationRules.RequiredMenuText, "/logistics/stock-in", 40);
-
-        var role = new SysRole { RoleCode = $"SI-SEL-{Tag()}", RoleName = "入库来源管理员", IsSystem = true };
-        db.SysRoles.Add(role);
-        await db.SaveChangesAsync();
-
-        var user = new SysUser
-        {
-            UserName = $"si-sel-{Tag()}",
-            PasswordHash = "hash",
-            PasswordSalt = "salt",
-            DisplayName = "入库来源管理员",
-            Status = UserStatus.Enabled
-        };
-        db.SysUsers.Add(user);
-        await db.SaveChangesAsync();
-
-        db.SysUserRoles.Add(new SysUserRole { UserId = user.Id, RoleId = role.Id });
-        db.SysRoleMenus.Add(new SysRoleMenu { RoleId = role.Id, MenuId = menu.Id });
-        await db.SaveChangesAsync();
-        return user.Id;
-    }
+        => await db.SysUsers.AsNoTracking()
+            .Where(u => u.UserName == SeedData.AdminUserName && !u.IsDeleted && u.Status == UserStatus.Enabled)
+            .Select(u => u.Id).SingleAsync();
 
     private static async Task<PurchaseOrder> SeedOrderAsync(ErpDbContext db, string orderNo, long supplierId,
         DocumentStatus status, long? owningCustomerId,
