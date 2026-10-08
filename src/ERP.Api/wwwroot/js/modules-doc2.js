@@ -314,7 +314,9 @@ Object.assign(MODULES, {
       { key: 'customerId', label: '客户', type: 'ref', ref: 'customer' },
       { key: 'customerName', label: '客户名称（冗余，可留空）' },
       { key: 'warehouseId', label: '退货入库仓库', type: 'ref', ref: 'warehouse' },
-      { key: 'sourceStockOutId', label: '来源销售出库单 ID（可留空）', type: 'number' },
+      /* ERP-374：来源由「选择来源」有界选择器显式回填（也可手工填写 Id）；选择器只回填权威来源与可退商品行，
+         绝不臆造价格 / 成本（单价与成本单价留 0，由服务端按来源出库成本兜底） */
+      { key: 'sourceStockOutId', label: '来源销售出库单 ID（可留空；建议用「选择来源」）', type: 'number', selector: 'sales-return-source' },
       { key: 'sourceStockOutNo', label: '来源销售出库单号（留空时按 ID 自动带出）' },
       { key: 'returnReason', label: '退货原因' },
       { key: 'remark', label: '备注', type: 'textarea' },

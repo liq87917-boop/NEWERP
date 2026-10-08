@@ -1,4 +1,5 @@
 using ERP.Application.Common;
+using ERP.Application.DTOs;
 using ERP.Application.Interfaces;
 using ERP.Application.Services;
 using ERP.Domain.Entities;
@@ -153,11 +154,52 @@ public class SalesReturnController : DocumentControllerBase<SalesReturn>
         return Ok(ApiResponse<IReadOnlyList<StockMovement>>.Success(movements));
     }
 
-    /// <summary>创建（单号由字轨生成；金额与合计由后端复核；来源链接校验先于单号生成）</summary>
+    // ==================== ERP-374：退货来源候选 / 详情（只读、有界） ====================
+
+    /// <summary>
+    /// 可退货来源候选（只读、有界）：返回当前账号客户数据范围内、客户 / 仓库匹配且关键字命中的
+    /// 「已审核、未删除」销售出库单可退货商品行，按「来源出库单 + 商品」聚合给出净可退容量。
+    /// <para>授权口径：既有「销售退货」菜单 + 既有「销售出库」菜单 + 实时客户数据范围（在计数 / 取数之前判定）；
+    /// 不新增用户授权，也不提供匿名 / 管理员降级；零容量 / 损坏证据的候选显式标记不可用，绝不猜容量。</para>
+    /// </summary>
+    [HttpGet("source-candidates")]
+    public async Task<IActionResult> GetSourceCandidates([FromQuery] long? customerId,
+        [FromQuery] long? warehouseId, [FromQuery] string? keyword, [FromQuery] int take = 0)
+    {
+        await AuthorizeAsync();
+        await SalesReturnSourceRules.EnsureSourceMenuAuthorizedAsync(Db, CurrentUserId());
+        var scope = await ResolveScopeAsync();
+        // 客户数据范围先于任何计数 / 取数：范围外客户按「不存在」拒绝，不泄露归属。
+        if (customerId is > 0) await EnsureCustomerScopeAsync(customerId);
+
+        var candidates = (await SalesReturnSourceRules.QuerySourceCandidatesAsync(
+            Db, scope, customerId, warehouseId, keyword, take)).ToList();
+        return Ok(ApiResponse<List<SalesReturnSourceCandidateDto>>.Success(
+            candidates, "已返回可退货的已审核销售出库来源（只读：零容量 / 损坏证据标记为不可用，绝不猜容量）"));
+    }
+
+    /// <summary>
+    /// 来源详情（只读、有界）：返回一张权威来源销售出库单的表头 + 逐商品净可退容量行，供业务表单在显式选择后
+    /// 回填权威来源 Id / 单号 / 客户 / 仓库与可退商品行。范围外 / 不存在 / 已删除按「不存在」拒绝，
+    /// 未审核 / 已取消 / 已驳回按冲突拒绝；任一失败都不改写已保存的来源链接。
+    /// </summary>
+    [HttpGet("source-candidates/{sourceStockOutId:long}")]
+    public async Task<IActionResult> GetSourceCandidateDetail(long sourceStockOutId)
+    {
+        await AuthorizeAsync();
+        await SalesReturnSourceRules.EnsureSourceMenuAuthorizedAsync(Db, CurrentUserId());
+        var scope = await ResolveScopeAsync();
+
+        var detail = await SalesReturnSourceRules.ResolveSourceDetailAsync(Db, scope, sourceStockOutId);
+        return Ok(ApiResponse<SalesReturnSourceDetailDto>.Success(
+            detail, "已返回来源销售出库单的可退容量详情（只读：不可用行带原因，绝不猜价格 / 成本）"));
+    }
+
+    /// <summary>创建（单号由字轨生成；金额与合计由后端复核；来源链接 + 累计可退容量校验先于单号生成）</summary>
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] SalesReturn entity)
     {
-        // 授权 + 客户范围 + 来源链接校验先于单号生成：被拒绝方绝不消耗单据号、绝不写库。
+        // 授权 + 客户范围先于单号生成：被拒绝方绝不消耗单据号、绝不写库。
         await AuthorizeAsync();
         await EnsureCustomerScopeAsync(entity.CustomerId);
         entity.Id = 0;
@@ -167,26 +209,51 @@ public class SalesReturnController : DocumentControllerBase<SalesReturn>
         ResetDetailIds(entity);
         await StockUnitConversion.NormalizeAsync(Db, entity.Details);
         Normalize(entity);
-        var link = await SalesReturnSourceRules.ValidateLinkAsync(Db, entity);
 
-        if (string.IsNullOrWhiteSpace(entity.ReturnNo))
-            entity.ReturnNo = await _noService.GenerateAsync(DocumentType.SalesReturn);
-        // 显式链接回填权威来源单号；未关联（null）保留显式文本，绝不按单号文本猜测链接。
-        entity.SourceStockOutNo = link is null ? entity.SourceStockOutNo : link.Shipment.StockOutNo;
-        Normalize(entity);   // 单号生成后回填明细冗余单号
-        Db.SalesReturns.Add(entity);
-        await Db.SaveChangesAsync();
+        await using var transaction = await Db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
+        try
+        {
+            // 与审核共用同一把「来源出库单行 → 退货单行」锁序：陈旧候选 / 并发退货在创建时即被串行化，
+            // 来源在窗口内失效时 fail closed；累计可退容量由审核 / 销审在同一把来源行锁内判定（绝不超退）。
+            await LockSourceShipmentAsync(entity.SourceStockOutId);
+            await AuthorizeAsync();
+
+            // 链接权威性：与修改 / 提交 / 审核同一份判定（创建 / 修改 / 提交 / 审核全程复用）。
+            var link = await SalesReturnSourceRules.ValidateLinkAsync(Db, entity);
+
+            if (string.IsNullOrWhiteSpace(entity.ReturnNo))
+                entity.ReturnNo = await _noService.GenerateAsync(DocumentType.SalesReturn);
+            // 显式链接回填权威来源单号；未关联（null）保留显式文本，绝不按单号文本猜测链接。
+            entity.SourceStockOutNo = link is null ? entity.SourceStockOutNo : link.Shipment.StockOutNo;
+            Normalize(entity);   // 单号生成后回填明细冗余单号
+            Db.SalesReturns.Add(entity);
+            await Db.SaveChangesAsync();
+            await transaction.CommitAsync();
+        }
+        catch
+        {
+            DiscardTrackedChanges();
+            await transaction.RollbackAsync();
+            throw;
+        }
+
         return Ok(ApiResponse<object>.Success(new { entity.Id, entity.ReturnNo }, "销售退货单创建成功"));
     }
 
-    /// <summary>修改（仅待提交可改；明细整体替换；与提交 / 审核共用同一把退货单行锁）</summary>
+    /// <summary>修改（仅待提交可改；明细整体替换；与提交 / 审核共用「来源出库单行 → 退货单行」锁序）</summary>
     [HttpPut("{id:long}")]
     public async Task<IActionResult> Update(long id, [FromBody] SalesReturn entity)
     {
         await AuthorizeAsync();
+        // 事务前无锁预读仅为取得上游来源 Id（随后在锁内重读并复核；来源在窗口内变化时补锁新的来源单）。
+        var probe = await Db.SalesReturns.AsNoTracking()
+            .Where(o => o.Id == id && !o.IsDeleted)
+            .Select(o => new { o.SourceStockOutId })
+            .FirstOrDefaultAsync() ?? throw BusinessException.NotFound("销售退货单不存在");
         await using var transaction = await Db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
         try
         {
+            await LockSourceShipmentAsync(probe.SourceStockOutId);
             if (!await LockReturnRowAsync(id))
                 throw BusinessException.NotFound("销售退货单不存在");
             await AuthorizeAsync();
@@ -204,6 +271,10 @@ public class SalesReturnController : DocumentControllerBase<SalesReturn>
             ResetDetailIds(entity);
             await StockUnitConversion.NormalizeAsync(Db, entity.Details);
             Normalize(entity);
+
+            // 修改后的显式来源可能与原来源不同：在新来源行上补锁（升序单把锁，无死锁）。
+            await LockSourceShipmentAsync(entity.SourceStockOutId);
+            // 链接权威性：陈旧候选 / 来源失效在修改时即 fail closed，原单据 / 库存 / 流水保持不变。
             var link = await SalesReturnSourceRules.ValidateLinkAsync(Db, entity);
 
             existing.ReturnDate = entity.ReturnDate;
@@ -406,14 +477,20 @@ public class SalesReturnController : DocumentControllerBase<SalesReturn>
             ? await InventoryDocumentHelper.WarehouseNameAsync(Db, warehouseId)
             : fallback;
 
-    /// <summary>提交（仅待提交可提交；重新校验来源链接；与修改 / 审核共用同一把退货单行锁）</summary>
+    /// <summary>提交（仅待提交可提交；重新校验来源链接与累计可退容量；与修改 / 审核共用「来源出库单行 → 退货单行」锁序）</summary>
     [HttpPost("{id:long}/submit")]
     public override async Task<IActionResult> Submit(long id)
     {
         await AuthorizeAsync();
+        // 事务前无锁预读仅为取得上游来源 Id（随后在锁内重读并复核）。
+        var probe = await Db.SalesReturns.AsNoTracking()
+            .Where(o => o.Id == id && !o.IsDeleted)
+            .Select(o => new { o.SourceStockOutId })
+            .FirstOrDefaultAsync() ?? throw BusinessException.NotFound("销售退货单不存在");
         await using var transaction = await Db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
         try
         {
+            await LockSourceShipmentAsync(probe.SourceStockOutId);
             if (!await LockReturnRowAsync(id))
                 throw BusinessException.NotFound("销售退货单不存在");
             await AuthorizeAsync();
@@ -421,11 +498,14 @@ public class SalesReturnController : DocumentControllerBase<SalesReturn>
             var entity = await Db.SalesReturns.Include(o => o.Details)
                 .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
                 ?? throw BusinessException.NotFound("销售退货单不存在");
+            if (entity.SourceStockOutId != probe.SourceStockOutId)
+                await LockSourceShipmentAsync(entity.SourceStockOutId);
             await EnsureCustomerScopeAsync(entity.CustomerId);
             if (GetStatus(entity) != DocumentStatus.Pending)
                 throw BusinessException.RuleConflict("当前状态不允许该操作");
 
-            // 提交前重新解析权威来源：来源失效 / 快照冲突时拒绝，不消耗任何库存或单据号。
+            // 提交前重新解析权威来源：来源失效 / 陈旧候选 / 快照冲突一律拒绝，不消耗任何库存或单据号，
+            // 单据 / 库存 / 流水保持原样；累计可退容量由审核 / 销审在同一把来源行锁内判定（绝不超退）。
             await StockUnitConversion.NormalizeAsync(Db, entity.Details);
             Normalize(entity);
             var link = await SalesReturnSourceRules.ValidateLinkAsync(Db, entity);
