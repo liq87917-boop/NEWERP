@@ -256,6 +256,25 @@ public static class SupplierPaymentLifecycleRules
     {
         ArgumentNullException.ThrowIfNull(db);
 
+        var payment = await db.FinancePayments.AsNoTracking()
+            .FirstOrDefaultAsync(p => p.Id == paymentId && !p.IsDeleted);
+        var orders = db.SupplierPaymentAllocations.AsNoTracking()
+            .Where(a => !a.IsDeleted && a.PaymentId == paymentId && a.Status == SupplierPaymentAllocationRules.StatusActive);
+        var invoices = db.SupplierPaymentInvoiceAllocations.AsNoTracking()
+            .Where(a => !a.IsDeleted && a.PaymentId == paymentId && a.Status == SupplierPaymentInvoiceAllocationRules.StatusActive);
+        if (payment is null)
+        {
+            if (await orders.AnyAsync() || await invoices.AnyAsync())
+                throw BusinessException.RuleConflict("有效付款引用缺少权威付款单，不能使用资金余额");
+        }
+        else
+        {
+            var currency = NormalizePaymentCurrency(payment.Currency);
+            if (await orders.AnyAsync(a => a.SupplierId != payment.SupplierId || a.Currency != currency || a.AllocatedAmount <= 0m)
+                || await invoices.AnyAsync(a => a.SupplierId != payment.SupplierId || a.Currency != currency || a.AllocatedAmount <= 0m))
+                throw BusinessException.RuleConflict("有效付款引用的供应商、币种或金额异常，请先通过授权业务流程处理，不能使用资金余额");
+        }
+
         var order = await db.SupplierPaymentAllocations.AsNoTracking()
             .Where(a => !a.IsDeleted && a.PaymentId == paymentId
                         && a.Status == SupplierPaymentAllocationRules.StatusActive)
