@@ -1,0 +1,75 @@
+{
+  "title": "Bound purchase returns by explicit approved receipt capacity",
+  "description": "Stage3 core inventory closure. Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance.",
+  "acceptance_criteria": [
+    "Existing authorized purchase return users linking SourceStockInId must resolve a live approved procurement receipt, same supplier and authoritative warehouse/product/base-unit evidence at create/update/submit/approve. Reuse live current user, actual menu and authoritative upstream customer scope where applicable; reject mismatched/nonexistent/deleted/cancelled source and conflicting snapshots. Genuinely null legacy returns stay explicit within existing authorization; never infer source from number or widen permissions.",
+    "Serialize linked receipt and return documents before approval and reversal; cumulative effective approved linked returns per product cannot exceed received base quantities. Aggregate duplicate product lines, reject invalid source/corrupt active quantity or units without inventory or financial writes. Keep existing sourced valuation and currency boundaries; post all lines/status/auditable ledger atomically, rollback later-line failures and release capacity only through explicit unaudit. Real two-connection tests invoke actual controller/service business operations for competing returns and source transitions, never reimplement posting in the test.",
+    "Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/PurchaseReturnController.cs",
+    "src/ERP.Application/Services/PurchaseReturnSourceRules.cs",
+    "src/ERP.Api/Controllers/StockUnitConversion.cs",
+    "src/ERP.UnitTests/PurchaseReturnSourceTests.cs",
+    "src/ERP.UnitTests/InventoryMovementTests.cs",
+    "src/ERP.IntegrationTests/PurchaseReturnSourceSqlServerTests.cs",
+    "docs/purchase-return-source.md",
+    "src/ERP.IntegrationTests/ERP.IntegrationTests.csproj"
+  ],
+  "criterion_path_map": {
+    "Existing authorized purchase return users linking SourceStockInId must resolve a live approved procurement receipt, same supplier and authoritative warehouse/product/base-unit evidence at create/update/submit/approve. Reuse live current user, actual menu and authoritative upstream customer scope where applicable; reject mismatched/nonexistent/deleted/cancelled source and conflicting snapshots. Genuinely null legacy returns stay explicit within existing authorization; never infer source from number or widen permissions.": [
+      "src/ERP.Api/Controllers/PurchaseReturnController.cs",
+      "src/ERP.Application/Services/PurchaseReturnSourceRules.cs",
+      "src/ERP.Api/Controllers/StockUnitConversion.cs",
+      "src/ERP.UnitTests/PurchaseReturnSourceTests.cs",
+      "src/ERP.UnitTests/InventoryMovementTests.cs",
+      "src/ERP.IntegrationTests/PurchaseReturnSourceSqlServerTests.cs",
+      "docs/purchase-return-source.md",
+      "src/ERP.IntegrationTests/ERP.IntegrationTests.csproj"
+    ],
+    "Serialize linked receipt and return documents before approval and reversal; cumulative effective approved linked returns per product cannot exceed received base quantities. Aggregate duplicate product lines, reject invalid source/corrupt active quantity or units without inventory or financial writes. Keep existing sourced valuation and currency boundaries; post all lines/status/auditable ledger atomically, rollback later-line failures and release capacity only through explicit unaudit. Real two-connection tests invoke actual controller/service business operations for competing returns and source transitions, never reimplement posting in the test.": [
+      "src/ERP.Api/Controllers/PurchaseReturnController.cs",
+      "src/ERP.Application/Services/PurchaseReturnSourceRules.cs",
+      "src/ERP.Api/Controllers/StockUnitConversion.cs",
+      "src/ERP.UnitTests/PurchaseReturnSourceTests.cs",
+      "src/ERP.UnitTests/InventoryMovementTests.cs",
+      "src/ERP.IntegrationTests/PurchaseReturnSourceSqlServerTests.cs",
+      "docs/purchase-return-source.md",
+      "src/ERP.IntegrationTests/ERP.IntegrationTests.csproj"
+    ],
+    "Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance.": [
+      "src/ERP.Api/Controllers/PurchaseReturnController.cs",
+      "src/ERP.Application/Services/PurchaseReturnSourceRules.cs",
+      "src/ERP.Api/Controllers/StockUnitConversion.cs",
+      "src/ERP.UnitTests/PurchaseReturnSourceTests.cs",
+      "src/ERP.UnitTests/InventoryMovementTests.cs",
+      "src/ERP.IntegrationTests/PurchaseReturnSourceSqlServerTests.cs",
+      "docs/purchase-return-source.md",
+      "src/ERP.IntegrationTests/ERP.IntegrationTests.csproj"
+    ]
+  },
+  "implementation_evidence": "PurchaseReturnController.Approve resolves only source number/cost and posts DecreaseAsync; no live supplier/source state or cumulative linked return validation. ERP100 reports exceptions without preventing new invalid return posting.",
+  "depends_on": [
+    "ERP-009"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "id": "ERP-358",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-08T09:09:04.940167Z"
+}

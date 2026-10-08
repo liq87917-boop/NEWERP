@@ -1,0 +1,96 @@
+{
+  "title": "Guard receipt and shipment cancellation while approved returns remain",
+  "description": "Stage3 core inventory closure. Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance.",
+  "acceptance_criteria": [
+    "Authorized source shipment/receipt cancellation must check explicit live effective approved SalesReturn.SourceStockOutId and PurchaseReturn.SourceStockInId evidence before inventory reversal or state changes. Reject source cancellation with an actionable return reversal requirement; preserve all original document/details/status/stock/ledger on denial. Null-source unrelated returns do not block. Do not alter financial allocation history or infer references from numbers.",
+    "Use the same upstream document row lock and atomic transaction as linked return approval/unaudit, with deterministic lock order. Two independent connections racing return approval against source cancellation admit only one consistent outcome. Reversed/cancelled return allows the existing source workflow; repeat source cancel remains idempotent under existing rules. Maintain live existing user/menu/data scope, no business grants; execute actual source and return controllers/services in isolated real SQL tests and retain old movement/fulfillment assertions.",
+    "Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/StockInController.cs",
+    "src/ERP.Api/Controllers/StockOutController.cs",
+    "src/ERP.Api/Controllers/SalesReturnController.cs",
+    "src/ERP.Api/Controllers/PurchaseReturnController.cs",
+    "src/ERP.Application/Services/ReturnSourceCancellationRules.cs",
+    "src/ERP.Application/Services/SalesReturnSourceRules.cs",
+    "src/ERP.Application/Services/PurchaseReturnSourceRules.cs",
+    "src/ERP.UnitTests/ReturnSourceCancellationTests.cs",
+    "src/ERP.UnitTests/StockInOutMovementLedgerTests.cs",
+    "src/ERP.UnitTests/InventoryMovementTests.cs",
+    "src/ERP.IntegrationTests/ReturnSourceCancellationSqlServerTests.cs",
+    "docs/return-source-cancellation.md",
+    "src/ERP.IntegrationTests/ERP.IntegrationTests.csproj"
+  ],
+  "criterion_path_map": {
+    "Authorized source shipment/receipt cancellation must check explicit live effective approved SalesReturn.SourceStockOutId and PurchaseReturn.SourceStockInId evidence before inventory reversal or state changes. Reject source cancellation with an actionable return reversal requirement; preserve all original document/details/status/stock/ledger on denial. Null-source unrelated returns do not block. Do not alter financial allocation history or infer references from numbers.": [
+      "src/ERP.Api/Controllers/StockInController.cs",
+      "src/ERP.Api/Controllers/StockOutController.cs",
+      "src/ERP.Api/Controllers/SalesReturnController.cs",
+      "src/ERP.Api/Controllers/PurchaseReturnController.cs",
+      "src/ERP.Application/Services/ReturnSourceCancellationRules.cs",
+      "src/ERP.Application/Services/SalesReturnSourceRules.cs",
+      "src/ERP.Application/Services/PurchaseReturnSourceRules.cs",
+      "src/ERP.UnitTests/ReturnSourceCancellationTests.cs",
+      "src/ERP.UnitTests/StockInOutMovementLedgerTests.cs",
+      "src/ERP.UnitTests/InventoryMovementTests.cs",
+      "src/ERP.IntegrationTests/ReturnSourceCancellationSqlServerTests.cs",
+      "docs/return-source-cancellation.md",
+      "src/ERP.IntegrationTests/ERP.IntegrationTests.csproj"
+    ],
+    "Use the same upstream document row lock and atomic transaction as linked return approval/unaudit, with deterministic lock order. Two independent connections racing return approval against source cancellation admit only one consistent outcome. Reversed/cancelled return allows the existing source workflow; repeat source cancel remains idempotent under existing rules. Maintain live existing user/menu/data scope, no business grants; execute actual source and return controllers/services in isolated real SQL tests and retain old movement/fulfillment assertions.": [
+      "src/ERP.Api/Controllers/StockInController.cs",
+      "src/ERP.Api/Controllers/StockOutController.cs",
+      "src/ERP.Api/Controllers/SalesReturnController.cs",
+      "src/ERP.Api/Controllers/PurchaseReturnController.cs",
+      "src/ERP.Application/Services/ReturnSourceCancellationRules.cs",
+      "src/ERP.Application/Services/SalesReturnSourceRules.cs",
+      "src/ERP.Application/Services/PurchaseReturnSourceRules.cs",
+      "src/ERP.UnitTests/ReturnSourceCancellationTests.cs",
+      "src/ERP.UnitTests/StockInOutMovementLedgerTests.cs",
+      "src/ERP.UnitTests/InventoryMovementTests.cs",
+      "src/ERP.IntegrationTests/ReturnSourceCancellationSqlServerTests.cs",
+      "docs/return-source-cancellation.md",
+      "src/ERP.IntegrationTests/ERP.IntegrationTests.csproj"
+    ],
+    "Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance.": [
+      "src/ERP.Api/Controllers/StockInController.cs",
+      "src/ERP.Api/Controllers/StockOutController.cs",
+      "src/ERP.Api/Controllers/SalesReturnController.cs",
+      "src/ERP.Api/Controllers/PurchaseReturnController.cs",
+      "src/ERP.Application/Services/ReturnSourceCancellationRules.cs",
+      "src/ERP.Application/Services/SalesReturnSourceRules.cs",
+      "src/ERP.Application/Services/PurchaseReturnSourceRules.cs",
+      "src/ERP.UnitTests/ReturnSourceCancellationTests.cs",
+      "src/ERP.UnitTests/StockInOutMovementLedgerTests.cs",
+      "src/ERP.UnitTests/InventoryMovementTests.cs",
+      "src/ERP.IntegrationTests/ReturnSourceCancellationSqlServerTests.cs",
+      "docs/return-source-cancellation.md",
+      "src/ERP.IntegrationTests/ERP.IntegrationTests.csproj"
+    ]
+  },
+  "implementation_evidence": "StockInController.Cancel and StockOutController.Cancel reverse posted inventory but have no explicit approved PurchaseReturns/SalesReturns reference check; valid return-source history can become invalid.",
+  "depends_on": [
+    "ERP-357",
+    "ERP-358"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "id": "ERP-359",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-08T09:09:04.946525Z"
+}
