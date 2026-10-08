@@ -1,11 +1,10 @@
 {
   "schema_version": 2,
   "project": "NEWERP",
-  "updated_at": "2026-10-08T22:25:58.086292Z",
+  "updated_at": "2026-10-08T22:35:14.807798Z",
   "phase": "ready",
   "current_task": null,
   "queue": [
-    "ERP-417",
     "ERP-418"
   ],
   "completed": [
@@ -398,45 +397,40 @@
     "ERP-413",
     "ERP-414",
     "ERP-415",
-    "ERP-416"
+    "ERP-416",
+    "ERP-417"
   ],
   "blocked": [],
   "last_build": {
-    "task": "ERP-416",
+    "task": "ERP-417",
     "profile": "safe",
     "status": "passed",
     "exit_code": 0,
-    "log": ".ai\\logs\\ERP-416-validation-1.log",
-    "at": "2026-10-08T22:10:35.241976Z"
+    "log": ".ai\\logs\\ERP-417-validation-2.log",
+    "at": "2026-10-08T22:35:14.167253Z"
   },
-  "last_error": {
-    "task": "ERP-417",
-    "kind": "automatic_repair_pending",
-    "summary": "Path guard failed:\noutside allowed_paths: src/ERP.UnitTests/PurchaseQuoteAuthorizationTests.cs"
-  },
+  "last_error": null,
   "last_deepseek_fix": {
     "task": "ERP-417",
-    "attempts": 3,
-    "status": "retry_pending",
-    "at": "2026-10-08T22:25:57.732215Z"
+    "attempt": 2,
+    "model": "deepseek-flash",
+    "exit_code": 0,
+    "finished_at": "2026-10-08T22:34:32.160958Z"
   },
   "git_sync": {
     "branch": "main",
-    "local_sha": "536ec46",
-    "status": "synced",
-    "ahead": 0,
+    "local_sha": "a1a2165",
+    "status": "pending",
+    "ahead": 1,
     "behind": 0,
-    "last_attempt_at": "2026-10-08T22:10:41.117039Z",
+    "last_attempt_at": "2026-10-08T22:35:14.665942Z",
     "last_error": null
   },
   "next_recommended_tasks": [
-    "ERP-417",
     "ERP-418"
   ],
   "runner": {
     "status": "stopped",
     "pid": null
-  },
-  "blocker": null,
-  "finish_reason": "deepseek_supervisor_recovery"
+  }
 }

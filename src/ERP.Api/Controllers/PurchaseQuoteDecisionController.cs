@@ -65,16 +65,26 @@ public class PurchaseQuoteDecisionController : ControllerBase
             $"比价批次 {batch.QuoteNo}：待审批 {batch.PendingCount}、已批准 {batch.ApprovedCount}、已拒绝 {batch.RejectedCount}"));
     }
 
-    /// <summary>记录审批决定（批准 / 拒绝）：append-only，拒绝重复 / 陈旧 / 跨批次决定</summary>
+    /// <summary>
+    /// 记录审批决定（批准 / 拒绝）：append-only，拒绝重复 / 陈旧 / 跨批次决定。
+    /// ERP-417：实时认证请求下先取实时身份 / 既有菜单授权与可信操作人，随后 <see cref="PurchaseQuoteApproval.DecideAsync"/>
+    /// 在比价行锁内再次复核实时身份 / 菜单 / 客户范围并追加**恰好一条**决定；决定人一律取自登录账号，
+    /// 请求体中的 <c>DecidedBy</c> / <c>DecidedByName</c> 在实时请求下被忽略（伪造无效）。
+    /// </summary>
     [HttpPost("decide")]
     public async Task<IActionResult> Decide([FromBody] PurchaseQuoteDecisionRequest request)
     {
-        // ERP-416：先授权并复核被审批比价行的持久化归属（决定人字段不是授权依据），授权先于任何追加。
-        var scope = await EnsureAuthorizedAsync();
-        if (RequiresLiveAuthorization() && request is { QuoteId: > 0 })
-            await PurchaseQuoteAuthorizationRules.EnsureQuoteAllowedAsync(_db, scope, request.QuoteId);
+        PurchaseQuoteAuthorizationRules.LiveActor? actor = null;
+        if (RequiresLiveAuthorization())
+        {
+            // 实时身份 + 既有「供应商比价」菜单 + 权威客户范围（授权先于任何追加与任何读取）。
+            var scope = await PurchaseQuoteAuthorizationRules.EnsureAccessAuthorizedAsync(_db, CurrentUserId());
+            actor = await PurchaseQuoteAuthorizationRules.EnsureLiveActorAsync(_db, CurrentUserId());
+            if (request is { QuoteId: > 0 })
+                await PurchaseQuoteAuthorizationRules.EnsureQuoteAllowedAsync(_db, scope, request.QuoteId);
+        }
 
-        var decision = await PurchaseQuoteApproval.DecideAsync(_db, request);
+        var decision = await PurchaseQuoteApproval.DecideAsync(_db, request, actor);
         var verb = decision.Decision == PurchaseQuoteApproval.Approved ? "批准选中" : "拒绝";
         return Ok(ApiResponse<PurchaseQuoteDecision>.Success(decision,
             $"已{verb}比价行 #{decision.QuoteId}（审批参考 {decision.DecisionRef}）"));

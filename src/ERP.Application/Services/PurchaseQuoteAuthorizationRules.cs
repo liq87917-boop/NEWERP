@@ -279,4 +279,37 @@ public static class PurchaseQuoteAuthorizationRules
         ArgumentNullException.ThrowIfNull(draft);
         return PurchaseOrderAuthorizationRules.EnsureOrderScopeAllowedAsync(db, destinationScope, draft, ct);
     }
+
+    // ==================== ERP-417：实时可信操作人（审批决定人一律取自登录账号） ====================
+
+    /// <summary>
+    /// 实时可信操作人快照：Id 与显示名一律来自**当前登录账号**的持久化行，
+    /// 绝不采信请求体中的 <c>DecidedBy</c> / <c>DecidedByName</c> 等任何客户端字段。
+    /// </summary>
+    public readonly record struct LiveActor(long UserId, string DisplayName);
+
+    /// <summary>
+    /// 解析**实时可信操作人**（fail closed）：身份缺失 / 非法 / 账号不存在 / 已删除按未认证拒绝，
+    /// 账号已禁用按权限不足拒绝；显示名取 <see cref="SysUser.DisplayName"/>，为空回退登录名。
+    /// 绝不新增 / 不修改任何用户授权，也绝不把空身份当作匿名或管理员。
+    /// </summary>
+    public static async Task<LiveActor> EnsureLiveActorAsync(IErpDbContext db, long? userId,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        ct.ThrowIfCancellationRequested();
+
+        if (userId is null or <= 0)
+            throw new BusinessException(UnauthorizedText, ErrorCodes.Unauthorized);
+
+        var user = await db.SysUsers.AsNoTracking()
+            .FirstOrDefaultAsync(u => u.Id == userId.Value && !u.IsDeleted, ct);
+        if (user is null)
+            throw new BusinessException(UserDeletedText, ErrorCodes.Unauthorized);
+        if (user.Status != UserStatus.Enabled)
+            throw new BusinessException(UserDisabledText, ErrorCodes.Forbidden);
+
+        var name = !string.IsNullOrWhiteSpace(user.DisplayName) ? user.DisplayName : user.UserName;
+        return new LiveActor(user.Id, (name ?? string.Empty).Trim());
+    }
 }

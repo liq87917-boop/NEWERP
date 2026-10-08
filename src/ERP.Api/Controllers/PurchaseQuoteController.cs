@@ -9,6 +9,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using System.Linq.Expressions;
 using System.Security.Claims;
 
@@ -109,47 +110,221 @@ public class PurchaseQuoteController : BaseCrudController<PurchaseQuote>
         return Ok(ApiResponse<PurchaseQuote>.Success(result));
     }
 
-    /// <summary>新增（ERP-416：先授权并复核拟提交归属客户，绝不采信 CustomerName，授权先于写入）。</summary>
+    /// <summary>
+    /// 新增（ERP-416：先授权并复核拟提交归属客户，绝不采信 CustomerName，授权先于写入）。
+    /// ERP-417：校验对比草稿（正数量 / 非负价格 / EF 精度 / 受支持币种 / 选中与状态一致 / 服务端重算总额），
+    /// 明确拒绝客户端伪造的「已转采购订单」状态、采购单号式 <c>RefOrderNo</c> 与主键 / 审计 / 软删除 / 并发令牌字段。
+    /// </summary>
     [HttpPost]
     public override async Task<IActionResult> Create([FromBody] PurchaseQuote entity)
     {
+        if (entity is null) throw BusinessException.InvalidParameter("请求内容不能为空");
+
         var scope = await EnsureAuthorizedAsync();
         PurchaseQuoteAuthorizationRules.EnsureProposedCustomerAllowed(scope, entity.CustomerId);
-        var result = await Service.CreateAsync(entity);
-        return Ok(ApiResponse<PurchaseQuote>.Success(result, "新增成功"));
+
+        await using var transaction = await PurchaseQuoteMutationRules.BeginMutationTransactionAsync(_db);
+        try
+        {
+            await PurchaseQuoteMutationRules.EnsureNoForgedConversionEvidenceAsync(_db, entity);
+            PurchaseQuoteMutationRules.ValidateDraft(entity);
+            PurchaseQuoteMutationRules.NormalizeForCreate(entity, CurrentUserId());
+
+            var result = await Service.CreateAsync(entity);
+            if (transaction is not null) await transaction.CommitAsync();
+            return Ok(ApiResponse<PurchaseQuote>.Success(result, "新增成功"));
+        }
+        catch
+        {
+            await RollbackAsync(transaction, _db);
+            throw;
+        }
     }
 
-    /// <summary>更新（ERP-416：先复核**已存**比价行归属与**拟提交**归属客户，再替换字段；被拒零写入）。</summary>
+    /// <summary>
+    /// 更新（ERP-416：先复核**已存**比价行归属与**拟提交**归属客户）。
+    /// ERP-417：在「比价行锁 + 原子事务 + 锁内权威重读」内改写字段——锁内重新读取实时身份 / 既有菜单 / 客户范围；
+    /// 已转采购订单的行一律冻结；已存在审批决定的行只允许安全非商业备注修改，其余商业条款 / 改派 / 批次 /
+    /// 选中状态变更一律拒绝；待比较草稿按服务端口径校验并重算总额。被拒整体回滚（零部分写入）。
+    /// </summary>
     [HttpPut("{id:long}")]
     public override async Task<IActionResult> Update(long id, [FromBody] PurchaseQuote entity)
     {
+        if (entity is null) throw BusinessException.InvalidParameter("请求内容不能为空");
+
         var scope = await EnsureAuthorizedAsync();
         await PurchaseQuoteAuthorizationRules.EnsureQuoteAllowedAsync(_db, scope, id);
         PurchaseQuoteAuthorizationRules.EnsureProposedCustomerAllowed(scope, entity.CustomerId);
+
         entity.Id = id;
-        var result = await Service.UpdateAsync(entity);
-        return Ok(ApiResponse<PurchaseQuote>.Success(result, "更新成功"));
+        await using var transaction = await PurchaseQuoteMutationRules.BeginMutationTransactionAsync(_db);
+        try
+        {
+            // ERP-417：锁内重新读取实时身份 / 既有菜单 / 权威客户范围。
+            var liveScope = await ReauthorizeAsync();
+            if (!await PurchaseQuoteMutationRules.LockQuoteRowAsync(_db, id))
+                throw BusinessException.NotFound(PurchaseQuoteAuthorizationRules.NotFoundText);
+            var stored = await _db.PurchaseQuotes.FirstOrDefaultAsync(q => q.Id == id && !q.IsDeleted)
+                ?? throw BusinessException.NotFound(PurchaseQuoteAuthorizationRules.NotFoundText);
+            await PurchaseQuoteAuthorizationRules.EnsureQuoteAllowedAsync(_db, liveScope, id);
+            PurchaseQuoteAuthorizationRules.EnsureProposedCustomerAllowed(liveScope, entity.CustomerId);
+
+            if (string.Equals((stored.Status ?? string.Empty).Trim(), PurchaseQuoteMutationRules.ConvertedStatus,
+                    StringComparison.Ordinal))
+                throw BusinessException.RuleConflict(PurchaseQuoteMutationRules.ConvertedImmutableText);
+
+            if (await PurchaseQuoteApproval.FindCurrentDecisionAsync(_db, stored) is not null)
+            {
+                // 已决定：只允许安全非商业备注修改，绝不覆盖审批依据或血缘。
+                if (!PurchaseQuoteMutationRules.IsRemarkOnlyChange(stored, entity))
+                    throw BusinessException.RuleConflict(PurchaseQuoteMutationRules.DecidedImmutableText);
+                PurchaseQuoteMutationRules.ApplyRemarkOnly(stored, entity);
+            }
+            else
+            {
+                await PurchaseQuoteMutationRules.EnsureNoForgedConversionEvidenceAsync(_db, entity);
+                PurchaseQuoteMutationRules.ValidateDraft(entity);
+                PurchaseQuoteMutationRules.ApplyEditableFields(stored, entity);
+            }
+
+            stored.UpdatedAt = DateTime.Now;
+            stored.UpdatedBy = CurrentUserId();
+            await _db.SaveChangesAsync();
+            if (transaction is not null) await transaction.CommitAsync();
+            return Ok(ApiResponse<PurchaseQuote>.Success(stored, "更新成功"));
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            await RollbackAsync(transaction, _db);
+            throw BusinessException.RuleConflict(PurchaseQuoteMutationRules.StaleRowVersionText);
+        }
+        catch
+        {
+            await RollbackAsync(transaction, _db);
+            throw;
+        }
     }
 
-    /// <summary>删除（软删除；ERP-416：先授权并复核持久化归属，被拒不删除任何行）。</summary>
+    /// <summary>
+    /// 删除（软删除；ERP-416：先授权并复核持久化归属，被拒不删除任何行）。
+    /// ERP-417：在比价行锁内确认「未转换 + 无归属审批决定」后才软删除；已转换、或已存在由实时审批生命周期
+    /// 追加的归属决定（<see cref="PurchaseQuoteMutationRules.IsAttributedDecision"/>）的行拒绝删除
+    /// （保留原始审批与转换历史，绝不硬删除）；未归属的历史 / 种子决定保留 ERP-416 既有软删除契约
+    /// （决策证据行本身绝不删除），失败整体回滚。
+    /// </summary>
     [HttpDelete("{id:long}")]
     public override async Task<IActionResult> Delete(long id)
     {
         var scope = await EnsureAuthorizedAsync();
         await PurchaseQuoteAuthorizationRules.EnsureQuoteAllowedAsync(_db, scope, id);
-        await Service.DeleteAsync(id);
-        return Ok(ApiResponse<object>.Success(null, "删除成功"));
+
+        await using var transaction = await PurchaseQuoteMutationRules.BeginMutationTransactionAsync(_db);
+        try
+        {
+            var liveScope = await ReauthorizeAsync();
+            if (!await PurchaseQuoteMutationRules.LockQuoteRowAsync(_db, id))
+                throw BusinessException.NotFound(PurchaseQuoteAuthorizationRules.NotFoundText);
+            var stored = await _db.PurchaseQuotes.FirstOrDefaultAsync(q => q.Id == id && !q.IsDeleted)
+                ?? throw BusinessException.NotFound(PurchaseQuoteAuthorizationRules.NotFoundText);
+            await PurchaseQuoteAuthorizationRules.EnsureQuoteAllowedAsync(_db, liveScope, id);
+
+            if (string.Equals((stored.Status ?? string.Empty).Trim(), PurchaseQuoteMutationRules.ConvertedStatus,
+                    StringComparison.Ordinal))
+                throw BusinessException.RuleConflict(PurchaseQuoteMutationRules.ConvertedImmutableText);
+            var decision = await PurchaseQuoteApproval.FindCurrentDecisionAsync(_db, stored);
+            if (PurchaseQuoteMutationRules.IsAttributedDecision(decision))
+                throw BusinessException.RuleConflict(PurchaseQuoteMutationRules.DecidedNoDeleteText);
+
+            stored.IsDeleted = true;
+            stored.UpdatedAt = DateTime.Now;
+            stored.UpdatedBy = CurrentUserId();
+            await _db.SaveChangesAsync();
+            if (transaction is not null) await transaction.CommitAsync();
+            return Ok(ApiResponse<object>.Success(null, "删除成功"));
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            await RollbackAsync(transaction, _db);
+            throw BusinessException.RuleConflict(PurchaseQuoteMutationRules.StaleRowVersionText);
+        }
+        catch
+        {
+            await RollbackAsync(transaction, _db);
+            throw;
+        }
     }
 
-    /// <summary>批量删除（软删除；ERP-416：混入任何范围外 / 不存在 Id 即整批拒绝，绝无部分写入）。</summary>
+    /// <summary>
+    /// 批量删除（软删除；ERP-416：混入任何范围外 / 不存在 Id 即整批拒绝，绝无部分写入）。
+    /// ERP-417：全部 Id 按升序确定性加锁，锁内校验所有行「未转换且无归属决定」后**全有或全无**提交；
+    /// 任一不合格即整体拒绝并回滚（绝不部分删除）。
+    /// </summary>
     [HttpPost("batch-delete")]
     public override async Task<IActionResult> BatchDelete([FromBody] List<long> ids)
     {
         var scope = await EnsureAuthorizedAsync();
-        var list = ids ?? new List<long>();
+        var list = PurchaseQuoteMutationRules.MergeLockIds(ids);
         await PurchaseQuoteAuthorizationRules.EnsureQuotesAllowedAsync(_db, scope, list);
-        await Service.BatchDeleteAsync(list);
-        return Ok(ApiResponse<object>.Success(null, "批量删除成功"));
+        if (list.Count == 0) return Ok(ApiResponse<object>.Success(null, "批量删除成功"));
+
+        await using var transaction = await PurchaseQuoteMutationRules.BeginMutationTransactionAsync(_db);
+        try
+        {
+            var liveScope = await ReauthorizeAsync();
+            await PurchaseQuoteMutationRules.LockQuoteRowsAsync(_db, list); // Id 升序确定性加锁
+
+            var rows = await _db.PurchaseQuotes
+                .Where(q => list.Contains(q.Id) && !q.IsDeleted)
+                .ToListAsync();
+            if (rows.Count != list.Count)
+                throw BusinessException.NotFound(PurchaseQuoteAuthorizationRules.NotFoundText);
+            await PurchaseQuoteAuthorizationRules.EnsureQuotesAllowedAsync(_db, liveScope, list);
+
+            if (rows.Any(r => string.Equals((r.Status ?? string.Empty).Trim(),
+                    PurchaseQuoteMutationRules.ConvertedStatus, StringComparison.Ordinal)))
+                throw BusinessException.RuleConflict(PurchaseQuoteMutationRules.ConvertedImmutableText);
+            var decisions = await _db.PurchaseQuoteDecisions.AsNoTracking()
+                .Where(d => list.Contains(d.QuoteId) && !d.IsDeleted)
+                .ToListAsync();
+            if (decisions.Any(PurchaseQuoteMutationRules.IsAttributedDecision))
+                throw BusinessException.RuleConflict(PurchaseQuoteMutationRules.DecidedNoDeleteText);
+
+            var now = DateTime.Now;
+            var actor = CurrentUserId();
+            foreach (var row in rows)
+            {
+                row.IsDeleted = true;
+                row.UpdatedAt = now;
+                row.UpdatedBy = actor;
+            }
+
+            await _db.SaveChangesAsync();
+            if (transaction is not null) await transaction.CommitAsync();
+            return Ok(ApiResponse<object>.Success(null, "批量删除成功"));
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            await RollbackAsync(transaction, _db);
+            throw BusinessException.RuleConflict(PurchaseQuoteMutationRules.StaleRowVersionText);
+        }
+        catch
+        {
+            await RollbackAsync(transaction, _db);
+            throw;
+        }
+    }
+
+    /// <summary>锁内重新读取实时身份 / 既有「供应商比价」菜单 / 权威客户范围（无 HTTP 管线时返回 null，保留内部口径）。</summary>
+    private async Task<SalespersonDataScope?> ReauthorizeAsync()
+        => RequiresLiveAuthorization()
+            ? await PurchaseQuoteAuthorizationRules.EnsureAccessAuthorizedAsync(_db, CurrentUserId())
+            : null;
+
+    /// <summary>失败 / 拒绝后整体回滚并丢弃半成品变更（绝不残留部分写入）。</summary>
+    private static async Task RollbackAsync(IDbContextTransaction? transaction, IErpDbContext db)
+    {
+        if (transaction is not null) await transaction.RollbackAsync();
+        PurchaseQuoteMutationRules.DiscardTrackedChanges(db);
     }
 
     /// <summary>
@@ -198,25 +373,50 @@ public class PurchaseQuoteController : BaseCrudController<PurchaseQuote>
         var scope = await EnsureAuthorizedAsync();
         var destination = await EnsureDestinationAuthorizedAsync();
 
-        var quote = await _db.PurchaseQuotes
-            .FirstOrDefaultAsync(q => q.Id == id && !q.IsDeleted)
-            ?? throw BusinessException.NotFound(PurchaseQuoteAuthorizationRules.NotFoundText);
-
-        await PurchaseQuoteAuthorizationRules.EnsureQuoteAllowedAsync(_db, scope, id);
-
-        var order = await PurchaseQuoteConversion.BuildDraftAsync(_db, quote);
-        if (destination is not null)
-            await PurchaseQuoteAuthorizationRules.EnsureDestinationScopeAllowedAsync(_db, destination, order);
-        order.OrderNo = await _noService.GenerateAsync(DocumentType.PurchaseOrder);
-        _db.PurchaseOrders.Add(order);
-        PurchaseQuoteConversion.MarkConverted(quote, order.OrderNo);
-        await _db.SaveChangesAsync();
-        return Ok(ApiResponse<PurchaseOrderConversionResult>.Success(new PurchaseOrderConversionResult
+        // ERP-417：与修改 / 删除 / 批量删除 / 审批决定共用同一把比价行锁 + 原子事务（锁内权威重读）。
+        await using var transaction = await PurchaseQuoteMutationRules.BeginMutationTransactionAsync(_db);
+        try
         {
-            Id = order.Id,
-            OrderNo = order.OrderNo,
-            SourceNo = quote.QuoteNo
-        }, "已生成采购订单"));
+            var liveScope = await ReauthorizeAsync();
+            if (!await PurchaseQuoteMutationRules.LockQuoteRowAsync(_db, id))
+                throw BusinessException.NotFound(PurchaseQuoteAuthorizationRules.NotFoundText);
+
+            var quote = await _db.PurchaseQuotes
+                .FirstOrDefaultAsync(q => q.Id == id && !q.IsDeleted)
+                ?? throw BusinessException.NotFound(PurchaseQuoteAuthorizationRules.NotFoundText);
+
+            await PurchaseQuoteAuthorizationRules.EnsureQuoteAllowedAsync(_db, liveScope, id);
+
+            var order = await PurchaseQuoteConversion.BuildDraftAsync(_db, quote);
+
+            // ERP-417：批准供应商与当前供应商必须一致（绝不采购批准之外的供应商）；在既有资格守卫之后判定，
+            // 保持既有「未维护供应商 / 未选中 / 已放弃」的提示口径。
+            await PurchaseQuoteApproval.EnsureApprovedSupplierCoherentAsync(_db, quote);
+
+            if (destination is not null)
+                await PurchaseQuoteAuthorizationRules.EnsureDestinationScopeAllowedAsync(_db, destination, order);
+            order.OrderNo = await _noService.GenerateAsync(DocumentType.PurchaseOrder);
+            _db.PurchaseOrders.Add(order);
+            PurchaseQuoteConversion.MarkConverted(quote, order.OrderNo);
+            await _db.SaveChangesAsync();
+            if (transaction is not null) await transaction.CommitAsync();
+            return Ok(ApiResponse<PurchaseOrderConversionResult>.Success(new PurchaseOrderConversionResult
+            {
+                Id = order.Id,
+                OrderNo = order.OrderNo,
+                SourceNo = quote.QuoteNo
+            }, "已生成采购订单"));
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            await RollbackAsync(transaction, _db);
+            throw BusinessException.RuleConflict(PurchaseQuoteMutationRules.StaleRowVersionText);
+        }
+        catch
+        {
+            await RollbackAsync(transaction, _db);
+            throw;
+        }
     }
 
     /// <summary>
@@ -256,22 +456,49 @@ public class PurchaseQuoteController : BaseCrudController<PurchaseQuote>
         // 并在真实发号 / 落库之前对计划草稿做权威目的地范围复核。
         var scope = await EnsureAuthorizedAsync();
         var destination = await EnsureDestinationAuthorizedAsync();
-        await PurchaseQuoteAuthorizationRules.EnsureBatchAllowedAsync(_db, scope,
+        var batchNo = await PurchaseQuoteAuthorizationRules.EnsureBatchAllowedAsync(_db, scope,
             request?.QuoteNo, request?.LineId, request?.LineIds);
 
-        if (destination is not null && request is not null)
+        // ERP-417：批次全部来源行按 Id 升序确定性加锁 + 原子事务（与修改 / 删除 / 审批决定共用同一把比价行锁）。
+        await using var transaction = await PurchaseQuoteMutationRules.BeginMutationTransactionAsync(_db);
+        try
         {
-            var precheck = await PurchaseQuoteConversion.BuildBatchAsync(
-                _db, request.QuoteNo, request.LineId, request.LineIds);
-            foreach (var group in precheck.Groups)
-                await PurchaseQuoteAuthorizationRules.EnsureDestinationScopeAllowedAsync(_db, destination, group.Draft);
-        }
+            var liveScope = await ReauthorizeAsync();
+            if (batchNo is not null)
+            {
+                var lockIds = await _db.PurchaseQuotes.AsNoTracking()
+                    .Where(q => q.QuoteNo == batchNo && !q.IsDeleted)
+                    .Select(q => q.Id)
+                    .ToListAsync();
+                await PurchaseQuoteMutationRules.LockQuoteRowsAsync(_db, lockIds);
+                await PurchaseQuoteAuthorizationRules.EnsureBatchAllowedAsync(_db, liveScope, batchNo, null);
+            }
 
-        var result = await PurchaseQuoteConversion.ConvertBatchAsync(_db, _noService, request);
-        var message = result.Skipped.Count > 0
-            ? $"已生成 {result.OrderCount} 张采购订单，跳过 {result.Skipped.Count} 行不合格比价行"
-            : $"已生成 {result.OrderCount} 张采购订单";
-        return Ok(ApiResponse<PurchaseQuoteBatchConversionResult>.Success(result, message));
+            if (destination is not null && request is not null)
+            {
+                var precheck = await PurchaseQuoteConversion.BuildBatchAsync(
+                    _db, request.QuoteNo, request.LineId, request.LineIds);
+                foreach (var group in precheck.Groups)
+                    await PurchaseQuoteAuthorizationRules.EnsureDestinationScopeAllowedAsync(_db, destination, group.Draft);
+            }
+
+            var result = await PurchaseQuoteConversion.ConvertBatchAsync(_db, _noService, request);
+            if (transaction is not null) await transaction.CommitAsync();
+            var message = result.Skipped.Count > 0
+                ? $"已生成 {result.OrderCount} 张采购订单，跳过 {result.Skipped.Count} 行不合格比价行"
+                : $"已生成 {result.OrderCount} 张采购订单";
+            return Ok(ApiResponse<PurchaseQuoteBatchConversionResult>.Success(result, message));
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            await RollbackAsync(transaction, _db);
+            throw BusinessException.RuleConflict(PurchaseQuoteMutationRules.StaleRowVersionText);
+        }
+        catch
+        {
+            await RollbackAsync(transaction, _db);
+            throw;
+        }
     }
 
     /// <summary>

@@ -17,10 +17,16 @@ public sealed class PurchaseQuoteDecisionRequest
     /// <summary>决定依据 / 理由</summary>
     public string? DecisionBasis { get; set; }
 
-    /// <summary>决定人 Id</summary>
+    /// <summary>
+    /// 决定人 Id。<b>ERP-417</b>：真实认证请求下由服务端从当前登录账号（<c>ClaimTypes.NameIdentifier</c>）解析并落库，
+    /// 本字段被忽略（伪造无效）；仅在无 HTTP 管线的进程内直调（内部派生 / 历史单元测试）时保留既有口径。
+    /// </summary>
     public long? DecidedBy { get; set; }
 
-    /// <summary>决定人名称</summary>
+    /// <summary>
+    /// 决定人名称。<b>ERP-417</b>：真实认证请求下由服务端从当前登录账号的显示名解析并落库，本字段被忽略（伪造无效）；
+    /// 仅在无 HTTP 管线的进程内直调时保留既有口径。
+    /// </summary>
     public string? DecidedByName { get; set; }
 }
 

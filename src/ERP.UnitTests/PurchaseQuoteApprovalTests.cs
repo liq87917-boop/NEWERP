@@ -2,10 +2,13 @@ using ERP.Api.Controllers;
 using ERP.Application.Common;
 using ERP.Application.Services;
 using ERP.Domain.Entities;
+using ERP.Domain.Enums;
 using ERP.Infrastructure.Data;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Routing;
 using System.Reflection;
+using System.Security.Claims;
 using Xunit;
 
 namespace ERP.UnitTests;
@@ -254,7 +257,94 @@ public class PurchaseQuoteApprovalTests
         Assert.Equal("api/purchase/quote-decisions", route);
     }
 
+    // ==================== ERP-417：原子决定 + 实时可信决定人 + 批准供应商一致性 ====================
+
+    [Fact]
+    public async Task 审批决定_实时认证请求_伪造决定人被忽略_取自登录账号()
+    {
+        using var db = TestDbFactory.Create();
+        var quote = SeedQuote(db, "PQ-APV-ACTOR");
+        var userId = SeedPrivilegedUser(db, "ERP417 审批人");
+
+        var decision = await DecideLiveAsync(db, userId, new PurchaseQuoteDecisionRequest
+        {
+            QuoteId = quote.Id,
+            QuoteNo = quote.QuoteNo,
+            Decision = PurchaseQuoteApproval.Approved,
+            DecidedBy = 9_999_999L,
+            DecidedByName = "伪造决定人"
+        });
+
+        Assert.Equal(userId, decision.DecidedBy);
+        Assert.Equal("ERP417 审批人", decision.DecidedByName);
+        Assert.Equal(userId, decision.CreatedBy); // 归属操作人：实时生命周期追加的决定冻结软删除
+        Assert.Single(db.PurchaseQuoteDecisions);
+    }
+
+    [Fact]
+    public async Task 已批准决定后_供应商被改写_转采购订单_拒绝()
+    {
+        using var db = TestDbFactory.Create();
+        var quote = SeedQuote(db, "PQ-APV-MISMATCH");
+        await DecideAsync(db, new PurchaseQuoteDecisionRequest
+        {
+            QuoteId = quote.Id, Decision = PurchaseQuoteApproval.Approved
+        });
+
+        // 模拟绕过生命周期的直接改写（历史数据 / 直连 SQL）：批准 88，却被改成 99。
+        var stored = db.PurchaseQuotes.Single(q => q.Id == quote.Id);
+        stored.SupplierId = 99L;
+        stored.SupplierName = "别家供应商";
+        db.SaveChanges();
+
+        var ex = await Assert.ThrowsAsync<BusinessException>(() => NewQuoteController(db).ToPurchaseOrder(quote.Id));
+        Assert.Equal(ErrorCodes.RuleConflict, ex.Code);
+        Assert.Contains("与已批准决定的选中供应商", ex.Message);
+        Assert.Empty(db.PurchaseOrders);
+    }
+
     // ==================== 工厂与种子数据 ====================
+
+    private static PurchaseQuoteDecisionController NewLiveController(ErpDbContext db, long userId)
+    {
+        var http = new DefaultHttpContext();
+        http.Request.Path = "/api/purchase/quote-decisions";
+        http.User = new ClaimsPrincipal(new ClaimsIdentity(
+            new[] { new Claim(ClaimTypes.NameIdentifier, userId.ToString()) }, "Test"));
+        return new PurchaseQuoteDecisionController(db)
+        {
+            ControllerContext = new ControllerContext { HttpContext = http }
+        };
+    }
+
+    private static async Task<PurchaseQuoteDecision> DecideLiveAsync(ErpDbContext db, long userId,
+        PurchaseQuoteDecisionRequest request)
+    {
+        var ok = Assert.IsType<OkObjectResult>(await NewLiveController(db, userId).Decide(request));
+        var response = Assert.IsType<ApiResponse<PurchaseQuoteDecision>>(ok.Value);
+        Assert.Equal(ErrorCodes.Success, response.Code);
+        return response.Data!;
+    }
+
+    private static long SeedPrivilegedUser(ErpDbContext db, string displayName)
+    {
+        var code = $"erp417-a-{Guid.NewGuid():N}";
+        var role = new SysRole { RoleName = code, RoleCode = code, IsSystem = true };
+        db.SysRoles.Add(role);
+        db.SaveChanges();
+
+        var user = new SysUser
+        {
+            UserName = code, PasswordHash = "hash", PasswordSalt = "salt",
+            DisplayName = displayName, Status = UserStatus.Enabled
+        };
+        db.SysUsers.Add(user);
+        db.SaveChanges();
+
+        db.SysUserRoles.Add(new SysUserRole { UserId = user.Id, RoleId = role.Id });
+        db.SaveChanges();
+        return user.Id;
+    }
 
     private static PurchaseQuoteDecisionController NewController(ErpDbContext db) => new(db);
 
