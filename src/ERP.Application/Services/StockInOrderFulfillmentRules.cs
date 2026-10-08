@@ -9,9 +9,10 @@ namespace ERP.Application.Services;
 /// <summary>
 /// 采购入库衔接来源订单并防止累计超收（ERP-342）。
 /// <para>只复用既有 <see cref="StockIn.PurchaseOrderId"/> 显式链接：未链接（null）的历史单据不做任何校验，行为保持不变。</para>
-/// <para>审核时，仅当链接构成「权威来源」（订单存在、未删除、已审核、供应商一致、每商品有且仅有一行可折算的订单明细）
-/// 才按商品、按基础单位逐行校验「累计已审核入库数量（含本单）≤ 订单授权数量」；链接不构成权威来源时
-/// 不做累计校验，与 ERP-033 成本回退同一口径——绝不猜测不明确的重复订单行，也绝不臆造授权数量、不阻断既有兜底入库。</para>
+/// <para>显式链接构成「权威来源」要求订单存在、未删除、已审核、供应商一致、每商品有且仅有一行可折算的订单明细，
+/// 且入库明细单位与商品基础单位兼容；任一不满足即在审核前 fail closed 拒绝履约，绝不因来源语义不明确而跳过数量护栏。</para>
+/// <para>ERP-033 成本回退只作用于「价格 / 汇率」估值缺失（不影响订单身份与数量授权）：权威来源的入库单仍按
+/// 基础单位累计校验，成本则回退移动加权平均，不把「有效来源 + 成本不可用」与「无效来源」混为一谈。</para>
 /// <para>已取消 / 已驳回 / 待提交 / 已提交的入库单不计入已审核数量，取消后自动释放剩余额度；跨单位、跨币种不合计。</para>
 /// <para>本类只做纯内存判定与有界查询，不落库、不改单据、不开启事务；同单并发审核的串行化由调用方
 /// （<c>StockInController.Approve</c>）在同一关系型事务内对来源订单行加更新锁完成。</para>
@@ -25,37 +26,52 @@ public static class StockInOrderFulfillmentRules
     public const string RuleText =
         "采购入库单关联采购订单后，仅当链接权威（订单已审核、供应商一致、每商品唯一兼容明细行）时，审核时累计" +
         "「以该订单为来源、未删除、已审核」的入库数量（入库明细已折算基础单位）加上本单数量不得超过订单授权数量（按商品逐行比对）；" +
-        "未关联或链接不权威的入库单不做累计校验，与既有成本回退口径一致，绝不猜测重复订单行、绝不臆造授权数量。";
+        "未关联的入库单不做累计校验；显式链接无效（订单不存在 / 已删除 / 未审核 / 供应商不一致 / 商品或单位不兼容 / 重复明细）" +
+        "在审核前直接拒绝履约，绝不猜测重复订单行、绝不臆造授权数量。";
 
     /// <summary>
     /// 校验审核时的来源订单链接与累计数量上限。调用方必须已把本单明细折算为基础单位（<c>StockUnitConversion.NormalizeAsync</c>）。
-    /// <para>未链接或链接不构成权威来源时直接返回（不校验、不阻断），与 ERP-033 成本回退同一口径；
-    /// 链接权威时按基础单位逐商品累计校验，超限抛业务异常且不落库、不改库存 / 流水 / 单据状态。</para>
+    /// <para>未链接（null）直接返回；显式链接无效时 fail closed 抛业务异常，且不落库、不改库存 / 流水 / 单据状态。</para>
     /// </summary>
     public static async Task ValidateApprovalAsync(IErpDbContext db, StockIn entity, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(db);
         ArgumentNullException.ThrowIfNull(entity);
 
-        if (entity.PurchaseOrderId is not > 0) return;
+        if (entity.PurchaseOrderId is null) return;
 
-        var link = await TryResolveAuthoritativeLinkAsync(db, entity, ct);
-        if (link is null) return;
-
+        var link = await ResolveAuthoritativeLinkOrThrowAsync(db, entity, ct);
         await EnforceCumulativeAsync(db, entity, link, ct);
+    }
+
+    /// <summary>
+    /// 校验创建 / 更新时的显式来源链接。未链接（null）保持历史行为；显式链接必须为正整数且构成权威来源，
+    /// 否则 fail closed 拒绝保存，避免把无效来源链接落到待提交 / 待审核单据上。
+    /// </summary>
+    public static async Task ValidateLinkAsync(IErpDbContext db, StockIn entity, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(entity);
+
+        if (entity.PurchaseOrderId is null) return;
+        if (entity.PurchaseOrderId is not > 0)
+            throw BusinessException.InvalidParameter("来源采购订单 Id 必须为正整数");
+
+        await ResolveAuthoritativeLinkOrThrowAsync(db, entity, ct);
     }
 
     // ==================== 私有助手 ====================
 
-    private static async Task<LinkContext?> TryResolveAuthoritativeLinkAsync(IErpDbContext db, StockIn entity,
+    private static async Task<LinkContext> ResolveAuthoritativeLinkOrThrowAsync(IErpDbContext db, StockIn entity,
         CancellationToken ct)
     {
         var order = await db.PurchaseOrders.AsNoTracking().Include(o => o.Details)
-            .FirstOrDefaultAsync(o => o.Id == entity.PurchaseOrderId!.Value && !o.IsDeleted, ct);
-        if (order is null || order.Status != DocumentStatus.Approved)
-            return null;
+            .FirstOrDefaultAsync(o => o.Id == entity.PurchaseOrderId!.Value && !o.IsDeleted, ct)
+            ?? throw BusinessException.RuleConflict("来源采购订单不存在或已删除");
+        if (order.Status != DocumentStatus.Approved)
+            throw BusinessException.RuleConflict("来源采购订单未审核，不能作为入库依据");
         if (entity.SupplierId != order.SupplierId)
-            return null;
+            throw BusinessException.RuleConflict("入库单供应商与来源采购订单供应商不一致");
 
         var productIds = entity.Details.Where(d => !d.IsDeleted && d.ProductId > 0)
             .Select(d => d.ProductId).Distinct().ToList();
@@ -70,16 +86,18 @@ public static class StockInOrderFulfillmentRules
         foreach (var detail in entity.Details.Where(d => !d.IsDeleted))
         {
             if (detail.ProductId <= 0)
-                return null;
+                throw BusinessException.RuleConflict("入库明细必须指定商品");
             if (!products.TryGetValue(detail.ProductId, out var product))
-                return null;
+                throw BusinessException.RuleConflict($"商品 [{detail.ProductName}] 不存在或已删除");
             var matches = lines.Where(l => l.ProductId == detail.ProductId).ToList();
-            if (matches.Count != 1)
-                return null;
+            if (matches.Count == 0)
+                throw BusinessException.RuleConflict($"来源采购订单无商品 [{product.ProductName}] 的明细行");
+            if (matches.Count > 1)
+                throw BusinessException.RuleConflict($"来源采购订单存在多条商品 [{product.ProductName}] 明细，授权数量不唯一");
             if (!TryBaseUnitQuantity(product, matches[0], out _))
-                return null;
+                throw BusinessException.RuleConflict($"来源采购订单商品 [{product.ProductName}] 明细单位无法折算为基础单位");
             if (!IsStockInUnitCompatible(product, detail))
-                return null;
+                throw BusinessException.RuleConflict($"入库明细单位与商品 [{product.ProductName}] 基础单位不兼容");
         }
 
         return new LinkContext(order, lines, products);

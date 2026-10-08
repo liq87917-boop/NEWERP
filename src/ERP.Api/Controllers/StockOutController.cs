@@ -77,6 +77,7 @@ public class StockOutController : DocumentControllerBase<StockOut>
         entity.CreatedAt = DateTime.Now;
         await StockUnitConversion.NormalizeAsync(Db, entity.Details);
         Calculate(entity);
+        await StockOutOrderFulfillmentRules.ValidateLinkAsync(Db, entity);
         Db.StockOuts.Add(entity);
         await Db.SaveChangesAsync();
         return Ok(ApiResponse<object>.Success(new { entity.Id, entity.StockOutNo }, "出库单创建成功"));
@@ -108,6 +109,7 @@ public class StockOutController : DocumentControllerBase<StockOut>
         existing.Details = entity.Details;
         await StockUnitConversion.NormalizeAsync(Db, existing.Details);
         Calculate(existing);
+        await StockOutOrderFulfillmentRules.ValidateLinkAsync(Db, existing);
         existing.UpdatedAt = DateTime.Now;
         await Db.SaveChangesAsync();
         return Ok(ApiResponse<object>.Success(null, "出库单更新成功"));
@@ -179,8 +181,8 @@ public class StockOutController : DocumentControllerBase<StockOut>
         if (salesOrderId is not > 0) return;
         if (!Db.Database.IsRelational()) return;
 
-        // 订单行不存在时无需加锁：ValidateApprovalAsync 会把链接判为非权威并跳过累计校验，
-        // 不因链接悬空而阻断出库。
+        // 订单行不存在时无需加锁：ValidateApprovalAsync 会对显式链接 fail closed 抛异常，
+        // 在取得任何库存写入前拒绝履约；未链接（null）则不加锁。
         await Db.Database
             .SqlQueryRaw<long>(
                 "SELECT Id FROM db_owner.SalesOrders WITH (UPDLOCK, HOLDLOCK) WHERE Id = {0}",

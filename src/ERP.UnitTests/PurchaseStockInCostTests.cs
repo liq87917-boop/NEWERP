@@ -154,22 +154,21 @@ public class PurchaseStockInCostTests
     }
 
     [Fact]
-    public async Task 采购入库_链接的采购订单不存在_回退既有兜底()
+    public async Task 采购入库_链接的采购订单不存在_拒绝保存且成本源判为不可用()
     {
         using var db = TestDbFactory.Create();
         SeedProduct(db, ProductA, "P-033-5", "商品A", "PCS", string.Empty, 0);
         SeedStock(db, WarehouseA, ProductA, quantity: 10m, totalCost: 100m);   // 当前均价 10
         var ctl = NewController(db);
-        var id = await CreateStockInAsync(ctl, ProductA, 5m, "PCS", purchaseOrderId: 999999L);
 
-        await ctl.Submit(id);
-        await ctl.Approve(id);
+        // 无效履约链接：fail closed，不落单据 / 流水
+        var ex = await Assert.ThrowsAsync<BusinessException>(() =>
+            ctl.Create(NewStockIn(999999L, ProductA, 5m, "PCS")));
+        Assert.Equal(ErrorCodes.RuleConflict, ex.Code);
+        Assert.Empty(db.StockIns);
+        Assert.Empty(db.StockMovements);
 
-        var movement = db.StockMovements.Single();
-        Assert.Equal(10m, movement.UnitCost);                         // 取当前加权平均成本
-        Assert.Equal(50m, movement.Amount);
-        Assert.Contains("成本来源：既有移动加权平均兜底", movement.Remark);
-
+        // 成本源口径独立保留：仍把缺失订单判为「非权威成本」，而非订单价
         var source = await LoadSourceAsync(db, 999999L, ProductA);
         Assert.False(source.HasAuthoritativeOrder);
         Assert.Equal(PurchaseStockInCost.ReasonOrderNotAuthoritative, source.OrderReason);
@@ -180,26 +179,27 @@ public class PurchaseStockInCostTests
     [InlineData(DocumentStatus.Submitted)]
     [InlineData(DocumentStatus.Cancelled)]
     [InlineData(DocumentStatus.Rejected)]
-    public async Task 采购入库_链接订单未审核_不以订单价格计价(DocumentStatus orderStatus)
+    public async Task 采购入库_链接订单未审核_拒绝保存且成本源判为不可用(DocumentStatus orderStatus)
     {
         using var db = TestDbFactory.Create();
         SeedProduct(db, ProductA, "P-033-6", "商品A", "PCS", string.Empty, 0);
         var order = SeedOrder(db, "PO-033-6", Currency.CNY, 1m, orderStatus, (ProductA, "PCS", 7.5m));
         SeedStock(db, WarehouseA, ProductA, quantity: 10m, totalCost: 100m);
         var ctl = NewController(db);
-        var id = await CreateStockInAsync(ctl, ProductA, 4m, "PCS", order.Id);
 
-        await ctl.Submit(id);
-        await ctl.Approve(id);
+        var ex = await Assert.ThrowsAsync<BusinessException>(() =>
+            ctl.Create(NewStockIn(order.Id, ProductA, 4m, "PCS")));
+        Assert.Equal(ErrorCodes.RuleConflict, ex.Code);
+        Assert.Empty(db.StockIns);
+        Assert.Empty(db.StockMovements);
 
-        var movement = db.StockMovements.Single();
-        Assert.Equal(10m, movement.UnitCost);                         // 未审核价格不构成成本依据
-        Assert.Contains("采购订单不存在或未审核", movement.Remark);
-        Assert.Equal(4m * 10m, movement.Amount);
+        var source = await LoadSourceAsync(db, order.Id, ProductA);
+        Assert.False(source.HasAuthoritativeOrder);
+        Assert.Equal(PurchaseStockInCost.ReasonOrderNotAuthoritative, source.OrderReason);
     }
 
     [Fact]
-    public async Task 采购入库_链接订单已软删除_回退既有兜底()
+    public async Task 采购入库_链接订单已软删除_拒绝保存()
     {
         using var db = TestDbFactory.Create();
         SeedProduct(db, ProductA, "P-033-7", "商品A", "PCS", string.Empty, 0);
@@ -208,18 +208,18 @@ public class PurchaseStockInCostTests
         await db.SaveChangesAsync();
         SeedStock(db, WarehouseA, ProductA, quantity: 10m, totalCost: 100m);
         var ctl = NewController(db);
-        var id = await CreateStockInAsync(ctl, ProductA, 4m, "PCS", order.Id);
 
-        await ctl.Submit(id);
-        await ctl.Approve(id);
-
-        Assert.Equal(10m, db.StockMovements.Single().UnitCost);
+        var ex = await Assert.ThrowsAsync<BusinessException>(() =>
+            ctl.Create(NewStockIn(order.Id, ProductA, 4m, "PCS")));
+        Assert.Equal(ErrorCodes.RuleConflict, ex.Code);
+        Assert.Empty(db.StockIns);
+        Assert.Empty(db.StockMovements);
     }
 
     // ==================== 5. 订单行缺失 / 重复：不任选价格 ====================
 
     [Fact]
-    public async Task 采购入库_订单无该商品明细行_回退既有兜底()
+    public async Task 采购入库_订单无该商品明细行_拒绝保存且成本源判为缺证据()
     {
         using var db = TestDbFactory.Create();
         SeedProduct(db, ProductA, "P-033-8", "商品A", "PCS", string.Empty, 0);
@@ -227,21 +227,19 @@ public class PurchaseStockInCostTests
         var order = SeedOrder(db, "PO-033-8", Currency.CNY, 1m, DocumentStatus.Approved, (830002L, "PCS", 9m));
         SeedStock(db, WarehouseA, ProductA, quantity: 10m, totalCost: 100m);
         var ctl = NewController(db);
-        var id = await CreateStockInAsync(ctl, ProductA, 4m, "PCS", order.Id);
 
-        await ctl.Submit(id);
-        await ctl.Approve(id);
-
-        var movement = db.StockMovements.Single();
-        Assert.Equal(10m, movement.UnitCost);
-        Assert.Contains("采购订单无该商品明细行", movement.Remark);
+        var ex = await Assert.ThrowsAsync<BusinessException>(() =>
+            ctl.Create(NewStockIn(order.Id, ProductA, 4m, "PCS")));
+        Assert.Equal(ErrorCodes.RuleConflict, ex.Code);
+        Assert.Empty(db.StockIns);
+        Assert.Empty(db.StockMovements);
 
         var source = await LoadSourceAsync(db, order.Id, ProductA);
         Assert.Equal(PurchaseStockInCost.ReasonLineMissing, source.Resolve(ProductA).Reason);
     }
 
     [Fact]
-    public async Task 采购入库_订单同商品多行明细_不任选价格回退既有兜底()
+    public async Task 采购入库_订单同商品多行明细_拒绝保存且成本源判为语义不唯一()
     {
         using var db = TestDbFactory.Create();
         SeedProduct(db, ProductA, "P-033-9", "商品A", "PCS", string.Empty, 0);
@@ -249,14 +247,12 @@ public class PurchaseStockInCostTests
             (ProductA, "PCS", 7.5m), (ProductA, "PCS", 99m));
         SeedStock(db, WarehouseA, ProductA, quantity: 10m, totalCost: 100m);
         var ctl = NewController(db);
-        var id = await CreateStockInAsync(ctl, ProductA, 4m, "PCS", order.Id);
 
-        await ctl.Submit(id);
-        await ctl.Approve(id);
-
-        var movement = db.StockMovements.Single();
-        Assert.Equal(10m, movement.UnitCost);                         // 既不是 7.5 也不是 99
-        Assert.Contains("采购订单同商品多行明细，价格不唯一", movement.Remark);
+        var ex = await Assert.ThrowsAsync<BusinessException>(() =>
+            ctl.Create(NewStockIn(order.Id, ProductA, 4m, "PCS")));
+        Assert.Equal(ErrorCodes.RuleConflict, ex.Code);
+        Assert.Empty(db.StockIns);
+        Assert.Empty(db.StockMovements);
 
         var source = await LoadSourceAsync(db, order.Id, ProductA);
         var cost = source.Resolve(ProductA);
@@ -271,19 +267,19 @@ public class PurchaseStockInCostTests
     [InlineData("", 12)]           // 订单行单位为空
     [InlineData("CTN", 0)]         // 装箱单位但装箱数无效
     [InlineData("CTN", -3)]        // 装箱数为负
-    public async Task 采购入库_订单行单位无法折算到基础单位_回退既有兜底(string lineUnit, int unitsPerPackage)
+    public async Task 采购入库_订单行单位无法折算到基础单位_拒绝保存且成本源判为不兼容(string lineUnit, int unitsPerPackage)
     {
         using var db = TestDbFactory.Create();
         SeedProduct(db, ProductA, "P-033-10", "商品A", "PCS", "CTN", unitsPerPackage);
         var order = SeedOrder(db, "PO-033-10", Currency.CNY, 1m, DocumentStatus.Approved, (ProductA, lineUnit, 7.5m));
         SeedStock(db, WarehouseA, ProductA, quantity: 10m, totalCost: 100m);
         var ctl = NewController(db);
-        var id = await CreateStockInAsync(ctl, ProductA, 4m, "PCS", order.Id);
 
-        await ctl.Submit(id);
-        await ctl.Approve(id);
-
-        Assert.Equal(10m, db.StockMovements.Single().UnitCost);
+        var ex = await Assert.ThrowsAsync<BusinessException>(() =>
+            ctl.Create(NewStockIn(order.Id, ProductA, 4m, "PCS")));
+        Assert.Equal(ErrorCodes.RuleConflict, ex.Code);
+        Assert.Empty(db.StockIns);
+        Assert.Empty(db.StockMovements);
 
         var source = await LoadSourceAsync(db, order.Id, ProductA);
         Assert.Equal(PurchaseStockInCost.ReasonUnitIncompatible, source.Resolve(ProductA).Reason);
@@ -311,25 +307,24 @@ public class PurchaseStockInCostTests
     }
 
     [Fact]
-    public async Task 采购入库_商品资料缺失_回退既有兜底()
+    public async Task 采购入库_商品资料缺失_拒绝保存且成本源判为商品缺失()
     {
         using var db = TestDbFactory.Create();
         const long OrphanProduct = 830099L;                            // 订单行引用了不存在的商品资料
         var order = SeedOrder(db, "PO-033-12", Currency.CNY, 1m, DocumentStatus.Approved, (OrphanProduct, "PCS", 7.5m));
         var ctl = NewController(db);
-        var id = await CreateStockInAsync(ctl, OrphanProduct, 4m, "PCS", order.Id);
 
-        await ctl.Submit(id);
-        await ctl.Approve(id);
+        var ex = await Assert.ThrowsAsync<BusinessException>(() =>
+            ctl.Create(NewStockIn(order.Id, OrphanProduct, 4m, "PCS")));
+        Assert.Equal(ErrorCodes.RuleConflict, ex.Code);
+        Assert.Empty(db.StockIns);
+        Assert.Empty(db.StockMovements);
 
         var source = await LoadSourceAsync(db, order.Id, OrphanProduct);
         var cost = source.Resolve(OrphanProduct);
         Assert.False(cost.UsedOrderPrice);
         Assert.Equal(PurchaseStockInCost.ReasonProductMissing, cost.Reason);
         Assert.Equal(0m, cost.UnitCost);
-
-        // 无法确认基础单位时按既有兜底落账（新库存行首次入库为 0），不臆造单价
-        Assert.Equal(0m, db.StockMovements.Single().UnitCost);
     }
 
     // ==================== 7. 币种：只接受既有权威换算 ====================
@@ -531,6 +526,27 @@ public class PurchaseStockInCostTests
         var data = Assert.IsType<ApiResponse<object>>(((OkObjectResult)result).Value).Data!;
         return (long)data.GetType().GetProperty("Id")!.GetValue(data)!;
     }
+
+    private static StockIn NewStockIn(long? purchaseOrderId, long productId, decimal quantity, string unit)
+        => new()
+        {
+            StockInDate = DateTime.Today,
+            PurchaseOrderId = purchaseOrderId,
+            SupplierId = SupplierA,
+            WarehouseId = WarehouseA,
+            Remark = "ERP-033_TEST",
+            Details = new List<StockInDetail>
+            {
+                new()
+                {
+                    ProductId = productId,
+                    ProductName = $"商品{productId}",
+                    Spec = "规格A",
+                    Unit = unit,
+                    Quantity = quantity
+                }
+            }
+        };
 
     private static void SeedProduct(ErpDbContext db, long id, string code, string name, string unit,
         string packageUnit, int unitsPerPackage)

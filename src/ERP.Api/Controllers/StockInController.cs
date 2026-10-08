@@ -76,6 +76,7 @@ public class StockInController : DocumentControllerBase<StockIn>
         entity.CreatedAt = DateTime.Now;
         await StockUnitConversion.NormalizeAsync(Db, entity.Details);
         Calculate(entity);
+        await StockInOrderFulfillmentRules.ValidateLinkAsync(Db, entity);
         Db.StockIns.Add(entity);
         await Db.SaveChangesAsync();
         return Ok(ApiResponse<object>.Success(new { entity.Id, entity.StockInNo }, "入库单创建成功"));
@@ -107,6 +108,7 @@ public class StockInController : DocumentControllerBase<StockIn>
         existing.Details = entity.Details;
         await StockUnitConversion.NormalizeAsync(Db, existing.Details);
         Calculate(existing);
+        await StockInOrderFulfillmentRules.ValidateLinkAsync(Db, existing);
         existing.UpdatedAt = DateTime.Now;
         await Db.SaveChangesAsync();
         return Ok(ApiResponse<object>.Success(null, "入库单更新成功"));
@@ -186,8 +188,8 @@ public class StockInController : DocumentControllerBase<StockIn>
         if (purchaseOrderId is not > 0) return;
         if (!Db.Database.IsRelational()) return;
 
-        // 订单行不存在时无需加锁：ValidateApprovalAsync 会把链接判为非权威并跳过累计校验，
-        // 与 ERP-033 成本回退同一口径，不因链接悬空而阻断入库。
+        // 订单行不存在时无需加锁：ValidateApprovalAsync 会对显式链接 fail closed 抛异常，
+        // 在取得任何库存写入前拒绝履约；未链接（null）则不加锁。
         await Db.Database
             .SqlQueryRaw<long>(
                 "SELECT Id FROM db_owner.PurchaseOrders WITH (UPDLOCK, HOLDLOCK) WHERE Id = {0}",

@@ -12,7 +12,7 @@ namespace ERP.IntegrationTests;
 
 /// <summary>
 /// ERP-342 采购入库衔接来源订单并防止累计超收 SQL Server 集成测试（NEWERP_AUTOTEST 护栏）。
-/// <para>直接对 <see cref="StockInOrderFulfillmentRules"/> 做真实 SQL Server 验证：非权威链接不做累计校验、
+/// <para>直接对 <see cref="StockInOrderFulfillmentRules"/> 做真实 SQL Server 验证：无效显式链接 fail closed 拒绝、
 /// 部分 / 满量批次累计、累计超限拒绝、取消释放额度、包装单位折算、以及同一订单并发审核经
 /// UPDLOCK/HOLDLOCK 串行化后不会超收。</para>
 /// <para>安全口径：目标必须为专用 localdb 实例 <c>NEWERP_AutoAcceptance</c> 且库名前缀 <c>NEWERP_AUTOTEST</c>；
@@ -40,7 +40,7 @@ public sealed class StockInOrderFulfillmentSqlServerTests
     }
 
     [Fact]
-    public async Task Approval_NonAuthoritativeSupplier_NoCumulativeEnforcement()
+    public async Task Approval_InvalidSupplier_FailsClosed()
     {
         Guard();
         await using var db = _fixture.CreateDbContext();
@@ -51,8 +51,11 @@ public sealed class StockInOrderFulfillmentSqlServerTests
         var entity = SeedStockIn(db, "INT_TEST_FULFILL_LINK_SI", order.Id, SupplierB, DocumentStatus.Submitted,
             (productId, "PCS", 6m));
 
-        // 供应商不一致 → 非权威链接：不做累计校验，不抛异常（与 ERP-033 成本回退同一口径）
-        await StockInOrderFulfillmentRules.ValidateApprovalAsync(db, await ReloadAsync(db, entity.Id));
+        // 供应商不一致 → 无效显式链接：审核前 fail closed，且不改单据状态
+        var ex = await Assert.ThrowsAsync<BusinessException>(async () =>
+            await StockInOrderFulfillmentRules.ValidateApprovalAsync(db, await ReloadAsync(db, entity.Id)));
+        Assert.Contains("供应商不一致", ex.Message);
+        Assert.Equal(DocumentStatus.Submitted, db.StockIns.Single(s => s.Id == entity.Id).Status);
     }
 
     [Fact]

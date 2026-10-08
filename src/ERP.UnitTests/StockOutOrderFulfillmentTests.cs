@@ -59,95 +59,111 @@ public class StockOutOrderFulfillmentTests
     }
 
     [Fact]
-    public async Task Approve_链接不存在订单_不做累计校验_仍可出库()
+    public async Task Create_链接不存在订单_拒绝保存()
     {
         using var db = TestDbFactory.Create();
         SeedProduct(db, ProductA, "S-FUL-3", "商品A", "PCS", string.Empty, 0);
-        SeedStock(db, WarehouseA, ProductA, 6m);
         var ctl = NewController(db);
 
-        var id = await CreateAsync(ctl, 999999L, CustomerA, (ProductA, "PCS", 6m));
-        await SubmitAndApproveAsync(ctl, id);
-
-        Assert.Equal(DocumentStatus.Approved, db.StockOuts.Single().Status);
-        Assert.Equal(0m, db.Stocks.Single(s => s.ProductId == ProductA).Quantity);
+        var ex = await Assert.ThrowsAsync<BusinessException>(() =>
+            ctl.Create(NewStockOut(CustomerA, 999999L, (ProductA, "PCS", 6m))));
+        Assert.Equal(ErrorCodes.RuleConflict, ex.Code);
+        Assert.Empty(db.StockOuts);
     }
 
     [Fact]
-    public async Task Approve_链接未审核订单_不做累计校验()
+    public async Task Create_链接未审核订单_拒绝保存()
     {
         using var db = TestDbFactory.Create();
         SeedProduct(db, ProductA, "S-FUL-4", "商品A", "PCS", string.Empty, 0);
-        SeedStock(db, WarehouseA, ProductA, 6m);
         var order = SeedOrder(db, "SO-FUL-4", CustomerA, DocumentStatus.Pending, (ProductA, "PCS", 10m, 7.5m));
         var ctl = NewController(db);
 
-        var id = await CreateAsync(ctl, order.Id, CustomerA, (ProductA, "PCS", 6m));
-        await SubmitAndApproveAsync(ctl, id);
-
-        Assert.Equal(DocumentStatus.Approved, db.StockOuts.Single().Status);
+        var ex = await Assert.ThrowsAsync<BusinessException>(() =>
+            ctl.Create(NewStockOut(CustomerA, order.Id, (ProductA, "PCS", 6m))));
+        Assert.Equal(ErrorCodes.RuleConflict, ex.Code);
+        Assert.Empty(db.StockOuts);
     }
 
     [Fact]
-    public async Task Approve_链接客户不一致_不做累计校验()
+    public async Task Create_链接客户不一致_拒绝保存()
     {
         using var db = TestDbFactory.Create();
         SeedProduct(db, ProductA, "S-FUL-5", "商品A", "PCS", string.Empty, 0);
-        SeedStock(db, WarehouseA, ProductA, 6m);
         var order = SeedOrder(db, "SO-FUL-5", CustomerA, DocumentStatus.Approved, (ProductA, "PCS", 10m, 7.5m));
         var ctl = NewController(db);
 
-        var id = await CreateAsync(ctl, order.Id, CustomerB, (ProductA, "PCS", 6m));
-        await SubmitAndApproveAsync(ctl, id);
-
-        Assert.Equal(DocumentStatus.Approved, db.StockOuts.Single().Status);
+        var ex = await Assert.ThrowsAsync<BusinessException>(() =>
+            ctl.Create(NewStockOut(CustomerB, order.Id, (ProductA, "PCS", 6m))));
+        Assert.Equal(ErrorCodes.RuleConflict, ex.Code);
+        Assert.Empty(db.StockOuts);
     }
 
     [Fact]
-    public async Task Approve_链接商品不在订单_不做累计校验()
+    public async Task Create_链接商品不在订单_拒绝保存()
     {
         using var db = TestDbFactory.Create();
         SeedProduct(db, ProductA, "S-FUL-6", "商品A", "PCS", string.Empty, 0);
         SeedProduct(db, ProductB, "S-FUL-6B", "商品B", "PCS", string.Empty, 0);
-        SeedStock(db, WarehouseA, ProductB, 6m);
         var order = SeedOrder(db, "SO-FUL-6", CustomerA, DocumentStatus.Approved, (ProductA, "PCS", 10m, 7.5m));
         var ctl = NewController(db);
 
-        var id = await CreateAsync(ctl, order.Id, CustomerA, (ProductB, "PCS", 6m));
-        await SubmitAndApproveAsync(ctl, id);
-
-        Assert.Equal(DocumentStatus.Approved, db.StockOuts.Single().Status);
+        var ex = await Assert.ThrowsAsync<BusinessException>(() =>
+            ctl.Create(NewStockOut(CustomerA, order.Id, (ProductB, "PCS", 6m))));
+        Assert.Equal(ErrorCodes.RuleConflict, ex.Code);
+        Assert.Empty(db.StockOuts);
     }
 
     [Fact]
-    public async Task Approve_链接订单同商品多行_不做累计校验且不猜测()
+    public async Task Create_链接订单同商品多行_拒绝保存()
     {
         using var db = TestDbFactory.Create();
         SeedProduct(db, ProductA, "S-FUL-7", "商品A", "PCS", string.Empty, 0);
-        SeedStock(db, WarehouseA, ProductA, 6m);
         var order = SeedOrder(db, "SO-FUL-7", CustomerA, DocumentStatus.Approved,
             (ProductA, "PCS", 6m, 7.5m), (ProductA, "PCS", 4m, 8m));
         var ctl = NewController(db);
 
-        var id = await CreateAsync(ctl, order.Id, CustomerA, (ProductA, "PCS", 6m));
-        await SubmitAndApproveAsync(ctl, id);
-
-        Assert.Equal(DocumentStatus.Approved, db.StockOuts.Single().Status);
+        var ex = await Assert.ThrowsAsync<BusinessException>(() =>
+            ctl.Create(NewStockOut(CustomerA, order.Id, (ProductA, "PCS", 6m))));
+        Assert.Equal(ErrorCodes.RuleConflict, ex.Code);
+        Assert.Empty(db.StockOuts);
     }
 
     [Fact]
-    public async Task Approve_链接订单行单位不兼容_不做累计校验()
+    public async Task Create_链接订单行单位不兼容_拒绝保存()
     {
         using var db = TestDbFactory.Create();
         SeedProduct(db, ProductA, "S-FUL-8", "商品A", "PCS", "CTN", 12);
-        SeedStock(db, WarehouseA, ProductA, 6m);
         var order = SeedOrder(db, "SO-FUL-8", CustomerA, DocumentStatus.Approved, (ProductA, "KG", 10m, 7.5m));
         var ctl = NewController(db);
 
-        var id = await CreateAsync(ctl, order.Id, CustomerA, (ProductA, "PCS", 6m));
-        await SubmitAndApproveAsync(ctl, id);
+        var ex = await Assert.ThrowsAsync<BusinessException>(() =>
+            ctl.Create(NewStockOut(CustomerA, order.Id, (ProductA, "PCS", 6m))));
+        Assert.Equal(ErrorCodes.RuleConflict, ex.Code);
+        Assert.Empty(db.StockOuts);
+    }
 
-        Assert.Equal(DocumentStatus.Approved, db.StockOuts.Single().Status);
+    [Fact]
+    public async Task Approve_提交后来源订单失效_拒绝履约且库存流水状态不变()
+    {
+        using var db = TestDbFactory.Create();
+        SeedProduct(db, ProductA, "S-FUL-9", "商品A", "PCS", string.Empty, 0);
+        SeedStock(db, WarehouseA, ProductA, 6m);
+        var order = SeedOrder(db, "SO-FUL-9", CustomerA, DocumentStatus.Approved, (ProductA, "PCS", 10m, 7.5m));
+        var ctl = NewController(db);
+
+        var id = await CreateAsync(ctl, order.Id, CustomerA, (ProductA, "PCS", 6m));
+        await ctl.Submit(id);
+
+        // 提交后来源订单被取消：审核前 fail closed，不扣库存 / 流水，状态保持已提交
+        order.Status = DocumentStatus.Cancelled;
+        await db.SaveChangesAsync();
+
+        var ex = await Assert.ThrowsAsync<BusinessException>(() => ctl.Approve(id));
+        Assert.Equal(ErrorCodes.RuleConflict, ex.Code);
+        Assert.Equal(DocumentStatus.Submitted, db.StockOuts.Single().Status);
+        Assert.Empty(db.StockMovements);
+        Assert.Equal(6m, db.Stocks.Single(s => s.ProductId == ProductA).Quantity);
     }
 
 
@@ -283,7 +299,7 @@ public class StockOutOrderFulfillmentTests
     {
         Assert.False(string.IsNullOrWhiteSpace(StockOutOrderFulfillmentRules.RuleText));
         Assert.Contains("绝不猜测", StockOutOrderFulfillmentRules.RuleText);
-        Assert.Contains("未关联或链接不权威的出库单不做累计校验", StockOutOrderFulfillmentRules.RuleText);
+        Assert.Contains("显式链接无效", StockOutOrderFulfillmentRules.RuleText);
     }
 
 

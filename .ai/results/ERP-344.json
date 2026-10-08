@@ -1,0 +1,11 @@
+{
+  "task": "ERP-344",
+  "status": "completed",
+  "execution_outcome": "completed",
+  "normalized_finish_reason": "build_validated",
+  "cline_exit_code": 0,
+  "cline_finish_reason_raw": "path_guard_recovered_existing_work",
+  "attempts": 2,
+  "browser_acceptance": null,
+  "finished_at": "2026-10-08T03:27:23.215731Z"
+}
