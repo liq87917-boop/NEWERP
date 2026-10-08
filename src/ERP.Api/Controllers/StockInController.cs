@@ -5,6 +5,7 @@ using ERP.Domain.Entities;
 using ERP.Domain.Enums;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.Data;
 
 namespace ERP.Api.Controllers;
 
@@ -123,39 +124,75 @@ public class StockInController : DocumentControllerBase<StockIn>
 
         await StockUnitConversion.NormalizeAsync(Db, entity.Details);
         Calculate(entity);
-        // 幂等护栏：已产生有效流水的单据不允许再次审核（状态被人工改回同样兜住，与 ERP-009 四类单据同一口径）
-        if (await _inventory.CountActiveMovementsAsync(InventoryDocumentHelper.StockInType, entity.Id) > 0)
-            throw BusinessException.RuleConflict("该入库单已产生库存流水，不能重复审核");
 
         // ERP-033：成本来源解析。一次加载商品元数据 + 本单链接的采购订单（含明细），逐行纯内存判定，
         // 不做逐行查库；未链接 / 链接不可用 / 语义不明确时该行成本返回 0（走既有兜底）。
         var costSource = await PurchaseStockInCostSource.LoadAsync(Db, entity.PurchaseOrderId,
             entity.Details.Select(d => (long?)d.ProductId));
 
-        foreach (var d in entity.Details.Where(d => !d.IsDeleted))
+        // ERP-342：把「累计已审核入库 ≤ 来源订单授权数量」的判定与库存写入放进同一个可串行化事务，
+        // 并对来源订单行加 UPDLOCK/HOLDLOCK 串行化同单并发审核；任一步失败整体回滚，库存、流水、状态都不变。
+        await using var transaction = await Db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
+        try
         {
-            // 零数量明细（旧版页面允许留空行）不产生库存变动；负数属于数据错误，直接拒绝
-            if (d.Quantity < 0)
-                throw BusinessException.InvalidParameter($"商品 [{d.ProductName}] 的入库数量不能为负数");
-            if (d.Quantity == 0) continue;
+            await AcquireOrderApprovalLockAsync(entity.PurchaseOrderId);
 
-            var cost = costSource.Resolve(d.ProductId);
-            var product = await InventoryDocumentHelper.ResolveProductAsync(Db, d.ProductId, d.ProductName, d.Spec, d.Unit);
-            var context = await InventoryDocumentHelper.BuildContextAsync(Db,
-                InventoryDocumentHelper.StockInType, entity.Id, entity.StockInNo,
-                InventoryMovementType.PurchaseIn, entity.WarehouseId, d.ProductId, product.Code, product.Name,
-                product.Spec, product.Unit, entity.StockInDate, MovementRemark(entity, cost));
+            // 幂等护栏放进锁内：同单并发审核时，后到者在拿到锁后能看到先到者已产生的流水，从而被拒绝。
+            if (await _inventory.CountActiveMovementsAsync(InventoryDocumentHelper.StockInType, entity.Id) > 0)
+                throw BusinessException.RuleConflict("该入库单已产生库存流水，不能重复审核");
 
-            // 成本基准（ERP-033）：优先取「权威链接的采购订单唯一兼容明细行单价」——包装单位单价按商品
-            // UnitsPerPackage 折算为基础单位单价，外币单价仅在订单持久化了非占位汇率时换算；
-            // 任一语义不明确（无链接 / 订单未审核 / 订单行缺失、重复、单位不兼容 / 无权威汇率 / 单价不可用）
-            // 都返回 0，交由 InventoryService 既有兜底口径计价（当前加权平均成本，首次入库为 0），不臆造成本单价。
-            await _inventory.IncreaseAsync(context, d.Quantity, cost.UnitCost);
+            await StockInOrderFulfillmentRules.ValidateApprovalAsync(Db, entity);
+
+            foreach (var d in entity.Details.Where(d => !d.IsDeleted))
+            {
+                // 零数量明细（旧版页面允许留空行）不产生库存变动；负数属于数据错误，直接拒绝
+                if (d.Quantity < 0)
+                    throw BusinessException.InvalidParameter($"商品 [{d.ProductName}] 的入库数量不能为负数");
+                if (d.Quantity == 0) continue;
+
+                var cost = costSource.Resolve(d.ProductId);
+                var product = await InventoryDocumentHelper.ResolveProductAsync(Db, d.ProductId, d.ProductName, d.Spec, d.Unit);
+                var context = await InventoryDocumentHelper.BuildContextAsync(Db,
+                    InventoryDocumentHelper.StockInType, entity.Id, entity.StockInNo,
+                    InventoryMovementType.PurchaseIn, entity.WarehouseId, d.ProductId, product.Code, product.Name,
+                    product.Spec, product.Unit, entity.StockInDate, MovementRemark(entity, cost));
+
+                // 成本基准（ERP-033）：优先取「权威链接的采购订单唯一兼容明细行单价」——包装单位单价按商品
+                // UnitsPerPackage 折算为基础单位单价，外币单价仅在订单持久化了非占位汇率时换算；
+                // 任一语义不明确（无链接 / 订单未审核 / 订单行缺失、重复、单位不兼容 / 无权威汇率 / 单价不可用）
+                // 都返回 0，交由 InventoryService 既有兜底口径计价（当前加权平均成本，首次入库为 0），不臆造成本单价。
+                await _inventory.IncreaseAsync(context, d.Quantity, cost.UnitCost);
+            }
+
+            SetStatus(entity, DocumentStatus.Approved);
+            await Db.SaveChangesAsync();
+            await transaction.CommitAsync();
+        }
+        catch
+        {
+            await transaction.RollbackAsync();
+            throw;
         }
 
-        SetStatus(entity, DocumentStatus.Approved);
-        await Db.SaveChangesAsync();
         return Ok(ApiResponse<object>.Success(null, "审核通过，库存已更新并写入库存流水"));
+    }
+
+    /// <summary>
+    /// 对来源采购订单行加更新锁（UPDLOCK, HOLDLOCK），把同单并发审核串行化在同一事务内。
+    /// 未链接订单时无需加锁；非关系型提供程序（内存库）无法执行表提示，跳过即可（事务本身等价无事务）。
+    /// </summary>
+    private async Task AcquireOrderApprovalLockAsync(long? purchaseOrderId)
+    {
+        if (purchaseOrderId is not > 0) return;
+        if (!Db.Database.IsRelational()) return;
+
+        // 订单行不存在时无需加锁：ValidateApprovalAsync 会把链接判为非权威并跳过累计校验，
+        // 与 ERP-033 成本回退同一口径，不因链接悬空而阻断入库。
+        await Db.Database
+            .SqlQueryRaw<long>(
+                "SELECT Id FROM db_owner.PurchaseOrders WITH (UPDLOCK, HOLDLOCK) WHERE Id = {0}",
+                purchaseOrderId.Value)
+            .ToListAsync();
     }
 
     /// <summary>取消：已审核单据按库存流水冲销（无流水的历史单据按基础单位原路冲回）。</summary>
