@@ -1,11 +1,16 @@
 using ERP.Application.Common;
 using ERP.Application.DTOs;
 using ERP.Application.Interfaces;
+using ERP.Application.Services;
+using ERP.Domain.Common;
 using ERP.Domain.Entities;
 using ERP.Domain.Enums;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.Linq.Expressions;
+using System.Security.Claims;
 
 namespace ERP.Api.Controllers;
 
@@ -14,6 +19,10 @@ namespace ERP.Api.Controllers;
 /// 维护：同一采购需求向多家供应商询价，一条记录 = 一家供应商对某需求的报价；
 ///       相同 QuoteNo 归为一批，便于横向比价与标记选中（IsSelected）。
 /// ERP-020：选中的比价行可「带入预填 / 直接生成」采购订单（见 <see cref="PurchaseQuoteConversion" />）。
+/// ERP-416：列表 / 全部 / 详情 / 新增 / 修改 / 删除 / 批量删除、带入预填 / 单行转单 / 批次计划 / 批次转单
+/// 与报价历史 / 价格差异 / 转化漏斗等派生路由，都先经 <see cref="PurchaseQuoteAuthorizationRules"/>
+/// 复核实时身份 + 既有「供应商比价」菜单 + ERP-097 客户数据范围（转单另须既有「采购订单」菜单与权威目的地范围），
+/// 范围在计数 / 分页 / 分组之前下推数据库，范围外 / 已删除 / 不存在返回同一非披露错误。
 /// </summary>
 [ApiController]
 [Route("api/purchase/quotes")]
@@ -30,6 +39,119 @@ public class PurchaseQuoteController : BaseCrudController<PurchaseQuote>
         _noService = noService;
     }
 
+    // ==================== ERP-416：实时授权（身份 + 既有菜单 + 客户数据范围） ====================
+
+    /// <summary>当前登录用户 Id（缺失 / 非数字 / 无 HTTP 管线时返回 null，由实时授权 fail closed 拒绝，绝不猜测身份）。</summary>
+    private long? CurrentUserId()
+    {
+        var value = ControllerContext?.HttpContext?.User?.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        return long.TryParse(value, out var id) && id > 0 ? id : null;
+    }
+
+    /// <summary>
+    /// ERP-416：是否必须执行实时授权。真实 HTTP 请求（MVC 绑定，<c>Request.Path</c> 已赋值）一律执行；
+    /// 进程内直接调用（历史单元测试 / 内部派生读取，无 HTTP 请求管线）仅在携带当前登录身份时执行。
+    /// 只对「既无任何登录身份、又不在 HTTP 请求管线内」的调用免授权：这类调用不可能由外部请求到达，
+    /// 也绝不把缺失身份当作管理员（真实匿名请求因处于请求管线内一律 fail closed）。
+    /// </summary>
+    private bool RequiresLiveAuthorization()
+    {
+        var http = ControllerContext?.HttpContext;
+        if (http is null) return false;
+        return http.Request.Path.HasValue || CurrentUserId() is not null;
+    }
+
+    /// <summary>比价数据入口授权（实时身份 + 既有「供应商比价」菜单 + ERP-097 客户数据范围）。</summary>
+    private async Task<SalespersonDataScope?> EnsureAuthorizedAsync()
+        => RequiresLiveAuthorization()
+            ? await PurchaseQuoteAuthorizationRules.EnsureAccessAuthorizedAsync(_db, CurrentUserId())
+            : null;
+
+    /// <summary>比价 → 采购订单目的地授权（既有「采购订单」菜单 + 权威客户范围），用于带入预填与真实转单。</summary>
+    private async Task<SalespersonDataScope?> EnsureDestinationAuthorizedAsync()
+        => RequiresLiveAuthorization()
+            ? await PurchaseQuoteAuthorizationRules.EnsureDestinationAuthorizedAsync(_db, CurrentUserId())
+            : null;
+
+    /// <summary>受限账号的客户数据范围谓词（下推到服务层，先于计数 / 分页 / 关键字）；不受限口径返回 null。</summary>
+    private static Expression<Func<PurchaseQuote, bool>>? ScopeFilter(SalespersonDataScope? scope)
+    {
+        if (scope is null || scope.AllowedCustomerIds is null) return null;
+        var allowed = scope.AllowedCustomerIds.ToList();
+        return q => q.CustomerId.HasValue && allowed.Contains(q.CustomerId.Value);
+    }
+
+    /// <summary>分页查询（ERP-416：先授权，再把客户数据范围下推到服务层，先于计数 / 分页 / 关键字）。</summary>
+    [HttpGet]
+    public override async Task<IActionResult> GetPaged([FromQuery] PageQuery query)
+    {
+        var scope = await EnsureAuthorizedAsync();
+        var result = await Service.GetPagedAsync(query, ScopeFilter(scope));
+        return Ok(ApiResponse<PagedResult<PurchaseQuote>>.Success(result));
+    }
+
+    /// <summary>查询全部（ERP-416：先授权，再按客户数据范围收敛；供下拉框等使用）。</summary>
+    [HttpGet("all")]
+    public override async Task<IActionResult> GetAll()
+    {
+        var scope = await EnsureAuthorizedAsync();
+        var result = await Service.GetAllAsync(ScopeFilter(scope));
+        return Ok(ApiResponse<List<PurchaseQuote>>.Success(result));
+    }
+
+    /// <summary>详情（ERP-416：先授权并复核持久化归属，范围外 / 已删除 / 不存在返回同一非披露错误）。</summary>
+    [HttpGet("{id:long}")]
+    public override async Task<IActionResult> GetById(long id)
+    {
+        var scope = await EnsureAuthorizedAsync();
+        await PurchaseQuoteAuthorizationRules.EnsureQuoteAllowedAsync(_db, scope, id);
+        var result = await Service.GetByIdAsync(id);
+        return Ok(ApiResponse<PurchaseQuote>.Success(result));
+    }
+
+    /// <summary>新增（ERP-416：先授权并复核拟提交归属客户，绝不采信 CustomerName，授权先于写入）。</summary>
+    [HttpPost]
+    public override async Task<IActionResult> Create([FromBody] PurchaseQuote entity)
+    {
+        var scope = await EnsureAuthorizedAsync();
+        PurchaseQuoteAuthorizationRules.EnsureProposedCustomerAllowed(scope, entity.CustomerId);
+        var result = await Service.CreateAsync(entity);
+        return Ok(ApiResponse<PurchaseQuote>.Success(result, "新增成功"));
+    }
+
+    /// <summary>更新（ERP-416：先复核**已存**比价行归属与**拟提交**归属客户，再替换字段；被拒零写入）。</summary>
+    [HttpPut("{id:long}")]
+    public override async Task<IActionResult> Update(long id, [FromBody] PurchaseQuote entity)
+    {
+        var scope = await EnsureAuthorizedAsync();
+        await PurchaseQuoteAuthorizationRules.EnsureQuoteAllowedAsync(_db, scope, id);
+        PurchaseQuoteAuthorizationRules.EnsureProposedCustomerAllowed(scope, entity.CustomerId);
+        entity.Id = id;
+        var result = await Service.UpdateAsync(entity);
+        return Ok(ApiResponse<PurchaseQuote>.Success(result, "更新成功"));
+    }
+
+    /// <summary>删除（软删除；ERP-416：先授权并复核持久化归属，被拒不删除任何行）。</summary>
+    [HttpDelete("{id:long}")]
+    public override async Task<IActionResult> Delete(long id)
+    {
+        var scope = await EnsureAuthorizedAsync();
+        await PurchaseQuoteAuthorizationRules.EnsureQuoteAllowedAsync(_db, scope, id);
+        await Service.DeleteAsync(id);
+        return Ok(ApiResponse<object>.Success(null, "删除成功"));
+    }
+
+    /// <summary>批量删除（软删除；ERP-416：混入任何范围外 / 不存在 Id 即整批拒绝，绝无部分写入）。</summary>
+    [HttpPost("batch-delete")]
+    public override async Task<IActionResult> BatchDelete([FromBody] List<long> ids)
+    {
+        var scope = await EnsureAuthorizedAsync();
+        var list = ids ?? new List<long>();
+        await PurchaseQuoteAuthorizationRules.EnsureQuotesAllowedAsync(_db, scope, list);
+        await Service.BatchDeleteAsync(list);
+        return Ok(ApiResponse<object>.Success(null, "批量删除成功"));
+    }
+
     /// <summary>
     /// 带入预填采购订单（ERP-020）：按选中的比价行返回一张**未落库**的采购订单草稿，
     /// 前端据此打开「采购订单 → 新增」表单继续编辑后再保存
@@ -40,11 +162,19 @@ public class PurchaseQuoteController : BaseCrudController<PurchaseQuote>
     [HttpGet("{id:long}/order-prefill")]
     public async Task<IActionResult> OrderPrefill(long id)
     {
+        // ERP-416：比价数据授权 + 采购订单目的地授权先于任何读取；来源与目的地归属都必须落在当前客户数据范围内。
+        var scope = await EnsureAuthorizedAsync();
+        var destination = await EnsureDestinationAuthorizedAsync();
+
         var quote = await _db.PurchaseQuotes.AsNoTracking()
             .FirstOrDefaultAsync(q => q.Id == id && !q.IsDeleted)
-            ?? throw BusinessException.NotFound("比价记录不存在");
+            ?? throw BusinessException.NotFound(PurchaseQuoteAuthorizationRules.NotFoundText);
+
+        await PurchaseQuoteAuthorizationRules.EnsureQuoteAllowedAsync(_db, scope, id);
 
         var order = await PurchaseQuoteConversion.BuildDraftAsync(_db, quote);
+        if (destination is not null)
+            await PurchaseQuoteAuthorizationRules.EnsureDestinationScopeAllowedAsync(_db, destination, order);
         return Ok(ApiResponse<PurchaseOrderPrefillResult>.Success(new PurchaseOrderPrefillResult
         {
             SourceType = PurchaseQuoteConversion.PurchaseQuoteSourceType,
@@ -64,11 +194,19 @@ public class PurchaseQuoteController : BaseCrudController<PurchaseQuote>
     [HttpPost("{id:long}/to-order")]
     public async Task<IActionResult> ToPurchaseOrder(long id)
     {
+        // ERP-416：授权（比价 + 目的地菜单）与来源 / 目的地归属复核先于发号与写入。
+        var scope = await EnsureAuthorizedAsync();
+        var destination = await EnsureDestinationAuthorizedAsync();
+
         var quote = await _db.PurchaseQuotes
             .FirstOrDefaultAsync(q => q.Id == id && !q.IsDeleted)
-            ?? throw BusinessException.NotFound("比价记录不存在");
+            ?? throw BusinessException.NotFound(PurchaseQuoteAuthorizationRules.NotFoundText);
+
+        await PurchaseQuoteAuthorizationRules.EnsureQuoteAllowedAsync(_db, scope, id);
 
         var order = await PurchaseQuoteConversion.BuildDraftAsync(_db, quote);
+        if (destination is not null)
+            await PurchaseQuoteAuthorizationRules.EnsureDestinationScopeAllowedAsync(_db, destination, order);
         order.OrderNo = await _noService.GenerateAsync(DocumentType.PurchaseOrder);
         _db.PurchaseOrders.Add(order);
         PurchaseQuoteConversion.MarkConverted(quote, order.OrderNo);
@@ -90,8 +228,16 @@ public class PurchaseQuoteController : BaseCrudController<PurchaseQuote>
     [HttpGet("batch-order-plan")]
     public async Task<IActionResult> BatchOrderPlan([FromQuery] string? quoteNo, [FromQuery] long? lineId)
     {
-        var build = await PurchaseQuoteConversion.BuildBatchAsync(_db, quoteNo, lineId);
+        // ERP-416：比价 + 目的地授权，批次整批归属复核（混入范围外 / 空归属行即整批非披露拒绝）。
+        var scope = await EnsureAuthorizedAsync();
+        var destination = await EnsureDestinationAuthorizedAsync();
+        await PurchaseQuoteAuthorizationRules.EnsureBatchAllowedAsync(_db, scope, quoteNo, lineId);
+
+        var build = await PurchaseQuoteConversion.BuildBatchAsync(_db, quoteNo, lineId, null);
         var plan = PurchaseQuoteConversion.BuildPlan(build);
+        if (destination is not null)
+            foreach (var group in plan.Groups)
+                await PurchaseQuoteAuthorizationRules.EnsureDestinationScopeAllowedAsync(_db, destination, group.Order);
         return Ok(ApiResponse<PurchaseQuoteBatchPlan>.Success(plan,
             $"比价批次 {plan.SourceNo}：可转换 {plan.EligibleLineCount} 行、将生成 {plan.GroupCount} 张采购订单"));
     }
@@ -106,6 +252,21 @@ public class PurchaseQuoteController : BaseCrudController<PurchaseQuote>
     [HttpPost("batch-to-order")]
     public async Task<IActionResult> BatchToOrder([FromBody] PurchaseQuoteBatchConversionRequest request)
     {
+        // ERP-416：比价 + 目的地授权，批次整批归属复核（混入范围外 / 空归属行即整批拒绝，无部分写入），
+        // 并在真实发号 / 落库之前对计划草稿做权威目的地范围复核。
+        var scope = await EnsureAuthorizedAsync();
+        var destination = await EnsureDestinationAuthorizedAsync();
+        await PurchaseQuoteAuthorizationRules.EnsureBatchAllowedAsync(_db, scope,
+            request?.QuoteNo, request?.LineId, request?.LineIds);
+
+        if (destination is not null && request is not null)
+        {
+            var precheck = await PurchaseQuoteConversion.BuildBatchAsync(
+                _db, request.QuoteNo, request.LineId, request.LineIds);
+            foreach (var group in precheck.Groups)
+                await PurchaseQuoteAuthorizationRules.EnsureDestinationScopeAllowedAsync(_db, destination, group.Draft);
+        }
+
         var result = await PurchaseQuoteConversion.ConvertBatchAsync(_db, _noService, request);
         var message = result.Skipped.Count > 0
             ? $"已生成 {result.OrderCount} 张采购订单，跳过 {result.Skipped.Count} 行不合格比价行"
@@ -121,7 +282,9 @@ public class PurchaseQuoteController : BaseCrudController<PurchaseQuote>
     [HttpGet("price-history")]
     public async Task<IActionResult> PriceHistory([FromQuery] PurchaseQuotePriceHistoryQuery query)
     {
-        var view = await PurchaseQuotePriceHistory.QueryAsync(_db, query);
+        // ERP-416：先授权，再把客户数据范围下推到派生查询（先于计数 / 分页 / 分组）。
+        var scope = await EnsureAuthorizedAsync();
+        var view = await PurchaseQuotePriceHistory.QueryAsync(_db, query, scope);
         return Ok(ApiResponse<PurchaseQuotePriceHistoryView>.Success(view,
             $"报价历史：{view.TotalCount} 行、{view.GroupCount} 个比价口径"));
     }
@@ -133,7 +296,8 @@ public class PurchaseQuoteController : BaseCrudController<PurchaseQuote>
     [HttpGet("{id:long}/price-history")]
     public async Task<IActionResult> QuotePriceHistory(long id)
     {
-        var view = await PurchaseQuotePriceHistory.ForQuoteAsync(_db, id);
+        var scope = await EnsureAuthorizedAsync();
+        var view = await PurchaseQuotePriceHistory.ForQuoteAsync(_db, id, scope);
         return Ok(ApiResponse<PurchaseQuotePriceHistoryView>.Success(view,
             $"比价行 #{id} 的报价历史：{view.TotalCount} 行、{view.GroupCount} 个比价口径"));
     }
@@ -147,7 +311,9 @@ public class PurchaseQuoteController : BaseCrudController<PurchaseQuote>
     [HttpGet("order-price-variance")]
     public async Task<IActionResult> OrderPriceVariance([FromQuery] PurchaseQuoteOrderPriceVarianceQuery query)
     {
-        var view = await PurchaseQuoteOrderPriceVariance.QueryAsync(_db, query);
+        // ERP-416：先授权，再把客户数据范围下推到派生查询（先于计数 / 分页 / 订单链接解析）。
+        var scope = await EnsureAuthorizedAsync();
+        var view = await PurchaseQuoteOrderPriceVariance.QueryAsync(_db, query, scope);
         return Ok(ApiResponse<PurchaseQuoteOrderPriceVarianceView>.Success(view,
             $"比价 → 采购订单价格差异：{view.TotalCount} 行（已核对 {view.ResolvedCount}、未解决 {view.UnresolvedCount}）"));
     }
@@ -159,7 +325,8 @@ public class PurchaseQuoteController : BaseCrudController<PurchaseQuote>
     [HttpGet("{id:long}/order-price-variance")]
     public async Task<IActionResult> QuoteOrderPriceVariance(long id)
     {
-        var view = await PurchaseQuoteOrderPriceVariance.ForQuoteAsync(_db, id);
+        var scope = await EnsureAuthorizedAsync();
+        var view = await PurchaseQuoteOrderPriceVariance.ForQuoteAsync(_db, id, scope);
         return Ok(ApiResponse<PurchaseQuoteOrderPriceVarianceView>.Success(view,
             $"比价行 #{id} 的价格差异：已核对 {view.ResolvedCount}、未解决 {view.UnresolvedCount}"));
     }
@@ -173,7 +340,9 @@ public class PurchaseQuoteController : BaseCrudController<PurchaseQuote>
     [HttpGet("conversion-funnel")]
     public async Task<IActionResult> ConversionFunnel([FromQuery] PurchaseQuoteConversionFunnelQuery query)
     {
-        var view = await PurchaseQuoteConversionFunnel.QueryAsync(_db, query);
+        // ERP-416：先授权，再把客户数据范围下推到派生查询（先于分组 / 计数 / 分页）。
+        var scope = await EnsureAuthorizedAsync();
+        var view = await PurchaseQuoteConversionFunnel.QueryAsync(_db, query, scope);
         return Ok(ApiResponse<PurchaseQuoteConversionFunnelView>.Success(view,
             $"供应商报价转单漏斗：{view.TotalBatchCount} 个批次、{view.TotalLineCount} 行"));
     }

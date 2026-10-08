@@ -27,8 +27,17 @@ public static class PurchaseQuoteOrderPriceVariance
     /// 通用价格差异查询（只读）：按报价日期 + 可选供应商筛选「已转采购订单」的未删除比价行，
     /// 稳定按报价日期 + 行 Id 排序并分页，逐行解析采购订单链接并计算口径内价格差异。
     /// </summary>
-    public static async Task<PurchaseQuoteOrderPriceVarianceView> QueryAsync(IErpDbContext db,
+    public static Task<PurchaseQuoteOrderPriceVarianceView> QueryAsync(IErpDbContext db,
         PurchaseQuoteOrderPriceVarianceQuery query, CancellationToken ct = default)
+        => QueryAsync(db, query, null, ct);
+
+    /// <summary>
+    /// ERP-416 带客户数据范围的通用价格差异查询：受限账号在**计数 / 分页 / 解析订单链接之前**把范围下推到数据库
+    /// （只剩持久化归属客户在范围内的比价行），绝不「先查全量再内存过滤」，也不返回隐藏行的计数。
+    /// <paramref name="scope"/> 为 <c>null</c> 表示既有不受限口径（特权 / 进程内调用）。
+    /// </summary>
+    public static async Task<PurchaseQuoteOrderPriceVarianceView> QueryAsync(IErpDbContext db,
+        PurchaseQuoteOrderPriceVarianceQuery query, SalespersonDataScope? scope, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(db);
         ArgumentNullException.ThrowIfNull(query);
@@ -36,8 +45,9 @@ public static class PurchaseQuoteOrderPriceVariance
         var (page, pageSize) = NormalizePaging(query);
         var (dateFrom, dateTo) = NormalizeDateRange(query);
 
-        var baseQuery = db.PurchaseQuotes.AsNoTracking()
-            .Where(q => !q.IsDeleted && q.Status == PurchaseQuoteConversion.ConvertedStatus);
+        var baseQuery = PurchaseQuoteAuthorizationRules.ApplyScope(scope,
+            db.PurchaseQuotes.AsNoTracking()
+                .Where(q => !q.IsDeleted && q.Status == PurchaseQuoteConversion.ConvertedStatus));
 
         if (query.SupplierId is > 0)
             baseQuery = baseQuery.Where(q => q.SupplierId == query.SupplierId.Value);
@@ -73,14 +83,24 @@ public static class PurchaseQuoteOrderPriceVariance
     /// <summary>
     /// 从某个比价行打开价格差异（只读）：只返回该行（已转采购订单）与其采购订单的对照；未转采购订单时显式标注未解决。
     /// </summary>
-    public static async Task<PurchaseQuoteOrderPriceVarianceView> ForQuoteAsync(IErpDbContext db, long quoteId,
+    public static Task<PurchaseQuoteOrderPriceVarianceView> ForQuoteAsync(IErpDbContext db, long quoteId,
         CancellationToken ct = default)
+        => ForQuoteAsync(db, quoteId, null, ct);
+
+    /// <summary>
+    /// ERP-416 带客户数据范围的「从比价行打开」：来源比价行必须落在当前客户数据范围内
+    /// （不存在 / 已删除 / 范围外返回同一非披露错误），随后只返回该行与其采购订单的对照。
+    /// </summary>
+    public static async Task<PurchaseQuoteOrderPriceVarianceView> ForQuoteAsync(IErpDbContext db, long quoteId,
+        SalespersonDataScope? scope, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(db);
 
         var quote = await db.PurchaseQuotes.AsNoTracking()
             .FirstOrDefaultAsync(q => q.Id == quoteId && !q.IsDeleted, ct)
-            ?? throw BusinessException.NotFound("比价记录不存在");
+            ?? throw BusinessException.NotFound(PurchaseQuoteAuthorizationRules.NotFoundText);
+
+        await PurchaseQuoteAuthorizationRules.EnsureQuoteAllowedAsync(db, scope, quoteId, ct);
 
         List<PurchaseQuoteOrderPriceVarianceRow> rows;
         if (quote.Status == PurchaseQuoteConversion.ConvertedStatus)

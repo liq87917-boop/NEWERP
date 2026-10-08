@@ -1,5 +1,6 @@
 using ERP.Application.Common;
 using ERP.Application.Interfaces;
+using ERP.Application.Services;
 using ERP.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 
@@ -53,8 +54,17 @@ public static class PurchaseQuoteConversionFunnel
     /// 通用转化漏斗查询（只读）：按报价日期 + 可选供应商筛选未删除报价行，按比价批次号分组，
     /// 稳定按批次最早报价日期 + 批次号排序并分页，逐批次分类六类证据与行明细。
     /// </summary>
-    public static async Task<PurchaseQuoteConversionFunnelView> QueryAsync(IErpDbContext db,
+    public static Task<PurchaseQuoteConversionFunnelView> QueryAsync(IErpDbContext db,
         PurchaseQuoteConversionFunnelQuery query, CancellationToken ct = default)
+        => QueryAsync(db, query, null, ct);
+
+    /// <summary>
+    /// ERP-416 带客户数据范围的转化漏斗查询：受限账号在**分组 / 计数 / 分页 / 解析订单链接之前**把范围下推到数据库
+    /// （只剩持久化归属客户在范围内的比价行），绝不「先查全量再内存过滤」，也不返回隐藏批次的计数。
+    /// <paramref name="scope"/> 为 <c>null</c> 表示既有不受限口径（特权 / 进程内调用）。
+    /// </summary>
+    public static async Task<PurchaseQuoteConversionFunnelView> QueryAsync(IErpDbContext db,
+        PurchaseQuoteConversionFunnelQuery query, SalespersonDataScope? scope, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(db);
         ArgumentNullException.ThrowIfNull(query);
@@ -62,8 +72,8 @@ public static class PurchaseQuoteConversionFunnel
         var (page, pageSize) = NormalizePaging(query);
         var (dateFrom, dateTo) = NormalizeDateRange(query);
 
-        var baseQuery = db.PurchaseQuotes.AsNoTracking()
-            .Where(q => !q.IsDeleted);
+        var baseQuery = PurchaseQuoteAuthorizationRules.ApplyScope(scope,
+            db.PurchaseQuotes.AsNoTracking().Where(q => !q.IsDeleted));
 
         if (query.SupplierId is > 0)
             baseQuery = baseQuery.Where(q => q.SupplierId == query.SupplierId.Value);

@@ -1,5 +1,6 @@
 using ERP.Application.Common;
 using ERP.Application.Interfaces;
+using ERP.Application.Services;
 using ERP.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 
@@ -33,8 +34,17 @@ public static class PurchaseQuotePriceHistory
     /// 通用比价历史查询（只读）：按商品 + 可选供应商 / 报价日期区间筛选未删除报价行，
     /// 稳定按报价日期 + 行 Id 排序并分页，再按比价口径分组计算口径内价格差异。
     /// </summary>
-    public static async Task<PurchaseQuotePriceHistoryView> QueryAsync(IErpDbContext db,
+    public static Task<PurchaseQuotePriceHistoryView> QueryAsync(IErpDbContext db,
         PurchaseQuotePriceHistoryQuery query, CancellationToken ct = default)
+        => QueryAsync(db, query, null, ct);
+
+    /// <summary>
+    /// ERP-416 带客户数据范围的比价历史查询：受限账号在**计数 / 分页 / 分组之前**把范围下推到数据库
+    /// （只剩持久化归属客户在范围内的比价行），绝不「先查全量再内存过滤」，也不返回隐藏行的计数。
+    /// <paramref name="scope"/> 为 <c>null</c> 表示既有不受限口径（特权 / 进程内调用）。
+    /// </summary>
+    public static async Task<PurchaseQuotePriceHistoryView> QueryAsync(IErpDbContext db,
+        PurchaseQuotePriceHistoryQuery query, SalespersonDataScope? scope, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(db);
         ArgumentNullException.ThrowIfNull(query);
@@ -43,10 +53,10 @@ public static class PurchaseQuotePriceHistory
         var (page, pageSize) = NormalizePaging(query);
         var (dateFrom, dateTo) = NormalizeDateRange(query);
 
-        var reference = await LoadReferenceAsync(db, query.ReferenceQuoteId, ct);
+        var reference = await LoadReferenceAsync(db, query.ReferenceQuoteId, scope, ct);
 
-        var baseQuery = db.PurchaseQuotes.AsNoTracking()
-            .Where(q => !q.IsDeleted && q.ProductId == productId);
+        var baseQuery = PurchaseQuoteAuthorizationRules.ApplyScope(scope,
+            db.PurchaseQuotes.AsNoTracking().Where(q => !q.IsDeleted && q.ProductId == productId));
 
         if (query.SupplierId is > 0)
             baseQuery = baseQuery.Where(q => q.SupplierId == query.SupplierId.Value);
@@ -92,13 +102,23 @@ public static class PurchaseQuotePriceHistory
     /// 从某个比价行打开比价历史（只读）：以该行商品作为筛选商品、以该行口径作为参照口径，
     /// 与参照口径一致的报价行为「可同比价」组，口径不一致的报价行明确分单列。
     /// </summary>
-    public static async Task<PurchaseQuotePriceHistoryView> ForQuoteAsync(IErpDbContext db, long quoteId,
+    public static Task<PurchaseQuotePriceHistoryView> ForQuoteAsync(IErpDbContext db, long quoteId,
         CancellationToken ct = default)
+        => ForQuoteAsync(db, quoteId, null, ct);
+
+    /// <summary>
+    /// ERP-416 带客户数据范围的「从比价行打开」：来源比价行必须落在当前客户数据范围内
+    /// （不存在 / 已删除 / 范围外返回同一非披露错误），随后按同范围计算口径内价格差异。
+    /// </summary>
+    public static async Task<PurchaseQuotePriceHistoryView> ForQuoteAsync(IErpDbContext db, long quoteId,
+        SalespersonDataScope? scope, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(db);
         var quote = await db.PurchaseQuotes.AsNoTracking()
             .FirstOrDefaultAsync(q => q.Id == quoteId && !q.IsDeleted, ct)
-            ?? throw BusinessException.NotFound("比价记录不存在");
+            ?? throw BusinessException.NotFound(PurchaseQuoteAuthorizationRules.NotFoundText);
+
+        await PurchaseQuoteAuthorizationRules.EnsureQuoteAllowedAsync(db, scope, quoteId, ct);
 
         return await QueryAsync(db, new PurchaseQuotePriceHistoryQuery
         {
@@ -106,15 +126,15 @@ public static class PurchaseQuotePriceHistory
             ReferenceQuoteId = quote.Id,
             Page = 1,
             PageSize = MaxPageSize,
-        }, ct);
+        }, scope, ct);
     }
     // ==================== 派生逻辑 ====================
 
     private static async Task<PurchaseQuote?> LoadReferenceAsync(IErpDbContext db, long? referenceQuoteId,
-        CancellationToken ct)
+        SalespersonDataScope? scope, CancellationToken ct)
     {
         if (referenceQuoteId is not > 0) return null;
-        return await db.PurchaseQuotes.AsNoTracking()
+        return await PurchaseQuoteAuthorizationRules.ApplyScope(scope, db.PurchaseQuotes.AsNoTracking())
             .FirstOrDefaultAsync(q => q.Id == referenceQuoteId.Value && !q.IsDeleted, ct);
     }
 
