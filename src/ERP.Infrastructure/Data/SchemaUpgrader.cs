@@ -1449,6 +1449,9 @@ IF COL_LENGTH('db_owner.ContainerBookings', 'CustomsReleaseDate') IS NULL
         //     29.4 表内不建外键、不被任何单据引用：客户软删除 / 停用后历史参与方仍可读
         //          （按编码 / 名称快照显示并显式标注不可用），无需任何历史数据修补；
         //     29.5 本段只建本表与其索引，不改写装柜清单、装柜明细、订柜跟踪值、单证、费用与库存。
+        //     29.6 ERP-366 只**追加**一个可空证据列 ContainerLoadingDetails.SourceStockOutDetailId
+        //          （NULL = 显式未链接，历史明细保持 NULL，**不含任何回填**），并为其建读取侧过滤索引；
+        //          刻意不建到 StockOutDetails 的外键，来源出库单软删除 / 取消后历史证据仍可读。
         await db.Database.ExecuteSqlRawAsync(@"
 IF OBJECT_ID('db_owner.ContainerLoadingListParticipants') IS NULL
 BEGIN
@@ -1490,7 +1493,26 @@ IF NOT EXISTS (SELECT 1 FROM sys.indexes
                  AND object_id = OBJECT_ID('db_owner.ContainerLoadingListParticipants'))
     CREATE INDEX IX_ContainerLoadingListParticipants_CustomerId
         ON db_owner.ContainerLoadingListParticipants(CustomerId)
-        WHERE IsDeleted = 0;");
+        WHERE IsDeleted = 0;
+
+-- 29.6 ERP-366：装柜明细 → 销售出库明细 的显式出运证据链接（可空留痕列）。
+--      历史 / 未链接明细保持 NULL = 显式「无证据」：**不做任何回填**，
+--      也绝不按出库单号 / 相似度猜测来源；本段只加列，不改写任何既有列与单据。
+IF OBJECT_ID('db_owner.ContainerLoadingDetails') IS NOT NULL
+   AND COL_LENGTH('db_owner.ContainerLoadingDetails', 'SourceStockOutDetailId') IS NULL
+    ALTER TABLE db_owner.ContainerLoadingDetails ADD SourceStockOutDetailId BIGINT NULL;");
+
+        // 29.7 读取侧索引必须独立成批：SourceStockOutDetailId 由上面的 ALTER TABLE ADD 新增，
+        //      若同批 CREATE INDEX 引用它，SQL Server 会在编译期报「列名无效」（错误 207）。
+        //      刻意**不建**到 StockOutDetails 的外键：来源出库单软删除 / 取消后历史装柜证据仍必须可读。
+        await db.Database.ExecuteSqlRawAsync(@"
+IF OBJECT_ID('db_owner.ContainerLoadingDetails') IS NOT NULL
+   AND NOT EXISTS (SELECT 1 FROM sys.indexes
+                   WHERE name = 'IX_ContainerLoadingDetails_SourceStockOutDetailId'
+                     AND object_id = OBJECT_ID('db_owner.ContainerLoadingDetails'))
+    CREATE INDEX IX_ContainerLoadingDetails_SourceStockOutDetailId
+        ON db_owner.ContainerLoadingDetails(SourceStockOutDetailId)
+        WHERE IsDeleted = 0 AND SourceStockOutDetailId IS NOT NULL;");
 
         // 30. 装柜费用分摊批次与来源留痕（ERP-042：既有费用单之上的留痕层）
         //     30.1 只做**幂等补齐**：给既有 FinanceExpenses 增加 3 个**可空 / 空串**留痕列

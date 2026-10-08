@@ -76,6 +76,8 @@ public class ContainerLoadingListController : DocumentControllerBase<ContainerLo
         entity.Status = DocumentStatus.Pending;
         entity.CreatedAt = DateTime.Now;
         await ContainerLoadingFulfillmentRules.ValidateLinkAsync(Db, entity, CurrentUserId());
+        // ERP-366：在写入任何明细之前校验显式出运证据链接（来源已审核且未删除、商品 / 基础单位一致、客户在范围内）。
+        await LoadingStockOutLinkRules.ValidateLinksAsync(Db, entity, CurrentUserId());
         Calculate(entity);
         Db.ContainerLoadingLists.Add(entity);
         await Db.SaveChangesAsync();
@@ -105,6 +107,9 @@ public class ContainerLoadingListController : DocumentControllerBase<ContainerLo
             await LoadingListAuthorizationRules.EnsureProposedScopeAllowedAsync(
                 Db, scope, existing, entity.CustomerId, entity.PreLoadingId);
             await ContainerLoadingFulfillmentRules.ValidateLinkAsync(Db, entity, CurrentUserId());
+            // ERP-366：拟议明细的显式出运证据链接必须整体有效，否则在替换任何明细之前 fail closed。
+            entity.Id = id;
+            await LoadingStockOutLinkRules.ValidateLinksAsync(Db, entity, CurrentUserId());
 
             existing.PreLoadingId = entity.PreLoadingId;
             existing.LoadingDate = entity.LoadingDate;
@@ -439,6 +444,8 @@ public class ContainerLoadingListController : DocumentControllerBase<ContainerLo
 
             await LoadingListAuthorizationRules.EnsureStoredScopeAllowedAsync(Db, scope, entity);
             await ContainerLoadingFulfillmentRules.ValidateLinkAsync(Db, entity, CurrentUserId());
+            // ERP-366：提交前复核显式出运证据链接（来源是否仍为已审核且未删除、商品 / 客户是否仍匹配）。
+            await LoadingStockOutLinkRules.ValidateLinksAsync(Db, entity, CurrentUserId());
 
             SetStatus(entity, DocumentStatus.Submitted);
             await Db.SaveChangesAsync();
@@ -461,13 +468,17 @@ public class ContainerLoadingListController : DocumentControllerBase<ContainerLo
     public override async Task<IActionResult> Approve(long id)
     {
         var scope = await LoadingListAuthorizationRules.EnsureAuthorizedAsync(Db, CurrentUserId());
-        var header = await Db.ContainerLoadingLists.AsNoTracking()
+        var header = await Db.ContainerLoadingLists.AsNoTracking().Include(o => o.Details)
             .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
             ?? throw BusinessException.NotFound("装柜清单不存在");
+
+        // ERP-366：确定性锁序 —— 上游销售出库行（按 StockOutId 升序）→ 预装柜单行 → 装柜清单行。
+        var linkedStockOutIds = await LoadingStockOutLinkRules.LoadLinkedStockOutIdsAsync(Db, header);
 
         await using var transaction = await Db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
         try
         {
+            await AcquireStockOutLinkRowLocksAsync(linkedStockOutIds);
             await AcquirePreLoadingApprovalLockAsync(header.PreLoadingId);
             await AcquireLoadingListRowLockAsync(id);
 
@@ -480,7 +491,10 @@ public class ContainerLoadingListController : DocumentControllerBase<ContainerLo
                 throw BusinessException.RuleConflict("当前状态不允许该操作");
 
             await LoadingListAuthorizationRules.EnsureStoredScopeAllowedAsync(Db, scope, entity);
+            // ERP-348 预装柜单来源 / 累计超装护栏（只判定，不过账库存 / 财务）。
             await ContainerLoadingFulfillmentRules.ValidateApprovalAsync(Db, entity, CurrentUserId());
+            // ERP-366 显式出运证据链接与累计容量护栏（只判定，不过账库存 / 财务）。
+            await LoadingStockOutLinkRules.ValidateApprovalAsync(Db, entity, CurrentUserId());
 
             SetStatus(entity, DocumentStatus.Approved);
             await Db.SaveChangesAsync();
@@ -564,6 +578,155 @@ public class ContainerLoadingListController : DocumentControllerBase<ContainerLo
         }
 
         return Ok(ApiResponse<object>.Success(null, "删除成功"));
+    }
+
+    // ==================== ERP-366：装柜明细 → 销售出库明细 的显式出运证据链接 ====================
+
+    /// <summary>
+    /// 可链接出运证据候选（<b>只读、有界</b>）：返回属于本装柜清单权威客户范围、「已审核、未删除」的
+    /// 销售出库明细，并显式回传父出库单 / 销售订单 / 商品 / 客户与剩余可链接基础单位数量（作为出运证据）。
+    /// 复用既有「装柜清单」与「销售出库」菜单授权与实时客户数据范围；不写任何表。
+    /// </summary>
+    [HttpGet("{id:long}/stock-out-candidates")]
+    public async Task<IActionResult> GetStockOutCandidates(
+        long id, [FromQuery] string? keyword, [FromQuery] int take = 0)
+    {
+        var scope = await LoadingListAuthorizationRules.EnsureAuthorizedAsync(Db, CurrentUserId());
+        var entity = await GetOrThrowAsync(id, "装柜清单不存在");
+        await LoadingListAuthorizationRules.EnsureStoredScopeAllowedAsync(Db, scope, entity);
+        // 候选直接暴露销售出库证据：非特权账号必须有既有「销售出库」菜单授权。
+        await LoadingStockOutLinkRules.EnsureSourceMenuAuthorizedAsync(Db, CurrentUserId());
+        var candidates = await LoadingStockOutLinkRules.QueryCandidatesAsync(Db, entity, scope, keyword, take);
+        return Ok(ApiResponse<List<LoadingStockOutCandidateDto>>.Success(
+            candidates, "已返回可链接的已审核销售出库证据（只读：缺失即无可用容量，绝不猜测来源）"));
+    }
+
+    /// <summary>
+    /// 指派 / 清除装柜明细的显式出运证据链接：在改写任何一行之前先统一校验全部拟议链接
+    /// （来源已审核且未删除、商品 / 基础单位一致、客户属于权威客户范围、新链接数量为正），
+    /// 并在同一可串行化事务内按「上游销售出库行（升序）→ 装柜清单行」确定性锁序提交；任一步失败整体回滚，
+    /// 明细 / 状态 / 历史保持不变。
+    /// </summary>
+    [HttpPost("{id:long}/stock-out-links")]
+    public async Task<IActionResult> AssignStockOutLinks(
+        long id, [FromBody] LoadingStockOutLinkAssignRequest request)
+    {
+        request ??= new LoadingStockOutLinkAssignRequest();
+        var links = request.Links ?? new List<LoadingStockOutLinkAssignmentDto>();
+        var scope = await LoadingListAuthorizationRules.EnsureAuthorizedAsync(Db, CurrentUserId());
+
+        // 确定性锁序：先解析本次拟议链接涉及的上游出库单，再按 Id 升序加锁。
+        var proposedSourceDetailIds = links
+            .Where(l => l.SourceStockOutDetailId is > 0)
+            .Select(l => l.SourceStockOutDetailId!.Value).ToList();
+        var lockStockOutIds = await LoadingStockOutLinkRules
+            .LoadStockOutIdsBySourceDetailIdsAsync(Db, proposedSourceDetailIds);
+
+        await using var transaction = await Db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
+        try
+        {
+            await AcquireStockOutLinkRowLocksAsync(lockStockOutIds);
+            await AcquireLoadingListRowLockAsync(id);
+
+            var entity = await Db.ContainerLoadingLists.Include(o => o.Details)
+                .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
+                ?? throw BusinessException.NotFound("装柜清单不存在");
+            if (GetStatus(entity) != DocumentStatus.Pending)
+                throw BusinessException.RuleConflict("仅待提交状态的装柜清单可维护出运证据链接");
+
+            await LoadingListAuthorizationRules.EnsureStoredScopeAllowedAsync(Db, scope, entity);
+
+            var assignments = links
+                .GroupBy(l => l.LoadingDetailId)
+                .Select(g => g.Last())
+                .ToList();
+            if (assignments.Count != links.Count)
+                throw BusinessException.InvalidParameter("链接指派存在重复的装柜明细行");
+
+            // 先在副本上校验全部拟议链接：被拒绝时不改动库中任何一行。
+            var proposed = new ContainerLoadingList
+            {
+                Id = entity.Id,
+                CustomerId = entity.CustomerId,
+                PreLoadingId = entity.PreLoadingId,
+                Details = entity.Details.Where(d => !d.IsDeleted).Select(d => new ContainerLoadingDetail
+                {
+                    Id = d.Id,
+                    LoadingListId = d.LoadingListId,
+                    ProductId = d.ProductId,
+                    ProductName = d.ProductName,
+                    Quantity = d.Quantity,
+                    Cartons = d.Cartons,
+                    Weight = d.Weight,
+                    Volume = d.Volume,
+                    Remark = d.Remark,
+                    SourceStockOutDetailId = d.SourceStockOutDetailId
+                }).ToList()
+            };
+
+            foreach (var assignment in assignments)
+            {
+                var target = proposed.Details.FirstOrDefault(d => d.Id == assignment.LoadingDetailId)
+                    ?? throw BusinessException.NotFound(
+                        $"装柜明细 {assignment.LoadingDetailId} 不存在或不属于本装柜清单");
+                target.SourceStockOutDetailId = assignment.SourceStockOutDetailId;
+            }
+
+            await LoadingStockOutLinkRules.ValidateLinksAsync(Db, proposed, CurrentUserId());
+
+            var linkedCount = 0;
+            var clearedCount = 0;
+            foreach (var assignment in assignments)
+            {
+                var target = entity.Details.First(d => d.Id == assignment.LoadingDetailId);
+                if (assignment.SourceStockOutDetailId is > 0)
+                {
+                    if (target.SourceStockOutDetailId != assignment.SourceStockOutDetailId) linkedCount++;
+                    target.SourceStockOutDetailId = assignment.SourceStockOutDetailId;
+                }
+                else
+                {
+                    if (target.SourceStockOutDetailId is not null) clearedCount++;
+                    target.SourceStockOutDetailId = null;
+                }
+            }
+
+            entity.UpdatedAt = DateTime.Now;
+            await Db.SaveChangesAsync();
+            await transaction.CommitAsync();
+
+            var lines = await LoadingStockOutLinkRules.DescribeLinksAsync(Db, entity);
+            return Ok(ApiResponse<LoadingStockOutLinkAssignResultDto>.Success(
+                new LoadingStockOutLinkAssignResultDto
+                {
+                    LinkedCount = linkedCount,
+                    ClearedCount = clearedCount,
+                    Items = lines
+                },
+                "出运证据链接已更新（历史未链接明细保持显式未链接）"));
+        }
+        catch
+        {
+            await transaction.RollbackAsync();
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// ERP-366：按 <c>StockOutId</c> 升序对上游销售出库单行加更新锁（<c>UPDLOCK, HOLDLOCK</c>，与销售退货审核 /
+    /// 销审 / 来源取消共用同一把来源行锁），把并发「装柜审核 / 链接」与「来源取消 / 退货」串行化在同一事务内。
+    /// 确定性锁序固定为「上游销售出库行 → 预装柜单行 → 装柜清单行」，避免锁环；非关系型提供程序跳过。
+    /// </summary>
+    private async Task AcquireStockOutLinkRowLocksAsync(IEnumerable<long> stockOutIds)
+    {
+        if (!LoadingStockOutLinkRules.IsRelationalProvider(Db)) return;
+
+        foreach (var stockOutId in stockOutIds.Where(id => id > 0).Distinct().OrderBy(id => id))
+        {
+            await Db.Database
+                .SqlQueryRaw<long>(LoadingStockOutLinkRules.LockStockOutRowSql, stockOutId)
+                .ToListAsync();
+        }
     }
 
     /// <summary>

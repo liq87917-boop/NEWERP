@@ -278,4 +278,13 @@ public class ContainerLoadingDetail : BaseEntity
     /// <summary>备注</summary>
     [MaxLength(500)]
     public string Remark { get; set; } = string.Empty;
+
+    /// <summary>
+    /// 来源**销售出库明细** Id（ERP-366，可空，刻意不建外键）：
+    /// 显式指向本行认定的**已审核、未删除**出库明细，作为该行数量的物理出运证据。
+    /// <para><c>null</c> = **显式未链接**（历史 / 未登记证据）：历史明细一律保持 <c>null</c>，
+    /// <strong>绝不回填、绝不按出库单号 / 相似度猜测来源</strong>，且未链接数量不计入「已证明出运」容量。</para>
+    /// </summary>
+    public long? SourceStockOutDetailId { get; set; }
+
 }

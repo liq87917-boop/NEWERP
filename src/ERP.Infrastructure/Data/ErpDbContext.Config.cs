@@ -226,6 +226,17 @@ public partial class ErpDbContext
             .HasDatabaseName("IX_ContainerLoadingListParticipants_CustomerId")
             .HasFilter("IsDeleted = 0");
 
+        // ============ ERP-366：装柜明细 → 销售出库明细 的显式出运证据链接 ============
+        // 设计口径：
+        //   1. SourceStockOutDetailId 为**可空**留痕：历史 / 未链接明细保持 NULL = 显式「无证据」，
+        //      **不做任何回填**，也绝不按出库单号 / 相似度猜测来源；
+        //   2. 刻意**不建**到 StockOutDetails 的外键：来源出库单软删除 / 取消后历史装柜证据仍必须可读；
+        //   3. 只建读取侧过滤索引（软删除行不占用），供「按来源出库明细累计已链接装柜数量」有界检索；
+        //   4. 与 SchemaUpgrader 第 29 段的幂等加列 / 建索引保持一致。
+        modelBuilder.Entity<ContainerLoadingDetail>().HasIndex(x => x.SourceStockOutDetailId)
+            .HasDatabaseName("IX_ContainerLoadingDetails_SourceStockOutDetailId")
+            .HasFilter("IsDeleted = 0 AND SourceStockOutDetailId IS NOT NULL");
+
         // ============ ERP-042：装柜费用分摊批次与分摊行（既有费用单之上的留痕层） ============
         // 设计口径：
         //   1. 分摊结果仍然是既有 FinanceExpense 行（一参与方一行），本两张表只记录
