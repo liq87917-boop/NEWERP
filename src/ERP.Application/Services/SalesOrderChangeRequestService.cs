@@ -48,7 +48,7 @@ public static class SalesOrderChangeRequestService
     /// </summary>
     public static async Task<SalesOrderChangeRequestDto> CreateDraftAsync(
         IErpDbContext db, IDocumentNumberService noService, SalesOrderChangeRequestSaveDto dto,
-        CancellationToken ct = default)
+        SalespersonDataScope? scope = null, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(db);
         ArgumentNullException.ThrowIfNull(noService);
@@ -56,6 +56,11 @@ public static class SalesOrderChangeRequestService
 
         if (dto.SalesOrderId <= 0)
             throw BusinessException.InvalidParameter("请选择要发起变更申请的销售订单");
+
+        /* ERP-414 授权先于发号与落库：拟议（显式）来源必须在当前账号的权威来源范围内；
+           来源不存在 / 已删除 / 范围外一律返回同一非披露错误，绝不先发号或写任何行。 */
+        await SalesOrderChangeRequestAuthorizationRules.EnsureSourceOrderAllowedAsync(
+            db, scope, dto.SalesOrderId, ct);
 
         var order = await LoadSourceOrderAsync(db, dto.SalesOrderId, ct)
             ?? throw BusinessException.NotFound(
@@ -91,13 +96,22 @@ public static class SalesOrderChangeRequestService
     /// 旧的「拟议新增行」按软删除留痕处理，来源行永远保留。
     /// </summary>
     public static async Task<SalesOrderChangeRequestDto> UpdateDraftAsync(
-        IErpDbContext db, long id, SalesOrderChangeRequestSaveDto dto, CancellationToken ct = default)
+        IErpDbContext db, long id, SalesOrderChangeRequestSaveDto dto,
+        SalespersonDataScope? scope = null, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(db);
         ArgumentNullException.ThrowIfNull(dto);
 
         var entity = await LoadAsync(db, id, includeDetails: true, ct);
         SalesOrderChangeRequestRules.EnsureDraftEditable(entity.Status);
+
+        /* ERP-414 授权先于明细替换：持久化来源与（如显式提交）拟议来源都必须通过来源归属复核；
+           范围外 / 不存在 / 已删除来源返回同一非披露错误，绝不替换任何拟议明细或写库。 */
+        await SalesOrderChangeRequestAuthorizationRules.EnsureSourceOrderAllowedAsync(
+            db, scope, entity.SalesOrderId, ct);
+        if (dto.SalesOrderId > 0 && dto.SalesOrderId != entity.SalesOrderId)
+            await SalesOrderChangeRequestAuthorizationRules.EnsureSourceOrderAllowedAsync(
+                db, scope, dto.SalesOrderId, ct);
 
         if (dto.SalesOrderId > 0 && dto.SalesOrderId != entity.SalesOrderId)
             throw BusinessException.InvalidParameter(
@@ -121,11 +135,14 @@ public static class SalesOrderChangeRequestService
     /// <para>提交<strong>不</strong>代表批准、<strong>不</strong>代表套用，也<strong>不</strong>改写来源销售订单。</para>
     /// </summary>
     public static async Task<SalesOrderChangeRequestDto> SubmitAsync(
-        IErpDbContext db, long id, CancellationToken ct = default)
+        IErpDbContext db, long id, SalespersonDataScope? scope = null, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(db);
 
         var entity = await LoadAsync(db, id, includeDetails: true, ct);
+        /* ERP-414 授权先于状态变更与成功响应：持久化来源必须先通过来源归属复核。 */
+        await SalesOrderChangeRequestAuthorizationRules.EnsureSourceOrderAllowedAsync(
+            db, scope, entity.SalesOrderId, ct);
         SalesOrderChangeRequestRules.EnsureSubmittable(entity.Status);
 
         var now = DateTime.Now;
@@ -141,11 +158,15 @@ public static class SalesOrderChangeRequestService
     /// 取消变更申请（草稿与已提交都可取消，必须填写原因）：保留原始与拟议证据，不做硬删除。
     /// </summary>
     public static async Task<SalesOrderChangeRequestDto> CancelAsync(
-        IErpDbContext db, long id, string? reason, CancellationToken ct = default)
+        IErpDbContext db, long id, string? reason,
+        SalespersonDataScope? scope = null, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(db);
 
         var entity = await LoadAsync(db, id, includeDetails: true, ct);
+        /* ERP-414 授权先于取消与成功响应：持久化来源必须先通过来源归属复核。 */
+        await SalesOrderChangeRequestAuthorizationRules.EnsureSourceOrderAllowedAsync(
+            db, scope, entity.SalesOrderId, ct);
         SalesOrderChangeRequestRules.EnsureCancellable(entity.Status);
 
         var normalized = SalesOrderChangeRequestRules.NormalizeCancelReason(reason);
@@ -655,19 +676,26 @@ public static class SalesOrderChangeRequestService
 
     /// <summary>变更申请详情（含来源快照、来源当前可用性与「来源是否已变化」提示；只读，不写库）</summary>
     public static async Task<SalesOrderChangeRequestDto> GetAsync(
-        IErpDbContext db, long id, CancellationToken ct = default)
+        IErpDbContext db, long id, SalespersonDataScope? scope = null, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(db);
         var entity = await LoadAsync(db, id, includeDetails: true, ct);
+        /* ERP-414 授权先于返回任何详情：持久化来源必须先通过来源归属复核（范围外 / 不存在同一非披露错误）。 */
+        await SalesOrderChangeRequestAuthorizationRules.EnsureSourceOrderAllowedAsync(
+            db, scope, entity.SalesOrderId, ct);
         return await MapAsync(db, entity, ct);
     }
 
     /// <summary>
     /// 变更申请台账（分页、只读）：可按来源销售订单 Id / 状态 / 关键字过滤；
     /// 明细与来源订单**一次批量装载**，绝不逐行查询数据库。
+    /// <para>ERP-414：受限账号的范围在 <c>Count</c> 与分页<b>之前</b>按来源订单实时归属下推到数据库
+    /// （<see cref="SalesOrderChangeRequestAuthorizationRules.ApplySourceScope"/>），来源缺失 / 已删除 /
+    /// 范围外的申请不计入总数也不返回，绝不「先查全量再内存过滤」。</para>
     /// </summary>
     public static async Task<PagedResult<SalesOrderChangeRequestDto>> ListAsync(
-        IErpDbContext db, SalesOrderChangeRequestQuery query, CancellationToken ct = default)
+        IErpDbContext db, SalesOrderChangeRequestQuery query,
+        SalespersonDataScope? scope = null, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(db);
         ArgumentNullException.ThrowIfNull(query);
@@ -678,7 +706,8 @@ public static class SalesOrderChangeRequestService
         if (query.Status is not null && !SalesOrderChangeRequestRules.SupportedStatuses.Contains(query.Status.Value))
             throw BusinessException.InvalidParameter("状态筛选不合法（0 草稿 / 1 已提交 / 2 已取消）");
 
-        var source = db.SalesOrderChangeRequests.AsNoTracking().Where(x => !x.IsDeleted);
+        var source = SalesOrderChangeRequestAuthorizationRules.ApplySourceScope(
+            db, scope, db.SalesOrderChangeRequests.AsNoTracking().Where(x => !x.IsDeleted));
         if (query.SalesOrderId is not null)
         {
             if (query.SalesOrderId.Value <= 0)
@@ -714,23 +743,33 @@ public static class SalesOrderChangeRequestService
 
     /// <summary>指定来源销售订单的变更申请清单（**有界**，单据行操作入口用）</summary>
     public static async Task<List<SalesOrderChangeRequestDto>> ListForSalesOrderAsync(
-        IErpDbContext db, long salesOrderId, int take = MaxPerSourceOrder, CancellationToken ct = default)
+        IErpDbContext db, long salesOrderId, int take = MaxPerSourceOrder,
+        SalespersonDataScope? scope = null, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(db);
         if (salesOrderId <= 0) throw BusinessException.InvalidParameter("来源销售订单 Id 不合法");
 
+        /* ERP-414 显式来源先授权：范围外 / 不存在 / 已删除来源返回同一非披露错误，
+           绝不返回其申请计数或部分行，也绝不泄露单据归属。 */
+        await SalesOrderChangeRequestAuthorizationRules.EnsureSourceOrderAllowedAsync(
+            db, scope, salesOrderId, ct);
+
         var size = take <= 0 ? MaxPerSourceOrder : Math.Min(take, MaxPerSourceOrder);
         var page = await ListAsync(db,
-            new SalesOrderChangeRequestQuery { SalesOrderId = salesOrderId, Page = 1, PageSize = size }, ct);
+            new SalesOrderChangeRequestQuery { SalesOrderId = salesOrderId, Page = 1, PageSize = size },
+            scope, ct);
         return page.Items;
     }
 
     /// <summary>
     /// 来源销售订单候选（只读、**有界**）：只返回存在且未删除的订单，关键字只匹配订单号；
     /// 已作废订单照实标注为不可选择，绝不按客户名 / 金额 / 日期相似度猜测来源。
+    /// <para>ERP-414：受限账号的来源候选在 <c>Take</c> <b>之前</b>按客户数据范围下推
+    /// （ERP-097 唯一权威口径），范围外客户订单既不返回也不占用候选名额。</para>
     /// </summary>
     public static async Task<List<SalesOrderChangeRequestSourceOptionDto>> ListSourceOrderOptionsAsync(
-        IErpDbContext db, string? keyword, int take = MaxSourceOptions, CancellationToken ct = default)
+        IErpDbContext db, string? keyword, int take = MaxSourceOptions,
+        SalespersonDataScope? scope = null, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(db);
 
@@ -738,6 +777,8 @@ public static class SalesOrderChangeRequestService
         var size = take <= 0 ? MaxSourceOptions : Math.Min(take, MaxSourceOptions);
 
         var source = db.SalesOrders.AsNoTracking().Where(o => !o.IsDeleted);
+        if (scope is not null)
+            source = SalespersonDataScopeService.FilterByCustomer(source, scope, o => o.CustomerId);
         if (keywordText.Length > 0) source = source.Where(o => o.OrderNo.Contains(keywordText));
 
         var rows = await source.OrderByDescending(o => o.Id).Take(size).ToListAsync(ct);
