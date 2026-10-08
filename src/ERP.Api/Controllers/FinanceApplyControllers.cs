@@ -1,4 +1,5 @@
 using ERP.Application.Common;
+using ERP.Application.DTOs;
 using ERP.Application.Interfaces;
 using ERP.Application.Services;
 using ERP.Domain.Entities;
@@ -59,12 +60,65 @@ public class FinanceDepositApplyController : DocumentControllerBase<FinanceDepos
     }
 
     /// <summary>
+    /// 来源销售订单候选（ERP-390，只读、有界、分页）：在既有「定金申请单」菜单 + 既有「销售订单」菜单 +
+    /// 实时客户数据范围之内，按<b>精确客户 Id</b>返回「未删除」销售订单候选（已取消 / 币种不一致显式标记不可选）；
+    /// 关键字 / 页码 / 每页条数先归一化再计数，只返回有界 DTO 字段。
+    /// <para><b>候选选择不等于授权</b>：候选只供显式选择，最终保存仍按定金申请单生命周期规则复核精确来源；
+    /// 不返回任意客户订单，也不提供按猜测 Id 直取候选的旁路；<b>不新增任何用户授权，也不提供匿名 / 管理员降级</b>。</para>
+    /// </summary>
+    [HttpGet("sales-order-candidates")]
+    public async Task<IActionResult> GetSalesOrderCandidates(
+        [FromQuery] long? customerId, [FromQuery] string? currency, [FromQuery] string? keyword,
+        [FromQuery] int page = 0, [FromQuery] int pageSize = 0)
+    {
+        await FinanceDepositApplyLifecycleRules.EnsureMenuAuthorizedAsync(Db, CurrentUserId());
+        await FinanceDepositApplyLifecycleRules.EnsureSourceMenuAuthorizedAsync(Db, CurrentUserId());
+        if (customerId is not > 0)
+            throw BusinessException.InvalidParameter(FinanceDepositApplyLifecycleRules.ExactCustomerRequiredText);
+        // 客户数据范围先于任何计数 / 取数：范围外客户按权限不足拒绝，不泄露归属。
+        var scope = await SalespersonDataScopeService.ResolveAsync(Db, CurrentUserId());
+        FinanceDepositApplyLifecycleRules.EnsureCustomerInScope(scope, customerId.Value);
+
+        // 币种按既有系统口径归一化（可空：不传则只按客户做有界展示；传入则按归一化币种精确比对可选性）。
+        var normalizedCurrency = string.IsNullOrWhiteSpace(currency)
+            ? null
+            : FinanceDepositApplyLifecycleRules.NormalizeApplyCurrency(currency);
+
+        var result = await FinanceApplySalesOrderSourceService.QueryCandidatesAsync(
+            Db, customerId.Value, normalizedCurrency, keyword, page, pageSize);
+        return Ok(ApiResponse<FinanceApplySalesOrderCandidatePageDto>.Success(
+            result, FinanceApplySalesOrderSourceService.CandidateRuleText));
+    }
+
+    /// <summary>
+    /// 已存储来源的只读展示（详情 / 重开）：按申请单权威客户做实时身份 / 菜单授权 / 客户数据范围复核后，
+    /// 返回持久化来源 Id 与显式状态文案（未关联 / 已关联 / 来源已取消 / 来源不可用）；历史已取消 / 不可用来源
+    /// 原样保留、只读可读，绝不静默清除 / 重绑定，也不改写任何字段。
+    /// </summary>
+    [HttpGet("{id:long}/sales-order-source")]
+    public async Task<IActionResult> GetStoredSalesOrderSource(long id)
+    {
+        await FinanceDepositApplyLifecycleRules.EnsureMenuAuthorizedAsync(Db, CurrentUserId());
+        var entity = await Set.AsNoTracking()
+            .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
+            ?? throw BusinessException.NotFound("定金申请单不存在");
+        var scope = await SalespersonDataScopeService.ResolveAsync(Db, CurrentUserId());
+        FinanceDepositApplyLifecycleRules.EnsureCustomerInScope(scope, entity.CustomerId);
+
+        var view = await FinanceApplySalesOrderSourceService.DescribeStoredSourceAsync(Db, entity);
+        return Ok(ApiResponse<FinanceApplySalesOrderSourceViewDto>.Success(
+            view, FinanceApplySalesOrderSourceService.StoredSourceRuleText));
+    }
+
+    /// <summary>
     /// 创建：在生成申请单号之前先完成身份 / 菜单授权 / 客户数据范围与商业字段 / 来源链接校验（授权与校验失败绝不消耗单号）；
     /// 关系型后端在同一事务内先取来源销售订单行锁、锁内权威复核来源资格之后才生成单号并落库。
     /// </summary>
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] FinanceDepositApply entity)
     {
+        // ERP-390：表单显式断开链接（留空 → 0）归一化为 null，保留历史「未关联来源」语义。
+        entity.SalesOrderId = entity.SalesOrderId is > 0 ? entity.SalesOrderId : null;
         var currency = FinanceDepositApplyLifecycleRules.NormalizeApplyCurrency(entity.Currency);
         var amount = FinanceDepositApplyLifecycleRules.NormalizeApplyAmount(entity.Amount, currency);
         var exchangeRate = FinanceDepositApplyLifecycleRules.NormalizeExchangeRate(entity.ExchangeRate);
@@ -115,6 +169,8 @@ public class FinanceDepositApplyController : DocumentControllerBase<FinanceDepos
     [HttpPut("{id:long}")]
     public async Task<IActionResult> Update(long id, [FromBody] FinanceDepositApply entity)
     {
+        // ERP-390：表单显式断开链接（留空 → 0）归一化为 null，保留历史「未关联来源」语义。
+        entity.SalesOrderId = entity.SalesOrderId is > 0 ? entity.SalesOrderId : null;
         var storedSourceOrderId = await FinanceDepositApplyLifecycleRules.ReadSourceSalesOrderIdAsync(Db, id);
         await using var transaction = FinanceDepositApplyLifecycleRules.IsRelationalProvider(Db)
             ? await Db.Database.BeginTransactionAsync()

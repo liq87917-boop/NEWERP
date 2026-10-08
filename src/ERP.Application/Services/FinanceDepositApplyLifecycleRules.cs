@@ -66,6 +66,42 @@ public static class FinanceDepositApplyLifecycleRules
         "来源销售订单行锁语句与销售订单取消共用同一常量（PreLoadingSalesOrderLinkRules.LockSalesOrderRowSql），" +
         "多个来源订单按 Id 升序加锁，绝不反向获取下游锁。";
 
+    /// <summary>
+    /// 链接 / 读取「销售订单」来源证据所需既有「销售订单」（<c>sales-order</c>）菜单编码（ERP-390，与
+    /// <see cref="SalesOrderCancellationRules.RequiredMenuCode"/> 同源，不新增权限模型）。
+    /// </summary>
+    public const string SourceRequiredMenuCode = "sales-order";
+
+    /// <summary>来源销售订单模块菜单中文文案（与既有菜单名一致）</summary>
+    public const string SourceRequiredMenuText = "销售订单";
+
+    /// <summary>来源销售订单菜单授权拒绝文案（fail closed，不返回任何订单数据）</summary>
+    public const string SourceMenuDeniedText =
+        "当前账号没有「销售订单」（sales-order）模块授权：拒绝读取 / 链接来源销售订单（fail closed，不返回任何订单数据）";
+
+    /// <summary>要求精确客户的拒绝文案（绝不返回任意客户订单）</summary>
+    public const string ExactCustomerRequiredText =
+        "必须提供精确的客户 Id（正整数）才能查询来源销售订单候选：拒绝返回任意客户订单（fail closed）";
+
+    /// <summary>候选列表中「已取消来源不可作为新来源」的不可选原因文案（ERP-390，与链接拒绝同口径）</summary>
+    public const string SourceCancelledCandidateText =
+        "销售订单已取消：不能作为新建 / 变更定金申请单的来源（历史已记录的链接按显式状态只读保留，绝不静默重绑定）";
+
+    /// <summary>历史未关联来源的显式证据文案（只读展示用，绝不回填 / 猜测来源）</summary>
+    public const string UnlinkedEvidenceText = "当前未关联来源销售订单（历史未关联语义原样保留，绝不回填）";
+
+    /// <summary>已关联来源的显式证据文案前缀</summary>
+    public const string LinkedEvidenceText = "已关联销售订单";
+
+    /// <summary>来源已取消的显式证据文案（历史链接只读保留）</summary>
+    public const string SourceCancelledEvidenceText =
+        "来源销售订单已取消，链接只读保留（不再作为新来源，绝不静默清除 / 重绑定）";
+
+    /// <summary>来源已删除 / 无法解析的显式证据文案（历史链接原样保留）</summary>
+    public const string UnavailableEvidenceText =
+        "来源销售订单不可用（已删除或无法解析），原链接原样保留（绝不静默清除 / 重绑定）";
+
+
     // ==================== 1. 币种、金额、汇率与客户纯校验 ====================
 
     /// <summary>币种规范化 + 支持范围校验（申请单币种必须来自系统币种口径，才能与来源订单权威比对）</summary>
@@ -141,7 +177,22 @@ public static class FinanceDepositApplyLifecycleRules
     /// 下一次请求立即收敛；申请单的修改 / 提交 / 审核 / 取消 / 删除会在同一事务内、取得行锁之后再调用本方法，
     /// 用实时身份与授权覆盖「先读后写」窗口。</para>
     /// </summary>
-    public static async Task EnsureMenuAuthorizedAsync(IErpDbContext db, long? userId)
+    public static Task EnsureMenuAuthorizedAsync(IErpDbContext db, long? userId)
+        => EnsureMenuCoreAsync(db, userId, RequiredMenuCode,
+            $"当前账号没有「{RequiredMenuText}」（{RequiredMenuCode}）模块授权");
+
+    /// <summary>
+    /// 链接 / 读取「销售订单」来源证据所需既有「销售订单」（<c>sales-order</c>）菜单授权（ERP-390）：
+    /// 实时启用身份（缺失 / 非法 → 未认证；不存在 / 已删除 → 未认证；禁用 → 权限不足）→ 既有菜单授权
+    /// （fail closed，绝不退化为匿名或管理员）。
+    /// <para>每次调用都重新查询 <c>SysUsers</c> 与「角色 → 菜单」授权（无缓存），授权撤销后下一次请求立即收敛；
+    /// 只复用既有菜单权限，不新增任何用户授权。</para>
+    /// </summary>
+    public static Task EnsureSourceMenuAuthorizedAsync(IErpDbContext db, long? userId)
+        => EnsureMenuCoreAsync(db, userId, SourceRequiredMenuCode, SourceMenuDeniedText);
+
+    private static async Task EnsureMenuCoreAsync(
+        IErpDbContext db, long? userId, string menuCode, string deniedText)
     {
         ArgumentNullException.ThrowIfNull(db);
         if (userId is null or <= 0)
@@ -155,10 +206,8 @@ public static class FinanceDepositApplyLifecycleRules
             throw new BusinessException("登录账号已禁用，禁止操作定金申请单（fail closed）", ErrorCodes.Forbidden);
 
         var menuCodes = await CustomerReceivableReconciliationService.LoadAuthorizedMenuCodesAsync(db, userId.Value);
-        if (!menuCodes.Contains(RequiredMenuCode, StringComparer.OrdinalIgnoreCase))
-            throw new BusinessException(
-                $"当前账号没有「{RequiredMenuText}」（{RequiredMenuCode}）模块授权",
-                ErrorCodes.Forbidden);
+        if (!menuCodes.Contains(menuCode, StringComparer.OrdinalIgnoreCase))
+            throw new BusinessException(deniedText, ErrorCodes.Forbidden);
     }
 
     /// <summary>
@@ -208,6 +257,40 @@ public static class FinanceDepositApplyLifecycleRules
                 + "不能引用（不做汇率换算）");
 
         return order;
+    }
+
+    /// <summary>
+    /// 新建 / 变更来源时可被显式选择的状态判定（ERP-390）：既有「未取消」订单可以为新来源建立链接；
+    /// 已取消订单只能作为<b>历史</b>已记录链接只读保留，绝不作为新来源（与
+    /// <see cref="ResolveSourceSalesOrderAsync"/> 的取消拒绝同口径）。
+    /// </summary>
+    public static bool IsEligibleNewSource(DocumentStatus status) => status != DocumentStatus.Cancelled;
+
+    /// <summary>
+    /// 构造定金申请单来源链接的<b>显式状态</b>文案（详情 / 只读展示用）：未关联（历史）→ 显式「未关联」；
+    /// 已关联且来源有效 → 已关联 + 订单号；来源已取消 → 已关联 + 「来源已取消，只读保留」；
+    /// 来源已删除 / 无法解析 → 「来源不可用，原链接原样保留」。
+    /// <para>本方法绝不写库、绝不重绑定 / 清除链接，也绝不因来源失效而抛异常（历史必须可读）。</para>
+    /// </summary>
+    public static async Task<string> DescribeStoredSourceAsync(
+        IErpDbContext db, FinanceDepositApply apply, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(apply);
+
+        if (apply.SalesOrderId is null or <= 0) return UnlinkedEvidenceText;
+
+        var order = await db.SalesOrders.AsNoTracking()
+            .Where(o => o.Id == apply.SalesOrderId.Value && !o.IsDeleted)
+            .Select(o => new { o.OrderNo, o.Status })
+            .FirstOrDefaultAsync(ct);
+
+        if (order is null)
+            return $"{LinkedEvidenceText} Id {apply.SalesOrderId.Value}：{UnavailableEvidenceText}";
+
+        return order.Status == DocumentStatus.Cancelled
+            ? $"{LinkedEvidenceText}「{order.OrderNo}」：{SourceCancelledEvidenceText}"
+            : $"{LinkedEvidenceText}「{order.OrderNo}」";
     }
 
     /// <summary>

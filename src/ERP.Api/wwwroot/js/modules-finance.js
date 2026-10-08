@@ -11,6 +11,9 @@ Object.assign(MODULES, {
       { key: 'amount', label: '申请金额', type: 'number' },
       { key: 'currency', label: '币种', type: 'select', options: CURRENCY_OPTS },
       { key: 'exchangeRate', label: '汇率', type: 'number', default: 1 },
+      /* ERP-390：来源销售订单由「选择来源」有界选择器显式回填（也可手工填写 Id / 留空显式断开）；
+         选择器只回填权威来源 Id，绝不臆造订单号、绝不自动改金额 / 汇率 / 币种 */
+      { key: 'salesOrderId', label: '来源销售订单 ID（可留空；建议用「选择来源」）', type: 'number', selector: 'finance-apply-sales-order-source' },
       { key: 'bankAccount', label: '银行账户' }, { key: 'payee', label: '收款方' },
       { key: 'reason', label: '申请事由', type: 'textarea' },
     ],
