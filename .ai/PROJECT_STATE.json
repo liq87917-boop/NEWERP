@@ -1,7 +1,7 @@
 {
   "schema_version": 2,
   "project": "NEWERP",
-  "updated_at": "2026-10-08T09:42:47.016214Z",
+  "updated_at": "2026-10-08T09:43:22.741030Z",
   "phase": "ready",
   "current_task": null,
   "queue": [
@@ -363,9 +363,9 @@
   },
   "git_sync": {
     "branch": "main",
-    "local_sha": "53ce151",
+    "local_sha": "72703c4",
     "status": "pending",
-    "ahead": 0,
+    "ahead": 1,
     "behind": 0,
     "last_attempt_at": "2026-10-08T09:42:46.890726Z",
     "last_error": null
@@ -378,5 +378,7 @@
   "runner": {
     "status": "stopped",
     "pid": null
-  }
+  },
+  "blocker": null,
+  "finish_reason": "completed_checkpoint_recovered"
 }
