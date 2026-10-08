@@ -72,6 +72,16 @@ public static class PreLoadingSalesOrderLinkRules
         "不是出运凭证，不锁库、不生成库存流水、不改财务、不生成单证；装柜清单的物理出运证据由装柜明细的" +
         "销售出库明细链接（ERP-366）单独认定。";
 
+    /// <summary>
+    /// 「有效需求承诺证据」口径（ERP-369，接口 / 文档同源）：只有**未删除、已审核**预装柜单中
+    /// 明细显式链接（<c>SourceSalesOrderDetailId</c> 非空）到来源销售订单明细的行，才构成「已被消费的需求承诺」；
+    /// 未链接（<c>null</c> 历史遗留）/ 已删除 / 未审核（待提交 / 已提交 / 已驳回 / 已取消）的预装柜单
+    /// **不**阻断来源销售订单取消，也不占用任何容量。
+    /// </summary>
+    public const string EffectiveDemandEvidenceText =
+        "「有效需求承诺证据」= 未删除且已审核的预装柜单中，明细显式链接（SourceSalesOrderDetailId 非空）到来源销售订单明细的行；" +
+        "未链接（null）/ 已删除 / 未审核（待提交 / 已提交 / 已驳回 / 已取消）的预装柜单不阻断来源销售订单取消，也不占用容量。";
+
     /// <summary>上游销售订单行锁语句（与销售订单取消 / 出库审核共用同一把来源行锁）。</summary>
     public const string LockSalesOrderRowSql =
         "SELECT Id FROM db_owner.SalesOrders WITH (UPDLOCK, HOLDLOCK) WHERE Id = {0}";
@@ -368,6 +378,54 @@ public static class PreLoadingSalesOrderLinkRules
         return results;
     }
 
+    /// <summary>
+    /// 读取「以给定来源销售订单明细为显式来源、未删除且已审核」的**有效需求承诺证据**（ERP-369，有界只读）。
+    /// <para>供给销售订单取消护栏在改变任何状态之前判定「取消会让哪些已承诺需求失去依据」：
+    /// 未链接（<c>null</c> 历史遗留）/ 已删除预装柜单 / 未审核（待提交 / 已提交 / 已驳回 / 已取消）明细、
+    /// 以及链接到其它订单明细的无关链接**一律不返回**。返回按预装柜单 Id、明细 Id 升序、确定性且去重。</para>
+    /// <para><b>边界</b>：只读证据查询 —— 不改预装柜单 / 明细 / 状态 / 库存 / 采购 / 财务，也不清除任何链接；
+    /// 解除路径是既有显式工作流（取消预装柜单或清除其显式来源链接）。</para>
+    /// </summary>
+    /// <param name="db">数据上下文（只读查询，不落任何写锁）。</param>
+    /// <param name="sourceSalesOrderDetailIds">来源销售订单明细 Id 集合（非正数 / 重复自动忽略）。</param>
+    /// <param name="ct">取消令牌。</param>
+    public static async Task<List<PreLoadingSalesOrderLinkEvidence>> LoadEffectiveApprovedSourceLinksAsync(
+        IErpDbContext db, IReadOnlyCollection<long> sourceSalesOrderDetailIds, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(sourceSalesOrderDetailIds);
+        ct.ThrowIfCancellationRequested();
+
+        var ids = sourceSalesOrderDetailIds.Where(id => id > 0).Distinct().ToList();
+        if (ids.Count == 0) return new List<PreLoadingSalesOrderLinkEvidence>();
+
+        var rows = await (from p in db.ContainerPreLoadings.AsNoTracking()
+                          join d in db.ContainerPreLoadingDetails.AsNoTracking() on p.Id equals d.PreLoadingId
+                          where !p.IsDeleted && p.Status == DocumentStatus.Approved
+                                && !d.IsDeleted && d.SourceSalesOrderDetailId != null
+                                && ids.Contains(d.SourceSalesOrderDetailId.Value)
+                          orderby p.Id, d.Id
+                          select new
+                          {
+                              PreLoadingId = p.Id,
+                              p.PreLoadingNo,
+                              PreLoadingDetailId = d.Id,
+                              SourceSalesOrderDetailId = d.SourceSalesOrderDetailId!.Value,
+                              d.ProductId,
+                              d.ProductName,
+                              d.Quantity
+                          }).ToListAsync(ct);
+
+        return rows.Select(r => new PreLoadingSalesOrderLinkEvidence(
+            r.PreLoadingId,
+            r.PreLoadingNo ?? string.Empty,
+            r.PreLoadingDetailId,
+            r.SourceSalesOrderDetailId,
+            r.ProductId,
+            r.ProductName ?? string.Empty,
+            r.Quantity)).ToList();
+    }
+
     // ==================== 私有助手 ====================
 
     /// <summary>读取本预装柜单的权威订柜客户（显式 BookingId → 未删除订柜信息客户）；无法解析时返回 <c>null</c>。</summary>
@@ -563,3 +621,25 @@ public static class PreLoadingSalesOrderLinkRules
         }
     }
 }
+
+/// <summary>
+/// 一条「有效需求承诺证据」只读事实（ERP-369）：某个未删除、已审核的预装柜单明细行，通过显式
+/// <c>SourceSalesOrderDetailId</c> 链接到给定的来源销售订单明细。只用于判定与可执行的拒绝文案，
+/// 不是库存预留、不是出运凭证，也不携带任何金额 / 币种语义。
+/// </summary>
+/// <param name="PreLoadingId">预装柜单 Id。</param>
+/// <param name="PreLoadingNo">预装柜单号（缺失时为空字符串，文案层回退为 Id）。</param>
+/// <param name="PreLoadingDetailId">预装柜明细行 Id。</param>
+/// <param name="SourceSalesOrderDetailId">被链接的来源销售订单明细 Id。</param>
+/// <param name="ProductId">预装柜明细商品 Id。</param>
+/// <param name="ProductName">预装柜明细商品名称（文案用）。</param>
+/// <param name="Quantity">预装柜明细数量（基础单位，只作证据展示，绝不合计金额）。</param>
+public sealed record PreLoadingSalesOrderLinkEvidence(
+    long PreLoadingId,
+    string PreLoadingNo,
+    long PreLoadingDetailId,
+    long SourceSalesOrderDetailId,
+    long ProductId,
+    string ProductName,
+    decimal Quantity);
+

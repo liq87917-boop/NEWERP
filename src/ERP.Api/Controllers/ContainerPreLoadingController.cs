@@ -276,22 +276,30 @@ public class ContainerPreLoadingController : DocumentControllerBase<ContainerPre
 
 
     /// <summary>
-    /// 取消（ERP-363）：先实时授权；在同一可串行化事务内按既有锁序（来源订柜行 → 本单行）加 UPDLOCK/HOLDLOCK，
+    /// 取消（ERP-363 / ERP-369）：先实时授权；在同一可串行化事务内按确定性锁序
+    /// （上游销售订单行（ERP-368 显式来源链接，SalesOrderId 升序）→ 来源订柜行 → 本单行）加 UPDLOCK/HOLDLOCK，
     /// 再复核权威客户范围并校验是否存在「以本单为来源、未删除、已审核」的装柜清单（ERP-348）；存在则拒绝，
-    /// 与同源装柜清单审核串行化。本方法只改状态为已取消，不写库存 / 财务、不改写装柜清单与明细。
+    /// 与同源装柜清单审核串行化。上游订单行锁与 ERP-347 / ERP-369 销售订单取消**共用同一把锁**：
+    /// 先提交者决定结果，二者不可能同时成功（取消后来源取消看到有效需求证据即拒绝）。
+    /// 本方法只改状态为已取消，不写库存 / 财务、不改写装柜清单与明细，也**不**清除需求计划证据链接
+    /// （链接与数量作为历史证据原样保留），解除关系只走既有显式工作流。
     /// </summary>
     [HttpPost("{id:long}/cancel")]
     public override async Task<IActionResult> Cancel(long id)
     {
         var scope = await PreLoadingAuthorizationRules.EnsureAuthorizedAsync(Db, CurrentUserId());
 
-        var header = await Db.ContainerPreLoadings.AsNoTracking()
+        var header = await Db.ContainerPreLoadings.AsNoTracking().Include(o => o.Details)
             .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
             ?? throw BusinessException.NotFound("预装柜单不存在");
+
+        // ERP-369：取消前解析上游销售订单，按同一确定性锁序先锁来源订单行（与销售订单取消串行化）。
+        var linkedSalesOrderIds = await PreLoadingSalesOrderLinkRules.LoadLinkedSalesOrderIdsAsync(Db, header);
 
         await using var transaction = await Db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
         try
         {
+            await AcquireSalesOrderLinkRowLocksAsync(linkedSalesOrderIds);
             await AcquireBookingLinkLockAsync(header.BookingId);
             await AcquirePreLoadingRowLockAsync(id);
 

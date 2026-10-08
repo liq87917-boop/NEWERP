@@ -276,12 +276,15 @@ public class SalesOrderController : DocumentControllerBase<SalesOrder>
     }
 
     /// <summary>
-    /// 取消销售订单（ERP-347）：在可串行化事务内对订单行加更新锁，把「拒绝判定」与「状态变更」做成一个原子步骤，
-    /// 并与同单出库审核（ERP-343）、采购归属关联（ERP-346）与收款引用登记（ERP-053）串行化——
-    /// 并发场景下「履约生效」与「来源取消」不可能同时成功。
+    /// 取消销售订单（ERP-347 / ERP-369）：在可串行化事务内对订单行加更新锁，把「拒绝判定」与「状态变更」做成一个原子步骤，
+    /// 并与同单出库审核（ERP-343）、采购归属关联（ERP-346）、收款引用登记（ERP-053）以及预装柜需求证据链接的
+    /// 提交 / 审核 / 取消（ERP-368 / ERP-369）串行化——并发场景下「履约 / 需求承诺生效」与「来源取消」不可能同时成功。
+    /// <para>锁语句与预装柜审核 / 取消共用同一把上游订单行锁（<see cref="PreLoadingSalesOrderLinkRules.LockSalesOrderRowSql"/>），
+    /// 确定性锁序「上游销售订单行 → 订柜信息行 → 预装柜单行」保持不变（取消只取订单行锁，绝不反向获取下游锁）。</para>
     /// <para>只把状态改为已取消，<strong>不改动</strong>订单明细 / 金额 / 客户 / 币种等原始字段；
-    /// 存在已审核且未冲销的出库、未删除且未取消的采购履约或有效客户收款引用证据时拒绝，且本方法<strong>绝不</strong>
-    /// 静默取消采购、冲销库存或财务，冲销 / 作废只走既有显式工作流。</para>
+    /// 存在已审核且未冲销的出库、未删除且未取消的采购履约、有效客户收款引用证据，或未删除且已审核的预装柜
+    /// 需求计划证据（来源明细链接）时拒绝，且本方法<strong>绝不</strong>静默取消采购 / 预装柜、冲销库存或财务，
+    /// 冲销 / 作废 / 解除链接只走既有显式工作流。</para>
     /// </summary>
     [HttpPost("{id:long}/cancel")]
     public override async Task<IActionResult> Cancel(long id)
@@ -311,16 +314,15 @@ public class SalesOrderController : DocumentControllerBase<SalesOrder>
     }
 
     /// <summary>
-    /// 对销售订单行加更新锁（UPDLOCK, HOLDLOCK），把同单并发「出库审核 / 取消」串行化在同一事务内；
+    /// 对销售订单行加更新锁（UPDLOCK, HOLDLOCK），把同单并发「出库审核 / 取消」以及「预装柜需求证据审核 / 取消」
+    /// 串行化在同一事务内；锁语句与 ERP-368 预装柜流程共用同一常量（同一把来源行锁，确定性锁序起点）；
     /// 非关系型提供程序（内存库）无法执行表提示，跳过即可（事务本身等价无事务）。
     /// </summary>
     private async Task AcquireOrderCancellationLockAsync(long orderId)
     {
         if (!Db.Database.IsRelational()) return;
         await Db.Database
-            .SqlQueryRaw<long>(
-                "SELECT Id FROM db_owner.SalesOrders WITH (UPDLOCK, HOLDLOCK) WHERE Id = {0}",
-                orderId)
+            .SqlQueryRaw<long>(PreLoadingSalesOrderLinkRules.LockSalesOrderRowSql, orderId)
             .ToListAsync();
     }
 
