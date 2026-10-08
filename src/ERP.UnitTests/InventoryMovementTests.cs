@@ -407,6 +407,9 @@ public class InventoryMovementTests
         using var db = TestDbFactory.Create();
         SeedStock(db, WarehouseA, Product1, quantity: 10m, totalCost: 60m);       // 均价 6
         var ctl = NewPurchaseReturnController(db);
+        // 权威来源采购入库单（已审核、同供应商同仓库、商品 10 PCS）与来源入库流水成本 6
+        PurchaseReturnTestAuthorization.SeedApprovedStockIn(db, 77L, "RK2609230077", 99L, WarehouseA,
+            (Product1, "PCS", 10m));
         var id = await CreatePurchaseReturnAsync(ctl, quantity: 4m, unitPrice: 7m, unitCost: 0m,
             sourceStockInId: 77L, sourceNo: "RK2609230077");
 
@@ -692,8 +695,17 @@ public class InventoryMovementTests
         return SalesReturnTestAuthorization.CreateAuthorized(db, 1L);
     }
 
+    // ERP-358：采购退货全部路由都要求真实已授权身份（既有「采购退货」菜单）与权威来源入库单；
+    // 这里播种真实操作员身份 + 主数据与来源入库单，保留原有全部数量 / 成本 / 冲销断言（不绕过鉴权）。
     private static PurchaseReturnController NewPurchaseReturnController(ErpDbContext db)
-        => new(db, new DocumentNumberService(db), new InventoryService(db));
+    {
+        PurchaseReturnTestAuthorization.SeedWarehouse(db, WarehouseA, "仓A");
+        PurchaseReturnTestAuthorization.SeedWarehouse(db, WarehouseB, "仓B");
+        PurchaseReturnTestAuthorization.SeedProduct(db, Product1, "INV-P1", "PCS");
+        PurchaseReturnTestAuthorization.SeedProduct(db, Product2, "INV-P2", "PCS");
+        PurchaseReturnTestAuthorization.SeedSupplier(db, 99L, "供应商A");
+        return PurchaseReturnTestAuthorization.CreateAuthorized(db);
+    }
 
     private static InventoryMovementContext Context(long warehouseId, long productId, long sourceDocId = 1L) => new()
     {
@@ -788,6 +800,7 @@ public class InventoryMovementTests
         var result = await ctl.Create(new PurchaseReturn
         {
             ReturnDate = DateTime.Today,
+            SupplierId = 99L,
             SupplierName = "供应商A",
             WarehouseId = WarehouseA,
             SourceStockInId = sourceStockInId,
