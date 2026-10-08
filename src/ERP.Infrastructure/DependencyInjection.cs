@@ -154,6 +154,9 @@ public static class DependencyInjection
             sp.GetRequiredService<ReportMigrationParityEvidenceProvider>());
         services.AddSingleton<IReportMigrationParityEvidenceStore>(sp =>
             sp.GetRequiredService<ReportMigrationParityEvidenceProvider>());
+        // 迁移 parity 三方一致读取作用域工厂（ERP-338 Stage 2）：旧来源 / 通用预览 / 实际旧产物
+        // 在既有作用域 DbContext 上共享同一个 Snapshot 一致只读事务；后端 / 隔离级别 / 嵌套事务不支持时 fail closed。
+        services.AddScoped<IReportMigrationParityReadScopeFactory, ReportMigrationParityReadScopeFactory>();
         services.AddScoped<IReportMigrationParityEvidenceService, ReportMigrationParityEvidenceService>();
         services.AddScoped<IReportMigrationRegistry, ReportMigrationRegistry>();
 

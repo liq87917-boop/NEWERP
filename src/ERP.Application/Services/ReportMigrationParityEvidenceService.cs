@@ -20,6 +20,7 @@ public sealed class ReportMigrationParityEvidenceService : IReportMigrationParit
     private readonly IReportConfigurationExecutionBudget _budget;
     private readonly IReportMigrationParityEvidenceStore _store;
     private readonly ILegacyReportArtifactSource? _artifactSource;
+    private readonly IReportMigrationParityReadScopeFactory? _readScopeFactory;
 
     public ReportMigrationParityEvidenceService(
         ILegacyReportSource legacySource,
@@ -28,7 +29,8 @@ public sealed class ReportMigrationParityEvidenceService : IReportMigrationParit
         IReportMigrationOutputComparator outputComparator,
         IReportConfigurationExecutionBudget budget,
         IReportMigrationParityEvidenceStore store,
-        ILegacyReportArtifactSource? artifactSource = null)
+        ILegacyReportArtifactSource? artifactSource = null,
+        IReportMigrationParityReadScopeFactory? readScopeFactory = null)
     {
         _legacySource = legacySource ?? throw new ArgumentNullException(nameof(legacySource));
         _providers = (providers ?? Array.Empty<IReportConfigurationDatasetProvider>())
@@ -39,6 +41,7 @@ public sealed class ReportMigrationParityEvidenceService : IReportMigrationParit
         _budget = budget ?? throw new ArgumentNullException(nameof(budget));
         _store = store ?? throw new ArgumentNullException(nameof(store));
         _artifactSource = artifactSource;
+        _readScopeFactory = readScopeFactory;
     }
 
     /// <inheritdoc />
@@ -55,99 +58,141 @@ public sealed class ReportMigrationParityEvidenceService : IReportMigrationParit
         return _budget.ExecuteAsync(
             userId,
             cancellationToken,
-            lease => ComputeAsync(definition, userId, lease.Token));
+            lease => ComputeAsync(definition, userId, lease.CorrelationId, lease.Token));
     }
 
     private async Task<ReportMigrationParityEvidenceDto?> ComputeAsync(
-        ReportMigrationRegistryEntryDefinition definition, long userId, CancellationToken cancellationToken)
+        ReportMigrationRegistryEntryDefinition definition,
+        long userId,
+        string correlationId,
+        CancellationToken cancellationToken)
     {
         var request = BuildRequest(definition.LegacyKey, userId);
 
-        LegacyReportSourceResult legacyResult;
+        // 三方（旧来源快照 / 通用预览 / 实际旧产物）读入同一个受支持的一致只读作用域；
+        // 后端 / 隔离级别 / 嵌套事务不支持时 environment-blocked → fail closed（无证据）。
+        IReportMigrationParityReadScope? scope = null;
         try
         {
-            legacyResult = await _legacySource.ReadAsync(request, cancellationToken);
-        }
-        catch (BusinessException)
-        {
-            return null;
-        }
+            if (_readScopeFactory is not null)
+            {
+                try
+                {
+                    scope = await _readScopeFactory.OpenAsync(userId, correlationId, cancellationToken);
+                }
+                catch (BusinessException)
+                {
+                    return null;
+                }
+            }
 
-        if (legacyResult.Status != LegacyReportSourceStatus.Success || legacyResult.Snapshot is null)
-            return null;
-
-        var legacy = legacyResult.Snapshot;
-
-        var provider = FindProvider(definition.DatasetKey);
-        if (provider is null)
-            return null;
-
-        ReportConfigurationDatasetDto? dataset;
-        try
-        {
-            dataset = await provider.GetDatasetAsync(userId, cancellationToken);
-        }
-        catch (BusinessException)
-        {
-            return null;
-        }
-
-        if (dataset is null)
-            return null;
-
-        var mappings = BuildFieldMappings(legacy.Columns, dataset);
-        if (mappings is null || mappings.Count == 0)
-            return null;
-
-        var genericDefinition = BuildGenericDefinition(definition.DatasetKey, mappings);
-        var parameters = new ReportConfigurationPreviewParameters(
-            1, 200, ReportConfigurationConstants.GroupNone, null, null);
-
-        ReportConfigurationPreviewDto preview;
-        try
-        {
-            preview = await provider.PreviewAsync(genericDefinition, parameters, userId, cancellationToken);
-        }
-        catch (BusinessException)
-        {
-            return null;
-        }
-
-        if (preview is null || preview.Rows is null)
-            return null;
-
-        var generic = ToSnapshot(preview, legacy, mappings);
-
-        LegacyReportArtifactBytesDto? legacyArtifacts = null;
-        if (_artifactSource is not null)
-        {
+            LegacyReportSourceResult legacyResult;
             try
             {
-                legacyArtifacts = await _artifactSource.ReadArtifactsAsync(request, cancellationToken);
+                legacyResult = await _legacySource.ReadAsync(request, cancellationToken);
             }
             catch (BusinessException)
             {
-                legacyArtifacts = null;
+                return null;
             }
+
+            if (legacyResult.Status != LegacyReportSourceStatus.Success || legacyResult.Snapshot is null)
+                return null;
+
+            var legacy = legacyResult.Snapshot;
+
+            var provider = FindProvider(definition.DatasetKey);
+            if (provider is null)
+                return null;
+
+            ReportConfigurationDatasetDto? dataset;
+            try
+            {
+                dataset = await provider.GetDatasetAsync(userId, cancellationToken);
+            }
+            catch (BusinessException)
+            {
+                return null;
+            }
+
+            if (dataset is null)
+                return null;
+
+            var mappings = BuildFieldMappings(legacy.Columns, dataset);
+            if (mappings is null || mappings.Count == 0)
+                return null;
+
+            var genericDefinition = BuildGenericDefinition(definition.DatasetKey, mappings);
+            var parameters = BuildPreviewParameters();
+
+            ReportConfigurationPreviewDto preview;
+            try
+            {
+                preview = await provider.PreviewAsync(genericDefinition, parameters, userId, cancellationToken);
+            }
+            catch (BusinessException)
+            {
+                return null;
+            }
+
+            if (preview is null || preview.Rows is null)
+                return null;
+
+            // 有界比对拒绝任何整页截断：满页旧行 / 通用预览 Total 超过本页均不得当作完整比对。
+            if (IsTruncated(legacy, preview))
+                return null;
+
+            var generic = ToSnapshot(preview, legacy, mappings);
+
+            LegacyReportArtifactBytesDto? legacyArtifacts = null;
+            if (_artifactSource is not null)
+            {
+                try
+                {
+                    legacyArtifacts = await _artifactSource.ReadArtifactsAsync(request, cancellationToken);
+                }
+                catch (BusinessException)
+                {
+                    legacyArtifacts = null;
+                }
+            }
+
+            if ((definition.ExcelCompatible || definition.PdfCompatible) && legacyArtifacts is null)
+                return null;
+
+            // 记录证据前做最终新鲜菜单 / 数据范围复核；撤销 / 失效即拒绝，绝不沿用旧缓存。
+            if (scope is not null)
+            {
+                try
+                {
+                    await scope.RecheckAsync(userId, BuildTarget(definition), cancellationToken);
+                }
+                catch (BusinessException)
+                {
+                    return null;
+                }
+            }
+
+            var output = _outputComparator.Compare(
+                BuildNormalizedPreview(preview, legacy, mappings),
+                legacy,
+                definition.ExcelCompatible,
+                definition.PdfCompatible,
+                legacyArtifacts: legacyArtifacts);
+
+            var comparison = _comparator.Compare(legacy, generic, output.OutputSemanticsMatched);
+            var evidence = comparison.Evidence;
+
+            if (evidence.Complete)
+                _store.Record(definition.LegacyKey, evidence);
+
+            return evidence;
         }
-
-        if ((definition.ExcelCompatible || definition.PdfCompatible) && legacyArtifacts is null)
-            return null;
-
-        var output = _outputComparator.Compare(
-            BuildNormalizedPreview(preview, legacy, mappings),
-            legacy,
-            definition.ExcelCompatible,
-            definition.PdfCompatible,
-            legacyArtifacts: legacyArtifacts);
-
-        var comparison = _comparator.Compare(legacy, generic, output.OutputSemanticsMatched);
-        var evidence = comparison.Evidence;
-
-        if (evidence.Complete)
-            _store.Record(definition.LegacyKey, evidence);
-
-        return evidence;
+        finally
+        {
+            if (scope is not null)
+                await scope.DisposeAsync();
+        }
     }
 
 
@@ -181,16 +226,31 @@ public sealed class ReportMigrationParityEvidenceService : IReportMigrationParit
 
     // ==================== 有界隔离夹具 ====================
 
+    private const int ComparisonPageSize = 200;
+
     private static LegacyReportSourceRequest BuildRequest(string legacyKey, long userId)
         => new()
         {
             LegacyKey = legacyKey,
             UserId = userId,
             Page = 1,
-            PageSize = 200,
-            Top = 200,
+            PageSize = ComparisonPageSize,
+            Top = ComparisonPageSize,
             AheadDays = 7,
         };
+
+    private static ReportConfigurationPreviewParameters BuildPreviewParameters()
+        => new(1, ComparisonPageSize, ReportConfigurationConstants.GroupNone, null, null);
+
+    private static ReportMigrationParityReadTarget BuildTarget(
+        ReportMigrationRegistryEntryDefinition definition)
+        => new(definition.LegacyKey, definition.DatasetKey, definition.RequiredMenuCodes);
+
+    private static bool IsTruncated(
+        ReportMigrationParitySnapshotDto legacy, ReportConfigurationPreviewDto preview)
+        => legacy.Rows.Count >= ComparisonPageSize
+           || preview.Total > preview.Rows.Count
+           || preview.TotalPages > 1;
 
     private static ReportConfigurationDefinition BuildGenericDefinition(
         string datasetKey, IReadOnlyList<FieldMapping> mappings)
