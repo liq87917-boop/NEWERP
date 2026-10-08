@@ -25,6 +25,14 @@ namespace ERP.Application.Services;
 /// <strong>不</strong>读取文件内容、<strong>不</strong>用引用标识发起任何网络或文件系统访问，也不校验文件是否存在、
 /// 内容是否安全、是否真实或是否已获下载授权；除本模块登记表外<strong>不</strong>写任何数据，
 /// 父单据、库存与库存成本、财务、出运与审批状态一律不变。</para>
+/// <para><b>原子性（ERP-412）</b>：<see cref="CreateAsync"/> / <see cref="VoidAsync"/> 全部落在
+/// <strong>同一个原子事务</strong>与<strong>确定性行锁</strong>内（登记先锁「权威父单据行」，作废先锁
+/// 「附件引用行」，口径见 <see cref="DocumentAttachmentReferenceMutationRules"/>）；锁内<strong>重新读取</strong>
+/// 实时身份 / 既有菜单 / 客户数据范围与权威父单据之后才快照与写入。加锁<strong>只</strong>刷新父单据技术字段
+/// <c>UpdatedAt</c>（绝不为加锁而改写父单据状态 / 金额 / 数量 / 客户 / 明细），并发登记输家由既有过滤唯一索引
+/// <c>UX_DocumentAttachmentReferences_ActiveIdentity</c> 拒绝并映射为稳定的业务冲突（Duplicate，完整回滚、
+/// 零部分写入），并发作废输家绝不覆盖赢家保留的原始作废原因与时间戳。<strong>不</strong>新增任何表 / 列 / 索引
+/// 或菜单 / 角色 / 用户授权。</para>
 /// </summary>
 public static class DocumentAttachmentReferenceService
 {
@@ -40,6 +48,9 @@ public static class DocumentAttachmentReferenceService
     /// 登记一条附件引用（元数据）：校验父单据类型 / 存在性、分类白名单、有界元数据、不透明引用标识、
     /// 来源授权确认与有效身份唯一性，写入父单据号码 / 类型快照。
     /// <para>本方法<strong>不</strong>访问对象存储、<strong>不</strong>上传或下载任何内容，也<strong>不</strong>改写父单据。</para>
+    /// <para>ERP-412：原子事务 + 确定性「权威父单据行」锁；锁内重新读取实时身份 / 菜单 / 客户数据范围与权威父单据
+    /// （存在 / 未删除 + 号码 / 类型快照）之后才判定有效身份唯一并写入；任何失败整体回滚（零部分写入），
+    /// 并发输家由既有过滤唯一索引拒绝并映射为稳定的业务冲突。</para>
     /// </summary>
     public static async Task<DocumentAttachmentReferenceDto> CreateAsync(
         IErpDbContext db, DocumentAttachmentReferenceSaveDto dto,
@@ -58,16 +69,7 @@ public static class DocumentAttachmentReferenceService
         if (access is not null)
             AttachmentOwnerAuthorizationRules.EnsureReferenceParentTypeAuthorized(access, parentType);
 
-        var parent = await ResolveParentAsync(db, parentType, dto.ParentId)
-            ?? throw BusinessException.NotFound(
-                $"{DocumentAttachmentReferenceRules.ParentTypeText(parentType)}（Id={dto.ParentId}）不存在或已删除："
-                + "只能对存在且未删除的父单据登记附件引用");
-
-        // ERP-408：持久化之前复核**原始权威父单据**与**实时**客户数据范围（不受调用方声明影响）
-        if (access is not null)
-            await AttachmentOwnerAuthorizationRules.EnsureReferenceParentScopeAsync(
-                db, access, parentType, parent.ParentId, false, cancellationToken);
-
+        // 有界元数据校验（纯校验，不读库）：非法请求在加锁之前即被拒绝，绝不占用事务与行锁。
         var category = DocumentAttachmentReferenceRules.NormalizeCategory(dto.Category);
         var displayName = DocumentAttachmentReferenceRules.NormalizeDisplayName(dto.DisplayName);
         var referenceId = DocumentAttachmentReferenceRules.NormalizeReferenceId(dto.ReferenceId);
@@ -79,34 +81,82 @@ public static class DocumentAttachmentReferenceService
             dto.SourceAuthorizationAcknowledged, dto.SourceAuthorizationNote);
         var authorizedBy = DocumentAttachmentReferenceRules.NormalizeAuthorizedBy(dto.AuthorizedBy);
 
-        await EnsureIdentityAvailableAsync(db, parentType, parent.ParentId, category, referenceId, excludeId: null);
+        // ERP-412：原子事务 + 确定性「权威父单据行」锁。锁内重新读取实时身份 / 菜单 / 客户数据范围与
+        // 权威父单据（存在 / 未删除 + 号码 / 类型快照），之后才判定有效身份唯一并写入；
+        // 加锁只刷新技术字段 UpdatedAt（绝不为加锁而改写父单据商业字段），任何失败整体回滚（零部分写入）。
+        var transaction = await DocumentAttachmentReferenceMutationRules.BeginMutationTransactionAsync(
+            db, cancellationToken);
+        var committed = false;
 
-        var now = DateTime.Now;
-        var entity = new DocumentAttachmentReference
+        try
         {
-            ParentType = parentType,
-            ParentId = parent.ParentId,
-            ParentNo = parent.ParentNo,
-            ParentTypeText = parent.ParentTypeText,
-            Category = category,
-            DisplayName = displayName,
-            ReferenceId = referenceId,
-            ContentType = contentType,
-            SizeBytes = sizeBytes,
-            Checksum = checksum,
-            Notes = notes,
-            SourceAuthorizationAcknowledged = true,
-            SourceAuthorizationNote = authorizationNote,
-            AuthorizedBy = authorizedBy,
-            AuthorizedAt = now,
-            RegisteredAt = now,
-            Status = DocumentAttachmentReferenceRules.StatusActive
-        };
+            // 1) 权威父单据行锁（UPDLOCK, HOLDLOCK 语义）：不存在 / 已删除 → 原子拒绝
+            if (!await DocumentAttachmentReferenceMutationRules.LockParentRowAsync(db, parentType, dto.ParentId))
+                throw BusinessException.NotFound(
+                    DocumentAttachmentReferenceMutationRules.ParentUnavailableText
+                    + $"（{DocumentAttachmentReferenceRules.ParentTypeText(parentType)} Id={dto.ParentId}）");
 
-        db.DocumentAttachmentReferences.Add(entity);
-        await db.SaveChangesAsync();
+            // 2) 锁内重新读取**实时**身份 / 菜单 / 客户数据范围（绝不信任加锁前的授权快照）
+            var liveAccess = access is not null
+                ? await AttachmentOwnerAuthorizationRules.ResolveDocumentReferenceAccessAsync(
+                    db, access.UserId, cancellationToken)
+                : null;
 
-        return await MapAsync(db, entity);
+            // 3) 锁内重新读取**权威父单据**：并发软删除 / 归属变更在本请求提交前一律收敛（原始父单据身份不变）
+            var parent = await ResolveParentAsync(db, parentType, dto.ParentId)
+                ?? throw BusinessException.NotFound(
+                    DocumentAttachmentReferenceMutationRules.ParentUnavailableText
+                    + $"（{DocumentAttachmentReferenceRules.ParentTypeText(parentType)} Id={dto.ParentId}）");
+
+            // 4) 锁内复核父单据类型菜单授权与权威归属客户范围（服务端权威快照，不受调用方声明影响）
+            if (liveAccess is not null)
+            {
+                AttachmentOwnerAuthorizationRules.EnsureReferenceParentTypeAuthorized(liveAccess, parentType);
+                await AttachmentOwnerAuthorizationRules.EnsureReferenceParentScopeAsync(
+                    db, liveAccess, parentType, parent.ParentId, false, cancellationToken);
+            }
+
+            // 5) 锁内判定有效身份唯一：既有过滤唯一索引仍是并发输家的最后防线
+            //    （由 SaveReferenceAsync 映射为稳定的 Duplicate 业务冲突，绝不暴露 SqlException / 内部路径）
+            await EnsureIdentityAvailableAsync(
+                db, parentType, parent.ParentId, category, referenceId, excludeId: null);
+
+            var now = DateTime.Now;
+            var entity = new DocumentAttachmentReference
+            {
+                ParentType = parentType,
+                ParentId = parent.ParentId,
+                ParentNo = parent.ParentNo,
+                ParentTypeText = parent.ParentTypeText,
+                Category = category,
+                DisplayName = displayName,
+                ReferenceId = referenceId,
+                ContentType = contentType,
+                SizeBytes = sizeBytes,
+                Checksum = checksum,
+                Notes = notes,
+                SourceAuthorizationAcknowledged = true,
+                SourceAuthorizationNote = authorizationNote,
+                AuthorizedBy = authorizedBy,
+                AuthorizedAt = now,
+                RegisteredAt = now,
+                Status = DocumentAttachmentReferenceRules.StatusActive
+            };
+
+            db.DocumentAttachmentReferences.Add(entity);
+            await DocumentAttachmentReferenceMutationRules.SaveReferenceAsync(db, cancellationToken);
+
+            await DocumentAttachmentReferenceMutationRules.CommitAsync(transaction, cancellationToken);
+            committed = true;
+
+            return await MapAsync(db, entity);
+        }
+        catch
+        {
+            if (!committed)
+                await DocumentAttachmentReferenceMutationRules.TryRollbackAsync(transaction, db);
+            throw;
+        }
     }
 
     /// <summary>分页参数规整（页码下限 1；每页条数收敛到 1 ~ <see cref="DocumentAttachmentReferenceQuery.MaxPageSize"/>）</summary>
@@ -294,31 +344,59 @@ public static class DocumentAttachmentReferenceService
     /// 作废附件引用：必须填写原因；**保留**原始元数据（分类 / 显示名 / 引用标识 / 大小 / 校验和 / 备注）、
     /// 来源授权留痕与审计历史，不物理删除、不删除任何远端对象、不静默替换；重复作废被拒绝。
     /// <para>作废<strong>不</strong>改写父单据，也<strong>不</strong>改动库存、财务、出运与审批数据。</para>
+    /// <para>ERP-412：原子事务 + 确定性「附件引用行」锁；锁内重新读取引用（tracked）与实时身份 / 授权，
+    /// 两个并发作废只有一个赢家，输家在锁内读到「已作废」一律拒绝，绝不覆盖赢家保留的原始作废原因与时间戳。</para>
     /// </summary>
     public static async Task<DocumentAttachmentReferenceDto> VoidAsync(
         IErpDbContext db, long id, string? reason,
         DocumentReferenceAccessContext? access = null, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(db);
+        if (id <= 0) throw BusinessException.InvalidParameter("附件引用 Id 不合法");
 
-        var entity = await LoadAsync(db, id);
+        // ERP-412：原子事务 + 确定性「附件引用行」锁。锁内重新读取引用（tracked）与实时身份 / 授权；
+        // 并发作废只有一个赢家，输家在锁内读到的已是「已作废」一律拒绝，
+        // 绝不覆盖赢家保留的原始作废原因与时间戳（历史不可变）。
+        var transaction = await DocumentAttachmentReferenceMutationRules.BeginMutationTransactionAsync(
+            db, cancellationToken);
+        var committed = false;
 
-        // ERP-408：作废写入之前，按**持久化**父单据复核父单据类型菜单授权与权威归属范围
-        // （未授权 / 范围外一律按「不存在」，fail closed；不改派、不静默修复）
-        if (access is not null)
-            await AttachmentOwnerAuthorizationRules.EnsureReferenceAuthorizedAsync(
-                db, access, entity, cancellationToken);
+        try
+        {
+            var entity = await DocumentAttachmentReferenceMutationRules.LockReferenceRowAsync(db, id)
+                ?? throw BusinessException.NotFound($"附件引用（Id={id}）不存在或已删除");
 
-        DocumentAttachmentReferenceRules.EnsureVoidable(entity.Status, Label(entity));
-        var reasonText = DocumentAttachmentReferenceRules.NormalizeVoidReason(reason);
+            // ERP-408：锁内按**持久化**父单据复核父单据类型菜单授权与权威归属范围
+            // （未授权 / 范围外一律按「不存在」，fail closed；不改派、不静默修复）
+            var liveAccess = access is not null
+                ? await AttachmentOwnerAuthorizationRules.ResolveDocumentReferenceAccessAsync(
+                    db, access.UserId, cancellationToken)
+                : null;
+            if (liveAccess is not null)
+                await AttachmentOwnerAuthorizationRules.EnsureReferenceAuthorizedAsync(
+                    db, liveAccess, entity, cancellationToken);
 
-        entity.Status = DocumentAttachmentReferenceRules.StatusVoided;
-        entity.VoidedAt = DateTime.Now;
-        entity.VoidReason = reasonText;
-        entity.UpdatedAt = DateTime.Now;
-        await db.SaveChangesAsync();
+            DocumentAttachmentReferenceRules.EnsureVoidable(entity.Status, Label(entity));
+            var reasonText = DocumentAttachmentReferenceRules.NormalizeVoidReason(reason);
 
-        return await MapAsync(db, entity);
+            var now = DateTime.Now;
+            entity.Status = DocumentAttachmentReferenceRules.StatusVoided;
+            entity.VoidedAt = now;
+            entity.VoidReason = reasonText;
+            entity.UpdatedAt = now;
+            await db.SaveChangesAsync(cancellationToken);
+
+            await DocumentAttachmentReferenceMutationRules.CommitAsync(transaction, cancellationToken);
+            committed = true;
+
+            return await MapAsync(db, entity);
+        }
+        catch
+        {
+            if (!committed)
+                await DocumentAttachmentReferenceMutationRules.TryRollbackAsync(transaction, db);
+            throw;
+        }
     }
 
     // ==================== 4. 父单据候选与模块元数据 ====================

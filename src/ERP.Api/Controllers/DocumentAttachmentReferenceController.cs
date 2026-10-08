@@ -106,6 +106,9 @@ public class DocumentAttachmentReferenceController : ControllerBase
     /// 登记附件引用（仅元数据）：校验白名单父单据类型与存在性、有界元数据、不透明引用标识、
     /// 来源授权确认与有效身份唯一性，写入父单据号码 / 类型快照。
     /// <para>ERP-408：先复核父单据类型菜单授权与原始权威父单据的实时客户范围，全部通过之后才持久化。</para>
+    /// <para>ERP-412：登记在**原子事务 + 确定性权威父单据行锁**内完成，锁内重新读取实时身份 / 菜单 /
+    /// 客户数据范围与权威父单据之后才快照与写入；失败整体回滚（零部分写入），并发输家由既有过滤唯一索引
+    /// 拒绝并映射为稳定的业务冲突（不暴露 SqlException / 内部路径）。</para>
     /// <para>本接口<strong>不</strong>接受文件内容或上传 / 下载地址，<strong>不</strong>访问对象存储，
     /// 也<strong>不</strong>改写父单据。</para>
     /// </summary>
@@ -121,6 +124,8 @@ public class DocumentAttachmentReferenceController : ControllerBase
     /// 作废附件引用（必须填写原因）：保留原始元数据、授权留痕与审计历史，不物理删除、不删除远端对象、
     /// 不静默替换，也不改写父单据。
     /// <para>ERP-408：作废写入之前按**持久化**父单据复核菜单授权与权威归属范围。</para>
+    /// <para>ERP-412：作废在**原子事务 + 确定性附件引用行锁**内完成，锁内重新读取引用与实时身份 / 授权；
+    /// 并发作废只有一个赢家，输家绝不覆盖赢家保留的原始作废原因与时间戳（历史不可变、完整回滚）。</para>
     /// </summary>
     [HttpPost("{id:long}/void")]
     public async Task<IActionResult> Void(
