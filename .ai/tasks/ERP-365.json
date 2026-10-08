@@ -1,0 +1,84 @@
+{
+  "title": "Authorize and serialize shipment milestone registration against live reference evidence",
+  "description": "Stage3 core inventory closure. Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance.",
+  "acceptance_criteria": [
+    "Use current enabled identity and existing source-module menu/customer scope via ERP362 shipment-reference authorization for list/detail/parent candidates/create/void, before counts or evidence reads. Scope against exact persisted parent source id/type, never free-text match. No new milestone permission or grants. Preserve authorized historical milestone reads with explicit unavailable parent/source annotation; deny new evidence on voided/deleted/cancelled parent source.",
+    "Serialize parent/source eligibility and same parent/type/time active uniqueness in the compatible ERP362 source/reference row lock transaction. Two simultaneous registrations yield exactly one effective event; parent void racing registration yields only a consistent serialized result. Serialize milestone void on its row, preserve original event/time/source/actor and required reason, reject repeat void, allow new event after explicit void. Failure rolls back entirely and changes no upstream/stock/finance. Test actual service/controllers with SQL duplicate registration, parent void race, restricted ownership, revoked permission and preserved historical evidence.",
+    "Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/ContainerShipmentMilestoneController.cs",
+    "src/ERP.Application/Services/ContainerShipmentMilestoneService.cs",
+    "src/ERP.Application/Services/ContainerShipmentMilestoneRules.cs",
+    "src/ERP.Application/Services/ShipmentReferenceAuthorizationRules.cs",
+    "src/ERP.Application/Services/ContainerShipmentReferenceService.cs",
+    "src/ERP.UnitTests/ContainerShipmentMilestoneTests.cs",
+    "src/ERP.UnitTests/ShipmentMilestoneConcurrencyTests.cs",
+    "src/ERP.IntegrationTests/ShipmentMilestoneConcurrencySqlServerTests.cs",
+    "src/ERP.IntegrationTests/ERP.IntegrationTests.csproj",
+    "docs/shipment-milestone-concurrency.md"
+  ],
+  "criterion_path_map": {
+    "Use current enabled identity and existing source-module menu/customer scope via ERP362 shipment-reference authorization for list/detail/parent candidates/create/void, before counts or evidence reads. Scope against exact persisted parent source id/type, never free-text match. No new milestone permission or grants. Preserve authorized historical milestone reads with explicit unavailable parent/source annotation; deny new evidence on voided/deleted/cancelled parent source.": [
+      "src/ERP.Api/Controllers/ContainerShipmentMilestoneController.cs",
+      "src/ERP.Application/Services/ContainerShipmentMilestoneService.cs",
+      "src/ERP.Application/Services/ContainerShipmentMilestoneRules.cs",
+      "src/ERP.Application/Services/ShipmentReferenceAuthorizationRules.cs",
+      "src/ERP.Application/Services/ContainerShipmentReferenceService.cs",
+      "src/ERP.UnitTests/ContainerShipmentMilestoneTests.cs",
+      "src/ERP.UnitTests/ShipmentMilestoneConcurrencyTests.cs",
+      "src/ERP.IntegrationTests/ShipmentMilestoneConcurrencySqlServerTests.cs",
+      "src/ERP.IntegrationTests/ERP.IntegrationTests.csproj",
+      "docs/shipment-milestone-concurrency.md"
+    ],
+    "Serialize parent/source eligibility and same parent/type/time active uniqueness in the compatible ERP362 source/reference row lock transaction. Two simultaneous registrations yield exactly one effective event; parent void racing registration yields only a consistent serialized result. Serialize milestone void on its row, preserve original event/time/source/actor and required reason, reject repeat void, allow new event after explicit void. Failure rolls back entirely and changes no upstream/stock/finance. Test actual service/controllers with SQL duplicate registration, parent void race, restricted ownership, revoked permission and preserved historical evidence.": [
+      "src/ERP.Api/Controllers/ContainerShipmentMilestoneController.cs",
+      "src/ERP.Application/Services/ContainerShipmentMilestoneService.cs",
+      "src/ERP.Application/Services/ContainerShipmentMilestoneRules.cs",
+      "src/ERP.Application/Services/ShipmentReferenceAuthorizationRules.cs",
+      "src/ERP.Application/Services/ContainerShipmentReferenceService.cs",
+      "src/ERP.UnitTests/ContainerShipmentMilestoneTests.cs",
+      "src/ERP.UnitTests/ShipmentMilestoneConcurrencyTests.cs",
+      "src/ERP.IntegrationTests/ShipmentMilestoneConcurrencySqlServerTests.cs",
+      "src/ERP.IntegrationTests/ERP.IntegrationTests.csproj",
+      "docs/shipment-milestone-concurrency.md"
+    ],
+    "Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance.": [
+      "src/ERP.Api/Controllers/ContainerShipmentMilestoneController.cs",
+      "src/ERP.Application/Services/ContainerShipmentMilestoneService.cs",
+      "src/ERP.Application/Services/ContainerShipmentMilestoneRules.cs",
+      "src/ERP.Application/Services/ShipmentReferenceAuthorizationRules.cs",
+      "src/ERP.Application/Services/ContainerShipmentReferenceService.cs",
+      "src/ERP.UnitTests/ContainerShipmentMilestoneTests.cs",
+      "src/ERP.UnitTests/ShipmentMilestoneConcurrencyTests.cs",
+      "src/ERP.IntegrationTests/ShipmentMilestoneConcurrencySqlServerTests.cs",
+      "src/ERP.IntegrationTests/ERP.IntegrationTests.csproj",
+      "docs/shipment-milestone-concurrency.md"
+    ]
+  },
+  "implementation_evidence": "ContainerShipmentMilestoneController calls service without identity; service performs duplicate read then insert and void without transaction/locks. Parent/reference void can race milestone registration.",
+  "depends_on": [
+    "ERP-058",
+    "ERP-362"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "id": "ERP-365",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-08T10:08:33.835994Z"
+}

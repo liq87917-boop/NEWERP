@@ -1,0 +1,85 @@
+{
+  "title": "Protect loading lists participants and trade documents with live customer scope",
+  "description": "Stage3 core inventory closure. Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance.",
+  "acceptance_criteria": [
+    "Enforce enabled current user, existing loading-list menu and authoritative current customer scope before list counts/detail/timeline/participants/options/trade-document generation and every write/state route. For multi-customer documents require access to every effective participant customer and relevant explicit upstream customer to avoid leaking another customer through shared shipment. Legacy single-customer scope uses persisted CustomerId; missing authoritative ownership is denied for restricted users. Unrestricted authorized users keep compatible access; do not create grants or infer ownership from numbers.",
+    "Validate complete proposed customer/participants/upstream scope before changing tracked fields, replacing details or setting primary participant. Use compatible existing preloading/list row locks and atomic transaction for writes and state changes; denied maintenance preserves all data and original audit. Retain ERP348 cumulative quantity, live eligible source and downstream evidence semantics; never post stock or finance. Verify actual controller/service SQL own/foreign/mixed participant documents, revoked menu, disabled user, export denial, failed edit unchanged and participant edit racing approval.",
+    "Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/ContainerLoadingListController.cs",
+    "src/ERP.Application/Services/LoadingListAuthorizationRules.cs",
+    "src/ERP.Application/Services/ContainerLoadingParticipantService.cs",
+    "src/ERP.Application/Services/ContainerLoadingFulfillmentRules.cs",
+    "src/ERP.UnitTests/LoadingListAuthorizationTests.cs",
+    "src/ERP.UnitTests/ContainerLoadingParticipantTests.cs",
+    "src/ERP.UnitTests/ContainerLoadingFulfillmentTests.cs",
+    "src/ERP.IntegrationTests/LoadingListAuthorizationSqlServerTests.cs",
+    "src/ERP.IntegrationTests/ERP.IntegrationTests.csproj",
+    "docs/loading-list-authorization.md"
+  ],
+  "criterion_path_map": {
+    "Enforce enabled current user, existing loading-list menu and authoritative current customer scope before list counts/detail/timeline/participants/options/trade-document generation and every write/state route. For multi-customer documents require access to every effective participant customer and relevant explicit upstream customer to avoid leaking another customer through shared shipment. Legacy single-customer scope uses persisted CustomerId; missing authoritative ownership is denied for restricted users. Unrestricted authorized users keep compatible access; do not create grants or infer ownership from numbers.": [
+      "src/ERP.Api/Controllers/ContainerLoadingListController.cs",
+      "src/ERP.Application/Services/LoadingListAuthorizationRules.cs",
+      "src/ERP.Application/Services/ContainerLoadingParticipantService.cs",
+      "src/ERP.Application/Services/ContainerLoadingFulfillmentRules.cs",
+      "src/ERP.UnitTests/LoadingListAuthorizationTests.cs",
+      "src/ERP.UnitTests/ContainerLoadingParticipantTests.cs",
+      "src/ERP.UnitTests/ContainerLoadingFulfillmentTests.cs",
+      "src/ERP.IntegrationTests/LoadingListAuthorizationSqlServerTests.cs",
+      "src/ERP.IntegrationTests/ERP.IntegrationTests.csproj",
+      "docs/loading-list-authorization.md"
+    ],
+    "Validate complete proposed customer/participants/upstream scope before changing tracked fields, replacing details or setting primary participant. Use compatible existing preloading/list row locks and atomic transaction for writes and state changes; denied maintenance preserves all data and original audit. Retain ERP348 cumulative quantity, live eligible source and downstream evidence semantics; never post stock or finance. Verify actual controller/service SQL own/foreign/mixed participant documents, revoked menu, disabled user, export denial, failed edit unchanged and participant edit racing approval.": [
+      "src/ERP.Api/Controllers/ContainerLoadingListController.cs",
+      "src/ERP.Application/Services/LoadingListAuthorizationRules.cs",
+      "src/ERP.Application/Services/ContainerLoadingParticipantService.cs",
+      "src/ERP.Application/Services/ContainerLoadingFulfillmentRules.cs",
+      "src/ERP.UnitTests/LoadingListAuthorizationTests.cs",
+      "src/ERP.UnitTests/ContainerLoadingParticipantTests.cs",
+      "src/ERP.UnitTests/ContainerLoadingFulfillmentTests.cs",
+      "src/ERP.IntegrationTests/LoadingListAuthorizationSqlServerTests.cs",
+      "src/ERP.IntegrationTests/ERP.IntegrationTests.csproj",
+      "docs/loading-list-authorization.md"
+    ],
+    "Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance.": [
+      "src/ERP.Api/Controllers/ContainerLoadingListController.cs",
+      "src/ERP.Application/Services/LoadingListAuthorizationRules.cs",
+      "src/ERP.Application/Services/ContainerLoadingParticipantService.cs",
+      "src/ERP.Application/Services/ContainerLoadingFulfillmentRules.cs",
+      "src/ERP.UnitTests/LoadingListAuthorizationTests.cs",
+      "src/ERP.UnitTests/ContainerLoadingParticipantTests.cs",
+      "src/ERP.UnitTests/ContainerLoadingFulfillmentTests.cs",
+      "src/ERP.IntegrationTests/LoadingListAuthorizationSqlServerTests.cs",
+      "src/ERP.IntegrationTests/ERP.IntegrationTests.csproj",
+      "docs/loading-list-authorization.md"
+    ]
+  },
+  "implementation_evidence": "ContainerLoadingListController list/detail/trade-document exports and participant routes lack uniform live user/menu scope. ERP348 link checks do not protect reads, legacy unlinked documents or participant maintenance.",
+  "depends_on": [
+    "ERP-348",
+    "ERP-041",
+    "ERP-360"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "id": "ERP-364",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-08T10:08:33.829884Z"
+}
