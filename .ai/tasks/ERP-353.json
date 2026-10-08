@@ -57,8 +57,8 @@
   "risk": "medium",
   "planning_stage": 3,
   "id": "ERP-353",
-  "status": "retry",
-  "attempts": 0,
+  "status": "completed",
+  "attempts": 1,
   "max_attempts": 3,
   "validation_profile": "safe",
   "completion_mode": "build",
@@ -73,22 +73,5 @@
     "required": false,
     "scenarios": []
   },
-  "created_at": "2026-10-08T05:31:23.149392Z",
-  "failure_kind": "provider_unavailable",
-  "last_error": "Insufficient Balance (request_id: d5832aef-8a59-4c38-a228-bb9a6ac781f0)",
-  "provider_retry": {
-    "probe_count": 3,
-    "cooldown_seconds": 240,
-    "next_probe_at": "2026-10-08T07:37:06.357101Z",
-    "last_seen_at": "2026-10-08T07:33:06.357101Z"
-  },
-  "preserved_work": {
-    "execution_copy": "D:\\VSCodeProject\\NEWERP.executor.continue-erp-190-20260930080457",
-    "changed_paths": [
-      ".ai/PROJECT_STATE.json",
-      ".ai/tasks/ERP-353.json"
-    ],
-    "diff": ".ai\\logs\\ERP-353-preserved-work.diff",
-    "preserved_at": "2026-10-08T07:33:06.526008Z"
-  }
+  "created_at": "2026-10-08T05:31:23.149392Z"
 }

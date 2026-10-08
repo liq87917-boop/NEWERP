@@ -1,0 +1,71 @@
+{
+  "title": "Reject stale stock counts and serialize inventory adjustment posting",
+  "description": "Stage3 core inventory closure. Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance.",
+  "acceptance_criteria": [
+    "An authorized stock-count operator must use a verified book-quantity baseline. Validate nonnegative actual/book quantities, live enabled warehouse and product, duplicate product lines and existing unit/cost semantics before mutation. At approval lock document and affected stock in deterministic order and reject a stale book quantity against authoritative current stock rather than silently posting a fabricated difference; require explicit re-count/edit in Pending state.",
+    "Post all adjustment lines, ledger and status in one atomic transaction. Serialize approve/approve, approval/cancel and unaudit against the same document lock. Reversal failure or later invalid line rolls back entire operation. Preserve historical movement evidence and existing permission mapping; no automatic correction of persisted historical records.",
+    "Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/StockAdjustmentController.cs",
+    "src/ERP.Application/Services/StockAdjustmentPostingRules.cs",
+    "src/ERP.Application/Services/InventoryService.cs",
+    "src/ERP.UnitTests/StockAdjustmentPostingTests.cs",
+    "src/ERP.UnitTests/InventoryMovementTests.cs",
+    "src/ERP.IntegrationTests/StockAdjustmentPostingSqlServerTests.cs",
+    "docs/stock-adjustment-posting.md"
+  ],
+  "criterion_path_map": {
+    "An authorized stock-count operator must use a verified book-quantity baseline. Validate nonnegative actual/book quantities, live enabled warehouse and product, duplicate product lines and existing unit/cost semantics before mutation. At approval lock document and affected stock in deterministic order and reject a stale book quantity against authoritative current stock rather than silently posting a fabricated difference; require explicit re-count/edit in Pending state.": [
+      "src/ERP.Api/Controllers/StockAdjustmentController.cs",
+      "src/ERP.Application/Services/StockAdjustmentPostingRules.cs",
+      "src/ERP.Application/Services/InventoryService.cs",
+      "src/ERP.UnitTests/StockAdjustmentPostingTests.cs",
+      "src/ERP.UnitTests/InventoryMovementTests.cs",
+      "src/ERP.IntegrationTests/StockAdjustmentPostingSqlServerTests.cs",
+      "docs/stock-adjustment-posting.md"
+    ],
+    "Post all adjustment lines, ledger and status in one atomic transaction. Serialize approve/approve, approval/cancel and unaudit against the same document lock. Reversal failure or later invalid line rolls back entire operation. Preserve historical movement evidence and existing permission mapping; no automatic correction of persisted historical records.": [
+      "src/ERP.Api/Controllers/StockAdjustmentController.cs",
+      "src/ERP.Application/Services/StockAdjustmentPostingRules.cs",
+      "src/ERP.Application/Services/InventoryService.cs",
+      "src/ERP.UnitTests/StockAdjustmentPostingTests.cs",
+      "src/ERP.UnitTests/InventoryMovementTests.cs",
+      "src/ERP.IntegrationTests/StockAdjustmentPostingSqlServerTests.cs",
+      "docs/stock-adjustment-posting.md"
+    ],
+    "Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance.": [
+      "src/ERP.Api/Controllers/StockAdjustmentController.cs",
+      "src/ERP.Application/Services/StockAdjustmentPostingRules.cs",
+      "src/ERP.Application/Services/InventoryService.cs",
+      "src/ERP.UnitTests/StockAdjustmentPostingTests.cs",
+      "src/ERP.UnitTests/InventoryMovementTests.cs",
+      "src/ERP.IntegrationTests/StockAdjustmentPostingSqlServerTests.cs",
+      "docs/stock-adjustment-posting.md"
+    ]
+  },
+  "implementation_evidence": "StockAdjustmentController.Normalize trusts request BookQuantity; Approve posts ActualQuantity minus client BookQuantity and tests active movements before locking document/stock; Unaudit has no outer document transaction.",
+  "depends_on": [
+    "ERP-009"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "id": "ERP-355",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-08T08:38:54.826179Z"
+}

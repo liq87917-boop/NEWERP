@@ -1,0 +1,71 @@
+{
+  "title": "Serialize warehouse transfer posting and reversal atomically",
+  "description": "Stage3 core inventory closure. Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance.",
+  "acceptance_criteria": [
+    "An authorized warehouse operator can approve a valid transfer exactly once. Acquire the same transfer document row lock before rereading status and movements, wrap both warehouses, all detail costs, ledger entries and status in one atomic transaction. Apply deterministic stock lock order across transfers using existing inventory services; do not alter valuation rules or remove quantity/cost assertions.",
+    "Serialize unaudit, approval, cancellation and deletion against the same document boundary. Concurrent approve/approve or approve/cancel cannot post duplicate or cancelled inventory. Opposing warehouse transfers avoid lock-order deadlocks; failed later detail or consumed destination reversal leaves both warehouse balances, movements and document status unchanged. Keep submitted editing rules and existing permissions.",
+    "Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/StockTransferController.cs",
+    "src/ERP.Application/Services/StockTransferPostingRules.cs",
+    "src/ERP.Application/Services/InventoryService.cs",
+    "src/ERP.UnitTests/StockTransferPostingTests.cs",
+    "src/ERP.UnitTests/InventoryMovementTests.cs",
+    "src/ERP.IntegrationTests/StockTransferPostingSqlServerTests.cs",
+    "docs/stock-transfer-posting.md"
+  ],
+  "criterion_path_map": {
+    "An authorized warehouse operator can approve a valid transfer exactly once. Acquire the same transfer document row lock before rereading status and movements, wrap both warehouses, all detail costs, ledger entries and status in one atomic transaction. Apply deterministic stock lock order across transfers using existing inventory services; do not alter valuation rules or remove quantity/cost assertions.": [
+      "src/ERP.Api/Controllers/StockTransferController.cs",
+      "src/ERP.Application/Services/StockTransferPostingRules.cs",
+      "src/ERP.Application/Services/InventoryService.cs",
+      "src/ERP.UnitTests/StockTransferPostingTests.cs",
+      "src/ERP.UnitTests/InventoryMovementTests.cs",
+      "src/ERP.IntegrationTests/StockTransferPostingSqlServerTests.cs",
+      "docs/stock-transfer-posting.md"
+    ],
+    "Serialize unaudit, approval, cancellation and deletion against the same document boundary. Concurrent approve/approve or approve/cancel cannot post duplicate or cancelled inventory. Opposing warehouse transfers avoid lock-order deadlocks; failed later detail or consumed destination reversal leaves both warehouse balances, movements and document status unchanged. Keep submitted editing rules and existing permissions.": [
+      "src/ERP.Api/Controllers/StockTransferController.cs",
+      "src/ERP.Application/Services/StockTransferPostingRules.cs",
+      "src/ERP.Application/Services/InventoryService.cs",
+      "src/ERP.UnitTests/StockTransferPostingTests.cs",
+      "src/ERP.UnitTests/InventoryMovementTests.cs",
+      "src/ERP.IntegrationTests/StockTransferPostingSqlServerTests.cs",
+      "docs/stock-transfer-posting.md"
+    ],
+    "Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance.": [
+      "src/ERP.Api/Controllers/StockTransferController.cs",
+      "src/ERP.Application/Services/StockTransferPostingRules.cs",
+      "src/ERP.Application/Services/InventoryService.cs",
+      "src/ERP.UnitTests/StockTransferPostingTests.cs",
+      "src/ERP.UnitTests/InventoryMovementTests.cs",
+      "src/ERP.IntegrationTests/StockTransferPostingSqlServerTests.cs",
+      "docs/stock-transfer-posting.md"
+    ]
+  },
+  "implementation_evidence": "StockTransferController.Approve reads Submitted and active movements without document lock; Unaudit reads Approved before ReverseAsync; InventoryService mutates tracked stock without owning a document-level transaction.",
+  "depends_on": [
+    "ERP-009"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "id": "ERP-354",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-08T08:38:54.818878Z"
+}

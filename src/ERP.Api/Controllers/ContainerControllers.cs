@@ -6,6 +6,7 @@ using ERP.Domain.Entities;
 using ERP.Domain.Enums;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.Data;
 
 namespace ERP.Api.Controllers;
 
@@ -81,6 +82,8 @@ public class ContainerReceivingPlanController : DocumentControllerBase<Container
 /// 跟踪字段只写订柜信息自身：不写费用 / 单证 / 库存，也不调用船公司、海关、货代等外部跟踪系统。
 /// 报关行引用复用「其他资料」数据字典（<c>InfoType = CustomsBroker</c>），名称快照由服务端权威写入；
 /// 文本与日期一律「未填写 = 未知」，不由任何自由文本推断。
+/// <para>ERP-353：本单是预装柜单的**上游权威来源**，取消走同一可串行化事务 + 订柜行锁，
+/// 只要存在已审核且未取消的预装柜单（或以其为来源的已审核装柜清单）就拒绝，绝不静默失效下游履约证据。</para>
 /// </remarks>
 [Route("api/container/bookings")]
 public class ContainerBookingController : DocumentControllerBase<ContainerBooking>
@@ -189,6 +192,53 @@ public class ContainerBookingController : DocumentControllerBase<ContainerBookin
         existing.UpdatedAt = DateTime.Now;
         await Db.SaveChangesAsync();
         return Ok(ApiResponse<object>.Success(null, "订柜信息更新成功"));
+    }
+
+    /// <summary>
+    /// 取消订柜信息：在同一可串行化事务内先对本订柜信息行加 UPDLOCK/HOLDLOCK，再校验是否存在
+    /// 「以本订柜为权威来源、未删除、已审核」的预装柜单（或历史数据中以该订柜下预装柜单为来源的已审核装柜清单）；
+    /// 存在则拒绝，与同一订柜下的预装柜单审核串行化（ERP-353）。
+    /// <para>本方法只改状态为已取消，不写库存 / 财务、不改写预装柜单与装柜清单、也不调用任何外部系统；
+    /// 解除只走既有显式取消流程（先装柜清单、再预装柜单、最后订柜信息）。</para>
+    /// </summary>
+    [HttpPost("{id:long}/cancel")]
+    public override async Task<IActionResult> Cancel(long id)
+    {
+        await using var transaction = await Db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
+        try
+        {
+            await AcquireBookingCancellationLockAsync(id);
+
+            var entity = await GetOrThrowAsync(id, "订柜信息不存在");
+
+            await PreLoadingBookingLinkRules.ValidateBookingCancellationAsync(Db, entity, CurrentUserId());
+
+            SetStatus(entity, DocumentStatus.Cancelled);
+            await Db.SaveChangesAsync();
+            await transaction.CommitAsync();
+        }
+        catch
+        {
+            await transaction.RollbackAsync();
+            throw;
+        }
+
+        return Ok(ApiResponse<object>.Success(null, "已取消"));
+    }
+
+    /// <summary>
+    /// 对订柜信息行加更新锁（UPDLOCK, HOLDLOCK），把同一订柜下的并发「预装柜审核 / 订柜取消」串行化在
+    /// 同一事务内；非关系型提供程序（内存库）无法执行表提示，跳过即可（事务本身等价无事务）。
+    /// </summary>
+    private async Task AcquireBookingCancellationLockAsync(long bookingId)
+    {
+        if (!Db.Database.IsRelational()) return;
+
+        await Db.Database
+            .SqlQueryRaw<long>(
+                "SELECT Id FROM db_owner.ContainerBookings WITH (UPDLOCK, HOLDLOCK) WHERE Id = {0}",
+                bookingId)
+            .ToListAsync();
     }
 
     /// <summary>
