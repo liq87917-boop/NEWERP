@@ -1,4 +1,5 @@
 using ERP.Application.Common;
+using ERP.Application.DTOs;
 using ERP.Application.Interfaces;
 using ERP.Application.Services;
 using ERP.Domain.Entities;
@@ -346,6 +347,50 @@ public class FinanceComplaintController : DocumentControllerBase<FinanceComplain
     }
 
     /// <summary>
+    /// 来源销售订单候选（ERP-389，只读、有界、分页）：在既有「客诉单」菜单 + 既有「销售订单」菜单 +
+    /// 实时客户数据范围之内，按<b>精确客户 Id</b>返回「未删除」销售订单候选（已取消显式标记不可选）；
+    /// 关键字 / 页码 / 每页条数先归一化再计数，只返回有界 DTO 字段。
+    /// <para><b>候选选择不等于授权</b>：候选只供显式选择，最终保存仍按 ERP-388 生命周期规则复核精确来源；
+    /// 不返回任意客户订单，也不提供按猜测 Id 直取候选的旁路；<b>不新增任何用户授权，也不提供匿名 / 管理员降级</b>。</para>
+    /// </summary>
+    [HttpGet("sales-order-candidates")]
+    public async Task<IActionResult> GetSalesOrderCandidates(
+        [FromQuery] long? customerId, [FromQuery] string? keyword,
+        [FromQuery] int page = 0, [FromQuery] int pageSize = 0)
+    {
+        var scope = await FinanceComplaintLifecycleRules.EnsureMenuAuthorizedAsync(Db, CurrentUserId());
+        await FinanceComplaintLifecycleRules.EnsureSourceMenuAuthorizedAsync(Db, CurrentUserId());
+        if (customerId is not > 0)
+            throw BusinessException.InvalidParameter(ComplaintSalesOrderSourceService.ExactCustomerRequiredText);
+        // 客户数据范围先于任何计数 / 取数：范围外客户按权限不足拒绝，不泄露归属。
+        FinanceComplaintLifecycleRules.EnsureCustomerInScope(scope, customerId.Value);
+
+        var result = await ComplaintSalesOrderSourceService.QueryCandidatesAsync(
+            Db, customerId.Value, keyword, page, pageSize);
+        return Ok(ApiResponse<ComplaintSalesOrderCandidatePageDto>.Success(
+            result, ComplaintSalesOrderSourceService.CandidateRuleText));
+    }
+
+    /// <summary>
+    /// 已存储来源的只读展示（详情 / 重开）：按客诉单权威客户做实时身份 / 菜单授权 / 客户数据范围复核后，
+    /// 返回持久化来源 Id 与显式状态文案（未关联 / 已关联 / 来源已取消 / 来源不可用）；历史已取消 / 不可用来源
+    /// 原样保留、只读可读，绝不静默清除 / 重绑定，也不改写任何字段。
+    /// </summary>
+    [HttpGet("{id:long}/sales-order-source")]
+    public async Task<IActionResult> GetStoredSalesOrderSource(long id)
+    {
+        var scope = await FinanceComplaintLifecycleRules.EnsureMenuAuthorizedAsync(Db, CurrentUserId());
+        var entity = await Set.AsNoTracking()
+            .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
+            ?? throw BusinessException.NotFound("客诉单不存在");
+        FinanceComplaintLifecycleRules.EnsureStoredComplaintScopeAllowed(scope, entity);
+
+        var view = await ComplaintSalesOrderSourceService.DescribeStoredSourceAsync(Db, entity);
+        return Ok(ApiResponse<ComplaintSalesOrderSourceViewDto>.Success(
+            view, ComplaintSalesOrderSourceService.StoredSourceRuleText));
+    }
+
+    /// <summary>
     /// 创建：在生成客诉单号之前先完成文本长度 / 客户可用性 / 客户数据范围 / 来源销售订单资格（含来源菜单授权）
     /// 校验（授权与校验失败绝不消耗单号）；关系型后端在同一事务内先取来源销售订单行锁，锁内权威复核来源资格之后
     /// 才生成单号并落库。
@@ -354,6 +399,8 @@ public class FinanceComplaintController : DocumentControllerBase<FinanceComplain
     public async Task<IActionResult> Create([FromBody] FinanceComplaint entity)
     {
         FinanceComplaintLifecycleRules.EnsureEditableTextLengths(entity);
+        // ERP-389：表单显式断开链接（留空 → 0）归一化为 null，保留历史「未关联来源」语义。
+        entity.SalesOrderId = entity.SalesOrderId is > 0 ? entity.SalesOrderId : null;
 
         var customer = await Db.BaseCustomers.AsNoTracking()
             .FirstOrDefaultAsync(c => c.Id == entity.CustomerId);
@@ -421,6 +468,8 @@ public class FinanceComplaintController : DocumentControllerBase<FinanceComplain
             await FinanceComplaintLifecycleRules.EnsurePersistedComplaintConsistentAsync(Db, existing);
 
             FinanceComplaintLifecycleRules.EnsureEditableTextLengths(entity);
+            // ERP-389：表单显式断开链接（留空 → 0）归一化为 null，保留历史「未关联来源」语义。
+            entity.SalesOrderId = entity.SalesOrderId is > 0 ? entity.SalesOrderId : null;
             var customer = await Db.BaseCustomers.AsNoTracking()
                 .FirstOrDefaultAsync(c => c.Id == entity.CustomerId);
             FinanceComplaintLifecycleRules.EnsureCustomerAvailable(customer, entity.CustomerId);

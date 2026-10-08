@@ -146,6 +146,10 @@ public static class FinanceComplaintLifecycleRules
     public const string DanglingLinkRejectedText =
         "销售订单不存在或已删除，不能作为客诉单来源（系统不按订单号文本、金额或相似度猜测来源）";
 
+    /// <summary>候选列表中「已取消来源不可作为新来源」的不可选原因文案（ERP-389，与链接拒绝同口径）</summary>
+    public const string SourceCancelledCandidateText =
+        "销售订单已取消：不能作为新建 / 变更客诉单的来源（历史已记录的链接按显式状态只读保留，绝不静默重绑定）";
+
     /// <summary>来源销售订单客户与客诉客户不一致的拒绝文案</summary>
     public const string ForeignCustomerLinkText =
         "销售订单的客户与客诉单客户不一致，不能作为来源（来源必须是本客诉单客户的既有订单）";
@@ -290,6 +294,13 @@ public static class FinanceComplaintLifecycleRules
 
         return order;
     }
+
+    /// <summary>
+    /// 新建 / 变更来源时可被显式选择的状态判定（ERP-389）：既有「未取消」订单可以为新来源建立链接；
+    /// 已取消订单只能作为<b>历史</b>已记录链接只读保留，绝不作为新来源（与
+    /// <see cref="ResolveSourceSalesOrderAsync"/> 的取消拒绝同口径）。
+    /// </summary>
+    public static bool IsEligibleNewSource(DocumentStatus status) => status != DocumentStatus.Cancelled;
 
     /// <summary>
     /// 校验并授权<b>新建 / 变更</b>的销售订单来源链接：未提供来源时直接返回 <c>null</c>

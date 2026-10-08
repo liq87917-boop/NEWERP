@@ -1,11 +1,13 @@
 {
   "schema_version": 2,
   "project": "NEWERP",
-  "updated_at": "2026-10-08T16:16:17.344275Z",
+  "updated_at": "2026-10-08T16:28:40.379416Z",
   "phase": "ready",
   "current_task": null,
   "queue": [
-    "ERP-389"
+    "ERP-390",
+    "ERP-391",
+    "ERP-392"
   ],
   "completed": [
     "ERP-000",
@@ -369,16 +371,17 @@
     "ERP-385",
     "ERP-386",
     "ERP-387",
-    "ERP-388"
+    "ERP-388",
+    "ERP-389"
   ],
   "blocked": [],
   "last_build": {
-    "task": "ERP-388",
+    "task": "ERP-389",
     "profile": "safe",
     "status": "passed",
     "exit_code": 0,
-    "log": ".ai\\logs\\ERP-388-validation-2.log",
-    "at": "2026-10-08T16:16:11.474501Z"
+    "log": ".ai\\logs\\ERP-389-validation-1.log",
+    "at": "2026-10-08T16:28:39.735999Z"
   },
   "last_error": null,
   "last_deepseek_fix": {
@@ -390,15 +393,17 @@
   },
   "git_sync": {
     "branch": "main",
-    "local_sha": "9e511af",
-    "status": "synced",
+    "local_sha": "a3f9a44",
+    "status": "pending",
     "ahead": 0,
     "behind": 0,
-    "last_attempt_at": "2026-10-08T16:16:17.224082Z",
+    "last_attempt_at": "2026-10-08T16:28:40.250209Z",
     "last_error": null
   },
   "next_recommended_tasks": [
-    "ERP-389"
+    "ERP-390",
+    "ERP-391",
+    "ERP-392"
   ],
   "runner": {
     "status": "stopped",

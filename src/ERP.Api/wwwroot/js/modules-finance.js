@@ -115,6 +115,9 @@ Object.assign(MODULES, {
     ],
     fields: [
       { key: 'complaintDate', label: '客诉日期', type: 'date' }, { key: 'customerId', label: '客户Id', type: 'number' },
+      /* ERP-389：来源销售订单由「选择来源」有界选择器显式回填（也可手工填写 Id / 留空显式断开）；
+         选择器只回填权威来源 Id，绝不臆造订单号、绝不自动改数量 / 金额 */
+      { key: 'salesOrderId', label: '来源销售订单 ID（可留空；建议用「选择来源」）', type: 'number', selector: 'complaint-sales-order-source' },
       { key: 'complaintType', label: '客诉类型' }, { key: 'responsibleDept', label: '责任部门' },
       { key: 'description', label: '客诉描述', type: 'textarea' }, { key: 'handleResult', label: '处理结果', type: 'textarea' },
     ],
