@@ -498,7 +498,12 @@ public class SalesOrderConversionTests
         => new(db, new DocumentNumberService(db));
 
     private static ProformaInvoiceController NewProformaInvoiceController(ErpDbContext db)
-        => new(db, new DocumentNumberService(db));
+    {
+        // ERP-398：PI 路由现在要求实时启用身份（特权账号豁免菜单授权）。
+        var controller = new ProformaInvoiceController(db, new DocumentNumberService(db));
+        TestAuth.SetUser(controller, TestAuth.SeedPrivilegedUser(db));
+        return controller;
+    }
 
     /// <summary>断言转换接口路由存在（前端调用的路径契约）</summary>
     private static void AssertRoute(Type controller, string methodName, string routeSuffix)

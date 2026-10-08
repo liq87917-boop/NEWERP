@@ -1,5 +1,6 @@
 using ERP.Application.Common;
 using ERP.Application.Interfaces;
+using ERP.Application.Services;
 using ERP.Domain.Entities;
 using ERP.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
@@ -30,6 +31,25 @@ public static class SalesOrderConversion
 
     /// <summary>默认定金比例（%）：客户资料未维护时按外贸惯例 30%，与「报价单转 PI」同一口径</summary>
     private const decimal DefaultDepositRatio = 30m;
+
+    /// <summary>来源客户缺失权威归属 / 越界时转换的拒绝文案（与 <see cref="ProformaInvoiceAuthorizationRules"/> 同源）</summary>
+    public const string SourceOutOfScopeText = ProformaInvoiceAuthorizationRules.SourceOutOfScopeText;
+
+    /// <summary>目标客户缺失权威归属 / 越界时转换的拒绝文案（绝不因来源可见而授予目标权限）</summary>
+    public const string TargetOutOfScopeText = ProformaInvoiceAuthorizationRules.TargetOutOfScopeText;
+
+    /// <summary>
+    /// 转换范围守卫（ERP-398）：PI → 销售订单在落库任何销售订单、消耗任何单据号<b>之前</b>，
+    /// 独立复核<b>来源客户</b>与<b>目标客户</b>都在当前账号实时客户数据范围内 ——
+    /// 来源 PI 可见绝不等于目标客户获得授权；受限账号缺失归属 / 越界一律 fail closed。
+    /// <c>null</c> 范围（进程内调用）保持既有内部口径，绝不把空身份当作匿名或管理员。
+    /// </summary>
+    public static void EnsureConversionScopeAuthorized(SalespersonDataScope? scope, long? sourceCustomerId,
+        long? targetCustomerId)
+    {
+        ProformaInvoiceAuthorizationRules.EnsureSourceCustomerInScope(scope, sourceCustomerId);
+        ProformaInvoiceAuthorizationRules.EnsureTargetCustomerInScope(scope, targetCustomerId);
+    }
 
     /// <summary>汇率缺省值：来源单据汇率为 0（未维护）时按 1 处理，避免销售订单金额折算异常</summary>
     private const decimal DefaultExchangeRate = 1m;
