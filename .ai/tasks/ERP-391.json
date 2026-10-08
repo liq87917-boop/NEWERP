@@ -1,0 +1,87 @@
+{
+  "title": "Select explicit sales order sources in the payment application workflow",
+  "description": "Stage3 explicit business source selection. Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance.",
+  "acceptance_criteria": [
+    "Add bounded authorized sales-order candidate API for payment-apply: live enabled identity, existing payment-apply menu and existing sales-order source permission, current customer scope, exact customer and normalized currency, nondeleted eligible order state per FinancePaymentApplyLifecycleRules. Apply scope before counts/pagination and return only bounded safe DTO fields. Selection cannot bypass final locked authoritative create/update validation. Separate stored-source resolution preserves exact historical links with unavailable/status annotations, never returns foreign fields or guesses source from order number. No new permission grants, orders, currency conversion or balance claims.",
+    "Wire optional SalesOrderId selection into actual payment-apply create/edit/detail UI using existing form hooks and the shared finance application source picker. Customer/currency changes invalidate selection, stale responses cannot restore a previous context, explicit unlink only on editable documents, no silent change to existing historical linkage or amount/rate. Reopen correctly displays stored source including cancelled/unavailable history; source selection never automatically changes money. Failed candidate/save preserves user form input and surfaces useful error. Real SQL API own/foreign/mismatched currency/cancelled/revoked/disabled plus final forged-ID denial; executable JS integration create/edit/reopen/change/stale/unlink/error tests, meaningful unit and safe Release verification. Browser evidence or accurate blocker.",
+    "Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/FinanceApplyControllers.cs",
+    "src/ERP.Application/DTOs/FinanceApplySalesOrderSourceDtos.cs",
+    "src/ERP.Application/Services/FinanceApplySalesOrderSourceService.cs",
+    "src/ERP.Application/Services/FinancePaymentApplyLifecycleRules.cs",
+    "src/ERP.Api/wwwroot/js/finance-apply-sales-order-source.js",
+    "src/ERP.Api/wwwroot/js/modules-finance.js",
+    "src/ERP.Api/wwwroot/index.html",
+    "src/ERP.UnitTests/PaymentApplySalesOrderSourceTests.cs",
+    "src/ERP.IntegrationTests/PaymentApplySalesOrderSourceSqlServerTests.cs",
+    "tests/payment-apply-sales-order-source.test.js",
+    "docs/payment-apply-sales-order-source.md"
+  ],
+  "criterion_path_map": {
+    "Add bounded authorized sales-order candidate API for payment-apply: live enabled identity, existing payment-apply menu and existing sales-order source permission, current customer scope, exact customer and normalized currency, nondeleted eligible order state per FinancePaymentApplyLifecycleRules. Apply scope before counts/pagination and return only bounded safe DTO fields. Selection cannot bypass final locked authoritative create/update validation. Separate stored-source resolution preserves exact historical links with unavailable/status annotations, never returns foreign fields or guesses source from order number. No new permission grants, orders, currency conversion or balance claims.": [
+      "src/ERP.Api/Controllers/FinanceApplyControllers.cs",
+      "src/ERP.Application/DTOs/FinanceApplySalesOrderSourceDtos.cs",
+      "src/ERP.Application/Services/FinanceApplySalesOrderSourceService.cs",
+      "src/ERP.Application/Services/FinancePaymentApplyLifecycleRules.cs",
+      "src/ERP.Api/wwwroot/js/finance-apply-sales-order-source.js",
+      "src/ERP.Api/wwwroot/js/modules-finance.js",
+      "src/ERP.Api/wwwroot/index.html",
+      "src/ERP.UnitTests/PaymentApplySalesOrderSourceTests.cs",
+      "src/ERP.IntegrationTests/PaymentApplySalesOrderSourceSqlServerTests.cs",
+      "tests/payment-apply-sales-order-source.test.js",
+      "docs/payment-apply-sales-order-source.md"
+    ],
+    "Wire optional SalesOrderId selection into actual payment-apply create/edit/detail UI using existing form hooks and the shared finance application source picker. Customer/currency changes invalidate selection, stale responses cannot restore a previous context, explicit unlink only on editable documents, no silent change to existing historical linkage or amount/rate. Reopen correctly displays stored source including cancelled/unavailable history; source selection never automatically changes money. Failed candidate/save preserves user form input and surfaces useful error. Real SQL API own/foreign/mismatched currency/cancelled/revoked/disabled plus final forged-ID denial; executable JS integration create/edit/reopen/change/stale/unlink/error tests, meaningful unit and safe Release verification. Browser evidence or accurate blocker.": [
+      "src/ERP.Api/Controllers/FinanceApplyControllers.cs",
+      "src/ERP.Application/DTOs/FinanceApplySalesOrderSourceDtos.cs",
+      "src/ERP.Application/Services/FinanceApplySalesOrderSourceService.cs",
+      "src/ERP.Application/Services/FinancePaymentApplyLifecycleRules.cs",
+      "src/ERP.Api/wwwroot/js/finance-apply-sales-order-source.js",
+      "src/ERP.Api/wwwroot/js/modules-finance.js",
+      "src/ERP.Api/wwwroot/index.html",
+      "src/ERP.UnitTests/PaymentApplySalesOrderSourceTests.cs",
+      "src/ERP.IntegrationTests/PaymentApplySalesOrderSourceSqlServerTests.cs",
+      "tests/payment-apply-sales-order-source.test.js",
+      "docs/payment-apply-sales-order-source.md"
+    ],
+    "Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance.": [
+      "src/ERP.Api/Controllers/FinanceApplyControllers.cs",
+      "src/ERP.Application/DTOs/FinanceApplySalesOrderSourceDtos.cs",
+      "src/ERP.Application/Services/FinanceApplySalesOrderSourceService.cs",
+      "src/ERP.Application/Services/FinancePaymentApplyLifecycleRules.cs",
+      "src/ERP.Api/wwwroot/js/finance-apply-sales-order-source.js",
+      "src/ERP.Api/wwwroot/js/modules-finance.js",
+      "src/ERP.Api/wwwroot/index.html",
+      "src/ERP.UnitTests/PaymentApplySalesOrderSourceTests.cs",
+      "src/ERP.IntegrationTests/PaymentApplySalesOrderSourceSqlServerTests.cs",
+      "tests/payment-apply-sales-order-source.test.js",
+      "docs/payment-apply-sales-order-source.md"
+    ]
+  },
+  "implementation_evidence": "Finance1.cs payment application already persists nullable SalesOrderId and ERP381/380 validates it. modules-finance.js payment-apply fields omit SalesOrderId, so actual users cannot select an explicit order. FinanceApplyControllers.cs has no bounded candidate route. Existing source pickers and ERP389 demonstrate form hooks; reuse a shared finance application source service and selector across both application types, no new schema.",
+  "depends_on": [
+    "ERP-390"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "id": "ERP-391",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-08T16:19:33.959527Z"
+}
