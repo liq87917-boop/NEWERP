@@ -112,3 +112,7 @@
 - `src/ERP.Api/Controllers/StockController.cs`：三个只读端点在计数 / 分页 / 聚合**之前**调用统一入口。
 - 复用既有：`SalespersonDataScopeService`（ERP-097 数据范围）、`CustomerReceivableReconciliationService.LoadAuthorizedMenuCodesAsync`（角色 → 菜单）。
 
+
+## 隔离 SQL 验证基线整改
+
+全新 GUID 测试库仍含真实种子库存，并保留同一 fixture 前序场景。全局查询断言改为真实基线加本场景精确增量；双连接按仓库读取时所有计数与汇总统一使用同一收窄过滤，避免将全局可用数量与单仓数量混比。原始失败完整保留于 ERP-356-independent-sql.log；无清库或改动业务查询口径。

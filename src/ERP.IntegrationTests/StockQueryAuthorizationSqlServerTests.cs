@@ -100,6 +100,13 @@ public sealed class StockQueryAuthorizationSqlServerTests
     {
         Guard();
         await using var db = _fixture.CreateDbContext();
+        // The fixture retains seed data and preceding cases. Assert exact increments,
+        // never require an empty database or erase another scenario's stock.
+        var baseline = db.Stocks.AsNoTracking().Where(s => !s.IsDeleted);
+        var baselineCount = await baseline.CountAsync();
+        var baselineQuantity = await baseline.SumAsync(s => s.Quantity);
+        var baselineAvailable = await baseline.SumAsync(s => s.AvailableQuantity);
+        var baselineWarehouses = await baseline.Select(s => s.WarehouseId).Distinct().CountAsync();
         var warehouseA = await SeedWarehouseAsync(db, "库存查询一号仓");
         var warehouseB = await SeedWarehouseAsync(db, "库存查询二号仓");
         var productId = await SeedProductAsync(db);
@@ -114,7 +121,7 @@ public sealed class StockQueryAuthorizationSqlServerTests
         // 列表 / 流水证据 / 汇总共用同一已授权范围（特权 = 既有全量可见性）。
         var stocks = StockQueryAuthorizationRules.ApplyScope(
             db.Stocks.AsNoTracking().Where(s => !s.IsDeleted), scope);
-        Assert.Equal(2, await stocks.CountAsync());
+        Assert.Equal(baselineCount + 2, await stocks.CountAsync());
         var row = await stocks.SingleAsync(s => s.WarehouseId == warehouseA);
         Assert.Equal(10m, row.Quantity);
         Assert.Equal(10m, row.AverageCost);
@@ -131,9 +138,9 @@ public sealed class StockQueryAuthorizationSqlServerTests
         Assert.Equal(50m, evidence.Amount);
 
         // 汇总（与控制器同一口径）：数量 / 可用数量 / 仓库数。
-        Assert.Equal(14m, await stocks.SumAsync(s => s.Quantity));
-        Assert.Equal(14m, await stocks.SumAsync(s => s.AvailableQuantity));
-        Assert.Equal(2, await stocks.Select(s => s.WarehouseId).Distinct().CountAsync());
+        Assert.Equal(baselineQuantity + 14m, await stocks.SumAsync(s => s.Quantity));
+        Assert.Equal(baselineAvailable + 14m, await stocks.SumAsync(s => s.AvailableQuantity));
+        Assert.Equal(baselineWarehouses + 2, await stocks.Select(s => s.WarehouseId).Distinct().CountAsync());
     }
 
     [Fact]
@@ -233,8 +240,10 @@ public sealed class StockQueryAuthorizationSqlServerTests
         var scope = await AuthorizeAsync(db, userId);
         var stocks = StockQueryAuthorizationRules.ApplyScope(
             db.Stocks.AsNoTracking().Where(s => !s.IsDeleted), scope);
-        return (await stocks.CountAsync(s => s.WarehouseId == warehouseId),
-            await stocks.Where(s => s.WarehouseId == warehouseId).SumAsync(s => s.Quantity),
+        // Use the same narrowing warehouse filter for every snapshot field.
+        stocks = stocks.Where(s => s.WarehouseId == warehouseId);
+        return (await stocks.CountAsync(),
+            await stocks.SumAsync(s => s.Quantity),
             await stocks.SumAsync(s => s.AvailableQuantity),
             await stocks.Select(s => s.WarehouseId).Distinct().CountAsync());
     }
