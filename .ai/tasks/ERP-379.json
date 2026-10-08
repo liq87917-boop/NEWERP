@@ -44,7 +44,7 @@
   "risk": "medium",
   "planning_stage": 3,
   "id": "ERP-379",
-  "status": "pending",
+  "status": "retry",
   "attempts": 0,
   "max_attempts": 3,
   "validation_profile": "safe",
@@ -60,5 +60,98 @@
     "required": false,
     "scenarios": []
   },
-  "created_at": "2026-10-08T13:32:14.671896Z"
+  "created_at": "2026-10-08T13:32:14.671896Z",
+  "preserved_work": {
+    "execution_copy": "D:\\VSCodeProject\\NEWERP.executor.continue-erp-190-20260930080457",
+    "changed_paths": [
+      ".ai/PROJECT_STATE.json",
+      ".ai/tasks/ERP-379.json",
+      "TestResults/erp379-sql.trx",
+      "TestResults/erp379-sql2.trx",
+      "TestResults/erp379-unit-full.trx",
+      "TestResults/erp379-unit-new.trx",
+      "docs/supplier-payment-transition-concurrency.md",
+      "src/ERP.Api/Controllers/FinancePaymentController.cs",
+      "src/ERP.Application/Services/SupplierPaymentLifecycleRules.cs",
+      "src/ERP.IntegrationTests/SupplierPaymentTransitionConcurrencySqlServerTests.cs",
+      "src/ERP.UnitTests/SupplierPaymentTransitionConcurrencyTests.cs"
+    ],
+    "diff": ".ai\\logs\\ERP-379-preserved-work.diff",
+    "preserved_at": "2026-10-08T14:01:17.079189Z"
+  },
+  "failure_kind": "path_guard_failure",
+  "failed_transport_version": 2,
+  "recovery_history": [
+    {
+      "remediation_task": "ERP-379-RECOVERY-1",
+      "cycle": 1,
+      "at": "2026-10-08T14:01:17.299229Z",
+      "evidence": {
+        "failure_kind": "path_guard_failure",
+        "summary": "Path guard failed:\noutside allowed_paths: TestResults/erp379-sql.trx\noutside allowed_paths: TestResults/erp379-sql2.trx\noutside allowed_paths: TestResults/erp379-unit-full.trx\noutside allowed_paths: TestResults/erp379-unit-new.trx",
+        "result": ".ai\\results\\ERP-379.json",
+        "attempt_logs": [
+          ".ai/logs/ERP-379-attempt-1.jsonl"
+        ],
+        "validation_logs": [],
+        "latest_state_error": {
+          "task": "ERP-379",
+          "kind": "automatic_repair_pending",
+          "summary": "Path guard failed:\noutside allowed_paths: TestResults/erp379-sql.trx\noutside allowed_paths: TestResults/erp379-sql2.trx\noutside allowed_paths: TestResults/erp379-unit-full.trx\noutside allowed_paths: TestResults/erp379-unit-new.trx"
+        },
+        "latest_build": null,
+        "task_context": ".ai\\tasks\\ERP-379.json",
+        "changed_paths": [
+          ".ai/PROJECT_STATE.json",
+          ".ai/tasks/ERP-379.json",
+          "TestResults/erp379-sql.trx",
+          "TestResults/erp379-sql2.trx",
+          "TestResults/erp379-unit-full.trx",
+          "TestResults/erp379-unit-new.trx",
+          "docs/supplier-payment-transition-concurrency.md",
+          "src/ERP.Api/Controllers/FinancePaymentController.cs",
+          "src/ERP.Application/Services/SupplierPaymentLifecycleRules.cs",
+          "src/ERP.IntegrationTests/SupplierPaymentTransitionConcurrencySqlServerTests.cs",
+          "src/ERP.UnitTests/SupplierPaymentTransitionConcurrencyTests.cs"
+        ],
+        "diff": ".ai\\logs\\ERP-379-preserved-work.diff",
+        "execution_copy": "D:\\VSCodeProject\\NEWERP.executor.continue-erp-190-20260930080457"
+      }
+    }
+  ],
+  "supervised_recovery_cycles": 1,
+  "recovery_context": {
+    "remediation_task": "ERP-379-RECOVERY-1",
+    "failure_kind": "path_guard_failure",
+    "summary": "Path guard failed:\noutside allowed_paths: TestResults/erp379-sql.trx\noutside allowed_paths: TestResults/erp379-sql2.trx\noutside allowed_paths: TestResults/erp379-unit-full.trx\noutside allowed_paths: TestResults/erp379-unit-new.trx",
+    "result": ".ai\\results\\ERP-379.json",
+    "attempt_logs": [
+      ".ai/logs/ERP-379-attempt-1.jsonl"
+    ],
+    "validation_logs": [],
+    "latest_state_error": {
+      "task": "ERP-379",
+      "kind": "automatic_repair_pending",
+      "summary": "Path guard failed:\noutside allowed_paths: TestResults/erp379-sql.trx\noutside allowed_paths: TestResults/erp379-sql2.trx\noutside allowed_paths: TestResults/erp379-unit-full.trx\noutside allowed_paths: TestResults/erp379-unit-new.trx"
+    },
+    "latest_build": null,
+    "task_context": ".ai\\tasks\\ERP-379.json",
+    "changed_paths": [
+      ".ai/PROJECT_STATE.json",
+      ".ai/tasks/ERP-379.json",
+      "TestResults/erp379-sql.trx",
+      "TestResults/erp379-sql2.trx",
+      "TestResults/erp379-unit-full.trx",
+      "TestResults/erp379-unit-new.trx",
+      "docs/supplier-payment-transition-concurrency.md",
+      "src/ERP.Api/Controllers/FinancePaymentController.cs",
+      "src/ERP.Application/Services/SupplierPaymentLifecycleRules.cs",
+      "src/ERP.IntegrationTests/SupplierPaymentTransitionConcurrencySqlServerTests.cs",
+      "src/ERP.UnitTests/SupplierPaymentTransitionConcurrencyTests.cs"
+    ],
+    "diff": ".ai\\logs\\ERP-379-preserved-work.diff",
+    "execution_copy": "D:\\VSCodeProject\\NEWERP.executor.continue-erp-190-20260930080457",
+    "repair_allowed_paths": [],
+    "instruction": "DeepSeek supervisor recovery: inspect the referenced complete logs, diagnose the root cause, and implement a different safe repair within allowed_paths. Rebuild and rerun the configured tests; if validation fails, use the newest log as the next repair input. Do not repeat the failed approach. Do not edit task/state/result files or relax production and irreversible-operation gates. "
+  }
 }

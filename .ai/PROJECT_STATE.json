@@ -1,7 +1,7 @@
 {
   "schema_version": 2,
   "project": "NEWERP",
-  "updated_at": "2026-10-08T13:53:08.552367Z",
+  "updated_at": "2026-10-08T14:01:17.430752Z",
   "phase": "ready",
   "current_task": null,
   "queue": [
@@ -371,17 +371,20 @@
     "log": ".ai\\logs\\ERP-378-validation-1.log",
     "at": "2026-10-08T13:52:58.685358Z"
   },
-  "last_error": null,
+  "last_error": {
+    "task": "ERP-379",
+    "kind": "automatic_repair_pending",
+    "summary": "Path guard failed:\noutside allowed_paths: TestResults/erp379-sql.trx\noutside allowed_paths: TestResults/erp379-sql2.trx\noutside allowed_paths: TestResults/erp379-unit-full.trx\noutside allowed_paths: TestResults/erp379-unit-new.trx"
+  },
   "last_deepseek_fix": {
-    "task": "ERP-371",
-    "attempt": 2,
-    "model": "deepseek-flash",
-    "exit_code": 0,
-    "finished_at": "2026-10-08T12:18:19.513064Z"
+    "task": "ERP-379",
+    "attempts": 3,
+    "status": "retry_pending",
+    "at": "2026-10-08T14:01:17.080957Z"
   },
   "git_sync": {
     "branch": "main",
-    "local_sha": "a346733",
+    "local_sha": "bb1265e",
     "status": "synced",
     "ahead": 0,
     "behind": 0,
@@ -395,5 +398,7 @@
   "runner": {
     "status": "stopped",
     "pid": null
-  }
+  },
+  "blocker": null,
+  "finish_reason": "deepseek_supervisor_recovery"
 }
