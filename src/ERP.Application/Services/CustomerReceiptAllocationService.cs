@@ -44,10 +44,23 @@ public static class CustomerReceiptAllocationService
         if (dto.ReceiptId <= 0) throw BusinessException.InvalidParameter("请选择要引用的收款单");
         if (dto.SalesOrderId <= 0) throw BusinessException.InvalidParameter("请选择要引用的销售订单");
 
-        var receipt = await LoadReceiptAsync(db, dto.ReceiptId);
-        var currency = CustomerReceiptAllocationRules.NormalizeCurrencyStrict(receipt.Currency.ToString());
-        var amount = CustomerReceiptAllocationRules.NormalizeAllocationAmount(dto.AllocatedAmount, currency);
-        var remark = CustomerReceiptAllocationRules.NormalizeRemark(dto.Remark);
+        // 与收款单生命周期（取消 / 修改 / 删除）互斥：在同一事务内先对收款单行加排它行锁，
+        // 再读权威金额与状态，避免「登记证据」与「收款单被取消 / 改金额」并发竞态。
+        await using var transaction = CustomerReceiptLifecycleRules.IsRelationalProvider(db)
+            ? await db.Database.BeginTransactionAsync()
+            : null;
+        try
+        {
+            await CustomerReceiptLifecycleRules.LockReceiptRowAsync(db, dto.ReceiptId);
+
+            var receipt = await LoadReceiptAsync(db, dto.ReceiptId);
+            if (receipt.Status == DocumentStatus.Cancelled)
+                throw BusinessException.RuleConflict(
+                    $"收款单「{receipt.ReceiptNo}」已取消，不能登记新的收款引用（历史引用仍可读，不再新增）");
+
+            var currency = CustomerReceiptAllocationRules.NormalizeCurrencyStrict(receipt.Currency.ToString());
+            var amount = CustomerReceiptAllocationRules.NormalizeAllocationAmount(dto.AllocatedAmount, currency);
+            var remark = CustomerReceiptAllocationRules.NormalizeRemark(dto.Remark);
 
         var order = await db.SalesOrders.AsNoTracking()
             .FirstOrDefaultAsync(o => o.Id == dto.SalesOrderId);
@@ -108,10 +121,17 @@ public static class CustomerReceiptAllocationService
             AllocatedAt = DateTime.Now
         };
 
-        db.CustomerReceiptAllocations.Add(row);
-        await db.SaveChangesAsync();
+            db.CustomerReceiptAllocations.Add(row);
+            await db.SaveChangesAsync();
 
-        return await MapAsync(db, row);
+            if (transaction is not null) await transaction.CommitAsync();
+            return await MapAsync(db, row);
+        }
+        catch
+        {
+            if (transaction is not null) await transaction.RollbackAsync();
+            throw;
+        }
     }
 
     // ==================== 2. 作废引用行（保留历史，不删除） ====================
@@ -445,11 +465,16 @@ public static class CustomerReceiptAllocationService
 
     // ==================== 5. 装载与映射（内部） ====================
 
-    /// <summary>按 Id 装载未删除收款单（不存在 / 已删除 → 数据不存在）</summary>
+    /// <summary>
+    /// 按 Id 装载未删除收款单（不存在 / 已删除 → 数据不存在）。
+    /// 使用 <c>AsNoTracking</c>：登记证据前已在锁内重新读取权威金额 / 状态，非跟踪读取保证拿到并发提交后的最新值，
+    /// 绝不复用加锁时的陈旧跟踪实体。
+    /// </summary>
     private static async Task<FinanceReceipt> LoadReceiptAsync(IErpDbContext db, long receiptId)
     {
         if (receiptId <= 0) throw BusinessException.InvalidParameter("收款单 Id 不合法");
-        return await db.FinanceReceipts.FirstOrDefaultAsync(r => r.Id == receiptId && !r.IsDeleted)
+        return await db.FinanceReceipts.AsNoTracking()
+                   .FirstOrDefaultAsync(r => r.Id == receiptId && !r.IsDeleted)
             ?? throw BusinessException.NotFound($"收款单（Id={receiptId}）不存在或已删除，不能登记收款引用");
     }
 

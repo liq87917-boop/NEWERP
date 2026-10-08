@@ -61,8 +61,17 @@ public static class AgencyServiceFeeCollectionAllocationService
                 "请显式选择要分摊的客户收款单（收款单 Id 必须由用户显式选择，"
                 + "系统不按单号文本、金额或日期相似度匹配收款单）");
 
-        var statement = await LoadStatementAsync(db, dto.StatementId);
-        var receipt = await LoadReceiptAsync(db, dto.ReceiptId);
+        // 与收款单生命周期（取消 / 修改 / 删除）互斥：先对收款单行加排它行锁，再读权威金额与状态，
+        // 避免「登记分摊证据」与「收款单被取消 / 改金额」并发竞态。
+        await using var transaction = CustomerReceiptLifecycleRules.IsRelationalProvider(db)
+            ? await db.Database.BeginTransactionAsync()
+            : null;
+        try
+        {
+            await CustomerReceiptLifecycleRules.LockReceiptRowAsync(db, dto.ReceiptId);
+
+            var statement = await LoadStatementAsync(db, dto.StatementId);
+            var receipt = await LoadReceiptAsync(db, dto.ReceiptId);
         var statementCurrency = AgencyServiceFeeCollectionAllocationRules.NormalizeCurrencyStrict(statement.Currency);
         var receiptCurrency = AgencyServiceFeeCollectionAllocationRules.NormalizeCurrencyStrict(
             receipt.Currency.ToString());
@@ -155,12 +164,19 @@ public static class AgencyServiceFeeCollectionAllocationService
             AllocatedBy = AgencyServiceFeeCollectionAllocationRules.NormalizeAllocatedBy(allocatedBy)
         };
 
-        db.AgencyServiceFeeCollectionAllocations.Add(allocation);
-        await db.SaveChangesAsync();
+            db.AgencyServiceFeeCollectionAllocations.Add(allocation);
+            await db.SaveChangesAsync();
 
-        return Map(allocation,
-            new Dictionary<long, FinanceReceipt> { [receipt.Id] = receipt },
-            new Dictionary<long, AgencyServiceFeeStatement> { [statement.Id] = statement });
+            if (transaction is not null) await transaction.CommitAsync();
+            return Map(allocation,
+                new Dictionary<long, FinanceReceipt> { [receipt.Id] = receipt },
+                new Dictionary<long, AgencyServiceFeeStatement> { [statement.Id] = statement });
+        }
+        catch
+        {
+            if (transaction is not null) await transaction.RollbackAsync();
+            throw;
+        }
     }
 
     // ==================== 2. 作废分摊行（证据保留） ====================

@@ -1,12 +1,10 @@
 {
   "schema_version": 2,
   "project": "NEWERP",
-  "updated_at": "2026-10-08T05:01:55.305189Z",
+  "updated_at": "2026-10-08T05:26:59.191238Z",
   "phase": "ready",
   "current_task": null,
-  "queue": [
-    "ERP-349"
-  ],
+  "queue": [],
   "completed": [
     "ERP-000",
     "ERP-001",
@@ -329,44 +327,38 @@
     "ERP-345",
     "ERP-346",
     "ERP-347",
-    "ERP-348"
+    "ERP-348",
+    "ERP-349"
   ],
   "blocked": [],
   "last_build": {
-    "task": "ERP-348",
+    "task": "ERP-349",
     "profile": "safe",
     "status": "passed",
     "exit_code": 0,
-    "log": ".ai\\logs\\ERP-348-validation-1.log",
-    "at": "2026-10-08T04:44:42.931513Z"
+    "log": ".ai\\logs\\ERP-349-validation-2.log",
+    "at": "2026-10-08T05:26:58.552803Z"
   },
-  "last_error": {
-    "task": "ERP-349",
-    "kind": "automatic_repair_pending",
-    "summary": "Path guard failed:\noutside allowed_paths: src/ERP.Application/ERP.Application.csproj"
-  },
+  "last_error": null,
   "last_deepseek_fix": {
     "task": "ERP-349",
-    "attempts": 3,
-    "status": "retry_pending",
-    "at": "2026-10-08T05:01:54.850062Z"
+    "attempt": 2,
+    "model": "deepseek-v4-pro",
+    "exit_code": 0,
+    "finished_at": "2026-10-08T05:25:22.221150Z"
   },
   "git_sync": {
     "branch": "main",
-    "local_sha": "54c8f62",
-    "status": "synced",
-    "ahead": 0,
+    "local_sha": "cc46eba",
+    "status": "pending",
+    "ahead": 1,
     "behind": 0,
-    "last_attempt_at": "2026-10-08T04:44:51.171600Z",
+    "last_attempt_at": "2026-10-08T05:26:59.045290Z",
     "last_error": null
   },
-  "next_recommended_tasks": [
-    "ERP-349"
-  ],
+  "next_recommended_tasks": [],
   "runner": {
     "status": "stopped",
     "pid": null
-  },
-  "blocker": null,
-  "finish_reason": "deepseek_supervisor_recovery"
+  }
 }
