@@ -159,6 +159,35 @@ public static class LoadingListAuthorizationRules
     }
 
     /// <summary>
+    /// 把「候选客户必须是该装柜清单的<b>权威归属客户</b>」下推到 SQL 侧（ERP-392，用于来源候选的有界只读查询）：
+    /// 精确客户必须是该清单的一个<b>有效（启用、未删除）参与方客户</b>；若该清单没有任何有效参与方，则要求持久化
+    /// 兼容客户字段 <see cref="ContainerLoadingList.CustomerId"/> 恰好等于该客户（历史单客户视图）。
+    /// <para><b>绝不按柜号 / 单号 / 相似度等自由文本猜测归属</b>，也不补链接 / 不回填；客户 Id 非正时返回空集（fail closed）。
+    /// 本方法只构造只读查询，不落库、不改单据、不写库存 / 财务。</para>
+    /// </summary>
+    public static IQueryable<ContainerLoadingList> ApplyAuthoritativeCustomerMembership(
+        IQueryable<ContainerLoadingList> source, IErpDbContext db, long customerId)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        ArgumentNullException.ThrowIfNull(db);
+        if (customerId <= 0) return source.Where(_ => false);
+
+        return from l in source
+               let hasAnyActiveParticipant = db.ContainerLoadingListParticipants.Any(p =>
+                   p.LoadingListId == l.Id
+                   && !p.IsDeleted
+                   && p.Status == ContainerLoadingParticipantRules.ActiveStatus)
+               let isActiveParticipant = db.ContainerLoadingListParticipants.Any(p =>
+                   p.LoadingListId == l.Id
+                   && !p.IsDeleted
+                   && p.Status == ContainerLoadingParticipantRules.ActiveStatus
+                   && p.CustomerId == customerId)
+               where (hasAnyActiveParticipant && isActiveParticipant)
+                     || (!hasAnyActiveParticipant && l.CustomerId == customerId)
+               select l;
+    }
+
+    /// <summary>
     /// 校验「库中已存储单据」的权威客户归属（见 <see cref="ApplyScope"/> 同一口径）是否落在当前账号范围内
     /// （读取 / 详情 / 时间线 / 参与方读取 / 修改 / 删除 / 状态变更之前调用）。特权账号保留历史访问。
     /// </summary>

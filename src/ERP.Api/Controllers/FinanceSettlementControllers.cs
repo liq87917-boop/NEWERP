@@ -62,6 +62,51 @@ public class FinanceContainerSettlementController : DocumentControllerBase<Finan
     }
 
     /// <summary>
+    /// 来源装柜清单候选（ERP-392，只读、有界、分页）：先做实时身份 + 既有「装柜结算单」（<c>container-settlement</c>）菜单
+    /// + 既有「装柜清单」（<c>loading-list</c>）菜单授权，再校验<b>精确客户</b>落在当前账号客户数据范围，之后才计数 / 取数；
+    /// 候选只含未删除、未取消，且该客户确实是权威归属客户（有效参与方之一或历史兼容客户）的装柜清单，
+    /// 共享柜的全部有效参与方与显式上游客户都必须在范围内。
+    /// <para><b>候选选择不等于授权</b>：候选只供显式选择，最终保存仍由 ERP-384 生命周期规则在锁内复核精确来源；
+    /// 不返回任意客户清单，也不提供按猜测 Id 直取候选的旁路；<b>不新增任何用户授权，也不提供匿名 / 管理员降级</b>。</para>
+    /// </summary>
+    [HttpGet("loading-list-candidates")]
+    public async Task<IActionResult> GetLoadingListCandidates(
+        [FromQuery] long? customerId, [FromQuery] string? keyword,
+        [FromQuery] int page = 0, [FromQuery] int pageSize = 0)
+    {
+        var scope = await FinanceContainerSettlementLifecycleRules.EnsureMenuAuthorizedAsync(Db, CurrentUserId());
+        // 既有「装柜清单」菜单授权（实时、fail closed）也必须显式具备，与结算单授权同时生效。
+        await LoadingListAuthorizationRules.EnsureAuthorizedAsync(Db, CurrentUserId());
+        if (customerId is not > 0)
+            throw BusinessException.InvalidParameter(ContainerSettlementLoadingSourceService.ExactCustomerRequiredText);
+        FinanceContainerSettlementLifecycleRules.EnsureCustomerInScope(scope, customerId.Value);
+
+        var candidates = await ContainerSettlementLoadingSourceService.QueryCandidatesAsync(
+            Db, scope, customerId.Value, keyword, page, pageSize);
+        return Ok(ApiResponse<ContainerSettlementLoadingListCandidatePageDto>.Success(
+            candidates, ContainerSettlementLoadingSourceService.CandidateRuleText));
+    }
+
+    /// <summary>
+    /// 已存储来源装柜清单的只读展示（ERP-392，详情 / 重开用）：按结算单权威客户复核实时身份 / 菜单授权 / 客户数据范围后，
+    /// 显式标注未关联 / 已关联 / 来源已取消 / 来源不可用；历史已取消 / 不可用来源原样保留、只读可读，
+    /// 绝不写库、绝不静默清除 / 重绑定。</summary>
+    [HttpGet("{id:long}/loading-list-source")]
+    public async Task<IActionResult> GetLoadingListSource(long id)
+    {
+        var scope = await FinanceContainerSettlementLifecycleRules.EnsureMenuAuthorizedAsync(Db, CurrentUserId());
+        var entity = await Set.AsNoTracking()
+            .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
+            ?? throw BusinessException.NotFound("装柜结算单不存在");
+        await FinanceContainerSettlementLifecycleRules.EnsureStoredSettlementScopeAllowedAsync(Db, scope, entity);
+
+        var view = await ContainerSettlementLoadingSourceService.DescribeStoredSourceAsync(
+            Db, null, entity.LoadingListId);
+        return Ok(ApiResponse<ContainerSettlementLoadingSourceViewDto>.Success(
+            view, ContainerSettlementLoadingSourceService.StoredSourceRuleText));
+    }
+
+    /// <summary>
     /// 创建：在生成结算单号之前先完成身份 / 菜单授权 / 客户数据范围 + 金额 + 客户可用性 + 来源清单资格校验
     /// （授权与校验失败绝不消耗单号、绝不写入）；关系型后端在同一事务内先取来源装柜清单行锁、锁内权威复核后才生成单号并落库。
     /// </summary>

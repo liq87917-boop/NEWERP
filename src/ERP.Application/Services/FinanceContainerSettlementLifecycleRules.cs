@@ -96,6 +96,23 @@ public static class FinanceContainerSettlementLifecycleRules
     public const string LoadingCancelBlockedText =
         "存在未删除且未取消的装柜结算单引用本装柜清单：请先取消装柜结算单，再取消装柜清单（历史与审计保留）";
 
+    // ==================== 0-b. 已存储来源装柜清单的只读标注文案（ERP-392，与来源候选 / 前端同源） ====================
+
+    /// <summary>历史「未关联来源」的只读标注（原样保留，绝不回填）</summary>
+    public const string StoredSourceUnlinkedText =
+        "当前未关联来源装柜清单（历史未关联语义原样保留，绝不回填）";
+
+    /// <summary>已关联且来源仍有效（未删除、未取消）的只读标注</summary>
+    public const string StoredSourceLinkedText = "已关联来源装柜清单";
+
+    /// <summary>来源装柜清单已取消的只读标注（原链接只读保留，绝不静默清除 / 重绑定）</summary>
+    public const string StoredSourceCancelledText =
+        "已关联来源装柜清单：来源装柜清单已取消，原链接只读保留";
+
+    /// <summary>来源装柜清单不可用（已删除 / 无法解析）的只读标注（原链接原样保留）</summary>
+    public const string StoredSourceUnavailableText =
+        "已关联来源装柜清单：来源装柜清单不可用（已删除或无法解析），原链接原样保留";
+
     // ==================== 1. 金额纯校验（既有存储精度，不换算 / 不聚合 / 不施加合计公式） ====================
 
     /// <summary>

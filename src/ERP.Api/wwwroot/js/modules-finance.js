@@ -68,6 +68,9 @@ Object.assign(MODULES, {
     ],
     fields: [
       { key: 'settlementDate', label: '结算日期', type: 'date' }, { key: 'customerId', label: '客户Id', type: 'number' },
+      /* ERP-392：来源装柜清单由「选择来源」有界选择器显式回填（也可手工填写 Id / 留空显式断开）；
+         选择器只回填权威来源 Id，绝不臆造柜号 / 清单号、绝不自动改动总金额 / 海运费 / 其他费用 */
+      { key: 'loadingListId', label: '来源装柜清单 ID（可留空；建议用「选择来源」）', type: 'number', selector: 'container-settlement-loading-source' },
       { key: 'totalAmount', label: '结算总金额', type: 'number' }, { key: 'freightCost', label: '海运费', type: 'number' },
       { key: 'otherCost', label: '其他费用', type: 'number' },
     ],

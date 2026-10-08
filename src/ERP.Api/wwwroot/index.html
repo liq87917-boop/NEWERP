@@ -297,6 +297,10 @@
   <!-- ERP-390：定金申请单来源销售订单显式选择器（只读有界分页候选 + 精确客户 + 归一化币种 → 仅回填权威来源 Id；
        已取消 / 币种不一致候选不可选；重开原样保留历史链接并显式标注；可显式断开；绝不臆造订单号、不改金额 / 汇率） -->
   <script src="/js/finance-apply-sales-order-source.js"></script>
+  <!-- ERP-392：装柜结算单来源装柜清单显式选择器（只读有界分页候选 + 精确客户 + 客户数据范围 → 仅回填权威来源 Id；
+       共享柜越范围 / 已取消候选不可选；重开原样保留历史链接并显式标注；可显式断开；绝不臆造柜号 / 清单号、
+       不自动改动结算总金额 / 海运费 / 其他费用） -->
+  <script src="/js/container-settlement-loading-source.js"></script>
   <script src="/js/base-io.js"></script>
   <script src="/js/datepicker.js"></script>
   <script src="/js/expense-allocate.js"></script>
