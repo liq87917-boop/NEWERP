@@ -4,13 +4,13 @@
   "execution_outcome": "provider_unavailable",
   "failure_kind": "provider_unavailable",
   "attempt": 1,
-  "last_error": "Insufficient Balance (request_id: 52cc3439-02ad-4e85-b13e-e61039c7c2ae)",
+  "last_error": "Insufficient Balance (request_id: d5832aef-8a59-4c38-a228-bb9a6ac781f0)",
   "executor_log": ".ai\\logs\\ERP-353-attempt-1.jsonl",
   "provider_retry": {
-    "probe_count": 2,
-    "cooldown_seconds": 120,
-    "next_probe_at": "2026-10-08T07:32:56.797876Z",
-    "last_seen_at": "2026-10-08T07:30:56.797876Z"
+    "probe_count": 3,
+    "cooldown_seconds": 240,
+    "next_probe_at": "2026-10-08T07:37:06.357101Z",
+    "last_seen_at": "2026-10-08T07:33:06.357101Z"
   },
   "preserved_work": {
     "execution_copy": "D:\\VSCodeProject\\NEWERP.executor.continue-erp-190-20260930080457",
@@ -19,7 +19,7 @@
       ".ai/tasks/ERP-353.json"
     ],
     "diff": ".ai\\logs\\ERP-353-preserved-work.diff",
-    "preserved_at": "2026-10-08T07:30:56.977406Z"
+    "preserved_at": "2026-10-08T07:33:06.526008Z"
   },
-  "finished_at": "2026-10-08T07:30:56.978598Z"
+  "finished_at": "2026-10-08T07:33:06.527031Z"
 }
