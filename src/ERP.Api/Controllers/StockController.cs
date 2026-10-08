@@ -1,15 +1,22 @@
 using ERP.Application.Common;
 using ERP.Application.Interfaces;
+using ERP.Application.Services;
 using ERP.Domain.Entities;
 using ERP.Domain.Enums;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.Security.Claims;
 
 namespace ERP.Api.Controllers;
 
 /// <summary>
-/// 库存查询控制器
+/// 库存查询控制器（ERP-356 实时授权与数据范围护栏）。
+/// <para>三个只读端点（分页列表 / 库存流水证据 / 汇总）在读取任何数量、成本或来源单据字段之前，
+/// 都先复用 <see cref="StockQueryAuthorizationRules"/> 重新解析：实时身份 → 账号状态 → 既有「库存查询」
+/// （stock-query）菜单授权 → 权威数据范围。任一缺失即 fail closed，绝不返回任何数量 / 成本 / 来源单据字段。</para>
+/// <para>授权通过后沿用既有查询与响应契约：数量、加权平均成本与库存金额语义不变；请求筛选（仓库 / 单据号 /
+/// 移动类型）只能收窄，绝不放大已授权范围。全程只读，不写库、不改单据 / 库存 / 流水。</para>
 /// </summary>
 [ApiController]
 [Route("api/stocks")]
@@ -23,12 +30,26 @@ public class StockController : ControllerBase
         _db = db;
     }
 
+    /// <summary>当前登录用户 Id（缺失或非数字时返回 null，由授权检查 fail closed 拒绝，绝不猜测身份）</summary>
+    private long? CurrentUserId()
+        => long.TryParse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value, out var id) ? id : null;
+
+    /// <summary>
+    /// 实时授权（fail closed）：校验身份 / 账号状态 / 既有 stock-query 菜单授权 / 权威数据范围。
+    /// 复用既有权限模型，不新增用户授权，也不把空身份当作管理员。
+    /// </summary>
+    private Task<StockQueryAuthorizationRules.StockQueryScope> AuthorizeAsync(CancellationToken ct = default)
+        => StockQueryAuthorizationRules.EnsureAuthorizedAsync(_db, CurrentUserId(), ct);
+
     /// <summary>分页查询库存（关联商品与仓库名称）</summary>
     [HttpGet]
     public async Task<IActionResult> GetPaged([FromQuery] PageQuery query, [FromQuery] long? warehouseId)
     {
         query.Normalize();
-        var source = _db.Stocks.AsNoTracking().Where(s => !s.IsDeleted);
+        // 授权 / 范围判定先于任何计数、分页与成本字段投影。
+        var scope = await AuthorizeAsync();
+        var source = StockQueryAuthorizationRules.ApplyScope(
+            _db.Stocks.AsNoTracking().Where(s => !s.IsDeleted), scope);
         if (warehouseId.HasValue) source = source.Where(s => s.WarehouseId == warehouseId.Value);
 
         var total = await source.CountAsync();
@@ -74,7 +95,10 @@ public class StockController : ControllerBase
         [FromQuery] InventoryMovementType? movementType)
     {
         query.Normalize();
-        var source = _db.StockMovements.AsNoTracking().Where(m => !m.IsDeleted);
+        // 与列表 / 汇总使用同一套授权 / 范围策略，且先于任何计数、分页与来源单据证据投影。
+        var scope = await AuthorizeAsync();
+        var source = StockQueryAuthorizationRules.ApplyScope(
+            _db.StockMovements.AsNoTracking().Where(m => !m.IsDeleted), scope);
         if (warehouseId.HasValue) source = source.Where(m => m.WarehouseId == warehouseId.Value);
         if (productId.HasValue) source = source.Where(m => m.ProductId == productId.Value);
         if (movementType.HasValue) source = source.Where(m => m.MovementType == movementType.Value);
@@ -102,9 +126,13 @@ public class StockController : ControllerBase
     [HttpGet("summary")]
     public async Task<IActionResult> GetSummary()
     {
-        var totalQuantity = await _db.Stocks.Where(s => !s.IsDeleted).SumAsync(s => s.Quantity);
-        var totalAvailable = await _db.Stocks.Where(s => !s.IsDeleted).SumAsync(s => s.AvailableQuantity);
-        var warehouseCount = await _db.Stocks.Where(s => !s.IsDeleted).Select(s => s.WarehouseId).Distinct().CountAsync();
+        // 汇总（数量 / 可用数量 / 仓库数）在同一套授权 / 范围策略之后聚合，未授权时不泄露任何计数。
+        var scope = await AuthorizeAsync();
+        var stocks = StockQueryAuthorizationRules.ApplyScope(
+            _db.Stocks.Where(s => !s.IsDeleted), scope);
+        var totalQuantity = await stocks.SumAsync(s => s.Quantity);
+        var totalAvailable = await stocks.SumAsync(s => s.AvailableQuantity);
+        var warehouseCount = await stocks.Select(s => s.WarehouseId).Distinct().CountAsync();
         return Ok(ApiResponse<object>.Success(new { totalQuantity, totalAvailable, warehouseCount }));
     }
 }

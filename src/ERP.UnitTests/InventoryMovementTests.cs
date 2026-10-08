@@ -541,7 +541,9 @@ public class InventoryMovementTests
         await adjustment.Unaudit(id);
 
         var docNo = db.StockAdjustments.Single().AdjustmentNo;
-        var controller = new StockController(db);
+        // ERP-356：库存查询端点在读取任何流水证据之前要求实时身份 + 既有 stock-query 菜单授权
+        // + 权威数据范围；此处注入真实特权库存查询身份（不绕过鉴权、不放宽可见性）。
+        var controller = StockQueryTestAuthorization.Create(db);
 
         var result = await controller.GetMovements(new PageQuery { Page = 1, PageSize = 20 }, null, null, docNo, null);
         var response = Assert.IsType<ApiResponse<PagedResult<StockMovement>>>(
