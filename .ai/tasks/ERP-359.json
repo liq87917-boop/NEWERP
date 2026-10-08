@@ -76,8 +76,8 @@
   "risk": "medium",
   "planning_stage": 3,
   "id": "ERP-359",
-  "status": "pending",
-  "attempts": 0,
+  "status": "completed",
+  "attempts": 1,
   "max_attempts": 3,
   "validation_profile": "safe",
   "completion_mode": "build",
@@ -92,5 +92,10 @@
     "required": false,
     "scenarios": []
   },
-  "created_at": "2026-10-08T09:09:04.946525Z"
+  "created_at": "2026-10-08T09:09:04.946525Z",
+  "checkpoint_recovery": {
+    "task": "ERP-359",
+    "signature": "443a43bf842c274df7f7a7eea0464fd67d20124d191dc210307c4cd45f522b10",
+    "cycles": 1
+  }
 }

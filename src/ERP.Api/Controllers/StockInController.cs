@@ -233,25 +233,41 @@ public class StockInController : DocumentControllerBase<StockIn>
             .ToListAsync();
     }
 
-    /// <summary>取消：已审核单据按库存流水冲销（无流水的历史单据按基础单位原路冲回）。</summary>
+    /// <summary>
+    /// 取消：已审核单据按库存流水冲销（无流水的历史单据按基础单位原路冲回）。
+    /// <para>ERP-359：与采购退货审核 / 销审共用<b>同一</b>把来源入库单行锁（<c>UPDLOCK, HOLDLOCK</c>）与可串行化事务，
+    /// 锁内先复核实时授权 / 来源归属，再确认没有仍然生效的已审核采购退货单显式引用本入库单（
+    /// <see cref="ReturnSourceCancellationRules.EnsureNoEffectiveApprovedPurchaseReturnAsync"/>）；
+    /// 存在时 fail closed 拒绝，单据 / 明细 / 状态 / 库存 / 流水全部保持原样，绝不先冲销再校验。</para>
+    /// </summary>
     [HttpPost("{id:long}/cancel")]
     public override async Task<IActionResult> Cancel(long id)
     {
-        var entity = await Db.StockIns.Include(o => o.Details)
-            .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
-            ?? throw BusinessException.NotFound("入库单不存在");
+        var probe = await Db.StockIns.AsNoTracking()
+            .Where(o => o.Id == id && !o.IsDeleted)
+            .Select(o => new { o.SupplierId, o.WarehouseId, o.PurchaseOrderId })
+            .FirstOrDefaultAsync() ?? throw BusinessException.NotFound("入库单不存在");
+        await StockInAuthorizationRules.EnsureAuthorizedAsync(
+            Db, CurrentInboundUserId(), probe.SupplierId, probe.WarehouseId, probe.PurchaseOrderId);
 
-        await StockInAuthorizationRules.EnsureAuthorizedAsync(Db, CurrentInboundUserId(), entity);
-
-        // 冲销与状态变更放进同一个可串行化事务，并在事务内再次复核实时授权与来源归属。
+        // 确定性锁序：来源入库单行（与采购退货审核 / 销审同一把锁）→ 退货单行（只读判定）。任一步失败整体回滚。
         await using var transaction = await Db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
         try
         {
+            await LockSourceReceiptRowAsync(id);
+
+            var entity = await Db.StockIns.Include(o => o.Details)
+                .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
+                ?? throw BusinessException.NotFound("入库单不存在");
             await StockInAuthorizationRules.EnsureAuthorizedAsync(Db, CurrentInboundUserId(), entity);
 
             var status = GetStatus(entity);
             if (status == DocumentStatus.Cancelled)
                 throw BusinessException.RuleConflict("入库单已取消");
+
+            // 在锁内、在任何库存冲销 / 状态变更之前判定退货引用：被拒绝时不留任何半成品写入。
+            await ReturnSourceCancellationRules.EnsureNoEffectiveApprovedPurchaseReturnAsync(Db, id);
+
             if (status == DocumentStatus.Approved)
                 await ReverseStockAsync(entity);
             else if (status is not (DocumentStatus.Pending or DocumentStatus.Submitted))
@@ -267,6 +283,19 @@ public class StockInController : DocumentControllerBase<StockIn>
         }
 
         return Ok(ApiResponse<object>.Success(null, "已取消，库存已按基础单位冲回"));
+    }
+
+    /// <summary>
+    /// 对来源采购入库单行加更新锁（<c>UPDLOCK, HOLDLOCK</c>，与采购退货审核 / 销审共用
+    /// <see cref="ReturnSourceCancellationRules.LockStockInRowSql"/> 同一锁语句）：
+    /// 把「取消来源入库单」与「采购退货审核 / 销审」串行化在同一可串行化事务内；非关系型提供程序跳过。
+    /// </summary>
+    private Task LockSourceReceiptRowAsync(long stockInId)
+    {
+        if (!ReturnSourceCancellationRules.IsRelationalProvider(Db)) return Task.CompletedTask;
+        return Db.Database
+            .SqlQueryRaw<long>(ReturnSourceCancellationRules.LockStockInRowSql, stockInId)
+            .ToListAsync();
     }
 
     /// <summary>

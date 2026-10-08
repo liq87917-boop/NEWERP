@@ -73,17 +73,17 @@ public class SalesReturnController : DocumentControllerBase<SalesReturn>
     /// <summary>
     /// 对来源销售出库单行加更新锁（<c>UPDLOCK, HOLDLOCK</c>）：把<b>同一来源出库单</b>上的并发退货审核
     /// 串行化在同一事务内，后到者能看到先到者已提交的累计退货数量。
-    /// <para>调用顺序固定为「来源出库单行 → 退货单行」，与确定性锁序一致；未链接（null）或非关系型提供程序跳过。</para>
+    /// <para>调用顺序固定为「来源出库单行 → 退货单行」，与确定性锁序一致；未链接（null）或非关系型提供程序跳过。
+    /// ERP-359：锁语句与 <see cref="ReturnSourceCancellationRules"/> 共用，保证「退货审核 / 销审」与
+    /// 「来源出库单取消」取到的是同一把上游行锁。</para>
     /// </summary>
     private async Task LockSourceShipmentAsync(long? sourceStockOutId)
     {
         if (sourceStockOutId is not > 0) return;
-        if (!SalesReturnSourceRules.IsRelationalProvider(Db)) return;
+        if (!ReturnSourceCancellationRules.IsRelationalProvider(Db)) return;
 
         await Db.Database
-            .SqlQueryRaw<long>(
-                "SELECT Id FROM db_owner.StockOuts WITH (UPDLOCK, HOLDLOCK) WHERE Id = {0}",
-                sourceStockOutId.Value)
+            .SqlQueryRaw<long>(ReturnSourceCancellationRules.LockStockOutRowSql, sourceStockOutId.Value)
             .ToListAsync();
     }
 

@@ -195,24 +195,68 @@ public class StockOutController : DocumentControllerBase<StockOut>
             .ToListAsync();
     }
 
-    /// <summary>取消：已审核单据按库存流水冲销（无流水的历史单据按基础单位原路恢复）。</summary>
+    /// <summary>
+    /// 取消：已审核单据按库存流水冲销（无流水的历史单据按基础单位原路恢复）。
+    /// <para>ERP-359：与销售退货审核 / 销审共用<b>同一</b>把来源出库单行锁（<c>UPDLOCK, HOLDLOCK</c>）与可串行化事务，
+    /// 锁内先复核实时授权 / 客户范围，再确认没有仍然生效的已审核销售退货单显式引用本出库单（
+    /// <see cref="ReturnSourceCancellationRules.EnsureNoEffectiveApprovedSalesReturnAsync"/>）；
+    /// 存在时 fail closed 拒绝，单据 / 明细 / 状态 / 库存 / 流水全部保持原样，绝不先冲销再校验。</para>
+    /// </summary>
     [HttpPost("{id:long}/cancel")]
     public override async Task<IActionResult> Cancel(long id)
     {
-        var entity = await Db.StockOuts.Include(o => o.Details)
-            .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
-            ?? throw BusinessException.NotFound("出库单不存在");
-        await EnsureCustomerScopeAsync(entity.CustomerId);
-        var status = GetStatus(entity);
-        if (status == DocumentStatus.Cancelled)
-            throw BusinessException.RuleConflict("出库单已取消");
-        if (status == DocumentStatus.Approved)
-            await ReverseStockAsync(entity);
-        else if (status is not (DocumentStatus.Pending or DocumentStatus.Submitted))
-            throw BusinessException.RuleConflict("当前状态不允许取消");
-        SetStatus(entity, DocumentStatus.Cancelled);
-        await Db.SaveChangesAsync();
+        var probe = await Db.StockOuts.AsNoTracking()
+            .Where(o => o.Id == id && !o.IsDeleted)
+            .Select(o => new { o.CustomerId })
+            .FirstOrDefaultAsync() ?? throw BusinessException.NotFound("出库单不存在");
+        await EnsureCustomerScopeAsync(probe.CustomerId);
+
+        // 确定性锁序：来源出库单行（与销售退货审核 / 销审同一把锁）→ 退货单行（只读判定）。任一步失败整体回滚。
+        await using var transaction = await Db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
+        try
+        {
+            await LockSourceShipmentRowAsync(id);
+
+            var entity = await Db.StockOuts.Include(o => o.Details)
+                .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
+                ?? throw BusinessException.NotFound("出库单不存在");
+            await EnsureCustomerScopeAsync(entity.CustomerId);
+
+            var status = GetStatus(entity);
+            if (status == DocumentStatus.Cancelled)
+                throw BusinessException.RuleConflict("出库单已取消");
+
+            // 在锁内、在任何库存冲销 / 状态变更之前判定退货引用：被拒绝时不留任何半成品写入。
+            await ReturnSourceCancellationRules.EnsureNoEffectiveApprovedSalesReturnAsync(Db, id);
+
+            if (status == DocumentStatus.Approved)
+                await ReverseStockAsync(entity);
+            else if (status is not (DocumentStatus.Pending or DocumentStatus.Submitted))
+                throw BusinessException.RuleConflict("当前状态不允许取消");
+            SetStatus(entity, DocumentStatus.Cancelled);
+            await Db.SaveChangesAsync();
+            await transaction.CommitAsync();
+        }
+        catch
+        {
+            await transaction.RollbackAsync();
+            throw;
+        }
+
         return Ok(ApiResponse<object>.Success(null, "已取消，库存已按基础单位恢复"));
+    }
+
+    /// <summary>
+    /// 对来源销售出库单行加更新锁（<c>UPDLOCK, HOLDLOCK</c>，与销售退货审核 / 销审共用
+    /// <see cref="ReturnSourceCancellationRules.LockStockOutRowSql"/> 同一锁语句）：
+    /// 把「取消来源出库单」与「销售退货审核 / 销审」串行化在同一可串行化事务内；非关系型提供程序跳过。
+    /// </summary>
+    private Task LockSourceShipmentRowAsync(long stockOutId)
+    {
+        if (!ReturnSourceCancellationRules.IsRelationalProvider(Db)) return Task.CompletedTask;
+        return Db.Database
+            .SqlQueryRaw<long>(ReturnSourceCancellationRules.LockStockOutRowSql, stockOutId)
+            .ToListAsync();
     }
 
     /// <summary>

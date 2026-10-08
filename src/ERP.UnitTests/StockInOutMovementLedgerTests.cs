@@ -400,6 +400,83 @@ public class StockInOutMovementLedgerTests
         Assert.Equal("PCS", movement.Unit);
     }
 
+    // ==================== ERP-359 来源取消退货引用护栏 ====================
+
+    [Fact]
+    public async Task 采购入库_存在已审核关联采购退货_取消被拒绝且库存与流水不变()
+    {
+        using var db = TestDbFactory.Create();
+        var ctl = NewStockInController(db);
+        var id = await CreateStockInAsync(ctl, quantity: 10m, unit: "PCS", purchaseOrderId: null);
+        await ctl.Submit(id);
+        await ctl.Approve(id);
+        Assert.Equal(10m, db.Stocks.Single(s => s.ProductId == Product1).Quantity);
+
+        // 显式来源指向本入库单、仍然生效的已审核采购退货：构成权威引用证据
+        db.PurchaseReturns.Add(new PurchaseReturn
+        {
+            ReturnNo = "CTH-LEDGER-0001",
+            ReturnDate = DateTime.Today,
+            SupplierId = 1L,
+            WarehouseId = WarehouseA,
+            SourceStockInId = id,
+            Status = DocumentStatus.Approved,
+            TotalQuantity = 10m,
+            Details = new List<PurchaseReturnDetail>
+            {
+                new() { ProductId = Product1, ProductName = "P1", Unit = "PCS", Quantity = 10m,
+                    UnitPrice = 1m, Amount = 10m }
+            }
+        });
+        db.SaveChanges();
+
+        var ex = await Assert.ThrowsAsync<BusinessException>(() => ctl.Cancel(id));
+        Assert.Equal(ErrorCodes.RuleConflict, ex.Code);
+        Assert.Contains("销审", ex.Message);
+        // 拒绝先于任何冲销 / 状态变更：库存、流水、状态全部保持原样
+        Assert.Equal(10m, db.Stocks.Single(s => s.ProductId == Product1).Quantity);
+        Assert.Single(db.StockMovements);
+        Assert.False(db.StockMovements.Single().IsReversed);
+        Assert.Equal(DocumentStatus.Approved, db.StockIns.Single().Status);
+    }
+
+    [Fact]
+    public async Task 销售出库_存在已审核关联销售退货_取消被拒绝且库存与流水不变()
+    {
+        using var db = TestDbFactory.Create();
+        SeedStock(db, WarehouseA, Product1, quantity: 10m, totalCost: 100m);
+        var ctl = NewStockOutController(db);
+        var id = await CreateStockOutAsync(ctl, quantity: 5m, unit: "PCS", salesOrderId: null);
+        await ctl.Submit(id);
+        await ctl.Approve(id);
+        Assert.Equal(5m, db.Stocks.Single(s => s.ProductId == Product1).Quantity);
+
+        db.SalesReturns.Add(new SalesReturn
+        {
+            ReturnNo = "XTH-LEDGER-0001",
+            ReturnDate = DateTime.Today,
+            CustomerId = 1L,
+            WarehouseId = WarehouseA,
+            SourceStockOutId = id,
+            Status = DocumentStatus.Approved,
+            TotalQuantity = 5m,
+            Details = new List<SalesReturnDetail>
+            {
+                new() { ProductId = Product1, ProductName = "P1", Unit = "PCS", Quantity = 5m,
+                    UnitPrice = 1m, Amount = 5m }
+            }
+        });
+        db.SaveChanges();
+
+        var ex = await Assert.ThrowsAsync<BusinessException>(() => ctl.Cancel(id));
+        Assert.Equal(ErrorCodes.RuleConflict, ex.Code);
+        Assert.Contains("销审", ex.Message);
+        Assert.Equal(5m, db.Stocks.Single(s => s.ProductId == Product1).Quantity);
+        Assert.Single(db.StockMovements);
+        Assert.False(db.StockMovements.Single().IsReversed);
+        Assert.Equal(DocumentStatus.Approved, db.StockOuts.Single().Status);
+    }
+
     // ==================== 测试辅助 ====================
 
     private static StockInController NewStockInController(ErpDbContext db)
