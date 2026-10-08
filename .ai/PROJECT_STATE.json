@@ -1,10 +1,11 @@
 {
   "schema_version": 2,
   "project": "NEWERP",
-  "updated_at": "2026-10-08T07:32:59.451253Z",
+  "updated_at": "2026-10-08T08:16:22.708211Z",
   "phase": "ready",
   "current_task": null,
   "queue": [
+    "ERP-352",
     "ERP-353"
   ],
   "completed": [
@@ -346,9 +347,9 @@
   "last_error": {
     "task": "ERP-353",
     "kind": "provider_unavailable",
-    "summary": "Insufficient Balance (request_id: 52cc3439-02ad-4e85-b13e-e61039c7c2ae)",
+    "summary": "Insufficient Balance (request_id: d5832aef-8a59-4c38-a228-bb9a6ac781f0)",
     "log": ".ai\\logs\\ERP-353-attempt-1.jsonl",
-    "next_probe_at": "2026-10-08T07:32:56.797876Z"
+    "next_probe_at": "2026-10-08T07:37:06.357101Z"
   },
   "last_deepseek_fix": {
     "task": "ERP-352",
@@ -359,14 +360,15 @@
   },
   "git_sync": {
     "branch": "main",
-    "local_sha": "9f9bbf8",
+    "local_sha": "50b0c76",
     "status": "synced",
-    "ahead": 3,
+    "ahead": 0,
     "behind": 0,
     "last_attempt_at": "2026-10-08T06:46:32.842521Z",
     "last_error": null
   },
   "next_recommended_tasks": [
+    "ERP-352",
     "ERP-353"
   ],
   "runner": {
