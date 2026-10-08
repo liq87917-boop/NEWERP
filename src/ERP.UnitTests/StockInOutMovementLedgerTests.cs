@@ -33,6 +33,18 @@ public class StockInOutMovementLedgerTests
         // 已有库存 10 × 10 = 100（均价 10）：入库明细没有成本列，按当前加权平均成本计价
         SeedStock(db, WarehouseA, Product1, quantity: 10m, totalCost: 100m);
         var ctl = NewStockInController(db);
+        // Valid approved fulfillment source; unavailable USD valuation retains weighted-average costing.
+        db.BaseProducts.Add(new BaseProduct { Id = Product1, ProductCode = "LEDGER-PO-P1", ProductName = "P1", Unit = "PCS" });
+        db.PurchaseOrders.Add(new PurchaseOrder
+        {
+            Id = 321L, OrderNo = "LEDGER-PO-321", SupplierId = 1L,
+            Status = DocumentStatus.Approved, Currency = Currency.USD, ExchangeRate = 0m,
+            Details = new List<PurchaseOrderDetail>
+            {
+                new() { ProductId = Product1, ProductName = "P1", Unit = "PCS", Quantity = 10m, UnitPrice = 7m, Amount = 70m }
+            }
+        });
+        db.SaveChanges();
         var id = await CreateStockInAsync(ctl, quantity: 10m, unit: "PCS", purchaseOrderId: 321L);
 
         await ctl.Submit(id);
@@ -162,6 +174,17 @@ public class StockInOutMovementLedgerTests
         using var db = TestDbFactory.Create();
         SeedStock(db, WarehouseA, Product1, quantity: 10m, totalCost: 100m);      // 均价 10
         var ctl = NewStockOutController(db);
+        // A live explicit source preserves both fulfillment validation and ledger trace assertions.
+        db.BaseProducts.Add(new BaseProduct { Id = Product1, ProductCode = "LEDGER-SO-P1", ProductName = "P1", Unit = "PCS" });
+        db.SalesOrders.Add(new SalesOrder
+        {
+            Id = 88L, OrderNo = "LEDGER-SO-88", CustomerId = 1L, Status = DocumentStatus.Approved,
+            Details = new List<SalesOrderDetail>
+            {
+                new() { ProductId = Product1, ProductName = "P1", Unit = "PCS", Quantity = 4m, UnitPrice = 17m, Amount = 68m }
+            }
+        });
+        db.SaveChanges();
         var id = await CreateStockOutAsync(ctl, quantity: 4m, unit: "PCS", salesOrderId: 88L);
 
         await ctl.Submit(id);
