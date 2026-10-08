@@ -1,0 +1,76 @@
+{
+  "title": "Preserve live sales demand while approved linked preloading remains",
+  "description": "Stage3 core inventory closure. Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance.",
+  "acceptance_criteria": [
+    "Extend actual sales order cancellation to reject effective approved nondeleted preloading linked through exact source sales-order detail ids before changing order state. Resolve live current user, sales-order menu and existing customer scope; null legacy links, cancelled/pending/deleted and unrelated preloading do not block. Return actionable preloading reversal requirement without modifying downstream stock, procurement, finance or historical evidence.",
+    "Share ERP368 upstream sales-order lock and compatible deterministic lock order with preloading approval/cancellation in one transaction. Actual controller two-connection approval versus source cancellation produces one consistent outcome. Explicit preloading cancellation releases the guard while original history remains; repeat source cancellation retains existing behavior. Failed cancellation preserves entire order/detail/status and existing ERP347 procurement/stock-out/receipt guards. Add actual SQL scenarios for denial, release, null/unrelated links, revoked authorization and race.",
+    "Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/SalesOrderController.cs",
+    "src/ERP.Api/Controllers/ContainerPreLoadingController.cs",
+    "src/ERP.Application/Services/SalesOrderCancellationRules.cs",
+    "src/ERP.Application/Services/PreLoadingSalesOrderLinkRules.cs",
+    "src/ERP.UnitTests/SalesOrderPreLoadingCancellationTests.cs",
+    "src/ERP.IntegrationTests/SalesOrderPreLoadingCancellationSqlServerTests.cs",
+    "src/ERP.IntegrationTests/ERP.IntegrationTests.csproj",
+    "docs/salesorder-preloading-cancellation.md"
+  ],
+  "criterion_path_map": {
+    "Extend actual sales order cancellation to reject effective approved nondeleted preloading linked through exact source sales-order detail ids before changing order state. Resolve live current user, sales-order menu and existing customer scope; null legacy links, cancelled/pending/deleted and unrelated preloading do not block. Return actionable preloading reversal requirement without modifying downstream stock, procurement, finance or historical evidence.": [
+      "src/ERP.Api/Controllers/SalesOrderController.cs",
+      "src/ERP.Api/Controllers/ContainerPreLoadingController.cs",
+      "src/ERP.Application/Services/SalesOrderCancellationRules.cs",
+      "src/ERP.Application/Services/PreLoadingSalesOrderLinkRules.cs",
+      "src/ERP.UnitTests/SalesOrderPreLoadingCancellationTests.cs",
+      "src/ERP.IntegrationTests/SalesOrderPreLoadingCancellationSqlServerTests.cs",
+      "src/ERP.IntegrationTests/ERP.IntegrationTests.csproj",
+      "docs/salesorder-preloading-cancellation.md"
+    ],
+    "Share ERP368 upstream sales-order lock and compatible deterministic lock order with preloading approval/cancellation in one transaction. Actual controller two-connection approval versus source cancellation produces one consistent outcome. Explicit preloading cancellation releases the guard while original history remains; repeat source cancellation retains existing behavior. Failed cancellation preserves entire order/detail/status and existing ERP347 procurement/stock-out/receipt guards. Add actual SQL scenarios for denial, release, null/unrelated links, revoked authorization and race.": [
+      "src/ERP.Api/Controllers/SalesOrderController.cs",
+      "src/ERP.Api/Controllers/ContainerPreLoadingController.cs",
+      "src/ERP.Application/Services/SalesOrderCancellationRules.cs",
+      "src/ERP.Application/Services/PreLoadingSalesOrderLinkRules.cs",
+      "src/ERP.UnitTests/SalesOrderPreLoadingCancellationTests.cs",
+      "src/ERP.IntegrationTests/SalesOrderPreLoadingCancellationSqlServerTests.cs",
+      "src/ERP.IntegrationTests/ERP.IntegrationTests.csproj",
+      "docs/salesorder-preloading-cancellation.md"
+    ],
+    "Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance.": [
+      "src/ERP.Api/Controllers/SalesOrderController.cs",
+      "src/ERP.Api/Controllers/ContainerPreLoadingController.cs",
+      "src/ERP.Application/Services/SalesOrderCancellationRules.cs",
+      "src/ERP.Application/Services/PreLoadingSalesOrderLinkRules.cs",
+      "src/ERP.UnitTests/SalesOrderPreLoadingCancellationTests.cs",
+      "src/ERP.IntegrationTests/SalesOrderPreLoadingCancellationSqlServerTests.cs",
+      "src/ERP.IntegrationTests/ERP.IntegrationTests.csproj",
+      "docs/salesorder-preloading-cancellation.md"
+    ]
+  },
+  "implementation_evidence": "ERP368 introduces explicit SourceSalesOrderDetailId. SalesOrderCancellationRules checks stock-out, procurement and receipt allocations but not linked approved preloading; cancellation can invalidate committed demand evidence.",
+  "depends_on": [
+    "ERP-347",
+    "ERP-368"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "id": "ERP-369",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-08T11:27:35.262380Z"
+}

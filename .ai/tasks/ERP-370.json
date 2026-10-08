@@ -1,0 +1,88 @@
+{
+  "title": "Enforce live outbound permission and customer scope across stock-out routes",
+  "description": "Stage3 core inventory closure. Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance.",
+  "acceptance_criteria": [
+    "Require live enabled current user and actual stock-out menu before every controller list/detail/movement/options/create/update/submit/approve/cancel/delete route. Use authoritative CustomerId and existing SalespersonDataScopeService, database scope before counts/pagination. Enforce both stored and proposed customer before edit assignment; no missing-identity, restricted-unmapped or legacy-unlinked global fallback. Restrict source/order/warehouse evidence to existing legitimate privileges, no new grants or inferred warehouse ownership.",
+    "Apply compatible source-sales-order/stock-out deterministic row lock and atomic transaction to state/edit/delete operations so approved stock/ledger cannot race edits. Preserve ERP343 source quantity limits, ERP359 approved-return and ERP367 loading reversal guards. Failed authorization/proposed detail update or later posting leaves original document/stock/ledger unchanged; approval never duplicates inventory. Test actual controller SQL own/foreign/null source, revoked menu, disabled user, denied movement evidence, failed edit unchanged and concurrent edit/state transitions; retain existing fulfillment and ledger tests.",
+    "Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/StockOutController.cs",
+    "src/ERP.Application/Services/StockOutAuthorizationRules.cs",
+    "src/ERP.Application/Services/StockOutOrderFulfillmentRules.cs",
+    "src/ERP.Application/Services/LoadingStockOutLinkRules.cs",
+    "src/ERP.Application/Services/ReturnSourceCancellationRules.cs",
+    "src/ERP.UnitTests/StockOutAuthorizationTests.cs",
+    "src/ERP.UnitTests/StockInOutMovementLedgerTests.cs",
+    "src/ERP.UnitTests/OrderTraceabilityTests.cs",
+    "src/ERP.IntegrationTests/StockOutAuthorizationSqlServerTests.cs",
+    "src/ERP.IntegrationTests/ERP.IntegrationTests.csproj",
+    "docs/stockout-authorization.md"
+  ],
+  "criterion_path_map": {
+    "Require live enabled current user and actual stock-out menu before every controller list/detail/movement/options/create/update/submit/approve/cancel/delete route. Use authoritative CustomerId and existing SalespersonDataScopeService, database scope before counts/pagination. Enforce both stored and proposed customer before edit assignment; no missing-identity, restricted-unmapped or legacy-unlinked global fallback. Restrict source/order/warehouse evidence to existing legitimate privileges, no new grants or inferred warehouse ownership.": [
+      "src/ERP.Api/Controllers/StockOutController.cs",
+      "src/ERP.Application/Services/StockOutAuthorizationRules.cs",
+      "src/ERP.Application/Services/StockOutOrderFulfillmentRules.cs",
+      "src/ERP.Application/Services/LoadingStockOutLinkRules.cs",
+      "src/ERP.Application/Services/ReturnSourceCancellationRules.cs",
+      "src/ERP.UnitTests/StockOutAuthorizationTests.cs",
+      "src/ERP.UnitTests/StockInOutMovementLedgerTests.cs",
+      "src/ERP.UnitTests/OrderTraceabilityTests.cs",
+      "src/ERP.IntegrationTests/StockOutAuthorizationSqlServerTests.cs",
+      "src/ERP.IntegrationTests/ERP.IntegrationTests.csproj",
+      "docs/stockout-authorization.md"
+    ],
+    "Apply compatible source-sales-order/stock-out deterministic row lock and atomic transaction to state/edit/delete operations so approved stock/ledger cannot race edits. Preserve ERP343 source quantity limits, ERP359 approved-return and ERP367 loading reversal guards. Failed authorization/proposed detail update or later posting leaves original document/stock/ledger unchanged; approval never duplicates inventory. Test actual controller SQL own/foreign/null source, revoked menu, disabled user, denied movement evidence, failed edit unchanged and concurrent edit/state transitions; retain existing fulfillment and ledger tests.": [
+      "src/ERP.Api/Controllers/StockOutController.cs",
+      "src/ERP.Application/Services/StockOutAuthorizationRules.cs",
+      "src/ERP.Application/Services/StockOutOrderFulfillmentRules.cs",
+      "src/ERP.Application/Services/LoadingStockOutLinkRules.cs",
+      "src/ERP.Application/Services/ReturnSourceCancellationRules.cs",
+      "src/ERP.UnitTests/StockOutAuthorizationTests.cs",
+      "src/ERP.UnitTests/StockInOutMovementLedgerTests.cs",
+      "src/ERP.UnitTests/OrderTraceabilityTests.cs",
+      "src/ERP.IntegrationTests/StockOutAuthorizationSqlServerTests.cs",
+      "src/ERP.IntegrationTests/ERP.IntegrationTests.csproj",
+      "docs/stockout-authorization.md"
+    ],
+    "Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance.": [
+      "src/ERP.Api/Controllers/StockOutController.cs",
+      "src/ERP.Application/Services/StockOutAuthorizationRules.cs",
+      "src/ERP.Application/Services/StockOutOrderFulfillmentRules.cs",
+      "src/ERP.Application/Services/LoadingStockOutLinkRules.cs",
+      "src/ERP.Application/Services/ReturnSourceCancellationRules.cs",
+      "src/ERP.UnitTests/StockOutAuthorizationTests.cs",
+      "src/ERP.UnitTests/StockInOutMovementLedgerTests.cs",
+      "src/ERP.UnitTests/OrderTraceabilityTests.cs",
+      "src/ERP.IntegrationTests/StockOutAuthorizationSqlServerTests.cs",
+      "src/ERP.IntegrationTests/ERP.IntegrationTests.csproj",
+      "docs/stockout-authorization.md"
+    ]
+  },
+  "implementation_evidence": "StockOutController reads and legacy unlinked writes are not uniformly authorized beyond authentication. Source-order validation and ERP367 cancellation guard do not protect every list/detail/movement or status endpoint.",
+  "depends_on": [
+    "ERP-343",
+    "ERP-367"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "id": "ERP-370",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-08T11:27:35.269427Z"
+}
