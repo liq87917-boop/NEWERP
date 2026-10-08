@@ -1,7 +1,7 @@
 {
   "schema_version": 2,
   "project": "NEWERP",
-  "updated_at": "2026-10-08T02:24:38.291487Z",
+  "updated_at": "2026-10-08T02:44:09.391067Z",
   "phase": "ready",
   "current_task": null,
   "queue": [
@@ -337,17 +337,20 @@
     "log": ".ai\\logs\\ERP-343-validation-2.log",
     "at": "2026-10-08T02:24:31.884458Z"
   },
-  "last_error": null,
+  "last_error": {
+    "task": "ERP-344",
+    "kind": "automatic_repair_pending",
+    "summary": "Path guard failed:\noutside allowed_paths: src/ERP.UnitTests/StockInOutMovementLedgerTests.cs"
+  },
   "last_deepseek_fix": {
-    "task": "ERP-343",
-    "attempt": 2,
-    "model": "deepseek-v4-pro",
-    "exit_code": 0,
-    "finished_at": "2026-10-08T02:23:00.988299Z"
+    "task": "ERP-344",
+    "attempts": 3,
+    "status": "retry_pending",
+    "at": "2026-10-08T02:44:08.923920Z"
   },
   "git_sync": {
     "branch": "main",
-    "local_sha": "54727cf",
+    "local_sha": "53fa6e0",
     "status": "synced",
     "ahead": 0,
     "behind": 0,
@@ -362,5 +365,7 @@
   "runner": {
     "status": "stopped",
     "pid": null
-  }
+  },
+  "blocker": null,
+  "finish_reason": "deepseek_supervisor_recovery"
 }
