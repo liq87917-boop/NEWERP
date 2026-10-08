@@ -34,9 +34,9 @@ public sealed class PurchaseOrderAuthorizationSqlServerTests
 {
     private readonly PurchaseOrderAuthorizationSqlServerFixture _fixture;
 
-    private const long ProductA = 956201L;
-    private const long CustomerA = 956301L;
-    private const long CustomerB = 956302L;
+    private long ProductA;
+    private long CustomerA;
+    private long CustomerB;
 
     public PurchaseOrderAuthorizationSqlServerTests(PurchaseOrderAuthorizationSqlServerFixture fixture)
         => _fixture = fixture;
@@ -45,10 +45,22 @@ public sealed class PurchaseOrderAuthorizationSqlServerTests
     private void Guard()
     {
         var target = new SqlConnectionStringBuilder(_fixture.ConnectionString);
-        Assert.Equal("(localdb)\\\\NEWERP_AutoAcceptance", target.DataSource, ignoreCase: true);
+        Assert.Equal("(localdb)\\NEWERP_AutoAcceptance", target.DataSource, ignoreCase: true);
         Assert.StartsWith(PurchaseOrderAuthorizationSqlServerFixture.DatabasePrefix, target.InitialCatalog,
             StringComparison.OrdinalIgnoreCase);
         Assert.True(target.IntegratedSecurity);
+    }
+
+    private async Task InitializeMastersAsync()
+    {
+        await using var db = _fixture.CreateDbContext();
+        var key = Guid.NewGuid().ToString("N");
+        var a = new BaseCustomer { CustomerCode = $"PO-A-{key}", CustomerName = "Owned", Status = 1 };
+        var b = new BaseCustomer { CustomerCode = $"PO-B-{key}", CustomerName = "Foreign", Status = 1 };
+        var product = new BaseProduct { ProductCode = $"PO-P-{key}", ProductName = "商品A", Spec = "规格A", Unit = "PCS" };
+        db.AddRange(a, b, product);
+        await db.SaveChangesAsync();
+        CustomerA = a.Id; CustomerB = b.Id; ProductA = product.Id;
     }
 
     // ==================== 1. 身份 / 账号状态 / 菜单 fail closed ====================
@@ -60,6 +72,7 @@ public sealed class PurchaseOrderAuthorizationSqlServerTests
     public async Task Live_identity_menu_and_status_denials_leave_order_unchanged(string scenario)
     {
         Guard();
+        await InitializeMastersAsync();
         await using var db = _fixture.CreateDbContext();
         long? userId = null;
         if (scenario == "disabled")
@@ -94,6 +107,7 @@ public sealed class PurchaseOrderAuthorizationSqlServerTests
     public async Task Seeded_admin_with_all_menus_can_read_export_and_create_stock_procurement()
     {
         Guard();
+        await InitializeMastersAsync();
         await using var db = _fixture.CreateDbContext();
         var adminId = await ResolveSeededAdminIdAsync(db);
         var order = await SeedOrderAsync(db, $"INT_TEST_POAUTH_ADMIN_{Guid.NewGuid():N}", CustomerA, DocumentStatus.Pending);
@@ -115,6 +129,7 @@ public sealed class PurchaseOrderAuthorizationSqlServerTests
     public async Task Restricted_operator_scopes_own_foreign_and_legacy_unowned_access()
     {
         Guard();
+        await InitializeMastersAsync();
         await using var db = _fixture.CreateDbContext();
         var operatorId = await SeedRestrictedOperatorAsync(db, CustomerA);
         var own = await SeedOrderAsync(db, $"INT_TEST_POAUTH_OWN_{Guid.NewGuid():N}", CustomerA, DocumentStatus.Pending);
@@ -156,6 +171,7 @@ public sealed class PurchaseOrderAuthorizationSqlServerTests
     public async Task Revoked_menu_authorization_converges_on_next_request()
     {
         Guard();
+        await InitializeMastersAsync();
         await using var db = _fixture.CreateDbContext();
         var operatorId = await SeedRestrictedOperatorAsync(db, CustomerA);
         var order = await SeedOrderAsync(db, $"INT_TEST_POAUTH_REVOKE_{Guid.NewGuid():N}", CustomerA, DocumentStatus.Pending);
@@ -182,6 +198,7 @@ public sealed class PurchaseOrderAuthorizationSqlServerTests
     public async Task Failed_linked_edit_preserves_totals_details_and_status()
     {
         Guard();
+        await InitializeMastersAsync();
         await using var db = _fixture.CreateDbContext();
         var adminId = await ResolveSeededAdminIdAsync(db);
         var customerId = await SeedCustomerAsync(db, $"INT_TEST_POAUTH_CUST_{Guid.NewGuid():N}");
@@ -207,6 +224,7 @@ public sealed class PurchaseOrderAuthorizationSqlServerTests
     public async Task Two_connection_race_submit_vs_delete_yields_one_consistent_result()
     {
         Guard();
+        await InitializeMastersAsync();
         await using var db = _fixture.CreateDbContext();
         var adminId = await ResolveSeededAdminIdAsync(db);
         var order = await SeedOrderAsync(db, $"INT_TEST_POAUTH_RACE1_{Guid.NewGuid():N}", null, DocumentStatus.Pending);
@@ -237,6 +255,7 @@ public sealed class PurchaseOrderAuthorizationSqlServerTests
     public async Task Two_connection_race_invalidated_source_vs_approve_refuses_approval()
     {
         Guard();
+        await InitializeMastersAsync();
         await using var db = _fixture.CreateDbContext();
         var adminId = await ResolveSeededAdminIdAsync(db);
         var customerId = await SeedCustomerAsync(db, $"INT_TEST_POAUTH_RACE2C_{Guid.NewGuid():N}");
@@ -367,10 +386,10 @@ public sealed class PurchaseOrderAuthorizationSqlServerTests
         var suffix = Guid.NewGuid().ToString("N");
         var user = new SysUser
         {
-            UserName = $"{name}-{suffix}",
+            UserName = $"po-auth-{suffix}",
             PasswordHash = "hash",
             PasswordSalt = "salt",
-            DisplayName = name,
+            DisplayName = name[..Math.Min(name.Length, 50)],
             Status = status
         };
         db.SysUsers.Add(user);
@@ -407,22 +426,16 @@ public sealed class PurchaseOrderAuthorizationSqlServerTests
 
         var userId = await SeedUserAsync(db, code, UserStatus.Enabled, withMenu: true);
 
-        var customer = await db.BaseCustomers.SingleOrDefaultAsync(c => c.Id == ownedCustomerId);
-        if (customer is null)
-            db.BaseCustomers.Add(new BaseCustomer
-            {
-                Id = ownedCustomerId, CustomerCode = $"SQLC-{ownedCustomerId}",
-                CustomerName = $"SQL 客户{ownedCustomerId}", EmpId = employee.Id, Status = 1
-            });
-        else
-            customer.EmpId = employee.Id;
+        employee.EmployeeCode = await db.SysUsers.Where(u => u.Id == userId).Select(u => u.UserName).SingleAsync();
+        var customer = await db.BaseCustomers.SingleAsync(c => c.Id == ownedCustomerId);
+        customer.EmpId = employee.Id;
         await db.SaveChangesAsync();
         return userId;
     }
 
     private static async Task<long> SeedCustomerAsync(ErpDbContext db, string code)
     {
-        var customer = new BaseCustomer { CustomerCode = code, CustomerName = code, Status = 1 };
+        var customer = new BaseCustomer { CustomerCode = $"PO-C-{Guid.NewGuid():N}", CustomerName = code[..Math.Min(code.Length, 100)], Status = 1 };
         db.BaseCustomers.Add(customer);
         await db.SaveChangesAsync();
         return customer.Id;
@@ -432,7 +445,7 @@ public sealed class PurchaseOrderAuthorizationSqlServerTests
     {
         var order = new SalesOrder
         {
-            OrderNo = orderNo,
+            OrderNo = $"SO-AUTH-{Guid.NewGuid():N}",
             OrderDate = DateTime.Today.AddDays(-5),
             CustomerId = customerId,
             Currency = Currency.USD,
@@ -443,12 +456,12 @@ public sealed class PurchaseOrderAuthorizationSqlServerTests
         return order.Id;
     }
 
-    private static async Task<PurchaseOrder> SeedOrderAsync(ErpDbContext db, string no,
+    private async Task<PurchaseOrder> SeedOrderAsync(ErpDbContext db, string no,
         long? owningCustomerId, DocumentStatus status)
     {
         var order = new PurchaseOrder
         {
-            OrderNo = no,
+            OrderNo = $"PO-AUTH-{Guid.NewGuid():N}",
             OrderDate = DateTime.Today,
             SupplierId = 1,
             Currency = Currency.CNY,
@@ -467,12 +480,12 @@ public sealed class PurchaseOrderAuthorizationSqlServerTests
         return order;
     }
 
-    private static async Task<PurchaseOrder> SeedLinkedOrderAsync(ErpDbContext db, string no,
+    private async Task<PurchaseOrder> SeedLinkedOrderAsync(ErpDbContext db, string no,
         long customerId, long salesOrderId, DocumentStatus status)
     {
         var order = new PurchaseOrder
         {
-            OrderNo = no,
+            OrderNo = $"PO-AUTH-{Guid.NewGuid():N}",
             OrderDate = DateTime.Today,
             SupplierId = 1,
             Currency = Currency.CNY,
@@ -492,7 +505,7 @@ public sealed class PurchaseOrderAuthorizationSqlServerTests
         return order;
     }
 
-    private static PurchaseOrder NewOrder(long? owningCustomerId)
+    private PurchaseOrder NewOrder(long? owningCustomerId)
         => new()
         {
             OrderDate = DateTime.Today,

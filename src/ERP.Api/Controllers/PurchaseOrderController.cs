@@ -570,13 +570,28 @@ public class PurchaseOrderController : DocumentControllerBase<PurchaseOrder>
     /// </summary>
     private async Task AcquireOrderStateLocksAsync(long orderId)
     {
-        var salesOrderId = await Db.PurchaseOrders.AsNoTracking()
-            .Where(o => o.Id == orderId && !o.IsDeleted)
-            .Select(o => (long?)o.OwningSalesOrderId)
-            .FirstOrDefaultAsync();
+        // Discovery must not retain a shared purchase lock before acquiring the
+        // upstream sales lock. Recheck the pointer under the final update lock.
+        long? salesOrderId;
+        if (Db.Database.IsRelational())
+        {
+            var pointers = await Db.Database.SqlQueryRaw<long>(
+                "SELECT COALESCE(OwningSalesOrderId, 0) AS Value FROM db_owner.PurchaseOrders WITH (READUNCOMMITTED) WHERE Id = {0} AND IsDeleted = 0",
+                orderId).ToListAsync();
+            salesOrderId = pointers.FirstOrDefault();
+        }
+        else
+            salesOrderId = await Db.PurchaseOrders.AsNoTracking()
+                .Where(o => o.Id == orderId && !o.IsDeleted)
+                .Select(o => (long?)o.OwningSalesOrderId).FirstOrDefaultAsync();
         if (salesOrderId is > 0)
             await AcquireSalesOrderLinkLockAsync(salesOrderId.Value);
         await AcquirePurchaseOrderLockAsync(orderId);
+        var lockedSourceId = await Db.PurchaseOrders.AsNoTracking()
+            .Where(o => o.Id == orderId && !o.IsDeleted)
+            .Select(o => (long?)o.OwningSalesOrderId).FirstOrDefaultAsync();
+        if ((lockedSourceId ?? 0) != (salesOrderId ?? 0))
+            throw BusinessException.RuleConflict("采购订单来源已变更，请刷新后重试");
     }
 
     /// <summary>对采购订单行加更新锁（UPDLOCK, HOLDLOCK）；非关系型提供程序跳过。</summary>

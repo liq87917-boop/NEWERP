@@ -104,3 +104,11 @@
   （需专用 localdb 环境与批准）；**构建通过不等于阶段验收通过**。
 - 未运行真实浏览器 UI 验收（`browser_acceptance.required = false`），未启动 API、未部署、未改动生产库或生产设置。
 - 未新增 / 未修改任何数据库 schema、表 / 列 / 菜单 / 权限；原始失败日志与历史审计证据原样保留。
+
+## 2026-10-08 独立 SQL 验证与整改
+
+- 专用 `(localdb)\NEWERP_AutoAcceptance`、全新 GUID `NEWERP_AUTOTEST` 数据库：真实控制器 9 项通过，未访问生产环境或重置已有库。
+- 修正测试目标字符串重复转义、固定身份键、超长测试账号/单号及员工编码与实际登录账号的映射；每个场景使用独立生成的主数据键。
+- 提交与删除并发曾返回 SQL 异常。来源指针发现不再在可串行化事务内提前保留采购共享锁；按来源销售订单→采购订单取得更新锁后重新核对来源指针，变化时明确拒绝并要求刷新。发现结果只用于锁序，授权与状态判断仍在最终锁内完成。
+- Release 完整构建 0 警告 / 0 错误，单元测试 5581 项通过。完整日志保存在 `.ai/logs/ERP-371-independent-sql.log`、`ERP-371-fixture-repair-sql.log`、`ERP-371-fixture-repair-sql2.log`、`ERP-371-independent-safe-build.log`、`ERP-371-independent-safe-tests.log`；失败原始日志保留。
+- 此证据仅覆盖采购订单授权及上述并发场景，第三阶段整体浏览器验收仍未完成，第二阶段迁移验收和旧入口切换条件保持原状。
