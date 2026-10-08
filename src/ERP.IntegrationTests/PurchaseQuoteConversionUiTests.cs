@@ -129,6 +129,9 @@ public class PurchaseQuoteConversionUiTests
         Assert.Empty(PurchaseOrdersByQuote(quote.No, quote.Id));      // 预填与「不保存」都不得生成采购订单
         Assert.Equal("已选中", QuoteRow(quote.Id).Status);             // 预填不改来源状态
 
+        // Prefill navigates to purchase-order; return to the source list before its row action.
+        OpenModule("purchase-quote");
+        SearchList(quote.No);
         // 2) 重复转换守卫：第一次生成成功，重复调用被服务端拒绝且不新增单据
         ClickRowMenuAction(quote.Id, "purchaseQuoteToOrder");
         AcceptAlert();
@@ -362,7 +365,9 @@ public class PurchaseQuoteConversionUiTests
             remark = "QUOTE_CONVERSION_UI"
         });
         var data = ApiData("POST", "/api/purchase/quotes", body);
-        return new QuoteSeed(data.GetProperty("id").GetInt64(), data.GetProperty("quoteNo").GetString()!);
+        var quote = new QuoteSeed(data.GetProperty("id").GetInt64(), data.GetProperty("quoteNo").GetString()!);
+        ApproveSelectedQuote(quote);
+        return quote;
     }
 
     /// <summary>
@@ -397,7 +402,24 @@ public class PurchaseQuoteConversionUiTests
             remark = "QUOTE_CONVERSION_UI"
         });
         var data = ApiData("POST", "/api/purchase/quotes", body);
-        return new QuoteSeed(data.GetProperty("id").GetInt64(), data.GetProperty("quoteNo").GetString()!);
+        var quote = new QuoteSeed(data.GetProperty("id").GetInt64(), data.GetProperty("quoteNo").GetString()!);
+        if (selected) ApproveSelectedQuote(quote);
+        return quote;
+    }
+
+    // ERP-095 requires a real immutable approval before any selected quote conversion.
+    // Seed through the authenticated business API; leave unselected comparison rows pending.
+    private void ApproveSelectedQuote(QuoteSeed quote)
+    {
+        var decision = ApiData("POST", "/api/purchase/quote-decisions/decide",
+            JsonSerializer.Serialize(new
+            {
+                quoteId = quote.Id, quoteNo = quote.No, decision = "Approved",
+                decisionBasis = "UI conversion fixture supplier selection approval"
+            }));
+        Assert.Equal(quote.Id, decision.GetProperty("quoteId").GetInt64());
+        Assert.Equal("Approved", decision.GetProperty("decision").GetString());
+        Assert.False(string.IsNullOrWhiteSpace(decision.GetProperty("decisionRef").GetString()));
     }
 
     private QuoteRowData QuoteRow(long id)
