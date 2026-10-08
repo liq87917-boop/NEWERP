@@ -1,0 +1,83 @@
+{
+  "title": "Guard sales order cancellation against active fulfillment and settlement",
+  "description": "Stage3 priority: implement a core operational integrity gap through existing business APIs/services. Preserve permissions, audit, original evidence and existing layers; no report, UI polish, Agent or production operations.",
+  "acceptance_criteria": [
+    "Authorized sales user cancels an order only after current identity, existing sales-order menu permission, live customer data scope and valid source status checks. Refuse while explicitly linked unreversed approved outbound movements, nondeleted uncancelled procurement fulfillment or active customer receipt allocations remain. Do not infer links from text or combine currencies. Give concise authorized reason; missing/unmapped user and out-of-scope document fail closed.",
+    "Coordinate cancellation and competing linked outbound approval, linked procurement creation/update and receipt allocation creation using the same source-order row lock and atomic serializable transaction. Include required existing writers above; refresh current source state and permission before commit. Race test cannot leave a cancelled order with newly effective fulfillment. Guard never silently cancels procurement or reverses stock/payment; require existing explicit reversal/void workflows and preserve historic lines, amounts and audit.",
+    "Meaningful unit/API and two-connection SQL tests cover no-dependency success, each active dependency refusal, explicit reversal/void/cancellation release, invalid/repeated state, denied/revoked user and cancellation-versus-fulfillment/allocation race. Legacy unlinked evidence is not guessed. Existing related sales and traceability tests remain passing.",
+    "Real SQL fixtures must require exact (localdb)\\NEWERP_AutoAcceptance, IntegratedSecurity and NEWERP_AUTOTEST prefix before access. Create only a new GUID-owned database, reject existing database, never drop/reset any database or read production settings. Use SQL generated identities, fail wrong-target guards before access, retain complete logs. Execute relevant unit and safe Release build/test plus real SQL scenarios; build completion does not mean stage acceptance."
+  ],
+  "allowed_paths": [
+    "src/ERP.Application/Services/SalesOrderCancellationRules.cs",
+    "src/ERP.Api/Controllers/SalesOrderController.cs",
+    "src/ERP.Api/Controllers/PurchaseOrderController.cs",
+    "src/ERP.Application/Services/CustomerReceiptAllocationService.cs",
+    "src/ERP.UnitTests/SalesOrderCancellationTests.cs",
+    "src/ERP.IntegrationTests/SalesOrderCancellationSqlServerTests.cs",
+    "docs/sales-order-cancellation.md"
+  ],
+  "criterion_path_map": {
+    "Authorized sales user cancels an order only after current identity, existing sales-order menu permission, live customer data scope and valid source status checks. Refuse while explicitly linked unreversed approved outbound movements, nondeleted uncancelled procurement fulfillment or active customer receipt allocations remain. Do not infer links from text or combine currencies. Give concise authorized reason; missing/unmapped user and out-of-scope document fail closed.": [
+      "src/ERP.Application/Services/SalesOrderCancellationRules.cs",
+      "src/ERP.Api/Controllers/SalesOrderController.cs",
+      "src/ERP.Api/Controllers/PurchaseOrderController.cs",
+      "src/ERP.Application/Services/CustomerReceiptAllocationService.cs",
+      "src/ERP.UnitTests/SalesOrderCancellationTests.cs",
+      "src/ERP.IntegrationTests/SalesOrderCancellationSqlServerTests.cs",
+      "docs/sales-order-cancellation.md"
+    ],
+    "Coordinate cancellation and competing linked outbound approval, linked procurement creation/update and receipt allocation creation using the same source-order row lock and atomic serializable transaction. Include required existing writers above; refresh current source state and permission before commit. Race test cannot leave a cancelled order with newly effective fulfillment. Guard never silently cancels procurement or reverses stock/payment; require existing explicit reversal/void workflows and preserve historic lines, amounts and audit.": [
+      "src/ERP.Application/Services/SalesOrderCancellationRules.cs",
+      "src/ERP.Api/Controllers/SalesOrderController.cs",
+      "src/ERP.Api/Controllers/PurchaseOrderController.cs",
+      "src/ERP.Application/Services/CustomerReceiptAllocationService.cs",
+      "src/ERP.UnitTests/SalesOrderCancellationTests.cs",
+      "src/ERP.IntegrationTests/SalesOrderCancellationSqlServerTests.cs",
+      "docs/sales-order-cancellation.md"
+    ],
+    "Meaningful unit/API and two-connection SQL tests cover no-dependency success, each active dependency refusal, explicit reversal/void/cancellation release, invalid/repeated state, denied/revoked user and cancellation-versus-fulfillment/allocation race. Legacy unlinked evidence is not guessed. Existing related sales and traceability tests remain passing.": [
+      "src/ERP.Application/Services/SalesOrderCancellationRules.cs",
+      "src/ERP.Api/Controllers/SalesOrderController.cs",
+      "src/ERP.Api/Controllers/PurchaseOrderController.cs",
+      "src/ERP.Application/Services/CustomerReceiptAllocationService.cs",
+      "src/ERP.UnitTests/SalesOrderCancellationTests.cs",
+      "src/ERP.IntegrationTests/SalesOrderCancellationSqlServerTests.cs",
+      "docs/sales-order-cancellation.md"
+    ],
+    "Real SQL fixtures must require exact (localdb)\\NEWERP_AutoAcceptance, IntegratedSecurity and NEWERP_AUTOTEST prefix before access. Create only a new GUID-owned database, reject existing database, never drop/reset any database or read production settings. Use SQL generated identities, fail wrong-target guards before access, retain complete logs. Execute relevant unit and safe Release build/test plus real SQL scenarios; build completion does not mean stage acceptance.": [
+      "src/ERP.Application/Services/SalesOrderCancellationRules.cs",
+      "src/ERP.Api/Controllers/SalesOrderController.cs",
+      "src/ERP.Api/Controllers/PurchaseOrderController.cs",
+      "src/ERP.Application/Services/CustomerReceiptAllocationService.cs",
+      "src/ERP.UnitTests/SalesOrderCancellationTests.cs",
+      "src/ERP.IntegrationTests/SalesOrderCancellationSqlServerTests.cs",
+      "docs/sales-order-cancellation.md"
+    ]
+  },
+  "depends_on": [
+    "ERP-343",
+    "ERP-344",
+    "ERP-346"
+  ],
+  "implementation_evidence": "SalesOrderController has no Cancel override. DocumentControllerBase.Cancel unconditionally changes status while explicit approved StockOut rows, live PurchaseOrder.OwningSalesOrderId and active CustomerReceiptAllocation.OrderId may remain. ERP343/344 guard outbound source approval but not source cancellation. ERP008 traceability and ERP053 allocation evidence are read/display mechanisms, not this cancellation invariant.",
+  "risk": "medium",
+  "planning_stage": 3,
+  "id": "ERP-347",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-08T03:53:50.467974Z"
+}

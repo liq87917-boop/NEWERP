@@ -1,0 +1,77 @@
+{
+  "title": "Validate linked container loading quantities against approved preloading",
+  "description": "Stage3 priority: implement a core operational integrity gap through existing business APIs/services. Preserve permissions, audit, original evidence and existing layers; no report, UI polish, Agent or production operations.",
+  "acceptance_criteria": [
+    "When existing authorized loading user supplies PreLoadingId, create/update/submit/approve resolves live approved source; reject nonpositive/missing/deleted/cancelled source, missing/deleted products, products absent from source, invalid nonpositive quantities and negative cartons/weight/volume. Use authoritative product base-unit quantities only, aggregate duplicate product lines consistently. Preserve optional unlinked historical documents and multi-customer participant semantics; never invent sales/customer ownership absent from source fields.",
+    "Approval atomically locks/reloads preloading source and active approved nondeleted uncancelled linked loading quantities; cumulative quantity per product cannot exceed approved source. Repeated approval cannot duplicate consumption, cancelled/rejected loading releases only its explicit consumption and does not write stock or finance. Prevent source cancellation while effective linked approved loading exists and serialize it against approval. Preserve source/participant/commercial snapshots and existing audit; enforce current module and all applicable customer data scope without expanding access.",
+    "Tests exercise partial/exact loading, duplicate lines and cumulative overflow, failed approval unchanged source/target state, explicit cancellation release, invalid source/product, denied identity/customer, unlinked legacy and genuine two-connection approval-versus-approval/source-cancellation races. Reuse original quantity semantics; do not equate cartons with pieces or infer outbound shipment from loading approval.",
+    "Real SQL fixtures must require exact (localdb)\\NEWERP_AutoAcceptance, IntegratedSecurity and NEWERP_AUTOTEST prefix before access. Create only a new GUID-owned database, reject existing database, never drop/reset any database or read production settings. Use SQL generated identities, fail wrong-target guards before access, retain complete logs. Execute relevant unit and safe Release build/test plus real SQL scenarios; build completion does not mean stage acceptance."
+  ],
+  "allowed_paths": [
+    "src/ERP.Application/Services/ContainerLoadingFulfillmentRules.cs",
+    "src/ERP.Api/Controllers/ContainerLoadingListController.cs",
+    "src/ERP.Api/Controllers/ContainerPreLoadingController.cs",
+    "src/ERP.UnitTests/ContainerLoadingFulfillmentTests.cs",
+    "src/ERP.IntegrationTests/ContainerLoadingFulfillmentSqlServerTests.cs",
+    "docs/container-loading-fulfillment.md"
+  ],
+  "criterion_path_map": {
+    "When existing authorized loading user supplies PreLoadingId, create/update/submit/approve resolves live approved source; reject nonpositive/missing/deleted/cancelled source, missing/deleted products, products absent from source, invalid nonpositive quantities and negative cartons/weight/volume. Use authoritative product base-unit quantities only, aggregate duplicate product lines consistently. Preserve optional unlinked historical documents and multi-customer participant semantics; never invent sales/customer ownership absent from source fields.": [
+      "src/ERP.Application/Services/ContainerLoadingFulfillmentRules.cs",
+      "src/ERP.Api/Controllers/ContainerLoadingListController.cs",
+      "src/ERP.Api/Controllers/ContainerPreLoadingController.cs",
+      "src/ERP.UnitTests/ContainerLoadingFulfillmentTests.cs",
+      "src/ERP.IntegrationTests/ContainerLoadingFulfillmentSqlServerTests.cs",
+      "docs/container-loading-fulfillment.md"
+    ],
+    "Approval atomically locks/reloads preloading source and active approved nondeleted uncancelled linked loading quantities; cumulative quantity per product cannot exceed approved source. Repeated approval cannot duplicate consumption, cancelled/rejected loading releases only its explicit consumption and does not write stock or finance. Prevent source cancellation while effective linked approved loading exists and serialize it against approval. Preserve source/participant/commercial snapshots and existing audit; enforce current module and all applicable customer data scope without expanding access.": [
+      "src/ERP.Application/Services/ContainerLoadingFulfillmentRules.cs",
+      "src/ERP.Api/Controllers/ContainerLoadingListController.cs",
+      "src/ERP.Api/Controllers/ContainerPreLoadingController.cs",
+      "src/ERP.UnitTests/ContainerLoadingFulfillmentTests.cs",
+      "src/ERP.IntegrationTests/ContainerLoadingFulfillmentSqlServerTests.cs",
+      "docs/container-loading-fulfillment.md"
+    ],
+    "Tests exercise partial/exact loading, duplicate lines and cumulative overflow, failed approval unchanged source/target state, explicit cancellation release, invalid source/product, denied identity/customer, unlinked legacy and genuine two-connection approval-versus-approval/source-cancellation races. Reuse original quantity semantics; do not equate cartons with pieces or infer outbound shipment from loading approval.": [
+      "src/ERP.Application/Services/ContainerLoadingFulfillmentRules.cs",
+      "src/ERP.Api/Controllers/ContainerLoadingListController.cs",
+      "src/ERP.Api/Controllers/ContainerPreLoadingController.cs",
+      "src/ERP.UnitTests/ContainerLoadingFulfillmentTests.cs",
+      "src/ERP.IntegrationTests/ContainerLoadingFulfillmentSqlServerTests.cs",
+      "docs/container-loading-fulfillment.md"
+    ],
+    "Real SQL fixtures must require exact (localdb)\\NEWERP_AutoAcceptance, IntegratedSecurity and NEWERP_AUTOTEST prefix before access. Create only a new GUID-owned database, reject existing database, never drop/reset any database or read production settings. Use SQL generated identities, fail wrong-target guards before access, retain complete logs. Execute relevant unit and safe Release build/test plus real SQL scenarios; build completion does not mean stage acceptance.": [
+      "src/ERP.Application/Services/ContainerLoadingFulfillmentRules.cs",
+      "src/ERP.Api/Controllers/ContainerLoadingListController.cs",
+      "src/ERP.Api/Controllers/ContainerPreLoadingController.cs",
+      "src/ERP.UnitTests/ContainerLoadingFulfillmentTests.cs",
+      "src/ERP.IntegrationTests/ContainerLoadingFulfillmentSqlServerTests.cs",
+      "docs/container-loading-fulfillment.md"
+    ]
+  },
+  "depends_on": [
+    "ERP-040",
+    "ERP-041"
+  ],
+  "implementation_evidence": "ContainerLoadingListController.Create/Update copies PreLoadingId and details and Calculate only totals. Approve/Cancel inherited from DocumentControllerBase. ContainerPreLoadingController Cancel inherited. Container2.cs existing PreLoadingId and ProductId/Quantity are explicit source fields, but no live source/product or cumulative approved-loading bound is enforced; ERP040/041 shipping/participant annotations do not implement this bound.",
+  "risk": "medium",
+  "planning_stage": 3,
+  "id": "ERP-348",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-08T03:53:50.469557Z"
+}
