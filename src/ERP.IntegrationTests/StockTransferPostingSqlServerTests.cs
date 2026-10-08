@@ -277,6 +277,7 @@ public sealed class StockTransferPostingSqlServerTests
         await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
         try
         {
+            await db.Database.ExecuteSqlRawAsync(StockTransferPostingRules.PostingBoundarySql);
             var ids = await db.Database.SqlQueryRaw<long>(
                 "SELECT Id FROM db_owner.StockTransfers WITH (UPDLOCK, HOLDLOCK) WHERE Id = {0}", transferId)
                 .ToListAsync();
@@ -350,6 +351,7 @@ public sealed class StockTransferPostingSqlServerTests
         await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
         try
         {
+            await db.Database.ExecuteSqlRawAsync(StockTransferPostingRules.PostingBoundarySql);
             var ids = await db.Database.SqlQueryRaw<long>(
                 "SELECT Id FROM db_owner.StockTransfers WITH (UPDLOCK, HOLDLOCK) WHERE Id = {0}", transferId)
                 .ToListAsync();

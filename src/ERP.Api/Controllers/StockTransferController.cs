@@ -48,6 +48,7 @@ public class StockTransferController : DocumentControllerBase<StockTransfer>
     private async Task<bool> LockTransferRowAsync(long transferId)
     {
         if (!StockTransferPostingRules.IsRelationalProvider(Db)) return true;
+        await Db.Database.ExecuteSqlRawAsync(StockTransferPostingRules.PostingBoundarySql);
 
         var ids = await Db.Database
             .SqlQueryRaw<long>(

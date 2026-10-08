@@ -73,6 +73,18 @@ public static class StockTransferPostingRules
     }
 
     /// <summary>
+    /// Serialize transfer transactions before document/table range locks. Without a covering
+    /// stock index, SQL Server may scan and lock rows outside the ordered identity set.
+    /// A transaction-owned application lock prevents opposing scans from deadlocking.
+    /// Other document types retain their existing protocols; this does not grant access.
+    /// </summary>
+    public const string PostingBoundarySql =
+        "DECLARE @result int; EXEC @result = sys.sp_getapplock " +
+        "@Resource = N'NEWERP.StockTransfer.Posting', @LockMode = 'Exclusive', " +
+        "@LockOwner = 'Transaction', @LockTimeout = 30000; " +
+        "IF @result < 0 THROW 51000, 'Stock transfer posting lock unavailable', 1;";
+
+    /// <summary>
     /// 关系型后端（SQL Server）判定：内存库等非关系型提供程序没有行锁语义，锁定与事务等价无操作。
     /// 使用 <c>DatabaseFacade.ProviderName</c>（EF Core 基础 API），不依赖关系型扩展。
     /// </summary>
