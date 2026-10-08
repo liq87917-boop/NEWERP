@@ -193,7 +193,7 @@ public class AttachmentEvidenceController : ControllerBase
     [HttpPost]
     [RequestSizeLimit(AttachmentEvidenceRules.MaxRequestBytes)]
     public async Task<IActionResult> Upload(
-        [FromForm] IFormFile? file,
+        IFormFile? file,
         [FromForm] string? ownerType,
         [FromForm] long ownerId,
         [FromForm] string? description,
