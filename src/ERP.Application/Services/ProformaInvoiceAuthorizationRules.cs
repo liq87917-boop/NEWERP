@@ -47,6 +47,17 @@ public static class ProformaInvoiceAuthorizationRules
     /// <summary>销售订单模块菜单中文文案（与既有菜单名一致）</summary>
     public const string SalesOrderMenuText = "销售订单";
 
+    /// <summary>来源报价单模块复用的既有菜单编码（与 <see cref="QuotationAuthorizationRules.RequiredMenuCode"/> 同源）。</summary>
+    public const string QuotationMenuCode = "quotation";
+
+    /// <summary>报价单模块菜单中文文案（与既有菜单名一致）。</summary>
+    public const string QuotationMenuText = "报价单";
+
+    /// <summary>缺少既有「报价单」菜单授权时普通 PI 保存来源链接的拒绝文案（ERP-403）。</summary>
+    public const string QuotationLineageDeniedText =
+        "当前账号没有「报价单」（quotation）模块授权：拒绝在 PI 上链接来源报价单"
+        + "（fail closed，不写入任何 PI，也不改写来源报价单）";
+
     /// <summary>无身份 / 非法身份的拒绝文案</summary>
     public const string UnauthorizedText = "请先登录后再访问形式发票 PI";
 
@@ -144,6 +155,21 @@ public static class ProformaInvoiceAuthorizationRules
     {
         var scope = await ResolveLiveIdentityAsync(db, userId, ct);
         await EnsureMenuAsync(db, scope, userId!.Value, SalesOrderMenuCode, SalesOrderLineageDeniedText, ct);
+        return scope;
+    }
+
+    /// <summary>
+    /// 普通 PI 表单保存**显式链接来源报价单**所需的授权（ERP-403）：实时启用身份阶梯与
+    /// <see cref="EnsureAuthorizedAsync"/> **完全同源**，同时要求非特权账号具备既有「形式发票 PI」
+    /// （<c>proforma-invoice</c>）与既有「报价单」（<c>quotation</c>）菜单授权（目标 + 来源双菜单），
+    /// 返回本次请求的权威客户数据范围。
+    /// </summary>
+    public static async Task<SalespersonDataScope> EnsureQuotationLineageAuthorizedAsync(
+        IErpDbContext db, long? userId, CancellationToken ct = default)
+    {
+        var scope = await ResolveLiveIdentityAsync(db, userId, ct);
+        await EnsureMenuAsync(db, scope, userId!.Value, RequiredMenuCode, MenuDeniedText, ct);
+        await EnsureMenuAsync(db, scope, userId!.Value, QuotationMenuCode, QuotationLineageDeniedText, ct);
         return scope;
     }
 

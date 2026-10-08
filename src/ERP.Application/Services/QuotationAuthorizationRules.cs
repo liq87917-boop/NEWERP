@@ -89,6 +89,17 @@ public static class QuotationAuthorizationRules
         "当前账号没有「销售订单」（sales-order）模块授权：拒绝在销售订单上链接来源报价单"
         + "（fail closed，不写入任何销售订单，也不改写来源报价单）";
 
+    /// <summary>来源询价单模块复用的既有菜单编码（与 <see cref="InquiryAuthorizationRules.RequiredMenuCode"/> 同源）。</summary>
+    public const string InquiryMenuCode = "inquiry";
+
+    /// <summary>询价单模块菜单中文文案（与既有菜单名一致）。</summary>
+    public const string InquiryMenuText = "询价单";
+
+    /// <summary>缺少既有「询价单」菜单授权时普通报价单保存来源链接的拒绝文案（ERP-403）。</summary>
+    public const string InquiryLineageDeniedText =
+        "当前账号没有「询价单」（inquiry）模块授权：拒绝在报价单上链接来源询价单"
+        + "（fail closed，不写入任何报价单，也不改写来源询价单）";
+
     /// <summary>受限账号访问缺失权威归属（CustomerId 为空）报价单的拒绝文案</summary>
     public const string UnlinkedCustomerText =
         "该报价单没有可判定的权威客户归属（持久化 CustomerId 缺失）：受限账号拒绝访问（fail closed，不泄露无主报价单）";
@@ -156,6 +167,20 @@ public static class QuotationAuthorizationRules
     {
         var scope = await ResolveLiveIdentityAsync(db, userId, ct);
         await EnsureMenuAsync(db, scope, userId!.Value, SalesOrderMenuCode, SalesOrderLineageDeniedText, ct);
+        return scope;
+    }
+
+    /// <summary>
+    /// 普通报价单表单保存**显式链接来源询价单**所需的授权（ERP-403）：实时启用身份阶梯与
+    /// <see cref="EnsureAuthorizedAsync"/> **完全同源**，同时要求非特权账号具备既有「报价单」（<c>quotation</c>）
+    /// 与既有「询价单」（<c>inquiry</c>）菜单授权（目标 + 来源双菜单），返回本次请求的权威客户数据范围。
+    /// </summary>
+    public static async Task<SalespersonDataScope> EnsureInquiryLineageAuthorizedAsync(
+        IErpDbContext db, long? userId, CancellationToken ct = default)
+    {
+        var scope = await ResolveLiveIdentityAsync(db, userId, ct);
+        await EnsureMenuAsync(db, scope, userId!.Value, RequiredMenuCode, MenuDeniedText, ct);
+        await EnsureMenuAsync(db, scope, userId!.Value, InquiryMenuCode, InquiryLineageDeniedText, ct);
         return scope;
     }
 

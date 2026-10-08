@@ -11,6 +11,14 @@ namespace ERP.Api.Controllers;
 public static class InquiryQuotationConversion
 {
     /// <summary>
+    /// 「询价单 → 报价单」来源血缘锁序口径（接口 / 文档同源，ERP-403）：直接转换（<c>to-quotation</c>）
+    /// 与普通报价单表单保存（带入预填后手工保存）共用同一把询价单来源行锁
+    /// （<see cref="InquiryMutationRules.LockInquiryRowAsync"/>），因此二者在<b>同一原子事务</b>内串行化，
+    /// 同一询价单至多生成一张有效报价单；普通保存绝不另取一把锁，也绝不反向获取上游锁。
+    /// </summary>
+    public const string SourceLineageLockOrderText = SalesDocumentSourceLineageRules.LockOrderText;
+
+    /// <summary>
     /// 只读构造（带入预填 / 直接转换共用的资格守卫入口）：按 <paramref name="inquiryId"/> 读取**权威**询价单
     /// （含明细），复核既有转换资格（重复生成 / 已完成 / 未审核 / 无有效明细），再映射为未落库的报价单草稿。
     /// 本方法**不落库、不占号、不改写来源状态**；写路径（转报价单）应在询价单来源行锁内改用

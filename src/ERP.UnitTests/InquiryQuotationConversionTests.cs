@@ -159,4 +159,43 @@ public class InquiryQuotationConversionTests
         db.SaveChanges();
         return inquiry;
     }
+
+    // ==================== ERP-403 普通保存来源血缘回归 ====================
+
+    [Fact]
+    public void 普通保存与直接转换共用同一把来源行锁_锁序口径同源()
+    {
+        Assert.Equal(SalesDocumentSourceLineageRules.LockOrderText,
+            InquiryQuotationConversion.SourceLineageLockOrderText);
+        Assert.Equal(InquiryMutationRules.InquiryRowLockSql, SalesDocumentSourceLineageRules.InquiryRowLockSql);
+        Assert.Contains("db_owner.Inquiries", SalesDocumentSourceLineageRules.InquiryRowLockSql);
+    }
+
+    [Fact]
+    public async Task 带入预填草稿经服务端复核后保存_留痕权威来源且不改写来源状态()
+    {
+        using var db = TestDbFactory.Create();
+        var inquiry = Seed(db, DocumentStatus.Approved);
+
+        // 带入预填（只读草稿）→ 普通表单保存：显式来源 Id 仍被服务端权威复核 / 规范化。
+        var draft = await InquiryQuotationConversion.BuildDraftAsync(db, inquiry.Id);
+        var ctl = new QuotationController(db, new DocumentNumberService(db));
+        TestAuth.SetUser(ctl, TestAuth.SeedPrivilegedUser(db));
+
+        draft.InquiryNo = "FORGED-INQ";   // 调用方自由文本不是权威链接
+        Assert.IsType<OkObjectResult>(await ctl.Create(draft));
+
+        var saved = db.Quotations.AsNoTracking().Single();
+        Assert.Equal(inquiry.Id, saved.InquiryId);
+        Assert.Equal("INQ-CONVERT", saved.InquiryNo);
+        // 普通保存不是直接转换：来源询价单状态保持已审核，绝不因保存而置「已完成」。
+        Assert.Equal(DocumentStatus.Approved, db.Inquiries.AsNoTracking().Single().Status);
+
+        // 直接转换在已有实时报价单时被既有重复规则拒绝（两种入口共用同一唯一目标口径）。
+        var inquiryCtl = new InquiryController(db, new DocumentNumberService(db));
+        TestAuth.SetUser(inquiryCtl, TestAuth.SeedPrivilegedUser(db));
+        var ex = await Assert.ThrowsAsync<BusinessException>(() => inquiryCtl.ToQuotation(inquiry.Id));
+        Assert.Equal(ErrorCodes.RuleConflict, ex.Code);
+        Assert.Equal(1, db.Quotations.Count());
+    }
 }

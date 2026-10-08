@@ -282,6 +282,8 @@ public class QuotationController : DocumentControllerBase<Quotation>
         => await RunLockedMutationAsync(id, async (_, entity) =>
         {
             QuotationMutationRules.EnsureNoDownstreamLink(await HasDownstreamLinkAsync(id));
+            await SalesDocumentSourceLineageRules.EnsurePersistedSourceIntactAsync(Db,
+                SalesDocumentSourceKind.Inquiry, entity.InquiryId, entity.CustomerId, id);
             QuotationMutationRules.EnsureSubmitAllowed(GetStatus(entity));
             SetStatus(entity, DocumentStatus.Submitted);
             await Db.SaveChangesAsync();
@@ -297,6 +299,8 @@ public class QuotationController : DocumentControllerBase<Quotation>
         => await RunLockedMutationAsync(id, async (_, entity) =>
         {
             QuotationMutationRules.EnsureNoDownstreamLink(await HasDownstreamLinkAsync(id));
+            await SalesDocumentSourceLineageRules.EnsurePersistedSourceIntactAsync(Db,
+                SalesDocumentSourceKind.Inquiry, entity.InquiryId, entity.CustomerId, id);
             QuotationMutationRules.EnsureApproveAllowed(GetStatus(entity),
                 QuotationMutationRules.ActiveDetailCount(entity));
             SetStatus(entity, DocumentStatus.Approved);
@@ -413,41 +417,191 @@ public class QuotationController : DocumentControllerBase<Quotation>
         }
     }
 
-    /// <summary>创建（单号缺省由字轨生成；行号/金额/合计后端复核）</summary>
+    /// <summary>
+    /// 创建（ERP-400 授权 + ERP-403 来源血缘）：显式来源询价单先做**权威解析 + 来源行锁 + 原子事务**，
+    /// 在锁内复核实时身份 / 既有「询价单」+「报价单」菜单 / 权威客户范围、既有转换资格与唯一目标，
+    /// <b>之后</b>才预约单据号与写入；显式来源 Id 全部无法解析时按「显式历史值」原样保留（不构成实时链接）；
+    /// 未链接的手工报价单保持既有口径（不取任何来源锁、不开事务）。
+    /// </summary>
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] Quotation entity)
     {
         // ERP-400：授权与拟议客户范围校验先于单号生成与任何写入（被拒绝的调用方绝不消耗单据号）。
         var scope = await QuotationAuthorizationRules.EnsureAuthorizedAsync(Db, CurrentUserId());
         QuotationAuthorizationRules.EnsureProposedCustomerInScope(scope, entity.CustomerId);
-        entity.Id = 0;
-        if (string.IsNullOrWhiteSpace(entity.QuotationNo))
-            entity.QuotationNo = await _noService.GenerateAsync(DocumentType.Quotation);
-        entity.Status = DocumentStatus.Pending;
-        entity.CreatedAt = DateTime.Now;
-        /* ERP-035：手工新建的报价单不携带任何版本元数据 → 库默认值即初始版本 V1（不做回填、不写映射） */
-        QuotationLineRules.Normalize(entity);
-        Db.Quotations.Add(entity);
-        await Db.SaveChangesAsync();
-        return Ok(ApiResponse<object>.Success(new { entity.Id, entity.QuotationNo }, "报价单创建成功"));
+
+        var requestedInquiryId = SalesDocumentSourceLineageRules.NormalizeId(entity.InquiryId);
+        var change = SalesDocumentSourceLineageRules.ResolveChange(
+            SalesDocumentSourceKind.Inquiry, null, requestedInquiryId);
+
+        IDbContextTransaction? transaction = null;
+        try
+        {
+            var lineage = new SalesDocumentSourceLineage();
+            if (change.HasSource)
+            {
+                // 第一阶段：有界只读权威解析（不加锁）—— 无法解析的显式历史值不占用任何来源锁。
+                lineage = await SalesDocumentSourceLineageRules.ResolveAsync(Db, change, entity.CustomerId);
+                if (!lineage.IsUnresolvedLegacy)
+                {
+                    // 第二阶段：原子事务内先取来源行锁，并**锁内重读**权威来源后才放行。
+                    transaction = await SalesDocumentSourceLineageRules.BeginWriteTransactionAsync(Db);
+                    if (!await SalesDocumentSourceLineageRules.LockSourceRowAsync(Db,
+                            SalesDocumentSourceKind.Inquiry, change.SourceId))
+                        throw BusinessException.RuleConflict(SalesDocumentSourceLineageRules.SourceNotFoundText);
+
+                    lineage = await SalesDocumentSourceLineageRules.ResolveAsync(Db, change, entity.CustomerId);
+                    if (lineage.IsUnresolvedLegacy)
+                        throw BusinessException.RuleConflict(SalesDocumentSourceLineageRules.SourceNotFoundText);
+
+                    await SalesDocumentSourceLineageRules.EnsureWriteAuthorizedAsync(
+                        Db, CurrentUserId(), lineage, entity.CustomerId);
+                    await SalesDocumentSourceLineageRules.EnsureNewLinkEligibleAsync(Db, lineage, null);
+                }
+            }
+
+            entity.Id = 0;
+            if (string.IsNullOrWhiteSpace(entity.QuotationNo))
+                entity.QuotationNo = await _noService.GenerateAsync(DocumentType.Quotation);
+            entity.Status = DocumentStatus.Pending;
+            entity.CreatedAt = DateTime.Now;
+
+            // 来源字段：权威血缘优先；显式历史值原样保留；未链接时保持调用方提交的自由文本（不构成链接）。
+            if (change.HasSource)
+            {
+                if (lineage.IsUnresolvedLegacy)
+                    SalesDocumentSourceLineageRules.ApplyExplicitValues(entity, change.SourceId, entity.InquiryNo);
+                else
+                    SalesDocumentSourceLineageRules.Apply(entity, lineage);
+            }
+
+            /* ERP-035：手工新建的报价单不携带任何版本元数据 → 库默认值即初始版本 V1（不做回填、不写映射） */
+            QuotationLineRules.Normalize(entity);
+            Db.Quotations.Add(entity);
+            await Db.SaveChangesAsync();
+            if (transaction is not null) await transaction.CommitAsync();
+            return Ok(ApiResponse<object>.Success(new { entity.Id, entity.QuotationNo }, "报价单创建成功"));
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            await RollbackAsync(transaction);
+            throw BusinessException.RuleConflict(SalesDocumentSourceLineageRules.ConcurrentMutationText);
+        }
+        catch
+        {
+            await RollbackAsync(transaction);
+            throw;
+        }
     }
 
     /// <summary>
-    /// 修改（ERP-400：报价单来源行锁 + 原子事务内锁内权威重读后改写；明细整体替换）。
+    /// 修改（ERP-400 锁序 + ERP-403 来源血缘：先取来源询价单行锁，再取报价单目标行锁，
+    /// 锁内权威重读持久化来源 / 目标状态后改写；明细整体替换）。
+    /// 历史来源绝不静默清除；显式改绑需完整实时复核（授权 / 资格 / 唯一目标）；来源单号一律按来源行规范化。
     /// 已审核 / 已转订单 / 已作废不可改；已被后续版本取代的历史版本只读；
     /// 存在下游 PI / 销售订单链接的报价单一律冻结（保留显式历史，不做反向冲销）。
     /// </summary>
     [HttpPut("{id:long}")]
     public async Task<IActionResult> Update(long id, [FromBody] Quotation entity)
-        => await RunLockedMutationAsync(id, async (scope, existing) =>
+    {
+        var scope = await QuotationAuthorizationRules.EnsureAuthorizedAsync(Db, CurrentUserId());
+        var snapshot = await Set.AsNoTracking()
+            .Where(o => o.Id == id && !o.IsDeleted)
+            .Select(o => new { o.InquiryId, o.CustomerId, o.Status })
+            .FirstOrDefaultAsync()
+            ?? throw QuotationNotFound();
+
+        QuotationAuthorizationRules.EnsureStoredCustomerInScope(scope, snapshot.CustomerId);
+        if (await QuotationRevisionService.IsSupersededAsync(Db, id))
+            throw BusinessException.RuleConflict(QuotationMutationRules.SupersededText);
+        QuotationAuthorizationRules.EnsureProposedCustomerInScope(scope, entity.CustomerId);
+        QuotationMutationRules.EnsureNoDownstreamLink(await HasDownstreamLinkAsync(id));
+        QuotationMutationRules.EnsureEditAllowed(snapshot.Status);
+
+        var requestedInquiryId = SalesDocumentSourceLineageRules.NormalizeId(entity.InquiryId);
+        var pre = SalesDocumentSourceLineageRules.ResolveChange(
+            SalesDocumentSourceKind.Inquiry, snapshot.InquiryId, requestedInquiryId);
+
+        IDbContextTransaction? transaction = null;
+        try
         {
-            QuotationAuthorizationRules.EnsureProposedCustomerInScope(scope, entity.CustomerId);
+            var lineage = new SalesDocumentSourceLineage();
+
+            // 锁序（确定性）：来源询价单行锁在前，报价单目标行锁在后；无来源时不取任何来源锁。
+            if (pre.HasSource)
+            {
+                lineage = await SalesDocumentSourceLineageRules.ResolveAsync(Db, pre, entity.CustomerId);
+                if (!lineage.IsUnresolvedLegacy)
+                {
+                    transaction = await SalesDocumentSourceLineageRules.BeginWriteTransactionAsync(Db);
+                    if (!await SalesDocumentSourceLineageRules.LockSourceRowAsync(Db,
+                            SalesDocumentSourceKind.Inquiry, pre.SourceId))
+                        throw BusinessException.RuleConflict(SalesDocumentSourceLineageRules.SourceNotFoundText);
+                    lineage = await SalesDocumentSourceLineageRules.ResolveAsync(Db, pre, entity.CustomerId);
+                    if (lineage.IsUnresolvedLegacy)
+                        throw BusinessException.RuleConflict(SalesDocumentSourceLineageRules.SourceNotFoundText);
+                }
+            }
+
+            if (transaction is null) transaction = await QuotationMutationRules.BeginMutationTransactionAsync(Db);
+            if (!await QuotationMutationRules.LockQuotationRowAsync(Db, id)) throw QuotationNotFound();
+
+            var existing = await Set.Include(o => o.Details)
+                .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
+                ?? throw QuotationNotFound();
+            QuotationAuthorizationRules.EnsureStoredCustomerInScope(scope, existing.CustomerId);
             QuotationMutationRules.EnsureNoDownstreamLink(await HasDownstreamLinkAsync(id));
             QuotationMutationRules.EnsureEditAllowed(GetStatus(existing));
+
+            var change = SalesDocumentSourceLineageRules.ResolveChange(
+                SalesDocumentSourceKind.Inquiry, existing.InquiryId, requestedInquiryId);
+            if (change.HasSource)
+            {
+                lineage = await SalesDocumentSourceLineageRules.ResolveAsync(Db, change, entity.CustomerId);
+                if (lineage.IsUnresolvedLegacy)
+                {
+                    if (change.IsExplicitChange && existing.InquiryId is > 0)
+                        throw BusinessException.RuleConflict(SalesDocumentSourceLineageRules.RebindUnknownSourceText);
+                }
+                else if (change.IsExplicitChange)
+                {
+                    await SalesDocumentSourceLineageRules.EnsureWriteAuthorizedAsync(
+                        Db, CurrentUserId(), lineage, entity.CustomerId);
+                    await SalesDocumentSourceLineageRules.EnsureNewLinkEligibleAsync(Db, lineage, id);
+                }
+                else
+                {
+                    await SalesDocumentSourceLineageRules.EnsurePersistedSourceIntactAsync(Db,
+                        SalesDocumentSourceKind.Inquiry, existing.InquiryId, entity.CustomerId, id);
+                }
+            }
+
+            // 来源字段：权威血缘优先；显式历史值原样保留；未携带可解析来源 Id 时保留持久化来源（绝不静默清除）。
+            if (change.HasSource && !lineage.IsUnresolvedLegacy)
+            {
+                SalesDocumentSourceLineageRules.Apply(existing, lineage);
+            }
+            else if (change.IsExplicitChange)
+            {
+                SalesDocumentSourceLineageRules.ApplyExplicitValues(existing, change.SourceId, entity.InquiryNo);
+            }
+
             ApplyUpdate(existing, entity, id);
             await Db.SaveChangesAsync();
+            if (transaction is not null) await transaction.CommitAsync();
             return Ok(ApiResponse<object>.Success(null, "报价单更新成功"));
-        });
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            await RollbackAsync(transaction);
+            throw BusinessException.RuleConflict(SalesDocumentSourceLineageRules.ConcurrentMutationText);
+        }
+        catch
+        {
+            await RollbackAsync(transaction);
+            throw;
+        }
+    }
 
     /// <summary>把请求体字段写入锁内权威实体（明细整体替换，单号 / 版本元数据 / 主键不可被客户端改写）。</summary>
     private void ApplyUpdate(Quotation existing, Quotation entity, long id)
@@ -459,8 +613,7 @@ public class QuotationController : DocumentControllerBase<Quotation>
         existing.ContactPerson = entity.ContactPerson;
         existing.ContactPhone = entity.ContactPhone;
         existing.ContactEmail = entity.ContactEmail;
-        existing.InquiryId = entity.InquiryId;
-        existing.InquiryNo = entity.InquiryNo;
+        /* ERP-403：来源询价单链接由来源血缘护栏按权威解析结果写入（绝不照抄提交文本）。 */
         existing.TradeTerms = entity.TradeTerms;
         existing.PortOfLoading = entity.PortOfLoading;
         existing.PortOfDestination = entity.PortOfDestination;

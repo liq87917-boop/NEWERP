@@ -5,6 +5,7 @@ using ERP.Domain.Entities;
 using ERP.Domain.Enums;
 using ERP.Infrastructure.Data;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using Xunit;
 
 namespace ERP.UnitTests;
@@ -253,5 +254,82 @@ public class QuotationToPiTests
         db.QuotationDetails.Add(detail);
         db.SaveChanges();
         return (quotation, detail);
+    }
+
+    // ==================== ERP-403 普通 PI 保存来源血缘回归 ====================
+
+    private static ProformaInvoiceController NewPiController(ErpDbContext db)
+    {
+        var controller = new ProformaInvoiceController(db, new DocumentNumberService(db));
+        TestAuth.SetUser(controller, TestAuth.SeedPrivilegedUser(db));
+        return controller;
+    }
+
+    private static ProformaInvoice NewPiBody(long customerId, long? quotationId, string quotationNo)
+        => new()
+        {
+            PiDate = DateTime.Today,
+            CustomerId = customerId,
+            CustomerName = "义乌外贸客户 A",
+            Currency = Currency.USD,
+            ExchangeRate = 7.2m,
+            DepositRatio = 30m,
+            QuotationId = quotationId,
+            QuotationNo = quotationNo,
+            Details = new List<ProformaInvoiceDetail>
+            {
+                new() { ProductCode = "P-1", ProductName = "手填商品", Unit = "PCS", Quantity = 10m, UnitPrice = 100m }
+            }
+        };
+
+    [Fact]
+    public void 普通PI保存与直接转换共用同一把报价单来源行锁_唯一目标口径一致()
+    {
+        Assert.Equal(QuotationMutationRules.QuotationRowLockSql,
+            SalesDocumentSourceLineageRules.QuotationRowLockSql);
+        Assert.Contains("db_owner.Quotations", SalesDocumentSourceLineageRules.QuotationRowLockSql);
+        Assert.Contains("来源行锁", SalesDocumentSourceLineageRules.LockOrderText);
+    }
+
+    [Fact]
+    public async Task 普通PI保存_留痕权威来源号_随后直接转换按唯一目标被拒()
+    {
+        using var db = TestDbFactory.Create();
+        var (quotation, _) = SeedQuotation(db, "QT-E403-1", DocumentStatus.Approved);
+
+        // 普通保存：提交文本伪造来源号 → 服务端按来源报价单规范化。
+        var piCtl = NewPiController(db);
+        Assert.IsType<OkObjectResult>(await piCtl.Create(NewPiBody(quotation.CustomerId!.Value,
+            quotation.Id, "FORGED-QT")));
+
+        var saved = db.ProformaInvoices.AsNoTracking().Single();
+        Assert.Equal(quotation.Id, saved.QuotationId);
+        Assert.Equal("QT-E403-1", saved.QuotationNo);
+        Assert.Equal(DocumentStatus.Approved, db.Quotations.AsNoTracking().Single().Status);   // 来源状态零改写
+
+        // 直接转换：同一报价单已有实时 PI → 既有重复规则拒绝（两种入口唯一目标口径一致）。
+        var quotationCtl = NewController(db);
+        var ex = await Assert.ThrowsAsync<BusinessException>(() => quotationCtl.ToProformaInvoice(quotation.Id));
+        Assert.Equal(ErrorCodes.RuleConflict, ex.Code);
+        Assert.Equal(1, db.ProformaInvoices.Count());
+    }
+
+    [Fact]
+    public async Task 普通PI修改_沿用持久化来源_调用方改绑被忽略()
+    {
+        using var db = TestDbFactory.Create();
+        var (quotation, _) = SeedQuotation(db, "QT-E403-2", DocumentStatus.Approved);
+        var (other, _) = SeedQuotation(db, "QT-E403-3", DocumentStatus.Approved);
+
+        var piCtl = NewPiController(db);
+        Assert.IsType<OkObjectResult>(await piCtl.Create(NewPiBody(quotation.CustomerId!.Value, quotation.Id, "")));
+
+        var pi = db.ProformaInvoices.AsNoTracking().Single();
+        Assert.IsType<OkObjectResult>(await piCtl.Update(pi.Id,
+            NewPiBody(quotation.CustomerId!.Value, other.Id, "QT-E403-3")));
+
+        var saved = db.ProformaInvoices.AsNoTracking().Single();
+        Assert.Equal(quotation.Id, saved.QuotationId);            // 沿用持久化链接
+        Assert.Equal("QT-E403-2", saved.QuotationNo);
     }
 }

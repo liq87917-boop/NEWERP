@@ -141,25 +141,90 @@ public class ProformaInvoiceController : DocumentControllerBase<ProformaInvoice>
     }
 
     /// <summary>创建（单号缺省由字轨生成；行号 / 金额 / 合计 / 定金由后端复核）</summary>
+    /// <summary>
+    /// 创建（ERP-398 授权 + ERP-403 来源血缘）：显式来源报价单先做**权威解析 + 来源行锁 + 原子事务**，
+    /// 在锁内复核实时身份 / 既有「报价单」+「形式发票 PI」菜单 / 权威客户范围、既有转换资格与唯一目标，
+    /// <b>之后</b>才预约单据号与写入；显式来源 Id 全部无法解析时按「显式历史值」原样保留（不构成实时链接）；
+    /// 未链接的手工 PI 保持既有口径（不取任何来源锁、不开事务）。
+    /// </summary>
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] ProformaInvoice entity)
     {
         // ERP-398：授权与拟议客户范围校验先于单号生成与任何写入（被拒绝的调用方绝不消耗单据号）。
         var scope = await ProformaInvoiceAuthorizationRules.EnsureAuthorizedAsync(Db, CurrentUserId());
         ProformaInvoiceAuthorizationRules.EnsureProposedCustomerInScope(scope, entity.CustomerId);
-        entity.Id = 0;
-        if (string.IsNullOrWhiteSpace(entity.PiNo))
-            entity.PiNo = await _noService.GenerateAsync(DocumentType.ProformaInvoice);
-        entity.Status = DocumentStatus.Pending;
-        entity.CreatedAt = DateTime.Now;
-        Normalize(entity);
-        Db.ProformaInvoices.Add(entity);
-        await Db.SaveChangesAsync();
-        return Ok(ApiResponse<object>.Success(new { entity.Id, entity.PiNo }, "形式发票 PI 创建成功"));
+
+        var requestedQuotationId = SalesDocumentSourceLineageRules.NormalizeId(entity.QuotationId);
+        var change = SalesDocumentSourceLineageRules.ResolveChange(
+            SalesDocumentSourceKind.Quotation, null, requestedQuotationId);
+
+        IDbContextTransaction? transaction = null;
+        try
+        {
+            var lineage = new SalesDocumentSourceLineage();
+            if (change.HasSource)
+            {
+                // 第一阶段：有界只读权威解析（不加锁）—— 无法解析的显式历史值不占用任何来源锁。
+                lineage = await SalesDocumentSourceLineageRules.ResolveAsync(Db, change, entity.CustomerId);
+                if (!lineage.IsUnresolvedLegacy)
+                {
+                    // 第二阶段：原子事务内先取来源报价单行锁（与「报价单 → PI」直接转换共用同一把），锁内权威重读后放行。
+                    transaction = await SalesDocumentSourceLineageRules.BeginWriteTransactionAsync(Db);
+                    if (!await SalesDocumentSourceLineageRules.LockSourceRowAsync(Db,
+                            SalesDocumentSourceKind.Quotation, change.SourceId))
+                        throw BusinessException.RuleConflict(SalesDocumentSourceLineageRules.SourceNotFoundText);
+
+                    lineage = await SalesDocumentSourceLineageRules.ResolveAsync(Db, change, entity.CustomerId);
+                    if (lineage.IsUnresolvedLegacy)
+                        throw BusinessException.RuleConflict(SalesDocumentSourceLineageRules.SourceNotFoundText);
+
+                    await SalesDocumentSourceLineageRules.EnsureWriteAuthorizedAsync(
+                        Db, CurrentUserId(), lineage, entity.CustomerId);
+                    await SalesDocumentSourceLineageRules.EnsureNewLinkEligibleAsync(Db, lineage, null);
+                }
+            }
+
+            entity.Id = 0;
+            if (string.IsNullOrWhiteSpace(entity.PiNo))
+                entity.PiNo = await _noService.GenerateAsync(DocumentType.ProformaInvoice);
+            entity.Status = DocumentStatus.Pending;
+            entity.CreatedAt = DateTime.Now;
+            Normalize(entity);
+
+            // 来源字段：权威血缘优先；显式历史值原样保留；未链接时保持调用方提交的自由文本（不构成链接）。
+            if (change.HasSource)
+            {
+                if (lineage.IsUnresolvedLegacy)
+                    SalesDocumentSourceLineageRules.ApplyExplicitValues(entity, change.SourceId, entity.QuotationNo);
+                else
+                    SalesDocumentSourceLineageRules.Apply(entity, lineage);
+            }
+
+            Db.ProformaInvoices.Add(entity);
+            await Db.SaveChangesAsync();
+            if (transaction is not null) await transaction.CommitAsync();
+            return Ok(ApiResponse<object>.Success(new { entity.Id, entity.PiNo }, "形式发票 PI 创建成功"));
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            await RollbackAsync(transaction);
+            throw BusinessException.RuleConflict(SalesDocumentSourceLineageRules.ConcurrentMutationText);
+        }
+        catch
+        {
+            await RollbackAsync(transaction);
+            throw;
+        }
     }
 
     /// <summary>
     /// 修改（ERP-399：PI 来源行锁 + 原子事务内锁内权威重读后改写；明细整体替换）。
+    /// 已审核 / 已转订单 / 已作废不可改；存在下游销售订单链接的 PI 一律冻结（保留显式历史，不做反向冲销）。
+    /// </summary>
+    /// <summary>
+    /// 修改（ERP-399：PI 来源行锁 + 原子事务内锁内权威重读后改写；明细整体替换）。
+    /// ERP-403：PI 修改**沿用持久化来源报价单链接**（调用方提交的来源字段不构成链接），
+    /// 并在改写前复核该持久化来源仍可精确解析（已删除来源 fail closed）。
     /// 已审核 / 已转订单 / 已作废不可改；存在下游销售订单链接的 PI 一律冻结（保留显式历史，不做反向冲销）。
     /// </summary>
     [HttpPut("{id:long}")]
@@ -169,6 +234,8 @@ public class ProformaInvoiceController : DocumentControllerBase<ProformaInvoice>
             ProformaInvoiceAuthorizationRules.EnsureProposedCustomerInScope(scope, entity.CustomerId);
             ProformaInvoiceMutationRules.EnsureNoDownstreamLink(await HasDownstreamLinkAsync(id));
             ProformaInvoiceMutationRules.EnsureEditAllowed(GetStatus(existing));
+            await SalesDocumentSourceLineageRules.EnsurePersistedSourceIntactAsync(Db,
+                SalesDocumentSourceKind.Quotation, existing.QuotationId, entity.CustomerId, id);
             ApplyUpdate(existing, entity, id);
             await Db.SaveChangesAsync();
             return Ok(ApiResponse<object>.Success(null, "形式发票 PI 更新成功"));
@@ -226,6 +293,8 @@ public class ProformaInvoiceController : DocumentControllerBase<ProformaInvoice>
         => await RunLockedMutationAsync(id, async (_, entity) =>
         {
             ProformaInvoiceMutationRules.EnsureNoDownstreamLink(await HasDownstreamLinkAsync(id));
+            await SalesDocumentSourceLineageRules.EnsurePersistedSourceIntactAsync(Db,
+                SalesDocumentSourceKind.Quotation, entity.QuotationId, entity.CustomerId, id);
             ProformaInvoiceMutationRules.EnsureApproveAllowed(GetStatus(entity),
                 ProformaInvoiceMutationRules.ActiveDetailCount(entity));
             SetStatus(entity, DocumentStatus.Approved);
@@ -251,6 +320,8 @@ public class ProformaInvoiceController : DocumentControllerBase<ProformaInvoice>
         => await RunLockedMutationAsync(id, async (_, entity) =>
         {
             ProformaInvoiceMutationRules.EnsureNoDownstreamLink(await HasDownstreamLinkAsync(id));
+            await SalesDocumentSourceLineageRules.EnsurePersistedSourceIntactAsync(Db,
+                SalesDocumentSourceKind.Quotation, entity.QuotationId, entity.CustomerId, id);
             ProformaInvoiceMutationRules.EnsureSubmitAllowed(GetStatus(entity));
             SetStatus(entity, DocumentStatus.Submitted);
             await Db.SaveChangesAsync();

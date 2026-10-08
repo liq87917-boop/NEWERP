@@ -5,6 +5,7 @@ using ERP.Domain.Entities;
 using ERP.Domain.Enums;
 using ERP.Infrastructure.Data;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using Xunit;
 
 namespace ERP.UnitTests;
@@ -436,5 +437,111 @@ public class ProformaInvoiceControllerTests
         db.ProformaInvoiceDetails.Add(detail);
         db.SaveChanges();
         return (pi, detail);
+    }
+
+    // ==================== ERP-403 显式来源报价单血缘 ====================
+
+    [Fact]
+    public async Task Create_显式来源报价单_以权威来源号落库且不改写来源状态()
+    {
+        using var db = TestDbFactory.Create();
+        var quotation = SeedApprovedQuotation(db, "QT-PI-LIN-1");
+        var ctl = NewController(db);
+
+        Assert.IsType<OkObjectResult>(await ctl.Create(new ProformaInvoice
+        {
+            PiDate = DateTime.Today,
+            CustomerId = 1,
+            CustomerName = "客户 A",
+            Currency = Currency.USD,
+            ExchangeRate = 7.2m,
+            DepositRatio = 30m,
+            QuotationId = quotation.Id,
+            QuotationNo = "FORGED-QT",                 // 调用方自由文本不是权威链接
+            Details = new List<ProformaInvoiceDetail> { new() { Quantity = 10m, UnitPrice = 100m } }
+        }));
+
+        var saved = db.ProformaInvoices.Single();
+        Assert.Equal(quotation.Id, saved.QuotationId);
+        Assert.Equal("QT-PI-LIN-1", saved.QuotationNo);
+        Assert.Equal(DocumentStatus.Approved, db.Quotations.AsNoTracking().Single().Status);
+    }
+
+    [Fact]
+    public async Task Create_来源报价单未审核_原子拒绝且不落库()
+    {
+        using var db = TestDbFactory.Create();
+        var quotation = SeedApprovedQuotation(db, "QT-PI-LIN-2", DocumentStatus.Pending);
+        var ctl = NewController(db);
+
+        var ex = await Assert.ThrowsAsync<BusinessException>(() => ctl.Create(new ProformaInvoice
+        {
+            PiDate = DateTime.Today,
+            CustomerId = 1,
+            Currency = Currency.USD,
+            ExchangeRate = 7.2m,
+            DepositRatio = 30m,
+            QuotationId = quotation.Id,
+            Details = new List<ProformaInvoiceDetail> { new() { Quantity = 10m, UnitPrice = 100m } }
+        }));
+        Assert.Equal(ErrorCodes.RuleConflict, ex.Code);
+        Assert.Empty(db.ProformaInvoices);
+    }
+
+    [Fact]
+    public async Task Update_沿用持久化来源链接_不因提交文本改绑()
+    {
+        using var db = TestDbFactory.Create();
+        var first = SeedApprovedQuotation(db, "QT-PI-LIN-3");
+        var second = SeedApprovedQuotation(db, "QT-PI-LIN-4");
+        var (pi, _) = SeedPi(db, "PI-LIN-1", DocumentStatus.Pending);
+        pi.QuotationId = first.Id;
+        pi.QuotationNo = first.QuotationNo;
+        db.SaveChanges();
+        var ctl = NewController(db);
+
+        await ctl.Update(pi.Id, new ProformaInvoice
+        {
+            PiDate = DateTime.Today,
+            CustomerId = 1,
+            CustomerName = "客户 A",
+            DepositRatio = 30m,
+            QuotationId = second.Id,                   // 伪造改绑：PI 修改沿用持久化链接
+            QuotationNo = second.QuotationNo,
+            Details = new List<ProformaInvoiceDetail> { new() { Quantity = 10m, UnitPrice = 100m } }
+        });
+
+        var saved = db.ProformaInvoices.AsNoTracking().Single();
+        Assert.Equal(first.Id, saved.QuotationId);
+        Assert.Equal("QT-PI-LIN-3", saved.QuotationNo);
+    }
+
+    private static Quotation SeedApprovedQuotation(ErpDbContext db, string no,
+        DocumentStatus status = DocumentStatus.Approved)
+    {
+        var quotation = new Quotation
+        {
+            QuotationNo = no,
+            QuotationDate = DateTime.Today,
+            ValidUntil = DateTime.Today.AddDays(30),
+            CustomerId = 1,
+            CustomerName = "客户 A",
+            Currency = Currency.USD,
+            ExchangeRate = 7.2m,
+            Status = status,
+            Details = new List<QuotationDetail>
+            {
+                new()
+                {
+                    SortNo = 1, ProductCode = "QT-1", ProductName = "报价商品", Unit = "PCS",
+                    Quantity = 10m, UnitPrice = 100m, Amount = 1000m
+                }
+            }
+        };
+        quotation.TotalAmount = 1000m;
+        quotation.TotalAmountCny = 7200m;
+        db.Quotations.Add(quotation);
+        db.SaveChanges();
+        return quotation;
     }
 }
