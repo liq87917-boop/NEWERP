@@ -17,6 +17,13 @@ namespace ERP.Application.Services;
 /// <para>收款单金额是同一张收款单的<b>唯一、同币种分摊额度</b>（ERP-350）：「收款单 → 销售订单」与
 /// 「收款单 → 代理服务费对账单」两套有效分摊行在收款单行锁下共同占用同一额度，任一写入都必须把两套
 /// 有效行合计后与收款单权威金额比较（绝不跨币种合计、绝不重复计算证据）。</para>
+/// <para>ERP-378：收款单的<b>修改 / 提交 / 审核 / 取消 / 删除五个生命周期动作</b>全部在同一个事务内先取收款单行锁
+/// （<see cref="LockReceiptRowAsync"/>），再加载权威状态 / 客户 / 币种 / 金额，并在锁内重新校验<strong>实时启用身份</strong>
+/// （账号存在、未删除且启用）、收款单菜单授权与当前客户数据范围；任一校验失败整体回滚，状态、原始字段与审计不变。
+/// 锁序与两套分摊证据写入（<see cref="CustomerReceiptAllocationService.CreateAsync"/> /
+/// <see cref="AgencyServiceFeeCollectionAllocationService.CreateAsync"/>）以及两套显式作废服务
+/// （<see cref="CustomerReceiptAllocationService.VoidAsync"/> /
+/// <see cref="AgencyServiceFeeCollectionAllocationService.VoidAsync"/>）保持同一口径：<b>先收款单行、后分摊行</b>。</para>
 /// <para>本类只做<b>纯判定与有界只读查询</b>；不落库、不改写收款单与分摊行；「判定 + 状态变更」的原子性与
 /// 同单并发串行化由调用方在同一可串行化事务内对收款单行加 UPDLOCK/HOLDLOCK 完成。</para>
 /// </summary>
@@ -34,7 +41,10 @@ public static class CustomerReceiptLifecycleRules
         "创建与修改校验真实可用客户、受支持币种与按币种精度取整后大于 0 的金额；" +
         "只要存在有效的「收款单 → 销售订单」或「收款单 → 代理服务费对账单」收款分摊证据，就拒绝取消 / 删除或修改客户 / 币种 / 金额，" +
         "必须先走既有显式作废服务释放限制（作废保留历史、绝不物理删除）；" +
-        "收款单生命周期与两套分摊证据写入通过收款单行锁（UPDLOCK/HOLDLOCK）+ 可串行化事务串行化，绝不跨币种合计、绝不重复计算证据。";
+        "收款单的修改 / 提交 / 审核 / 取消 / 删除都在同一事务内先取收款单行锁（UPDLOCK/HOLDLOCK）再加载权威状态 / 客户 / 币种 / 金额，" +
+        "并在锁内重新校验实时启用身份、收款单菜单授权与当前客户数据范围；" +
+        "收款单生命周期与两套分摊证据写入（含显式作废）使用同一锁序（先收款单行、后分摊行），" +
+        "失败整体回滚、状态与审计不变，绝不跨币种合计、绝不重复计算证据。";
 
     /// <summary>模块边界文案（不收款 / 不记账 / 不核销，也不改写库存、订单或供应商付款）</summary>
     public const string BoundaryText =
@@ -100,12 +110,25 @@ public static class CustomerReceiptLifecycleRules
 
     // ==================== 2. 身份 / 菜单 / 客户数据范围（fail closed） ====================
 
-    /// <summary>校验当前账号具备收款单（receipt）菜单授权；无身份 / 无角色 / 无授权一律拒绝。</summary>
+    /// <summary>
+    /// 校验当前账号的<strong>实时启用身份</strong>与收款单（receipt）菜单授权：无身份 / 账号不存在或被删除 /
+    /// 账号被禁用 / 无角色 / 无授权一律拒绝（fail closed，绝不退化为匿名或管理员）。
+    /// <para>每次调用都重新查询 <c>SysUsers</c> 与「角色 → 菜单」授权（无缓存），因此账号停用或授权撤销后
+    /// 下一次请求立即收敛；收款单的修改 / 提交 / 审核 / 取消 / 删除会在同一事务内、取得收款单行锁之后再调用本方法，
+    /// 用实时身份与授权覆盖「先读后写」窗口。</para>
+    /// </summary>
     public static async Task EnsureMenuAuthorizedAsync(IErpDbContext db, long? userId)
     {
         ArgumentNullException.ThrowIfNull(db);
         if (userId is null or <= 0)
             throw new BusinessException("请先登录后再访问收款单", ErrorCodes.Unauthorized);
+
+        var user = await db.SysUsers.AsNoTracking()
+            .FirstOrDefaultAsync(u => u.Id == userId.Value && !u.IsDeleted);
+        if (user is null)
+            throw new BusinessException("登录账号不存在或已删除，禁止操作收款单", ErrorCodes.Unauthorized);
+        if (user.Status != UserStatus.Enabled)
+            throw new BusinessException("登录账号已禁用，禁止操作收款单（fail closed）", ErrorCodes.Forbidden);
 
         var menuCodes = await CustomerReceivableReconciliationService.LoadAuthorizedMenuCodesAsync(db, userId.Value);
         if (!menuCodes.Contains(RequiredMenuCode, StringComparer.OrdinalIgnoreCase))
@@ -268,11 +291,14 @@ public static class CustomerReceiptLifecycleRules
             StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
-    /// 对收款单行加更新锁，把同单并发的「收款单生命周期操作」与「两套分摊证据写入」串行化在同一事务内。
+    /// 对收款单行加更新锁，把同单并发的「收款单生命周期操作」与「两套分摊证据写入 / 显式作废」串行化在同一事务内。
     /// <para>实现（仅用 EF Core 基础 API，不依赖关系型扩展）：在调用方事务内对收款单行发出一条「审计时间戳刷新」的
     /// UPDATE，从而取得排它行锁（X 锁，持有至事务结束），语义等价于 <c>SELECT ... WITH (UPDLOCK, HOLDLOCK)</c>；
     /// <c>UpdatedAt</c> 是技术审计字段、不是分摊证据，因此不构成对分摊证据的静默改写。
     /// 内存库等非关系型提供程序无行锁语义，直接跳过（事务等价无事务）。</para>
+    /// <para><b>锁序（ERP-378，全模块统一）</b>：收款单生命周期动作与两套分摊证据写入 / 作废都必须先取本锁、
+    /// 再读写分摊行（<b>先收款单行、后分摊行</b>），绝不反向获取下游锁；因此「取消 / 删除 / 改动客户 / 币种 / 金额」
+    /// 与「登记 / 作废分摊证据」只能串行执行，不会产生孤儿分摊、超额度资金或半成品写入。</para>
     /// </summary>
     public static async Task LockReceiptRowAsync(IErpDbContext db, long receiptId)
     {

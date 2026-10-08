@@ -190,26 +190,51 @@ public static class AgencyServiceFeeCollectionAllocationService
     /// 作废一条收款分摊行（有效 → 已作废）：必须填写作废原因；<strong>保留</strong>原始分摊金额、对账单与
     /// 收款单快照、客户快照、登记人与时间戳，不物理删除、不改派、不改写原始金额，也不产生任何收款 / 记账 /
     /// 核销 / 结算 / 催收动作；作废后该组合可重新登记一条新的有效分摊行（新旧并存可查）；重复作废被拒绝。
+    /// <para>ERP-378：作废在<b>同一事务</b>内先取收款单行锁（<b>先收款单行、后分摊行</b>，与收款单生命周期
+    /// 及两套分摊证据写入同一锁序），再读分摊行做权威作废判定与写入；因此「作废释放额度」与
+    /// 「收款单取消 / 删除 / 改动客户 / 币种 / 金额」严格串行，失败整体回滚、原始证据与审计保持不变。</para>
     /// </summary>
     public static async Task<AgencyServiceFeeCollectionAllocationDto> VoidAsync(
         IErpDbContext db, long allocationId, string? reason)
     {
         ArgumentNullException.ThrowIfNull(db);
-        var allocation = await LoadAllocationAsync(db, allocationId);
-        var identity = AgencyServiceFeeCollectionAllocationRules.AllocationIdentityText(
-            allocation.StatementNo, allocation.ReceiptNo);
-        AgencyServiceFeeCollectionAllocationRules.EnsureVoidable(allocation.Status, identity);
 
-        var reasonText = AgencyServiceFeeCollectionAllocationRules.NormalizeVoidReason(reason);
-        var now = DateTime.Now;
-        allocation.Status = AgencyServiceFeeCollectionAllocationRules.StatusVoided;
-        allocation.VoidedAt = now;
-        allocation.VoidReason = reasonText;
-        allocation.UpdatedAt = now;
+        // ERP-378 锁序：先做一次轻量投影读取仅为取得收款单 Id（不是权威判定、不构成锁），
+        // 取锁之后才读分摊行做权威作废判定，避免「作废证据」与「收款单取消 / 改金额」并发互相失效。
+        var receiptId = await db.AgencyServiceFeeCollectionAllocations.AsNoTracking()
+            .Where(a => a.Id == allocationId)
+            .Select(a => (long?)a.ReceiptId)
+            .FirstOrDefaultAsync();
 
-        await db.SaveChangesAsync();
+        await using var transaction = CustomerReceiptLifecycleRules.IsRelationalProvider(db)
+            ? await db.Database.BeginTransactionAsync()
+            : null;
+        try
+        {
+            if (receiptId is > 0) await CustomerReceiptLifecycleRules.LockReceiptRowAsync(db, receiptId.Value);
 
-        return await MapOneAsync(db, allocation);
+            var allocation = await LoadAllocationAsync(db, allocationId);
+            var identity = AgencyServiceFeeCollectionAllocationRules.AllocationIdentityText(
+                allocation.StatementNo, allocation.ReceiptNo);
+            AgencyServiceFeeCollectionAllocationRules.EnsureVoidable(allocation.Status, identity);
+
+            var reasonText = AgencyServiceFeeCollectionAllocationRules.NormalizeVoidReason(reason);
+            var now = DateTime.Now;
+            allocation.Status = AgencyServiceFeeCollectionAllocationRules.StatusVoided;
+            allocation.VoidedAt = now;
+            allocation.VoidReason = reasonText;
+            allocation.UpdatedAt = now;
+
+            await db.SaveChangesAsync();
+
+            if (transaction is not null) await transaction.CommitAsync();
+            return await MapOneAsync(db, allocation);
+        }
+        catch
+        {
+            if (transaction is not null) await transaction.RollbackAsync();
+            throw;
+        }
     }
 
     // ==================== 3. 台账 / 详情 / 两侧汇总 / 两侧候选（只读、有界） ====================

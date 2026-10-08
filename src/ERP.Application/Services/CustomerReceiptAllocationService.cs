@@ -147,23 +147,48 @@ public static class CustomerReceiptAllocationService
     /// 不物理删除、不静默替换、不重写已作废证据；重复作废被拒绝。
     /// <para>作废<strong>不</strong>改写收款单与销售订单的任何字段，也不产生任何收款 / 记账 / 核销 /
     /// 结算或催收动作。</para>
+    /// <para>ERP-378：作废在<b>同一事务</b>内先取收款单行锁（<b>先收款单行、后分摊行</b>，与收款单生命周期
+    /// 及两套分摊证据写入同一锁序），再读分摊行做权威作废判定与写入；因此「作废释放证据」与
+    /// 「收款单取消 / 删除 / 改动客户 / 币种 / 金额」严格串行，失败整体回滚、原始证据与审计保持不变。</para>
     /// </summary>
     public static async Task<CustomerReceiptAllocationDto> VoidAsync(
         IErpDbContext db, long allocationId, string? reason)
     {
         ArgumentNullException.ThrowIfNull(db);
 
-        var row = await LoadAsync(db, allocationId);
-        CustomerReceiptAllocationRules.EnsureVoidable(row.Status, row.ReceiptNo, row.OrderNo);
-        var reasonText = CustomerReceiptAllocationRules.NormalizeVoidReason(reason);
+        // ERP-378 锁序：与收款单生命周期（取消 / 删除 / 改金额）及两套分摊写入共用同一把收款单行锁，
+        // 且一律「先收款单行、后分摊行」。这里先做一次轻量投影读取仅为取得收款单 Id（不是权威判定、不构成锁），
+        // 取锁之后才读分摊行做权威作废判定，避免「作废证据」与「收款单取消 / 改金额」并发互相失效。
+        var receiptId = await db.CustomerReceiptAllocations.AsNoTracking()
+            .Where(a => a.Id == allocationId)
+            .Select(a => (long?)a.ReceiptId)
+            .FirstOrDefaultAsync();
 
-        row.Status = CustomerReceiptAllocationRules.StatusVoided;
-        row.VoidedAt = DateTime.Now;
-        row.VoidReason = reasonText;
-        row.UpdatedAt = DateTime.Now;
-        await db.SaveChangesAsync();
+        await using var transaction = CustomerReceiptLifecycleRules.IsRelationalProvider(db)
+            ? await db.Database.BeginTransactionAsync()
+            : null;
+        try
+        {
+            if (receiptId is > 0) await CustomerReceiptLifecycleRules.LockReceiptRowAsync(db, receiptId.Value);
 
-        return await MapAsync(db, row);
+            var row = await LoadAsync(db, allocationId);
+            CustomerReceiptAllocationRules.EnsureVoidable(row.Status, row.ReceiptNo, row.OrderNo);
+            var reasonText = CustomerReceiptAllocationRules.NormalizeVoidReason(reason);
+
+            row.Status = CustomerReceiptAllocationRules.StatusVoided;
+            row.VoidedAt = DateTime.Now;
+            row.VoidReason = reasonText;
+            row.UpdatedAt = DateTime.Now;
+            await db.SaveChangesAsync();
+
+            if (transaction is not null) await transaction.CommitAsync();
+            return await MapAsync(db, row);
+        }
+        catch
+        {
+            if (transaction is not null) await transaction.RollbackAsync();
+            throw;
+        }
     }
 
     // ==================== 3. 读取（台账 / 详情 / 收款单侧汇总） ====================
