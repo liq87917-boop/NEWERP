@@ -105,7 +105,7 @@ async function convertPurchaseQuoteBatch(target) {
   } catch (err) { toast(err.message, 'error'); }
 }
 
-/* 计划的确认文案：把「将发生什么」讲清楚（张数 / 每组行数与重算合计 / 跳过行 / 总合计） */
+/* 计划的确认文案：张数 / 每组行数与重算合计 / 跳过行 / 按币种分列的重算合计（ERP-418：跨币种绝不合计成一个金额） */
 function batchPlanText(plan, groups) {
   const lines = groups.map(g =>
     `· ${g.supplierName || ('供应商#' + g.supplierId)} / ${g.currency} / ${g.lineCount} 行 / 合计 ${fmtMoney(g.totalAmount)}`).join('\n');
@@ -114,7 +114,21 @@ function batchPlanText(plan, groups) {
     ? `\n另有 ${skipped.length} 行不合格将被跳过（${skipped.map(s => s.reason).join('；')}）。`
     : '';
   return `比价批次 ${plan.sourceNo}：将把 ${plan.eligibleLineCount} 行「已选中」按供应商 + 币种合并生成 `
-    + `${groups.length} 张采购订单：\n${lines}${skipText}\n合计（服务端重算）${fmtMoney(plan.totalAmount)}。确认生成？`;
+    + `${groups.length} 张采购订单：\n${lines}${skipText}\n${batchTotalText(plan)}确认生成？`;
+}
+
+/**
+ * 批次合计文案（ERP-418）：同币种才可相加——只有单一币种时给出合计金额；
+ * 跨币种批次一律按币种分列小计，并明确说明「不做跨币种合计」，绝不把混合币种金额展示成一个金额。
+ */
+function batchTotalText(plan) {
+  const byCurrency = plan.totalAmountByCurrency || [];
+  if (!byCurrency.length) return '合计（服务端重算）：无（本次没有可转换行）。';
+  if (plan.mixedCurrency || byCurrency.length > 1) {
+    const parts = byCurrency.map(t => `${t.currency} ${fmtMoney(t.totalAmount)}（${t.lineCount} 行）`).join('；');
+    return `合计（服务端重算，按币种分列，不做跨币种合计）：${parts}。`;
+  }
+  return `合计（服务端重算）${fmtMoney(byCurrency[0].totalAmount)}（${byCurrency[0].currency}）。`;
 }
 
 /* 不合格行提示：批次内没有可转换行时列出原因（未选中 / 已放弃 / 已转采购订单 / 未维护供应商 …） */

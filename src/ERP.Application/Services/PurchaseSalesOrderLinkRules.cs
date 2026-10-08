@@ -145,6 +145,43 @@ public static class PurchaseSalesOrderLinkRules
     private static async Task EnsureAuthorizedAsync(IErpDbContext db, long? userId, CancellationToken ct)
         => await PurchaseOrderAuthorizationRules.EnsureMenuAuthorizedAsync(db, userId, ct);
 
+    /// <summary>
+    /// ERP-418 转换目的地归属复核（比价 → 采购订单转换专用，纯只读）：
+    /// 生成草稿的归属客户必须与权威归属销售订单客户一致（任一侧缺失时不臆造冲突）；
+    /// 归属销售订单存在明细时，采购明细商品必须能在来源明细中找到且单位兼容；
+    /// 来源明细为空（历史 / 摘要订单）时无法判定，保持放行（不误伤既有可转换比价行）。
+    /// 与显式链接保存（<see cref="ApplyLinkAsync"/>）共用同一商品 / 单位兼容判定与文案，绝不新增口径。
+    /// </summary>
+    public static async Task EnsureOwningSourceCompatibleAsync(IErpDbContext db, PurchaseOrder draft,
+        long owningSalesOrderId, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(draft);
+        if (owningSalesOrderId <= 0) return;
+
+        var order = await db.SalesOrders.AsNoTracking().Include(o => o.Details)
+            .FirstOrDefaultAsync(o => o.Id == owningSalesOrderId, ct);
+        if (order is null || order.IsDeleted) return;      // 存在性 / 删除由锁内协议统一受控判定
+
+        if (order.CustomerId > 0 && draft.OwningCustomerId is > 0
+            && draft.OwningCustomerId.Value != order.CustomerId)
+            throw BusinessException.RuleConflict("采购订单归属客户与归属销售订单客户不一致");
+
+        var salesLines = order.Details.Where(d => !d.IsDeleted && d.ProductId > 0).ToList();
+        if (salesLines.Count == 0) return;                // 来源无明细：不可判定，保持放行
+
+        foreach (var line in draft.Details.Where(d => !d.IsDeleted && d.ProductId > 0))
+        {
+            var salesLine = salesLines.FirstOrDefault(s => s.ProductId == line.ProductId)
+                ?? throw BusinessException.RuleConflict(
+                    $"采购明细商品 [{DisplayName(line)}] 不在归属销售订单明细中");
+
+            if (!UnitsCompatible(line.Unit, salesLine.Unit))
+                throw BusinessException.RuleConflict(
+                    $"采购明细商品 [{DisplayName(line)}] 单位 [{line.Unit}] 与归属销售订单单位 [{salesLine.Unit}] 不兼容");
+        }
+    }
+
     /// <summary>商品 / 单位兼容性：采购明细商品必须能在来源销售订单明细中找到，且单位兼容。</summary>
     private static void EnsureProductAndUnitCompatible(PurchaseOrder entity, SalesOrder order)
     {

@@ -373,28 +373,30 @@ public class PurchaseQuoteController : BaseCrudController<PurchaseQuote>
         var scope = await EnsureAuthorizedAsync();
         var destination = await EnsureDestinationAuthorizedAsync();
 
-        // ERP-417：与修改 / 删除 / 批量删除 / 审批决定共用同一把比价行锁 + 原子事务（锁内权威重读）。
-        await using var transaction = await PurchaseQuoteMutationRules.BeginMutationTransactionAsync(_db);
+        // ERP-418：与批次转单**共用同一协议**——先解析权威归属销售订单并按 Id 升序加锁，
+        // 再按比价行 Id 升序加锁（与 ERP-417 修改 / 删除 / 审批决定同一把行锁），锁内权威重读与复核后才发号写入。
+        await using var transaction = await PurchaseQuoteConversionMutationRules.BeginConversionTransactionAsync(_db);
         try
         {
             var liveScope = await ReauthorizeAsync();
-            if (!await PurchaseQuoteMutationRules.LockQuoteRowAsync(_db, id))
-                throw BusinessException.NotFound(PurchaseQuoteAuthorizationRules.NotFoundText);
 
-            var quote = await _db.PurchaseQuotes
-                .FirstOrDefaultAsync(q => q.Id == id && !q.IsDeleted)
-                ?? throw BusinessException.NotFound(PurchaseQuoteAuthorizationRules.NotFoundText);
+            var source = await PurchaseQuoteConversionMutationRules.LockAndReloadAsync(_db, new[] { id }, null);
+            var quote = source.Lines.Single();
 
             await PurchaseQuoteAuthorizationRules.EnsureQuoteAllowedAsync(_db, liveScope, id);
+            await PurchaseQuoteConversionMutationRules.EnsureConversionReadyAsync(_db, source, new[] { id });
 
             var order = await PurchaseQuoteConversion.BuildDraftAsync(_db, quote);
 
-            // ERP-417：批准供应商与当前供应商必须一致（绝不采购批准之外的供应商）；在既有资格守卫之后判定，
-            // 保持既有「未维护供应商 / 未选中 / 已放弃」的提示口径。
+            // ERP-417 / ERP-418：批准供应商与当前供应商必须一致（绝不采购批准之外的供应商）。
             await PurchaseQuoteApproval.EnsureApprovedSupplierCoherentAsync(_db, quote);
 
+            // ERP-418：目的地归属规则——归属客户 / 商品 / 单位与权威归属销售订单兼容（来源无明细时不误伤）。
             if (destination is not null)
                 await PurchaseQuoteAuthorizationRules.EnsureDestinationScopeAllowedAsync(_db, destination, order);
+            if (source.OwningSalesOrderIdByLineId.TryGetValue(id, out var owningId) && owningId is long owning)
+                await PurchaseSalesOrderLinkRules.EnsureOwningSourceCompatibleAsync(_db, order, owning);
+
             order.OrderNo = await _noService.GenerateAsync(DocumentType.PurchaseOrder);
             _db.PurchaseOrders.Add(order);
             PurchaseQuoteConversion.MarkConverted(quote, order.OrderNo);
@@ -452,37 +454,54 @@ public class PurchaseQuoteController : BaseCrudController<PurchaseQuote>
     [HttpPost("batch-to-order")]
     public async Task<IActionResult> BatchToOrder([FromBody] PurchaseQuoteBatchConversionRequest request)
     {
-        // ERP-416：比价 + 目的地授权，批次整批归属复核（混入范围外 / 空归属行即整批拒绝，无部分写入），
-        // 并在真实发号 / 落库之前对计划草稿做权威目的地范围复核。
+        // ERP-416：比价 + 目的地授权，批次整批归属复核（混入范围外 / 空归属行即整批拒绝，无部分写入）。
         var scope = await EnsureAuthorizedAsync();
         var destination = await EnsureDestinationAuthorizedAsync();
         var batchNo = await PurchaseQuoteAuthorizationRules.EnsureBatchAllowedAsync(_db, scope,
             request?.QuoteNo, request?.LineId, request?.LineIds);
+        if (request is null) throw BusinessException.InvalidParameter("请求内容不能为空");
 
-        // ERP-417：批次全部来源行按 Id 升序确定性加锁 + 原子事务（与修改 / 删除 / 审批决定共用同一把比价行锁）。
-        await using var transaction = await PurchaseQuoteMutationRules.BeginMutationTransactionAsync(_db);
+        // ERP-418：与单行转单共用同一协议——事务内解析不可变批次成员 → 确定性加锁（归属销售订单 → 比价行）
+        // → 锁内权威重读与复核（实时权限 / 资格 / 币种 / 主数据 / 目的地归属规则）→ 发号 → 写入 → 提交。
+        await using var transaction = await PurchaseQuoteConversionMutationRules.BeginConversionTransactionAsync(_db);
         try
         {
             var liveScope = await ReauthorizeAsync();
-            if (batchNo is not null)
+
+            // ① 锁定前解析不可变批次成员（锁定后逐字复核，成员变化 / 被删 / 改批次即受控拒绝）。
+            var members = await PurchaseQuoteConversion.ResolveBatchLinesAsync(
+                _db, request?.QuoteNo, request?.LineId, request?.LineIds);
+            var lineIds = members.Select(l => l.Id).ToList();
+            var expectedBatchNo = (batchNo ?? string.Empty).Trim();
+
+            // ② 归属销售订单行锁（Id 升序）→ ③ 来源比价行锁（Id 升序）→ ④ 锁内权威重读 + 成员一致复核。
+            var source = await PurchaseQuoteConversionMutationRules.LockAndReloadAsync(_db, lineIds, expectedBatchNo);
+            await PurchaseQuoteAuthorizationRules.EnsureBatchAllowedAsync(_db, liveScope, source.BatchNo, null);
+
+            // ⑤ 计划 / 复核（只读）：合格行 = 将写库的行（不合格行按批次既有语义显式跳过，不阻断整批）。
+            var precheck = await PurchaseQuoteConversion.BuildBatchFromLinesAsync(_db, source.Lines);
+            var convertibleIds = precheck.Groups.SelectMany(g => g.Lines).Select(l => l.Id).ToList();
+            await PurchaseQuoteConversionMutationRules.EnsureConversionReadyAsync(_db, source, convertibleIds);
+            await PurchaseQuoteApproval.EnsureApprovedSuppliersCoherentAsync(_db, source.Lines);
+
+            // ⑥ 目的地归属复核（权威客户范围 + 归属销售订单客户 / 商品 / 单位兼容）先于发号与落库。
+            if (destination is not null)
+                await PurchaseQuoteAuthorizationRules.EnsureDestinationScopeAllowedAsync(
+                    _db, destination, precheck.Groups.Select(g => g.Draft).ToList());
+            foreach (var group in precheck.Groups)
             {
-                var lockIds = await _db.PurchaseQuotes.AsNoTracking()
-                    .Where(q => q.QuoteNo == batchNo && !q.IsDeleted)
-                    .Select(q => q.Id)
-                    .ToListAsync();
-                await PurchaseQuoteMutationRules.LockQuoteRowsAsync(_db, lockIds);
-                await PurchaseQuoteAuthorizationRules.EnsureBatchAllowedAsync(_db, liveScope, batchNo, null);
+                var owningIds = group.Lines
+                    .Select(l => source.OwningSalesOrderIdByLineId.TryGetValue(l.Id, out var owning) ? owning : null)
+                    .Where(owning => owning is > 0)
+                    .Select(owning => owning!.Value)
+                    .Distinct()
+                    .ToList();
+                foreach (var owningId in owningIds)
+                    await PurchaseSalesOrderLinkRules.EnsureOwningSourceCompatibleAsync(_db, group.Draft, owningId);
             }
 
-            if (destination is not null && request is not null)
-            {
-                var precheck = await PurchaseQuoteConversion.BuildBatchAsync(
-                    _db, request.QuoteNo, request.LineId, request.LineIds);
-                foreach (var group in precheck.Groups)
-                    await PurchaseQuoteAuthorizationRules.EnsureDestinationScopeAllowedAsync(_db, destination, group.Draft);
-            }
-
-            var result = await PurchaseQuoteConversion.ConvertBatchAsync(_db, _noService, request);
+            // ⑦ 取号 + 写入 + 来源留痕（单次 SaveChanges；任一步失败整体回滚，绝不残留孤儿订单 / 明细）。
+            var result = await PurchaseQuoteConversion.ConvertBatchAsync(_db, _noService, source.Lines, source.BatchNo);
             if (transaction is not null) await transaction.CommitAsync();
             var message = result.Skipped.Count > 0
                 ? $"已生成 {result.OrderCount} 张采购订单，跳过 {result.Skipped.Count} 行不合格比价行"

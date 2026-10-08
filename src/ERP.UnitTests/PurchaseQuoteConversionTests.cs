@@ -119,16 +119,20 @@ public class PurchaseQuoteConversionTests
     }
 
     [Fact]
-    public async Task 选中比价行转采购订单_币种无法识别_回退人民币()
+    public async Task 选中比价行转采购订单_币种无法识别_拒绝且不回退人民币()
     {
         using var db = TestDbFactory.Create();
         var quote = SeedSelectedQuote(db, "PQ-CUR-1");
         quote.Currency = "RUB";
         db.SaveChanges();
 
-        await NewController(db).ToPurchaseOrder(quote.Id);
+        // ERP-418：无法识别的币种一律拒绝转换（绝不回退 CNY，避免把原币金额静默改写成另一币种）。
+        var ex = await Assert.ThrowsAsync<BusinessException>(() => NewController(db).ToPurchaseOrder(quote.Id));
 
-        Assert.Equal(Currency.CNY, db.PurchaseOrders.Single().Currency);
+        Assert.Equal(ErrorCodes.InvalidParameter, ex.Code);
+        Assert.Contains("币种无法识别", ex.Message);
+        Assert.Empty(db.PurchaseOrders);
+        Assert.Equal(PurchaseQuoteConversion.SelectedStatus, db.PurchaseQuotes.Single().Status);
     }
 
     [Fact]
@@ -450,11 +454,23 @@ public class PurchaseQuoteConversionTests
     [InlineData("USD", Currency.USD)]
     [InlineData("usd", Currency.USD)]
     [InlineData(" CNY ", Currency.CNY)]
-    [InlineData("RUB", Currency.CNY)]
-    [InlineData("", Currency.CNY)]
-    [InlineData(null, Currency.CNY)]
-    public void 币种文本解析_大小写不敏感_无法识别回退人民币(string? text, Currency expected)
+    public void 币种文本解析_大小写不敏感_且仅接受受支持口径(string? text, Currency expected)
         => Assert.Equal(expected, PurchaseQuoteConversion.ParseCurrency(text));
+
+    [Theory]
+    [InlineData("RUB")]
+    [InlineData("EUR")]
+    [InlineData("0")]
+    [InlineData("")]
+    [InlineData(null)]
+    public void 币种文本无法识别_拒绝而非回退人民币(string? text)
+    {
+        // ERP-418：无法识别一律拒绝（InvalidParameter），绝不回退人民币，也不接受纯数字枚举值。
+        var ex = Assert.Throws<BusinessException>(() => PurchaseQuoteConversion.ParseCurrency(text));
+        Assert.Equal(ErrorCodes.InvalidParameter, ex.Code);
+        Assert.Contains("币种无法识别", ex.Message);
+        Assert.False(PurchaseQuoteConversion.TryParseCurrency(text, out _));
+    }
 
     // ==================== 工厂与种子数据 ====================
 

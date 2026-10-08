@@ -1,5 +1,6 @@
 using ERP.Application.Common;
 using ERP.Application.Interfaces;
+using ERP.Application.Services;
 using ERP.Domain.Entities;
 using ERP.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
@@ -181,9 +182,18 @@ public static class PurchaseQuoteConversion
         return order;
     }
 
-    /// <summary>比价行币种文本 → 采购订单币种枚举：按枚举名不区分大小写解析，无法识别按人民币（比价表默认 CNY）处理</summary>
+    /// <summary>
+    /// 比价行币种文本 → 采购订单币种枚举（ERP-418 收紧口径）：按枚举名不区分大小写解析，且必须落在既有受支持口径内；
+    /// <b>无法识别一律拒绝</b>（<see cref="ErrorCodes.InvalidParameter"/>），<b>绝不回退人民币</b>——
+    /// 否则会把客户原币金额静默改写成另一币种，属于不可接受的会计口径漂移。
+    /// 唯一权威解析在 <see cref="PurchaseQuoteConversionMutationRules.RequireCurrency(string?)"/>（单行 / 批次共用）。
+    /// </summary>
     public static Currency ParseCurrency(string? currency)
-        => Enum.TryParse<Currency>(currency?.Trim(), ignoreCase: true, out var parsed) ? parsed : Currency.CNY;
+        => PurchaseQuoteConversionMutationRules.RequireCurrency(currency);
+
+    /// <summary>币种文本是否可识别且受支持（只读判定，绝不回退）。</summary>
+    public static bool TryParseCurrency(string? currency, out Currency parsed)
+        => PurchaseQuoteConversionMutationRules.TryParseCurrency(currency, out parsed);
 
     /// <summary>比价行 → 采购订单明细（金额由服务端重算，不采信来源报价总额）</summary>
     private static PurchaseOrderDetail NewDetail(PurchaseQuote quote, DateTime? deliveryDate)
@@ -222,8 +232,11 @@ public static class PurchaseQuoteConversion
 
     /// <summary>
     /// 归属销售订单解析：比价行 <see cref="PurchaseQuote.RefOrderNo" /> 转换前的语义为「关联销售订单号」
-    /// （代理采购时该采购为哪张销售订单备货），按单号匹配未删除销售订单后写入采购订单归属字段；
+    /// （代理采购时该采购为哪张销售订单备货），按单号匹配销售订单后写入采购订单归属字段；
     /// 匹配不到（含该列已是采购单号或留空）时留空，不臆造关联。
+    /// <para><b>ERP-418 受控口径</b>：命中但<b>已删除 / 已取消 / 未审核</b>时受控拒绝
+    /// （绝不静默生成无归属或错误归属的采购订单）；判定与锁序由
+    /// <see cref="PurchaseQuoteConversionMutationRules"/> 唯一权威提供，单行与批次逐字一致。</para>
     /// </summary>
     private static async Task<(long? Id, string No)> ResolveOwningSalesOrderAsync(IErpDbContext db,
         PurchaseQuote quote, PurchaseQuoteBatchLookup? lookup, CancellationToken ct)
@@ -232,8 +245,7 @@ public static class PurchaseQuoteConversion
         if (refNo.Length == 0) return (null, string.Empty);
 
         var order = lookup is null
-            ? await db.SalesOrders.AsNoTracking()
-                .FirstOrDefaultAsync(o => o.OrderNo == refNo && !o.IsDeleted, ct)
+            ? await PurchaseQuoteConversionMutationRules.ResolveOwningSalesOrderAsync(db, refNo, ct)
             : lookup.FindSalesOrder(refNo);
         return order is null ? (null, string.Empty) : (order.Id, order.OrderNo);
     }
@@ -286,11 +298,28 @@ public static class PurchaseQuoteConversion
     /// 批次构造（只读、不落库）：解析来源行 → 逐行复用单行权威守卫与映射（<see cref="BuildDraftAsync(IErpDbContext, PurchaseQuote, PurchaseQuoteBatchLookup?, CancellationToken)" />）→
     /// 按兼容分组键合并为「一批采购订单草稿」。
     /// 不合格行**不静默丢弃**，而是作为 <see cref="PurchaseQuoteBatchSkip" /> 显式列出原因。
+    /// <para>只读路径（计划 / 预检）专用；真实转换必须走
+    /// <see cref="ConvertBatchAsync(IErpDbContext, IDocumentNumberService, IReadOnlyList{PurchaseQuote}, string, CancellationToken)" />
+    /// 的锁内权威行重载（ERP-418），绝不使用本方法解析出的快照落库。</para>
     /// </summary>
     public static async Task<PurchaseQuoteBatchBuildResult> BuildBatchAsync(IErpDbContext db, string? quoteNo, long? lineId,
         IReadOnlyCollection<long>? lineIds = null, CancellationToken ct = default)
     {
         var lines = await ResolveBatchLinesAsync(db, quoteNo, lineId, lineIds, ct);
+        return await BuildBatchFromLinesAsync(db, lines, ct);
+    }
+
+    /// <summary>
+    /// 批次构造（只读）的<b>权威行重载</b>：来源行由调用方提供（单行 / 批次转换在锁内重读的受跟踪权威行，
+    /// 或只读计划按批次解析出的快照），本方法只做逐行守卫、映射与兼容分组，绝不自行解析成员。
+    /// </summary>
+    public static async Task<PurchaseQuoteBatchBuildResult> BuildBatchFromLinesAsync(IErpDbContext db,
+        IReadOnlyList<PurchaseQuote> lines, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(lines);
+        if (lines.Count == 0) throw BusinessException.NotFound("比价批次不存在或已删除");
+
         var build = new PurchaseQuoteBatchBuildResult { SourceNo = lines[0].QuoteNo, LineCount = lines.Count };
 
         // 批次内一次性预取既有单据索引：重复生成守卫与归属销售订单解析不再按行查库（批次内固定 2 次查询）
@@ -400,6 +429,9 @@ public static class PurchaseQuoteConversion
     /// 批次转采购订单（直接生成）：先统一取号（全部取号发生在任何单据落库之前，避免半成品数据），
     /// 再一次性新增全部采购订单并逐行回写来源留痕，最后单次 SaveChanges 提交（只新增，绝不覆盖既有订单）。
     /// 没有任何合格行时抛 <see cref="BusinessException" />（RuleConflict），不落库、不占号。
+    /// <para>ERP-418：本重载按请求解析批次成员，属于<b>只读解析 + 同事务写入</b>的兼容入口；
+    /// 真实 HTTP 转换必须走 <see cref="ConvertBatchAsync(IErpDbContext, IDocumentNumberService, IReadOnlyList{PurchaseQuote}, string, CancellationToken)" />
+    /// 的锁内权威行入口（先归属销售订单、后来源比价行的确定性行锁），两者写入口径逐字一致。</para>
     /// </summary>
     public static async Task<PurchaseQuoteBatchConversionResult> ConvertBatchAsync(IErpDbContext db,
         IDocumentNumberService noService, PurchaseQuoteBatchConversionRequest? request, CancellationToken ct = default)
@@ -407,6 +439,38 @@ public static class PurchaseQuoteConversion
         if (request is null) throw BusinessException.InvalidParameter("请求内容不能为空");
 
         var build = await BuildBatchAsync(db, request.QuoteNo, request.LineId, request.LineIds, ct);
+        return await WriteBatchAsync(db, noService, build, ct);
+    }
+
+    /// <summary>
+    /// 批次转采购订单的<b>锁内权威行入口（ERP-418）</b>：来源行必须是
+    /// <see cref="PurchaseQuoteConversionMutationRules.LockAndReloadAsync"/> 在行锁内重读的受跟踪权威行
+    /// （调用方已通过资格 / 主数据 / 币种复核并复核目的地归属规则）；本方法只负责分组、取号、写入与来源留痕，
+    /// 任一失败由调用方在同一事务内整体回滚。
+    /// </summary>
+    public static async Task<PurchaseQuoteBatchConversionResult> ConvertBatchAsync(IErpDbContext db,
+        IDocumentNumberService noService, IReadOnlyList<PurchaseQuote> lockedLines, string batchNo,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        if (lockedLines is null || lockedLines.Count == 0)
+            throw BusinessException.NotFound($"{batchNo} 没有可转换的比价行");
+
+        var build = await BuildBatchFromLinesAsync(db, lockedLines, ct);
+        return await WriteBatchAsync(db, noService, build, ct);
+    }
+
+    /// <summary>
+    /// 批次写入（取号 → 新增全部订单 → 逐行来源留痕 → 单次 SaveChanges）；
+    /// 单行 / 批次与锁内 / 只读解析入口全部复用本方法，保证写入口径唯一。
+    /// </summary>
+    private static async Task<PurchaseQuoteBatchConversionResult> WriteBatchAsync(IErpDbContext db,
+        IDocumentNumberService noService, PurchaseQuoteBatchBuildResult build, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(noService);
+        ArgumentNullException.ThrowIfNull(build);
+
         if (build.Groups.Count == 0)
             throw BusinessException.RuleConflict(
                 $"比价批次 {build.SourceNo} 没有可转换的「已选中」行：{SkipSummary(build.Skipped)}");
@@ -434,13 +498,18 @@ public static class PurchaseQuoteConversion
 
         await db.SaveChangesAsync(ct);
 
+        // ERP-418：跨币种批次不做合计——按币种分列小计，聚合字段在跨币种时显式为未知（null）。
+        var totals = SummarizeByCurrency(build.Groups
+            .Select(g => (g.Draft.Currency.ToString(), g.Draft.TotalAmount, g.Lines.Count)));
         return new PurchaseQuoteBatchConversionResult
         {
             SourceType = PurchaseQuoteSourceType,
             SourceNo = build.SourceNo,
             OrderCount = build.Groups.Count,
             ConvertedLineCount = build.Groups.Sum(g => g.Lines.Count),
-            TotalAmount = build.Groups.Sum(g => g.Draft.TotalAmount),
+            MixedCurrency = totals.Mixed,
+            TotalAmount = totals.Total,
+            TotalAmountByCurrency = totals.ByCurrency,
             Skipped = build.Skipped,
             Orders = build.Groups.Select(g => new PurchaseQuoteBatchOrderResult
             {
@@ -528,33 +597,68 @@ public static class PurchaseQuoteConversion
         throw BusinessException.RuleConflict($"采购单号 {normalized} 连续冲突，无法为比价批次生成唯一单号");
     }
 
-    /// <summary>把批次构造结果映射为只读计划响应（含每组未落库草稿、合格行数、服务端重算合计与跳过原因）</summary>
-    public static PurchaseQuoteBatchPlan BuildPlan(PurchaseQuoteBatchBuildResult build) => new()
+    /// <summary>
+    /// 批次金额按币种分列汇总（ERP-418）：同一币种的金额才可相加；
+    /// 跨币种一律<b>不合计</b>（<see cref="PurchaseQuoteCurrencyTotal"/> 逐一列示，聚合字段显式为未知）。
+    /// </summary>
+    public static (bool Mixed, decimal? Total, List<PurchaseQuoteCurrencyTotal> ByCurrency) SummarizeByCurrency(
+        IEnumerable<(string Currency, decimal Amount, int LineCount)> items)
     {
-        SourceType = PurchaseQuoteSourceType,
-        SourceNo = build.SourceNo,
-        BatchLineCount = build.LineCount,
-        EligibleLineCount = build.Groups.Sum(g => g.Lines.Count),
-        GroupCount = build.Groups.Count,
-        TotalAmount = build.Groups.Sum(g => g.Draft.TotalAmount),
-        Skipped = build.Skipped,
-        Groups = build.Groups.Select(g => new PurchaseQuoteBatchGroupPlan
+        ArgumentNullException.ThrowIfNull(items);
+        var list = items.ToList();
+        var byCurrency = list
+            .GroupBy(x => (x.Currency ?? string.Empty).Trim().ToUpperInvariant(), StringComparer.Ordinal)
+            .Select(g => new PurchaseQuoteCurrencyTotal
+            {
+                Currency = g.Key,
+                TotalAmount = g.Sum(x => x.Amount),
+                LineCount = g.Sum(x => x.LineCount)
+            })
+            .OrderBy(t => t.Currency, StringComparer.Ordinal)
+            .ToList();
+
+        var mixed = byCurrency.Count > 1;
+        decimal? total = mixed ? null : byCurrency.Sum(t => t.TotalAmount);
+        return (mixed, total, byCurrency);
+    }
+
+    /// <summary>把批次构造结果映射为只读计划响应（含每组未落库草稿、合格行数、服务端重算合计与跳过原因）</summary>
+    public static PurchaseQuoteBatchPlan BuildPlan(PurchaseQuoteBatchBuildResult build)
+    {
+        ArgumentNullException.ThrowIfNull(build);
+        var totals = SummarizeByCurrency(build.Groups.Select(g =>
+            (g.Draft.Currency.ToString(), g.Draft.TotalAmount, g.Lines.Count)));
+
+        return new PurchaseQuoteBatchPlan
         {
-            SupplierId = g.Draft.SupplierId,
-            SupplierName = Clamp(g.Lines[0].SupplierName, 200),
-            Currency = g.Draft.Currency.ToString(),
-            OwningCustomerId = g.Draft.OwningCustomerId,
-            OwningCustomerName = g.Draft.OwningCustomerName,
-            OwningSalesOrderNo = g.Draft.OwningSalesOrderNo,
-            PaymentTerms = g.Draft.PaymentTerms,
-            TaxIncluded = g.Draft.TaxIncluded,
-            DeliveryDate = g.Draft.DeliveryDate,
-            LineIds = g.Lines.Select(l => l.Id).ToList(),
-            LineCount = g.Lines.Count,
-            TotalAmount = g.Draft.TotalAmount,
-            Order = g.Draft
-        }).ToList()
-    };
+            SourceType = PurchaseQuoteSourceType,
+            SourceNo = build.SourceNo,
+            BatchLineCount = build.LineCount,
+            EligibleLineCount = build.Groups.Sum(g => g.Lines.Count),
+            GroupCount = build.Groups.Count,
+            // ERP-418：跨币种不做合计（MixedCurrency = true 时 TotalAmount 显式为未知，绝不把混合金额当钱）。
+            MixedCurrency = totals.Mixed,
+            TotalAmount = totals.Total,
+            TotalAmountByCurrency = totals.ByCurrency,
+            Skipped = build.Skipped,
+            Groups = build.Groups.Select(g => new PurchaseQuoteBatchGroupPlan
+            {
+                SupplierId = g.Draft.SupplierId,
+                SupplierName = Clamp(g.Lines[0].SupplierName, 200),
+                Currency = g.Draft.Currency.ToString(),
+                OwningCustomerId = g.Draft.OwningCustomerId,
+                OwningCustomerName = g.Draft.OwningCustomerName,
+                OwningSalesOrderNo = g.Draft.OwningSalesOrderNo,
+                PaymentTerms = g.Draft.PaymentTerms,
+                TaxIncluded = g.Draft.TaxIncluded,
+                DeliveryDate = g.Draft.DeliveryDate,
+                LineIds = g.Lines.Select(l => l.Id).ToList(),
+                LineCount = g.Lines.Count,
+                TotalAmount = g.Draft.TotalAmount,
+                Order = g.Draft
+            }).ToList()
+        };
+    }
 
     /// <summary>跳过原因摘要（按原因分组计数，便于一次看清批次内有多少行不合格）</summary>
     public static string SkipSummary(IReadOnlyList<PurchaseQuoteBatchSkip> skipped)
@@ -676,12 +780,18 @@ public sealed class PurchaseQuoteBatchLookup
             .ToList();
 
         // ① 关联销售订单（RefOrderNo 转换前的语义：代理采购为哪张销售订单备货）
+        //    ERP-418：已删除行也一并装载——用于区分「不是销售订单号」（归属留空）与「销售订单已删除 / 不可用」（受控拒绝）。
         if (refNos.Count > 0)
         {
             var salesOrders = await db.SalesOrders.AsNoTracking()
-                .Where(o => !o.IsDeleted && refNos.Contains(o.OrderNo))
+                .Where(o => refNos.Contains(o.OrderNo))
+                .OrderBy(o => o.Id)
                 .ToListAsync(ct);
-            foreach (var salesOrder in salesOrders) lookup._salesOrdersByNo[salesOrder.OrderNo] = salesOrder;
+            foreach (var salesOrder in salesOrders)
+            {
+                if (lookup._salesOrdersByNo.ContainsKey(salesOrder.OrderNo)) continue;   // 同号取最小 Id
+                lookup._salesOrdersByNo[salesOrder.OrderNo] = salesOrder;
+            }
         }
 
         // ② 既有来源采购订单：按号（回写判据）或按备注来源标记（同一批次共用标记前缀，一次查回后逐行匹配）
@@ -718,11 +828,20 @@ public sealed class PurchaseQuoteBatchLookup
     public PurchaseQuoteDecision? FindDecision(long quoteId)
         => _decisionsByQuoteId.TryGetValue(quoteId, out var decision) ? decision : null;
 
-    /// <summary>按单号取关联销售订单（未预取到 = 不存在或已删除，与单行路径匹配结果一致）</summary>
+    /// <summary>
+    /// 按单号取关联销售订单（未预取到 = 该文本不是任何既有销售订单号，归属字段留空，与单行路径一致）。
+    /// <para><b>ERP-418 受控口径</b>：命中但已删除 / 已取消 / 未审核时受控拒绝
+    /// （与单行路径 <see cref="PurchaseQuoteConversionMutationRules.ResolveOwningSalesOrderAsync"/> 同一判定）。</para>
+    /// </summary>
     public SalesOrder? FindSalesOrder(string orderNo)
-        => (orderNo ?? string.Empty).Trim() is { Length: > 0 } no && _salesOrdersByNo.TryGetValue(no, out var order)
-            ? order
-            : null;
+    {
+        var no = (orderNo ?? string.Empty).Trim();
+        if (no.Length == 0 || !_salesOrdersByNo.TryGetValue(no, out var order)) return null;
+        if (order.IsDeleted) throw BusinessException.RuleConflict(PurchaseQuoteConversionMutationRules.OwnershipUnavailableText);
+
+        PurchaseQuoteConversionMutationRules.EnsureOwningSalesOrderUsable(order);
+        return order;
+    }
 }
 
 /// <summary>批次转换中被显式跳过的比价行（不合格，附原因；不生成采购订单也不改来源状态）</summary>
@@ -769,6 +888,22 @@ public sealed class PurchaseQuoteBatchGroupPlan
     public PurchaseOrder Order { get; set; } = new();
 }
 
+/// <summary>
+/// 单一币种的金额小计（ERP-418）：只有同一币种的金额才可相加；
+/// 跨币种批次一律按币种逐一列示，绝不合并成一个金额。
+/// </summary>
+public sealed class PurchaseQuoteCurrencyTotal
+{
+    /// <summary>币种（CNY / USD）</summary>
+    public string Currency { get; set; } = string.Empty;
+
+    /// <summary>该币种下的服务端重算金额合计</summary>
+    public decimal TotalAmount { get; set; }
+
+    /// <summary>该币种下的来源行数</summary>
+    public int LineCount { get; set; }
+}
+
 /// <summary>批次转换计划（只读）：将生成几张采购订单、每张含哪些来源行、合计多少、哪些行会被跳过</summary>
 public sealed class PurchaseQuoteBatchPlan
 {
@@ -784,8 +919,17 @@ public sealed class PurchaseQuoteBatchPlan
     /// <summary>将生成的采购订单张数</summary>
     public int GroupCount { get; set; }
 
-    /// <summary>全部合格行金额合计（服务端重算）</summary>
-    public decimal TotalAmount { get; set; }
+    /// <summary>
+    /// 全部合格行金额合计（服务端重算）：<b>仅当批次只有一个币种时</b>才有值；
+    /// 跨币种批次为 <c>null</c>（显式未知，绝不把混合币种金额当钱），改看 <see cref="TotalAmountByCurrency"/>。
+    /// </summary>
+    public decimal? TotalAmount { get; set; }
+
+    /// <summary>批次是否跨币种（跨币种时不提供合计金额）</summary>
+    public bool MixedCurrency { get; set; }
+
+    /// <summary>按币种分列的金额小计（同币种才合计；跨币种不合并）</summary>
+    public List<PurchaseQuoteCurrencyTotal> TotalAmountByCurrency { get; set; } = new();
 
     public List<PurchaseQuoteBatchGroupPlan> Groups { get; set; } = new();
     public List<PurchaseQuoteBatchSkip> Skipped { get; set; } = new();
@@ -821,8 +965,17 @@ public sealed class PurchaseQuoteBatchConversionResult
     /// <summary>已转换来源行数</summary>
     public int ConvertedLineCount { get; set; }
 
-    /// <summary>生成金额合计（服务端重算）</summary>
-    public decimal TotalAmount { get; set; }
+    /// <summary>
+    /// 生成金额合计（服务端重算）：<b>仅当本次转换只有一个币种时</b>才有值；
+    /// 跨币种时为 <c>null</c>（显式未知，绝不把混合币种金额当钱），改看 <see cref="TotalAmountByCurrency"/>。
+    /// </summary>
+    public decimal? TotalAmount { get; set; }
+
+    /// <summary>本次转换是否跨币种（跨币种时不提供合计金额）</summary>
+    public bool MixedCurrency { get; set; }
+
+    /// <summary>按币种分列的金额小计（同币种才合计；跨币种不合并）</summary>
+    public List<PurchaseQuoteCurrencyTotal> TotalAmountByCurrency { get; set; } = new();
 
     public List<PurchaseQuoteBatchOrderResult> Orders { get; set; } = new();
     public List<PurchaseQuoteBatchSkip> Skipped { get; set; } = new();

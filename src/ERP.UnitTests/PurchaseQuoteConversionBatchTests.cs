@@ -98,7 +98,12 @@ public class PurchaseQuoteConversionBatchTests
 
         Assert.Equal(3, result.OrderCount);
         Assert.Equal(4, result.ConvertedLineCount);
-        Assert.Equal(600m + 300m + 2000m, result.TotalAmount);
+        // ERP-418：跨币种不做合计——聚合字段显式为未知（null），改按币种分列小计（同币种才相加）。
+        Assert.True(result.MixedCurrency);
+        Assert.Null(result.TotalAmount);
+        Assert.Equal(600m + 300m, result.TotalAmountByCurrency.Single(t => t.Currency == "USD").TotalAmount);
+        Assert.Equal(2000m, result.TotalAmountByCurrency.Single(t => t.Currency == "CNY").TotalAmount);
+        Assert.Equal(2, result.TotalAmountByCurrency.Count);
         Assert.Equal(3, db.PurchaseOrders.Count());
         Assert.Equal(3, db.PurchaseOrders.Select(o => o.OrderNo).ToList().Distinct(StringComparer.OrdinalIgnoreCase).Count());
 
@@ -400,7 +405,12 @@ public class PurchaseQuoteConversionBatchTests
         Assert.Equal(4, plan.BatchLineCount);
         Assert.Equal(3, plan.EligibleLineCount);
         Assert.Equal(2, plan.GroupCount);
+        // ERP-418：两组币种相同（USD）才给出合计；跨币种不合计（见「不同供应商或币种」用例）。
+        Assert.False(plan.MixedCurrency);
         Assert.Equal(13000m + 3500m + 2400m, plan.TotalAmount);
+        Assert.Equal(13000m + 3500m + 2400m,
+            plan.TotalAmountByCurrency.Single(t => t.Currency == "USD").TotalAmount);
+        Assert.Equal(3, plan.TotalAmountByCurrency.Single(t => t.Currency == "USD").LineCount);
         Assert.Equal(skippedLine.Id, Assert.Single(plan.Skipped).LineId);
 
         var merged = plan.Groups.Single(g => g.LineCount == 2);

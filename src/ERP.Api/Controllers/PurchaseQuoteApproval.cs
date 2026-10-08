@@ -44,10 +44,39 @@ public static class PurchaseQuoteApproval
             return;
 
         if (decision.SelectedSupplierId != quote.SupplierId)
-            throw BusinessException.RuleConflict(
-                $"比价行 #{quote.Id} 的当前供应商（{Text(quote.SupplierId)}）与已批准决定的选中供应商" +
-                $"（{Text(decision.SelectedSupplierId)}）不一致：拒绝转采购订单（绝不采购批准之外的供应商）");
+            throw BusinessException.RuleConflict(SupplierCoherenceText(quote, decision));
     }
+
+    /// <summary>
+    /// ERP-418 批次（及单行）转换前的「批准供应商一致性」批量复核：一次查询决定后逐行比对，
+    /// 与 <see cref="EnsureApprovedSupplierCoherentAsync"/> 逐字同口径（无决定 / 非批准决定不在此判定），
+    /// 任一行不一致即整批受控拒绝（绝不部分写入）。
+    /// </summary>
+    public static async Task EnsureApprovedSuppliersCoherentAsync(IErpDbContext db,
+        IReadOnlyList<PurchaseQuote> quotes, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(quotes);
+        if (quotes.Count == 0) return;
+
+        var ids = quotes.Select(q => q.Id).Distinct().ToList();
+        var decisions = await db.PurchaseQuoteDecisions.AsNoTracking()
+            .Where(d => ids.Contains(d.QuoteId) && !d.IsDeleted)
+            .ToListAsync(ct);
+
+        foreach (var quote in quotes)
+        {
+            var decision = decisions.FirstOrDefault(d => d.QuoteId == quote.Id);
+            if (decision is null || !string.Equals(decision.Decision, Approved, StringComparison.Ordinal))
+                continue;
+            if (decision.SelectedSupplierId != quote.SupplierId)
+                throw BusinessException.RuleConflict(SupplierCoherenceText(quote, decision));
+        }
+    }
+
+    private static string SupplierCoherenceText(PurchaseQuote quote, PurchaseQuoteDecision decision)
+        => $"比价行 #{quote.Id} 的当前供应商（{Text(quote.SupplierId)}）与已批准决定的选中供应商" +
+           $"（{Text(decision.SelectedSupplierId)}）不一致：拒绝转采购订单（绝不采购批准之外的供应商）";
 
     private static string Text(long? supplierId)
         => supplierId is null or <= 0 ? "（未维护）" : supplierId.Value.ToString();

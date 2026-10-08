@@ -280,6 +280,22 @@ public static class PurchaseQuoteAuthorizationRules
         return PurchaseOrderAuthorizationRules.EnsureOrderScopeAllowedAsync(db, destinationScope, draft, ct);
     }
 
+    /// <summary>
+    /// ERP-418：批次转换的权威目的地范围复核（逐组草稿复用单草稿判定，任一越界即 fail closed）。
+    /// 在分配采购单号 / 落库<b>之前</b>调用；批次内任一草稿越界即整批拒绝，绝不部分写入。
+    /// </summary>
+    public static async Task EnsureDestinationScopeAllowedAsync(
+        IErpDbContext db, SalespersonDataScope destinationScope, IReadOnlyList<PurchaseOrder> drafts,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(destinationScope);
+        ArgumentNullException.ThrowIfNull(drafts);
+
+        foreach (var draft in drafts)
+            await EnsureDestinationScopeAllowedAsync(db, destinationScope, draft, ct);
+    }
+
     // ==================== ERP-417：实时可信操作人（审批决定人一律取自登录账号） ====================
 
     /// <summary>
