@@ -13,6 +13,11 @@ namespace ERP.Api.Controllers;
 
 /// <summary>
 /// 采购订单控制器
+/// <para>ERP-371：读取（列表 / 详情 / 导出 / 派生只读视图）/ 创建 / 修改 / 提交 / 审核 / 取消 / 删除每一路由都先做实时授权
+/// （既有登录身份 + 账号启用状态 + 既有「采购订单」菜单 + <see cref="SalespersonDataScopeService"/> 权威客户数据范围，
+/// 同时覆盖显式归属客户与权威归属销售订单客户），列表在计数 / 分页之前把客户范围下推到数据库；</para>
+/// <para>显式销售链接的权威快照与来源校验仍为 ERP-346，取消护栏仍为 ERP-345；提交 / 审核 / 删除 / 取消 / 改单
+/// 共用「归属销售订单 → 本采购订单」行锁与可串行化事务，审核在锁内复核来源仍为权威可用。</para>
 /// </summary>
 [Route("api/purchase-orders")]
 public class PurchaseOrderController : DocumentControllerBase<PurchaseOrder>
@@ -29,7 +34,8 @@ public class PurchaseOrderController : DocumentControllerBase<PurchaseOrder>
     public async Task<IActionResult> GetPaged([FromQuery] PageQuery query, [FromQuery] DocumentStatus? status)
     {
         query.Normalize();
-        var source = Set.AsNoTracking().Where(o => !o.IsDeleted);
+        // ERP-371：身份 / 账号状态 / 既有「采购订单」菜单 / 权威客户范围先于任何计数与分页（数据库侧范围下推）。
+        var source = await ApplyProcurementScopeAsync(Set.AsNoTracking().Where(o => !o.IsDeleted));
         if (status.HasValue) source = source.Where(o => o.Status == status.Value);
         if (!string.IsNullOrWhiteSpace(query.Keyword))
         {
@@ -53,14 +59,19 @@ public class PurchaseOrderController : DocumentControllerBase<PurchaseOrder>
         var entity = await Set.AsNoTracking().Include(o => o.Details)
             .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
             ?? throw BusinessException.NotFound("采购订单不存在");
+        // ERP-371：详情与列表同一口径（身份 / 菜单 / 权威归属客户范围）。
+        await EnsureOrderAuthorizedAsync(entity);
         return Ok(ApiResponse<PurchaseOrder>.Success(entity));
     }
 
     /// <summary>从现有订单、供应商确认交期和采购入库记录派生只读执行时间线。</summary>
     [HttpGet("{id:long}/timeline")]
     public async Task<IActionResult> Timeline(long id)
-        => Ok(ApiResponse<List<OrderTimelineEvent>>.Success(
+    {
+        await EnsureOrderIdAuthorizedAsync(id);
+        return Ok(ApiResponse<List<OrderTimelineEvent>>.Success(
             await OrderExecutionTimeline.ForPurchaseOrderAsync(Db, id)));
+    }
 
     /// <summary>
     /// 采购执行进度（ERP-026，只读派生）：按既有采购入库单派生已订 / 已收 / 未收数量（含待审与订单外数量），
@@ -68,16 +79,22 @@ public class PurchaseOrderController : DocumentControllerBase<PurchaseOrder>
     /// </summary>
     [HttpGet("{id:long}/progress")]
     public async Task<IActionResult> Progress(long id)
-        => Ok(ApiResponse<PurchaseOrderProgressView>.Success(
+    {
+        await EnsureOrderIdAuthorizedAsync(id);
+        return Ok(ApiResponse<PurchaseOrderProgressView>.Success(
             await PurchaseOrderProgress.ForPurchaseOrderAsync(Db, id)));
+    }
     /// <summary>
     /// 财务核对（ERP-028，只读派生）：结算金额复用 ERP-026 的权威引用链（付款单 → 货款申请单 → 本单归属销售订单），
     /// 并按既有引用字段列出费用单、客诉单、收款单与结算单；无法按权威引用归属的记录仅列出，金额未知为 null（不推断）。
     /// </summary>
     [HttpGet("{id:long}/finance-reconciliation")]
     public async Task<IActionResult> FinanceReconciliation(long id)
-        => Ok(ApiResponse<OrderFinanceReconciliationView>.Success(
+    {
+        await EnsureOrderIdAuthorizedAsync(id);
+        return Ok(ApiResponse<OrderFinanceReconciliationView>.Success(
             await OrderFinanceReconciliation.ForPurchaseOrderAsync(Db, id)));
+    }
 
     /// <summary>
     /// 供应商采购敞口报表（ERP-031，只读派生）：按供应商 + 币种聚合采购订单金额，并复用 ERP-026 的入库 / 结算权威引用口径
@@ -86,8 +103,11 @@ public class PurchaseOrderController : DocumentControllerBase<PurchaseOrder>
     /// </summary>
     [HttpGet("supplier-exposure")]
     public async Task<IActionResult> SupplierExposure([FromQuery] SupplierPurchaseExposureQuery query)
-        => Ok(ApiResponse<SupplierPurchaseExposureReport>.Success(
+    {
+        await EnsureMenuAuthorizedAsync();
+        return Ok(ApiResponse<SupplierPurchaseExposureReport>.Success(
             await SupplierPurchaseExposure.ForQueryAsync(Db, query)));
+    }
 
     /// <summary>
     /// 采购交期异常工作台（ERP-099，只读派生）：按供应商 + 显式 as-of 基准日过滤采购订单，
@@ -96,8 +116,11 @@ public class PurchaseOrderController : DocumentControllerBase<PurchaseOrder>
     /// </summary>
     [HttpGet("delivery-exceptions")]
     public async Task<IActionResult> DeliveryExceptions([FromQuery] PurchaseOrderDeliveryExceptionQuery query)
-        => Ok(ApiResponse<PurchaseOrderDeliveryExceptionReport>.Success(
+    {
+        await EnsureMenuAuthorizedAsync();
+        return Ok(ApiResponse<PurchaseOrderDeliveryExceptionReport>.Success(
             await PurchaseOrderDeliveryExceptions.ForQueryAsync(Db, query)));
+    }
 
     /// <summary>
     /// 供应商首收交期（ERP-109，只读派生）：按供应商 + 订单日期区间筛选未删除且已审核的采购订单，
@@ -108,8 +131,11 @@ public class PurchaseOrderController : DocumentControllerBase<PurchaseOrder>
     /// </summary>
     [HttpGet("first-receipt-lead-times")]
     public async Task<IActionResult> SupplierFirstReceiptLeadTimes([FromQuery] SupplierFirstReceiptLeadTimeQuery query)
-        => Ok(ApiResponse<SupplierFirstReceiptLeadTimeReport>.Success(
+    {
+        await EnsureMenuAuthorizedAsync();
+        return Ok(ApiResponse<SupplierFirstReceiptLeadTimeReport>.Success(
             await SupplierFirstReceiptLeadTimeService.ForQueryAsync(Db, query)));
+    }
 
     /// <summary>
     /// 采购订单退货影响（ERP-100，只读派生）：按显式链接链「采购退货 → 来源入库单 → 本采购订单」派生
@@ -119,8 +145,11 @@ public class PurchaseOrderController : DocumentControllerBase<PurchaseOrder>
     /// </summary>
     [HttpGet("{id:long}/return-impact")]
     public async Task<IActionResult> ReturnImpact(long id)
-        => Ok(ApiResponse<PurchaseOrderReturnImpactView>.Success(
+    {
+        await EnsureOrderIdAuthorizedAsync(id);
+        return Ok(ApiResponse<PurchaseOrderReturnImpactView>.Success(
             await PurchaseOrderReturnImpact.ForOrderAsync(Db, id)));
+    }
 
     /// <summary>
     /// 发票证据汇总（ERP-048，只读派生）：只按 ERP-043 的持久化关联行派生「已登记且未作废」的已开票金额、
@@ -131,8 +160,11 @@ public class PurchaseOrderController : DocumentControllerBase<PurchaseOrder>
     /// </summary>
     [HttpGet("{id:long}/invoice-evidence")]
     public async Task<IActionResult> InvoiceEvidence(long id)
-        => Ok(ApiResponse<PurchaseOrderInvoiceEvidenceDetail>.Success(
+    {
+        await EnsureOrderIdAuthorizedAsync(id);
+        return Ok(ApiResponse<PurchaseOrderInvoiceEvidenceDetail>.Success(
             await PurchaseOrderInvoiceEvidence.ForOrderAsync(Db, id)));
+    }
 
     /// <summary>
     /// 采购订单列表用有界发票覆盖汇总（ERP-048，只读派生）：逗号分隔的订单 Id（一次最多 200 张），
@@ -140,9 +172,12 @@ public class PurchaseOrderController : DocumentControllerBase<PurchaseOrder>
     /// </summary>
     [HttpGet("invoice-evidence-summaries")]
     public async Task<IActionResult> InvoiceEvidenceSummaries([FromQuery] string? ids)
-        => Ok(ApiResponse<PurchaseOrderInvoiceEvidenceBatch>.Success(
+    {
+        await EnsureOrderIdsAuthorizedAsync(ParseOrderIds(ids));
+        return Ok(ApiResponse<PurchaseOrderInvoiceEvidenceBatch>.Success(
             await PurchaseOrderInvoiceEvidence.ForOrdersAsync(
                 Db, new PurchaseOrderInvoiceEvidenceQuery { Ids = ids })));
+    }
 
     /// <summary>
     /// 付款引用证据详情（ERP-050，只读派生）：只按 ERP-049 的持久化引用行派生该订单的**有效**已引用金额、
@@ -153,8 +188,11 @@ public class PurchaseOrderController : DocumentControllerBase<PurchaseOrder>
     /// </summary>
     [HttpGet("{id:long}/payment-evidence")]
     public async Task<IActionResult> PaymentEvidence(long id)
-        => Ok(ApiResponse<PurchaseOrderPaymentEvidenceDetail>.Success(
+    {
+        await EnsureOrderIdAuthorizedAsync(id);
+        return Ok(ApiResponse<PurchaseOrderPaymentEvidenceDetail>.Success(
             await PurchaseOrderPaymentEvidence.ForOrderAsync(Db, id)));
+    }
 
     /// <summary>
     /// 采购订单列表用有界付款引用证据汇总（ERP-050，只读派生）：逗号分隔的订单 Id（一次最多 200 张），
@@ -163,9 +201,12 @@ public class PurchaseOrderController : DocumentControllerBase<PurchaseOrder>
     /// </summary>
     [HttpGet("payment-evidence-summaries")]
     public async Task<IActionResult> PaymentEvidenceSummaries([FromQuery] string? ids)
-        => Ok(ApiResponse<PurchaseOrderPaymentEvidenceBatch>.Success(
+    {
+        await EnsureOrderIdsAuthorizedAsync(ParseOrderIds(ids));
+        return Ok(ApiResponse<PurchaseOrderPaymentEvidenceBatch>.Success(
             await PurchaseOrderPaymentEvidence.ForOrdersAsync(
                 Db, new PurchaseOrderPaymentEvidenceQuery { Ids = ids })));
+    }
 
     /// <summary>
     /// 已分配付款引用证据详情（ERP-067，只读派生）：只按 ERP-066 的持久化「付款单 → 供应商采购发票」引用行派生，
@@ -178,8 +219,11 @@ public class PurchaseOrderController : DocumentControllerBase<PurchaseOrder>
     /// </summary>
     [HttpGet("{id:long}/invoice-payment-evidence")]
     public async Task<IActionResult> InvoicePaymentEvidence(long id)
-        => Ok(ApiResponse<PurchaseOrderInvoicePaymentEvidenceDetail>.Success(
+    {
+        await EnsureOrderIdAuthorizedAsync(id);
+        return Ok(ApiResponse<PurchaseOrderInvoicePaymentEvidenceDetail>.Success(
             await PurchaseOrderInvoicePaymentEvidence.ForOrderAsync(Db, id)));
+    }
 
     /// <summary>
     /// 采购订单列表用有界「已分配付款引用证据」汇总（ERP-067，只读派生）：逗号分隔的订单 Id（一次最多 200 张），
@@ -189,9 +233,12 @@ public class PurchaseOrderController : DocumentControllerBase<PurchaseOrder>
     /// </summary>
     [HttpGet("invoice-payment-evidence-summaries")]
     public async Task<IActionResult> InvoicePaymentEvidenceSummaries([FromQuery] string? ids)
-        => Ok(ApiResponse<PurchaseOrderInvoicePaymentEvidenceBatch>.Success(
+    {
+        await EnsureOrderIdsAuthorizedAsync(ParseOrderIds(ids));
+        return Ok(ApiResponse<PurchaseOrderInvoicePaymentEvidenceBatch>.Success(
             await PurchaseOrderInvoicePaymentEvidence.ForOrdersAsync(
                 Db, new PurchaseOrderInvoicePaymentEvidenceQuery { Ids = ids })));
+    }
 
     /// <summary>创建</summary>
     [HttpPost]
@@ -206,6 +253,9 @@ public class PurchaseOrderController : DocumentControllerBase<PurchaseOrder>
         try
         {
             await AcquireSalesOrderLinkLockAsync(entity.OwningSalesOrderId.Value);
+
+            // ERP-371：身份 / 菜单 / 归属来源范围先于单据号与任何写入（fail closed）。
+            await EnsureProposedAuthorizedAsync(entity);
 
             entity.Id = 0;
             entity.OrderNo = await _noService.GenerateAsync(DocumentType.PurchaseOrder);
@@ -240,12 +290,18 @@ public class PurchaseOrderController : DocumentControllerBase<PurchaseOrder>
         try
         {
             await AcquireSalesOrderLinkLockAsync(entity.OwningSalesOrderId.Value);
+            // ERP-371：同序（销售订单 → 采购订单）加行锁，把来源链接变更与状态流转串行化，避免死锁。
+            await AcquirePurchaseOrderLockAsync(id);
 
             var existing = await Db.PurchaseOrders.Include(o => o.Details)
                 .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
                 ?? throw BusinessException.NotFound("采购订单不存在");
             if (GetStatus(existing) != DocumentStatus.Pending)
                 throw BusinessException.RuleConflict("仅待提交状态的单据可修改");
+
+            // ERP-371：分配字段 / 替换明细之前先校验「已存」与「请求」两侧归属（身份 / 菜单 / 权威客户范围）。
+            await EnsureOrderAuthorizedAsync(existing);
+            await EnsureProposedAuthorizedAsync(entity);
 
             await PurchaseSalesOrderLinkRules.ApplyLinkAsync(Db, entity, CurrentUserId());
 
@@ -300,6 +356,9 @@ public class PurchaseOrderController : DocumentControllerBase<PurchaseOrder>
     /// <summary>无归属销售订单的采购创建（保持历史行为，不加锁、不开事务）。</summary>
     private async Task<IActionResult> CreateUnlinkedAsync(PurchaseOrder entity)
     {
+        // ERP-371：无归属备货采购同样先解析身份 / 菜单 / 请求归属范围（fail closed，特权备货采购保持可用）。
+        await EnsureProposedAuthorizedAsync(entity);
+
         entity.Id = 0;
         entity.OrderNo = await _noService.GenerateAsync(DocumentType.PurchaseOrder);
         entity.Status = DocumentStatus.Pending;
@@ -320,6 +379,10 @@ public class PurchaseOrderController : DocumentControllerBase<PurchaseOrder>
             ?? throw BusinessException.NotFound("采购订单不存在");
         if (GetStatus(existing) != DocumentStatus.Pending)
             throw BusinessException.RuleConflict("仅待提交状态的单据可修改");
+
+        // ERP-371：分配字段 / 替换明细之前先校验「已存」与「请求」两侧归属（身份 / 菜单 / 权威客户范围）。
+        await EnsureOrderAuthorizedAsync(existing);
+        await EnsureProposedAuthorizedAsync(entity);
 
         existing.OrderDate = entity.OrderDate;
         existing.SupplierId = entity.SupplierId;
@@ -382,6 +445,8 @@ public class PurchaseOrderController : DocumentControllerBase<PurchaseOrder>
         var entity = await Set.AsNoTracking().Include(o => o.Details)
             .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
             ?? throw BusinessException.NotFound("采购订单不存在");
+        // ERP-371：打印与详情同一授权口径（身份 / 菜单 / 权威归属客户范围）。
+        await EnsureOrderAuthorizedAsync(entity);
         entity.Details = entity.Details.Where(d => !d.IsDeleted).ToList();
         return Ok(ApiResponse<PurchaseOrder>.Success(entity));
     }
@@ -390,7 +455,8 @@ public class PurchaseOrderController : DocumentControllerBase<PurchaseOrder>
     [HttpGet("export")]
     public async Task<IActionResult> Export([FromQuery] DateTime? start, [FromQuery] DateTime? end)
     {
-        var source = Db.PurchaseOrders.AsNoTracking().Include(o => o.Details).Where(o => !o.IsDeleted);
+        var source = await ApplyProcurementScopeAsync(
+            Db.PurchaseOrders.AsNoTracking().Include(o => o.Details).Where(o => !o.IsDeleted));
         if (start.HasValue) source = source.Where(o => o.OrderDate >= start.Value);
         if (end.HasValue) source = source.Where(o => o.OrderDate <= end.Value);
         var items = await source.OrderByDescending(o => o.Id).ToListAsync();
@@ -415,7 +481,7 @@ public class PurchaseOrderController : DocumentControllerBase<PurchaseOrder>
     public async Task<IActionResult> ExportExcel([FromQuery] string? keyword, [FromQuery] DocumentStatus? status,
         [FromQuery] DateTime? start, [FromQuery] DateTime? end)
     {
-        var source = Db.PurchaseOrders.AsNoTracking().Where(o => !o.IsDeleted);
+        var source = await ApplyProcurementScopeAsync(Db.PurchaseOrders.AsNoTracking().Where(o => !o.IsDeleted));
         if (!string.IsNullOrWhiteSpace(keyword))
         {
             var kw = keyword;
@@ -475,7 +541,7 @@ public class PurchaseOrderController : DocumentControllerBase<PurchaseOrder>
         await using var transaction = await Db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
         try
         {
-            await AcquireOrderCancellationLockAsync(id);
+            await AcquireOrderStateLocksAsync(id);
 
             var entity = await Db.PurchaseOrders.Include(o => o.Details)
                 .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
@@ -497,10 +563,24 @@ public class PurchaseOrderController : DocumentControllerBase<PurchaseOrder>
     }
 
     /// <summary>
-    /// 对采购订单行加更新锁（UPDLOCK, HOLDLOCK），把同单并发「入库审核 / 取消」串行化在同一事务内；
+    /// 采购订单状态流转锁序（ERP-371）：先锁归属销售订单行、再锁本采购订单行（<c>UPDLOCK, HOLDLOCK</c>），
+    /// 与创建 / 更新的「来源销售订单 → 采购订单」锁序一致，避免与来源取消 / 链接变更死锁；
+    /// 同单并发「提交 / 审核 / 删除 / 取消 / 改单」因此串行化在同一事务内。
     /// 非关系型提供程序（内存库）无法执行表提示，跳过即可（事务本身等价无事务）。
     /// </summary>
-    private async Task AcquireOrderCancellationLockAsync(long orderId)
+    private async Task AcquireOrderStateLocksAsync(long orderId)
+    {
+        var salesOrderId = await Db.PurchaseOrders.AsNoTracking()
+            .Where(o => o.Id == orderId && !o.IsDeleted)
+            .Select(o => (long?)o.OwningSalesOrderId)
+            .FirstOrDefaultAsync();
+        if (salesOrderId is > 0)
+            await AcquireSalesOrderLinkLockAsync(salesOrderId.Value);
+        await AcquirePurchaseOrderLockAsync(orderId);
+    }
+
+    /// <summary>对采购订单行加更新锁（UPDLOCK, HOLDLOCK）；非关系型提供程序跳过。</summary>
+    private async Task AcquirePurchaseOrderLockAsync(long orderId)
     {
         if (!Db.Database.IsRelational()) return;
         await Db.Database
@@ -508,5 +588,157 @@ public class PurchaseOrderController : DocumentControllerBase<PurchaseOrder>
                 "SELECT Id FROM db_owner.PurchaseOrders WITH (UPDLOCK, HOLDLOCK) WHERE Id = {0}",
                 orderId)
             .ToListAsync();
+    }
+
+    /// <summary>
+    /// 提交（ERP-371）：与本采购订单行锁 / 可串行化事务同口径，锁内先复核实时授权，
+    /// 被拒绝时不改任何状态；授权接入后既有 Pending → Submitted 语义不变。
+    /// </summary>
+    [HttpPost("{id:long}/submit")]
+    public override async Task<IActionResult> Submit(long id)
+    {
+        await using var transaction = await Db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
+        try
+        {
+            await AcquireOrderStateLocksAsync(id);
+
+            var entity = await GetOrThrowAsync(id, "采购订单不存在");
+            await EnsureOrderAuthorizedAsync(entity);
+
+            var result = await base.Submit(id);
+            await transaction.CommitAsync();
+            return result;
+        }
+        catch
+        {
+            await transaction.RollbackAsync();
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// 审核（ERP-371）：与提交 / 取消同一把本采购订单行锁 + 可串行化事务，锁内复核实时授权，
+    /// 并重新校验归属来源销售订单仍为权威可用（存在、未删除、已审核、未取消）——
+    /// 并发场景下「来源失效」与「采购审核」不可能同时成功，消除审核与来源作废的竞争。
+    /// </summary>
+    [HttpPost("{id:long}/approve")]
+    public override async Task<IActionResult> Approve(long id)
+    {
+        await using var transaction = await Db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
+        try
+        {
+            await AcquireOrderStateLocksAsync(id);
+
+            var entity = await GetOrThrowAsync(id, "采购订单不存在");
+            await EnsureOrderAuthorizedAsync(entity);
+            await PurchaseSalesOrderLinkRules.EnsureSourceLinkStillValidAsync(Db, entity.OwningSalesOrderId);
+
+            var result = await base.Approve(id);
+            await transaction.CommitAsync();
+            return result;
+        }
+        catch
+        {
+            await transaction.RollbackAsync();
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// 删除（软删除，仅待提交）：与本采购订单行锁 / 可串行化事务同口径，锁内先复核实时授权，
+    /// 被拒绝时不删除任何单据 / 明细，历史审计证据保持不变。
+    /// </summary>
+    [HttpDelete("{id:long}")]
+    public override async Task<IActionResult> Delete(long id)
+    {
+        await using var transaction = await Db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
+        try
+        {
+            await AcquireOrderStateLocksAsync(id);
+
+            var entity = await GetOrThrowAsync(id, "采购订单不存在");
+            await EnsureOrderAuthorizedAsync(entity);
+
+            var result = await base.Delete(id);
+            await transaction.CommitAsync();
+            return result;
+        }
+        catch
+        {
+            await transaction.RollbackAsync();
+            throw;
+        }
+    }
+
+    // ==================== ERP-371：实时授权辅助（身份 / 菜单 / 权威客户范围） ====================
+
+    /// <summary>
+    /// 是否必须执行实时授权：真实 HTTP 请求（MVC 绑定，<c>Request.Path</c> 已赋值）一律执行；
+    /// 进程内直接调用（历史单元测试 / 内部派生读取，无 HTTP 请求管线）仅在携带当前登录身份时执行。
+    /// 只对「既无任何登录身份、又不在 HTTP 请求管线内」的调用免授权：这类调用不可能由外部请求到达，
+    /// 也绝不把缺失身份当作管理员（真实匿名请求因处于请求管线内一律 fail closed）。
+    /// </summary>
+    private bool RequiresLiveAuthorization()
+    {
+        var http = ControllerContext?.HttpContext;
+        if (http is null) return false;
+        return http.Request.Path.HasValue || CurrentUserId() is not null;
+    }
+
+    /// <summary>身份 / 账号状态 / 菜单授权（fail closed）：缺失 / 已删除按未认证，禁用 / 无菜单按权限不足。</summary>
+    private async Task EnsureMenuAuthorizedAsync()
+    {
+        if (!RequiresLiveAuthorization()) return;
+        await PurchaseOrderAuthorizationRules.EnsureMenuAuthorizedAsync(Db, CurrentUserId());
+    }
+
+    /// <summary>单据级授权：身份 / 菜单 + 权威归属客户范围（显式归属客户 + 权威归属销售订单客户）。</summary>
+    private async Task EnsureOrderAuthorizedAsync(PurchaseOrder order)
+    {
+        if (!RequiresLiveAuthorization()) return;
+        await PurchaseOrderAuthorizationRules.EnsureOrderAuthorizedAsync(Db, CurrentUserId(), order);
+    }
+
+    /// <summary>请求侧（创建 / 修改提交的归属）授权：先校验再分配字段 / 替换明细 / 消耗单据号。</summary>
+    private async Task EnsureProposedAuthorizedAsync(PurchaseOrder proposed)
+    {
+        if (!RequiresLiveAuthorization()) return;
+        await PurchaseOrderAuthorizationRules.EnsureProposedAuthorizedAsync(Db, CurrentUserId(), proposed);
+    }
+
+    /// <summary>按 Id 复核单张采购订单的权威归属客户范围（详情 / 打印 / 派生只读视图使用）。</summary>
+    private async Task EnsureOrderIdAuthorizedAsync(long id)
+    {
+        if (!RequiresLiveAuthorization()) return;
+        var ownership = await PurchaseOrderAuthorizationRules.LoadOwnershipAsync(Db, new[] { id });
+        await PurchaseOrderAuthorizationRules.EnsureOrdersAuthorizedAsync(Db, CurrentUserId(), ownership);
+    }
+
+    /// <summary>按 Id 批量复核采购订单权威归属客户范围（列表用批量派生汇总使用）。</summary>
+    private async Task EnsureOrderIdsAuthorizedAsync(IReadOnlyCollection<long> ids)
+    {
+        if (!RequiresLiveAuthorization() || ids.Count == 0) return;
+        var ownership = await PurchaseOrderAuthorizationRules.LoadOwnershipAsync(Db, ids);
+        await PurchaseOrderAuthorizationRules.EnsureOrdersAuthorizedAsync(Db, CurrentUserId(), ownership);
+    }
+
+    /// <summary>列表 / 导出的权威客户范围下推（计数 / 分页之前）；非 HTTP / 无身份的内部调用不改变既有查询。</summary>
+    private async Task<IQueryable<PurchaseOrder>> ApplyProcurementScopeAsync(IQueryable<PurchaseOrder> source)
+    {
+        if (!RequiresLiveAuthorization()) return source;
+        return await PurchaseOrderAuthorizationRules.ApplyScopeAsync(Db, source, CurrentUserId());
+    }
+
+    /// <summary>解析逗号分隔的订单 Id（与既有批量证据接口同一入参口径，非法片段忽略）。</summary>
+    private static List<long> ParseOrderIds(string? ids)
+    {
+        var result = new List<long>();
+        if (string.IsNullOrWhiteSpace(ids)) return result;
+        foreach (var segment in ids.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (long.TryParse(segment, out var id) && id > 0)
+                result.Add(id);
+        }
+        return result;
     }
 }

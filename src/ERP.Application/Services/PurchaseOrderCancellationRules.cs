@@ -53,30 +53,14 @@ public static class PurchaseOrderCancellationRules
 
     // ==================== 授权（fail closed） ====================
 
-    /// <summary>身份 / 菜单 / 客户数据范围三重校验：任一缺失即拒绝，绝不猜测身份或范围。</summary>
+    /// <summary>
+    /// 身份 / 账号状态 / 菜单 / 客户数据范围校验（ERP-371 起统一收敛到
+    /// <see cref="PurchaseOrderAuthorizationRules.EnsureOrderAuthorizedAsync"/>）：菜单授权每次请求重新解析，
+    /// 范围同时覆盖显式归属客户与权威归属销售订单客户，任一缺失即拒绝，绝不猜测身份或范围。
+    /// </summary>
     private static async Task EnsureAuthorizedAsync(
         IErpDbContext db, PurchaseOrder order, long? userId, CancellationToken ct)
-    {
-        if (userId is null or <= 0)
-            throw new BusinessException("请先登录后再取消采购订单", ErrorCodes.Unauthorized);
-
-        var menuCodes = await CustomerReceivableReconciliationService.LoadAuthorizedMenuCodesAsync(db, userId.Value);
-        if (!menuCodes.Contains(RequiredMenuCode, StringComparer.OrdinalIgnoreCase))
-        {
-            throw new BusinessException(
-                $"当前账号没有「{RequiredMenuText}」（{RequiredMenuCode}）模块授权：拒绝取消采购订单" +
-                "（fail closed，不执行任何状态变更）",
-                ErrorCodes.Forbidden);
-        }
-
-        var scope = await SalespersonDataScopeService.ResolveAsync(db, userId.Value);
-        if (!scope.AllowsCustomer(order.OwningCustomerId))
-        {
-            throw new BusinessException(
-                "当前账号的客户数据范围不包含该采购订单的归属客户：拒绝取消（fail closed，不泄露范围外订单）",
-                ErrorCodes.Forbidden);
-        }
-    }
+        => await PurchaseOrderAuthorizationRules.EnsureOrderAuthorizedAsync(db, userId, order, ct);
 
     // ==================== 实时单据状态 ====================
 

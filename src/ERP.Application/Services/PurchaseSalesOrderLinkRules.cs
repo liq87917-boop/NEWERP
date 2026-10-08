@@ -62,6 +62,26 @@ public static class PurchaseSalesOrderLinkRules
         entity.OwningSalesOrderNo = link.Order.OrderNo;
     }
 
+    /// <summary>
+    /// 状态流转（尤其是审核）在锁内重新校验归属来源仍为权威可用：来源销售订单必须存在、未删除、已审核且未被取消。
+    /// 未链接（null / 非正）直接返回；任一不满足即 fail closed，拒绝「来源已作废」的采购审核（消除审核与来源失效的竞争）。
+    /// </summary>
+    public static async Task EnsureSourceLinkStillValidAsync(IErpDbContext db, long? owningSalesOrderId,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        if (owningSalesOrderId is null or <= 0) return;
+
+        var order = await db.SalesOrders.AsNoTracking()
+            .FirstOrDefaultAsync(o => o.Id == owningSalesOrderId.Value && !o.IsDeleted, ct)
+            ?? throw BusinessException.RuleConflict("归属销售订单不存在或已删除，不能作为采购备货来源");
+        if (order.Status == DocumentStatus.Cancelled)
+            throw BusinessException.RuleConflict("归属销售订单已取消，不能作为采购备货来源");
+        if (order.Status != DocumentStatus.Approved)
+            throw BusinessException.RuleConflict("归属销售订单未审核，不能作为采购备货来源");
+    }
+
+
     // ==================== 私有助手 ====================
 
     private static async Task<LinkContext> ResolveAuthoritativeLinkOrThrowAsync(
@@ -96,19 +116,13 @@ public static class PurchaseSalesOrderLinkRules
         return new LinkContext(order, customer);
     }
 
-    /// <summary>身份 / 模块授权双重校验：任一缺失即拒绝，绝不猜测身份或范围。</summary>
+    /// <summary>
+    /// 身份 / 账号状态 / 模块授权校验（ERP-371 起统一收敛到
+    /// <see cref="PurchaseOrderAuthorizationRules.EnsureMenuAuthorizedAsync"/>）：缺失 / 已删除身份按未认证拒绝，
+    /// 禁用账号与缺少既有 <c>purchase-order</c> 菜单授权按权限不足拒绝，绝不猜测身份或范围。
+    /// </summary>
     private static async Task EnsureAuthorizedAsync(IErpDbContext db, long? userId, CancellationToken ct)
-    {
-        if (userId is null or <= 0)
-            throw new BusinessException("请先登录后再关联销售订单", ErrorCodes.Unauthorized);
-
-        var menuCodes = await CustomerReceivableReconciliationService.LoadAuthorizedMenuCodesAsync(db, userId.Value);
-        if (!menuCodes.Contains(RequiredMenuCode, StringComparer.OrdinalIgnoreCase))
-            throw new BusinessException(
-                $"当前账号没有「{RequiredMenuText}」（{RequiredMenuCode}）模块授权：拒绝关联销售订单" +
-                "（fail closed，不执行任何写入）",
-                ErrorCodes.Forbidden);
-    }
+        => await PurchaseOrderAuthorizationRules.EnsureMenuAuthorizedAsync(db, userId, ct);
 
     /// <summary>商品 / 单位兼容性：采购明细商品必须能在来源销售订单明细中找到，且单位兼容。</summary>
     private static void EnsureProductAndUnitCompatible(PurchaseOrder entity, SalesOrder order)

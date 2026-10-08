@@ -1,11 +1,10 @@
 {
   "schema_version": 2,
   "project": "NEWERP",
-  "updated_at": "2026-10-08T12:14:15.157513Z",
+  "updated_at": "2026-10-08T12:18:56.485219Z",
   "phase": "ready",
   "current_task": null,
   "queue": [
-    "ERP-371",
     "ERP-372",
     "ERP-373",
     "ERP-374"
@@ -354,39 +353,36 @@
     "ERP-367",
     "ERP-368",
     "ERP-369",
-    "ERP-370"
+    "ERP-370",
+    "ERP-371"
   ],
   "blocked": [],
   "last_build": {
-    "task": "ERP-370",
+    "task": "ERP-371",
     "profile": "safe",
     "status": "passed",
     "exit_code": 0,
-    "log": ".ai\\logs\\ERP-370-validation-1.log",
-    "at": "2026-10-08T11:57:19.736166Z"
+    "log": ".ai\\logs\\ERP-371-validation-2.log",
+    "at": "2026-10-08T12:18:55.859618Z"
   },
-  "last_error": {
-    "task": "ERP-371",
-    "kind": "automatic_repair_pending",
-    "summary": "Path guard failed:\noutside allowed_paths: src/ERP.IntegrationTests/StockOutAuthorizationSqlServerTests.cs"
-  },
+  "last_error": null,
   "last_deepseek_fix": {
     "task": "ERP-371",
-    "attempts": 3,
-    "status": "retry_pending",
-    "at": "2026-10-08T12:14:14.778744Z"
+    "attempt": 2,
+    "model": "deepseek-flash",
+    "exit_code": 0,
+    "finished_at": "2026-10-08T12:18:19.513064Z"
   },
   "git_sync": {
     "branch": "main",
-    "local_sha": "19a810d",
-    "status": "synced",
+    "local_sha": "c65577a",
+    "status": "pending",
     "ahead": 0,
     "behind": 0,
-    "last_attempt_at": "2026-10-08T11:57:25.730537Z",
+    "last_attempt_at": "2026-10-08T12:18:56.360035Z",
     "last_error": null
   },
   "next_recommended_tasks": [
-    "ERP-371",
     "ERP-372",
     "ERP-373",
     "ERP-374"
@@ -394,7 +390,5 @@
   "runner": {
     "status": "stopped",
     "pid": null
-  },
-  "blocker": null,
-  "finish_reason": "deepseek_supervisor_recovery"
+  }
 }
