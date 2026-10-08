@@ -30,7 +30,10 @@ namespace ERP.Api.Controllers;
 /// 也不解析、抓取或回填单证既有的「附件说明 / 存放位置」自由文本；
 /// 生产库结构变更仍由 Human Gate 控制（建表 / 索引由 SchemaUpgrader 幂等补齐）。</para>
 /// <para>授权：全部接口（含内容下载）均要求与销售订单 / 采购订单工作流相同的 JWT 认证与模块授权；
-/// 下载还会在服务端重新校验证据状态与归属单据存在性，不能靠知道 Id 绕过。</para>
+/// ERP-407 起，普通路由（台账 / 按归属清单 / 归属候选 / 归属摘要 / 详情 / 上传 / 下载 / 作废）与附件中心工作台
+/// 统一复用 <see cref="AttachmentOwnerAuthorizationRules"/> 的「实时启用身份 + 归属类型对应的既有父单据模块菜单 +
+/// ERP-097 客户数据范围」三重护栏（范围在计数 / 分页之前下推，未授权类型与范围外归属一律 fail closed，
+/// 内容只有通过授权后才读取存储），因此不能靠改变查询参数或知道 Id 绕过父单据工作流的授权。</para>
 /// </summary>
 [ApiController]
 [Route("api/attachment-evidences")]
@@ -54,19 +57,27 @@ public class AttachmentEvidenceController : ControllerBase
     public async Task<IActionResult> GetPaged(
         [FromQuery] AttachmentEvidenceQuery query, CancellationToken cancellationToken = default)
         => Ok(ApiResponse<PagedResult<AttachmentEvidenceDto>>.Success(
-            await AttachmentEvidenceService.ListAsync(_db, query, cancellationToken)));
+            await AttachmentEvidenceService.ListAsync(
+                _db, query, cancellationToken, await ResolveAccessAsync(cancellationToken))));
 
     /// <summary>
     /// 模块元数据（只读）：白名单归属类型 / 格式 / 状态、大小与分页上下界、当前内容存储提供程序
     /// （本阶段固定为隔离的非生产本地存储）与全部口径文案，供界面与接口同源显示。
+    /// <para>ERP-407：模块元数据是静态口径（不读取任何记录 / 计数 / 内容），但仍要求实时启用身份，
+    /// 缺失 / 已删除 / 已禁用一律 fail closed。</para>
     /// </summary>
     [HttpGet("metadata")]
-    public IActionResult Metadata()
-        => Ok(ApiResponse<AttachmentEvidenceMetadataDto>.Success(AttachmentEvidenceService.GetMetadata(_store)));
+    public async Task<IActionResult> Metadata(CancellationToken cancellationToken = default)
+    {
+        await AttachmentOwnerAuthorizationRules.EnsureLiveIdentityAsync(
+            _db, CurrentUserId(), cancellationToken);
+        return Ok(ApiResponse<AttachmentEvidenceMetadataDto>.Success(AttachmentEvidenceService.GetMetadata(_store)));
+    }
 
     /// <summary>
     /// 指定归属单据的证据清单（**有界**，单据详情工作流用；默认含已作废历史）：
-    /// 归属单据必须存在且未删除（服务端重新校验，查询参数不能绕过）。
+    /// 归属单据必须存在且未删除（服务端重新校验，查询参数不能绕过），且必须落在当前账号的
+    /// 归属类型既有菜单授权与客户数据范围内（ERP-407）。
     /// </summary>
     [HttpGet("by-owner")]
     public async Task<IActionResult> GetForOwner(
@@ -77,7 +88,8 @@ public class AttachmentEvidenceController : ControllerBase
         CancellationToken cancellationToken = default)
         => Ok(ApiResponse<List<AttachmentEvidenceDto>>.Success(
             await AttachmentEvidenceService.ListForOwnerAsync(
-                _db, ownerType, ownerId, status, take, cancellationToken)));
+                _db, ownerType, ownerId, status, take, cancellationToken,
+                await ResolveAccessAsync(cancellationToken))));
 
     /// <summary>
     /// 可挂附件证据的单据候选（只读、**有界**）：只列出未删除的销售订单 / 采购订单 / 出口单证 /
@@ -91,7 +103,9 @@ public class AttachmentEvidenceController : ControllerBase
         [FromQuery] int take = AttachmentEvidenceService.MaxOwnerOptions,
         CancellationToken cancellationToken = default)
         => Ok(ApiResponse<List<AttachmentEvidenceOwnerOptionDto>>.Success(
-            await AttachmentEvidenceService.ListOwnerOptionsAsync(_db, ownerType, keyword, take, cancellationToken)));
+            await AttachmentEvidenceService.ListOwnerOptionsAsync(
+                _db, ownerType, keyword, take, cancellationToken,
+                await ResolveAccessAsync(cancellationToken))));
 
     /// <summary>
     /// 归属单据的附件证据**有界摘要**（ERP-062，只读）：按 <c>ids=1,2,3</c>（或重复 <c>ids</c> 参数）
@@ -107,7 +121,8 @@ public class AttachmentEvidenceController : ControllerBase
         CancellationToken cancellationToken = default)
         => Ok(ApiResponse<List<AttachmentEvidenceOwnerSummaryDto>>.Success(
             await AttachmentEvidenceService.SummarizeOwnersAsync(
-                _db, ownerType, AttachmentEvidenceRules.ParseOwnerIds(ids), cancellationToken)));
+                _db, ownerType, AttachmentEvidenceRules.ParseOwnerIds(ids), cancellationToken,
+                await ResolveAccessAsync(cancellationToken))));
 
     // ==================== ERP-064：附件中心工作台（只读、分页、按既有「角色 → 菜单」授权收敛） ====================
 
@@ -183,7 +198,8 @@ public class AttachmentEvidenceController : ControllerBase
     [HttpGet("{id:long}")]
     public async Task<IActionResult> GetById(long id, CancellationToken cancellationToken = default)
         => Ok(ApiResponse<AttachmentEvidenceDto>.Success(
-            await AttachmentEvidenceService.GetAsync(_db, id, cancellationToken)));
+            await AttachmentEvidenceService.GetAsync(
+                _db, id, cancellationToken, await ResolveAccessAsync(cancellationToken))));
 
     /// <summary>
     /// 上传附件证据（multipart/form-data）：只接受 PDF / PNG / JPEG，大小有界（20 MiB）；
@@ -201,6 +217,9 @@ public class AttachmentEvidenceController : ControllerBase
     {
         if (file is null)
             throw BusinessException.InvalidParameter("请选择要上传的附件文件（表单字段名必须为 file）");
+
+        // ERP-407：先解析授权（实时身份 + 归属类型菜单 + 客户范围），**再**打开 / 读取文件内容
+        var access = await ResolveAccessAsync(cancellationToken);
 
         AttachmentEvidenceDto result;
         await using (var content = file.OpenReadStream())
@@ -220,7 +239,8 @@ public class AttachmentEvidenceController : ControllerBase
                 },
                 CurrentUserName(),
                 CurrentUserId(),
-                cancellationToken);
+                cancellationToken,
+                access);
         }
 
         return Ok(ApiResponse<AttachmentEvidenceDto>.Success(
@@ -236,7 +256,8 @@ public class AttachmentEvidenceController : ControllerBase
     [HttpGet("{id:long}/content")]
     public async Task<IActionResult> DownloadContent(long id, CancellationToken cancellationToken = default)
     {
-        var content = await AttachmentEvidenceService.OpenContentAsync(_db, _store, id, cancellationToken);
+        var content = await AttachmentEvidenceService.OpenContentAsync(
+            _db, _store, id, cancellationToken, await ResolveAccessAsync(cancellationToken));
 
         SetDefensiveDownloadHeaders();
 
@@ -251,8 +272,17 @@ public class AttachmentEvidenceController : ControllerBase
     public async Task<IActionResult> Void(
         long id, [FromBody] AttachmentEvidenceVoidRequest? request, CancellationToken cancellationToken = default)
         => Ok(ApiResponse<AttachmentEvidenceDto>.Success(
-            await AttachmentEvidenceService.VoidAsync(_db, id, request?.Reason, cancellationToken),
+            await AttachmentEvidenceService.VoidAsync(
+                _db, id, request?.Reason, cancellationToken, await ResolveAccessAsync(cancellationToken)),
             "附件证据已作废（原始文件名 / 摘要 / 登记历史保留可读；内容不再提供下载，不提供硬删除与二进制替换）"));
+
+    /// <summary>
+    /// ERP-407：解析当前请求的权威附件证据访问上下文（实时启用身份 + 归属类型对应的既有父单据模块菜单授权 +
+    /// ERP-097 客户数据范围），必须在读取任何元数据 / 计数 / 文件名 / 摘要 / 内容 / 存储或写入之前调用；
+    /// 缺失 / 非法 / 已删除身份按未认证拒绝，已禁用账号按权限不足拒绝，绝不退化为匿名或管理员。
+    /// </summary>
+    private Task<AttachmentOwnerAccessContext> ResolveAccessAsync(CancellationToken cancellationToken)
+        => AttachmentOwnerAuthorizationRules.ResolveAsync(_db, CurrentUserId(), cancellationToken);
 
     /// <summary>当前登录用户名（缺失时返回 null，由服务端统一记为「未知用户」，绝不猜测身份）</summary>
     private string? CurrentUserName()

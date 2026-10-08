@@ -64,7 +64,8 @@ public static class AttachmentEvidenceService
         AttachmentEvidenceUploadRequest request,
         string? uploadedBy,
         long? uploadedById,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        AttachmentOwnerAccessContext? access = null)
     {
         ArgumentNullException.ThrowIfNull(db);
         ArgumentNullException.ThrowIfNull(store);
@@ -73,9 +74,17 @@ public static class AttachmentEvidenceService
         // 0) 内容存储：开发 / 测试只允许隔离的非生产提供程序（生产 OSS 未实现、未注册、未激活）
         EnsureIsolatedStorageProvider(store);
 
-        // 1) 归属单据：白名单类型 + 必须指向存在且未删除的权威单据（服务端复核，不接受客户端快照）
+        // 0.1) ERP-407 授权（**先于**读取文件与写入任何内容）：归属类型既有菜单授权 + 归属客户实时数据范围
         var ownerType = AttachmentEvidenceRules.NormalizeOwnerType(request.OwnerType);
+        if (access is not null)
+            AttachmentOwnerAuthorizationRules.EnsureOwnerTypeAuthorized(access, ownerType);
+
+        // 1) 归属单据：白名单类型 + 必须指向存在且未删除的权威单据（服务端复核，不接受客户端快照）
         var owner = await LoadOwnerAsync(db, ownerType, request.OwnerId, cancellationToken);
+
+        if (access is not null)
+            await AttachmentOwnerAuthorizationRules.EnsureOwnershipScopeAsync(
+                db, access, owner.Ownership(), false, cancellationToken);
 
         // 2) 有界读取内容：声明长度先做快速拒绝，实际读取超限立即中止（不保存任何内容）
         var content = await ReadBoundedAsync(request.Content, request.DeclaredLength, cancellationToken);
@@ -187,7 +196,8 @@ public static class AttachmentEvidenceService
     /// 默认包含已作废历史（原始元数据保留可读）；页内归属单据可用性**批量装载**（每类型最多一次查询）。
     /// </summary>
     public static async Task<PagedResult<AttachmentEvidenceDto>> ListAsync(
-        IErpDbContext db, AttachmentEvidenceQuery? query = null, CancellationToken cancellationToken = default)
+        IErpDbContext db, AttachmentEvidenceQuery? query = null, CancellationToken cancellationToken = default,
+        AttachmentOwnerAccessContext? access = null)
     {
         ArgumentNullException.ThrowIfNull(db);
 
@@ -208,6 +218,11 @@ public static class AttachmentEvidenceService
         var keyword = AttachmentEvidenceRules.NormalizeKeyword(request.Keyword);
 
         var source = db.AttachmentEvidences.AsNoTracking().Where(r => !r.IsDeleted);
+
+        // ERP-407：归属类型 + 客户范围在**计数与分页之前**下推到数据库（未授权 / 范围外一律不计数、不泄露）
+        if (access is not null)
+            source = AttachmentOwnerAuthorizationRules.ApplyEvidenceScope(db, source, access, ownerType);
+
         if (ownerType is not null) source = source.Where(r => r.OwnerType == ownerType);
         if (ownerId is not null) source = source.Where(r => r.OwnerId == ownerId.Value);
         if (status is not null) source = source.Where(r => r.Status == status.Value);
@@ -244,12 +259,23 @@ public static class AttachmentEvidenceService
         long ownerId,
         int? status = null,
         int take = MaxPerOwner,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        AttachmentOwnerAccessContext? access = null)
     {
         ArgumentNullException.ThrowIfNull(db);
 
         var type = AttachmentEvidenceRules.NormalizeOwnerType(ownerType);
+
+        // ERP-407：归属类型既有菜单授权 + 归属客户实时数据范围（**先于**任何归属读取与计数）
+        if (access is not null)
+            AttachmentOwnerAuthorizationRules.EnsureOwnerTypeAuthorized(access, type);
+
         var owner = await LoadOwnerAsync(db, type, ownerId, cancellationToken);
+
+        if (access is not null)
+            await AttachmentOwnerAuthorizationRules.EnsureOwnershipScopeAsync(
+                db, access, owner.Ownership(), false, cancellationToken);
+
         var statusFilter = AttachmentEvidenceRules.NormalizeStatusFilter(status);
         var bounded = Math.Clamp(take <= 0 ? MaxPerOwner : take, 1, MaxPerOwner);
 
@@ -267,10 +293,17 @@ public static class AttachmentEvidenceService
 
     /// <summary>证据详情（只读）：归属单据已删除 / 缺失时照实标注不可用，历史证据仍可只读查看。</summary>
     public static async Task<AttachmentEvidenceDto> GetAsync(
-        IErpDbContext db, long id, CancellationToken cancellationToken = default)
+        IErpDbContext db, long id, CancellationToken cancellationToken = default,
+        AttachmentOwnerAccessContext? access = null)
     {
         ArgumentNullException.ThrowIfNull(db);
         var row = await LoadAsync(db, id, cancellationToken);
+
+        // ERP-407：正证据 Id 必须先复核归属类型菜单授权与权威归属客户范围（不披露存在性）
+        if (access is not null)
+            await AttachmentOwnerAuthorizationRules.EnsureEvidenceAuthorizedAsync(
+                db, access, row, cancellationToken);
+
         var ownerAvailable = await IsOwnerAvailableAsync(db, row.OwnerType, row.OwnerId, cancellationToken);
         return Map(row, ownerAvailable);
     }
@@ -287,12 +320,18 @@ public static class AttachmentEvidenceService
     /// <para>返回的内容只含文件名 / 媒体类型 / 长度 / 摘要与只读流，<strong>不</strong>含存储键或任何路径。</para>
     /// </summary>
     public static async Task<AttachmentEvidenceContentDto> OpenContentAsync(
-        IErpDbContext db, IAttachmentContentStore store, long id, CancellationToken cancellationToken = default)
+        IErpDbContext db, IAttachmentContentStore store, long id, CancellationToken cancellationToken = default,
+        AttachmentOwnerAccessContext? access = null)
     {
         ArgumentNullException.ThrowIfNull(db);
         ArgumentNullException.ThrowIfNull(store);
 
         var row = await LoadAsync(db, id, cancellationToken);
+
+        // ERP-407：内容读取之前必须先复核归属类型菜单授权与权威归属客户范围（绝不先碰存储）
+        if (access is not null)
+            await AttachmentOwnerAuthorizationRules.EnsureEvidenceAuthorizedAsync(
+                db, access, row, cancellationToken);
 
         if (row.Status != AttachmentEvidenceRules.StatusActive)
             throw BusinessException.RuleConflict(
@@ -350,11 +389,18 @@ public static class AttachmentEvidenceService
     /// 存储键、归属与上传人，不物理删除、不替换内容、不改派归属；重复作废拒绝。
     /// </summary>
     public static async Task<AttachmentEvidenceDto> VoidAsync(
-        IErpDbContext db, long id, string? reason, CancellationToken cancellationToken = default)
+        IErpDbContext db, long id, string? reason, CancellationToken cancellationToken = default,
+        AttachmentOwnerAccessContext? access = null)
     {
         ArgumentNullException.ThrowIfNull(db);
 
         var row = await LoadAsync(db, id, cancellationToken);
+
+        // ERP-407：写入（作废）之前必须先复核归属类型菜单授权与权威归属客户范围
+        if (access is not null)
+            await AttachmentOwnerAuthorizationRules.EnsureEvidenceAuthorizedAsync(
+                db, access, row, cancellationToken);
+
         if (row.Status == AttachmentEvidenceRules.StatusVoided)
             throw BusinessException.Duplicate(
                 $"该附件证据已作废（{row.VoidedAt:yyyy-MM-dd HH:mm}，原因：{row.VoidReason}）：不重复作废；"
@@ -424,13 +470,16 @@ public static class AttachmentEvidenceService
     /// <summary>
     /// 归属单据候选（只读、**有界**）：只列出未删除的销售订单 / 采购订单 / 出口单证，并批量统计已有
     /// 证据条数（含已作废历史）；只用于**显式选择**归属，绝不按号码、名称或文件名猜测。
+    /// <para>ERP-407：<paramref name="access"/> 非空时先复核归属类型既有菜单授权，并把客户数据范围下推到
+    /// 候选查询（受限账号未映射业务员 / 无可见客户 → 授权不足拒绝，绝不泄露范围外单据）。</para>
     /// </summary>
     public static async Task<List<AttachmentEvidenceOwnerOptionDto>> ListOwnerOptionsAsync(
         IErpDbContext db,
         string? ownerType,
         string? keyword,
         int take = MaxOwnerOptions,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        AttachmentOwnerAccessContext? access = null)
     {
         ArgumentNullException.ThrowIfNull(db);
 
@@ -438,10 +487,21 @@ public static class AttachmentEvidenceService
         var filter = AttachmentEvidenceRules.NormalizeKeyword(keyword);
         var bounded = Math.Clamp(take <= 0 ? MaxOwnerOptions : take, 1, MaxOwnerOptions);
 
+        if (access is not null)
+        {
+            AttachmentOwnerAuthorizationRules.EnsureOwnerTypeAuthorized(access, type);
+            if (!access.IsPrivileged
+                && (access.Scope.AllowedCustomerIds is null || access.Scope.AllowedCustomerIds.Count == 0))
+                throw new BusinessException(
+                    AttachmentOwnerAuthorizationRules.UnmappedOperatorText, ErrorCodes.Forbidden);
+        }
+
         if (type == AttachmentEvidenceRules.OwnerTypeSalesOrder)
         {
             var query = db.SalesOrders.AsNoTracking().Where(o => !o.IsDeleted);
             if (filter is not null) query = query.Where(o => o.OrderNo.Contains(filter));
+            if (access is not null)
+                query = AttachmentOwnerAuthorizationRules.ApplySalesOrderScope(query, access.Scope);
 
             var rows = await query
                 .OrderByDescending(o => o.OrderDate).ThenByDescending(o => o.Id)
@@ -457,6 +517,8 @@ public static class AttachmentEvidenceService
         {
             var purchaseQuery = db.PurchaseOrders.AsNoTracking().Where(o => !o.IsDeleted);
             if (filter is not null) purchaseQuery = purchaseQuery.Where(o => o.OrderNo.Contains(filter));
+            if (access is not null)
+                purchaseQuery = AttachmentOwnerAuthorizationRules.ApplyPurchaseOrderScope(db, purchaseQuery, access.Scope);
 
             var purchaseRows = await purchaseQuery
                 .OrderByDescending(o => o.OrderDate).ThenByDescending(o => o.Id)
@@ -474,6 +536,8 @@ public static class AttachmentEvidenceService
         {
             var inspectionQuery = db.PurchaseOrders.AsNoTracking().Where(o => !o.IsDeleted);
             if (filter is not null) inspectionQuery = inspectionQuery.Where(o => o.OrderNo.Contains(filter));
+            if (access is not null)
+                inspectionQuery = AttachmentOwnerAuthorizationRules.ApplyPurchaseOrderScope(db, inspectionQuery, access.Scope);
 
             var inspectionRows = await inspectionQuery
                 .OrderByDescending(o => o.OrderDate).ThenByDescending(o => o.Id)
@@ -491,6 +555,8 @@ public static class AttachmentEvidenceService
         {
             var sampleQuery = db.Samples.AsNoTracking().Where(s => !s.IsDeleted);
             if (filter is not null) sampleQuery = sampleQuery.Where(s => s.SampleNo.Contains(filter));
+            if (access is not null)
+                sampleQuery = AttachmentOwnerAuthorizationRules.ApplySampleScope(sampleQuery, access.Scope);
 
             var sampleRows = await sampleQuery
                 .OrderByDescending(s => s.SampleDate).ThenByDescending(s => s.Id)
@@ -508,6 +574,8 @@ public static class AttachmentEvidenceService
         {
             var documentQuery = db.TradeDocuments.AsNoTracking().Where(d => !d.IsDeleted);
             if (filter is not null) documentQuery = documentQuery.Where(d => d.DocNo.Contains(filter));
+            if (access is not null)
+                documentQuery = AttachmentOwnerAuthorizationRules.ApplyTradeDocumentScope(documentQuery, access.Scope);
 
             var documentRows = await documentQuery
                 .OrderByDescending(d => d.IssueDate).ThenByDescending(d => d.Id)
@@ -536,13 +604,22 @@ public static class AttachmentEvidenceService
         IErpDbContext db,
         string? ownerType,
         IEnumerable<long>? ownerIds,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        AttachmentOwnerAccessContext? access = null)
     {
         ArgumentNullException.ThrowIfNull(db);
 
         var type = AttachmentEvidenceRules.NormalizeOwnerType(ownerType);
         var ids = AttachmentEvidenceRules.NormalizeOwnerIds(ownerIds);
         if (ids.Count == 0) return new List<AttachmentEvidenceOwnerSummaryDto>();
+
+        // ERP-407：混合归属摘要只返回权威归属落在当前客户数据范围内的 Id（范围外连零计数都不返回）
+        if (access is not null)
+        {
+            ids = await AttachmentOwnerAuthorizationRules.FilterAuthorizedOwnerIdsAsync(
+                db, access, type, ids, cancellationToken);
+            if (ids.Count == 0) return new List<AttachmentEvidenceOwnerSummaryDto>();
+        }
 
         var grouped = await CountEvidenceByStatusAsync(db, type, ids, cancellationToken);
         var owners = await LoadOwnerReferencesAsync(db, type, ids, cancellationToken);
@@ -588,35 +665,8 @@ public static class AttachmentEvidenceService
         IErpDbContext db, long? userId, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(db);
-        if (userId is null or <= 0) return new List<string>();
-
-        var roleIds = await db.SysUserRoles.AsNoTracking()
-            .Where(ur => ur.UserId == userId.Value && !ur.IsDeleted)
-            .Select(ur => ur.RoleId)
-            .ToListAsync(cancellationToken);
-        if (roleIds.Count == 0) return new List<string>();
-
-        var roleSet = roleIds.ToHashSet();
-        var menuIds = await db.SysRoleMenus.AsNoTracking()
-            .Where(rm => roleSet.Contains(rm.RoleId) && !rm.IsDeleted)
-            .Select(rm => rm.MenuId)
-            .ToListAsync(cancellationToken);
-        if (menuIds.Count == 0) return new List<string>();
-
-        var menuIdSet = menuIds.ToHashSet();
-        var menuCodes = await db.SysMenus.AsNoTracking()
-            .Where(m => menuIdSet.Contains(m.Id) && !m.IsDeleted && m.MenuType != MenuType.Button)
-            .Select(m => m.MenuCode)
-            .ToListAsync(cancellationToken);
-
-        var codes = menuCodes
-            .Where(code => !string.IsNullOrWhiteSpace(code))
-            .Select(code => code.Trim())
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-        return AttachmentEvidenceRules.SupportedOwnerTypes
-            .Where(type => codes.Contains(AttachmentEvidenceRules.RequiredMenuCodeOf(type)))
-            .ToList();
+        var access = await AttachmentOwnerAuthorizationRules.TryResolveAsync(db, userId, cancellationToken);
+        return access?.AuthorizedOwnerTypes ?? new List<string>();
     }
 
     /// <summary>
@@ -628,7 +678,16 @@ public static class AttachmentEvidenceService
     {
         ArgumentNullException.ThrowIfNull(db);
 
-        var authorized = await LoadAuthorizedOwnerTypesAsync(db, userId, cancellationToken);
+        // ERP-407：实时启用身份 + 既有菜单授权（缺失 / 已删除 / 已禁用 → 不授权任何归属类型，fail closed）
+        var access = await AttachmentOwnerAuthorizationRules.TryResolveAsync(db, userId, cancellationToken);
+        return BuildCenterScope(access, userId, userName);
+    }
+
+    /// <summary>由已解析上下文构造工作台可见范围（避免同一请求重复解析身份 / 菜单 / 数据范围）。</summary>
+    private static AttachmentEvidenceCenterScopeDto BuildCenterScope(
+        AttachmentOwnerAccessContext? access, long? userId, string? userName)
+    {
+        var authorized = access?.AuthorizedOwnerTypes ?? new List<string>();
         var authorizedSet = authorized.ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         var items = AttachmentEvidenceRules.SupportedOwnerTypes
@@ -643,7 +702,7 @@ public static class AttachmentEvidenceService
             .ToList();
 
         return new AttachmentEvidenceCenterScopeDto(
-            userId ?? 0,
+            access?.UserId ?? userId ?? 0,
             TrimTo(
                 string.IsNullOrWhiteSpace(userName) ? AttachmentEvidenceRules.UnknownText : userName,
                 AttachmentEvidenceRules.MaxUploadedByLength),
@@ -668,14 +727,18 @@ public static class AttachmentEvidenceService
     {
         ArgumentNullException.ThrowIfNull(db);
 
-        var scope = await GetCenterScopeAsync(db, userId, userName, cancellationToken);
+        var access = await AttachmentOwnerAuthorizationRules.TryResolveAsync(db, userId, cancellationToken);
+        var scope = BuildCenterScope(access, userId, userName);
         var authorized = scope.OwnerTypes.Where(o => o.Authorized).Select(o => o.OwnerType).ToList();
 
         var byType = new Dictionary<string, EvidenceStatusCounts>(StringComparer.OrdinalIgnoreCase);
-        if (authorized.Count > 0)
+        if (authorized.Count > 0 && access is not null)
         {
-            var rows = await db.AttachmentEvidences.AsNoTracking()
-                .Where(r => !r.IsDeleted && authorized.Contains(r.OwnerType))
+            // ERP-407：计数在「归属类型授权 + 客户数据范围」之后（下推数据库），未授权 / 范围外连计数都没有
+            var scoped = AttachmentOwnerAuthorizationRules.ApplyEvidenceScope(
+                db, db.AttachmentEvidences.AsNoTracking().Where(r => !r.IsDeleted), access, null);
+
+            var rows = await scoped
                 .GroupBy(r => new { r.OwnerType, r.Status })
                 .Select(g => new { g.Key.OwnerType, g.Key.Status, Count = g.Count() })
                 .ToListAsync(cancellationToken);
@@ -774,16 +837,18 @@ public static class AttachmentEvidenceService
             requestedOwnerType = AttachmentEvidenceRules.NormalizeOwnerType(request.OwnerType);
 
         // 授权可见范围（fail closed）：无身份 / 无角色 / 无相关菜单 → 空页；显式未授权类型 → 空页（不披露存在性）
-        var authorized = await LoadAuthorizedOwnerTypesAsync(db, userId, cancellationToken);
-        if (authorized.Count == 0) return EmptyPage(page, pageSize);
+        var access = await AttachmentOwnerAuthorizationRules.TryResolveAsync(db, userId, cancellationToken);
+        var authorized = access?.AuthorizedOwnerTypes ?? new List<string>();
+        if (access is null || authorized.Count == 0) return EmptyPage(page, pageSize);
         if (requestedOwnerType is not null
             && !authorized.Contains(requestedOwnerType, StringComparer.OrdinalIgnoreCase))
             return EmptyPage(page, pageSize);
 
         var ownerType = requestedOwnerType;
 
-        var source = db.AttachmentEvidences.AsNoTracking()
-            .Where(r => !r.IsDeleted && authorized.Contains(r.OwnerType));
+        // ERP-407：归属类型 + 客户范围在计数 / 分页之前下推（范围外归属的记录与计数一律不返回）
+        var source = AttachmentOwnerAuthorizationRules.ApplyEvidenceScope(
+            db, db.AttachmentEvidences.AsNoTracking().Where(r => !r.IsDeleted), access, ownerType);
         if (ownerType is not null) source = source.Where(r => r.OwnerType == ownerType);
         if (ownerId is not null) source = source.Where(r => r.OwnerId == ownerId.Value);
         if (ownerNo is not null) source = source.Where(r => r.OwnerNo.Contains(ownerNo));
@@ -821,7 +886,7 @@ public static class AttachmentEvidenceService
     {
         ArgumentNullException.ThrowIfNull(db);
         var row = await LoadAsync(db, id, cancellationToken);
-        await EnsureCenterAccessAsync(db, row.OwnerType, userId, cancellationToken);
+        var access = await EnsureCenterEvidenceAsync(db, row, userId, cancellationToken);
         var ownerAvailable = await IsOwnerAvailableAsync(db, row.OwnerType, row.OwnerId, cancellationToken);
         return Map(row, ownerAvailable);
     }
@@ -839,28 +904,41 @@ public static class AttachmentEvidenceService
         ArgumentNullException.ThrowIfNull(store);
 
         var row = await LoadAsync(db, id, cancellationToken);
-        await EnsureCenterAccessAsync(db, row.OwnerType, userId, cancellationToken);
-        return await OpenContentAsync(db, store, id, cancellationToken);
+        var access = await EnsureCenterEvidenceAsync(db, row, userId, cancellationToken);
+        return await OpenContentAsync(db, store, id, cancellationToken, access);
     }
 
     /// <summary>
-    /// 工作台归属类型授权复核（fail closed）：未授权类型一律按「不存在」抛 <c>NotFound</c>，
-    /// 且消息里**不**包含证据 Id 与归属类型，避免把「存在但无权访问」与「不存在」区分出来。
+    /// 附件中心工作台的证据授权复核（fail closed、不披露存在性）：实时身份 + 归属类型既有菜单授权 +
+    /// 权威归属客户数据范围；身份不可用 / 类型未授权 / 范围外一律按「不存在」处理，绝不在复核前触碰存储。
     /// </summary>
-    private static async Task EnsureCenterAccessAsync(
-        IErpDbContext db, string? ownerType, long? userId, CancellationToken cancellationToken)
+    private static async Task<AttachmentOwnerAccessContext> EnsureCenterEvidenceAsync(
+        IErpDbContext db, AttachmentEvidence row, long? userId, CancellationToken cancellationToken)
     {
-        var authorized = await LoadAuthorizedOwnerTypesAsync(db, userId, cancellationToken);
-        if (!authorized.Contains((ownerType ?? string.Empty).Trim(), StringComparer.OrdinalIgnoreCase))
-            throw BusinessException.NotFound(
-                "附件证据不存在或当前账号无权查看（系统不披露附件 Id 与归属类型）："
-                + "附件中心工作台只显示当前账号已获菜单授权的归属类型，未授权类型不披露记录、计数、文件名或摘要");
+        var access = await AttachmentOwnerAuthorizationRules.TryResolveAsync(db, userId, cancellationToken)
+            ?? throw BusinessException.NotFound(AttachmentOwnerAuthorizationRules.NotFoundText);
+
+        AttachmentOwnerAuthorizationRules.EnsureOwnerTypeAuthorizedOrNotFound(access, row.OwnerType);
+        await AttachmentOwnerAuthorizationRules.EnsureOwnerScopeAsync(
+            db, access, row.OwnerType, row.OwnerId, true, cancellationToken);
+        return access;
     }
 
     // ==================== 7. 内部：归属单据读写（权威复核 + 批量装载） ====================
 
-    /// <summary>归属单据快照（服务端权威读取；**不**接受客户端提交的号码 / 类型快照）</summary>
-    private sealed record OwnerSnapshot(string OwnerType, long Id, string No, string StatusText);
+    /// <summary>
+    /// 归属单据快照（服务端权威读取；**不**接受客户端提交的号码 / 类型快照）：
+    /// 同时带出**权威归属字段**（销售订单 / 出口单证 / 样品的 <c>CustomerId</c>，采购订单 / 验货记录的
+    /// <c>OwningCustomerId</c> 与 <c>OwningSalesOrderId</c>），供 ERP-407 客户数据范围复核复用，
+    /// 避免二次装载父单据。
+    /// </summary>
+    private sealed record OwnerSnapshot(
+        string OwnerType, long Id, string No, string StatusText, long? CustomerId, long? OwningSalesOrderId)
+    {
+        /// <summary>权威归属投影（用于 ERP-407 客户数据范围复核）</summary>
+        public AttachmentOwnerAuthorizationRules.AttachmentOwnerOwnership Ownership()
+            => new(OwnerType, Id, Available: true, CustomerId, OwningSalesOrderId);
+    }
 
     /// <summary>候选行的中间投影（状态在内存里转文案，避免在 EF 投影中调用方法）</summary>
     private sealed record OwnerCandidate(long Id, string OrderNo, DocumentStatus Status, string SummaryText);
@@ -905,7 +983,8 @@ public static class AttachmentEvidenceService
             if (order is null)
                 throw BusinessException.NotFound(
                     $"销售订单不存在或已删除（Id={ownerId}）：请选择有效的销售订单后再上传附件证据");
-            return new OwnerSnapshot(ownerType, order.Id, order.OrderNo, StatusText(order.Status));
+            return new OwnerSnapshot(
+                ownerType, order.Id, order.OrderNo, StatusText(order.Status), order.CustomerId, null);
         }
 
         if (ownerType == AttachmentEvidenceRules.OwnerTypePurchaseOrder)
@@ -915,7 +994,9 @@ public static class AttachmentEvidenceService
             if (order is null)
                 throw BusinessException.NotFound(
                     $"采购订单不存在或已删除（Id={ownerId}）：请选择有效的采购订单后再上传附件证据");
-            return new OwnerSnapshot(ownerType, order.Id, order.OrderNo, StatusText(order.Status));
+            return new OwnerSnapshot(
+                ownerType, order.Id, order.OrderNo, StatusText(order.Status),
+                order.OwningCustomerId, order.OwningSalesOrderId);
         }
 
         if (ownerType == AttachmentEvidenceRules.OwnerTypeTradeDocument)
@@ -927,7 +1008,8 @@ public static class AttachmentEvidenceService
                     $"出口单证不存在或已删除（Id={ownerId}）：请选择有效的单证台账记录后再上传附件证据"
                     + "（系统不会按单证编号文本或「附件说明」内容猜测归属）");
             return new OwnerSnapshot(
-                ownerType, document.Id, document.DocNo, AttachmentEvidenceRules.TradeDocumentStatusText(document.Status));
+                ownerType, document.Id, document.DocNo,
+                AttachmentEvidenceRules.TradeDocumentStatusText(document.Status), document.CustomerId, null);
         }
 
         // 验货记录（ERP-063）：权威记录 = 既有采购订单上的 QC 记录（本仓库**没有**独立验货实体），
@@ -942,7 +1024,9 @@ public static class AttachmentEvidenceService
                     + $"验货状态（QcStatus），请选择有效的采购订单后再上传附件证据"
                     + "（系统不会按订单号、商品名称或文件名猜测归属）");
             return new OwnerSnapshot(
-                ownerType, order.Id, order.OrderNo, AttachmentEvidenceRules.QualityInspectionStatusText(order.QcStatus));
+                ownerType, order.Id, order.OrderNo,
+                AttachmentEvidenceRules.QualityInspectionStatusText(order.QcStatus),
+                order.OwningCustomerId, order.OwningSalesOrderId);
         }
 
         // 样品记录（ERP-063）：复核既有样品台账记录**存在且未删除**；客户反馈只作只读快照，绝不推断是否获批准
@@ -955,7 +1039,8 @@ public static class AttachmentEvidenceService
                     $"样品记录不存在或已删除（Id={ownerId}）：请选择有效的样品记录后再上传附件证据"
                     + "（系统不会按样品编号、商品名称或文件名猜测归属）");
             return new OwnerSnapshot(
-                ownerType, sample.Id, sample.SampleNo, AttachmentEvidenceRules.SampleResultText(sample.Result));
+                ownerType, sample.Id, sample.SampleNo,
+                AttachmentEvidenceRules.SampleResultText(sample.Result), sample.CustomerId, null);
         }
 
         throw BusinessException.InvalidParameter($"不支持的归属单据类型「{ownerType}」");

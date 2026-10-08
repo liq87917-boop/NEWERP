@@ -1,11 +1,10 @@
 {
   "schema_version": 2,
   "project": "NEWERP",
-  "updated_at": "2026-10-08T20:06:28.194393Z",
+  "updated_at": "2026-10-08T20:23:51.591361Z",
   "phase": "ready",
   "current_task": null,
   "queue": [
-    "ERP-407",
     "ERP-408",
     "ERP-409"
   ],
@@ -389,16 +388,17 @@
     "ERP-403",
     "ERP-404",
     "ERP-405",
-    "ERP-406"
+    "ERP-406",
+    "ERP-407"
   ],
   "blocked": [],
   "last_build": {
-    "task": "ERP-406",
+    "task": "ERP-407",
     "profile": "safe",
     "status": "passed",
     "exit_code": 0,
-    "log": ".ai\\logs\\ERP-406-validation-1.log",
-    "at": "2026-10-08T20:06:22.640164Z"
+    "log": ".ai\\logs\\ERP-407-validation-1.log",
+    "at": "2026-10-08T20:23:50.983769Z"
   },
   "last_error": null,
   "last_deepseek_fix": {
@@ -410,15 +410,14 @@
   },
   "git_sync": {
     "branch": "main",
-    "local_sha": "36731ad",
-    "status": "synced",
+    "local_sha": "a5be4c4",
+    "status": "pending",
     "ahead": 0,
     "behind": 0,
-    "last_attempt_at": "2026-10-08T20:06:28.070912Z",
+    "last_attempt_at": "2026-10-08T20:23:51.467898Z",
     "last_error": null
   },
   "next_recommended_tasks": [
-    "ERP-407",
     "ERP-408",
     "ERP-409"
   ],

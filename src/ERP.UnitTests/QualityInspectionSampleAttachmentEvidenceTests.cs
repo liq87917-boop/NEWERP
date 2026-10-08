@@ -12,6 +12,7 @@ using Microsoft.AspNetCore.Http.Metadata;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using System.Reflection;
+using System.Security.Claims;
 using System.Text;
 using Xunit;
 
@@ -435,12 +436,79 @@ public class QualityInspectionSampleAttachmentEvidenceTests
         return ex;
     }
 
-    /// <summary>构造控制器（下载等用例需要 HttpContext 才能写入防御性响应头）</summary>
-    private static AttachmentEvidenceController BuildController(ErpDbContext db, IAttachmentContentStore store)
-        => new(db, store)
+    /// <summary>ERP-407 控制器测试账号登录名（每个内存库独立，仅用于播种真实启用身份）</summary>
+    private const string ControllerUserName = "erp407-controller";
+
+    /// <summary>
+    /// ERP-407：播种一个**实时启用**的控制器账号（系统内置角色 = 特权数据范围，保留既有历史可见性），
+    /// 并授予全部白名单归属类型所需的既有菜单；使控制器普通路由具备真实身份 + 既有菜单授权。
+    /// </summary>
+    private static long SeedControllerIdentity(ErpDbContext db)
+    {
+        var existing = db.SysUsers.AsNoTracking()
+            .Where(u => u.UserName == ControllerUserName)
+            .Select(u => u.Id)
+            .FirstOrDefault();
+        if (existing > 0) return existing;
+
+        var user = new SysUser
         {
-            ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() }
+            UserName = ControllerUserName,
+            PasswordHash = "hash",
+            PasswordSalt = "salt",
+            DisplayName = "ERP-407 控制器账号",
+            Status = UserStatus.Enabled
         };
+        db.SysUsers.Add(user);
+        db.SaveChanges();
+
+        var role = new SysRole
+        {
+            RoleName = "ERP-407 系统角色",
+            RoleCode = $"ERP407_{Guid.NewGuid():N}",
+            Description = "ERP-407 控制器身份（系统内置 = 特权数据范围）",
+            IsSystem = true
+        };
+        db.SysRoles.Add(role);
+        db.SaveChanges();
+        db.SysUserRoles.Add(new SysUserRole { UserId = user.Id, RoleId = role.Id });
+        db.SaveChanges();
+
+        foreach (var code in AttachmentEvidenceRules.SupportedOwnerTypes
+                     .Select(AttachmentEvidenceRules.RequiredMenuCodeOf)
+                     .Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            var menu = new SysMenu
+            {
+                ParentId = 0,
+                MenuName = $"ERP-407 菜单 {code}",
+                MenuCode = code,
+                Path = $"/{code}",
+                Icon = "test",
+                SortOrder = 1,
+                MenuType = MenuType.Menu
+            };
+            db.SysMenus.Add(menu);
+            db.SaveChanges();
+            db.SysRoleMenus.Add(new SysRoleMenu { RoleId = role.Id, MenuId = menu.Id });
+            db.SaveChanges();
+        }
+
+        return user.Id;
+    }
+
+    /// <summary>构造控制器（下载等用例需要 HttpContext 才能写入防御性响应头）；ERP-407 起带真实启用身份</summary>
+    private static AttachmentEvidenceController BuildController(ErpDbContext db, IAttachmentContentStore store)
+    {
+        var userId = SeedControllerIdentity(db);
+        var http = new DefaultHttpContext();
+        http.User = new ClaimsPrincipal(new ClaimsIdentity(
+            new[] { new Claim(ClaimTypes.NameIdentifier, userId.ToString()) }, "Test"));
+        return new AttachmentEvidenceController(db, store)
+        {
+            ControllerContext = new ControllerContext { HttpContext = http }
+        };
+    }
 
     /// <summary>按仓库根目录拼接文件的绝对路径（与其它契约测试口径一致）</summary>
     private static string RepoFile(params string[] segments)

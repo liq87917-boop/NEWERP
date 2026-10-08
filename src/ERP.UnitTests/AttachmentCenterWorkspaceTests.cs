@@ -41,15 +41,34 @@ public class AttachmentCenterWorkspaceTests
     private static byte[] PngBytes()
         => new byte[] { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D };
 
-    /// <summary>播种「角色 → 菜单」授权（既有口径）：只授予传入的菜单编码；空数组 = 有角色但无菜单</summary>
+    /// <summary>
+    /// 播种「角色 → 菜单」授权（既有口径）：只授予传入的菜单编码；空数组 = 有角色但无菜单。
+    /// <para>ERP-407：授权复核现在还要求<strong>实时启用身份</strong>，因此同时播种一个已启用账号；
+    /// 角色标记为系统内置角色（＝特权数据范围，保留既有全部客户可见性，菜单仍是唯一收敛维度），
+    /// 与 ERP-064 原有的「只按菜单收敛」口径一致，使既有断言继续成立。</para>
+    /// </summary>
     private static SysRole SeedAuthorization(ErpDbContext db, long userId, params string[] menuCodes)
     {
+        if (!db.SysUsers.AsNoTracking().Any(u => u.Id == userId))
+        {
+            db.SysUsers.Add(new SysUser
+            {
+                Id = userId,
+                UserName = $"attachment-center-{userId}",
+                PasswordHash = "hash",
+                PasswordSalt = "salt",
+                DisplayName = $"附件中心测试账号 {userId}",
+                Status = UserStatus.Enabled
+            });
+            db.SaveChanges();
+        }
+
         var role = new SysRole
         {
             RoleName = $"附件中心测试角色 {userId}",
             RoleCode = $"AC-{userId}",
-            Description = "ERP-064 授权测试",
-            IsSystem = false
+            Description = "ERP-064 / ERP-407 授权测试",
+            IsSystem = true
         };
         db.SysRoles.Add(role);
         db.SaveChanges();
@@ -793,6 +812,7 @@ public class AttachmentCenterWorkspaceTests
 
         var list = await AttachmentEvidenceService.ListForCenterAsync(
             counting.Proxy, CenterQuery(pageSize: 1), CenterUserId);
+        var listReads = counting.DatasetReads;
         var summary = await AttachmentEvidenceService.GetCenterSummaryAsync(counting.Proxy, CenterUserId, "工作台用户");
         var smallReads = counting.DatasetReads;
 
@@ -800,18 +820,21 @@ public class AttachmentCenterWorkspaceTests
         Assert.Single(list.Items);
         Assert.Equal(1, summary.TotalCount);
 
-        // 数据集访问固定：授权（角色 / 角色菜单 / 菜单）+ 证据表（计数与本页共用同一次数据集访问）
+        // 数据集访问固定：实时授权（账号 / 角色 / 参数 / 角色菜单 / 菜单）+ 证据表（计数与本页共用同一次数据集访问）
         // + 归属（批量可用性）；台账与摘要都不逐行查库，且工作台全程只读（不落库）
         Assert.Equal(
             new[]
             {
-                nameof(IErpDbContext.SysUserRoles),
-                nameof(IErpDbContext.SysRoleMenus),
-                nameof(IErpDbContext.SysMenus),
                 nameof(IErpDbContext.AttachmentEvidences),
-                nameof(IErpDbContext.SalesOrders)
+                nameof(IErpDbContext.SalesOrders),
+                nameof(IErpDbContext.SysMenus),
+                nameof(IErpDbContext.SysParameters),
+                nameof(IErpDbContext.SysRoleMenus),
+                nameof(IErpDbContext.SysRoles),
+                nameof(IErpDbContext.SysUserRoles),
+                nameof(IErpDbContext.SysUsers)
             },
-            counting.ReadProperties.Distinct().ToArray());
+            counting.ReadProperties.Distinct().OrderBy(name => name, StringComparer.Ordinal).ToArray());
         Assert.Equal(0, counting.WriteCalls);
         Assert.Equal(uploadCalls, store.TotalCalls);          // 列表 / 摘要零存储访问
 
@@ -828,7 +851,7 @@ public class AttachmentCenterWorkspaceTests
 
         Assert.Equal(301, large.Total);
         Assert.Equal(AttachmentEvidenceCenterQuery.MaxPageSize, large.Items.Count);   // 单页有界（上限 200）
-        Assert.Equal(5, largeReads);                                                  // 固定 5 次数据集访问
+        Assert.Equal(listReads, largeReads);                                          // 数据集访问次数与页内行数无关
         Assert.Equal(0, counting.WriteCalls);
         Assert.Equal(uploadCalls, store.TotalCalls);
 
