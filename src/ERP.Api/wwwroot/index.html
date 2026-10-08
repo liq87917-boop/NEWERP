@@ -288,6 +288,9 @@
        权威客户与可发货商品行；重复 / 歧义明细、单位未知、已发货满额不可选；保留用户所选仓库；
        不臆造价格、不写库存、不绕过 ERP-343 / ERP-359 / ERP-367 护栏） -->
   <script src="/js/stock-out-source-picker.js"></script>
+  <!-- ERP-377：采购退货来源采购入库单显式选择器（只读有界候选 + 逐商品净可退容量 → 回填权威来源 Id / 单号 /
+       供应商 / 仓库与可退商品行；零容量 / 损坏证据不可选；单价与成本一律留 0，绝不臆造价格；不锁库、不写流水 / 财务） -->
+  <script src="/js/purchase-return-source-picker.js"></script>
   <script src="/js/base-io.js"></script>
   <script src="/js/datepicker.js"></script>
   <script src="/js/expense-allocate.js"></script>

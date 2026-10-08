@@ -1,4 +1,5 @@
 using ERP.Application.Common;
+using ERP.Application.DTOs;
 using ERP.Application.Interfaces;
 using ERP.Application.Services;
 using ERP.Domain.Entities;
@@ -145,6 +146,36 @@ public class PurchaseReturnController : DocumentControllerBase<PurchaseReturn>
         await GetOrThrowAsync(id, "采购退货单不存在");
         var movements = await _inventory.ListMovementsAsync(InventoryDocumentHelper.PurchaseReturnType, id);
         return Ok(ApiResponse<IReadOnlyList<StockMovement>>.Success(movements));
+    }
+
+    /// <summary>
+    /// 可退货来源候选（只读、有界）：返回当前账号采购入库归属范围内、供应商 / 仓库匹配且关键字命中的
+    /// 「已审核、未删除」采购入库单可退货商品行，按「来源入库单 + 商品」聚合给出净可退容量。
+    /// <para>授权口径：既有「采购退货」菜单 + 既有「采购入库」菜单 + 既有采购入库归属范围（在计数 / 取数<b>之前</b>判定）；
+    /// 不新增用户授权，也不提供匿名 / 管理员降级；零容量 / 损坏证据的候选显式标记不可用，绝不猜容量。</para>
+    /// </summary>
+    [HttpGet("source-candidates")]
+    public async Task<IActionResult> GetSourceCandidates([FromQuery] long? supplierId,
+        [FromQuery] long? warehouseId, [FromQuery] string? keyword, [FromQuery] int take = 0)
+    {
+        var candidates = (await PurchaseReturnSourceRules.QuerySourceCandidatesAsync(
+            Db, CurrentUserId(), supplierId, warehouseId, keyword, take)).ToList();
+        return Ok(ApiResponse<List<PurchaseReturnSourceCandidateDto>>.Success(
+            candidates, "已返回可退货的已审核采购入库来源（只读：零容量 / 损坏证据标记为不可用，绝不猜容量）"));
+    }
+
+    /// <summary>
+    /// 来源详情（只读、有界）：返回一张权威来源采购入库单的表头 + 逐商品净可退容量行，供业务表单在显式选择后
+    /// 回填权威来源 Id / 单号 / 供应商 / 仓库与可退商品行。范围外 / 不存在 / 已删除按「不存在」拒绝，
+    /// 未审核 / 已取消 / 已驳回按冲突拒绝；任一失败都不改写已保存的来源链接。
+    /// </summary>
+    [HttpGet("source-candidates/{sourceStockInId:long}")]
+    public async Task<IActionResult> GetSourceCandidateDetail(long sourceStockInId)
+    {
+        var detail = await PurchaseReturnSourceRules.ResolveSourceDetailAsync(
+            Db, CurrentUserId(), sourceStockInId);
+        return Ok(ApiResponse<PurchaseReturnSourceDetailDto>.Success(
+            detail, "已返回来源采购入库单的可退容量详情（只读：不可用行带原因，绝不猜价格 / 成本）"));
     }
 
     /// <summary>创建（单号由字轨生成；金额与合计由后端复核；来源链接校验先于单号生成）</summary>

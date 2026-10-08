@@ -1,4 +1,5 @@
 using ERP.Application.Common;
+using ERP.Application.DTOs;
 using ERP.Application.Interfaces;
 using ERP.Domain.Entities;
 using ERP.Domain.Enums;
@@ -315,7 +316,351 @@ public static class PurchaseReturnSourceRules
         baseUnitQuantity = Math.Round(quantity * product.UnitsPerPackage, 4);
         return true;
     }
+
+    // ==================== ERP-377：采购退货来源入库候选 / 详情（只读、有界） ====================
+
+    /// <summary>读取 / 选择退货来源所需既有「采购入库」菜单编码（与 <see cref="StockInAuthorizationRules"/> 同源，绝不新增权限模型）</summary>
+    public const string SourceRequiredMenuCode = StockInAuthorizationRules.RequiredMenuCode;
+
+    /// <summary>采购入库模块菜单中文文案（与既有菜单名一致）</summary>
+    public const string SourceRequiredMenuText = StockInAuthorizationRules.RequiredMenuText;
+
+    /// <summary>来源候选查询默认返回条数</summary>
+    public const int DefaultCandidateTake = 50;
+
+    /// <summary>来源候选查询返回条数上限（有界，绝不无界拉取）</summary>
+    public const int MaxCandidateTake = 200;
+
+    /// <summary>来源候选扫描上限（有界：先取有限来源入库单，再在内存按商品聚合 / 计算剩余可退容量）</summary>
+    public const int MaxCandidateScan = 500;
+
+    /// <summary>关键字长度上限（超长截断，避免无界匹配）</summary>
+    public const int MaxKeywordLength = 100;
+
+    /// <summary>候选 / 详情口径文案（接口 / 文档同源）</summary>
+    public const string CandidateRuleText =
+        "采购退货来源候选只返回当前账号采购入库归属范围内「未删除、已审核」的采购入库单，并按「来源入库单 + 商品」聚合" +
+        "（同商品重复入库行按基础单位合计，绝不重复相乘），给出「来源数量 − 已生效（已审核、未删除）退货数量」的净可退容量；" +
+        "关键字只在单号 / 供应商名 / 商品名称 / 规格内做有界匹配；" +
+        "零容量、负数量或单位无法折算为基础单位的来源一律标记为不可用（available=false + 原因），绝不猜容量；" +
+        "候选 / 详情是只读投影：不落库、不改单据 / 库存 / 流水、不新增表 / 列 / 菜单 / 权限或用户授权。";
+
+    /// <summary>不可用原因文案（零容量）</summary>
+    public const string ZeroCapacityText = "可退容量为 0：来源入库数量已被有效（已审核）退货占用";
+
+    /// <summary>不可用原因文案（来源证据损坏）</summary>
+    public const string CorruptSourceText = "来源证据损坏（负数量或商品主数据缺失），不可用";
+
+    /// <summary>不可用原因文案（单位无法折算）</summary>
+    public const string UnknownUnitText = "来源单位无法折算为基础单位（单位未知），不可用";
+
+    /// <summary>范围外 / 不存在 / 已删除的来源统一按「不存在」拒绝（不泄露单据归属）</summary>
+    public const string SourceNotFoundText = "来源采购入库单不存在";
+
+    /// <summary>来源未审核 / 已取消 / 已驳回，不能作为退货依据</summary>
+    public const string SourceNotApprovedText = "来源采购入库单未审核（或已取消 / 已驳回），不能作为退货依据";
+
+    /// <summary>
+    /// 读取 / 选择退货来源所需实时授权（fail closed，ERP-377）：先复用既有「采购退货」身份 / 账号状态 / 菜单校验，
+    /// 再要求当前账号实时具备既有「采购入库」（<c>stock-in</c>）菜单授权；撤销任一授权后下一次请求立即收敛。
+    /// <para>绝不新增用户授权，也不提供匿名 / 管理员降级；每次请求重新解析角色 → 菜单，不缓存。</para>
+    /// </summary>
+    public static async Task EnsureSourceMenuAuthorizedAsync(IErpDbContext db, long? userId,
+        CancellationToken ct = default)
+    {
+        // 采购退货权限（身份 / 账号状态 / purchase-return 菜单）先 fail closed。
+        await EnsureMenuAuthorizedAsync(db, userId, ct);
+
+        // 来源证据所在模块「采购入库」菜单必须实时具备（与 ERP-352 同源口径，绝不新增授权）。
+        var menuCodes = await CustomerReceivableReconciliationService.LoadAuthorizedMenuCodesAsync(db, userId!.Value);
+        if (!menuCodes.Contains(SourceRequiredMenuCode, StringComparer.OrdinalIgnoreCase))
+        {
+            throw new BusinessException(
+                $"当前账号没有「{SourceRequiredMenuText}」（{SourceRequiredMenuCode}）模块授权：拒绝读取采购退货来源候选" +
+                "（fail closed，不返回任何来源证据）",
+                ErrorCodes.Forbidden);
+        }
+    }
+
+    /// <summary>候选 / 详情返回条数钳制（&lt;= 0 取默认值，上限 <see cref="MaxCandidateTake"/>，绝不无界拉取）。</summary>
+    public static int ClampTake(int take)
+        => take <= 0 ? DefaultCandidateTake : Math.Min(take, MaxCandidateTake);
+
+    /// <summary>关键字规范化（去首尾空白并截断到 <see cref="MaxKeywordLength"/>；空串 = 不过滤）。</summary>
+    public static string NormalizeKeyword(string? keyword)
+    {
+        var kw = (keyword ?? string.Empty).Trim();
+        return kw.Length <= MaxKeywordLength ? kw : kw[..MaxKeywordLength];
+    }
+
+    /// <summary>
+    /// 有界只读候选查询：返回当前账号采购入库归属范围内、供应商 / 仓库匹配且关键字命中的「已审核、未删除」
+    /// 采购入库单可退货商品行（按「来源入库单 + 商品」聚合，重复商品行按基础单位合计，绝不重复相乘）。
+    /// <para>先按既有采购入库归属范围（ERP-352：链接采购订单归属客户 / 已映射入库操作员）硬收窄，再做显式筛选，
+    /// 最后只取最近 <see cref="MaxCandidateScan"/> 张来源入库单与至多 <see cref="MaxCandidateTake"/> 条候选。</para>
+    /// <para>零容量 / 负数量 / 单位无法折算的候选保留并显式标记 <c>Available = false</c> + 原因，绝不猜容量；
+    /// 只读投影：不落库、不改单据 / 库存 / 流水、不新增表 / 列 / 菜单 / 权限。</para>
+    /// </summary>
+    public static async Task<IReadOnlyList<PurchaseReturnSourceCandidateDto>> QuerySourceCandidatesAsync(
+        IErpDbContext db, long? userId, long? supplierId, long? warehouseId,
+        string? keyword, int take, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+
+        // 实时授权：既有「采购退货」+ 既有「采购入库」菜单，先于任何计数 / 取数。
+        await EnsureSourceMenuAuthorizedAsync(db, userId, ct);
+
+        var bounded = ClampTake(take);
+        var kw = NormalizeKeyword(keyword);
+
+        var source = db.StockIns.AsNoTracking()
+            .Where(o => !o.IsDeleted && o.Status == DocumentStatus.Approved);
+        // 复用既有采购入库归属范围（ERP-352）：归属客户 / 已映射入库操作员先于计数 / 取数下推到数据库。
+        source = await StockInAuthorizationRules.ApplyScopeAsync(db, source, userId, ct);
+        if (supplierId is > 0) source = source.Where(o => o.SupplierId == supplierId.Value);
+        if (warehouseId is > 0) source = source.Where(o => o.WarehouseId == warehouseId.Value);
+
+        var receipts = await source.OrderByDescending(o => o.Id)
+            .Take(MaxCandidateScan)
+            .Include(o => o.Details)
+            .ToListAsync(ct);
+
+        var lines = await BuildCandidatesAsync(db, receipts, kw, ct);
+        return lines
+            .OrderByDescending(l => l.Available)
+            .ThenByDescending(l => l.RemainingBaseQuantity)
+            .ThenByDescending(l => l.SourceStockInId)
+            .ThenBy(l => l.ProductId)
+            .Take(bounded)
+            .ToList();
+    }
+
+    /// <summary>
+    /// 来源详情（只读、有界）：返回一张权威来源采购入库单的表头 + 全部商品可退容量行。
+    /// <para>归属范围外 / 不存在 / 已删除的来源按「不存在」拒绝（不泄露归属）；未审核 / 已取消 / 已驳回按冲突拒绝；
+    /// 任一失败都不写库、不改写任何已保存的来源链接，界面必须重新显式选择来源。</para>
+    /// </summary>
+    public static async Task<PurchaseReturnSourceDetailDto> ResolveSourceDetailAsync(
+        IErpDbContext db, long? userId, long sourceStockInId, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+
+        await EnsureSourceMenuAuthorizedAsync(db, userId, ct);
+        if (sourceStockInId <= 0)
+            throw BusinessException.InvalidParameter("来源采购入库单 Id 必须为正整数");
+
+        // 归属范围是硬边界：范围外的来源按「不存在」拒绝，不泄露单据归属。
+        var scoped = await StockInAuthorizationRules.ApplyScopeAsync(
+            db, db.StockIns.AsNoTracking().Where(o => o.Id == sourceStockInId), userId, ct);
+        var receipt = await scoped.Include(o => o.Details).FirstOrDefaultAsync(ct)
+            ?? throw BusinessException.NotFound(SourceNotFoundText);
+
+        if (receipt.IsDeleted)
+            throw BusinessException.NotFound(SourceNotFoundText);
+        if (receipt.Status != DocumentStatus.Approved)
+            throw BusinessException.RuleConflict(SourceNotApprovedText);
+
+        var lines = (await BuildCandidatesAsync(db, new List<StockIn> { receipt }, string.Empty, ct))
+            .OrderByDescending(l => l.Available)
+            .ThenBy(l => l.ProductId)
+            .ToList();
+        var supplierNames = await LoadSupplierNamesAsync(db, new List<long> { receipt.SupplierId }, ct);
+        var warehouseNames = await LoadWarehouseNamesAsync(db, new List<long> { receipt.WarehouseId }, ct);
+        var available = lines.Any(l => l.Available);
+
+        return new PurchaseReturnSourceDetailDto
+        {
+            SourceStockInId = receipt.Id,
+            SourceStockInNo = receipt.StockInNo,
+            SourceStockInDate = receipt.StockInDate,
+            SupplierId = receipt.SupplierId,
+            SupplierName = supplierNames.GetValueOrDefault(receipt.SupplierId, string.Empty),
+            WarehouseId = receipt.WarehouseId,
+            WarehouseName = warehouseNames.GetValueOrDefault(receipt.WarehouseId, string.Empty),
+            Available = available,
+            UnavailableReason = available
+                ? string.Empty
+                : lines.FirstOrDefault()?.UnavailableReason ?? ZeroCapacityText,
+            Lines = lines
+        };
+    }
+
+    /// <summary>按「来源入库单 + 商品」构建候选行（聚合来源入库数量与已生效退货数量，绝不重复相乘）。</summary>
+    private static async Task<List<PurchaseReturnSourceCandidateDto>> BuildCandidatesAsync(
+        IErpDbContext db, IReadOnlyList<StockIn> receipts, string keyword, CancellationToken ct)
+    {
+        var result = new List<PurchaseReturnSourceCandidateDto>();
+        if (receipts.Count == 0) return result;
+
+        var sourceIds = receipts.Select(s => s.Id).ToList();
+        var supplierNames = await LoadSupplierNamesAsync(
+            db, receipts.Select(s => s.SupplierId).Distinct().ToList(), ct);
+        var warehouseNames = await LoadWarehouseNamesAsync(
+            db, receipts.Select(s => s.WarehouseId).Distinct().ToList(), ct);
+
+        var sourceRows = new List<(long SourceId, long ProductId, string? Unit, decimal Quantity,
+            string ProductName, string Spec)>();
+        foreach (var receipt in receipts)
+        {
+            foreach (var detail in receipt.Details.Where(d => !d.IsDeleted && d.ProductId > 0))
+            {
+                sourceRows.Add((receipt.Id, detail.ProductId, detail.Unit, detail.Quantity,
+                    detail.ProductName, detail.Spec));
+            }
+        }
+        if (sourceRows.Count == 0) return result;
+
+        var productIds = sourceRows.Select(r => r.ProductId).Distinct().ToList();
+
+        // 已生效（已审核、未删除）退货按「来源入库单 + 商品」保守聚合：
+        // 退货缺少来源明细 Id，绝不猜测退货归属到哪一条入库明细。
+        var approvedRows = await (from r in db.PurchaseReturns
+                                  join d in db.PurchaseReturnDetails on r.Id equals d.PurchaseReturnId
+                                  where r.SourceStockInId != null
+                                        && sourceIds.Contains(r.SourceStockInId.Value)
+                                        && !r.IsDeleted
+                                        && r.Status == DocumentStatus.Approved
+                                        && !d.IsDeleted
+                                        && d.ProductId > 0
+                                  select new
+                                  {
+                                      SourceStockInId = r.SourceStockInId!.Value,
+                                      ProductId = d.ProductId!.Value,
+                                      d.Unit,
+                                      d.Quantity
+                                  })
+            .ToListAsync(ct);
+        productIds.AddRange(approvedRows.Select(r => r.ProductId));
+        productIds = productIds.Distinct().ToList();
+
+        var products = await db.BaseProducts.AsNoTracking()
+            .Where(p => productIds.Contains(p.Id))
+            .ToDictionaryAsync(p => p.Id, ct);
+
+        var groups = new Dictionary<(long SourceId, long ProductId), CandidateGroup>();
+        foreach (var row in sourceRows)
+        {
+            var key = (row.SourceId, row.ProductId);
+            if (!groups.TryGetValue(key, out var group))
+                groups[key] = group = new CandidateGroup { ProductName = row.ProductName, Spec = row.Spec };
+
+            if (group.Product is null && products.TryGetValue(row.ProductId, out var product) && !product.IsDeleted)
+                group.Product = product;
+
+            if (row.Quantity < 0) { group.Corrupt = true; continue; }
+            if (group.Product is null) { group.UnitUnknown = true; continue; }
+            if (!TryBaseUnitQuantity(group.Product, row.Unit, row.Quantity, out var baseQuantity))
+            {
+                group.UnitUnknown = true;
+                continue;
+            }
+            group.SourceBaseQuantity += baseQuantity;
+        }
+
+        foreach (var row in approvedRows)
+        {
+            if (!groups.TryGetValue((row.SourceStockInId, row.ProductId), out var group)) continue;
+            if (row.Quantity < 0) { group.Corrupt = true; continue; }
+            if (group.Product is null) { group.UnitUnknown = true; continue; }
+            if (!TryBaseUnitQuantity(group.Product, row.Unit, row.Quantity, out var baseQuantity))
+            {
+                group.UnitUnknown = true;
+                continue;
+            }
+            group.EffectiveReturnedBaseQuantity += baseQuantity;
+        }
+
+        var receiptsById = receipts.ToDictionary(s => s.Id);
+        foreach (var kv in groups)
+        {
+            var (sourceId, productId) = kv.Key;
+            var group = kv.Value;
+            var receipt = receiptsById[sourceId];
+
+            var remaining = group.SourceBaseQuantity - group.EffectiveReturnedBaseQuantity;
+            if (remaining < 0) remaining = 0m;
+
+            bool available;
+            string reason;
+            if (group.Corrupt) { available = false; reason = CorruptSourceText; }
+            else if (group.UnitUnknown) { available = false; reason = UnknownUnitText; }
+            else if (group.SourceBaseQuantity <= 0 || remaining <= QuantityTolerance)
+            {
+                available = false;
+                reason = ZeroCapacityText;
+            }
+            else { available = true; reason = string.Empty; }
+
+            var line = new PurchaseReturnSourceCandidateDto
+            {
+                SourceStockInId = receipt.Id,
+                SourceStockInNo = receipt.StockInNo,
+                SourceStockInDate = receipt.StockInDate,
+                SupplierId = receipt.SupplierId,
+                SupplierName = supplierNames.GetValueOrDefault(receipt.SupplierId, string.Empty),
+                WarehouseId = receipt.WarehouseId,
+                WarehouseName = warehouseNames.GetValueOrDefault(receipt.WarehouseId, string.Empty),
+                ProductId = productId,
+                ProductName = group.Product?.ProductName ?? group.ProductName,
+                Spec = group.Product?.Spec ?? group.Spec,
+                BaseUnit = group.Product?.Unit ?? string.Empty,
+                SourceBaseQuantity = group.SourceBaseQuantity,
+                EffectiveReturnedBaseQuantity = group.EffectiveReturnedBaseQuantity,
+                RemainingBaseQuantity = available ? remaining : 0m,
+                Available = available,
+                UnavailableReason = reason
+            };
+
+            if (keyword.Length > 0 && !MatchesKeyword(line, keyword)) continue;
+            result.Add(line);
+        }
+
+        return result;
+    }
+
+    /// <summary>关键字有界匹配（来源单号 / 供应商名 / 商品名称 / 规格），大小写不敏感；绝不用于推断来源。</summary>
+    private static bool MatchesKeyword(PurchaseReturnSourceCandidateDto line, string keyword)
+    {
+        static bool Hit(string? value, string kw)
+            => !string.IsNullOrEmpty(value) && value.Contains(kw, StringComparison.OrdinalIgnoreCase);
+
+        return Hit(line.SourceStockInNo, keyword)
+            || Hit(line.SupplierName, keyword)
+            || Hit(line.ProductName, keyword)
+            || Hit(line.Spec, keyword);
+    }
+
+    private static async Task<Dictionary<long, string>> LoadSupplierNamesAsync(
+        IErpDbContext db, List<long> supplierIds, CancellationToken ct)
+        => supplierIds.Count == 0
+            ? new Dictionary<long, string>()
+            : await db.BaseSuppliers.AsNoTracking()
+                .Where(s => supplierIds.Contains(s.Id) && !s.IsDeleted)
+                .ToDictionaryAsync(s => s.Id, s => s.SupplierName, ct);
+
+    private static async Task<Dictionary<long, string>> LoadWarehouseNamesAsync(
+        IErpDbContext db, List<long> warehouseIds, CancellationToken ct)
+        => warehouseIds.Count == 0
+            ? new Dictionary<long, string>()
+            : await db.BaseWarehouses.AsNoTracking()
+                .Where(w => warehouseIds.Contains(w.Id) && !w.IsDeleted)
+                .ToDictionaryAsync(w => w.Id, w => w.WarehouseName, ct);
+
+    /// <summary>「来源入库单 + 商品」聚合中间态（来源数量 / 已生效退货数量 / 证据可用性）。</summary>
+    private sealed class CandidateGroup
+    {
+        public BaseProduct? Product { get; set; }
+        public string ProductName { get; set; } = string.Empty;
+        public string Spec { get; set; } = string.Empty;
+        public bool Corrupt { get; set; }
+        public bool UnitUnknown { get; set; }
+        public decimal SourceBaseQuantity { get; set; }
+        public decimal EffectiveReturnedBaseQuantity { get; set; }
+    }
 }
+
+
+
 
 /// <summary>
 /// 已解析的权威来源上下文（只读事实）：来源采购入库单 + 按商品合计的已审核入库基础单位数量。

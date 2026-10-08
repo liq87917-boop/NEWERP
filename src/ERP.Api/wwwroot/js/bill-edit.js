@@ -315,6 +315,9 @@ function renderBillEdit(oid) {
     sourcePickerHtml = sisSourceButtonHtml(BILL_EDIT_OID || 0);
   } else if (BILL_CODE === 'stock-out' && typeof sosSourceButtonHtml === 'function') {
     sourcePickerHtml = sosSourceButtonHtml(BILL_EDIT_OID || 0);
+  } else if (BILL_CODE === 'purchase-return' && typeof prsSourceButtonHtml === 'function') {
+    /* ERP-377：采购退货（SP 单据页）来源采购入库单显式选择入口（只影响 purchase-return 单据）。 */
+    sourcePickerHtml = prsSourceButtonHtml(BILL_EDIT_OID || 0);
   }
 
   document.getElementById('content').innerHTML = `

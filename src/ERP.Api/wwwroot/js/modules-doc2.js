@@ -386,7 +386,9 @@ Object.assign(MODULES, {
       { key: 'supplierId', label: '供应商', type: 'ref', ref: 'supplier' },
       { key: 'supplierName', label: '供应商名称（冗余，可留空）' },
       { key: 'warehouseId', label: '退货出库仓库', type: 'ref', ref: 'warehouse' },
-      { key: 'sourceStockInId', label: '来源采购入库单 ID（可留空）', type: 'number' },
+      /* ERP-377：来源由「选择来源」有界选择器显式回填（也可手工填写 Id）；选择器只回填权威来源 Id / 单号 /
+         供应商 / 仓库与净可退商品行，绝不臆造价格 / 成本（单价与成本单价留 0，由服务端按来源入库成本兜底） */
+      { key: 'sourceStockInId', label: '来源采购入库单 ID（可留空；建议用「选择来源」）', type: 'number', selector: 'purchase-return-source' },
       { key: 'sourceStockInNo', label: '来源采购入库单号（留空时按 ID 自动带出）' },
       { key: 'returnReason', label: '退货原因' },
       { key: 'remark', label: '备注', type: 'textarea' },
