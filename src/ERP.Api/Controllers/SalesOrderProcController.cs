@@ -17,7 +17,7 @@ namespace ERP.Api.Controllers;
 /// 已验证业务适配器，因此一律 fail closed，绝不推断 <c>Oid = Id</c>、绝不信任请求头金额、绝不静默转换
 /// 不支持的请求字段、绝不执行 <c>sp_Biz_*</c>、绝不占用单号、绝不写日志 / 通知。</para>
 /// <para>规范销售订单工作流（<c>api/sales-orders</c>）与转换工作流不受影响；本控制器的查询 / 翻页 / 导航路由
-/// （<c>SalesOrderProcController.Query.cs</c>）保持不变，留待其自身的授权 / 迁移门槛。</para>
+/// （<c>SalesOrderProcController.Query.cs</c>）由 ERP-411 收敛到 ERP-405 的同一份读侧门禁与受控只读服务之下。</para>
 /// </summary>
 [ApiController]
 [Route("api/v2/sales-orders")]
@@ -30,10 +30,29 @@ public partial class SalesOrderProcController : ControllerBase
     private readonly StoredProcedureService _sp;
     private readonly IErpDbContext _db;
 
+    /// <summary>
+    /// ERP-411 旧销售订单读侧受控只读服务（ERP-405 <see cref="ILegacyBillReadService"/>）：
+    /// 查询 / 翻页导航只经由该有限服务在调用方数据范围内完成，绝不直接拼 SQL 读取旧库。
+    /// </summary>
+    private readonly ILegacyBillReadService _legacyReads;
+
+    /// <summary>
+    /// 兼容构造：读侧（ERP-411）使用由连接配置构建的受控只读服务；生产 DI 会选用下方显式注入的构造
+    /// （与 ERP-410 写入门禁共用同一 <see cref="StoredProcedureService"/> 连接来源）。
+    /// </summary>
     public SalesOrderProcController(StoredProcedureService sp, IErpDbContext db)
+        : this(sp, db, new ERP.Infrastructure.Reports.LegacyBillReadService(sp))
+    {
+    }
+
+    /// <summary>
+    /// 构造：额外注入旧单据读侧受控只读服务（ERP-411：查询 / 翻页导航）。
+    /// </summary>
+    public SalesOrderProcController(StoredProcedureService sp, IErpDbContext db, ILegacyBillReadService legacyReads)
     {
         _sp = sp;
         _db = db;
+        _legacyReads = legacyReads ?? throw new ArgumentNullException(nameof(legacyReads));
     }
 
     /// <summary>当前登录账号 Id（缺失 / 非法 = <c>null</c>，绝不当作匿名或管理员）。</summary>
