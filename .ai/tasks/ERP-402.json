@@ -1,0 +1,79 @@
+{
+  "title": "Make inquiry lifecycle and quotation creation authorized and atomic",
+  "description": "Stage3 core business workflow integrity. Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance.",
+  "acceptance_criteria": [
+    "Implement reusable inquiry live enabled identity/existing inquiry menu/customer scope authority across all CRUD, lifecycle, batch, export and prefill/conversion endpoints. Quotation creation additionally requires existing quotation menu and target customer scope; original and proposed customers checked on update. Counts/paging/export scoped before reads; no new grants or reliance on text ownership. Preserve existing source eligibility, inquiry details and current calculation/quantity/unit semantics.",
+    "Serialize edit/submit/approve/cancel/delete/batch and to-quotation under deterministic inquiry-to-quotation lock order compatible with quotation mutations; transaction and source reread before duplicate check/number/draft. Same inquiry produces at most one full quotation per existing rule, converted source cannot be reopened or invalidated while live downstream exists; no downstream automatic reversal. Two independent SQL connections duplicate conversion, cancel/conversion, edit/approve, mixed batch and DB failure; source-only/target-only/revoked/disabled/foreign denials zero mutation. Unit existing inquiry conversion regressions and safe Release/full unit; browser evidence or exact blocker.",
+    "Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/InquiryController.cs",
+    "src/ERP.Api/Controllers/InquiryQuotationConversion.cs",
+    "src/ERP.Application/Services/InquiryAuthorizationRules.cs",
+    "src/ERP.Application/Services/InquiryMutationRules.cs",
+    "src/ERP.Application/Services/QuotationMutationRules.cs",
+    "src/ERP.UnitTests/InquiryMutationTests.cs",
+    "src/ERP.UnitTests/InquiryQuotationConversionTests.cs",
+    "src/ERP.IntegrationTests/InquiryMutationSqlServerTests.cs",
+    "docs/inquiry-mutations.md"
+  ],
+  "criterion_path_map": {
+    "Implement reusable inquiry live enabled identity/existing inquiry menu/customer scope authority across all CRUD, lifecycle, batch, export and prefill/conversion endpoints. Quotation creation additionally requires existing quotation menu and target customer scope; original and proposed customers checked on update. Counts/paging/export scoped before reads; no new grants or reliance on text ownership. Preserve existing source eligibility, inquiry details and current calculation/quantity/unit semantics.": [
+      "src/ERP.Api/Controllers/InquiryController.cs",
+      "src/ERP.Api/Controllers/InquiryQuotationConversion.cs",
+      "src/ERP.Application/Services/InquiryAuthorizationRules.cs",
+      "src/ERP.Application/Services/InquiryMutationRules.cs",
+      "src/ERP.Application/Services/QuotationMutationRules.cs",
+      "src/ERP.UnitTests/InquiryMutationTests.cs",
+      "src/ERP.UnitTests/InquiryQuotationConversionTests.cs",
+      "src/ERP.IntegrationTests/InquiryMutationSqlServerTests.cs",
+      "docs/inquiry-mutations.md"
+    ],
+    "Serialize edit/submit/approve/cancel/delete/batch and to-quotation under deterministic inquiry-to-quotation lock order compatible with quotation mutations; transaction and source reread before duplicate check/number/draft. Same inquiry produces at most one full quotation per existing rule, converted source cannot be reopened or invalidated while live downstream exists; no downstream automatic reversal. Two independent SQL connections duplicate conversion, cancel/conversion, edit/approve, mixed batch and DB failure; source-only/target-only/revoked/disabled/foreign denials zero mutation. Unit existing inquiry conversion regressions and safe Release/full unit; browser evidence or exact blocker.": [
+      "src/ERP.Api/Controllers/InquiryController.cs",
+      "src/ERP.Api/Controllers/InquiryQuotationConversion.cs",
+      "src/ERP.Application/Services/InquiryAuthorizationRules.cs",
+      "src/ERP.Application/Services/InquiryMutationRules.cs",
+      "src/ERP.Application/Services/QuotationMutationRules.cs",
+      "src/ERP.UnitTests/InquiryMutationTests.cs",
+      "src/ERP.UnitTests/InquiryQuotationConversionTests.cs",
+      "src/ERP.IntegrationTests/InquiryMutationSqlServerTests.cs",
+      "docs/inquiry-mutations.md"
+    ],
+    "Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance.": [
+      "src/ERP.Api/Controllers/InquiryController.cs",
+      "src/ERP.Api/Controllers/InquiryQuotationConversion.cs",
+      "src/ERP.Application/Services/InquiryAuthorizationRules.cs",
+      "src/ERP.Application/Services/InquiryMutationRules.cs",
+      "src/ERP.Application/Services/QuotationMutationRules.cs",
+      "src/ERP.UnitTests/InquiryMutationTests.cs",
+      "src/ERP.UnitTests/InquiryQuotationConversionTests.cs",
+      "src/ERP.IntegrationTests/InquiryMutationSqlServerTests.cs",
+      "docs/inquiry-mutations.md"
+    ]
+  },
+  "implementation_evidence": "InquiryController selected reads use ResolveScopeAsync but mutation and prefill/to-quotation do not explicitly enforce live source/target menus. ToQuotation builds draft and generates number before rereading inquiry and inserting quotation/marking completed in SaveChanges without source-row transaction or duplicate serialization.",
+  "depends_on": [
+    "ERP-401"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "id": "ERP-402",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-08T18:28:57.033400Z"
+}

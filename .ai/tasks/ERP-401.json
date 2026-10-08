@@ -1,0 +1,89 @@
+{
+  "title": "Validate sales order source lineage during ordinary form save",
+  "description": "Stage3 core business workflow integrity. Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance.",
+  "acceptance_criteria": [
+    "Add Application source-lineage rules invoked by ordinary sales-order create/update/submit/approve. For explicit PI/quotation IDs resolve exact nondeleted source, live enabled existing source and sales-order menu authority, current customer scope and existing conversion eligibility; normalize authoritative source numbers and PI quotation ancestry, reject conflicting source pair/foreign customer/invalid source. Never infer source from number or require arbitrary price equality beyond established conversion rules; unlinked manual orders remain valid. Preserve existing amounts/currency/unit and server detail calculations.",
+    "Transaction and deterministic source-to-order lock sequence compatible with ERP399/400 conversions, recheck duplicate target and persisted source/order state before number reservation/save. Race manual prefill save versus direct conversion or source invalidation must produce legal consistent source/target history and at most one target under existing duplicate rule. No silent clearing/rebinding of historical source; explicit editable link changes require complete live revalidation and downstream freeze. Real SQL forged/foreign/revoked/disabled/invalid-source and two independent connections manual/direct conversion, source cancel/save, competing manual saves, edit/approve, rollback; meaningful unit and existing sales-order/conversion regressions, safe Release and browser evidence or accurate blocker.",
+    "Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/SalesOrderController.cs",
+    "src/ERP.Api/Controllers/SalesOrderConversion.cs",
+    "src/ERP.Application/Services/SalesOrderSourceLineageRules.cs",
+    "src/ERP.Application/Services/ProformaInvoiceMutationRules.cs",
+    "src/ERP.Application/Services/ProformaInvoiceAuthorizationRules.cs",
+    "src/ERP.Application/Services/QuotationMutationRules.cs",
+    "src/ERP.Application/Services/QuotationAuthorizationRules.cs",
+    "src/ERP.UnitTests/SalesOrderSourceLineageTests.cs",
+    "src/ERP.UnitTests/SalesOrderConversionTests.cs",
+    "src/ERP.IntegrationTests/SalesOrderSourceLineageSqlServerTests.cs",
+    "docs/sales-order-source-lineage.md"
+  ],
+  "criterion_path_map": {
+    "Add Application source-lineage rules invoked by ordinary sales-order create/update/submit/approve. For explicit PI/quotation IDs resolve exact nondeleted source, live enabled existing source and sales-order menu authority, current customer scope and existing conversion eligibility; normalize authoritative source numbers and PI quotation ancestry, reject conflicting source pair/foreign customer/invalid source. Never infer source from number or require arbitrary price equality beyond established conversion rules; unlinked manual orders remain valid. Preserve existing amounts/currency/unit and server detail calculations.": [
+      "src/ERP.Api/Controllers/SalesOrderController.cs",
+      "src/ERP.Api/Controllers/SalesOrderConversion.cs",
+      "src/ERP.Application/Services/SalesOrderSourceLineageRules.cs",
+      "src/ERP.Application/Services/ProformaInvoiceMutationRules.cs",
+      "src/ERP.Application/Services/ProformaInvoiceAuthorizationRules.cs",
+      "src/ERP.Application/Services/QuotationMutationRules.cs",
+      "src/ERP.Application/Services/QuotationAuthorizationRules.cs",
+      "src/ERP.UnitTests/SalesOrderSourceLineageTests.cs",
+      "src/ERP.UnitTests/SalesOrderConversionTests.cs",
+      "src/ERP.IntegrationTests/SalesOrderSourceLineageSqlServerTests.cs",
+      "docs/sales-order-source-lineage.md"
+    ],
+    "Transaction and deterministic source-to-order lock sequence compatible with ERP399/400 conversions, recheck duplicate target and persisted source/order state before number reservation/save. Race manual prefill save versus direct conversion or source invalidation must produce legal consistent source/target history and at most one target under existing duplicate rule. No silent clearing/rebinding of historical source; explicit editable link changes require complete live revalidation and downstream freeze. Real SQL forged/foreign/revoked/disabled/invalid-source and two independent connections manual/direct conversion, source cancel/save, competing manual saves, edit/approve, rollback; meaningful unit and existing sales-order/conversion regressions, safe Release and browser evidence or accurate blocker.": [
+      "src/ERP.Api/Controllers/SalesOrderController.cs",
+      "src/ERP.Api/Controllers/SalesOrderConversion.cs",
+      "src/ERP.Application/Services/SalesOrderSourceLineageRules.cs",
+      "src/ERP.Application/Services/ProformaInvoiceMutationRules.cs",
+      "src/ERP.Application/Services/ProformaInvoiceAuthorizationRules.cs",
+      "src/ERP.Application/Services/QuotationMutationRules.cs",
+      "src/ERP.Application/Services/QuotationAuthorizationRules.cs",
+      "src/ERP.UnitTests/SalesOrderSourceLineageTests.cs",
+      "src/ERP.UnitTests/SalesOrderConversionTests.cs",
+      "src/ERP.IntegrationTests/SalesOrderSourceLineageSqlServerTests.cs",
+      "docs/sales-order-source-lineage.md"
+    ],
+    "Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance.": [
+      "src/ERP.Api/Controllers/SalesOrderController.cs",
+      "src/ERP.Api/Controllers/SalesOrderConversion.cs",
+      "src/ERP.Application/Services/SalesOrderSourceLineageRules.cs",
+      "src/ERP.Application/Services/ProformaInvoiceMutationRules.cs",
+      "src/ERP.Application/Services/ProformaInvoiceAuthorizationRules.cs",
+      "src/ERP.Application/Services/QuotationMutationRules.cs",
+      "src/ERP.Application/Services/QuotationAuthorizationRules.cs",
+      "src/ERP.UnitTests/SalesOrderSourceLineageTests.cs",
+      "src/ERP.UnitTests/SalesOrderConversionTests.cs",
+      "src/ERP.IntegrationTests/SalesOrderSourceLineageSqlServerTests.cs",
+      "docs/sales-order-source-lineage.md"
+    ]
+  },
+  "implementation_evidence": "SalesOrderController.Create generates number then persists caller SourcePiId/SourceQuotationId without authoritative source resolution; Update copies both IDs and source numbers. Specialized PI/quotation conversion protects only direct conversion actions, so editable prefill and forged ordinary saves can bypass source eligibility/duplicate guards.",
+  "depends_on": [
+    "ERP-400",
+    "ERP-399",
+    "ERP-398"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "id": "ERP-401",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-08T18:28:57.026925Z"
+}
