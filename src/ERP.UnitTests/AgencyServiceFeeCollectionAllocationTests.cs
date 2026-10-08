@@ -1337,7 +1337,7 @@ public class AgencyServiceFeeCollectionAllocationTests
     }
 
     [Fact]
-    public async Task 证据维度分离_销售订单收款引用不占用代理服务费可分摊余额且绝不相加()
+    public async Task 收款单侧额度_销售订单收款引用占用代理服务费可分摊余额_拒绝超额且两表不变()
     {
         using var db = TestDbFactory.Create();
         var customer = SeedCustomer(db, "C001", "义乌进出口");
@@ -1353,7 +1353,7 @@ public class AgencyServiceFeeCollectionAllocationTests
             Status = DocumentStatus.Approved
         };
         db.SalesOrders.Add(order);
-        // ERP-053：同一张收款单已被「收款单 → 销售订单」引用占满
+        // ERP-053：同一张收款单已被「收款单 → 销售订单」引用占满（1000）
         db.CustomerReceiptAllocations.Add(new CustomerReceiptAllocation
         {
             ReceiptId = receipt.Id,
@@ -1379,31 +1379,33 @@ public class AgencyServiceFeeCollectionAllocationTests
 
         var controller = BuildController(db);
 
-        // 本维度只扣减**本表的**有效分摊行：ERP-053 的引用不占用代理服务费可分摊余额
+        // ERP-350：收款单可分摊余额扣减两套有效分摊证据，ERP-053 的引用因此占用本维度可分摊余额
         var options = AssertOk<List<AgencyServiceFeeCollectionAllocationReceiptCandidateDto>>(
             await controller.ReceiptCandidates(customer.Id, "USD", null));
         Assert.Single(options);
-        Assert.Equal(1000m, options[0].UnallocatedAmount);
-        Assert.True(options[0].Eligible);
+        Assert.Equal(1000m, options[0].AllocatedAmount);
+        Assert.Equal(0m, options[0].UnallocatedAmount);
+        Assert.False(options[0].Eligible);
 
-        var created = AssertOk<AgencyServiceFeeCollectionAllocationDto>(
-            await controller.Create(SaveDto(statement.Id, receipt.Id, 400m)));
-        Assert.Equal(400m, created.AllocatedAmount);
+        // 再登记本维度分摊（400）会被收款单唯一额度拒绝：两套证据合计 1400 超过收款单 1000
+        await AssertBusinessAsync(ErrorCodes.RuleConflict,
+            () => controller.Create(SaveDto(statement.Id, receipt.Id, 400m)));
 
+        // ERP-053 的引用行未被改写，本维度也未产生任何分摊行（失败关闭，两表不变）
+        var other = await db.CustomerReceiptAllocations.AsNoTracking().SingleAsync();
+        Assert.Equal(1000m, other.AllocatedAmount);
+        Assert.Empty(db.AgencyServiceFeeCollectionAllocations.AsNoTracking()
+            .Where(a => a.ReceiptId == receipt.Id && !a.IsDeleted));
+
+        // 收款单侧汇总按两套证据合计派生：已占用 1000，剩余 0
         var receiptSummary = AssertOk<AgencyServiceFeeCollectionAllocationReceiptSummaryDto>(
             await controller.ReceiptSummary(receipt.Id));
-        Assert.Equal(400m, receiptSummary.AllocatedAmount);
-        Assert.Equal(600m, receiptSummary.UnallocatedAmount);
-        Assert.Contains("收款单在本维度", receiptSummary.LinkageText);
+        Assert.Equal(1000m, receiptSummary.AllocatedAmount);
+        Assert.Equal(0m, receiptSummary.UnallocatedAmount);
         Assert.Contains("ERP-053", receiptSummary.DimensionSeparationText);
         Assert.Contains("ERP-055", receiptSummary.DimensionSeparationText);
         Assert.Contains("绝不相加", receiptSummary.DimensionSeparationText);
         Assert.Contains("被当作几张不同的收款单", receiptSummary.DimensionSeparationText);
-
-        // ERP-053 的引用行未被改写，也未被并入本维度合计
-        var other = await db.CustomerReceiptAllocations.AsNoTracking().SingleAsync();
-        Assert.Equal(1000m, other.AllocatedAmount);
-        Assert.Equal(1, await db.AgencyServiceFeeCollectionAllocations.CountAsync());
     }
 
     // ==================== 10. 纯规则 / 模型 / 幂等结构 / 契约 ====================

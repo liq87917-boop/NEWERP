@@ -14,6 +14,9 @@ namespace ERP.Application.Services;
 /// 取消 / 删除收款单，也拒绝以会破坏证据的方式修改客户 / 币种 / 金额；要解除限制必须先走既有显式作废服务
 /// （<see cref="CustomerReceiptAllocationService.VoidAsync"/> / <see cref="AgencyServiceFeeCollectionAllocationService.VoidAsync"/>），
 /// 作废只保留原始证据、绝不物理删除、绝不静默改写。</para>
+/// <para>收款单金额是同一张收款单的<b>唯一、同币种分摊额度</b>（ERP-350）：「收款单 → 销售订单」与
+/// 「收款单 → 代理服务费对账单」两套有效分摊行在收款单行锁下共同占用同一额度，任一写入都必须把两套
+/// 有效行合计后与收款单权威金额比较（绝不跨币种合计、绝不重复计算证据）。</para>
 /// <para>本类只做<b>纯判定与有界只读查询</b>；不落库、不改写收款单与分摊行；「判定 + 状态变更」的原子性与
 /// 同单并发串行化由调用方在同一可串行化事务内对收款单行加 UPDLOCK/HOLDLOCK 完成。</para>
 /// </summary>
@@ -37,7 +40,8 @@ public static class CustomerReceiptLifecycleRules
     public const string BoundaryText =
         "本护栏只保护收款单生命周期与既有收款分摊证据：不会真的收款、不会记账或生成凭证、不会核销、不会移动资金，" +
         "也不改写销售订单、库存与库存成本、供应商付款与采购发票、装柜与单证、客户信用状态或任何其它既有单据；" +
-        "分摊证据只按各自维度（ERP-053 / ERP-071）分别计算，绝不把两个维度的金额相加。";
+        "收款单金额作为同一张收款单的唯一、同币种分摊额度，由「收款单 → 销售订单」与「收款单 → 代理服务费对账单」" +
+        "两套证据在收款单行锁下共同占用；绝不跨币种合计、绝不重复计算证据、绝不静默改写或删除任一证据。";
 
     // ==================== 1. 币种、金额与客户纯校验 ====================
 
@@ -156,6 +160,75 @@ public static class CustomerReceiptLifecycleRules
                 "请先通过既有的作废服务显式作废相关分摊行（作废保留历史，不物理删除、不静默改写证据）");
     }
 
+    // ==================== 3.1 收款单唯一分摊额度（两套证据共享、同币种，ERP-350） ====================
+
+    /// <summary>
+    /// 同一张收款单的唯一、同币种分摊额度快照（ERP-350）：把「收款单 → 销售订单」与
+    /// 「收款单 → 代理服务费对账单」两套<b>有效（未删除、未作废）</b>分摊行各自合计，
+    /// 由 <see cref="ReceiptFunding.CombinedAllocated"/> 给出两套证据共同占用的金额（每个维度各计一次、绝不重复）。
+    /// <para>只按同一收款单、同一币种的持久化有效行派生；作废行 / 删除行保留历史但不占用额度；
+    /// 只有显式作废才释放额度，任一表都不会被另一写入方改写。</para>
+    /// </summary>
+    public static async Task<ReceiptFunding> LoadReceiptFundingAsync(IErpDbContext db, long receiptId)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+
+        var customer = await db.CustomerReceiptAllocations.AsNoTracking()
+            .Where(a => !a.IsDeleted && a.ReceiptId == receiptId
+                        && a.Status == CustomerReceiptAllocationRules.StatusActive)
+            .GroupBy(a => a.ReceiptId)
+            .Select(g => new { Amount = g.Sum(a => a.AllocatedAmount), Count = g.Count() })
+            .FirstOrDefaultAsync();
+
+        var agency = await db.AgencyServiceFeeCollectionAllocations.AsNoTracking()
+            .Where(a => !a.IsDeleted && a.ReceiptId == receiptId
+                        && a.Status == AgencyServiceFeeCollectionAllocationRules.StatusActive)
+            .GroupBy(a => a.ReceiptId)
+            .Select(g => new { Amount = g.Sum(a => a.AllocatedAmount), Count = g.Count() })
+            .FirstOrDefaultAsync();
+
+        return new ReceiptFunding(
+            customer?.Amount ?? 0m,
+            agency?.Amount ?? 0m,
+            customer?.Count ?? 0,
+            agency?.Count ?? 0);
+    }
+
+    /// <summary>
+    /// 批量装载同一批收款单的唯一、同币种分摊额度（ERP-350；候选列表用，固定 2 次数据集访问、无逐行查库）。
+    /// </summary>
+    public static async Task<Dictionary<long, ReceiptFunding>> LoadReceiptFundingForReceiptsAsync(
+        IErpDbContext db, IReadOnlyList<long> receiptIds)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        var ids = receiptIds.Distinct().ToList();
+        if (ids.Count == 0) return new Dictionary<long, ReceiptFunding>();
+
+        var customer = await db.CustomerReceiptAllocations.AsNoTracking()
+            .Where(a => !a.IsDeleted && a.Status == CustomerReceiptAllocationRules.StatusActive
+                        && ids.Contains(a.ReceiptId))
+            .GroupBy(a => a.ReceiptId)
+            .Select(g => new { ReceiptId = g.Key, Amount = g.Sum(a => a.AllocatedAmount), Count = g.Count() })
+            .ToListAsync();
+
+        var agency = await db.AgencyServiceFeeCollectionAllocations.AsNoTracking()
+            .Where(a => !a.IsDeleted && a.Status == AgencyServiceFeeCollectionAllocationRules.StatusActive
+                        && ids.Contains(a.ReceiptId))
+            .GroupBy(a => a.ReceiptId)
+            .Select(g => new { ReceiptId = g.Key, Amount = g.Sum(a => a.AllocatedAmount), Count = g.Count() })
+            .ToListAsync();
+
+        var map = new Dictionary<long, ReceiptFunding>();
+        foreach (var id in ids)
+        {
+            var c = customer.FirstOrDefault(x => x.ReceiptId == id);
+            var ag = agency.FirstOrDefault(x => x.ReceiptId == id);
+            map[id] = new ReceiptFunding(c?.Amount ?? 0m, ag?.Amount ?? 0m, c?.Count ?? 0, ag?.Count ?? 0);
+        }
+
+        return map;
+    }
+
     // ==================== 4. 收款单行锁（与分摊证据写入 / 生命周期串行化） ====================
 
     /// <summary>
@@ -196,3 +269,20 @@ public static class CustomerReceiptLifecycleRules
         }
     }
 }
+
+/// <summary>
+/// 收款单唯一、同币种分摊额度快照（ERP-350）。
+/// <para><see cref="CustomerOrderAllocated"/> 为「收款单 → 销售订单」有效行合计，
+/// <see cref="AgencyAllocated"/> 为「收款单 → 代理服务费对账单」有效行合计；
+/// <see cref="CombinedAllocated"/> 是两套证据共同占用的金额（每个维度各计一次、绝不重复计算）。</para>
+/// </summary>
+public readonly record struct ReceiptFunding(
+    decimal CustomerOrderAllocated,
+    decimal AgencyAllocated,
+    int CustomerOrderCount,
+    int AgencyCount)
+{
+    /// <summary>两套证据共同占用的有效分摊金额（每个维度各计一次）</summary>
+    public decimal CombinedAllocated => CustomerOrderAllocated + AgencyAllocated;
+}
+

@@ -17,9 +17,9 @@ namespace ERP.Application.Services;
 /// 不物理删除、不改派、不静默替换；</item>
 /// <item><b>台账 / 详情 / 两侧汇总 / 两侧候选</b>（只读、有界）：批量装载，绝无逐行数据库查询。</item>
 /// </list>
-/// <para>证据维度分离（关键）：本服务只派生**本维度**（收款 → 代理服务费对账单）的已分摊与未分摊金额；
-/// <strong>绝不</strong>把 ERP-053「收款单 → 销售订单」引用与 ERP-055「销项发票 → 销售订单」分摊的金额相加，
-/// 也不把它们当作几张不同的收款单。</para>
+/// <para>收款单侧额度（关键，ERP-350）：收款单可分摊余额按<b>同一张收款单的唯一、同币种分摊额度</b>派生——
+/// 即收款单权威金额扣除「收款单 → 销售订单」与「收款单 → 代理服务费对账单」两套**有效**分摊行合计；
+/// 对账单未分摊额仍只扣减本维度有效分摊。两套证据本身仍分别保留、分别展示，绝不跨币种合计、绝不重复计算。</para>
 /// <para>边界（重要）：本服务只读写 <c>AgencyServiceFeeCollectionAllocations</c> 一张表；<strong>不</strong>收款、
 /// <strong>不</strong>付款、<strong>不</strong>记账或生成凭证 / 结算单、<strong>不</strong>核销、<strong>不</strong>催收或
 /// 联系客户、<strong>不</strong>调用任何外部服务，也<strong>不</strong>改写收款单（含状态 / 金额 / 币种 / 付款方式 /
@@ -92,8 +92,13 @@ public static class AgencyServiceFeeCollectionAllocationService
         var activeRows = await LoadActiveRowsAsync(db, statement.Id, receipt.Id);
         var statementAllocated = activeRows
             .Where(a => a.StatementId == statement.Id).Sum(a => a.AllocatedAmount);
-        var receiptAllocated = activeRows
+        var ownReceiptAllocated = activeRows
             .Where(a => a.ReceiptId == receipt.Id).Sum(a => a.AllocatedAmount);
+
+        // 唯一、同币种分摊额度（ERP-350）：同一收款单的「收款单 → 销售订单」与「收款单 → 代理服务费对账单」
+        // 两套有效分摊行在收款单行锁下共同占用同一额度，因此收款单侧余额要扣减两套合计（绝不跨币种、绝不重复计算）。
+        var receiptFunding = await CustomerReceiptLifecycleRules.LoadReceiptFundingAsync(db, receipt.Id);
+        var receiptAllocated = receiptFunding.CombinedAllocated;
 
         EnsureWithinLimit(
             activeRows.Count(a => a.StatementId == statement.Id),
@@ -114,7 +119,7 @@ public static class AgencyServiceFeeCollectionAllocationService
         if (amount > receiptAvailable)
             throw BusinessException.RuleConflict(
                 $"收款单「{receipt.ReceiptNo}」的可分摊余额为 {receiptAvailable} {statementCurrency}"
-                + $"（收款金额已按币种精度取整，本维度已分摊 {receiptAllocated}），"
+                + $"（收款金额已按币种精度取整，两套证据已分摊 {receiptAllocated}，其中本维度 {ownReceiptAllocated}），"
                 + $"不能分摊 {amount} {statementCurrency}：系统不做超额分摊、不自动调整差额，"
                 + "也不把差额猜测到别的记录");
 
@@ -398,11 +403,11 @@ public static class AgencyServiceFeeCollectionAllocationService
     }
 
     /// <summary>
-    /// 收款单侧汇总（只读派生）：收款单快照 + **本维度**有效分摊金额 / 可分摊余额、有效行数与已作废行数 +
+    /// 收款单侧汇总（只读派生）：收款单快照 + 有效分摊金额 / 可分摊余额、本维度有效行数与已作废行数 +
     /// 有界逐行明细。
-    /// <para>统计口径：有效分摊金额只按 <c>Status = 有效</c> 的持久化行合计（已作废历史永不并入有效合计，
-    /// 但单独计数并列出）；可分摊余额下限 0，且<strong>只属于本维度</strong>（不与 ERP-053 销售订单收款引用
-    /// 相加），<strong>不是</strong>银行未到账金额、应收账款余额或客户欠款。</para>
+    /// <para>统计口径（ERP-350）：有效分摊金额按同一张收款单的「收款单 → 销售订单」与「收款单 → 代理服务费对账单」
+    /// 两套 <c>Status = 有效</c> 的持久化行合计（已作废历史永不并入有效合计，但单独计数并列出）；
+    /// 可分摊余额下限 0，<strong>不是</strong>银行未到账金额、应收账款余额或客户欠款。</para>
     /// </summary>
     public static async Task<AgencyServiceFeeCollectionAllocationReceiptSummaryDto> GetReceiptSummaryAsync(
         IErpDbContext db, long receiptId)
@@ -419,10 +424,12 @@ public static class AgencyServiceFeeCollectionAllocationService
             .Select(g => new { Status = g.Key, Count = g.Count(), Amount = g.Sum(a => a.AllocatedAmount) })
             .ToListAsync();
 
-        var active = stats
+        var ownActive = stats
             .Where(s => s.Status == AgencyServiceFeeCollectionAllocationRules.StatusActive).ToList();
-        var allocated = active.Sum(s => s.Amount);
-        var allocationCount = active.Sum(s => s.Count);
+        // 唯一、同币种分摊额度（ERP-350）：剩余额度必须扣减两套有效分摊证据（本维度 + 销售订单收款引用维度）。
+        var funding = await CustomerReceiptLifecycleRules.LoadReceiptFundingAsync(db, receipt.Id);
+        var allocated = funding.CombinedAllocated;
+        var allocationCount = ownActive.Sum(s => s.Count);
         var voidedCount = stats
             .Where(s => s.Status == AgencyServiceFeeCollectionAllocationRules.StatusVoided)
             .Sum(s => s.Count);
@@ -450,7 +457,7 @@ public static class AgencyServiceFeeCollectionAllocationService
             voidedCount,
             AgencyServiceFeeCollectionAllocationRules.LinkageStatusOf(amount, allocated),
             AgencyServiceFeeCollectionAllocationRules.LinkageText(
-                amount, allocated, allocationCount, currency, "收款单在本维度"),
+                amount, allocated, allocationCount, currency, "收款单"),
             AgencyServiceFeeCollectionAllocationRules.EvaluateReceiptEligibility(receipt, allocated).Eligible,
             AgencyServiceFeeCollectionAllocationRules.ReceiptAvailabilityText(receipt),
             AgencyServiceFeeCollectionAllocationRules.RuleText,
@@ -464,9 +471,9 @@ public static class AgencyServiceFeeCollectionAllocationService
 
     /// <summary>
     /// 可分摊收款单候选（只读、有界）：必须显式给出客户与币种（资格判定依赖它们），单次最多
-    /// <see cref="MaxReceiptCandidates"/> 条；只列出**未删除且未取消**的收款单，附 **本维度** 已分摊金额、
+    /// <see cref="MaxReceiptCandidates"/> 条；只列出**未删除且未取消**的收款单，附已分摊金额、
     /// 可分摊余额与资格文案（已占满 → 不可分摊）。
-    /// <para>刻意**不与** ERP-053 的销售订单收款引用合并：可分摊余额只扣减本登记册的有效分摊行。</para>
+    /// <para>可分摊余额按同一张收款单的「收款单 → 销售订单」与「收款单 → 代理服务费对账单」两套有效分摊行合计派生（ERP-350）。</para>
     /// </summary>
     public static async Task<List<AgencyServiceFeeCollectionAllocationReceiptCandidateDto>> ListReceiptCandidatesAsync(
         IErpDbContext db, long customerId, string? currency, string? keyword, int take)
@@ -498,12 +505,17 @@ public static class AgencyServiceFeeCollectionAllocationService
             .Take(limit)
             .ToListAsync();
 
-        var totals = await LoadActiveTotalsForReceiptsAsync(db, rows.Select(r => r.Id).ToList());
+        var ownTotals = await LoadActiveTotalsForReceiptsAsync(db, rows.Select(r => r.Id).ToList());
+        // 唯一、同币种分摊额度（ERP-350）：候选的已占用 / 剩余额度扣减两套有效分摊证据。
+        var fundingByReceipt = await CustomerReceiptLifecycleRules.LoadReceiptFundingForReceiptsAsync(
+            db, rows.Select(r => r.Id).ToList());
 
         return rows.Select(receipt =>
         {
-            var allocated = totals.TryGetValue(receipt.Id, out var value) ? value.Amount : 0m;
-            var count = totals.TryGetValue(receipt.Id, out var value2) ? value2.Count : 0;
+            ownTotals.TryGetValue(receipt.Id, out var ownValue);
+            var count = ownValue.Count;
+            var allocated = fundingByReceipt.TryGetValue(receipt.Id, out var funding)
+                ? funding.CombinedAllocated : 0m;
             var receivedTotal = AgencyServiceFeeCollectionAllocationRules.AuthoritativeAmount(
                 receipt.Amount, normalizedCurrency);
             var remaining = receivedTotal - allocated;

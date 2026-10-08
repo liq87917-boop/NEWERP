@@ -12,7 +12,8 @@ namespace ERP.Application.Services;
 /// <list type="number">
 /// <item><b>登记引用行</b>（<see cref="CreateAsync"/>）：收款单必须存在且未删除，销售订单必须存在、未删除、
 /// 未取消，且订单客户与币种都必须与收款单**权威一致**；引用金额按币种精度取整且大于 0，
-/// 同一收款单内有效行合计不得超过收款单金额，同一订单在同一收款单内不得重复（有效行）；</item>
+/// 同一收款单内两套有效分摊行（含「收款单 → 代理服务费对账单」）合计不得超过收款单金额，
+/// 同一订单在同一收款单内不得重复（有效行）；</item>
 /// <item><b>作废引用行</b>（<see cref="VoidAsync"/>）：必须填写原因，保留原始金额 / 快照 / 审计历史，
 /// 不物理删除、不静默替换、不重写已作废证据；</item>
 /// <item><b>台账与汇总读取</b>（<see cref="ListAsync"/> / <see cref="GetAsync"/> /
@@ -33,7 +34,8 @@ public static class CustomerReceiptAllocationService
     /// <summary>
     /// 登记一条收款引用行：全部校验通过后才写一行证据，并写入收款单 / 客户 / 销售订单的服务端快照。
     /// <para>校验顺序：收款单可用 → 币种口径 → 引用金额（精度 + 大于 0）→ 备注 → 销售订单资格
-    /// （存在 / 未删除 / 未取消 / 客户一致 / 币种一致）→ 单收款单行数上限 → 重复有效行 → 收款金额上限。</para>
+    /// （存在 / 未删除 / 未取消 / 客户一致 / 币种一致）→ 单收款单行数上限 → 重复有效行 →
+    /// 同一收款单的唯一同币种分摊额度上限（两套证据合计，ERP-350）。</para>
     /// </summary>
     public static async Task<CustomerReceiptAllocationDto> CreateAsync(
         IErpDbContext db, CustomerReceiptAllocationSaveDto dto)
@@ -87,12 +89,16 @@ public static class CustomerReceiptAllocationService
                 + "同一订单在同一收款单内只能有一条有效引用行（如需更正请先作废原行，再登记新行；作废保留历史）");
 
         var receiptAmount = CustomerReceiptAllocationRules.AuthoritativeReceiptAmount(receipt.Amount, currency);
-        var allocated = activeRows.Sum(a => a.AllocatedAmount);
+        // 唯一、同币种分摊额度（ERP-350）：同一收款单的「收款单 → 销售订单」与「收款单 → 代理服务费对账单」
+        // 两套有效分摊行在收款单行锁下共同占用同一额度，因此这里取两套合计（绝不跨币种、绝不重复计算）。
+        var funding = await CustomerReceiptLifecycleRules.LoadReceiptFundingAsync(db, receipt.Id);
+        var allocated = funding.CombinedAllocated;
         var total = allocated + amount;
         if (total > receiptAmount)
             throw BusinessException.RuleConflict(
                 $"收款单「{receipt.ReceiptNo}」的引用金额合计 {total} 超过收款单金额 {receiptAmount} {currency}"
-                + $"（已引用 {allocated}，本次 {amount}）：请调整引用金额"
+                + $"（已引用 {allocated}，其中「收款单 → 销售订单」{funding.CustomerOrderAllocated}，"
+                + $"「收款单 → 代理服务费对账单」{funding.AgencyAllocated}；本次 {amount}）：请调整引用金额"
                 + "（收款单允许部分或全部未被引用，未引用部分保持为未引用金额）");
 
         var customer = await db.BaseCustomers.AsNoTracking()
@@ -253,9 +259,10 @@ public static class CustomerReceiptAllocationService
     }
 
     /// <summary>
-    /// 收款单侧汇总（只读派生）：收款单快照 + **有效行**已引用金额 / 未引用金额 / 行数 / 已作废行数 + 有界明细。
-    /// <para>统计口径：已引用金额只按 <c>Status = 有效</c> 的持久化行合计（已作废历史永不并入有效合计，
-    /// 但单独计数并列出）；收款金额上限按币种精度取整，未引用金额下限 0。
+    /// 收款单侧汇总（只读派生）：收款单快照 + 已引用金额 / 未引用金额 / 行数 / 已作废行数 + 有界明细。
+    /// <para>统计口径（ERP-350）：已引用金额按同一张收款单的「收款单 → 销售订单」与「收款单 → 代理服务费对账单」
+    /// 两套 <c>Status = 有效</c> 的持久化行合计（已作废历史永不并入有效合计，但单独计数并列出）；
+    /// 收款金额上限按币种精度取整，未引用金额下限 0。
     /// 明细行按有界上限返回（不逐行查库）；本方法<strong>不写库</strong>、不改写收款单与销售订单，
     /// 也不把结果表述为已到账金额、应收账款余额或客户欠款。</para>
     /// </summary>
@@ -275,9 +282,11 @@ public static class CustomerReceiptAllocationService
             .Select(g => new { Status = g.Key, Count = g.Count(), Amount = g.Sum(a => a.AllocatedAmount) })
             .ToListAsync();
 
-        var activeRows = stats.Where(s => s.Status == CustomerReceiptAllocationRules.StatusActive).ToList();
-        var allocated = activeRows.Sum(s => s.Amount);
-        var allocationCount = activeRows.Sum(s => s.Count);
+        var ownActiveRows = stats.Where(s => s.Status == CustomerReceiptAllocationRules.StatusActive).ToList();
+        // 唯一、同币种分摊额度（ERP-350）：剩余额度必须扣减两套有效分摊证据（本维度 + 代理服务费对账单维度）。
+        var funding = await CustomerReceiptLifecycleRules.LoadReceiptFundingAsync(db, receipt.Id);
+        var allocated = funding.CombinedAllocated;
+        var allocationCount = ownActiveRows.Sum(s => s.Count);
         var voidedCount = stats
             .Where(s => s.Status == CustomerReceiptAllocationRules.StatusVoided)
             .Sum(s => s.Count);
@@ -317,8 +326,9 @@ public static class CustomerReceiptAllocationService
 
     /// <summary>
     /// 可引用收款单候选（只读、有界）：只列出**既有、未删除**的客户收款单（可按客户筛选、按收款单号关键字检索），
-    /// 每张收款单附带有效行已引用金额、未引用金额、有效行数与资格文案（已全额引用 / 币种不受支持时不可引用）。
-    /// <para><c>UnallocatedAmount</c> 只按持久化有效行派生，它不是银行未到账金额、应收账款余额或客户欠款，
+    /// 每张收款单附带已引用金额、未引用金额、有效行数与资格文案（已全额引用 / 币种不受支持时不可引用）。
+    /// <para><c>UnallocatedAmount</c> 按同一张收款单的「收款单 → 销售订单」与「收款单 → 代理服务费对账单」
+    /// 两套有效分摊行合计派生（ERP-350）；它不是银行未到账金额、应收账款余额或客户欠款，
     /// 也不代表款项是否真的收到。</para>
     /// </summary>
     public static async Task<List<CustomerReceiptAllocationReceiptCandidateDto>> ListReceiptCandidatesAsync(
@@ -345,13 +355,16 @@ public static class CustomerReceiptAllocationService
 
         var receiptIds = receipts.Select(r => r.Id).ToList();
 
-        // 一次查询取回候选收款单的有效引用行（已作废行不占用额度）
-        var activeRows = await db.CustomerReceiptAllocations.AsNoTracking()
+        // 一次查询取回候选收款单的有效引用行（已作废行不占用额度；仅用于本维度行数）
+        var ownRows = await db.CustomerReceiptAllocations.AsNoTracking()
             .Where(a => !a.IsDeleted
                         && a.Status == CustomerReceiptAllocationRules.StatusActive
                         && receiptIds.Contains(a.ReceiptId))
             .Select(a => new { a.ReceiptId, a.AllocatedAmount })
             .ToListAsync();
+
+        // 唯一、同币种分摊额度（ERP-350）：候选的已占用 / 剩余额度扣减两套有效分摊证据。
+        var fundingByReceipt = await CustomerReceiptLifecycleRules.LoadReceiptFundingForReceiptsAsync(db, receiptIds);
 
         var customerIds = receipts.Select(r => r.CustomerId).Distinct().ToList();
         var customers = (await db.BaseCustomers.AsNoTracking()
@@ -360,8 +373,9 @@ public static class CustomerReceiptAllocationService
 
         return receipts.Select(receipt =>
         {
-            var rows = activeRows.Where(r => r.ReceiptId == receipt.Id).ToList();
-            var allocated = rows.Sum(r => r.AllocatedAmount);
+            var ownCount = ownRows.Count(r => r.ReceiptId == receipt.Id);
+            var allocated = fundingByReceipt.TryGetValue(receipt.Id, out var funding)
+                ? funding.CombinedAllocated : 0m;
             var currency = CurrencyAmountRules.NormalizeCurrency(receipt.Currency.ToString());
             var receiptAmount = CustomerReceiptAllocationRules.AuthoritativeReceiptAmount(receipt.Amount, currency);
             var unallocated = receiptAmount - allocated;
@@ -385,7 +399,7 @@ public static class CustomerReceiptAllocationService
                 receiptAmount,
                 allocated,
                 unallocated,
-                rows.Count,
+                ownCount,
                 eligible,
                 eligibilityText);
         }).ToList();

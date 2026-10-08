@@ -1,11 +1,10 @@
 {
   "schema_version": 2,
   "project": "NEWERP",
-  "updated_at": "2026-10-08T06:08:50.809974Z",
+  "updated_at": "2026-10-08T06:19:09.817448Z",
   "phase": "ready",
   "current_task": null,
   "queue": [
-    "ERP-350",
     "ERP-351",
     "ERP-352",
     "ERP-353"
@@ -333,39 +332,36 @@
     "ERP-346",
     "ERP-347",
     "ERP-348",
-    "ERP-349"
+    "ERP-349",
+    "ERP-350"
   ],
   "blocked": [],
   "last_build": {
     "task": "ERP-350",
     "profile": "safe",
-    "status": "failed",
-    "exit_code": 1,
-    "log": ".ai\\logs\\ERP-350-validation-1.log",
-    "at": "2026-10-08T05:56:33.037342Z"
+    "status": "passed",
+    "exit_code": 0,
+    "log": ".ai\\logs\\ERP-350-validation-2.log",
+    "at": "2026-10-08T06:19:09.188488Z"
   },
-  "last_error": {
-    "task": "ERP-350",
-    "kind": "automatic_repair_pending",
-    "summary": "Path guard failed:\noutside allowed_paths: src/ERP.Application/Services/AgencyServiceFeeCollectionAllocationRules.cs"
-  },
+  "last_error": null,
   "last_deepseek_fix": {
     "task": "ERP-350",
-    "attempts": 3,
-    "status": "retry_pending",
-    "at": "2026-10-08T06:08:50.422407Z"
+    "attempt": 2,
+    "model": "deepseek-v4-pro",
+    "exit_code": 0,
+    "finished_at": "2026-10-08T06:17:13.165222Z"
   },
   "git_sync": {
     "branch": "main",
-    "local_sha": "607d8b0",
-    "status": "synced",
+    "local_sha": "159e0fd",
+    "status": "pending",
     "ahead": 0,
     "behind": 0,
-    "last_attempt_at": "2026-10-08T05:27:04.714898Z",
+    "last_attempt_at": "2026-10-08T06:19:09.701778Z",
     "last_error": null
   },
   "next_recommended_tasks": [
-    "ERP-350",
     "ERP-351",
     "ERP-352",
     "ERP-353"
@@ -373,7 +369,5 @@
   "runner": {
     "status": "stopped",
     "pid": null
-  },
-  "blocker": null,
-  "finish_reason": "deepseek_supervisor_recovery"
+  }
 }

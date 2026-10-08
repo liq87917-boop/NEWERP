@@ -10,6 +10,9 @@
 原实现中，收款单 `Create` 接受 `Amount / Currency / CustomerId` 却无运营校验，`Update` 会直接覆盖这些值而不检查
 既有分摊证据，`Cancel / Delete` 走无条件基类状态逻辑，且两套分摊写入只在**创建时**以当时的收款单金额做上限，
 没有与收款单生命周期互斥、也没有并发护栏。ERP-349 在不新增表 / 列 / 权限模型的前提下，通过既有业务 API / 服务补上护栏。
+ERP-350 在此基础上把两套分摊写入的「收款单金额上限」升级为**同一张收款单的唯一、同币种分摊额度**：
+「收款单 → 销售订单」与「收款单 → 代理服务费对账单」两套有效分摊行在收款单行锁下**共同占用**同一额度，
+任一写入都把两套有效行合计后与收款单权威金额比较，绝不跨币种合计、绝不重复计算证据。
 
 ## 2. 关键不变量
 
@@ -22,7 +25,10 @@
    取消 / 删除收款单，也拒绝以破坏证据的方式修改客户 / 币种 / 金额。要解除限制必须先走既有显式作废服务
    （`CustomerReceiptAllocationService.VoidAsync` / `AgencyServiceFeeCollectionAllocationService.VoidAsync`），
    作废保留原始证据、绝不物理删除、绝不静默改写。
-4. **证据维度分离**：两套分摊证据各自独立计算、绝不把金额相加；也绝不跨币种合计或重复计算证据。
+4. **同一收款单的唯一同币种分摊额度（ERP-350）**：同一张收款单的金额是唯一、同币种的分摊额度；
+   「收款单 → 销售订单」与「收款单 → 代理服务费对账单」两套**有效（未删除、未作废）**分摊行在收款单行锁下
+   **共同占用**同一额度，任一写入都先把两套有效行合计后与收款单权威金额比较（每套证据各计一次、绝不重复计算）。
+   两套证据本身仍分别保留、分别展示，绝不跨币种合计、绝不把证据静默删除或改写。
 
 ## 3. 原子性与并发
 
@@ -33,8 +39,10 @@
   绝不静默覆盖赢家。
 - 两套分摊服务（`CustomerReceiptAllocationService.CreateAsync` / `AgencyServiceFeeCollectionAllocationService.CreateAsync`）
   在锁内重读收款单，并在收款单已取消时拒绝新增证据，从而与「收款单取消 / 改金额」互斥。
-- 并发「登记证据 vs 取消」「登记证据 vs 改金额」「两笔并发分摊」不可能同时成功：先提交者生效，后提交者看到
-  已变更的状态 / 已占用额度而拒绝，失败时原始收款单与分摊证据保持不变。
+- 收款单侧额度是**跨两套证据共享**的：任一写入都在收款单行锁内把两套有效分摊行合计后与收款单权威金额比较；
+  对账单侧额度仍只扣减本维度（`AgencyServiceFeeCollectionAllocations`）的有效分摊。
+- 并发「登记证据 vs 取消」「登记证据 vs 改金额」「两笔并发分摊（含跨维度）」不可能同时成功：先提交者生效，
+  后提交者看到已变更的状态 / 已占用额度而拒绝，失败时原始收款单与分摊证据保持不变。
 
 ## 4. 接口
 
@@ -55,6 +63,8 @@
 - `src/ERP.Application/Services/AgencyServiceFeeCollectionAllocationService.cs`（ERP-071 登记加锁）
 - `src/ERP.UnitTests/CustomerReceiptLifecycleTests.cs`（内存库）
 - `src/ERP.IntegrationTests/CustomerReceiptLifecycleSqlServerTests.cs`（真实 SQL）
+- `src/ERP.UnitTests/CustomerReceiptSharedFundingTests.cs`（ERP-350 内存库：跨消费者唯一分摊额度）
+- `src/ERP.IntegrationTests/CustomerReceiptSharedFundingSqlServerTests.cs`（ERP-350 真实 SQL：跨消费者额度与竞态）
 
 ## 6. 测试与验证
 
@@ -62,6 +72,11 @@
 - 安全验证档：`dotnet restore` + Release 构建（`TreatWarningsAsErrors` / 分析器开启）+ `ERP.UnitTests`。
 - SQL Server 集成测试：`src/ERP.IntegrationTests/CustomerReceiptLifecycleSqlServerTests.cs`，
   覆盖有效收款引用拒绝改金额 / 取消、作废释放、有效代理服务费分摊拒绝改金额、并发分摊竞态与并发「分摊 vs 取消」竞态。
+- ERP-350 单元测试：`src/ERP.UnitTests/CustomerReceiptSharedFundingTests.cs`（内存库），
+  覆盖「客户 80 → 代理 30 / 反向写入顺序」的超额拒绝与两表不变、精确 100 双写、作废释放、币种 / 客户护栏、
+  以及汇总与候选的跨维度剩余额度。
+- ERP-350 SQL Server 集成测试：`src/ERP.IntegrationTests/CustomerReceiptSharedFundingSqlServerTests.cs`（真实 SQL），
+  覆盖跨消费者额度、作废释放、币种 / 客户护栏与两个独立连接上的跨消费者并发竞态。
 
 ## 7. 真实 SQL 夹具安全口径
 
