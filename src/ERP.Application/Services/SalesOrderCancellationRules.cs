@@ -7,11 +7,12 @@ using Microsoft.EntityFrameworkCore;
 namespace ERP.Application.Services;
 
 /// <summary>
-/// 销售订单取消护栏（ERP-347 / ERP-369）：在既有取消路由上校验身份 / 菜单 / 客户数据范围与实时单据状态，
+/// 销售订单取消护栏（ERP-347 / ERP-369 / ERP-381）：在既有取消路由上校验身份 / 菜单 / 客户数据范围与实时单据状态，
 /// 并在取消前拒绝仍有「以本单为来源、未删除、已审核」的销售出库履约、仍有「未删除且未取消」的
 /// 采购订单履约（<c>PurchaseOrder.OwningSalesOrderId</c> 指向本单）、仍有「有效（未作废）」客户收款引用
-/// （分摊）证据（<c>CustomerReceiptAllocation.SalesOrderId</c> 指向本单），或仍有「未删除、已审核」且明细通过
-/// 显式来源销售订单明细链接本单明细的预装柜需求计划证据（ERP-368 的 <c>SourceSalesOrderDetailId</c>，ERP-369）的订单。
+/// （分摊）证据（<c>CustomerReceiptAllocation.SalesOrderId</c> 指向本单）、仍有「未删除且未取消」的定金申请单
+/// （<c>FinanceDepositApply.SalesOrderId</c> 指向本单，ERP-381 的权威收款申请来源链接），或仍有「未删除、已审核」
+/// 且明细通过显式来源销售订单明细链接本单明细的预装柜需求计划证据（ERP-368 的 <c>SourceSalesOrderDetailId</c>，ERP-369）的订单。
 /// <para>本类只做<b>纯判定与有界只读查询</b>，不落库、不改单据、不冲销库存与财务、不开启事务；
 /// 「取消状态变更 + 拒绝判定」的原子性与同单并发串行化由调用方（<c>SalesOrderController.Cancel</c>）
 /// 在同一可串行化事务内对销售订单行加 UPDLOCK/HOLDLOCK 完成（与 ERP-343 出库审核、ERP-346 采购归属关联同源口径）。</para>
@@ -30,8 +31,9 @@ public static class SalesOrderCancellationRules
     /// <summary>取消护栏口径文案（接口 / 文档同源）</summary>
     public const string RuleText =
         "取消销售订单前，先校验当前身份、销售订单（sales-order）菜单授权与客户数据范围；" +
-        "当存在「以本单为来源、未删除、已审核」的销售出库单，或存在「未删除且未取消」的采购订单（归属销售订单指向本单）" +
-        "与「有效（未作废）」客户收款引用（分摊）证据，或存在「未删除、已审核」且明细显式链接本单明细的预装柜需求计划证据时拒绝取消；" +
+        "当存在「以本单为来源、未删除、已审核」的销售出库单，或存在「未删除且未取消」的采购订单（归属销售订单指向本单）、" +
+        "「有效（未作废）」客户收款引用（分摊）证据与「未删除且未取消」的定金申请单（SalesOrderId 显式指向本单），" +
+        "或存在「未删除、已审核」且明细显式链接本单明细的预装柜需求计划证据时拒绝取消；" +
         "已取消 / 已冲销 / 已作废 / 已删除的证据只有在既有权威工作流显式标记其失效后才被忽略，绝不按字符串或金额猜测链接、绝不跨币种合计；" +
         "取消本身不冲销库存或财务，冲销只走既有冲销 / 作废工作流。";
 
@@ -113,9 +115,9 @@ public static class SalesOrderCancellationRules
     // ==================== 有效履约证据护栏 ====================
 
     /// <summary>
-    /// 拒绝仍有「已审核且未冲销」的销售出库履约、未删除且未取消的采购履约、有效客户收款引用证据，
-    /// 或「未删除、已审核」且明细显式链接本单明细的预装柜需求计划证据（ERP-369）的订单。
-    /// 判定只做有界只读查询，不合计金额、不猜测链接。
+    /// 拒绝仍有「已审核且未冲销」的销售出库履约、未删除且未取消的采购履约、有效客户收款引用证据、
+    /// 未删除且未取消的定金申请单来源链接（ERP-381），或「未删除、已审核」且明细显式链接本单明细的
+    /// 预装柜需求计划证据（ERP-369）的订单。判定只做有界只读查询，不合计金额、不猜测链接。
     /// </summary>
     private static async Task EnsureNoActiveFulfillmentAsync(
         IErpDbContext db, SalesOrder order, CancellationToken ct)
@@ -141,7 +143,17 @@ public static class SalesOrderCancellationRules
         if (hasActiveAllocation)
             throw BusinessException.RuleConflict("存在有效的客户收款引用（分摊）证据：请先作废收款引用行，再取消销售订单");
 
-        // 4) 以本单明细为显式来源、未删除且已审核的预装柜需求计划证据（ERP-369）：存在即拒绝
+        // 4) 以本单为显式来源（SalesOrderId）、未删除且未取消的定金申请单（ERP-381 权威收款申请来源链接）：存在即拒绝
+        var hasActiveDepositApply = await db.FinanceDepositApplies.AsNoTracking()
+            .AnyAsync(a => !a.IsDeleted && a.SalesOrderId == order.Id
+                           && a.Status != DocumentStatus.Cancelled, ct);
+        if (hasActiveDepositApply)
+            throw BusinessException.RuleConflict(
+                "存在未删除且未取消的定金申请单（SalesOrderId 显式指向本销售订单）："
+                + "请先在定金申请单模块取消 / 删除后再取消销售订单"
+                + "（取消保留历史与审计，不物理删除收款申请证据，也绝不按文本猜测来源）");
+
+        // 5) 以本单明细为显式来源、未删除且已审核的预装柜需求计划证据（ERP-369）：存在即拒绝
         await EnsureNoLinkedPreLoadingDemandAsync(db, order, ct);
     }
 
