@@ -81,10 +81,16 @@ public class TradeDocumentController : BaseCrudController<TradeDocument>
     /// <summary>
     /// 新增单证：写入任何字段之前校验拟议客户的实时范围与真实启用状态（受限账号无主 / 越界一律拒绝）。
     /// </summary>
+    /// <summary>
+    /// 新增单证：写入任何字段之前校验拟议客户的实时范围与真实启用状态（受限账号无主 / 越界一律拒绝）；
+    /// 状态归一化后必须在已知口径内（未知状态 fail closed）。
+    /// </summary>
     [HttpPost]
     public override async Task<IActionResult> Create([FromBody] TradeDocument entity)
     {
         entity.Id = 0;
+        entity.Status = TradeDocumentMutationRules.NormalizeStatus(entity.Status);
+        TradeDocumentMutationRules.EnsureKnownStatus(entity.Status);
         await TradeDocumentAuthorizationRules.EnsureProposedScopeAllowedAsync(
             _db, TradeDocumentRequestScope, entity);
         var result = await Service.CreateAsync(entity);
@@ -92,52 +98,98 @@ public class TradeDocumentController : BaseCrudController<TradeDocument>
     }
 
     /// <summary>
-    /// 修改单证：先复核「已存储」单证的权威归属，再校验「拟议」客户的实时范围与真实启用状态。
+    /// 修改单证：与明细行写入共用同一把父单证行锁 + 同一原子事务（ERP-395）；锁内重新加载并复核
+    /// 「已存储」单证的权威归属、状态前进合法性（未知 / 回退 fail closed）与冻结状态下的商业字段不可改写，
+    /// 再校验「拟议」客户的实时范围与真实启用状态；失败整体回滚（状态、原始字段与审计不变）。
     /// </summary>
     [HttpPut("{id:long}")]
     public override async Task<IActionResult> Update(long id, [FromBody] TradeDocument entity)
     {
-        var existing = await Service.GetByIdAsync(id);
-        TradeDocumentAuthorizationRules.EnsureStoredScopeAllowed(TradeDocumentRequestScope, existing);
+        var scope = TradeDocumentRequestScope;
+        await using var transaction = await TradeDocumentMutationRules.BeginMutationTransactionAsync(_db);
+        try
+        {
+            await TradeDocumentMutationRules.LockDocumentRowAsync(_db, id);
+            var existing = await TradeDocumentAuthorizationRules.LoadLockedDocumentAsync(_db, scope, id);
 
-        entity.Id = id;
-        await TradeDocumentAuthorizationRules.EnsureProposedScopeAllowedAsync(
-            _db, TradeDocumentRequestScope, entity);
-        var result = await Service.UpdateAsync(entity);
-        return Ok(ApiResponse<TradeDocument>.Success(result, "更新成功"));
-    }
+            entity.Id = id;
+            entity.Status = TradeDocumentMutationRules.NormalizeStatus(entity.Status);
+            TradeDocumentMutationRules.EnsureHeaderUpdateAllowed(existing, entity);
 
-    /// <summary>删除单证（软删除）：删除前复核已存储单证的权威归属。</summary>
-    [HttpDelete("{id:long}")]
-    public override async Task<IActionResult> Delete(long id)
-    {
-        var existing = await Service.GetByIdAsync(id);
-        TradeDocumentAuthorizationRules.EnsureStoredScopeAllowed(TradeDocumentRequestScope, existing);
-        await Service.DeleteAsync(id);
-        return Ok(ApiResponse<object>.Success(null, "删除成功"));
+            await TradeDocumentAuthorizationRules.EnsureProposedScopeAllowedAsync(_db, scope, entity);
+
+            var result = await Service.UpdateAsync(entity);
+            if (transaction is not null) await transaction.CommitAsync();
+            return Ok(ApiResponse<TradeDocument>.Success(result, "更新成功"));
+        }
+        catch
+        {
+            if (transaction is not null) await transaction.RollbackAsync();
+            TradeDocumentMutationRules.DiscardTrackedChanges(_db);
+            throw;
+        }
     }
 
     /// <summary>
-    /// 批量删除（软删除）：逐行复核权威归属，**任一行越界 / 无主即整体拒绝**（绝不产生部分删除），
-    /// 全部通过后才一次性软删除。
+    /// 删除单证（软删除）：与明细行写入共用同一把父单证行锁 + 同一原子事务（ERP-395）；
+    /// 锁内重新加载并复核已存储单证的权威归属，失败整体回滚（并发明细行写入在此被拒绝）。
+    /// </summary>
+    [HttpDelete("{id:long}")]
+    public override async Task<IActionResult> Delete(long id)
+    {
+        var scope = TradeDocumentRequestScope;
+        await using var transaction = await TradeDocumentMutationRules.BeginMutationTransactionAsync(_db);
+        try
+        {
+            await TradeDocumentMutationRules.LockDocumentRowAsync(_db, id);
+            await TradeDocumentAuthorizationRules.LoadLockedDocumentAsync(_db, scope, id);
+
+            await Service.DeleteAsync(id);
+            if (transaction is not null) await transaction.CommitAsync();
+            return Ok(ApiResponse<object>.Success(null, "删除成功"));
+        }
+        catch
+        {
+            if (transaction is not null) await transaction.RollbackAsync();
+            TradeDocumentMutationRules.DiscardTrackedChanges(_db);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// 批量删除（软删除）：同一事务内按父单证 Id <b>升序</b>确定性加锁（去重、仅正整数），
+    /// 锁内逐行复核权威归属，**任一行越界 / 无主即整体拒绝**（绝不产生部分删除），全部通过后才一次性软删除。
     /// </summary>
     [HttpPost("batch-delete")]
     public override async Task<IActionResult> BatchDelete([FromBody] List<long> ids)
     {
         var scope = TradeDocumentRequestScope;
         var requested = (ids ?? new List<long>()).Where(id => id > 0).Distinct().ToList();
-        var ownership = await TradeDocumentAuthorizationRules.LoadOwnershipAsync(_db, requested);
-        foreach (var document in ownership)
-            TradeDocumentAuthorizationRules.EnsureStoredScopeAllowed(scope, document);
+        await using var transaction = await TradeDocumentMutationRules.BeginMutationTransactionAsync(_db);
+        try
+        {
+            await TradeDocumentMutationRules.LockDocumentRowsAsync(_db, requested);
 
-        var found = ownership.Select(d => d.Id).ToHashSet();
-        var missing = requested.Where(id => !found.Contains(id)).ToList();
-        if (missing.Count > 0)
-            throw BusinessException.NotFound(
-                $"批量删除的单证不存在或已删除：{string.Join("、", missing)}（未做任何部分删除）");
+            var ownership = await TradeDocumentAuthorizationRules.LoadOwnershipAsync(_db, requested);
+            foreach (var document in ownership)
+                TradeDocumentAuthorizationRules.EnsureStoredScopeAllowed(scope, document);
 
-        await Service.BatchDeleteAsync(requested);
-        return Ok(ApiResponse<object>.Success(null, "批量删除成功"));
+            var found = ownership.Select(d => d.Id).ToHashSet();
+            var missing = requested.Where(id => !found.Contains(id)).ToList();
+            if (missing.Count > 0)
+                throw BusinessException.NotFound(
+                    $"批量删除的单证不存在或已删除：{string.Join("、", missing)}（未做任何部分删除）");
+
+            await Service.BatchDeleteAsync(requested);
+            if (transaction is not null) await transaction.CommitAsync();
+            return Ok(ApiResponse<object>.Success(null, "批量删除成功"));
+        }
+        catch
+        {
+            if (transaction is not null) await transaction.RollbackAsync();
+            TradeDocumentMutationRules.DiscardTrackedChanges(_db);
+            throw;
+        }
     }
 
     /// <summary>单证导出列定义（顺序即 Excel 列顺序；中文列头与页面字段一致）</summary>

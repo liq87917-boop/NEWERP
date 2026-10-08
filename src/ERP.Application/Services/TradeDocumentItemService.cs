@@ -20,9 +20,14 @@ namespace ERP.Application.Services;
 /// <item><b>删除行</b>（<see cref="DeleteAsync"/>）：只在准备状态允许的**显式删除**（软删除，保留审计字段），
 /// 已提交客户 / 已使用的单证明细既不能修改也不能删除。</item>
 /// </list>
-/// <para>边界（重要）：本服务只读写 <c>TradeDocumentItems</c> 一张表；<strong>不</strong>改写单证台账表头
-/// （含金额 / 状态 / 份数 / 备注）、<strong>不</strong>改写商品资料、销售订单、采购订单、装柜清单、
+/// <para>边界（重要）：本服务只读写 <c>TradeDocumentItems</c> 明细，以及父单证的<strong>技术审计时间戳</strong>
+/// （ERP-395 共享行锁：仅刷新 <c>TradeDocument.UpdatedAt</c> 取得排它行锁，<c>UpdatedAt</c> 是技术审计字段、
+/// 不是商业证据）；<strong>不</strong>改写单证台账表头的商业字段（金额 / 状态 / 份数 / 备注等）、
+/// <strong>不</strong>改写商品资料、销售订单、采购订单、装柜清单、
 /// 库存与库存流水、发票与发票关联、退税、费用或财务记录，也<strong>不</strong>做任何价格推断与汇率换算。</para>
+/// <para><b>并发（ERP-395）</b>：新增 / 修改 / 删除明细行都在同一原子事务内先取<strong>父单证行锁</strong>，
+/// 再重新加载父单证与明细行做锁内复核（存在 / 未删除 / 权威归属 / 状态 / 类型 / 行序），
+/// 与表头状态 / 商业修改 / 删除 / 批量删除共用同一把锁，并发父删除 / 冻结绝不放行后到的明细行写入。</para>
 /// </summary>
 public static class TradeDocumentItemService
 {
@@ -115,9 +120,38 @@ public static class TradeDocumentItemService
         ArgumentNullException.ThrowIfNull(dto);
         if (documentId <= 0) throw BusinessException.InvalidParameter("请指定要新增明细行的单证");
 
-        var document = await LoadDocumentAsync(db, documentId);
-        // ERP-394：写入明细行之前复核父单证的权威归属（受限账号不得改范围外 / 无主单证的明细）。
-        TradeDocumentAuthorizationRules.EnsureStoredScopeAllowed(scope, document);
+        // 事务外有界预读：解析父单证并做实时授权 / 可维护性判定（fail closed 时不进事务、不加锁、不写库）。
+        var probe = await LoadDocumentAsync(db, documentId);
+        TradeDocumentAuthorizationRules.EnsureStoredScopeAllowed(scope, probe);
+        EnsureMutable(probe, out _);
+
+        // ERP-395：明细行写入与表头状态 / 商业修改 / 删除共用同一把父单证行锁 + 同一原子事务。
+        await using var transaction = await TradeDocumentMutationRules.BeginMutationTransactionAsync(db);
+        try
+        {
+            // 共享父单证行锁：并发父删除 / 冻结先提交时，本写入在锁内复核后 fail closed。
+            if (!await TradeDocumentMutationRules.LockDocumentRowAsync(db, documentId))
+                throw BusinessException.NotFound(TradeDocumentMutationRules.ParentDeletedText);
+
+            // 锁内重新加载父单证并复核（存在 / 未删除 / 权威归属 / 状态 / 类型 / 币种）。
+            var locked = await TradeDocumentAuthorizationRules.LoadLockedDocumentAsync(db, scope, documentId);
+            var result = await CreateCoreAsync(db, locked, dto);
+
+            if (transaction is not null) await transaction.CommitAsync();
+            return result;
+        }
+        catch
+        {
+            if (transaction is not null) await transaction.RollbackAsync();
+            TradeDocumentMutationRules.DiscardTrackedChanges(db);
+            throw;
+        }
+    }
+
+    /// <summary>新增行的锁内核心写入（父单证行锁与原子事务已由 <see cref="CreateAsync"/> 取得）。</summary>
+    private static async Task<TradeDocumentItemDto> CreateCoreAsync(
+        IErpDbContext db, TradeDocument document, TradeDocumentItemSaveDto dto)
+    {
         var pricingAllowed = EnsureMutable(document, out var currency);
 
         var existing = await db.TradeDocumentItems.AsNoTracking()
@@ -181,13 +215,48 @@ public static class TradeDocumentItemService
         ArgumentNullException.ThrowIfNull(db);
         ArgumentNullException.ThrowIfNull(dto);
 
+        // 事务外有界预读：先由明细行解析父单证 Id（不改写任何行），再进事务加父行锁。
+        var probe = await db.TradeDocumentItems.AsNoTracking()
+            .FirstOrDefaultAsync(i => i.Id == itemId && !i.IsDeleted)
+            ?? throw BusinessException.NotFound("明细行不存在或已删除：不能修改（历史行请通过清单查看）");
+        var parentProbe = await LoadDocumentAsync(db, probe.TradeDocumentId);
+        TradeDocumentAuthorizationRules.EnsureStoredScopeAllowed(scope, parentProbe);
+        EnsureMutable(parentProbe, out _);
+
+        // ERP-395：明细行修改与表头状态 / 商业修改 / 删除共用同一把父单证行锁 + 同一原子事务。
+        await using var transaction = await TradeDocumentMutationRules.BeginMutationTransactionAsync(db);
+        try
+        {
+            if (!await TradeDocumentMutationRules.LockDocumentRowAsync(db, probe.TradeDocumentId))
+                throw BusinessException.NotFound(TradeDocumentMutationRules.ParentDeletedText);
+
+            var locked = await TradeDocumentAuthorizationRules.LoadLockedDocumentAsync(
+                db, scope, probe.TradeDocumentId);
+            var result = await UpdateCoreAsync(db, locked, itemId, dto);
+
+            if (transaction is not null) await transaction.CommitAsync();
+            return result;
+        }
+        catch
+        {
+            if (transaction is not null) await transaction.RollbackAsync();
+            TradeDocumentMutationRules.DiscardTrackedChanges(db);
+            throw;
+        }
+    }
+
+    /// <summary>修改行的锁内核心写入（父单证行锁与原子事务已由 <see cref="UpdateAsync"/> 取得）。</summary>
+    private static async Task<TradeDocumentItemDto> UpdateCoreAsync(
+        IErpDbContext db, TradeDocument document, long itemId, TradeDocumentItemSaveDto dto)
+    {
         var item = await db.TradeDocumentItems
             .FirstOrDefaultAsync(i => i.Id == itemId && !i.IsDeleted)
             ?? throw BusinessException.NotFound("明细行不存在或已删除：不能修改（历史行请通过清单查看）");
 
-        var document = await LoadDocumentAsync(db, item.TradeDocumentId);
-        // ERP-394：修改明细行之前复核父单证的权威归属（失败即不改写任何行值）。
-        TradeDocumentAuthorizationRules.EnsureStoredScopeAllowed(scope, document);
+        // 锁内复核：明细行仍属于同一父单证（并发删除 / 迁移不会被误写）。
+        if (item.TradeDocumentId != document.Id)
+            throw BusinessException.NotFound("明细行不存在或已删除：不能修改（历史行请通过清单查看）");
+
         var pricingAllowed = EnsureMutable(document, out var currency);
 
         var requested = TradeDocumentItemRules.NormalizeLineOrder(dto.LineOrder);
@@ -235,13 +304,48 @@ public static class TradeDocumentItemService
     {
         ArgumentNullException.ThrowIfNull(db);
 
+        // 事务外有界预读：先由明细行解析父单证 Id（不改写任何行），再进事务加父行锁。
+        var probe = await db.TradeDocumentItems.AsNoTracking()
+            .FirstOrDefaultAsync(i => i.Id == itemId && !i.IsDeleted)
+            ?? throw BusinessException.NotFound("明细行不存在或已删除：不能重复删除");
+        var parentProbe = await LoadDocumentAsync(db, probe.TradeDocumentId);
+        TradeDocumentAuthorizationRules.EnsureStoredScopeAllowed(scope, parentProbe);
+        EnsureMutable(parentProbe, out _);
+
+        // ERP-395：明细行删除与表头状态 / 商业修改 / 删除共用同一把父单证行锁 + 同一原子事务。
+        await using var transaction = await TradeDocumentMutationRules.BeginMutationTransactionAsync(db);
+        try
+        {
+            if (!await TradeDocumentMutationRules.LockDocumentRowAsync(db, probe.TradeDocumentId))
+                throw BusinessException.NotFound(TradeDocumentMutationRules.ParentDeletedText);
+
+            var locked = await TradeDocumentAuthorizationRules.LoadLockedDocumentAsync(
+                db, scope, probe.TradeDocumentId);
+            var result = await DeleteCoreAsync(db, locked, itemId);
+
+            if (transaction is not null) await transaction.CommitAsync();
+            return result;
+        }
+        catch
+        {
+            if (transaction is not null) await transaction.RollbackAsync();
+            TradeDocumentMutationRules.DiscardTrackedChanges(db);
+            throw;
+        }
+    }
+
+    /// <summary>删除行的锁内核心写入（父单证行锁与原子事务已由 <see cref="DeleteAsync"/> 取得）。</summary>
+    private static async Task<TradeDocumentItemDto> DeleteCoreAsync(
+        IErpDbContext db, TradeDocument document, long itemId)
+    {
         var item = await db.TradeDocumentItems
             .FirstOrDefaultAsync(i => i.Id == itemId && !i.IsDeleted)
             ?? throw BusinessException.NotFound("明细行不存在或已删除：不能重复删除");
 
-        var document = await LoadDocumentAsync(db, item.TradeDocumentId);
-        // ERP-394：删除明细行之前复核父单证的权威归属（失败即不软删除任何行）。
-        TradeDocumentAuthorizationRules.EnsureStoredScopeAllowed(scope, document);
+        // 锁内复核：明细行仍属于同一父单证（并发删除 / 迁移不会被误删）。
+        if (item.TradeDocumentId != document.Id)
+            throw BusinessException.NotFound("明细行不存在或已删除：不能重复删除");
+
         EnsureMutable(document, out _);
 
         item.IsDeleted = true;

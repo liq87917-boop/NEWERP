@@ -39,6 +39,30 @@ public static class TradeDocumentItemRules
     /// <summary>可维护明细行的单证状态（准备状态）：已提交客户 / 已使用 / 未知状态一律冻结</summary>
     public static readonly IReadOnlyList<string> EditableStatuses = new[] { StatusPreparing, StatusPrepared };
 
+    /// <summary>
+    /// 已知状态集合（待制作 / 已制作 / 已提交客户 / 已使用）：表头生命周期与明细行写入都只接受这些状态，
+    /// 未知状态一律 fail closed（ERP-395）。
+    /// </summary>
+    public static readonly IReadOnlyList<string> KnownStatuses =
+        new[] { StatusPreparing, StatusPrepared, StatusSubmitted, StatusUsed };
+
+    /// <summary>冻结状态（已提交客户 / 已使用）：表头商业字段与明细行均不可再改（ERP-395）</summary>
+    public static readonly IReadOnlyList<string> FrozenStatuses = new[] { StatusSubmitted, StatusUsed };
+
+    /// <summary>状态是否处于已知口径内（去首尾空白后逐字比较）</summary>
+    public static bool IsKnownStatus(string? status)
+    {
+        var value = (status ?? string.Empty).Trim();
+        return KnownStatuses.Contains(value, StringComparer.Ordinal);
+    }
+
+    /// <summary>状态是否属于冻结状态（已提交客户 / 已使用；未知状态不算已知冻结，由 IsKnownStatus 单独 fail closed）</summary>
+    public static bool IsFrozenStatus(string? status)
+    {
+        var value = (status ?? string.Empty).Trim();
+        return FrozenStatuses.Contains(value, StringComparer.Ordinal);
+    }
+
     /// <summary>单张单证允许的明细行数上限（保证清单、打印与导出有界）</summary>
     public const int MaxLinesPerDocument = 200;
 

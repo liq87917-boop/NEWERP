@@ -174,6 +174,26 @@ public static class TradeDocumentAuthorizationRules
     }
 
     /// <summary>
+    /// 锁内重新加载父单证并复核实时授权口径（ERP-395）：在取得父单证行锁（UPDLOCK, HOLDLOCK）之后调用，
+    /// 按主键重新读取<b>持久化</b>状态（存在 / 未删除），再复核权威客户范围；不存在 / 已删除按「数据不存在」
+    /// 拒绝，受限账号无主 / 越界 fail closed。返回权威在库单证，供调用方在锁内继续校验状态与明细行规则。
+    /// </summary>
+    public static async Task<TradeDocument> LoadLockedDocumentAsync(
+        IErpDbContext db, SalespersonDataScope? scope, long documentId, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        if (documentId <= 0) throw BusinessException.InvalidParameter("请指定单证");
+
+        var document = await db.TradeDocuments
+            .FirstOrDefaultAsync(d => d.Id == documentId && !d.IsDeleted, ct)
+            ?? throw BusinessException.NotFound(
+                "单证不存在或已删除：无法维护单证或明细行（并发删除已先行提交，fail closed）");
+
+        EnsureStoredScopeAllowed(scope, document);
+        return document;
+    }
+
+    /// <summary>
     /// 来源单据（销售订单 / 装柜清单）的权威客户范围校验（带入预填 / 直接生成之前调用）：
     /// 受限账号的来源缺失权威归属或越界一律 fail closed，绝不通过共享来源泄露范围外客户。
     /// </summary>

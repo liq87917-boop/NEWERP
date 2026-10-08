@@ -805,6 +805,47 @@ public class TradeDocumentItemTests
         Assert.Equal(3, reloadedDocument.Copies);
     }
 
+    // ==================== ERP-395：明细行写入与父单证共享行锁 / 状态冻结 ====================
+
+    [Fact]
+    public async Task 明细行写入_父单证冻结或删除_一律拒绝且不改写快照()
+    {
+        using var db = TestDbFactory.Create();
+        var document = SeedDocument(db, "CI-LOCK", "商业发票", status: "待制作");
+        var controller = BuildController(db);
+        var item = await AddItemAsync(controller, document.Id, Item(quantity: 2m, unitPrice: 5m));
+
+        /* 冻结（已提交客户）：新增 / 修改 / 删除一律拒绝且历史快照不变 */
+        document.Status = "已提交客户";
+        db.SaveChanges();
+
+        await AssertBusinessAsync(ErrorCodes.RuleConflict, () => controller.CreateItem(document.Id, Item()));
+        await AssertBusinessAsync(ErrorCodes.RuleConflict, () => controller.UpdateItem(item.Id, Item(quantity: 9m)));
+        await AssertBusinessAsync(ErrorCodes.RuleConflict, () => controller.DeleteItem(item.Id));
+
+        var stored = await db.TradeDocumentItems.AsNoTracking().SingleAsync(i => i.Id == item.Id);
+        Assert.False(stored.IsDeleted);
+        Assert.Equal(2m, stored.Quantity);
+
+        /* 父单证被删除后：明细行写入一律拒绝且不产生新行 */
+        document.IsDeleted = true;
+        db.SaveChanges();
+
+        await AssertBusinessAsync(ErrorCodes.NotFound, () => controller.CreateItem(document.Id, Item()));
+        Assert.Equal(1, await db.TradeDocumentItems.CountAsync(i => !i.IsDeleted));
+    }
+
+    [Fact]
+    public void 写入契约_明细行先取父行锁并在锁内复核()
+    {
+        var service = File.ReadAllText(
+            RepoFile("src", "ERP.Application", "Services", "TradeDocumentItemService.cs"));
+
+        Assert.Contains("TradeDocumentMutationRules.BeginMutationTransactionAsync", service);
+        Assert.Contains("TradeDocumentMutationRules.LockDocumentRowAsync", service);
+        Assert.Contains("TradeDocumentAuthorizationRules.LoadLockedDocumentAsync", service);
+    }
+
     // ==================== 7. 契约：数据模型、幂等升级、接口路由与前端接线 ====================
 
     [Fact]
