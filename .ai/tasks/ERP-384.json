@@ -1,0 +1,76 @@
+{
+  "title": "Protect container settlement lifecycle and explicit loading source integrity",
+  "description": "Stage3 core finance closure. Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance.",
+  "acceptance_criteria": [
+    "Secure every container settlement list/detail/create/update/submit/approve/cancel/delete/expense-evidence route with current enabled identity, existing container-settlement menu and current customer scope before counts, numbers, source evidence or writes. Optional LoadingListId must resolve exact existing eligible loading list and authoritative customer/participant scope using ERP364 rules, with settlement CustomerId a real enabled participant/customer. Mixed-customer evidence requires access to every included customer. Keep null legacy source semantics and fail closed for unknown ownership; do not infer source from text or grant permissions.",
+    "Validate positive settlement TotalAmount and nonnegative freight/other costs using existing storage precision; settlement has no currency field, so preserve explicit raw amount semantics without invented conversion or cross-currency aggregation or formula imposing total=sum(costs). Serialize source loading row before settlement row for edit/state/delete and source cancel, recheck persisted/request scope and status under locks. Nondeleted noncancelled linked settlement blocks loading cancellation until explicit settlement cancel releases it. Preserve history and denied-write audit, no stock/funds/accounting effects. Actual controller SQL invalid/foreign/mixed/revoked/disabled, edit rollback and two-connection edit vs submit, approve vs cancel and loading cancel vs linked settlement creation/approval. Run relevant unit and safe Release verification; record real browser evidence or accurate blocker.",
+    "Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/FinanceSettlementControllers.cs",
+    "src/ERP.Api/Controllers/ContainerLoadingListController.cs",
+    "src/ERP.Application/Services/FinanceContainerSettlementLifecycleRules.cs",
+    "src/ERP.Application/Services/LoadingListAuthorizationRules.cs",
+    "src/ERP.Application/Services/ContainerLoadingFulfillmentRules.cs",
+    "src/ERP.UnitTests/FinanceContainerSettlementLifecycleTests.cs",
+    "src/ERP.IntegrationTests/FinanceContainerSettlementLifecycleSqlServerTests.cs",
+    "docs/container-settlement-lifecycle.md"
+  ],
+  "criterion_path_map": {
+    "Secure every container settlement list/detail/create/update/submit/approve/cancel/delete/expense-evidence route with current enabled identity, existing container-settlement menu and current customer scope before counts, numbers, source evidence or writes. Optional LoadingListId must resolve exact existing eligible loading list and authoritative customer/participant scope using ERP364 rules, with settlement CustomerId a real enabled participant/customer. Mixed-customer evidence requires access to every included customer. Keep null legacy source semantics and fail closed for unknown ownership; do not infer source from text or grant permissions.": [
+      "src/ERP.Api/Controllers/FinanceSettlementControllers.cs",
+      "src/ERP.Api/Controllers/ContainerLoadingListController.cs",
+      "src/ERP.Application/Services/FinanceContainerSettlementLifecycleRules.cs",
+      "src/ERP.Application/Services/LoadingListAuthorizationRules.cs",
+      "src/ERP.Application/Services/ContainerLoadingFulfillmentRules.cs",
+      "src/ERP.UnitTests/FinanceContainerSettlementLifecycleTests.cs",
+      "src/ERP.IntegrationTests/FinanceContainerSettlementLifecycleSqlServerTests.cs",
+      "docs/container-settlement-lifecycle.md"
+    ],
+    "Validate positive settlement TotalAmount and nonnegative freight/other costs using existing storage precision; settlement has no currency field, so preserve explicit raw amount semantics without invented conversion or cross-currency aggregation or formula imposing total=sum(costs). Serialize source loading row before settlement row for edit/state/delete and source cancel, recheck persisted/request scope and status under locks. Nondeleted noncancelled linked settlement blocks loading cancellation until explicit settlement cancel releases it. Preserve history and denied-write audit, no stock/funds/accounting effects. Actual controller SQL invalid/foreign/mixed/revoked/disabled, edit rollback and two-connection edit vs submit, approve vs cancel and loading cancel vs linked settlement creation/approval. Run relevant unit and safe Release verification; record real browser evidence or accurate blocker.": [
+      "src/ERP.Api/Controllers/FinanceSettlementControllers.cs",
+      "src/ERP.Api/Controllers/ContainerLoadingListController.cs",
+      "src/ERP.Application/Services/FinanceContainerSettlementLifecycleRules.cs",
+      "src/ERP.Application/Services/LoadingListAuthorizationRules.cs",
+      "src/ERP.Application/Services/ContainerLoadingFulfillmentRules.cs",
+      "src/ERP.UnitTests/FinanceContainerSettlementLifecycleTests.cs",
+      "src/ERP.IntegrationTests/FinanceContainerSettlementLifecycleSqlServerTests.cs",
+      "docs/container-settlement-lifecycle.md"
+    ],
+    "Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance.": [
+      "src/ERP.Api/Controllers/FinanceSettlementControllers.cs",
+      "src/ERP.Api/Controllers/ContainerLoadingListController.cs",
+      "src/ERP.Application/Services/FinanceContainerSettlementLifecycleRules.cs",
+      "src/ERP.Application/Services/LoadingListAuthorizationRules.cs",
+      "src/ERP.Application/Services/ContainerLoadingFulfillmentRules.cs",
+      "src/ERP.UnitTests/FinanceContainerSettlementLifecycleTests.cs",
+      "src/ERP.IntegrationTests/FinanceContainerSettlementLifecycleSqlServerTests.cs",
+      "docs/container-settlement-lifecycle.md"
+    ]
+  },
+  "implementation_evidence": "FinanceContainerSettlementController list/detail/create/update/expense evidence and inherited state routes lack live menu/customer scope, monetary guards and locking. LoadingListId can reference a foreign or cancelled loading list and source cancellation can invalidate a live settlement.",
+  "depends_on": [
+    "ERP-383",
+    "ERP-364"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "id": "ERP-384",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-08T14:49:39.266693Z"
+}

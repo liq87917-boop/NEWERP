@@ -1,0 +1,91 @@
+{
+  "title": "Enforce live expense ownership across CRUD and allocation evidence routes",
+  "description": "Stage3 core finance closure. Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance.",
+  "acceptance_criteria": [
+    "Require current enabled identity, existing expense-bill menu and authoritative customer scope at every expense CRUD/read/list/export-if-present and both legacy and batch allocation preview/generate/list/detail/void route before counts, number allocation or data writes. Scope customer expenses from persisted CustomerId; shared loading sources and batches require every effective participant/customer allowed using exact explicit LoadingListId, SourceExpenseId and generated rows. Restricted users cannot access source-less expenses lacking proven ownership; authorized unrestricted users retain historical access. Never infer scope from free-text RefNo or CustomerName, fabricate grants or bypass unknown ownership.",
+    "Validate complete stored/proposed customer scope, real enabled customers, supported currency, positive rounded amount and rate before changing fields or generating any rows. Keep batch-generated fee audit immutability and explicit void semantics; denied edit/delete/preview/generate/void leaves original rows/status/audit and all linked evidence unchanged. Client identity cannot be supplied in body to widen scope. Wire authorization through actual controller/service entry paths without anonymous fallback; no new permission tables, schema or financial posting. SQL actual API/service own/foreign/mixed/unknown/revoked/disabled and denied edit/batch operations plus safe Release tests; real browser evidence or accurate blocker.",
+    "Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/ExpenseBillController.cs",
+    "src/ERP.Api/Controllers/ContainerExpenseAllocationEvidenceController.cs",
+    "src/ERP.Application/Services/ExpenseAuthorizationRules.cs",
+    "src/ERP.Application/Services/ContainerExpenseAllocationService.cs",
+    "src/ERP.Application/Services/ContainerExpenseAllocationEvidenceService.cs",
+    "src/ERP.Application/Services/LoadingListAuthorizationRules.cs",
+    "src/ERP.Api/Controllers/BaseCrudController.cs",
+    "src/ERP.Application/DTOs/ContainerExpenseAllocationDtos.cs",
+    "src/ERP.UnitTests/ExpenseAuthorizationTests.cs",
+    "src/ERP.IntegrationTests/ExpenseAuthorizationSqlServerTests.cs",
+    "docs/expense-authorization.md"
+  ],
+  "criterion_path_map": {
+    "Require current enabled identity, existing expense-bill menu and authoritative customer scope at every expense CRUD/read/list/export-if-present and both legacy and batch allocation preview/generate/list/detail/void route before counts, number allocation or data writes. Scope customer expenses from persisted CustomerId; shared loading sources and batches require every effective participant/customer allowed using exact explicit LoadingListId, SourceExpenseId and generated rows. Restricted users cannot access source-less expenses lacking proven ownership; authorized unrestricted users retain historical access. Never infer scope from free-text RefNo or CustomerName, fabricate grants or bypass unknown ownership.": [
+      "src/ERP.Api/Controllers/ExpenseBillController.cs",
+      "src/ERP.Api/Controllers/ContainerExpenseAllocationEvidenceController.cs",
+      "src/ERP.Application/Services/ExpenseAuthorizationRules.cs",
+      "src/ERP.Application/Services/ContainerExpenseAllocationService.cs",
+      "src/ERP.Application/Services/ContainerExpenseAllocationEvidenceService.cs",
+      "src/ERP.Application/Services/LoadingListAuthorizationRules.cs",
+      "src/ERP.Api/Controllers/BaseCrudController.cs",
+      "src/ERP.Application/DTOs/ContainerExpenseAllocationDtos.cs",
+      "src/ERP.UnitTests/ExpenseAuthorizationTests.cs",
+      "src/ERP.IntegrationTests/ExpenseAuthorizationSqlServerTests.cs",
+      "docs/expense-authorization.md"
+    ],
+    "Validate complete stored/proposed customer scope, real enabled customers, supported currency, positive rounded amount and rate before changing fields or generating any rows. Keep batch-generated fee audit immutability and explicit void semantics; denied edit/delete/preview/generate/void leaves original rows/status/audit and all linked evidence unchanged. Client identity cannot be supplied in body to widen scope. Wire authorization through actual controller/service entry paths without anonymous fallback; no new permission tables, schema or financial posting. SQL actual API/service own/foreign/mixed/unknown/revoked/disabled and denied edit/batch operations plus safe Release tests; real browser evidence or accurate blocker.": [
+      "src/ERP.Api/Controllers/ExpenseBillController.cs",
+      "src/ERP.Api/Controllers/ContainerExpenseAllocationEvidenceController.cs",
+      "src/ERP.Application/Services/ExpenseAuthorizationRules.cs",
+      "src/ERP.Application/Services/ContainerExpenseAllocationService.cs",
+      "src/ERP.Application/Services/ContainerExpenseAllocationEvidenceService.cs",
+      "src/ERP.Application/Services/LoadingListAuthorizationRules.cs",
+      "src/ERP.Api/Controllers/BaseCrudController.cs",
+      "src/ERP.Application/DTOs/ContainerExpenseAllocationDtos.cs",
+      "src/ERP.UnitTests/ExpenseAuthorizationTests.cs",
+      "src/ERP.IntegrationTests/ExpenseAuthorizationSqlServerTests.cs",
+      "docs/expense-authorization.md"
+    ],
+    "Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance.": [
+      "src/ERP.Api/Controllers/ExpenseBillController.cs",
+      "src/ERP.Api/Controllers/ContainerExpenseAllocationEvidenceController.cs",
+      "src/ERP.Application/Services/ExpenseAuthorizationRules.cs",
+      "src/ERP.Application/Services/ContainerExpenseAllocationService.cs",
+      "src/ERP.Application/Services/ContainerExpenseAllocationEvidenceService.cs",
+      "src/ERP.Application/Services/LoadingListAuthorizationRules.cs",
+      "src/ERP.Api/Controllers/BaseCrudController.cs",
+      "src/ERP.Application/DTOs/ContainerExpenseAllocationDtos.cs",
+      "src/ERP.UnitTests/ExpenseAuthorizationTests.cs",
+      "src/ERP.IntegrationTests/ExpenseAuthorizationSqlServerTests.cs",
+      "docs/expense-authorization.md"
+    ]
+  },
+  "implementation_evidence": "ExpenseBillController inherits unscoped generic CRUD and calls legacy allocation and ERP042 batch preview/generate/list/detail/void services without current identity. Current requests can read or mutate another customer or shared-container allocation evidence. BaseCrudController.Delete is nonvirtual; authorize minimal virtual extension so expense delete can enforce the same scope without changing other modules.",
+  "depends_on": [
+    "ERP-383",
+    "ERP-042",
+    "ERP-060",
+    "ERP-364",
+    "ERP-384"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "id": "ERP-385",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-08T14:49:39.273644Z"
+}
