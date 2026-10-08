@@ -225,20 +225,32 @@ public sealed class AttachmentEvidenceMutationSqlServerTests
     private async Task SoftDeleteOrderAsync(long orderId)
     {
         await using var db = _fixture.CreateDbContext();
+        // Read RowVersion only after obtaining the competing parent mutation lock.
+        // Upload may update the technical timestamp; a stale fixture token is not a business failure.
+        await using var transaction = await db.Database.BeginTransactionAsync();
+        await db.Database.ExecuteSqlRawAsync(
+            "SELECT [Id] FROM [db_owner].[SalesOrders] WITH (UPDLOCK, HOLDLOCK) WHERE [Id] = {0}", orderId);
         var order = await db.SalesOrders.FirstAsync(o => o.Id == orderId);
         order.IsDeleted = true;
         order.UpdatedAt = DateTime.Now;
         await db.SaveChangesAsync();
+        await transaction.CommitAsync();
     }
 
     /// <summary>独立连接：改写父单据归属客户（模拟「归属客户并发变更」）。</summary>
     private async Task ChangeOrderCustomerAsync(long orderId, long customerId)
     {
         await using var db = _fixture.CreateDbContext();
+        // Read RowVersion only after obtaining the competing parent mutation lock.
+        // Upload may update the technical timestamp; a stale fixture token is not a business failure.
+        await using var transaction = await db.Database.BeginTransactionAsync();
+        await db.Database.ExecuteSqlRawAsync(
+            "SELECT [Id] FROM [db_owner].[SalesOrders] WITH (UPDLOCK, HOLDLOCK) WHERE [Id] = {0}", orderId);
         var order = await db.SalesOrders.FirstAsync(o => o.Id == orderId);
         order.CustomerId = customerId;
         order.UpdatedAt = DateTime.Now;
         await db.SaveChangesAsync();
+        await transaction.CommitAsync();
     }
 
     private async Task<int> CountOwnerEvidenceAsync(long ownerId)
