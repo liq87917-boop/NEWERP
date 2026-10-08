@@ -310,6 +310,66 @@ public class TradeDocumentGenerationUiTests
         AssertEmptyApiIssues();
     }
 
+    // ==================== 场景 6：明细行对话框上下文绑定（ERP-396） ====================
+
+    [Fact]
+    public void 单证明细行对话框_切换单证关闭与重复点击时旧响应不得覆盖当前文档()
+    {
+        var tag = "UICX" + DateTime.Now.ToString("HHmmss");
+        LoginAsAdmin();
+        InstallApiIssueRecorder();
+
+        var customer = CreateCustomer(tag);
+        var orderA = CreateSalesOrder(tag + "A", customer.Id);
+        var orderB = CreateSalesOrder(tag + "B", customer.Id);
+        var docA = GenerateTradeDocument(orderA.Id, orderA.No, "商业发票");
+        var docB = GenerateTradeDocument(orderB.Id, orderB.No, "商业发票");
+        Assert.NotEqual(docA.Id, docB.Id);
+
+        OpenModule("doc-center");
+        SearchList(docB.DocNo);
+        Assert.True(FunctionExists("manageTradeDocumentItems"),
+            "页面未加载 /js/trade-doc-items.js（前端脚本过期）：请先重新构建并启动 ERP.Api 再运行浏览器验收");
+        Assert.True(FunctionExists("tdiSnapshot") && FunctionExists("tdiClose"),
+            "页面未加载明细行上下文绑定契约（tdiSnapshot / tdiClose）：请先重新构建并启动 ERP.Api 再运行浏览器验收");
+
+        using var result = JsonDocument.Parse(
+            RunItemDialogContextBinding(docA.Id, docA.DocNo, docB.Id, docB.DocNo));
+        var root = result.RootElement;
+        Assert.True(root.GetProperty("errors").GetArrayLength() == 0,
+            "页面内驱动明细行对话框出现异常：" + root.GetProperty("errors").EnumerateArray()
+                .Select(e => e.GetString()).Aggregate(string.Empty, (a, b) => a + " | " + b));
+
+        // A→B 切换：A 的迟到响应不得覆盖 / 渲染 B
+        var afterSwitch = root.GetProperty("afterSwitch");
+        Assert.Equal(docB.Id, afterSwitch.GetProperty("docId").GetInt64());
+        Assert.Equal(docB.DocNo, afterSwitch.GetProperty("dataDocNo").GetString());
+        var switchedDialog = afterSwitch.GetProperty("dialog").GetString() ?? string.Empty;
+        Assert.Contains(docB.DocNo, switchedDialog);
+        Assert.DoesNotContain(docA.DocNo, switchedDialog);
+        CaptureEvidence("trade-document-item-context-switch");
+
+        // 关闭期间的迟到读取：不得重新打开对话框 / 落地旧数据
+        var afterClose = root.GetProperty("afterClose");
+        Assert.False(afterClose.GetProperty("open").GetBoolean(), "关闭后迟到读取不得重新打开明细行对话框");
+        Assert.Equal(string.Empty, afterClose.GetProperty("dataDocNo").GetString());
+        Assert.NotEqual("flex", afterClose.GetProperty("display").GetString());
+        CaptureEvidence("trade-document-item-context-close");
+
+        // 重复点击保存：只产生一次提交请求，且 URL 精确绑定当前单证
+        var duplicate = root.GetProperty("duplicate");
+        var posts = duplicate.GetProperty("posts").EnumerateArray()
+            .Select(e => e.GetString() ?? string.Empty).ToArray();
+        Assert.True(posts.Length == 1, "重复点击保存只应产生一次提交请求，实际：" + string.Join(" | ", posts));
+        Assert.Contains($"/api/trade/documents/{docA.Id}/items", posts[0]);
+        Assert.Equal(0, duplicate.GetProperty("pendingItemId").GetInt64());
+        CaptureEvidence("trade-document-item-context-duplicate-click");
+
+        ExecuteScript("tdiClose(); return 'ok';");
+        Thread.Sleep(500);
+        AssertEmptyApiIssues();
+    }
+
     // ==================== 测试数据（经接口创建，每次运行唯一标记） ====================
 
     private sealed record CustomerSeed(long Id);
@@ -418,6 +478,80 @@ public class TradeDocumentGenerationUiTests
                 Str(item, "remark")));
         }
         return rows;
+    }
+
+    /// <summary>按来源销售订单生成指定类型单证并读取单证中心记录（经应用自身接口，不直连数据库）</summary>
+    private TradeDocRow GenerateTradeDocument(long sourceOrderId, string orderNo, string docType)
+    {
+        ApiData("POST", $"/api/sales-orders/{sourceOrderId}/trade-documents",
+            JsonSerializer.Serialize(new { docTypes = new[] { docType } }));
+        return TradeDocsBySalesOrder(orderNo).Single(d => d.DocType == docType);
+    }
+
+    /// <summary>
+    /// ERP-396：在页面内驱动明细行对话框，人为延迟明细行读取以制造「A→B 切换 / 关闭期间的迟到响应 /
+    /// 重复点击保存」三类竞态，回传事实 JSON 供断言（不直连数据库、不执行 SQL、不改写服务端权限口径）。
+    /// </summary>
+    private string RunItemDialogContextBinding(long docAId, string docANo, long docBId, string docBNo)
+        => ExecuteAsyncScript(
+            """
+            const done = arguments[arguments.length - 1];
+            const docAId = Number(arguments[0]);
+            const docANo = String(arguments[1]);
+            const docBId = Number(arguments[2]);
+            const docBNo = String(arguments[3]);
+            (async () => {
+              const result = { errors: [], afterSwitch: null, afterClose: null, duplicate: null };
+              const wait = (ms) => new Promise(r => setTimeout(r, ms));
+              const snap = () => {
+                const s = tdiSnapshot();
+                return { docId: s.docId, dataDocNo: s.dataDocNo, open: s.open, pendingItemId: s.pendingItemId };
+              };
+              try {
+                const originalFetch = window.fetch;
+                window.__calls = [];
+                window.fetch = async (...args) => {
+                  const url = String(args[0] || '');
+                  const callMethod = String((args[1] && args[1].method) || 'GET').toUpperCase();
+                  window.__calls.push(callMethod + ' ' + url);
+                  if (url.indexOf('/items') >= 0 && callMethod === 'GET') await wait(700);
+                  return originalFetch.apply(window, args);
+                };
+
+                manageTradeDocumentItems(docAId);
+                manageTradeDocumentItems(docBId);
+                let deadline = Date.now() + 10000;
+                while (Date.now() < deadline && tdiSnapshot().docId !== docBId) await wait(100);
+                await wait(1500);
+                result.afterSwitch = Object.assign(snap(), { dialog: document.getElementById('modal').innerHTML });
+
+                manageTradeDocumentItems(docAId);
+                tdiClose();
+                await wait(1500);
+                result.afterClose = Object.assign(snap(), { display: document.getElementById('modal').style.display });
+
+                window.__calls = [];
+                manageTradeDocumentItems(docAId);
+                deadline = Date.now() + 10000;
+                while (Date.now() < deadline && (tdiSnapshot().dataDocNo !== docANo || !document.getElementById('f_Quantity'))) await wait(100);
+                document.getElementById('f_ProductCode').value = 'UIT-CX';
+                document.getElementById('f_Quantity').value = '3';
+                tdiSaveForm();
+                tdiSaveForm();
+                await wait(2500);
+                result.duplicate = Object.assign(snap(), { posts: window.__calls.filter(c => c.indexOf('POST ') === 0) });
+                window.fetch = originalFetch;
+              } catch (e) { result.errors.push(String((e && e.stack) ? e.stack : e)); }
+              done(JSON.stringify(result));
+            })();
+            """,
+            docAId, docANo, docBId, docBNo);
+
+    /// <summary>执行页面异步脚本（等待回调完成），用于页面内驱动的竞态验收</summary>
+    private string ExecuteAsyncScript(string script, params object[] args)
+    {
+        _fx.Driver.Manage().Timeouts().AsynchronousJavaScript = TimeSpan.FromSeconds(60);
+        return (string?)((IJavaScriptExecutor)_fx.Driver).ExecuteAsyncScript(script, args) ?? string.Empty;
     }
 
     // ==================== 接口助手（以当前登录态调用应用自身 API） ====================
