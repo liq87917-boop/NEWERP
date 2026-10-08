@@ -82,6 +82,13 @@ public static class PurchaseInvoiceService
         ArgumentNullException.ThrowIfNull(dto);
         if (invoiceId <= 0) throw BusinessException.InvalidParameter("请选择要修改的发票");
 
+        // ERP-382：在同一事务内先取本发票行锁，再在锁内重读权威状态 / 供应商 / 币种与已持久化关联合计口径，
+        // 把同单并发的「草稿修改 / 关联替换 / 登记 / 作废」与「付款引用登记 / 作废」串行化（绝不丢失更新）。
+        await using var transaction = PurchaseInvoiceConcurrencyRules.IsRelationalProvider(db)
+            ? await db.Database.BeginTransactionAsync()
+            : null;
+
+        await PurchaseInvoiceConcurrencyRules.LockInvoiceRowAsync(db, invoiceId);
         var invoice = await LoadAsync(db, invoiceId);
         PurchaseInvoiceRules.EnsureEditable(invoice.Status, IdentityOf(invoice));
 
@@ -119,6 +126,7 @@ public static class PurchaseInvoiceService
         invoice.UpdatedAt = DateTime.Now;
 
         await db.SaveChangesAsync();
+        if (transaction is not null) await transaction.CommitAsync();
         return await MapAsync(db, invoice);
     }
 
@@ -136,9 +144,12 @@ public static class PurchaseInvoiceService
     /// 台账分页查询（只读）：支持供应商 / 发票类型 / 状态 / 币种 / 开票日期区间 / 关联状态 / 关键字过滤。
     /// <para>关联状态过滤与分页口径一致：先按**持久化关联行**派生每张发票的已关联金额（子查询）再过滤，
     /// 因此「只看未关联」这类筛选不会因分页而漏行；本页关联行一次批量装载（无逐行数据库查询）。</para>
+    /// <para>ERP-382：调用方可传入身份 / 菜单 / 权威来源范围谓词，在**计数与分页之前**下推到数据库
+    /// （绝不「先查全量再内存过滤」）；为 null 表示进程内直接调用（历史单元测试 / 内部派生读取）。</para>
     /// </summary>
     public static async Task<PagedResult<PurchaseInvoiceDto>> ListAsync(
-        IErpDbContext db, PurchaseInvoiceQuery query)
+        IErpDbContext db, PurchaseInvoiceQuery query,
+        System.Linq.Expressions.Expression<Func<PurchaseInvoice, bool>>? scopePredicate = null)
     {
         ArgumentNullException.ThrowIfNull(db);
         ArgumentNullException.ThrowIfNull(query);
@@ -152,6 +163,8 @@ public static class PurchaseInvoiceService
             : PurchaseInvoiceRules.NormalizeCurrencyStrict(query.Currency);
 
         var source = db.PurchaseInvoices.AsNoTracking().Where(x => !x.IsDeleted);
+        // ERP-382：身份 / 菜单 / 权威来源范围谓词在计数与分页之前下推（绝不先查全量再内存过滤）。
+        if (scopePredicate is not null) source = source.Where(scopePredicate);
         if (query.SupplierId is not null) source = source.Where(x => x.SupplierId == query.SupplierId.Value);
         if (invoiceType is not null) source = source.Where(x => x.InvoiceType == invoiceType);
         if (status is not null) source = source.Where(x => x.Status == status.Value);
@@ -329,6 +342,25 @@ public static class PurchaseInvoiceService
         IErpDbContext db, long invoiceId, PurchaseInvoiceAllocationSaveRequest? request)
     {
         ArgumentNullException.ThrowIfNull(db);
+        if (invoiceId <= 0) throw BusinessException.InvalidParameter("请选择要维护关联的发票");
+
+        // ERP-382 发现阶段（只读、不加锁）：把「已存储来源 + 拟提议来源」的订单合并后按 Id 升序加锁，
+        // 使并发多张发票对同一采购订单的容量竞争在同一把订单行锁上串行化；随后再取本发票行锁（发票容量唯一汇聚点）。
+        var storedOrderIds = await db.PurchaseInvoiceAllocations.AsNoTracking()
+            .Where(a => !a.IsDeleted && a.PurchaseInvoiceId == invoiceId)
+            .Select(a => a.PurchaseOrderId)
+            .ToListAsync();
+        var proposedOrderIds = (request?.Lines ?? new List<PurchaseInvoiceAllocationSaveDto>())
+            .Select(l => l.PurchaseOrderId);
+
+        await using var transaction = PurchaseInvoiceConcurrencyRules.IsRelationalProvider(db)
+            ? await db.Database.BeginTransactionAsync()
+            : null;
+
+        await PurchaseInvoiceConcurrencyRules.LockPurchaseOrderRowsAsync(
+            db, storedOrderIds.Concat(proposedOrderIds));
+        await PurchaseInvoiceConcurrencyRules.LockInvoiceRowAsync(db, invoiceId);
+
         var invoice = await LoadAsync(db, invoiceId);
         var plan = await BuildAllocationPlanAsync(db, invoice, request);
 
@@ -341,6 +373,7 @@ public static class PurchaseInvoiceService
 
         invoice.UpdatedAt = DateTime.Now;
         await db.SaveChangesAsync();
+        if (transaction is not null) await transaction.CommitAsync();
 
         return await MapAsync(db, invoice);
     }
@@ -390,20 +423,9 @@ public static class PurchaseInvoiceService
             : (await db.PurchaseOrders.AsNoTracking().Where(o => orderIds.Contains(o.Id)).ToListAsync())
                 .ToDictionary(o => o.Id);
 
-        // 其他有效发票已占用该订单的金额（一次查询）：仅供预览上下文展示，不改变本单校验口径
-        var linkedByOthers = orderIds.Count == 0
-            ? new Dictionary<long, decimal>()
-            : (await (from allocation in db.PurchaseInvoiceAllocations.AsNoTracking()
-                      join owner in db.PurchaseInvoices.AsNoTracking()
-                          on allocation.PurchaseInvoiceId equals owner.Id
-                      where !allocation.IsDeleted && !owner.IsDeleted
-                            && owner.Status != PurchaseInvoiceRules.StatusVoided
-                            && owner.Id != invoice.Id
-                            && orderIds.Contains(allocation.PurchaseOrderId)
-                      select new { allocation.PurchaseOrderId, allocation.AllocatedAmount })
-                     .ToListAsync())
-                .GroupBy(r => r.PurchaseOrderId)
-                .ToDictionary(g => g.Key, g => g.Sum(r => r.AllocatedAmount));
+        // 其他有效（未作废）发票已占用该订单的金额（一次查询）：既用于预览上下文展示，
+        // 也用于 ERP-382「并发发票不得合计超过订单发票容量」的校验口径。
+        var linkedByOthers = await LoadOtherInvoiceLinkedAmountsAsync(db, invoice.Id, orderIds);
 
         var rows = new List<PurchaseInvoiceAllocation>();
         var previewLines = new List<PurchaseInvoiceAllocationPreviewLineDto>();
@@ -426,6 +448,10 @@ public static class PurchaseInvoiceService
                 throw BusinessException.RuleConflict(
                     $"关联金额合计 {total} 超过发票含税总额 {invoice.GrossAmount} {currency}："
                     + "请调整关联金额（发票允许部分关联，未关联部分保留为未关联金额）");
+
+            // ERP-382：订单发票容量（同币种、不换算、不重复计算）= 其他未作废发票已关联 + 本次关联 ≤ 订单总额。
+            var othersLinked = linkedByOthers.TryGetValue(order.Id, out var others) ? others : 0m;
+            EnsureOrderInvoiceCapacity(order, othersLinked, amount, currency);
 
             var remark = PurchaseInvoiceRules.NormalizeRemark(line.Remark);
             sort++;
@@ -460,7 +486,7 @@ public static class PurchaseInvoiceService
                 true,
                 PurchaseInvoiceRules.EvaluateOrderEligibility(invoice, order).Text,
                 order.TotalAmount,
-                linkedByOthers.TryGetValue(order.Id, out var other) ? other : 0m,
+                othersLinked,
                 amount));
         }
 
@@ -481,6 +507,22 @@ public static class PurchaseInvoiceService
     public static async Task<PurchaseInvoiceDto> RecordAsync(IErpDbContext db, long invoiceId)
     {
         ArgumentNullException.ThrowIfNull(db);
+        if (invoiceId <= 0) throw BusinessException.InvalidParameter("请选择要登记的发票");
+
+        // ERP-382：先按 Id 升序取来源采购订单行锁（与「并发发票 → 同一订单」容量竞争串行化），
+        // 再取本发票行锁；锁内重读权威状态 / 供应商 / 币种 / 已持久化关联与订单合计后才冻结证据。
+        var storedOrderIds = await db.PurchaseInvoiceAllocations.AsNoTracking()
+            .Where(a => !a.IsDeleted && a.PurchaseInvoiceId == invoiceId)
+            .Select(a => a.PurchaseOrderId)
+            .ToListAsync();
+
+        await using var transaction = PurchaseInvoiceConcurrencyRules.IsRelationalProvider(db)
+            ? await db.Database.BeginTransactionAsync()
+            : null;
+
+        await PurchaseInvoiceConcurrencyRules.LockPurchaseOrderRowsAsync(db, storedOrderIds);
+        await PurchaseInvoiceConcurrencyRules.LockInvoiceRowAsync(db, invoiceId);
+
         var invoice = await LoadAsync(db, invoiceId);
         PurchaseInvoiceRules.EnsureRecordable(invoice.Status, IdentityOf(invoice));
 
@@ -490,6 +532,7 @@ public static class PurchaseInvoiceService
         invoice.RecordedAt = DateTime.Now;
         invoice.UpdatedAt = DateTime.Now;
         await db.SaveChangesAsync();
+        if (transaction is not null) await transaction.CommitAsync();
 
         return await MapAsync(db, invoice);
     }
@@ -501,6 +544,16 @@ public static class PurchaseInvoiceService
     public static async Task<PurchaseInvoiceDto> VoidAsync(IErpDbContext db, long invoiceId, string? reason)
     {
         ArgumentNullException.ThrowIfNull(db);
+        if (invoiceId <= 0) throw BusinessException.InvalidParameter("请选择要作废的发票");
+
+        // ERP-382：取本发票行锁后再重读权威状态并写库，把「作废 vs 付款引用登记 / 关联替换 / 修改」
+        // 串行化在同一事务内，并保留作废原因与冻结审计（重复作废在锁内被状态门拒绝）。
+        await using var transaction = PurchaseInvoiceConcurrencyRules.IsRelationalProvider(db)
+            ? await db.Database.BeginTransactionAsync()
+            : null;
+
+        await PurchaseInvoiceConcurrencyRules.LockInvoiceRowAsync(db, invoiceId);
+
         var invoice = await LoadAsync(db, invoiceId);
         PurchaseInvoiceRules.EnsureVoidable(invoice.Status, IdentityOf(invoice));
         var reasonText = PurchaseInvoiceRules.NormalizeVoidReason(reason);
@@ -510,6 +563,7 @@ public static class PurchaseInvoiceService
         invoice.VoidReason = reasonText;
         invoice.UpdatedAt = DateTime.Now;
         await db.SaveChangesAsync();
+        if (transaction is not null) await transaction.CommitAsync();
 
         return await MapAsync(db, invoice);
     }
@@ -532,6 +586,10 @@ public static class PurchaseInvoiceService
                 .Where(o => orderIds.Contains(o.Id)).ToListAsync())
             .ToDictionary(o => o.Id);
 
+        // ERP-382：登记前在锁内重读「其他未作废发票已关联」的订单发票容量口径并复核，绝不超容量冻结证据。
+        var currency = CurrencyAmountRules.NormalizeCurrency(invoice.Currency);
+        var linkedByOthers = await LoadOtherInvoiceLinkedAmountsAsync(db, invoice.Id, orderIds);
+
         decimal total = 0;
         foreach (var allocation in allocations)
         {
@@ -542,6 +600,10 @@ public static class PurchaseInvoiceService
                     + "登记前请先调整关联（不存在 / 已删除订单的关联不能形成登记证据）");
 
             PurchaseInvoiceRules.EnsureOrderLinkable(invoice, order);
+
+            var othersLinked = linkedByOthers.TryGetValue(order.Id, out var others) ? others : 0m;
+            EnsureOrderInvoiceCapacity(order, othersLinked, allocation.AllocatedAmount, currency);
+
             total += allocation.AllocatedAmount;
         }
 
@@ -549,6 +611,44 @@ public static class PurchaseInvoiceService
             throw BusinessException.RuleConflict(
                 $"发票「{IdentityOf(invoice)}」的关联金额合计 {total} 超过含税总额 {invoice.GrossAmount}："
                 + "请先调整关联再登记");
+    }
+
+    /// <summary>
+    /// 一次查询取回「其他未作废发票」在这些采购订单上的已关联金额（按订单分组）：
+    /// 预览 / 保存 / 登记共用同一口径，避免逐行查库，也避免重复计算本发票自身的持久化行。
+    /// </summary>
+    private static async Task<Dictionary<long, decimal>> LoadOtherInvoiceLinkedAmountsAsync(
+        IErpDbContext db, long invoiceId, IReadOnlyCollection<long> orderIds)
+    {
+        if (orderIds.Count == 0) return new Dictionary<long, decimal>();
+
+        var rows = await (from allocation in db.PurchaseInvoiceAllocations.AsNoTracking()
+                          join owner in db.PurchaseInvoices.AsNoTracking()
+                              on allocation.PurchaseInvoiceId equals owner.Id
+                          where !allocation.IsDeleted && !owner.IsDeleted
+                                && owner.Status != PurchaseInvoiceRules.StatusVoided
+                                && owner.Id != invoiceId
+                                && orderIds.Contains(allocation.PurchaseOrderId)
+                          select new { allocation.PurchaseOrderId, allocation.AllocatedAmount })
+            .ToListAsync();
+
+        return rows.GroupBy(r => r.PurchaseOrderId)
+            .ToDictionary(g => g.Key, g => g.Sum(r => r.AllocatedAmount));
+    }
+
+    /// <summary>
+    /// 订单发票容量护栏（ERP-382）：其他未作废发票已关联金额 + 本次关联金额不得超过订单总额；
+    /// 同币种比较、不做汇率换算、不重复计算证据；超出即整体拒绝（不写任何关联行）。
+    /// </summary>
+    private static void EnsureOrderInvoiceCapacity(
+        PurchaseOrder order, decimal othersLinked, decimal amount, string currency)
+    {
+        var total = othersLinked + amount;
+        if (total > order.TotalAmount)
+            throw BusinessException.RuleConflict(
+                $"采购订单「{order.OrderNo}」的发票关联容量不足：其他未作废发票已关联 {othersLinked} + 本次 {amount} "
+                + $"= {total} 超过订单总额 {order.TotalAmount} {currency}"
+                + "（同币种、不做汇率换算、不重复计算证据）：请调整关联金额或改用其他订单");
     }
 
     // ==================== 5. 校验与映射（内部） ====================

@@ -48,12 +48,14 @@ public static class SupplierPaymentInvoiceAllocationService
         if (dto.PaymentId <= 0) throw BusinessException.InvalidParameter("请选择要引用的付款单");
         if (dto.PurchaseInvoiceId <= 0) throw BusinessException.InvalidParameter("请选择要引用的供应商采购发票");
 
-        // 与付款单生命周期（取消 / 修改 / 删除）及来源货款申请单的商业改动 / 取消互斥：ERP-380 统一锁序为
-        // 「先来源申请单行、后付款单行」，再读权威金额与状态，避免「登记引用证据」与
-        // 「付款单被取消 / 改金额 / 来源申请单被取消」并发竞态。
+        // ERP-382 唯一全局锁序：来源采购订单行 → 供应商采购发票行 → 来源货款申请单行（ERP-380）→ 付款单行 → 引用行。
+        // 先取**发票行锁**，把「并发不同付款单引用同一发票」的发票同币种容量竞争串行化；
+        // 再取来源申请单行 / 付款单行，避免「登记引用证据」与「付款单被取消 / 改金额 / 来源申请单被取消」并发竞态。
         await using var transaction = SupplierPaymentLifecycleRules.IsRelationalProvider(db)
             ? await db.Database.BeginTransactionAsync()
             : null;
+
+        await PurchaseInvoiceConcurrencyRules.LockInvoiceRowAsync(db, dto.PurchaseInvoiceId);
 
         var sourceApplyId = await FinancePaymentApplyLifecycleRules.ReadPaymentApplyIdAsync(db, dto.PaymentId);
         if (sourceApplyId is > 0)
@@ -186,6 +188,22 @@ public static class SupplierPaymentInvoiceAllocationService
     {
         ArgumentNullException.ThrowIfNull(db);
 
+        // ERP-382 发现阶段（只读、无跟踪）：取本引用行所属发票 / 付款单，用于按唯一全局锁序加锁。
+        var target = await db.SupplierPaymentInvoiceAllocations.AsNoTracking()
+            .Where(a => a.Id == allocationId && !a.IsDeleted)
+            .Select(a => new { a.PaymentId, a.PurchaseInvoiceId })
+            .FirstOrDefaultAsync()
+            ?? throw BusinessException.NotFound($"付款发票引用行（Id={allocationId}）不存在或已删除");
+
+        // 唯一全局锁序：发票行 → 来源货款申请单行（ERP-380）→ 付款单行；锁内重读权威行后再作废，
+        // 使「作废释放发票容量 / 付款额度」与并发登记、发票作废、付款单生命周期变更串行化。
+        await using var transaction = SupplierPaymentLifecycleRules.IsRelationalProvider(db)
+            ? await db.Database.BeginTransactionAsync()
+            : null;
+
+        await PurchaseInvoiceConcurrencyRules.LockInvoiceRowAsync(db, target.PurchaseInvoiceId);
+        await PurchaseInvoiceConcurrencyRules.LockApplicationAndPaymentRowsAsync(db, target.PaymentId);
+
         var row = await LoadAsync(db, allocationId);
         SupplierPaymentInvoiceAllocationRules.EnsureVoidable(
             row.Status, row.PaymentNo,
@@ -198,6 +216,7 @@ public static class SupplierPaymentInvoiceAllocationService
         row.VoidReason = reasonText;
         row.UpdatedAt = DateTime.Now;
         await db.SaveChangesAsync();
+        if (transaction is not null) await transaction.CommitAsync();
 
         return await MapAsync(db, row);
     }

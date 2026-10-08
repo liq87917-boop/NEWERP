@@ -4,6 +4,8 @@ using ERP.Application.Interfaces;
 using ERP.Application.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+using System.Security.Claims;
 
 namespace ERP.Api.Controllers;
 
@@ -35,13 +37,16 @@ public class PurchaseInvoiceController : ControllerBase
     [HttpGet]
     public async Task<IActionResult> GetPaged([FromQuery] PurchaseInvoiceQuery query)
         => Ok(ApiResponse<PagedResult<PurchaseInvoiceDto>>.Success(
-            await PurchaseInvoiceService.ListAsync(_db, query)));
+            await PurchaseInvoiceService.ListAsync(_db, query, await BuildScopePredicateAsync())));
 
     /// <summary>发票详情（含关联行、已关联 / 未关联金额与订单可用性标注；只读）</summary>
     [HttpGet("{id:long}")]
     public async Task<IActionResult> GetById(long id)
-        => Ok(ApiResponse<PurchaseInvoiceDto>.Success(
+    {
+        await EnsureInvoiceIdAuthorizedAsync(id);
+        return Ok(ApiResponse<PurchaseInvoiceDto>.Success(
             await PurchaseInvoiceService.GetAsync(_db, id)));
+    }
 
     /// <summary>
     /// 供应商采购发票对账报表（ERP-044，**只读派生**）：按「供应商 + 币种」分组核对采购订单与**已登记（未作废）**
@@ -54,8 +59,11 @@ public class PurchaseInvoiceController : ControllerBase
     /// </summary>
     [HttpGet("reconciliation")]
     public async Task<IActionResult> Reconciliation([FromQuery] SupplierInvoiceReconciliationQuery query)
-        => Ok(ApiResponse<SupplierInvoiceReconciliationReport>.Success(
+    {
+        await EnsureMenuAuthorizedAsync();
+        return Ok(ApiResponse<SupplierInvoiceReconciliationReport>.Success(
             await SupplierInvoiceReconciliation.ForQueryAsync(_db, query)));
+    }
 
     /// <summary>
     /// 供应商对账与账龄工作台（ERP-068，**只读派生**）：按「供应商 + 币种」列出 ERP-065 持久化供应商采购发票证据、
@@ -67,8 +75,11 @@ public class PurchaseInvoiceController : ControllerBase
     /// </summary>
     [HttpGet("reconciliation-aging")]
     public async Task<IActionResult> ReconciliationAging([FromQuery] SupplierReconciliationAgingQuery query)
-        => Ok(ApiResponse<SupplierReconciliationAgingReport>.Success(
+    {
+        await EnsureMenuAuthorizedAsync();
+        return Ok(ApiResponse<SupplierReconciliationAgingReport>.Success(
             await SupplierReconciliationAging.ForQueryAsync(_db, query)));
+    }
 
     /// <summary>
     /// 单张发票的对账与账龄证据明细（ERP-068，**只读派生**，与列表同一派生口径）：打开明细时**重新校验**
@@ -79,8 +90,75 @@ public class PurchaseInvoiceController : ControllerBase
     [HttpGet("reconciliation-aging/invoices/{invoiceId:long}")]
     public async Task<IActionResult> ReconciliationAgingInvoiceDetail(
         long invoiceId, [FromQuery] DateTime? asOfDate = null)
-        => Ok(ApiResponse<SupplierReconciliationAgingInvoiceDetail>.Success(
+    {
+        await EnsureInvoiceIdAuthorizedAsync(invoiceId);
+        return Ok(ApiResponse<SupplierReconciliationAgingInvoiceDetail>.Success(
             await SupplierReconciliationAging.ForInvoiceDetailAsync(_db, invoiceId, CurrentUserId(), asOfDate)));
+    }
+
+    // ==================== ERP-382：实时授权辅助（身份 / 菜单 / 权威来源范围） ====================
+
+    /// <summary>
+    /// 是否必须执行实时授权：真实 HTTP 请求（MVC 绑定，<c>Request.Path</c> 已赋值）一律执行；
+    /// 进程内直接调用（历史单元测试 / 内部派生读取，无 HTTP 请求管线）仅在携带当前登录身份时执行。
+    /// 只对「既无任何登录身份、又不在 HTTP 请求管线内」的调用免授权：这类调用不可能由外部请求到达，
+    /// 也绝不把缺失身份当作管理员（真实匿名请求因处于请求管线内一律 fail closed）。
+    /// </summary>
+    private bool RequiresLiveAuthorization()
+    {
+        var http = ControllerContext?.HttpContext;
+        if (http is null) return false;
+        return http.Request.Path.HasValue || CurrentUserId() is not null;
+    }
+
+    /// <summary>身份 / 账号状态 / 既有「采购订单」菜单授权（fail closed：缺失 / 已删除按未认证，禁用 / 无菜单按权限不足）。</summary>
+    private async Task EnsureMenuAuthorizedAsync()
+    {
+        if (!RequiresLiveAuthorization()) return;
+        await PurchaseInvoiceAuthorizationRules.EnsureMenuAuthorizedAsync(_db, CurrentUserId());
+    }
+
+    /// <summary>
+    /// 台账范围谓词：真实请求在计数 / 分页之前下推身份 / 菜单 / 权威来源范围；进程内无身份调用返回 null（既有语义不变）。
+    /// </summary>
+    private async Task<System.Linq.Expressions.Expression<Func<ERP.Domain.Entities.PurchaseInvoice, bool>>?>
+        BuildScopePredicateAsync()
+    {
+        if (!RequiresLiveAuthorization()) return null;
+        return await PurchaseInvoiceAuthorizationRules.BuildScopePredicateAsync(_db, CurrentUserId());
+    }
+
+    /// <summary>
+    /// 单张发票的范围授权：身份 / 菜单 fail closed → 发票不存在或已删除按业务「不存在」拒绝 →
+    /// 复核发票<strong>全部来源采购订单</strong>的权威归属客户范围（受限账号无来源 / 越界一律拒绝）。
+    /// </summary>
+    private async Task EnsureInvoiceIdAuthorizedAsync(long invoiceId)
+    {
+        if (!RequiresLiveAuthorization()) return;
+        if (invoiceId <= 0) throw BusinessException.InvalidParameter("发票 Id 不合法");
+
+        var invoice = await _db.PurchaseInvoices.AsNoTracking()
+            .FirstOrDefaultAsync(x => x.Id == invoiceId && !x.IsDeleted)
+            ?? throw BusinessException.NotFound($"供应商采购发票（Id={invoiceId}）不存在或已删除");
+
+        await PurchaseInvoiceAuthorizationRules.EnsureInvoiceAuthorizedAsync(_db, CurrentUserId(), invoice);
+    }
+
+    /// <summary>
+    /// 拟提议关联的来源范围授权：在替换关联行之前复核请求中每一张采购订单的来源归属
+    /// （受限账号必须至少有一张且在本人客户范围内，特权账号放行），绝不新增任何权限。
+    /// </summary>
+    private async Task EnsureProposedAllocationsAuthorizedAsync(PurchaseInvoiceAllocationSaveRequest? request)
+    {
+        if (!RequiresLiveAuthorization()) return;
+
+        var orderIds = (request?.Lines ?? new List<PurchaseInvoiceAllocationSaveDto>())
+            .Select(l => l.PurchaseOrderId)
+            .Where(id => id > 0)
+            .Distinct()
+            .ToList();
+        await PurchaseInvoiceAuthorizationRules.EnsureOrderIdsAuthorizedAsync(_db, CurrentUserId(), orderIds);
+    }
 
     /// <summary>当前登录用户 Id（缺失或非数字时返回 null，由明细接口 fail closed 拒绝，绝不猜测身份）</summary>
     private long? CurrentUserId()
@@ -95,8 +173,11 @@ public class PurchaseInvoiceController : ControllerBase
     /// </summary>
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] PurchaseInvoiceSaveDto dto)
-        => Ok(ApiResponse<PurchaseInvoiceDto>.Success(
+    {
+        await EnsureMenuAuthorizedAsync();
+        return Ok(ApiResponse<PurchaseInvoiceDto>.Success(
             await PurchaseInvoiceService.CreateAsync(_db, dto), "发票草稿已登记"));
+    }
 
     /// <summary>
     /// 修改草稿发票（已登记 / 已作废拒绝修改；已有采购订单关联时不允许更换供应商或币种）；
@@ -104,8 +185,11 @@ public class PurchaseInvoiceController : ControllerBase
     /// </summary>
     [HttpPut("{id:long}")]
     public async Task<IActionResult> Update(long id, [FromBody] PurchaseInvoiceSaveDto dto)
-        => Ok(ApiResponse<PurchaseInvoiceDto>.Success(
+    {
+        await EnsureInvoiceIdAuthorizedAsync(id);
+        return Ok(ApiResponse<PurchaseInvoiceDto>.Success(
             await PurchaseInvoiceService.UpdateAsync(_db, id, dto), "发票草稿已更新"));
+    }
 
     /// <summary>
     /// 可关联采购订单候选（只读、有界）：只返回同供应商 + 同币种的订单（含已取消订单并标注不可关联），
@@ -114,8 +198,11 @@ public class PurchaseInvoiceController : ControllerBase
     [HttpGet("{id:long}/order-candidates")]
     public async Task<IActionResult> OrderCandidates(
         long id, [FromQuery] string? keyword, [FromQuery] int take = PurchaseInvoiceRules.MaxOrderCandidates)
-        => Ok(ApiResponse<List<PurchaseInvoiceOrderCandidateDto>>.Success(
+    {
+        await EnsureInvoiceIdAuthorizedAsync(id);
+        return Ok(ApiResponse<List<PurchaseInvoiceOrderCandidateDto>>.Success(
             await PurchaseInvoiceService.ListOrderCandidatesAsync(_db, id, keyword, take)));
+    }
 
     /// <summary>
     /// 关联预览（**只读，不写库**）：逐行校验采购订单资格与关联金额，返回订单快照、资格文案、
@@ -124,18 +211,27 @@ public class PurchaseInvoiceController : ControllerBase
     [HttpPost("{id:long}/allocations/preview")]
     public async Task<IActionResult> PreviewAllocations(
         long id, [FromBody] PurchaseInvoiceAllocationSaveRequest? request)
-        => Ok(ApiResponse<PurchaseInvoiceAllocationPreviewDto>.Success(
+    {
+        await EnsureInvoiceIdAuthorizedAsync(id);
+        await EnsureProposedAllocationsAuthorizedAsync(request);
+        return Ok(ApiResponse<PurchaseInvoiceAllocationPreviewDto>.Success(
             await PurchaseInvoiceService.PreviewAllocationsAsync(_db, id, request), "关联预览完成（未写库）"));
+    }
 
     /// <summary>
     /// 保存关联（草稿专用，整体替换，事务性）：同一发票内同一订单不重复、供应商与币种必须一致、
-    /// 关联金额合计不得超过含税总额；已登记 / 已作废发票拒绝任何关联改动。
+    /// 关联金额合计不得超过含税总额与来源订单的发票容量；已登记 / 已作废发票拒绝任何关联改动。
     /// </summary>
     [HttpPost("{id:long}/allocations")]
     public async Task<IActionResult> SaveAllocations(
         long id, [FromBody] PurchaseInvoiceAllocationSaveRequest? request)
-        => Ok(ApiResponse<PurchaseInvoiceDto>.Success(
+    {
+        // ERP-382：先复核「已存储来源」与「拟提议来源」的完整授权范围，再做整体替换（被拒绝者绝不改写任何关联行）。
+        await EnsureInvoiceIdAuthorizedAsync(id);
+        await EnsureProposedAllocationsAuthorizedAsync(request);
+        return Ok(ApiResponse<PurchaseInvoiceDto>.Success(
             await PurchaseInvoiceService.SaveAllocationsAsync(_db, id, request), "发票关联已保存"));
+    }
 
     /// <summary>
     /// 登记发票（草稿 → 已登记）：登记前复核已持久化关联行仍权威可关联；只改发票状态与登记时间，
@@ -143,8 +239,11 @@ public class PurchaseInvoiceController : ControllerBase
     /// </summary>
     [HttpPost("{id:long}/record")]
     public async Task<IActionResult> Record(long id)
-        => Ok(ApiResponse<PurchaseInvoiceDto>.Success(
+    {
+        await EnsureInvoiceIdAuthorizedAsync(id);
+        return Ok(ApiResponse<PurchaseInvoiceDto>.Success(
             await PurchaseInvoiceService.RecordAsync(_db, id), "发票已登记（证据已冻结，可作废但不可改写）"));
+    }
 
     /// <summary>
     /// 作废发票（必须填写作废原因）：保留身份、金额、关联行与审计历史，不物理删除、不改写已登记证据，
@@ -152,7 +251,10 @@ public class PurchaseInvoiceController : ControllerBase
     /// </summary>
     [HttpPost("{id:long}/void")]
     public async Task<IActionResult> Void(long id, [FromBody] PurchaseInvoiceVoidRequest? request)
-        => Ok(ApiResponse<PurchaseInvoiceDto>.Success(
+    {
+        await EnsureInvoiceIdAuthorizedAsync(id);
+        return Ok(ApiResponse<PurchaseInvoiceDto>.Success(
             await PurchaseInvoiceService.VoidAsync(_db, id, request?.Reason),
             "发票已作废（历史证据与关联保留，可读）"));
+    }
 }
