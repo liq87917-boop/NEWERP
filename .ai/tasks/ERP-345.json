@@ -4,7 +4,8 @@
   "acceptance_criteria": [
     "In existing purchase-order cancellation route validate current identity/menu/customer scope and live document state. Refuse cancellation while explicit live approved unreversed receipts or effective supplier payment/invoice allocations remain; list only authorized concise reason, never infer links from strings or sum currencies.",
     "Run check and state change atomically with same-order approval coordination used by ERP342; concurrent receipt approval and source cancellation cannot both succeed creating invalid fulfillment. Null/unlinked historical evidence not guessed; canceled/reversed/deleted evidence only ignored when authoritative existing workflow marks it inactive. Existing reversal services must be used; cancellation guard itself never silently reverses stock or finance.",
-    "Keep original order lines/amounts and audit route. Verify no-dependent cancellation, active receipt/payment refusal, explicitly reversed/canceled release, denied user, repeated operation and two-connection cancellation-versus-approval race under exact dedicated NEWERP_AUTOTEST LocalDB; safe Release and relevant units pass."
+    "Keep original order lines/amounts and audit route. Verify no-dependent cancellation, active receipt/payment refusal, explicitly reversed/canceled release, denied user, repeated operation and two-connection cancellation-versus-approval race under exact dedicated NEWERP_AUTOTEST LocalDB; safe Release and relevant units pass.",
+    "Before any real SQL fixture execution require exact DataSource (localdb)\\NEWERP_AutoAcceptance, IntegratedSecurity and NEWERP_AUTOTEST prefix. Create a fresh uniquely GUID-named owned test database and reject an existing database instead of dropping/resetting it; never read production config or credentials. Use generated EF/SQL identity keys. Add target guard tests that reject wrong server or production database before access, then execute meaningful real database scenarios and retain logs. Reuse the ERP342 fixture repaired in 767c1e4; no broad destructive fixture cleanup or stage acceptance inferred from build."
   ],
   "allowed_paths": [
     "src/ERP.Application/Services/PurchaseOrderCancellationRules.cs",
@@ -34,12 +35,16 @@
       "src/ERP.UnitTests/PurchaseOrderCancellationTests.cs",
       "src/ERP.IntegrationTests/PurchaseOrderCancellationSqlServerTests.cs",
       "docs/purchase-order-cancellation.md"
+    ],
+    "Before any real SQL fixture execution require exact DataSource (localdb)\\NEWERP_AutoAcceptance, IntegratedSecurity and NEWERP_AUTOTEST prefix. Create a fresh uniquely GUID-named owned test database and reject an existing database instead of dropping/resetting it; never read production config or credentials. Use generated EF/SQL identity keys. Add target guard tests that reject wrong server or production database before access, then execute meaningful real database scenarios and retain logs. Reuse the ERP342 fixture repaired in 767c1e4; no broad destructive fixture cleanup or stage acceptance inferred from build.": [
+      "src/ERP.IntegrationTests/PurchaseOrderCancellationSqlServerTests.cs"
     ]
   },
   "depends_on": [
-    "ERP-342"
+    "ERP-342",
+    "ERP-344"
   ],
-  "implementation_evidence": "PurchaseOrderController has no Cancel override; DocumentControllerBase.Cancel sets Cancelled unconditionally without checking active StockIns, stock movements or explicit supplier payment/invoice allocation links. Existing approved receipts and payment evidence can outlive a canceled source with no operational guard.",
+  "implementation_evidence": "PurchaseOrderController has no Cancel override; DocumentControllerBase.Cancel sets Cancelled unconditionally without checking active StockIns, stock movements or explicit supplier payment/invoice allocation links. Existing approved receipts and payment evidence can outlive a canceled source with no operational guard. Cancellation relies on ERP344 fail-closed validation after source status changes; depend on its completion rather than ERP342 alone. Read existing Api PurchaseOrderPaymentEvidence.cs and PurchaseOrderInvoicePaymentEvidence.cs semantics for recorded/voided/invalid/unavailable and invoice multi-order allocations; do not infer settlement from evidence presence or duplicate allocated invoice amounts.",
   "risk": "medium",
   "planning_stage": 3,
   "id": "ERP-345",
@@ -59,5 +64,6 @@
     "required": false,
     "scenarios": []
   },
-  "created_at": "2026-10-08T02:11:35.402681Z"
+  "created_at": "2026-10-08T02:11:35.402681Z",
+  "updated_at": "2026-10-08T02:32:07.027094Z"
 }

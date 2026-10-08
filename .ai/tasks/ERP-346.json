@@ -4,7 +4,8 @@
   "acceptance_criteria": [
     "When authorized purchase user explicitly links OwningSalesOrderId, resolve a live approved sales order using current-user sales/customer data scope and existing module permissions; reject nonpositive/missing/deleted/canceled/out-of-scope source, incompatible owning customer/product/unit. Derive order number and customer name from authoritative source, never trust conflicting client snapshots.",
     "Support unlinked procurement for stock without fabricating sales links. Preserve original commercial currencies/prices and calculate purchase totals through existing method; no forced currency equality or cross-currency sums, no silent sales/stock/finance mutations. Update rechecks source and permissions; submitted or approved document freeze rules remain.",
-    "Integrate existing create/update APIs and audit, fail transaction before saving incompatible source; show meaningful conflict. Test bounded source lookup, authorized link, denied/unmapped user, forged snapshot, invalid products/units, unlinked procurement and source changed between edit/save using real guarded SQL and safe Release build/unit. Amend legacy traceability fixtures to use genuine authorized source instead of dangling dummy IDs."
+    "Integrate existing create/update APIs and audit, fail transaction before saving incompatible source; show meaningful conflict. Test bounded source lookup, authorized link, denied/unmapped user, forged snapshot, invalid products/units, unlinked procurement and source changed between edit/save using real guarded SQL and safe Release build/unit. Amend legacy traceability fixtures to use genuine authorized source instead of dangling dummy IDs.",
+    "Before any real SQL fixture execution require exact DataSource (localdb)\\NEWERP_AutoAcceptance, IntegratedSecurity and NEWERP_AUTOTEST prefix. Create a fresh uniquely GUID-named owned test database and reject an existing database instead of dropping/resetting it; never read production config or credentials. Use generated EF/SQL identity keys. Add target guard tests that reject wrong server or production database before access, then execute meaningful real database scenarios and retain logs. Reuse the ERP342 fixture repaired in 767c1e4; no broad destructive fixture cleanup or stage acceptance inferred from build."
   ],
   "allowed_paths": [
     "src/ERP.Application/Services/PurchaseSalesOrderLinkRules.cs",
@@ -38,6 +39,9 @@
       "src/ERP.UnitTests/OrderTraceabilityTests.cs",
       "src/ERP.IntegrationTests/PurchaseSalesOrderLinkSqlServerTests.cs",
       "docs/purchase-sales-order-link.md"
+    ],
+    "Before any real SQL fixture execution require exact DataSource (localdb)\\NEWERP_AutoAcceptance, IntegratedSecurity and NEWERP_AUTOTEST prefix. Create a fresh uniquely GUID-named owned test database and reject an existing database instead of dropping/resetting it; never read production config or credentials. Use generated EF/SQL identity keys. Add target guard tests that reject wrong server or production database before access, then execute meaningful real database scenarios and retain logs. Reuse the ERP342 fixture repaired in 767c1e4; no broad destructive fixture cleanup or stage acceptance inferred from build.": [
+      "src/ERP.IntegrationTests/PurchaseSalesOrderLinkSqlServerTests.cs"
     ]
   },
   "depends_on": [
@@ -63,5 +67,6 @@
     "required": false,
     "scenarios": []
   },
-  "created_at": "2026-10-08T02:11:35.408484Z"
+  "created_at": "2026-10-08T02:11:35.408484Z",
+  "updated_at": "2026-10-08T02:32:07.059087Z"
 }
