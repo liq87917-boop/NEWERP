@@ -6,6 +6,7 @@ using ERP.Domain.Entities;
 using ERP.Domain.Enums;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 
 namespace ERP.Api.Controllers;
 
@@ -13,6 +14,14 @@ namespace ERP.Api.Controllers;
 /// 报价单控制器（主子表：一张报价单多行商品）
 /// 业务链：询价单 Inquiry → **报价单 Quotation** → 形式发票 PI → 销售订单
 /// 说明：本单据使用 EF 主子表实现（不走存储过程），不触碰现有单据的 SP
+/// <para>ERP-400：列表 / 详情 / 新增 / 修改 / 提交 / 审核 / 销审 / 取消 / 作废 / 删除 / 创建版本 / 版本链 /
+/// 有效期提醒 / 打印 / 询价带入 / 带入预填销售订单 / 转 PI / 转销售订单，每一路由在读取任何计数、
+/// 生成 / 消耗单据号或写入任何数据<b>之前</b>都先经 <see cref="QuotationAuthorizationRules"/> 复核
+/// <b>实时启用身份</b>、既有「报价单」（<c>quotation</c>）菜单授权与既有业务员数据范围；
+/// 转换额外要求既有「形式发票 PI」（<c>proforma-invoice</c>）或「销售订单」（<c>sales-order</c>）授权，
+/// 并独立复核来源 / 目标客户范围，绝不因来源报价单可见而授予目标菜单 / 客户权限。</para>
+/// <para>ERP-400：所有生命周期写路径（修改 / 提交 / 审核 / 销审 / 取消 / 作废 / 删除 / 创建版本 / 转换）都在
+/// 「报价单来源行锁 + 原子事务 + 锁内权威重读」内执行，与 PI 锁的确定顺序为「报价单行锁 → PI 行锁」。</para>
 /// </summary>
 [Route("api/sales/quotations")]
 public class QuotationController : DocumentControllerBase<Quotation>
@@ -24,15 +33,86 @@ public class QuotationController : DocumentControllerBase<Quotation>
         _noService = noService;
     }
 
+    /// <summary>报价单不存在 / 越界（不泄露范围外报价单）统一按「不存在」拒绝（fail closed）。</summary>
+    private static BusinessException QuotationNotFound() => BusinessException.NotFound("报价单不存在");
+
+    /// <summary>已存报价单的权威归属读取复核：受限账号缺失归属 / 越界按「不存在」拒绝（不泄露范围外报价单）。</summary>
+    private static void EnsureVisible(SalespersonDataScope scope, Quotation entity)
+    {
+        if (!scope.AllowsCustomer(entity.CustomerId)) throw QuotationNotFound();
+    }
+
+    // ==================== ERP-400 确定性报价单来源行锁 + 原子事务 ====================
+
+    /// <summary>
+    /// 锁内**权威重读**报价单（不复用加锁前的内存实体）：先取报价单来源行锁，再重新加载含明细的权威行，
+    /// 并按实时身份复核已存归属 —— 并发改写 / 删除 / 越界一律在改写任何字段之前原子拒绝；
+    /// <paramref name="allowSuperseded"/> 为 <c>false</c> 时同时复核「历史版本只读」（ERP-035 既有口径）。
+    /// </summary>
+    private async Task<Quotation> ReloadLockedAsync(SalespersonDataScope scope, long id, bool allowSuperseded = false)
+    {
+        if (!await QuotationMutationRules.LockQuotationRowAsync(Db, id))
+            throw QuotationNotFound();
+        var entity = await Db.Quotations.Include(o => o.Details)
+            .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
+            ?? throw QuotationNotFound();
+        QuotationAuthorizationRules.EnsureStoredCustomerInScope(scope, entity.CustomerId);
+        if (!allowSuperseded && await QuotationRevisionService.IsSupersededAsync(Db, id))
+            throw BusinessException.RuleConflict(QuotationMutationRules.SupersededText);
+        return entity;
+    }
+
+    /// <summary>
+    /// 在「报价单来源行锁 + 原子事务」内执行一次生命周期变更：授权 → 开事务 → 加锁并锁内权威重读 →
+    /// 调用 <paramref name="body"/>（自行 SaveChanges）→ 提交；任一步失败整体回滚并丢弃半成品变更，
+    /// 绝不留下撕裂状态或半成品写入。并发令牌过期（RowVersion）转为可读的业务冲突。
+    /// </summary>
+    private async Task<IActionResult> RunLockedMutationAsync(long id,
+        Func<SalespersonDataScope, Quotation, Task<IActionResult>> body, bool allowSuperseded = false)
+    {
+        var scope = await QuotationAuthorizationRules.EnsureAuthorizedAsync(Db, CurrentUserId());
+        await using var transaction = await QuotationMutationRules.BeginMutationTransactionAsync(Db);
+        try
+        {
+            var entity = await ReloadLockedAsync(scope, id, allowSuperseded);
+            var result = await body(scope, entity);
+            if (transaction is not null) await transaction.CommitAsync();
+            return result;
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            await RollbackAsync(transaction);
+            throw BusinessException.RuleConflict(QuotationMutationRules.StaleRowVersionText);
+        }
+        catch
+        {
+            await RollbackAsync(transaction);
+            throw;
+        }
+    }
+
+    /// <summary>回滚当前事务并丢弃变更跟踪器中的半成品变更（内存库无事务时同样清理，绝不残留部分写入）。</summary>
+    private async Task RollbackAsync(IDbContextTransaction? transaction)
+    {
+        if (transaction is not null) await transaction.RollbackAsync();
+        QuotationMutationRules.DiscardTrackedChanges(Db);
+    }
+
+    /// <summary>是否存在未删除的下游 PI / 销售订单链接（只按持久化外键判定，绝不按自由文本推断）。</summary>
+    private Task<bool> HasDownstreamLinkAsync(long quotationId)
+        => QuotationMutationRules.HasDownstreamLinkAsync(Db, quotationId);
+
+
     /// <summary>分页查询（keyword 匹配单号 / 客户名 / 来源询价单号 / 业务员）</summary>
     [HttpGet]
     public async Task<IActionResult> GetPaged([FromQuery] PageQuery query, [FromQuery] DocumentStatus? status,
         [FromQuery] DateTime? start, [FromQuery] DateTime? end)
     {
+        // ERP-400：授权先于计数 / 分页（受限账号范围下推到 SQL，缺失归属 / 越界绝不进入计数）。
+        var scope = await QuotationAuthorizationRules.EnsureAuthorizedAsync(Db, CurrentUserId());
         query.Normalize();
-        var scope = await ResolveScopeAsync();
-        var source = SalespersonDataScopeService.FilterByCustomer(
-            Set.AsNoTracking().Where(o => !o.IsDeleted), scope, o => o.CustomerId);
+        var source = QuotationAuthorizationRules.ApplyScope(
+            Set.AsNoTracking().Where(o => !o.IsDeleted), scope);
         if (status.HasValue) source = source.Where(o => o.Status == status.Value);
         if (start.HasValue) source = source.Where(o => o.QuotationDate >= start.Value);
         if (end.HasValue) source = source.Where(o => o.QuotationDate <= end.Value);
@@ -59,11 +139,11 @@ public class QuotationController : DocumentControllerBase<Quotation>
     [HttpGet("{id:long}")]
     public async Task<IActionResult> GetById(long id)
     {
+        var scope = await QuotationAuthorizationRules.EnsureAuthorizedAsync(Db, CurrentUserId());
         var entity = await Set.AsNoTracking().Include(o => o.Details)
             .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
-            ?? throw BusinessException.NotFound("报价单不存在");
-        if (!(await ResolveScopeAsync()).AllowsCustomer(entity.CustomerId))
-            throw BusinessException.NotFound("报价单不存在");
+            ?? throw QuotationNotFound();
+        EnsureVisible(scope, entity);
         entity.Details = entity.Details.Where(d => !d.IsDeleted).OrderBy(d => d.SortNo).ToList();
         return Ok(ApiResponse<Quotation>.Success(entity));
     }
@@ -82,17 +162,38 @@ public class QuotationController : DocumentControllerBase<Quotation>
     [HttpPost("{id:long}/revisions")]
     public async Task<IActionResult> CreateRevision(long id)
     {
-        var revision = await QuotationRevisionService.CreateRevisionAsync(Db, id);
-        return Ok(ApiResponse<QuotationRevisionResult>.Success(new QuotationRevisionResult
+        // ERP-400：授权 → 报价单来源行锁 → 锁内权威重读（版本创建允许从历史版本分支，故 allowSuperseded=true）→
+        // 既有版本号 / 单号权威分配在同一原子事务内完成，失败整体回滚（源版本一行不改）。
+        var scope = await QuotationAuthorizationRules.EnsureAuthorizedAsync(Db, CurrentUserId());
+        await using var transaction = await QuotationMutationRules.BeginMutationTransactionAsync(Db);
+        try
         {
-            Id = revision.Id,
-            QuotationNo = revision.QuotationNo,
-            RevisionNumber = revision.RevisionNumber,
-            RootQuotationId = revision.RootQuotationId ?? revision.Id,
-            RootQuotationNo = revision.RootQuotationNo,
-            PreviousRevisionId = revision.PreviousRevisionId ?? 0,
-            PreviousRevisionNo = revision.PreviousRevisionNo
-        }, $"已创建新版本 {revision.QuotationNo}（草稿，可继续修改）"));
+            var source = await ReloadLockedAsync(scope, id, allowSuperseded: true);
+            QuotationRevisionRules.EnsureSourceEligible(source.Status);
+
+            var revision = await QuotationRevisionService.CreateRevisionAsync(Db, source.Id);
+            if (transaction is not null) await transaction.CommitAsync();
+            return Ok(ApiResponse<QuotationRevisionResult>.Success(new QuotationRevisionResult
+            {
+                Id = revision.Id,
+                QuotationNo = revision.QuotationNo,
+                RevisionNumber = revision.RevisionNumber,
+                RootQuotationId = revision.RootQuotationId ?? revision.Id,
+                RootQuotationNo = revision.RootQuotationNo,
+                PreviousRevisionId = revision.PreviousRevisionId ?? 0,
+                PreviousRevisionNo = revision.PreviousRevisionNo
+            }, $"已创建新版本 {revision.QuotationNo}（草稿，可继续修改）"));
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            await RollbackAsync(transaction);
+            throw BusinessException.RuleConflict(QuotationMutationRules.StaleRowVersionText);
+        }
+        catch
+        {
+            await RollbackAsync(transaction);
+            throw;
+        }
     }
 
     /// <summary>
@@ -106,9 +207,19 @@ public class QuotationController : DocumentControllerBase<Quotation>
     [HttpGet("{id:long}/revisions")]
     public async Task<IActionResult> GetRevisions(long id)
     {
+        var scope = await QuotationAuthorizationRules.EnsureAuthorizedAsync(Db, CurrentUserId());
         var selected = await Set.AsNoTracking()
             .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
-            ?? throw BusinessException.NotFound("报价单不存在");
+            ?? throw QuotationNotFound();
+        EnsureVisible(scope, selected);
+
+        // ERP-400：链内每一张版本都必须落在实时范围内（存在一个可见版本不得泄露范围外版本的金额 / 状态）。
+        var rootId = selected.RootQuotationId ?? selected.Id;
+        var chainCustomerIds = await Db.Quotations.AsNoTracking()
+            .Where(o => !o.IsDeleted && (o.Id == rootId || o.RootQuotationId == rootId))
+            .Select(o => o.CustomerId).ToListAsync();
+        QuotationAuthorizationRules.EnsureChainCustomerInScope(scope, chainCustomerIds);
+
         var chain = await QuotationRevisionService.LoadChainAsync(Db, selected);
         return Ok(ApiResponse<List<QuotationRevisionChainItem>>.Success(chain,
             $"版本链共 {chain.Count} 个版本（根单：{chain.FirstOrDefault()?.RootQuotationNo}）"));
@@ -118,9 +229,12 @@ public class QuotationController : DocumentControllerBase<Quotation>
     [HttpGet("from-inquiry/{inquiryId:long}")]
     public async Task<IActionResult> FromInquiry(long inquiryId)
     {
+        // ERP-400：带入预填同样先实时授权，并按权威归属复核询价单客户在实时范围内（fail closed）。
+        var scope = await QuotationAuthorizationRules.EnsureAuthorizedAsync(Db, CurrentUserId());
         var inquiry = await Db.Inquiries.AsNoTracking().Include(o => o.Details)
             .FirstOrDefaultAsync(o => o.Id == inquiryId && !o.IsDeleted)
             ?? throw BusinessException.NotFound("询价单不存在");
+        QuotationAuthorizationRules.EnsureProposedCustomerInScope(scope, inquiry.CustomerId);
 
         BaseCustomer? customer = null;
         if (inquiry.CustomerId > 0)
@@ -159,59 +273,153 @@ public class QuotationController : DocumentControllerBase<Quotation>
         return Ok(ApiResponse<object>.Success(result));
     }
 
-    /// <summary>提交（ERP-035：已被后续版本取代的历史版本只读，不允许再流转状态）</summary>
+    /// <summary>
+    /// 提交（ERP-400：报价单来源行锁 + 原子事务内锁内权威重读后 草稿 → 已提交；
+    /// ERP-035：已被后续版本取代的历史版本只读；存在下游链接的已完成报价单一律冻结）。
+    /// </summary>
     [HttpPost("{id:long}/submit")]
     public override async Task<IActionResult> Submit(long id)
-    {
-        await EnsureNotSupersededAsync(id);
-        return await base.Submit(id);
-    }
+        => await RunLockedMutationAsync(id, async (_, entity) =>
+        {
+            QuotationMutationRules.EnsureNoDownstreamLink(await HasDownstreamLinkAsync(id));
+            QuotationMutationRules.EnsureSubmitAllowed(GetStatus(entity));
+            SetStatus(entity, DocumentStatus.Submitted);
+            await Db.SaveChangesAsync();
+            return Ok(ApiResponse<object>.Success(null, "提交成功"));
+        });
 
-    /// <summary>审核（草稿可直接审核，也支持提交后审核；历史版本只读）</summary>
+    /// <summary>
+    /// 审核（ERP-400：报价单来源行锁 + 原子事务内锁内权威重读后审核；草稿可直接审核，也支持提交后审核；
+    /// 无有效明细不允许审核；历史版本只读；存在下游链接的已完成报价单一律冻结）。
+    /// </summary>
     [HttpPost("{id:long}/approve")]
     public override async Task<IActionResult> Approve(long id)
-    {
-        await EnsureNotSupersededAsync(id);
-        var entity = await GetOrThrowAsync(id, "报价单不存在");
-        if (GetStatus(entity) == DocumentStatus.Approved)
-            throw BusinessException.RuleConflict("报价单已审核");
-        SetStatus(entity, DocumentStatus.Approved);
-        entity.Details.Clear();
-        await Db.SaveChangesAsync();
-        return Ok(ApiResponse<object>.Success(null, "报价单已审核"));
-    }
+        => await RunLockedMutationAsync(id, async (_, entity) =>
+        {
+            QuotationMutationRules.EnsureNoDownstreamLink(await HasDownstreamLinkAsync(id));
+            QuotationMutationRules.EnsureApproveAllowed(GetStatus(entity),
+                QuotationMutationRules.ActiveDetailCount(entity));
+            SetStatus(entity, DocumentStatus.Approved);
+            await Db.SaveChangesAsync();
+            return Ok(ApiResponse<object>.Success(null, "报价单已审核"));
+        });
 
-    /// <summary>销审（退回草稿，可继续修改；历史版本只读）</summary>
+    /// <summary>销审（ERP-400：报价单来源行锁 + 原子事务内锁内权威重读后退回草稿，可继续修改；历史版本只读）</summary>
     [HttpPost("{id:long}/unaudit")]
     public async Task<IActionResult> Unaudit(long id)
-    {
-        await EnsureNotSupersededAsync(id);
-        var entity = await GetOrThrowAsync(id, "报价单不存在");
-        SetStatus(entity, DocumentStatus.Pending);
-        await Db.SaveChangesAsync();
-        return Ok(ApiResponse<object>.Success(null, "已销审，可继续修改"));
-    }
+        => await RunLockedMutationAsync(id, async (_, entity) =>
+        {
+            QuotationMutationRules.EnsureNoDownstreamLink(await HasDownstreamLinkAsync(id));
+            QuotationMutationRules.EnsureUnauditAllowed(GetStatus(entity));
+            SetStatus(entity, DocumentStatus.Pending);
+            await Db.SaveChangesAsync();
+            return Ok(ApiResponse<object>.Success(null, "已销审，可继续修改"));
+        });
 
-    /// <summary>取消（ERP-035：历史版本只读，需在最新版本上操作）</summary>
+    /// <summary>取消（ERP-400：报价单来源行锁 + 原子事务内锁内权威重读后取消；已链接报价单一律冻结）</summary>
     [HttpPost("{id:long}/cancel")]
     public override async Task<IActionResult> Cancel(long id)
-    {
-        await EnsureNotSupersededAsync(id);
-        return await base.Cancel(id);
-    }
+        => await RunLockedMutationAsync(id, async (_, entity) =>
+        {
+            QuotationMutationRules.EnsureNoDownstreamLink(await HasDownstreamLinkAsync(id));
+            QuotationMutationRules.EnsureCancelAllowed(GetStatus(entity));
+            SetStatus(entity, DocumentStatus.Cancelled);
+            await Db.SaveChangesAsync();
+            return Ok(ApiResponse<object>.Success(null, "已取消"));
+        });
 
-    /// <summary>删除（软删除，仅待提交状态可删；ERP-035：历史版本不可删除）</summary>
+    /// <summary>
+    /// 作废（ERP-400：报价单来源行锁 + 原子事务内锁内权威重读后作废；已转 PI / 已转销售订单 / 已链接报价单不可作废，
+    /// 重复作废给出明确提示）。绝不通过取消目标单据做反向冲销。
+    /// </summary>
+    [HttpPost("{id:long}/void")]
+    public async Task<IActionResult> Void(long id)
+        => await RunLockedMutationAsync(id, async (_, entity) =>
+        {
+            QuotationMutationRules.EnsureNoDownstreamLink(await HasDownstreamLinkAsync(id));
+            QuotationMutationRules.EnsureVoidAllowed(GetStatus(entity));
+            SetStatus(entity, DocumentStatus.Cancelled);
+            await Db.SaveChangesAsync();
+            return Ok(ApiResponse<object>.Success(null, "报价单已作废"));
+        });
+
+    /// <summary>删除（软删除，仅待提交状态可删；ERP-400：报价单来源行锁 + 原子事务内锁内权威重读后软删除）</summary>
     [HttpDelete("{id:long}")]
     public override async Task<IActionResult> Delete(long id)
+        => await RunLockedMutationAsync(id, async (_, entity) =>
+        {
+            QuotationMutationRules.EnsureNoDownstreamLink(await HasDownstreamLinkAsync(id));
+            QuotationMutationRules.EnsureDeleteAllowed(GetStatus(entity));
+            entity.IsDeleted = true;
+            entity.UpdatedAt = DateTime.Now;
+            await Db.SaveChangesAsync();
+            return Ok(ApiResponse<object>.Success(null, "删除成功"));
+        });
+
+    /// <summary>
+    /// 批量软删除（ERP-400）：授权后<strong>按报价单 Id 升序确定性加锁</strong>（与单行生命周期路由
+    /// 共用同一把报价单来源行锁），锁内权威重读并逐行复核归属 / 下游 PI 或销售订单链接 / 状态，
+    /// 混合允许 / 越界 / 无主批次<b>整体拒绝</b>、不做部分删除；全部通过后才在同一原子事务内一次性软删除。
+    /// </summary>
+    [HttpPost("batch-delete")]
+    public async Task<IActionResult> BatchDelete([FromBody] List<long> ids)
     {
-        await EnsureNotSupersededAsync(id);
-        return await base.Delete(id);
+        var scope = await QuotationAuthorizationRules.EnsureAuthorizedAsync(Db, CurrentUserId());
+        var requested = QuotationMutationRules.MergeLockIds(ids);
+        if (requested.Count == 0)
+            throw BusinessException.InvalidParameter("请指定要删除的报价单");
+
+        await using var transaction = await QuotationMutationRules.BeginMutationTransactionAsync(Db);
+        try
+        {
+            // 锁序：全部报价单来源行按 Id 升序确定性加锁（去重、仅正整数；绝不反向获取其它锁）。
+            await QuotationMutationRules.LockQuotationRowsAsync(Db, requested);
+
+            // 锁内权威重读：存在性 / 归属 / 下游链接 / 状态逐行复核，任一行不满足即整体拒绝（无部分删除）。
+            var entities = await Db.Quotations
+                .Where(o => requested.Contains(o.Id) && !o.IsDeleted).ToListAsync();
+            var found = entities.Select(o => o.Id).ToHashSet();
+            var missing = requested.Where(id => !found.Contains(id)).ToList();
+            if (missing.Count > 0)
+                throw BusinessException.NotFound(
+                    $"批量删除的报价单不存在或已删除：{string.Join("、", missing)}（未做任何部分删除）");
+
+            foreach (var quotation in entities)
+            {
+                QuotationAuthorizationRules.EnsureStoredCustomerInScope(scope, quotation.CustomerId);
+                QuotationMutationRules.EnsureNoDownstreamLink(await HasDownstreamLinkAsync(quotation.Id));
+            }
+
+            QuotationMutationRules.EnsureBatchDeleteAllowed(entities.Select(GetStatus));
+
+            foreach (var entity in entities)
+            {
+                entity.IsDeleted = true;
+                entity.UpdatedAt = DateTime.Now;
+            }
+            await Db.SaveChangesAsync();
+            if (transaction is not null) await transaction.CommitAsync();
+            return Ok(ApiResponse<object>.Success(null, $"已删除 {entities.Count} 张报价单"));
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            await RollbackAsync(transaction);
+            throw BusinessException.RuleConflict(QuotationMutationRules.StaleRowVersionText);
+        }
+        catch
+        {
+            await RollbackAsync(transaction);
+            throw;
+        }
     }
 
     /// <summary>创建（单号缺省由字轨生成；行号/金额/合计后端复核）</summary>
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] Quotation entity)
     {
+        // ERP-400：授权与拟议客户范围校验先于单号生成与任何写入（被拒绝的调用方绝不消耗单据号）。
+        var scope = await QuotationAuthorizationRules.EnsureAuthorizedAsync(Db, CurrentUserId());
+        QuotationAuthorizationRules.EnsureProposedCustomerInScope(scope, entity.CustomerId);
         entity.Id = 0;
         if (string.IsNullOrWhiteSpace(entity.QuotationNo))
             entity.QuotationNo = await _noService.GenerateAsync(DocumentType.Quotation);
@@ -224,17 +432,26 @@ public class QuotationController : DocumentControllerBase<Quotation>
         return Ok(ApiResponse<object>.Success(new { entity.Id, entity.QuotationNo }, "报价单创建成功"));
     }
 
-    /// <summary>修改（已审核 / 已取消不可改；ERP-035：已被后续版本取代的历史版本不可改；明细整体替换）</summary>
+    /// <summary>
+    /// 修改（ERP-400：报价单来源行锁 + 原子事务内锁内权威重读后改写；明细整体替换）。
+    /// 已审核 / 已转订单 / 已作废不可改；已被后续版本取代的历史版本只读；
+    /// 存在下游 PI / 销售订单链接的报价单一律冻结（保留显式历史，不做反向冲销）。
+    /// </summary>
     [HttpPut("{id:long}")]
     public async Task<IActionResult> Update(long id, [FromBody] Quotation entity)
-    {
-        await EnsureNotSupersededAsync(id);
-        var existing = await Db.Quotations.Include(o => o.Details)
-            .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
-            ?? throw BusinessException.NotFound("报价单不存在");
-        if (GetStatus(existing) is DocumentStatus.Approved or DocumentStatus.Cancelled)
-            throw BusinessException.RuleConflict("已审核或已取消的报价单不可修改，请先销审");
+        => await RunLockedMutationAsync(id, async (scope, existing) =>
+        {
+            QuotationAuthorizationRules.EnsureProposedCustomerInScope(scope, entity.CustomerId);
+            QuotationMutationRules.EnsureNoDownstreamLink(await HasDownstreamLinkAsync(id));
+            QuotationMutationRules.EnsureEditAllowed(GetStatus(existing));
+            ApplyUpdate(existing, entity, id);
+            await Db.SaveChangesAsync();
+            return Ok(ApiResponse<object>.Success(null, "报价单更新成功"));
+        });
 
+    /// <summary>把请求体字段写入锁内权威实体（明细整体替换，单号 / 版本元数据 / 主键不可被客户端改写）。</summary>
+    private void ApplyUpdate(Quotation existing, Quotation entity, long id)
+    {
         existing.QuotationDate = entity.QuotationDate;
         existing.ValidUntil = entity.ValidUntil;
         existing.CustomerId = entity.CustomerId;
@@ -263,39 +480,68 @@ public class QuotationController : DocumentControllerBase<Quotation>
         existing.TotalAmount = entity.TotalAmount;
         existing.TotalAmountCny = entity.TotalAmountCny;
         existing.UpdatedAt = DateTime.Now;
-        await Db.SaveChangesAsync();
-        return Ok(ApiResponse<object>.Success(null, "报价单更新成功"));
     }
 
-    /// <summary>转为 PI：复制主表业务字段与明细 / 回填来源报价单 / 原报价单状态改为「已转 PI」（Completed）</summary>
+    /// <summary>
+    /// 转为 PI（ERP-400）：在「报价单来源行锁 + 原子事务」内按已审核报价单生成一张 PI，
+    /// 并回填来源报价单、把原报价单状态改为「已转 PI」（Completed）。
+    /// </summary>
     /// <remarks>
     /// 转换规则（唯一入口，防重复）：
-    /// 1) 报价单必须已审核（草稿 / 已提交先审核），已作废与已转 PI 均被拒绝；
-    /// 2) 同一报价单只允许生成一张 PI（即使状态被人工改回，也由 PI.QuotationId 兜底拦截）；
-    /// 3) 银行信息取系统参数 PI_BankInfo 默认值，收货人 / 通知人 / 唛头取客户资料默认值，PI 上均可再改。
+    /// 1) 授权：既有「报价单」+「形式发票 PI」菜单授权，且来源 / 目标客户都在实时范围内；
+    /// 2) 报价单必须已审核（草稿 / 已提交先审核），已作废、已完成与已生成 PI 均被拒绝；
+    /// 3) 同一报价单只允许生成一张 PI（即使状态被人工改回，也由 PI.QuotationId 兜底拦截）；
+    /// 4) 银行信息取系统参数 PI_BankInfo 默认值，收货人 / 通知人 / 唛头取客户资料默认值，PI 上均可再改；
+    /// 5) 任一失败整体回滚（不消耗单据号、不落半成品 PI、不改来源状态）。
     /// </remarks>
     [HttpPost("{id:long}/to-pi")]
     public async Task<IActionResult> ToProformaInvoice(long id)
     {
-        var quotation = await Db.Quotations.Include(o => o.Details)
-            .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
-            ?? throw BusinessException.NotFound("报价单不存在");
+        var scope = await QuotationAuthorizationRules
+            .EnsureProformaInvoiceConversionAuthorizedAsync(Db, CurrentUserId());
+        await using var transaction = await QuotationMutationRules.BeginMutationTransactionAsync(Db);
+        try
+        {
+            // ERP-400：先取报价单来源行锁，再锁内权威重读（生命周期 / 明细都以持久化行为准）。
+            var quotation = await ReloadLockedAsync(scope, id, allowSuperseded: true);
+            QuotationAuthorizationRules.EnsureSourceCustomerInScope(scope, quotation.CustomerId);
 
-        var status = GetStatus(quotation);
-        if (status == DocumentStatus.Cancelled)
-            throw BusinessException.RuleConflict("已作废的报价单不能转 PI");
-        if (status == DocumentStatus.Completed)
-            throw BusinessException.RuleConflict("该报价单已完成转换（已转 PI 或已转销售订单），不能重复转换");
-        if (status != DocumentStatus.Approved)
-            throw BusinessException.RuleConflict("报价单未审核，请先审核后再转 PI");
-        if (!quotation.Details.Any(d => !d.IsDeleted))
-            throw BusinessException.RuleConflict("报价单无商品明细，不能转 PI");
+            // 锁内转换资格 + 既有来源 PI 复核（重复生成唯一化：同一报价单至多一张完整 PI）。
+            var existingPi = await QuotationMutationRules.FindDownstreamPiAsync(Db, id);
+            QuotationMutationRules.EnsureProformaInvoiceConversionEligible(quotation, existingPi,
+                QuotationMutationRules.ActiveDetailCount(quotation));
 
-        var generated = await Db.ProformaInvoices.AsNoTracking()
-            .FirstOrDefaultAsync(o => o.QuotationId == id && !o.IsDeleted);
-        if (generated is not null)
-            throw BusinessException.RuleConflict($"该报价单已转为 PI：{generated.PiNo}");
+            var pi = await BuildProformaInvoiceDraftAsync(quotation);
+            QuotationAuthorizationRules.EnsureTargetCustomerInScope(scope, pi.CustomerId);
+            SalesOrderConversion.EnsureQuotationConversionScopeAuthorized(scope, quotation.CustomerId, pi.CustomerId);
 
+            pi.PiNo = await _noService.GenerateAsync(DocumentType.ProformaInvoice);
+            ProformaInvoiceController.Normalize(pi);
+            Db.ProformaInvoices.Add(pi);
+            SetStatus(quotation, DocumentStatus.Completed);   // 报价单 →「已转 PI」
+            await Db.SaveChangesAsync();
+            if (transaction is not null) await transaction.CommitAsync();
+            return Ok(ApiResponse<object>.Success(new { pi.Id, pi.PiNo, QuotationNo = quotation.QuotationNo },
+                "已生成形式发票 PI"));
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            await RollbackAsync(transaction);
+            throw BusinessException.RuleConflict(QuotationMutationRules.StaleRowVersionText);
+        }
+        catch
+        {
+            await RollbackAsync(transaction);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// 构造 PI 草稿（未落库、无单号）：复制报价单可议价字段与明细，并带入客户档案 / 系统参数默认值。
+    /// 单号与合计由调用方在锁内按权威口径生成 / 复算，绝不信任客户端。
+    /// </summary>
+    private async Task<ProformaInvoice> BuildProformaInvoiceDraftAsync(Quotation quotation)
+    {
         BaseCustomer? customer = null;
         if (quotation.CustomerId > 0)
             customer = await Db.BaseCustomers.AsNoTracking()
@@ -304,9 +550,9 @@ public class QuotationController : DocumentControllerBase<Quotation>
             .Where(p => !p.IsDeleted && p.ParamKey == "PI_BankInfo")
             .Select(p => p.ParamValue).FirstOrDefaultAsync() ?? string.Empty;
 
-        var pi = new ProformaInvoice
+        return new ProformaInvoice
         {
-            PiNo = await _noService.GenerateAsync(DocumentType.ProformaInvoice),
+            PiNo = string.Empty,
             PiDate = DateTime.Today,
             QuotationId = quotation.Id,
             QuotationNo = quotation.QuotationNo,
@@ -348,29 +594,28 @@ public class QuotationController : DocumentControllerBase<Quotation>
                     CreatedAt = DateTime.Now
                 }).ToList()
         };
-
-        ProformaInvoiceController.Normalize(pi);
-        Db.ProformaInvoices.Add(pi);
-        SetStatus(quotation, DocumentStatus.Completed);   // 报价单 →「已转 PI」
-        await Db.SaveChangesAsync();
-        return Ok(ApiResponse<object>.Success(new { pi.Id, pi.PiNo, QuotationNo = quotation.QuotationNo },
-            "已生成形式发票 PI"));
     }
 
     /// <summary>
-    /// 带入预填销售订单（ERP-010）：按报价单返回一张**未落库**的销售订单草稿，
+    /// 带入预填销售订单（ERP-010 / ERP-400）：按报价单返回一张**未落库**的销售订单草稿，
     /// 前端据此打开「销售订单 → 新增」表单继续编辑后再保存（保存走 <c>POST /api/sales-orders</c>，服务端复核数量 / 单价 / 合计）。
-    /// 与 <see cref="ToSalesOrder"/> 共用同一套守卫（见 <see cref="SalesOrderConversion.FromQuotationAsync"/>）：
+    /// 授权要求既有「报价单」+「销售订单」菜单，且来源 / 目标客户都在实时范围内；
     /// 只允许已审核报价单，已作废 / 已转 PI / 已生成销售订单均被拒绝，本接口不占用单据号、不写库。
     /// </summary>
     [HttpGet("{id:long}/order-prefill")]
     public async Task<IActionResult> OrderPrefill(long id)
     {
+        var scope = await QuotationAuthorizationRules
+            .EnsureSalesOrderConversionAuthorizedAsync(Db, CurrentUserId());
         var quotation = await Db.Quotations.AsNoTracking().Include(o => o.Details)
             .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
-            ?? throw BusinessException.NotFound("报价单不存在");
+            ?? throw QuotationNotFound();
+        EnsureVisible(scope, quotation);
+        QuotationAuthorizationRules.EnsureSourceCustomerInScope(scope, quotation.CustomerId);
 
         var order = await SalesOrderConversion.FromQuotationAsync(Db, quotation);
+        QuotationAuthorizationRules.EnsureTargetCustomerInScope(scope, order.CustomerId);
+        SalesOrderConversion.EnsureQuotationConversionScopeAuthorized(scope, quotation.CustomerId, order.CustomerId);
         return Ok(ApiResponse<SalesOrderPrefillResult>.Success(new SalesOrderPrefillResult
         {
             SourceType = SalesOrderConversion.QuotationSourceType,
@@ -381,28 +626,58 @@ public class QuotationController : DocumentControllerBase<Quotation>
     }
 
     /// <summary>
-    /// 转为销售订单（ERP-010）：按已审核报价单生成一张销售订单（EF 主子表路径，不走旧版存储过程）。
-    /// 守卫：同一报价单仅生成一张（以销售订单的来源字段为准，见 <see cref="SalesOrderConversion"/>），
-    /// 只新增单据、绝不覆盖既有订单；生成后报价单状态置「已完成」（已转 PI 或已转销售订单）。
+    /// 转为销售订单（ERP-010 / ERP-400）：在「报价单来源行锁 + 原子事务」内按已审核报价单生成一张销售订单
+    /// （EF 主子表路径，不走旧版存储过程）。
+    /// 授权要求既有「报价单」+「销售订单」菜单，且来源 / 目标客户都在实时范围内；
+    /// 同一报价单仅生成一张（以销售订单的来源字段为准），只新增单据、绝不覆盖既有订单；
+    /// 生成后报价单状态置「已完成」（已转 PI 或已转销售订单）；任一失败整体回滚。
     /// </summary>
     [HttpPost("{id:long}/to-order")]
     public async Task<IActionResult> ToSalesOrder(long id)
     {
-        var quotation = await Db.Quotations.Include(o => o.Details)
-            .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
-            ?? throw BusinessException.NotFound("报价单不存在");
-
-        var order = await SalesOrderConversion.FromQuotationAsync(Db, quotation);
-        order.OrderNo = await _noService.GenerateAsync(DocumentType.SalesOrder);
-        Db.SalesOrders.Add(order);
-        SetStatus(quotation, DocumentStatus.Completed);
-        await Db.SaveChangesAsync();
-        return Ok(ApiResponse<SalesOrderConversionResult>.Success(new SalesOrderConversionResult
+        var scope = await QuotationAuthorizationRules
+            .EnsureSalesOrderConversionAuthorizedAsync(Db, CurrentUserId());
+        await using var transaction = await QuotationMutationRules.BeginMutationTransactionAsync(Db);
+        try
         {
-            Id = order.Id,
-            OrderNo = order.OrderNo,
-            SourceNo = quotation.QuotationNo
-        }, "已生成销售订单"));
+            // ERP-400：先取报价单来源行锁，再锁内权威重读（生命周期 / 明细都以持久化行为准）。
+            var quotation = await ReloadLockedAsync(scope, id, allowSuperseded: true);
+            QuotationAuthorizationRules.EnsureSourceCustomerInScope(scope, quotation.CustomerId);
+
+            // 锁内转换资格 + 既有来源订单 / PI 复核（重复生成唯一化：同一报价单至多一张完整销售订单）。
+            var existingOrder = await QuotationMutationRules.FindDownstreamOrderAsync(Db, id);
+            var existingPi = await QuotationMutationRules.FindDownstreamPiAsync(Db, id);
+            QuotationMutationRules.EnsureSalesOrderConversionEligible(quotation, existingOrder, existingPi,
+                QuotationMutationRules.ActiveDetailCount(quotation));
+
+            var order = await SalesOrderConversion.FromQuotationAsync(Db, quotation);
+            QuotationAuthorizationRules.EnsureTargetCustomerInScope(scope, order.CustomerId);
+            SalesOrderConversion.EnsureQuotationConversionScopeAuthorized(scope, quotation.CustomerId, order.CustomerId);
+            // 落库订单必须与本次锁内权威重读完全一致（数量 / 币种 / 汇率 / 合计 / 定金 / 显式 SourceQuotationId）。
+            SalesOrderConversion.EnsureQuotationDraftMatchesSource(quotation, order);
+
+            order.OrderNo = await _noService.GenerateAsync(DocumentType.SalesOrder);
+            Db.SalesOrders.Add(order);
+            SetStatus(quotation, DocumentStatus.Completed);
+            await Db.SaveChangesAsync();
+            if (transaction is not null) await transaction.CommitAsync();
+            return Ok(ApiResponse<SalesOrderConversionResult>.Success(new SalesOrderConversionResult
+            {
+                Id = order.Id,
+                OrderNo = order.OrderNo,
+                SourceNo = quotation.QuotationNo
+            }, "已生成销售订单"));
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            await RollbackAsync(transaction);
+            throw BusinessException.RuleConflict(QuotationMutationRules.StaleRowVersionText);
+        }
+        catch
+        {
+            await RollbackAsync(transaction);
+            throw;
+        }
     }
 
     /// <summary>
@@ -414,11 +689,11 @@ public class QuotationController : DocumentControllerBase<Quotation>
     [HttpGet("{id:long}/print")]
     public async Task<IActionResult> GetPrint(long id)
     {
+        var scope = await QuotationAuthorizationRules.EnsureAuthorizedAsync(Db, CurrentUserId());
         var entity = await Set.AsNoTracking().Include(o => o.Details)
             .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
-            ?? throw BusinessException.NotFound("报价单不存在");
-        if (!(await ResolveScopeAsync()).AllowsCustomer(entity.CustomerId))
-            throw BusinessException.NotFound("报价单不存在");
+            ?? throw QuotationNotFound();
+        EnsureVisible(scope, entity);
         entity.Details = entity.Details.Where(d => !d.IsDeleted).OrderBy(d => d.SortNo).ToList();
         return Ok(ApiResponse<Quotation>.Success(entity));
     }
@@ -438,7 +713,9 @@ public class QuotationController : DocumentControllerBase<Quotation>
         var asOf = (asOfDate ?? DateTime.Today).Date;
         var window = QuotationValidityRules.NormalizeAheadDays(aheadDays);
 
-        var items = await Set.AsNoTracking()
+        // ERP-400：有效期提醒同样先实时授权，并把客户范围下推到 SQL（绝不泄露范围外报价单）。
+        var scope = await QuotationAuthorizationRules.EnsureAuthorizedAsync(Db, CurrentUserId());
+        var items = await QuotationAuthorizationRules.ApplyScope(Set.AsNoTracking(), scope)
             .Where(o => !o.IsDeleted && o.Status != DocumentStatus.Cancelled
                         && o.ValidUntil != null && o.ValidUntil <= asOf.AddDays(window))
             .ToListAsync();
@@ -478,14 +755,4 @@ public class QuotationController : DocumentControllerBase<Quotation>
     /// </summary>
     private Task<HashSet<long>> LoadConvertedQuotationIdsAsync(List<long> quotationIds)
         => QuotationRevisionService.LoadConvertedQuotationIdsAsync(Db, quotationIds);
-
-    /// <summary>
-    /// 历史版本只读守卫（ERP-035）：报价单若已被后续版本取代（链内存在指向它的下一版本）则不允许
-    /// 修改 / 提交 / 审核 / 销审 / 取消 / 删除 —— 源版本作为不可变历史原样保留。
-    /// </summary>
-    private async Task EnsureNotSupersededAsync(long id)
-    {
-        if (await QuotationRevisionService.IsSupersededAsync(Db, id))
-            throw BusinessException.RuleConflict("该报价单已有后续版本，历史版本只读；请在最新版本上继续操作");
-    }
 }

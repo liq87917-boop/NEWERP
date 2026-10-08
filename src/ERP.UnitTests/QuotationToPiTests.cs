@@ -200,7 +200,12 @@ public class QuotationToPiTests
     // ==================== 种子与工厂 ====================
 
     private static QuotationController NewController(ErpDbContext db)
-        => new(db, new DocumentNumberService(db));
+    {
+        // ERP-400：报价单路由现在要求实时启用身份（特权账号豁免菜单授权）。
+        var controller = new QuotationController(db, new DocumentNumberService(db));
+        TestAuth.SetUser(controller, TestAuth.SeedPrivilegedUser(db));
+        return controller;
+    }
 
     /// <summary>种一张报价单（含一行明细：1000 × 1 = 1000）</summary>
     private static (Quotation quotation, QuotationDetail detail) SeedQuotation(

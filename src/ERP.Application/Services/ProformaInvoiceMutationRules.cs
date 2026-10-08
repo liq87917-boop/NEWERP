@@ -45,6 +45,21 @@ public static class ProformaInvoiceMutationRules
     /// </summary>
     public const string SalesOrderRowLockSql = PreLoadingSalesOrderLinkRules.LockSalesOrderRowSql;
 
+    /// <summary>
+    /// 报价单（Quotation）来源行锁语句（与 ERP-400 共用同一把报价单行锁）：跨单据链恒定锁序为
+    /// 「报价单行锁 → PI 行锁 / 销售订单行锁」；PI 侧只读引用该常量，保证「报价单 → PI」与
+    /// 「报价单 → 销售订单」共用同一把报价单行锁，绝不反向获取上游报价单锁。
+    /// </summary>
+    public const string QuotationRowLockSql = QuotationMutationRules.QuotationRowLockSql;
+
+    /// <summary>
+    /// 跨单据链锁序口径文案（接口 / 文档同源）：报价单 → PI / 销售订单的写路径恒定先取报价单行锁，
+    /// 再在 PI 行锁内处理 PI 生命周期，绝不反向获取上游锁。
+    /// </summary>
+    public const string CrossDocumentLockOrderText =
+        "跨单据链确定性锁序：报价单来源行锁（db_owner.Quotations）→ PI 来源行锁（db_owner.ProformaInvoices）→ "
+        + "销售订单来源行锁；任何写路径都不得逆序获取，因此不存在锁环。";
+
     /// <summary>行锁重试次数（乐观并发令牌过期时重读权威行后有界重试；行锁语义 = 阻塞后成功）。</summary>
     public const int RowLockRetryAttempts = 8;
 

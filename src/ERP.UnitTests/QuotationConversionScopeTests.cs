@@ -418,4 +418,67 @@ public class QuotationConversionScopeTests
         Assert.Equal(1, row.CancelledCount);
         Assert.Equal(50m, row.ConversionRate);      // 1 ÷ 2 × 100
     }
+
+    // ==================== 6. 报价单授权 / 客户范围谓词（ERP-400） ====================
+
+    [Fact]
+    public void 报价单范围谓词_特权与进程内恒真_受限账号仅本人客户且无主不可见()
+    {
+        Assert.NotNull(QuotationAuthorizationRules.ScopeFilter(PrivilegedScope));
+        Assert.NotNull(QuotationAuthorizationRules.ScopeFilter(null));
+
+        var restricted = new SalespersonDataScope
+        {
+            IsPrivileged = false, SalesmanId = 5, AllowedCustomerIds = new HashSet<long> { 1, 2 }
+        };
+        var quotations = new List<Quotation>
+        {
+            new() { CustomerId = 1 }, new() { CustomerId = 2 },
+            new() { CustomerId = 3 }, new() { CustomerId = null }
+        }.AsQueryable();
+
+        var visible = QuotationAuthorizationRules.ApplyScope(quotations, restricted)
+            .Select(q => q.CustomerId).ToList();
+        Assert.Equal(new long?[] { 1, 2 }, visible);            // 越界 3 与无主 null 一律排除
+
+        var unmapped = new SalespersonDataScope
+        {
+            IsPrivileged = false, SalesmanId = null, AllowedCustomerIds = new HashSet<long>()
+        };
+        Assert.Empty(QuotationAuthorizationRules.ApplyScope(quotations, unmapped).ToList());
+    }
+
+    [Fact]
+    public void 报价单归属复核_受限账号缺失归属或越界一律fail_closed()
+    {
+        var restricted = new SalespersonDataScope
+        {
+            IsPrivileged = false, SalesmanId = 5, AllowedCustomerIds = new HashSet<long> { 1 }
+        };
+
+        QuotationAuthorizationRules.EnsureStoredCustomerInScope(restricted, 1);
+        Assert.Equal(ErrorCodes.Forbidden,
+            Assert.Throws<BusinessException>(() =>
+                QuotationAuthorizationRules.EnsureStoredCustomerInScope(restricted, 2)).Code);
+        Assert.Equal(ErrorCodes.Forbidden,
+            Assert.Throws<BusinessException>(() =>
+                QuotationAuthorizationRules.EnsureStoredCustomerInScope(restricted, null)).Code);
+        Assert.Equal(ErrorCodes.Forbidden,
+            Assert.Throws<BusinessException>(() =>
+                QuotationAuthorizationRules.EnsureProposedCustomerInScope(restricted, 0)).Code);
+        Assert.Equal(ErrorCodes.Forbidden,
+            Assert.Throws<BusinessException>(() =>
+                QuotationAuthorizationRules.EnsureSourceCustomerInScope(restricted, 9)).Code);
+        Assert.Equal(ErrorCodes.Forbidden,
+            Assert.Throws<BusinessException>(() =>
+                QuotationAuthorizationRules.EnsureTargetCustomerInScope(restricted, 9)).Code);
+        Assert.Equal(ErrorCodes.Forbidden,
+            Assert.Throws<BusinessException>(() =>
+                QuotationAuthorizationRules.EnsureChainCustomerInScope(restricted, new long?[] { 1, 2 })).Code);
+
+        // 进程内调用（null）与特权账号保持既有口径：绝不把空身份当作匿名或管理员而额外放行。
+        QuotationAuthorizationRules.EnsureStoredCustomerInScope(null, null);
+        QuotationAuthorizationRules.EnsureStoredCustomerInScope(PrivilegedScope, null);
+        QuotationAuthorizationRules.EnsureChainCustomerInScope(restricted, new long?[] { 1, 1 });
+    }
 }

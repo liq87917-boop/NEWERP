@@ -90,6 +90,60 @@ public static class SalesOrderConversion
             throw BusinessException.RuleConflict(DraftMismatchText);
     }
 
+    /// <summary>
+    /// 报价单转换范围守卫（ERP-400）：报价单 → PI / 销售订单在落库任何目标单据、消耗任何单据号<b>之前</b>，
+    /// 独立复核<b>来源报价单客户</b>与<b>目标客户</b>都在当前账号实时客户数据范围内 ——
+    /// 来源报价单可见绝不等于目标客户获得授权；受限账号缺失归属 / 越界一律 fail closed。
+    /// <c>null</c> 范围（进程内调用）保持既有内部口径，绝不把空身份当作匿名或管理员。
+    /// </summary>
+    public static void EnsureQuotationConversionScopeAuthorized(SalespersonDataScope? scope,
+        long? sourceCustomerId, long? targetCustomerId)
+    {
+        QuotationAuthorizationRules.EnsureSourceCustomerInScope(scope, sourceCustomerId);
+        QuotationAuthorizationRules.EnsureTargetCustomerInScope(scope, targetCustomerId);
+    }
+
+    /// <summary>
+    /// 报价单转换结果与来源报价单的权威重读不一致时的拒绝文案（ERP-400）。
+    /// </summary>
+    public const string QuotationDraftMismatchText =
+        "转换结果与来源报价单的权威重读不一致（来源留痕 / 币种 / 汇率 / 明细数量 / 合计 / 定金）：原子拒绝，"
+        + "绝不写入与来源不符的销售订单";
+
+    /// <summary>
+    /// 报价单转换结果的权威一致性复核（ERP-400）：落库的销售订单必须**完全**来自本次锁内权威重读的报价单 ——
+    /// 显式 <c>SourceQuotationId</c> / 来源报价单号、币种、汇率、明细数量合计、合计金额与定金口径逐项一致；
+    /// 任一不一致即判定为陈旧 / 撕裂证据并原子拒绝（绝不写入与来源不符的订单，也绝不改写来源报价单）。
+    /// <para>定金口径与销售订单权威算法（<see cref="SalesOrderAmountRules.Calculate"/>）一致：
+    /// <c>定金金额 = 合计 × 定金比例 %</c>，不做额外取整。</para>
+    /// </summary>
+    public static void EnsureQuotationDraftMatchesSource(Quotation quotation, SalesOrder order)
+    {
+        ArgumentNullException.ThrowIfNull(quotation);
+        ArgumentNullException.ThrowIfNull(order);
+
+        if (order.SourceQuotationId != quotation.Id
+            || !string.Equals(order.SourceQuotationNo ?? string.Empty, Clamp(quotation.QuotationNo, 50), StringComparison.Ordinal)
+            || order.Currency != quotation.Currency)
+            throw BusinessException.RuleConflict(QuotationDraftMismatchText);
+
+        var expectedRate = quotation.ExchangeRate > 0 ? quotation.ExchangeRate : DefaultExchangeRate;
+        if (order.ExchangeRate != expectedRate)
+            throw BusinessException.RuleConflict(QuotationDraftMismatchText);
+
+        var activeDetails = quotation.Details.Where(d => !d.IsDeleted).ToList();
+        if (order.Details.Sum(d => d.Quantity) != activeDetails.Sum(d => d.Quantity))
+            throw BusinessException.RuleConflict(QuotationDraftMismatchText);
+
+        var expectedAmount = activeDetails.Sum(d => d.Quantity * d.UnitPrice);
+        if (order.TotalAmount != expectedAmount)
+            throw BusinessException.RuleConflict(QuotationDraftMismatchText);
+
+        var expectedDeposit = order.TotalAmount * order.DepositRatio / 100m;
+        if (order.DepositAmount != expectedDeposit)
+            throw BusinessException.RuleConflict(QuotationDraftMismatchText);
+    }
+
     /// <summary>汇率缺省值：来源单据汇率为 0（未维护）时按 1 处理，避免销售订单金额折算异常</summary>
     private const decimal DefaultExchangeRate = 1m;
 

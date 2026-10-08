@@ -1,5 +1,6 @@
 using ERP.Application.Common;
 using ERP.Domain.Entities;
+using ERP.Domain.Enums;
 
 namespace ERP.Application.Services;
 
@@ -43,5 +44,15 @@ public static class QuotationRevisionRules
         if (quotationNo.Length > MaxQuotationNoLength)
             throw BusinessException.RuleConflict(
                 $"版本单号「{quotationNo}」超过 {MaxQuotationNoLength} 个字符，无法生成版本号，请先整理根单号");
+    }
+
+    /// <summary>
+    /// 版本来源资格（纯规则，ERP-400）：已作废报价单不能创建新版本；缺失 / 已删除来源由调用方在锁内
+    /// 权威重读后按「不存在」拒绝。历史版本（已被后续版本取代）仍允许创建新版本分支（既有 ERP-035 口径不变）。
+    /// </summary>
+    public static void EnsureSourceEligible(DocumentStatus status)
+    {
+        if (status == DocumentStatus.Cancelled)
+            throw BusinessException.RuleConflict("已作废的报价单不能创建新版本");
     }
 }

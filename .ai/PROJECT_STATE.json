@@ -1,11 +1,10 @@
 {
   "schema_version": 2,
   "project": "NEWERP",
-  "updated_at": "2026-10-08T18:42:17.803572Z",
+  "updated_at": "2026-10-08T18:45:25.514250Z",
   "phase": "ready",
   "current_task": null,
   "queue": [
-    "ERP-400",
     "ERP-401",
     "ERP-402",
     "ERP-403"
@@ -383,39 +382,36 @@
     "ERP-396",
     "ERP-397",
     "ERP-398",
-    "ERP-399"
+    "ERP-399",
+    "ERP-400"
   ],
   "blocked": [],
   "last_build": {
-    "task": "ERP-399",
+    "task": "ERP-400",
     "profile": "safe",
     "status": "passed",
     "exit_code": 0,
-    "log": ".ai\\logs\\ERP-399-validation-1.log",
-    "at": "2026-10-08T18:26:56.112800Z"
+    "log": ".ai\\logs\\ERP-400-validation-2.log",
+    "at": "2026-10-08T18:45:24.867255Z"
   },
-  "last_error": {
-    "task": "ERP-400",
-    "kind": "automatic_repair_pending",
-    "summary": "Path guard failed:\noutside allowed_paths: TestResults/erp400.trx"
-  },
+  "last_error": null,
   "last_deepseek_fix": {
     "task": "ERP-400",
-    "attempts": 3,
-    "status": "retry_pending",
-    "at": "2026-10-08T18:42:17.438285Z"
+    "attempt": 2,
+    "model": "deepseek-flash",
+    "exit_code": 0,
+    "finished_at": "2026-10-08T18:44:48.199031Z"
   },
   "git_sync": {
     "branch": "main",
-    "local_sha": "0f50904",
-    "status": "synced",
-    "ahead": 0,
+    "local_sha": "a1ec816",
+    "status": "pending",
+    "ahead": 1,
     "behind": 0,
-    "last_attempt_at": "2026-10-08T18:27:01.660494Z",
+    "last_attempt_at": "2026-10-08T18:45:25.387813Z",
     "last_error": null
   },
   "next_recommended_tasks": [
-    "ERP-400",
     "ERP-401",
     "ERP-402",
     "ERP-403"
@@ -423,7 +419,5 @@
   "runner": {
     "status": "stopped",
     "pid": null
-  },
-  "blocker": null,
-  "finish_reason": "deepseek_supervisor_recovery"
+  }
 }
