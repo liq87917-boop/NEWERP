@@ -25,12 +25,58 @@ public class SalesOrderController : DocumentControllerBase<SalesOrder>
         _noService = noService;
     }
 
+    /// <summary>
+    /// ERP-413：是否必须执行实时授权。真实 HTTP 请求（MVC 绑定，<c>Request.Path</c> 已赋值）一律执行；
+    /// 进程内直接调用（历史单元测试 / 内部派生读取，无 HTTP 请求管线）仅在携带当前登录身份时执行。
+    /// 只对「既无任何登录身份、又不在 HTTP 请求管线内」的调用免授权：这类调用不可能由外部请求到达，
+    /// 也绝不把缺失身份当作管理员（真实匿名请求因处于请求管线内一律 fail closed）。
+    /// </summary>
+    private bool RequiresLiveAuthorization()
+    {
+        var http = ControllerContext?.HttpContext;
+        if (http is null) return false;
+        return http.Request.Path.HasValue || CurrentUserId() is not null;
+    }
+
+    /// <summary>
+    /// ERP-413 执行证据入口授权（实时身份 + 既有「销售订单」菜单 + 权威客户范围）：
+    /// 进程内无身份直调返回 <c>null</c>（免授权，保持既有单元测试口径）。
+    /// </summary>
+    private async Task<SalespersonDataScope?> EnsureExecutionEvidenceAuthorizedAsync()
+        => RequiresLiveAuthorization()
+            ? await SalesOrderExecutionAuthorizationRules.EnsureReadAuthorizedAsync(Db, CurrentUserId())
+            : null;
+
+    /// <summary>ERP-413 单张订单证据的非披露归属复核（<paramref name="scope"/> 为 null 表示进程内免授权调用）。</summary>
+    private async Task EnsureOrderEvidenceAuthorizedAsync(long id, SalespersonDataScope? scope)
+    {
+        if (scope is null) return;
+        await SalesOrderExecutionAuthorizationRules.EnsureOrderAllowedAsync(Db, scope, id);
+    }
+
+    /// <summary>ERP-413 批量显式 Id 证据的整批非披露归属复核（<paramref name="scope"/> 为 null 或未请求任何订单时直接放行）。</summary>
+    private async Task EnsureOrdersEvidenceAuthorizedAsync(IReadOnlyCollection<long> orderIds, SalespersonDataScope? scope)
+    {
+        if (scope is null || orderIds.Count == 0) return;
+        await SalesOrderExecutionAuthorizationRules.EnsureOrdersAllowedAsync(Db, scope, orderIds);
+    }
+
+    /// <summary>
+    /// ERP-413 列表 / 详情入口的实时身份与权威范围（缺失 / 已删除按未认证拒绝，已禁用按权限不足拒绝）；
+    /// 进程内无身份直调返回 <c>null</c>（免授权，保持既有单元测试口径）。列表 / 详情沿用既有 ERP-097 范围口径，
+    /// 不额外要求模块菜单（执行证据入口才要求）。
+    /// </summary>
+    private async Task<SalespersonDataScope?> ResolveListDetailScopeAsync()
+        => RequiresLiveAuthorization()
+            ? await SalesOrderExecutionAuthorizationRules.EnsureLiveIdentityAsync(Db, CurrentUserId())
+            : null;
+
     /// <summary>分页查询</summary>
     [HttpGet]
     public async Task<IActionResult> GetPaged([FromQuery] PageQuery query, [FromQuery] DocumentStatus? status)
     {
         query.Normalize();
-        var scope = await ResolveScopeAsync();
+        var scope = await ResolveListDetailScopeAsync() ?? await ResolveScopeAsync();
         var source = SalespersonDataScopeService.FilterByCustomer(
             Set.AsNoTracking().Where(o => !o.IsDeleted), scope, o => o.CustomerId);
         if (status.HasValue) source = source.Where(o => o.Status == status.Value);
@@ -48,42 +94,62 @@ public class SalesOrderController : DocumentControllerBase<SalesOrder>
             new PagedResult<SalesOrder> { Items = items, Total = total, Page = query.Page, PageSize = query.PageSize }));
     }
 
-    /// <summary>详情</summary>
+    /// <summary>详情（ERP-413：实时身份 + 持久化客户归属先于读取；范围外用与不存在同一非披露错误）。</summary>
     [HttpGet("{id:long}")]
     public async Task<IActionResult> GetById(long id)
     {
+        var scope = await ResolveListDetailScopeAsync();
+        if (scope is not null)
+            await SalesOrderExecutionAuthorizationRules.EnsureOrderAllowedAsync(Db, scope, id);
+
         var entity = await Set.AsNoTracking().Include(o => o.Details)
             .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
-            ?? throw BusinessException.NotFound("销售订单不存在");
-        if (!(await ResolveScopeAsync()).AllowsCustomer(entity.CustomerId))
-            throw BusinessException.NotFound("销售订单不存在");
+            ?? throw BusinessException.NotFound(SalesOrderExecutionAuthorizationRules.NotFoundText);
+
+        if (scope is null && !(await ResolveScopeAsync()).AllowsCustomer(entity.CustomerId))
+            throw BusinessException.NotFound(SalesOrderExecutionAuthorizationRules.NotFoundText);
+
         return Ok(ApiResponse<SalesOrder>.Success(entity));
     }
 
-    /// <summary>从现有订单、销售出库、出口单证和客诉记录派生只读执行时间线。</summary>
+    /// <summary>从现有订单、销售出库、出口单证和客诉记录派生只读执行时间线（ERP-413：先实时授权再派生）。</summary>
     [HttpGet("{id:long}/timeline")]
     public async Task<IActionResult> Timeline(long id)
-        => Ok(ApiResponse<List<OrderTimelineEvent>>.Success(
+    {
+        var scope = await EnsureExecutionEvidenceAuthorizedAsync();
+        await EnsureOrderEvidenceAuthorizedAsync(id, scope);
+        return Ok(ApiResponse<List<OrderTimelineEvent>>.Success(
             await OrderExecutionTimeline.ForSalesOrderAsync(Db, id)));
+    }
 
     /// <summary>
     /// 财务核对（ERP-028，只读派生）：按既有引用字段把本单与定金 / 货款申请单、付款单、费用单、客诉单、
     /// 收款单与结算单关联；只有「权威引用 + 已审核 + 币种一致」的记录计入金额，其余仅列出，金额未知为 null（不推断）。
+    /// <para>ERP-413：证据派生之前先复核实时身份 / 既有「销售订单」菜单 / 权威客户范围。</para>
     /// </summary>
     [HttpGet("{id:long}/finance-reconciliation")]
     public async Task<IActionResult> FinanceReconciliation(long id)
-        => Ok(ApiResponse<OrderFinanceReconciliationView>.Success(
+    {
+        var scope = await EnsureExecutionEvidenceAuthorizedAsync();
+        await EnsureOrderEvidenceAuthorizedAsync(id, scope);
+        return Ok(ApiResponse<OrderFinanceReconciliationView>.Success(
             await OrderFinanceReconciliation.ForSalesOrderAsync(Db, id)));
+    }
 
     /// <summary>
     /// 出货与收款进度（ERP-032，只读派生）：出货数量按「以本单为来源（SalesOrderId）、未删除、已审核」的销售出库单明细派生
     /// （待提交 / 已提交只单列，已驳回 / 已取消不计入）；收款链接复用 ERP-028 的既有引用字段（定金 / 货款申请单的 SalesOrderId），
     /// 只有「已审核 + 币种一致」计入金额，无权威引用或命中派生上限时金额为 null（未知，不用 0 顶替）。
+    /// <para>ERP-413：证据派生之前先复核实时身份 / 既有「销售订单」菜单 / 权威客户范围。</para>
     /// </summary>
     [HttpGet("{id:long}/progress")]
     public async Task<IActionResult> Progress(long id)
-        => Ok(ApiResponse<SalesOrderProgressView>.Success(
+    {
+        var scope = await EnsureExecutionEvidenceAuthorizedAsync();
+        await EnsureOrderEvidenceAuthorizedAsync(id, scope);
+        return Ok(ApiResponse<SalesOrderProgressView>.Success(
             await SalesOrderProgress.ForSalesOrderAsync(Db, id)));
+    }
 
     /// <summary>
     /// 销售交期异常工作台（ERP-102，只读派生、分页有界）：按客户 + 显式 as-of 基准日过滤销售订单，
@@ -100,11 +166,16 @@ public class SalesOrderController : DocumentControllerBase<SalesOrder>
     /// 毛出货 / 有效退货 / 净出货数量，并把未审核、客户不一致、来源已删除、来源不属于本单、未关联来源
     /// 的退货作为异常单列（绝不推断为扣减）；超退净额为负、不静默钳制；证据不完整为未知。
     /// <para>只读：不写任何表、不执行迁移 / 生产 SQL / 真实数据库操作 / 部署，不改写订单任何已登记进度。</para>
+    /// <para>ERP-413：证据派生之前先复核实时身份 / 既有「销售订单」菜单 / 权威客户范围。</para>
     /// </summary>
     [HttpGet("{id:long}/return-impact")]
     public async Task<IActionResult> ReturnImpact(long id)
-        => Ok(ApiResponse<SalesOrderReturnImpactView>.Success(
+    {
+        var scope = await EnsureExecutionEvidenceAuthorizedAsync();
+        await EnsureOrderEvidenceAuthorizedAsync(id, scope);
+        return Ok(ApiResponse<SalesOrderReturnImpactView>.Success(
             await SalesOrderReturnImpact.ForOrderAsync(Db, id)));
+    }
 
     /// <summary>
     /// 销售订单出货 / 财务进度报表（ERP-032，只读派生、分页有界）：按「客户 + 币种」分组汇总已按权威口径派生的出货数量与收款链接金额，
@@ -138,22 +209,38 @@ public class SalesOrderController : DocumentControllerBase<SalesOrder>
     /// <para>本接口<strong>不是</strong>银行入账凭证、<strong>不是</strong>应收余额或货款核销、<strong>不是</strong>客户对账单，
     /// 也<strong>不是</strong>账龄表：不判断是否已收款 / 已结清 / 逾期，且<strong>不写库</strong>
     /// （不改销售订单、收款单、客户信用、发票、库存、装柜单证、佣金或费用退税记录）。</para>
+    /// <para>ERP-413：证据派生之前先复核实时身份 / 既有「销售订单」菜单 / 权威客户范围。</para>
     /// </summary>
     [HttpGet("{id:long}/receipt-evidence")]
     public async Task<IActionResult> ReceiptEvidence(long id)
-        => Ok(ApiResponse<SalesOrderReceiptEvidenceDetail>.Success(
+    {
+        var scope = await EnsureExecutionEvidenceAuthorizedAsync();
+        await EnsureOrderEvidenceAuthorizedAsync(id, scope);
+        return Ok(ApiResponse<SalesOrderReceiptEvidenceDetail>.Success(
             await SalesOrderReceiptEvidence.ForOrderAsync(Db, id)));
+    }
 
     /// <summary>
     /// 一批销售订单的收款引用证据汇总（ERP-054，**只读派生**、有界批量）：列表页按页取 Id 一次请求取回本页汇总，
     /// 单次最多 200 张订单，绝不逐行查库；命中行数上限时金额与计数按「未知」返回（不用 0 顶替）。
     /// <para>口径与单张详情一致：只统计有效（未作废）引用行，历史 / 无效 / 无法确认证据单独分桶，
     /// 绝不并入有效合计，也绝不换算、合并或改派到其他订单。</para>
+    /// <para>ERP-413：派生之前先复核实时身份 / 既有「销售订单」菜单 / 权威客户范围；显式 Id 混入任何
+    /// 不存在 / 已删除 / 范围外订单即**整批**返回同一非披露错误，绝不返回部分行或计数。</para>
     /// </summary>
     [HttpGet("receipt-evidence-summaries")]
     public async Task<IActionResult> ReceiptEvidenceSummaries([FromQuery] SalesOrderReceiptEvidenceQuery query)
-        => Ok(ApiResponse<SalesOrderReceiptEvidenceBatch>.Success(
+    {
+        var scope = await EnsureExecutionEvidenceAuthorizedAsync();
+        if (scope is not null)
+        {
+            query.Normalize();
+            await EnsureOrdersEvidenceAuthorizedAsync(query.OrderIds, scope);
+        }
+
+        return Ok(ApiResponse<SalesOrderReceiptEvidenceBatch>.Success(
             await SalesOrderReceiptEvidence.ForOrdersAsync(Db, query)));
+    }
 
     /// <summary>
     /// 单张销售订单的销项发票证据（ERP-056，**只读派生**）：只按 ERP-055 的持久化发票证据行
@@ -166,22 +253,38 @@ public class SalesOrderController : DocumentControllerBase<SalesOrder>
     /// <strong>不是</strong>应收余额或收款核销、<strong>不是</strong>客户对账单，也<strong>不是</strong>账龄表：
     /// 不判断是否已开票 / 已收款 / 已结清 / 逾期，且<strong>不写库</strong>
     /// （不改销售订单、发票证据与分摊行、收款单与收款引用行、客户信用、库存、装柜单证、佣金或费用退税记录）。</para>
+    /// <para>ERP-413：证据派生之前先复核实时身份 / 既有「销售订单」菜单 / 权威客户范围。</para>
     /// </summary>
     [HttpGet("{id:long}/invoice-evidence")]
     public async Task<IActionResult> InvoiceEvidence(long id)
-        => Ok(ApiResponse<SalesOrderInvoiceEvidenceDetail>.Success(
+    {
+        var scope = await EnsureExecutionEvidenceAuthorizedAsync();
+        await EnsureOrderEvidenceAuthorizedAsync(id, scope);
+        return Ok(ApiResponse<SalesOrderInvoiceEvidenceDetail>.Success(
             await SalesOrderInvoiceEvidence.ForOrderAsync(Db, id)));
+    }
 
     /// <summary>
     /// 一批销售订单的销项发票证据汇总（ERP-056，**只读派生**、有界批量）：列表页按页取 Id 一次请求取回本页汇总，
     /// 单次最多 200 张订单，绝不逐行查库；命中行数上限时金额与计数按「未知」返回（不用 0 顶替）。
     /// <para>口径与单张详情一致：只统计已登记（未作废）发票下的未删除分摊行，草稿 / 历史 / 无效 / 无法确认证据
     /// 单独分桶，绝不并入有效合计，也绝不换算、合并或改派到其他订单。</para>
+    /// <para>ERP-413：派生之前先复核实时身份 / 既有「销售订单」菜单 / 权威客户范围；显式 Id 混入任何
+    /// 不存在 / 已删除 / 范围外订单即**整批**返回同一非披露错误，绝不返回部分行或计数。</para>
     /// </summary>
     [HttpGet("invoice-evidence-summaries")]
     public async Task<IActionResult> InvoiceEvidenceSummaries([FromQuery] SalesOrderInvoiceEvidenceQuery query)
-        => Ok(ApiResponse<SalesOrderInvoiceEvidenceBatch>.Success(
+    {
+        var scope = await EnsureExecutionEvidenceAuthorizedAsync();
+        if (scope is not null)
+        {
+            query.Normalize();
+            await EnsureOrdersEvidenceAuthorizedAsync(query.OrderIds, scope);
+        }
+
+        return Ok(ApiResponse<SalesOrderInvoiceEvidenceBatch>.Success(
             await SalesOrderInvoiceEvidence.ForOrdersAsync(Db, query)));
+    }
 
 
     /// <summary>
