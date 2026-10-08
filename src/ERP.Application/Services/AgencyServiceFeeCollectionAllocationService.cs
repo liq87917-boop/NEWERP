@@ -25,6 +25,9 @@ namespace ERP.Application.Services;
 /// 联系客户、<strong>不</strong>调用任何外部服务，也<strong>不</strong>改写收款单（含状态 / 金额 / 币种 / 付款方式 /
 /// 银行账户 / 备注）、对账单证据（含合计 / 状态 / 登记人）、ERP-069 协议证据、客户主数据、销售订单、
 /// 装柜与装柜清单、单证、发票、库存与库存成本、库存流水、费用与退税、结算与余额记录。</para>
+/// <para>ERP-383 锁序审计：本服务只取<b>收款单行锁</b>（ERP-383 唯一全局锁序第 3 段：来源销售订单行 → 客户销项发票行 →
+/// 客户收款单行 → 引用 / 分摊 / 证据行），登记 / 显式作废都先取收款单行锁再读写分摊行；本服务<strong>不</strong>获取
+/// 上游销售订单行 / 客户销项发票行锁，因此与 ERP-347 销售订单取消、ERP-383 客户销项发票模块都不构成反向加锁。</para>
 /// </summary>
 public static class AgencyServiceFeeCollectionAllocationService
 {

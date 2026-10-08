@@ -28,6 +28,15 @@ public static class SalesOrderCancellationRules
     /// <summary>取消所需菜单的中文文案（与既有菜单名一致）</summary>
     public const string RequiredMenuText = "销售订单";
 
+    /// <summary>
+    /// ERP-383 唯一全局锁序与本模块的锁序审计：来源销售订单行（Id 升序，本取消护栏在可串行化事务内以
+    /// <c>UPDLOCK, HOLDLOCK</c> 取得该行）→ 客户销项发票行 → 客户收款单行 → 引用 / 分摊 / 证据行。
+    /// 本类只做纯判定（不落库、不取行锁），行锁由 <c>SalesOrderController.Cancel</c> 在事务内取得；
+    /// 客户销项发票模块（ERP-383）与收款单模块（ERP-349 / ERP-378）都只在本行锁之后获取下游锁，绝不反向加锁。
+    /// </summary>
+    public const string GlobalLockOrderText = CustomerSalesInvoiceConcurrencyRules.GlobalLockOrderText
+        + "销售订单取消在可串行化事务内先取来源销售订单行锁（第 1 段），发票 / 收款单模块只在其后获取下游锁。";
+
     /// <summary>取消护栏口径文案（接口 / 文档同源）</summary>
     public const string RuleText =
         "取消销售订单前，先校验当前身份、销售订单（sales-order）菜单授权与客户数据范围；" +

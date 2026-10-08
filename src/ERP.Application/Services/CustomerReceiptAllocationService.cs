@@ -26,6 +26,9 @@ namespace ERP.Application.Services;
 /// 审批 / 执行状态、金额、币种、付款方式、银行账户、客户或备注，<strong>不</strong>改写销售订单状态、出货进度、
 /// 金额与明细、交期与合同字段，<strong>不</strong>改写客户信用状态与信用额度、发票记录、库存与库存成本、
 /// 库存流水、装柜与单证、佣金 / 回佣、费用与退税记录，也<strong>不</strong>执行任何收款、记账、核销、结算或催收动作。</para>
+/// <para>ERP-383 锁序审计：本服务只取<b>收款单行锁</b>（ERP-383 唯一全局锁序第 3 段：来源销售订单行 → 客户销项发票行 →
+/// 客户收款单行 → 引用 / 分摊 / 证据行），在登记 / 显式作废时先取收款单行锁再读写引用行；本服务<strong>不</strong>获取
+/// 上游销售订单行 / 客户销项发票行锁，因此与 ERP-347 销售订单取消、ERP-383 客户销项发票模块都不构成反向加锁。</para>
 /// </summary>
 public static class CustomerReceiptAllocationService
 {

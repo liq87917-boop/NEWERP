@@ -4,6 +4,7 @@ using ERP.Application.Interfaces;
 using ERP.Domain.Entities;
 using ERP.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
+using System.Linq.Expressions;
 
 namespace ERP.Application.Services;
 
@@ -84,6 +85,14 @@ public static class CustomerSalesInvoiceEvidenceService
         ArgumentNullException.ThrowIfNull(dto);
         if (invoiceId <= 0) throw BusinessException.InvalidParameter("请选择要修改的发票");
 
+        // ERP-383：在同一事务内先取本发票行锁，再在锁内重读权威状态 / 客户 / 币种与已持久化分摊口径，
+        // 把同单并发的「草稿修改 / 分摊替换 / 登记 / 作废」与「收款单 → 发票分摊登记 / 作废」串行化（绝不丢失更新）。
+        await using var transaction = CustomerSalesInvoiceConcurrencyRules.IsRelationalProvider(db)
+            ? await db.Database.BeginTransactionAsync()
+            : null;
+
+        await CustomerSalesInvoiceConcurrencyRules.LockInvoiceRowAsync(db, invoiceId);
+
         var invoice = await LoadAsync(db, invoiceId);
         CustomerSalesInvoiceEvidenceRules.EnsureEditable(invoice.Status, IdentityOf(invoice));
 
@@ -124,6 +133,7 @@ public static class CustomerSalesInvoiceEvidenceService
         invoice.UpdatedAt = DateTime.Now;
 
         await db.SaveChangesAsync();
+        if (transaction is not null) await transaction.CommitAsync();
 
         return await MapAsync(db, invoice);
     }
@@ -148,7 +158,8 @@ public static class CustomerSalesInvoiceEvidenceService
     /// 因此「只看未分摊」这类筛选不会因分页而漏行；本页分摊行一次批量装载（无逐行数据库查询）。</para>
     /// </summary>
     public static async Task<PagedResult<CustomerSalesInvoiceEvidenceDto>> ListAsync(
-        IErpDbContext db, CustomerSalesInvoiceEvidenceQuery query, HashSet<long>? allowedCustomerIds = null)
+        IErpDbContext db, CustomerSalesInvoiceEvidenceQuery query, HashSet<long>? allowedCustomerIds = null,
+        Expression<Func<CustomerSalesInvoiceEvidence, bool>>? scopePredicate = null)
     {
         ArgumentNullException.ThrowIfNull(db);
         ArgumentNullException.ThrowIfNull(query);
@@ -163,6 +174,8 @@ public static class CustomerSalesInvoiceEvidenceService
         var keyword = CustomerSalesInvoiceEvidenceRules.NormalizeKeyword(query.Keyword);
 
         var source = db.CustomerSalesInvoiceEvidences.AsNoTracking().Where(x => !x.IsDeleted);
+        // ERP-383：身份 / 菜单 / 权威来源范围谓词在**计数与分页之前**下推数据库（绝不先查全量再内存过滤）。
+        if (scopePredicate is not null) source = source.Where(scopePredicate);
         if (allowedCustomerIds is not null) source = source.Where(x => allowedCustomerIds.Contains(x.CustomerId));
         if (query.CustomerId is not null) source = source.Where(x => x.CustomerId == query.CustomerId.Value);
         if (invoiceType is not null) source = source.Where(x => x.InvoiceType == invoiceType);
@@ -314,7 +327,8 @@ public static class CustomerSalesInvoiceEvidenceService
     /// </summary>
     public static async Task<List<CustomerSalesInvoiceTradeDocumentCandidateDto>> ListTradeDocumentCandidatesAsync(
         IErpDbContext db, string? keyword,
-        int take = CustomerSalesInvoiceEvidenceRules.MaxTradeDocumentCandidates)
+        int take = CustomerSalesInvoiceEvidenceRules.MaxTradeDocumentCandidates,
+        Expression<Func<TradeDocument, bool>>? scopePredicate = null)
     {
         ArgumentNullException.ThrowIfNull(db);
 
@@ -324,6 +338,8 @@ public static class CustomerSalesInvoiceEvidenceService
 
         var source = db.TradeDocuments.AsNoTracking()
             .Where(d => !d.IsDeleted && d.DocType == TradeDocumentItemRules.CommercialInvoiceDocType);
+        // ERP-383：身份 / 菜单 / 权威单证归属范围谓词在**取数之前**下推数据库（受限账号不泄露范围外单证）。
+        if (scopePredicate is not null) source = source.Where(scopePredicate);
         if (keywordText.Length > 0)
             source = source.Where(d => d.DocNo.Contains(keywordText) || d.SalesOrderNo.Contains(keywordText));
 
@@ -390,6 +406,25 @@ public static class CustomerSalesInvoiceEvidenceService
         IErpDbContext db, long invoiceId, CustomerSalesInvoiceAllocationSaveRequest? request)
     {
         ArgumentNullException.ThrowIfNull(db);
+        if (invoiceId <= 0) throw BusinessException.InvalidParameter("请选择要维护分摊的发票");
+
+        // ERP-383 发现阶段（只读、不加锁）：把「已存储来源 + 拟提议来源」的订单合并后按 Id 升序加锁，
+        // 使并发多张发票对同一销售订单的容量竞争在同一把订单行锁上串行化；
+        // 随后再取本发票行锁（发票容量 ≠ 订单容量，发票行是「发票 → 订单」整体替换的唯一汇聚点）。
+        var storedOrderIds = await db.CustomerSalesInvoiceAllocations.AsNoTracking()
+            .Where(a => !a.IsDeleted && a.CustomerSalesInvoiceEvidenceId == invoiceId)
+            .Select(a => a.SalesOrderId)
+            .ToListAsync();
+        var proposedOrderIds = (request?.Lines ?? new List<CustomerSalesInvoiceAllocationSaveDto>())
+            .Select(l => l.SalesOrderId);
+
+        await using var transaction = CustomerSalesInvoiceConcurrencyRules.IsRelationalProvider(db)
+            ? await db.Database.BeginTransactionAsync()
+            : null;
+
+        await CustomerSalesInvoiceConcurrencyRules.LockSalesOrderRowsAsync(db, storedOrderIds.Concat(proposedOrderIds));
+        await CustomerSalesInvoiceConcurrencyRules.LockInvoiceRowAsync(db, invoiceId);
+
         var invoice = await LoadAsync(db, invoiceId);
         var plan = await BuildAllocationPlanAsync(db, invoice, request);
 
@@ -402,6 +437,7 @@ public static class CustomerSalesInvoiceEvidenceService
 
         invoice.UpdatedAt = DateTime.Now;
         await db.SaveChangesAsync();
+        if (transaction is not null) await transaction.CommitAsync();
 
         return await MapAsync(db, invoice);
     }
@@ -460,17 +496,9 @@ public static class CustomerSalesInvoiceEvidenceService
                 .Where(o => orderIds.Contains(o.Id)).ToListAsync())
             .ToDictionary(o => o.Id);
 
-        var linkedByOthers = (await (from allocation in db.CustomerSalesInvoiceAllocations.AsNoTracking()
-                                     join owner in db.CustomerSalesInvoiceEvidences.AsNoTracking()
-                                         on allocation.CustomerSalesInvoiceEvidenceId equals owner.Id
-                                     where !allocation.IsDeleted && !owner.IsDeleted
-                                           && owner.Status != CustomerSalesInvoiceEvidenceRules.StatusVoided
-                                           && owner.Id != invoice.Id
-                                           && orderIds.Contains(allocation.SalesOrderId)
-                                     select new { allocation.SalesOrderId, allocation.AllocatedAmount })
-                                 .ToListAsync())
-            .GroupBy(r => r.SalesOrderId)
-            .ToDictionary(g => g.Key, g => g.Sum(r => r.AllocatedAmount));
+        // 其他有效（未作废）发票已占用该订单的金额（一次查询）：既用于预览上下文展示，
+        // 也用于 ERP-383「并发发票不得合计超过来源销售订单金额」的校验口径。
+        var linkedByOthers = await LoadOtherInvoiceLinkedAmountsAsync(db, invoice.Id, orderIds);
 
         var rows = new List<CustomerSalesInvoiceAllocation>();
         var previewLines = new List<CustomerSalesInvoiceAllocationPreviewLineDto>();
@@ -493,6 +521,11 @@ public static class CustomerSalesInvoiceEvidenceService
                 throw BusinessException.RuleConflict(
                     $"分摊金额合计 {total} 超过发票含税总额 {invoice.GrossAmount} {currency}："
                     + "请调整分摊金额（发票允许部分分摊，未分摊部分保留为未分摊金额）");
+
+            // ERP-383：来源销售订单容量（同币种、不换算、不重复计算）
+            // = 其他未作废发票已分摊 + 本次分摊 ≤ 订单总额；并发多张发票在同一订单行锁上串行化。
+            var othersLinked = linkedByOthers.TryGetValue(order.Id, out var others) ? others : 0m;
+            EnsureOrderInvoiceCapacity(order, othersLinked, amount, currency);
 
             var remark = CustomerSalesInvoiceEvidenceRules.NormalizeRemark(line.Remark);
             sort++;
@@ -547,6 +580,22 @@ public static class CustomerSalesInvoiceEvidenceService
     public static async Task<CustomerSalesInvoiceEvidenceDto> RecordAsync(IErpDbContext db, long invoiceId)
     {
         ArgumentNullException.ThrowIfNull(db);
+        if (invoiceId <= 0) throw BusinessException.InvalidParameter("请选择要登记的发票");
+
+        // ERP-383：先按 Id 升序取来源销售订单行锁（与「并发发票 → 同一订单」容量竞争串行化），
+        // 再取本发票行锁；锁内重读权威状态 / 客户 / 币种 / 已持久化分摊与订单容量后才冻结证据。
+        var storedOrderIds = await db.CustomerSalesInvoiceAllocations.AsNoTracking()
+            .Where(a => !a.IsDeleted && a.CustomerSalesInvoiceEvidenceId == invoiceId)
+            .Select(a => a.SalesOrderId)
+            .ToListAsync();
+
+        await using var transaction = CustomerSalesInvoiceConcurrencyRules.IsRelationalProvider(db)
+            ? await db.Database.BeginTransactionAsync()
+            : null;
+
+        await CustomerSalesInvoiceConcurrencyRules.LockSalesOrderRowsAsync(db, storedOrderIds);
+        await CustomerSalesInvoiceConcurrencyRules.LockInvoiceRowAsync(db, invoiceId);
+
         var invoice = await LoadAsync(db, invoiceId);
         CustomerSalesInvoiceEvidenceRules.EnsureRecordable(invoice.Status, IdentityOf(invoice));
 
@@ -556,6 +605,7 @@ public static class CustomerSalesInvoiceEvidenceService
         invoice.RecordedAt = DateTime.Now;
         invoice.UpdatedAt = DateTime.Now;
         await db.SaveChangesAsync();
+        if (transaction is not null) await transaction.CommitAsync();
 
         return await MapAsync(db, invoice);
     }
@@ -569,6 +619,16 @@ public static class CustomerSalesInvoiceEvidenceService
         IErpDbContext db, long invoiceId, string? reason)
     {
         ArgumentNullException.ThrowIfNull(db);
+        if (invoiceId <= 0) throw BusinessException.InvalidParameter("请选择要作废的发票");
+
+        // ERP-383：取本发票行锁后再重读权威状态并写库，把「作废 vs 收款分摊登记 / 分摊替换 / 修改」
+        // 串行化在同一事务内，并保留作废原因与冻结审计（重复作废在锁内被状态门拒绝）。
+        await using var transaction = CustomerSalesInvoiceConcurrencyRules.IsRelationalProvider(db)
+            ? await db.Database.BeginTransactionAsync()
+            : null;
+
+        await CustomerSalesInvoiceConcurrencyRules.LockInvoiceRowAsync(db, invoiceId);
+
         var invoice = await LoadAsync(db, invoiceId);
         CustomerSalesInvoiceEvidenceRules.EnsureVoidable(invoice.Status, IdentityOf(invoice));
         var reasonText = CustomerSalesInvoiceEvidenceRules.NormalizeVoidReason(reason);
@@ -578,6 +638,7 @@ public static class CustomerSalesInvoiceEvidenceService
         invoice.VoidReason = reasonText;
         invoice.UpdatedAt = DateTime.Now;
         await db.SaveChangesAsync();
+        if (transaction is not null) await transaction.CommitAsync();
 
         return await MapAsync(db, invoice);
     }
@@ -601,6 +662,10 @@ public static class CustomerSalesInvoiceEvidenceService
                 .Where(o => orderIds.Contains(o.Id)).ToListAsync())
             .ToDictionary(o => o.Id);
 
+        // ERP-383：登记前在锁内重读「其他未作废发票已分摊」的订单容量口径并复核，绝不超容量冻结证据。
+        var linkedByOthers = await LoadOtherInvoiceLinkedAmountsAsync(db, invoice.Id, orderIds);
+        var currency = CurrencyAmountRules.NormalizeCurrency(invoice.Currency);
+
         decimal total = 0;
         foreach (var allocation in allocations)
         {
@@ -611,6 +676,10 @@ public static class CustomerSalesInvoiceEvidenceService
                     + "登记前请先调整分摊（不存在 / 已删除订单的分摊不能形成登记证据）");
 
             CustomerSalesInvoiceEvidenceRules.EnsureOrderLinkable(invoice.CustomerId, invoice.Currency, order);
+
+            var othersLinked = linkedByOthers.TryGetValue(order.Id, out var others) ? others : 0m;
+            EnsureOrderInvoiceCapacity(order, othersLinked, allocation.AllocatedAmount, currency);
+
             total += allocation.AllocatedAmount;
         }
 
@@ -618,6 +687,44 @@ public static class CustomerSalesInvoiceEvidenceService
             throw BusinessException.RuleConflict(
                 $"发票「{IdentityOf(invoice)}」的分摊金额合计 {total} 超过含税总额 {invoice.GrossAmount}："
                 + "请先调整分摊再登记");
+    }
+
+    /// <summary>
+    /// 一次查询取回「其他未作废发票」在这些销售订单上的已分摊金额（按订单分组）：
+    /// 预览 / 保存 / 登记共用同一口径，避免逐行查库，也避免重复计算本发票自身的持久化行。
+    /// </summary>
+    private static async Task<Dictionary<long, decimal>> LoadOtherInvoiceLinkedAmountsAsync(
+        IErpDbContext db, long invoiceId, IReadOnlyCollection<long> orderIds)
+    {
+        if (orderIds.Count == 0) return new Dictionary<long, decimal>();
+
+        var rows = await (from allocation in db.CustomerSalesInvoiceAllocations.AsNoTracking()
+                          join owner in db.CustomerSalesInvoiceEvidences.AsNoTracking()
+                              on allocation.CustomerSalesInvoiceEvidenceId equals owner.Id
+                          where !allocation.IsDeleted && !owner.IsDeleted
+                                && owner.Status != CustomerSalesInvoiceEvidenceRules.StatusVoided
+                                && owner.Id != invoiceId
+                                && orderIds.Contains(allocation.SalesOrderId)
+                          select new { allocation.SalesOrderId, allocation.AllocatedAmount })
+            .ToListAsync();
+
+        return rows.GroupBy(r => r.SalesOrderId)
+            .ToDictionary(g => g.Key, g => g.Sum(r => r.AllocatedAmount));
+    }
+
+    /// <summary>
+    /// 来源销售订单容量护栏（ERP-383）：其他未作废发票已分摊金额 + 本次分摊金额不得超过订单总额；
+    /// 同币种比较、不做汇率换算、不重复计算证据；超出即整体拒绝（不写任何分摊行）。
+    /// </summary>
+    private static void EnsureOrderInvoiceCapacity(
+        SalesOrder order, decimal othersLinked, decimal amount, string currency)
+    {
+        var total = othersLinked + amount;
+        if (total > order.TotalAmount)
+            throw BusinessException.RuleConflict(
+                $"销售订单「{order.OrderNo}」的发票分摊容量不足：其他未作废发票已分摊 {othersLinked} + 本次 {amount} "
+                + $"= {total} 超过订单总额 {order.TotalAmount} {currency}"
+                + "（同币种、不做汇率换算、不重复计算证据）：请调整分摊金额或改用其他订单");
     }
 
     // ==================== 6. 校验与映射（内部） ====================

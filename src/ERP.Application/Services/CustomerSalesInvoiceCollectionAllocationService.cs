@@ -41,6 +41,9 @@ public static class CustomerSalesInvoiceCollectionAllocationService
     /// <summary>
     /// 登记一条收款分摊行：全部校验通过后才写一行证据，并写入发票 / 收款单 / 客户的服务端快照；
     /// 登记人由服务端按已认证身份写入（<paramref name="allocatedBy"/>，客户端不能提交该值）。
+    /// <para>ERP-383：登记在<b>同一事务</b>内按唯一全局锁序先取<b>客户销项发票行</b>（发票同币种收款容量竞争的唯一汇聚点）、
+    /// 再取<b>客户收款单行</b>（与收款单生命周期互斥），锁内重读权威发票状态 / 含税总额与收款单金额 / 状态后才落行；
+    /// 因此「不同收款单并发分摊同一发票」与「收款分摊登记 vs 发票作废 / 收款单取消」都被串行化为一致证据或原子拒绝。</para>
     /// </summary>
     public static async Task<CustomerSalesInvoiceCollectionAllocationDto> CreateAsync(
         IErpDbContext db, CustomerSalesInvoiceCollectionAllocationSaveDto dto, string? allocatedBy)
@@ -57,6 +60,34 @@ public static class CustomerSalesInvoiceCollectionAllocationService
                 "请显式选择要分摊的客户收款单（收款单 Id 必须由用户显式选择，"
                 + "系统不按单号文本、金额或日期相似度匹配收款单）");
 
+        await using var transaction = CustomerSalesInvoiceConcurrencyRules.IsRelationalProvider(db)
+            ? await db.Database.BeginTransactionAsync()
+            : null;
+        try
+        {
+            // ERP-383 唯一全局锁序：客户销项发票行 → 客户收款单行（绝不先收款单后发票，避免与发票作废反向加锁）。
+            await CustomerSalesInvoiceConcurrencyRules.LockInvoiceAndReceiptRowsAsync(
+                db, dto.CustomerSalesInvoiceEvidenceId, dto.ReceiptId);
+
+            var result = await CreateUnderLocksAsync(db, dto, allocatedBy);
+            if (transaction is not null) await transaction.CommitAsync();
+            return result;
+        }
+        catch
+        {
+            if (transaction is not null) await transaction.RollbackAsync();
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// 锁内登记实现（调用方必须已按唯一全局锁序取发票行锁 → 收款单行锁并在同一事务内）：
+    /// 发票证据必须存在、未删除且<strong>已登记</strong>，收款单必须存在、未删除且<strong>未取消</strong>，
+    /// 客户与币种必须一致；金额按币种精度取整且大于 0，且不得超过收款单可分摊余额与发票未分摊含税额。
+    /// </summary>
+    private static async Task<CustomerSalesInvoiceCollectionAllocationDto> CreateUnderLocksAsync(
+        IErpDbContext db, CustomerSalesInvoiceCollectionAllocationSaveDto dto, string? allocatedBy)
+    {
         var invoice = await LoadInvoiceAsync(db, dto.CustomerSalesInvoiceEvidenceId);
         var receipt = await LoadReceiptAsync(db, dto.ReceiptId);
         var invoiceCurrency = CustomerSalesInvoiceCollectionAllocationRules.NormalizeCurrencyStrict(invoice.Currency);
@@ -166,26 +197,52 @@ public static class CustomerSalesInvoiceCollectionAllocationService
     /// <summary>
     /// 作废一条收款分摊行（有效 → 已作废）：必须填写作废原因；<strong>保留</strong>原始分摊金额、发票与
     /// 收款单快照、客户快照、登记人与时间戳，不物理删除、不改派、不改写原始金额；作废后该组合可重新登记。
+    /// <para>ERP-383：作废按唯一全局锁序在<b>同一事务</b>内先取所引用<b>发票行锁</b>、再取<b>收款单行锁</b>，
+    /// 锁内重读分摊行做权威作废判定与写入，因此「作废释放容量」与「发票作废 / 收款单取消 / 改金额」严格串行，
+    /// 失败整体回滚、原始证据与审计保持不变。</para>
     /// </summary>
     public static async Task<CustomerSalesInvoiceCollectionAllocationDto> VoidAsync(
         IErpDbContext db, long allocationId, string? reason)
     {
         ArgumentNullException.ThrowIfNull(db);
-        var allocation = await LoadAllocationAsync(db, allocationId);
-        var identity = CustomerSalesInvoiceCollectionAllocationRules.AllocationIdentityText(
-            allocation.InvoiceType, allocation.InvoiceCode, allocation.InvoiceNumber, allocation.ReceiptNo);
-        CustomerSalesInvoiceCollectionAllocationRules.EnsureVoidable(allocation.Status, identity);
 
-        var reasonText = CustomerSalesInvoiceCollectionAllocationRules.NormalizeVoidReason(reason);
-        var now = DateTime.Now;
-        allocation.Status = CustomerSalesInvoiceCollectionAllocationRules.StatusVoided;
-        allocation.VoidedAt = now;
-        allocation.VoidReason = reasonText;
-        allocation.UpdatedAt = now;
+        // 发现阶段（只读、无跟踪）：仅取本分摊行引用的发票 / 收款单 Id，用于按唯一全局锁序加锁（不是权威判定）。
+        var target = await db.CustomerSalesInvoiceCollectionAllocations.AsNoTracking()
+            .Where(a => a.Id == allocationId)
+            .Select(a => new { a.CustomerSalesInvoiceEvidenceId, a.ReceiptId })
+            .FirstOrDefaultAsync();
 
-        await db.SaveChangesAsync();
+        await using var transaction = CustomerSalesInvoiceConcurrencyRules.IsRelationalProvider(db)
+            ? await db.Database.BeginTransactionAsync()
+            : null;
+        try
+        {
+            if (target is not null)
+                await CustomerSalesInvoiceConcurrencyRules.LockInvoiceAndReceiptRowsAsync(
+                    db, target.CustomerSalesInvoiceEvidenceId, target.ReceiptId);
 
-        return await MapOneAsync(db, allocation);
+            var allocation = await LoadAllocationAsync(db, allocationId);
+            var identity = CustomerSalesInvoiceCollectionAllocationRules.AllocationIdentityText(
+                allocation.InvoiceType, allocation.InvoiceCode, allocation.InvoiceNumber, allocation.ReceiptNo);
+            CustomerSalesInvoiceCollectionAllocationRules.EnsureVoidable(allocation.Status, identity);
+
+            var reasonText = CustomerSalesInvoiceCollectionAllocationRules.NormalizeVoidReason(reason);
+            var now = DateTime.Now;
+            allocation.Status = CustomerSalesInvoiceCollectionAllocationRules.StatusVoided;
+            allocation.VoidedAt = now;
+            allocation.VoidReason = reasonText;
+            allocation.UpdatedAt = now;
+
+            await db.SaveChangesAsync();
+
+            if (transaction is not null) await transaction.CommitAsync();
+            return await MapOneAsync(db, allocation);
+        }
+        catch
+        {
+            if (transaction is not null) await transaction.RollbackAsync();
+            throw;
+        }
     }
 
     // ==================== 3. 台账 / 详情 / 两侧汇总 / 两侧候选（只读、有界） ====================
