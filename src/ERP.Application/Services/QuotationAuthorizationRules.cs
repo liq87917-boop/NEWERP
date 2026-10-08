@@ -84,6 +84,11 @@ public static class QuotationAuthorizationRules
         "当前账号没有「销售订单」（sales-order）模块授权：拒绝由报价单生成销售订单"
         + "（fail closed，不产生任何销售订单，也不改写来源报价单）";
 
+    /// <summary>缺少既有「销售订单」菜单授权时普通销售订单保存来源链接的拒绝文案（ERP-401）</summary>
+    public const string SalesOrderLineageDeniedText =
+        "当前账号没有「销售订单」（sales-order）模块授权：拒绝在销售订单上链接来源报价单"
+        + "（fail closed，不写入任何销售订单，也不改写来源报价单）";
+
     /// <summary>受限账号访问缺失权威归属（CustomerId 为空）报价单的拒绝文案</summary>
     public const string UnlinkedCustomerText =
         "该报价单没有可判定的权威客户归属（持久化 CustomerId 缺失）：受限账号拒绝访问（fail closed，不泄露无主报价单）";
@@ -136,6 +141,31 @@ public static class QuotationAuthorizationRules
     public static async Task<SalespersonDataScope> EnsureAuthorizedAsync(
         IErpDbContext db, long? userId, CancellationToken ct = default)
     {
+        var scope = await ResolveLiveIdentityAsync(db, userId, ct);
+        await EnsureMenuAsync(db, scope, userId!.Value, RequiredMenuCode, MenuDeniedText, ct);
+        return scope;
+    }
+
+    /// <summary>
+    /// 普通销售订单表单保存**显式链接来源报价单**所需的授权（ERP-401）：实时启用身份阶梯与
+    /// <see cref="EnsureAuthorizedAsync"/> **完全同源**，但只要求既有「销售订单」（<c>sales-order</c>）
+    /// 菜单授权（不要求报价单菜单 —— 保存的是销售订单，不是报价单台账），返回本次请求的权威客户数据范围。
+    /// </summary>
+    public static async Task<SalespersonDataScope> EnsureSalesOrderLineageAuthorizedAsync(
+        IErpDbContext db, long? userId, CancellationToken ct = default)
+    {
+        var scope = await ResolveLiveIdentityAsync(db, userId, ct);
+        await EnsureMenuAsync(db, scope, userId!.Value, SalesOrderMenuCode, SalesOrderLineageDeniedText, ct);
+        return scope;
+    }
+
+    /// <summary>
+    /// 实时身份阶梯（每次重新查询、绝不缓存）：缺失 / 非法身份 → 未认证；账号不存在 / 已删除 → 未认证；
+    /// 禁用 → 权限不足。空身份绝不降级为匿名或管理员。
+    /// </summary>
+    private static async Task<SalespersonDataScope> ResolveLiveIdentityAsync(
+        IErpDbContext db, long? userId, CancellationToken ct)
+    {
         ArgumentNullException.ThrowIfNull(db);
         ct.ThrowIfCancellationRequested();
 
@@ -149,9 +179,7 @@ public static class QuotationAuthorizationRules
         if (user.Status != UserStatus.Enabled)
             throw new BusinessException(UserDisabledText, ErrorCodes.Forbidden);
 
-        var scope = await SalespersonDataScopeService.ResolveAsync(db, userId.Value);
-        await EnsureMenuAsync(db, scope, userId.Value, RequiredMenuCode, MenuDeniedText, ct);
-        return scope;
+        return await SalespersonDataScopeService.ResolveAsync(db, userId.Value);
     }
 
     /// <summary>

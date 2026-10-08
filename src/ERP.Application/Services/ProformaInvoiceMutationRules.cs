@@ -326,4 +326,24 @@ public static class ProformaInvoiceMutationRules
         if (activeDetailCount <= 0)
             throw BusinessException.RuleConflict(NoActiveDetailsConversionText);
     }
+
+    /// <summary>
+    /// 普通销售订单表单保存**显式链接来源 PI** 时的既有转换资格（ERP-401）：与
+    /// <see cref="EnsureConversionEligible"/>（「PI → 销售订单」直接转换）**完全同口径**且复用同一实现 ——
+    /// 已作废 / 未审核 / 无有效明细 / 已完成一律拒绝；唯一目标由
+    /// <c>SalesOrderConversion.FindOtherTargetAsync</c> 在来源行锁内独立复核。
+    /// 本方法不写库、不改写来源 PI、不消耗单据号。
+    /// </summary>
+    public static void EnsureManualOrderLinkEligible(ProformaInvoice pi, int activeDetailCount)
+        => EnsureConversionEligible(pi, null, activeDetailCount);
+
+    /// <summary>
+    /// 普通表单保存链接来源 PI 的锁序口径（接口 / 文档同源，ERP-401）：与「PI → 销售订单」直接转换共用同一把
+    /// PI 来源行锁，人工保存与直接转换因此串行化在同一事务内，同一 PI 至多一张目标销售订单。
+    /// </summary>
+    public const string ManualLinkLockOrderText =
+        "ERP-401：普通销售订单表单显式链接来源 PI 时先取「PI 来源行锁」"
+        + "（db_owner.ProformaInvoices WITH (UPDLOCK, HOLDLOCK)，等价实现为审计时间戳刷新的 UPDATE），"
+        + "与「PI → 销售订单」直接转换共用同一把来源行锁：并发人工保存与直接转换串行化在同一原子事务内，"
+        + "同一 PI 至多一张完整目标订单；不反向获取下游锁，因此不存在锁环。";
 }

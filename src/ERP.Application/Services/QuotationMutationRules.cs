@@ -391,6 +391,27 @@ public static class QuotationMutationRules
         if (activeDetailCount <= 0)
             throw BusinessException.RuleConflict(NoActiveDetailsToOrderText);
     }
+
+    /// <summary>
+    /// 普通销售订单表单保存**显式链接来源报价单**时的既有转换资格（ERP-401）：与
+    /// <see cref="EnsureSalesOrderConversionEligible"/>（「报价单 → 销售订单」直接转换）**完全同口径**且复用同一实现 ——
+    /// 已作废 / 未审核 / 无有效明细 / 已完成 / 已转 PI（<paramref name="existingPi"/> 非空）一律拒绝；
+    /// 唯一目标由 <c>SalesOrderConversion.FindOtherTargetAsync</c> 在来源行锁内独立复核。
+    /// 本方法不写库、不改写来源报价单、不消耗单据号。
+    /// </summary>
+    public static void EnsureManualOrderLinkEligible(Quotation quotation, ProformaInvoice? existingPi,
+        int activeDetailCount)
+        => EnsureSalesOrderConversionEligible(quotation, null, existingPi, activeDetailCount);
+
+    /// <summary>
+    /// 普通表单保存链接来源报价单的锁序口径（接口 / 文档同源，ERP-401）：与「报价单 → 销售订单」直接转换共用同一把
+    /// 报价单来源行锁（跨单据链的第一把锁），人工保存与直接转换因此串行化在同一事务内，同一报价单至多一张目标销售订单。
+    /// </summary>
+    public const string ManualLinkLockOrderText =
+        "ERP-401：普通销售订单表单显式链接来源报价单时先取「报价单来源行锁」"
+        + "（db_owner.Quotations WITH (UPDLOCK, HOLDLOCK)，等价实现为审计时间戳刷新的 UPDATE），"
+        + "再按需要取 PI / 销售订单行锁（恒定锁序「报价单 → PI / 销售订单」），与「报价单 → 销售订单」直接转换"
+        + "共用同一把来源行锁：并发人工保存与直接转换串行化在同一原子事务内，同一报价单至多一张完整目标订单。";
 }
 
 

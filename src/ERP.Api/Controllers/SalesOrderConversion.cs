@@ -39,6 +39,13 @@ public static class SalesOrderConversion
     public const string TargetOutOfScopeText = ProformaInvoiceAuthorizationRules.TargetOutOfScopeText;
 
     /// <summary>
+    /// 来源 → 目标锁序口径（ERP-401 与 ERP-399 / ERP-400 转换共用同一把来源行锁）：
+    /// 普通表单保存显式链接来源时恒定按「报价单来源行锁 → PI 来源行锁 → 销售订单目标行锁」取得排它行锁，
+    /// 与「PI → 销售订单」「报价单 → 销售订单」直接转换串行化在同一把来源行锁上，绝不反向获取下游锁。
+    /// </summary>
+    public const string SourceLockOrderText = SalesOrderSourceLineageRules.LockOrderText;
+
+    /// <summary>
     /// 转换范围守卫（ERP-398）：PI → 销售订单在落库任何销售订单、消耗任何单据号<b>之前</b>，
     /// 独立复核<b>来源客户</b>与<b>目标客户</b>都在当前账号实时客户数据范围内 ——
     /// 来源 PI 可见绝不等于目标客户获得授权；受限账号缺失归属 / 越界一律 fail closed。
@@ -243,6 +250,17 @@ public static class SalesOrderConversion
         SalesOrderController.Validate(order);
         return order;
     }
+
+    /// <summary>
+    /// 唯一目标复核（ERP-401 与既有转换守卫同一口径）：按**持久化来源字段**查找除
+    /// <paramref name="excludeOrderId"/>（修改本单时排除自身）之外、未删除的既有销售订单 ——
+    /// 同一 PI 以 <c>SourcePiId</c> 唯一化，同一报价单以「<c>SourceQuotationId</c> 且未绑定 PI」唯一化
+    /// （PI 来源订单会同时留痕报价单祖先，不能因此误判为重复报价单目标）。
+    /// 只按显式 Id 判定，绝不按来源单号等自由文本推断。
+    /// </summary>
+    public static Task<SalesOrder?> FindOtherTargetAsync(IErpDbContext db, long? quotationId, long? piId,
+        long? excludeOrderId, CancellationToken ct = default)
+        => SalesOrderSourceLineageRules.FindOtherTargetAsync(db, quotationId, piId, excludeOrderId, ct);
 
     // ==================== 重复生成守卫（同一来源仅一张销售订单） ====================
 

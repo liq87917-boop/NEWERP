@@ -7,6 +7,7 @@ using ERP.Domain.Enums;
 using ERP.Infrastructure.Export;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using System.Data;
 
 namespace ERP.Api.Controllers;
@@ -199,24 +200,90 @@ public class SalesOrderController : DocumentControllerBase<SalesOrder>
             await CustomerSalesPriceHistoryService.QueryAsync(Db, query, scope.AllowedCustomerIds)));
     }
 
-    /// <summary>创建</summary>
+    /// <summary>
+    /// 创建（ERP-401）：显式来源先做**权威解析 + 确定性来源行锁（报价单 → PI）+ 原子事务**，
+    /// 在锁内复核实时身份 / 既有「销售订单」菜单 / 权威客户范围、既有转换资格与唯一目标，
+    /// <b>之后</b>才预约单据号与写入；显式来源 Id 全部无法解析时按「显式历史值」原样保留（不构成实时链接）；
+    /// 未链接的手工订单保持既有口径（不取任何来源锁、不开事务）。
+    /// </summary>
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] SalesOrder entity)
     {
-        entity.Id = 0;
-        entity.OrderNo = await _noService.GenerateAsync(DocumentType.SalesOrder);
-        entity.Status = DocumentStatus.Pending;
-        entity.CreatedAt = DateTime.Now;
-        // 与 Update 对齐：明细金额由服务端按「数量 × 单价」重算（唯一权威口径，忽略客户端金额）
-        SalesOrderAmountRules.ApplyDetailAmounts(entity);
-        Calculate(entity);
-        Validate(entity);
-        Db.SalesOrders.Add(entity);
-        await Db.SaveChangesAsync();
-        return Ok(ApiResponse<object>.Success(new { entity.Id, entity.OrderNo }, "销售订单创建成功"));
+        var requestedQuotationId = SalesOrderSourceLineageRules.NormalizeId(entity.SourceQuotationId);
+        var requestedPiId = SalesOrderSourceLineageRules.NormalizeId(entity.SourcePiId);
+        var change = SalesOrderSourceLineageRules.ResolveChange(null, null, requestedQuotationId, requestedPiId);
+
+        IDbContextTransaction? transaction = null;
+        try
+        {
+            var lineage = new SalesOrderSourceLineage();
+            if (change.HasSource)
+            {
+                // 第一阶段：有界只读权威解析（不加锁）—— 无法解析的显式历史值不占用任何来源锁。
+                lineage = await SalesOrderSourceLineageRules.ResolveAsync(Db, change, entity.CustomerId);
+                if (!lineage.IsUnresolvedLegacy)
+                {
+                    // 第二阶段：原子事务内按确定性锁序加来源行锁，并**锁内重读**权威来源后才放行。
+                    transaction = await SalesOrderSourceLineageRules.BeginWriteTransactionAsync(Db);
+                    if (!await SalesOrderSourceLineageRules.LockSourcesAsync(Db, change.QuotationId, change.PiId))
+                        throw BusinessException.RuleConflict(SalesOrderSourceLineageRules.SourceNotFoundText);
+
+                    lineage = await SalesOrderSourceLineageRules.ResolveAsync(Db, change, entity.CustomerId);
+                    if (lineage.IsUnresolvedLegacy)
+                        throw BusinessException.RuleConflict(SalesOrderSourceLineageRules.SourceNotFoundText);
+
+                    await SalesOrderSourceLineageRules.EnsureWriteAuthorizedAsync(
+                        Db, CurrentUserId(), lineage, entity.CustomerId);
+                    await SalesOrderSourceLineageRules.EnsureNewLinkEligibleAsync(Db, lineage, null);
+                }
+            }
+
+            entity.Id = 0;
+            entity.OrderNo = await _noService.GenerateAsync(DocumentType.SalesOrder);
+            entity.Status = DocumentStatus.Pending;
+            entity.CreatedAt = DateTime.Now;
+            if (change.HasSource)
+            {
+                if (lineage.IsUnresolvedLegacy)
+                    SalesOrderSourceLineageRules.ApplyExplicitValues(entity, requestedQuotationId,
+                        entity.SourceQuotationNo, requestedPiId, entity.SourcePiNo);
+                else
+                    SalesOrderSourceLineageRules.Apply(entity, lineage);
+            }
+
+            // 与 Update 对齐：明细金额由服务端按「数量 × 单价」重算（唯一权威口径，忽略客户端金额）
+            SalesOrderAmountRules.ApplyDetailAmounts(entity);
+            Calculate(entity);
+            Validate(entity);
+            Db.SalesOrders.Add(entity);
+            await Db.SaveChangesAsync();
+            if (transaction is not null) await transaction.CommitAsync();
+            return Ok(ApiResponse<object>.Success(new { entity.Id, entity.OrderNo }, "销售订单创建成功"));
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            await RollbackLineageWriteAsync(transaction);
+            throw BusinessException.RuleConflict(SalesOrderSourceLineageRules.ConcurrentMutationText);
+        }
+        catch
+        {
+            await RollbackLineageWriteAsync(transaction);
+            throw;
+        }
     }
 
-    /// <summary>更新</summary>
+    /// <summary>回滚来源血缘写入事务并丢弃变更跟踪器中的半成品写入（内存库无事务时同样清理）。</summary>
+    private async Task RollbackLineageWriteAsync(IDbContextTransaction? transaction)
+    {
+        if (transaction is not null) await transaction.RollbackAsync();
+        ProformaInvoiceMutationRules.DiscardTrackedChanges(Db);
+    }
+
+    /// <summary>
+    /// 更新（ERP-401）：先按「报价单 → PI → 销售订单」确定性锁序加来源行锁并**锁内重读**持久化来源 / 目标状态，
+    /// 再复核来源血缘（历史来源绝不静默清除；显式改绑需完整实时复核且下游已有证据时冻结），
+    /// 最后才改写字段 / 明细 / 金额；未链接且不涉及来源的手工订单保持既有口径（不取任何来源锁、不开事务）。
+    /// </summary>
     [HttpPut("{id:long}")]
     public async Task<IActionResult> Update(long id, [FromBody] SalesOrder entity)
     {
@@ -226,53 +293,214 @@ public class SalesOrderController : DocumentControllerBase<SalesOrder>
         if (GetStatus(existing) != DocumentStatus.Pending)
             throw BusinessException.RuleConflict("仅待提交状态的单据可修改");
 
-        existing.OrderDate = entity.OrderDate;
-        existing.CustomerId = entity.CustomerId;
-        existing.SalesmanId = entity.SalesmanId;
-        existing.Currency = entity.Currency;
-        existing.ExchangeRate = entity.ExchangeRate;
-        existing.DepositRatio = entity.DepositRatio;
-        existing.PaymentTerms = entity.PaymentTerms;
-        existing.DeliveryDate = entity.DeliveryDate;
-        existing.ShippingMethod = entity.ShippingMethod;
-        existing.PortId = entity.PortId;
-        existing.Remark = entity.Remark;
+        var requestedQuotationId = SalesOrderSourceLineageRules.NormalizeId(entity.SourceQuotationId);
+        var requestedPiId = SalesOrderSourceLineageRules.NormalizeId(entity.SourcePiId);
+        var preliminary = SalesOrderSourceLineageRules.ResolveChange(existing.SourceQuotationId,
+            existing.SourcePiId, requestedQuotationId, requestedPiId);
 
-        // 外贸合同与运输信息（ERP-008）
-        existing.CustomerPoNo = entity.CustomerPoNo;
-        existing.ContractNo = entity.ContractNo;
-        existing.TradeTerms = entity.TradeTerms;
-        existing.DestinationPort = entity.DestinationPort;
-        existing.Consignee = entity.Consignee;
-        existing.NotifyParty = entity.NotifyParty;
-        existing.ShippingMarks = entity.ShippingMarks;
-        // 来源追溯（报价单 / PI → 销售订单）
-        existing.SourceQuotationId = entity.SourceQuotationId;
-        existing.SourceQuotationNo = entity.SourceQuotationNo;
-        existing.SourcePiId = entity.SourcePiId;
-        existing.SourcePiNo = entity.SourcePiNo;
-        existing.ExportMode = entity.ExportMode;
-        existing.CommissionRatio = entity.CommissionRatio;
-        existing.BusinessNature = entity.BusinessNature;
-        existing.SplitShipment = entity.SplitShipment;
-        existing.InspectionRequirement = entity.InspectionRequirement;
-        existing.PackagingRequirement = entity.PackagingRequirement;
-
-        Db.SalesOrderDetails.RemoveRange(existing.Details);
-        foreach (var d in entity.Details)
+        IDbContextTransaction? transaction = null;
+        try
         {
-            d.Id = 0;
-            d.SalesOrderId = id;
-            d.CreatedAt = DateTime.Now;
+            var change = preliminary;
+            var lineage = new SalesOrderSourceLineage();
+            if (preliminary.HasSource)
+            {
+                // 只读预解析：区分「可精确解析的实时链接」与「无法解析的显式历史值」。
+                lineage = await SalesOrderSourceLineageRules.ResolveAsync(Db, preliminary, entity.CustomerId);
+                if (lineage.IsUnresolvedLegacy)
+                {
+                    // 存在历史链接时禁止改绑到无法解析的来源（绝不静默放弃历史来源）。
+                    var persistedNow = existing.SourceQuotationId is > 0 || existing.SourcePiId is > 0;
+                    if (preliminary.IsExplicitChange && persistedNow)
+                        throw BusinessException.RuleConflict(SalesOrderSourceLineageRules.RebindUnknownSourceText);
+                }
+                else
+                {
+                    // 显式改绑先复核下游冻结（未删除的变更申请 / 销售出库一律冻结改绑）。
+                    if (preliminary.IsExplicitChange)
+                        await SalesOrderSourceLineageRules.EnsureRebindNotFrozenAsync(Db, id);
+
+                    transaction = await SalesOrderSourceLineageRules.BeginWriteTransactionAsync(Db);
+                    if (!await SalesOrderSourceLineageRules.LockSourcesAsync(Db, preliminary.QuotationId,
+                            preliminary.PiId))
+                        throw BusinessException.RuleConflict(SalesOrderSourceLineageRules.SourceNotFoundText);
+                    if (!await SalesOrderSourceLineageRules.LockSalesOrderRowAsync(Db, id))
+                        throw BusinessException.NotFound("销售订单不存在");
+
+                    // 锁内重读持久化状态：并发方已提交的结果以锁内权威重读为准，绝不按陈旧状态放行。
+                    var locked = await Db.SalesOrders.AsNoTracking()
+                        .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
+                        ?? throw BusinessException.NotFound("销售订单不存在");
+                    if (locked.Status != DocumentStatus.Pending)
+                        throw BusinessException.RuleConflict("仅待提交状态的单据可修改");
+
+                    change = SalesOrderSourceLineageRules.ResolveChange(locked.SourceQuotationId,
+                        locked.SourcePiId, requestedQuotationId, requestedPiId);
+                    var persistedLinkExists = locked.SourceQuotationId is > 0 || locked.SourcePiId is > 0;
+
+                    lineage = await SalesOrderSourceLineageRules.ResolveAsync(Db, change, entity.CustomerId);
+                    if (lineage.IsUnresolvedLegacy)
+                    {
+                        if (change.IsExplicitChange && persistedLinkExists)
+                            throw BusinessException.RuleConflict(
+                                SalesOrderSourceLineageRules.RebindUnknownSourceText);
+                    }
+                    else if (change.IsExplicitChange)
+                    {
+                        await SalesOrderSourceLineageRules.EnsureWriteAuthorizedAsync(
+                            Db, CurrentUserId(), lineage, entity.CustomerId);
+                        await SalesOrderSourceLineageRules.EnsureNewLinkEligibleAsync(Db, lineage, id);
+                    }
+                    else
+                    {
+                        // 历史链接未改动（或请求未给出 Id 的清空尝试）：只做持久化来源重查，绝不静默清除 / 改写。
+                        await SalesOrderSourceLineageRules.EnsurePersistedSourceIntactAsync(Db, locked);
+                    }
+                }
+            }
+
+            // 来源字段：权威血缘优先；显式历史值原样保留；未链接时保持调用方提交的自由文本（不构成链接）。
+            if (change.HasSource && !lineage.IsUnresolvedLegacy)
+            {
+                SalesOrderSourceLineageRules.Apply(existing, lineage);
+            }
+            else
+            {
+                // 未携带可解析来源 Id：以提交前**最新持久化来源**为准（并发登记的来源绝不被静默清除）。
+                var latest = await Db.SalesOrders.AsNoTracking()
+                    .Where(o => o.Id == id)
+                    .Select(o => new { o.SourceQuotationId, o.SourceQuotationNo, o.SourcePiId, o.SourcePiNo })
+                    .FirstOrDefaultAsync();
+                if (latest is not null && (latest.SourceQuotationId is > 0 || latest.SourcePiId is > 0))
+                {
+                    SalesOrderSourceLineageRules.ApplyExplicitValues(existing, latest.SourceQuotationId,
+                        latest.SourceQuotationNo, latest.SourcePiId, latest.SourcePiNo);
+                }
+                else
+                {
+                    SalesOrderSourceLineageRules.ApplyExplicitValues(existing, change.QuotationId,
+                        change.IsClearingAttempt ? existing.SourceQuotationNo : entity.SourceQuotationNo,
+                        change.PiId,
+                        change.IsClearingAttempt ? existing.SourcePiNo : entity.SourcePiNo);
+                }
+            }
+
+            existing.OrderDate = entity.OrderDate;
+            existing.CustomerId = entity.CustomerId;
+            existing.SalesmanId = entity.SalesmanId;
+            existing.Currency = entity.Currency;
+            existing.ExchangeRate = entity.ExchangeRate;
+            existing.DepositRatio = entity.DepositRatio;
+            existing.PaymentTerms = entity.PaymentTerms;
+            existing.DeliveryDate = entity.DeliveryDate;
+            existing.ShippingMethod = entity.ShippingMethod;
+            existing.PortId = entity.PortId;
+            existing.Remark = entity.Remark;
+
+            // 外贸合同与运输信息（ERP-008）
+            existing.CustomerPoNo = entity.CustomerPoNo;
+            existing.ContractNo = entity.ContractNo;
+            existing.TradeTerms = entity.TradeTerms;
+            existing.DestinationPort = entity.DestinationPort;
+            existing.Consignee = entity.Consignee;
+            existing.NotifyParty = entity.NotifyParty;
+            existing.ShippingMarks = entity.ShippingMarks;
+            // 来源追溯（报价单 / PI → 销售订单）由 ERP-401 血缘护栏按权威解析结果写入，绝不照抄提交文本。
+            existing.ExportMode = entity.ExportMode;
+            existing.CommissionRatio = entity.CommissionRatio;
+            existing.BusinessNature = entity.BusinessNature;
+            existing.SplitShipment = entity.SplitShipment;
+            existing.InspectionRequirement = entity.InspectionRequirement;
+            existing.PackagingRequirement = entity.PackagingRequirement;
+
+            Db.SalesOrderDetails.RemoveRange(existing.Details);
+            foreach (var d in entity.Details)
+            {
+                d.Id = 0;
+                d.SalesOrderId = id;
+                d.CreatedAt = DateTime.Now;
+            }
+            // 明细金额与合计一律由服务端按唯一权威口径重算（ERP-047：SalesOrderAmountRules）
+            SalesOrderAmountRules.ApplyDetailAmounts(entity);
+            existing.Details = entity.Details;
+            Calculate(existing);
+            Validate(existing);
+            existing.UpdatedAt = DateTime.Now;
+            await Db.SaveChangesAsync();
+            if (transaction is not null) await transaction.CommitAsync();
+            return Ok(ApiResponse<object>.Success(null, "销售订单更新成功"));
         }
-        // 明细金额与合计一律由服务端按唯一权威口径重算（ERP-047：SalesOrderAmountRules）
-        SalesOrderAmountRules.ApplyDetailAmounts(entity);
-        existing.Details = entity.Details;
-        Calculate(existing);
-        Validate(existing);
-        existing.UpdatedAt = DateTime.Now;
-        await Db.SaveChangesAsync();
-        return Ok(ApiResponse<object>.Success(null, "销售订单更新成功"));
+        catch (DbUpdateConcurrencyException)
+        {
+            await RollbackLineageWriteAsync(transaction);
+            throw BusinessException.RuleConflict(SalesOrderSourceLineageRules.ConcurrentMutationText);
+        }
+        catch
+        {
+            await RollbackLineageWriteAsync(transaction);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// 提交（ERP-401）：未链接的手工订单保持既有流转；已登记来源血缘的订单先做持久化来源重查
+    /// （来源必须仍可精确解析、同一来源不得存在其它目标），再在订单行锁 + 原子事务内流转状态。
+    /// </summary>
+    [HttpPost("{id:long}/submit")]
+    public override async Task<IActionResult> Submit(long id)
+        => await RunLineageGuardedStatusChangeAsync(id, DocumentStatus.Pending, DocumentStatus.Submitted, "提交成功");
+
+    /// <summary>
+    /// 审核（ERP-401）：与 <see cref="Submit"/> 同一口径，在订单行锁 + 原子事务内复核持久化来源血缘后审核。
+    /// </summary>
+    [HttpPost("{id:long}/approve")]
+    public override async Task<IActionResult> Approve(long id)
+        => await RunLineageGuardedStatusChangeAsync(id, DocumentStatus.Submitted, DocumentStatus.Approved, "审核通过");
+
+    /// <summary>
+    /// 带来源血缘复核的状态流转：未链接手工订单走既有口径（不加锁、不开事务）；
+    /// 已登记来源的订单先取目标订单行锁（与取消 / 出库审核 / 单证生成同一把锁）再复核持久化来源血缘，
+    /// 任一步失败整体回滚并丢弃半成品变更。
+    /// </summary>
+    private async Task<IActionResult> RunLineageGuardedStatusChangeAsync(long id, DocumentStatus from,
+        DocumentStatus to, string message)
+    {
+        var entity = await Db.SalesOrders.Include(o => o.Details)
+            .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
+            ?? throw BusinessException.NotFound("销售订单不存在");
+        if (GetStatus(entity) != from)
+            throw BusinessException.RuleConflict("当前状态不允许该操作");
+
+        if (entity.SourceQuotationId is not > 0 && entity.SourcePiId is not > 0)
+        {
+            SetStatus(entity, to);
+            await Db.SaveChangesAsync();
+            return Ok(ApiResponse<object>.Success(null, message));
+        }
+
+        IDbContextTransaction? transaction = null;
+        try
+        {
+            transaction = await SalesOrderSourceLineageRules.BeginWriteTransactionAsync(Db);
+            if (!await SalesOrderSourceLineageRules.LockSalesOrderRowAsync(Db, id))
+                throw BusinessException.NotFound("销售订单不存在");
+
+            await SalesOrderSourceLineageRules.EnsurePersistedSourceIntactAsync(Db, entity);
+            SetStatus(entity, to);
+            await Db.SaveChangesAsync();
+            if (transaction is not null) await transaction.CommitAsync();
+            return Ok(ApiResponse<object>.Success(null, message));
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            await RollbackLineageWriteAsync(transaction);
+            throw BusinessException.RuleConflict(SalesOrderSourceLineageRules.ConcurrentMutationText);
+        }
+        catch
+        {
+            await RollbackLineageWriteAsync(transaction);
+            throw;
+        }
     }
 
     /// <summary>

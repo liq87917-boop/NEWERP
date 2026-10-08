@@ -492,12 +492,134 @@ public class SalesOrderConversionTests
         Assert.Equal(3m, detail.GetProperty("unitPrice").GetDecimal());
     }
 
+    // ==================== ERP-401 普通保存与直接转换的唯一目标 / 锁序同源 ====================
+
+    [Fact]
+    public async Task ERP401_普通保存链接PI_与直接转换共用同一把来源行锁与唯一目标口径()
+    {
+        using var db = TestDbFactory.Create();
+        var customer = SeedCustomer(db);
+        var pi = SeedPi(db, customer.Id, "PI-ERP401-1");
+
+        // 普通表单保存（预填后手工保存走同一路由）：显式链接已审核 PI。
+        var body = new SalesOrder
+        {
+            OrderDate = DateTime.Today,
+            CustomerId = customer.Id,
+            Currency = pi.Currency,
+            ExchangeRate = pi.ExchangeRate,
+            DepositRatio = pi.DepositRatio,
+            SourcePiId = pi.Id,
+            SourcePiNo = pi.PiNo,
+            Details = new List<SalesOrderDetail>
+            {
+                new() { ProductId = 21, ProductName = "PI 商品", Unit = "PCS", Quantity = 100m, UnitPrice = 10m }
+            }
+        };
+        Assert.IsType<OkObjectResult>(await NewSalesOrderController(db).Create(body));
+        var order = db.SalesOrders.Single();
+
+        // 转换侧按同一持久化字段（SourcePiId）识别既有目标：唯一目标口径一致。
+        var bySourcePi = await SalesOrderConversion.FindBySourcePiAsync(db, pi.Id);
+        Assert.NotNull(bySourcePi);
+        Assert.Equal(order.Id, bySourcePi!.Id);
+
+        // 共享的唯一目标复核（普通保存与转换同一实现）：同一 PI 只认一张目标。
+        var other = await SalesOrderConversion.FindOtherTargetAsync(db, null, pi.Id, null);
+        Assert.NotNull(other);
+        Assert.Equal(order.Id, other!.Id);
+        Assert.Null(await SalesOrderConversion.FindOtherTargetAsync(db, null, pi.Id, order.Id));
+
+        // 已有目标后，直接转换按既有重复规则被拒绝（绝不生成第二张目标订单）。
+        var ex = Assert.Throws<BusinessException>(() => ProformaInvoiceMutationRules.EnsureConversionEligible(
+            pi, order, ProformaInvoiceMutationRules.ActiveDetailCount(pi)));
+        Assert.Equal(ErrorCodes.RuleConflict, ex.Code);
+        Assert.Single(db.SalesOrders);
+
+        // 锁序口径与来源行锁语句同源（与 ERP-399 转换共用同一把 PI 来源行锁）。
+        Assert.Equal(ProformaInvoiceMutationRules.PiRowLockSql,
+            SalesOrderSourceLineageRules.ProformaInvoiceRowLockSql);
+        Assert.Equal(SalesOrderSourceLineageRules.LockOrderText, SalesOrderConversion.SourceLockOrderText);
+        Assert.Contains("PI 来源行锁", ProformaInvoiceMutationRules.ManualLinkLockOrderText);
+    }
+
+    [Fact]
+    public async Task ERP401_普通保存链接报价单_与报价单直接转换唯一目标一致()
+    {
+        using var db = TestDbFactory.Create();
+        var customer = SeedCustomer(db);
+        var quotation = SeedQuotation(db, "QT-ERP401-1", DocumentStatus.Approved, customer.Id);
+
+        var body = new SalesOrder
+        {
+            OrderDate = DateTime.Today,
+            CustomerId = customer.Id,
+            Currency = quotation.Currency,
+            ExchangeRate = quotation.ExchangeRate,
+            DepositRatio = 30m,
+            SourceQuotationId = quotation.Id,
+            SourceQuotationNo = quotation.QuotationNo,
+            Details = new List<SalesOrderDetail>
+            {
+                new() { ProductId = 11, ProductName = "商品 A", Unit = "PCS", Quantity = 100m, UnitPrice = 2.5m }
+            }
+        };
+        Assert.IsType<OkObjectResult>(await NewSalesOrderController(db).Create(body));
+        var order = db.SalesOrders.Single();
+
+        var other = await SalesOrderConversion.FindOtherTargetAsync(db, quotation.Id, null, null);
+        Assert.NotNull(other);
+        Assert.Equal(order.Id, other!.Id);
+
+        var ex = Assert.Throws<BusinessException>(() =>
+            QuotationMutationRules.EnsureSalesOrderConversionEligible(quotation, order, null,
+                QuotationMutationRules.ActiveDetailCount(quotation)));
+        Assert.Equal(ErrorCodes.RuleConflict, ex.Code);
+        Assert.Single(db.SalesOrders);
+
+        Assert.Equal(QuotationMutationRules.QuotationRowLockSql,
+            SalesOrderSourceLineageRules.QuotationRowLockSql);
+        Assert.Contains("报价单来源行锁", QuotationMutationRules.ManualLinkLockOrderText);
+    }
+
+    [Fact]
+    public async Task ERP401_PI带入预填草稿_服务端复核后可直接保存并留痕权威来源()
+    {
+        using var db = TestDbFactory.Create();
+        var customer = SeedCustomer(db);
+        var pi = SeedPi(db, customer.Id, "PI-ERP401-2");
+
+        // 带入预填（只读，不落库、不占单号）。
+        var draft = await SalesOrderConversion.FromProformaInvoiceAsync(db, pi);
+        Assert.Equal(string.Empty, draft.OrderNo);
+        Assert.Empty(db.SalesOrders);
+
+        // 保存草稿（前端「销售订单 → 新增」路由）：来源血缘按权威来源复核并规范化。
+        Assert.IsType<OkObjectResult>(await NewSalesOrderController(db).Create(draft));
+
+        var order = db.SalesOrders.Single();
+        Assert.Equal(pi.Id, order.SourcePiId);
+        Assert.Equal(pi.PiNo, order.SourcePiNo);
+        Assert.StartsWith("SO", order.OrderNo);
+        Assert.Equal(1000m, order.TotalAmount);
+        // 来源 PI 状态不被普通保存改写（既不伪造「已转订单」也不消耗）。
+        Assert.Equal(DocumentStatus.Approved, db.ProformaInvoices.Single().Status);
+    }
+
     // ==================== 工厂与种子数据 ====================
 
     private static QuotationController NewQuotationController(ErpDbContext db)
     {
         // ERP-400：报价单路由现在要求实时启用身份（特权账号豁免菜单授权）。
         var controller = new QuotationController(db, new DocumentNumberService(db));
+        TestAuth.SetUser(controller, TestAuth.SeedPrivilegedUser(db));
+        return controller;
+    }
+
+    private static SalesOrderController NewSalesOrderController(ErpDbContext db)
+    {
+        // ERP-401：普通保存显式链接来源时要求实时启用身份 + 既有「销售订单」菜单（特权账号豁免菜单授权）。
+        var controller = new SalesOrderController(db, new DocumentNumberService(db));
         TestAuth.SetUser(controller, TestAuth.SeedPrivilegedUser(db));
         return controller;
     }
