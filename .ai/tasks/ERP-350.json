@@ -13,7 +13,8 @@
     "src/ERP.Application/Services/AgencyServiceFeeCollectionAllocationService.cs",
     "src/ERP.UnitTests/CustomerReceiptSharedFundingTests.cs",
     "src/ERP.IntegrationTests/CustomerReceiptSharedFundingSqlServerTests.cs",
-    "docs/customer-receipt-lifecycle.md"
+    "docs/customer-receipt-lifecycle.md",
+    "src/ERP.UnitTests/AgencyServiceFeeCollectionAllocationTests.cs"
   ],
   "criterion_path_map": {
     "For each real receipt, both existing allocation APIs must use a single authoritative same-currency receipt funding capacity under the already shared receipt lock. Sum effective nondeleted nonvoided allocations from both existing tables exactly once. Reject combined requested amount above authoritative receipt amount, invalid active currency/customer/source evidence must fail closed or remain accurately blocked, never silently drop evidence or convert currencies.": [
@@ -38,7 +39,8 @@
       "src/ERP.Application/Services/AgencyServiceFeeCollectionAllocationService.cs",
       "src/ERP.UnitTests/CustomerReceiptSharedFundingTests.cs",
       "src/ERP.IntegrationTests/CustomerReceiptSharedFundingSqlServerTests.cs",
-      "docs/customer-receipt-lifecycle.md"
+      "docs/customer-receipt-lifecycle.md",
+      "src/ERP.UnitTests/AgencyServiceFeeCollectionAllocationTests.cs"
     ],
     "Real SQL fixtures must require exact (localdb)\\NEWERP_AutoAcceptance, IntegratedSecurity and NEWERP_AUTOTEST prefix before access. Create only a new GUID-owned database, reject existing database, never drop/reset any database or read production settings. Use SQL generated identities, fail wrong-target guards before access, retain complete logs. Execute relevant unit and safe Release build/test plus real SQL scenarios; build completion does not mean stage acceptance.": [
       "src/ERP.Application/Services/CustomerReceiptLifecycleRules.cs",
@@ -52,12 +54,12 @@
   "depends_on": [
     "ERP-349"
   ],
-  "implementation_evidence": "ERP349 acquired a shared receipt row lock, but CustomerReceiptAllocationService.CreateAsync still sums only CustomerReceiptAllocations and AgencyServiceFeeCollectionAllocationService sums only its own allocation table. docs/customer-receipt-lifecycle.md section2 item4 explicitly says independent allocation accounting. Same receipt100 can therefore fund customer100 plus agency100 despite serialized writers; this misses ERP349 cross-consumer funding acceptance, so retain original results and correct the implementation rather than declare full acceptance.",
+  "implementation_evidence": "ERP349 acquired a shared receipt row lock, but CustomerReceiptAllocationService.CreateAsync still sums only CustomerReceiptAllocations and AgencyServiceFeeCollectionAllocationService sums only its own allocation table. docs/customer-receipt-lifecycle.md section2 item4 explicitly says independent allocation accounting. Same receipt100 can therefore fund customer100 plus agency100 despite serialized writers; this misses ERP349 cross-consumer funding acceptance, so retain original results and correct the implementation rather than declare full acceptance.\n2026-10-08 validation1: complete safe build passes, 5159 units pass, one old ERP071 test at AgencyServiceFeeCollectionAllocationTests.cs:1386 asserts independent receipt funding1000 after customer allocation1000. This conflicts with explicitly authorized shared funding. Precisely authorize this existing regression file to revise that conflicting scenario to reject agency overflow, preserve original customer allocation and other nonmutation/evidence separation assertions, and verify explicit void release. Do not restore independent funding or weaken security/amount checks. Full failure retained in .ai/logs/ERP-350-validation-1.log.",
   "risk": "medium",
   "planning_stage": 3,
   "id": "ERP-350",
-  "status": "pending",
-  "attempts": 0,
+  "status": "in_progress",
+  "attempts": 2,
   "max_attempts": 3,
   "validation_profile": "safe",
   "completion_mode": "build",
@@ -72,5 +74,6 @@
     "required": false,
     "scenarios": []
   },
-  "created_at": "2026-10-08T05:31:23.145274Z"
+  "created_at": "2026-10-08T05:31:23.145274Z",
+  "updated_at": "2026-10-08T06:01:40.031454Z"
 }
