@@ -27,6 +27,63 @@ public class OrderTraceabilityTests
         TestAuth.SetUser(controller, TestAuth.SeedPrivilegedUser(db));
         return controller;
     }
+
+    private static long SeedAuthorizedPurchaseUser(ErpDbContext db)
+    {
+        var user = new SysUser
+        {
+            UserName = $"po-{Guid.NewGuid():N}",
+            PasswordHash = "hash",
+            PasswordSalt = "salt",
+            DisplayName = "采购测试用户",
+            Status = UserStatus.Enabled
+        };
+        db.SysUsers.Add(user);
+        db.SaveChanges();
+
+        var role = new SysRole { RoleName = "采购测试角色", RoleCode = $"PoRole-{Guid.NewGuid():N}", IsSystem = true };
+        db.SysRoles.Add(role);
+        db.SaveChanges();
+
+        db.SysUserRoles.Add(new SysUserRole { UserId = user.Id, RoleId = role.Id });
+        db.SaveChanges();
+
+        var menu = new SysMenu { MenuName = "采购订单", MenuCode = "purchase-order", MenuType = MenuType.Menu };
+        db.SysMenus.Add(menu);
+        db.SaveChanges();
+
+        db.SysRoleMenus.Add(new SysRoleMenu { RoleId = role.Id, MenuId = menu.Id });
+        db.SaveChanges();
+        return user.Id;
+    }
+
+    private static (long CustomerId, long SalesOrderId, long ProductId) SeedPurchaseLinkSource(
+        ErpDbContext db, string orderNo, string customerName)
+    {
+        var product = new BaseProduct { ProductCode = $"P-{Guid.NewGuid():N}", ProductName = "商品A", Spec = "规格A", Unit = "PCS" };
+        db.BaseProducts.Add(product);
+        db.SaveChanges();
+
+        var customer = new BaseCustomer { CustomerCode = $"C-{Guid.NewGuid():N}", CustomerName = customerName };
+        db.BaseCustomers.Add(customer);
+        db.SaveChanges();
+
+        var so = new SalesOrder
+        {
+            OrderNo = orderNo,
+            OrderDate = DateTime.Today.AddDays(-5),
+            CustomerId = customer.Id,
+            Currency = Currency.USD,
+            Status = DocumentStatus.Approved,
+            Details = new List<SalesOrderDetail>
+            {
+                new() { ProductId = product.Id, ProductName = "商品A", Spec = "规格A", Unit = "PCS", Quantity = 20m, UnitPrice = 100m, Amount = 2000m }
+            }
+        };
+        db.SalesOrders.Add(so);
+        db.SaveChanges();
+        return (customer.Id, so.Id, product.Id);
+    }
     // ==================== 销售订单：新字段往返 ====================
 
     [Fact]
@@ -234,6 +291,8 @@ public class OrderTraceabilityTests
     {
         using var db = TestDbFactory.Create();
         var ctl = new PurchaseOrderController(db, new DocumentNumberService(db));
+        var (customerId, salesOrderId, productId) = SeedPurchaseLinkSource(db, "SO2609230001", "ACME IMPORT");
+        TestAuth.SetUser(ctl, SeedAuthorizedPurchaseUser(db));
 
         await ctl.Create(new PurchaseOrder
         {
@@ -241,8 +300,7 @@ public class OrderTraceabilityTests
             Currency = Currency.CNY, ExchangeRate = 1m, PaymentTerms = "月结 30 天",
             DeliveryDate = DateTime.Today.AddDays(20),
             ContractNo = "PC-2026-0001",
-            OwningCustomerId = 555L, OwningCustomerName = "ACME IMPORT",
-            OwningSalesOrderId = 666L, OwningSalesOrderNo = "SO2609230001",
+            OwningSalesOrderId = salesOrderId,
             AdvanceOnBehalf = true,
             SupplierConfirmedDate = DateTime.Today.AddDays(18),
             TaxRate = 13m, TaxIncluded = true,
@@ -250,7 +308,7 @@ public class OrderTraceabilityTests
             Remark = "PO_TRACE_TEST",
             Details = new List<PurchaseOrderDetail>
             {
-                new() { ProductId = 1, ProductName = "P1", Quantity = 20m, UnitPrice = 50m }
+                new() { ProductId = productId, ProductName = "商品A", Spec = "规格A", Unit = "PCS", Quantity = 20m, UnitPrice = 50m }
             }
         });
 
@@ -259,9 +317,9 @@ public class OrderTraceabilityTests
         var po = Assert.IsType<ApiResponse<PurchaseOrder>>(Assert.IsType<OkObjectResult>(readResult).Value).Data!;
 
         Assert.Equal("PC-2026-0001", po.ContractNo);
-        Assert.Equal(555L, po.OwningCustomerId);
+        Assert.Equal(customerId, po.OwningCustomerId);
         Assert.Equal("ACME IMPORT", po.OwningCustomerName);
-        Assert.Equal(666L, po.OwningSalesOrderId);
+        Assert.Equal(salesOrderId, po.OwningSalesOrderId);
         Assert.Equal("SO2609230001", po.OwningSalesOrderNo);
         Assert.True(po.AdvanceOnBehalf);
         Assert.Equal(DateTime.Today.AddDays(18), po.SupplierConfirmedDate);
@@ -278,22 +336,28 @@ public class OrderTraceabilityTests
     {
         using var db = TestDbFactory.Create();
         var ctl = new PurchaseOrderController(db, new DocumentNumberService(db));
+        var (customerId, salesOrderId, productId) = SeedPurchaseLinkSource(db, "SO-LINK-9", "LINK CUSTOMER");
+        TestAuth.SetUser(ctl, SeedAuthorizedPurchaseUser(db));
         await ctl.Create(new PurchaseOrder { OrderDate = DateTime.Today, SupplierId = 1 });
         var id = db.PurchaseOrders.Single().Id;
 
         await ctl.Update(id, new PurchaseOrder
         {
             OrderDate = DateTime.Today, SupplierId = 1,
-            OwningSalesOrderId = 9L, OwningSalesOrderNo = "SO-LINK-9",
-            OwningCustomerName = "LINK CUSTOMER",
+            OwningSalesOrderId = salesOrderId,
             ArrivalProgress = "已到货", QcStatus = "不合格", SettlementProgress = "部分结算",
-            AdvanceOnBehalf = true, TaxIncluded = false, TaxRate = 6m
+            AdvanceOnBehalf = true, TaxIncluded = false, TaxRate = 6m,
+            Details = new List<PurchaseOrderDetail>
+            {
+                new() { ProductId = productId, ProductName = "商品A", Spec = "规格A", Unit = "PCS", Quantity = 1m, UnitPrice = 1m }
+            }
         });
 
         var saved = db.PurchaseOrders.Single(o => o.Id == id);
-        Assert.Equal(9L, saved.OwningSalesOrderId);
+        Assert.Equal(salesOrderId, saved.OwningSalesOrderId);
         Assert.Equal("SO-LINK-9", saved.OwningSalesOrderNo);
         Assert.Equal("LINK CUSTOMER", saved.OwningCustomerName);
+        Assert.Equal(customerId, saved.OwningCustomerId);
         Assert.Equal("已到货", saved.ArrivalProgress);
         Assert.Equal("不合格", saved.QcStatus);
         Assert.Equal("部分结算", saved.SettlementProgress);

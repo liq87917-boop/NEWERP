@@ -202,6 +202,8 @@ public class PurchaseOrderController : DocumentControllerBase<PurchaseOrder>
         entity.Status = DocumentStatus.Pending;
         entity.CreatedAt = DateTime.Now;
         foreach (var d in entity.Details) d.Amount = d.Quantity * d.UnitPrice;   // 与 Update 对齐：补齐明细金额
+        if (entity.OwningSalesOrderId is not null)
+            await PurchaseSalesOrderLinkRules.ApplyLinkAsync(Db, entity, CurrentUserId());   // ERP-346：解析并统一归属销售订单来源
         Calculate(entity);
         Validate(entity);
         Db.PurchaseOrders.Add(entity);
@@ -218,6 +220,9 @@ public class PurchaseOrderController : DocumentControllerBase<PurchaseOrder>
             ?? throw BusinessException.NotFound("采购订单不存在");
         if (GetStatus(existing) != DocumentStatus.Pending)
             throw BusinessException.RuleConflict("仅待提交状态的单据可修改");
+
+        if (entity.OwningSalesOrderId is not null)
+            await PurchaseSalesOrderLinkRules.ApplyLinkAsync(Db, entity, CurrentUserId());   // ERP-346：先解析来源与权限，失败不改动现有单据
 
         existing.OrderDate = entity.OrderDate;
         existing.SupplierId = entity.SupplierId;
