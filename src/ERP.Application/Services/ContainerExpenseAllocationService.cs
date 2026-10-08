@@ -53,12 +53,24 @@ public static class ContainerExpenseAllocationService
     /// 参与方与来源费用均按有界上限返回，批次与分摊行一次批量查询（无逐行查询）。
     /// </summary>
     public static async Task<ContainerExpenseAllocationContextDto> GetContextAsync(
-        IErpDbContext db, long loadingListId)
+        IErpDbContext db, long loadingListId, SalespersonDataScope? scope = null)
     {
-        var loadingList = await ContainerLoadingParticipantService.EnsureLoadingListAsync(db, loadingListId);
+        // ERP-385：读取任何参与方 / 来源费用 / 批次之前先复核该清单的权威客户范围（受限账号 fail closed）。
+        var loadingList = await ExpenseAuthorizationRules.EnsureLoadingListScopeAllowedAsync(db, scope, loadingListId);
         var participants = await ContainerLoadingParticipantService.ListAsync(db, loadingListId);
         var batches = await LoadBatchDtosAsync(db, loadingListId);
         var sources = await LoadSourceExpensesAsync(db, loadingList);
+
+        // 受限账号不展示归属客户在范围外的柜级来源费用（无归属登记的行仍可作为该柜参考，不按自由文本推断）。
+        if (scope is not null && scope.AllowedCustomerIds is not null)
+        {
+            sources = sources
+                .Where(e => e.CustomerId is not > 0 || scope.AllowsCustomer(e.CustomerId.Value))
+                .ToList();
+            batches = batches
+                .Where(b => scope.AllowedCustomerIds is null || BatchVisibleToScope(b, scope))
+                .ToList();
+        }
 
         var batchStatusByNo = batches
             .GroupBy(b => b.BatchNo, StringComparer.Ordinal)
@@ -294,9 +306,9 @@ public static class ContainerExpenseAllocationService
     /// 预览与生成共用同一计算入口（<see cref="BuildPlanAsync"/>），因此预览所示即生成结果。
     /// </summary>
     public static async Task<ContainerExpenseAllocationPreviewDto> PreviewAsync(
-        IErpDbContext db, ContainerExpenseAllocationRequest request)
+        IErpDbContext db, ContainerExpenseAllocationRequest request, SalespersonDataScope? scope = null)
     {
-        var plan = await BuildPlanAsync(db, request);
+        var plan = await BuildPlanAsync(db, request, scope);
         return plan.Preview;
     }
 
@@ -315,7 +327,7 @@ public static class ContainerExpenseAllocationService
     /// （余差归基准值最大的参与方）。全部校验通过后才返回；不写库、不改写任何记录。
     /// </summary>
     private static async Task<AllocationPlan> BuildPlanAsync(
-        IErpDbContext db, ContainerExpenseAllocationRequest request)
+        IErpDbContext db, ContainerExpenseAllocationRequest request, SalespersonDataScope? scope = null)
     {
         ArgumentNullException.ThrowIfNull(request);
         if (request.SourceExpenseId <= 0) throw BusinessException.InvalidParameter("请选择来源费用单");
@@ -324,11 +336,14 @@ public static class ContainerExpenseAllocationService
         var method = ContainerExpenseAllocationRules.NormalizeMethod(request.AllocationMethod);
         ContainerExpenseAllocationRules.NormalizeRemark(request.Remark);
 
-        var loadingList = await ContainerLoadingParticipantService.EnsureLoadingListAsync(db, request.LoadingListId);
+        // ERP-385：装柜清单（参与方 / 上游客户）与来源费用归属客户的范围校验在读取参与方与计算之前完成。
+        var loadingList = await ExpenseAuthorizationRules.EnsureLoadingListScopeAllowedAsync(
+            db, scope, request.LoadingListId);
         var source = await db.FinanceExpenses.AsNoTracking()
             .FirstOrDefaultAsync(x => x.Id == request.SourceExpenseId);
         ContainerExpenseAllocationRules.EnsureEligibleSource(source, loadingList);
         if (source is null) throw BusinessException.NotFound("来源费用单不存在或已删除，不能作为分摊来源");
+        ExpenseAuthorizationRules.EnsureStoredExpenseScopeAllowed(scope, source);
 
         var participants = await ContainerLoadingParticipantService.ListAsync(
             db, request.LoadingListId, activeOnly: true);
@@ -338,6 +353,11 @@ public static class ContainerExpenseAllocationService
         if (participants.Count > ContainerExpenseAllocationRules.MaxLinesPerBatch)
             throw BusinessException.InvalidParameter(
                 $"该装柜清单启用中的参与方超过 {ContainerExpenseAllocationRules.MaxLinesPerBatch} 条，超出单次分摊上限");
+
+        // ERP-385：HTTP 请求（scope 非空）在预览 / 生成任何行之前，复核每一个参与方客户真实存在且启用。
+        if (scope is not null)
+            await ExpenseAuthorizationRules.EnsureCustomersValidAsync(
+                db, scope, participants.Select(p => p.CustomerId).ToList());
 
         var currency = ContainerExpenseAllocationRules.NormalizeCurrency(source.Currency);
 
@@ -555,9 +575,9 @@ public static class ContainerExpenseAllocationService
     /// 批次 / 分摊行 / 费用单行在<b>同一次 SaveChanges</b> 内提交，校验或持久化失败不会留下部分行。
     /// </summary>
     public static async Task<ContainerExpenseAllocationGenerateResultDto> GenerateAsync(
-        IErpDbContext db, ContainerExpenseAllocationRequest request)
+        IErpDbContext db, ContainerExpenseAllocationRequest request, SalespersonDataScope? scope = null)
     {
-        var plan = await BuildPlanAsync(db, request);
+        var plan = await BuildPlanAsync(db, request, scope);
         var source = plan.Source;
         var loadingList = plan.LoadingList;
 
@@ -711,7 +731,7 @@ public static class ContainerExpenseAllocationService
     /// 也不产生任何收款 / 付款 / 结算 / 记账动作；作废后同一来源费用可重新生成。
     /// </summary>
     public static async Task<ContainerExpenseAllocationBatchDto> VoidAsync(
-        IErpDbContext db, long batchId, string? reason)
+        IErpDbContext db, long batchId, string? reason, SalespersonDataScope? scope = null)
     {
         if (batchId <= 0) throw BusinessException.InvalidParameter("分摊批次 Id 不合法");
 
@@ -722,6 +742,9 @@ public static class ContainerExpenseAllocationService
         var batch = await db.FinanceExpenseAllocationBatches
             .FirstOrDefaultAsync(x => x.Id == batchId && !x.IsDeleted)
             ?? throw BusinessException.NotFound($"分摊批次（Id={batchId}）不存在或已删除");
+
+        // ERP-385：范围校验在任何状态改写之前完成（越界 / 无法证明归属一律拒绝，且不改写状态与审计）。
+        await ExpenseAuthorizationRules.EnsureBatchScopeAllowedAsync(db, scope, batch);
 
         if (batch.Status == ContainerExpenseAllocationRules.BatchVoided)
             throw BusinessException.RuleConflict(
@@ -744,13 +767,15 @@ public static class ContainerExpenseAllocationService
 
     /// <summary>按来源费用 / 装柜清单 / 状态 / 关键字分页查询批次台账（有界、无逐行查询）</summary>
     public static async Task<PagedResult<ContainerExpenseAllocationBatchDto>> ListBatchesAsync(
-        IErpDbContext db, ContainerExpenseAllocationBatchQuery query)
+        IErpDbContext db, ContainerExpenseAllocationBatchQuery query, SalespersonDataScope? scope = null)
     {
         ArgumentNullException.ThrowIfNull(query);
         query.Normalize();
         var status = ContainerExpenseAllocationRules.NormalizeBatchStatusFilter(query.Status);
 
-        var source = db.FinanceExpenseAllocationBatches.AsNoTracking().Where(x => !x.IsDeleted);
+        // ERP-385：身份 / 菜单 / 权威范围在**计数与分页之前**下推到 SQL（绝不先查全量再内存过滤）。
+        var source = ExpenseAuthorizationRules.ApplyBatchScope(
+            db.FinanceExpenseAllocationBatches.AsNoTracking().Where(x => !x.IsDeleted), db, scope);
         if (query.SourceExpenseId is not null)
             source = source.Where(x => x.SourceExpenseId == query.SourceExpenseId.Value);
         if (query.LoadingListId is not null)
@@ -782,13 +807,17 @@ public static class ContainerExpenseAllocationService
     }
 
     /// <summary>按 Id 读取单个批次台账（含逐行留痕，只读）</summary>
-    public static async Task<ContainerExpenseAllocationBatchDto> GetBatchAsync(IErpDbContext db, long batchId)
+    public static async Task<ContainerExpenseAllocationBatchDto> GetBatchAsync(
+        IErpDbContext db, long batchId, SalespersonDataScope? scope = null)
     {
         if (batchId <= 0) throw BusinessException.InvalidParameter("分摊批次 Id 不合法");
 
         var batch = await db.FinanceExpenseAllocationBatches.AsNoTracking()
             .FirstOrDefaultAsync(x => x.Id == batchId && !x.IsDeleted)
             ?? throw BusinessException.NotFound($"分摊批次（Id={batchId}）不存在或已删除");
+
+        // ERP-385：详情读取之前复核批次的完整权威归属（装柜清单参与方 / 来源费用 / 逐行生成客户）。
+        await ExpenseAuthorizationRules.EnsureBatchScopeAllowedAsync(db, scope, batch);
 
         var mapped = await MapBatchesAsync(db, new[] { batch });
         return mapped[0];
@@ -831,6 +860,17 @@ public static class ContainerExpenseAllocationService
             row.AllocationLineage = ContainerExpenseAllocationRules.LineageOf(row);
             row.AllocationLineageText = ContainerExpenseAllocationRules.LineageText(row, status);
         }
+    }
+
+    /// <summary>
+    /// 批次 DTO 是否对受限账号可见：其**逐行生成客户**必须全部落在当前范围内（多客户共享柜 fail closed，
+    /// 不通过上下文面板泄露其他客户的分摊证据）。特权账号由调用方直接放行。
+    /// </summary>
+    private static bool BatchVisibleToScope(ContainerExpenseAllocationBatchDto batch, SalespersonDataScope scope)
+    {
+        ArgumentNullException.ThrowIfNull(batch);
+        ArgumentNullException.ThrowIfNull(scope);
+        return batch.Lines.All(line => scope.AllowsCustomer(line.CustomerId));
     }
 
     /// <summary>下一个批次号（EAB-yyyyMMdd-序号；按当日已有批次号的最大序号 +1）</summary>

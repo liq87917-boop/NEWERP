@@ -18,6 +18,8 @@ public sealed class ContainerExpenseAllocationBasisDto
 /// 装柜费用分摊请求（ERP-042，预览与生成共用）：对一条**柜级来源费用单**按某个装柜清单的启用参与方分摊。
 /// <para>客户端只能提交「来源费用 + 装柜清单 + 方法 + 各参与方基数值 + 备注」；
 /// 客户快照、比例、分摊金额、批次号与留痕字段一律由服务端权威计算与写入。</para>
+/// <para>ERP-385：<b>本请求体不包含、也不接受任何账号身份字段</b>；授权与数据范围只来自已认证请求主体
+/// （<c>ClaimTypes.NameIdentifier</c>），客户端无法通过提交体指定或扩大可见范围。</para>
 /// </summary>
 public sealed class ContainerExpenseAllocationRequest
 {

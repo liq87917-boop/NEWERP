@@ -37,10 +37,19 @@ public static class ContainerExpenseAllocationEvidenceService
     public static async Task<ContainerExpenseAllocationEvidenceDto> GetForLoadingListAsync(
         IErpDbContext db, long loadingListId,
         bool includeHistory = true,
-        int historyTake = ContainerExpenseAllocationEvidenceRules.DefaultHistoryTake)
+        int historyTake = ContainerExpenseAllocationEvidenceRules.DefaultHistoryTake,
+        SalespersonDataScope? dataScope = null)
     {
         var id = ContainerExpenseAllocationEvidenceRules.EnsureScopeId(loadingListId, "装柜清单");
         var take = ContainerExpenseAllocationEvidenceRules.NormalizeHistoryTake(historyTake);
+
+        // ERP-385：读取任何证据之前先复核该装柜清单（参与方 / 上游客户）与链路上每一个被分摊客户的权威范围。
+        if (dataScope is not null)
+        {
+            await ExpenseAuthorizationRules.ResolveLoadingListScopeAsync(db, dataScope, id);
+            await ExpenseAuthorizationRules.EnsureEvidenceCustomersInScopeAsync(db, dataScope, id);
+        }
+
         var scope = await LoadScopeAsync(db, id);
         return BuildDetail(scope, ContainerExpenseAllocationEvidenceRules.ScopeLoadingList, id, includeHistory, take);
     }
@@ -55,7 +64,8 @@ public static class ContainerExpenseAllocationEvidenceService
     public static async Task<ContainerSettlementAllocationEvidenceDto> GetForSettlementAsync(
         IErpDbContext db, long settlementId,
         bool includeHistory = true,
-        int historyTake = ContainerExpenseAllocationEvidenceRules.DefaultHistoryTake)
+        int historyTake = ContainerExpenseAllocationEvidenceRules.DefaultHistoryTake,
+        SalespersonDataScope? dataScope = null)
     {
         var id = ContainerExpenseAllocationEvidenceRules.EnsureScopeId(settlementId, "装柜结算单");
         var take = ContainerExpenseAllocationEvidenceRules.NormalizeHistoryTake(historyTake);
@@ -64,6 +74,9 @@ public static class ContainerExpenseAllocationEvidenceService
             .FirstOrDefaultAsync(x => x.Id == id);
         if (settlement is null || settlement.IsDeleted)
             throw BusinessException.NotFound("装柜结算单不存在或已删除，不能查看分摊证据");
+
+        // ERP-385：结算客户 / 显式装柜清单（参与方、上游客户）与链路上每一个被分摊客户的范围校验。
+        await ExpenseAuthorizationRules.EnsureSettlementScopeAllowedAsync(db, dataScope, settlement);
 
         var customer = settlement.CustomerId <= 0
             ? null
@@ -663,7 +676,8 @@ public static class ContainerExpenseAllocationEvidenceService
     /// 扫描上限 <see cref="ContainerExpenseAllocationEvidenceRules.MaxBatchScan"/>，截断时显式标注。
     /// </summary>
     public static async Task<ContainerExpenseAllocationEvidenceWorkspaceDto> ListAsync(
-        IErpDbContext db, ContainerExpenseAllocationEvidenceQuery query)
+        IErpDbContext db, ContainerExpenseAllocationEvidenceQuery query,
+        SalespersonDataScope? dataScope = null)
     {
         ArgumentNullException.ThrowIfNull(query);
         query.Normalize();
@@ -676,7 +690,9 @@ public static class ContainerExpenseAllocationEvidenceService
         var customerId = ContainerExpenseAllocationEvidenceRules.NormalizeCustomerIdFilter(query.CustomerId);
         var keyword = ContainerExpenseAllocationEvidenceRules.NormalizeKeyword(query.Keyword);
 
-        var batchesQuery = db.FinanceExpenseAllocationBatches.AsNoTracking();
+        // ERP-385：身份 / 菜单 / 权威范围在**计数与分页之前**下推到 SQL（绝不先查全量再内存过滤）。
+        var batchesQuery = ExpenseAuthorizationRules.ApplyBatchScope(
+            db.FinanceExpenseAllocationBatches.AsNoTracking(), db, dataScope);
         if (!query.IncludeHistory)
             batchesQuery = batchesQuery.Where(x => x.Status == ContainerExpenseAllocationRules.BatchActive);
         if (status.HasValue)

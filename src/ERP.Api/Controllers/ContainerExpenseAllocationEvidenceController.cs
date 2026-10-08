@@ -4,6 +4,7 @@ using ERP.Application.Interfaces;
 using ERP.Application.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using System.Security.Claims;
 
 namespace ERP.Api.Controllers;
 
@@ -38,7 +39,8 @@ public class ContainerExpenseAllocationEvidenceController : ControllerBase
     [HttpGet]
     public async Task<IActionResult> GetPaged([FromQuery] ContainerExpenseAllocationEvidenceQuery query)
         => Ok(ApiResponse<ContainerExpenseAllocationEvidenceWorkspaceDto>.Success(
-            await ContainerExpenseAllocationEvidenceService.ListAsync(_db, query)));
+            await ContainerExpenseAllocationEvidenceService.ListAsync(
+                _db, query, await EnsureAuthorizedAsync())));
 
     /// <summary>
     /// 按**显式装柜清单 Id** 读取分摊证据（只读）：有效批次与「币种 → 客户」分组、未分摊参考、
@@ -52,7 +54,7 @@ public class ContainerExpenseAllocationEvidenceController : ControllerBase
         [FromQuery] int historyTake = ContainerExpenseAllocationEvidenceRules.DefaultHistoryTake)
         => Ok(ApiResponse<ContainerExpenseAllocationEvidenceDto>.Success(
             await ContainerExpenseAllocationEvidenceService.GetForLoadingListAsync(
-                _db, loadingListId, includeHistory, historyTake),
+                _db, loadingListId, includeHistory, historyTake, await EnsureAuthorizedAsync()),
             "已按显式装柜清单返回分摊证据（只读：缺失显示「无 / 未知」，不改写任何单据）"));
 
     /// <summary>
@@ -67,6 +69,19 @@ public class ContainerExpenseAllocationEvidenceController : ControllerBase
         [FromQuery] int historyTake = ContainerExpenseAllocationEvidenceRules.DefaultHistoryTake)
         => Ok(ApiResponse<ContainerSettlementAllocationEvidenceDto>.Success(
             await ContainerExpenseAllocationEvidenceService.GetForSettlementAsync(
-                _db, settlementId, includeHistory, historyTake),
+                _db, settlementId, includeHistory, historyTake, await EnsureAuthorizedAsync()),
             "已按显式装柜结算单返回分摊证据（只读：结算金额字段为原值回显，分摊证据不参与结算计算）"));
+
+    /// <summary>
+    /// 分摊证据读取前的实时授权（ERP-385）：身份 / 账号状态 / 既有「费用单」（<c>expense-bill</c>）菜单授权与
+    /// 权威客户数据范围，缺失 / 禁用 / 无授权一律 fail closed（不返回任何证据）。
+    /// </summary>
+    private Task<SalespersonDataScope> EnsureAuthorizedAsync()
+        => ExpenseAuthorizationRules.EnsureMenuAuthorizedAsync(_db, CurrentUserId());
+
+    /// <summary>当前登录账号 Id（身份只来自已认证请求主体，缺失 / 非法返回 <c>null</c>）</summary>
+    private long? CurrentUserId()
+        => long.TryParse(HttpContext?.User?.FindFirst(ClaimTypes.NameIdentifier)?.Value, out var id) && id > 0
+            ? id
+            : null;
 }
