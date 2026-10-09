@@ -1,0 +1,68 @@
+{
+  "title": "Enforce supplier invoice evidence authorization independently of request path",
+  "description": "Stage3 critical authority path repair. src/ERP.Api/Controllers/PurchaseInvoiceController.cs:102-111 returns false for absent request context/path and identity, so supplier invoice evidence routes can execute without live identity/menu/scope. Remove the request-shape bypass and require the existing authoritative supplier-invoice menu/customer scope on every paged/detail/reconciliation/create/update/record/void/allocation operation; preserve original shared invoice/payment capacity transaction locks and all currency/amount semantics. Preserve existing ERP business permissions, data scopes, transactions and numeric validation. Adapt legacy controller fixtures to genuine enabled identities and their existing menu grants in isolated test data only. No Request.Path/environment/blank-context/test-only switch, anonymous fallback, permission expansion, production access or schema change. Genuine SQL uses exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and fresh GUID-owned NEWERP_AUTOTEST database, refusing existing or wrong targets before access; never drop/reset. Preserve full failing logs. Safe Release with analyzers/warnings-as-errors and full unit suite, plus new authenticated real SQL tests are required; build is not whole phase acceptance.",
+  "acceptance_criteria": [
+    "src/ERP.Api/Controllers/PurchaseInvoiceController.cs:102-111 returns false for absent request context/path and identity, so supplier invoice evidence routes can execute without live identity/menu/scope. Remove the request-shape bypass and require the existing authoritative supplier-invoice menu/customer scope on every paged/detail/reconciliation/create/update/record/void/allocation operation; preserve original shared invoice/payment capacity transaction locks and all currency/amount semantics. Missing/zero/deleted identity must fail Unauthorized; disabled/revoked/missing-menu must fail Forbidden before sensitive reads or writes. Empty and populated Request.Path must enforce identical authority, including no HttpContext. No anonymous or administrative fallback.",
+    "Retain permitted privileged and existing menu-granted business lifecycle, existing customer scope and non-disclosing missing/foreign behavior, and all original amount/quantity/transaction, numbering, audit and failure boundaries. Denied operations persist zero mutations or grants; do not weaken validators or change production seed permissions.",
+    "Genuine isolated SQL controller tests exercise empty and populated request paths and missing contexts, live revocation/disabled/deleted identities, permitted genuine identity lifecycle and denied mutation snapshots, preserving all existing regressions. Preserve existing ERP business permissions, data scopes, transactions and numeric validation. Adapt legacy controller fixtures to genuine enabled identities and their existing menu grants in isolated test data only. No Request.Path/environment/blank-context/test-only switch, anonymous fallback, permission expansion, production access or schema change. Genuine SQL uses exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and fresh GUID-owned NEWERP_AUTOTEST database, refusing existing or wrong targets before access; never drop/reset. Preserve full failing logs. Safe Release with analyzers/warnings-as-errors and full unit suite, plus new authenticated real SQL tests are required; build is not whole phase acceptance."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/PurchaseInvoiceController.cs",
+    "src/ERP.Application/Services/PurchaseInvoiceAuthorizationRules.cs",
+    "src/ERP.UnitTests/PurchaseInvoiceConcurrencyTests.cs",
+    "src/ERP.UnitTests/PurchaseOrderInvoiceEvidenceTests.cs",
+    "src/ERP.UnitTests/SupplierInvoiceReconciliationTests.cs",
+    "src/ERP.IntegrationTests/PurchaseInvoiceConcurrencySqlServerTests.cs",
+    "src/ERP.UnitTests/PurchaseInvoiceEntryAuthorizationTests.cs",
+    "src/ERP.IntegrationTests/PurchaseInvoiceEntryAuthorizationSqlServerTests.cs",
+    "docs/purchaseinvoiceentryauthorization.md"
+  ],
+  "criterion_path_map": {
+    "src/ERP.Api/Controllers/PurchaseInvoiceController.cs:102-111 returns false for absent request context/path and identity, so supplier invoice evidence routes can execute without live identity/menu/scope. Remove the request-shape bypass and require the existing authoritative supplier-invoice menu/customer scope on every paged/detail/reconciliation/create/update/record/void/allocation operation; preserve original shared invoice/payment capacity transaction locks and all currency/amount semantics. Missing/zero/deleted identity must fail Unauthorized; disabled/revoked/missing-menu must fail Forbidden before sensitive reads or writes. Empty and populated Request.Path must enforce identical authority, including no HttpContext. No anonymous or administrative fallback.": [
+      "src/ERP.Api/Controllers/PurchaseInvoiceController.cs",
+      "src/ERP.Application/Services/PurchaseInvoiceAuthorizationRules.cs"
+    ],
+    "Retain permitted privileged and existing menu-granted business lifecycle, existing customer scope and non-disclosing missing/foreign behavior, and all original amount/quantity/transaction, numbering, audit and failure boundaries. Denied operations persist zero mutations or grants; do not weaken validators or change production seed permissions.": [
+      "src/ERP.Api/Controllers/PurchaseInvoiceController.cs",
+      "src/ERP.Application/Services/PurchaseInvoiceAuthorizationRules.cs",
+      "src/ERP.UnitTests/PurchaseInvoiceConcurrencyTests.cs",
+      "src/ERP.UnitTests/PurchaseOrderInvoiceEvidenceTests.cs",
+      "src/ERP.UnitTests/SupplierInvoiceReconciliationTests.cs",
+      "src/ERP.IntegrationTests/PurchaseInvoiceConcurrencySqlServerTests.cs"
+    ],
+    "Genuine isolated SQL controller tests exercise empty and populated request paths and missing contexts, live revocation/disabled/deleted identities, permitted genuine identity lifecycle and denied mutation snapshots, preserving all existing regressions. Preserve existing ERP business permissions, data scopes, transactions and numeric validation. Adapt legacy controller fixtures to genuine enabled identities and their existing menu grants in isolated test data only. No Request.Path/environment/blank-context/test-only switch, anonymous fallback, permission expansion, production access or schema change. Genuine SQL uses exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and fresh GUID-owned NEWERP_AUTOTEST database, refusing existing or wrong targets before access; never drop/reset. Preserve full failing logs. Safe Release with analyzers/warnings-as-errors and full unit suite, plus new authenticated real SQL tests are required; build is not whole phase acceptance.": [
+      "src/ERP.UnitTests/PurchaseInvoiceConcurrencyTests.cs",
+      "src/ERP.UnitTests/PurchaseOrderInvoiceEvidenceTests.cs",
+      "src/ERP.UnitTests/SupplierInvoiceReconciliationTests.cs",
+      "src/ERP.IntegrationTests/PurchaseInvoiceConcurrencySqlServerTests.cs",
+      "src/ERP.UnitTests/PurchaseInvoiceEntryAuthorizationTests.cs",
+      "src/ERP.IntegrationTests/PurchaseInvoiceEntryAuthorizationSqlServerTests.cs",
+      "docs/purchaseinvoiceentryauthorization.md"
+    ]
+  },
+  "depends_on": [
+    "ERP-382",
+    "ERP-433"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "implementation_evidence": "src/ERP.Api/Controllers/PurchaseInvoiceController.cs:102-111 returns false for absent request context/path and identity, so supplier invoice evidence routes can execute without live identity/menu/scope. Remove the request-shape bypass and require the existing authoritative supplier-invoice menu/customer scope on every paged/detail/reconciliation/create/update/record/void/allocation operation; preserve original shared invoice/payment capacity transaction locks and all currency/amount semantics.",
+  "id": "ERP-462",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-09T09:48:38.204147Z"
+}
