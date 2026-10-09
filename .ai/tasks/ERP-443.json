@@ -1,0 +1,65 @@
+{
+  "title": "Authorize the other-info data dictionary routes with live menu authority and bounded field validation",
+  "description": "Stage 3 operational master-data closure for the shared dictionary that sales/shipping/document screens read. src/ERP.Api/Controllers/OtherInfoController.cs:12-15 declares [ApiController]/[Route(\"api/base/other-infos\")]/[Authorize] over BaseCrudController<BaseOtherInfo> and adds GetByType at 19-25; the inherited generic routes in src/ERP.Api/Controllers/BaseCrudController.cs:38-92 (GetPaged, GetAll, GetById, Create, Update, Delete, batch-delete) delegate straight to IGenericService/GenericService.cs with zero Authoriz/Menu/scope references, so any authenticated account can list, create, update and delete any dictionary entry (Currency/Port/Forwarder/ShippingMark/Package/TradeTerm) that other modules treat as authoritative - CustomerForwarderRules.cs:29 (forwarder selection), SalesOrder.PortId, ContainerBooking ports and ContainerShipment customs-broker all resolve against BaseOtherInfo rows, and BaseDataIoAuthorizationRules.cs:40 already maps the other-infos resource to the existing other-info menu. Reuse that existing other-info functional menu (SeedData.Menus.cs:31) exactly, keep BaseCrudController's paging/response contract, and add server-side bounded field validation for the persisted columns of BaseOtherInfo (src/ERP.Domain/Entities/BaseOtherInfo.cs:188-218). Add no grants, no anonymous/admin fallback, no schema change and no change to existing dictionary semantics. Genuine isolated (localdb)\\NEWERP_AutoAcceptance GUID-owned NEWERP_AUTOTEST SQL only; safe Release build plus full ERP.UnitTests.",
+  "acceptance_criteria": [
+    "For every route on /api/base/other-infos (paged, all, by-id, create, update, delete, batch-delete and by-type) require the current enabled nondeleted identity and the existing other-info functional menu before any read or write, rejecting missing, disabled, deleted and revoked-menu identities with the existing controlled non-disclosing errors and adding no new grants or anonymous/admin fallback.",
+    "Validate on create and update that InfoType is a known bounded dictionary type, that InfoCode and InfoName are non-empty and within their persisted length bounds, that EnglishName and Remark stay within their persisted bounds and that Status is a known enabled/disabled value, returning the existing controlled validation errors without silently clamping, deleting or resurrecting any dictionary row.",
+    "Genuine isolated SQL authenticated controller tests cover the permitted privileged and menu-granted flows, missing other-info menu, disabled, deleted and revoked identities and invalid InfoType, code, name and status payloads, and assert that denied calls read or mutate no BaseOtherInfo row while the existing forwarder and shipping master-data regression contracts stay green.",
+    "Keep the safe Release build and the full existing ERP.UnitTests suite green, use only genuine isolated (localdb)\\NEWERP_AutoAcceptance GUID-owned NEWERP_AUTOTEST databases with Integrated Security, and add no schema, entity, menu, permission or production/secret change; build completion is not stage acceptance."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/OtherInfoController.cs",
+    "src/ERP.Application/Services/OtherInfoAuthorizationRules.cs",
+    "src/ERP.UnitTests/OtherInfoAuthorizationTests.cs",
+    "src/ERP.UnitTests/CustomerForwarderTests.cs",
+    "src/ERP.IntegrationTests/OtherInfoAuthorizationSqlServerTests.cs",
+    "docs/other-info-authority.md"
+  ],
+  "criterion_path_map": {
+    "For every route on /api/base/other-infos (paged, all, by-id, create, update, delete, batch-delete and by-type) require the current enabled nondeleted identity and the existing other-info functional menu before any read or write, rejecting missing, disabled, deleted and revoked-menu identities with the existing controlled non-disclosing errors and adding no new grants or anonymous/admin fallback.": [
+      "src/ERP.Api/Controllers/OtherInfoController.cs",
+      "src/ERP.Application/Services/OtherInfoAuthorizationRules.cs"
+    ],
+    "Validate on create and update that InfoType is a known bounded dictionary type, that InfoCode and InfoName are non-empty and within their persisted length bounds, that EnglishName and Remark stay within their persisted bounds and that Status is a known enabled/disabled value, returning the existing controlled validation errors without silently clamping, deleting or resurrecting any dictionary row.": [
+      "src/ERP.Api/Controllers/OtherInfoController.cs",
+      "src/ERP.Application/Services/OtherInfoAuthorizationRules.cs",
+      "src/ERP.UnitTests/OtherInfoAuthorizationTests.cs"
+    ],
+    "Genuine isolated SQL authenticated controller tests cover the permitted privileged and menu-granted flows, missing other-info menu, disabled, deleted and revoked identities and invalid InfoType, code, name and status payloads, and assert that denied calls read or mutate no BaseOtherInfo row while the existing forwarder and shipping master-data regression contracts stay green.": [
+      "src/ERP.UnitTests/OtherInfoAuthorizationTests.cs",
+      "src/ERP.UnitTests/CustomerForwarderTests.cs",
+      "src/ERP.IntegrationTests/OtherInfoAuthorizationSqlServerTests.cs",
+      "docs/other-info-authority.md"
+    ],
+    "Keep the safe Release build and the full existing ERP.UnitTests suite green, use only genuine isolated (localdb)\\NEWERP_AutoAcceptance GUID-owned NEWERP_AUTOTEST databases with Integrated Security, and add no schema, entity, menu, permission or production/secret change; build completion is not stage acceptance.": [
+      "src/ERP.UnitTests/OtherInfoAuthorizationTests.cs",
+      "docs/other-info-authority.md"
+    ]
+  },
+  "depends_on": [
+    "ERP-006",
+    "ERP-097",
+    "ERP-440"
+  ],
+  "risk": "low",
+  "planning_stage": 3,
+  "implementation_evidence": "src/ERP.Api/Controllers/OtherInfoController.cs:12-15 declares only [Authorize] over BaseCrudController<BaseOtherInfo> and GetByType at 19-25 calls Service.GetAllAsync without resolving identity or the existing other-info menu; the inherited generic routes in src/ERP.Api/Controllers/BaseCrudController.cs:38-92 (GetPaged 38-43, GetAll 46-51, GetById 54-59, Create 62-67, Update 70-76, Delete 79-84, batch-delete 87-92) call IGenericService (GenericService.cs) which contains zero Authoriz/Menu/scope references. BaseOtherInfo (src/ERP.Domain/Entities/BaseOtherInfo.cs:188-218) persists InfoType/InfoCode/InfoName/EnglishName/Status/Remark with no server-side bound rule. The dictionary is authoritative for CustomerForwarderRules.cs:29 (forwarder selection), SalesOrder.PortId (src/ERP.Domain/Entities/SalesOrder.cs:61), ContainerBooking/ContainerShipment master references, and BaseDataIoAuthorizationRules.cs:40 already maps other-infos to the existing other-info menu (SeedData.Menus.cs:31). An exact search of .ai/tasks shows ERP-036/ERP-317/ERP-320 only touch forwarder master data and report migration and no task lists OtherInfoController for live authorization.",
+  "id": "ERP-443",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-09T06:45:33.639145Z"
+}

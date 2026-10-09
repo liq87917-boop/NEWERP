@@ -1,0 +1,65 @@
+{
+  "title": "Authorize system parameters with live menu authority and operational value guards",
+  "description": "Stage 3 operational-configuration closure for the global parameters that feed operational document defaults. src/ERP.Api/Controllers/ParameterController.cs:13-16 declares [ApiController]/[Route(\"api/sys/parameters\")]/[Authorize] with no identity or menu resolution; GetAll at 26-40, GetById at 43-49, GetByKey at 52-58, Create at 61-71 and Update at 74-85 read and rewrite SysParameters (src/ERP.Domain/Entities/SysSystem.cs:10-30) for any authenticated account. The DefaultCurrency and ExchangeRate parameters are consumed as authoritative fallbacks by src/ERP.Api/Controllers/BillProcController.cs:268-289 (LoadCurrencyDefaultsAsync) and 304-313 (ApplyCurrencyDefaultsAsync) when a bill omits currency or exchange rate, so an unguarded write can silently change the currency and rate defaults of newly saved operational documents. Reuse the existing sys-parameter functional menu (SeedData.Menus.cs:18) on every route and add bounded server-side validation for the persisted parameter columns plus explicit operational guards (supported currency codes, positive exchange rate), keeping BillProcController's existing parameter-driven default behaviour unchanged. Add no grants, no anonymous/admin fallback, no schema change. Genuine isolated (localdb)\\NEWERP_AutoAcceptance GUID-owned NEWERP_AUTOTEST SQL only; safe Release build plus full ERP.UnitTests.",
+  "acceptance_criteria": [
+    "For every route on /api/sys/parameters (list, by-id, by-key, create and update) require the current enabled nondeleted identity and the existing sys-parameter functional menu before any read or write, rejecting missing, disabled, deleted and revoked-menu identities with the existing controlled non-disclosing errors and adding no new grants or anonymous/admin fallback.",
+    "Validate on create and update that ParamKey and ParamName are non-empty within their persisted length bounds and that ParamKey stays unique among non-deleted parameters, that ParamValue and Description stay within their persisted bounds, and that the operational keys DefaultCurrency and ExchangeRate accept only a supported currency code and a positive parseable decimal respectively, so rejected writes persist no SysParameters row and leave the stored values, BillProcController's currency/exchange-rate fallback and existing system parameters unchanged.",
+    "Genuine isolated SQL authenticated controller tests cover the permitted privileged and menu-granted flows, missing sys-parameter menu, disabled, deleted and revoked identities, duplicate or over-long keys and invalid DefaultCurrency and ExchangeRate values, and assert that denied create and update calls read or mutate no SysParameters row while the existing ParameterControllerTests contracts stay green.",
+    "Keep the safe Release build and the full existing ERP.UnitTests suite green, use only genuine isolated (localdb)\\NEWERP_AutoAcceptance GUID-owned NEWERP_AUTOTEST databases with Integrated Security, and add no schema, entity, menu, permission or production/secret change; build completion is not stage acceptance."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/ParameterController.cs",
+    "src/ERP.Application/Services/SystemParameterAuthorizationRules.cs",
+    "src/ERP.UnitTests/ParameterControllerTests.cs",
+    "src/ERP.UnitTests/SystemParameterAuthorizationTests.cs",
+    "src/ERP.IntegrationTests/SystemParameterAuthorizationSqlServerTests.cs",
+    "docs/system-parameter-authority.md"
+  ],
+  "criterion_path_map": {
+    "For every route on /api/sys/parameters (list, by-id, by-key, create and update) require the current enabled nondeleted identity and the existing sys-parameter functional menu before any read or write, rejecting missing, disabled, deleted and revoked-menu identities with the existing controlled non-disclosing errors and adding no new grants or anonymous/admin fallback.": [
+      "src/ERP.Api/Controllers/ParameterController.cs",
+      "src/ERP.Application/Services/SystemParameterAuthorizationRules.cs"
+    ],
+    "Validate on create and update that ParamKey and ParamName are non-empty within their persisted length bounds and that ParamKey stays unique among non-deleted parameters, that ParamValue and Description stay within their persisted bounds, and that the operational keys DefaultCurrency and ExchangeRate accept only a supported currency code and a positive parseable decimal respectively, so rejected writes persist no SysParameters row and leave the stored values, BillProcController's currency/exchange-rate fallback and existing system parameters unchanged.": [
+      "src/ERP.Api/Controllers/ParameterController.cs",
+      "src/ERP.Application/Services/SystemParameterAuthorizationRules.cs",
+      "src/ERP.UnitTests/SystemParameterAuthorizationTests.cs"
+    ],
+    "Genuine isolated SQL authenticated controller tests cover the permitted privileged and menu-granted flows, missing sys-parameter menu, disabled, deleted and revoked identities, duplicate or over-long keys and invalid DefaultCurrency and ExchangeRate values, and assert that denied create and update calls read or mutate no SysParameters row while the existing ParameterControllerTests contracts stay green.": [
+      "src/ERP.UnitTests/SystemParameterAuthorizationTests.cs",
+      "src/ERP.UnitTests/ParameterControllerTests.cs",
+      "src/ERP.IntegrationTests/SystemParameterAuthorizationSqlServerTests.cs",
+      "docs/system-parameter-authority.md"
+    ],
+    "Keep the safe Release build and the full existing ERP.UnitTests suite green, use only genuine isolated (localdb)\\NEWERP_AutoAcceptance GUID-owned NEWERP_AUTOTEST databases with Integrated Security, and add no schema, entity, menu, permission or production/secret change; build completion is not stage acceptance.": [
+      "src/ERP.UnitTests/SystemParameterAuthorizationTests.cs",
+      "docs/system-parameter-authority.md"
+    ]
+  },
+  "depends_on": [
+    "ERP-006",
+    "ERP-097",
+    "ERP-442"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "implementation_evidence": "src/ERP.Api/Controllers/ParameterController.cs:13-16 declares only [Authorize] with no identity/menu resolution; GetAll at 26-40, GetById at 43-49, GetByKey at 52-58, Create at 61-71 and Update at 74-85 read and write SysParameters with only a duplicate-key check at 64-65 and no caller, menu or value guard. SysParameter (src/ERP.Domain/Entities/SysSystem.cs:10-30) persists ParamKey/ParamValue/ParamName/Description with no server-side bound or domain rule. The consumed operational fallback is src/ERP.Api/Controllers/BillProcController.cs:268-289 (LoadCurrencyDefaultsAsync reads DefaultCurrency and ExchangeRate from SysParameters) and 304-313 (ApplyCurrencyDefaultsAsync applies them to saved bills), so unguarded writes change operational document currency/rate defaults. The existing sys-parameter menu is seeded at src/ERP.Infrastructure/Data/SeedData.Menus.cs:18. An exact search of .ai/tasks returned no task listing ParameterController or SysParameter for live authorization.",
+  "id": "ERP-446",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-09T06:45:33.643041Z"
+}

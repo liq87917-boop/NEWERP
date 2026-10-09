@@ -1,0 +1,68 @@
+{
+  "title": "Authorize product variant SKU maintenance with live product permission and reference validation",
+  "description": "Stage 3 operational master-data closure for product SKUs used by sales/procurement order lines and stock documents. src/ERP.Api/Controllers/ProductVariantController.cs:18-21 declares [ApiController]/[Route(\"api/base/products/{productId:long}/variants\")]/[Authorize] on ControllerBase, and List at 34-39, Options at 45-50, Create at 52-58, Update at 60-66, Disable at 68-74, Enable at 76-82 and Delete at 84-90 call ProductVariantService directly. src/ERP.Application/Services/ProductVariantService.cs contains zero Authoriz/Menu/SalespersonDataScope references (class at 25; EnsureProductAsync at 33-38 only checks that the product exists and is not deleted), so any authenticated account can read and rewrite which SKUs a product may be ordered or stocked under, including code, color/size, status and active/disabled transitions, while ERP-441 already closed the sibling product-to-supplier sourcing routes with the existing product and supplier menus (ProductSupplierRules.cs:251). Reuse the existing product functional menu (SeedData.Menus.cs:30) on every route, validate the live product reference and the proposed variant payload before persisting, and keep the ERP-037 uniqueness, bound and status semantics unchanged. Add no grants, no anonymous/admin fallback, no schema change. Genuine isolated (localdb)\\NEWERP_AutoAcceptance GUID-owned NEWERP_AUTOTEST SQL only; safe Release build plus full ERP.UnitTests.",
+  "acceptance_criteria": [
+    "For every route on /api/base/products/{productId}/variants (list, options, create, update, disable, enable and delete) require the current enabled nondeleted identity and the existing product functional menu before any read or write, rejecting missing, disabled, deleted and revoked-menu identities with the existing controlled non-disclosing errors and adding no new grants or anonymous/admin fallback.",
+    "Validate the authoritative live product reference and the proposed variant payload on every read and write before persisting so foreign, deleted or disabled products and invalid code, color, size or status values fail closed and no variant row or status transition is persisted on denial, keeping the existing ERP-037 code uniqueness, active-combination uniqueness and status bounds unchanged.",
+    "Genuine isolated SQL authenticated controller tests cover the permitted product-permission flows, missing product menu, disabled, deleted and revoked identities, foreign or deleted product references and invalid variant payloads, and assert that denied list, create, update, disable, enable and delete calls read or mutate no BaseProductVariants row while the existing ProductVariantTests contracts stay green.",
+    "Keep the safe Release build and the full existing ERP.UnitTests suite green, use only genuine isolated (localdb)\\NEWERP_AutoAcceptance GUID-owned NEWERP_AUTOTEST databases with Integrated Security, and add no schema, entity, menu, permission or production/secret change; build completion is not stage acceptance."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/ProductVariantController.cs",
+    "src/ERP.Application/Services/ProductVariantService.cs",
+    "src/ERP.Application/Services/ProductVariantAuthorizationRules.cs",
+    "src/ERP.UnitTests/ProductVariantAuthorizationTests.cs",
+    "src/ERP.UnitTests/ProductVariantTests.cs",
+    "src/ERP.IntegrationTests/ProductVariantAuthorizationSqlServerTests.cs",
+    "docs/product-variant-authority.md"
+  ],
+  "criterion_path_map": {
+    "For every route on /api/base/products/{productId}/variants (list, options, create, update, disable, enable and delete) require the current enabled nondeleted identity and the existing product functional menu before any read or write, rejecting missing, disabled, deleted and revoked-menu identities with the existing controlled non-disclosing errors and adding no new grants or anonymous/admin fallback.": [
+      "src/ERP.Api/Controllers/ProductVariantController.cs",
+      "src/ERP.Application/Services/ProductVariantService.cs",
+      "src/ERP.Application/Services/ProductVariantAuthorizationRules.cs"
+    ],
+    "Validate the authoritative live product reference and the proposed variant payload on every read and write before persisting so foreign, deleted or disabled products and invalid code, color, size or status values fail closed and no variant row or status transition is persisted on denial, keeping the existing ERP-037 code uniqueness, active-combination uniqueness and status bounds unchanged.": [
+      "src/ERP.Api/Controllers/ProductVariantController.cs",
+      "src/ERP.Application/Services/ProductVariantService.cs",
+      "src/ERP.Application/Services/ProductVariantAuthorizationRules.cs",
+      "src/ERP.UnitTests/ProductVariantAuthorizationTests.cs"
+    ],
+    "Genuine isolated SQL authenticated controller tests cover the permitted product-permission flows, missing product menu, disabled, deleted and revoked identities, foreign or deleted product references and invalid variant payloads, and assert that denied list, create, update, disable, enable and delete calls read or mutate no BaseProductVariants row while the existing ProductVariantTests contracts stay green.": [
+      "src/ERP.UnitTests/ProductVariantAuthorizationTests.cs",
+      "src/ERP.UnitTests/ProductVariantTests.cs",
+      "src/ERP.IntegrationTests/ProductVariantAuthorizationSqlServerTests.cs",
+      "docs/product-variant-authority.md"
+    ],
+    "Keep the safe Release build and the full existing ERP.UnitTests suite green, use only genuine isolated (localdb)\\NEWERP_AutoAcceptance GUID-owned NEWERP_AUTOTEST databases with Integrated Security, and add no schema, entity, menu, permission or production/secret change; build completion is not stage acceptance.": [
+      "src/ERP.UnitTests/ProductVariantAuthorizationTests.cs",
+      "docs/product-variant-authority.md"
+    ]
+  },
+  "depends_on": [
+    "ERP-037",
+    "ERP-097",
+    "ERP-441"
+  ],
+  "risk": "low",
+  "planning_stage": 3,
+  "implementation_evidence": "src/ERP.Api/Controllers/ProductVariantController.cs:18-21 declares only [Authorize] (no identity, menu or scope resolution); List 34-39, Options 45-50, Create 52-58, Update 60-66, Disable 68-74, Enable 76-82 and Delete 84-90 call ProductVariantService directly. src/ERP.Application/Services/ProductVariantService.cs contains zero Authoriz/Menu/SalespersonDataScope references: EnsureProductAsync at 33-38 only verifies the product exists and is not deleted, CreateAsync at 110-131 persists code/color/size/status with only ERP-037 uniqueness helpers, and SetStatusAsync at 183-210 flips active/disabled state without any caller check. The sibling sourcing routes were closed by ERP-441 with the existing product/supplier menus (src/ERP.Application/Services/ProductSupplierRules.cs:251) and the existing product menu is seeded at src/ERP.Infrastructure/Data/SeedData.Menus.cs:30. An exact search of .ai/tasks returned no task listing ProductVariantController or ProductVariantService for live authorization.",
+  "id": "ERP-444",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-09T06:45:33.640615Z"
+}

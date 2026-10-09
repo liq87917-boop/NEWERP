@@ -1,0 +1,67 @@
+{
+  "title": "Authorize document number rules with live menu authority and numbering-rule bounds",
+  "description": "Stage 3 document-control closure for the rules that mint every operational document number. src/ERP.Api/Controllers/SysSimpleControllers.cs:21-30 declares [ApiController]/[Route(\"api/sys/document-number-rules\")]/[Authorize] over BaseCrudController<SysDocumentNumberRule> with no identity or menu resolution, so the inherited generic routes (src/ERP.Api/Controllers/BaseCrudController.cs:38-92) let any authenticated account list, create, update and delete the rules that src/ERP.Application/Services/DocumentNumberService.cs:56-57 reads to generate sales, purchase, stock-in/out, transfer, adjustment, loading, receipt and payment numbers that carry CurrentSequence. SysDocumentNumberRule (src/ERP.Domain/Entities/SysSystem.cs:52-89) persists DocumentType, RuleCode, Prefix, DateFormat, SerialLength, Separator, CurrentSequence and YearlyReset with no bound rule. Reuse the existing doc-rule functional menu (SeedData.Menus.cs:20) on every route and add server-side bounds so a rule cannot be rewritten into an unusable or duplicate numbering shape, keeping DocumentNumberService's default fallback (prefix + yyyyMMdd + 4-digit serial) and the numbering sequence semantics unchanged. Add no grants, no anonymous/admin fallback, no schema change. Genuine isolated (localdb)\\NEWERP_AutoAcceptance GUID-owned NEWERP_AUTOTEST SQL only; safe Release build plus full ERP.UnitTests.",
+  "acceptance_criteria": [
+    "For every route on /api/sys/document-number-rules (paged, all, by-id, create, update, delete and batch-delete) require the current enabled nondeleted identity and the existing doc-rule functional menu before any read or write, rejecting missing, disabled, deleted and revoked-menu identities with the existing controlled non-disclosing errors and adding no new grants or anonymous/admin fallback.",
+    "Validate on create and update that DocumentType is a known document type, RuleCode is non-empty and unique within the existing unique rule-code semantic, Prefix, Separator and DateFormat stay within their persisted bounds and the date format is a supported shape, SerialLength stays within a bounded positive range, CurrentSequence is non-negative, and rejected writes mutate no SysDocumentNumberRules row, consume no number and leave DocumentNumberService's default fallback and existing sequence semantics unchanged.",
+    "Genuine isolated SQL authenticated controller tests cover the permitted privileged and menu-granted flows, missing doc-rule menu, disabled, deleted and revoked identities and invalid rule payloads, and assert that denied create, update and delete calls leave no rule row changed and no generated operational number consumed while the existing DocumentNumberServiceTests contracts stay green.",
+    "Keep the safe Release build and the full existing ERP.UnitTests suite green, use only genuine isolated (localdb)\\NEWERP_AutoAcceptance GUID-owned NEWERP_AUTOTEST databases with Integrated Security, and add no schema, entity, menu, permission or production/secret change; build completion is not stage acceptance."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/SysSimpleControllers.cs",
+    "src/ERP.Application/Services/DocumentNumberRuleAuthorizationRules.cs",
+    "src/ERP.Application/Services/DocumentNumberService.cs",
+    "src/ERP.UnitTests/DocumentNumberRuleAuthorizationTests.cs",
+    "src/ERP.UnitTests/DocumentNumberServiceTests.cs",
+    "src/ERP.IntegrationTests/DocumentNumberRuleAuthorizationSqlServerTests.cs",
+    "docs/document-number-rule-authority.md"
+  ],
+  "criterion_path_map": {
+    "For every route on /api/sys/document-number-rules (paged, all, by-id, create, update, delete and batch-delete) require the current enabled nondeleted identity and the existing doc-rule functional menu before any read or write, rejecting missing, disabled, deleted and revoked-menu identities with the existing controlled non-disclosing errors and adding no new grants or anonymous/admin fallback.": [
+      "src/ERP.Api/Controllers/SysSimpleControllers.cs",
+      "src/ERP.Application/Services/DocumentNumberRuleAuthorizationRules.cs"
+    ],
+    "Validate on create and update that DocumentType is a known document type, RuleCode is non-empty and unique within the existing unique rule-code semantic, Prefix, Separator and DateFormat stay within their persisted bounds and the date format is a supported shape, SerialLength stays within a bounded positive range, CurrentSequence is non-negative, and rejected writes mutate no SysDocumentNumberRules row, consume no number and leave DocumentNumberService's default fallback and existing sequence semantics unchanged.": [
+      "src/ERP.Api/Controllers/SysSimpleControllers.cs",
+      "src/ERP.Application/Services/DocumentNumberRuleAuthorizationRules.cs",
+      "src/ERP.Application/Services/DocumentNumberService.cs",
+      "src/ERP.UnitTests/DocumentNumberRuleAuthorizationTests.cs"
+    ],
+    "Genuine isolated SQL authenticated controller tests cover the permitted privileged and menu-granted flows, missing doc-rule menu, disabled, deleted and revoked identities and invalid rule payloads, and assert that denied create, update and delete calls leave no rule row changed and no generated operational number consumed while the existing DocumentNumberServiceTests contracts stay green.": [
+      "src/ERP.UnitTests/DocumentNumberRuleAuthorizationTests.cs",
+      "src/ERP.UnitTests/DocumentNumberServiceTests.cs",
+      "src/ERP.IntegrationTests/DocumentNumberRuleAuthorizationSqlServerTests.cs",
+      "docs/document-number-rule-authority.md"
+    ],
+    "Keep the safe Release build and the full existing ERP.UnitTests suite green, use only genuine isolated (localdb)\\NEWERP_AutoAcceptance GUID-owned NEWERP_AUTOTEST databases with Integrated Security, and add no schema, entity, menu, permission or production/secret change; build completion is not stage acceptance.": [
+      "src/ERP.UnitTests/DocumentNumberRuleAuthorizationTests.cs",
+      "docs/document-number-rule-authority.md"
+    ]
+  },
+  "depends_on": [
+    "ERP-006",
+    "ERP-097",
+    "ERP-429"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "implementation_evidence": "src/ERP.Api/Controllers/SysSimpleControllers.cs:21-30 declares DocumentNumberRuleController with only [ApiController]/[Route(\"api/sys/document-number-rules\")]/[Authorize] over BaseCrudController<SysDocumentNumberRule>; it defines no action of its own, so the inherited generic CRUD in src/ERP.Api/Controllers/BaseCrudController.cs:38-92 runs with zero Authoriz/Menu/scope references and no field validation. SysDocumentNumberRule (src/ERP.Domain/Entities/SysSystem.cs:52-89) persists DocumentType/RuleCode/Prefix/DateFormat/SerialLength/Separator/CurrentSequence/YearlyReset without any bound rule, and src/ERP.Application/Services/DocumentNumberService.cs:56-57 loads the matching rule to mint numbers for every operational document type (defaults fallback documented at 54-56). The existing doc-rule menu is seeded at src/ERP.Infrastructure/Data/SeedData.Menus.cs:20. An exact search of .ai/tasks shows ERP-429 only restored server-side numbering for purchase-order HTTP forms and no task lists DocumentNumberRuleController for live authorization.",
+  "id": "ERP-445",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-09T06:45:33.641852Z"
+}
