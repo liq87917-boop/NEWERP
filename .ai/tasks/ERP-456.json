@@ -1,0 +1,70 @@
+{
+  "title": "Authorize user parameter maintenance with live user-parameter authority and bounded user and key validation",
+  "description": "Stage 3 access-control closure for the per-user parameter rows that are read as user-level personalisation. src/ERP.Api/Controllers/UserParameterController.cs:13-16 declares UserParameterController with only [ApiController]/[Route(api/sys/user-parameters)]/[Authorize] and no identity, account-state or menu resolution: GetPaged 25-56 returns every nondeleted SysUserParameter (optionally filtered by an arbitrary UserId) together with the user display names, GetById 58-65 returns any row, Create 67-79 only checks the duplicate (UserId, ParamKey) at 71-72 and accepts any UserId without resolving it, Update 81-93 rewrites ParamKey/ParamValue and Delete 95-105 soft-deletes, so any authenticated account can read or rewrite another account's user parameters and can mint rows for arbitrary or nonexistent users. Reuse the existing 用户参数 (user-parameter, src/ERP.Infrastructure/Data/SeedData.Menus.cs:19) functional menu on every route, add bounded server-side validation for the persisted SysUserParameter columns (src/ERP.Domain/Entities/SysSystem.cs:35-47) and validate that UserId resolves to a known nondeleted user before any write, keeping the existing per-user duplicate-key check and the soft-delete semantics unchanged. No Domain/Infrastructure/schema change, no grant, no anonymous/admin fallback. Genuine isolated (localdb)\\\\NEWERP_AutoAcceptance GUID-owned NEWERP_AUTOTEST SQL only; safe Release build plus full ERP.UnitTests. All entry points including in-process controllers must enforce live authorization. Adapt legacy fixtures by seeding an enabled identity and existing menu grants in the isolated test context; never gate authorization on Request.Path, environment, fake identity, or an empty request to bypass checks.",
+  "acceptance_criteria": [
+    "For every route on /api/sys/user-parameters (paged, by-id, create, update and delete) require the current enabled nondeleted identity and the existing user-parameter functional menu before any read or write, rejecting missing, disabled, deleted and revoked-menu identities with the existing controlled non-disclosing errors and adding no new grants or anonymous/admin fallback.",
+    "Validate on create and update that ParamKey is non-empty and within its persisted length bound, that ParamValue stays within its persisted bound, and that UserId resolves to a known nondeleted user, so a rejected write persists no SysUserParameter row and the existing per-user duplicate-key check and soft-delete semantics stay unchanged.",
+    "Genuine isolated SQL authenticated controller tests cover the permitted privileged and menu-granted flows, missing user-parameter menu, disabled, deleted and revoked identities and invalid empty or over-long keys and values and unknown or deleted user ids, and assert that denied paged, by-id, create, update and delete calls read or mutate no SysUserParameter row while the existing SystemParameterAuthorizationTests and SysUserMasterAuthorizationTests contracts stay green.",
+    "Keep the safe Release build and the full existing ERP.UnitTests suite green, use only genuine isolated (localdb)\\\\NEWERP_AutoAcceptance GUID-owned NEWERP_AUTOTEST databases with Integrated Security, and add no schema, entity, menu, permission or production/secret change; build completion is not stage acceptance."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/UserParameterController.cs",
+    "src/ERP.Application/Services/SysUserParameterAuthorizationRules.cs",
+    "src/ERP.UnitTests/SysUserParameterAuthorizationTests.cs",
+    "src/ERP.UnitTests/SystemParameterAuthorizationTests.cs",
+    "src/ERP.UnitTests/SysUserMasterAuthorizationTests.cs",
+    "src/ERP.IntegrationTests/SysUserParameterAuthorizationSqlServerTests.cs",
+    "docs/user-parameter-authority.md"
+  ],
+  "criterion_path_map": {
+    "For every route on /api/sys/user-parameters (paged, by-id, create, update and delete) require the current enabled nondeleted identity and the existing user-parameter functional menu before any read or write, rejecting missing, disabled, deleted and revoked-menu identities with the existing controlled non-disclosing errors and adding no new grants or anonymous/admin fallback.": [
+      "src/ERP.Api/Controllers/UserParameterController.cs",
+      "src/ERP.Application/Services/SysUserParameterAuthorizationRules.cs",
+      "src/ERP.UnitTests/SysUserParameterAuthorizationTests.cs",
+      "src/ERP.IntegrationTests/SysUserParameterAuthorizationSqlServerTests.cs"
+    ],
+    "Validate on create and update that ParamKey is non-empty and within its persisted length bound, that ParamValue stays within its persisted bound, and that UserId resolves to a known nondeleted user, so a rejected write persists no SysUserParameter row and the existing per-user duplicate-key check and soft-delete semantics stay unchanged.": [
+      "src/ERP.Api/Controllers/UserParameterController.cs",
+      "src/ERP.Application/Services/SysUserParameterAuthorizationRules.cs",
+      "src/ERP.UnitTests/SysUserParameterAuthorizationTests.cs"
+    ],
+    "Genuine isolated SQL authenticated controller tests cover the permitted privileged and menu-granted flows, missing user-parameter menu, disabled, deleted and revoked identities and invalid empty or over-long keys and values and unknown or deleted user ids, and assert that denied paged, by-id, create, update and delete calls read or mutate no SysUserParameter row while the existing SystemParameterAuthorizationTests and SysUserMasterAuthorizationTests contracts stay green.": [
+      "src/ERP.UnitTests/SysUserParameterAuthorizationTests.cs",
+      "src/ERP.UnitTests/SystemParameterAuthorizationTests.cs",
+      "src/ERP.UnitTests/SysUserMasterAuthorizationTests.cs",
+      "src/ERP.IntegrationTests/SysUserParameterAuthorizationSqlServerTests.cs",
+      "docs/user-parameter-authority.md"
+    ],
+    "Keep the safe Release build and the full existing ERP.UnitTests suite green, use only genuine isolated (localdb)\\\\NEWERP_AutoAcceptance GUID-owned NEWERP_AUTOTEST databases with Integrated Security, and add no schema, entity, menu, permission or production/secret change; build completion is not stage acceptance.": [
+      "src/ERP.UnitTests/SysUserParameterAuthorizationTests.cs",
+      "src/ERP.IntegrationTests/SysUserParameterAuthorizationSqlServerTests.cs",
+      "docs/user-parameter-authority.md"
+    ]
+  },
+  "depends_on": [
+    "ERP-006",
+    "ERP-097",
+    "ERP-453"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "implementation_evidence": "src/ERP.Api/Controllers/UserParameterController.cs:13-16 declares UserParameterController with only [ApiController]/[Route(api/sys/user-parameters)]/[Authorize] and no Authorize/Menu/identity-resolution reference: GetPaged 25-56, GetById 58-65, Create 67-79 (only the duplicate (UserId,ParamKey) check at 71-72), Update 81-93 and Delete 95-105 query and write _db.SysUserParameters directly. SysUserParameter (src/ERP.Domain/Entities/SysSystem.cs:35-47) persists UserId(38), ParamKey(41-42, Required MaxLength 100) and ParamValue(45-46, MaxLength 500) with only attribute annotations, no foreign key and no UserId resolution. The re-used existing menu is seeded at src/ERP.Infrastructure/Data/SeedData.Menus.cs:19 and the frontend page is src/ERP.Api/wwwroot/js/user-params.js:30,80,96-97,105 registered at src/ERP.Api/wwwroot/js/app.js:376. The sibling closure precedent is src/ERP.Application/Services/SystemParameterAuthorizationRules.cs (ERP-446) with regression src/ERP.UnitTests/SystemParameterAuthorizationTests.cs, and the user-record closure is src/ERP.UnitTests/SysUserMasterAuthorizationTests.cs (ERP-453). There is no SysUserParameterAuthorizationRules in src/ERP.Application/Services and an exact search of .ai/tasks returns no task listing UserParameterController or SysUserParameter for live authorization.",
+  "id": "ERP-456",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-09T08:48:38.766808Z"
+}
