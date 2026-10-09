@@ -350,26 +350,71 @@ public sealed class SalesOrderExecutionAuthorizationSqlServerTests
     // ==================== 7. ERP-432 运营核对读取路由：实时授权 + 范围下推 ====================
 
     [Fact]
-    public async Task 受限业务员_三个运营核对读取路由_只返回范围内客户数据()
+    public async Task 受限业务员_多客户_三个运营核对读取路由只返回范围内客户与正确计数()
+    {
+        Guard();
+        var before = await SnapshotAsync();
+        await using var db = _fixture.CreateDbContext();
+        var ctl = NewController(db, _fixture.RestrictedUserId);
+        var permitted = new[] { _fixture.CustomerAId, _fixture.CustomerCId };
+
+        // 交期异常工作台：未指定客户时返回**两个**分配客户的合法订单与正确数量，不含范围外客户 B。
+        var delivery = await OkDataAsync<SalesOrderDeliveryExceptionReport>(
+            ctl.DeliveryExceptions(new SalesOrderDeliveryExceptionQuery()));
+        Assert.Equal(2, delivery.Total);
+        Assert.Equal(2, delivery.Counts.Total);
+        Assert.Equal(2, delivery.Items.Count);
+        Assert.All(delivery.Items, i => Assert.Contains(i.CustomerId, permitted));
+        Assert.DoesNotContain(delivery.Items, i => i.CustomerId == _fixture.CustomerBId);
+
+        var own = delivery.Items.Single(i => i.CustomerId == _fixture.CustomerAId);
+        Assert.Equal(10m, own.OrderedQuantity);
+        Assert.Equal(4m, own.ApprovedShippedQuantity);
+        Assert.Equal(6m, own.OutstandingQuantity);
+
+        var second = delivery.Items.Single(i => i.CustomerId == _fixture.CustomerCId);
+        Assert.Equal(6m, second.OrderedQuantity);
+        Assert.Equal(0m, second.ApprovedShippedQuantity);
+        Assert.Equal(6m, second.OutstandingQuantity);
+
+        var shipment = await OkDataAsync<SalesOrderShipmentFinanceReportView>(
+            ctl.ShipmentFinanceReport(new SalesOrderShipmentFinanceQuery()));
+        Assert.Equal(2, shipment.Total);
+        Assert.All(shipment.Groups, g => Assert.Contains(g.CustomerId, permitted));
+
+        var receipt = await OkDataAsync<SalesOrderReceiptReconciliationReport>(
+            ctl.ReceiptReconciliationReport(new SalesOrderReceiptReconciliationQuery()));
+        Assert.Equal(2, receipt.Total);
+        Assert.All(receipt.Groups, g => Assert.Contains(g.CustomerId, permitted));
+
+        AssertUnchanged(before, await SnapshotAsync());
+    }
+
+    [Fact]
+    public async Task 受限业务员_显式指定范围内客户_三个运营核对读取路由只返回该客户子集()
     {
         Guard();
         await using var db = _fixture.CreateDbContext();
         var ctl = NewController(db, _fixture.RestrictedUserId);
 
         var delivery = await OkDataAsync<SalesOrderDeliveryExceptionReport>(
-            ctl.DeliveryExceptions(new SalesOrderDeliveryExceptionQuery()));
+            ctl.DeliveryExceptions(new SalesOrderDeliveryExceptionQuery { CustomerId = _fixture.CustomerCId }));
         Assert.Equal(1, delivery.Total);
-        Assert.Equal(_fixture.CustomerAId, Assert.Single(delivery.Items).CustomerId);
+        Assert.Equal(_fixture.CustomerCId, Assert.Single(delivery.Items).CustomerId);
+        Assert.Equal(6m, delivery.Items[0].OrderedQuantity);
 
         var shipment = await OkDataAsync<SalesOrderShipmentFinanceReportView>(
-            ctl.ShipmentFinanceReport(new SalesOrderShipmentFinanceQuery()));
+            ctl.ShipmentFinanceReport(new SalesOrderShipmentFinanceQuery { CustomerId = _fixture.CustomerCId }));
         Assert.Equal(1, shipment.Total);
-        Assert.Equal(_fixture.CustomerAId, Assert.Single(shipment.Groups).CustomerId);
+        Assert.Equal(_fixture.CustomerCId, Assert.Single(shipment.Groups).CustomerId);
 
         var receipt = await OkDataAsync<SalesOrderReceiptReconciliationReport>(
-            ctl.ReceiptReconciliationReport(new SalesOrderReceiptReconciliationQuery()));
+            ctl.ReceiptReconciliationReport(new SalesOrderReceiptReconciliationQuery
+            {
+                CustomerId = _fixture.CustomerCId
+            }));
         Assert.Equal(1, receipt.Total);
-        Assert.Equal(_fixture.CustomerAId, Assert.Single(receipt.Groups).CustomerId);
+        Assert.Equal(_fixture.CustomerCId, Assert.Single(receipt.Groups).CustomerId);
     }
 
     [Fact]
@@ -378,6 +423,7 @@ public sealed class SalesOrderExecutionAuthorizationSqlServerTests
         Guard();
         await using var db = _fixture.CreateDbContext();
         var ctl = NewController(db, _fixture.RestrictedUserId);
+        // 客户 B 不属于该业务员（EmpId 为空）：显式筛选范围外客户一律空集与 0 计数，不透露其存在性。
         var foreign = _fixture.CustomerBId;
 
         var delivery = await OkDataAsync<SalesOrderDeliveryExceptionReport>(
@@ -403,11 +449,12 @@ public sealed class SalesOrderExecutionAuthorizationSqlServerTests
         await using var db = _fixture.CreateDbContext();
         var ctl = NewController(db, _fixture.PrivilegedUserId);
 
-        Assert.Equal(2, (await OkDataAsync<SalesOrderDeliveryExceptionReport>(
+        // 特权账号保留既有全量口径：不受数据范围限制，返回全部 3 张在途订单（已删除订单不计入）。
+        Assert.Equal(3, (await OkDataAsync<SalesOrderDeliveryExceptionReport>(
             ctl.DeliveryExceptions(new SalesOrderDeliveryExceptionQuery()))).Total);
-        Assert.Equal(2, (await OkDataAsync<SalesOrderShipmentFinanceReportView>(
+        Assert.Equal(3, (await OkDataAsync<SalesOrderShipmentFinanceReportView>(
             ctl.ShipmentFinanceReport(new SalesOrderShipmentFinanceQuery()))).Total);
-        Assert.Equal(2, (await OkDataAsync<SalesOrderReceiptReconciliationReport>(
+        Assert.Equal(3, (await OkDataAsync<SalesOrderReceiptReconciliationReport>(
             ctl.ReceiptReconciliationReport(new SalesOrderReceiptReconciliationQuery()))).Total);
     }
 }
@@ -444,6 +491,8 @@ public sealed class SalesOrderExecutionAuthorizationSqlServerFixture : IAsyncLif
     public long DeletedOrderAId { get; private set; }
     public long CustomerAId { get; private set; }
     public long CustomerBId { get; private set; }
+    public long CustomerCId { get; private set; }
+    public long OrderCId { get; private set; }
     public string OrderANo { get; private set; } = string.Empty;
 
     public async Task InitializeAsync()
@@ -561,12 +610,20 @@ public sealed class SalesOrderExecutionAuthorizationSqlServerFixture : IAsyncLif
             CustomerCode = $"C-B-{Guid.NewGuid():N}", CustomerName = "ERP413 隐藏客户",
             EmpId = null, Status = 1, CreditStatus = "正常"
         };
-        db.BaseCustomers.AddRange(customerA, customerB);
+        // ERP-432：同一受限业务员的**第二个**分配客户（多客户范围必须返回两户，而非空报表）。
+        var customerC = new BaseCustomer
+        {
+            CustomerCode = $"C-C-{Guid.NewGuid():N}", CustomerName = "ERP413 可见客户二",
+            EmpId = employee.Id, Status = 1, CreditStatus = "正常"
+        };
+        db.BaseCustomers.AddRange(customerA, customerB, customerC);
         await db.SaveChangesAsync();
         CustomerAId = customerA.Id;
         CustomerBId = customerB.Id;
+        CustomerCId = customerC.Id;
 
         await SeedOrdersAsync(db, tag, customerA.Id, customerB.Id);
+        await SeedSecondAssignedOrderAsync(db, tag, customerC.Id);
 
         // 3) 拒绝侧账号：无菜单 / 仅导出菜单 / 已撤销菜单 / 已禁用 / 已删除。
         MenuLessUserId = await SeedDeniedUserAsync(db, Array.Empty<string>(), UserStatus.Enabled);
@@ -665,6 +722,29 @@ public sealed class SalesOrderExecutionAuthorizationSqlServerFixture : IAsyncLif
         await db.SaveChangesAsync();
 
         await SeedFinanceEvidenceAsync(db, tag, customerAId, customerBId, orderA);
+    }
+
+    /// <summary>
+    /// ERP-432：为受限业务员的第二分配客户播种一张合法在途订单（无出库 / 无收款证据），
+    /// 用于证明「多客户范围未指定客户」返回两户而不再 fail closed 为空报表。
+    /// </summary>
+    private async Task SeedSecondAssignedOrderAsync(ErpDbContext db, string tag, long customerCId)
+    {
+        var orderC = new SalesOrder
+        {
+            OrderNo = $"SO-413-C-{tag}", OrderDate = DateTime.Today, CustomerId = customerCId,
+            Currency = Currency.USD, ExchangeRate = 7.1m, TotalAmount = 60m, Status = DocumentStatus.Approved
+        };
+        db.SalesOrders.Add(orderC);
+        await db.SaveChangesAsync();
+        OrderCId = orderC.Id;
+
+        db.SalesOrderDetails.Add(new SalesOrderDetail
+        {
+            SalesOrderId = orderC.Id, ProductId = ProductId, ProductName = $"商品{ProductId}",
+            Unit = "PCS", Quantity = 6m, UnitPrice = 10m, Amount = 60m
+        });
+        await db.SaveChangesAsync();
     }
 
     /// <summary>播种部分收款 350 / 部分开票 350 证据，以及他人订单与已删除订单。</summary>

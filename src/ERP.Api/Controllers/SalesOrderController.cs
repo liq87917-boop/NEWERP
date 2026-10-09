@@ -179,52 +179,17 @@ public class SalesOrderController : DocumentControllerBase<SalesOrder>
     /// 销售交期异常工作台（ERP-102，只读派生、分页有界）：按客户 + 显式 as-of 基准日过滤销售订单，
     /// 报告订单头 / 明细行交货日期（明细行优先）与「已订 / 已审核出货 / 未出」数量证据，并派生逾期 / 即将到期 / 已出齐 / 在途 / 未知交期状态；
     /// 缺日期或出货证据不完整为未知；不改写订单状态与已登记进度，不执行迁移 / 生产 SQL / 真实数据库操作 / 部署。
-    /// <para>ERP-432：派生之前先复核实时身份 / 既有「销售订单」菜单 / ERP-097 权威客户范围，并把权威客户范围下推到
-    /// 计数 / 分页之前（该工作台的既有唯一客户筛选是单一 <c>CustomerId</c>，无法表达「范围内全部客户」集合过滤，
-    /// 因此受限账号只能查询范围内客户：范围恰为单一客户时其「全部客户」即该客户，其余无法安全表达的情形一律
-    /// fail closed 返回空报表）；拒绝时返回既有受控非披露错误，绝不返回任何行或计数。</para>
+    /// <para>ERP-432：派生之前先复核实时身份 / 既有「销售订单」菜单 / ERP-097 权威客户范围，并把权威客户范围
+    /// （含「范围内全部客户」的集合过滤）下推到计数 / 分页之前；受限账号只命中范围内客户，
+    /// 显式筛选范围外客户返回空报表（0 计数、无行，不透露其存在性）；
+    /// 拒绝时返回既有受控非披露错误，绝不返回任何行或计数。</para>
     /// </summary>
     [HttpGet("delivery-exceptions")]
     public async Task<IActionResult> DeliveryExceptions([FromQuery] SalesOrderDeliveryExceptionQuery query)
     {
         var scope = await EnsureExecutionEvidenceAuthorizedAsync();
         return Ok(ApiResponse<SalesOrderDeliveryExceptionReport>.Success(
-            await QueryDeliveryExceptionsAsync(query, scope)));
-    }
-
-    /// <summary>
-    /// ERP-432 交期异常工作台的权威客户范围下推（先授权、后派生）：复用
-    /// <see cref="SalespersonDataScopeService.TryResolveScopedCustomerFilter"/> 把范围归约为该工作台既有唯一的
-    /// 单客户筛选（<see cref="SalesOrderDeliveryExceptionQuery.CustomerId"/>）。
-    /// 受限账号指定范围外客户、或未显式指定客户且范围非单一客户（无法由单客户筛选安全表达「范围内全部客户」）时
-    /// 一律 fail closed —— 返回与本工作台同口径的**空报表（0 计数、无行）**，绝不带着范围外条件去派生，
-    /// 也绝不返回范围外客户的订单计数 / 数量 / 出货证据；特权账号保持既有不过滤口径。
-    /// </summary>
-    private async Task<SalesOrderDeliveryExceptionReport> QueryDeliveryExceptionsAsync(
-        SalesOrderDeliveryExceptionQuery query, SalespersonDataScope? scope)
-    {
-        query.Normalize();
-        if (scope is not null)
-        {
-            if (!SalespersonDataScopeService.TryResolveScopedCustomerFilter(scope, query.CustomerId, out var customerId))
-            {
-                return new SalesOrderDeliveryExceptionReport
-                {
-                    AsOfDate = query.AsOf,
-                    CustomerId = query.CustomerId,
-                    Total = 0,
-                    Page = query.Page,
-                    PageSize = query.PageSize,
-                    TotalPages = 0,
-                    Counts = new SalesOrderDeliveryExceptionCounts(),
-                    Items = new List<SalesOrderDeliveryExceptionItem>(),
-                };
-            }
-
-            query.CustomerId = customerId;
-        }
-
-        return await SalesOrderDeliveryExceptions.ForQueryAsync(Db, query);
+            await SalesOrderDeliveryExceptions.ForQueryAsync(Db, query, scope)));
     }
 
     /// <summary>

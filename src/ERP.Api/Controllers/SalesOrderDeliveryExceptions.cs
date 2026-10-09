@@ -1,4 +1,5 @@
 using ERP.Application.Interfaces;
+using ERP.Application.Services;
 using ERP.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 
@@ -178,9 +179,12 @@ public static class SalesOrderDeliveryExceptions
     /// <summary>
     /// 交期异常工作台查询（GET /api/sales-orders/delivery-exceptions，只读、分页有界）。
     /// 出货证据复用 ERP-032 的权威批量派生（固定查询次数，无逐单查库）。
+    /// <para>ERP-432：可选 <paramref name="scope"/> 为 ERP-097 权威客户数据范围，在**任何计数 / 分页 / 物化之前**
+    /// 下推到基础 <c>SalesOrders</c> 源查询（与两个兄弟报表助手的既有签名一致）；受限账号只命中范围内客户。
+    /// <paramref name="scope"/> 为 <c>null</c>（进程内免授权直调 / 既有两参调用）保持既有不过滤口径。</para>
     /// </summary>
     public static async Task<SalesOrderDeliveryExceptionReport> ForQueryAsync(IErpDbContext db,
-        SalesOrderDeliveryExceptionQuery query)
+        SalesOrderDeliveryExceptionQuery query, SalespersonDataScope? scope = null)
     {
         ArgumentNullException.ThrowIfNull(db);
         ArgumentNullException.ThrowIfNull(query);
@@ -188,7 +192,7 @@ public static class SalesOrderDeliveryExceptions
         var asOf = query.AsOf;
 
         // 1~2 次：筛选 + 计数 + 本页 Id（分页按客户 → 订单日期 → 单据 Id 稳定排序，翻页不重不漏）
-        var source = ApplyFilters(db, query);
+        var source = ApplyFilters(db, query, scope);
         var total = await source.CountAsync();
         var pageIds = await source
             .OrderBy(o => o.CustomerId).ThenBy(o => o.OrderDate).ThenBy(o => o.Id)
@@ -249,10 +253,18 @@ public static class SalesOrderDeliveryExceptions
             Items = items,
         };
     }
-    /// <summary>报表筛选（只读）：客户 / 关键字；as-of 只是判定基准，不用于过滤订单日期。</summary>
-    private static IQueryable<SalesOrder> ApplyFilters(IErpDbContext db, SalesOrderDeliveryExceptionQuery query)
+    /// <summary>
+    /// 报表筛选（只读）：**先**下推 ERP-097 权威客户范围（<paramref name="scope"/> 为 null 时不过滤，保持既有口径），
+    /// 再叠加既有客户 / 关键字筛选；as-of 只是判定基准，不用于过滤订单日期。
+    /// <para>范围过滤发生在 <c>Count</c> / 分页 / 任何物化之前，受限账号既不会命中范围外客户，
+    /// 也无法用显式范围外 <c>CustomerId</c> 探测其存在性（结果为空集与 0 计数）。</para>
+    /// </summary>
+    private static IQueryable<SalesOrder> ApplyFilters(IErpDbContext db, SalesOrderDeliveryExceptionQuery query,
+        SalespersonDataScope? scope)
     {
         var source = db.SalesOrders.AsNoTracking().Where(o => !o.IsDeleted);
+        if (scope is not null)
+            source = SalespersonDataScopeService.FilterByCustomer(source, scope, o => o.CustomerId);
         if (query.CustomerId.HasValue) source = source.Where(o => o.CustomerId == query.CustomerId.Value);
         if (!string.IsNullOrWhiteSpace(query.Keyword))
         {

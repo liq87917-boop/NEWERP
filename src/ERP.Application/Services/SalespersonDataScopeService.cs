@@ -116,51 +116,6 @@ public static class SalespersonDataScopeService
         return set;
     }
 
-    /// <summary>
-    /// ERP-432：把权威客户数据范围归约为「既有单客户报表筛选」可安全表达的唯一客户 Id，供
-    /// <c>api/sales-orders/delivery-exceptions</c> 这类**只接受单一客户筛选**的既有报表在派生之前下推范围。
-    /// <list type="bullet">
-    /// <item>特权账号（<see cref="SalespersonDataScope.AllowedCustomerIds"/> 为 <c>null</c>）：不过滤，原样返回请求值。</item>
-    /// <item>受限账号**显式指定**客户：仅当该客户在范围内时返回 <c>true</c>（范围外返回 <c>false</c>，绝不派生）。</item>
-    /// <item>受限账号**未指定**客户：范围恰为单一客户时返回该客户（其「全部客户」即该客户）；否则返回 <c>false</c>
-    /// ——「范围内全部客户」的集合过滤无法由既有单客户筛选安全表达，调用方必须 fail closed。</item>
-    /// </list>
-    /// <para>本方法只做纯判定：不查询、不落库、不新增任何菜单 / 角色 / 用户授权，也不引入第二套范围口径。</para>
-    /// </summary>
-    public static bool TryResolveScopedCustomerFilter(SalespersonDataScope scope, long? requestedCustomerId,
-        out long? effectiveCustomerId)
-    {
-        ArgumentNullException.ThrowIfNull(scope);
-
-        if (scope.AllowedCustomerIds is null)
-        {
-            effectiveCustomerId = requestedCustomerId;   // 特权账号：保持既有不过滤口径
-            return true;
-        }
-
-        if (requestedCustomerId.HasValue)
-        {
-            // 显式请求：仅范围内客户可安全派生；范围外一律 fail closed，且不把被拒客户 Id 经 out 参数外传。
-            if (scope.AllowedCustomerIds.Contains(requestedCustomerId.Value))
-            {
-                effectiveCustomerId = requestedCustomerId;
-                return true;
-            }
-
-            effectiveCustomerId = null;
-            return false;
-        }
-
-        if (scope.AllowedCustomerIds.Count == 1)
-        {
-            effectiveCustomerId = scope.AllowedCustomerIds.First();   // 「全部客户」= 范围内唯一客户
-            return true;
-        }
-
-        effectiveCustomerId = null;                      // 无法表达「范围内全部客户」集合过滤
-        return false;
-    }
-
     /// <summary>按客户 Id（<see cref="long"/>）过滤查询；特权账号（<c>AllowedCustomerIds == null</c>）不过滤。</summary>
     public static IQueryable<T> FilterByCustomer<T>(
         IQueryable<T> source, SalespersonDataScope scope, Expression<Func<T, long>> customerId)

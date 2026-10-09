@@ -610,28 +610,33 @@ public class SalesOrderExecutionAuthorizationTests
 
 
     [Fact]
-    public async Task 受限业务员_多客户未指定客户_交期异常工作台fail_closed为空_其余两路由只返回范围内客户()
+    public async Task 受限业务员_多客户_三个运营核对读取路由返回范围内全部客户且不含范围外客户()
     {
         using var db = TestDbFactory.Create();
         var (userId, employeeId, _) = SeedOperator(db);
         var first = SeedCustomer(db, "C432-MULTI-A", employeeId);
         var second = SeedCustomer(db, "C432-MULTI-B", employeeId);
         var foreign = SeedCustomer(db, "C432-MULTI-X", null);
-        SeedOrder(db, "SO-432-MULTI-A", first.Id);
-        SeedOrder(db, "SO-432-MULTI-B", second.Id);
+        var firstOrder = SeedOrder(db, "SO-432-MULTI-A", first.Id);
+        var secondOrder = SeedOrder(db, "SO-432-MULTI-B", second.Id);
         SeedOrder(db, "SO-432-MULTI-X", foreign.Id);
+        SeedDetail(db, firstOrder.Id, ProductId, 10m);
+        SeedDetail(db, secondOrder.Id, ProductId, 6m);
 
         var ctl = NewController(db, userId);
 
-        // 交期异常工作台既有唯一客户筛选是单一 CustomerId：受限账号未指定客户且范围非单一客户时无法安全表达
-        // 「范围内全部客户」→ fail closed（空报表、0 计数、无行），绝不返回范围外客户的订单计数 / 数量。
+        // 交期异常工作台的权威范围**集合**下推（先于计数 / 分页 / 物化）：未指定客户时返回范围内全部客户的
+        // 合法订单与正确数量，绝不返回范围外客户的订单计数 / 数量。
         var delivery = await OkDataAsync<SalesOrderDeliveryExceptionReport>(
             () => ctl.DeliveryExceptions(new SalesOrderDeliveryExceptionQuery()));
-        Assert.Equal(0, delivery.Total);
-        Assert.Empty(delivery.Items);
-        Assert.Equal(0, delivery.Counts.Total);
+        Assert.Equal(2, delivery.Total);
+        Assert.Equal(2, delivery.Counts.Total);
+        Assert.Equal(2, delivery.Items.Count);
+        Assert.All(delivery.Items, i => Assert.Contains(i.CustomerId, new[] { first.Id, second.Id }));
+        Assert.Equal(10m, delivery.Items.Single(i => i.CustomerId == first.Id).OrderedQuantity);
+        Assert.Equal(6m, delivery.Items.Single(i => i.CustomerId == second.Id).OrderedQuantity);
 
-        // 出货 / 财务进度与订单收款核对支持集合范围下推：仍返回范围内全部客户，绝不返回范围外客户。
+        // 出货 / 财务进度与订单收款核对同样只返回范围内客户，绝不返回范围外客户。
         var shipment = await OkDataAsync<SalesOrderShipmentFinanceReportView>(
             () => ctl.ShipmentFinanceReport(new SalesOrderShipmentFinanceQuery()));
         Assert.Equal(2, shipment.Total);
@@ -674,29 +679,54 @@ public class SalesOrderExecutionAuthorizationTests
     }
 
     [Fact]
-    public void 范围归约_特权原样_显式范围外fail_closed_单一客户按范围默认_多客户未指定fail_closed()
+    public async Task 交期异常工作台_权威范围下推_多客户全返回_显式范围外为空_空范围fail_closed()
     {
-        var privileged = new SalespersonDataScope { IsPrivileged = true, AllowedCustomerIds = null };
-        Assert.True(SalespersonDataScopeService.TryResolveScopedCustomerFilter(privileged, 7, out var privilegedEffective));
-        Assert.Equal(7, privilegedEffective);
-        Assert.True(SalespersonDataScopeService.TryResolveScopedCustomerFilter(privileged, null, out var privilegedAll));
-        Assert.Null(privilegedAll);
+        using var db = TestDbFactory.Create();
+        var first = SeedCustomer(db, "C432-PUSH-A", null);
+        var second = SeedCustomer(db, "C432-PUSH-B", null);
+        var foreign = SeedCustomer(db, "C432-PUSH-X", null);
+        var firstOrder = SeedOrder(db, "SO-432-PUSH-A", first.Id);
+        var secondOrder = SeedOrder(db, "SO-432-PUSH-B", second.Id);
+        var foreignOrder = SeedOrder(db, "SO-432-PUSH-X", foreign.Id);
+        SeedDetail(db, firstOrder.Id, ProductId, 10m);
+        SeedDetail(db, secondOrder.Id, ProductId, 6m);
+        SeedDetail(db, foreignOrder.Id, ProductId, 999m);
 
-        var single = new SalespersonDataScope { IsPrivileged = false, AllowedCustomerIds = new HashSet<long> { 11 } };
-        Assert.True(SalespersonDataScopeService.TryResolveScopedCustomerFilter(single, null, out var singleEffective));
-        Assert.Equal(11, singleEffective);
-        Assert.True(SalespersonDataScopeService.TryResolveScopedCustomerFilter(single, 11, out var ownEffective));
-        Assert.Equal(11, ownEffective);
-        Assert.False(SalespersonDataScopeService.TryResolveScopedCustomerFilter(single, 99, out var foreignEffective));
-        Assert.Null(foreignEffective);
+        // 范围 = 两个分配客户：未指定客户时两户都返回（正确计数 / 数量），范围外客户不出现。
+        var multi = new SalespersonDataScope
+        {
+            IsPrivileged = false, AllowedCustomerIds = new HashSet<long> { first.Id, second.Id }
+        };
+        var scoped = await SalesOrderDeliveryExceptions.ForQueryAsync(
+            db, new SalesOrderDeliveryExceptionQuery(), multi);
+        Assert.Equal(2, scoped.Total);
+        Assert.All(scoped.Items, i => Assert.Contains(i.CustomerId, new[] { first.Id, second.Id }));
+        Assert.Equal(10m, scoped.Items.Single(i => i.CustomerId == first.Id).OrderedQuantity);
+        Assert.Equal(6m, scoped.Items.Single(i => i.CustomerId == second.Id).OrderedQuantity);
 
-        var multi = new SalespersonDataScope { IsPrivileged = false, AllowedCustomerIds = new HashSet<long> { 11, 22 } };
-        Assert.False(SalespersonDataScopeService.TryResolveScopedCustomerFilter(multi, null, out var multiEffective));
-        Assert.Null(multiEffective);
+        // 显式指定范围内客户：只返回该客户子集。
+        var picked = await SalesOrderDeliveryExceptions.ForQueryAsync(
+            db, new SalesOrderDeliveryExceptionQuery { CustomerId = second.Id }, multi);
+        Assert.Equal(1, picked.Total);
+        Assert.Equal(second.Id, Assert.Single(picked.Items).CustomerId);
 
+        // 显式指定范围外客户：空集与 0 计数（不透露不可访问客户的存在性）。
+        var denied = await SalesOrderDeliveryExceptions.ForQueryAsync(
+            db, new SalesOrderDeliveryExceptionQuery { CustomerId = foreign.Id }, multi);
+        Assert.Equal(0, denied.Total);
+        Assert.Empty(denied.Items);
+        Assert.Equal(0, denied.Counts.Total);
+
+        // 空范围：一律空集 fail closed。
         var none = new SalespersonDataScope { IsPrivileged = false, AllowedCustomerIds = new HashSet<long>() };
-        Assert.False(SalespersonDataScopeService.TryResolveScopedCustomerFilter(none, null, out _));
-        Assert.False(SalespersonDataScopeService.TryResolveScopedCustomerFilter(none, 11, out _));
+        var empty = await SalesOrderDeliveryExceptions.ForQueryAsync(
+            db, new SalesOrderDeliveryExceptionQuery(), none);
+        Assert.Equal(0, empty.Total);
+        Assert.Empty(empty.Items);
+
+        // scope 为 null（进程内既有两参调用 / 特权豁免）：保持既有不过滤口径。
+        var unscoped = await SalesOrderDeliveryExceptions.ForQueryAsync(db, new SalesOrderDeliveryExceptionQuery());
+        Assert.Equal(3, unscoped.Total);
     }
 
     // ==================== 8. 派生夹具（部分出货 / 退货 / 收款 / 发票证据） ====================

@@ -1,14 +1,11 @@
 {
   "task": "ERP-432",
-  "status": "retry_pending",
-  "execution_outcome": "retry_pending",
-  "normalized_finish_reason": "acceptance_scope_reopened",
+  "status": "completed",
+  "execution_outcome": "completed",
+  "normalized_finish_reason": "build_validated",
   "cline_exit_code": 0,
   "cline_finish_reason_raw": "completed",
   "attempts": 2,
   "browser_acceptance": null,
-  "finished_at": "2026-10-09T04:34:47.022075Z",
-  "prior_build_checkpoint": ".ai\\results\\ERP-432-checkpoint-attempt-2-before-scope-revision.json",
-  "reopened_at": "2026-10-09T05:21:57.440128Z",
-  "reopen_reason": "Actual attempt2 documents incomplete multi-assigned-customer operational read due excluded helper; exact original path now authorized, original result retained as prior checkpoint only."
+  "finished_at": "2026-10-09T05:37:01.273721Z"
 }
