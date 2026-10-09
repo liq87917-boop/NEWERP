@@ -23,6 +23,16 @@ namespace ERP.Application.Services;
 /// 不改写订柜信息 / 预装柜单 / 装柜清单 / 出运引用 / 里程碑的任何列、状态与工作流，不推进任何业务单据，
 /// 不改写订单、库存、单证、发票、费用与分摊、收付款、税务与结算记录，也不轮询承运人、海关、货代或任何外部系统；
 /// 不把缺失事件推断为已开船 / 已到港 / 已清关 / 延误 / 逾期，也不做任何时区换算。</para>
+/// <para>授权（ERP-435）：由出运时间线控制器（<c>api/container/shipment-timeline</c> 三个路由）调用时，控制器先用
+/// <see cref="ShipmentReferenceAuthorizationRules.EnsureAuthorizedAsync"/> 解析实时身份 / 账号状态 / 既有源模块菜单 /
+/// 权威客户数据范围并把结果作为 <see cref="ShipmentReferenceAccess"/> 传入本服务；本服务复用
+/// <see cref="ShipmentReferenceAuthorizationRules.RequireSourceType"/> /
+/// <see cref="ShipmentReferenceAuthorizationRules.EnsureScopeAllowsSourceAsync"/> /
+/// <see cref="ShipmentReferenceAuthorizationRules.EnsureScopeAllowsParentReferenceAsync"/> /
+/// <see cref="ShipmentReferenceAuthorizationRules.ApplyScope"/>，把既有源模块菜单与客户范围<strong>先于</strong>计数、
+/// 分页与 materialization 下推到数据库，受限账号看不到范围外客户的出运引用、里程碑事件与状态计数；不新增任何授权，
+/// 也不做匿名 / 管理员回退（受限账号越范围一律 fail closed）。装柜三单详情入口（订柜信息 / 预装柜单 / 装柜清单控制器）
+/// 已由各自控制器在调用前完成同一口径的实时授权，因此可沿用 <c>access = null</c> 调用。</para>
 /// </summary>
 public static class ContainerShipmentTimelineService
 {
@@ -36,7 +46,8 @@ public static class ContainerShipmentTimelineService
     /// </summary>
     public static async Task<ContainerShipmentTimelineDetailDto> GetForSourceAsync(
         IErpDbContext db, string? sourceType, long sourceId,
-        bool includeHistory = true, int historyTake = ContainerShipmentTimelineRules.MaxHistoryEvents)
+        bool includeHistory = true, int historyTake = ContainerShipmentTimelineRules.MaxHistoryEvents,
+        ShipmentReferenceAccess? access = null)
     {
         ArgumentNullException.ThrowIfNull(db);
 
@@ -44,6 +55,15 @@ public static class ContainerShipmentTimelineService
         if (sourceId <= 0)
             throw BusinessException.InvalidParameter(
                 "请指定要查看出运证据时间线的源记录（订柜信息 / 预装柜单 / 装柜清单）：系统不按柜号 / 单号等自由文本匹配记录");
+
+        // ERP-435：有护栏调用方（出运时间线控制器）在读取任何计划值 / 实际事件 / 承运人 / 货代 / 港口等证据字段之前，
+        // 先复核该源记录类型对应的既有源模块菜单与权威客户数据范围（复用 ERP-362 / ERP-097）；
+        // 受限账号对越范围 / 无权威归属的源记录 fail closed，不返回任何证据、计数或汇总。
+        if (access is not null)
+        {
+            ShipmentReferenceAuthorizationRules.RequireSourceType(access, type);
+            await ShipmentReferenceAuthorizationRules.EnsureScopeAllowsSourceAsync(db, access, type, sourceId);
+        }
 
         var sourceAvailable = await SourceExistsAsync(db, type, sourceId);
 
@@ -68,7 +88,8 @@ public static class ContainerShipmentTimelineService
     /// </summary>
     public static async Task<ContainerShipmentTimelineDetailDto> GetForReferenceAsync(
         IErpDbContext db, long referenceId,
-        bool includeHistory = true, int historyTake = ContainerShipmentTimelineRules.MaxHistoryEvents)
+        bool includeHistory = true, int historyTake = ContainerShipmentTimelineRules.MaxHistoryEvents,
+        ShipmentReferenceAccess? access = null)
     {
         ArgumentNullException.ThrowIfNull(db);
         if (referenceId <= 0)
@@ -77,6 +98,11 @@ public static class ContainerShipmentTimelineService
         var reference = await db.ContainerShipmentReferences.AsNoTracking()
             .FirstOrDefaultAsync(r => r.Id == referenceId && !r.IsDeleted)
             ?? throw BusinessException.NotFound($"出运引用不存在（Id={referenceId}）");
+
+        // ERP-435：按父出运引用**持久化**的源记录类型 + Id 复核既有源模块菜单与权威客户数据范围（与 ERP-362 / ERP-365 同口径）；
+        // 受限账号对越范围引用（含父引用缺失无法解析权威归属）fail closed，不返回任何证据字段。
+        if (access is not null)
+            await ShipmentReferenceAuthorizationRules.EnsureScopeAllowsParentReferenceAsync(db, access, reference);
 
         var sourceAvailable = ContainerShipmentReferenceRules.IsSupportedSourceType(reference.SourceType)
                               && await SourceExistsAsync(
@@ -99,7 +125,7 @@ public static class ContainerShipmentTimelineService
     /// 不静默忽略筛选条件；不同记录只按显式 Id 区分，绝不因文本相似而合并。</para>
     /// </summary>
     public static async Task<PagedResult<ContainerShipmentTimelineShipmentDto>> ListAsync(
-        IErpDbContext db, ContainerShipmentTimelineQuery query)
+        IErpDbContext db, ContainerShipmentTimelineQuery query, ShipmentReferenceAccess? access = null)
     {
         ArgumentNullException.ThrowIfNull(db);
         ArgumentNullException.ThrowIfNull(query);
@@ -130,6 +156,10 @@ public static class ContainerShipmentTimelineService
         var plannedArrivalTo = query.PlannedArrivalTo?.Date.AddDays(1);
 
         var source = db.ContainerShipmentReferences.AsNoTracking().Where(r => !r.IsDeleted);
+        // ERP-435：既有源模块菜单 + 权威客户数据范围在**计数、分页与 materialization 之前**下推到数据库；
+        // 受限账号绝不返回范围外客户的出运引用、里程碑事件或状态计数（绝不「先查全量再内存过滤」）。
+        if (access is not null)
+            source = ShipmentReferenceAuthorizationRules.ApplyScope(db, source, access);
         if (sourceType is not null) source = source.Where(r => r.SourceType == sourceType);
         if (query.SourceId is not null) source = source.Where(r => r.SourceId == query.SourceId!.Value);
         if (status is not null) source = source.Where(r => r.Status == status.Value);

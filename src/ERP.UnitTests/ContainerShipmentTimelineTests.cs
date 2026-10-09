@@ -33,7 +33,13 @@ public class ContainerShipmentTimelineTests
     private static readonly DateTime ActualDepartureAt = new(2026, 9, 12, 10, 30, 0);
     private static readonly DateTime ActualArrivalAt = new(2026, 9, 27, 6, 15, 0);
 
-    private static ContainerShipmentTimelineController BuildController(ErpDbContext db) => new(db);
+    private static ContainerShipmentTimelineController BuildController(ErpDbContext db)
+    {
+        // ERP-435：本模块每个路由都先实时授权，测试用既有特权账号（系统内置角色，不新增任何菜单授权）。
+        var controller = new ContainerShipmentTimelineController(db);
+        TestAuth.SetUser(controller, TestAuth.SeedPrivilegedUser(db));
+        return controller;
+    }
 
     private static ContainerBooking SeedBooking(
         ErpDbContext db, string bookingNo, string containerNo = "CONT-059",
@@ -1186,6 +1192,84 @@ public class ContainerShipmentTimelineTests
         Assert.Equal(5, ContainerShipmentTimelineRules.NormalizeHistoryTake(5));
         Assert.Equal(ContainerShipmentTimelineRules.MaxHistoryEvents,
             ContainerShipmentTimelineRules.NormalizeHistoryTake(100_000));
+    }
+
+    // ==================== 15B. ERP-435：时间线读取的实时授权与客户数据范围 ====================
+
+    /// <summary>构造受限账号的授权结果（复用 ERP-097 客户范围 + 既有三种源模块菜单；不新增任何授权）。</summary>
+    private static ShipmentReferenceAccess RestrictedAccess(params long[] allowedCustomerIds) => new()
+    {
+        Scope = new SalespersonDataScope
+        {
+            IsPrivileged = false,
+            SalesmanId = 1,
+            AllowedCustomerIds = allowedCustomerIds.ToHashSet()
+        },
+        UserId = 1,
+        AllowedSourceTypes = new HashSet<string>(
+            ContainerShipmentReferenceRules.SupportedSourceTypes, StringComparer.Ordinal)
+    };
+
+    [Fact]
+    public async Task 受限账号工作台只返回本人客户引用的时间线且范围先于计数与分页()
+    {
+        using var db = TestDbFactory.Create();
+        var own = SeedBooking(db, "DG-435-OWN", customerId: 100);
+        var foreign = SeedBooking(db, "DG-435-OTHER", customerId: 200);
+        SeedReference(db, own.Id, sourceNo: "DG-435-OWN");
+        SeedReference(db, foreign.Id, sourceNo: "DG-435-OTHER");
+
+        var page = await ContainerShipmentTimelineService.ListAsync(
+            db, new ContainerShipmentTimelineQuery(), RestrictedAccess(100));
+
+        var row = Assert.Single(page.Items);
+        Assert.Equal(1, page.Total);                       // 计数发生在数据库侧范围过滤之后
+        Assert.Equal("DG-435-OWN", row.SourceNo);
+    }
+
+    [Fact]
+    public async Task 受限账号越范围源记录与引用详情被拒绝且不返回任何证据()
+    {
+        using var db = TestDbFactory.Create();
+        var foreign = SeedBooking(db, "DG-435-FOREIGN", customerId: 200);
+        var foreignReference = SeedReference(db, foreign.Id, sourceNo: "DG-435-FOREIGN");
+        SeedMilestone(db, foreignReference.Id, ContainerShipmentMilestoneRules.EventTypeActualDeparture);
+
+        var access = RestrictedAccess(100);
+
+        await AssertBusinessAsync(ErrorCodes.Forbidden, () => ContainerShipmentTimelineService.GetForSourceAsync(
+            db, ContainerShipmentReferenceRules.SourceTypeBooking, foreign.Id, true,
+            ContainerShipmentTimelineRules.MaxHistoryEvents, access));
+        await AssertBusinessAsync(ErrorCodes.Forbidden, () => ContainerShipmentTimelineService.GetForReferenceAsync(
+            db, foreignReference.Id, true, ContainerShipmentTimelineRules.MaxHistoryEvents, access));
+    }
+
+    [Fact]
+    public async Task 受限账号未映射任何客户时工作台失败关闭且不泄露任何行()
+    {
+        using var db = TestDbFactory.Create();
+        var booking = SeedBooking(db, "DG-435-UNMAPPED", customerId: 100);
+        SeedReference(db, booking.Id, sourceNo: "DG-435-UNMAPPED");
+
+        // 未映射业务员的受限账号：AllowedCustomerIds 为空集合（看不到任何客户），fail closed（不降级为全局可见）。
+        var access = new ShipmentReferenceAccess
+        {
+            Scope = new SalespersonDataScope
+            {
+                IsPrivileged = false,
+                SalesmanId = null,
+                AllowedCustomerIds = new HashSet<long>()
+            },
+            UserId = 1,
+            AllowedSourceTypes = new HashSet<string>(
+                ContainerShipmentReferenceRules.SupportedSourceTypes, StringComparer.Ordinal)
+        };
+
+        var page = await ContainerShipmentTimelineService.ListAsync(
+            db, new ContainerShipmentTimelineQuery(), access);
+
+        Assert.Empty(page.Items);
+        Assert.Equal(0, page.Total);
     }
 
     // ==================== 16. 前端与路由接线契约 ====================
