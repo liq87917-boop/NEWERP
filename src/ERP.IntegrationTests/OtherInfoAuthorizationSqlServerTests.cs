@@ -172,7 +172,7 @@ public sealed class OtherInfoAuthorizationSqlServerTests : IClassFixture<OtherIn
         Assert.DoesNotContain(options, o => o.InfoName == "集成停用货代");
         Assert.All(options, o => Assert.Equal(1, o.Status));
 
-        var code = $"OI-OP-{Guid.NewGuid():N}"[..40];
+        var code = $"OI-OP-{Guid.NewGuid():N}";
         var created = AssertOk<BaseOtherInfo>(await ctl.Create(NewRow("Currency", code, "操作员新增币种")));
         Assert.IsType<OkObjectResult>(await ctl.BatchDelete(new List<long> { created.Id }));
         Assert.True(await db.BaseOtherInfos.AsNoTracking().AnyAsync(o => o.Id == created.Id && o.IsDeleted));

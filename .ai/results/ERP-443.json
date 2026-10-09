@@ -1,13 +1,11 @@
 {
   "task": "ERP-443",
-  "status": "retry_pending",
-  "execution_outcome": "retry_pending",
-  "normalized_finish_reason": "real_sql_acceptance_reopened",
+  "status": "completed",
+  "execution_outcome": "completed",
+  "normalized_finish_reason": "build_validated",
   "cline_exit_code": 0,
   "cline_finish_reason_raw": "completed",
   "attempts": 1,
   "browser_acceptance": null,
-  "finished_at": "2026-10-09T06:52:08.458404Z",
-  "last_error": "Independent genuine SQL failed 1/12: OtherInfoAuthorizationSqlServerTests.cs:175 slices the 38-character OI-OP plus full GUID code with [..40], causing ArgumentOutOfRangeException before permitted create and batch-delete lifecycle. Complete original SQL log/TRX/target preserved at .ai/logs/heartbeat-20261009T0907-original-failures. Minimum isolated repair removes only that invalid [..40] slice, retaining full GUID uniqueness and 38-character code within persisted MaxLength40, preserving all authorization and validation assertions. Isolated safe Release passed 0 warnings/errors; 7 real controller SQL cases plus 5 target guards passed on fresh dedicated GUID-owned NEWERP_AUTOTEST localdb. Apply exact one-expression fixture fix within existing allowed_paths and run genuine SQL plus existing safe/full-unit gates before completing. Never suppress assertions or relax production validation or permissions. Tested candidate is .ai/logs/ERP-311-repair-validation-20261005/src/ERP.IntegrationTests/OtherInfoAuthorizationSqlServerTests.cs.",
-  "historical_checkpoint": ".ai/results/ERP-443-checkpoint-attempt-1-before-real-sql-repair.json"
+  "finished_at": "2026-10-09T09:38:56.868263Z"
 }
