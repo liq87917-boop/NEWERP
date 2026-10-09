@@ -221,13 +221,55 @@ public static class SupplierPaymentInvoiceAllocationService
         return await MapAsync(db, row);
     }
 
-    // ==================== 3. 读取（台账 / 详情 / 付款单侧清单） ====================
-
-    /// <summary>引用行详情（含付款单与发票可用性标注；只读，不写库）</summary>
-    public static async Task<SupplierPaymentInvoiceAllocationDto> GetAsync(IErpDbContext db, long allocationId)
+    /// <summary>
+    /// 路由级授权登记（ERP-066）：先实时身份 + 付款单菜单 + 客户数据范围解析并校验权威付款单
+    /// （付款单缺失 / 已删除 / 越范围 / 无权威归属一律返回同一条不披露存在性的错误），
+    /// 授权通过后才复用 <see cref="CreateAsync"/> 写证据——越权请求绝不落任何引用行。
+    /// </summary>
+    public static async Task<SupplierPaymentInvoiceAllocationDto> CreateAuthorizedAsync(
+        IErpDbContext db, SupplierPaymentInvoiceAllocationSaveDto dto, long? userId, string? recordedBy)
     {
         ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(dto);
+        // 纯参数形状校验先于授权（不读库、不泄露信息），保持既有错误码
+        if (dto.PaymentId <= 0) throw BusinessException.InvalidParameter("请选择要引用的付款单");
+        await SupplierPaymentLifecycleRules.ResolveAuthorizedPaymentAsync(db, userId, dto.PaymentId);
+        return await CreateAsync(db, dto, recordedBy);
+    }
+
+    /// <summary>
+    /// 路由级授权作废（ERP-066）：先实时身份 + 付款单菜单 + 客户数据范围，再解析引用行所属权威付款单
+    /// （引用行 / 付款单缺失、已删除或越范围一律返回同一条不披露存在性的错误），
+    /// 授权通过后才复用 <see cref="VoidAsync"/> 写证据状态——越权请求绝不改写任何引用行。
+    /// </summary>
+    public static async Task<SupplierPaymentInvoiceAllocationDto> VoidAuthorizedAsync(
+        IErpDbContext db, long allocationId, string? reason, long? userId)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        var scope = await SupplierPaymentLifecycleRules.ResolveAuthorizedScopeAsync(db, userId);
+
+        var paymentId = allocationId > 0
+            ? await db.SupplierPaymentInvoiceAllocations.AsNoTracking()
+                .Where(a => a.Id == allocationId && !a.IsDeleted)
+                .Select(a => (long?)a.PaymentId)
+                .FirstOrDefaultAsync()
+            : null;
+        await SupplierPaymentLifecycleRules.EnsurePaymentInScopeAsync(db, scope, paymentId);
+
+        return await VoidAsync(db, allocationId, reason);
+    }
+
+    // ==================== 3. 读取（台账 / 详情 / 付款单侧清单） ====================
+
+    /// <summary>引用行详情（含付款单与发票可用性标注；只读，不写库；先实时身份 + 付款菜单 + 客户范围）</summary>
+    public static async Task<SupplierPaymentInvoiceAllocationDto> GetAsync(
+        IErpDbContext db, long allocationId, long? userId)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        var scope = await SupplierPaymentLifecycleRules.ResolveAuthorizedScopeAsync(db, userId);
         var row = await LoadAsync(db, allocationId);
+        // 历史证据：被引用付款单即使已软删除也保留可读，但仍须落在当前账号的权威客户范围内
+        await SupplierPaymentLifecycleRules.EnsureHistoricalPaymentInScopeAsync(db, scope, row.PaymentId);
         return await MapAsync(db, row);
     }
 
@@ -237,11 +279,14 @@ public static class SupplierPaymentInvoiceAllocationService
     /// <para>本页行一次批量装载付款单与发票，<strong>无逐行数据库查询</strong>。</para>
     /// </summary>
     public static async Task<PagedResult<SupplierPaymentInvoiceAllocationDto>> ListAsync(
-        IErpDbContext db, SupplierPaymentInvoiceAllocationQuery query)
+        IErpDbContext db, SupplierPaymentInvoiceAllocationQuery query, long? userId)
     {
         ArgumentNullException.ThrowIfNull(db);
         ArgumentNullException.ThrowIfNull(query);
         query.Normalize();
+
+        // 实时身份 + 付款单菜单 + 客户数据范围：先于任何计数 / 明细读取
+        var scope = await SupplierPaymentLifecycleRules.ResolveAuthorizedScopeAsync(db, userId);
 
         var status = SupplierPaymentInvoiceAllocationRules.NormalizeStatusFilter(query.Status);
         var currency = string.IsNullOrWhiteSpace(query.Currency)
@@ -249,6 +294,7 @@ public static class SupplierPaymentInvoiceAllocationService
             : SupplierPaymentInvoiceAllocationRules.NormalizeCurrencyStrict(query.Currency);
 
         var source = db.SupplierPaymentInvoiceAllocations.AsNoTracking().Where(x => !x.IsDeleted);
+        source = await SupplierPaymentLifecycleRules.ApplyCustomerScopeAsync(db, source, scope);
         if (query.PaymentId is not null) source = source.Where(x => x.PaymentId == query.PaymentId.Value);
         if (query.PurchaseInvoiceId is not null)
             source = source.Where(x => x.PurchaseInvoiceId == query.PurchaseInvoiceId.Value);
@@ -290,10 +336,12 @@ public static class SupplierPaymentInvoiceAllocationService
     /// status 传 1 只看有效 / 传 2 只看已作废；不写库、不改写付款单。
     /// </summary>
     public static async Task<List<SupplierPaymentInvoiceAllocationDto>> ListForPaymentAsync(
-        IErpDbContext db, long paymentId, int? status = null, int take = SupplierPaymentInvoiceAllocationRules.MaxAllocationsPerPayment)
+        IErpDbContext db, long paymentId, long? userId, int? status = null, int take = SupplierPaymentInvoiceAllocationRules.MaxAllocationsPerPayment)
     {
         ArgumentNullException.ThrowIfNull(db);
         if (paymentId <= 0) throw BusinessException.InvalidParameter("付款单 Id 不合法");
+        // 实时身份 + 付款菜单 + 客户数据范围：被引用付款单缺失 / 已删除 / 越范围一律不披露存在性
+        _ = await SupplierPaymentLifecycleRules.ResolveAuthorizedPaymentAsync(db, userId, paymentId);
 
         var statusFilter = SupplierPaymentInvoiceAllocationRules.NormalizeStatusFilter(status);
         var size = take <= 0 ? SupplierPaymentInvoiceAllocationRules.MaxAllocationsPerPayment
@@ -317,10 +365,14 @@ public static class SupplierPaymentInvoiceAllocationService
     /// status 传 1 只看有效 / 传 2 只看已作废；不写库、不改写发票。
     /// </summary>
     public static async Task<List<SupplierPaymentInvoiceAllocationDto>> ListForInvoiceAsync(
-        IErpDbContext db, long purchaseInvoiceId, int? status = null, int take = SupplierPaymentInvoiceAllocationRules.MaxAllocationsPerInvoice)
+        IErpDbContext db, long purchaseInvoiceId, long? userId, int? status = null, int take = SupplierPaymentInvoiceAllocationRules.MaxAllocationsPerInvoice)
     {
         ArgumentNullException.ThrowIfNull(db);
         if (purchaseInvoiceId <= 0) throw BusinessException.InvalidParameter("发票 Id 不合法");
+
+        // 实时身份 + 付款菜单 + 客户数据范围：发票缺失 / 已删除 / 越范围一律不披露存在性
+        var scope = await SupplierPaymentLifecycleRules.ResolveAuthorizedScopeAsync(db, userId);
+        await SupplierPaymentLifecycleRules.EnsureInvoiceInScopeAsync(db, scope, purchaseInvoiceId);
 
         var statusFilter = SupplierPaymentInvoiceAllocationRules.NormalizeStatusFilter(status);
         var size = take <= 0 ? SupplierPaymentInvoiceAllocationRules.MaxAllocationsPerInvoice
@@ -328,6 +380,7 @@ public static class SupplierPaymentInvoiceAllocationService
 
         var source = db.SupplierPaymentInvoiceAllocations.AsNoTracking()
             .Where(a => !a.IsDeleted && a.PurchaseInvoiceId == purchaseInvoiceId);
+        source = await SupplierPaymentLifecycleRules.ApplyCustomerScopeAsync(db, source, scope);
         if (statusFilter is not null) source = source.Where(a => a.Status == statusFilter.Value);
 
         var rows = await source
@@ -349,10 +402,12 @@ public static class SupplierPaymentInvoiceAllocationService
     /// 明细行按有界上限返回（不逐行查库）；本方法<strong>不写库</strong>、不改写付款单与发票。</para>
     /// </summary>
     public static async Task<SupplierPaymentInvoiceAllocationPaymentSummaryDto> GetPaymentSummaryAsync(
-        IErpDbContext db, long paymentId)
+        IErpDbContext db, long paymentId, long? userId)
     {
         ArgumentNullException.ThrowIfNull(db);
-        var payment = await LoadPaymentAsync(db, paymentId);
+
+        // 实时身份 + 付款菜单 + 客户数据范围：被引用付款单缺失 / 已删除 / 越范围一律不披露存在性
+        var payment = await SupplierPaymentLifecycleRules.ResolveAuthorizedPaymentAsync(db, userId, paymentId);
 
         var currency = CurrencyAmountRules.NormalizeCurrency(payment.Currency.ToString());
         var paymentAmount = SupplierPaymentInvoiceAllocationRules.AuthoritativeAmount(payment.Amount, currency);
@@ -384,7 +439,7 @@ public static class SupplierPaymentInvoiceAllocationService
         var purchaseOrderAllocated = purchaseOrderStats.Sum(s => s.Amount);
         var purchaseOrderCount = purchaseOrderStats.Sum(s => s.Count);
 
-        var rows = await ListForPaymentAsync(db, payment.Id);
+        var rows = await ListForPaymentAsync(db, payment.Id, userId);
         var supplier = await db.BaseSuppliers.AsNoTracking()
             .FirstOrDefaultAsync(s => s.Id == payment.SupplierId);
 
@@ -425,16 +480,22 @@ public static class SupplierPaymentInvoiceAllocationService
     /// 未引用含税总额<strong>不是</strong>应付余额、账龄或付款依据；本方法不写库、不改写发票与付款单。</para>
     /// </summary>
     public static async Task<SupplierPaymentInvoiceAllocationInvoiceSummaryDto> GetInvoiceSummaryAsync(
-        IErpDbContext db, long purchaseInvoiceId)
+        IErpDbContext db, long purchaseInvoiceId, long? userId)
     {
         ArgumentNullException.ThrowIfNull(db);
-        var invoice = await LoadInvoiceAsync(db, purchaseInvoiceId);
+
+        // 实时身份 + 付款菜单 + 客户数据范围：发票缺失 / 已删除 / 越范围一律不披露存在性
+        var scope = await SupplierPaymentLifecycleRules.ResolveAuthorizedScopeAsync(db, userId);
+        var invoice = await SupplierPaymentLifecycleRules.EnsureInvoiceInScopeAsync(
+            db, scope, purchaseInvoiceId);
 
         var currency = CurrencyAmountRules.NormalizeCurrency(invoice.Currency);
         var grossAmount = SupplierPaymentInvoiceAllocationRules.AuthoritativeAmount(invoice.GrossAmount, currency);
 
-        var stats = await db.SupplierPaymentInvoiceAllocations.AsNoTracking()
-            .Where(a => !a.IsDeleted && a.PurchaseInvoiceId == invoice.Id)
+        var statsSource = db.SupplierPaymentInvoiceAllocations.AsNoTracking()
+            .Where(a => !a.IsDeleted && a.PurchaseInvoiceId == invoice.Id);
+        statsSource = await SupplierPaymentLifecycleRules.ApplyCustomerScopeAsync(db, statsSource, scope);
+        var stats = await statsSource
             .GroupBy(a => a.Status)
             .Select(g => new { Status = g.Key, Count = g.Count(), Amount = g.Sum(a => a.AllocatedAmount) })
             .ToListAsync();
@@ -448,7 +509,7 @@ public static class SupplierPaymentInvoiceAllocationService
         var unallocated = grossAmount - allocated;
         if (unallocated < 0) unallocated = 0;
 
-        var rows = await ListForInvoiceAsync(db, invoice.Id);
+        var rows = await ListForInvoiceAsync(db, invoice.Id, userId);
         var supplier = await db.BaseSuppliers.AsNoTracking()
             .FirstOrDefaultAsync(s => s.Id == invoice.SupplierId);
 
@@ -492,16 +553,20 @@ public static class SupplierPaymentInvoiceAllocationService
     /// 也不代表付款是否真的发生，更不与 ERP-049 的采购订单引用金额相加。</para>
     /// </summary>
     public static async Task<List<SupplierPaymentInvoiceAllocationPaymentCandidateDto>> ListPaymentCandidatesAsync(
-        IErpDbContext db, long? supplierId, string? keyword,
+        IErpDbContext db, long? supplierId, string? keyword, long? userId,
         int take = SupplierPaymentInvoiceAllocationRules.MaxPaymentCandidates)
     {
         ArgumentNullException.ThrowIfNull(db);
+
+        // 实时身份 + 付款菜单 + 客户数据范围：先于候选计数 / 明细读取
+        var scope = await SupplierPaymentLifecycleRules.ResolveAuthorizedScopeAsync(db, userId);
 
         var keywordText = SupplierPaymentInvoiceAllocationRules.NormalizeKeyword(keyword);
         var size = take <= 0 ? SupplierPaymentInvoiceAllocationRules.MaxPaymentCandidates
             : Math.Min(take, SupplierPaymentInvoiceAllocationRules.MaxPaymentCandidates);
 
         var source = db.FinancePayments.AsNoTracking().Where(p => !p.IsDeleted);
+        source = await SupplierPaymentLifecycleRules.ApplyCustomerScopeAsync(db, source, scope);
         if (supplierId is not null && supplierId.Value > 0)
             source = source.Where(p => p.SupplierId == supplierId.Value);
         if (keywordText.Length > 0) source = source.Where(p => p.PaymentNo.Contains(keywordText));
@@ -567,12 +632,13 @@ public static class SupplierPaymentInvoiceAllocationService
     /// 与剩余未被付款引用证据覆盖的金额（只按本册持久化有效行派生，下限 0）。
     /// </summary>
     public static async Task<List<SupplierPaymentInvoiceAllocationInvoiceCandidateDto>> ListInvoiceCandidatesAsync(
-        IErpDbContext db, long paymentId, string? keyword,
+        IErpDbContext db, long paymentId, string? keyword, long? userId,
         int take = SupplierPaymentInvoiceAllocationRules.MaxInvoiceCandidates)
     {
         ArgumentNullException.ThrowIfNull(db);
 
-        var payment = await LoadPaymentAsync(db, paymentId);
+        // 实时身份 + 付款菜单 + 客户数据范围：被引用付款单缺失 / 已删除 / 越范围一律不披露存在性
+        var payment = await SupplierPaymentLifecycleRules.ResolveAuthorizedPaymentAsync(db, userId, paymentId);
         var currency = SupplierPaymentInvoiceAllocationRules.NormalizeCurrencyStrict(payment.Currency.ToString());
         var keywordText = SupplierPaymentInvoiceAllocationRules.NormalizeKeyword(keyword);
         var size = take <= 0 ? SupplierPaymentInvoiceAllocationRules.MaxInvoiceCandidates

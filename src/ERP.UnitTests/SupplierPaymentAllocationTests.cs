@@ -5,8 +5,10 @@ using ERP.Application.Services;
 using ERP.Domain.Entities;
 using ERP.Domain.Enums;
 using ERP.Infrastructure.Data;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.Security.Claims;
 using Xunit;
 
 namespace ERP.UnitTests;
@@ -23,7 +25,107 @@ public class SupplierPaymentAllocationTests
 {
     // ==================== 0. 测试脚手架 ====================
 
-    private static SupplierPaymentAllocationController BuildController(ErpDbContext db) => new(db);
+    private static SysMenu EnsurePaymentMenu(ErpDbContext db)
+    {
+        var menu = db.SysMenus.FirstOrDefault(m => !m.IsDeleted
+            && m.MenuCode == SupplierPaymentLifecycleRules.RequiredMenuCode);
+        if (menu is not null) return menu;
+
+        menu = new SysMenu
+        {
+            ParentId = 0,
+            MenuCode = SupplierPaymentLifecycleRules.RequiredMenuCode,
+            MenuName = SupplierPaymentLifecycleRules.RequiredMenuText,
+            Path = "/finance/payment",
+            MenuType = MenuType.Menu
+        };
+        db.SysMenus.Add(menu);
+        db.SaveChanges();
+        return menu;
+    }
+
+    /// <summary>播种具备既有付款单菜单的特权账号（数据范围不受限，聚焦引用证据语义）</summary>
+    private static long SeedPrivilegedUser(ErpDbContext db)
+    {
+        var role = new SysRole { RoleName = "付款引用特权角色", RoleCode = $"AllocPriv-{Guid.NewGuid():N}", IsSystem = true };
+        db.SysRoles.Add(role);
+        db.SaveChanges();
+
+        var user = new SysUser
+        {
+            UserName = $"alloc-priv-{Guid.NewGuid():N}",
+            PasswordHash = "hash",
+            PasswordSalt = "salt",
+            DisplayName = "付款引用特权用户",
+            Status = UserStatus.Enabled
+        };
+        db.SysUsers.Add(user);
+        db.SaveChanges();
+
+        db.SysUserRoles.Add(new SysUserRole { UserId = user.Id, RoleId = role.Id });
+        var menu = EnsurePaymentMenu(db);
+        db.SysRoleMenus.Add(new SysRoleMenu { RoleId = role.Id, MenuId = menu.Id });
+        db.SaveChanges();
+        return user.Id;
+    }
+
+    /// <summary>播种受限业务员账号（登录名 = 员工编码，ERP-097 权威映射；仅可见被分配客户）</summary>
+    private static long SeedRestrictedSalesman(ErpDbContext db, string userName)
+    {
+        var role = new SysRole { RoleName = "付款引用业务员角色", RoleCode = $"AllocSales-{Guid.NewGuid():N}", IsSystem = false };
+        db.SysRoles.Add(role);
+        db.SaveChanges();
+
+        var user = new SysUser
+        {
+            UserName = userName,
+            PasswordHash = "hash",
+            PasswordSalt = "salt",
+            DisplayName = userName,
+            Status = UserStatus.Enabled
+        };
+        db.SysUsers.Add(user);
+        db.SaveChanges();
+
+        db.SysUserRoles.Add(new SysUserRole { UserId = user.Id, RoleId = role.Id });
+        var menu = EnsurePaymentMenu(db);
+        db.SysRoleMenus.Add(new SysRoleMenu { RoleId = role.Id, MenuId = menu.Id });
+        db.SaveChanges();
+
+        db.BaseEmployees.Add(new BaseEmployee
+        {
+            EmployeeCode = userName, EmployeeName = userName, IsSalesman = true, Status = 1
+        });
+        db.SaveChanges();
+        return user.Id;
+    }
+
+    internal static void SetUser(ControllerBase controller, long? userId)
+    {
+        var claims = userId.HasValue
+            ? new[] { new Claim(ClaimTypes.NameIdentifier, userId.Value.ToString()) }
+            : Array.Empty<Claim>();
+        var http = new DefaultHttpContext { User = new ClaimsPrincipal(new ClaimsIdentity(claims, "Test")) };
+        // 标记为真实 HTTP 路由（Request.Path 已赋值）：缺失身份也必须实时授权并 fail closed。
+        http.Request.Path = "/api/supplier-payment-allocations";
+        controller.ControllerContext = new ControllerContext { HttpContext = http };
+    }
+
+    /// <summary>默认注入具备既有付款单菜单的特权身份（未显式指定 userId 时），聚焦引用证据业务语义</summary>
+    private static SupplierPaymentAllocationController BuildController(ErpDbContext db, long? userId = null)
+    {
+        var controller = new SupplierPaymentAllocationController(db);
+        SetUser(controller, userId ?? SeedPrivilegedUser(db));
+        return controller;
+    }
+
+    /// <summary>严格按给定身份（含 null = 无身份）构建控制器，用于权限边界测试</summary>
+    private static SupplierPaymentAllocationController BuildIdentityController(ErpDbContext db, long? userId)
+    {
+        var controller = new SupplierPaymentAllocationController(db);
+        SetUser(controller, userId);
+        return controller;
+    }
 
     private static BaseSupplier SeedSupplier(
         ErpDbContext db, string code, string name, int status = 1, bool deleted = false)
@@ -119,6 +221,232 @@ public class SupplierPaymentAllocationTests
         decimal amount, string remark = "")
         => AssertOk<SupplierPaymentAllocationDto>(
             await controller.Create(AllocateDto(paymentId, orderId, amount, remark)));
+
+    // ==================== 0b. 实时身份 / 菜单 / 客户数据范围（ERP-433） ====================
+
+    private static BaseCustomer SeedCustomer(ErpDbContext db, string code, string name, long? empId = null)
+    {
+        var customer = new BaseCustomer
+        {
+            CustomerCode = code, CustomerName = name, Status = 1, CreditStatus = "正常", EmpId = empId
+        };
+        db.BaseCustomers.Add(customer);
+        db.SaveChanges();
+        return customer;
+    }
+
+    private static FinancePaymentApply SeedPaymentApply(
+        ErpDbContext db, string applyNo, long customerId, decimal amount = 1000m, Currency currency = Currency.CNY)
+    {
+        var apply = new FinancePaymentApply
+        {
+            ApplyNo = applyNo, ApplyDate = new DateTime(2026, 9, 1), CustomerId = customerId,
+            Amount = amount, Currency = currency, Status = DocumentStatus.Approved
+        };
+        db.FinancePaymentApplies.Add(apply);
+        db.SaveChanges();
+        return apply;
+    }
+
+    private static FinancePayment SeedScopedPayment(
+        ErpDbContext db, string paymentNo, long supplierId, long paymentApplyId,
+        decimal amount = 1000m, Currency currency = Currency.CNY, bool deleted = false)
+    {
+        var payment = new FinancePayment
+        {
+            PaymentNo = paymentNo, PaymentDate = new DateTime(2026, 9, 10), SupplierId = supplierId,
+            PaymentApplyId = paymentApplyId, Amount = amount, Currency = currency,
+            PaymentMethod = PaymentMethod.BankTransfer, Status = DocumentStatus.Approved, IsDeleted = deleted
+        };
+        db.FinancePayments.Add(payment);
+        db.SaveChanges();
+        return payment;
+    }
+
+    /// <summary>受限业务员账号 + 自有客户（EmpId = 本人）/ 他人客户 的完整范围脚手架</summary>
+    private static (long SalesmanId, BaseCustomer Own, BaseCustomer Foreign, BaseSupplier Supplier) SeedScope(
+        ErpDbContext db, string userName)
+    {
+        var salesmanId = SeedRestrictedSalesman(db, userName);
+        var employeeId = db.BaseEmployees.First(e => e.EmployeeCode == userName).Id;
+        var own = SeedCustomer(db, $"{userName}-OWN", "自有客户", employeeId);
+        var foreign = SeedCustomer(db, $"{userName}-FOREIGN", "他人客户");
+        var supplier = SeedSupplier(db, $"{userName}-SUP", "义乌档口");
+        return (salesmanId, own, foreign, supplier);
+    }
+
+    [Fact]
+    public async Task 缺失已删除身份按未认证拒绝_禁用账号与撤销菜单按权限不足拒绝且不读不写()
+    {
+        using var db = TestDbFactory.Create();
+        var supplier = SeedSupplier(db, "S001", "义乌档口");
+        var payment = SeedPayment(db, "FK-1", supplier.Id, 1000m);
+        var order = SeedOrder(db, "PO-A", supplier.Id, Currency.CNY, DocumentStatus.Approved, 1000m);
+
+        var disabledId = SeedPrivilegedUser(db);
+        var disabled = await db.SysUsers.FirstAsync(u => u.Id == disabledId);
+        disabled.Status = UserStatus.Disabled;
+
+        var revokedId = SeedPrivilegedUser(db);
+        foreach (var grant in db.SysRoleMenus.Where(rm => !rm.IsDeleted
+                     && db.SysUserRoles.Any(ur => ur.RoleId == rm.RoleId && ur.UserId == revokedId)).ToList())
+            grant.IsDeleted = true;
+
+        var deletedId = SeedPrivilegedUser(db);
+        var deleted = await db.SysUsers.FirstAsync(u => u.Id == deletedId);
+        deleted.IsDeleted = true;
+        await db.SaveChangesAsync();
+
+        // 缺失 / 非法 / 已删除身份 → 未认证（Unauthorized）
+        foreach (long? userId in new long?[] { null, 0, deletedId })
+        {
+            var controller = BuildIdentityController(db, userId);
+            await AssertBusinessAsync(ErrorCodes.Unauthorized, () => controller.GetPaged(new SupplierPaymentAllocationQuery()));
+            await AssertBusinessAsync(ErrorCodes.Unauthorized, () => controller.PaymentCandidates(null, null));
+            await AssertBusinessAsync(ErrorCodes.Unauthorized, () => controller.GetById(1));
+            await AssertBusinessAsync(ErrorCodes.Unauthorized, () => controller.Create(AllocateDto(payment.Id, order.Id, 10m)));
+            await AssertBusinessAsync(ErrorCodes.Unauthorized,
+                () => controller.Void(1, new SupplierPaymentAllocationVoidRequest { Reason = "作废" }));
+        }
+
+        // 禁用 / 撤销菜单 → 权限不足（Forbidden）
+        foreach (var userId in new[] { disabledId, revokedId })
+        {
+            var controller = BuildIdentityController(db, userId);
+            await AssertBusinessAsync(ErrorCodes.Forbidden, () => controller.GetPaged(new SupplierPaymentAllocationQuery()));
+            await AssertBusinessAsync(ErrorCodes.Forbidden, () => controller.PaymentCandidates(null, null));
+            await AssertBusinessAsync(ErrorCodes.Forbidden, () => controller.GetById(1));
+            await AssertBusinessAsync(ErrorCodes.Forbidden, () => controller.Create(AllocateDto(payment.Id, order.Id, 10m)));
+            await AssertBusinessAsync(ErrorCodes.Forbidden,
+                () => controller.Void(1, new SupplierPaymentAllocationVoidRequest { Reason = "作废" }));
+        }
+
+        // 被拒请求一律不落任何引用行
+        Assert.Empty(await db.SupplierPaymentAllocations.AsNoTracking().ToListAsync());
+    }
+
+    [Fact]
+    public async Task 越范围付款单与不存在付款单一律同一条不披露错误_且台账候选不泄露()
+    {
+        using var db = TestDbFactory.Create();
+        var (salesmanId, own, foreign, supplier) = SeedScope(db, "erp433-scope");
+        var ownApply = SeedPaymentApply(db, "DJ-OWN", own.Id);
+        var foreignApply = SeedPaymentApply(db, "DJ-FOREIGN", foreign.Id);
+        var ownPayment = SeedScopedPayment(db, "FK-OWN", supplier.Id, ownApply.Id);
+        var foreignPayment = SeedScopedPayment(db, "FK-FOREIGN", supplier.Id, foreignApply.Id);
+        var ownOrder = SeedOrder(db, "PO-OWN", supplier.Id, Currency.CNY, DocumentStatus.Approved, 1000m);
+        var foreignOrder = SeedOrder(db, "PO-FOREIGN", supplier.Id, Currency.CNY, DocumentStatus.Approved, 1000m);
+
+        var controller = BuildController(db, salesmanId);
+
+        // 自有范围内付款单：允许登记（被许可的登记生命周期）
+        var ownRow = await CreateAllocationAsync(controller, ownPayment.Id, ownOrder.Id, 100m);
+        Assert.True(ownRow.IsActive);
+
+        // 越范围付款单：与不存在付款单同一条不披露错误（NotFound），绝不暴露范围外 Id / 金额 / 单号
+        var foreignDenied = await AssertBusinessAsync(ErrorCodes.NotFound,
+            () => controller.Create(AllocateDto(foreignPayment.Id, foreignOrder.Id, 100m)));
+        var missingDenied = await AssertBusinessAsync(ErrorCodes.NotFound,
+            () => controller.Create(AllocateDto(987_654_321L, foreignOrder.Id, 100m)));
+        Assert.Equal(missingDenied.Message, foreignDenied.Message);
+        Assert.DoesNotContain(foreignPayment.Id.ToString(), foreignDenied.Message);
+        Assert.DoesNotContain("FK-FOREIGN", foreignDenied.Message);
+
+        // 越范围付款单的汇总 / 明细 / 候选同样不披露（同一错误）
+        Assert.Equal(missingDenied.Message, (await AssertBusinessAsync(ErrorCodes.NotFound,
+            () => controller.PaymentSummary(foreignPayment.Id))).Message);
+        Assert.Equal(missingDenied.Message, (await AssertBusinessAsync(ErrorCodes.NotFound,
+            () => controller.AllocationsForPayment(foreignPayment.Id))).Message);
+        Assert.Equal(missingDenied.Message, (await AssertBusinessAsync(ErrorCodes.NotFound,
+            () => controller.OrderCandidates(foreignPayment.Id, null))).Message);
+
+        var candidates = AssertOk<List<SupplierPaymentAllocationPaymentCandidateDto>>(
+            await controller.PaymentCandidates(null, null));
+        Assert.Contains(candidates, c => c.PaymentId == ownPayment.Id);
+        Assert.DoesNotContain(candidates, c => c.PaymentId == foreignPayment.Id);
+
+        // 台账只列出范围内付款单的引用行
+        var ledger = AssertOk<PagedResult<SupplierPaymentAllocationDto>>(
+            await controller.GetPaged(new SupplierPaymentAllocationQuery()));
+        Assert.Equal(1, ledger.Total);
+        Assert.Equal(ownPayment.Id, ledger.Items.Single().PaymentId);
+
+        // 被拒写入不落行：仅 1 条范围内有效引用行
+        Assert.Single(await db.SupplierPaymentAllocations.AsNoTracking().ToListAsync());
+    }
+
+    [Fact]
+    public async Task 越范围或已删除付款单_拒绝登记与作废_且零证据变更()
+    {
+        using var db = TestDbFactory.Create();
+        var (salesmanId, own, foreign, supplier) = SeedScope(db, "erp433-void");
+        var ownApply = SeedPaymentApply(db, "DJ-OWN", own.Id);
+        var foreignApply = SeedPaymentApply(db, "DJ-FOREIGN", foreign.Id);
+        var ownPayment = SeedScopedPayment(db, "FK-OWN", supplier.Id, ownApply.Id);
+        var foreignPayment = SeedScopedPayment(db, "FK-FOREIGN", supplier.Id, foreignApply.Id);
+        var deletionPayment = SeedScopedPayment(db, "FK-DEL", supplier.Id, ownApply.Id);
+        var ownOrder = SeedOrder(db, "PO-OWN", supplier.Id, Currency.CNY, DocumentStatus.Approved, 1000m);
+        var foreignOrder = SeedOrder(db, "PO-FOREIGN", supplier.Id, Currency.CNY, DocumentStatus.Approved, 1000m);
+        var deletionOrder = SeedOrder(db, "PO-DEL", supplier.Id, Currency.CNY, DocumentStatus.Approved, 1000m);
+
+        // 特权账号先建立三条有效引用行（含越范围与即将软删除的付款单），用于验证越权作废不改写证据
+        var privileged = BuildController(db);
+        var ownRow = await CreateAllocationAsync(privileged, ownPayment.Id, ownOrder.Id, 100m);
+        var foreignRow = await CreateAllocationAsync(privileged, foreignPayment.Id, foreignOrder.Id, 100m);
+        var deletionRow = await CreateAllocationAsync(privileged, deletionPayment.Id, deletionOrder.Id, 100m);
+
+        var deletion = await db.FinancePayments.FirstAsync(p => p.Id == deletionPayment.Id);
+        deletion.IsDeleted = true;
+        await db.SaveChangesAsync();
+
+        var controller = BuildController(db, salesmanId);
+
+        // 自有范围内：作废允许（被许可的生命周期）
+        var voided = AssertOk<SupplierPaymentAllocationDto>(
+            await controller.Void(ownRow.Id, new SupplierPaymentAllocationVoidRequest { Reason = "录错" }));
+        Assert.True(voided.IsVoided);
+
+        // 越范围 / 已删除付款单：作废按不存在拒绝；登记同样按不存在拒绝
+        await AssertBusinessAsync(ErrorCodes.NotFound,
+            () => controller.Void(foreignRow.Id, new SupplierPaymentAllocationVoidRequest { Reason = "越权作废" }));
+        await AssertBusinessAsync(ErrorCodes.NotFound,
+            () => controller.Void(deletionRow.Id, new SupplierPaymentAllocationVoidRequest { Reason = "已删除作废" }));
+        await AssertBusinessAsync(ErrorCodes.NotFound,
+            () => controller.Create(AllocateDto(foreignPayment.Id, ownOrder.Id, 10m)));
+        await AssertBusinessAsync(ErrorCodes.NotFound,
+            () => controller.Create(AllocateDto(deletionPayment.Id, deletionOrder.Id, 10m)));
+
+        // 证据零变更：被拒行仍为有效、无作废时间、金额不变；总行数不变
+        var storedForeign = await db.SupplierPaymentAllocations.AsNoTracking().FirstAsync(a => a.Id == foreignRow.Id);
+        Assert.Equal(SupplierPaymentAllocationRules.StatusActive, storedForeign.Status);
+        Assert.Null(storedForeign.VoidedAt);
+        Assert.Equal(100m, storedForeign.AllocatedAmount);
+        var storedDeletion = await db.SupplierPaymentAllocations.AsNoTracking().FirstAsync(a => a.Id == deletionRow.Id);
+        Assert.Equal(SupplierPaymentAllocationRules.StatusActive, storedDeletion.Status);
+        Assert.Null(storedDeletion.VoidedAt);
+        Assert.Equal(3, (await db.SupplierPaymentAllocations.AsNoTracking().ToListAsync()).Count);
+    }
+
+    [Fact]
+    public void 控制器与服务复用既有付款护栏且无匿名或管理员回退()
+    {
+        var controller = File.ReadAllText(
+            RepoFile("src", "ERP.Api", "Controllers", "SupplierPaymentAllocationController.cs"));
+        Assert.Contains("SupplierPaymentLifecycleRules.EnsureMenuAuthorizedAsync", controller);
+        Assert.DoesNotContain("AllowAnonymous", controller);
+        Assert.DoesNotContain("[Authorize(Roles", controller);
+
+        var service = File.ReadAllText(
+            RepoFile("src", "ERP.Application", "Services", "SupplierPaymentAllocationService.cs"));
+        Assert.Contains("SupplierPaymentLifecycleRules.ResolveAuthorizedScopeAsync", service);
+        Assert.Contains("SupplierPaymentLifecycleRules.ResolveAuthorizedPaymentAsync", service);
+        Assert.Contains("SupplierPaymentLifecycleRules.EnsurePaymentInScopeAsync", service);
+
+        var rules = File.ReadAllText(
+            RepoFile("src", "ERP.Application", "Services", "SupplierPaymentLifecycleRules.cs"));
+        Assert.Contains("AllocationNotFoundText", rules);
+        Assert.Contains("EnsureMenuAuthorizedAsync", rules);
+    }
 
     // ==================== 1. 登记：部分 / 全额引用与快照 ====================
 

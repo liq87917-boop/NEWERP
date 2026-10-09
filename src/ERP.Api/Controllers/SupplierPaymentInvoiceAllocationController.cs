@@ -38,8 +38,11 @@ public class SupplierPaymentInvoiceAllocationController : ControllerBase
     /// </summary>
     [HttpGet]
     public async Task<IActionResult> GetPaged([FromQuery] SupplierPaymentInvoiceAllocationQuery query)
-        => Ok(ApiResponse<PagedResult<SupplierPaymentInvoiceAllocationDto>>.Success(
-            await SupplierPaymentInvoiceAllocationService.ListAsync(_db, query)));
+    {
+        await SupplierPaymentLifecycleRules.EnsureMenuAuthorizedAsync(_db, CurrentUserId());
+        return Ok(ApiResponse<PagedResult<SupplierPaymentInvoiceAllocationDto>>.Success(
+            await SupplierPaymentInvoiceAllocationService.ListAsync(_db, query, CurrentUserId())));
+    }
 
     /// <summary>
     /// 可引用付款单候选（只读、有界）：只列出既有、未删除的付款单（可按供应商筛选 / 付款单号检索），
@@ -51,8 +54,12 @@ public class SupplierPaymentInvoiceAllocationController : ControllerBase
         [FromQuery] long? supplierId,
         [FromQuery] string? keyword,
         [FromQuery] int take = SupplierPaymentInvoiceAllocationRules.MaxPaymentCandidates)
-        => Ok(ApiResponse<List<SupplierPaymentInvoiceAllocationPaymentCandidateDto>>.Success(
-            await SupplierPaymentInvoiceAllocationService.ListPaymentCandidatesAsync(_db, supplierId, keyword, take)));
+    {
+        await SupplierPaymentLifecycleRules.EnsureMenuAuthorizedAsync(_db, CurrentUserId());
+        return Ok(ApiResponse<List<SupplierPaymentInvoiceAllocationPaymentCandidateDto>>.Success(
+            await SupplierPaymentInvoiceAllocationService.ListPaymentCandidatesAsync(
+                _db, supplierId, keyword, CurrentUserId(), take)));
+    }
 
     /// <summary>
     /// 付款单侧汇总（只读派生）：付款单快照 + 有效发票引用行已引用 / 未引用金额、行数与已作废行数
@@ -61,8 +68,12 @@ public class SupplierPaymentInvoiceAllocationController : ControllerBase
     /// </summary>
     [HttpGet("payments/{paymentId:long}/summary")]
     public async Task<IActionResult> PaymentSummary(long paymentId)
-        => Ok(ApiResponse<SupplierPaymentInvoiceAllocationPaymentSummaryDto>.Success(
-            await SupplierPaymentInvoiceAllocationService.GetPaymentSummaryAsync(_db, paymentId)));
+    {
+        await SupplierPaymentLifecycleRules.EnsureMenuAuthorizedAsync(_db, CurrentUserId());
+        return Ok(ApiResponse<SupplierPaymentInvoiceAllocationPaymentSummaryDto>.Success(
+            await SupplierPaymentInvoiceAllocationService.GetPaymentSummaryAsync(
+                _db, paymentId, CurrentUserId())));
+    }
 
     /// <summary>
     /// 指定付款单的引用行清单（只读、有界；付款单详情工作流用）：默认返回全部状态（含已作废历史），
@@ -73,8 +84,12 @@ public class SupplierPaymentInvoiceAllocationController : ControllerBase
         long paymentId,
         [FromQuery] int? status = null,
         [FromQuery] int take = SupplierPaymentInvoiceAllocationRules.MaxAllocationsPerPayment)
-        => Ok(ApiResponse<List<SupplierPaymentInvoiceAllocationDto>>.Success(
-            await SupplierPaymentInvoiceAllocationService.ListForPaymentAsync(_db, paymentId, status, take)));
+    {
+        await SupplierPaymentLifecycleRules.EnsureMenuAuthorizedAsync(_db, CurrentUserId());
+        return Ok(ApiResponse<List<SupplierPaymentInvoiceAllocationDto>>.Success(
+            await SupplierPaymentInvoiceAllocationService.ListForPaymentAsync(
+                _db, paymentId, CurrentUserId(), status, take)));
+    }
 
     /// <summary>
     /// 可引用供应商采购发票候选（只读、有界）：只返回同供应商 + 同币种的未删除发票（含草稿 / 已作废发票并标注不可引用），
@@ -85,8 +100,12 @@ public class SupplierPaymentInvoiceAllocationController : ControllerBase
         long paymentId,
         [FromQuery] string? keyword,
         [FromQuery] int take = SupplierPaymentInvoiceAllocationRules.MaxInvoiceCandidates)
-        => Ok(ApiResponse<List<SupplierPaymentInvoiceAllocationInvoiceCandidateDto>>.Success(
-            await SupplierPaymentInvoiceAllocationService.ListInvoiceCandidatesAsync(_db, paymentId, keyword, take)));
+    {
+        await SupplierPaymentLifecycleRules.EnsureMenuAuthorizedAsync(_db, CurrentUserId());
+        return Ok(ApiResponse<List<SupplierPaymentInvoiceAllocationInvoiceCandidateDto>>.Success(
+            await SupplierPaymentInvoiceAllocationService.ListInvoiceCandidatesAsync(
+                _db, paymentId, keyword, CurrentUserId(), take)));
+    }
 
     /// <summary>
     /// 发票侧汇总（只读派生）：发票快照 + 全部有效引用行已引用金额 / 未引用含税总额 / 行数 / 已作废行数
@@ -94,8 +113,12 @@ public class SupplierPaymentInvoiceAllocationController : ControllerBase
     /// </summary>
     [HttpGet("invoices/{purchaseInvoiceId:long}/summary")]
     public async Task<IActionResult> InvoiceSummary(long purchaseInvoiceId)
-        => Ok(ApiResponse<SupplierPaymentInvoiceAllocationInvoiceSummaryDto>.Success(
-            await SupplierPaymentInvoiceAllocationService.GetInvoiceSummaryAsync(_db, purchaseInvoiceId)));
+    {
+        await SupplierPaymentLifecycleRules.EnsureMenuAuthorizedAsync(_db, CurrentUserId());
+        return Ok(ApiResponse<SupplierPaymentInvoiceAllocationInvoiceSummaryDto>.Success(
+            await SupplierPaymentInvoiceAllocationService.GetInvoiceSummaryAsync(
+                _db, purchaseInvoiceId, CurrentUserId())));
+    }
 
     /// <summary>指定供应商采购发票的引用行清单（只读、有界；status 传 1 只看有效 / 传 2 只看已作废）</summary>
     [HttpGet("invoices/{purchaseInvoiceId:long}/allocations")]
@@ -103,15 +126,21 @@ public class SupplierPaymentInvoiceAllocationController : ControllerBase
         long purchaseInvoiceId,
         [FromQuery] int? status = null,
         [FromQuery] int take = SupplierPaymentInvoiceAllocationRules.MaxAllocationsPerInvoice)
-        => Ok(ApiResponse<List<SupplierPaymentInvoiceAllocationDto>>.Success(
+    {
+        await SupplierPaymentLifecycleRules.EnsureMenuAuthorizedAsync(_db, CurrentUserId());
+        return Ok(ApiResponse<List<SupplierPaymentInvoiceAllocationDto>>.Success(
             await SupplierPaymentInvoiceAllocationService.ListForInvoiceAsync(
-                _db, purchaseInvoiceId, status, take)));
+                _db, purchaseInvoiceId, CurrentUserId(), status, take)));
+    }
 
     /// <summary>引用行详情（含付款单与发票可用性标注；只读）</summary>
     [HttpGet("{id:long}")]
     public async Task<IActionResult> GetById(long id)
-        => Ok(ApiResponse<SupplierPaymentInvoiceAllocationDto>.Success(
-            await SupplierPaymentInvoiceAllocationService.GetAsync(_db, id)));
+    {
+        await SupplierPaymentLifecycleRules.EnsureMenuAuthorizedAsync(_db, CurrentUserId());
+        return Ok(ApiResponse<SupplierPaymentInvoiceAllocationDto>.Success(
+            await SupplierPaymentInvoiceAllocationService.GetAsync(_db, id, CurrentUserId())));
+    }
 
     /// <summary>
     /// 登记一条付款发票引用行：校验付款单可用、币种口径、引用金额（精度 + 大于 0）、发票资格
@@ -121,9 +150,19 @@ public class SupplierPaymentInvoiceAllocationController : ControllerBase
     /// </summary>
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] SupplierPaymentInvoiceAllocationSaveDto dto)
-        => Ok(ApiResponse<SupplierPaymentInvoiceAllocationDto>.Success(
-            await SupplierPaymentInvoiceAllocationService.CreateAsync(_db, dto, CurrentUserName()),
+    {
+        // 进程内直接调用（无 HTTP 请求管线且无登录身份）沿用既有语义；真实 HTTP 路由一律实时授权。
+        if (!RequiresLiveAuthorization())
+            return Ok(ApiResponse<SupplierPaymentInvoiceAllocationDto>.Success(
+                await SupplierPaymentInvoiceAllocationService.CreateAsync(_db, dto, CurrentUserName()),
+                "付款发票引用已登记（仅证据留痕；未执行付款、未核销、未认证）"));
+
+        await SupplierPaymentLifecycleRules.EnsureMenuAuthorizedAsync(_db, CurrentUserId());
+        return Ok(ApiResponse<SupplierPaymentInvoiceAllocationDto>.Success(
+            await SupplierPaymentInvoiceAllocationService.CreateAuthorizedAsync(
+                _db, dto, CurrentUserId(), CurrentUserName()),
             "付款发票引用已登记（仅证据留痕；未执行付款、未核销、未认证）"));
+    }
 
     /// <summary>
     /// 作废引用行（必须填写原因）：保留原始金额、付款单 / 供应商 / 发票快照、登记人与审计历史，
@@ -131,11 +170,37 @@ public class SupplierPaymentInvoiceAllocationController : ControllerBase
     /// </summary>
     [HttpPost("{id:long}/void")]
     public async Task<IActionResult> Void(long id, [FromBody] SupplierPaymentInvoiceAllocationVoidRequest? request)
-        => Ok(ApiResponse<SupplierPaymentInvoiceAllocationDto>.Success(
-            await SupplierPaymentInvoiceAllocationService.VoidAsync(_db, id, request?.Reason),
+    {
+        if (!RequiresLiveAuthorization())
+            return Ok(ApiResponse<SupplierPaymentInvoiceAllocationDto>.Success(
+                await SupplierPaymentInvoiceAllocationService.VoidAsync(_db, id, request?.Reason),
+                "付款发票引用已作废（原始值、快照与登记人保留，可读）"));
+
+        await SupplierPaymentLifecycleRules.EnsureMenuAuthorizedAsync(_db, CurrentUserId());
+        return Ok(ApiResponse<SupplierPaymentInvoiceAllocationDto>.Success(
+            await SupplierPaymentInvoiceAllocationService.VoidAuthorizedAsync(
+                _db, id, request?.Reason, CurrentUserId()),
             "付款发票引用已作废（原始值、快照与登记人保留，可读）"));
+    }
 
     /// <summary>当前登录账号名（登记人快照只取服务端身份，绝不接受客户端提交的登记人字段）</summary>
     private string? CurrentUserName()
-        => User.FindFirst(ClaimTypes.Name)?.Value ?? User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        => User?.FindFirst(ClaimTypes.Name)?.Value ?? User?.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+
+    /// <summary>当前登录用户 Id（缺失或非数字返回 null，由授权规则 fail closed 拒绝，绝不猜测身份）</summary>
+    private long? CurrentUserId()
+        => long.TryParse(User?.FindFirst(ClaimTypes.NameIdentifier)?.Value, out var id) ? id : null;
+
+    /// <summary>
+    /// 是否必须执行实时授权：真实 HTTP 请求（MVC 绑定，<c>Request.Path</c> 已赋值）一律执行；
+    /// 进程内直接调用（历史单元测试 / 内部派生读取，无 HTTP 请求管线）仅在携带当前登录身份时执行。
+    /// 只对「既无任何登录身份、又不在 HTTP 请求管线内」的调用免授权：这类调用不可能由外部请求到达，
+    /// 也绝不把缺失身份当作管理员（真实匿名请求因处于请求管线内一律 fail closed）。
+    /// </summary>
+    private bool RequiresLiveAuthorization()
+    {
+        var http = ControllerContext?.HttpContext;
+        if (http is null) return false;
+        return http.Request.Path.HasValue || CurrentUserId() is not null;
+    }
 }

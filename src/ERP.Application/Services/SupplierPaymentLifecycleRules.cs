@@ -167,6 +167,164 @@ public static class SupplierPaymentLifecycleRules
                 ErrorCodes.Forbidden);
     }
 
+    // ==================== 2b. 付款引用证据（ERP-049 / ERP-066）授权与客户范围（fail closed） ====================
+
+    /// <summary>
+    /// 付款引用证据（ERP-049「付款单 → 采购订单」/ ERP-066「付款单 → 供应商采购发票」）登记与读取时，
+    /// 被引用付款单缺失 / 已删除 / 越范围 / 无权威归属一律返回的<strong>同一条不披露存在性</strong>文案
+    /// （绝不暴露范围外付款单 Id、金额或计数，也不区分「不存在」与「不可见」）。
+    /// </summary>
+    public const string AllocationNotFoundText = "付款单不存在或已删除，或不在当前账号的数据范围内";
+
+    /// <summary>
+    /// 解析并授权当前账号的付款功能数据范围（台账 / 候选列表过滤复用）：先校验<strong>实时启用身份 +
+    /// 既有付款单（payment）菜单</strong>（<see cref="EnsureMenuAuthorizedAsync"/>，缺失 / 已删除 / 停用 / 撤权
+    /// 一律 fail closed），再复用 ERP-097 唯一权威口径解析客户数据范围（每次请求重新解析，绝不缓存）。
+    /// </summary>
+    public static async Task<SalespersonDataScope> ResolveAuthorizedScopeAsync(IErpDbContext db, long? userId)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        await EnsureMenuAuthorizedAsync(db, userId);
+        return await SalespersonDataScopeService.ResolveAsync(db, userId!.Value);
+    }
+
+    /// <summary>
+    /// 在既有付款功能客户数据范围内解析<strong>权威付款单</strong>（供 ERP-049 / ERP-066 引用证据登记 / 读取复用）：
+    /// 付款单缺失 / 已删除 / 越范围 / 未关联客户且非特权账号一律抛同一条不披露存在性的
+    /// <see cref="AllocationNotFoundText"/>。调用方必须已通过 <see cref="ResolveAuthorizedScopeAsync"/>；
+    /// 本方法只做资源级的范围收敛，绝不新增授权口径、绝不猜测身份或范围。
+    /// </summary>
+    public static async Task<FinancePayment> EnsurePaymentInScopeAsync(
+        IErpDbContext db, SalespersonDataScope scope, long? paymentId)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(scope);
+
+        var payment = paymentId is > 0
+            ? await db.FinancePayments.AsNoTracking()
+                .FirstOrDefaultAsync(p => p.Id == paymentId.Value && !p.IsDeleted)
+            : null;
+        var customerId = payment is null ? null : await ResolvePaymentCustomerAsync(db, payment);
+        if (payment is null || !scope.AllowsCustomer(customerId))
+            throw BusinessException.NotFound(AllocationNotFoundText);
+        return payment;
+    }
+
+    /// <summary>
+    /// 付款引用证据（ERP-049 / ERP-066）路由级授权 + 权威付款单解析：先实时身份 + 既有付款单菜单
+    /// （<see cref="EnsureMenuAuthorizedAsync"/>），再按 Id 解析既有、未删除付款单并在客户数据范围内复核；
+    /// 缺失 / 已删除 / 越范围 / 无权威归属一律返回同一条不披露存在性的 <see cref="AllocationNotFoundText"/>。
+    /// </summary>
+    public static async Task<FinancePayment> ResolveAuthorizedPaymentAsync(
+        IErpDbContext db, long? userId, long? paymentId)
+    {
+        var scope = await ResolveAuthorizedScopeAsync(db, userId);
+        return await EnsurePaymentInScopeAsync(db, scope, paymentId);
+    }
+
+    /// <summary>
+    /// <strong>历史证据读取</strong>专用的范围收敛：允许付款单已软删除（ERP-049 / ERP-066 明确要求被引用付款单
+    /// 软删除后历史引用仍可读、可用性只作只读标注），但仍按权威客户范围收敛——付款单 Id 无对应行（含物理缺失）
+    /// 或越范围一律返回同一条不披露存在性的 <see cref="AllocationNotFoundText"/>。登记 / 作废等写入路径
+    /// 必须使用严格的 <see cref="EnsurePaymentInScopeAsync"/>（已删除付款单不可再写入新证据）。
+    /// </summary>
+    public static async Task<FinancePayment> EnsureHistoricalPaymentInScopeAsync(
+        IErpDbContext db, SalespersonDataScope scope, long? paymentId)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(scope);
+
+        var payment = paymentId is > 0
+            ? await db.FinancePayments.AsNoTracking()
+                .FirstOrDefaultAsync(p => p.Id == paymentId.Value)
+            : null;
+        if (payment is null) throw BusinessException.NotFound(AllocationNotFoundText);
+
+        var customerId = await ResolvePaymentCustomerAsync(db, payment);
+        if (!scope.AllowsCustomer(customerId))
+            throw BusinessException.NotFound(AllocationNotFoundText);
+        return payment;
+    }
+
+    /// <summary>
+    /// 在既有付款功能客户数据范围内解析<strong>权威供应商采购发票</strong>（供 ERP-066 发票侧读取复用）：
+    /// 发票缺失 / 已删除一律抛同一条不披露存在性的 <see cref="AllocationNotFoundText"/>；
+    /// 受限制账号还要求该发票已被其可见范围内付款单的引用行引用（无权威归属的发票对受限制账号不可见，
+    /// fail closed，绝不暴露范围外发票 Id / 金额 / 计数）。调用方必须已通过
+    /// <see cref="ResolveAuthorizedScopeAsync"/>；本方法只做资源级的范围收敛，绝不新增授权口径。
+    /// </summary>
+    public static async Task<PurchaseInvoice> EnsureInvoiceInScopeAsync(
+        IErpDbContext db, SalespersonDataScope scope, long? purchaseInvoiceId)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(scope);
+
+        var invoice = purchaseInvoiceId is > 0
+            ? await db.PurchaseInvoices.AsNoTracking()
+                .FirstOrDefaultAsync(i => i.Id == purchaseInvoiceId.Value && !i.IsDeleted)
+            : null;
+        if (invoice is null) throw BusinessException.NotFound(AllocationNotFoundText);
+
+        if (scope.AllowedCustomerIds is not null)
+        {
+            var paymentIds = await LoadScopedPaymentIdsAsync(db, scope);
+            var referenced = await db.SupplierPaymentInvoiceAllocations.AsNoTracking()
+                .AnyAsync(a => !a.IsDeleted
+                               && a.PurchaseInvoiceId == invoice.Id
+                               && paymentIds.Contains(a.PaymentId));
+            if (!referenced) throw BusinessException.NotFound(AllocationNotFoundText);
+        }
+
+        return invoice;
+    }
+
+    /// <summary>
+    /// 按客户数据范围过滤「付款单 → 采购订单」引用行查询（台账列表用）：特权账号不过滤；受限制账号只保留
+    /// 关联到其被分配客户的货款申请单的付款单的引用行（未关联客户的付款单对受限制账号不可见，fail closed）。
+    /// </summary>
+    public static async Task<IQueryable<SupplierPaymentAllocation>> ApplyCustomerScopeAsync(
+        IErpDbContext db, IQueryable<SupplierPaymentAllocation> source, SalespersonDataScope scope)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(source);
+        ArgumentNullException.ThrowIfNull(scope);
+        if (scope.AllowedCustomerIds is null) return source;
+
+        var paymentIds = await LoadScopedPaymentIdsAsync(db, scope);
+        return source.Where(a => paymentIds.Contains(a.PaymentId));
+    }
+
+    /// <summary>
+    /// 按客户数据范围过滤「付款单 → 供应商采购发票」引用行查询（台账列表用）：口径与
+    /// <see cref="ApplyCustomerScopeAsync(IErpDbContext, IQueryable{SupplierPaymentAllocation}, SalespersonDataScope)"/>
+    /// 完全一致（同一权威付款单集合），绝不引入第二套范围口径。
+    /// </summary>
+    public static async Task<IQueryable<SupplierPaymentInvoiceAllocation>> ApplyCustomerScopeAsync(
+        IErpDbContext db, IQueryable<SupplierPaymentInvoiceAllocation> source, SalespersonDataScope scope)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(source);
+        ArgumentNullException.ThrowIfNull(scope);
+        if (scope.AllowedCustomerIds is null) return source;
+
+        var paymentIds = await LoadScopedPaymentIdsAsync(db, scope);
+        return source.Where(a => paymentIds.Contains(a.PaymentId));
+    }
+
+    /// <summary>受限制账号可见的付款单 Id 集合（关联货款申请单的客户在范围内；未关联客户不可见，fail closed）。</summary>
+    private static async Task<List<long>> LoadScopedPaymentIdsAsync(IErpDbContext db, SalespersonDataScope scope)
+    {
+        var allowed = scope.AllowedCustomerIds!.ToList();
+        var applyIds = await db.FinancePaymentApplies.AsNoTracking()
+            .Where(a => !a.IsDeleted && allowed.Contains(a.CustomerId))
+            .Select(a => a.Id)
+            .ToListAsync();
+        return await db.FinancePayments.AsNoTracking()
+            .Where(p => !p.IsDeleted && p.PaymentApplyId != null && applyIds.Contains(p.PaymentApplyId.Value))
+            .Select(p => p.Id)
+            .ToListAsync();
+    }
+
     // ==================== 3. 货款申请单来源解析（按 Id，绝不从标签猜测） ====================
 
     /// <summary>
