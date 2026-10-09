@@ -1,0 +1,113 @@
+{
+  "title": "Validate purchase order quantities and monetary precision before operational commitment",
+  "description": "Stage3 core purchase order workflow. Use existing authenticated live ERP permissions, no new grants or HTTP/test identity bypass. Preserve source audit and all original failure logs. Relevant units, guarded genuine SQL on exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and fresh GUID-owned NEWERP_AUTOTEST database only; reject existing/wrong targets before access, never drop/reset/read production configuration. Safe Release build/full unit suite required. Build completion is not full stage acceptance.",
+  "acceptance_criteria": [
+    "Reuse a single PurchaseOrderAmountRules authority for nonempty live detail rows, positive quantities and nonnegative prices representable at actual EF decimal precision, defined currency, positive representable exchange rate, tax 0..100 and checked representable per-line/header totals. Server calculates stored line amounts and total with documented decimal rounding that keeps persisted header equal to sum of persisted lines. Zero-price permitted if established policy permits; no cross-currency/unit mixing or invented tax payable posting. Reject decimal overflow with controlled business error before number reservation/partial assignments.",
+    "Create/update and locked submit/approve validate proposed or persisted terms; client totals/status/audit/detail identities cannot bypass server authority. Keep immutable historical reads/print unchanged and preserve approved downstream receipt/payment/invoice evidence. Necessary quote conversion calls reuse the authority without weakening source selection and amount checks. Denial leaves original header/details/status/number sequence and downstream rows intact.",
+    "Guarded real SQL/unit scenarios cover negative/zero/tiny quantity, negative/oversized price, overflow/decimal boundaries, invalid currency/exchange/tax, forged totals and invalid stored terms on submit/approve; successful manual/linked orders persist exact amounts through complete lifecycle. Include relevant quote conversion and cost caller regressions, no fabricated stage acceptance.",
+    "Use existing authenticated live ERP permissions, no new grants or HTTP/test identity bypass. Preserve source audit and all original failure logs. Relevant units, guarded genuine SQL on exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and fresh GUID-owned NEWERP_AUTOTEST database only; reject existing/wrong targets before access, never drop/reset/read production configuration. Safe Release build/full unit suite required. Build completion is not full stage acceptance."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/PurchaseOrderController.cs",
+    "src/ERP.Application/Services/PurchaseOrderAmountRules.cs",
+    "src/ERP.Application/Services/PurchaseOrderMutationRules.cs",
+    "src/ERP.Api/Controllers/PurchaseQuoteConversion.cs",
+    "src/ERP.UnitTests/PurchaseOrderWriteValidationTests.cs",
+    "src/ERP.IntegrationTests/PurchaseOrderWriteValidationSqlServerTests.cs",
+    "docs/purchase-order-writevalidation.md",
+    "src/ERP.UnitTests/OrderTraceabilityTests.cs",
+    "src/ERP.UnitTests/PurchaseOrderAuthorizationTests.cs",
+    "src/ERP.UnitTests/PurchaseOrderCancellationTests.cs",
+    "src/ERP.UnitTests/PurchaseOrderControllerTests.cs",
+    "src/ERP.UnitTests/PurchaseOrderDeliveryExceptionTests.cs",
+    "src/ERP.UnitTests/PurchaseOrderInvoiceEvidenceTests.cs",
+    "src/ERP.UnitTests/PurchaseOrderInvoicePaymentEvidenceTests.cs",
+    "src/ERP.UnitTests/PurchaseOrderPaymentEvidenceTests.cs",
+    "src/ERP.UnitTests/PurchaseOrderProgressTests.cs",
+    "src/ERP.UnitTests/PurchaseOrderReturnImpactTests.cs",
+    "src/ERP.UnitTests/SupplierFirstReceiptLeadTimeTests.cs",
+    "src/ERP.UnitTests/SupplierPurchaseExposureTests.cs",
+    "src/ERP.IntegrationTests/PurchaseOrderAuthorizationSqlServerTests.cs",
+    "src/ERP.UnitTests/PurchaseQuoteConversionTests.cs",
+    "src/ERP.IntegrationTests/PurchaseQuoteConversionMutationSqlServerTests.cs"
+  ],
+  "criterion_path_map": {
+    "Reuse a single PurchaseOrderAmountRules authority for nonempty live detail rows, positive quantities and nonnegative prices representable at actual EF decimal precision, defined currency, positive representable exchange rate, tax 0..100 and checked representable per-line/header totals. Server calculates stored line amounts and total with documented decimal rounding that keeps persisted header equal to sum of persisted lines. Zero-price permitted if established policy permits; no cross-currency/unit mixing or invented tax payable posting. Reject decimal overflow with controlled business error before number reservation/partial assignments.": [
+      "src/ERP.Api/Controllers/PurchaseOrderController.cs",
+      "src/ERP.Application/Services/PurchaseOrderAmountRules.cs",
+      "src/ERP.Application/Services/PurchaseOrderMutationRules.cs",
+      "src/ERP.Api/Controllers/PurchaseQuoteConversion.cs"
+    ],
+    "Create/update and locked submit/approve validate proposed or persisted terms; client totals/status/audit/detail identities cannot bypass server authority. Keep immutable historical reads/print unchanged and preserve approved downstream receipt/payment/invoice evidence. Necessary quote conversion calls reuse the authority without weakening source selection and amount checks. Denial leaves original header/details/status/number sequence and downstream rows intact.": [
+      "src/ERP.Api/Controllers/PurchaseOrderController.cs",
+      "src/ERP.Application/Services/PurchaseOrderAmountRules.cs",
+      "src/ERP.Application/Services/PurchaseOrderMutationRules.cs",
+      "src/ERP.Api/Controllers/PurchaseQuoteConversion.cs"
+    ],
+    "Guarded real SQL/unit scenarios cover negative/zero/tiny quantity, negative/oversized price, overflow/decimal boundaries, invalid currency/exchange/tax, forged totals and invalid stored terms on submit/approve; successful manual/linked orders persist exact amounts through complete lifecycle. Include relevant quote conversion and cost caller regressions, no fabricated stage acceptance.": [
+      "src/ERP.UnitTests/PurchaseOrderWriteValidationTests.cs",
+      "src/ERP.IntegrationTests/PurchaseOrderWriteValidationSqlServerTests.cs",
+      "docs/purchase-order-writevalidation.md",
+      "src/ERP.UnitTests/OrderTraceabilityTests.cs",
+      "src/ERP.UnitTests/PurchaseOrderAuthorizationTests.cs",
+      "src/ERP.UnitTests/PurchaseOrderCancellationTests.cs",
+      "src/ERP.UnitTests/PurchaseOrderControllerTests.cs",
+      "src/ERP.UnitTests/PurchaseOrderDeliveryExceptionTests.cs",
+      "src/ERP.UnitTests/PurchaseOrderInvoiceEvidenceTests.cs",
+      "src/ERP.UnitTests/PurchaseOrderInvoicePaymentEvidenceTests.cs",
+      "src/ERP.UnitTests/PurchaseOrderPaymentEvidenceTests.cs",
+      "src/ERP.UnitTests/PurchaseOrderProgressTests.cs",
+      "src/ERP.UnitTests/PurchaseOrderReturnImpactTests.cs",
+      "src/ERP.UnitTests/SupplierFirstReceiptLeadTimeTests.cs",
+      "src/ERP.UnitTests/SupplierPurchaseExposureTests.cs",
+      "src/ERP.IntegrationTests/PurchaseOrderAuthorizationSqlServerTests.cs",
+      "src/ERP.UnitTests/PurchaseQuoteConversionTests.cs",
+      "src/ERP.IntegrationTests/PurchaseQuoteConversionMutationSqlServerTests.cs"
+    ],
+    "Use existing authenticated live ERP permissions, no new grants or HTTP/test identity bypass. Preserve source audit and all original failure logs. Relevant units, guarded genuine SQL on exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and fresh GUID-owned NEWERP_AUTOTEST database only; reject existing/wrong targets before access, never drop/reset/read production configuration. Safe Release build/full unit suite required. Build completion is not full stage acceptance.": [
+      "src/ERP.UnitTests/PurchaseOrderWriteValidationTests.cs",
+      "src/ERP.IntegrationTests/PurchaseOrderWriteValidationSqlServerTests.cs",
+      "docs/purchase-order-writevalidation.md",
+      "src/ERP.UnitTests/OrderTraceabilityTests.cs",
+      "src/ERP.UnitTests/PurchaseOrderAuthorizationTests.cs",
+      "src/ERP.UnitTests/PurchaseOrderCancellationTests.cs",
+      "src/ERP.UnitTests/PurchaseOrderControllerTests.cs",
+      "src/ERP.UnitTests/PurchaseOrderDeliveryExceptionTests.cs",
+      "src/ERP.UnitTests/PurchaseOrderInvoiceEvidenceTests.cs",
+      "src/ERP.UnitTests/PurchaseOrderInvoicePaymentEvidenceTests.cs",
+      "src/ERP.UnitTests/PurchaseOrderPaymentEvidenceTests.cs",
+      "src/ERP.UnitTests/PurchaseOrderProgressTests.cs",
+      "src/ERP.UnitTests/PurchaseOrderReturnImpactTests.cs",
+      "src/ERP.UnitTests/SupplierFirstReceiptLeadTimeTests.cs",
+      "src/ERP.UnitTests/SupplierPurchaseExposureTests.cs",
+      "src/ERP.IntegrationTests/PurchaseOrderAuthorizationSqlServerTests.cs",
+      "src/ERP.UnitTests/PurchaseQuoteConversionTests.cs",
+      "src/ERP.IntegrationTests/PurchaseQuoteConversionMutationSqlServerTests.cs"
+    ]
+  },
+  "implementation_evidence": "PurchaseOrderController Calculate uses unchecked detail quantity*price sum and Validate only checks tax 0..100; ordinary create/update accept nonpositive/unrepresentable quantity, negative price, undefined currency/invalid exchange rate, overflow and rounded detail/header mismatch. Submit/approve do not revalidate persisted money. ERP033 authoritative receiving cost and ERP418 quote conversion do not validate all ordinary purchase write terms.",
+  "depends_on": [
+    "ERP-425",
+    "ERP-418"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "id": "ERP-426",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-09T01:12:34.444702Z"
+}

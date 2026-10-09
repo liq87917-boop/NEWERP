@@ -1,0 +1,110 @@
+{
+  "title": "Serialize all ordinary purchase order draft mutations with existing status and receipt locks",
+  "description": "Stage3 core purchase order workflow. Use existing authenticated live ERP permissions, no new grants or HTTP/test identity bypass. Preserve source audit and all original failure logs. Relevant units, guarded genuine SQL on exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and fresh GUID-owned NEWERP_AUTOTEST database only; reject existing/wrong targets before access, never drop/reset/read production configuration. Safe Release build/full unit suite required. Build completion is not full stage acceptance.",
+  "acceptance_criteria": [
+    "Use existing DbContext transaction protocol for ordinary create/update whether linked or manual. Discover persisted and proposed sales ownership without retaining reverse purchase locks; acquire bounded necessary sales source locks in deterministic ascending order before the shared purchase order lock. Never choose safety solely from request null ownership. Under locks reread persisted header/details/status/source and live existing procurement scope; changed discovery pointers reject atomically. Preserve source cancellation and receipt approval lock compatibility, no nested transaction or lock inversion.",
+    "Pending edit only; submitted/approved/deleted/cancelled cannot be edited or revived after competing transitions. Header/detail replacement plus number reservation and assignments form one atomic save; constraint/provider failure rolls back complete original state and clears partial tracking. Existing explicit source reassignment remains authorized and validates live approved source; no silent lineage clear. Preserve existing authenticated user/menu/customer policy, fail closed missing identity, no additional grants or downstream inventory/finance edits.",
+    "Two independent genuine SQL connections test manual edit versus submit/delete/cancel, linked request clearing/rebinding versus original source cancellation, forced detail replacement failure, coherent complete detail set and retained original source audit. Verify controlled losers and valid ordinary lifecycle. Seed lawful fixture identities/masters for existing caller regressions without production bypass; safe Release/full unit suite.",
+    "Use existing authenticated live ERP permissions, no new grants or HTTP/test identity bypass. Preserve source audit and all original failure logs. Relevant units, guarded genuine SQL on exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and fresh GUID-owned NEWERP_AUTOTEST database only; reject existing/wrong targets before access, never drop/reset/read production configuration. Safe Release build/full unit suite required. Build completion is not full stage acceptance."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/PurchaseOrderController.cs",
+    "src/ERP.Application/Services/PurchaseOrderMutationRules.cs",
+    "src/ERP.Application/Services/PurchaseSalesOrderLinkRules.cs",
+    "src/ERP.Application/Services/PurchaseOrderAuthorizationRules.cs",
+    "src/ERP.Application/Services/PurchaseOrderCancellationRules.cs",
+    "src/ERP.UnitTests/PurchaseOrderMutationTests.cs",
+    "src/ERP.IntegrationTests/PurchaseOrderMutationSqlServerTests.cs",
+    "docs/purchase-order-mutation.md",
+    "src/ERP.UnitTests/OrderTraceabilityTests.cs",
+    "src/ERP.UnitTests/PurchaseOrderAuthorizationTests.cs",
+    "src/ERP.UnitTests/PurchaseOrderCancellationTests.cs",
+    "src/ERP.UnitTests/PurchaseOrderControllerTests.cs",
+    "src/ERP.UnitTests/PurchaseOrderDeliveryExceptionTests.cs",
+    "src/ERP.UnitTests/PurchaseOrderInvoiceEvidenceTests.cs",
+    "src/ERP.UnitTests/PurchaseOrderInvoicePaymentEvidenceTests.cs",
+    "src/ERP.UnitTests/PurchaseOrderPaymentEvidenceTests.cs",
+    "src/ERP.UnitTests/PurchaseOrderProgressTests.cs",
+    "src/ERP.UnitTests/PurchaseOrderReturnImpactTests.cs",
+    "src/ERP.UnitTests/SupplierFirstReceiptLeadTimeTests.cs",
+    "src/ERP.UnitTests/SupplierPurchaseExposureTests.cs",
+    "src/ERP.IntegrationTests/PurchaseOrderAuthorizationSqlServerTests.cs"
+  ],
+  "criterion_path_map": {
+    "Use existing DbContext transaction protocol for ordinary create/update whether linked or manual. Discover persisted and proposed sales ownership without retaining reverse purchase locks; acquire bounded necessary sales source locks in deterministic ascending order before the shared purchase order lock. Never choose safety solely from request null ownership. Under locks reread persisted header/details/status/source and live existing procurement scope; changed discovery pointers reject atomically. Preserve source cancellation and receipt approval lock compatibility, no nested transaction or lock inversion.": [
+      "src/ERP.Api/Controllers/PurchaseOrderController.cs",
+      "src/ERP.Application/Services/PurchaseOrderMutationRules.cs",
+      "src/ERP.Application/Services/PurchaseSalesOrderLinkRules.cs",
+      "src/ERP.Application/Services/PurchaseOrderAuthorizationRules.cs",
+      "src/ERP.Application/Services/PurchaseOrderCancellationRules.cs"
+    ],
+    "Pending edit only; submitted/approved/deleted/cancelled cannot be edited or revived after competing transitions. Header/detail replacement plus number reservation and assignments form one atomic save; constraint/provider failure rolls back complete original state and clears partial tracking. Existing explicit source reassignment remains authorized and validates live approved source; no silent lineage clear. Preserve existing authenticated user/menu/customer policy, fail closed missing identity, no additional grants or downstream inventory/finance edits.": [
+      "src/ERP.Api/Controllers/PurchaseOrderController.cs",
+      "src/ERP.Application/Services/PurchaseOrderMutationRules.cs",
+      "src/ERP.Application/Services/PurchaseSalesOrderLinkRules.cs",
+      "src/ERP.Application/Services/PurchaseOrderAuthorizationRules.cs"
+    ],
+    "Two independent genuine SQL connections test manual edit versus submit/delete/cancel, linked request clearing/rebinding versus original source cancellation, forced detail replacement failure, coherent complete detail set and retained original source audit. Verify controlled losers and valid ordinary lifecycle. Seed lawful fixture identities/masters for existing caller regressions without production bypass; safe Release/full unit suite.": [
+      "src/ERP.UnitTests/PurchaseOrderMutationTests.cs",
+      "src/ERP.IntegrationTests/PurchaseOrderMutationSqlServerTests.cs",
+      "docs/purchase-order-mutation.md",
+      "src/ERP.UnitTests/OrderTraceabilityTests.cs",
+      "src/ERP.UnitTests/PurchaseOrderAuthorizationTests.cs",
+      "src/ERP.UnitTests/PurchaseOrderCancellationTests.cs",
+      "src/ERP.UnitTests/PurchaseOrderControllerTests.cs",
+      "src/ERP.UnitTests/PurchaseOrderDeliveryExceptionTests.cs",
+      "src/ERP.UnitTests/PurchaseOrderInvoiceEvidenceTests.cs",
+      "src/ERP.UnitTests/PurchaseOrderInvoicePaymentEvidenceTests.cs",
+      "src/ERP.UnitTests/PurchaseOrderPaymentEvidenceTests.cs",
+      "src/ERP.UnitTests/PurchaseOrderProgressTests.cs",
+      "src/ERP.UnitTests/PurchaseOrderReturnImpactTests.cs",
+      "src/ERP.UnitTests/SupplierFirstReceiptLeadTimeTests.cs",
+      "src/ERP.UnitTests/SupplierPurchaseExposureTests.cs",
+      "src/ERP.IntegrationTests/PurchaseOrderAuthorizationSqlServerTests.cs"
+    ],
+    "Use existing authenticated live ERP permissions, no new grants or HTTP/test identity bypass. Preserve source audit and all original failure logs. Relevant units, guarded genuine SQL on exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and fresh GUID-owned NEWERP_AUTOTEST database only; reject existing/wrong targets before access, never drop/reset/read production configuration. Safe Release build/full unit suite required. Build completion is not full stage acceptance.": [
+      "src/ERP.UnitTests/PurchaseOrderMutationTests.cs",
+      "src/ERP.IntegrationTests/PurchaseOrderMutationSqlServerTests.cs",
+      "docs/purchase-order-mutation.md",
+      "src/ERP.UnitTests/OrderTraceabilityTests.cs",
+      "src/ERP.UnitTests/PurchaseOrderAuthorizationTests.cs",
+      "src/ERP.UnitTests/PurchaseOrderCancellationTests.cs",
+      "src/ERP.UnitTests/PurchaseOrderControllerTests.cs",
+      "src/ERP.UnitTests/PurchaseOrderDeliveryExceptionTests.cs",
+      "src/ERP.UnitTests/PurchaseOrderInvoiceEvidenceTests.cs",
+      "src/ERP.UnitTests/PurchaseOrderInvoicePaymentEvidenceTests.cs",
+      "src/ERP.UnitTests/PurchaseOrderPaymentEvidenceTests.cs",
+      "src/ERP.UnitTests/PurchaseOrderProgressTests.cs",
+      "src/ERP.UnitTests/PurchaseOrderReturnImpactTests.cs",
+      "src/ERP.UnitTests/SupplierFirstReceiptLeadTimeTests.cs",
+      "src/ERP.UnitTests/SupplierPurchaseExposureTests.cs",
+      "src/ERP.IntegrationTests/PurchaseOrderAuthorizationSqlServerTests.cs"
+    ]
+  },
+  "implementation_evidence": "PurchaseOrderController CreateUnlinkedAsync/UpdateUnlinkedAsync explicitly omit transactions and shared order locks; Update dispatch trusts requested OwningSalesOrderId=null even if persisted order is linked. ERP371 serializes submit/approve/delete/cancel and ERP346/347 source linkage but ordinary unlinked update can race status/cancel and replace details outside those locks. ERP418 supplier quote conversion protects different entries. Full history has no all-path ordinary purchase draft mutation task.",
+  "depends_on": [
+    "ERP-424",
+    "ERP-371",
+    "ERP-346"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "id": "ERP-425",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-09T01:12:34.435435Z"
+}

@@ -1,0 +1,109 @@
+{
+  "title": "Validate live purchase order supplier product and optional master references",
+  "description": "Stage3 core purchase order workflow. Use existing authenticated live ERP permissions, no new grants or HTTP/test identity bypass. Preserve source audit and all original failure logs. Relevant units, guarded genuine SQL on exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and fresh GUID-owned NEWERP_AUTOTEST database only; reject existing/wrong targets before access, never drop/reset/read production configuration. Safe Release build/full unit suite required. Build completion is not full stage acceptance.",
+  "acceptance_criteria": [
+    "Inside existing purchase write transaction/locks require positive live nondeleted active SupplierId and each ProductId using established master status semantics; optional BuyerId and PortId remain optional but explicit references resolve to proper live eligible master entities. Require established supported unit policy including legitimate alternative packaging units, never assume equality to product default or invent conversions. Resolve with bounded DbContext projections before number generation or header/detail mutation; no master mutation/schema extension/new grants.",
+    "Recheck live masters before locked submit/approve; source/master invalidation cannot commit demand. Preserve historical read/print and unresolved optional historical lineage rules without silent backfill. Existing owning customer/source/menu access checks remain authoritative; non-disclosing denied access precedes sensitive master/reference details. Failure preserves original commercial/source/audit and downstream receipt/inventory/payable/payment/invoice rows.",
+    "Authenticated guarded genuine SQL tests cover missing/deleted/disabled supplier/product, invalid optional buyer/port, supported units, invalidated masters before submit/approve, foreign owning customer scope and a valid manual purchase create/edit/submit/approve lifecycle. Adapt necessary old controller fixture masters while preserving production validation; relevant units, safe Release/full suite and actual SQL evidence required.",
+    "Use existing authenticated live ERP permissions, no new grants or HTTP/test identity bypass. Preserve source audit and all original failure logs. Relevant units, guarded genuine SQL on exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and fresh GUID-owned NEWERP_AUTOTEST database only; reject existing/wrong targets before access, never drop/reset/read production configuration. Safe Release build/full unit suite required. Build completion is not full stage acceptance."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/PurchaseOrderController.cs",
+    "src/ERP.Application/Services/PurchaseOrderMasterReferenceRules.cs",
+    "src/ERP.Application/Services/PurchaseOrderMutationRules.cs",
+    "src/ERP.Application/Services/PurchaseOrderAuthorizationRules.cs",
+    "src/ERP.Application/Services/PurchaseSalesOrderLinkRules.cs",
+    "src/ERP.UnitTests/PurchaseOrderMasterReferenceTests.cs",
+    "src/ERP.IntegrationTests/PurchaseOrderMasterReferenceSqlServerTests.cs",
+    "docs/purchase-order-masterreference.md",
+    "src/ERP.UnitTests/OrderTraceabilityTests.cs",
+    "src/ERP.UnitTests/PurchaseOrderAuthorizationTests.cs",
+    "src/ERP.UnitTests/PurchaseOrderCancellationTests.cs",
+    "src/ERP.UnitTests/PurchaseOrderControllerTests.cs",
+    "src/ERP.UnitTests/PurchaseOrderDeliveryExceptionTests.cs",
+    "src/ERP.UnitTests/PurchaseOrderInvoiceEvidenceTests.cs",
+    "src/ERP.UnitTests/PurchaseOrderInvoicePaymentEvidenceTests.cs",
+    "src/ERP.UnitTests/PurchaseOrderPaymentEvidenceTests.cs",
+    "src/ERP.UnitTests/PurchaseOrderProgressTests.cs",
+    "src/ERP.UnitTests/PurchaseOrderReturnImpactTests.cs",
+    "src/ERP.UnitTests/SupplierFirstReceiptLeadTimeTests.cs",
+    "src/ERP.UnitTests/SupplierPurchaseExposureTests.cs",
+    "src/ERP.IntegrationTests/PurchaseOrderAuthorizationSqlServerTests.cs"
+  ],
+  "criterion_path_map": {
+    "Inside existing purchase write transaction/locks require positive live nondeleted active SupplierId and each ProductId using established master status semantics; optional BuyerId and PortId remain optional but explicit references resolve to proper live eligible master entities. Require established supported unit policy including legitimate alternative packaging units, never assume equality to product default or invent conversions. Resolve with bounded DbContext projections before number generation or header/detail mutation; no master mutation/schema extension/new grants.": [
+      "src/ERP.Api/Controllers/PurchaseOrderController.cs",
+      "src/ERP.Application/Services/PurchaseOrderMasterReferenceRules.cs",
+      "src/ERP.Application/Services/PurchaseOrderMutationRules.cs",
+      "src/ERP.Application/Services/PurchaseOrderAuthorizationRules.cs",
+      "src/ERP.Application/Services/PurchaseSalesOrderLinkRules.cs"
+    ],
+    "Recheck live masters before locked submit/approve; source/master invalidation cannot commit demand. Preserve historical read/print and unresolved optional historical lineage rules without silent backfill. Existing owning customer/source/menu access checks remain authoritative; non-disclosing denied access precedes sensitive master/reference details. Failure preserves original commercial/source/audit and downstream receipt/inventory/payable/payment/invoice rows.": [
+      "src/ERP.Api/Controllers/PurchaseOrderController.cs",
+      "src/ERP.Application/Services/PurchaseOrderMasterReferenceRules.cs",
+      "src/ERP.Application/Services/PurchaseOrderMutationRules.cs",
+      "src/ERP.Application/Services/PurchaseOrderAuthorizationRules.cs",
+      "src/ERP.Application/Services/PurchaseSalesOrderLinkRules.cs"
+    ],
+    "Authenticated guarded genuine SQL tests cover missing/deleted/disabled supplier/product, invalid optional buyer/port, supported units, invalidated masters before submit/approve, foreign owning customer scope and a valid manual purchase create/edit/submit/approve lifecycle. Adapt necessary old controller fixture masters while preserving production validation; relevant units, safe Release/full suite and actual SQL evidence required.": [
+      "src/ERP.UnitTests/PurchaseOrderMasterReferenceTests.cs",
+      "src/ERP.IntegrationTests/PurchaseOrderMasterReferenceSqlServerTests.cs",
+      "docs/purchase-order-masterreference.md",
+      "src/ERP.UnitTests/OrderTraceabilityTests.cs",
+      "src/ERP.UnitTests/PurchaseOrderAuthorizationTests.cs",
+      "src/ERP.UnitTests/PurchaseOrderCancellationTests.cs",
+      "src/ERP.UnitTests/PurchaseOrderControllerTests.cs",
+      "src/ERP.UnitTests/PurchaseOrderDeliveryExceptionTests.cs",
+      "src/ERP.UnitTests/PurchaseOrderInvoiceEvidenceTests.cs",
+      "src/ERP.UnitTests/PurchaseOrderInvoicePaymentEvidenceTests.cs",
+      "src/ERP.UnitTests/PurchaseOrderPaymentEvidenceTests.cs",
+      "src/ERP.UnitTests/PurchaseOrderProgressTests.cs",
+      "src/ERP.UnitTests/PurchaseOrderReturnImpactTests.cs",
+      "src/ERP.UnitTests/SupplierFirstReceiptLeadTimeTests.cs",
+      "src/ERP.UnitTests/SupplierPurchaseExposureTests.cs",
+      "src/ERP.IntegrationTests/PurchaseOrderAuthorizationSqlServerTests.cs"
+    ],
+    "Use existing authenticated live ERP permissions, no new grants or HTTP/test identity bypass. Preserve source audit and all original failure logs. Relevant units, guarded genuine SQL on exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and fresh GUID-owned NEWERP_AUTOTEST database only; reject existing/wrong targets before access, never drop/reset/read production configuration. Safe Release build/full unit suite required. Build completion is not full stage acceptance.": [
+      "src/ERP.UnitTests/PurchaseOrderMasterReferenceTests.cs",
+      "src/ERP.IntegrationTests/PurchaseOrderMasterReferenceSqlServerTests.cs",
+      "docs/purchase-order-masterreference.md",
+      "src/ERP.UnitTests/OrderTraceabilityTests.cs",
+      "src/ERP.UnitTests/PurchaseOrderAuthorizationTests.cs",
+      "src/ERP.UnitTests/PurchaseOrderCancellationTests.cs",
+      "src/ERP.UnitTests/PurchaseOrderControllerTests.cs",
+      "src/ERP.UnitTests/PurchaseOrderDeliveryExceptionTests.cs",
+      "src/ERP.UnitTests/PurchaseOrderInvoiceEvidenceTests.cs",
+      "src/ERP.UnitTests/PurchaseOrderInvoicePaymentEvidenceTests.cs",
+      "src/ERP.UnitTests/PurchaseOrderPaymentEvidenceTests.cs",
+      "src/ERP.UnitTests/PurchaseOrderProgressTests.cs",
+      "src/ERP.UnitTests/PurchaseOrderReturnImpactTests.cs",
+      "src/ERP.UnitTests/SupplierFirstReceiptLeadTimeTests.cs",
+      "src/ERP.UnitTests/SupplierPurchaseExposureTests.cs",
+      "src/ERP.IntegrationTests/PurchaseOrderAuthorizationSqlServerTests.cs"
+    ]
+  },
+  "implementation_evidence": "PurchaseOrderController ordinary writes assign SupplierId/BuyerId/PortId/detail ProductId and free text Unit without checking master existence/nondeleted/enabled state; ERP371 enforces procurement menu/owning customer scope and ERP346 owning sales lineage only. Missing supplier/product can be approved into receipt/payable demand. No equivalent ordinary purchase live master commitment task in all task history.",
+  "depends_on": [
+    "ERP-426"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "id": "ERP-427",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-09T01:12:34.453383Z"
+}
