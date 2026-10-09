@@ -23,6 +23,11 @@ namespace ERP.Api.Controllers;
 /// 也<strong>不</strong>改写收款单及其引用行、对账单证据、ERP-069 协议证据、客户主数据、销售订单、装柜与单据、
 /// 发票、库存与费用记录；生产库结构变更仍由 Human Gate 控制（本控制器不做任何 DDL，建表 / 索引由
 /// SchemaUpgrader 第 44 段幂等补齐）。</para>
+/// <para>授权（ERP-437）：**每一条**路由在读取 / 写入之前都先复用
+/// <see cref="AgencyServiceFeeReconciliationRules.EnsureRegisterAuthorizedAsync"/> 解析实时启用身份、
+/// 既有「客户资料」（customer）功能菜单（缺一即 fail closed，与月度汇总路由同码同源）与 ERP-097 权威客户范围，
+/// 再把范围下推到台账 / 候选 / 汇总 / 明细 / 登记 / 作废；范围外 / 已删除 / 不存在的对账单、收款单与分摊行
+/// 一律返回同一条不披露存在性的错误，<strong>不</strong>新增任何菜单 / 角色 / 用户授权，也<strong>不</strong>做匿名 / 管理员回退。</para>
 /// </summary>
 [ApiController]
 [Route("api/agency-service-fee-collection-allocations")]
@@ -42,8 +47,11 @@ public class AgencyServiceFeeCollectionAllocationController : ControllerBase
     /// </summary>
     [HttpGet]
     public async Task<IActionResult> GetPaged([FromQuery] AgencyServiceFeeCollectionAllocationQuery query)
-        => Ok(ApiResponse<PagedResult<AgencyServiceFeeCollectionAllocationDto>>.Success(
-            await AgencyServiceFeeCollectionAllocationService.ListAsync(_db, query)));
+    {
+        var scope = await AgencyServiceFeeReconciliationRules.EnsureRegisterAuthorizedAsync(_db, CurrentUserId());
+        return Ok(ApiResponse<PagedResult<AgencyServiceFeeCollectionAllocationDto>>.Success(
+            await AgencyServiceFeeCollectionAllocationService.ListAsync(_db, query, scope)));
+    }
 
     /// <summary>
     /// 模块元数据（只读）：支持币种、有界额度与口径文案（分摊 / 金额 / 唯一性 / 证据维度分离 / 历史只读 /
@@ -65,9 +73,12 @@ public class AgencyServiceFeeCollectionAllocationController : ControllerBase
         [FromQuery] string? currency,
         [FromQuery] string? keyword,
         [FromQuery] int take = AgencyServiceFeeCollectionAllocationService.MaxReceiptCandidates)
-        => Ok(ApiResponse<List<AgencyServiceFeeCollectionAllocationReceiptCandidateDto>>.Success(
+    {
+        var scope = await AgencyServiceFeeReconciliationRules.EnsureRegisterAuthorizedAsync(_db, CurrentUserId());
+        return Ok(ApiResponse<List<AgencyServiceFeeCollectionAllocationReceiptCandidateDto>>.Success(
             await AgencyServiceFeeCollectionAllocationService.ListReceiptCandidatesAsync(
-                _db, customerId, currency, keyword, take)));
+                _db, customerId, currency, keyword, take, scope)));
+    }
 
     /// <summary>
     /// 可承接收款分摊的对账单候选（只读、有界）：只列出未删除且**已登记**的代理服务费对账单证据，
@@ -79,9 +90,12 @@ public class AgencyServiceFeeCollectionAllocationController : ControllerBase
         [FromQuery] string? currency,
         [FromQuery] string? keyword,
         [FromQuery] int take = AgencyServiceFeeCollectionAllocationService.MaxStatementCandidates)
-        => Ok(ApiResponse<List<AgencyServiceFeeCollectionAllocationStatementCandidateDto>>.Success(
+    {
+        var scope = await AgencyServiceFeeReconciliationRules.EnsureRegisterAuthorizedAsync(_db, CurrentUserId());
+        return Ok(ApiResponse<List<AgencyServiceFeeCollectionAllocationStatementCandidateDto>>.Success(
             await AgencyServiceFeeCollectionAllocationService.ListStatementCandidatesAsync(
-                _db, customerId, currency, keyword, take)));
+                _db, customerId, currency, keyword, take, scope)));
+    }
 
     /// <summary>
     /// 收款单侧汇总（只读派生）：收款单快照 + **本维度**有效分摊金额 / 可分摊余额、行数与已作废行数 +
@@ -89,8 +103,11 @@ public class AgencyServiceFeeCollectionAllocationController : ControllerBase
     /// </summary>
     [HttpGet("receipts/{receiptId:long}/summary")]
     public async Task<IActionResult> ReceiptSummary(long receiptId)
-        => Ok(ApiResponse<AgencyServiceFeeCollectionAllocationReceiptSummaryDto>.Success(
-            await AgencyServiceFeeCollectionAllocationService.GetReceiptSummaryAsync(_db, receiptId)));
+    {
+        var scope = await AgencyServiceFeeReconciliationRules.EnsureRegisterAuthorizedAsync(_db, CurrentUserId());
+        return Ok(ApiResponse<AgencyServiceFeeCollectionAllocationReceiptSummaryDto>.Success(
+            await AgencyServiceFeeCollectionAllocationService.GetReceiptSummaryAsync(_db, receiptId, scope)));
+    }
 
     /// <summary>指定收款单的分摊行清单（只读、有界；status 传 1 只看有效 / 传 2 只看已作废）</summary>
     [HttpGet("receipts/{receiptId:long}/allocations")]
@@ -98,8 +115,12 @@ public class AgencyServiceFeeCollectionAllocationController : ControllerBase
         long receiptId,
         [FromQuery] int? status = null,
         [FromQuery] int take = AgencyServiceFeeCollectionAllocationRules.MaxAllocationsPerReceipt)
-        => Ok(ApiResponse<List<AgencyServiceFeeCollectionAllocationDto>>.Success(
-            await AgencyServiceFeeCollectionAllocationService.ListForReceiptAsync(_db, receiptId, status, take)));
+    {
+        var scope = await AgencyServiceFeeReconciliationRules.EnsureRegisterAuthorizedAsync(_db, CurrentUserId());
+        return Ok(ApiResponse<List<AgencyServiceFeeCollectionAllocationDto>>.Success(
+            await AgencyServiceFeeCollectionAllocationService.ListForReceiptAsync(
+                _db, receiptId, status, take, scope)));
+    }
 
     /// <summary>
     /// 对账单侧汇总（只读派生）：对账单快照 + **本维度**有效分摊金额 / 未分摊额、行数与已作废行数 +
@@ -107,8 +128,11 @@ public class AgencyServiceFeeCollectionAllocationController : ControllerBase
     /// </summary>
     [HttpGet("statements/{statementId:long}/summary")]
     public async Task<IActionResult> StatementSummary(long statementId)
-        => Ok(ApiResponse<AgencyServiceFeeCollectionAllocationStatementSummaryDto>.Success(
-            await AgencyServiceFeeCollectionAllocationService.GetStatementSummaryAsync(_db, statementId)));
+    {
+        var scope = await AgencyServiceFeeReconciliationRules.EnsureRegisterAuthorizedAsync(_db, CurrentUserId());
+        return Ok(ApiResponse<AgencyServiceFeeCollectionAllocationStatementSummaryDto>.Success(
+            await AgencyServiceFeeCollectionAllocationService.GetStatementSummaryAsync(_db, statementId, scope)));
+    }
 
     /// <summary>指定对账单的分摊行清单（只读、有界；status 传 1 只看有效 / 传 2 只看已作废）</summary>
     [HttpGet("statements/{statementId:long}/allocations")]
@@ -116,14 +140,21 @@ public class AgencyServiceFeeCollectionAllocationController : ControllerBase
         long statementId,
         [FromQuery] int? status = null,
         [FromQuery] int take = AgencyServiceFeeCollectionAllocationRules.MaxAllocationsPerStatement)
-        => Ok(ApiResponse<List<AgencyServiceFeeCollectionAllocationDto>>.Success(
-            await AgencyServiceFeeCollectionAllocationService.ListForStatementAsync(_db, statementId, status, take)));
+    {
+        var scope = await AgencyServiceFeeReconciliationRules.EnsureRegisterAuthorizedAsync(_db, CurrentUserId());
+        return Ok(ApiResponse<List<AgencyServiceFeeCollectionAllocationDto>>.Success(
+            await AgencyServiceFeeCollectionAllocationService.ListForStatementAsync(
+                _db, statementId, status, take, scope)));
+    }
 
     /// <summary>分摊行详情（含对账单与收款单可用性标注；只读）</summary>
     [HttpGet("{id:long}")]
     public async Task<IActionResult> GetById(long id)
-        => Ok(ApiResponse<AgencyServiceFeeCollectionAllocationDto>.Success(
-            await AgencyServiceFeeCollectionAllocationService.GetAsync(_db, id)));
+    {
+        var scope = await AgencyServiceFeeReconciliationRules.EnsureRegisterAuthorizedAsync(_db, CurrentUserId());
+        return Ok(ApiResponse<AgencyServiceFeeCollectionAllocationDto>.Success(
+            await AgencyServiceFeeCollectionAllocationService.GetAsync(_db, id, scope)));
+    }
 
     /// <summary>
     /// 登记一条收款分摊行：校验对账单（未删除 / **已登记**）与收款单（未删除 / 未取消）、二者客户与币种一致性、
@@ -133,9 +164,12 @@ public class AgencyServiceFeeCollectionAllocationController : ControllerBase
     /// </summary>
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] AgencyServiceFeeCollectionAllocationSaveDto dto)
-        => Ok(ApiResponse<AgencyServiceFeeCollectionAllocationDto>.Success(
-            await AgencyServiceFeeCollectionAllocationService.CreateAsync(_db, dto, CurrentUserName()),
+    {
+        var scope = await AgencyServiceFeeReconciliationRules.EnsureRegisterAuthorizedAsync(_db, CurrentUserId());
+        return Ok(ApiResponse<AgencyServiceFeeCollectionAllocationDto>.Success(
+            await AgencyServiceFeeCollectionAllocationService.CreateAsync(_db, dto, CurrentUserName(), scope),
             "收款分摊证据已登记（仅证据留痕；未执行收款、未核销、未结算、未记账）"));
+    }
 
     /// <summary>
     /// 作废分摊行（必须填写作废原因）：保留原始分摊金额、对账单 / 收款单 / 客户快照、登记人与时间戳，
@@ -143,11 +177,18 @@ public class AgencyServiceFeeCollectionAllocationController : ControllerBase
     /// </summary>
     [HttpPost("{id:long}/void")]
     public async Task<IActionResult> Void(long id, [FromBody] AgencyServiceFeeCollectionAllocationVoidRequest? request)
-        => Ok(ApiResponse<AgencyServiceFeeCollectionAllocationDto>.Success(
-            await AgencyServiceFeeCollectionAllocationService.VoidAsync(_db, id, request?.Reason),
+    {
+        var scope = await AgencyServiceFeeReconciliationRules.EnsureRegisterAuthorizedAsync(_db, CurrentUserId());
+        return Ok(ApiResponse<AgencyServiceFeeCollectionAllocationDto>.Success(
+            await AgencyServiceFeeCollectionAllocationService.VoidAsync(_db, id, request?.Reason, scope),
             "收款分摊证据已作废（原始金额与历史保留，可读）"));
+    }
 
     /// <summary>当前登录用户名（登记人由服务端按已认证身份写入，不采信客户端提交的值；无身份时返回 null → 记「未知用户」）</summary>
     private string? CurrentUserName()
         => User?.FindFirst(ClaimTypes.Name)?.Value ?? User?.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+
+    /// <summary>当前登录用户 Id（缺失或非数字时返回 null，由授权规则 fail closed 拒绝，绝不猜测身份）</summary>
+    private long? CurrentUserId()
+        => long.TryParse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value, out var id) ? id : null;
 }

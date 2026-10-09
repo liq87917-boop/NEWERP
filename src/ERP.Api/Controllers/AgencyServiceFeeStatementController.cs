@@ -43,8 +43,11 @@ public class AgencyServiceFeeStatementController : ControllerBase
     /// </summary>
     [HttpGet]
     public async Task<IActionResult> GetPaged([FromQuery] AgencyServiceFeeStatementQuery query)
-        => Ok(ApiResponse<PagedResult<AgencyServiceFeeStatementDto>>.Success(
-            await AgencyServiceFeeStatementService.ListAsync(_db, query)));
+    {
+        var scope = await AgencyServiceFeeReconciliationRules.EnsureRegisterAuthorizedAsync(_db, CurrentUserId());
+        return Ok(ApiResponse<PagedResult<AgencyServiceFeeStatementDto>>.Success(
+            await AgencyServiceFeeStatementService.ListAsync(_db, query, scope)));
+    }
 
     /// <summary>
     /// 模块元数据（只读）：来源类型 / 状态白名单、支持币种、有界额度与口径文案（来源链接 / 金额 / 到期日 /
@@ -67,9 +70,12 @@ public class AgencyServiceFeeStatementController : ControllerBase
         [FromQuery] string? currency,
         [FromQuery] string? keyword,
         [FromQuery] int take = AgencyServiceFeeStatementService.MaxSourceOptions)
-        => Ok(ApiResponse<List<AgencyServiceFeeStatementSourceOptionDto>>.Success(
+    {
+        var scope = await AgencyServiceFeeReconciliationRules.EnsureRegisterAuthorizedAsync(_db, CurrentUserId());
+        return Ok(ApiResponse<List<AgencyServiceFeeStatementSourceOptionDto>>.Success(
             await AgencyServiceFeeStatementService.ListSourceOptionsAsync(
-                _db, sourceType, customerId, currency, keyword, take)));
+                _db, sourceType, customerId, currency, keyword, take, scope)));
+    }
 
     /// <summary>
     /// 代理服务费对账单**月度汇总**（只读派生）：把未删除的对账单证据按「对账日期所属年月 + 客户 + 原币」分组，
@@ -110,8 +116,11 @@ public class AgencyServiceFeeStatementController : ControllerBase
     /// <summary>对账单证据详情（含全部有界行清单、来源快照与客户 / 协议可用性标注；只读）</summary>
     [HttpGet("{id:long}")]
     public async Task<IActionResult> GetById(long id)
-        => Ok(ApiResponse<AgencyServiceFeeStatementDto>.Success(
-            await AgencyServiceFeeStatementService.GetAsync(_db, id)));
+    {
+        var scope = await AgencyServiceFeeReconciliationRules.EnsureRegisterAuthorizedAsync(_db, CurrentUserId());
+        return Ok(ApiResponse<AgencyServiceFeeStatementDto>.Success(
+            await AgencyServiceFeeStatementService.GetAsync(_db, id, scope)));
+    }
 
     /// <summary>
     /// 新增草稿对账单证据：校验对账单号、客户（存在、未删除且启用）、显式关联的 ERP-069 协议
@@ -121,16 +130,22 @@ public class AgencyServiceFeeStatementController : ControllerBase
     /// </summary>
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] AgencyServiceFeeStatementSaveDto dto)
-        => Ok(ApiResponse<AgencyServiceFeeStatementDto>.Success(
-            await AgencyServiceFeeStatementService.CreateAsync(_db, dto),
+    {
+        var scope = await AgencyServiceFeeReconciliationRules.EnsureRegisterAuthorizedAsync(_db, CurrentUserId());
+        return Ok(ApiResponse<AgencyServiceFeeStatementDto>.Success(
+            await AgencyServiceFeeStatementService.CreateAsync(_db, dto, scope),
             "代理服务费对账单证据草稿已登记（仅操作性费用证据留痕；未开票、未收款、未联系客户、未记账）"));
+    }
 
     /// <summary>修改草稿对账单证据（已登记 / 已作废拒绝修改；客户与协议快照、行号与来源快照由服务端重新写入）</summary>
     [HttpPut("{id:long}")]
     public async Task<IActionResult> Update(long id, [FromBody] AgencyServiceFeeStatementSaveDto dto)
-        => Ok(ApiResponse<AgencyServiceFeeStatementDto>.Success(
-            await AgencyServiceFeeStatementService.UpdateAsync(_db, id, dto),
+    {
+        var scope = await AgencyServiceFeeReconciliationRules.EnsureRegisterAuthorizedAsync(_db, CurrentUserId());
+        return Ok(ApiResponse<AgencyServiceFeeStatementDto>.Success(
+            await AgencyServiceFeeStatementService.UpdateAsync(_db, id, dto, scope),
             "代理服务费对账单证据草稿已更新（合计按已校验行在服务端重算）"));
+    }
 
     /// <summary>
     /// 登记对账单证据（草稿 → 已登记）：按持久化行金额在服务端重算合计并冻结表头与全部行，
@@ -139,9 +154,12 @@ public class AgencyServiceFeeStatementController : ControllerBase
     /// </summary>
     [HttpPost("{id:long}/record")]
     public async Task<IActionResult> Record(long id)
-        => Ok(ApiResponse<AgencyServiceFeeStatementDto>.Success(
-            await AgencyServiceFeeStatementService.RecordAsync(_db, id, CurrentUserName()),
+    {
+        var scope = await AgencyServiceFeeReconciliationRules.EnsureRegisterAuthorizedAsync(_db, CurrentUserId());
+        return Ok(ApiResponse<AgencyServiceFeeStatementDto>.Success(
+            await AgencyServiceFeeStatementService.RecordAsync(_db, id, CurrentUserName(), scope),
             "代理服务费对账单证据已登记（证据已冻结，可作废但不可改写；未开票、未收款、未记账）"));
+    }
 
     /// <summary>
     /// 作废对账单证据（必须填写作废原因）：保留对账单身份、全部原始行、来源快照、客户与协议快照、
@@ -149,9 +167,12 @@ public class AgencyServiceFeeStatementController : ControllerBase
     /// </summary>
     [HttpPost("{id:long}/void")]
     public async Task<IActionResult> Void(long id, [FromBody] AgencyServiceFeeStatementVoidRequest? request)
-        => Ok(ApiResponse<AgencyServiceFeeStatementDto>.Success(
-            await AgencyServiceFeeStatementService.VoidAsync(_db, id, request?.Reason),
+    {
+        var scope = await AgencyServiceFeeReconciliationRules.EnsureRegisterAuthorizedAsync(_db, CurrentUserId());
+        return Ok(ApiResponse<AgencyServiceFeeStatementDto>.Success(
+            await AgencyServiceFeeStatementService.VoidAsync(_db, id, request?.Reason, scope),
             "代理服务费对账单证据已作废（原始行与历史保留，可读）"));
+    }
 
     /// <summary>当前登录用户名（登记人由服务端按已认证身份写入，不采信客户端提交的值；无身份时返回 null → 记「未知用户」）</summary>
     private string? CurrentUserName()

@@ -29,16 +29,136 @@ public class AgencyServiceFeeStatementTests
 {
     // ==================== 0. 测试脚手架 ====================
 
-    /// <summary>构造控制器并注入测试身份（登记人由服务端按 ClaimsPrincipal 写入；无身份时记「未知用户」）</summary>
+    /// <summary>播种既有「客户资料」（customer）功能菜单（ERP-437 复用既有菜单口径，不新增菜单 / 权限）</summary>
+    private static SysMenu EnsureCustomerMenu(ErpDbContext db)
+    {
+        var menu = db.SysMenus.FirstOrDefault(m => !m.IsDeleted
+            && m.MenuCode == AgencyServiceFeeReconciliationRules.RequiredMenuCode);
+        if (menu is not null) return menu;
+
+        menu = new SysMenu
+        {
+            ParentId = 0,
+            MenuCode = AgencyServiceFeeReconciliationRules.RequiredMenuCode,
+            MenuName = AgencyServiceFeeReconciliationRules.RequiredMenuText,
+            Path = "/master/customer",
+            MenuType = MenuType.Menu
+        };
+        db.SysMenus.Add(menu);
+        db.SaveChanges();
+        return menu;
+    }
+
+    /// <summary>播种具备既有「客户资料」菜单的特权账号（系统内置角色 → 数据范围不受限，聚焦证据语义）</summary>
+    private static long SeedPrivilegedUser(ErpDbContext db)
+    {
+        var role = new SysRole
+        {
+            RoleName = "代理服务费对账单证据特权角色",
+            RoleCode = $"AsfStmtPriv-{Guid.NewGuid():N}",
+            IsSystem = true
+        };
+        db.SysRoles.Add(role);
+        db.SaveChanges();
+
+        var user = new SysUser
+        {
+            UserName = $"asf-stmt-priv-{Guid.NewGuid():N}",
+            PasswordHash = "hash",
+            PasswordSalt = "salt",
+            DisplayName = "代理服务费对账单证据特权用户",
+            Status = UserStatus.Enabled
+        };
+        db.SysUsers.Add(user);
+        db.SaveChanges();
+
+        db.SysUserRoles.Add(new SysUserRole { UserId = user.Id, RoleId = role.Id });
+        var menu = EnsureCustomerMenu(db);
+        db.SysRoleMenus.Add(new SysRoleMenu { RoleId = role.Id, MenuId = menu.Id });
+        db.SaveChanges();
+        return user.Id;
+    }
+
+    /// <summary>播种带既有「客户资料」菜单的受限业务员账号（可选是否授予菜单，用于撤销 / 无菜单场景）</summary>
+    private static long SeedRestrictedSalesman(ErpDbContext db, string userName, bool grantMenu)
+    {
+        var role = new SysRole
+        {
+            RoleName = "代理服务费对账单证据业务员角色",
+            RoleCode = $"AsfStmtSales-{Guid.NewGuid():N}",
+            IsSystem = false
+        };
+        db.SysRoles.Add(role);
+        db.SaveChanges();
+
+        var user = new SysUser
+        {
+            UserName = userName,
+            PasswordHash = "hash",
+            PasswordSalt = "salt",
+            DisplayName = userName,
+            Status = UserStatus.Enabled
+        };
+        db.SysUsers.Add(user);
+        db.SaveChanges();
+
+        db.SysUserRoles.Add(new SysUserRole { UserId = user.Id, RoleId = role.Id });
+        if (grantMenu)
+        {
+            var menu = EnsureCustomerMenu(db);
+            db.SysRoleMenus.Add(new SysRoleMenu { RoleId = role.Id, MenuId = menu.Id });
+        }
+
+        db.BaseEmployees.Add(new BaseEmployee
+        {
+            EmployeeCode = userName,
+            EmployeeName = userName,
+            IsSalesman = true,
+            Status = 1
+        });
+        db.SaveChanges();
+        return user.Id;
+    }
+
+    /// <summary>撤销指定账号全部既有菜单授权（含 customer），用于验证「授权撤销后立即收敛」</summary>
+    private static void RevokeMenus(ErpDbContext db, long userId)
+    {
+        var roleIds = db.SysUserRoles.AsNoTracking()
+            .Where(ur => ur.UserId == userId && !ur.IsDeleted).Select(ur => ur.RoleId).ToList();
+        foreach (var grant in db.SysRoleMenus.Where(rm => !rm.IsDeleted && roleIds.Contains(rm.RoleId)).ToList())
+            grant.IsDeleted = true;
+        db.SaveChanges();
+    }
+
+    /// <summary>绑定指定身份（缺失 = 匿名请求）的控制器；未认证 / 越权一律由授权规则 fail closed。</summary>
+    private static AgencyServiceFeeStatementController BuildControllerWithUser(ErpDbContext db, long? userId)
+    {
+        var claims = userId.HasValue
+            ? new[] { new Claim(ClaimTypes.NameIdentifier, userId.Value.ToString()) }
+            : Array.Empty<Claim>();
+        var controller = new AgencyServiceFeeStatementController(db)
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext
+                {
+                    User = new ClaimsPrincipal(new ClaimsIdentity(claims, "Test"))
+                }
+            }
+        };
+        return controller;
+    }
+
+    /// <summary>构造控制器并注入测试身份（已认证且具备既有「客户资料」菜单；登记人由 ClaimsPrincipal 写入）</summary>
     private static AgencyServiceFeeStatementController BuildController(ErpDbContext db, string? userName = null)
     {
+        var userId = SeedPrivilegedUser(db);
+        var claims = new List<Claim> { new(ClaimTypes.NameIdentifier, userId.ToString()) };
+        if (userName is not null) claims.Add(new Claim(ClaimTypes.Name, userName));
         var controller = new AgencyServiceFeeStatementController(db);
-        var identity = new ClaimsIdentity(
-            userName is null ? Array.Empty<Claim>() : new[] { new Claim(ClaimTypes.Name, userName) },
-            "Test");
         controller.ControllerContext = new ControllerContext
         {
-            HttpContext = new DefaultHttpContext { User = new ClaimsPrincipal(identity) }
+            HttpContext = new DefaultHttpContext { User = new ClaimsPrincipal(new ClaimsIdentity(claims, "Test")) }
         };
         return controller;
     }
@@ -960,12 +1080,12 @@ public class AgencyServiceFeeStatementTests
         Assert.True(line.IsRecorded);
         Assert.Equal("张三", line.RecordedBy);
 
-        // 无身份时登记人记「未知用户」
+        // 无身份时登记人记「未知用户」（进程内服务直调：控制器路由已要求实时身份，认证矩阵另测）
         var secondOrder = SeedOrder(db, "SO-002", customer.Id);
-        var other = AssertOk<AgencyServiceFeeStatementDto>(await BuildController(db).Create(
+        var other = await AgencyServiceFeeStatementService.CreateAsync(db,
             SalesOrderSave(customer.Id, agreement.Id, secondOrder.Id, amount: 5m,
-                statementNo: "ASFS-2026-011")));
-        var anonymous = AssertOk<AgencyServiceFeeStatementDto>(await BuildController(db).Record(other.Id));
+                statementNo: "ASFS-2026-011"));
+        var anonymous = await AgencyServiceFeeStatementService.RecordAsync(db, other.Id, recordedBy: null);
         Assert.Equal("未知用户", anonymous.RecordedBy);
     }
 
@@ -1790,6 +1910,171 @@ public class AgencyServiceFeeStatementTests
         Assert.Contains("{id:long}/void", controller);
         Assert.Contains("[HttpGet(\"metadata\")]", controller);
         Assert.Contains("[HttpGet(\"source-options\")]", controller);
+    }
+
+    // ==================== 8. ERP-437 实时授权与客户数据范围 ====================
+
+    [Fact]
+    public async Task 认证_缺失停用删除撤权身份与无菜单一律拒绝且不落任何对账单()
+    {
+        using var db = TestDbFactory.Create();
+        var customer = SeedCustomer(db, "C001", "义乌进出口");
+        var order = SeedOrder(db, "SO-001", customer.Id);
+        var agreement = await SeedRecordedAgreementAsync(db, customer.Id);
+
+        var disabledId = SeedPrivilegedUser(db);
+        (await db.SysUsers.SingleAsync(u => u.Id == disabledId)).Status = UserStatus.Disabled;
+        var deletedId = SeedPrivilegedUser(db);
+        (await db.SysUsers.SingleAsync(u => u.Id == deletedId)).IsDeleted = true;
+        var revokedId = SeedPrivilegedUser(db);
+        RevokeMenus(db, revokedId);
+        await db.SaveChangesAsync();
+        var noMenuId = SeedRestrictedSalesman(db, $"erp437-nomenu-{Guid.NewGuid():N}", grantMenu: false);
+
+        var dto = SalesOrderSave(customer.Id, agreement.Id, order.Id);
+
+        // 缺失 / 非法 / 已删除身份 → 未认证（每一条路由都在任何读取 / 写入之前拒绝）
+        foreach (long? userId in new long?[] { null, 0, deletedId })
+        {
+            var controller = BuildControllerWithUser(db, userId);
+            await AssertBusinessAsync(ErrorCodes.Unauthorized,
+                () => controller.GetPaged(new AgencyServiceFeeStatementQuery()));
+            await AssertBusinessAsync(ErrorCodes.Unauthorized,
+                () => controller.SourceOptions(null, customer.Id, "USD", null, 50));
+            await AssertBusinessAsync(ErrorCodes.Unauthorized, () => controller.GetById(1));
+            await AssertBusinessAsync(ErrorCodes.Unauthorized, () => controller.Create(dto));
+            await AssertBusinessAsync(ErrorCodes.Unauthorized, () => controller.Update(1, dto));
+            await AssertBusinessAsync(ErrorCodes.Unauthorized, () => controller.Record(1));
+            await AssertBusinessAsync(ErrorCodes.Unauthorized,
+                () => controller.Void(1, new AgencyServiceFeeStatementVoidRequest { Reason = "作废" }));
+        }
+
+        // 禁用 / 撤销菜单 / 无菜单 → 权限不足
+        foreach (var userId in new[] { disabledId, revokedId, noMenuId })
+        {
+            var controller = BuildControllerWithUser(db, userId);
+            await AssertBusinessAsync(ErrorCodes.Forbidden,
+                () => controller.GetPaged(new AgencyServiceFeeStatementQuery()));
+            await AssertBusinessAsync(ErrorCodes.Forbidden,
+                () => controller.SourceOptions(null, customer.Id, "USD", null, 50));
+            await AssertBusinessAsync(ErrorCodes.Forbidden, () => controller.GetById(1));
+            await AssertBusinessAsync(ErrorCodes.Forbidden, () => controller.Create(dto));
+            await AssertBusinessAsync(ErrorCodes.Forbidden, () => controller.Update(1, dto));
+            await AssertBusinessAsync(ErrorCodes.Forbidden, () => controller.Record(1));
+            await AssertBusinessAsync(ErrorCodes.Forbidden,
+                () => controller.Void(1, new AgencyServiceFeeStatementVoidRequest { Reason = "作废" }));
+        }
+
+        // 零证据：被拒请求绝不落任何对账单表头或行
+        Assert.Empty(db.AgencyServiceFeeStatements);
+        Assert.Empty(db.AgencyServiceFeeStatementLines);
+    }
+
+    [Fact]
+    public async Task 认证_授权撤销后下一次请求立即收敛为拒绝()
+    {
+        using var db = TestDbFactory.Create();
+        var userId = SeedPrivilegedUser(db);
+        var controller = BuildControllerWithUser(db, userId);
+
+        // 授权存活：可读台账
+        AssertOk<PagedResult<AgencyServiceFeeStatementDto>>(
+            await controller.GetPaged(new AgencyServiceFeeStatementQuery()));
+
+        RevokeMenus(db, userId);
+
+        // 授权撤销：下一次请求立即 fail closed（绝不缓存）
+        await AssertBusinessAsync(ErrorCodes.Forbidden,
+            () => controller.GetPaged(new AgencyServiceFeeStatementQuery()));
+    }
+
+    [Fact]
+    public async Task 认证_自有范围登记登记作废成功_越范围与已删除对账单同一条错误且零变更()
+    {
+        using var db = TestDbFactory.Create();
+        var ownName = $"erp437-own-{Guid.NewGuid():N}";
+        var salesmanId = SeedRestrictedSalesman(db, ownName, grantMenu: true);
+        var employeeId = (await db.BaseEmployees.SingleAsync(e => e.EmployeeCode == ownName)).Id;
+
+        var ownCustomer = SeedCustomer(db, "C-OWN", "自有客户");
+        ownCustomer.EmpId = employeeId;
+        var foreignCustomer = SeedCustomer(db, "C-FGN", "他人客户");
+        await db.SaveChangesAsync();
+
+        var ownOrder = SeedOrder(db, "SO-OWN", ownCustomer.Id);
+        var ownOrder2 = SeedOrder(db, "SO-OWN2", ownCustomer.Id);
+        var ownOrder3 = SeedOrder(db, "SO-OWN3", ownCustomer.Id);
+        var ownOrder4 = SeedOrder(db, "SO-OWN4", ownCustomer.Id);
+        var foreignOrder = SeedOrder(db, "SO-FGN", foreignCustomer.Id);
+        var ownAgreement = await SeedRecordedAgreementAsync(db, ownCustomer.Id, "ASF-OWN");
+        var foreignAgreement = await SeedRecordedAgreementAsync(db, foreignCustomer.Id, "ASF-FGN");
+
+        // 特权账号先建立越范围与即将软删除的对账单（越范围对账单属于他人客户）
+        var privileged = BuildController(db);
+        var foreignStatement = AssertOk<AgencyServiceFeeStatementDto>(await privileged.Create(
+            SalesOrderSave(foreignCustomer.Id, foreignAgreement.Id, foreignOrder.Id, statementNo: "ASFS-FGN")));
+        var deletionStatement = AssertOk<AgencyServiceFeeStatementDto>(await privileged.Create(
+            SalesOrderSave(ownCustomer.Id, ownAgreement.Id, ownOrder4.Id, statementNo: "ASFS-DEL")));
+        (await db.AgencyServiceFeeStatements.SingleAsync(s => s.Id == deletionStatement.Id)).IsDeleted = true;
+        await db.SaveChangesAsync();
+
+        var controller = BuildControllerWithUser(db, salesmanId);
+
+        // 自有范围内：草稿登记 / 修改 / 登记 / 作废全流程被许可
+        var created = AssertOk<AgencyServiceFeeStatementDto>(await controller.Create(
+            SalesOrderSave(ownCustomer.Id, ownAgreement.Id, ownOrder.Id, statementNo: "ASFS-OWN-OK")));
+        var draft = AssertOk<AgencyServiceFeeStatementDto>(await controller.Create(
+            SalesOrderSave(ownCustomer.Id, ownAgreement.Id, ownOrder2.Id, statementNo: "ASFS-OWN-DRAFT")));
+        var edited = AssertOk<AgencyServiceFeeStatementDto>(await controller.Update(
+            draft.Id,
+            SaveDto(ownCustomer.Id, ownAgreement.Id,
+                new[] { LineDto(AgencyServiceFeeStatementRules.SourceTypeSalesOrder, ownOrder3.Id, 33m) },
+                statementNo: "ASFS-OWN-DRAFT")));
+        Assert.Equal(33m, edited.TotalAmount);
+        var recorded = AssertOk<AgencyServiceFeeStatementDto>(await controller.Record(created.Id));
+        Assert.True(recorded.IsRecorded);
+        var voided = AssertOk<AgencyServiceFeeStatementDto>(await controller.Void(
+            recorded.Id, new AgencyServiceFeeStatementVoidRequest { Reason = "客户争议" }));
+        Assert.True(voided.IsVoided);
+
+        // 越范围对账单：与不存在 / 已删除对账单同一条不披露错误（不泄露范围外 Id / 金额 / 计数）
+        var foreignDenied = await AssertBusinessAsync(ErrorCodes.NotFound,
+            () => controller.GetById(foreignStatement.Id));
+        var missingDenied = await AssertBusinessAsync(ErrorCodes.NotFound, () => controller.GetById(987_654_321L));
+        var deletedDenied = await AssertBusinessAsync(ErrorCodes.NotFound,
+            () => controller.GetById(deletionStatement.Id));
+        Assert.Equal(AgencyServiceFeeReconciliationRules.RegisterNotFoundText, foreignDenied.Message);
+        Assert.Equal(foreignDenied.Message, missingDenied.Message);
+        Assert.Equal(foreignDenied.Message, deletedDenied.Message);
+
+        await AssertBusinessAsync(ErrorCodes.NotFound, () => controller.Record(foreignStatement.Id));
+        await AssertBusinessAsync(ErrorCodes.NotFound, () => controller.Void(
+            foreignStatement.Id, new AgencyServiceFeeStatementVoidRequest { Reason = "越权作废" }));
+        await AssertBusinessAsync(ErrorCodes.NotFound, () => controller.Update(
+            foreignStatement.Id,
+            SalesOrderSave(ownCustomer.Id, ownAgreement.Id, ownOrder.Id, statementNo: "ASFS-OWN-OK")));
+        await AssertBusinessAsync(ErrorCodes.NotFound, () => controller.Create(
+            SalesOrderSave(foreignCustomer.Id, foreignAgreement.Id, foreignOrder.Id, statementNo: "ASFS-FGN-2")));
+        await AssertBusinessAsync(ErrorCodes.NotFound,
+            () => controller.SourceOptions(AgencyServiceFeeStatementRules.SourceTypeSalesOrder,
+                foreignCustomer.Id, "USD", null, 50));
+
+        // 越范围对账单零变更：仍为草稿且未登记
+        var storedForeign = await db.AgencyServiceFeeStatements.AsNoTracking()
+            .SingleAsync(s => s.Id == foreignStatement.Id);
+        Assert.Equal(AgencyServiceFeeStatementRules.StatusDraft, storedForeign.Status);
+        Assert.Null(storedForeign.RecordedAt);
+
+        // 台账与来源候选只暴露自有客户
+        var ledger = AssertOk<PagedResult<AgencyServiceFeeStatementDto>>(
+            await controller.GetPaged(new AgencyServiceFeeStatementQuery()));
+        Assert.NotEmpty(ledger.Items);
+        Assert.All(ledger.Items, i => Assert.Equal(ownCustomer.Id, i.CustomerId));
+        var options = AssertOk<List<AgencyServiceFeeStatementSourceOptionDto>>(
+            await controller.SourceOptions(AgencyServiceFeeStatementRules.SourceTypeSalesOrder,
+                ownCustomer.Id, "USD", null, 50));
+        Assert.NotEmpty(options);
+        Assert.All(options, o => Assert.Equal(ownCustomer.Id, o.CustomerId));
     }
 
     /// <summary>

@@ -43,6 +43,29 @@ public static class AgencyServiceFeeCollectionAllocationService
     // ==================== 1. 登记分摊行（新增一条证据） ====================
 
     /// <summary>
+    /// 路由级登记收款分摊行（ERP-437）：<paramref name="scope"/> 非空时先按权威客户范围收敛被引用的对账单与
+    /// 收款单；越范围 / 已删除 / 不存在一律返回同一条不披露存在性的错误，拒绝发生在**写入之前**——
+    /// 绝不落任何分摊行，也绝不改写对账单、收款单或客户快照。
+    /// </summary>
+    public static async Task<AgencyServiceFeeCollectionAllocationDto> CreateAsync(
+        IErpDbContext db, AgencyServiceFeeCollectionAllocationSaveDto dto, string? allocatedBy,
+        SalespersonDataScope? scope)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(dto);
+        // 未显式选择对账单 / 收款单（Id <= 0）的既有参数校验保留由核心方法给出（不改变既有受控错误）。
+        if (scope is not null)
+        {
+            if (dto.StatementId > 0)
+                await AgencyServiceFeeReconciliationRules.EnsureStatementInScopeAsync(db, scope, dto.StatementId);
+            if (dto.ReceiptId > 0)
+                await AgencyServiceFeeReconciliationRules.EnsureReceiptInScopeAsync(db, scope, dto.ReceiptId);
+        }
+
+        return await CreateAsync(db, dto, allocatedBy);
+    }
+
+    /// <summary>
     /// 登记一条收款分摊行：全部校验通过后才写一行证据，并写入对账单 / 收款单 / 客户的服务端快照；
     /// 登记人由服务端按已认证身份写入（<paramref name="allocatedBy"/>，客户端不能提交该值）。
     /// <para>校验顺序：对账单可用（未删除 → 不存在；草稿 / 已作废 → 拒绝）→ 收款单可用（未删除 → 不存在；
@@ -190,6 +213,20 @@ public static class AgencyServiceFeeCollectionAllocationService
     // ==================== 2. 作废分摊行（证据保留） ====================
 
     /// <summary>
+    /// 路由级作废收款分摊行（ERP-437）：<paramref name="scope"/> 非空时先按权威客户范围收敛该分摊行；
+    /// 越范围 / 已删除 / 不存在一律返回同一条不披露存在性的错误，拒绝发生在**改写状态之前**——
+    /// 原始金额、双方快照、登记人与时间戳全部不变。
+    /// </summary>
+    public static async Task<AgencyServiceFeeCollectionAllocationDto> VoidAsync(
+        IErpDbContext db, long allocationId, string? reason, SalespersonDataScope? scope)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        if (scope is not null && allocationId > 0)
+            await AgencyServiceFeeReconciliationRules.EnsureAllocationInScopeAsync(db, scope, allocationId);
+        return await VoidAsync(db, allocationId, reason);
+    }
+
+    /// <summary>
     /// 作废一条收款分摊行（有效 → 已作废）：必须填写作废原因；<strong>保留</strong>原始分摊金额、对账单与
     /// 收款单快照、客户快照、登记人与时间戳，不物理删除、不改派、不改写原始金额，也不产生任何收款 / 记账 /
     /// 核销 / 结算 / 催收动作；作废后该组合可重新登记一条新的有效分摊行（新旧并存可查）；重复作废被拒绝。
@@ -251,11 +288,26 @@ public static class AgencyServiceFeeCollectionAllocationService
     }
 
     /// <summary>
+    /// 路由级分摊行详情（ERP-437）：<paramref name="scope"/> 非空时按持久化客户快照收敛分摊行；
+    /// 越范围 / 已删除 / 不存在一律返回同一条不披露存在性的错误（不暴露范围外对账单 / 收款单 Id 或金额）。
+    /// </summary>
+    public static async Task<AgencyServiceFeeCollectionAllocationDto> GetAsync(
+        IErpDbContext db, long allocationId, SalespersonDataScope? scope)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        if (scope is not null && allocationId > 0)
+            await AgencyServiceFeeReconciliationRules.EnsureAllocationInScopeAsync(db, scope, allocationId);
+        return await GetAsync(db, allocationId);
+    }
+
+    /// <summary>
     /// 台账分页查询（只读）：支持对账单 / 收款单 / 客户 / 状态 / 币种 / 登记时间区间 / 关键字过滤；
     /// 默认包含已作废历史（证据保留可读）。页内对账单与收款单**一次批量装载**（无逐行数据库查询）。
+    /// <para>ERP-437：<paramref name="scope"/> 非空时，权威客户范围在**计数、分页与物化之前**下推；
+    /// 受限账号绝不返回范围外分摊行，也绝不通过计数泄露范围外证据规模。</para>
     /// </summary>
     public static async Task<PagedResult<AgencyServiceFeeCollectionAllocationDto>> ListAsync(
-        IErpDbContext db, AgencyServiceFeeCollectionAllocationQuery query)
+        IErpDbContext db, AgencyServiceFeeCollectionAllocationQuery query, SalespersonDataScope? scope = null)
     {
         ArgumentNullException.ThrowIfNull(db);
         ArgumentNullException.ThrowIfNull(query);
@@ -268,6 +320,10 @@ public static class AgencyServiceFeeCollectionAllocationService
         var keyword = AgencyServiceFeeCollectionAllocationRules.NormalizeKeyword(query.Keyword);
 
         var source = db.AgencyServiceFeeCollectionAllocations.AsNoTracking().Where(x => !x.IsDeleted);
+        // ERP-437：权威客户范围在**计数、分页与物化之前**下推到数据库（按持久化快照 CustomerId 判定）；
+        // 受限账号绝不返回范围外分摊行，来源 / 收款单 / 对账单 / 关键字过滤也只在本范围内求值。
+        if (scope is not null)
+            source = SalespersonDataScopeService.FilterByCustomer(source, scope, x => x.CustomerId);
         if (query.StatementId is not null) source = source.Where(x => x.StatementId == query.StatementId.Value);
         if (query.ReceiptId is not null) source = source.Where(x => x.ReceiptId == query.ReceiptId.Value);
         if (query.CustomerId is not null) source = source.Where(x => x.CustomerId == query.CustomerId.Value);
@@ -305,6 +361,19 @@ public static class AgencyServiceFeeCollectionAllocationService
     }
 
     /// <summary>
+    /// 路由级对账单侧分摊行清单（ERP-437）：<paramref name="scope"/> 非空时先按权威客户范围收敛对账单；
+    /// 越范围 / 已删除 / 不存在一律同一条不披露错误（不返回任何分摊行 / 计数）。
+    /// </summary>
+    public static async Task<List<AgencyServiceFeeCollectionAllocationDto>> ListForStatementAsync(
+        IErpDbContext db, long statementId, int? status, int take, SalespersonDataScope? scope)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        if (scope is not null && statementId > 0)
+            await AgencyServiceFeeReconciliationRules.EnsureStatementInScopeAsync(db, scope, statementId);
+        return await ListForStatementAsync(db, statementId, status, take);
+    }
+
+    /// <summary>
     /// 指定对账单的分摊行清单（只读、有界；对账单详情工作流用）：默认返回全部状态（含已作废历史），
     /// status 传 1 只看有效 / 传 2 只看已作废。
     /// </summary>
@@ -335,6 +404,19 @@ public static class AgencyServiceFeeCollectionAllocationService
     }
 
     /// <summary>
+    /// 路由级收款单侧分摊行清单（ERP-437）：<paramref name="scope"/> 非空时先按权威客户范围收敛收款单；
+    /// 越范围 / 已删除 / 不存在一律同一条不披露错误（不返回任何分摊行 / 计数）。
+    /// </summary>
+    public static async Task<List<AgencyServiceFeeCollectionAllocationDto>> ListForReceiptAsync(
+        IErpDbContext db, long receiptId, int? status, int take, SalespersonDataScope? scope)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        if (scope is not null && receiptId > 0)
+            await AgencyServiceFeeReconciliationRules.EnsureReceiptInScopeAsync(db, scope, receiptId);
+        return await ListForReceiptAsync(db, receiptId, status, take);
+    }
+
+    /// <summary>
     /// 指定收款单的分摊行清单（只读、有界；收款单工作流用）：默认返回全部状态（含已作废历史）。
     /// </summary>
     public static async Task<List<AgencyServiceFeeCollectionAllocationDto>> ListForReceiptAsync(
@@ -361,6 +443,19 @@ public static class AgencyServiceFeeCollectionAllocationService
             .ToListAsync();
 
         return await MapManyAsync(db, rows);
+    }
+
+    /// <summary>
+    /// 路由级对账单侧汇总（ERP-437）：<paramref name="scope"/> 非空时先按权威客户范围收敛对账单；
+    /// 越范围 / 已删除 / 不存在一律同一条不披露错误（不返回任何金额 / 计数 / 明细）。
+    /// </summary>
+    public static async Task<AgencyServiceFeeCollectionAllocationStatementSummaryDto> GetStatementSummaryAsync(
+        IErpDbContext db, long statementId, SalespersonDataScope? scope)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        if (scope is not null && statementId > 0)
+            await AgencyServiceFeeReconciliationRules.EnsureStatementInScopeAsync(db, scope, statementId);
+        return await GetStatementSummaryAsync(db, statementId);
     }
 
     /// <summary>
@@ -431,6 +526,19 @@ public static class AgencyServiceFeeCollectionAllocationService
     }
 
     /// <summary>
+    /// 路由级收款单侧汇总（ERP-437）：<paramref name="scope"/> 非空时先按权威客户范围收敛收款单；
+    /// 越范围 / 已删除 / 不存在一律同一条不披露错误（不返回任何金额 / 计数 / 明细）。
+    /// </summary>
+    public static async Task<AgencyServiceFeeCollectionAllocationReceiptSummaryDto> GetReceiptSummaryAsync(
+        IErpDbContext db, long receiptId, SalespersonDataScope? scope)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        if (scope is not null && receiptId > 0)
+            await AgencyServiceFeeReconciliationRules.EnsureReceiptInScopeAsync(db, scope, receiptId);
+        return await GetReceiptSummaryAsync(db, receiptId);
+    }
+
+    /// <summary>
     /// 收款单侧汇总（只读派生）：收款单快照 + 有效分摊金额 / 可分摊余额、本维度有效行数与已作废行数 +
     /// 有界逐行明细。
     /// <para>统计口径（ERP-350）：有效分摊金额按同一张收款单的「收款单 → 销售订单」与「收款单 → 代理服务费对账单」
@@ -496,6 +604,21 @@ public static class AgencyServiceFeeCollectionAllocationService
     }
 
     // ==================== 4. 候选读取（只读、有界，绝不写库） ====================
+
+    /// <summary>
+    /// 路由级可分摊收款单候选（ERP-437）：<paramref name="scope"/> 非空时，显式给出的客户必须落在权威客户范围内，
+    /// 越范围客户一律按同一条不披露存在性的错误拒绝（不返回任何收款单 Id / 单号 / 金额 / 计数）。
+    /// 客户 Id 缺失 / 非正或币种缺失的既有参数校验仍由核心方法给出。
+    /// </summary>
+    public static async Task<List<AgencyServiceFeeCollectionAllocationReceiptCandidateDto>> ListReceiptCandidatesAsync(
+        IErpDbContext db, long customerId, string? currency, string? keyword, int take,
+        SalespersonDataScope? scope)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        if (scope is not null && customerId > 0)
+            AgencyServiceFeeReconciliationRules.EnsureCustomerInScope(scope, customerId);
+        return await ListReceiptCandidatesAsync(db, customerId, currency, keyword, take);
+    }
 
     /// <summary>
     /// 可分摊收款单候选（只读、有界）：必须显式给出客户与币种（资格判定依赖它们），单次最多
@@ -569,6 +692,21 @@ public static class AgencyServiceFeeCollectionAllocationService
                 eligible,
                 text);
         }).ToList();
+    }
+
+    /// <summary>
+    /// 路由级可承接收款分摊的对账单候选（ERP-437）：<paramref name="scope"/> 非空时，显式给出的客户必须落在
+    /// 权威客户范围内，越范围客户一律按同一条不披露存在性的错误拒绝（不返回任何对账单 Id / 单号 / 金额 / 计数）。
+    /// 客户 Id 缺失 / 非正或币种缺失的既有参数校验仍由核心方法给出。
+    /// </summary>
+    public static async Task<List<AgencyServiceFeeCollectionAllocationStatementCandidateDto>> ListStatementCandidatesAsync(
+        IErpDbContext db, long customerId, string? currency, string? keyword, int take,
+        SalespersonDataScope? scope)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        if (scope is not null && customerId > 0)
+            AgencyServiceFeeReconciliationRules.EnsureCustomerInScope(scope, customerId);
+        return await ListStatementCandidatesAsync(db, customerId, currency, keyword, take);
     }
 
     /// <summary>

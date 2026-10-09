@@ -68,6 +68,21 @@ public static class AgencyServiceFeeStatementService
     }
 
     /// <summary>
+    /// 路由级登记草稿对账单（ERP-437）：<paramref name="scope"/> 非空时，显式提交的客户必须落在权威客户范围内；
+    /// 越范围客户一律按同一条不披露存在性的错误在**写入之前**拒绝——绝不落任何对账单表头或行，
+    /// 也绝不消耗任何对账单身份 / 来源占用。
+    /// </summary>
+    public static async Task<AgencyServiceFeeStatementDto> CreateAsync(
+        IErpDbContext db, AgencyServiceFeeStatementSaveDto dto, SalespersonDataScope? scope)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(dto);
+        if (scope is not null && dto.CustomerId > 0 && !scope.AllowsCustomer(dto.CustomerId))
+            throw BusinessException.NotFound(AgencyServiceFeeReconciliationRules.RegisterNotFoundText);
+        return await CreateAsync(db, dto);
+    }
+
+    /// <summary>
     /// 修改草稿对账单证据：已登记 / 已作废拒绝修改（保留可读）；原草稿行按**软删除**替换（草稿尚未构成证据，
     /// 但也不做物理删除），新行重新校验客户 / 币种兼容性与来源唯一性，合计在服务端重算；
     /// 修改不会触碰登记人 / 登记时间（草稿尚未登记时它们为空）。
@@ -118,12 +133,26 @@ public static class AgencyServiceFeeStatementService
     }
 
     /// <summary>
+    /// 路由级对账单证据详情（ERP-437）：<paramref name="scope"/> 非空时按权威客户范围收敛——
+    /// 范围外 / 已删除 / 不存在的对账单返回同一条不披露存在性的错误（绝不暴露范围外对账单 Id、单号、金额或行数）；
+    /// 详情返回前不会先读取任何行清单。范围先于读取，绝不「先读全量再内存过滤」。
+    /// </summary>
+    public static async Task<AgencyServiceFeeStatementDto> GetAsync(
+        IErpDbContext db, long statementId, SalespersonDataScope? scope)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        if (scope is not null && statementId > 0)
+            await AgencyServiceFeeReconciliationRules.EnsureStatementInScopeAsync(db, scope, statementId);
+        return await GetAsync(db, statementId);
+    }
+
+    /// <summary>
     /// 台账分页查询（只读）：支持客户 / 协议 / 状态 / 币种 / 来源类型 / 对账日期区间 / 关键字过滤；
     /// 默认包含已作废历史（证据保留可读）。页内客户、协议与行数**一次批量装载**（无逐行数据库查询）；
     /// 列表只返回行数摘要，行的完整快照由详情接口给出（有界，避免一次拉取无界行数据）。
     /// </summary>
     public static async Task<PagedResult<AgencyServiceFeeStatementDto>> ListAsync(
-        IErpDbContext db, AgencyServiceFeeStatementQuery query)
+        IErpDbContext db, AgencyServiceFeeStatementQuery query, SalespersonDataScope? scope = null)
     {
         ArgumentNullException.ThrowIfNull(db);
         ArgumentNullException.ThrowIfNull(query);
@@ -137,6 +166,10 @@ public static class AgencyServiceFeeStatementService
         var keyword = AgencyServiceFeeStatementRules.NormalizeKeyword(query.Keyword);
 
         var source = db.AgencyServiceFeeStatements.AsNoTracking().Where(x => !x.IsDeleted);
+        // ERP-437：权威客户范围在**计数、分页与物化之前**下推到数据库（受限账号绝不返回范围外对账单 / 计数）；
+        // 来源类型过滤与关键字也只在本范围内求值，范围外对账单不会通过 Id / 计数旁路泄露。
+        if (scope is not null)
+            source = SalespersonDataScopeService.FilterByCustomer(source, scope, x => x.CustomerId);
         if (query.CustomerId is not null) source = source.Where(x => x.CustomerId == query.CustomerId.Value);
         if (query.AgreementId is not null) source = source.Where(x => x.AgreementId == query.AgreementId.Value);
         if (status is not null) source = source.Where(x => x.Status == status.Value);
@@ -207,6 +240,21 @@ public static class AgencyServiceFeeStatementService
             AgencyServiceFeeStatementRules.UniquenessRuleText,
             AgencyServiceFeeStatementRules.SeparationText,
             AgencyServiceFeeStatementRules.BoundaryText);
+
+    /// <summary>
+    /// 路由级可引用来源候选（ERP-437）：<paramref name="scope"/> 非空时，显式给出的客户必须落在权威客户范围内，
+    /// 越范围客户一律按同一条不披露存在性的错误拒绝（不返回任何来源 Id / 单号 / 日期 / 状态 / 计数）。
+    /// 客户 Id 缺失 / 非正或币种缺失的既有参数校验仍由核心方法给出（不改变既有受控错误）。
+    /// </summary>
+    public static async Task<List<AgencyServiceFeeStatementSourceOptionDto>> ListSourceOptionsAsync(
+        IErpDbContext db, string? sourceType, long customerId, string? currency, string? keyword, int take,
+        SalespersonDataScope? scope)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        if (scope is not null && customerId > 0)
+            AgencyServiceFeeReconciliationRules.EnsureCustomerInScope(scope, customerId);
+        return await ListSourceOptionsAsync(db, sourceType, customerId, currency, keyword, take);
+    }
 
     /// <summary>
     /// 可引用的**显式服务来源**候选（只读、**有界**）：必须显式给出客户与对账单币种（资格判定依赖它们），
@@ -331,6 +379,40 @@ public static class AgencyServiceFeeStatementService
     // ==================== 3. 登记 / 作废（证据冻结与保留） ====================
 
     /// <summary>
+    /// 路由级修改草稿对账单（ERP-437）：<paramref name="scope"/> 非空时先按**已存**对账单的持久化客户与
+    /// 显式提交的客户双向复核权威范围；越范围 / 已删除 / 不存在一律同一条不披露错误，
+    /// 被拒请求绝不改写任何对账单表头或行。
+    /// </summary>
+    public static async Task<AgencyServiceFeeStatementDto> UpdateAsync(
+        IErpDbContext db, long statementId, AgencyServiceFeeStatementSaveDto dto, SalespersonDataScope? scope)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(dto);
+        if (scope is not null)
+        {
+            if (statementId > 0)
+                await AgencyServiceFeeReconciliationRules.EnsureStatementInScopeAsync(db, scope, statementId);
+            if (dto.CustomerId > 0)
+                AgencyServiceFeeReconciliationRules.EnsureCustomerInScope(scope, dto.CustomerId);
+        }
+
+        return await UpdateAsync(db, statementId, dto);
+    }
+
+    /// <summary>
+    /// 路由级登记对账单（ERP-437）：<paramref name="scope"/> 非空时先按权威客户范围收敛对账单；
+    /// 越范围 / 已删除 / 不存在一律同一条不披露错误，拒绝发生在**冻结表头与行之前**——状态、字段与审计不变。
+    /// </summary>
+    public static async Task<AgencyServiceFeeStatementDto> RecordAsync(
+        IErpDbContext db, long statementId, string? recordedByName, SalespersonDataScope? scope)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        if (scope is not null && statementId > 0)
+            await AgencyServiceFeeReconciliationRules.EnsureStatementInScopeAsync(db, scope, statementId);
+        return await RecordAsync(db, statementId, recordedByName);
+    }
+
+    /// <summary>
     /// 登记对账单证据（草稿 → 已登记）：按**持久化行金额**在服务端重算合计，冻结表头与全部行、
     /// 写入登记时间与登记人（按已认证身份写入，客户端不能提交该字段）；
     /// <strong>不</strong>开票、<strong>不</strong>记账、<strong>不</strong>收款或催收、<strong>不</strong>调用外部服务，
@@ -369,6 +451,19 @@ public static class AgencyServiceFeeStatementService
         await db.SaveChangesAsync();
 
         return await MapAsync(db, statement, includeLines: true);
+    }
+
+    /// <summary>
+    /// 路由级作废对账单（ERP-437）：<paramref name="scope"/> 非空时先按权威客户范围收敛对账单；
+    /// 越范围 / 已删除 / 不存在一律同一条不披露错误，拒绝发生在**改写状态之前**——原始行、来源快照与审计不变。
+    /// </summary>
+    public static async Task<AgencyServiceFeeStatementDto> VoidAsync(
+        IErpDbContext db, long statementId, string? reason, SalespersonDataScope? scope)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        if (scope is not null && statementId > 0)
+            await AgencyServiceFeeReconciliationRules.EnsureStatementInScopeAsync(db, scope, statementId);
+        return await VoidAsync(db, statementId, reason);
     }
 
     /// <summary>

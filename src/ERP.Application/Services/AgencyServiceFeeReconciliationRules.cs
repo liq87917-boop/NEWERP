@@ -1,5 +1,8 @@
 using ERP.Application.Common;
+using ERP.Application.Interfaces;
+using ERP.Domain.Entities;
 using ERP.Domain.Enums;
+using Microsoft.EntityFrameworkCore;
 
 namespace ERP.Application.Services;
 
@@ -24,6 +27,14 @@ namespace ERP.Application.Services;
 /// <para>边界：本规则只做**校验与纯计算**，不写库、不开票、不记账、不核销、不收款或付款、不催收或联系客户，
 /// 也不改写对账单证据、收款分摊证据、收款单、协议证据、客户主数据、销售订单、装柜清单、单证、发票、
 /// 库存、费用、退税与结算记录。</para>
+/// <para><b>ERP-437 授权口径</b>：本类另承载 <c>api/agency-service-fee-statements</c> 与
+/// <c>api/agency-service-fee-collection-allocations</c> 全部证据路由的**唯一**入口授权
+/// （<see cref="EnsureLiveIdentityAsync"/> / <see cref="EnsureRegisterAuthorizedAsync"/>）与**权威客户范围**硬边界
+/// （<see cref="EnsureCustomerInScope"/> / <see cref="EnsureStatementInScopeAsync"/> /
+/// <see cref="EnsureReceiptInScopeAsync"/> / <see cref="EnsureAllocationInScopeAsync"/>）：复用既有的
+/// <see cref="CustomerReceivableReconciliationService.LoadAuthorizedMenuCodesAsync"/> + ERP-097
+/// <see cref="SalespersonDataScopeService"/>，与月度汇总路由同一条身份 / 菜单 / 客户范围口径，
+/// <strong>不新增任何授权、菜单、角色或回退</strong>；判定方法只做有界只读查询，绝不落库、绝不改写任何证据。</para>
 /// </summary>
 public static class AgencyServiceFeeReconciliationRules
 {
@@ -390,4 +401,130 @@ public static class AgencyServiceFeeReconciliationRules
 
     /// <summary>无分摊行时的展示文案（证据缺口 ≠ 未付款）</summary>
     public const string NoAllocationText = "无持久化分摊行（证据缺口，不代表未付 / 已付 / 已结清 / 逾期）";
+
+    // ==================== 7. 路由级实时授权与权威客户范围（ERP-437，fail closed） ====================
+
+    /// <summary>无身份 / 非法身份的拒绝文案。</summary>
+    public const string UnauthorizedText = "请先登录后再访问代理服务费对账单与收款分摊证据";
+
+    /// <summary>账号不存在 / 已删除的拒绝文案。</summary>
+    public const string UserDeletedText = "登录账号不存在或已删除，禁止访问代理服务费对账单与收款分摊证据";
+
+    /// <summary>账号已禁用的拒绝文案。</summary>
+    public const string UserDisabledText = "登录账号已禁用，禁止访问代理服务费对账单与收款分摊证据（fail closed）";
+
+    /// <summary>缺少既有「客户资料」（customer）功能菜单授权时的拒绝文案（与月度汇总路由同码同源）。</summary>
+    public const string MenuDeniedText =
+        "当前账号没有「客户资料」（customer）模块授权：拒绝访问代理服务费对账单与收款分摊证据"
+        + "（fail closed，不返回 / 不修改任何证据）";
+
+    /// <summary>
+    /// 越范围 / 已删除 / 不存在的对账单、收款单与分摊行统一返回的**同一条不披露存在性**文案：
+    /// 「不存在」与「不可见」不区分，错误文案不含范围外资源 Id、单号、金额或计数。
+    /// </summary>
+    public const string RegisterNotFoundText =
+        "代理服务费对账单 / 收款分摊证据不存在或已删除，或不在当前账号的数据范围内";
+
+    /// <summary>
+    /// 校验当前账号的**实时启用身份**：无身份 / 非法（非正整数）→ 未认证；账号不存在 / 已删除 → 未认证；
+    /// 账号已禁用 → 权限不足。每次请求重新查询，绝不缓存，也绝不把空身份当作匿名或管理员（fail closed）。
+    /// </summary>
+    public static async Task EnsureLiveIdentityAsync(IErpDbContext db, long? userId)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        if (userId is null or <= 0)
+            throw new BusinessException(UnauthorizedText, ErrorCodes.Unauthorized);
+
+        var user = await db.SysUsers.AsNoTracking()
+            .FirstOrDefaultAsync(u => u.Id == userId.Value && !u.IsDeleted);
+        if (user is null)
+            throw new BusinessException(UserDeletedText, ErrorCodes.Unauthorized);
+        if (user.Status != UserStatus.Enabled)
+            throw new BusinessException(UserDisabledText, ErrorCodes.Forbidden);
+    }
+
+    /// <summary>
+    /// 本模块路由的统一入口授权：先校验实时启用身份（<see cref="EnsureLiveIdentityAsync"/>），
+    /// 再用既有的 <see cref="CustomerReceivableReconciliationService.LoadAuthorizedMenuCodesAsync"/> 与
+    /// 既有「客户资料」（<see cref="RequiredMenuCode"/>）功能菜单授权（与月度汇总路由完全同口径），
+    /// 最后复用 ERP-097 唯一权威数据范围 <see cref="SalespersonDataScopeService.ResolveAsync"/>
+    /// 解析当前账号的客户范围。任何缺失 / 禁用 / 已删除身份或缺失 / 撤销菜单一律 fail closed，
+    /// 绝不新增任何菜单 / 角色 / 用户授权，也不提供匿名 / 管理员回退。
+    /// </summary>
+    public static async Task<SalespersonDataScope> EnsureRegisterAuthorizedAsync(IErpDbContext db, long? userId)
+    {
+        await EnsureLiveIdentityAsync(db, userId);
+
+        var menuCodes = await CustomerReceivableReconciliationService
+            .LoadAuthorizedMenuCodesAsync(db, userId!.Value);
+        if (!menuCodes.Contains(RequiredMenuCode, StringComparer.OrdinalIgnoreCase))
+            throw new BusinessException(MenuDeniedText, ErrorCodes.Forbidden);
+
+        return await SalespersonDataScopeService.ResolveAsync(db, userId.Value);
+    }
+
+    /// <summary>客户数据范围硬边界：受限业务员越界一律 fail closed（不披露范围外客户存在性）。</summary>
+    public static void EnsureCustomerInScope(SalespersonDataScope scope, long customerId)
+    {
+        ArgumentNullException.ThrowIfNull(scope);
+        if (!scope.AllowsCustomer(customerId))
+            throw BusinessException.NotFound(RegisterNotFoundText);
+    }
+
+    /// <summary>
+    /// 按 Id 在权威客户范围内收敛**对账单证据**（严格口径：已删除视为不存在）：
+    /// 不存在 / 已删除 / 越范围一律抛同一条不披露存在性的 <see cref="RegisterNotFoundText"/>。
+    /// </summary>
+    public static async Task<AgencyServiceFeeStatement> EnsureStatementInScopeAsync(
+        IErpDbContext db, SalespersonDataScope scope, long statementId)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(scope);
+
+        var statement = statementId > 0
+            ? await db.AgencyServiceFeeStatements.AsNoTracking()
+                .FirstOrDefaultAsync(s => s.Id == statementId && !s.IsDeleted)
+            : null;
+        if (statement is null || !scope.AllowsCustomer(statement.CustomerId))
+            throw BusinessException.NotFound(RegisterNotFoundText);
+        return statement;
+    }
+
+    /// <summary>
+    /// 按 Id 在权威客户范围内收敛**客户收款单**（严格口径：已删除视为不存在）：
+    /// 不存在 / 已删除 / 越范围一律抛同一条不披露存在性的 <see cref="RegisterNotFoundText"/>。
+    /// </summary>
+    public static async Task<FinanceReceipt> EnsureReceiptInScopeAsync(
+        IErpDbContext db, SalespersonDataScope scope, long receiptId)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(scope);
+
+        var receipt = receiptId > 0
+            ? await db.FinanceReceipts.AsNoTracking()
+                .FirstOrDefaultAsync(r => r.Id == receiptId && !r.IsDeleted)
+            : null;
+        if (receipt is null || !scope.AllowsCustomer(receipt.CustomerId))
+            throw BusinessException.NotFound(RegisterNotFoundText);
+        return receipt;
+    }
+
+    /// <summary>
+    /// 按 Id 在权威客户范围内收敛**收款分摊行**（按持久化快照 <c>CustomerId</c> 判定归属）：
+    /// 不存在 / 已删除 / 越范围一律抛同一条不披露存在性的 <see cref="RegisterNotFoundText"/>。
+    /// </summary>
+    public static async Task<AgencyServiceFeeCollectionAllocation> EnsureAllocationInScopeAsync(
+        IErpDbContext db, SalespersonDataScope scope, long allocationId)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(scope);
+
+        var allocation = allocationId > 0
+            ? await db.AgencyServiceFeeCollectionAllocations.AsNoTracking()
+                .FirstOrDefaultAsync(a => a.Id == allocationId && !a.IsDeleted)
+            : null;
+        if (allocation is null || !scope.AllowsCustomer(allocation.CustomerId))
+            throw BusinessException.NotFound(RegisterNotFoundText);
+        return allocation;
+    }
 }
