@@ -83,6 +83,18 @@ public class SalesOrderController : DocumentControllerBase<SalesOrder>
     private Task<long> EnsurePersistedOrderAllowedAsync(SalespersonDataScope scope, long id)
         => SalesOrderMutationAuthorizationRules.EnsureOrderAllowedAsync(Db, scope, id);
 
+    /// <summary>
+    /// ERP-424 规范文档输出入口授权（实时身份 + 既有「销售订单」功能菜单 + 既有「销售订单导出」导出菜单 +
+    /// ERP-097 权威客户范围）：打印 / JSON 单据导出 / Excel 导出**不做**「无请求路径 / 匿名进程内调用」豁免，
+    /// 因此直接调用控制器的这三个方法同样 fail closed；每次调用都重新查询，撤销授权 / 账号停用后立即收敛。
+    /// </summary>
+    private Task<SalespersonDataScope> EnsureDocumentOutputAuthorizedAsync()
+        => SalesOrderDocumentOutputAuthorizationRules.EnsureDocumentOutputAuthorizedAsync(Db, CurrentUserId());
+
+    /// <summary>ERP-424 单张订单文档输出的持久化归属复核（范围外 / 已删除 / 不存在 / 非正 Id 返回同一非披露错误）。</summary>
+    private Task<long> EnsureDocumentOutputOrderAllowedAsync(SalespersonDataScope scope, long id)
+        => SalesOrderDocumentOutputAuthorizationRules.EnsureOrderAllowedAsync(Db, scope, id);
+
     /// <summary>分页查询</summary>
     [HttpGet]
     public async Task<IActionResult> GetPaged([FromQuery] PageQuery query, [FromQuery] DocumentStatus? status)
@@ -818,25 +830,40 @@ public class SalesOrderController : DocumentControllerBase<SalesOrder>
     }
 
 
-    /// <summary>打印数据（主表 + 明细；打印模板由 /api/sys/print-templates/sales-order 提供）</summary>
+    /// <summary>
+    /// 打印数据（主表 + 明细；打印模板由 /api/sys/print-templates/sales-order 提供）
+    /// <para>ERP-424：先实时授权（实时身份 + 既有「销售订单」功能菜单 + 既有「销售订单导出」导出菜单 + 权威客户范围），
+    /// 再按**持久化 CustomerId** 复核归属（范围外 / 已删除 / 不存在同一非披露错误），最后才装载主表与**未删除**明细。</para>
+    /// </summary>
     [HttpGet("{id:long}/print")]
     public async Task<IActionResult> GetPrint(long id)
     {
+        var scope = await EnsureDocumentOutputAuthorizedAsync();
+        await EnsureDocumentOutputOrderAllowedAsync(scope, id);
+
         var entity = await Set.AsNoTracking().Include(o => o.Details)
             .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
-            ?? throw BusinessException.NotFound("销售订单不存在");
+            ?? throw BusinessException.NotFound(SalesOrderDocumentOutputAuthorizationRules.NotFoundText);
         entity.Details = entity.Details.Where(d => !d.IsDeleted).ToList();
         return Ok(ApiResponse<SalesOrder>.Success(entity));
     }
 
-    /// <summary>导出</summary>
+    /// <summary>
+    /// 导出（JSON 单据）
+    /// <para>ERP-424：先实时授权，并把权威客户范围**下推到数据库**（先于日期过滤与任何物化）；
+    /// 明细只保留**未删除**行（与打印同口径），拒绝时绝不返回任何订单号 / 计数 / 明细。</para>
+    /// </summary>
     [HttpGet("export")]
     public async Task<IActionResult> Export([FromQuery] DateTime? start, [FromQuery] DateTime? end)
     {
-        var source = Db.SalesOrders.AsNoTracking().Include(o => o.Details).Where(o => !o.IsDeleted);
+        var scope = await EnsureDocumentOutputAuthorizedAsync();
+        var source = SalesOrderDocumentOutputAuthorizationRules.ApplyCustomerScope(
+            Db.SalesOrders.AsNoTracking().Include(o => o.Details).Where(o => !o.IsDeleted), scope);
         if (start.HasValue) source = source.Where(o => o.OrderDate >= start.Value);
         if (end.HasValue) source = source.Where(o => o.OrderDate <= end.Value);
         var items = await source.OrderByDescending(o => o.Id).ToListAsync();
+        foreach (var item in items)
+            item.Details = item.Details.Where(d => !d.IsDeleted).ToList();
         return Ok(ApiResponse<List<SalesOrder>>.Success(items));
     }
 
@@ -977,14 +1004,18 @@ public class SalesOrderController : DocumentControllerBase<SalesOrder>
         ("Status", "状态"), ("Remark", "备注"),
     };
 
-    /// <summary>导出销售订单为 Excel（含新增外贸合同与追溯字段）</summary>
+    /// <summary>
+    /// 导出销售订单为 Excel（含新增外贸合同与追溯字段）
+    /// <para>ERP-424：先实时授权（实时身份 + 既有「销售订单」功能菜单 + 既有「销售订单导出」导出菜单 + 权威客户范围），
+    /// 并把客户范围**下推到数据库**（先于关键字 / 状态 / 日期过滤与任何物化）；列与文件名保持不变。</para>
+    /// </summary>
     [HttpGet("export-excel")]
     public async Task<IActionResult> ExportExcel([FromQuery] string? keyword, [FromQuery] DocumentStatus? status,
         [FromQuery] DateTime? start, [FromQuery] DateTime? end)
     {
-        var scope = await ResolveScopeAsync();
-        var source = SalespersonDataScopeService.FilterByCustomer(
-            Db.SalesOrders.AsNoTracking().Where(o => !o.IsDeleted), scope, o => o.CustomerId);
+        var scope = await EnsureDocumentOutputAuthorizedAsync();
+        var source = SalesOrderDocumentOutputAuthorizationRules.ApplyCustomerScope(
+            Db.SalesOrders.AsNoTracking().Where(o => !o.IsDeleted), scope);
         if (!string.IsNullOrWhiteSpace(keyword))
         {
             var kw = keyword;
