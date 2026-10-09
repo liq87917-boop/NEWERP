@@ -155,14 +155,19 @@ public class ContainerPreLoadingController : DocumentControllerBase<ContainerPre
     }
 
     /// <summary>
-    /// 权威外贸 / 物流跟踪值（ERP-040，**只读**）：按预装柜单持久化的订柜引用
+    /// 权威外贸 / 物流跟踪值（ERP-040，**只读**）：先实时授权（ERP-363：实时身份 / 账号状态 / 既有「预装柜单」
+    /// 菜单授权 / 权威客户数据范围，与下方出运时间线同口径），再按预装柜单持久化的订柜引用
     /// （<c>BookingId</c>）读取订柜信息并原样回显；没有引用（或引用指向的订柜记录已删除）时返回
     /// 「未关联」，所有跟踪字段为未知 —— 不按柜号等自由文本匹配，也不在本单上另存一份跟踪值。
+    /// 范围外 / 已删除 / 不存在单据在授权后返回与出运时间线相同的受控错误，不泄露柜号 / 订柜号 / ETD / ETA / 报关行值。
     /// </summary>
     [HttpGet("{id:long}/shipment-tracking")]
     public async Task<IActionResult> GetShipmentTracking(long id)
     {
+        // ERP-363：实时授权与权威客户范围严格先于单据解析与跟踪读取（与出运时间线同一口径，无匿名 / 管理员回退）。
+        var scope = await PreLoadingAuthorizationRules.EnsureAuthorizedAsync(Db, CurrentUserId());
         var entity = await GetOrThrowAsync(id, "预装柜单不存在");
+        await PreLoadingAuthorizationRules.EnsureStoredScopeAllowedAsync(Db, scope, entity);
         var tracking = await ContainerShipmentTrackingService.ResolveForPreLoadingAsync(Db, entity);
         return Ok(ApiResponse<ContainerShipmentTrackingDto>.Success(tracking, "已按持久化订柜引用返回跟踪信息（只读）"));
     }

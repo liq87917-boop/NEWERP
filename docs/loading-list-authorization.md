@@ -15,7 +15,7 @@
 
 | 项 | 口径 |
 |---|---|
-| 适用路由 | 列表、详情、出运时间线、费用分摊证据、参与方读取、参与方新增 / 修改 / 置主 / 停用 / 启用 / 删除、新增、修改、提交、审核、取消、删除 |
+| 适用路由 | 列表、详情、出运跟踪、出运时间线、费用分摊证据、参与方读取、参与方新增 / 修改 / 置主 / 停用 / 启用 / 删除、新增、修改、提交、审核、取消、删除 |
 | 实时授权 | 每一路由先解析：身份缺失 / 非法 → 未认证；账号不存在 / 已删除 → 未认证；账号禁用 → 权限不足；非特权账号无既有 `loading-list` 菜单 → 权限不足；非特权账号未映射业务员 → 权限不足（fail closed） |
 | 一柜多客户 | 存在「启用、未删除」参与方时按**参与方客户**判定：必须对**每一个**有效参与方客户都有权限（否则视为通过共享柜泄露他人客户） |
 | 历史单客户 | 无有效参与方时按持久化 `ContainerLoadingList.CustomerId` 判定；`CustomerId <= 0` 视为**无权威归属**，受限账号 fail closed |
@@ -104,6 +104,10 @@
   真实 SQL Server，覆盖本人 / 他人客户读取、多客户共享柜拒绝、撤销菜单与禁用账号、失败参与方维护不改动原行与审计，
   以及**两条独立连接**的「参与方置主 与 审核」竞争（不留撕裂状态）与并发审核（恰好一方成功））。
 - 目标库护栏测试：`LoadingListAuthorizationTargetGuardTests`（非专用实例 / 错误库名 / 非集成安全一律在任何数据库访问之前拒绝）。
+- ERP-431：`PreLoadingAuthorizationTests` / `LoadingListAuthorizationTests`（出运跟踪路由的本人可读、他人 / 无主 / 共享柜 /
+  上游越范围拒绝、已删除 / 不存在受控未找到、禁用 / 已删除 / 撤销菜单身份与无菜单 fail closed、特权账号历史只读、
+  授权先于单据解析的源码契约，以及被拒绝时预装柜 / 装柜清单 / 参与方 / 订柜 / 出运引用 / 里程碑不变）与
+  `PreLoadingAuthorizationSqlServerTests` / `LoadingListAuthorizationSqlServerTests`（真实 SQL 上的同类场景）覆盖。
 
 ## 8. 真实 SQL 夹具安全口径
 
@@ -116,8 +120,15 @@
 
 ## 9. 边界说明
 
-本任务的确定性交付门为「Release 构建 + `ERP.UnitTests` 全套通过」。为避免破坏**不在本任务 `allowed_paths` 内**的既有
-单元测试（`TradeDocumentGenerationTests` / `TradeDocumentLineSnapshotTests` / `ContainerShipmentTrackingTests` 以无身份控制器
-直接调用单证带入 / 生成与出运跟踪路由），本护栏与 ERP-363 保持同一取舍：**单证带入 / 生成与出运跟踪路由暂未接入本护栏**，
-装柜清单其余的读取与写入 / 状态路由全部接入。后续如放开 `allowed_paths`，可对上述路由按同一口径补齐。
+本任务的确定性交付门为「Release 构建 + `ERP.UnitTests` 全套通过」。
+
+ERP-431 已把**出运跟踪（`{id}/shipment-tracking`）**路由按本文同一口径接入本护栏：`ContainerPreLoadingController` 复用
+`PreLoadingAuthorizationRules`、`ContainerLoadingListController` 复用 `LoadingListAuthorizationRules`（不新增任何授权 / 菜单 /
+表列），先实时授权与权威客户范围，再解析持久化单据与订柜引用；范围外 / 已删除 / 不存在单据与出运时间线返回同一受控错误，
+绝不泄露柜号 / 订柜号 / ETD / ETA / 报关行值，且 `ContainerShipmentTrackingDto`、`null = 未知` 语义与只读行为完全不变。
+`ContainerShipmentTrackingTests`（在本任务 `allowed_paths` 内）改为注入既有特权身份，ERP-040 只读回显语义与既有断言全部保留；
+受限范围 / 拒绝 / 未找到场景在 `PreLoadingAuthorizationTests` / `LoadingListAuthorizationTests` 与两条真实 SQL 集成测试中覆盖。
+
+仍暂未接入本护栏的是**单证带入 / 生成**路由（`TradeDocumentGenerationTests` / `TradeDocumentLineSnapshotTests` 以无身份控制器
+直接调用，且不在本任务 `allowed_paths` 内）；后续如放开 `allowed_paths`，可对上述路由按同一口径补齐。
 

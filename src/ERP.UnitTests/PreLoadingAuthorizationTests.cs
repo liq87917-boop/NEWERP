@@ -218,6 +218,7 @@ public class PreLoadingAuthorizationTests
         await AssertCode(ErrorCodes.Unauthorized, () => ctl.GetPaged(new PageQuery { Page = 1, PageSize = 10 }, null));
         await AssertCode(ErrorCodes.Unauthorized, () => ctl.GetById(pending.Id));
         await AssertCode(ErrorCodes.Unauthorized, () => ctl.GetShipmentTimeline(pending.Id));
+        await AssertCode(ErrorCodes.Unauthorized, () => ctl.GetShipmentTracking(pending.Id));
         await AssertCode(ErrorCodes.Unauthorized, () => ctl.Create(NewPreLoading(booking.Id, "CTN-NEW", (ProductA, 1m))));
         await AssertCode(ErrorCodes.Unauthorized, () => ctl.Update(pending.Id, NewPreLoading(booking.Id, "CTN-UPD", (ProductA, 1m))));
         await AssertCode(ErrorCodes.Unauthorized, () => ctl.Submit(pending.Id));
@@ -330,6 +331,112 @@ public class PreLoadingAuthorizationTests
         await AssertCode(ErrorCodes.Forbidden, () => ctl.GetById(missing.Id));
         await AssertCode(ErrorCodes.Forbidden, () => ctl.GetById(deletedSource.Id));
         await AssertCode(ErrorCodes.Forbidden, () => ctl.GetShipmentTimeline(unlinked.Id));
+    }
+
+    // ==================== 2B. ERP-431：出运跟踪路由实时授权（与出运时间线同口径） ====================
+
+    [Fact]
+    public async Task 受限业务员_出运跟踪_本人可读_他人与无主拒绝且不改动库中行()
+    {
+        using var db = TestDbFactory.Create();
+        var (userId, employeeId) = SeedRestrictedOperator(db, PreLoadingAuthorizationRules.RequiredMenuCode);
+        SeedCustomer(db, CustomerOwn, "C-OWN-TRK", "本人客户", empId: employeeId);
+        SeedCustomer(db, CustomerOther, "C-OTHER-TRK", "他人客户");
+
+        var ownBooking = SeedBooking(db, "PRE-TRK-OWN", CustomerOwn);
+        var otherBooking = SeedBooking(db, "PRE-TRK-OTHER", CustomerOther);
+        var own = SeedPreLoading(db, "YZ-TRK-OWN", ownBooking.Id, DocumentStatus.Pending, "CTN-TRK-OWN");
+        var foreign = SeedPreLoading(db, "YZ-TRK-OTHER", otherBooking.Id, DocumentStatus.Pending, "CTN-TRK-OTHER");
+        var unlinked = SeedPreLoading(db, "YZ-TRK-UNLINKED", null, DocumentStatus.Pending, "CTN-TRK-UNLINKED");
+        var dangling = SeedPreLoading(db, "YZ-TRK-DANGLING", 999999L, DocumentStatus.Pending, "CTN-TRK-DANGLING");
+        var ctl = NewController(db, userId);
+
+        var tracking = AssertOk<ContainerShipmentTrackingDto>(await ctl.GetShipmentTracking(own.Id));
+        Assert.True(tracking.Linked);
+        Assert.Equal(ownBooking.Id, tracking.BookingId);
+        Assert.Equal("BL-PRE-TRK-OWN", tracking.BillOfLadingNo);
+        Assert.Equal("未知", tracking.ShipmentModeText);      // 订柜未填出运方式 = 未知，不推断
+        Assert.Null(tracking.Etd);
+
+        await AssertCode(ErrorCodes.Forbidden, () => ctl.GetShipmentTracking(foreign.Id));
+        await AssertCode(ErrorCodes.Forbidden, () => ctl.GetShipmentTracking(unlinked.Id));
+        await AssertCode(ErrorCodes.Forbidden, () => ctl.GetShipmentTracking(dangling.Id));
+        await AssertCode(ErrorCodes.Forbidden, () => ctl.GetShipmentTimeline(foreign.Id)); // 与时间线同口径
+
+        // 拒绝不泄露：他人 / 无主单据的柜号、订柜号与行都保持不变
+        Assert.Equal("CTN-TRK-OTHER", Reload(db, foreign.Id).ContainerNo);
+        Assert.Equal(otherBooking.Id, Reload(db, foreign.Id).BookingId);
+        Assert.Equal("PRE-TRK-OTHER", db.ContainerBookings.Single(b => b.Id == otherBooking.Id).BookingNo);
+        Assert.Equal("CTN-TRK-UNLINKED", Reload(db, unlinked.Id).ContainerNo);
+        Assert.Null(Reload(db, unlinked.Id).BookingId);
+    }
+
+    [Fact]
+    public async Task 出运跟踪_不存在或已删除单据_返回与时间线同一受控未找到错误且不泄露()
+    {
+        using var db = TestDbFactory.Create();
+        var (userId, employeeId) = SeedRestrictedOperator(db, PreLoadingAuthorizationRules.RequiredMenuCode);
+        SeedCustomer(db, CustomerOwn, "C-OWN-TRK2", "本人客户", empId: employeeId);
+        var booking = SeedBooking(db, "PRE-TRK-DEL", CustomerOwn);
+        var deleted = SeedPreLoading(db, "YZ-TRK-DEL", booking.Id, DocumentStatus.Pending, "CTN-TRK-DEL");
+        deleted.IsDeleted = true;
+        db.SaveChanges();
+        var ctl = NewController(db, userId);
+
+        await AssertCode(ErrorCodes.NotFound, () => ctl.GetShipmentTracking(deleted.Id));
+        await AssertCode(ErrorCodes.NotFound, () => ctl.GetShipmentTimeline(deleted.Id));
+        await AssertCode(ErrorCodes.NotFound, () => ctl.GetShipmentTracking(987654321L));
+
+        var ex = await Assert.ThrowsAsync<BusinessException>(() => ctl.GetShipmentTracking(deleted.Id));
+        Assert.Equal("预装柜单不存在", ex.Message);           // 受控、不披露
+        Assert.DoesNotContain("CTN-TRK-DEL", ex.Message);
+        Assert.DoesNotContain("PRE-TRK-DEL", ex.Message);
+    }
+
+    [Fact]
+    public async Task 出运跟踪_禁用按权限不足_已删除按未认证_无菜单拒绝()
+    {
+        using var db = TestDbFactory.Create();
+        var booking = SeedBooking(db, "PRE-TRK-STATUS", CustomerOwn);
+        var entity = SeedPreLoading(db, "YZ-TRK-STATUS", booking.Id, DocumentStatus.Pending, "CTN-TRK-STATUS");
+
+        var disabled = SeedMenuUser(db, PreLoadingAuthorizationRules.RequiredMenuCode);
+        disabled.Status = UserStatus.Disabled;
+        db.SaveChanges();
+
+        var deleted = SeedMenuUser(db, PreLoadingAuthorizationRules.RequiredMenuCode);
+        deleted.IsDeleted = true;
+        db.SaveChanges();
+
+        var noMenu = SeedMenuUser(db);
+
+        await AssertCode(ErrorCodes.Unauthorized, () => NewController(db, null).GetShipmentTracking(entity.Id));
+        await AssertCode(ErrorCodes.Forbidden, () => NewController(db, disabled.Id).GetShipmentTracking(entity.Id));
+        await AssertCode(ErrorCodes.Unauthorized, () => NewController(db, deleted.Id).GetShipmentTracking(entity.Id));
+
+        var ex = await Assert.ThrowsAsync<BusinessException>(
+            () => NewController(db, noMenu.Id).GetShipmentTracking(entity.Id));
+        Assert.Equal(ErrorCodes.Forbidden, ex.Code);
+        Assert.Contains("模块授权", ex.Message);
+
+        Assert.Equal("CTN-TRK-STATUS", Reload(db, entity.Id).ContainerNo);
+    }
+
+    [Fact]
+    public async Task 出运跟踪_特权账号_未关联历史单据_保留历史只读访问()
+    {
+        using var db = TestDbFactory.Create();
+        var userId = TestAuth.SeedPrivilegedUser(db);
+        var unlinked = SeedPreLoading(db, "YZ-TRK-HIST", null, DocumentStatus.Pending, "CTN-TRK-HIST");
+        var ctl = NewController(db, userId);
+
+        var tracking = AssertOk<ContainerShipmentTrackingDto>(await ctl.GetShipmentTracking(unlinked.Id));
+        Assert.False(tracking.Linked);
+        Assert.Null(tracking.BookingId);
+        Assert.Equal(string.Empty, tracking.BookingNo);
+        Assert.Contains("未关联", tracking.NotLinkedReason);
+
+        Assert.Equal("CTN-TRK-HIST", Reload(db, unlinked.Id).ContainerNo);
     }
 
     [Fact]
@@ -501,6 +608,16 @@ public class PreLoadingAuthorizationTests
         var proposed = controller.IndexOf("PreLoadingAuthorizationRules.EnsureProposedScopeAllowedAsync", StringComparison.Ordinal);
         var generate = controller.IndexOf("GenerateAsync(DocumentType.PreLoading)", StringComparison.Ordinal);
         Assert.True(proposed >= 0 && generate > proposed);
+
+        // ERP-431：出运跟踪路由与出运时间线同口径，授权严格先于单据解析与跟踪读取。
+        var trackingRoute = controller.IndexOf("[HttpGet(\"{id:long}/shipment-tracking\")]", StringComparison.Ordinal);
+        Assert.True(trackingRoute >= 0);
+        var trackingAuth = controller.IndexOf("PreLoadingAuthorizationRules.EnsureAuthorizedAsync", trackingRoute, StringComparison.Ordinal);
+        var trackingLookup = controller.IndexOf("GetOrThrowAsync(id, \"预装柜单不存在\")", trackingRoute, StringComparison.Ordinal);
+        var trackingScope = controller.IndexOf("PreLoadingAuthorizationRules.EnsureStoredScopeAllowedAsync", trackingRoute, StringComparison.Ordinal);
+        Assert.True(trackingAuth > trackingRoute);
+        Assert.True(trackingLookup > trackingAuth);
+        Assert.True(trackingScope > trackingLookup);
     }
 
     [Fact]

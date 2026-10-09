@@ -268,14 +268,19 @@ public class ContainerLoadingListController : DocumentControllerBase<ContainerLo
         => drafts.FirstOrDefault(d => string.Equals(d.DocType, docType, StringComparison.Ordinal))?.Currency;
 
     /// <summary>
-    /// 权威外贸 / 物流跟踪值（ERP-040，**只读**）：按装柜清单 → 预装柜单 → 订柜信息的
-    /// 持久化引用链读取订柜记录并原样回显；链上任一环缺失即返回「未关联」（跟踪字段未知），
-    /// 不按柜号等自由文本兜底匹配，也不在本单上另存一份跟踪值。
+    /// 权威外贸 / 物流跟踪值（ERP-040，**只读**）：先实时授权（ERP-364：实时身份 / 账号状态 / 既有「装柜清单」
+    /// 菜单授权 / 权威客户数据范围，含有效参与方与显式上游客户，与下方出运时间线同口径），再按
+    /// 装柜清单 → 预装柜单 → 订柜信息的持久化引用链读取订柜记录并原样回显；链上任一环缺失即返回「未关联」
+    /// （跟踪字段未知），不按柜号等自由文本兜底匹配，也不在本单上另存一份跟踪值。
+    /// 范围外 / 已删除 / 不存在单据在授权后返回与出运时间线相同的受控错误，不泄露柜号 / 订柜号 / ETD / ETA / 报关行值。
     /// </summary>
     [HttpGet("{id:long}/shipment-tracking")]
     public async Task<IActionResult> GetShipmentTracking(long id)
     {
+        // ERP-364：实时授权与权威客户范围严格先于单据解析与跟踪读取（与出运时间线同一口径，无匿名 / 管理员回退）。
+        var scope = await LoadingListAuthorizationRules.EnsureAuthorizedAsync(Db, CurrentUserId());
         var entity = await GetOrThrowAsync(id, "装柜清单不存在");
+        await LoadingListAuthorizationRules.EnsureStoredScopeAllowedAsync(Db, scope, entity);
         var tracking = await ContainerShipmentTrackingService.ResolveForLoadingListAsync(Db, entity);
         return Ok(ApiResponse<ContainerShipmentTrackingDto>.Success(tracking, "已按持久化引用链返回跟踪信息（只读）"));
     }

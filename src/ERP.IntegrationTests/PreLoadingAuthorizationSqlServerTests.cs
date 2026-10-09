@@ -79,6 +79,64 @@ public sealed class PreLoadingAuthorizationSqlServerTests
         await AssertCode(ErrorCodes.Forbidden, () => ctl.GetShipmentTimeline(unlinked.Id));
     }
 
+    // ==================== 1B. ERP-431：出运跟踪路由实时授权（与出运时间线同口径） ====================
+
+    [Fact]
+    public async Task Live_shipment_tracking_enforces_identity_menu_and_customer_scope()
+    {
+        Guard();
+        await using var db = _fixture.CreateDbContext();
+        var (userId, employeeId) = await SeedRestrictedOperatorAsync(db, withPreLoadingMenu: true);
+        var ownCustomer = await SeedCustomerAsync(db, "本人客户", employeeId);
+        var foreignCustomer = await SeedCustomerAsync(db, "他人客户", empId: null);
+        var ownBooking = await SeedBookingAsync(db, ownCustomer, DocumentStatus.Approved);
+        var foreignBooking = await SeedBookingAsync(db, foreignCustomer, DocumentStatus.Approved);
+
+        var keyword = Tag();
+        var own = await SeedPreLoadingAsync(db, $"YZ-{keyword}-TROWN", ownBooking.Id, DocumentStatus.Pending, "CTN-TROWN");
+        var foreign = await SeedPreLoadingAsync(db, $"YZ-{keyword}-TROTHER", foreignBooking.Id, DocumentStatus.Pending, "CTN-TROTHER");
+        var unlinked = await SeedPreLoadingAsync(db, $"YZ-{keyword}-TRUNLINK", null, DocumentStatus.Pending, "CTN-TRUNLINK");
+        var deleted = await SeedPreLoadingAsync(db, $"YZ-{keyword}-TRDEL", ownBooking.Id, DocumentStatus.Pending, "CTN-TRDEL");
+        deleted.IsDeleted = true;
+        await db.SaveChangesAsync();
+
+        var beforePreLoadings = await db.ContainerPreLoadings.AsNoTracking().CountAsync();
+        var beforeBookings = await db.ContainerBookings.AsNoTracking().CountAsync();
+        var beforeReferences = await db.ContainerShipmentReferences.AsNoTracking().CountAsync();
+        var beforeMilestones = await db.ContainerShipmentMilestones.AsNoTracking().CountAsync();
+
+        var ctl = NewController(db, userId);
+
+        // 本人客户：按持久化订柜引用返回权威跟踪值（只读，DTO 语义不变）。
+        var tracking = AssertOk<ContainerShipmentTrackingDto>(await ctl.GetShipmentTracking(own.Id));
+        Assert.True(tracking.Linked);
+        Assert.Equal(ownBooking.Id, tracking.BookingId);
+
+        // 他人 / 无主单据与出运时间线同口径拒绝；已删除单据返回受控未找到。
+        await AssertCode(ErrorCodes.Forbidden, () => ctl.GetShipmentTracking(foreign.Id));
+        await AssertCode(ErrorCodes.Forbidden, () => ctl.GetShipmentTracking(unlinked.Id));
+        await AssertCode(ErrorCodes.Forbidden, () => ctl.GetShipmentTimeline(foreign.Id));
+        await AssertCode(ErrorCodes.NotFound, () => ctl.GetShipmentTracking(deleted.Id));
+
+        var disabledUserId = await SeedDisabledUserAsync(db);
+        await AssertCode(ErrorCodes.Forbidden, () => NewController(db, disabledUserId).GetShipmentTracking(own.Id));
+        await AssertCode(ErrorCodes.Unauthorized, () => NewController(db, null).GetShipmentTracking(own.Id));
+
+        // 拒绝 / 未找到不改变任何行：预装柜 / 订柜 / 出运引用 / 里程碑保持原样。
+        await using var verify = _fixture.CreateDbContext();
+        Assert.Equal(beforePreLoadings, await verify.ContainerPreLoadings.AsNoTracking().CountAsync());
+        Assert.Equal(beforeBookings, await verify.ContainerBookings.AsNoTracking().CountAsync());
+        Assert.Equal(beforeReferences, await verify.ContainerShipmentReferences.AsNoTracking().CountAsync());
+        Assert.Equal(beforeMilestones, await verify.ContainerShipmentMilestones.AsNoTracking().CountAsync());
+
+        var storedForeign = await verify.ContainerPreLoadings.AsNoTracking().SingleAsync(p => p.Id == foreign.Id);
+        Assert.Equal("CTN-TROTHER", storedForeign.ContainerNo);
+        Assert.Equal(foreignBooking.Id, storedForeign.BookingId);
+        var storedUnlinked = await verify.ContainerPreLoadings.AsNoTracking().SingleAsync(p => p.Id == unlinked.Id);
+        Assert.Null(storedUnlinked.BookingId);
+        Assert.True((await verify.ContainerPreLoadings.AsNoTracking().SingleAsync(p => p.Id == deleted.Id)).IsDeleted);
+    }
+
     // ==================== 2. 受限业务员不能写他人 / 无主单据 ====================
 
     [Fact]
@@ -132,10 +190,12 @@ public sealed class PreLoadingAuthorizationSqlServerTests
 
         await AssertCode(ErrorCodes.Forbidden, () => NewController(db, userId).GetPaged(new PageQuery(), null));
         await AssertCode(ErrorCodes.Forbidden, () => NewController(db, userId).Delete(entity.Id));
+        await AssertCode(ErrorCodes.Forbidden, () => NewController(db, userId).GetShipmentTracking(entity.Id));
 
         var disabledUserId = await SeedDisabledUserAsync(db);
         await AssertCode(ErrorCodes.Forbidden, () => NewController(db, disabledUserId).GetPaged(new PageQuery(), null));
         await AssertCode(ErrorCodes.Forbidden, () => NewController(db, disabledUserId).Delete(entity.Id));
+        await AssertCode(ErrorCodes.Forbidden, () => NewController(db, disabledUserId).GetShipmentTracking(entity.Id));
 
         db.ChangeTracker.Clear();
         var stored = await db.ContainerPreLoadings.AsNoTracking().SingleAsync(p => p.Id == entity.Id);

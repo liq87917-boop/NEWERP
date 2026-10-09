@@ -8,7 +8,7 @@ namespace ERP.Application.Services;
 
 /// <summary>
 /// 装柜清单（<see cref="ContainerLoadingList"/>，<c>api/container/loading-lists</c>）实时授权与权威客户数据范围护栏（ERP-364）。
-/// <para><b>实时授权先于任何读取 / 计数 / 单据号生成 / 单证生成 / 写入</b>：列表 / 详情 / 出运时间线 / 费用分摊证据 /
+/// <para><b>实时授权先于任何读取 / 计数 / 单据号生成 / 单证生成 / 写入</b>：列表 / 详情 / 出运跟踪 / 出运时间线 / 费用分摊证据 /
 /// 参与方读取 / 新增 / 修改 / 提交 / 审核 / 取消 / 删除每一个路由都先重新解析：<b>实时身份</b>（缺失 / 非法按未认证拒绝）
 /// → <b>账号状态</b>（不存在 / 已删除按未认证，禁用按权限不足）→ 既有「装柜清单」（<c>loading-list</c>）菜单授权
 /// （非特权账号必须显式具备）→ 权威客户数据范围（复用 ERP-097 <see cref="SalespersonDataScopeService"/>；未映射业务员的
@@ -58,7 +58,7 @@ public static class LoadingListAuthorizationRules
 
     /// <summary>授权与数据范围口径文案（接口 / 文档同源）</summary>
     public const string RuleText =
-        "装柜清单（列表 / 详情 / 出运时间线 / 费用分摊证据 / 参与方读取 / 新增 / 修改 / 提交 / 审核 / 取消 / 删除）在读取任何计数、" +
+        "装柜清单（列表 / 详情 / 出运跟踪 / 出运时间线 / 费用分摊证据 / 参与方读取 / 新增 / 修改 / 提交 / 审核 / 取消 / 删除）在读取任何计数、" +
         "参与方或生成单据号 / 单证之前，都会重新校验实时身份（缺失 / 非法 / 已删除按未认证，禁用按权限不足，一律 fail closed）、" +
         "既有「装柜清单」（loading-list）菜单授权与权威客户数据范围（复用 ERP-097）；受限账号必须对每一个有效参与方客户以及" +
         "显式上游（预装柜单 → 订柜信息）客户同时有权限，历史单客户按持久化 CustomerId 判定，无权威归属 fail closed，" +

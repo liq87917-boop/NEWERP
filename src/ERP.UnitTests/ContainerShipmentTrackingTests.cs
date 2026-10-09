@@ -580,6 +580,56 @@ public class ContainerShipmentTrackingTests
         Assert.Equal(3, db.ContainerLoadingLists.Count());
     }
 
+    // ==================== ERP-431：出运跟踪路由实时授权（无匿名 / 管理员回退） ====================
+
+    [Fact]
+    public async Task 出运跟踪_无身份拒绝_特权身份保留只读DTO与未关联语义()
+    {
+        using var db = TestDbFactory.Create();
+        var booking = SeedTrackingBooking(db, "DG004", null, string.Empty);
+        var preLoading = SeedPreLoading(db, "YZ006", booking.Id, "CTN-4004");
+        var list = SeedLoadingList(db, "ZQ005", preLoading.Id, "CTN-4004");
+        var before = SnapshotOf(booking);
+
+        // 无身份：与出运时间线同口径按未认证拒绝，绝不回退为匿名 / 管理员可见。
+        var anonymousPreLoading = new ContainerPreLoadingController(db, new DocumentNumberService(db));
+        TestAuth.SetUser(anonymousPreLoading, null);
+        var anonymousList = new ContainerLoadingListController(db, new DocumentNumberService(db));
+        TestAuth.SetUser(anonymousList, null);
+
+        var preLoadingEx = await Assert.ThrowsAsync<BusinessException>(
+            () => anonymousPreLoading.GetShipmentTracking(preLoading.Id));
+        Assert.Equal(ErrorCodes.Unauthorized, preLoadingEx.Code);
+        var listEx = await Assert.ThrowsAsync<BusinessException>(
+            () => anonymousList.GetShipmentTracking(list.Id));
+        Assert.Equal(ErrorCodes.Unauthorized, listEx.Code);
+        Assert.Equal(before, SnapshotOf(db.ContainerBookings.Single()));
+
+        // 特权身份：DTO 字段与只读语义保持 ERP-040 原样（含空值 = 未知）。
+        var preTracking = AssertOk<ContainerShipmentTrackingDto>(
+            await BuildPreLoadingController(db).GetShipmentTracking(preLoading.Id));
+        Assert.True(preTracking.Linked);
+        Assert.Equal(booking.Id, preTracking.BookingId);
+        Assert.Equal("DG004", preTracking.BookingNo);
+        Assert.Equal("FCL", preTracking.ShipmentMode);
+        Assert.Equal(new DateTime(2026, 9, 28), preTracking.Etd);
+        Assert.Null(preTracking.Atd);
+
+        var listTracking = AssertOk<ContainerShipmentTrackingDto>(
+            await BuildLoadingListController(db).GetShipmentTracking(list.Id));
+        Assert.True(listTracking.Linked);
+        Assert.Equal(booking.Id, listTracking.BookingId);
+        Assert.Equal("DG004", listTracking.BookingNo);
+
+        // 只读：无匿名拒绝与特权读取都不改动订柜 / 预装柜 / 装柜清单，也不产生其他单据。
+        Assert.Equal(before, SnapshotOf(db.ContainerBookings.Single()));
+        Assert.Equal("CTN-4004", db.ContainerPreLoadings.Single().ContainerNo);
+        Assert.Equal(preLoading.Id, db.ContainerLoadingLists.Single().PreLoadingId);
+        Assert.Empty(db.TradeDocuments);
+        Assert.Empty(db.FinanceExpenses);
+        Assert.Empty(db.StockMovements);
+    }
+
     // ==================== 纯规则 ====================
 
     [Fact]
@@ -827,13 +877,31 @@ public class ContainerShipmentTrackingTests
         db.SaveChanges();
     }
 
-    /// <summary>预装柜单控制器（内存库 + 单据号服务）</summary>
+    /// <summary>
+    /// 预装柜单控制器（内存库 + 单据号服务 + ERP-363 特权登录身份）。
+    /// <para>ERP-431 起 <c>{id}/shipment-tracking</c> 与出运时间线一样先实时授权；本文件聚焦 ERP-040 跟踪语义，
+    /// 故统一注入特权身份（与 <see cref="BuildBookingController"/> 同口径），受限范围与拒绝场景在
+    /// <c>PreLoadingAuthorizationTests</c> / 真实 SQL 集成测试中单独覆盖。</para>
+    /// </summary>
     private static ContainerPreLoadingController BuildPreLoadingController(ErpDbContext db)
-        => new(db, new DocumentNumberService(db));
+    {
+        var controller = new ContainerPreLoadingController(db, new DocumentNumberService(db));
+        TestAuth.SetUser(controller, TestAuth.SeedPrivilegedUser(db));
+        return controller;
+    }
 
-    /// <summary>装柜清单控制器（内存库 + 单据号服务）</summary>
+    /// <summary>
+    /// 装柜清单控制器（内存库 + 单据号服务 + ERP-364 特权登录身份）。
+    /// <para>ERP-431 起 <c>{id}/shipment-tracking</c> 与出运时间线一样先实时授权；本文件聚焦 ERP-040 跟踪语义，
+    /// 故统一注入特权身份（与 <see cref="BuildBookingController"/> 同口径），受限范围与拒绝场景在
+    /// <c>LoadingListAuthorizationTests</c> / 真实 SQL 集成测试中单独覆盖。</para>
+    /// </summary>
     private static ContainerLoadingListController BuildLoadingListController(ErpDbContext db)
-        => new(db, new DocumentNumberService(db));
+    {
+        var controller = new ContainerLoadingListController(db, new DocumentNumberService(db));
+        TestAuth.SetUser(controller, TestAuth.SeedPrivilegedUser(db));
+        return controller;
+    }
 
     /// <summary>断言成功响应并取出数据（业务码必须为 0）</summary>
     private static T AssertOk<T>(IActionResult result)

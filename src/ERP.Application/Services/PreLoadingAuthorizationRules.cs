@@ -8,7 +8,7 @@ namespace ERP.Application.Services;
 
 /// <summary>
 /// 预装柜单（<see cref="ContainerPreLoading"/>，<c>api/container/pre-loadings</c>）实时授权与权威客户数据范围护栏（ERP-363）。
-/// <para><b>实时授权先于任何读取 / 计数 / 单据号生成 / 写入</b>：列表 / 详情 / 出运时间线 / 新增 / 修改 /
+/// <para><b>实时授权先于任何读取 / 计数 / 单据号生成 / 写入</b>：列表 / 详情 / 出运跟踪 / 出运时间线 / 新增 / 修改 /
 /// 提交 / 审核 / 取消 / 删除每一个路由都先重新解析：<b>实时身份</b>（缺失 / 非法按未认证拒绝）→ <b>账号状态</b>
 /// （不存在 / 已删除按未认证，禁用按权限不足）→ 既有「预装柜单」（<c>pre-loading</c>）菜单授权（非特权账号必须显式具备）
 /// → 权威客户数据范围（复用 ERP-097 <see cref="SalespersonDataScopeService"/>；未映射业务员的受限账号 fail closed，
@@ -47,7 +47,7 @@ public static class PreLoadingAuthorizationRules
 
     /// <summary>授权与数据范围口径文案（接口 / 文档同源）</summary>
     public const string RuleText =
-        "预装柜单（列表 / 详情 / 出运时间线 / 新增 / 修改 / 提交 / 审核 / 取消 / 删除）在读取任何计数、" +
+        "预装柜单（列表 / 详情 / 出运跟踪 / 出运时间线 / 新增 / 修改 / 提交 / 审核 / 取消 / 删除）在读取任何计数、" +
         "来源字段或生成单据号之前，都会重新校验实时身份（缺失 / 非法 / 已删除按未认证，禁用按权限不足，一律 fail closed）、" +
         "既有「预装柜单」（pre-loading）菜单授权与权威客户数据范围（复用 ERP-097）；受限账号的可见范围只按显式 BookingId 与" +
         "订柜信息权威归属客户判定，未关联 / 来源已删除的无主单据 fail closed，绝不按单号等自由文本猜测归属；" +

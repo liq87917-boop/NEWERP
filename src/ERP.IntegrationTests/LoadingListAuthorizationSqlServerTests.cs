@@ -95,13 +95,82 @@ public sealed class LoadingListAuthorizationSqlServerTests
 
         await AssertCode(ErrorCodes.Forbidden, () => NewController(db, revokedUserId).GetById(list.Id));
         await AssertCode(ErrorCodes.Forbidden, () => NewController(db, revokedUserId).Delete(list.Id));
+        await AssertCode(ErrorCodes.Forbidden, () => NewController(db, revokedUserId).GetShipmentTracking(list.Id));
         await AssertCode(ErrorCodes.Forbidden, () => NewController(db, disabledUserId).GetById(list.Id));
+        await AssertCode(ErrorCodes.Forbidden, () => NewController(db, disabledUserId).GetShipmentTracking(list.Id));
         await AssertCode(ErrorCodes.Unauthorized, () => NewController(db, null).GetById(list.Id));
+        await AssertCode(ErrorCodes.Unauthorized, () => NewController(db, null).GetShipmentTracking(list.Id));
 
         db.ChangeTracker.Clear();
         var stored = await db.ContainerLoadingLists.AsNoTracking().SingleAsync(x => x.Id == list.Id);
         Assert.False(stored.IsDeleted);
         Assert.Equal(DocumentStatus.Pending, stored.Status);
+    }
+
+    // ==================== 2B. ERP-431：出运跟踪路由实时授权（与出运时间线同口径） ====================
+
+    [Fact]
+    public async Task Live_shipment_tracking_enforces_identity_menu_and_customer_scope()
+    {
+        Guard();
+        await using var db = _fixture.CreateDbContext();
+        var (userId, employeeId) = await SeedRestrictedOperatorAsync(db, withLoadingListMenu: true);
+        var own = await SeedCustomerAsync(db, "本人客户", employeeId);
+        var foreign = await SeedCustomerAsync(db, "他人客户");
+
+        var keyword = Tag();
+        var ownList = await SeedLoadingListAsync(db, $"ZQ-{keyword}-TROWN", own, DocumentStatus.Pending);
+        var foreignList = await SeedLoadingListAsync(db, $"ZQ-{keyword}-TROTHER", foreign, DocumentStatus.Pending);
+        var ownerless = await SeedLoadingListAsync(db, $"ZQ-{keyword}-TRNONE", 0L, DocumentStatus.Pending);
+        var shared = await SeedLoadingListAsync(db, $"ZQ-{keyword}-TRSHARED", own, DocumentStatus.Pending);
+        await SeedParticipantAsync(db, shared.Id, foreign);            // 混合参与方共享柜 → 拒绝
+        var deletedList = await SeedLoadingListAsync(db, $"ZQ-{keyword}-TRDEL", own, DocumentStatus.Pending);
+        deletedList.IsDeleted = true;
+        await db.SaveChangesAsync();
+
+        var (revokedUserId, _) = await SeedRestrictedOperatorAsync(db, withLoadingListMenu: true);
+        await RevokeMenusAsync(db, revokedUserId);
+        var disabledUserId = await SeedDisabledUserAsync(db);
+
+        var beforeLists = await db.ContainerLoadingLists.AsNoTracking().CountAsync();
+        var beforeParticipants = await db.ContainerLoadingListParticipants.AsNoTracking().CountAsync();
+        var beforeBookings = await db.ContainerBookings.AsNoTracking().CountAsync();
+        var beforeReferences = await db.ContainerShipmentReferences.AsNoTracking().CountAsync();
+        var beforeMilestones = await db.ContainerShipmentMilestones.AsNoTracking().CountAsync();
+
+        var ctl = NewController(db, userId);
+
+        // 本人客户且无显式引用链：返回「未关联」（全字段未知），绝不按柜号等自由文本猜测。
+        var tracking = AssertOk<ContainerShipmentTrackingDto>(await ctl.GetShipmentTracking(ownList.Id));
+        Assert.False(tracking.Linked);
+        Assert.Null(tracking.BookingId);
+
+        // 他人 / 无主 / 混合参与方共享柜：与出运时间线同口径拒绝；已删除单据返回受控未找到。
+        await AssertCode(ErrorCodes.Forbidden, () => ctl.GetShipmentTracking(foreignList.Id));
+        await AssertCode(ErrorCodes.Forbidden, () => ctl.GetShipmentTracking(ownerless.Id));
+        await AssertCode(ErrorCodes.Forbidden, () => ctl.GetShipmentTracking(shared.Id));
+        await AssertCode(ErrorCodes.Forbidden, () => ctl.GetShipmentTimeline(shared.Id));
+        await AssertCode(ErrorCodes.NotFound, () => ctl.GetShipmentTracking(deletedList.Id));
+        await AssertCode(ErrorCodes.NotFound, () => ctl.GetShipmentTracking(987654321L));
+
+        // 撤销菜单 / 禁用账号 / 缺失身份：一律拒绝，无匿名 / 管理员回退。
+        await AssertCode(ErrorCodes.Forbidden, () => NewController(db, revokedUserId).GetShipmentTracking(ownList.Id));
+        await AssertCode(ErrorCodes.Forbidden, () => NewController(db, disabledUserId).GetShipmentTracking(ownList.Id));
+        await AssertCode(ErrorCodes.Unauthorized, () => NewController(db, null).GetShipmentTracking(ownList.Id));
+
+        // 拒绝 / 未找到不改变任何行：装柜清单 / 参与方 / 订柜 / 出运引用 / 里程碑保持原样。
+        await using var verify = _fixture.CreateDbContext();
+        Assert.Equal(beforeLists, await verify.ContainerLoadingLists.AsNoTracking().CountAsync());
+        Assert.Equal(beforeParticipants, await verify.ContainerLoadingListParticipants.AsNoTracking().CountAsync());
+        Assert.Equal(beforeBookings, await verify.ContainerBookings.AsNoTracking().CountAsync());
+        Assert.Equal(beforeReferences, await verify.ContainerShipmentReferences.AsNoTracking().CountAsync());
+        Assert.Equal(beforeMilestones, await verify.ContainerShipmentMilestones.AsNoTracking().CountAsync());
+
+        Assert.Equal(foreign, (await verify.ContainerLoadingLists.AsNoTracking().SingleAsync(x => x.Id == foreignList.Id)).CustomerId);
+        Assert.Equal(0L, (await verify.ContainerLoadingLists.AsNoTracking().SingleAsync(x => x.Id == ownerless.Id)).CustomerId);
+        Assert.Equal(own, (await verify.ContainerLoadingLists.AsNoTracking().SingleAsync(x => x.Id == shared.Id)).CustomerId);
+        Assert.Equal(foreign, (await verify.ContainerLoadingListParticipants.AsNoTracking().SingleAsync(p => p.LoadingListId == shared.Id)).CustomerId);
+        Assert.True((await verify.ContainerLoadingLists.AsNoTracking().SingleAsync(x => x.Id == deletedList.Id)).IsDeleted);
     }
 
     // ==================== 3. 失败的参与方维护不改动原行 / 兼容字段 / 审计 ====================
