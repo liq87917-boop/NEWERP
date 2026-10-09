@@ -443,6 +443,43 @@ public class CustomerForwarderTests
     }
 
     [Fact]
+    public void Rules_其他资料写入校验不改变货代字典既有语义()
+    {
+        // ERP-443 新增的字典写入校验只拒绝未知类型与越界字段，不放宽也不收紧既有「可选用货代」判定。
+        var forwarder = new BaseOtherInfo
+        {
+            InfoType = CustomerForwarderRules.ForwarderInfoType,
+            InfoCode = "FD-REG",
+            InfoName = "回归货代",
+            Status = 1
+        };
+
+        OtherInfoAuthorizationRules.Validate(forwarder);
+        Assert.True(CustomerForwarderRules.IsSelectableForwarder(forwarder));
+
+        // 已知有界字典类型集合包含既有货代 / 报关行类型（与既有页面取值同源，不新增取值）。
+        Assert.True(OtherInfoAuthorizationRules.IsKnownInfoType(CustomerForwarderRules.ForwarderInfoType));
+        Assert.True(OtherInfoAuthorizationRules.IsKnownInfoType(ContainerShipmentTrackingRules.CustomsBrokerInfoType));
+    }
+
+    [Fact]
+    public async Task GetForwarderOptions_新增字典写入校验后仍按既有口径只返回启用货代()
+    {
+        using var db = TestDbFactory.Create();
+        SeedOtherInfo(db, "Forwarder", "FD-REG1", "回归启用货代");
+        SeedOtherInfo(db, "Forwarder", "FD-REG2", "回归停用货代", status: 0);
+        var ctl = BuildController(db);
+
+        var ok = Assert.IsType<OkObjectResult>(await ctl.GetForwarderOptions());
+        var resp = Assert.IsType<ApiResponse<List<OtherInfoOptionDto>>>(ok.Value);
+        var options = resp.Data!;
+
+        var only = Assert.Single(options);
+        Assert.Equal("回归启用货代", only.InfoName);
+        Assert.True(only.Selectable);
+    }
+
+    [Fact]
     public void Rules_不可用标注文案与空名称处理()
     {
         Assert.Equal("XX 货代（已停用/不可用）", CustomerForwarderRules.MarkUnavailable("XX 货代"));
