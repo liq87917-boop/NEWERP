@@ -1,0 +1,11 @@
+{
+  "task": "ERP-437",
+  "status": "completed",
+  "execution_outcome": "completed",
+  "normalized_finish_reason": "build_validated",
+  "cline_exit_code": 0,
+  "cline_finish_reason_raw": "completed",
+  "attempts": 2,
+  "browser_acceptance": null,
+  "finished_at": "2026-10-09T05:55:14.710588Z"
+}
