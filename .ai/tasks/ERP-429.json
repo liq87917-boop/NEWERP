@@ -1,0 +1,69 @@
+{
+  "title": "Restore manual and linked purchase order HTTP form entry with server numbering",
+  "description": "Stage3 operational business closure. Keep existing live account/menu/customer authority, quantity and amount checks, master checks, source locks, atomic transactions and audit. No new grants, no identity bypass. Genuine HTTP/browser and SQL use only fresh GUID NEWERP_AUTOTEST databases on exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity, reject existing/wrong targets before access. Preserve original failure logs. Relevant tests and safe Release/full unit suite required; build completion is not stage acceptance. No production access, deployment or legacy report entry switch.",
+  "acceptance_criteria": [
+    "Allow omitted server-owned procurement number through HTTP model binding without globally disabling validation; database number remains nonnull/bounded, allocation only after existing live authority/master/amount checks. Reject malformed bodies, invalid suppliers/quantities/terms; supplied fake number never determines stored number.",
+    "Use existing opt-in nullable numeric serialization for blank owningSalesOrderId and portId, sending null for unlinked/manual procurement; explicit illegal0/negative remains rejected. Edit with omitted source preserves existing lineage under425 locks. Existing linked source selector and valid explicit audited sales source semantics preserved; never fake audited sources or weaken linkage rules.",
+    "Genuine HTTP/browser tests create live supplier/product and lawful audited sales source through existing application APIs, then save/reopen manual and linked purchases with original execution/settlement fields. Fix old fixture masters and cleanup to respect audited-source cancel policy. Cover omitted/forged number, blank optional source/port, invalid reference and foreign customer denial; quantity amount and transaction validations427/426 remain active.",
+    "Keep existing live account/menu/customer authority, quantity and amount checks, master checks, source locks, atomic transactions and audit. No new grants, no identity bypass. Genuine HTTP/browser and SQL use only fresh GUID NEWERP_AUTOTEST databases on exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity, reject existing/wrong targets before access. Preserve original failure logs. Relevant tests and safe Release/full unit suite required; build completion is not stage acceptance. No production access, deployment or legacy report entry switch."
+  ],
+  "allowed_paths": [
+    "src/ERP.Domain/Entities/PurchaseOrder.cs",
+    "src/ERP.Api/Controllers/PurchaseOrderController.cs",
+    "src/ERP.Api/wwwroot/js/crud.js",
+    "src/ERP.Api/wwwroot/js/modules-doc.js",
+    "src/ERP.Api/wwwroot/js/purchase-order-sales-order-source.js",
+    "src/ERP.IntegrationTests/OrderTraceabilityUiTests.cs",
+    "src/ERP.UnitTests/PurchaseOrderHttpFormContractTests.cs",
+    "src/ERP.IntegrationTests/PurchaseOrderHttpFormSqlServerTests.cs",
+    "docs/purchase-order-http-form.md"
+  ],
+  "criterion_path_map": {
+    "Allow omitted server-owned procurement number through HTTP model binding without globally disabling validation; database number remains nonnull/bounded, allocation only after existing live authority/master/amount checks. Reject malformed bodies, invalid suppliers/quantities/terms; supplied fake number never determines stored number.": [
+      "src/ERP.Domain/Entities/PurchaseOrder.cs",
+      "src/ERP.Api/Controllers/PurchaseOrderController.cs"
+    ],
+    "Use existing opt-in nullable numeric serialization for blank owningSalesOrderId and portId, sending null for unlinked/manual procurement; explicit illegal0/negative remains rejected. Edit with omitted source preserves existing lineage under425 locks. Existing linked source selector and valid explicit audited sales source semantics preserved; never fake audited sources or weaken linkage rules.": [
+      "src/ERP.Api/wwwroot/js/crud.js",
+      "src/ERP.Api/wwwroot/js/modules-doc.js",
+      "src/ERP.Api/wwwroot/js/purchase-order-sales-order-source.js"
+    ],
+    "Genuine HTTP/browser tests create live supplier/product and lawful audited sales source through existing application APIs, then save/reopen manual and linked purchases with original execution/settlement fields. Fix old fixture masters and cleanup to respect audited-source cancel policy. Cover omitted/forged number, blank optional source/port, invalid reference and foreign customer denial; quantity amount and transaction validations427/426 remain active.": [
+      "src/ERP.IntegrationTests/OrderTraceabilityUiTests.cs",
+      "src/ERP.UnitTests/PurchaseOrderHttpFormContractTests.cs",
+      "src/ERP.IntegrationTests/PurchaseOrderHttpFormSqlServerTests.cs",
+      "docs/purchase-order-http-form.md"
+    ],
+    "Keep existing live account/menu/customer authority, quantity and amount checks, master checks, source locks, atomic transactions and audit. No new grants, no identity bypass. Genuine HTTP/browser and SQL use only fresh GUID NEWERP_AUTOTEST databases on exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity, reject existing/wrong targets before access. Preserve original failure logs. Relevant tests and safe Release/full unit suite required; build completion is not stage acceptance. No production access, deployment or legacy report entry switch.": [
+      "src/ERP.IntegrationTests/OrderTraceabilityUiTests.cs",
+      "src/ERP.UnitTests/PurchaseOrderHttpFormContractTests.cs",
+      "src/ERP.IntegrationTests/PurchaseOrderHttpFormSqlServerTests.cs",
+      "docs/purchase-order-http-form.md"
+    ]
+  },
+  "implementation_evidence": "Current PurchaseOrder.OrderNo is Required with empty default but purchase form omits server-owned number. CRUD blank number becomes0: purchase module owningSalesOrderId and optional portId lack nullable opt-in; ERP425 rejects explicit source0 and ERP427 requires positive optional port or null. Ordinary manual procurement form therefore cannot reach the validated lifecycle. ERP425-427 direct-controller SQL does not exercise HTTP binding or form serialization. Reuse preceding sales fix; existing source selection393 remains authoritative.",
+  "depends_on": [
+    "ERP-428",
+    "ERP-427"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "id": "ERP-429",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-09T02:09:03.639228Z"
+}

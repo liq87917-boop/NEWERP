@@ -1,0 +1,56 @@
+{
+  "title": "Exclude deleted procurement lines from operational order snapshots",
+  "description": "Stage3 operational business closure. Keep existing live account/menu/customer authority, quantity and amount checks, master checks, source locks, atomic transactions and audit. No new grants, no identity bypass. Genuine HTTP/browser and SQL use only fresh GUID NEWERP_AUTOTEST databases on exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity, reject existing/wrong targets before access. Preserve original failure logs. Relevant tests and safe Release/full unit suite required; build completion is not stage acceptance. No production access, deployment or legacy report entry switch.",
+  "acceptance_criteria": [
+    "Canonical purchase order detail, print and JSON operational export include only nondeleted child lines belonging to accessible nondeleted parents. Scope before filtering/materialization; reuse371 live account/menu and explicit plus authoritative owning customer scope. Preserve historical stored header amounts and source/audit snapshots; do not recompute currency totals or mutate tombstoned rows.",
+    "Genuine isolated SQL fixtures with mixed live/deleted details and foreign parents verify detail/print/JSON agreement, deleted parent denial, foreign/malformed/disabled/revoked identity refusal and unchanged source/inventory/payable/payment evidence. Preserve existing fields and Excel contract, no new grants/menu, no arbitrary joins or SQL. Related units and safe Release/full suite required.",
+    "Keep existing live account/menu/customer authority, quantity and amount checks, master checks, source locks, atomic transactions and audit. No new grants, no identity bypass. Genuine HTTP/browser and SQL use only fresh GUID NEWERP_AUTOTEST databases on exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity, reject existing/wrong targets before access. Preserve original failure logs. Relevant tests and safe Release/full unit suite required; build completion is not stage acceptance. No production access, deployment or legacy report entry switch."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/PurchaseOrderController.cs",
+    "src/ERP.UnitTests/PurchaseOrderOperationalDetailTests.cs",
+    "src/ERP.IntegrationTests/PurchaseOrderOperationalDetailSqlServerTests.cs",
+    "docs/purchase-order-operational-details.md"
+  ],
+  "criterion_path_map": {
+    "Canonical purchase order detail, print and JSON operational export include only nondeleted child lines belonging to accessible nondeleted parents. Scope before filtering/materialization; reuse371 live account/menu and explicit plus authoritative owning customer scope. Preserve historical stored header amounts and source/audit snapshots; do not recompute currency totals or mutate tombstoned rows.": [
+      "src/ERP.Api/Controllers/PurchaseOrderController.cs"
+    ],
+    "Genuine isolated SQL fixtures with mixed live/deleted details and foreign parents verify detail/print/JSON agreement, deleted parent denial, foreign/malformed/disabled/revoked identity refusal and unchanged source/inventory/payable/payment evidence. Preserve existing fields and Excel contract, no new grants/menu, no arbitrary joins or SQL. Related units and safe Release/full suite required.": [
+      "src/ERP.UnitTests/PurchaseOrderOperationalDetailTests.cs",
+      "src/ERP.IntegrationTests/PurchaseOrderOperationalDetailSqlServerTests.cs",
+      "docs/purchase-order-operational-details.md"
+    ],
+    "Keep existing live account/menu/customer authority, quantity and amount checks, master checks, source locks, atomic transactions and audit. No new grants, no identity bypass. Genuine HTTP/browser and SQL use only fresh GUID NEWERP_AUTOTEST databases on exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity, reject existing/wrong targets before access. Preserve original failure logs. Relevant tests and safe Release/full unit suite required; build completion is not stage acceptance. No production access, deployment or legacy report entry switch.": [
+      "src/ERP.UnitTests/PurchaseOrderOperationalDetailTests.cs",
+      "src/ERP.IntegrationTests/PurchaseOrderOperationalDetailSqlServerTests.cs",
+      "docs/purchase-order-operational-details.md"
+    ]
+  },
+  "implementation_evidence": "Current PurchaseOrderController.GetById loads all Details and Export JSON Includes all Details without IsDeleted predicate. GetPrint already filters deleted detail rows, so canonical operational detail and JSON snapshots expose tombstoned lines inconsistent with print. Existing371 authorization and393 selector do not fix this detail filtering. This is operational document correctness, not a new report or migration completion.",
+  "depends_on": [
+    "ERP-429",
+    "ERP-371",
+    "ERP-427"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "id": "ERP-430",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-09T02:09:03.651282Z"
+}

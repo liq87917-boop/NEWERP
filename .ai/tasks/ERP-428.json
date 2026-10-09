@@ -1,0 +1,67 @@
+{
+  "title": "Restore server numbered manual sales order entry through genuine HTTP forms",
+  "description": "Stage3 operational business closure. Keep existing live account/menu/customer authority, quantity and amount checks, master checks, source locks, atomic transactions and audit. No new grants, no identity bypass. Genuine HTTP/browser and SQL use only fresh GUID NEWERP_AUTOTEST databases on exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity, reject existing/wrong targets before access. Preserve original failure logs. Relevant tests and safe Release/full unit suite required; build completion is not stage acceptance. No production access, deployment or legacy report entry switch.",
+  "acceptance_criteria": [
+    "Allow omitted server-owned sales OrderNo at HTTP model binding while keeping database nonnull/max-length and server-owned authoritative number generation after existing authorization and validation. Caller supplied numbers cannot determine persisted number. Preserve malformed-body, required customer/master and commercial validation, status/source/audit behavior; no global validation suppression.",
+    "Manual sales form serializes blank explicitly optional numeric PortId as null; positive values remain exact and invalid0/negative/nonexistent references still rejected by server. Opt-in nullable field serialization must preserve existing required numeric zero defaults and all other modules. Existing source/historical semantics unchanged.",
+    "Repair actual UI fixture boolean JavaScript string assertions and use live API-created product IDs instead of hardcoded nonexistent catalog1. Verify genuine manual sales save, server generated number, reopened persisted fields, print and Excel under original checks. Preserve captured rejection bodies/screenshots. Add genuine HTTP regression covering omitted/forged number and blank optional port plus controlled invalid reference and permission denial; direct controller tests alone do not prove binding.",
+    "Keep existing live account/menu/customer authority, quantity and amount checks, master checks, source locks, atomic transactions and audit. No new grants, no identity bypass. Genuine HTTP/browser and SQL use only fresh GUID NEWERP_AUTOTEST databases on exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity, reject existing/wrong targets before access. Preserve original failure logs. Relevant tests and safe Release/full unit suite required; build completion is not stage acceptance. No production access, deployment or legacy report entry switch."
+  ],
+  "allowed_paths": [
+    "src/ERP.Domain/Entities/SalesOrder.cs",
+    "src/ERP.Api/Controllers/SalesOrderController.cs",
+    "src/ERP.Api/wwwroot/js/crud.js",
+    "src/ERP.Api/wwwroot/js/modules-doc.js",
+    "src/ERP.IntegrationTests/OrderTraceabilityUiTests.cs",
+    "src/ERP.UnitTests/SalesOrderHttpFormContractTests.cs",
+    "src/ERP.IntegrationTests/SalesOrderHttpFormSqlServerTests.cs",
+    "docs/sales-order-http-form.md"
+  ],
+  "criterion_path_map": {
+    "Allow omitted server-owned sales OrderNo at HTTP model binding while keeping database nonnull/max-length and server-owned authoritative number generation after existing authorization and validation. Caller supplied numbers cannot determine persisted number. Preserve malformed-body, required customer/master and commercial validation, status/source/audit behavior; no global validation suppression.": [
+      "src/ERP.Domain/Entities/SalesOrder.cs",
+      "src/ERP.Api/Controllers/SalesOrderController.cs"
+    ],
+    "Manual sales form serializes blank explicitly optional numeric PortId as null; positive values remain exact and invalid0/negative/nonexistent references still rejected by server. Opt-in nullable field serialization must preserve existing required numeric zero defaults and all other modules. Existing source/historical semantics unchanged.": [
+      "src/ERP.Api/wwwroot/js/crud.js",
+      "src/ERP.Api/wwwroot/js/modules-doc.js"
+    ],
+    "Repair actual UI fixture boolean JavaScript string assertions and use live API-created product IDs instead of hardcoded nonexistent catalog1. Verify genuine manual sales save, server generated number, reopened persisted fields, print and Excel under original checks. Preserve captured rejection bodies/screenshots. Add genuine HTTP regression covering omitted/forged number and blank optional port plus controlled invalid reference and permission denial; direct controller tests alone do not prove binding.": [
+      "src/ERP.IntegrationTests/OrderTraceabilityUiTests.cs",
+      "src/ERP.UnitTests/SalesOrderHttpFormContractTests.cs",
+      "src/ERP.IntegrationTests/SalesOrderHttpFormSqlServerTests.cs",
+      "docs/sales-order-http-form.md"
+    ],
+    "Keep existing live account/menu/customer authority, quantity and amount checks, master checks, source locks, atomic transactions and audit. No new grants, no identity bypass. Genuine HTTP/browser and SQL use only fresh GUID NEWERP_AUTOTEST databases on exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity, reject existing/wrong targets before access. Preserve original failure logs. Relevant tests and safe Release/full unit suite required; build completion is not stage acceptance. No production access, deployment or legacy report entry switch.": [
+      "src/ERP.IntegrationTests/OrderTraceabilityUiTests.cs",
+      "src/ERP.UnitTests/SalesOrderHttpFormContractTests.cs",
+      "src/ERP.IntegrationTests/SalesOrderHttpFormSqlServerTests.cs",
+      "docs/sales-order-http-form.md"
+    ]
+  },
+  "implementation_evidence": "Real isolated browser response evidence .ai/logs/heartbeat-20261009T0140-sales-manual-browser-response-diagnosis/test.log proves HTTP400 OrderNo required before Create, despite server generating the number. After removing only server-owned number requirement, nullable-port-repair evidence proves empty optional port becomes0 and is rejected. Prepared exact fix and one genuine browser pass, 4 screenshots, safe Release and6567 units are preserved in .ai/logs/heartbeat-20261009T0140-sales-ui-prepared-repair; integrate carefully against current source, never copy unrelated old snapshot source.",
+  "depends_on": [
+    "ERP-423",
+    "ERP-424"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "id": "ERP-428",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-09T02:09:03.627690Z"
+}
