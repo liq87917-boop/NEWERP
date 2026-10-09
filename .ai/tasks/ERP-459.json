@@ -1,0 +1,76 @@
+{
+  "title": "Authorize CRM sample management with live sample menu authority, ERP-097 customer scope and bounded field validation",
+  "description": "Stage 3 access-control closure for the CRM sample register the 样品管理 page maintains. src/ERP.Api/Controllers/SampleController.cs:12-17 declares SampleController with only [ApiController]/[Route(api/crm/samples)]/[Authorize] and no overrides, so every route is inherited unguarded from src/ERP.Api/Controllers/BaseCrudController.cs:37-92 (GetPaged 38-43, GetAll 46-51, GetById 53-59, Create 62-67, Update 69-76, Delete 79-84, BatchDelete 87-92) and delegates to IGenericService with zero identity, menu or customer-scope resolution, so any authenticated account can list, mint, edit or soft-delete every customer's sample records and their sample-fee data. Reuse the existing 样品管理 (sample, src/ERP.Infrastructure/Data/SchemaUpgrader.cs:684-697) functional menu on every route, reuse the existing ERP-097 salesperson data scope (CustomerId ownership) for restricted accounts, and add bounded server-side validation for the persisted Sample columns (src/ERP.Domain/Entities/Sample.cs:13-86), keeping the generic BaseCrudController contract, the soft-delete semantics and the ERP-063 attachment-evidence ownership contract (OwnerType Sample) unchanged. No Domain/Infrastructure/schema change, no grant, no anonymous/admin fallback. Genuine isolated (localdb)\\\\NEWERP_AutoAcceptance GUID-owned NEWERP_AUTOTEST SQL only; safe Release build plus full ERP.UnitTests. All entry points including in-process controllers must enforce live authorization. Adapt legacy fixtures by seeding an enabled identity and existing menu grants in the isolated test context; never gate authorization on Request.Path, environment, fake identity, or an empty request to bypass checks.",
+  "acceptance_criteria": [
+    "For every route on /api/crm/samples (paged, all, by-id, create, update, delete and batch delete) require the current enabled nondeleted identity and the existing sample functional menu before any read or write, rejecting missing, disabled, deleted and revoked-menu identities with the existing controlled non-disclosing errors and adding no new grants or anonymous/admin fallback.",
+    "Restrict sample reads to the current ERP-097 salesperson data scope and require that create and update writes name a CustomerId inside that scope, so a denied read or write loads, returns or mutates no Sample row and the attachment-evidence ownership contract stays unchanged.",
+    "Validate on create and update that SampleNo is non-empty and within its persisted length bound, that SampleType, Unit, Currency, Express, TrackingNo, Result, CustomerName, ProductName, Spec, SalesmanName and Remark stay within their persisted bounds, that Quantity and SampleFee are non-negative and within the persisted decimal range, and that a non-empty CustomerId, ProductId and SalesmanId resolve to known nondeleted records, so a rejected write persists no Sample change.",
+    "Genuine isolated SQL authenticated controller tests cover the permitted privileged and menu-granted flows, missing sample menu, disabled, deleted and revoked identities, out-of-scope customers and invalid or over-long sample payloads, and assert that denied paged, all, by-id, create, update, delete and batch-delete calls read or mutate no Sample row while the existing QualityInspectionSampleAttachmentEvidenceTests and AttachmentOwnerAuthorizationTests contracts stay green.",
+    "Keep the safe Release build and the full existing ERP.UnitTests suite green, use only genuine isolated (localdb)\\\\NEWERP_AutoAcceptance GUID-owned NEWERP_AUTOTEST databases with Integrated Security, and add no schema, entity, menu, permission or production/secret change; build completion is not stage acceptance."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/SampleController.cs",
+    "src/ERP.Application/Services/SampleAuthorizationRules.cs",
+    "src/ERP.UnitTests/SampleAuthorizationTests.cs",
+    "src/ERP.UnitTests/QualityInspectionSampleAttachmentEvidenceTests.cs",
+    "src/ERP.UnitTests/AttachmentOwnerAuthorizationTests.cs",
+    "src/ERP.IntegrationTests/SampleAuthorizationSqlServerTests.cs",
+    "docs/sample-authority.md"
+  ],
+  "criterion_path_map": {
+    "For every route on /api/crm/samples (paged, all, by-id, create, update, delete and batch delete) require the current enabled nondeleted identity and the existing sample functional menu before any read or write, rejecting missing, disabled, deleted and revoked-menu identities with the existing controlled non-disclosing errors and adding no new grants or anonymous/admin fallback.": [
+      "src/ERP.Api/Controllers/SampleController.cs",
+      "src/ERP.Application/Services/SampleAuthorizationRules.cs",
+      "src/ERP.UnitTests/SampleAuthorizationTests.cs"
+    ],
+    "Restrict sample reads to the current ERP-097 salesperson data scope and require that create and update writes name a CustomerId inside that scope, so a denied read or write loads, returns or mutates no Sample row and the attachment-evidence ownership contract stays unchanged.": [
+      "src/ERP.Api/Controllers/SampleController.cs",
+      "src/ERP.Application/Services/SampleAuthorizationRules.cs",
+      "src/ERP.UnitTests/SampleAuthorizationTests.cs",
+      "src/ERP.UnitTests/AttachmentOwnerAuthorizationTests.cs"
+    ],
+    "Validate on create and update that SampleNo is non-empty and within its persisted length bound, that SampleType, Unit, Currency, Express, TrackingNo, Result, CustomerName, ProductName, Spec, SalesmanName and Remark stay within their persisted bounds, that Quantity and SampleFee are non-negative and within the persisted decimal range, and that a non-empty CustomerId, ProductId and SalesmanId resolve to known nondeleted records, so a rejected write persists no Sample change.": [
+      "src/ERP.Api/Controllers/SampleController.cs",
+      "src/ERP.Application/Services/SampleAuthorizationRules.cs",
+      "src/ERP.UnitTests/SampleAuthorizationTests.cs"
+    ],
+    "Genuine isolated SQL authenticated controller tests cover the permitted privileged and menu-granted flows, missing sample menu, disabled, deleted and revoked identities, out-of-scope customers and invalid or over-long sample payloads, and assert that denied paged, all, by-id, create, update, delete and batch-delete calls read or mutate no Sample row while the existing QualityInspectionSampleAttachmentEvidenceTests and AttachmentOwnerAuthorizationTests contracts stay green.": [
+      "src/ERP.UnitTests/SampleAuthorizationTests.cs",
+      "src/ERP.UnitTests/QualityInspectionSampleAttachmentEvidenceTests.cs",
+      "src/ERP.UnitTests/AttachmentOwnerAuthorizationTests.cs",
+      "src/ERP.IntegrationTests/SampleAuthorizationSqlServerTests.cs",
+      "docs/sample-authority.md"
+    ],
+    "Keep the safe Release build and the full existing ERP.UnitTests suite green, use only genuine isolated (localdb)\\\\NEWERP_AutoAcceptance GUID-owned NEWERP_AUTOTEST databases with Integrated Security, and add no schema, entity, menu, permission or production/secret change; build completion is not stage acceptance.": [
+      "src/ERP.UnitTests/SampleAuthorizationTests.cs",
+      "src/ERP.IntegrationTests/SampleAuthorizationSqlServerTests.cs",
+      "docs/sample-authority.md"
+    ]
+  },
+  "depends_on": [
+    "ERP-006",
+    "ERP-097",
+    "ERP-451"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "implementation_evidence": "src/ERP.Api/Controllers/SampleController.cs:12-17 declares SampleController with only [ApiController]/[Route(api/crm/samples)]/[Authorize] and no overrides, so all routes are inherited unguarded from src/ERP.Api/Controllers/BaseCrudController.cs:37-92 and call IGenericService with zero Authorize/Menu/scope references. Sample (src/ERP.Domain/Entities/Sample.cs:13-86) persists SampleNo(15-17, Required MaxLength 50), CustomerId(22-23), ProductId(29-30), Quantity(44-45), SampleFee(51-52), Currency(54-56, MaxLength 20), SalesmanId(76-77), SalesmanName(79-81, MaxLength 50) and Remark(83-85, MaxLength 500) with only attribute annotations. The re-used existing menu is seeded at src/ERP.Infrastructure/Data/SchemaUpgrader.cs:684-697 (sample, crm:sample) with the table DDL at 650-682, and the page is registered at src/ERP.Api/wwwroot/js/modules.js:549-598 (app.js:340 icon map). The override-with-live-authorization plus ERP-097 scope pattern already exists at src/ERP.Application/Services/CustomerAuthorizationRules.cs:143-177 and src/ERP.Application/Services/SalespersonDataScopeService.cs:59; the sibling regression contracts are src/ERP.UnitTests/QualityInspectionSampleAttachmentEvidenceTests.cs and src/ERP.UnitTests/AttachmentOwnerAuthorizationTests.cs (ERP-407/ERP-063). There is no SampleAuthorizationRules in src/ERP.Application/Services and an exact search of .ai/tasks returns no task listing SampleController or Sample for live authorization.",
+  "id": "ERP-459",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-09T09:13:17.132604Z"
+}

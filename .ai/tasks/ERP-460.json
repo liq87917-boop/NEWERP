@@ -1,0 +1,66 @@
+{
+  "title": "Authorize DingTalk notification configuration and log routes with live menu authority and bounded configuration validation",
+  "description": "Stage 3 access-control closure for the DingTalk notification settings and send-record pages. src/ERP.Api/Controllers/DingTalkController.cs:13-16 declares DingTalkController with only [ApiController]/[Route(api/sys/dingtalk)]/[Authorize] and no identity, account-state or menu resolution: GetConfig 42-48 returns every whitelisted configuration value including DingTalk_Webhook and DingTalk_Secret in plaintext, SaveConfig 50-56 writes configuration, Test 58-72 posts a message to an optional caller-supplied webhook, GetLogs 74-108 lists SysDingTalkLog rows, Resend 110-118 resends a record, DeleteLog 120-130 soft-deletes a record and SendFollowUpReminder 33-40 forces a reminder push, so any authenticated account can read the shared webhook / sign secret and drive or purge notifications. Reuse the existing 钉钉通知配置 (dingtalk-config, src/ERP.Infrastructure/Data/SchemaUpgrader.cs:143-158) menu on the configuration, test and manual-push routes and the existing 钉钉发送记录 (dingtalk-log, same block) menu on the log routes, and validate on save that only whitelisted DingTalk keys are accepted and each value stays within its persisted SysParameter bound (src/ERP.Domain/Entities/SysSystem.cs:10-30, ParamValue MaxLength 500), keeping the existing whitelist save semantics, the masked-log write path (src/ERP.Api/Services/DingTalkService.cs:171-187) and the soft-delete semantics unchanged. No Domain/Infrastructure/schema change, no new menu, no grant, no anonymous/admin fallback, no secret printed in responses or logs. Genuine isolated (localdb)\\\\NEWERP_AutoAcceptance GUID-owned NEWERP_AUTOTEST SQL only; safe Release build plus full ERP.UnitTests. All entry points including in-process controllers must enforce live authorization. Adapt legacy fixtures by seeding an enabled identity and existing menu grants in the isolated test context; never gate authorization on Request.Path, environment, fake identity, or an empty request to bypass checks.",
+  "acceptance_criteria": [
+    "For every route on /api/sys/dingtalk (config read, config save, test send, follow-up reminder push, log list, log resend and log delete) require the current enabled nondeleted identity with the existing dingtalk-config menu on the config, test and reminder routes and the existing dingtalk-log menu on the log routes before reading configuration, sending any message or reading, resending or deleting any send record, rejecting missing, disabled, deleted and revoked-menu identities with the existing controlled non-disclosing errors and adding no new grants or anonymous/admin fallback.",
+    "Validate on config save that only whitelisted DingTalk keys are accepted and each submitted value stays within its persisted SysParameter length bound, and on log delete that the target record exists and is nondeleted, so a rejected save or delete persists no SysParameter or SysDingTalkLog change and a denied read discloses no webhook, access token or sign secret.",
+    "Genuine isolated SQL authenticated controller tests cover the permitted privileged and menu-granted flows, missing dingtalk-config and dingtalk-log menus, disabled, deleted and revoked identities, unknown configuration keys and over-long values, and assert that denied config, test, reminder, log, resend and delete calls read or mutate no SysParameter or SysDingTalkLog row and return no webhook or secret value while the existing SystemParameterAuthorizationTests contracts stay green.",
+    "Keep the safe Release build and the full existing ERP.UnitTests suite green, use only genuine isolated (localdb)\\\\NEWERP_AutoAcceptance GUID-owned NEWERP_AUTOTEST databases with Integrated Security, and add no schema, entity, menu, permission or production/secret change; build completion is not stage acceptance."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/DingTalkController.cs",
+    "src/ERP.Application/Services/DingTalkAuthorizationRules.cs",
+    "src/ERP.UnitTests/DingTalkAuthorizationTests.cs",
+    "src/ERP.UnitTests/SystemParameterAuthorizationTests.cs",
+    "src/ERP.IntegrationTests/DingTalkAuthorizationSqlServerTests.cs",
+    "docs/dingtalk-authority.md"
+  ],
+  "criterion_path_map": {
+    "For every route on /api/sys/dingtalk (config read, config save, test send, follow-up reminder push, log list, log resend and log delete) require the current enabled nondeleted identity with the existing dingtalk-config menu on the config, test and reminder routes and the existing dingtalk-log menu on the log routes before reading configuration, sending any message or reading, resending or deleting any send record, rejecting missing, disabled, deleted and revoked-menu identities with the existing controlled non-disclosing errors and adding no new grants or anonymous/admin fallback.": [
+      "src/ERP.Api/Controllers/DingTalkController.cs",
+      "src/ERP.Application/Services/DingTalkAuthorizationRules.cs",
+      "src/ERP.UnitTests/DingTalkAuthorizationTests.cs"
+    ],
+    "Validate on config save that only whitelisted DingTalk keys are accepted and each submitted value stays within its persisted SysParameter length bound, and on log delete that the target record exists and is nondeleted, so a rejected save or delete persists no SysParameter or SysDingTalkLog change and a denied read discloses no webhook, access token or sign secret.": [
+      "src/ERP.Api/Controllers/DingTalkController.cs",
+      "src/ERP.Application/Services/DingTalkAuthorizationRules.cs",
+      "src/ERP.UnitTests/DingTalkAuthorizationTests.cs"
+    ],
+    "Genuine isolated SQL authenticated controller tests cover the permitted privileged and menu-granted flows, missing dingtalk-config and dingtalk-log menus, disabled, deleted and revoked identities, unknown configuration keys and over-long values, and assert that denied config, test, reminder, log, resend and delete calls read or mutate no SysParameter or SysDingTalkLog row and return no webhook or secret value while the existing SystemParameterAuthorizationTests contracts stay green.": [
+      "src/ERP.UnitTests/DingTalkAuthorizationTests.cs",
+      "src/ERP.UnitTests/SystemParameterAuthorizationTests.cs",
+      "src/ERP.IntegrationTests/DingTalkAuthorizationSqlServerTests.cs",
+      "docs/dingtalk-authority.md"
+    ],
+    "Keep the safe Release build and the full existing ERP.UnitTests suite green, use only genuine isolated (localdb)\\\\NEWERP_AutoAcceptance GUID-owned NEWERP_AUTOTEST databases with Integrated Security, and add no schema, entity, menu, permission or production/secret change; build completion is not stage acceptance.": [
+      "src/ERP.UnitTests/DingTalkAuthorizationTests.cs",
+      "src/ERP.IntegrationTests/DingTalkAuthorizationSqlServerTests.cs",
+      "docs/dingtalk-authority.md"
+    ]
+  },
+  "depends_on": [
+    "ERP-006",
+    "ERP-446"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "implementation_evidence": "src/ERP.Api/Controllers/DingTalkController.cs:13-16 declares DingTalkController with only [ApiController]/[Route(api/sys/dingtalk)]/[Authorize] and no Authorize/Menu/identity-resolution reference: GetConfig 42-48 calls DingTalkService.GetConfigAsync, SaveConfig 50-56 calls SaveConfigAsync, Test 58-72 calls SendAsync with request.Webhook, GetLogs 74-108 queries _db.SysDingTalkLogs directly, Resend 110-118 calls ResendAsync, DeleteLog 120-130 rewrites IsDeleted and SendFollowUpReminder 33-40 calls _followUpReminder.TickAsync(force: true). src/ERP.Api/Services/DingTalkService.cs:18-29 defines KeyWebhook/KeySecret in AllKeys and 92-102 uses them to build the signed URL, so the unguarded GET /config discloses the shared webhook and sign secret. SysParameter (src/ERP.Domain/Entities/SysSystem.cs:10-30, ParamValue MaxLength 500) persists configuration and SysDingTalkLog (src/ERP.Domain/Entities/SysDingTalkLog.cs:10) persists records. The re-used existing menus are seeded at src/ERP.Infrastructure/Data/SchemaUpgrader.cs:143-158 (dingtalk-config, dingtalk-log) with idempotent grants at 160-170, and the page hooks are src/ERP.Api/wwwroot/js/dingtalk.js:284 (pushFollowUpReminder) and app.js:341. The sibling closure precedent is src/ERP.Application/Services/SystemParameterAuthorizationRules.cs (ERP-446) with regression src/ERP.UnitTests/SystemParameterAuthorizationTests.cs. There is no DingTalkAuthorizationRules in src/ERP.Application/Services and an exact search of .ai/tasks returns no task listing DingTalkController for live authorization.",
+  "id": "ERP-460",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-09T09:13:17.134043Z"
+}

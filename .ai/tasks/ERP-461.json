@@ -1,0 +1,76 @@
+{
+  "title": "Authorize the read-only product image library and export field completeness workspaces with live product menu authority",
+  "description": "Stage 3 access-control closure for the two read-only product work-spaces opened from the product page toolbar. src/ERP.Api/Controllers/ProductImageLibraryController.cs:18-42 declares ProductImageLibraryController with only [ApiController]/[Route(api/base/product-images)]/[Authorize] and a single GET List action (37-43) that calls ProductImageLibraryService.QueryAsync over every nondeleted BaseProduct, and src/ERP.Api/Controllers/ProductExportFieldCompleteness.cs:19-71 declares ProductExportFieldCompletenessController with only [ApiController]/[Route(api/base/products/export-field-completeness)]/[Authorize] and a single GET GetWorksheet action (35-72) that reads every active BaseProduct; neither resolves identity, account state or any menu, so any authenticated account can enumerate the whole product master through these sibling routes even though ERP-452 already guards api/base/products with the 商品资料 (product) menu. Reuse the existing product functional menu (src/ERP.Application/Services/ProductAuthorizationRules.cs:27-30, RequiredMenuCode product) on both controllers, keeping both workspaces strictly read-only with no Add/Update/Remove/SaveChanges, no arbitrary SQL, no OSS or image fetch, and no change to the ERP-452 product menu contract on api/base/products. No Domain/Infrastructure/schema change, no new menu, no grant, no anonymous/admin fallback. Genuine isolated (localdb)\\\\NEWERP_AutoAcceptance GUID-owned NEWERP_AUTOTEST SQL only; safe Release build plus full ERP.UnitTests. All entry points including in-process controllers must enforce live authorization. Adapt the in-process legacy fixtures by seeding an enabled identity and the existing product menu grant in the isolated test context; never gate authorization on Request.Path, environment, fake identity, or an empty request to bypass checks.",
+  "acceptance_criteria": [
+    "For every route on /api/base/product-images and /api/base/products/export-field-completeness require the current enabled nondeleted identity and the existing product functional menu before reading any BaseProduct row, rejecting missing, disabled, deleted and revoked-menu identities with the existing controlled non-disclosing errors and adding no new grants or anonymous/admin fallback.",
+    "Keep both product work-spaces strictly read-only so a denied request returns no product code, product name, image reference or field-completeness state, persists no change to BaseProducts or any other table, and leaves the existing ERP-452 product menu contract on api/base/products unchanged.",
+    "Genuine isolated SQL authenticated controller tests cover the permitted privileged and menu-granted flows, missing product menu, disabled, deleted and revoked identities and re-run the existing product image library and export field completeness read contracts under an authorized identity, while the existing ProductImageLibraryTests, ProductExportFieldCompletenessTests and ProductMasterAuthorizationTests contracts stay green.",
+    "Keep the safe Release build and the full existing ERP.UnitTests suite green, use only genuine isolated (localdb)\\\\NEWERP_AutoAcceptance GUID-owned NEWERP_AUTOTEST databases with Integrated Security, and add no schema, entity, menu, permission or production/secret change; build completion is not stage acceptance."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/ProductImageLibraryController.cs",
+    "src/ERP.Api/Controllers/ProductExportFieldCompleteness.cs",
+    "src/ERP.Application/Services/ProductReadWorkspaceAuthorizationRules.cs",
+    "src/ERP.UnitTests/ProductImageLibraryAuthorizationTests.cs",
+    "src/ERP.UnitTests/ProductImageLibraryTests.cs",
+    "src/ERP.UnitTests/ProductExportFieldCompletenessTests.cs",
+    "src/ERP.UnitTests/ProductMasterAuthorizationTests.cs",
+    "src/ERP.IntegrationTests/ProductReadWorkspaceAuthorizationSqlServerTests.cs",
+    "docs/product-read-workspace-authority.md"
+  ],
+  "criterion_path_map": {
+    "For every route on /api/base/product-images and /api/base/products/export-field-completeness require the current enabled nondeleted identity and the existing product functional menu before reading any BaseProduct row, rejecting missing, disabled, deleted and revoked-menu identities with the existing controlled non-disclosing errors and adding no new grants or anonymous/admin fallback.": [
+      "src/ERP.Api/Controllers/ProductImageLibraryController.cs",
+      "src/ERP.Api/Controllers/ProductExportFieldCompleteness.cs",
+      "src/ERP.Application/Services/ProductReadWorkspaceAuthorizationRules.cs",
+      "src/ERP.UnitTests/ProductImageLibraryAuthorizationTests.cs"
+    ],
+    "Keep both product work-spaces strictly read-only so a denied request returns no product code, product name, image reference or field-completeness state, persists no change to BaseProducts or any other table, and leaves the existing ERP-452 product menu contract on api/base/products unchanged.": [
+      "src/ERP.Api/Controllers/ProductImageLibraryController.cs",
+      "src/ERP.Api/Controllers/ProductExportFieldCompleteness.cs",
+      "src/ERP.Application/Services/ProductReadWorkspaceAuthorizationRules.cs",
+      "src/ERP.UnitTests/ProductImageLibraryAuthorizationTests.cs",
+      "src/ERP.UnitTests/ProductMasterAuthorizationTests.cs"
+    ],
+    "Genuine isolated SQL authenticated controller tests cover the permitted privileged and menu-granted flows, missing product menu, disabled, deleted and revoked identities and re-run the existing product image library and export field completeness read contracts under an authorized identity, while the existing ProductImageLibraryTests, ProductExportFieldCompletenessTests and ProductMasterAuthorizationTests contracts stay green.": [
+      "src/ERP.UnitTests/ProductImageLibraryAuthorizationTests.cs",
+      "src/ERP.UnitTests/ProductImageLibraryTests.cs",
+      "src/ERP.UnitTests/ProductExportFieldCompletenessTests.cs",
+      "src/ERP.UnitTests/ProductMasterAuthorizationTests.cs",
+      "src/ERP.IntegrationTests/ProductReadWorkspaceAuthorizationSqlServerTests.cs",
+      "docs/product-read-workspace-authority.md"
+    ],
+    "Keep the safe Release build and the full existing ERP.UnitTests suite green, use only genuine isolated (localdb)\\\\NEWERP_AutoAcceptance GUID-owned NEWERP_AUTOTEST databases with Integrated Security, and add no schema, entity, menu, permission or production/secret change; build completion is not stage acceptance.": [
+      "src/ERP.UnitTests/ProductImageLibraryAuthorizationTests.cs",
+      "src/ERP.IntegrationTests/ProductReadWorkspaceAuthorizationSqlServerTests.cs",
+      "docs/product-read-workspace-authority.md"
+    ]
+  },
+  "depends_on": [
+    "ERP-006",
+    "ERP-039",
+    "ERP-107",
+    "ERP-452"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "implementation_evidence": "src/ERP.Api/Controllers/ProductImageLibraryController.cs:18-42 declares ProductImageLibraryController with only [ApiController]/[Route(api/base/product-images)]/[Authorize] and one GET List action (37-43) that calls ProductImageLibraryService.QueryAsync(_db, query, cancellationToken) over all nondeleted BaseProducts with no Authorize/Menu/DataScope reference; src/ERP.Api/Controllers/ProductExportFieldCompleteness.cs:19-71 declares ProductExportFieldCompletenessController with only [ApiController]/[Route(api/base/products/export-field-completeness)]/[Authorize] and one GET GetWorksheet action (35-72) that queries _db.BaseProducts.AsNoTracking (41-42) with no identity, account-state or menu resolution. The authoritative product-menu closure already exists for the sibling controller at src/ERP.Application/Services/ProductAuthorizationRules.cs:27-30 (RequiredMenuCode = product) and 140-161 (EnsureAuthorizedAsync via CustomerReceivableReconciliationService.LoadAuthorizedMenuCodesAsync) with regression src/ERP.UnitTests/ProductMasterAuthorizationTests.cs (ERP-452, in-process Controller at 40-43), and the pages are registered at src/ERP.Api/wwwroot/js/modules.js:239-241 with docs/product-export-field-completeness.md:70-71. The existing read regression contracts are src/ERP.UnitTests/ProductImageLibraryTests.cs (in-process new(db) at 31 and List at 488/550) and src/ERP.UnitTests/ProductExportFieldCompletenessTests.cs (in-process new(db) at 23 and GetWorksheet at 70). There is no product read-workspace authorization rules class in src/ERP.Application/Services and an exact search of .ai/tasks returns no task listing ProductImageLibraryController or ProductExportFieldCompletenessController for live authorization.",
+  "id": "ERP-461",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-09T09:13:17.135389Z"
+}
