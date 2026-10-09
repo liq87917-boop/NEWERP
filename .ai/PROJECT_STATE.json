@@ -1,7 +1,7 @@
 {
   "schema_version": 2,
   "project": "NEWERP",
-  "updated_at": "2026-10-09T04:23:22.059108Z",
+  "updated_at": "2026-10-09T04:28:12.765611Z",
   "phase": "ready",
   "current_task": null,
   "queue": [
@@ -425,17 +425,20 @@
     "log": ".ai\\logs\\ERP-431-validation-1.log",
     "at": "2026-10-09T04:23:13.141237Z"
   },
-  "last_error": null,
+  "last_error": {
+    "task": "ERP-432",
+    "kind": "automatic_repair_pending",
+    "summary": "Path guard failed:\noutside allowed_paths: src/ERP.Api/Controllers/SalesOrderDeliveryExceptions.cs"
+  },
   "last_deepseek_fix": {
-    "task": "ERP-429",
-    "attempt": 2,
-    "model": "deepseek-flash",
-    "exit_code": 0,
-    "finished_at": "2026-10-09T03:58:42.980700Z"
+    "task": "ERP-432",
+    "attempts": 3,
+    "status": "retry_pending",
+    "at": "2026-10-09T04:28:12.425316Z"
   },
   "git_sync": {
     "branch": "main",
-    "local_sha": "e7e491c",
+    "local_sha": "6ffe83d",
     "status": "synced",
     "ahead": 0,
     "behind": 0,
@@ -450,5 +453,7 @@
   "runner": {
     "status": "stopped",
     "pid": null
-  }
+  },
+  "blocker": null,
+  "finish_reason": "deepseek_supervisor_recovery"
 }
