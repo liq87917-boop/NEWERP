@@ -71,6 +71,18 @@ public class SalesOrderController : DocumentControllerBase<SalesOrder>
             ? await SalesOrderExecutionAuthorizationRules.EnsureLiveIdentityAsync(Db, CurrentUserId())
             : null;
 
+    /// <summary>
+    /// ERP-420 规范写入授权（实时身份 + 既有「销售订单」菜单 + ERP-097 权威客户范围）：缺失 / 非法 / 已删除身份
+    /// 按未认证拒绝，已禁用 / 缺菜单按权限不足拒绝。写入路径**不做**「无请求路径 / 匿名进程内调用」豁免，
+    /// 因此直接调用控制器的写入方法同样 fail closed；每次调用都重新查询，撤销授权后立即收敛。
+    /// </summary>
+    private Task<SalespersonDataScope> EnsureCanonicalWriteAuthorizedAsync()
+        => SalesOrderMutationAuthorizationRules.EnsureWriteAuthorizedAsync(Db, CurrentUserId());
+
+    /// <summary>ERP-420 持久化订单归属复核（范围外 / 已删除 / 不存在返回同一非披露错误）。</summary>
+    private Task<long> EnsurePersistedOrderAllowedAsync(SalespersonDataScope scope, long id)
+        => SalesOrderMutationAuthorizationRules.EnsureOrderAllowedAsync(Db, scope, id);
+
     /// <summary>分页查询</summary>
     [HttpGet]
     public async Task<IActionResult> GetPaged([FromQuery] PageQuery query, [FromQuery] DocumentStatus? status)
@@ -304,14 +316,18 @@ public class SalesOrderController : DocumentControllerBase<SalesOrder>
     }
 
     /// <summary>
-    /// 创建（ERP-401）：显式来源先做**权威解析 + 确定性来源行锁（报价单 → PI）+ 原子事务**，
-    /// 在锁内复核实时身份 / 既有「销售订单」菜单 / 权威客户范围、既有转换资格与唯一目标，
-    /// <b>之后</b>才预约单据号与写入；显式来源 Id 全部无法解析时按「显式历史值」原样保留（不构成实时链接）；
-    /// 未链接的手工订单保持既有口径（不取任何来源锁、不开事务）。
+    /// 创建（ERP-401 / ERP-420）：先复核**规范写入授权**（实时身份 + 既有「销售订单」菜单 + 权威客户范围）与
+    /// 拟议客户范围（无来源的手工订单同样适用），显式来源再做**权威解析 + 确定性来源行锁（报价单 → PI）+ 原子事务**，
+    /// 在锁内复核既有转换资格与唯一目标，<b>之后</b>才预约单据号与写入；显式来源 Id 全部无法解析时按「显式历史值」
+    /// 原样保留（不构成实时链接）；未链接的手工订单保持既有口径（不取任何来源锁、不开事务）。
     /// </summary>
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] SalesOrder entity)
     {
+        // ERP-420：写入授权先于单号预约与任何写入；无来源 / 历史无法解析来源路径同样 fail closed，不做进程内豁免。
+        var writeScope = await EnsureCanonicalWriteAuthorizedAsync();
+        SalesOrderMutationAuthorizationRules.EnsureProposedCustomerAllowed(writeScope, entity.CustomerId);
+
         var requestedQuotationId = SalesOrderSourceLineageRules.NormalizeId(entity.SourceQuotationId);
         var requestedPiId = SalesOrderSourceLineageRules.NormalizeId(entity.SourcePiId);
         var change = SalesOrderSourceLineageRules.ResolveChange(null, null, requestedQuotationId, requestedPiId);
@@ -383,13 +399,20 @@ public class SalesOrderController : DocumentControllerBase<SalesOrder>
     }
 
     /// <summary>
-    /// 更新（ERP-401）：先按「报价单 → PI → 销售订单」确定性锁序加来源行锁并**锁内重读**持久化来源 / 目标状态，
-    /// 再复核来源血缘（历史来源绝不静默清除；显式改绑需完整实时复核且下游已有证据时冻结），
-    /// 最后才改写字段 / 明细 / 金额；未链接且不涉及来源的手工订单保持既有口径（不取任何来源锁、不开事务）。
+    /// 更新（ERP-401 / ERP-420）：先复核**规范写入授权**（实时身份 + 既有「销售订单」菜单 + 权威客户范围）、
+    /// 持久化订单归属（先于读取明细 / 暴露状态）与拟议客户范围（改派）；再按「报价单 → PI → 销售订单」确定性锁序加
+    /// 来源行锁并**锁内重读**持久化来源 / 目标状态与实时权限，复核来源血缘（历史来源绝不静默清除；显式改绑需完整实时
+    /// 复核且下游已有证据时冻结），最后才改写字段 / 明细 / 金额；未链接且不涉及来源的手工订单保持既有口径
+    /// （不取任何来源锁、不开事务）。
     /// </summary>
     [HttpPut("{id:long}")]
     public async Task<IActionResult> Update(long id, [FromBody] SalesOrder entity)
     {
+        // ERP-420：持久化订单归属与拟议客户范围先于读取明细 / 暴露状态与任何写入；不做进程内豁免。
+        var writeScope = await EnsureCanonicalWriteAuthorizedAsync();
+        await EnsurePersistedOrderAllowedAsync(writeScope, id);
+        SalesOrderMutationAuthorizationRules.EnsureProposedCustomerAllowed(writeScope, entity.CustomerId);
+
         var existing = await Db.SalesOrders.Include(o => o.Details)
             .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
             ?? throw BusinessException.NotFound("销售订单不存在");
@@ -429,6 +452,13 @@ public class SalesOrderController : DocumentControllerBase<SalesOrder>
                         throw BusinessException.RuleConflict(SalesOrderSourceLineageRules.SourceNotFoundText);
                     if (!await SalesOrderSourceLineageRules.LockSalesOrderRowAsync(Db, id))
                         throw BusinessException.NotFound("销售订单不存在");
+
+                    // ERP-420：在已持有的订单行锁内**重新读取实时权限**（身份 / 菜单 / 客户范围）与持久化归属，
+                    // 授权撤销 / 账号停用 / 客户改派在下一次请求立即收敛，绝不按授权前读到的陈旧范围放行。
+                    var lockedScope = await EnsureCanonicalWriteAuthorizedAsync();
+                    await EnsurePersistedOrderAllowedAsync(lockedScope, id);
+                    SalesOrderMutationAuthorizationRules.EnsureProposedCustomerAllowed(
+                        lockedScope, entity.CustomerId);
 
                     // 锁内重读持久化状态：并发方已提交的结果以锁内权威重读为准，绝不按陈旧状态放行。
                     var locked = await Db.SalesOrders.AsNoTracking()
@@ -546,7 +576,8 @@ public class SalesOrderController : DocumentControllerBase<SalesOrder>
     }
 
     /// <summary>
-    /// 提交（ERP-401）：未链接的手工订单保持既有流转；已登记来源血缘的订单先做持久化来源重查
+    /// 提交（ERP-401 / ERP-420）：先复核**规范写入授权**（实时身份 + 既有「销售订单」菜单 + 权威客户范围）与
+    /// 持久化订单归属（先于暴露状态）；未链接的手工订单保持既有流转；已登记来源血缘的订单先做持久化来源重查
     /// （来源必须仍可精确解析、同一来源不得存在其它目标），再在订单行锁 + 原子事务内流转状态。
     /// </summary>
     [HttpPost("{id:long}/submit")]
@@ -554,20 +585,26 @@ public class SalesOrderController : DocumentControllerBase<SalesOrder>
         => await RunLineageGuardedStatusChangeAsync(id, DocumentStatus.Pending, DocumentStatus.Submitted, "提交成功");
 
     /// <summary>
-    /// 审核（ERP-401）：与 <see cref="Submit"/> 同一口径，在订单行锁 + 原子事务内复核持久化来源血缘后审核。
+    /// 审核（ERP-401 / ERP-420）：与 <see cref="Submit"/> 同一口径（同样先复核实时写入授权与持久化归属），
+    /// 在订单行锁 + 原子事务内复核持久化来源血缘后审核。
     /// </summary>
     [HttpPost("{id:long}/approve")]
     public override async Task<IActionResult> Approve(long id)
         => await RunLineageGuardedStatusChangeAsync(id, DocumentStatus.Submitted, DocumentStatus.Approved, "审核通过");
 
     /// <summary>
-    /// 带来源血缘复核的状态流转：未链接手工订单走既有口径（不加锁、不开事务）；
-    /// 已登记来源的订单先取目标订单行锁（与取消 / 出库审核 / 单证生成同一把锁）再复核持久化来源血缘，
+    /// 带来源血缘复核的状态流转：先复核**规范写入授权**与持久化订单归属（缺失 / 非法 / 已禁用身份、缺菜单或
+    /// 范围外订单一律 fail closed，且先于读取明细 / 暴露状态）；未链接手工订单走既有口径（不加锁、不开事务）；
+    /// 已登记来源的订单先取目标订单行锁（与取消 / 出库审核 / 单证生成同一把锁）再**锁内重读实时权限**并复核持久化来源血缘，
     /// 任一步失败整体回滚并丢弃半成品变更。
     /// </summary>
     private async Task<IActionResult> RunLineageGuardedStatusChangeAsync(long id, DocumentStatus from,
         DocumentStatus to, string message)
     {
+        // ERP-420：写入授权 + 持久化归属先于读取明细 / 暴露状态与任何状态变更；不做进程内豁免。
+        var writeScope = await EnsureCanonicalWriteAuthorizedAsync();
+        await EnsurePersistedOrderAllowedAsync(writeScope, id);
+
         var entity = await Db.SalesOrders.Include(o => o.Details)
             .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
             ?? throw BusinessException.NotFound("销售订单不存在");
@@ -588,6 +625,10 @@ public class SalesOrderController : DocumentControllerBase<SalesOrder>
             if (!await SalesOrderSourceLineageRules.LockSalesOrderRowAsync(Db, id))
                 throw BusinessException.NotFound("销售订单不存在");
 
+            // ERP-420：在已持有的订单行锁内重新读取实时权限与持久化归属（授权撤销 / 账号停用立即收敛）。
+            var lockedScope = await EnsureCanonicalWriteAuthorizedAsync();
+            await EnsurePersistedOrderAllowedAsync(lockedScope, id);
+
             await SalesOrderSourceLineageRules.EnsurePersistedSourceIntactAsync(Db, entity);
             SetStatus(entity, to);
             await Db.SaveChangesAsync();
@@ -607,7 +648,8 @@ public class SalesOrderController : DocumentControllerBase<SalesOrder>
     }
 
     /// <summary>
-    /// 取消销售订单（ERP-347 / ERP-369）：在可串行化事务内对订单行加更新锁，把「拒绝判定」与「状态变更」做成一个原子步骤，
+    /// 取消销售订单（ERP-347 / ERP-369 / ERP-420）：在可串行化事务内对订单行加更新锁，**锁内复核规范写入授权**
+    /// （实时身份 + 既有「销售订单」菜单 + 权威客户范围）与持久化订单归属，把「拒绝判定」与「状态变更」做成一个原子步骤，
     /// 并与同单出库审核（ERP-343）、采购归属关联（ERP-346）、收款引用登记（ERP-053）以及预装柜需求证据链接的
     /// 提交 / 审核 / 取消（ERP-368 / ERP-369）串行化——并发场景下「履约 / 需求承诺生效」与「来源取消」不可能同时成功。
     /// <para>锁语句与预装柜审核 / 取消共用同一把上游订单行锁（<see cref="PreLoadingSalesOrderLinkRules.LockSalesOrderRowSql"/>），
@@ -624,6 +666,11 @@ public class SalesOrderController : DocumentControllerBase<SalesOrder>
         try
         {
             await AcquireOrderCancellationLockAsync(id);
+
+            // ERP-420：锁内复核规范写入授权（实时启用 / 未删除身份 + 既有菜单 + 权威客户范围）与持久化订单归属；
+            // 写入路径不做进程内豁免。既有取消护栏（ValidateCancellationAsync）保持不变，继续在原位执行。
+            var writeScope = await EnsureCanonicalWriteAuthorizedAsync();
+            await EnsurePersistedOrderAllowedAsync(writeScope, id);
 
             var entity = await Db.SalesOrders.Include(o => o.Details)
                 .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
@@ -656,6 +703,20 @@ public class SalesOrderController : DocumentControllerBase<SalesOrder>
             .SqlQueryRaw<long>(PreLoadingSalesOrderLinkRules.LockSalesOrderRowSql, orderId)
             .ToListAsync();
     }
+
+    /// <summary>
+    /// 删除（ERP-420）：先复核**规范写入授权**（实时身份 + 既有「销售订单」菜单 + 权威客户范围）与持久化订单归属
+    /// （范围外 / 已删除 / 不存在返回同一非披露错误），再沿用基类「仅待提交状态可软删除」的既有口径；
+    /// 写入路径不做进程内豁免，也绝不物理删除或改写下游证据。
+    /// </summary>
+    [HttpDelete("{id:long}")]
+    public override async Task<IActionResult> Delete(long id)
+    {
+        var writeScope = await EnsureCanonicalWriteAuthorizedAsync();
+        await EnsurePersistedOrderAllowedAsync(writeScope, id);
+        return await base.Delete(id);
+    }
+
 
     /// <summary>打印数据（主表 + 明细；打印模板由 /api/sys/print-templates/sales-order 提供）</summary>
     [HttpGet("{id:long}/print")]
