@@ -21,6 +21,9 @@ namespace ERP.IntegrationTests;
 /// ① 审批 vs 拒绝 → 恰好一条决定、受控输家；② 审批 vs 商业编辑 → 一致结果（批准快照不变）或编辑先行条款。</item>
 /// <item><b>原子性</b>：审批 vs 删除恰好一个赢家；混合批量删除全有或全无；伪造决定人被登录账号覆盖；
 /// 强制保存失败整体回滚（锁刷新与新增决定都不落库）。</item>
+/// <item><b>ERP-419 历史决定冻结</b>：已批准 / 已拒绝的历史决定（缺失 / 零 <c>CreatedBy</c>）一律冻结软删除，
+/// 单条 / 批量删除都拒绝且来源、决定与创建人元数据原样；两条独立连接并发删除无赢家、已批准来源绝不消失；
+/// 真正未决定 / 未转换的草稿在实时范围内仍可软删除。</item>
 /// <item><b>保留库存来源单据审计与原始失败日志</b>：只读取计数与权威行，不删除 / 不清理任何既有行。</item>
 /// <item><b>专用目标护栏</b>：访问数据库之前精确命中 <c>(localdb)\NEWERP_AutoAcceptance</c> +
 /// <c>NEWERP_AUTOTEST</c> 前缀 + <c>Integrated Security</c>；错误实例 / 错误库名 / 非集成安全一律 fail closed。</item>
@@ -255,6 +258,139 @@ public sealed class PurchaseQuoteMutationSqlServerTests
         }
     }
 
+    // ==================== ERP-419：历史决定（缺失 / 零创建人）冻结删除 ====================
+
+    [Theory]
+    [InlineData(PurchaseQuoteApproval.Approved, null)]
+    [InlineData(PurchaseQuoteApproval.Approved, 0L)]
+    [InlineData(PurchaseQuoteApproval.Rejected, null)]
+    [InlineData(PurchaseQuoteApproval.Rejected, 0L)]
+    public async Task 历史审批决定_缺失或零创建人_删除一律被拒且来源与决定保留(string decision, long? createdBy)
+    {
+        Guard();
+        PurchaseQuote quote;
+        await using (var seed = _fixture.CreateDbContext())
+        {
+            quote = await AddOwnQuoteAsync(seed, PurchaseQuoteMutationRules.PendingStatus, selected: false);
+            await AddDecisionAsync(seed, quote, decision, createdBy);
+        }
+
+        await using var db = _fixture.CreateDbContext();
+        var ex = await Assert.ThrowsAsync<BusinessException>(() =>
+            QuoteController(db, _fixture.OperatorUserId).Delete(quote.Id));
+        Assert.Equal(PurchaseQuoteMutationRules.DecidedNoDeleteText, ex.Message);
+
+        // 来源保留、决定保留、创建人元数据原样（绝不回溯臆造操作人）。
+        await using var check = _fixture.CreateDbContext();
+        Assert.False(await check.PurchaseQuotes.AsNoTracking().Where(q => q.Id == quote.Id)
+            .Select(q => q.IsDeleted).SingleAsync());
+        var evidence = await check.PurchaseQuoteDecisions.AsNoTracking()
+            .SingleAsync(d => d.QuoteId == quote.Id && !d.IsDeleted);
+        Assert.Equal(decision, evidence.Decision);
+        Assert.Equal(createdBy, evidence.CreatedBy);
+        Assert.True(PurchaseQuoteMutationRules.IsDecisionFreezingDeletion(evidence));
+    }
+
+    [Fact]
+    public async Task 竞态_两个独立连接并发删除历史已批准来源_二者皆拒绝且来源与决定不消失()
+    {
+        Guard();
+        PurchaseQuote quote;
+        await using (var seed = _fixture.CreateDbContext())
+        {
+            quote = await AddOwnQuoteAsync(seed, PurchaseQuoteMutationRules.PendingStatus, selected: false);
+            await AddDecisionAsync(seed, quote, PurchaseQuoteApproval.Approved, null);
+        }
+
+        await using var dbA = _fixture.CreateDbContext();
+        await using var dbB = _fixture.CreateDbContext();
+        using var gate = new SemaphoreSlim(0, 2);
+
+        async Task<Outcome> DeleteAsync(ErpDbContext db)
+        {
+            await gate.WaitAsync();
+            return await CaptureAsync(() => QuoteController(db, _fixture.OperatorUserId).Delete(quote.Id));
+        }
+
+        var first = DeleteAsync(dbA);
+        var second = DeleteAsync(dbB);
+        gate.Release(2);
+        var results = new[] { await first, await second };
+
+        Assert.All(results, r => Assert.False(r.Success, r.Error));
+        Assert.All(results, r => Assert.Contains(
+            PurchaseQuoteMutationRules.DecidedNoDeleteText, r.Error, StringComparison.Ordinal));
+
+        // 第三条独立连接：已批准来源与其决定均未消失。
+        await using var verify = _fixture.CreateDbContext();
+        Assert.False(await verify.PurchaseQuotes.AsNoTracking().Where(q => q.Id == quote.Id)
+            .Select(q => q.IsDeleted).SingleAsync());
+        Assert.True(await verify.PurchaseQuoteDecisions.AsNoTracking()
+            .AnyAsync(d => d.QuoteId == quote.Id && !d.IsDeleted));
+    }
+
+    [Fact]
+    public async Task 未决定未转换草稿_实时范围内可软删除()
+    {
+        Guard();
+        long quoteId;
+        await using (var seed = _fixture.CreateDbContext())
+            quoteId = (await AddOwnQuoteAsync(seed, PurchaseQuoteMutationRules.PendingStatus, selected: false)).Id;
+
+        await using (var db = _fixture.CreateDbContext())
+            Assert.IsType<OkObjectResult>(await QuoteController(db, _fixture.OperatorUserId).Delete(quoteId));
+
+        await using var check = _fixture.CreateDbContext();
+        Assert.True(await check.PurchaseQuotes.AsNoTracking().Where(q => q.Id == quoteId)
+            .Select(q => q.IsDeleted).SingleAsync());
+        Assert.False(await check.PurchaseQuoteDecisions.AsNoTracking().AnyAsync(d => d.QuoteId == quoteId));
+    }
+
+    [Fact]
+    public async Task 混合批量删除_混入历史已决定与未决定草稿_整批回滚不变_未决定草稿放行()
+    {
+        Guard();
+        long aId, bId, legacyId;
+        await using (var seed = _fixture.CreateDbContext())
+        {
+            aId = (await AddOwnQuoteAsync(seed, PurchaseQuoteMutationRules.PendingStatus, selected: false)).Id;
+            bId = (await AddOwnQuoteAsync(seed, PurchaseQuoteMutationRules.PendingStatus, selected: false)).Id;
+            var legacy = await AddOwnQuoteAsync(seed, PurchaseQuoteMutationRules.PendingStatus, selected: false);
+            legacyId = legacy.Id;
+            await AddDecisionAsync(seed, legacy, PurchaseQuoteApproval.Approved, null);
+        }
+
+        await using (var db = _fixture.CreateDbContext())
+        {
+            var ex = await Assert.ThrowsAsync<BusinessException>(() =>
+                QuoteController(db, _fixture.OperatorUserId).BatchDelete(new List<long> { aId, bId, legacyId }));
+            Assert.Equal(PurchaseQuoteMutationRules.DecidedNoDeleteText, ex.Message);
+        }
+
+        await using (var check = _fixture.CreateDbContext())
+        {
+            var rows = await check.PurchaseQuotes.AsNoTracking()
+                .Where(q => new[] { aId, bId, legacyId }.Contains(q.Id)).ToListAsync();
+            Assert.All(rows, r => Assert.False(r.IsDeleted)); // 全有或全无：混入历史决定即整批原样保留
+            Assert.True(await check.PurchaseQuoteDecisions.AsNoTracking()
+                .AnyAsync(d => d.QuoteId == legacyId && !d.IsDeleted));
+        }
+
+        await using (var db2 = _fixture.CreateDbContext())
+            Assert.IsType<OkObjectResult>(await QuoteController(db2, _fixture.OperatorUserId)
+                .BatchDelete(new List<long> { aId, bId }));
+
+        await using (var check = _fixture.CreateDbContext())
+        {
+            Assert.True(await check.PurchaseQuotes.AsNoTracking().Where(q => q.Id == aId)
+                .Select(q => q.IsDeleted).SingleAsync());
+            Assert.True(await check.PurchaseQuotes.AsNoTracking().Where(q => q.Id == bId)
+                .Select(q => q.IsDeleted).SingleAsync());
+            Assert.False(await check.PurchaseQuotes.AsNoTracking().Where(q => q.Id == legacyId)
+                .Select(q => q.IsDeleted).SingleAsync());
+        }
+    }
+
     [Fact]
     public async Task 伪造决定人_被登录账号覆盖()
     {
@@ -420,6 +556,23 @@ public sealed class PurchaseQuoteMutationSqlServerTests
         RefOrderNo = quote.RefOrderNo,
         Remark = quote.Remark
     };
+
+    /// <summary>
+    /// 为既定比价行追加一条有效历史决定（<paramref name="createdBy"/> 为空 / 零 = 缺失操作人归属）。
+    /// </summary>
+    private static async Task AddDecisionAsync(ErpDbContext db, PurchaseQuote quote, string decision,
+        long? createdBy)
+    {
+        db.PurchaseQuoteDecisions.Add(new PurchaseQuoteDecision
+        {
+            QuoteId = quote.Id, QuoteNo = quote.QuoteNo, Decision = decision,
+            SelectedSupplierId = quote.SupplierId, SelectedSupplierName = quote.SupplierName,
+            DecisionBasis = "历史导入", DecidedBy = createdBy, DecidedByName = "历史审批人",
+            DecidedAt = DateTime.Now, DecisionRef = PurchaseQuoteApproval.DecisionRef(quote),
+            CreatedAt = DateTime.Now, CreatedBy = createdBy
+        });
+        await db.SaveChangesAsync();
+    }
 
     private static string Tag() => Guid.NewGuid().ToString("N")[..8];
 }

@@ -14,11 +14,13 @@ using Xunit;
 namespace ERP.UnitTests;
 
 /// <summary>
-/// ERP-417 供应商比价生命周期与审批决定并发护栏单元测试（全部使用内存库，不连接 SQL Server）：
+/// ERP-417 / ERP-419 供应商比价生命周期与审批决定并发护栏单元测试（全部使用内存库，不连接 SQL Server）：
 /// 行锁 / 原子事务契约（与既有父单证锁同源、Id 升序、非关系型等价无操作）；待比较草稿校验
 /// （正数量 / 非负价格 / EF 精度 / 受支持币种 / 选中与状态一致 / 服务端重算总额）；
 /// 伪造「已转采购订单」状态、采购单号式 RefOrderNo 与审计字段一律拒绝 / 忽略；
 /// 已存在审批决定后商业条款 / 改派 / 选中 / 删除一律拒绝，仅允许安全非商业备注修改；
+/// 删除冻结与操作人归属无关（ERP-419）：有效批准 / 拒绝决定不论 CreatedBy 为空 / 为零都冻结软删除，
+/// 来源与决定一律保留、绝不回溯臆造操作人；真正未决定的草稿仍可删除；
 /// 已转换行冻结；批量删除全有或全无；决定人取自可信操作人（伪造输入被忽略）。
 /// 说明：真实 SQL Server 并发竞态在 <c>PurchaseQuoteMutationSqlServerTests</c>（受控 localdb）覆盖。
 /// </summary>
@@ -265,32 +267,33 @@ public class PurchaseQuoteMutationTests
         Assert.True(db.PurchaseQuotes.AsNoTracking().Single(q => q.Id == pending.Id).IsDeleted);
     }
 
-    [Fact]
-    public async Task 删除_未归属历史决定_保留既有ERP416软删除契约_决定证据不被删除()
+    [Theory]
+    [InlineData(PurchaseQuoteApproval.Approved, null)]
+    [InlineData(PurchaseQuoteApproval.Approved, 0L)]
+    [InlineData(PurchaseQuoteApproval.Rejected, null)]
+    [InlineData(PurchaseQuoteApproval.Rejected, 0L)]
+    public async Task 删除_历史决定缺失或零操作人_一律冻结软删除且来源与决定保留(string decision, long? creator)
     {
         using var db = TestDbFactory.Create();
         var ctl = QuoteController(db);
-        var quote = SeedQuote(db, "PQ-DEL-LEGACY");
+        var quote = SeedQuote(db, $"PQ-DEL-LEGACY-{decision}-{creator}");
 
-        // 历史 / 种子 / 导入数据：决定没有操作人归属（CreatedBy 为空），非实时审批生命周期追加。
-        db.PurchaseQuoteDecisions.Add(new PurchaseQuoteDecision
-        {
-            QuoteId = quote.Id, QuoteNo = quote.QuoteNo, Decision = PurchaseQuoteApproval.Approved,
-            SelectedSupplierId = quote.SupplierId, SelectedSupplierName = quote.SupplierName,
-            DecisionBasis = "历史导入", DecidedBy = 1L, DecidedByName = "历史审批人",
-            DecidedAt = DateTime.Now, DecisionRef = PurchaseQuoteApproval.DecisionRef(quote)
-        });
-        db.SaveChanges();
+        // 历史 / 种子 / 导入数据：决定没有操作人归属（CreatedBy 为空 / 为零），非实时审批生命周期追加。
+        var evidence = SeedDecision(db, quote, decision, creator);
 
-        Assert.False(PurchaseQuoteMutationRules.IsAttributedDecision(
-            db.PurchaseQuoteDecisions.AsNoTracking().Single()));
+        // 缺失的操作人元数据是「未知归属」，绝不是删除已批准 / 已拒绝来源的许可。
+        Assert.True(PurchaseQuoteMutationRules.IsDecisionFreezingDeletion(evidence));
 
-        // 未归属决定不冻结软删除（ERP-416 既有契约）：只隐藏比价行，决策证据行绝不被删除、血缘完整。
-        Assert.IsType<OkObjectResult>(await ctl.Delete(quote.Id));
-        Assert.True(db.PurchaseQuotes.AsNoTracking().Single(q => q.Id == quote.Id).IsDeleted);
-        var evidence = db.PurchaseQuoteDecisions.AsNoTracking().Single();
-        Assert.False(evidence.IsDeleted);
-        Assert.Equal(quote.Id, evidence.QuoteId);
+        var ex = await Assert.ThrowsAsync<BusinessException>(() => ctl.Delete(quote.Id));
+        Assert.Equal(ErrorCodes.RuleConflict, ex.Code);
+        Assert.Equal(PurchaseQuoteMutationRules.DecidedNoDeleteText, ex.Message);
+
+        // 来源保留、决定保留、操作人元数据原样（绝不回溯臆造操作人，也不自动修复审计）。
+        Assert.False(db.PurchaseQuotes.AsNoTracking().Single(q => q.Id == quote.Id).IsDeleted);
+        var stored = db.PurchaseQuoteDecisions.AsNoTracking().Single(d => d.QuoteId == quote.Id);
+        Assert.False(stored.IsDeleted);
+        Assert.Equal(decision, stored.Decision);
+        Assert.Equal(creator, stored.CreatedBy);
     }
 
     [Fact]
@@ -300,7 +303,7 @@ public class PurchaseQuoteMutationTests
         var ctl = QuoteController(db);
         var quote = SeedQuote(db, "PQ-DEL-ATTRIBUTED", withDecision: true);
 
-        Assert.True(PurchaseQuoteMutationRules.IsAttributedDecision(
+        Assert.True(PurchaseQuoteMutationRules.IsDecisionFreezingDeletion(
             db.PurchaseQuoteDecisions.AsNoTracking().Single()));
 
         var ex = await Assert.ThrowsAsync<BusinessException>(() => ctl.Delete(quote.Id));
@@ -325,6 +328,33 @@ public class PurchaseQuoteMutationTests
         Assert.IsType<OkObjectResult>(await ctl.BatchDelete(new List<long> { a.Id, c.Id, a.Id }));
         Assert.True(db.PurchaseQuotes.AsNoTracking().Single(q => q.Id == a.Id).IsDeleted);
         Assert.True(db.PurchaseQuotes.AsNoTracking().Single(q => q.Id == c.Id).IsDeleted);
+    }
+
+    [Fact]
+    public async Task 批量删除_混入历史已决定行_整批原样保留且决定不消失()
+    {
+        using var db = TestDbFactory.Create();
+        var ctl = QuoteController(db);
+        var a = SeedQuote(db, "PQ-BD-LEG-A", PurchaseQuoteMutationRules.PendingStatus, selected: false);
+        var b = SeedQuote(db, "PQ-BD-LEG-B", PurchaseQuoteMutationRules.PendingStatus, selected: false);
+        var legacy = SeedQuote(db, "PQ-BD-LEG-C");
+        SeedDecision(db, legacy, PurchaseQuoteApproval.Approved, null);
+
+        var ex = await Assert.ThrowsAsync<BusinessException>(() =>
+            ctl.BatchDelete(new List<long> { a.Id, legacy.Id, b.Id }));
+        Assert.Equal(PurchaseQuoteMutationRules.DecidedNoDeleteText, ex.Message);
+
+        // 混入历史决定行：整批原样保留（全有或全无），来源与决定都不消失。
+        Assert.All(new[] { a.Id, b.Id, legacy.Id }, id =>
+            Assert.False(db.PurchaseQuotes.AsNoTracking().Single(q => q.Id == id).IsDeleted));
+        var evidence = db.PurchaseQuoteDecisions.AsNoTracking().Single(d => d.QuoteId == legacy.Id);
+        Assert.False(evidence.IsDeleted);
+
+        // 真正未决定的草稿仍可整批软删除。
+        Assert.IsType<OkObjectResult>(await ctl.BatchDelete(new List<long> { a.Id, b.Id }));
+        Assert.True(db.PurchaseQuotes.AsNoTracking().Single(q => q.Id == a.Id).IsDeleted);
+        Assert.True(db.PurchaseQuotes.AsNoTracking().Single(q => q.Id == b.Id).IsDeleted);
+        Assert.False(db.PurchaseQuotes.AsNoTracking().Single(q => q.Id == legacy.Id).IsDeleted);
     }
 
     // ==================== 5. 审批决定：append-only + 可信决定人 ====================
@@ -391,6 +421,11 @@ public class PurchaseQuoteMutationTests
         Assert.Contains("LockQuoteRowAsync", rules);
         Assert.Contains("LockQuoteRowsAsync", rules);
         Assert.Contains("BeginMutationTransactionAsync", rules);
+        // ERP-419：删除冻结判据与操作人归属无关（绝不以 CreatedBy 空 / 零作为放行许可）。
+        Assert.Contains("IsDecisionFreezingDeletion", rules);
+        Assert.DoesNotContain("IsAttributedDecision", rules, StringComparison.Ordinal);
+        Assert.Equal(PurchaseQuoteApproval.Approved, PurchaseQuoteMutationRules.ApprovedDecision);
+        Assert.Equal(PurchaseQuoteApproval.Rejected, PurchaseQuoteMutationRules.RejectedDecision);
 
         var controller = ReadSource("src", "ERP.Api", "Controllers", "PurchaseQuoteController.cs");
         Assert.DoesNotContain("AllowAnonymous", controller, StringComparison.Ordinal);
@@ -401,6 +436,8 @@ public class PurchaseQuoteMutationTests
         Assert.Contains("PurchaseQuoteMutationRules.EnsureNoForgedConversionEvidenceAsync", controller);
         Assert.Contains("PurchaseQuoteApproval.EnsureApprovedSupplierCoherentAsync", controller);
         Assert.Contains("ReauthorizeAsync", controller);
+        Assert.Contains("PurchaseQuoteMutationRules.IsDecisionFreezingDeletion", controller);
+        Assert.DoesNotContain("IsAttributedDecision", controller, StringComparison.Ordinal);
 
         var approval = ReadSource("src", "ERP.Api", "Controllers", "PurchaseQuoteApproval.cs");
         Assert.Contains("PurchaseQuoteMutationRules.LockQuoteRowAsync", approval);
@@ -477,6 +514,27 @@ public class PurchaseQuoteMutationTests
         }
 
         return quote;
+    }
+
+    /// <summary>
+    /// 播种一条历史 / 种子 / 导入决定（<paramref name="creator"/> 为空 / 为零 = 缺失操作人归属，绝不回溯臆造）。
+    /// </summary>
+    private static PurchaseQuoteDecision SeedDecision(ErpDbContext db, PurchaseQuote quote, string decision,
+        long? creator)
+    {
+        var rejected = string.Equals(decision, PurchaseQuoteApproval.Rejected, StringComparison.Ordinal);
+        var row = new PurchaseQuoteDecision
+        {
+            QuoteId = quote.Id, QuoteNo = quote.QuoteNo, Decision = decision,
+            SelectedSupplierId = rejected ? null : quote.SupplierId,
+            SelectedSupplierName = rejected ? string.Empty : quote.SupplierName,
+            DecisionBasis = "历史导入", DecidedBy = creator, DecidedByName = "历史审批人",
+            DecidedAt = DateTime.Now, DecisionRef = PurchaseQuoteApproval.DecisionRef(quote),
+            CreatedAt = DateTime.Now, CreatedBy = creator
+        };
+        db.PurchaseQuoteDecisions.Add(row);
+        db.SaveChanges();
+        return row;
     }
 
     private static PurchaseQuote CloneQuote(PurchaseQuote quote, bool? isSelected = null) => new()

@@ -335,9 +335,20 @@ public class PurchaseQuoteAuthorizationTests
         Assert.False(env.Db.PurchaseQuotes.AsNoTracking().Single(q => q.Id == env.OwnQuoteId).IsDeleted);
         Assert.False(env.Db.PurchaseQuotes.AsNoTracking().Single(q => q.Id == env.ForeignQuoteId).IsDeleted);
 
-        // 仅本人行：放行。
-        Assert.IsType<OkObjectResult>(await ctl.Delete(env.OwnQuoteId));
-        Assert.True(env.Db.PurchaseQuotes.AsNoTracking().Single(q => q.Id == env.OwnQuoteId).IsDeleted);
+        // 仅本人行：放行——但必须是真正未决定 / 未转换的草稿（ERP-419 修复 ERP-416 授权夹具的冲突前提：
+        // 本人登记行本身带既有批准历史且缺失创建人元数据，绝不因操作人元数据缺失被当作可删除）。
+        var draft = AddQuote(env.Db, $"PQ-OWN-DRAFT-{Guid.NewGuid():N}", env.CustomerAId, "ERP416 可见客户",
+            selected: false, status: PurchaseQuoteMutationRules.PendingStatus);
+        Assert.IsType<OkObjectResult>(await ctl.Delete(draft.Id));
+        Assert.True(env.Db.PurchaseQuotes.AsNoTracking().Single(q => q.Id == draft.Id).IsDeleted);
+
+        // 已批准历史（缺失创建人元数据 = 未知归属）不是删除许可：来源与决定一律保留。
+        var frozen = await Assert.ThrowsAsync<BusinessException>(() => ctl.Delete(env.OwnQuoteId));
+        Assert.Equal(ErrorCodes.RuleConflict, frozen.Code);
+        Assert.Equal(PurchaseQuoteMutationRules.DecidedNoDeleteText, frozen.Message);
+        Assert.False(env.Db.PurchaseQuotes.AsNoTracking().Single(q => q.Id == env.OwnQuoteId).IsDeleted);
+        Assert.False(env.Db.PurchaseQuoteDecisions.AsNoTracking()
+            .Single(d => d.QuoteId == env.OwnQuoteId).IsDeleted);
     }
 
     private static PurchaseQuote NewQuote(string quoteNo, long? customerId) => new()

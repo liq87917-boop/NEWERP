@@ -16,7 +16,8 @@ namespace ERP.UnitTests;
 /// <summary>
 /// 供应商比价价格审批与供应商选择历史（ERP-095）单元测试：
 /// 批准 / 拒绝决定、append-only（重复 / 陈旧 / 跨批次拒绝）、批次审批状态（pending / approved / rejected）、
-/// 订单转换只接受「已批准」比价行并保留审批参考号、接口路由契约。
+/// 订单转换只接受「已批准」比价行并保留审批参考号、接口路由契约；
+/// ERP-419：有效批准 / 拒绝决定（含缺失 / 零操作人归属的历史数据）一律冻结所在比价行的软删除。
 /// 说明：全部使用内存数据库，不连接 SQL Server、不启动 API（browser_deferred）。
 /// </summary>
 public class PurchaseQuoteApprovalTests
@@ -277,7 +278,7 @@ public class PurchaseQuoteApprovalTests
 
         Assert.Equal(userId, decision.DecidedBy);
         Assert.Equal("ERP417 审批人", decision.DecidedByName);
-        Assert.Equal(userId, decision.CreatedBy); // 归属操作人：实时生命周期追加的决定冻结软删除
+        Assert.Equal(userId, decision.CreatedBy); // 归属仅用于审计溯源（ERP-419：删除冻结与归属无关）
         Assert.Single(db.PurchaseQuoteDecisions);
     }
 
@@ -301,6 +302,34 @@ public class PurchaseQuoteApprovalTests
         Assert.Equal(ErrorCodes.RuleConflict, ex.Code);
         Assert.Contains("与已批准决定的选中供应商", ex.Message);
         Assert.Empty(db.PurchaseOrders);
+    }
+
+    // ==================== ERP-419：历史决定（缺失操作人元数据）同样冻结删除 ====================
+
+    [Fact]
+    public async Task 历史批准决定缺少创建人_删除仍被拒且来源与决定保留()
+    {
+        using var db = TestDbFactory.Create();
+        var quote = SeedQuote(db, "PQ-APV-LEGACY");
+
+        // 历史 / 种子 / 导入数据：有效批准决定缺失创建人归属（CreatedBy 为空 = 未知归属）。
+        db.PurchaseQuoteDecisions.Add(new PurchaseQuoteDecision
+        {
+            QuoteId = quote.Id, QuoteNo = quote.QuoteNo, Decision = PurchaseQuoteApproval.Approved,
+            SelectedSupplierId = quote.SupplierId, SelectedSupplierName = quote.SupplierName,
+            DecisionBasis = "历史导入", DecidedBy = null, DecidedByName = string.Empty,
+            DecidedAt = DateTime.Now, DecisionRef = PurchaseQuoteApproval.DecisionRef(quote)
+        });
+        db.SaveChanges();
+
+        Assert.True(PurchaseQuoteMutationRules.IsDecisionFreezingDeletion(db.PurchaseQuoteDecisions.Single()));
+
+        var ex = await Assert.ThrowsAsync<BusinessException>(() => NewQuoteController(db).Delete(quote.Id));
+        Assert.Equal(ErrorCodes.RuleConflict, ex.Code);
+        Assert.Equal(PurchaseQuoteMutationRules.DecidedNoDeleteText, ex.Message);
+        Assert.False(db.PurchaseQuotes.Single(q => q.Id == quote.Id).IsDeleted);
+        Assert.False(db.PurchaseQuoteDecisions.Single().IsDeleted);
+        Assert.Null(db.PurchaseQuoteDecisions.Single().CreatedBy); // 绝不回溯臆造操作人
     }
 
     // ==================== 工厂与种子数据 ====================

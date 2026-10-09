@@ -1,6 +1,7 @@
-# 供应商比价生命周期与审批决定的原子性 / 并发护栏（ERP-417）
+# 供应商比价生命周期与审批决定的原子性 / 并发护栏（ERP-417 / ERP-419）
 
-> 任务：`ERP-417`「Freeze supplier comparison commercial terms under atomic approval decisions」（阶段 3 核心业务流程完整性）。
+> 任务：`ERP-417`「Freeze supplier comparison commercial terms under atomic approval decisions」、
+> `ERP-419`「Preserve historical supplier approval deletion freeze without actor metadata exemption」（阶段 3 核心业务流程完整性）。
 > 关联：`ERP-416`（比价与审批实时授权，`docs/purchase-quote-authority.md`）、`ERP-095`（比价审批决定 append-only）、
 > `ERP-020` / `ERP-027`（比价 → 采购订单带入预填 / 单行与批次转单）、
 > `ERP-395`（父单证行锁协议，`TradeDocumentMutationRules`）、`ERP-097`（业务员客户数据范围）。
@@ -45,7 +46,7 @@
 2. **存在 / 未删除**：锁返回 `false` 或锁内重读为空一律按「比价记录不存在」非披露拒绝；
 3. **已转换冻结**：持久化状态为「已转采购订单」时，修改 / 删除 / 批量删除 / 再审批一律拒绝；
 4. **已决定冻结**：存在有效审批决定时，仅允许安全非商业备注修改，其余商业条款 / 改派 / 批次 / 选中状态变更一律拒绝；
-   由实时审批生命周期追加的**归属决定**（`CreatedBy` = 登录账号 / 请求决定人）还额外冻结**软删除**（见 6.1）；
+   任何有效审批决定（已批准 / 已拒绝）都额外冻结**软删除**——与操作人归属无关（见 6.1）；
 5. **重复决定**：追加前锁内重读「是否已有有效决定」，并以 `UX_PurchaseQuoteDecisions_QuoteId`（`IsDeleted = 0` 过滤唯一索引）作并发兜底；`DbUpdateException` 转为可读的 `RuleConflict`（受控输家）。
 
 ## 5. 对比草稿校验与伪造拒绝（服务端唯一权威）
@@ -69,8 +70,8 @@
 | --- | --- | --- |
 | `POST /` | 实时授权 + 拟议客户范围 + 对比草稿校验 + 伪造转换证据拒绝 | 单一 `SaveChanges`（原子），服务端重置审计并重算总额 |
 | `PUT /{id}` | 已存 + 拟议归属；已转换 → 拒绝；已决定 → **仅备注白名单**；否则草稿校验后整体替换商业字段 | 被拒整体回滚，零部分写入 |
-| `DELETE /{id}` | 已转换 → 拒绝；已存在**归属**审批决定 → 拒绝（保留审批历史） | 软删除，绝不硬删除；未归属历史决定见 6.1 |
-| `POST batch-delete` | 全部 Id 升序加锁 + 逐行「未转换且无归属决定」 | 任一不合格即**整批拒绝**，全有或全无 |
+| `DELETE /{id}` | 已转换 → 拒绝；已存在**任何有效审批决定**（已批准 / 已拒绝，与操作人归属无关）→ 拒绝（保留审批历史） | 软删除，绝不硬删除；历史 / 缺失操作人元数据见 6.1 |
+| `POST batch-delete` | 全部 Id 升序加锁 + 逐行「未转换且无有效决定」 | 任一行不合格（含历史决定）即**整批拒绝**，全有或全无 |
 | `POST /{id}/to-order` | 比价行锁 + 目的地菜单 / 权威目的地范围 + 既有转换资格 + **批准供应商与当前供应商一致** | 发号 / 落库全部在锁内；被拒不发号 |
 | `POST batch-to-order` | 批次全部来源行升序加锁 + 整批归属 + 目的地范围 + 既有分组 / 唯一单号守卫 | 与单行路径共用同一把锁 |
 
@@ -78,22 +79,28 @@
 批次一致 / 陈旧 / 已转换 / 已放弃 / 重复守卫 → 追加**恰好一条**决定（`SelectedSupplierId` / `SelectedSupplierName` 取自锁内权威比价行，
 `DecidedBy` / `DecidedByName` 取自登录账号，请求体伪造字段被忽略）→ 提交。append-only：无修改 / 删除 / 重新打开 / 覆盖已批准决定的接口。
 决定同时写入**操作人归属** `CreatedBy`（实时认证请求 = 登录账号 Id；无 HTTP 管线的进程内直调回退 `DecidedBy`），
-作为「删除冻结」的唯一判据。
+仅用于审计溯源；删除冻结判据是「该比价行存在任何有效决定」，与 `CreatedBy` 是否缺失无关（见 6.1）。
 
-### 6.1 删除冻结口径与 ERP-416 兼容（路径护栏内修复）
+### 6.1 删除冻结口径（ERP-419：与操作人归属无关）
 
-- **归属决定（attributed decision）**：`PurchaseQuoteMutationRules.IsAttributedDecision` = 决定存在且 `CreatedBy` 为正值
-  （实时审批生命周期追加、带操作人归属）。这类决定**冻结**所在比价行的软删除：单条删除与批量删除都拒绝
-  （`PurchaseQuoteMutationRules.DecidedNoDeleteText`），失败整体回滚、零部分删除。
-- **未归属决定**：`CreatedBy` 为空的历史 / 种子 / 导入数据保留 ERP-416 既有契约——本人行仍可**软删除**（只隐藏比价行），
-  `PurchaseQuoteDecision` 审批证据行绝不被删除 / 修改，血缘完整；系统不存在任何硬删除 / 重开 / 覆盖已批准决定的接口。
-- **为什么必须这样定界**：ERP-416 的既有单元测试 `src/ERP.UnitTests/PurchaseQuoteAuthorizationTests.cs` **不在本任务 `allowed_paths` 内**，
-  其既有断言要求「本人行（含既有决定）可软删除」。若把删除冻结无差别施加到**全部**决定，该断言必然失败；
-  而修改该文件会被路径护栏拒绝（上一轮 `path_guard_failure` 的根因）。
-  因此本修复把删除冻结精确到**归属决定**：实时审批生命周期产生的新证据不可销毁，同时既有 ERP-416 契约与全量单元套件保持绿灯，
-  且不触碰任何 `allowed_paths` 之外的文件。
-- **商业条款冻结不区分归属**：拒绝改派 / 价格 / 数量 / 币种 / 选中 / 批次、仅允许备注白名单的口径对**任何**有效决定都生效
-  （防止「批准一家供应商却按另一家条款采购」）；删除冻结才需要区分归属（新证据 vs 既有契约）。
+- **唯一判据**：`PurchaseQuoteMutationRules.IsDecisionFreezingDeletion` = 存在一条**未删除**且决定为
+  `Approved` / `Rejected` 的持久化决定（口径常量 `ApprovedDecision` / `RejectedDecision` 与
+  `PurchaseQuoteApproval.Approved` / `Rejected` 逐字一致，契约测试断言同源）。
+  只要命中即**冻结**所在比价行的软删除：单条删除与批量删除都拒绝（`PurchaseQuoteMutationRules.DecidedNoDeleteText`），
+  失败整体回滚、零部分删除。
+- **与 `CreatedBy` 无关**：`CreatedBy` 为空 / 为零（历史 / 种子 / 导入数据）只表示**未知归属**，
+  **绝不**构成删除已批准 / 已拒绝来源的许可；缺失的操作人元数据原样保留，绝不回溯臆造操作人、也绝不自动修复审计。
+- **为什么必须这样定界（ERP-419 修复 ERP-417 缺陷）**：ERP-417 曾以「归属决定」（`CreatedBy > 0`）为删除冻结判据，
+  结果「有效批准决定 + 缺失创建人元数据」的历史来源可被软删除（审批来源消失），违背「审批历史不可销毁」。
+  ERP-419 删除该豁免：删除冻结对**任何**有效决定生效。
+- **ERP-416 授权夹具的冲突前提已修正**：`src/ERP.UnitTests/PurchaseQuoteAuthorizationTests.cs` 的原始夹具把
+  「本人可删除」的断言压在一条**带批准决定**的本人行上（`AddQuote` 默认 `selected: true` 会追加无 `CreatedBy` 的批准决定）。
+  ERP-419 在本任务 `allowed_paths` 内把该夹具修正为：**允许的本人删除必须是真正未决定 / 未转换的草稿**，
+  同时显式断言「已批准历史（缺失创建人）删除被拒且来源与决定保留」。
+  ⚠️ **ERP-417 曾两度失败**：attempt1 因越界修改该文件触发 `path_guard_failure`；
+  attempt2 回退夹具改动、改用 `IsAttributedDecision` 豁免历史决定，导致上述业务完整性缺陷。本轮两者都修：夹具在允许路径内修正，且不再有归属豁免。
+- **商业条款冻结口径不变**：拒绝改派 / 价格 / 数量 / 币种 / 选中 / 批次、仅允许备注白名单的口径对**任何**有效决定都生效
+  （防止「批准一家供应商却按另一家条款采购」）；真正未决定 / 未转换的草稿仍可修改与软删除。
 
 ## 7. 转换一致性（比价 → 采购订单）
 
@@ -117,10 +124,11 @@
 
 | 层 | 文件 | 覆盖 |
 | --- | --- | --- |
-| 单元（内存库，新增） | `src/ERP.UnitTests/PurchaseQuoteMutationTests.cs` | 锁 / 事务契约（`QuoteRowLockSql`、`MergeLockIds` Id 升序、非关系型等价无操作、状态常量与既有转换口径逐字一致）；待比较草稿校验逐条（正数量 / 非负价格 / EF 精度 / 币种 / 选中与状态一致 / 服务端重算总额）；伪造「已转采购订单」状态 / 采购单号式 `RefOrderNo` / 审计字段拒绝与忽略；已决定行冻结（商业条款 / 改派 / 选中拒绝，仅备注允许）；已转换行冻结；删除 / 批量删除（归属决定冻结、未归属历史决定保留 ERP-416 软删除契约、全有或全无）；重复决定抛 `RuleConflict`；可信操作人覆盖伪造输入；审批通过后转单保留审批参考；控制器接线契约 |
-| 单元（内存库，更新） | `src/ERP.UnitTests/PurchaseQuoteApprovalTests.cs` | 既有批准 / 拒绝 / 重复 / 陈旧 / 跨批次 / 批次状态 / 路由契约回归保持通过；新增「实时请求伪造决定人被忽略（含 `CreatedBy` 归属）」「已批准后供应商被改写再转单拒绝」 |
-| 单元（既有回归，**未修改**） | `src/ERP.UnitTests/PurchaseQuoteAuthorizationTests.cs` | ERP-416 授权矩阵**原样保持绿灯**：该文件不在 `allowed_paths` 内，本轮修复未做任何改动（上一轮的 `path_guard_failure` 即因修改它）；删除冻结精确到**归属决定**（见 6.1），既有「本人行可软删除」契约不变 |
-| SQL Server 集成（受控 localdb，新增） | `src/ERP.IntegrationTests/PurchaseQuoteMutationSqlServerTests.cs` | 真实既有授权 + 真实控制器：**两个独立连接竞态**（审批 vs 拒绝 → 恰好一条决定 / 受控输家；审批 vs 商业编辑 → 批准快照不变或编辑先行条款）；审批 vs 删除恰好一个赢家；混合批量删除全有或全无；伪造决定人被登录账号覆盖；强制保存失败整体回滚（锁刷新 + 新增决定都不落库）；专用目标护栏 fail-closed |
+| 单元（内存库，新增） | `src/ERP.UnitTests/PurchaseQuoteMutationTests.cs` | 锁 / 事务契约（`QuoteRowLockSql`、`MergeLockIds` Id 升序、非关系型等价无操作、状态常量与既有转换口径逐字一致）；待比较草稿校验逐条（正数量 / 非负价格 / EF 精度 / 币种 / 选中与状态一致 / 服务端重算总额）；伪造「已转采购订单」状态 / 采购单号式 `RefOrderNo` / 审计字段拒绝与忽略；已决定行冻结（商业条款 / 改派 / 选中拒绝，仅备注允许）；已转换行冻结；删除 / 批量删除（任何有效批准 / 拒绝决定都冻结软删除，含缺失 / 零 `CreatedBy` 的历史决定；全有或全无；真正未决定草稿仍可删除）；重复决定抛 `RuleConflict`；可信操作人覆盖伪造输入；审批通过后转单保留审批参考；控制器接线契约 |
+| 单元（内存库，更新） | `src/ERP.UnitTests/PurchaseQuoteApprovalTests.cs` | 既有批准 / 拒绝 / 重复 / 陈旧 / 跨批次 / 批次状态 / 路由契约回归保持通过；新增「实时请求伪造决定人被忽略（含 `CreatedBy` 归属）」「已批准后供应商被改写再转单拒绝」；ERP-419 新增「历史批准决定缺失创建人 → 删除仍被拒且来源 / 决定保留」 |
+| 单元（内存库，**本轮按 ERP-419 修正夹具**） | `src/ERP.UnitTests/PurchaseQuoteAuthorizationTests.cs` | ERP-416 授权矩阵（范围外 / 空归属 / 已删除 / 无身份 / 已删除 / 已禁用 / 无菜单 / 混入范围外整批拒绝等）语义原样保持绿灯；ERP-419 修正「本人行可删除」的冲突前提：允许的本人删除改用**真正未决定 / 未转换草稿**，并显式断言「已批准历史（缺失创建人）删除被拒且来源 / 决定保留」（不再以 `CreatedBy` 空 / 零作为放行许可） |
+| SQL Server 集成（受控 localdb，新增） | `src/ERP.IntegrationTests/PurchaseQuoteMutationSqlServerTests.cs` | 真实既有授权 + 真实控制器：**两个独立连接竞态**（审批 vs 拒绝 → 恰好一条决定 / 受控输家；审批 vs 商业编辑 → 批准快照不变或编辑先行条款）；审批 vs 删除恰好一个赢家；混合批量删除全有或全无；伪造决定人被登录账号覆盖；强制保存失败整体回滚（锁刷新 + 新增决定都不落库）；**ERP-419**：有效批准 / 拒绝历史决定（`CreatedBy` 空 / 零）单条删除一律被拒且来源 / 决定 / 创建人元数据原样；两条独立连接并发删除无赢家、第三条连接确认已批准来源未消失；混入历史决定行的批量删除整批回滚；未决定未转换草稿仍可软删除；专用目标护栏 fail-closed |
+| SQL Server 集成（受控 localdb，ERP-418 / ERP-419） | `src/ERP.IntegrationTests/PurchaseQuoteConversionMutationSqlServerTests.cs` | 单行 / 批次转换竞态与受控拒绝回归；**ERP-419**：并发「转换 vs 历史删除尝试」不再出现删除赢家——转换放行并落订单血缘，删除受控拒绝，来源、审批决定与订单都不消失 |
 | 安全 profile | `.ai/config.json` 的 `safe` | `dotnet restore` → Release 构建（warnings-as-errors + analyzers）→ `ERP.UnitTests` 全量 |
 
 ### 9.1 SQL Server 集成目标护栏
@@ -130,7 +138,7 @@
 - 每次运行只创建一个**全新 GUID 后缀库**；发现同名库已存在立即拒绝；绝不 drop / reset / 复用任何库，也绝不读取 `appsettings` / `.env` / 生产凭据。
 - 集成竞态使用两条**独立真实连接**（两个 `ErpDbContext`）+ 同步闸门强制并发；被拒绝 / 回滚的请求只回滚自己的写入，保留既有行。
 
-## 10. 本轮验证证据（safe profile + 受控 localdb 集成）
+## 10. ERP-417 验证证据（原始记录，保留）
 
 | 步骤 | 命令 | 结果 |
 | --- | --- | --- |
@@ -147,5 +155,32 @@
 - 未使用生产凭据 / 生产数据，未执行任何破坏性数据操作；未提交 / 未推送（Git 与检查点由编排器负责）。
 - 真实浏览器验收按任务配置 `browser_acceptance.required = false`（未执行，也不声明通过）。
 
+- 全量单元套件 6398 通过是 ERP-417 的原始记录：它与 ERP-417 的 `IsAttributedDecision` 归属豁免一起被 ERP-419 判定为**业务完整性缺陷**
+  （有效批准决定 + 缺失创建人元数据的历史来源可被软删除）。原始日志 / 工作副本原样保留在 `.ai/logs/ERP-417-*`
+  与 `.ai/logs/ERP-419-prepared/original/`（本轮未清理、未改写、未删除）。
+
 > 构建完成不等于阶段验收：只有上述受控 localdb 上真实执行通过、或给出准确 blocker，才构成阶段验收证据。
+
+## 11. ERP-419 验证证据（本轮：safe profile + 受控 localdb 集成）
+
+| 步骤 | 命令 | 结果 |
+| --- | --- | --- |
+| Release 构建（warnings-as-errors + analyzers，no-incremental） | `dotnet build NEWERP.sln -c Release --no-incremental /p:TreatWarningsAsErrors=true /p:RunAnalyzersDuringBuild=true` | **0 警告 / 0 错误** |
+| 全量单元套件 | `dotnet test src/ERP.UnitTests/ERP.UnitTests.csproj -c Release --no-build --verbosity minimal` | **6425 通过 / 0 失败 / 0 跳过**（日志 `erp419-fullunits.log`） |
+| 本任务单元筛选 | 同上 + `--filter "FullyQualifiedName~PurchaseQuote"` | **166 通过 / 0 失败** |
+| 删除冻结真实 SQL（受控 localdb） | `dotnet test src/ERP.IntegrationTests/ERP.IntegrationTests.csproj -c Release --no-build --filter "FullyQualifiedName~PurchaseQuoteMutationSqlServerTests"` | **18 通过 / 0 失败**（日志 `erp419-sql-mutation.log`） |
+| 转换 / 授权真实 SQL（受控 localdb） | 同上 + `--filter "FullyQualifiedName~PurchaseQuoteConversionMutationSqlServerTests\|FullyQualifiedName~PurchaseQuoteAuthorizationSqlServerTests"` | **25 通过 / 0 失败**（日志 `erp419-sql-conv-auth.log`） |
+
+- 三个测试类各自创建**一个全新 GUID 库**：`NEWERP_AUTOTEST_PQSOURCEAUTH_7b9cbb91…`（2026-10-09 07:56:13）、
+  `NEWERP_AUTOTEST_PQSOURCEAUTH_2713a453…` / `_0031f1a6…`（07:56:43）；`sqlcmd` 只读核验：91 张表、
+  `db_owner.PurchaseQuotes` 24 行、`db_owner.PurchaseQuoteDecisions` 18 行 → 真实 SQL 确实执行（非内存模拟）。
+- 目标为精确 `(localdb)\NEWERP_AutoAcceptance` + `Integrated Security` + 全新 GUID 后缀 `NEWERP_AUTOTEST` 库；
+  只创建、不 drop / reset / 复用任何既有库，未读取 `appsettings*.json` / `.env` / 生产凭据，未执行任何生产数据库变更。
+- 未使用既有授权之外的新授权：真实既有菜单（`purchase-quote` / `purchase-order`）+ 业务员客户数据范围驱动真实控制器，
+  无匿名 / 管理员降级、无测试身份旁路；操作人归属仍只取实时认证账号。
+- **原始失败与历史证据全部保留**：ERP-417 两次尝试、`.ai/logs/ERP-419-prepared/original/…` 原样保留，本轮未删除 / 未改写任何既有行或日志。
+- 未提交 / 未推送（Git 与检查点由编排器负责）；真实浏览器验收按任务配置 `browser_acceptance.required = false`（未执行，也不声明通过）。
+
+> 构建完成不等于阶段验收：本任务 `completion_mode = build`，因此**不声明完整阶段验收**，仅交付上述可复现证据
+> （受控 localdb 真实执行通过 + 全量单元绿灯 + Release 构建零告警）。
 

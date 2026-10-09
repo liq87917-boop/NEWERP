@@ -207,10 +207,10 @@ public class PurchaseQuoteController : BaseCrudController<PurchaseQuote>
 
     /// <summary>
     /// 删除（软删除；ERP-416：先授权并复核持久化归属，被拒不删除任何行）。
-    /// ERP-417：在比价行锁内确认「未转换 + 无归属审批决定」后才软删除；已转换、或已存在由实时审批生命周期
-    /// 追加的归属决定（<see cref="PurchaseQuoteMutationRules.IsAttributedDecision"/>）的行拒绝删除
-    /// （保留原始审批与转换历史，绝不硬删除）；未归属的历史 / 种子决定保留 ERP-416 既有软删除契约
-    /// （决策证据行本身绝不删除），失败整体回滚。
+    /// ERP-417 / ERP-419：在比价行锁内确认「未转换 + 无有效审批决定」后才软删除；已转换、或已存在任何有效审批决定
+    /// （已批准 / 已拒绝，<see cref="PurchaseQuoteMutationRules.IsDecisionFreezingDeletion"/>）的行拒绝删除——
+    /// <b>与操作人归属无关</b>：历史 / 种子 / 导入决定缺失 <c>CreatedBy</c> 只是「未知归属」，绝不构成删除许可。
+    /// 保留原始审批决定与来源历史，绝不硬删除、绝不回溯臆造操作人；真正未决定的草稿仍可软删除，失败整体回滚。
     /// </summary>
     [HttpDelete("{id:long}")]
     public override async Task<IActionResult> Delete(long id)
@@ -232,7 +232,7 @@ public class PurchaseQuoteController : BaseCrudController<PurchaseQuote>
                     StringComparison.Ordinal))
                 throw BusinessException.RuleConflict(PurchaseQuoteMutationRules.ConvertedImmutableText);
             var decision = await PurchaseQuoteApproval.FindCurrentDecisionAsync(_db, stored);
-            if (PurchaseQuoteMutationRules.IsAttributedDecision(decision))
+            if (PurchaseQuoteMutationRules.IsDecisionFreezingDeletion(decision))
                 throw BusinessException.RuleConflict(PurchaseQuoteMutationRules.DecidedNoDeleteText);
 
             stored.IsDeleted = true;
@@ -256,8 +256,8 @@ public class PurchaseQuoteController : BaseCrudController<PurchaseQuote>
 
     /// <summary>
     /// 批量删除（软删除；ERP-416：混入任何范围外 / 不存在 Id 即整批拒绝，绝无部分写入）。
-    /// ERP-417：全部 Id 按升序确定性加锁，锁内校验所有行「未转换且无归属决定」后**全有或全无**提交；
-    /// 任一不合格即整体拒绝并回滚（绝不部分删除）。
+    /// ERP-417 / ERP-419：全部 Id 按升序确定性加锁，锁内校验所有行「未转换且无有效审批决定」后**全有或全无**提交；
+    /// 任一行的有效决定（含缺失 / 零操作人归属的历史决定）即整批拒绝并回滚（绝不部分删除，也绝不因操作人元数据缺失而放行）。
     /// </summary>
     [HttpPost("batch-delete")]
     public override async Task<IActionResult> BatchDelete([FromBody] List<long> ids)
@@ -286,7 +286,7 @@ public class PurchaseQuoteController : BaseCrudController<PurchaseQuote>
             var decisions = await _db.PurchaseQuoteDecisions.AsNoTracking()
                 .Where(d => list.Contains(d.QuoteId) && !d.IsDeleted)
                 .ToListAsync();
-            if (decisions.Any(PurchaseQuoteMutationRules.IsAttributedDecision))
+            if (decisions.Any(PurchaseQuoteMutationRules.IsDecisionFreezingDeletion))
                 throw BusinessException.RuleConflict(PurchaseQuoteMutationRules.DecidedNoDeleteText);
 
             var now = DateTime.Now;

@@ -88,19 +88,29 @@ public static class PurchaseQuoteMutationRules
         "该比价行已存在审批决定（已批准选中供应商 / 已拒绝）：商业条款不得再修改，仅允许修改非商业备注" +
         "（fail closed，绝不改写审批依据的供应商 / 价格 / 数量 / 币种 / 选中状态 / 批次，也绝不删除）";
 
-    /// <summary>已存在（实时审批生命周期追加的）归属审批决定的比价行不得删除的拒绝文案。</summary>
+    /// <summary>已存在有效审批决定（已批准 / 已拒绝）的比价行不得删除的拒绝文案。</summary>
     public const string DecidedNoDeleteText =
-        "该比价行已存在由实时审批生命周期追加的审批决定：不得删除（保留原始审批历史；如需废止请走既有审批流程，绝不硬删除）";
+        "该比价行已存在有效的供应商审批决定（已批准 / 已拒绝）：不得删除（保留原始审批决定与来源历史；" +
+        "缺失历史操作人元数据属于「未知归属」，绝不构成删除许可；如需废止请走既有审批流程，绝不硬删除）";
+
+    /// <summary>审批决定口径：已批准（与 <c>PurchaseQuoteApproval.Approved</c> 逐字一致）。</summary>
+    public const string ApprovedDecision = "Approved";
+
+    /// <summary>审批决定口径：已拒绝（与 <c>PurchaseQuoteApproval.Rejected</c> 逐字一致）。</summary>
+    public const string RejectedDecision = "Rejected";
 
     /// <summary>
-    /// 决定是否属于**由实时可信审批生命周期追加、带操作人归属**的决定（<c>CreatedBy</c> 由登录账号 / 请求决定人写入）。
-    /// <para><b>删除冻结口径（ERP-417）</b>：只有归属决定才冻结所在比价行的软删除；未归属决定
-    /// （历史 / 种子 / 导入数据，无 <c>CreatedBy</c>）保留 ERP-416 既有「本人行可软删除」契约——
-    /// 软删除只隐藏比价行，<see cref="PurchaseQuoteDecision"/> 审批证据行绝不被删除 / 修改，血缘依旧完整，
-    /// 也绝不存在任何硬删除入口。</para>
+    /// 比价行是否已被<b>有效审批决定</b>冻结软删除（ERP-419）。
+    /// <para><b>删除冻结判据</b>：只要存在一条未删除、决定为「已批准 / 已拒绝」的持久化决定，即冻结所在比价行的
+    /// 软删除——<b>与操作人归属无关</b>：<c>CreatedBy</c> 为空 / 为零（历史 / 种子 / 导入数据）只表示「未知归属」，
+    /// 绝不构成删除已批准来源的许可。缺失的操作人元数据原样保留，绝不回溯臆造操作人、也不自动修复审计。</para>
+    /// <para><b>与商业冻结的区别</b>：商业条款冻结对任何有效决定都生效（<see cref="DecidedImmutableText"/>），
+    /// 与本判据一致；真正未决定 / 未转换的草稿仍按既有契约可软删除。</para>
     /// </summary>
-    public static bool IsAttributedDecision(PurchaseQuoteDecision? decision)
-        => decision is not null && decision.CreatedBy is > 0;
+    public static bool IsDecisionFreezingDeletion(PurchaseQuoteDecision? decision)
+        => decision is not null && !decision.IsDeleted
+           && (string.Equals(decision.Decision, ApprovedDecision, StringComparison.Ordinal)
+               || string.Equals(decision.Decision, RejectedDecision, StringComparison.Ordinal));
 
     /// <summary>已转采购订单的比价行不可再修改 / 删除的拒绝文案。</summary>
     public const string ConvertedImmutableText =

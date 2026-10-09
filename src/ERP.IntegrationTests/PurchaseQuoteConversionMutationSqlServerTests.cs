@@ -22,7 +22,8 @@ namespace ERP.IntegrationTests;
 /// 「采购订单」<c>purchase-order</c> 菜单授权与业务员客户数据范围，不新增 / 不修改任何权限模型，
 /// 无匿名 / 管理员降级。</item>
 /// <item><b>两个独立连接竞态</b>（真实 GUID 独占库、两条真实 <see cref="ErpDbContext"/> 连接）：
-/// ① 单行 vs 单行；② 单行 vs 重叠批次；③ 转换 vs 来源比价行删除；④ 转换 vs 归属销售订单取消
+/// ① 单行 vs 单行；② 单行 vs 重叠批次；③ 转换 vs 历史删除尝试（ERP-419：已批准来源的有效决定
+/// 不论创建人归属一律冻结删除 → 转换放行、删除受控拒绝、来源与决定都不消失）；④ 转换 vs 归属销售订单取消
 /// （与真实取消路由共用同一把销售订单行锁）。每例都断言「同一来源行恰好一条已提交订单血缘」。</item>
 /// <item><b>受控拒绝</b>：币种无法识别（绝不回退 CNY）、供应商 / 商品档案停用、单位缺失、
 /// 归属销售订单删除 / 取消 / 未审核。</item>
@@ -175,10 +176,15 @@ public sealed class PurchaseQuoteConversionMutationSqlServerTests
         }
     }
 
-    // ==================== 两个独立连接竞态：转换 vs 来源比价行删除 ====================
+    // ==================== 两个独立连接竞态：转换 vs 历史删除尝试 ====================
 
+    /// <summary>
+    /// ERP-419：已批准来源上存在的有效决定（历史 / 种子数据，缺失创建人归属 = 未知归属）冻结软删除，
+    /// 因此并发的「转换 vs 删除」不再可能出现「删除赢家」：转换一律放行并原子落订单血缘，删除一律受控拒绝；
+    /// 来源、审批决定与订单都不会消失，也绝不生成无来源订单。
+    /// </summary>
     [Fact]
-    public async Task 竞态_转换与来源删除_恰好一个赢家且永不生成无来源订单()
+    public async Task 竞态_转换与历史删除尝试_转换放行且删除被拒_来源与决定绝不消失()
     {
         Guard();
         long quoteId;
@@ -207,32 +213,24 @@ public sealed class PurchaseQuoteConversionMutationSqlServerTests
         var convert = await convertTask;
         var delete = await deleteTask;
 
-        Assert.True(convert.Success ^ delete.Success, $"convert={convert.Error}; delete={delete.Error}");
+        Assert.True(convert.Success, convert.Error);
+        Assert.False(delete.Success, delete.Error);
+        Assert.True(
+            delete.Error.Contains(PurchaseQuoteMutationRules.DecidedNoDeleteText, StringComparison.Ordinal)
+            || delete.Error.Contains(PurchaseQuoteMutationRules.ConvertedImmutableText, StringComparison.Ordinal)
+            || delete.Error.Contains(PurchaseQuoteMutationRules.ConcurrentMutationText, StringComparison.Ordinal),
+            delete.Error);
 
         await using var check = _fixture.CreateDbContext();
         var row = await check.PurchaseQuotes.AsNoTracking().SingleAsync(q => q.Id == quoteId);
+        Assert.False(row.IsDeleted);                                 // 来源保留：订单 + 来源留痕
+        Assert.Equal(PurchaseQuoteConversion.ConvertedStatus, row.Status);
         var orders = await check.PurchaseOrders.AsNoTracking()
             .Where(o => o.Remark.Contains($"比价行 #{quoteId}）")).ToListAsync();
-
-        if (convert.Success)
-        {
-            Assert.False(row.IsDeleted);                                 // 赢家：订单 + 来源留痕
-            Assert.Equal(PurchaseQuoteConversion.ConvertedStatus, row.Status);
-            Assert.Single(orders);
-            Assert.Equal(orders[0].OrderNo, row.RefOrderNo);
-        }
-        else
-        {
-            // 删除赢家：转换受控拒绝（删除先行 → NotFound；删除与加锁交错 → 锁内重读发现成员消失 → RuleConflict）。
-            Assert.True(row.IsDeleted);
-            Assert.Empty(orders);
-            Assert.Equal(PurchaseQuoteConversion.SelectedStatus, row.Status);
-            Assert.Equal(string.Empty, row.RefOrderNo ?? string.Empty);
-            Assert.True(
-                convert.Error.Contains(ErrorCodes.NotFound.ToString(), StringComparison.Ordinal)
-                || convert.Error.Contains(ErrorCodes.RuleConflict.ToString(), StringComparison.Ordinal),
-                convert.Error);
-        }
+        Assert.Single(orders);
+        Assert.Equal(orders[0].OrderNo, row.RefOrderNo);
+        Assert.True(await check.PurchaseQuoteDecisions.AsNoTracking()
+            .AnyAsync(d => d.QuoteId == quoteId && !d.IsDeleted));    // 审批决定同样保留
     }
 
     // ==================== 两个独立连接竞态：转换 vs 归属销售订单取消 ====================

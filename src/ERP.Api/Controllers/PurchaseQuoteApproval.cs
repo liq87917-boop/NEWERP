@@ -148,8 +148,9 @@ public static class PurchaseQuoteApproval
                 DecidedAt = DateTime.Now,
                 DecisionRef = DecisionRef(quote),
                 CreatedAt = DateTime.Now,
-                // ERP-417：归属操作人——实时认证请求取登录账号；无 HTTP 管线的进程内直调回退请求决定人。
-                // 归属决定是「删除冻结」的唯一判据（见 PurchaseQuoteMutationRules.IsAttributedDecision）。
+                // ERP-417 / ERP-419：操作人归属——实时认证请求取登录账号；无 HTTP 管线的进程内直调回退请求决定人。
+                // 归属仅用于审计溯源；删除冻结判据是所在比价行存在任何有效审批决定
+                // （PurchaseQuoteMutationRules.IsDecisionFreezingDeletion），与 CreatedBy 是否为空的「未知归属」无关。
                 CreatedBy = actor?.UserId ?? request.DecidedBy
             };
             db.PurchaseQuoteDecisions.Add(row);
