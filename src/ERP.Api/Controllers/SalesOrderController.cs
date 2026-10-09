@@ -179,11 +179,53 @@ public class SalesOrderController : DocumentControllerBase<SalesOrder>
     /// 销售交期异常工作台（ERP-102，只读派生、分页有界）：按客户 + 显式 as-of 基准日过滤销售订单，
     /// 报告订单头 / 明细行交货日期（明细行优先）与「已订 / 已审核出货 / 未出」数量证据，并派生逾期 / 即将到期 / 已出齐 / 在途 / 未知交期状态；
     /// 缺日期或出货证据不完整为未知；不改写订单状态与已登记进度，不执行迁移 / 生产 SQL / 真实数据库操作 / 部署。
+    /// <para>ERP-432：派生之前先复核实时身份 / 既有「销售订单」菜单 / ERP-097 权威客户范围，并把权威客户范围下推到
+    /// 计数 / 分页之前（该工作台的既有唯一客户筛选是单一 <c>CustomerId</c>，无法表达「范围内全部客户」集合过滤，
+    /// 因此受限账号只能查询范围内客户：范围恰为单一客户时其「全部客户」即该客户，其余无法安全表达的情形一律
+    /// fail closed 返回空报表）；拒绝时返回既有受控非披露错误，绝不返回任何行或计数。</para>
     /// </summary>
     [HttpGet("delivery-exceptions")]
     public async Task<IActionResult> DeliveryExceptions([FromQuery] SalesOrderDeliveryExceptionQuery query)
-        => Ok(ApiResponse<SalesOrderDeliveryExceptionReport>.Success(
-            await SalesOrderDeliveryExceptions.ForQueryAsync(Db, query)));
+    {
+        var scope = await EnsureExecutionEvidenceAuthorizedAsync();
+        return Ok(ApiResponse<SalesOrderDeliveryExceptionReport>.Success(
+            await QueryDeliveryExceptionsAsync(query, scope)));
+    }
+
+    /// <summary>
+    /// ERP-432 交期异常工作台的权威客户范围下推（先授权、后派生）：复用
+    /// <see cref="SalespersonDataScopeService.TryResolveScopedCustomerFilter"/> 把范围归约为该工作台既有唯一的
+    /// 单客户筛选（<see cref="SalesOrderDeliveryExceptionQuery.CustomerId"/>）。
+    /// 受限账号指定范围外客户、或未显式指定客户且范围非单一客户（无法由单客户筛选安全表达「范围内全部客户」）时
+    /// 一律 fail closed —— 返回与本工作台同口径的**空报表（0 计数、无行）**，绝不带着范围外条件去派生，
+    /// 也绝不返回范围外客户的订单计数 / 数量 / 出货证据；特权账号保持既有不过滤口径。
+    /// </summary>
+    private async Task<SalesOrderDeliveryExceptionReport> QueryDeliveryExceptionsAsync(
+        SalesOrderDeliveryExceptionQuery query, SalespersonDataScope? scope)
+    {
+        query.Normalize();
+        if (scope is not null)
+        {
+            if (!SalespersonDataScopeService.TryResolveScopedCustomerFilter(scope, query.CustomerId, out var customerId))
+            {
+                return new SalesOrderDeliveryExceptionReport
+                {
+                    AsOfDate = query.AsOf,
+                    CustomerId = query.CustomerId,
+                    Total = 0,
+                    Page = query.Page,
+                    PageSize = query.PageSize,
+                    TotalPages = 0,
+                    Counts = new SalesOrderDeliveryExceptionCounts(),
+                    Items = new List<SalesOrderDeliveryExceptionItem>(),
+                };
+            }
+
+            query.CustomerId = customerId;
+        }
+
+        return await SalesOrderDeliveryExceptions.ForQueryAsync(Db, query);
+    }
 
     /// <summary>
     /// 销售订单退货影响（ERP-101，只读派生）：按显式链接链「销售退货 → 来源出库单 → 本销售订单」派生
@@ -204,11 +246,16 @@ public class SalesOrderController : DocumentControllerBase<SalesOrder>
     /// <summary>
     /// 销售订单出货 / 财务进度报表（ERP-032，只读派生、分页有界）：按「客户 + 币种」分组汇总已按权威口径派生的出货数量与收款链接金额，
     /// 不同币种分别成行、绝不合并、不做汇率换算；未链接 / 命中上限一律显式标注未知，不作为应收余额或账龄使用。
+    /// <para>ERP-432：派生之前先复核实时身份 / 既有「销售订单」菜单 / ERP-097 权威客户范围，并把范围下推到计数 / 分页
+    /// 之前；拒绝时返回既有受控非披露错误，绝不返回任何行或计数。</para>
     /// </summary>
     [HttpGet("shipment-finance-report")]
     public async Task<IActionResult> ShipmentFinanceReport([FromQuery] SalesOrderShipmentFinanceQuery query)
-        => Ok(ApiResponse<SalesOrderShipmentFinanceReportView>.Success(
-            await SalesOrderShipmentFinanceReport.ForQueryAsync(Db, query)));
+    {
+        var scope = await EnsureExecutionEvidenceAuthorizedAsync();
+        return Ok(ApiResponse<SalesOrderShipmentFinanceReportView>.Success(
+            await SalesOrderShipmentFinanceReport.ForQueryAsync(Db, query, scope)));
+    }
 
     /// <summary>
     /// 客户订单与收款核对报表（ERP-046，**只读派生**、分页有界）：按「客户 + 币种」分组核对销售订单与收款证据 ——
@@ -219,11 +266,16 @@ public class SalesOrderController : DocumentControllerBase<SalesOrder>
     /// <para>本接口<strong>不是</strong>应收账款台账、<strong>不是</strong>客户对账单、<strong>不是</strong>收款授权或结算结果，
     /// 也<strong>不是</strong>账龄表：不推算账期与到期日、不判断是否已收讫，且<strong>不写库</strong>
     /// （不改销售订单、出库单、收款单、收款申请、客户信用、库存、财务与税务记录）。</para>
+    /// <para>ERP-432：派生之前先复核实时身份 / 既有「销售订单」菜单 / ERP-097 权威客户范围，并把范围下推到计数 / 分页
+    /// 之前；拒绝时返回既有受控非披露错误，绝不返回任何行或计数。</para>
     /// </summary>
     [HttpGet("receipt-reconciliation-report")]
     public async Task<IActionResult> ReceiptReconciliationReport([FromQuery] SalesOrderReceiptReconciliationQuery query)
-        => Ok(ApiResponse<SalesOrderReceiptReconciliationReport>.Success(
-            await SalesOrderReceiptReconciliation.ForQueryAsync(Db, query)));
+    {
+        var scope = await EnsureExecutionEvidenceAuthorizedAsync();
+        return Ok(ApiResponse<SalesOrderReceiptReconciliationReport>.Success(
+            await SalesOrderReceiptReconciliation.ForQueryAsync(Db, query, scope)));
+    }
 
     /// <summary>
     /// 单张销售订单的收款引用证据（ERP-054，**只读派生**）：只按 ERP-053 的持久化收款引用行

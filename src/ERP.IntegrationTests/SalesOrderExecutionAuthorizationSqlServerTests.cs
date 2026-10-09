@@ -67,6 +67,15 @@ public sealed class SalesOrderExecutionAuthorizationSqlServerTests
         ("invoice-evidence", (c, id) => c.InvoiceEvidence(id)),
     };
 
+    /// <summary>ERP-432 三个运营核对读取路由（路由标签 → 控制器动作；默认查询无客户筛选）。</summary>
+    private static readonly (string Label, Func<SalesOrderController, Task<IActionResult>> Call)[] ReportEntries =
+    {
+        ("delivery-exceptions", c => c.DeliveryExceptions(new SalesOrderDeliveryExceptionQuery())),
+        ("shipment-finance-report", c => c.ShipmentFinanceReport(new SalesOrderShipmentFinanceQuery())),
+        ("receipt-reconciliation-report",
+            c => c.ReceiptReconciliationReport(new SalesOrderReceiptReconciliationQuery())),
+    };
+
     /// <summary>专用目标护栏（任何数据库访问之前）。</summary>
     private void Guard() => SalesOrderExecutionAuthorizationSqlServerFixture
         .AssertDedicatedTarget(_fixture.ConnectionString);
@@ -245,6 +254,13 @@ public sealed class SalesOrderExecutionAuthorizationSqlServerTests
                 Assert.Equal(text, ex.Message);
             }
 
+            foreach (var (label, call) in ReportEntries)
+            {
+                var reportEx = await Assert.ThrowsAsync<BusinessException>(() => call(ctl));
+                Assert.True(reportEx.Code == code, $"{label} 期望 {code} 实际 {reportEx.Code}");
+                Assert.Equal(text, reportEx.Message);
+            }
+
             await Assert.ThrowsAsync<BusinessException>(() => ctl.ReceiptEvidenceSummaries(
                 new SalesOrderReceiptEvidenceQuery { Ids = _fixture.OrderAId.ToString() }));
         }
@@ -331,6 +347,69 @@ public sealed class SalesOrderExecutionAuthorizationSqlServerTests
         Assert.Contains(_fixture.OrderANo, allowedJson, StringComparison.Ordinal);
         AssertUnchanged(before, await SnapshotAsync());
     }
+    // ==================== 7. ERP-432 运营核对读取路由：实时授权 + 范围下推 ====================
+
+    [Fact]
+    public async Task 受限业务员_三个运营核对读取路由_只返回范围内客户数据()
+    {
+        Guard();
+        await using var db = _fixture.CreateDbContext();
+        var ctl = NewController(db, _fixture.RestrictedUserId);
+
+        var delivery = await OkDataAsync<SalesOrderDeliveryExceptionReport>(
+            ctl.DeliveryExceptions(new SalesOrderDeliveryExceptionQuery()));
+        Assert.Equal(1, delivery.Total);
+        Assert.Equal(_fixture.CustomerAId, Assert.Single(delivery.Items).CustomerId);
+
+        var shipment = await OkDataAsync<SalesOrderShipmentFinanceReportView>(
+            ctl.ShipmentFinanceReport(new SalesOrderShipmentFinanceQuery()));
+        Assert.Equal(1, shipment.Total);
+        Assert.Equal(_fixture.CustomerAId, Assert.Single(shipment.Groups).CustomerId);
+
+        var receipt = await OkDataAsync<SalesOrderReceiptReconciliationReport>(
+            ctl.ReceiptReconciliationReport(new SalesOrderReceiptReconciliationQuery()));
+        Assert.Equal(1, receipt.Total);
+        Assert.Equal(_fixture.CustomerAId, Assert.Single(receipt.Groups).CustomerId);
+    }
+
+    [Fact]
+    public async Task 受限业务员_筛选范围外客户_三个运营核对读取路由返回空且无计数()
+    {
+        Guard();
+        await using var db = _fixture.CreateDbContext();
+        var ctl = NewController(db, _fixture.RestrictedUserId);
+        var foreign = _fixture.CustomerBId;
+
+        var delivery = await OkDataAsync<SalesOrderDeliveryExceptionReport>(
+            ctl.DeliveryExceptions(new SalesOrderDeliveryExceptionQuery { CustomerId = foreign }));
+        Assert.Equal(0, delivery.Total);
+        Assert.Empty(delivery.Items);
+
+        var shipment = await OkDataAsync<SalesOrderShipmentFinanceReportView>(
+            ctl.ShipmentFinanceReport(new SalesOrderShipmentFinanceQuery { CustomerId = foreign }));
+        Assert.Equal(0, shipment.Total);
+        Assert.Empty(shipment.Groups);
+
+        var receipt = await OkDataAsync<SalesOrderReceiptReconciliationReport>(
+            ctl.ReceiptReconciliationReport(new SalesOrderReceiptReconciliationQuery { CustomerId = foreign }));
+        Assert.Equal(0, receipt.Total);
+        Assert.Empty(receipt.Groups);
+    }
+
+    [Fact]
+    public async Task 特权账号_三个运营核对读取路由保留既有全量口径()
+    {
+        Guard();
+        await using var db = _fixture.CreateDbContext();
+        var ctl = NewController(db, _fixture.PrivilegedUserId);
+
+        Assert.Equal(2, (await OkDataAsync<SalesOrderDeliveryExceptionReport>(
+            ctl.DeliveryExceptions(new SalesOrderDeliveryExceptionQuery()))).Total);
+        Assert.Equal(2, (await OkDataAsync<SalesOrderShipmentFinanceReportView>(
+            ctl.ShipmentFinanceReport(new SalesOrderShipmentFinanceQuery()))).Total);
+        Assert.Equal(2, (await OkDataAsync<SalesOrderReceiptReconciliationReport>(
+            ctl.ReceiptReconciliationReport(new SalesOrderReceiptReconciliationQuery()))).Total);
+    }
 }
 
 /// <summary>
@@ -363,6 +442,8 @@ public sealed class SalesOrderExecutionAuthorizationSqlServerFixture : IAsyncLif
     public long OrderAId { get; private set; }
     public long OrderBId { get; private set; }
     public long DeletedOrderAId { get; private set; }
+    public long CustomerAId { get; private set; }
+    public long CustomerBId { get; private set; }
     public string OrderANo { get; private set; } = string.Empty;
 
     public async Task InitializeAsync()
@@ -482,6 +563,8 @@ public sealed class SalesOrderExecutionAuthorizationSqlServerFixture : IAsyncLif
         };
         db.BaseCustomers.AddRange(customerA, customerB);
         await db.SaveChangesAsync();
+        CustomerAId = customerA.Id;
+        CustomerBId = customerB.Id;
 
         await SeedOrdersAsync(db, tag, customerA.Id, customerB.Id);
 

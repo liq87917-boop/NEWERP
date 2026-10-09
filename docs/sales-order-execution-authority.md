@@ -123,3 +123,55 @@
   （`ERP-410` / `ERP-411`）的既有门禁与读侧范围。
 - 不清理 / 不删除任何既有业务行、库存来源审计或既有失败日志；不执行生产凭据或生产数据操作。
 - 浏览器验收按任务配置为 `browser_acceptance.required = false`：不运行真实 Edge / UI / 截图验收。
+
+## 7. ERP-432：运营核对读取路由（`delivery-exceptions` / `shipment-finance-report` / `receipt-reconciliation-report`）
+
+ERP-413 只收敛了**单张**执行证据（时间线 / 财务核对 / 进度 / 退货影响 / 收款与发票证据，含列表批量汇总）；
+同一控制器里三条**运营核对读取**路由仍直接派生，不解析实时身份 / 既有菜单 / 客户范围：
+
+| 路由 | 修复前行为 |
+| --- | --- |
+| `GET /api/sales-orders/delivery-exceptions` | 直接调用 `SalesOrderDeliveryExceptions.ForQueryAsync`，无任何授权 |
+| `GET /api/sales-orders/shipment-finance-report` | 直接调用 `SalesOrderShipmentFinanceReport.ForQueryAsync`，无任何授权 |
+| `GET /api/sales-orders/receipt-reconciliation-report` | 直接调用 `SalesOrderReceiptReconciliation.ForQueryAsync`，无任何授权 |
+
+任何已登录账号只要调用这三条路由，就能读取**全部客户**的交期 / 出货 / 收款 / 发票计数与金额。
+
+**修复（复用既有唯一权威口径，不新增任何授权）**：
+
+- 三条路由在**任何派生之前**统一调用既有 `EnsureExecutionEvidenceAuthorizedAsync()`（= 实时身份 + 既有「销售订单」`sales-order`
+  菜单 + ERP-097 权威客户范围，特权账号豁免菜单但仍须通过实时身份；口径与 ERP-413 单张证据入口**逐字一致**）。
+- **出货 / 财务进度报表与订单收款核对报表**：解析出的 `SalespersonDataScope` 直接作为两个派生助手的既有可选 `scope`
+  参数下推（`SalesOrderShipmentFinanceReport.ForQueryAsync` / `SalesOrderReceiptReconciliation.ForQueryAsync`），在
+  `ApplyFilters` 内、`Count` / 分组 / 分页与任何物化**之前**按 `SalespersonDataScopeService.FilterByCustomer` 过滤：
+  受限账号只命中范围内客户，绝不返回范围外客户的订单计数 / 数量 / 出货数量 / 收款金额。
+- **交期异常工作台**：其既有唯一客户筛选是单一 `SalesOrderDeliveryExceptionQuery.CustomerId`，无法表达「范围内全部客户」
+  的集合过滤（该派生助手的既有两参签名不在本任务允许改动范围内，不新增第二个过滤口径）。因此控制器复用新增的**纯判定**
+  `SalespersonDataScopeService.TryResolveScopedCustomerFilter(scope, requestedCustomerId, out effectiveCustomerId)`
+  把权威范围归约为该单客户筛选，并在派生之前下推：
+  - 特权账号：**不过滤**，原样保留请求值（既有全量口径）。
+  - 受限账号**显式指定**客户：范围内 → 按该客户派生；范围外 → **fail closed**（不派生）。
+  - 受限账号**未指定**客户：范围恰为单一客户时其「全部客户」即该客户（按该客户派生）；范围非单一客户 → **fail closed**
+    （无法由单客户筛选安全表达「范围内全部客户」，绝不冒然带范围外条件派生）。
+  - fail closed 一律返回与本工作台**同口径的空报表**（`Total = 0`、空 `Items`、空 `Counts`），不透露不可访问客户的存在性。
+- **拒绝语义**：身份 / 菜单拒绝返回既有受控非披露错误（`Err:Unauthorized` / `Err:Forbidden`）与既有文案，
+  **不返回任何行或计数**；范围外 / 无法表达的客户筛选返回**空集与 0 计数**，不透露不可访问客户的存在性。
+- **保留契约**：响应 DTO、币种 / 单位分离、`null`-as-unknown、`Truncated` 与证据分桶口径**全部不变**；
+  拒绝路径**零写入**（不改销售订单 / 出库 / 收款 / 分摊 / 发票 / 财务 / 库存行，不产生操作日志）。
+- **进程内直调边界**：与 ERP-413 只读证据入口同源 —— 真实 HTTP 请求（`Request.Path` 已赋值）一律执行授权；
+  仅「既无任何登录身份、又不在 HTTP 请求管线内」的进程内调用保持既有免授权口径（既有静态派生单测据此沿用两参调用）。
+
+### 7.1 验证证据（`ERP-432`）
+
+- **单元测试**（`src/ERP.UnitTests/SalesOrderExecutionAuthorizationTests.cs` §9）：受限业务员（单一分配客户）三条路由只返回
+  范围内客户；筛选范围外客户返回空且无计数；受限多客户未指定客户时交期异常工作台 fail closed（空报表）而两个集合范围报表
+  仍只返回范围内全部客户；显式指定范围内客户时三条路由只返回该客户；特权账号保留既有全量口径；
+  `TryResolveScopedCustomerFilter` 的纯判定分支（特权 / 显式范围内 / 显式范围外 / 单一客户默认 / 多客户与空范围 fail closed）
+  逐条断言；无身份 / 已删除 / 已禁用 / 无菜单 / 仅导出菜单 / 已撤销菜单六类身份在三条路由上**逐条** fail closed 且零写入。
+- **真实隔离 SQL 测试**（`src/ERP.IntegrationTests/SalesOrderExecutionAuthorizationSqlServerTests.cs` §7）：同样只使用
+  全新 GUID 的 `(localdb)\NEWERP_AutoAcceptance` / `NEWERP_AUTOTEST_*` / `Integrated Security=true` 库，
+  `AssertDedicatedTarget` 在任何数据库访问之前放行；以真实 `SalesOrderController` 逐条驱动三条路由证明
+  受限本人可见 / 范围外为空 / 特权全量 / 拒绝矩阵 fail closed（零写入快照）。
+- **构建与回归**：`.NET 8` Release 构建 0 警告 0 错误；`ERP.UnitTests` 全量回归保持绿色。
+  构建完成不等于阶段验收：真实 SQL 用例必须在受控 localdb 上真实执行通过才算验收证据。
+

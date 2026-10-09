@@ -475,6 +475,230 @@ public class SalesOrderExecutionAuthorizationTests
             (await SalesOrderReturnImpact.ForOrderAsync(db, order.Id)).NetShippedTotal);
     }
 
+    // ==================== 9. ERP-432 运营核对读取路由：实时授权 + 范围下推（交期异常 / 出货财务 / 订单收款核对） ====================
+
+    [Fact]
+    public async Task 受限业务员_三个运营核对读取路由_只返回范围内客户数据()
+    {
+        using var db = TestDbFactory.Create();
+        var (userId, employeeId, _) = SeedOperator(db);
+        var own = SeedCustomer(db, "C432-OWN", employeeId);
+        var foreign = SeedCustomer(db, "C432-FOREIGN", null);
+        SeedOrder(db, "SO-432-OWN", own.Id);
+        SeedOrder(db, "SO-432-FOREIGN", foreign.Id);
+
+        var ctl = NewController(db, userId);
+
+        var delivery = await OkDataAsync<SalesOrderDeliveryExceptionReport>(
+            () => ctl.DeliveryExceptions(new SalesOrderDeliveryExceptionQuery()));
+        Assert.Equal(1, delivery.Total);
+        Assert.Equal(own.Id, Assert.Single(delivery.Items).CustomerId);
+
+        var shipment = await OkDataAsync<SalesOrderShipmentFinanceReportView>(
+            () => ctl.ShipmentFinanceReport(new SalesOrderShipmentFinanceQuery()));
+        Assert.Equal(1, shipment.Total);
+        Assert.Equal(own.Id, Assert.Single(shipment.Groups).CustomerId);
+
+        var receipt = await OkDataAsync<SalesOrderReceiptReconciliationReport>(
+            () => ctl.ReceiptReconciliationReport(new SalesOrderReceiptReconciliationQuery()));
+        Assert.Equal(1, receipt.Total);
+        Assert.Equal(own.Id, Assert.Single(receipt.Groups).CustomerId);
+    }
+
+    [Fact]
+    public async Task 受限业务员_筛选范围外客户_三个运营核对读取路由返回空且无计数()
+    {
+        using var db = TestDbFactory.Create();
+        var (userId, employeeId, _) = SeedOperator(db);
+        var own = SeedCustomer(db, "C432-SCOPE-OWN", employeeId);
+        var foreign = SeedCustomer(db, "C432-SCOPE-FOREIGN", null);
+        SeedOrder(db, "SO-432-SCOPE-OWN", own.Id);
+        SeedOrder(db, "SO-432-SCOPE-FOREIGN", foreign.Id);
+
+        var ctl = NewController(db, userId);
+
+        var delivery = await OkDataAsync<SalesOrderDeliveryExceptionReport>(
+            () => ctl.DeliveryExceptions(new SalesOrderDeliveryExceptionQuery { CustomerId = foreign.Id }));
+        Assert.Equal(0, delivery.Total);
+        Assert.Empty(delivery.Items);
+
+        var shipment = await OkDataAsync<SalesOrderShipmentFinanceReportView>(
+            () => ctl.ShipmentFinanceReport(new SalesOrderShipmentFinanceQuery { CustomerId = foreign.Id }));
+        Assert.Equal(0, shipment.Total);
+        Assert.Empty(shipment.Groups);
+
+        var receipt = await OkDataAsync<SalesOrderReceiptReconciliationReport>(
+            () => ctl.ReceiptReconciliationReport(new SalesOrderReceiptReconciliationQuery { CustomerId = foreign.Id }));
+        Assert.Equal(0, receipt.Total);
+        Assert.Empty(receipt.Groups);
+    }
+
+    [Fact]
+    public async Task 特权账号_三个运营核对读取路由保留既有全量口径()
+    {
+        using var db = TestDbFactory.Create();
+        var privilegedUserId = TestAuth.SeedPrivilegedUser(db);
+        var first = SeedCustomer(db, "C432-PRIV-A", null);
+        var second = SeedCustomer(db, "C432-PRIV-B", null);
+        SeedOrder(db, "SO-432-PRIV-A", first.Id);
+        SeedOrder(db, "SO-432-PRIV-B", second.Id);
+
+        var ctl = NewController(db, privilegedUserId);
+
+        Assert.Equal(2, (await OkDataAsync<SalesOrderDeliveryExceptionReport>(
+            () => ctl.DeliveryExceptions(new SalesOrderDeliveryExceptionQuery()))).Total);
+        Assert.Equal(2, (await OkDataAsync<SalesOrderShipmentFinanceReportView>(
+            () => ctl.ShipmentFinanceReport(new SalesOrderShipmentFinanceQuery()))).Total);
+        Assert.Equal(2, (await OkDataAsync<SalesOrderReceiptReconciliationReport>(
+            () => ctl.ReceiptReconciliationReport(new SalesOrderReceiptReconciliationQuery()))).Total);
+    }
+
+
+    [Fact]
+    public async Task 身份与菜单拒绝矩阵_三个运营核对读取路由fail_closed且零写入()
+    {
+        using var db = TestDbFactory.Create();
+        var (menuLessId, _, _) = SeedOperator(db, menu: false);
+        var (exportOnlyId, _, exportOnlyRole) = SeedOperator(db, menu: false);
+        GrantMenu(db, exportOnlyRole.Id, SalesOrderDocumentOutputAuthorizationRules.ExportMenuCode);
+        var (revokedId, _, revokedRole) = SeedOperator(db);
+        db.SysRoleMenus.RemoveRange(db.SysRoleMenus.Where(rm => rm.RoleId == revokedRole.Id));
+        db.SaveChanges();
+        var (disabledId, _, _) = SeedOperator(db, status: UserStatus.Disabled);
+        var (deletedId, _, _) = SeedOperator(db);
+        var deletedUser = db.SysUsers.Single(u => u.Id == deletedId);
+        deletedUser.IsDeleted = true;
+        db.SaveChanges();
+
+        var customer = SeedCustomer(db, "C432-DENY", null);
+        SeedOrder(db, "SO-432-DENY", customer.Id);
+        var ordersBefore = db.SalesOrders.Count();
+
+        (long? UserId, int Code, string Text)[] cases =
+        {
+            (null, ErrorCodes.Unauthorized, SalesOrderExecutionAuthorizationRules.UnauthorizedText),
+            (deletedId, ErrorCodes.Unauthorized, SalesOrderExecutionAuthorizationRules.UserDeletedText),
+            (disabledId, ErrorCodes.Forbidden, SalesOrderExecutionAuthorizationRules.UserDisabledText),
+            (menuLessId, ErrorCodes.Forbidden, SalesOrderExecutionAuthorizationRules.MenuDeniedText),
+            (exportOnlyId, ErrorCodes.Forbidden, SalesOrderExecutionAuthorizationRules.MenuDeniedText),
+            (revokedId, ErrorCodes.Forbidden, SalesOrderExecutionAuthorizationRules.MenuDeniedText),
+        };
+
+        foreach (var (userId, code, text) in cases)
+        {
+            var ctl = NewController(db, userId);
+
+            var delivery = await Assert.ThrowsAsync<BusinessException>(
+                () => ctl.DeliveryExceptions(new SalesOrderDeliveryExceptionQuery()));
+            Assert.Equal(code, delivery.Code);
+            Assert.Equal(text, delivery.Message);
+
+            var shipment = await Assert.ThrowsAsync<BusinessException>(
+                () => ctl.ShipmentFinanceReport(new SalesOrderShipmentFinanceQuery()));
+            Assert.Equal(code, shipment.Code);
+            Assert.Equal(text, shipment.Message);
+
+            var receipt = await Assert.ThrowsAsync<BusinessException>(
+                () => ctl.ReceiptReconciliationReport(new SalesOrderReceiptReconciliationQuery()));
+            Assert.Equal(code, receipt.Code);
+            Assert.Equal(text, receipt.Message);
+        }
+
+        Assert.Equal(ordersBefore, db.SalesOrders.Count());
+        Assert.Equal(0, db.SysOperationLogs.Count());
+    }
+
+
+    [Fact]
+    public async Task 受限业务员_多客户未指定客户_交期异常工作台fail_closed为空_其余两路由只返回范围内客户()
+    {
+        using var db = TestDbFactory.Create();
+        var (userId, employeeId, _) = SeedOperator(db);
+        var first = SeedCustomer(db, "C432-MULTI-A", employeeId);
+        var second = SeedCustomer(db, "C432-MULTI-B", employeeId);
+        var foreign = SeedCustomer(db, "C432-MULTI-X", null);
+        SeedOrder(db, "SO-432-MULTI-A", first.Id);
+        SeedOrder(db, "SO-432-MULTI-B", second.Id);
+        SeedOrder(db, "SO-432-MULTI-X", foreign.Id);
+
+        var ctl = NewController(db, userId);
+
+        // 交期异常工作台既有唯一客户筛选是单一 CustomerId：受限账号未指定客户且范围非单一客户时无法安全表达
+        // 「范围内全部客户」→ fail closed（空报表、0 计数、无行），绝不返回范围外客户的订单计数 / 数量。
+        var delivery = await OkDataAsync<SalesOrderDeliveryExceptionReport>(
+            () => ctl.DeliveryExceptions(new SalesOrderDeliveryExceptionQuery()));
+        Assert.Equal(0, delivery.Total);
+        Assert.Empty(delivery.Items);
+        Assert.Equal(0, delivery.Counts.Total);
+
+        // 出货 / 财务进度与订单收款核对支持集合范围下推：仍返回范围内全部客户，绝不返回范围外客户。
+        var shipment = await OkDataAsync<SalesOrderShipmentFinanceReportView>(
+            () => ctl.ShipmentFinanceReport(new SalesOrderShipmentFinanceQuery()));
+        Assert.Equal(2, shipment.Total);
+        Assert.All(shipment.Groups, g => Assert.Contains(g.CustomerId, new[] { first.Id, second.Id }));
+
+        var receipt = await OkDataAsync<SalesOrderReceiptReconciliationReport>(
+            () => ctl.ReceiptReconciliationReport(new SalesOrderReceiptReconciliationQuery()));
+        Assert.Equal(2, receipt.Total);
+        Assert.All(receipt.Groups, g => Assert.Contains(g.CustomerId, new[] { first.Id, second.Id }));
+    }
+
+    [Fact]
+    public async Task 受限业务员_显式指定范围内客户_三条运营核对读取路由只返回该客户()
+    {
+        using var db = TestDbFactory.Create();
+        var (userId, employeeId, _) = SeedOperator(db);
+        var first = SeedCustomer(db, "C432-PICK-A", employeeId);
+        var second = SeedCustomer(db, "C432-PICK-B", employeeId);
+        var foreign = SeedCustomer(db, "C432-PICK-X", null);
+        SeedOrder(db, "SO-432-PICK-A", first.Id);
+        SeedOrder(db, "SO-432-PICK-B", second.Id);
+        SeedOrder(db, "SO-432-PICK-X", foreign.Id);
+
+        var ctl = NewController(db, userId);
+
+        var delivery = await OkDataAsync<SalesOrderDeliveryExceptionReport>(
+            () => ctl.DeliveryExceptions(new SalesOrderDeliveryExceptionQuery { CustomerId = first.Id }));
+        Assert.Equal(1, delivery.Total);
+        Assert.Equal(first.Id, Assert.Single(delivery.Items).CustomerId);
+
+        var shipment = await OkDataAsync<SalesOrderShipmentFinanceReportView>(
+            () => ctl.ShipmentFinanceReport(new SalesOrderShipmentFinanceQuery { CustomerId = first.Id }));
+        Assert.Equal(1, shipment.Total);
+        Assert.Equal(first.Id, Assert.Single(shipment.Groups).CustomerId);
+
+        var receipt = await OkDataAsync<SalesOrderReceiptReconciliationReport>(
+            () => ctl.ReceiptReconciliationReport(new SalesOrderReceiptReconciliationQuery { CustomerId = first.Id }));
+        Assert.Equal(1, receipt.Total);
+        Assert.Equal(first.Id, Assert.Single(receipt.Groups).CustomerId);
+    }
+
+    [Fact]
+    public void 范围归约_特权原样_显式范围外fail_closed_单一客户按范围默认_多客户未指定fail_closed()
+    {
+        var privileged = new SalespersonDataScope { IsPrivileged = true, AllowedCustomerIds = null };
+        Assert.True(SalespersonDataScopeService.TryResolveScopedCustomerFilter(privileged, 7, out var privilegedEffective));
+        Assert.Equal(7, privilegedEffective);
+        Assert.True(SalespersonDataScopeService.TryResolveScopedCustomerFilter(privileged, null, out var privilegedAll));
+        Assert.Null(privilegedAll);
+
+        var single = new SalespersonDataScope { IsPrivileged = false, AllowedCustomerIds = new HashSet<long> { 11 } };
+        Assert.True(SalespersonDataScopeService.TryResolveScopedCustomerFilter(single, null, out var singleEffective));
+        Assert.Equal(11, singleEffective);
+        Assert.True(SalespersonDataScopeService.TryResolveScopedCustomerFilter(single, 11, out var ownEffective));
+        Assert.Equal(11, ownEffective);
+        Assert.False(SalespersonDataScopeService.TryResolveScopedCustomerFilter(single, 99, out var foreignEffective));
+        Assert.Null(foreignEffective);
+
+        var multi = new SalespersonDataScope { IsPrivileged = false, AllowedCustomerIds = new HashSet<long> { 11, 22 } };
+        Assert.False(SalespersonDataScopeService.TryResolveScopedCustomerFilter(multi, null, out var multiEffective));
+        Assert.Null(multiEffective);
+
+        var none = new SalespersonDataScope { IsPrivileged = false, AllowedCustomerIds = new HashSet<long>() };
+        Assert.False(SalespersonDataScopeService.TryResolveScopedCustomerFilter(none, null, out _));
+        Assert.False(SalespersonDataScopeService.TryResolveScopedCustomerFilter(none, 11, out _));
+    }
+
     // ==================== 8. 派生夹具（部分出货 / 退货 / 收款 / 发票证据） ====================
 
     private static void SeedDetail(ErpDbContext db, long salesOrderId, long productId, decimal quantity)
