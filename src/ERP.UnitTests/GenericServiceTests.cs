@@ -141,4 +141,32 @@ public class GenericServiceTests
         await service.DeleteAsync(warehouse.Id);
         await Assert.ThrowsAsync<BusinessException>(() => service.GetByIdAsync(warehouse.Id));
     }
+
+    /// <summary>
+    /// ERP-449：授权护栏位于控制器层，<see cref="GenericService{TEntity}"/> 的既有 CRUD 契约保持不变
+    /// （员工主数据同样可经通用服务分页 / 新增 / 更新 / 软删除）。
+    /// </summary>
+    [Fact]
+    public async Task GenericService_员工_既有CRUD契约保持不变()
+    {
+        using var db = TestDbFactory.Create();
+        var service = new GenericService<BaseEmployee>(db);
+        var employee = await service.CreateAsync(new BaseEmployee
+        {
+            EmployeeCode = "E001",
+            EmployeeName = "测试员工",
+            Status = 1
+        });
+
+        Assert.True(employee.Id > 0);
+        Assert.Equal("E001", (await service.GetByIdAsync(employee.Id)).EmployeeCode);
+        Assert.Equal(1, (await service.GetPagedAsync(new PageQuery { Page = 1, PageSize = 10 })).Total);
+
+        employee.EmployeeName = "改名员工";
+        await service.UpdateAsync(employee);
+        Assert.Equal("改名员工", (await service.GetByIdAsync(employee.Id)).EmployeeName);
+
+        await service.DeleteAsync(employee.Id);
+        await Assert.ThrowsAsync<BusinessException>(() => service.GetByIdAsync(employee.Id));
+    }
 }

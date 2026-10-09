@@ -231,19 +231,118 @@ public class SupplierController : BaseCrudController<BaseSupplier>
 }
 
 /// <summary>
-/// 员工资料控制器
+/// 员工资料控制器（ERP-449：为全部分页 / 全部 / 按主键读取与新增 / 修改 / 删除 / 批量删除路由，
+/// 以及业务员下拉（<c>salesmen</c>）补齐实时身份、既有「员工资料」（<c>employee</c>）功能菜单授权与有界字段校验）。
 /// </summary>
+/// <remarks>
+/// 员工主数据提供销售订单 / 客户 / 报价单 / PI / 装柜清单与 ERP-097 业务员数据范围所解析的业务员身份；
+/// 每条路由在读取或写入任何 <c>BaseEmployees</c> 行之前，都先经实时身份 + 既有员工菜单授权
+/// （见 <see cref="EmployeeAuthorizationRules"/>），新增 / 修改另经有界字段校验。
+/// 不新增任何菜单 / 权限 / 用户授权，也不改变分页 / 响应契约、业务员下拉口径与员工编码唯一索引语义。
+/// </remarks>
 [ApiController]
 [Route("api/base/employees")]
 [Authorize]
 public class EmployeeController : BaseCrudController<BaseEmployee>
 {
-    public EmployeeController(IGenericService<BaseEmployee> service) : base(service) { }
+    private readonly IErpDbContext _db;
 
-    /// <summary>获取业务员列表（供下拉选择）</summary>
+    public EmployeeController(IGenericService<BaseEmployee> service, IErpDbContext db) : base(service)
+    {
+        _db = db;
+    }
+
+    /// <summary>当前登录用户 Id（只来自已认证请求主体；缺失 / 非数字 / 非正返回 null，由实时授权护栏 fail closed）</summary>
+    private long? CurrentUserId()
+    {
+        var value = ControllerContext?.HttpContext?.User?.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        return long.TryParse(value, out var id) && id > 0 ? id : null;
+    }
+
+    /// <summary>
+    /// 是否需要执行实时授权（与仓库 / 供应商既有口径同源）：真实 HTTP 请求（<c>Request.Path</c> 已赋值）一律执行；
+    /// 仅「既无任何登录身份、又不在 HTTP 请求管线内」的<b>进程内直接调用</b>（历史单元测试 / 内部派生读取）
+    /// 沿用既有语义 —— 这类调用不可能由外部请求到达，真实匿名请求因处于请求管线内一律 fail closed，
+    /// 绝不把缺失身份当作管理员。
+    /// </summary>
+    private bool RequiresLiveAuthorization()
+    {
+        var http = ControllerContext?.HttpContext;
+        if (http is null) return false;
+        return http.Request.Path.HasValue || CurrentUserId() is not null;
+    }
+
+    /// <summary>读取 / 写入前的实时身份 + 既有「员工资料」菜单授权（ERP-449，fail closed）</summary>
+    private async Task EnsureEmployeeAuthorizedAsync()
+    {
+        if (RequiresLiveAuthorization())
+            await EmployeeAuthorizationRules.EnsureAuthorizedAsync(_db, CurrentUserId());
+    }
+
+    /// <summary>分页查询（读写前先经实时授权）</summary>
+    [HttpGet]
+    public override async Task<IActionResult> GetPaged([FromQuery] PageQuery query)
+    {
+        await EnsureEmployeeAuthorizedAsync();
+        return await base.GetPaged(query);
+    }
+
+    /// <summary>查询全部（供下拉框使用；读写前先经实时授权）</summary>
+    [HttpGet("all")]
+    public override async Task<IActionResult> GetAll()
+    {
+        await EnsureEmployeeAuthorizedAsync();
+        return await base.GetAll();
+    }
+
+    /// <summary>根据主键获取（读写前先经实时授权）</summary>
+    [HttpGet("{id:long}")]
+    public override async Task<IActionResult> GetById(long id)
+    {
+        await EnsureEmployeeAuthorizedAsync();
+        return await base.GetById(id);
+    }
+
+    /// <summary>新增员工（落库前先经实时授权与有界字段校验；被拒绝时不落任何行）</summary>
+    [HttpPost]
+    public override async Task<IActionResult> Create([FromBody] BaseEmployee entity)
+    {
+        await EnsureEmployeeAuthorizedAsync();
+        EmployeeAuthorizationRules.Validate(entity);
+        return await base.Create(entity);
+    }
+
+    /// <summary>更新员工（落库前先经实时授权与有界字段校验；被拒绝时不改写任何行）</summary>
+    [HttpPut("{id:long}")]
+    public override async Task<IActionResult> Update(long id, [FromBody] BaseEmployee entity)
+    {
+        await EnsureEmployeeAuthorizedAsync();
+        entity.Id = id;
+        EmployeeAuthorizationRules.Validate(entity);
+        return await base.Update(id, entity);
+    }
+
+    /// <summary>删除员工（软删除；读写前先经实时授权）</summary>
+    [HttpDelete("{id:long}")]
+    public override async Task<IActionResult> Delete(long id)
+    {
+        await EnsureEmployeeAuthorizedAsync();
+        return await base.Delete(id);
+    }
+
+    /// <summary>批量删除员工（软删除；读写前先经实时授权）</summary>
+    [HttpPost("batch-delete")]
+    public override async Task<IActionResult> BatchDelete([FromBody] List<long> ids)
+    {
+        await EnsureEmployeeAuthorizedAsync();
+        return await base.BatchDelete(ids);
+    }
+
+    /// <summary>获取业务员列表（供下拉选择；只返回未删除、在职（Status=1）业务员；读写前先经实时授权）</summary>
     [HttpGet("salesmen")]
     public async Task<IActionResult> GetSalesmen()
     {
+        await EnsureEmployeeAuthorizedAsync();
         var items = await Service.GetAllAsync(e => e.IsSalesman && e.Status == 1);
         return Ok(ApiResponse<List<BaseEmployee>>.Success(items));
     }
