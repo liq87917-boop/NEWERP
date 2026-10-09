@@ -523,8 +523,17 @@ public class WarehouseController : BaseCrudController<BaseWarehouse>
 }
 
 /// <summary>
-/// 商品资料控制器（ERP-037：商品下可选的颜色 / 尺码 SKU 规格变体，规格维护见 <see cref="ProductVariantController"/>）
+/// 商品资料控制器（ERP-037：商品下可选的颜色 / 尺码 SKU 规格变体，规格维护见 <see cref="ProductVariantController"/>；
+/// ERP-452：为全部分页 / 全部 / 按主键读取 / 新增 / 修改 / 删除 / 批量删除 / 导出 / 单张上传 / 批量上传路由
+/// 补齐实时身份、既有「商品资料」（<c>product</c>）功能菜单授权与有界字段校验）。
 /// </summary>
+/// <remarks>
+/// 商品主数据是销售订单行 / 采购订单行 / 报价单行 / 库存单据与库存查询共同解析的权威对象，
+/// 商品导出与 OSS 图片上传路由同样在其名下。ERP-452 的授权与校验护栏见 <see cref="ProductAuthorizationRules"/>：
+/// 每个路由在读取、写入或产出任何产物之前都先经实时身份 + 既有商品菜单授权，新增 / 修改另经有界字段校验；
+/// 不新增任何菜单 / 权限 / 用户授权，也不改变 ERP-037 规格变体、ERP-038 货源关系、商品编码唯一索引语义
+/// 与分页 / 导出 / 上传响应契约。
+/// </remarks>
 [ApiController]
 [Route("api/base/products")]
 [Authorize]
@@ -545,8 +554,34 @@ public class ProductController : BaseCrudController<BaseProduct>
         _db = db;
     }
 
+    /// <summary>当前登录用户 Id（只来自已认证请求主体；缺失 / 非数字 / 非正返回 null，由实时授权护栏 fail closed）</summary>
+    private long? CurrentUserId()
+    {
+        var value = ControllerContext?.HttpContext?.User?.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        return long.TryParse(value, out var id) && id > 0 ? id : null;
+    }
+
     /// <summary>
-    /// 分页查询（补充规格计数与货源关系计数标注，不写库）。
+    /// 是否需要执行实时授权（与仓库 / 客户既有口径同源）：真实 HTTP 请求（MVC 绑定，<c>Request.Path</c> 已赋值）
+    /// 一律执行；仅「未进入 HTTP 请求管线」的<b>进程内直接调用</b>（历史单元测试 / 内部派生读取，
+    /// 无请求路径，不可能由外部请求到达）沿用既有语义，绝不把缺失身份当作管理员。
+    /// <para>真实匿名请求因处于请求管线内（<c>Request.Path</c> 必然已赋值）一律 fail closed。</para>
+    /// </summary>
+    private bool RequiresLiveAuthorization()
+    {
+        var http = ControllerContext?.HttpContext;
+        return http?.Request.Path.HasValue == true;
+    }
+
+    /// <summary>读取 / 写入 / 产物生成前的实时身份 + 既有「商品资料」菜单授权（ERP-452，fail closed）</summary>
+    private async Task EnsureProductAuthorizedAsync()
+    {
+        if (RequiresLiveAuthorization())
+            await ProductAuthorizationRules.EnsureAuthorizedAsync(_db, CurrentUserId());
+    }
+
+    /// <summary>
+    /// 分页查询（读取前先经实时授权；补充规格计数与货源关系计数标注，不写库）。
     /// 商品身份与字段完全不变；<c>variantCount</c> / <c>variantTotalCount</c> 与
     /// <c>sourcingCount</c> / <c>sourcingTotalCount</c> 都只是读取标注，
     /// 没有维护规格与货源关系的历史商品四项均为 0（行为与历史完全一致）。
@@ -554,44 +589,93 @@ public class ProductController : BaseCrudController<BaseProduct>
     [HttpGet]
     public override async Task<IActionResult> GetPaged([FromQuery] PageQuery query)
     {
+        await EnsureProductAuthorizedAsync();
         var result = await Service.GetPagedAsync(query);
         await ProductVariantService.AnnotateAsync(_db, result.Items);
         await ProductSupplierService.AnnotateProductsAsync(_db, result.Items);
         return Ok(ApiResponse<PagedResult<BaseProduct>>.Success(result));
     }
 
-    /// <summary>根据主键获取（补充规格计数与货源关系计数标注，不写库）</summary>
+    /// <summary>查询全部（读取前先经实时授权；供下拉框使用）</summary>
+    [HttpGet("all")]
+    public override async Task<IActionResult> GetAll()
+    {
+        await EnsureProductAuthorizedAsync();
+        var result = await Service.GetAllAsync();
+        return Ok(ApiResponse<List<BaseProduct>>.Success(result));
+    }
+
+    /// <summary>根据主键获取（读取前先经实时授权；补充规格计数与货源关系计数标注，不写库）</summary>
     [HttpGet("{id:long}")]
     public override async Task<IActionResult> GetById(long id)
     {
+        await EnsureProductAuthorizedAsync();
         var result = await Service.GetByIdAsync(id);
         await ProductVariantService.AnnotateAsync(_db, new[] { result });
         await ProductSupplierService.AnnotateProductsAsync(_db, new[] { result });
         return Ok(ApiResponse<BaseProduct>.Success(result));
     }
 
-    /// <summary>导出商品资料为 Excel（读取模板填充：图片/文本/数值/货币/公式/求和）</summary>
+    /// <summary>新增商品（落库前先经实时授权与有界字段校验；被拒绝时不落任何行）</summary>
+    [HttpPost]
+    public override async Task<IActionResult> Create([FromBody] BaseProduct entity)
+    {
+        await EnsureProductAuthorizedAsync();
+        ProductAuthorizationRules.Validate(entity);
+        return await base.Create(entity);
+    }
+
+    /// <summary>更新商品（落库前先经实时授权与有界字段校验；被拒绝时不改写任何行）</summary>
+    [HttpPut("{id:long}")]
+    public override async Task<IActionResult> Update(long id, [FromBody] BaseProduct entity)
+    {
+        await EnsureProductAuthorizedAsync();
+        entity.Id = id;
+        ProductAuthorizationRules.Validate(entity);
+        return await base.Update(id, entity);
+    }
+
+    /// <summary>删除商品（软删除；写入前先经实时授权）</summary>
+    [HttpDelete("{id:long}")]
+    public override async Task<IActionResult> Delete(long id)
+    {
+        await EnsureProductAuthorizedAsync();
+        return await base.Delete(id);
+    }
+
+    /// <summary>批量删除商品（软删除；写入前先经实时授权）</summary>
+    [HttpPost("batch-delete")]
+    public override async Task<IActionResult> BatchDelete([FromBody] List<long> ids)
+    {
+        await EnsureProductAuthorizedAsync();
+        return await base.BatchDelete(ids);
+    }
+
+    /// <summary>导出商品资料为 Excel（产出产物前先经实时授权；读取模板填充：图片/文本/数值/货币/公式/求和）</summary>
     [HttpGet("export")]
     public async Task<IActionResult> Export()
     {
+        await EnsureProductAuthorizedAsync();
         var templatePath = Path.Combine(_env.ContentRootPath, "templates", "导出_商品信息.xlsx");
         var bytes = await _exporter.ExportAsync(templatePath);
         var fileName = $"商品信息_{DateTime.Now:yyyyMMddHHmmss}.xlsx";
         return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", fileName);
     }
 
-    /// <summary>单张图片上传到阿里云 OSS</summary>
+    /// <summary>单张图片上传到阿里云 OSS（写入对象存储前先经实时授权）</summary>
     [HttpPost("upload")]
     public async Task<IActionResult> Upload(IFormFile file)
     {
+        await EnsureProductAuthorizedAsync();
         var url = await SaveImageAsync(file);
         return Ok(ApiResponse<object>.Success(new { url }, "上传成功"));
     }
 
-    /// <summary>批量图片上传到阿里云 OSS</summary>
+    /// <summary>批量图片上传到阿里云 OSS（写入对象存储前先经实时授权）</summary>
     [HttpPost("upload-batch")]
     public async Task<IActionResult> UploadBatch(List<IFormFile> files)
     {
+        await EnsureProductAuthorizedAsync();
         if (files is null || files.Count == 0)
             throw BusinessException.InvalidParameter("请选择要上传的图片");
 
