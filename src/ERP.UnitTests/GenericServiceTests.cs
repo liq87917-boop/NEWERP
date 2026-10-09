@@ -113,4 +113,32 @@ public class GenericServiceTests
         await service.DeleteAsync(supplier.Id);
         await Assert.ThrowsAsync<BusinessException>(() => service.GetByIdAsync(supplier.Id));
     }
+
+    /// <summary>
+    /// ERP-448：授权护栏位于控制器层，<see cref="GenericService{TEntity}"/> 的既有 CRUD 契约保持不变
+    /// （仓库主数据同样可经通用服务分页 / 新增 / 更新 / 软删除）。
+    /// </summary>
+    [Fact]
+    public async Task GenericService_仓库_既有CRUD契约保持不变()
+    {
+        using var db = TestDbFactory.Create();
+        var service = new GenericService<BaseWarehouse>(db);
+        var warehouse = await service.CreateAsync(new BaseWarehouse
+        {
+            WarehouseCode = "W001",
+            WarehouseName = "测试仓库",
+            Status = 1
+        });
+
+        Assert.True(warehouse.Id > 0);
+        Assert.Equal("W001", (await service.GetByIdAsync(warehouse.Id)).WarehouseCode);
+        Assert.Equal(1, (await service.GetPagedAsync(new PageQuery { Page = 1, PageSize = 10 })).Total);
+
+        warehouse.WarehouseName = "改名仓库";
+        await service.UpdateAsync(warehouse);
+        Assert.Equal("改名仓库", (await service.GetByIdAsync(warehouse.Id)).WarehouseName);
+
+        await service.DeleteAsync(warehouse.Id);
+        await Assert.ThrowsAsync<BusinessException>(() => service.GetByIdAsync(warehouse.Id));
+    }
 }

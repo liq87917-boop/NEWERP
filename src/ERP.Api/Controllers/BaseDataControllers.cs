@@ -261,14 +261,111 @@ public class ExpenseAccountController : BaseCrudController<BaseExpenseAccount>
 }
 
 /// <summary>
-/// 仓库资料控制器
+/// 仓库资料控制器（ERP-448：为全部分页 / 全部 / 按主键读取与新增 / 修改 / 删除 / 批量删除路由补齐实时身份、
+/// 既有「仓库资料」（<c>warehouse</c>）功能菜单授权与有界字段校验）。
 /// </summary>
+/// <remarks>
+/// 库存入 / 出 / 调整 / 调拨与库存位置 / 批次查询都解析到本控制器维护的仓库主数据；这些路由在读取或写入任何
+/// <c>BaseWarehouses</c> 行之前，都先经实时身份 + 既有仓库菜单授权（见 <see cref="WarehouseAuthorizationRules"/>），
+/// 新增 / 修改另经有界字段校验。不新增任何菜单 / 权限 / 用户授权，也不改变分页 / 响应契约与仓库编码唯一索引语义。
+/// </remarks>
 [ApiController]
 [Route("api/base/warehouses")]
 [Authorize]
 public class WarehouseController : BaseCrudController<BaseWarehouse>
 {
-    public WarehouseController(IGenericService<BaseWarehouse> service) : base(service) { }
+    private readonly IErpDbContext _db;
+
+    public WarehouseController(IGenericService<BaseWarehouse> service, IErpDbContext db) : base(service)
+    {
+        _db = db;
+    }
+
+    /// <summary>当前登录用户 Id（只来自已认证请求主体；缺失 / 非数字 / 非正返回 null，由实时授权护栏 fail closed）</summary>
+    private long? CurrentUserId()
+    {
+        var value = ControllerContext?.HttpContext?.User?.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        return long.TryParse(value, out var id) && id > 0 ? id : null;
+    }
+
+    /// <summary>
+    /// 是否需要执行实时授权（与仓库既有口径同源）：真实 HTTP 请求（<c>Request.Path</c> 已赋值）一律执行；
+    /// 仅「既无任何登录身份、又不在 HTTP 请求管线内」的<b>进程内直接调用</b>（历史单元测试 / 内部派生读取）
+    /// 沿用既有语义 —— 这类调用不可能由外部请求到达，真实匿名请求因处于请求管线内一律 fail closed，
+    /// 绝不把缺失身份当作管理员。
+    /// </summary>
+    private bool RequiresLiveAuthorization()
+    {
+        var http = ControllerContext?.HttpContext;
+        if (http is null) return false;
+        return http.Request.Path.HasValue || CurrentUserId() is not null;
+    }
+
+    /// <summary>读取 / 写入前的实时身份 + 既有「仓库资料」菜单授权（ERP-448，fail closed）</summary>
+    private async Task EnsureWarehouseAuthorizedAsync()
+    {
+        if (RequiresLiveAuthorization())
+            await WarehouseAuthorizationRules.EnsureAuthorizedAsync(_db, CurrentUserId());
+    }
+
+    /// <summary>分页查询（读写前先经实时授权）</summary>
+    [HttpGet]
+    public override async Task<IActionResult> GetPaged([FromQuery] PageQuery query)
+    {
+        await EnsureWarehouseAuthorizedAsync();
+        return await base.GetPaged(query);
+    }
+
+    /// <summary>查询全部（供下拉框使用；读写前先经实时授权）</summary>
+    [HttpGet("all")]
+    public override async Task<IActionResult> GetAll()
+    {
+        await EnsureWarehouseAuthorizedAsync();
+        return await base.GetAll();
+    }
+
+    /// <summary>根据主键获取（读写前先经实时授权）</summary>
+    [HttpGet("{id:long}")]
+    public override async Task<IActionResult> GetById(long id)
+    {
+        await EnsureWarehouseAuthorizedAsync();
+        return await base.GetById(id);
+    }
+
+    /// <summary>新增仓库（落库前先经实时授权与有界字段校验；被拒绝时不落任何行）</summary>
+    [HttpPost]
+    public override async Task<IActionResult> Create([FromBody] BaseWarehouse entity)
+    {
+        await EnsureWarehouseAuthorizedAsync();
+        WarehouseAuthorizationRules.Validate(entity);
+        return await base.Create(entity);
+    }
+
+    /// <summary>更新仓库（落库前先经实时授权与有界字段校验；被拒绝时不改写任何行）</summary>
+    [HttpPut("{id:long}")]
+    public override async Task<IActionResult> Update(long id, [FromBody] BaseWarehouse entity)
+    {
+        await EnsureWarehouseAuthorizedAsync();
+        entity.Id = id;
+        WarehouseAuthorizationRules.Validate(entity);
+        return await base.Update(id, entity);
+    }
+
+    /// <summary>删除仓库（软删除；读写前先经实时授权）</summary>
+    [HttpDelete("{id:long}")]
+    public override async Task<IActionResult> Delete(long id)
+    {
+        await EnsureWarehouseAuthorizedAsync();
+        return await base.Delete(id);
+    }
+
+    /// <summary>批量删除仓库（软删除；读写前先经实时授权）</summary>
+    [HttpPost("batch-delete")]
+    public override async Task<IActionResult> BatchDelete([FromBody] List<long> ids)
+    {
+        await EnsureWarehouseAuthorizedAsync();
+        return await base.BatchDelete(ids);
+    }
 }
 
 /// <summary>
