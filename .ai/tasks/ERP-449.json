@@ -1,0 +1,65 @@
+{
+  "title": "Authorize employee master data and the salesman picker with live menu authority and bounded field validation",
+  "description": "Stage 3 sales master-data closure for the employee records that supply the salesman identity used by sales orders, customers, quotations, proforma invoices, loading lists and every salesperson data-scope decision. src/ERP.Api/Controllers/BaseDataControllers.cs:155-172 declares EmployeeController over BaseCrudController<BaseEmployee> with only [ApiController]/[Route(\"api/base/employees\")]/[Authorize]; GetSalesmen at 166-171 returns every employee flagged IsSalesman and Status=1, and Create/Update/Delete/BatchDelete inherit the unguarded generic routes in src/ERP.Api/Controllers/BaseCrudController.cs:38-92 (src/ERP.Application/Services/GenericService.cs, zero Authoriz/Menu references), so any authenticated account can mint, rewrite or soft-delete a salesman identity that ERP-097 data scope and the sales document screens then resolve. Reuse the existing employee functional menu (src/ERP.Infrastructure/Data/SeedData.Menus.cs:27) on every route and add bounded server-side validation for the persisted BaseEmployee columns (src/ERP.Domain/Entities/BaseEmployee.cs:9-43) before persisting, keeping the existing employee-code unique index semantics (src/ERP.Infrastructure/Data/ErpDbContext.Config.cs:31) and the existing paging/response contracts unchanged. No grants, no anonymous/admin fallback, no schema change. Genuine isolated (localdb)\\\\NEWERP_AutoAcceptance GUID-owned NEWERP_AUTOTEST SQL only; safe Release build plus full ERP.UnitTests.",
+  "acceptance_criteria": [
+    "For every route on /api/base/employees (paged, all, by-id, create, update, delete, batch-delete and salesmen) require the current enabled nondeleted identity and the existing employee functional menu before any read or write, rejecting missing, disabled, deleted and revoked-menu identities with the existing controlled non-disclosing errors and adding no new grants or anonymous/admin fallback.",
+    "Validate on create and update that EmployeeCode and EmployeeName are non-empty and within their persisted length bounds, that Department, Position, Phone, Email and HireDate stay within their persisted shapes, and that Status is a known on/off-duty value, returning the existing controlled validation errors without silently clamping or rewriting any employee row and keeping the existing employee-code uniqueness semantics unchanged, so a rejected write persists no BaseEmployees row and the salesmen picker keeps returning only enabled salesmen.",
+    "Genuine isolated SQL authenticated controller tests cover the permitted privileged and menu-granted flows, missing employee menu, disabled, deleted and revoked identities and invalid code, name, bounds and status payloads, and assert that denied list, create, update, delete, batch-delete and salesmen calls read or mutate no BaseEmployees row while the existing GenericService contracts stay green.",
+    "Keep the safe Release build and the full existing ERP.UnitTests suite green, use only genuine isolated (localdb)\\\\NEWERP_AutoAcceptance GUID-owned NEWERP_AUTOTEST databases with Integrated Security, and add no schema, entity, menu, permission or production/secret change; build completion is not stage acceptance."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/BaseDataControllers.cs",
+    "src/ERP.Application/Services/EmployeeAuthorizationRules.cs",
+    "src/ERP.UnitTests/EmployeeMasterAuthorizationTests.cs",
+    "src/ERP.UnitTests/GenericServiceTests.cs",
+    "src/ERP.IntegrationTests/EmployeeMasterAuthorizationSqlServerTests.cs",
+    "docs/employee-master-authority.md"
+  ],
+  "criterion_path_map": {
+    "For every route on /api/base/employees (paged, all, by-id, create, update, delete, batch-delete and salesmen) require the current enabled nondeleted identity and the existing employee functional menu before any read or write, rejecting missing, disabled, deleted and revoked-menu identities with the existing controlled non-disclosing errors and adding no new grants or anonymous/admin fallback.": [
+      "src/ERP.Api/Controllers/BaseDataControllers.cs",
+      "src/ERP.Application/Services/EmployeeAuthorizationRules.cs"
+    ],
+    "Validate on create and update that EmployeeCode and EmployeeName are non-empty and within their persisted length bounds, that Department, Position, Phone, Email and HireDate stay within their persisted shapes, and that Status is a known on/off-duty value, returning the existing controlled validation errors without silently clamping or rewriting any employee row and keeping the existing employee-code uniqueness semantics unchanged, so a rejected write persists no BaseEmployees row and the salesmen picker keeps returning only enabled salesmen.": [
+      "src/ERP.Api/Controllers/BaseDataControllers.cs",
+      "src/ERP.Application/Services/EmployeeAuthorizationRules.cs",
+      "src/ERP.UnitTests/EmployeeMasterAuthorizationTests.cs"
+    ],
+    "Genuine isolated SQL authenticated controller tests cover the permitted privileged and menu-granted flows, missing employee menu, disabled, deleted and revoked identities and invalid code, name, bounds and status payloads, and assert that denied list, create, update, delete, batch-delete and salesmen calls read or mutate no BaseEmployees row while the existing GenericService contracts stay green.": [
+      "src/ERP.UnitTests/EmployeeMasterAuthorizationTests.cs",
+      "src/ERP.UnitTests/GenericServiceTests.cs",
+      "src/ERP.IntegrationTests/EmployeeMasterAuthorizationSqlServerTests.cs",
+      "docs/employee-master-authority.md"
+    ],
+    "Keep the safe Release build and the full existing ERP.UnitTests suite green, use only genuine isolated (localdb)\\\\NEWERP_AutoAcceptance GUID-owned NEWERP_AUTOTEST databases with Integrated Security, and add no schema, entity, menu, permission or production/secret change; build completion is not stage acceptance.": [
+      "src/ERP.UnitTests/EmployeeMasterAuthorizationTests.cs",
+      "docs/employee-master-authority.md"
+    ]
+  },
+  "depends_on": [
+    "ERP-006",
+    "ERP-097",
+    "ERP-443"
+  ],
+  "risk": "low",
+  "planning_stage": 3,
+  "implementation_evidence": "src/ERP.Api/Controllers/BaseDataControllers.cs:155-172 declares EmployeeController with only [Authorize] over BaseCrudController<BaseEmployee>; GetSalesmen at 166-171 calls Service.GetAllAsync(e => e.IsSalesman && e.Status == 1) with no caller, menu or scope resolution, and Create/Update/Delete/batch-delete inherit src/ERP.Api/Controllers/BaseCrudController.cs:38-92 which delegates to IGenericService (src/ERP.Application/Services/GenericService.cs:31-117, zero Authoriz/Menu references). BaseEmployee (src/ERP.Domain/Entities/BaseEmployee.cs:9-43) persists EmployeeCode/EmployeeName/Department/Position/Phone/Email/HireDate/Status/IsSalesman with only attribute annotations and no server-side rule; the unique index is src/ERP.Infrastructure/Data/ErpDbContext.Config.cs:31 and the existing employee menu is seeded at src/ERP.Infrastructure/Data/SeedData.Menus.cs:27. The salesman identity feeds ERP-097 SalespersonDataScopeService and the sales document salesman pickers (src/ERP.Api/wwwroot/js/modules-doc.js:131,242); an exact search of .ai/tasks returned no task listing EmployeeController for live authorization.",
+  "id": "ERP-449",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-09T07:20:46.501459Z"
+}

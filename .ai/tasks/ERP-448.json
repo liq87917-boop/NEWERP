@@ -1,0 +1,65 @@
+{
+  "title": "Authorize warehouse master data with live menu authority and bounded field validation",
+  "description": "Stage 3 inventory master-data closure for the warehouse records every stock-in, stock-out, stock adjustment, stock transfer and inventory location/lot query resolves against. src/ERP.Api/Controllers/BaseDataControllers.cs:185-194 declares WarehouseController over BaseCrudController<BaseWarehouse> with only [ApiController]/[Route(\"api/base/warehouses\")]/[Authorize] and no action of its own, so the inherited unguarded generic routes in src/ERP.Api/Controllers/BaseCrudController.cs:38-92 (backed by src/ERP.Application/Services/GenericService.cs) let any authenticated account list, create, rewrite and delete the warehouses that inventory posting rows point at, while ERP-355/356/436 already guarded the posting and stock-query side. Reuse the existing warehouse functional menu (src/ERP.Infrastructure/Data/SeedData.Menus.cs:29) on every route and add bounded server-side validation for the persisted BaseWarehouse columns (src/ERP.Domain/Entities/BaseWarehouse.cs:36-64) before persisting, keeping the existing warehouse-code unique index semantics (src/ERP.Infrastructure/Data/ErpDbContext.Config.cs:33) and the existing paging/response contracts unchanged. No grants, no anonymous/admin fallback, no schema change. Genuine isolated (localdb)\\\\NEWERP_AutoAcceptance GUID-owned NEWERP_AUTOTEST SQL only; safe Release build plus full ERP.UnitTests.",
+  "acceptance_criteria": [
+    "For every route on /api/base/warehouses (paged, all, by-id, create, update, delete and batch-delete) require the current enabled nondeleted identity and the existing warehouse functional menu before any read or write, rejecting missing, disabled, deleted and revoked-menu identities with the existing controlled non-disclosing errors and adding no new grants or anonymous/admin fallback.",
+    "Validate on create and update that WarehouseCode and WarehouseName are non-empty and within their persisted length bounds, that Address, Manager, Phone and Remark stay within their persisted bounds, and that Status is a known enabled/disabled value, returning the existing controlled validation errors without silently clamping or rewriting any warehouse row and keeping the existing warehouse-code uniqueness semantics unchanged, so a rejected write persists no BaseWarehouses row.",
+    "Genuine isolated SQL authenticated controller tests cover the permitted privileged and menu-granted flows, missing warehouse menu, disabled, deleted and revoked identities and invalid code, name, bounds and status payloads, and assert that denied list, create, update, delete and batch-delete calls read or mutate no BaseWarehouses row while the existing GenericService contracts stay green.",
+    "Keep the safe Release build and the full existing ERP.UnitTests suite green, use only genuine isolated (localdb)\\\\NEWERP_AutoAcceptance GUID-owned NEWERP_AUTOTEST databases with Integrated Security, and add no schema, entity, menu, permission or production/secret change; build completion is not stage acceptance."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/BaseDataControllers.cs",
+    "src/ERP.Application/Services/WarehouseAuthorizationRules.cs",
+    "src/ERP.UnitTests/WarehouseMasterAuthorizationTests.cs",
+    "src/ERP.UnitTests/GenericServiceTests.cs",
+    "src/ERP.IntegrationTests/WarehouseMasterAuthorizationSqlServerTests.cs",
+    "docs/warehouse-master-authority.md"
+  ],
+  "criterion_path_map": {
+    "For every route on /api/base/warehouses (paged, all, by-id, create, update, delete and batch-delete) require the current enabled nondeleted identity and the existing warehouse functional menu before any read or write, rejecting missing, disabled, deleted and revoked-menu identities with the existing controlled non-disclosing errors and adding no new grants or anonymous/admin fallback.": [
+      "src/ERP.Api/Controllers/BaseDataControllers.cs",
+      "src/ERP.Application/Services/WarehouseAuthorizationRules.cs"
+    ],
+    "Validate on create and update that WarehouseCode and WarehouseName are non-empty and within their persisted length bounds, that Address, Manager, Phone and Remark stay within their persisted bounds, and that Status is a known enabled/disabled value, returning the existing controlled validation errors without silently clamping or rewriting any warehouse row and keeping the existing warehouse-code uniqueness semantics unchanged, so a rejected write persists no BaseWarehouses row.": [
+      "src/ERP.Api/Controllers/BaseDataControllers.cs",
+      "src/ERP.Application/Services/WarehouseAuthorizationRules.cs",
+      "src/ERP.UnitTests/WarehouseMasterAuthorizationTests.cs"
+    ],
+    "Genuine isolated SQL authenticated controller tests cover the permitted privileged and menu-granted flows, missing warehouse menu, disabled, deleted and revoked identities and invalid code, name, bounds and status payloads, and assert that denied list, create, update, delete and batch-delete calls read or mutate no BaseWarehouses row while the existing GenericService contracts stay green.": [
+      "src/ERP.UnitTests/WarehouseMasterAuthorizationTests.cs",
+      "src/ERP.UnitTests/GenericServiceTests.cs",
+      "src/ERP.IntegrationTests/WarehouseMasterAuthorizationSqlServerTests.cs",
+      "docs/warehouse-master-authority.md"
+    ],
+    "Keep the safe Release build and the full existing ERP.UnitTests suite green, use only genuine isolated (localdb)\\\\NEWERP_AutoAcceptance GUID-owned NEWERP_AUTOTEST databases with Integrated Security, and add no schema, entity, menu, permission or production/secret change; build completion is not stage acceptance.": [
+      "src/ERP.UnitTests/WarehouseMasterAuthorizationTests.cs",
+      "docs/warehouse-master-authority.md"
+    ]
+  },
+  "depends_on": [
+    "ERP-006",
+    "ERP-097",
+    "ERP-356"
+  ],
+  "risk": "low",
+  "planning_stage": 3,
+  "implementation_evidence": "src/ERP.Api/Controllers/BaseDataControllers.cs:185-194 declares WarehouseController with only [ApiController]/[Route(\"api/base/warehouses\")]/[Authorize] and no action of its own; the inherited generic routes in src/ERP.Api/Controllers/BaseCrudController.cs:38-92 call IGenericService (src/ERP.Application/Services/GenericService.cs:31-117) with zero Authoriz/Menu/scope references. BaseWarehouse (src/ERP.Domain/Entities/BaseWarehouse.cs:36-64) persists WarehouseCode/WarehouseName/Address/Manager/Phone/Status/Remark with only attribute annotations and no server-side rule; the unique index is src/ERP.Infrastructure/Data/ErpDbContext.Config.cs:33 and the existing warehouse menu is seeded at src/ERP.Infrastructure/Data/SeedData.Menus.cs:29. The posting and query sides are already closed by ERP-355 (stock counts), ERP-356 (stock query authorization) and ERP-436 (location/lot reads) but the warehouse master routes they depend on remain unguarded; an exact search of .ai/tasks returned no task listing WarehouseController for live authorization.",
+  "id": "ERP-448",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-09T07:20:46.500016Z"
+}

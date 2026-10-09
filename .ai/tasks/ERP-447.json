@@ -1,0 +1,65 @@
+{
+  "title": "Authorize supplier master data with live menu authority and bounded field validation",
+  "description": "Stage 3 procurement master-data closure for the supplier records that every purchase quote, purchase order, stock-in and supplier payment resolves against. src/ERP.Api/Controllers/BaseDataControllers.cs:124-153 declares SupplierController over BaseCrudController<BaseSupplier> with only [ApiController]/[Route(\"api/base/suppliers\")]/[Authorize]; GetPaged at 137-143 and GetById at 146-152 only attach sourcing annotations, and Create/Update/Delete/BatchDelete inherit the unguarded generic routes in src/ERP.Api/Controllers/BaseCrudController.cs:38-92, which call IGenericService (src/ERP.Application/Services/GenericService.cs:31-117, zero Authoriz/Menu references), so any authenticated account can list, create, rewrite and delete any supplier. Reuse the existing supplier functional menu (src/ERP.Infrastructure/Data/SeedData.Menus.cs:26) on every route and add bounded server-side validation for the persisted BaseSupplier columns (src/ERP.Domain/Entities/BaseSupplier.cs:12-96) before persisting, keeping the existing supplier-code unique index semantics (src/ERP.Infrastructure/Data/ErpDbContext.Config.cs:30) and the existing paging/response contracts unchanged. No grants, no anonymous/admin fallback, no schema change. Genuine isolated (localdb)\\\\NEWERP_AutoAcceptance GUID-owned NEWERP_AUTOTEST SQL only; safe Release build plus full ERP.UnitTests.",
+  "acceptance_criteria": [
+    "For every route on /api/base/suppliers (paged, all, by-id, create, update, delete and batch-delete) require the current enabled nondeleted identity and the existing supplier functional menu before any read or write, rejecting missing, disabled, deleted and revoked-menu identities with the existing controlled non-disclosing errors and adding no new grants or anonymous/admin fallback.",
+    "Validate on create and update that SupplierCode and SupplierName are non-empty and within their persisted length bounds, that the optional persisted supplier text and numeric fields stay within their persisted bounds, and that Status is a known enabled/disabled value, returning the existing controlled validation errors without silently clamping or rewriting any supplier row and keeping the existing supplier-code uniqueness semantics unchanged, so a rejected write persists no BaseSuppliers row.",
+    "Genuine isolated SQL authenticated controller tests cover the permitted privileged and menu-granted flows, missing supplier menu, disabled, deleted and revoked identities and invalid code, name, bounds and status payloads, and assert that denied list, create, update, delete and batch-delete calls read or mutate no BaseSuppliers row while the existing GenericService contracts stay green.",
+    "Keep the safe Release build and the full existing ERP.UnitTests suite green, use only genuine isolated (localdb)\\\\NEWERP_AutoAcceptance GUID-owned NEWERP_AUTOTEST databases with Integrated Security, and add no schema, entity, menu, permission or production/secret change; build completion is not stage acceptance."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/BaseDataControllers.cs",
+    "src/ERP.Application/Services/SupplierAuthorizationRules.cs",
+    "src/ERP.UnitTests/SupplierMasterAuthorizationTests.cs",
+    "src/ERP.UnitTests/GenericServiceTests.cs",
+    "src/ERP.IntegrationTests/SupplierMasterAuthorizationSqlServerTests.cs",
+    "docs/supplier-master-authority.md"
+  ],
+  "criterion_path_map": {
+    "For every route on /api/base/suppliers (paged, all, by-id, create, update, delete and batch-delete) require the current enabled nondeleted identity and the existing supplier functional menu before any read or write, rejecting missing, disabled, deleted and revoked-menu identities with the existing controlled non-disclosing errors and adding no new grants or anonymous/admin fallback.": [
+      "src/ERP.Api/Controllers/BaseDataControllers.cs",
+      "src/ERP.Application/Services/SupplierAuthorizationRules.cs"
+    ],
+    "Validate on create and update that SupplierCode and SupplierName are non-empty and within their persisted length bounds, that the optional persisted supplier text and numeric fields stay within their persisted bounds, and that Status is a known enabled/disabled value, returning the existing controlled validation errors without silently clamping or rewriting any supplier row and keeping the existing supplier-code uniqueness semantics unchanged, so a rejected write persists no BaseSuppliers row.": [
+      "src/ERP.Api/Controllers/BaseDataControllers.cs",
+      "src/ERP.Application/Services/SupplierAuthorizationRules.cs",
+      "src/ERP.UnitTests/SupplierMasterAuthorizationTests.cs"
+    ],
+    "Genuine isolated SQL authenticated controller tests cover the permitted privileged and menu-granted flows, missing supplier menu, disabled, deleted and revoked identities and invalid code, name, bounds and status payloads, and assert that denied list, create, update, delete and batch-delete calls read or mutate no BaseSuppliers row while the existing GenericService contracts stay green.": [
+      "src/ERP.UnitTests/SupplierMasterAuthorizationTests.cs",
+      "src/ERP.UnitTests/GenericServiceTests.cs",
+      "src/ERP.IntegrationTests/SupplierMasterAuthorizationSqlServerTests.cs",
+      "docs/supplier-master-authority.md"
+    ],
+    "Keep the safe Release build and the full existing ERP.UnitTests suite green, use only genuine isolated (localdb)\\\\NEWERP_AutoAcceptance GUID-owned NEWERP_AUTOTEST databases with Integrated Security, and add no schema, entity, menu, permission or production/secret change; build completion is not stage acceptance.": [
+      "src/ERP.UnitTests/SupplierMasterAuthorizationTests.cs",
+      "docs/supplier-master-authority.md"
+    ]
+  },
+  "depends_on": [
+    "ERP-006",
+    "ERP-097",
+    "ERP-441"
+  ],
+  "risk": "low",
+  "planning_stage": 3,
+  "implementation_evidence": "src/ERP.Api/Controllers/BaseDataControllers.cs:124-153 declares SupplierController with only [Authorize] over BaseCrudController<BaseSupplier>; GetPaged at 137-143 and GetById at 146-152 only add sourcing annotations and the base generic routes in src/ERP.Api/Controllers/BaseCrudController.cs:38-92 (GetPaged 38-43, GetAll 46-51, GetById 54-59, Create 62-67, Update 70-76, Delete 79-84, batch-delete 87-92) call IGenericService (src/ERP.Application/Services/GenericService.cs, which contains zero Authoriz/Menu/scope references). BaseSupplier (src/ERP.Domain/Entities/BaseSupplier.cs:12-96) persists SupplierCode/SupplierName/EnglishName/ContactPerson/Phone/Email/Country/Address/PaymentTerms/BankName/BankAccount/Status plus SupplierType/BoothLocation/MainCategory/SettlementMethod/InvoiceAbility/TaxRate/DeliveryDays/RebateRatio/WeChat/Remark with only attribute annotations and no server-side rule; the unique index is src/ERP.Infrastructure/Data/ErpDbContext.Config.cs:30. The existing supplier menu is seeded at src/ERP.Infrastructure/Data/SeedData.Menus.cs:26. An exact search of .ai/tasks shows ERP-441 only closed the product sourcing relations (ProductSupplierController/SupplierSourcingController) and no task lists SupplierController for live authorization.",
+  "id": "ERP-447",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-09T07:20:46.498426Z"
+}

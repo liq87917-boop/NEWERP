@@ -1,0 +1,65 @@
+{
+  "title": "Authorize print template maintenance with live print-design menu authority and bounded layout validation",
+  "description": "Stage 3 document-output closure for the print templates that render every operational document (sales order, purchase order, quotation, proforma invoice, stock/inventory bills, container and trade documents) through the shared print preview/design pipeline. src/ERP.Api/Controllers/PrintTemplateController.cs:13-16 declares [ApiController]/[Route(\"api/sys/print-templates\")]/[Authorize] with no identity or menu resolution; GetList at 38-48, GetDefault at 50-60, Save at 62-151, Delete at 153-163, ExportExcel at 165-176 and ImportExcel at 178-200 run for any authenticated account, Save silently rewrites out-of-range FontSize to 12 at line 73 instead of rejecting and applies only two non-empty checks at 66-69 while clamping other columns at 121-131, and ExportExcel/ImportExcel move raw grid layouts in and out. Reuse the existing print-design functional menu (src/ERP.Infrastructure/Data/SchemaUpgrader.cs:65-80, MenuCode print-design) on every route and add bounded server-side validation for the persisted SysPrintTemplate columns (src/ERP.Domain/Entities/SysPrintTemplate.cs:12-113) before persisting, keeping the existing (BillType, TemplateName) unique index and default-flag semantics unchanged. No grants, no anonymous/admin fallback, no schema change. Genuine isolated (localdb)\\\\NEWERP_AutoAcceptance GUID-owned NEWERP_AUTOTEST SQL only; safe Release build plus full ERP.UnitTests.",
+  "acceptance_criteria": [
+    "For every route on /api/sys/print-templates (list, default by bill type, save, delete and the template Excel export and import helpers) require the current enabled nondeleted identity and the existing print-design functional menu before any read or write, rejecting missing, disabled, deleted and revoked-menu identities with the existing controlled non-disclosing errors and adding no new grants or anonymous/admin fallback.",
+    "Validate on save that BillType is one of the existing printable bill types, that TemplateName is non-empty and within its persisted length bounds, that Title, CompanyName, CompanyAddress, CompanyPhone, PaperSize, FieldKeys, FooterText, FontFamily and the colour values stay within their persisted bounds and known formats, and that FontSize, TitleFontSize and CompanyFontSize are within their supported ranges, returning the existing controlled validation errors instead of the current silent FontSize clamp so a rejected save persists no SysPrintTemplates row and leaves the existing template, default flag and rendered document output unchanged.",
+    "Genuine isolated SQL authenticated controller tests cover the permitted privileged and menu-granted flows, missing print-design menu, disabled, deleted and revoked identities and invalid bill type, name, font-size, colour and field payloads, and assert that denied list, save, delete and export/import calls read or mutate no SysPrintTemplates row and produce no downloadable artifact while the existing PrintTemplateTests contracts stay green.",
+    "Keep the safe Release build and the full existing ERP.UnitTests suite green, use only genuine isolated (localdb)\\\\NEWERP_AutoAcceptance GUID-owned NEWERP_AUTOTEST databases with Integrated Security, and add no schema, entity, menu, permission or production/secret change; build completion is not stage acceptance."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/PrintTemplateController.cs",
+    "src/ERP.Application/Services/PrintTemplateAuthorizationRules.cs",
+    "src/ERP.UnitTests/PrintTemplateAuthorizationTests.cs",
+    "src/ERP.UnitTests/PrintTemplateTests.cs",
+    "src/ERP.IntegrationTests/PrintTemplateAuthorizationSqlServerTests.cs",
+    "docs/print-template-authority.md"
+  ],
+  "criterion_path_map": {
+    "For every route on /api/sys/print-templates (list, default by bill type, save, delete and the template Excel export and import helpers) require the current enabled nondeleted identity and the existing print-design functional menu before any read or write, rejecting missing, disabled, deleted and revoked-menu identities with the existing controlled non-disclosing errors and adding no new grants or anonymous/admin fallback.": [
+      "src/ERP.Api/Controllers/PrintTemplateController.cs",
+      "src/ERP.Application/Services/PrintTemplateAuthorizationRules.cs"
+    ],
+    "Validate on save that BillType is one of the existing printable bill types, that TemplateName is non-empty and within its persisted length bounds, that Title, CompanyName, CompanyAddress, CompanyPhone, PaperSize, FieldKeys, FooterText, FontFamily and the colour values stay within their persisted bounds and known formats, and that FontSize, TitleFontSize and CompanyFontSize are within their supported ranges, returning the existing controlled validation errors instead of the current silent FontSize clamp so a rejected save persists no SysPrintTemplates row and leaves the existing template, default flag and rendered document output unchanged.": [
+      "src/ERP.Api/Controllers/PrintTemplateController.cs",
+      "src/ERP.Application/Services/PrintTemplateAuthorizationRules.cs",
+      "src/ERP.UnitTests/PrintTemplateAuthorizationTests.cs"
+    ],
+    "Genuine isolated SQL authenticated controller tests cover the permitted privileged and menu-granted flows, missing print-design menu, disabled, deleted and revoked identities and invalid bill type, name, font-size, colour and field payloads, and assert that denied list, save, delete and export/import calls read or mutate no SysPrintTemplates row and produce no downloadable artifact while the existing PrintTemplateTests contracts stay green.": [
+      "src/ERP.UnitTests/PrintTemplateAuthorizationTests.cs",
+      "src/ERP.UnitTests/PrintTemplateTests.cs",
+      "src/ERP.IntegrationTests/PrintTemplateAuthorizationSqlServerTests.cs",
+      "docs/print-template-authority.md"
+    ],
+    "Keep the safe Release build and the full existing ERP.UnitTests suite green, use only genuine isolated (localdb)\\\\NEWERP_AutoAcceptance GUID-owned NEWERP_AUTOTEST databases with Integrated Security, and add no schema, entity, menu, permission or production/secret change; build completion is not stage acceptance.": [
+      "src/ERP.UnitTests/PrintTemplateAuthorizationTests.cs",
+      "docs/print-template-authority.md"
+    ]
+  },
+  "depends_on": [
+    "ERP-006",
+    "ERP-312",
+    "ERP-443"
+  ],
+  "risk": "low",
+  "planning_stage": 3,
+  "implementation_evidence": "src/ERP.Api/Controllers/PrintTemplateController.cs:13-16 declares only [ApiController]/[Route(\"api/sys/print-templates\")]/[Authorize]; GetList at 38-48, GetDefault at 50-60, Save at 62-151, Delete at 153-163, ExportExcel at 165-176 and ImportExcel at 178-200 contain zero identity/menu resolution and no *AuthorizationRules reference. Save validates only non-empty BillType/TemplateName at 66-69, silently rewrites FontSize at 73 (`if (model.FontSize is < 8 or > 24) model.FontSize = 12;`) and silently clamps other columns at 121-131; the printable bill-type catalog is PrintTemplateController.cs:21-31. SysPrintTemplate (src/ERP.Domain/Entities/SysPrintTemplate.cs:12-113) persists BillType(50)/TemplateName(100)/Title(200)/CompanyName(200)/CompanyAddress(300)/CompanyPhone(100)/PaperSize(20)/FieldKeys(2000)/FooterText(500)/FontFamily(50)/colour(20) bounds enforced only by attributes. The existing print-design menu is seeded at src/ERP.Infrastructure/Data/SchemaUpgrader.cs:65-80, and the existing regression suite is src/ERP.UnitTests/PrintTemplateTests.cs. An exact search of .ai/tasks shows ERP-312/313 only consumed SysPrintTemplate as a report binding catalog and no task lists PrintTemplateController for live authorization.",
+  "id": "ERP-450",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-09T07:20:46.503268Z"
+}
