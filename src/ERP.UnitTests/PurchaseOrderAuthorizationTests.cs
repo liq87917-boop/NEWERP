@@ -343,6 +343,9 @@ public class PurchaseOrderAuthorizationTests
     /// </summary>
     private static PurchaseOrderController ForUser(ErpDbContext db, long? userId, bool httpBound = true)
     {
+        // ERP-427：绑定到真实 HTTP 请求管线的写入会复核实时主数据引用，故补齐既有合法主数据
+        // （供应商 Id=1 与商品 ProductA）；只补缺失行，绝不改写生产校验口径。
+        SeedMasterFixtures(db);
         var claims = userId.HasValue
             ? new[] { new Claim(ClaimTypes.NameIdentifier, userId.Value.ToString()) }
             : Array.Empty<Claim>();
@@ -352,6 +355,25 @@ public class PurchaseOrderAuthorizationTests
         {
             ControllerContext = new ControllerContext { HttpContext = http }
         };
+    }
+
+    /// <summary>
+    /// ERP-427：播种既有合法主数据（供应商 Id=1 与商品 <see cref="ProductA"/>，单位 PCS），
+    /// 供规范采购订单写入的实时主数据引用复核使用；只补寄存器中缺失的行。
+    /// </summary>
+    private static void SeedMasterFixtures(ErpDbContext db)
+    {
+        if (!db.BaseSuppliers.Any(s => s.Id == 1L))
+            db.BaseSuppliers.Add(new BaseSupplier
+            {
+                Id = 1L, SupplierCode = "S-AUTH-1", SupplierName = "ERP427 供应商", Status = 1
+            });
+        if (!db.BaseProducts.Any(p => p.Id == ProductA))
+            db.BaseProducts.Add(new BaseProduct
+            {
+                Id = ProductA, ProductCode = "P-AUTH-0", ProductName = "商品A", Spec = "规格A", Unit = "PCS"
+            });
+        db.SaveChanges();
     }
 
     private static async Task AssertAllRoutesDenied(PurchaseOrderController ctl, long id, int code)

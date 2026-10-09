@@ -23,6 +23,9 @@ namespace ERP.Api.Controllers;
 /// <see cref="PurchaseOrderMutationRules"/> 的「原子事务 + 确定性行锁 + 锁内权威重读」协议：
 /// 加锁前以无锁只读发现持久化归属来源并与请求拟议来源取并集，按 Id 升序取得来源行锁后再取本采购订单行锁；
 /// 仅待提交可修改、来源指针被并发改写即原子拒绝、请求未给出来源时保留已存血缘（绝不静默清除）。</para>
+/// <para>ERP-427：真实 HTTP 写入请求（新增 / 修改）在单号预约与任何表头 / 明细赋值之前、提交 / 审核在既有采购订单行锁内
+/// 提交之前，一律经 <see cref="PurchaseOrderMasterReferenceRules"/> 复核实时主数据引用（必填供应商、每条有效明细的必填商品、
+/// 可选采购员 / 起运港与既有有效单位口径），失败即受控拒绝且不落库、不占单号；历史读取 / 打印保持完全只读、不被回填。</para>
 /// </summary>
 [Route("api/purchase-orders")]
 public class PurchaseOrderController : DocumentControllerBase<PurchaseOrder>
@@ -322,6 +325,10 @@ public class PurchaseOrderController : DocumentControllerBase<PurchaseOrder>
             // ERP-426：新写入条款校验先于单号预约与任何字段 / 明细改写；失败整体回滚、不占用单号、不落任何数据。
             PurchaseOrderMutationRules.EnsureValidatedTerms(entity);
 
+            // ERP-427：来源血缘 / 转换资格与条款校验通过后，再复核实时主数据引用（供应商 / 商品 / 可选采购员 /
+            // 可选起运港 / 既有有效单位口径）；仍先于单号预约与任何表头 / 明细赋值，失败整体回滚、不占单号、不落任何数据。
+            await EnsureMasterReferencesAsync(entity);
+
             entity.Id = 0;
             entity.OrderNo = await _noService.GenerateAsync(DocumentType.PurchaseOrder);
             entity.Status = DocumentStatus.Pending;
@@ -401,6 +408,10 @@ public class PurchaseOrderController : DocumentControllerBase<PurchaseOrder>
             else if (requestedSalesOrderId is not null)
                 // 显式给出非法来源 Id（0 / 负）：绝不静默清除血缘。
                 throw BusinessException.InvalidParameter("归属销售订单 Id 必须为正整数");
+
+            // ERP-427：来源血缘复核通过后，再于表头 / 明细赋值之前复核实时主数据引用（供应商 / 商品 / 可选采购员 /
+            // 可选起运港 / 既有有效单位口径）；失败即整体回滚、不留半成品变更。
+            await EnsureMasterReferencesAsync(entity);
 
             ApplyHeader(existing, entity);
             ReplaceDetails(id, existing, entity);
@@ -691,6 +702,10 @@ public class PurchaseOrderController : DocumentControllerBase<PurchaseOrder>
             // ERP-426：提交在既有采购订单行锁内复核**已持久化条款**；非法存储条款原子拒绝、状态与原始证据均不变。
             PurchaseOrderMutationRules.EnsureValidatedTerms(entity);
 
+            // ERP-427：提交在同一把采购订单行锁内重查实时主数据引用，来源失效（供应商 / 商品被删除 / 停用，
+            // 或可选采购员 / 起运港失效、单位口径失效）一律原子拒绝，绝不让无效引用提交运营需求。
+            await EnsureMasterReferencesAsync(entity);
+
             var result = await base.Submit(id);
             await transaction.CommitAsync();
             return result;
@@ -722,6 +737,10 @@ public class PurchaseOrderController : DocumentControllerBase<PurchaseOrder>
             await PurchaseSalesOrderLinkRules.EnsureSourceLinkStillValidAsync(Db, entity.OwningSalesOrderId);
             // ERP-426：审核在既有采购订单行锁内复核**已持久化条款**；非法存储条款原子拒绝、状态与原始证据均不变。
             PurchaseOrderMutationRules.EnsureValidatedTerms(entity);
+
+            // ERP-427：审核在同一把采购订单行锁内重查实时主数据引用（与提交同一口径），
+            // 供应商 / 商品 / 可选采购员 / 起运港在审核前失效时原子拒绝、状态与原始证据均不变。
+            await EnsureMasterReferencesAsync(entity);
 
             var result = await base.Approve(id);
             await transaction.CommitAsync();
@@ -773,6 +792,28 @@ public class PurchaseOrderController : DocumentControllerBase<PurchaseOrder>
         var http = ControllerContext?.HttpContext;
         if (http is null) return false;
         return http.Request.Path.HasValue || CurrentUserId() is not null;
+    }
+
+    /// <summary>
+    /// ERP-427：是否必须执行实时主数据引用复核。真实 HTTP 写入请求（MVC 绑定，<c>Request.Path</c> 已赋值）
+    /// 一律执行；进程内直接调用（历史单元测试 / 内部派生读取，无 HTTP 请求管线）保持既有行为 —— 与
+    /// <see cref="RequiresLiveAuthorization"/> 同一取舍：这类调用不可能由外部请求到达。
+    /// <para>真实请求在到达本复核之前已由 <see cref="EnsureProposedAuthorizedAsync"/> /
+    /// <see cref="EnsureOrderAuthorizedAsync"/> 完成身份 / 菜单 / 权威归属范围 fail closed（非披露），
+    /// 因此本复核只可能在**已授权**的外部请求上生效，绝不把缺失身份当作管理员。</para>
+    /// </summary>
+    private bool RequiresLiveMasterValidation()
+        => ControllerContext?.HttpContext?.Request.Path.HasValue == true;
+
+    /// <summary>
+    /// ERP-427：复核请求侧（新增 / 修改）或已持久化（提交 / 审核）采购订单的实时主数据引用 ——
+    /// 必填供应商、每条有效明细的必填商品、可选采购员 / 起运港与既有有效单位口径。
+    /// 只做纯判定与有界只读查询，绝不写主数据、不消耗单号、不改写任何字段。
+    /// </summary>
+    private async Task EnsureMasterReferencesAsync(PurchaseOrder order)
+    {
+        if (!RequiresLiveMasterValidation()) return;
+        await PurchaseOrderMasterReferenceRules.EnsureMasterReferencesAsync(Db, order);
     }
 
     /// <summary>身份 / 账号状态 / 菜单授权（fail closed）：缺失 / 已删除按未认证，禁用 / 无菜单按权限不足。</summary>
