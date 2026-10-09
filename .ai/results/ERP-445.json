@@ -1,11 +1,13 @@
 {
   "task": "ERP-445",
-  "status": "completed",
-  "execution_outcome": "completed",
-  "normalized_finish_reason": "build_validated",
+  "status": "retry_pending",
+  "execution_outcome": "retry_pending",
+  "normalized_finish_reason": "real_sql_acceptance_reopened",
   "cline_exit_code": 0,
   "cline_finish_reason_raw": "completed",
   "attempts": 1,
   "browser_acceptance": null,
-  "finished_at": "2026-10-09T07:09:07.976226Z"
+  "finished_at": "2026-10-09T07:09:07.976226Z",
+  "last_error": "Independent real SQL acceptance failed 4/12 tests, preserved full log/TRX/target at .ai/logs/heartbeat-20261009T0807-original-failures. UniqueCode uses unconditional [..40] on shorter GUID prefix strings and throws before exercising business denial. Number-generation assertions incorrectly expect fallback SOC/XTH instead of configured fixture DR prefix; SeedData already has an active SalesReturn rule so newly seeded rule is not selected. Minimal isolated fixture repair in .ai/logs/ERP-311-repair-validation-20261005/src/ERP.IntegrationTests/DocumentNumberRuleAuthorizationSqlServerTests.cs uses Math.Min(40,code.Length), expects configured DR prefix, and explicitly initializes the actual selected SalesReturn fixture rule before the before-snapshot to prefix DR/date yyyyMMdd/serial4/sequence1. It preserves snapshot equality after denied writes and expected one increment to2, all authorization and production validation. Corrected isolated safe Release 0 warnings/errors and 7 real SQL cases plus 5 guards passed in a fresh GUID-owned NEWERP_AUTOTEST dedicated localdb. Apply minimum fixture correction within existing allowed_paths, run real SQL and full existing gates; do not relax validations, suppress assertions, change production numbering or widen permissions. Build or guard-only tests do not fulfill real SQL acceptance.",
+  "historical_checkpoint": ".ai/results/ERP-445-checkpoint-attempt-1-before-real-sql-repair.json"
 }
