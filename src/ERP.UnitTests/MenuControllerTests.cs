@@ -73,6 +73,8 @@ public class MenuControllerTests
 
         await ctl.Update(m.Id, new SysMenu
         {
+            // ERP-455：修改载荷仍须携带非空且受长度约束的菜单编码（Update 不改写 MenuCode 本身）。
+            MenuCode = m.MenuCode,
             ParentId = 0,
             MenuName = "系统改名",
             Path = "/new",
