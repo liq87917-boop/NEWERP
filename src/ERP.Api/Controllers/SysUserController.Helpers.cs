@@ -1,3 +1,4 @@
+using ERP.Application.Services;
 using ERP.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 
@@ -8,8 +9,14 @@ namespace ERP.Api.Controllers;
 /// </summary>
 public partial class SysUserController
 {
+    /// <summary>
+    /// 写入用户的角色关联（ERP-453：任何角色关联写入前都必须把角色 Id 解析为<b>已知的非删除</b>角色，
+    /// 否则整批按受控参数错误拒绝，绝不接受任意 <c>roleId</c>、也不留下任何半写关联）。
+    /// </summary>
     private async Task SaveRolesAsync(long userId, List<long> roleIds)
     {
+        await SysUserAuthorizationRules.EnsureRoleIdsResolvedAsync(_db, roleIds);
+
         var existing = await _db.SysUserRoles.Where(ur => ur.UserId == userId).ToListAsync();
         _db.SysUserRoles.RemoveRange(existing);
         foreach (var roleId in roleIds.Distinct())

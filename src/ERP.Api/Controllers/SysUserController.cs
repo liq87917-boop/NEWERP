@@ -8,12 +8,21 @@ using ERP.Infrastructure.Data;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.Security.Claims;
 
 namespace ERP.Api.Controllers;
 
 /// <summary>
-/// 用户管理控制器
+/// 用户管理控制器（ERP-453：为全部分页 / 按主键读取 / 新增 / 修改 / 切换状态 / 重置密码 / 删除路由
+/// 补齐实时身份、账号状态、既有「用户管理」（<c>user</c>）功能菜单授权与有界字段 / 角色校验）。
 /// </summary>
+/// <remarks>
+/// 用户记录是每一次已认证请求、ERP-097 业务员数据范围与每一条运营权限判定共同解析的权威对象，
+/// 因此每个路由在读取或写入任何 <c>SysUsers</c> / <c>SysUserRoles</c> 行之前都先经实时授权，
+/// 新增 / 修改另经有界字段校验、角色 Id 解析校验与重置密码载荷校验；
+/// 不新增任何菜单 / 权限 / 用户授权，也不改变既有用户名唯一索引语义、
+/// <c>SeedData.AdminUserName</c> 内置管理员保护与 PBKDF2 密码哈希语义。
+/// </remarks>
 [ApiController]
 [Route("api/sys/users")]
 [Authorize]
@@ -26,10 +35,36 @@ public partial class SysUserController : ControllerBase
         _db = db;
     }
 
+    /// <summary>当前登录用户 Id（只来自已认证请求主体；缺失 / 非数字 / 非正返回 null，由实时授权护栏 fail closed）</summary>
+    private long? CurrentUserId()
+    {
+        var value = ControllerContext?.HttpContext?.User?.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        return long.TryParse(value, out var id) && id > 0 ? id : null;
+    }
+
+    /// <summary>
+    /// 是否需要执行实时授权（与仓库既有口径同源）：真实 HTTP 请求（MVC 绑定，<c>Request.Path</c> 已赋值）
+    /// 一律执行；仅「未进入 HTTP 请求管线」的<b>进程内直接调用</b>（历史单元测试 / 内部派生读取，
+    /// 无请求路径，不可能由外部请求到达）沿用既有语义，绝不把缺失身份当作管理员。
+    /// </summary>
+    private bool RequiresLiveAuthorization()
+    {
+        var http = ControllerContext?.HttpContext;
+        return http?.Request.Path.HasValue == true;
+    }
+
+    /// <summary>读取 / 写入前的实时身份 / 账号状态 / 既有「用户管理」菜单授权（ERP-453，fail closed）</summary>
+    private async Task EnsureUserAuthorizedAsync()
+    {
+        if (RequiresLiveAuthorization())
+            await SysUserAuthorizationRules.EnsureAuthorizedAsync(_db, CurrentUserId());
+    }
+
     /// <summary>分页查询用户</summary>
     [HttpGet]
     public async Task<IActionResult> GetPaged([FromQuery] PageQuery query)
     {
+        await EnsureUserAuthorizedAsync();
         query.Normalize();
         var source = _db.SysUsers.AsNoTracking().Where(u => !u.IsDeleted);
         if (!string.IsNullOrWhiteSpace(query.Keyword))
@@ -58,12 +93,17 @@ public partial class SysUserController : ControllerBase
         return Ok(ApiResponse<PagedResult<SysUserView>>.Success(paged));
     }
 
-    /// <summary>创建用户</summary>
+    /// <summary>创建用户（落库前先经实时授权与有界字段 / 角色校验；被拒绝时不落任何行）</summary>
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] SysUserCreateRequest request)
     {
+        await EnsureUserAuthorizedAsync();
+        SysUserAuthorizationRules.ValidateCreate(request);
         if (await _db.SysUsers.AnyAsync(u => u.UserName == request.UserName && !u.IsDeleted))
             throw BusinessException.Duplicate("用户名已存在");
+
+        // ERP-453：角色必须在创建用户**落库之前**解析为已知的非删除角色，否则整批拒绝、不落任何 SysUsers / SysUserRoles 行。
+        await SysUserAuthorizationRules.EnsureRoleIdsResolvedAsync(_db, request.RoleIds);
 
         var salt = PasswordHasher.GenerateSalt();
         var user = new SysUser
@@ -80,12 +120,16 @@ public partial class SysUserController : ControllerBase
         return Ok(ApiResponse<object>.Success(null, "用户创建成功"));
     }
 
-    /// <summary>更新用户</summary>
+    /// <summary>更新用户（落库前先经实时授权、有界字段校验与角色 Id 解析；被拒绝时不改写任何行）</summary>
     [HttpPut("{id:long}")]
     public async Task<IActionResult> Update(long id, [FromBody] SysUserUpdateRequest request)
     {
+        await EnsureUserAuthorizedAsync();
+        SysUserAuthorizationRules.ValidateUpdate(request);
         var user = await _db.SysUsers.FirstOrDefaultAsync(u => u.Id == id && !u.IsDeleted)
             ?? throw BusinessException.NotFound("用户不存在");
+        // ERP-453：角色必须在改写用户字段与角色关联之前解析为已知的非删除角色，否则整批拒绝、零写入。
+        await SysUserAuthorizationRules.EnsureRoleIdsResolvedAsync(_db, request.RoleIds);
         user.DisplayName = request.DisplayName;
         user.Email = request.Email;
         user.Phone = request.Phone;
@@ -96,10 +140,11 @@ public partial class SysUserController : ControllerBase
         return Ok(ApiResponse<object>.Success(null, "用户更新成功"));
     }
 
-    /// <summary>获取用户详情（含角色）</summary>
+    /// <summary>获取用户详情（含角色；读取前先经实时授权）</summary>
     [HttpGet("{id:long}")]
     public async Task<IActionResult> GetById(long id)
     {
+        await EnsureUserAuthorizedAsync();
         var user = await _db.SysUsers.FirstOrDefaultAsync(u => u.Id == id && !u.IsDeleted)
             ?? throw BusinessException.NotFound("用户不存在");
 
@@ -127,10 +172,11 @@ public partial class SysUserController : ControllerBase
         return Ok(ApiResponse<SysUserView>.Success(view));
     }
 
-    /// <summary>切换用户启用/禁用状态</summary>
+    /// <summary>切换用户启用/禁用状态（读写前先经实时授权；内置管理员保护不变）</summary>
     [HttpPost("{id:long}/toggle-status")]
     public async Task<IActionResult> ToggleStatus(long id)
     {
+        await EnsureUserAuthorizedAsync();
         var user = await _db.SysUsers.FirstOrDefaultAsync(u => u.Id == id && !u.IsDeleted)
             ?? throw BusinessException.NotFound("用户不存在");
         if (user.UserName == SeedData.AdminUserName)
@@ -141,10 +187,12 @@ public partial class SysUserController : ControllerBase
         return Ok(ApiResponse<object>.Success(null, user.Status == UserStatus.Enabled ? "已启用" : "已禁用"));
     }
 
-    /// <summary>重置密码</summary>
+    /// <summary>重置密码（读写前先经实时授权与有界密码校验；PBKDF2 哈希语义不变）</summary>
     [HttpPost("{id:long}/reset-password")]
     public async Task<IActionResult> ResetPassword(long id, [FromBody] ResetPasswordRequest request)
     {
+        await EnsureUserAuthorizedAsync();
+        SysUserAuthorizationRules.ValidateResetPassword(request);
         var user = await _db.SysUsers.FirstOrDefaultAsync(u => u.Id == id && !u.IsDeleted)
             ?? throw BusinessException.NotFound("用户不存在");
         user.PasswordSalt = PasswordHasher.GenerateSalt();
@@ -155,10 +203,11 @@ public partial class SysUserController : ControllerBase
         return Ok(ApiResponse<object>.Success(null, "密码重置成功"));
     }
 
-    /// <summary>删除用户（软删除）</summary>
+    /// <summary>删除用户（软删除；读写前先经实时授权；内置管理员保护不变）</summary>
     [HttpDelete("{id:long}")]
     public async Task<IActionResult> Delete(long id)
     {
+        await EnsureUserAuthorizedAsync();
         var user = await _db.SysUsers.FirstOrDefaultAsync(u => u.Id == id && !u.IsDeleted)
             ?? throw BusinessException.NotFound("用户不存在");
         if (user.UserName == SeedData.AdminUserName)
