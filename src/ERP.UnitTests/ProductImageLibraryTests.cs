@@ -4,10 +4,13 @@ using ERP.Application.DTOs;
 using ERP.Application.Interfaces;
 using ERP.Application.Services;
 using ERP.Domain.Entities;
+using ERP.Domain.Enums;
 using ERP.Infrastructure.Data;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using System.Reflection;
+using System.Security.Claims;
 using Xunit;
 
 namespace ERP.UnitTests;
@@ -18,6 +21,9 @@ namespace ERP.UnitTests;
 /// 全部填充 / 部分填充 / 无图片 / 坏引用 / 不可用引用的区分与文案、按编码或名称的关键字筛选、
 /// 图片填充状态筛选与状态 / 商品筛选、软删除排除、分页有界与排序、有界数据集访问（无逐行查库）、
 /// 「只读不写库、不改写商品图片字段与其它任何状态」的边界、只读端点契约（仅 GET、不依赖存储服务）与前端接线。
+/// <para>授权（ERP-461）：图片库与 <c>api/base/products</c> 是并列路由，控制器每条路由都<b>无条件</b>先经
+/// 既有「商品资料」（<c>product</c>）实时授权；因此本文件里的进程内用例均注入一个启用且已授予既有商品菜单的
+/// 身份（<see cref="SeedAuthorizedUser"/>），绝不依赖 <c>Request.Path</c> / 环境 / 假身份绕过判定。</para>
 /// <para>说明：全部使用内存数据库（TestDbFactory），不连接 SQL Server、不启动 API、不访问 OSS、
 /// 不执行任何 SQL / 部署脚本、不做任何浏览器验收。</para>
 /// </summary>
@@ -28,7 +34,65 @@ public class ProductImageLibraryTests
 
     // ==================== 0. 测试脚手架 ====================
 
-    private static ProductImageLibraryController Controller(IErpDbContext db) => new(db);
+    /// <summary>注入已授权（启用 + 既有「商品资料」菜单）HTTP 身份的真实控制器。</summary>
+    private static ProductImageLibraryController Controller(IErpDbContext db, long userId)
+        => new(db) { ControllerContext = ContextWithUser(userId) };
+
+    /// <summary>带 <c>NameIdentifier</c> 的 HTTP 身份上下文（不设置 <c>Request.Path</c>，证明授权不依赖请求路径）。</summary>
+    private static ControllerContext ContextWithUser(long userId)
+        => new()
+        {
+            HttpContext = new DefaultHttpContext
+            {
+                User = new ClaimsPrincipal(new ClaimsIdentity(
+                    new[] { new Claim(ClaimTypes.NameIdentifier, userId.ToString()) }, "Test"))
+            }
+        };
+
+    /// <summary>播种一个启用身份并授予既有「商品资料」菜单（与生产授权模型同源），返回用户 Id。</summary>
+    private static long SeedAuthorizedUser(ErpDbContext db)
+    {
+        var user = new SysUser
+        {
+            UserName = $"image-library-{Guid.NewGuid():N}",
+            DisplayName = "图片库授权用例账号",
+            PasswordHash = "hash",
+            PasswordSalt = "salt",
+            Status = UserStatus.Enabled
+        };
+        db.SysUsers.Add(user);
+        db.SaveChanges();
+
+        var role = new SysRole
+        {
+            RoleName = "图片库授权用例角色",
+            RoleCode = $"ImageLibraryCase-{Guid.NewGuid():N}",
+            IsSystem = false
+        };
+        db.SysRoles.Add(role);
+        db.SaveChanges();
+        db.SysUserRoles.Add(new SysUserRole { UserId = user.Id, RoleId = role.Id });
+        db.SaveChanges();
+
+        var menu = db.SysMenus.FirstOrDefault(m => m.MenuCode == ProductReadWorkspaceAuthorizationRules.RequiredMenuCode && !m.IsDeleted);
+        if (menu is null)
+        {
+            menu = new SysMenu
+            {
+                MenuCode = ProductReadWorkspaceAuthorizationRules.RequiredMenuCode,
+                MenuName = ProductReadWorkspaceAuthorizationRules.RequiredMenuText,
+                MenuType = MenuType.Menu
+            };
+            db.SysMenus.Add(menu);
+            db.SaveChanges();
+        }
+        if (!db.SysRoleMenus.Any(rm => rm.RoleId == role.Id && rm.MenuId == menu.Id && !rm.IsDeleted))
+        {
+            db.SysRoleMenus.Add(new SysRoleMenu { RoleId = role.Id, MenuId = menu.Id });
+            db.SaveChanges();
+        }
+        return user.Id;
+    }
 
     private static Task<ProductImageLibraryPage> QueryAsync(
         ErpDbContext db, string? keyword = null, long? productId = null, int? status = null,
@@ -473,6 +537,7 @@ public class ProductImageLibraryTests
         using var db = TestDbFactory.Create();
         var product = SeedProduct(db, "P001", "混合引用", "标准", "javascript:alert(1)", LocalReference, string.Empty);
         await db.SaveChangesAsync();
+        var userId = SeedAuthorizedUser(db);
 
         var beforeImage1 = product.Image1;
         var beforeImage2 = product.Image2;
@@ -485,7 +550,7 @@ public class ProductImageLibraryTests
         await ProductImageLibraryService.QueryAsync(db, new ProductImageLibraryQuery());
         await ProductImageLibraryService.QueryAsync(db,
             new ProductImageLibraryQuery { ImageState = ProductImageRules.FilterHas, Keyword = "P001" });
-        await Controller(counting.Proxy).List(new ProductImageLibraryQuery { ProductId = product.Id }, CancellationToken.None);
+        await Controller(counting.Proxy, userId).List(new ProductImageLibraryQuery { ProductId = product.Id }, CancellationToken.None);
 
         var stored = await db.BaseProducts.AsNoTracking().SingleAsync(p => p.Id == product.Id);
         Assert.Equal(beforeImage1, stored.Image1);
@@ -546,8 +611,9 @@ public class ProductImageLibraryTests
         using var db = TestDbFactory.Create();
         SeedProduct(db, "P001", "保温杯", "500ml", LocalReference, HttpReference, "javascript:alert(1)");
         await db.SaveChangesAsync();
+        var userId = SeedAuthorizedUser(db);
 
-        var result = await Controller(db).List(
+        var result = await Controller(db, userId).List(
             new ProductImageLibraryQuery { Keyword = "P" }, CancellationToken.None);
 
         var ok = Assert.IsType<OkObjectResult>(result);

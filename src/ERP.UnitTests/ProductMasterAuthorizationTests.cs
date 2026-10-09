@@ -487,6 +487,22 @@ public class ProductMasterAuthorizationTests
             $"(\"base\", \"{ProductAuthorizationRules.RequiredMenuCode}\", \"{ProductAuthorizationRules.RequiredMenuText}\"",
             menus);
     }
+
+    /// <summary>
+    /// ERP-461：商品资料页工具栏打开的<b>并列</b>只读工作台（图片库 / 出口字段完整度）复用<b>同一</b>既有
+    /// 「商品资料」菜单授权，因此 <c>api/base/products</c> 的 ERP-452 契约保持不变，且不新增任何菜单。
+    /// </summary>
+    [Fact]
+    public void Auth_并列只读工作台复用同一商品菜单_不新增菜单()
+    {
+        Assert.Equal(ProductAuthorizationRules.RequiredMenuCode, ProductReadWorkspaceAuthorizationRules.RequiredMenuCode);
+        Assert.Equal(ProductAuthorizationRules.RequiredMenuText, ProductReadWorkspaceAuthorizationRules.RequiredMenuText);
+
+        var menus = File.ReadAllText(RepoFile("src", "ERP.Infrastructure", "Data", "SeedData.Menus.cs"));
+        Assert.Contains(
+            $"(\"base\", \"{ProductReadWorkspaceAuthorizationRules.RequiredMenuCode}\", \"{ProductReadWorkspaceAuthorizationRules.RequiredMenuText}\"",
+            menus);
+    }
 }
 
 

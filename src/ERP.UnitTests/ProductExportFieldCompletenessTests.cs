@@ -3,9 +3,12 @@ using ERP.Application.Common;
 using ERP.Application.DTOs;
 using ERP.Application.Services;
 using ERP.Domain.Entities;
+using ERP.Domain.Enums;
 using ERP.Infrastructure.Data;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.Security.Claims;
 using Xunit;
 
 namespace ERP.UnitTests;
@@ -14,13 +17,74 @@ namespace ERP.UnitTests;
 /// ERP-107 只读出口字段完整度工作台单元测试。覆盖：
 /// 稀疏商品与完整商品、无效尺寸与退税率边界、软删除 / 停用排除、关键字与完整度分组筛选、
 /// 稳定分页有界、只读不写库、未知分组拒绝，以及接口与前端接线契约。
+/// <para>授权（ERP-461）：本工作台与 <c>api/base/products</c> 是并列路由，控制器每条路由都<b>无条件</b>先经
+/// 既有「商品资料」（<c>product</c>）实时授权；因此本文件的进程内用例均注入一个启用且已授予既有商品菜单的
+/// 身份（<see cref="SeedAuthorizedUser"/>），绝不依赖 <c>Request.Path</c> / 环境 / 假身份绕过判定。</para>
 /// <para>全部使用内存数据库（TestDbFactory），不连接 SQL Server、不启动 API、不执行任何 SQL / seed，不做浏览器验收。</para>
 /// </summary>
 public class ProductExportFieldCompletenessTests
 {
     // ==================== 0. 测试脚手架 ====================
 
-    private static ProductExportFieldCompletenessController BuildController(ErpDbContext db) => new(db);
+    /// <summary>注入已授权（启用 + 既有「商品资料」菜单）HTTP 身份的真实控制器。</summary>
+    private static ProductExportFieldCompletenessController BuildController(ErpDbContext db)
+        => new(db) { ControllerContext = ContextWithUser(SeedAuthorizedUser(db)) };
+
+    /// <summary>带 <c>NameIdentifier</c> 的 HTTP 身份上下文（不设置 <c>Request.Path</c>，证明授权不依赖请求路径）。</summary>
+    private static ControllerContext ContextWithUser(long userId)
+        => new()
+        {
+            HttpContext = new DefaultHttpContext
+            {
+                User = new ClaimsPrincipal(new ClaimsIdentity(
+                    new[] { new Claim(ClaimTypes.NameIdentifier, userId.ToString()) }, "Test"))
+            }
+        };
+
+    /// <summary>播种一个启用身份并授予既有「商品资料」菜单（与生产授权模型同源），返回用户 Id。</summary>
+    private static long SeedAuthorizedUser(ErpDbContext db)
+    {
+        var user = new SysUser
+        {
+            UserName = $"export-field-{Guid.NewGuid():N}",
+            DisplayName = "出口字段完整度授权用例账号",
+            PasswordHash = "hash",
+            PasswordSalt = "salt",
+            Status = UserStatus.Enabled
+        };
+        db.SysUsers.Add(user);
+        db.SaveChanges();
+
+        var role = new SysRole
+        {
+            RoleName = "出口字段完整度授权用例角色",
+            RoleCode = $"ExportFieldCase-{Guid.NewGuid():N}",
+            IsSystem = false
+        };
+        db.SysRoles.Add(role);
+        db.SaveChanges();
+        db.SysUserRoles.Add(new SysUserRole { UserId = user.Id, RoleId = role.Id });
+        db.SaveChanges();
+
+        var menu = db.SysMenus.FirstOrDefault(m => m.MenuCode == ProductReadWorkspaceAuthorizationRules.RequiredMenuCode && !m.IsDeleted);
+        if (menu is null)
+        {
+            menu = new SysMenu
+            {
+                MenuCode = ProductReadWorkspaceAuthorizationRules.RequiredMenuCode,
+                MenuName = ProductReadWorkspaceAuthorizationRules.RequiredMenuText,
+                MenuType = MenuType.Menu
+            };
+            db.SysMenus.Add(menu);
+            db.SaveChanges();
+        }
+        if (!db.SysRoleMenus.Any(rm => rm.RoleId == role.Id && rm.MenuId == menu.Id && !rm.IsDeleted))
+        {
+            db.SysRoleMenus.Add(new SysRoleMenu { RoleId = role.Id, MenuId = menu.Id });
+            db.SaveChanges();
+        }
+        return user.Id;
+    }
 
     private static ProductExportFieldCompletenessDto GetData(IActionResult result)
     {
