@@ -328,6 +328,13 @@ public class SalesOrderSourceLineageTests
     public async Task 新增_显式来源Id无法解析_按显式历史值原样保留()
     {
         using var db = TestDbFactory.Create();
+        // ERP-423：显式历史来源无法解析不构成实时链接，但订单本身仍要求既有合法客户 / 商品主数据。
+        db.BaseCustomers.Add(new BaseCustomer
+        {
+            Id = 999999L, CustomerCode = "C-MR-999999", CustomerName = "ERP423 历史客户", Status = 1, DepositRatio = 30m
+        });
+        db.SaveChanges();
+        SeedProducts(db, 5L);
         var ctl = PrivilegedController(db);
 
         var body = NewOrderBody(999999L, 777L, 888L, quotationNo: "QT-HISTORY-1", piNo: "PI-HISTORY-1");
@@ -618,7 +625,24 @@ public class SalesOrderSourceLineageTests
         };
         db.BaseCustomers.Add(customer);
         db.SaveChanges();
+        // ERP-423：规范销售订单写入要求实时商品主数据；一并播种本用例使用的既有合法商品。
+        SeedProducts(db, 5L, 21L);
         return customer;
+    }
+
+    /// <summary>ERP-423：播种既有合法商品（单位留空 = 不产生单位口径判定）供规范销售订单写入使用；只补缺失行。</summary>
+    private static void SeedProducts(ErpDbContext db, params long[] ids)
+    {
+        foreach (var id in ids)
+        {
+            if (!db.BaseProducts.Any(p => p.Id == id))
+                db.BaseProducts.Add(new BaseProduct
+                {
+                    Id = id, ProductCode = $"P-MR-{id}", ProductName = $"ERP423 商品 {id}", Status = 1
+                });
+        }
+
+        db.SaveChanges();
     }
 
     /// <summary>受限（非特权）业务员账号：既有「销售订单」菜单可选 + 仅分配指定客户的数据范围。</summary>

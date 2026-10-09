@@ -28,6 +28,36 @@ public class OrderTraceabilityTests
         return controller;
     }
 
+    /// <summary>
+    /// ERP-423：播种既有合法主数据（客户 / 在职业务员 / 商品）供规范销售订单写入使用；
+    /// 只补寄存器中缺失的行，绝不改写生产校验口径。
+    /// </summary>
+    private static void SeedMasterFixtures(ErpDbContext db)
+    {
+        if (!db.BaseCustomers.Any(c => c.Id == 1L))
+            db.BaseCustomers.Add(new BaseCustomer
+            {
+                Id = 1L, CustomerCode = "C-MR-1", CustomerName = "ERP423 客户", Status = 1, DepositRatio = 30m
+            });
+        if (!db.BaseCustomers.Any(c => c.Id == 999999L))
+            db.BaseCustomers.Add(new BaseCustomer
+            {
+                Id = 999999L, CustomerCode = "C-MR-999999", CustomerName = "ERP423 客户 2", Status = 1, DepositRatio = 30m
+            });
+        if (!db.BaseEmployees.Any(e => e.Id == 888888L))
+            db.BaseEmployees.Add(new BaseEmployee
+            {
+                Id = 888888L, EmployeeCode = "E-MR-888888", EmployeeName = "ERP423 业务员",
+                IsSalesman = true, Status = 1
+            });
+        if (!db.BaseProducts.Any(p => p.Id == 1L))
+            db.BaseProducts.Add(new BaseProduct
+            {
+                Id = 1L, ProductCode = "P-MR-1", ProductName = "ERP423 商品", Unit = "PCS", Status = 1
+            });
+        db.SaveChanges();
+    }
+
     private static long SeedAuthorizedPurchaseUser(ErpDbContext db)
     {
         var user = new SysUser
@@ -90,6 +120,7 @@ public class OrderTraceabilityTests
     public async Task 销售订单_新字段完整持久化_GetById可原样读回()
     {
         using var db = TestDbFactory.Create();
+        SeedMasterFixtures(db);
         var ctl = BuildController(db);
 
         var so = new SalesOrder
@@ -185,6 +216,7 @@ public class OrderTraceabilityTests
     public async Task 销售订单_Update_可改写并清空新字段()
     {
         using var db = TestDbFactory.Create();
+        SeedMasterFixtures(db);
         var ctl = BuildController(db);
         await ctl.Create(new SalesOrder
         {
@@ -192,7 +224,7 @@ public class OrderTraceabilityTests
             TradeTerms = "CIF", SplitShipment = true, CommissionRatio = 5m,
             Details = new List<SalesOrderDetail>
             {
-                new() { ProductId = 1, ProductName = "P1", Quantity = 1m, UnitPrice = 1000m }
+                new() { ProductId = 1, ProductName = "P1", Unit = "PCS", Quantity = 1m, UnitPrice = 1000m }
             }
         });
         var id = db.SalesOrders.Single().Id;
@@ -205,7 +237,7 @@ public class OrderTraceabilityTests
             SourceQuotationNo = "QT-2", SplitShipment = false, CommissionRatio = 0m,
             Details = new List<SalesOrderDetail>
             {
-                new() { ProductId = 1, ProductName = "P1", Quantity = 2m, UnitPrice = 500m }
+                new() { ProductId = 1, ProductName = "P1", Unit = "PCS", Quantity = 2m, UnitPrice = 500m }
             }
         });
 
@@ -243,16 +275,17 @@ public class OrderTraceabilityTests
     public async Task 销售订单_列表关键字_可命中客户PO号与合同号()
     {
         using var db = TestDbFactory.Create();
+        SeedMasterFixtures(db);
         var ctl = BuildController(db);
         await ctl.Create(new SalesOrder
         {
             OrderDate = DateTime.Today, CustomerId = 1, CustomerPoNo = "BUYERPO-77",
-            Details = new List<SalesOrderDetail> { new() { ProductId = 1, ProductName = "P1", Quantity = 1m, UnitPrice = 1m } }
+            Details = new List<SalesOrderDetail> { new() { ProductId = 1, ProductName = "P1", Unit = "PCS", Quantity = 1m, UnitPrice = 1m } }
         });
         await ctl.Create(new SalesOrder
         {
             OrderDate = DateTime.Today, CustomerId = 1, ContractNo = "SC-KEY-9",
-            Details = new List<SalesOrderDetail> { new() { ProductId = 1, ProductName = "P1", Quantity = 1m, UnitPrice = 1m } }
+            Details = new List<SalesOrderDetail> { new() { ProductId = 1, ProductName = "P1", Unit = "PCS", Quantity = 1m, UnitPrice = 1m } }
         });
 
         var byPo = Assert.IsType<ApiResponse<PagedResult<SalesOrder>>>(
@@ -268,11 +301,12 @@ public class OrderTraceabilityTests
     public async Task 销售订单_打印数据_返回主表新字段与明细()
     {
         using var db = TestDbFactory.Create();
+        SeedMasterFixtures(db);
         var ctl = BuildController(db);
         await ctl.Create(new SalesOrder
         {
             OrderDate = DateTime.Today, CustomerId = 1, ContractNo = "SC-PRINT-1", ShippingMarks = "MARKS-PRINT",
-            Details = new List<SalesOrderDetail> { new() { ProductId = 1, ProductName = "P1", Quantity = 2m, UnitPrice = 10m } }
+            Details = new List<SalesOrderDetail> { new() { ProductId = 1, ProductName = "P1", Unit = "PCS", Quantity = 2m, UnitPrice = 10m } }
         });
         var id = db.SalesOrders.Single().Id;
 
@@ -289,13 +323,14 @@ public class OrderTraceabilityTests
     public async Task 销售订单_Excel导出_返回xlsx字节流()
     {
         using var db = TestDbFactory.Create();
+        SeedMasterFixtures(db);
         var ctl = BuildController(db);
         await ctl.Create(new SalesOrder
         {
             OrderDate = DateTime.Today, CustomerId = 1, CustomerPoNo = "PO-EXCEL", ContractNo = "SC-EXCEL",
             Details = new List<SalesOrderDetail>
             {
-                new() { ProductId = 1, ProductName = "P1", Quantity = 1m, UnitPrice = 1m }
+                new() { ProductId = 1, ProductName = "P1", Unit = "PCS", Quantity = 1m, UnitPrice = 1m }
             }
         });
 

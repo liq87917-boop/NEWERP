@@ -285,6 +285,7 @@ public class SalesOrderWriteValidationTests
     public async Task 新增_客户端伪造合计与定金_服务端按明细重算覆盖()
     {
         using var db = TestDbFactory.Create();
+        SeedMasterFixtures(db);
         var ctl = NewController(db);
         var body = NewOrder(new SalesOrderDetail
         {
@@ -309,6 +310,7 @@ public class SalesOrderWriteValidationTests
     public async Task 新增_精确落库_明细合计与定金逐分一致()
     {
         using var db = TestDbFactory.Create();
+        SeedMasterFixtures(db);
         var ctl = NewController(db);
         var body = NewOrder(
             new SalesOrderDetail { ProductId = 1, ProductName = "P1", Quantity = 100m, UnitPrice = 2.5m },
@@ -382,6 +384,7 @@ public class SalesOrderWriteValidationTests
         var customer = SeedCustomer(db);
         var pi = SeedPi(db, customer);
         var order = SeedOrder(db, customer, DocumentStatus.Pending, pi.Id, pi.PiNo);
+        SeedMasterFixtures(db);
 
         var body = NewOrder(new SalesOrderDetail
         {
@@ -449,6 +452,7 @@ public class SalesOrderWriteValidationTests
         var customer = SeedCustomer(db);
         var pi = SeedPi(db, customer);
         var order = SeedOrder(db, customer, DocumentStatus.Pending, pi.Id, pi.PiNo);
+        SeedMasterFixtures(db);
 
         Assert.IsType<OkObjectResult>(await ctl.Submit(order.Id));
         Assert.IsType<OkObjectResult>(await ctl.Approve(order.Id));
@@ -586,4 +590,33 @@ public class SalesOrderWriteValidationTests
 
     private static string ColumnType(IModel model, Type entityType, string propertyName)
         => model.FindEntityType(entityType)!.FindProperty(propertyName)!.GetColumnType()!;
+
+    /// <summary>
+    /// ERP-423：播种既有合法主数据（客户 / 在职业务员 / 商品）供规范销售订单写入使用；
+    /// 只补寄存器中缺失的行，绝不改写生产校验口径。
+    /// </summary>
+    private static void SeedMasterFixtures(ErpDbContext db)
+    {
+        if (!db.BaseCustomers.Any(c => c.Id == 1L))
+            db.BaseCustomers.Add(new BaseCustomer
+            {
+                Id = 1L, CustomerCode = "C-MR-1", CustomerName = "ERP423 客户", Status = 1, DepositRatio = 30m
+            });
+        if (!db.BaseEmployees.Any(e => e.Id == 1L))
+            db.BaseEmployees.Add(new BaseEmployee
+            {
+                Id = 1L, EmployeeCode = "E-MR-1", EmployeeName = "ERP423 业务员", IsSalesman = true, Status = 1
+            });
+
+        foreach (var id in new[] { 1L, 2L, 7L, 21L })
+        {
+            if (!db.BaseProducts.Any(p => p.Id == id))
+                db.BaseProducts.Add(new BaseProduct
+                {
+                    Id = id, ProductCode = $"P-MR-{id}", ProductName = $"ERP423 商品 {id}", Status = 1
+                });
+        }
+
+        db.SaveChanges();
+    }
 }

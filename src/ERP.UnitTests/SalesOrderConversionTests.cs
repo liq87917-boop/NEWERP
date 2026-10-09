@@ -694,6 +694,16 @@ public class SalesOrderConversionTests
         };
         db.BaseCustomers.Add(customer);
         db.SaveChanges();
+        // ERP-423：规范销售订单写入要求实时商品主数据；一并播种本用例使用的既有合法商品（只补缺失行）。
+        foreach (var id in new[] { 11L, 21L })
+        {
+            if (!db.BaseProducts.Any(p => p.Id == id))
+                db.BaseProducts.Add(new BaseProduct
+                {
+                    Id = id, ProductCode = $"P-MR-{id}", ProductName = $"ERP423 商品 {id}", Status = 1
+                });
+        }
+        db.SaveChanges();
         return customer;
     }
 

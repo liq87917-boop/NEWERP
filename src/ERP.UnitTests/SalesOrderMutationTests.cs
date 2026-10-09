@@ -254,6 +254,7 @@ public class SalesOrderMutationTests
     public async Task 手工订单_提交与审核_进入协议且保持合法流转()
     {
         using var db = TestDbFactory.Create();
+        SeedMasterFixtures(db);
         var controller = PrivilegedController(db);
         var order = SeedOrder(db, DocumentStatus.Pending);
 
@@ -268,6 +269,7 @@ public class SalesOrderMutationTests
     public async Task 过期删除与编辑_并发提交后一律拒绝且原始证据不变()
     {
         using var db = TestDbFactory.Create();
+        SeedMasterFixtures(db);
         var controller = PrivilegedController(db);
         var order = SeedOrder(db, DocumentStatus.Pending);
 
@@ -326,6 +328,7 @@ public class SalesOrderMutationTests
     public async Task 编辑_手工订单_明细整体替换并重算合计()
     {
         using var db = TestDbFactory.Create();
+        SeedMasterFixtures(db);
         var controller = PrivilegedController(db);
         var order = SeedOrder(db, DocumentStatus.Pending);
 
@@ -483,5 +486,34 @@ public class SalesOrderMutationTests
                 Quantity = quantity, UnitPrice = unitPrice
             });
         return body;
+    }
+
+    /// <summary>
+    /// ERP-423：播种既有合法主数据（客户 / 在职业务员 / 商品）供规范销售订单写入使用；
+    /// 只补寄存器中缺失的行，绝不改写生产校验口径。
+    /// </summary>
+    private static void SeedMasterFixtures(ErpDbContext db)
+    {
+        if (!db.BaseCustomers.Any(c => c.Id == 1L))
+            db.BaseCustomers.Add(new BaseCustomer
+            {
+                Id = 1L, CustomerCode = "C-MR-1", CustomerName = "ERP423 客户", Status = 1, DepositRatio = 30m
+            });
+        if (!db.BaseEmployees.Any(e => e.Id == 1L))
+            db.BaseEmployees.Add(new BaseEmployee
+            {
+                Id = 1L, EmployeeCode = "E-MR-1", EmployeeName = "ERP423 业务员", IsSalesman = true, Status = 1
+            });
+
+        foreach (var id in new[] { 21L, 100L, 101L, 102L })
+        {
+            if (!db.BaseProducts.Any(p => p.Id == id))
+                db.BaseProducts.Add(new BaseProduct
+                {
+                    Id = id, ProductCode = $"P-MR-{id}", ProductName = $"ERP423 商品 {id}", Status = 1
+                });
+        }
+
+        db.SaveChanges();
     }
 }

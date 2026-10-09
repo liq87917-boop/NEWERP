@@ -404,6 +404,21 @@ public class SalesOrderProcMutationTests
         var controller = new SalesOrderController(db, new DocumentNumberService(db));
         TestAuth.SetUser(controller, TestAuth.SeedPrivilegedUser(db));
 
+        // ERP-423：规范销售订单写入要求实时客户 / 业务员 / 商品主数据；播种既有合法夹具。
+        db.BaseCustomers.Add(new BaseCustomer
+        {
+            Id = 9001, CustomerCode = "C-MR-9001", CustomerName = "ERP423 客户", Status = 1, DepositRatio = 30m
+        });
+        db.BaseEmployees.Add(new BaseEmployee
+        {
+            Id = 9002, EmployeeCode = "E-MR-9002", EmployeeName = "ERP423 业务员", IsSalesman = true, Status = 1
+        });
+        db.BaseProducts.Add(new BaseProduct
+        {
+            Id = 1, ProductCode = "P-MR-1", ProductName = "ERP423 商品", Status = 1
+        });
+        await db.SaveChangesAsync();
+
         var order = new SalesOrder
         {
             OrderDate = DateTime.Today,

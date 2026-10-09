@@ -142,6 +142,15 @@ public sealed class TradeDocumentGenerationMutationSqlServerTests
         try
         {
             var stored = await db.SalesOrders.AsNoTracking().FirstAsync(o => o.Id == orderId);
+            // ERP-423：规范销售订单写入要求实时商品主数据（单位留空 = 不产生单位口径判定）。
+            var product = new BaseProduct
+            {
+                ProductCode = $"P-E397-{Guid.NewGuid():N}", ProductName = "毛巾",
+                Unit = string.Empty, Status = 1
+            };
+            db.BaseProducts.Add(product);
+            await db.SaveChangesAsync();
+
             var body = new SalesOrder
             {
                 OrderDate = stored.OrderDate, CustomerId = stored.CustomerId, Currency = stored.Currency,
@@ -150,7 +159,7 @@ public sealed class TradeDocumentGenerationMutationSqlServerTests
                 {
                     new()
                     {
-                        ProductId = 0, ProductName = "毛巾", Spec = "70x140", Unit = "箱",
+                        ProductId = product.Id, ProductName = "毛巾", Spec = "70x140", Unit = "箱",
                         Quantity = quantity, UnitPrice = unitPrice,
                     }
                 },

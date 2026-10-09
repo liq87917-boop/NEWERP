@@ -74,7 +74,7 @@ public sealed class SalesOrderMutationAuthorizationSqlServerTests
     /// <summary>必然不存在的来源 Id（无法解析的显式历史值）。</summary>
     private const long MissingPiId = 9_420_777L;
 
-    private static SalesOrder NewOrderBody(long customerId, long? piId = null, string piNo = "",
+    private SalesOrder NewOrderBody(long customerId, long? piId = null, string piNo = "",
         string remark = "")
         => new()
         {
@@ -88,7 +88,7 @@ public sealed class SalesOrderMutationAuthorizationSqlServerTests
             SourcePiNo = piNo,
             Details = new List<SalesOrderDetail>
             {
-                new() { ProductId = 1, ProductName = "ERP420 商品", Unit = "PCS", Quantity = 2m, UnitPrice = 5m }
+                new() { ProductId = _fixture.ProductId, ProductName = "ERP420 商品", Unit = "PCS", Quantity = 2m, UnitPrice = 5m }
             }
         };
 
@@ -290,7 +290,7 @@ public sealed class SalesOrderMutationAuthorizationSqlServerTests
         await db.SaveChangesAsync();
         db.SalesOrderDetails.Add(new SalesOrderDetail
         {
-            SalesOrderId = order.Id, ProductId = 1, ProductName = "ERP420 商品",
+            SalesOrderId = order.Id, ProductId = _fixture.ProductId, ProductName = "ERP420 商品",
             Unit = "PCS", Quantity = 1m, UnitPrice = 100m, Amount = 100m
         });
         await db.SaveChangesAsync();
@@ -603,6 +603,9 @@ public sealed class SalesOrderMutationAuthorizationSqlServerFixture : IAsyncLife
     public long CustomerAId { get; private set; }
     public long CustomerBId { get; private set; }
 
+    /// <summary>ERP-423：既有合法商品（单位 PCS）—— 规范销售订单写入要求实时商品主数据。</summary>
+    public long ProductId { get; private set; }
+
     public async Task InitializeAsync()
     {
         var connectionString = Environment.GetEnvironmentVariable("ERP_ConnectionStrings__Default");
@@ -720,6 +723,16 @@ public sealed class SalesOrderMutationAuthorizationSqlServerFixture : IAsyncLife
         await db.SaveChangesAsync();
         CustomerAId = customerA.Id;
         CustomerBId = customerB.Id;
+
+        // ERP-423：既有合法商品（实时主数据引用护栏要求商品存在 / 未删除 / 启用，且单位落在既有有效口径内）。
+        var product = new BaseProduct
+        {
+            ProductCode = $"P-ERP420-{Guid.NewGuid():N}", ProductName = "ERP420 商品",
+            Unit = "PCS", Status = 1
+        };
+        db.BaseProducts.Add(product);
+        await db.SaveChangesAsync();
+        ProductId = product.Id;
 
         // 3) 拒绝侧账号：无菜单 / 仅导出菜单 / 已撤销菜单 / 已禁用 / 已删除。
         MenuLessUserId = await SeedDeniedUserAsync(db, Array.Empty<string>(), UserStatus.Enabled);

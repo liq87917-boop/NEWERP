@@ -22,6 +22,7 @@ public class SalesOrderControllerTests
     public async Task Create_正常创建_生成OrderNo_Status为Pending_Calculate_TotalAmount与DepositAmount自动计算()
     {
         using var db = TestDbFactory.Create();
+        SeedMasterFixtures(db);
         var noService = new DocumentNumberService(db);
         var ctl = BuildController(db);
 
@@ -133,6 +134,7 @@ public class SalesOrderControllerTests
     {
         using var db = TestDbFactory.Create();
         var (so, _) = SeedSalesOrder(db, "SO-Y", DocumentStatus.Pending);
+        SeedMasterFixtures(db);
         var ctl = BuildController(db);
 
         var update = new SalesOrder
@@ -163,6 +165,7 @@ public class SalesOrderControllerTests
     {
         using var db = TestDbFactory.Create();
         var (so, _) = SeedSalesOrder(db, "SO-WF", DocumentStatus.Pending);
+        SeedMasterFixtures(db);
         var ctl = BuildController(db);
 
         await ctl.Submit(so.Id);
@@ -235,5 +238,48 @@ private static (SalesOrder so, SalesOrderDetail detail) SeedSalesOrder(ErpDbCont
         db.SalesOrderDetails.Add(detail);
         db.SaveChanges();
         return (so, detail);
+    }
+
+    /// <summary>
+    /// ERP-423：播种既有合法主数据（客户 / 在职业务员 / 商品）供规范销售订单写入使用；
+    /// 只补寄存器中缺失的行，绝不改写生产校验口径。
+    /// </summary>
+    private static void SeedMasterFixtures(ErpDbContext db)
+    {
+        foreach (var id in new[] { 1L, 999999L })
+        {
+            if (!db.BaseCustomers.Any(c => c.Id == id))
+                db.BaseCustomers.Add(new BaseCustomer
+                {
+                    Id = id,
+                    CustomerCode = $"C-MR-{id}",
+                    CustomerName = $"ERP423 客户 {id}",
+                    Status = 1,
+                    DepositRatio = 30m
+                });
+            if (!db.BaseEmployees.Any(e => e.Id == id))
+                db.BaseEmployees.Add(new BaseEmployee
+                {
+                    Id = id,
+                    EmployeeCode = $"E-MR-{id}",
+                    EmployeeName = $"ERP423 业务员 {id}",
+                    IsSalesman = true,
+                    Status = 1
+                });
+        }
+
+        foreach (var id in new[] { 1L, 2L })
+        {
+            if (!db.BaseProducts.Any(p => p.Id == id))
+                db.BaseProducts.Add(new BaseProduct
+                {
+                    Id = id,
+                    ProductCode = $"P-MR-{id}",
+                    ProductName = $"ERP423 商品 {id}",
+                    Status = 1
+                });
+        }
+
+        db.SaveChanges();
     }
 }

@@ -461,6 +461,16 @@ public class SalesOrderMutationAuthorizationTests
         };
         db.BaseCustomers.Add(customer);
         db.SaveChanges();
+        // ERP-423：规范销售订单写入要求实时商品主数据；一并播种本用例使用的既有合法商品（只补缺失行）。
+        if (!db.BaseProducts.Any(p => p.Id == 942_001L))
+        {
+            db.BaseProducts.Add(new BaseProduct
+            {
+                Id = 942_001L, ProductCode = "ERP420-P", ProductName = "ERP420 商品", Status = 1
+            });
+            db.SaveChanges();
+        }
+
         return customer;
     }
 

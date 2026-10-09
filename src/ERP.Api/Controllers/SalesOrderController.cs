@@ -322,6 +322,8 @@ public class SalesOrderController : DocumentControllerBase<SalesOrder>
     /// 原样保留（不构成实时链接）；未链接的手工订单不取任何来源锁，但表头与明细仍在同一原子事务内写入（ERP-421）。
     /// <para>ERP-422：客户端提交的数量 / 单价 / 金额 / 合计 / 定金一律由服务端按 <see cref="SalesOrderAmountRules"/>
     /// 唯一权威口径重算覆盖；新写入条款校验在<b>单号预约与任何字段改写之前</b>完成，非法请求既不消耗单号也不落库。</para>
+    /// <para>ERP-423：客户 / 商品 / 可选业务员 / 可选目的港与既有有效单位口径在同一原子事务内、单号预约与任何
+    /// 表头 / 明细赋值之前复核；引用失效（不存在 / 已删除 / 已停用 / 单位不支持）时原子拒绝且不消耗单号。</para>
     /// </summary>
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] SalesOrder entity)
@@ -363,6 +365,10 @@ public class SalesOrderController : DocumentControllerBase<SalesOrder>
                     await SalesOrderSourceLineageRules.EnsureNewLinkEligibleAsync(Db, lineage, null);
                 }
             }
+
+            // ERP-423：来源血缘 / 转换资格复核通过后，再复核实时主数据引用（客户 / 商品 / 可选业务员 /
+            // 可选目的港 / 既有有效单位口径）；仍先于单号预约与任何表头 / 明细赋值，失败整体回滚、不占单号、不落任何数据。
+            await SalesOrderMasterReferenceRules.EnsureMasterReferencesAsync(Db, entity);
 
             entity.Id = 0;
             entity.OrderNo = await _noService.GenerateAsync(DocumentType.SalesOrder);
@@ -413,6 +419,8 @@ public class SalesOrderController : DocumentControllerBase<SalesOrder>
     /// 下游已有证据时冻结），最后才改写字段 / 明细 / 金额；加锁前读到的来源被并发改写时原子拒绝。
     /// <para>ERP-422：非法新写入条款在加锁之前即被拒绝；改写后的持久化条款在锁内再执行一次唯一权威校验，
     /// 失败时原始表头 / 明细 / 状态与下游证据保持不变。</para>
+    /// <para>ERP-423：拟议客户 / 商品 / 可选业务员 / 可选目的港与既有有效单位口径在同一原子事务内、字段 / 明细
+    /// 赋值之前复核；引用失效（不存在 / 已删除 / 已停用 / 单位不支持）时原子拒绝，原始表头 / 明细 / 状态不变。</para>
     /// </summary>
     [HttpPut("{id:long}")]
     public async Task<IActionResult> Update(long id, [FromBody] SalesOrder entity)
@@ -510,6 +518,10 @@ public class SalesOrderController : DocumentControllerBase<SalesOrder>
                     }
                 }
             }
+
+            // ERP-423：来源血缘 / 转换资格复核通过后，再于字段 / 明细赋值之前复核实时主数据引用
+            // （客户 / 商品 / 可选业务员 / 可选目的港 / 既有有效单位口径）；失败即整体回滚、不留半成品变更。
+            await SalesOrderMasterReferenceRules.EnsureMasterReferencesAsync(Db, entity);
 
             // 来源字段：权威血缘优先；显式历史值原样保留；未链接时保持调用方提交的自由文本（不构成链接）。
             if (change.HasSource && !lineage.IsUnresolvedLegacy)
@@ -619,6 +631,8 @@ public class SalesOrderController : DocumentControllerBase<SalesOrder>
     /// 锁内重新读取实时权限、持久化状态与来源后复核合法流转与持久化来源血缘，任一步失败整体回滚并丢弃半成品变更。
     /// <para>ERP-422：提交 / 审核除状态与来源血缘外，还在<b>同一把订单行锁内</b>复核已持久化条款（数量 / 单价 /
     /// 币种 / 汇率 / 比例 / 金额精度）；非法存储条款原子拒绝、状态与原始证据均不变。</para>
+    /// <para>ERP-423：提交 / 审核还在<b>同一把订单行锁内</b>重查实时主数据引用（客户 / 商品 / 可选业务员 /
+    /// 可选目的港 / 既有有效单位口径），来源失效时原子拒绝，绝不让无效引用提交运营需求。</para>
     /// </summary>
     private async Task<IActionResult> RunLineageGuardedStatusChangeAsync(long id, DocumentStatus from,
         DocumentStatus to, string message)
@@ -664,6 +678,9 @@ public class SalesOrderController : DocumentControllerBase<SalesOrder>
             await SalesOrderSourceLineageRules.EnsurePersistedSourceIntactAsync(Db, locked);
             // ERP-422：提交 / 审核在既有订单行锁内复核已持久化条款；非法存储条款原子拒绝、状态不变。
             SalesOrderMutationRules.EnsureValidatedTerms(locked);
+            // ERP-423：提交 / 审核在同一把订单行锁内重查实时主数据引用，来源失效（客户 / 商品 / 可选业务员 /
+            // 可选目的港被删除 / 停用或单位口径失效）一律原子拒绝，绝不让无效引用提交运营需求。
+            await SalesOrderMasterReferenceRules.EnsureMasterReferencesAsync(Db, locked);
             SetStatus(locked, to);
             await Db.SaveChangesAsync();
             if (transaction is not null) await transaction.CommitAsync();

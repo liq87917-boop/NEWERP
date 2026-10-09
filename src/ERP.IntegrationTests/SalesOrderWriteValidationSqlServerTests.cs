@@ -89,7 +89,7 @@ public sealed class SalesOrderWriteValidationSqlServerTests
 
         var ex = await Assert.ThrowsAsync<BusinessException>(() =>
             NewController(db, _fixture.PrivilegedUserId).Create(NewBody(
-                new SalesOrderDetail { ProductId = 1, ProductName = "P1", Quantity = 0.001m, UnitPrice = 10m })));
+                new SalesOrderDetail { ProductId = _fixture.ProductId, ProductName = "P1", Quantity = 0.001m, UnitPrice = 10m })));
 
         Assert.Equal(ErrorCodes.InvalidParameter, ex.Code);
         Assert.Contains("数量必须大于 0", ex.Message);
@@ -107,7 +107,7 @@ public sealed class SalesOrderWriteValidationSqlServerTests
 
         var body = NewBody(new SalesOrderDetail
         {
-            ProductId = 1, ProductName = "P1", Quantity = 1m, UnitPrice = 1m
+            ProductId = _fixture.ProductId, ProductName = "P1", Quantity = 1m, UnitPrice = 1m
         });
         body.Currency = (Currency)77;
 
@@ -128,7 +128,7 @@ public sealed class SalesOrderWriteValidationSqlServerTests
         await using var db = _fixture.CreateDbContext();
         var body = NewBody(new SalesOrderDetail
         {
-            ProductId = 1, ProductName = "P1", Quantity = 10m, UnitPrice = 100m
+            ProductId = _fixture.ProductId, ProductName = "P1", Quantity = 10m, UnitPrice = 100m
         });
         body.DepositRatio = 30m;
         body.TotalAmount = 999_999m;      // 伪造
@@ -138,7 +138,7 @@ public sealed class SalesOrderWriteValidationSqlServerTests
 
         await using var verify = _fixture.CreateDbContext();
         var stored = await verify.SalesOrders.AsNoTracking()
-            .Where(o => o.CustomerId == _fixture.CustomerId && o.SalesmanId == _fixture.PrivilegedUserId)
+            .Where(o => o.CustomerId == _fixture.CustomerId && o.SalesmanId == _fixture.SalesmanEmployeeId)
             .OrderByDescending(o => o.Id)
             .FirstAsync();
         var lines = await verify.SalesOrderDetails.AsNoTracking()
@@ -162,7 +162,7 @@ public sealed class SalesOrderWriteValidationSqlServerTests
 
         var ex = await Assert.ThrowsAsync<BusinessException>(() =>
             NewController(db, _fixture.PrivilegedUserId).Update(order.Id, NewBody(
-                new SalesOrderDetail { ProductId = 1, ProductName = "P1", Quantity = 1.005m, UnitPrice = 100m })));
+                new SalesOrderDetail { ProductId = _fixture.ProductId, ProductName = "P1", Quantity = 1.005m, UnitPrice = 100m })));
 
         Assert.Equal(ErrorCodes.InvalidParameter, ex.Code);
 
@@ -294,7 +294,7 @@ public sealed class SalesOrderWriteValidationSqlServerTests
     {
         OrderDate = DateTime.Today,
         CustomerId = _fixture.CustomerId,
-        SalesmanId = _fixture.PrivilegedUserId,
+        SalesmanId = _fixture.SalesmanEmployeeId,
         Currency = Currency.USD,
         ExchangeRate = 7.2m,
         DepositRatio = 30m,
@@ -323,6 +323,12 @@ public sealed class SalesOrderWriteValidationSqlServerFixture : IAsyncLifetime
     public long CustomerId { get; private set; }
     public long PiId { get; private set; }
     public string PiNo { get; private set; } = string.Empty;
+
+    /// <summary>ERP-423：既有合法业务员（在职员工）—— 规范销售订单写入要求显式 SalesmanId 可解析。</summary>
+    public long SalesmanEmployeeId { get; private set; }
+
+    /// <summary>ERP-423：既有合法商品（未维护单位 = 不产生单位口径判定）—— 规范销售订单写入要求实时商品主数据。</summary>
+    public long ProductId { get; private set; }
 
     public async Task InitializeAsync()
     {
@@ -423,6 +429,23 @@ public sealed class SalesOrderWriteValidationSqlServerFixture : IAsyncLifetime
         await db.SaveChangesAsync();
         CustomerId = customer.Id;
 
+        // ERP-423：规范销售订单写入要求实时业务员（在职员工）与商品主数据；播种既有合法夹具。
+        var employee = new BaseEmployee
+        {
+            EmployeeCode = $"E-422-{Guid.NewGuid():N}", EmployeeName = "ERP422 业务员",
+            IsSalesman = true, Status = 1
+        };
+        db.BaseEmployees.Add(employee);
+        var product = new BaseProduct
+        {
+            ProductCode = $"P-422-{Guid.NewGuid():N}", ProductName = "ERP422 商品",
+            Unit = string.Empty, Status = 1
+        };
+        db.BaseProducts.Add(product);
+        await db.SaveChangesAsync();
+        SalesmanEmployeeId = employee.Id;
+        ProductId = product.Id;
+
         PiNo = $"PI-422-{Guid.NewGuid():N}"[..18];
         var pi = new ProformaInvoice
         {
@@ -460,7 +483,7 @@ public sealed class SalesOrderWriteValidationSqlServerFixture : IAsyncLifetime
             OrderNo = $"SO-422-{Guid.NewGuid():N}"[..18],
             OrderDate = DateTime.Today,
             CustomerId = CustomerId,
-            SalesmanId = PrivilegedUserId,
+            SalesmanId = SalesmanEmployeeId,
             Currency = Currency.USD,
             ExchangeRate = 7.2m,
             DepositRatio = 30m,
@@ -471,7 +494,7 @@ public sealed class SalesOrderWriteValidationSqlServerFixture : IAsyncLifetime
             {
                 new()
                 {
-                    ProductId = 21, ProductName = "ERP422 商品", Spec = "标准", Unit = "PCS",
+                    ProductId = ProductId, ProductName = "ERP422 商品", Spec = "标准", Unit = "PCS",
                     Quantity = 10m, UnitPrice = 100m
                 }
             }
