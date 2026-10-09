@@ -90,8 +90,8 @@
   "risk": "medium",
   "planning_stage": 3,
   "id": "ERP-425",
-  "status": "retry",
-  "attempts": 0,
+  "status": "completed",
+  "attempts": 2,
   "max_attempts": 3,
   "validation_profile": "safe",
   "completion_mode": "build",
@@ -107,23 +107,6 @@
     "scenarios": []
   },
   "created_at": "2026-10-09T01:12:34.435435Z",
-  "preserved_work": {
-    "execution_copy": "D:\\VSCodeProject\\NEWERP.executor.continue-erp-190-20260930080457",
-    "changed_paths": [
-      ".ai/PROJECT_STATE.json",
-      ".ai/tasks/ERP-425.json",
-      "docs/purchase-order-mutation.md",
-      "src/ERP.Api/Controllers/PurchaseOrderController.cs",
-      "src/ERP.Application/Services/PurchaseOrderMutationRules.cs",
-      "src/ERP.IntegrationTests/OrderTraceabilityUiTests.cs",
-      "src/ERP.IntegrationTests/PurchaseOrderMutationSqlServerTests.cs",
-      "src/ERP.UnitTests/PurchaseOrderMutationTests.cs"
-    ],
-    "diff": ".ai\\logs\\ERP-425-preserved-work.diff",
-    "preserved_at": "2026-10-09T01:37:13.189527Z"
-  },
-  "failure_kind": "path_guard_failure",
-  "failed_transport_version": 2,
   "recovery_history": [
     {
       "remediation_task": "ERP-425-RECOVERY-1",
@@ -159,36 +142,5 @@
       }
     }
   ],
-  "supervised_recovery_cycles": 1,
-  "recovery_context": {
-    "remediation_task": "ERP-425-RECOVERY-1",
-    "failure_kind": "path_guard_failure",
-    "summary": "Path guard failed:\noutside allowed_paths: src/ERP.IntegrationTests/OrderTraceabilityUiTests.cs",
-    "result": ".ai\\results\\ERP-425.json",
-    "attempt_logs": [
-      ".ai/logs/ERP-425-attempt-1.jsonl"
-    ],
-    "validation_logs": [],
-    "latest_state_error": {
-      "task": "ERP-425",
-      "kind": "automatic_repair_pending",
-      "summary": "Path guard failed:\noutside allowed_paths: src/ERP.IntegrationTests/OrderTraceabilityUiTests.cs"
-    },
-    "latest_build": null,
-    "task_context": ".ai\\tasks\\ERP-425.json",
-    "changed_paths": [
-      ".ai/PROJECT_STATE.json",
-      ".ai/tasks/ERP-425.json",
-      "docs/purchase-order-mutation.md",
-      "src/ERP.Api/Controllers/PurchaseOrderController.cs",
-      "src/ERP.Application/Services/PurchaseOrderMutationRules.cs",
-      "src/ERP.IntegrationTests/OrderTraceabilityUiTests.cs",
-      "src/ERP.IntegrationTests/PurchaseOrderMutationSqlServerTests.cs",
-      "src/ERP.UnitTests/PurchaseOrderMutationTests.cs"
-    ],
-    "diff": ".ai\\logs\\ERP-425-preserved-work.diff",
-    "execution_copy": "D:\\VSCodeProject\\NEWERP.executor.continue-erp-190-20260930080457",
-    "repair_allowed_paths": [],
-    "instruction": "DeepSeek supervisor recovery: inspect the referenced complete logs, diagnose the root cause, and implement a different safe repair within allowed_paths. Rebuild and rerun the configured tests; if validation fails, use the newest log as the next repair input. Do not repeat the failed approach. Do not edit task/state/result files or relax production and irreversible-operation gates. "
-  }
+  "supervised_recovery_cycles": 1
 }

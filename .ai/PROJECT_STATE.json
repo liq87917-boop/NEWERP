@@ -1,11 +1,10 @@
 {
   "schema_version": 2,
   "project": "NEWERP",
-  "updated_at": "2026-10-09T01:37:13.773341Z",
+  "updated_at": "2026-10-09T01:44:58.057875Z",
   "phase": "ready",
   "current_task": null,
   "queue": [
-    "ERP-425",
     "ERP-426",
     "ERP-427"
   ],
@@ -407,46 +406,41 @@
     "ERP-421",
     "ERP-422",
     "ERP-423",
-    "ERP-424"
+    "ERP-424",
+    "ERP-425"
   ],
   "blocked": [],
   "last_build": {
-    "task": "ERP-424",
+    "task": "ERP-425",
     "profile": "safe",
     "status": "passed",
     "exit_code": 0,
-    "log": ".ai\\logs\\ERP-424-validation-1.log",
-    "at": "2026-10-09T01:20:27.588472Z"
+    "log": ".ai\\logs\\ERP-425-validation-2.log",
+    "at": "2026-10-09T01:44:57.282796Z"
   },
-  "last_error": {
-    "task": "ERP-425",
-    "kind": "automatic_repair_pending",
-    "summary": "Path guard failed:\noutside allowed_paths: src/ERP.IntegrationTests/OrderTraceabilityUiTests.cs"
-  },
+  "last_error": null,
   "last_deepseek_fix": {
     "task": "ERP-425",
-    "attempts": 3,
-    "status": "retry_pending",
-    "at": "2026-10-09T01:37:13.193043Z"
+    "attempt": 2,
+    "model": "deepseek-flash",
+    "exit_code": 0,
+    "finished_at": "2026-10-09T01:41:12.448677Z"
   },
   "git_sync": {
     "branch": "main",
-    "local_sha": "2266479",
-    "status": "synced",
-    "ahead": 0,
+    "local_sha": "88e14fb",
+    "status": "pending",
+    "ahead": 1,
     "behind": 0,
-    "last_attempt_at": "2026-10-09T01:20:33.357785Z",
+    "last_attempt_at": "2026-10-09T01:44:57.890240Z",
     "last_error": null
   },
   "next_recommended_tasks": [
-    "ERP-425",
     "ERP-426",
     "ERP-427"
   ],
   "runner": {
     "status": "stopped",
     "pid": null
-  },
-  "blocker": null,
-  "finish_reason": "deepseek_supervisor_recovery"
+  }
 }

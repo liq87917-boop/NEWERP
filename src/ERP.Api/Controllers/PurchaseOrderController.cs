@@ -7,6 +7,7 @@ using ERP.Domain.Enums;
 using ERP.Infrastructure.Export;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using System.Data;
 
 namespace ERP.Api.Controllers;
@@ -16,8 +17,12 @@ namespace ERP.Api.Controllers;
 /// <para>ERP-371：读取（列表 / 详情 / 导出 / 派生只读视图）/ 创建 / 修改 / 提交 / 审核 / 取消 / 删除每一路由都先做实时授权
 /// （既有登录身份 + 账号启用状态 + 既有「采购订单」菜单 + <see cref="SalespersonDataScopeService"/> 权威客户数据范围，
 /// 同时覆盖显式归属客户与权威归属销售订单客户），列表在计数 / 分页之前把客户范围下推到数据库；</para>
-/// <para>显式销售链接的权威快照与来源校验仍为 ERP-346，取消护栏仍为 ERP-345；提交 / 审核 / 删除 / 取消 / 改单
-/// 共用「归属销售订单 → 本采购订单」行锁与可串行化事务，审核在锁内复核来源仍为权威可用。</para>
+/// <para>显式销售链接的权威快照与来源校验仍为 ERP-346，取消护栏仍为 ERP-345；提交 / 审核 / 删除 / 取消 / 修改
+/// 共用「归属销售订单 → 本采购订单」行锁与原子事务，审核在锁内复核来源仍为权威可用。</para>
+/// <para>ERP-425：普通创建 / 修改（无论手工备货还是显式链接）统一进入
+/// <see cref="PurchaseOrderMutationRules"/> 的「原子事务 + 确定性行锁 + 锁内权威重读」协议：
+/// 加锁前以无锁只读发现持久化归属来源并与请求拟议来源取并集，按 Id 升序取得来源行锁后再取本采购订单行锁；
+/// 仅待提交可修改、来源指针被并发改写即原子拒绝、请求未给出来源时保留已存血缘（绝不静默清除）。</para>
 /// </summary>
 [Route("api/purchase-orders")]
 public class PurchaseOrderController : DocumentControllerBase<PurchaseOrder>
@@ -282,19 +287,27 @@ public class PurchaseOrderController : DocumentControllerBase<PurchaseOrder>
                 Db, new PurchaseOrderInvoicePaymentEvidenceQuery { Ids = ids })));
     }
 
-    /// <summary>创建</summary>
+    /// <summary>
+    /// 创建（ERP-425）：无论手工（无归属备货）还是显式链接来源，表头 / 明细 / 单据号预约都在同一原子事务内写入；
+    /// 显式来源时先按「来源销售订单行（升序）→ 采购订单行」确定性锁序取得上游行锁（与来源取消串行化），
+    /// 再权威解析来源；并发时「来源取消」与「采购创建」只能成功其一。
+    /// </summary>
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] PurchaseOrder entity)
     {
-        if (entity.OwningSalesOrderId is null)
-            return await CreateUnlinkedAsync(entity);
-
-        // ERP-347：显式归属销售订单的采购创建与「来源销售订单取消」使用同一把销售订单行锁（UPDLOCK/HOLDLOCK），
-        // 在可串行化事务内先锁来源订单行，再解析权威来源；并发时「来源取消」与「采购创建」只能成功其一。
-        await using var transaction = await Db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
+        IDbContextTransaction? transaction = null;
         try
         {
-            await AcquireSalesOrderLinkLockAsync(entity.OwningSalesOrderId.Value);
+            // ERP-425：复用既有 DbContext 事务协议（绝不嵌套），手工 / 已链接走同一事务边界。
+            transaction = await PurchaseOrderMutationRules.BeginMutationTransactionAsync(Db);
+
+            // 显式给出非法来源 Id（0 / 负）：绝不静默忽略，直接拒绝（不消耗单据号、不落库）。
+            if (entity.OwningSalesOrderId is not null and not > 0)
+                throw BusinessException.InvalidParameter("归属销售订单 Id 必须为正整数");
+
+            // 拟议来源（创建没有持久化来源）：升序、去重、有界加锁，绝不在未持来源锁时应用显式链接。
+            await AcquireSalesOrderLinkLocksAsync(
+                PurchaseOrderMutationRules.MergeSalesOrderLockIds(entity.OwningSalesOrderId));
 
             // ERP-371：身份 / 菜单 / 归属来源范围先于单据号与任何写入（fail closed）。
             await EnsureProposedAuthorizedAsync(entity);
@@ -304,128 +317,99 @@ public class PurchaseOrderController : DocumentControllerBase<PurchaseOrder>
             entity.Status = DocumentStatus.Pending;
             entity.CreatedAt = DateTime.Now;
             foreach (var d in entity.Details) d.Amount = d.Quantity * d.UnitPrice;
-            await PurchaseSalesOrderLinkRules.ApplyLinkAsync(Db, entity, CurrentUserId());
+            if (entity.OwningSalesOrderId is > 0)
+                await PurchaseSalesOrderLinkRules.ApplyLinkAsync(Db, entity, CurrentUserId());
             Calculate(entity);
             Validate(entity);
             Db.PurchaseOrders.Add(entity);
             await Db.SaveChangesAsync();
-            await transaction.CommitAsync();
+            if (transaction is not null) await transaction.CommitAsync();
         }
         catch
         {
-            await transaction.RollbackAsync();
+            if (transaction is not null) await transaction.RollbackAsync();
+            PurchaseOrderMutationRules.DiscardTrackedChanges(Db);
             throw;
         }
 
         return Ok(ApiResponse<object>.Success(new { entity.Id, entity.OrderNo }, "采购订单创建成功"));
     }
 
-    /// <summary>更新</summary>
+    /// <summary>
+    /// 更新（ERP-425）：无论手工（无归属备货）还是已链接来源，都在同一原子事务内进入「确定性行锁 + 锁内权威重读」协议。
+    /// <para>加锁前以<b>无锁只读</b>发现<b>持久化</b>归属来源，并与请求<b>拟议</b>来源取并集，
+    /// 按 Id 升序取得全部必要来源销售订单行锁，再取本采购订单行锁（与提交 / 审核 / 删除 / 取消共用同一把锁）。</para>
+    /// <para>锁内重读持久化表头 / 明细 / 状态 / 来源与实时权限：仅待提交可修改、来源指针被并发改写即原子拒绝；
+    /// 请求未给出归属来源时保留已存来源（绝不静默清除血缘），显式改绑仍按权威来源重新解析并校验实时已审核来源。</para>
+    /// </summary>
     [HttpPut("{id:long}")]
     public async Task<IActionResult> Update(long id, [FromBody] PurchaseOrder entity)
     {
-        if (entity.OwningSalesOrderId is null)
-            return await UpdateUnlinkedAsync(id, entity);
-
-        // ERP-347：与创建同口径——显式归属销售订单的采购更新与「来源销售订单取消」使用同一把销售订单行锁串行化。
-        await using var transaction = await Db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
+        IDbContextTransaction? transaction = null;
         try
         {
-            await AcquireSalesOrderLinkLockAsync(entity.OwningSalesOrderId.Value);
-            // ERP-371：同序（销售订单 → 采购订单）加行锁，把来源链接变更与状态流转串行化，避免死锁。
+            // ERP-425：复用既有 DbContext 事务协议（绝不嵌套），手工 / 已链接走同一事务边界。
+            transaction = await PurchaseOrderMutationRules.BeginMutationTransactionAsync(Db);
+
+            // 加锁前发现：无锁只读读取持久化归属来源，绝不在持有采购共享锁的情况下再去取上游来源锁。
+            var discoveredSalesOrderId = await PurchaseOrderMutationRules
+                .ReadPersistedSalesOrderPointerAsync(Db, id);
+
+            // 请求原样保留（null = 未提供；非 null 含 0 / 负 = 显式给出，交由权威解析拒绝）。
+            var requestedSalesOrderId = entity.OwningSalesOrderId;
+
+            // 持久化 ∪ 拟议：升序、去重、有界加锁 —— 绝不仅凭请求 null 选择安全路径。
+            await AcquireSalesOrderLinkLocksAsync(PurchaseOrderMutationRules
+                .MergeSalesOrderLockIds(discoveredSalesOrderId,
+                    PurchaseOrderMutationRules.NormalizeId(requestedSalesOrderId)));
             await AcquirePurchaseOrderLockAsync(id);
 
             var existing = await Db.PurchaseOrders.Include(o => o.Details)
                 .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
                 ?? throw BusinessException.NotFound("采购订单不存在");
-            if (GetStatus(existing) != DocumentStatus.Pending)
-                throw BusinessException.RuleConflict("仅待提交状态的单据可修改");
+
+            // 锁内重读持久化状态：并发提交 / 审核 / 删除 / 取消之后过期的编辑一律原子拒绝、绝不复活。
+            PurchaseOrderMutationRules.EnsureEditable(GetStatus(existing));
+
+            // 锁内重读来源指针：发现指针被并发改写（本次未对其加锁）→ 原子拒绝。
+            var lockedSalesOrderId = PurchaseOrderMutationRules.NormalizeId(existing.OwningSalesOrderId);
+            if (!PurchaseOrderMutationRules.PersistedSourceUnchanged(discoveredSalesOrderId, lockedSalesOrderId))
+                throw BusinessException.RuleConflict(PurchaseOrderMutationRules.SourceChangedUnderLockText);
+
+            // 请求未给出归属来源时保留已存来源（绝不静默清除血缘）；显式给出时保留原值交由权威解析校验。
+            entity.OwningSalesOrderId = requestedSalesOrderId ?? lockedSalesOrderId;
 
             // ERP-371：分配字段 / 替换明细之前先校验「已存」与「请求」两侧归属（身份 / 菜单 / 权威客户范围）。
             await EnsureOrderAuthorizedAsync(existing);
             await EnsureProposedAuthorizedAsync(entity);
 
-            await PurchaseSalesOrderLinkRules.ApplyLinkAsync(Db, entity, CurrentUserId());
+            if (entity.OwningSalesOrderId is > 0)
+                await PurchaseSalesOrderLinkRules.ApplyLinkAsync(Db, entity, CurrentUserId());
+            else if (requestedSalesOrderId is not null)
+                // 显式给出非法来源 Id（0 / 负）：绝不静默清除血缘。
+                throw BusinessException.InvalidParameter("归属销售订单 Id 必须为正整数");
 
-            existing.OrderDate = entity.OrderDate;
-            existing.SupplierId = entity.SupplierId;
-            existing.BuyerId = entity.BuyerId;
-            existing.Currency = entity.Currency;
-            existing.ExchangeRate = entity.ExchangeRate;
-            existing.PaymentTerms = entity.PaymentTerms;
-            existing.DeliveryDate = entity.DeliveryDate;
-            existing.PortId = entity.PortId;
-            existing.Remark = entity.Remark;
-
-            // 采购执行与结算追溯（ERP-008）
-            existing.OwningCustomerId = entity.OwningCustomerId;
-            existing.OwningCustomerName = entity.OwningCustomerName;
-            existing.OwningSalesOrderId = entity.OwningSalesOrderId;
-            existing.OwningSalesOrderNo = entity.OwningSalesOrderNo;
-            existing.AdvanceOnBehalf = entity.AdvanceOnBehalf;
-            existing.SupplierConfirmedDate = entity.SupplierConfirmedDate;
-            existing.TaxRate = entity.TaxRate;
-            existing.TaxIncluded = entity.TaxIncluded;
-            existing.ArrivalProgress = entity.ArrivalProgress;
-            existing.QcStatus = entity.QcStatus;
-            existing.ContractNo = entity.ContractNo;
-            existing.SettlementProgress = entity.SettlementProgress;
-
-            Db.PurchaseOrderDetails.RemoveRange(existing.Details);
-            foreach (var d in entity.Details)
-            {
-                d.Id = 0;
-                d.PurchaseOrderId = id;
-                d.CreatedAt = DateTime.Now;
-                d.Amount = d.Quantity * d.UnitPrice;
-            }
-            existing.Details = entity.Details;
+            ApplyHeader(existing, entity);
+            ReplaceDetails(id, existing, entity);
             Calculate(existing);
             Validate(existing);
             existing.UpdatedAt = DateTime.Now;
             await Db.SaveChangesAsync();
-            await transaction.CommitAsync();
+            if (transaction is not null) await transaction.CommitAsync();
         }
         catch
         {
-            await transaction.RollbackAsync();
+            if (transaction is not null) await transaction.RollbackAsync();
+            PurchaseOrderMutationRules.DiscardTrackedChanges(Db);
             throw;
         }
 
         return Ok(ApiResponse<object>.Success(null, "采购订单更新成功"));
     }
 
-    /// <summary>无归属销售订单的采购创建（保持历史行为，不加锁、不开事务）。</summary>
-    private async Task<IActionResult> CreateUnlinkedAsync(PurchaseOrder entity)
+    /// <summary>把请求字段整体赋值到已存受跟踪实体（表头 / 采购执行与结算追溯，商业语义原样透传）。</summary>
+    private static void ApplyHeader(PurchaseOrder existing, PurchaseOrder entity)
     {
-        // ERP-371：无归属备货采购同样先解析身份 / 菜单 / 请求归属范围（fail closed，特权备货采购保持可用）。
-        await EnsureProposedAuthorizedAsync(entity);
-
-        entity.Id = 0;
-        entity.OrderNo = await _noService.GenerateAsync(DocumentType.PurchaseOrder);
-        entity.Status = DocumentStatus.Pending;
-        entity.CreatedAt = DateTime.Now;
-        foreach (var d in entity.Details) d.Amount = d.Quantity * d.UnitPrice;
-        Calculate(entity);
-        Validate(entity);
-        Db.PurchaseOrders.Add(entity);
-        await Db.SaveChangesAsync();
-        return Ok(ApiResponse<object>.Success(new { entity.Id, entity.OrderNo }, "采购订单创建成功"));
-    }
-
-    /// <summary>无归属销售订单的采购更新（保持历史行为，不加锁、不开事务）。</summary>
-    private async Task<IActionResult> UpdateUnlinkedAsync(long id, PurchaseOrder entity)
-    {
-        var existing = await Db.PurchaseOrders.Include(o => o.Details)
-            .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
-            ?? throw BusinessException.NotFound("采购订单不存在");
-        if (GetStatus(existing) != DocumentStatus.Pending)
-            throw BusinessException.RuleConflict("仅待提交状态的单据可修改");
-
-        // ERP-371：分配字段 / 替换明细之前先校验「已存」与「请求」两侧归属（身份 / 菜单 / 权威客户范围）。
-        await EnsureOrderAuthorizedAsync(existing);
-        await EnsureProposedAuthorizedAsync(entity);
-
         existing.OrderDate = entity.OrderDate;
         existing.SupplierId = entity.SupplierId;
         existing.BuyerId = entity.BuyerId;
@@ -449,7 +433,11 @@ public class PurchaseOrderController : DocumentControllerBase<PurchaseOrder>
         existing.QcStatus = entity.QcStatus;
         existing.ContractNo = entity.ContractNo;
         existing.SettlementProgress = entity.SettlementProgress;
+    }
 
+    /// <summary>明细整体替换（全删全建）：金额按「数量 × 单价」重算，与表头在同一事务内原子保存。</summary>
+    private void ReplaceDetails(long id, PurchaseOrder existing, PurchaseOrder entity)
+    {
         Db.PurchaseOrderDetails.RemoveRange(existing.Details);
         foreach (var d in entity.Details)
         {
@@ -459,11 +447,6 @@ public class PurchaseOrderController : DocumentControllerBase<PurchaseOrder>
             d.Amount = d.Quantity * d.UnitPrice;
         }
         existing.Details = entity.Details;
-        Calculate(existing);
-        Validate(existing);
-        existing.UpdatedAt = DateTime.Now;
-        await Db.SaveChangesAsync();
-        return Ok(ApiResponse<object>.Success(null, "采购订单更新成功"));
     }
 
     /// <summary>
@@ -605,44 +588,65 @@ public class PurchaseOrderController : DocumentControllerBase<PurchaseOrder>
     }
 
     /// <summary>
-    /// 采购订单状态流转锁序（ERP-371）：先锁归属销售订单行、再锁本采购订单行（<c>UPDLOCK, HOLDLOCK</c>），
-    /// 与创建 / 更新的「来源销售订单 → 采购订单」锁序一致，避免与来源取消 / 链接变更死锁；
+    /// 采购订单状态流转锁序（ERP-371 / ERP-425）：先锁归属销售订单行、再锁本采购订单行（<c>UPDLOCK, HOLDLOCK</c>），
+    /// 与创建 / 修改的「来源销售订单 → 采购订单」锁序一致，避免与来源取消 / 链接变更死锁；
     /// 同单并发「提交 / 审核 / 删除 / 取消 / 改单」因此串行化在同一事务内。
     /// 非关系型提供程序（内存库）无法执行表提示，跳过即可（事务本身等价无事务）。
     /// </summary>
     private async Task AcquireOrderStateLocksAsync(long orderId)
     {
-        // Discovery must not retain a shared purchase lock before acquiring the
-        // upstream sales lock. Recheck the pointer under the final update lock.
-        long? salesOrderId;
-        if (Db.Database.IsRelational())
-        {
-            var pointers = await Db.Database.SqlQueryRaw<long>(
-                "SELECT COALESCE(OwningSalesOrderId, 0) AS Value FROM db_owner.PurchaseOrders WITH (READUNCOMMITTED) WHERE Id = {0} AND IsDeleted = 0",
-                orderId).ToListAsync();
-            salesOrderId = pointers.FirstOrDefault();
-        }
-        else
-            salesOrderId = await Db.PurchaseOrders.AsNoTracking()
-                .Where(o => o.Id == orderId && !o.IsDeleted)
-                .Select(o => (long?)o.OwningSalesOrderId).FirstOrDefaultAsync();
-        if (salesOrderId is > 0)
-            await AcquireSalesOrderLinkLockAsync(salesOrderId.Value);
+        // 加锁前发现：可串行化事务内的普通 SELECT 会保留共享锁，因此用 READUNCOMMITTED 无锁只读，
+        // 绝不在取得上游来源锁之前保留采购订单共享锁；按「来源销售订单行（升序）→ 本采购订单行」确定性加锁，
+        // 再在锁内重读来源指针并核对。
+        var discoveredSalesOrderId = await ReadPersistedSalesOrderPointerUnlockedAsync(orderId);
+        await AcquireSalesOrderLinkLocksAsync(
+            PurchaseOrderMutationRules.MergeSalesOrderLockIds(discoveredSalesOrderId));
         await AcquirePurchaseOrderLockAsync(orderId);
-        var lockedSourceId = await Db.PurchaseOrders.AsNoTracking()
-            .Where(o => o.Id == orderId && !o.IsDeleted)
-            .Select(o => (long?)o.OwningSalesOrderId).FirstOrDefaultAsync();
-        if ((lockedSourceId ?? 0) != (salesOrderId ?? 0))
-            throw BusinessException.RuleConflict("采购订单来源已变更，请刷新后重试");
+
+        var lockedSalesOrderId = await PurchaseOrderMutationRules
+            .ReadPersistedSalesOrderPointerAsync(Db, orderId);
+        if (!PurchaseOrderMutationRules.PersistedSourceUnchanged(discoveredSalesOrderId, lockedSalesOrderId))
+            throw BusinessException.RuleConflict(PurchaseOrderMutationRules.SourceChangedUnderLockText);
     }
 
-    /// <summary>对采购订单行加更新锁（UPDLOCK, HOLDLOCK）；非关系型提供程序跳过。</summary>
+    /// <summary>
+    /// <b>无锁</b>读取持久化归属来源指针（可串行化事务内的发现专用）：关系型后端用
+    /// <c>READUNCOMMITTED</c> 只读，绝不保留采购订单共享锁；非关系型提供程序无锁语义，直接只读。
+    /// </summary>
+    private async Task<long?> ReadPersistedSalesOrderPointerUnlockedAsync(long orderId)
+    {
+        if (!Db.Database.IsRelational())
+            return await PurchaseOrderMutationRules.ReadPersistedSalesOrderPointerAsync(Db, orderId);
+
+        var pointers = await Db.Database.SqlQueryRaw<long>(
+            "SELECT COALESCE(OwningSalesOrderId, 0) AS Value FROM db_owner.PurchaseOrders WITH (READUNCOMMITTED) WHERE Id = {0} AND IsDeleted = 0",
+            orderId).ToListAsync();
+        return PurchaseOrderMutationRules.NormalizeId(pointers.FirstOrDefault());
+    }
+
+    /// <summary>
+    /// 按 <b>Id 升序</b>对全部必要归属销售订单行加更新锁（去重、仅正整数，已由
+    /// <see cref="PurchaseOrderMutationRules.MergeSalesOrderLockIds(long?)"/> 归一化）；
+    /// 与创建 / 修改 / 状态流转共用同一把上游来源锁，绝不反向获取下游锁。
+    /// </summary>
+    private async Task AcquireSalesOrderLinkLocksAsync(IReadOnlyList<long> salesOrderIds)
+    {
+        foreach (var salesOrderId in salesOrderIds)
+            await AcquireSalesOrderLinkLockAsync(salesOrderId);
+    }
+
+    /// <summary>
+    /// 对采购订单行加更新锁（UPDLOCK, HOLDLOCK）；非关系型提供程序跳过。
+    /// 等价语句：<c>SELECT Id FROM db_owner.PurchaseOrders WITH (UPDLOCK, HOLDLOCK) WHERE Id = {0}</c>
+    /// （常量为 <see cref="PurchaseOrderMutationRules.PurchaseOrderRowLockSql"/>，与状态流转 / 供应商采购发票模块
+    /// 共用同一把采购订单行锁，绝不反向获取下游锁）。
+    /// </summary>
     private async Task AcquirePurchaseOrderLockAsync(long orderId)
     {
         if (!Db.Database.IsRelational()) return;
         await Db.Database
             .SqlQueryRaw<long>(
-                "SELECT Id FROM db_owner.PurchaseOrders WITH (UPDLOCK, HOLDLOCK) WHERE Id = {0}",
+                PurchaseOrderMutationRules.PurchaseOrderRowLockSql,
                 orderId)
             .ToListAsync();
     }
