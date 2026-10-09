@@ -19,6 +19,11 @@ namespace ERP.Api.Controllers;
 /// 销售订单（含佣金比例与金额）、装柜与单证、收款单及其引用行、销项发票证据、库存与库存成本、费用与退税记录，
 /// 也<strong>不</strong>读取或改写业务员提成报表（<c>SalesCommissionRate</c>）口径；费用条款只接受显式提交的值，
 /// 不在服务端推断。生产库结构变更仍由 Human Gate 控制（本控制器不做任何 DDL，建表 / 索引由 SchemaUpgrader 幂等补齐）。</para>
+/// <para>授权（ERP-439）：**每一条**路由在读取 / 写入之前都先复用
+/// <see cref="AgencyServiceFeeReconciliationRules.EnsureRegisterAuthorizedAsync"/> 解析实时启用身份、既有
+/// 「客户资料」（customer）功能菜单（缺一即 fail closed，与月度汇总及 ERP-437 登记册路由同码同源）与 ERP-097
+/// 权威客户范围，再把范围下推到台账 / 详情 / 登记 / 修改 / 记录 / 作废；范围外 / 已删除 / 不存在的协议一律返回
+/// 同一条不披露存在性的错误，<strong>不</strong>新增任何菜单 / 角色 / 用户授权，也<strong>不</strong>做匿名 / 管理员回退。</para>
 /// </summary>
 [ApiController]
 [Route("api/agency-service-fee-agreements")]
@@ -38,14 +43,20 @@ public class AgencyServiceFeeAgreementController : ControllerBase
     /// </summary>
     [HttpGet]
     public async Task<IActionResult> GetPaged([FromQuery] AgencyServiceFeeAgreementQuery query)
-        => Ok(ApiResponse<PagedResult<AgencyServiceFeeAgreementDto>>.Success(
-            await AgencyServiceFeeAgreementService.ListAsync(_db, query)));
+    {
+        var scope = await AgencyServiceFeeReconciliationRules.EnsureRegisterAuthorizedAsync(_db, CurrentUserId());
+        return Ok(ApiResponse<PagedResult<AgencyServiceFeeAgreementDto>>.Success(
+            await AgencyServiceFeeAgreementService.ListAsync(_db, query, scope)));
+    }
 
     /// <summary>协议证据详情（含客户可用性标注与同源口径文案；只读）</summary>
     [HttpGet("{id:long}")]
     public async Task<IActionResult> GetById(long id)
-        => Ok(ApiResponse<AgencyServiceFeeAgreementDto>.Success(
-            await AgencyServiceFeeAgreementService.GetAsync(_db, id)));
+    {
+        var scope = await AgencyServiceFeeReconciliationRules.EnsureRegisterAuthorizedAsync(_db, CurrentUserId());
+        return Ok(ApiResponse<AgencyServiceFeeAgreementDto>.Success(
+            await AgencyServiceFeeAgreementService.GetAsync(_db, id, scope)));
+    }
 
     /// <summary>
     /// 新增草稿协议证据：校验协议号、客户（必须存在、未删除且启用）、生效日期区间、币种、
@@ -53,16 +64,22 @@ public class AgencyServiceFeeAgreementController : ControllerBase
     /// </summary>
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] AgencyServiceFeeAgreementSaveDto dto)
-        => Ok(ApiResponse<AgencyServiceFeeAgreementDto>.Success(
-            await AgencyServiceFeeAgreementService.CreateAsync(_db, dto),
+    {
+        var scope = await AgencyServiceFeeReconciliationRules.EnsureRegisterAuthorizedAsync(_db, CurrentUserId());
+        return Ok(ApiResponse<AgencyServiceFeeAgreementDto>.Success(
+            await AgencyServiceFeeAgreementService.CreateAsync(_db, dto, scope),
             "代理服务费协议证据草稿已登记（仅商业条款证据留痕；未开发票、未记账、未授权付款）"));
+    }
 
     /// <summary>修改草稿协议证据（已登记 / 已作废拒绝修改；协议号与客户快照由服务端重新写入）</summary>
     [HttpPut("{id:long}")]
     public async Task<IActionResult> Update(long id, [FromBody] AgencyServiceFeeAgreementSaveDto dto)
-        => Ok(ApiResponse<AgencyServiceFeeAgreementDto>.Success(
-            await AgencyServiceFeeAgreementService.UpdateAsync(_db, id, dto),
+    {
+        var scope = await AgencyServiceFeeReconciliationRules.EnsureRegisterAuthorizedAsync(_db, CurrentUserId());
+        return Ok(ApiResponse<AgencyServiceFeeAgreementDto>.Success(
+            await AgencyServiceFeeAgreementService.UpdateAsync(_db, id, dto, scope),
             "代理服务费协议证据草稿已更新"));
+    }
 
     /// <summary>
     /// 登记协议证据（草稿 → 已登记）：只改状态、登记时间与登记人（服务端按已认证身份写入，客户端不能提交该字段），
@@ -70,9 +87,12 @@ public class AgencyServiceFeeAgreementController : ControllerBase
     /// </summary>
     [HttpPost("{id:long}/record")]
     public async Task<IActionResult> Record(long id)
-        => Ok(ApiResponse<AgencyServiceFeeAgreementDto>.Success(
-            await AgencyServiceFeeAgreementService.RecordAsync(_db, id, CurrentUserName()),
+    {
+        var scope = await AgencyServiceFeeReconciliationRules.EnsureRegisterAuthorizedAsync(_db, CurrentUserId());
+        return Ok(ApiResponse<AgencyServiceFeeAgreementDto>.Success(
+            await AgencyServiceFeeAgreementService.RecordAsync(_db, id, CurrentUserName(), scope),
             "代理服务费协议证据已登记（证据已冻结，可作废但不可改写；未开发票、未记账、未授权付款）"));
+    }
 
     /// <summary>
     /// 作废协议证据（必须填写作废原因）：保留协议身份、费用条款、客户快照、登记人与时间戳及审计历史，
@@ -80,11 +100,18 @@ public class AgencyServiceFeeAgreementController : ControllerBase
     /// </summary>
     [HttpPost("{id:long}/void")]
     public async Task<IActionResult> Void(long id, [FromBody] AgencyServiceFeeAgreementVoidRequest? request)
-        => Ok(ApiResponse<AgencyServiceFeeAgreementDto>.Success(
-            await AgencyServiceFeeAgreementService.VoidAsync(_db, id, request?.Reason),
+    {
+        var scope = await AgencyServiceFeeReconciliationRules.EnsureRegisterAuthorizedAsync(_db, CurrentUserId());
+        return Ok(ApiResponse<AgencyServiceFeeAgreementDto>.Success(
+            await AgencyServiceFeeAgreementService.VoidAsync(_db, id, request?.Reason, scope),
             "代理服务费协议证据已作废（原始条款与历史保留，可读）"));
+    }
 
     /// <summary>当前登录用户名（登记人由服务端按已认证身份写入，不采信客户端提交的值；无身份时返回 null → 记「未知用户」）</summary>
     private string? CurrentUserName()
         => User?.FindFirst(ClaimTypes.Name)?.Value ?? User?.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+
+    /// <summary>当前登录用户 Id（缺失或非数字时返回 null，由授权规则 fail closed 拒绝，绝不猜测身份）</summary>
+    private long? CurrentUserId()
+        => long.TryParse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value, out var id) ? id : null;
 }

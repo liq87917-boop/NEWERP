@@ -1,5 +1,7 @@
 using ERP.Application.Common;
+using ERP.Application.Interfaces;
 using ERP.Domain.Entities;
+using Microsoft.EntityFrameworkCore;
 
 namespace ERP.Application.Services;
 
@@ -362,5 +364,46 @@ public static class AgencyServiceFeeAgreementRules
     {
         if (status == StatusVoided)
             throw BusinessException.RuleConflict($"协议「{identity}」已是已作废状态，不能重复作废");
+    }
+
+    // ==================== 9. 路由级实时授权与权威客户范围（ERP-439，fail closed） ====================
+
+    /// <summary>
+    /// 越范围 / 已删除 / 不存在的代理服务费协议证据统一返回的**同一条不披露存在性**文案：
+    /// 「不存在」与「不可见」不区分，错误文案不含范围外协议 Id、协议号、客户、金额或费率。
+    /// </summary>
+    public const string AgreementNotFoundText =
+        "代理服务费协议证据不存在或已删除，或不在当前账号的数据范围内";
+
+    /// <summary>
+    /// 客户数据范围硬边界（ERP-439）：受限业务员的显式提交客户越界一律 fail closed，
+    /// 返回同一条不披露存在性的 <see cref="AgreementNotFoundText"/>；绝不新增任何菜单 / 角色 / 用户授权，
+    /// 也不提供匿名 / 管理员回退。
+    /// </summary>
+    public static void EnsureCustomerInScope(SalespersonDataScope scope, long customerId)
+    {
+        ArgumentNullException.ThrowIfNull(scope);
+        if (!scope.AllowsCustomer(customerId))
+            throw BusinessException.NotFound(AgreementNotFoundText);
+    }
+
+    /// <summary>
+    /// 按 Id 在权威客户范围内收敛**协议证据**（ERP-439，严格口径：已删除视为不存在）：
+    /// 不存在 / 已删除 / 越范围一律抛同一条不披露存在性的 <see cref="AgreementNotFoundText"/>。
+    /// <para>本方法只做有界只读查询，绝不落库、绝不改写任何证据；范围先于读取，绝不「先读全量再内存过滤」。</para>
+    /// </summary>
+    public static async Task<AgencyServiceFeeAgreement> EnsureAgreementInScopeAsync(
+        IErpDbContext db, SalespersonDataScope scope, long agreementId)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(scope);
+
+        var agreement = agreementId > 0
+            ? await db.AgencyServiceFeeAgreements.AsNoTracking()
+                .FirstOrDefaultAsync(a => a.Id == agreementId && !a.IsDeleted)
+            : null;
+        if (agreement is null || !scope.AllowsCustomer(agreement.CustomerId))
+            throw BusinessException.NotFound(AgreementNotFoundText);
+        return agreement;
     }
 }

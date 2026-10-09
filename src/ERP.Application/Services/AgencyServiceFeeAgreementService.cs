@@ -68,6 +68,21 @@ public static class AgencyServiceFeeAgreementService
     }
 
     /// <summary>
+    /// 路由级登记草稿协议证据（ERP-439）：<paramref name="scope"/> 非空时，显式提交的客户必须落在
+    /// ERP-097 权威客户范围内；越范围客户一律按同一条不披露存在性的错误在**写入之前**拒绝——
+    /// 绝不落任何协议行，也绝不消耗任何协议身份。
+    /// </summary>
+    public static async Task<AgencyServiceFeeAgreementDto> CreateAsync(
+        IErpDbContext db, AgencyServiceFeeAgreementSaveDto dto, SalespersonDataScope? scope)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(dto);
+        if (scope is not null && dto.CustomerId > 0)
+            AgencyServiceFeeAgreementRules.EnsureCustomerInScope(scope, dto.CustomerId);
+        return await CreateAsync(db, dto);
+    }
+
+    /// <summary>
     /// 修改草稿协议证据：已登记 / 已作废拒绝修改（保留可读）；重复身份拒绝；
     /// 修改不改写任何既有记录，也不触碰登记人 / 登记时间（草稿尚未登记时它们为空）。
     /// </summary>
@@ -104,6 +119,26 @@ public static class AgencyServiceFeeAgreementService
         return await MapAsync(db, agreement);
     }
 
+    /// <summary>
+    /// 路由级修改草稿协议证据（ERP-439）：<paramref name="scope"/> 非空时先按**已存**协议的持久化客户与
+    /// 拟提交客户双向收敛——范围外 / 已删除 / 不存在的协议或越范围客户一律拒绝，且拒绝发生在**写库之前**，
+    /// 绝不改写任何既有协议字段或状态。
+    /// </summary>
+    public static async Task<AgencyServiceFeeAgreementDto> UpdateAsync(
+        IErpDbContext db, long agreementId, AgencyServiceFeeAgreementSaveDto dto, SalespersonDataScope? scope)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(dto);
+        if (scope is not null)
+        {
+            if (agreementId > 0)
+                await AgencyServiceFeeAgreementRules.EnsureAgreementInScopeAsync(db, scope, agreementId);
+            if (dto.CustomerId > 0)
+                AgencyServiceFeeAgreementRules.EnsureCustomerInScope(scope, dto.CustomerId);
+        }
+        return await UpdateAsync(db, agreementId, dto);
+    }
+
     // ==================== 2. 台账读取（分页 / 有界，批量装载） ====================
 
     /// <summary>协议证据详情（含客户可用性标注与口径文案；只读）</summary>
@@ -115,11 +150,27 @@ public static class AgencyServiceFeeAgreementService
     }
 
     /// <summary>
+    /// 路由级协议证据详情（ERP-439）：<paramref name="scope"/> 非空时按权威客户范围收敛——
+    /// 范围外 / 已删除 / 不存在的协议返回同一条不披露存在性的错误
+    /// （绝不暴露范围外协议 Id、协议号、客户、金额或费率）；范围先于读取，绝不「先读全量再内存过滤」。
+    /// </summary>
+    public static async Task<AgencyServiceFeeAgreementDto> GetAsync(
+        IErpDbContext db, long agreementId, SalespersonDataScope? scope)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        if (scope is not null && agreementId > 0)
+            await AgencyServiceFeeAgreementRules.EnsureAgreementInScopeAsync(db, scope, agreementId);
+        return await GetAsync(db, agreementId);
+    }
+
+    /// <summary>
     /// 台账分页查询（只读）：支持客户 / 状态 / 币种 / 计费方式 / 生效起始日期区间 / 关键字过滤；
     /// 默认包含已作废历史（证据保留可读）。页内客户一次批量装载（无逐行数据库查询）。
+    /// <para>ERP-439：<paramref name="scope"/> 非空时，权威客户范围在**计数、分页与物化之前**下推到数据库，
+    /// 受限账号绝不返回范围外协议或其计数；范围外协议不会通过 Id / 计数旁路泄露。</para>
     /// </summary>
     public static async Task<PagedResult<AgencyServiceFeeAgreementDto>> ListAsync(
-        IErpDbContext db, AgencyServiceFeeAgreementQuery query)
+        IErpDbContext db, AgencyServiceFeeAgreementQuery query, SalespersonDataScope? scope = null)
     {
         ArgumentNullException.ThrowIfNull(db);
         ArgumentNullException.ThrowIfNull(query);
@@ -133,6 +184,9 @@ public static class AgencyServiceFeeAgreementService
         var keyword = AgencyServiceFeeAgreementRules.NormalizeKeyword(query.Keyword);
 
         var source = db.AgencyServiceFeeAgreements.AsNoTracking().Where(x => !x.IsDeleted);
+        // ERP-439：权威客户范围在计数 / 分页之前下推（受限账号绝不统计 / 返回范围外协议）。
+        if (scope is not null)
+            source = SalespersonDataScopeService.FilterByCustomer(source, scope, x => x.CustomerId);
         if (query.CustomerId is not null) source = source.Where(x => x.CustomerId == query.CustomerId.Value);
         if (status is not null) source = source.Where(x => x.Status == status.Value);
         if (feeMethod is not null) source = source.Where(x => x.FeeMethod == feeMethod);
@@ -190,6 +244,20 @@ public static class AgencyServiceFeeAgreementService
     }
 
     /// <summary>
+    /// 路由级登记协议证据（ERP-439）：<paramref name="scope"/> 非空时先按权威客户范围收敛协议；
+    /// 范围外 / 已删除 / 不存在的协议一律拒绝，且拒绝发生在**写库之前**——
+    /// 绝不改变任何协议状态、登记人或时间戳。
+    /// </summary>
+    public static async Task<AgencyServiceFeeAgreementDto> RecordAsync(
+        IErpDbContext db, long agreementId, string? recordedBy, SalespersonDataScope? scope)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        if (scope is not null && agreementId > 0)
+            await AgencyServiceFeeAgreementRules.EnsureAgreementInScopeAsync(db, scope, agreementId);
+        return await RecordAsync(db, agreementId, recordedBy);
+    }
+
+    /// <summary>
     /// 作废协议证据（草稿 / 已登记 → 已作废）：必须填写作废原因；**保留**协议身份、费用条款、客户快照、
     /// 登记人与时间戳，不物理删除、不改写原始条款，也不产生任何发票 / 记账 / 付款 / 法律动作；重复作废被拒绝。
     /// </summary>
@@ -208,6 +276,20 @@ public static class AgencyServiceFeeAgreementService
         await db.SaveChangesAsync();
 
         return await MapAsync(db, agreement);
+    }
+
+    /// <summary>
+    /// 路由级作废协议证据（ERP-439）：<paramref name="scope"/> 非空时先按权威客户范围收敛协议；
+    /// 范围外 / 已删除 / 不存在的协议一律拒绝，且拒绝发生在**写库之前**——
+    /// 绝不改变任何协议状态、作废原因或时间戳。
+    /// </summary>
+    public static async Task<AgencyServiceFeeAgreementDto> VoidAsync(
+        IErpDbContext db, long agreementId, string? reason, SalespersonDataScope? scope)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        if (scope is not null && agreementId > 0)
+            await AgencyServiceFeeAgreementRules.EnsureAgreementInScopeAsync(db, scope, agreementId);
+        return await VoidAsync(db, agreementId, reason);
     }
 
     // ==================== 4. 校验与映射（内部） ====================
