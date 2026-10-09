@@ -4,13 +4,15 @@
   "acceptance_criteria": [
     "Canonical purchase order detail, print and JSON operational export include only nondeleted child lines belonging to accessible nondeleted parents. Scope before filtering/materialization; reuse371 live account/menu and explicit plus authoritative owning customer scope. Preserve historical stored header amounts and source/audit snapshots; do not recompute currency totals or mutate tombstoned rows.",
     "Genuine isolated SQL fixtures with mixed live/deleted details and foreign parents verify detail/print/JSON agreement, deleted parent denial, foreign/malformed/disabled/revoked identity refusal and unchanged source/inventory/payable/payment evidence. Preserve existing fields and Excel contract, no new grants/menu, no arbitrary joins or SQL. Related units and safe Release/full suite required.",
-    "Keep existing live account/menu/customer authority, quantity and amount checks, master checks, source locks, atomic transactions and audit. No new grants, no identity bypass. Genuine HTTP/browser and SQL use only fresh GUID NEWERP_AUTOTEST databases on exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity, reject existing/wrong targets before access. Preserve original failure logs. Relevant tests and safe Release/full unit suite required; build completion is not stage acceptance. No production access, deployment or legacy report entry switch."
+    "Keep existing live account/menu/customer authority, quantity and amount checks, master checks, source locks, atomic transactions and audit. No new grants, no identity bypass. Genuine HTTP/browser and SQL use only fresh GUID NEWERP_AUTOTEST databases on exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity, reject existing/wrong targets before access. Preserve original failure logs. Relevant tests and safe Release/full unit suite required; build completion is not stage acceptance. No production access, deployment or legacy report entry switch.",
+    "Apply minimal prerequisite sales HTTP fixture correction, then preserve and rerun real regression during operational closure: existing ERP428 OrderBody emits orderNo:null despite claiming omission, so real .ai/logs/ERP-428-independent-http-results/test.log failed7 and passed6. Preserve these complete logs. Omit only null orderNo key in PostOrderAsync; do not suppress MVC validation, remove optional port null or weaken business guards. Exact isolated three-line correction .ai/logs/heartbeat-20261009T0236-http-fixture-repair/SalesOrderHttpFormSqlServerTests.repaired.cs passed13 real HTTP/SQL cases on fresh isolated GUID DB in .ai/logs/ERP-428-independent-http-repaired-results/test.log; apply against current file without overwriting concurrent work. Include malformed body, authority, invalid master zero writes and caller number override; build is not stage acceptance."
   ],
   "allowed_paths": [
     "src/ERP.Api/Controllers/PurchaseOrderController.cs",
     "src/ERP.UnitTests/PurchaseOrderOperationalDetailTests.cs",
     "src/ERP.IntegrationTests/PurchaseOrderOperationalDetailSqlServerTests.cs",
-    "docs/purchase-order-operational-details.md"
+    "docs/purchase-order-operational-details.md",
+    "src/ERP.IntegrationTests/SalesOrderHttpFormSqlServerTests.cs"
   ],
   "criterion_path_map": {
     "Canonical purchase order detail, print and JSON operational export include only nondeleted child lines belonging to accessible nondeleted parents. Scope before filtering/materialization; reuse371 live account/menu and explicit plus authoritative owning customer scope. Preserve historical stored header amounts and source/audit snapshots; do not recompute currency totals or mutate tombstoned rows.": [
@@ -25,6 +27,9 @@
       "src/ERP.UnitTests/PurchaseOrderOperationalDetailTests.cs",
       "src/ERP.IntegrationTests/PurchaseOrderOperationalDetailSqlServerTests.cs",
       "docs/purchase-order-operational-details.md"
+    ],
+    "Apply minimal prerequisite sales HTTP fixture correction, then preserve and rerun real regression during operational closure: existing ERP428 OrderBody emits orderNo:null despite claiming omission, so real .ai/logs/ERP-428-independent-http-results/test.log failed7 and passed6. Preserve these complete logs. Omit only null orderNo key in PostOrderAsync; do not suppress MVC validation, remove optional port null or weaken business guards. Exact isolated three-line correction .ai/logs/heartbeat-20261009T0236-http-fixture-repair/SalesOrderHttpFormSqlServerTests.repaired.cs passed13 real HTTP/SQL cases on fresh isolated GUID DB in .ai/logs/ERP-428-independent-http-repaired-results/test.log; apply against current file without overwriting concurrent work. Include malformed body, authority, invalid master zero writes and caller number override; build is not stage acceptance.": [
+      "src/ERP.IntegrationTests/SalesOrderHttpFormSqlServerTests.cs"
     ]
   },
   "implementation_evidence": "Current PurchaseOrderController.GetById loads all Details and Export JSON Includes all Details without IsDeleted predicate. GetPrint already filters deleted detail rows, so canonical operational detail and JSON snapshots expose tombstoned lines inconsistent with print. Existing371 authorization and393 selector do not fix this detail filtering. This is operational document correctness, not a new report or migration completion.",
