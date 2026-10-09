@@ -676,7 +676,9 @@ public class SupplierInvoiceReconciliationTests
         SeedAllocation(db, invoice, order.Id, 300m);
         await db.SaveChangesAsync();
 
-        var controller = new PurchaseInvoiceController(db);
+        // ERP-462：控制器绑定真实启用身份与既有「采购订单」菜单授权（不设置 Request.Path，证明授权与请求路径无关）
+        var controller = PurchaseInvoiceTestIdentities.ForUser(db,
+            PurchaseInvoiceTestIdentities.SeedAuthorizedUser(db, privileged: true));
         var result = await controller.Reconciliation(Query());
 
         var ok = Assert.IsType<OkObjectResult>(result);
@@ -700,7 +702,9 @@ public class SupplierInvoiceReconciliationTests
         SeedSupplier(db, SupplierA, "甲供应商");
         var order = SeedOrder(db, OrderA, "PO-REC-15", SupplierA, Currency.CNY, 500m, quantity: 5m);
         await db.SaveChangesAsync();
-        var controller = new PurchaseInvoiceController(db);
+        // ERP-462：控制器绑定真实启用身份与既有「采购订单」菜单授权（不设置 Request.Path，证明授权与请求路径无关）
+        var controller = PurchaseInvoiceTestIdentities.ForUser(db,
+            PurchaseInvoiceTestIdentities.SeedAuthorizedUser(db, privileged: true));
 
         var invoice = AssertOk<PurchaseInvoiceDto>(await controller.Create(new PurchaseInvoiceSaveDto
         {

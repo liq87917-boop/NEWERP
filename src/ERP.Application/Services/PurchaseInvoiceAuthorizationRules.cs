@@ -43,7 +43,18 @@ public static class PurchaseInvoiceAuthorizationRules
         "发票归属只认已持久化的「发票 → 采购订单」关联行，关联的每一张采购订单的权威归属客户都必须落在当前账号范围内，任一越界即拒绝；" +
         "受限账号不得访问无采购订单来源发票，特权账号的历史无来源发票保持可读；" +
         "关联整体替换同时校验「已存储」与「拟提议」的完整来源范围，被拒绝的调用方绝不改写任何发票 / 关联行 / 采购订单；" +
+        "判定与请求形状无关（空路径与已赋值路径口径一致，缺少身份不得放行）；" +
         "绝不新增权限模型、绝不把空身份当作管理员，也绝不泄露范围外发票。";
+
+    /// <summary>
+    /// 与请求形状无关的授权契约（ERP-462）：调用方（控制器）在<strong>任何绑定到 HTTP 请求管线的调用</strong>上都必须执行实时身份 /
+    /// 菜单 / 权威来源范围判定，与 <c>Request.Path</c> 是否赋值、以及请求是否携带可解析身份完全无关——空路径与已赋值路径口径一致，
+    /// 缺失 / 零 / 已删除身份一律按未认证拒绝，禁用 / 撤销菜单 / 无菜单一律按权限不足拒绝，且绝不新增任何授权。
+    /// </summary>
+    public const string PathIndependenceText =
+        "供应商采购发票授权判定与请求形状无关：只要控制器绑定到 HTTP 请求管线（空路径或已赋值路径）就一律执行实时身份 / 既有「采购订单」菜单 / " +
+        "SalespersonDataScopeService 权威来源范围判定；缺少 / 非法身份与账号不存在 / 已删除按未认证拒绝，禁用账号与缺少既有菜单按权限不足拒绝；" +
+        "空路径请求不得因「请求形状」或「尚无身份」而放行，绝无匿名 / 管理员兜底，也绝不读取环境变量或测试专用开关。";
 
     /// <summary>边界文案（不改变发票商业口径、不改写来源采购订单或主数据）</summary>
     public const string BoundaryText =
@@ -55,6 +66,8 @@ public static class PurchaseInvoiceAuthorizationRules
     /// 身份 / 账号状态 / 菜单授权三重校验（fail closed）：缺失或非法身份按未认证拒绝，账号不存在 / 已删除按未认证拒绝，
     /// 禁用账号按权限不足拒绝，缺少既有 <c>purchase-order</c> 菜单授权（含被撤销最后一个菜单）按权限不足拒绝。
     /// 返回解析出的权威数据范围，供调用方在同一请求内复用（绝不缓存）。
+    /// <para>与请求形状无关（见 <see cref="PathIndependenceText"/>）：调用方必须在<strong>每一个绑定到请求管线的路由入口</strong>
+    /// 无条件调用本方法，不得因为空路径、缺少身份或任何请求形状而跳过。</para>
     /// </summary>
     public static async Task<SalespersonDataScope> EnsureMenuAuthorizedAsync(
         IErpDbContext db, long? userId, CancellationToken ct = default)

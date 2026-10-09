@@ -99,19 +99,21 @@ public class PurchaseInvoiceController : ControllerBase
     // ==================== ERP-382：实时授权辅助（身份 / 菜单 / 权威来源范围） ====================
 
     /// <summary>
-    /// 是否必须执行实时授权：真实 HTTP 请求（MVC 绑定，<c>Request.Path</c> 已赋值）一律执行；
-    /// 进程内直接调用（历史单元测试 / 内部派生读取，无 HTTP 请求管线）仅在携带当前登录身份时执行。
-    /// 只对「既无任何登录身份、又不在 HTTP 请求管线内」的调用免授权：这类调用不可能由外部请求到达，
-    /// 也绝不把缺失身份当作管理员（真实匿名请求因处于请求管线内一律 fail closed）。
+    /// 是否必须执行实时授权（ERP-462）：<strong>只要控制器绑定到 HTTP 请求管线（<c>ControllerContext.HttpContext</c> 存在）
+    /// 就一律执行</strong>，与请求路径是否赋值、以及当前是否携带可解析的登录身份<strong>完全无关</strong>：
+    /// 空路径请求与已赋值路径请求的授权口径完全一致，缺少身份的真实请求同样 fail closed（未认证），
+    /// 既不存在「空路径 / 无身份」的请求形状旁路，也绝不把缺失身份当作管理员，绝无匿名或管理员兜底。
+    /// <para>仅「未被任何请求绑定」（<c>HttpContext</c> 为 null 的纯进程内直接调用，外部请求无法到达，例如既有进程内
+    /// 单元测试夹具 <c>PurchaseInvoiceTests</c>）沿用仓库一致的进程内直调边界：该边界不读取请求路径、
+    /// 不读取环境变量、也不使用任何测试专用开关，因此不是请求形状旁路，也不能由任何外部请求到达。</para>
     /// </summary>
     private bool RequiresLiveAuthorization()
-    {
-        var http = ControllerContext?.HttpContext;
-        if (http is null) return false;
-        return http.Request.Path.HasValue || CurrentUserId() is not null;
-    }
+        => ControllerContext?.HttpContext is not null;
 
-    /// <summary>身份 / 账号状态 / 既有「采购订单」菜单授权（fail closed：缺失 / 已删除按未认证，禁用 / 无菜单按权限不足）。</summary>
+    /// <summary>
+    /// 身份 / 账号状态 / 既有「采购订单」菜单授权（fail closed：缺失 / 已删除按未认证，禁用 / 无菜单按权限不足）。
+    /// 与请求路径是否赋值无关：只要控制器绑定到请求管线（空路径或已赋值路径）就一律执行。
+    /// </summary>
     private async Task EnsureMenuAuthorizedAsync()
     {
         if (!RequiresLiveAuthorization()) return;
@@ -119,7 +121,8 @@ public class PurchaseInvoiceController : ControllerBase
     }
 
     /// <summary>
-    /// 台账范围谓词：真实请求在计数 / 分页之前下推身份 / 菜单 / 权威来源范围；进程内无身份调用返回 null（既有语义不变）。
+    /// 台账范围谓词：请求在计数 / 分页之前下推身份 / 菜单 / 权威来源范围（空路径 / 无身份请求与已认证请求口径一致，
+    /// 一律 fail closed）；仅未绑定任何请求的纯进程内直调返回 null（既有进程内语义不变）。
     /// </summary>
     private async Task<System.Linq.Expressions.Expression<Func<ERP.Domain.Entities.PurchaseInvoice, bool>>?>
         BuildScopePredicateAsync()

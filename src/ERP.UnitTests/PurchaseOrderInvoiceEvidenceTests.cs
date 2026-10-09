@@ -614,7 +614,9 @@ public class PurchaseOrderInvoiceEvidenceTests
         SeedOrder(db, 948198L, "PO-EV-15", SupplierA, Currency.CNY, 500m);
         await db.SaveChangesAsync();
 
-        var controller = new PurchaseInvoiceController(db);
+        // ERP-462：控制器绑定真实启用身份与既有「采购订单」菜单授权（不设置 Request.Path，证明授权与请求路径无关）
+        var controller = PurchaseInvoiceTestIdentities.ForUser(db,
+            PurchaseInvoiceTestIdentities.SeedAuthorizedUser(db, privileged: true));
         var invoice = AssertOk<PurchaseInvoiceDto>(await controller.Create(new PurchaseInvoiceSaveDto
         {
             InvoiceType = PurchaseInvoiceRules.InvoiceTypeSpecial,

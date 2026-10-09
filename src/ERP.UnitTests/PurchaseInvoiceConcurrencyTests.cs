@@ -401,6 +401,37 @@ public class PurchaseInvoiceConcurrencyTests
         Assert.Equal(PurchaseInvoiceRules.StatusDraft, StoredStatus(db, invoice.Id));
     }
 
+    /// <summary>
+    /// ERP-462：空 <c>Request.Path</c> 与已赋值 <c>Request.Path</c> 必须执行完全一致的实时授权——
+    /// 空路径 + 无身份不再是「请求形状」旁路（一律未认证），空路径 + 既有授权身份照常放行；
+    /// 被拒绝的请求零写入。
+    /// </summary>
+    [Fact]
+    public async Task Empty_request_path_enforces_the_same_authority_as_a_populated_path()
+    {
+        using var db = TestDbFactory.Create();
+        var userId = SeedPrivilegedUser(db);
+        var supplier = SeedSupplier(db, "S001", "义乌档口");
+        var invoice = SeedInvoice(db, "INV-PATH", supplier.Id, 100m);
+
+        // 空路径 + 无身份：与真实匿名请求一致 fail closed（绝不因「尚无身份 / 空路径」放行）
+        await AssertAllRoutesDeniedAsync(
+            ForUser(db, null, httpBound: false), invoice.Id, supplier.Id, ErrorCodes.Unauthorized);
+
+        // 空路径 + 既有授权身份：与已赋值路径判定一致地放行同一张发票
+        var emptyPath = ForUser(db, userId, httpBound: false);
+        var populatedPath = ForUser(db, userId, httpBound: true);
+        Assert.Equal(
+            AssertOk<PurchaseInvoiceDto>(await emptyPath.GetById(invoice.Id)).Id,
+            AssertOk<PurchaseInvoiceDto>(await populatedPath.GetById(invoice.Id)).Id);
+        Assert.Equal(
+            AssertOk<PagedResult<PurchaseInvoiceDto>>(await emptyPath.GetPaged(new PurchaseInvoiceQuery())).Total,
+            AssertOk<PagedResult<PurchaseInvoiceDto>>(await populatedPath.GetPaged(new PurchaseInvoiceQuery())).Total);
+
+        Assert.Equal(PurchaseInvoiceRules.StatusDraft, StoredStatus(db, invoice.Id));
+        Assert.Empty(db.PurchaseInvoiceAllocations);
+    }
+
     private static async Task AssertAllRoutesDeniedAsync(
         PurchaseInvoiceController ctl, long invoiceId, long supplierId, int code)
     {
@@ -705,6 +736,9 @@ public class PurchaseInvoiceConcurrencyTests
         Assert.Contains("PurchaseInvoiceAuthorizationRules.EnsureOrderIdsAuthorizedAsync", controller);
         Assert.Contains("BuildScopePredicateAsync", controller);
         Assert.Contains("RequiresLiveAuthorization", controller);
+        // ERP-462：授权判定与请求形状无关（绝不读 Request.Path / 环境变量 / 测试开关）
+        Assert.DoesNotContain("Request.Path", controller);
+        Assert.Contains("ControllerContext?.HttpContext is not null", controller);
 
         var invoiceAllocation = ReadSource("src", "ERP.Application", "Services",
             "SupplierPaymentInvoiceAllocationService.cs");
