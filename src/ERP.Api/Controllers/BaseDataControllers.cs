@@ -16,12 +16,18 @@ using System.Security.Claims;
 namespace ERP.Api.Controllers;
 
 /// <summary>
-/// 客户资料控制器（ERP-036：新增可选的「指定货代」主数据指引字段）
+/// 客户资料控制器（ERP-036：新增可选的「指定货代」主数据指引字段；
+/// ERP-451：为全部分页 / 全部 / 按主键读取 / 指定货代下拉与新增 / 修改 / 删除 / 批量删除路由补齐实时身份、
+/// 既有「客户资料」（<c>customer</c>）功能菜单授权与有界字段校验）。
 /// </summary>
 /// <remarks>
 /// 复用既有的「其他资料」数据字典（<c>InfoType = Forwarder</c>），不新增任何单据关联：
 /// 指定货代只写客户资料自身的引用 Id + 名称快照两列，不会自动写入订舱 / 装柜 / 报关 / 费用单据，
 /// 也不涉及任何外部货代系统。
+/// <para>ERP-451 的授权与校验护栏见 <see cref="CustomerAuthorizationRules"/>：每个路由在读取或写入任何
+/// <c>BaseCustomers</c> 行之前都先经实时身份 + 既有客户菜单授权，新增 / 修改另经有界字段校验；
+/// 不新增任何菜单 / 权限 / 用户授权，也不改变 ERP-097 业务员读取范围、指定货代引用语义、
+/// 客户编码唯一索引语义与分页 / 响应契约。</para>
 /// </remarks>
 [ApiController]
 [Route("api/base/customers")]
@@ -35,47 +41,75 @@ public class CustomerController : BaseCrudController<BaseCustomer>
         _db = db;
     }
 
-    /// <summary>指定货代下拉选项（只返回未删除、已启用、类型为 Forwarder 的字典项）</summary>
+    /// <summary>当前登录用户 Id（只来自已认证请求主体；缺失 / 非数字 / 非正返回 null，由实时授权护栏 fail closed）</summary>
+    private long? CurrentUserId()
+    {
+        var value = ControllerContext?.HttpContext?.User?.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        return long.TryParse(value, out var id) && id > 0 ? id : null;
+    }
+
+    /// <summary>
+    /// 是否需要执行实时授权（与仓库既有口径同源）：真实 HTTP 请求（MVC 绑定，<c>Request.Path</c> 已赋值）
+    /// 一律执行；仅「未进入 HTTP 请求管线」的<b>进程内直接调用</b>（历史单元测试 / 内部派生读取，
+    /// 无请求路径，不可能由外部请求到达）沿用既有语义，绝不把缺失身份当作管理员。
+    /// <para>这里刻意以请求路径为准（不采纳单纯的进程内身份注入）：ERP-097 业务员读取范围与
+    /// ERP-036 指定货代的历史单元测试都以进程内直调控制器的方式断言既有语义，必须保持不变；
+    /// 真实匿名请求因处于请求管线内（<c>Request.Path</c> 必然已赋值）一律 fail closed。</para>
+    /// </summary>
+    private bool RequiresLiveAuthorization()
+    {
+        var http = ControllerContext?.HttpContext;
+        return http?.Request.Path.HasValue == true;
+    }
+
+    /// <summary>读取 / 写入前的实时身份 + 既有「客户资料」菜单授权（ERP-451，fail closed）</summary>
+    private async Task EnsureCustomerAuthorizedAsync()
+    {
+        if (RequiresLiveAuthorization())
+            await CustomerAuthorizationRules.EnsureAuthorizedAsync(_db, CurrentUserId());
+    }
+
+    /// <summary>指定货代下拉选项（读取前先经实时授权；只返回未删除、已启用、类型为 Forwarder 的字典项）</summary>
     [HttpGet("forwarder-options")]
     public async Task<IActionResult> GetForwarderOptions()
     {
+        await EnsureCustomerAuthorizedAsync();
         var options = await CustomerForwarderService.LoadOptionsAsync(_db);
         return Ok(ApiResponse<List<OtherInfoOptionDto>>.Success(options));
     }
 
-    /// <summary>分页查询（ERP-097：受限制业务员只看到自己被分配的客户；补充指定货代引用的可用性标注，不写库）</summary>
+    /// <summary>分页查询（读取前先经实时授权；ERP-097：受限制业务员只看到自己被分配的客户；补充指定货代引用的可用性标注，不写库）</summary>
     [HttpGet]
     public override async Task<IActionResult> GetPaged([FromQuery] PageQuery query)
     {
+        await EnsureCustomerAuthorizedAsync();
         var scope = await ResolveScopeAsync();
         var result = await Service.GetPagedAsync(query, CustomerFilter(scope));
         await CustomerForwarderService.AnnotateAsync(_db, result.Items);
         return Ok(ApiResponse<PagedResult<BaseCustomer>>.Success(result));
     }
 
-    /// <summary>查询全部（供下拉框使用；ERP-097：受限制业务员只返回自己被分配的客户）</summary>
+    /// <summary>查询全部（读取前先经实时授权；供下拉框使用；ERP-097：受限制业务员只返回自己被分配的客户）</summary>
     [HttpGet("all")]
     public override async Task<IActionResult> GetAll()
     {
+        await EnsureCustomerAuthorizedAsync();
         var scope = await ResolveScopeAsync();
         var result = await Service.GetAllAsync(CustomerFilter(scope));
         return Ok(ApiResponse<List<BaseCustomer>>.Success(result));
     }
 
-    /// <summary>根据主键获取（ERP-097：越界客户按「不存在」fail closed；补充指定货代引用的可用性标注，不写库）</summary>
+    /// <summary>根据主键获取（读取前先经实时授权；ERP-097：越界客户按「不存在」fail closed；补充指定货代引用的可用性标注，不写库）</summary>
     [HttpGet("{id:long}")]
     public override async Task<IActionResult> GetById(long id)
     {
+        await EnsureCustomerAuthorizedAsync();
         if (!(await ResolveScopeAsync()).AllowsCustomer(id))
             throw BusinessException.NotFound("客户不存在");
         var result = await Service.GetByIdAsync(id);
         await CustomerForwarderService.AnnotateAsync(_db, new[] { result });
         return Ok(ApiResponse<BaseCustomer>.Success(result));
     }
-
-    /// <summary>当前登录用户 Id（缺失或非数字时返回 null，由数据范围解析 fail closed 拒绝）</summary>
-    private long? CurrentUserId()
-        => long.TryParse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value, out var id) ? id : null;
 
     /// <summary>解析当前账号的业务员数据范围（ERP-097 唯一权威口径）</summary>
     private Task<SalespersonDataScope> ResolveScopeAsync()
@@ -90,26 +124,47 @@ public class CustomerController : BaseCrudController<BaseCustomer>
         return c => allowed.Contains(c.Id);
     }
 
-    /// <summary>新增客户（指定货代必须是可用的 Forwarder 字典项，名称快照由服务端写入）</summary>
+    /// <summary>新增客户（落库前先经实时授权与有界字段校验；指定货代必须是可用的 Forwarder 字典项，名称快照由服务端写入；被拒绝时不落任何行）</summary>
     [HttpPost]
     public override async Task<IActionResult> Create([FromBody] BaseCustomer entity)
     {
+        await EnsureCustomerAuthorizedAsync();
+        CustomerAuthorizationRules.Validate(entity);
         await CustomerForwarderService.ApplyAsync(_db, entity, stored: null);
         return await base.Create(entity);
     }
 
     /// <summary>
-    /// 更新客户（指定货代必须是可用的 Forwarder 字典项；引用未变更时保留历史引用，不因字典项停用而清空）
+    /// 更新客户（落库前先经实时授权与有界字段校验；指定货代必须是可用的 Forwarder 字典项；
+    /// 引用未变更时保留历史引用，不因字典项停用而清空；被拒绝时不改写任何行）
     /// </summary>
     [HttpPut("{id:long}")]
     public override async Task<IActionResult> Update(long id, [FromBody] BaseCustomer entity)
     {
+        await EnsureCustomerAuthorizedAsync();
         entity.Id = id;
+        CustomerAuthorizationRules.Validate(entity);
         var stored = await _db.BaseCustomers.AsNoTracking().FirstOrDefaultAsync(c => c.Id == id);
         // 客户不存在时不先校验货代引用，交由服务层统一报「数据不存在」，避免错误信息错位
         if (stored is not null)
             await CustomerForwarderService.ApplyAsync(_db, entity, stored);
         return await base.Update(id, entity);
+    }
+
+    /// <summary>删除客户（软删除；读写前先经实时授权）</summary>
+    [HttpDelete("{id:long}")]
+    public override async Task<IActionResult> Delete(long id)
+    {
+        await EnsureCustomerAuthorizedAsync();
+        return await base.Delete(id);
+    }
+
+    /// <summary>批量删除客户（软删除；读写前先经实时授权）</summary>
+    [HttpPost("batch-delete")]
+    public override async Task<IActionResult> BatchDelete([FromBody] List<long> ids)
+    {
+        await EnsureCustomerAuthorizedAsync();
+        return await base.BatchDelete(ids);
     }
 }
 

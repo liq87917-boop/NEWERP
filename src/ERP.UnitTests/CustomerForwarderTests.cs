@@ -3,8 +3,11 @@ using ERP.Application.Common;
 using ERP.Application.DTOs;
 using ERP.Application.Services;
 using ERP.Domain.Entities;
+using ERP.Domain.Enums;
 using ERP.Infrastructure.Data;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using System.Security.Claims;
 using Xunit;
 
 namespace ERP.UnitTests;
@@ -487,6 +490,54 @@ public class CustomerForwarderTests
         Assert.Equal(CustomerForwarderRules.UnavailableMark, CustomerForwarderRules.MarkUnavailable(null));
     }
 
+    // ============ ERP-451：既有菜单授权下的指定货代语义保持不变 ============
+
+    /// <summary>
+    /// ERP-451：真实 HTTP 请求（<c>Request.Path</c> 已赋值）且身份具备既有「客户资料」菜单时，
+    /// 指定货代语义完全不变（仍以服务端权威快照写入、仍只返回启用货代选项）；
+    /// 请求之间撤销该菜单后，下一次真实请求在任何读取 / 写入之前 fail closed 且不落任何新行。
+    /// </summary>
+    [Fact]
+    public async Task Auth_真实请求_客户菜单授权后指定货代语义不变_撤销后fail_closed()
+    {
+        using var db = TestDbFactory.Create();
+        var forwarder = SeedOtherInfo(db, "Forwarder", "FD-AUTH", "授权货代");
+        var userId = SeedCustomerMenuUser(db);
+        var ctl = new CustomerController(new GenericService<BaseCustomer>(db), db)
+        {
+            ControllerContext = HttpContextWithUser(userId)
+        };
+
+        // 授权真实请求：指定货代仍按服务端权威快照写入（客户端自由文本不被采信）
+        var created = AssertOk<BaseCustomer>(await ctl.Create(new BaseCustomer
+        {
+            CustomerCode = "C-AUTH-1",
+            CustomerName = "授权客户",
+            ForwarderId = forwarder.Id,
+            ForwarderName = "客户端自由文本"
+        }));
+        Assert.Equal(forwarder.Id, created.ForwarderId);
+        Assert.Equal("授权货代", created.ForwarderName);
+
+        // 授权真实请求：指定货代下拉仍只返回启用货代
+        var ok = Assert.IsType<OkObjectResult>(await ctl.GetForwarderOptions());
+        var options = Assert.IsType<ApiResponse<List<OtherInfoOptionDto>>>(ok.Value).Data!;
+        var only = Assert.Single(options);
+        Assert.Equal("授权货代", only.InfoName);
+
+        // 撤销既有客户菜单授权：下一次真实请求在任何读取 / 写入之前 fail closed，且不落任何新行
+        foreach (var grant in db.SysRoleMenus.ToList()) grant.IsDeleted = true;
+        db.SaveChanges();
+
+        var ex = await Assert.ThrowsAsync<BusinessException>(() => ctl.Create(new BaseCustomer
+        {
+            CustomerCode = "C-AUTH-2",
+            CustomerName = "撤销后客户"
+        }));
+        Assert.Equal(ErrorCodes.Forbidden, ex.Code);
+        Assert.Equal(1, db.BaseCustomers.Count());
+    }
+
     // ============ 测试辅助 ============
 
     /// <summary>构造客户资料控制器（内存库 + 通用 CRUD 服务，并注入特权登录身份）</summary>
@@ -541,4 +592,64 @@ public class CustomerForwarderTests
         db.SaveChanges();
         return customer;
     }
+
+    /// <summary>
+    /// ERP-451：播种一个具备既有「客户资料」（<c>customer</c>）菜单授权的登录身份，返回用户 Id。
+    /// （菜单缺失时按既有种子口径补建一条功能菜单，与 SeedData.Menus 同源，不新增任何菜单。）
+    /// </summary>
+    private static long SeedCustomerMenuUser(ErpDbContext db)
+    {
+        var user = new SysUser
+        {
+            UserName = $"forwarder-auth-{Guid.NewGuid():N}",
+            DisplayName = "指定货代授权用例账号",
+            PasswordHash = "hash",
+            PasswordSalt = "salt",
+            Status = UserStatus.Enabled
+        };
+        db.SysUsers.Add(user);
+        db.SaveChanges();
+
+        var role = new SysRole
+        {
+            RoleName = "指定货代授权用例角色",
+            RoleCode = $"ForwarderAuthCase-{Guid.NewGuid():N}",
+            IsSystem = false
+        };
+        db.SysRoles.Add(role);
+        db.SaveChanges();
+        db.SysUserRoles.Add(new SysUserRole { UserId = user.Id, RoleId = role.Id });
+        db.SaveChanges();
+
+        var menu = db.SysMenus.FirstOrDefault(m => m.MenuCode == CustomerAuthorizationRules.RequiredMenuCode && !m.IsDeleted)
+            ?? new SysMenu
+            {
+                MenuCode = CustomerAuthorizationRules.RequiredMenuCode,
+                MenuName = CustomerAuthorizationRules.RequiredMenuText,
+                MenuType = MenuType.Menu
+            };
+        if (menu.Id == 0)
+        {
+            db.SysMenus.Add(menu);
+            db.SaveChanges();
+        }
+        db.SysRoleMenus.Add(new SysRoleMenu { RoleId = role.Id, MenuId = menu.Id });
+        db.SaveChanges();
+        return user.Id;
+    }
+
+    /// <summary>ERP-451：真实 HTTP 路由身份上下文（<c>Request.Path</c> 已赋值，因此实时授权必定执行）。</summary>
+    private static ControllerContext HttpContextWithUser(long? userId)
+    {
+        var claims = userId.HasValue
+            ? new[] { new Claim(ClaimTypes.NameIdentifier, userId.Value.ToString()) }
+            : Array.Empty<Claim>();
+        var http = new DefaultHttpContext
+        {
+            User = new ClaimsPrincipal(new ClaimsIdentity(claims, "Test"))
+        };
+        http.Request.Path = "/api/base/customers";
+        return new ControllerContext { HttpContext = http };
+    }
+
 }
