@@ -4,6 +4,7 @@ using ERP.Application.Interfaces;
 using ERP.Application.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using System.Security.Claims;
 
 namespace ERP.Api.Controllers;
 
@@ -11,6 +12,11 @@ namespace ERP.Api.Controllers;
 /// 商品规格变体控制器（ERP-037）：商品资料下的颜色 / 尺码 SKU 子表维护。
 /// <para>路由挂在既有商品资源下（<c>/api/base/products/{productId}/variants</c>），
 /// 商品身份与商品接口保持不变：规格是「零到多条」的可选细分，没有规格的商品仍按单规格商品使用。</para>
+/// <para>授权（ERP-444）：<b>每一条</b>路由在读取或写入任何规格之前先经
+/// <see cref="ProductVariantAuthorizationRules.EnsureAuthorizedAsync"/> 重新解析实时身份（缺失 / 非法 / 已删除按未认证，
+/// 禁用按权限不足）与既有「商品资料」（<c>product</c>）功能菜单授权（撤销后下一次请求立即收敛）；随后由
+/// <see cref="ProductVariantService"/> 在落库前校验权威商品引用（存在、未删除、启用）与提交载荷（编码 / 颜色 / 尺码 / 状态）。
+/// 不新增任何菜单 / 权限 / 用户授权，也没有匿名 / 管理员回退。</para>
 /// <para>边界：所有接口只读写 <c>BaseProductVariants</c> 子表 —— 不改写任何历史单据行
 /// （询价 / 报价 / PI / 订单 / 库存 / 库存流水），不拆分或重算已有库存，也不触达外部系统；
 /// 生产库结构变更仍由 Human Gate 控制（本控制器不做任何 DDL，建表 / 索引由 SchemaUpgrader 幂等补齐）。</para>
@@ -27,6 +33,10 @@ public class ProductVariantController : ControllerBase
         _db = db;
     }
 
+    /// <summary>当前登录用户 Id（缺失或非数字时返回 null，由实时授权护栏 fail closed 拒绝）</summary>
+    private long? CurrentUserId()
+        => long.TryParse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value, out var id) ? id : null;
+
     /// <summary>
     /// 规格明细（含停用规格，便于历史可读）：按排序号 / Id 返回，并按上限收敛为有界视图。
     /// <paramref name="activeOnly"/> 为真时只返回启用中的规格（可选用口径）。
@@ -34,6 +44,7 @@ public class ProductVariantController : ControllerBase
     [HttpGet]
     public async Task<IActionResult> List(long productId, [FromQuery] bool activeOnly = false)
     {
+        await ProductVariantAuthorizationRules.EnsureAuthorizedAsync(_db, CurrentUserId());
         var variants = await ProductVariantService.ListAsync(_db, productId, activeOnly);
         return Ok(ApiResponse<List<ProductVariantDto>>.Success(variants));
     }
@@ -45,6 +56,7 @@ public class ProductVariantController : ControllerBase
     [HttpGet("options")]
     public async Task<IActionResult> Options(long productId)
     {
+        await ProductVariantAuthorizationRules.EnsureAuthorizedAsync(_db, CurrentUserId());
         var variants = await ProductVariantService.LoadSelectableAsync(_db, productId);
         return Ok(ApiResponse<List<ProductVariantDto>>.Success(variants));
     }
@@ -53,6 +65,7 @@ public class ProductVariantController : ControllerBase
     [HttpPost]
     public async Task<IActionResult> Create(long productId, [FromBody] ProductVariantSaveDto dto)
     {
+        await ProductVariantAuthorizationRules.EnsureAuthorizedAsync(_db, CurrentUserId());
         var created = await ProductVariantService.CreateAsync(_db, productId, dto);
         return Ok(ApiResponse<ProductVariantDto>.Success(created, "规格新增成功"));
     }
@@ -61,6 +74,7 @@ public class ProductVariantController : ControllerBase
     [HttpPut("{id:long}")]
     public async Task<IActionResult> Update(long productId, long id, [FromBody] ProductVariantSaveDto dto)
     {
+        await ProductVariantAuthorizationRules.EnsureAuthorizedAsync(_db, CurrentUserId());
         var updated = await ProductVariantService.UpdateAsync(_db, productId, id, dto);
         return Ok(ApiResponse<ProductVariantDto>.Success(updated, "规格更新成功"));
     }
@@ -69,6 +83,7 @@ public class ProductVariantController : ControllerBase
     [HttpPost("{id:long}/disable")]
     public async Task<IActionResult> Disable(long productId, long id)
     {
+        await ProductVariantAuthorizationRules.EnsureAuthorizedAsync(_db, CurrentUserId());
         var disabled = await ProductVariantService.DisableAsync(_db, productId, id);
         return Ok(ApiResponse<ProductVariantDto>.Success(disabled, "规格已停用"));
     }
@@ -77,6 +92,7 @@ public class ProductVariantController : ControllerBase
     [HttpPost("{id:long}/enable")]
     public async Task<IActionResult> Enable(long productId, long id)
     {
+        await ProductVariantAuthorizationRules.EnsureAuthorizedAsync(_db, CurrentUserId());
         var enabled = await ProductVariantService.EnableAsync(_db, productId, id);
         return Ok(ApiResponse<ProductVariantDto>.Success(enabled, "规格已启用"));
     }
@@ -85,7 +101,9 @@ public class ProductVariantController : ControllerBase
     [HttpDelete("{id:long}")]
     public async Task<IActionResult> Delete(long productId, long id)
     {
+        await ProductVariantAuthorizationRules.EnsureAuthorizedAsync(_db, CurrentUserId());
         await ProductVariantService.DeleteAsync(_db, productId, id);
         return Ok(ApiResponse<object>.Success(null, "规格已删除"));
     }
 }
+

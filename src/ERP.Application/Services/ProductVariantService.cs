@@ -28,15 +28,13 @@ public static class ProductVariantService
     public const string DuplicateConflictMessage = "该规格正在被其他请求写入（编码或颜色+尺码组合重复），请重试";
 
     /// <summary>
-    /// 校验商品存在（未删除），返回商品实体；规格必须挂在既有商品下。
+    /// 校验权威商品引用（存在、未删除且启用），返回商品实体；规格必须挂在既有启用商品下。
+    /// <para>ERP-444：所有读取 / 写入都经本方法，因此外部 / 已删除商品（<c>NotFound</c>）与已停用商品
+    /// （<c>InvalidParameter</c>）在读写任何规格之前 fail closed；判定口径由
+    /// <see cref="ProductVariantAuthorizationRules.EnsureLiveProductAsync"/> 统一维护。</para>
     /// </summary>
-    public static async Task<BaseProduct> EnsureProductAsync(IErpDbContext db, long productId)
-    {
-        if (productId <= 0)
-            throw BusinessException.InvalidParameter("商品 Id 不合法");
-        return await db.BaseProducts.AsNoTracking().FirstOrDefaultAsync(p => p.Id == productId && !p.IsDeleted)
-            ?? throw BusinessException.NotFound($"商品（Id={productId}）不存在或已删除，不能维护规格");
-    }
+    public static Task<BaseProduct> EnsureProductAsync(IErpDbContext db, long productId) =>
+        ProductVariantAuthorizationRules.EnsureLiveProductAsync(db, productId);
 
     /// <summary>
     /// 读取某商品的规格列表（<b>只读，不写库</b>）：默认包含停用规格（历史可读），

@@ -8,10 +8,12 @@ using ERP.Infrastructure.Data;
 using ERP.Infrastructure.Export;
 using ERP.Infrastructure.Storage;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.FileProviders;
+using System.Security.Claims;
 using Xunit;
 
 namespace ERP.UnitTests;
@@ -22,6 +24,8 @@ namespace ERP.UnitTests;
 /// 有界维护视图与条数上限、停用规格的可读性与「不可再被新选中」、无规格历史商品的兼容与计数标注，
 /// 以及「规格维护不改写历史单据行 / 库存 / 库存流水 / 商品本身」的边界与幂等结构契约。
 /// 全部使用内存库（TestDbFactory），不连接 SQL Server、不执行任何 SQL / 部署脚本。
+/// <para>ERP-444：用例统一经<b>实时授权测试身份</b>（已启用 + 既有「商品资料」菜单）执行，
+/// 因此既有 ERP-037 契约在授权护栏生效后仍逐条保持。</para>
 /// </summary>
 public class ProductVariantTests
 {
@@ -29,7 +33,90 @@ public class ProductVariantTests
 
     private const long Warehouse1 = 910001L;
 
-    private static ProductVariantController VariantController(ErpDbContext db) => new(db);
+    private const string AuthorizedUserName = "__erp444_variant_authorized__";
+
+    /// <summary>规格控制器：注入「已启用 + 既有商品资料菜单」的实时授权身份（ERP-444）</summary>
+    private static ProductVariantController VariantController(ErpDbContext db) =>
+        new(db) { ControllerContext = AuthorizedContext(db) };
+
+    private static ControllerContext AuthorizedContext(ErpDbContext db) =>
+        ContextWithUser(EnsureAuthorizedUser(db));
+
+    /// <summary>带（可空）<c>NameIdentifier</c> 的 HTTP 身份上下文；null = 无身份，由授权护栏 fail closed 拒绝</summary>
+    private static ControllerContext ContextWithUser(long? userId)
+    {
+        var claims = userId.HasValue
+            ? new[] { new Claim(ClaimTypes.NameIdentifier, userId.Value.ToString()) }
+            : Array.Empty<Claim>();
+        return new ControllerContext
+        {
+            HttpContext = new DefaultHttpContext
+            {
+                User = new ClaimsPrincipal(new ClaimsIdentity(claims, "Test"))
+            }
+        };
+    }
+
+    /// <summary>
+    /// 确保内存库中存在一个已启用、未删除的授权测试身份（幂等），并保证它具备既有「商品资料」菜单授权；
+    /// 全部沿用既有「用户 → 角色 → 菜单」口径，不新增任何权限模型。
+    /// </summary>
+    private static long EnsureAuthorizedUser(ErpDbContext db)
+    {
+        var user = db.SysUsers.FirstOrDefault(u => u.UserName == AuthorizedUserName);
+        if (user is null)
+        {
+            user = new SysUser
+            {
+                UserName = AuthorizedUserName,
+                DisplayName = "规格变体授权测试账号",
+                PasswordHash = "hash",
+                PasswordSalt = "salt",
+                Status = UserStatus.Enabled
+            };
+            db.SysUsers.Add(user);
+            db.SaveChanges();
+
+            var role = new SysRole
+            {
+                RoleName = "规格变体授权测试角色",
+                RoleCode = $"VariantAuth-{Guid.NewGuid():N}",
+                IsSystem = false
+            };
+            db.SysRoles.Add(role);
+            db.SaveChanges();
+            db.SysUserRoles.Add(new SysUserRole { UserId = user.Id, RoleId = role.Id });
+            db.SaveChanges();
+        }
+
+        var roleId = db.SysUserRoles.AsNoTracking()
+            .Where(ur => ur.UserId == user.Id && !ur.IsDeleted)
+            .Select(ur => ur.RoleId).First();
+        GrantMenu(db, roleId);
+        return user.Id;
+    }
+
+    /// <summary>按既有菜单编码授予角色访问权限（幂等；菜单缺失时按既有种子口径补建一条功能菜单）</summary>
+    private static void GrantMenu(ErpDbContext db, long roleId)
+    {
+        var menu = db.SysMenus.FirstOrDefault(m => m.MenuCode == ProductVariantAuthorizationRules.ProductMenuCode && !m.IsDeleted);
+        if (menu is null)
+        {
+            menu = new SysMenu
+            {
+                MenuCode = ProductVariantAuthorizationRules.ProductMenuCode,
+                MenuName = ProductVariantAuthorizationRules.ProductMenuText,
+                MenuType = MenuType.Menu
+            };
+            db.SysMenus.Add(menu);
+            db.SaveChanges();
+        }
+        if (!db.SysRoleMenus.Any(rm => rm.RoleId == roleId && rm.MenuId == menu.Id && !rm.IsDeleted))
+        {
+            db.SysRoleMenus.Add(new SysRoleMenu { RoleId = roleId, MenuId = menu.Id });
+            db.SaveChanges();
+        }
+    }
 
     /// <summary>商品资料控制器（补充规格计数标注），依赖与生产一致：内存库 + 测试用 OSS 配置 + 假宿主环境</summary>
     private static ProductController ProductControllerOf(ErpDbContext db) => new(
