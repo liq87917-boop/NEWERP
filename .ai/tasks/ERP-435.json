@@ -1,0 +1,65 @@
+{
+  "title": "Authorize container shipment evidence timeline reads with live menu and customer scope",
+  "description": "Stage3 shipping/tracking closure (not report polish). src/ERP.Api/Controllers/ContainerShipmentTimelineController.cs declares only [Authorize] and all three routes call ContainerShipmentTimelineService.ListAsync/GetForSourceAsync/GetForReferenceAsync with no userId, menu or scope, while the service and the whole file contain zero Authoriz/Ensure/SalespersonDataScope references. Any authenticated account that knows a source type+Id or a reference Id can read any container's B/L, S/O, carrier, forwarder, broker, ports, planned times and milestone actuals, unlike the already guarded siblings ContainerShipmentReferenceController.cs:57,72,181 and ContainerShipmentMilestoneController.cs:58,73 which reuse ShipmentReferenceAuthorizationRules.EnsureAuthorizedAsync. Reuse ShipmentReferenceAuthorizationRules (EnsureAuthorizedAsync / RequireSourceType / ApplyScope) and ERP-097 SalespersonDataScopeService exactly; add no grants, no anonymous/admin fallback, no schema and no response-contract change. Genuine isolated (localdb)\\NEWERP_AutoAcceptance GUID-owned NEWERP_AUTOTEST SQL only; safe Release build plus full ERP.UnitTests.",
+  "acceptance_criteria": [
+    "Before reading any timeline, shipment, reference, milestone, port, carrier, forwarder, broker or planned and actual time field, require the current enabled nondeleted identity, the existing booking, pre-loading or loading-list functional menu for the referenced source type and the authoritative SalespersonDataScopeService customer scope on GET /api/container/shipment-timeline, GET /api/container/shipment-timeline/sources/{sourceType}/{sourceId} and GET /api/container/shipment-timeline/references/{referenceId}, reusing ShipmentReferenceAuthorizationRules exactly with no new grants and no anonymous or admin fallback.",
+    "Push the resolved customer scope and the allowed source types into each timeline query before counting, paging or materialization so restricted accounts cannot receive foreign customers' shipments, references, milestone events or status counts, keep the existing response DTOs, currency and unit separation and null-as-unknown missing-evidence semantics, and return the existing controlled non-disclosing error with no rows, counts or totals on denial.",
+    "Genuine isolated SQL authenticated controller tests cover permitted and foreign source records and references, unknown source types, missing functional menu, and disabled, deleted and revoked-menu identities on all three routes, assert denial returns no container, reference, milestone or loading row and mutates nothing, and confirm the existing ContainerShipmentTimelineTests contracts and the ERP-362 and ERP-365 reference and milestone authorization regressions stay green.",
+    "Keep the safe Release build and the full existing ERP.UnitTests suite green, use only genuine isolated (localdb)\\NEWERP_AutoAcceptance GUID-owned NEWERP_AUTOTEST databases with Integrated Security, and add no schema, entity, permission or production/secret change; build completion is not stage acceptance."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/ContainerShipmentTimelineController.cs",
+    "src/ERP.Application/Services/ContainerShipmentTimelineService.cs",
+    "src/ERP.Application/Services/ShipmentReferenceAuthorizationRules.cs",
+    "src/ERP.UnitTests/ContainerShipmentTimelineTests.cs",
+    "src/ERP.IntegrationTests/ContainerShipmentTimelineAuthorizationSqlServerTests.cs",
+    "docs/container-shipment-timeline-authorization.md"
+  ],
+  "criterion_path_map": {
+    "Before reading any timeline, shipment, reference, milestone, port, carrier, forwarder, broker or planned and actual time field, require the current enabled nondeleted identity, the existing booking, pre-loading or loading-list functional menu for the referenced source type and the authoritative SalespersonDataScopeService customer scope on GET /api/container/shipment-timeline, GET /api/container/shipment-timeline/sources/{sourceType}/{sourceId} and GET /api/container/shipment-timeline/references/{referenceId}, reusing ShipmentReferenceAuthorizationRules exactly with no new grants and no anonymous or admin fallback.": [
+      "src/ERP.Api/Controllers/ContainerShipmentTimelineController.cs",
+      "src/ERP.Application/Services/ShipmentReferenceAuthorizationRules.cs"
+    ],
+    "Push the resolved customer scope and the allowed source types into each timeline query before counting, paging or materialization so restricted accounts cannot receive foreign customers' shipments, references, milestone events or status counts, keep the existing response DTOs, currency and unit separation and null-as-unknown missing-evidence semantics, and return the existing controlled non-disclosing error with no rows, counts or totals on denial.": [
+      "src/ERP.Application/Services/ContainerShipmentTimelineService.cs",
+      "src/ERP.Application/Services/ShipmentReferenceAuthorizationRules.cs"
+    ],
+    "Genuine isolated SQL authenticated controller tests cover permitted and foreign source records and references, unknown source types, missing functional menu, and disabled, deleted and revoked-menu identities on all three routes, assert denial returns no container, reference, milestone or loading row and mutates nothing, and confirm the existing ContainerShipmentTimelineTests contracts and the ERP-362 and ERP-365 reference and milestone authorization regressions stay green.": [
+      "src/ERP.UnitTests/ContainerShipmentTimelineTests.cs",
+      "src/ERP.IntegrationTests/ContainerShipmentTimelineAuthorizationSqlServerTests.cs",
+      "docs/container-shipment-timeline-authorization.md"
+    ],
+    "Keep the safe Release build and the full existing ERP.UnitTests suite green, use only genuine isolated (localdb)\\NEWERP_AutoAcceptance GUID-owned NEWERP_AUTOTEST databases with Integrated Security, and add no schema, entity, permission or production/secret change; build completion is not stage acceptance.": [
+      "src/ERP.UnitTests/ContainerShipmentTimelineTests.cs",
+      "docs/container-shipment-timeline-authorization.md"
+    ]
+  },
+  "depends_on": [
+    "ERP-059",
+    "ERP-362",
+    "ERP-365",
+    "ERP-097",
+    "ERP-431"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "implementation_evidence": "src/ERP.Api/Controllers/ContainerShipmentTimelineController.cs:20-23 declares only [Authorize]; the routes at 37-40 (GetPaged), 47-55 (GetForSource) and 61-69 (GetForReference) pass only _db/query/sourceType/sourceId into ContainerShipmentTimelineService and never resolve identity, menu or customer scope. src/ERP.Application/Services/ContainerShipmentTimelineService.cs:37-38,69-70,101-102 accept no userId or access parameter and the file contains zero Authoriz/Ensure/SalespersonDataScope references. The guarded siblings are src/ERP.Api/Controllers/ContainerShipmentReferenceController.cs:57,72,181 (ShipmentReferenceAuthorizationRules.EnsureAuthorizedAsync + RequireSourceType) and src/ERP.Api/Controllers/ContainerShipmentMilestoneController.cs:58,73 (same rule). No task in .ai/tasks lists ContainerShipmentTimelineController or ContainerShipmentTimelineService as allowed_paths for authorization.",
+  "id": "ERP-435",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-09T05:10:19.653878Z"
+}

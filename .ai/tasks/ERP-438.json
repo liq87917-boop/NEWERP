@@ -1,0 +1,62 @@
+{
+  "title": "Authorize stock replenishment worksheet reads with live inventory permission",
+  "description": "Stage3 inventory closure (not report polish). src/ERP.Api/Controllers/StockReplenishmentWorksheet.cs:22-24 declares only [Authorize]; GetWorksheet at line 39 reads _db.Stocks, _db.BaseProducts, _db.BaseProductSuppliers and _db.BaseSuppliers directly with no identity, menu or scope, and src/ERP.Application/Services/StockReplenishmentRules.cs contains zero Authoriz/Menu/Scope references, unlike StockController.cs:41-52 which reuses StockQueryAuthorizationRules.EnsureAuthorizedAsync and ApplyScope. Any authenticated account can read any warehouse's quantities, minimum and maximum stock and supplier sourcing references. Reuse StockQueryAuthorizationRules exactly; add no grants, no anonymous/admin fallback, no schema and no change to the worksheet DTO, recommendation or boundary semantics. Genuine isolated (localdb)\\NEWERP_AutoAcceptance GUID-owned NEWERP_AUTOTEST SQL only; safe Release build plus full ERP.UnitTests.",
+  "acceptance_criteria": [
+    "Before reading any stock quantity, available quantity, minimum or maximum stock or supplier sourcing row, require the current enabled nondeleted identity and the existing stock-query functional menu on GET /api/stocks/replenishment-worksheet by reusing StockQueryAuthorizationRules.EnsureAuthorizedAsync exactly, rejecting missing, disabled, deleted and unauthorized identities with the existing controlled non-disclosing errors and adding no new grants or anonymous/admin fallback.",
+    "Apply the resolved stock query scope to the warehouse stock source before counting, paging or materializing so non-privileged accounts without an authoritative warehouse-level scope fail closed without receiving foreign warehouse quantities or supplier references, and keep the existing StockReplenishmentWorksheetDto, recommendation text, boundary text and null-as-unknown behaviour unchanged.",
+    "Genuine isolated SQL authenticated controller tests cover permitted privileged access, restricted accounts with no authoritative warehouse scope, missing functional menu, disabled, deleted and revoked identities, and empty or foreign warehouse inputs, assert denial returns no rows and mutates no stock, product, supplier or sourcing row, and confirm the existing StockReplenishmentWorksheetTests contracts stay green.",
+    "Keep the safe Release build and the full existing ERP.UnitTests suite green, use only genuine isolated (localdb)\\NEWERP_AutoAcceptance GUID-owned NEWERP_AUTOTEST databases with Integrated Security, and add no schema, entity, permission or production/secret change; build completion is not stage acceptance."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/StockReplenishmentWorksheet.cs",
+    "src/ERP.Application/Services/StockReplenishmentRules.cs",
+    "src/ERP.UnitTests/StockReplenishmentWorksheetTests.cs",
+    "src/ERP.IntegrationTests/StockReplenishmentWorksheetAuthorizationSqlServerTests.cs",
+    "docs/stock-replenishment-worksheet.md"
+  ],
+  "criterion_path_map": {
+    "Before reading any stock quantity, available quantity, minimum or maximum stock or supplier sourcing row, require the current enabled nondeleted identity and the existing stock-query functional menu on GET /api/stocks/replenishment-worksheet by reusing StockQueryAuthorizationRules.EnsureAuthorizedAsync exactly, rejecting missing, disabled, deleted and unauthorized identities with the existing controlled non-disclosing errors and adding no new grants or anonymous/admin fallback.": [
+      "src/ERP.Api/Controllers/StockReplenishmentWorksheet.cs",
+      "src/ERP.Application/Services/StockReplenishmentRules.cs"
+    ],
+    "Apply the resolved stock query scope to the warehouse stock source before counting, paging or materializing so non-privileged accounts without an authoritative warehouse-level scope fail closed without receiving foreign warehouse quantities or supplier references, and keep the existing StockReplenishmentWorksheetDto, recommendation text, boundary text and null-as-unknown behaviour unchanged.": [
+      "src/ERP.Api/Controllers/StockReplenishmentWorksheet.cs",
+      "src/ERP.Application/Services/StockReplenishmentRules.cs"
+    ],
+    "Genuine isolated SQL authenticated controller tests cover permitted privileged access, restricted accounts with no authoritative warehouse scope, missing functional menu, disabled, deleted and revoked identities, and empty or foreign warehouse inputs, assert denial returns no rows and mutates no stock, product, supplier or sourcing row, and confirm the existing StockReplenishmentWorksheetTests contracts stay green.": [
+      "src/ERP.UnitTests/StockReplenishmentWorksheetTests.cs",
+      "src/ERP.IntegrationTests/StockReplenishmentWorksheetAuthorizationSqlServerTests.cs",
+      "docs/stock-replenishment-worksheet.md"
+    ],
+    "Keep the safe Release build and the full existing ERP.UnitTests suite green, use only genuine isolated (localdb)\\NEWERP_AutoAcceptance GUID-owned NEWERP_AUTOTEST databases with Integrated Security, and add no schema, entity, permission or production/secret change; build completion is not stage acceptance.": [
+      "src/ERP.UnitTests/StockReplenishmentWorksheetTests.cs",
+      "docs/stock-replenishment-worksheet.md"
+    ]
+  },
+  "depends_on": [
+    "ERP-106",
+    "ERP-356",
+    "ERP-009"
+  ],
+  "risk": "low",
+  "planning_stage": 3,
+  "implementation_evidence": "src/ERP.Api/Controllers/StockReplenishmentWorksheet.cs:22-24 declares only [Authorize]; GetWorksheet at 38-55 queries _db.Stocks.AsNoTracking().Where(!IsDeleted && WarehouseId == warehouseId) and pages without any identity, menu or scope resolution, then loads BaseProducts/BaseProductSuppliers/BaseSuppliers at 58-84 and returns at 130. src/ERP.Application/Services/StockReplenishmentRules.cs contains zero Authoriz/Menu/Scope/RequiredMenu references. The guarded counterpart is src/ERP.Api/Controllers/StockController.cs:41-42 (StockQueryAuthorizationRules.EnsureAuthorizedAsync) with ApplyScope at 51-52. No task in .ai/tasks lists StockReplenishmentWorksheet or StockReplenishmentRules as allowed_paths for authorization (ERP-106 only created the worksheet).",
+  "id": "ERP-438",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-09T05:10:19.659112Z"
+}

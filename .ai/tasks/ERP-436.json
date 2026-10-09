@@ -1,0 +1,63 @@
+{
+  "title": "Authorize inventory location and lot balance reads and movement validation with live permission",
+  "description": "Stage3 inventory closure (not report polish). src/ERP.Api/Controllers/InventoryLocationLotController.cs declares only [Authorize]; GetBalances (line 27) and Validate (line 35) call IInventoryLocationLotService.GetLocationLotBalancesAsync and ValidateMovementAsync with no user id, menu or scope, and InventoryLocationLotService.cs and InventoryLocationLotRules.cs contain zero Authoriz/Menu/Scope references, unlike StockController.cs:41-52 which reuses StockQueryAuthorizationRules.EnsureAuthorizedAsync and ApplyScope. Any authenticated account can read location and lot quantities for any warehouse or product and probe movement location and lot identities. Reuse StockQueryAuthorizationRules (existing stock-query menu plus the fail-closed rule that no authoritative warehouse-level scope exists for restricted accounts) exactly; add no grants, no anonymous/admin fallback, no schema and no change to the balance or validation semantics. Genuine isolated (localdb)\\NEWERP_AutoAcceptance GUID-owned NEWERP_AUTOTEST SQL only; safe Release build plus full ERP.UnitTests.",
+  "acceptance_criteria": [
+    "Require the current enabled nondeleted identity and the existing stock-query functional menu before returning any location or lot balance or validating any movement location and lot input on GET /api/inventory/location-lot/balances and POST /api/inventory/location-lot/validate by reusing StockQueryAuthorizationRules.EnsureAuthorizedAsync exactly, rejecting missing, disabled, deleted and unauthorized identities with the existing controlled non-disclosing errors and adding no new grants or anonymous/admin fallback.",
+    "Apply the resolved stock query scope before any warehouse, product, location or lot quantity is counted or returned so non-privileged accounts without an authoritative warehouse-level scope fail closed without receiving foreign quantities, and keep the existing LocationLotBalanceReport and ValidatedMovementLocationLot response contracts, the idempotent validation semantics and the null-as-unknown behaviour unchanged.",
+    "Genuine isolated SQL authenticated controller tests cover permitted privileged access, restricted accounts with no authoritative warehouse scope, missing functional menu, disabled, deleted and revoked identities, and invalid or foreign warehouse, product, location and lot inputs, assert denial returns no balances and mutates no stock, location, lot or movement row, and confirm the existing InventoryLocationLotFoundationTests contracts stay green.",
+    "Keep the safe Release build and the full existing ERP.UnitTests suite green, use only genuine isolated (localdb)\\NEWERP_AutoAcceptance GUID-owned NEWERP_AUTOTEST databases with Integrated Security, and add no schema, entity, permission or production/secret change; build completion is not stage acceptance."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/InventoryLocationLotController.cs",
+    "src/ERP.Application/Services/InventoryLocationLotService.cs",
+    "src/ERP.Application/Services/InventoryLocationLotRules.cs",
+    "src/ERP.UnitTests/InventoryLocationLotFoundationTests.cs",
+    "src/ERP.IntegrationTests/InventoryLocationLotAuthorizationSqlServerTests.cs",
+    "docs/inventory-location-lot-authorization.md"
+  ],
+  "criterion_path_map": {
+    "Require the current enabled nondeleted identity and the existing stock-query functional menu before returning any location or lot balance or validating any movement location and lot input on GET /api/inventory/location-lot/balances and POST /api/inventory/location-lot/validate by reusing StockQueryAuthorizationRules.EnsureAuthorizedAsync exactly, rejecting missing, disabled, deleted and unauthorized identities with the existing controlled non-disclosing errors and adding no new grants or anonymous/admin fallback.": [
+      "src/ERP.Api/Controllers/InventoryLocationLotController.cs",
+      "src/ERP.Application/Services/InventoryLocationLotRules.cs"
+    ],
+    "Apply the resolved stock query scope before any warehouse, product, location or lot quantity is counted or returned so non-privileged accounts without an authoritative warehouse-level scope fail closed without receiving foreign quantities, and keep the existing LocationLotBalanceReport and ValidatedMovementLocationLot response contracts, the idempotent validation semantics and the null-as-unknown behaviour unchanged.": [
+      "src/ERP.Application/Services/InventoryLocationLotService.cs",
+      "src/ERP.Application/Services/InventoryLocationLotRules.cs"
+    ],
+    "Genuine isolated SQL authenticated controller tests cover permitted privileged access, restricted accounts with no authoritative warehouse scope, missing functional menu, disabled, deleted and revoked identities, and invalid or foreign warehouse, product, location and lot inputs, assert denial returns no balances and mutates no stock, location, lot or movement row, and confirm the existing InventoryLocationLotFoundationTests contracts stay green.": [
+      "src/ERP.UnitTests/InventoryLocationLotFoundationTests.cs",
+      "src/ERP.IntegrationTests/InventoryLocationLotAuthorizationSqlServerTests.cs",
+      "docs/inventory-location-lot-authorization.md"
+    ],
+    "Keep the safe Release build and the full existing ERP.UnitTests suite green, use only genuine isolated (localdb)\\NEWERP_AutoAcceptance GUID-owned NEWERP_AUTOTEST databases with Integrated Security, and add no schema, entity, permission or production/secret change; build completion is not stage acceptance.": [
+      "src/ERP.UnitTests/InventoryLocationLotFoundationTests.cs",
+      "docs/inventory-location-lot-authorization.md"
+    ]
+  },
+  "depends_on": [
+    "ERP-096",
+    "ERP-356",
+    "ERP-009"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "implementation_evidence": "src/ERP.Api/Controllers/InventoryLocationLotController.cs:14-17 declares only [Authorize]; GetBalances at 27-32 calls _service.GetLocationLotBalancesAsync(warehouseId, productId) and Validate at 35-40 calls _service.ValidateMovementAsync(input) with no identity, menu or scope argument. src/ERP.Application/Services/InventoryLocationLotService.cs contains no Authoriz/Menu/Scope reference (only InventoryLocationLotRules.EnsurePositiveQuantity at line 57 and EnsureDistinctWarehouses at line 68) and src/ERP.Application/Services/InventoryLocationLotRules.cs has none. The guarded counterpart is src/ERP.Api/Controllers/StockController.cs:41-42 (StockQueryAuthorizationRules.EnsureAuthorizedAsync) with ApplyScope at 51,100,131. No task in .ai/tasks lists InventoryLocationLotController or its service as allowed_paths for authorization.",
+  "id": "ERP-436",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-09T05:10:19.656092Z"
+}
