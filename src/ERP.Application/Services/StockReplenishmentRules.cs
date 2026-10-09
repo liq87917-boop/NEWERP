@@ -1,5 +1,7 @@
 using ERP.Application.Common;
 using ERP.Application.DTOs;
+using ERP.Application.Interfaces;
+using ERP.Domain.Entities;
 
 namespace ERP.Application.Services;
 
@@ -9,6 +11,8 @@ namespace ERP.Application.Services;
 /// 以及只读 / 边界 / 免责声明。
 /// <para>边界：本规则只做读取口径的判定——不自动选择供应商、不生成采购报价或采购订单、
 /// 不改写任何库存、单据与主数据，也不做跨仓汇总与单位换算。</para>
+/// <para>读取护栏：补货工作台在读取任何库存数量、可用数量、最低 / 上限库存或货源关系之前，复用
+/// <see cref="StockQueryAuthorizationRules"/>（既有「库存查询」<c>stock-query</c> 菜单 + 权威数据范围，fail closed）。</para>
 /// </summary>
 public static class StockReplenishmentRules
 {
@@ -138,4 +142,26 @@ public static class StockReplenishmentRules
             throw BusinessException.InvalidParameter("商品 Id 必须为正整数（按商品筛选时不接受 0 或负数）");
         return productId;
     }
+
+    // ==================== 4. 读取前授权与数据范围（精确复用 ERP-356 库存查询口径） ====================
+
+    /// <summary>
+    /// 补货工作台读取前的实时授权（fail closed）：<b>精确复用</b>既有 ERP-356
+    /// <see cref="StockQueryAuthorizationRules.EnsureAuthorizedAsync"/>——实时身份（缺失 / 非法 / 已删除按未认证，
+    /// 禁用按权限不足）→ 既有「库存查询」（<c>stock-query</c>）菜单授权 → 权威数据范围。
+    /// <para>受限账号（非特权）在库存维度没有权威的仓库级数据范围，因此一律拒绝，绝不降级为全局可见性；
+    /// 不新增任何菜单 / 角色 / 用户授权，也不把空身份当作管理员。</para>
+    /// </summary>
+    public static Task<StockQueryAuthorizationRules.StockQueryScope> EnsureAuthorizedAsync(IErpDbContext db,
+        long? userId, CancellationToken ct = default)
+        => StockQueryAuthorizationRules.EnsureAuthorizedAsync(db, userId, ct);
+
+    /// <summary>
+    /// 把已解析的库存查询范围应用到库存行查询（复用
+    /// <see cref="StockQueryAuthorizationRules.ApplyScope(IQueryable{Stock}, StockQueryAuthorizationRules.StockQueryScope)"/>
+    /// 守卫：受限范围 fail closed，绝不放大为全局可见性）。必须在任何计数 / 分页之前调用。
+    /// </summary>
+    public static IQueryable<Stock> ApplyScope(IQueryable<Stock> source,
+        StockQueryAuthorizationRules.StockQueryScope scope)
+        => StockQueryAuthorizationRules.ApplyScope(source, scope);
 }

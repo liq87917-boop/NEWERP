@@ -6,6 +6,7 @@ using ERP.Domain.Entities;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.Security.Claims;
 
 namespace ERP.Api.Controllers;
 
@@ -13,6 +14,10 @@ namespace ERP.Api.Controllers;
 /// 只读补货工作台控制器（ERP-106）：把既有库存 <c>Stocks</c>、商品最低 / 上限库存
 /// （<c>BaseProduct.MinStock</c> / <c>BaseProduct.MaxStock</c>）与启用中的商品货源关系
 /// （<c>BaseProductSuppliers</c>）按「仓库 + 商品」逐行只读呈现，并给出低于最低库存时的补货建议。
+/// <para>授权（ERP-438）：在读取<b>任何</b>库存数量、可用数量、最低 / 上限库存或货源关系之前，
+/// 复用 <see cref="StockQueryAuthorizationRules"/>（ERP-356）重新解析实时身份 → 账号状态 →
+/// 既有「库存查询」（<c>stock-query</c>）菜单授权 → 权威数据范围，任一缺失即 fail closed；
+/// 受限账号没有权威的仓库级数据范围时拒绝读取全局库存，绝不授予全局可见性。</para>
 /// <para>审计口径：本控制器<strong>不新建任何表、不新增任何列、不执行任何写操作</strong>，
 /// 只按显式字段读取（全库查询均为 <c>AsNoTracking</c>，无 Add / Update / Remove / SaveChanges），
 /// 不改写库存 / 商品 / 供应商 / 货源关系，也不生成任何采购报价或采购订单。</para>
@@ -31,6 +36,17 @@ public class StockReplenishmentWorksheetController : ControllerBase
         _db = db;
     }
 
+    /// <summary>当前登录用户 Id（缺失或非数字时返回 null，由授权检查 fail closed 拒绝，绝不猜测身份）</summary>
+    private long? CurrentUserId()
+        => long.TryParse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value, out var id) ? id : null;
+
+    /// <summary>
+    /// 实时授权（fail closed）：校验身份 / 账号状态 / 既有 stock-query 菜单授权 / 权威数据范围。
+    /// 精确复用 <see cref="StockQueryAuthorizationRules"/>，不新增用户授权，也不把空身份当作管理员。
+    /// </summary>
+    private Task<StockQueryAuthorizationRules.StockQueryScope> AuthorizeAsync(CancellationToken ct = default)
+        => StockReplenishmentRules.EnsureAuthorizedAsync(_db, CurrentUserId(), ct);
+
     /// <summary>
     /// 只读补货工作台（分页）：按仓库（必填）/ 可选商品筛选，按稳定库存行 Id 分页；
     /// 单页内批量装载商品阈值、仓库名与启用中的货源关系（含供应商参考），不产生逐行数据库访问。
@@ -39,10 +55,15 @@ public class StockReplenishmentWorksheetController : ControllerBase
     public async Task<IActionResult> GetWorksheet([FromQuery] StockReplenishmentWorksheetQuery query)
     {
         query.Normalize();
+        // 授权 / 范围判定先于任何计数、分页与库存 / 阈值 / 货源字段读取（fail closed）：
+        // 身份 / 账号状态 / 既有 stock-query 菜单 / 权威数据范围任一缺失即拒绝。
+        var scope = await AuthorizeAsync();
         var warehouseId = StockReplenishmentRules.RequireWarehouse(query.WarehouseId);
         var productId = StockReplenishmentRules.NormalizeProductFilter(query.ProductId);
 
-        var source = _db.Stocks.AsNoTracking().Where(s => !s.IsDeleted && s.WarehouseId == warehouseId);
+        var source = StockReplenishmentRules.ApplyScope(
+            _db.Stocks.AsNoTracking().Where(s => !s.IsDeleted), scope);
+        source = source.Where(s => s.WarehouseId == warehouseId);
         if (productId.HasValue)
             source = source.Where(s => s.ProductId == productId.Value);
 

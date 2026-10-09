@@ -15,6 +15,8 @@ namespace ERP.UnitTests;
 /// 低于最低库存 + 有效上限目标的补货建议（阈值边界）、缺上限目标 / 阈值缺失 / 阈值无效的显式标注、
 /// 缺失商品行的可读性、停用供应商的货源不可用、无货源关系、多仓库不跨仓汇总、稳定分页有界、
 /// 仓库必填校验、只读不写库，以及接口与前端接线契约。
+/// <para>ERP-438：并覆盖读取前的实时授权（缺失 / 禁用 / 已删除 / 无菜单 / 受限身份 fail closed，
+/// 撤销授权下一次请求收敛），全部<strong>精确复用</strong>既有 <c>StockQueryAuthorizationRules</c>（ERP-356）。</para>
 /// <para>全部使用内存数据库（TestDbFactory），不连接 SQL Server、不启动 API、不执行任何 SQL / seed，不做浏览器验收。</para>
 /// </summary>
 public class StockReplenishmentWorksheetTests
@@ -27,7 +29,20 @@ public class StockReplenishmentWorksheetTests
     private const long Product2 = 700002L;
     private const long Supplier1 = 800001L;
 
-    private static StockReplenishmentWorksheetController BuildController(ErpDbContext db) => new(db);
+    /// <summary>
+    /// 构建已注入**特权库存查询身份**（系统内置角色 + 既有 <c>stock-query</c> 菜单）的控制器：
+    /// 既有 ERP-106 契约用例（建议 / 阈值 / 货源 / 分页 / 只读）都在已授权身份下继续成立。
+    /// </summary>
+    private static StockReplenishmentWorksheetController BuildController(ErpDbContext db)
+        => BuildController(db, StockQueryTestAuthorization.SeedPrivilegedReader(db));
+
+    /// <summary>把指定登录用户 Id（可空 = 无身份）写入控制器 HttpContext。</summary>
+    private static StockReplenishmentWorksheetController BuildController(ErpDbContext db, long? userId)
+    {
+        var controller = new StockReplenishmentWorksheetController(db);
+        TestAuth.SetUser(controller, userId);
+        return controller;
+    }
 
     private static StockReplenishmentWorksheetDto GetData(IActionResult result)
     {
@@ -323,7 +338,130 @@ public class StockReplenishmentWorksheetTests
             controller.GetWorksheet(new StockReplenishmentWorksheetQuery { WarehouseId = null }));
     }
 
-    // ==================== 4. 前端接线契约 ====================
+    // ==================== 4. 实时授权（fail closed，复用库存查询口径） ====================
+
+    [Fact]
+    public async Task Worksheet_denies_missing_identity_before_reading_any_stock()
+    {
+        using var db = TestDbFactory.Create();
+        SeedWarehouse(db, WarehouseA, "主仓");
+        SeedProduct(db, Product1, "P001", "保温杯", minStock: 10m, maxStock: 100m);
+        SeedStock(db, WarehouseA, Product1, 5m);
+        await db.SaveChangesAsync();
+
+        var controller = BuildController(db, null);
+        var error = await Assert.ThrowsAsync<BusinessException>(() => controller.GetWorksheet(
+            new StockReplenishmentWorksheetQuery { WarehouseId = WarehouseA }));
+
+        Assert.Equal(ErrorCodes.Unauthorized, error.Code);
+    }
+
+    [Theory]
+    [InlineData("disabled", ErrorCodes.Forbidden)]
+    [InlineData("deleted", ErrorCodes.Unauthorized)]
+    [InlineData("no-menu", ErrorCodes.Forbidden)]
+    [InlineData("restricted", ErrorCodes.Forbidden)]
+    public async Task Worksheet_denies_non_authorized_identities_without_rows_or_mutation(
+        string scenario, int expectedCode)
+    {
+        using var db = TestDbFactory.Create();
+        SeedWarehouse(db, WarehouseA, "主仓");
+        SeedProduct(db, Product1, "P001", "保温杯", minStock: 10m, maxStock: 100m);
+        SeedStock(db, WarehouseA, Product1, 5m);
+        SeedSupplier(db, Supplier1, "S001", "义乌工厂");
+        SeedRelation(db, Product1, Supplier1);
+        await db.SaveChangesAsync();
+
+        var userId = scenario switch
+        {
+            "disabled" => StockQueryTestAuthorization.SeedDisabledUser(db, withMenu: true),
+            "deleted" => StockQueryTestAuthorization.SeedDeletedUser(db, withMenu: true),
+            "no-menu" => StockQueryTestAuthorization.SeedRestrictedReader(db, withMenu: false),
+            _ => StockQueryTestAuthorization.SeedRestrictedReader(db, withMenu: true)
+        };
+        var controller = BuildController(db, userId);
+
+        var stocksBefore = db.Stocks.Count();
+        var productsBefore = db.BaseProducts.Count();
+        var suppliersBefore = db.BaseSuppliers.Count();
+        var relationsBefore = db.BaseProductSuppliers.Count();
+
+        var error = await Assert.ThrowsAsync<BusinessException>(() => controller.GetWorksheet(
+            new StockReplenishmentWorksheetQuery { WarehouseId = WarehouseA }));
+
+        Assert.Equal(expectedCode, error.Code);
+        // 拒绝时不返回任何行、不泄露任何数量 / 阈值 / 货源，且不改写库存 / 商品 / 供应商 / 货源
+        Assert.Equal(stocksBefore, db.Stocks.Count());
+        Assert.Equal(productsBefore, db.BaseProducts.Count());
+        Assert.Equal(suppliersBefore, db.BaseSuppliers.Count());
+        Assert.Equal(relationsBefore, db.BaseProductSuppliers.Count());
+        Assert.DoesNotContain(db.ChangeTracker.Entries(), e => e.State != EntityState.Unchanged);
+    }
+
+    [Fact]
+    public async Task Worksheet_restricted_identity_with_menu_has_no_authoritative_scope_and_is_denied()
+    {
+        using var db = TestDbFactory.Create();
+        SeedWarehouse(db, WarehouseA, "主仓");
+        SeedProduct(db, Product1, "P001", "保温杯", minStock: 10m, maxStock: 100m);
+        SeedStock(db, WarehouseA, Product1, 5m);
+        await db.SaveChangesAsync();
+
+        // 具备既有 stock-query 菜单，但非特权且未映射业务员 → 无权威仓库级数据范围。
+        var userId = StockQueryTestAuthorization.SeedRestrictedReader(db, withMenu: true);
+        var controller = BuildController(db, userId);
+
+        var error = await Assert.ThrowsAsync<BusinessException>(() => controller.GetWorksheet(
+            new StockReplenishmentWorksheetQuery { WarehouseId = WarehouseA }));
+
+        Assert.Equal(ErrorCodes.Forbidden, error.Code);
+        Assert.Contains("权威", error.Message);
+    }
+
+    [Fact]
+    public async Task Worksheet_revoked_menu_converges_to_denial_on_next_request()
+    {
+        using var db = TestDbFactory.Create();
+        SeedWarehouse(db, WarehouseA, "主仓");
+        SeedProduct(db, Product1, "P001", "保温杯", minStock: 10m, maxStock: 100m);
+        SeedStock(db, WarehouseA, Product1, 5m);
+        var controller = BuildController(db);       // 已授权特权身份
+
+        Assert.Single(GetData(await controller.GetWorksheet(
+            new StockReplenishmentWorksheetQuery { WarehouseId = WarehouseA })).Items);
+
+        // 请求之间回收「角色 → 菜单」授权：下一次请求立即收敛为拒绝（每次请求重新解析，绝不缓存）。
+        StockQueryTestAuthorization.RevokeMenuGrants(db);
+
+        Assert.Equal(ErrorCodes.Forbidden,
+            (await Assert.ThrowsAsync<BusinessException>(() => controller.GetWorksheet(
+                new StockReplenishmentWorksheetQuery { WarehouseId = WarehouseA }))).Code);
+        Assert.Equal(5m, db.Stocks.Single().Quantity);
+    }
+
+    [Fact]
+    public async Task Worksheet_privileged_returns_empty_for_foreign_or_stockless_warehouse()
+    {
+        using var db = TestDbFactory.Create();
+        SeedWarehouse(db, WarehouseA, "主仓");
+        SeedWarehouse(db, WarehouseB, "海外仓");       // 存在但无库存行
+        SeedProduct(db, Product1, "P001", "保温杯", minStock: 10m, maxStock: 100m);
+        SeedStock(db, WarehouseA, Product1, 5m);
+        var controller = BuildController(db);
+
+        var empty = GetData(await controller.GetWorksheet(
+            new StockReplenishmentWorksheetQuery { WarehouseId = WarehouseB }));
+        Assert.Empty(empty.Items);
+        Assert.Equal(0, empty.Total);
+
+        // 不存在（foreign）的仓库 Id：不猜归属、不返回任何行。
+        var foreign = GetData(await controller.GetWorksheet(
+            new StockReplenishmentWorksheetQuery { WarehouseId = 999999999L }));
+        Assert.Empty(foreign.Items);
+        Assert.Equal(0, foreign.Total);
+    }
+
+    // ==================== 5. 前端接线契约 ====================
 
     [Fact]
     public void Frontend_wiring_registers_worksheet()
