@@ -1,0 +1,65 @@
+{
+  "title": "Authorize product supplier sourcing relations with live product and supplier permissions",
+  "description": "Stage3 procurement-sourcing closure. src/ERP.Api/Controllers/ProductSupplierController.cs:18-28 declares only [Authorize] on ControllerBase; List at 35-40, Options at 46-51, Create at 54-59, Update at 62-67, Disable at 70-75, Enable at 78-83, SetPreferred at 89-95 and Delete at 98-103 call ProductSupplierService directly, and SupplierSourcingController at 111-133 exposes the supplier-side sourcing list under the same single [Authorize]. src/ERP.Application/Services/ProductSupplierService.cs contains zero Authoriz/Menu references, so any authenticated account can read and rewrite which suppliers a product (or SKU) may be procured from, including supplier item code, purchase unit, MOQ, lead time and the preferred-supplier flag that governs procurement reference. Reuse the existing product (product) and supplier (supplier) functional menus on every route and validate the live product, optional variant and supplier references on every write; add no grants, no anonymous/admin fallback, no schema change and no change to the ERP-037/038 uniqueness, ScopeKey and preferred semantics. Genuine isolated (localdb)\\NEWERP_AutoAcceptance GUID-owned NEWERP_AUTOTEST SQL only; safe Release build plus full ERP.UnitTests.",
+  "acceptance_criteria": [
+    "For every route on /api/base/products/{productId}/suppliers and /api/base/suppliers/{supplierId}/sourcing (list, options, create, update, disable, enable, preferred, delete) require the current enabled nondeleted identity and the existing product and supplier functional menus before any read or write, rejecting missing, disabled, deleted and revoked-menu identities with the existing controlled non-disclosing errors and adding no new grants or anonymous/admin fallback.",
+    "Validate the authoritative product, optional variant and supplier references live on every write before persisting so foreign, deleted, disabled or mismatched ids fail closed and no sourcing row, preferred flag or status change is persisted on denial, keeping the existing ERP-037/038 uniqueness, scope-key and preferred-supplier semantics unchanged.",
+    "Genuine isolated SQL authenticated controller tests cover permitted product and supplier permissions, missing each required menu, disabled, deleted and revoked identities, foreign or invalid product, variant and supplier references, and assert denied create, update, enable, disable, preferred and delete mutate no BaseProductSuppliers row while the existing ProductSupplierTests contracts stay green.",
+    "Keep the safe Release build and the full existing ERP.UnitTests suite green, use only genuine isolated (localdb)\\NEWERP_AutoAcceptance GUID-owned NEWERP_AUTOTEST databases with Integrated Security, and add no schema, entity, permission or production/secret change; build completion is not stage acceptance."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/ProductSupplierController.cs",
+    "src/ERP.Application/Services/ProductSupplierService.cs",
+    "src/ERP.Application/Services/ProductSupplierRules.cs",
+    "src/ERP.UnitTests/ProductSupplierTests.cs",
+    "src/ERP.IntegrationTests/ProductSupplierSourcingAuthorizationSqlServerTests.cs",
+    "docs/product-supplier-sourcing-authority.md"
+  ],
+  "criterion_path_map": {
+    "For every route on /api/base/products/{productId}/suppliers and /api/base/suppliers/{supplierId}/sourcing (list, options, create, update, disable, enable, preferred, delete) require the current enabled nondeleted identity and the existing product and supplier functional menus before any read or write, rejecting missing, disabled, deleted and revoked-menu identities with the existing controlled non-disclosing errors and adding no new grants or anonymous/admin fallback.": [
+      "src/ERP.Api/Controllers/ProductSupplierController.cs",
+      "src/ERP.Application/Services/ProductSupplierRules.cs"
+    ],
+    "Validate the authoritative product, optional variant and supplier references live on every write before persisting so foreign, deleted, disabled or mismatched ids fail closed and no sourcing row, preferred flag or status change is persisted on denial, keeping the existing ERP-037/038 uniqueness, scope-key and preferred-supplier semantics unchanged.": [
+      "src/ERP.Api/Controllers/ProductSupplierController.cs",
+      "src/ERP.Application/Services/ProductSupplierService.cs",
+      "src/ERP.Application/Services/ProductSupplierRules.cs"
+    ],
+    "Genuine isolated SQL authenticated controller tests cover permitted product and supplier permissions, missing each required menu, disabled, deleted and revoked identities, foreign or invalid product, variant and supplier references, and assert denied create, update, enable, disable, preferred and delete mutate no BaseProductSuppliers row while the existing ProductSupplierTests contracts stay green.": [
+      "src/ERP.UnitTests/ProductSupplierTests.cs",
+      "src/ERP.IntegrationTests/ProductSupplierSourcingAuthorizationSqlServerTests.cs",
+      "docs/product-supplier-sourcing-authority.md"
+    ],
+    "Keep the safe Release build and the full existing ERP.UnitTests suite green, use only genuine isolated (localdb)\\NEWERP_AutoAcceptance GUID-owned NEWERP_AUTOTEST databases with Integrated Security, and add no schema, entity, permission or production/secret change; build completion is not stage acceptance.": [
+      "src/ERP.UnitTests/ProductSupplierTests.cs",
+      "docs/product-supplier-sourcing-authority.md"
+    ]
+  },
+  "depends_on": [
+    "ERP-037",
+    "ERP-038",
+    "ERP-097",
+    "ERP-371"
+  ],
+  "risk": "low",
+  "planning_stage": 3,
+  "implementation_evidence": "src/ERP.Api/Controllers/ProductSupplierController.cs:18-28 declares only [Authorize] on ControllerBase; List at 35-40, Options at 46-51, Create at 54-59, Update at 62-67, Disable at 70-75, Enable at 78-83, SetPreferred at 89-95 and Delete at 98-103 call ProductSupplierService directly, and SupplierSourcingController at 111-133 exposes the supplier-side sourcing list with the same single [Authorize]. src/ERP.Application/Services/ProductSupplierService.cs contains zero Authoriz/Menu references (its 23 Scope occurrences are ScopeKey product/SKU scope at lines 66, 187, 193, 246, 260 and 342, not caller data scope); CreateAsync at 177-227 persists supplier item code, purchase unit, MOQ, lead time and preferred flag with no caller or menu check. An exact search of .ai/tasks shows ERP-038 only created the sourcing relations and no task lists ProductSupplierController, SupplierSourcingController or ProductSupplierService for live authorization.",
+  "id": "ERP-441",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-09T06:12:20.128056Z"
+}

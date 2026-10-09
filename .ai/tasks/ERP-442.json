@@ -1,0 +1,63 @@
+{
+  "title": "Authorize export tax refund ledger writes with live finance permission and amount guards",
+  "description": "Stage3 finance-ledger closure. src/ERP.Api/Controllers/TaxRefundController.cs:12-17 declares only [Authorize] and inherits BaseCrudController<BaseTaxRefund> without resolving identity, the existing tax-refund functional menu or any customer scope; the inherited generic routes in src/ERP.Api/Controllers/BaseCrudController.cs:38-92 serve paged, all, by-id, create, update, delete and batch-delete through IGenericService/GenericService.cs, so any authenticated account can read, create, update and delete any export tax refund ledger row. BaseTaxRefund (src/ERP.Domain/Entities/BaseTaxRefund.cs:11-72) carries ExportAmount, RefundRate, RefundableAmount, RefundedAmount, Currency, RefundPeriod and declare/refund dates that no server-side rule bounds. Reuse the existing tax-refund functional menu (MenuCode N'tax-refund' seeded at src/ERP.Infrastructure/Data/SchemaUpgrader.cs:356-368) and the ERP-097 salesperson customer scope, and add explicit amount/rate/date guards; add no grants, no anonymous/admin fallback, no schema change and no change to the existing read-only tax refund report semantics. Genuine isolated (localdb)\\NEWERP_AutoAcceptance GUID-owned NEWERP_AUTOTEST SQL only; safe Release build plus full ERP.UnitTests.",
+  "acceptance_criteria": [
+    "For every route on /api/base/tax-refunds (paged, all, by-id, create, update, delete and batch-delete) require the current enabled nondeleted identity and the existing tax-refund functional menu before any read or write, rejecting missing, disabled, deleted and revoked-menu identities with the existing controlled non-disclosing errors and adding no new grants or anonymous/admin fallback.",
+    "Resolve the authoritative SalespersonDataScopeService customer scope and apply it to every tax refund ledger count, list, detail and write so foreign or unowned rows are not disclosed and a denied write persists no ledger row, keeping historical rows with a null CustomerId readable only to privileged accounts.",
+    "Validate on create and update that ExportAmount, RefundableAmount and RefundedAmount are non-negative, RefundRate is within 0..100, RefundedAmount does not exceed RefundableAmount, Currency and RefundPeriod are non-empty bounded values and declare/refund dates are internally consistent, returning the existing controlled validation errors without silently clamping or back-filling.",
+    "Genuine isolated SQL authenticated controller tests cover permitted privileged and in-scope flows, restricted out-of-scope rows, missing functional menu, disabled, deleted and revoked identities, invalid amounts and rates, and assert denied calls read or mutate no ledger row, while the safe Release build and the full existing ERP.UnitTests suite stay green with no schema, entity, permission or production/secret change; build completion is not stage acceptance."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/TaxRefundController.cs",
+    "src/ERP.Application/Services/TaxRefundLedgerRules.cs",
+    "src/ERP.UnitTests/TaxRefundLedgerTests.cs",
+    "src/ERP.IntegrationTests/TaxRefundLedgerAuthorizationSqlServerTests.cs",
+    "docs/export-tax-refund-ledger-authority.md"
+  ],
+  "criterion_path_map": {
+    "For every route on /api/base/tax-refunds (paged, all, by-id, create, update, delete and batch-delete) require the current enabled nondeleted identity and the existing tax-refund functional menu before any read or write, rejecting missing, disabled, deleted and revoked-menu identities with the existing controlled non-disclosing errors and adding no new grants or anonymous/admin fallback.": [
+      "src/ERP.Api/Controllers/TaxRefundController.cs",
+      "src/ERP.Application/Services/TaxRefundLedgerRules.cs"
+    ],
+    "Resolve the authoritative SalespersonDataScopeService customer scope and apply it to every tax refund ledger count, list, detail and write so foreign or unowned rows are not disclosed and a denied write persists no ledger row, keeping historical rows with a null CustomerId readable only to privileged accounts.": [
+      "src/ERP.Api/Controllers/TaxRefundController.cs",
+      "src/ERP.Application/Services/TaxRefundLedgerRules.cs"
+    ],
+    "Validate on create and update that ExportAmount, RefundableAmount and RefundedAmount are non-negative, RefundRate is within 0..100, RefundedAmount does not exceed RefundableAmount, Currency and RefundPeriod are non-empty bounded values and declare/refund dates are internally consistent, returning the existing controlled validation errors without silently clamping or back-filling.": [
+      "src/ERP.Api/Controllers/TaxRefundController.cs",
+      "src/ERP.Application/Services/TaxRefundLedgerRules.cs",
+      "src/ERP.UnitTests/TaxRefundLedgerTests.cs"
+    ],
+    "Genuine isolated SQL authenticated controller tests cover permitted privileged and in-scope flows, restricted out-of-scope rows, missing functional menu, disabled, deleted and revoked identities, invalid amounts and rates, and assert denied calls read or mutate no ledger row, while the safe Release build and the full existing ERP.UnitTests suite stay green with no schema, entity, permission or production/secret change; build completion is not stage acceptance.": [
+      "src/ERP.UnitTests/TaxRefundLedgerTests.cs",
+      "src/ERP.IntegrationTests/TaxRefundLedgerAuthorizationSqlServerTests.cs",
+      "docs/export-tax-refund-ledger-authority.md"
+    ]
+  },
+  "depends_on": [
+    "ERP-006",
+    "ERP-097",
+    "ERP-107"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "implementation_evidence": "src/ERP.Api/Controllers/TaxRefundController.cs:12-17 declares only [Authorize] and inherits BaseCrudController<BaseTaxRefund> without resolving identity, the existing tax-refund menu or any customer scope; the inherited generic routes in src/ERP.Api/Controllers/BaseCrudController.cs:38-92 (GetPaged, GetAll, GetById, Create, Update, Delete, batch-delete) delegate to IGenericService and GenericService.cs with zero Authoriz/Scope/Menu references and no field validation. BaseTaxRefund (src/ERP.Domain/Entities/BaseTaxRefund.cs:11-72) persists ExportAmount, RefundRate, RefundableAmount, RefundedAmount, Currency, RefundPeriod and declare/refund dates without any bound rule, and BaseEntity is the only shared base. The existing tax-refund functional menu is seeded at src/ERP.Infrastructure/Data/SchemaUpgrader.cs:356-368 (MenuCode N'tax-refund', path /finance/tax-refund). An exact search of .ai/tasks returned no task listing TaxRefundController for live authorization.",
+  "id": "ERP-442",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-09T06:12:20.130012Z"
+}

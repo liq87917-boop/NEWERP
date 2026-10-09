@@ -1,0 +1,66 @@
+{
+  "title": "Enforce live customer scope and menu authority on agency service fee agreement evidence register",
+  "description": "Stage3 receipts and finance-evidence closure (not report polish). src/ERP.Api/Controllers/AgencyServiceFeeAgreementController.cs:23-26 declares only [Authorize]; GetPaged at 39-42, GetById at 45-48, Create at 54-58, Update at 61-65, Record at 71-75 and Void at 81-85 call AgencyServiceFeeAgreementService directly and CurrentUserName at 88-89 is only an audit label. src/ERP.Application/Services/AgencyServiceFeeAgreementService.cs contains zero Authoriz/SalespersonDataScope/Menu references, so any authenticated account can list, read, create, update, record and void any customer's agency service fee agreement evidence. ERP-437 closed the sibling statement and collection-allocation registers but left this agreement register unguarded. Reuse the existing guards exactly (CustomerReceivableReconciliationService.LoadAuthorizedMenuCodesAsync with AgencyServiceFeeReconciliationRules.RequiredMenuCode and SalespersonDataScopeService.ResolveAsync) on every route and push the scope into every count, list and detail query before materialization; add no grants, no anonymous/admin fallback, no schema change and no change to ERP-069/070/071/072 semantics. Genuine isolated (localdb)\\NEWERP_AutoAcceptance GUID-owned NEWERP_AUTOTEST SQL only; safe Release build plus full ERP.UnitTests.",
+  "acceptance_criteria": [
+    "For every route on /api/agency-service-fee-agreements (GetPaged, GetById, Create, Update, record, void) require the current enabled nondeleted identity and the existing customer functional menu before any read or write by reusing CustomerReceivableReconciliationService.LoadAuthorizedMenuCodesAsync with AgencyServiceFeeReconciliationRules.RequiredMenuCode exactly as the sibling monthly-summary and ERP-437 register routes do, rejecting missing, disabled, deleted and revoked-menu identities with the existing controlled non-disclosing errors and adding no new grants or anonymous/admin fallback.",
+    "Resolve the authoritative SalespersonDataScopeService customer scope and push it into every agreement count, list and detail query before materialization so foreign or out-of-scope agreements return the same non-disclosing error without exposing foreign ids, amounts or rates, and denied create, update, record or void writes persist no agreement row or status change.",
+    "Genuine isolated SQL authenticated controller tests cover own, foreign and deleted agreements, missing functional menu, disabled, deleted and revoked identities, denied create, update, record and void with zero evidence mutation and a permitted draft-to-recorded-to-voided lifecycle, while keeping the existing ERP-069 and ERP-072 agreement and reconciliation regression tests green.",
+    "Keep the safe Release build and the full existing ERP.UnitTests suite green, use only genuine isolated (localdb)\\NEWERP_AutoAcceptance GUID-owned NEWERP_AUTOTEST databases with Integrated Security, and add no schema, entity, permission or production/secret change; build completion is not stage acceptance."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/AgencyServiceFeeAgreementController.cs",
+    "src/ERP.Application/Services/AgencyServiceFeeAgreementService.cs",
+    "src/ERP.Application/Services/AgencyServiceFeeAgreementRules.cs",
+    "src/ERP.UnitTests/AgencyServiceFeeAgreementTests.cs",
+    "src/ERP.IntegrationTests/AgencyServiceFeeAgreementAuthorizationSqlServerTests.cs",
+    "docs/agency-service-fee-agreement-authority.md"
+  ],
+  "criterion_path_map": {
+    "For every route on /api/agency-service-fee-agreements (GetPaged, GetById, Create, Update, record, void) require the current enabled nondeleted identity and the existing customer functional menu before any read or write by reusing CustomerReceivableReconciliationService.LoadAuthorizedMenuCodesAsync with AgencyServiceFeeReconciliationRules.RequiredMenuCode exactly as the sibling monthly-summary and ERP-437 register routes do, rejecting missing, disabled, deleted and revoked-menu identities with the existing controlled non-disclosing errors and adding no new grants or anonymous/admin fallback.": [
+      "src/ERP.Api/Controllers/AgencyServiceFeeAgreementController.cs",
+      "src/ERP.Application/Services/AgencyServiceFeeAgreementRules.cs"
+    ],
+    "Resolve the authoritative SalespersonDataScopeService customer scope and push it into every agreement count, list and detail query before materialization so foreign or out-of-scope agreements return the same non-disclosing error without exposing foreign ids, amounts or rates, and denied create, update, record or void writes persist no agreement row or status change.": [
+      "src/ERP.Api/Controllers/AgencyServiceFeeAgreementController.cs",
+      "src/ERP.Application/Services/AgencyServiceFeeAgreementService.cs",
+      "src/ERP.Application/Services/AgencyServiceFeeAgreementRules.cs"
+    ],
+    "Genuine isolated SQL authenticated controller tests cover own, foreign and deleted agreements, missing functional menu, disabled, deleted and revoked identities, denied create, update, record and void with zero evidence mutation and a permitted draft-to-recorded-to-voided lifecycle, while keeping the existing ERP-069 and ERP-072 agreement and reconciliation regression tests green.": [
+      "src/ERP.UnitTests/AgencyServiceFeeAgreementTests.cs",
+      "src/ERP.IntegrationTests/AgencyServiceFeeAgreementAuthorizationSqlServerTests.cs",
+      "docs/agency-service-fee-agreement-authority.md"
+    ],
+    "Keep the safe Release build and the full existing ERP.UnitTests suite green, use only genuine isolated (localdb)\\NEWERP_AutoAcceptance GUID-owned NEWERP_AUTOTEST databases with Integrated Security, and add no schema, entity, permission or production/secret change; build completion is not stage acceptance.": [
+      "src/ERP.UnitTests/AgencyServiceFeeAgreementTests.cs",
+      "docs/agency-service-fee-agreement-authority.md"
+    ]
+  },
+  "depends_on": [
+    "ERP-069",
+    "ERP-070",
+    "ERP-072",
+    "ERP-097",
+    "ERP-437"
+  ],
+  "risk": "low",
+  "planning_stage": 3,
+  "implementation_evidence": "src/ERP.Api/Controllers/AgencyServiceFeeAgreementController.cs:23-26 declares only [Authorize] (ControllerBase, no identity/menu/scope resolution); GetPaged at 39-42, GetById at 45-48, Create at 54-58, Update at 61-65, Record at 71-75 and Void at 81-85 call AgencyServiceFeeAgreementService directly and CurrentUserName at 88-89 is only an audit name, never an authorization check. src/ERP.Application/Services/AgencyServiceFeeAgreementService.cs (17744 bytes) contains zero Authoriz/SalespersonDataScope/Menu references; CreateAsync at 37-44 validates the client and customer availability but not the caller. The sibling guards fixed by ERP-437 are CustomerReceivableReconciliationService.LoadAuthorizedMenuCodesAsync with AgencyServiceFeeReconciliationRules.RequiredMenuCode plus SalespersonDataScopeService.ResolveAsync; AgencyServiceFeeReconciliationService.cs already contains Authoriz/Menu checks while the agreement service does not. An exact search of .ai/tasks returned no task listing AgencyServiceFeeAgreementController or AgencyServiceFeeAgreementService for authorization.",
+  "id": "ERP-439",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-09T06:12:20.124336Z"
+}

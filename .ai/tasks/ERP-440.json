@@ -1,0 +1,63 @@
+{
+  "title": "Enforce live menu authority and customer scope on base-data import and export",
+  "description": "Stage3 permission closure on operational master data. src/ERP.Api/Controllers/BaseDataIoController.cs:19-22 declares [ApiController]/[Route(\"api/base/io\")]/[Authorize] on ControllerBase with no identity, menu or scope resolution; Export at 116-135 serializes LoadEntities (215-226) which returns every non-deleted customer/supplier/employee/product/warehouse row unfiltered, and Import at 152-211 inserts arbitrary base-data rows via dbContext.Add/SaveChangesAsync at 196-197 with no functional menu check, so any authenticated account can export all customers and bulk-insert master data that operational documents depend on. The canonical base-data read path already scopes customers with SalespersonDataScopeService (ERP-097) in src/ERP.Api/Controllers/BaseDataControllers.cs:47-91, and the /api/base/io routes bypass it. Reuse the existing per-resource base menus (customer, supplier, employee, product and the other registered resources) and the existing salesperson customer scope; add no grants, no anonymous/admin fallback, no schema change, and keep the export/import template, row-level success/failure reporting and 2000-row bound unchanged. Genuine isolated (localdb)\\NEWERP_AutoAcceptance GUID-owned NEWERP_AUTOTEST SQL only; safe Release build plus full ERP.UnitTests.",
+  "acceptance_criteria": [
+    "Before reading or writing any base-data row on /api/base/io/{resource}/export, /api/base/io/{resource}/import-template and /api/base/io/{resource}/import require the current enabled nondeleted identity and that resource's existing functional menu (customer, supplier, employee, product and the other registered base resources) before any entity load, count or insert, rejecting missing, disabled, deleted and revoked-menu identities with the existing controlled non-disclosing errors and adding no new grants or anonymous/admin fallback.",
+    "Resolve the authoritative SalespersonDataScopeService customer scope and apply it to the customer export and to any imported customer row so a restricted salesperson receives only their own customers and cannot create, overwrite or resurrect a customer outside their scope, while privileged accounts keep the existing full export.",
+    "Keep the existing export and import template contracts, per-row success and failure reporting, the 2000-row bound and the file-format errors unchanged, and add server-side row validation so an invalid or out-of-authority row fails per row without aborting or partially corrupting the other rows.",
+    "Genuine isolated SQL authenticated controller tests cover permitted privileged and in-scope export and import, restricted out-of-scope customers, missing functional menu, disabled, deleted and revoked identities, and assert denied calls load and mutate no customer, supplier, employee or product row, while the safe Release build and the full existing ERP.UnitTests suite stay green with no schema, entity, permission or production/secret change; build completion is not stage acceptance."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/BaseDataIoController.cs",
+    "src/ERP.Application/Services/BaseDataIoAuthorizationRules.cs",
+    "src/ERP.UnitTests/BaseDataIoAuthorizationTests.cs",
+    "src/ERP.IntegrationTests/BaseDataIoAuthorizationSqlServerTests.cs",
+    "docs/base-data-io-authority.md"
+  ],
+  "criterion_path_map": {
+    "Before reading or writing any base-data row on /api/base/io/{resource}/export, /api/base/io/{resource}/import-template and /api/base/io/{resource}/import require the current enabled nondeleted identity and that resource's existing functional menu (customer, supplier, employee, product and the other registered base resources) before any entity load, count or insert, rejecting missing, disabled, deleted and revoked-menu identities with the existing controlled non-disclosing errors and adding no new grants or anonymous/admin fallback.": [
+      "src/ERP.Api/Controllers/BaseDataIoController.cs",
+      "src/ERP.Application/Services/BaseDataIoAuthorizationRules.cs"
+    ],
+    "Resolve the authoritative SalespersonDataScopeService customer scope and apply it to the customer export and to any imported customer row so a restricted salesperson receives only their own customers and cannot create, overwrite or resurrect a customer outside their scope, while privileged accounts keep the existing full export.": [
+      "src/ERP.Api/Controllers/BaseDataIoController.cs",
+      "src/ERP.Application/Services/BaseDataIoAuthorizationRules.cs"
+    ],
+    "Keep the existing export and import template contracts, per-row success and failure reporting, the 2000-row bound and the file-format errors unchanged, and add server-side row validation so an invalid or out-of-authority row fails per row without aborting or partially corrupting the other rows.": [
+      "src/ERP.Api/Controllers/BaseDataIoController.cs",
+      "src/ERP.Application/Services/BaseDataIoAuthorizationRules.cs",
+      "src/ERP.UnitTests/BaseDataIoAuthorizationTests.cs"
+    ],
+    "Genuine isolated SQL authenticated controller tests cover permitted privileged and in-scope export and import, restricted out-of-scope customers, missing functional menu, disabled, deleted and revoked identities, and assert denied calls load and mutate no customer, supplier, employee or product row, while the safe Release build and the full existing ERP.UnitTests suite stay green with no schema, entity, permission or production/secret change; build completion is not stage acceptance.": [
+      "src/ERP.UnitTests/BaseDataIoAuthorizationTests.cs",
+      "src/ERP.IntegrationTests/BaseDataIoAuthorizationSqlServerTests.cs",
+      "docs/base-data-io-authority.md"
+    ]
+  },
+  "depends_on": [
+    "ERP-006",
+    "ERP-036",
+    "ERP-097"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "implementation_evidence": "src/ERP.Api/Controllers/BaseDataIoController.cs:19-22 declares [ApiController]/[Route(\"api/base/io\")]/[Authorize] on ControllerBase with no identity, menu or scope resolution; Export at 116-135 serializes LoadEntities (215-226) which returns every non-deleted customer/supplier/employee/product/warehouse row unfiltered, DownloadTemplate at 139-149 and Import at 152-211 insert rows via dbContext.Add/SaveChangesAsync at 196-197 with no functional menu check and no scope enforcement. The canonical scoped read path is src/ERP.Api/Controllers/BaseDataControllers.cs:47-91 (CustomerController resolves SalespersonDataScopeService and filters by allowed customer ids, ERP-097), which the /api/base/io routes bypass. Only ERP-334 references BaseDataIoController and that stage-2 task used it as a legacy print snapshot source rather than authorizing these routes; no task lists it for live authorization.",
+  "id": "ERP-440",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-09T06:12:20.126189Z"
+}
