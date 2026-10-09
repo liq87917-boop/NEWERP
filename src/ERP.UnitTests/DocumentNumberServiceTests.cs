@@ -95,4 +95,42 @@ public class DocumentNumberServiceTests
         Assert.StartsWith("SO20260923", soNo);          // 既有单据编号规则不受影响
         Assert.DoesNotContain("PI202609230001", soNo);
     }
+
+    [Fact]
+    public async Task GenerateAsync_规则日期格式为空_仍回退默认yyyyMMdd()
+    {
+        using var db = TestDbFactory.Create();
+        db.SysDocumentNumberRules.Add(new SysDocumentNumberRule
+        {
+            DocumentType = DocumentType.PurchaseOrder,
+            RuleCode = "PO-NOFMT",
+            RuleName = "采购订单（无日期格式）",
+            Prefix = "PO",
+            DateFormat = null,
+            SerialLength = 4,
+            Separator = string.Empty,
+            CurrentSequence = 0,
+            YearlyReset = true
+        });
+        await db.SaveChangesAsync();
+
+        var service = new DocumentNumberService(db);
+        var no = await service.GenerateAsync(DocumentType.PurchaseOrder, new DateTime(2026, 8, 19));
+
+        // ERP-445：规则已存在但日期格式未设置时，仍回到既有默认兜底 yyyyMMdd。
+        Assert.Equal("PO202608190001", no);
+    }
+
+    [Fact]
+    public async Task GenerateAsync_未配置规则_默认前缀加yyyyMMdd加四位流水()
+    {
+        using var db = TestDbFactory.Create();
+        var service = new DocumentNumberService(db);
+
+        var no = await service.GenerateAsync(DocumentType.StockIn, new DateTime(2026, 8, 19));
+
+        Assert.StartsWith("RK20260819", no);            // 既有默认前缀
+        Assert.Equal(14, no.Length);                    // RK + yyyyMMdd(8) + 4 位流水
+        Assert.True(int.TryParse(no[^4..], out _));     // 4 位流水段
+    }
 }
