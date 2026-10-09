@@ -1,7 +1,7 @@
 {
   "schema_version": 2,
   "project": "NEWERP",
-  "updated_at": "2026-10-09T04:51:42.881587Z",
+  "updated_at": "2026-10-09T05:01:41.084192Z",
   "phase": "ready",
   "current_task": null,
   "queue": [
@@ -425,17 +425,20 @@
     "log": ".ai\\logs\\ERP-433-validation-1.log",
     "at": "2026-10-09T04:51:34.951496Z"
   },
-  "last_error": null,
+  "last_error": {
+    "task": "ERP-434",
+    "kind": "automatic_repair_pending",
+    "summary": "Path guard failed:\noutside allowed_paths: erp434-full.pid\noutside allowed_paths: erp434-sql.pid\noutside allowed_paths: erp434results/erp434-full.trx\noutside allowed_paths: erp434results/erp434-sql.trx\noutside allowed_paths: erp434results/erp434a.trx\noutside allowed_paths: erp434results/erp434b.trx\noutside allowed_paths: erp434results/erp434c.trx"
+  },
   "last_deepseek_fix": {
-    "task": "ERP-432",
-    "attempt": 2,
-    "model": "deepseek-flash",
-    "exit_code": 0,
-    "finished_at": "2026-10-09T04:34:09.381652Z"
+    "task": "ERP-434",
+    "attempts": 3,
+    "status": "retry_pending",
+    "at": "2026-10-09T05:01:40.596372Z"
   },
   "git_sync": {
     "branch": "main",
-    "local_sha": "cbbaba3",
+    "local_sha": "29635ae",
     "status": "synced",
     "ahead": 0,
     "behind": 0,
@@ -448,5 +451,7 @@
   "runner": {
     "status": "stopped",
     "pid": null
-  }
+  },
+  "blocker": null,
+  "finish_reason": "deepseek_supervisor_recovery"
 }

@@ -54,7 +54,7 @@
   "risk": "medium",
   "planning_stage": 3,
   "id": "ERP-434",
-  "status": "pending",
+  "status": "retry",
   "attempts": 0,
   "max_attempts": 3,
   "validation_profile": "safe",
@@ -70,5 +70,119 @@
     "required": false,
     "scenarios": []
   },
-  "created_at": "2026-10-09T04:17:26.112020Z"
+  "created_at": "2026-10-09T04:17:26.112020Z",
+  "preserved_work": {
+    "execution_copy": "D:\\VSCodeProject\\NEWERP.executor.continue-erp-190-20260930080457",
+    "changed_paths": [
+      ".ai/PROJECT_STATE.json",
+      ".ai/tasks/ERP-434.json",
+      "docs/customer-receipt-allocation-authority.md",
+      "erp434-full.pid",
+      "erp434-sql.pid",
+      "erp434results/erp434-full.trx",
+      "erp434results/erp434-sql.trx",
+      "erp434results/erp434a.trx",
+      "erp434results/erp434b.trx",
+      "erp434results/erp434c.trx",
+      "src/ERP.Api/Controllers/CustomerReceiptAllocationController.cs",
+      "src/ERP.Api/Controllers/CustomerSalesInvoiceCollectionAllocationController.cs",
+      "src/ERP.Application/Services/CustomerReceiptAllocationService.cs",
+      "src/ERP.Application/Services/CustomerReceiptLifecycleRules.cs",
+      "src/ERP.Application/Services/CustomerSalesInvoiceCollectionAllocationService.cs",
+      "src/ERP.IntegrationTests/CustomerReceiptLifecycleSqlServerTests.cs",
+      "src/ERP.UnitTests/CustomerReceiptAllocationTests.cs",
+      "src/ERP.UnitTests/CustomerSalesInvoiceCollectionAllocationTests.cs"
+    ],
+    "diff": ".ai\\logs\\ERP-434-preserved-work.diff",
+    "preserved_at": "2026-10-09T05:01:40.594416Z"
+  },
+  "failure_kind": "path_guard_failure",
+  "failed_transport_version": 2,
+  "recovery_history": [
+    {
+      "remediation_task": "ERP-434-RECOVERY-1",
+      "cycle": 1,
+      "at": "2026-10-09T05:01:40.906921Z",
+      "evidence": {
+        "failure_kind": "path_guard_failure",
+        "summary": "Path guard failed:\noutside allowed_paths: erp434-full.pid\noutside allowed_paths: erp434-sql.pid\noutside allowed_paths: erp434results/erp434-full.trx\noutside allowed_paths: erp434results/erp434-sql.trx\noutside allowed_paths: erp434results/erp434a.trx\noutside allowed_paths: erp434results/erp434b.trx\noutside allowed_paths: erp434results/erp434c.trx",
+        "result": ".ai\\results\\ERP-434.json",
+        "attempt_logs": [
+          ".ai/logs/ERP-434-attempt-1.jsonl"
+        ],
+        "validation_logs": [],
+        "latest_state_error": {
+          "task": "ERP-434",
+          "kind": "automatic_repair_pending",
+          "summary": "Path guard failed:\noutside allowed_paths: erp434-full.pid\noutside allowed_paths: erp434-sql.pid\noutside allowed_paths: erp434results/erp434-full.trx\noutside allowed_paths: erp434results/erp434-sql.trx\noutside allowed_paths: erp434results/erp434a.trx\noutside allowed_paths: erp434results/erp434b.trx\noutside allowed_paths: erp434results/erp434c.trx"
+        },
+        "latest_build": null,
+        "task_context": ".ai\\tasks\\ERP-434.json",
+        "changed_paths": [
+          ".ai/PROJECT_STATE.json",
+          ".ai/tasks/ERP-434.json",
+          "docs/customer-receipt-allocation-authority.md",
+          "erp434-full.pid",
+          "erp434-sql.pid",
+          "erp434results/erp434-full.trx",
+          "erp434results/erp434-sql.trx",
+          "erp434results/erp434a.trx",
+          "erp434results/erp434b.trx",
+          "erp434results/erp434c.trx",
+          "src/ERP.Api/Controllers/CustomerReceiptAllocationController.cs",
+          "src/ERP.Api/Controllers/CustomerSalesInvoiceCollectionAllocationController.cs",
+          "src/ERP.Application/Services/CustomerReceiptAllocationService.cs",
+          "src/ERP.Application/Services/CustomerReceiptLifecycleRules.cs",
+          "src/ERP.Application/Services/CustomerSalesInvoiceCollectionAllocationService.cs",
+          "src/ERP.IntegrationTests/CustomerReceiptLifecycleSqlServerTests.cs",
+          "src/ERP.UnitTests/CustomerReceiptAllocationTests.cs",
+          "src/ERP.UnitTests/CustomerSalesInvoiceCollectionAllocationTests.cs"
+        ],
+        "diff": ".ai\\logs\\ERP-434-preserved-work.diff",
+        "execution_copy": "D:\\VSCodeProject\\NEWERP.executor.continue-erp-190-20260930080457"
+      }
+    }
+  ],
+  "supervised_recovery_cycles": 1,
+  "recovery_context": {
+    "remediation_task": "ERP-434-RECOVERY-1",
+    "failure_kind": "path_guard_failure",
+    "summary": "Path guard failed:\noutside allowed_paths: erp434-full.pid\noutside allowed_paths: erp434-sql.pid\noutside allowed_paths: erp434results/erp434-full.trx\noutside allowed_paths: erp434results/erp434-sql.trx\noutside allowed_paths: erp434results/erp434a.trx\noutside allowed_paths: erp434results/erp434b.trx\noutside allowed_paths: erp434results/erp434c.trx",
+    "result": ".ai\\results\\ERP-434.json",
+    "attempt_logs": [
+      ".ai/logs/ERP-434-attempt-1.jsonl"
+    ],
+    "validation_logs": [],
+    "latest_state_error": {
+      "task": "ERP-434",
+      "kind": "automatic_repair_pending",
+      "summary": "Path guard failed:\noutside allowed_paths: erp434-full.pid\noutside allowed_paths: erp434-sql.pid\noutside allowed_paths: erp434results/erp434-full.trx\noutside allowed_paths: erp434results/erp434-sql.trx\noutside allowed_paths: erp434results/erp434a.trx\noutside allowed_paths: erp434results/erp434b.trx\noutside allowed_paths: erp434results/erp434c.trx"
+    },
+    "latest_build": null,
+    "task_context": ".ai\\tasks\\ERP-434.json",
+    "changed_paths": [
+      ".ai/PROJECT_STATE.json",
+      ".ai/tasks/ERP-434.json",
+      "docs/customer-receipt-allocation-authority.md",
+      "erp434-full.pid",
+      "erp434-sql.pid",
+      "erp434results/erp434-full.trx",
+      "erp434results/erp434-sql.trx",
+      "erp434results/erp434a.trx",
+      "erp434results/erp434b.trx",
+      "erp434results/erp434c.trx",
+      "src/ERP.Api/Controllers/CustomerReceiptAllocationController.cs",
+      "src/ERP.Api/Controllers/CustomerSalesInvoiceCollectionAllocationController.cs",
+      "src/ERP.Application/Services/CustomerReceiptAllocationService.cs",
+      "src/ERP.Application/Services/CustomerReceiptLifecycleRules.cs",
+      "src/ERP.Application/Services/CustomerSalesInvoiceCollectionAllocationService.cs",
+      "src/ERP.IntegrationTests/CustomerReceiptLifecycleSqlServerTests.cs",
+      "src/ERP.UnitTests/CustomerReceiptAllocationTests.cs",
+      "src/ERP.UnitTests/CustomerSalesInvoiceCollectionAllocationTests.cs"
+    ],
+    "diff": ".ai\\logs\\ERP-434-preserved-work.diff",
+    "execution_copy": "D:\\VSCodeProject\\NEWERP.executor.continue-erp-190-20260930080457",
+    "repair_allowed_paths": [],
+    "instruction": "DeepSeek supervisor recovery: inspect the referenced complete logs, diagnose the root cause, and implement a different safe repair within allowed_paths. Rebuild and rerun the configured tests; if validation fails, use the newest log as the next repair input. Do not repeat the failed approach. Do not edit task/state/result files or relax production and irreversible-operation gates. "
+  }
 }
