@@ -1,0 +1,68 @@
+{
+  "title": "Authorize system user management with live menu authority, bounded field validation and guarded role assignment",
+  "description": "Stage 3 access-control closure for the user records that every authenticated request, the ERP-097 salesperson data scope and every operational permission decision resolves through. src/ERP.Api/Controllers/SysUserController.cs:20 declares SysUserController with only [ApiController]/[Route(`api/sys/users`)]/[Authorize] and no identity, account-state or menu resolution on any route; GetPaged 31-59 reads all users and their role links, Create 63-81 only checks the duplicate user name at 65-66, Update 85-97 rewrites status/display fields, GetById 101-128 returns role bindings, ToggleStatus 132-142 flips enable/disable, ResetPassword 146-156 rewrites the password hash and Delete 160-170 soft-deletes; the role links are written by SysUserController.Helpers.cs:11-18 SaveRolesAsync which accepts any supplied roleId, so any authenticated account can mint a user, reset an account, disable it or attach it to an arbitrary role. Reuse the existing user-management functional menu (src/ERP.Infrastructure/Data/SeedData.Menus.cs:15) on every route, add bounded server-side validation for the persisted SysUser columns (src/ERP.Domain/Entities/SysUser.cs:10-52) and validate that supplied role ids resolve to known nondeleted roles, and keep the existing unique user-name index (src/ERP.Infrastructure/Data/ErpDbContext.Config.cs:20), the seeded admin protection (SeedData.AdminUserName checks at 136-137, 164-165) and the PBKDF2 hashing semantics unchanged. No Domain/Infrastructure/schema change, no grants, no anonymous/admin fallback. Genuine isolated (localdb)\\NEWERP_AutoAcceptance GUID-owned NEWERP_AUTOTEST SQL only; safe Release build plus full ERP.UnitTests.",
+  "acceptance_criteria": [
+    "For every route on /api/sys/users (paged, by-id, create, update, toggle-status, reset-password and delete) require the current enabled nondeleted identity and the existing user-management functional menu before any read or write, rejecting missing, disabled, deleted and revoked-menu identities with the existing controlled non-disclosing errors and adding no new grants or anonymous/admin fallback.",
+    "Validate on create and update that UserName, DisplayName, Email and Phone stay within their persisted length bounds with UserName required and unique among non-deleted users, that Status is a known enabled/disabled value and that every supplied role id resolves to a known nondeleted role, and accept only bounded reset-password payloads, so a rejected write persists no SysUsers or SysUserRoles change and the existing admin protection and password hashing semantics stay unchanged.",
+    "Genuine isolated SQL authenticated controller tests cover the permitted privileged and menu-granted flows, missing user menu, disabled, deleted and revoked identities and invalid name, bounds, status and role payloads, and assert that denied paged, by-id, create, update, toggle-status, reset-password and delete calls read or mutate no SysUsers or SysUserRoles row while the existing SysUserControllerTests and AuthServiceTests contracts stay green.",
+    "Keep the safe Release build and the full existing ERP.UnitTests suite green, use only genuine isolated (localdb)\\NEWERP_AutoAcceptance GUID-owned NEWERP_AUTOTEST databases with Integrated Security, and add no schema, entity, menu, permission or production/secret change; build completion is not stage acceptance."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/SysUserController.cs",
+    "src/ERP.Api/Controllers/SysUserController.Helpers.cs",
+    "src/ERP.Application/Services/SysUserAuthorizationRules.cs",
+    "src/ERP.UnitTests/SysUserMasterAuthorizationTests.cs",
+    "src/ERP.UnitTests/SysUserControllerTests.cs",
+    "src/ERP.UnitTests/AuthServiceTests.cs",
+    "src/ERP.IntegrationTests/SysUserMasterAuthorizationSqlServerTests.cs",
+    "docs/user-master-authority.md"
+  ],
+  "criterion_path_map": {
+    "For every route on /api/sys/users (paged, by-id, create, update, toggle-status, reset-password and delete) require the current enabled nondeleted identity and the existing user-management functional menu before any read or write, rejecting missing, disabled, deleted and revoked-menu identities with the existing controlled non-disclosing errors and adding no new grants or anonymous/admin fallback.": [
+      "src/ERP.Api/Controllers/SysUserController.cs",
+      "src/ERP.Application/Services/SysUserAuthorizationRules.cs"
+    ],
+    "Validate on create and update that UserName, DisplayName, Email and Phone stay within their persisted length bounds with UserName required and unique among non-deleted users, that Status is a known enabled/disabled value and that every supplied role id resolves to a known nondeleted role, and accept only bounded reset-password payloads, so a rejected write persists no SysUsers or SysUserRoles change and the existing admin protection and password hashing semantics stay unchanged.": [
+      "src/ERP.Api/Controllers/SysUserController.cs",
+      "src/ERP.Api/Controllers/SysUserController.Helpers.cs",
+      "src/ERP.Application/Services/SysUserAuthorizationRules.cs",
+      "src/ERP.UnitTests/SysUserMasterAuthorizationTests.cs"
+    ],
+    "Genuine isolated SQL authenticated controller tests cover the permitted privileged and menu-granted flows, missing user menu, disabled, deleted and revoked identities and invalid name, bounds, status and role payloads, and assert that denied paged, by-id, create, update, toggle-status, reset-password and delete calls read or mutate no SysUsers or SysUserRoles row while the existing SysUserControllerTests and AuthServiceTests contracts stay green.": [
+      "src/ERP.UnitTests/SysUserMasterAuthorizationTests.cs",
+      "src/ERP.UnitTests/SysUserControllerTests.cs",
+      "src/ERP.UnitTests/AuthServiceTests.cs",
+      "src/ERP.IntegrationTests/SysUserMasterAuthorizationSqlServerTests.cs",
+      "docs/user-master-authority.md"
+    ],
+    "Keep the safe Release build and the full existing ERP.UnitTests suite green, use only genuine isolated (localdb)\\NEWERP_AutoAcceptance GUID-owned NEWERP_AUTOTEST databases with Integrated Security, and add no schema, entity, menu, permission or production/secret change; build completion is not stage acceptance.": [
+      "src/ERP.UnitTests/SysUserMasterAuthorizationTests.cs",
+      "docs/user-master-authority.md"
+    ]
+  },
+  "depends_on": [
+    "ERP-006",
+    "ERP-097"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "implementation_evidence": "src/ERP.Api/Controllers/SysUserController.cs:17-20 declares SysUserController with only [ApiController]/[Route(api/sys/users)]/[Authorize] and no Authoriz/Menu/identity-resolution reference on any action: GetPaged 31-59, Create 63-81 (only the duplicate-name check at 65-66), Update 85-97, GetById 101-128, ToggleStatus 132-142, ResetPassword 146-156 and Delete 160-170 all query and write _db.SysUsers directly. Role binding is written unguarded by src/ERP.Api/Controllers/SysUserController.Helpers.cs:11-18 SaveRolesAsync, which removes and re-adds SysUserRoles for any supplied roleId. SysUser (src/ERP.Domain/Entities/SysUser.cs:10-52) persists UserName(50)/PasswordHash(256)/PasswordSalt(64)/DisplayName(50)/Email(100)/Phone(30)/Avatar(500)/Status/LastLoginTime/LastLoginIp(64)/MustChangePassword with only attribute annotations; the unique index is src/ERP.Infrastructure/Data/ErpDbContext.Config.cs:20 and the existing user-management menu is seeded at src/ERP.Infrastructure/Data/SeedData.Menus.cs:15. The seeded admin protection is the SeedData.AdminUserName check at SysUserController.cs:136-137 and 164-165 and existing regression contracts are src/ERP.UnitTests/SysUserControllerTests.cs and src/ERP.UnitTests/AuthServiceTests.cs. There is no SysUserAuthorizationRules in src/ERP.Application/Services and an exact search of .ai/tasks returns no task listing SysUserController for live authorization.",
+  "id": "ERP-453",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-09T08:00:42.716399Z"
+}

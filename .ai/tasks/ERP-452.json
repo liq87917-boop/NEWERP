@@ -1,0 +1,68 @@
+{
+  "title": "Authorize product master data with live menu authority, bounded field validation and guarded export and image uploads",
+  "description": "Stage 3 master-data closure for the product records that every sales order line, purchase order line, quotation line, stock document and stock query resolves against, together with the product export and OSS image upload routes on the same controller. src/ERP.Api/Controllers/BaseDataControllers.cs:476 declares ProductController with only [ApiController]/[Route(`api/base/products`)]/[Authorize]; GetPaged 499-506 and GetById 509-516 add variant/sourcing annotations but no menu check, Create/Update/Delete/BatchDelete are inherited unguarded from src/ERP.Api/Controllers/BaseCrudController.cs:62-92 (IGenericService, src/ERP.Application/Services/GenericService.cs), Export at 519-526 streams a template workbook and Upload 529-534 / UploadBatch 537-548 write images through OssStorageService via SaveImageAsync 551-567, all for any authenticated account and with no bounded validation. The sibling product routes were already closed by ERP-441 (ProductSupplierRules) and ERP-444 (ProductVariantRules) using the existing product menu; this task closes the parent controller. Reuse the existing product functional menu (src/ERP.Infrastructure/Data/SeedData.Menus.cs:30) on every route, add bounded server-side validation for the persisted BaseProduct columns (src/ERP.Domain/Entities/BaseOtherInfo.cs:10-182), and keep the existing product-code unique index (src/ERP.Infrastructure/Data/ErpDbContext.Config.cs:34), the ERP-037 variant and ERP-038 sourcing semantics and the export/upload response contracts unchanged. No Domain/Infrastructure/schema change, no grants, no anonymous/admin fallback. Genuine isolated (localdb)\\NEWERP_AutoAcceptance GUID-owned NEWERP_AUTOTEST SQL only; safe Release build plus full ERP.UnitTests.",
+  "acceptance_criteria": [
+    "For every route on /api/base/products (paged, all, by-id, create, update, delete, batch-delete, export, upload and upload-batch) require the current enabled nondeleted identity and the existing product functional menu before any read, write or artifact, rejecting missing, disabled, deleted and revoked-menu identities with the existing controlled non-disclosing errors and adding no new grants or anonymous/admin fallback.",
+    "Validate on create and update that ProductCode and ProductName are non-empty and within their persisted length bounds, that the optional persisted text, decimal and integer product fields stay within their persisted bounds and known shapes, and that Status is a known enabled/disabled value, returning the existing controlled validation errors without silently clamping or rewriting any product row and keeping the existing product-code uniqueness, ERP-037 variant relation and ERP-038 sourcing relation semantics unchanged, so a rejected write persists no BaseProducts row and no export or image upload artifact is produced on denial.",
+    "Genuine isolated SQL authenticated controller tests cover the permitted privileged and menu-granted flows, missing product menu, disabled, deleted and revoked identities and invalid code, name, bounds and status payloads, and assert that denied paged, all, by-id, create, update, delete, batch-delete, export, upload and upload-batch calls read or mutate no BaseProducts row and produce no downloadable artifact or stored image while the existing ProductVariantTests and ProductSupplierTests contracts stay green.",
+    "Keep the safe Release build and the full existing ERP.UnitTests suite green, use only genuine isolated (localdb)\\NEWERP_AutoAcceptance GUID-owned NEWERP_AUTOTEST databases with Integrated Security, and add no schema, entity, menu, permission or production/secret change; build completion is not stage acceptance."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/BaseDataControllers.cs",
+    "src/ERP.Application/Services/ProductAuthorizationRules.cs",
+    "src/ERP.UnitTests/ProductMasterAuthorizationTests.cs",
+    "src/ERP.UnitTests/ProductVariantTests.cs",
+    "src/ERP.UnitTests/ProductSupplierTests.cs",
+    "src/ERP.IntegrationTests/ProductMasterAuthorizationSqlServerTests.cs",
+    "docs/product-master-authority.md"
+  ],
+  "criterion_path_map": {
+    "For every route on /api/base/products (paged, all, by-id, create, update, delete, batch-delete, export, upload and upload-batch) require the current enabled nondeleted identity and the existing product functional menu before any read, write or artifact, rejecting missing, disabled, deleted and revoked-menu identities with the existing controlled non-disclosing errors and adding no new grants or anonymous/admin fallback.": [
+      "src/ERP.Api/Controllers/BaseDataControllers.cs",
+      "src/ERP.Application/Services/ProductAuthorizationRules.cs"
+    ],
+    "Validate on create and update that ProductCode and ProductName are non-empty and within their persisted length bounds, that the optional persisted text, decimal and integer product fields stay within their persisted bounds and known shapes, and that Status is a known enabled/disabled value, returning the existing controlled validation errors without silently clamping or rewriting any product row and keeping the existing product-code uniqueness, ERP-037 variant relation and ERP-038 sourcing relation semantics unchanged, so a rejected write persists no BaseProducts row and no export or image upload artifact is produced on denial.": [
+      "src/ERP.Api/Controllers/BaseDataControllers.cs",
+      "src/ERP.Application/Services/ProductAuthorizationRules.cs",
+      "src/ERP.UnitTests/ProductMasterAuthorizationTests.cs"
+    ],
+    "Genuine isolated SQL authenticated controller tests cover the permitted privileged and menu-granted flows, missing product menu, disabled, deleted and revoked identities and invalid code, name, bounds and status payloads, and assert that denied paged, all, by-id, create, update, delete, batch-delete, export, upload and upload-batch calls read or mutate no BaseProducts row and produce no downloadable artifact or stored image while the existing ProductVariantTests and ProductSupplierTests contracts stay green.": [
+      "src/ERP.UnitTests/ProductMasterAuthorizationTests.cs",
+      "src/ERP.UnitTests/ProductVariantTests.cs",
+      "src/ERP.UnitTests/ProductSupplierTests.cs",
+      "src/ERP.IntegrationTests/ProductMasterAuthorizationSqlServerTests.cs",
+      "docs/product-master-authority.md"
+    ],
+    "Keep the safe Release build and the full existing ERP.UnitTests suite green, use only genuine isolated (localdb)\\NEWERP_AutoAcceptance GUID-owned NEWERP_AUTOTEST databases with Integrated Security, and add no schema, entity, menu, permission or production/secret change; build completion is not stage acceptance.": [
+      "src/ERP.UnitTests/ProductMasterAuthorizationTests.cs",
+      "docs/product-master-authority.md"
+    ]
+  },
+  "depends_on": [
+    "ERP-006",
+    "ERP-037",
+    "ERP-097",
+    "ERP-444"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "implementation_evidence": "src/ERP.Api/Controllers/BaseDataControllers.cs:476 declares ProductController with only [ApiController]/[Route(api/base/products)]/[Authorize]; the ctor at 483-491 injects IGenericService/OssStorageService/ProductExcelExporter/IWebHostEnvironment/IErpDbContext, GetPaged 499-506 and GetById 509-516 only add ProductVariantService/ProductSupplierService annotations, Export at 519-526 returns File(_exporter.ExportAsync(templatePath)) with no menu or identity resolution, Upload 529-534 / UploadBatch 537-548 call SaveImageAsync 551-567 which writes to the configured OSS bucket, and Create/Update/Delete/BatchDelete are inherited from src/ERP.Api/Controllers/BaseCrudController.cs:62-92 whose routes (38-92) call IGenericService (src/ERP.Application/Services/GenericService.cs, zero Authoriz/Menu references). BaseProduct (src/ERP.Domain/Entities/BaseOtherInfo.cs:10-182) persists ProductCode(50)/ProductName(200)/EnglishName/Spec/Unit/Category/HsCode/Barcode/PurchasePrice/SalePrice/CostPrice/Weight/Volume/dimensions/Image1-3/Status/PackageUnit/UnitsPerPackage/UnitConversion/Outer*/VolumeWeight/EnglishDeclareName/RefundRate/Brand/Certification/CustomerItemNo/FactoryItemNo/MinOrderQty/TaxIncluded/MinStock/MaxStock/Remark with only attribute annotations; the unique index is src/ERP.Infrastructure/Data/ErpDbContext.Config.cs:34 and the existing product menu is seeded at src/ERP.Infrastructure/Data/SeedData.Menus.cs:30. There is no ProductAuthorizationRules in src/ERP.Application/Services (ERP-441 added ProductSupplierRules and ERP-444 added ProductVariantRules for the child routes only), and an exact search of .ai/tasks returns no task listing ProductController for live authorization.",
+  "id": "ERP-452",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-09T08:00:42.715079Z"
+}

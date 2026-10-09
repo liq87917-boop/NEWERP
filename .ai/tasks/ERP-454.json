@@ -1,0 +1,66 @@
+{
+  "title": "Authorize system role management with live menu authority, bounded field validation and guarded role-menu assignment",
+  "description": "Stage 3 access-control closure for the role records and role-to-menu bindings that the existing menu authorisation of every operational route reads. src/ERP.Api/Controllers/RoleController.cs:17 declares RoleController with only [ApiController]/[Route(`api/sys/roles`)]/[Authorize] and no identity, account-state or menu resolution; GetPaged 27-41 and GetAll 44-49 read all roles, GetRoleMenus 52-58 returns assigned menu ids, GetById 61-67 returns a role, Create 70-88 only checks the duplicate role code at 73-74, Update 91-103 rewrites name/description, Delete 106-118 soft-deletes, and the private SaveRoleMenusAsync 120-127 at 122-126 removes every existing SysRoleMenu and inserts one link per supplied menuId with no menu validation, so any authenticated account can create a role, attach an arbitrary menu (including system menus) to it and thereby widen the menu authority that the other controllers now enforce. Reuse the existing role-management functional menu (src/ERP.Infrastructure/Data/SeedData.Menus.cs:16) on every route, add bounded server-side validation for the persisted SysRole columns (src/ERP.Domain/Entities/SysRoleMenu.cs:10-26) and validate that every supplied menu id resolves to a known nondeleted menu before any SysRoleMenus link is written, and keep the existing unique role-code index (src/ERP.Infrastructure/Data/ErpDbContext.Config.cs:21), the IsSystem delete protection and the all-or-nothing role-menu replacement semantics unchanged. No Domain/Infrastructure/schema change, no grants, no anonymous/admin fallback. Genuine isolated (localdb)\\NEWERP_AutoAcceptance GUID-owned NEWERP_AUTOTEST SQL only; safe Release build plus full ERP.UnitTests.",
+  "acceptance_criteria": [
+    "For every route on /api/sys/roles (paged, all, by-id, role-menus, create, update and delete) require the current enabled nondeleted identity and the existing role-management functional menu before any read or write, rejecting missing, disabled, deleted and revoked-menu identities with the existing controlled non-disclosing errors and adding no new grants or anonymous/admin fallback.",
+    "Validate on create and update that RoleName and RoleCode are non-empty and within their persisted length bounds, that Description stays within its persisted bound and that every assigned menu id resolves to a known nondeleted menu, so an invalid or forged menu id never persists a SysRoleMenus link, keeping the existing unique role-code index, IsSystem delete protection and all-or-nothing role-menu replacement semantics unchanged and persisting no SysRoles or SysRoleMenus row on denial.",
+    "Genuine isolated SQL authenticated controller tests cover the permitted privileged and menu-granted flows, missing role menu, disabled, deleted and revoked identities and invalid role-name, code, description and menu-id payloads, and assert that denied paged, all, by-id, role-menus, create, update and delete calls read or mutate no SysRoles or SysRoleMenus row while the existing RoleControllerTests and AuthServiceTests contracts stay green.",
+    "Keep the safe Release build and the full existing ERP.UnitTests suite green, use only genuine isolated (localdb)\\NEWERP_AutoAcceptance GUID-owned NEWERP_AUTOTEST databases with Integrated Security, and add no schema, entity, menu, permission or production/secret change; build completion is not stage acceptance."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/RoleController.cs",
+    "src/ERP.Application/Services/RoleAuthorizationRules.cs",
+    "src/ERP.UnitTests/RoleMasterAuthorizationTests.cs",
+    "src/ERP.UnitTests/RoleControllerTests.cs",
+    "src/ERP.UnitTests/AuthServiceTests.cs",
+    "src/ERP.IntegrationTests/RoleMasterAuthorizationSqlServerTests.cs",
+    "docs/role-master-authority.md"
+  ],
+  "criterion_path_map": {
+    "For every route on /api/sys/roles (paged, all, by-id, role-menus, create, update and delete) require the current enabled nondeleted identity and the existing role-management functional menu before any read or write, rejecting missing, disabled, deleted and revoked-menu identities with the existing controlled non-disclosing errors and adding no new grants or anonymous/admin fallback.": [
+      "src/ERP.Api/Controllers/RoleController.cs",
+      "src/ERP.Application/Services/RoleAuthorizationRules.cs"
+    ],
+    "Validate on create and update that RoleName and RoleCode are non-empty and within their persisted length bounds, that Description stays within its persisted bound and that every assigned menu id resolves to a known nondeleted menu, so an invalid or forged menu id never persists a SysRoleMenus link, keeping the existing unique role-code index, IsSystem delete protection and all-or-nothing role-menu replacement semantics unchanged and persisting no SysRoles or SysRoleMenus row on denial.": [
+      "src/ERP.Api/Controllers/RoleController.cs",
+      "src/ERP.Application/Services/RoleAuthorizationRules.cs",
+      "src/ERP.UnitTests/RoleMasterAuthorizationTests.cs"
+    ],
+    "Genuine isolated SQL authenticated controller tests cover the permitted privileged and menu-granted flows, missing role menu, disabled, deleted and revoked identities and invalid role-name, code, description and menu-id payloads, and assert that denied paged, all, by-id, role-menus, create, update and delete calls read or mutate no SysRoles or SysRoleMenus row while the existing RoleControllerTests and AuthServiceTests contracts stay green.": [
+      "src/ERP.UnitTests/RoleMasterAuthorizationTests.cs",
+      "src/ERP.UnitTests/RoleControllerTests.cs",
+      "src/ERP.UnitTests/AuthServiceTests.cs",
+      "src/ERP.IntegrationTests/RoleMasterAuthorizationSqlServerTests.cs",
+      "docs/role-master-authority.md"
+    ],
+    "Keep the safe Release build and the full existing ERP.UnitTests suite green, use only genuine isolated (localdb)\\NEWERP_AutoAcceptance GUID-owned NEWERP_AUTOTEST databases with Integrated Security, and add no schema, entity, menu, permission or production/secret change; build completion is not stage acceptance.": [
+      "src/ERP.UnitTests/RoleMasterAuthorizationTests.cs",
+      "docs/role-master-authority.md"
+    ]
+  },
+  "depends_on": [
+    "ERP-006",
+    "ERP-097"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "implementation_evidence": "src/ERP.Api/Controllers/RoleController.cs:14-17 declares RoleController with only [ApiController]/[Route(api/sys/roles)]/[Authorize] and no Authoriz/Menu/identity-resolution reference: GetPaged 27-41, GetAll 44-49, GetRoleMenus 52-58, GetById 61-67, Create 70-88 (only the duplicate-code check at 73-74), Update 91-103 and Delete 106-118 query and write _db.SysRoles/SysRoleMenus directly, and the private SaveRoleMenusAsync 120-127 at 122-126 removes all existing SysRoleMenus rows then inserts a link for every supplied menuId with no menu-id validation. SysRole (src/ERP.Domain/Entities/SysRoleMenu.cs:10-26) persists RoleName(50)/RoleCode(50)/Description(200)/IsSystem and SysRoleMenu (78-85) persists RoleId/MenuId with only attribute annotations; the unique index is src/ERP.Infrastructure/Data/ErpDbContext.Config.cs:21 and the existing role-management menu is seeded at src/ERP.Infrastructure/Data/SeedData.Menus.cs:16. Role-menu bindings are the authority consulted by every operational menu check (src/ERP.Application/Services/AuthService.Helpers.cs:15-51 BuildCurrentUserAsync/BuildMenuTreeAsync) and existing regression contracts are src/ERP.UnitTests/RoleControllerTests.cs and src/ERP.UnitTests/AuthServiceTests.cs. There is no RoleAuthorizationRules in src/ERP.Application/Services and an exact search of .ai/tasks returns no task listing RoleController for live authorization.",
+  "id": "ERP-454",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-09T08:00:42.717618Z"
+}

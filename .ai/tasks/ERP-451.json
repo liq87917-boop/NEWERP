@@ -1,0 +1,65 @@
+{
+  "title": "Authorize customer master data with live menu authority and bounded field validation",
+  "description": "Stage 3 master-data closure for the customer records that every sales order, quotation, proforma invoice, loading list, receipt and salesperson data-scope decision resolves against. src/ERP.Api/Controllers/BaseDataControllers.cs:29 declares CustomerController with only [ApiController]/[Route(`api/base/customers`)]/[Authorize]; only the read routes resolve identity through ERP-097 SalespersonDataScopeService (GetPaged 47-54, GetAll 57-63, GetById 66-74), while GetForwarderOptions at 39-44 and the inherited generic Create/Update/Delete/BatchDelete routes in src/ERP.Api/Controllers/BaseCrudController.cs:62-92 delegate to IGenericService (src/ERP.Application/Services/GenericService.cs, zero Authoriz/Menu references) so any authenticated account can mint, rewrite and soft-delete customers; no route enforces the existing customer functional menu (src/ERP.Infrastructure/Data/SeedData.Menus.cs:25) and no route applies bounded field validation. Reuse that existing customer menu on every route, add bounded server-side validation for the persisted BaseCustomer columns (src/ERP.Domain/Entities/BaseCustomer.cs:10-143), and keep the existing customer-code unique index (src/ERP.Infrastructure/Data/ErpDbContext.Config.cs:29), the ERP-097 read scope and CustomerForwarderService semantics (src/ERP.Application/Services/CustomerForwarderService.cs) unchanged. No Domain/Infrastructure/schema change, no grants, no anonymous/admin fallback. Genuine isolated (localdb)\\NEWERP_AutoAcceptance GUID-owned NEWERP_AUTOTEST SQL only; safe Release build plus full ERP.UnitTests.",
+  "acceptance_criteria": [
+    "For every route on /api/base/customers (paged, all, by-id, forwarder-options, create, update, delete and batch-delete) require the current enabled nondeleted identity and the existing customer functional menu before any read or write, rejecting missing, disabled, deleted and revoked-menu identities with the existing controlled non-disclosing errors while preserving the ERP-097 salesperson read scope and adding no new grants or anonymous/admin fallback.",
+    "Validate on create and update that CustomerCode and CustomerName are non-empty and within their persisted length bounds, that the optional persisted customer text, decimal and integer fields stay within their persisted bounds and known shapes, and that Status is a known enabled/disabled value, returning the existing controlled validation errors without silently clamping or rewriting any customer row and keeping the existing customer-code uniqueness, ERP-097 read scope and forwarder reference semantics unchanged, so a rejected write persists no BaseCustomers row.",
+    "Genuine isolated SQL authenticated controller tests cover the permitted privileged and menu-granted flows, missing customer menu, disabled, deleted and revoked identities and invalid code, name, bounds and status payloads, and assert that denied paged, all, by-id, forwarder-options, create, update, delete and batch-delete calls read or mutate no BaseCustomers row while the existing CustomerForwarderTests contracts stay green.",
+    "Keep the safe Release build and the full existing ERP.UnitTests suite green, use only genuine isolated (localdb)\\NEWERP_AutoAcceptance GUID-owned NEWERP_AUTOTEST databases with Integrated Security, and add no schema, entity, menu, permission or production/secret change; build completion is not stage acceptance."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/BaseDataControllers.cs",
+    "src/ERP.Application/Services/CustomerAuthorizationRules.cs",
+    "src/ERP.UnitTests/CustomerMasterAuthorizationTests.cs",
+    "src/ERP.UnitTests/CustomerForwarderTests.cs",
+    "src/ERP.IntegrationTests/CustomerMasterAuthorizationSqlServerTests.cs",
+    "docs/customer-master-authority.md"
+  ],
+  "criterion_path_map": {
+    "For every route on /api/base/customers (paged, all, by-id, forwarder-options, create, update, delete and batch-delete) require the current enabled nondeleted identity and the existing customer functional menu before any read or write, rejecting missing, disabled, deleted and revoked-menu identities with the existing controlled non-disclosing errors while preserving the ERP-097 salesperson read scope and adding no new grants or anonymous/admin fallback.": [
+      "src/ERP.Api/Controllers/BaseDataControllers.cs",
+      "src/ERP.Application/Services/CustomerAuthorizationRules.cs"
+    ],
+    "Validate on create and update that CustomerCode and CustomerName are non-empty and within their persisted length bounds, that the optional persisted customer text, decimal and integer fields stay within their persisted bounds and known shapes, and that Status is a known enabled/disabled value, returning the existing controlled validation errors without silently clamping or rewriting any customer row and keeping the existing customer-code uniqueness, ERP-097 read scope and forwarder reference semantics unchanged, so a rejected write persists no BaseCustomers row.": [
+      "src/ERP.Api/Controllers/BaseDataControllers.cs",
+      "src/ERP.Application/Services/CustomerAuthorizationRules.cs",
+      "src/ERP.UnitTests/CustomerMasterAuthorizationTests.cs"
+    ],
+    "Genuine isolated SQL authenticated controller tests cover the permitted privileged and menu-granted flows, missing customer menu, disabled, deleted and revoked identities and invalid code, name, bounds and status payloads, and assert that denied paged, all, by-id, forwarder-options, create, update, delete and batch-delete calls read or mutate no BaseCustomers row while the existing CustomerForwarderTests contracts stay green.": [
+      "src/ERP.UnitTests/CustomerMasterAuthorizationTests.cs",
+      "src/ERP.UnitTests/CustomerForwarderTests.cs",
+      "src/ERP.IntegrationTests/CustomerMasterAuthorizationSqlServerTests.cs",
+      "docs/customer-master-authority.md"
+    ],
+    "Keep the safe Release build and the full existing ERP.UnitTests suite green, use only genuine isolated (localdb)\\NEWERP_AutoAcceptance GUID-owned NEWERP_AUTOTEST databases with Integrated Security, and add no schema, entity, menu, permission or production/secret change; build completion is not stage acceptance.": [
+      "src/ERP.UnitTests/CustomerMasterAuthorizationTests.cs",
+      "docs/customer-master-authority.md"
+    ]
+  },
+  "depends_on": [
+    "ERP-006",
+    "ERP-036",
+    "ERP-097"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "implementation_evidence": "src/ERP.Api/Controllers/BaseDataControllers.cs:29 declares CustomerController with only [ApiController]/[Route(api/base/customers)]/[Authorize]; GetPaged 47-54, GetAll 57-63 and GetById 66-74 apply only the ERP-097 SalespersonDataScopeService filter, GetForwarderOptions at 39-44 calls CustomerForwarderService.LoadOptionsAsync with no caller/menu resolution, and Create 94-99 / Update 104-113 call CustomerForwarderService.ApplyAsync then base.Create/base.Update, while Delete and BatchDelete are inherited from src/ERP.Api/Controllers/BaseCrudController.cs:79-92 whose routes (38-92) call IGenericService (src/ERP.Application/Services/GenericService.cs, zero Authoriz/Menu/scope references). BaseCustomer (src/ERP.Domain/Entities/BaseCustomer.cs:10-143) persists CustomerCode(50)/CustomerName(200)/EnglishName/ContactPerson/Phone/Email/Country/Address/PaymentTerms/CreditLimit/DepositRatio/TaxNumber/EmpId/Status/Currency/TradeTerms/Consignee/NotifyParty/DefaultShippingMark/CreditDays/CommissionRatio/CustomerLevel/CreditStatus/Source/Remark with only attribute annotations; the unique index is src/ERP.Infrastructure/Data/ErpDbContext.Config.cs:29 and the existing customer menu is seeded at src/ERP.Infrastructure/Data/SeedData.Menus.cs:25. There is no CustomerAuthorizationRules in src/ERP.Application/Services, and an exact search of .ai/tasks returns no task listing CustomerController for live authorization (ERP-036 only added the forwarder reference). src/ERP.Api/Program.cs:152-153 registers only exception/log middleware, confirming no global menu gate.",
+  "id": "ERP-451",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-09T08:00:42.713473Z"
+}
