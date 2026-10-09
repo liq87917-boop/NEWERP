@@ -1,5 +1,6 @@
 using ERP.Application.Common;
 using ERP.Application.Interfaces;
+using ERP.Application.Services;
 using ERP.Domain.Common;
 using ERP.Domain.Entities;
 using ERP.Infrastructure.Export;
@@ -9,12 +10,16 @@ using Microsoft.EntityFrameworkCore;
 using System.Collections;
 using System.Globalization;
 using System.Reflection;
+using System.Security.Claims;
 
 namespace ERP.Api.Controllers;
 
 /// <summary>
 /// 基础资料导入导出控制器：为全部基础资料提供统一的 Excel 导出 / 导入能力
-/// 路由：api/base/io/{resource}/export 与 api/base/io/{resource}/import
+/// 路由：api/base/io/{resource}/export、api/base/io/{resource}/import-template 与 api/base/io/{resource}/import
+/// <para>ERP-440 授权闭环：三个路由在读取 / 计数 / 写入任何基础资料行之前，都先经
+/// <see cref="BaseDataIoAuthorizationRules"/> 校验实时身份、账号状态与该资源既有功能菜单；
+/// 客户资源另按 ERP-097 权威客户范围过滤导出并逐行校验导入（受限账号只能操作本人客户）。</para>
 /// </summary>
 [ApiController]
 [Route("api/base/io")]
@@ -112,14 +117,24 @@ public class BaseDataIoController : ControllerBase
         _db = db;
     }
 
-    /// <summary>导出基础资料为 Excel 文件（导出全部未删除记录）</summary>
+    /// <summary>当前登录用户 Id（缺失或非数字时返回 null，由授权护栏 fail closed 拒绝）</summary>
+    private long? CurrentUserId()
+        => long.TryParse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value, out var id) ? id : null;
+
+    /// <summary>
+    /// 导出基础资料为 Excel 文件（ERP-440：读取任何行之前先校验实时身份、账号状态与既有功能菜单；
+    /// 客户资源按 ERP-097 权威客户范围过滤，特权账号保留既有全量导出）。
+    /// </summary>
     [HttpGet("{resource}/export")]
-    public IActionResult Export(string resource)
+    public async Task<IActionResult> Export(string resource)
     {
         if (!Resources.TryGetValue(resource, out var def))
             return Ok(ApiResponse<object>.Fail("不支持该基础资料的导出", ErrorCodes.InvalidParameter));
 
-        var rows = LoadEntities(def)
+        var (_, scope) = await BaseDataIoAuthorizationRules
+            .EnsureAuthorizedAsync(_db, CurrentUserId(), resource);
+
+        var rows = LoadEntities(def, scope)
             .Select(entity =>
             {
                 var row = new Dictionary<string, object?>();
@@ -135,12 +150,14 @@ public class BaseDataIoController : ControllerBase
             $"{def.Title}_{DateTime.Now:yyyyMMddHHmmss}.xlsx");
     }
 
-    /// <summary>下载基础资料导入模板（首行中文表头）</summary>
+    /// <summary>下载基础资料导入模板（首行中文表头；ERP-440：返回模板之前先校验实时身份、账号状态与既有功能菜单）</summary>
     [HttpGet("{resource}/import-template")]
-    public IActionResult DownloadTemplate(string resource)
+    public async Task<IActionResult> DownloadTemplate(string resource)
     {
         if (!Resources.TryGetValue(resource, out var def))
             return Ok(ApiResponse<object>.Fail("不支持该基础资料的导入", ErrorCodes.InvalidParameter));
+
+        await BaseDataIoAuthorizationRules.EnsureAuthorizedAsync(_db, CurrentUserId(), resource);
 
         var columns = def.Columns.Select(c => (c.Key, c.Title)).ToList();
         var bytes = ExcelImporter.BuildTemplate(def.Title, columns);
@@ -148,13 +165,21 @@ public class BaseDataIoController : ControllerBase
             $"{def.Title}_导入模板_{DateTime.Now:yyyyMMdd}.xlsx");
     }
 
-    /// <summary>导入基础资料（Excel 首行中文表头，逐行写入数据库）</summary>
+    /// <summary>
+    /// 导入基础资料（Excel 首行中文表头，逐行写入数据库）。
+    /// <para>ERP-440：解析 / 写入任何行之前先校验实时身份、账号状态与该资源既有功能菜单；
+    /// 客户资源按 ERP-097 权威客户范围逐行校验（越界行按失败行报告，不中止其他行）。</para>
+    /// </summary>
     [HttpPost("{resource}/import")]
     [RequestSizeLimit(20 * 1024 * 1024)]
     public async Task<IActionResult> Import(string resource, IFormFile? file)
     {
         if (!Resources.TryGetValue(resource, out var def))
             return Ok(ApiResponse<object>.Fail("不支持该基础资料的导入", ErrorCodes.InvalidParameter));
+
+        var (authority, scope) = await BaseDataIoAuthorizationRules
+            .EnsureAuthorizedAsync(_db, CurrentUserId(), resource);
+
         if (file is null || file.Length == 0)
             return Ok(ApiResponse<object>.Fail("请选择要导入的 Excel 文件", ErrorCodes.InvalidParameter));
         if (!file.FileName.EndsWith(".xlsx", StringComparison.OrdinalIgnoreCase))
@@ -193,6 +218,9 @@ public class BaseDataIoController : ControllerBase
                     if (ValueNormalizer.IsSystemField(kv.Key)) continue;
                     WriteProperty(entity, kv.Key, kv.Value);
                 }
+                // ERP-440：客户导入逐行复核权威客户范围（越界行按失败行报告，不中止 / 不污染其他行）
+                if (authority.CustomerScoped && entity is BaseCustomer customer)
+                    BaseDataIoAuthorizationRules.EnsureCustomerRowInScope(scope, customer.EmpId);
                 dbContext.Add(entity);
                 await _db.SaveChangesAsync();
                 success++;
@@ -211,9 +239,20 @@ public class BaseDataIoController : ControllerBase
         return Ok(ApiResponse<object>.Success(new { total = rows.Count, success, failed, errors }, message));
     }
 
-    /// <summary>读取资源对应的全部未删除实体（按 Id 倒序）</summary>
-    private List<BaseEntity> LoadEntities(ResourceDef def)
+    /// <summary>
+    /// 读取资源对应的未删除实体（按 Id 倒序）。
+    /// <para>ERP-440：客户资源按 ERP-097 权威客户范围在数据库侧过滤（受限制业务员只返回本人客户，
+    /// 绝不「先查全量再内存过滤」）；其余资源沿用既有全量读取。</para>
+    /// </summary>
+    private List<BaseEntity> LoadEntities(ResourceDef def, SalespersonDataScope scope)
     {
+        if (def.EntityType == typeof(BaseCustomer))
+        {
+            var query = _db.BaseCustomers.Where(c => !c.IsDeleted);
+            query = SalespersonDataScopeService.FilterByCustomer(query, scope, c => c.Id);
+            return query.OrderByDescending(c => c.Id).Cast<BaseEntity>().ToList();
+        }
+
         var property = typeof(IErpDbContext).GetProperty(def.DbSetProperty)
             ?? throw BusinessException.NotFound($"未找到基础资料数据源：{def.Key}");
         var enumerable = (IEnumerable?)property.GetValue(_db)
