@@ -81,6 +81,26 @@ public static class CustomerSalesInvoiceCollectionAllocationService
     }
 
     /// <summary>
+    /// 路由级授权登记（ERP-073）：先实时身份 + 既有收款单（receipt）菜单 + 权威客户数据范围，再解析被引用
+    /// 收款单（缺失 / 已删除 / 越范围一律同一条不披露存在性的错误；发票证据在核心登记中按同一客户与币种复核），
+    /// 授权通过后才复用 <see cref="CreateAsync"/> 写证据 —— 越权 / 已删除 / 范围外请求绝不落任何分摊行。
+    /// </summary>
+    public static async Task<CustomerSalesInvoiceCollectionAllocationDto> CreateAuthorizedAsync(
+        IErpDbContext db, CustomerSalesInvoiceCollectionAllocationSaveDto dto,
+        string? allocatedBy, long? userId)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(dto);
+        // 纯参数形状校验先于授权（不读库、不泄露信息），保持既有错误码。
+        if (dto.ReceiptId <= 0)
+            throw BusinessException.InvalidParameter(
+                "请显式选择要分摊的客户收款单（收款单 Id 必须由用户显式选择，"
+                + "系统不按单号文本、金额或日期相似度匹配收款单）");
+        await CustomerReceiptLifecycleRules.ResolveAuthorizedReceiptAsync(db, userId, dto.ReceiptId);
+        return await CreateAsync(db, dto, allocatedBy);
+    }
+
+    /// <summary>
     /// 锁内登记实现（调用方必须已按唯一全局锁序取发票行锁 → 收款单行锁并在同一事务内）：
     /// 发票证据必须存在、未删除且<strong>已登记</strong>，收款单必须存在、未删除且<strong>未取消</strong>，
     /// 客户与币种必须一致；金额按币种精度取整且大于 0，且不得超过收款单可分摊余额与发票未分摊含税额。
@@ -245,6 +265,28 @@ public static class CustomerSalesInvoiceCollectionAllocationService
         }
     }
 
+    /// <summary>
+    /// 路由级授权作废（ERP-073）：先实时身份 + 既有收款单（receipt）菜单 + 权威客户数据范围，再解析分摊行所属
+    /// 权威收款单（分摊行 / 收款单缺失、已删除或越范围一律同一条不披露错误），授权通过后才复用
+    /// <see cref="VoidAsync"/> 写作废状态 —— 越权请求绝不改写任何分摊行。
+    /// </summary>
+    public static async Task<CustomerSalesInvoiceCollectionAllocationDto> VoidAuthorizedAsync(
+        IErpDbContext db, long allocationId, string? reason, long? userId)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        var scope = await CustomerReceiptLifecycleRules.ResolveAuthorizedScopeAsync(db, userId);
+
+        var receiptId = allocationId > 0
+            ? await db.CustomerSalesInvoiceCollectionAllocations.AsNoTracking()
+                .Where(a => a.Id == allocationId && !a.IsDeleted)
+                .Select(a => (long?)a.ReceiptId)
+                .FirstOrDefaultAsync()
+            : null;
+        await CustomerReceiptLifecycleRules.EnsureReceiptInScopeAsync(db, scope, receiptId);
+
+        return await VoidAsync(db, allocationId, reason);
+    }
+
     // ==================== 3. 台账 / 详情 / 两侧汇总 / 两侧候选（只读、有界） ====================
 
     /// <summary>分摊行详情（含发票与收款单可用性标注；只读）</summary>
@@ -255,9 +297,39 @@ public static class CustomerSalesInvoiceCollectionAllocationService
         return await MapOneAsync(db, allocation);
     }
 
+    /// <summary>
+    /// 路由级分摊行详情：先实时身份 + 收款单菜单 + 权威客户数据范围，再解析分摊行并按**历史**口径收敛其
+    /// 被引用收款单与发票证据（软删除后历史仍可读、可用性只作只读标注），越范围 / 物理缺失一律同一条不披露错误。
+    /// </summary>
+    public static async Task<CustomerSalesInvoiceCollectionAllocationDto> GetAsync(
+        IErpDbContext db, long allocationId, long? userId)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        var scope = await CustomerReceiptLifecycleRules.ResolveAuthorizedScopeAsync(db, userId);
+        var allocation = await LoadAllocationAsync(db, allocationId);
+        await CustomerReceiptLifecycleRules.EnsureHistoricalReceiptInScopeAsync(db, scope, allocation.ReceiptId);
+        await CustomerReceiptLifecycleRules.EnsureHistoricalInvoiceInScopeAsync(
+            db, scope, allocation.CustomerSalesInvoiceEvidenceId);
+        return await MapOneAsync(db, allocation);
+    }
+
     /// <summary>收款分摊行台账（分页，只读）：可按发票 / 收款单 / 客户 / 状态 / 币种 / 登记时间区间 / 关键字过滤。</summary>
     public static async Task<PagedResult<CustomerSalesInvoiceCollectionAllocationDto>> ListAsync(
-        IErpDbContext db, CustomerSalesInvoiceCollectionAllocationQuery query)
+        IErpDbContext db, CustomerSalesInvoiceCollectionAllocationQuery query, long? userId)
+    {
+        var scope = await CustomerReceiptLifecycleRules.ResolveAuthorizedScopeAsync(db, userId);
+        return await ListAsync(db, query, scope);
+    }
+
+    /// <summary>
+    /// 收款分摊行台账（分页，只读）：可按发票 / 收款单 / 客户 / 状态 / 币种 / 登记时间区间 / 关键字过滤。
+    /// <para><paramref name="scope"/> 为 null 时保持既有内部复用语义（不过滤）；路由读取一律由
+    /// <see cref="ListAsync(IErpDbContext, CustomerSalesInvoiceCollectionAllocationQuery, long?)"/> 传入权威客户范围，
+    /// 且范围过滤先于任何计数 / 明细读取。</para>
+    /// </summary>
+    public static async Task<PagedResult<CustomerSalesInvoiceCollectionAllocationDto>> ListAsync(
+        IErpDbContext db, CustomerSalesInvoiceCollectionAllocationQuery query,
+        SalespersonDataScope? scope = null)
     {
         ArgumentNullException.ThrowIfNull(db);
         ArgumentNullException.ThrowIfNull(query);
@@ -290,6 +362,10 @@ public static class CustomerSalesInvoiceCollectionAllocationService
                 || x.Remark.Contains(keyword));
         }
 
+        // 权威客户数据范围先于任何计数 / 明细读取：范围外条目绝不参与计数或响应体。
+        if (scope is not null)
+            source = SalespersonDataScopeService.FilterByCustomer(source, scope, x => x.CustomerId);
+
         var total = await source.CountAsync();
         var page = await source
             .OrderByDescending(x => x.AllocatedAt)
@@ -305,6 +381,15 @@ public static class CustomerSalesInvoiceCollectionAllocationService
             Page = query.Page,
             PageSize = query.PageSize
         };
+    }
+
+    /// <summary>指定发票的分摊行清单（只读、有界；发票详情工作流用）：默认返回全部状态（含已作废历史）。</summary>
+    public static async Task<List<CustomerSalesInvoiceCollectionAllocationDto>> ListForInvoiceAsync(
+        IErpDbContext db, long customerSalesInvoiceEvidenceId, long? userId, int? status, int take)
+    {
+        var scope = await CustomerReceiptLifecycleRules.ResolveAuthorizedScopeAsync(db, userId);
+        await CustomerReceiptLifecycleRules.EnsureInvoiceInScopeAsync(db, scope, customerSalesInvoiceEvidenceId);
+        return await ListForInvoiceAsync(db, customerSalesInvoiceEvidenceId, status, take);
     }
 
     /// <summary>指定发票的分摊行清单（只读、有界；发票详情工作流用）：默认返回全部状态（含已作废历史）。</summary>
@@ -332,6 +417,15 @@ public static class CustomerSalesInvoiceCollectionAllocationService
             .ToListAsync();
 
         return await MapManyAsync(db, rows);
+    }
+
+    /// <summary>指定收款单的分摊行清单（只读、有界；收款单工作流用）：默认返回全部状态（含已作废历史）。</summary>
+    public static async Task<List<CustomerSalesInvoiceCollectionAllocationDto>> ListForReceiptAsync(
+        IErpDbContext db, long receiptId, long? userId, int? status, int take)
+    {
+        var scope = await CustomerReceiptLifecycleRules.ResolveAuthorizedScopeAsync(db, userId);
+        await CustomerReceiptLifecycleRules.EnsureReceiptInScopeAsync(db, scope, receiptId);
+        return await ListForReceiptAsync(db, receiptId, status, take);
     }
 
     /// <summary>指定收款单的分摊行清单（只读、有界；收款单工作流用）：默认返回全部状态（含已作废历史）。</summary>
@@ -364,6 +458,14 @@ public static class CustomerSalesInvoiceCollectionAllocationService
     /// <summary>
     /// 发票侧汇总（只读派生）：发票快照 + **本维度**有效分摊金额 / 未分摊含税额、有效行数与已作废行数 + 有界逐行明细。
     /// </summary>
+    public static async Task<CustomerSalesInvoiceCollectionAllocationInvoiceSummaryDto> GetInvoiceSummaryAsync(
+        IErpDbContext db, long customerSalesInvoiceEvidenceId, long? userId)
+    {
+        var scope = await CustomerReceiptLifecycleRules.ResolveAuthorizedScopeAsync(db, userId);
+        await CustomerReceiptLifecycleRules.EnsureInvoiceInScopeAsync(db, scope, customerSalesInvoiceEvidenceId);
+        return await GetInvoiceSummaryAsync(db, customerSalesInvoiceEvidenceId);
+    }
+
     public static async Task<CustomerSalesInvoiceCollectionAllocationInvoiceSummaryDto> GetInvoiceSummaryAsync(
         IErpDbContext db, long customerSalesInvoiceEvidenceId)
     {
@@ -428,6 +530,14 @@ public static class CustomerSalesInvoiceCollectionAllocationService
 
     /// <summary>收款单侧汇总（只读派生）：收款单快照 + **本维度**有效分摊金额 / 可分摊余额、行数 + 有界逐行明细。</summary>
     public static async Task<CustomerSalesInvoiceCollectionAllocationReceiptSummaryDto> GetReceiptSummaryAsync(
+        IErpDbContext db, long receiptId, long? userId)
+    {
+        var scope = await CustomerReceiptLifecycleRules.ResolveAuthorizedScopeAsync(db, userId);
+        await CustomerReceiptLifecycleRules.EnsureReceiptInScopeAsync(db, scope, receiptId);
+        return await GetReceiptSummaryAsync(db, receiptId);
+    }
+
+    public static async Task<CustomerSalesInvoiceCollectionAllocationReceiptSummaryDto> GetReceiptSummaryAsync(
         IErpDbContext db, long receiptId)
     {
         ArgumentNullException.ThrowIfNull(db);
@@ -486,6 +596,15 @@ public static class CustomerSalesInvoiceCollectionAllocationService
     // ==================== 4. 候选读取（只读、有界，绝不写库） ====================
 
     /// <summary>可分摊收款单候选（只读、有界）：必须显式给出客户与币种；只列未删除且未取消的收款单。</summary>
+    public static async Task<List<CustomerSalesInvoiceCollectionAllocationReceiptCandidateDto>> ListReceiptCandidatesAsync(
+        IErpDbContext db, long customerId, string? currency, string? keyword, int take, long? userId)
+    {
+        var scope = await CustomerReceiptLifecycleRules.ResolveAuthorizedScopeAsync(db, userId);
+        if (customerId > 0 && !scope.AllowsCustomer(customerId))
+            throw BusinessException.NotFound(CustomerReceiptLifecycleRules.AllocationNotFoundText);
+        return await ListReceiptCandidatesAsync(db, customerId, currency, keyword, take);
+    }
+
     public static async Task<List<CustomerSalesInvoiceCollectionAllocationReceiptCandidateDto>> ListReceiptCandidatesAsync(
         IErpDbContext db, long customerId, string? currency, string? keyword, int take)
     {
@@ -550,6 +669,15 @@ public static class CustomerSalesInvoiceCollectionAllocationService
     }
 
     /// <summary>可承接收款分摊的发票候选（只读、有界）：只列未删除且已登记的发票证据（草稿 / 已作废不出现）。</summary>
+    public static async Task<List<CustomerSalesInvoiceCollectionAllocationInvoiceCandidateDto>> ListInvoiceCandidatesAsync(
+        IErpDbContext db, long customerId, string? currency, string? keyword, int take, long? userId)
+    {
+        var scope = await CustomerReceiptLifecycleRules.ResolveAuthorizedScopeAsync(db, userId);
+        if (customerId > 0 && !scope.AllowsCustomer(customerId))
+            throw BusinessException.NotFound(CustomerReceiptLifecycleRules.AllocationNotFoundText);
+        return await ListInvoiceCandidatesAsync(db, customerId, currency, keyword, take);
+    }
+
     public static async Task<List<CustomerSalesInvoiceCollectionAllocationInvoiceCandidateDto>> ListInvoiceCandidatesAsync(
         IErpDbContext db, long customerId, string? currency, string? keyword, int take)
     {

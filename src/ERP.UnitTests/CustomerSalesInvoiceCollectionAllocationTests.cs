@@ -26,17 +26,70 @@ public class CustomerSalesInvoiceCollectionAllocationTests
 {
     // ==================== 0. 测试脚手架 ====================
 
+    /// <summary>播种具备既有「收款单」（receipt）菜单的特权账号（数据范围不受限，聚焦分摊证据语义）</summary>
+    private static SysMenu EnsureReceiptMenu(ErpDbContext db)
+    {
+        var menu = db.SysMenus.FirstOrDefault(m => !m.IsDeleted
+            && m.MenuCode == CustomerReceiptLifecycleRules.RequiredMenuCode);
+        if (menu is not null) return menu;
+
+        menu = new SysMenu
+        {
+            ParentId = 0,
+            MenuCode = CustomerReceiptLifecycleRules.RequiredMenuCode,
+            MenuName = CustomerReceiptLifecycleRules.RequiredMenuText,
+            Path = "/finance/receipt",
+            MenuType = MenuType.Menu
+        };
+        db.SysMenus.Add(menu);
+        db.SaveChanges();
+        return menu;
+    }
+
+    private static long SeedPrivilegedUser(ErpDbContext db)
+    {
+        var role = new SysRole
+        {
+            RoleName = "收款分摊特权角色",
+            RoleCode = $"CollAllocPriv-{Guid.NewGuid():N}",
+            IsSystem = true
+        };
+        db.SysRoles.Add(role);
+        db.SaveChanges();
+
+        var user = new SysUser
+        {
+            UserName = $"coll-alloc-priv-{Guid.NewGuid():N}",
+            PasswordHash = "hash",
+            PasswordSalt = "salt",
+            DisplayName = "收款分摊特权用户",
+            Status = UserStatus.Enabled
+        };
+        db.SysUsers.Add(user);
+        db.SaveChanges();
+
+        db.SysUserRoles.Add(new SysUserRole { UserId = user.Id, RoleId = role.Id });
+        var menu = EnsureReceiptMenu(db);
+        db.SysRoleMenus.Add(new SysRoleMenu { RoleId = role.Id, MenuId = menu.Id });
+        db.SaveChanges();
+        return user.Id;
+    }
+
+    /// <summary>绑定特权身份（既有收款单菜单 + 不受限客户范围）的真实 HTTP 请求控制器。</summary>
     private static CustomerSalesInvoiceCollectionAllocationController BuildController(ErpDbContext db, string? userName = null)
     {
-        var controller = new CustomerSalesInvoiceCollectionAllocationController(db);
-        var identity = new ClaimsIdentity(
-            userName is null ? Array.Empty<Claim>() : new[] { new Claim(ClaimTypes.Name, userName) },
-            "Test");
-        controller.ControllerContext = new ControllerContext
+        var userId = SeedPrivilegedUser(db);
+        var claims = new List<Claim> { new(ClaimTypes.NameIdentifier, userId.ToString()) };
+        if (userName is not null) claims.Add(new Claim(ClaimTypes.Name, userName));
+        var http = new DefaultHttpContext
         {
-            HttpContext = new DefaultHttpContext { User = new ClaimsPrincipal(identity) }
+            User = new ClaimsPrincipal(new ClaimsIdentity(claims, "Test"))
         };
-        return controller;
+        http.Request.Path = "/api/customer-sales-invoice-collection-allocations";
+        return new CustomerSalesInvoiceCollectionAllocationController(db)
+        {
+            ControllerContext = new ControllerContext { HttpContext = http }
+        };
     }
 
     private static BaseCustomer SeedCustomer(
@@ -186,7 +239,8 @@ public class CustomerSalesInvoiceCollectionAllocationTests
         var customer = SeedCustomer(db, "C001", "义乌进出口");
         var invoice = SeedInvoice(db, "INV-2026-001", customer.Id);
         var receipt = SeedReceipt(db, "SK20260925", customer.Id);
-        var controller = BuildController(db);
+        // 进程内直调（无 HTTP 请求管线、无登录身份）：沿用既有语义，登记人记「未知用户」。
+        var controller = new CustomerSalesInvoiceCollectionAllocationController(db);
 
         var created = await CreateAllocationAsync(controller, invoice.Id, receipt.Id, 100m);
 
@@ -673,13 +727,13 @@ public class CustomerSalesInvoiceCollectionAllocationTests
     }
 
     [Fact]
-    public void 元数据_有界额度与口径文案与文档同源()
+    public async Task 元数据_有界额度与口径文案与文档同源()
     {
         using var db = TestDbFactory.Create();
         var controller = BuildController(db);
 
         var metadata = AssertOk<CustomerSalesInvoiceCollectionAllocationMetadataDto>(
-            controller.Metadata());
+            await controller.Metadata());
 
         Assert.Equal(CustomerSalesInvoiceCollectionAllocationRules.MaxAllocationsPerInvoice,
             metadata.MaxAllocationsPerInvoice);
@@ -956,5 +1010,226 @@ public class CustomerSalesInvoiceCollectionAllocationTests
         Assert.Contains("[HttpGet(\"invoices/{customerSalesInvoiceEvidenceId:long}/summary\")]", controller);
         Assert.Contains("{id:long}/void", controller);
         Assert.Contains("CurrentUserName()", controller);
+    }
+
+    // ==================== 9. ERP-434 实时授权与客户数据范围 ====================
+
+    private static long SeedRestrictedSalesman(ErpDbContext db, string userName, bool grantMenu)
+    {
+        var role = new SysRole
+        {
+            RoleName = "收款分摊业务员角色",
+            RoleCode = $"CollAllocSales-{Guid.NewGuid():N}",
+            IsSystem = false
+        };
+        db.SysRoles.Add(role);
+        db.SaveChanges();
+
+        var user = new SysUser
+        {
+            UserName = userName,
+            PasswordHash = "hash",
+            PasswordSalt = "salt",
+            DisplayName = userName,
+            Status = UserStatus.Enabled
+        };
+        db.SysUsers.Add(user);
+        db.SaveChanges();
+
+        db.SysUserRoles.Add(new SysUserRole { UserId = user.Id, RoleId = role.Id });
+        if (grantMenu)
+        {
+            var menu = EnsureReceiptMenu(db);
+            db.SysRoleMenus.Add(new SysRoleMenu { RoleId = role.Id, MenuId = menu.Id });
+        }
+        db.BaseEmployees.Add(new BaseEmployee
+        {
+            EmployeeCode = userName,
+            EmployeeName = userName,
+            IsSalesman = true,
+            Status = 1
+        });
+        db.SaveChanges();
+        return user.Id;
+    }
+
+    private static void RevokeMenus(ErpDbContext db, long userId)
+    {
+        var roleIds = db.SysUserRoles.AsNoTracking()
+            .Where(ur => ur.UserId == userId && !ur.IsDeleted).Select(ur => ur.RoleId).ToList();
+        foreach (var grant in db.SysRoleMenus.Where(rm => !rm.IsDeleted && roleIds.Contains(rm.RoleId)).ToList())
+            grant.IsDeleted = true;
+        db.SaveChanges();
+    }
+
+    /// <summary>绑定真实 HTTP 请求管线（Request.Path 已赋值）+ 指定身份（可空 = 匿名请求）。</summary>
+    private static CustomerSalesInvoiceCollectionAllocationController BuildControllerWithUser(
+        ErpDbContext db, long? userId)
+    {
+        var claims = userId.HasValue
+            ? new[] { new Claim(ClaimTypes.NameIdentifier, userId.Value.ToString()) }
+            : Array.Empty<Claim>();
+        var http = new DefaultHttpContext
+        {
+            User = new ClaimsPrincipal(new ClaimsIdentity(claims, "Test"))
+        };
+        http.Request.Path = "/api/customer-sales-invoice-collection-allocations";
+        return new CustomerSalesInvoiceCollectionAllocationController(db)
+        {
+            ControllerContext = new ControllerContext { HttpContext = http }
+        };
+    }
+
+    [Fact]
+    public async Task 认证_缺失停用删除撤权身份与无菜单一律拒绝且不落行()
+    {
+        using var db = TestDbFactory.Create();
+        var customer = SeedCustomer(db, "C001", "义乌进出口");
+        var invoice = SeedInvoice(db, "INV-001", customer.Id, grossAmount: 1000m);
+        var receipt = SeedReceipt(db, "SK-001", customer.Id, amount: 1000m);
+
+        var disabledId = SeedPrivilegedUser(db);
+        (await db.SysUsers.SingleAsync(u => u.Id == disabledId)).Status = UserStatus.Disabled;
+
+        var deletedId = SeedPrivilegedUser(db);
+        (await db.SysUsers.SingleAsync(u => u.Id == deletedId)).IsDeleted = true;
+
+        var revokedId = SeedPrivilegedUser(db);
+        RevokeMenus(db, revokedId);
+        await db.SaveChangesAsync();
+
+        var noMenuId = SeedRestrictedSalesman(db, $"erp434n-nomenu-{Guid.NewGuid():N}", grantMenu: false);
+
+        // 缺失 / 非法 / 已删除身份 → 未认证（每一条路由都在任何读取 / 写入之前拒绝）
+        foreach (long? userId in new long?[] { null, 0, deletedId })
+        {
+            var controller = BuildControllerWithUser(db, userId);
+            await AssertBusinessAsync(ErrorCodes.Unauthorized,
+                () => controller.GetPaged(new CustomerSalesInvoiceCollectionAllocationQuery()));
+            await AssertBusinessAsync(ErrorCodes.Unauthorized, () => controller.Metadata());
+            await AssertBusinessAsync(ErrorCodes.Unauthorized,
+                () => controller.ReceiptCandidates(customer.Id, "USD", null, 50));
+            await AssertBusinessAsync(ErrorCodes.Unauthorized,
+                () => controller.InvoiceCandidates(customer.Id, "USD", null, 50));
+            await AssertBusinessAsync(ErrorCodes.Unauthorized, () => controller.ReceiptSummary(receipt.Id));
+            await AssertBusinessAsync(ErrorCodes.Unauthorized, () => controller.AllocationsForReceipt(receipt.Id));
+            await AssertBusinessAsync(ErrorCodes.Unauthorized, () => controller.InvoiceSummary(invoice.Id));
+            await AssertBusinessAsync(ErrorCodes.Unauthorized, () => controller.AllocationsForInvoice(invoice.Id));
+            await AssertBusinessAsync(ErrorCodes.Unauthorized, () => controller.GetById(1));
+            await AssertBusinessAsync(ErrorCodes.Unauthorized,
+                () => controller.Create(SaveDto(invoice.Id, receipt.Id, 10m)));
+            await AssertBusinessAsync(ErrorCodes.Unauthorized,
+                () => controller.Void(1, new CustomerSalesInvoiceCollectionAllocationVoidRequest { Reason = "作废" }));
+        }
+
+        // 禁用 / 撤销菜单 / 无菜单 → 权限不足
+        foreach (var userId in new[] { disabledId, revokedId, noMenuId })
+        {
+            var controller = BuildControllerWithUser(db, userId);
+            await AssertBusinessAsync(ErrorCodes.Forbidden,
+                () => controller.GetPaged(new CustomerSalesInvoiceCollectionAllocationQuery()));
+            await AssertBusinessAsync(ErrorCodes.Forbidden,
+                () => controller.Create(SaveDto(invoice.Id, receipt.Id, 10m)));
+            await AssertBusinessAsync(ErrorCodes.Forbidden,
+                () => controller.Void(1, new CustomerSalesInvoiceCollectionAllocationVoidRequest { Reason = "作废" }));
+        }
+
+        Assert.Equal(0, await db.CustomerSalesInvoiceCollectionAllocations.AsNoTracking().CountAsync());
+    }
+
+    [Fact]
+    public async Task 认证_自有范围登记与作废成功_越范围与已删除收款单发票同一条错误且零变更()
+    {
+        using var db = TestDbFactory.Create();
+        var ownName = $"erp434n-own-{Guid.NewGuid():N}";
+        var salesmanId = SeedRestrictedSalesman(db, ownName, grantMenu: true);
+        var employeeId = (await db.BaseEmployees.SingleAsync(e => e.EmployeeCode == ownName)).Id;
+
+        var ownCustomer = SeedCustomer(db, "C-OWN", "自有客户");
+        ownCustomer.EmpId = employeeId;
+        var foreignCustomer = SeedCustomer(db, "C-FGN", "他人客户");
+        await db.SaveChangesAsync();
+
+        var ownReceipt = SeedReceipt(db, "SK-OWN", ownCustomer.Id, amount: 1000m);
+        var ownReceipt2 = SeedReceipt(db, "SK-OWN2", ownCustomer.Id, amount: 1000m);
+        var foreignReceipt = SeedReceipt(db, "SK-FGN", foreignCustomer.Id, amount: 1000m);
+        var deletionReceipt = SeedReceipt(db, "SK-DEL", ownCustomer.Id, amount: 1000m);
+        var ownInvoice = SeedInvoice(db, "INV-OWN", ownCustomer.Id, grossAmount: 1000m);
+        var ownInvoice2 = SeedInvoice(db, "INV-OWN2", ownCustomer.Id, grossAmount: 1000m);
+        var foreignInvoice = SeedInvoice(db, "INV-FGN", foreignCustomer.Id, grossAmount: 1000m);
+        var deletionInvoice = SeedInvoice(db, "INV-DEL", ownCustomer.Id, grossAmount: 1000m);
+
+        // 特权账号先建立越范围与即将软删除收款单/发票的有效分摊行
+        var privileged = BuildController(db);
+        var ownRow = AssertOk<CustomerSalesInvoiceCollectionAllocationDto>(
+            await privileged.Create(SaveDto(ownInvoice.Id, ownReceipt.Id, 50m)));
+        var foreignRow = AssertOk<CustomerSalesInvoiceCollectionAllocationDto>(
+            await privileged.Create(SaveDto(foreignInvoice.Id, foreignReceipt.Id, 50m)));
+        var deletionRow = AssertOk<CustomerSalesInvoiceCollectionAllocationDto>(
+            await privileged.Create(SaveDto(deletionInvoice.Id, deletionReceipt.Id, 50m)));
+
+        deletionReceipt.IsDeleted = true;
+        deletionInvoice.IsDeleted = true;
+        await db.SaveChangesAsync();
+
+        var controller = BuildControllerWithUser(db, salesmanId);
+
+        // 自有范围内：登记与作废均被许可（被许可的生命周期）
+        var ownNew = AssertOk<CustomerSalesInvoiceCollectionAllocationDto>(
+            await controller.Create(SaveDto(ownInvoice2.Id, ownReceipt2.Id, 20m)));
+        Assert.True(ownNew.IsActive);
+        var voided = AssertOk<CustomerSalesInvoiceCollectionAllocationDto>(
+            await controller.Void(ownRow.Id, new CustomerSalesInvoiceCollectionAllocationVoidRequest { Reason = "录错" }));
+        Assert.True(voided.IsVoided);
+
+        // 越范围收款单：与不存在收款单同一条不披露错误（不泄露范围外 Id / 金额 / 计数）
+        var foreignDenied = await AssertBusinessAsync(ErrorCodes.NotFound,
+            () => controller.ReceiptSummary(foreignReceipt.Id));
+        var missingDenied = await AssertBusinessAsync(ErrorCodes.NotFound,
+            () => controller.ReceiptSummary(987_654_321L));
+        Assert.Equal(missingDenied.Message, foreignDenied.Message);
+        Assert.Equal(CustomerReceiptLifecycleRules.AllocationNotFoundText, foreignDenied.Message);
+        await AssertBusinessAsync(ErrorCodes.NotFound, () => controller.AllocationsForReceipt(foreignReceipt.Id));
+        await AssertBusinessAsync(ErrorCodes.NotFound,
+            () => controller.Create(SaveDto(ownInvoice2.Id, foreignReceipt.Id, 10m)));
+        await AssertBusinessAsync(ErrorCodes.NotFound,
+            () => controller.Void(foreignRow.Id,
+                new CustomerSalesInvoiceCollectionAllocationVoidRequest { Reason = "越权作废" }));
+
+        // 越范围发票：与不存在发票同一条不披露错误
+        var foreignInvoiceDenied = await AssertBusinessAsync(ErrorCodes.NotFound,
+            () => controller.InvoiceSummary(foreignInvoice.Id));
+        var missingInvoiceDenied = await AssertBusinessAsync(ErrorCodes.NotFound,
+            () => controller.InvoiceSummary(987_654_321L));
+        Assert.Equal(missingInvoiceDenied.Message, foreignInvoiceDenied.Message);
+        await AssertBusinessAsync(ErrorCodes.NotFound, () => controller.AllocationsForInvoice(foreignInvoice.Id));
+        await AssertBusinessAsync(ErrorCodes.NotFound, () => controller.InvoiceCandidates(foreignCustomer.Id, "USD", null, 50));
+
+        // 已删除收款单与发票：登记一律按不存在拒绝
+        await AssertBusinessAsync(ErrorCodes.NotFound,
+            () => controller.Create(SaveDto(deletionInvoice.Id, deletionReceipt.Id, 10m)));
+        await AssertBusinessAsync(ErrorCodes.NotFound,
+            () => controller.Void(deletionRow.Id,
+                new CustomerSalesInvoiceCollectionAllocationVoidRequest { Reason = "已删除作废" }));
+
+        // 证据零变更：被拒行仍为有效、无作废时间
+        var storedForeign = await db.CustomerSalesInvoiceCollectionAllocations.AsNoTracking()
+            .SingleAsync(a => a.Id == foreignRow.Id);
+        Assert.Equal(CustomerSalesInvoiceCollectionAllocationRules.StatusActive, storedForeign.Status);
+        Assert.Null(storedForeign.VoidedAt);
+        var storedDeletion = await db.CustomerSalesInvoiceCollectionAllocations.AsNoTracking()
+            .SingleAsync(a => a.Id == deletionRow.Id);
+        Assert.Equal(CustomerSalesInvoiceCollectionAllocationRules.StatusActive, storedDeletion.Status);
+        Assert.Null(storedDeletion.VoidedAt);
+
+        // 台账按客户范围过滤：受限业务员只看到自有客户的分摊行
+        var ledger = AssertOk<PagedResult<CustomerSalesInvoiceCollectionAllocationDto>>(
+            await controller.GetPaged(new CustomerSalesInvoiceCollectionAllocationQuery()));
+        Assert.NotEmpty(ledger.Items);
+        Assert.All(ledger.Items, i => Assert.Equal(ownCustomer.Id, i.CustomerId));
+
+        // 发票侧详情：越范围分摊行与不存在分摊行按同一条不披露错误拒绝
+        var foreignDetail = await AssertBusinessAsync(ErrorCodes.NotFound, () => controller.GetById(foreignRow.Id));
+        Assert.Equal(CustomerReceiptLifecycleRules.AllocationNotFoundText, foreignDetail.Message);
     }
 }

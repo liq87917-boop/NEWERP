@@ -143,6 +143,22 @@ public static class CustomerReceiptAllocationService
         }
     }
 
+    /// <summary>
+    /// 路由级授权登记（ERP-053）：先实时身份 + 既有收款单（receipt）菜单 + 权威客户数据范围，再解析被引用
+    /// 收款单（缺失 / 已删除 / 越范围一律同一条不披露存在性的错误；销售订单在核心登记中按同一收款单客户复核），
+    /// 授权通过后才复用 <see cref="CreateAsync"/> 写证据 —— 越权 / 已删除 / 范围外请求绝不落任何引用行。
+    /// </summary>
+    public static async Task<CustomerReceiptAllocationDto> CreateAuthorizedAsync(
+        IErpDbContext db, CustomerReceiptAllocationSaveDto dto, long? userId)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(dto);
+        // 纯参数形状校验先于授权（不读库、不泄露信息），保持既有错误码。
+        if (dto.ReceiptId <= 0) throw BusinessException.InvalidParameter("请选择要引用的收款单");
+        await CustomerReceiptLifecycleRules.ResolveAuthorizedReceiptAsync(db, userId, dto.ReceiptId);
+        return await CreateAsync(db, dto);
+    }
+
     // ==================== 2. 作废引用行（保留历史，不删除） ====================
 
     /// <summary>
@@ -194,6 +210,28 @@ public static class CustomerReceiptAllocationService
         }
     }
 
+    /// <summary>
+    /// 路由级授权作废（ERP-053）：先实时身份 + 既有收款单（receipt）菜单 + 权威客户数据范围，再解析引用行所属
+    /// 权威收款单（引用行 / 收款单缺失、已删除或越范围一律同一条不披露错误），授权通过后才复用
+    /// <see cref="VoidAsync"/> 写作废状态 —— 越权请求绝不改写任何引用行。
+    /// </summary>
+    public static async Task<CustomerReceiptAllocationDto> VoidAuthorizedAsync(
+        IErpDbContext db, long allocationId, string? reason, long? userId)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        var scope = await CustomerReceiptLifecycleRules.ResolveAuthorizedScopeAsync(db, userId);
+
+        var receiptId = allocationId > 0
+            ? await db.CustomerReceiptAllocations.AsNoTracking()
+                .Where(a => a.Id == allocationId && !a.IsDeleted)
+                .Select(a => (long?)a.ReceiptId)
+                .FirstOrDefaultAsync()
+            : null;
+        await CustomerReceiptLifecycleRules.EnsureReceiptInScopeAsync(db, scope, receiptId);
+
+        return await VoidAsync(db, allocationId, reason);
+    }
+
     // ==================== 3. 读取（台账 / 详情 / 收款单侧汇总） ====================
 
     /// <summary>引用行详情（含收款单与销售订单可用性标注；只读，不写库）</summary>
@@ -205,12 +243,40 @@ public static class CustomerReceiptAllocationService
     }
 
     /// <summary>
+    /// 路由级引用行详情：先实时身份 + 收款单菜单 + 权威客户数据范围，再解析引用行并按**历史**口径收敛其
+    /// 被引用收款单（软删除后历史仍可读、可用性只作只读标注），越范围 / 物理缺失一律同一条不披露错误。
+    /// </summary>
+    public static async Task<CustomerReceiptAllocationDto> GetAsync(
+        IErpDbContext db, long allocationId, long? userId)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        var scope = await CustomerReceiptLifecycleRules.ResolveAuthorizedScopeAsync(db, userId);
+        var row = await LoadAsync(db, allocationId);
+        await CustomerReceiptLifecycleRules.EnsureHistoricalReceiptInScopeAsync(db, scope, row.ReceiptId);
+        return await MapAsync(db, row);
+    }
+
+    /// <summary>
     /// 台账分页查询（只读，有界）：支持收款单 / 销售订单 / 客户 / 状态 / 币种 / 登记时间区间 / 关键字过滤；
     /// 默认包含已作废历史（证据保留可读）。
     /// <para>本页行一次批量装载收款单 / 客户 / 销售订单，<strong>无逐行数据库查询</strong>。</para>
     /// </summary>
     public static async Task<PagedResult<CustomerReceiptAllocationDto>> ListAsync(
-        IErpDbContext db, CustomerReceiptAllocationQuery query)
+        IErpDbContext db, CustomerReceiptAllocationQuery query, long? userId)
+    {
+        var scope = await CustomerReceiptLifecycleRules.ResolveAuthorizedScopeAsync(db, userId);
+        return await ListAsync(db, query, scope);
+    }
+
+    /// <summary>
+    /// 台账分页查询（只读，有界）：支持收款单 / 销售订单 / 客户 / 状态 / 币种 / 登记时间区间 / 关键字过滤；
+    /// 默认包含已作废历史（证据保留可读）。
+    /// <para><paramref name="scope"/> 为 null 时保持既有内部复用语义（不过滤）；路由读取一律由
+    /// <see cref="ListAsync(IErpDbContext, CustomerReceiptAllocationQuery, long?)"/> 传入权威客户范围。</para>
+    /// <para>本页行一次批量装载收款单 / 客户 / 销售订单，<strong>无逐行数据库查询</strong>。</para>
+    /// </summary>
+    public static async Task<PagedResult<CustomerReceiptAllocationDto>> ListAsync(
+        IErpDbContext db, CustomerReceiptAllocationQuery query, SalespersonDataScope? scope = null)
     {
         ArgumentNullException.ThrowIfNull(db);
         ArgumentNullException.ThrowIfNull(query);
@@ -240,6 +306,10 @@ public static class CustomerReceiptAllocationService
                 || x.CustomerName.Contains(keyword)
                 || x.CustomerCode.Contains(keyword));
 
+        // 权威客户数据范围先于任何计数 / 明细读取：范围外条目绝不参与计数或响应体。
+        if (scope is not null)
+            source = SalespersonDataScopeService.FilterByCustomer(source, scope, x => x.CustomerId);
+
         var total = await source.CountAsync();
         var rows = await source
             .OrderByDescending(x => x.AllocatedAt)
@@ -255,6 +325,18 @@ public static class CustomerReceiptAllocationService
             Page = query.Page,
             PageSize = query.PageSize
         };
+    }
+
+    /// <summary>
+    /// 单张收款单的引用行清单（只读、**有界**，收款单详情工作流用）：默认返回全部状态（含已作废历史）；
+    /// status 传 1 只看有效 / 传 2 只看已作废；单次最多 <see cref="CustomerReceiptAllocationRules.MaxAllocationsPerReceipt"/> 行。
+    /// </summary>
+    public static async Task<List<CustomerReceiptAllocationDto>> ListForReceiptAsync(
+        IErpDbContext db, long receiptId, long? userId, int? status = null,
+        int take = CustomerReceiptAllocationRules.MaxAllocationsPerReceipt)
+    {
+        await CustomerReceiptLifecycleRules.ResolveAuthorizedReceiptAsync(db, userId, receiptId);
+        return await ListForReceiptAsync(db, receiptId, status, take);
     }
 
     /// <summary>
@@ -294,6 +376,13 @@ public static class CustomerReceiptAllocationService
     /// 明细行按有界上限返回（不逐行查库）；本方法<strong>不写库</strong>、不改写收款单与销售订单，
     /// 也不把结果表述为已到账金额、应收账款余额或客户欠款。</para>
     /// </summary>
+    public static async Task<CustomerReceiptAllocationReceiptSummaryDto> GetReceiptSummaryAsync(
+        IErpDbContext db, long receiptId, long? userId)
+    {
+        await CustomerReceiptLifecycleRules.ResolveAuthorizedReceiptAsync(db, userId, receiptId);
+        return await GetReceiptSummaryAsync(db, receiptId);
+    }
+
     public static async Task<CustomerReceiptAllocationReceiptSummaryDto> GetReceiptSummaryAsync(
         IErpDbContext db, long receiptId)
     {
@@ -360,8 +449,23 @@ public static class CustomerReceiptAllocationService
     /// 也不代表款项是否真的收到。</para>
     /// </summary>
     public static async Task<List<CustomerReceiptAllocationReceiptCandidateDto>> ListReceiptCandidatesAsync(
-        IErpDbContext db, long? customerId, string? keyword,
+        IErpDbContext db, long? customerId, string? keyword, long? userId,
         int take = CustomerReceiptAllocationRules.MaxReceiptCandidates)
+    {
+        var scope = await CustomerReceiptLifecycleRules.ResolveAuthorizedScopeAsync(db, userId);
+        if (customerId is > 0 && !scope.AllowsCustomer(customerId.Value))
+            throw BusinessException.NotFound(CustomerReceiptLifecycleRules.AllocationNotFoundText);
+        return await ListReceiptCandidatesAsync(db, customerId, keyword, take, scope);
+    }
+
+    /// <summary>
+    /// 可引用收款单候选（只读、有界）：只列出**既有、未删除**的客户收款单（可按客户筛选、按收款单号关键字检索）。
+    /// <para><paramref name="scope"/> 非空时先按权威客户范围过滤，再取候选（范围外收款单绝不进入响应体）。</para>
+    /// </summary>
+    public static async Task<List<CustomerReceiptAllocationReceiptCandidateDto>> ListReceiptCandidatesAsync(
+        IErpDbContext db, long? customerId, string? keyword,
+        int take = CustomerReceiptAllocationRules.MaxReceiptCandidates,
+        SalespersonDataScope? scope = null)
     {
         ArgumentNullException.ThrowIfNull(db);
 
@@ -373,6 +477,8 @@ public static class CustomerReceiptAllocationService
         if (customerId is not null && customerId.Value > 0)
             source = source.Where(r => r.CustomerId == customerId.Value);
         if (keywordText.Length > 0) source = source.Where(r => r.ReceiptNo.Contains(keywordText));
+        if (scope is not null)
+            source = SalespersonDataScopeService.FilterByCustomer(source, scope, r => r.CustomerId);
 
         var receipts = await source
             .OrderByDescending(r => r.ReceiptDate)
@@ -437,6 +543,17 @@ public static class CustomerReceiptAllocationService
     /// 可引用销售订单候选（只读、有界）：只列出**同客户 + 同币种**的未删除订单（含已取消订单并显式标注不可引用），
     /// 每张订单附带订单总额、本收款单已引用、其他收款单已引用与剩余未被收款引用证据覆盖的金额
     /// （只按持久化有效行派生，下限 0 —— 不是应收余额、账龄、信用额度或催收依据）。
+    /// </summary>
+    public static async Task<List<CustomerReceiptAllocationOrderCandidateDto>> ListOrderCandidatesAsync(
+        IErpDbContext db, long receiptId, string? keyword, long? userId,
+        int take = CustomerReceiptAllocationRules.MaxOrderCandidates)
+    {
+        await CustomerReceiptLifecycleRules.ResolveAuthorizedReceiptAsync(db, userId, receiptId);
+        return await ListOrderCandidatesAsync(db, receiptId, keyword, take);
+    }
+
+    /// <summary>
+    /// 可引用销售订单候选（只读、有界）：只列出**同客户 + 同币种**的未删除订单（含已取消订单并显式标注不可引用）。
     /// </summary>
     public static async Task<List<CustomerReceiptAllocationOrderCandidateDto>> ListOrderCandidatesAsync(
         IErpDbContext db, long receiptId, string? keyword,

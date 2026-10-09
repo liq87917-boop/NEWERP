@@ -158,6 +158,121 @@ public static class CustomerReceiptLifecycleRules
         EnsureCustomerInScope(scope, customerId);
     }
 
+    // ==================== 2b. 收款引用证据（ERP-053 / ERP-073）授权与客户范围（fail closed） ====================
+
+    /// <summary>
+    /// 收款引用证据（ERP-053「收款单 → 销售订单」/ ERP-073「收款单 → 客户销项发票证据」）登记与读取时，
+    /// 被引用收款单 / 销售订单 / 发票证据缺失 / 已删除 / 越范围一律返回的<strong>同一条不披露存在性</strong>文案
+    /// （绝不暴露范围外资源 Id、金额或计数，也不区分「不存在」与「不可见」）。
+    /// </summary>
+    public const string AllocationNotFoundText = "收款单不存在或已删除，或不在当前账号的数据范围内";
+
+    /// <summary>
+    /// 解析收款引用证据所需的<strong>实时身份 + 收款单（receipt）菜单 + 权威客户数据范围</strong>：
+    /// 先复用 <see cref="EnsureMenuAuthorizedAsync"/>（缺失 / 不存在 / 已删除身份 → 未认证；禁用 / 无菜单 → 权限不足），
+    /// 再复用 <see cref="SalespersonDataScopeService.ResolveAsync"/>（ERP-097 唯一权威数据范围，每次请求重新解析、不缓存）。
+    /// 调用方必须在任何计数 / 明细 / 汇总 / 候选读取之前先取得本范围，绝不新增授权口径。
+    /// </summary>
+    public static async Task<SalespersonDataScope> ResolveAuthorizedScopeAsync(IErpDbContext db, long? userId)
+    {
+        await EnsureMenuAuthorizedAsync(db, userId);
+        return await SalespersonDataScopeService.ResolveAsync(db, userId!.Value);
+    }
+
+    /// <summary>
+    /// 在既有收款功能客户数据范围内解析<strong>权威收款单</strong>（写入 / 严格读取路径复用）：
+    /// 收款单缺失 / 已删除 / 越范围一律抛同一条不披露存在性的 <see cref="AllocationNotFoundText"/>，
+    /// 绝不暴露范围外收款单 Id、单号、金额或计数。调用方必须已通过
+    /// <see cref="ResolveAuthorizedScopeAsync"/>。
+    /// </summary>
+    public static async Task<FinanceReceipt> EnsureReceiptInScopeAsync(
+        IErpDbContext db, SalespersonDataScope scope, long? receiptId)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(scope);
+
+        var receipt = receiptId is > 0
+            ? await db.FinanceReceipts.AsNoTracking()
+                .FirstOrDefaultAsync(r => r.Id == receiptId.Value && !r.IsDeleted)
+            : null;
+        if (receipt is null || !scope.AllowsCustomer(receipt.CustomerId))
+            throw BusinessException.NotFound(AllocationNotFoundText);
+        return receipt;
+    }
+
+    /// <summary>
+    /// 收款引用证据路由级授权 + 权威收款单解析：先实时身份 + 既有收款单菜单 + 客户数据范围
+    /// （<see cref="ResolveAuthorizedScopeAsync"/>），再按 Id 解析既有、未删除收款单并在范围内复核；
+    /// 缺失 / 已删除 / 越范围一律返回同一条不披露存在性的 <see cref="AllocationNotFoundText"/>。
+    /// </summary>
+    public static async Task<FinanceReceipt> ResolveAuthorizedReceiptAsync(
+        IErpDbContext db, long? userId, long? receiptId)
+    {
+        var scope = await ResolveAuthorizedScopeAsync(db, userId);
+        return await EnsureReceiptInScopeAsync(db, scope, receiptId);
+    }
+
+    /// <summary>
+    /// <strong>历史证据读取</strong>专用的收款单范围收敛：允许收款单已软删除（ERP-053 明确要求被引用收款单
+    /// 软删除后历史引用仍可读、可用性只作只读标注），但仍按权威客户范围收敛——收款单 Id 无对应行（含物理缺失）
+    /// 或越范围一律返回同一条不披露存在性的 <see cref="AllocationNotFoundText"/>。登记 / 作废等写入路径
+    /// 必须使用严格的 <see cref="EnsureReceiptInScopeAsync"/>（已删除收款单不可再写入新证据）。
+    /// </summary>
+    public static async Task<FinanceReceipt> EnsureHistoricalReceiptInScopeAsync(
+        IErpDbContext db, SalespersonDataScope scope, long? receiptId)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(scope);
+
+        var receipt = receiptId is > 0
+            ? await db.FinanceReceipts.AsNoTracking()
+                .FirstOrDefaultAsync(r => r.Id == receiptId.Value)
+            : null;
+        if (receipt is null || !scope.AllowsCustomer(receipt.CustomerId))
+            throw BusinessException.NotFound(AllocationNotFoundText);
+        return receipt;
+    }
+
+    /// <summary>
+    /// 在既有收款功能客户数据范围内解析<strong>权威客户销项发票证据</strong>（ERP-073 发票侧复用）：
+    /// 发票证据缺失 / 已删除 / 越范围一律抛同一条不披露存在性的 <see cref="AllocationNotFoundText"/>。
+    /// 调用方必须已通过 <see cref="ResolveAuthorizedScopeAsync"/>；本方法只做资源级的范围收敛，绝不新增授权口径。
+    /// </summary>
+    public static async Task<CustomerSalesInvoiceEvidence> EnsureInvoiceInScopeAsync(
+        IErpDbContext db, SalespersonDataScope scope, long? customerSalesInvoiceEvidenceId)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(scope);
+
+        var invoice = customerSalesInvoiceEvidenceId is > 0
+            ? await db.CustomerSalesInvoiceEvidences.AsNoTracking()
+                .FirstOrDefaultAsync(x => x.Id == customerSalesInvoiceEvidenceId.Value && !x.IsDeleted)
+            : null;
+        if (invoice is null || !scope.AllowsCustomer(invoice.CustomerId))
+            throw BusinessException.NotFound(AllocationNotFoundText);
+        return invoice;
+    }
+
+    /// <summary>
+    /// <strong>历史证据读取</strong>专用的发票证据范围收敛：允许发票证据已软删除（历史分摊行仍可读、可用性只作只读标注），
+    /// 但仍按权威客户范围收敛——无对应行（含物理缺失）或越范围一律返回同一条不披露存在性的
+    /// <see cref="AllocationNotFoundText"/>。登记路径必须使用严格的 <see cref="EnsureInvoiceInScopeAsync"/>。
+    /// </summary>
+    public static async Task<CustomerSalesInvoiceEvidence> EnsureHistoricalInvoiceInScopeAsync(
+        IErpDbContext db, SalespersonDataScope scope, long? customerSalesInvoiceEvidenceId)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(scope);
+
+        var invoice = customerSalesInvoiceEvidenceId is > 0
+            ? await db.CustomerSalesInvoiceEvidences.AsNoTracking()
+                .FirstOrDefaultAsync(x => x.Id == customerSalesInvoiceEvidenceId.Value)
+            : null;
+        if (invoice is null || !scope.AllowsCustomer(invoice.CustomerId))
+            throw BusinessException.NotFound(AllocationNotFoundText);
+        return invoice;
+    }
+
     // ==================== 3. 有效收款分摊证据判定（只读、有界） ====================
 
     /// <summary>

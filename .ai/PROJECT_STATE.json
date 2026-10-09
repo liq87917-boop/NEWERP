@@ -1,12 +1,10 @@
 {
   "schema_version": 2,
   "project": "NEWERP",
-  "updated_at": "2026-10-09T05:01:41.084192Z",
+  "updated_at": "2026-10-09T05:06:45.114703Z",
   "phase": "ready",
   "current_task": null,
-  "queue": [
-    "ERP-434"
-  ],
+  "queue": [],
   "completed": [
     "ERP-000",
     "ERP-001",
@@ -414,44 +412,38 @@
     "ERP-430",
     "ERP-431",
     "ERP-432",
-    "ERP-433"
+    "ERP-433",
+    "ERP-434"
   ],
   "blocked": [],
   "last_build": {
-    "task": "ERP-433",
+    "task": "ERP-434",
     "profile": "safe",
     "status": "passed",
     "exit_code": 0,
-    "log": ".ai\\logs\\ERP-433-validation-1.log",
-    "at": "2026-10-09T04:51:34.951496Z"
+    "log": ".ai\\logs\\ERP-434-validation-2.log",
+    "at": "2026-10-09T05:06:44.382387Z"
   },
-  "last_error": {
-    "task": "ERP-434",
-    "kind": "automatic_repair_pending",
-    "summary": "Path guard failed:\noutside allowed_paths: erp434-full.pid\noutside allowed_paths: erp434-sql.pid\noutside allowed_paths: erp434results/erp434-full.trx\noutside allowed_paths: erp434results/erp434-sql.trx\noutside allowed_paths: erp434results/erp434a.trx\noutside allowed_paths: erp434results/erp434b.trx\noutside allowed_paths: erp434results/erp434c.trx"
-  },
+  "last_error": null,
   "last_deepseek_fix": {
     "task": "ERP-434",
-    "attempts": 3,
-    "status": "retry_pending",
-    "at": "2026-10-09T05:01:40.596372Z"
+    "attempt": 2,
+    "model": "deepseek-flash",
+    "exit_code": 0,
+    "finished_at": "2026-10-09T05:05:14.315861Z"
   },
   "git_sync": {
     "branch": "main",
-    "local_sha": "29635ae",
-    "status": "synced",
-    "ahead": 0,
+    "local_sha": "ea04010",
+    "status": "pending",
+    "ahead": 1,
     "behind": 0,
-    "last_attempt_at": "2026-10-09T04:51:42.757169Z",
+    "last_attempt_at": "2026-10-09T05:06:44.969118Z",
     "last_error": null
   },
-  "next_recommended_tasks": [
-    "ERP-434"
-  ],
+  "next_recommended_tasks": [],
   "runner": {
     "status": "stopped",
     "pid": null
-  },
-  "blocker": null,
-  "finish_reason": "deepseek_supervisor_recovery"
+  }
 }
