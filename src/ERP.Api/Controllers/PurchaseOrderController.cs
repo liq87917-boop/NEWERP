@@ -291,6 +291,9 @@ public class PurchaseOrderController : DocumentControllerBase<PurchaseOrder>
     /// 创建（ERP-425）：无论手工（无归属备货）还是显式链接来源，表头 / 明细 / 单据号预约都在同一原子事务内写入；
     /// 显式来源时先按「来源销售订单行（升序）→ 采购订单行」确定性锁序取得上游行锁（与来源取消串行化），
     /// 再权威解析来源；并发时「来源取消」与「采购创建」只能成功其一。
+    /// <para>ERP-426：实时授权与来源解析之后、<b>单号预约与任何字段 / 明细改写之前</b>执行唯一权威
+    /// <see cref="PurchaseOrderMutationRules.EnsureValidatedTerms"/>（<see cref="PurchaseOrderAmountRules"/>）；
+    /// 客户端提交的数量 / 单价 / 金额 / 合计 / 状态 / 审计字段一律由服务端重算或重置覆盖，非法请求既不消耗单号也不落库。</para>
     /// </summary>
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] PurchaseOrder entity)
@@ -312,15 +315,20 @@ public class PurchaseOrderController : DocumentControllerBase<PurchaseOrder>
             // ERP-371：身份 / 菜单 / 归属来源范围先于单据号与任何写入（fail closed）。
             await EnsureProposedAuthorizedAsync(entity);
 
+            // 显式归属来源：权威解析 + 统一快照（不占用单据号，绝不臆造销售链接；来源非法即拒绝）。
+            if (entity.OwningSalesOrderId is > 0)
+                await PurchaseSalesOrderLinkRules.ApplyLinkAsync(Db, entity, CurrentUserId());
+
+            // ERP-426：新写入条款校验先于单号预约与任何字段 / 明细改写；失败整体回滚、不占用单号、不落任何数据。
+            PurchaseOrderMutationRules.EnsureValidatedTerms(entity);
+
             entity.Id = 0;
             entity.OrderNo = await _noService.GenerateAsync(DocumentType.PurchaseOrder);
             entity.Status = DocumentStatus.Pending;
             entity.CreatedAt = DateTime.Now;
-            foreach (var d in entity.Details) d.Amount = d.Quantity * d.UnitPrice;
-            if (entity.OwningSalesOrderId is > 0)
-                await PurchaseSalesOrderLinkRules.ApplyLinkAsync(Db, entity, CurrentUserId());
+            // ERP-426：明细金额由服务端按「数量 × 单价」重算（唯一权威口径，忽略客户端金额）。
+            PurchaseOrderAmountRules.ApplyDetailAmounts(entity);
             Calculate(entity);
-            Validate(entity);
             Db.PurchaseOrders.Add(entity);
             await Db.SaveChangesAsync();
             if (transaction is not null) await transaction.CommitAsync();
@@ -341,6 +349,8 @@ public class PurchaseOrderController : DocumentControllerBase<PurchaseOrder>
     /// 按 Id 升序取得全部必要来源销售订单行锁，再取本采购订单行锁（与提交 / 审核 / 删除 / 取消共用同一把锁）。</para>
     /// <para>锁内重读持久化表头 / 明细 / 状态 / 来源与实时权限：仅待提交可修改、来源指针被并发改写即原子拒绝；
     /// 请求未给出归属来源时保留已存来源（绝不静默清除血缘），显式改绑仍按权威来源重新解析并校验实时已审核来源。</para>
+    /// <para>ERP-426：非法新写入条款在来源加锁之前即被拒绝；改写后的持久化条款在锁内再执行一次唯一权威校验
+    /// （<see cref="PurchaseOrderMutationRules.EnsureValidatedTerms"/>），失败时原始表头 / 明细 / 状态与来源血缘保持不变。</para>
     /// </summary>
     [HttpPut("{id:long}")]
     public async Task<IActionResult> Update(long id, [FromBody] PurchaseOrder entity)
@@ -350,6 +360,9 @@ public class PurchaseOrderController : DocumentControllerBase<PurchaseOrder>
         {
             // ERP-425：复用既有 DbContext 事务协议（绝不嵌套），手工 / 已链接走同一事务边界。
             transaction = await PurchaseOrderMutationRules.BeginMutationTransactionAsync(Db);
+
+            // ERP-426：新写入条款校验先于来源加锁与任何字段 / 明细改写；失败整体回滚、不留半成品变更。
+            PurchaseOrderMutationRules.EnsureValidatedTerms(entity);
 
             // 加锁前发现：无锁只读读取持久化归属来源，绝不在持有采购共享锁的情况下再去取上游来源锁。
             var discoveredSalesOrderId = await PurchaseOrderMutationRules
@@ -392,7 +405,8 @@ public class PurchaseOrderController : DocumentControllerBase<PurchaseOrder>
             ApplyHeader(existing, entity);
             ReplaceDetails(id, existing, entity);
             Calculate(existing);
-            Validate(existing);
+            // ERP-426：锁内对改写后的持久化条款再执行一次唯一权威校验，之后才允许提交事务。
+            PurchaseOrderMutationRules.EnsureValidatedTerms(existing);
             existing.UpdatedAt = DateTime.Now;
             await Db.SaveChangesAsync();
             if (transaction is not null) await transaction.CommitAsync();
@@ -541,18 +555,15 @@ public class PurchaseOrderController : DocumentControllerBase<PurchaseOrder>
     /// 合计口径（采购订单唯一权威算法）：总额 = Σ 明细数量×单价。
     /// 声明为 public：供应商比价选中行转采购订单（ERP-020，<see cref="PurchaseQuoteConversion" />）
     /// 复用同一算法，避免带入路径与页面录入路径出现两套口径。
+    /// <para>ERP-426：实现已抽到唯一权威 <see cref="PurchaseOrderAmountRules.Calculate" />，本方法只做转发。</para>
     /// </summary>
-    public static void Calculate(PurchaseOrder entity)
-    {
-        entity.TotalAmount = entity.Details.Sum(d => d.Quantity * d.UnitPrice);
-    }
+    public static void Calculate(PurchaseOrder entity) => PurchaseOrderAmountRules.Calculate(entity);
 
-    /// <summary>业务字段校验（税率 0~100；历史单据不填时为 0，不受影响）</summary>
-    public static void Validate(PurchaseOrder entity)
-    {
-        if (entity.TaxRate < 0 || entity.TaxRate > 100)
-            throw BusinessException.InvalidParameter("税率必须在 0~100 之间");
-    }
+    /// <summary>
+    /// 业务字段校验（税率 0~100；历史单据不填时为 0，不受影响）。
+    /// <para>ERP-426：实现位于唯一权威 <see cref="PurchaseOrderAmountRules.Validate" />，与合计算法同源。</para>
+    /// </summary>
+    public static void Validate(PurchaseOrder entity) => PurchaseOrderAmountRules.Validate(entity);
 
     /// <summary>
     /// 取消采购订单（ERP-345）：在可串行化事务内对订单行加更新锁，把「拒绝判定」与「状态变更」做成一个原子步骤，
@@ -652,8 +663,20 @@ public class PurchaseOrderController : DocumentControllerBase<PurchaseOrder>
     }
 
     /// <summary>
+    /// 在既有行锁内按主键**权威重读**采购订单（显式装载明细）——「单据不存在」抛受控业务异常。
+    /// 与 <c>DocumentControllerBase.GetOrThrowAsync</c> 同口径，额外装载明细供提交 / 审核复核**已持久化条款**
+    /// （ERP-426）；不新增任何读取旁路，也不改写任何字段。
+    /// </summary>
+    private async Task<PurchaseOrder> GetWithDetailsOrThrowAsync(long id, string message)
+        => await Db.PurchaseOrders.Include(o => o.Details)
+               .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
+           ?? throw BusinessException.NotFound(message);
+
+    /// <summary>
     /// 提交（ERP-371）：与本采购订单行锁 / 可串行化事务同口径，锁内先复核实时授权，
     /// 被拒绝时不改任何状态；授权接入后既有 Pending → Submitted 语义不变。
+    /// <para>ERP-426：在既有采购订单行锁内复核**已持久化条款**（唯一权威
+    /// <see cref="PurchaseOrderMutationRules.EnsureValidatedTerms"/>）；非法存储条款原子拒绝、状态与原始证据均不变。</para>
     /// </summary>
     [HttpPost("{id:long}/submit")]
     public override async Task<IActionResult> Submit(long id)
@@ -663,8 +686,10 @@ public class PurchaseOrderController : DocumentControllerBase<PurchaseOrder>
         {
             await AcquireOrderStateLocksAsync(id);
 
-            var entity = await GetOrThrowAsync(id, "采购订单不存在");
+            var entity = await GetWithDetailsOrThrowAsync(id, "采购订单不存在");
             await EnsureOrderAuthorizedAsync(entity);
+            // ERP-426：提交在既有采购订单行锁内复核**已持久化条款**；非法存储条款原子拒绝、状态与原始证据均不变。
+            PurchaseOrderMutationRules.EnsureValidatedTerms(entity);
 
             var result = await base.Submit(id);
             await transaction.CommitAsync();
@@ -681,6 +706,8 @@ public class PurchaseOrderController : DocumentControllerBase<PurchaseOrder>
     /// 审核（ERP-371）：与提交 / 取消同一把本采购订单行锁 + 可串行化事务，锁内复核实时授权，
     /// 并重新校验归属来源销售订单仍为权威可用（存在、未删除、已审核、未取消）——
     /// 并发场景下「来源失效」与「采购审核」不可能同时成功，消除审核与来源作废的竞争。
+    /// <para>ERP-426：锁内先复核归属来源血缘，再复核**已持久化条款**（唯一权威
+    /// <see cref="PurchaseOrderMutationRules.EnsureValidatedTerms"/>）；非法存储条款原子拒绝、状态与原始证据均不变。</para>
     /// </summary>
     [HttpPost("{id:long}/approve")]
     public override async Task<IActionResult> Approve(long id)
@@ -690,9 +717,11 @@ public class PurchaseOrderController : DocumentControllerBase<PurchaseOrder>
         {
             await AcquireOrderStateLocksAsync(id);
 
-            var entity = await GetOrThrowAsync(id, "采购订单不存在");
+            var entity = await GetWithDetailsOrThrowAsync(id, "采购订单不存在");
             await EnsureOrderAuthorizedAsync(entity);
             await PurchaseSalesOrderLinkRules.EnsureSourceLinkStillValidAsync(Db, entity.OwningSalesOrderId);
+            // ERP-426：审核在既有采购订单行锁内复核**已持久化条款**；非法存储条款原子拒绝、状态与原始证据均不变。
+            PurchaseOrderMutationRules.EnsureValidatedTerms(entity);
 
             var result = await base.Approve(id);
             await transaction.CommitAsync();

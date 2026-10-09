@@ -397,7 +397,14 @@ public class OrderTraceabilityTests
         var ctl = new PurchaseOrderController(db, new DocumentNumberService(db));
         var (customerId, salesOrderId, productId) = SeedPurchaseLinkSource(db, "SO-LINK-9", "LINK CUSTOMER");
         TestAuth.SetUser(ctl, SeedAuthorizedPurchaseUser(db));
-        await ctl.Create(new PurchaseOrder { OrderDate = DateTime.Today, SupplierId = 1 });
+        await ctl.Create(new PurchaseOrder
+        {
+            OrderDate = DateTime.Today, SupplierId = 1,
+            Details = new List<PurchaseOrderDetail>
+            {
+                new() { ProductId = productId, ProductName = "商品A", Quantity = 1m, UnitPrice = 1m }
+            }
+        });
         var id = db.PurchaseOrders.Single().Id;
 
         await ctl.Update(id, new PurchaseOrder
@@ -432,7 +439,11 @@ public class OrderTraceabilityTests
 
         var ex = await Assert.ThrowsAsync<BusinessException>(() => ctl.Create(new PurchaseOrder
         {
-            OrderDate = DateTime.Today, SupplierId = 1, TaxRate = -1m
+            OrderDate = DateTime.Today, SupplierId = 1, TaxRate = -1m,
+            Details = new List<PurchaseOrderDetail>
+            {
+                new() { ProductId = 1, ProductName = "P1", Quantity = 1m, UnitPrice = 1m }
+            }
         }));
         Assert.Equal(ErrorCodes.InvalidParameter, ex.Code);
         Assert.Empty(db.PurchaseOrders);
@@ -469,8 +480,16 @@ public class OrderTraceabilityTests
     {
         using var db = TestDbFactory.Create();
         var ctl = new PurchaseOrderController(db, new DocumentNumberService(db));
-        await ctl.Create(new PurchaseOrder { OrderDate = DateTime.Today, SupplierId = 1, OwningSalesOrderNo = "SO-KEY-8" });
-        await ctl.Create(new PurchaseOrder { OrderDate = DateTime.Today, SupplierId = 1, ContractNo = "PC-KEY-8" });
+        await ctl.Create(new PurchaseOrder
+        {
+            OrderDate = DateTime.Today, SupplierId = 1, OwningSalesOrderNo = "SO-KEY-8",
+            Details = new List<PurchaseOrderDetail> { new() { ProductId = 1, ProductName = "P1", Quantity = 1m, UnitPrice = 1m } }
+        });
+        await ctl.Create(new PurchaseOrder
+        {
+            OrderDate = DateTime.Today, SupplierId = 1, ContractNo = "PC-KEY-8",
+            Details = new List<PurchaseOrderDetail> { new() { ProductId = 1, ProductName = "P1", Quantity = 1m, UnitPrice = 1m } }
+        });
 
         var bySalesOrder = Assert.IsType<ApiResponse<PagedResult<PurchaseOrder>>>(
             Assert.IsType<OkObjectResult>(await ctl.GetPaged(new PageQuery { Page = 1, PageSize = 10, Keyword = "SO-KEY-8" }, null)).Value);

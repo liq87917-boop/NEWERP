@@ -232,6 +232,24 @@ public class PurchaseQuoteConversionTests
     }
 
     [Fact]
+    public async Task 比价行行金额超出存储精度_转采购订单_复用权威校验拒绝()
+    {
+        using var db = TestDbFactory.Create();
+        var quote = SeedSelectedQuote(db, "PQ-AMOUNT-PRECISION");
+        // 0.25 × 1.05 = 0.2625：旧的带入路径会 Math.Round 静默取整，现复用
+        // PurchaseOrderAmountRules 唯一权威校验，绝不写入与明细合计不一致的金额。
+        quote.Quantity = 0.25m;
+        quote.QuotePrice = 1.05m;
+        db.SaveChanges();
+
+        var ex = await Assert.ThrowsAsync<BusinessException>(() => NewController(db).ToPurchaseOrder(quote.Id));
+
+        Assert.Equal(ErrorCodes.InvalidParameter, ex.Code);
+        Assert.Contains("行金额", ex.Message);
+        Assert.Empty(db.PurchaseOrders);
+    }
+
+    [Fact]
     public async Task 比价行不存在_预填与生成_均抛NotFound()
     {
         using var db = TestDbFactory.Create();

@@ -212,22 +212,16 @@ public static class PurchaseQuoteConversion
         };
 
     /// <summary>
-    /// 服务端复核带入结果：明细数量 / 单价逐行校验并重算金额。
+    /// 服务端复核带入结果（ERP-426）：逐行金额按唯一权威口径重算，并复用
+    /// <see cref="PurchaseOrderAmountRules.ValidateNewWrite"/> 校验「明细非空、数量 / 单价 / 币种 / 汇率 /
+    /// 税率与金额精度」——与页面手工录入**完全同一套**服务端规则，绝不出现第二套校验。
     /// 订单总额随后由采购订单口径 <see cref="PurchaseOrderController.Calculate" /> 计算，
     /// 保证「带入生成 + 人工编辑」与「页面手工录入」两条路径完全同口径。
     /// </summary>
     private static void Revalidate(PurchaseOrder order)
     {
-        var line = 0;
-        foreach (var d in order.Details)
-        {
-            line++;
-            if (d.Quantity <= 0)
-                throw BusinessException.InvalidParameter($"采购订单明细第 {line} 行数量必须大于 0");
-            if (d.UnitPrice < 0)
-                throw BusinessException.InvalidParameter($"采购订单明细第 {line} 行单价不能为负数");
-            d.Amount = Math.Round(d.Quantity * d.UnitPrice, 2);
-        }
+        PurchaseOrderAmountRules.ApplyDetailAmounts(order);
+        PurchaseOrderAmountRules.ValidateNewWrite(order);
     }
 
     /// <summary>
