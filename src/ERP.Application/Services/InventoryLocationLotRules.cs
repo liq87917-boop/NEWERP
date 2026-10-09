@@ -1,5 +1,7 @@
 using ERP.Application.Common;
 using ERP.Application.DTOs;
+using ERP.Application.Interfaces;
+using ERP.Domain.Entities;
 
 namespace ERP.Application.Services;
 
@@ -8,6 +10,8 @@ namespace ERP.Application.Services;
 /// 批次 / 库位编码的归一化与长度校验、移动数量的正数校验、调拨仓库与守恒校验。
 /// <para>长度口径与既有实体 <c>BatchNo</c> / <c>WarehouseName</c> 等 NVARCHAR(50/100) 一致，
 /// 本规则只做校验与归一化，不落库、不改写任何库存或单据。</para>
+/// <para>读取护栏：库位 / 批次余额与移动校验与既有库存查询同源，复用
+/// <see cref="StockQueryAuthorizationRules"/>（既有「库存查询」<c>stock-query</c> 菜单 + 权威数据范围，fail closed）。</para>
 /// </summary>
 public static class InventoryLocationLotRules
 {
@@ -19,6 +23,31 @@ public static class InventoryLocationLotRules
 
     /// <summary>空批次桶：无法唯一归属批次的数量统一计入空串批次</summary>
     public const string NoLot = "";
+
+    /// <summary>
+    /// 库位 / 批次余额与移动校验的实时授权（fail closed）：<b>精确复用</b>既有 ERP-356
+    /// <see cref="StockQueryAuthorizationRules.EnsureAuthorizedAsync"/>——实时身份（缺失 / 非法 / 已删除按未认证，
+    /// 禁用按权限不足）→ 既有「库存查询」（<c>stock-query</c>）菜单授权 → 权威数据范围。
+    /// <para>受限账号（非特权）在库存维度没有权威的仓库级数据范围，因此一律拒绝，绝不降级为全局可见性；
+    /// 不新增任何菜单 / 角色 / 用户授权，也不把空身份当作管理员。</para>
+    /// </summary>
+    public static Task<StockQueryAuthorizationRules.StockQueryScope> EnsureAuthorizedAsync(IErpDbContext db,
+        long? userId, CancellationToken ct = default)
+        => StockQueryAuthorizationRules.EnsureAuthorizedAsync(db, userId, ct);
+
+    /// <summary>
+    /// 把已解析的库存查询范围应用到库存行查询（复用
+    /// <see cref="StockQueryAuthorizationRules.ApplyScope(IQueryable{Stock}, StockQueryAuthorizationRules.StockQueryScope)"/>
+    /// 守卫：受限范围 fail closed，绝不放大为全局可见性）。必须在任何计数 / 求和 / 分页之前调用。
+    /// </summary>
+    public static IQueryable<Stock> ApplyScope(IQueryable<Stock> source,
+        StockQueryAuthorizationRules.StockQueryScope scope)
+        => StockQueryAuthorizationRules.ApplyScope(source, scope);
+
+    /// <summary>把已解析的库存查询范围应用到库存流水查询（与库存行同一套授权 / 范围策略）。</summary>
+    public static IQueryable<StockMovement> ApplyScope(IQueryable<StockMovement> source,
+        StockQueryAuthorizationRules.StockQueryScope scope)
+        => StockQueryAuthorizationRules.ApplyScope(source, scope);
 
     /// <summary>归一化批次号（去首尾空白；空值 / 空白返回空串；超长拒绝）。批次为可选身份。</summary>
     public static string NormalizeLot(string? lotNo)

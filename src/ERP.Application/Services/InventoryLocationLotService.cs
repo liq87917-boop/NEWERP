@@ -10,20 +10,24 @@ namespace ERP.Application.Services;
 /// 库位 + 批次库存基础（ERP-096）服务：为入库 / 出库 / 调拨 / 退货四类移动统一校验
 /// 「仓库库位 + 可选批次」身份，并从现有库存行与库存流水只读派生「库位级 / 批次级」余额，
 /// 不改变既有商品级成本口径、不新增或修改任何表结构、不执行生产 SQL。
+/// <para>读取 / 校验前先实时授权（ERP-356 同源口径，fail closed）：身份 / 账号状态 / 既有「库存查询」
+/// （<c>stock-query</c>）菜单授权 / 权威数据范围任一缺失即在读取任何仓库、商品、库位、批次或数量之前拒绝；
+/// 不新增任何权限模型，也不把空身份当作管理员。</para>
 /// </summary>
 public interface IInventoryLocationLotService
 {
     /// <summary>
     /// 校验一次库存移动携带的「仓库库位 + 可选批次」身份并返回归一化结果。
-    /// 仓库不存在、库位 / 批次超长、数量非正、调拨两仓相同等情况抛业务异常。
+    /// 先实时授权（fail closed）再校验；仓库不存在、库位 / 批次超长、数量非正、调拨两仓相同等情况抛业务异常。
     /// </summary>
-    Task<ValidatedMovementLocationLot> ValidateMovementAsync(MovementLocationLotInput input,
+    Task<ValidatedMovementLocationLot> ValidateMovementAsync(MovementLocationLotInput input, long? userId,
         CancellationToken cancellationToken = default);
 
     /// <summary>
     /// 只读派生「库位级 + 批次级」库存余额（可按仓库 / 商品过滤），并给出与既有商品级总量的对账结果。
+    /// 先实时授权并把已解析范围应用到库存行 / 流水查询，范围先于任何计数或求和。
     /// </summary>
-    Task<LocationLotBalanceReport> GetLocationLotBalancesAsync(long? warehouseId, long? productId,
+    Task<LocationLotBalanceReport> GetLocationLotBalancesAsync(long? warehouseId, long? productId, long? userId,
         CancellationToken cancellationToken = default);
 }
 
@@ -48,9 +52,13 @@ public sealed class InventoryLocationLotService : IInventoryLocationLotService
 
     /// <inheritdoc />
     public async Task<ValidatedMovementLocationLot> ValidateMovementAsync(MovementLocationLotInput input,
-        CancellationToken cancellationToken = default)
+        long? userId, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(input);
+
+        // 实时授权 / 解析范围先于任何仓库、商品、库位、批次或数量读取（fail closed）：
+        // 身份 / 账号状态 / 既有 stock-query 菜单 / 权威数据范围任一缺失即拒绝。
+        var scope = await InventoryLocationLotRules.EnsureAuthorizedAsync(_db, userId, cancellationToken);
 
         var lotNo = InventoryLocationLotRules.NormalizeLot(input.LotNo);
         var locationCode = InventoryLocationLotRules.NormalizeLocationCode(input.LocationCode);
@@ -74,7 +82,7 @@ public sealed class InventoryLocationLotService : IInventoryLocationLotService
             // 且调出仓现存量必须足以覆盖调拨数量（拒绝负库存）。
             // 手工行（无商品 Id）无法核对现存量，跳过存量检查，仍保留数量 / 成本 / 两仓守恒。
             var sourceOnHand = input.ProductId.HasValue
-                ? await GetSourceOnHandAsync(input.WarehouseId, input.ProductId.Value, cancellationToken)
+                ? await GetSourceOnHandAsync(input.WarehouseId, input.ProductId.Value, scope, cancellationToken)
                 : input.Quantity;
             var conservation = InventoryLocationLotRules.EvaluateTransfer(
                 input.WarehouseId, toWarehouseId, input.Quantity, input.UnitCost, sourceOnHand);
@@ -105,24 +113,33 @@ public sealed class InventoryLocationLotService : IInventoryLocationLotService
         return warehouse ?? throw BusinessException.InvalidParameter($"仓库 Id {warehouseId} 不存在或已删除");
     }
 
-    /// <summary>取调出仓（仓库 + 商品）现存量；无商品或未建库存行时为 0。</summary>
-    private async Task<decimal> GetSourceOnHandAsync(long warehouseId, long productId, CancellationToken cancellationToken)
+    /// <summary>取调出仓（仓库 + 商品）现存量；无商品或未建库存行时为 0。范围先于求和（fail closed）。</summary>
+    private async Task<decimal> GetSourceOnHandAsync(long warehouseId, long productId,
+        StockQueryAuthorizationRules.StockQueryScope scope, CancellationToken cancellationToken)
     {
-        return await _db.Stocks.AsNoTracking()
-            .Where(s => !s.IsDeleted && s.WarehouseId == warehouseId && s.ProductId == productId)
+        return await InventoryLocationLotRules.ApplyScope(
+                _db.Stocks.AsNoTracking()
+                    .Where(s => !s.IsDeleted && s.WarehouseId == warehouseId && s.ProductId == productId),
+                scope)
             .Select(s => s.Quantity)
             .SumAsync(cancellationToken);
     }
 
     /// <inheritdoc />
     public async Task<LocationLotBalanceReport> GetLocationLotBalancesAsync(long? warehouseId, long? productId,
-        CancellationToken cancellationToken = default)
+        long? userId, CancellationToken cancellationToken = default)
     {
-        // 1) 库位级（仓库 + 商品）现存量：权威库存行
-        var stocks = await _db.Stocks.AsNoTracking()
-            .Where(s => !s.IsDeleted)
+        // 实时授权 / 解析范围先于任何数量读取（fail closed）：身份 / 账号状态 / 既有 stock-query 菜单 /
+        // 权威数据范围任一缺失即在统计或返回任何库位 / 商品 / 批次数量之前拒绝。
+        var scope = await InventoryLocationLotRules.EnsureAuthorizedAsync(_db, userId, cancellationToken);
+
+        // 1) 库位级（仓库 + 商品）现存量：权威库存行（范围先于计数 / 求和；请求筛选只能收窄）
+        var stockQuery = InventoryLocationLotRules.ApplyScope(
+            _db.Stocks.AsNoTracking().Where(s => !s.IsDeleted), scope);
+        stockQuery = stockQuery
             .Where(s => !warehouseId.HasValue || s.WarehouseId == warehouseId.Value)
-            .Where(s => !productId.HasValue || s.ProductId == productId.Value)
+            .Where(s => !productId.HasValue || s.ProductId == productId.Value);
+        var stocks = await stockQuery
             .OrderBy(s => s.WarehouseId).ThenBy(s => s.ProductId).ThenBy(s => s.Id)
             .ToListAsync(cancellationToken);
 
@@ -165,12 +182,14 @@ public sealed class InventoryLocationLotService : IInventoryLocationLotService
                 quantity > 0 ? InventoryService.RoundCost(totalCost / quantity) : 0m);
         }).ToList();
 
-        // 2) 批次级：有效库存流水（未冲销、非红字）结合来源单据明细 BatchNo 派生
+        // 2) 批次级：有效库存流水（未冲销、非红字）结合来源单据明细 BatchNo 派生（同一授权 / 范围守卫）
         var movements = productIds.Count == 0 || warehouseIds.Count == 0
             ? new List<StockMovement>()
-            : await _db.StockMovements.AsNoTracking()
-                .Where(m => !m.IsDeleted && !m.IsReversal && !m.IsReversed && m.ProductId != null
-                            && productIds.Contains(m.ProductId.Value) && warehouseIds.Contains(m.WarehouseId))
+            : await InventoryLocationLotRules.ApplyScope(
+                    _db.StockMovements.AsNoTracking()
+                        .Where(m => !m.IsDeleted && !m.IsReversal && !m.IsReversed && m.ProductId != null
+                                    && productIds.Contains(m.ProductId.Value) && warehouseIds.Contains(m.WarehouseId)),
+                    scope)
                 .OrderBy(m => m.Id)
                 .ToListAsync(cancellationToken);
 
