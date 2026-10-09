@@ -34,6 +34,9 @@ public class OrderTraceabilityUiTests
         InstallApiIssueRecorder();
 
         var customer = CreateCustomer(tag);
+        // ERP-428：隔离验收库里没有 catalog 商品，明细必须使用经既有接口新建的真实商品 Id
+        // （硬编码 productId=1 在全新库里不存在，会被 ERP-423 主数据护栏拒绝）。
+        var productId = CreateProductViaApi(tag);
         var customerPo = "BUYERPO-" + tag;
         var contractNo = "SC-" + tag;
 
@@ -64,7 +67,7 @@ public class OrderTraceabilityUiTests
         SetSelectValue("f_currency", "USD");
         SetFieldValue("f_exchangeRate", "7.2");
         SetFieldValue("f_depositRatio", "30");
-        AddDetailRow(0, tag + "-商品A", "大", "PCS", "10", "100");
+        AddDetailRow(0, tag + "-商品A", "大", "PCS", "10", "100", productId);
 
         ClearToast();
         SavePanel();
@@ -147,7 +150,8 @@ public class OrderTraceabilityUiTests
 
         var customer = CreateCustomer(tag);
         var supplier = CreateSupplier(tag);
-        var salesOrder = CreateSalesOrderViaApi(tag, customer.Id);
+        var productId = CreateProductViaApi(tag);
+        var salesOrder = CreateSalesOrderViaApi(tag, customer.Id, productId);
         var contractNo = "PC-" + tag;
 
         OpenModule("purchase-order");
@@ -169,7 +173,7 @@ public class OrderTraceabilityUiTests
         SetSelectValue("f_settlementProgress", "未结算");
         SetFieldValue("f_paymentTerms", "月结 30 天");
         SetFieldValue("f_deliveryDate", DateTime.Today.AddDays(20).ToString("yyyy-MM-dd"));
-        AddDetailRow(0, tag + "-采购商品A", "中", "PCS", "20", "50");
+        AddDetailRow(0, tag + "-采购商品A", "中", "PCS", "20", "50", productId);
 
         ClearToast();
         SavePanel();
@@ -240,8 +244,9 @@ public class OrderTraceabilityUiTests
 
         var customer = CreateCustomer(tag);
         var supplier = CreateSupplier(tag);
-        var salesOrder = CreateSalesOrderViaApi(tag, customer.Id);
-        var purchaseOrder = CreatePurchaseOrderViaApi(tag, supplier.Id, salesOrder.Id, salesOrder.No);
+        var productId = CreateProductViaApi(tag);
+        var salesOrder = CreateSalesOrderViaApi(tag, customer.Id, productId);
+        var purchaseOrder = CreatePurchaseOrderViaApi(tag, supplier.Id, salesOrder.Id, salesOrder.No, productId);
 
         OpenModule("sales-order");
         var salesHeaders = TableHeaders();
@@ -294,7 +299,7 @@ public class OrderTraceabilityUiTests
         "    try {" +
         "      const j = JSON.parse(text);" +
         "      if (!res.ok || (j && typeof j.code === 'number' && j.code !== 0))" +
-        "        window.__apiIssues.push(String(args[0] || '') + ' => ' + res.status + ' ' + (j.message || ''));" +
+        "        window.__apiIssues.push(String(args[0] || '') + ' => ' + res.status + ' ' + (j.message || j.title || '') + ' body=' + text);" +
         "    } catch (e) { if (!res.ok) window.__apiIssues.push(String(args[0] || '') + ' => ' + res.status); }" +
         "  } catch (e) { /* 忽略读取失败 */ }" +
         "  return res;" +
@@ -367,7 +372,17 @@ public class OrderTraceabilityUiTests
         return new PartySeed(data.GetProperty("id").GetInt64(), data.GetProperty("supplierCode").GetString()!);
     }
 
-    private SalesOrderSeed CreateSalesOrderViaApi(string tag, long customerId)
+    /// <summary>
+    /// ERP-428：隔离验收库里没有 catalog 商品。经既有 /api/base/products 接口新建一个真实商品主数据，
+    /// 返回其 Id 供明细引用（绝不使用硬编码 productId=1 这类在全新库中不存在的引用）。
+    /// </summary>
+    private long CreateProductViaApi(string tag)
+    {
+        var body = JsonSerializer.Serialize(new { productCode = "P-" + tag, productName = tag + "-商品A", unit = "PCS" });
+        return ApiData("POST", "/api/base/products", body).GetProperty("id").GetInt64();
+    }
+
+    private SalesOrderSeed CreateSalesOrderViaApi(string tag, long customerId, long productId)
     {
         var body = JsonSerializer.Serialize(new
         {
@@ -380,7 +395,7 @@ public class OrderTraceabilityUiTests
             remark = "ORDER_TRACE_UI",
             details = new object[]
             {
-                new { productId = 1, productName = "API 商品", spec = "大", unit = "PCS", quantity = 5m, unitPrice = 20m }
+                new { productId, productName = "API 商品", spec = "大", unit = "PCS", quantity = 5m, unitPrice = 20m }
             }
         });
         var data = ApiData("POST", "/api/sales-orders", body);
@@ -390,7 +405,7 @@ public class OrderTraceabilityUiTests
     }
 
     private PurchaseOrderSeed CreatePurchaseOrderViaApi(string tag, long supplierId, long owningSalesOrderId,
-        string owningSalesOrderNo)
+        string owningSalesOrderNo, long productId)
     {
         var body = JsonSerializer.Serialize(new
         {
@@ -405,7 +420,7 @@ public class OrderTraceabilityUiTests
             remark = "ORDER_TRACE_UI",
             details = new object[]
             {
-                new { productId = 1, productName = "API 采购商品", spec = "中", unit = "PCS", quantity = 5m, unitPrice = 20m }
+                new { productId, productName = "API 采购商品", spec = "中", unit = "PCS", quantity = 5m, unitPrice = 20m }
             }
         });
         var data = ApiData("POST", "/api/purchase-orders", body);
@@ -532,7 +547,7 @@ public class OrderTraceabilityUiTests
     }) ?? Array.Empty<string>();
 
     private bool FunctionExists(string functionName)
-        => ExecuteScript($"return String(typeof {functionName} === 'function');") == "True";
+        => ExecuteScript($"return String(typeof {functionName} === 'function');") == "true";
 
     private void ClickNewButton()
     {
@@ -558,7 +573,7 @@ public class OrderTraceabilityUiTests
         var exists = ExecuteScript(
             $"const el = document.getElementById({JsonSerializer.Serialize(elementId)});" +
             $"return String(!!el && Array.from(el.options).some(o => o.value === {JsonSerializer.Serialize(value)}));");
-        Assert.Equal("True", exists);
+        Assert.Equal("true", exists);
         SetFieldValue(elementId, value);
     }
 
@@ -567,14 +582,15 @@ public class OrderTraceabilityUiTests
         $"const hid = document.getElementById('f_{key}'); if (hid) hid.value = '{id}'; " +
         $"const s = document.getElementById('f_{key}_search'); if (s) s.value = {JsonSerializer.Serialize(displayText)}; return 'ok';");
 
-    private void AddDetailRow(int index, string productName, string spec, string unit, string qty, string price)
+    private void AddDetailRow(int index, string productName, string spec, string unit, string qty, string price,
+        long productId)
     {
         var addButton = Wait().Until(d =>
             d.FindElements(By.XPath("//button[starts-with(@onclick,'detailAddRow()')]")).FirstOrDefault());
         Assert.NotNull(addButton);
         SafeClick(addButton!);
         Wait().Until(d => d.FindElements(By.Id($"d_{index}_productName")).Count > 0);
-        SetDetailCell(index, "productId", "1");
+        SetDetailCell(index, "productId", productId.ToString());
         SetDetailCell(index, "productName", productName);
         SetDetailCell(index, "spec", spec);
         SetDetailCell(index, "unit", unit);
@@ -622,6 +638,19 @@ public class OrderTraceabilityUiTests
     private void WaitToastContains(string text) => Wait().Until(d =>
     {
         var toast = d.FindElement(By.Id("toast"));
+        // ERP-428：保存被拒时立即截取原始失败证据（错误 toast + 被拒绝的接口响应体 + 明细快照），
+        // 而不是等超时后只留下模糊的等待失败；原始拒绝体必须原样保留，绝不改写为「成功」。
+        // 仅在 toast 真正显示且为 error 态（或同时捕获到失败请求）时判定为拒绝，避免把上一轮
+        // 无关提示误判为本次保存失败。
+        var displayed = toast.Displayed;
+        var errorToast = displayed && (toast.GetDomAttribute("class") ?? "").Contains("error");
+        var issues = displayed ? ApiIssues() : Array.Empty<string>();
+        if (errorToast || issues.Length > 0)
+        {
+            CaptureEvidence("sales-order-save-rejection");
+            var details = ExecuteScript("return JSON.stringify(typeof DETAIL_ROWS !== 'undefined' ? DETAIL_ROWS : []);");
+            throw new InvalidOperationException("Save rejected: " + toast.Text + " | " + string.Join(" | ", issues) + " | details=" + details);
+        }
         return toast.Text.Contains(text) ? toast : null;
     });
 
@@ -704,7 +733,7 @@ public class OrderTraceabilityUiTests
     private string ModalPrintText() => ExecuteScript("const m = document.getElementById('modal'); return m ? m.innerText : '';");
 
     private bool HasPrintPage()
-        => ExecuteScript("return String(document.querySelectorAll('#modal .print-page').length > 0);") == "True";
+        => ExecuteScript("return String(document.querySelectorAll('#modal .print-page').length > 0);") == "true";
 
     private void WaitModalContains(string text) => Wait().Until(_ => ModalPrintText().Contains(text));
 

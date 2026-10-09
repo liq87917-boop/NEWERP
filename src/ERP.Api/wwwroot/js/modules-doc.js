@@ -133,7 +133,9 @@ Object.assign(MODULES, {
       { key: 'contractNo', label: '外销合同号' },
       { key: 'tradeTerms', label: '价格条款', type: 'select', options: TRADE_TERM_OPTS },
       { key: 'destinationPort', label: '目的港（文本）' },
-      { key: 'portId', label: '目的港 Id（港口字典，可留空）', type: 'number' },
+      /* ERP-428：目的港 Id 是显式可选引用，声明 nullable 让留空提交 null（而非 0），
+         服务端仍按既有 ERP-423 主数据护栏拒绝 0 / 负数 / 不存在的港口。 */
+      { key: 'portId', label: '目的港 Id（港口字典，可留空）', type: 'number', nullable: true },
       { key: 'consignee', label: '收货人 Consignee（提单用）', type: 'textarea' },
       { key: 'notifyParty', label: '通知人 Notify Party（提单用）', type: 'textarea' },
       { key: 'shippingMarks', label: '唛头 Shipping Marks', type: 'textarea' },

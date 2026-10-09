@@ -247,7 +247,10 @@ async function saveForm(id) {
     const el = document.getElementById('f_' + f.key);
     if (!el) return;
     let v = el.value;
-    if (f.type === 'number') v = v === '' ? 0 : Number(v);
+    /* ERP-428：显式可选（f.nullable === true）的数值字段留空时提交 null（如销售订单目的港 Id 这类可空引用），
+       绝不回落为 0 —— 0 会被服务端按「显式非法引用」拒绝。默认（未声明 nullable）仍保持既有口径：留空 = 0，
+       因此必填数值字段（汇率 / 比例 / 明细数量单价等）的零值语义与其它模块完全不变。 */
+    if (f.type === 'number') v = v === '' ? (f.nullable === true ? null : 0) : Number(v);
     if (f.type === 'ref') v = v === '' ? null : Number(v);
     if (f.type === 'parent') v = v === '' ? null : Number(v);
     /* 日期字段：留空时提交 null（而非空串），避免服务端把 "" 反序列化为 DateTime? 时报错；
