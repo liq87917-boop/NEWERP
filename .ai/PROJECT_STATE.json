@@ -1,7 +1,7 @@
 {
   "schema_version": 2,
   "project": "NEWERP",
-  "updated_at": "2026-10-09T05:37:11.331707Z",
+  "updated_at": "2026-10-09T05:49:57.940640Z",
   "phase": "ready",
   "current_task": null,
   "queue": [
@@ -429,17 +429,20 @@
     "log": ".ai\\logs\\ERP-432-validation-2.log",
     "at": "2026-10-09T05:37:00.532305Z"
   },
-  "last_error": null,
+  "last_error": {
+    "task": "ERP-437",
+    "kind": "automatic_repair_pending",
+    "summary": "Path guard failed:\noutside allowed_paths: erp437-test.pid"
+  },
   "last_deepseek_fix": {
-    "task": "ERP-432",
-    "attempt": 2,
-    "model": "deepseek-flash",
-    "exit_code": 0,
-    "finished_at": "2026-10-09T05:35:24.929300Z"
+    "task": "ERP-437",
+    "attempts": 3,
+    "status": "retry_pending",
+    "at": "2026-10-09T05:49:57.477624Z"
   },
   "git_sync": {
     "branch": "main",
-    "local_sha": "69941fb",
+    "local_sha": "3d7b8a4",
     "status": "synced",
     "ahead": 0,
     "behind": 0,
@@ -453,5 +456,7 @@
   "runner": {
     "status": "stopped",
     "pid": null
-  }
+  },
+  "blocker": null,
+  "finish_reason": "deepseek_supervisor_recovery"
 }
