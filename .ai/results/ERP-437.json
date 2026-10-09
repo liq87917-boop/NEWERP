@@ -1,13 +1,11 @@
 {
   "task": "ERP-437",
-  "status": "retry_pending",
-  "execution_outcome": "retry_pending",
-  "normalized_finish_reason": "real_sql_acceptance_reopened",
+  "status": "completed",
+  "execution_outcome": "completed",
+  "normalized_finish_reason": "build_validated",
   "cline_exit_code": 0,
   "cline_finish_reason_raw": "completed",
   "attempts": 2,
   "browser_acceptance": null,
-  "finished_at": "2026-10-09T05:55:14.710588Z",
-  "last_error": "Independent genuine SQL found permitted statement lifecycle fails at AgencyServiceFeeRegisterAuthorizationSqlServerTests.cs:459: SalesOrderSave line DTO omits required BasisNote. Full original SQL failure and TRX preserved under .ai/logs/heartbeat-20261009T0550-original-failures; original path-guard failure also preserved. Isolated minimum fixture repair adds BasisNote to AgencyServiceFeeStatementLineSaveDto only, preserving all business validation and permissions. Safe Release 0 warnings/errors and 2 real SQL cases plus 5 target guards pass in fresh GUID-owned dedicated NEWERP_AUTOTEST; production source untouched by heartbeat. Apply that exact fixture correction within existing allowed_paths and run genuine SQL plus existing gates before completing. Do not treat guard-only tests as real SQL acceptance.",
-  "historical_checkpoint": ".ai/results/ERP-437-checkpoint-attempt-2-before-real-sql-repair.json"
+  "finished_at": "2026-10-09T06:08:00.807474Z"
 }

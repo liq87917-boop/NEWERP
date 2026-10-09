@@ -299,6 +299,9 @@ public sealed class AgencyServiceFeeRegisterAuthorizationSqlServerTests
                     SourceType = AgencyServiceFeeStatementRules.SourceTypeSalesOrder,
                     SourceId = orderId,
                     Description = "代理服务费",
+                    // 计费基础说明为服务端必填（NormalizeBasisNote）：夹具行必须显式提供，
+                    // 否则合法生命周期会在 Create 校验处以 InvalidParameter 失败。
+                    BasisNote = "按协议约定的服务期间",
                     Amount = amount,
                     Remark = string.Empty
                 }

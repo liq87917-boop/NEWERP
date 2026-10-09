@@ -55,7 +55,7 @@
   "planning_stage": 3,
   "implementation_evidence": "src/ERP.Api/Controllers/AgencyServiceFeeStatementController.cs:28-31 declares only [Authorize]; GetPaged at 44-47, SourceOptions at 63-72, GetById at 111-114, Create at 122-126, Update at 129-133, Record at 140-144 and Void at 150-154 call the service directly, while only MonthlySummary at 79-108 resolves CurrentUserId, CustomerReceivableReconciliationService.LoadAuthorizedMenuCodesAsync with AgencyServiceFeeReconciliationRules.RequiredMenuCode and SalespersonDataScopeService.ResolveAsync. src/ERP.Api/Controllers/AgencyServiceFeeCollectionAllocationController.cs:27-30 declares only [Authorize]; routes at 43-148 call AgencyServiceFeeCollectionAllocationService with only _db and query and CurrentUserName at 151-152 is never an authorization check. Both src/ERP.Application/Services/AgencyServiceFeeStatementService.cs and src/ERP.Application/Services/AgencyServiceFeeCollectionAllocationService.cs contain zero Authoriz/SalespersonDataScope/EnsureMenu references. No task in .ai/tasks lists these controllers or services as allowed_paths for authorization.",
   "id": "ERP-437",
-  "status": "retry",
+  "status": "completed",
   "attempts": 2,
   "max_attempts": 3,
   "validation_profile": "safe",
@@ -111,19 +111,5 @@
       }
     }
   ],
-  "supervised_recovery_cycles": 1,
-  "last_error": "Independent genuine SQL found permitted statement lifecycle fails at AgencyServiceFeeRegisterAuthorizationSqlServerTests.cs:459: SalesOrderSave line DTO omits required BasisNote. Full original SQL failure and TRX preserved under .ai/logs/heartbeat-20261009T0550-original-failures; original path-guard failure also preserved. Isolated minimum fixture repair adds BasisNote to AgencyServiceFeeStatementLineSaveDto only, preserving all business validation and permissions. Safe Release 0 warnings/errors and 2 real SQL cases plus 5 target guards pass in fresh GUID-owned dedicated NEWERP_AUTOTEST; production source untouched by heartbeat. Apply that exact fixture correction within existing allowed_paths and run genuine SQL plus existing gates before completing. Do not treat guard-only tests as real SQL acceptance.",
-  "failure_kind": "real_sql_fixture_validation_failure",
-  "recovery_context": {
-    "failure_kind": "real_sql_fixture_validation_failure",
-    "summary": "Independent genuine SQL found permitted statement lifecycle fails at AgencyServiceFeeRegisterAuthorizationSqlServerTests.cs:459: SalesOrderSave line DTO omits required BasisNote. Full original SQL failure and TRX preserved under .ai/logs/heartbeat-20261009T0550-original-failures; original path-guard failure also preserved. Isolated minimum fixture repair adds BasisNote to AgencyServiceFeeStatementLineSaveDto only, preserving all business validation and permissions. Safe Release 0 warnings/errors and 2 real SQL cases plus 5 target guards pass in fresh GUID-owned dedicated NEWERP_AUTOTEST; production source untouched by heartbeat. Apply that exact fixture correction within existing allowed_paths and run genuine SQL plus existing gates before completing. Do not treat guard-only tests as real SQL acceptance.",
-    "attempt_logs": [
-      ".ai/logs/ERP-437-independent-verification/sql.log"
-    ],
-    "validation_logs": [
-      ".ai/logs/ERP-437-independent-verification/agency-register.trx",
-      ".ai/logs/ERP-437-independent-fixture-repair/sql.log"
-    ],
-    "instruction": "Independent genuine SQL found permitted statement lifecycle fails at AgencyServiceFeeRegisterAuthorizationSqlServerTests.cs:459: SalesOrderSave line DTO omits required BasisNote. Full original SQL failure and TRX preserved under .ai/logs/heartbeat-20261009T0550-original-failures; original path-guard failure also preserved. Isolated minimum fixture repair adds BasisNote to AgencyServiceFeeStatementLineSaveDto only, preserving all business validation and permissions. Safe Release 0 warnings/errors and 2 real SQL cases plus 5 target guards pass in fresh GUID-owned dedicated NEWERP_AUTOTEST; production source untouched by heartbeat. Apply that exact fixture correction within existing allowed_paths and run genuine SQL plus existing gates before completing. Do not treat guard-only tests as real SQL acceptance."
-  }
+  "supervised_recovery_cycles": 1
 }
