@@ -1,0 +1,73 @@
+{
+  "title": "Authorize loading-list and preloading shipment tracking reads with live menu and customer scope",
+  "description": "Stage3 loading/shipping operational-link closure. src/ERP.Api/Controllers/ContainerPreLoadingController.cs:162-168 and src/ERP.Api/Controllers/ContainerLoadingListController.cs:275-281 expose GET {id}/shipment-tracking with no live identity, menu or customer scope, while every sibling route (including the adjacent shipment-timeline route at ContainerPreLoadingController.cs:181-183 and ContainerLoadingListController.cs:294-296) authorizes; docs/loading-list-authorization.md:121 records these routes as deliberately deferred. Reuse the existing PreLoadingAuthorizationRules and LoadingListAuthorizationRules exactly, add no grants, no anonymous/admin fallback, no schema or production change, and change no tracking DTO semantics. Use genuine isolated (localdb)\\NEWERP_AutoAcceptance GUID-owned NEWERP_AUTOTEST SQL only; safe Release build plus full ERP.UnitTests.",
+  "acceptance_criteria": [
+    "Before returning shipment tracking, require the current enabled nondeleted authenticated account, the existing preloading and loading-list functional menus and the authoritative customer scope by reusing PreLoadingAuthorizationRules and LoadingListAuthorizationRules exactly on GET /api/container/pre-loadings/{id}/shipment-tracking and GET /api/container/loading-lists/{id}/shipment-tracking; no new grants, no anonymous or admin fallback and no request-path or export-menu exemption.",
+    "Resolve the persisted preloading or loading-list and its booking reference only after scope passes so foreign, deleted or missing documents return the same controlled non-disclosing not-found error as the sibling shipment-timeline routes, without leaking container numbers, booking ids, ETD/ETA or customs-broker values, and preserve the existing ContainerShipmentTrackingDto, null-as-unknown semantics and read-only behavior.",
+    "Genuine isolated SQL authenticated controller tests cover own, foreign and deleted documents, mixed-participant shared shipments and explicit upstream customers, disabled, deleted and revoked-menu identities, missing functional menu and permitted privileged access on both routes, and assert denial leaves preloading, loading-list, booking, shipment-reference and milestone rows unchanged while ERP-040/057/059 tracking and timeline contracts still hold.",
+    "Keep the safe Release build and the full existing ERP.UnitTests suite green, use only genuine isolated (localdb)\\NEWERP_AutoAcceptance GUID-owned NEWERP_AUTOTEST databases with Integrated Security, and add no schema, entity, permission or production/secret change; build completion is not stage acceptance."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/ContainerPreLoadingController.cs",
+    "src/ERP.Api/Controllers/ContainerLoadingListController.cs",
+    "src/ERP.Application/Services/PreLoadingAuthorizationRules.cs",
+    "src/ERP.Application/Services/LoadingListAuthorizationRules.cs",
+    "src/ERP.UnitTests/PreLoadingAuthorizationTests.cs",
+    "src/ERP.UnitTests/LoadingListAuthorizationTests.cs",
+    "src/ERP.UnitTests/ContainerShipmentTrackingTests.cs",
+    "src/ERP.IntegrationTests/PreLoadingAuthorizationSqlServerTests.cs",
+    "src/ERP.IntegrationTests/LoadingListAuthorizationSqlServerTests.cs",
+    "docs/loading-list-authorization.md"
+  ],
+  "criterion_path_map": {
+    "Before returning shipment tracking, require the current enabled nondeleted authenticated account, the existing preloading and loading-list functional menus and the authoritative customer scope by reusing PreLoadingAuthorizationRules and LoadingListAuthorizationRules exactly on GET /api/container/pre-loadings/{id}/shipment-tracking and GET /api/container/loading-lists/{id}/shipment-tracking; no new grants, no anonymous or admin fallback and no request-path or export-menu exemption.": [
+      "src/ERP.Api/Controllers/ContainerPreLoadingController.cs",
+      "src/ERP.Api/Controllers/ContainerLoadingListController.cs",
+      "src/ERP.Application/Services/PreLoadingAuthorizationRules.cs",
+      "src/ERP.Application/Services/LoadingListAuthorizationRules.cs"
+    ],
+    "Resolve the persisted preloading or loading-list and its booking reference only after scope passes so foreign, deleted or missing documents return the same controlled non-disclosing not-found error as the sibling shipment-timeline routes, without leaking container numbers, booking ids, ETD/ETA or customs-broker values, and preserve the existing ContainerShipmentTrackingDto, null-as-unknown semantics and read-only behavior.": [
+      "src/ERP.Api/Controllers/ContainerPreLoadingController.cs",
+      "src/ERP.Api/Controllers/ContainerLoadingListController.cs"
+    ],
+    "Genuine isolated SQL authenticated controller tests cover own, foreign and deleted documents, mixed-participant shared shipments and explicit upstream customers, disabled, deleted and revoked-menu identities, missing functional menu and permitted privileged access on both routes, and assert denial leaves preloading, loading-list, booking, shipment-reference and milestone rows unchanged while ERP-040/057/059 tracking and timeline contracts still hold.": [
+      "src/ERP.UnitTests/PreLoadingAuthorizationTests.cs",
+      "src/ERP.UnitTests/LoadingListAuthorizationTests.cs",
+      "src/ERP.UnitTests/ContainerShipmentTrackingTests.cs",
+      "src/ERP.IntegrationTests/PreLoadingAuthorizationSqlServerTests.cs",
+      "src/ERP.IntegrationTests/LoadingListAuthorizationSqlServerTests.cs",
+      "docs/loading-list-authorization.md"
+    ],
+    "Keep the safe Release build and the full existing ERP.UnitTests suite green, use only genuine isolated (localdb)\\NEWERP_AutoAcceptance GUID-owned NEWERP_AUTOTEST databases with Integrated Security, and add no schema, entity, permission or production/secret change; build completion is not stage acceptance.": [
+      "src/ERP.UnitTests/PreLoadingAuthorizationTests.cs",
+      "src/ERP.UnitTests/LoadingListAuthorizationTests.cs",
+      "docs/loading-list-authorization.md"
+    ]
+  },
+  "implementation_evidence": "src/ERP.Api/Controllers/ContainerPreLoadingController.cs:162-168 GetShipmentTracking calls GetOrThrowAsync then ContainerShipmentTrackingService.ResolveForPreLoadingAsync with no PreLoadingAuthorizationRules.EnsureAuthorizedAsync/EnsureStoredScopeAllowedAsync, unlike the guarded shipment-timeline route at lines 175-188 and every other route in the file. src/ERP.Api/Controllers/ContainerLoadingListController.cs:275-281 GetShipmentTracking is likewise unguarded while the adjacent shipment-timeline route (288-301) and all other routes authorize. docs/loading-list-authorization.md:119-122 records these exact routes as deferred ('单证带入 / 生成与出运跟踪路由暂未接入本护栏'). No task in .ai/tasks lists these two routes or these controllers for the tracking route.",
+  "depends_on": [
+    "ERP-364",
+    "ERP-363",
+    "ERP-059"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "id": "ERP-431",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-09T04:17:26.108316Z"
+}

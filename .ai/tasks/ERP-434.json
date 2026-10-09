@@ -1,0 +1,74 @@
+{
+  "title": "Enforce live receipt permission and scope on customer receipt allocation evidence registers",
+  "description": "Stage3 receipts closure. src/ERP.Api/Controllers/CustomerReceiptAllocationController.cs and CustomerSalesInvoiceCollectionAllocationController.cs declare only [Authorize] and no route resolves a live module menu or customer scope; CustomerReceiptAllocationService.cs and CustomerSalesInvoiceCollectionAllocationService.cs contain zero authorization references. Reuse the existing CustomerReceiptLifecycleRules.EnsureMenuAuthorizedAsync/EnsureAuthorizedAsync that FinanceReceiptController.cs:36-38,55 already uses plus SalespersonDataScopeService; add no grants, no anonymous/admin fallback, no schema change and no change to the ERP-053/073/075 funding-evidence semantics or locking. Genuine isolated (localdb)\\NEWERP_AutoAcceptance GUID-owned NEWERP_AUTOTEST SQL only; safe Release build plus full ERP.UnitTests.",
+  "acceptance_criteria": [
+    "For every route on /api/customer-receipt-allocations and /api/customer-sales-invoice-collection-allocations require the current enabled nondeleted identity and the existing receipt functional menu before any read or write by reusing CustomerReceiptLifecycleRules exactly, rejecting missing, disabled, deleted and revoked-menu identities with the existing controlled non-disclosing errors and adding no new grants or anonymous/admin fallback.",
+    "Resolve the referenced receipt and its orders or sales-invoice evidences only after authorization and scope them with SalespersonDataScopeService before counting, listing, summary or candidate materialization, so foreign, deleted or missing receipts, orders and invoices return the same non-disclosing error without exposing foreign ids, amounts or counts, and denied register or void writes persist no allocation row.",
+    "Genuine isolated SQL authenticated controller tests cover own, foreign and deleted receipts and invoices, missing functional menu, disabled, deleted and revoked identities, denied create and void with zero evidence mutation and a permitted register lifecycle, while keeping the existing ERP-053/073/075 receipt-funding and collection-evidence regression tests green.",
+    "Keep the safe Release build and the full existing ERP.UnitTests suite green, use only genuine isolated (localdb)\\NEWERP_AutoAcceptance GUID-owned NEWERP_AUTOTEST databases with Integrated Security, and add no schema, entity, permission or production/secret change; build completion is not stage acceptance."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/CustomerReceiptAllocationController.cs",
+    "src/ERP.Api/Controllers/CustomerSalesInvoiceCollectionAllocationController.cs",
+    "src/ERP.Application/Services/CustomerReceiptLifecycleRules.cs",
+    "src/ERP.Application/Services/CustomerReceiptAllocationService.cs",
+    "src/ERP.Application/Services/CustomerSalesInvoiceCollectionAllocationService.cs",
+    "src/ERP.Application/Services/SalespersonDataScopeService.cs",
+    "src/ERP.UnitTests/CustomerReceiptAllocationTests.cs",
+    "src/ERP.UnitTests/CustomerSalesInvoiceCollectionAllocationTests.cs",
+    "src/ERP.UnitTests/CustomerReceiptLifecycleTests.cs",
+    "src/ERP.IntegrationTests/CustomerReceiptLifecycleSqlServerTests.cs",
+    "docs/customer-receipt-allocation-authority.md"
+  ],
+  "criterion_path_map": {
+    "For every route on /api/customer-receipt-allocations and /api/customer-sales-invoice-collection-allocations require the current enabled nondeleted identity and the existing receipt functional menu before any read or write by reusing CustomerReceiptLifecycleRules exactly, rejecting missing, disabled, deleted and revoked-menu identities with the existing controlled non-disclosing errors and adding no new grants or anonymous/admin fallback.": [
+      "src/ERP.Api/Controllers/CustomerReceiptAllocationController.cs",
+      "src/ERP.Api/Controllers/CustomerSalesInvoiceCollectionAllocationController.cs",
+      "src/ERP.Application/Services/CustomerReceiptLifecycleRules.cs"
+    ],
+    "Resolve the referenced receipt and its orders or sales-invoice evidences only after authorization and scope them with SalespersonDataScopeService before counting, listing, summary or candidate materialization, so foreign, deleted or missing receipts, orders and invoices return the same non-disclosing error without exposing foreign ids, amounts or counts, and denied register or void writes persist no allocation row.": [
+      "src/ERP.Application/Services/CustomerReceiptAllocationService.cs",
+      "src/ERP.Application/Services/CustomerSalesInvoiceCollectionAllocationService.cs",
+      "src/ERP.Application/Services/SalespersonDataScopeService.cs"
+    ],
+    "Genuine isolated SQL authenticated controller tests cover own, foreign and deleted receipts and invoices, missing functional menu, disabled, deleted and revoked identities, denied create and void with zero evidence mutation and a permitted register lifecycle, while keeping the existing ERP-053/073/075 receipt-funding and collection-evidence regression tests green.": [
+      "src/ERP.UnitTests/CustomerReceiptAllocationTests.cs",
+      "src/ERP.UnitTests/CustomerSalesInvoiceCollectionAllocationTests.cs",
+      "src/ERP.UnitTests/CustomerReceiptLifecycleTests.cs",
+      "src/ERP.IntegrationTests/CustomerReceiptLifecycleSqlServerTests.cs",
+      "docs/customer-receipt-allocation-authority.md"
+    ],
+    "Keep the safe Release build and the full existing ERP.UnitTests suite green, use only genuine isolated (localdb)\\NEWERP_AutoAcceptance GUID-owned NEWERP_AUTOTEST databases with Integrated Security, and add no schema, entity, permission or production/secret change; build completion is not stage acceptance.": [
+      "src/ERP.UnitTests/CustomerReceiptLifecycleTests.cs",
+      "docs/customer-receipt-allocation-authority.md"
+    ]
+  },
+  "implementation_evidence": "src/ERP.Api/Controllers/CustomerReceiptAllocationController.cs:25-113 and src/ERP.Api/Controllers/CustomerSalesInvoiceCollectionAllocationController.cs:16-32 declare only [Authorize] at class level; every route (GetPaged, receipts/invoices summar­ies, allocations, order/invoice candidates, GetById, Create, Void) calls the service with no CurrentUserId, menu or scope resolution. src/ERP.Application/Services/CustomerReceiptAllocationService.cs and CustomerSalesInvoiceCollectionAllocationService.cs contain no Authoriz/SalespersonDataScope/EnsureMenu reference. The existing guarded counterparts are src/ERP.Api/Controllers/FinanceReceiptComplaintControllers.cs:36-38,55 (CustomerReceiptLifecycleRules.EnsureMenuAuthorizedAsync/EnsureAuthorizedAsync + SalespersonDataScopeService). No task in .ai/tasks lists these controllers or these services as allowed_paths for authorization.",
+  "depends_on": [
+    "ERP-349",
+    "ERP-350",
+    "ERP-383",
+    "ERP-053",
+    "ERP-073"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "id": "ERP-434",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-09T04:17:26.112020Z"
+}

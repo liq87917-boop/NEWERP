@@ -1,0 +1,72 @@
+{
+  "title": "Enforce live payment permission and scope on supplier payment allocation evidence registers",
+  "description": "Stage3 procurement-to-payments closure. src/ERP.Api/Controllers/SupplierPaymentAllocationController.cs and SupplierPaymentInvoiceAllocationController.cs declare only [Authorize] and no route resolves a live module menu or owning customer scope; SupplierPaymentAllocationService.cs and SupplierPaymentInvoiceAllocationService.cs contain zero authorization references. Reuse the existing SupplierPaymentLifecycleRules.EnsureMenuAuthorizedAsync/EnsureAuthorizedAsync that FinancePaymentController.cs:28,48 already uses; add no grants, no anonymous/admin fallback, no schema change and no change to the ERP-049/066/067 evidence semantics or payment-capacity locking. Genuine isolated (localdb)\\NEWERP_AutoAcceptance GUID-owned NEWERP_AUTOTEST SQL only; safe Release build plus full ERP.UnitTests.",
+  "acceptance_criteria": [
+    "For every route on /api/supplier-payment-allocations and /api/supplier-payment-invoice-allocations require the current enabled nondeleted identity and the existing payment functional menu before any read or write by reusing SupplierPaymentLifecycleRules exactly, rejecting missing, disabled, deleted and revoked-menu identities with the existing controlled non-disclosing errors and adding no new grants or anonymous/admin fallback.",
+    "Resolve the referenced supplier payment and its orders or invoices only after authorization and scope them to the account's authoritative customer scope before counting, listing, summary or candidate materialization, so foreign, deleted or missing payments, orders and invoices return the same non-disclosing error without exposing foreign ids, amounts or counts, and denied register or void writes persist no allocation row.",
+    "Genuine isolated SQL authenticated controller tests cover own, foreign and deleted payments and invoices, missing functional menu, disabled, deleted and revoked identities, denied create and void with zero evidence mutation and a permitted register lifecycle, while keeping the existing ERP-049/066/067 evidence semantics and the supplier payment capacity and concurrency regression tests green.",
+    "Keep the safe Release build and the full existing ERP.UnitTests suite green, use only genuine isolated (localdb)\\NEWERP_AutoAcceptance GUID-owned NEWERP_AUTOTEST databases with Integrated Security, and add no schema, entity, permission or production/secret change; build completion is not stage acceptance."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/SupplierPaymentAllocationController.cs",
+    "src/ERP.Api/Controllers/SupplierPaymentInvoiceAllocationController.cs",
+    "src/ERP.Application/Services/SupplierPaymentLifecycleRules.cs",
+    "src/ERP.Application/Services/SupplierPaymentAllocationService.cs",
+    "src/ERP.Application/Services/SupplierPaymentInvoiceAllocationService.cs",
+    "src/ERP.UnitTests/SupplierPaymentAllocationTests.cs",
+    "src/ERP.UnitTests/SupplierPaymentInvoiceAllocationTests.cs",
+    "src/ERP.UnitTests/SupplierPaymentLifecycleTests.cs",
+    "src/ERP.IntegrationTests/SupplierPaymentLifecycleSqlServerTests.cs",
+    "docs/supplier-payment-allocation-authority.md"
+  ],
+  "criterion_path_map": {
+    "For every route on /api/supplier-payment-allocations and /api/supplier-payment-invoice-allocations require the current enabled nondeleted identity and the existing payment functional menu before any read or write by reusing SupplierPaymentLifecycleRules exactly, rejecting missing, disabled, deleted and revoked-menu identities with the existing controlled non-disclosing errors and adding no new grants or anonymous/admin fallback.": [
+      "src/ERP.Api/Controllers/SupplierPaymentAllocationController.cs",
+      "src/ERP.Api/Controllers/SupplierPaymentInvoiceAllocationController.cs",
+      "src/ERP.Application/Services/SupplierPaymentLifecycleRules.cs"
+    ],
+    "Resolve the referenced supplier payment and its orders or invoices only after authorization and scope them to the account's authoritative customer scope before counting, listing, summary or candidate materialization, so foreign, deleted or missing payments, orders and invoices return the same non-disclosing error without exposing foreign ids, amounts or counts, and denied register or void writes persist no allocation row.": [
+      "src/ERP.Application/Services/SupplierPaymentAllocationService.cs",
+      "src/ERP.Application/Services/SupplierPaymentInvoiceAllocationService.cs",
+      "src/ERP.Application/Services/SupplierPaymentLifecycleRules.cs"
+    ],
+    "Genuine isolated SQL authenticated controller tests cover own, foreign and deleted payments and invoices, missing functional menu, disabled, deleted and revoked identities, denied create and void with zero evidence mutation and a permitted register lifecycle, while keeping the existing ERP-049/066/067 evidence semantics and the supplier payment capacity and concurrency regression tests green.": [
+      "src/ERP.UnitTests/SupplierPaymentAllocationTests.cs",
+      "src/ERP.UnitTests/SupplierPaymentInvoiceAllocationTests.cs",
+      "src/ERP.UnitTests/SupplierPaymentLifecycleTests.cs",
+      "src/ERP.IntegrationTests/SupplierPaymentLifecycleSqlServerTests.cs",
+      "docs/supplier-payment-allocation-authority.md"
+    ],
+    "Keep the safe Release build and the full existing ERP.UnitTests suite green, use only genuine isolated (localdb)\\NEWERP_AutoAcceptance GUID-owned NEWERP_AUTOTEST databases with Integrated Security, and add no schema, entity, permission or production/secret change; build completion is not stage acceptance.": [
+      "src/ERP.UnitTests/SupplierPaymentLifecycleTests.cs",
+      "docs/supplier-payment-allocation-authority.md"
+    ]
+  },
+  "implementation_evidence": "src/ERP.Api/Controllers/SupplierPaymentAllocationController.cs:23-90 and src/ERP.Api/Controllers/SupplierPaymentInvoiceAllocationController.cs:26-113 declare only [Authorize] at class level; every route (GetPaged, payments/payment summaries/allocations/candidates, GetById, Create, Void) calls the service with no CurrentUserId, menu or scope resolution. src/ERP.Application/Services/SupplierPaymentAllocationService.cs and src/ERP.Application/Services/SupplierPaymentInvoiceAllocationService.cs contain no Authoriz/SalespersonDataScope/EnsureMenu reference. The existing guarded counterpart is src/ERP.Api/Controllers/FinancePaymentController.cs:28,48 which reuses SupplierPaymentLifecycleRules.EnsureMenuAuthorizedAsync/EnsureAuthorizedAsync. No task in .ai/tasks lists these controllers or services as allowed_paths, so the register remains reachable by any authenticated account.",
+  "depends_on": [
+    "ERP-351",
+    "ERP-380",
+    "ERP-382",
+    "ERP-066"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "id": "ERP-433",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-09T04:17:26.110951Z"
+}
