@@ -319,7 +319,7 @@ public class SalesOrderController : DocumentControllerBase<SalesOrder>
     /// 创建（ERP-401 / ERP-420）：先复核**规范写入授权**（实时身份 + 既有「销售订单」菜单 + 权威客户范围）与
     /// 拟议客户范围（无来源的手工订单同样适用），显式来源再做**权威解析 + 确定性来源行锁（报价单 → PI）+ 原子事务**，
     /// 在锁内复核既有转换资格与唯一目标，<b>之后</b>才预约单据号与写入；显式来源 Id 全部无法解析时按「显式历史值」
-    /// 原样保留（不构成实时链接）；未链接的手工订单保持既有口径（不取任何来源锁、不开事务）。
+    /// 原样保留（不构成实时链接）；未链接的手工订单不取任何来源锁，但表头与明细仍在同一原子事务内写入（ERP-421）。
     /// </summary>
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] SalesOrder entity)
@@ -335,6 +335,9 @@ public class SalesOrderController : DocumentControllerBase<SalesOrder>
         IDbContextTransaction? transaction = null;
         try
         {
+            // ERP-421：无论手工 / 历史 / 已解析来源，表头与明细都在同一原子事务内写入。
+            transaction = await SalesOrderMutationRules.BeginMutationTransactionAsync(Db);
+
             var lineage = new SalesOrderSourceLineage();
             if (change.HasSource)
             {
@@ -343,7 +346,6 @@ public class SalesOrderController : DocumentControllerBase<SalesOrder>
                 if (!lineage.IsUnresolvedLegacy)
                 {
                     // 第二阶段：原子事务内按确定性锁序加来源行锁，并**锁内重读**权威来源后才放行。
-                    transaction = await SalesOrderSourceLineageRules.BeginWriteTransactionAsync(Db);
                     if (!await SalesOrderSourceLineageRules.LockSourcesAsync(Db, change.QuotationId, change.PiId))
                         throw BusinessException.RuleConflict(SalesOrderSourceLineageRules.SourceNotFoundText);
 
@@ -400,10 +402,10 @@ public class SalesOrderController : DocumentControllerBase<SalesOrder>
 
     /// <summary>
     /// 更新（ERP-401 / ERP-420）：先复核**规范写入授权**（实时身份 + 既有「销售订单」菜单 + 权威客户范围）、
-    /// 持久化订单归属（先于读取明细 / 暴露状态）与拟议客户范围（改派）；再按「报价单 → PI → 销售订单」确定性锁序加
-    /// 来源行锁并**锁内重读**持久化来源 / 目标状态与实时权限，复核来源血缘（历史来源绝不静默清除；显式改绑需完整实时
-    /// 复核且下游已有证据时冻结），最后才改写字段 / 明细 / 金额；未链接且不涉及来源的手工订单保持既有口径
-    /// （不取任何来源锁、不开事务）。
+    /// 持久化订单归属（先于读取明细 / 暴露状态）与拟议客户范围（改派）；随后<b>无论手工 / 历史 / 已解析来源</b>
+    /// 都在同一原子事务内按「报价单 → PI → 销售订单」确定性锁序加锁（手工 / 无法解析历史来源只取订单行锁），
+    /// 锁内重读持久化来源 / 目标状态与实时权限并复核来源血缘（历史来源绝不静默清除；显式改绑需完整实时复核且
+    /// 下游已有证据时冻结），最后才改写字段 / 明细 / 金额；加锁前读到的来源被并发改写时原子拒绝。
     /// </summary>
     [HttpPut("{id:long}")]
     public async Task<IActionResult> Update(long id, [FromBody] SalesOrder entity)
@@ -413,72 +415,79 @@ public class SalesOrderController : DocumentControllerBase<SalesOrder>
         await EnsurePersistedOrderAllowedAsync(writeScope, id);
         SalesOrderMutationAuthorizationRules.EnsureProposedCustomerAllowed(writeScope, entity.CustomerId);
 
-        var existing = await Db.SalesOrders.Include(o => o.Details)
-            .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
-            ?? throw BusinessException.NotFound("销售订单不存在");
-        if (GetStatus(existing) != DocumentStatus.Pending)
-            throw BusinessException.RuleConflict("仅待提交状态的单据可修改");
-
         var requestedQuotationId = SalesOrderSourceLineageRules.NormalizeId(entity.SourceQuotationId);
         var requestedPiId = SalesOrderSourceLineageRules.NormalizeId(entity.SourcePiId);
-        var preliminary = SalesOrderSourceLineageRules.ResolveChange(existing.SourceQuotationId,
-            existing.SourcePiId, requestedQuotationId, requestedPiId);
 
         IDbContextTransaction? transaction = null;
         try
         {
-            var change = preliminary;
-            var lineage = new SalesOrderSourceLineage();
-            if (preliminary.HasSource)
+            // ERP-421：无论手工 / 历史 / 已解析来源，修改都在同一原子事务内先取确定性行锁。
+            transaction = await SalesOrderMutationRules.BeginMutationTransactionAsync(Db);
+
+            var preliminaryRead = await Db.SalesOrders.AsNoTracking()
+                .Where(o => o.Id == id && !o.IsDeleted)
+                .Select(o => new { o.CustomerId, o.Status, o.SourceQuotationId, o.SourcePiId })
+                .FirstOrDefaultAsync()
+                ?? throw BusinessException.NotFound("销售订单不存在");
+            SalesOrderMutationRules.EnsureEditable(preliminaryRead.Status);
+
+            var preliminary = SalesOrderSourceLineageRules.ResolveChange(preliminaryRead.SourceQuotationId,
+                preliminaryRead.SourcePiId, requestedQuotationId, requestedPiId);
+
+            // 需要加锁的实时来源行（无法解析的历史值 / 手工订单不取来源锁，只取订单行锁）。
+            var lockScope = preliminary.HasSource
+                ? await SalesOrderMutationRules.ResolveLiveSourceLockScopeAsync(Db, preliminaryRead.CustomerId,
+                    preliminary.QuotationId, preliminary.PiId)
+                : SalesOrderMutationLockScope.None;
+
+            // 显式改绑到可精确解析来源时先复核下游冻结（未删除的变更申请 / 销售出库一律冻结改绑）。
+            if (preliminary.IsExplicitChange && lockScope.IsLiveSource
+                && (preliminaryRead.SourceQuotationId is > 0 || preliminaryRead.SourcePiId is > 0))
+                await SalesOrderSourceLineageRules.EnsureRebindNotFrozenAsync(Db, id);
+
+            // 确定性锁序：报价单来源行 → PI 来源行 → 销售订单目标行（绝不反向获取下游锁）。
+            if (!await SalesOrderSourceLineageRules.LockSourcesAsync(Db, lockScope.QuotationId, lockScope.PiId))
+                throw BusinessException.RuleConflict(SalesOrderSourceLineageRules.SourceNotFoundText);
+            if (!await SalesOrderSourceLineageRules.LockSalesOrderRowAsync(Db, id))
+                throw BusinessException.NotFound("销售订单不存在");
+
+            // 锁内重新读取实时权限（身份 / 菜单 / 客户范围）与持久化归属，授权撤销 / 客户改派立即收敛。
+            var lockedScope = await EnsureCanonicalWriteAuthorizedAsync();
+            await EnsurePersistedOrderAllowedAsync(lockedScope, id);
+            SalesOrderMutationAuthorizationRules.EnsureProposedCustomerAllowed(lockedScope, entity.CustomerId);
+
+            // 锁内重读持久化表头 / 明细 / 状态 / 来源：并发方已提交的结果以此为准，绝不按陈旧状态放行。
+            var existing = await Db.SalesOrders.Include(o => o.Details)
+                .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
+                ?? throw BusinessException.NotFound("销售订单不存在");
+            SalesOrderMutationRules.EnsureEditable(GetStatus(existing));
+            if (!SalesOrderMutationRules.PersistedSourceUnchanged(preliminaryRead.SourceQuotationId,
+                    preliminaryRead.SourcePiId, existing.SourceQuotationId, existing.SourcePiId))
+                throw BusinessException.RuleConflict(SalesOrderMutationRules.SourceChangedUnderLockText);
+
+            var change = SalesOrderSourceLineageRules.ResolveChange(existing.SourceQuotationId,
+                existing.SourcePiId, requestedQuotationId, requestedPiId);
+            var lineage = change.HasSource
+                ? await SalesOrderSourceLineageRules.ResolveAsync(Db, change, entity.CustomerId)
+                : new SalesOrderSourceLineage();
+
+            if (change.HasSource)
             {
-                // 只读预解析：区分「可精确解析的实时链接」与「无法解析的显式历史值」。
-                lineage = await SalesOrderSourceLineageRules.ResolveAsync(Db, preliminary, entity.CustomerId);
                 if (lineage.IsUnresolvedLegacy)
                 {
                     // 存在历史链接时禁止改绑到无法解析的来源（绝不静默放弃历史来源）。
-                    var persistedNow = existing.SourceQuotationId is > 0 || existing.SourcePiId is > 0;
-                    if (preliminary.IsExplicitChange && persistedNow)
+                    var persistedLinkExists = existing.SourceQuotationId is > 0 || existing.SourcePiId is > 0;
+                    if (change.IsExplicitChange && persistedLinkExists)
                         throw BusinessException.RuleConflict(SalesOrderSourceLineageRules.RebindUnknownSourceText);
                 }
                 else
                 {
-                    // 显式改绑先复核下游冻结（未删除的变更申请 / 销售出库一律冻结改绑）。
-                    if (preliminary.IsExplicitChange)
-                        await SalesOrderSourceLineageRules.EnsureRebindNotFrozenAsync(Db, id);
+                    // 本次加锁的来源范围必须覆盖锁内重新解析出的实时来源（来源已过期时绝不改写到未加锁的来源）。
+                    if (!SalesOrderMutationRules.ScopeCovers(lockScope, lineage.Quotation?.Id,
+                            lineage.ProformaInvoice?.Id))
+                        throw BusinessException.RuleConflict(SalesOrderMutationRules.SourceChangedUnderLockText);
 
-                    transaction = await SalesOrderSourceLineageRules.BeginWriteTransactionAsync(Db);
-                    if (!await SalesOrderSourceLineageRules.LockSourcesAsync(Db, preliminary.QuotationId,
-                            preliminary.PiId))
-                        throw BusinessException.RuleConflict(SalesOrderSourceLineageRules.SourceNotFoundText);
-                    if (!await SalesOrderSourceLineageRules.LockSalesOrderRowAsync(Db, id))
-                        throw BusinessException.NotFound("销售订单不存在");
-
-                    // ERP-420：在已持有的订单行锁内**重新读取实时权限**（身份 / 菜单 / 客户范围）与持久化归属，
-                    // 授权撤销 / 账号停用 / 客户改派在下一次请求立即收敛，绝不按授权前读到的陈旧范围放行。
-                    var lockedScope = await EnsureCanonicalWriteAuthorizedAsync();
-                    await EnsurePersistedOrderAllowedAsync(lockedScope, id);
-                    SalesOrderMutationAuthorizationRules.EnsureProposedCustomerAllowed(
-                        lockedScope, entity.CustomerId);
-
-                    // 锁内重读持久化状态：并发方已提交的结果以锁内权威重读为准，绝不按陈旧状态放行。
-                    var locked = await Db.SalesOrders.AsNoTracking()
-                        .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
-                        ?? throw BusinessException.NotFound("销售订单不存在");
-                    if (locked.Status != DocumentStatus.Pending)
-                        throw BusinessException.RuleConflict("仅待提交状态的单据可修改");
-
-                    change = SalesOrderSourceLineageRules.ResolveChange(locked.SourceQuotationId,
-                        locked.SourcePiId, requestedQuotationId, requestedPiId);
-                    var persistedLinkExists = locked.SourceQuotationId is > 0 || locked.SourcePiId is > 0;
-
-                    lineage = await SalesOrderSourceLineageRules.ResolveAsync(Db, change, entity.CustomerId);
-                    if (lineage.IsUnresolvedLegacy)
-                    {
-                        if (change.IsExplicitChange && persistedLinkExists)
-                            throw BusinessException.RuleConflict(
-                                SalesOrderSourceLineageRules.RebindUnknownSourceText);
-                    }
-                    else if (change.IsExplicitChange)
+                    if (change.IsExplicitChange)
                     {
                         await SalesOrderSourceLineageRules.EnsureWriteAuthorizedAsync(
                             Db, CurrentUserId(), lineage, entity.CustomerId);
@@ -487,7 +496,7 @@ public class SalesOrderController : DocumentControllerBase<SalesOrder>
                     else
                     {
                         // 历史链接未改动（或请求未给出 Id 的清空尝试）：只做持久化来源重查，绝不静默清除 / 改写。
-                        await SalesOrderSourceLineageRules.EnsurePersistedSourceIntactAsync(Db, locked);
+                        await SalesOrderSourceLineageRules.EnsurePersistedSourceIntactAsync(Db, existing);
                     }
                 }
             }
@@ -593,10 +602,10 @@ public class SalesOrderController : DocumentControllerBase<SalesOrder>
         => await RunLineageGuardedStatusChangeAsync(id, DocumentStatus.Submitted, DocumentStatus.Approved, "审核通过");
 
     /// <summary>
-    /// 带来源血缘复核的状态流转：先复核**规范写入授权**与持久化订单归属（缺失 / 非法 / 已禁用身份、缺菜单或
-    /// 范围外订单一律 fail closed，且先于读取明细 / 暴露状态）；未链接手工订单走既有口径（不加锁、不开事务）；
-    /// 已登记来源的订单先取目标订单行锁（与取消 / 出库审核 / 单证生成同一把锁）再**锁内重读实时权限**并复核持久化来源血缘，
-    /// 任一步失败整体回滚并丢弃半成品变更。
+    /// 带来源血缘复核的状态流转（ERP-421）：先复核**规范写入授权**与持久化订单归属（缺失 / 非法 / 已禁用身份、
+    /// 缺菜单或范围外订单一律 fail closed，且先于读取明细 / 暴露状态）；随后<b>无论手工 / 历史 / 已解析来源</b>
+    /// 都进入同一原子事务并按「报价单 → PI → 销售订单行」确定性锁序加锁（手工 / 无法解析的历史来源只取订单行锁），
+    /// 锁内重新读取实时权限、持久化状态与来源后复核合法流转与持久化来源血缘，任一步失败整体回滚并丢弃半成品变更。
     /// </summary>
     private async Task<IActionResult> RunLineageGuardedStatusChangeAsync(long id, DocumentStatus from,
         DocumentStatus to, string message)
@@ -605,23 +614,24 @@ public class SalesOrderController : DocumentControllerBase<SalesOrder>
         var writeScope = await EnsureCanonicalWriteAuthorizedAsync();
         await EnsurePersistedOrderAllowedAsync(writeScope, id);
 
-        var entity = await Db.SalesOrders.Include(o => o.Details)
-            .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
+        var preliminary = await Db.SalesOrders.AsNoTracking()
+            .Where(o => o.Id == id && !o.IsDeleted)
+            .Select(o => new { o.CustomerId, o.Status, o.SourceQuotationId, o.SourcePiId })
+            .FirstOrDefaultAsync()
             ?? throw BusinessException.NotFound("销售订单不存在");
-        if (GetStatus(entity) != from)
-            throw BusinessException.RuleConflict("当前状态不允许该操作");
-
-        if (entity.SourceQuotationId is not > 0 && entity.SourcePiId is not > 0)
-        {
-            SetStatus(entity, to);
-            await Db.SaveChangesAsync();
-            return Ok(ApiResponse<object>.Success(null, message));
-        }
+        SalesOrderMutationRules.EnsureTransitionAllowed(preliminary.Status, from, to);
 
         IDbContextTransaction? transaction = null;
         try
         {
-            transaction = await SalesOrderSourceLineageRules.BeginWriteTransactionAsync(Db);
+            // ERP-421：无论手工 / 历史 / 已解析来源，状态流转都在同一原子事务内先取确定性行锁。
+            transaction = await SalesOrderMutationRules.BeginMutationTransactionAsync(Db);
+
+            // 已解析实时来源按「报价单 → PI → 订单行」加锁；手工 / 无法解析的历史来源只取订单行锁。
+            var lockScope = await SalesOrderMutationRules.TryResolveLiveSourceLockScopeAsync(Db,
+                preliminary.CustomerId, preliminary.SourceQuotationId, preliminary.SourcePiId);
+            if (!await SalesOrderSourceLineageRules.LockSourcesAsync(Db, lockScope.QuotationId, lockScope.PiId))
+                throw BusinessException.RuleConflict(SalesOrderSourceLineageRules.SourceNotFoundText);
             if (!await SalesOrderSourceLineageRules.LockSalesOrderRowAsync(Db, id))
                 throw BusinessException.NotFound("销售订单不存在");
 
@@ -629,8 +639,16 @@ public class SalesOrderController : DocumentControllerBase<SalesOrder>
             var lockedScope = await EnsureCanonicalWriteAuthorizedAsync();
             await EnsurePersistedOrderAllowedAsync(lockedScope, id);
 
-            await SalesOrderSourceLineageRules.EnsurePersistedSourceIntactAsync(Db, entity);
-            SetStatus(entity, to);
+            // 锁内权威重读状态与来源：并发提交 / 审核 / 取消 / 改绑后的过期结果一律拒绝，绝不按陈旧状态放行。
+            var locked = await Db.SalesOrders.FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
+                ?? throw BusinessException.NotFound("销售订单不存在");
+            SalesOrderMutationRules.EnsureTransitionAllowed(GetStatus(locked), from, to);
+            if (!SalesOrderMutationRules.PersistedSourceUnchanged(preliminary.SourceQuotationId,
+                    preliminary.SourcePiId, locked.SourceQuotationId, locked.SourcePiId))
+                throw BusinessException.RuleConflict(SalesOrderMutationRules.SourceChangedUnderLockText);
+
+            await SalesOrderSourceLineageRules.EnsurePersistedSourceIntactAsync(Db, locked);
+            SetStatus(locked, to);
             await Db.SaveChangesAsync();
             if (transaction is not null) await transaction.CommitAsync();
             return Ok(ApiResponse<object>.Success(null, message));
@@ -705,16 +723,65 @@ public class SalesOrderController : DocumentControllerBase<SalesOrder>
     }
 
     /// <summary>
-    /// 删除（ERP-420）：先复核**规范写入授权**（实时身份 + 既有「销售订单」菜单 + 权威客户范围）与持久化订单归属
-    /// （范围外 / 已删除 / 不存在返回同一非披露错误），再沿用基类「仅待提交状态可软删除」的既有口径；
-    /// 写入路径不做进程内豁免，也绝不物理删除或改写下游证据。
+    /// 删除（ERP-420 / ERP-421）：先复核**规范写入授权**（实时身份 + 既有「销售订单」菜单 + 权威客户范围）与持久化
+    /// 订单归属（范围外 / 已删除 / 不存在返回同一非披露错误）；随后**无论手工 / 历史 / 已解析来源**都进入同一原子事务，
+    /// 按「报价单 → PI → 销售订单行」确定性锁序加锁（手工 / 无法解析的历史来源只取订单行锁），锁内重新读取实时权限、
+    /// 持久化状态与来源后复核「仅待提交可软删除」，任一步失败整体回滚并丢弃半成品变更；绝不物理删除或改写下游证据。
     /// </summary>
     [HttpDelete("{id:long}")]
     public override async Task<IActionResult> Delete(long id)
     {
         var writeScope = await EnsureCanonicalWriteAuthorizedAsync();
         await EnsurePersistedOrderAllowedAsync(writeScope, id);
-        return await base.Delete(id);
+
+        var preliminary = await Db.SalesOrders.AsNoTracking()
+            .Where(o => o.Id == id && !o.IsDeleted)
+            .Select(o => new { o.CustomerId, o.Status, o.SourceQuotationId, o.SourcePiId })
+            .FirstOrDefaultAsync()
+            ?? throw BusinessException.NotFound("销售订单不存在");
+        SalesOrderMutationRules.EnsureDeletable(preliminary.Status);
+
+        IDbContextTransaction? transaction = null;
+        try
+        {
+            // ERP-421：无论手工 / 历史 / 已解析来源，软删除都在同一原子事务内先取确定性行锁。
+            transaction = await SalesOrderMutationRules.BeginMutationTransactionAsync(Db);
+
+            var lockScope = await SalesOrderMutationRules.TryResolveLiveSourceLockScopeAsync(Db,
+                preliminary.CustomerId, preliminary.SourceQuotationId, preliminary.SourcePiId);
+            if (!await SalesOrderSourceLineageRules.LockSourcesAsync(Db, lockScope.QuotationId, lockScope.PiId))
+                throw BusinessException.RuleConflict(SalesOrderSourceLineageRules.SourceNotFoundText);
+            if (!await SalesOrderSourceLineageRules.LockSalesOrderRowAsync(Db, id))
+                throw BusinessException.NotFound("销售订单不存在");
+
+            // 锁内重新读取实时权限与持久化归属（授权撤销 / 账号停用立即收敛）。
+            var lockedScope = await EnsureCanonicalWriteAuthorizedAsync();
+            await EnsurePersistedOrderAllowedAsync(lockedScope, id);
+
+            // 锁内权威重读状态与来源：并发提交 / 审核 / 取消后的过期删除一律拒绝，已删除 / 已取消记录不可复活。
+            var locked = await Db.SalesOrders.FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
+                ?? throw BusinessException.NotFound("销售订单不存在");
+            SalesOrderMutationRules.EnsureDeletable(GetStatus(locked));
+            if (!SalesOrderMutationRules.PersistedSourceUnchanged(preliminary.SourceQuotationId,
+                    preliminary.SourcePiId, locked.SourceQuotationId, locked.SourcePiId))
+                throw BusinessException.RuleConflict(SalesOrderMutationRules.SourceChangedUnderLockText);
+
+            locked.IsDeleted = true;
+            locked.UpdatedAt = DateTime.Now;
+            await Db.SaveChangesAsync();
+            if (transaction is not null) await transaction.CommitAsync();
+            return Ok(ApiResponse<object>.Success(null, "删除成功"));
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            await RollbackLineageWriteAsync(transaction);
+            throw BusinessException.RuleConflict(SalesOrderSourceLineageRules.ConcurrentMutationText);
+        }
+        catch
+        {
+            await RollbackLineageWriteAsync(transaction);
+            throw;
+        }
     }
 
 

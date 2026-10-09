@@ -535,6 +535,21 @@ public sealed class TradeDocumentGenerationMutationSqlServerTests
         Assert.Equal("商业发票", documents[0].DocType);
         Assert.DoesNotContain(documents, d => d.DocType == "装箱单");
     }
+
+    // ==================== ERP-421：与规范普通写入共用同一把订单行锁 ====================
+
+    [Fact]
+    public void 与ERP421普通写入_共用同一把销售订单行锁与确定性锁序()
+    {
+        // 单证生成（ERP-397）与普通写入（ERP-421）、取消（ERP-347 / -369）、转换（ERP-399 / -400）
+        // 共用同一把来源订单行锁，因此并发场景在单一资源上串行化，绝不反向获取下游锁（不存在锁环）。
+        Assert.Equal(PreLoadingSalesOrderLinkRules.LockSalesOrderRowSql,
+            TradeDocumentGenerationMutationRules.SalesOrderRowLockSql);
+        Assert.Equal(TradeDocumentGenerationMutationRules.SalesOrderRowLockSql,
+            SalesOrderSourceLineageRules.SalesOrderRowLockSql);
+        Assert.Contains("db_owner.SalesOrders", SalesOrderMutationRules.LockOrderText);
+        Assert.Contains("绝不反向获取下游锁", SalesOrderMutationRules.LockOrderText);
+    }
 }
 
 /// <summary>

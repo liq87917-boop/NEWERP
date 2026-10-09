@@ -582,9 +582,12 @@ public class SalesOrderSourceLineageTests
         Assert.Contains("SalesOrderSourceLineageRules.EnsurePersistedSourceIntactAsync", source);
         Assert.Contains("SalesOrderSourceLineageRules.RebindUnknownSourceText", source);
         Assert.Contains("RunLineageGuardedStatusChangeAsync", source);
-        // 未链接手工订单保持既有路径：仅在携带来源时取锁 / 开事务。
+        // ERP-421：无论手工 / 历史 / 已解析来源，都进入同一原子事务 + 确定性行锁 + 锁内权威重读协议。
         Assert.Contains("if (change.HasSource)", source);
-        Assert.Contains("if (preliminary.HasSource)", source);
+        Assert.Contains("SalesOrderMutationRules.BeginMutationTransactionAsync", source);
+        Assert.Contains("SalesOrderMutationRules.ResolveLiveSourceLockScopeAsync", source);
+        Assert.Contains("SalesOrderMutationRules.TryResolveLiveSourceLockScopeAsync", source);
+        Assert.Contains("SalesOrderMutationRules.PersistedSourceUnchanged", source);
         // 来源字段不再照抄提交文本。
         Assert.DoesNotContain("existing.SourcePiId = entity.SourcePiId", source);
         Assert.DoesNotContain("existing.SourceQuotationId = entity.SourceQuotationId", source);
