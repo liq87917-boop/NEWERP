@@ -26,6 +26,9 @@ namespace ERP.Api.Controllers;
 /// <para>ERP-427：真实 HTTP 写入请求（新增 / 修改）在单号预约与任何表头 / 明细赋值之前、提交 / 审核在既有采购订单行锁内
 /// 提交之前，一律经 <see cref="PurchaseOrderMasterReferenceRules"/> 复核实时主数据引用（必填供应商、每条有效明细的必填商品、
 /// 可选采购员 / 起运港与既有有效单位口径），失败即受控拒绝且不落库、不占单号；历史读取 / 打印保持完全只读、不被回填。</para>
+/// <para>ERP-430：规范运营读取（详情 / 打印 / JSON 运营导出）统一经 <see cref="OperationalReadQuery"/>，
+/// 只返回未删除父单的**未删除**明细行（EF Core filtered include，先于物化下推到数据库），与打印同口径；
+/// 表头历史金额与来源 / 审计快照原样保留，读取侧不重算币种总额、不改写被软删除的行。</para>
 /// </summary>
 [Route("api/purchase-orders")]
 public class PurchaseOrderController : DocumentControllerBase<PurchaseOrder>
@@ -60,11 +63,16 @@ public class PurchaseOrderController : DocumentControllerBase<PurchaseOrder>
             new PagedResult<PurchaseOrder> { Items = items, Total = total, Page = query.Page, PageSize = query.PageSize }));
     }
 
-    /// <summary>详情</summary>
+    /// <summary>
+    /// 详情
+    /// <para>ERP-430：与打印 / JSON 运营导出共用 <see cref="OperationalReadQuery"/> —— 只装载未删除父单的
+    /// **未删除**明细行（filtered include，先于物化下推到数据库），被软删除的明细行绝不进入运营快照；
+    /// 表头历史金额与来源 / 审计快照原样保留，不在读取侧重算或改写。</para>
+    /// </summary>
     [HttpGet("{id:long}")]
     public async Task<IActionResult> GetById(long id)
     {
-        var entity = await Set.AsNoTracking().Include(o => o.Details)
+        var entity = await OperationalReadQuery()
             .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
             ?? throw BusinessException.NotFound("采购订单不存在");
         // ERP-371：详情与列表同一口径（身份 / 菜单 / 权威归属客户范围）。
@@ -488,25 +496,33 @@ public class PurchaseOrderController : DocumentControllerBase<PurchaseOrder>
             .ToListAsync();
     }
 
-    /// <summary>打印数据（主表 + 明细；打印模板由 /api/sys/print-templates/purchase-order 提供）</summary>
+    /// <summary>
+    /// 打印数据（主表 + 明细；打印模板由 /api/sys/print-templates/purchase-order 提供）
+    /// <para>ERP-430：明细只保留**未删除**行，且与详情 / JSON 运营导出共用 <see cref="OperationalReadQuery"/>
+    /// 同一数据库侧口径（filtered include，先于物化），不再依赖内存后再过滤。</para>
+    /// </summary>
     [HttpGet("{id:long}/print")]
     public async Task<IActionResult> GetPrint(long id)
     {
-        var entity = await Set.AsNoTracking().Include(o => o.Details)
+        var entity = await OperationalReadQuery()
             .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
             ?? throw BusinessException.NotFound("采购订单不存在");
         // ERP-371：打印与详情同一授权口径（身份 / 菜单 / 权威归属客户范围）。
         await EnsureOrderAuthorizedAsync(entity);
-        entity.Details = entity.Details.Where(d => !d.IsDeleted).ToList();
         return Ok(ApiResponse<PurchaseOrder>.Success(entity));
     }
 
-    /// <summary>导出</summary>
+    /// <summary>
+    /// 导出（JSON 运营快照）
+    /// <para>ERP-430：权威客户范围先于日期过滤与物化下推到数据库；明细只保留**未删除**行
+    /// （<see cref="OperationalReadQuery"/> 的 filtered include，与详情 / 打印同口径），
+    /// 已删除父单与已删除明细行均不返回。</para>
+    /// </summary>
     [HttpGet("export")]
     public async Task<IActionResult> Export([FromQuery] DateTime? start, [FromQuery] DateTime? end)
     {
         var source = await ApplyProcurementScopeAsync(
-            Db.PurchaseOrders.AsNoTracking().Include(o => o.Details).Where(o => !o.IsDeleted));
+            OperationalReadQuery().Where(o => !o.IsDeleted));
         if (start.HasValue) source = source.Where(o => o.OrderDate >= start.Value);
         if (end.HasValue) source = source.Where(o => o.OrderDate <= end.Value);
         var items = await source.OrderByDescending(o => o.Id).ToListAsync();
@@ -852,6 +868,16 @@ public class PurchaseOrderController : DocumentControllerBase<PurchaseOrder>
         var ownership = await PurchaseOrderAuthorizationRules.LoadOwnershipAsync(Db, ids);
         await PurchaseOrderAuthorizationRules.EnsureOrdersAuthorizedAsync(Db, CurrentUserId(), ownership);
     }
+
+    /// <summary>
+    /// ERP-430：规范运营读取（详情 / 打印 / JSON 运营导出）的唯一主表 + 明细查询口径 ——
+    /// 主表未删除由调用方补 <c>!IsDeleted</c>，明细只装载**未删除**行。
+    /// <para>明细过滤使用 EF Core filtered include，先于物化下推到数据库（SQL 侧 <c>IsDeleted = 0</c>），
+    /// 被软删除的明细行绝不进入内存、绝不因内存过滤而遗漏或回填；表头历史金额与来源 / 审计快照原样保留，
+    /// 读取侧不重算币种总额、不改写任何被软删除的行。详情 / 打印 / JSON 导出共用本口径，保证三者一致。</para>
+    /// </summary>
+    private IQueryable<PurchaseOrder> OperationalReadQuery()
+        => Set.AsNoTracking().Include(o => o.Details.Where(d => !d.IsDeleted));
 
     /// <summary>列表 / 导出的权威客户范围下推（计数 / 分页之前）；非 HTTP / 无身份的内部调用不改变既有查询。</summary>
     private async Task<IQueryable<PurchaseOrder>> ApplyProcurementScopeAsync(IQueryable<PurchaseOrder> source)

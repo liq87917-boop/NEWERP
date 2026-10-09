@@ -45,7 +45,10 @@ public sealed class SalesOrderHttpFormSqlServerTests : IClassFixture<SalesOrderH
     private static async Task<(HttpStatusCode Status, JsonElement Root, string Raw)> PostOrderAsync(
         HttpClient client, object body)
     {
-        var payload = JsonSerializer.Serialize(body);
+        var node = JsonSerializer.SerializeToNode(body)!;
+        // A missing server-owned number must be omitted, not sent as explicit null.
+        if (node["orderNo"] is null) node.AsObject().Remove("orderNo");
+        var payload = node.ToJsonString();
         using var response = await client.PostAsync("/api/sales-orders",
             new StringContent(payload, Encoding.UTF8, "application/json"));
         var raw = await response.Content.ReadAsStringAsync();
