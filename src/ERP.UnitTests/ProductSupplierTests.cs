@@ -9,10 +9,12 @@ using ERP.Infrastructure.Data;
 using ERP.Infrastructure.Export;
 using ERP.Infrastructure.Storage;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.FileProviders;
+using System.Security.Claims;
 using Xunit;
 
 namespace ERP.UnitTests;
@@ -31,9 +33,134 @@ public class ProductSupplierTests
 
     private const long Warehouse1 = 910001L;
 
-    private static ProductSupplierController SupplyController(ErpDbContext db) => new(db);
+    private const string AuthorizedUserName = "__erp441_sourcing_authorized__";
 
-    private static SupplierSourcingController SourcingController(ErpDbContext db) => new(db);
+    /// <summary>商品侧控制器：注入「已启用 + 既有商品资料 + 既有供应商资料菜单」的实时授权身份（ERP-441）</summary>
+    private static ProductSupplierController SupplyController(ErpDbContext db) =>
+        new(db) { ControllerContext = AuthorizedContext(db) };
+
+    /// <summary>供应商侧控制器：注入与商品侧同源的实时授权身份（ERP-441）</summary>
+    private static SupplierSourcingController SourcingController(ErpDbContext db) =>
+        new(db) { ControllerContext = AuthorizedContext(db) };
+
+    private static ControllerContext AuthorizedContext(ErpDbContext db) =>
+        ContextWithUser(EnsureAuthorizedUser(db));
+
+    /// <summary>带（可空）<c>NameIdentifier</c> 的 HTTP 身份上下文；null = 无身份，由授权护栏 fail closed 拒绝</summary>
+    private static ControllerContext ContextWithUser(long? userId)
+    {
+        var claims = userId.HasValue
+            ? new[] { new Claim(ClaimTypes.NameIdentifier, userId.Value.ToString()) }
+            : Array.Empty<Claim>();
+        return new ControllerContext
+        {
+            HttpContext = new DefaultHttpContext
+            {
+                User = new ClaimsPrincipal(new ClaimsIdentity(claims, "Test"))
+            }
+        };
+    }
+
+    /// <summary>
+    /// 确保内存库中存在一个已启用、未删除的授权测试身份（幂等），并保证它具备既有「商品资料」与「供应商资料」菜单授权；
+    /// 全部沿用既有「用户 → 角色 → 菜单」口径，不新增任何权限模型。
+    /// </summary>
+    private static long EnsureAuthorizedUser(ErpDbContext db)
+    {
+        var user = db.SysUsers.FirstOrDefault(u => u.UserName == AuthorizedUserName);
+        if (user is null)
+        {
+            user = new SysUser
+            {
+                UserName = AuthorizedUserName,
+                DisplayName = "货源关系授权测试账号",
+                PasswordHash = "hash",
+                PasswordSalt = "salt",
+                Status = UserStatus.Enabled
+            };
+            db.SysUsers.Add(user);
+            db.SaveChanges();
+
+            var role = new SysRole
+            {
+                RoleName = "货源关系授权测试角色",
+                RoleCode = $"SourcingAuth-{Guid.NewGuid():N}",
+                IsSystem = false
+            };
+            db.SysRoles.Add(role);
+            db.SaveChanges();
+            db.SysUserRoles.Add(new SysUserRole { UserId = user.Id, RoleId = role.Id });
+            db.SaveChanges();
+        }
+
+        var roleId = db.SysUserRoles.AsNoTracking()
+            .Where(ur => ur.UserId == user.Id && !ur.IsDeleted)
+            .Select(ur => ur.RoleId).First();
+        GrantMenu(db, roleId, ProductSupplierRules.ProductMenuCode, ProductSupplierRules.ProductMenuText);
+        GrantMenu(db, roleId, ProductSupplierRules.SupplierMenuCode, ProductSupplierRules.SupplierMenuText);
+        return user.Id;
+    }
+
+    /// <summary>播种一个独立授权身份（可选状态 / 删除 / 商品菜单 / 供应商菜单），返回用户 Id（每个用例独立）</summary>
+    private static long SeedUser(ErpDbContext db, UserStatus status = UserStatus.Enabled, bool deleted = false,
+        bool grantProductMenu = true, bool grantSupplierMenu = true)
+    {
+        var user = new SysUser
+        {
+            UserName = $"sourcing-{Guid.NewGuid():N}",
+            DisplayName = "货源关系授权用例账号",
+            PasswordHash = "hash",
+            PasswordSalt = "salt",
+            Status = status,
+            IsDeleted = deleted
+        };
+        db.SysUsers.Add(user);
+        db.SaveChanges();
+
+        var role = new SysRole
+        {
+            RoleName = "货源关系授权用例角色",
+            RoleCode = $"SourcingCase-{Guid.NewGuid():N}",
+            IsSystem = false
+        };
+        db.SysRoles.Add(role);
+        db.SaveChanges();
+        db.SysUserRoles.Add(new SysUserRole { UserId = user.Id, RoleId = role.Id });
+        db.SaveChanges();
+
+        if (grantProductMenu) GrantMenu(db, role.Id, ProductSupplierRules.ProductMenuCode, ProductSupplierRules.ProductMenuText);
+        if (grantSupplierMenu) GrantMenu(db, role.Id, ProductSupplierRules.SupplierMenuCode, ProductSupplierRules.SupplierMenuText);
+        return user.Id;
+    }
+
+    /// <summary>按既有菜单编码授予角色访问权限（幂等；菜单缺失时按既有种子口径补建一条功能菜单）</summary>
+    private static void GrantMenu(ErpDbContext db, long roleId, string menuCode, string menuName)
+    {
+        var menu = db.SysMenus.FirstOrDefault(m => m.MenuCode == menuCode && !m.IsDeleted);
+        if (menu is null)
+        {
+            menu = new SysMenu { MenuCode = menuCode, MenuName = menuName, MenuType = MenuType.Menu };
+            db.SysMenus.Add(menu);
+            db.SaveChanges();
+        }
+        if (!db.SysRoleMenus.Any(rm => rm.RoleId == roleId && rm.MenuId == menu.Id && !rm.IsDeleted))
+        {
+            db.SysRoleMenus.Add(new SysRoleMenu { RoleId = roleId, MenuId = menu.Id });
+            db.SaveChanges();
+        }
+    }
+
+    /// <summary>货源关系子表快照（授权拒绝后必须逐字节不变）</summary>
+    private static string SourcingSnapshot(ErpDbContext db) => string.Join("|",
+        db.BaseProductSuppliers.AsNoTracking().OrderBy(x => x.Id)
+            .Select(x => $"{x.Id}:{x.Status}:{x.IsPreferred}:{x.IsDeleted}:{x.SupplierId}:{x.ScopeKey}:{x.SupplierItemCode}")
+            .ToList());
+
+    private static async Task AssertCode(int expected, Func<Task<IActionResult>> action)
+    {
+        var ex = await Assert.ThrowsAsync<BusinessException>(action);
+        Assert.Equal(expected, ex.Code);
+    }
 
     /// <summary>商品资料控制器（补充规格 / 货源关系计数标注），依赖与生产一致：内存库 + 测试用 OSS 配置 + 假宿主环境</summary>
     private static ProductController ProductControllerOf(ErpDbContext db) => new(
@@ -1165,6 +1292,153 @@ public class ProductSupplierTests
         Assert.Contains("已停用", ProductSupplierRules.AvailabilityText(false, true, true));
         Assert.Contains(ProductSupplierRules.UnavailableMark, ProductSupplierRules.AvailabilityText(true, false, true));
         Assert.Contains(ProductSupplierRules.UnavailableMark, ProductSupplierRules.AvailabilityText(true, true, false));
+    }
+
+    // ==================== 9. 实时授权（ERP-441）：身份 / 账号状态 / 既有商品与供应商功能菜单 ====================
+
+    /// <summary>
+    /// 缺失 / 禁用 / 已删除 / 缺少商品菜单 / 缺少供应商菜单 / 无任何菜单的身份：商品侧与供应商侧<b>全部路由</b>
+    /// 在读取或写入任何货源关系之前 fail closed，且货源关系子表逐字节不变（拒绝不落任何行 / 首选 / 状态变更）。
+    /// </summary>
+    [Theory]
+    [InlineData("missing")]
+    [InlineData("disabled")]
+    [InlineData("deleted")]
+    [InlineData("no-product-menu")]
+    [InlineData("no-supplier-menu")]
+    [InlineData("no-menu")]
+    public async Task Auth_拒绝身份_所有路由先授权且不改写任何货源关系(string scenario)
+    {
+        using var db = TestDbFactory.Create();
+        var product = SeedProduct(db);
+        var supplier = SeedSupplier(db);
+        var relation = SeedRelation(db, product.Id, supplier.Id, itemCode: "F-1", preferred: true, status: 1);
+
+        long? userId = scenario switch
+        {
+            "missing" => null,
+            "disabled" => SeedUser(db, UserStatus.Disabled),
+            "deleted" => SeedUser(db, deleted: true),
+            "no-product-menu" => SeedUser(db, grantProductMenu: false),
+            "no-supplier-menu" => SeedUser(db, grantSupplierMenu: false),
+            _ => SeedUser(db, grantProductMenu: false, grantSupplierMenu: false)
+        };
+        var expectedCode = scenario switch
+        {
+            "missing" or "deleted" => ErrorCodes.Unauthorized,
+            _ => ErrorCodes.Forbidden
+        };
+
+        var supply = new ProductSupplierController(db) { ControllerContext = ContextWithUser(userId) };
+        var sourcing = new SupplierSourcingController(db) { ControllerContext = ContextWithUser(userId) };
+        var before = SourcingSnapshot(db);
+
+        await AssertCode(expectedCode, () => supply.List(product.Id));
+        await AssertCode(expectedCode, () => supply.Options(product.Id));
+        await AssertCode(expectedCode, () => supply.Create(product.Id, Save(supplier.Id)));
+        await AssertCode(expectedCode, () => supply.Update(product.Id, relation.Id, Save(supplier.Id, itemCode: "HACK")));
+        await AssertCode(expectedCode, () => supply.Disable(product.Id, relation.Id));
+        await AssertCode(expectedCode, () => supply.Enable(product.Id, relation.Id));
+        await AssertCode(expectedCode, () => supply.SetPreferred(product.Id, relation.Id, true));
+        await AssertCode(expectedCode, () => supply.SetPreferred(product.Id, relation.Id, false));
+        await AssertCode(expectedCode, () => supply.Delete(product.Id, relation.Id));
+        await AssertCode(expectedCode, () => sourcing.List(supplier.Id));
+
+        Assert.Equal(before, SourcingSnapshot(db));
+        var stored = db.BaseProductSuppliers.AsNoTracking().Single();
+        Assert.Equal(ProductSupplierRules.ActiveStatus, stored.Status);
+        Assert.True(stored.IsPreferred);
+        Assert.False(stored.IsDeleted);
+        Assert.Equal("F-1", stored.SupplierItemCode);
+    }
+
+    /// <summary>同时具备既有「商品资料」与「供应商资料」菜单的身份：既有读 / 写契约照常放行。</summary>
+    [Fact]
+    public async Task Auth_具备必需菜单_放行既有读写契约()
+    {
+        using var db = TestDbFactory.Create();
+        var product = SeedProduct(db);
+        var supplier = SeedSupplier(db);
+        var userId = SeedUser(db);
+        var ctl = new ProductSupplierController(db) { ControllerContext = ContextWithUser(userId) };
+
+        var created = Data<ProductSupplierDto>(await ctl.Create(product.Id, Save(supplier.Id, itemCode: "F-OK", preferred: true)));
+        Assert.Equal("F-OK", created.SupplierItemCode);
+        Assert.True(created.IsPreferred);
+        Assert.Single(Data<List<ProductSupplierDto>>(await ctl.List(product.Id)));
+        Assert.Single(Data<List<ProductSupplierDto>>(await ctl.Options(product.Id)));
+        Assert.False(Data<ProductSupplierDto>(await ctl.SetPreferred(product.Id, created.Id, false)).IsPreferred);
+        Assert.Equal(ProductSupplierRules.DisabledStatus,
+            Data<ProductSupplierDto>(await ctl.Disable(product.Id, created.Id)).Status);
+    }
+
+    /// <summary>请求之间撤销菜单授权：下一次请求立即收敛为拒绝（每次都重新解析，绝不缓存）。</summary>
+    [Fact]
+    public async Task Auth_撤销菜单后_下一次请求立即收敛为拒绝()
+    {
+        using var db = TestDbFactory.Create();
+        var product = SeedProduct(db);
+        var userId = SeedUser(db);
+        var ctl = new ProductSupplierController(db) { ControllerContext = ContextWithUser(userId) };
+
+        Data<List<ProductSupplierDto>>(await ctl.List(product.Id));       // 授权读取成功
+
+        foreach (var grant in db.SysRoleMenus.ToList()) grant.IsDeleted = true;
+        db.SaveChanges();
+
+        await AssertCode(ErrorCodes.Forbidden, () => ctl.List(product.Id));
+    }
+
+    /// <summary>
+    /// 授权通过后，权威引用校验仍然 fail closed：外部商品、已删除规格、已停用供应商一律拒绝且零写入
+    /// （ERP-038 的引用校验语义保持不变）。
+    /// </summary>
+    [Fact]
+    public async Task Auth_授权身份下_外部商品与非法引用仍拒绝且零写入()
+    {
+        using var db = TestDbFactory.Create();
+        var product = SeedProduct(db);
+        var activeSupplier = SeedSupplier(db, "S-ON", "启用供应商");
+        var disabledSupplier = SeedSupplier(db, "S-OFF", "停用供应商", status: 0);
+        var deletedVariant = SeedVariant(db, product.Id, "DEL", "红", "S", deleted: true);
+        var userId = SeedUser(db);
+        var ctl = new ProductSupplierController(db) { ControllerContext = ContextWithUser(userId) };
+
+        var foreignProduct = await Assert.ThrowsAsync<BusinessException>(() =>
+            ctl.Create(987654321L, Save(activeSupplier.Id)));
+        Assert.Equal(ErrorCodes.NotFound, foreignProduct.Code);
+
+        var badVariant = await Assert.ThrowsAsync<BusinessException>(() =>
+            ctl.Create(product.Id, Save(activeSupplier.Id, variantId: deletedVariant.Id)));
+        Assert.Equal(ErrorCodes.NotFound, badVariant.Code);
+
+        var badSupplier = await Assert.ThrowsAsync<BusinessException>(() =>
+            ctl.Create(product.Id, Save(disabledSupplier.Id)));
+        Assert.Equal(ErrorCodes.InvalidParameter, badSupplier.Code);
+
+        Assert.Empty(db.BaseProductSuppliers);
+    }
+
+    /// <summary>控制器源码契约：9 个路由（商品侧 8 + 供应商侧 1）全部先经实时授权再读写。</summary>
+    [Fact]
+    public void Auth_控制器源码契约_所有路由先授权再读写()
+    {
+        var source = File.ReadAllText(RepoFile("src", "ERP.Api", "Controllers", "ProductSupplierController.cs"));
+        Assert.Contains("ClaimTypes.NameIdentifier", source);
+        Assert.Equal(9, System.Text.RegularExpressions.Regex.Matches(
+            source, @"ProductSupplierRules\.EnsureAuthorizedAsync\(_db, CurrentUserId\(\)\)").Count);
+    }
+
+    /// <summary>授权口径复用既有「商品资料」/「供应商资料」菜单（与 SeedData.Menus 同源），不新增任何菜单。</summary>
+    [Fact]
+    public void Auth_复用既有商品与供应商菜单常量_不新增菜单()
+    {
+        Assert.Equal("product", ProductSupplierRules.ProductMenuCode);
+        Assert.Equal("supplier", ProductSupplierRules.SupplierMenuCode);
+
+        var menus = File.ReadAllText(RepoFile("src", "ERP.Infrastructure", "Data", "SeedData.Menus.cs"));
+        Assert.Contains($"(\"base\", \"{ProductSupplierRules.ProductMenuCode}\", \"{ProductSupplierRules.ProductMenuText}\"", menus);
+        Assert.Contains($"(\"base\", \"{ProductSupplierRules.SupplierMenuCode}\", \"{ProductSupplierRules.SupplierMenuText}\"", menus);
     }
 
     /// <summary>按仓库根目录拼接文件的绝对路径（与其它契约测试口径一致）</summary>

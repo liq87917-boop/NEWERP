@@ -4,6 +4,7 @@ using ERP.Application.Interfaces;
 using ERP.Application.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using System.Security.Claims;
 
 namespace ERP.Api.Controllers;
 
@@ -27,6 +28,10 @@ public class ProductSupplierController : ControllerBase
         _db = db;
     }
 
+    /// <summary>当前登录用户 Id（缺失或非数字时返回 null，由实时授权护栏 fail closed 拒绝）</summary>
+    private long? CurrentUserId()
+        => long.TryParse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value, out var id) ? id : null;
+
     /// <summary>
     /// 货源关系明细（含停用关系，便于历史可读）：按作用域（商品级在前）→ 排序号 → Id 返回，
     /// 并按上限收敛为**有界**视图；<paramref name="activeOnly"/> 为真时只返回启用中的关系（可选用口径）。
@@ -35,6 +40,7 @@ public class ProductSupplierController : ControllerBase
     [HttpGet]
     public async Task<IActionResult> List(long productId, [FromQuery] bool activeOnly = false)
     {
+        await ProductSupplierRules.EnsureAuthorizedAsync(_db, CurrentUserId());
         var rows = await ProductSupplierService.ListByProductAsync(_db, productId, activeOnly);
         return Ok(ApiResponse<List<ProductSupplierDto>>.Success(rows));
     }
@@ -46,6 +52,7 @@ public class ProductSupplierController : ControllerBase
     [HttpGet("options")]
     public async Task<IActionResult> Options(long productId)
     {
+        await ProductSupplierRules.EnsureAuthorizedAsync(_db, CurrentUserId());
         var rows = await ProductSupplierService.LoadSelectableAsync(_db, productId);
         return Ok(ApiResponse<List<ProductSupplierDto>>.Success(rows));
     }
@@ -54,6 +61,7 @@ public class ProductSupplierController : ControllerBase
     [HttpPost]
     public async Task<IActionResult> Create(long productId, [FromBody] ProductSupplierSaveDto dto)
     {
+        await ProductSupplierRules.EnsureAuthorizedAsync(_db, CurrentUserId());
         var created = await ProductSupplierService.CreateAsync(_db, productId, dto);
         return Ok(ApiResponse<ProductSupplierDto>.Success(created, "货源关系新增成功"));
     }
@@ -62,6 +70,7 @@ public class ProductSupplierController : ControllerBase
     [HttpPut("{id:long}")]
     public async Task<IActionResult> Update(long productId, long id, [FromBody] ProductSupplierSaveDto dto)
     {
+        await ProductSupplierRules.EnsureAuthorizedAsync(_db, CurrentUserId());
         var updated = await ProductSupplierService.UpdateAsync(_db, productId, id, dto);
         return Ok(ApiResponse<ProductSupplierDto>.Success(updated, "货源关系更新成功"));
     }
@@ -70,6 +79,7 @@ public class ProductSupplierController : ControllerBase
     [HttpPost("{id:long}/disable")]
     public async Task<IActionResult> Disable(long productId, long id)
     {
+        await ProductSupplierRules.EnsureAuthorizedAsync(_db, CurrentUserId());
         var disabled = await ProductSupplierService.DisableAsync(_db, productId, id);
         return Ok(ApiResponse<ProductSupplierDto>.Success(disabled, "货源关系已停用"));
     }
@@ -78,6 +88,7 @@ public class ProductSupplierController : ControllerBase
     [HttpPost("{id:long}/enable")]
     public async Task<IActionResult> Enable(long productId, long id)
     {
+        await ProductSupplierRules.EnsureAuthorizedAsync(_db, CurrentUserId());
         var enabled = await ProductSupplierService.EnableAsync(_db, productId, id);
         return Ok(ApiResponse<ProductSupplierDto>.Success(enabled, "货源关系已启用"));
     }
@@ -89,6 +100,7 @@ public class ProductSupplierController : ControllerBase
     [HttpPost("{id:long}/preferred")]
     public async Task<IActionResult> SetPreferred(long productId, long id, [FromQuery] bool preferred = true)
     {
+        await ProductSupplierRules.EnsureAuthorizedAsync(_db, CurrentUserId());
         var result = await ProductSupplierService.SetPreferredAsync(_db, productId, id, preferred);
         return Ok(ApiResponse<ProductSupplierDto>.Success(
             result, preferred ? "已设为该范围的首选货源" : "已取消首选"));
@@ -98,6 +110,7 @@ public class ProductSupplierController : ControllerBase
     [HttpDelete("{id:long}")]
     public async Task<IActionResult> Delete(long productId, long id)
     {
+        await ProductSupplierRules.EnsureAuthorizedAsync(_db, CurrentUserId());
         await ProductSupplierService.DeleteAsync(_db, productId, id);
         return Ok(ApiResponse<object>.Success(null, "货源关系已删除"));
     }
@@ -120,6 +133,10 @@ public class SupplierSourcingController : ControllerBase
         _db = db;
     }
 
+    /// <summary>当前登录用户 Id（缺失或非数字时返回 null，由实时授权护栏 fail closed 拒绝）</summary>
+    private long? CurrentUserId()
+        => long.TryParse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value, out var id) ? id : null;
+
     /// <summary>
     /// 该供应商的货源关系列表（只读）：默认含停用关系（历史可读）与可用性标注，
     /// 按上限收敛为**有界**列表；<paramref name="activeOnly"/> 为真时只返回启用中的关系。
@@ -127,6 +144,7 @@ public class SupplierSourcingController : ControllerBase
     [HttpGet]
     public async Task<IActionResult> List(long supplierId, [FromQuery] bool activeOnly = false)
     {
+        await ProductSupplierRules.EnsureAuthorizedAsync(_db, CurrentUserId());
         var rows = await ProductSupplierService.ListBySupplierAsync(_db, supplierId, activeOnly);
         return Ok(ApiResponse<List<ProductSupplierDto>>.Success(rows));
     }

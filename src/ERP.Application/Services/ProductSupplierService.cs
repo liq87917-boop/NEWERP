@@ -11,7 +11,9 @@ namespace ERP.Application.Services;
 /// <list type="number">
 /// <item><b>维护</b>（<see cref="CreateAsync"/> / <see cref="UpdateAsync"/> / <see cref="SetStatusAsync"/> /
 /// <see cref="SetPreferredAsync"/> / <see cref="DeleteAsync"/>）：只写货源关系子表 <c>BaseProductSuppliers</c>，
-/// 服务端统一推导作用域键、规范化文本与数值，并校验商品 / 规格 / 供应商引用的存在性、归属与启用状态；</item>
+/// 服务端统一推导作用域键、规范化文本与数值，并在<b>落库之前</b>实时校验权威商品（存在、未删除、启用）、
+/// 可选规格（存在、未删除、启用且属于该商品）与供应商（存在、未删除、启用）引用 ——
+/// 外部 / 已删除 / 已停用 / 归属不符的引用一律 fail closed，拒绝时不落任何货源行、首选标记或状态变更；</item>
 /// <item><b>读取</b>（<see cref="ListByProductAsync"/> / <see cref="ListBySupplierAsync"/>）：商品侧与供应商侧
 /// 都返回**有界**列表，默认含停用关系（历史可读）并显式标注可用性；</item>
 /// <item><b>可选用口径</b>（<see cref="LoadSelectableAsync"/>）：只返回启用中的关系，因此停用 / 已删除关系

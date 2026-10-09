@@ -1,5 +1,8 @@
 using ERP.Application.Common;
+using ERP.Application.Interfaces;
 using ERP.Domain.Entities;
+using ERP.Domain.Enums;
+using Microsoft.EntityFrameworkCore;
 using System.Text;
 
 namespace ERP.Application.Services;
@@ -240,5 +243,90 @@ public static class ProductSupplierRules
         if (!supplierAvailable) return $"供应商已停用 / 已删除{UnavailableMark}，仅历史可读";
         if (!variantAvailable) return $"规格已停用 / 已删除{UnavailableMark}，仅历史可读";
         return "可选用";
+    }
+
+    // ==================== ERP-441 实时身份 + 既有功能菜单授权 ====================
+
+    /// <summary>商品侧所需既有功能菜单编码（与 <c>SeedData.Menus</c> 同源，<b>不新增菜单</b>）</summary>
+    public const string ProductMenuCode = "product";
+
+    /// <summary>商品侧既有功能菜单中文文案</summary>
+    public const string ProductMenuText = "商品资料";
+
+    /// <summary>供应商侧所需既有功能菜单编码（与 <c>SeedData.Menus</c> 同源，<b>不新增菜单</b>）</summary>
+    public const string SupplierMenuCode = "supplier";
+
+    /// <summary>供应商侧既有功能菜单中文文案</summary>
+    public const string SupplierMenuText = "供应商资料";
+
+    /// <summary>无身份 / 非法身份的拒绝文案（受控、不泄露数据）</summary>
+    public const string UnauthorizedText = "请先登录后再访问商品货源关系";
+
+    /// <summary>账号不存在 / 已删除的拒绝文案（受控、不泄露数据）</summary>
+    public const string UserDeletedText = "登录账号不存在或已删除，禁止访问商品货源关系";
+
+    /// <summary>账号已禁用的拒绝文案（受控、不泄露数据）</summary>
+    public const string UserDisabledText = "登录账号已禁用，禁止访问商品货源关系（fail closed）";
+
+    /// <summary>缺少既有「商品资料」菜单授权时的拒绝文案（受控、不泄露数据）</summary>
+    public const string ProductMenuDeniedText =
+        "当前账号没有「商品资料」（product）模块授权：" +
+        "拒绝访问商品货源关系（fail closed，不返回 / 不新增 / 不改写任何货源关系）";
+
+    /// <summary>缺少既有「供应商资料」菜单授权时的拒绝文案（受控、不泄露数据）</summary>
+    public const string SupplierMenuDeniedText =
+        "当前账号没有「供应商资料」（supplier）模块授权：" +
+        "拒绝访问商品货源关系（fail closed，不返回 / 不新增 / 不改写任何货源关系）";
+
+    /// <summary>授权口径文案（接口 / 文档同源）</summary>
+    public const string AuthorizationRuleText =
+        "商品 / SKU 货源关系（商品侧列表 / 可选用选项 / 新增 / 修改 / 停用 / 启用 / 首选 / 删除与供应商侧货源列表）" +
+        "在读取或写入任何货源关系之前，都会重新校验实时身份（缺失 / 非法 / 已删除按未认证，禁用按权限不足，一律 fail closed）" +
+        "与既有「商品资料」（product）+「供应商资料」（supplier）两项功能菜单授权；菜单授权复用既有「角色 → 菜单」口径，" +
+        "每次请求重新查询，撤销后下一次请求立即收敛。";
+
+    /// <summary>授权边界文案（不改写 ERP-037/038 的业务口径）</summary>
+    public const string AuthorizationBoundaryText =
+        "本护栏只新增「读取 / 写入前的授权判定」：不改变作用域键（产品级 P / 规格级 V{Id}）、" +
+        "重复关系与「同一范围唯一启用首选」判定、供应商货号 / 采购单位 / MOQ / 交期 / 备注规范化、" +
+        "以及商品 / 规格 / 供应商引用（存在、未删除、启用、归属）校验的既有语义；" +
+        "不新增表 / 列 / 实体 / 菜单 / 权限 / 用户授权，也不把空身份当作管理员。";
+
+    /// <summary>
+    /// 身份 / 账号状态 / 既有功能菜单三项校验（fail closed），返回本次请求的权威用户 Id。
+    /// <list type="bullet">
+    /// <item>身份缺失 / 非法 → <see cref="ErrorCodes.Unauthorized"/>；</item>
+    /// <item>账号不存在或已删除 → <see cref="ErrorCodes.Unauthorized"/>；</item>
+    /// <item>账号已禁用 → <see cref="ErrorCodes.Forbidden"/>；</item>
+    /// <item>缺少既有「商品资料」（<c>product</c>）或「供应商资料」（<c>supplier</c>）菜单授权（含被撤销授权）→ <see cref="ErrorCodes.Forbidden"/>。</item>
+    /// </list>
+    /// 判定发生在任何货源关系读取 / 计数 / 写入<b>之前</b>；每次请求重新解析，菜单或账号状态变更后立即收敛；
+    /// <b>不</b>新增任何菜单 / 角色 / 用户授权，也<b>不</b>因身份缺失而降级为管理员。
+    /// </summary>
+    public static async Task<long> EnsureAuthorizedAsync(
+        IErpDbContext db, long? userId, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        ct.ThrowIfCancellationRequested();
+
+        if (userId is null or <= 0)
+            throw new BusinessException(UnauthorizedText, ErrorCodes.Unauthorized);
+
+        var user = await db.SysUsers.AsNoTracking()
+            .FirstOrDefaultAsync(u => u.Id == userId.Value && !u.IsDeleted, ct);
+        if (user is null)
+            throw new BusinessException(UserDeletedText, ErrorCodes.Unauthorized);
+        if (user.Status != UserStatus.Enabled)
+            throw new BusinessException(UserDisabledText, ErrorCodes.Forbidden);
+
+        var menuCodes = await CustomerReceivableReconciliationService
+            .LoadAuthorizedMenuCodesAsync(db, userId.Value);
+
+        if (!menuCodes.Contains(ProductMenuCode, StringComparer.OrdinalIgnoreCase))
+            throw new BusinessException(ProductMenuDeniedText, ErrorCodes.Forbidden);
+        if (!menuCodes.Contains(SupplierMenuCode, StringComparer.OrdinalIgnoreCase))
+            throw new BusinessException(SupplierMenuDeniedText, ErrorCodes.Forbidden);
+
+        return user.Id;
     }
 }
