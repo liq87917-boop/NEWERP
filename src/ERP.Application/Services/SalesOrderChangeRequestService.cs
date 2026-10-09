@@ -746,20 +746,24 @@ public static class SalesOrderChangeRequestService
     // ==================== 6. 金额重算（销售订单唯一权威算法；不信任客户端合计） ====================
     /// <summary>
     /// 按 <see cref="SalesOrderAmountRules"/>（销售订单唯一权威算法）重算拟议明细金额、拟议总额与拟议定金金额，
-    /// 并用同一套口径校验明细数量 / 单价、定金比例（0~100）与佣金比例（0~100）。
+    /// 并复用同一套**新写入校验**（ERP-422）校验明细数量 / 单价 / 币种 / 汇率 / 金额精度、定金比例（0~100）
+    /// 与佣金比例（0~100）。
     /// <para>做法：把拟议值装配成一张**未落库**的销售订单草稿，交给同一套算法与校验处理，再把结果写回申请行 ——
-    /// 系统内不存在第二套销售订单金额算法。</para>
+    /// 系统内不存在第二套销售订单金额算法，也不存在第二套新增写入校验。</para>
     /// </summary>
     private static void RecalculateProposal(SalesOrderChangeRequest entity)
     {
         var rows = entity.Details.Where(d => !d.IsDeleted && !d.ProposedRemoved).OrderBy(d => d.LineNo).ToList();
         var draft = BuildProposedDraft(entity, rows);
 
+        // 与页面手工录入同源：定金比例 / 明细取值 / 行金额 / 合计 / 佣金比例一律走唯一权威算法与校验。
         SalesOrderAmountRules.ValidateDepositRatio(draft.DepositRatio);
         SalesOrderAmountRules.ValidateDetailValues(draft.Details);
         SalesOrderAmountRules.ApplyDetailAmounts(draft);
         SalesOrderAmountRules.Calculate(draft);
         SalesOrderAmountRules.Validate(draft);
+        // ERP-422：再复用「新增写入」的统一精度 / 币种 / 汇率校验，变更申请与规范写入共用同一套口径。
+        SalesOrderAmountRules.ValidateNewWrite(draft);
 
         for (var i = 0; i < rows.Count; i++) rows[i].ProposedAmount = draft.Details[i].Amount;
         entity.ProposedTotalAmount = draft.TotalAmount;

@@ -320,6 +320,8 @@ public class SalesOrderController : DocumentControllerBase<SalesOrder>
     /// 拟议客户范围（无来源的手工订单同样适用），显式来源再做**权威解析 + 确定性来源行锁（报价单 → PI）+ 原子事务**，
     /// 在锁内复核既有转换资格与唯一目标，<b>之后</b>才预约单据号与写入；显式来源 Id 全部无法解析时按「显式历史值」
     /// 原样保留（不构成实时链接）；未链接的手工订单不取任何来源锁，但表头与明细仍在同一原子事务内写入（ERP-421）。
+    /// <para>ERP-422：客户端提交的数量 / 单价 / 金额 / 合计 / 定金一律由服务端按 <see cref="SalesOrderAmountRules"/>
+    /// 唯一权威口径重算覆盖；新写入条款校验在<b>单号预约与任何字段改写之前</b>完成，非法请求既不消耗单号也不落库。</para>
     /// </summary>
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] SalesOrder entity)
@@ -337,6 +339,9 @@ public class SalesOrderController : DocumentControllerBase<SalesOrder>
         {
             // ERP-421：无论手工 / 历史 / 已解析来源，表头与明细都在同一原子事务内写入。
             transaction = await SalesOrderMutationRules.BeginMutationTransactionAsync(Db);
+
+            // ERP-422：新写入条款校验先于单号预约与任何字段 / 明细改写；失败整体回滚、不占用单号、不落任何数据。
+            SalesOrderMutationRules.EnsureValidatedTerms(entity);
 
             var lineage = new SalesOrderSourceLineage();
             if (change.HasSource)
@@ -375,7 +380,7 @@ public class SalesOrderController : DocumentControllerBase<SalesOrder>
             // 与 Update 对齐：明细金额由服务端按「数量 × 单价」重算（唯一权威口径，忽略客户端金额）
             SalesOrderAmountRules.ApplyDetailAmounts(entity);
             Calculate(entity);
-            Validate(entity);
+            SalesOrderMutationRules.EnsureValidatedTerms(entity);
             Db.SalesOrders.Add(entity);
             await Db.SaveChangesAsync();
             if (transaction is not null) await transaction.CommitAsync();
@@ -406,6 +411,8 @@ public class SalesOrderController : DocumentControllerBase<SalesOrder>
     /// 都在同一原子事务内按「报价单 → PI → 销售订单」确定性锁序加锁（手工 / 无法解析历史来源只取订单行锁），
     /// 锁内重读持久化来源 / 目标状态与实时权限并复核来源血缘（历史来源绝不静默清除；显式改绑需完整实时复核且
     /// 下游已有证据时冻结），最后才改写字段 / 明细 / 金额；加锁前读到的来源被并发改写时原子拒绝。
+    /// <para>ERP-422：非法新写入条款在加锁之前即被拒绝；改写后的持久化条款在锁内再执行一次唯一权威校验，
+    /// 失败时原始表头 / 明细 / 状态与下游证据保持不变。</para>
     /// </summary>
     [HttpPut("{id:long}")]
     public async Task<IActionResult> Update(long id, [FromBody] SalesOrder entity)
@@ -423,6 +430,9 @@ public class SalesOrderController : DocumentControllerBase<SalesOrder>
         {
             // ERP-421：无论手工 / 历史 / 已解析来源，修改都在同一原子事务内先取确定性行锁。
             transaction = await SalesOrderMutationRules.BeginMutationTransactionAsync(Db);
+
+            // ERP-422：新写入条款校验先于来源加锁与任何字段 / 明细改写；失败整体回滚、不留半成品变更。
+            SalesOrderMutationRules.EnsureValidatedTerms(entity);
 
             var preliminaryRead = await Db.SalesOrders.AsNoTracking()
                 .Where(o => o.Id == id && !o.IsDeleted)
@@ -566,7 +576,8 @@ public class SalesOrderController : DocumentControllerBase<SalesOrder>
             SalesOrderAmountRules.ApplyDetailAmounts(entity);
             existing.Details = entity.Details;
             Calculate(existing);
-            Validate(existing);
+            // ERP-422：锁内对改写后的持久化条款再执行一次唯一权威校验，之后才允许提交事务。
+            SalesOrderMutationRules.EnsureValidatedTerms(existing);
             existing.UpdatedAt = DateTime.Now;
             await Db.SaveChangesAsync();
             if (transaction is not null) await transaction.CommitAsync();
@@ -606,6 +617,8 @@ public class SalesOrderController : DocumentControllerBase<SalesOrder>
     /// 缺菜单或范围外订单一律 fail closed，且先于读取明细 / 暴露状态）；随后<b>无论手工 / 历史 / 已解析来源</b>
     /// 都进入同一原子事务并按「报价单 → PI → 销售订单行」确定性锁序加锁（手工 / 无法解析的历史来源只取订单行锁），
     /// 锁内重新读取实时权限、持久化状态与来源后复核合法流转与持久化来源血缘，任一步失败整体回滚并丢弃半成品变更。
+    /// <para>ERP-422：提交 / 审核除状态与来源血缘外，还在<b>同一把订单行锁内</b>复核已持久化条款（数量 / 单价 /
+    /// 币种 / 汇率 / 比例 / 金额精度）；非法存储条款原子拒绝、状态与原始证据均不变。</para>
     /// </summary>
     private async Task<IActionResult> RunLineageGuardedStatusChangeAsync(long id, DocumentStatus from,
         DocumentStatus to, string message)
@@ -640,7 +653,8 @@ public class SalesOrderController : DocumentControllerBase<SalesOrder>
             await EnsurePersistedOrderAllowedAsync(lockedScope, id);
 
             // 锁内权威重读状态与来源：并发提交 / 审核 / 取消 / 改绑后的过期结果一律拒绝，绝不按陈旧状态放行。
-            var locked = await Db.SalesOrders.FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
+            var locked = await Db.SalesOrders.Include(o => o.Details)
+                .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
                 ?? throw BusinessException.NotFound("销售订单不存在");
             SalesOrderMutationRules.EnsureTransitionAllowed(GetStatus(locked), from, to);
             if (!SalesOrderMutationRules.PersistedSourceUnchanged(preliminary.SourceQuotationId,
@@ -648,6 +662,8 @@ public class SalesOrderController : DocumentControllerBase<SalesOrder>
                 throw BusinessException.RuleConflict(SalesOrderMutationRules.SourceChangedUnderLockText);
 
             await SalesOrderSourceLineageRules.EnsurePersistedSourceIntactAsync(Db, locked);
+            // ERP-422：提交 / 审核在既有订单行锁内复核已持久化条款；非法存储条款原子拒绝、状态不变。
+            SalesOrderMutationRules.EnsureValidatedTerms(locked);
             SetStatus(locked, to);
             await Db.SaveChangesAsync();
             if (transaction is not null) await transaction.CommitAsync();

@@ -189,7 +189,11 @@ public class OrderTraceabilityTests
         await ctl.Create(new SalesOrder
         {
             OrderDate = DateTime.Today, CustomerId = 1, CustomerPoNo = "PO-A", ContractNo = "SC-A",
-            TradeTerms = "CIF", SplitShipment = true, CommissionRatio = 5m
+            TradeTerms = "CIF", SplitShipment = true, CommissionRatio = 5m,
+            Details = new List<SalesOrderDetail>
+            {
+                new() { ProductId = 1, ProductName = "P1", Quantity = 1m, UnitPrice = 1000m }
+            }
         });
         var id = db.SalesOrders.Single().Id;
 
@@ -198,7 +202,11 @@ public class OrderTraceabilityTests
             OrderDate = DateTime.Today, CustomerId = 1,
             CustomerPoNo = "PO-B", ContractNo = "SC-B", TradeTerms = "EXW",
             DestinationPort = "JEDDAH", ExportMode = "1039", BusinessNature = "代理出口",
-            SourceQuotationNo = "QT-2", SplitShipment = false, CommissionRatio = 0m
+            SourceQuotationNo = "QT-2", SplitShipment = false, CommissionRatio = 0m,
+            Details = new List<SalesOrderDetail>
+            {
+                new() { ProductId = 1, ProductName = "P1", Quantity = 2m, UnitPrice = 500m }
+            }
         });
 
         var saved = db.SalesOrders.Single(o => o.Id == id);
@@ -221,7 +229,11 @@ public class OrderTraceabilityTests
 
         var ex = await Assert.ThrowsAsync<BusinessException>(() => ctl.Create(new SalesOrder
         {
-            OrderDate = DateTime.Today, CustomerId = 1, CommissionRatio = 120m
+            OrderDate = DateTime.Today, CustomerId = 1, CommissionRatio = 120m,
+            Details = new List<SalesOrderDetail>
+            {
+                new() { ProductId = 1, ProductName = "P1", Quantity = 1m, UnitPrice = 1m }
+            }
         }));
         Assert.Equal(ErrorCodes.InvalidParameter, ex.Code);
         Assert.Empty(db.SalesOrders);
@@ -232,8 +244,16 @@ public class OrderTraceabilityTests
     {
         using var db = TestDbFactory.Create();
         var ctl = BuildController(db);
-        await ctl.Create(new SalesOrder { OrderDate = DateTime.Today, CustomerId = 1, CustomerPoNo = "BUYERPO-77" });
-        await ctl.Create(new SalesOrder { OrderDate = DateTime.Today, CustomerId = 1, ContractNo = "SC-KEY-9" });
+        await ctl.Create(new SalesOrder
+        {
+            OrderDate = DateTime.Today, CustomerId = 1, CustomerPoNo = "BUYERPO-77",
+            Details = new List<SalesOrderDetail> { new() { ProductId = 1, ProductName = "P1", Quantity = 1m, UnitPrice = 1m } }
+        });
+        await ctl.Create(new SalesOrder
+        {
+            OrderDate = DateTime.Today, CustomerId = 1, ContractNo = "SC-KEY-9",
+            Details = new List<SalesOrderDetail> { new() { ProductId = 1, ProductName = "P1", Quantity = 1m, UnitPrice = 1m } }
+        });
 
         var byPo = Assert.IsType<ApiResponse<PagedResult<SalesOrder>>>(
             Assert.IsType<OkObjectResult>(await ctl.GetPaged(new PageQuery { Page = 1, PageSize = 10, Keyword = "BUYERPO-77" }, null)).Value);
@@ -272,7 +292,11 @@ public class OrderTraceabilityTests
         var ctl = BuildController(db);
         await ctl.Create(new SalesOrder
         {
-            OrderDate = DateTime.Today, CustomerId = 1, CustomerPoNo = "PO-EXCEL", ContractNo = "SC-EXCEL"
+            OrderDate = DateTime.Today, CustomerId = 1, CustomerPoNo = "PO-EXCEL", ContractNo = "SC-EXCEL",
+            Details = new List<SalesOrderDetail>
+            {
+                new() { ProductId = 1, ProductName = "P1", Quantity = 1m, UnitPrice = 1m }
+            }
         });
 
         var result = await ctl.ExportExcel(null, null, null, null);

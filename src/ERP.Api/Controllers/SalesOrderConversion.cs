@@ -348,25 +348,15 @@ public static class SalesOrderConversion
         };
 
     /// <summary>
-    /// 服务端复核带入结果：明细数量 / 单价逐行校验并重算金额、定金比例区间校验。
-    /// 合计与定金金额随后由销售订单口径 <see cref="SalesOrderController.Calculate" /> 计算，
-    /// 保证「带入 + 人工编辑」与「页面手工录入」两条路径完全同口径。
+    /// 服务端复核带入结果（ERP-422）：逐行金额按唯一权威口径重算，并复用
+    /// <see cref="SalesOrderAmountRules.ValidateNewWrite"/> 校验「明细非空、数量 / 单价 / 币种 / 汇率 /
+    /// 定金 / 佣金比例与金额精度」——与页面手工录入**完全同一套**服务端规则，绝不出现第二套校验。
+    /// 合计与定金金额随后由 <see cref="SalesOrderController.Calculate"/> 计算。
     /// </summary>
     private static void Revalidate(SalesOrder order)
     {
-        var line = 0;
-        foreach (var d in order.Details)
-        {
-            line++;
-            if (d.Quantity <= 0)
-                throw BusinessException.InvalidParameter($"销售订单明细第 {line} 行数量必须大于 0");
-            if (d.UnitPrice < 0)
-                throw BusinessException.InvalidParameter($"销售订单明细第 {line} 行单价不能为负数");
-            d.Amount = Math.Round(d.Quantity * d.UnitPrice, 2);
-        }
-
-        if (order.DepositRatio < 0m || order.DepositRatio > 100m)
-            throw BusinessException.InvalidParameter("定金比例必须在 0~100 之间");
+        SalesOrderAmountRules.ApplyDetailAmounts(order);
+        SalesOrderAmountRules.ValidateNewWrite(order);
     }
 
     /// <summary>备注 + 来源文本交期合并（销售订单没有交期文本列，超过 500 字符按列长截断）</summary>
