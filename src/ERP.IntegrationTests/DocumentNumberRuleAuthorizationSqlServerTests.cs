@@ -69,7 +69,7 @@ public sealed class DocumentNumberRuleAuthorizationSqlServerTests : IClassFixtur
         // 仍按既有流水语义生成，证明被拒的写入没有消耗任何单据号。
         var service = new DocumentNumberService(db);
         var no = await service.GenerateAsync(DocumentType.SalesOrderChangeRequest, new DateTime(2026, 8, 19));
-        Assert.Equal("SOC202608190004", no);
+        Assert.Equal("DR202608190004", no);
     }
 
     [Fact]
@@ -189,6 +189,14 @@ public sealed class DocumentNumberRuleAuthorizationSqlServerTests : IClassFixtur
         await using var db = _fixture.CreateDbContext();
         var adminId = await ResolveSeededAdminIdAsync(db);
         var seeded = await SeedRuleAsync(db, DocumentType.SalesReturn, currentSequence: 1);
+        // SeedData may already own the first active SalesReturn rule used by numbering.
+        var effectiveRule = await db.SysDocumentNumberRules.FirstAsync(r => r.DocumentType == DocumentType.SalesReturn && !r.IsDeleted);
+        effectiveRule.Prefix = "DR";
+        effectiveRule.DateFormat = "yyyyMMdd";
+        effectiveRule.Separator = string.Empty;
+        effectiveRule.SerialLength = 4;
+        effectiveRule.CurrentSequence = 1;
+        await db.SaveChangesAsync();
         var dup = UniqueCode("DR-DUP");
         await SeedRuleAsync(db, DocumentType.SalesOrder, ruleCode: dup);
         var before = await SnapshotAsync(db);
@@ -220,7 +228,7 @@ public sealed class DocumentNumberRuleAuthorizationSqlServerTests : IClassFixtur
         // 被拒的写入没有消耗任何单据号：既有流水仍从 1 自增到 2。
         var service = new DocumentNumberService(db);
         var no = await service.GenerateAsync(DocumentType.SalesReturn, new DateTime(2026, 8, 19));
-        Assert.Equal("XTH202608190002", no);
+        Assert.Equal("DR202608190002", no);
     }
 
     // ==================== 4. 脚手架 ====================
@@ -239,7 +247,7 @@ public sealed class DocumentNumberRuleAuthorizationSqlServerTests : IClassFixtur
     }
 
     /// <summary>生成不超过既有 <c>RuleCode</c> 持久化上界的唯一规则编码（测试内不会互相占用）。</summary>
-    private static string UniqueCode(string prefix) => $"{prefix}-{Guid.NewGuid():N}"[..40];
+    private static string UniqueCode(string prefix) { var code = $"{prefix}-{Guid.NewGuid():N}"; return code[..Math.Min(40, code.Length)]; }
 
     private static SysDocumentNumberRule NewRule(
         DocumentType documentType,
