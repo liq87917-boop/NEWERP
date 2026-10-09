@@ -114,12 +114,17 @@ public class CustomerController : BaseCrudController<BaseCustomer>
 }
 
 /// <summary>
-/// 供应商资料控制器（ERP-038：补充「供货商品货源关系」计数标注与供应商侧有界货源列表路由）
+/// 供应商资料控制器（ERP-038：补充「供货商品货源关系」计数标注与供应商侧有界货源列表路由；
+/// ERP-447：为全部分页 / 全部 / 按主键读取与新增 / 修改 / 删除 / 批量删除路由补齐实时身份、
+/// 既有「供应商资料」（<c>supplier</c>）功能菜单授权与有界字段校验）。
 /// </summary>
 /// <remarks>
 /// 只读取货源关系子表 <c>BaseProductSuppliers</c> 做计数与列表展示：
 /// 不自动选择供应商、不改写采购报价 / 采购订单 / 库存与任何历史单据。
 /// 供应商侧货源列表见 <see cref="SupplierSourcingController"/>（<c>/api/base/suppliers/{id}/sourcing</c>）。
+/// <para>ERP-447 的授权与校验护栏见 <see cref="SupplierAuthorizationRules"/>：每个路由在读取或写入任何
+/// <c>BaseSuppliers</c> 行之前都先经实时身份 + 既有供应商菜单授权，新增 / 修改另经有界字段校验；
+/// 不新增任何菜单 / 权限 / 用户授权，也不改变分页 / 响应契约与供应商编码唯一索引语义。</para>
 /// </remarks>
 [ApiController]
 [Route("api/base/suppliers")]
@@ -133,22 +138,95 @@ public class SupplierController : BaseCrudController<BaseSupplier>
         _db = db;
     }
 
-    /// <summary>分页查询（补充货源关系计数标注，不写库）</summary>
+    /// <summary>当前登录用户 Id（只来自已认证请求主体；缺失 / 非数字 / 非正返回 null，由实时授权护栏 fail closed）</summary>
+    private long? CurrentUserId()
+    {
+        var value = ControllerContext?.HttpContext?.User?.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        return long.TryParse(value, out var id) && id > 0 ? id : null;
+    }
+
+    /// <summary>
+    /// 是否需要执行实时授权（与仓库既有口径同源）：真实 HTTP 请求（<c>Request.Path</c> 已赋值）一律执行；
+    /// 仅「既无任何登录身份、又不在 HTTP 请求管线内」的<b>进程内直接调用</b>（历史单元测试 / 内部派生读取）
+    /// 沿用既有语义 —— 这类调用不可能由外部请求到达，真实匿名请求因处于请求管线内一律 fail closed，
+    /// 绝不把缺失身份当作管理员。
+    /// </summary>
+    private bool RequiresLiveAuthorization()
+    {
+        var http = ControllerContext?.HttpContext;
+        if (http is null) return false;
+        return http.Request.Path.HasValue || CurrentUserId() is not null;
+    }
+
+    /// <summary>读取 / 写入前的实时身份 + 既有「供应商资料」菜单授权（ERP-447，fail closed）</summary>
+    private async Task EnsureAuthorizedAsync()
+    {
+        if (RequiresLiveAuthorization())
+            await SupplierAuthorizationRules.EnsureAuthorizedAsync(_db, CurrentUserId());
+    }
+
+    /// <summary>分页查询（补充货源关系计数标注，不写库；读写前先经实时授权）</summary>
     [HttpGet]
     public override async Task<IActionResult> GetPaged([FromQuery] PageQuery query)
     {
+        await EnsureAuthorizedAsync();
         var result = await Service.GetPagedAsync(query);
         await ProductSupplierService.AnnotateSuppliersAsync(_db, result.Items);
         return Ok(ApiResponse<PagedResult<BaseSupplier>>.Success(result));
     }
 
-    /// <summary>根据主键获取（补充货源关系计数标注，不写库）</summary>
+    /// <summary>查询全部（供下拉框使用；读写前先经实时授权）</summary>
+    [HttpGet("all")]
+    public override async Task<IActionResult> GetAll()
+    {
+        await EnsureAuthorizedAsync();
+        var result = await Service.GetAllAsync();
+        return Ok(ApiResponse<List<BaseSupplier>>.Success(result));
+    }
+
+    /// <summary>根据主键获取（补充货源关系计数标注，不写库；读写前先经实时授权）</summary>
     [HttpGet("{id:long}")]
     public override async Task<IActionResult> GetById(long id)
     {
+        await EnsureAuthorizedAsync();
         var result = await Service.GetByIdAsync(id);
         await ProductSupplierService.AnnotateSuppliersAsync(_db, new[] { result });
         return Ok(ApiResponse<BaseSupplier>.Success(result));
+    }
+
+    /// <summary>新增供应商（落库前先经实时授权与有界字段校验；被拒绝时不落任何行）</summary>
+    [HttpPost]
+    public override async Task<IActionResult> Create([FromBody] BaseSupplier entity)
+    {
+        await EnsureAuthorizedAsync();
+        SupplierAuthorizationRules.Validate(entity);
+        return await base.Create(entity);
+    }
+
+    /// <summary>更新供应商（落库前先经实时授权与有界字段校验；被拒绝时不改写任何行）</summary>
+    [HttpPut("{id:long}")]
+    public override async Task<IActionResult> Update(long id, [FromBody] BaseSupplier entity)
+    {
+        await EnsureAuthorizedAsync();
+        entity.Id = id;
+        SupplierAuthorizationRules.Validate(entity);
+        return await base.Update(id, entity);
+    }
+
+    /// <summary>删除供应商（软删除；读写前先经实时授权）</summary>
+    [HttpDelete("{id:long}")]
+    public override async Task<IActionResult> Delete(long id)
+    {
+        await EnsureAuthorizedAsync();
+        return await base.Delete(id);
+    }
+
+    /// <summary>批量删除供应商（软删除；读写前先经实时授权）</summary>
+    [HttpPost("batch-delete")]
+    public override async Task<IActionResult> BatchDelete([FromBody] List<long> ids)
+    {
+        await EnsureAuthorizedAsync();
+        return await base.BatchDelete(ids);
     }
 }
 

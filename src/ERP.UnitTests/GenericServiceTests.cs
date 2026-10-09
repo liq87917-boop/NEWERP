@@ -85,4 +85,32 @@ public class GenericServiceTests
         Assert.Equal(10, result.Items.Count);
         Assert.Equal(3, result.TotalPages);
     }
+
+    /// <summary>
+    /// ERP-447：授权护栏位于控制器层，<see cref="GenericService{TEntity}"/> 的既有 CRUD 契约保持不变
+    /// （供应商主数据同样可经通用服务分页 / 新增 / 更新 / 软删除）。
+    /// </summary>
+    [Fact]
+    public async Task GenericService_供应商_既有CRUD契约保持不变()
+    {
+        using var db = TestDbFactory.Create();
+        var service = new GenericService<BaseSupplier>(db);
+        var supplier = await service.CreateAsync(new BaseSupplier
+        {
+            SupplierCode = "S001",
+            SupplierName = "测试供应商",
+            Status = 1
+        });
+
+        Assert.True(supplier.Id > 0);
+        Assert.Equal("S001", (await service.GetByIdAsync(supplier.Id)).SupplierCode);
+        Assert.Equal(1, (await service.GetPagedAsync(new PageQuery { Page = 1, PageSize = 10 })).Total);
+
+        supplier.SupplierName = "改名供应商";
+        await service.UpdateAsync(supplier);
+        Assert.Equal("改名供应商", (await service.GetByIdAsync(supplier.Id)).SupplierName);
+
+        await service.DeleteAsync(supplier.Id);
+        await Assert.ThrowsAsync<BusinessException>(() => service.GetByIdAsync(supplier.Id));
+    }
 }
