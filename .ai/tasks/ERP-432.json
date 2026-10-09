@@ -5,7 +5,8 @@
     "Before deriving any data, require the current enabled nondeleted identity, the existing sales-order functional menu and the authoritative SalespersonDataScopeService customer scope on GET /api/sales-orders/delivery-exceptions, GET /api/sales-orders/shipment-finance-report and GET /api/sales-orders/receipt-reconciliation-report, reusing SalesOrderExecutionAuthorizationRules, SalesOrderDocumentOutputAuthorizationRules and SalespersonDataScopeService exactly with no new grants and no anonymous or admin fallback.",
     "Push the resolved customer scope into each derived query before counting, grouping or materialization so restricted accounts cannot receive foreign customers' order counts, quantities, shipment quantities or receipt amounts, keep the existing response DTOs, currency and unit separation and null-as-unknown semantics, and return the existing controlled non-disclosing error with no rows or totals on denial.",
     "Genuine isolated SQL authenticated controller tests cover restricted own and foreign customer, unrestricted privileged access and disabled, deleted and revoked-menu identities on all three routes, assert denial mutates no order, stock-out, receipt or allocation row, and confirm the existing delivery-exception, shipment-finance and receipt-reconciliation result contracts and regression tests are preserved.",
-    "Keep the safe Release build and the full existing ERP.UnitTests suite green, use only genuine isolated (localdb)\\NEWERP_AutoAcceptance GUID-owned NEWERP_AUTOTEST databases with Integrated Security, and add no schema, entity, permission, report-route or production/secret change; build completion is not stage acceptance."
+    "Keep the safe Release build and the full existing ERP.UnitTests suite green, use only genuine isolated (localdb)\\NEWERP_AutoAcceptance GUID-owned NEWERP_AUTOTEST databases with Integrated Security, and add no schema, entity, permission, report-route or production/secret change; build completion is not stage acceptance.",
+    "Repair unfinished multi-customer execution-read scope from the original path-guard failure: ERP432 attempt2 documented that a restricted account assigned multiple customers receives an empty delivery-exception report unless selecting one customer, because the helper was outside allowed_paths. This is not complete scope-preserving operational functionality. Now authorize the exact existing helper file and apply the resolved customer ID set to its base SalesOrders query before any materialization/count/quantity aggregation; preserve privileged/unrestricted behavior, explicit permitted-customer filtering, DTOs and missing-evidence semantics. Empty scope or foreign requested customer stays fail-closed; no grants or role/menu changes. Add real isolated SQL regression with two assigned customers, both having legitimate live orders plus a foreign customer: omitted customer returns both permitted customers with correct scoped counts and quantities and no foreign rows; explicit permitted customer returns that subset; revocation/deletion still deny zero writes. Retain original complete failed logs and completed checkpoint history; do not declare stage accepted. Update docs to remove resolved single-customer workaround limitation only after this real verification passes."
   ],
   "allowed_paths": [
     "src/ERP.Api/Controllers/SalesOrderController.cs",
@@ -17,7 +18,8 @@
     "src/ERP.UnitTests/SalesOrderShipmentFinanceReportTests.cs",
     "src/ERP.UnitTests/SalesOrderReceiptReconciliationTests.cs",
     "src/ERP.IntegrationTests/SalesOrderExecutionAuthorizationSqlServerTests.cs",
-    "docs/sales-order-execution-authority.md"
+    "docs/sales-order-execution-authority.md",
+    "src/ERP.Api/Controllers/SalesOrderDeliveryExceptions.cs"
   ],
   "criterion_path_map": {
     "Before deriving any data, require the current enabled nondeleted identity, the existing sales-order functional menu and the authoritative SalespersonDataScopeService customer scope on GET /api/sales-orders/delivery-exceptions, GET /api/sales-orders/shipment-finance-report and GET /api/sales-orders/receipt-reconciliation-report, reusing SalesOrderExecutionAuthorizationRules, SalesOrderDocumentOutputAuthorizationRules and SalespersonDataScopeService exactly with no new grants and no anonymous or admin fallback.": [
@@ -41,9 +43,17 @@
     "Keep the safe Release build and the full existing ERP.UnitTests suite green, use only genuine isolated (localdb)\\NEWERP_AutoAcceptance GUID-owned NEWERP_AUTOTEST databases with Integrated Security, and add no schema, entity, permission, report-route or production/secret change; build completion is not stage acceptance.": [
       "src/ERP.UnitTests/SalesOrderExecutionAuthorizationTests.cs",
       "docs/sales-order-execution-authority.md"
+    ],
+    "Repair unfinished multi-customer execution-read scope from the original path-guard failure: ERP432 attempt2 documented that a restricted account assigned multiple customers receives an empty delivery-exception report unless selecting one customer, because the helper was outside allowed_paths. This is not complete scope-preserving operational functionality. Now authorize the exact existing helper file and apply the resolved customer ID set to its base SalesOrders query before any materialization/count/quantity aggregation; preserve privileged/unrestricted behavior, explicit permitted-customer filtering, DTOs and missing-evidence semantics. Empty scope or foreign requested customer stays fail-closed; no grants or role/menu changes. Add real isolated SQL regression with two assigned customers, both having legitimate live orders plus a foreign customer: omitted customer returns both permitted customers with correct scoped counts and quantities and no foreign rows; explicit permitted customer returns that subset; revocation/deletion still deny zero writes. Retain original complete failed logs and completed checkpoint history; do not declare stage accepted. Update docs to remove resolved single-customer workaround limitation only after this real verification passes.": [
+      "src/ERP.Api/Controllers/SalesOrderDeliveryExceptions.cs",
+      "src/ERP.Api/Controllers/SalesOrderController.cs",
+      "src/ERP.UnitTests/SalesOrderExecutionAuthorizationTests.cs",
+      "src/ERP.UnitTests/SalesOrderDeliveryExceptionTests.cs",
+      "src/ERP.IntegrationTests/SalesOrderExecutionAuthorizationSqlServerTests.cs",
+      "docs/sales-order-execution-authority.md"
     ]
   },
-  "implementation_evidence": "src/ERP.Api/Controllers/SalesOrderController.cs:183-186 (DeliveryExceptions), 208-211 (ShipmentFinanceReport) and 223-226 (ReceiptReconciliationReport) call the static derivation helpers directly with no EnsureExecutionEvidenceAuthorizedAsync/ResolveScopeAsync, whereas the same file guards Timeline/Progress/ReturnImpact/receipt-and-invoice evidence routes (lines 141-202, 238-245) under ERP-413. The purchase-order equivalents do authorize: src/ERP.Api/Controllers/PurchaseOrderController.cs:162-165,175-178 call EnsureMenuAuthorizedAsync. ERP-413 implementation_evidence lists only Timeline, FinanceReconciliation, Progress, ReturnImpact and invoice/receipt single-record evidence, leaving these three query routes uncovered; ERP-424 covers only GetPrint/Export/ExportExcel.",
+  "implementation_evidence": "src/ERP.Api/Controllers/SalesOrderController.cs:183-186 (DeliveryExceptions), 208-211 (ShipmentFinanceReport) and 223-226 (ReceiptReconciliationReport) call the static derivation helpers directly with no EnsureExecutionEvidenceAuthorizedAsync/ResolveScopeAsync, whereas the same file guards Timeline/Progress/ReturnImpact/receipt-and-invoice evidence routes (lines 141-202, 238-245) under ERP-413. The purchase-order equivalents do authorize: src/ERP.Api/Controllers/PurchaseOrderController.cs:162-165,175-178 call EnsureMenuAuthorizedAsync. ERP-413 implementation_evidence lists only Timeline, FinanceReconciliation, Progress, ReturnImpact and invoice/receipt single-record evidence, leaving these three query routes uncovered; ERP-424 covers only GetPrint/Export/ExportExcel. See .ai/logs/ERP-432-attempt-2.jsonl final honest-boundary paragraph and docs/sales-order-execution-authority.md section7. Different repair approach: pass resolved scope into the existing helper rather than deny legitimate multi-customer read.",
   "depends_on": [
     "ERP-413",
     "ERP-424",
@@ -52,7 +62,7 @@
   "risk": "medium",
   "planning_stage": 3,
   "id": "ERP-432",
-  "status": "completed",
+  "status": "retry",
   "attempts": 2,
   "max_attempts": 3,
   "validation_profile": "safe",
@@ -104,5 +114,6 @@
       }
     }
   ],
-  "supervised_recovery_cycles": 1
+  "supervised_recovery_cycles": 1,
+  "completion_revision_reason": "Actual attempt2 documents incomplete multi-assigned-customer operational read due excluded helper; exact original path now authorized, original result retained as prior checkpoint only."
 }
