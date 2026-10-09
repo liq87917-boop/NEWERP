@@ -245,7 +245,9 @@ Object.assign(MODULES, {
       { key: 'owningCustomerName', label: '归属客户名称（冗余，可留空）' },
       /* ERP-393：来源销售订单由「选择来源」有界选择器显式回填（也可手工填写 Id）；选择器只回填权威归属来源
          Id / 单号与归属客户（服务端保存时再按来源权威派生），绝不自动改动币种 / 汇率 / 单价 / 金额 / 明细 */
-      { key: 'owningSalesOrderId', label: '归属销售订单 ID', type: 'number', selector: 'purchase-order-sales-order-source' },
+      /* ERP-429：归属来源是显式可选引用 —— 留空（手工采购 / 未关联）时提交 null，绝不回落为 0，
+         因为 0 会被服务端既有 ERP-425 来源校验按「显式非法 0」拒绝；逐字段选择加入，其它数值字段口径不变。 */
+      { key: 'owningSalesOrderId', label: '归属销售订单 ID', type: 'number', nullable: true, selector: 'purchase-order-sales-order-source' },
       { key: 'owningSalesOrderNo', label: '归属销售订单号' },
       { key: 'advanceOnBehalf', label: '是否代垫货款', type: 'select', valueType: 'bool', options: YES_NO_OPTS },
       { key: 'currency', label: '币种', type: 'select', options: CURRENCY_NAME_OPTS },
@@ -258,7 +260,8 @@ Object.assign(MODULES, {
       { key: 'arrivalProgress', label: '到货进度', type: 'select', options: ARRIVAL_PROGRESS_OPTS },
       { key: 'qcStatus', label: '验货状态', type: 'select', options: QC_STATUS_OPTS },
       { key: 'settlementProgress', label: '结算进度', type: 'select', options: SETTLEMENT_PROGRESS_OPTS },
-      { key: 'portId', label: '起运港 Id（港口字典，可留空）', type: 'number' },
+      /* ERP-429：起运港 Id 是显式可选引用 —— 留空提交 null（绝不回落为 0，0 仍被既有 ERP-427 主数据护栏拒绝）。 */
+      { key: 'portId', label: '起运港 Id（港口字典，可留空）', type: 'number', nullable: true },
       { key: 'remark', label: '备注', type: 'textarea' },
     ],
     /* ERP-031：供应商采购敞口报表入口（工具栏，始终可见；只读派生，不落库，不作为应付账款台账） */

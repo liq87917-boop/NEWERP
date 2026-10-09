@@ -42,6 +42,17 @@ public class SalesOrderHttpFormContractTests
 
     private static readonly IServiceProvider Mvc = BuildMvcServices();
 
+    /// <summary>
+    /// 全站精确有限的可选数值字段白名单（唯一允许留空提交 <c>null</c> 的数值字段）：
+    /// 销售订单目的港 + 采购订单可选归属来源 / 起运港；其余数值字段一律保持既有「留空 = 0」默认零值口径。
+    /// </summary>
+    private static readonly string[] AllowedNullableNumberFields =
+    {
+        "{ key: 'portId', label: '目的港 Id（港口字典，可留空）', type: 'number', nullable: true }",
+        "{ key: 'owningSalesOrderId', label: '归属销售订单 ID', type: 'number', nullable: true, selector: 'purchase-order-sales-order-source' }",
+        "{ key: 'portId', label: '起运港 Id（港口字典，可留空）', type: 'number', nullable: true }",
+    };
+
     private static IServiceProvider BuildMvcServices()
     {
         var services = new ServiceCollection();
@@ -352,8 +363,26 @@ public class SalesOrderHttpFormContractTests
         var modules = ReadRepoFile("src", "ERP.Api", "wwwroot", "js", "modules-doc.js");
         Assert.Contains(
             "{ key: 'portId', label: '目的港 Id（港口字典，可留空）', type: 'number', nullable: true }", modules);
-        // 选择加入是逐字段的：全站模块目录里只有销售订单目的港这一处，其它模块语义不变。
-        Assert.Equal(1, CountOccurrences(modules, "nullable: true"));
+        // 选择加入是逐字段的：全站模块目录只允许销售订单目的港 + 采购订单可选归属来源 / 起运港这三处，
+        // 其它数值字段（含采购数量 / 单价 / 汇率 / 税率等）一律保持既有「留空 = 0」默认零值口径。
+        Assert.Contains(
+            "{ key: 'owningSalesOrderId', label: '归属销售订单 ID', type: 'number', nullable: true, selector: 'purchase-order-sales-order-source' }",
+            modules);
+        Assert.Contains("{ key: 'portId', label: '起运港 Id（港口字典，可留空）', type: 'number', nullable: true }", modules);
+        // 精确有限白名单：销售目的港 1 处 + 采购可选来源 / 起运港 2 处，全站仅此 3 处，绝不扩散为全局可空转换。
+        Assert.Equal(3, CountOccurrences(modules, "nullable: true"));
+        // 其余任何数值字段都没有选择加入：留空仍回落 0（默认零值口径不变）。
+        var numberFields = modules.Split('\n').Select(line => line.Trim())
+            .Where(line => line.Contains("type: 'number'", StringComparison.Ordinal)).ToList();
+        Assert.True(numberFields.Count > 3, "模块目录应包含多于 3 个数值字段（明细列 / 其它模块）");
+        var optedInNumberFields = numberFields
+            .Where(line => line.Contains("nullable", StringComparison.Ordinal)).ToList();
+        Assert.Equal(3, optedInNumberFields.Count);
+        Assert.All(optedInNumberFields, line =>
+        {
+            // 字段声明行以逗号结尾（数组元素），白名单按声明本体比对。
+            Assert.Contains(line.TrimEnd(','), AllowedNullableNumberFields);
+        });
     }
 
     [Fact]

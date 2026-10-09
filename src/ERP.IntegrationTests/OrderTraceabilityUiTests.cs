@@ -225,9 +225,92 @@ public class OrderTraceabilityUiTests
         CaptureEvidence("purchase-order-print-preview");
         CloseModal();
 
-        // 清理测试单据（软删除，仅待提交单据可删）
+        // 清理测试单据：先软删除待提交采购单，再按既有业务接口取消「已审核」来源
+        // （已审核销售订单不可删除：只能走既有取消策略；客户 / 供应商仍被来源引用，保留隔离库主数据）。
         ApiData("DELETE", $"/api/purchase-orders/{order.Id}");
-        ApiData("DELETE", $"/api/sales-orders/{salesOrder.Id}");
+        ApiData("POST", $"/api/sales-orders/{salesOrder.Id}/cancel");
+        Assert.Empty(ApiIssues());
+    }
+
+    // ==================== 场景 2b：手工未关联采购（追加覆盖，保留已链接场景） ====================
+
+    [Fact]
+    public void 采购订单_手工未关联_省略单号与可选来源_保存重新打开与打印()
+    {
+        var tag = "UIPOM" + DateTime.Now.ToString("HHmmss");
+        LoginAsAdmin();
+        InstallApiIssueRecorder();
+
+        var customer = CreateCustomer(tag);
+        var supplier = CreateSupplier(tag);
+        var productId = CreateProductViaApi(tag);
+        var contractNo = "PCM-" + tag;
+
+        OpenModule("purchase-order");
+        ClickNewButton();
+        WaitPanelFieldVisible("f_owningSalesOrderNo");
+
+        SetRefField("supplierId", supplier.Id, tag);
+        SetRefField("owningCustomerId", customer.Id, tag);
+        SetFieldValue("f_owningCustomerName", tag);
+        // 手工未关联：归属销售订单 Id / 单号与起运港保持留空（前端提交 null，而非 0）。
+        SetFieldValue("f_owningSalesOrderId", "");
+        SetFieldValue("f_owningSalesOrderNo", "");
+        SetFieldValue("f_portId", "");
+        SetFieldValue("f_contractNo", contractNo);
+        SetSelectValue("f_advanceOnBehalf", "false");
+        SetSelectValue("f_taxIncluded", "true");
+        SetFieldValue("f_taxRate", "13");
+        SetSelectValue("f_arrivalProgress", "未到货");
+        SetSelectValue("f_qcStatus", "未验货");
+        SetSelectValue("f_settlementProgress", "未结算");
+        SetFieldValue("f_paymentTerms", "月结 30 天");
+        SetFieldValue("f_deliveryDate", DateTime.Today.AddDays(20).ToString("yyyy-MM-dd"));
+        AddDetailRow(0, tag + "-手工采购商品", "中", "PCS", "20", "50", productId);
+
+        ClearToast();
+        SavePanel();
+        WaitToastContains("保存成功");
+        ClosePanel();
+
+        var order = FindPurchaseOrder(contractNo);
+        Assert.True(order.Id > 0, "手工采购订单应落库");
+        Assert.StartsWith("PO", order.No);
+        Assert.Equal(contractNo, order.ContractNo);
+        Assert.Null(order.OwningSalesOrderId);
+        Assert.True(string.IsNullOrEmpty(order.OwningSalesOrderNo));
+        Assert.Equal(tag, order.OwningCustomerName);
+        Assert.Equal(13m, order.TaxRate);
+        Assert.Equal("未结算", order.SettlementProgress);
+        Assert.Equal(1000m, order.TotalAmount);
+        CaptureEvidence("purchase-order-manual-unlinked-saved");
+
+        // 重新打开：页面回显必须与落库一致（未关联语义原样保留，绝不回填伪造来源）。
+        OpenModule("purchase-order");
+        SearchList(contractNo);
+        OpenEditForm(contractNo, "f_contractNo", contractNo);
+        Assert.Equal(contractNo, FormValue("f_contractNo"));
+        Assert.True(string.IsNullOrEmpty(FormValue("f_owningSalesOrderNo")));
+        Assert.Equal(tag, FormValue("f_owningCustomerName"));
+        Assert.Equal("13", FormValue("f_taxRate"));
+        Assert.Equal("未结算", FormValue("f_settlementProgress"));
+        Assert.Equal(tag + "-手工采购商品", FormValue("d_0_productName"));
+        CaptureEvidence("purchase-order-manual-unlinked-reopened");
+        ClosePanel();
+
+        // 打印预览：手工采购单据必须可打印。
+        OpenModule("purchase-order");
+        SearchList(contractNo);
+        ClickRowMenuAction(order.Id, "previewSalesDocPrint");
+        WaitModalContains("打印预览");
+        var preview = ModalPrintText();
+        Assert.Contains(contractNo, preview);
+        Assert.True(HasPrintPage(), "打印预览应渲染 .print-page 单据版式");
+        CaptureEvidence("purchase-order-manual-unlinked-print-preview");
+        CloseModal();
+
+        // 清理：未关联采购单（软删除，仅待提交可删）后即可删除本次新建的隔离主数据。
+        ApiData("DELETE", $"/api/purchase-orders/{order.Id}");
         ApiData("DELETE", $"/api/base/customers/{customer.Id}");
         ApiData("DELETE", $"/api/base/suppliers/{supplier.Id}");
         Assert.Empty(ApiIssues());
@@ -269,9 +352,8 @@ public class OrderTraceabilityUiTests
         CaptureEvidence("sales-order-export-menu");
 
         ApiData("DELETE", $"/api/purchase-orders/{purchaseOrder.Id}");
-        ApiData("DELETE", $"/api/sales-orders/{salesOrder.Id}");
-        ApiData("DELETE", $"/api/base/customers/{customer.Id}");
-        ApiData("DELETE", $"/api/base/suppliers/{supplier.Id}");
+        // 已审核销售来源不可删除：按既有取消策略收尾（客户 / 供应商仍被来源引用，保留隔离库主数据）。
+        ApiData("POST", $"/api/sales-orders/{salesOrder.Id}/cancel");
         Assert.Empty(ApiIssues());
     }
 
@@ -399,7 +481,12 @@ public class OrderTraceabilityUiTests
             }
         });
         var data = ApiData("POST", "/api/sales-orders", body);
-        return new SalesOrderSeed(data.GetProperty("id").GetInt64(), data.GetProperty("orderNo").GetString()!,
+        var id = data.GetProperty("id").GetInt64();
+        /* ERP-429：采购归属来源必须是「已审核、未删除、未取消」的销售订单（既有 PurchaseSalesOrderLinkRules 口径）。
+           经既有提交 / 审核接口产生真实审核状态，绝不伪造审核状态，也不新增任何授权 / 菜单。 */
+        ApiData("POST", $"/api/sales-orders/{id}/submit");
+        ApiData("POST", $"/api/sales-orders/{id}/approve");
+        return new SalesOrderSeed(id, data.GetProperty("orderNo").GetString()!,
             string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty, string.Empty,
             string.Empty, string.Empty, string.Empty, string.Empty, false, 0m, 0m, 0);
     }
