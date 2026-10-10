@@ -1,11 +1,13 @@
 {
   "task": "ERP-446",
-  "status": "completed",
-  "execution_outcome": "completed",
-  "normalized_finish_reason": "build_validated",
+  "status": "retry_pending",
+  "execution_outcome": "retry_pending",
+  "normalized_finish_reason": "real_sql_acceptance_reopened",
   "cline_exit_code": 0,
   "cline_finish_reason_raw": "completed",
   "attempts": 1,
   "browser_acceptance": null,
-  "finished_at": "2026-10-09T07:17:07.897922Z"
+  "finished_at": "2026-10-09T07:17:07.897922Z",
+  "last_error": "Independent genuine SQL failed 3/12 because SystemParameterAuthorizationSqlServerTests.cs:229 slices short prefix plus GUID keys with [..40], throwing ArgumentOutOfRangeException before authorization and invalid-payload assertions. Original complete SQL log/TRX/target/build preserved in .ai/logs/heartbeat-20261010T0023-original-failures. Minimum isolated repair bounds slicing with Math.Min(40,key.Length), retaining GUID uniqueness and persisted MaxLength40. Isolated safe Release passed with 0 warnings/errors, and all 12 tests (7 real controller SQL cases and 5 database target guards) passed on a fresh GUID-owned dedicated NEWERP_AUTOTEST localdb. Apply only this fixture expression fix within existing allowed_paths, preserve all assertions and production authorization/value constraints, and run genuine SQL plus existing safe Release/full-unit gates before completing. Tested candidate: .ai/logs/ERP-311-repair-validation-20261005/src/ERP.IntegrationTests/SystemParameterAuthorizationSqlServerTests.cs.",
+  "historical_checkpoint": ".ai/results/ERP-446-checkpoint-attempt-1-before-real-sql-repair.json"
 }
