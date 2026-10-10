@@ -26,6 +26,12 @@ namespace ERP.Api.Controllers;
 /// <para>ERP-427：真实 HTTP 写入请求（新增 / 修改）在单号预约与任何表头 / 明细赋值之前、提交 / 审核在既有采购订单行锁内
 /// 提交之前，一律经 <see cref="PurchaseOrderMasterReferenceRules"/> 复核实时主数据引用（必填供应商、每条有效明细的必填商品、
 /// 可选采购员 / 起运港与既有有效单位口径），失败即受控拒绝且不落库、不占单号；历史读取 / 打印保持完全只读、不被回填。</para>
+/// <para>ERP-466：<see cref="RequiresLiveAuthorization"/> 只依据「控制器是否绑定到 HTTP 请求管线」
+/// （<c>ControllerContext.HttpContext</c> 是否存在），<strong>与 <c>Request.Path</c> 是否赋值、以及是否携带可解析身份完全无关</strong>：
+/// 空路径与已赋值路径的授权口径完全一致，缺少身份的真实请求 fail closed（未认证），不再存在「空路径 / 无身份」的请求形状旁路；
+/// 所有列表 / 详情 / 派生只读 / 创建 / 修改 / 提交 / 审核 / 取消 / 删除入口都在任何字节读写之前无条件复核实时身份 / 账号状态 /
+/// 既有「采购订单」菜单 / ERP-097 权威客户范围。仅 <c>HttpContext</c> 为 null 的纯进程内直调（外部请求无法构造）沿用仓库一致的
+/// 进程内边界，该边界不读取请求路径、环境变量或任何测试专用开关。</para>
 /// <para>ERP-430：规范运营读取（详情 / 打印 / JSON 运营导出）统一经 <see cref="OperationalReadQuery"/>，
 /// 只返回未删除父单的**未删除**明细行（EF Core filtered include，先于物化下推到数据库），与打印同口径；
 /// 表头历史金额与来源 / 审计快照原样保留，读取侧不重算币种总额、不改写被软删除的行。</para>
@@ -798,21 +804,20 @@ public class PurchaseOrderController : DocumentControllerBase<PurchaseOrder>
     // ==================== ERP-371：实时授权辅助（身份 / 菜单 / 权威客户范围） ====================
 
     /// <summary>
-    /// 是否必须执行实时授权：真实 HTTP 请求（MVC 绑定，<c>Request.Path</c> 已赋值）一律执行；
-    /// 进程内直接调用（历史单元测试 / 内部派生读取，无 HTTP 请求管线）仅在携带当前登录身份时执行。
-    /// 只对「既无任何登录身份、又不在 HTTP 请求管线内」的调用免授权：这类调用不可能由外部请求到达，
-    /// 也绝不把缺失身份当作管理员（真实匿名请求因处于请求管线内一律 fail closed）。
+    /// ERP-466：是否必须执行实时授权。<strong>只要控制器绑定到 HTTP 请求管线（<c>ControllerContext.HttpContext</c> 存在）
+    /// 就一律执行</strong>，与请求路径是否赋值、以及当前是否携带可解析的登录身份<strong>完全无关</strong>：
+    /// 空路径请求与已赋值路径请求的授权口径完全一致，缺少身份的真实请求同样 fail closed（未认证），
+    /// 既不存在「空路径 / 无身份」的请求形状旁路，也绝不把缺失身份当作管理员，绝无匿名或管理员兜底。
+    /// <para>仅「未被任何请求绑定」（<c>HttpContext</c> 为 null 的纯进程内直接调用，外部请求无法到达，例如既有
+    /// 进程内单元测试夹具）沿用仓库一致的进程内直调边界：该边界不读取请求路径、不读取环境变量，也不使用任何
+    /// 测试专用开关，因此不是请求形状旁路，也不能由任何外部请求到达。</para>
     /// </summary>
     private bool RequiresLiveAuthorization()
-    {
-        var http = ControllerContext?.HttpContext;
-        if (http is null) return false;
-        return http.Request.Path.HasValue || CurrentUserId() is not null;
-    }
+        => ControllerContext?.HttpContext is not null;
 
     /// <summary>
-    /// ERP-427：是否必须执行实时主数据引用复核。真实 HTTP 写入请求（MVC 绑定，<c>Request.Path</c> 已赋值）
-    /// 一律执行；进程内直接调用（历史单元测试 / 内部派生读取，无 HTTP 请求管线）保持既有行为 —— 与
+    /// ERP-427：是否必须执行实时主数据引用复核。<strong>真实 HTTP 写入请求（MVC 绑定，<c>Request.Path</c> 已赋值）
+    /// 一律执行</strong>；进程内直接调用（历史单元测试 / 内部派生读取，无 HTTP 请求管线）保持既有行为 —— 与
     /// <see cref="RequiresLiveAuthorization"/> 同一取舍：这类调用不可能由外部请求到达。
     /// <para>真实请求在到达本复核之前已由 <see cref="EnsureProposedAuthorizedAsync"/> /
     /// <see cref="EnsureOrderAuthorizedAsync"/> 完成身份 / 菜单 / 权威归属范围 fail closed（非披露），

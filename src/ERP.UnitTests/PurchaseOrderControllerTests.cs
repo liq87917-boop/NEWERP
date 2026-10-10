@@ -12,6 +12,9 @@ namespace ERP.UnitTests;
 
 /// <summary>
 /// PurchaseOrderController 单元测试：Create 修复了 SalesOrder 同款 Amount bug 后的行为 + DocumentControllerBase 状态流转。
+/// <para>ERP-466：既有进程内夹具改为**真实启用身份 + 既有「采购订单」（<c>purchase-order</c>）菜单授权 + 特权数据范围**，
+/// 且**刻意不设置 <c>Request.Path</c>**（空路径请求），证明这些既有契约只有在实时授权通过之后才成立；
+/// 全部使用隔离内存测试数据，不新增任何生产菜单 / 角色 / 用户授权。</para>
 /// </summary>
 public class PurchaseOrderControllerTests
 {
@@ -19,7 +22,7 @@ public class PurchaseOrderControllerTests
     public async Task Create_正常创建_生成OrderNo_Detail的Amount被自动计算_TotalAmount汇总()
     {
         using var db = TestDbFactory.Create();
-        var ctl = new PurchaseOrderController(db, new DocumentNumberService(db));
+        var ctl = ForUser(db, SeedAuthorizedOperator(db));
 
         var po = new PurchaseOrder
         {
@@ -52,7 +55,7 @@ public class PurchaseOrderControllerTests
     public async Task GetById_不存在_抛NotFound()
     {
         using var db = TestDbFactory.Create();
-        var ctl = new PurchaseOrderController(db, new DocumentNumberService(db));
+        var ctl = ForUser(db, SeedAuthorizedOperator(db));
         await Assert.ThrowsAsync<BusinessException>(() => ctl.GetById(999));
     }
 
@@ -62,7 +65,7 @@ public class PurchaseOrderControllerTests
         using var db = TestDbFactory.Create();
         SeedPurchaseOrder(db, "PO-FOO-1", DocumentStatus.Pending);
         SeedPurchaseOrder(db, "PO-BAR-1", DocumentStatus.Pending);
-        var ctl = new PurchaseOrderController(db, new DocumentNumberService(db));
+        var ctl = ForUser(db, SeedAuthorizedOperator(db));
 
         var result = await ctl.GetPaged(new PageQuery { Page = 1, PageSize = 10, Keyword = "FOO" }, null);
         var resp = Assert.IsType<ApiResponse<PagedResult<PurchaseOrder>>>(Assert.IsType<OkObjectResult>(result).Value);
@@ -74,7 +77,7 @@ public class PurchaseOrderControllerTests
     {
         using var db = TestDbFactory.Create();
         var (po, _) = SeedPurchaseOrder(db, "PO-X", DocumentStatus.Approved);
-        var ctl = new PurchaseOrderController(db, new DocumentNumberService(db));
+        var ctl = ForUser(db, SeedAuthorizedOperator(db));
 
         var update = new PurchaseOrder
         {
@@ -93,7 +96,7 @@ public class PurchaseOrderControllerTests
     {
         using var db = TestDbFactory.Create();
         var (po, _) = SeedPurchaseOrder(db, "PO-Y", DocumentStatus.Pending);
-        var ctl = new PurchaseOrderController(db, new DocumentNumberService(db));
+        var ctl = ForUser(db, SeedAuthorizedOperator(db));
 
         var update = new PurchaseOrder
         {
@@ -116,7 +119,7 @@ public class PurchaseOrderControllerTests
     {
         using var db = TestDbFactory.Create();
         var (po, _) = SeedPurchaseOrder(db, "PO-WF", DocumentStatus.Pending);
-        var ctl = new PurchaseOrderController(db, new DocumentNumberService(db));
+        var ctl = ForUser(db, SeedAuthorizedOperator(db));
 
         await ctl.Submit(po.Id);
         Assert.Equal(DocumentStatus.Submitted, db.PurchaseOrders.Single().Status);
@@ -131,7 +134,7 @@ public class PurchaseOrderControllerTests
         using var db = TestDbFactory.Create();
         var (po1, _) = SeedPurchaseOrder(db, "PO-D1", DocumentStatus.Pending);
         var (po2, _) = SeedPurchaseOrder(db, "PO-D2", DocumentStatus.Approved);
-        var ctl = new PurchaseOrderController(db, new DocumentNumberService(db));
+        var ctl = ForUser(db, SeedAuthorizedOperator(db));
 
         await ctl.Delete(po1.Id);
         Assert.True(db.PurchaseOrders.Single(p => p.Id == po1.Id).IsDeleted);
@@ -163,5 +166,57 @@ public class PurchaseOrderControllerTests
         db.PurchaseOrderDetails.Add(detail);
         db.SaveChanges();
         return (po, detail);
+    }
+
+    /// <summary>播种既有「采购订单」（purchase-order）菜单授权 + 启用特权账号（系统内置角色 → 不受数据范围限制）。</summary>
+    private static long SeedAuthorizedOperator(ErpDbContext db)
+    {
+        var menu = db.SysMenus.FirstOrDefault(
+            m => m.MenuCode == PurchaseOrderAuthorizationRules.RequiredMenuCode && !m.IsDeleted);
+        if (menu is null)
+        {
+            menu = new SysMenu
+            {
+                ParentId = 0,
+                MenuCode = PurchaseOrderAuthorizationRules.RequiredMenuCode,
+                MenuName = PurchaseOrderAuthorizationRules.RequiredMenuText,
+                Path = "/purchase/purchase-order",
+                MenuType = MenuType.Menu,
+                CreatedAt = DateTime.Now
+            };
+            db.SysMenus.Add(menu);
+            db.SaveChanges();
+        }
+
+        var role = new SysRole
+        {
+            RoleCode = $"PoCtl-{Guid.NewGuid():N}", RoleName = "采购控制器测试角色", IsSystem = true
+        };
+        db.SysRoles.Add(role);
+        db.SaveChanges();
+
+        var user = new SysUser
+        {
+            UserName = $"po-ctl-{Guid.NewGuid():N}",
+            PasswordHash = "hash",
+            PasswordSalt = "salt",
+            DisplayName = "采购控制器测试账号",
+            Status = UserStatus.Enabled
+        };
+        db.SysUsers.Add(user);
+        db.SaveChanges();
+
+        db.SysUserRoles.Add(new SysUserRole { UserId = user.Id, RoleId = role.Id });
+        db.SysRoleMenus.Add(new SysRoleMenu { RoleId = role.Id, MenuId = menu.Id });
+        db.SaveChanges();
+        return user.Id;
+    }
+
+    /// <summary>绑定既有启用身份（<strong>刻意不设置 Request.Path</strong>，证明授权与请求形状无关）。</summary>
+    private static PurchaseOrderController ForUser(ErpDbContext db, long userId)
+    {
+        var ctl = new PurchaseOrderController(db, new DocumentNumberService(db));
+        TestAuth.SetUser(ctl, userId);
+        return ctl;
     }
 }
