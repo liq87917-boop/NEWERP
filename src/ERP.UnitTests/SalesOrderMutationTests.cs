@@ -390,8 +390,56 @@ public class SalesOrderMutationTests
     private static SalesOrderController PrivilegedController(ErpDbContext db)
     {
         var controller = new SalesOrderController(db, new DocumentNumberService(db));
-        TestAuth.SetUser(controller, TestAuth.SeedPrivilegedUser(db));
+        // ERP-465：普通写入入口的实时身份 / 账号状态 / 既有「销售订单」菜单口径与请求形状无关；
+        // 夹具绑定真实的既有启用身份 + 既有「销售订单」菜单授权（特权口径，数据范围不受限），刻意不设置 Request.Path。
+        TestAuth.SetUser(controller, SeedAuthorizedActor(db));
         return controller;
+    }
+
+    /// <summary>
+    /// ERP-465：在隔离内存测试数据里播种<b>既有启用身份 + 既有「销售订单」（<c>sales-order</c>）菜单授权</b>
+    /// （真实角色 → 菜单口径，菜单编码与 <c>SeedData</c> 同源，不新增任何生产权限），返回其用户 Id。
+    /// </summary>
+    private static long SeedAuthorizedActor(ErpDbContext db)
+    {
+        var menu = db.SysMenus.FirstOrDefault(
+            m => m.MenuCode == SalesOrderExecutionAuthorizationRules.RequiredMenuCode && !m.IsDeleted);
+        if (menu is null)
+        {
+            menu = new SysMenu
+            {
+                MenuCode = SalesOrderExecutionAuthorizationRules.RequiredMenuCode,
+                MenuName = SalesOrderExecutionAuthorizationRules.RequiredMenuText,
+                MenuType = MenuType.Menu
+            };
+            db.SysMenus.Add(menu);
+            db.SaveChanges();
+        }
+
+        var role = new SysRole
+        {
+            RoleCode = $"so-mut-{Guid.NewGuid():N}",
+            RoleName = "销售订单写入测试角色",
+            IsSystem = true
+        };
+        db.SysRoles.Add(role);
+        db.SaveChanges();
+        db.SysRoleMenus.Add(new SysRoleMenu { RoleId = role.Id, MenuId = menu.Id });
+        db.SaveChanges();
+
+        var user = new SysUser
+        {
+            UserName = $"so-mut-{Guid.NewGuid():N}",
+            PasswordHash = "hash",
+            PasswordSalt = "salt",
+            DisplayName = "销售订单写入测试账号",
+            Status = UserStatus.Enabled
+        };
+        db.SysUsers.Add(user);
+        db.SaveChanges();
+        db.SysUserRoles.Add(new SysUserRole { UserId = user.Id, RoleId = role.Id });
+        db.SaveChanges();
+        return user.Id;
     }
 
     private static BaseCustomer SeedCustomer(ErpDbContext db)

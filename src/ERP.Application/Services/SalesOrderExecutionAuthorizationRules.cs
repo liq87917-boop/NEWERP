@@ -72,8 +72,23 @@ public static class SalesOrderExecutionAuthorizationRules
         + "不删除历史证据与审计留痕，也不新增任何表 / 列 / 索引 / 菜单 / 权限或用户授权。";
 
     /// <summary>
+    /// ERP-465 路径无关契约文案：执行证据 / 列表 / 详情入口的授权判定与请求形状无关 —— 只要控制器绑定到
+    /// HTTP 请求管线（空路径或已赋值路径）就一律执行同一套实时身份 / 账号状态 / 既有菜单 / ERP-097 权威范围判定；
+    /// 不读取 <c>Request.Path</c>、不读取环境变量、不使用任何测试专用开关，也绝无匿名 / 管理员兜底。
+    /// </summary>
+    public const string PathIndependenceText =
+        "销售订单读侧授权与请求形状无关：空 Request.Path 与已赋值 Request.Path（以及缺失身份的真实请求）"
+        + "一律执行同一套实时身份 / 账号状态 / 既有「销售订单」（sales-order）功能菜单 / "
+        + "SalespersonDataScopeService（ERP-097 唯一权威口径）客户数据范围判定；"
+        + "缺失 / 零 / 非法 / 已删除身份按未认证拒绝（2000），已禁用 / 缺失或撤销既有菜单按权限不足拒绝（2002），"
+        + "且全部先于任何订单 / 明细 / 执行证据 / 时间线字节读取；"
+        + "判定不读取 Request.Path、不读取环境变量、不使用任何测试专用开关，也绝无匿名或管理员兜底。";
+
+    /// <summary>
     /// 执行证据入口的完整授权（实时身份 + 既有「销售订单」菜单 + 权威客户数据范围）。
     /// 特权账号豁免菜单校验但仍须通过实时身份校验；每次调用都重新查询（无缓存），授权撤销 / 账号停用后立即收敛。
+    /// <para>ERP-465：控制器对<strong>每一条绑定到 HTTP 请求管线</strong>的执行证据入口（空路径与已赋值路径口径一致）
+    /// <strong>无条件</strong>调用本方法；缺少身份的请求 fail closed（未认证），绝不因请求形状或身份缺失而降级。</para>
     /// </summary>
     public static async Task<SalespersonDataScope> EnsureReadAuthorizedAsync(
         IErpDbContext db, long? userId, CancellationToken ct = default)
@@ -94,6 +109,8 @@ public static class SalesOrderExecutionAuthorizationRules
     /// 已禁用按权限不足拒绝；随后复用 <see cref="SalespersonDataScopeService"/>（ERP-097）解析权威客户范围。
     /// 普通账号仍须显式具备既有「销售订单」菜单 —— 该要求由执行证据入口
     /// <see cref="EnsureReadAuthorizedAsync"/> 施加，本方法只解析实时身份与范围。
+    /// <para>ERP-465：控制器对<strong>每一条绑定到 HTTP 请求管线</strong>的列表 / 详情入口（空路径与已赋值路径口径一致）
+    /// 调用本方法；缺少身份的请求 fail closed（未认证），列表 / 详情<strong>不额外要求模块菜单</strong>（与既有口径一致）。</para>
     /// </summary>
     public static async Task<SalespersonDataScope> EnsureLiveIdentityAsync(
         IErpDbContext db, long? userId, CancellationToken ct = default)

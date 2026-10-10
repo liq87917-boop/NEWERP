@@ -13,6 +13,9 @@ namespace ERP.UnitTests;
 /// <summary>
 /// SalesOrderController 单元测试：覆盖 GetPaged / GetById / Create / Update / Export 业务方法，
 /// 以及 DocumentControllerBase 的 Submit / Approve / Cancel / Delete 状态流转。
+/// <para>ERP-465：夹具全部以<b>真实的既有启用身份 + 既有「销售订单」（<c>sales-order</c>）菜单授权</b>驱动控制器，
+/// 且<b>不设置</b> <c>Request.Path</c>（空路径）—— 证明这些既有业务契约只有在同一套实时授权通过之后才成立，
+/// 授权判定与请求路径 / 请求形状完全无关。授权数据只播种在隔离的内存测试库中，绝不新增任何生产菜单 / 权限 / 用户授权。</para>
 /// </summary>
 public class SalesOrderControllerTests
 {
@@ -204,8 +207,57 @@ public class SalesOrderControllerTests
     private static SalesOrderController BuildController(ErpDbContext db)
     {
         var controller = new SalesOrderController(db, new DocumentNumberService(db));
-        TestAuth.SetUser(controller, TestAuth.SeedPrivilegedUser(db));
+        // ERP-465：读写入口的实时授权与请求形状无关 —— 夹具绑定**真实的既有启用身份 + 既有「销售订单」
+        // （sales-order）菜单授权**，且刻意不设置 Request.Path（空路径），证明这些既有业务契约只有实时授权通过后才成立。
+        TestAuth.SetUser(controller, SeedAuthorizedActor(db));
         return controller;
+    }
+
+    /// <summary>
+    /// ERP-465：在隔离的内存测试数据里播种一个<b>既有启用身份 + 既有「销售订单」（sales-order）菜单授权</b>
+    /// （真实角色 → 菜单口径，菜单编码与 <c>SeedData</c> 同源，不新增任何生产权限），返回其用户 Id。
+    /// 账号沿用既有特权口径（系统内置角色 → 数据范围不受限），以便聚焦既有读写业务契约。
+    /// </summary>
+    private static long SeedAuthorizedActor(ErpDbContext db)
+    {
+        var menu = db.SysMenus.FirstOrDefault(
+            m => m.MenuCode == SalesOrderExecutionAuthorizationRules.RequiredMenuCode && !m.IsDeleted);
+        if (menu is null)
+        {
+            menu = new SysMenu
+            {
+                MenuCode = SalesOrderExecutionAuthorizationRules.RequiredMenuCode,
+                MenuName = SalesOrderExecutionAuthorizationRules.RequiredMenuText,
+                MenuType = MenuType.Menu
+            };
+            db.SysMenus.Add(menu);
+            db.SaveChanges();
+        }
+
+        var role = new SysRole
+        {
+            RoleCode = $"so-entry-{Guid.NewGuid():N}",
+            RoleName = "销售订单入口测试角色",
+            IsSystem = true
+        };
+        db.SysRoles.Add(role);
+        db.SaveChanges();
+        db.SysRoleMenus.Add(new SysRoleMenu { RoleId = role.Id, MenuId = menu.Id });
+        db.SaveChanges();
+
+        var user = new SysUser
+        {
+            UserName = $"so-entry-{Guid.NewGuid():N}",
+            PasswordHash = "hash",
+            PasswordSalt = "salt",
+            DisplayName = "销售订单入口测试账号",
+            Status = UserStatus.Enabled
+        };
+        db.SysUsers.Add(user);
+        db.SaveChanges();
+        db.SysUserRoles.Add(new SysUserRole { UserId = user.Id, RoleId = role.Id });
+        db.SaveChanges();
+        return user.Id;
     }
 private static (SalesOrder so, SalesOrderDetail detail) SeedSalesOrder(ErpDbContext db, string no, DocumentStatus status)
     {

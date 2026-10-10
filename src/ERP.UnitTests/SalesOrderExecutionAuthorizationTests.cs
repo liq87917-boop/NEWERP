@@ -19,7 +19,9 @@ namespace ERP.UnitTests;
 /// 无身份 / 已删除 / 已禁用 / 无菜单 / 仅导出菜单 / 已撤销菜单一律 fail closed；
 /// 批量显式 Id 混入不可访问订单**整批拒绝**（无部分行 / 计数）；特权账号保留既有全量口径；
 /// 允许派生保留既有部分出货 / 退货 / 发票 / 收款语义且与直接派生结果一致；拒绝后零写入；
-/// 进程内无身份直调免授权（保持既有单元测试口径），真实 HTTP 匿名请求 fail closed。</para>
+/// 进程内无身份直调免授权（保持既有单元测试口径），真实 HTTP 匿名请求 fail closed。
+/// ERP-465：只要控制器绑定到 HTTP 请求管线（空路径或已赋值路径）就一律执行实时授权，两种请求形状判定完全一致；
+/// 仅未绑定任何请求的纯进程内直调沿用既有边界，且绝不读取 <c>Request.Path</c> 或环境变量。</para>
 /// <para>全部使用内存数据库（<see cref="TestDbFactory"/>），不连接 SQL Server、不启动 API、不执行任何 SQL / seed。</para>
 /// </summary>
 public class SalesOrderExecutionAuthorizationTests
@@ -383,6 +385,95 @@ public class SalesOrderExecutionAuthorizationTests
 
         // 详情入口沿用既有口径（历史实现即要求范围解析）：无身份直调一律 fail closed（绝不返回订单数据）。
         await Assert.ThrowsAnyAsync<Exception>(() => inProcess.GetById(order.Id));
+    }
+
+    // ==================== 5b. 请求形状无关（ERP-465） ====================
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("/api/sales-orders")]
+    public async Task 空路径与已赋值路径_缺少身份一律未认证(string? path)
+    {
+        using var db = TestDbFactory.Create();
+        var customer = SeedCustomer(db, "C413-PATH-ANON", null);
+        var order = SeedOrder(db, "SO-413-PATH-ANON", customer.Id);
+
+        var ctl = NewController(db, null, path);
+        await AssertDeniedAsync(ErrorCodes.Unauthorized, () => ctl.GetPaged(new PageQuery(), null));
+        await AssertDeniedAsync(ErrorCodes.Unauthorized, () => ctl.GetById(order.Id));
+        await AssertDeniedAsync(ErrorCodes.Unauthorized, () => ctl.Timeline(order.Id));
+        await AssertDeniedAsync(ErrorCodes.Unauthorized, () => ctl.Progress(order.Id));
+        await AssertDeniedAsync(ErrorCodes.Unauthorized, () => ctl.ReceiptEvidence(order.Id));
+        await AssertDeniedAsync(ErrorCodes.Unauthorized, () => ctl.InvoiceEvidence(order.Id));
+        await AssertDeniedAsync(ErrorCodes.Unauthorized, () => ctl.ReceiptEvidenceSummaries(
+            new SalesOrderReceiptEvidenceQuery { Ids = order.Id.ToString() }));
+        await AssertDeniedAsync(ErrorCodes.Unauthorized, () => ctl.InvoiceEvidenceSummaries(
+            new SalesOrderInvoiceEvidenceQuery { Ids = order.Id.ToString() }));
+    }
+
+    [Fact]
+    public async Task 空路径与已赋值路径_同一身份判定完全一致()
+    {
+        using var db = TestDbFactory.Create();
+        var (userId, employeeId, _) = SeedOperator(db);
+        var own = SeedCustomer(db, "C413-EQ-OWN", employeeId);
+        var foreign = SeedCustomer(db, "C413-EQ-FOR", null);
+        var ownOrder = SeedOrder(db, "SO-413-EQ-OWN", own.Id);
+        var foreignOrder = SeedOrder(db, "SO-413-EQ-FOR", foreign.Id);
+
+        // 空路径与已赋值路径：同一身份放行 / 拒绝结果逐条一致。
+        foreach (var ctl in new[] { NewController(db, userId, null), NewController(db, userId, "/api/sales-orders") })
+        {
+            Assert.NotNull(await OkDataAsync<SalesOrderProgressView>(() => ctl.Progress(ownOrder.Id)));
+            Assert.NotNull(await OkDataAsync<SalesOrder>(() => ctl.GetById(ownOrder.Id)));
+            await AssertNonDisclosingNotFoundAsync(() => ctl.Progress(foreignOrder.Id));
+            await AssertNonDisclosingNotFoundAsync(() => ctl.GetById(foreignOrder.Id));
+        }
+
+        // 禁用身份在两种请求形状上一致权限不足（Fail closed，先于任何证据读取）。
+        var disabled = SeedOperator(db, status: UserStatus.Disabled);
+        foreach (var ctl in new[]
+                 {
+                     NewController(db, disabled.UserId, null),
+                     NewController(db, disabled.UserId, "/api/sales-orders")
+                 })
+        {
+            await AssertDeniedAsync(ErrorCodes.Forbidden, () => ctl.Progress(ownOrder.Id));
+            await AssertDeniedAsync(ErrorCodes.Forbidden, () => ctl.GetById(ownOrder.Id));
+        }
+    }
+
+    [Fact]
+    public void 控制器源码_读侧授权与请求形状无关且无兜底()
+    {
+        var source = File.ReadAllText(Path.Combine(RepoRoot(), "src", "ERP.Api", "Controllers",
+            "SalesOrderController.cs"));
+
+        Assert.Contains("ControllerContext?.HttpContext is not null", source);
+        Assert.DoesNotContain("Request.Path", source);
+        Assert.DoesNotContain("AllowAnonymous", source);
+        Assert.DoesNotContain("[Authorize(Roles", source);
+        Assert.DoesNotContain("Environment.GetEnvironmentVariable", source);
+        Assert.DoesNotContain("IsInMemory", source);
+        Assert.Contains("SalesOrderExecutionAuthorizationRules.EnsureLiveIdentityAsync", source);
+        Assert.Contains("SalesOrderExecutionAuthorizationRules.EnsureReadAuthorizedAsync", source);
+
+        var rules = File.ReadAllText(Path.Combine(RepoRoot(), "src", "ERP.Application", "Services",
+            "SalesOrderExecutionAuthorizationRules.cs"));
+        Assert.Contains("PathIndependenceText", rules);
+        Assert.Contains("请求形状", SalesOrderExecutionAuthorizationRules.PathIndependenceText);
+        Assert.Contains("未认证", SalesOrderExecutionAuthorizationRules.PathIndependenceText);
+        Assert.Contains("权限不足", SalesOrderExecutionAuthorizationRules.PathIndependenceText);
+    }
+
+    private static string RepoRoot()
+        => Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
+
+    /// <summary>断言拒绝：返回指定受控错误码（未认证 2000 / 权限不足 2002）。</summary>
+    private static async Task AssertDeniedAsync(int code, Func<Task<IActionResult>> action)
+    {
+        var ex = await Assert.ThrowsAsync<BusinessException>(action);
+        Assert.Equal(code, ex.Code);
     }
 
     // ==================== 6. 拒绝时零写入 ====================
