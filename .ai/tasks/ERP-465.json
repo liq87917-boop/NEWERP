@@ -1,0 +1,75 @@
+{
+  "title": "Enforce canonical sales order read authority independently of request path",
+  "description": "Stage3 verified authority-path repair, direct follow-up to ERP-413 / ERP-420 / ERP-424 (the same defect class already repaired for PurchaseInvoice ERP-462, SysUser ERP-463 and Role ERP-464). src/ERP.Api/Controllers/SalesOrderController.cs:34-39 gates the read-side live authorization on request shape only: RequiresLiveAuthorization() returns false when ControllerContext.HttpContext is null and otherwise returns http.Request.Path.HasValue || CurrentUserId() is not null, so blank-path or identity-less in-process calls skip ResolveListDetailScopeAsync (lines 69-72) and EnsureExecutionEvidenceAuthorizedAsync (lines 45-48) completely. Remove the request-shape/identity bypass so the existing live authority runs on every paged, detail and execution-evidence entry, matching the already-unconditional canonical write (lines 79-80) and document-output (lines 91-92) guards. Preserve the existing ERP-097 authoritative customer scope, the existing sales-order (sales-order) menu requirement on the execution-evidence entry only (no new menu requirement for list/detail), non-disclosing missing/foreign behavior, all quantity/amount/currency/numbering/status/transaction/audit boundaries, and production seed permissions. Adapt legacy in-process fixtures to genuine enabled identities and their existing menu grants in isolated test data only. No Request.Path, environment, blank-context or test-only switch, no anonymous or administrative fallback, no permission expansion, no production access, no schema change. Genuine SQL uses exactly (localdb)\\NEWERP_AutoAcceptance with Integrated Security and a fresh GUID-owned NEWERP_AUTOTEST database, refusing existing or wrong targets before access and never dropping or resetting. Safe Release with analyzers/warnings-as-errors plus the full unit suite is required; a build alone is not whole-phase acceptance.",
+  "acceptance_criteria": [
+    "src/ERP.Api/Controllers/SalesOrderController.cs:34-39 gates live read authorization on request shape only: RequiresLiveAuthorization() returns false when ControllerContext.HttpContext is null and otherwise returns http.Request.Path.HasValue || CurrentUserId() is not null, so blank-path or identity-less in-process calls skip ResolveListDetailScopeAsync (lines 69-72) and EnsureExecutionEvidenceAuthorizedAsync (lines 45-48) completely. Require the existing live identity / account-status and ERP-097 authoritative customer scope on every paged and detail entry (without adding a module-menu requirement that does not exist today) and the existing live identity / account-status / 「销售订单」(sales-order) menu / ERP-097 scope on every execution-evidence entry, all independent of request path or shape, matching the unconditional canonical write (lines 79-80) and document-output (lines 91-92) guards. Missing/zero/unknown/deleted identity must fail Unauthorized and disabled/revoked/missing-menu must fail Forbidden before any order, detail, execution-evidence, traceability or timeline byte is read. Empty and populated Request.Path must enforce identical authority, including when no HttpContext is bound. No Request.Path, environment, blank-context or test-only switch, no anonymous or administrative fallback.",
+    "Retain the permitted salesperson and privileged lifecycles, the existing ERP-097 customer data scope and non-disclosing missing/foreign behavior, and all original quantity, amount, currency, numbering, transaction, audit and status-transition boundaries; denied calls return no order data and persist zero mutations. Do not weaken any validator, do not change production seed permissions, menu codes or role grants, and add no new permission, table or column.",
+    "Adapt the legacy in-process sales-order fixtures to genuine enabled identities holding their existing 「销售订单」menu grants in isolated test data only, and add genuine isolated SQL controller tests exercising empty and populated request paths, absent HttpContext, missing/zero/deleted identity, disabled or revoked-menu identity, permitted lifecycle and denied zero-mutation snapshots, preserving all existing regressions. Safe Release with analyzers and warnings-as-errors plus the full unit suite is required, so a build alone is not whole-phase acceptance. Genuine SQL must use exactly (localdb)\\NEWERP_AutoAcceptance with Integrated Security and a fresh GUID-owned NEWERP_AUTOTEST database, refusing existing or wrong targets before access and never dropping or resetting any database; preserve full failing logs."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/SalesOrderController.cs",
+    "src/ERP.Application/Services/SalesOrderExecutionAuthorizationRules.cs",
+    "src/ERP.Application/Services/SalesOrderMutationAuthorizationRules.cs",
+    "src/ERP.Application/Services/SalesOrderDocumentOutputAuthorizationRules.cs",
+    "src/ERP.UnitTests/SalesOrderControllerTests.cs",
+    "src/ERP.UnitTests/SalesOrderProcReadTests.cs",
+    "src/ERP.UnitTests/SalesOrderMutationTests.cs",
+    "src/ERP.UnitTests/SalesOrderExecutionAuthorizationTests.cs",
+    "src/ERP.UnitTests/SalesOrderMutationAuthorizationTests.cs",
+    "src/ERP.UnitTests/SalesOrderDocumentOutputAuthorizationTests.cs",
+    "src/ERP.UnitTests/SalesOrderEntryAuthorizationTests.cs",
+    "src/ERP.IntegrationTests/SalesOrderEntryAuthorizationSqlServerTests.cs",
+    "docs/salesorderentryauthorization.md"
+  ],
+  "criterion_path_map": {
+    "src/ERP.Api/Controllers/SalesOrderController.cs:34-39 gates live read authorization on request shape only: RequiresLiveAuthorization() returns false when ControllerContext.HttpContext is null and otherwise returns http.Request.Path.HasValue || CurrentUserId() is not null, so blank-path or identity-less in-process calls skip ResolveListDetailScopeAsync (lines 69-72) and EnsureExecutionEvidenceAuthorizedAsync (lines 45-48) completely. Require the existing live identity / account-status and ERP-097 authoritative customer scope on every paged and detail entry (without adding a module-menu requirement that does not exist today) and the existing live identity / account-status / 「销售订单」(sales-order) menu / ERP-097 scope on every execution-evidence entry, all independent of request path or shape, matching the unconditional canonical write (lines 79-80) and document-output (lines 91-92) guards. Missing/zero/unknown/deleted identity must fail Unauthorized and disabled/revoked/missing-menu must fail Forbidden before any order, detail, execution-evidence, traceability or timeline byte is read. Empty and populated Request.Path must enforce identical authority, including when no HttpContext is bound. No Request.Path, environment, blank-context or test-only switch, no anonymous or administrative fallback.": [
+      "src/ERP.Api/Controllers/SalesOrderController.cs",
+      "src/ERP.Application/Services/SalesOrderExecutionAuthorizationRules.cs",
+      "src/ERP.Application/Services/SalesOrderMutationAuthorizationRules.cs",
+      "src/ERP.Application/Services/SalesOrderDocumentOutputAuthorizationRules.cs"
+    ],
+    "Retain the permitted salesperson and privileged lifecycles, the existing ERP-097 customer data scope and non-disclosing missing/foreign behavior, and all original quantity, amount, currency, numbering, transaction, audit and status-transition boundaries; denied calls return no order data and persist zero mutations. Do not weaken any validator, do not change production seed permissions, menu codes or role grants, and add no new permission, table or column.": [
+      "src/ERP.Api/Controllers/SalesOrderController.cs",
+      "src/ERP.Application/Services/SalesOrderExecutionAuthorizationRules.cs",
+      "src/ERP.Application/Services/SalesOrderMutationAuthorizationRules.cs",
+      "src/ERP.UnitTests/SalesOrderControllerTests.cs",
+      "src/ERP.UnitTests/SalesOrderMutationTests.cs"
+    ],
+    "Adapt the legacy in-process sales-order fixtures to genuine enabled identities holding their existing 「销售订单」menu grants in isolated test data only, and add genuine isolated SQL controller tests exercising empty and populated request paths, absent HttpContext, missing/zero/deleted identity, disabled or revoked-menu identity, permitted lifecycle and denied zero-mutation snapshots, preserving all existing regressions. Safe Release with analyzers and warnings-as-errors plus the full unit suite is required, so a build alone is not whole-phase acceptance. Genuine SQL must use exactly (localdb)\\NEWERP_AutoAcceptance with Integrated Security and a fresh GUID-owned NEWERP_AUTOTEST database, refusing existing or wrong targets before access and never dropping or resetting any database; preserve full failing logs.": [
+      "src/ERP.UnitTests/SalesOrderControllerTests.cs",
+      "src/ERP.UnitTests/SalesOrderProcReadTests.cs",
+      "src/ERP.UnitTests/SalesOrderExecutionAuthorizationTests.cs",
+      "src/ERP.UnitTests/SalesOrderMutationAuthorizationTests.cs",
+      "src/ERP.UnitTests/SalesOrderDocumentOutputAuthorizationTests.cs",
+      "src/ERP.UnitTests/SalesOrderEntryAuthorizationTests.cs",
+      "src/ERP.IntegrationTests/SalesOrderEntryAuthorizationSqlServerTests.cs",
+      "docs/salesorderentryauthorization.md"
+    ]
+  },
+  "depends_on": [
+    "ERP-413",
+    "ERP-420",
+    "ERP-424"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "implementation_evidence": "src/ERP.Api/Controllers/SalesOrderController.cs:34-39 private bool RequiresLiveAuthorization() { var http = ControllerContext?.HttpContext; if (http is null) return false; return http.Request.Path.HasValue || CurrentUserId() is not null; } and its two request-shape-conditional call sites: lines 45-48 EnsureExecutionEvidenceAuthorizedAsync => RequiresLiveAuthorization() ? await SalesOrderExecutionAuthorizationRules.EnsureReadAuthorizedAsync(...) : null, and lines 69-72 ResolveListDetailScopeAsync => RequiresLiveAuthorization() ? await SalesOrderExecutionAuthorizationRules.EnsureLiveIdentityAsync(...) : null (GetPaged line 103 and GetById consume these). By contrast lines 79-80 (EnsureCanonicalWriteAuthorizedAsync) and 91-92 (EnsureDocumentOutputAuthorizedAsync) are already unconditional, proving the read-side gate is the remaining bypass.",
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "max_attempts": 3,
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "id": "ERP-465",
+  "status": "pending",
+  "attempts": 0,
+  "created_at": "2026-10-10T01:04:47.381538Z"
+}

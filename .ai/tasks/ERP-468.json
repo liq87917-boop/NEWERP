@@ -1,0 +1,72 @@
+{
+  "title": "Enforce receipt and payment allocation evidence authority independently of request path",
+  "description": "Stage3 verified authority-path repair, direct follow-up to ERP-433 and ERP-434 (same defect class as ERP-462 / ERP-463 / ERP-464) on the receipt/payment operational links prioritized for stage 3. src/ERP.Api/Controllers/CustomerReceiptAllocationController.cs:167-172 and src/ERP.Api/Controllers/SupplierPaymentAllocationController.cs:163-168 gate live authorization on request shape only (null HttpContext returns false; otherwise http.Request.Path.HasValue || CurrentUserId() is not null), and the Create and Void actions short-circuit to the unguarded service overloads at lines 128/146 and 123/141 whenever that probe is false, so blank-path or identity-less contexts register or void receipt/payment allocation evidence (amount, currency, snapshot, reason) without live identity, the existing 「收款单」(receipt) / 「付款单」(payment) menu or the ERP-097 authoritative scope. Make the gate independent of request path/shape on every list, candidate, preview, detail, create and void entry, preserving the existing amount precision and greater-than-zero guards, currency equality, duplicate active row and funding-capacity limits, snapshot and void-history semantics and audit fields. Adapt legacy in-process fixtures to genuine enabled identities and their existing menu grants in isolated test data only. No Request.Path, environment, blank-context or test-only switch, no anonymous or administrative fallback, no permission expansion, no production access, no schema change. Genuine SQL uses exactly (localdb)\\NEWERP_AutoAcceptance with Integrated Security and a fresh GUID-owned NEWERP_AUTOTEST database, refusing existing or wrong targets before access and never dropping or resetting. Safe Release with analyzers/warnings-as-errors plus the full unit suite is required; a build alone is not whole-phase acceptance.",
+  "acceptance_criteria": [
+    "src/ERP.Api/Controllers/CustomerReceiptAllocationController.cs:167-172 and src/ERP.Api/Controllers/SupplierPaymentAllocationController.cs:163-168 gate live authorization on request shape only (null HttpContext returns false; otherwise http.Request.Path.HasValue || CurrentUserId() is not null), and the Create/Void actions short-circuit to the unguarded service overloads at lines 128/146 and 123/141 whenever that probe is false, so blank-path or identity-less contexts register or void receipt/payment allocation evidence without live identity, menu or authoritative scope. Require the existing live identity / account-status and existing 「收款单」(receipt) / 「付款单」(payment) menu authority plus ERP-097 authoritative scope on every list, candidate, preview, detail, create and void entry independent of request path or shape. Missing/zero/unknown/deleted identity must fail Unauthorized and disabled/revoked/missing-menu must fail Forbidden before any allocation amount, snapshot or candidate is read or written. Empty and populated Request.Path must enforce identical authority, including when no HttpContext is bound. No Request.Path, environment, blank-context or test-only switch, no anonymous or administrative fallback.",
+    "Retain the permitted privileged and menu-granted allocation lifecycle, existing authoritative scope and non-disclosing missing/foreign behavior, and all original amount precision and greater-than-zero guards, currency equality, duplicate active-row and payment/receipt funding-capacity limits, snapshot, void-reason and audit boundaries; denied calls persist zero mutations and register no evidence row. Do not weaken any validator, do not change production seed permissions, menu codes or role grants, and add no new permission, table or column.",
+    "Adapt the legacy in-process receipt and payment allocation fixtures to genuine enabled identities holding their existing 「收款单」/「付款单」menu grants in isolated test data only, and add genuine isolated SQL controller tests exercising empty and populated request paths, absent HttpContext, missing/zero/deleted identity, disabled or revoked-menu identity, permitted lifecycle and denied zero-mutation snapshots, preserving all existing regressions. Safe Release with analyzers and warnings-as-errors plus the full unit suite is required, so a build alone is not whole-phase acceptance. Genuine SQL must use exactly (localdb)\\NEWERP_AutoAcceptance with Integrated Security and a fresh GUID-owned NEWERP_AUTOTEST database, refusing existing or wrong targets before access and never dropping or resetting any database; preserve full failing logs."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/CustomerReceiptAllocationController.cs",
+    "src/ERP.Api/Controllers/SupplierPaymentAllocationController.cs",
+    "src/ERP.Application/Services/CustomerReceiptLifecycleRules.cs",
+    "src/ERP.Application/Services/SupplierPaymentLifecycleRules.cs",
+    "src/ERP.UnitTests/CustomerReceiptAllocationTests.cs",
+    "src/ERP.UnitTests/SupplierPaymentAllocationTests.cs",
+    "src/ERP.UnitTests/CustomerReceiptLifecycleTests.cs",
+    "src/ERP.UnitTests/SupplierPaymentLifecycleTests.cs",
+    "src/ERP.UnitTests/ReceiptPaymentAllocationEntryAuthorizationTests.cs",
+    "src/ERP.IntegrationTests/ReceiptPaymentAllocationEntryAuthorizationSqlServerTests.cs",
+    "docs/receiptpaymentallocationentryauthorization.md"
+  ],
+  "criterion_path_map": {
+    "src/ERP.Api/Controllers/CustomerReceiptAllocationController.cs:167-172 and src/ERP.Api/Controllers/SupplierPaymentAllocationController.cs:163-168 gate live authorization on request shape only (null HttpContext returns false; otherwise http.Request.Path.HasValue || CurrentUserId() is not null), and the Create/Void actions short-circuit to the unguarded service overloads at lines 128/146 and 123/141 whenever that probe is false, so blank-path or identity-less contexts register or void receipt/payment allocation evidence without live identity, menu or authoritative scope. Require the existing live identity / account-status and existing 「收款单」(receipt) / 「付款单」(payment) menu authority plus ERP-097 authoritative scope on every list, candidate, preview, detail, create and void entry independent of request path or shape. Missing/zero/unknown/deleted identity must fail Unauthorized and disabled/revoked/missing-menu must fail Forbidden before any allocation amount, snapshot or candidate is read or written. Empty and populated Request.Path must enforce identical authority, including when no HttpContext is bound. No Request.Path, environment, blank-context or test-only switch, no anonymous or administrative fallback.": [
+      "src/ERP.Api/Controllers/CustomerReceiptAllocationController.cs",
+      "src/ERP.Api/Controllers/SupplierPaymentAllocationController.cs",
+      "src/ERP.Application/Services/CustomerReceiptLifecycleRules.cs",
+      "src/ERP.Application/Services/SupplierPaymentLifecycleRules.cs"
+    ],
+    "Retain the permitted privileged and menu-granted allocation lifecycle, existing authoritative scope and non-disclosing missing/foreign behavior, and all original amount precision and greater-than-zero guards, currency equality, duplicate active-row and payment/receipt funding-capacity limits, snapshot, void-reason and audit boundaries; denied calls persist zero mutations and register no evidence row. Do not weaken any validator, do not change production seed permissions, menu codes or role grants, and add no new permission, table or column.": [
+      "src/ERP.Api/Controllers/CustomerReceiptAllocationController.cs",
+      "src/ERP.Api/Controllers/SupplierPaymentAllocationController.cs",
+      "src/ERP.Application/Services/CustomerReceiptLifecycleRules.cs",
+      "src/ERP.Application/Services/SupplierPaymentLifecycleRules.cs",
+      "src/ERP.UnitTests/CustomerReceiptAllocationTests.cs",
+      "src/ERP.UnitTests/SupplierPaymentAllocationTests.cs"
+    ],
+    "Adapt the legacy in-process receipt and payment allocation fixtures to genuine enabled identities holding their existing 「收款单」/「付款单」menu grants in isolated test data only, and add genuine isolated SQL controller tests exercising empty and populated request paths, absent HttpContext, missing/zero/deleted identity, disabled or revoked-menu identity, permitted lifecycle and denied zero-mutation snapshots, preserving all existing regressions. Safe Release with analyzers and warnings-as-errors plus the full unit suite is required, so a build alone is not whole-phase acceptance. Genuine SQL must use exactly (localdb)\\NEWERP_AutoAcceptance with Integrated Security and a fresh GUID-owned NEWERP_AUTOTEST database, refusing existing or wrong targets before access and never dropping or resetting any database; preserve full failing logs.": [
+      "src/ERP.UnitTests/CustomerReceiptAllocationTests.cs",
+      "src/ERP.UnitTests/SupplierPaymentAllocationTests.cs",
+      "src/ERP.UnitTests/CustomerReceiptLifecycleTests.cs",
+      "src/ERP.UnitTests/SupplierPaymentLifecycleTests.cs",
+      "src/ERP.UnitTests/ReceiptPaymentAllocationEntryAuthorizationTests.cs",
+      "src/ERP.IntegrationTests/ReceiptPaymentAllocationEntryAuthorizationSqlServerTests.cs",
+      "docs/receiptpaymentallocationentryauthorization.md"
+    ]
+  },
+  "depends_on": [
+    "ERP-433",
+    "ERP-434"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "implementation_evidence": "src/ERP.Api/Controllers/CustomerReceiptAllocationController.cs:167-172 private bool RequiresLiveAuthorization() { var http = ControllerContext?.HttpContext; if (http is null) return false; return http.Request.Path.HasValue || CurrentUserId() is not null; } with bypass call sites at lines 127-131 Create (if (!RequiresLiveAuthorization()) return Ok(... CustomerReceiptAllocationService.CreateAsync(_db, dto) ...)) and 146-149 Void (if (!RequiresLiveAuthorization()) return Ok(... VoidAsync(_db, id, request?.Reason) ...)); identical defect in src/ERP.Api/Controllers/SupplierPaymentAllocationController.cs:163-168 with bypass call sites at lines 123-126 Create (SupplierPaymentAllocationService.CreateAsync(_db, dto)) and 141-144 Void (VoidAsync(_db, id, request?.Reason)); the guarded branches call CustomerReceiptLifecycleRules.EnsureMenuAuthorizedAsync / SupplierPaymentLifecycleRules.EnsureMenuAuthorizedAsync with RequiredMenuCode receipt / payment.",
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "max_attempts": 3,
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "id": "ERP-468",
+  "status": "pending",
+  "attempts": 0,
+  "created_at": "2026-10-10T01:04:47.386579Z"
+}

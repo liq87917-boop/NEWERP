@@ -1,0 +1,84 @@
+{
+  "title": "Enforce master-data authority independently of request path",
+  "description": "Stage3 verified authority-path repair, direct follow-up to ERP-447 / ERP-448 / ERP-449 / ERP-451 / ERP-452 (same defect class as ERP-462 / ERP-463 / ERP-464). src/ERP.Api/Controllers/BaseDataControllers.cs contains five controllers whose live-authorization probe is request-shape dependent: CustomerController lines 59-63 (return http?.Request.Path.HasValue == true), SupplierController lines 209-214, EmployeeController lines 323-328 and WarehouseController lines 451-456 (if (http is null) return false; return http.Request.Path.HasValue || CurrentUserId() is not null), and ProductController lines 570-574 (return http?.Request.Path.HasValue == true). Each guard is invoked conditionally, so empty-path or identity-less contexts read and write customer, supplier, employee, warehouse and product master data (including exports and image uploads) without live identity, account status or the existing customer/supplier/employee/warehouse/product menu authority. Make the gate independent of request path/shape for all five controllers, preserving the existing ERP-097 salesperson customer scope, bounded field validation, forwarder reference semantics, variant/sourcing annotations, export field completeness and image-upload rules. Adapt legacy in-process fixtures to genuine enabled identities and their existing menu grants in isolated test data only. No Request.Path, environment, blank-context or test-only switch, no anonymous or administrative fallback, no permission expansion, no production access, no schema change. Genuine SQL uses exactly (localdb)\\NEWERP_AutoAcceptance with Integrated Security and a fresh GUID-owned NEWERP_AUTOTEST database, refusing existing or wrong targets before access and never dropping or resetting. Safe Release with analyzers/warnings-as-errors plus the full unit suite is required; a build alone is not whole-phase acceptance.",
+  "acceptance_criteria": [
+    "src/ERP.Api/Controllers/BaseDataControllers.cs:59-63 (Customer), 209-214 (Supplier), 323-328 (Employee), 451-456 (Warehouse) and 570-574 (Product) gate live authorization on request shape only (null HttpContext returns false; otherwise http.Request.Path.HasValue, or http?.Request.Path.HasValue == true for Customer/Product, is required), so blank-path or identity-less contexts skip EnsureCustomerAuthorizedAsync (lines 66-70), EnsureAuthorizedAsync (lines 217-221), EnsureEmployeeAuthorizedAsync (lines 331-335), EnsureWarehouseAuthorizedAsync (lines 459-463) and EnsureProductAuthorizedAsync (lines 577-581) on every paged, all, by-id, create, update, delete, batch-delete, export and image-entry route. Require the existing live identity / account-status and existing 「客户资料」/「供应商资料」/「员工资料」/「仓库资料」/「商品资料」menu authority on every entry independent of request path or shape. Missing/zero/unknown/deleted identity must fail Unauthorized and disabled/revoked/missing-menu must fail Forbidden before any master-data row or product image/export byte is read. Empty and populated Request.Path must enforce identical authority, including when no HttpContext is bound. No Request.Path, environment, blank-context or test-only switch, no anonymous or administrative fallback.",
+    "Retain the permitted privileged and existing menu-granted master-data lifecycle, the existing ERP-097 salesperson customer scope, bounded field validation, forwarder reference semantics, product variant/sourcing read annotations, export field completeness and image-upload rules, and all original uniqueness, soft-delete, numbering and audit boundaries; denied calls persist zero mutations. Do not change production seed permissions, menu codes or role grants, and add no new permission, table or column.",
+    "Adapt the legacy in-process master-data fixtures to genuine enabled identities holding their existing menu grants in isolated test data only, and add genuine isolated SQL controller tests covering all five controllers, empty and populated request paths, absent HttpContext, missing/zero/deleted identity, disabled or revoked-menu identity, permitted lifecycle and denied zero-mutation snapshots, preserving all existing regressions. Safe Release with analyzers and warnings-as-errors plus the full unit suite is required, so a build alone is not whole-phase acceptance. Genuine SQL must use exactly (localdb)\\NEWERP_AutoAcceptance with Integrated Security and a fresh GUID-owned NEWERP_AUTOTEST database, refusing existing or wrong targets before access and never dropping or resetting any database; preserve full failing logs."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/BaseDataControllers.cs",
+    "src/ERP.Application/Services/CustomerAuthorizationRules.cs",
+    "src/ERP.Application/Services/SupplierAuthorizationRules.cs",
+    "src/ERP.Application/Services/EmployeeAuthorizationRules.cs",
+    "src/ERP.Application/Services/WarehouseAuthorizationRules.cs",
+    "src/ERP.Application/Services/ProductAuthorizationRules.cs",
+    "src/ERP.UnitTests/CustomerMasterAuthorizationTests.cs",
+    "src/ERP.UnitTests/SupplierMasterAuthorizationTests.cs",
+    "src/ERP.UnitTests/EmployeeMasterAuthorizationTests.cs",
+    "src/ERP.UnitTests/WarehouseMasterAuthorizationTests.cs",
+    "src/ERP.UnitTests/ProductMasterAuthorizationTests.cs",
+    "src/ERP.UnitTests/CustomerForwarderTests.cs",
+    "src/ERP.UnitTests/MasterDataEntryAuthorizationTests.cs",
+    "src/ERP.IntegrationTests/MasterDataEntryAuthorizationSqlServerTests.cs",
+    "docs/masterdataentryauthorization.md"
+  ],
+  "criterion_path_map": {
+    "src/ERP.Api/Controllers/BaseDataControllers.cs:59-63 (Customer), 209-214 (Supplier), 323-328 (Employee), 451-456 (Warehouse) and 570-574 (Product) gate live authorization on request shape only (null HttpContext returns false; otherwise http.Request.Path.HasValue, or http?.Request.Path.HasValue == true for Customer/Product, is required), so blank-path or identity-less contexts skip EnsureCustomerAuthorizedAsync (lines 66-70), EnsureAuthorizedAsync (lines 217-221), EnsureEmployeeAuthorizedAsync (lines 331-335), EnsureWarehouseAuthorizedAsync (lines 459-463) and EnsureProductAuthorizedAsync (lines 577-581) on every paged, all, by-id, create, update, delete, batch-delete, export and image-entry route. Require the existing live identity / account-status and existing 「客户资料」/「供应商资料」/「员工资料」/「仓库资料」/「商品资料」menu authority on every entry independent of request path or shape. Missing/zero/unknown/deleted identity must fail Unauthorized and disabled/revoked/missing-menu must fail Forbidden before any master-data row or product image/export byte is read. Empty and populated Request.Path must enforce identical authority, including when no HttpContext is bound. No Request.Path, environment, blank-context or test-only switch, no anonymous or administrative fallback.": [
+      "src/ERP.Api/Controllers/BaseDataControllers.cs",
+      "src/ERP.Application/Services/CustomerAuthorizationRules.cs",
+      "src/ERP.Application/Services/SupplierAuthorizationRules.cs",
+      "src/ERP.Application/Services/EmployeeAuthorizationRules.cs",
+      "src/ERP.Application/Services/WarehouseAuthorizationRules.cs",
+      "src/ERP.Application/Services/ProductAuthorizationRules.cs"
+    ],
+    "Retain the permitted privileged and existing menu-granted master-data lifecycle, the existing ERP-097 salesperson customer scope, bounded field validation, forwarder reference semantics, product variant/sourcing read annotations, export field completeness and image-upload rules, and all original uniqueness, soft-delete, numbering and audit boundaries; denied calls persist zero mutations. Do not change production seed permissions, menu codes or role grants, and add no new permission, table or column.": [
+      "src/ERP.Api/Controllers/BaseDataControllers.cs",
+      "src/ERP.Application/Services/CustomerAuthorizationRules.cs",
+      "src/ERP.Application/Services/SupplierAuthorizationRules.cs",
+      "src/ERP.Application/Services/EmployeeAuthorizationRules.cs",
+      "src/ERP.Application/Services/WarehouseAuthorizationRules.cs",
+      "src/ERP.Application/Services/ProductAuthorizationRules.cs",
+      "src/ERP.UnitTests/CustomerMasterAuthorizationTests.cs",
+      "src/ERP.UnitTests/CustomerForwarderTests.cs"
+    ],
+    "Adapt the legacy in-process master-data fixtures to genuine enabled identities holding their existing menu grants in isolated test data only, and add genuine isolated SQL controller tests covering all five controllers, empty and populated request paths, absent HttpContext, missing/zero/deleted identity, disabled or revoked-menu identity, permitted lifecycle and denied zero-mutation snapshots, preserving all existing regressions. Safe Release with analyzers and warnings-as-errors plus the full unit suite is required, so a build alone is not whole-phase acceptance. Genuine SQL must use exactly (localdb)\\NEWERP_AutoAcceptance with Integrated Security and a fresh GUID-owned NEWERP_AUTOTEST database, refusing existing or wrong targets before access and never dropping or resetting any database; preserve full failing logs.": [
+      "src/ERP.UnitTests/CustomerMasterAuthorizationTests.cs",
+      "src/ERP.UnitTests/SupplierMasterAuthorizationTests.cs",
+      "src/ERP.UnitTests/EmployeeMasterAuthorizationTests.cs",
+      "src/ERP.UnitTests/WarehouseMasterAuthorizationTests.cs",
+      "src/ERP.UnitTests/ProductMasterAuthorizationTests.cs",
+      "src/ERP.UnitTests/MasterDataEntryAuthorizationTests.cs",
+      "src/ERP.IntegrationTests/MasterDataEntryAuthorizationSqlServerTests.cs",
+      "docs/masterdataentryauthorization.md"
+    ]
+  },
+  "depends_on": [
+    "ERP-447",
+    "ERP-448",
+    "ERP-449",
+    "ERP-451",
+    "ERP-452"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "implementation_evidence": "src/ERP.Api/Controllers/BaseDataControllers.cs five request-shape gates: CustomerController lines 59-63 private bool RequiresLiveAuthorization() { var http = ControllerContext?.HttpContext; return http?.Request.Path.HasValue == true; } consumed at lines 66-70 EnsureCustomerAuthorizedAsync (if (RequiresLiveAuthorization()) await CustomerAuthorizationRules.EnsureAuthorizedAsync(...)); SupplierController lines 209-214 (return http.Request.Path.HasValue || CurrentUserId() is not null) consumed at lines 217-221; EmployeeController lines 323-328 consumed at lines 331-335; WarehouseController lines 451-456 consumed at lines 459-463; ProductController lines 570-574 (return http?.Request.Path.HasValue == true) consumed at lines 577-581.",
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "max_attempts": 3,
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "id": "ERP-467",
+  "status": "pending",
+  "attempts": 0,
+  "created_at": "2026-10-10T01:04:47.384927Z"
+}

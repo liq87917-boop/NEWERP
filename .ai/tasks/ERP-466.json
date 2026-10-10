@@ -1,0 +1,74 @@
+{
+  "title": "Enforce canonical purchase order authority independently of request path",
+  "description": "Stage3 verified authority-path repair, direct follow-up to ERP-425 / ERP-426 / ERP-427 / ERP-429 (same defect class as ERP-462 / ERP-463 / ERP-464). src/ERP.Api/Controllers/PurchaseOrderController.cs:806-811 gates live authorization on request shape only (null HttpContext returns false; otherwise http.Request.Path.HasValue || CurrentUserId() is not null) and :821-822 gates the ERP-427 master-reference revalidation on Request.Path.HasValue alone. All callers short-circuit: EnsureMasterReferencesAsync (line 831), EnsureMenuAuthorizedAsync (line 838), EnsureOrderAuthorizedAsync (line 845), EnsureProposedAuthorizedAsync (line 852), EnsureOrderIdAuthorizedAsync (line 859), EnsureOrderIdsAuthorizedAsync (line 867) and the list scope predicate (line 885), so blank-path or identity-less contexts execute purchase-order list/detail/derived reads and write-validation-free mutations without live identity, menu, authoritative scope or master-reference revalidation. Make both gates independent of request path/shape while preserving the existing purchase-order (purchase-order) menu, ERP-097 authoritative customer scope, supplier/product/master reference rules, row-lock ordering, serializable transactions, receipt capacity and all quantity/amount/currency/numbering/status/audit boundaries. Adapt legacy in-process fixtures to genuine enabled identities and their existing menu grants in isolated test data only. No Request.Path, environment, blank-context or test-only switch, no anonymous or administrative fallback, no permission expansion, no production access, no schema change. Genuine SQL uses exactly (localdb)\\NEWERP_AutoAcceptance with Integrated Security and a fresh GUID-owned NEWERP_AUTOTEST database, refusing existing or wrong targets before access and never dropping or resetting. Safe Release with analyzers/warnings-as-errors plus the full unit suite is required; a build alone is not whole-phase acceptance.",
+  "acceptance_criteria": [
+    "src/ERP.Api/Controllers/PurchaseOrderController.cs:806-811 gates live authorization on request shape only (null HttpContext returns false; otherwise http.Request.Path.HasValue || CurrentUserId() is not null) and :821-822 gates master-reference validation on Request.Path.HasValue alone, so blank-path or identity-less contexts skip EnsureMasterReferencesAsync (line 831), EnsureMenuAuthorizedAsync (line 838), EnsureOrderAuthorizedAsync (line 845), EnsureProposedAuthorizedAsync (line 852), EnsureOrderIdAuthorizedAsync (line 859), EnsureOrderIdsAuthorizedAsync (line 867) and the list scope predicate (line 885). Require the existing live identity / account-status / 「采购订单」(purchase-order) menu / ERP-097 authoritative customer-scope authority and the live supplier/product/master-reference revalidation on every list, detail, derived-read, create, update, submit, approve, receipt, cancel and delete entry independent of request path or shape. Missing/zero/unknown/deleted identity must fail Unauthorized and disabled/revoked/missing-menu must fail Forbidden before any order, detail, progress or evidence byte is read. Empty and populated Request.Path must enforce identical authority, including when no HttpContext is bound. No Request.Path, environment, blank-context or test-only switch, no anonymous or administrative fallback.",
+    "Retain the permitted privileged and menu-granted purchase-order lifecycle, existing customer scope and non-disclosing missing/foreign behavior, and all original quantity, amount, currency, numbering, status, row-lock ordering, serializable-transaction, receipt-capacity, cancellation and audit boundaries; denied calls persist zero mutations and consume no document number. Do not weaken any validator or master-reference rule, do not change production seed permissions, menu codes or role grants, and add no new permission, table or column.",
+    "Adapt the legacy in-process purchase-order fixtures to genuine enabled identities holding their existing 「采购订单」menu grants in isolated test data only, and add genuine isolated SQL controller tests exercising empty and populated request paths, absent HttpContext, missing/zero/deleted identity, disabled or revoked-menu identity, permitted lifecycle and denied zero-mutation snapshots under the existing receipt locks, preserving all existing regressions. Safe Release with analyzers and warnings-as-errors plus the full unit suite is required, so a build alone is not whole-phase acceptance. Genuine SQL must use exactly (localdb)\\NEWERP_AutoAcceptance with Integrated Security and a fresh GUID-owned NEWERP_AUTOTEST database, refusing existing or wrong targets before access and never dropping or resetting any database; preserve full failing logs."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/PurchaseOrderController.cs",
+    "src/ERP.Application/Services/PurchaseOrderAuthorizationRules.cs",
+    "src/ERP.Application/Services/PurchaseOrderMasterReferenceRules.cs",
+    "src/ERP.UnitTests/PurchaseOrderControllerTests.cs",
+    "src/ERP.UnitTests/PurchaseOrderAuthorizationTests.cs",
+    "src/ERP.UnitTests/PurchaseOrderMutationTests.cs",
+    "src/ERP.UnitTests/PurchaseOrderMasterReferenceTests.cs",
+    "src/ERP.UnitTests/PurchaseOrderWriteValidationTests.cs",
+    "src/ERP.UnitTests/PurchaseOrderHttpFormContractTests.cs",
+    "src/ERP.UnitTests/PurchaseOrderEntryAuthorizationTests.cs",
+    "src/ERP.IntegrationTests/PurchaseOrderEntryAuthorizationSqlServerTests.cs",
+    "docs/purchaseorderentryauthorization.md"
+  ],
+  "criterion_path_map": {
+    "src/ERP.Api/Controllers/PurchaseOrderController.cs:806-811 gates live authorization on request shape only (null HttpContext returns false; otherwise http.Request.Path.HasValue || CurrentUserId() is not null) and :821-822 gates master-reference validation on Request.Path.HasValue alone, so blank-path or identity-less contexts skip EnsureMasterReferencesAsync (line 831), EnsureMenuAuthorizedAsync (line 838), EnsureOrderAuthorizedAsync (line 845), EnsureProposedAuthorizedAsync (line 852), EnsureOrderIdAuthorizedAsync (line 859), EnsureOrderIdsAuthorizedAsync (line 867) and the list scope predicate (line 885). Require the existing live identity / account-status / 「采购订单」(purchase-order) menu / ERP-097 authoritative customer-scope authority and the live supplier/product/master-reference revalidation on every list, detail, derived-read, create, update, submit, approve, receipt, cancel and delete entry independent of request path or shape. Missing/zero/unknown/deleted identity must fail Unauthorized and disabled/revoked/missing-menu must fail Forbidden before any order, detail, progress or evidence byte is read. Empty and populated Request.Path must enforce identical authority, including when no HttpContext is bound. No Request.Path, environment, blank-context or test-only switch, no anonymous or administrative fallback.": [
+      "src/ERP.Api/Controllers/PurchaseOrderController.cs",
+      "src/ERP.Application/Services/PurchaseOrderAuthorizationRules.cs",
+      "src/ERP.Application/Services/PurchaseOrderMasterReferenceRules.cs"
+    ],
+    "Retain the permitted privileged and menu-granted purchase-order lifecycle, existing customer scope and non-disclosing missing/foreign behavior, and all original quantity, amount, currency, numbering, status, row-lock ordering, serializable-transaction, receipt-capacity, cancellation and audit boundaries; denied calls persist zero mutations and consume no document number. Do not weaken any validator or master-reference rule, do not change production seed permissions, menu codes or role grants, and add no new permission, table or column.": [
+      "src/ERP.Api/Controllers/PurchaseOrderController.cs",
+      "src/ERP.Application/Services/PurchaseOrderAuthorizationRules.cs",
+      "src/ERP.Application/Services/PurchaseOrderMasterReferenceRules.cs",
+      "src/ERP.UnitTests/PurchaseOrderControllerTests.cs",
+      "src/ERP.UnitTests/PurchaseOrderMutationTests.cs",
+      "src/ERP.UnitTests/PurchaseOrderWriteValidationTests.cs"
+    ],
+    "Adapt the legacy in-process purchase-order fixtures to genuine enabled identities holding their existing 「采购订单」menu grants in isolated test data only, and add genuine isolated SQL controller tests exercising empty and populated request paths, absent HttpContext, missing/zero/deleted identity, disabled or revoked-menu identity, permitted lifecycle and denied zero-mutation snapshots under the existing receipt locks, preserving all existing regressions. Safe Release with analyzers and warnings-as-errors plus the full unit suite is required, so a build alone is not whole-phase acceptance. Genuine SQL must use exactly (localdb)\\NEWERP_AutoAcceptance with Integrated Security and a fresh GUID-owned NEWERP_AUTOTEST database, refusing existing or wrong targets before access and never dropping or resetting any database; preserve full failing logs.": [
+      "src/ERP.UnitTests/PurchaseOrderControllerTests.cs",
+      "src/ERP.UnitTests/PurchaseOrderAuthorizationTests.cs",
+      "src/ERP.UnitTests/PurchaseOrderMasterReferenceTests.cs",
+      "src/ERP.UnitTests/PurchaseOrderHttpFormContractTests.cs",
+      "src/ERP.UnitTests/PurchaseOrderEntryAuthorizationTests.cs",
+      "src/ERP.IntegrationTests/PurchaseOrderEntryAuthorizationSqlServerTests.cs",
+      "docs/purchaseorderentryauthorization.md"
+    ]
+  },
+  "depends_on": [
+    "ERP-425",
+    "ERP-426",
+    "ERP-427",
+    "ERP-429"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "implementation_evidence": "src/ERP.Api/Controllers/PurchaseOrderController.cs:806-811 private bool RequiresLiveAuthorization() { var http = ControllerContext?.HttpContext; if (http is null) return false; return http.Request.Path.HasValue || CurrentUserId() is not null; } and :821-822 private bool RequiresLiveMasterValidation() => ControllerContext?.HttpContext?.Request.Path.HasValue == true; every consumer returns early when the probe is false: line 831 if (!RequiresLiveMasterValidation()) return; lines 838, 845, 852, 859 if (!RequiresLiveAuthorization()) return; line 867 if (!RequiresLiveAuthorization() || ids.Count == 0) return; line 885 if (!RequiresLiveAuthorization()) return source; (list scope predicate).",
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "max_attempts": 3,
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "id": "ERP-466",
+  "status": "pending",
+  "attempts": 0,
+  "created_at": "2026-10-10T01:04:47.383318Z"
+}
