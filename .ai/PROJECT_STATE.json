@@ -1,7 +1,7 @@
 {
   "schema_version": 2,
   "project": "NEWERP",
-  "updated_at": "2026-10-10T01:32:59.762739Z",
+  "updated_at": "2026-10-10T01:43:11.806741Z",
   "phase": "ready",
   "current_task": null,
   "queue": [
@@ -459,17 +459,20 @@
     "log": ".ai\\logs\\ERP-466-validation-1.log",
     "at": "2026-10-10T01:32:52.952805Z"
   },
-  "last_error": null,
+  "last_error": {
+    "task": "ERP-467",
+    "kind": "automatic_repair_pending",
+    "summary": "Path guard failed:\noutside allowed_paths: src/ERP.UnitTests/ProductSupplierTests.cs\noutside allowed_paths: src/ERP.UnitTests/ProductVariantTests.cs\noutside allowed_paths: src/ERP.UnitTests/SalespersonDataScopeTests.cs"
+  },
   "last_deepseek_fix": {
-    "task": "ERP-463",
-    "attempt": 2,
-    "model": "deepseek-flash",
-    "exit_code": 0,
-    "finished_at": "2026-10-10T00:45:25.553052Z"
+    "task": "ERP-467",
+    "attempts": 3,
+    "status": "retry_pending",
+    "at": "2026-10-10T01:43:11.474722Z"
   },
   "git_sync": {
     "branch": "main",
-    "local_sha": "7fcd750",
+    "local_sha": "93cea69",
     "status": "synced",
     "ahead": 0,
     "behind": 0,
@@ -483,5 +486,7 @@
   "runner": {
     "status": "stopped",
     "pid": null
-  }
+  },
+  "blocker": null,
+  "finish_reason": "deepseek_supervisor_recovery"
 }
