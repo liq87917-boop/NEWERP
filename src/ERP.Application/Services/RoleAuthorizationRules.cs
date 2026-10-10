@@ -16,7 +16,9 @@ namespace ERP.Application.Services;
 /// <item><b>实时授权</b>（<see cref="EnsureAuthorizedAsync"/>）：分页 / 全部 / 按主键读取 / 角色菜单 /
 /// 新增 / 修改 / 删除<b>每一</b>路由在读取或写入任何 <c>SysRoles</c> / <c>SysRoleMenus</c> 行<b>之前</b>
 /// 都重新解析实时身份（缺失 / 非法 / 账号不存在或已删除按未认证，禁用按权限不足）与既有
-/// 「角色管理」（<c>role</c>）功能菜单授权（缺菜单 / 被撤销按权限不足），一律 fail closed；</item>
+/// 「角色管理」（<c>role</c>）功能菜单授权（缺菜单 / 被撤销按权限不足），一律 fail closed；
+/// 该判定与 <c>Request.Path</c> 是否赋值、请求形状以及是否绑定 <c>HttpContext</c> <b>完全无关</b>
+/// （见 <see cref="PathIndependenceText"/>）；角色 → 菜单批量写入入口同样独立复检；</item>
 /// <item><b>有界字段校验</b>（<see cref="Validate"/>）：新增 / 修改在落库之前校验角色名称 / 角色编码
 /// 非空且在持久化长度上限内、角色描述不超持久化长度；</item>
 /// <item><b>受控菜单分配</b>（<see cref="EnsureMenuIdsResolvedAsync"/>）：每一个被分配的菜单 Id
@@ -73,6 +75,19 @@ public static class RoleAuthorizationRules
         "不新增表 / 列 / 实体 / 菜单 / 权限 / 用户授权，也不把空身份当作管理员。";
 
     /// <summary>
+    /// 与请求形状无关的授权契约（ERP-464）：读取 / 写入前的实时身份 / 账号状态 / 既有「角色管理」菜单判定
+    /// 必须在<b>每一个入口</b>无条件执行，与 <c>Request.Path</c> 是否赋值、请求形状、以及控制器是否绑定
+    /// <c>HttpContext</c> <b>完全无关</b>——空路径与已赋值路径口径完全一致，完全未绑定 <c>HttpContext</c>
+    /// 的纯进程内直调同样执行本护栏；缺失 / 零 / 非法 / 已删除身份一律按未认证拒绝，
+    /// 禁用账号 / 撤销或缺少既有菜单一律按权限不足拒绝。
+    /// </summary>
+    public const string PathIndependenceText =
+        "角色管理的实时身份 / 账号状态 / 既有「角色管理」（role）菜单判定与请求路径 / 请求形状 / 是否绑定 HttpContext 完全无关：" +
+        "空路径与已赋值路径口径完全一致，未绑定任何请求上下文的纯进程内直调同样执行本护栏；" +
+        "缺失 / 零 / 非法 / 已删除身份按未认证拒绝，禁用账号与撤销 / 缺少既有菜单按权限不足拒绝；" +
+        "绝无匿名 / 管理员回退，不读取环境变量、不区分数据库提供程序，也不存在任何测试专用放行开关。";
+
+    /// <summary>
     /// 实时身份 / 账号状态 / 既有「角色管理」功能菜单三项校验（fail closed），返回本次请求的权威用户 Id。
     /// <list type="bullet">
     /// <item>身份缺失 / 非法 → <see cref="ErrorCodes.Unauthorized"/>；</item>
@@ -82,6 +97,9 @@ public static class RoleAuthorizationRules
     /// </list>
     /// 判定发生在任何角色读取 / 写入<b>之前</b>；每次请求重新解析，菜单或账号状态变更后立即收敛；
     /// <b>不</b>新增任何菜单 / 角色 / 用户授权，也<b>不</b>因身份缺失而降级为管理员。
+    /// <para>与请求形状无关（见 <see cref="PathIndependenceText"/>，ERP-464）：调用方必须在<b>每一个路由入口 /
+    /// 每一个角色菜单写入入口</b>无条件调用本方法，不得因为空路径、缺少身份、未绑定 <c>HttpContext</c>
+    /// 或任何请求形状而跳过；<b>空路径 / 无上下文与已认证真实请求的判定口径完全一致</b>。</para>
     /// </summary>
     public static async Task<long> EnsureAuthorizedAsync(
         IErpDbContext db, long? userId, CancellationToken ct = default)

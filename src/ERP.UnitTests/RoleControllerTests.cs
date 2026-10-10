@@ -1,16 +1,23 @@
 using ERP.Api.Controllers;
 using ERP.Application.Common;
 using ERP.Application.DTOs;
+using ERP.Application.Services;
 using ERP.Domain.Entities;
 using ERP.Domain.Enums;
 using ERP.Infrastructure.Data;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using System.Security.Claims;
 using Xunit;
 
 namespace ERP.UnitTests;
 
 /// <summary>
-/// RoleController 单元测试：角色编码唯一性、系统内置不可删、菜单全删全建、GetRoleMenus
+/// RoleController 单元测试：角色编码唯一性、系统内置不可删、菜单全删全建、GetRoleMenus。
+/// <para>ERP-464：夹具全部以<b>真实的既有启用身份 + 既有「角色管理」（<c>role</c>）菜单授权</b>驱动控制器，
+/// 且<b>不设置</b> <c>Request.Path</c>（空路径）—— 证明这些既有业务契约只有在同一套实时授权通过之后才成立，
+/// 授权判定与请求路径 / 请求形状完全无关。授权数据只播种在隔离的内存测试库中，
+/// 绝不新增任何生产菜单 / 权限 / 用户授权，也没有任何测试专用放行开关。</para>
 /// </summary>
 public class RoleControllerTests
 {
@@ -21,12 +28,12 @@ public class RoleControllerTests
     {
         using var db = TestDbFactory.Create();
         SeedRole(db, "admin", "管理员", isSystem: false);
-        var ctl = new RoleController(db);
+        var ctl = BoundController(db, SeedAuthorizedActor(db));
 
         var ex = await Assert.ThrowsAsync<BusinessException>(() =>
             ctl.Create(new RoleRequest { RoleCode = "admin", RoleName = "重复", MenuIds = new() }));
         Assert.Equal(ErrorCodes.Duplicate, ex.Code);
-        Assert.Single(db.SysRoles);
+        Assert.Single(db.SysRoles.Where(r => r.RoleCode == "admin"));
     }
 
     [Fact]
@@ -34,7 +41,7 @@ public class RoleControllerTests
     {
         using var db = TestDbFactory.Create();
         var (m1, m2, m3) = (SeedMenu(db), SeedMenu(db), SeedMenu(db));
-        var ctl = new RoleController(db);
+        var ctl = BoundController(db, SeedAuthorizedActor(db));
 
         var result = await ctl.Create(new RoleRequest
         {
@@ -44,7 +51,7 @@ public class RoleControllerTests
         });
 
         Assert.IsType<OkObjectResult>(result);
-        var role = db.SysRoles.Single();
+        var role = db.SysRoles.Single(r => r.RoleCode == "sales");
         Assert.Equal("sales", role.RoleCode);
         Assert.False(role.IsSystem);
 
@@ -58,7 +65,7 @@ public class RoleControllerTests
     public async Task Update_角色不存在_抛NotFound()
     {
         using var db = TestDbFactory.Create();
-        var ctl = new RoleController(db);
+        var ctl = BoundController(db, SeedAuthorizedActor(db));
 
         await Assert.ThrowsAsync<BusinessException>(() =>
             ctl.Update(999, new RoleRequest { RoleCode = "x", RoleName = "X", MenuIds = new() }));
@@ -80,7 +87,7 @@ public class RoleControllerTests
         );
         await db.SaveChangesAsync();
 
-        var ctl = new RoleController(db);
+        var ctl = BoundController(db, SeedAuthorizedActor(db));
         await ctl.Update(r.Id, new RoleRequest
         {
             RoleCode = "sales-changed",   // 注意：Update 不允许改 RoleCode
@@ -88,7 +95,7 @@ public class RoleControllerTests
             MenuIds = new List<long> { m2.Id, m3.Id }    // 移除 m1、新增 m3
         });
 
-        var role = db.SysRoles.Single();
+        var role = db.SysRoles.Single(x => x.Id == r.Id);
         Assert.Equal("sales", role.RoleCode);    // 未变
         Assert.Equal("业务员改名", role.RoleName);
 
@@ -106,11 +113,11 @@ public class RoleControllerTests
     {
         using var db = TestDbFactory.Create();
         var adminRole = SeedRole(db, "admin", "管理员", isSystem: true);
-        var ctl = new RoleController(db);
+        var ctl = BoundController(db, SeedAuthorizedActor(db));
 
         var ex = await Assert.ThrowsAsync<BusinessException>(() => ctl.Delete(adminRole.Id));
         Assert.Equal(ErrorCodes.RuleConflict, ex.Code);
-        Assert.False(db.SysRoles.Single().IsDeleted);
+        Assert.False(db.SysRoles.Single(x => x.Id == adminRole.Id).IsDeleted);
     }
 
     [Fact]
@@ -118,10 +125,10 @@ public class RoleControllerTests
     {
         using var db = TestDbFactory.Create();
         var r = SeedRole(db, "sales", "业务员", isSystem: false);
-        var ctl = new RoleController(db);
+        var ctl = BoundController(db, SeedAuthorizedActor(db));
 
         await ctl.Delete(r.Id);
-        Assert.True(db.SysRoles.Single().IsDeleted);
+        Assert.True(db.SysRoles.Single(x => x.Id == r.Id).IsDeleted);
 
         await Assert.ThrowsAsync<BusinessException>(() => ctl.GetById(r.Id));
     }
@@ -141,7 +148,7 @@ public class RoleControllerTests
         );
         await db.SaveChangesAsync();
 
-        var ctl = new RoleController(db);
+        var ctl = BoundController(db, SeedAuthorizedActor(db));
         var result = await ctl.GetRoleMenus(r.Id);
 
         var ok = Assert.IsType<OkObjectResult>(result);
@@ -150,6 +157,67 @@ public class RoleControllerTests
         Assert.Contains(m1.Id, resp.Data);
         Assert.Contains(m2.Id, resp.Data);
     }
+
+    /// <summary>
+    /// ERP-464：在隔离测试数据里播种一个<b>既有启用身份 + 既有「角色管理」（<c>role</c>）菜单授权</b>
+    /// （真实角色 → 菜单口径，菜单与 <c>SeedData</c> 同码同源，不新增任何生产权限），返回其用户 Id。
+    /// </summary>
+    private static long SeedAuthorizedActor(ErpDbContext db)
+    {
+        var menu = db.SysMenus.FirstOrDefault(
+            m => m.MenuCode == RoleAuthorizationRules.RequiredMenuCode && !m.IsDeleted);
+        if (menu is null)
+        {
+            menu = new SysMenu
+            {
+                MenuCode = RoleAuthorizationRules.RequiredMenuCode,
+                MenuName = RoleAuthorizationRules.RequiredMenuText,
+                MenuType = MenuType.Menu
+            };
+            db.SysMenus.Add(menu);
+            db.SaveChanges();
+        }
+
+        var role = new SysRole
+        {
+            RoleCode = $"role-entry-{Guid.NewGuid():N}",
+            RoleName = "角色管理入口测试角色",
+            IsSystem = false
+        };
+        db.SysRoles.Add(role);
+        db.SaveChanges();
+        db.SysRoleMenus.Add(new SysRoleMenu { RoleId = role.Id, MenuId = menu.Id });
+
+        var actor = new SysUser
+        {
+            UserName = $"role-entry-{Guid.NewGuid():N}",
+            DisplayName = "角色管理入口测试账号",
+            PasswordHash = "hash",
+            PasswordSalt = "salt",
+            Status = UserStatus.Enabled,
+            MustChangePassword = false
+        };
+        db.SysUsers.Add(actor);
+        db.SaveChanges();
+        db.SysUserRoles.Add(new SysUserRole { UserId = actor.Id, RoleId = role.Id });
+        db.SaveChanges();
+        return actor.Id;
+    }
+
+    /// <summary>
+    /// ERP-464：把控制器绑定到已播种的既有启用身份。这里<b>刻意不设置</b> <c>Request.Path</c>（空路径），
+    /// 证明既有业务契约的放行同样必须经过实时授权，授权判定与请求路径 / 请求形状完全无关。
+    /// </summary>
+    private static RoleController BoundController(ErpDbContext db, long userId)
+    {
+        var http = new DefaultHttpContext
+        {
+            User = new ClaimsPrincipal(new ClaimsIdentity(
+                new[] { new Claim(ClaimTypes.NameIdentifier, userId.ToString()) }, "Test"))
+        };
+        return new RoleController(db) { ControllerContext = new ControllerContext { HttpContext = http } };
+    }
+
 
     // ==================== 种子辅助 ====================
 

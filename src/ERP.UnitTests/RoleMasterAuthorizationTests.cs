@@ -26,7 +26,8 @@ namespace ERP.UnitTests;
 /// 一律按受控参数错误拒绝且不落任何行 / 不改写任何行，伪造菜单 Id 绝不落 <c>SysRoleMenus</c> 关联；</item>
 /// <item><b>既有契约不变</b>：角色编码唯一性（<c>Duplicate</c>）、系统内置角色删除保护（<c>RuleConflict</c>）
 /// 与「全删全建」菜单替换语义不变；</item>
-/// <item><b>源码契约</b>：控制器 7 条路由全部先授权再读写，且只复用既有 <c>role</c> 菜单，不新增菜单。</item>
+/// <item><b>源码契约</b>：控制器 7 条路由 + 角色菜单批量写入入口全部先授权再读写，且只复用既有 <c>role</c> 菜单，不新增菜单；</item>
+/// <item><b>路径无关</b>（ERP-464）：空路径 / 已赋值路径 / 完全未绑定 <c>HttpContext</c> 三种形状对同一身份给出完全一致的判定。</item>
 /// </list>
 /// 全部使用内存库（TestDbFactory），不连接 SQL Server、不执行任何 SQL / 部署脚本。
 /// </summary>
@@ -55,7 +56,7 @@ public class RoleMasterAuthorizationTests
         return new ControllerContext { HttpContext = http };
     }
 
-    /// <summary>进程内直调上下文（无请求路径、可带身份）：用于断言历史单元测试口径保持不变。</summary>
+    /// <summary>空路径上下文（<c>Request.Path</c> 未赋值、可带身份）：ERP-464 断言空路径与已赋值路径口径完全一致。</summary>
     private static ControllerContext InternalContextWithUser(long? userId)
     {
         var claims = userId.HasValue
@@ -327,15 +328,78 @@ public class RoleMasterAuthorizationTests
     }
 
     /// <summary>
-    /// 进程内直调边界（与仓库既有口径同源）：未进入 HTTP 请求管线（<c>Request.Path</c> 为空）的历史单元测试 /
-    /// 内部派生读取沿用既有语义；真实 HTTP 请求（<c>Request.Path</c> 已赋值）一律实时授权并 fail closed。
+    /// ERP-464 路径无关边界：空路径（未设置 <c>Request.Path</c>）与已赋值路径对同一身份给出完全一致的判定 ——
+    /// 缺失 / 已删除身份一律未认证，禁用 / 缺菜单身份一律权限不足，且拒绝后零写入。
     /// </summary>
-    [Fact]
-    public async Task Auth_进程内直调无请求路径_沿用既有语义()
+    [Theory]
+    [InlineData("empty", "missing", ErrorCodes.Unauthorized)]
+    [InlineData("populated", "missing", ErrorCodes.Unauthorized)]
+    [InlineData("empty", "deleted", ErrorCodes.Unauthorized)]
+    [InlineData("populated", "deleted", ErrorCodes.Unauthorized)]
+    [InlineData("empty", "disabled", ErrorCodes.Forbidden)]
+    [InlineData("populated", "disabled", ErrorCodes.Forbidden)]
+    [InlineData("empty", "no-menu", ErrorCodes.Forbidden)]
+    [InlineData("populated", "no-menu", ErrorCodes.Forbidden)]
+    public async Task Auth_空路径与已赋值路径口径完全一致(string pathMode, string scenario, int expectedCode)
     {
         using var db = TestDbFactory.Create();
         var target = SeedTargetRole(db);
-        var ctl = new RoleController(db) { ControllerContext = InternalContextWithUser(null) };
+        long? userId = scenario switch
+        {
+            "missing" => null,
+            "deleted" => SeedAuthUser(db, deleted: true),
+            "disabled" => SeedAuthUser(db, UserStatus.Disabled),
+            _ => SeedAuthUser(db, grantRoleMenu: false)
+        };
+        var ctl = pathMode == "populated"
+            ? Controller(db, userId)
+            : new RoleController(db) { ControllerContext = InternalContextWithUser(userId) };
+        var before = Snapshot(db);
+
+        await AssertCode(expectedCode, () => ctl.GetPaged(new PageQuery { Page = 1, PageSize = 10 }));
+        await AssertCode(expectedCode, () => ctl.GetAll());
+        await AssertCode(expectedCode, () => ctl.GetById(target.Id));
+        await AssertCode(expectedCode, () => ctl.GetRoleMenus(target.Id));
+        await AssertCode(expectedCode, () => ctl.Create(NewRequest()));
+        await AssertCode(expectedCode, () => ctl.Update(target.Id, NewRequest(code: "sales")));
+        await AssertCode(expectedCode, () => ctl.Delete(target.Id));
+
+        Assert.Equal(before, Snapshot(db));
+        Assert.False((await db.SysRoles.AsNoTracking().SingleAsync(x => x.Id == target.Id)).IsDeleted);
+    }
+
+    /// <summary>
+    /// 完全未绑定 <c>HttpContext</c>（纯进程内直调，外部请求无法到达）：无法解析任何身份，
+    /// 读取 / 写入入口一律按未认证拒绝且零写入 —— 绝不因「没有请求上下文 / 没有路径」而放行。
+    /// </summary>
+    [Fact]
+    public async Task Auth_未绑定HTTP上下文_一律未认证且零写入()
+    {
+        using var db = TestDbFactory.Create();
+        var target = SeedTargetRole(db);
+        SeedAuthUser(db);
+        var ctl = new RoleController(db);
+        var before = Snapshot(db);
+
+        await AssertCode(ErrorCodes.Unauthorized, () => ctl.GetPaged(new PageQuery { Page = 1, PageSize = 10 }));
+        await AssertCode(ErrorCodes.Unauthorized, () => ctl.GetAll());
+        await AssertCode(ErrorCodes.Unauthorized, () => ctl.GetById(target.Id));
+        await AssertCode(ErrorCodes.Unauthorized, () => ctl.GetRoleMenus(target.Id));
+        await AssertCode(ErrorCodes.Unauthorized, () => ctl.Create(NewRequest()));
+        await AssertCode(ErrorCodes.Unauthorized, () => ctl.Update(target.Id, NewRequest(code: "sales")));
+        await AssertCode(ErrorCodes.Unauthorized, () => ctl.Delete(target.Id));
+
+        Assert.Equal(before, Snapshot(db));
+    }
+
+    /// <summary>空路径（未设置 <c>Request.Path</c>）下，具备既有 <c>role</c> 菜单的真实启用身份照常放行既有读契约。</summary>
+    [Fact]
+    public async Task Auth_空路径_具备既有菜单身份放行()
+    {
+        using var db = TestDbFactory.Create();
+        var userId = SeedAuthUser(db);
+        var target = SeedTargetRole(db);
+        var ctl = new RoleController(db) { ControllerContext = InternalContextWithUser(userId) };
 
         var page = Data<PagedResult<SysRole>>(await ctl.GetPaged(new PageQuery { Page = 1, PageSize = 10 }));
         Assert.Contains(page.Items, r => r.Id == target.Id);
@@ -469,15 +533,33 @@ public class RoleMasterAuthorizationTests
         Assert.False((await db.SysRoles.AsNoTracking().SingleAsync(x => x.Id == builtIn.Id)).IsDeleted);
     }
 
-    /// <summary>控制器源码契约：7 条路由全部先经实时授权再读写，且无匿名 / 角色回退。</summary>
+    /// <summary>控制器源码契约：7 条路由 + 角色菜单批量写入入口全部先经实时授权再读写，且无匿名 / 角色回退。</summary>
     [Fact]
     public void Auth_控制器源码契约_所有路由先授权再读写()
     {
         var source = File.ReadAllText(RepoFile("src", "ERP.Api", "Controllers", "RoleController.cs"));
         Assert.Contains("ClaimTypes.NameIdentifier", source);
-        Assert.Equal(7, Regex.Matches(source, @"await EnsureRoleAuthorizedAsync\(\);").Count);
+        Assert.Equal(8, Regex.Matches(source, @"await EnsureRoleAuthorizedAsync\(\);").Count);
         Assert.DoesNotContain("AllowAnonymous", source);
         Assert.DoesNotContain("[Authorize(Roles", source);
+    }
+
+    /// <summary>
+    /// ERP-464 源码契约：授权入口不以 <c>Request.Path</c>、环境、上下文存在性或任何测试开关决定是否执行；
+    /// 角色 → 菜单批量写入入口同样先授权。
+    /// </summary>
+    [Fact]
+    public void Auth_控制器源码契约_授权不依赖请求路径()
+    {
+        var source = File.ReadAllText(RepoFile("src", "ERP.Api", "Controllers", "RoleController.cs"));
+
+        Assert.DoesNotContain("Request.Path", source);
+        Assert.DoesNotContain("RequiresLiveAuthorization", source);
+        Assert.DoesNotContain("Environment.GetEnvironmentVariable", source);
+
+        // 角色菜单批量写入入口不因调用方已授权而省略实时护栏
+        Assert.Contains("await EnsureRoleAuthorizedAsync();", source);
+        Assert.Contains("EnsureMenuIdsResolvedAsync", source);
     }
 
     /// <summary>授权口径复用既有「角色管理」菜单（与 SeedData.Menus 同源），不新增任何菜单。</summary>
