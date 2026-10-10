@@ -24,6 +24,8 @@ namespace ERP.UnitTests;
 /// <item><b>有界字段 / 角色校验</b>：用户名空值 / 越界、显示姓名 / 邮箱 / 手机号越界、状态非 0 / 1、
 /// 重置密码越界、角色 Id 为负数 / 未知 / 已删除一律按受控参数错误拒绝且不落任何行 / 不改写任何行；</item>
 /// <item><b>既有契约不变</b>：内置管理员（<c>SeedData.AdminUserName</c>）禁用 / 删除保护与 PBKDF2 哈希语义不变；</item>
+/// <item><b>与请求路径无关</b>（ERP-463）：空路径与已赋值路径口径完全一致，完全未绑定 <c>HttpContext</c>
+/// 的纯进程内直调同样执行实时授权（无法解析身份即未认证），绝无匿名 / 管理员回退；</item>
 /// <item><b>源码契约</b>：控制器 7 条路由全部先授权再读写，且只复用既有 <c>user</c> 菜单，不新增菜单。</item>
 /// </list>
 /// 全部使用内存库（TestDbFactory），不连接 SQL Server、不执行任何 SQL / 部署脚本。
@@ -53,7 +55,10 @@ public class SysUserMasterAuthorizationTests
         return new ControllerContext { HttpContext = http };
     }
 
-    /// <summary>进程内直调上下文（无请求路径、可带身份）：用于断言历史单元测试口径保持不变。</summary>
+    /// <summary>
+    /// 空路径身份上下文（<b>不设置</b> <c>Request.Path</c>，可带身份）：用于断言空路径 / 未绑定请求管线的调用
+    /// 与已赋值路径口径完全一致（ERP-463）。
+    /// </summary>
     private static ControllerContext InternalContextWithUser(long? userId)
     {
         var claims = userId.HasValue
@@ -309,18 +314,79 @@ public class SysUserMasterAuthorizationTests
     }
 
     /// <summary>
-    /// 进程内直调边界（与仓库既有口径同源）：未进入 HTTP 请求管线（<c>Request.Path</c> 为空）的历史单元测试 /
-    /// 内部派生读取沿用既有语义；真实 HTTP 请求（<c>Request.Path</c> 已赋值）一律实时授权并 fail closed。
+    /// ERP-463：授权判定与请求路径 / 请求形状无关 —— 空路径（未设置 <c>Request.Path</c>）与已赋值路径
+    /// 对同一身份给出完全一致的判定；完全未绑定 <c>HttpContext</c> 的纯进程内直调同样执行本护栏，
+    /// 因无法解析身份一律按未认证拒绝（绝不因缺少路径 / 上下文而放行）。
     /// </summary>
     [Fact]
-    public async Task Auth_进程内直调无请求路径_沿用既有语义()
+    public async Task Auth_空路径与已赋值路径口径一致_未绑定上下文一律未认证()
     {
         using var db = TestDbFactory.Create();
         var target = SeedTarget(db);
-        var ctl = new SysUserController(db) { ControllerContext = InternalContextWithUser(null) };
+        var userId = SeedUser(db);
 
-        var page = Data<PagedResult<SysUserView>>(await ctl.GetPaged(new PageQuery { Page = 1, PageSize = 10 }));
+        // 1) 空路径 + 既有启用身份 + 既有 user 菜单 → 放行（与已赋值路径完全一致）
+        var emptyPath = new SysUserController(db) { ControllerContext = InternalContextWithUser(userId) };
+        var page = Data<PagedResult<SysUserView>>(await emptyPath.GetPaged(new PageQuery { Page = 1, PageSize = 10 }));
         Assert.Contains(page.Items, x => x.Id == target.Id);
+
+        // 2) 已赋值路径 + 同一身份 → 判定完全一致
+        var realRoute = Controller(db, userId);
+        var page2 = Data<PagedResult<SysUserView>>(await realRoute.GetPaged(new PageQuery { Page = 1, PageSize = 10 }));
+        Assert.Contains(page2.Items, x => x.Id == target.Id);
+
+        // 3) 空路径 + 无身份 → 未认证（绝不因空路径放行）
+        var emptyPathAnonymous = new SysUserController(db) { ControllerContext = InternalContextWithUser(null) };
+        await AssertCode(ErrorCodes.Unauthorized, () =>
+            emptyPathAnonymous.GetPaged(new PageQuery { Page = 1, PageSize = 10 }));
+        await AssertCode(ErrorCodes.Unauthorized, () => emptyPathAnonymous.Create(NewCreate()));
+        await AssertCode(ErrorCodes.Unauthorized, () => emptyPathAnonymous.Delete(target.Id));
+
+        // 4) 完全未绑定 HttpContext（纯进程内直调）→ 无法解析身份，一律未认证
+        var unbound = new SysUserController(db);
+        await AssertCode(ErrorCodes.Unauthorized, () => unbound.GetPaged(new PageQuery { Page = 1, PageSize = 10 }));
+        await AssertCode(ErrorCodes.Unauthorized, () => unbound.Update(target.Id, NewUpdate()));
+        await AssertCode(ErrorCodes.Unauthorized, () => unbound.ToggleStatus(target.Id));
+        await AssertCode(ErrorCodes.Unauthorized, () =>
+            unbound.ResetPassword(target.Id, new ResetPasswordRequest { NewPassword = "NewPass123" }));
+
+        // 拒绝后目标用户零改写
+        var stored = await db.SysUsers.AsNoTracking().SingleAsync(x => x.Id == target.Id);
+        Assert.Equal(UserStatus.Enabled, stored.Status);
+        Assert.False(stored.IsDeleted);
+        Assert.True(PasswordHasher.VerifyPassword("OldPass123", stored.PasswordSalt, stored.PasswordHash));
+    }
+
+    /// <summary>空路径（未设置 <c>Request.Path</c>）下，禁用 / 已删除 / 缺菜单身份与已赋值路径一样 fail closed。</summary>
+    [Theory]
+    [InlineData("disabled")]
+    [InlineData("deleted")]
+    [InlineData("no-menu")]
+    public async Task Auth_空路径_拒绝身份与已赋值路径一致(string scenario)
+    {
+        using var db = TestDbFactory.Create();
+        var target = SeedTarget(db);
+        long? userId = scenario switch
+        {
+            "disabled" => SeedUser(db, UserStatus.Disabled),
+            "deleted" => SeedUser(db, deleted: true),
+            _ => SeedUser(db, grantUserMenu: false)
+        };
+        var expectedCode = scenario == "deleted" ? ErrorCodes.Unauthorized : ErrorCodes.Forbidden;
+
+        var ctl = new SysUserController(db) { ControllerContext = InternalContextWithUser(userId) };
+        var before = Snapshot(db);
+
+        await AssertCode(expectedCode, () => ctl.GetPaged(new PageQuery { Page = 1, PageSize = 10 }));
+        await AssertCode(expectedCode, () => ctl.GetById(target.Id));
+        await AssertCode(expectedCode, () => ctl.Create(NewCreate()));
+        await AssertCode(expectedCode, () => ctl.Update(target.Id, NewUpdate()));
+        await AssertCode(expectedCode, () => ctl.ToggleStatus(target.Id));
+        await AssertCode(expectedCode, () =>
+            ctl.ResetPassword(target.Id, new ResetPasswordRequest { NewPassword = "NewPass123" }));
+        await AssertCode(expectedCode, () => ctl.Delete(target.Id));
+
+        Assert.Equal(before, Snapshot(db));
     }
 
     // ==================== 3. 有界字段 / 角色校验：拒绝且不落 / 不改写任何行 ====================
@@ -507,6 +573,28 @@ public class SysUserMasterAuthorizationTests
             source, @"await EnsureUserAuthorizedAsync\(\);").Count);
         Assert.DoesNotContain("AllowAnonymous", source);
         Assert.DoesNotContain("[Authorize(Roles", source);
+    }
+
+    /// <summary>
+    /// ERP-463 源码契约：授权入口不以 <c>Request.Path</c>、环境、上下文存在性或任何测试开关决定是否执行；
+    /// 角色关联写入入口同样先授权。
+    /// </summary>
+    [Fact]
+    public void Auth_控制器源码契约_授权不依赖请求路径()
+    {
+        var source = File.ReadAllText(RepoFile("src", "ERP.Api", "Controllers", "SysUserController.cs"));
+        var helpers = File.ReadAllText(RepoFile("src", "ERP.Api", "Controllers", "SysUserController.Helpers.cs"));
+
+        foreach (var text in new[] { source, helpers })
+        {
+            Assert.DoesNotContain("Request.Path", text);
+            Assert.DoesNotContain("RequiresLiveAuthorization", text);
+            Assert.DoesNotContain("Environment.GetEnvironmentVariable", text);
+        }
+
+        // 角色关联批量写入入口不因调用方已授权而省略实时护栏
+        Assert.Contains("await EnsureUserAuthorizedAsync();", helpers);
+        Assert.Contains("EnsureRoleIdsResolvedAsync", helpers);
     }
 
     /// <summary>授权口径复用既有「用户管理」菜单（与 SeedData.Menus 同源），不新增任何菜单。</summary>

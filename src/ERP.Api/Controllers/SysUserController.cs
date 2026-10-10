@@ -13,12 +13,14 @@ using System.Security.Claims;
 namespace ERP.Api.Controllers;
 
 /// <summary>
-/// 用户管理控制器（ERP-453：为全部分页 / 按主键读取 / 新增 / 修改 / 切换状态 / 重置密码 / 删除路由
-/// 补齐实时身份、账号状态、既有「用户管理」（<c>user</c>）功能菜单授权与有界字段 / 角色校验）。
+/// 用户管理控制器（ERP-453 / ERP-463：为全部分页 / 按主键读取 / 新增 / 修改 / 切换状态 / 重置密码 / 删除路由
+/// 补齐实时身份、账号状态、既有「用户管理」（<c>user</c>）功能菜单授权与有界字段 / 角色校验，
+/// 并使该授权判定与请求路径 / 请求形状 / 是否绑定 <c>HttpContext</c> 完全无关）。
 /// </summary>
 /// <remarks>
 /// 用户记录是每一次已认证请求、ERP-097 业务员数据范围与每一条运营权限判定共同解析的权威对象，
-/// 因此每个路由在读取或写入任何 <c>SysUsers</c> / <c>SysUserRoles</c> 行之前都先经实时授权，
+/// 因此每个路由在读取或写入任何 <c>SysUsers</c> / <c>SysUserRoles</c> 行之前都先经实时授权
+/// （<b>不受请求路径是否赋值、空路径、请求形状或未绑定 <c>HttpContext</c> 影响</b>），
 /// 新增 / 修改另经有界字段校验、角色 Id 解析校验与重置密码载荷校验；
 /// 不新增任何菜单 / 权限 / 用户授权，也不改变既有用户名唯一索引语义、
 /// <c>SeedData.AdminUserName</c> 内置管理员保护与 PBKDF2 密码哈希语义。
@@ -43,21 +45,16 @@ public partial class SysUserController : ControllerBase
     }
 
     /// <summary>
-    /// 是否需要执行实时授权（与仓库既有口径同源）：真实 HTTP 请求（MVC 绑定，<c>Request.Path</c> 已赋值）
-    /// 一律执行；仅「未进入 HTTP 请求管线」的<b>进程内直接调用</b>（历史单元测试 / 内部派生读取，
-    /// 无请求路径，不可能由外部请求到达）沿用既有语义，绝不把缺失身份当作管理员。
+    /// 读取 / 写入前的实时身份 / 账号状态 / 既有「用户管理」菜单授权（ERP-453 / ERP-463，fail closed）。
+    /// <para>与请求路径是否赋值、请求形状、以及控制器是否绑定 <c>HttpContext</c> <b>完全无关</b>：
+    /// 空路径与已赋值路径口径完全一致；即便未绑定任何请求上下文（纯进程内直接调用）也照常执行本护栏，
+    /// 缺失 / 零 / 已删除身份一律按未认证拒绝，禁用账号 / 撤销或缺少既有菜单一律按权限不足拒绝。
+    /// 不读取环境变量、不区分数据库提供程序，也不存在任何测试专用放行开关，绝无匿名 / 管理员回退。
+    /// 契约与边界见 <see cref="SysUserAuthorizationRules.PathIndependenceText"/>。</para>
     /// </summary>
-    private bool RequiresLiveAuthorization()
-    {
-        var http = ControllerContext?.HttpContext;
-        return http?.Request.Path.HasValue == true;
-    }
-
-    /// <summary>读取 / 写入前的实时身份 / 账号状态 / 既有「用户管理」菜单授权（ERP-453，fail closed）</summary>
     private async Task EnsureUserAuthorizedAsync()
     {
-        if (RequiresLiveAuthorization())
-            await SysUserAuthorizationRules.EnsureAuthorizedAsync(_db, CurrentUserId());
+        await SysUserAuthorizationRules.EnsureAuthorizedAsync(_db, CurrentUserId());
     }
 
     /// <summary>分页查询用户</summary>

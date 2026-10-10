@@ -5,13 +5,19 @@ using ERP.Application.Services;
 using ERP.Domain.Entities;
 using ERP.Domain.Enums;
 using ERP.Infrastructure.Data;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using System.Security.Claims;
 using Xunit;
 
 namespace ERP.UnitTests;
 
 /// <summary>
-/// SysUserController 单元测试：用户名唯一性、admin 保护、重置密码、Update/ToggleStatus/Delete、分页关键字搜索
+/// SysUserController 单元测试：用户名唯一性、admin 保护、重置密码、Update/ToggleStatus/Delete、分页关键字搜索。
+/// <para>ERP-463：夹具全部以<b>真实的既有启用身份 + 既有「用户管理」（<c>user</c>）菜单授权</b>驱动控制器，
+/// 且<b>不设置</b> <c>Request.Path</c>（空路径）—— 证明这些既有业务契约只有在同一套实时授权通过之后才成立，
+/// 授权判定与请求路径 / 请求形状完全无关。授权数据只播种在隔离的内存测试库中，
+/// 绝不新增任何生产菜单 / 权限 / 用户授权，也没有任何测试专用放行开关。</para>
 /// </summary>
 public class SysUserControllerTests
 {
@@ -22,21 +28,21 @@ public class SysUserControllerTests
     {
         using var db = TestDbFactory.Create();
         SeedUser(db, "alice", "old", UserStatus.Enabled);
-        var ctl = new SysUserController(db);
+        var ctl = BoundController(db, SeedAuthorizedActor(db));
 
         var ex = await Assert.ThrowsAsync<BusinessException>(() =>
             ctl.Create(new SysUserCreateRequest { UserName = "alice", Password = "NewPass123" }));
 
         Assert.Equal(ErrorCodes.Duplicate, ex.Code);
         // 数据库里仍然只有一个 alice
-        Assert.Single(db.SysUsers);
+        Assert.Single(db.SysUsers.Where(x => x.UserName == "alice"));
     }
 
     [Fact]
     public async Task Create_正常创建_返回Ok_初始密码强制改密_且密码哈希非明文()
     {
         using var db = TestDbFactory.Create();
-        var ctl = new SysUserController(db);
+        var ctl = BoundController(db, SeedAuthorizedActor(db));
 
         var result = await ctl.Create(new SysUserCreateRequest
         {
@@ -46,7 +52,7 @@ public class SysUserControllerTests
         });
 
         Assert.IsType<OkObjectResult>(result);
-        var u = db.SysUsers.Single();
+        var u = db.SysUsers.Single(x => x.UserName == "alice");
         Assert.Equal("alice", u.UserName);
         Assert.Equal("Alice", u.DisplayName);
         Assert.Equal(UserStatus.Enabled, u.Status);
@@ -63,7 +69,7 @@ public class SysUserControllerTests
         using var db = TestDbFactory.Create();
         var r1 = SeedRole(db, "admin");
         var r2 = SeedRole(db, "sales");
-        var ctl = new SysUserController(db);
+        var ctl = BoundController(db, SeedAuthorizedActor(db));
 
         await ctl.Create(new SysUserCreateRequest
         {
@@ -72,7 +78,7 @@ public class SysUserControllerTests
             RoleIds = new List<long> { r1.Id, r2.Id, r1.Id }   // r1 重复
         });
 
-        var u = db.SysUsers.Single();
+        var u = db.SysUsers.Single(x => x.UserName == "alice");
         var links = db.SysUserRoles.Where(x => x.UserId == u.Id).ToList();
         Assert.Equal(2, links.Count);                          // r1 被去重
         Assert.Contains(links, x => x.RoleId == r1.Id);
@@ -85,10 +91,11 @@ public class SysUserControllerTests
     public async Task Update_用户不存在_抛NotFound()
     {
         using var db = TestDbFactory.Create();
-        var ctl = new SysUserController(db);
+        var ctl = BoundController(db, SeedAuthorizedActor(db));
 
-        await Assert.ThrowsAsync<BusinessException>(() =>
+        var ex = await Assert.ThrowsAsync<BusinessException>(() =>
             ctl.Update(999, new SysUserUpdateRequest { DisplayName = "X" }));
+        Assert.Equal(ErrorCodes.NotFound, ex.Code);
     }
 
     [Fact]
@@ -101,7 +108,7 @@ public class SysUserControllerTests
         db.SysUserRoles.Add(new SysUserRole { UserId = alice.Id, RoleId = r1.Id });
         await db.SaveChangesAsync();
 
-        var ctl = new SysUserController(db);
+        var ctl = BoundController(db, SeedAuthorizedActor(db));
         await ctl.Update(alice.Id, new SysUserUpdateRequest
         {
             DisplayName = "新Alice",
@@ -111,7 +118,7 @@ public class SysUserControllerTests
             RoleIds = new List<long> { r2.Id }    // 移除 r1，只留 r2
         });
 
-        var dbUser = db.SysUsers.Single();
+        var dbUser = db.SysUsers.Single(x => x.Id == alice.Id);
         Assert.Equal("新Alice", dbUser.DisplayName);
         Assert.Equal("alice@x.com", dbUser.Email);
         Assert.Equal("13800138000", dbUser.Phone);
@@ -129,11 +136,11 @@ public class SysUserControllerTests
     {
         using var db = TestDbFactory.Create();
         var admin = SeedUser(db, "admin", "x", UserStatus.Enabled);
-        var ctl = new SysUserController(db);
+        var ctl = BoundController(db, SeedAuthorizedActor(db));
 
         var ex = await Assert.ThrowsAsync<BusinessException>(() => ctl.ToggleStatus(admin.Id));
         Assert.Equal(ErrorCodes.RuleConflict, ex.Code);
-        Assert.Equal(UserStatus.Enabled, db.SysUsers.Single().Status);    // 未变
+        Assert.Equal(UserStatus.Enabled, db.SysUsers.Single(x => x.Id == admin.Id).Status);    // 未变
     }
 
     [Fact]
@@ -141,13 +148,13 @@ public class SysUserControllerTests
     {
         using var db = TestDbFactory.Create();
         var u = SeedUser(db, "alice", "x", UserStatus.Enabled);
-        var ctl = new SysUserController(db);
+        var ctl = BoundController(db, SeedAuthorizedActor(db));
 
         await ctl.ToggleStatus(u.Id);
-        Assert.Equal(UserStatus.Disabled, db.SysUsers.Single().Status);
+        Assert.Equal(UserStatus.Disabled, db.SysUsers.Single(x => x.Id == u.Id).Status);
 
         await ctl.ToggleStatus(u.Id);
-        Assert.Equal(UserStatus.Enabled, db.SysUsers.Single().Status);
+        Assert.Equal(UserStatus.Enabled, db.SysUsers.Single(x => x.Id == u.Id).Status);
     }
 
     // ==================== ResetPassword ====================
@@ -156,10 +163,11 @@ public class SysUserControllerTests
     public async Task ResetPassword_用户不存在_抛NotFound()
     {
         using var db = TestDbFactory.Create();
-        var ctl = new SysUserController(db);
+        var ctl = BoundController(db, SeedAuthorizedActor(db));
 
-        await Assert.ThrowsAsync<BusinessException>(() =>
+        var ex = await Assert.ThrowsAsync<BusinessException>(() =>
             ctl.ResetPassword(999, new ResetPasswordRequest { NewPassword = "NewPass123" }));
+        Assert.Equal(ErrorCodes.NotFound, ex.Code);
     }
 
     [Fact]
@@ -170,10 +178,10 @@ public class SysUserControllerTests
         u.MustChangePassword = false;
         await db.SaveChangesAsync();
 
-        var ctl = new SysUserController(db);
+        var ctl = BoundController(db, SeedAuthorizedActor(db));
         await ctl.ResetPassword(u.Id, new ResetPasswordRequest { NewPassword = "NewPass123" });
 
-        var dbUser = db.SysUsers.Single();
+        var dbUser = db.SysUsers.Single(x => x.Id == u.Id);
         Assert.True(dbUser.MustChangePassword);
         Assert.True(PasswordHasher.VerifyPassword("NewPass123", dbUser.PasswordSalt, dbUser.PasswordHash));
         Assert.False(PasswordHasher.VerifyPassword("OldPass123", dbUser.PasswordSalt, dbUser.PasswordHash));
@@ -186,11 +194,11 @@ public class SysUserControllerTests
     {
         using var db = TestDbFactory.Create();
         var admin = SeedUser(db, "admin", "x", UserStatus.Enabled);
-        var ctl = new SysUserController(db);
+        var ctl = BoundController(db, SeedAuthorizedActor(db));
 
         var ex = await Assert.ThrowsAsync<BusinessException>(() => ctl.Delete(admin.Id));
         Assert.Equal(ErrorCodes.RuleConflict, ex.Code);
-        Assert.False(db.SysUsers.Single().IsDeleted);
+        Assert.False(db.SysUsers.Single(x => x.Id == admin.Id).IsDeleted);
     }
 
     [Fact]
@@ -198,10 +206,10 @@ public class SysUserControllerTests
     {
         using var db = TestDbFactory.Create();
         var u = SeedUser(db, "alice", "x", UserStatus.Enabled);
-        var ctl = new SysUserController(db);
+        var ctl = BoundController(db, SeedAuthorizedActor(db));
 
         await ctl.Delete(u.Id);
-        Assert.True(db.SysUsers.Single().IsDeleted);
+        Assert.True(db.SysUsers.Single(x => x.Id == u.Id).IsDeleted);
 
         // GetById 看不到
         await Assert.ThrowsAsync<BusinessException>(() => ctl.GetById(u.Id));
@@ -216,7 +224,7 @@ public class SysUserControllerTests
         SeedUser(db, "alice", "x", UserStatus.Enabled, displayName: "艾丽斯");
         SeedUser(db, "bob", "x", UserStatus.Enabled, displayName: "鲍勃");
         SeedUser(db, "charlie", "x", UserStatus.Enabled, displayName: "查理");
-        var ctl = new SysUserController(db);
+        var ctl = BoundController(db, SeedAuthorizedActor(db));
 
         // 关键字 alice → 命中 alice
         var r1 = await ctl.GetPaged(new PageQuery { Page = 1, PageSize = 10, Keyword = "alice" });
@@ -232,6 +240,66 @@ public class SysUserControllerTests
     }
 
     // ==================== 种子辅助 ====================
+
+    /// <summary>
+    /// ERP-463：在隔离测试数据里播种一个<b>既有启用身份 + 既有「用户管理」（<c>user</c>）菜单授权</b>
+    /// （真实角色 → 菜单口径，菜单与 <c>SeedData</c> 同码同源，不新增任何生产权限），返回其用户 Id。
+    /// </summary>
+    private static long SeedAuthorizedActor(ErpDbContext db)
+    {
+        var menu = db.SysMenus.FirstOrDefault(
+            m => m.MenuCode == SysUserAuthorizationRules.RequiredMenuCode && !m.IsDeleted);
+        if (menu is null)
+        {
+            menu = new SysMenu
+            {
+                MenuCode = SysUserAuthorizationRules.RequiredMenuCode,
+                MenuName = SysUserAuthorizationRules.RequiredMenuText,
+                MenuType = MenuType.Menu
+            };
+            db.SysMenus.Add(menu);
+            db.SaveChanges();
+        }
+
+        var role = new SysRole
+        {
+            RoleCode = $"user-entry-{Guid.NewGuid():N}",
+            RoleName = "用户管理入口测试角色",
+            IsSystem = false
+        };
+        db.SysRoles.Add(role);
+        db.SaveChanges();
+        db.SysRoleMenus.Add(new SysRoleMenu { RoleId = role.Id, MenuId = menu.Id });
+
+        var actor = new SysUser
+        {
+            UserName = $"user-entry-{Guid.NewGuid():N}",
+            DisplayName = "用户管理入口测试账号",
+            PasswordHash = "hash",
+            PasswordSalt = "salt",
+            Status = UserStatus.Enabled,
+            MustChangePassword = false
+        };
+        db.SysUsers.Add(actor);
+        db.SaveChanges();
+        db.SysUserRoles.Add(new SysUserRole { UserId = actor.Id, RoleId = role.Id });
+        db.SaveChanges();
+        return actor.Id;
+    }
+
+    /// <summary>
+    /// ERP-463：把控制器绑定到已播种的既有启用身份。这里<b>刻意不设置</b> <c>Request.Path</c>（空路径），
+    /// 证明既有业务契约的放行同样必须经过实时授权，授权判定与请求路径 / 请求形状完全无关。
+    /// </summary>
+    private static SysUserController BoundController(ErpDbContext db, long userId)
+    {
+        var http = new DefaultHttpContext
+        {
+            User = new ClaimsPrincipal(new ClaimsIdentity(
+                new[] { new Claim(ClaimTypes.NameIdentifier, userId.ToString()) }, "Test"))
+        };
+        return new SysUserController(db) { ControllerContext = new ControllerContext { HttpContext = http } };
+    }
 
     private static SysUser SeedUser(ErpDbContext db, string userName, string password, UserStatus status,
         string displayName = "DisplayName")

@@ -44,8 +44,8 @@
   "planning_stage": 3,
   "implementation_evidence": "src/ERP.Api/Controllers/SysUserController.cs:46-53 gates live authorization only on Request.Path.HasValue. ERP453 business routes can bypass live account/menu and guarded role assignment for empty-path or in-process contexts. Require the existing guards on every read/create/update/delete/batch/status/reset/role-assignment entry, independent of request path; preserve credential handling and existing role assignment restrictions.",
   "id": "ERP-463",
-  "status": "retry",
-  "attempts": 0,
+  "status": "completed",
+  "attempts": 2,
   "max_attempts": 3,
   "validation_profile": "safe",
   "completion_mode": "build",
@@ -83,23 +83,5 @@
       }
     }
   ],
-  "supervised_recovery_cycles": 1,
-  "recovery_context": {
-    "remediation_task": "ERP-463-RECOVERY-1",
-    "failure_kind": "unclassified_engineering_failure",
-    "summary": "",
-    "result": null,
-    "attempt_logs": [
-      ".ai/logs/ERP-463-attempt-1.jsonl"
-    ],
-    "validation_logs": [],
-    "latest_state_error": null,
-    "latest_build": null,
-    "task_context": ".ai\\tasks\\ERP-463.json",
-    "changed_paths": [],
-    "diff": null,
-    "execution_copy": null,
-    "repair_allowed_paths": [],
-    "instruction": "DeepSeek supervisor recovery: inspect the referenced complete logs, diagnose the root cause, and implement a different safe repair within allowed_paths. Rebuild and rerun the configured tests; if validation fails, use the newest log as the next repair input. Do not repeat the failed approach. Do not edit task/state/result files or relax production and irreversible-operation gates. "
-  }
+  "supervised_recovery_cycles": 1
 }

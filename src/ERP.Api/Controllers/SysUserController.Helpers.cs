@@ -10,11 +10,15 @@ namespace ERP.Api.Controllers;
 public partial class SysUserController
 {
     /// <summary>
-    /// 写入用户的角色关联（ERP-453：任何角色关联写入前都必须把角色 Id 解析为<b>已知的非删除</b>角色，
-    /// 否则整批按受控参数错误拒绝，绝不接受任意 <c>roleId</c>、也不留下任何半写关联）。
+    /// 写入用户的角色关联（ERP-453 / ERP-463：角色关联批量写入入口在改写任何 <c>SysUserRoles</c> 行之前
+    /// 同样先经实时身份 / 账号状态 / 既有「用户管理」菜单授权——不因调用方已授权而省略，与请求路径 / 请求形状 /
+    /// 是否绑定 <c>HttpContext</c> 无关（见 <see cref="SysUserAuthorizationRules.PathIndependenceText"/>）；
+    /// 另把角色 Id 解析为<b>已知的非删除</b>角色，否则整批按受控参数错误拒绝，绝不接受任意 <c>roleId</c>、
+    /// 也不留下任何半写关联）。
     /// </summary>
     private async Task SaveRolesAsync(long userId, List<long> roleIds)
     {
+        await EnsureUserAuthorizedAsync();
         await SysUserAuthorizationRules.EnsureRoleIdsResolvedAsync(_db, roleIds);
 
         var existing = await _db.SysUserRoles.Where(ur => ur.UserId == userId).ToListAsync();
