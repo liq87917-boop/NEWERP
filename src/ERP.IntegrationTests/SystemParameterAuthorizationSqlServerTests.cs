@@ -226,7 +226,7 @@ public sealed class SystemParameterAuthorizationSqlServerTests : IClassFixture<S
     }
 
     /// <summary>生成不超过既有 ParamKey 持久化上界的唯一键（测试内不会互相占用）。</summary>
-    private static string UniqueKey(string prefix) => $"{prefix}-{Guid.NewGuid():N}"[..40];
+    private static string UniqueKey(string prefix) { var key = $"{prefix}-{Guid.NewGuid():N}"; return key[..Math.Min(40, key.Length)]; }
 
     private static SysParameter NewParam(
         string paramKey, string name = "集成系统参数", string value = "v", string description = "")

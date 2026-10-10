@@ -45,7 +45,7 @@
   "planning_stage": 3,
   "implementation_evidence": "src/ERP.Api/Controllers/ParameterController.cs:13-16 declares only [Authorize] with no identity/menu resolution; GetAll at 26-40, GetById at 43-49, GetByKey at 52-58, Create at 61-71 and Update at 74-85 read and write SysParameters with only a duplicate-key check at 64-65 and no caller, menu or value guard. SysParameter (src/ERP.Domain/Entities/SysSystem.cs:10-30) persists ParamKey/ParamValue/ParamName/Description with no server-side bound or domain rule. The consumed operational fallback is src/ERP.Api/Controllers/BillProcController.cs:268-289 (LoadCurrencyDefaultsAsync reads DefaultCurrency and ExchangeRate from SysParameters) and 304-313 (ApplyCurrencyDefaultsAsync applies them to saved bills), so unguarded writes change operational document currency/rate defaults. The existing sys-parameter menu is seeded at src/ERP.Infrastructure/Data/SeedData.Menus.cs:18. An exact search of .ai/tasks returned no task listing ParameterController or SysParameter for live authorization.",
   "id": "ERP-446",
-  "status": "retry",
+  "status": "completed",
   "attempts": 1,
   "max_attempts": 3,
   "validation_profile": "safe",
@@ -61,18 +61,5 @@
     "required": false,
     "scenarios": []
   },
-  "created_at": "2026-10-09T06:45:33.643041Z",
-  "last_error": "Independent genuine SQL failed 3/12 because SystemParameterAuthorizationSqlServerTests.cs:229 slices short prefix plus GUID keys with [..40], throwing ArgumentOutOfRangeException before authorization and invalid-payload assertions. Original complete SQL log/TRX/target/build preserved in .ai/logs/heartbeat-20261010T0023-original-failures. Minimum isolated repair bounds slicing with Math.Min(40,key.Length), retaining GUID uniqueness and persisted MaxLength40. Isolated safe Release passed with 0 warnings/errors, and all 12 tests (7 real controller SQL cases and 5 database target guards) passed on a fresh GUID-owned dedicated NEWERP_AUTOTEST localdb. Apply only this fixture expression fix within existing allowed_paths, preserve all assertions and production authorization/value constraints, and run genuine SQL plus existing safe Release/full-unit gates before completing. Tested candidate: .ai/logs/ERP-311-repair-validation-20261005/src/ERP.IntegrationTests/SystemParameterAuthorizationSqlServerTests.cs.",
-  "failure_kind": "real_sql_fixture_validation_failure",
-  "recovery_context": {
-    "failure_kind": "real_sql_fixture_validation_failure",
-    "summary": "Independent genuine SQL failed 3/12 because SystemParameterAuthorizationSqlServerTests.cs:229 slices short prefix plus GUID keys with [..40], throwing ArgumentOutOfRangeException before authorization and invalid-payload assertions. Original complete SQL log/TRX/target/build preserved in .ai/logs/heartbeat-20261010T0023-original-failures. Minimum isolated repair bounds slicing with Math.Min(40,key.Length), retaining GUID uniqueness and persisted MaxLength40. Isolated safe Release passed with 0 warnings/errors, and all 12 tests (7 real controller SQL cases and 5 database target guards) passed on a fresh GUID-owned dedicated NEWERP_AUTOTEST localdb. Apply only this fixture expression fix within existing allowed_paths, preserve all assertions and production authorization/value constraints, and run genuine SQL plus existing safe Release/full-unit gates before completing. Tested candidate: .ai/logs/ERP-311-repair-validation-20261005/src/ERP.IntegrationTests/SystemParameterAuthorizationSqlServerTests.cs.",
-    "attempt_logs": [
-      ".ai/logs/ERP-446-independent-verification/sql.log"
-    ],
-    "validation_logs": [
-      ".ai/logs/ERP-446-independent-fixture-repair/sql.log"
-    ],
-    "instruction": "Independent genuine SQL failed 3/12 because SystemParameterAuthorizationSqlServerTests.cs:229 slices short prefix plus GUID keys with [..40], throwing ArgumentOutOfRangeException before authorization and invalid-payload assertions. Original complete SQL log/TRX/target/build preserved in .ai/logs/heartbeat-20261010T0023-original-failures. Minimum isolated repair bounds slicing with Math.Min(40,key.Length), retaining GUID uniqueness and persisted MaxLength40. Isolated safe Release passed with 0 warnings/errors, and all 12 tests (7 real controller SQL cases and 5 database target guards) passed on a fresh GUID-owned dedicated NEWERP_AUTOTEST localdb. Apply only this fixture expression fix within existing allowed_paths, preserve all assertions and production authorization/value constraints, and run genuine SQL plus existing safe Release/full-unit gates before completing. Tested candidate: .ai/logs/ERP-311-repair-validation-20261005/src/ERP.IntegrationTests/SystemParameterAuthorizationSqlServerTests.cs."
-  }
+  "created_at": "2026-10-09T06:45:33.643041Z"
 }
