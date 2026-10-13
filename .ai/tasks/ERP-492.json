@@ -1,0 +1,69 @@
+{
+  "title": "Enforce system menu authority independently of request path",
+  "description": "Stage 3 verified authority-path repair, direct follow-up to ERP-455 (same defect class already removed for supplier invoice evidence, system user, system role, canonical sales order, canonical purchase order, master data, receipt/payment allocation and customer invoice in ERP-462 / ERP-463 / ERP-464 / ERP-465 / ERP-466 / ERP-467 / ERP-468 / ERP-487). src/ERP.Api/Controllers/MenuController.cs:49-53 still gates live authorization on request shape only: private bool RequiresLiveAuthorization() { var http = ControllerContext?.HttpContext; return http?.Request.Path.HasValue == true; }, and the two guards EnsureMenuReadAuthorizedAsync:56-60 and EnsureMenuWriteAuthorizedAsync:63-67 call SysMenuAuthorizationRules only when that probe returns true (if (RequiresLiveAuthorization()) await SysMenuAuthorizationRules.EnsureReadAuthorizedAsync(_db, CurrentUserId()); / EnsureWriteAuthorizedAsync(...)). Therefore an identity-less or account-status-less context whose Request.Path is empty or whose HttpContext is not bound skips live identity, ERP-453 account status and the existing 「用户权限」(user-permission) / 「角色管理」(role) menu authority on GetTree:70-83, Create:86-100, Update:103-122 and Delete:125-139, and any caller reaching those action methods in-process can read the whole menu tree or mint / repoint / soft-delete menu codes that SysRoleMenu and AuthService resolve for every operational route. Remove the request-shape probe (and the helper) and make the existing authority unconditional on every entry, preserving SysMenuAuthorizationRules.Validate bounded field validation, EnsureParentResolvedAsync parent integrity, the existing MenuCode uniqueness check and the existing child-protection delete semantics, with zero SysMenus mutation on denial. Adapt the legacy in-process menu fixtures to genuine enabled identities holding their existing user-permission/role grants in isolated test data only. No Request.Path, environment, blank-context or test-only switch, no anonymous or administrative fallback, no permission/menu/grant expansion, no production access, no schema change. Genuine SQL uses exactly (localdb)\\\\NEWERP_AutoAcceptance with Integrated Security and a fresh GUID-owned NEWERP_AUTOTEST database, refusing existing or wrong targets before access and never dropping or resetting. Safe Release with analyzers/warnings-as-errors plus the full unit suite is required; a build alone is not whole-stage acceptance.",
+  "acceptance_criteria": [
+    "Every route on /api/sys/menus (tree, create, update and delete) requires the current live enabled nondeleted identity and its existing 用户权限 (user-permission) menu for create/update/delete and its existing 用户权限 or 角色管理 (role) menu for the read tree before any SysMenus count, tree node, uniqueness probe or write, independent of whether Request.Path is set, whether HttpContext is bound and how the request is shaped; the request-shape probe and its two conditional guards are removed, missing/zero/unknown/deleted identity fails Unauthorized and disabled/revoked/missing-menu identity fails Forbidden, and no anonymous, administrative, environment or test-only fallback is added.",
+    "Retain the existing SysMenuAuthorizationRules.Validate bounded field validation, EnsureParentResolvedAsync parent integrity, the MenuCode uniqueness check and the existing child-protection delete semantics; denied tree/create/update/delete reads or writes zero SysMenus rows and returns no menu node, and no new menu, role grant, permission, table or column is added.",
+    "Adapt the legacy in-process menu fixtures to genuine enabled identities holding their existing user-permission/role grants in isolated test data only, and add genuine isolated SQL controller tests covering tree/create/update/delete with no HttpContext, empty and populated Request.Path, missing/zero/deleted identity, disabled and revoked-menu identity and permitted flows; existing MenuControllerTests, SysMenuAuthorizationTests and AuthServiceTests contracts stay green.",
+    "Keep the safe Release build with analyzers and warnings-as-errors and the full existing ERP.UnitTests suite green, run genuine SQL only on the isolated (localdb)\\\\NEWERP_AutoAcceptance instance with Integrated Security and a fresh GUID-owned NEWERP_AUTOTEST database that is never dropped or reset, and claim no whole-stage acceptance from a build alone."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/MenuController.cs",
+    "src/ERP.Application/Services/SysMenuAuthorizationRules.cs",
+    "src/ERP.UnitTests/MenuControllerTests.cs",
+    "src/ERP.UnitTests/SysMenuAuthorizationTests.cs",
+    "src/ERP.UnitTests/AuthServiceTests.cs",
+    "src/ERP.IntegrationTests/SysMenuAuthorizationSqlServerTests.cs",
+    "docs/menu-record-authority.md"
+  ],
+  "criterion_path_map": {
+    "Every route on /api/sys/menus (tree, create, update and delete) requires the current live enabled nondeleted identity and its existing 用户权限 (user-permission) menu for create/update/delete and its existing 用户权限 or 角色管理 (role) menu for the read tree before any SysMenus count, tree node, uniqueness probe or write, independent of whether Request.Path is set, whether HttpContext is bound and how the request is shaped; the request-shape probe and its two conditional guards are removed, missing/zero/unknown/deleted identity fails Unauthorized and disabled/revoked/missing-menu identity fails Forbidden, and no anonymous, administrative, environment or test-only fallback is added.": [
+      "src/ERP.Api/Controllers/MenuController.cs",
+      "src/ERP.Application/Services/SysMenuAuthorizationRules.cs",
+      "src/ERP.UnitTests/SysMenuAuthorizationTests.cs",
+      "src/ERP.IntegrationTests/SysMenuAuthorizationSqlServerTests.cs"
+    ],
+    "Retain the existing SysMenuAuthorizationRules.Validate bounded field validation, EnsureParentResolvedAsync parent integrity, the MenuCode uniqueness check and the existing child-protection delete semantics; denied tree/create/update/delete reads or writes zero SysMenus rows and returns no menu node, and no new menu, role grant, permission, table or column is added.": [
+      "src/ERP.Api/Controllers/MenuController.cs",
+      "src/ERP.Application/Services/SysMenuAuthorizationRules.cs",
+      "src/ERP.UnitTests/MenuControllerTests.cs"
+    ],
+    "Adapt the legacy in-process menu fixtures to genuine enabled identities holding their existing user-permission/role grants in isolated test data only, and add genuine isolated SQL controller tests covering tree/create/update/delete with no HttpContext, empty and populated Request.Path, missing/zero/deleted identity, disabled and revoked-menu identity and permitted flows; existing MenuControllerTests, SysMenuAuthorizationTests and AuthServiceTests contracts stay green.": [
+      "src/ERP.UnitTests/MenuControllerTests.cs",
+      "src/ERP.UnitTests/SysMenuAuthorizationTests.cs",
+      "src/ERP.UnitTests/AuthServiceTests.cs",
+      "src/ERP.IntegrationTests/SysMenuAuthorizationSqlServerTests.cs",
+      "docs/menu-record-authority.md"
+    ],
+    "Keep the safe Release build with analyzers and warnings-as-errors and the full existing ERP.UnitTests suite green, run genuine SQL only on the isolated (localdb)\\\\NEWERP_AutoAcceptance instance with Integrated Security and a fresh GUID-owned NEWERP_AUTOTEST database that is never dropped or reset, and claim no whole-stage acceptance from a build alone.": [
+      "src/ERP.IntegrationTests/SysMenuAuthorizationSqlServerTests.cs",
+      "docs/menu-record-authority.md"
+    ]
+  },
+  "depends_on": [
+    "ERP-455",
+    "ERP-097",
+    "ERP-462"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "implementation_evidence": "src/ERP.Api/Controllers/MenuController.cs:49-53 private bool RequiresLiveAuthorization() returns http?.Request.Path.HasValue == true; EnsureMenuReadAuthorizedAsync:56-60 and EnsureMenuWriteAuthorizedAsync:63-67 execute SysMenuAuthorizationRules.EnsureReadAuthorizedAsync / EnsureWriteAuthorizedAsync only inside if (RequiresLiveAuthorization()), and those guards are the sole authorization of GetTree:70-83, Create:86-100, Update:103-122 and Delete:125-139 (SysMenuAuthorizationRules.EnsureReadAuthorizedAsync:100, EnsureWriteAuthorizedAsync:111, Validate:154, EnsureParentResolvedAsync:176), so an identity-less context with empty / unbound Request.Path reads the menu tree and writes or soft-deletes SysMenus rows without live identity, account status or the existing user-permission/role menu authority. The same request-shape waiver was already removed for the other modules in ERP-462 / ERP-463 / ERP-464 / ERP-465 / ERP-466 / ERP-467 / ERP-468 / ERP-487, and src/ERP.UnitTests/SysMenuAuthorizationTests.cs:39-52,556-583 still encodes the in-process Request.Path-empty expectation that must be adapted.",
+  "id": "ERP-492",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-13T19:54:16.811328Z"
+}

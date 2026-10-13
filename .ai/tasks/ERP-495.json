@@ -1,0 +1,71 @@
+{
+  "title": "Enforce legacy bill read authority on the Excel import template route",
+  "description": "Stage 3 verified authorization gap in the legacy stored-procedure bill family, follow-up to ERP-405 (list / detail / navigation reads) and to ERP-440 which already authorizes the equivalent base-data import-template route. src/ERP.Api/Controllers/BillProcController.Import.cs:18-30 [HttpGet(\"{billType}/import-template\")] DownloadImportTemplate reads Bills and ImportColumns and returns generated workbook bytes for any billType with no live identity, no account-status check and no legacy bill read authority, while the sibling Import route in the same file (46-55) first calls GuardLegacyMutationAsync(billType, LegacyBillOperation.Import) (defined in src/ERP.Api/Controllers/BillProcController.cs:71-85 via LegacyBillMutationRules.AuthorizeAsync) and every other read route of the family resolves LegacyBillAuthorizationRules.EnsureReadAuthorizedAsync(_db, CurrentUserId(), billType) before returning data (BillProcController.Query.cs:25 GetPaged, :63 Navigate, :90 GetDetail, BillProcController.Export.cs:133-148 GuardLegacyExportAsync used by Export:229-249 and ExportPreview:256-285, BillProcController.Log.cs:107 GetBillLogs). Add the same existing read gate to the template route before any column list or workbook byte is produced, returning the existing controlled failure envelope (HTTP 200 + business error code) exactly as GuardLegacyExportAsync does and keeping the existing unknown-billType InvalidParameter envelope and the withSample sample-row behaviour unchanged for authorized callers. Reuse only the existing family functional menus and ERP-097 read scope resolved by LegacyBillAuthorizationRules; do not weaken the existing read-scope, ownership or max-customer limits and do not touch LegacyBillMutationRules. Adapt legacy in-process fixtures to genuine enabled identities holding their existing family menu grants in isolated test data only. No new menu, grant, permission, table or column, no anonymous or administrative fallback, no request-path or context-shape waiver, no production access, no arbitrary SQL. Genuine SQL uses exactly (localdb)\\\\NEWERP_AutoAcceptance with Integrated Security and a fresh GUID-owned NEWERP_AUTOTEST database, refusing existing or wrong targets before access and never dropping or resetting. Safe Release with analyzers/warnings-as-errors plus the full unit suite is required; a build alone is not whole-stage acceptance.",
+  "acceptance_criteria": [
+    "src/ERP.Api/Controllers/BillProcController.Import.cs:18-30 DownloadImportTemplate requires the current live enabled nondeleted identity, the ERP-453 account status and the existing legacy bill family functional menu plus ERP-097 read scope through the existing LegacyBillAuthorizationRules.EnsureReadAuthorizedAsync(_db, CurrentUserId(), billType) before any column definition, sample row or workbook byte is generated, failing with the existing controlled HTTP 200 + business error envelope for missing/zero/unknown/deleted, disabled, revoked-menu and out-of-scope identities, and keeping the existing InvalidParameter envelope for an unknown billType.",
+    "Retain the existing read-side boundaries (LegacyBillAuthorizationRules.EnsureLiveIdentityAsync / EnsureModuleAuthorizedAsync / read-ownership and max-customer scope limits) and the existing template contract: registered ImportColumns derived from ExportColumns with system fields removed, the Chinese header row, the withSample date-only sample row and the returned .xlsx file name and content type; do not change LegacyBillMutationRules, the guarded Import route behaviour or any other route of the family, and add no new menu, grant, permission, table or column.",
+    "Adapt the legacy in-process fixtures to genuine enabled identities holding their existing bill family menu grants in isolated test data only, and add genuine unit plus isolated SQL controller tests covering the import-template route for unknown billType, missing/zero/deleted identity, disabled and revoked-menu identity, limited-scope identity, empty and populated request paths, withSample true and false and permitted flows; existing LegacyBillReadTests, LegacyBillMutationTests, LegacyBillHistoryTests, BillCatalogTests and their SQL counterparts stay green.",
+    "Keep the safe Release build with analyzers and warnings-as-errors and the full existing ERP.UnitTests suite green, run genuine SQL only on the isolated (localdb)\\\\NEWERP_AutoAcceptance instance with Integrated Security and a fresh GUID-owned NEWERP_AUTOTEST database that is never dropped or reset, and claim no whole-stage acceptance from a build alone."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/BillProcController.Import.cs",
+    "src/ERP.Application/Services/LegacyBillAuthorizationRules.cs",
+    "src/ERP.UnitTests/LegacyBillReadTests.cs",
+    "src/ERP.UnitTests/LegacyBillMutationTests.cs",
+    "src/ERP.UnitTests/LegacyBillHistoryTests.cs",
+    "src/ERP.IntegrationTests/LegacyBillReadSqlServerTests.cs",
+    "src/ERP.IntegrationTests/LegacyBillMutationSqlServerTests.cs",
+    "docs/legacy-bill-read-scope.md"
+  ],
+  "criterion_path_map": {
+    "src/ERP.Api/Controllers/BillProcController.Import.cs:18-30 DownloadImportTemplate requires the current live enabled nondeleted identity, the ERP-453 account status and the existing legacy bill family functional menu plus ERP-097 read scope through the existing LegacyBillAuthorizationRules.EnsureReadAuthorizedAsync(_db, CurrentUserId(), billType) before any column definition, sample row or workbook byte is generated, failing with the existing controlled HTTP 200 + business error envelope for missing/zero/unknown/deleted, disabled, revoked-menu and out-of-scope identities, and keeping the existing InvalidParameter envelope for an unknown billType.": [
+      "src/ERP.Api/Controllers/BillProcController.Import.cs",
+      "src/ERP.Application/Services/LegacyBillAuthorizationRules.cs",
+      "src/ERP.UnitTests/LegacyBillReadTests.cs",
+      "src/ERP.IntegrationTests/LegacyBillReadSqlServerTests.cs"
+    ],
+    "Retain the existing read-side boundaries (LegacyBillAuthorizationRules.EnsureLiveIdentityAsync / EnsureModuleAuthorizedAsync / read-ownership and max-customer scope limits) and the existing template contract: registered ImportColumns derived from ExportColumns with system fields removed, the Chinese header row, the withSample date-only sample row and the returned .xlsx file name and content type; do not change LegacyBillMutationRules, the guarded Import route behaviour or any other route of the family, and add no new menu, grant, permission, table or column.": [
+      "src/ERP.Api/Controllers/BillProcController.Import.cs",
+      "src/ERP.Application/Services/LegacyBillAuthorizationRules.cs",
+      "src/ERP.UnitTests/LegacyBillMutationTests.cs"
+    ],
+    "Adapt the legacy in-process fixtures to genuine enabled identities holding their existing bill family menu grants in isolated test data only, and add genuine unit plus isolated SQL controller tests covering the import-template route for unknown billType, missing/zero/deleted identity, disabled and revoked-menu identity, limited-scope identity, empty and populated request paths, withSample true and false and permitted flows; existing LegacyBillReadTests, LegacyBillMutationTests, LegacyBillHistoryTests, BillCatalogTests and their SQL counterparts stay green.": [
+      "src/ERP.UnitTests/LegacyBillReadTests.cs",
+      "src/ERP.UnitTests/LegacyBillMutationTests.cs",
+      "src/ERP.UnitTests/LegacyBillHistoryTests.cs",
+      "src/ERP.IntegrationTests/LegacyBillReadSqlServerTests.cs",
+      "src/ERP.IntegrationTests/LegacyBillMutationSqlServerTests.cs",
+      "docs/legacy-bill-read-scope.md"
+    ],
+    "Keep the safe Release build with analyzers and warnings-as-errors and the full existing ERP.UnitTests suite green, run genuine SQL only on the isolated (localdb)\\\\NEWERP_AutoAcceptance instance with Integrated Security and a fresh GUID-owned NEWERP_AUTOTEST database that is never dropped or reset, and claim no whole-stage acceptance from a build alone.": [
+      "src/ERP.IntegrationTests/LegacyBillReadSqlServerTests.cs",
+      "docs/legacy-bill-read-scope.md"
+    ]
+  },
+  "depends_on": [
+    "ERP-405",
+    "ERP-440",
+    "ERP-097"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "implementation_evidence": "src/ERP.Api/Controllers/BillProcController.Import.cs:18-30 DownloadImportTemplate(string billType, bool withSample) only checks Bills.TryGetValue and then returns File(ExcelImporter.BuildTemplate(meta.Table, columns, sample), ...) with no Identity / menu / scope resolution, while the Import route in the same file guards at :54 with var denied = await GuardLegacyMutationAsync(billType, LegacyBillOperation.Import) (helper in src/ERP.Api/Controllers/BillProcController.cs:71-85 calling LegacyBillMutationRules.AuthorizeAsync(_db, CurrentUserId(), LegacyFamilyKey, operation)); the read sibling routes all resolve LegacyBillAuthorizationRules.EnsureReadAuthorizedAsync(_db, CurrentUserId(), billType) before data (BillProcController.Query.cs:25, :63, :90; BillProcController.Export.cs:133-148 for Export:229 and ExportPreview:256; BillProcController.Log.cs:107) and the equivalent base-data template route is already authorized after ERP-440 (BaseDataIoController + src/ERP.UnitTests/BaseDataIoAuthorizationTests.cs:17 which covers export / import-template / import). An exact search of .ai/tasks returns no task adding live identity, menu or scope authority to DownloadImportTemplate.",
+  "id": "ERP-495",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-13T19:54:16.815234Z"
+}

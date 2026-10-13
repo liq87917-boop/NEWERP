@@ -1,0 +1,68 @@
+{
+  "title": "Enforce live agency service fee reconciliation register authority and customer scope at every entry",
+  "description": "Stage 3 verified authority repair on the agency service fee reconciliation workbench, follow-up to ERP-437 which already enforced the same 客户资料(customer) register authority and ERP-097 scope on the sibling registers. src/ERP.Api/Controllers/AgencyServiceFeeReconciliationController.cs is the only controller of its module family whose routes do not resolve authority: Report:41-44 calls AgencyServiceFeeReconciliationService.ForQueryAsync(_db, query) with no CurrentUserId and no Ensure call, and Metadata:51-54 returns the module metadata without any live identity check, whereas the sibling AgencyServiceFeeStatementController.cs:47/74/120/134/144/158/171 and AgencyServiceFeeCollectionAllocationController.cs:51/77/94/107/119/132/144/154/168/181 all call AgencyServiceFeeReconciliationRules.EnsureRegisterAuthorizedAsync(_db, CurrentUserId()) before reading anything, and AttachmentEvidenceController:69-74 likewise requires live identity on metadata. Because Inspection.Queryable ApplyFilters (src/ERP.Application/Services/AgencyServiceFeeReconciliationService.cs:145-151) filters only by the request fields and never by the authoritative customer scope, any authenticated account can page every customer's statement totals, valid collection-allocation evidence, remaining-amount evidence and aging buckets, and the detail route ForStatementDetailAsync:853-920 checks identity and menu codes but applies no ERP-097 customer scope, so an out-of-scope statement is readable by its Id. Route both entries through the existing EnsureRegisterAuthorizedAsync, apply the resolved SalespersonDataScope to the workbench list and detail (same口径 as src/ERP.Application/Services/AgencyServiceFeeStatementService.cs:171-172 SalespersonDataScopeService.FilterByCustomer(source, scope, x => x.CustomerId) and AgencyServiceFeeReconciliationRules.EnsureStatementInScopeAsync:478) and keep every existing boundary: read-only derivation, per-currency isolation with no cross-currency total, unknown due-date and invalid-evidence separation, bounded paging and detail limits, and the existing controlled non-disclosing errors. Adapt legacy in-process fixtures to genuine enabled identities with their existing customer menu grants in isolated test data only. No new menu, role, permission, table or column, no anonymous or administrative fallback, no production access, no arbitrary SQL. Genuine SQL uses exactly (localdb)\\\\NEWERP_AutoAcceptance with Integrated Security and a fresh GUID-owned NEWERP_AUTOTEST database, refusing existing or wrong targets before access and never dropping or resetting. Safe Release with analyzers/warnings-as-errors plus the full unit suite is required; a build alone is not whole-stage acceptance.",
+  "acceptance_criteria": [
+    "src/ERP.Api/Controllers/AgencyServiceFeeReconciliationController.cs:41-44 Report and 51-54 Metadata plus the statement detail route 62-67 require the current live enabled nondeleted identity, the ERP-453 account status and the existing 客户资料 (customer) functional menu through AgencyServiceFeeReconciliationRules.EnsureRegisterAuthorizedAsync before any count, statement row, allocation row, amount or metadata is produced, with missing/zero/unknown/deleted identity failing Unauthorized and disabled/revoked/missing-menu identity failing Forbidden, and no anonymous, administrative, environment or test-only fallback, no request-path or context-shape waiver and no new grant.",
+    "Apply the resolved ERP-097 authoritative customer scope to the workbench list and the statement detail so only in-scope customers are counted or returned (SalespersonDataScopeService.FilterByCustomer on the statement source and the existing EnsureStatementInScopeAsync口径 for a stored statement Id, out-of-scope treated as the existing non-disclosing not-found) while retaining read-only derivation, per-currency rows with no cross-currency total, separate unknown-due-date and invalid-evidence groups, bounded paging and detail limits, and zero writes to AgencyServiceFeeStatements, AgencyServiceFeeCollectionAllocations, FinanceReceipts or any other table.",
+    "Adapt the legacy in-process agency service fee reconciliation fixtures to genuine enabled identities holding their existing customer menu grants in isolated test data only, and add genuine isolated SQL controller tests covering the workbench list, metadata and statement detail for missing/zero/deleted identity, disabled and revoked-menu identity, limited-scope identity reading an out-of-scope customer, empty and populated request paths and permitted flows; existing AgencyServiceFeeReconciliationTests and AgencyServiceFeeStatementTests contracts stay green.",
+    "Keep the safe Release build with analyzers and warnings-as-errors and the full existing ERP.UnitTests suite green, run genuine SQL only on the isolated (localdb)\\\\NEWERP_AutoAcceptance instance with Integrated Security and a fresh GUID-owned NEWERP_AUTOTEST database that is never dropped or reset, and claim no whole-stage acceptance from a build alone."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/AgencyServiceFeeReconciliationController.cs",
+    "src/ERP.Application/Services/AgencyServiceFeeReconciliationService.cs",
+    "src/ERP.Application/Services/AgencyServiceFeeReconciliationRules.cs",
+    "src/ERP.UnitTests/AgencyServiceFeeReconciliationTests.cs",
+    "src/ERP.UnitTests/AgencyServiceFeeStatementTests.cs",
+    "src/ERP.IntegrationTests/AgencyServiceFeeRegisterAuthorizationSqlServerTests.cs",
+    "docs/agency-service-fee-register-authority.md"
+  ],
+  "criterion_path_map": {
+    "src/ERP.Api/Controllers/AgencyServiceFeeReconciliationController.cs:41-44 Report and 51-54 Metadata plus the statement detail route 62-67 require the current live enabled nondeleted identity, the ERP-453 account status and the existing 客户资料 (customer) functional menu through AgencyServiceFeeReconciliationRules.EnsureRegisterAuthorizedAsync before any count, statement row, allocation row, amount or metadata is produced, with missing/zero/unknown/deleted identity failing Unauthorized and disabled/revoked/missing-menu identity failing Forbidden, and no anonymous, administrative, environment or test-only fallback, no request-path or context-shape waiver and no new grant.": [
+      "src/ERP.Api/Controllers/AgencyServiceFeeReconciliationController.cs",
+      "src/ERP.Application/Services/AgencyServiceFeeReconciliationRules.cs",
+      "src/ERP.UnitTests/AgencyServiceFeeReconciliationTests.cs",
+      "src/ERP.IntegrationTests/AgencyServiceFeeRegisterAuthorizationSqlServerTests.cs"
+    ],
+    "Apply the resolved ERP-097 authoritative customer scope to the workbench list and the statement detail so only in-scope customers are counted or returned (SalespersonDataScopeService.FilterByCustomer on the statement source and the existing EnsureStatementInScopeAsync口径 for a stored statement Id, out-of-scope treated as the existing non-disclosing not-found) while retaining read-only derivation, per-currency rows with no cross-currency total, separate unknown-due-date and invalid-evidence groups, bounded paging and detail limits, and zero writes to AgencyServiceFeeStatements, AgencyServiceFeeCollectionAllocations, FinanceReceipts or any other table.": [
+      "src/ERP.Api/Controllers/AgencyServiceFeeReconciliationController.cs",
+      "src/ERP.Application/Services/AgencyServiceFeeReconciliationService.cs",
+      "src/ERP.Application/Services/AgencyServiceFeeReconciliationRules.cs",
+      "src/ERP.UnitTests/AgencyServiceFeeReconciliationTests.cs"
+    ],
+    "Adapt the legacy in-process agency service fee reconciliation fixtures to genuine enabled identities holding their existing customer menu grants in isolated test data only, and add genuine isolated SQL controller tests covering the workbench list, metadata and statement detail for missing/zero/deleted identity, disabled and revoked-menu identity, limited-scope identity reading an out-of-scope customer, empty and populated request paths and permitted flows; existing AgencyServiceFeeReconciliationTests and AgencyServiceFeeStatementTests contracts stay green.": [
+      "src/ERP.UnitTests/AgencyServiceFeeReconciliationTests.cs",
+      "src/ERP.UnitTests/AgencyServiceFeeStatementTests.cs",
+      "src/ERP.IntegrationTests/AgencyServiceFeeRegisterAuthorizationSqlServerTests.cs",
+      "docs/agency-service-fee-register-authority.md"
+    ],
+    "Keep the safe Release build with analyzers and warnings-as-errors and the full existing ERP.UnitTests suite green, run genuine SQL only on the isolated (localdb)\\\\NEWERP_AutoAcceptance instance with Integrated Security and a fresh GUID-owned NEWERP_AUTOTEST database that is never dropped or reset, and claim no whole-stage acceptance from a build alone.": [
+      "src/ERP.IntegrationTests/AgencyServiceFeeRegisterAuthorizationSqlServerTests.cs",
+      "docs/agency-service-fee-register-authority.md"
+    ]
+  },
+  "depends_on": [
+    "ERP-437",
+    "ERP-097"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "implementation_evidence": "src/ERP.Api/Controllers/AgencyServiceFeeReconciliationController.cs:41-44 [HttpGet] Report([FromQuery] AgencyServiceFeeReconciliationQuery query) => Ok(...AgencyServiceFeeReconciliationService.ForQueryAsync(_db, query)) and 51-54 [HttpGet(\"metadata\")] Metadata() with no CurrentUserId / Ensure call; src/ERP.Application/Services/AgencyServiceFeeReconciliationService.cs:46-47 ForQueryAsync(IErpDbContext db, AgencyServiceFeeReconciliationQuery query) has no userId parameter and 145-151 ApplyFilters filters only CustomerId / dates / currency from the request, and 853-920 ForStatementDetailAsync checks identity (863-867) and menu codes (870-879) but never SalespersonDataScope; the sibling controllers AgencyServiceFeeStatementController.cs:47/74/120 and AgencyServiceFeeCollectionAllocationController.cs:51/77/107/132/154/168 call AgencyServiceFeeReconciliationRules.EnsureRegisterAuthorizedAsync (rules at AgencyServiceFeeReconciliationRules.cs:454-464, returning SalespersonDataScope) and AgencyServiceFeeStatementService.cs:171-172 filters by SalespersonDataScopeService.FilterByCustomer, which is the missing口径; an exact search of .ai/tasks returns no task adding authority or scope to AgencyServiceFeeReconciliationController or to ForQueryAsync.",
+  "id": "ERP-494",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-13T19:54:16.814257Z"
+}
