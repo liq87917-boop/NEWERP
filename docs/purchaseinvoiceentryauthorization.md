@@ -24,22 +24,33 @@ private bool RequiresLiveAuthorization()
 关联预览、新增、修改、关联整体替换、登记、作废这 12 条入口在「空路径 / 无身份」的调用上都可能执行，
 供应商采购发票证据路由缺少实时的身份 / 菜单 / 范围强制。
 
-## 2. 修复后的授权门（与请求路径无关）
+**2026-10-13 复核（recovery）追加证据**：首轮修复把授权门收窄为
+`ControllerContext?.HttpContext is not null`，虽然移除了 `Request.Path` 与身份维度旁路，但对
+**`HttpContext` 为 `null` 的调用**（进程内直调）仍然整段跳过菜单、范围内查询与发票 / 来源权威判定，
+与验收条款「including no HttpContext 也必须 fail closed」不符。本次修复**彻底移除**该门。
 
-`RequiresLiveAuthorization()` 现在只依据「控制器是否绑定到 HTTP 请求管线」：
+## 2. 修复后的授权门（与请求形状 / 请求上下文 / 身份无关）
+
+`RequiresLiveAuthorization()` **已彻底移除**：控制器不再存在任何请求形状 / 请求上下文 / 身份维度的授权门，
+每一条路由入口都**无条件**执行实时授权；身份解析保持安全（缺失请求上下文 / 缺失身份声明 / 非数字一律解析为 `null`）：
 
 ```csharp
-private bool RequiresLiveAuthorization()
-    => ControllerContext?.HttpContext is not null;
+private long? CurrentUserId()
+    => long.TryParse(
+        ControllerContext?.HttpContext?.User?.FindFirst(ClaimTypes.NameIdentifier)?.Value, out var id)
+        ? id
+        : null;
 ```
 
 - **空路径与已赋值路径口径完全一致**：不再读取 `Request.Path`，请求形状不再参与授权判定；
-- **缺少身份不再放行**：绑定到请求管线但身份缺失 / 为零 / 已删除时一律 fail closed（未认证）；
+- **无请求上下文不再放行**：`HttpContext` 为 `null` 的纯进程内直调与真实请求口径一致，缺少身份时由既有规则
+  在触达任何查询之前返回受控未认证（fail closed）；
+- **缺少身份不再放行**：缺失 / 零 / 已删除身份一律 fail closed（未认证），禁用 / 撤销菜单 / 无菜单一律权限不足；
 - 不读取环境变量、不读取数据库提供程序 / 内存库标识、不存在任何测试专用开关；
 - 不存在 `[AllowAnonymous]`、角色白名单或「退化为管理员」的兜底（源码契约测试逐条断言）。
 
 `PurchaseInvoiceAuthorizationRules.PathIndependenceText` 固化了同一口径，并与 `RuleText` 一起构成
-「与请求形状无关」的可回归契约文案。
+「与请求形状 / 请求上下文无关」的可回归契约文案。
 
 ## 3. 逐路由先授权、后读写
 
@@ -78,23 +89,35 @@ private bool RequiresLiveAuthorization()
 
 ### 5.1 单元测试（内存库 + 真实既有身份 / 菜单 / 数据范围）
 
-- `src/ERP.UnitTests/PurchaseInvoiceEntryAuthorizationTests.cs`（新增）：
+- `src/ERP.UnitTests/PurchaseInvoiceEntryAuthorizationTests.cs`（新增 / 扩展）：
   空路径与已赋值路径的**逐路由一致判定**（台账 / 详情 / 对账 / 账龄 / 账龄明细 / 候选 / 预览 / 关联 / 新增 / 修改 / 登记 / 作废）；
   缺失 / 零 / 未知 / 已删除身份 → 未认证；禁用 / 撤销菜单 → 权限不足；授权账号在**空路径**请求上完成
   新增 → 关联 → 登记 → 作废 全生命周期；受限业务员对范围外 / 无来源发票 fail closed 且零写入；
-  以及源码契约（控制器不含 `Request.Path` / `AllowAnonymous` / 角色白名单 / 环境变量 / 内存库开关）。
+  新增 `Missing_request_context_is_unauthorized_on_every_route`（**完全无 `HttpContext`** 的进程内直调在 12 条入口上
+  一律未认证且零写入）；以及源码契约（控制器不含 `RequiresLiveAuthorization` / `Request.Path` / `AllowAnonymous` /
+  角色白名单 / 环境变量 / 内存库开关，并安全解析缺失上下文身份）。
 - `src/ERP.UnitTests/PurchaseInvoiceConcurrencyTests.cs`（扩展）：新增
   `Empty_request_path_enforces_the_same_authority_as_a_populated_path`（空路径 + 无身份 → 未认证；
-  空路径 + 既有授权身份 → 与已赋值路径一致放行），并在接线契约中断言控制器不再读取 `Request.Path`。
-- 既有夹具按「真实启用身份 + 既有菜单授权 + 不设置 `Request.Path`」适配：
-  `PurchaseOrderInvoiceEvidenceTests`、`SupplierInvoiceReconciliationTests`。
-- 既有 52 个 `PurchaseInvoiceTests`（进程内直调用例）与全部既有回归保持绿色。
+  空路径 + 既有授权身份 → 与已赋值路径一致放行）与 `Missing_request_context_enforces_authority_on_every_route`
+  （**完全无 `HttpContext`** → 未认证且零写入），并在接线契约中断言控制器不再读取 `Request.Path`、
+  不再存在 `RequiresLiveAuthorization` / `ControllerContext?.HttpContext is not null` 门。
+- 既有夹具按「真实启用身份 + 既有菜单授权」适配：`PurchaseOrderInvoiceEvidenceTests`、
+  `SupplierInvoiceReconciliationTests`；`PurchaseInvoiceTests` 的 52 个进程内直调用例改为
+  `PurchaseInvoiceTestIdentities.ForUser(db, SeedAuthorizedUser(db, privileged: true))`（真实启用身份 +
+  既有「采购订单」菜单授权，隔离内存测试数据内播种，不设置 `Request.Path`）后保持绿色。
 
 ### 5.2 真实隔离 SQL 测试
 
-`src/ERP.IntegrationTests/PurchaseInvoiceEntryAuthorizationSqlServerTests.cs`（新增）以真实控制器 + 真实既有身份 /
+`src/ERP.IntegrationTests/PurchaseInvoiceEntryAuthorizationSqlServerTests.cs`（新增 / 扩展）以真实控制器 + 真实既有身份 /
 菜单 / 数据范围驱动：空路径与已赋值路径一致判定、缺失 / 零 / 未知 / 已删除身份未认证、禁用与撤销菜单权限不足、
-授权账号全生命周期、被拒绝调用零写入与零授权扩张，以及专用目标护栏的 fail-closed 覆盖。
+授权账号全生命周期、被拒绝调用零写入与零授权扩张、
+新增 `Missing_request_context_is_unauthorized_on_every_route`（**完全无 `HttpContext`** 的 12 条入口一律未认证且零写入），
+以及专用目标护栏的 fail-closed 覆盖。
+
+`src/ERP.IntegrationTests/PurchaseInvoiceConcurrencySqlServerTests.cs`（扩展）新增
+`Missing_request_context_denies_every_write_route_without_mutation`：**完全无 `HttpContext`** 时
+台账 / 详情 / 关联预览 / 关联替换 / 登记 / 作废 / 新增一律未认证，且发票状态与关联行零改动
+（原有双连接容量竞态与全局锁序验证完全保留）。
 
 安全口径：目标必须是专用实例 `(localdb)\NEWERP_AutoAcceptance`、库名前缀 `NEWERP_AUTOTEST` 且 `Integrated Security=true`；
 每次运行只创建**全新 GUID 后缀库**，发现同名库已存在立即拒绝，**绝不 drop / reset / 复用**任何数据库；
@@ -102,24 +125,22 @@ private bool RequiresLiveAuthorization()
 
 ## 6. 授权判定边界
 
-修复后，**任何绑定到 HTTP 请求管线的调用**都执行实时授权：真实 HTTP 请求由 ASP.NET Core 请求管线提供
+修复后，**每一个控制器入口无条件**执行实时授权：真实 HTTP 请求由 ASP.NET Core 请求管线提供
 `ControllerContext.HttpContext`，因此生产与集成环境中的**每一条**入口（空路径与已赋值路径、匿名与已认证）
-都强制走身份 / 菜单 / 范围判定，**空路径不再构成旁路**，缺少身份的真实请求一律 fail closed。
+都强制走身份 / 菜单 / 范围判定，**空路径不再构成旁路**；而**完全没有请求上下文**（`HttpContext` 为 `null`
+的纯进程内直调）的调用同样先解析出 `null` 身份并 fail closed——缺少身份一律受控未认证。
 
-唯一不执行实时授权的情形是：控制器**完全未被任何请求绑定**（`HttpContext` 为 null 的纯进程内直接调用）。
-这类调用不可能由任何外部请求到达（不存在可被外部构造的「无请求上下文」HTTP 调用），并且该边界**不**读取
-请求路径、环境变量、数据库提供程序或任何测试专用开关。既有进程内夹具（例如 `PurchaseInvoiceTests`
-直接 `new PurchaseInvoiceController(db)`）属于这一类。
+**不存在任何免授权边界**：控制器不读取请求路径、环境变量、数据库提供程序或任何测试专用开关，
+不会因为「无请求上下文 / 空身份」而执行任何读取或写入。
 
-## 7. 残留边界与后续动作（显式声明，不隐藏）
+## 7. 残留边界（已关闭）
 
-验收条款要求「including no HttpContext」也必须 fail closed。要让**进程内无请求上下文**的直调也一并 fail closed，
-必须把既有进程内夹具 `src/ERP.UnitTests/PurchaseInvoiceTests.cs`（52 个直调用例，通过 `BuildController(db) => new(db)`
-构造控制器）适配为「真实启用身份 + 既有菜单授权 + 请求上下文」。该文件**不在本任务的 `allowed_paths` 清单内**，
-因此本任务**未**改动它（也未为了让其保持绿色而保留任何请求形状 / 身份 / 环境 / 测试专用放行开关），
-本任务移除了控制器侧的请求路径与身份维度旁路。
+首轮修复曾在本文档第 7 节显式声明「`HttpContext` 为 `null` 的进程内直调不执行实时授权」这一残留边界。
+本次修复把 `RequiresLiveAuthorization()` 与所有「无上下文 / 空身份」豁免**完全移除**，并把既有进程内夹具
+`src/ERP.UnitTests/PurchaseInvoiceTests.cs`（52 个直调用例）适配为注入真实启用身份与既有「采购订单」菜单授权的
+请求上下文，因此：
 
-后续动作（建议，需要先授权该路径）：把 `RequiresLiveAuthorization()` 改为无条件启用（直接返回 `true` 或移除该门），
-并把 `PurchaseInvoiceTests.BuildController` 适配为注入真实启用身份与既有「采购订单」菜单的请求上下文；
-届时「无 HttpContext」的直调与空路径请求同样是 fail closed，本文件的第 6 节边界随之消失。
+- 「无 `HttpContext`」的直调与空路径请求**同样 fail closed**（缺少身份 → 受控未认证），第 6 节描述的免授权边界**已消失**；
+- 不存在任何请求形状 / 请求上下文 / 身份 / 环境变量 / 数据库提供程序 / 测试专用开关维度的放行；
+- 不新增任何菜单 / 角色 / 用户授权，不修改生产种子权限，不改写任何发票 / 关联行 / 采购订单 / 付款证据。
 

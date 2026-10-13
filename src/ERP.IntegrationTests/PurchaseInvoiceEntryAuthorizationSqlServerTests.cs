@@ -313,6 +313,40 @@ public sealed class PurchaseInvoiceEntryAuthorizationSqlServerTests
             c => c.Void(invoiceId, new PurchaseInvoiceVoidRequest { Reason = "重开" })));
     }
 
+    /// <summary>
+    /// ERP-462：完全没有请求上下文（<c>HttpContext</c> 为 null 的进程内直调）时 12 条入口同样必须先授权后读写——
+    /// 缺少身份安全解析为 null，一律受控未认证，绝无「无请求上下文」豁免。
+    /// </summary>
+    private async Task AssertAllRoutesDeniedWithoutContextAsync(long invoiceId, long supplierId, int code)
+    {
+        async Task CheckAsync(Func<PurchaseInvoiceController, Task<IActionResult>> action)
+        {
+            await using var db = _fixture.CreateDbContext();
+            try
+            {
+                await action(new PurchaseInvoiceController(db));
+                Assert.Fail("缺少请求上下文时必须 fail closed（不得执行任何读写）");
+            }
+            catch (BusinessException ex)
+            {
+                Assert.Equal(code, ex.Code);
+            }
+        }
+
+        await CheckAsync(c => c.GetPaged(new PurchaseInvoiceQuery()));
+        await CheckAsync(c => c.GetById(invoiceId));
+        await CheckAsync(c => c.Reconciliation(new SupplierInvoiceReconciliationQuery()));
+        await CheckAsync(c => c.ReconciliationAging(new SupplierReconciliationAgingQuery()));
+        await CheckAsync(c => c.ReconciliationAgingInvoiceDetail(invoiceId));
+        await CheckAsync(c => c.OrderCandidates(invoiceId, null, 10));
+        await CheckAsync(c => c.PreviewAllocations(invoiceId, Lines((1L, 10m))));
+        await CheckAsync(c => c.SaveAllocations(invoiceId, Lines((1L, 10m))));
+        await CheckAsync(c => c.Create(InvoiceDto(supplierId)));
+        await CheckAsync(c => c.Update(invoiceId, InvoiceDto(supplierId)));
+        await CheckAsync(c => c.Record(invoiceId));
+        await CheckAsync(c => c.Void(invoiceId, new PurchaseInvoiceVoidRequest { Reason = "重开" }));
+    }
+
     // ==================== 1. 与请求形状无关：空路径与已赋值路径判定一致 ====================
 
     [Fact]
@@ -345,6 +379,34 @@ public sealed class PurchaseInvoiceEntryAuthorizationSqlServerTests
         Assert.Equal(ErrorCodes.Unauthorized, await DeniedCodeAsync(null, RoutePath, c => c.GetPaged(new PurchaseInvoiceQuery())));
 
         Assert.Equal(PurchaseInvoiceRules.StatusDraft, (await ReloadInvoiceAsync(invoiceId)).Status);
+    }
+
+    /// <summary>
+    /// ERP-462：完全没有请求上下文（<c>HttpContext</c> 为 null 的进程内直调）也必须 fail closed——
+    /// 缺少身份安全解析为 null，12 条入口一律先返回受控未认证且零写入，不存在「无请求上下文」豁免。
+    /// </summary>
+    [Fact]
+    public async Task Missing_request_context_is_unauthorized_on_every_route()
+    {
+        Guard();
+        long invoiceId, supplierId;
+        await using (var seed = _fixture.CreateDbContext())
+        {
+            var supplier = await SeedSupplierAsync(seed);
+            var customer = await SeedCustomerAsync(seed);
+            await SeedOperatorAsync(seed, customer.Id, privileged: true);
+            var order = await SeedPurchaseOrderAsync(seed, supplier.Id, customer.Id);
+            var invoice = await SeedInvoiceAsync(seed, supplier.Id, 100m);
+            await SeedInvoiceAllocationAsync(seed, invoice.Id, order, 40m);
+            invoiceId = invoice.Id;
+            supplierId = supplier.Id;
+        }
+
+        await AssertAllRoutesDeniedWithoutContextAsync(invoiceId, supplierId, ErrorCodes.Unauthorized);
+
+        // 零写入：发票仍为草稿、关联行原样保留
+        Assert.Equal(PurchaseInvoiceRules.StatusDraft, (await ReloadInvoiceAsync(invoiceId)).Status);
+        Assert.Equal(1, await AllocationCountAsync(invoiceId));
     }
 
     // ==================== 2. 缺失 / 零 / 未知 / 已删除身份：任何路由、任何请求形状一律未认证 ====================

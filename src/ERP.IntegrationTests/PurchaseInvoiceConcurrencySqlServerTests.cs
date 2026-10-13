@@ -344,7 +344,61 @@ public sealed class PurchaseInvoiceConcurrencySqlServerTests
             }).ToList()
         };
 
-    // ==================== 1. 两个独立连接竞态：发票容量 ====================
+    // ==================== 1. 无请求上下文：任何写入一律先授权后执行 ====================
+
+    private static async Task<int> DeniedCodeAsync(Func<Task<IActionResult>> action)
+        => (await Assert.ThrowsAsync<BusinessException>(action)).Code;
+
+    /// <summary>
+    /// ERP-462：完全没有请求上下文（<c>HttpContext</c> 为 null 的进程内直调）也必须 fail closed——
+    /// 缺少身份安全解析为 null，写入路由一律先返回受控未认证且零写入，不存在「无请求上下文」豁免。
+    /// </summary>
+    [Fact]
+    public async Task Missing_request_context_denies_every_write_route_without_mutation()
+    {
+        Guard();
+        long supplierId, invoiceId, orderId;
+        await using (var seed = _fixture.CreateDbContext())
+        {
+            var supplier = await SeedSupplierAsync(seed, $"INT_PI382_S0_{Guid.NewGuid():N}", "供应商0");
+            var customer = await SeedCustomerAsync(seed, $"INT_PI382_C0_{Guid.NewGuid():N}", "客户0");
+            supplierId = supplier.Id;
+            orderId = (await SeedPurchaseOrderAsync(seed, $"INT_PI382_PO0_{Guid.NewGuid():N}", supplier.Id,
+                customer.Id, 100m)).Id;
+            invoiceId = (await SeedInvoiceAsync(seed, $"INT_PI382_INV0_{Guid.NewGuid():N}", supplier.Id, 100m)).Id;
+        }
+
+        await using (var db = _fixture.CreateDbContext())
+        {
+            var ctl = new PurchaseInvoiceController(db);
+            Assert.Equal(ErrorCodes.Unauthorized,
+                await DeniedCodeAsync(() => ctl.SaveAllocations(invoiceId, Lines((orderId, 10m)))));
+            Assert.Equal(ErrorCodes.Unauthorized,
+                await DeniedCodeAsync(() => ctl.PreviewAllocations(invoiceId, Lines((orderId, 10m)))));
+            Assert.Equal(ErrorCodes.Unauthorized, await DeniedCodeAsync(() => ctl.GetById(invoiceId)));
+            Assert.Equal(ErrorCodes.Unauthorized, await DeniedCodeAsync(() => ctl.Record(invoiceId)));
+            Assert.Equal(ErrorCodes.Unauthorized, await DeniedCodeAsync(() =>
+                ctl.Void(invoiceId, new PurchaseInvoiceVoidRequest { Reason = "重开" })));
+            Assert.Equal(ErrorCodes.Unauthorized, await DeniedCodeAsync(() => ctl.Create(
+                new ERP.Application.DTOs.PurchaseInvoiceSaveDto
+                {
+                    InvoiceType = PurchaseInvoiceRules.InvoiceTypeOrdinary,
+                    InvoiceNumber = $"INT_PI382_NOCTX_{Guid.NewGuid():N}",
+                    InvoiceDate = DateTime.Today,
+                    SupplierId = supplierId,
+                    Currency = "CNY",
+                    NetAmount = 9m,
+                    TaxAmount = 0m,
+                    GrossAmount = 9m
+                })));
+        }
+
+        // 零写入：发票仍为草稿、无任何关联行；未认证不产生任何新发票
+        Assert.Equal(PurchaseInvoiceRules.StatusDraft, (await ReloadInvoiceAsync(invoiceId)).Status);
+        Assert.Equal(0, await InvoiceAllocationRowCountAsync(invoiceId));
+    }
+
+    // ==================== 2. 两个独立连接竞态：发票容量 ====================
 
     [Fact]
     public async Task Race_TwoDistinctPayments_OneInvoice_OnlyOneSucceeds()
@@ -403,7 +457,7 @@ public sealed class PurchaseInvoiceConcurrencySqlServerTests
                         + await InvoiceAllocationRowCountAsync(secondInvoiceId));
     }
 
-    // ==================== 2. 两个独立连接竞态：作废 / 登记 / 关联替换 ====================
+    // ==================== 3. 两个独立连接竞态：作废 / 登记 / 关联替换 ====================
 
     [Fact]
     public async Task Race_AssignmentVersusInvoiceVoid_SerializedConsistentResult()
@@ -521,7 +575,7 @@ public sealed class PurchaseInvoiceConcurrencySqlServerTests
         Assert.Equal(1, await InvoiceAllocationRowCountAsync(invoiceId));
     }
 
-    // ==================== 3. 真实身份实时授权（无新增授权、无匿名兜底） ====================
+    // ==================== 4. 真实身份实时授权（无新增授权、无匿名兜底） ====================
 
     [Fact]
     public async Task Realtime_authorization_denies_foreign_and_unlinked_sources_without_mutation()

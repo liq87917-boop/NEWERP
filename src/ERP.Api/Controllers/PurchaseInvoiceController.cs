@@ -96,49 +96,38 @@ public class PurchaseInvoiceController : ControllerBase
             await SupplierReconciliationAging.ForInvoiceDetailAsync(_db, invoiceId, CurrentUserId(), asOfDate)));
     }
 
-    // ==================== ERP-382：实时授权辅助（身份 / 菜单 / 权威来源范围） ====================
-
-    /// <summary>
-    /// 是否必须执行实时授权（ERP-462）：<strong>只要控制器绑定到 HTTP 请求管线（<c>ControllerContext.HttpContext</c> 存在）
-    /// 就一律执行</strong>，与请求路径是否赋值、以及当前是否携带可解析的登录身份<strong>完全无关</strong>：
-    /// 空路径请求与已赋值路径请求的授权口径完全一致，缺少身份的真实请求同样 fail closed（未认证），
-    /// 既不存在「空路径 / 无身份」的请求形状旁路，也绝不把缺失身份当作管理员，绝无匿名或管理员兜底。
-    /// <para>仅「未被任何请求绑定」（<c>HttpContext</c> 为 null 的纯进程内直接调用，外部请求无法到达，例如既有进程内
-    /// 单元测试夹具 <c>PurchaseInvoiceTests</c>）沿用仓库一致的进程内直调边界：该边界不读取请求路径、
-    /// 不读取环境变量、也不使用任何测试专用开关，因此不是请求形状旁路，也不能由任何外部请求到达。</para>
-    /// </summary>
-    private bool RequiresLiveAuthorization()
-        => ControllerContext?.HttpContext is not null;
+    // ==================== ERP-382 / ERP-462：实时授权辅助（身份 / 菜单 / 权威来源范围） ====================
 
     /// <summary>
     /// 身份 / 账号状态 / 既有「采购订单」菜单授权（fail closed：缺失 / 已删除按未认证，禁用 / 无菜单按权限不足）。
-    /// 与请求路径是否赋值无关：只要控制器绑定到请求管线（空路径或已赋值路径）就一律执行。
+    /// <para>ERP-462：<strong>无条件执行</strong>，与请求路径是否赋值、是否绑定请求上下文、是否携带可解析身份
+    /// <strong>完全无关</strong>：空路径 / 已赋值路径、以及<strong>没有 <c>HttpContext</c> 的纯进程内直调</strong>
+    /// 的授权口径完全一致——缺少身份时由规则在触达任何查询之前返回受控未认证（<c>Err:Unauthorized</c>）。</para>
+    /// <para>既不存在请求形状旁路，也不存在「无请求上下文 / 空身份」豁免，绝不把缺失身份当作管理员，
+    /// 绝无匿名或管理员兜底，也不读取环境变量或任何测试专用开关。</para>
     /// </summary>
     private async Task EnsureMenuAuthorizedAsync()
-    {
-        if (!RequiresLiveAuthorization()) return;
-        await PurchaseInvoiceAuthorizationRules.EnsureMenuAuthorizedAsync(_db, CurrentUserId());
-    }
+        => await PurchaseInvoiceAuthorizationRules.EnsureMenuAuthorizedAsync(_db, CurrentUserId());
 
     /// <summary>
-    /// 台账范围谓词：请求在计数 / 分页之前下推身份 / 菜单 / 权威来源范围（空路径 / 无身份请求与已认证请求口径一致，
-    /// 一律 fail closed）；仅未绑定任何请求的纯进程内直调返回 null（既有进程内语义不变）。
+    /// 台账范围谓词：在计数 / 分页之前下推身份 / 菜单 / 权威来源范围（空路径 / 已赋值路径 / 无请求上下文口径完全一致，
+    /// 一律 fail closed）；缺少身份时规则先返回受控未认证，绝不退化为「无范围」全量查询。
     /// </summary>
-    private async Task<System.Linq.Expressions.Expression<Func<ERP.Domain.Entities.PurchaseInvoice, bool>>?>
+    private async Task<System.Linq.Expressions.Expression<Func<ERP.Domain.Entities.PurchaseInvoice, bool>>>
         BuildScopePredicateAsync()
-    {
-        if (!RequiresLiveAuthorization()) return null;
-        return await PurchaseInvoiceAuthorizationRules.BuildScopePredicateAsync(_db, CurrentUserId());
-    }
+        => await PurchaseInvoiceAuthorizationRules.BuildScopePredicateAsync(_db, CurrentUserId());
 
     /// <summary>
-    /// 单张发票的范围授权：身份 / 菜单 fail closed → 发票不存在或已删除按业务「不存在」拒绝 →
+    /// 单张发票的范围授权（ERP-462 无条件执行，与请求形状 / 是否存在请求上下文无关）：
+    /// 身份 / 菜单 fail closed → 发票不存在或已删除按业务「不存在」拒绝 →
     /// 复核发票<strong>全部来源采购订单</strong>的权威归属客户范围（受限账号无来源 / 越界一律拒绝）。
     /// </summary>
     private async Task EnsureInvoiceIdAuthorizedAsync(long invoiceId)
     {
-        if (!RequiresLiveAuthorization()) return;
         if (invoiceId <= 0) throw BusinessException.InvalidParameter("发票 Id 不合法");
+
+        // ERP-462：身份 / 菜单判定**先于任何发票读取**（缺失身份在触达敏感读取之前即受控未认证，fail closed）。
+        await EnsureMenuAuthorizedAsync();
 
         var invoice = await _db.PurchaseInvoices.AsNoTracking()
             .FirstOrDefaultAsync(x => x.Id == invoiceId && !x.IsDeleted)
@@ -148,13 +137,11 @@ public class PurchaseInvoiceController : ControllerBase
     }
 
     /// <summary>
-    /// 拟提议关联的来源范围授权：在替换关联行之前复核请求中每一张采购订单的来源归属
+    /// 拟提议关联的来源范围授权（ERP-462 无条件执行）：在替换关联行之前复核请求中每一张采购订单的来源归属
     /// （受限账号必须至少有一张且在本人客户范围内，特权账号放行），绝不新增任何权限。
     /// </summary>
     private async Task EnsureProposedAllocationsAuthorizedAsync(PurchaseInvoiceAllocationSaveRequest? request)
     {
-        if (!RequiresLiveAuthorization()) return;
-
         var orderIds = (request?.Lines ?? new List<PurchaseInvoiceAllocationSaveDto>())
             .Select(l => l.PurchaseOrderId)
             .Where(id => id > 0)
@@ -163,9 +150,13 @@ public class PurchaseInvoiceController : ControllerBase
         await PurchaseInvoiceAuthorizationRules.EnsureOrderIdsAuthorizedAsync(_db, CurrentUserId(), orderIds);
     }
 
-    /// <summary>当前登录用户 Id（缺失或非数字时返回 null，由明细接口 fail closed 拒绝，绝不猜测身份）</summary>
+    /// <summary>
+    /// 当前登录用户 Id（ERP-462）：<strong>缺少请求上下文 / 缺少身份声明 / 非数字时一律安全解析为 null</strong>，
+    /// 由既有授权规则在触达任何查询之前返回受控未认证（fail closed），绝不猜测身份、绝不回退为管理员。
+    /// </summary>
     private long? CurrentUserId()
-        => long.TryParse(User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value, out var id)
+        => long.TryParse(
+            ControllerContext?.HttpContext?.User?.FindFirst(ClaimTypes.NameIdentifier)?.Value, out var id)
             ? id
             : null;
 

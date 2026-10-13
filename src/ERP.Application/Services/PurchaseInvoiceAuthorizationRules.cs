@@ -47,14 +47,17 @@ public static class PurchaseInvoiceAuthorizationRules
         "绝不新增权限模型、绝不把空身份当作管理员，也绝不泄露范围外发票。";
 
     /// <summary>
-    /// 与请求形状无关的授权契约（ERP-462）：调用方（控制器）在<strong>任何绑定到 HTTP 请求管线的调用</strong>上都必须执行实时身份 /
-    /// 菜单 / 权威来源范围判定，与 <c>Request.Path</c> 是否赋值、以及请求是否携带可解析身份完全无关——空路径与已赋值路径口径一致，
+    /// 与请求形状无关的授权契约（ERP-462）：调用方（控制器）在<strong>每一个路由入口无条件</strong>执行实时身份 /
+    /// 菜单 / 权威来源范围判定，与 <c>Request.Path</c> 是否赋值、是否绑定 <c>HttpContext</c>、以及请求是否携带可解析身份
+    /// <strong>完全无关</strong>——空路径、已赋值路径与无请求上下文的进程内直调的授权口径完全一致；
     /// 缺失 / 零 / 已删除身份一律按未认证拒绝，禁用 / 撤销菜单 / 无菜单一律按权限不足拒绝，且绝不新增任何授权。
     /// </summary>
     public const string PathIndependenceText =
-        "供应商采购发票授权判定与请求形状无关：只要控制器绑定到 HTTP 请求管线（空路径或已赋值路径）就一律执行实时身份 / 既有「采购订单」菜单 / " +
-        "SalespersonDataScopeService 权威来源范围判定；缺少 / 非法身份与账号不存在 / 已删除按未认证拒绝，禁用账号与缺少既有菜单按权限不足拒绝；" +
-        "空路径请求不得因「请求形状」或「尚无身份」而放行，绝无匿名 / 管理员兜底，也绝不读取环境变量或测试专用开关。";
+        "供应商采购发票授权判定与请求形状及请求上下文无关：无论 Request.Path 是否赋值、是否绑定 HttpContext，" +
+        "控制器一律无条件执行实时身份 / 既有「采购订单」菜单 / SalespersonDataScopeService 权威来源范围判定；" +
+        "缺少 / 非法身份与账号不存在 / 已删除按未认证拒绝，禁用账号与缺少既有菜单按权限不足拒绝；" +
+        "空路径请求与无请求上下文的进程内直调都不得因「请求形状」或「尚无身份」而放行，绝无匿名 / 管理员兜底，" +
+        "也绝不读取环境变量或测试专用开关。";
 
     /// <summary>边界文案（不改变发票商业口径、不改写来源采购订单或主数据）</summary>
     public const string BoundaryText =
@@ -66,8 +69,8 @@ public static class PurchaseInvoiceAuthorizationRules
     /// 身份 / 账号状态 / 菜单授权三重校验（fail closed）：缺失或非法身份按未认证拒绝，账号不存在 / 已删除按未认证拒绝，
     /// 禁用账号按权限不足拒绝，缺少既有 <c>purchase-order</c> 菜单授权（含被撤销最后一个菜单）按权限不足拒绝。
     /// 返回解析出的权威数据范围，供调用方在同一请求内复用（绝不缓存）。
-    /// <para>与请求形状无关（见 <see cref="PathIndependenceText"/>）：调用方必须在<strong>每一个绑定到请求管线的路由入口</strong>
-    /// 无条件调用本方法，不得因为空路径、缺少身份或任何请求形状而跳过。</para>
+    /// <para>与请求形状无关（见 <see cref="PathIndependenceText"/>）：调用方必须在<strong>每一个路由入口无条件</strong>
+    /// 调用本方法，不得因为空路径、缺少身份、缺少请求上下文或任何请求形状而跳过。</para>
     /// </summary>
     public static async Task<SalespersonDataScope> EnsureMenuAuthorizedAsync(
         IErpDbContext db, long? userId, CancellationToken ct = default)

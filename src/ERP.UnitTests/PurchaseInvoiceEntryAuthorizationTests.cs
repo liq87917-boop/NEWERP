@@ -133,6 +133,13 @@ internal static class PurchaseInvoiceTestIdentities
         IErpDbContext db, long? userId, string? requestPath = null)
         => Bind(new PurchaseInvoiceController(db), userId, requestPath);
 
+    /// <summary>
+    /// ERP-462：完全不绑定任何请求上下文（<c>ControllerContext.HttpContext</c> 为 null 的纯进程内直调）。
+    /// 该调用同样无条件执行实时授权：缺少身份安全解析为 null，由规则返回受控未认证，绝无无上下文豁免。
+    /// </summary>
+    internal static PurchaseInvoiceController WithoutRequestContext(IErpDbContext db)
+        => new(db);
+
     private static SysMenu FindOrCreateRequiredMenu(ErpDbContext db)
     {
         var menu = db.SysMenus.FirstOrDefault(m => m.MenuCode == PurchaseInvoiceAuthorizationRules.RequiredMenuCode && !m.IsDeleted);
@@ -393,6 +400,22 @@ public class PurchaseInvoiceEntryAuthorizationTests
         AssertZeroMutation(db, invoice.Id);
     }
 
+    /// <summary>
+    /// ERP-462：完全没有请求上下文（<c>HttpContext</c> 为 null 的纯进程内直调）时也必须 fail closed——
+    /// 缺少身份安全解析为 null，12 条入口一律先返回受控未认证且零写入，不存在「无请求上下文」豁免。
+    /// </summary>
+    [Fact]
+    public async Task Missing_request_context_is_unauthorized_on_every_route()
+    {
+        using var db = TestDbFactory.Create();
+        var supplier = SeedSupplier(db, "S001");
+        var invoice = SeedInvoice(db, "INV-NOCTX", supplier.Id);
+        var ctl = PurchaseInvoiceTestIdentities.WithoutRequestContext(db);
+
+        await AssertAllRoutesDeniedAsync(ctl, invoice.Id, supplier.Id, ErrorCodes.Unauthorized);
+        AssertZeroMutation(db, invoice.Id);
+    }
+
     // ==================== 2. 禁用 / 撤销菜单：任何路由、任何请求形状一律权限不足 ====================
 
     [Theory]
@@ -559,7 +582,9 @@ public class PurchaseInvoiceEntryAuthorizationTests
     public void Authorization_gate_is_request_path_independent_and_has_no_fallback()
     {
         var controller = ReadSource("src", "ERP.Api", "Controllers", "PurchaseInvoiceController.cs");
-        Assert.Contains("ControllerContext?.HttpContext is not null", controller);
+        Assert.DoesNotContain("RequiresLiveAuthorization", controller);
+        Assert.DoesNotContain("ControllerContext?.HttpContext is not null", controller);
+        Assert.Contains("ControllerContext?.HttpContext?.User?", controller);   // 缺失上下文安全解析为 null
         Assert.DoesNotContain("Request.Path", controller);
         Assert.DoesNotContain("AllowAnonymous", controller);
         Assert.DoesNotContain("[Authorize(Roles", controller);

@@ -25,7 +25,13 @@ public class PurchaseInvoiceTests
 {
     // ==================== 0. 测试脚手架 ====================
 
-    private static PurchaseInvoiceController BuildController(ErpDbContext db) => new(db);
+    /// <summary>
+    /// ERP-462：构建绑定真实启用身份与既有「采购订单」菜单授权的控制器（授权身份只在隔离内存测试数据内播种，
+    /// 不新增任何生产授权）；不设置 <c>Request.Path</c>，证明授权判定与请求形状完全无关。
+    /// </summary>
+    private static PurchaseInvoiceController BuildController(ErpDbContext db)
+        => PurchaseInvoiceTestIdentities.ForUser(
+            db, PurchaseInvoiceTestIdentities.SeedAuthorizedUser(db, privileged: true));
 
     private static BaseSupplier SeedSupplier(
         ErpDbContext db, string code, string name, int status = 1, bool deleted = false)

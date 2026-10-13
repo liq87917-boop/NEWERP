@@ -432,6 +432,24 @@ public class PurchaseInvoiceConcurrencyTests
         Assert.Empty(db.PurchaseInvoiceAllocations);
     }
 
+    /// <summary>
+    /// ERP-462：完全没有请求上下文（<c>ControllerContext.HttpContext</c> 为 null 的纯进程内直调）也必须 fail closed——
+    /// 缺少身份安全解析为 null，核心路由一律先返回受控未认证且零写入，不存在「无请求上下文」豁免。
+    /// </summary>
+    [Fact]
+    public async Task Missing_request_context_enforces_authority_on_every_route()
+    {
+        using var db = TestDbFactory.Create();
+        var supplier = SeedSupplier(db, "S001", "义乌档口");
+        var invoice = SeedInvoice(db, "INV-NOCTX", supplier.Id, 100m);
+
+        await AssertAllRoutesDeniedAsync(
+            new PurchaseInvoiceController(db), invoice.Id, supplier.Id, ErrorCodes.Unauthorized);
+
+        Assert.Equal(PurchaseInvoiceRules.StatusDraft, StoredStatus(db, invoice.Id));
+        Assert.Empty(db.PurchaseInvoiceAllocations);
+    }
+
     private static async Task AssertAllRoutesDeniedAsync(
         PurchaseInvoiceController ctl, long invoiceId, long supplierId, int code)
     {
@@ -735,10 +753,10 @@ public class PurchaseInvoiceConcurrencyTests
         Assert.Contains("PurchaseInvoiceAuthorizationRules.EnsureInvoiceAuthorizedAsync", controller);
         Assert.Contains("PurchaseInvoiceAuthorizationRules.EnsureOrderIdsAuthorizedAsync", controller);
         Assert.Contains("BuildScopePredicateAsync", controller);
-        Assert.Contains("RequiresLiveAuthorization", controller);
-        // ERP-462：授权判定与请求形状无关（绝不读 Request.Path / 环境变量 / 测试开关）
+        // ERP-462：授权判定与请求形状 / 请求上下文无关（绝不读 Request.Path / 环境变量 / 测试开关，绝无无上下文豁免）
         Assert.DoesNotContain("Request.Path", controller);
-        Assert.Contains("ControllerContext?.HttpContext is not null", controller);
+        Assert.DoesNotContain("RequiresLiveAuthorization", controller);
+        Assert.DoesNotContain("ControllerContext?.HttpContext is not null", controller);
 
         var invoiceAllocation = ReadSource("src", "ERP.Application", "Services",
             "SupplierPaymentInvoiceAllocationService.cs");
