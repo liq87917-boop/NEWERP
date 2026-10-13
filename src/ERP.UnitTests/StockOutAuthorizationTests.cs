@@ -114,6 +114,78 @@ public class StockOutAuthorizationTests
         AssertUnchanged(db, own.Id, DocumentStatus.Pending, deleted: false);
     }
 
+    // ==================== 1b. ERP-370 验收恢复：实时闸门先于任何单据读取 ====================
+
+    [Theory]
+    [InlineData("missing")]
+    [InlineData("disabled")]
+    [InlineData("deleted")]
+    [InlineData("no-menu")]
+    public async Task Detail_and_movement_gate_precedes_any_document_read(string scenario)
+    {
+        using var db = TestDbFactory.Create();
+        long? userId = scenario switch
+        {
+            "missing" => null,
+            "disabled" => SeedDeniedUser(db, UserStatus.Disabled),
+            "deleted" => SeedDeletedUser(db),
+            _ => SeedDeniedUser(db, UserStatus.Enabled)
+        };
+        var ctl = ForUser(db, userId);
+        var expected = scenario is "missing" or "deleted" ? ErrorCodes.Unauthorized : ErrorCodes.Forbidden;
+
+        // 未知 Id：必须与「存在但越权」得到完全相同的受控拒绝，绝不因 Id 是否存在而差异化（不泄露存在性）。
+        const long unknownId = 912345678L;
+        await AssertDenied(expected, () => ctl.GetById(unknownId));
+        await AssertDenied(expected, () => ctl.GetMovements(unknownId));
+
+        var existing = SeedStockOut(db, "AUTH-PRE-READ", CustomerA, DocumentStatus.Pending, (ProductA, 1m));
+        await AssertDenied(expected, () => ctl.GetById(existing.Id));
+        await AssertDenied(expected, () => ctl.GetMovements(existing.Id));
+
+        AssertUnchanged(db, existing.Id, DocumentStatus.Pending, deleted: false);
+        Assert.Empty(db.Stocks);
+        Assert.Empty(db.StockMovements);
+    }
+
+    [Fact]
+    public async Task Missing_request_context_is_unauthenticated_without_any_exemption()
+    {
+        using var db = TestDbFactory.Create();
+        var document = SeedStockOut(db, "AUTH-NO-CONTEXT", CustomerA, DocumentStatus.Pending, (ProductA, 1m));
+        var ctl = new StockOutController(db, new DocumentNumberService(db), new InventoryService(db))
+        {
+            // 无请求上下文：安全解析为 null → 受控未认证（绝无内部直调 / 测试兼容豁免）。
+            ControllerContext = new ControllerContext { HttpContext = null! }
+        };
+
+        await AssertAllRoutesDenied(ctl, document.Id, ErrorCodes.Unauthorized);
+        await AssertDenied(ErrorCodes.Unauthorized, () => ctl.GetById(912345678L));
+        await AssertDenied(ErrorCodes.Unauthorized, () => ctl.GetMovements(912345678L));
+
+        AssertUnchanged(db, document.Id, DocumentStatus.Pending, deleted: false);
+        Assert.Empty(db.Stocks);
+        Assert.Empty(db.StockMovements);
+    }
+
+    /// <summary>播种一个已分配角色（仅含无关菜单、缺少既有「销售出库」菜单）的账号（权限不足 fail closed）。</summary>
+    private static long SeedDeniedUser(ErpDbContext db, UserStatus status)
+    {
+        var other = SeedMenu(db, $"stock-out-other-{Guid.NewGuid():N}", "其它模块");
+        var role = SeedRoleWithMenus(db, other);
+        return SeedUser(db, role, status);
+    }
+
+    /// <summary>播种一个存在但已删除（<c>IsDeleted</c>）的账号（按未认证 fail closed）。</summary>
+    private static long SeedDeletedUser(ErpDbContext db)
+    {
+        var userId = SeedDeniedUser(db, UserStatus.Enabled);
+        var user = db.SysUsers.Single(u => u.Id == userId);
+        user.IsDeleted = true;
+        db.SaveChanges();
+        return userId;
+    }
+
     // ==================== 2. 权威客户数据范围（列表 / 详情 / 流水 / 创建 / 修改） ====================
 
     [Fact]
@@ -326,6 +398,66 @@ public class StockOutAuthorizationTests
         var loadingGuard = controller.IndexOf("await LoadingStockOutLinkRules.EnsureNoEffectiveApprovedLoadingAsync(Db, id);", StringComparison.Ordinal);
         var reversal = controller.IndexOf("await ReverseStockAsync(entity);", StringComparison.Ordinal);
         Assert.True(cancelLock > 0 && loadingGuard > cancelLock && reversal > loadingGuard);
+    }
+
+    // ==================== 4b. ERP-370 验收恢复：每条路由的实时闸门先于读取 / 行锁 ====================
+
+    [Fact]
+    public void Controller_authorizes_live_menu_before_any_read_or_lock_on_every_route()
+    {
+        var controller = ReadSource("src/ERP.Api/Controllers/StockOutController.cs");
+        const string gate = "StockOutAuthorizationRules.EnsureMenuAuthorizedAsync";
+
+        // 列表：身份 / 菜单 / 客户范围下推到计数 / 分页之前。
+        AssertInOrder(controller,
+            "StockOutAuthorizationRules.ApplyScopeAsync",
+            "var total = await source.CountAsync();");
+
+        // 详情：菜单闸门先于任何出库单读取（未知 Id 与存在 Id 同口径受控拒绝）。
+        AssertInOrder(controller,
+            "public async Task<IActionResult> GetById(long id)",
+            gate,
+            ".FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)");
+
+        // 流水：菜单闸门先于单据读取与流水查询。
+        AssertInOrder(controller,
+            "public async Task<IActionResult> GetMovements(long id)",
+            gate,
+            "var movements = await _inventory.ListMovementsAsync(InventoryDocumentHelper.StockOutType, id);");
+
+        // 创建 / 修改 / 提交 / 审核 / 取消 / 删除：菜单闸门先于行锁与任何单据读取。
+        AssertInOrder(controller, "public async Task<IActionResult> Update(long id, [FromBody] StockOut entity)", gate, "await LockStockOutRowAsync(id);");
+        AssertInOrder(controller, "public override async Task<IActionResult> Submit(long id)", gate, "await LockStockOutRowAsync(id);");
+        AssertInOrder(controller, "public override async Task<IActionResult> Delete(long id)", gate, "await LockStockOutRowAsync(id);");
+        AssertInOrder(controller, "public override async Task<IActionResult> Approve(long id)", gate, "await LockStockOutRowAsync(entity.Id);");
+        AssertInOrder(controller, "public override async Task<IActionResult> Cancel(long id)", gate, "await LockSourceShipmentRowAsync(id);");
+        AssertInOrder(controller,
+            "public async Task<IActionResult> Create([FromBody] StockOut entity)",
+            gate,
+            "StockOutAuthorizationRules.EnsureCustomerAuthorizedAsync");
+
+        // 来源候选：既有「销售出库」+「销售订单」菜单先于候选取数。
+        AssertInOrder(controller,
+            "StockOutAuthorizationRules.EnsureSourceMenuAuthorizedAsync",
+            "StockOutOrderFulfillmentRules.QuerySourceCandidatesAsync");
+
+        // 实时客户复核仍在读后 / 锁内保留（原始授权口径不退化）。
+        Assert.Contains("await StockOutAuthorizationRules.EnsureCustomerAuthorizedAsync(Db, userId, existing.CustomerId);", controller);
+        Assert.Contains("await StockOutAuthorizationRules.EnsureCustomerAuthorizedAsync(Db, userId, entity.CustomerId);", controller);
+    }
+
+    /// <summary>断言若干标记在控制器源码中按给定先后顺序出现（同一路由内的确定性顺序契约）。</summary>
+    private static void AssertInOrder(string source, params string[] markers)
+    {
+        var from = 0;
+        var previous = -1;
+        foreach (var marker in markers)
+        {
+            var index = source.IndexOf(marker, from, StringComparison.Ordinal);
+            Assert.True(index > previous, $"未找到或顺序不符：{marker}");
+            previous = index;
+            from = index + marker.Length;
+        }
     }
 
     [Fact]

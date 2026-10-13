@@ -93,11 +93,25 @@ public sealed class StockOutAuthorizationSqlServerTests : IClassFixture<StockOut
         var beforeStock = await db.Stocks.CountAsync();
         var ctl = ControllerFor(db, userId);
 
+        // ERP-370（2026-10-13 验收恢复）：缺失 / 禁用 / 无菜单调用方在**未知 Id** 与**存在 Id**（含流水）上得到
+        // 完全相同的受控拒绝 —— 实时身份 / 菜单闸门先于任何单据读取，绝不因 Id 是否存在而差异化（不泄露存在性）。
+        var expectedCode = scenario == "missing" ? ErrorCodes.Unauthorized : ErrorCodes.Forbidden;
         var error = await Assert.ThrowsAsync<BusinessException>(() => ctl.Create(NewStockOut(CustomerA, WarehouseA)));
-        Assert.Equal(scenario == "missing" ? ErrorCodes.Unauthorized : ErrorCodes.Forbidden, error.Code);
-        await Assert.ThrowsAsync<BusinessException>(() => ctl.GetPaged(new PageQuery(), null));
-        await Assert.ThrowsAsync<BusinessException>(() => ctl.GetById(document.Id));
-        await Assert.ThrowsAsync<BusinessException>(() => ctl.Approve(document.Id));
+        Assert.Equal(expectedCode, error.Code);
+        Assert.Equal(expectedCode,
+            (await Assert.ThrowsAsync<BusinessException>(() => ctl.GetPaged(new PageQuery(), null))).Code);
+
+        const long unknownId = 912345678L;
+        Assert.Equal(expectedCode, (await Assert.ThrowsAsync<BusinessException>(() => ctl.GetById(unknownId))).Code);
+        Assert.Equal(expectedCode, (await Assert.ThrowsAsync<BusinessException>(() => ctl.GetMovements(unknownId))).Code);
+        Assert.Equal(expectedCode, (await Assert.ThrowsAsync<BusinessException>(() => ctl.GetById(document.Id))).Code);
+        Assert.Equal(expectedCode, (await Assert.ThrowsAsync<BusinessException>(() => ctl.GetMovements(document.Id))).Code);
+        Assert.Equal(expectedCode,
+            (await Assert.ThrowsAsync<BusinessException>(() => ctl.Update(document.Id, NewStockOut(CustomerA, WarehouseA)))).Code);
+        Assert.Equal(expectedCode, (await Assert.ThrowsAsync<BusinessException>(() => ctl.Submit(document.Id))).Code);
+        Assert.Equal(expectedCode, (await Assert.ThrowsAsync<BusinessException>(() => ctl.Approve(document.Id))).Code);
+        Assert.Equal(expectedCode, (await Assert.ThrowsAsync<BusinessException>(() => ctl.Cancel(document.Id))).Code);
+        Assert.Equal(expectedCode, (await Assert.ThrowsAsync<BusinessException>(() => ctl.Delete(document.Id))).Code);
 
         Assert.Equal(beforeMovements, await db.StockMovements.CountAsync());
         Assert.Equal(beforeStock, await db.Stocks.CountAsync());

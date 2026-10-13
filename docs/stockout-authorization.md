@@ -5,6 +5,9 @@
 销售出库单（stock-out）的全部既有路由（列表 / 详情 / 库存流水 / 创建 / 修改 / 提交 / 审核 / 取消 / 删除）
 都必须对**当前登录身份**做**实时**授权与数据范围复核，并把「库存记账」与「改单 / 状态流转」串行化在同一把来源行锁上：
 - 缺失 / 非法 / 已删除身份、禁用账号、无既有「销售出库」授权、受限未映射业务员一律 fail closed；
+- **实时身份 / 账号状态 / 既有「销售出库」菜单闸门先于任何单据读取与行锁**（列表 / 详情 / 流水 / 创建 / 修改 / 提交 / 审核 / 取消 / 删除每一路由）：
+  未知 Id 与「存在但越权」的 Id 得到**完全相同**的受控未认证 / 权限不足错误，绝不因 Id 是否存在而差异化
+  （不泄露存在性；无请求上下文安全解析为 null → 受控未认证，绝无内部直调 / 测试兼容豁免或改名旁路）；
 - 列表在计数 / 分页之前把权威客户范围下推到数据库，详情 / 流水与列表同一口径，范围外单据一律按「不存在」拒绝（不泄露 Id / 单号）；
 - 创建 / 修改同时校验「已存单据客户」与「请求客户」，被拒绝方绝不消耗单据号、绝不改写单据 / 明细 / 库存 / 流水；
 - 修改 / 提交 / 删除 / 审核与取消共用**同一把**本出库单行锁（`UPDLOCK, HOLDLOCK`）与可串行化事务，已审核库存 / 流水不会被并发改单穿透；
@@ -20,6 +23,7 @@
 | 模块授权 | 已配置「角色 → 菜单」授权但不含既有 `stock-out`（销售出库） | `2002` 权限不足（拒绝） |
 | 模块授权 | 已分配角色却没有任何「角色 → 菜单」授权（含撤销最后一个菜单） | `2002` 权限不足（拒绝） |
 | 数据范围 | 受限账号未映射业务员（无员工编码映射） | `2002` 权限不足（拒绝） |
+| 读取顺序 | 详情 / 流水 / 状态 / 编辑 / 删除 | 实时身份 / 菜单闸门先于任何单据读取与行锁；未知 Id 与存在 Id 同口径受控拒绝（不泄露存在性） |
 | 数据范围 | 权威 `StockOut.CustomerId` 不在当前账号可见客户内 | `1002` 按「不存在」拒绝（不泄露归属） |
 | 列表范围 | 计数 / 分页之前把客户范围下推到 SQL | 只统计 / 只返回范围内单据，绝不「先查全量再内存过滤」 |
 | 创建 / 修改 | 已存与请求两侧客户范围、来源链接（ERP-343）、明细折算全部通过后才落库 | 任一步失败整体回滚，原单据不变，单号不消耗 |
@@ -40,7 +44,8 @@
   - `LockStockOutRowSql`：与 `ReturnSourceCancellationRules.LockStockOutRowSql` **同一**锁语句（同一把行锁）。
 - `src/ERP.Api/Controllers/StockOutController.cs`：
   - `GetPaged` → `ApplyScopeAsync`（身份 / 菜单 / 客户范围先于 `CountAsync`）；
-  - `GetById` / `GetMovements` → `EnsureCustomerAuthorizedAsync(entity.CustomerId)`；
+  - `GetById` / `GetMovements` → `EnsureMenuAuthorizedAsync`（先于任何单据 / 流水读取）→ `EnsureCustomerAuthorizedAsync(entity.CustomerId)`；
+  - `Create` / `Update` / `Submit` / `Approve` / `Cancel` / `Delete` → `EnsureMenuAuthorizedAsync`（先于行锁与任何单据读取，`Update` 复用同一请求内的权威范围）；
   - `Create` → 授权先于 `IDocumentNumberService.GenerateAsync`；
   - `Update` → 行锁 + 可串行化事务内先复核「已存 + 请求」客户，校验请求内容（明细折算 + ERP-343 来源链接）通过后才改写已存单据；
   - `Submit` / `Delete` → 行锁 + 可串行化事务内复核授权后走基类状态流转 / 软删除；
@@ -50,8 +55,10 @@
 
 ## 4. 测试
 
-- `src/ERP.UnitTests/StockOutAuthorizationTests.cs`（新增，内存库 + 真实 HTTP 身份）：
-  覆盖缺失身份 / 禁用账号 / 撤销菜单 / 受限未映射账号在九条路由上 fail closed 且零副作用；
+- `src/ERP.UnitTests/StockOutAuthorizationTests.cs`（内存库 + 真实 HTTP 身份）：
+  覆盖缺失身份 / 禁用账号 / 已删除账号 / 撤销菜单 / 受限未映射账号在九条路由上 fail closed 且零副作用；
+  **未知 Id 与存在 Id 对受限身份同口径受控拒绝**（详情 / 流水先鉴权再读行）、**无请求上下文安全解析为 null → 受控未认证**；
+  **控制器接线顺序契约**（每路由实时闸门先于读取 / 行锁 / 计数）；
   受限业务员自有客户放行、他人客户在列表 / 详情 / 流水 / 创建 / 修改两侧拒绝；
   修改失败（来源链接无效）后单据 / 明细 / 库存 / 流水保持原样；
   审核恰好一次过账、重复审核被拒；审核 / 取消 / 修改 / 提交 / 删除的行锁与事务形状断言（含锁序）。
@@ -74,6 +81,9 @@
   生产凭据，也绝不执行生产库；**构建通过不等于阶段验收通过**。
 - 全部使用既有种子身份与既有菜单授权（`SeedData` 为超级管理员授予全部菜单），不新增任何用户授权；
   `.ai/logs/` 下原始失败日志原样保留。
+- 既有共享护栏 `TestDatabaseSafetyGuard` 要求显式测试上下文（`ERP_AI_TEST_RUN=1` 且 `ASPNETCORE_ENVIRONMENT=Development`，
+  或人工高风险批准 / CI）：缺少上下文时**不建立数据库连接**即 fail closed。本次真实 SQL 复跑即在该显式上下文下进行，
+  目标仍是专用实例 `(localdb)\NEWERP_AutoAcceptance` + 每次全新 GUID `NEWERP_AUTOTEST*` 库，绝不 drop / reset / 复用。
 
 ## 6. 边界
 
@@ -82,8 +92,22 @@
 
 ## 7. 未执行 / 限制
 
-- 本机验证档为 `safe`：Release 编译（0 警告 / 0 错误）+ `ERP.UnitTests` 全量通过（5566/5566，含本次新增 15 例）。
-- `src/ERP.IntegrationTests/StockOutAuthorizationSqlServerTests.cs` 属真实 SQL 集成档，**本次未在本机执行**
-  （需专用 localdb 环境与批准）；**构建通过不等于阶段验收通过**。
+- 本机验证档为 `safe`：Release 编译（0 警告 / 0 错误，`--no-incremental` + 分析器 + `TreatWarningsAsErrors`）
+  + `ERP.UnitTests` 全量通过（7999/7999，含本次 ERP-370 验收恢复新增 6 例：
+  `Detail_and_movement_gate_precedes_any_document_read`（缺失 / 禁用 / 已删除 / 无菜单 ×4）、
+  `Missing_request_context_is_unauthenticated_without_any_exemption`、
+  `Controller_authorizes_live_menu_before_any_read_or_lock_on_every_route`）。
+- 真实隔离 SQL（`ERP_AI_TEST_RUN=1` + `ASPNETCORE_ENVIRONMENT=Development`，目标 `(localdb)\NEWERP_AutoAcceptance`、
+  全新 GUID `NEWERP_AUTOTEST*` 库、集成安全、绝不 drop / reset）：`StockOutAuthorizationSqlServerTests`（7）+
+  `StockOutAuthorizationTargetGuardTests`（3）+ `StockOutCanonicalEntrySqlServerTests`（11）+
+  `LoadingStockOutCancellationSqlServerTests`（7）+ `StockOutOrderFulfillmentSqlServerTests`（5）共 **33/33 通过**。
+- **既有失败（非本次引入，已留存基线证据）**：`ReturnSourceCancellationSqlServerTests` 4 例（`Null_source_or_unapproved...`、
+  `Repeat_source_shipment_cancel...`、`Unaudited_linked_sales_return...`、`Source_shipment_cancel_rejected_while_approved_sales_return_remains`）
+  的夹具身份 `SeedSalesmanAsync` **只授予既有「销售退货」菜单、未授予既有「销售出库」菜单**，因此被 ERP-370
+  实时菜单闸门按 `2002` 权限不足拒绝（原期望 `1004` 规则冲突）。用未改动的 `HEAD` 控制器在同一隔离库复跑得到**完全相同的 4 例失败**
+  （`.ai/logs/ERP-370/results/baseline-returnsource-sql.log` / `erp370-baseline-returnsource-sql.trx`），故为**预先存在**
+  的夹具口径问题，与本次「闸门前置」改造无关；该夹具文件不在本任务 `allowed_paths` 内，本任务不新增任何用户授权去迁就它。
+- 日志与证据：`.ai/logs/ERP-370/results/`（编译 / 单元 / SQL / 基线）与 `.ai/logs/ERP-370/TRX/`（5 个 TRX）；
+  原始失败日志与历史审计证据原样保留，绝不删除。
 - 未运行真实浏览器 UI 验收（`browser_acceptance.required = false`），未启动 API、未部署、未改动生产库或生产设置。
-- 未新增 / 未修改任何数据库 schema、表 / 列 / 菜单 / 权限；原始失败日志与历史审计证据原样保留。
+- 未新增 / 未修改任何数据库 schema、表 / 列 / 菜单 / 权限；**构建通过不等于阶段验收通过**。

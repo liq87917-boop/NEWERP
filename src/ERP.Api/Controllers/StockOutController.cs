@@ -66,6 +66,9 @@ public class StockOutController : DocumentControllerBase<StockOut>
     [HttpGet("{id:long}")]
     public async Task<IActionResult> GetById(long id)
     {
+        // ERP-370（2026-10-13 验收恢复）：身份 / 账号状态 / 既有「销售出库」菜单闸门先于任何单据读取 fail closed ——
+        // 未知 Id 与存在但越权 Id 对缺失 / 禁用 / 已删除 / 无菜单账号给出完全相同的受控未认证 / 权限不足错误。
+        await StockOutAuthorizationRules.EnsureMenuAuthorizedAsync(Db, CurrentStockOutUserId());
         var entity = await Set.AsNoTracking().Include(o => o.Details)
             .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
             ?? throw BusinessException.NotFound("出库单不存在");
@@ -78,6 +81,8 @@ public class StockOutController : DocumentControllerBase<StockOut>
     [HttpGet("{id:long}/movements")]
     public async Task<IActionResult> GetMovements(long id)
     {
+        // ERP-370（2026-10-13 验收恢复）：统一实时闸门先于任何出库单 / 流水读取，与详情完全同口径。
+        await StockOutAuthorizationRules.EnsureMenuAuthorizedAsync(Db, CurrentStockOutUserId());
         var entity = await GetOrThrowAsync(id, "出库单不存在");
         await StockOutAuthorizationRules.EnsureCustomerAuthorizedAsync(Db, CurrentStockOutUserId(), entity.CustomerId);
         var movements = await _inventory.ListMovementsAsync(InventoryDocumentHelper.StockOutType, id);
@@ -134,6 +139,8 @@ public class StockOutController : DocumentControllerBase<StockOut>
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] StockOut entity)
     {
+        // ERP-370（2026-10-13 验收恢复）：统一实时身份 / 菜单闸门先于任何请求字节处理与写入（缺失 / 禁用 / 无菜单立即受控拒绝）。
+        await StockOutAuthorizationRules.EnsureMenuAuthorizedAsync(Db, CurrentStockOutUserId());
         // ERP-376 / ERP-478：业务表单「未选择来源」以数字 0 表示（数字字段留空 → 0），
         // 或按 ERP-478 的声明式可空引用（nullable）直接提交 null；两者都归一为 null，
         // 保持历史「无来源」出库单语义（null），绝不把 0 当成无效显式链接拒绝。
@@ -177,6 +184,10 @@ public class StockOutController : DocumentControllerBase<StockOut>
         entity.Details ??= new List<StockOutDetail>();
 
         var userId = CurrentStockOutUserId();
+
+        // ERP-370（2026-10-13 验收恢复）：统一实时身份 / 既有「销售出库」菜单闸门先于行锁与任何单据读取 ——
+        // 未知 Id 与存在但越权 Id 对缺失 / 禁用 / 已删除 / 无菜单账号给出完全相同的受控拒绝。
+        await StockOutAuthorizationRules.EnsureMenuAuthorizedAsync(Db, userId);
 
         // 确定性锁序：来源出库单行（与销售退货审核 / 销审 / 取消 / 装柜审核同一把锁）→ 只读判定。
         await using var transaction = await Db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
@@ -235,6 +246,8 @@ public class StockOutController : DocumentControllerBase<StockOut>
     [HttpPost("{id:long}/approve")]
     public override async Task<IActionResult> Approve(long id)
     {
+        // ERP-370（2026-10-13 验收恢复）：身份 / 菜单闸门先于任何单据读取与行锁；锁内再复核实时客户范围。
+        await StockOutAuthorizationRules.EnsureMenuAuthorizedAsync(Db, CurrentStockOutUserId());
         var entity = await Db.StockOuts.Include(o => o.Details)
             .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
             ?? throw BusinessException.NotFound("出库单不存在");
@@ -325,6 +338,8 @@ public class StockOutController : DocumentControllerBase<StockOut>
     [HttpPost("{id:long}/cancel")]
     public override async Task<IActionResult> Cancel(long id)
     {
+        // ERP-370（2026-10-13 验收恢复）：身份 / 菜单闸门先于任何探测读取与行锁（未知 Id 同口径受控拒绝）。
+        await StockOutAuthorizationRules.EnsureMenuAuthorizedAsync(Db, CurrentStockOutUserId());
         var probe = await Db.StockOuts.AsNoTracking()
             .Where(o => o.Id == id && !o.IsDeleted)
             .Select(o => new { o.CustomerId })
@@ -390,6 +405,7 @@ public class StockOutController : DocumentControllerBase<StockOut>
     }
 
     /// <summary>当前登录用户 Id（缺失 / 非数字时返回 null，由授权规则 fail closed 拒绝，绝不猜测身份）</summary>
+    // ERP-370：缺失身份 / 无请求上下文一律安全解析为 null → 受控未认证；绝无内部直调 / 测试兼容豁免或改名旁路。
     private long? CurrentStockOutUserId()
         => ControllerContext.HttpContext is null ? null : CurrentUserId();
 
@@ -400,6 +416,9 @@ public class StockOutController : DocumentControllerBase<StockOut>
     [HttpPost("{id:long}/submit")]
     public override async Task<IActionResult> Submit(long id)
     {
+        // ERP-370（2026-10-13 验收恢复）：身份 / 菜单闸门先于行锁与任何单据读取。
+        await StockOutAuthorizationRules.EnsureMenuAuthorizedAsync(Db, CurrentStockOutUserId());
+
         await using var transaction = await Db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
         try
         {
@@ -426,6 +445,9 @@ public class StockOutController : DocumentControllerBase<StockOut>
     [HttpDelete("{id:long}")]
     public override async Task<IActionResult> Delete(long id)
     {
+        // ERP-370（2026-10-13 验收恢复）：身份 / 菜单闸门先于行锁与任何单据读取。
+        await StockOutAuthorizationRules.EnsureMenuAuthorizedAsync(Db, CurrentStockOutUserId());
+
         await using var transaction = await Db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
         try
         {
