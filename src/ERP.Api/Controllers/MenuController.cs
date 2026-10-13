@@ -11,16 +11,21 @@ using System.Security.Claims;
 namespace ERP.Api.Controllers;
 
 /// <summary>
-/// 菜单管理控制器（ERP-455：为读树 / 新增 / 修改 / 删除路由补齐实时身份、账号状态、
+/// 菜单管理控制器（ERP-455 / ERP-492：为读树 / 新增 / 修改 / 删除路由补齐实时身份、账号状态、
 /// 既有功能菜单授权、有界字段校验与父级完整性，菜单编码是每一条运营路由菜单授权所校验的权威）。
 /// </summary>
 /// <remarks>
 /// 菜单（<c>SysMenu</c>）定义每一条运营路由授权所校验的菜单编码、也是
-/// <c>AuthService</c> 为每个登录账号构建菜单树时读取的来源，因此每个路由在读取或写入任何
-/// <c>SysMenus</c> 行之前都先经实时授权：读树接受既有「用户权限」（<c>user-permission</c>）或
+/// <c>AuthService</c> 为每个登录账号构建菜单树时读取的来源，因此<b>每一个入口都无条件</b>在读取或写入任何
+/// <c>SysMenus</c> 行之前先经实时授权：读树接受既有「用户权限」（<c>user-permission</c>）或
 /// 既有「角色管理」（<c>role</c>）任一，新增 / 修改 / 删除只接受既有「用户权限」；
 /// 新增 / 修改另经有界字段校验，非零父级必须在落库前解析为已知的非删除菜单；
 /// 不新增任何菜单 / 权限 / 用户授权，也不改变既有菜单编码唯一性判定与「存在子菜单不可删除」语义。
+/// <para>ERP-492：原「请求形状探针」（依据请求路径是否赋值判定是否需要授权）与它的两个条件护栏已<b>彻底移除</b> ——
+/// 授权判定与请求路径是否赋值、请求形状、以及控制器是否绑定
+/// <c>HttpContext</c> <b>完全无关</b>：空路径、已赋值路径与未绑定任何请求上下文的纯进程内直调对同一身份给出
+/// 完全相同的判定。缺失 / 为零 / 未知 / 已删除身份一律未认证，禁用账号 / 缺少或被撤销既有菜单一律权限不足；
+/// 无匿名 / 管理员 / 环境 / 测试专用开关回退。契约见 <see cref="SysMenuAuthorizationRules.PathIndependenceText"/>。</para>
 /// </remarks>
 [ApiController]
 [Route("api/sys/menus")]
@@ -42,28 +47,25 @@ public class MenuController : ControllerBase
     }
 
     /// <summary>
-    /// 是否需要执行实时授权（与仓库既有口径同源）：真实 HTTP 请求（MVC 绑定，<c>Request.Path</c> 已赋值）
-    /// 一律执行；仅「未进入 HTTP 请求管线」的<b>进程内直接调用</b>（历史单元测试 / 内部派生读取，
-    /// 无请求路径，不可能由外部请求到达）沿用既有语义，绝不把缺失身份当作管理员。
+    /// 读取菜单树前的实时身份 / 账号状态 / 既有「用户权限」或「角色管理」菜单授权（ERP-455 / ERP-492，无条件 fail closed）。
+    /// <para>ERP-492：不再存在任何请求形状探针 —— 是否绑定 <c>HttpContext</c>、请求路径是否赋值、
+    /// 当前是否携带可解析身份都不影响判定；缺失 / 为零 / 未知 / 已删除身份一律未认证。</para>
     /// </summary>
-    private bool RequiresLiveAuthorization()
-    {
-        var http = ControllerContext?.HttpContext;
-        return http?.Request.Path.HasValue == true;
-    }
-
-    /// <summary>读取菜单树前的实时身份 / 账号状态 / 既有「用户权限」或「角色管理」菜单授权（ERP-455，fail closed）</summary>
     private async Task EnsureMenuReadAuthorizedAsync()
     {
-        if (RequiresLiveAuthorization())
-            await SysMenuAuthorizationRules.EnsureReadAuthorizedAsync(_db, CurrentUserId());
+        // ERP-492：无条件执行（请求形状探针与请求路径判定已彻底移除）。
+        await SysMenuAuthorizationRules.EnsureReadAuthorizedAsync(_db, CurrentUserId());
     }
 
-    /// <summary>新增 / 修改 / 删除前的实时身份 / 账号状态 / 既有「用户权限」菜单授权（ERP-455，fail closed）</summary>
+    /// <summary>
+    /// 新增 / 修改 / 删除前的实时身份 / 账号状态 / 既有「用户权限」菜单授权（ERP-455 / ERP-492，无条件 fail closed）。
+    /// <para>ERP-492：与读树同一口径，写入入口一律无条件授权，绝不因空路径 / 缺失身份 / 未绑定请求上下文
+    /// 而退回无授权的服务直调。</para>
+    /// </summary>
     private async Task EnsureMenuWriteAuthorizedAsync()
     {
-        if (RequiresLiveAuthorization())
-            await SysMenuAuthorizationRules.EnsureWriteAuthorizedAsync(_db, CurrentUserId());
+        // ERP-492：无条件执行（请求形状探针与请求路径判定已彻底移除）。
+        await SysMenuAuthorizationRules.EnsureWriteAuthorizedAsync(_db, CurrentUserId());
     }
 
     /// <summary>获取菜单树（用于角色授权界面）</summary>

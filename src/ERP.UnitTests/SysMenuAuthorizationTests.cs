@@ -13,10 +13,13 @@ using Xunit;
 namespace ERP.UnitTests;
 
 /// <summary>
-/// 菜单管理（<c>api/sys/menus</c> 读树 / 新增 / 修改 / 删除）实时授权、有界字段校验与父级完整性单元测试（ERP-455）。覆盖：
+/// 菜单管理（<c>api/sys/menus</c> 读树 / 新增 / 修改 / 删除）实时授权、有界字段校验与父级完整性单元测试（ERP-455 / ERP-492）。覆盖：
 /// <list type="number">
-/// <item><b>拒绝矩阵</b>：缺失 / 禁用 / 已删除 / 无任何菜单授权的身份在<b>全部 4 条路由</b> fail closed，
+/// <item><b>拒绝矩阵</b>：缺失 / 为零 / 未知 / 禁用 / 已删除 / 无任何菜单授权的身份在<b>全部 4 条路由</b> fail closed，
 /// 且 <c>SysMenus</c> 行逐字节不变（拒绝在路由体读取 / 改写任何菜单之前抛错）；</item>
+/// <item><b>请求形状无关</b>（ERP-492）：未绑定 <c>HttpContext</c>、空 <c>Request.Path</c> 与已赋值
+/// <c>Request.Path</c> 对同一身份给出<b>完全相同</b>的判定 —— 原请求形状探针与其条件护栏已彻底移除，
+/// 不存在任何进程内直调豁免；</item>
 /// <item><b>读 / 写授权分离</b>：读树接受既有「用户权限」（<c>user-permission</c>）或既有「角色管理」（<c>role</c>）任一；
 /// 新增 / 修改 / 删除只接受既有「用户权限」；</item>
 /// <item><b>放行</b>：具备既有「用户权限」菜单的普通与特权（系统内置角色）身份下，既有读 / 写契约保持；</item>
@@ -24,7 +27,8 @@ namespace ERP.UnitTests;
 /// <item><b>有界字段 / 父级校验</b>：菜单名称 / 编码空值 / 越界、路径 / 图标 / 权限编码越界、未知菜单类型、
 /// 父级负数 / 未知 / 已删除一律按受控参数错误拒绝且不落任何行 / 不改写任何行；</item>
 /// <item><b>既有契约不变</b>：菜单编码重复仍为 <c>Duplicate</c>、存在子菜单删除仍为 <c>RuleConflict</c>；</item>
-/// <item><b>源码契约</b>：控制器 4 条路由全部先授权再读写，且只复用既有菜单，不新增菜单。</item>
+/// <item><b>源码契约</b>：控制器 4 条路由全部先授权再读写，请求形状探针 / <c>Request.Path</c> 已彻底移除，
+/// 且只复用既有菜单，不新增菜单。</item>
 /// </list>
 /// 全部使用内存库（TestDbFactory），不连接 SQL Server、不执行任何 SQL / 部署脚本。
 /// </summary>
@@ -33,13 +37,15 @@ public class SysMenuAuthorizationTests
     // ==================== 0. 测试脚手架 ====================
 
     private static MenuController Controller(ErpDbContext db, long? userId) =>
-        new(db) { ControllerContext = ContextWithUser(userId) };
+        new(db) { ControllerContext = Context(userId, "/api/sys/menus/tree") };
 
     /// <summary>
-    /// 带（可空）<c>NameIdentifier</c> 的真实 HTTP 路由身份上下文（<c>Request.Path</c> 已赋值）：
-    /// null = 无身份，真实请求因处于请求管线内一律 fail closed 拒绝。
+    /// 带（可空）<c>NameIdentifier</c> 的请求身份上下文：<paramref name="requestPath"/> 为 null 时不赋值
+    /// （等同于空路径），为空串时显式空路径，非空时为已赋值路径。
+    /// <para>ERP-492：请求形状探针已彻底移除，三种形状对同一身份给出<b>完全相同</b>的判定 ——
+    /// 缺失身份一律未认证，具备既有菜单一律放行。</para>
     /// </summary>
-    private static ControllerContext ContextWithUser(long? userId)
+    private static ControllerContext Context(long? userId, string? requestPath)
     {
         var claims = userId.HasValue
             ? new[] { new Claim(ClaimTypes.NameIdentifier, userId.Value.ToString()) }
@@ -48,20 +54,18 @@ public class SysMenuAuthorizationTests
         {
             User = new ClaimsPrincipal(new ClaimsIdentity(claims, "Test"))
         };
-        // 标记为真实 HTTP 路由（Request.Path 已赋值）：缺失身份也必须实时授权并 fail closed。
-        http.Request.Path = "/api/sys/menus/tree";
+        if (requestPath is not null)
+            http.Request.Path = requestPath;
         return new ControllerContext { HttpContext = http };
     }
 
-    /// <summary>进程内直调上下文（无请求路径、可带身份）：用于断言历史单元测试口径保持不变。</summary>
-    private static ControllerContext InternalContextWithUser(long? userId)
-    {
-        var claims = userId.HasValue
-            ? new[] { new Claim(ClaimTypes.NameIdentifier, userId.Value.ToString()) }
-            : Array.Empty<Claim>();
-        var http = new DefaultHttpContext { User = new ClaimsPrincipal(new ClaimsIdentity(claims, "Test")) };
-        return new ControllerContext { HttpContext = http };
-    }
+    /// <summary>
+    /// 完全未绑定 <c>HttpContext</c> 的纯进程内直调控制器（外部请求无法构造）。
+    /// <para>ERP-492：不存在任何授权豁免 —— 与空路径 / 已赋值路径对同一身份给出完全相同的判定
+    /// （无 <c>HttpContext</c> 即无身份，一律受控未认证）。</para>
+    /// </summary>
+    private static MenuController ControllerWithoutHttp(ErpDbContext db) =>
+        new(db) { ControllerContext = new ControllerContext() };
 
     /// <summary>
     /// 播种一个独立授权身份，返回用户 Id（每个用例独立）。可选状态 / 删除 / 既有「用户权限」菜单 /
@@ -193,11 +197,13 @@ public class SysMenuAuthorizationTests
     // ==================== 1. 身份 / 账号状态 / 菜单 fail closed ====================
 
     /// <summary>
-    /// 缺失 / 禁用 / 已删除 / 无任何菜单授权的身份：全部 4 条路由在读取或写入任何菜单之前 fail closed，
+    /// 缺失 / 为零 / 未知 / 禁用 / 已删除 / 无任何菜单授权的身份：全部 4 条路由在读取或写入任何菜单之前 fail closed，
     /// 且 <c>SysMenus</c> 行逐字节不变（拒绝在路由体读取 / 改写任何菜单之前抛错）。
     /// </summary>
     [Theory]
     [InlineData("missing")]
+    [InlineData("zero")]
+    [InlineData("unknown")]
     [InlineData("disabled")]
     [InlineData("deleted")]
     [InlineData("no-menu")]
@@ -209,13 +215,15 @@ public class SysMenuAuthorizationTests
         long? userId = scenario switch
         {
             "missing" => null,
+            "zero" => 0,
+            "unknown" => 9_999_999,
             "disabled" => SeedAuthUser(db, UserStatus.Disabled),
             "deleted" => SeedAuthUser(db, deleted: true),
             _ => SeedAuthUser(db, grantWriteMenu: false)
         };
         var expectedCode = scenario switch
         {
-            "missing" or "deleted" => ErrorCodes.Unauthorized,
+            "missing" or "zero" or "unknown" or "deleted" => ErrorCodes.Unauthorized,
             _ => ErrorCodes.Forbidden
         };
 
@@ -550,24 +558,73 @@ public class SysMenuAuthorizationTests
     }
 
 
-    // ==================== 7. 进程内直调边界与源码 / 菜单契约 ====================
+    // ==================== 7. 请求形状无关 / 进程内直调与源码 / 菜单契约 ====================
 
     /// <summary>
-    /// 进程内直调边界（与仓库既有口径同源）：未进入 HTTP 请求管线（<c>Request.Path</c> 为空）的历史单元测试 /
-    /// 内部派生读取沿用既有语义；真实 HTTP 请求（<c>Request.Path</c> 已赋值）一律实时授权并 fail closed。
+    /// ERP-492：完全未绑定 <c>HttpContext</c> 的纯进程内直调不再存在任何授权豁免 —— 无身份一律受控未认证，
+    /// 且拒绝先于任何菜单读取 / 写入（<c>SysMenus</c> 快照逐字节不变）。
     /// </summary>
     [Fact]
-    public async Task Auth_进程内直调无请求路径_沿用既有语义()
+    public async Task Auth_无HttpContext直调_缺失身份一律未认证且零写入()
     {
         using var db = TestDbFactory.Create();
         var target = SeedTargetMenu(db);
-        var ctl = new MenuController(db) { ControllerContext = InternalContextWithUser(null) };
+        var ctl = ControllerWithoutHttp(db);
+        var before = Snapshot(db);
 
-        var tree = Data<List<MenuTreeNode>>(await ctl.GetTree());
-        Assert.Contains(tree, n => n.MenuCode == target.MenuCode);
+        await AssertCode(ErrorCodes.Unauthorized, () => ctl.GetTree());
+        await AssertCode(ErrorCodes.Unauthorized, () => ctl.Create(NewMenu()));
+        await AssertCode(ErrorCodes.Unauthorized, () => ctl.Update(target.Id, NewMenu(code: target.MenuCode)));
+        await AssertCode(ErrorCodes.Unauthorized, () => ctl.Delete(target.Id));
+
+        Assert.Equal(before, Snapshot(db));
+        Assert.DoesNotContain(db.SysMenus, m => m.MenuCode == "new-menu");
     }
 
-    /// <summary>控制器源码契约：4 条路由全部先经实时授权再读写，且无匿名 / 角色回退。</summary>
+    /// <summary>
+    /// ERP-492：同一身份在「空请求路径」与「已赋值请求路径」下对全部 4 条路由（读树 / 新增 / 修改 / 删除）
+    /// 的判定完全一致（请求形状探针已彻底移除）；无身份在任一形状下读树 / 新增一律未认证。
+    /// </summary>
+    [Fact]
+    public async Task Auth_空路径与已赋值路径_判定完全一致()
+    {
+        using var db = TestDbFactory.Create();
+        var userId = SeedAuthUser(db);
+
+        foreach (var path in new[] { "", "/api/sys/menus/tree", "/api/sys/menus/42" })
+        {
+            var ctl = new MenuController(db) { ControllerContext = Context(userId, path) };
+
+            // 读树：既有非删除菜单全部可见
+            var parent = SeedTargetMenu(db, code: $"shape-{Guid.NewGuid():N}");
+            var tree = Data<List<MenuTreeNode>>(await ctl.GetTree());
+            Assert.Contains(tree, n => n.MenuCode == parent.MenuCode);
+
+            // 新增：非零父级必须解析为已知的非删除菜单
+            var newCode = $"shape-new-{Guid.NewGuid():N}";
+            await ctl.Create(NewMenu(code: newCode, name: "形状无关新增", parentId: parent.Id));
+            var stored = await db.SysMenus.AsNoTracking().SingleAsync(m => m.MenuCode == newCode);
+            Assert.Equal(parent.Id, stored.ParentId);
+
+            // 修改：既有菜单字段按既有契约被覆盖
+            await ctl.Update(stored.Id, NewMenu(code: newCode, name: "形状无关修改", path: "/shape"));
+            Assert.Equal("形状无关修改",
+                (await db.SysMenus.AsNoTracking().SingleAsync(m => m.Id == stored.Id)).MenuName);
+
+            // 删除：无子菜单叶子按既有契约软删除
+            await ctl.Delete(stored.Id);
+            Assert.True((await db.SysMenus.AsNoTracking().SingleAsync(m => m.Id == stored.Id)).IsDeleted);
+        }
+
+        foreach (var path in new[] { "", "/api/sys/menus/tree" })
+        {
+            var anonymous = new MenuController(db) { ControllerContext = Context(null, path) };
+            await AssertCode(ErrorCodes.Unauthorized, () => anonymous.GetTree());
+            await AssertCode(ErrorCodes.Unauthorized, () => anonymous.Create(NewMenu()));
+        }
+    }
+
+    /// <summary>控制器源码契约：4 条路由全部先经实时授权再读写，请求形状探针已彻底移除，且无匿名 / 角色回退。</summary>
     [Fact]
     public void Auth_控制器源码契约_所有路由先授权再读写()
     {
@@ -581,6 +638,13 @@ public class SysMenuAuthorizationTests
         Assert.Contains("SysMenuAuthorizationRules.EnsureParentResolvedAsync", source);
         Assert.DoesNotContain("AllowAnonymous", source);
         Assert.DoesNotContain("[Authorize(Roles", source);
+
+        // ERP-492：请求形状探针（RequiresLiveAuthorization / Request.Path）与其条件护栏彻底移除，
+        // 也不存在环境变量 / 数据库提供程序 / 测试专用开关的放行分支。
+        Assert.DoesNotContain("RequiresLiveAuthorization", source);
+        Assert.DoesNotContain("Request.Path", source);
+        Assert.DoesNotContain("Environment.GetEnvironmentVariable", source);
+        Assert.Contains("Request.Path", SysMenuAuthorizationRules.PathIndependenceText);
     }
 
     /// <summary>授权口径复用既有菜单（与 SeedData.Menus 同源），不新增任何菜单 / 权限。</summary>

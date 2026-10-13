@@ -16,7 +16,9 @@ namespace ERP.Application.Services;
 /// （<see cref="EnsureWriteAuthorizedAsync"/>）在读取或写入任何 <c>SysMenus</c> 行<b>之前</b>都重新解析实时身份
 /// （缺失 / 非法 / 账号不存在或已删除按未认证，禁用按权限不足）与既有功能菜单授权
 /// （读树接受既有「用户权限」（<c>user-permission</c>）或既有「角色管理」（<c>role</c>）任一；
-/// 新增 / 修改 / 删除只接受既有「用户权限」），一律 fail closed；</item>
+/// 新增 / 修改 / 删除只接受既有「用户权限」），一律 fail closed；该判定与 <c>Request.Path</c> 是否赋值、
+/// 请求形状以及是否绑定 <c>HttpContext</c> <b>完全无关</b>（ERP-492 已移除请求形状探针，
+/// 见 <see cref="PathIndependenceText"/>）；</item>
 /// <item><b>有界字段校验</b>（<see cref="Validate"/>）：新增 / 修改在落库之前校验菜单名称 / 菜单编码非空且在持久化
 /// 长度上限内、路由路径 / 图标 / 权限编码不超持久化长度、菜单类型为已知菜单类型、父级 Id 为零或有效正数；</item>
 /// <item><b>父级完整性</b>（<see cref="EnsureParentResolvedAsync"/>）：非零父级 Id 必须解析为<b>已知的非删除</b>
@@ -88,6 +90,21 @@ public static class SysMenuAuthorizationRules
         "不新增表 / 列 / 实体 / 菜单 / 权限 / 用户授权，也不把空身份当作管理员。";
 
     /// <summary>
+    /// 与请求形状无关的授权契约（ERP-492）：读树 / 新增 / 修改 / 删除前的实时身份 / 账号状态 / 既有功能菜单判定
+    /// 必须在<b>每一个入口无条件</b>执行，与 <c>Request.Path</c> 是否赋值、请求形状、以及控制器是否绑定
+    /// <c>HttpContext</c> <b>完全无关</b> —— 空路径与已赋值路径口径完全一致，完全未绑定 <c>HttpContext</c>
+    /// 的纯进程内直调同样执行本护栏；缺失 / 为零 / 非法 / 已删除身份一律按未认证拒绝，
+    /// 禁用账号 / 撤销或缺少既有菜单一律按权限不足拒绝。
+    /// </summary>
+    public const string PathIndependenceText =
+        "菜单管理（读树 / 新增 / 修改 / 删除）的实时身份 / 账号状态 / 既有功能菜单判定与请求路径 / 请求形状 / " +
+        "是否绑定 HttpContext 完全无关：原「请求形状探针」（RequiresLiveAuthorization 依据 Request.Path.HasValue）" +
+        "与它的两个条件护栏已彻底移除，空路径与已赋值路径口径完全一致，未绑定任何请求上下文的纯进程内直调" +
+        "同样无条件执行本护栏；缺失 / 为零 / 非法 / 已删除身份按未认证拒绝，禁用账号与撤销 / 缺少既有菜单" +
+        "按权限不足拒绝；绝无匿名 / 管理员回退，不读取环境变量、不区分数据库提供程序，" +
+        "也不存在任何测试专用放行开关。";
+
+    /// <summary>
     /// 读树实时授权（fail closed）：实时身份 / 账号状态 / 既有「用户权限」或「角色管理」菜单三项校验，
     /// 返回本次请求的权威用户 Id。
     /// <list type="bullet">
@@ -96,6 +113,9 @@ public static class SysMenuAuthorizationRules
     /// <item>账号已禁用 → <see cref="ErrorCodes.Forbidden"/>；</item>
     /// <item>缺少既有「用户权限」或「角色管理」菜单授权（含被撤销授权）→ <see cref="ErrorCodes.Forbidden"/>。</item>
     /// </list>
+    /// <para>与请求形状无关（见 <see cref="PathIndependenceText"/>，ERP-492）：调用方必须在<b>每一个路由入口</b>
+    /// 无条件调用本方法，不得因为空路径、缺少身份、未绑定 <c>HttpContext</c> 或任何请求形状而跳过；
+    /// 空路径 / 无上下文与已认证真实请求的判定口径完全一致。</para>
     /// </summary>
     public static Task<long> EnsureReadAuthorizedAsync(
         IErpDbContext db, long? userId, CancellationToken ct = default)
@@ -107,6 +127,9 @@ public static class SysMenuAuthorizationRules
     /// 返回本次请求的权威用户 Id。判定发生在任何菜单读取 / 写入<b>之前</b>；每次请求重新解析，
     /// 菜单或账号状态变更后立即收敛；<b>不</b>新增任何菜单 / 角色 / 用户授权，
     /// 也<b>不</b>因身份缺失而降级为管理员。
+    /// <para>与请求形状无关（见 <see cref="PathIndependenceText"/>，ERP-492）：调用方必须在<b>每一个写入入口</b>
+    /// 无条件调用本方法，不得因为空路径、缺少身份、未绑定 <c>HttpContext</c> 或任何请求形状而跳过；
+    /// 空路径 / 无上下文与已认证真实请求的判定口径完全一致。</para>
     /// </summary>
     public static Task<long> EnsureWriteAuthorizedAsync(
         IErpDbContext db, long? userId, CancellationToken ct = default)
