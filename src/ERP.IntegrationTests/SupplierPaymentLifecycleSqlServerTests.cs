@@ -1,6 +1,7 @@
 ﻿using ERP.Api.Controllers;
 using ERP.Application.Common;
 using ERP.Application.DTOs;
+using ERP.Application.Interfaces;
 using ERP.Application.Services;
 using ERP.Domain.Entities;
 using ERP.Domain.Enums;
@@ -679,6 +680,80 @@ public sealed class SupplierPaymentLifecycleSqlServerTests
         Assert.Equal(missingInvoiceDenied.Message, foreignInvoiceDenied.Message);
         await AssertCodeAsync(ErrorCodes.NotFound, () => controller.AllocationsForInvoice(foreignInvoiceId));
     }
+    // ==================== 6. 付款单控制器读取 / 生命周期闸门（ERP-351 验收恢复） ====================
+
+    private sealed class FixtureDocumentNumberService : IDocumentNumberService
+    {
+        private int _seq;
+        public Task<string> GenerateAsync(DocumentType documentType, DateTime? date = null)
+            => Task.FromResult($"INTFIX{DateTime.Now:yyyyMMdd}{++_seq:D4}");
+    }
+
+    private static FinancePaymentController PaymentController(ErpDbContext db, long? userId)
+        => BuildAuthController(new FinancePaymentController(db, new FixtureDocumentNumberService()), userId);
+
+    [Fact]
+    public async Task 认证控制器_付款单读取与生命周期闸门先于付款单与来源查询_且拒绝零状态变化()
+    {
+        Guard();
+        await using var db = _fixture.CreateDbContext();
+        var supplierId = SeedSupplier(db, "INT_SP351_S1", "供应商351A");
+        var customerId = SeedCustomer(db, "INT_SP351_C1", "客户351A");
+        var applyId = SeedPaymentApply(db, "INT_SP351_DJ1", customerId, 100m, Currency.CNY);
+        var paymentId = SeedPayment(db, "INT_SP351_PAY1", supplierId, 100m, Currency.CNY, DocumentStatus.Pending, applyId);
+
+        var disabledId = SeedPrivilegedUserWithMenu(db);
+        (await db.SysUsers.SingleAsync(u => u.Id == disabledId)).Status = UserStatus.Disabled;
+        var deletedId = SeedPrivilegedUserWithMenu(db);
+        (await db.SysUsers.SingleAsync(u => u.Id == deletedId)).IsDeleted = true;
+        var revokedId = SeedPrivilegedUserWithMenu(db);
+        RevokeMenus(db, revokedId);
+        await db.SaveChangesAsync();
+
+        var before = await db.FinancePayments.AsNoTracking().SingleAsync(p => p.Id == paymentId);
+        const long unknownId = 987_654_321L;
+
+        // 缺失 / 非正 / 已删除身份：未知 Id 与存在 Id 一律受控未认证（闸门先于读取，绝不先 NotFound）。
+        foreach (long? userId in new long?[] { null, 0, deletedId })
+        {
+            var controller = PaymentController(db, userId);
+            await AssertCodeAsync(ErrorCodes.Unauthorized, () => controller.GetById(unknownId));
+            await AssertCodeAsync(ErrorCodes.Unauthorized, () => controller.GetById(paymentId));
+            await AssertCodeAsync(ErrorCodes.Unauthorized, () => controller.Submit(unknownId));
+            await AssertCodeAsync(ErrorCodes.Unauthorized, () => controller.Cancel(paymentId));
+        }
+
+        // 禁用 / 撤权菜单：未知 Id 与存在 Id 一律受控权限不足，且绝不加锁 / 绝不先读行。
+        foreach (var userId in new[] { disabledId, revokedId })
+        {
+            var controller = PaymentController(db, userId);
+            await AssertCodeAsync(ErrorCodes.Forbidden, () => controller.GetById(unknownId));
+            await AssertCodeAsync(ErrorCodes.Forbidden, () => controller.GetById(paymentId));
+            await AssertCodeAsync(ErrorCodes.Forbidden, () => controller.Delete(unknownId));
+            await AssertCodeAsync(ErrorCodes.Forbidden, () => controller.Approve(unknownId));
+            await AssertCodeAsync(ErrorCodes.Forbidden, () => controller.Update(unknownId, new FinancePayment
+            {
+                SupplierId = supplierId,
+                Amount = 100m,
+                Currency = Currency.CNY
+            }));
+        }
+
+        // 授权通过后才按权威读取给出不存在；被拒调用方零状态 / 零证据变化。
+        var privileged = PaymentController(db, SeedPrivilegedUserWithMenu(db));
+        await AssertCodeAsync(ErrorCodes.NotFound, () => privileged.GetById(unknownId));
+        AssertOkDto<FinancePayment>(await privileged.GetById(paymentId));
+
+        var after = await db.FinancePayments.AsNoTracking().SingleAsync(p => p.Id == paymentId);
+        Assert.Equal(DocumentStatus.Pending, after.Status);
+        Assert.Equal(100m, after.Amount);
+        Assert.False(after.IsDeleted);
+        Assert.Equal(before.UpdatedAt, after.UpdatedAt);
+        Assert.False(await db.SupplierPaymentAllocations.AsNoTracking().AnyAsync(a => a.PaymentId == paymentId));
+        Assert.False(await db.SupplierPaymentInvoiceAllocations.AsNoTracking().AnyAsync(a => a.PaymentId == paymentId));
+    }
+
+
 
 }
 

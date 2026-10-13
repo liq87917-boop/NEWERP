@@ -859,6 +859,78 @@ public class ReceiptPaymentCanonicalEntryTests
             Assert.Contains("EnsureReceiptAuthorizedAsync(", body);
         }
     }
+    [Fact]
+    public void Controllers_付款单读取与生命周期闸门先于付款单查询与行锁()
+    {
+        var payment = ReadSource("src", "ERP.Api", "Controllers", "FinancePaymentController.cs");
+
+        // 无请求上下文 / 空路径 / 环境变量 / 内存库测试开关豁免一律不存在：缺失身份安全解析为 null（受控未认证）。
+        var actor = MethodBody(payment, "private new long? CurrentUserId()");
+        Assert.Contains("ControllerContext?.HttpContext?.User?.FindFirst", actor);
+        Assert.Contains("id > 0 ? id : null", actor);
+        Assert.Contains("免授权或测试兼容边界", payment);
+        Assert.Contains("绝不猜测身份、绝不回退为匿名或管理员", payment);
+        Assert.DoesNotContain("Request.Path", actor);
+        Assert.DoesNotContain("Environment.", actor);
+        Assert.DoesNotContain("IsRelationalProvider", actor);
+        Assert.DoesNotContain("UseInMemoryDatabase", payment);
+        Assert.DoesNotContain("HttpContext.Request", payment);
+
+        // 读取：身份 / 付款单菜单闸门先于付款单读取、来源货款申请单查询与客户范围解析（未知 Id 不得先返回 NotFound）。
+        var getById = MethodBody(payment, "public async Task<IActionResult> GetById(long id)");
+        var readGate = getById.IndexOf(
+            "SupplierPaymentLifecycleRules.EnsureMenuAuthorizedAsync(Db, CurrentUserId())", StringComparison.Ordinal);
+        var readRow = getById.IndexOf("Set.AsNoTracking()", StringComparison.Ordinal);
+        var readSource = getById.IndexOf(
+            "SupplierPaymentLifecycleRules.ResolvePaymentCustomerAsync(Db, entity)", StringComparison.Ordinal);
+        var readScope = getById.IndexOf(
+            "SupplierPaymentLifecycleRules.EnsureAuthorizedAsync(Db, CurrentUserId(), customerId)", StringComparison.Ordinal);
+        Assert.True(readGate >= 0 && readRow > readGate && readSource > readGate,
+            "GetById 必须先执行付款单菜单闸门再读取付款单行与来源客户（未知 Id 不得先返回 NotFound，被拒调用方不得触及来源查询）");
+        Assert.True(readScope > readRow, "GetById 读取后仍须按实时身份 / 菜单 / 权威来源客户范围收口");
+
+        // 创建：菜单闸门先于任何业务查询（供应商 / 币种 / 金额 / 来源）与单号预约。
+        var create = MethodBody(payment, "public async Task<IActionResult> Create([FromBody] FinancePayment entity)");
+        var createGate = create.IndexOf(
+            "SupplierPaymentLifecycleRules.EnsureMenuAuthorizedAsync(Db, CurrentUserId())", StringComparison.Ordinal);
+        var createSupplier = create.IndexOf("Db.BaseSuppliers", StringComparison.Ordinal);
+        var createGenerate = create.IndexOf("_noService.GenerateAsync", StringComparison.Ordinal);
+        Assert.True(createGate >= 0 && createSupplier > createGate && createGenerate > createGate,
+            "Create 的付款单菜单闸门必须先于供应商查询与单号预约（被拒绝请求零写入、零占号）");
+
+        // 生命周期：菜单闸门先于来源申请单行锁、付款单行锁与任何读取，且锁内仍保留完整实时授权复核。
+        foreach (var signature in new[]
+                 {
+                     "public async Task<IActionResult> Update(long id, [FromBody] FinancePayment entity)",
+                     "public override async Task<IActionResult> Submit(long id)",
+                     "public override async Task<IActionResult> Approve(long id)",
+                     "public override async Task<IActionResult> Cancel(long id)",
+                     "public override async Task<IActionResult> Delete(long id)"
+                 })
+        {
+            var body = MethodBody(payment, signature);
+            var gate = body.IndexOf(
+                "SupplierPaymentLifecycleRules.EnsureMenuAuthorizedAsync(Db, CurrentUserId())", StringComparison.Ordinal);
+            var lockPayment = body.IndexOf("LockPaymentWithSourceAsync(id)", StringComparison.Ordinal);
+            Assert.True(gate >= 0, $"{signature} 必须先执行付款单菜单闸门");
+            Assert.True(lockPayment > gate,
+                $"{signature} 的菜单闸门必须先于来源申请单行锁与付款单行锁（未知 Id 也不得先加锁 / 先读行）");
+            Assert.True(
+                body.Contains("EnsurePaymentAuthorizedAsync(", StringComparison.Ordinal)
+                || body.Contains("SupplierPaymentLifecycleRules.EnsureAuthorizedAsync(", StringComparison.Ordinal),
+                $"{signature} 通过闸门后仍须在锁内完整复核实时身份 / 菜单 / 客户数据范围");
+        }
+
+        // 修改：请求来源申请单行锁同样必须晚于菜单闸门（绝不先加锁再判权）。
+        var update = MethodBody(payment, "public async Task<IActionResult> Update(long id, [FromBody] FinancePayment entity)");
+        Assert.True(update.IndexOf("LockSourceApplyAsync(entity.PaymentApplyId)", StringComparison.Ordinal)
+                    > update.IndexOf(
+                        "SupplierPaymentLifecycleRules.EnsureMenuAuthorizedAsync(Db, CurrentUserId())",
+                        StringComparison.Ordinal),
+            "Update 的来源申请单行锁必须先经过付款单菜单闸门");
+    }
+
+
 
     private static string MethodBody(string source, string signature)
     {

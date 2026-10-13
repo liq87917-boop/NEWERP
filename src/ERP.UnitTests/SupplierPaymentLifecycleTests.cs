@@ -815,6 +815,199 @@ public class SupplierPaymentLifecycleTests
         Assert.Equal(80m, funding.OrderAllocated);
         Assert.Equal(0m, funding.InvoiceAllocated);
     }
+
+    // ==================== 6. 读取 / 生命周期闸门先于付款单查询与行锁（ERP-351 验收恢复） ====================
+
+    /// <summary>播种一个启用但<strong>没有</strong>付款单（payment）菜单授权的账号（用于证明闸门先于读取）。</summary>
+    private static long SeedEnabledUserWithoutPaymentMenu(ErpDbContext db, string userName)
+    {
+        var role = new SysRole { RoleName = "无付款菜单角色", RoleCode = $"NoPaymentMenu-{Guid.NewGuid():N}", IsSystem = false };
+        db.SysRoles.Add(role);
+        db.SaveChanges();
+
+        var user = new SysUser
+        {
+            UserName = userName,
+            PasswordHash = "hash",
+            PasswordSalt = "salt",
+            DisplayName = userName,
+            Status = UserStatus.Enabled
+        };
+        db.SysUsers.Add(user);
+        db.SaveChanges();
+
+        db.SysUserRoles.Add(new SysUserRole { UserId = user.Id, RoleId = role.Id });
+        db.SaveChanges();
+        return user.Id;
+    }
+
+    [Fact]
+    public async Task GetById_无身份_未知Id与存在Id一律未认证()
+    {
+        using var db = TestDbFactory.Create();
+        var supplier = SeedSupplier(db, "S001", "义乌档口");
+        var payment = SeedPayment(db, "FK-1", supplier.Id);
+
+        var controller = BuildController(db);
+        TestAuth.SetUser(controller, null);
+
+        // 未知 Id 必须先走身份 / 菜单闸门，绝不先返回 NotFound 而差异化泄露存在性。
+        await AssertBusinessCodeAsync(ErrorCodes.Unauthorized, () => controller.GetById(987_654_321L));
+        await AssertBusinessCodeAsync(ErrorCodes.Unauthorized, () => controller.GetById(payment.Id));
+    }
+
+    [Fact]
+    public async Task GetById_未绑定请求上下文_未认证而非异常()
+    {
+        using var db = TestDbFactory.Create();
+        var supplier = SeedSupplier(db, "S001", "义乌档口");
+        var payment = SeedPayment(db, "FK-1", supplier.Id);
+
+        // 纯进程内直调、完全不绑定 HttpContext：缺失身份安全解析为 null → 受控未认证（绝不抛 NRE、绝不豁免）。
+        var controller = BuildController(db);
+
+        await AssertBusinessCodeAsync(ErrorCodes.Unauthorized, () => controller.GetById(payment.Id));
+        await AssertBusinessCodeAsync(ErrorCodes.Unauthorized, () => controller.GetById(987_654_321L));
+    }
+
+    [Fact]
+    public async Task GetById_无付款单菜单_未知Id与存在Id一律权限不足()
+    {
+        using var db = TestDbFactory.Create();
+        var supplier = SeedSupplier(db, "S001", "义乌档口");
+        var payment = SeedPayment(db, "FK-1", supplier.Id);
+        var userId = SeedEnabledUserWithoutPaymentMenu(db, "nopaymenu");
+
+        var controller = BuildController(db);
+        TestAuth.SetUser(controller, userId);
+
+        await AssertBusinessCodeAsync(ErrorCodes.Forbidden, () => controller.GetById(987_654_321L));
+        await AssertBusinessCodeAsync(ErrorCodes.Forbidden, () => controller.GetById(payment.Id));
+    }
+
+    [Fact]
+    public async Task GetById_账号禁用_未知Id与存在Id一律权限不足()
+    {
+        using var db = TestDbFactory.Create();
+        var supplier = SeedSupplier(db, "S001", "义乌档口");
+        var payment = SeedPayment(db, "FK-1", supplier.Id);
+        var userId = SeedPrivilegedUser(db);
+        db.SysUsers.Single(u => u.Id == userId).Status = UserStatus.Disabled;
+        db.SaveChanges();
+
+        var controller = BuildController(db);
+        TestAuth.SetUser(controller, userId);
+
+        await AssertBusinessCodeAsync(ErrorCodes.Forbidden, () => controller.GetById(987_654_321L));
+        await AssertBusinessCodeAsync(ErrorCodes.Forbidden, () => controller.GetById(payment.Id));
+    }
+
+    [Fact]
+    public async Task GetById_账号已删除_未知Id与存在Id一律未认证()
+    {
+        using var db = TestDbFactory.Create();
+        var supplier = SeedSupplier(db, "S001", "义乌档口");
+        var payment = SeedPayment(db, "FK-1", supplier.Id);
+        var userId = SeedPrivilegedUser(db);
+        db.SysUsers.Single(u => u.Id == userId).IsDeleted = true;
+        db.SaveChanges();
+
+        var controller = BuildController(db);
+        TestAuth.SetUser(controller, userId);
+
+        await AssertBusinessCodeAsync(ErrorCodes.Unauthorized, () => controller.GetById(987_654_321L));
+        await AssertBusinessCodeAsync(ErrorCodes.Unauthorized, () => controller.GetById(payment.Id));
+    }
+
+    [Fact]
+    public async Task GetById_越界账号_未知Id不存在_范围外Id权限不足()
+    {
+        using var db = TestDbFactory.Create();
+        var (userId, employeeId) = SeedRestrictedSalesman(db, "sales351");
+        var inScope = SeedCustomer(db, "C-IN", "范围内客户", empId: employeeId);
+        var outOfScope = SeedCustomer(db, "C-OUT", "范围外客户", empId: 9999L);
+        var supplier = SeedSupplier(db, "S001", "义乌档口");
+        var apply = SeedPaymentApply(db, "DJ-OUT", outOfScope.Id, amount: 1000m, currency: Currency.CNY);
+        var payment = SeedPayment(db, "FK-OUT", supplier.Id, amount: 1000m, paymentApplyId: apply.Id);
+
+        var controller = BuildController(db);
+        TestAuth.SetUser(controller, userId);
+
+        // 越界账号：身份 / 菜单闸门先通过，再按权威读取判定不存在；范围外付款单一律权限不足，不泄露归属。
+        await AssertBusinessCodeAsync(ErrorCodes.NotFound, () => controller.GetById(987_654_321L));
+        await AssertBusinessCodeAsync(ErrorCodes.Forbidden, () => controller.GetById(payment.Id));
+        Assert.NotNull(inScope);
+    }
+
+    [Fact]
+    public async Task GetById_有权限_未知Id_不存在()
+    {
+        using var db = TestDbFactory.Create();
+        var userId = SeedPrivilegedUser(db);
+
+        var controller = BuildController(db);
+        TestAuth.SetUser(controller, userId);
+
+        // 授权通过后才按权威读取给出不存在：身份 / 菜单闸门先于不存在判定。
+        await AssertBusinessCodeAsync(ErrorCodes.NotFound, () => controller.GetById(987_654_321L));
+    }
+
+    [Fact]
+    public async Task 生命周期动作_未知Id_缺失禁用无菜单账号_一律受控拒绝且零状态变化()
+    {
+        using var db = TestDbFactory.Create();
+        var supplier = SeedSupplier(db, "S001", "义乌档口");
+        var payment = SeedPayment(db, "FK-1", supplier.Id, amount: 1000m);
+        var noMenuId = SeedEnabledUserWithoutPaymentMenu(db, "nomenu351");
+        var disabledId = SeedPrivilegedUser(db);
+        db.SysUsers.Single(u => u.Id == disabledId).Status = UserStatus.Disabled;
+        db.SaveChanges();
+
+        var before = db.FinancePayments.AsNoTracking().Single(p => p.Id == payment.Id);
+        const long unknownId = 987_654_321L;
+
+        var anonymous = BuildController(db);
+        TestAuth.SetUser(anonymous, null);
+        await AssertBusinessCodeAsync(ErrorCodes.Unauthorized, () => anonymous.Submit(unknownId));
+        await AssertBusinessCodeAsync(ErrorCodes.Unauthorized, () => anonymous.Cancel(payment.Id));
+
+        var noMenu = BuildController(db);
+        TestAuth.SetUser(noMenu, noMenuId);
+        await AssertBusinessCodeAsync(ErrorCodes.Forbidden, () => noMenu.Delete(unknownId));
+        await AssertBusinessCodeAsync(ErrorCodes.Forbidden, () => noMenu.Update(unknownId, new FinancePayment
+        {
+            SupplierId = supplier.Id,
+            Amount = 500m,
+            Currency = Currency.CNY
+        }));
+
+        var disabled = BuildController(db);
+        TestAuth.SetUser(disabled, disabledId);
+        await AssertBusinessCodeAsync(ErrorCodes.Forbidden, () => disabled.Approve(unknownId));
+        await AssertBusinessCodeAsync(ErrorCodes.Forbidden, () => disabled.Cancel(payment.Id));
+
+        // 被拒绝的生命周期动作不改变原始付款单（状态、字段与审计时间戳保持不变，也绝不生成引用行）。
+        var stored = db.FinancePayments.AsNoTracking().Single(p => p.Id == payment.Id);
+        Assert.Equal(DocumentStatus.Pending, stored.Status);
+        Assert.Equal(1000m, stored.Amount);
+        Assert.False(stored.IsDeleted);
+        Assert.Equal(before.UpdatedAt, stored.UpdatedAt);
+        Assert.Empty(db.SupplierPaymentAllocations.AsNoTracking());
+        Assert.Empty(db.SupplierPaymentInvoiceAllocations.AsNoTracking());
+    }
+
+    [Fact]
+    public void 读取闸门口径文案_与实现同源()
+    {
+        var text = SupplierPaymentLifecycleRules.ReadGateOrderText;
+        Assert.Contains("先执行实时身份 + 既有「付款单」（payment）菜单闸门", text);
+        Assert.Contains("安全解析为 null", text);
+        Assert.Contains("完全相同的受控拒绝", text);
+        Assert.Contains("绝不先读行 / 先加锁再判权", text);
+        Assert.DoesNotContain("豁免为", text);
+    }
+
+
 }
 
 

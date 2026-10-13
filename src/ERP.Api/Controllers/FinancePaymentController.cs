@@ -5,6 +5,7 @@ using ERP.Domain.Entities;
 using ERP.Domain.Enums;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.Security.Claims;
 
 namespace ERP.Api.Controllers;
 
@@ -29,6 +30,20 @@ public class FinancePaymentController : DocumentControllerBase<FinancePayment>
         _noService = noService;
     }
 
+    /// <summary>
+    /// 当前登录用户 Id（ERP-351）：只来自已认证请求主体（<c>ClaimTypes.NameIdentifier</c>）；
+    /// 缺失 / 非数字 / 非正数 / <strong>未绑定请求上下文（<c>ControllerContext.HttpContext</c> 为 <c>null</c>）</strong>
+    /// 一律安全解析为 <c>null</c>，由既有 <see cref="SupplierPaymentLifecycleRules.EnsureMenuAuthorizedAsync"/>
+    /// 在触及任何付款单读取 / 来源 · 客户查询 / 行锁 / 业务查询<strong>之前</strong>返回受控未认证（fail closed）。
+    /// <para>这里<strong>不是</strong>免授权或测试兼容边界：不存在「无请求上下文 / 空路径 / 匿名进程内直调」豁免，
+    /// 也不读取 <c>Request.Path</c>、环境变量、数据库提供程序或任何测试开关；绝不猜测身份、绝不回退为匿名或管理员。</para>
+    /// </summary>
+    private new long? CurrentUserId()
+    {
+        var value = ControllerContext?.HttpContext?.User?.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        return long.TryParse(value, out var id) && id > 0 ? id : null;
+    }
+
     [HttpGet]
     public async Task<IActionResult> GetPaged([FromQuery] PageQuery query, [FromQuery] DocumentStatus? status)
     {
@@ -49,9 +64,16 @@ public class FinancePaymentController : DocumentControllerBase<FinancePayment>
     [HttpGet("{id:long}")]
     public async Task<IActionResult> GetById(long id)
     {
+        // ERP-351：身份 / 菜单闸门必须先于任何付款单读取、来源货款申请单查询与客户范围解析 ——
+        // 未知 Id 对缺失 / 禁用 / 已删除 / 无菜单账号与存在 Id 给出完全相同的受控拒绝（未认证 / 权限不足），
+        // 绝不先读行再判权、绝不因 Id 是否存在而差异化，也绝不让被拒调用方触及任何财务来源查询。
+        await SupplierPaymentLifecycleRules.EnsureMenuAuthorizedAsync(Db, CurrentUserId());
+
         var entity = await Set.AsNoTracking()
             .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
             ?? throw BusinessException.NotFound("付款单不存在");
+
+        // 读取后仍按实时身份 / 付款单菜单 / 权威来源客户数据范围收口（越界 fail closed，不泄露范围外付款单）。
         var customerId = await SupplierPaymentLifecycleRules.ResolvePaymentCustomerAsync(Db, entity);
         await SupplierPaymentLifecycleRules.EnsureAuthorizedAsync(Db, CurrentUserId(), customerId);
         return Ok(ApiResponse<FinancePayment>.Success(entity));
@@ -64,6 +86,10 @@ public class FinancePaymentController : DocumentControllerBase<FinancePayment>
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] FinancePayment entity)
     {
+        // ERP-351：身份 / 菜单闸门先于币种 · 金额 · 供应商 · 货款申请单来源等任何业务查询与单号预约
+        // （被拒绝请求零写入、零占号，也绝不让缺失 / 禁用 / 无菜单账号触及任何业务查询）。
+        await SupplierPaymentLifecycleRules.EnsureMenuAuthorizedAsync(Db, CurrentUserId());
+
         var currency = SupplierPaymentLifecycleRules.NormalizePaymentCurrency(entity.Currency);
         var amount = SupplierPaymentLifecycleRules.NormalizePaymentAmount(entity.Amount, currency);
 
@@ -116,6 +142,10 @@ public class FinancePaymentController : DocumentControllerBase<FinancePayment>
     [HttpPut("{id:long}")]
     public async Task<IActionResult> Update(long id, [FromBody] FinancePayment entity)
     {
+        // ERP-351：身份 / 菜单闸门先于来源申请单行锁、付款单行锁与任何付款单 / 来源读取
+        // （未知 Id 不泄露存在性，绝不先加锁 / 先读行再判权）；锁内仍完整复核实时身份 / 菜单 / 客户范围。
+        await SupplierPaymentLifecycleRules.EnsureMenuAuthorizedAsync(Db, CurrentUserId());
+
         // 与付款引用证据写入互斥，并与来源申请单的商业改动 / 取消串行化（ERP-380）
         await using var transaction = SupplierPaymentLifecycleRules.IsRelationalProvider(Db)
             ? await Db.Database.BeginTransactionAsync()
@@ -182,6 +212,10 @@ public class FinancePaymentController : DocumentControllerBase<FinancePayment>
     [HttpPost("{id:long}/submit")]
     public override async Task<IActionResult> Submit(long id)
     {
+        // ERP-351：身份 / 菜单闸门先于来源申请单行锁、付款单行锁与任何读取（未知 Id 不泄露存在性）；
+        // 取得行锁后仍在锁内复核实时身份 / 菜单 / 客户数据范围（EnsurePaymentAuthorizedAsync）。
+        await SupplierPaymentLifecycleRules.EnsureMenuAuthorizedAsync(Db, CurrentUserId());
+
         await using var transaction = SupplierPaymentLifecycleRules.IsRelationalProvider(Db)
             ? await Db.Database.BeginTransactionAsync()
             : null;
@@ -215,6 +249,10 @@ public class FinancePaymentController : DocumentControllerBase<FinancePayment>
     [HttpPost("{id:long}/approve")]
     public override async Task<IActionResult> Approve(long id)
     {
+        // ERP-351：身份 / 菜单闸门先于来源申请单行锁、付款单行锁与任何读取（未知 Id 不泄露存在性）；
+        // 取得行锁后仍在锁内复核实时身份 / 菜单 / 客户数据范围（EnsurePaymentAuthorizedAsync）。
+        await SupplierPaymentLifecycleRules.EnsureMenuAuthorizedAsync(Db, CurrentUserId());
+
         await using var transaction = SupplierPaymentLifecycleRules.IsRelationalProvider(Db)
             ? await Db.Database.BeginTransactionAsync()
             : null;
@@ -244,6 +282,10 @@ public class FinancePaymentController : DocumentControllerBase<FinancePayment>
     [HttpPost("{id:long}/cancel")]
     public override async Task<IActionResult> Cancel(long id)
     {
+        // ERP-351：身份 / 菜单闸门先于来源申请单行锁、付款单行锁与任何读取（未知 Id 不泄露存在性）；
+        // 取得行锁后仍在锁内复核实时身份 / 菜单 / 客户数据范围（EnsurePaymentAuthorizedAsync）。
+        await SupplierPaymentLifecycleRules.EnsureMenuAuthorizedAsync(Db, CurrentUserId());
+
         await using var transaction = SupplierPaymentLifecycleRules.IsRelationalProvider(Db)
             ? await Db.Database.BeginTransactionAsync()
             : null;
@@ -272,6 +314,10 @@ public class FinancePaymentController : DocumentControllerBase<FinancePayment>
     [HttpDelete("{id:long}")]
     public override async Task<IActionResult> Delete(long id)
     {
+        // ERP-351：身份 / 菜单闸门先于来源申请单行锁、付款单行锁与任何读取（未知 Id 不泄露存在性）；
+        // 取得行锁后仍在锁内复核实时身份 / 菜单 / 客户数据范围（EnsurePaymentAuthorizedAsync）。
+        await SupplierPaymentLifecycleRules.EnsureMenuAuthorizedAsync(Db, CurrentUserId());
+
         await using var transaction = SupplierPaymentLifecycleRules.IsRelationalProvider(Db)
             ? await Db.Database.BeginTransactionAsync()
             : null;

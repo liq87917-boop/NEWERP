@@ -62,6 +62,8 @@
 - `src/ERP.Application/Services/SupplierPaymentAllocationService.cs`（ERP-049 登记加锁 + 已取消拒绝 + 跨维度额度）
 - `src/ERP.Application/Services/SupplierPaymentInvoiceAllocationService.cs`（ERP-066 登记加锁 + 已取消拒绝 + 跨维度额度）
 - `src/ERP.UnitTests/SupplierPaymentLifecycleTests.cs`（内存库）
+- `src/ERP.UnitTests/ReceiptPaymentCanonicalEntryTests.cs`（规范入口 / 读取与生命周期闸门结构契约）
+- `src/ERP.UnitTests/SupplierPaymentTransitionConcurrencyTests.cs`（提交 / 审核串行化）
 - `src/ERP.IntegrationTests/SupplierPaymentLifecycleSqlServerTests.cs`（真实 SQL）
 
 ## 6. 测试与验证
@@ -85,3 +87,23 @@
 本护栏只保护付款单生命周期与既有付款引用证据：不会真的付款、不会记账或生成凭证、不会核销、不会移动资金，
 也不改写采购订单状态 / 到货进度 / 金额与明细 / 结算进度、供应商采购发票、采购订单引用证据、发票引用证据、
 库存与库存成本、库存流水、退税记录、费用与供应商余额。
+
+## 9. 读取 / 生命周期闸门顺序（ERP-351 验收恢复）
+
+- **先闸门、后读取**：付款单的**读取**（`GET /api/finance/payments/{id}`）与**全部生命周期动作**
+  （创建 / 修改 / 提交 / 审核 / 取消 / 删除）都**先**执行实时身份 + 既有「付款单」（`payment`）菜单闸门
+  （`SupplierPaymentLifecycleRules.EnsureMenuAuthorizedAsync`），**再**读取付款单 / 来源货款申请单 / 客户，
+  或获取来源申请单行锁（`FinancePaymentApplyLifecycleRules.LockApplyRowAsync`）与付款单行锁
+  （`SupplierPaymentLifecycleRules.LockPaymentRowAsync`）。
+- **未知 Id 不泄露存在性**：缺失 / 非数字 / 非正数 / **已删除**身份一律安全解析为 `null` 并返回受控未认证；
+  未知 Id 与存在 Id 对同一缺失 / 禁用 / 已删除 / 无菜单账号给出**完全相同**的受控拒绝（未认证 / 权限不足），
+  绝不先读行 / 先加锁再判权，也绝不让被拒调用方触及任何付款单读取与财务来源查询。
+- **无豁免**：不存在「无请求上下文 / 空路径 / 匿名进程内直调 / 数据库提供程序 / 内存库测试开关」豁免；
+  控制器只读取已认证主体的 `ClaimTypes.NameIdentifier`，不读 `Request.Path`、环境变量或任何测试开关，
+  绝不猜测身份、绝不回退为匿名或管理员。口径文案见 `SupplierPaymentLifecycleRules.ReadGateOrderText`。
+- **闸门不替代锁内复核**：通过闸门后，生命周期动作仍在付款单行锁内重新复核实时身份 / 菜单 / 权威来源客户
+  数据范围与允许的状态流转；未知 Id 在授权通过后才按权威读取给出「不存在」。守卫动作失败时原始付款单
+  （状态、金额、删除标记、审计时间戳）与两套引用证据均保持不变。
+- 覆盖：`SupplierPaymentLifecycleTests`（内存库：缺失 / 未绑定上下文 / 无菜单 / 禁用 / 已删除 / 越界 / 有权限未知 Id）、
+  `ReceiptPaymentCanonicalEntryTests`（付款单控制器闸门先于读取 · 行锁的结构契约）与
+  `SupplierPaymentLifecycleSqlServerTests`（真实 SQL：真实 HTTP 路由上下文下未知 Id 与存在 Id 的受控拒绝且零状态变化）。
