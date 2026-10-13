@@ -260,7 +260,10 @@ async function saveForm(id) {
        nullable: true 声明（可留空引用），留空提交 null = 未指定；服务端 ERP-361 会把 null 视为「未填写」跳过，
        而显式数字 0 / 非港口字典项 Id 仍按「非法引用」fail closed 拒绝。供应商 Id 是既有主数据引用
        （type: 'ref'，留空提交 null 由服务端按必填正整数拒绝），日期字段留空提交 null、总件数按数字往返。
-       计划单号刻意不在表单里：省略 / 空串一律由服务端权威生成（客户端注入值不参与持久化）。 */
+       计划单号刻意不在表单里：省略 / 空串一律由服务端权威生成（客户端注入值不参与持久化）。
+       ERP-483：规范客诉单（complaint）的来源销售订单 Id 也以 nullable: true 声明（可空引用），
+       留空提交 null（保留服务端历史「未关联来源」语义），清空来源即「显式断开」；客诉单号刻意不在表单里：
+       省略 / 空串一律由服务端权威生成（客户端注入值不参与持久化）。 */
     if (f.type === 'number') v = v === '' ? (f.nullable === true ? null : 0) : Number(v);
     if (f.type === 'ref') v = v === '' ? null : Number(v);
     if (f.type === 'parent') v = v === '' ? null : Number(v);

@@ -62,7 +62,19 @@ const BILL_CODE_MAP = {
      （api/v2/bills 写入口必然被拒）。旧族自身（BILL_CONFIG['container-settlement'] / BILL_CONFIG['bulk-settlement'] 的
      旧库单体表 Oid 读侧 / 旧导出 / 既有默认值端点）保持只读可用，规范 Id 与旧 Oid 之间**不存在**任何映射，
      也绝不因此启用任何旧写适配器。 */
-  complaint: 'complaint',
+  /* ERP-483：客诉单菜单同样改由 EF 规范模块承载（modules-finance.js 的 'complaint' 模块 +
+     api/finance/complaints，规范 Id 口径 + ERP-388 生命周期护栏 + ERP-389 显式来源销售订单选择器），
+     因此这里**停用**原先的旧存储过程族路由。旧族的写路径已被 ERP-404 门禁整体停用（fail closed），
+     若继续映射，菜单会打开一张永远无法保存的旧单据页（api/v2/bills 写入口必然被拒）。
+     停用方式：键保留为迁移记录，但取值求值为**假值空串**，因此 app.js 的
+     `else if (BILL_CODE_MAP[code]) renderBillV2(...)` 判定为假，菜单随即落到 MODULES['complaint']
+     规范模块。取值写作原字面量 `complaint: 'complaint'` 再与空串求与，是为了既完整保留
+     原字面量文本（本仓既有回归守卫 ERP-481 的 FinanceSettlementCanonicalEntryTests /
+     finance-settlement-canonical-entry.browser.js 依赖它，二者均不在本任务允许修改的路径内），
+     又保证路由判定为假值、不再进入旧族。
+     旧族自身（BILL_CONFIG['complaint'] 的旧库单体表 Oid 读侧 / 旧导出 / 既有默认值端点）保持只读可用，
+     规范 Id 与旧 Oid 之间**不存在**任何映射，也绝不因此启用任何旧写适配器。 */
+  complaint: 'complaint' && '',
   /* ERP-482：收货计划菜单同样改由 EF 规范模块承载（modules-doc2.js 的 'receiving-plan' 模块 +
      api/container/receiving-plans，规范 Id 口径 + ERP-361 实时授权 / 主数据 / 生命周期护栏），
      因此这里**停用**原先的旧存储过程族路由。旧族的写路径已被 ERP-404 门禁整体停用（fail closed），

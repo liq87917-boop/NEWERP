@@ -314,6 +314,14 @@ public class FinanceReceiptController : DocumentControllerBase<FinanceReceipt>
 /// 失败整体回滚（状态、原始字段与审计不变）。取消来源销售订单侧由 <see cref="SalesOrderCancellationRules"/> 协同：
 /// 客诉单绝不阻断其取消，取消原样保留客诉历史与其来源链接。</para>
 /// <para>本护栏不写库存 / 资金 / 会计，不产生销售数量、应收、收款、库存或任何财务流水，也不改写销售订单。</para>
+/// <para>ERP-483：既有「客诉单」菜单改由本规范控制器（<c>api/finance/complaints</c>，规范 <c>Id</c> 口径）承载，
+/// 不再映射到已由 ERP-404 门禁整体停用（fail closed）的旧存储过程族；旧族 <c>Oid</c> 读侧保持只读可用，
+/// 规范 <c>Id</c> 与旧 <c>Oid</c> 之间<b>不存在</b>任何映射，也绝不启用任何旧写适配器。
+/// 新增入口允许省略 / 空串客诉单号（实体不再显式 <c>[Required]</c>，与 ERP-477 / ERP-478 / ERP-479 /
+/// ERP-480 / ERP-481 / ERP-482 同源口径），主键 / 客诉单号 / 状态 / 删除态 / 时间戳一律由服务端权威覆盖：
+/// 全部授权 · 客户 · 来源销售订单校验都在<b>单号预约与任何写入之前</b>完成，被拒绝的请求零表头 · 零状态变化
+/// 且零占号。来源销售订单是可空引用（<c>long?</c>），历史「未关联来源」语义（<c>null</c>）与显式断开原样保留。</para>
+
 /// </summary>
 [Route("api/finance/complaints")]
 public class FinanceComplaintController : DocumentControllerBase<FinanceComplaint>
@@ -435,8 +443,12 @@ public class FinanceComplaintController : DocumentControllerBase<FinanceComplain
 
             entity.Id = 0;
             entity.ComplaintNo = await _noService.GenerateAsync(DocumentType.Complaint);
+            // ERP-483：主键 / 客诉单号 / 状态 / 删除态 / 时间戳一律由服务端权威覆盖（客户端注入值不参与持久化，
+            // 与 ERP-477 / ERP-478 / ERP-479 / ERP-480 / ERP-481 / ERP-482 同源口径）。
             entity.Status = DocumentStatus.Pending;
+            entity.IsDeleted = false;
             entity.CreatedAt = DateTime.Now;
+            entity.UpdatedAt = null;
             Db.FinanceComplaints.Add(entity);
             await Db.SaveChangesAsync();
             if (transaction is not null) await transaction.CommitAsync();

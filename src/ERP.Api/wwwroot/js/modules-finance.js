@@ -153,6 +153,10 @@ Object.assign(MODULES, {
     ],
   },
   complaint: {
+    /* ERP-483：既有「客诉单」菜单的规范 EF 模块（api/finance/complaints，规范 Id 口径）——
+       列表 / 详情 / 保存 / 提交 / 审核 / 取消 / 删除全走规范 Id，绝不把旧存储过程族 Oid 当作规范 Id。
+       客诉单号由服务端权威生成（表单不提交客诉单号），来源销售订单由既有 ERP-389 显式选择器回填 /
+       显式断开。客诉单只是投诉 / 质量反馈追溯：绝不自动退款、绝不调整库存、绝不取消销售订单。 */
     title: '客诉单', api: '/api/finance/complaints', canSubmit: true,
     columns: [
       { key: 'complaintNo', label: '客诉单号' }, { key: 'complaintDate', label: '日期', type: 'date' },
@@ -161,10 +165,14 @@ Object.assign(MODULES, {
     fields: [
       { key: 'complaintDate', label: '客诉日期', type: 'date' }, { key: 'customerId', label: '客户Id', type: 'number' },
       /* ERP-389：来源销售订单由「选择来源」有界选择器显式回填（也可手工填写 Id / 留空显式断开）；
-         选择器只回填权威来源 Id，绝不臆造订单号、绝不自动改数量 / 金额 */
-      { key: 'salesOrderId', label: '来源销售订单 ID（可留空；建议用「选择来源」）', type: 'number', selector: 'complaint-sales-order-source' },
+         选择器只回填权威来源 Id，绝不臆造订单号、绝不自动改数量 / 金额。
+         ERP-483：声明为显式可空引用（nullable: true）——留空提交 null（未关联来源的历史语义），
+         绝不回落为哨兵值 0；清空来源即「显式断开」，最终仍由服务端 ERP-388 在锁内按权威客户与来源资格复核。 */
+      { key: 'salesOrderId', label: '来源销售订单 ID（可留空 = 未关联；建议用「选择来源」）', type: 'number', nullable: true, selector: 'complaint-sales-order-source' },
       { key: 'complaintType', label: '客诉类型' }, { key: 'responsibleDept', label: '责任部门' },
       { key: 'description', label: '客诉描述', type: 'textarea' }, { key: 'handleResult', label: '处理结果', type: 'textarea' },
+      /* ERP-483：备注随表单提交，保证「保存 → 重开 → 修改」原样往返（不再因未声明字段而在编辑时被置空）。 */
+      { key: 'remark', label: '备注', type: 'textarea' },
     ],
   },
 });

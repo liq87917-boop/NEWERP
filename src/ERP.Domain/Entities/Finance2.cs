@@ -144,8 +144,21 @@ public class FinanceReceipt : BaseEntity
 /// </summary>
 public class FinanceComplaint : BaseEntity
 {
-    /// <summary>客诉单号</summary>
-    [Required, MaxLength(50)]
+    /// <summary>
+    /// 客诉单号（服务端权威生成：新增入口一律在实时身份 / 客诉单（<c>complaint</c>）菜单 / 客户范围、
+    /// 真实可用客户、可选来源销售订单精确资格等全部校验通过之后，由 <c>IDocumentNumberService</c> 预约覆盖，
+    /// 调用方提交值不参与持久化）。
+    /// <para>ERP-483：这里刻意<strong>不加</strong> <c>[Required]</c>（与 ERP-477 入库单号 / ERP-478 出库单号 /
+    /// ERP-479 收款单号 · 付款单号 / ERP-480 申请单号 / ERP-481 结算单号 / ERP-482 计划单号同源口径）。
+    /// 手工录入表单不提交客诉单号，MVC 对非空引用类型属性本就会推断一个 <c>AllowEmptyStrings = true</c> 的隐式必填
+    /// （允许空串）；而显式 <c>[Required]</c>（默认 <c>AllowEmptyStrings = false</c>）会把「省略客诉单号」在模型绑定 /
+    /// 模型校验阶段直接拒绝为 HTTP 400 <c>{"errors":{"ComplaintNo":[...]}}</c>，服务端权威单号根本没有机会生成。
+    /// 移除显式特性后：省略 / 空串照常绑定并进入已授权的 <c>FinanceComplaintController.Create</c>，服务端仍按唯一
+    /// 权威口径覆盖客诉单号、主键、状态、删除态与时间戳；数据库列仍是 NOT NULL（非空 CLR 引用类型），长度仍受
+    /// <see cref="MaxLengthAttribute"/>(50) 约束，非法 / 越权请求的校验顺序不变
+    /// （授权、客户与来源校验先于单号预约与任何写入）。</para>
+    /// </summary>
+    [MaxLength(50)]
     public string ComplaintNo { get; set; } = string.Empty;
 
     /// <summary>客诉日期</summary>
