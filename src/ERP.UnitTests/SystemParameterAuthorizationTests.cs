@@ -332,11 +332,67 @@ public class SystemParameterAuthorizationTests
             + $"\"{SystemParameterAuthorizationRules.RequiredMenuText}\"",
             menus);
 
-        // BillProcController 的既有参数驱动默认值读取口径（键名与回退来源）保持不变。
+        // BillProcController 的默认值读取口径（ERP-469）：键名复用既有系统参数键常量，
+        // 取值由既有护栏裁决；缺失 / 非法一律 fail closed，绝不回退美元 / 1（绝不臆造汇率）。
         var billProc = File.ReadAllText(RepoFile("src", "ERP.Api", "Controllers", "BillProcController.cs"));
-        Assert.Contains("ParamKey IN ('DefaultCurrency','ExchangeRate')", billProc);
+        Assert.Contains("SystemParameterAuthorizationRules.DefaultCurrencyKey", billProc);
+        Assert.Contains("SystemParameterAuthorizationRules.ExchangeRateKey", billProc);
+        Assert.Contains("SystemParameterAuthorizationRules.ResolveBillCurrencyDefaults", billProc);
         Assert.Contains("LoadCurrencyDefaultsAsync", billProc);
         Assert.Contains("ApplyCurrencyDefaultsAsync", billProc);
+        Assert.DoesNotContain("var exchangeRate = 1m;", billProc);
+        Assert.DoesNotContain("var currency = (int)Currency.USD;", billProc);
+    }
+
+    // ==================== 4b. ERP-469 默认币种 / 汇率 fail closed ====================
+
+    [Fact]
+    public void 默认币种汇率解析_缺失或非法一律failclosed且不臆造汇率()
+    {
+        // 合法：两者都合法才返回（币种代码规范化为大写，汇率按区域性无关十进制解析）。
+        var ok = SystemParameterAuthorizationRules.ResolveBillCurrencyDefaults("cny", " 7.20 ");
+        Assert.Equal("CNY", ok.CurrencyCode);
+        Assert.Equal(7.20m, ok.ExchangeRate);
+
+        // 默认币种缺失 / 非法：拒绝，绝不回退美元。
+        foreach (var currency in new string?[] { null, string.Empty, "   ", "XYZ", "1", "美元" })
+        {
+            var ex = Assert.Throws<BusinessException>(
+                () => SystemParameterAuthorizationRules.ResolveBillCurrencyDefaults(currency, "7.2"));
+            Assert.Equal(ErrorCodes.InvalidParameter, ex.Code);
+            Assert.Contains("默认币种", ex.Message);
+        }
+
+        // 默认汇率缺失 / 非正 / 不可解析：拒绝，绝不回退 1（也绝不臆造汇率）。
+        foreach (var rate in new string?[] { null, string.Empty, "0", "-1.5", "abc", "1e3" })
+        {
+            var ex = Assert.Throws<BusinessException>(
+                () => SystemParameterAuthorizationRules.ResolveBillCurrencyDefaults("USD", rate));
+            Assert.Equal(ErrorCodes.InvalidParameter, ex.Code);
+            Assert.Contains("默认汇率", ex.Message);
+        }
+
+        // 两者都缺失：同样拒绝，且绝不返回任何默认值。
+        Assert.Throws<BusinessException>(
+            () => SystemParameterAuthorizationRules.ResolveBillCurrencyDefaults(null, null));
+    }
+
+    [Fact]
+    public void 默认值与导出源码契约_failclosed且复用既有读侧门禁()
+    {
+        var billProc = File.ReadAllText(RepoFile("src", "ERP.Api", "Controllers", "BillProcController.cs"));
+        // 默认值接口：授权失败与参数不可用都收敛为既有受控失败信封（不返回数据）。
+        Assert.Contains("[HttpGet(\"{billType}/defaults\")]", billProc);
+        Assert.Contains("LegacyBillAuthorizationRules.EnsureReadAuthorizedAsync(_db, CurrentUserId(), billType)", billProc);
+        Assert.Contains("ApiResponse<object>.Fail(ex.Message, ex.Code)", billProc);
+
+        var export = File.ReadAllText(RepoFile("src", "ERP.Api", "Controllers", "BillProcController.Export.cs"));
+        // 导出与导出前预览共用门禁与筛选条件；日期列只接受已登记导出列（绝不拼接任意列名）。
+        Assert.Contains("[HttpGet(\"{billType}/export-preview\")]", export);
+        Assert.Contains("GuardLegacyExportAsync(billType)", export);
+        Assert.Contains("BuildExportFilter(", export);
+        Assert.Contains("ExportColumns.TryGetValue(billType, out var registered)", export);
+        Assert.DoesNotContain("AND {dateField}", export);
     }
 
     // ==================== 6. 测试辅助 ====================

@@ -1,4 +1,5 @@
 using ERP.Application.Common;
+using ERP.Application.Services;
 using ERP.Infrastructure.Data;
 using ERP.Infrastructure.Export;
 using Microsoft.AspNetCore.Mvc;
@@ -123,7 +124,107 @@ public partial class BillProcController
 
 
     /// <summary>
-    /// 导出单据为 Excel 文件（按单据号关键字、状态、日期范围筛选）
+    /// 导出 / 预览前必须通过的既有读侧门禁（实时身份 + 该族既有功能菜单 + 业务员客户数据范围）。
+    /// </summary>
+    /// <remarks>
+    /// ERP-469：导出与导出前预览共用同一门禁；未知单据类型与授权失败都返回既有受控失败信封
+    /// （HTTP 200 + 业务错误码），绝不返回任何行，也绝不让导出类菜单顶替功能菜单。
+    /// </remarks>
+    private async Task<IActionResult?> GuardLegacyExportAsync(string billType)
+    {
+        if (!Bills.TryGetValue(billType, out _))
+            return Ok(ApiResponse<object>.Fail("未知单据类型", ErrorCodes.InvalidParameter));
+
+        try
+        {
+            await LegacyBillAuthorizationRules.EnsureReadAuthorizedAsync(_db, CurrentUserId(), billType);
+            return null;
+        }
+        catch (BusinessException ex)
+        {
+            LogLegacyReadDenied("导出", billType, ex);
+            return Ok(ApiResponse<object>.Fail(ex.Message, ex.Code));
+        }
+    }
+
+    /// <summary>导出预览最多返回的行数（只用于下载前确认，绝不替代导出）。</summary>
+    private const int ExportPreviewRowLimit = 20;
+
+    /// <summary>
+    /// 导出 / 预览共用的筛选条件（单据号关键字 / 状态 / 日期范围）。日期列只接受该单据<b>已登记</b>的
+    /// 导出列名（白名单），绝不把请求参数直接拼接进 SQL。
+    /// </summary>
+    private static (string Where, List<SqlParameter> Args) BuildExportFilter(
+        string billType, string? keyword, int? status, string? dateField, DateTime? start, DateTime? end)
+    {
+        var where = new System.Text.StringBuilder("1=1");
+        var args = new List<SqlParameter>();
+
+        if (!string.IsNullOrWhiteSpace(keyword))
+        {
+            where.Append(" AND BillNo LIKE @kw");
+            args.Add(new SqlParameter("@kw", $"%{keyword}%"));
+        }
+
+        if (status.HasValue)
+        {
+            where.Append(" AND Status = @st");
+            args.Add(new SqlParameter("@st", status.Value));
+        }
+
+        var safeDateField = default(string);
+        if (!string.IsNullOrWhiteSpace(dateField) && ExportColumns.TryGetValue(billType, out var registered))
+        {
+            // 只接受该族已登记的导出列名（大小写不敏感）；未登记 / 任意列名一律忽略，绝不拼接进 SQL。
+            var matched = registered.FirstOrDefault(
+                c => string.Equals(c.Key, dateField, StringComparison.OrdinalIgnoreCase));
+            if (!string.IsNullOrEmpty(matched.Key)) safeDateField = matched.Key;
+        }
+
+        if (safeDateField is not null)
+        {
+            if (start.HasValue)
+            {
+                where.Append($" AND {safeDateField} >= @start");
+                args.Add(new SqlParameter("@start", start.Value));
+            }
+
+            if (end.HasValue)
+            {
+                where.Append($" AND {safeDateField} <= @end");
+                args.Add(new SqlParameter("@end", end.Value));
+            }
+        }
+
+        return (where.ToString(), args);
+    }
+
+    /// <summary>按既有筛选条件读取导出行（调用方已先授权；只读，不写任何数据）。</summary>
+    private async Task<List<Dictionary<string, object?>>> ReadExportRowsAsync(
+        BillMeta meta, string where, List<SqlParameter> args)
+    {
+        var sql = $"SELECT * FROM db_owner.{meta.Table} WHERE {where} ORDER BY Oid DESC";
+        using var conn = new SqlConnection(_sp.GetConnectionString());
+        await conn.OpenAsync();
+        using var cmd = new SqlCommand(sql, conn);
+        foreach (var arg in args) cmd.Parameters.Add(arg);
+
+        var rows = new List<Dictionary<string, object?>>();
+        using var reader = await cmd.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            var row = new Dictionary<string, object?>();
+            for (var i = 0; i < reader.FieldCount; i++)
+                row[reader.GetName(i)] = reader.IsDBNull(i) ? null : reader.GetValue(i);
+            rows.Add(row);
+        }
+
+        return rows;
+    }
+
+    /// <summary>
+    /// 导出单据为 Excel 文件（按单据号关键字、状态、日期范围筛选）。
+    /// ERP-469：导出前先通过既有读侧门禁（与查询 / 详情 / 默认值同源），绝不绕过既有权限与数据范围。
     /// </summary>
     [HttpGet("{billType}/export")]
     public async Task<IActionResult> Export(
@@ -134,46 +235,53 @@ public partial class BillProcController
         [FromQuery] DateTime? start,
         [FromQuery] DateTime? end)
     {
-        if (!Bills.TryGetValue(billType, out var meta))
-            return Ok(ApiResponse<object>.Fail("未知单据类型", ErrorCodes.InvalidParameter));
+        var denied = await GuardLegacyExportAsync(billType);
+        if (denied is not null) return denied;
 
-        var where = "1=1";
-        if (!string.IsNullOrWhiteSpace(keyword)) where += " AND BillNo LIKE @kw";
-        if (status.HasValue) where += " AND Status = @st";
-        if (!string.IsNullOrWhiteSpace(dateField))
-        {
-            if (start.HasValue) where += $" AND {dateField} >= @start";
-            if (end.HasValue) where += $" AND {dateField} <= @end";
-        }
-
-        var sql = $"SELECT * FROM db_owner.{meta.Table} WHERE {where} ORDER BY Oid DESC";
-        using var conn = new SqlConnection(_sp.GetConnectionString());
-        await conn.OpenAsync();
-        using var cmd = new SqlCommand(sql, conn);
-        if (!string.IsNullOrWhiteSpace(keyword)) cmd.Parameters.AddWithValue("@kw", $"%{keyword}%");
-        if (status.HasValue) cmd.Parameters.AddWithValue("@st", status.Value);
-        if (!string.IsNullOrWhiteSpace(dateField))
-        {
-            if (start.HasValue) cmd.Parameters.AddWithValue("@start", start.Value);
-            if (end.HasValue) cmd.Parameters.AddWithValue("@end", end.Value);
-        }
-
-        var rows = new List<Dictionary<string, object?>>();
-        using (var reader = await cmd.ExecuteReaderAsync())
-        {
-            while (await reader.ReadAsync())
-            {
-                var row = new Dictionary<string, object?>();
-                for (var i = 0; i < reader.FieldCount; i++)
-                    row[reader.GetName(i)] = reader.IsDBNull(i) ? null : reader.GetValue(i);
-                rows.Add(row);
-            }
-        }
+        var meta = Bills[billType];
+        var (where, args) = BuildExportFilter(billType, keyword, status, dateField, start, end);
+        var rows = await ReadExportRowsAsync(meta, where, args);
 
         var columns = ExportColumns.TryGetValue(billType, out var cols) ? cols : null;
         var bytes = ExcelExporter.ExportRows(meta.Table, rows, columns);
         var fileName = $"{meta.Table}_{DateTime.Now:yyyyMMddHHmmss}.xlsx";
         return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", fileName);
+    }
+
+    /// <summary>
+    /// 导出前预览（网页端显式「搜索 / 预览」动作）：与导出使用<b>完全相同</b>的授权与筛选参数
+    /// （单据号关键字 / 状态 / 日期范围），只返回命中计数与有限预览行，供用户在下载前确认；
+    /// 只读、不写任何数据、不绕过既有权限与数据范围，也不改变任何导出口径。
+    /// </summary>
+    [HttpGet("{billType}/export-preview")]
+    public async Task<IActionResult> ExportPreview(
+        string billType,
+        [FromQuery] string? keyword,
+        [FromQuery] int? status,
+        [FromQuery] string? dateField,
+        [FromQuery] DateTime? start,
+        [FromQuery] DateTime? end)
+    {
+        var denied = await GuardLegacyExportAsync(billType);
+        if (denied is not null) return denied;
+
+        var meta = Bills[billType];
+        var (where, args) = BuildExportFilter(billType, keyword, status, dateField, start, end);
+        var rows = await ReadExportRowsAsync(meta, where, args);
+
+        var columns = ExportColumns.TryGetValue(billType, out var cols)
+            ? cols.Select(c => new { key = c.Key, title = c.Title }).ToList()
+            : null;
+
+        return Ok(ApiResponse<object>.Success(new
+        {
+            billType,
+            table = meta.Table,
+            total = rows.Count,
+            previewCount = Math.Min(rows.Count, ExportPreviewRowLimit),
+            columns,
+            items = rows.Take(ExportPreviewRowLimit).ToList(),
+        }));
     }
 }
 

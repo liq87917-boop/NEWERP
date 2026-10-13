@@ -109,6 +109,15 @@ public static class SystemParameterAuthorizationRules
     public const string ExchangeRateInvalidText =
         "默认汇率（ExchangeRate）只接受正的可解析十进制数（必须大于 0）";
 
+    /// <summary>
+    /// 运营单据默认币种 / 汇率缺失或非法时的受控拒绝文案（ERP-469 fail closed）：
+    /// 绝不用「美元 / 1」替代，也绝不臆造一个汇率。
+    /// </summary>
+    public const string BillCurrencyDefaultsUnavailableText =
+        "系统参数未提供可用的默认币种 / 默认汇率（DefaultCurrency 必须是受支持币种代码，"
+        + "ExchangeRate 必须是正的可解析十进制数）：拒绝自动填充（fail closed，绝不臆造汇率），"
+        + "请先在既有「系统参数」中维护合法取值，或在表单中手工录入币种与汇率";
+
     /// <summary>授权与校验口径文案（接口 / 文档同源）</summary>
     public const string RuleText =
         "系统参数（分页 / 主键详情 / 按键详情 / 新增 / 修改）在读取任何参数行或写入之前，"
@@ -118,11 +127,12 @@ public static class SystemParameterAuthorizationRules
         + "ParamValue / Description 有界，且被运营单据默认值消费的 DefaultCurrency 只接受受支持币种代码、"
         + "ExchangeRate 只接受正的可解析十进制数，一律拒绝而不静默截断 / 改写任何参数行；身份只来自已认证请求主体。";
 
-    /// <summary>边界文案（不新增权限 / 表列，不改变既有参数驱动默认值行为）</summary>
+    /// <summary>边界文案（不新增权限 / 表列，默认币种 / 汇率按既有取值护栏 fail closed）</summary>
     public const string BoundaryText =
         "本护栏只保护系统参数的访问与持久化取值校验：不新增菜单 / 角色 / 用户授权或表结构，"
-        + "无匿名 / 管理员兜底，也不改变 BillProcController 既有的参数驱动默认币种 / 汇率回退行为"
-        + "（DefaultCurrency 缺失 / 无效时仍回退美元、ExchangeRate 缺失 / 无效时仍回退 1）；"
+        + "无匿名 / 管理员兜底；被运营单据默认值消费的 DefaultCurrency / ExchangeRate 缺一不可，"
+        + "缺失 / 非法时 BillProcController 的默认值读取与保存兜底都 fail closed（既不回退美元 / 1，"
+        + "也绝不臆造汇率，用户手工录入的合法取值仍然优先且服务端校验仍为权威）；"
         + "被拒绝的读取 / 新增 / 修改不加载、不写入、不改写任何参数行。";
 
     // ==================== 1. 身份 / 账号状态 / 菜单授权（fail closed） ====================
@@ -179,6 +189,28 @@ public static class SystemParameterAuthorizationRules
     public static bool IsPositiveExchangeRate(string? value)
         => decimal.TryParse((value ?? string.Empty).Trim(), NumberStyles.Number, CultureInfo.InvariantCulture,
                out var rate) && rate > 0;
+
+    /// <summary>
+    /// 运营单据（询价单等）新建表单的默认币种 / 汇率解析（纯函数，fail closed，ERP-469）：
+    /// <c>DefaultCurrency</c> 必须是受支持币种代码、<c>ExchangeRate</c> 必须是正的可解析十进制数，
+    /// 任一缺失 / 非法都以既有受控参数错误（<c>1001</c>）拒绝 —— <b>绝不回退美元 / 1，绝不臆造汇率</b>；
+    /// 只有两者都合法才返回规范化后的币种代码与汇率（调用方再映射为既有币种枚举值）。
+    /// </summary>
+    /// <param name="defaultCurrencyValue">系统参数 <c>DefaultCurrency</c> 的原始取值（缺失 = <c>null</c>）</param>
+    /// <param name="exchangeRateValue">系统参数 <c>ExchangeRate</c> 的原始取值（缺失 = <c>null</c>）</param>
+    public static (string CurrencyCode, decimal ExchangeRate) ResolveBillCurrencyDefaults(
+        string? defaultCurrencyValue, string? exchangeRateValue)
+    {
+        var currencyCode = (defaultCurrencyValue ?? string.Empty).Trim();
+        if (!IsSupportedCurrencyCode(currencyCode))
+            throw BusinessException.InvalidParameter($"{BillCurrencyDefaultsUnavailableText}：默认币种（DefaultCurrency）");
+
+        if (!IsPositiveExchangeRate(exchangeRateValue))
+            throw BusinessException.InvalidParameter($"{BillCurrencyDefaultsUnavailableText}：默认汇率（ExchangeRate）");
+
+        var rate = decimal.Parse(exchangeRateValue!.Trim(), NumberStyles.Number, CultureInfo.InvariantCulture);
+        return (currencyCode.ToUpperInvariant(), rate);
+    }
 
     // ==================== 3. 可选字段规范化（判空去空白，不改写任何已存储行） ====================
 

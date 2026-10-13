@@ -1,7 +1,7 @@
 {
   "id": "ERP-469",
   "title": "Fix all seven recorded manual web-test regressions without weakening ERP controls",
-  "status": "pending",
+  "status": "completed",
   "risk_level": "medium",
   "description": "Resolve every discrete finding in NEWERP网页测试错误.xlsx: new inquiry must obtain the existing authorized system default currency/exchange-rate rather than require manual rate entry; validity days must use integral day increments; tabs must retain more than three pages and preserve a user's unsaved page state when switching; inquiry creation must work and inquiry/sales-order export views must offer an explicit search/preview action before download; opening a genuinely new document must not silently reuse earlier form values and must provide a clear-all action. Reuse the existing parameter-authorized default endpoint and existing document authorization, validation, transaction and audit paths. Do not add external FX lookup, SQL, schema, permissions, production data access, or privileged fallback. User-entered values remain editable and server-side authority remains decisive.",
   "acceptance_criteria": [
@@ -66,6 +66,6 @@
     "reason": "Repository-only UI and existing authorized-default behavior; no schema, production, deployment, or irreversible action."
   },
   "max_attempts": 3,
-  "attempts": 0,
+  "attempts": 1,
   "created_at": "2026-10-13T11:30:00Z"
 }

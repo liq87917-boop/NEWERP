@@ -45,7 +45,10 @@ const BILL_CONFIG = {
       { key: 'ContactPerson', label: '联系人' }, { key: 'ContactPhone', label: '联系电话' },
       { key: 'EmpId', label: '业务员', type: 'number' },
       { key: 'Currency', label: '币种', type: 'select', options: CURRENCY_OPTS },
-      { key: 'ExchangeRate', label: '汇率', type: 'number' }, { key: 'ValidDays', label: '有效期(天)', type: 'number' },
+      /* ERP-469：有效期（天）是**整数天**输入 —— 整数步长（step=1）+ 最小 0；
+         浏览器步进（滚轮 / 上下键）只产生整数天，前端另有整数校验，服务端既有校验仍为权威。 */
+      { key: 'ExchangeRate', label: '汇率', type: 'number' },
+      { key: 'ValidDays', label: '有效期(天)', type: 'number', integer: true, step: 1, min: 0 },
       { key: 'Remark', label: '备注', type: 'textarea' },
     ],
   },
@@ -64,3 +67,8 @@ const BILL_CONFIG = {
     ],
   },
 };
+
+/* Node 单测导出（浏览器中 module 为 undefined，自动跳过） */
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = { BILL_CONFIG };
+}

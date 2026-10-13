@@ -5,6 +5,7 @@ using ERP.Infrastructure.Data;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.SqlClient;
+using Microsoft.EntityFrameworkCore;
 
 namespace ERP.Api.Controllers;
 
@@ -119,8 +120,18 @@ public partial class BillProcController : ControllerBase
         foreach (var kv in request.Fields)
             parameters["@" + kv.Key] = kv.Value;
 
-        // 兜底：币种/汇率为空或无效时，回退到系统参数默认值（用户手动传入的值优先）
-        await ApplyCurrencyDefaultsAsync(parameters);
+        // 兜底：币种/汇率为空或无效时，回退到系统参数默认值（用户手动传入的合法值优先）；
+        // ERP-469：系统参数缺失 / 非法时 fail closed（受控失败信封，不调用 sp_Biz_*、不占单号、不写日志、不通知）。
+        try
+        {
+            await ApplyCurrencyDefaultsAsync(parameters);
+        }
+        catch (BusinessException ex)
+        {
+            Serilog.Log.Warning(
+                "单据默认币种 / 汇率不可用，保存被拒绝：{BillType}（错误码 {Code}）", billType, ex.Code);
+            return Ok(ApiResponse<object>.Fail(ex.Message, ex.Code));
+        }
 
         // 明细（副表）序列化为 JSON，供存储过程 OPENJSON 解析
         if (request.Details is { Count: > 0 })
@@ -243,6 +254,8 @@ public partial class BillProcController : ControllerBase
     /// <summary>
     /// 获取单据默认值（默认币种、默认汇率，取自系统参数）。ERP-405：与查询 / 翻页 / 详情共用同一读侧门禁
     /// （实时身份 + 既有功能菜单 + 客户数据范围），默认值本身无行数据但仍须先授权。
+    /// ERP-469：参数缺失 / 非法时同样 <b>fail closed</b>（受控失败信封，绝不返回美元 / 1 或臆造汇率），
+    /// 用户手工录入的合法取值不受影响。
     /// </summary>
     [HttpGet("{billType}/defaults")]
     public async Task<IActionResult> GetDefaults(string billType)
@@ -260,32 +273,43 @@ public partial class BillProcController : ControllerBase
             return Ok(ApiResponse<object>.Fail(ex.Message, ex.Code));
         }
 
-        var (currency, exchangeRate) = await LoadCurrencyDefaultsAsync();
-        return Ok(ApiResponse<object>.Success(new { currency, exchangeRate }));
+        try
+        {
+            var (currency, exchangeRate) = await LoadCurrencyDefaultsAsync();
+            return Ok(ApiResponse<object>.Success(new { currency, exchangeRate }));
+        }
+        catch (BusinessException ex)
+        {
+            LogLegacyReadDenied("默认值", billType, ex);
+            return Ok(ApiResponse<object>.Fail(ex.Message, ex.Code));
+        }
     }
 
-    /// <summary>从系统参数读取默认币种与默认汇率</summary>
+    /// <summary>
+    /// 从系统参数读取默认币种与默认汇率（ERP-469 严格口径）：<c>DefaultCurrency</c> 与
+    /// <c>ExchangeRate</c> 必须存在且合法，否则以既有受控参数错误 <b>fail closed</b> ——
+    /// 绝不回退美元 / 1（绝不臆造汇率）。取值护栏复用
+    /// <see cref="SystemParameterAuthorizationRules.ResolveBillCurrencyDefaults"/>。
+    /// </summary>
     private async Task<(int Currency, decimal ExchangeRate)> LoadCurrencyDefaultsAsync()
     {
-        var currency = (int)Currency.USD;
-        var exchangeRate = 1m;
+        var rows = await _db.SysParameters.AsNoTracking()
+            .Where(p => !p.IsDeleted
+                && (p.ParamKey == SystemParameterAuthorizationRules.DefaultCurrencyKey
+                    || p.ParamKey == SystemParameterAuthorizationRules.ExchangeRateKey))
+            .Select(p => new { p.ParamKey, p.ParamValue })
+            .ToListAsync();
 
-        using var conn = new SqlConnection(_sp.GetConnectionString());
-        await conn.OpenAsync();
-        using var cmd = new SqlCommand(
-            "SELECT ParamKey, ParamValue FROM db_owner.SysParameters WHERE IsDeleted = 0 AND ParamKey IN ('DefaultCurrency','ExchangeRate')",
-            conn);
-        using var reader = await cmd.ExecuteReaderAsync();
-        while (await reader.ReadAsync())
-        {
-            var key = reader.GetString(0);
-            var value = reader.IsDBNull(1) ? string.Empty : reader.GetString(1);
-            if (key == "DefaultCurrency")
-                currency = MapCurrencyCode(value);
-            else if (key == "ExchangeRate" && decimal.TryParse(value, out var rate) && rate > 0)
-                exchangeRate = rate;
-        }
-        return (currency, exchangeRate);
+        var currencyValue = rows
+            .FirstOrDefault(p => string.Equals(p.ParamKey, SystemParameterAuthorizationRules.DefaultCurrencyKey,
+                StringComparison.OrdinalIgnoreCase))?.ParamValue;
+        var exchangeRateValue = rows
+            .FirstOrDefault(p => string.Equals(p.ParamKey, SystemParameterAuthorizationRules.ExchangeRateKey,
+                StringComparison.OrdinalIgnoreCase))?.ParamValue;
+
+        var (currencyCode, exchangeRate) =
+            SystemParameterAuthorizationRules.ResolveBillCurrencyDefaults(currencyValue, exchangeRateValue);
+        return (MapCurrencyCode(currencyCode), exchangeRate);
     }
 
     /// <summary>币种代码映射为枚举值（默认美元）</summary>
@@ -300,7 +324,12 @@ public partial class BillProcController : ControllerBase
         _ => (int)Currency.USD
     };
 
-    /// <summary>币种/汇率为空或无效时，回退到系统参数默认值</summary>
+    /// <summary>
+    /// 币种/汇率为空或无效时，回退到系统参数默认值（用户手动传入的合法值优先）。
+    /// ERP-469：默认值本身缺失 / 非法时以既有受控参数错误 fail closed（见
+    /// <see cref="SystemParameterAuthorizationRules.ResolveBillCurrencyDefaults"/>），
+    /// 绝不臆造汇率；被拒绝的保存不调用存储过程、不占用单号、不写日志、不通知。
+    /// </summary>
     private async Task ApplyCurrencyDefaultsAsync(Dictionary<string, object?> parameters)
     {
         var hasCurrency = parameters.TryGetValue("@Currency", out var cur) && IsPositiveInteger(cur);

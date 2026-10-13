@@ -364,7 +364,98 @@ function iconOf(code) {
   return icon(CODE_ICON[code] || 'dot');
 }
 
-let openTabs = []; // 最近打开的标签（最多 3 个）[{code, name}]
+let openTabs = []; // 已打开的标签（ERP-469：不再限制数量，第 4 个及以后不再被驱逐）[{code, name}]
+
+/* ============ 标签页未保存 UI 状态（ERP-469） ============
+   目标：切换标签时保留每个页面**未保存、非敏感**的界面状态（输入框 / 下拉 / 文本域），
+   关闭标签即丢弃该页签的状态；状态只存在内存（浏览器会话），既不写 localStorage 也不发给服务端，
+   绝不序列化令牌、密码、授权判定结果或任何已落库的单据变更。
+   敏感字段（密码 / 隐藏域 / 文件域，以及 id / name / autocomplete 命中敏感词的字段）一律既不采集也不回写。 */
+const TAB_FORM_STATE = {};                              // { [code]: { content: {...}, modal: {...} } }
+const TAB_STATE_CONTAINER_IDS = ['content', 'modal'];   // 页面内容区 + 单据表单弹层
+const TAB_SENSITIVE_FIELD = /(password|passwd|secret|token|credential|authorization|authcode|captcha|jwt|otp|session)/i;
+
+function tabStateNodes(container) {
+  if (!container || typeof container.querySelectorAll !== 'function') return [];
+  return Array.prototype.slice.call(container.querySelectorAll('input, select, textarea'));
+}
+
+/* 敏感 / 不可采集字段（纯函数）：密码、隐藏域、文件域与命中敏感词的字段一律跳过 */
+function isSensitiveTabField(el) {
+  if (!el) return true;
+  const type = String(el.type || '').toLowerCase();
+  if (type === 'password' || type === 'hidden' || type === 'file') return true;
+  const hint = [el.id, el.name, el.autocomplete]
+    .filter(v => v !== undefined && v !== null && v !== '')
+    .join(' ');
+  return TAB_SENSITIVE_FIELD.test(hint);
+}
+
+/* 采集容器内非敏感字段状态（纯函数，可离线单测）：只记录值 / 勾选，绝不记录授权结论 */
+function captureContainerTabState(container) {
+  const state = {};
+  tabStateNodes(container).forEach(el => {
+    if (!el || !el.id || isSensitiveTabField(el)) return;
+    if (el.type === 'checkbox' || el.type === 'radio') state[el.id] = { checked: !!el.checked };
+    else state[el.id] = { value: el.value === undefined || el.value === null ? '' : String(el.value) };
+  });
+  return state;
+}
+
+/* 回写容器内非敏感字段状态（纯函数，可离线单测）：敏感字段一律不回写 */
+function applyContainerTabState(container, state) {
+  if (!state) return;
+  tabStateNodes(container).forEach(el => {
+    if (!el || !el.id || isSensitiveTabField(el)) return;
+    const saved = state[el.id];
+    if (!saved) return;
+    if (Object.prototype.hasOwnProperty.call(saved, 'checked')) el.checked = !!saved.checked;
+    else el.value = saved.value;
+  });
+}
+
+/* 保存某个页签当前的未保存界面状态（空状态即清除，不保留陈旧值） */
+function captureTabState(code) {
+  if (!code) return;
+  const state = {};
+  TAB_STATE_CONTAINER_IDS.forEach(id => {
+    const container = document.getElementById(id);
+    if (!container) return;
+    const captured = captureContainerTabState(container);
+    if (Object.keys(captured).length) state[id] = captured;
+  });
+  if (Object.keys(state).length) TAB_FORM_STATE[code] = state;
+  else delete TAB_FORM_STATE[code];
+}
+
+/* 恢复某个页签的未保存界面状态（没有保存过就不动任何字段） */
+function applyTabState(code) {
+  const state = code ? TAB_FORM_STATE[code] : null;
+  if (!state) return;
+  TAB_STATE_CONTAINER_IDS.forEach(id => {
+    if (!state[id]) return;
+    applyContainerTabState(document.getElementById(id), state[id]);
+  });
+}
+
+/* 丢弃某个页签保存的界面状态（关闭标签时调用；也可用于新单据入口，绝不沿用上次的值） */
+function dropTabState(code) { if (code) delete TAB_FORM_STATE[code]; }
+
+/* 当前保留的页签状态快照（只读副本，仅供诊断 / 单测使用） */
+function getTabState() {
+  const copy = {};
+  Object.keys(TAB_FORM_STATE).forEach(code => {
+    copy[code] = JSON.parse(JSON.stringify(TAB_FORM_STATE[code]));
+  });
+  return copy;
+}
+
+/* 离开当前页面前保存其未保存状态；已关闭的页签不再保存（关闭 = 丢弃，绝不复活） */
+function saveActiveTabState() {
+  if (!CURRENT_PAGE_CODE) return;
+  if (!openTabs.some(t => t.code === CURRENT_PAGE_CODE)) return;
+  captureTabState(CURRENT_PAGE_CODE);
+}
 
 function renderPage(code, name) {
   CURRENT_PAGE_CODE = code;
@@ -645,6 +736,7 @@ function showToast(msg, type = 'success') {
 }
 
 function navigate(code, name) {
+  saveActiveTabState();   // ERP-469：离开当前页面前保留其未保存的非敏感界面状态
   renderPage(code, name);
   addTab(code, name);
 }
@@ -652,8 +744,7 @@ function navigate(code, name) {
 function addTab(code, name) {
   openTabs = openTabs.filter(t => t.code !== code); // 去重
   openTabs.unshift({ code, name }); // 最新打开的排最前
-  if (openTabs.length > 3) openTabs = openTabs.slice(0, 3); // 最多保留 3 个
-  renderTabs();
+  renderTabs();                     // ERP-469：不再按数量驱逐（保留全部已打开页签）
 }
 
 function renderTabs() {
@@ -671,12 +762,21 @@ function renderTabs() {
 }
 
 function switchTab(code, name) {
+  saveActiveTabState();   // ERP-469：先保存当前页签未保存的非敏感界面状态
   renderPage(code, name); // 切换页面（不改变标签顺序）
+  applyTabState(code);    // 再恢复目标页签保存的状态（没有保存过则不动任何字段）
 }
 
 function closeTab(code) {
   openTabs = openTabs.filter(t => t.code !== code);
-  renderTabs();
+  dropTabState(code);     // ERP-469：关闭标签即丢弃该页签保存的未保存界面状态
+  if (code === CURRENT_PAGE_CODE) {
+    const next = openTabs[0];
+    if (next) switchTab(next.code, next.name);   // 关闭当前页签 → 切换到一个仍打开的页签
+    else goHome();                               // 全部关闭 → 回到首页门户
+  } else {
+    renderTabs();
+  }
 }
 
 /* 返回首页门户（点击左上角公司 LOGO、点顶部「首页」标签均走这里） */
@@ -947,5 +1047,13 @@ if (typeof module !== 'undefined' && module.exports) {
     hasAuthorizedReportDataset,
     addTab,
     getOpenTabs: function () { return openTabs.slice(); },
+    /* ERP-469 标签页未保存 UI 状态（离线可测的纯逻辑） */
+    isSensitiveTabField,
+    captureContainerTabState,
+    applyContainerTabState,
+    captureTabState,
+    applyTabState,
+    dropTabState,
+    getTabState,
   };
 }

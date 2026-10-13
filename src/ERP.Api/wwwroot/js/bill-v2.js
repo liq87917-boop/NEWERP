@@ -58,7 +58,7 @@ function renderBillV2(code) {
         <button class="btn btn-neutral" onclick="exportBillExcel()" title="导出为 Excel">📤 导出</button>
         <button class="btn btn-neutral" onclick="gotoPrintDesign(BILL_CODE)" title="打开样式设计，配置该单据的打印模板">🎨 打印设计</button>
         <button class="btn btn-neutral" onclick="batchPrintBills()" title="勾选表格左侧复选框后，可一次打印多张单据">🖨 批量打印</button>
-        <button class="btn btn-primary" onclick="renderBillEdit()">+ 新增</button>
+        <button class="btn btn-primary" onclick="startNewBillForm()" title="新建单据（只从默认值开始，绝不沿用上一次表单值）">+ 新增</button>
       </div>
     </div>
     <div class="table-wrap" id="table-wrap"></div>
@@ -114,7 +114,7 @@ function renderBillTable(data) {
     if (st === 2) more += `<button class="row-menu-item danger" onclick="billAction(${r.Oid},'void')"><span class="rmi-ico">🚫</span><span class="rmi-txt">作废</span></button>`;
     if (st === -1) more += `<button class="row-menu-item" onclick="billAction(${r.Oid},'restore')"><span class="rmi-ico">♻️</span><span class="rmi-txt">还原</span></button>`;
     const acts = `<div class="row-actions">
-        <button class="btn btn-neutral btn-sm" onclick="renderBillEdit(${r.Oid})">编辑</button>
+        <button class="btn btn-neutral btn-sm" onclick="editBillRow(${r.Oid})">编辑</button>
         <button class="btn btn-neutral btn-sm row-more" onclick="toggleRowMenu(event, this)" title="更多操作">更多</button>
       </div>
       <div class="row-menu" hidden>${more}</div>`;
@@ -148,7 +148,220 @@ async function navBill(oid, direction) {
 function copyBill(oid) {
   toast('复制功能：已打开新单据表单');
   renderBillEdit();          // 打开新建表单（Oid=0，保存即为新增）
-  loadBillEditIntoForm(oid); // 用原单数据填充新表单，实现复制
+  loadBillEditIntoForm(oid); // 用原单数据填充新表单，实现复制（显式、带标注的复制行为）
+  billApplyIntegralDaysControl(); // 复制流程同样只允许整数天（有效期语义与新建一致）
+}
+
+/* ============ ERP-469：新建单据表单（默认值 / 整数有效期 / 清空重填 / 新表单隔离） ============
+   网页手工测试记录的四类问题在此收口：新建单据绝不沿用上一次表单值；有效期只接受整数天；
+   默认币种 / 汇率取自既有（参数授权）默认值端点且缺失 / 非法时显式失败而不臆造；
+   表单提供一键「清空重填」恢复文档化默认值。服务端既有校验 / 授权 / 事务 / 审计路径完全不变。 */
+
+/* 单据字段的「文档化默认值」：只取字段元数据声明的 default，日期字段取当天，其余为空。
+   绝不读取任何上一次表单残留值 —— 真正的新单据只从文档化默认值开始。 */
+function billNewDocumentDefaults(cfg, today) {
+  const day = today || new Date().toISOString().slice(0, 10);
+  const values = {};
+  ((cfg && cfg.fields) || []).forEach(f => {
+    if (!f || !f.key) return;
+    if (f.default !== undefined && f.default !== null) values[f.key] = String(f.default);
+    else if (f.type === 'date') values[f.key] = day;
+    else values[f.key] = '';
+  });
+  return values;
+}
+
+/* 有效期（天）整数校验 / 归一化（纯函数）：
+   - 空 = 未填，交由既有服务端校验裁决；
+   - 只接受非负整数天（^\d+$），小数 / 负数 / 文本一律 ok=false，并给出可立即回写的整数
+     （小数向下取整，其它清空）—— 于是滚轮 / 步进产生的「非整数天」不可能作为有效天数提交。
+   服务端既有校验仍为权威，本函数只是让非法值无法通过前端。 */
+function billIntegralDays(raw) {
+  const text = raw === null || raw === undefined ? '' : String(raw).trim();
+  if (text === '') return { ok: true, value: '', message: '' };
+  if (/^\d+$/.test(text)) {
+    const days = Number(text);
+    if (!Number.isSafeInteger(days))
+      return { ok: false, value: '', message: '有效期（天）超出可录入范围，请重新录入整数天' };
+    return { ok: true, value: days, message: '' };
+  }
+  const truncated = /^\d+\.\d+$/.test(text) ? Math.trunc(Number(text)) : null;
+  return {
+    ok: false,
+    value: truncated === null ? '' : truncated,
+    message: '有效期（天）只能录入整数天（不支持小数天）',
+  };
+}
+
+/* 服务端默认值 → 表单值（纯函数，fail closed）：
+   默认币种必须是正整数枚举值、默认汇率必须是正数；任一缺失 / 非法都返回空值 + 显式提示，
+   绝不回退美元 / 1，也绝不臆造汇率（用户仍可手工录入，服务端校验才是权威）。 */
+function billDefaultsIntoFields(serverDefaults, cfg) {
+  const fields = (cfg && cfg.fields) || [];
+  const values = {};
+  const warnings = [];
+
+  if (fields.some(f => f && f.key === 'Currency')) {
+    const currency = Number(serverDefaults && serverDefaults.currency);
+    if (Number.isInteger(currency) && currency > 0) {
+      values.Currency = String(currency);
+    } else {
+      values.Currency = '';
+      warnings.push('系统未提供可用的默认币种（已保持为空，请手工选择）');
+    }
+  }
+
+  if (fields.some(f => f && f.key === 'ExchangeRate')) {
+    const rate = Number(serverDefaults && serverDefaults.exchangeRate);
+    if (Number.isFinite(rate) && rate > 0) {
+      values.ExchangeRate = String(rate);
+    } else {
+      values.ExchangeRate = '';
+      warnings.push('系统未提供可用的默认汇率（已保持为空，绝不自动生成汇率，请手工录入）');
+    }
+  }
+
+  return { values, warnings };
+}
+
+/* 一键「清空重填」的计划（纯函数，可离线单测）：以文档化默认值为基线，
+   可选叠加服务端默认币种 / 汇率（缺失 / 非法时显式提示且保持为空）。
+   绝不含任何上一次表单值 —— 清空重填即一次性恢复默认。 */
+function billClearAllPlan(cfg, serverDefaults, today) {
+  const values = billNewDocumentDefaults(cfg, today);
+  const warnings = [];
+  if (serverDefaults) {
+    const applied = billDefaultsIntoFields(serverDefaults, cfg);
+    Object.keys(applied.values).forEach(key => { values[key] = applied.values[key]; });
+    warnings.push.apply(warnings, applied.warnings);
+  }
+  return { values, warnings };
+}
+
+function billCurrentPageCode() {
+  return (typeof CURRENT_PAGE_CODE === 'string') ? CURRENT_PAGE_CODE : '';
+}
+
+/* 当前是否为「新建单据」表单（编辑 / 复制流程 Oid > 0，绝不覆盖既有记录值） */
+function billIsNewDocumentForm() {
+  return !(typeof BILL_EDIT_OID === 'number' && BILL_EDIT_OID > 0);
+}
+
+/* 有效期（天）控件的整数语义：整数步长 + 最小 0 + 输入即归整。
+   浏览器 step 让滚轮 / 上下键只产生整数天；前端校验再挡住手工输入的小数 / 负数；
+   服务端既有校验仍为权威。 */
+function billApplyIntegralDaysControl() {
+  const el = document.getElementById('f_ValidDays');
+  if (!el || typeof el.setAttribute !== 'function') return;
+  el.setAttribute('type', 'number');
+  el.setAttribute('step', '1');
+  el.setAttribute('min', '0');
+  el.setAttribute('inputmode', 'numeric');
+  el.oninput = billGuardValidDaysInput;
+  el.onchange = billGuardValidDaysInput;
+  el.onwheel = function () { setTimeout(billGuardValidDaysInput, 0); };
+}
+
+/* 有效期输入即时归整：非整数天一律不留在字段里（并显式提示） */
+function billGuardValidDaysInput() {
+  const el = document.getElementById('f_ValidDays');
+  if (!el) return;
+  const checked = billIntegralDays(el.value);
+  if (checked.ok) return;
+  el.value = checked.value === '' ? '' : String(checked.value);
+  if (checked.message) toast(checked.message, 'error');
+}
+
+/* 新建表单增强（只加不删）：整数有效期控件 + 一键「清空重填」入口 */
+function billApplyNewFormUi() {
+  billApplyIntegralDaysControl();
+
+  const actions = (typeof document.querySelector === 'function')
+    ? document.querySelector('.bill-hero-actions') : null;
+  if (!actions || typeof actions.insertAdjacentHTML !== 'function') return;
+  if (document.getElementById('bill-clear-all')) return;
+  actions.insertAdjacentHTML('beforeend',
+    '<button type="button" class="btn" id="bill-clear-all" onclick="clearBillFormFields()" '
+    + 'title="清空当前新建表单并恢复文档化默认值（币种 / 汇率重新取既有系统参数默认值）">🧹 清空重填</button>');
+}
+
+/* 从既有（参数授权）默认值端点取默认币种 / 汇率并填充**新建**表单。
+   授权失败 / 参数缺失 / 取值非法：清空这两个字段并显式提示（fail closed，绝不臆造汇率）；
+   用户手工录入始终可编辑，保存仍走既有服务端校验 / 授权 / 事务 / 审计路径。 */
+async function loadAuthorizedBillDefaults() {
+  if (!billIsNewDocumentForm()) return;
+
+  try {
+    const defaults = await api(`/api/v2/bills/${BILL_CODE}/defaults`);
+    const applied = billDefaultsIntoFields(defaults, BILL_CONFIG[BILL_CODE]);
+    Object.keys(applied.values).forEach(key => {
+      const el = document.getElementById('f_' + key);
+      if (el) el.value = applied.values[key];
+    });
+    if (applied.warnings.length) toast(applied.warnings.join('；'), 'error');
+  } catch (err) {
+    const currencyEl = document.getElementById('f_Currency');
+    const rateEl = document.getElementById('f_ExchangeRate');
+    if (currencyEl) currencyEl.value = '';
+    if (rateEl) rateEl.value = '';
+    toast('未能获取系统默认币种 / 汇率：' + ((err && err.message) ? err.message : '请求失败')
+      + '（已保持为空，绝不自动生成汇率，请手工录入或联系管理员维护系统参数）', 'error');
+  }
+
+  if (typeof updateBillHeroChips === 'function') updateBillHeroChips();
+}
+
+/* 新建单据入口（工具栏「+ 新增」）：绝不沿用上一次表单值 —— 先丢弃当前页签保存的未保存状态，
+   再以既有渲染路径开启全新表单（只从文档化默认值开始），最后增强整数有效期 / 清空重填并取既有系统默认值。 */
+function startNewBillForm() {
+  const pageCode = billCurrentPageCode();
+  if (pageCode && typeof dropTabState === 'function') dropTabState(pageCode);
+  renderBillEdit();          // 既有新建渲染（无 Oid = 新增）
+  billApplyNewFormUi();
+  return loadAuthorizedBillDefaults();
+}
+
+/* 编辑入口：保留既有编辑行为（按 Oid 载入持久化值），只补齐整数有效期控件 */
+function editBillRow(oid) {
+  renderBillEdit(oid);
+  billApplyIntegralDaysControl();
+}
+
+/* 一键「清空重填」：主表恢复到文档化默认值、明细恢复到一条空行，并重新取既有系统默认币种 / 汇率。
+   只作用于当前新建表单（编辑 / 复制流程的显式、带标注行为不变）。 */
+function clearBillFormFields() {
+  const cfg = BILL_CONFIG[BILL_CODE];
+  if (!cfg) return;
+
+  const defaults = billClearAllPlan(cfg, null).values;
+  (cfg.fields || []).forEach(f => {
+    if (!f || !f.key) return;
+    const el = document.getElementById('f_' + f.key);
+    if (el) {
+      const value = defaults[f.key] === undefined ? '' : defaults[f.key];
+      if (f.type === 'select') {
+        el.value = value !== '' ? value
+          : ((el.options && el.options.length) ? el.options[0].value : '');
+      } else {
+        el.value = value;
+      }
+    }
+    const searchEl = document.getElementById('f_' + f.key + '_search');
+    if (searchEl) searchEl.value = '';
+  });
+
+  // 明细恢复为一条空行（新建表单的初始状态），绝不沿用上一次的明细值。
+  const tbody = document.getElementById('detail-tbody');
+  if (tbody && typeof addDetailRow === 'function') {
+    tbody.innerHTML = '';
+    addDetailRow();
+    if (typeof updateDetailSummary === 'function') updateDetailSummary();
+  }
+
+  const pageCode = billCurrentPageCode();
+  if (pageCode && typeof dropTabState === 'function') dropTabState(pageCode);
+  toast('已恢复默认值');
+  return loadAuthorizedBillDefaults();
 }
 
 /* ============ 批量打印（勾选多张单据 → 生成多页打印任务） ============ */
@@ -203,4 +416,14 @@ async function batchPrintBills() {
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = '🖨 批量打印'; }
   }
+}
+
+/* Node 单测导出（浏览器中 module 为 undefined，自动跳过） */
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = {
+    billNewDocumentDefaults,
+    billIntegralDays,
+    billDefaultsIntoFields,
+    billClearAllPlan,
+  };
 }
