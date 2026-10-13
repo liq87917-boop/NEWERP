@@ -263,7 +263,11 @@ async function saveForm(id) {
        计划单号刻意不在表单里：省略 / 空串一律由服务端权威生成（客户端注入值不参与持久化）。
        ERP-483：规范客诉单（complaint）的来源销售订单 Id 也以 nullable: true 声明（可空引用），
        留空提交 null（保留服务端历史「未关联来源」语义），清空来源即「显式断开」；客诉单号刻意不在表单里：
-       省略 / 空串一律由服务端权威生成（客户端注入值不参与持久化）。 */
+        省略 / 空串一律由服务端权威生成（客户端注入值不参与持久化）。
+        ERP-484：规范订柜信息（booking）的可选供应商 / 报关行引用以 nullable: true 声明（type: 'ref' 留空本就提交
+        null = 未指定，绝不回落为 0）；可选日期（订柜 / 开船 / ETD·ETA·ATD·ATA / 查验 / 放行）留空提交 null，
+        跟踪三态（查验要求）留空提交 null（未知）；订柜单号刻意不在表单里：省略 / 空串一律由服务端权威生成
+        （客户端注入值不参与持久化），保存成功返回 { id, bookingNo, status } 并用规范 Id 重开 / 修改。 */
     if (f.type === 'number') v = v === '' ? (f.nullable === true ? null : 0) : Number(v);
     if (f.type === 'ref') v = v === '' ? null : Number(v);
     if (f.type === 'parent') v = v === '' ? null : Number(v);

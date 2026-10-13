@@ -323,12 +323,16 @@ public class ContainerBookingController : DocumentControllerBase<ContainerBookin
 
     /// <summary>
     /// 新增订柜信息（ERP-040：跟踪字段按统一口径校验后落库 —— 出运方式只接受 LCL / FCL / 未指定，
-    /// 报关行必须是启用未删除的 CustomsBroker 字典项，查验要求保持三态）
+    /// 报关行必须是启用未删除的 CustomsBroker 字典项，查验要求保持三态）。
+    /// <para>ERP-484：手工录入表单不提交订柜单号（<see cref="ContainerBooking.BookingNo"/> 已去掉显式 <c>[Required]</c>，
+    /// 省略 / 空串不再被模型绑定层拒为 HTTP 400）。校验顺序保持「先拒绝、后编号」：实时身份 / 菜单 / 数据范围 +
+    /// 客户（必填）与供应商（可选）实时主数据校验 → ERP-040 跟踪字段（出运方式 / 有界文本 / 查验三态 / 报关行引用）
+    /// 校验 → <b>只有全部通过之后</b>才由服务端权威覆盖主键 / 订柜单号 / 状态 / 删除态 / 时间戳。被拒绝的请求
+    /// 零表头变化、零状态变化、零占号（单号预约永不发生）。</para>
     /// </summary>
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] ContainerBooking entity)
     {
-        entity.Id = 0;
         // 供应商为可选项：0 与 null 同义（未指定）
         if (entity.SupplierId is <= 0) entity.SupplierId = null;
         // ERP-360：身份 / 菜单 / 数据范围 + 客户 / 供应商实时主数据校验，
@@ -336,12 +340,19 @@ public class ContainerBookingController : DocumentControllerBase<ContainerBookin
         await BookingAuthorizationRules.EnsureWriteAuthorizedAsync(Db, CurrentUserId(), entity, storedCustomerId: null);
         // 先校验：不合格直接拒绝，不占用单据号流水
         await ContainerShipmentTrackingService.ApplyAsync(Db, entity, stored: null);
+        // ERP-484：全部校验通过之后，主键 / 订柜单号 / 状态 / 删除态 / 时间戳一律由服务端权威覆盖，
+        // 客户端注入值（省略 / 空串 / 伪造单号 · 主键 · 状态 · 删除态 · 时间戳）不参与持久化。
+        // 订柜信息始终只是物流证据：不创建库存移动 / 装柜 / 单证 / 财务记录，也不臆造来源链接。
+        entity.Id = 0;
         entity.BookingNo = await _noService.GenerateAsync(DocumentType.ContainerBooking);
         entity.Status = DocumentStatus.Pending;
+        entity.IsDeleted = false;
+        entity.UpdatedAt = null;
         entity.CreatedAt = DateTime.Now;
         Db.ContainerBookings.Add(entity);
         await Db.SaveChangesAsync();
-        return Ok(ApiResponse<object>.Success(new { entity.Id, entity.BookingNo }, "订柜信息创建成功"));
+        return Ok(ApiResponse<object>.Success(
+            new { entity.Id, entity.BookingNo, entity.Status }, "订柜信息创建成功"));
     }
 
     /// <summary>

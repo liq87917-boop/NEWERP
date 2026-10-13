@@ -164,7 +164,12 @@ Object.assign(MODULES, {
   },
   /* ERP-040：订柜信息 = 外贸 / 物流跟踪字段的**权威记录**（出运方式 / B/L / S-O / 中转港 / ETD·ETA·ATD·ATA /
      拖车 / 报关行 / 查验要求与日期 / 放行日期）。列表与详情只回显本单持久化的值，未知一律显示「未知」；
-     报关行引用停用 / 删除后仍显示当时的名称快照并标注不可用。 */
+     报关行引用停用 / 删除后仍显示当时的名称快照并标注不可用。
+     ERP-484：既有「订柜信息」菜单（菜单编码 booking，BILL_CODE_MAP 已无该键）直接打开本规范模块
+     （api/container/bookings，规范 Id 口径）。**表单刻意不提交 bookingNo**：省略 / 空串由服务端权威生成
+     （Container1.cs 的 ContainerBooking.BookingNo 已去掉显式 [Required]，不再被模型绑定层拒为 HTTP 400），
+     保存成功返回 { id, bookingNo, status }，重开 / 修改一律按规范 Id。可选的供应商 / 报关行引用以
+     nullable 声明：留空提交 null（未指定），绝不回落为 0 / 自由文本，也不做任何 legacy 单号映射。 */
   booking: {
     title: '订柜信息', api: '/api/container/bookings', canSubmit: true,
     columns: [
@@ -193,7 +198,8 @@ Object.assign(MODULES, {
     fields: [
       { key: 'bookingDate', label: '订柜日期', type: 'date' },
       { key: 'customerId', label: '客户', type: 'ref', ref: 'customer' },
-      { key: 'supplierId', label: '供应商（可留空）', type: 'ref', ref: 'supplier' },
+      /* ERP-484：可选引用以 nullable 声明（留空提交 null = 未指定；服务端仍把 0 / 非法 Id fail closed 拒绝） */
+      { key: 'supplierId', label: '供应商（可留空）', type: 'ref', ref: 'supplier', nullable: true },
       { key: 'containerType', label: '柜型', type: 'select', options: CONTAINER_OPTS },
       { key: 'shippingCompany', label: '船公司' }, { key: 'voyageNo', label: '航次' },
       { key: 'sailingDate', label: '开船日期', type: 'date' },
@@ -205,7 +211,7 @@ Object.assign(MODULES, {
       { key: 'etd', label: '预计开船 ETD', type: 'date' }, { key: 'eta', label: '预计到港 ETA', type: 'date' },
       { key: 'atd', label: '实际开船 ATD', type: 'date' }, { key: 'ata', label: '实际到港 ATA', type: 'date' },
       { key: 'truckerName', label: '拖车 / 集卡公司' },
-      { key: 'customsBrokerId', label: '报关行（可留空）', type: 'ref', ref: 'customsBroker' },
+      { key: 'customsBrokerId', label: '报关行（可留空）', type: 'ref', ref: 'customsBroker', nullable: true },
       { key: 'inspectionRequired', label: '查验要求', type: 'select', valueType: 'bool?', options: INSPECTION_REQUIRED_OPTS },
       { key: 'inspectionDate', label: '查验日期（可留空）', type: 'date' },
       { key: 'customsReleaseDate', label: '海关放行日期（可留空）', type: 'date' },

@@ -70,8 +70,21 @@ public class ContainerReceivingPlan : BaseEntity
 /// </summary>
 public class ContainerBooking : BaseEntity
 {
-    /// <summary>订柜单号</summary>
-    [Required, MaxLength(50)]
+    /// <summary>
+    /// 订柜单号（服务端权威生成：新增入口一律在实时身份 / 账号状态 / 既有「订柜信息」（<c>booking</c>）菜单 /
+    /// 权威客户数据范围、真实可用客户与可选供应商、已知柜型与有界文本等全部校验通过之后，由
+    /// <c>IDocumentNumberService</c> 预约覆盖；调用方提交值不参与持久化）。
+    /// <para>ERP-484：这里刻意<strong>不加</strong> <c>[Required]</c>（与 ERP-482 收货计划单号 / ERP-477 入库单号 /
+    /// ERP-478 出库单号 / ERP-479 收款单号 · 付款单号 / ERP-480 申请单号 / ERP-481 结算单号同源口径）。手工录入表单
+    /// 不提交订柜单号，MVC 对非空引用类型属性本就会推断一个 <c>AllowEmptyStrings = true</c> 的隐式必填（允许空串）；
+    /// 而显式 <c>[Required]</c>（默认 <c>AllowEmptyStrings = false</c>）会把「省略订柜单号」在模型绑定 / 模型校验阶段
+    /// 直接拒绝为 HTTP 400 <c>{"errors":{"BookingNo":[...]}}</c>，服务端权威单号根本没有机会生成。移除显式特性后：
+    /// 省略 / 空串照常绑定并进入已授权的 <c>ContainerBookingController.Create</c>，服务端仍按唯一权威口径覆盖订柜单号、
+    /// 主键、状态、删除态与时间戳；数据库列仍是 NOT NULL（非空 CLR 引用类型），长度仍受
+    /// <see cref="MaxLengthAttribute"/>(50) 约束，非法 / 越权请求的校验顺序不变（授权与主数据 / 边界校验先于单号预约
+    /// 与任何写入）。</para>
+    /// </summary>
+    [MaxLength(50)]
     public string BookingNo { get; set; } = string.Empty;
 
     /// <summary>订柜日期</summary>
