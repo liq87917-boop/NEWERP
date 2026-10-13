@@ -98,6 +98,11 @@ public static class InquiryQuotationConversion
         // ERP-470：币种 / 汇率 / 数量 / 单价与行金额、合计一律由唯一权威契约校验并按币种精度派生
         // （绝不静默替换汇率、绝不采信来源行金额）：非法来源条款在单号预约与任何写入之前受控拒绝。
         QuotationCommercialValidationRules.NormalizeDerivedDraft(quotation);
+
+        // ERP-472：询价单 → 报价单（直接转换 / 带入预填）先复核**实时主数据引用** —— 草稿承载的客户 / 业务员 /
+        // 明细商品必须在生成草稿与预约单号之前解析到实时主数据（零 / 负 / 缺失 / 已删除 / 已停用一律受控拒绝）；
+        // 被拒绝的转换绝不消耗报价单号、绝不落库、绝不改写来源询价单状态。
+        await QuotationMasterReferenceRules.EnsureMasterReferencesAsync(db, quotation);
         return quotation;
     }
 

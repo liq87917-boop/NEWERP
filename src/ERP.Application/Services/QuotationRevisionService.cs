@@ -45,6 +45,10 @@ public static class QuotationRevisionService
         // 非法历史数量绝不通过「创建版本」变成可提交的草稿；校验失败即受控拒绝，源版本与版本号零变更。
         QuotationCommercialValidationRules.ValidatePersisted(source);
 
+        // ERP-472：复制前复核源版本的**实时主数据引用**（客户 / 业务员 / 明细商品）—— 草稿保存后被删除 / 停用的
+        // 引用绝不通过「创建版本」变成新的可提交草稿；校验失败即受控拒绝，源版本一行不改、版本号零变更。
+        await QuotationMasterReferenceRules.EnsureMasterReferencesAsync(db, source);
+
         // 链根：源版本本身无根则源即根；否则取源记录的根单 Id / 根单号
         var rootId = source.RootQuotationId ?? source.Id;
         var rootNo = source.RootQuotationId is null

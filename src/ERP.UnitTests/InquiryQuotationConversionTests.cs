@@ -120,6 +120,32 @@ public class InquiryQuotationConversionTests
         Assert.Single(db.Quotations.Where(q => !q.IsDeleted));
     }
 
+    [Fact]
+    public async Task 转报价_来源商品已停用_拒绝且来源状态与写入不变()
+    {
+        // ERP-472：询价转报价在来源行锁内复核草稿的实时主数据引用 —— 失效商品不得生成报价单，也不改写来源。
+        using var db = TestDbFactory.Create();
+        var inquiry = Seed(db, DocumentStatus.Approved);
+        var detail = db.InquiryDetails.Single();
+        db.BaseProducts.Add(new BaseProduct
+        {
+            Id = detail.ProductId, ProductCode = "P-CONVERT", ProductName = "Widget", Unit = "PCS", Status = 0
+        });
+        db.SaveChanges();
+
+        var error = await Assert.ThrowsAsync<BusinessException>(() => Controller(db).ToQuotation(inquiry.Id));
+
+        Assert.Equal(ErrorCodes.RuleConflict, error.Code);
+        Assert.Contains("已停用", error.Message);
+        Assert.Empty(db.Quotations);
+        Assert.Equal(DocumentStatus.Approved, db.Inquiries.AsNoTracking().Single().Status);
+
+        // 带入预填（只读）同样受控拒绝：不产出草稿、不改写来源状态。
+        var prefill = await Assert.ThrowsAsync<BusinessException>(() => Controller(db).QuotationPrefill(inquiry.Id));
+        Assert.Equal(ErrorCodes.RuleConflict, prefill.Code);
+        Assert.Equal(DocumentStatus.Approved, db.Inquiries.AsNoTracking().Single().Status);
+    }
+
     private static InquiryController Controller(ERP.Infrastructure.Data.ErpDbContext db)
     {
         var controller = new InquiryController(db, new DocumentNumberService(db));

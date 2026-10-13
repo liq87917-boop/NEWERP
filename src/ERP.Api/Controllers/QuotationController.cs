@@ -287,6 +287,9 @@ public class QuotationController : DocumentControllerBase<Quotation>
             QuotationMutationRules.EnsureSubmitAllowed(GetStatus(entity));
             // ERP-470：提交前按唯一权威契约复核已持久化商业条款（至少一行有效明细；非法历史数量原子拒绝、状态不变）。
             QuotationCommercialValidationRules.ValidateOperational(entity);
+            // ERP-472：运营承诺（提交）在既有报价单来源行锁内、状态改写之前复核**实时主数据引用** ——
+            // 草稿保存后被删除 / 停用的客户 / 商品 / 业务员一律原子拒绝，绝不把失效引用提交进运营需求。
+            await QuotationMasterReferenceRules.EnsureMasterReferencesAsync(Db, entity);
             SetStatus(entity, DocumentStatus.Submitted);
             await Db.SaveChangesAsync();
             return Ok(ApiResponse<object>.Success(null, "提交成功"));
@@ -307,6 +310,9 @@ public class QuotationController : DocumentControllerBase<Quotation>
                 QuotationMutationRules.ActiveDetailCount(entity));
             // ERP-470：审核前按唯一权威契约复核已持久化商业条款（非法历史数量绝不成为可转 PI / 订单的实时履约）。
             QuotationCommercialValidationRules.ValidateOperational(entity);
+            // ERP-472：运营承诺（审核）在既有报价单来源行锁内、状态改写之前复核**实时主数据引用** ——
+            // 失效客户 / 商品 / 业务员绝不通过审核进入下游转换。
+            await QuotationMasterReferenceRules.EnsureMasterReferencesAsync(Db, entity);
             SetStatus(entity, DocumentStatus.Approved);
             await Db.SaveChangesAsync();
             return Ok(ApiResponse<object>.Success(null, "报价单已审核"));
@@ -438,6 +444,10 @@ public class QuotationController : DocumentControllerBase<Quotation>
         // 允许显式支持的空草稿，但被提交的行必须是合法商业行 —— 非法请求零写入、零占号。
         QuotationCommercialValidationRules.ValidateIncomingDraft(entity);
 
+        // ERP-472：显式客户 / 业务员 / 明细商品引用必须在单号预约与任何表头 / 明细写入之前解析到**实时主数据**
+        // （零 / 负 / 缺失 / 已删除 / 已停用一律受控拒绝；留空的引用与手工商品快照行保持既有口径）。
+        await QuotationMasterReferenceRules.EnsureMasterReferencesAsync(Db, entity);
+
         var requestedInquiryId = SalesDocumentSourceLineageRules.NormalizeId(entity.InquiryId);
         var change = SalesDocumentSourceLineageRules.ResolveChange(
             SalesDocumentSourceKind.Inquiry, null, requestedInquiryId);
@@ -529,6 +539,10 @@ public class QuotationController : DocumentControllerBase<Quotation>
         // ERP-470：商业条款在开事务 / 加锁 / 取号与任何字段改写之前校验（被拒绝的请求零写入、零占号；
         // 表头 / 明细 / 来源单据 / 状态与既有单号预约均不变）。允许显式支持的空草稿。
         QuotationCommercialValidationRules.ValidateIncomingDraft(entity);
+
+        // ERP-472：显式客户 / 业务员 / 明细商品引用必须在开事务 / 加锁 / 任何字段改写之前解析到**实时主数据**
+        // （零 / 负 / 缺失 / 已删除 / 已停用一律受控拒绝；被拒绝的请求表头 / 明细 / 单号预约全部不变）。
+        await QuotationMasterReferenceRules.EnsureMasterReferencesAsync(Db, entity);
 
         var requestedInquiryId = SalesDocumentSourceLineageRules.NormalizeId(entity.InquiryId);
         var pre = SalesDocumentSourceLineageRules.ResolveChange(

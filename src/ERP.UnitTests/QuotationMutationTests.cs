@@ -98,6 +98,10 @@ public class QuotationMutationTests
     private static Quotation SeedQuotation(ErpDbContext db, string no, DocumentStatus status,
         long? customerId, params QuotationDetail[] details)
     {
+        // ERP-472：显式客户引用必须是**实时**主数据（护栏要求解析到存在 / 未删除 / 启用客户）——
+        // 夹具按需补齐被引用的客户行；已存在时不做任何改动。
+        if (customerId.HasValue) EnsureLiveCustomer(db, customerId.Value);
+
         var quotation = new Quotation
         {
             QuotationNo = no,
@@ -126,6 +130,25 @@ public class QuotationMutationTests
         db.Quotations.Add(quotation);
         db.SaveChanges();
         return quotation;
+    }
+
+    /// <summary>
+    /// ERP-472 夹具适配：确保被引用的客户实时存在（显式客户引用必须解析到实时主数据）。
+    /// 已存在时不做任何改动（绝不回填 / 改写既有夹具行）。
+    /// </summary>
+    private static void EnsureLiveCustomer(ErpDbContext db, long customerId)
+    {
+        if (db.BaseCustomers.Any(c => c.Id == customerId)) return;
+        db.BaseCustomers.Add(new BaseCustomer
+        {
+            Id = customerId,
+            CustomerCode = $"C-QT-{customerId}",
+            CustomerName = "义乌客户（护栏测试）",
+            Status = 1,
+            CreditStatus = "正常",
+            DepositRatio = 30m
+        });
+        db.SaveChanges();
     }
 
     /// <summary>播种一张指向来源报价单的 PI（把报价单标记为「已完成」+ 有下游链接）。</summary>

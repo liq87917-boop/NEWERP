@@ -503,6 +503,27 @@ public class QuotationRevisionTests
         Assert.Equal(0, db.Quotations.Count(q => q.RootQuotationId == root.Id));
     }
 
+    [Fact]
+    public async Task CreateRevision_rejects_source_with_disabled_product_without_writing()
+    {
+        // ERP-472：源版本的实时主数据引用必须在复制前复核（商品被停用即受控拒绝，源版本与版本号零变更）。
+        using var db = TestDbFactory.Create();
+        var source = SeedSource(db);
+        var detail = db.QuotationDetails.First(d => d.QuotationId == source.Id && d.ProductCode == "P001");
+        db.BaseProducts.Add(new BaseProduct
+        {
+            Id = detail.ProductId!.Value, ProductCode = "P001", ProductName = "商品 A", Unit = "PCS", Status = 0
+        });
+        db.SaveChanges();
+
+        var ex = await Assert.ThrowsAsync<BusinessException>(() => Controller(db).CreateRevision(source.Id));
+
+        Assert.Equal(ErrorCodes.RuleConflict, ex.Code);
+        Assert.Contains("已停用", ex.Message);
+        Assert.Equal(0, db.Quotations.Count(q => q.RootQuotationId == source.Id));
+        Assert.Equal(DocumentStatus.Approved, db.Quotations.AsNoTracking().Single(q => q.Id == source.Id).Status);
+    }
+
     /// <summary>读取控制器返回的统一响应数据</summary>
     private static T GetData<T>(IActionResult action)
     {
@@ -514,6 +535,24 @@ public class QuotationRevisionTests
     /// <summary>读取版本链响应中的提示文案（版本链长度也在其中）</summary>
     private static string OkMessage(IActionResult action)
         => Assert.IsType<ApiResponse<List<QuotationRevisionChainItem>>>(Assert.IsType<OkObjectResult>(action).Value).Message ?? string.Empty;
+
+    /// <summary>
+    /// ERP-472 夹具适配：确保被引用的客户实时存在（显式客户引用必须解析到实时主数据）。
+    /// 已存在时不做任何改动（绝不回填 / 改写既有夹具行）。
+    /// </summary>
+    private static void EnsureLiveCustomer(ErpDbContext db, long customerId)
+    {
+        if (db.BaseCustomers.Any(c => c.Id == customerId)) return;
+        db.BaseCustomers.Add(new BaseCustomer
+        {
+            Id = customerId,
+            CustomerCode = $"C-REV-{customerId}",
+            CustomerName = "义乌客户（版本测试）",
+            Status = 1,
+            DepositRatio = 30m
+        });
+        db.SaveChanges();
+    }
 
     /// <summary>源版本明细的持久化快照（主键 / 行号 / 金额 / 软删除标记 / 商品编码），用于断言「源版本一行未改」</summary>
     private static string SourceLines(ErpDbContext db, long quotationId) => string.Join(";", db.QuotationDetails.AsNoTracking()
@@ -550,6 +589,9 @@ public class QuotationRevisionTests
     private static Quotation SeedSource(ErpDbContext db, string no = RootNo,
         DocumentStatus status = DocumentStatus.Approved, int revisionNumber = 1)
     {
+        // ERP-472：源版本引用的客户必须是**实时**主数据（护栏要求显式客户引用解析到存在 / 未删除 / 启用客户）。
+        EnsureLiveCustomer(db, 7L);
+
         var quotation = new Quotation
         {
             QuotationNo = no,

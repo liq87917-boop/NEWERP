@@ -165,6 +165,22 @@ public class QuotationCrudRegressionTests
         Assert.Equal("QT-BETA", Assert.Single(result.Items).QuotationNo);
     }
 
+    [Fact]
+    public async Task Create_rejects_invalid_explicit_master_references_without_writing()
+    {
+        // ERP-472：显式客户引用必须解析到实时主数据（零 / 负 / 缺失 / 已删除 / 已停用一律在写入之前受控拒绝）。
+        using var db = TestDbFactory.Create();
+        var entity = Draft("QT-BAD-MASTER", DocumentStatus.Pending);
+        entity.CustomerId = 424242L;
+        entity.Details = new() { Line(1, 1, 1, 1) };
+
+        var ex = await Assert.ThrowsAsync<BusinessException>(() => Controller(db).Create(entity));
+
+        Assert.Equal(ErrorCodes.NotFound, ex.Code);
+        Assert.Empty(db.Quotations);
+        Assert.Empty(db.QuotationDetails);
+    }
+
     private static QuotationController Controller(ERP.Infrastructure.Data.ErpDbContext db)
     {
         var controller = new QuotationController(db, new DocumentNumberService(db));

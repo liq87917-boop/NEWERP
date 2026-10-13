@@ -17,6 +17,10 @@ namespace ERP.Api.Controllers;
 /// 既有业务员数据范围；转报价单额外要求既有「报价单」（<c>quotation</c>）菜单授权。
 /// 生命周期变更 / 批量删除 / 转报价单都在「询价单来源行锁 + 原子事务 + 锁内权威重读」内执行，
 /// 与报价单锁的确定顺序为「询价单行锁 → 报价单行锁」。</para>
+/// <para>ERP-472：转报价单（<see cref="ToQuotation"/>）与带入预填（<see cref="QuotationPrefill"/>）
+/// 复用 <see cref="InquiryQuotationConversion.BuildDraftAsync(IErpDbContext, Inquiry)"/> —— 映射草稿承载的
+/// 客户 / 业务员 / 明细商品在占用报价单号与任何写入之前按 <see cref="QuotationMasterReferenceRules"/>
+/// 复核**实时主数据引用**；失败即受控拒绝，来源询价单状态与单号预约均不变。</para>
 /// </summary>
 [Route("api/inquiries")]
 public class InquiryController : DocumentControllerBase<Inquiry>
