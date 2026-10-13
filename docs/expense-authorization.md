@@ -1,25 +1,39 @@
-# 费用单与装柜费用分摊授权护栏说明（ERP-385）
+# 费用单与装柜费用分摊授权护栏说明（ERP-385 / ERP-496）
 
 - 任务：`ERP-385`「Enforce live expense ownership across CRUD and allocation evidence routes」
+  + `ERP-496`「Enforce expense bill and allocation authority independently of the MVC request pipeline」
 - 权威实现：
   - `src/ERP.Application/Services/ExpenseAuthorizationRules.cs`（纯规则 + 实时授权 + 权威客户范围 + 写入校验）
-  - `src/ERP.Api/Controllers/BaseCrudController.cs`（`ExpenseRequestAuthorizationFilter` HTTP 入口强制门）
-  - `src/ERP.Api/Controllers/ExpenseBillController.cs`（费用 CRUD / 传统分摊 / ERP-042 分摊批次路由）
+  - `src/ERP.Api/Controllers/ExpenseBillController.cs`（费用 CRUD / 传统分摊 / ERP-042 分摊批次路由，**每个动作内实时授权**）
+  - `src/ERP.Api/Controllers/BaseCrudController.cs`（通用 CRUD 基类；ERP-496 起**不再**承载费用授权过滤器）
   - `src/ERP.Api/Controllers/ContainerExpenseAllocationEvidenceController.cs`（ERP-060 分摊证据读取）
-  - `src/ERP.Application/Services/ContainerExpenseAllocationService.cs`（批次预览 / 生成 / 台账 / 详情 / 作废）
+  - `src/ERP.Application/Services/ContainerExpenseAllocationService.cs`（批次预览 / 生成 / 台账 / 详情 / 作废，范围参数必填）
   - `src/ERP.Application/Services/ContainerExpenseAllocationEvidenceService.cs`（分摊证据只读派生）
 
 ## 1. 授权口径
 
 | 环节 | 口径 |
 | --- | --- |
-| 实时身份 | 每个路由在读取任何计数 / 参与方 / 生成单号 / 写入之前重新解析身份：缺失 / 非法按未认证拒绝；账号不存在或已删除按未认证拒绝；账号已禁用按权限不足拒绝 |
+| 实时身份 | 每个路由动作在读取任何计数 / 参与方 / 生成单号 / 写入之前重新解析身份：缺失 / 非法 / 为零 / 未知 / 已删除按未认证拒绝；账号已禁用按权限不足拒绝 |
 | 既有菜单 | 复用已部署的「费用单」（`expense-bill`）菜单：非特权账号必须显式具备，撤销后下一次请求立即收敛（无缓存） |
 | 业务员映射 | 复用 ERP-097 `SalespersonDataScopeService` 唯一权威口径：受限账号按其登录名精确匹配员工编码；未映射业务员的受限账号 **fail closed**，绝不降级为全局 / 管理员可见 |
 | 特权账号 | 超级管理员 / 系统内置角色 / 显式配置的特权角色保留既有全部访问（含历史无主行与共享柜） |
 | 身份来源 | 只来自已认证请求主体（`ClaimTypes.NameIdentifier`）；请求体（`ContainerExpenseAllocationRequest` 等）**不包含也不接受**任何账号 / 角色 / 范围字段 |
+| 请求形状无关 | 判定与 `Request.Path` 是否赋值、请求形状、以及控制器是否绑定 `HttpContext` **完全无关**：空路径、已赋值路径与未绑定任何请求上下文的纯进程内直调对同一身份给出完全相同的判定（契约见 `ExpenseAuthorizationRules.PathIndependenceText`） |
 
-HTTP 入口由 `[ExpenseRequestAuthorizationFilter]`（`IAsyncActionFilter`）统一执行身份 / 账号状态 / 菜单授权，并把本次请求的权威范围写入 `HttpContext.Items`，供动作方法做数据库侧范围下推与实体级复核；解析失败即 fail closed（不执行任何计数 / 单号生成 / 写入）。进程内直接调用动作方法（单元测试 / 内部派生读取）不经过过滤器，其范围只能为 `null`（= 既有内部口径），**绝不代表匿名或管理员**。
+**ERP-496**：费用单控制器**每一个路由动作**的第一步都是
+`ExpenseAuthorizationRules.EnsureMenuAuthorizedAsync(_db, CurrentUserId())`（`ExpenseBillController.EnsureExpenseAuthorizedAsync`），
+解析出**非空**权威客户范围后才读取任何计数 / 行 / 金额 / 分摊基数或写入。原 HTTP 入口动作过滤器
+`ExpenseRequestAuthorizationFilter`、它的 `HttpContext.Items` 范围通道（`ExpenseRequestAuthorizationFilter.ScopeItemKey`）与
+`BaseCrudController.ExpenseRequestScope` 属性已**彻底移除**，「进程内调用范围只能为 `null`（= 不受限）」的旁路不复存在：
+缺少请求上下文 / 缺少身份声明 / 非数字 / 非正数一律安全解析为 `null` 并由规则返回受控未认证。
+`ExpenseScopeFilter` / `ApplyExpenseScope` / `BatchScopeFilter` / `EnsureBatchScopeAllowedAsync` /
+`EnsureLoadingListScopeAllowedAsync` / `EnsureCustomerInScope` / `EnsureStoredExpenseScopeAllowed` /
+`EnsureProposedExpenseValidAsync` / `EnsureCustomersValidAsync` 的范围参数**不再接受 `null`**（特权账号以
+`AllowedCustomerIds is null` 表示「不限制」，绝不与「未解析身份」混同），`ContainerExpenseAllocationService`
+的全部批次入口也把范围参数改为**必填**。**绝无匿名 / 管理员 / 环境 / 测试专用开关回退。**
+仅分摊证据模块（ERP-060，本任务未改动其路由，已在各自控制器动作内先完成实时授权）的只读派生入口仍以
+`dataScope = null` 表示「调用方已完成授权且不再额外下推」，该分支**不可由费用单路由到达**。
 
 ## 2. 权威客户归属
 
@@ -36,21 +50,21 @@ HTTP 入口由 `[ExpenseRequestAuthorizationFilter]`（`IAsyncActionFilter`）�
 
 | 模块 | 路由 | 授权 + 范围 |
 | --- | --- | --- |
-| 费用单 | `GET /api/finance/expenses` | 过滤器的身份 / 菜单门 + 列表范围下推 + 读取侧留痕标注 |
-| 费用单 | `GET /api/finance/expenses/all` | 过滤器 + 范围下推（下拉用） |
-| 费用单 | `GET /api/finance/expenses/{id}` | 过滤器 + 已存储 `CustomerId` 范围复核 |
-| 费用单 | `POST /api/finance/expenses` | 过滤器 + 拟议客户范围 / 启用客户 / 币种 / 金额 / 汇率校验；忽略客户端批次留痕 |
-| 费用单 | `PUT /api/finance/expenses/{id}` | 过滤器 + 已存储范围 + 拟议范围与数据校验 + 保留批次留痕（审计不可被客户端改写） |
-| 费用单 | `DELETE /api/finance/expenses/{id}` | 过滤器 + 已存储范围复核后软删除 |
-| 费用单 | `POST /api/finance/expenses/batch-delete` | 过滤器 + 逐行范围复核（任一行越界即整体拒绝） |
-| 传统分摊 | `POST .../allocate-preview` | 过滤器 + 明细客户范围复核（只读） |
-| 传统分摊 | `POST .../allocate-apply` | 过滤器 + 明细客户范围 / 启用客户 / 币种 / 金额 / 汇率校验后才检查重复、生成单号与写入 |
-| ERP-042 | `GET .../allocation-context` | 过滤器 + 装柜清单（参与方 / 上游客户）范围；受限账号不展示范围外归属的来源费用与批次 |
-| ERP-042 | `POST .../allocation-preview` | 过滤器 + 装柜清单范围 + 来源费用归属范围（只读计算） |
-| ERP-042 | `POST .../allocation-generate` | 过滤器 + 同上，全部校验通过后才写入批次 / 逐行留痕 / 费用单行 |
-| ERP-042 | `GET .../allocation-batches` | 过滤器 + 批次范围下推（计数 / 分页之前） |
-| ERP-042 | `GET .../allocation-batches/{batchId}` | 过滤器 + 批次完整范围复核 |
-| ERP-042 | `POST .../allocation-batches/{batchId}/void` | 过滤器 + 批次完整范围复核后才改状态（拒绝时状态 / 审计 / 留痕不变） |
+| 费用单 | `GET /api/finance/expenses` | 动作内实时授权 + 列表范围下推 + 读取侧留痕标注 |
+| 费用单 | `GET /api/finance/expenses/all` | 动作内实时授权 + 范围下推（下拉用） |
+| 费用单 | `GET /api/finance/expenses/{id}` | 动作内实时授权 + 已存储 `CustomerId` 范围复核 |
+| 费用单 | `POST /api/finance/expenses` | 动作内实时授权 + 拟议客户范围 / 启用客户 / 币种 / 金额 / 汇率校验；忽略客户端批次留痕 |
+| 费用单 | `PUT /api/finance/expenses/{id}` | 动作内实时授权 + 已存储范围 + 拟议范围与数据校验 + 保留批次留痕（审计不可被客户端改写） |
+| 费用单 | `DELETE /api/finance/expenses/{id}` | 动作内实时授权 + 已存储范围复核后软删除 |
+| 费用单 | `POST /api/finance/expenses/batch-delete` | 动作内实时授权 + 逐行范围复核（任一行越界即整体拒绝） |
+| 传统分摊 | `POST .../allocate-preview` | 动作内实时授权 + 明细客户范围复核（只读） |
+| 传统分摊 | `POST .../allocate-apply` | 动作内实时授权 + 明细客户范围 / 启用客户 / 币种 / 金额 / 汇率校验后才检查重复、生成单号与写入（锁内再次实时复核） |
+| ERP-042 | `GET .../allocation-context` | 动作内实时授权 + 装柜清单（参与方 / 上游客户）范围；受限账号不展示范围外归属的来源费用与批次 |
+| ERP-042 | `POST .../allocation-preview` | 动作内实时授权 + 装柜清单范围 + 来源费用归属范围（只读计算） |
+| ERP-042 | `POST .../allocation-generate` | 动作内实时授权 + 同上，全部校验通过后才写入批次 / 逐行留痕 / 费用单行 |
+| ERP-042 | `GET .../allocation-batches` | 动作内实时授权 + 批次范围下推（计数 / 分页之前） |
+| ERP-042 | `GET .../allocation-batches/{batchId}` | 动作内实时授权 + 批次完整范围复核 |
+| ERP-042 | `POST .../allocation-batches/{batchId}/void` | 动作内实时授权 + 批次完整范围复核后才改状态（拒绝时状态 / 审计 / 留痕不变） |
 | ERP-060 | `GET /api/container/expense-allocation-evidence` | 动作内实时授权 + 批次范围下推 |
 | ERP-060 | `GET .../loading-lists/{loadingListId}` | 动作内实时授权 + 装柜清单范围 + 每一个被分摊客户范围 |
 | ERP-060 | `GET .../settlements/{settlementId}` | 动作内实时授权 + 结算客户范围 + 关联清单参与方 / 上游 / 被分摊客户范围 |
@@ -77,8 +91,11 @@ HTTP 入口由 `[ExpenseRequestAuthorizationFilter]`（`IAsyncActionFilter`）�
 
 | 层 | 文件 | 覆盖 |
 | --- | --- | --- |
-| 单元（内存库） | `src/ERP.UnitTests/ExpenseAuthorizationTests.cs` | 币种 / 金额 / 汇率规则；身份 / 账号状态 / 菜单 / 未映射业务员 fail closed；HTTP 入口过滤器拒绝与范围注入；费用列表 / 详情 / 新增 / 修改 / 删除 / 批量删除的范围与数据校验；传统分摊越界与非法取值；批次预览 / 生成 / 台账 / 详情 / 作废的共享柜范围与「拒绝不改写」；分摊证据范围下推与结算客户范围；边界与接线契约 |
+| 单元（内存库） | `src/ERP.UnitTests/ExpenseAuthorizationTests.cs` | 币种 / 金额 / 汇率规则；身份 / 账号状态 / 菜单 / 未映射业务员 fail closed；**ERP-496 逐路由矩阵（15 条路由 × 缺失 / 为零 / 未知 / 已删除 / 禁用 / 缺少或撤销菜单 / 空路径 / 已赋值路径 / 未绑定 HttpContext）**；受限身份本人范围可读写与共享柜 / 越界拒绝且零改写；费用列表 / 详情 / 新增 / 修改 / 删除 / 批量删除的范围与数据校验；传统分摊越界与非法取值；批次预览 / 生成 / 台账 / 详情 / 作废的共享柜范围与「拒绝不改写」；分摊证据范围下推与结算客户范围；边界与接线契约（过滤器 / 范围属性 / null 旁路已移除） |
+| 单元（内存库） | `src/ERP.UnitTests/ExpenseAllocationConcurrencyTests.cs` | 真实启用身份（受限 / 特权，均持有既有 `expense-bill` 菜单）驱动的传统分摊、来源费用改动与批次路由；锁序 / 单号键 / 原子回滚 |
+| 单元（内存库） | `src/ERP.UnitTests/ContainerExpenseAllocationTests.cs` | 真实启用特权身份夹具（既有菜单授权）驱动的批次预览 / 生成 / 作废 / 台账 / 上下文全量回归 |
 | SQL Server 集成（受控 localdb） | `src/ERP.IntegrationTests/ExpenseAuthorizationSqlServerTests.cs` | 真实控制器 / 服务下的本人 / 他人 / 混源 / 无主 / 撤销授权 / 禁用 / 删除账号；被拒绝的编辑 / 删除 / 批量删除 / 作废不改写；两个独立连接竞态（同一来源并发生成只落一条有效批次；范围外修改 vs 删除并发均 fail closed）；专用目标护栏 fail-closed |
+| SQL Server 集成（受控 localdb） | `src/ERP.IntegrationTests/ExpenseAllocationConcurrencySqlServerTests.cs` | 真实控制器动作下的实时身份（授予 / 撤销菜单 / 禁用 / 删除 / 为零 / 未知 / 匿名 / 未绑定请求上下文）+ **全部 15 条路由请求形状无关性**与拒绝零改写 |
 | 安全 profile | `.ai/config.json` 的 `safe` | `dotnet restore` → Release 构建（`TreatWarningsAsErrors`）→ `ERP.UnitTests` 全量 |
 
 ### 6.1 SQL Server 集成目标护栏

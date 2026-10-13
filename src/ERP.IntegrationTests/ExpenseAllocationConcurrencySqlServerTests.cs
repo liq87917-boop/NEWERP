@@ -25,9 +25,10 @@ namespace ERP.IntegrationTests;
 /// <item><b>两个独立连接竞态</b>：① 两条等价传统分摊请求 → 最多一套完整费用单；② 两条不同传统分摊请求 →
 /// 单号绝不冲突；③ 来源费用删除 vs 批次生成；④ 来源费用金额修改 vs 批次生成；⑤ 生成 vs 作废；
 /// ⑥ 参与方停用 vs 生成。每条竞态都验证唯一一致结果与「无半成品 / 无陈旧证据」。</item>
-/// <item><b>真实身份实时授权</b>：真实 HTTP 授权管线（<see cref="ExpenseRequestAuthorizationFilter"/>）
-/// + 既有「费用单」（expense-bill）菜单 + 既有业务员客户数据范围；撤销菜单 / 停用账号后立即收敛，
-/// 且被拒绝的请求零改写；绝不新增任何用户授权，也绝无匿名 / 管理员兜底。</item>
+/// <item><b>真实身份实时授权</b>：真实控制器动作<b>自行</b>解析实时身份 / 既有「费用单」（expense-bill）菜单 /
+/// 既有业务员客户数据范围（ERP-496：无动作过滤器、无 HttpContext.Items 范围通道，与请求路径 / 是否绑定
+/// <c>HttpContext</c> 完全无关）；撤销菜单 / 停用账号后立即收敛，且被拒绝的请求零改写；
+/// 绝不新增任何用户授权，也绝无匿名 / 管理员兜底。</item>
 /// <item><b>金额与证据精确</b>：生成行合计恒等于来源费用金额（含币种精度与余差），
 /// 来源费用 / 装柜清单与结算口径不被改写，作废保留原因与原审计。</item>
 /// </list>
@@ -55,22 +56,10 @@ public sealed class ExpenseAllocationConcurrencySqlServerTests
         Assert.True(target.IntegratedSecurity);
     }
 
-    /// <summary>仅解析 IErpDbContext 的最小服务提供器（驱动真实授权过滤器）。</summary>
-    private sealed class SingleDbContextServices : IServiceProvider
-    {
-        private readonly IErpDbContext _db;
-
-        public SingleDbContextServices(IErpDbContext db) => _db = db;
-
-        public object? GetService(Type serviceType)
-            => serviceType == typeof(IErpDbContext) ? _db
-             : serviceType == typeof(IServiceProvider) ? this
-             : null;
-    }
-
     /// <summary>
-    /// 用一条独立连接驱动真实 HTTP 授权管线 + 真实控制器动作（身份来自已认证主体，
-    /// 菜单授权 / 客户数据范围每次实时查询，绝不来自请求体）。
+    /// 用一条独立连接驱动真实控制器动作（ERP-496）：身份来自已认证主体并写在 <c>HttpContext.User</c> 上，
+    /// 动作<b>自己</b>先解析实时身份 / 既有「费用单」菜单 / 既有业务员客户数据范围（无 HttpContext.Items 范围通道，
+    /// 也绝不经过任何动作过滤器）；请求路径已赋值以证明「路径存在与否不影响判定」。
     /// </summary>
     private async Task<(bool Success, string Error)> TryAuthorizedActionAsync(
         long? userId, Func<ExpenseBillController, Task<IActionResult>> action)
@@ -78,7 +67,7 @@ public sealed class ExpenseAllocationConcurrencySqlServerTests
         await using var db = _fixture.CreateDbContext();
         try
         {
-            var http = new DefaultHttpContext { RequestServices = new SingleDbContextServices(db) };
+            var http = new DefaultHttpContext();
             if (userId.HasValue)
                 http.User = new ClaimsPrincipal(new ClaimsIdentity(
                     new[] { new Claim(ClaimTypes.NameIdentifier, userId.Value.ToString()) }, "Test"));
@@ -89,13 +78,26 @@ public sealed class ExpenseAllocationConcurrencySqlServerTests
                 ControllerContext = new ControllerContext { HttpContext = http }
             };
 
-            var actionContext = new ActionContext(http, new RouteData(), new ControllerActionDescriptor());
-            var executing = new ActionExecutingContext(
-                actionContext, new List<IFilterMetadata>(), new Dictionary<string, object?>(), controller);
-            var executed = new ActionExecutedContext(actionContext, new List<IFilterMetadata>(), controller);
-            await new ExpenseRequestAuthorizationFilter().OnActionExecutionAsync(
-                executing, () => Task.FromResult(executed));
+            var result = await action(controller);
+            return (result is OkObjectResult, string.Empty);
+        }
+        catch (Exception ex)
+        {
+            return (false, ex.Message);
+        }
+    }
 
+    /// <summary>
+    /// 纯进程内直调（ERP-496，未绑定任何请求上下文）：与已绑定请求上下文的调用<b>口径完全一致</b>，
+    /// 缺失身份一律受控未认证（不存在「无请求上下文 = 免授权」的旁路）。
+    /// </summary>
+    private async Task<(bool Success, string Error)> TryHeadlessActionAsync(
+        Func<ExpenseBillController, Task<IActionResult>> action)
+    {
+        await using var db = _fixture.CreateDbContext();
+        try
+        {
+            var controller = new ExpenseBillController(new GenericService<FinanceExpense>(db), db);
             var result = await action(controller);
             return (result is OkObjectResult, string.Empty);
         }
@@ -272,6 +274,10 @@ public sealed class ExpenseAllocationConcurrencySqlServerTests
 
     private static SalespersonDataScope PrivilegedScope()
         => new() { IsPrivileged = true, SalesmanId = null, AllowedCustomerIds = null };
+
+    /// <summary>显式受限范围（集成测试直接驱动服务 / 自查用；控制器动作一律实时解析身份，不接受外部范围）</summary>
+    private static SalespersonDataScope RestrictedScope(long salesmanId, params long[] allowedCustomerIds)
+        => new() { IsPrivileged = false, SalesmanId = salesmanId, AllowedCustomerIds = allowedCustomerIds.ToHashSet() };
 
     private static ExpenseAllocateRequest LegacyRequest(string refNo, long? customerId, decimal total)
         => new()
@@ -754,6 +760,17 @@ public sealed class ExpenseAllocationConcurrencySqlServerTests
             ctl => ctl.AllocateApply(LegacyRequest(anonymousRefNo, customerId, 20m)));
         Assert.False(anonymous.Success);
 
+        // ③-b ERP-496：为零 / 未知身份同样在任何读取 / 单号 / 写入之前拒绝（不猜测身份）
+        Assert.False((await TryAuthorizedActionAsync(0L,
+            ctl => ctl.AllocateApply(LegacyRequest($"INT_EA386_ZERO_{Guid.NewGuid():N}", customerId, 20m)))).Success);
+        Assert.False((await TryAuthorizedActionAsync(long.MaxValue,
+            ctl => ctl.AllocateApply(LegacyRequest($"INT_EA386_UNKNOWN_{Guid.NewGuid():N}", customerId, 20m)))).Success);
+
+        // ③-c ERP-496：纯进程内直调（未绑定任何请求上下文）口径完全一致 —— 同样受控未认证
+        var headless = await TryHeadlessActionAsync(
+            ctl => ctl.AllocateApply(LegacyRequest($"INT_EA386_HEADLESS_{Guid.NewGuid():N}", customerId, 20m)));
+        Assert.False(headless.Success);
+
         // ④ 账号停用：立即收敛为权限不足
         await using (var disable = _fixture.CreateDbContext())
         {
@@ -766,12 +783,25 @@ public sealed class ExpenseAllocationConcurrencySqlServerTests
             ctl => ctl.AllocateApply(LegacyRequest(disabledRefNo, customerId, 20m)));
         Assert.False(disabled.Success);
 
+        // ⑤ 账号删除：收敛为受控未认证
+        await using (var delete = _fixture.CreateDbContext())
+        {
+            var user = await delete.SysUsers.SingleAsync(x => x.Id == userId);
+            user.IsDeleted = true;
+            await delete.SaveChangesAsync();
+        }
+        var deletedRefNo = $"INT_EA386_DELETED_{Guid.NewGuid():N}";
+        var deleted = await TryAuthorizedActionAsync(userId,
+            ctl => ctl.AllocateApply(LegacyRequest(deletedRefNo, customerId, 20m)));
+        Assert.False(deleted.Success);
+
         // 被拒绝的请求零改写：只有第 ① 步写入；也不新增任何用户 / 角色 / 授权
         await using var verify = _fixture.CreateDbContext();
         var rows = await verify.FinanceExpenses.AsNoTracking()
             .Where(x => !x.IsDeleted
                 && (x.RefNo == grantedRefNo || x.RefNo == revokedRefNo
-                    || x.RefNo == anonymousRefNo || x.RefNo == disabledRefNo))
+                    || x.RefNo == anonymousRefNo || x.RefNo == disabledRefNo
+                    || x.RefNo == deletedRefNo))
             .ToListAsync();
         Assert.Single(rows);
         Assert.Equal(grantedRefNo, rows[0].RefNo);
@@ -779,6 +809,116 @@ public sealed class ExpenseAllocationConcurrencySqlServerTests
         Assert.Equal(usersAfterSeed, await verify.SysUsers.CountAsync());
         Assert.Equal(0, await verify.SysRoleMenus.CountAsync(g => g.RoleId == roleId));
     }
+    /// <summary>
+    /// ERP-496：每一条费用单路由都<b>自行</b>解析实时身份 / 既有「费用单」菜单 / 权威客户范围 ——
+    /// 缺失身份（含未绑定任何请求上下文、空路径与已赋值路径、身份为零）一律受控未认证，
+    /// 且在全部拒绝路径上零改写任何费用单 / 分摊批次 / 分摊行；已启用且持有既有菜单授权的身份可读。
+    /// </summary>
+    [Fact]
+    public async Task Every_route_resolves_live_identity_independently_of_request_path_and_context()
+    {
+        Guard();
+        long userId, customerId, expenseId, batchId, loadingListId;
+        await using (var seed = _fixture.CreateDbContext())
+        {
+            var customer = await SeedCustomerAsync(seed, $"INT_EA386_RT_{Guid.NewGuid():N}", "集成路由客户");
+            customerId = customer.Id;
+            userId = (await SeedOperatorAsync(seed, customer.Id)).UserId;
+
+            var list = await SeedLoadingListAsync(seed, $"INT_EA386_RTL_{Guid.NewGuid():N}",
+                $"TCLU-EA386-{Guid.NewGuid():N}", customer.Id);
+            loadingListId = list.Id;
+            var participant = await SeedParticipantAsync(seed, list.Id, customer, primary: true);
+            var source = await SeedSourceExpenseAsync(seed, $"EXP-EA386-RT-{Guid.NewGuid():N}",
+                customer.Id, 500m, refNo: list.ContainerNo);
+            expenseId = source.Id;
+
+            var generated = await ContainerExpenseAllocationService.GenerateAsync(
+                seed,
+                new ContainerExpenseAllocationRequest
+                {
+                    SourceExpenseId = source.Id,
+                    LoadingListId = list.Id,
+                    AllocationMethod = ContainerExpenseAllocationRules.MethodByVolume,
+                    Lines = new List<ContainerExpenseAllocationBasisDto>
+                    {
+                        new() { ParticipantId = participant.Id, BasisValue = 1m }
+                    }
+                },
+                RestrictedScope(userId, customer.Id));
+            batchId = generated.BatchId;
+        }
+
+        foreach (var route in RouteInvocations(expenseId, customerId, loadingListId, batchId))
+        {
+            // ① 未绑定任何请求上下文（纯进程内直调）：缺失身份同样受控未认证
+            var headless = await TryHeadlessActionAsync(route.Invoke);
+            Assert.False(headless.Success, $"{route.Name} 未绑定请求上下文时必须 fail closed");
+            Assert.DoesNotContain("未注册 IErpDbContext", headless.Error, StringComparison.Ordinal);
+
+            // ② 已绑定请求上下文但缺失 / 为零身份（含空路径与已赋值路径）：口径完全一致
+            Assert.False((await TryAuthorizedActionAsync(null, route.Invoke)).Success,
+                $"{route.Name} 缺失身份时必须 fail closed");
+            Assert.False((await TryAuthorizedActionAsync(0L, route.Invoke)).Success,
+                $"{route.Name} 身份为零时必须 fail closed");
+        }
+
+        // ③ 被拒绝的全部路由零改写：既有费用单未被删除 / 改写，也未新增批次 / 分摊行
+        await using var verify = _fixture.CreateDbContext();
+        var stored = await verify.FinanceExpenses.AsNoTracking().SingleAsync(x => x.Id == expenseId);
+        Assert.False(stored.IsDeleted);
+        Assert.Equal(500m, stored.Amount);
+        Assert.Equal(1, await verify.FinanceExpenseAllocationBatches.CountAsync(x => !x.IsDeleted));
+        Assert.Equal(1, await verify.FinanceExpenseAllocationLines.CountAsync(x => !x.IsDeleted));
+
+        // ④ 已启用且持有既有菜单授权的身份：列表可读（权威范围下推生效）
+        var allowed = await TryAuthorizedActionAsync(userId, ctl => ctl.GetPaged(new PageQuery()));
+        Assert.True(allowed.Success, allowed.Error);
+    }
+
+    /// <summary>全部 15 条费用单路由的动作调用矩阵（ERP-496 逐路由覆盖用）</summary>
+    private static List<(string Name, Func<ExpenseBillController, Task<IActionResult>> Invoke)>
+        RouteInvocations(long expenseId, long customerId, long loadingListId, long batchId)
+        => new()
+        {
+            ("paged", ctl => ctl.GetPaged(new PageQuery())),
+            ("all", ctl => ctl.GetAll()),
+            ("by-id", ctl => ctl.GetById(expenseId)),
+            ("create", ctl => ctl.Create(new FinanceExpense
+            {
+                ExpenseNo = $"EXP-EA386-NEW-{Guid.NewGuid():N}", ExpenseDate = DateTime.Today,
+                ExpenseType = "报关费", Amount = 10m, Currency = "CNY", ExchangeRate = 1m,
+                CustomerId = customerId, RefType = "客户", RefNo = "TCLU-RT", AllocationBase = "不分摊"
+            })),
+            ("update", ctl => ctl.Update(expenseId, new FinanceExpense
+            {
+                Id = expenseId, ExpenseNo = $"EXP-EA386-UP-{Guid.NewGuid():N}", ExpenseDate = DateTime.Today,
+                ExpenseType = "报关费", Amount = 500m, Currency = "CNY", ExchangeRate = 1m,
+                CustomerId = customerId, RefType = "拼柜", RefNo = "TCLU-RT", AllocationBase = "不分摊"
+            })),
+            ("delete", ctl => ctl.Delete(expenseId)),
+            ("batch-delete", ctl => ctl.BatchDelete(new List<long> { expenseId })),
+            ("allocate-preview", ctl => ctl.AllocatePreview(LegacyRequest("TCLU-RT-PRE", customerId, 40m))),
+            ("allocate-apply", ctl => ctl.AllocateApply(
+                LegacyRequest($"INT_EA386_RT_APPLY_{Guid.NewGuid():N}", customerId, 40m))),
+            ("allocation-context", ctl => ctl.GetAllocationContext(loadingListId)),
+            ("allocation-preview", ctl => ctl.AllocationPreview(new ContainerExpenseAllocationRequest
+            {
+                SourceExpenseId = expenseId, LoadingListId = loadingListId,
+                AllocationMethod = ContainerExpenseAllocationRules.MethodByVolume,
+                Lines = new List<ContainerExpenseAllocationBasisDto>()
+            })),
+            ("allocation-generate", ctl => ctl.AllocationGenerate(new ContainerExpenseAllocationRequest
+            {
+                SourceExpenseId = expenseId, LoadingListId = loadingListId,
+                AllocationMethod = ContainerExpenseAllocationRules.MethodByVolume,
+                Lines = new List<ContainerExpenseAllocationBasisDto>()
+            })),
+            ("allocation-batches", ctl => ctl.GetAllocationBatches(new ContainerExpenseAllocationBatchQuery())),
+            ("allocation-batch", ctl => ctl.GetAllocationBatch(batchId)),
+            ("allocation-batch-void", ctl => ctl.VoidAllocationBatch(
+                batchId, new ContainerExpenseAllocationVoidRequest { Reason = "路由覆盖" }))
+        };
 }
 
 /// <summary>

@@ -8,6 +8,7 @@ using ERP.Infrastructure.Data;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.Security.Claims;
 using Xunit;
 
 namespace ERP.UnitTests;
@@ -33,12 +34,16 @@ public class ExpenseAllocationConcurrencyTests
 {
     // ==================== 0. 脚手架 ====================
 
-    /// <summary>以显式范围模拟「已通过 HTTP 授权管线」的控制器（范围来自已认证主体，绝不来自请求体）。</summary>
-    private static ExpenseBillController NewExpenseController(ErpDbContext db, SalespersonDataScope? scope)
+    /// <summary>
+    /// 真实费用单控制器（ERP-496）：动作<b>自行</b>实时解析身份 / 账号状态 / 既有「费用单」菜单 / 权威客户范围。
+    /// 夹具只注入已认证主体，绝不注入范围，也绝不经过任何动作过滤器。
+    /// </summary>
+    private static ExpenseBillController NewExpenseController(ErpDbContext db, long? userId)
     {
         var httpContext = new DefaultHttpContext();
-        if (scope is not null)
-            httpContext.Items[ExpenseRequestAuthorizationFilter.ScopeItemKey] = scope;
+        if (userId.HasValue)
+            httpContext.User = new ClaimsPrincipal(new ClaimsIdentity(
+                new[] { new Claim(ClaimTypes.NameIdentifier, userId.Value.ToString()) }, "Test"));
 
         var controller = new ExpenseBillController(new GenericService<FinanceExpense>(db), db);
         controller.ControllerContext = new ControllerContext
@@ -49,6 +54,110 @@ public class ExpenseAllocationConcurrencyTests
         return controller;
     }
 
+    /// <summary>
+    /// 播种<b>真实启用</b>的特权费用单操作员（系统内置角色 = 既有特权口径）并授予<b>既有</b>
+    /// 「费用单」（expense-bill）菜单 —— 只在隔离测试数据内创建，绝不新增生产授权 / 菜单。
+    /// </summary>
+    private static long SeedPrivilegedOperator(ErpDbContext db)
+    {
+        var role = new SysRole
+        {
+            RoleName = $"费用分摊并发角色-{Guid.NewGuid():N}",
+            RoleCode = $"Role-{Guid.NewGuid():N}",
+            IsSystem = true
+        };
+        db.SysRoles.Add(role);
+        db.SaveChanges();
+
+        var user = new SysUser
+        {
+            UserName = $"exp-cc-{Guid.NewGuid():N}",
+            PasswordHash = "hash",
+            PasswordSalt = "salt",
+            DisplayName = "费用分摊并发账号",
+            Status = UserStatus.Enabled
+        };
+        db.SysUsers.Add(user);
+        db.SaveChanges();
+        db.SysUserRoles.Add(new SysUserRole { UserId = user.Id, RoleId = role.Id });
+        db.SaveChanges();
+
+        var menu = db.SysMenus
+            .FirstOrDefault(m => m.MenuCode == ExpenseAuthorizationRules.RequiredMenuCode && !m.IsDeleted);
+        if (menu is null)
+        {
+            menu = new SysMenu
+            {
+                ParentId = 0,
+                MenuCode = ExpenseAuthorizationRules.RequiredMenuCode,
+                MenuName = ExpenseAuthorizationRules.RequiredMenuText,
+                Path = "/finance/expense-bill",
+                MenuType = MenuType.Menu
+            };
+            db.SysMenus.Add(menu);
+            db.SaveChanges();
+        }
+        db.SysRoleMenus.Add(new SysRoleMenu { RoleId = role.Id, MenuId = menu.Id });
+        db.SaveChanges();
+        return user.Id;
+    }
+
+    /// <summary>
+    /// 播种<b>真实启用</b>的受限费用单操作员：登录账号 = 员工编码 + 既有「费用单」菜单授权
+    /// （客户可见范围由 <c>BaseCustomer.EmpId</c> 决定，绝不构造范围）。
+    /// </summary>
+    private static (SysUser User, BaseEmployee Employee) SeedRestrictedOperator(ErpDbContext db)
+    {
+        var code = $"exp-cc-{Guid.NewGuid():N}";
+        var employee = new BaseEmployee
+        {
+            EmployeeCode = code, EmployeeName = code, IsSalesman = true, Status = 1
+        };
+        db.BaseEmployees.Add(employee);
+        db.SaveChanges();
+
+        var role = new SysRole
+        {
+            RoleName = $"费用分摊受限角色-{Guid.NewGuid():N}",
+            RoleCode = $"Role-{Guid.NewGuid():N}",
+            IsSystem = false
+        };
+        db.SysRoles.Add(role);
+        db.SaveChanges();
+
+        var user = new SysUser
+        {
+            UserName = code,
+            PasswordHash = "hash",
+            PasswordSalt = "salt",
+            DisplayName = "费用分摊受限账号",
+            Status = UserStatus.Enabled
+        };
+        db.SysUsers.Add(user);
+        db.SaveChanges();
+        db.SysUserRoles.Add(new SysUserRole { UserId = user.Id, RoleId = role.Id });
+        db.SaveChanges();
+
+        var menu = db.SysMenus
+            .FirstOrDefault(m => m.MenuCode == ExpenseAuthorizationRules.RequiredMenuCode && !m.IsDeleted);
+        if (menu is null)
+        {
+            menu = new SysMenu
+            {
+                ParentId = 0,
+                MenuCode = ExpenseAuthorizationRules.RequiredMenuCode,
+                MenuName = ExpenseAuthorizationRules.RequiredMenuText,
+                Path = "/finance/expense-bill",
+                MenuType = MenuType.Menu
+            };
+            db.SysMenus.Add(menu);
+            db.SaveChanges();
+        }
+        db.SysRoleMenus.Add(new SysRoleMenu { RoleId = role.Id, MenuId = menu.Id });
+        db.SaveChanges();
+        return (user, employee);
+    }
+
     private static SalespersonDataScope Restricted(long salesmanId, params long[] allowedCustomerIds)
         => new() { IsPrivileged = false, SalesmanId = salesmanId, AllowedCustomerIds = allowedCustomerIds.ToHashSet() };
 
@@ -56,12 +165,12 @@ public class ExpenseAllocationConcurrencyTests
         => new() { IsPrivileged = true, SalesmanId = null, AllowedCustomerIds = null };
 
     private static BaseCustomer SeedCustomer(
-        ErpDbContext db, string code, string name, int status = 1, bool deleted = false)
+        ErpDbContext db, string code, string name, int status = 1, bool deleted = false, long? empId = null)
     {
         var customer = new BaseCustomer
         {
             CustomerCode = code, CustomerName = name, CreditStatus = "正常",
-            Status = status, IsDeleted = deleted
+            Status = status, IsDeleted = deleted, EmpId = empId
         };
         db.BaseCustomers.Add(customer);
         db.SaveChanges();
@@ -368,21 +477,22 @@ public class ExpenseAllocationConcurrencyTests
     public async Task 传统分摊_无效明细整批拒绝且不占用任何单号()
     {
         using var db = TestDbFactory.Create();
-        var own = SeedCustomer(db, "C-OWN", "本人客户");
+        var (operatorUser, employee) = SeedRestrictedOperator(db);
+        var own = SeedCustomer(db, "C-OWN", "本人客户", empId: employee.Id);
         var other = SeedCustomer(db, "C-OTHER", "他人客户");
-        var scope = Restricted(1, own.Id);
 
-        await AssertCodeAsync(ErrorCodes.Forbidden, () => NewExpenseController(db, scope).AllocateApply(
+        await AssertCodeAsync(ErrorCodes.Forbidden, () => NewExpenseController(db, operatorUser.Id).AllocateApply(
             LegacyRequest("TCLU-A", own.Id,
                 details: new[] { (CustomerId: (long?)own.Id, Volume: 1m), (CustomerId: (long?)other.Id, Volume: 1m) })));
         Assert.Equal(0, await db.FinanceExpenses.CountAsync());
 
-        await AssertCodeAsync(ErrorCodes.InvalidParameter, () => NewExpenseController(db, scope).AllocateApply(
+        await AssertCodeAsync(ErrorCodes.InvalidParameter, () => NewExpenseController(db, operatorUser.Id).AllocateApply(
             LegacyRequest("TCLU-A", own.Id, total: 0m)));
         Assert.Equal(0, await db.FinanceExpenses.CountAsync());
 
         // 非法请求不占用单号：随后合规请求仍从当日 001 开始
-        Assert.IsType<OkObjectResult>(await NewExpenseController(db, scope).AllocateApply(LegacyRequest("TCLU-A", own.Id)));
+        Assert.IsType<OkObjectResult>(await NewExpenseController(db, operatorUser.Id)
+            .AllocateApply(LegacyRequest("TCLU-A", own.Id)));
         var single = Assert.Single(await db.FinanceExpenses.AsNoTracking().Select(x => x.ExpenseNo).ToListAsync());
         Assert.EndsWith("-001", single);
     }
@@ -391,24 +501,24 @@ public class ExpenseAllocationConcurrencyTests
     public async Task 传统分摊_等价请求最多一套完整费用单且不同请求单号绝不重复()
     {
         using var db = TestDbFactory.Create();
-        var a = SeedCustomer(db, "C-A", "客户A");
-        var b = SeedCustomer(db, "C-B", "客户B");
-        var scope = Restricted(1, a.Id, b.Id);
+        var (operatorUser, employee) = SeedRestrictedOperator(db);
+        var a = SeedCustomer(db, "C-A", "客户A", empId: employee.Id);
+        var b = SeedCustomer(db, "C-B", "客户B", empId: employee.Id);
 
         var multi = LegacyRequest("TCLU-MULTI", a.Id, total: 100m,
             details: new[] { (CustomerId: (long?)a.Id, Volume: 3m), (CustomerId: (long?)b.Id, Volume: 1m) });
-        Assert.IsType<OkObjectResult>(await NewExpenseController(db, scope).AllocateApply(multi));
+        Assert.IsType<OkObjectResult>(await NewExpenseController(db, operatorUser.Id).AllocateApply(multi));
         var rowsAfterFirst = await db.FinanceExpenses.AsNoTracking().OrderBy(x => x.ExpenseNo).ToListAsync();
         Assert.Equal(2, rowsAfterFirst.Count);
         Assert.Equal(100m, rowsAfterFirst.Sum(x => x.Amount));
 
         // 等价请求：拒绝且不新增任何行（也不重新占用单号）
         await AssertCodeAsync(ErrorCodes.RuleConflict, () =>
-            NewExpenseController(db, scope).AllocateApply(multi));
+            NewExpenseController(db, operatorUser.Id).AllocateApply(multi));
         Assert.Equal(2, await db.FinanceExpenses.CountAsync());
 
         // 另一笔请求（不同 RefNo）：单号递增且与既有单号绝不重复
-        Assert.IsType<OkObjectResult>(await NewExpenseController(db, scope).AllocateApply(
+        Assert.IsType<OkObjectResult>(await NewExpenseController(db, operatorUser.Id).AllocateApply(
             LegacyRequest("TCLU-NEXT", a.Id, total: 50m)));
         var all = await db.FinanceExpenses.AsNoTracking().Select(x => x.ExpenseNo).ToListAsync();
         Assert.Equal(3, all.Count);
@@ -501,6 +611,7 @@ public class ExpenseAllocationConcurrencyTests
         var pa = SeedParticipant(db, list.Id, a, primary: true);
         var source = SeedExpense(db, "EXP-SRC-2", a.Id, amount: 200m, refNo: "TCLU-2");
         var scope = Privileged();
+        var privilegedUserId = SeedPrivilegedOperator(db);
 
         var generated = await ContainerExpenseAllocationService.GenerateAsync(db,
             BatchRequest(source.Id, list.Id, lines: new[] { (ParticipantId: pa.Id, BasisValue: (decimal?)5m) }), scope);
@@ -515,15 +626,15 @@ public class ExpenseAllocationConcurrencyTests
 
         // 金额 / 归属客户 / 币种等权威分摊基数：拒绝且不改写原行与批次证据
         await AssertCodeAsync(ErrorCodes.RuleConflict, () =>
-            NewExpenseController(db, scope).Update(source.Id, Body(250m, "改金额")));
+            NewExpenseController(db, privilegedUserId).Update(source.Id, Body(250m, "改金额")));
         var customerChanged = Body(200m, "改客户");
         customerChanged.CustomerId = other.Id;
         await AssertCodeAsync(ErrorCodes.RuleConflict, () =>
-            NewExpenseController(db, scope).Update(source.Id, customerChanged));
+            NewExpenseController(db, privilegedUserId).Update(source.Id, customerChanged));
         var currencyChanged = Body(200m, "改币种");
         currencyChanged.Currency = "USD";
         await AssertCodeAsync(ErrorCodes.RuleConflict, () =>
-            NewExpenseController(db, scope).Update(source.Id, currencyChanged));
+            NewExpenseController(db, privilegedUserId).Update(source.Id, currencyChanged));
 
         var stored = await db.FinanceExpenses.AsNoTracking().SingleAsync(x => x.Id == source.Id);
         Assert.Equal(200m, stored.Amount);
@@ -532,20 +643,20 @@ public class ExpenseAllocationConcurrencyTests
         Assert.Equal(200m, generated.SourceAmount);
 
         // 非基数字段（备注）仍可修改
-        Assert.IsType<OkObjectResult>(await NewExpenseController(db, scope).Update(source.Id, Body(200m, "改备注")));
+        Assert.IsType<OkObjectResult>(await NewExpenseController(db, privilegedUserId).Update(source.Id, Body(200m, "改备注")));
         Assert.Equal("改备注",
             (await db.FinanceExpenses.AsNoTracking().SingleAsync(x => x.Id == source.Id)).Remark);
 
         // 有效批次来源费用：单条 / 批量删除都拒绝且不改写任何行
-        await AssertCodeAsync(ErrorCodes.RuleConflict, () => NewExpenseController(db, scope).Delete(source.Id));
+        await AssertCodeAsync(ErrorCodes.RuleConflict, () => NewExpenseController(db, privilegedUserId).Delete(source.Id));
         await AssertCodeAsync(ErrorCodes.RuleConflict, () =>
-            NewExpenseController(db, scope).BatchDelete(new List<long> { source.Id }));
+            NewExpenseController(db, privilegedUserId).BatchDelete(new List<long> { source.Id }));
         Assert.False((await db.FinanceExpenses.AsNoTracking().SingleAsync(x => x.Id == source.Id)).IsDeleted);
 
         // 显式作废批次后释放：来源费用可以软删除（历史与逐行留痕保留）
         await ContainerExpenseAllocationService.VoidAsync(db, generated.BatchId, "来源口径更正", scope);
         Assert.False(await ExpenseAllocationConcurrencyRules.HasEffectiveBatchForSourceAsync(db, source.Id));
-        Assert.IsType<OkObjectResult>(await NewExpenseController(db, scope).Delete(source.Id));
+        Assert.IsType<OkObjectResult>(await NewExpenseController(db, privilegedUserId).Delete(source.Id));
         Assert.True((await db.FinanceExpenses.AsNoTracking().SingleAsync(x => x.Id == source.Id)).IsDeleted);
         Assert.Equal(1, await db.FinanceExpenseAllocationBatches.CountAsync(x => !x.IsDeleted));
         Assert.Equal(1, await db.FinanceExpenseAllocationLines.CountAsync());

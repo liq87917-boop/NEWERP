@@ -5,8 +5,11 @@ using ERP.Application.Services;
 using ERP.Domain.Entities;
 using ERP.Domain.Enums;
 using ERP.Infrastructure.Data;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.Controllers;
 using Microsoft.EntityFrameworkCore;
+using System.Security.Claims;
 using Xunit;
 
 namespace ERP.UnitTests;
@@ -24,8 +27,74 @@ public class ContainerExpenseAllocationTests
 {
     // ==================== 0. 测试脚手架 ====================
 
+    /// <summary>
+    /// 真实费用单控制器（ERP-496）：控制器动作<b>自行</b>实时解析身份 / 账号状态 / 既有「费用单」（expense-bill）
+    /// 菜单 / 权威客户范围，因此夹具绑定一个<b>真实启用</b>、持有既有菜单授权的特权账号
+    /// （系统内置角色 = 既有全部访问口径，与历史夹具的「不受限」语义一致）；绝不注入任何外部范围。
+    /// </summary>
     private static ExpenseBillController BuildController(ErpDbContext db)
-        => new(new GenericService<FinanceExpense>(db), db);
+    {
+        var userId = SeedPrivilegedExpenseOperator(db);
+        var controller = new ExpenseBillController(new GenericService<FinanceExpense>(db), db);
+        controller.ControllerContext = new ControllerContext
+        {
+            HttpContext = new DefaultHttpContext
+            {
+                User = new ClaimsPrincipal(new ClaimsIdentity(
+                    new[] { new Claim(ClaimTypes.NameIdentifier, userId.ToString()) }, "Test"))
+            },
+            ActionDescriptor = new ControllerActionDescriptor()
+        };
+        return controller;
+    }
+
+    /// <summary>
+    /// 播种<b>真实启用</b>的特权费用单操作员（系统内置角色 = 既有特权口径）并授予<b>既有</b>
+    /// 「费用单」（expense-bill）菜单 —— 只在隔离测试数据内创建，绝不新增任何生产授权 / 菜单。
+    /// </summary>
+    private static long SeedPrivilegedExpenseOperator(ErpDbContext db)
+    {
+        var role = new SysRole
+        {
+            RoleName = $"费用单夹具角色-{Guid.NewGuid():N}",
+            RoleCode = $"Role-{Guid.NewGuid():N}",
+            IsSystem = true
+        };
+        db.SysRoles.Add(role);
+        db.SaveChanges();
+
+        var user = new SysUser
+        {
+            UserName = $"exp-alloc-{Guid.NewGuid():N}",
+            PasswordHash = "hash",
+            PasswordSalt = "salt",
+            DisplayName = "费用单夹具账号",
+            Status = UserStatus.Enabled
+        };
+        db.SysUsers.Add(user);
+        db.SaveChanges();
+        db.SysUserRoles.Add(new SysUserRole { UserId = user.Id, RoleId = role.Id });
+        db.SaveChanges();
+
+        var menu = db.SysMenus
+            .FirstOrDefault(m => m.MenuCode == ExpenseAuthorizationRules.RequiredMenuCode && !m.IsDeleted);
+        if (menu is null)
+        {
+            menu = new SysMenu
+            {
+                ParentId = 0,
+                MenuCode = ExpenseAuthorizationRules.RequiredMenuCode,
+                MenuName = ExpenseAuthorizationRules.RequiredMenuText,
+                Path = "/finance/expense-bill",
+                MenuType = MenuType.Menu
+            };
+            db.SysMenus.Add(menu);
+            db.SaveChanges();
+        }
+        db.SysRoleMenus.Add(new SysRoleMenu { RoleId = role.Id, MenuId = menu.Id });
+        db.SaveChanges();
+        return user.Id;
+    }
 
     /// <summary>共享同一内存库的上下文选项（用于「写入失败 → 换新上下文断言无残留」）</summary>
     private static DbContextOptions<ErpDbContext> SharedOptions(string name)
@@ -994,6 +1063,7 @@ public class ContainerExpenseAllocationTests
         var name = Guid.NewGuid().ToString();
         var options = SharedOptions(name);
         long sourceId, listId, participantAId, participantBId;
+        SalespersonDataScope scope;
 
         using (var seed = new ErpDbContext(options))
         {
@@ -1004,6 +1074,10 @@ public class ContainerExpenseAllocationTests
             participantBId = SeedParticipant(seed, list.Id, customerB).Id;
             sourceId = SeedSourceExpense(seed, "EXP-20260925020", "TCLU-020", 800m).Id;
             listId = list.Id;
+
+            // ERP-496：权威范围只来自真实启用身份（既有「费用单」菜单授权），绝不构造 / 注入范围。
+            scope = await ExpenseAuthorizationRules.EnsureMenuAuthorizedAsync(
+                seed, SeedPrivilegedExpenseOperator(seed));
         }
 
         var request = Request(sourceId, listId, "按体积", null, "箱数", "",
@@ -1012,7 +1086,7 @@ public class ContainerExpenseAllocationTests
         using (var failing = new FailingSaveDbContext(options))
         {
             await Assert.ThrowsAsync<InvalidOperationException>(
-                () => ContainerExpenseAllocationService.GenerateAsync(failing, request));
+                () => ContainerExpenseAllocationService.GenerateAsync(failing, request, scope));
         }
 
         // 换新上下文断言：批次 / 分摊行 / 生成的费用单行都没有留下半条（校验与写入同批完成）

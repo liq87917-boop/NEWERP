@@ -28,8 +28,14 @@ namespace ERP.Application.Services;
 /// （分摊批次只以显式作废（状态 0 + 原因）更正，保留历史）。</item>
 /// </list>
 /// <para><b>身份来源唯一</b>：请求提交体中的任何字段都不能指定或扩大账号身份 —— 身份只来自已认证请求主体
-/// （<c>ClaimTypes.NameIdentifier</c>），由调用方（控制器 / <c>ExpenseRequestAuthorizationFilter</c>）解析后以
-/// <see cref="SalespersonDataScope"/> 传入；<c>null</c> 仅表示「未经过 MVC 授权管线的进程内调用」，绝不代表匿名或管理员。</para>
+/// （<c>ClaimTypes.NameIdentifier</c>），由调用方（<c>ExpenseBillController</c> 的每一个路由动作）解析后经
+/// <see cref="EnsureMenuAuthorizedAsync"/> 实时解析为 <see cref="SalespersonDataScope"/> 并以非空范围传入；</para>
+/// <para><b>与请求形状无关（ERP-496）</b>：上述判定由<b>每一个路由动作无条件</b>执行 —— 与 <c>Request.Path</c>
+/// 是否赋值、请求形状、以及是否绑定 <c>HttpContext</c> <b>完全无关</b>。原 HTTP 入口过滤器
+/// （<c>ExpenseRequestAuthorizationFilter</c>）与它的 <c>HttpContext.Items</c> 范围通道、以及「进程内调用范围只能为
+/// <c>null</c>（= 不受限）」的旁路已<b>彻底移除</b>；空路径 / 已赋值路径 / 未绑定任何请求上下文的纯进程内直调对同一身份
+/// 给出完全相同的判定，缺失 / 为零 / 未知 / 已删除身份一律按未认证拒绝，禁用账号 / 缺少或被撤销既有菜单一律按权限不足拒绝。
+/// 契约见 <see cref="PathIndependenceText"/>。</para>
 /// <para>边界：本类只做纯判定与有界只读查询；不新增表 / 列 / 菜单 / 权限模型，不伪造任何授权，不记账、不生成
 /// 凭证 / 收款 / 付款 / 结算单，也不改写任何历史留痕。</para>
 /// </summary>
@@ -97,14 +103,35 @@ public static class ExpenseAuthorizationRules
         + "都会重新校验实时启用身份（缺失 / 非法 / 已删除按未认证，禁用按权限不足）、既有「费用单」（expense-bill）菜单授权与权威客户数据范围；"
         + "费用单只按持久化 CustomerId 判定，受限账号不能访问缺失权威归属的无主费用单，特权账号保留历史访问；"
         + "共享装柜清单与分摊批次要求显式 LoadingListId 的每一个有效参与方 / 上游客户、SourceExpenseId 来源费用客户与逐行生成客户全部在范围内；"
-        + "写入前校验真实启用客户、受支持币种、取整后为正的金额与为正的汇率；身份只来自已认证请求主体，客户端提交体不能指定或扩大范围。";
+        + "写入前校验真实启用客户、受支持币种、取整后为正的金额与为正的汇率；身份只来自已认证请求主体，客户端提交体不能指定或扩大范围。"
+        + "该判定由每一个路由动作无条件执行，与请求路径 / 请求形状 / 是否绑定 HttpContext 完全无关"
+        + "（ERP-496 已移除请求形状探针与 HttpContext.Items 范围通道，见 PathIndependenceText）。";
 
     /// <summary>边界文案（不新增权限 / 表列，不记账，不改写历史证据）</summary>
     public const string BoundaryText =
         "本护栏只保护费用单与分摊批次 / 分摊证据的授权、范围与写入校验：不新增菜单 / 角色 / 用户授权或表结构，也不把空身份当作管理员；"
         + "不写库存 / 资金 / 会计凭证，不产生收款、付款、核销、分摊入账或对账结论；"
         + "被拒绝的编辑 / 删除 / 预览 / 生成 / 作废不改写原费用行、批次状态、审计时间戳与任何关联证据；"
-        + "分摊更正仍走 ERP-042 的显式作废（状态 0 + 原因），历史留痕保持不变。";
+        + "分摊更正仍走 ERP-042 的显式作废（状态 0 + 原因），历史留痕保持不变；"
+        + "不存在任何请求路径 / 请求形状 / 空请求上下文或数据库提供程序 / 测试专用开关的免授权回退。";
+
+    /// <summary>
+    /// 与请求形状无关的授权契约（ERP-496）：费用单路由（分页 / 全部 / 详情 / 新增 / 修改 / 删除 / 批量删除 /
+    /// 传统分摊预览与生成 / ERP-042 分摊上下文 / 预览 / 生成 / 台账 / 详情 / 作废）的身份 / 账号状态 /
+    /// 既有「费用单」（<c>expense-bill</c>）菜单判定必须在<b>每一个路由动作内无条件</b>执行，
+    /// 与 <c>Request.Path</c> 是否赋值、请求形状、以及控制器是否绑定 <c>HttpContext</c> <b>完全无关</b> ——
+    /// 空路径与已赋值路径口径完全一致，完全未绑定 <c>HttpContext</c> 的纯进程内直调同样执行本护栏；
+    /// 缺失 / 为零 / 未知 / 已删除身份一律按未认证拒绝，禁用账号 / 撤销或缺少既有菜单一律按权限不足拒绝。
+    /// </summary>
+    public const string PathIndependenceText =
+        "费用单（分页 / 全部 / 详情 / 新增 / 修改 / 删除 / 批量删除 / 传统分摊预览与生成 / ERP-042 分摊上下文 / "
+        + "预览 / 生成 / 台账 / 详情 / 作废）的实时身份 / 账号状态 / 既有「费用单」（expense-bill）菜单判定与请求路径 / "
+        + "请求形状 / 是否绑定 HttpContext 完全无关：原 HTTP 入口过滤器 ExpenseRequestAuthorizationFilter 与它的 "
+        + "HttpContext.Items 范围通道、以及「进程内调用范围只能为 null（= 不受限）」旁路已彻底移除，"
+        + "每个路由动作都先经 EnsureMenuAuthorizedAsync 解析出非空权威客户范围再读取任何计数 / 行 / 金额 / 分摊基数或写入；"
+        + "空路径与已赋值路径口径完全一致，未绑定任何请求上下文的纯进程内直调同样无条件执行本护栏；"
+        + "缺失 / 为零 / 未知 / 已删除身份按未认证拒绝，禁用账号与撤销 / 缺少既有菜单按权限不足拒绝；"
+        + "绝无匿名 / 管理员回退，不读取环境变量、不区分数据库提供程序，也不存在任何测试专用放行开关。";
 
     // ==================== 1. 币种 / 金额 / 汇率纯校验 ====================
 
@@ -143,6 +170,9 @@ public static class ExpenseAuthorizationRules
     /// 缺失 / 非法身份按未认证拒绝，账号不存在 / 已删除按未认证拒绝，禁用按权限不足拒绝，
     /// 非特权账号缺少既有 <c>expense-bill</c> 菜单授权或未映射业务员按权限不足拒绝。
     /// 每次调用都重新查询（无缓存），账号停用或授权撤销后下一次请求立即收敛；特权账号保留既有全部访问。
+    /// <para>与请求形状无关（见 <see cref="PathIndependenceText"/>，ERP-496）：调用方必须在<b>每一个路由动作内无条件</b>
+    /// 调用本方法，不得因为空路径、缺少身份、未绑定 <c>HttpContext</c> 或任何请求形状而跳过；
+    /// 空路径 / 无上下文与已认证真实请求的判定口径完全一致。</para>
     /// </summary>
     public static async Task<SalespersonDataScope> EnsureMenuAuthorizedAsync(
         IErpDbContext db, long? userId, CancellationToken ct = default)
@@ -176,10 +206,15 @@ public static class ExpenseAuthorizationRules
         return scope;
     }
 
-    /// <summary>受限账号按持久化客户 Id 的硬范围边界：无权威归属（缺失 / &lt;= 0）与越界一律 fail closed</summary>
-    public static void EnsureCustomerInScope(SalespersonDataScope? scope, long? customerId)
+    /// <summary>
+    /// 受限账号按持久化客户 Id 的硬范围边界：无权威归属（缺失 / &lt;= 0）与越界一律 fail closed。
+    /// <para>ERP-496：范围参数<b>不再接受 <c>null</c></b> —— 调用方必须先经 <see cref="EnsureMenuAuthorizedAsync"/>
+    /// 解析出非空范围；特权账号由 <c>AllowedCustomerIds is null</c> 表示「不限制」，绝不与「未解析身份」混同。</para>
+    /// </summary>
+    public static void EnsureCustomerInScope(SalespersonDataScope scope, long? customerId)
     {
-        if (scope is null || scope.AllowedCustomerIds is null) return;
+        ArgumentNullException.ThrowIfNull(scope);
+        if (scope.AllowedCustomerIds is null) return;
 
         if (customerId is null or <= 0)
             throw new BusinessException(UnlinkedExpenseText, ErrorCodes.Forbidden);
@@ -207,8 +242,9 @@ public static class ExpenseAuthorizationRules
     // ==================== 3. 费用单写入 / 读取范围校验 ====================
 
     /// <summary>已存储费用单的范围校验（读取 / 详情 / 修改 / 删除之前调用；特权账号保留历史访问）</summary>
-    public static void EnsureStoredExpenseScopeAllowed(SalespersonDataScope? scope, FinanceExpense expense)
+    public static void EnsureStoredExpenseScopeAllowed(SalespersonDataScope scope, FinanceExpense expense)
     {
+        ArgumentNullException.ThrowIfNull(scope);
         ArgumentNullException.ThrowIfNull(expense);
         EnsureCustomerInScope(scope, expense.CustomerId);
     }
@@ -219,7 +255,7 @@ public static class ExpenseAuthorizationRules
     /// <para>受限账号不能提交无权威客户归属（CustomerId 为空）的费用单；特权账号的柜级 / 客户级既有口径保持不变。</para>
     /// </summary>
     public static async Task EnsureProposedExpenseValidAsync(
-        IErpDbContext db, SalespersonDataScope? scope, FinanceExpense proposed, CancellationToken ct = default)
+        IErpDbContext db, SalespersonDataScope scope, FinanceExpense proposed, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(db);
         ArgumentNullException.ThrowIfNull(proposed);
@@ -238,7 +274,7 @@ public static class ExpenseAuthorizationRules
     /// 每一个客户都必须在当前账号范围内且真实启用；任一越界 / 不可用即整体拒绝（不生成任何行）。
     /// </summary>
     public static async Task EnsureCustomersValidAsync(
-        IErpDbContext db, SalespersonDataScope? scope, IEnumerable<long> customerIds, CancellationToken ct = default)
+        IErpDbContext db, SalespersonDataScope scope, IEnumerable<long> customerIds, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(db);
         ArgumentNullException.ThrowIfNull(customerIds);
@@ -253,22 +289,26 @@ public static class ExpenseAuthorizationRules
     // ==================== 4. SQL 侧范围下推（计数 / 分页之前） ====================
 
     /// <summary>
-    /// 费用单范围谓词：<c>null</c> = 进程内调用（不额外限制）；特权账号不过滤；受限账号只保留持久化
+    /// 费用单范围谓词：特权账号（<c>AllowedCustomerIds is null</c>）不过滤；受限账号只保留持久化
     /// <see cref="FinanceExpense.CustomerId"/> 落在范围内且非空的费用行（无权威归属的无主行一律不返回）。
+    /// <para>ERP-496：范围参数<b>不再接受 <c>null</c></b>（原「<c>null</c> = 进程内调用，不额外限制」旁路已移除）——
+    /// 调用方必须先经 <see cref="EnsureMenuAuthorizedAsync"/> 解析出非空范围。</para>
     /// </summary>
-    public static Expression<Func<FinanceExpense, bool>>? ExpenseScopeFilter(SalespersonDataScope? scope)
+    public static Expression<Func<FinanceExpense, bool>>? ExpenseScopeFilter(SalespersonDataScope scope)
     {
-        if (scope is null || scope.AllowedCustomerIds is null) return null;
+        ArgumentNullException.ThrowIfNull(scope);
+        if (scope.AllowedCustomerIds is null) return null;
 
         var allowed = scope.AllowedCustomerIds.ToList();
         return expense => expense.CustomerId.HasValue && allowed.Contains(expense.CustomerId.Value);
     }
 
-    /// <summary>费用单范围下推（<see cref="ExpenseScopeFilter"/> 的 IQueryable 便捷重载）</summary>
+    /// <summary>费用单范围下推（<see cref="ExpenseScopeFilter"/> 的 IQueryable 便捷重载，范围必须为非空已知身份）</summary>
     public static IQueryable<FinanceExpense> ApplyExpenseScope(
-        IQueryable<FinanceExpense> source, SalespersonDataScope? scope)
+        IQueryable<FinanceExpense> source, SalespersonDataScope scope)
     {
         ArgumentNullException.ThrowIfNull(source);
+        ArgumentNullException.ThrowIfNull(scope);
         var filter = ExpenseScopeFilter(scope);
         return filter is null ? source : source.Where(filter);
     }
@@ -279,12 +319,14 @@ public static class ExpenseAuthorizationRules
     /// （无范围外有效参与方 / 上游客户，且有有效参与方或兼容客户字段在范围内）；② 没有任何范围外的逐行生成客户；
     /// ③ <see cref="FinanceExpenseAllocationBatch.SourceExpenseId"/> 来源费用没有范围外的归属客户。
     /// 无法证明归属的行一律不返回，绝不「先查全量再内存过滤」。
+    /// <para>ERP-496：范围参数<b>不再接受 <c>null</c></b>（原旁路已移除）。</para>
     /// </summary>
     public static Expression<Func<FinanceExpenseAllocationBatch, bool>>? BatchScopeFilter(
-        IErpDbContext db, SalespersonDataScope? scope)
+        IErpDbContext db, SalespersonDataScope scope)
     {
         ArgumentNullException.ThrowIfNull(db);
-        if (scope is null || scope.AllowedCustomerIds is null) return null;
+        ArgumentNullException.ThrowIfNull(scope);
+        if (scope.AllowedCustomerIds is null) return null;
 
         var allowed = scope.AllowedCustomerIds.ToList();
         var scopedListIds = LoadingListAuthorizationRules
@@ -302,10 +344,21 @@ public static class ExpenseAuthorizationRules
     }
 
     /// <summary>分摊批次范围下推（<see cref="BatchScopeFilter"/> 的 IQueryable 便捷重载）</summary>
+    /// <summary>
+    /// 分摊批次范围下推（<see cref="BatchScopeFilter"/> 的 IQueryable 便捷重载）。
+    /// <para>ERP-496：费用单路由（分摊上下文 / 预览 / 生成 / 台账 / 详情 / 作废）一律传入
+    /// <see cref="EnsureMenuAuthorizedAsync"/> 解析出的<b>非空</b>权威范围，绝不依赖任何「未解析身份即不受限」的分支。</para>
+    /// <para><b>既有已授权调用方边界</b>：分摊证据模块（ERP-060，本任务未改动其路由）在自己的控制器动作内已先经
+    /// <see cref="EnsureMenuAuthorizedAsync"/> 完成实时授权；其只读派生服务在装柜清单 / 结算单维度入口以
+    /// <c>dataScope = null</c> 表示「调用方已完成授权且不再额外下推」——该分支只服务该既有调用方，
+    /// <b>不可由费用单路由到达</b>，也绝不代表匿名、管理员或测试专用放行。</para>
+    /// </summary>
     public static IQueryable<FinanceExpenseAllocationBatch> ApplyBatchScope(
         IQueryable<FinanceExpenseAllocationBatch> source, IErpDbContext db, SalespersonDataScope? scope)
     {
         ArgumentNullException.ThrowIfNull(source);
+        if (scope is null) return source;
+
         var filter = BatchScopeFilter(db, scope);
         return filter is null ? source : source.Where(filter);
     }
@@ -315,12 +368,14 @@ public static class ExpenseAuthorizationRules
     /// <summary>
     /// 装柜清单范围校验（分摊上下文 / 预览 / 生成 / 证据读取之前）：显式 Id 解析既有未删除清单，
     /// 受限账号按 ERP-364 口径复核每一个有效参与方客户与显式上游客户。
+    /// <para>ERP-496：范围参数<b>不再接受 <c>null</c></b>。</para>
     /// </summary>
     public static async Task<ContainerLoadingList> EnsureLoadingListScopeAllowedAsync(
-        IErpDbContext db, SalespersonDataScope? scope, long loadingListId, CancellationToken ct = default)
+        IErpDbContext db, SalespersonDataScope scope, long loadingListId, CancellationToken ct = default)
     {
+        ArgumentNullException.ThrowIfNull(scope);
         var loadingList = await ContainerLoadingParticipantService.EnsureLoadingListAsync(db, loadingListId);
-        if (scope is not null && scope.AllowedCustomerIds is not null)
+        if (scope.AllowedCustomerIds is not null)
             await LoadingListAuthorizationRules.EnsureStoredScopeAllowedAsync(db, scope, loadingList, ct);
         return loadingList;
     }
@@ -380,14 +435,16 @@ public static class ExpenseAuthorizationRules
     /// <summary>
     /// 已存储分摊批次的完整范围校验（台账详情 / 作废之前）：受限账号要求显式装柜清单（参与方 + 上游客户）可证明、
     /// 来源费用（若已登记归属客户）在范围内、且逐行生成客户全部在范围内；任一不满足即拒绝，且不修改任何行 / 状态 / 审计。
+    /// <para>ERP-496：范围参数<b>不再接受 <c>null</c></b>（原「未解析身份即不受限」旁路已移除）。</para>
     /// </summary>
     public static async Task EnsureBatchScopeAllowedAsync(
-        IErpDbContext db, SalespersonDataScope? scope, FinanceExpenseAllocationBatch batch,
+        IErpDbContext db, SalespersonDataScope scope, FinanceExpenseAllocationBatch batch,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(db);
         ArgumentNullException.ThrowIfNull(batch);
-        if (scope is null || scope.AllowedCustomerIds is null) return;
+        ArgumentNullException.ThrowIfNull(scope);
+        if (scope.AllowedCustomerIds is null) return;
 
         // ① 显式 LoadingListId 的权威归属：清单不存在 / 已删除即 fail closed（不通过共享柜泄露）。
         var loadingList = await db.ContainerLoadingLists.AsNoTracking()
@@ -420,6 +477,12 @@ public static class ExpenseAuthorizationRules
     /// <summary>
     /// 已存储装柜结算单的范围校验（分摊证据读取之前）：结算客户必须在范围内；显式关联的装柜清单仍可解析时，
     /// 其参与方 / 上游客户范围与链路上<b>每一个被分摊行显式引用的客户</b>也必须同时满足（共享柜 fail closed）。
+    /// <para><b>既有已授权调用方边界（ERP-496）</b>：本方法只服务分摊证据模块（ERP-060）的结算单维度只读派生；
+    /// 该模块的控制器动作已先经 <see cref="EnsureMenuAuthorizedAsync"/> 完成实时授权，并以非空范围调用本方法；
+    /// 既有装柜清单 / 装柜结算单路由（<c>ContainerLoadingListController</c> / <c>FinanceSettlementControllers</c>）
+    /// 在自己的实时授权之后调用只读派生服务时不额外传入范围（<c>dataScope = null</c>），仅表示「调用方已授权且
+    /// 不再重复下推」——该分支<b>不可由费用单路由（<c>api/finance/expenses</c>）到达</b>，也绝不代表匿名、管理员
+    /// 或测试专用放行。</para>
     /// </summary>
     public static async Task EnsureSettlementScopeAllowedAsync(
         IErpDbContext db, SalespersonDataScope? scope, FinanceContainerSettlement settlement,

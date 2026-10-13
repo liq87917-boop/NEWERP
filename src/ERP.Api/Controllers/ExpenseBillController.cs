@@ -6,6 +6,7 @@ using ERP.Domain.Entities;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.Security.Claims;
 
 namespace ERP.Api.Controllers;
 
@@ -14,11 +15,20 @@ namespace ERP.Api.Controllers;
 /// 维护：出口杂费（报关费 / 拖车费 / THC / 文件费 / 港杂费 / 仓储费 / 快递费 / 查验费…）
 /// 支持：按整柜 / 拼柜 / 散货 / 订单 / 客户 归属，并按 体积 / 重量 / 金额 / 箱数 / 手工 分摊
 /// 另提供：拼柜费用分摊（预览 + 生成），用于"一柜多客户，费用按体积或重量分摊"
+/// <para><b>实时授权（ERP-385 / ERP-496）</b>：本控制器<b>每一个路由动作</b>在任何计数、行、金额、分摊基数
+/// 读取或写入之前，都先经 <see cref="ExpenseAuthorizationRules.EnsureMenuAuthorizedAsync"/> 解析<b>当前实时</b>
+/// 启用身份、账号状态、既有「费用单」（<c>expense-bill</c>）菜单授权与 ERP-097 权威客户数据范围，
+/// 并把解析出的<b>非空</b>范围下推到服务 / 数据库。</para>
+/// <para><b>与请求形状无关（ERP-496）</b>：判定不依赖 <c>Request.Path</c>、请求形状或是否绑定 <c>HttpContext</c> ——
+/// 原 HTTP 入口动作过滤器（<c>ExpenseRequestAuthorizationFilter</c>）与它的 <c>HttpContext.Items</c> 范围通道已
+/// <b>彻底移除</b>：空路径 / 已赋值路径 / 未绑定任何请求上下文的纯进程内直调对同一身份给出完全相同的判定；
+/// 缺失 / 为零 / 未知 / 已删除身份一律受控未认证，禁用账号 / 缺少或被撤销既有菜单一律权限不足；
+/// 绝无匿名 / 管理员 / 环境 / 测试专用开关回退。契约见
+/// <see cref="ExpenseAuthorizationRules.PathIndependenceText"/>。</para>
 /// </summary>
 [ApiController]
 [Route("api/finance/expenses")]
 [Authorize]
-[ExpenseRequestAuthorizationFilter]
 public class ExpenseBillController : BaseCrudController<FinanceExpense>
 {
     private readonly IErpDbContext _db;
@@ -32,8 +42,11 @@ public class ExpenseBillController : BaseCrudController<FinanceExpense>
     [HttpPost("allocate-preview")]
     public async Task<IActionResult> AllocatePreview([FromBody] ExpenseAllocateRequest req)
     {
+        // ERP-496：实时身份 / 账号状态 / 既有「费用单」菜单先于任何读取（与请求路径 / 是否绑定 HttpContext 无关）。
+        var scope = await EnsureExpenseAuthorizedAsync();
+
         // ERP-385：只读预览也必须先复核明细客户的权威范围（受限账号 fail closed，不泄露范围外客户）。
-        await EnsureLegacyAllocateRequestValidAsync(req, write: false);
+        await EnsureLegacyAllocateRequestValidAsync(req, scope, write: false);
         var items = Calculate(req);
         return Ok(ApiResponse<List<ExpenseAllocateResultItem>>.Success(items, "计算完成"));
     }
@@ -45,11 +58,14 @@ public class ExpenseBillController : BaseCrudController<FinanceExpense>
     [HttpPost("allocate-apply")]
     public async Task<IActionResult> AllocateApply([FromBody] ExpenseAllocateRequest req)
     {
+        // ERP-496：实时身份 / 账号状态 / 既有「费用单」菜单先于任何校验、重复检查、单号生成与写入。
+        var scope = await EnsureExpenseAuthorizedAsync();
+
         if (req.Details is null || req.Details.Count == 0)
             throw BusinessException.InvalidParameter("请至少填写一行分摊明细");
 
         // ERP-385：在重复检查、单号生成与任何写入之前完成范围 / 客户 / 币种 / 金额 / 汇率校验。
-        await EnsureLegacyAllocateRequestValidAsync(req, write: true);
+        await EnsureLegacyAllocateRequestValidAsync(req, scope, write: true);
 
         // ERP-386：传统分摊的「重复检查 + 单号保留 + 生成写入」必须在**同一原子事务**内完成，
         // 并在「模块级单号键行」（既有 expense-bill 菜单行）行锁下串行化 —— 锁键只取既有权威行，
@@ -58,7 +74,9 @@ public class ExpenseBillController : BaseCrudController<FinanceExpense>
         await ExpenseAllocationConcurrencyRules.LockModuleNumberKeyAsync(_db);
 
         // 锁内复核实时授权 / 客户可用性 / 金额口径：陈旧权限或被停用客户一律拒绝，且不占用任何单号。
-        await EnsureLegacyAllocateRequestValidAsync(req, write: true);
+        // ERP-496：此处重新解析实时身份 / 菜单 / 权威范围（无缓存），锁内复核与请求形状完全无关。
+        var lockedScope = await EnsureExpenseAuthorizedAsync();
+        await EnsureLegacyAllocateRequestValidAsync(req, lockedScope, write: true);
 
         var expenseDate = (req.ExpenseDate ?? DateTime.Today).Date;
         var allocated = Calculate(req);
@@ -125,7 +143,8 @@ public class ExpenseBillController : BaseCrudController<FinanceExpense>
     [HttpGet]
     public override async Task<IActionResult> GetPaged([FromQuery] PageQuery query)
     {
-        var scope = ExpenseRequestScope;
+        // ERP-496：实时身份 / 账号状态 / 既有「费用单」菜单 + 权威范围先于任何计数与分页（数据库侧范围下推）。
+        var scope = await EnsureExpenseAuthorizedAsync();
         var result = await Service.GetPagedAsync(query, ExpenseAuthorizationRules.ExpenseScopeFilter(scope));
         await ContainerExpenseAllocationService.AnnotateLineageAsync(_db, result.Items);
         return Ok(ApiResponse<PagedResult<FinanceExpense>>.Success(result));
@@ -135,7 +154,8 @@ public class ExpenseBillController : BaseCrudController<FinanceExpense>
     [HttpGet("all")]
     public override async Task<IActionResult> GetAll()
     {
-        var scope = ExpenseRequestScope;
+        // ERP-496：实时身份 / 账号状态 / 既有「费用单」菜单 + 权威范围先于任何读取。
+        var scope = await EnsureExpenseAuthorizedAsync();
         var result = await Service.GetAllAsync(ExpenseAuthorizationRules.ExpenseScopeFilter(scope));
         await ContainerExpenseAllocationService.AnnotateLineageAsync(_db, result);
         return Ok(ApiResponse<List<FinanceExpense>>.Success(result));
@@ -145,7 +165,8 @@ public class ExpenseBillController : BaseCrudController<FinanceExpense>
     [HttpGet("{id:long}")]
     public override async Task<IActionResult> GetById(long id)
     {
-        var scope = ExpenseRequestScope;
+        // ERP-496：实时身份 / 账号状态 / 既有「费用单」菜单先于任何行读取。
+        var scope = await EnsureExpenseAuthorizedAsync();
         var entity = await Service.GetByIdAsync(id);
         ExpenseAuthorizationRules.EnsureStoredExpenseScopeAllowed(scope, entity);
         await ContainerExpenseAllocationService.AnnotateLineageAsync(_db, new[] { entity });
@@ -159,7 +180,8 @@ public class ExpenseBillController : BaseCrudController<FinanceExpense>
     [HttpPost]
     public override async Task<IActionResult> Create([FromBody] FinanceExpense entity)
     {
-        var scope = ExpenseRequestScope;
+        // ERP-496：实时身份 / 账号状态 / 既有「费用单」菜单先于任何字段校验与写入。
+        var scope = await EnsureExpenseAuthorizedAsync();
         entity.Id = 0;
         await ExpenseAuthorizationRules.EnsureProposedExpenseValidAsync(_db, scope, entity);
         ClearClientSuppliedAllocationLineage(entity);
@@ -176,7 +198,8 @@ public class ExpenseBillController : BaseCrudController<FinanceExpense>
     [HttpPut("{id:long}")]
     public override async Task<IActionResult> Update(long id, [FromBody] FinanceExpense entity)
     {
-        var scope = ExpenseRequestScope;
+        // ERP-496：实时身份 / 账号状态 / 既有「费用单」菜单先于行锁与任何行读取。
+        var scope = await EnsureExpenseAuthorizedAsync();
 
         await using var transaction = await ExpenseAllocationConcurrencyRules.BeginTransactionIfRelationalAsync(_db);
         await ExpenseAllocationConcurrencyRules.LockSourceExpenseRowsAsync(_db, new[] { id });
@@ -212,7 +235,8 @@ public class ExpenseBillController : BaseCrudController<FinanceExpense>
     [HttpDelete("{id:long}")]
     public override async Task<IActionResult> Delete(long id)
     {
-        var scope = ExpenseRequestScope;
+        // ERP-496：实时身份 / 账号状态 / 既有「费用单」菜单先于行锁与任何行读取。
+        var scope = await EnsureExpenseAuthorizedAsync();
 
         await using var transaction = await ExpenseAllocationConcurrencyRules.BeginTransactionIfRelationalAsync(_db);
         await ExpenseAllocationConcurrencyRules.LockSourceExpenseRowsAsync(_db, new[] { id });
@@ -235,7 +259,8 @@ public class ExpenseBillController : BaseCrudController<FinanceExpense>
     [HttpPost("batch-delete")]
     public override async Task<IActionResult> BatchDelete([FromBody] List<long> ids)
     {
-        var scope = ExpenseRequestScope;
+        // ERP-496：实时身份 / 账号状态 / 既有「费用单」菜单先于行锁与任何行读取。
+        var scope = await EnsureExpenseAuthorizedAsync();
         var lockIds = ExpenseAllocationConcurrencyRules.MergeRowLockIds(ids);
 
         await using var transaction = await ExpenseAllocationConcurrencyRules.BeginTransactionIfRelationalAsync(_db);
@@ -272,8 +297,10 @@ public class ExpenseBillController : BaseCrudController<FinanceExpense>
     [HttpGet("allocation-context")]
     public async Task<IActionResult> GetAllocationContext([FromQuery] long loadingListId)
     {
+        // ERP-496：实时身份 / 账号状态 / 既有「费用单」菜单 + 权威范围先于任何参与方 / 来源 / 批次读取。
+        var scope = await EnsureExpenseAuthorizedAsync();
         var context = await ContainerExpenseAllocationService.GetContextAsync(
-            _db, loadingListId, ExpenseRequestScope);
+            _db, loadingListId, scope);
         return Ok(ApiResponse<ContainerExpenseAllocationContextDto>.Success(context, "已返回分摊上下文（只读）"));
     }
 
@@ -284,8 +311,10 @@ public class ExpenseBillController : BaseCrudController<FinanceExpense>
     [HttpPost("allocation-preview")]
     public async Task<IActionResult> AllocationPreview([FromBody] ContainerExpenseAllocationRequest request)
     {
+        // ERP-496：实时身份 / 账号状态 / 既有「费用单」菜单 + 权威范围先于任何计算。
+        var scope = await EnsureExpenseAuthorizedAsync();
         var preview = await ContainerExpenseAllocationService.PreviewAsync(
-            _db, request, ExpenseRequestScope);
+            _db, request, scope);
         return Ok(ApiResponse<ContainerExpenseAllocationPreviewDto>.Success(preview, "分摊预览完成（未写库）"));
     }
 
@@ -296,8 +325,10 @@ public class ExpenseBillController : BaseCrudController<FinanceExpense>
     [HttpPost("allocation-generate")]
     public async Task<IActionResult> AllocationGenerate([FromBody] ContainerExpenseAllocationRequest request)
     {
+        // ERP-496：实时身份 / 账号状态 / 既有「费用单」菜单 + 权威范围先于任何行锁与写入。
+        var scope = await EnsureExpenseAuthorizedAsync();
         var result = await ContainerExpenseAllocationService.GenerateAsync(
-            _db, request, ExpenseRequestScope);
+            _db, request, scope);
         return Ok(ApiResponse<ContainerExpenseAllocationGenerateResultDto>.Success(
             result, $"已生成分摊批次 {result.BatchNo}（{result.LineCount} 条费用单）"));
     }
@@ -306,8 +337,10 @@ public class ExpenseBillController : BaseCrudController<FinanceExpense>
     [HttpGet("allocation-batches")]
     public async Task<IActionResult> GetAllocationBatches([FromQuery] ContainerExpenseAllocationBatchQuery query)
     {
+        // ERP-496：实时身份 / 账号状态 / 既有「费用单」菜单 + 权威范围先于任何计数与分页。
+        var scope = await EnsureExpenseAuthorizedAsync();
         var result = await ContainerExpenseAllocationService.ListBatchesAsync(
-            _db, query, ExpenseRequestScope);
+            _db, query, scope);
         return Ok(ApiResponse<PagedResult<ContainerExpenseAllocationBatchDto>>.Success(result));
     }
 
@@ -315,8 +348,10 @@ public class ExpenseBillController : BaseCrudController<FinanceExpense>
     [HttpGet("allocation-batches/{batchId:long}")]
     public async Task<IActionResult> GetAllocationBatch(long batchId)
     {
+        // ERP-496：实时身份 / 账号状态 / 既有「费用单」菜单 + 权威范围先于任何行读取。
+        var scope = await EnsureExpenseAuthorizedAsync();
         var batch = await ContainerExpenseAllocationService.GetBatchAsync(
-            _db, batchId, ExpenseRequestScope);
+            _db, batchId, scope);
         return Ok(ApiResponse<ContainerExpenseAllocationBatchDto>.Success(batch));
     }
 
@@ -328,22 +363,50 @@ public class ExpenseBillController : BaseCrudController<FinanceExpense>
     public async Task<IActionResult> VoidAllocationBatch(
         long batchId, [FromBody] ContainerExpenseAllocationVoidRequest? request)
     {
+        // ERP-496：实时身份 / 账号状态 / 既有「费用单」菜单 + 权威范围先于任何状态改写。
+        var scope = await EnsureExpenseAuthorizedAsync();
         var batch = await ContainerExpenseAllocationService.VoidAsync(
-            _db, batchId, request?.Reason, ExpenseRequestScope);
+            _db, batchId, request?.Reason, scope);
         return Ok(ApiResponse<ContainerExpenseAllocationBatchDto>.Success(
             batch, $"分摊批次 {batch.BatchNo} 已作废（历史与逐行留痕保留）"));
     }
 
     /// <summary>
+    /// 本控制器全部路由的实时授权（ERP-496，<b>无条件执行</b>）：身份只来自已认证请求主体
+    /// （<c>ClaimTypes.NameIdentifier</c>），每次调用都重新查询实时启用身份 / 账号状态 / 既有「费用单」
+    /// （<c>expense-bill</c>）菜单授权与 ERP-097 权威客户数据范围，返回<b>非空</b>范围供同一动作复用。
+    /// <para>缺少请求上下文 / 缺少身份声明 / 非数字 / 非正数一律安全解析为 <c>null</c> 并由规则返回受控未认证，
+    /// 与 <c>Request.Path</c> 是否赋值、控制器是否绑定 <c>HttpContext</c>、是否经过 MVC 过滤器管线完全无关；
+    /// 绝无匿名 / 管理员 / 环境 / 测试专用开关回退。契约见
+    /// <see cref="ExpenseAuthorizationRules.PathIndependenceText"/>。</para>
+    /// </summary>
+    private Task<SalespersonDataScope> EnsureExpenseAuthorizedAsync()
+        => ExpenseAuthorizationRules.EnsureMenuAuthorizedAsync(_db, CurrentUserId());
+
+    /// <summary>
+    /// 当前登录账号 Id（身份只来自已认证请求主体）：缺少请求上下文 / 缺少身份声明 / 非数字 / 非正数一律
+    /// 安全解析为 <c>null</c>，由 <see cref="ExpenseAuthorizationRules.EnsureMenuAuthorizedAsync"/> 返回受控未认证，
+    /// 绝不猜测身份、绝不回退为管理员或任何测试专用放行。
+    /// </summary>
+    private long? CurrentUserId()
+        => long.TryParse(
+            ControllerContext?.HttpContext?.User?.FindFirst(ClaimTypes.NameIdentifier)?.Value, out var id)
+            && id > 0
+            ? id
+            : null;
+
+    /// <summary>
     /// 传统「拼柜分摊」请求（预览 / 生成共用）的授权与写入校验：在任何重复检查、单号生成与写入之前调用。
     /// 明细客户必须逐个落在当前账号权威范围内（受限账号 fail closed，不泄露范围外客户）；写入路径还必须指向
     /// 真实启用客户，且币种受支持、总额按既有存储精度取整后为正、汇率取整后为正。
+    /// <para>ERP-496：权威范围由调用方（动作内 <c>EnsureExpenseAuthorizedAsync</c>）实时解析后传入，<b>必填且非空</b>。</para>
     /// </summary>
-    private async Task EnsureLegacyAllocateRequestValidAsync(ExpenseAllocateRequest req, bool write)
+    private async Task EnsureLegacyAllocateRequestValidAsync(
+        ExpenseAllocateRequest req, SalespersonDataScope scope, bool write)
     {
         ArgumentNullException.ThrowIfNull(req);
+        ArgumentNullException.ThrowIfNull(scope);
 
-        var scope = ExpenseRequestScope;
         var details = req.Details ?? new List<ExpenseAllocateDetail>();
 
         ExpenseAuthorizationRules.NormalizeCurrencyStrict(req.Currency);

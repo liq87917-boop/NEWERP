@@ -48,15 +48,12 @@ public sealed class ExpenseAuthorizationSqlServerTests : IClassFixture<ExpenseAu
 
     // ==================== 控制器 / 双连接脚手架 ====================
 
-    private static ExpenseBillController NewExpenseController(
-        ErpDbContext db, SalespersonDataScope? scope, long? userId)
+    private static ExpenseBillController NewExpenseController(ErpDbContext db, long? userId)
     {
         var httpContext = new DefaultHttpContext();
         if (userId.HasValue)
             httpContext.User = new ClaimsPrincipal(new ClaimsIdentity(
                 new[] { new Claim(ClaimTypes.NameIdentifier, userId.Value.ToString()) }, "Test"));
-        if (scope is not null)
-            httpContext.Items[ExpenseRequestAuthorizationFilter.ScopeItemKey] = scope;
 
         var controller = new ExpenseBillController(new GenericService<FinanceExpense>(db), db);
         controller.ControllerContext = new ControllerContext
@@ -66,6 +63,13 @@ public sealed class ExpenseAuthorizationSqlServerTests : IClassFixture<ExpenseAu
         };
         return controller;
     }
+
+    /// <summary>
+    /// 不绑定任何请求上下文（<c>ControllerContext.HttpContext</c> 为 <c>null</c>）的纯进程内直调（ERP-496）：
+    /// 与已绑定请求上下文的调用<b>口径完全一致</b>，缺失身份一律受控未认证。
+    /// </summary>
+    private static ExpenseBillController NewHeadlessExpenseController(ErpDbContext db)
+        => new(new GenericService<FinanceExpense>(db), db);
 
     private static SalespersonDataScope RestrictedScope(long salesmanId, params long[] allowedCustomerIds)
         => new()
@@ -292,7 +296,7 @@ public sealed class ExpenseAuthorizationSqlServerTests : IClassFixture<ExpenseAu
         await using (var own = _fixture.CreateDbContext())
         {
             // 列表：在计数与分页之前按本人客户过滤（排除他人行与无主行）
-            var page = await NewExpenseController(own, scope, operatorUserId).GetPaged(new PageQuery());
+            var page = await NewExpenseController(own, operatorUserId).GetPaged(new PageQuery());
             var ok = Assert.IsType<OkObjectResult>(page);
             var data = Assert.IsType<ApiResponse<PagedResult<FinanceExpense>>>(ok.Value).Data!;
             Assert.Contains(data.Items, x => x.Id == ownExpenseId);
@@ -301,11 +305,11 @@ public sealed class ExpenseAuthorizationSqlServerTests : IClassFixture<ExpenseAu
 
             // 详情：他人与无主一律拒绝
             await Assert.ThrowsAsync<BusinessException>(() =>
-                NewExpenseController(own, scope, operatorUserId).GetById(foreignExpenseId));
+                NewExpenseController(own, operatorUserId).GetById(foreignExpenseId));
 
             // 修改 / 删除 / 批量删除：一律拒绝且不写库
             await Assert.ThrowsAsync<BusinessException>(() =>
-                NewExpenseController(own, scope, operatorUserId).Update(foreignExpenseId, new FinanceExpense
+                NewExpenseController(own, operatorUserId).Update(foreignExpenseId, new FinanceExpense
                 {
                     Id = foreignExpenseId,
                     ExpenseNo = $"EXP-E385-TRY-{tag}",
@@ -320,9 +324,9 @@ public sealed class ExpenseAuthorizationSqlServerTests : IClassFixture<ExpenseAu
                     AllocationBase = "不分摊"
                 }));
             await Assert.ThrowsAsync<BusinessException>(() =>
-                NewExpenseController(own, scope, operatorUserId).Delete(foreignExpenseId));
+                NewExpenseController(own, operatorUserId).Delete(foreignExpenseId));
             await Assert.ThrowsAsync<BusinessException>(() =>
-                NewExpenseController(own, scope, operatorUserId)
+                NewExpenseController(own, operatorUserId)
                     .BatchDelete(new List<long> { ownExpenseId, foreignExpenseId }));
 
             // 批次台账 / 详情 / 作废：混源批次对受限账号不可见、不可作废
@@ -418,6 +422,15 @@ public sealed class ExpenseAuthorizationSqlServerTests : IClassFixture<ExpenseAu
             var deleted = await Assert.ThrowsAsync<BusinessException>(() =>
                 ExpenseAuthorizationRules.EnsureMenuAuthorizedAsync(db, userId));
             Assert.Equal(ErrorCodes.Unauthorized, deleted.Code);
+        }
+
+        // ERP-496：纯进程内直调（未绑定任何请求上下文）与真实请求口径完全一致 —— 缺失身份同样受控未认证，
+        // 且不存在「无请求上下文 = 免授权」的旁路。
+        await using (var headlessDb = _fixture.CreateDbContext())
+        {
+            var headless = await Assert.ThrowsAsync<BusinessException>(() =>
+                NewHeadlessExpenseController(headlessDb).GetPaged(new PageQuery()));
+            Assert.Equal(ErrorCodes.Unauthorized, headless.Code);
         }
     }
 
@@ -516,7 +529,7 @@ public sealed class ExpenseAuthorizationSqlServerTests : IClassFixture<ExpenseAu
             () => TryAsync(async () =>
             {
                 await using var db = _fixture.CreateDbContext();
-                await NewExpenseController(db, scope, operatorUserId).Update(foreignExpenseId, new FinanceExpense
+                await NewExpenseController(db, operatorUserId).Update(foreignExpenseId, new FinanceExpense
                 {
                     Id = foreignExpenseId,
                     ExpenseNo = $"EXP-E385-RC2-TRY-{tag}",
@@ -534,7 +547,7 @@ public sealed class ExpenseAuthorizationSqlServerTests : IClassFixture<ExpenseAu
             () => TryAsync(async () =>
             {
                 await using var db = _fixture.CreateDbContext();
-                await NewExpenseController(db, scope, operatorUserId).Delete(foreignExpenseId);
+                await NewExpenseController(db, operatorUserId).Delete(foreignExpenseId);
             }));
 
         Assert.All(results, r => Assert.False(r.Success, r.Error));

@@ -31,16 +31,19 @@ public class ExpenseAuthorizationTests
 {
     // ==================== 脚手架 ====================
 
-    /// <summary>以显式范围模拟「已通过 HTTP 授权管线」的控制器（范围来自已认证主体，绝不来自请求体）</summary>
+    /// <summary>
+    /// 真实费用单控制器（ERP-496）：动作<b>自行</b>实时解析身份 / 账号状态 / 既有「费用单」菜单 / 权威客户范围。
+    /// 夹具只注入已认证主体（<c>ClaimTypes.NameIdentifier</c>），绝不注入范围，也绝不经过任何动作过滤器。
+    /// </summary>
     private static ExpenseBillController NewExpenseController(
-        ErpDbContext db, SalespersonDataScope? scope, long? userId = null)
+        ErpDbContext db, long? userId, string requestPath = "")
     {
         var httpContext = new DefaultHttpContext();
         if (userId.HasValue)
             httpContext.User = new ClaimsPrincipal(new ClaimsIdentity(
                 new[] { new Claim(ClaimTypes.NameIdentifier, userId.Value.ToString()) }, "Test"));
-        if (scope is not null)
-            httpContext.Items[ExpenseRequestAuthorizationFilter.ScopeItemKey] = scope;
+        if (!string.IsNullOrEmpty(requestPath))
+            httpContext.Request.Path = requestPath;
 
         var controller = new ExpenseBillController(new GenericService<FinanceExpense>(db), db);
         controller.ControllerContext = new ControllerContext
@@ -50,6 +53,13 @@ public class ExpenseAuthorizationTests
         };
         return controller;
     }
+
+    /// <summary>
+    /// 未绑定任何请求上下文（<c>ControllerContext.HttpContext</c> 为 <c>null</c>）的纯进程内直调（ERP-496）：
+    /// 与已绑定请求上下文的调用<b>口径完全一致</b>，缺失身份一律受控未认证。
+    /// </summary>
+    private static ExpenseBillController NewHeadlessExpenseController(ErpDbContext db)
+        => new(new GenericService<FinanceExpense>(db), db);
 
     private static ContainerExpenseAllocationEvidenceController NewEvidenceController(ErpDbContext db)
     {
@@ -60,52 +70,6 @@ public class ExpenseAuthorizationTests
             ActionDescriptor = new ControllerActionDescriptor()
         };
         return controller;
-    }
-
-    /// <summary>仅解析 IErpDbContext 的最小服务提供器（用于直接驱动真实授权过滤器）</summary>
-    private sealed class SingleDbContextServices : IServiceProvider
-    {
-        private readonly IErpDbContext _db;
-
-        public SingleDbContextServices(IErpDbContext db) => _db = db;
-
-        public object? GetService(Type serviceType)
-            => serviceType == typeof(IErpDbContext) ? _db
-             : serviceType == typeof(IServiceProvider) ? this
-             : null;
-    }
-
-    /// <summary>驱动真实 <see cref="ExpenseRequestAuthorizationFilter"/>（HTTP 入口）并返回结果</summary>
-    private static async Task<(ExpenseBillController Controller, BusinessException? Denied)>
-        RunAuthorizationFilterAsync(ErpDbContext db, long? userId)
-    {
-        var httpContext = new DefaultHttpContext { RequestServices = new SingleDbContextServices(db) };
-        if (userId.HasValue)
-            httpContext.User = new ClaimsPrincipal(new ClaimsIdentity(
-                new[] { new Claim(ClaimTypes.NameIdentifier, userId.Value.ToString()) }, "Test"));
-
-        var controller = new ExpenseBillController(new GenericService<FinanceExpense>(db), db);
-        controller.ControllerContext = new ControllerContext
-        {
-            HttpContext = httpContext,
-            ActionDescriptor = new ControllerActionDescriptor()
-        };
-
-        var actionContext = new ActionContext(httpContext, new RouteData(), new ControllerActionDescriptor());
-        var executing = new ActionExecutingContext(
-            actionContext, new List<IFilterMetadata>(), new Dictionary<string, object?>(), controller);
-        var executed = new ActionExecutedContext(actionContext, new List<IFilterMetadata>(), controller);
-
-        try
-        {
-            await new ExpenseRequestAuthorizationFilter().OnActionExecutionAsync(
-                executing, () => Task.FromResult(executed));
-            return (controller, null);
-        }
-        catch (BusinessException ex)
-        {
-            return (controller, ex);
-        }
     }
 
     // ==================== 种子数据 ====================
@@ -401,20 +365,28 @@ public class ExpenseAuthorizationTests
     }
 
     [Fact]
-    public async Task Http入口过滤器_未认证与无菜单请求在读取与写入之前被拒绝()
+    public async Task 路由动作实时授权_未认证无菜单与未绑定请求上下文一律在读写之前拒绝()
     {
         using var db = TestDbFactory.Create();
 
-        var (_, anonymous) = await RunAuthorizationFilterAsync(db, null);
-        Assert.NotNull(anonymous);
-        Assert.Equal(ErrorCodes.Unauthorized, anonymous!.Code);
+        // 缺失身份（含未绑定任何请求上下文、空路径与已赋值路径）：口径完全一致
+        await AssertCodeAsync(ErrorCodes.Unauthorized, () =>
+            NewExpenseController(db, null).GetPaged(new PageQuery()));
+        await AssertCodeAsync(ErrorCodes.Unauthorized, () =>
+            NewExpenseController(db, null, "/api/finance/expenses").GetPaged(new PageQuery()));
+        await AssertCodeAsync(ErrorCodes.Unauthorized, () =>
+            NewHeadlessExpenseController(db).GetPaged(new PageQuery()));
 
-        var noMenu = SeedUser(db, "u-filter-no-menu");
-        var (_, denied) = await RunAuthorizationFilterAsync(db, noMenu.Id);
-        Assert.NotNull(denied);
-        Assert.Equal(ErrorCodes.Forbidden, denied!.Code);
+        // 身份为零：不猜测身份，同样受控未认证
+        await AssertCodeAsync(ErrorCodes.Unauthorized, () =>
+            NewExpenseController(db, 0L).GetPaged(new PageQuery()));
 
-        // 过滤器放行后必须已注入权威范围：列表在计数之前按本人客户过滤（同时排除无主行）
+        // 无菜单：权限不足（未触达任何计数 / 行读取）
+        var noMenu = SeedUser(db, "u-route-no-menu");
+        await AssertCodeAsync(ErrorCodes.Forbidden, () =>
+            NewExpenseController(db, noMenu.Id).GetPaged(new PageQuery()));
+
+        // 放行后必须解析出权威范围：列表在计数之前按本人客户过滤（同时排除无主行）
         var (operatorUser, employee) = SeedRestrictedOperator(db, ExpenseAuthorizationRules.RequiredMenuCode);
         var own = SeedCustomer(db, "C-OWN", "本人客户", empId: employee.Id);
         var foreign = SeedCustomer(db, "C-OTHER", "他人客户");
@@ -422,12 +394,15 @@ public class ExpenseAuthorizationTests
         SeedExpense(db, "EXP-FOREIGN", foreign.Id);
         SeedExpense(db, "EXP-SOURCE-LESS", null);
 
-        var (controller, allowed) = await RunAuthorizationFilterAsync(db, operatorUser.Id);
-        Assert.Null(allowed);
-
-        var page = AssertOk<PagedResult<FinanceExpense>>(await controller.GetPaged(new PageQuery()));
+        var page = AssertOk<PagedResult<FinanceExpense>>(
+            await NewExpenseController(db, operatorUser.Id).GetPaged(new PageQuery()));
         Assert.Equal(1, page.Total);
         Assert.Equal("EXP-OWN", Assert.Single(page.Items).ExpenseNo);
+
+        // 已赋值请求路径与未绑定请求上下文（有身份无上下文无法构造，故校验空路径口径一致）
+        var pageWithPath = AssertOk<PagedResult<FinanceExpense>>(
+            await NewExpenseController(db, operatorUser.Id, "/api/finance/expenses").GetPaged(new PageQuery()));
+        Assert.Equal(1, pageWithPath.Total);
 
         Assert.Equal(3, await db.FinanceExpenses.CountAsync());
     }
@@ -435,7 +410,6 @@ public class ExpenseAuthorizationTests
     [Fact]
     public void 范围谓词_特权不过滤_受限排除无主与越界()
     {
-        Assert.Null(ExpenseAuthorizationRules.ExpenseScopeFilter(null));
         Assert.Null(ExpenseAuthorizationRules.ExpenseScopeFilter(Privileged()));
 
         using var db = TestDbFactory.Create();
@@ -484,31 +458,35 @@ public class ExpenseAuthorizationTests
     public async Task 新增_拟议客户范围与写入校验_拒绝时不留任何行()
     {
         using var db = TestDbFactory.Create();
-        var own = SeedCustomer(db, "C-OWN", "本人客户");
+        var (operatorUser, employee) = SeedRestrictedOperator(db, ExpenseAuthorizationRules.RequiredMenuCode);
+        var own = SeedCustomer(db, "C-OWN", "本人客户", empId: employee.Id);
+        var disabled = SeedCustomer(db, "C-DIS", "停用客户", empId: employee.Id, status: 0);
         var foreign = SeedCustomer(db, "C-OTHER", "他人客户");
-        var disabled = SeedCustomer(db, "C-DIS", "停用客户", status: 0);
-        var scope = Restricted(1, own.Id, disabled.Id, 987654321L);
+        var restricted = NewExpenseController(db, operatorUser.Id);
 
         await AssertCodeAsync(ErrorCodes.Forbidden, () =>
-            NewExpenseController(db, scope).Create(NewExpense(foreign.Id)));
+            restricted.Create(NewExpense(foreign.Id)));
 
         // 无权威归属（CustomerId 缺失）：受限账号 fail closed
         await AssertCodeAsync(ErrorCodes.Forbidden, () =>
-            NewExpenseController(db, scope).Create(NewExpense(null)));
+            restricted.Create(NewExpense(null)));
 
-        // 客户真实存在性 / 启用状态：范围内但不存在 / 已停用一律拒绝
+        // 范围内但已停用客户：拒绝且不留任何行
         await AssertCodeAsync(ErrorCodes.InvalidParameter, () =>
-            NewExpenseController(db, scope).Create(NewExpense(987654321L)));
-        await AssertCodeAsync(ErrorCodes.InvalidParameter, () =>
-            NewExpenseController(db, scope).Create(NewExpense(disabled.Id)));
+            restricted.Create(NewExpense(disabled.Id)));
 
-        // 受支持币种 / 取整后为正的金额 / 为正的汇率
+        // 客户不存在 / 受支持币种 / 取整后为正的金额 / 为正的汇率：与范围无关的写入校验（由特权账号验证）
+        var privileged = NewExpenseController(db, SeedUser(
+            db, "u-write-priv", privileged: true,
+            menuCodes: ExpenseAuthorizationRules.RequiredMenuCode).Id);
         await AssertCodeAsync(ErrorCodes.InvalidParameter, () =>
-            NewExpenseController(db, scope).Create(NewExpense(own.Id, currency: "KRW")));
+            privileged.Create(NewExpense(987654321L)));
         await AssertCodeAsync(ErrorCodes.InvalidParameter, () =>
-            NewExpenseController(db, scope).Create(NewExpense(own.Id, amount: 0.004m)));
+            privileged.Create(NewExpense(own.Id, currency: "KRW")));
         await AssertCodeAsync(ErrorCodes.InvalidParameter, () =>
-            NewExpenseController(db, scope).Create(NewExpense(own.Id, rate: 0m)));
+            privileged.Create(NewExpense(own.Id, amount: 0.004m)));
+        await AssertCodeAsync(ErrorCodes.InvalidParameter, () =>
+            privileged.Create(NewExpense(own.Id, rate: 0m)));
 
         Assert.Equal(0, await db.FinanceExpenses.CountAsync());
     }
@@ -517,9 +495,9 @@ public class ExpenseAuthorizationTests
     public async Task 新增_成功写入本人客户且忽略客户端批次留痕()
     {
         using var db = TestDbFactory.Create();
-        var own = SeedCustomer(db, "C-OWN", "本人客户");
-        var scope = Restricted(1, own.Id);
-        var controller = NewExpenseController(db, scope);
+        var (operatorUser, employee) = SeedRestrictedOperator(db, ExpenseAuthorizationRules.RequiredMenuCode);
+        var own = SeedCustomer(db, "C-OWN", "本人客户", empId: employee.Id);
+        var controller = NewExpenseController(db, operatorUser.Id);
 
         var created = AssertOk<FinanceExpense>(await controller.Create(
             NewExpense(own.Id, allocationBatchNo: "EAB-CLIENT-001")));
@@ -538,24 +516,26 @@ public class ExpenseAuthorizationTests
     public async Task 详情_越界与无主一律拒绝_本人客户可读()
     {
         using var db = TestDbFactory.Create();
-        var own = SeedCustomer(db, "C-OWN", "本人客户");
+        var (operatorUser, employee) = SeedRestrictedOperator(db, ExpenseAuthorizationRules.RequiredMenuCode);
+        var own = SeedCustomer(db, "C-OWN", "本人客户", empId: employee.Id);
         var foreign = SeedCustomer(db, "C-OTHER", "他人客户");
         var ownRow = SeedExpense(db, "EXP-OWN", own.Id);
         var foreignRow = SeedExpense(db, "EXP-FOREIGN", foreign.Id);
         var orphanRow = SeedExpense(db, "EXP-NONE", null);
-        var scope = Restricted(1, own.Id);
 
         var detail = AssertOk<FinanceExpense>(
-            await NewExpenseController(db, scope).GetById(ownRow.Id));
+            await NewExpenseController(db, operatorUser.Id).GetById(ownRow.Id));
         Assert.Equal("EXP-OWN", detail.ExpenseNo);
 
         await AssertCodeAsync(ErrorCodes.Forbidden, () =>
-            NewExpenseController(db, scope).GetById(foreignRow.Id));
+            NewExpenseController(db, operatorUser.Id).GetById(foreignRow.Id));
         await AssertCodeAsync(ErrorCodes.Forbidden, () =>
-            NewExpenseController(db, scope).GetById(orphanRow.Id));
+            NewExpenseController(db, operatorUser.Id).GetById(orphanRow.Id));
 
         // 特权账号保留历史访问（含无主行与范围外行）
-        var privileged = NewExpenseController(db, Privileged());
+        var privileged = NewExpenseController(db, SeedUser(
+            db, "u-read-priv", privileged: true,
+            menuCodes: ExpenseAuthorizationRules.RequiredMenuCode).Id);
         Assert.Equal("EXP-FOREIGN",
             AssertOk<FinanceExpense>(await privileged.GetById(foreignRow.Id)).ExpenseNo);
         Assert.Equal("EXP-NONE",
@@ -566,23 +546,23 @@ public class ExpenseAuthorizationTests
     public async Task 删除与批量删除_越界一律拒绝且不改写任何行()
     {
         using var db = TestDbFactory.Create();
-        var own = SeedCustomer(db, "C-OWN", "本人客户");
+        var (operatorUser, employee) = SeedRestrictedOperator(db, ExpenseAuthorizationRules.RequiredMenuCode);
+        var own = SeedCustomer(db, "C-OWN", "本人客户", empId: employee.Id);
         var foreign = SeedCustomer(db, "C-OTHER", "他人客户");
         var ownRow = SeedExpense(db, "EXP-OWN", own.Id);
         var foreignRow = SeedExpense(db, "EXP-FOREIGN", foreign.Id);
-        var scope = Restricted(1, own.Id);
 
         await AssertCodeAsync(ErrorCodes.Forbidden, () =>
-            NewExpenseController(db, scope).Delete(foreignRow.Id));
+            NewExpenseController(db, operatorUser.Id).Delete(foreignRow.Id));
         Assert.False(db.FinanceExpenses.Single(x => x.Id == foreignRow.Id).IsDeleted);
 
         // 批量删除：任一行越界即整体拒绝，本人行也不得被删除
         await AssertCodeAsync(ErrorCodes.Forbidden, () =>
-            NewExpenseController(db, scope).BatchDelete(new List<long> { ownRow.Id, foreignRow.Id }));
+            NewExpenseController(db, operatorUser.Id).BatchDelete(new List<long> { ownRow.Id, foreignRow.Id }));
         Assert.False(db.FinanceExpenses.Single(x => x.Id == ownRow.Id).IsDeleted);
         Assert.False(db.FinanceExpenses.Single(x => x.Id == foreignRow.Id).IsDeleted);
 
-        AssertOk<object>(await NewExpenseController(db, scope).Delete(ownRow.Id));
+        AssertOk<object>(await NewExpenseController(db, operatorUser.Id).Delete(ownRow.Id));
         Assert.True(db.FinanceExpenses.Single(x => x.Id == ownRow.Id).IsDeleted);
         Assert.False(db.FinanceExpenses.Single(x => x.Id == foreignRow.Id).IsDeleted);
     }
@@ -591,18 +571,18 @@ public class ExpenseAuthorizationTests
     public async Task 修改_越界拒绝且批次生成行审计不可被客户端改写()
     {
         using var db = TestDbFactory.Create();
-        var own = SeedCustomer(db, "C-OWN", "本人客户");
+        var (operatorUser, employee) = SeedRestrictedOperator(db, ExpenseAuthorizationRules.RequiredMenuCode);
+        var own = SeedCustomer(db, "C-OWN", "本人客户", empId: employee.Id);
         var foreign = SeedCustomer(db, "C-OTHER", "他人客户");
         var generated = SeedExpense(db, "EXP-GEN", own.Id, amount: 300m,
             allocationBatchNo: "EAB-20261001-001", allocationSourceExpenseId: 42,
             allocationSourceExpenseNo: "EXP-SRC");
         var foreignRow = SeedExpense(db, "EXP-FOREIGN", foreign.Id);
-        var scope = Restricted(1, own.Id);
 
         // 越界行：拒绝且字段 / 审计不变
         var foreignBefore = await db.FinanceExpenses.AsNoTracking().SingleAsync(x => x.Id == foreignRow.Id);
         await AssertCodeAsync(ErrorCodes.Forbidden, () =>
-            NewExpenseController(db, scope).Update(foreignRow.Id, NewExpense(own.Id, amount: 999m)));
+            NewExpenseController(db, operatorUser.Id).Update(foreignRow.Id, NewExpense(own.Id, amount: 999m)));
         var foreignAfter = await db.FinanceExpenses.AsNoTracking().SingleAsync(x => x.Id == foreignRow.Id);
         Assert.Equal(foreignBefore.Amount, foreignAfter.Amount);
         Assert.Equal(foreignBefore.UpdatedAt, foreignAfter.UpdatedAt);
@@ -611,7 +591,7 @@ public class ExpenseAuthorizationTests
         var body = NewExpense(own.Id, amount: 350m, allocationBatchNo: "");
         body.Remark = "调整金额";
         var updated = AssertOk<FinanceExpense>(
-            await NewExpenseController(db, scope).Update(generated.Id, body));
+            await NewExpenseController(db, operatorUser.Id).Update(generated.Id, body));
         Assert.Equal(350m, updated.Amount);
         Assert.Equal("EAB-20261001-001", updated.AllocationBatchNo);
         Assert.Equal(42L, updated.AllocationSourceExpenseId);
@@ -619,7 +599,7 @@ public class ExpenseAuthorizationTests
 
         // 越界客户改派同样被拒绝（拟议范围校验）
         await AssertCodeAsync(ErrorCodes.Forbidden, () =>
-            NewExpenseController(db, scope).Update(generated.Id, NewExpense(foreign.Id, amount: 350m)));
+            NewExpenseController(db, operatorUser.Id).Update(generated.Id, NewExpense(foreign.Id, amount: 350m)));
         Assert.Equal("EAB-20261001-001",
             db.FinanceExpenses.Single(x => x.Id == generated.Id).AllocationBatchNo);
     }
@@ -647,33 +627,33 @@ public class ExpenseAuthorizationTests
     public async Task 传统分摊_越界与非法取值一律拒绝且不写库()
     {
         using var db = TestDbFactory.Create();
-        var own = SeedCustomer(db, "C-OWN", "本人客户");
+        var (operatorUser, employee) = SeedRestrictedOperator(db, ExpenseAuthorizationRules.RequiredMenuCode);
+        var own = SeedCustomer(db, "C-OWN", "本人客户", empId: employee.Id);
         var foreign = SeedCustomer(db, "C-OTHER", "他人客户");
-        var scope = Restricted(1, own.Id);
 
         await AssertCodeAsync(ErrorCodes.Forbidden, () =>
-            NewExpenseController(db, scope).AllocatePreview(AllocateRequest(foreign.Id)));
+            NewExpenseController(db, operatorUser.Id).AllocatePreview(AllocateRequest(foreign.Id)));
         await AssertCodeAsync(ErrorCodes.Forbidden, () =>
-            NewExpenseController(db, scope).AllocateApply(AllocateRequest(foreign.Id)));
+            NewExpenseController(db, operatorUser.Id).AllocateApply(AllocateRequest(foreign.Id)));
 
         // 无权威归属（CustomerId 缺失）的明细行对受限账号 fail closed
         await AssertCodeAsync(ErrorCodes.Forbidden, () =>
-            NewExpenseController(db, scope).AllocateApply(AllocateRequest(null)));
+            NewExpenseController(db, operatorUser.Id).AllocateApply(AllocateRequest(null)));
 
         await AssertCodeAsync(ErrorCodes.InvalidParameter, () =>
-            NewExpenseController(db, scope).AllocateApply(AllocateRequest(own.Id, total: 0m)));
+            NewExpenseController(db, operatorUser.Id).AllocateApply(AllocateRequest(own.Id, total: 0m)));
         await AssertCodeAsync(ErrorCodes.InvalidParameter, () =>
-            NewExpenseController(db, scope).AllocateApply(AllocateRequest(own.Id, currency: "KRW")));
+            NewExpenseController(db, operatorUser.Id).AllocateApply(AllocateRequest(own.Id, currency: "KRW")));
         await AssertCodeAsync(ErrorCodes.InvalidParameter, () =>
-            NewExpenseController(db, scope).AllocateApply(AllocateRequest(own.Id, rate: 0m)));
+            NewExpenseController(db, operatorUser.Id).AllocateApply(AllocateRequest(own.Id, rate: 0m)));
 
         Assert.Equal(0, await db.FinanceExpenses.CountAsync());
 
         var preview = AssertOk<List<ExpenseAllocateResultItem>>(
-            await NewExpenseController(db, scope).AllocatePreview(AllocateRequest(own.Id)));
+            await NewExpenseController(db, operatorUser.Id).AllocatePreview(AllocateRequest(own.Id)));
         Assert.Equal(100m, Assert.Single(preview).AllocatedAmount);
 
-        var apply = await NewExpenseController(db, scope).AllocateApply(AllocateRequest(own.Id));
+        var apply = await NewExpenseController(db, operatorUser.Id).AllocateApply(AllocateRequest(own.Id));
         Assert.IsType<OkObjectResult>(apply);
         var generated = await db.FinanceExpenses.AsNoTracking().SingleAsync();
         Assert.Equal(own.Id, generated.CustomerId);
@@ -684,13 +664,13 @@ public class ExpenseAuthorizationTests
     public async Task 批次预览与生成_共享柜越界参与方拒绝且不留任何行()
     {
         using var db = TestDbFactory.Create();
-        var own = SeedCustomer(db, "C-OWN", "本人客户");
+        var (operatorUser, employee) = SeedRestrictedOperator(db, ExpenseAuthorizationRules.RequiredMenuCode);
+        var own = SeedCustomer(db, "C-OWN", "本人客户", empId: employee.Id);
         var foreign = SeedCustomer(db, "C-OTHER", "他人客户");
         var list = SeedLoadingList(db, "ZG-SHARED", "TCLU-SHARED", own.Id);
         var ownParticipant = SeedParticipant(db, list.Id, own, primary: true);
         var foreignParticipant = SeedParticipant(db, list.Id, foreign);
         var source = SeedExpense(db, "EXP-SHARED-SRC", own.Id, amount: 1000m, refNo: "TCLU-SHARED");
-        var scope = Restricted(1, own.Id);
 
         var request = new ContainerExpenseAllocationRequest
         {
@@ -705,14 +685,16 @@ public class ExpenseAuthorizationTests
         };
 
         await AssertCodeAsync(ErrorCodes.Forbidden, () =>
-            NewExpenseController(db, scope).AllocationPreview(request));
+            NewExpenseController(db, operatorUser.Id).AllocationPreview(request));
         await AssertCodeAsync(ErrorCodes.Forbidden, () =>
-            NewExpenseController(db, scope).AllocationGenerate(request));
+            NewExpenseController(db, operatorUser.Id).AllocationGenerate(request));
         Assert.Equal(0, await db.FinanceExpenseAllocationBatches.CountAsync());
         Assert.Equal(1, await db.FinanceExpenses.CountAsync());
 
         // 特权账号保留既有口径：预览与生成均可用
-        var privileged = NewExpenseController(db, Privileged());
+        var privileged = NewExpenseController(db, SeedUser(
+            db, "u-batch-priv", privileged: true,
+            menuCodes: ExpenseAuthorizationRules.RequiredMenuCode).Id);
         var preview = AssertOk<ContainerExpenseAllocationPreviewDto>(await privileged.AllocationPreview(request));
         Assert.Equal(2, preview.Lines.Count);
 
@@ -770,10 +752,9 @@ public class ExpenseAuthorizationTests
     }
 
     [Fact]
-    public void 批次范围谓词_进程内调用与特权账号不过滤()
+    public void 批次范围谓词_特权账号不过滤_受限账号按逐行客户证明过滤()
     {
         using var db = TestDbFactory.Create();
-        Assert.Null(ExpenseAuthorizationRules.BatchScopeFilter(db, null));
         Assert.Null(ExpenseAuthorizationRules.BatchScopeFilter(db, Privileged()));
         Assert.NotNull(ExpenseAuthorizationRules.BatchScopeFilter(db, Restricted(1)));
     }
@@ -848,6 +829,160 @@ public class ExpenseAuthorizationTests
         });
     }
 
+    // ==================== 4.5 ERP-496 逐路由实时授权矩阵 ====================
+
+    /// <summary>全部 15 条费用单路由的动作调用矩阵（ERP-496 逐路由覆盖用）。</summary>
+    private static List<(string Name, Func<ExpenseBillController, Task<IActionResult>> Invoke)>
+        RouteMatrix(long expenseId, long customerId, long loadingListId, long batchId)
+        => new()
+        {
+            ("paged", ctl => ctl.GetPaged(new PageQuery())),
+            ("all", ctl => ctl.GetAll()),
+            ("by-id", ctl => ctl.GetById(expenseId)),
+            ("create", ctl => ctl.Create(NewExpense(customerId))),
+            ("update", ctl => ctl.Update(expenseId, NewExpense(customerId))),
+            ("delete", ctl => ctl.Delete(expenseId)),
+            ("batch-delete", ctl => ctl.BatchDelete(new List<long> { expenseId })),
+            ("allocate-preview", ctl => ctl.AllocatePreview(AllocateRequest(customerId))),
+            ("allocate-apply", ctl => ctl.AllocateApply(AllocateRequest(customerId))),
+            ("allocation-context", ctl => ctl.GetAllocationContext(loadingListId)),
+            ("allocation-preview", ctl => ctl.AllocationPreview(BatchAllocateRequest(expenseId, loadingListId))),
+            ("allocation-generate", ctl => ctl.AllocationGenerate(BatchAllocateRequest(expenseId, loadingListId))),
+            ("allocation-batches", ctl => ctl.GetAllocationBatches(new ContainerExpenseAllocationBatchQuery())),
+            ("allocation-batch", ctl => ctl.GetAllocationBatch(batchId)),
+            ("allocation-batch-void", ctl => ctl.VoidAllocationBatch(
+                batchId, new ContainerExpenseAllocationVoidRequest { Reason = "路由矩阵" }))
+        };
+
+    private static ContainerExpenseAllocationRequest BatchAllocateRequest(long expenseId, long loadingListId)
+        => new()
+        {
+            SourceExpenseId = expenseId,
+            LoadingListId = loadingListId,
+            AllocationMethod = "按体积",
+            Lines = new List<ContainerExpenseAllocationBasisDto>()
+        };
+
+    [Fact]
+    public async Task 路由矩阵_缺失为零未知已删除身份未授权_禁用与缺少或撤销菜单禁止()
+    {
+        using var db = TestDbFactory.Create();
+        var routes = RouteMatrix(1L, 1L, 1L, 1L);
+
+        foreach (var route in routes)
+        {
+            // 缺失身份：空路径、已赋值路径与未绑定任何请求上下文口径完全一致
+            await AssertCodeAsync(ErrorCodes.Unauthorized,
+                () => route.Invoke(NewExpenseController(db, null)));
+            await AssertCodeAsync(ErrorCodes.Unauthorized,
+                () => route.Invoke(NewExpenseController(db, null, "/api/finance/expenses")));
+            await AssertCodeAsync(ErrorCodes.Unauthorized,
+                () => route.Invoke(NewHeadlessExpenseController(db)));
+
+            // 为零 / 未知身份：不猜测身份，一律受控未认证
+            await AssertCodeAsync(ErrorCodes.Unauthorized,
+                () => route.Invoke(NewExpenseController(db, 0L)));
+            await AssertCodeAsync(ErrorCodes.Unauthorized,
+                () => route.Invoke(NewExpenseController(db, long.MaxValue)));
+
+            // 已删除账号：受控未认证
+            var deleted = SeedUser(db, $"u-del-{Guid.NewGuid():N}", deleted: true);
+            await AssertCodeAsync(ErrorCodes.Unauthorized,
+                () => route.Invoke(NewExpenseController(db, deleted.Id)));
+
+            // 已禁用账号（具备既有菜单）：权限不足
+            var disabled = SeedUser(db, $"u-dis-{Guid.NewGuid():N}", enabled: false,
+                menuCodes: ExpenseAuthorizationRules.RequiredMenuCode);
+            await AssertCodeAsync(ErrorCodes.Forbidden,
+                () => route.Invoke(NewExpenseController(db, disabled.Id)));
+
+            // 缺少既有「费用单」菜单：权限不足
+            var noMenu = SeedUser(db, $"u-nomenu-{Guid.NewGuid():N}");
+            await AssertCodeAsync(ErrorCodes.Forbidden,
+                () => route.Invoke(NewExpenseController(db, noMenu.Id)));
+
+            // 撤销既有「费用单」菜单：下一次请求立即收敛（无缓存）
+            var (revokedUser, revokedRoleId) = SeedRestrictedOperatorWithRole(
+                db, ExpenseAuthorizationRules.RequiredMenuCode);
+            var grant = db.SysRoleMenus.Single(rm =>
+                rm.RoleId == revokedRoleId && !rm.IsDeleted
+                && db.SysMenus.Any(m => m.Id == rm.MenuId
+                    && m.MenuCode == ExpenseAuthorizationRules.RequiredMenuCode));
+            grant.IsDeleted = true;
+            db.SaveChanges();
+            await AssertCodeAsync(ErrorCodes.Forbidden,
+                () => route.Invoke(NewExpenseController(db, revokedUser.Id)));
+        }
+
+        // 全部拒绝路径零改写：无新增费用单 / 批次 / 分摊行
+        Assert.Equal(0, await db.FinanceExpenses.CountAsync());
+        Assert.Equal(0, await db.FinanceExpenseAllocationBatches.CountAsync());
+        Assert.Equal(0, await db.FinanceExpenseAllocationLines.CountAsync());
+    }
+
+    /// <summary>播种受限业务员并返回其角色 Id（用于撤销既有菜单授权验证实时收敛）。</summary>
+    private static (SysUser User, long RoleId) SeedRestrictedOperatorWithRole(
+        ErpDbContext db, params string[] menuCodes)
+    {
+        var (user, _) = SeedRestrictedOperator(db, menuCodes);
+        var roleId = db.SysUserRoles.Single(ur => ur.UserId == user.Id).RoleId;
+        return (user, roleId);
+    }
+
+    [Fact]
+    public async Task 受限身份_本人范围可读写_共享柜批次与范围外费用在控制器路由拒绝且零改写()
+    {
+        using var db = TestDbFactory.Create();
+        var (operatorUser, employee) = SeedRestrictedOperator(db, ExpenseAuthorizationRules.RequiredMenuCode);
+        var own = SeedCustomer(db, "C-OWN", "本人客户", empId: employee.Id);
+        var foreign = SeedCustomer(db, "C-OTHER", "他人客户");
+        var ownRow = SeedExpense(db, "EXP-OWN", own.Id, amount: 500m);
+        var foreignRow = SeedExpense(db, "EXP-FOREIGN", foreign.Id);
+        var list = SeedLoadingList(db, "ZG-RT", "TCLU-RT", own.Id);
+        var ownParticipant = SeedParticipant(db, list.Id, own, primary: true);
+        var foreignParticipant = SeedParticipant(db, list.Id, foreign);
+        var source = SeedExpense(db, "EXP-RT-SRC", own.Id, amount: 1000m, refNo: "TCLU-RT");
+        var mixed = SeedBatch(db, "EAB-RT-MIXED", list, source,
+            (ownParticipant.Id, own.Id, 600m), (foreignParticipant.Id, foreign.Id, 400m));
+        var controller = NewExpenseController(
+            db, operatorUser.Id, "/api/finance/expenses/allocation-batches");
+
+        // 本人范围：列表按权威客户范围在数据库侧过滤（排除范围外行）与详情可读
+        var page = AssertOk<PagedResult<FinanceExpense>>(await controller.GetPaged(new PageQuery()));
+        Assert.Equal(2, page.Total);                          // 本人客户的两条：明细行 + 批次来源费用
+        Assert.DoesNotContain(page.Items, x => x.Id == foreignRow.Id);
+        Assert.All(page.Items, x => Assert.Equal(own.Id, x.CustomerId));
+        Assert.Equal("EXP-OWN", AssertOk<FinanceExpense>(await controller.GetById(ownRow.Id)).ExpenseNo);
+
+        // 范围外费用：详情 / 修改 / 删除一律拒绝且零改写
+        await AssertCodeAsync(ErrorCodes.Forbidden, () => controller.GetById(foreignRow.Id));
+        await AssertCodeAsync(ErrorCodes.Forbidden, () =>
+            controller.Update(foreignRow.Id, NewExpense(own.Id)));
+        await AssertCodeAsync(ErrorCodes.Forbidden, () => controller.Delete(foreignRow.Id));
+        Assert.False(db.FinanceExpenses.Single(x => x.Id == foreignRow.Id).IsDeleted);
+
+        // 共享柜（逐行含范围外客户）：上下文 / 台账 / 详情 / 作废一律拒绝且零改写
+        await AssertCodeAsync(ErrorCodes.Forbidden, () => controller.GetAllocationContext(list.Id));
+        var batches = AssertOk<PagedResult<ContainerExpenseAllocationBatchDto>>(
+            await controller.GetAllocationBatches(new ContainerExpenseAllocationBatchQuery()));
+        Assert.Equal(0, batches.Total);
+        await AssertCodeAsync(ErrorCodes.Forbidden, () => controller.GetAllocationBatch(mixed.Id));
+        await AssertCodeAsync(ErrorCodes.Forbidden, () => controller.VoidAllocationBatch(
+            mixed.Id, new ContainerExpenseAllocationVoidRequest { Reason = "越界作废" }));
+        var batchRow = await db.FinanceExpenseAllocationBatches.AsNoTracking()
+            .SingleAsync(x => x.Id == mixed.Id);
+        Assert.Equal(ContainerExpenseAllocationRules.BatchActive, batchRow.Status);
+        Assert.Null(batchRow.VoidedAt);
+        Assert.Equal(string.Empty, batchRow.VoidReason);
+        Assert.Equal(2, await db.FinanceExpenseAllocationLines.CountAsync(l => l.BatchId == mixed.Id));
+
+        // 传统分摊：范围外明细拒绝；本人明细可预览（只读、不写库）
+        await AssertCodeAsync(ErrorCodes.Forbidden, () => controller.AllocatePreview(AllocateRequest(foreign.Id)));
+        Assert.Equal(100m, Assert.Single(AssertOk<List<ExpenseAllocateResultItem>>(
+            await controller.AllocatePreview(AllocateRequest(own.Id)))).AllocatedAmount);
+        Assert.Equal(3, await db.FinanceExpenses.CountAsync());
+    }
+
     // ==================== 5. 边界与接线 ====================
 
     private static string RepoRoot()
@@ -879,10 +1014,18 @@ public class ExpenseAuthorizationTests
         Assert.Contains("expense-bill", ExpenseAuthorizationRules.RuleText);
         Assert.Contains("不新增", ExpenseAuthorizationRules.BoundaryText);
 
-        // 费用单控制器：HTTP 入口过滤器 + 全部分摊路由范围接线
+        // 费用单控制器：ERP-496 每一条路由都在动作内实时授权（过滤器 / 范围通道已彻底移除）
         var controller = ReadRepoFile("src", "ERP.Api", "Controllers", "ExpenseBillController.cs");
-        Assert.Contains("[ExpenseRequestAuthorizationFilter]", controller);
-        Assert.Contains("ExpenseRequestScope", controller);
+        Assert.DoesNotContain("[ExpenseRequestAuthorizationFilter]", controller);
+        Assert.DoesNotContain("ExpenseRequestScope", controller);
+        Assert.DoesNotContain("ExpenseRequestAuthorizationFilter.ScopeItemKey", controller);
+        Assert.Contains("EnsureExpenseAuthorizedAsync", controller);
+        Assert.Contains("EnsureMenuAuthorizedAsync(_db, CurrentUserId())", controller);
+        Assert.Contains("[HttpPost(\"allocate-preview\")]", controller);
+        Assert.Contains("[HttpPost(\"allocate-apply\")]", controller);
+        Assert.Contains("[HttpPut(\"{id:long}\")]", controller);
+        Assert.Contains("[HttpDelete(\"{id:long}\")]", controller);
+        Assert.Contains("[HttpPost(\"batch-delete\")]", controller);
         Assert.Contains("[HttpPost(\"allocation-preview\")]", controller);
         Assert.Contains("[HttpPost(\"allocation-generate\")]", controller);
         Assert.Contains("[HttpGet(\"allocation-context\")]", controller);
@@ -895,10 +1038,27 @@ public class ExpenseAuthorizationTests
             "src", "ERP.Api", "Controllers", "ContainerExpenseAllocationEvidenceController.cs");
         Assert.Contains("EnsureMenuAuthorizedAsync", evidenceController);
 
-        // 通用 CRUD 基类的删除路由已 virtual（费用单可复核范围而不影响其他模块）
+        // 规则层：路径无关契约 + 原「进程内调用范围只能为 null（= 不受限）」旁路已移除
+        var rules = ReadRepoFile("src", "ERP.Application", "Services", "ExpenseAuthorizationRules.cs");
+        Assert.Contains("EnsureMenuAuthorizedAsync", rules);
+        Assert.Contains(nameof(ExpenseAuthorizationRules.PathIndependenceText), rules);
+        Assert.Contains("PathIndependenceText", ExpenseAuthorizationRules.RuleText);
+        Assert.Contains("ExpenseScopeFilter(SalespersonDataScope scope)", rules);
+        Assert.Contains("IErpDbContext db, SalespersonDataScope scope, FinanceExpenseAllocationBatch batch", rules);
+        Assert.Contains("public static void EnsureCustomerInScope(SalespersonDataScope scope, long? customerId)", rules);
+        Assert.Contains("public static void EnsureStoredExpenseScopeAllowed(SalespersonDataScope scope, FinanceExpense expense)", rules);
+        Assert.DoesNotContain("ExpenseScopeFilter(SalespersonDataScope? scope)", rules);
+        Assert.DoesNotContain("IErpDbContext db, SalespersonDataScope? scope, IEnumerable<long> customerIds", rules);
+        Assert.DoesNotContain("void EnsureCustomerInScope(SalespersonDataScope? scope", rules);
+        Assert.DoesNotContain("void EnsureStoredExpenseScopeAllowed(SalespersonDataScope? scope", rules);
+        Assert.Contains("EnsureMenuAuthorizedAsync", ExpenseAuthorizationRules.PathIndependenceText);
+
+        // 通用 CRUD 基类的删除路由已 virtual（费用单可复核范围而不影响其他模块）；
+        // ERP-496：费用单授权过滤器与 HttpContext.Items 范围通道已从基类彻底移除
         var baseController = ReadRepoFile("src", "ERP.Api", "Controllers", "BaseCrudController.cs");
         Assert.Contains("public virtual async Task<IActionResult> Delete(long id)", baseController);
         Assert.Contains("public virtual async Task<IActionResult> BatchDelete", baseController);
-        Assert.Contains("class ExpenseRequestAuthorizationFilter", baseController);
+        Assert.DoesNotContain("ExpenseRequestAuthorizationFilter", baseController);
+        Assert.DoesNotContain("ExpenseRequestScope", baseController);
     }
 }
