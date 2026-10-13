@@ -27,23 +27,31 @@ private bool RequiresLiveAuthorization()
 `SupplierPaymentAllocationService.CreateAsync` / `VoidAsync`），因此「空路径 / 无身份」的请求形状旁路可以
 登记或作废包含金额、币种、快照与作废原因的分摊证据，而不需要实时身份、既有菜单或权威范围。
 
-## 2. 修复后的授权门（与请求路径无关）
+> **2026-10-13 验收恢复**：上一次修复把授权门收敛为「是否绑定到 HTTP 请求管线」，但仍对
+> `HttpContext` 为 null 的纯进程内直调保留免授权分支（`RequiresLiveAuthorization()`），
+> 与「including no HttpContext 也必须 fail closed」的验收条款不一致。本次恢复**彻底移除**该门与
+> `Create` / `Void` 的无授权服务直调分支，并把两个进程内夹具
+> （`SalesOrderReceiptEvidenceTests` / `PurchaseOrderPaymentEvidenceTests`）适配为
+> 「真实启用身份 + 既有「收款单」/「付款单」菜单授权」，因此不存在任何内部调用 / 测试兼容 / 重命名旁路，
+> 也不存在「无请求上下文」豁免。
 
-两个控制器的 `RequiresLiveAuthorization()` 现在只依据「控制器是否绑定到 HTTP 请求管线」：
+## 2. 修复后的授权门（无条件、与请求路径 / 请求形状 / 请求上下文无关）
 
-```csharp
-private bool RequiresLiveAuthorization()
-    => ControllerContext?.HttpContext is not null;
-```
+两个控制器**已彻底移除** `RequiresLiveAuthorization()` 授权门与登记 / 作废的无授权服务直调分支：
 
-- **空路径与已赋值路径口径完全一致**：不再读取请求路径，请求形状不再参与授权判定；
-- **缺少身份不再放行**：绑定到请求管线但身份缺失 / 为零 / 未知 / 已删除时一律 fail closed（未认证 2000）；
+- 台账 / 候选 / 汇总 / 清单 / 订单候选 / 详情每一条读取入口无条件调用
+  `CustomerReceiptLifecycleRules.EnsureMenuAuthorizedAsync` / `SupplierPaymentLifecycleRules.EnsureMenuAuthorizedAsync`；
+- 登记 / 作废无条件先调用同一菜单授权，再走授权服务重载 `CreateAuthorizedAsync` / `VoidAuthorizedAsync`，
+  **绝不**退回 `CreateAsync` / `VoidAsync` 无授权重载；
+- 判定**与请求路径 / 请求形状 / 是否绑定 `HttpContext` 完全无关**：空路径、已赋值路径与
+  **完全未绑定 `HttpContext`** 的纯进程内直调口径完全一致，对同一身份给出完全相同的判定；
+- **缺少身份不再放行**：身份缺失 / 为零 / 未知 / 已删除时一律 fail closed（未认证 2000）；
 - **禁用 / 撤销或缺少既有菜单一律权限不足（2002）**，且判定先于任何分摊金额、快照或候选读取与写入；
-- 不读取环境变量、不按数据库提供程序 / 内存库放行、不存在任何测试专用开关；
+- 不读取 `Request.Path`、不读取环境变量、不按数据库提供程序 / 内存库放行、不存在任何测试专用开关；
 - 不存在 `[AllowAnonymous]`、角色白名单或「退化为管理员」的兜底（源码契约测试逐条断言）。
 
 `CustomerReceiptLifecycleRules.PathIndependenceText` 与 `SupplierPaymentLifecycleRules.PathIndependenceText`
-固化了同一口径，并与各自的 `RuleText` / `BoundaryText` 一起构成「与请求形状无关」的可回归契约文案。
+固化了同一口径，并与各自的 `RuleText` / `BoundaryText` 一起构成「与请求形状 / 请求上下文无关」的可回归契约文案。
 
 ## 3. 逐路由先授权、后读写
 
@@ -89,23 +97,26 @@ private bool RequiresLiveAuthorization()
 
 ### 5.1 单元测试（内存库 + 真实既有身份 / 菜单 / 数据范围）
 
-- `src/ERP.UnitTests/ReceiptPaymentAllocationEntryAuthorizationTests.cs`（新增，24 个用例）：
+- `src/ERP.UnitTests/ReceiptPaymentAllocationEntryAuthorizationTests.cs`（27 个用例）：
   空路径与已赋值路径的**逐入口一致判定**（收款 / 付款各 8 条：台账 / 候选 / 汇总 / 清单 / 订单候选 / 详情 / 登记 / 作废）；
   缺失 / 零 / 未知 / 已删除身份 → 未认证；禁用 / 缺少 / 撤销既有菜单 → 权限不足（撤销后下一次请求立即收敛）；
   授权身份在**空路径**请求上完成 登记 → 作废 → 重新登记 生命周期并保留金额 / 币种 / 客户 / 重复有效行护栏；
   被拒绝调用对证据行、金额与授权行数的**零写入快照**；ERP-097 范围内外收敛与不披露错误；
-  以及源码契约（控制器不含 `Request.Path` / `AllowAnonymous` / 角色白名单 / 环境变量 / 内存库开关，
-  且登记 / 作废只走授权服务重载）。
+  **完全未绑定 `HttpContext`** 的纯进程内直调在全部入口一律未认证且零写入；
+  以及源码契约（控制器不含 `RequiresLiveAuthorization` / `ControllerContext?.HttpContext is not null` / `Request.Path` /
+  `AllowAnonymous` / 角色白名单 / 环境变量 / 内存库开关，且登记 / 作废只走授权服务重载）。
 - 既有夹具按「真实启用身份 + 既有菜单授权 + 不设置 `Request.Path`」适配：
-  `CustomerReceiptAllocationTests`、`SupplierPaymentAllocationTests`（默认空路径请求，证明授权与请求形状无关）。
-- **Safe Release（分析器 + warnings-as-errors）构建 0 警告 0 错误，`ERP.UnitTests` 全量 7415 个用例全部通过**
+  `CustomerReceiptAllocationTests`、`SupplierPaymentAllocationTests`、`SalesOrderReceiptEvidenceTests`、
+  `PurchaseOrderPaymentEvidenceTests`（默认空路径请求，证明授权与请求形状 / 请求上下文无关）。
+- **Safe Release（分析器 + warnings-as-errors）构建 0 警告 0 错误，`ERP.UnitTests` 全量用例全部通过**
   （构建本身不等于整阶段验收）。
 
 ### 5.2 真实隔离 SQL 测试
 
-`src/ERP.IntegrationTests/ReceiptPaymentAllocationEntryAuthorizationSqlServerTests.cs`（新增）以真实控制器 + 真实既有身份 /
+`src/ERP.IntegrationTests/ReceiptPaymentAllocationEntryAuthorizationSqlServerTests.cs` 以真实控制器 + 真实既有身份 /
 菜单 / 数据范围驱动：空路径与已赋值路径一致判定、缺失 / 零 / 未知 / 已删除身份未认证、禁用与撤销菜单权限不足、
-授权账号全生命周期（两种请求形状）、被拒绝调用零写入与零授权扩张，以及专用目标护栏的 fail-closed 覆盖。
+授权账号全生命周期（两种请求形状）、被拒绝调用零写入与零授权扩张、**完全未绑定 `HttpContext` 的直调在全部入口
+一律未认证且零写入**，以及专用目标护栏的 fail-closed 覆盖。
 
 安全口径：目标必须是专用实例 `(localdb)\NEWERP_AutoAcceptance`、库名前缀 `NEWERP_AUTOTEST` 且 `Integrated Security=true`；
 每次运行只创建**全新 GUID 后缀库**，发现同名库已存在立即拒绝，**绝不 drop / reset / 复用**任何数据库；
@@ -113,28 +124,20 @@ private bool RequiresLiveAuthorization()
 
 ## 6. 授权判定边界
 
-修复后，**任何绑定到 HTTP 请求管线的调用**都执行实时授权：真实 HTTP 请求由 ASP.NET Core 请求管线提供
+修复后，**每一条入口都无条件执行实时授权**：真实 HTTP 请求由 ASP.NET Core 请求管线提供
 `ControllerContext.HttpContext`，因此生产与集成环境中的**每一条**入口（空路径与已赋值路径、匿名与已认证）
 都强制走身份 / 账号状态 / 既有菜单 / ERP-097 权威范围判定，**空路径不再构成旁路**，缺少身份的真实请求一律 fail closed。
 
-唯一不执行实时授权的情形是：控制器**完全未被任何请求绑定**（`HttpContext` 为 null 的纯进程内直接调用）。
-这类调用不可能由任何外部请求到达（不存在可被外部构造的「无请求上下文」HTTP 调用），并且该边界**不**读取
-请求路径、环境变量、数据库提供程序或任何测试专用开关。
+与此同时，**完全未绑定 `HttpContext`**（`ControllerContext.HttpContext` 为 null）的纯进程内直调同样无条件执行本护栏：
+`CurrentUserId()` 在缺少请求主体时安全解析为 `null`，缺失 / 为零 / 未知 / 已删除身份一律未认证（2000），
+禁用 / 缺少或被撤销菜单一律权限不足（2002），且判定先于任何分摊金额、快照或候选读取与写入——
+**不存在「无请求上下文」豁免**，也不存在任何内部调用 / 测试兼容 / 环境变量 / 数据库提供程序旁路。
 
-## 7. 残留边界与后续动作（显式声明，不隐藏）
+## 7. 边界声明
 
-验收条款要求「including no HttpContext」也必须 fail closed，且「空白上下文」不得作为放行条件。本任务已移除
-请求路径与身份维度旁路，并把两个控制器的授权门收敛为「是否绑定到请求管线」；但**当 `HttpContext` 完全为 null 时
-仍沿用仓库一致的进程内直调边界**，原因是仓库中仍存在未授权进程内直调夹具：
-
-- `src/ERP.UnitTests/SalesOrderReceiptEvidenceTests.cs`（`new CustomerReceiptAllocationController(db)` 后直接 `Create` / `Void`）；
-- `src/ERP.UnitTests/PurchaseOrderPaymentEvidenceTests.cs`（`new SupplierPaymentAllocationController(db)` 后直接 `Create` / `Void`）。
-
-这两个文件**不在本任务的 `allowed_paths` 清单内**，因此本任务**未**改动它们，也未为了让其保持绿色而保留任何
-请求形状 / 身份 / 环境 / 测试专用放行开关。本任务已在本任务范围内把既有夹具
-（`CustomerReceiptAllocationTests`、`SupplierPaymentAllocationTests`）适配为「真实启用身份 + 既有菜单授权」的真实请求上下文。
-
-后续动作（建议，需要先授权这两个路径）：把 `RequiresLiveAuthorization()` 改为无条件启用（直接返回 `true` 或移除该门），
-并把上述两个进程内夹具适配为注入真实启用身份与既有「收款单」/「付款单」菜单的请求上下文；届时「无 HttpContext」的
-直调与空路径请求同样是 fail closed，本文件的第 6 节边界随之消失。
+- 本模块**只改授权门与夹具**：不弱化任何金额 / 币种 / 重复行 / 额度 / 作废原因 / 审计校验，
+  不新增或修改生产菜单 / 角色 / 用户授权，不新增表 / 列 / 权限模型，响应路由与 DTO 契约不变。
+- 被拒绝的调用**零写入**：不新增 / 不改写任何分摊证据行、不改写收款单 / 付款单、不新增任何用户授权。
+- 真实隔离 SQL 只使用专用实例 `(localdb)\NEWERP_AutoAcceptance` + 全新 GUID 的 `NEWERP_AUTOTEST` 库，
+  绝不 drop / reset / 复用任何数据库，绝不读取生产凭据。
 

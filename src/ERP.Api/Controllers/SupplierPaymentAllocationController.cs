@@ -17,13 +17,13 @@ namespace ERP.Api.Controllers;
 /// <strong>不</strong>改写采购订单状态 / 到货进度 / 金额与明细 / 结算进度、<strong>不</strong>改写发票与发票关联、
 /// 库存与库存成本、退税记录、费用与供应商余额，也不执行任何付款、记账、核销或结算动作；
 /// 生产库结构变更仍由 Human Gate 控制（本控制器不做任何 DDL，建表 / 索引由 SchemaUpgrader 幂等补齐）。</para>
-/// <para>ERP-468：<see cref="RequiresLiveAuthorization"/> 只依据「控制器是否绑定到 HTTP 请求管线」
-/// （<c>ControllerContext.HttpContext</c> 是否存在），<strong>与请求路径是否赋值、以及是否携带可解析身份完全无关</strong>：
-/// 空路径与已赋值路径的授权口径完全一致，缺少身份的真实请求 fail closed（未认证），不再存在「空路径 / 无身份」的请求形状旁路；
-/// 台账 / 付款单候选 / 付款单侧汇总 / 付款单侧清单 / 订单候选 / 详情 / 登记 / 作废每一条入口都在任何引用金额、快照或候选
-/// 读写之前复核实时身份 / 账号状态 / 既有「付款单」（payment）菜单 / ERP-097 权威客户范围。仅 <c>HttpContext</c> 为 null 的
-/// 纯进程内直调（外部请求无法构造）沿用仓库一致的进程内边界，该边界不读取请求路径、环境变量或任何测试专用开关。
-/// 口径见 <see cref="SupplierPaymentLifecycleRules.PathIndependenceText"/>。</para>
+/// <para>ERP-468：台账 / 付款单候选 / 付款单侧汇总 / 付款单侧清单 / 订单候选 / 详情 / 登记 / 作废<strong>每一条入口都无条件</strong>
+/// 在任何引用金额、快照或候选读写之前复核实时身份 / 账号状态 / 既有「付款单」（payment）菜单 / ERP-097 权威客户范围；
+/// 判定与请求路径是否赋值、请求形状以及是否绑定 <c>HttpContext</c> <strong>完全无关</strong>：
+/// 空路径、已赋值路径与未绑定任何请求上下文的纯进程内直调口径完全一致，缺失 / 为零 / 未知 / 已删除身份一律未认证，
+/// 禁用账号 / 缺少或被撤销菜单一律权限不足；登记 / 作废不再存在任何无授权的服务直调旁路（无请求形状 / 环境变量 /
+/// 数据库提供程序 / 测试专用开关旁路，绝无匿名或管理员兜底）。口径见
+/// <see cref="SupplierPaymentLifecycleRules.PathIndependenceText"/>。</para>
 /// </summary>
 [ApiController]
 [Route("api/supplier-payment-allocations")]
@@ -126,13 +126,9 @@ public class SupplierPaymentAllocationController : ControllerBase
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] SupplierPaymentAllocationSaveDto dto)
     {
-        // ERP-468：只要控制器绑定到 HTTP 请求管线（空路径或已赋值路径）就一律实时授权；缺少身份 fail closed。
-        // 仅完全未绑定请求上下文的纯进程内直调沿用仓库一致的进程内边界（不读取请求路径 / 环境变量 / 测试开关）。
-        if (!RequiresLiveAuthorization())
-            return Ok(ApiResponse<SupplierPaymentAllocationDto>.Success(
-                await SupplierPaymentAllocationService.CreateAsync(_db, dto),
-                "付款引用已登记（仅证据留痕；未执行付款、未结算、未核销）"));
-
+        // ERP-468：与请求路径 / 请求形状 / 是否绑定 HttpContext 完全无关 —— 登记入口无条件先解析实时启用身份、
+        // 既有「付款单」（payment）菜单授权与 ERP-097 权威客户数据范围，再执行授权服务重载；
+        // 缺失身份 fail closed，绝不退回无授权的服务直调（不存在任何请求形状 / 空上下文旁路）。
         await SupplierPaymentLifecycleRules.EnsureMenuAuthorizedAsync(_db, CurrentUserId());
         return Ok(ApiResponse<SupplierPaymentAllocationDto>.Success(
             await SupplierPaymentAllocationService.CreateAuthorizedAsync(_db, dto, CurrentUserId()),
@@ -146,12 +142,8 @@ public class SupplierPaymentAllocationController : ControllerBase
     [HttpPost("{id:long}/void")]
     public async Task<IActionResult> Void(long id, [FromBody] SupplierPaymentAllocationVoidRequest? request)
     {
-        // ERP-468：与登记同一口径——绑定到请求管线就一律实时授权，作废绝不因请求形状或缺少身份而放行。
-        if (!RequiresLiveAuthorization())
-            return Ok(ApiResponse<SupplierPaymentAllocationDto>.Success(
-                await SupplierPaymentAllocationService.VoidAsync(_db, id, request?.Reason),
-                "付款引用已作废（原始值与快照保留，可读）"));
-
+        // ERP-468：与登记同一口径 —— 作废同样无条件实时授权（身份 + 既有「付款单」菜单 + 权威客户范围），
+        // 绝不因请求形状、空路径或未绑定 HttpContext 而放行。
         await SupplierPaymentLifecycleRules.EnsureMenuAuthorizedAsync(_db, CurrentUserId());
         return Ok(ApiResponse<SupplierPaymentAllocationDto>.Success(
             await SupplierPaymentAllocationService.VoidAuthorizedAsync(
@@ -162,17 +154,4 @@ public class SupplierPaymentAllocationController : ControllerBase
     /// <summary>当前登录用户 Id（缺失或非数字返回 null，由授权规则 fail closed 拒绝，绝不猜测身份）</summary>
     private long? CurrentUserId()
         => long.TryParse(User?.FindFirst(ClaimTypes.NameIdentifier)?.Value, out var id) ? id : null;
-
-    /// <summary>
-    /// 是否必须执行实时授权（ERP-468）：<strong>只要控制器绑定到 HTTP 请求管线（<c>ControllerContext.HttpContext</c> 存在）
-    /// 就一律执行</strong>，与请求路径是否赋值、以及当前是否携带可解析的登录身份<strong>完全无关</strong>：
-    /// 空路径请求与已赋值路径请求的授权口径完全一致，缺少身份的真实请求同样 fail closed（未认证），
-    /// 既不存在「空路径 / 无身份」的请求形状旁路，也绝不把缺失身份当作管理员，绝无匿名或管理员兜底。
-    /// <para>仅「未被任何请求绑定」（<c>HttpContext</c> 为 null 的纯进程内直接调用，外部请求无法到达，例如既有进程内
-    /// 单元测试夹具 <c>PurchaseOrderPaymentEvidenceTests</c>）沿用仓库一致的进程内直调边界：该边界不读取请求路径、
-    /// 不读取环境变量、也不使用任何测试专用开关，因此不是请求形状旁路，也不能由任何外部请求到达。
-    /// 契约与边界见 <see cref="SupplierPaymentLifecycleRules.PathIndependenceText"/>。</para>
-    /// </summary>
-    private bool RequiresLiveAuthorization()
-        => ControllerContext?.HttpContext is not null;
 }

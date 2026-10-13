@@ -1,8 +1,11 @@
 {
   "task": "ERP-468",
-  "status": "retry",
-  "execution_outcome": "acceptance_reopened",
-  "attempts": 1,
-  "reason": "CustomerReceiptAllocationController.RequiresLiveAuthorization:180 and SupplierPaymentAllocationController.RequiresLiveAuthorization:176 still waive Create/Void live guards with no HttpContext, contrary to original explicit no-context acceptance. Remove the helpers and direct unguarded service branches; always use existing receipt/payment menu and current funding/source/customer authority, including all reads/candidates/preview. Preserve shared budgets, exact currency, explicit parent identities, immutable void history and atomic rejection.",
-  "original_result_preserved": "D:\\VSCodeProject\\NEWERP.executor.continue-erp-190-20260930080457\\.ai\\logs\\heartbeat-20261013-190922-recovery\\ERP-468"
+  "status": "completed",
+  "execution_outcome": "completed",
+  "normalized_finish_reason": "build_validated",
+  "cline_exit_code": 0,
+  "cline_finish_reason_raw": "completed",
+  "attempts": 2,
+  "browser_acceptance": null,
+  "finished_at": "2026-10-13T19:40:55.865089Z"
 }

@@ -20,9 +20,9 @@ namespace ERP.IntegrationTests;
 /// <item><b>真实控制器 + 真实既有身份 / 菜单 / 数据范围</b>：以既有「收款单」（receipt）/「付款单」（payment）菜单授权与既有
 /// <see cref="SalespersonDataScopeService"/> 数据范围口径驱动真实 <see cref="CustomerReceiptAllocationController"/> /
 /// <see cref="SupplierPaymentAllocationController"/>。</item>
-/// <item><b>与请求形状无关</b>：<strong>空 <c>Request.Path</c></strong> 与<strong>已赋值 <c>Request.Path</c></strong>
-/// 必须给出完全一致的判定；缺失 / 零 / 未知 / 已删除身份一律未认证，禁用 / 撤销菜单一律权限不足，且都在任何
-/// 分摊金额、快照或候选读取与写入之前。</item>
+/// <item><b>与请求形状 / 请求上下文无关</b>：<strong>空 <c>Request.Path</c></strong>、<strong>已赋值 <c>Request.Path</c></strong>
+/// 与<strong>完全未绑定 <c>HttpContext</c></strong> 的纯进程内直调必须给出完全一致的判定；缺失 / 零 / 未知 / 已删除身份一律未认证，
+/// 禁用 / 撤销菜单一律权限不足，且都在任何分摊金额、快照或候选读取与写入之前。</item>
 /// <item><b>保留既有业务生命周期与零写入拒绝</b>：既有授权账号照常完成 台账 / 候选 / 汇总 / 详情 / 登记 / 作废 全生命周期；
 /// 被拒绝的请求不新增 / 不改写任何分摊行或权威收款单 / 付款单，也不新增任何用户授权。</item>
 /// </list>
@@ -119,6 +119,45 @@ public sealed class ReceiptPaymentAllocationEntryAuthorizationSqlServerTests
         }
     }
 
+    /// <summary>完全未绑定 HttpContext 的纯进程内直调（<c>ControllerContext.HttpContext</c> 为 null）。</summary>
+    private async Task<(bool Success, int Code, string Error)> TryReceiptWithoutContextAsync(
+        Func<CustomerReceiptAllocationController, Task<IActionResult>> action)
+    {
+        await using var db = _fixture.CreateDbContext();
+        try
+        {
+            var result = await action(new CustomerReceiptAllocationController(db));
+            return (result is OkObjectResult, ErrorCodes.Success, string.Empty);
+        }
+        catch (BusinessException ex)
+        {
+            return (false, ex.Code, ex.Message);
+        }
+        catch (Exception ex)
+        {
+            return (false, -1, ex.ToString());
+        }
+    }
+
+    private async Task<(bool Success, int Code, string Error)> TryPaymentWithoutContextAsync(
+        Func<SupplierPaymentAllocationController, Task<IActionResult>> action)
+    {
+        await using var db = _fixture.CreateDbContext();
+        try
+        {
+            var result = await action(new SupplierPaymentAllocationController(db));
+            return (result is OkObjectResult, ErrorCodes.Success, string.Empty);
+        }
+        catch (BusinessException ex)
+        {
+            return (false, ex.Code, ex.Message);
+        }
+        catch (Exception ex)
+        {
+            return (false, -1, ex.ToString());
+        }
+    }
+
     // ==================== 路由判决助手（收款 / 付款各 8 条入口） ====================
 
     private static CustomerReceiptAllocationSaveDto ReceiptDto(long receiptId, long salesOrderId, decimal amount)
@@ -166,6 +205,48 @@ public sealed class ReceiptPaymentAllocationEntryAuthorizationSqlServerTests
         Assert.Equal(code, (await TryPaymentAsync(userId, requestPath,
             c => c.Create(PaymentDto(paymentId, purchaseOrderId, 10m)))).Code);
         Assert.Equal(code, (await TryPaymentAsync(userId, requestPath,
+            c => c.Void(1L, new SupplierPaymentAllocationVoidRequest { Reason = "作废" }))).Code);
+    }
+
+    private async Task AssertReceiptRoutesWithoutContextDeniedAsync(
+        long receiptId, long salesOrderId, int code)
+    {
+        Assert.Equal(code, (await TryReceiptWithoutContextAsync(
+            c => c.GetPaged(new CustomerReceiptAllocationQuery()))).Code);
+        Assert.Equal(code, (await TryReceiptWithoutContextAsync(
+            c => c.ReceiptCandidates(null, null, 10))).Code);
+        Assert.Equal(code, (await TryReceiptWithoutContextAsync(
+            c => c.ReceiptSummary(receiptId))).Code);
+        Assert.Equal(code, (await TryReceiptWithoutContextAsync(
+            c => c.AllocationsForReceipt(receiptId))).Code);
+        Assert.Equal(code, (await TryReceiptWithoutContextAsync(
+            c => c.OrderCandidates(receiptId, null, 10))).Code);
+        Assert.Equal(code, (await TryReceiptWithoutContextAsync(
+            c => c.GetById(1L))).Code);
+        Assert.Equal(code, (await TryReceiptWithoutContextAsync(
+            c => c.Create(ReceiptDto(receiptId, salesOrderId, 10m)))).Code);
+        Assert.Equal(code, (await TryReceiptWithoutContextAsync(
+            c => c.Void(1L, new CustomerReceiptAllocationVoidRequest { Reason = "作废" }))).Code);
+    }
+
+    private async Task AssertPaymentRoutesWithoutContextDeniedAsync(
+        long paymentId, long purchaseOrderId, int code)
+    {
+        Assert.Equal(code, (await TryPaymentWithoutContextAsync(
+            c => c.GetPaged(new SupplierPaymentAllocationQuery()))).Code);
+        Assert.Equal(code, (await TryPaymentWithoutContextAsync(
+            c => c.PaymentCandidates(null, null, 10))).Code);
+        Assert.Equal(code, (await TryPaymentWithoutContextAsync(
+            c => c.PaymentSummary(paymentId))).Code);
+        Assert.Equal(code, (await TryPaymentWithoutContextAsync(
+            c => c.AllocationsForPayment(paymentId))).Code);
+        Assert.Equal(code, (await TryPaymentWithoutContextAsync(
+            c => c.OrderCandidates(paymentId, null, 10))).Code);
+        Assert.Equal(code, (await TryPaymentWithoutContextAsync(
+            c => c.GetById(1L))).Code);
+        Assert.Equal(code, (await TryPaymentWithoutContextAsync(
+            c => c.Create(PaymentDto(paymentId, purchaseOrderId, 10m)))).Code);
+        Assert.Equal(code, (await TryPaymentWithoutContextAsync(
             c => c.Void(1L, new SupplierPaymentAllocationVoidRequest { Reason = "作废" }))).Code);
     }
 
@@ -593,6 +674,32 @@ public sealed class ReceiptPaymentAllocationEntryAuthorizationSqlServerTests
             .SingleAsync(a => a.ReceiptId == receiptId && !a.IsDeleted);
         Assert.Equal(CustomerReceiptAllocationRules.StatusActive, stored.Status);
         Assert.Null(stored.VoidedAt);
+    }
+
+    // ==================== 6. 完全未绑定 HttpContext：同样无条件未认证且零写入 ====================
+
+    [Fact]
+    public async Task Absent_Http_Context_fails_closed_on_every_route_and_persists_nothing()
+    {
+        Guard();
+        long receiptId, salesOrderId, paymentId, purchaseOrderId;
+        await using (var seed = _fixture.CreateDbContext())
+        {
+            var customerId = await SeedCustomerAsync(seed, "NOCTX");
+            var supplierId = await SeedSupplierAsync(seed);
+            receiptId = (await SeedReceiptAsync(seed, customerId)).Id;
+            salesOrderId = (await SeedSalesOrderAsync(seed, customerId)).Id;
+            paymentId = (await SeedPaymentAsync(seed, supplierId)).Id;
+            purchaseOrderId = (await SeedPurchaseOrderAsync(seed, supplierId)).Id;
+        }
+
+        // 未绑定任何请求上下文（HttpContext 为 null）的纯进程内直调：身份不可解析 → 一律未认证。
+        await AssertReceiptRoutesWithoutContextDeniedAsync(receiptId, salesOrderId, ErrorCodes.Unauthorized);
+        await AssertPaymentRoutesWithoutContextDeniedAsync(paymentId, purchaseOrderId, ErrorCodes.Unauthorized);
+
+        await using var check = _fixture.CreateDbContext();
+        Assert.Equal(0, await check.CustomerReceiptAllocations.CountAsync(a => a.ReceiptId == receiptId));
+        Assert.Equal(0, await check.SupplierPaymentAllocations.CountAsync(a => a.PaymentId == paymentId));
     }
 }
 

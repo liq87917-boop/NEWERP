@@ -486,8 +486,11 @@ public class SalesOrderReceiptEvidenceTests
         });
         await db.SaveChangesAsync();
 
-        // ERP-053 服务端登记：写入服务端快照并形成有效证据
+        // ERP-468：登记 / 作废无条件实时授权 —— 夹具绑定隔离内存测试库中的真实启用身份，
+        // 且该身份持有既有「收款单」（receipt）菜单授权（系统内置角色口径，数据范围不受限）；
+        // 默认空路径请求（不设置 Request.Path），证明授权与请求形状 / 请求上下文完全无关。
         var register = new CustomerReceiptAllocationController(db);
+        TestAuth.SetUser(register, SeedReceiptAllocationOperator(db));
         var created = AssertOk<CustomerReceiptAllocationDto>(await register.Create(
             new CustomerReceiptAllocationSaveDto
             {
@@ -876,5 +879,54 @@ public class SalesOrderReceiptEvidenceTests
         };
         db.CustomerReceiptAllocations.Add(row);
         return row;
+    }
+
+    /// <summary>
+    /// ERP-468：为既有登记 / 作废直调夹具播种<strong>真实启用身份 + 既有「收款单」（receipt）菜单授权</strong>
+    /// （系统内置角色口径 → 既有不受客户范围限制的授权）；菜单 / 角色 / 账号只播种在隔离的内存测试数据里，
+    /// 绝不新增或修改任何生产菜单 / 角色 / 用户授权，也不提供任何测试专用开关。
+    /// </summary>
+    private static long SeedReceiptAllocationOperator(ErpDbContext db)
+    {
+        var menu = db.SysMenus.FirstOrDefault(
+            m => m.MenuCode == CustomerReceiptLifecycleRules.RequiredMenuCode && !m.IsDeleted);
+        if (menu is null)
+        {
+            menu = new SysMenu
+            {
+                ParentId = 0,
+                MenuCode = CustomerReceiptLifecycleRules.RequiredMenuCode,
+                MenuName = CustomerReceiptLifecycleRules.RequiredMenuText,
+                Path = "/finance/receipt",
+                MenuType = MenuType.Menu
+            };
+            db.SysMenus.Add(menu);
+            db.SaveChanges();
+        }
+
+        var role = new SysRole
+        {
+            RoleCode = $"SoReceiptEvidence-{Guid.NewGuid():N}",
+            RoleName = "销售订单收款证据测试角色",
+            IsSystem = true
+        };
+        db.SysRoles.Add(role);
+        db.SaveChanges();
+        db.SysRoleMenus.Add(new SysRoleMenu { RoleId = role.Id, MenuId = menu.Id });
+        db.SaveChanges();
+
+        var user = new SysUser
+        {
+            UserName = $"so-receipt-evidence-{Guid.NewGuid():N}",
+            PasswordHash = "hash",
+            PasswordSalt = "salt",
+            DisplayName = "销售订单收款证据测试账号",
+            Status = UserStatus.Enabled
+        };
+        db.SysUsers.Add(user);
+        db.SaveChanges();
+        db.SysUserRoles.Add(new SysUserRole { UserId = user.Id, RoleId = role.Id });
+        db.SaveChanges();
+        return user.Id;
     }
 }

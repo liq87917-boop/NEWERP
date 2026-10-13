@@ -22,6 +22,7 @@ namespace ERP.UnitTests;
 /// 一律权限不足（2002），且全部先于任何分摊金额、快照或候选读取与写入；授权身份在<strong>空路径</strong>请求上完成
 /// 既有「登记 → 作废 → 重新登记」生命周期，被拒绝调用零写入且不新增任何授权。</para>
 /// <para>默认<strong>不设置</strong> <c>Request.Path</c>（空路径请求）用于证明授权判定与请求形状无关；
+/// 并覆盖「完全未绑定 <c>HttpContext</c>」的纯进程内直调 —— 同样无条件实时授权、身份缺失一律未认证。
 /// 全部使用隔离内存测试数据（<see cref="TestDbFactory"/>），绝不新增生产菜单 / 角色 / 用户授权，
 /// 也不提供任何测试专用开关。真实隔离 SQL 用例见
 /// <c>ERP.IntegrationTests/ReceiptPaymentAllocationEntryAuthorizationSqlServerTests.cs</c>。</para>
@@ -796,8 +797,10 @@ public class ReceiptPaymentAllocationEntryAuthorizationTests
 
         foreach (var controller in new[] { receipts, payments })
         {
-            // 授权门只依据「是否绑定到请求管线」，不再依据请求路径或身份是否可解析。
-            Assert.Contains("ControllerContext?.HttpContext is not null", controller);
+            // ERP-468：请求形状门 / 无上下文豁免彻底移除 —— 不再按请求路径、身份或「是否绑定 HttpContext」放行，
+            // 登记 / 作废也绝不退回无授权的服务直调。
+            Assert.DoesNotContain("RequiresLiveAuthorization", controller);
+            Assert.DoesNotContain("ControllerContext?.HttpContext is not null", controller);
             Assert.DoesNotContain("Request.Path", controller);
             Assert.DoesNotContain("AllowAnonymous", controller);
             Assert.DoesNotContain("[Authorize(Roles", controller);
@@ -808,6 +811,12 @@ public class ReceiptPaymentAllocationEntryAuthorizationTests
             Assert.Contains("CreateAuthorizedAsync", controller);
             Assert.Contains("VoidAuthorizedAsync", controller);
         }
+
+        // 无授权的服务直调重载绝不被控制器引用（登记 / 作废只走授权重载）。
+        Assert.DoesNotContain("CustomerReceiptAllocationService.CreateAsync", receipts);
+        Assert.DoesNotContain("CustomerReceiptAllocationService.VoidAsync", receipts);
+        Assert.DoesNotContain("SupplierPaymentAllocationService.CreateAsync", payments);
+        Assert.DoesNotContain("SupplierPaymentAllocationService.VoidAsync", payments);
 
         // 每一条入口（台账 / 候选 / 汇总 / 清单 / 订单候选 / 详情）仍在读写之前实时授权。
         Assert.Contains("CustomerReceiptLifecycleRules.EnsureMenuAuthorizedAsync", receipts);
@@ -825,5 +834,65 @@ public class ReceiptPaymentAllocationEntryAuthorizationTests
             Assert.Contains("权限不足", text);
             Assert.Contains("Request.Path", text);
         }
+    }
+
+    // ==================== 9. 完全未绑定 HttpContext：同样无条件 fail closed ====================
+
+    [Fact]
+    public async Task Receipt_routes_without_any_HttpContext_are_unauthorized()
+    {
+        using var db = TestDbFactory.Create();
+        var customer = SeedCustomer(db, "C-R468-NOCTX");
+        var receipt = SeedReceipt(db, "SK-R468-NOCTX", customer.Id);
+        var order = SeedSalesOrder(db, "SO-R468-NOCTX", customer.Id);
+
+        // 完全未绑定请求上下文（ControllerContext.HttpContext 为 null）的纯进程内直调：
+        // ERP-468 起同样无条件实时授权，身份缺失一律未认证，绝不因「无 HttpContext」放行。
+        var ctl = new CustomerReceiptAllocationController(db);
+
+        await AssertReceiptRoutesDenied(ctl, receipt.Id, order.Id, ErrorCodes.Unauthorized);
+        Assert.Equal(0, await db.CustomerReceiptAllocations.CountAsync());
+    }
+
+    [Fact]
+    public async Task Payment_routes_without_any_HttpContext_are_unauthorized()
+    {
+        using var db = TestDbFactory.Create();
+        var supplier = SeedSupplier(db, "S-R468-NOCTX");
+        var payment = SeedPayment(db, "FK-R468-NOCTX", supplier.Id);
+        var order = SeedPurchaseOrder(db, "PO-R468-NOCTX", supplier.Id);
+
+        var ctl = new SupplierPaymentAllocationController(db);
+
+        await AssertPaymentRoutesDenied(ctl, payment.Id, order.Id, ErrorCodes.Unauthorized);
+        Assert.Equal(0, await db.SupplierPaymentAllocations.CountAsync());
+    }
+
+    [Fact]
+    public async Task No_Http_Context_never_registers_or_voids_evidence_even_with_valid_data()
+    {
+        using var db = TestDbFactory.Create();
+        var customer = SeedCustomer(db, "C-R468-NOCTX-MUT");
+        var receipt = SeedReceipt(db, "SK-R468-NOCTX-MUT", customer.Id, amount: 1000m);
+        var order = SeedSalesOrder(db, "SO-R468-NOCTX-MUT", customer.Id, totalAmount: 1000m);
+        var supplier = SeedSupplier(db, "S-R468-NOCTX-MUT");
+        var payment = SeedPayment(db, "FK-R468-NOCTX-MUT", supplier.Id, amount: 1000m);
+        var purchaseOrder = SeedPurchaseOrder(db, "PO-R468-NOCTX-MUT", supplier.Id, totalAmount: 1000m);
+
+        // 即使提供完全合法的金额 / 币种 / 关联，未绑定请求上下文同样零写入。
+        var receiptCtl = new CustomerReceiptAllocationController(db);
+        await AssertDenied(ErrorCodes.Unauthorized, () =>
+            receiptCtl.Create(ReceiptDto(receipt.Id, order.Id, 100m)));
+        await AssertDenied(ErrorCodes.Unauthorized, () =>
+            receiptCtl.Void(1L, new CustomerReceiptAllocationVoidRequest { Reason = "作废" }));
+
+        var paymentCtl = new SupplierPaymentAllocationController(db);
+        await AssertDenied(ErrorCodes.Unauthorized, () =>
+            paymentCtl.Create(PaymentDto(payment.Id, purchaseOrder.Id, 100m)));
+        await AssertDenied(ErrorCodes.Unauthorized, () =>
+            paymentCtl.Void(1L, new SupplierPaymentAllocationVoidRequest { Reason = "作废" }));
+
+        Assert.Equal(0, await db.CustomerReceiptAllocations.CountAsync());
+        Assert.Equal(0, await db.SupplierPaymentAllocations.CountAsync());
     }
 }

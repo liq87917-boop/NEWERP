@@ -1,11 +1,10 @@
 {
   "schema_version": 2,
   "project": "NEWERP",
-  "updated_at": "2026-10-13T19:33:39.831119Z",
+  "updated_at": "2026-10-13T19:40:55.988699Z",
   "phase": "ready",
   "current_task": null,
   "queue": [
-    "ERP-468",
     "ERP-487"
   ],
   "completed": [
@@ -450,6 +449,7 @@
     "ERP-465",
     "ERP-466",
     "ERP-467",
+    "ERP-468",
     "ERP-469",
     "ERP-470",
     "ERP-471",
@@ -475,32 +475,31 @@
   ],
   "blocked": [],
   "last_build": {
-    "task": "ERP-352",
+    "task": "ERP-468",
     "profile": "safe",
     "status": "passed",
     "exit_code": 0,
-    "log": ".ai\\logs\\ERP-352-validation-2.log",
-    "at": "2026-10-13T19:33:33.661490Z"
+    "log": ".ai\\logs\\ERP-468-validation-2.log",
+    "at": "2026-10-13T19:40:55.387475Z"
   },
   "last_error": null,
   "last_deepseek_fix": {
-    "task": "ERP-352",
+    "task": "ERP-468",
     "attempt": 2,
     "model": "deepseek-flash",
     "exit_code": 0,
-    "finished_at": "2026-10-13T19:32:50.271568Z"
+    "finished_at": "2026-10-13T19:40:09.221064Z"
   },
   "git_sync": {
     "branch": "main",
-    "local_sha": "ce087c8",
-    "status": "synced",
+    "local_sha": "2cedf5a",
+    "status": "pending",
     "ahead": 0,
     "behind": 0,
-    "last_attempt_at": "2026-10-13T19:33:39.702267Z",
+    "last_attempt_at": "2026-10-13T19:40:55.865089Z",
     "last_error": null
   },
   "next_recommended_tasks": [
-    "ERP-468",
     "ERP-487"
   ],
   "runner": {
