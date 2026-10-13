@@ -184,7 +184,7 @@
   "planning_stage": 3,
   "implementation_evidence": "src/ERP.Api/Controllers/StockOutController.cs:140-169 Create validates only the menu (:143) and customer (:151) plus the optional SalesOrderId link (:154) before Db.StockOuts.Add and SaveChanges (:166-167), and :179+ Update repeats the same shape; src/ERP.Application/Services/StockOutAuthorizationRules.cs declares only EnsureMenuAuthorizedAsync (:67), EnsureSourceMenuAuthorizedAsync (:109) and EnsureCustomerAuthorizedAsync (:136) with no warehouse or product validator, while the sibling src/ERP.Application/Services/StockInAuthorizationRules.cs:153-166 EnsureAuthorizedAsync calls EnsureWarehouseAvailableAsync (:286-294); src/ERP.Api/Controllers/StockUnitConversion.cs:38-59 skips lines with a missing product (:46) and never validates quantity or product status; Approve rejects only a negative quantity (:281-282) and src/ERP.Application/Services/InventoryService.cs:356-362 rejects a non-positive quantity and missing product id, i.e. only after the malformed draft is stored; an exact search of .ai/tasks returns no task adding draft warehouse, product or line-shape validation to StockOutController.",
   "id": "ERP-502",
-  "status": "in_progress",
+  "status": "completed",
   "attempts": 1,
   "max_attempts": 3,
   "validation_profile": "safe",

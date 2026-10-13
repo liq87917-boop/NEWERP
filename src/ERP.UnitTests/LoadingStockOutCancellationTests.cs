@@ -34,6 +34,9 @@ public class LoadingStockOutCancellationTests
 
     private static StockOutController NewStockOutController(ErpDbContext db, long? userId)
     {
+        // ERP-502：创建要求仓库与商品真实在用 —— 播种本夹具主数据（不新增任何授权或业务断言）。
+        StockOutTestAuthorization.SeedWarehouse(db, WarehouseA, "装柜测试仓");
+        StockOutTestAuthorization.SeedProduct(db, ProductA, name: $"商品{ProductA}");
         var ctl = new StockOutController(db, new DocumentNumberService(db), new InventoryService(db));
         TestAuth.SetUser(ctl, userId);
         return ctl;

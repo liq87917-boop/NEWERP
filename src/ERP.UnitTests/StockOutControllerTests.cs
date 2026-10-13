@@ -21,6 +21,7 @@ public class StockOutControllerTests
     public async Task Create_正常创建_汇总TotalQuantity_Weight_Volume_Status_Pending_()
     {
         using var db = TestDbFactory.Create();
+        SeedMasterData(db);
         var ctl = StockOutTestAuthorization.Create(db);
 
         var so = new StockOut
@@ -51,6 +52,7 @@ public class StockOutControllerTests
     public async Task Create_空串单号与伪造身份_一律由服务端权威覆盖()
     {
         using var db = TestDbFactory.Create();
+        SeedMasterData(db);
         var ctl = StockOutTestAuthorization.Create(db);
 
         var so = new StockOut
@@ -98,6 +100,7 @@ public class StockOutControllerTests
     public async Task Create_伪造出库单号_被服务端权威单号覆盖()
     {
         using var db = TestDbFactory.Create();
+        SeedMasterData(db);
         var ctl = StockOutTestAuthorization.Create(db);
 
         var result = await ctl.Create(new StockOut
@@ -174,6 +177,17 @@ public class StockOutControllerTests
         using var db = TestDbFactory.Create();
         var ctl = StockOutTestAuthorization.Create(db);
         await Assert.ThrowsAsync<BusinessException>(() => ctl.GetById(999));
+    }
+
+    /// <summary>
+    /// ERP-502：创建 / 修改要求仓库与商品真实在用，因此本夹具播种与用例一致的既有主数据行
+    /// （仓库 999999 + 商品 1 / 2，均存在、未删除、启用），不新增任何权限或业务断言。
+    /// </summary>
+    private static void SeedMasterData(ErpDbContext db)
+    {
+        StockOutTestAuthorization.SeedWarehouse(db, 999999L, "测试出库仓");
+        StockOutTestAuthorization.SeedProduct(db, 1L, name: "P1");
+        StockOutTestAuthorization.SeedProduct(db, 2L, name: "P2");
     }
 
     private static (StockOut so, StockOutDetail detail) SeedStockOut(ErpDbContext db, string no, DocumentStatus status)

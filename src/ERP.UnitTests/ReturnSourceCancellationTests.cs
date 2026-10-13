@@ -347,7 +347,12 @@ public class ReturnSourceCancellationTests
     // ==================== 测试辅助 ====================
 
     private static StockOutController NewStockOutController(ErpDbContext db)
-        => StockOutTestAuthorization.Create(db);
+    {
+        // ERP-502：创建要求仓库与商品真实在用 —— 播种本夹具主数据（不新增任何授权或业务断言）。
+        StockOutTestAuthorization.SeedWarehouse(db, WarehouseA, "来源取消测试仓");
+        StockOutTestAuthorization.SeedProduct(db, Product1, name: "商品SRC-P1");
+        return StockOutTestAuthorization.Create(db);
+    }
 
     private static StockInController NewStockInController(ErpDbContext db)
         => StockInLegacyTestFixture.Create(db, SupplierA, WarehouseA);

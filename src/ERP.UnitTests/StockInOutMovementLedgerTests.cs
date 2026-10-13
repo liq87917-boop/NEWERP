@@ -176,7 +176,8 @@ public class StockInOutMovementLedgerTests
         SeedStock(db, WarehouseA, Product1, quantity: 10m, totalCost: 100m);      // 均价 10
         var ctl = NewStockOutController(db);
         // A live explicit source preserves both fulfillment validation and ledger trace assertions.
-        db.BaseProducts.Add(new BaseProduct { Id = Product1, ProductCode = "LEDGER-SO-P1", ProductName = "P1", Unit = "PCS" });
+        // ERP-502：商品主数据由既有测试脚手架幂等播种（仓库 / 商品均在用），不重复插入同主键行。
+        StockOutTestAuthorization.SeedProduct(db, Product1, name: "P1");
         db.SalesOrders.Add(new SalesOrder
         {
             Id = 88L, OrderNo = "LEDGER-SO-88", CustomerId = 1L, Status = DocumentStatus.Approved,
@@ -563,7 +564,12 @@ public class StockInOutMovementLedgerTests
         => StockInLegacyTestFixture.Create(db, 1L, WarehouseA);
 
     private static StockOutController NewStockOutController(ErpDbContext db)
-        => StockOutTestAuthorization.Create(db);
+    {
+        // ERP-502：创建要求仓库与商品真实在用 —— 播种本夹具主数据（不新增任何授权或业务断言）。
+        StockOutTestAuthorization.SeedWarehouse(db, WarehouseA, "流水测试仓");
+        StockOutTestAuthorization.SeedProduct(db, Product1, name: "P1");
+        return StockOutTestAuthorization.Create(db);
+    }
 
     private static async Task<long> CreateStockInAsync(StockInController ctl, decimal quantity, string unit,
         long? purchaseOrderId)

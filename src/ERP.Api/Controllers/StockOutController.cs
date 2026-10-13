@@ -30,6 +30,12 @@ namespace ERP.Api.Controllers;
 /// 新增 / 修改在实时授权与客户范围、来源归属（含基础单位折算与 ERP-343 累计容量）校验之后、<b>单号预约与任何写入之前</b>
 /// 完成全部校验：主键 / 出库单号 / 状态 / 删除态 / 时间戳与明细身份一律由服务端权威覆盖，
 /// 被拒绝的请求零表头 · 明细 · 来源 · 状态变化且不消耗单据号（ERP-370 口径）。</para>
+/// <para>ERP-502：新增 / 修改在单位折算之后、单号预约与任何写入之前再执行共享草稿护栏
+/// （<see cref="StockOutAuthorizationRules.EnsureDraftValidAsync"/>）：仓库 Id 必须为正数且仓库真实在用（存在 / 未删除 / 启用），
+/// 每一行有效明细的数量必须为正且与毛重 / 体积 / 表头合计一并落在实际存储精度 <c>DECIMAL(18,2)</c> 内（含溢出），
+/// 商品必须存在 / 未删除 / 启用；空草稿头仍可保存，提交 / 审核要求至少一行有效明细，重复商品行按累计数量语义保留。
+/// 该护栏是<b>纯判定 + 有界只读查询</b>，不新增表 / 列 / 索引 / 菜单 / 权限，也不改动既有行锁、可串行化事务、
+/// ERP-343 累计容量口径与 <see cref="StockMovement"/> 流水写入。</para>
 /// </summary>
 [Route("api/stock-outs")]
 public class StockOutController : DocumentControllerBase<StockOut>
@@ -152,6 +158,9 @@ public class StockOutController : DocumentControllerBase<StockOut>
         await StockUnitConversion.NormalizeAsync(Db, entity.Details);
         Calculate(entity);
         await StockOutOrderFulfillmentRules.ValidateLinkAsync(Db, entity);
+        // ERP-502：草稿护栏（形状 + 实际存储精度 + 在用仓库 / 商品）在单位折算与来源校验之后、
+        // 单号预约与任何写入之前执行；被拒绝的请求零单号消耗、零单据 / 明细 / 库存 / 流水变化。
+        await StockOutAuthorizationRules.EnsureDraftValidAsync(Db, entity.WarehouseId, entity.Details);
 
         // ERP-478：主键 / 单号 / 状态 / 删除态 / 时间戳一律由服务端权威覆盖（客户端提交值不参与持久化），
         // 明细身份（主键 / 归属单据 / 删除态）同口径重置，绝不采信客户端注入的明细 Id / IsDeleted / 表头身份。
@@ -213,6 +222,9 @@ public class StockOutController : DocumentControllerBase<StockOut>
             ApplyServerOwnedDetailIdentity(entity.Details, id, DateTime.Now);
             await StockUnitConversion.NormalizeAsync(Db, entity.Details);
             await StockOutOrderFulfillmentRules.ValidateLinkAsync(Db, entity);
+            // ERP-502：与创建同一草稿护栏，在明细整体替换 / 任何写入之前收敛非法仓库、非法数量与失效商品，
+            // 被拒绝方不消耗新单号、不改动既有单据与明细逐字段。
+            await StockOutAuthorizationRules.EnsureDraftValidAsync(Db, entity.WarehouseId, entity.Details);
 
             existing.StockOutDate = entity.StockOutDate;
             existing.SalesOrderId = entity.SalesOrderId;
@@ -254,6 +266,8 @@ public class StockOutController : DocumentControllerBase<StockOut>
         await StockOutAuthorizationRules.EnsureCustomerAuthorizedAsync(Db, CurrentStockOutUserId(), entity.CustomerId);
         if (GetStatus(entity) != DocumentStatus.Submitted)
             throw BusinessException.RuleConflict("当前状态不允许该操作");
+        // ERP-502：审核要求至少一行有效明细（空草稿头可保存但不可提交 / 审核）。
+        StockOutAuthorizationRules.EnsureHasEffectiveLine(entity.Details, "审核");
 
         await StockUnitConversion.NormalizeAsync(Db, entity.Details);
         Calculate(entity);
@@ -424,8 +438,12 @@ public class StockOutController : DocumentControllerBase<StockOut>
         {
             await LockStockOutRowAsync(id);
 
-            var entity = await GetOrThrowAsync(id, "出库单不存在");
+            var entity = await Db.StockOuts.Include(o => o.Details)
+                .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
+                ?? throw BusinessException.NotFound("出库单不存在");
             await StockOutAuthorizationRules.EnsureCustomerAuthorizedAsync(Db, CurrentStockOutUserId(), entity.CustomerId);
+            // ERP-502：提交要求至少一行有效明细（空草稿头可保存但不可提交 / 审核）。
+            StockOutAuthorizationRules.EnsureHasEffectiveLine(entity.Details, "提交");
 
             var result = await base.Submit(id);
             await transaction.CommitAsync();

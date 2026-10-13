@@ -119,8 +119,10 @@ public class StockOutWriteScopeRegressionTests
         db.SysUsers.Add(user); db.BaseEmployees.Add(employee); await db.SaveChangesAsync();
         var customer = new BaseCustomer { CustomerCode = "SCOPE-C", CustomerName = "Assigned", EmpId = employee.Id };
         db.BaseCustomers.Add(customer); await db.SaveChangesAsync();
+        // ERP-502：创建要求仓库真实在用 —— 播种既有仓库主数据（空草稿头本身仍受支持）。
+        StockOutTestAuthorization.SeedWarehouse(db, 330001L, "范围测试仓");
         var ctl = StockOutTestAuthorization.ForUser(db, user.Id);
-        await ctl.Create(new StockOut { CustomerId = customer.Id });
+        await ctl.Create(new StockOut { CustomerId = customer.Id, WarehouseId = 330001L });
         var saved = db.StockOuts.Single();
         await Assert.ThrowsAsync<BusinessException>(() => ctl.Update(saved.Id, new StockOut { CustomerId = customer.Id + 500 }));
         Assert.Equal(customer.Id, saved.CustomerId);

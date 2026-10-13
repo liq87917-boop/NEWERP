@@ -216,6 +216,7 @@ public class StockOutAuthorizationTests
     public async Task Create_rejects_foreign_customer_without_consuming_document_number()
     {
         using var db = TestDbFactory.Create();
+        SeedBaseProduct(db);
         SeedStockOutNumberRule(db, currentSequence: 5);
         var menu = SeedMenu(db, StockOutAuthorizationRules.RequiredMenuCode, "销售出库");
         var role = SeedRoleWithMenus(db, menu);
@@ -236,6 +237,8 @@ public class StockOutAuthorizationTests
     public async Task Update_checks_stored_and_proposed_customer_before_assignment()
     {
         using var db = TestDbFactory.Create();
+        SeedBaseProduct(db);
+        db.SaveChanges();
         var menu = SeedMenu(db, StockOutAuthorizationRules.RequiredMenuCode, "销售出库");
         var role = SeedRoleWithMenus(db, menu);
         var (userId, _) = SeedRestrictedSalesman(db, role, CustomerA);
@@ -367,6 +370,8 @@ public class StockOutAuthorizationTests
     {
         using var db = TestDbFactory.Create();
         // 历史账号：未配置任何「角色 → 菜单」授权，沿用既有 ERP-097 权威数据范围（不新增授权、不降级为全局）。
+        SeedBaseProduct(db);
+        db.SaveChanges();
         var (userId, _) = SeedRestrictedSalesmanWithoutMenus(db, CustomerA);
         var ctl = ForUser(db, userId);
 
@@ -637,7 +642,20 @@ public class StockOutAuthorizationTests
     }
 
     private static void SeedBaseProduct(ErpDbContext db)
-        => db.BaseProducts.Add(new BaseProduct
+    {
+        // ERP-502：创建 / 修改要求仓库真实在用；本夹具同时播种既有仓库与商品（存在、未删除、启用）。
+        if (!db.BaseWarehouses.Any(w => w.Id == WarehouseA))
+            db.BaseWarehouses.Add(new BaseWarehouse
+            {
+                Id = WarehouseA,
+                WarehouseCode = "AUTH-WH-A",
+                WarehouseName = "出库仓A",
+                Status = 1
+            });
+        if (db.BaseProducts.Any(p => p.Id == ProductA))
+            return;
+
+        db.BaseProducts.Add(new BaseProduct
         {
             Id = ProductA,
             ProductCode = "AUTH-P1",
@@ -645,6 +663,7 @@ public class StockOutAuthorizationTests
             Spec = "规格A",
             Unit = "PCS"
         });
+    }
 
     private static StockOut SeedStockOut(ErpDbContext db, string no, long customerId, DocumentStatus status,
         params (long ProductId, decimal Quantity)[] lines)

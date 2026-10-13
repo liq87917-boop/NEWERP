@@ -53,7 +53,20 @@ public static class StockUnitConversion
                 throw BusinessException.RuleConflict($"商品 [{product.ProductName}] 的每包装数量必须大于 0");
             if (baseUnit.Length == 0)
                 throw BusinessException.RuleConflict($"商品 [{product.ProductName}] 未设置基础单位，不能执行包装换算");
-            line.SetQuantity(Math.Round(line.GetQuantity() * product.UnitsPerPackage, 4));
+            // ERP-502：装箱换算的乘法必须在受控范围内完成 —— decimal 溢出转换为受控业务错误，
+            // 绝不把溢出 / 截断后的数量交给后续草稿护栏或落库。
+            decimal converted;
+            try
+            {
+                converted = line.GetQuantity() * product.UnitsPerPackage;
+            }
+            catch (OverflowException)
+            {
+                throw BusinessException.InvalidParameter(
+                    $"商品 [{product.ProductName}] 的装箱换算数量超出可表示范围：已拒绝，绝不静默截断或取整");
+            }
+
+            line.SetQuantity(Math.Round(converted, 4));
             line.SetUnit(baseUnit);
         }
     }

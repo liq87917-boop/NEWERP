@@ -5,19 +5,98 @@ using ERP.Domain.Enums;
 using ERP.Infrastructure.Data;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using System.Security.Claims;
 
 namespace ERP.UnitTests;
 
 internal static class StockOutTestAuthorization
 {
+    /// <summary>
+    /// ERP-502：既有装箱换算回归夹具（<c>StockUnitConversionTests</c>）直接复用本工厂并以 <c>WarehouseId = 3</c> 建单；
+    /// 草稿护栏要求仓库真实存在，因此本工厂播种一个与 <c>StockInLegacyTestFixture</c> 同口径的在用仓库（仅供测试脚手架，
+    /// 绝不新增任何用户授权）。
+    /// </summary>
+    public const long LegacyWarehouseId = 3L;
+
     public static StockOutController Create(ErpDbContext db)
     {
         var user = new SysUser { UserName = "stockout-test-admin", DisplayName = "Test", PasswordHash = "hash", PasswordSalt = "salt", Status = UserStatus.Enabled };
         var role = new SysRole { RoleCode = "SuperAdmin", RoleName = "Test Admin" };
         db.SysUsers.Add(user); db.SysRoles.Add(role); db.SaveChanges();
         db.SysUserRoles.Add(new SysUserRole { UserId = user.Id, RoleId = role.Id }); db.SaveChanges();
+        EnsureLegacyWarehouse(db);
         return ForUser(db, user.Id);
+    }
+
+    /// <summary>ERP-502：播种既有装箱换算测试使用的默认在用仓库（幂等）。</summary>
+    private static void EnsureLegacyWarehouse(ErpDbContext db)
+        => SeedWarehouse(db, LegacyWarehouseId, "ERP-052测试仓");
+
+    /// <summary>播种真实在用的仓库主数据（存在、未删除、启用；幂等）。</summary>
+    public static BaseWarehouse SeedWarehouse(ErpDbContext db, long id, string name = "测试仓A")
+    {
+        var existing = db.BaseWarehouses.FirstOrDefault(w => w.Id == id);
+        if (existing is not null)
+        {
+            // 播种后即脱离跟踪：允许调用方随后以同一主键自行播种 / 改写（避免同键重复跟踪）。
+            db.Entry(existing).State = EntityState.Detached;
+            return existing;
+        }
+
+        var warehouse = new BaseWarehouse
+        {
+            Id = id, WarehouseCode = $"W-{id}", WarehouseName = name, Status = 1
+        };
+        db.BaseWarehouses.Add(warehouse);
+        db.SaveChanges();
+        db.Entry(warehouse).State = EntityState.Detached;
+        return warehouse;
+    }
+
+    /// <summary>播种真实在用的商品主数据（存在、未删除、启用；幂等）。</summary>
+    public static BaseProduct SeedProduct(ErpDbContext db, long id, string unit = "PCS",
+        string packageUnit = "", int unitsPerPackage = 0, string name = "测试商品")
+    {
+        var existing = db.BaseProducts.FirstOrDefault(p => p.Id == id);
+        if (existing is not null)
+        {
+            db.Entry(existing).State = EntityState.Detached;
+            return existing;
+        }
+
+        var product = new BaseProduct
+        {
+            Id = id, ProductCode = $"P-{id}", ProductName = name, Spec = "规格A",
+            Unit = unit, PackageUnit = packageUnit, UnitsPerPackage = unitsPerPackage, Status = 1
+        };
+        db.BaseProducts.Add(product);
+        db.SaveChanges();
+        db.Entry(product).State = EntityState.Detached;
+        return product;
+    }
+
+    /// <summary>播种销售出库单号规则（幂等；供「被拒绝的请求绝不消耗单据号」断言使用）。</summary>
+    public static SysDocumentNumberRule SeedStockOutNumberRule(ErpDbContext db, long currentSequence = 0)
+    {
+        var existing = db.SysDocumentNumberRules
+            .FirstOrDefault(r => r.DocumentType == DocumentType.StockOut);
+        if (existing is not null)
+            return existing;
+
+        var rule = new SysDocumentNumberRule
+        {
+            DocumentType = DocumentType.StockOut,
+            RuleCode = "CK-TEST",
+            RuleName = "销售出库单号",
+            Prefix = "CK",
+            DateFormat = "yyyyMMdd",
+            SerialLength = 4,
+            CurrentSequence = currentSequence
+        };
+        db.SysDocumentNumberRules.Add(rule);
+        db.SaveChanges();
+        return rule;
     }
 
     public static StockOutController ForUser(ErpDbContext db, long? userId)
@@ -95,6 +174,7 @@ internal static class StockOutTestAuthorization
         };
         db.BaseCustomers.Add(customer);
         db.SaveChanges();
+        db.Entry(customer).State = EntityState.Detached;
         return customer;
     }
 

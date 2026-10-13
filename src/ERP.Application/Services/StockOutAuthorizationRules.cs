@@ -124,6 +124,184 @@ public static class StockOutAuthorizationRules
         return scope;
     }
 
+    // ==================== ERP-502：草稿写入护栏（形状 + 实际存储精度 + 在用主数据） ====================
+
+    /// <summary>
+    /// 出库数量 / 毛重 / 体积与表头合计的实际存储精度：<c>DECIMAL(18,2)</c>。
+    /// <para>与 <c>ErpDbContext</c> 对 <c>StockOutDetail.Quantity</c> / <c>Weight</c> / <c>Volume</c> 与
+    /// <c>StockOut.TotalQuantity</c> / <c>TotalWeight</c> / <c>TotalVolume</c> 的 EF 默认精度（未显式声明即
+    /// <c>DECIMAL(18,2)</c>）同源；校验必须使用<b>同一份</b>精度口径，否则超精度值会被落库静默取整。</para>
+    /// </summary>
+    public const int QuantityPrecision = 18;
+
+    /// <summary>出库数量 / 毛重 / 体积与表头合计的实际小数位：2（与 <see cref="QuantityPrecision"/> 同源）。</summary>
+    public const int QuantityScale = 2;
+
+    /// <summary><c>DECIMAL(18,2)</c> 的最大可表示绝对值（16 位整数 + 2 位小数）。</summary>
+    public const decimal MaxDecimal18Scale2 = 9_999_999_999_999_999.99m;
+
+    /// <summary>
+    /// 草稿写入护栏口径文案（接口 / 文档同源，ERP-502）：创建 / 修改在单位折算之后、单号预约与任何写入<b>之前</b>
+    /// 校验仓库在用（正数 Id、存在、未删除、启用）与每一行有效明细（正数且在存储精度内可表示的数量、
+    /// 非负且可表示的毛重 / 体积、商品存在 / 未删除 / 启用），并按同一精度口径校验表头合计（含溢出）。
+    /// </summary>
+    public const string DraftGuardRuleText =
+        "销售出库单创建 / 修改在单位折算之后、单号预约与任何写入之前执行统一草稿护栏：仓库 Id 必须为正数且仓库存在、未删除、已启用；" +
+        "每一行有效明细的数量必须为正数、毛重与体积不得为负，且与表头合计一并落在实际存储精度（DECIMAL(18,2)）内（含溢出）；" +
+        "商品 Id 必须有效且商品存在、未删除、已启用；空草稿头（0 行有效明细）仍受支持（提交 / 审核要求至少一行有效明细），" +
+        "重复商品行按累计数量语义保留，绝不引入任意唯一性规则；被拒绝的请求零单号消耗、零单据 / 明细 / 库存 / 流水变化，" +
+        "绝不新增表 / 列 / 索引 / 菜单 / 权限。";
+
+    /// <summary>出库数量 / 毛重 / 体积是否在实际存储精度 <c>DECIMAL(18,2)</c> 内可表示（最多 2 位小数且绝对值有界）。</summary>
+    public static bool IsQuantityRepresentable(decimal value)
+        => decimal.Round(value, QuantityScale) == value
+           && value >= -MaxDecimal18Scale2 && value <= MaxDecimal18Scale2;
+
+    /// <summary>
+    /// 草稿明细形状校验（纯内存，不访问数据库）：只校验<b>未删除</b>的有效明细行 ——
+    /// 商品 Id 有效、数量为正且在 <c>DECIMAL(18,2)</c> 内可表示、毛重与体积非负且可表示；
+    /// 随后按与 <c>StockOutController.Calculate</c> <b>同源</b>的公式重算表头合计数量 / 毛重 / 体积并校验可表示性与溢出。
+    /// <para>刻意<b>不</b>校验商品唯一性：同一商品允许在一张出库单中重复出现（累计数量语义），不引入任何任意唯一性规则。</para>
+    /// <para>空明细（0 行有效明细）在草稿阶段仍受支持；是否要求非空由调用方（提交 / 审核）决定。</para>
+    /// </summary>
+    public static void EnsureLineShape(IEnumerable<StockOutDetail> details)
+    {
+        ArgumentNullException.ThrowIfNull(details);
+
+        var effective = details.Where(d => !d.IsDeleted).ToList();
+        var line = 0;
+        foreach (var d in effective)
+        {
+            line++;
+            var label = string.IsNullOrWhiteSpace(d.ProductName) ? $"第 {line} 行" : d.ProductName;
+
+            if (d.ProductId <= 0)
+                throw BusinessException.InvalidParameter($"出库明细 [{label}] 缺少有效商品 Id，不能出库");
+            if (d.Quantity <= 0m)
+                throw BusinessException.InvalidParameter($"商品 [{label}] 的出库数量必须大于 0");
+            if (!IsQuantityRepresentable(d.Quantity))
+                throw BusinessException.InvalidParameter(
+                    $"商品 [{label}] 的出库数量 {d.Quantity} 超出存储精度（DECIMAL(18,2)）：已拒绝，绝不静默截断或取整");
+            if (d.Weight < 0m)
+                throw BusinessException.InvalidParameter($"商品 [{label}] 的毛重不能为负数");
+            if (!IsQuantityRepresentable(d.Weight))
+                throw BusinessException.InvalidParameter(
+                    $"商品 [{label}] 的毛重 {d.Weight} 超出存储精度（DECIMAL(18,2)）：已拒绝，绝不静默截断或取整");
+            if (d.Volume < 0m)
+                throw BusinessException.InvalidParameter($"商品 [{label}] 的体积不能为负数");
+            if (!IsQuantityRepresentable(d.Volume))
+                throw BusinessException.InvalidParameter(
+                    $"商品 [{label}] 的体积 {d.Volume} 超出存储精度（DECIMAL(18,2)）：已拒绝，绝不静默截断或取整");
+        }
+
+        EnsureRepresentableTotals(effective);
+    }
+
+    /// <summary>
+    /// 表头合计（数量 / 毛重 / 体积）的 checked 精度校验：与 <c>StockOutController.Calculate</c> 同源重算，
+    /// 任一不可表示 / 溢出都返回受控业务错误。通过本校验后 <c>Calculate</c> 的结果可被 EF <b>原样</b>持久化，
+    /// 明细之和与表头合计逐分一致（不存在落库取整差），也不会把正数量静默舍入为 0。
+    /// </summary>
+    private static void EnsureRepresentableTotals(IReadOnlyList<StockOutDetail> details)
+    {
+        try
+        {
+            decimal totalQuantity = 0m, totalWeight = 0m, totalVolume = 0m;
+            foreach (var d in details)
+            {
+                totalQuantity += d.Quantity;
+                totalWeight += d.Weight;
+                totalVolume += d.Volume;
+            }
+
+            AssertTotalRepresentable("合计数量", totalQuantity);
+            AssertTotalRepresentable("合计毛重", totalWeight);
+            AssertTotalRepresentable("合计体积", totalVolume);
+        }
+        catch (OverflowException)
+        {
+            // decimal 加法溢出：转换为受控业务错误，绝不落库为截断值。
+            throw BusinessException.InvalidParameter(
+                "出库数量 / 毛重 / 体积超出可存储范围（DECIMAL(18,2)）：已拒绝，绝不静默截断或取整");
+        }
+    }
+
+    private static void AssertTotalRepresentable(string name, decimal value)
+    {
+        if (!IsQuantityRepresentable(value))
+            throw BusinessException.InvalidParameter(
+                $"出库单{name} {value} 超出存储精度（DECIMAL(18,2)）：已拒绝，绝不静默截断或取整");
+    }
+
+    /// <summary>仓库必须真实可用（存在、未删除、已启用），否则拒绝销售出库单草稿写入。</summary>
+    public static async Task EnsureWarehouseAvailableAsync(IErpDbContext db, long warehouseId,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        if (warehouseId <= 0)
+            throw BusinessException.InvalidParameter("销售出库单必须选择有效仓库（仓库 Id 必须为正数）");
+
+        var warehouse = await db.BaseWarehouses.AsNoTracking()
+            .FirstOrDefaultAsync(w => w.Id == warehouseId && !w.IsDeleted, ct);
+        if (warehouse is null)
+            throw BusinessException.InvalidParameter($"仓库（Id={warehouseId}）不存在或已删除，不能用于销售出库单");
+        if (warehouse.Status != 1)
+            throw BusinessException.RuleConflict($"仓库「{warehouse.WarehouseName}」已停用，不能用于销售出库单");
+    }
+
+    /// <summary>每一行有效明细的商品必须真实可用（存在、未删除、已启用），否则拒绝销售出库单草稿写入。</summary>
+    public static async Task EnsureProductsAvailableAsync(IErpDbContext db, IEnumerable<StockOutDetail> details,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(details);
+
+        var effective = details.Where(d => !d.IsDeleted).ToList();
+        var ids = effective.Select(d => d.ProductId).Distinct().ToList();
+        var products = ids.Count == 0
+            ? new Dictionary<long, BaseProduct>()
+            : await db.BaseProducts.AsNoTracking()
+                .Where(p => ids.Contains(p.Id) && !p.IsDeleted)
+                .ToDictionaryAsync(p => p.Id, ct);
+
+        var line = 0;
+        foreach (var d in effective)
+        {
+            line++;
+            var label = string.IsNullOrWhiteSpace(d.ProductName) ? $"第 {line} 行" : d.ProductName;
+
+            if (!products.TryGetValue(d.ProductId, out var product))
+                throw BusinessException.InvalidParameter($"商品 [{label}] 不存在或已删除，不能出库");
+            if (product.Status != 1)
+                throw BusinessException.RuleConflict($"商品「{product.ProductName}」已停用，不能出库（fail closed）");
+        }
+    }
+
+    /// <summary>
+    /// ERP-502 共享草稿护栏（创建 / 修改在单位折算之后、单号预约与任何写入之前调用）：
+    /// <see cref="EnsureLineShape"/>（形状 + 实际存储精度 + 表头合计）→ <see cref="EnsureWarehouseAvailableAsync"/> →
+    /// <see cref="EnsureProductsAvailableAsync"/>。任一不满足即按既有受控业务错误
+    /// （<c>InvalidParameter</c> / <c>RuleConflict</c>）拒绝，绝不消耗单据号、绝不落任何单据 / 明细 / 库存 / 流水。
+    /// </summary>
+    public static async Task EnsureDraftValidAsync(IErpDbContext db, long warehouseId,
+        IEnumerable<StockOutDetail> details, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(details);
+
+        EnsureLineShape(details);
+        await EnsureWarehouseAvailableAsync(db, warehouseId, ct);
+        await EnsureProductsAvailableAsync(db, details, ct);
+    }
+
+    /// <summary>提交 / 审核前必须至少存在一行有效明细（未删除）；空草稿头可保存但不可提交 / 审核。</summary>
+    public static void EnsureHasEffectiveLine(IEnumerable<StockOutDetail> details, string action)
+    {
+        ArgumentNullException.ThrowIfNull(details);
+        if (!details.Any(d => !d.IsDeleted))
+            throw BusinessException.RuleConflict($"出库单无明细，不能{action}");
+    }
+
     /// <summary>缺少既有「销售出库」菜单授权时的拒绝（fail closed，不执行任何写入）。</summary>
     private static BusinessException MenuDenied()
         => new($"当前账号没有「{RequiredMenuText}」（{RequiredMenuCode}）模块授权：拒绝访问销售出库（fail closed，不执行任何写入）",

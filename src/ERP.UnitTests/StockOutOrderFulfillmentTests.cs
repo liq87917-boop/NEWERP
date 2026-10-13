@@ -314,7 +314,9 @@ public class StockOutOrderFulfillmentTests
         SeedStock(db, WarehouseA, ProductA, 10m);
         var ctl = NewController(db);
 
-        var id = await CreateAsync(ctl, null, CustomerA, (ProductA, "PCS", -1m));
+        // ERP-502：创建护栏已在写入前拒绝非正数量，因此本用例改为直接播种等价的历史 / 直写草稿
+        // （旧版页面遗留数据形状），继续验证审核期「负数数量受控拒绝且零副作用」的既有业务口径。
+        var id = SeedLegacyDraft(db, "CK-FUL-NEG", CustomerA, (ProductA, "PCS", -1m));
         await ctl.Submit(id);
 
         var ex = await Assert.ThrowsAsync<BusinessException>(() => ctl.Approve(id));
@@ -334,7 +336,9 @@ public class StockOutOrderFulfillmentTests
         SeedStock(db, WarehouseA, ProductA, 10m);
         var ctl = NewController(db);
 
-        var id = await CreateAsync(ctl, null, CustomerA, (ProductA, "PCS", 0m));
+        // ERP-502：创建护栏已在写入前拒绝非正数量，因此本用例改为直接播种等价的历史 / 直写草稿
+        // （旧版页面允许留空的零数量行形状），继续验证审核期「零数量明细不产生库存变动与流水」的既有业务口径。
+        var id = SeedLegacyDraft(db, "CK-FUL-ZERO", CustomerA, (ProductA, "PCS", 0m));
         await SubmitAndApproveAsync(ctl, id);
 
         Assert.Equal(10m, db.Stocks.Single().Quantity);            // 零数量不产生任何库存变动
@@ -347,7 +351,12 @@ public class StockOutOrderFulfillmentTests
     // ==================== 辅助 ====================
 
     private static StockOutController NewController(ErpDbContext db)
-        => StockOutTestAuthorization.Create(db);
+    {
+        // ERP-502：创建 / 修改要求仓库真实在用 —— 播种本夹具既有仓库主数据（存在、未删除、启用），
+        // 不新增任何用户授权，也不改变任何业务断言。
+        StockOutTestAuthorization.SeedWarehouse(db, WarehouseA);
+        return StockOutTestAuthorization.Create(db);
+    }
 
     private static StockOut NewStockOut(long customerId, long? salesOrderId,
         params (long ProductId, string Unit, decimal Quantity)[] lines)
@@ -381,6 +390,34 @@ public class StockOutOrderFulfillmentTests
     {
         await ctl.Submit(id);
         await ctl.Approve(id);
+    }
+
+    /// <summary>
+    /// ERP-502：直接播种历史 / 直写草稿（单号、状态、明细与旧版页面遗留数据同形），
+    /// 供「审核期零副作用」用例在创建护栏之外继续验证既有审核口径；不经过 Create，不消耗单号。
+    /// </summary>
+    private static long SeedLegacyDraft(ErpDbContext db, string no, long customerId,
+        params (long ProductId, string Unit, decimal Quantity)[] lines)
+    {
+        var document = new StockOut
+        {
+            StockOutNo = no,
+            StockOutDate = DateTime.Today,
+            CustomerId = customerId,
+            WarehouseId = WarehouseA,
+            Status = DocumentStatus.Pending,
+            Details = lines.Select(l => new StockOutDetail
+            {
+                ProductId = l.ProductId,
+                ProductName = $"商品{l.ProductId}",
+                Spec = "规格A",
+                Unit = l.Unit,
+                Quantity = l.Quantity
+            }).ToList()
+        };
+        db.StockOuts.Add(document);
+        db.SaveChanges();
+        return document.Id;
     }
 
     private static void SeedProduct(ErpDbContext db, long id, string code, string name, string unit,

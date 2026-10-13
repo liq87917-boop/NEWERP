@@ -45,7 +45,8 @@
 | 1 | `NormalizeSalesOrderLink`（数字 `0` → `null`：表单「未选择来源」）+ `Details ??= new()` |
 | 2 | `StockOutAuthorizationRules.EnsureCustomerAuthorizedAsync`（实时身份 / 账号状态 / 既有「销售出库」菜单 + ERP-097 权威客户范围） |
 | 3 | `StockUnitConversion.NormalizeAsync`（装箱单位 → 基础单位）+ `Calculate`（合计）+ `StockOutOrderFulfillmentRules.ValidateLinkAsync`（来源权威性） |
-| 4 | **只有全部校验通过之后**才：`entity.Id = 0`、`ApplyServerOwnedDetailIdentity`（明细主键 / 归属单据 / 删除态 / 时间戳一律服务端重置）、`GenerateAsync(DocumentType.StockOut)`、`Status = Pending`、`IsDeleted = false`、`CreatedAt = now`、`UpdatedAt = null`、落库 |
+| 4 | **ERP-502 草稿护栏** `StockOutAuthorizationRules.EnsureDraftValidAsync`（明细形状 + 实际存储精度 + 表头合计 + 在用仓库 / 商品） |
+| 5 | **只有全部校验通过之后**才：`entity.Id = 0`、`ApplyServerOwnedDetailIdentity`（明细主键 / 归属单据 / 删除态 / 时间戳一律服务端重置）、`GenerateAsync(DocumentType.StockOut)`、`Status = Pending`、`IsDeleted = false`、`CreatedAt = now`、`UpdatedAt = null`、落库 |
 
 `Update` 同口径：已存 / 请求两侧客户范围校验 → 仅「待提交」可改 → 单据号 / 状态 / 删除态保持服务端值、明细身份重置。
 被拒绝的请求：**零表头 · 明细 · 来源 · 状态变化、零单号消耗**。
@@ -87,7 +88,7 @@
   修改显式清空来源后单号与状态不变、控制器接线顺序（校验先于 `GenerateAsync`）、菜单路由与模块 / 选择器接线契约。
 - `src/ERP.UnitTests/StockOutControllerTests.cs`：空串出库单号 + 伪造身份 → 服务端权威覆盖；伪造出库单号被覆盖。
 - `src/ERP.UnitTests/StockOutOrderFulfillmentTests.cs`：负数明细数量审核受控拒绝（零库存零流水、状态不变）、
-  零数量明细（空草稿）审核不产生库存变动。
+  零数量明细（空草稿）审核不产生库存变动（ERP-502 起：这两条历史 / 直写草稿改为直接播种，创建入口已在写入前拒绝非正数量）。
 - `src/ERP.UnitTests/StockOutSourceSelectionTests.cs`：显式清空来源 → 未链接语义 + 单据号 / 状态 / 明细保留。
 - `src/ERP.UnitTests/StockOutWriteScopeRegressionTests.cs`：缺既有「销售出库」菜单的映射业务员创建 fail closed 且零写入。
 - `src/ERP.UnitTests/StockOutTestAuthorization.cs`：新增既有菜单 / 客户 / 特权与受限出库操作员播种脚手架（不新增权限模型）。
@@ -124,4 +125,73 @@
 - `src/ERP.Api/wwwroot/js/stock-out-source-picker.js`：显式选择 + 显式清空来源（未链接）语义。
 - 复用既有：`StockOutAuthorizationRules`（ERP-370）、`StockOutOrderFulfillmentRules`（ERP-343 / ERP-376）、
   `InventoryService`（ERP-025 / ERP-009）、`crud.js`（主子表表单与可空引用提交）。
+
+## 6. ERP-502 销售出库草稿写入护栏（仓库 / 明细形状 / 在用商品）
+
+> 任务：`ERP-502`「Validate sales stock-out draft warehouse and line shape before commitment」（阶段 3 写校验缺口）。
+> 同源口径：`ERP-422` / `ERP-427`（销售订单）、`ERP-352`（采购入库）、`ERP-501`（仓库调拨）。
+
+### 6.1 缺陷证据（修复前）
+
+| 位置 | 缺陷 |
+|---|---|
+| `StockOutController.Create` / `Update` | 归一化来源、折算单位、重算合计、只校验可选 `SalesOrderId` 后即保存：草稿可持久化 `WarehouseId = 0` 或已软删除 / 已停用仓库、已软删除 / 已停用商品、零 / 负 / EF 不可表示数量与畸形合计 |
+| `StockOutAuthorizationRules` | 只有菜单 / 来源菜单 / 客户校验，缺少仓库与商品在用校验（对比 `StockInAuthorizationRules.EnsureWarehouseAvailableAsync`） |
+| `StockUnitConversion` | 静默跳过商品缺失行，不校验数量符号 / 商品状态，装箱换算乘法无溢出护栏 |
+| 后果 | `Approve` 与 `InventoryService` 只在畸形草稿已落库、页面可见、可提交之后才拒绝 |
+
+### 6.2 口径与实现
+
+| 项 | 口径 |
+|---|---|
+| 共享草稿护栏 | `StockOutAuthorizationRules.EnsureDraftValidAsync(db, warehouseId, details)`：`EnsureLineShape`（形状 + 精度 + 表头合计）→ `EnsureWarehouseAvailableAsync` → `EnsureProductsAvailableAsync` |
+| 调用位置 | 创建 / 修改在**单位折算之后**、**来源链接校验之后**、**单号预约与任何写入之前** |
+| 仓库 | Id 必须为正数（`InvalidParameter`）；不存在 / 已软删除（`InvalidParameter`）；已停用（`RuleConflict`） |
+| 明细形状 | 只校验未删除的有效明细：`ProductId > 0`；`Quantity > 0` 且在 `DECIMAL(18,2)` 内可表示；`Weight` / `Volume >= 0` 且可表示 |
+| 表头合计 | 与 `Calculate` 同源重算数量 / 毛重 / 体积并校验可表示性与 `OverflowException`（拒绝，不静默截断） |
+| 商品 | 存在 / 未删除（`InvalidParameter`）；已停用（`RuleConflict`） |
+| 空草稿头 | 0 行有效明细仍可保存；`Submit` / `Approve` 要求至少一行有效明细（`RuleConflict`） |
+| 重复商品行 | 保留累计数量语义（`Calculate` 求和、审核逐行过账），**不引入任何任意唯一性规则** |
+| 单位折算 | 仍先于护栏执行；装箱换算乘法溢出转换为受控 `InvalidParameter` |
+| 不变口径 | 实时身份 / 账号状态 / 既有「销售出库」菜单 / ERP-097 客户范围、可选 `SalesOrderId` 仍走 `StockOutOrderFulfillmentRules`、服务端单号 / 状态 / 时间戳 / 明细身份、审核 / 取消 / 删除的行锁 + 可串行化事务 + ERP-343 累计容量 + `StockMovements` 流水一律不变 |
+| 边界 | 不新增表 / 列 / 索引 / 菜单 / 权限 / 用户授权，不改写任何主数据（只读校验）；被拒绝的请求零单号消耗、零单据 / 明细 / 库存 / 流水变化 |
+
+### 6.3 验证范围
+
+| 层 | 命令 / 范围 |
+|---|---|
+| Release 生成（分析器 + 警告即错误） | `dotnet build NEWERP.sln -c Release /p:TreatWarningsAsErrors=true /p:RunAnalyzersDuringBuild=true` |
+| 全量单元测试 | `dotnet test src/ERP.UnitTests -c Release` |
+| 新增单元测试 | `--filter "FullyQualifiedName~StockOutDraftValidationTests"` |
+| 既有契约 | `StockOutControllerTests` / `StockOutOrderFulfillmentTests` / `StockOutSourceSelectionTests` / `StockOutWriteScopeRegressionTests` / `StockOutAuthorizationTests` / `StockOutCanonicalEntryTests` / `StockUnitConversionTests` / `StockInOutMovementLedgerTests` / `LoadingStockOutCancellationTests` / `ReturnSourceCancellationTests` |
+| 真实隔离 SQL | `dotnet test src/ERP.IntegrationTests -c Release --filter "FullyQualifiedName~StockOutDraftValidation"` |
+
+新增 / 更新测试：
+
+- `src/ERP.UnitTests/StockOutDraftValidationTests.cs`（新增）：仓库（零 / 负 / 缺失 / 已删除 / 已停用）、数量（零 / 负 / 不可表示 / 溢出）、毛重与体积（负 / 不可表示）、表头合计溢出、商品（缺失 Id / 不存在 / 已删除 / 已停用）、空草稿头 + 提交 / 审核要求有效明细、重复商品行累计、单位折算先于护栏、修改零改动与合法修改、EF 实际精度契约与源码接线契约。
+- `src/ERP.UnitTests/StockOutTestAuthorization.cs`：新增仓库 / 商品 / 单号规则幂等播种脚手架（含既有装箱换算夹具的默认在用仓库），不新增任何授权。
+- 既有夹具适配（`StockOutControllerTests` / `StockOutAuthorizationTests` / `StockOutOrderFulfillmentTests` / `StockOutWriteScopeRegressionTests` / `LoadingStockOutCancellationTests` / `ReturnSourceCancellationTests` / `StockInOutMovementLedgerTests`）：补齐真实在用仓库 / 商品主数据；`StockOutOrderFulfillmentTests` 的「负数 / 零数量审核零副作用」改为直接播种历史直写草稿（业务断言全部保留）。
+- `src/ERP.IntegrationTests/StockOutDraftValidationSqlServerTests.cs`（新增）：真实 SQL Server 上的创建 / 修改拒绝矩阵（零写入 + 零单号）、重复商品行合法流程、空草稿头 + 提交拒绝、合法修改保留服务端单号，以及目标库护栏 fail-closed。
+
+## 7. ERP-502 实测证据（本次尝试）
+
+| 层 | 命令 | 结果 |
+|---|---|---|
+| Release 生成（分析器 + 警告即错误） | `dotnet build NEWERP.sln -c Release /p:TreatWarningsAsErrors=true /p:RunAnalyzersDuringBuild=true` | ✅ 0 警告 0 错误 |
+| 全量单元测试 | `dotnet test src/ERP.UnitTests -c Release`（TRX：`.ai/logs/ERP-502/erp502-full-units.trx`） | ✅ 8169 / 8169 通过（失败 0） |
+| 新增草稿护栏单元测试 | `--filter "FullyQualifiedName~StockOutDraftValidationTests"` | ✅ 37 / 37 通过 |
+| 既有销售出库 / 库存契约 | `--filter "FullyQualifiedName~Stock\|FullyQualifiedName~LoadingStockOutCancellation\|FullyQualifiedName~ReturnSourceCancellation"` | ✅ 430 / 430 通过 |
+| 真实隔离 SQL（草稿护栏） | `dotnet test src/ERP.IntegrationTests -c Release --filter "FullyQualifiedName~StockOutDraftValidation"`（TRX：`.ai/logs/ERP-502/erp502-sql2.trx`） | ✅ 33 / 33 通过（30 项真实 SQL 场景 + 3 项目标护栏 fail-closed，13 s） |
+
+真实 SQL 目标（运行期护栏断言 + 实例复核）：
+
+- 实例：`(localdb)\NEWERP_AutoAcceptance`（`Integrated Security=true`）；实例名与库名前缀在每次访问数据库之前由测试断言复核。
+- 库：每次运行全新 GUID 库 —— 首次运行 `NEWERP_AUTOTEST_STOCKOUTDRAFT_20261014_ea8ef8b3154c447289606f294ee0e495`（07:33:28），
+  复验运行 `NEWERP_AUTOTEST_STOCKOUTDRAFT_20261014_b43940c4f129469b85053f45e5229976`（07:34:24）；
+  发现同名库已存在立即拒绝，绝不 drop / reset / 复用任何数据库，也未触碰其它库或生产库。
+- 未读取 `appsettings*.json` / `.env` / 生产连接串 / 生产凭据；未 commit / push；未执行迁移或部署。
+- 本任务 `validation_profile = safe`、`completion_mode = build`、`browser_acceptance.required = false`：
+  **不声称**浏览器端到端验收或整阶段验收通过；上述真实隔离 SQL 结果来自 IntegrationTests 的真实控制器调用路径。
+- 验证产物（TRX / 日志）一律落 `.ai/logs/ERP-502/`，未在仓库根留下任何 `TestResults`。
+
 
