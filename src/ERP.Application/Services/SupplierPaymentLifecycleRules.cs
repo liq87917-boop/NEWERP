@@ -75,6 +75,34 @@ public static class SupplierPaymentLifecycleRules
         "一律权限不足（2002），且全部先于任何引用金额、快照或候选读取与写入。 " +
         "不存在 Request.Path / 环境变量 / 数据库提供程序 / 测试专用开关旁路，绝无匿名或管理员回退。";
 
+    /// <summary>
+    /// ERP-488：「付款单 → 供应商采购发票」发票引用证据入口（台账 / 付款单候选 / 付款单侧汇总 / 付款单侧清单 /
+    /// 发票候选 / 发票侧汇总 / 发票侧清单 / 详情 / 登记 / 作废）的实时授权与调用形状<strong>完全无关</strong>，
+    /// 且<strong>登记 / 作废不再存在无授权的服务直调旁路</strong>：缺失 / 为零 / 未知 / 已删除身份一律未认证（2000），
+    /// 账号禁用 / 缺少或被撤销既有「付款单」（<c>payment</c>）菜单一律权限不足（2002），
+    /// 受限账号越界付款单 / 来源 / 发票一律受控非披露拒绝，且全部先于任何金额、快照、候选读取与写入；
+    /// 被拒调用零证据行 / 付款单 / 发票 / 状态变更。绝无匿名 / 管理员兜底、测试环境或合成旁路身份。
+    /// </summary>
+    public const string InvoiceAllocationPathIndependenceText =
+        "ERP-488：付款发票引用证据（「付款单 → 供应商采购发票」）每一条入口（台账 / 付款单候选 / 付款单侧汇总 / " +
+        "付款单侧清单 / 发票候选 / 发票侧汇总 / 发票侧清单 / 详情 / 登记 / 作废）都无条件执行实时身份 + 既有「付款单」（payment）" +
+        "菜单 + ERP-097 权威客户数据范围（含被引用付款单与来源货款申请单归属客户）；缺失 / 为零 / 未知 / 已删除身份一律未认证（2000），" +
+        "账号禁用 / 缺少或被撤销菜单一律权限不足（2002），受限账号越界付款单 / 来源 / 发票一律受控非披露拒绝，" +
+        "且全部先于任何金额、快照、候选读取与写入；登记 / 作废不再退回无授权的服务直调，" +
+        "被拒调用零证据行 / 付款单 / 发票 / 状态变更。绝无匿名 / 管理员兜底、测试环境、请求路径旁路或合成旁路身份。";
+
+    /// <summary>缺失 / 非法登录身份（未认证）的拒绝文案（接口 / 文档 / 测试同源）</summary>
+    public const string UnauthorizedText = "请先登录后再访问付款单";
+
+    /// <summary>登录账号不存在或已删除（未认证）的拒绝文案</summary>
+    public const string DeletedIdentityText = "登录账号不存在或已删除，禁止操作付款单";
+
+    /// <summary>登录账号已禁用（权限不足）的拒绝文案</summary>
+    public const string DisabledIdentityText = "登录账号已禁用，禁止操作付款单（fail closed）";
+
+    /// <summary>缺少既有「付款单」（payment）菜单授权（权限不足）的拒绝文案</summary>
+    public const string MenuDeniedText = $"当前账号没有「{RequiredMenuText}」（{RequiredMenuCode}）模块授权";
+
     // ==================== 1. 币种、金额、供应商纯校验 ====================
 
     /// <summary>币种规范化 + 支持范围校验（付款单币种必须来自系统币种口径，才能与引用证据权威比对）</summary>
@@ -133,20 +161,18 @@ public static class SupplierPaymentLifecycleRules
     {
         ArgumentNullException.ThrowIfNull(db);
         if (userId is null or <= 0)
-            throw new BusinessException("请先登录后再访问付款单", ErrorCodes.Unauthorized);
+            throw new BusinessException(UnauthorizedText, ErrorCodes.Unauthorized);
 
         var user = await db.SysUsers.AsNoTracking()
             .FirstOrDefaultAsync(u => u.Id == userId.Value && !u.IsDeleted);
         if (user is null)
-            throw new BusinessException("登录账号不存在或已删除，禁止操作付款单", ErrorCodes.Unauthorized);
+            throw new BusinessException(DeletedIdentityText, ErrorCodes.Unauthorized);
         if (user.Status != UserStatus.Enabled)
-            throw new BusinessException("登录账号已禁用，禁止操作付款单（fail closed）", ErrorCodes.Forbidden);
+            throw new BusinessException(DisabledIdentityText, ErrorCodes.Forbidden);
 
         var menuCodes = await CustomerReceivableReconciliationService.LoadAuthorizedMenuCodesAsync(db, userId.Value);
         if (!menuCodes.Contains(RequiredMenuCode, StringComparer.OrdinalIgnoreCase))
-            throw new BusinessException(
-                $"当前账号没有「{RequiredMenuText}」（{RequiredMenuCode}）模块授权",
-                ErrorCodes.Forbidden);
+            throw new BusinessException(MenuDeniedText, ErrorCodes.Forbidden);
     }
 
     /// <summary>

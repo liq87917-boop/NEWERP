@@ -19,6 +19,13 @@ namespace ERP.Api.Controllers;
 /// 也不执行任何付款、记账、核销或结算动作；本控制器<strong>刻意不提供</strong> <c>PUT</c> / <c>PATCH</c> /
 /// <c>DELETE</c>（更正只走显式作废，保留原始值与历史）；
 /// 生产库结构变更仍由 Human Gate 控制（本控制器不做任何 DDL，建表 / 索引由 SchemaUpgrader 幂等补齐）。</para>
+/// <para>ERP-488：<strong>每一条入口（台账 / 付款单候选 / 付款单侧汇总 / 付款单侧清单 / 发票候选 / 发票侧汇总 /
+/// 发票侧清单 / 详情 / 登记 / 作废）都无条件执行</strong>实时身份（缺失 / 为零 / 未知 / 已删除一律未认证）、
+/// 既有「付款单」（<c>payment</c>）菜单授权（禁用 / 缺少或被撤销一律权限不足）与 ERP-097 权威客户数据范围
+/// （含被引用付款单与来源货款申请单归属客户）；登记 / 作废不再存在「无 HTTP 请求管线且无身份」或「空请求路径且无身份」的
+/// 服务直调旁路，被拒调用零证据行 / 付款单 / 发票改动。契约与边界见
+/// <see cref="SupplierPaymentLifecycleRules.InvoiceAllocationPathIndependenceText"/> 与
+/// <see cref="SupplierPaymentLifecycleRules.PathIndependenceText"/>。</para>
 /// </summary>
 [ApiController]
 [Route("api/supplier-payment-invoice-allocations")]
@@ -147,16 +154,16 @@ public class SupplierPaymentInvoiceAllocationController : ControllerBase
     /// （存在 / 未删除 / 已登记未作废 / 供应商一致 / 币种一致）、重复有效行、付款单金额上限与发票未引用含税总额上限，
     /// 全部通过后才写入证据；登记人取当前登录账号（客户端不可提交）。
     /// <para>本接口<strong>不</strong>改写付款单与发票的任何字段，也<strong>不</strong>执行付款、认证或核销。</para>
+    /// <para>ERP-488：与调用形状完全无关 —— 登记入口<strong>无条件</strong>先解析实时启用身份、既有「付款单」（<c>payment</c>）
+    /// 菜单授权与 ERP-097 权威客户数据范围（含被引用付款单与来源归属客户），再执行授权服务重载；
+    /// 缺失 / 为零 / 未知 / 已删除身份一律未认证（2000），禁用 / 被撤销菜单一律权限不足（2002），越界付款单 /
+    /// 来源一律受控非披露拒绝，且全部先于任何金额、快照、候选读取与写入。</para>
     /// </summary>
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] SupplierPaymentInvoiceAllocationSaveDto dto)
     {
-        // 进程内直接调用（无 HTTP 请求管线且无登录身份）沿用既有语义；真实 HTTP 路由一律实时授权。
-        if (!RequiresLiveAuthorization())
-            return Ok(ApiResponse<SupplierPaymentInvoiceAllocationDto>.Success(
-                await SupplierPaymentInvoiceAllocationService.CreateAsync(_db, dto, CurrentUserName()),
-                "付款发票引用已登记（仅证据留痕；未执行付款、未核销、未认证）"));
-
+        // ERP-488：绑定到请求管线（空路径或已赋值路径）与纯进程内直调都一律实时授权；
+        // 缺失身份 fail closed，绝不退回无授权的服务直调（不再有请求形状 / 空上下文旁路）。
         await SupplierPaymentLifecycleRules.EnsureMenuAuthorizedAsync(_db, CurrentUserId());
         return Ok(ApiResponse<SupplierPaymentInvoiceAllocationDto>.Success(
             await SupplierPaymentInvoiceAllocationService.CreateAuthorizedAsync(
@@ -167,15 +174,13 @@ public class SupplierPaymentInvoiceAllocationController : ControllerBase
     /// <summary>
     /// 作废引用行（必须填写原因）：保留原始金额、付款单 / 供应商 / 发票快照、登记人与审计历史，
     /// 不物理删除、不改派、不静默替换金额，也不改写付款单与发票。
+    /// <para>ERP-488：与登记同一口径 —— 作废入口无条件实时授权（实时身份 + 既有「付款单」菜单 + 权威客户范围），
+    /// 绝不因请求形状或缺少身份而放行，被拒调用零引用行 / 付款单 / 发票变更。</para>
     /// </summary>
     [HttpPost("{id:long}/void")]
     public async Task<IActionResult> Void(long id, [FromBody] SupplierPaymentInvoiceAllocationVoidRequest? request)
     {
-        if (!RequiresLiveAuthorization())
-            return Ok(ApiResponse<SupplierPaymentInvoiceAllocationDto>.Success(
-                await SupplierPaymentInvoiceAllocationService.VoidAsync(_db, id, request?.Reason),
-                "付款发票引用已作废（原始值、快照与登记人保留，可读）"));
-
+        // ERP-488：作废同样无条件实时授权（空路径 / 缺失身份 / 空上下文同样 fail closed）。
         await SupplierPaymentLifecycleRules.EnsureMenuAuthorizedAsync(_db, CurrentUserId());
         return Ok(ApiResponse<SupplierPaymentInvoiceAllocationDto>.Success(
             await SupplierPaymentInvoiceAllocationService.VoidAuthorizedAsync(
@@ -190,17 +195,4 @@ public class SupplierPaymentInvoiceAllocationController : ControllerBase
     /// <summary>当前登录用户 Id（缺失或非数字返回 null，由授权规则 fail closed 拒绝，绝不猜测身份）</summary>
     private long? CurrentUserId()
         => long.TryParse(User?.FindFirst(ClaimTypes.NameIdentifier)?.Value, out var id) ? id : null;
-
-    /// <summary>
-    /// 是否必须执行实时授权：真实 HTTP 请求（MVC 绑定，<c>Request.Path</c> 已赋值）一律执行；
-    /// 进程内直接调用（历史单元测试 / 内部派生读取，无 HTTP 请求管线）仅在携带当前登录身份时执行。
-    /// 只对「既无任何登录身份、又不在 HTTP 请求管线内」的调用免授权：这类调用不可能由外部请求到达，
-    /// 也绝不把缺失身份当作管理员（真实匿名请求因处于请求管线内一律 fail closed）。
-    /// </summary>
-    private bool RequiresLiveAuthorization()
-    {
-        var http = ControllerContext?.HttpContext;
-        if (http is null) return false;
-        return http.Request.Path.HasValue || CurrentUserId() is not null;
-    }
 }

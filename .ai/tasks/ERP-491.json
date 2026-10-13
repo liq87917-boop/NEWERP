@@ -1,0 +1,113 @@
+{
+  "title": "Revalidate supplier comparison masters at all sourcing and conversion commitments",
+  "description": "Complete procurement sourcing master integrity by removing PurchaseQuoteController.RequiresLiveMasterValidation path gate. Helper lines 89-99 bypasses PurchaseQuoteMasterReferenceRules for empty-path authorized calls; decision/single/batch conversions at lines 396/443/549 likewise gate live references. Always enforce existing product/supplier/customer live-reference rules before draft writes and approval/selection/procurement commitment, including inside current comparison locks. Retain supported nullable draft comparisons and explicit-source grouping, but no invalid supplier/product may become a committed purchase order. Reuse existing sourcing/procurement authority from ERP-486; do not grant master-maintenance permissions. Adapt existing fixtures with genuine enabled identities, existing menu grants and live master rows, never a request-path/environment/test bypass. Preserve nullable manual drafts where the established business rules allow them. Full original failure logs and explicit TRX/results directories must remain under .ai/logs/<task>; do not stage generated outputs. No schema changes or new permissions. Retain existing live identity/menu/customer-scope authority, transactions, source locks, controlled errors and audit. Reject before numbering or persistence, with zero header/detail/source/status mutations. No new permissions, schema, production access, external service or arbitrary SQL. Genuine SQL only on (localdb)\\NEWERP_AutoAcceptance with Integrated Security and a fresh GUID-owned NEWERP_AUTOTEST database; reject wrong/existing targets and never drop/reset. Require safe Release with analyzers/warnings-as-errors, full units and relevant genuine SQL/browser tests; accurately record blockers and do not claim whole-stage acceptance.",
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/PurchaseQuoteController.cs",
+    "src/ERP.Api/Controllers/PurchaseQuoteConversion.cs",
+    "src/ERP.Application/Services/PurchaseQuoteMasterReferenceRules.cs",
+    "src/ERP.UnitTests/PurchaseQuoteApprovalTests.cs",
+    "src/ERP.UnitTests/PurchaseQuoteAuthorizationTests.cs",
+    "src/ERP.UnitTests/PurchaseQuoteConversionBatchTests.cs",
+    "src/ERP.UnitTests/PurchaseQuoteConversionFunnelTests.cs",
+    "src/ERP.UnitTests/PurchaseQuoteConversionMutationTests.cs",
+    "src/ERP.UnitTests/PurchaseQuoteConversionTests.cs",
+    "src/ERP.UnitTests/PurchaseQuoteEntryAuthorizationTests.cs",
+    "src/ERP.UnitTests/PurchaseQuoteMasterReferenceTests.cs",
+    "src/ERP.UnitTests/PurchaseQuoteMutationTests.cs",
+    "src/ERP.UnitTests/PurchaseQuoteOrderPriceVarianceTests.cs",
+    "src/ERP.UnitTests/PurchaseQuotePriceHistoryTests.cs",
+    "src/ERP.UnitTests/PurchaseQuoteUnconditionalMasterReferenceTests.cs",
+    "src/ERP.IntegrationTests/PurchaseQuoteUnconditionalMasterReferenceSqlServerTests.cs",
+    "docs/purchase-quote-unconditional-master-validation.md"
+  ],
+  "acceptance_criteria": [
+    "Draft writes and sourcing approval/selection/single/batch procurement conversion enforce existing live product/supplier/customer rules regardless of request shape. Preserve supported nullable comparison drafts, reject zero/missing/deleted/disabled explicit references and invalid procurement commitment without silent substitution.",
+    "Master invalidation during sourcing is revalidated under current locks with bounded batched reads. One invalid batch source rejects all groups before any purchase number or persistence; preserve approved price/currency/quantity, current caller/customer/menu scope, selection history and transaction integrity.",
+    "Meaningful controller and genuine isolated SQL tests cover permitted sourced commitment, nullable draft semantics, master revocation, identical populated/empty/no-context calls and zero rejected writes/numbering. Keep original conversion/master/authority regression fixtures valid, pass safe Release/full units and retain original logs."
+  ],
+  "criterion_path_map": {
+    "Draft writes and sourcing approval/selection/single/batch procurement conversion enforce existing live product/supplier/customer rules regardless of request shape. Preserve supported nullable comparison drafts, reject zero/missing/deleted/disabled explicit references and invalid procurement commitment without silent substitution.": [
+      "src/ERP.Api/Controllers/PurchaseQuoteController.cs",
+      "src/ERP.Api/Controllers/PurchaseQuoteConversion.cs",
+      "src/ERP.Application/Services/PurchaseQuoteMasterReferenceRules.cs",
+      "src/ERP.UnitTests/PurchaseQuoteApprovalTests.cs",
+      "src/ERP.UnitTests/PurchaseQuoteAuthorizationTests.cs",
+      "src/ERP.UnitTests/PurchaseQuoteConversionBatchTests.cs",
+      "src/ERP.UnitTests/PurchaseQuoteConversionFunnelTests.cs",
+      "src/ERP.UnitTests/PurchaseQuoteConversionMutationTests.cs",
+      "src/ERP.UnitTests/PurchaseQuoteConversionTests.cs",
+      "src/ERP.UnitTests/PurchaseQuoteEntryAuthorizationTests.cs",
+      "src/ERP.UnitTests/PurchaseQuoteMasterReferenceTests.cs",
+      "src/ERP.UnitTests/PurchaseQuoteMutationTests.cs",
+      "src/ERP.UnitTests/PurchaseQuoteOrderPriceVarianceTests.cs",
+      "src/ERP.UnitTests/PurchaseQuotePriceHistoryTests.cs",
+      "src/ERP.UnitTests/PurchaseQuoteUnconditionalMasterReferenceTests.cs",
+      "src/ERP.IntegrationTests/PurchaseQuoteUnconditionalMasterReferenceSqlServerTests.cs",
+      "docs/purchase-quote-unconditional-master-validation.md"
+    ],
+    "Master invalidation during sourcing is revalidated under current locks with bounded batched reads. One invalid batch source rejects all groups before any purchase number or persistence; preserve approved price/currency/quantity, current caller/customer/menu scope, selection history and transaction integrity.": [
+      "src/ERP.Api/Controllers/PurchaseQuoteController.cs",
+      "src/ERP.Api/Controllers/PurchaseQuoteConversion.cs",
+      "src/ERP.Application/Services/PurchaseQuoteMasterReferenceRules.cs",
+      "src/ERP.UnitTests/PurchaseQuoteApprovalTests.cs",
+      "src/ERP.UnitTests/PurchaseQuoteAuthorizationTests.cs",
+      "src/ERP.UnitTests/PurchaseQuoteConversionBatchTests.cs",
+      "src/ERP.UnitTests/PurchaseQuoteConversionFunnelTests.cs",
+      "src/ERP.UnitTests/PurchaseQuoteConversionMutationTests.cs",
+      "src/ERP.UnitTests/PurchaseQuoteConversionTests.cs",
+      "src/ERP.UnitTests/PurchaseQuoteEntryAuthorizationTests.cs",
+      "src/ERP.UnitTests/PurchaseQuoteMasterReferenceTests.cs",
+      "src/ERP.UnitTests/PurchaseQuoteMutationTests.cs",
+      "src/ERP.UnitTests/PurchaseQuoteOrderPriceVarianceTests.cs",
+      "src/ERP.UnitTests/PurchaseQuotePriceHistoryTests.cs",
+      "src/ERP.UnitTests/PurchaseQuoteUnconditionalMasterReferenceTests.cs",
+      "src/ERP.IntegrationTests/PurchaseQuoteUnconditionalMasterReferenceSqlServerTests.cs",
+      "docs/purchase-quote-unconditional-master-validation.md"
+    ],
+    "Meaningful controller and genuine isolated SQL tests cover permitted sourced commitment, nullable draft semantics, master revocation, identical populated/empty/no-context calls and zero rejected writes/numbering. Keep original conversion/master/authority regression fixtures valid, pass safe Release/full units and retain original logs.": [
+      "src/ERP.Api/Controllers/PurchaseQuoteController.cs",
+      "src/ERP.Api/Controllers/PurchaseQuoteConversion.cs",
+      "src/ERP.Application/Services/PurchaseQuoteMasterReferenceRules.cs",
+      "src/ERP.UnitTests/PurchaseQuoteApprovalTests.cs",
+      "src/ERP.UnitTests/PurchaseQuoteAuthorizationTests.cs",
+      "src/ERP.UnitTests/PurchaseQuoteConversionBatchTests.cs",
+      "src/ERP.UnitTests/PurchaseQuoteConversionFunnelTests.cs",
+      "src/ERP.UnitTests/PurchaseQuoteConversionMutationTests.cs",
+      "src/ERP.UnitTests/PurchaseQuoteConversionTests.cs",
+      "src/ERP.UnitTests/PurchaseQuoteEntryAuthorizationTests.cs",
+      "src/ERP.UnitTests/PurchaseQuoteMasterReferenceTests.cs",
+      "src/ERP.UnitTests/PurchaseQuoteMutationTests.cs",
+      "src/ERP.UnitTests/PurchaseQuoteOrderPriceVarianceTests.cs",
+      "src/ERP.UnitTests/PurchaseQuotePriceHistoryTests.cs",
+      "src/ERP.UnitTests/PurchaseQuoteUnconditionalMasterReferenceTests.cs",
+      "src/ERP.IntegrationTests/PurchaseQuoteUnconditionalMasterReferenceSqlServerTests.cs",
+      "docs/purchase-quote-unconditional-master-validation.md"
+    ]
+  },
+  "implementation_evidence": "PurchaseQuoteController.cs:89-99,396,443,549 gates live master checks on Request.Path.HasValue even after ERP-486 makes authority unconditional. ERP-476 protects HTTP references and ERP-486 identity/menu ownership; neither eliminates master-only waiver. Source/backlog/full task history inspected.",
+  "depends_on": [
+    "ERP-490",
+    "ERP-486",
+    "ERP-476"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "id": "ERP-491",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-13T18:10:33.822075Z"
+}

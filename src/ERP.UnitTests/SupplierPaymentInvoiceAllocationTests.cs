@@ -21,6 +21,8 @@ namespace ERP.UnitTests;
 /// 证据维度分离（与 ERP-049 采购订单引用金额分别记录、绝不相加）、台账过滤与分页有界、候选派生金额、
 /// 非变更边界（付款单、发票、发票关联行、采购订单、ERP-049 引用行、库存、退税、费用与供应商均不被改写），
 /// 以及模型 / 幂等结构 / 路由 / 前端接线契约。
+/// ERP-488：登记 / 作废在任何调用形状（含完全未绑定 <c>HttpContext</c> 的纯进程内直调、空 <c>Request.Path</c>
+/// 且无身份）都无条件实时授权（实时启用身份 + 既有「付款单」菜单 + 权威客户数据范围），不再有无授权的服务直调旁路。
 /// 全部使用内存库（TestDbFactory），不连接 SQL Server、不执行任何 SQL / 部署脚本。
 /// </summary>
 public class SupplierPaymentInvoiceAllocationTests
@@ -372,6 +374,40 @@ public class SupplierPaymentInvoiceAllocationTests
         }
 
         Assert.Empty(await db.SupplierPaymentInvoiceAllocations.AsNoTracking().ToListAsync());
+    }
+
+    [Fact]
+    public async Task 无请求上下文与空路径无身份时登记作废一律未认证且零写行()
+    {
+        using var db = TestDbFactory.Create();
+        var supplier = SeedSupplier(db, "S488", "义乌档口");
+        var payment = SeedPayment(db, "FK-488", supplier.Id, 1000m);
+        var invoice = SeedInvoice(db, "INV-488", supplier.Id, 1000m);
+
+        // 完全未绑定 HttpContext 的纯进程内直调（外部请求无法构造）不再存在无授权服务直调旁路：
+        // 与空 Request.Path 且无身份的真实请求同一 fail closed（未认证），且先于任何快照读取与写入。
+        var inProcess = new SupplierPaymentInvoiceAllocationController(db);
+        var createDenied = await AssertBusinessAsync(ErrorCodes.Unauthorized,
+            () => inProcess.Create(AllocateDto(payment.Id, invoice.Id, 10m)));
+        Assert.Equal(SupplierPaymentLifecycleRules.UnauthorizedText, createDenied.Message);
+        var voidDenied = await AssertBusinessAsync(ErrorCodes.Unauthorized,
+            () => inProcess.Void(1, new SupplierPaymentInvoiceAllocationVoidRequest { Reason = "越权作废" }));
+        Assert.Equal(SupplierPaymentLifecycleRules.UnauthorizedText, voidDenied.Message);
+
+        // 绑定请求管线但空路径且无身份：同一未认证判决（绝不退化为匿名或管理员）。
+        var emptyPathNoIdentity = new SupplierPaymentInvoiceAllocationController(db);
+        SetUser(emptyPathNoIdentity, null);
+        emptyPathNoIdentity.ControllerContext.HttpContext!.Request.Path = default;
+        Assert.Equal(ErrorCodes.Unauthorized, (await AssertBusinessAsync(ErrorCodes.Unauthorized,
+            () => emptyPathNoIdentity.Create(AllocateDto(payment.Id, invoice.Id, 10m)))).Code);
+        Assert.Equal(ErrorCodes.Unauthorized, (await AssertBusinessAsync(ErrorCodes.Unauthorized,
+            () => emptyPathNoIdentity.Void(1, new SupplierPaymentInvoiceAllocationVoidRequest { Reason = "越权作废" }))).Code);
+
+        // 零写入：不新增 / 不改写任何引用行、付款单、发票或号码记录。
+        Assert.Empty(await db.SupplierPaymentInvoiceAllocations.AsNoTracking().ToListAsync());
+        Assert.Equal(1000m, (await db.FinancePayments.AsNoTracking().FirstAsync(p => p.Id == payment.Id)).Amount);
+        Assert.Equal(PurchaseInvoiceRules.StatusRecorded,
+            (await db.PurchaseInvoices.AsNoTracking().FirstAsync(i => i.Id == invoice.Id)).Status);
     }
 
     [Fact]
