@@ -702,8 +702,24 @@ def executor_requested_missing_task(log_path: Path) -> bool:
 
 def build_prompt(task: dict[str, Any], attempt: int, previous_error: str) -> str:
     base = (AI_DIR / "prompts" / "developer.md").read_text(encoding="utf-8")
-    retry = f"\nPrevious attempt failed. The complete validation log remains at the path in this summary:\n{previous_error[-12000:]}\n" if previous_error else ""
-    return f"{base}\n\nCurrent task JSON:\n{json.dumps(task, ensure_ascii=False, indent=2)}\n\nAttempt: {attempt}{retry}"
+    # Recovery metadata can contain complete validation transcripts and nested
+    # historical snapshots. Passing it verbatim as Cline's positional prompt
+    # exceeds the Windows CreateProcess command-line limit and strands the
+    # resident scheduler before it can repair the current task. The complete
+    # evidence remains in .ai/logs and .ai/results; the executor needs only the
+    # actionable task contract plus a bounded current failure summary.
+    prompt_keys = (
+        "id", "title", "description", "acceptance_criteria", "allowed_paths",
+        "criterion_path_map", "validation_profile", "completion_mode",
+        "max_attempts", "depends_on", "browser_acceptance",
+    )
+    prompt_task = {key: task[key] for key in prompt_keys if key in task}
+    retry = (
+        "\nPrevious attempt failed. The complete validation log remains at the path in this summary:\n"
+        f"{previous_error[-6000:]}\n"
+        if previous_error else ""
+    )
+    return f"{base}\n\nCurrent task JSON:\n{json.dumps(prompt_task, ensure_ascii=False, indent=2)}\n\nAttempt: {attempt}{retry}"
 
 
 def resolve_cline_command(command: str) -> str:

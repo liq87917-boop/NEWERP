@@ -98,6 +98,28 @@ class PipelineContracts(unittest.TestCase):
                                                  "text": "Insufficient Balance (request_id=123)"}) + '\n')
             self.assertIn("Insufficient Balance", provider.provider_failure_from_log(log))
 
+    def test_recovery_prompt_excludes_unbounded_historical_transcripts(self):
+        task = self.task("ERP-469")
+        task.update({
+            "description": "repair scheduler prompt transport",
+            "acceptance_criteria": ["preserve complete evidence in logs"],
+            "recovery_history": [{"summary": "x" * 60000}],
+            "preserved_work": {"diff": "x" * 60000},
+        })
+        original_ai_dir = orchestrator.AI_DIR
+        with tempfile.TemporaryDirectory() as directory:
+            ai_dir = Path(directory)
+            (ai_dir / "prompts").mkdir()
+            (ai_dir / "prompts" / "developer.md").write_text("base", encoding="utf-8")
+            orchestrator.AI_DIR = ai_dir
+            try:
+                prompt = orchestrator.build_prompt(task, 2, "failure" * 4000)
+            finally:
+                orchestrator.AI_DIR = original_ai_dir
+        self.assertLess(len(prompt), 30000)
+        self.assertNotIn("recovery_history", prompt)
+        self.assertNotIn("preserved_work", prompt)
+
     def test_provider_retry_has_bounded_backoff_and_due_time(self):
         now = datetime(2026, 9, 30, tzinfo=timezone.utc)
         config = {"provider_retry_initial_seconds": 60, "provider_retry_max_seconds": 180}
