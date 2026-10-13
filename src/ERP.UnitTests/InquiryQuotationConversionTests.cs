@@ -293,4 +293,64 @@ public class InquiryQuotationConversionTests
         Assert.Equal(ErrorCodes.RuleConflict, ex.Code);
         Assert.Equal(1, db.Quotations.Count());
     }
+
+    // ==================== ERP-475 来源实时主数据引用复核 ====================
+
+    [Fact]
+    public async Task 转换_来源客户被删除_在占号与改写来源状态之前受控拒绝()
+    {
+        // ERP-475：询价转报价 / 带入预填在来源行锁内先复核**来源实时主数据引用** —— 失效客户既不生成报价单、
+        // 不消耗报价单号，也不改写来源状态。
+        using var db = TestDbFactory.Create();
+        var inquiry = Seed(db, DocumentStatus.Approved);
+        var rule = SeedQuotationNumberRule(db, current: 7);
+        db.BaseCustomers.Single(c => c.Id == inquiry.CustomerId).IsDeleted = true;
+        db.SaveChanges();
+
+        var error = await Assert.ThrowsAsync<BusinessException>(() => Controller(db).ToQuotation(inquiry.Id));
+        Assert.Equal(ErrorCodes.NotFound, error.Code);
+        Assert.Contains("不存在或已删除", error.Message);
+
+        var prefill = await Assert.ThrowsAsync<BusinessException>(() => Controller(db).QuotationPrefill(inquiry.Id));
+        Assert.Equal(ErrorCodes.NotFound, prefill.Code);
+
+        Assert.Empty(db.Quotations);
+        Assert.Equal(7L, db.SysDocumentNumberRules.AsNoTracking()
+            .Single(r => r.Id == rule.Id).CurrentSequence);          // 被拒绝的转换绝不消耗报价单号
+        Assert.Equal(DocumentStatus.Approved, db.Inquiries.AsNoTracking().Single().Status);
+    }
+
+    [Fact]
+    public async Task 转换_来源明细为手工快照行_悬空商品Id与自带文本原样保留()
+    {
+        // ERP-475：来源明细为**手工商品快照行**（悬空商品 Id + 自带受界文本）时照常转换，
+        // 且来源与目标文本均原样保留（不回填 / 不改派）。
+        using var db = TestDbFactory.Create();
+        var inquiry = Seed(db, DocumentStatus.Approved);
+
+        Assert.IsType<OkObjectResult>(await Controller(db).ToQuotation(inquiry.Id));
+
+        var line = db.Quotations.Include(q => q.Details).Single().Details.Single();
+        Assert.Equal(1, line.ProductId);
+        Assert.Equal("Widget", line.ProductName);
+        Assert.Equal(DocumentStatus.Completed, db.Inquiries.AsNoTracking().Single().Status);
+
+        var sourceLine = db.InquiryDetails.AsNoTracking().Single();
+        Assert.Equal(1, sourceLine.ProductId);
+        Assert.Equal("Widget", sourceLine.ProductName);
+    }
+
+    /// <summary>播种报价单单号规则（用于断言「被拒绝的转换绝不消耗报价单号」）。</summary>
+    private static SysDocumentNumberRule SeedQuotationNumberRule(ERP.Infrastructure.Data.ErpDbContext db, long current)
+    {
+        var rule = new SysDocumentNumberRule
+        {
+            DocumentType = DocumentType.Quotation, RuleCode = $"QT-{Guid.NewGuid():N}", RuleName = "报价单号",
+            Prefix = "QT", DateFormat = "yyyyMMdd", SerialLength = 4, Separator = string.Empty,
+            CurrentSequence = current, IsDeleted = false
+        };
+        db.SysDocumentNumberRules.Add(rule);
+        db.SaveChanges();
+        return rule;
+    }
 }

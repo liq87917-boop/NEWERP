@@ -26,6 +26,11 @@ namespace ERP.Api.Controllers;
 /// 有界整数天有效期 / 逐行数量 · 单价 / 软删除明细注入）并按币种精度派生行金额；提交 / 审核在锁内权威重读后、
 /// 状态改写之前按 <see cref="InquiryCommercialValidationRules.ValidateOperational"/> 复核**已持久化**条款
 /// （至少一行有效明细）。被拒绝的请求零写入、零占号、状态与明细均不变。</para>
+/// <para>ERP-475：新增在单号预约与任何赋值之前、修改在询价单来源行锁内改写字段之前、提交 / 审核在行锁内状态改写
+/// 之前，一律按 <see cref="InquiryMasterReferenceRules.EnsureMasterReferencesAsync"/> 复核**实时主数据引用**
+/// —— 必填客户（存在 / 未删除 / 启用）、可选业务员（存在 / 未删除 / 在职且为业务员）与明细商品（正整数的去重集合
+/// 一次有界批量查询；已删除 / 已停用拒绝，无对应商品行时自带受界文本的手工快照行保留、纯目录引用拒绝）。
+/// 既有身份 / 菜单 / 客户数据范围授权仍然最先且决定性；失效引用在单号预约与任何写入之前受控拒绝。</para>
 /// </summary>
 [Route("api/inquiries")]
 public class InquiryController : DocumentControllerBase<Inquiry>
@@ -210,6 +215,8 @@ public class InquiryController : DocumentControllerBase<Inquiry>
     /// 创建（ERP-402：实时授权 + 拟议客户范围先于单号生成与任何写入；
     /// ERP-474：商业条款按唯一权威契约在**单号预约与任何写入之前**校验并按币种精度派生行金额，
     /// 允许显式支持的空草稿，但被提交的行必须是合法商业行 —— 非法请求零写入、零占号；
+    /// ERP-475：实时主数据引用（必填客户 / 可选业务员 / 明细商品批量解析）同样在**单号预约与任何写入之前**复核，
+    /// 失效引用零写入、零占号；
     /// 单号 / 状态 / 主键一律由服务端权威覆盖，客户端提交值不参与持久化）。
     /// </summary>
     [HttpPost]
@@ -221,6 +228,10 @@ public class InquiryController : DocumentControllerBase<Inquiry>
         // ERP-474：币种 / 汇率 / 有效期（有界整数天）/ 逐行数量 · 单价 / 软删除明细注入在单号预约之前校验，
         // 行金额由服务端按既有币种精度派生（绝不采信客户端行金额）。
         InquiryCommercialValidationRules.NormalizeIncomingDraft(entity);
+
+        // ERP-475：实时主数据引用（必填客户 / 可选业务员 / 明细商品一次有界批量查询）在单号预约与任何写入之前复核 ——
+        // 零 / 负 / 不存在 / 已删除 / 已停用引用一律受控拒绝，被拒绝的请求零写入、零占号。
+        await InquiryMasterReferenceRules.EnsureMasterReferencesAsync(Db, entity);
 
         // 客户端不得注入身份 / 状态 / 删除态：主键 / 单号 / 状态一律由服务端权威覆盖（与 ERP-428 订单号同源口径）。
         entity.Id = 0;
@@ -250,6 +261,10 @@ public class InquiryController : DocumentControllerBase<Inquiry>
             InquiryAuthorizationRules.EnsureProposedCustomerInScope(scope, entity.CustomerId);
             InquiryMutationRules.EnsureNoLiveDownstream(await HasLiveQuotationAsync(id));
             InquiryMutationRules.EnsureEditAllowed(GetStatus(existing));
+
+            // ERP-475：拟议客户 / 可选业务员 / 明细商品在改写任何字段之前复核**实时主数据引用** ——
+            // 草稿保存后被删除 / 停用的主数据、零 / 负 / 缺失 / 非业务员引用一律原子拒绝，原表头 / 明细 / 单号不变。
+            await InquiryMasterReferenceRules.EnsureMasterReferencesAsync(Db, entity);
 
             existing.InquiryDate = entity.InquiryDate;
             existing.CustomerId = entity.CustomerId;
@@ -288,6 +303,9 @@ public class InquiryController : DocumentControllerBase<Inquiry>
             InquiryMutationRules.EnsureSubmitAllowed(GetStatus(entity));
             // ERP-474：锁内权威重读后复核已持久化条款（有效明细 + 币种 / 汇率 / 有效期 / 数量 · 单价 / 金额精度）。
             InquiryCommercialValidationRules.ValidateOperational(entity);
+            // ERP-475：运营承诺（提交）在既有来源行锁内、状态改写之前复核**实时主数据引用** ——
+            // 草稿保存后被删除 / 停用的客户 / 商品 / 非在职业务员一律原子拒绝，绝不把失效引用提交进运营需求。
+            await InquiryMasterReferenceRules.EnsureMasterReferencesAsync(Db, entity);
             SetStatus(entity, DocumentStatus.Submitted);
             await Db.SaveChangesAsync();
             return Ok(ApiResponse<object>.Success(null, "提交成功"));
@@ -305,6 +323,8 @@ public class InquiryController : DocumentControllerBase<Inquiry>
             InquiryMutationRules.EnsureApproveAllowed(GetStatus(entity));
             // ERP-474：审核即下游承诺（可转报价单），必须至少一行有效明细并复核全部条款。
             InquiryCommercialValidationRules.ValidateOperational(entity);
+            // ERP-475：审核在既有来源行锁内、状态改写之前复核**实时主数据引用**（与提交同一权威护栏）。
+            await InquiryMasterReferenceRules.EnsureMasterReferencesAsync(Db, entity);
             SetStatus(entity, DocumentStatus.Approved);
             await Db.SaveChangesAsync();
             return Ok(ApiResponse<object>.Success(null, "审核通过"));

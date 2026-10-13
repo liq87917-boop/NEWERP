@@ -203,6 +203,9 @@ public class InquiryCommercialValidationTests
         using var db = TestDbFactory.Create();
         SeedInquiryNumberRule(db);
         var entity = Draft(Line(2m, 10m), Line(3m, 4m));
+        // ERP-475：新增在单号预约与任何写入之前复核**必填客户的实时主数据引用** —— 夹具播种既有合法客户，
+        // 本用例仍只断言「伪造单号 / 身份状态被服务端权威覆盖」。
+        entity.CustomerId = SeedCustomer(db).Id;
         entity.InquiryNo = "HACK-ERP474";
         entity.Id = 4242;
         entity.Status = DocumentStatus.Approved;
@@ -228,8 +231,11 @@ public class InquiryCommercialValidationTests
     public async Task 新增_空草稿_作为待提交草稿保存且不生成明细()
     {
         using var db = TestDbFactory.Create();
+        // ERP-475：空草稿仍可保存，但必填客户必须解析到既有实时主数据行（夹具播种启用未删除客户）。
+        var draft = Draft(Array.Empty<InquiryDetail>());
+        draft.CustomerId = SeedCustomer(db).Id;
 
-        Assert.IsType<OkObjectResult>(await NewController(db).Create(Draft(Array.Empty<InquiryDetail>())));
+        Assert.IsType<OkObjectResult>(await NewController(db).Create(draft));
 
         var saved = db.Inquiries.Single();
         Assert.Equal(DocumentStatus.Pending, saved.Status);

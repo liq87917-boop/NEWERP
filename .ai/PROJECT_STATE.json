@@ -1,11 +1,10 @@
 {
   "schema_version": 2,
   "project": "NEWERP",
-  "updated_at": "2026-10-13T14:37:59.497061Z",
+  "updated_at": "2026-10-13T14:56:36.450804Z",
   "phase": "ready",
   "current_task": null,
   "queue": [
-    "ERP-475",
     "ERP-476"
   ],
   "completed": [
@@ -456,16 +455,17 @@
     "ERP-471",
     "ERP-472",
     "ERP-473",
-    "ERP-474"
+    "ERP-474",
+    "ERP-475"
   ],
   "blocked": [],
   "last_build": {
-    "task": "ERP-474",
+    "task": "ERP-475",
     "profile": "safe",
     "status": "passed",
     "exit_code": 0,
-    "log": ".ai\\logs\\ERP-474-validation-1.log",
-    "at": "2026-10-13T14:37:51.712207Z"
+    "log": ".ai\\logs\\ERP-475-validation-1.log",
+    "at": "2026-10-13T14:56:35.820537Z"
   },
   "last_error": null,
   "last_deepseek_fix": {
@@ -476,15 +476,14 @@
   },
   "git_sync": {
     "branch": "main",
-    "local_sha": "c25ed40",
-    "status": "synced",
+    "local_sha": "658e356",
+    "status": "pending",
     "ahead": 0,
     "behind": 0,
-    "last_attempt_at": "2026-10-13T14:37:59.371943Z",
+    "last_attempt_at": "2026-10-13T14:56:36.330131Z",
     "last_error": null
   },
   "next_recommended_tasks": [
-    "ERP-475",
     "ERP-476"
   ],
   "runner": {

@@ -26,21 +26,28 @@ public class InquiryControllerTests
         var noService = new DocumentNumberService(db);
         var ctl = BuildController(db);
 
+        // ERP-475：询价单必填客户与可选业务员 / 明细商品在单号预约与任何写入之前复核**实时主数据引用**，
+        // 因此夹具播种既有合法主数据行（客户启用未删除、员工在职且为业务员、商品启用未删除）。
+        var customer = SeedLiveCustomer(db);
+        var salesman = SeedLiveEmployee(db);
+        var firstProduct = SeedLiveProduct(db);
+        var secondProduct = SeedLiveProduct(db);
+
         var inquiry = new Inquiry
         {
             InquiryDate = DateTime.Today,
-            CustomerId = 999999L,
+            CustomerId = customer.Id,
             ContactPerson = "李雷",
             ContactPhone = "13800138000",
-            SalesmanId = 999999L,
+            SalesmanId = salesman.Id,
             Currency = (Currency)2,
             ExchangeRate = 7.1m,
             ValidDays = 30,
             Remark = "INT_TEST",
             Details = new List<InquiryDetail>
             {
-                new InquiryDetail { ProductId = 1, ProductName = "P1", Spec = "大", Unit = "PCS", Quantity = 10m, UnitPrice = 100m },
-                new InquiryDetail { ProductId = 2, ProductName = "P2", Spec = "中", Unit = "PCS", Quantity = 5m,  UnitPrice = 80m }
+                new InquiryDetail { ProductId = firstProduct.Id, ProductName = "P1", Spec = "大", Unit = "PCS", Quantity = 10m, UnitPrice = 100m },
+                new InquiryDetail { ProductId = secondProduct.Id, ProductName = "P2", Spec = "中", Unit = "PCS", Quantity = 5m,  UnitPrice = 80m }
             }
         };
 
@@ -52,8 +59,8 @@ public class InquiryControllerTests
         Assert.StartsWith("INQ", dbEntity.InquiryNo);
         Assert.Equal(DocumentStatus.Pending, dbEntity.Status);
         Assert.Equal(2, dbEntity.Details.Count);
-        Assert.Equal(1000m, dbEntity.Details.Single(d => d.ProductId == 1).Amount);
-        Assert.Equal(400m,  dbEntity.Details.Single(d => d.ProductId == 2).Amount);
+        Assert.Equal(1000m, dbEntity.Details.Single(d => d.ProductId == firstProduct.Id).Amount);
+        Assert.Equal(400m,  dbEntity.Details.Single(d => d.ProductId == secondProduct.Id).Amount);
     }
 
     // ==================== GetById ====================
@@ -150,14 +157,19 @@ public class InquiryControllerTests
         var originalDetailId = db.InquiryDetails.Single(i => i.InquiryId == inquiry.Id).Id;
         var ctl = BuildController(db);
 
+        // ERP-475：修改的拟议客户 / 业务员 / 明细商品同样复核实时主数据引用 —— 夹具用既有合法主数据行。
+        var customer = SeedLiveCustomer(db);
+        var salesman = SeedLiveEmployee(db);
+        var product = SeedLiveProduct(db);
+
         var update = new Inquiry
         {
             InquiryDate = DateTime.Today,
-            CustomerId = 999999L, ContactPerson = "改", ContactPhone = "13800138000",
-            SalesmanId = 999999L, Currency = (Currency)2, ExchangeRate = 7.1m, ValidDays = 60,
+            CustomerId = customer.Id, ContactPerson = "改", ContactPhone = "13800138000",
+            SalesmanId = salesman.Id, Currency = (Currency)2, ExchangeRate = 7.1m, ValidDays = 60,
             Details = new List<InquiryDetail>
             {
-                new InquiryDetail { ProductId = 1, ProductName = "P1", Quantity = 20m, UnitPrice = 50m }
+                new InquiryDetail { ProductId = product.Id, ProductName = "P1", Quantity = 20m, UnitPrice = 50m }
             }
         };
 
@@ -236,16 +248,20 @@ public class InquiryControllerTests
         using var db = TestDbFactory.Create();
         var ctl = BuildController(db);
 
+        // ERP-475：必填客户必须解析到实时启用未删除客户；明细商品为启用未删除商品。
+        var customer = SeedLiveCustomer(db);
+        var product = SeedLiveProduct(db);
+
         var result = await ctl.Create(new Inquiry
         {
             InquiryDate = DateTime.Today,
-            CustomerId = 999999L,
+            CustomerId = customer.Id,
             Currency = Currency.USD,
             ExchangeRate = 7.1m,
             ValidDays = 30,
             Details = new List<InquiryDetail>
             {
-                new InquiryDetail { ProductId = 1, ProductName = "P1", Unit = "PCS", Quantity = 2m, UnitPrice = 5m }
+                new InquiryDetail { ProductId = product.Id, ProductName = "P1", Unit = "PCS", Quantity = 2m, UnitPrice = 5m }
             }
         });
 
@@ -298,14 +314,19 @@ public class InquiryControllerTests
     }
 private static (Inquiry inquiry, InquiryDetail detail) SeedInquiry(ErpDbContext db, string no, DocumentStatus status)
     {
+        // ERP-475：询价单必填客户 / 可选业务员 / 明细商品在写入与承诺前复核实时主数据引用 ——
+        // 种子统一播种既有合法主数据行（客户启用未删除、员工在职且为业务员、商品启用未删除）。
+        var customer = SeedLiveCustomer(db);
+        var salesman = SeedLiveEmployee(db);
+        var product = SeedLiveProduct(db);
         var inq = new Inquiry
         {
             InquiryNo = no,
             InquiryDate = DateTime.Today,
-            CustomerId = 1,
+            CustomerId = customer.Id,
             ContactPerson = "C",
             ContactPhone = "138",
-            SalesmanId = 1,
+            SalesmanId = salesman.Id,
             Currency = (Currency)2,
             ExchangeRate = 7.1m,
             ValidDays = 30,
@@ -316,7 +337,7 @@ private static (Inquiry inquiry, InquiryDetail detail) SeedInquiry(ErpDbContext 
         var detail = new InquiryDetail
         {
             InquiryId = inq.Id,
-            ProductId = 1,
+            ProductId = product.Id,
             ProductName = "P1",
             Spec = "大",
             Unit = "PCS",
@@ -327,5 +348,45 @@ private static (Inquiry inquiry, InquiryDetail detail) SeedInquiry(ErpDbContext 
         db.InquiryDetails.Add(detail);
         db.SaveChanges();
         return (inq, detail);
+    }
+
+    /// <summary>既有启用未删除客户（ERP-475：询价单必填客户的实时主数据引用）。</summary>
+    private static BaseCustomer SeedLiveCustomer(ErpDbContext db, int status = 1, bool deleted = false)
+    {
+        var customer = new BaseCustomer
+        {
+            CustomerCode = $"C-INQ-{Guid.NewGuid():N}", CustomerName = "询价测试客户",
+            Status = status, CreditStatus = "正常", DepositRatio = 30m, IsDeleted = deleted
+        };
+        db.BaseCustomers.Add(customer);
+        db.SaveChanges();
+        return customer;
+    }
+
+    /// <summary>既有在职业务员员工（ERP-475：询价单可选业务员的实时主数据引用与资格语义）。</summary>
+    private static BaseEmployee SeedLiveEmployee(ErpDbContext db, int status = 1, bool deleted = false,
+        bool isSalesman = true)
+    {
+        var employee = new BaseEmployee
+        {
+            EmployeeCode = $"E-INQ-{Guid.NewGuid():N}", EmployeeName = "询价测试业务员",
+            IsSalesman = isSalesman, Status = status, IsDeleted = deleted
+        };
+        db.BaseEmployees.Add(employee);
+        db.SaveChanges();
+        return employee;
+    }
+
+    /// <summary>既有启用未删除商品（ERP-475：询价明细商品的实时主数据引用）。</summary>
+    private static BaseProduct SeedLiveProduct(ErpDbContext db, int status = 1, bool deleted = false)
+    {
+        var product = new BaseProduct
+        {
+            ProductCode = $"P-INQ-{Guid.NewGuid():N}", ProductName = "询价测试商品",
+            Unit = "PCS", Status = status, IsDeleted = deleted
+        };
+        db.BaseProducts.Add(product);
+        db.SaveChanges();
+        return product;
     }
 }

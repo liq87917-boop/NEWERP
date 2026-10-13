@@ -132,6 +132,18 @@ public class InquiryMutationTests
         return customer;
     }
 
+    /// <summary>既有启用未删除商品（ERP-475：询价明细商品的实时主数据引用）。</summary>
+    private static BaseProduct SeedProduct(ErpDbContext db)
+    {
+        var product = new BaseProduct
+        {
+            ProductCode = $"P-INQ-{Guid.NewGuid():N}", ProductName = "询价测试商品", Unit = "PCS", Status = 1
+        };
+        db.BaseProducts.Add(product);
+        db.SaveChanges();
+        return product;
+    }
+
     /// <summary>
     /// 播种一条既有单据号规则（用于观察「被拒绝的调用方绝不消耗单据号」：失败后 CurrentSequence 必须保持不变）。
     /// </summary>
@@ -344,11 +356,13 @@ public class InquiryMutationTests
         var (user, _, own) = SeedRestrictedOperator(db, InquiryMenu);
         var foreign = SeedCustomer(db, SeedRestrictedOperator(db, InquiryMenu).Employee.Id);
         var rule = SeedNumberRule(db, DocumentType.Inquiry, "INQ");
+        // ERP-475：明细商品在新增时复核实时主数据引用 —— 夹具播种既有启用未删除商品。
+        var product = SeedProduct(db);
 
         var allowed = await NewController(db, user.Id).Create(new Inquiry
         {
             CustomerId = own.Id,
-            Details = new List<InquiryDetail> { new() { ProductId = 1, Quantity = 2m, UnitPrice = 5m } }
+            Details = new List<InquiryDetail> { new() { ProductId = product.Id, Quantity = 2m, UnitPrice = 5m } }
         });
         Assert.IsType<OkObjectResult>(allowed);
         Assert.Single(db.Inquiries);
@@ -407,7 +421,9 @@ public class InquiryMutationTests
     public async Task 生命周期_提交审核与取消既有口径不变()
     {
         using var db = TestDbFactory.Create();
-        var inquiry = SeedInquiry(db, "INQ-LIFE", 1L);
+        // ERP-475：提交 / 审核在来源行锁内复核**实时主数据引用** —— 夹具使用既有合法客户（启用未删除）。
+        var customer = SeedCustomer(db);
+        var inquiry = SeedInquiry(db, "INQ-LIFE", customer.Id);
         var controller = NewController(db);
 
         await Assert.ThrowsAsync<BusinessException>(() => controller.Approve(inquiry.Id));   // 草稿不可直接审核

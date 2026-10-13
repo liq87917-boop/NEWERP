@@ -1,0 +1,27 @@
+{
+  "skipped": 0,
+  "failed": 0,
+  "diagnosis": "Test process inherited an empty JWT signing key; supplied a cryptographically generated process-local test key and retained normal JWT authentication. No source settings or permissions changed.",
+  "production_access": false,
+  "stage_acceptance": false,
+  "files": [
+    {
+      "sha256": "c1b9e3fd00a91ec0f408cff3972a77d55c47f143400517e9110dc974f70fe4ec",
+      "path": ".ai/logs/heartbeat-20261013-143750-http-repaired.log"
+    },
+    {
+      "sha256": "9e4ea7db7cb378243d071d590613f0624ed61503bc1e464f5e2fe398653cbd0f",
+      "path": ".ai/logs/heartbeat-20261013-143750-http-repaired/inquiry-canonical.trx"
+    },
+    {
+      "sha256": "0e420eedf32f224c72a4b13ae50b4ed18679fc652d35afc08c6167d83c39589c",
+      "path": ".ai/logs/heartbeat-20261013-143750-http-repaired/inquiry-canonical-entry-api-console.log"
+    }
+  ],
+  "task": "ERP-474",
+  "initial_failure_log": ".ai/logs/heartbeat-20261013-143750-http.log",
+  "verification": "real Kestrel HTTP and fresh dedicated localdb SQL",
+  "browser_acceptance": "not executed; existing browser-named script contains offline wiring assertions only",
+  "at": "2026-10-13T14:42:34.3311643Z",
+  "passed": 14
+}

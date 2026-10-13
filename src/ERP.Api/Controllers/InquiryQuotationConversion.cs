@@ -18,6 +18,9 @@ public static class InquiryQuotationConversion
     /// <para>ERP-474：草稿构造前先按 <see cref="InquiryCommercialValidationRules.ValidateOperational"/> 复核
     /// **来源询价单**的商业条款（至少一行有效明细 + 币种 / 汇率 / 有界整数天有效期 / 数量 · 单价 / 行金额精度），
     /// 非法来源在映射 / 占号 / 任何写入之前受控拒绝。</para>
+    /// <para>ERP-475：草稿构造前另按 <see cref="InquiryMasterReferenceRules"/> 复核**来源询价单的实时主数据引用**
+    /// （必填客户 / 可选业务员 / 明细商品一次有界批量查询）：失效引用同样在映射 / 占号 / 任何写入之前受控拒绝，
+    /// 绝不消耗报价单号、绝不落库、绝不改写来源状态；带入预填（只读）与直接转换共用同一道复核。</para>
     /// </summary>
     public const string SourceLineageLockOrderText = SalesDocumentSourceLineageRules.LockOrderText;
 
@@ -44,6 +47,8 @@ public static class InquiryQuotationConversion
     /// 按**锁内权威重读**的询价单映射报价单草稿（不查资格、不落库、不占号、不改写来源）：
     /// 资格由调用方在询价单来源行锁内以 <see cref="InquiryMutationRules.EnsureQuotationConversionEligible"/>
     /// 复核后调用，保证「重复检测 / 单号生成 / 草稿构造」全部发生在同一原子事务内。
+    /// <para>ERP-475：来源客户 / 可选业务员 / 明细商品的**实时主数据引用**在映射与占号之前复核，
+    /// 失效来源一律受控拒绝且零副作用。</para>
     /// </summary>
     public static async Task<Quotation> BuildDraftAsync(IErpDbContext db, Inquiry inquiry)
     {
@@ -55,19 +60,14 @@ public static class InquiryQuotationConversion
         // 带入预填与直接转换共用同一道复核，非法来源绝不生成草稿、绝不改写来源状态。
         InquiryCommercialValidationRules.ValidateOperational(inquiry);
 
-        var customer = inquiry.CustomerId > 0
-            ? await db.BaseCustomers.AsNoTracking()
-                .FirstOrDefaultAsync(c => c.Id == inquiry.CustomerId && !c.IsDeleted)
-            : null;
-        if (customer == null)
-            throw BusinessException.RuleConflict("询价单客户无效，不能生成报价单");
-
-        var salesmanName = inquiry.SalesmanId.HasValue
-            ? await db.BaseEmployees.AsNoTracking()
-                .Where(e => e.Id == inquiry.SalesmanId.Value && !e.IsDeleted)
-                .Select(e => e.EmployeeName)
-                .FirstOrDefaultAsync() ?? string.Empty
-            : string.Empty;
+        // ERP-475：询价单来源的**实时主数据引用**（必填客户 / 可选业务员 / 明细商品一次有界批量查询）在映射草稿、
+        // 预约报价单号与任何写入之前复核 —— 失效引用（零 / 负 / 缺失 / 已删除 / 已停用 / 非在职或非业务员）
+        // 一律受控拒绝，绝不消耗报价单号、绝不落库、绝不改写来源询价单状态。
+        var customer = await InquiryMasterReferenceRules
+            .EnsureCustomerAvailableAsync(db, inquiry.CustomerId);
+        var salesman = await InquiryMasterReferenceRules
+            .EnsureSalesmanAvailableAsync(db, inquiry.SalesmanId);
+        await InquiryMasterReferenceRules.EnsureDetailProductsAsync(db, inquiry.Details);
 
         var quotationDate = DateTime.Today;
         var quotation = new Quotation
@@ -89,7 +89,7 @@ public static class InquiryQuotationConversion
             Currency = inquiry.Currency,
             ExchangeRate = inquiry.ExchangeRate,
             SalesmanId = inquiry.SalesmanId,
-            SalesmanName = salesmanName,
+            SalesmanName = salesman?.EmployeeName ?? string.Empty,
             Remark = inquiry.Remark,
             Status = DocumentStatus.Pending,
             Details = inquiry.Details.Where(d => !d.IsDeleted).OrderBy(d => d.Id)
