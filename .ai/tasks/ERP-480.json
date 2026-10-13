@@ -1,0 +1,103 @@
+{
+  "title": "Restore canonical deposit and payment application form entry",
+  "description": "Restore the existing deposit-apply/payment-apply menus to the canonical api/finance/deposit-applies and api/finance/payment-applies modules, removing only the legacy dispatch precedence for these menus. The existing legacy stored-procedure mutation gate remains fail closed; do not map legacy Oid to canonical Id. FinanceDepositApply/FinancePaymentApply ApplyNo are Required with empty defaults although FinanceApplyControllers generates the authoritative numbers. Make blank-number genuine MVC requests reach the existing authorized business actions; maintain server-owned identity/status and current money/customer/source validation. Wire the existing explicit sales-order source selector, including nullable blank fields and explicit clearing, and preserve source freezes/active payment guards. Current business document page and basic-data drawer behavior must remain intact. Write full build/test output and TRX under .ai/logs/<task>/ with explicit --results-directory; never put generated artifacts in the repository root or stage them. Preserve all original failure logs and result files; if relocation is necessary verify exact targets stay inside the executor and copy/move completed artifacts into .ai/logs without deleting work or resetting attempts. Test API fixtures must use an ephemeral process-local cryptographic JWT key and genuine existing authentication, not production configuration or a missing-key fallback. Retain existing live identity/menu/customer-scope authority, transactions, source locks, controlled errors and audit. Reject before numbering or persistence, with zero header/detail/source/status mutations. No new permissions, schema, production access, external service or arbitrary SQL. Genuine SQL only on (localdb)\\NEWERP_AutoAcceptance with Integrated Security and a fresh GUID-owned NEWERP_AUTOTEST database; reject wrong/existing targets and never drop/reset. Require safe Release with analyzers/warnings-as-errors, full units and relevant genuine SQL/browser tests; accurately record blockers and do not claim whole-stage acceptance.",
+  "allowed_paths": [
+    "src/ERP.Domain/Entities/Finance1.cs",
+    "src/ERP.Api/Controllers/FinanceApplyControllers.cs",
+    "src/ERP.Api/wwwroot/js/bill-v2.js",
+    "src/ERP.Api/wwwroot/js/modules-finance.js",
+    "src/ERP.Api/wwwroot/js/crud.js",
+    "src/ERP.Api/wwwroot/js/finance-apply-sales-order-source.js",
+    "src/ERP.UnitTests/FinanceDepositApplyLifecycleTests.cs",
+    "src/ERP.UnitTests/FinancePaymentApplyLifecycleTests.cs",
+    "src/ERP.UnitTests/DepositApplySalesOrderSourceTests.cs",
+    "src/ERP.UnitTests/PaymentApplySalesOrderSourceTests.cs",
+    "src/ERP.UnitTests/FinanceApplyCanonicalEntryTests.cs",
+    "src/ERP.IntegrationTests/FinanceApplyCanonicalEntrySqlServerTests.cs",
+    "tests/finance-apply-canonical-entry.browser.js",
+    "docs/finance-apply-canonical-entry.md"
+  ],
+  "acceptance_criteria": [
+    "The two authorized application menus use canonical IDs/endpoints; blank-number HTTP create yields the server number and default state. Main-form save/reload/edit and explicit sales-order selection/clearing preserve authoritative customer/source identity, supported unlinked/manual entry and typed nullable fields without legacy remapping.",
+    "Valid submit/approve/cancel operations use existing live authority and transaction/source locks. Invalid money/currency/rate, stale source, ownership mismatch, missing permission or active downstream payment evidence rejects atomically with zero application/source/payment/status/number side effects and no permission expansion.",
+    "Rules/controller and genuine isolated SQL/HTTP tests cover omitted-number model binding, round trip, linked/manual forms, valid lifecycle and rejected zero writes/numbering; real browser proof must use actual authorized writes or accurately record its missing execution. Preserve source-picker/lifecycle regressions, safe Release/full units and all full log/TRX evidence."
+  ],
+  "criterion_path_map": {
+    "The two authorized application menus use canonical IDs/endpoints; blank-number HTTP create yields the server number and default state. Main-form save/reload/edit and explicit sales-order selection/clearing preserve authoritative customer/source identity, supported unlinked/manual entry and typed nullable fields without legacy remapping.": [
+      "src/ERP.Domain/Entities/Finance1.cs",
+      "src/ERP.Api/Controllers/FinanceApplyControllers.cs",
+      "src/ERP.Api/wwwroot/js/bill-v2.js",
+      "src/ERP.Api/wwwroot/js/modules-finance.js",
+      "src/ERP.Api/wwwroot/js/crud.js",
+      "src/ERP.Api/wwwroot/js/finance-apply-sales-order-source.js",
+      "src/ERP.UnitTests/FinanceDepositApplyLifecycleTests.cs",
+      "src/ERP.UnitTests/FinancePaymentApplyLifecycleTests.cs",
+      "src/ERP.UnitTests/DepositApplySalesOrderSourceTests.cs",
+      "src/ERP.UnitTests/PaymentApplySalesOrderSourceTests.cs",
+      "src/ERP.UnitTests/FinanceApplyCanonicalEntryTests.cs",
+      "src/ERP.IntegrationTests/FinanceApplyCanonicalEntrySqlServerTests.cs",
+      "tests/finance-apply-canonical-entry.browser.js",
+      "docs/finance-apply-canonical-entry.md"
+    ],
+    "Valid submit/approve/cancel operations use existing live authority and transaction/source locks. Invalid money/currency/rate, stale source, ownership mismatch, missing permission or active downstream payment evidence rejects atomically with zero application/source/payment/status/number side effects and no permission expansion.": [
+      "src/ERP.Domain/Entities/Finance1.cs",
+      "src/ERP.Api/Controllers/FinanceApplyControllers.cs",
+      "src/ERP.Api/wwwroot/js/bill-v2.js",
+      "src/ERP.Api/wwwroot/js/modules-finance.js",
+      "src/ERP.Api/wwwroot/js/crud.js",
+      "src/ERP.Api/wwwroot/js/finance-apply-sales-order-source.js",
+      "src/ERP.UnitTests/FinanceDepositApplyLifecycleTests.cs",
+      "src/ERP.UnitTests/FinancePaymentApplyLifecycleTests.cs",
+      "src/ERP.UnitTests/DepositApplySalesOrderSourceTests.cs",
+      "src/ERP.UnitTests/PaymentApplySalesOrderSourceTests.cs",
+      "src/ERP.UnitTests/FinanceApplyCanonicalEntryTests.cs",
+      "src/ERP.IntegrationTests/FinanceApplyCanonicalEntrySqlServerTests.cs",
+      "tests/finance-apply-canonical-entry.browser.js",
+      "docs/finance-apply-canonical-entry.md"
+    ],
+    "Rules/controller and genuine isolated SQL/HTTP tests cover omitted-number model binding, round trip, linked/manual forms, valid lifecycle and rejected zero writes/numbering; real browser proof must use actual authorized writes or accurately record its missing execution. Preserve source-picker/lifecycle regressions, safe Release/full units and all full log/TRX evidence.": [
+      "src/ERP.Domain/Entities/Finance1.cs",
+      "src/ERP.Api/Controllers/FinanceApplyControllers.cs",
+      "src/ERP.Api/wwwroot/js/bill-v2.js",
+      "src/ERP.Api/wwwroot/js/modules-finance.js",
+      "src/ERP.Api/wwwroot/js/crud.js",
+      "src/ERP.Api/wwwroot/js/finance-apply-sales-order-source.js",
+      "src/ERP.UnitTests/FinanceDepositApplyLifecycleTests.cs",
+      "src/ERP.UnitTests/FinancePaymentApplyLifecycleTests.cs",
+      "src/ERP.UnitTests/DepositApplySalesOrderSourceTests.cs",
+      "src/ERP.UnitTests/PaymentApplySalesOrderSourceTests.cs",
+      "src/ERP.UnitTests/FinanceApplyCanonicalEntryTests.cs",
+      "src/ERP.IntegrationTests/FinanceApplyCanonicalEntrySqlServerTests.cs",
+      "tests/finance-apply-canonical-entry.browser.js",
+      "docs/finance-apply-canonical-entry.md"
+    ]
+  },
+  "implementation_evidence": "bill-v2.js:41-42 still routes deposit-apply/payment-apply to blocked legacy families, while modules-finance.js:3-36 defines their canonical endpoints/selectors. Finance1.cs marks the ApplyNo properties Required with empty default; FinanceApplyControllers.Create assigns them via GenerateAsync (deposit line 146, payment line 482). ERP-380/381/390/391 govern source/state rules but do not close primary menu/model-binding entry.",
+  "depends_on": [
+    "ERP-479",
+    "ERP-380",
+    "ERP-381",
+    "ERP-390",
+    "ERP-391"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "id": "ERP-480",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-13T15:53:06.275133Z"
+}

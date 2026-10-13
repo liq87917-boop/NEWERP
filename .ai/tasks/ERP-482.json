@@ -1,0 +1,84 @@
+{
+  "title": "Restore canonical receiving plan form and server-numbered HTTP entry",
+  "description": "Make the existing receiving-plan menu use the canonical api/container/receiving-plans module instead of the blocked legacy bill family. ContainerReceivingPlan.PlanNo is Required with empty default although ContainerReceivingPlanController assigns the number. Restore genuine omitted-number creation with server-owned ID/status, typed nullable references and correct date/quantity fields; retain existing live warehouse/product/supplier validation, receiving-plan menu authority, unit/quantity bounds and lifecycle. Plans remain planning evidence and must not create actual inventory receipts, stock movements or guessed procurement/shipping references. Do not enable legacy mutation or remap old identities. Write full build/test output and TRX under .ai/logs/<task>/ with explicit --results-directory; never put generated artifacts in the repository root or stage them. Preserve all original failure logs and result files; if relocation is necessary verify exact targets stay inside the executor and copy/move completed artifacts into .ai/logs without deleting work or resetting attempts. Test API fixtures must use an ephemeral process-local cryptographic JWT key and genuine existing authentication, not production configuration or a missing-key fallback. Retain existing live identity/menu/customer-scope authority, transactions, source locks, controlled errors and audit. Reject before numbering or persistence, with zero header/detail/source/status mutations. No new permissions, schema, production access, external service or arbitrary SQL. Genuine SQL only on (localdb)\\NEWERP_AutoAcceptance with Integrated Security and a fresh GUID-owned NEWERP_AUTOTEST database; reject wrong/existing targets and never drop/reset. Require safe Release with analyzers/warnings-as-errors, full units and relevant genuine SQL/browser tests; accurately record blockers and do not claim whole-stage acceptance.",
+  "allowed_paths": [
+    "src/ERP.Domain/Entities/Container1.cs",
+    "src/ERP.Api/Controllers/ContainerControllers.cs",
+    "src/ERP.Api/wwwroot/js/bill-v2.js",
+    "src/ERP.Api/wwwroot/js/modules-doc2.js",
+    "src/ERP.Api/wwwroot/js/crud.js",
+    "src/ERP.UnitTests/ReceivingPlanLifecycleTests.cs",
+    "src/ERP.UnitTests/ReceivingPlanCanonicalEntryTests.cs",
+    "src/ERP.IntegrationTests/ReceivingPlanCanonicalEntrySqlServerTests.cs",
+    "tests/receiving-plan-canonical-entry.browser.js",
+    "docs/receiving-plan-canonical-entry.md"
+  ],
+  "acceptance_criteria": [
+    "Authorized receiving-plan menu opens its canonical module, omitted-number HTTP requests produce server numbers/canonical IDs, and form save/reload/edit, supported optional references and dates/quantity/unit inputs round trip correctly. Legacy read history remains separate and old writes remain fail closed.",
+    "Retain current live identity/menu/master-reference rules and draft/submit/approve/cancel restrictions. Invalid/deleted/disabled master references, invalid quantity/unit and revoked authority reject before numbering/persistence; valid plan state changes create no stock/movement/financial record or inferred source links.",
+    "Real isolated SQL/HTTP tests cover omitted-number binding, valid form/state flow, master invalidation and denied zero writes/numbering/inventory effects; browser proof must use actual API writes or record missing execution. Preserve existing lifecycle/unit tests, safe Release/full regressions and original full logs/TRX."
+  ],
+  "criterion_path_map": {
+    "Authorized receiving-plan menu opens its canonical module, omitted-number HTTP requests produce server numbers/canonical IDs, and form save/reload/edit, supported optional references and dates/quantity/unit inputs round trip correctly. Legacy read history remains separate and old writes remain fail closed.": [
+      "src/ERP.Domain/Entities/Container1.cs",
+      "src/ERP.Api/Controllers/ContainerControllers.cs",
+      "src/ERP.Api/wwwroot/js/bill-v2.js",
+      "src/ERP.Api/wwwroot/js/modules-doc2.js",
+      "src/ERP.Api/wwwroot/js/crud.js",
+      "src/ERP.UnitTests/ReceivingPlanLifecycleTests.cs",
+      "src/ERP.UnitTests/ReceivingPlanCanonicalEntryTests.cs",
+      "src/ERP.IntegrationTests/ReceivingPlanCanonicalEntrySqlServerTests.cs",
+      "tests/receiving-plan-canonical-entry.browser.js",
+      "docs/receiving-plan-canonical-entry.md"
+    ],
+    "Retain current live identity/menu/master-reference rules and draft/submit/approve/cancel restrictions. Invalid/deleted/disabled master references, invalid quantity/unit and revoked authority reject before numbering/persistence; valid plan state changes create no stock/movement/financial record or inferred source links.": [
+      "src/ERP.Domain/Entities/Container1.cs",
+      "src/ERP.Api/Controllers/ContainerControllers.cs",
+      "src/ERP.Api/wwwroot/js/bill-v2.js",
+      "src/ERP.Api/wwwroot/js/modules-doc2.js",
+      "src/ERP.Api/wwwroot/js/crud.js",
+      "src/ERP.UnitTests/ReceivingPlanLifecycleTests.cs",
+      "src/ERP.UnitTests/ReceivingPlanCanonicalEntryTests.cs",
+      "src/ERP.IntegrationTests/ReceivingPlanCanonicalEntrySqlServerTests.cs",
+      "tests/receiving-plan-canonical-entry.browser.js",
+      "docs/receiving-plan-canonical-entry.md"
+    ],
+    "Real isolated SQL/HTTP tests cover omitted-number binding, valid form/state flow, master invalidation and denied zero writes/numbering/inventory effects; browser proof must use actual API writes or record missing execution. Preserve existing lifecycle/unit tests, safe Release/full regressions and original full logs/TRX.": [
+      "src/ERP.Domain/Entities/Container1.cs",
+      "src/ERP.Api/Controllers/ContainerControllers.cs",
+      "src/ERP.Api/wwwroot/js/bill-v2.js",
+      "src/ERP.Api/wwwroot/js/modules-doc2.js",
+      "src/ERP.Api/wwwroot/js/crud.js",
+      "src/ERP.UnitTests/ReceivingPlanLifecycleTests.cs",
+      "src/ERP.UnitTests/ReceivingPlanCanonicalEntryTests.cs",
+      "src/ERP.IntegrationTests/ReceivingPlanCanonicalEntrySqlServerTests.cs",
+      "tests/receiving-plan-canonical-entry.browser.js",
+      "docs/receiving-plan-canonical-entry.md"
+    ]
+  },
+  "implementation_evidence": "bill-v2.js:46 still maps receiving-plan to a legacy stored-procedure family; modules-doc2.js:136-154 already registers api/container/receiving-plans. Container1.cs:14-15 marks PlanNo Required with empty default and ContainerControllers.cs ContainerReceivingPlanController.Create uses server numbering. ERP-361 provides master/lifecycle validation but leaves menu precedence/model binding unresolved.",
+  "depends_on": [
+    "ERP-481",
+    "ERP-361"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "id": "ERP-482",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-13T15:53:06.284292Z"
+}

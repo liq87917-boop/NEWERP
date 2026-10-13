@@ -1,6 +1,6 @@
 {
   "title": "Restore canonical customer receipt and supplier payment form entry",
-  "description": "Complete the cash-evidence ends of the core sales/procurement chain through existing canonical finance modules. BILL_CODE_MAP receipt/payment still overrides MODULES configured for api/finance/receipts and api/finance/payments, taking users to legacy writers whose mutation policy intentionally refuses writes. Route these existing authorized menus to canonical modules with canonical IDs; do not enable legacy writes or infer Oid/Id mappings. FinanceReceipt.ReceiptNo and FinancePayment.PaymentNo are Required with empty defaults although controllers allocate them. Restore blank-number HTTP binding while preserving server-owned identity/status, positive currency-safe amounts, source application/sales ownership, live current authority and shared allocation budgets. Forms must retain correct typed nullable references and reach existing allocation registers from saved canonical rows; use existing service paths only, no ledger backfill or automatic financial assignment. Isolated HTTP fixtures generate ephemeral process-local JWT keys and never use production settings. Retain existing live identity/menu/customer-scope authority, transactions, source locks, controlled errors and audit. Reject before numbering or persistence, with zero header/detail/source/status mutations. No new permissions, schema, production access, external service or arbitrary SQL. Genuine SQL only on (localdb)\\NEWERP_AutoAcceptance with Integrated Security and a fresh GUID-owned NEWERP_AUTOTEST database; reject wrong/existing targets and never drop/reset. Require safe Release with analyzers/warnings-as-errors, full units and relevant genuine SQL/browser tests; accurately record blockers and do not claim whole-stage acceptance.",
+  "description": "Complete the cash-evidence ends of the core sales/procurement chain through existing canonical finance modules. BILL_CODE_MAP receipt/payment still overrides MODULES configured for api/finance/receipts and api/finance/payments, taking users to legacy writers whose mutation policy intentionally refuses writes. Route these existing authorized menus to canonical modules with canonical IDs; do not enable legacy writes or infer Oid/Id mappings. FinanceReceipt.ReceiptNo and FinancePayment.PaymentNo are Required with empty defaults although controllers allocate them. Restore blank-number HTTP binding while preserving server-owned identity/status, positive currency-safe amounts, source application/sales ownership, live current authority and shared allocation budgets. Forms must retain correct typed nullable references and reach existing allocation registers from saved canonical rows; use existing service paths only, no ledger backfill or automatic financial assignment. Isolated HTTP fixtures generate ephemeral process-local JWT keys and never use production settings. Retain existing live identity/menu/customer-scope authority, transactions, source locks, controlled errors and audit. Reject before numbering or persistence, with zero header/detail/source/status mutations. No new permissions, schema, production access, external service or arbitrary SQL. Genuine SQL only on (localdb)\\NEWERP_AutoAcceptance with Integrated Security and a fresh GUID-owned NEWERP_AUTOTEST database; reject wrong/existing targets and never drop/reset. Require safe Release with analyzers/warnings-as-errors, full units and relevant genuine SQL/browser tests; accurately record blockers and do not claim whole-stage acceptance. Keep every build/test log and TRX under .ai/logs/ERP-479 with explicit --results-directory, never repository-root TestResults. Preserve full original failures; relocate completed artifacts into .ai/logs without deleting work or resetting attempts.",
   "allowed_paths": [
     "src/ERP.Domain/Entities/Finance1.cs",
     "src/ERP.Domain/Entities/Finance2.cs",
@@ -86,8 +86,8 @@
   "risk": "medium",
   "planning_stage": 3,
   "id": "ERP-479",
-  "status": "pending",
-  "attempts": 0,
+  "status": "in_progress",
+  "attempts": 1,
   "max_attempts": 3,
   "validation_profile": "safe",
   "completion_mode": "build",
@@ -102,5 +102,6 @@
     "required": false,
     "scenarios": []
   },
-  "created_at": "2026-10-13T15:01:50.045741Z"
+  "created_at": "2026-10-13T15:01:50.045741Z",
+  "updated_at": "2026-10-13T15:53:44.293339Z"
 }

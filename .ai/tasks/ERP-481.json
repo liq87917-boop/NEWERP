@@ -1,0 +1,98 @@
+{
+  "title": "Restore canonical container and bulk settlement form entry",
+  "description": "Restore container-settlement/bulk-settlement menu dispatch to the existing canonical finance settlement modules. Leave all legacy mutation adapters disabled and legacy history identities distinct. Finance2 settlement number properties are Required with empty defaults while FinanceSettlementControllers creates server numbers; restore genuine blank-number binding and server-owned IDs/status. Preserve existing currency-safe operational settlement amounts and live customer/loading scope; use the existing explicit loading-source selector for container settlement and supported unlinked/manual bulk semantics. Do not introduce accounting entries, financial reassignment, arbitrary aggregation or report substitutes. Write full build/test output and TRX under .ai/logs/<task>/ with explicit --results-directory; never put generated artifacts in the repository root or stage them. Preserve all original failure logs and result files; if relocation is necessary verify exact targets stay inside the executor and copy/move completed artifacts into .ai/logs without deleting work or resetting attempts. Test API fixtures must use an ephemeral process-local cryptographic JWT key and genuine existing authentication, not production configuration or a missing-key fallback. Retain existing live identity/menu/customer-scope authority, transactions, source locks, controlled errors and audit. Reject before numbering or persistence, with zero header/detail/source/status mutations. No new permissions, schema, production access, external service or arbitrary SQL. Genuine SQL only on (localdb)\\NEWERP_AutoAcceptance with Integrated Security and a fresh GUID-owned NEWERP_AUTOTEST database; reject wrong/existing targets and never drop/reset. Require safe Release with analyzers/warnings-as-errors, full units and relevant genuine SQL/browser tests; accurately record blockers and do not claim whole-stage acceptance.",
+  "allowed_paths": [
+    "src/ERP.Domain/Entities/Finance2.cs",
+    "src/ERP.Api/Controllers/FinanceSettlementControllers.cs",
+    "src/ERP.Api/wwwroot/js/bill-v2.js",
+    "src/ERP.Api/wwwroot/js/modules-finance.js",
+    "src/ERP.Api/wwwroot/js/crud.js",
+    "src/ERP.Api/wwwroot/js/container-settlement-loading-source.js",
+    "src/ERP.UnitTests/FinanceContainerSettlementLifecycleTests.cs",
+    "src/ERP.UnitTests/FinanceBulkSettlementLifecycleTests.cs",
+    "src/ERP.UnitTests/ContainerSettlementLoadingSourceTests.cs",
+    "src/ERP.UnitTests/FinanceSettlementCanonicalEntryTests.cs",
+    "src/ERP.IntegrationTests/FinanceSettlementCanonicalEntrySqlServerTests.cs",
+    "tests/finance-settlement-canonical-entry.browser.js",
+    "docs/finance-settlement-canonical-entry.md"
+  ],
+  "acceptance_criteria": [
+    "Existing authorized settlement menus choose api/finance/container-settlements and api/finance/bulk-settlements, and genuine blank-number creation produces canonical IDs/server numbers. Save/reload/edit, nullable source fields and explicit loading selection/clearing remain operational while legacy history stays separate.",
+    "Maintain existing authority, currency/amount/precision checks and lifecycle/source locks. Stale/deleted loading, customer mismatch, invalid money/rate, revoked permission or forbidden state change rejects with zero settlement/source/status/number effects. Keep manual/unlinked paths explicit and never combine currency/units or infer shipment references.",
+    "Genuine isolated SQL/HTTP tests prove blank-number binding, valid typed payload/round trip and loading/manual lifecycle, plus invalid zero-mutation behavior. Browser proof uses actual permitted API writes or records non-execution; preserve lifecycle/source-selector unit regressions, safe Release/full unit tests and original full logs/TRX."
+  ],
+  "criterion_path_map": {
+    "Existing authorized settlement menus choose api/finance/container-settlements and api/finance/bulk-settlements, and genuine blank-number creation produces canonical IDs/server numbers. Save/reload/edit, nullable source fields and explicit loading selection/clearing remain operational while legacy history stays separate.": [
+      "src/ERP.Domain/Entities/Finance2.cs",
+      "src/ERP.Api/Controllers/FinanceSettlementControllers.cs",
+      "src/ERP.Api/wwwroot/js/bill-v2.js",
+      "src/ERP.Api/wwwroot/js/modules-finance.js",
+      "src/ERP.Api/wwwroot/js/crud.js",
+      "src/ERP.Api/wwwroot/js/container-settlement-loading-source.js",
+      "src/ERP.UnitTests/FinanceContainerSettlementLifecycleTests.cs",
+      "src/ERP.UnitTests/FinanceBulkSettlementLifecycleTests.cs",
+      "src/ERP.UnitTests/ContainerSettlementLoadingSourceTests.cs",
+      "src/ERP.UnitTests/FinanceSettlementCanonicalEntryTests.cs",
+      "src/ERP.IntegrationTests/FinanceSettlementCanonicalEntrySqlServerTests.cs",
+      "tests/finance-settlement-canonical-entry.browser.js",
+      "docs/finance-settlement-canonical-entry.md"
+    ],
+    "Maintain existing authority, currency/amount/precision checks and lifecycle/source locks. Stale/deleted loading, customer mismatch, invalid money/rate, revoked permission or forbidden state change rejects with zero settlement/source/status/number effects. Keep manual/unlinked paths explicit and never combine currency/units or infer shipment references.": [
+      "src/ERP.Domain/Entities/Finance2.cs",
+      "src/ERP.Api/Controllers/FinanceSettlementControllers.cs",
+      "src/ERP.Api/wwwroot/js/bill-v2.js",
+      "src/ERP.Api/wwwroot/js/modules-finance.js",
+      "src/ERP.Api/wwwroot/js/crud.js",
+      "src/ERP.Api/wwwroot/js/container-settlement-loading-source.js",
+      "src/ERP.UnitTests/FinanceContainerSettlementLifecycleTests.cs",
+      "src/ERP.UnitTests/FinanceBulkSettlementLifecycleTests.cs",
+      "src/ERP.UnitTests/ContainerSettlementLoadingSourceTests.cs",
+      "src/ERP.UnitTests/FinanceSettlementCanonicalEntryTests.cs",
+      "src/ERP.IntegrationTests/FinanceSettlementCanonicalEntrySqlServerTests.cs",
+      "tests/finance-settlement-canonical-entry.browser.js",
+      "docs/finance-settlement-canonical-entry.md"
+    ],
+    "Genuine isolated SQL/HTTP tests prove blank-number binding, valid typed payload/round trip and loading/manual lifecycle, plus invalid zero-mutation behavior. Browser proof uses actual permitted API writes or records non-execution; preserve lifecycle/source-selector unit regressions, safe Release/full unit tests and original full logs/TRX.": [
+      "src/ERP.Domain/Entities/Finance2.cs",
+      "src/ERP.Api/Controllers/FinanceSettlementControllers.cs",
+      "src/ERP.Api/wwwroot/js/bill-v2.js",
+      "src/ERP.Api/wwwroot/js/modules-finance.js",
+      "src/ERP.Api/wwwroot/js/crud.js",
+      "src/ERP.Api/wwwroot/js/container-settlement-loading-source.js",
+      "src/ERP.UnitTests/FinanceContainerSettlementLifecycleTests.cs",
+      "src/ERP.UnitTests/FinanceBulkSettlementLifecycleTests.cs",
+      "src/ERP.UnitTests/ContainerSettlementLoadingSourceTests.cs",
+      "src/ERP.UnitTests/FinanceSettlementCanonicalEntryTests.cs",
+      "src/ERP.IntegrationTests/FinanceSettlementCanonicalEntrySqlServerTests.cs",
+      "tests/finance-settlement-canonical-entry.browser.js",
+      "docs/finance-settlement-canonical-entry.md"
+    ]
+  },
+  "implementation_evidence": "bill-v2.js:43-44 retains legacy container-settlement/bulk-settlement dispatch; modules-finance.js:63-100 already exposes canonical api/finance/container-settlements and bulk-settlements. Finance2.cs settlement numbers have Required with empty default; FinanceSettlementControllers.Create invokes GenerateAsync. ERP-384/387/392 supplies existing authority and explicit source selection, not canonical primary HTTP entry.",
+  "depends_on": [
+    "ERP-480",
+    "ERP-384",
+    "ERP-387",
+    "ERP-392"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "id": "ERP-481",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-13T15:53:06.279806Z"
+}
