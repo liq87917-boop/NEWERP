@@ -253,7 +253,11 @@ public class SalesOrderDeliveryExceptionTests
         SeedOrder(db, "SO-CTRL", CustomerA, headerDeliveryDate: AsOf.AddDays(-10), lines: (ProductA, 10m));
         await db.SaveChangesAsync();
 
+        // ERP-465：交付异常读取入口无条件实时授权（实时身份 + 账号状态 + 既有「销售订单」菜单 + ERP-097 范围）——
+        // 夹具绑定隔离内存测试库中的真实启用身份，且该身份持有既有「销售订单」（sales-order）菜单授权；
+        // 绝不使用免授权直调或任何兼容开关。
         var controller = new SalesOrderController(db, new DocumentNumberService(db));
+        TestAuth.SetUser(controller, SalesOrderEntryTestIdentities.SeedPrivilegedOperatorWithMenu(db));
         var result = await controller.DeliveryExceptions(Query());
 
         var ok = Assert.IsType<OkObjectResult>(result);

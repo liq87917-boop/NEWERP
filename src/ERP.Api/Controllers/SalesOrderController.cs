@@ -9,6 +9,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using System.Data;
+using System.Security.Claims;
 
 namespace ERP.Api.Controllers;
 
@@ -26,51 +27,59 @@ public class SalesOrderController : DocumentControllerBase<SalesOrder>
     }
 
     /// <summary>
-    /// ERP-465：是否必须执行实时授权。<strong>只要控制器绑定到 HTTP 请求管线（<c>ControllerContext.HttpContext</c> 存在）
-    /// 就一律执行</strong>，与请求路径是否赋值、以及当前是否携带可解析的登录身份<strong>完全无关</strong>：
-    /// 空路径请求与已赋值路径请求的授权口径完全一致，缺少身份的真实请求同样 fail closed（未认证），
-    /// 既不存在「空路径 / 无身份」的请求形状旁路，也绝不把缺失身份当作管理员，绝无匿名或管理员兜底。
-    /// <para>仅「未被任何请求绑定」（<c>HttpContext</c> 为 null 的纯进程内直接调用，外部请求无法到达，例如既有
-    /// 进程内单元测试夹具）沿用仓库一致的进程内直调边界：该边界不读取请求路径、不读取环境变量，也不使用任何
-    /// 测试专用开关，因此不是请求形状旁路，也不能由任何外部请求到达。</para>
+    /// ERP-465 / ERP-462 当前登录用户 Id：<strong>缺少请求上下文（<c>ControllerContext.HttpContext</c> 为 null）、
+    /// 缺少身份声明、非数字或非正数时一律安全解析为 <c>null</c></strong>，由既有授权规则在触达任何订单 / 明细 /
+    /// 证据查询<strong>之前</strong>返回受控未认证（fail closed）；绝不猜测身份、绝不回退为匿名 / 管理员。
+    /// <para>本方法不读取请求路径属性、不读取环境变量、不判断数据库提供程序，也不使用任何测试专用开关：
+    /// 「空路径 / 已赋值路径 / 无请求上下文」三种调用形状的身份解析口径完全一致。</para>
     /// </summary>
-    private bool RequiresLiveAuthorization()
-        => ControllerContext?.HttpContext is not null;
+    private new long? CurrentUserId()
+    {
+        var value = ControllerContext?.HttpContext?.User?.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        return long.TryParse(value, out var id) && id > 0 ? id : null;
+    }
 
     /// <summary>
     /// ERP-465 执行证据入口授权（实时身份 + 既有「销售订单」菜单 + ERP-097 权威客户范围）：
-    /// <strong>绑定到请求管线（空路径或已赋值路径）一律执行</strong>；空路径与已赋值路径口径完全一致，
-    /// 缺少身份的请求 fail closed（未认证）。仅未绑定任何请求的纯进程内直调返回 <c>null</c>（仓库一致的进程内边界）。
+    /// <strong>无条件执行</strong>，与请求路径是否赋值、请求形状、以及控制器是否绑定 <c>HttpContext</c> 完全无关 ——
+    /// 空路径 / 已赋值路径 / 未绑定任何请求的纯进程内直调口径完全一致。缺失 / 零 / 非法 / 已删除身份一律先返回
+    /// 受控未认证（<c>Err:Unauthorized</c>），已禁用 / 缺少或撤销既有菜单返回受控权限不足（<c>Err:Forbidden</c>），
+    /// 全部发生在读取任何时间线 / 财务核对 / 进度 / 退货 / 收款 / 发票证据字节<strong>之前</strong>。
+    /// 绝无匿名或管理员兜底，也绝不存在「空路径 / 无身份 / 无请求上下文」的免授权回退。
     /// </summary>
-    private async Task<SalespersonDataScope?> EnsureExecutionEvidenceAuthorizedAsync()
-        => RequiresLiveAuthorization()
-            ? await SalesOrderExecutionAuthorizationRules.EnsureReadAuthorizedAsync(Db, CurrentUserId())
-            : null;
+    private Task<SalespersonDataScope> EnsureExecutionEvidenceAuthorizedAsync()
+        => SalesOrderExecutionAuthorizationRules.EnsureReadAuthorizedAsync(Db, CurrentUserId());
 
-    /// <summary>ERP-413 单张订单证据的非披露归属复核（<paramref name="scope"/> 为 null 表示进程内免授权调用）。</summary>
-    private async Task EnsureOrderEvidenceAuthorizedAsync(long id, SalespersonDataScope? scope)
+    /// <summary>
+    /// ERP-413 单张订单证据的非披露归属复核（授权后的 ERP-097 权威客户范围）：范围外 / 已删除 / 不存在订单
+    /// 返回同一受控非披露错误。<strong>不接收 <c>null</c> 范围</strong> —— 授权失败在调用本方法之前即已终止请求。
+    /// </summary>
+    private async Task EnsureOrderEvidenceAuthorizedAsync(long id, SalespersonDataScope scope)
     {
-        if (scope is null) return;
         await SalesOrderExecutionAuthorizationRules.EnsureOrderAllowedAsync(Db, scope, id);
     }
 
-    /// <summary>ERP-413 批量显式 Id 证据的整批非披露归属复核（<paramref name="scope"/> 为 null 或未请求任何订单时直接放行）。</summary>
-    private async Task EnsureOrdersEvidenceAuthorizedAsync(IReadOnlyCollection<long> orderIds, SalespersonDataScope? scope)
+    /// <summary>
+    /// ERP-413 批量显式 Id 证据的整批非披露归属复核：未请求任何订单时直接放行；只要混入任何不存在 / 已删除 /
+    /// 范围外订单即<strong>整批</strong>返回同一受控非披露错误（绝不返回计数或部分行）。
+    /// <strong>不接收 <c>null</c> 范围</strong> —— 授权失败在调用本方法之前即已终止请求。
+    /// </summary>
+    private async Task EnsureOrdersEvidenceAuthorizedAsync(IReadOnlyCollection<long> orderIds, SalespersonDataScope scope)
     {
-        if (scope is null || orderIds.Count == 0) return;
+        if (orderIds.Count == 0) return;
         await SalesOrderExecutionAuthorizationRules.EnsureOrdersAllowedAsync(Db, scope, orderIds);
     }
 
     /// <summary>
-    /// ERP-465 列表 / 详情入口的实时身份与 ERP-097 权威范围（缺失 / 已删除按未认证拒绝，已禁用按权限不足拒绝）；
-    /// <strong>绑定到请求管线（空路径或已赋值路径）一律执行</strong>，缺少身份的请求 fail closed（未认证）。
-    /// 仅未绑定任何请求的纯进程内直调返回 <c>null</c>（仓库一致的进程内边界）。列表 / 详情沿用既有 ERP-097 范围口径，
-    /// 不额外要求模块菜单（执行证据入口才要求）。
+    /// ERP-465 列表 / 详情入口的实时身份与 ERP-097 权威范围（缺失 / 零 / 非法 / 已删除按未认证拒绝，
+    /// 已禁用按权限不足拒绝）：<strong>无条件执行</strong>，与请求路径是否赋值、请求形状、以及控制器是否绑定
+    /// <c>HttpContext</c> 完全无关 —— 空路径 / 已赋值路径 / 未绑定任何请求的纯进程内直调口径完全一致，
+    /// 缺少身份在触达任何订单 / 明细查询<strong>之前</strong>即返回受控未认证。
+    /// <para>列表 / 详情沿用既有 ERP-097 范围口径，<strong>不额外要求模块菜单</strong>（只有执行证据入口要求既有
+    /// 「销售订单」菜单），因此不构成任何权限扩张。</para>
     /// </summary>
-    private async Task<SalespersonDataScope?> ResolveListDetailScopeAsync()
-        => RequiresLiveAuthorization()
-            ? await SalesOrderExecutionAuthorizationRules.EnsureLiveIdentityAsync(Db, CurrentUserId())
-            : null;
+    private Task<SalespersonDataScope> ResolveListDetailScopeAsync()
+        => SalesOrderExecutionAuthorizationRules.EnsureLiveIdentityAsync(Db, CurrentUserId());
 
     /// <summary>
     /// ERP-420 规范写入授权（实时身份 + 既有「销售订单」菜单 + ERP-097 权威客户范围）：缺失 / 非法 / 已删除身份
@@ -96,12 +105,12 @@ public class SalesOrderController : DocumentControllerBase<SalesOrder>
     private Task<long> EnsureDocumentOutputOrderAllowedAsync(SalespersonDataScope scope, long id)
         => SalesOrderDocumentOutputAuthorizationRules.EnsureOrderAllowedAsync(Db, scope, id);
 
-    /// <summary>分页查询</summary>
+    /// <summary>分页查询（ERP-465：实时身份 / 账号状态 / ERP-097 范围无条件先于计数与分页；不额外要求模块菜单）。</summary>
     [HttpGet]
     public async Task<IActionResult> GetPaged([FromQuery] PageQuery query, [FromQuery] DocumentStatus? status)
     {
         query.Normalize();
-        var scope = await ResolveListDetailScopeAsync() ?? await ResolveScopeAsync();
+        var scope = await ResolveListDetailScopeAsync();
         var source = SalespersonDataScopeService.FilterByCustomer(
             Set.AsNoTracking().Where(o => !o.IsDeleted), scope, o => o.CustomerId);
         if (status.HasValue) source = source.Where(o => o.Status == status.Value);
@@ -124,15 +133,11 @@ public class SalesOrderController : DocumentControllerBase<SalesOrder>
     public async Task<IActionResult> GetById(long id)
     {
         var scope = await ResolveListDetailScopeAsync();
-        if (scope is not null)
-            await SalesOrderExecutionAuthorizationRules.EnsureOrderAllowedAsync(Db, scope, id);
+        await EnsureOrderEvidenceAuthorizedAsync(id, scope);
 
         var entity = await Set.AsNoTracking().Include(o => o.Details)
             .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
             ?? throw BusinessException.NotFound(SalesOrderExecutionAuthorizationRules.NotFoundText);
-
-        if (scope is null && !(await ResolveScopeAsync()).AllowsCustomer(entity.CustomerId))
-            throw BusinessException.NotFound(SalesOrderExecutionAuthorizationRules.NotFoundText);
 
         return Ok(ApiResponse<SalesOrder>.Success(entity));
     }
@@ -274,11 +279,8 @@ public class SalesOrderController : DocumentControllerBase<SalesOrder>
     public async Task<IActionResult> ReceiptEvidenceSummaries([FromQuery] SalesOrderReceiptEvidenceQuery query)
     {
         var scope = await EnsureExecutionEvidenceAuthorizedAsync();
-        if (scope is not null)
-        {
-            query.Normalize();
-            await EnsureOrdersEvidenceAuthorizedAsync(query.OrderIds, scope);
-        }
+        query.Normalize();
+        await EnsureOrdersEvidenceAuthorizedAsync(query.OrderIds, scope);
 
         return Ok(ApiResponse<SalesOrderReceiptEvidenceBatch>.Success(
             await SalesOrderReceiptEvidence.ForOrdersAsync(Db, query)));
@@ -318,11 +320,8 @@ public class SalesOrderController : DocumentControllerBase<SalesOrder>
     public async Task<IActionResult> InvoiceEvidenceSummaries([FromQuery] SalesOrderInvoiceEvidenceQuery query)
     {
         var scope = await EnsureExecutionEvidenceAuthorizedAsync();
-        if (scope is not null)
-        {
-            query.Normalize();
-            await EnsureOrdersEvidenceAuthorizedAsync(query.OrderIds, scope);
-        }
+        query.Normalize();
+        await EnsureOrdersEvidenceAuthorizedAsync(query.OrderIds, scope);
 
         return Ok(ApiResponse<SalesOrderInvoiceEvidenceBatch>.Success(
             await SalesOrderInvoiceEvidence.ForOrdersAsync(Db, query)));
@@ -334,13 +333,16 @@ public class SalesOrderController : DocumentControllerBase<SalesOrder>
     /// 「未删除」明细价格，可再按客户与订单日期区间筛选，并应用业务员数据范围（硬边界）；
     /// 仅把「客户 + 商品 + 规格 + 单位 + 币种」完全一致的明细归为同一口径，保留原始单价与贸易条款，
     /// 口径不一致（单位 / 币种 / 规格 / 客户不同）的证据分组成行单列。
+    /// <para>ERP-465：派生之前同样先复核实时身份 / 账号状态与 ERP-097 权威客户范围（与分页 / 详情同一口径，
+    /// 不额外要求模块菜单），且与请求路径 / 请求形状 / 是否绑定 <c>HttpContext</c> 完全无关；缺少身份时在任何
+    /// 订单明细字节被读取之前返回受控未认证。</para>
     /// <para>本接口<strong>不是</strong>定价工具、<strong>不写库</strong>：不改写销售订单 / 明细 / 价格 / 贸易条款，
     /// 不做汇率换算、不合并不同币种金额，也不执行迁移 / 生产 SQL / 真实数据库操作 / 部署。</para>
     /// </summary>
     [HttpGet("price-history")]
     public async Task<IActionResult> PriceHistory([FromQuery] CustomerSalesPriceHistoryQuery query)
     {
-        var scope = await ResolveScopeAsync();
+        var scope = await ResolveListDetailScopeAsync();
         return Ok(ApiResponse<CustomerSalesPriceHistoryView>.Success(
             await CustomerSalesPriceHistoryService.QueryAsync(Db, query, scope.AllowedCustomerIds)));
     }

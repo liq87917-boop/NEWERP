@@ -88,6 +88,40 @@ internal static class SalesOrderEntryTestIdentities
         db.SaveChanges();
     }
 
+    /// <summary>
+    /// ERP-465 派生证据只读夹具专用的既有启用身份：既有系统内置角色（既有特权口径，数据范围不受限）<strong>并且
+    /// 持有既有「销售订单」（<c>sales-order</c>）菜单授权</strong>；菜单 / 角色 / 账号全部只播种在隔离的内存测试
+    /// 数据里，绝不新增或修改任何生产菜单 / 角色 / 用户授权。
+    /// </summary>
+    internal static long SeedPrivilegedOperatorWithMenu(ErpDbContext db)
+    {
+        var menu = FindOrCreateRequiredMenu(db);
+        var role = new SysRole
+        {
+            RoleCode = $"SoEntryPriv-{Guid.NewGuid():N}",
+            RoleName = "销售订单入口特权测试角色",
+            IsSystem = true
+        };
+        db.SysRoles.Add(role);
+        db.SaveChanges();
+        db.SysRoleMenus.Add(new SysRoleMenu { RoleId = role.Id, MenuId = menu.Id });
+        db.SaveChanges();
+
+        var user = new SysUser
+        {
+            UserName = $"so-entry-priv-{Guid.NewGuid():N}",
+            PasswordHash = "hash",
+            PasswordSalt = "salt",
+            DisplayName = "销售订单入口特权测试账号",
+            Status = UserStatus.Enabled
+        };
+        db.SysUsers.Add(user);
+        db.SaveChanges();
+        db.SysUserRoles.Add(new SysUserRole { UserId = user.Id, RoleId = role.Id });
+        db.SaveChanges();
+        return user.Id;
+    }
+
     /// <summary>按业务「账号已删除」软删除账号（缺失 / 已删除一律按未认证拒绝）。</summary>
     internal static void SoftDeleteUser(ErpDbContext db, long userId)
     {
@@ -112,6 +146,14 @@ internal static class SalesOrderEntryTestIdentities
             ControllerContext = new ControllerContext { HttpContext = http }
         };
     }
+
+    /// <summary>
+    /// ERP-465：<strong>完全不绑定任何请求上下文</strong>（从未赋值 <c>ControllerContext.HttpContext</c> 的纯进程内直调）。
+    /// 该调用形状同样无条件执行实时授权 —— 缺少身份安全解析为 <c>null</c>，由既有规则在任何订单 / 明细 /
+    /// 证据字节被读取之前返回受控未认证；绝无「无请求上下文」豁免，也不存在任何兼容开关。
+    /// </summary>
+    internal static SalesOrderController WithoutRequestContext(ErpDbContext db)
+        => new(db, new DocumentNumberService(db));
 }
 
 /// <summary>
@@ -120,6 +162,9 @@ internal static class SalesOrderEntryTestIdentities
 /// <item><b>与请求形状无关</b>：同一个真实身份在<strong>空 <c>Request.Path</c></strong> 与<strong>已赋值 <c>Request.Path</c></strong>
 /// 上必须得到完全一致的判定；缺失 / 零 / 未知 / 已删除身份一律未认证，禁用 / 缺少或撤销既有菜单一律权限不足，
 /// 且全部发生在任何订单 / 明细 / 执行证据 / 时间线字节读取之前。</item>
+/// <item><b>无请求上下文同样 fail closed</b>：完全未绑定 <c>HttpContext</c> 的纯进程内直调（外部请求无法构造）
+/// 也执行同一套实时授权，缺少身份安全解析为 <c>null</c> 并返回受控未认证 —— 不存在「空路径 / 无身份 /
+/// 无请求上下文」的免授权回退、兼容开关或测试专用开关。</item>
 /// <item><b>既有菜单口径不变</b>：列表 / 详情只要求实时身份 + 账号状态 + ERP-097 权威客户范围（<strong>不新增</strong>菜单要求）；
 /// 执行证据入口在身份 / 状态 / 范围之外仍要求既有「销售订单」（<c>sales-order</c>）菜单。</item>
 /// <item><b>保留既有业务语义</b>：既有菜单授权身份照常完成列表 / 详情 / 时间线 / 财务核对 / 进度 / 退货影响 / 收款与发票证据
@@ -267,6 +312,34 @@ public class SalesOrderEntryAuthorizationTests
         AssertZeroMutation(db);
     }
 
+
+    // ==================== 1b. 未绑定任何请求上下文：与请求形状无关的一律未认证（无免授权回退） ====================
+
+    /// <summary>
+    /// ERP-465：完全未绑定任何请求上下文（从未赋值 <c>ControllerContext.HttpContext</c>，外部请求无法构造该形状）
+    /// 的纯进程内直调同样无条件执行实时授权 —— 缺少身份安全解析为 <c>null</c>，每一条读侧入口（分页 / 详情 /
+    /// 时间线 / 财务核对 / 进度 / 交付异常 / 退货影响 / 出运财务 / 收款核对 / 收款证据 / 发票证据及批量汇总 /
+    /// 价格历史）都必须在读取任何订单 / 明细 / 证据字节<strong>之前</strong>返回受控未认证；
+    /// 即便内存库中已存在真实启用身份 + 既有菜单授权，未绑定请求上下文的调用也绝不退化为任何身份。
+    /// </summary>
+    [Fact]
+    public async Task Missing_request_context_is_unauthorized_on_every_read_entry()
+    {
+        using var db = TestDbFactory.Create();
+        var (userId, employeeId, _) = SalesOrderEntryTestIdentities.SeedOperator(db);
+        var own = SeedCustomer(db, "SO465-NOCTX", employeeId);
+        var order = SeedOrder(db, "SO-465-NOCTX", own.Id);
+        Assert.True(userId > 0);
+
+        var ctl = SalesOrderEntryTestIdentities.WithoutRequestContext(db);
+        await AssertAllReadEntriesDeniedAsync(ctl, order.Id, ErrorCodes.Unauthorized);
+        await AssertDeniedAsync(ErrorCodes.Unauthorized,
+            () => ctl.PriceHistory(new CustomerSalesPriceHistoryQuery { PageSize = 10 }));
+
+        // 零写入 / 零授权扩张：拒绝路径不新增或改写任何业务 / 授权记录。
+        AssertZeroMutation(db);
+        Assert.Empty(db.SysRoleMenus.Where(g => g.IsDeleted));
+    }
 
     // ==================== 2. 禁用 / 缺少或撤销既有菜单：权限不足 ====================
 
@@ -463,7 +536,12 @@ public class SalesOrderEntryAuthorizationTests
 
         var controller = File.ReadAllText(Path.Combine(directory!.FullName,
             "src", "ERP.Api", "Controllers", "SalesOrderController.cs"));
-        Assert.Contains("ControllerContext?.HttpContext is not null", controller);
+        // ERP-465：授权与请求形状 / 请求上下文完全无关 —— 无请求形状门、无空 scope 回退、无无上下文豁免。
+        Assert.DoesNotContain("RequiresLiveAuthorization", controller, StringComparison.Ordinal);
+        Assert.DoesNotContain("ControllerContext?.HttpContext is not null", controller, StringComparison.Ordinal);
+        Assert.DoesNotContain("scope is null", controller, StringComparison.Ordinal);
+        Assert.DoesNotContain("scope is not null", controller, StringComparison.Ordinal);
+        Assert.Contains("ControllerContext?.HttpContext?.User?", controller, StringComparison.Ordinal);
         Assert.DoesNotContain("Request.Path", controller);
         Assert.DoesNotContain("AllowAnonymous", controller);
         Assert.DoesNotContain("[Authorize(Roles", controller);

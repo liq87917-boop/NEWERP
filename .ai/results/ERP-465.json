@@ -1,8 +1,11 @@
 {
   "task": "ERP-465",
-  "status": "retry",
-  "execution_outcome": "acceptance_reopened",
-  "attempts": 1,
-  "reason": "src/ERP.Api/Controllers/SalesOrderController.cs:37-73 still returns null identity/customer and execution-evidence scope for null HttpContext; violates original no blank-context switch criterion. Retain no module menu requirement on list/detail, existing sales-order menu only on execution evidence.",
-  "original_result_preserved": "D:\\VSCodeProject\\NEWERP.executor.continue-erp-190-20260930080457\\.ai\\logs\\heartbeat-20261013-183922-recovery\\ERP-465"
+  "status": "completed",
+  "execution_outcome": "completed",
+  "normalized_finish_reason": "build_validated",
+  "cline_exit_code": 0,
+  "cline_finish_reason_raw": "completed",
+  "attempts": 2,
+  "browser_acceptance": null,
+  "finished_at": "2026-10-13T19:07:46.258557Z"
 }

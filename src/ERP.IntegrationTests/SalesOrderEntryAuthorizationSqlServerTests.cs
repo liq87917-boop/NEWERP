@@ -89,6 +89,51 @@ public sealed class SalesOrderEntryAuthorizationSqlServerTests
         Assert.IsType<OkObjectResult>(await action(NewController(db, userId, requestPath)));
     }
 
+    /// <summary>
+    /// ERP-465：<strong>完全不绑定任何请求上下文</strong>（从未赋值 <c>ControllerContext.HttpContext</c> 的纯进程内直调，
+    /// 外部请求无法构造该形状）执行控制器动作，返回受控错误码（成功返回 null）。
+    /// </summary>
+    private async Task<int?> ContextlessDeniedCodeAsync(Func<SalesOrderController, Task<IActionResult>> action)
+    {
+        await using var db = _fixture.CreateDbContext();
+        try
+        {
+            await action(new SalesOrderController(db, new DocumentNumberService(db)));
+            return null;
+        }
+        catch (BusinessException ex)
+        {
+            return ex.Code;
+        }
+    }
+
+    /// <summary>未绑定任何请求上下文的读侧逐入口一致判定：全部必须在读取任何字节之前返回同一受控错误码。</summary>
+    private async Task AssertAllReadEntriesDeniedWithoutContextAsync(long orderId, int code)
+    {
+        var ids = orderId.ToString();
+        Assert.Equal(code, await ContextlessDeniedCodeAsync(
+            c => c.GetPaged(new PageQuery { Page = 1, PageSize = 10 }, null)));
+        Assert.Equal(code, await ContextlessDeniedCodeAsync(c => c.GetById(orderId)));
+        Assert.Equal(code, await ContextlessDeniedCodeAsync(c => c.Timeline(orderId)));
+        Assert.Equal(code, await ContextlessDeniedCodeAsync(c => c.FinanceReconciliation(orderId)));
+        Assert.Equal(code, await ContextlessDeniedCodeAsync(c => c.Progress(orderId)));
+        Assert.Equal(code, await ContextlessDeniedCodeAsync(
+            c => c.DeliveryExceptions(new SalesOrderDeliveryExceptionQuery())));
+        Assert.Equal(code, await ContextlessDeniedCodeAsync(c => c.ReturnImpact(orderId)));
+        Assert.Equal(code, await ContextlessDeniedCodeAsync(
+            c => c.ShipmentFinanceReport(new SalesOrderShipmentFinanceQuery())));
+        Assert.Equal(code, await ContextlessDeniedCodeAsync(
+            c => c.ReceiptReconciliationReport(new SalesOrderReceiptReconciliationQuery())));
+        Assert.Equal(code, await ContextlessDeniedCodeAsync(c => c.ReceiptEvidence(orderId)));
+        Assert.Equal(code, await ContextlessDeniedCodeAsync(
+            c => c.ReceiptEvidenceSummaries(new SalesOrderReceiptEvidenceQuery { Ids = ids })));
+        Assert.Equal(code, await ContextlessDeniedCodeAsync(c => c.InvoiceEvidence(orderId)));
+        Assert.Equal(code, await ContextlessDeniedCodeAsync(
+            c => c.InvoiceEvidenceSummaries(new SalesOrderInvoiceEvidenceQuery { Ids = ids })));
+        Assert.Equal(code, await ContextlessDeniedCodeAsync(
+            c => c.PriceHistory(new CustomerSalesPriceHistoryQuery { PageSize = 10 })));
+    }
+
     // ==================== 种子助手（EF 生成身份主键，绝不清理既有行） ====================
 
     private static async Task<BaseCustomer> SeedCustomerAsync(ErpDbContext db)
@@ -232,6 +277,50 @@ public sealed class SalesOrderEntryAuthorizationSqlServerTests
         await AssertAllReadEntriesDeniedAsync(deletedUserId, requestPath, orderId, ErrorCodes.Unauthorized);
     }
 
+    /// <summary>
+    /// ERP-465：<strong>完全未绑定任何请求上下文</strong>（从未赋值 <c>ControllerContext.HttpContext</c> 的纯进程内直调，
+    /// 外部请求无法构造该形状）的调用同样无条件执行实时授权 —— 缺少身份安全解析为 <c>null</c>，每一条读侧入口
+    /// （分页 / 详情 / 时间线 / 财务核对 / 进度 / 交付异常 / 退货影响 / 出运财务 / 收款核对 / 收款证据 / 发票证据及
+    /// 批量汇总 / 价格历史）都在读取任何订单 / 明细 / 证据字节<strong>之前</strong>返回受控未认证；
+    /// 即便真实数据库中已存在启用身份与既有菜单授权，也绝不退化为任何身份，且被拒绝的调用零写入、零授权扩张。
+    /// </summary>
+    [Fact]
+    public async Task Missing_request_context_is_unauthorized_on_every_read_entry()
+    {
+        Guard();
+        long orderId;
+        await using (var seed = _fixture.CreateDbContext())
+        {
+            var customer = await SeedCustomerAsync(seed);
+            var order = await SeedOrderAsync(seed, customer.Id);
+            await SeedOperatorAsync(seed, customer.Id);
+            orderId = order.Id;
+        }
+
+        long grantsBefore, usersBefore, rolesBefore, ordersBefore, detailsBefore;
+        await using (var before = _fixture.CreateDbContext())
+        {
+            grantsBefore = await before.SysRoleMenus.CountAsync(g => !g.IsDeleted);
+            usersBefore = await before.SysUsers.CountAsync();
+            rolesBefore = await before.SysRoles.CountAsync();
+            ordersBefore = await before.SalesOrders.CountAsync();
+            detailsBefore = await before.SalesOrderDetails.CountAsync();
+        }
+
+        await AssertAllReadEntriesDeniedWithoutContextAsync(orderId, ErrorCodes.Unauthorized);
+
+        await using (var after = _fixture.CreateDbContext())
+        {
+            Assert.Equal(grantsBefore, await after.SysRoleMenus.CountAsync(g => !g.IsDeleted));
+            Assert.Equal(usersBefore, await after.SysUsers.CountAsync());
+            Assert.Equal(rolesBefore, await after.SysRoles.CountAsync());
+            Assert.Equal(ordersBefore, await after.SalesOrders.CountAsync());
+            Assert.Equal(detailsBefore, await after.SalesOrderDetails.CountAsync());
+            Assert.Equal(DocumentStatus.Pending, (await after.SalesOrders.AsNoTracking()
+                .SingleAsync(o => o.Id == orderId)).Status);
+        }
+    }
+
     [Theory]
     [InlineData(null)]
     [InlineData(RoutePath)]
@@ -360,10 +449,11 @@ public sealed class SalesOrderEntryAuthorizationSqlServerTests
             roleId = owner.RoleId;
         }
 
-        long grantsBefore, usersBefore, rolesBefore, ordersBefore;
+        long grantsBefore, grantsTotalBefore, usersBefore, rolesBefore, ordersBefore, revokedGrants;
         await using (var before = _fixture.CreateDbContext())
         {
             grantsBefore = await before.SysRoleMenus.CountAsync(g => !g.IsDeleted);
+            grantsTotalBefore = await before.SysRoleMenus.CountAsync();
             usersBefore = await before.SysUsers.CountAsync();
             rolesBefore = await before.SysRoles.CountAsync();
             ordersBefore = await before.SalesOrders.CountAsync();
@@ -373,15 +463,22 @@ public sealed class SalesOrderEntryAuthorizationSqlServerTests
         Assert.Equal(ErrorCodes.NotFound, await DeniedCodeAsync(userId, null, c => c.Progress(foreignOrderId)));
         Assert.Equal(ErrorCodes.NotFound, await DeniedCodeAsync(userId, RoutePath, c => c.GetById(foreignOrderId)));
 
-        // 撤销既有菜单：证据入口权限不足，且不扩张任何用户授权。
+        // 撤销既有菜单：证据入口权限不足。该撤销是夹具**显式**执行的既有「权限撤销」路径（软删除该角色未删除的菜单
+        // 授权），并非被拒绝调用产生的写入；因此断言只允许这一处显式变更，被拒绝的调用绝不新增任何授权。
         await using (var revoke = _fixture.CreateDbContext())
+        {
+            revokedGrants = await revoke.SysRoleMenus.CountAsync(g => g.RoleId == roleId && !g.IsDeleted);
             await RevokeMenuAsync(revoke, roleId);
+        }
+        Assert.True(revokedGrants > 0, "夹具必须显式撤销至少一条既有菜单授权");
         Assert.Equal(ErrorCodes.Forbidden, await DeniedCodeAsync(userId, null, c => c.Progress(ownOrderId)));
         Assert.Equal(ErrorCodes.Forbidden, await DeniedCodeAsync(userId, RoutePath, c => c.InvoiceEvidence(ownOrderId)));
 
         await using (var after = _fixture.CreateDbContext())
         {
-            Assert.Equal(grantsBefore, await after.SysRoleMenus.CountAsync(g => !g.IsDeleted));
+            // 零授权扩张：仅夹具显式撤销的授权减少，绝无新增授权行 / 用户 / 角色，也绝不改写任何业务记录。
+            Assert.Equal(grantsBefore - revokedGrants, await after.SysRoleMenus.CountAsync(g => !g.IsDeleted));
+            Assert.Equal(grantsTotalBefore, await after.SysRoleMenus.CountAsync());
             Assert.Equal(usersBefore, await after.SysUsers.CountAsync());
             Assert.Equal(rolesBefore, await after.SysRoles.CountAsync());
             Assert.Equal(ordersBefore, await after.SalesOrders.CountAsync());

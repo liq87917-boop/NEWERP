@@ -725,7 +725,11 @@ public class SalesOrderReceiptReconciliationTests
         SeedDepositApply(db, "DJ-EP-1", order.Id, 250m, Currency.USD, DocumentStatus.Approved);
         SeedReceipt(db, "SK-EP-1", CustomerA, 30m, Currency.USD, DocumentStatus.Approved);
 
+        // ERP-465：收款核对报表入口无条件实时授权（实时身份 + 账号状态 + 既有「销售订单」菜单 + ERP-097 范围）——
+        // 夹具绑定隔离内存测试库中的真实启用身份，且该身份持有既有「销售订单」（sales-order）菜单授权；
+        // 绝不使用免授权直调或任何兼容开关。
         var controller = new SalesOrderController(db, new DocumentNumberService(db));
+        TestAuth.SetUser(controller, SalesOrderEntryTestIdentities.SeedPrivilegedOperatorWithMenu(db));
         var result = await controller.ReceiptReconciliationReport(Query());
         var ok = Assert.IsType<OkObjectResult>(result);
         var report = Assert.IsType<ApiResponse<SalesOrderReceiptReconciliationReport>>(ok.Value).Data!;

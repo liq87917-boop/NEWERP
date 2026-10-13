@@ -30,31 +30,45 @@ private bool RequiresLiveAuthorization()
 因此同一台控制器在「真实 HTTP 请求」与「空路径 / 无身份请求形状」下的授权判定不一致，
 使 ERP-413 / ERP-424 的读侧护栏可被请求形状绕过。
 
-## 2. 修复后的授权门（与请求路径无关）
+## 2. 修复后的授权门（与请求路径、请求上下文完全无关）
 
-`RequiresLiveAuthorization()` 现在只依据「控制器是否绑定到 HTTP 请求管线」：
+`RequiresLiveAuthorization()` 请求形状门已被**彻底删除**（不再存在于源码中）；读侧授权改由
+`safe-parse 身份解析 + 无条件授权辅助` 构成：
 
 ```csharp
-private bool RequiresLiveAuthorization()
-    => ControllerContext?.HttpContext is not null;
+// ERP-465：缺少请求上下文 / 缺少身份声明 / 非数字 / 非正 → 一律安全解析为 null（绝不猜测、绝不回退管理员）
+private new long? CurrentUserId()
+{
+    var value = ControllerContext?.HttpContext?.User?.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+    return long.TryParse(value, out var id) && id > 0 ? id : null;
+}
+
+private Task<SalespersonDataScope> EnsureExecutionEvidenceAuthorizedAsync()
+    => SalesOrderExecutionAuthorizationRules.EnsureReadAuthorizedAsync(Db, CurrentUserId());
+
+private Task<SalespersonDataScope> ResolveListDetailScopeAsync()
+    => SalesOrderExecutionAuthorizationRules.EnsureLiveIdentityAsync(Db, CurrentUserId());
 ```
 
-- **不再读取 `Request.Path`**：请求路径是否赋值不再参与授权判定；
-- **空路径与已赋值路径口径完全一致**：绑定到请求管线即一律实时授权，缺少身份的真实请求 fail closed（未认证）；
+- **不再读取请求路径**：请求路径是否赋值不再参与授权判定（源码中已无 `Request.Path` / 请求形状门）；
+- **空路径、已赋值路径、缺失身份的真实请求、完全未绑定 `HttpContext` 的纯进程内直调口径完全一致**：
+  一律实时授权，缺少身份在触达任何查询之前返回受控未认证（`Err:Unauthorized`）；
+- **不存在任何免授权回退**：既不返回 `null` 身份 / `null` 范围，也没有「无请求上下文」豁免、
+  兼容开关、测试专用开关或环境变量分支；
 - 与已无条件的规范写入（`EnsureCanonicalWriteAuthorizedAsync`，ERP-420）与文档输出
-  （`EnsureDocumentOutputAuthorizedAsync`，ERP-424）口径对齐；
-- 不读取环境变量、不判断数据库提供程序、不存在任何测试专用开关；
+  （`EnsureDocumentOutputAuthorizedAsync`，ERP-424）口径完全对齐；
 - 不存在 `[AllowAnonymous]`、角色白名单或「退化为管理员」的兜底（源码契约测试逐条断言）。
 
 `SalesOrderExecutionAuthorizationRules.PathIndependenceText` 固化同一口径，与既有 `RuleText` / `BoundaryText`
-共同构成「与请求形状无关」的可回归契约文案。
+共同构成「与请求形状 / 请求上下文无关」的可回归契约文案。
 
 ## 3. 逐入口先授权、后读取
 
 | 入口 | 授权调用 | 失败语义 |
 | --- | --- | --- |
 | `GET /api/sales-orders`（分页） | `ResolveListDetailScopeAsync` → 实时身份 / 账号状态 / ERP-097 范围（**不要求菜单**） | 未认证 / 权限不足 |
-| `GET /api/sales-orders/{id}`（详情） | `ResolveListDetailScopeAsync` + `EnsureOrderAllowedAsync` | 未认证 / 权限不足 / 非披露「销售订单不存在」 |
+| `GET /api/sales-orders/{id}`（详情） | `ResolveListDetailScopeAsync` + `EnsureOrderEvidenceAuthorizedAsync` | 未认证 / 权限不足 / 非披露「销售订单不存在」 |
+| `GET /price-history` | `ResolveListDetailScopeAsync`（与分页 / 详情同一口径，**不要求菜单**） | 未认证 / 权限不足 |
 | `GET /{id}/timeline`、`/{id}/finance-reconciliation`、`/{id}/progress`、`/{id}/return-impact` | `EnsureExecutionEvidenceAuthorizedAsync` → 实时身份 / 账号状态 / 既有「销售订单」菜单 / ERP-097 范围 + 单张归属复核 | 未认证 / 权限不足 / 非披露 |
 | `GET /delivery-exceptions`、`/shipment-finance-report`、`/receipt-reconciliation-report` | `EnsureExecutionEvidenceAuthorizedAsync` | 未认证 / 权限不足 |
 | `GET /{id}/receipt-evidence`、`/{id}/invoice-evidence` | `EnsureExecutionEvidenceAuthorizedAsync` + 单张归属复核 | 未认证 / 权限不足 / 非披露 |
@@ -82,25 +96,28 @@ private bool RequiresLiveAuthorization()
 
 - `src/ERP.UnitTests/SalesOrderEntryAuthorizationTests.cs`（新增）：空路径与已赋值路径的**逐入口一致判定**
   （分页 / 详情 / 时间线 / 财务核对 / 进度 / 交付异常 / 退货影响 / 出运财务 / 收款核对 / 收款证据 / 发票证据
-  及批量汇总）；缺失 / 零 / 未知 / 已删除 → 未认证；禁用 / 缺少或撤销菜单 → 权限不足；缺少菜单时列表 / 详情仍可读
+  及批量汇总 / 价格历史）；缺失 / 零 / 未知 / 已删除 → 未认证；禁用 / 缺少或撤销菜单 → 权限不足；缺少菜单时列表 / 详情仍可读
   而证据入口权限不足（证明未新增菜单要求）；允许身份在两种请求形状上读取本人订单证据并对外单 / 混入批量单返回同一
-  非披露错误；特权账号保留既有全量口径；拒绝路径零写入、零授权扩张；以及控制器源码契约
-  （无 `Request.Path` / `AllowAnonymous` / 角色白名单 / 环境变量 / 内存库开关）。
+  非披露错误；特权账号保留既有全量口径；**完全未绑定 `HttpContext` 的纯进程内直调一律未认证且零写入**
+  （`Missing_request_context_is_unauthorized_on_every_read_entry`）；拒绝路径零写入、零授权扩张；以及控制器源码契约
+  （无 `Request.Path` / `RequiresLiveAuthorization` / 空 `scope` 回退 / 无上下文豁免 / `AllowAnonymous` / 角色白名单 /
+  环境变量 / 内存库开关，且身份经 `ControllerContext?.HttpContext?.User?` 安全解析）。
 - `src/ERP.UnitTests/SalesOrderExecutionAuthorizationTests.cs`（扩展）：新增
   `空路径与已赋值路径_缺少身份一律未认证`、`空路径与已赋值路径_同一身份判定完全一致`、
-  `控制器源码_读侧授权与请求形状无关且无兜底`。
+  `未绑定任何请求上下文_一律未认证_不存在免授权回退`、`控制器源码_读侧授权与请求形状无关且无兜底`。
 - 既有夹具按「真实启用身份 + 既有菜单授权 + 不设置 `Request.Path`」适配：
-  `SalesOrderControllerTests`、`SalesOrderMutationTests`（`SalesOrderProcReadTests` 已使用真实启用身份 + 既有菜单）。
-- 既有销售订单读侧回归（`SalesOrderReturnImpactTests`、`SalesOrderDeliveryExceptionTests`、
-  `SalesOrderInvoiceEvidenceTests`、`SalesOrderReceiptEvidenceTests`、`SalesOrderReceiptReconciliationTests`、
-  `SalesOrderShipmentFinanceReportTests` 等）全部保持绿色。
+  `SalesOrderControllerTests`、`SalesOrderMutationTests`；派生证据只读夹具
+  （`SalesOrderDeliveryExceptionTests`、`SalesOrderInvoiceEvidenceTests`、`SalesOrderReceiptEvidenceTests`、
+  `SalesOrderReceiptReconciliationTests`、`SalesOrderReturnImpactTests`、`SalesOrderShipmentFinanceReportTests`）
+  由免授权直调改为绑定隔离内存库中的真实启用身份（既有特权角色口径）。
+- 既有销售订单读侧回归全部保持绿色。
 
 ### 5.2 真实隔离 SQL 测试
 
 `src/ERP.IntegrationTests/SalesOrderEntryAuthorizationSqlServerTests.cs`（新增）以真实控制器 + 真实既有身份 /
 菜单 / 数据范围驱动：空路径与已赋值路径一致判定、缺失 / 零 / 未知 / 已删除身份未认证、禁用与撤销菜单权限不足、
-缺少菜单时列表 / 详情放行而证据入口权限不足、授权身份读侧生命周期与非披露、被拒绝调用零写入与零授权扩张，
-以及专用目标护栏的 fail-closed 覆盖。
+缺少菜单时列表 / 详情放行而证据入口权限不足、**完全未绑定 `HttpContext` 的纯进程内直调逐入口未认证且零写入 /
+零授权扩张**、授权身份读侧生命周期与非披露、被拒绝调用零写入与零授权扩张，以及专用目标护栏的 fail-closed 覆盖。
 
 安全口径：目标必须是专用实例 `(localdb)\NEWERP_AutoAcceptance`、库名前缀 `NEWERP_AUTOTEST` 且
 `Integrated Security=true`；每次运行只创建**全新 GUID 后缀库**，发现同名库已存在立即拒绝，**绝不 drop / reset /
@@ -108,23 +125,24 @@ private bool RequiresLiveAuthorization()
 
 ## 6. 授权判定边界
 
-修复后，**任何绑定到 HTTP 请求管线的调用**都执行实时授权：真实 HTTP 请求由 ASP.NET Core 请求管线提供
-`ControllerContext.HttpContext`，因此生产与集成环境中的**每一条**读侧入口（空路径与已赋值路径、匿名与已认证）
-都强制走身份 / 账号状态 / 既有菜单 / 权威范围判定，**空路径与缺失身份不再构成旁路**。
+修复后，**每一条读侧入口在任何调用形状下**都执行实时授权：真实 HTTP 请求由 ASP.NET Core 请求管线提供
+`ControllerContext.HttpContext`，因此生产与集成环境中的每一条读侧入口（空路径与已赋值路径、匿名与已认证）
+都强制走身份 / 账号状态 / 既有菜单 / 权威范围判定，**空路径、缺失身份与未绑定 `HttpContext` 都不再构成旁路**。
 
-唯一不执行实时授权的情形是：控制器**完全未被任何请求绑定**（`HttpContext` 为 null 的纯进程内直接调用）。
-这类调用不可能由任何外部请求到达（不存在可被外部构造的「无请求上下文」HTTP 调用），并且该边界**不**读取
-请求路径、环境变量、数据库提供程序或任何测试专用开关。既有进程内夹具（例如直接 `new SalesOrderController(...)`
-的派生只读证据用例）属于这一类。
+**不存在任何不执行实时授权的情形**：控制器不再保留「无请求上下文」进程内豁免（该豁免已在 ERP-465 恢复修复中
+彻底移除，也不以内部 / 测试兼容边界的形式保留或改名）；未绑定请求上下文时身份安全解析为 `null`，
+既有规则在触达任何订单 / 明细 / 证据查询之前返回受控未认证。既有进程内夹具改为绑定真实启用身份，
+不再依赖任何免授权调用形状。该判定始终不读取请求路径、环境变量、数据库提供程序或任何测试专用开关。
 
 ## 7. 相关实现
 
-- `src/ERP.Api/Controllers/SalesOrderController.cs`：`RequiresLiveAuthorization()`
-  （`ControllerContext?.HttpContext is not null`）驱动 `EnsureExecutionEvidenceAuthorizedAsync` 与
-  `ResolveListDetailScopeAsync`；写入（`EnsureCanonicalWriteAuthorizedAsync`）与文档输出
+- `src/ERP.Api/Controllers/SalesOrderController.cs`：移除 `RequiresLiveAuthorization()`；新增安全解析身份的
+  `CurrentUserId()` 并以此驱动无条件的 `EnsureExecutionEvidenceAuthorizedAsync` / `ResolveListDetailScopeAsync`
+  （含分页 / 详情 / 价格历史）；写入（`EnsureCanonicalWriteAuthorizedAsync`）与文档输出
   （`EnsureDocumentOutputAuthorizedAsync`）保持无条件调用。
-- `src/ERP.Application/Services/SalesOrderExecutionAuthorizationRules.cs`：新增 `PathIndependenceText`
-  路径无关契约文案；`EnsureReadAuthorizedAsync` / `EnsureLiveIdentityAsync` 文档明确要求每个请求绑定入口无条件调用。
+- `src/ERP.Application/Services/SalesOrderExecutionAuthorizationRules.cs`：`PathIndependenceText`
+  明确「空路径 / 已赋值路径 / 无请求上下文口径一致、无免授权回退」；`EnsureReadAuthorizedAsync` /
+  `EnsureLiveIdentityAsync` 文档明确要求每个入口无条件调用。
 - `src/ERP.Application/Services/SalesOrderMutationAuthorizationRules.cs` / `SalesOrderDocumentOutputAuthorizationRules.cs`：
   与读侧口径对齐的文档说明。
 - 复用既有：`SalespersonDataScopeService`（ERP-097）、`CustomerReceivableReconciliationService.LoadAuthorizedMenuCodesAsync`

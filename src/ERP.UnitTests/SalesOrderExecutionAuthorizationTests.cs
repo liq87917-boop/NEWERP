@@ -1,5 +1,6 @@
 using ERP.Api.Controllers;
 using ERP.Application.Common;
+using ERP.Application.DTOs;
 using ERP.Application.Services;
 using ERP.Domain.Entities;
 using ERP.Domain.Enums;
@@ -18,10 +19,10 @@ namespace ERP.UnitTests;
 /// 时间线 / 财务核对 / 进度 / 退货影响 / 收款引用证据 / 销项发票证据单张与批量汇总授权；
 /// 无身份 / 已删除 / 已禁用 / 无菜单 / 仅导出菜单 / 已撤销菜单一律 fail closed；
 /// 批量显式 Id 混入不可访问订单**整批拒绝**（无部分行 / 计数）；特权账号保留既有全量口径；
-/// 允许派生保留既有部分出货 / 退货 / 发票 / 收款语义且与直接派生结果一致；拒绝后零写入；
-/// 进程内无身份直调免授权（保持既有单元测试口径），真实 HTTP 匿名请求 fail closed。
-/// ERP-465：只要控制器绑定到 HTTP 请求管线（空路径或已赋值路径）就一律执行实时授权，两种请求形状判定完全一致；
-/// 仅未绑定任何请求的纯进程内直调沿用既有边界，且绝不读取 <c>Request.Path</c> 或环境变量。</para>
+/// 允许派生保留既有部分出货 / 退货 / 发票 / 收款语义且与直接派生结果一致；拒绝后零写入。
+/// ERP-465：读侧授权<strong>无条件执行</strong> —— 空路径 / 已赋值路径 / 未绑定任何请求上下文的纯进程内直调
+/// 口径完全一致，缺少身份安全解析为 <c>null</c> 并先返回受控未认证；绝不读取 <c>Request.Path</c> 或环境变量，
+/// 也不存在任何免授权回退或测试专用开关。</para>
 /// <para>全部使用内存数据库（<see cref="TestDbFactory"/>），不连接 SQL Server、不启动 API、不执行任何 SQL / seed。</para>
 /// </summary>
 public class SalesOrderExecutionAuthorizationTests
@@ -373,18 +374,31 @@ public class SalesOrderExecutionAuthorizationTests
     }
 
     [Fact]
-    public async Task 进程内无身份直调_免授权_保持既有单元测试口径()
+    public async Task 未绑定任何请求上下文_一律未认证_不存在免授权回退()
     {
         using var db = TestDbFactory.Create();
-        var customer = SeedCustomer(db, "C413-INPROC", null);
-        var order = SeedOrder(db, "SO-413-INPROC", customer.Id);
+        var (ownerId, employeeId, _) = SeedOperator(db);
+        var customer = SeedCustomer(db, "C413-NOCTX", employeeId);
+        var order = SeedOrder(db, "SO-413-NOCTX", customer.Id);
+        Assert.True(ownerId > 0);
 
-        // 无 ControllerContext（既非 HTTP 请求管线，也无登录身份）：不可能由外部请求到达，执行证据入口保持既有免授权口径。
+        // 未绑定任何请求上下文（从未赋值 ControllerContext.HttpContext）的纯进程内直调：
+        // 即便内存库中存在真实启用身份 + 既有「销售订单」菜单授权，也绝不退化为任何身份。
         var inProcess = new SalesOrderController(db, new DocumentNumberService(db));
-        Assert.NotNull(await OkDataAsync<SalesOrderProgressView>(() => inProcess.Progress(order.Id)));
+        await AssertDeniedAsync(ErrorCodes.Unauthorized, () => inProcess.GetPaged(new PageQuery(), null));
+        await AssertDeniedAsync(ErrorCodes.Unauthorized, () => inProcess.GetById(order.Id));
+        await AssertDeniedAsync(ErrorCodes.Unauthorized, () => inProcess.Timeline(order.Id));
+        await AssertDeniedAsync(ErrorCodes.Unauthorized, () => inProcess.Progress(order.Id));
+        await AssertDeniedAsync(ErrorCodes.Unauthorized, () => inProcess.ReceiptEvidence(order.Id));
+        await AssertDeniedAsync(ErrorCodes.Unauthorized, () => inProcess.InvoiceEvidence(order.Id));
+        await AssertDeniedAsync(ErrorCodes.Unauthorized,
+            () => inProcess.InvoiceEvidenceSummaries(new SalesOrderInvoiceEvidenceQuery { Ids = order.Id.ToString() }));
+        await AssertDeniedAsync(ErrorCodes.Unauthorized,
+            () => inProcess.PriceHistory(new CustomerSalesPriceHistoryQuery { PageSize = 10 }));
 
-        // 详情入口沿用既有口径（历史实现即要求范围解析）：无身份直调一律 fail closed（绝不返回订单数据）。
-        await Assert.ThrowsAnyAsync<Exception>(() => inProcess.GetById(order.Id));
+        // 零写入：拒绝的进程内直调不改写任何业务记录。
+        Assert.Equal(DocumentStatus.Approved, db.SalesOrders.AsNoTracking().Single(o => o.Id == order.Id).Status);
+        Assert.False(db.ChangeTracker.HasChanges());
     }
 
     // ==================== 5b. 请求形状无关（ERP-465） ====================
@@ -449,7 +463,12 @@ public class SalesOrderExecutionAuthorizationTests
         var source = File.ReadAllText(Path.Combine(RepoRoot(), "src", "ERP.Api", "Controllers",
             "SalesOrderController.cs"));
 
-        Assert.Contains("ControllerContext?.HttpContext is not null", source);
+        // ERP-465：无请求形状门、无空 scope 回退、无「无请求上下文」豁免；缺失上下文安全解析为 null。
+        Assert.DoesNotContain("RequiresLiveAuthorization", source);
+        Assert.DoesNotContain("ControllerContext?.HttpContext is not null", source);
+        Assert.DoesNotContain("scope is null", source);
+        Assert.DoesNotContain("scope is not null", source);
+        Assert.Contains("ControllerContext?.HttpContext?.User?", source);
         Assert.DoesNotContain("Request.Path", source);
         Assert.DoesNotContain("AllowAnonymous", source);
         Assert.DoesNotContain("[Authorize(Roles", source);
