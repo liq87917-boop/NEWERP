@@ -377,6 +377,94 @@ public sealed class FinanceDepositApplyLifecycleSqlServerTests
         Assert.Equal(revokedBefore.UpdatedAt, revoked.UpdatedAt);
     }
 
+    /// <summary>在被拒动作上捕获受控业务错误码（真实控制器 SQL；绝不吞掉异常之外的失败）。</summary>
+    private async Task<int> CaptureCodeAsync(
+        long? userId, Func<FinanceDepositApplyController, Task<IActionResult>> action)
+    {
+        await using var db = _fixture.CreateDbContext();
+        var ex = await Assert.ThrowsAsync<BusinessException>(
+            () => action(NewApplyController(db, userId)));
+        return ex.Code;
+    }
+
+    /// <summary>
+    /// ERP-381 恢复：被拒调用方（缺失身份 / 已禁用 / 撤销菜单）对<strong>未知 Id 与既有 Id</strong>必须在真实 SQL 上得到
+    /// 完全相同的受控拒绝码，且拒绝发生在任何申请单 / 客户 / 来源主数据访问之前（绝不先读行 / 锁行再判权）；
+    /// 被拒请求零改写（状态 / 商业字段 / 审计不变）且不产生任何记账 · 结算行。合法身份仍按权威客户收口。
+    /// </summary>
+    [Fact]
+    public async Task Controller_DeniedCallers_UnknownIdParity_NoBusinessReadNoWrite()
+    {
+        Guard();
+        var tag = Tag();
+        long ownerCustomerId, applyId, enabledOperatorId, disabledOperatorId, revokedOperatorId, revokedRoleId;
+        await using (var seed = _fixture.CreateDbContext())
+        {
+            var ownerCustomer = await SeedCustomerAsync(seed, $"INT_E381_PIO_{tag}", "未知Id一致性客户");
+            ownerCustomerId = ownerCustomer.Id;
+            enabledOperatorId = (await SeedOperatorAsync(seed, ownerCustomer.Id)).UserId;
+            applyId = (await SeedApplyAsync(seed, $"INT_E381_PIA_{tag}", ownerCustomer.Id, 1000m)).Id;
+
+            var disabledCustomer = await SeedCustomerAsync(seed, $"INT_E381_PID_{tag}", "停用账号客户");
+            disabledOperatorId = (await SeedOperatorAsync(seed, disabledCustomer.Id)).UserId;
+            await DisableUserAsync(seed, disabledOperatorId);
+
+            var revokedCustomer = await SeedCustomerAsync(seed, $"INT_E381_PIR_{tag}", "撤销授权客户");
+            (revokedOperatorId, revokedRoleId) = await SeedOperatorAsync(seed, revokedCustomer.Id);
+            await RevokeMenuAsync(seed, revokedRoleId);
+        }
+        var before = await ReloadApplyAsync(applyId);
+        var postingsBefore = await PostingRowCountAsync();
+        const long unknownApplyId = 987654321L;
+
+        // (a) 缺失身份：未知 Id 与既有 Id 在全部路由上都是受控未认证（未知 Id 绝不泄露「不存在」）
+        foreach (var id in new[] { applyId, unknownApplyId })
+        {
+            Assert.Equal(ErrorCodes.Unauthorized, await CaptureCodeAsync(null, c => c.GetById(id)));
+            Assert.Equal(ErrorCodes.Unauthorized, await CaptureCodeAsync(null, c => c.GetStoredSalesOrderSource(id)));
+            Assert.Equal(ErrorCodes.Unauthorized, await CaptureCodeAsync(null, c => c.Cancel(id)));
+            Assert.Equal(ErrorCodes.Unauthorized, await CaptureCodeAsync(null, c => c.Submit(id)));
+            Assert.Equal(ErrorCodes.Unauthorized, await CaptureCodeAsync(null, c => c.Approve(id)));
+            Assert.Equal(ErrorCodes.Unauthorized, await CaptureCodeAsync(null, c => c.Delete(id)));
+            Assert.Equal(ErrorCodes.Unauthorized,
+                await CaptureCodeAsync(null, c => c.Update(id, NewApplyRequest(ownerCustomerId, 300m))));
+        }
+
+        // (b) 账号已禁用 / 撤销菜单：未知 Id 与既有 Id 在全部路由上都是受控权限不足
+        foreach (var operatorId in new[] { disabledOperatorId, revokedOperatorId })
+        {
+            foreach (var id in new[] { applyId, unknownApplyId })
+            {
+                Assert.Equal(ErrorCodes.Forbidden, await CaptureCodeAsync(operatorId, c => c.GetById(id)));
+                Assert.Equal(ErrorCodes.Forbidden, await CaptureCodeAsync(operatorId, c => c.GetStoredSalesOrderSource(id)));
+                Assert.Equal(ErrorCodes.Forbidden, await CaptureCodeAsync(operatorId, c => c.Cancel(id)));
+                Assert.Equal(ErrorCodes.Forbidden, await CaptureCodeAsync(operatorId, c => c.Submit(id)));
+                Assert.Equal(ErrorCodes.Forbidden, await CaptureCodeAsync(operatorId, c => c.Approve(id)));
+                Assert.Equal(ErrorCodes.Forbidden, await CaptureCodeAsync(operatorId, c => c.Delete(id)));
+                Assert.Equal(ErrorCodes.Forbidden,
+                    await CaptureCodeAsync(operatorId, c => c.Update(id, NewApplyRequest(ownerCustomerId, 300m))));
+            }
+        }
+
+        // 合法身份：既有单可读、未知单按「不存在」（闸门通过后仍按权威客户收口）
+        await using (var db = _fixture.CreateDbContext())
+        {
+            Assert.IsType<OkObjectResult>(await NewApplyController(db, enabledOperatorId).GetById(applyId));
+            await AssertBusinessCodeAsync(ErrorCodes.NotFound,
+                () => NewApplyController(db, enabledOperatorId).GetById(unknownApplyId));
+        }
+
+        // 被拒请求零改写：状态 / 商业字段 / 审计不变，且不产生任何记账 · 结算行
+        var after = await ReloadApplyAsync(applyId);
+        Assert.Equal(before.Status, after.Status);
+        Assert.Equal(before.Amount, after.Amount);
+        Assert.Equal(before.CustomerId, after.CustomerId);
+        Assert.Equal(before.SalesOrderId, after.SalesOrderId);
+        Assert.Equal(before.UpdatedAt, after.UpdatedAt);
+        Assert.False(after.IsDeleted);
+        Assert.Equal(postingsBefore, await PostingRowCountAsync());
+    }
+
 
     [Fact]
     public async Task Controller_InvalidCurrencyAmountExchangeRateAndSource_Denied_NoWrite()

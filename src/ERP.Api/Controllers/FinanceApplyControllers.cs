@@ -15,6 +15,13 @@ namespace ERP.Api.Controllers;
 /// 实时启用身份（账号存在、未删除且启用）、定金申请单（deposit-apply）菜单授权与当前权威客户数据范围；
 /// 创建 / 修改校验真实可用客户、受支持币种、按币种精度取整后大于 0 的金额、大于 0 的汇率，并按 Id 校验可空来源
 /// 销售订单（必须既有 / 未删除 / 未取消 / 客户一致 / 币种兼容；空来源保留历史「未关联来源」语义，绝不按文本猜测）。
+/// <para><b>调用方闸门（ERP-381 恢复）</b>：列表 / 详情 / 已存储来源 / 来源候选 / 创建 / 修改 / 提交 / 审核 / 取消 /
+/// 删除的<strong>第一步</strong>都是实时启用身份 + 既有「定金申请单」（<c>deposit-apply</c>）菜单授权
+/// （<see cref="FinanceDepositApplyLifecycleRules.EnsureMenuAuthorizedAsync"/>）：缺失 / 非数字 / 非正数 /
+/// 未绑定请求上下文的身份一律安全解析为 <c>null</c> 并返回受控未认证，账号不存在 / 已删除 → 未认证，
+/// 已禁用 / 撤销菜单 → 权限不足。因此未知 Id 与既有 Id 对这些被拒调用方给出<strong>完全相同</strong>的受控拒绝，
+/// 绝不先读行 / 锁行再判权，也绝不让被拒账号触及任何申请单 / 客户 / 销售订单主数据查询、计数、单号或行锁；
+/// <strong>不存在</strong>「无请求上下文 / 空路径 / 环境变量 / 内存库开关」豁免，也没有内部直调或改名旁路。</para>
 /// <para>修改 / 提交 / 审核 / 取消 / 删除都在同一事务内先取来源销售订单行锁、再取定金申请单行锁（ERP-381 锁序：
 /// 先上游销售订单行、后申请单行），再加载权威状态 / 字段并在锁内复核身份 + 菜单授权 + 既有与请求客户 / 来源范围、
 /// 持久化商业字段与来源链接；失败整体回滚（状态、原始字段与审计不变）。取消销售订单侧由
@@ -53,9 +60,13 @@ public class FinanceDepositApplyController : DocumentControllerBase<FinanceDepos
     [HttpGet("{id:long}")]
     public async Task<IActionResult> GetById(long id)
     {
+        // 调用方闸门先于任何申请单读取：缺失 / 非数字 / 未绑定请求上下文 → 受控未认证，账号不存在 / 已删除 → 受控未认证，
+        // 已禁用 / 撤销菜单 → 权限不足。未知 Id 与既有 Id 对被拒调用方给出完全相同的受控拒绝，绝不先读行再判权。
+        await FinanceDepositApplyLifecycleRules.EnsureMenuAuthorizedAsync(Db, CurrentUserId());
         var entity = await Set.AsNoTracking()
             .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
             ?? throw BusinessException.NotFound("定金申请单不存在");
+        // 闸门之后仍按申请单权威客户重做完整三重授权（身份 / 菜单 / 客户数据范围），越界 fail closed。
         await FinanceDepositApplyLifecycleRules.EnsureAuthorizedAsync(Db, CurrentUserId(), entity.CustomerId);
         return Ok(ApiResponse<FinanceDepositApply>.Success(entity));
     }
@@ -121,6 +132,9 @@ public class FinanceDepositApplyController : DocumentControllerBase<FinanceDepos
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] FinanceDepositApply entity)
     {
+        // 调用方闸门先于任何客户 · 来源主数据读取与单号生成：缺失 / 已禁用 / 已删除 / 无菜单账号零业务查询、零占号。
+        await FinanceDepositApplyLifecycleRules.EnsureMenuAuthorizedAsync(Db, CurrentUserId());
+
         // ERP-390：表单显式断开链接（留空 → 0）归一化为 null，保留历史「未关联来源」语义。
         entity.SalesOrderId = entity.SalesOrderId is > 0 ? entity.SalesOrderId : null;
         var currency = FinanceDepositApplyLifecycleRules.NormalizeApplyCurrency(entity.Currency);
@@ -176,6 +190,9 @@ public class FinanceDepositApplyController : DocumentControllerBase<FinanceDepos
     [HttpPut("{id:long}")]
     public async Task<IActionResult> Update(long id, [FromBody] FinanceDepositApply entity)
     {
+        // 调用方闸门先于任何来源 / 申请单读取、行锁与客户 · 来源主数据查询：被拒账号零业务查询、零改写。
+        await FinanceDepositApplyLifecycleRules.EnsureMenuAuthorizedAsync(Db, CurrentUserId());
+
         // ERP-390：表单显式断开链接（留空 → 0）归一化为 null，保留历史「未关联来源」语义。
         entity.SalesOrderId = entity.SalesOrderId is > 0 ? entity.SalesOrderId : null;
         var storedSourceOrderId = await FinanceDepositApplyLifecycleRules.ReadSourceSalesOrderIdAsync(Db, id);
@@ -253,6 +270,9 @@ public class FinanceDepositApplyController : DocumentControllerBase<FinanceDepos
     [HttpPost("{id:long}/cancel")]
     public override async Task<IActionResult> Cancel(long id)
     {
+        // 调用方闸门先于任何来源读取与行锁：被拒账号零业务查询、零状态变化。
+        await FinanceDepositApplyLifecycleRules.EnsureMenuAuthorizedAsync(Db, CurrentUserId());
+
         var storedSourceOrderId = await FinanceDepositApplyLifecycleRules.ReadSourceSalesOrderIdAsync(Db, id);
         await using var transaction = FinanceDepositApplyLifecycleRules.IsRelationalProvider(Db)
             ? await Db.Database.BeginTransactionAsync()
@@ -282,6 +302,9 @@ public class FinanceDepositApplyController : DocumentControllerBase<FinanceDepos
     [HttpDelete("{id:long}")]
     public override async Task<IActionResult> Delete(long id)
     {
+        // 调用方闸门先于任何来源读取与行锁：被拒账号零业务查询、零删除标记变化。
+        await FinanceDepositApplyLifecycleRules.EnsureMenuAuthorizedAsync(Db, CurrentUserId());
+
         var storedSourceOrderId = await FinanceDepositApplyLifecycleRules.ReadSourceSalesOrderIdAsync(Db, id);
         await using var transaction = FinanceDepositApplyLifecycleRules.IsRelationalProvider(Db)
             ? await Db.Database.BeginTransactionAsync()
@@ -312,6 +335,9 @@ public class FinanceDepositApplyController : DocumentControllerBase<FinanceDepos
     private async Task<IActionResult> TransitionAsync(
         long id, DocumentStatus from, DocumentStatus to, string message)
     {
+        // 调用方闸门先于任何来源读取与行锁：被拒账号零业务查询、零状态变化。
+        await FinanceDepositApplyLifecycleRules.EnsureMenuAuthorizedAsync(Db, CurrentUserId());
+
         var storedSourceOrderId = await FinanceDepositApplyLifecycleRules.ReadSourceSalesOrderIdAsync(Db, id);
         await using var transaction = FinanceDepositApplyLifecycleRules.IsRelationalProvider(Db)
             ? await Db.Database.BeginTransactionAsync()
@@ -356,6 +382,21 @@ public class FinanceDepositApplyController : DocumentControllerBase<FinanceDepos
         return await Db.FinanceDepositApplies
                    .FirstOrDefaultAsync(a => a.Id == id && !a.IsDeleted)
                ?? throw BusinessException.NotFound("定金申请单不存在");
+    }
+
+    /// <summary>
+    /// 当前登录账号 Id（ERP-381）：只来自已认证请求主体（<c>ClaimTypes.NameIdentifier</c>）；缺失 / 非数字 /
+    /// 非正数 / <strong>未绑定请求上下文（<c>ControllerContext.HttpContext</c> 为 <c>null</c>）</strong>一律安全解析为
+    /// <c>null</c>，由既有 <see cref="FinanceDepositApplyLifecycleRules.EnsureMenuAuthorizedAsync"/> 在触及任何申请单行 /
+    /// 客户 · 销售订单主数据读取、计数、取行、单号生成或行锁<strong>之前</strong>返回受控未认证（fail closed）。
+    /// <para>这里<strong>不是</strong>免授权或测试兼容边界：不存在「无请求上下文 / 空路径 / 匿名进程内直调」豁免，
+    /// 也不读取请求路径、环境变量、数据库提供程序或任何测试开关；绝不猜测身份、绝不回退为匿名或管理员，
+    /// 也没有内部直调 / 改名旁路。</para>
+    /// </summary>
+    private new long? CurrentUserId()
+    {
+        var value = ControllerContext?.HttpContext?.User?.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        return long.TryParse(value, out var id) && id > 0 ? id : null;
     }
 
     /// <summary>按申请单权威客户做身份 / 菜单 / 客户数据范围复核（修改 / 提交 / 审核 / 取消 / 删除共用）。</summary>
