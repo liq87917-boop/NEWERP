@@ -430,12 +430,29 @@ public class PurchaseQuoteMasterReferenceTests
     }
 
     [Fact]
-    public async Task 进程内直调_无请求管线_保持既有行为()
+    public async Task 进程内直调_缺失身份_受控拒绝且零写入()
     {
         using var db = TestDbFactory.Create();
-        // 未绑定任何 HTTP 请求的进程内直调（历史单元测试口径）：保持既有行为，不额外加载主数据。
+        // ERP-486：不再有「无请求管线免授权」旁路 —— 未绑定任何身份 / 请求的直接调用 fail closed。
         var ctl = new PurchaseQuoteController(new GenericService<PurchaseQuote>(db), db,
             new DocumentNumberService(db));
+        var draft = NewQuote("PQ-486-INPROCESS-NOID");
+        draft.SupplierId = SeedSupplier(db).Id;
+
+        var ex = await Assert.ThrowsAsync<BusinessException>(() => ctl.Create(draft));
+
+        Assert.Equal(ErrorCodes.Unauthorized, ex.Code);
+        Assert.Equal(PurchaseQuoteAuthorizationRules.UnauthorizedText, ex.Message);
+        Assert.Empty(db.PurchaseQuotes);
+    }
+
+    [Fact]
+    public async Task 进程内直调_真实启用身份_空请求路径_授权通过并保持既有主数据门()
+    {
+        using var db = TestDbFactory.Create();
+        // ERP-486：既有进程内夹具改为真实启用身份（既有菜单 / 不受限范围），刻意不设置 Request.Path；
+        // 授权判定与请求形状无关，而 ERP-476 实时主数据门仍只依据 Request.Path（真实请求一律执行）。
+        var ctl = PurchaseQuoteTestAuthority.NewQuoteController(db);
         var draft = NewQuote("PQ-476-INPROCESS");
         draft.SupplierId = 4_760_010L;
         draft.ProductId = 4_760_011L;

@@ -577,8 +577,9 @@ public class PurchaseQuoteConversionTests
 
     // ==================== 工厂与种子数据 ====================
 
+    /// <summary>ERP-486：既有进程内夹具改为真实启用身份 + 既有「供应商比价」/「采购订单」菜单授权（刻意不设置 <c>Request.Path</c>）。</summary>
     private static PurchaseQuoteController NewController(ErpDbContext db)
-        => new(new GenericService<PurchaseQuote>(db), db, new DocumentNumberService(db));
+        => PurchaseQuoteTestAuthority.NewQuoteController(db);
 
     // ==================== ERP-476：真实 HTTP 承诺请求形状的控制器与实时主数据 ====================
 

@@ -97,6 +97,20 @@ public static class PurchaseQuoteAuthorizationRules
         + "既有转换守卫（重复生成 + 审批参考）与只读派生口径保持不变；不新增任何表 / 列 / 索引 / 菜单 / 角色 / 用户授权。";
 
     /// <summary>
+    /// ERP-486：入口授权与调用形状无关的契约文案 —— 每一条读取 / 写入 / 审批 / 决定 / 下游转单入口都
+    /// <b>无条件</b>执行实时身份 + 既有菜单 + 权威客户范围判定，空 / 已赋值 <c>Request.Path</c>、缺失
+    /// <c>HttpContext</c>、缺失 / 零 / 未知身份都不构成旁路；被拒请求在读取任何证据、消耗单据号或产生任何变更
+    /// 之前返回同一受控非披露错误。（接口 / 文档同源，绝不提供测试专用降级。）
+    /// </summary>
+    public const string PathIndependenceText =
+        "供应商比价入口授权与请求形状无关：控制器的每一条读取 / 写入 / 审批 / 决定 / 下游转单入口都无条件调用"
+        + "PurchaseQuoteAuthorizationRules.EnsureAccessAuthorizedAsync（带入预填 / 转单另加 EnsureDestinationAuthorizedAsync），"
+        + "空 Request.Path 与已赋值 Request.Path、缺失 HttpContext 与绑定请求管线、可解析身份与缺失身份都不参与"
+        + "「是否授权」的判定；缺失 / 零 / 未知 / 已删除身份一律未认证（fail closed），受控非披露拒绝先于任何证据读取、"
+        + "单据号消耗与写入，被拒调用零表头 / 明细 / 来源 / 状态改动；绝不使用测试环境、请求路径、合成旁路身份、"
+        + "匿名 / 管理员兜底或空上下文豁免授权，也不新增任何菜单 / 角色 / 用户授权。";
+
+    /// <summary>
     /// 实时身份校验（fail closed）：缺失 / 非法身份按未认证拒绝，账号不存在 / 已删除按未认证拒绝，
     /// 已禁用按权限不足拒绝；随后复用 <see cref="SalespersonDataScopeService"/>（ERP-097）解析权威客户范围。
     /// 普通账号仍须显式具备既有菜单 —— 该要求由 <see cref="EnsureAccessAuthorizedAsync"/> 施加。

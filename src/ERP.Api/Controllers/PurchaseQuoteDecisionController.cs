@@ -17,6 +17,9 @@ namespace ERP.Api.Controllers;
 /// （混入任何范围外 / 空归属行即整批非披露拒绝，绝不返回隐藏行计数 / 决定历史），
 /// 记录决定先复核被审批比价行的**持久化归属**（不采信请求中的 <c>DecidedBy</c> / <c>DecidedByName</c> 快照），
 /// 范围外 / 已删除 / 不存在返回同一非披露错误；授权先于任何读取 / 追加。</para>
+/// <para>ERP-486：实时授权与调用形状完全无关 —— 不读取 <c>Request.Path</c>、不判断是否存在 <c>HttpContext</c>、
+/// 不依据身份是否可解析，两条路由（批次审批状态与记录决定）都<b>无条件</b>调用实时身份 / 既有菜单 / 权威范围判定，
+/// 缺失 / 零 / 未知 / 已删除身份一律受控非披露拒绝，且拒绝先于任何证据读取、决定追加与单号 / 状态变更。</para>
 /// </summary>
 [ApiController]
 [Route("api/purchase/quote-decisions")]
@@ -35,23 +38,12 @@ public class PurchaseQuoteDecisionController : ControllerBase
     }
 
     /// <summary>
-    /// ERP-416：是否必须执行实时授权。真实 HTTP 请求（MVC 绑定，<c>Request.Path</c> 已赋值）一律执行；
-    /// 进程内直接调用（历史单元测试 / 内部派生读取，无 HTTP 请求管线）仅在携带当前登录身份时执行。
-    /// 只对「既无任何登录身份、又不在 HTTP 请求管线内」的调用免授权：这类调用不可能由外部请求到达，
-    /// 也绝不把缺失身份当作管理员（真实匿名请求因处于请求管线内一律 fail closed）。
+    /// ERP-486：比价数据入口授权（实时身份 + 既有「供应商比价」菜单 + ERP-097 客户数据范围）。
+    /// <b>与调用形状完全无关</b>：不读取 <c>Request.Path</c>、不判断是否存在 <c>HttpContext</c>、不依据身份是否可解析，
+    /// 两条路由都无条件调用；缺失 / 零 / 未知 / 已删除身份一律未认证（fail closed），授权先于任何读取与追加。
     /// </summary>
-    private bool RequiresLiveAuthorization()
-    {
-        var http = ControllerContext?.HttpContext;
-        if (http is null) return false;
-        return http.Request.Path.HasValue || CurrentUserId() is not null;
-    }
-
-    /// <summary>比价数据入口授权（实时身份 + 既有「供应商比价」菜单 + ERP-097 客户数据范围）。</summary>
-    private async Task<SalespersonDataScope?> EnsureAuthorizedAsync()
-        => RequiresLiveAuthorization()
-            ? await PurchaseQuoteAuthorizationRules.EnsureAccessAuthorizedAsync(_db, CurrentUserId())
-            : null;
+    private Task<SalespersonDataScope> EnsureAuthorizedAsync()
+        => PurchaseQuoteAuthorizationRules.EnsureAccessAuthorizedAsync(_db, CurrentUserId());
 
     /// <summary>批次审批状态（只读）：逐行 pending / approved / rejected + 全量决定历史</summary>
     [HttpGet("batch")]
@@ -74,15 +66,13 @@ public class PurchaseQuoteDecisionController : ControllerBase
     [HttpPost("decide")]
     public async Task<IActionResult> Decide([FromBody] PurchaseQuoteDecisionRequest request)
     {
-        PurchaseQuoteAuthorizationRules.LiveActor? actor = null;
-        if (RequiresLiveAuthorization())
-        {
-            // 实时身份 + 既有「供应商比价」菜单 + 权威客户范围（授权先于任何追加与任何读取）。
-            var scope = await PurchaseQuoteAuthorizationRules.EnsureAccessAuthorizedAsync(_db, CurrentUserId());
-            actor = await PurchaseQuoteAuthorizationRules.EnsureLiveActorAsync(_db, CurrentUserId());
-            if (request is { QuoteId: > 0 })
-                await PurchaseQuoteAuthorizationRules.EnsureQuoteAllowedAsync(_db, scope, request.QuoteId);
-        }
+        // ERP-486：无条件实时身份 + 既有菜单 + 权威客户范围 + 实时可信操作人（授权先于任何读取与追加，
+        // 缺失 / 零 / 未知身份一律受控非披露拒绝）。判定人一律取自登录账号，请求体中的
+        // DecidedBy / DecidedByName 被忽略（伪造无效）。
+        var scope = await EnsureAuthorizedAsync();
+        var actor = await PurchaseQuoteAuthorizationRules.EnsureLiveActorAsync(_db, CurrentUserId());
+        if (request is { QuoteId: > 0 })
+            await PurchaseQuoteAuthorizationRules.EnsureQuoteAllowedAsync(_db, scope, request.QuoteId);
 
         var decision = await PurchaseQuoteApproval.DecideAsync(_db, request, actor);
         var verb = decision.Decision == PurchaseQuoteApproval.Approved ? "批准选中" : "拒绝";

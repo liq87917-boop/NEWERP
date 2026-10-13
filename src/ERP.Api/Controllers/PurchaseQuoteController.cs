@@ -31,7 +31,11 @@ namespace ERP.Api.Controllers;
 /// 采购承诺（选中 / 带入预填 / 单行转采购订单 / 批次转采购订单）另要求在既有来源行锁内、映射草稿与采购单号预约
 /// <b>之前</b>复核供应商与商品引用**显式存在且为正整数**（绝不把缺失 / <c>0</c> 静默当作实时采购引用），
 /// 见 <see cref="PurchaseQuoteConversion.EnsureSourceMasterReferencesAsync"/>；任一行不合格即整批受控拒绝：
-/// 零写入、零占号、不改写来源状态。真实 HTTP 请求一律执行，未被请求绑定的进程内直调保持既有行为。</para>
+/// 零写入、零占号、不改写来源状态。</para>
+/// <para>ERP-486：实时授权与调用形状完全无关 —— 每一条读取 / 写入 / 审批 / 决定 / 下游转单入口都<b>无条件</b>调用
+/// <see cref="PurchaseQuoteAuthorizationRules.EnsureAccessAuthorizedAsync"/>（带入预填 / 转单另加目的地授权），
+/// 缺失 <c>HttpContext</c>、空 <c>Request.Path</c>、缺失 / 零 / 未知身份都不再构成旁路；受控非披露拒绝先于
+/// 任何证据读取、单据号消耗、状态变更与写入，被拒调用零表头 / 明细 / 来源 / 状态改动。</para>
 /// </summary>
 [ApiController]
 [Route("api/purchase/quotes")]
@@ -58,29 +62,20 @@ public class PurchaseQuoteController : BaseCrudController<PurchaseQuote>
     }
 
     /// <summary>
-    /// ERP-416：是否必须执行实时授权。真实 HTTP 请求（MVC 绑定，<c>Request.Path</c> 已赋值）一律执行；
-    /// 进程内直接调用（历史单元测试 / 内部派生读取，无 HTTP 请求管线）仅在携带当前登录身份时执行。
-    /// 只对「既无任何登录身份、又不在 HTTP 请求管线内」的调用免授权：这类调用不可能由外部请求到达，
-    /// 也绝不把缺失身份当作管理员（真实匿名请求因处于请求管线内一律 fail closed）。
+    /// ERP-486：比价数据入口授权（实时身份 + 既有「供应商比价」菜单 + ERP-097 客户数据范围）。
+    /// <b>与调用形状完全无关</b>：不读取 <c>Request.Path</c>、不判断是否存在 <c>HttpContext</c>、不依据身份是否可解析，
+    /// 每一条读取 / 写入 / 审批 / 决定 / 转单入口都无条件调用；缺失 / 零 / 未知 / 已删除身份一律未认证（fail closed），
+    /// 被拒请求在读取任何证据、消耗任何单号或产生任何变更之前返回受控非披露错误。绝不提供测试专用旁路。
     /// </summary>
-    private bool RequiresLiveAuthorization()
-    {
-        var http = ControllerContext?.HttpContext;
-        if (http is null) return false;
-        return http.Request.Path.HasValue || CurrentUserId() is not null;
-    }
+    private Task<SalespersonDataScope> EnsureAuthorizedAsync()
+        => PurchaseQuoteAuthorizationRules.EnsureAccessAuthorizedAsync(_db, CurrentUserId());
 
-    /// <summary>比价数据入口授权（实时身份 + 既有「供应商比价」菜单 + ERP-097 客户数据范围）。</summary>
-    private async Task<SalespersonDataScope?> EnsureAuthorizedAsync()
-        => RequiresLiveAuthorization()
-            ? await PurchaseQuoteAuthorizationRules.EnsureAccessAuthorizedAsync(_db, CurrentUserId())
-            : null;
-
-    /// <summary>比价 → 采购订单目的地授权（既有「采购订单」菜单 + 权威客户范围），用于带入预填与真实转单。</summary>
-    private async Task<SalespersonDataScope?> EnsureDestinationAuthorizedAsync()
-        => RequiresLiveAuthorization()
-            ? await PurchaseQuoteAuthorizationRules.EnsureDestinationAuthorizedAsync(_db, CurrentUserId())
-            : null;
+    /// <summary>
+    /// 比价 → 采购订单目的地授权（既有「采购订单」菜单 + 权威客户范围），用于带入预填与真实转单；
+    /// 与调用形状无关，无条件执行（任一不满足即 fail closed，不发号、不写入）。
+    /// </summary>
+    private Task<SalespersonDataScope> EnsureDestinationAuthorizedAsync()
+        => PurchaseQuoteAuthorizationRules.EnsureDestinationAuthorizedAsync(_db, CurrentUserId());
 
     // ==================== ERP-476：实时主数据引用复核（写入 / 选择 / 承诺） ====================
 
@@ -362,11 +357,9 @@ public class PurchaseQuoteController : BaseCrudController<PurchaseQuote>
         }
     }
 
-    /// <summary>锁内重新读取实时身份 / 既有「供应商比价」菜单 / 权威客户范围（无 HTTP 管线时返回 null，保留内部口径）。</summary>
-    private async Task<SalespersonDataScope?> ReauthorizeAsync()
-        => RequiresLiveAuthorization()
-            ? await PurchaseQuoteAuthorizationRules.EnsureAccessAuthorizedAsync(_db, CurrentUserId())
-            : null;
+    /// <summary>锁内重新读取实时身份 / 既有「供应商比价」菜单 / 权威客户范围（ERP-486：无条件执行，缺失身份即在锁内 fail closed）。</summary>
+    private Task<SalespersonDataScope> ReauthorizeAsync()
+        => PurchaseQuoteAuthorizationRules.EnsureAccessAuthorizedAsync(_db, CurrentUserId());
 
     /// <summary>失败 / 拒绝后整体回滚并丢弃半成品变更（绝不残留部分写入）。</summary>
     private static async Task RollbackAsync(IDbContextTransaction? transaction, IErpDbContext db)

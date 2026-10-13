@@ -21,7 +21,8 @@ namespace ERP.UnitTests;
 /// 价格差异 / 转化漏斗与审批状态 / 记录决定授权；范围先于计数 / 分页 / 分组下推；<c>CustomerName</c> 与
 /// <c>RefOrderNo</c> 文本都不是授权依据；空归属只在不受限口径下可见；批次混入范围外行即整批拒绝且零写入；
 /// 无身份 / 已删除 / 已禁用 / 无菜单一律 fail closed；转单另须既有「采购订单」菜单与权威目的地范围；
-/// 特权账号保留既有不受限口径；进程内无身份直调保持既有免授权口径。</para>
+/// 特权账号保留既有不受限口径；ERP-486：进程内无身份直调（无 <c>HttpContext</c> / 空 <c>Request.Path</c>）不再免授权，
+/// 一律 fail closed 且零写入。</para>
 /// <para>全部使用内存数据库（<see cref="TestDbFactory"/>），不连接 SQL Server、不启动 API、不执行任何 SQL / seed。</para>
 /// </summary>
 public class PurchaseQuoteAuthorizationTests
@@ -667,19 +668,28 @@ public class PurchaseQuoteAuthorizationTests
     }
 
     [Fact]
-    public async Task 进程内无身份直调_保持既有免授权口径()
+    public async Task 进程内无身份直调_不再免授权_逐入口fail_closed且零写入()
     {
         using var env = CreateEnv();
         var ctl = InProcessController(env.Db);
-
-        var page = AssertOk<PagedResult<PurchaseQuote>>(await ctl.GetPaged(new PageQuery { PageSize = 100 }));
-        Assert.Equal(5, page.Total);
-        Assert.Equal(env.ForeignQuoteId, AssertOk<PurchaseQuote>(await ctl.GetById(env.ForeignQuoteId)).Id);
-        Assert.Equal(env.ForeignQuoteId, AssertOk<PurchaseOrderPrefillResult>(await ctl.OrderPrefill(env.ForeignQuoteId)).SourceId);
-
-        // 审批控制器进程内直调（无 HTTP 管线）同样保持既有口径。
         var decisions = new PurchaseQuoteDecisionController(env.Db);
-        Assert.Equal(2, AssertOk<PurchaseQuoteDecisionBatch>(await decisions.BatchStatus(env.BatchNo)).LineCount);
+        var ordersBefore = env.Db.PurchaseOrders.Count();
+        var decisionsBefore = env.Db.PurchaseQuoteDecisions.Count();
+
+        // ERP-486：无 HttpContext / 空 Request.Path 的进程内直调一律实时授权，缺失身份 fail closed，
+        // 且拒绝先于任何证据读取、发号与写入。
+        await AssertDeniedAsync(ErrorCodes.Unauthorized, PurchaseQuoteAuthorizationRules.UnauthorizedText,
+            () => ctl.GetPaged(new PageQuery { PageSize = 100 }));
+        await AssertDeniedAsync(ErrorCodes.Unauthorized, PurchaseQuoteAuthorizationRules.UnauthorizedText,
+            () => ctl.GetById(env.ForeignQuoteId));
+        await AssertDeniedAsync(ErrorCodes.Unauthorized, PurchaseQuoteAuthorizationRules.UnauthorizedText,
+            () => ctl.OrderPrefill(env.ForeignQuoteId));
+        await AssertDeniedAsync(ErrorCodes.Unauthorized, PurchaseQuoteAuthorizationRules.UnauthorizedText,
+            () => decisions.BatchStatus(env.BatchNo));
+
+        Assert.Equal(ordersBefore, env.Db.PurchaseOrders.Count());
+        Assert.Equal(decisionsBefore, env.Db.PurchaseQuoteDecisions.Count());
+        Assert.False(env.Db.PurchaseQuotes.AsNoTracking().Single(q => q.Id == env.ForeignQuoteId).IsDeleted);
     }
 
     private static async Task<T> AssertOkAsync<T>(Func<Task<IActionResult>> action) => AssertOk<T>(await action());

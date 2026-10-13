@@ -28,8 +28,10 @@ public class PurchaseQuoteApprovalTests
     {
         using var db = TestDbFactory.Create();
         var quote = SeedQuote(db, "PQ-APV-1");
+        var decidedBy = SeedPrivilegedUser(db, "采购主管");
 
-        var decision = await DecideAsync(db, new PurchaseQuoteDecisionRequest
+        // ERP-486 / ERP-417：实时身份下判定人一律取自登录账号；请求体中的 DecidedBy / DecidedByName 仅作留痕、被忽略。
+        var decision = await DecideLiveAsync(db, decidedBy, new PurchaseQuoteDecisionRequest
         {
             QuoteId = quote.Id,
             QuoteNo = quote.QuoteNo,
@@ -45,7 +47,7 @@ public class PurchaseQuoteApprovalTests
         Assert.Equal(88L, decision.SelectedSupplierId);
         Assert.Equal("供应商88", decision.SelectedSupplierName);
         Assert.Equal("单价最低且交期可控", decision.DecisionBasis);
-        Assert.Equal(7L, decision.DecidedBy);
+        Assert.Equal(decidedBy, decision.DecidedBy);
         Assert.Equal("采购主管", decision.DecidedByName);
         Assert.Equal("APV-PQ-APV-1-#" + quote.Id, decision.DecisionRef);
         Assert.NotEqual(default, decision.DecidedAt);
@@ -376,15 +378,22 @@ public class PurchaseQuoteApprovalTests
         return user.Id;
     }
 
-    private static PurchaseQuoteDecisionController NewController(ErpDbContext db) => new(db);
+    /// <summary>
+    /// ERP-486：既有进程内夹具改为**真实启用身份 + 既有菜单授权**（隔离内存测试数据），且刻意不设置
+    /// <c>Request.Path</c>，证明既有契约只有在实时授权通过后才成立（不再有「无请求管线免授权」旁路）。
+    /// </summary>
+    private static PurchaseQuoteDecisionController NewController(ErpDbContext db, string? displayName = null)
+        => PurchaseQuoteTestAuthority.NewDecisionController(db, displayName);
 
     private static PurchaseQuoteController NewQuoteController(ErpDbContext db)
-        => new(new GenericService<PurchaseQuote>(db), db, new DocumentNumberService(db));
+        => PurchaseQuoteTestAuthority.NewQuoteController(db);
 
     private static async Task<PurchaseQuoteDecision> DecideAsync(ErpDbContext db,
         PurchaseQuoteDecisionRequest request)
     {
-        var ok = Assert.IsType<OkObjectResult>(await NewController(db).Decide(request));
+        // ERP-486 / ERP-417：实时请求下判定人一律取自登录账号，故夹具按请求中的留痕名播种真实身份
+        // （请求字段只用于命名测试身份，绝不作为授权依据）。
+        var ok = Assert.IsType<OkObjectResult>(await NewController(db, request.DecidedByName).Decide(request));
         var response = Assert.IsType<ApiResponse<PurchaseQuoteDecision>>(ok.Value);
         Assert.Equal(0, response.Code);
         return response.Data!;

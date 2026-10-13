@@ -186,7 +186,8 @@ public class PurchaseQuoteMutationTests
         Assert.Equal(30m, created.TotalAmount);      // 服务端按 10 × 3 重算
         Assert.False(created.IsDeleted);
         Assert.True(created.CreatedAt > new DateTime(2020, 1, 1));
-        Assert.Null(created.CreatedBy);
+        Assert.NotEqual(4242L, created.CreatedBy);   // 客户端伪造审计字段被忽略
+        Assert.NotNull(created.CreatedBy);           // ERP-486：实时身份下归属取自登录账号
         Assert.Single(db.PurchaseQuotes);
     }
 
@@ -364,7 +365,7 @@ public class PurchaseQuoteMutationTests
     {
         using var db = TestDbFactory.Create();
         var quote = SeedQuote(db, "PQ-DUP", PurchaseQuoteMutationRules.PendingStatus, selected: false);
-        var ctl = new PurchaseQuoteDecisionController(db);
+        var ctl = PurchaseQuoteTestAuthority.NewDecisionController(db);
 
         AssertOk<PurchaseQuoteDecision>(await ctl.Decide(new PurchaseQuoteDecisionRequest
         {
@@ -400,7 +401,7 @@ public class PurchaseQuoteMutationTests
     {
         using var db = TestDbFactory.Create();
         var quote = SeedQuote(db, "PQ-APV-CONV");
-        var ctl = new PurchaseQuoteDecisionController(db);
+        var ctl = PurchaseQuoteTestAuthority.NewDecisionController(db);
         await ctl.Decide(new PurchaseQuoteDecisionRequest { QuoteId = quote.Id, Decision = PurchaseQuoteApproval.Approved });
 
         var converted = AssertOk<PurchaseOrderConversionResult>(await QuoteController(db).ToPurchaseOrder(quote.Id));
@@ -461,8 +462,9 @@ public class PurchaseQuoteMutationTests
 
     // ==================== 工厂与种子数据 ====================
 
+    /// <summary>ERP-486：既有进程内夹具改为真实启用身份 + 既有菜单授权（刻意不设置 <c>Request.Path</c>）。</summary>
     private static PurchaseQuoteController QuoteController(ErpDbContext db)
-        => new(new GenericService<PurchaseQuote>(db), db, new DocumentNumberService(db));
+        => PurchaseQuoteTestAuthority.NewQuoteController(db);
 
     private static T AssertOk<T>(IActionResult result)
     {
