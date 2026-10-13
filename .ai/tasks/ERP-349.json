@@ -1,6 +1,6 @@
 {
   "title": "Protect customer receipt lifecycle while active allocations exist",
-  "description": "Stage3 priority: implement a core operational integrity gap through existing business APIs/services. Preserve permissions, audit, original evidence and existing layers; no report, UI polish, Agent or production operations.",
+  "description": "Stage3 priority: implement a core operational integrity gap through existing business APIs/services. Preserve permissions, audit, original evidence and existing layers; no report, UI polish, Agent or production operations.\n\n2026-10-13 verified acceptance recovery: FinanceReceiptController in FinanceReceiptComplaintControllers.cs GetById loads FinanceReceipt row before CustomerReceiptLifecycleRules.EnsureAuthorizedAsync. Unknown id returns NotFound before identity/menu checks, while existing id rejects missing/disabled/deleted/no-menu caller differently. This leaves original receipt read fail-closed scope requirements incomplete. Require existing CustomerReceiptLifecycleRules.EnsureMenuAuthorizedAsync before every receipt query/lock, then retain scoped ownership and live account revalidation within lifecycle locks. Preserve positive currency-rounded amount, shared receipt funding, customer/agency/invoice allocation guards and immutable void history. Do not alter complaint controller behavior sharing this file. Remove exemptions completely, including no HttpContext; parse missing actor safely to null for controlled Unauthorized. No internal-call/test-compatibility exceptions or renamed bypass. Adapt fixtures only with genuine enabled identities/existing grants/live masters in isolated databases. Retain original numeric/source/customer/transaction/audit checks. Missing/disabled/no-menu users must be rejected before counts or any business query. Preserve full logs; use explicit .ai/logs/ERP-349 results/TRX directories. Safe Release with analyzers/warnings-as-errors/full units plus real isolated SQL mandatory; no whole-stage claim.",
   "acceptance_criteria": [
     "Existing authorized finance receipt user create/update/submit/approve/cancel/delete and document reads recheck live user/menu/customer data scope; no identity bypass or permission expansion. Validate real available customer, supported currency and positive normalized amount using existing currency precision. On update protect existing and requested customer scope, document freeze rules and audit, no silent edits to allocation evidence.",
     "With any effective customer-order or agency-fee receipt allocation, refuse receipt cancellation/deletion or changing customer/currency/amount in a way that invalidates evidence. Use existing explicit void services to release restrictions, retain all original allocation history. Coordinate receipt lifecycle operations and both existing allocation writers by receipt row lock/atomic transaction, re-read authoritative amount/status before persist. Prevent concurrent effective allocation total from exceeding receipt amount in the same currency across relevant existing consumers, never sum currencies or double-count evidence.",
@@ -14,7 +14,9 @@
     "src/ERP.Application/Services/AgencyServiceFeeCollectionAllocationService.cs",
     "src/ERP.UnitTests/CustomerReceiptLifecycleTests.cs",
     "src/ERP.IntegrationTests/CustomerReceiptLifecycleSqlServerTests.cs",
-    "docs/customer-receipt-lifecycle.md"
+    "docs/customer-receipt-lifecycle.md",
+    "src/ERP.UnitTests/ReceiptLifecycleConcurrencyTests.cs",
+    "src/ERP.UnitTests/ReceiptPaymentCanonicalEntryTests.cs"
   ],
   "criterion_path_map": {
     "Existing authorized finance receipt user create/update/submit/approve/cancel/delete and document reads recheck live user/menu/customer data scope; no identity bypass or permission expansion. Validate real available customer, supported currency and positive normalized amount using existing currency precision. On update protect existing and requested customer scope, document freeze rules and audit, no silent edits to allocation evidence.": [
@@ -24,7 +26,9 @@
       "src/ERP.Application/Services/AgencyServiceFeeCollectionAllocationService.cs",
       "src/ERP.UnitTests/CustomerReceiptLifecycleTests.cs",
       "src/ERP.IntegrationTests/CustomerReceiptLifecycleSqlServerTests.cs",
-      "docs/customer-receipt-lifecycle.md"
+      "docs/customer-receipt-lifecycle.md",
+      "src/ERP.UnitTests/ReceiptLifecycleConcurrencyTests.cs",
+      "src/ERP.UnitTests/ReceiptPaymentCanonicalEntryTests.cs"
     ],
     "With any effective customer-order or agency-fee receipt allocation, refuse receipt cancellation/deletion or changing customer/currency/amount in a way that invalidates evidence. Use existing explicit void services to release restrictions, retain all original allocation history. Coordinate receipt lifecycle operations and both existing allocation writers by receipt row lock/atomic transaction, re-read authoritative amount/status before persist. Prevent concurrent effective allocation total from exceeding receipt amount in the same currency across relevant existing consumers, never sum currencies or double-count evidence.": [
       "src/ERP.Application/Services/CustomerReceiptLifecycleRules.cs",
@@ -33,7 +37,9 @@
       "src/ERP.Application/Services/AgencyServiceFeeCollectionAllocationService.cs",
       "src/ERP.UnitTests/CustomerReceiptLifecycleTests.cs",
       "src/ERP.IntegrationTests/CustomerReceiptLifecycleSqlServerTests.cs",
-      "docs/customer-receipt-lifecycle.md"
+      "docs/customer-receipt-lifecycle.md",
+      "src/ERP.UnitTests/ReceiptLifecycleConcurrencyTests.cs",
+      "src/ERP.UnitTests/ReceiptPaymentCanonicalEntryTests.cs"
     ],
     "Verify denied/unmapped/revoked user, invalid amount/currency/customer, active allocation refusal for both types, explicit void release, allowed harmless metadata edit, repeated operation, and SQL allocation-versus-receipt-change plus concurrent-allocation race with unchanged original receipt/allocation on failure. Preserve existing receipt and allocation API routes and related regression assertions; do not mutate stock, orders or supplier payments.": [
       "src/ERP.Application/Services/CustomerReceiptLifecycleRules.cs",
@@ -42,7 +48,9 @@
       "src/ERP.Application/Services/AgencyServiceFeeCollectionAllocationService.cs",
       "src/ERP.UnitTests/CustomerReceiptLifecycleTests.cs",
       "src/ERP.IntegrationTests/CustomerReceiptLifecycleSqlServerTests.cs",
-      "docs/customer-receipt-lifecycle.md"
+      "docs/customer-receipt-lifecycle.md",
+      "src/ERP.UnitTests/ReceiptLifecycleConcurrencyTests.cs",
+      "src/ERP.UnitTests/ReceiptPaymentCanonicalEntryTests.cs"
     ],
     "Real SQL fixtures must require exact (localdb)\\NEWERP_AutoAcceptance, IntegratedSecurity and NEWERP_AUTOTEST prefix before access. Create only a new GUID-owned database, reject existing database, never drop/reset any database or read production settings. Use SQL generated identities, fail wrong-target guards before access, retain complete logs. Execute relevant unit and safe Release build/test plus real SQL scenarios; build completion does not mean stage acceptance.": [
       "src/ERP.Application/Services/CustomerReceiptLifecycleRules.cs",
@@ -51,19 +59,21 @@
       "src/ERP.Application/Services/AgencyServiceFeeCollectionAllocationService.cs",
       "src/ERP.UnitTests/CustomerReceiptLifecycleTests.cs",
       "src/ERP.IntegrationTests/CustomerReceiptLifecycleSqlServerTests.cs",
-      "docs/customer-receipt-lifecycle.md"
+      "docs/customer-receipt-lifecycle.md",
+      "src/ERP.UnitTests/ReceiptLifecycleConcurrencyTests.cs",
+      "src/ERP.UnitTests/ReceiptPaymentCanonicalEntryTests.cs"
     ]
   },
   "depends_on": [
     "ERP-053",
     "ERP-071"
   ],
-  "implementation_evidence": "FinanceReceiptController.Create accepts Amount/Currency/CustomerId without operational validation; Update replaces those values without checking existing CustomerReceiptAllocations or AgencyServiceFeeCollectionAllocations. Cancel/Delete inherited unconditional base status logic. CustomerReceiptAllocationService.CreateAsync bounds effective sum only at creation against then-current receipt.Amount, leaving later receipt edits/cancellation and concurrent allocation races unguarded. Existing ERP053/071 settlement evidence is retained, not recreated.",
+  "implementation_evidence": "FinanceReceiptController in FinanceReceiptComplaintControllers.cs GetById loads FinanceReceipt row before CustomerReceiptLifecycleRules.EnsureAuthorizedAsync. Unknown id returns NotFound before identity/menu checks, while existing id rejects missing/disabled/deleted/no-menu caller differently. This leaves original receipt read fail-closed scope requirements incomplete. Require existing CustomerReceiptLifecycleRules.EnsureMenuAuthorizedAsync before every receipt query/lock, then retain scoped ownership and live account revalidation within lifecycle locks. Preserve positive currency-rounded amount, shared receipt funding, customer/agency/invoice allocation guards and immutable void history. Do not alter complaint controller behavior sharing this file.",
   "risk": "medium",
   "planning_stage": 3,
   "id": "ERP-349",
-  "status": "completed",
-  "attempts": 2,
+  "status": "retry",
+  "attempts": 3,
   "max_attempts": 3,
   "validation_profile": "safe",
   "completion_mode": "build",
@@ -116,5 +126,12 @@
       }
     }
   ],
-  "supervised_recovery_cycles": 1
+  "supervised_recovery_cycles": 1,
+  "recovery_context": {
+    "at": "2026-10-13T20:41:14.820965Z",
+    "reason": "original acceptance unmet despite build-valid verdict",
+    "original_attempts": 2,
+    "next_attempt_reserved": 3,
+    "preserved_evidence": "D:\\VSCodeProject\\NEWERP.executor.continue-erp-190-20260930080457\\.ai\\logs\\heartbeat-20261013-203922-recovery\\ERP-349"
+  }
 }

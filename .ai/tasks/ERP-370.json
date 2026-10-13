@@ -1,6 +1,6 @@
 {
   "title": "Enforce live outbound permission and customer scope across stock-out routes",
-  "description": "Stage3 core inventory closure. Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance.",
+  "description": "Stage3 core inventory closure. Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance.\n\n2026-10-13 verified acceptance recovery: StockOutController.GetById:68-74 loads receipt row before StockOutAuthorizationRules.EnsureCustomerAuthorizedAsync, and GetMovements:82-83 loads before same check. An unknown id yields NotFound while an existing id yields Unauthorized/Forbidden for missing/disabled/deleted/no-menu caller, contrary to original live stock-out menu before every detail/movement route. Require existing EnsureMenuAuthorizedAsync before any stock-out/source read or lock on all entries, then retain authoritative current customer checks inside deterministic transaction/source locks. No new grants, no source reassignment, unchanged stock quantities/cost/ledger/return/loading reversal guards. Remove exemptions completely, including no HttpContext; parse missing actor safely to null for controlled Unauthorized. No internal-call/test-compatibility exceptions or renamed bypass. Adapt fixtures only with genuine enabled identities/existing grants/live masters in isolated databases. Retain original numeric/source/customer/transaction/audit checks. Missing/disabled/no-menu users must be rejected before counts or any business query. Preserve full logs; use explicit .ai/logs/ERP-370 results/TRX directories. Safe Release with analyzers/warnings-as-errors/full units plus real isolated SQL mandatory; no whole-stage claim.",
   "acceptance_criteria": [
     "Require live enabled current user and actual stock-out menu before every controller list/detail/movement/options/create/update/submit/approve/cancel/delete route. Use authoritative CustomerId and existing SalespersonDataScopeService, database scope before counts/pagination. Enforce both stored and proposed customer before edit assignment; no missing-identity, restricted-unmapped or legacy-unlinked global fallback. Restrict source/order/warehouse evidence to existing legitimate privileges, no new grants or inferred warehouse ownership.",
     "Apply compatible source-sales-order/stock-out deterministic row lock and atomic transaction to state/edit/delete operations so approved stock/ledger cannot race edits. Preserve ERP343 source quantity limits, ERP359 approved-return and ERP367 loading reversal guards. Failed authorization/proposed detail update or later posting leaves original document/stock/ledger unchanged; approval never duplicates inventory. Test actual controller SQL own/foreign/null source, revoked menu, disabled user, denied movement evidence, failed edit unchanged and concurrent edit/state transitions; retain existing fulfillment and ledger tests.",
@@ -17,7 +17,14 @@
     "src/ERP.UnitTests/OrderTraceabilityTests.cs",
     "src/ERP.IntegrationTests/StockOutAuthorizationSqlServerTests.cs",
     "src/ERP.IntegrationTests/ERP.IntegrationTests.csproj",
-    "docs/stockout-authorization.md"
+    "docs/stockout-authorization.md",
+    "src/ERP.UnitTests/LoadingStockOutCancellationTests.cs",
+    "src/ERP.UnitTests/ReturnSourceCancellationTests.cs",
+    "src/ERP.UnitTests/StockOutCanonicalEntryTests.cs",
+    "src/ERP.UnitTests/StockOutControllerTests.cs",
+    "src/ERP.UnitTests/StockOutOrderFulfillmentTests.cs",
+    "src/ERP.UnitTests/StockOutTestAuthorization.cs",
+    "src/ERP.UnitTests/StockOutWriteScopeRegressionTests.cs"
   ],
   "criterion_path_map": {
     "Require live enabled current user and actual stock-out menu before every controller list/detail/movement/options/create/update/submit/approve/cancel/delete route. Use authoritative CustomerId and existing SalespersonDataScopeService, database scope before counts/pagination. Enforce both stored and proposed customer before edit assignment; no missing-identity, restricted-unmapped or legacy-unlinked global fallback. Restrict source/order/warehouse evidence to existing legitimate privileges, no new grants or inferred warehouse ownership.": [
@@ -31,7 +38,14 @@
       "src/ERP.UnitTests/OrderTraceabilityTests.cs",
       "src/ERP.IntegrationTests/StockOutAuthorizationSqlServerTests.cs",
       "src/ERP.IntegrationTests/ERP.IntegrationTests.csproj",
-      "docs/stockout-authorization.md"
+      "docs/stockout-authorization.md",
+      "src/ERP.UnitTests/LoadingStockOutCancellationTests.cs",
+      "src/ERP.UnitTests/ReturnSourceCancellationTests.cs",
+      "src/ERP.UnitTests/StockOutCanonicalEntryTests.cs",
+      "src/ERP.UnitTests/StockOutControllerTests.cs",
+      "src/ERP.UnitTests/StockOutOrderFulfillmentTests.cs",
+      "src/ERP.UnitTests/StockOutTestAuthorization.cs",
+      "src/ERP.UnitTests/StockOutWriteScopeRegressionTests.cs"
     ],
     "Apply compatible source-sales-order/stock-out deterministic row lock and atomic transaction to state/edit/delete operations so approved stock/ledger cannot race edits. Preserve ERP343 source quantity limits, ERP359 approved-return and ERP367 loading reversal guards. Failed authorization/proposed detail update or later posting leaves original document/stock/ledger unchanged; approval never duplicates inventory. Test actual controller SQL own/foreign/null source, revoked menu, disabled user, denied movement evidence, failed edit unchanged and concurrent edit/state transitions; retain existing fulfillment and ledger tests.": [
       "src/ERP.Api/Controllers/StockOutController.cs",
@@ -44,7 +58,14 @@
       "src/ERP.UnitTests/OrderTraceabilityTests.cs",
       "src/ERP.IntegrationTests/StockOutAuthorizationSqlServerTests.cs",
       "src/ERP.IntegrationTests/ERP.IntegrationTests.csproj",
-      "docs/stockout-authorization.md"
+      "docs/stockout-authorization.md",
+      "src/ERP.UnitTests/LoadingStockOutCancellationTests.cs",
+      "src/ERP.UnitTests/ReturnSourceCancellationTests.cs",
+      "src/ERP.UnitTests/StockOutCanonicalEntryTests.cs",
+      "src/ERP.UnitTests/StockOutControllerTests.cs",
+      "src/ERP.UnitTests/StockOutOrderFulfillmentTests.cs",
+      "src/ERP.UnitTests/StockOutTestAuthorization.cs",
+      "src/ERP.UnitTests/StockOutWriteScopeRegressionTests.cs"
     ],
     "Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance.": [
       "src/ERP.Api/Controllers/StockOutController.cs",
@@ -57,10 +78,17 @@
       "src/ERP.UnitTests/OrderTraceabilityTests.cs",
       "src/ERP.IntegrationTests/StockOutAuthorizationSqlServerTests.cs",
       "src/ERP.IntegrationTests/ERP.IntegrationTests.csproj",
-      "docs/stockout-authorization.md"
+      "docs/stockout-authorization.md",
+      "src/ERP.UnitTests/LoadingStockOutCancellationTests.cs",
+      "src/ERP.UnitTests/ReturnSourceCancellationTests.cs",
+      "src/ERP.UnitTests/StockOutCanonicalEntryTests.cs",
+      "src/ERP.UnitTests/StockOutControllerTests.cs",
+      "src/ERP.UnitTests/StockOutOrderFulfillmentTests.cs",
+      "src/ERP.UnitTests/StockOutTestAuthorization.cs",
+      "src/ERP.UnitTests/StockOutWriteScopeRegressionTests.cs"
     ]
   },
-  "implementation_evidence": "StockOutController reads and legacy unlinked writes are not uniformly authorized beyond authentication. Source-order validation and ERP367 cancellation guard do not protect every list/detail/movement or status endpoint.",
+  "implementation_evidence": "StockOutController.GetById:68-74 loads receipt row before StockOutAuthorizationRules.EnsureCustomerAuthorizedAsync, and GetMovements:82-83 loads before same check. An unknown id yields NotFound while an existing id yields Unauthorized/Forbidden for missing/disabled/deleted/no-menu caller, contrary to original live stock-out menu before every detail/movement route. Require existing EnsureMenuAuthorizedAsync before any stock-out/source read or lock on all entries, then retain authoritative current customer checks inside deterministic transaction/source locks. No new grants, no source reassignment, unchanged stock quantities/cost/ledger/return/loading reversal guards.",
   "depends_on": [
     "ERP-343",
     "ERP-367"
@@ -68,8 +96,8 @@
   "risk": "medium",
   "planning_stage": 3,
   "id": "ERP-370",
-  "status": "completed",
-  "attempts": 1,
+  "status": "retry",
+  "attempts": 2,
   "max_attempts": 3,
   "validation_profile": "safe",
   "completion_mode": "build",
@@ -84,5 +112,12 @@
     "required": false,
     "scenarios": []
   },
-  "created_at": "2026-10-08T11:27:35.269427Z"
+  "created_at": "2026-10-08T11:27:35.269427Z",
+  "recovery_context": {
+    "at": "2026-10-13T20:41:14.760274Z",
+    "reason": "original acceptance unmet despite build-valid verdict",
+    "original_attempts": 1,
+    "next_attempt_reserved": 2,
+    "preserved_evidence": "D:\\VSCodeProject\\NEWERP.executor.continue-erp-190-20260930080457\\.ai\\logs\\heartbeat-20261013-203922-recovery\\ERP-370"
+  }
 }

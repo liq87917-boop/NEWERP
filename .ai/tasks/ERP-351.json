@@ -1,6 +1,6 @@
 {
   "title": "Protect supplier payment lifecycle and shared settlement capacity",
-  "description": "Stage3 priority: implement a core operational integrity gap through existing business APIs/services. Preserve permissions, audit, original evidence and existing layers; no report, UI polish, Agent or production operations.",
+  "description": "Stage3 priority: implement a core operational integrity gap through existing business APIs/services. Preserve permissions, audit, original evidence and existing layers; no report, UI polish, Agent or production operations.\n\n2026-10-13 verified acceptance recovery: FinancePaymentController.GetById:50-56 reads payment then resolves PaymentApply/customer before live SupplierPaymentLifecycleRules.EnsureAuthorizedAsync. Unknown id yields NotFound while existing id rejects missing/disabled/deleted/no-menu caller differently; denied callers reach financial source queries. Require existing payment menu/live identity before any payment/source/customer query or lifecycle lock, then retain current source ownership under deterministic source/payment locks. Preserve payment authorization, live supplier/apply/customer, same-currency shared order/invoice budgets and atomic source/cancellation rules; no permission expansion or changes to source evidence. Remove exemptions completely, including no HttpContext; parse missing actor safely to null for controlled Unauthorized. No internal-call/test-compatibility exceptions or renamed bypass. Adapt fixtures only with genuine enabled identities/existing grants/live masters in isolated databases. Retain original numeric/source/customer/transaction/audit checks. Missing/disabled/no-menu users must be rejected before counts or any business query. Preserve full logs; use explicit .ai/logs/ERP-351 results/TRX directories. Safe Release with analyzers/warnings-as-errors/full units plus real isolated SQL mandatory; no whole-stage claim.",
   "acceptance_criteria": [
     "Existing payment user create/update/read/submit/approve/cancel/delete requires current live identity, existing payment module authorization and applicable supplier/customer data scope. Validate enabled authoritative supplier, supported currency, positive normalized amount. If PaymentApplyId supplied resolve live eligible existing request with compatible supplier/currency/amount and permission; reject forged/dangling source without deriving from labels. Preserve valid unlinked historical payment scenario and existing commercial fields.",
     "Protect effective purchase-order and invoice payment allocations: no cancel/delete or source supplier/currency/amount change invalidating existing evidence. Explicit existing void workflows release restriction and retain original rows. Coordinate source lifecycle and both allocation writers on payment row in one atomic transaction, reload live amount/status/authorization. The same payment funds one combined effective capacity across both allocation consumers; do not sum currencies, allocate payment twice or silently rewrite invoice/order/stock.",
@@ -14,7 +14,9 @@
     "src/ERP.Application/Services/SupplierPaymentInvoiceAllocationService.cs",
     "src/ERP.UnitTests/SupplierPaymentLifecycleTests.cs",
     "src/ERP.IntegrationTests/SupplierPaymentLifecycleSqlServerTests.cs",
-    "docs/supplier-payment-lifecycle.md"
+    "docs/supplier-payment-lifecycle.md",
+    "src/ERP.UnitTests/ReceiptPaymentCanonicalEntryTests.cs",
+    "src/ERP.UnitTests/SupplierPaymentTransitionConcurrencyTests.cs"
   ],
   "criterion_path_map": {
     "Existing payment user create/update/read/submit/approve/cancel/delete requires current live identity, existing payment module authorization and applicable supplier/customer data scope. Validate enabled authoritative supplier, supported currency, positive normalized amount. If PaymentApplyId supplied resolve live eligible existing request with compatible supplier/currency/amount and permission; reject forged/dangling source without deriving from labels. Preserve valid unlinked historical payment scenario and existing commercial fields.": [
@@ -24,7 +26,9 @@
       "src/ERP.Application/Services/SupplierPaymentInvoiceAllocationService.cs",
       "src/ERP.UnitTests/SupplierPaymentLifecycleTests.cs",
       "src/ERP.IntegrationTests/SupplierPaymentLifecycleSqlServerTests.cs",
-      "docs/supplier-payment-lifecycle.md"
+      "docs/supplier-payment-lifecycle.md",
+      "src/ERP.UnitTests/ReceiptPaymentCanonicalEntryTests.cs",
+      "src/ERP.UnitTests/SupplierPaymentTransitionConcurrencyTests.cs"
     ],
     "Protect effective purchase-order and invoice payment allocations: no cancel/delete or source supplier/currency/amount change invalidating existing evidence. Explicit existing void workflows release restriction and retain original rows. Coordinate source lifecycle and both allocation writers on payment row in one atomic transaction, reload live amount/status/authorization. The same payment funds one combined effective capacity across both allocation consumers; do not sum currencies, allocate payment twice or silently rewrite invoice/order/stock.": [
       "src/ERP.Application/Services/SupplierPaymentLifecycleRules.cs",
@@ -33,7 +37,9 @@
       "src/ERP.Application/Services/SupplierPaymentInvoiceAllocationService.cs",
       "src/ERP.UnitTests/SupplierPaymentLifecycleTests.cs",
       "src/ERP.IntegrationTests/SupplierPaymentLifecycleSqlServerTests.cs",
-      "docs/supplier-payment-lifecycle.md"
+      "docs/supplier-payment-lifecycle.md",
+      "src/ERP.UnitTests/ReceiptPaymentCanonicalEntryTests.cs",
+      "src/ERP.UnitTests/SupplierPaymentTransitionConcurrencyTests.cs"
     ],
     "Meaningful units and real SQL cover both allocation types, exact combined capacity/overflow, void release, unlinked payment, incompatible request/supplier/currency, denied/revoked caller, failure leaves original amounts/evidence, payment cancellation-vs-allocation and cross-consumer concurrent allocation. Existing routes/audit and source allocation regressions preserved.": [
       "src/ERP.Application/Services/SupplierPaymentLifecycleRules.cs",
@@ -42,7 +48,9 @@
       "src/ERP.Application/Services/SupplierPaymentInvoiceAllocationService.cs",
       "src/ERP.UnitTests/SupplierPaymentLifecycleTests.cs",
       "src/ERP.IntegrationTests/SupplierPaymentLifecycleSqlServerTests.cs",
-      "docs/supplier-payment-lifecycle.md"
+      "docs/supplier-payment-lifecycle.md",
+      "src/ERP.UnitTests/ReceiptPaymentCanonicalEntryTests.cs",
+      "src/ERP.UnitTests/SupplierPaymentTransitionConcurrencyTests.cs"
     ],
     "Real SQL fixtures must require exact (localdb)\\NEWERP_AutoAcceptance, IntegratedSecurity and NEWERP_AUTOTEST prefix before access. Create only a new GUID-owned database, reject existing database, never drop/reset any database or read production settings. Use SQL generated identities, fail wrong-target guards before access, retain complete logs. Execute relevant unit and safe Release build/test plus real SQL scenarios; build completion does not mean stage acceptance.": [
       "src/ERP.Application/Services/SupplierPaymentLifecycleRules.cs",
@@ -51,7 +59,9 @@
       "src/ERP.Application/Services/SupplierPaymentInvoiceAllocationService.cs",
       "src/ERP.UnitTests/SupplierPaymentLifecycleTests.cs",
       "src/ERP.IntegrationTests/SupplierPaymentLifecycleSqlServerTests.cs",
-      "docs/supplier-payment-lifecycle.md"
+      "docs/supplier-payment-lifecycle.md",
+      "src/ERP.UnitTests/ReceiptPaymentCanonicalEntryTests.cs",
+      "src/ERP.UnitTests/SupplierPaymentTransitionConcurrencyTests.cs"
     ]
   },
   "depends_on": [
@@ -59,12 +69,12 @@
     "ERP-067",
     "ERP-345"
   ],
-  "implementation_evidence": "FinancePaymentController.Create directly saves arbitrary Amount/Currency/SupplierId/PaymentApplyId; Update copies them, Cancel/Delete inherited. Existing SupplierPaymentAllocationService and SupplierPaymentInvoiceAllocationService bound their own allocations at create time but FinancePayment lifecycle does not preserve effective downstream evidence or coordinate amount edits/cancellation with allocation creation. ERP345 protects purchase cancellation, not this source payment lifecycle.",
+  "implementation_evidence": "FinancePaymentController.GetById:50-56 reads payment then resolves PaymentApply/customer before live SupplierPaymentLifecycleRules.EnsureAuthorizedAsync. Unknown id yields NotFound while existing id rejects missing/disabled/deleted/no-menu caller differently; denied callers reach financial source queries. Require existing payment menu/live identity before any payment/source/customer query or lifecycle lock, then retain current source ownership under deterministic source/payment locks. Preserve payment authorization, live supplier/apply/customer, same-currency shared order/invoice budgets and atomic source/cancellation rules; no permission expansion or changes to source evidence.",
   "risk": "medium",
   "planning_stage": 3,
   "id": "ERP-351",
-  "status": "completed",
-  "attempts": 1,
+  "status": "retry",
+  "attempts": 2,
   "max_attempts": 3,
   "validation_profile": "safe",
   "completion_mode": "build",
@@ -79,5 +89,12 @@
     "required": false,
     "scenarios": []
   },
-  "created_at": "2026-10-08T05:31:23.146871Z"
+  "created_at": "2026-10-08T05:31:23.146871Z",
+  "recovery_context": {
+    "at": "2026-10-13T20:41:14.878119Z",
+    "reason": "original acceptance unmet despite build-valid verdict",
+    "original_attempts": 1,
+    "next_attempt_reserved": 2,
+    "preserved_evidence": "D:\\VSCodeProject\\NEWERP.executor.continue-erp-190-20260930080457\\.ai\\logs\\heartbeat-20261013-203922-recovery\\ERP-351"
+  }
 }

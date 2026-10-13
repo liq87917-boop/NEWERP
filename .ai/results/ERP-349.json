@@ -1,11 +1,8 @@
 {
   "task": "ERP-349",
-  "status": "completed",
-  "execution_outcome": "completed",
-  "normalized_finish_reason": "build_validated",
-  "cline_exit_code": 0,
-  "cline_finish_reason_raw": "completed",
+  "status": "retry",
+  "execution_outcome": "acceptance_reopened",
   "attempts": 2,
-  "browser_acceptance": null,
-  "finished_at": "2026-10-08T05:26:59.044133Z"
+  "reason": "FinanceReceiptController in FinanceReceiptComplaintControllers.cs GetById loads FinanceReceipt row before CustomerReceiptLifecycleRules.EnsureAuthorizedAsync. Unknown id returns NotFound before identity/menu checks, while existing id rejects missing/disabled/deleted/no-menu caller differently. This leaves original receipt read fail-closed scope requirements incomplete. Require existing CustomerReceiptLifecycleRules.EnsureMenuAuthorizedAsync before every receipt query/lock, then retain scoped ownership and live account revalidation within lifecycle locks. Preserve positive currency-rounded amount, shared receipt funding, customer/agency/invoice allocation guards and immutable void history. Do not alter complaint controller behavior sharing this file.",
+  "original_result_preserved": "D:\\VSCodeProject\\NEWERP.executor.continue-erp-190-20260930080457\\.ai\\logs\\heartbeat-20261013-203922-recovery\\ERP-349"
 }

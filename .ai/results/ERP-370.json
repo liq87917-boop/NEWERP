@@ -1,11 +1,8 @@
 {
   "task": "ERP-370",
-  "status": "completed",
-  "execution_outcome": "completed",
-  "normalized_finish_reason": "build_validated",
-  "cline_exit_code": 0,
-  "cline_finish_reason_raw": "completed",
+  "status": "retry",
+  "execution_outcome": "acceptance_reopened",
   "attempts": 1,
-  "browser_acceptance": null,
-  "finished_at": "2026-10-08T11:57:20.241621Z"
+  "reason": "StockOutController.GetById:68-74 loads receipt row before StockOutAuthorizationRules.EnsureCustomerAuthorizedAsync, and GetMovements:82-83 loads before same check. An unknown id yields NotFound while an existing id yields Unauthorized/Forbidden for missing/disabled/deleted/no-menu caller, contrary to original live stock-out menu before every detail/movement route. Require existing EnsureMenuAuthorizedAsync before any stock-out/source read or lock on all entries, then retain authoritative current customer checks inside deterministic transaction/source locks. No new grants, no source reassignment, unchanged stock quantities/cost/ledger/return/loading reversal guards.",
+  "original_result_preserved": "D:\\VSCodeProject\\NEWERP.executor.continue-erp-190-20260930080457\\.ai\\logs\\heartbeat-20261013-203922-recovery\\ERP-370"
 }
