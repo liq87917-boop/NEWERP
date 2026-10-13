@@ -1,6 +1,6 @@
 {
   "title": "Enforce customer invoice and receipt invoice-allocation authority at every entry",
-  "description": "Close remaining customer invoice/receipt-invoice allocation waivers in the receivable chain. CustomerSalesInvoiceEvidenceController RequiresLiveAuthorization and its scope/customer/invoice helpers return null or skip all checks without HttpContext or when Request.Path and identity are empty. CustomerSalesInvoiceCollectionAllocationController Create/Void directly calls business services under the same condition. Remove these waivers and always resolve current invoice menu/customer scope and existing receipt funding authority, including all source/target customers and trade-document candidates. Preserve concurrency/amount/currency/shared-budget rules and history; no accounting posting, permission changes or grants. Adapt legacy in-process fixtures only by seeding genuine enabled identities, existing menus/role grants and authorized customers in isolated test data. Do not use request-path presence, test environments, synthetic bypass identities, anonymous/admin fallbacks or empty context to waive authority. Preserve all number/quantity/amount/source/transaction/locking rules and audit. Store complete output/TRX under .ai/logs/<task> with explicit results directories; preserve original failures and do not stage generated output. Retain existing live identity/menu/customer-scope authority, transactions, source locks, controlled errors and audit. Reject before numbering or persistence, with zero header/detail/source/status mutations. No new permissions, schema, production access, external service or arbitrary SQL. Genuine SQL only on (localdb)\\NEWERP_AutoAcceptance with Integrated Security and a fresh GUID-owned NEWERP_AUTOTEST database; reject wrong/existing targets and never drop/reset. Require safe Release with analyzers/warnings-as-errors, full units and relevant genuine SQL/browser tests; accurately record blockers and do not claim whole-stage acceptance.",
+  "description": "Close remaining customer invoice/receipt-invoice allocation waivers in the receivable chain. CustomerSalesInvoiceEvidenceController RequiresLiveAuthorization and its scope/customer/invoice helpers return null or skip all checks without HttpContext or when Request.Path and identity are empty. CustomerSalesInvoiceCollectionAllocationController Create/Void directly calls business services under the same condition. Remove these waivers and always resolve current invoice menu/customer scope and existing receipt funding authority, including all source/target customers and trade-document candidates. Preserve concurrency/amount/currency/shared-budget rules and history; no accounting posting, permission changes or grants. Adapt legacy in-process fixtures only by seeding genuine enabled identities, existing menus/role grants and authorized customers in isolated test data. Do not use request-path presence, test environments, synthetic bypass identities, anonymous/admin fallbacks or empty context to waive authority. Preserve all number/quantity/amount/source/transaction/locking rules and audit. Store complete output/TRX under .ai/logs/<task> with explicit results directories; preserve original failures and do not stage generated output. Retain existing live identity/menu/customer-scope authority, transactions, source locks, controlled errors and audit. Reject before numbering or persistence, with zero header/detail/source/status mutations. No new permissions, schema, production access, external service or arbitrary SQL. Genuine SQL only on (localdb)\\NEWERP_AutoAcceptance with Integrated Security and a fresh GUID-owned NEWERP_AUTOTEST database; reject wrong/existing targets and never drop/reset. Require safe Release with analyzers/warnings-as-errors, full units and relevant genuine SQL/browser tests; accurately record blockers and do not claim whole-stage acceptance.\n\n2026-10-13 verified acceptance recovery: CustomerSalesInvoiceEvidenceController.RequiresLiveAuthorization:217 and helper skips at233/243/254/276/297 still return null or waive invoice/candidate/current source customer authority for no HttpContext, contrary to original all-call-shape acceptance. Remove every waiver and make existing customer invoice authority mandatory on all register/candidate/detail/create/edit/record/void entries. Keep already-unconditional collection-allocation controller intact except genuine shared fixture adaptation; preserve receipt funding and invoice amount/currency/concurrency/transaction rules. Remove exemptions completely, including no HttpContext; parse missing actor safely to null for controlled Unauthorized. No internal-call/test-compatibility exceptions or renamed bypass. Adapt fixtures only with genuine enabled identities/existing grants/live masters in isolated databases. Retain original numeric/source/customer/transaction/audit checks. Missing/disabled/no-menu users must be rejected before counts or any business query. Preserve full logs; use explicit .ai/logs/ERP-487 results/TRX directories. Safe Release with analyzers/warnings-as-errors/full units plus real isolated SQL mandatory; no whole-stage claim.",
   "allowed_paths": [
     "src/ERP.Api/Controllers/CustomerSalesInvoiceEvidenceController.cs",
     "src/ERP.Api/Controllers/CustomerSalesInvoiceCollectionAllocationController.cs",
@@ -12,7 +12,9 @@
     "src/ERP.UnitTests/CustomerSalesInvoiceReceiptAllocationExposureTests.cs",
     "src/ERP.UnitTests/CustomerSalesInvoiceEntryAuthorizationTests.cs",
     "src/ERP.IntegrationTests/CustomerSalesInvoiceEntryAuthorizationSqlServerTests.cs",
-    "docs/customer-sales-invoice-entry-authorization.md"
+    "docs/customer-sales-invoice-entry-authorization.md",
+    "src/ERP.UnitTests/CustomerInvoiceCollectionTimingTests.cs",
+    "src/ERP.UnitTests/SalesOrderInvoiceEvidenceTests.cs"
   ],
   "acceptance_criteria": [
     "All customer invoice reads/writes/candidates/record/void/allocation and receipt-invoice allocation entries require live enabled identity and their existing menu/source/customer authority independently of request shape. Missing, disabled, deleted, revoked or foreign-scope identity receives a controlled non-disclosing error before counts, candidates, snapshots or mutations.",
@@ -31,7 +33,9 @@
       "src/ERP.UnitTests/CustomerSalesInvoiceReceiptAllocationExposureTests.cs",
       "src/ERP.UnitTests/CustomerSalesInvoiceEntryAuthorizationTests.cs",
       "src/ERP.IntegrationTests/CustomerSalesInvoiceEntryAuthorizationSqlServerTests.cs",
-      "docs/customer-sales-invoice-entry-authorization.md"
+      "docs/customer-sales-invoice-entry-authorization.md",
+      "src/ERP.UnitTests/CustomerInvoiceCollectionTimingTests.cs",
+      "src/ERP.UnitTests/SalesOrderInvoiceEvidenceTests.cs"
     ],
     "Retain atomic current invoice/receipt funding validation, shared budgets, currency precision, explicit document/customer lineage and audit. Denied reads return no partial financial/customer/doc evidence; denied create/record/allocate/void produces zero invoice/receipt/source/budget/status writes and never broadens permissions.": [
       "src/ERP.Api/Controllers/CustomerSalesInvoiceEvidenceController.cs",
@@ -44,7 +48,9 @@
       "src/ERP.UnitTests/CustomerSalesInvoiceReceiptAllocationExposureTests.cs",
       "src/ERP.UnitTests/CustomerSalesInvoiceEntryAuthorizationTests.cs",
       "src/ERP.IntegrationTests/CustomerSalesInvoiceEntryAuthorizationSqlServerTests.cs",
-      "docs/customer-sales-invoice-entry-authorization.md"
+      "docs/customer-sales-invoice-entry-authorization.md",
+      "src/ERP.UnitTests/CustomerInvoiceCollectionTimingTests.cs",
+      "src/ERP.UnitTests/SalesOrderInvoiceEvidenceTests.cs"
     ],
     "Real isolated SQL plus controller regressions cover populated/empty/no-context entry parity, revoked menus and scopes, genuine permitted invoice/receipt flows and zero-mutation/disclosure denial. Adapt legacy invoice/concurrency/exposure fixtures with existing test grants without weakening controls; pass safe Release/full units and retain full logs/TRX.": [
       "src/ERP.Api/Controllers/CustomerSalesInvoiceEvidenceController.cs",
@@ -57,10 +63,12 @@
       "src/ERP.UnitTests/CustomerSalesInvoiceReceiptAllocationExposureTests.cs",
       "src/ERP.UnitTests/CustomerSalesInvoiceEntryAuthorizationTests.cs",
       "src/ERP.IntegrationTests/CustomerSalesInvoiceEntryAuthorizationSqlServerTests.cs",
-      "docs/customer-sales-invoice-entry-authorization.md"
+      "docs/customer-sales-invoice-entry-authorization.md",
+      "src/ERP.UnitTests/CustomerInvoiceCollectionTimingTests.cs",
+      "src/ERP.UnitTests/SalesOrderInvoiceEvidenceTests.cs"
     ]
   },
-  "implementation_evidence": "CustomerSalesInvoiceEvidenceController.cs:205-209 path-dependent RequiresLiveAuthorization; BuildScopePredicateAsync:224 and BuildTradeDocumentScopePredicateAsync:231 return null, additional invoice/customer/DTO helpers:242/262/276 waive checks. CustomerSalesInvoiceCollectionAllocationController.cs:124/139 bypass Create/Void authorization via RequiresLiveAuthorization:164-168. ERP-383/434 guard normal HTTP but ERP-468 affects different receipt-allocation controllers, so this waiver remains.",
+  "implementation_evidence": "CustomerSalesInvoiceEvidenceController.RequiresLiveAuthorization:217 and helper skips at233/243/254/276/297 still return null or waive invoice/candidate/current source customer authority for no HttpContext, contrary to original all-call-shape acceptance. Remove every waiver and make existing customer invoice authority mandatory on all register/candidate/detail/create/edit/record/void entries. Keep already-unconditional collection-allocation controller intact except genuine shared fixture adaptation; preserve receipt funding and invoice amount/currency/concurrency/transaction rules.",
   "depends_on": [
     "ERP-486",
     "ERP-383",
@@ -69,8 +77,8 @@
   "risk": "medium",
   "planning_stage": 3,
   "id": "ERP-487",
-  "status": "completed",
-  "attempts": 1,
+  "status": "retry",
+  "attempts": 2,
   "max_attempts": 3,
   "validation_profile": "safe",
   "completion_mode": "build",
@@ -85,5 +93,12 @@
     "required": false,
     "scenarios": []
   },
-  "created_at": "2026-10-13T17:24:52.342124Z"
+  "created_at": "2026-10-13T17:24:52.342124Z",
+  "recovery_context": {
+    "at": "2026-10-13T19:11:22.293145Z",
+    "reason": "original acceptance unmet despite build-valid verdict",
+    "original_attempts": 1,
+    "next_attempt_reserved": 2,
+    "preserved_evidence": "D:\\VSCodeProject\\NEWERP.executor.continue-erp-190-20260930080457\\.ai\\logs\\heartbeat-20261013-190922-recovery\\ERP-487"
+  }
 }
