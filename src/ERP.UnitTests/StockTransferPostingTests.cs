@@ -86,6 +86,53 @@ internal static class StockTransferTestAuthorization
     public static StockTransferController CreateAuthorized(ErpDbContext db)
         => ForUser(db, SeedAuthorizedOperator(db));
 
+    /// <summary>播种一张调拨单所需的在用主数据（两侧仓库 + 商品，幂等；ERP-501）。</summary>
+    public static void SeedMasterData(ErpDbContext db, long fromWarehouseId, long toWarehouseId,
+        params long[] productIds)
+    {
+        SeedWarehouse(db, fromWarehouseId);
+        SeedWarehouse(db, toWarehouseId);
+        foreach (var productId in productIds) SeedProduct(db, productId);
+    }
+
+    /// <summary>播种启用 / 停用仓库（幂等；显式 Id 便于测试直接引用）。</summary>
+    public static BaseWarehouse SeedWarehouse(ErpDbContext db, long id, bool enabled = true)
+    {
+        var warehouse = db.BaseWarehouses.FirstOrDefault(w => w.Id == id && !w.IsDeleted);
+        if (warehouse is not null) return warehouse;
+
+        warehouse = new BaseWarehouse
+        {
+            Id = id,
+            WarehouseCode = $"STW-{id}",
+            WarehouseName = $"调拨仓-{id}",
+            Status = enabled ? 1 : 0
+        };
+        db.BaseWarehouses.Add(warehouse);
+        db.SaveChanges();
+        return warehouse;
+    }
+
+    /// <summary>播种启用 / 停用商品（幂等；显式 Id 便于测试直接引用）。</summary>
+    public static BaseProduct SeedProduct(ErpDbContext db, long id, bool enabled = true)
+    {
+        var product = db.BaseProducts.FirstOrDefault(p => p.Id == id && !p.IsDeleted);
+        if (product is not null) return product;
+
+        product = new BaseProduct
+        {
+            Id = id,
+            ProductCode = $"STP-{id}",
+            ProductName = $"调拨商品-{id}",
+            Spec = "规格A",
+            Unit = "PCS",
+            Status = enabled ? 1 : 0
+        };
+        db.BaseProducts.Add(product);
+        db.SaveChanges();
+        return product;
+    }
+
     /// <summary>把指定登录用户 Id（可空 = 无身份）写入控制器 HttpContext。</summary>
     public static StockTransferController ForUser(ErpDbContext db, long? userId)
         => new(db, new DocumentNumberService(db), new InventoryService(db))
@@ -124,7 +171,7 @@ public class StockTransferPostingTests
     {
         using var db = TestDbFactory.Create();
         SeedStock(db, WarehouseA, Product1, quantity: 100m, totalCost: 1000m);   // 均价 10
-        var ctl = StockTransferTestAuthorization.CreateAuthorized(db);
+        var ctl = NewController(db);
         var id = await CreateAndSubmitAsync(ctl, WarehouseA, WarehouseB, (Product1, "P1", 30m, 0m));
 
         await ctl.Approve(id);
@@ -152,7 +199,7 @@ public class StockTransferPostingTests
     {
         using var db = TestDbFactory.Create();
         SeedStock(db, WarehouseA, Product1, quantity: 100m, totalCost: 1000m);
-        var ctl = StockTransferTestAuthorization.CreateAuthorized(db);
+        var ctl = NewController(db);
         var id = await CreateAndSubmitAsync(ctl, WarehouseA, WarehouseB, (Product1, "P1", 40m, 10m));
         await ctl.Approve(id);
 
@@ -177,7 +224,7 @@ public class StockTransferPostingTests
     {
         using var db = TestDbFactory.Create();
         SeedStock(db, WarehouseA, Product1, quantity: 100m, totalCost: 1000m);
-        var authorized = StockTransferTestAuthorization.CreateAuthorized(db);
+        var authorized = NewController(db);
         var id = await CreateAndSubmitAsync(authorized, WarehouseA, WarehouseB, (Product1, "P1", 10m, 10m));
 
         var ctl = StockTransferTestAuthorization.ForUser(db, null);
@@ -196,7 +243,7 @@ public class StockTransferPostingTests
     {
         using var db = TestDbFactory.Create();
         SeedStock(db, WarehouseA, Product1, quantity: 100m, totalCost: 1000m);
-        var authorized = StockTransferTestAuthorization.CreateAuthorized(db);
+        var authorized = NewController(db);
         var id = await CreateAndSubmitAsync(authorized, WarehouseA, WarehouseB, (Product1, "P1", 10m, 10m));
 
         var noMenu = StockTransferTestAuthorization.ForUser(db, StockTransferTestAuthorization.SeedUnauthorizedUser(db));
@@ -242,7 +289,7 @@ public class StockTransferPostingTests
         using var db = TestDbFactory.Create();
         SeedStock(db, WarehouseA, Product1, quantity: 100m, totalCost: 1000m);
         SeedStock(db, WarehouseA, Product2, quantity: 1m, totalCost: 10m);       // 第二行不足
-        var ctl = StockTransferTestAuthorization.CreateAuthorized(db);
+        var ctl = NewController(db);
         var id = await CreateAndSubmitAsync(ctl, WarehouseA, WarehouseB,
             (Product1, "P1", 5m, 0m), (Product2, "P2", 10m, 0m));
 
@@ -263,7 +310,7 @@ public class StockTransferPostingTests
     {
         using var db = TestDbFactory.Create();
         SeedStock(db, WarehouseA, Product1, quantity: 100m, totalCost: 1000m);
-        var ctl = StockTransferTestAuthorization.CreateAuthorized(db);
+        var ctl = NewController(db);
         var id = await CreateAndSubmitAsync(ctl, WarehouseA, WarehouseB, (Product1, "P1", 40m, 10m));
         await ctl.Approve(id);
 
@@ -291,7 +338,7 @@ public class StockTransferPostingTests
     {
         using var db = TestDbFactory.Create();
         SeedStock(db, WarehouseA, Product1, quantity: 100m, totalCost: 1000m);
-        var ctl = StockTransferTestAuthorization.CreateAuthorized(db);
+        var ctl = NewController(db);
         var id = await CreateAndSubmitAsync(ctl, WarehouseA, WarehouseB, (Product1, "P1", 10m, 10m));
         await ctl.Approve(id);
 
@@ -320,7 +367,8 @@ public class StockTransferPostingTests
     public async Task 调拨单_待提交_取消与删除保持既有规则()
     {
         using var db = TestDbFactory.Create();
-        var ctl = StockTransferTestAuthorization.CreateAuthorized(db);
+        StockTransferTestAuthorization.SeedMasterData(db, WarehouseA, WarehouseB, Product1, Product2);
+        var ctl = NewController(db);
 
         var pendingForCancel = await CreateAsync(ctl, WarehouseA, WarehouseB, (Product1, "P1", 1m, 1m));
         await ctl.Cancel(pendingForCancel);
@@ -396,6 +444,17 @@ public class StockTransferPostingTests
     }
 
     // ==================== 测试辅助 ====================
+
+    /// <summary>
+    /// 播种一张调拨单所需的在用主数据（两侧仓库 + 商品）并返回已授权控制器（ERP-501）：
+    /// 创建 / 修改 / 提交现在会校验在用主数据，因此全部原本直接实例化控制器的用例都经此注入真实主数据，
+    /// 不绕过鉴权、不删除任何原有数量 / 成本 / 冲销断言。
+    /// </summary>
+    private static StockTransferController NewController(ErpDbContext db)
+    {
+        StockTransferTestAuthorization.SeedMasterData(db, WarehouseA, WarehouseB, Product1, Product2);
+        return StockTransferTestAuthorization.CreateAuthorized(db);
+    }
 
     private static async Task<long> CreateAsync(StockTransferController ctl, long fromWarehouseId,
         long toWarehouseId, params (long ProductId, string Name, decimal Quantity, decimal UnitCost)[] lines)

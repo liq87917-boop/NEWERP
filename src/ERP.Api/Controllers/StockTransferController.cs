@@ -151,6 +151,14 @@ public class StockTransferController : DocumentControllerBase<StockTransfer>
         // 授权先于单号生成：被拒绝的调用方绝不消耗单据号（SysDocumentNumberRules 不前进）
         await AuthorizeAsync();
         entity.Id = 0;
+        entity.Details ??= new List<StockTransferDetail>();
+
+        // ERP-501：明细形状（正数量 / 非负成本 / 实际存储精度可表示）与在用主数据（两侧仓库与商品）
+        // 先于单号预约与任何单据 / 明细写入；被拒绝方不消耗单据号、不落任何行。
+        StockTransferPostingRules.EnsureLineShape(entity.Details);
+        await StockTransferPostingRules.EnsureLiveMasterDataAsync(
+            Db, entity.FromWarehouseId, entity.ToWarehouseId, entity.Details);
+
         if (string.IsNullOrWhiteSpace(entity.TransferNo))
             entity.TransferNo = await _noService.GenerateAsync(DocumentType.StockTransfer);
         entity.Status = DocumentStatus.Pending;
@@ -179,6 +187,13 @@ public class StockTransferController : DocumentControllerBase<StockTransfer>
                 ?? throw BusinessException.NotFound("调拨单不存在");
             if (GetStatus(existing) != DocumentStatus.Pending)
                 throw BusinessException.RuleConflict("仅待提交状态的单据可修改");
+
+            // ERP-501：明细整体替换之前的同一套草稿护栏（形状 + 可表示性 + 在用主数据）；
+            // 校验先于任何删除 / 写入，被拒绝方不改动既有单据与明细、不消耗单据号。
+            entity.Details ??= new List<StockTransferDetail>();
+            StockTransferPostingRules.EnsureLineShape(entity.Details);
+            await StockTransferPostingRules.EnsureLiveMasterDataAsync(
+                Db, entity.FromWarehouseId, entity.ToWarehouseId, entity.Details);
 
             existing.TransferDate = entity.TransferDate;
             existing.FromWarehouseId = entity.FromWarehouseId;
@@ -371,7 +386,11 @@ public class StockTransferController : DocumentControllerBase<StockTransfer>
         return Ok(ApiResponse<object>.Success(null, "已取消"));
     }
 
-    /// <summary>提交（仅待提交可提交；与审核 / 取消 / 删除共用同一把单据行锁）</summary>
+    /// <summary>
+    /// 提交（仅待提交可提交；与审核 / 取消 / 删除共用同一把单据行锁）
+    /// <para>ERP-501：提交要求至少一行有效明细，且明细形状 / 可表示性与在用主数据有效；空草稿头仍可保存，
+    /// 但不得提交，须先补齐有效明细。</para>
+    /// </summary>
     [HttpPost("{id:long}/submit")]
     public override async Task<IActionResult> Submit(long id)
     {
@@ -382,11 +401,19 @@ public class StockTransferController : DocumentControllerBase<StockTransfer>
                 throw BusinessException.NotFound("调拨单不存在");
             await AuthorizeAsync();
 
-            var entity = await Db.StockTransfers
+            var entity = await Db.StockTransfers.Include(o => o.Details)
                 .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
                 ?? throw BusinessException.NotFound("调拨单不存在");
             if (GetStatus(entity) != DocumentStatus.Pending)
                 throw BusinessException.RuleConflict("当前状态不允许该操作");
+
+            // ERP-501：提交前要求至少一行有效明细，并复核明细形状 / 可表示性与在用主数据（先于任何写入）
+            var details = entity.Details.Where(d => !d.IsDeleted).OrderBy(d => d.SortNo).ToList();
+            if (details.Count == 0)
+                throw BusinessException.RuleConflict("调拨单无明细，不能提交");
+            StockTransferPostingRules.EnsureLineShape(details);
+            await StockTransferPostingRules.EnsureLiveMasterDataAsync(
+                Db, entity.FromWarehouseId, entity.ToWarehouseId, details);
 
             SetStatus(entity, DocumentStatus.Submitted);
             await Db.SaveChangesAsync();

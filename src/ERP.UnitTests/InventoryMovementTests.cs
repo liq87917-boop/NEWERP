@@ -681,8 +681,12 @@ public class InventoryMovementTests
 
     // ERP-354：调拨单全部路由都要求真实已授权身份（既有「库存查询」菜单），
     // 这里注入测试授权身份，保留原有全部数量 / 成本 / 冲销断言，不改业务规则、不绕过鉴权。
+    // ERP-501：创建 / 修改 / 提交还会校验在用主数据（两侧仓库与商品），因此同时播种真实主数据行。
     private static StockTransferController NewTransferController(ErpDbContext db)
-        => StockTransferTestAuthorization.CreateAuthorized(db);
+    {
+        StockTransferTestAuthorization.SeedMasterData(db, WarehouseA, WarehouseB, Product1, Product2);
+        return StockTransferTestAuthorization.CreateAuthorized(db);
+    }
 
     // ERP-357：销售退货全部路由都要求真实已授权身份（既有「销售退货」菜单）与客户数据范围，
     // 来源单必须构成权威来源；这里播种真实业务员身份 + 主数据与来源出库单，保留原有全部数量 / 成本 / 冲销断言。
