@@ -703,4 +703,237 @@ public class FinancePaymentApplyLifecycleTests
         // 已删除的申请单不再可见
         await AssertBusinessCodeAsync(ErrorCodes.NotFound, () => controller.GetById(apply.Id));
     }
+
+    // ==================== 5. 调用方闸门先于任何业务 / 来源 / 主数据读取与行锁（ERP-380 恢复） ====================
+
+    /// <summary>不存在的申请单 Id（未知 Id 绝不泄露「不存在」，也绝不先读行再判权）。</summary>
+    private const long UnknownApplyId = 987654321L;
+
+    private static void MarkUserDeleted(ErpDbContext db, long userId)
+    {
+        db.SysUsers.Single(u => u.Id == userId).IsDeleted = true;
+        db.SaveChanges();
+    }
+
+    private static string RepoFile(params string[] parts)
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "NEWERP.sln"))) dir = dir.Parent;
+        Assert.NotNull(dir);
+        return Path.Combine(new[] { dir!.FullName }.Concat(parts).ToArray());
+    }
+
+    /// <summary>截取 <paramref name="from"/> 签名之后、<paramref name="to"/> 签名之前的源码片段（源码契约断言用）。</summary>
+    private static string Segment(string source, string from, string to)
+    {
+        var start = source.IndexOf(from, StringComparison.Ordinal);
+        Assert.True(start >= 0, $"未找到片段起点：{from}");
+        var end = source.IndexOf(to, start + from.Length, StringComparison.Ordinal);
+        Assert.True(end > start, $"未找到片段终点：{to}");
+        return source[start..end];
+    }
+
+    /// <summary>
+    /// 被拒调用方在<strong>全部</strong>货款申请单路由（列表 / 详情 / 已存储来源 / 来源候选 / 创建 / 修改 / 提交 /
+    /// 审核 / 取消 / 删除）上必须得到<strong>完全相同</strong>的受控拒绝码，且未知 Id 与既有 Id 无差异
+    /// （绝不先读行再判权、绝不因 Id 是否存在而差异化），被拒请求零单号消耗。
+    /// </summary>
+    private static async Task AssertAllRoutesRejectedAsync(
+        FinancePaymentApplyController controller, FakeDocumentNumberService no,
+        long customerId, long existingApplyId, int expectedCode)
+    {
+        await AssertBusinessCodeAsync(expectedCode, () => controller.GetPaged(new PageQuery(), null));
+        await AssertBusinessCodeAsync(expectedCode, () => controller.GetById(existingApplyId));
+        await AssertBusinessCodeAsync(expectedCode, () => controller.GetById(UnknownApplyId));
+        await AssertBusinessCodeAsync(expectedCode, () => controller.GetStoredSalesOrderSource(existingApplyId));
+        await AssertBusinessCodeAsync(expectedCode, () => controller.GetStoredSalesOrderSource(UnknownApplyId));
+        await AssertBusinessCodeAsync(expectedCode,
+            () => controller.GetSalesOrderCandidates(customerId, null, null, 1, 20));
+        await AssertBusinessCodeAsync(expectedCode, () => controller.Create(NewApplyRequest(customerId)));
+        await AssertBusinessCodeAsync(expectedCode,
+            () => controller.Update(existingApplyId, NewApplyRequest(customerId, amount: 200m)));
+        await AssertBusinessCodeAsync(expectedCode, () => controller.Submit(existingApplyId));
+        await AssertBusinessCodeAsync(expectedCode, () => controller.Approve(existingApplyId));
+        await AssertBusinessCodeAsync(expectedCode, () => controller.Cancel(existingApplyId));
+        await AssertBusinessCodeAsync(expectedCode, () => controller.Delete(existingApplyId));
+
+        Assert.Equal(0, no.Calls);
+    }
+
+    [Fact]
+    public async Task 未认证_全部路由与未知Id_受控未认证_零业务查询零占号()
+    {
+        using var db = TestDbFactory.Create();
+        var customer = SeedCustomer(db, "C001", "客户A");
+        var order = SeedSalesOrder(db, "SO-1", customer.Id, Currency.CNY);
+        var apply = SeedApply(db, "HK-1", customer.Id, salesOrderId: order.Id);
+
+        var no = new FakeDocumentNumberService();
+        var controller = BuildController(db, no);
+        TestAuth.SetUser(controller, null);
+
+        await AssertAllRoutesRejectedAsync(controller, no, customer.Id, apply.Id, ErrorCodes.Unauthorized);
+
+        AssertApplyUnchanged(db, apply);
+        Assert.Single(db.FinancePaymentApplies.AsNoTracking().ToList());
+    }
+
+    [Fact]
+    public async Task 账号已删除_全部路由与未知Id_受控未认证_零业务查询()
+    {
+        using var db = TestDbFactory.Create();
+        var (userId, _, _) = SeedOperator(db);
+        var customer = SeedCustomer(db, "C001", "客户A");
+        var apply = SeedApply(db, "HK-1", customer.Id);
+        MarkUserDeleted(db, userId);
+
+        var no = new FakeDocumentNumberService();
+        var controller = BuildController(db, no);
+        TestAuth.SetUser(controller, userId);
+
+        await AssertAllRoutesRejectedAsync(controller, no, customer.Id, apply.Id, ErrorCodes.Unauthorized);
+
+        AssertApplyUnchanged(db, apply);
+    }
+
+    [Fact]
+    public async Task 账号停用_全部路由与未知Id_受控权限不足_零写入零占号()
+    {
+        using var db = TestDbFactory.Create();
+        var (userId, _, _) = SeedOperator(db);
+        var customer = SeedCustomer(db, "C001", "客户A");
+        var apply = SeedApply(db, "HK-1", customer.Id);
+        DisableUser(db, userId);
+
+        var no = new FakeDocumentNumberService();
+        var controller = BuildController(db, no);
+        TestAuth.SetUser(controller, userId);
+
+        await AssertAllRoutesRejectedAsync(controller, no, customer.Id, apply.Id, ErrorCodes.Forbidden);
+
+        AssertApplyUnchanged(db, apply);
+        Assert.Single(db.FinancePaymentApplies.AsNoTracking().ToList());
+    }
+
+    [Fact]
+    public async Task 撤销菜单授权_全部路由与未知Id_受控权限不足_零写入零占号()
+    {
+        using var db = TestDbFactory.Create();
+        var (userId, roleId, _) = SeedOperator(db);
+        var customer = SeedCustomer(db, "C001", "客户A");
+        var apply = SeedApply(db, "HK-1", customer.Id);
+        RevokeApplyMenu(db, roleId);
+
+        var no = new FakeDocumentNumberService();
+        var controller = BuildController(db, no);
+        TestAuth.SetUser(controller, userId);
+
+        await AssertAllRoutesRejectedAsync(controller, no, customer.Id, apply.Id, ErrorCodes.Forbidden);
+
+        AssertApplyUnchanged(db, apply);
+        Assert.Single(db.FinancePaymentApplies.AsNoTracking().ToList());
+    }
+
+    [Fact]
+    public async Task 未绑定请求上下文_纯进程内直调_安全解析为null_受控未认证()
+    {
+        using var db = TestDbFactory.Create();
+        var customer = SeedCustomer(db, "C001", "客户A");
+        var apply = SeedApply(db, "HK-1", customer.Id);
+
+        var no = new FakeDocumentNumberService();
+
+        // (a) 完全没有 HttpContext（未进入请求管线）：身份安全解析为 null → 受控未认证，绝无免授权 / 测试兼容豁免
+        var withoutHttpContext = BuildController(db, no);
+        withoutHttpContext.ControllerContext = new ControllerContext { HttpContext = null! };
+        await AssertAllRoutesRejectedAsync(withoutHttpContext, no, customer.Id, apply.Id, ErrorCodes.Unauthorized);
+        AssertApplyUnchanged(db, apply);
+
+        // (b) 从未绑定任何 ControllerContext：同一套实时授权，同样受控未认证
+        var untouched = BuildController(db, no);
+        await AssertBusinessCodeAsync(ErrorCodes.Unauthorized, () => untouched.GetById(apply.Id));
+        await AssertBusinessCodeAsync(ErrorCodes.Unauthorized, () => untouched.GetById(UnknownApplyId));
+        await AssertBusinessCodeAsync(ErrorCodes.Unauthorized, () => untouched.Cancel(apply.Id));
+        await AssertBusinessCodeAsync(ErrorCodes.Unauthorized, () => untouched.Create(NewApplyRequest(customer.Id)));
+
+        Assert.Equal(0, no.Calls);
+        AssertApplyUnchanged(db, apply);
+    }
+
+    [Fact]
+    public void 源码契约_调用方闸门先于任何读取与行锁_且仅改货款控制器()
+    {
+        var controller = File.ReadAllText(
+            RepoFile("src", "ERP.Api", "Controllers", "FinanceApplyControllers.cs"));
+        var paymentClassIndex = controller.IndexOf(
+            "class FinancePaymentApplyController", StringComparison.Ordinal);
+        Assert.True(paymentClassIndex > 0);
+
+        var deposit = controller[..paymentClassIndex];
+        var payment = controller[paymentClassIndex..];
+        const string gate = "FinancePaymentApplyLifecycleRules.EnsureMenuAuthorizedAsync(Db, CurrentUserId());";
+
+        // 身份只来自已认证请求主体，缺失 / 无 HttpContext 一律安全解析为 null；无请求形状 / 环境变量 / 测试开关探针
+        Assert.Contains("private new long? CurrentUserId()", payment);
+        Assert.Contains(
+            "ControllerContext?.HttpContext?.User?.FindFirst(ClaimTypes.NameIdentifier)?.Value", payment);
+        Assert.DoesNotContain("Request.Path", payment);
+        Assert.DoesNotContain("Environment.", payment);
+        Assert.DoesNotContain("IsInMemory", payment);
+
+        // 详情：闸门先于申请单读取（未知 Id 绝不泄露「不存在」）
+        var getById = Segment(payment,
+            "public async Task<IActionResult> GetById(long id)",
+            "public async Task<IActionResult> GetSalesOrderCandidates(");
+        Assert.True(getById.IndexOf(gate, StringComparison.Ordinal)
+            < getById.IndexOf("Set.AsNoTracking()", StringComparison.Ordinal),
+            "详情必须先复核调用方闸门（身份 + 货款申请单菜单）再读取申请单行");
+
+        // 创建：闸门先于客户 / 来源主数据读取与单号生成
+        var create = Segment(payment,
+            "public async Task<IActionResult> Create([FromBody] FinancePaymentApply entity)",
+            "public async Task<IActionResult> Update(long id, [FromBody] FinancePaymentApply entity)");
+        Assert.True(create.IndexOf(gate, StringComparison.Ordinal)
+            < create.IndexOf("Db.BaseCustomers.AsNoTracking()", StringComparison.Ordinal),
+            "创建必须先复核调用方闸门再读取客户主数据");
+        Assert.True(create.IndexOf(gate, StringComparison.Ordinal)
+            < create.IndexOf("_noService.GenerateAsync", StringComparison.Ordinal),
+            "创建必须先复核调用方闸门再生成申请单号");
+
+        // 修改 / 取消 / 删除 / 提交审核：闸门先于申请单行锁与读取
+        var update = Segment(payment,
+            "public async Task<IActionResult> Update(long id, [FromBody] FinancePaymentApply entity)",
+            "public override Task<IActionResult> Submit(long id)");
+        Assert.True(update.IndexOf(gate, StringComparison.Ordinal)
+            < update.IndexOf("LockApplyRowAsync", StringComparison.Ordinal),
+            "修改必须先复核调用方闸门再取申请单行锁");
+
+        var cancel = Segment(payment,
+            "public override async Task<IActionResult> Cancel(long id)",
+            "public override async Task<IActionResult> Delete(long id)");
+        Assert.True(cancel.IndexOf(gate, StringComparison.Ordinal)
+            < cancel.IndexOf("LockAndLoadApplyAsync", StringComparison.Ordinal),
+            "取消必须先复核调用方闸门再取申请单行锁");
+
+        var delete = Segment(payment,
+            "public override async Task<IActionResult> Delete(long id)",
+            "private async Task<IActionResult> TransitionAsync(");
+        Assert.True(delete.IndexOf(gate, StringComparison.Ordinal)
+            < delete.IndexOf("LockAndLoadApplyAsync", StringComparison.Ordinal),
+            "删除必须先复核调用方闸门再取申请单行锁");
+
+        var transition = Segment(payment,
+            "private async Task<IActionResult> TransitionAsync(",
+            "private async Task<FinancePaymentApply> LockAndLoadApplyAsync(");
+        Assert.True(transition.IndexOf(gate, StringComparison.Ordinal)
+            < transition.IndexOf("LockAndLoadApplyAsync", StringComparison.Ordinal),
+            "提交 / 审核必须先复核调用方闸门再取申请单行锁");
+
+        // 定金申请单控制器（同一文件）未被本次改动触碰：其详情仍是「先读行、再按权威客户收口」
+        var depositGetById = Segment(deposit,
+            "public async Task<IActionResult> GetById(long id)",
+            "public async Task<IActionResult> GetSalesOrderCandidates(");
+        Assert.DoesNotContain("FinancePaymentApplyLifecycleRules", depositGetById);
+        Assert.Contains("FinanceDepositApplyLifecycleRules.EnsureAuthorizedAsync", depositGetById);
+    }
 }

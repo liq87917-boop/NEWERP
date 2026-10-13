@@ -361,6 +361,14 @@ public sealed class FinancePaymentApplyLifecycleSqlServerTests
         await db.SaveChangesAsync();
     }
 
+    /// <summary>软删除登录账号（fail closed：已删除账号一律受控未认证，绝不先读业务行）。</summary>
+    private static async Task DeleteUserAsync(ErpDbContext db, long userId)
+    {
+        var user = await db.SysUsers.SingleAsync(u => u.Id == userId);
+        user.IsDeleted = true;
+        await db.SaveChangesAsync();
+    }
+
     /// <summary>只读复核：用一条独立连接读取申请单权威行（不受被测事务 / 跟踪状态影响）。</summary>
     private async Task<FinancePaymentApply> ReloadApplyAsync(long applyId)
     {
@@ -465,6 +473,161 @@ public sealed class FinancePaymentApplyLifecycleSqlServerTests
         Assert.Equal(disabledBefore.UpdatedAt, disabled.UpdatedAt);
         Assert.Equal(DocumentStatus.Approved, revoked.Status);
         Assert.Equal(revokedBefore.UpdatedAt, revoked.UpdatedAt);
+    }
+
+    /// <summary>
+    /// ERP-380 恢复：调用方闸门（实时启用身份 + 既有货款申请单菜单）必须先于任何申请单读取 / 行锁 ——
+    /// 未知 Id 与既有 Id 对缺失 / 已删除 / 已禁用 / 已撤销菜单 / 无菜单账号给出<strong>完全相同</strong>的受控拒绝，
+    /// 绝不先读行再判权、绝不因 Id 是否存在而差异化，被拒请求零业务查询、零写入、零状态 / 审计变化。
+    /// </summary>
+    [Fact]
+    public async Task Controller_PreReadGate_UnknownAndExistingId_SameControlledRejection_NoWrite()
+    {
+        Guard();
+        var tag = Tag();
+        const long unknownId = 987654321L;
+        long ownerId, ownerCustomerId, disabledId, disabledCustomerId, revokedId, revokedRoleId, revokedCustomerId;
+        long noMenuId, noMenuCustomerId, deletedId, deletedCustomerId;
+        long ownerApplyId, disabledApplyId, revokedApplyId, noMenuApplyId, deletedApplyId;
+
+        await using (var seed = _fixture.CreateDbContext())
+        {
+            var ownerCustomer = await SeedCustomerAsync(seed, $"INT_E380_PRG_OWN_{tag}", "闸门本人客户");
+            ownerCustomerId = ownerCustomer.Id;
+            ownerId = (await SeedOperatorAsync(seed, ownerCustomer.Id)).UserId;
+            ownerApplyId = (await SeedApplyAsync(seed, $"INT_E380_PGA_OWN_{tag}", ownerCustomer.Id, 1000m)).Id;
+
+            var disabledCustomer = await SeedCustomerAsync(seed, $"INT_E380_PRG_DIS_{tag}", "闸门停用客户");
+            disabledCustomerId = disabledCustomer.Id;
+            disabledId = (await SeedOperatorAsync(seed, disabledCustomer.Id)).UserId;
+            disabledApplyId = (await SeedApplyAsync(seed, $"INT_E380_PGA_DIS_{tag}", disabledCustomer.Id, 1000m)).Id;
+            await DisableUserAsync(seed, disabledId);
+
+            var revokedCustomer = await SeedCustomerAsync(seed, $"INT_E380_PRG_REV_{tag}", "闸门撤销客户端");
+            revokedCustomerId = revokedCustomer.Id;
+            (revokedId, revokedRoleId) = await SeedOperatorAsync(seed, revokedCustomer.Id);
+            revokedApplyId = (await SeedApplyAsync(seed, $"INT_E380_PGA_REV_{tag}", revokedCustomer.Id, 1000m)).Id;
+            await RevokeMenuAsync(seed, revokedRoleId);
+
+            // 无货款申请单菜单（仍有既有客户数据范围）：必须与「未知 Id」得到同一受控拒绝，绝不泄露 NotFound
+            var noMenuCustomer = await SeedCustomerAsync(seed, $"INT_E380_PRG_NOM_{tag}", "闸门无菜单客户");
+            noMenuCustomerId = noMenuCustomer.Id;
+            noMenuId = (await SeedOperatorAsync(seed, noMenuCustomer.Id, withApplyMenu: false)).UserId;
+            noMenuApplyId = (await SeedApplyAsync(seed, $"INT_E380_PGA_NOM_{tag}", noMenuCustomer.Id, 1000m)).Id;
+
+            // 已删除账号
+            var deletedCustomer = await SeedCustomerAsync(seed, $"INT_E380_PRG_DEL_{tag}", "闸门已删除账号客户");
+            deletedCustomerId = deletedCustomer.Id;
+            deletedId = (await SeedOperatorAsync(seed, deletedCustomer.Id)).UserId;
+            deletedApplyId = (await SeedApplyAsync(seed, $"INT_E380_PGA_DEL_{tag}", deletedCustomer.Id, 1000m)).Id;
+            await DeleteUserAsync(seed, deletedId);
+        }
+
+        var ownerBefore = await ReloadApplyAsync(ownerApplyId);
+        var disabledBefore = await ReloadApplyAsync(disabledApplyId);
+        var revokedBefore = await ReloadApplyAsync(revokedApplyId);
+        var noMenuBefore = await ReloadApplyAsync(noMenuApplyId);
+        var deletedBefore = await ReloadApplyAsync(deletedApplyId);
+
+        await using (var db = _fixture.CreateDbContext())
+        {
+            // 缺失身份：未知 Id 与既有 Id 一律受控未认证（未知 Id 绝不先读行、绝不返回 NotFound）
+            var anonymous = NewApplyController(db, null);
+            await AssertBusinessCodeAsync(ErrorCodes.Unauthorized, () => anonymous.GetById(ownerApplyId));
+            await AssertBusinessCodeAsync(ErrorCodes.Unauthorized, () => anonymous.GetById(unknownId));
+            await AssertBusinessCodeAsync(ErrorCodes.Unauthorized, () => anonymous.Cancel(ownerApplyId));
+            await AssertBusinessCodeAsync(ErrorCodes.Unauthorized,
+                () => anonymous.Update(ownerApplyId, NewApplyRequest(ownerCustomerId, 300m)));
+        }
+
+        await using (var db = _fixture.CreateDbContext())
+        {
+            var disabled = NewApplyController(db, disabledId);
+            await AssertBusinessCodeAsync(ErrorCodes.Forbidden, () => disabled.GetById(disabledApplyId));
+            await AssertBusinessCodeAsync(ErrorCodes.Forbidden, () => disabled.GetById(unknownId));
+            await AssertBusinessCodeAsync(ErrorCodes.Forbidden,
+                () => disabled.Update(disabledApplyId, NewApplyRequest(disabledCustomerId, 300m)));
+            await AssertBusinessCodeAsync(ErrorCodes.Forbidden, () => disabled.Cancel(disabledApplyId));
+            await AssertBusinessCodeAsync(ErrorCodes.Forbidden, () => disabled.Delete(disabledApplyId));
+            await AssertBusinessCodeAsync(ErrorCodes.Forbidden, () => disabled.Submit(disabledApplyId));
+            await AssertBusinessCodeAsync(ErrorCodes.Forbidden,
+                () => disabled.GetStoredSalesOrderSource(disabledApplyId));
+        }
+
+        await using (var db = _fixture.CreateDbContext())
+        {
+            var revoked = NewApplyController(db, revokedId);
+            await AssertBusinessCodeAsync(ErrorCodes.Forbidden, () => revoked.GetById(revokedApplyId));
+            await AssertBusinessCodeAsync(ErrorCodes.Forbidden, () => revoked.GetById(unknownId));
+            await AssertBusinessCodeAsync(ErrorCodes.Forbidden,
+                () => revoked.Update(revokedApplyId, NewApplyRequest(revokedCustomerId, 300m)));
+            await AssertBusinessCodeAsync(ErrorCodes.Forbidden, () => revoked.Cancel(revokedApplyId));
+            await AssertBusinessCodeAsync(ErrorCodes.Forbidden, () => revoked.Delete(revokedApplyId));
+            await AssertBusinessCodeAsync(ErrorCodes.Forbidden, () => revoked.Approve(revokedApplyId));
+        }
+
+        await using (var db = _fixture.CreateDbContext())
+        {
+            // 无货款申请单菜单：未知 Id 与既有 Id 同为权限不足（绝不因 Id 是否存在而差异化）
+            var noMenu = NewApplyController(db, noMenuId);
+            await AssertBusinessCodeAsync(ErrorCodes.Forbidden, () => noMenu.GetById(noMenuApplyId));
+            await AssertBusinessCodeAsync(ErrorCodes.Forbidden, () => noMenu.GetById(unknownId));
+            await AssertBusinessCodeAsync(ErrorCodes.Forbidden,
+                () => noMenu.Update(noMenuApplyId, NewApplyRequest(noMenuCustomerId, 300m)));
+            await AssertBusinessCodeAsync(ErrorCodes.Forbidden, () => noMenu.Cancel(noMenuApplyId));
+            await AssertBusinessCodeAsync(ErrorCodes.Forbidden, () => noMenu.Delete(noMenuApplyId));
+            await AssertBusinessCodeAsync(ErrorCodes.Forbidden,
+                () => noMenu.GetSalesOrderCandidates(noMenuCustomerId, null, null, 1, 20));
+        }
+
+        await using (var db = _fixture.CreateDbContext())
+        {
+            // 已删除账号：一律受控未认证
+            var deleted = NewApplyController(db, deletedId);
+            await AssertBusinessCodeAsync(ErrorCodes.Unauthorized, () => deleted.GetById(deletedApplyId));
+            await AssertBusinessCodeAsync(ErrorCodes.Unauthorized, () => deleted.GetById(unknownId));
+            await AssertBusinessCodeAsync(ErrorCodes.Unauthorized,
+                () => deleted.Update(deletedApplyId, NewApplyRequest(deletedCustomerId, 300m)));
+            await AssertBusinessCodeAsync(ErrorCodes.Unauthorized, () => deleted.Cancel(deletedApplyId));
+            await AssertBusinessCodeAsync(ErrorCodes.Unauthorized, () => deleted.Delete(deletedApplyId));
+        }
+
+        // 正向对照：同一套闸门下，具备实时启用身份 + 既有菜单 + 权威客户范围的本人账号可读（闸门只拦被拒调用方）
+        await using (var db = _fixture.CreateDbContext())
+        {
+            Assert.IsType<OkObjectResult>(await NewApplyController(db, ownerId).GetById(ownerApplyId));
+        }
+
+        // 被拒请求零写入：状态 / 商业字段 / 删除标记 / 审计时间戳全部不变
+        var ownerAfter = await ReloadApplyAsync(ownerApplyId);
+        Assert.Equal(ownerBefore.Status, ownerAfter.Status);
+        Assert.Equal(ownerBefore.Amount, ownerAfter.Amount);
+        Assert.Equal(ownerBefore.UpdatedAt, ownerAfter.UpdatedAt);
+        Assert.False(ownerAfter.IsDeleted);
+
+        var disabledAfter = await ReloadApplyAsync(disabledApplyId);
+        Assert.Equal(disabledBefore.Status, disabledAfter.Status);
+        Assert.Equal(disabledBefore.Amount, disabledAfter.Amount);
+        Assert.Equal(disabledBefore.UpdatedAt, disabledAfter.UpdatedAt);
+        Assert.False(disabledAfter.IsDeleted);
+
+        var revokedAfter = await ReloadApplyAsync(revokedApplyId);
+        Assert.Equal(revokedBefore.Status, revokedAfter.Status);
+        Assert.Equal(revokedBefore.Amount, revokedAfter.Amount);
+        Assert.Equal(revokedBefore.UpdatedAt, revokedAfter.UpdatedAt);
+        Assert.False(revokedAfter.IsDeleted);
+
+        var noMenuAfter = await ReloadApplyAsync(noMenuApplyId);
+        Assert.Equal(noMenuBefore.Status, noMenuAfter.Status);
+        Assert.Equal(noMenuBefore.Amount, noMenuAfter.Amount);
+        Assert.Equal(noMenuBefore.UpdatedAt, noMenuAfter.UpdatedAt);
+        Assert.False(noMenuAfter.IsDeleted);
+
+        var deletedAfter = await ReloadApplyAsync(deletedApplyId);
+        Assert.Equal(deletedBefore.Status, deletedAfter.Status);
+        Assert.Equal(deletedBefore.Amount, deletedAfter.Amount);
+        Assert.Equal(deletedBefore.UpdatedAt, deletedAfter.UpdatedAt);
+        Assert.False(deletedAfter.IsDeleted);
     }
 
     [Fact]

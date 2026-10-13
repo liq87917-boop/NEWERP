@@ -1,8 +1,11 @@
 {
   "task": "ERP-380",
-  "status": "retry",
-  "execution_outcome": "acceptance_reopened",
-  "attempts": 1,
-  "reason": "FinancePaymentApplyController.GetById in FinanceApplyControllers.cs:405-410 loads application before live FinancePaymentApplyLifecycleRules.EnsureAuthorizedAsync. Unknown id returns NotFound while existing id rejects missing/disabled/deleted/no-menu caller differently, violating original identity/menu before rows. Lifecycle paths likewise lock/read before caller gate. Require existing payment-apply menu and live identity before all business/source/master reads or locks; preserve current scope revalidation under application then payment locks, explicit sales-order/source/customer/currency integrity and payment-reference cancellation guards. Modify only payment application controller in shared file, keep deposit controller unchanged.",
-  "original_result_preserved": "D:\\VSCodeProject\\NEWERP.executor.continue-erp-190-20260930080457\\.ai\\logs\\heartbeat-20261013-210922-recovery\\ERP-380"
+  "status": "completed",
+  "execution_outcome": "completed",
+  "normalized_finish_reason": "build_validated",
+  "cline_exit_code": 0,
+  "cline_finish_reason_raw": "completed",
+  "attempts": 2,
+  "browser_acceptance": null,
+  "finished_at": "2026-10-13T21:26:12.873450Z"
 }

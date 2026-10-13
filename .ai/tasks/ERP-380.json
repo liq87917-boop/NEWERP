@@ -77,7 +77,7 @@
   "risk": "medium",
   "planning_stage": 3,
   "id": "ERP-380",
-  "status": "retry",
+  "status": "completed",
   "attempts": 2,
   "max_attempts": 3,
   "validation_profile": "safe",
@@ -93,12 +93,5 @@
     "required": false,
     "scenarios": []
   },
-  "created_at": "2026-10-08T13:32:14.679762Z",
-  "recovery_context": {
-    "at": "2026-10-13T21:13:40.692094Z",
-    "reason": "original acceptance unmet despite build-valid verdict",
-    "original_attempts": 1,
-    "next_attempt_reserved": 2,
-    "preserved_evidence": "D:\\VSCodeProject\\NEWERP.executor.continue-erp-190-20260930080457\\.ai\\logs\\heartbeat-20261013-210922-recovery\\ERP-380"
-  }
+  "created_at": "2026-10-08T13:32:14.679762Z"
 }

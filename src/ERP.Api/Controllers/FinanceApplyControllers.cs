@@ -6,6 +6,7 @@ using ERP.Domain.Entities;
 using ERP.Domain.Enums;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.Security.Claims;
 
 namespace ERP.Api.Controllers;
 
@@ -363,14 +364,20 @@ public class FinanceDepositApplyController : DocumentControllerBase<FinanceDepos
 }
 
 /// <summary>
-/// 货款申请单控制器（ERP-380 生命周期护栏）：列表 / 详情 / 创建 / 修改 / 提交 / 审核 / 取消 / 删除与读取都重新校验
-/// 实时启用身份（账号存在、未删除且启用）、货款申请单（payment-apply）菜单授权与当前权威客户数据范围；创建 / 修改
-/// 校验真实可用客户、受支持币种、按币种精度取整后大于 0 的金额、大于 0 的汇率，并按 Id 校验可空来源销售订单
-/// （必须既有 / 未删除 / 未取消 / 客户一致 / 币种兼容；空来源保留历史「未关联来源」语义，绝不按文本猜测）。
+/// 货款申请单控制器（ERP-380 生命周期护栏）：列表 / 详情 / 创建 / 修改 / 提交 / 审核 / 取消 / 删除与来源读取
+/// <strong>一律先复核调用方闸门</strong>（实时启用身份 + 既有货款申请单（<c>payment-apply</c>）菜单授权），
+/// 之后才允许任何申请单行 / 客户 · 销售订单 · 付款单主数据读取、计数、取行、单号生成或行锁；因此未知 Id 与既有 Id
+/// 对缺失 / 已删除 / 已禁用 / 无菜单账号给出**完全相同**的受控拒绝（受控未认证 / 权限不足），
+/// 绝不先读行再判权、绝不因 Id 是否存在而差异化，也绝不让被拒调用方触及任何业务查询。
+/// <para>闸门之后仍在申请单行锁内按**权威客户**重做完整三重授权（实时身份 / 菜单 / 客户数据范围）——
+/// 既有持久化客户与请求客户都必须在当前范围之内（被拒编辑绝不改写原始字段）；创建 / 修改校验真实可用客户、
+/// 受支持币种、按币种精度取整后大于 0 的金额、大于 0 的汇率，并按 Id 精确校验可空来源销售订单
+/// （必须既有 / 未删除 / 未取消 / 客户一致 / 币种兼容；空来源保留历史「未关联来源」语义，绝不按文本猜测）。</para>
 /// <para>存在未删除且未取消的引用付款单时拒绝取消 / 删除或修改客户 / 来源 / 币种 / 金额 / 汇率（显式取消的付款单释放
 /// 限制但历史与审计原样保留）。修改 / 提交 / 审核 / 取消 / 删除五个动作都在同一事务内先取申请单行锁
 /// （ERP-380 锁序：先来源申请单行、后付款单行），再加载权威状态 / 字段并在锁内复核实时身份 / 菜单授权 / 客户数据范围 /
 /// 引用付款护栏与允许的状态流转；任一步失败整体回滚，状态、原始字段与审计不变。</para>
+/// <para>定金申请单控制器（<see cref="FinanceDepositApplyController"/>）路由与语义保持不变。</para>
 /// </summary>
 [Route("api/finance/payment-applies")]
 public class FinancePaymentApplyController : DocumentControllerBase<FinancePaymentApply>
@@ -380,6 +387,21 @@ public class FinancePaymentApplyController : DocumentControllerBase<FinancePayme
     public FinancePaymentApplyController(IErpDbContext db, IDocumentNumberService noService) : base(db)
     {
         _noService = noService;
+    }
+
+    /// <summary>
+    /// 当前登录用户 Id（ERP-380）：只来自已认证请求主体（<c>ClaimTypes.NameIdentifier</c>）；缺失 / 非数字 /
+    /// 非正数 / <strong>未绑定请求上下文（<c>ControllerContext.HttpContext</c> 为 <c>null</c>）</strong>一律安全解析为
+    /// <c>null</c>，由既有 <see cref="FinancePaymentApplyLifecycleRules.EnsureMenuAuthorizedAsync"/> 在触及任何申请单行 /
+    /// 客户 · 销售订单 · 付款单主数据读取、计数、取行、单号生成或行锁<strong>之前</strong>返回受控未认证（fail closed）。
+    /// <para>这里<strong>不是</strong>免授权或测试兼容边界：不存在「无请求上下文 / 空路径 / 匿名进程内直调」豁免，
+    /// 也不读取请求路径、环境变量、数据库提供程序或任何测试开关；绝不猜测身份、绝不回退为匿名或管理员，
+    /// 也没有内部直调 / 改名旁路。</para>
+    /// </summary>
+    private new long? CurrentUserId()
+    {
+        var value = ControllerContext?.HttpContext?.User?.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        return long.TryParse(value, out var id) && id > 0 ? id : null;
     }
 
     /// <summary>分页：身份 / 菜单授权与客户数据范围在计数与取行之前生效（受限制账号看不到范围外申请单）。</summary>
@@ -400,13 +422,23 @@ public class FinancePaymentApplyController : DocumentControllerBase<FinancePayme
             new PagedResult<FinancePaymentApply> { Items = items, Total = total, Page = query.Page, PageSize = query.PageSize }));
     }
 
-    /// <summary>详情：按申请单权威客户做身份 / 菜单授权 / 客户数据范围复核，越界 fail closed。</summary>
+    /// <summary>
+    /// 详情：<strong>先</strong>复核实时启用身份 + 既有货款申请单菜单授权（调用方闸门），之后才读取申请单行；
+    /// 读取后再按申请单权威客户收口客户数据范围，越界 fail closed。
+    /// <para>未知 Id 与既有 Id 对缺失 / 已禁用 / 已删除 / 无菜单账号给出完全相同的受控拒绝（受控未认证 / 权限不足），
+    /// 绝不先读行再判权、绝不因 Id 是否存在而差异化，也绝不让被拒调用方触及任何业务查询。</para>
+    /// </summary>
     [HttpGet("{id:long}")]
     public async Task<IActionResult> GetById(long id)
     {
+        // 调用方闸门先于任何申请单读取：未知 Id 绝不泄露「不存在」，被拒方零业务查询。
+        await FinancePaymentApplyLifecycleRules.EnsureMenuAuthorizedAsync(Db, CurrentUserId());
+
         var entity = await Set.AsNoTracking()
             .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
             ?? throw BusinessException.NotFound("货款申请单不存在");
+
+        // 读取后仍按实时身份 / 货款申请单菜单 / 权威客户数据范围收口（越界 fail closed，不泄露范围外申请单）。
         await FinancePaymentApplyLifecycleRules.EnsureAuthorizedAsync(Db, CurrentUserId(), entity.CustomerId);
         return Ok(ApiResponse<FinancePaymentApply>.Success(entity));
     }
@@ -472,6 +504,9 @@ public class FinancePaymentApplyController : DocumentControllerBase<FinancePayme
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] FinancePaymentApply entity)
     {
+        // 调用方闸门先于任何客户 · 来源主数据读取与单号生成：缺失 / 已禁用 / 已删除 / 无菜单账号零业务查询、零占号。
+        await FinancePaymentApplyLifecycleRules.EnsureMenuAuthorizedAsync(Db, CurrentUserId());
+
         // ERP-391：表单显式断开链接（留空 → 0）归一化为 null，保留历史「未关联来源」语义。
         entity.SalesOrderId = entity.SalesOrderId is > 0 ? entity.SalesOrderId : null;
         var currency = FinancePaymentApplyLifecycleRules.NormalizeApplyCurrency(entity.Currency);
@@ -510,6 +545,10 @@ public class FinancePaymentApplyController : DocumentControllerBase<FinancePayme
     [HttpPut("{id:long}")]
     public async Task<IActionResult> Update(long id, [FromBody] FinancePaymentApply entity)
     {
+        // 调用方闸门先于任何行锁 / 申请单行读取 / 客户 · 来源主数据读取：缺失 / 已禁用 / 已删除 / 无菜单账号
+        // 在触及任何业务查询之前即被受控拒绝（绝不先加锁再判权）。
+        await FinancePaymentApplyLifecycleRules.EnsureMenuAuthorizedAsync(Db, CurrentUserId());
+
         // ERP-391：表单显式断开链接（留空 → 0）归一化为 null，保留历史「未关联来源」语义。
         entity.SalesOrderId = entity.SalesOrderId is > 0 ? entity.SalesOrderId : null;
         await using var transaction = FinancePaymentApplyLifecycleRules.IsRelationalProvider(Db)
@@ -591,6 +630,9 @@ public class FinancePaymentApplyController : DocumentControllerBase<FinancePayme
     [HttpPost("{id:long}/cancel")]
     public override async Task<IActionResult> Cancel(long id)
     {
+        // 调用方闸门先于任何申请单行锁 / 读取：被拒账号零业务查询、零状态变化。
+        await FinancePaymentApplyLifecycleRules.EnsureMenuAuthorizedAsync(Db, CurrentUserId());
+
         await using var transaction = FinancePaymentApplyLifecycleRules.IsRelationalProvider(Db)
             ? await Db.Database.BeginTransactionAsync()
             : null;
@@ -619,6 +661,9 @@ public class FinancePaymentApplyController : DocumentControllerBase<FinancePayme
     [HttpDelete("{id:long}")]
     public override async Task<IActionResult> Delete(long id)
     {
+        // 调用方闸门先于任何申请单行锁 / 读取：被拒账号零业务查询、零删除标记变化。
+        await FinancePaymentApplyLifecycleRules.EnsureMenuAuthorizedAsync(Db, CurrentUserId());
+
         await using var transaction = FinancePaymentApplyLifecycleRules.IsRelationalProvider(Db)
             ? await Db.Database.BeginTransactionAsync()
             : null;
@@ -648,6 +693,9 @@ public class FinancePaymentApplyController : DocumentControllerBase<FinancePayme
     private async Task<IActionResult> TransitionAsync(
         long id, DocumentStatus from, DocumentStatus to, string message)
     {
+        // 调用方闸门先于任何申请单行锁 / 读取：被拒账号零业务查询、零状态变化。
+        await FinancePaymentApplyLifecycleRules.EnsureMenuAuthorizedAsync(Db, CurrentUserId());
+
         await using var transaction = FinancePaymentApplyLifecycleRules.IsRelationalProvider(Db)
             ? await Db.Database.BeginTransactionAsync()
             : null;
