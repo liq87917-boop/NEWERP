@@ -1,0 +1,104 @@
+{
+  "title": "Restore canonical sales stock-out form and server-numbered HTTP entry",
+  "description": "Make the existing stock-out menu choose its already implemented canonical EF api/stock-outs module and explicit sales-order source selector, with no legacy stored-procedure write adapter or Oid/Id mapping. StockOut.StockOutNo has Required with empty default while Create assigns the server number; allow omitted-number requests through genuine MVC binding, preserve server-owned identity/status and ensure rejected business values consume no number. Keep source ownership, remaining sales-order capacity, inventory sufficiency/cost, approved returns and loading references authoritative. Preserve manual unlinked historical-compatible entry where supported and current document page/drawer behavior. Use self-contained ephemeral JWT configuration in isolated test API processes without reading production settings. Retain existing live identity/menu/customer-scope authority, transactions, source locks, controlled errors and audit. Reject before numbering or persistence, with zero header/detail/source/status mutations. No new permissions, schema, production access, external service or arbitrary SQL. Genuine SQL only on (localdb)\\NEWERP_AutoAcceptance with Integrated Security and a fresh GUID-owned NEWERP_AUTOTEST database; reject wrong/existing targets and never drop/reset. Require safe Release with analyzers/warnings-as-errors, full units and relevant genuine SQL/browser tests; accurately record blockers and do not claim whole-stage acceptance.",
+  "allowed_paths": [
+    "src/ERP.Domain/Entities/Logistics.cs",
+    "src/ERP.Api/Controllers/StockOutController.cs",
+    "src/ERP.Api/wwwroot/js/bill-v2.js",
+    "src/ERP.Api/wwwroot/js/modules-doc2.js",
+    "src/ERP.Api/wwwroot/js/crud.js",
+    "src/ERP.Api/wwwroot/js/stock-out-source-picker.js",
+    "src/ERP.UnitTests/StockOutControllerTests.cs",
+    "src/ERP.UnitTests/StockOutOrderFulfillmentTests.cs",
+    "src/ERP.UnitTests/StockOutSourceSelectionTests.cs",
+    "src/ERP.UnitTests/StockOutWriteScopeRegressionTests.cs",
+    "src/ERP.UnitTests/StockOutTestAuthorization.cs",
+    "src/ERP.UnitTests/StockOutCanonicalEntryTests.cs",
+    "src/ERP.IntegrationTests/StockOutCanonicalEntrySqlServerTests.cs",
+    "tests/stock-out-canonical-entry.browser.js",
+    "docs/stock-out-canonical-entry.md"
+  ],
+  "acceptance_criteria": [
+    "The authorized stock-out menu opens api/stock-outs with canonical IDs; omitted-number HTTP creation returns a server number, and save/reload/edit main/detail rows and explicit sales-order remaining-capacity selection work through existing current-scope endpoints. Keep manual unlinked entry explicit and legacy history separate.",
+    "Valid typed fields and source detail payloads pass existing validation; submit/approve posts outbound stock and cost exactly once in existing transactions. Overdelivery, insufficient inventory, stale/deleted source, unauthorized customer and invalid quantity/amount cases fail atomically before numbering or posting. Existing approved return/loading-reference reversal guards are preserved.",
+    "Real isolated SQL/HTTP tests cover binding, round trip, manual and linked source paths, valid posting/reversal and rejected zero inventory/movement/source/number changes. Browser proof must use real permitted API writes or record an actual environment blocker; preserve source-picker tests and safe Release/full unit regressions."
+  ],
+  "criterion_path_map": {
+    "The authorized stock-out menu opens api/stock-outs with canonical IDs; omitted-number HTTP creation returns a server number, and save/reload/edit main/detail rows and explicit sales-order remaining-capacity selection work through existing current-scope endpoints. Keep manual unlinked entry explicit and legacy history separate.": [
+      "src/ERP.Domain/Entities/Logistics.cs",
+      "src/ERP.Api/Controllers/StockOutController.cs",
+      "src/ERP.Api/wwwroot/js/bill-v2.js",
+      "src/ERP.Api/wwwroot/js/modules-doc2.js",
+      "src/ERP.Api/wwwroot/js/crud.js",
+      "src/ERP.Api/wwwroot/js/stock-out-source-picker.js",
+      "src/ERP.UnitTests/StockOutControllerTests.cs",
+      "src/ERP.UnitTests/StockOutOrderFulfillmentTests.cs",
+      "src/ERP.UnitTests/StockOutSourceSelectionTests.cs",
+      "src/ERP.UnitTests/StockOutWriteScopeRegressionTests.cs",
+      "src/ERP.UnitTests/StockOutTestAuthorization.cs",
+      "src/ERP.UnitTests/StockOutCanonicalEntryTests.cs",
+      "src/ERP.IntegrationTests/StockOutCanonicalEntrySqlServerTests.cs",
+      "tests/stock-out-canonical-entry.browser.js",
+      "docs/stock-out-canonical-entry.md"
+    ],
+    "Valid typed fields and source detail payloads pass existing validation; submit/approve posts outbound stock and cost exactly once in existing transactions. Overdelivery, insufficient inventory, stale/deleted source, unauthorized customer and invalid quantity/amount cases fail atomically before numbering or posting. Existing approved return/loading-reference reversal guards are preserved.": [
+      "src/ERP.Domain/Entities/Logistics.cs",
+      "src/ERP.Api/Controllers/StockOutController.cs",
+      "src/ERP.Api/wwwroot/js/bill-v2.js",
+      "src/ERP.Api/wwwroot/js/modules-doc2.js",
+      "src/ERP.Api/wwwroot/js/crud.js",
+      "src/ERP.Api/wwwroot/js/stock-out-source-picker.js",
+      "src/ERP.UnitTests/StockOutControllerTests.cs",
+      "src/ERP.UnitTests/StockOutOrderFulfillmentTests.cs",
+      "src/ERP.UnitTests/StockOutSourceSelectionTests.cs",
+      "src/ERP.UnitTests/StockOutWriteScopeRegressionTests.cs",
+      "src/ERP.UnitTests/StockOutTestAuthorization.cs",
+      "src/ERP.UnitTests/StockOutCanonicalEntryTests.cs",
+      "src/ERP.IntegrationTests/StockOutCanonicalEntrySqlServerTests.cs",
+      "tests/stock-out-canonical-entry.browser.js",
+      "docs/stock-out-canonical-entry.md"
+    ],
+    "Real isolated SQL/HTTP tests cover binding, round trip, manual and linked source paths, valid posting/reversal and rejected zero inventory/movement/source/number changes. Browser proof must use real permitted API writes or record an actual environment blocker; preserve source-picker tests and safe Release/full unit regressions.": [
+      "src/ERP.Domain/Entities/Logistics.cs",
+      "src/ERP.Api/Controllers/StockOutController.cs",
+      "src/ERP.Api/wwwroot/js/bill-v2.js",
+      "src/ERP.Api/wwwroot/js/modules-doc2.js",
+      "src/ERP.Api/wwwroot/js/crud.js",
+      "src/ERP.Api/wwwroot/js/stock-out-source-picker.js",
+      "src/ERP.UnitTests/StockOutControllerTests.cs",
+      "src/ERP.UnitTests/StockOutOrderFulfillmentTests.cs",
+      "src/ERP.UnitTests/StockOutSourceSelectionTests.cs",
+      "src/ERP.UnitTests/StockOutWriteScopeRegressionTests.cs",
+      "src/ERP.UnitTests/StockOutTestAuthorization.cs",
+      "src/ERP.UnitTests/StockOutCanonicalEntryTests.cs",
+      "src/ERP.IntegrationTests/StockOutCanonicalEntrySqlServerTests.cs",
+      "tests/stock-out-canonical-entry.browser.js",
+      "docs/stock-out-canonical-entry.md"
+    ]
+  },
+  "implementation_evidence": "bill-v2.js:28 keeps stock-out in the legacy map despite modules-doc2.js:91-110 providing api/stock-outs and stock-out-source selector. app.js dispatches legacy map first and ERP-404 blocks legacy mutation. Logistics.cs:95-96 marks StockOutNo Required with empty default while StockOutController.Create:134 generates StockOutNo. ERP-376 closes source selection but leaves menu dispatch/model binding unreachable.",
+  "depends_on": [
+    "ERP-477",
+    "ERP-376"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "id": "ERP-478",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-13T15:01:50.040326Z"
+}

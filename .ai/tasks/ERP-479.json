@@ -1,0 +1,106 @@
+{
+  "title": "Restore canonical customer receipt and supplier payment form entry",
+  "description": "Complete the cash-evidence ends of the core sales/procurement chain through existing canonical finance modules. BILL_CODE_MAP receipt/payment still overrides MODULES configured for api/finance/receipts and api/finance/payments, taking users to legacy writers whose mutation policy intentionally refuses writes. Route these existing authorized menus to canonical modules with canonical IDs; do not enable legacy writes or infer Oid/Id mappings. FinanceReceipt.ReceiptNo and FinancePayment.PaymentNo are Required with empty defaults although controllers allocate them. Restore blank-number HTTP binding while preserving server-owned identity/status, positive currency-safe amounts, source application/sales ownership, live current authority and shared allocation budgets. Forms must retain correct typed nullable references and reach existing allocation registers from saved canonical rows; use existing service paths only, no ledger backfill or automatic financial assignment. Isolated HTTP fixtures generate ephemeral process-local JWT keys and never use production settings. Retain existing live identity/menu/customer-scope authority, transactions, source locks, controlled errors and audit. Reject before numbering or persistence, with zero header/detail/source/status mutations. No new permissions, schema, production access, external service or arbitrary SQL. Genuine SQL only on (localdb)\\NEWERP_AutoAcceptance with Integrated Security and a fresh GUID-owned NEWERP_AUTOTEST database; reject wrong/existing targets and never drop/reset. Require safe Release with analyzers/warnings-as-errors, full units and relevant genuine SQL/browser tests; accurately record blockers and do not claim whole-stage acceptance.",
+  "allowed_paths": [
+    "src/ERP.Domain/Entities/Finance1.cs",
+    "src/ERP.Domain/Entities/Finance2.cs",
+    "src/ERP.Api/Controllers/FinanceReceiptComplaintControllers.cs",
+    "src/ERP.Api/Controllers/FinancePaymentController.cs",
+    "src/ERP.Api/wwwroot/js/bill-v2.js",
+    "src/ERP.Api/wwwroot/js/modules-finance.js",
+    "src/ERP.Api/wwwroot/js/crud.js",
+    "src/ERP.UnitTests/CustomerReceiptLifecycleTests.cs",
+    "src/ERP.UnitTests/SupplierPaymentLifecycleTests.cs",
+    "src/ERP.UnitTests/CustomerReceiptAllocationTests.cs",
+    "src/ERP.UnitTests/SupplierPaymentAllocationTests.cs",
+    "src/ERP.UnitTests/ReceiptPaymentCanonicalEntryTests.cs",
+    "src/ERP.IntegrationTests/ReceiptPaymentCanonicalEntrySqlServerTests.cs",
+    "tests/receipt-payment-canonical-entry.browser.js",
+    "docs/receipt-payment-canonical-entry.md"
+  ],
+  "acceptance_criteria": [
+    "Existing receipt/payment menus select their canonical modules, and genuine authenticated blank-number HTTP create/save/reload/edit returns server-owned canonical ID/number/state. Valid manual receipt/payment and explicitly linked application/order flows remain usable without legacy-ID remapping or expanded permission.",
+    "Canonical typed fields reach existing monetary/reference/transaction validators; lifecycle and active shared-budget allocations remain authoritative. Invalid currencies/amounts, stale source, wrong customer/supplier, revoked authority or overallocated funding cause zero evidence, source, budget, status and numbering changes. Saved canonical IDs open existing receipt/payment allocation workspaces.",
+    "Meaningful isolated SQL/HTTP and genuine authorized browser workflows prove blank-number model binding, canonical menu routing, round trip, valid lifecycle/allocation and rejected zero-mutation cases; browser absence is recorded rather than replaced by mocked business writes. Preserve existing lifecycle/allocation regressions and pass safe Release/full units."
+  ],
+  "criterion_path_map": {
+    "Existing receipt/payment menus select their canonical modules, and genuine authenticated blank-number HTTP create/save/reload/edit returns server-owned canonical ID/number/state. Valid manual receipt/payment and explicitly linked application/order flows remain usable without legacy-ID remapping or expanded permission.": [
+      "src/ERP.Domain/Entities/Finance1.cs",
+      "src/ERP.Domain/Entities/Finance2.cs",
+      "src/ERP.Api/Controllers/FinanceReceiptComplaintControllers.cs",
+      "src/ERP.Api/Controllers/FinancePaymentController.cs",
+      "src/ERP.Api/wwwroot/js/bill-v2.js",
+      "src/ERP.Api/wwwroot/js/modules-finance.js",
+      "src/ERP.Api/wwwroot/js/crud.js",
+      "src/ERP.UnitTests/CustomerReceiptLifecycleTests.cs",
+      "src/ERP.UnitTests/SupplierPaymentLifecycleTests.cs",
+      "src/ERP.UnitTests/CustomerReceiptAllocationTests.cs",
+      "src/ERP.UnitTests/SupplierPaymentAllocationTests.cs",
+      "src/ERP.UnitTests/ReceiptPaymentCanonicalEntryTests.cs",
+      "src/ERP.IntegrationTests/ReceiptPaymentCanonicalEntrySqlServerTests.cs",
+      "tests/receipt-payment-canonical-entry.browser.js",
+      "docs/receipt-payment-canonical-entry.md"
+    ],
+    "Canonical typed fields reach existing monetary/reference/transaction validators; lifecycle and active shared-budget allocations remain authoritative. Invalid currencies/amounts, stale source, wrong customer/supplier, revoked authority or overallocated funding cause zero evidence, source, budget, status and numbering changes. Saved canonical IDs open existing receipt/payment allocation workspaces.": [
+      "src/ERP.Domain/Entities/Finance1.cs",
+      "src/ERP.Domain/Entities/Finance2.cs",
+      "src/ERP.Api/Controllers/FinanceReceiptComplaintControllers.cs",
+      "src/ERP.Api/Controllers/FinancePaymentController.cs",
+      "src/ERP.Api/wwwroot/js/bill-v2.js",
+      "src/ERP.Api/wwwroot/js/modules-finance.js",
+      "src/ERP.Api/wwwroot/js/crud.js",
+      "src/ERP.UnitTests/CustomerReceiptLifecycleTests.cs",
+      "src/ERP.UnitTests/SupplierPaymentLifecycleTests.cs",
+      "src/ERP.UnitTests/CustomerReceiptAllocationTests.cs",
+      "src/ERP.UnitTests/SupplierPaymentAllocationTests.cs",
+      "src/ERP.UnitTests/ReceiptPaymentCanonicalEntryTests.cs",
+      "src/ERP.IntegrationTests/ReceiptPaymentCanonicalEntrySqlServerTests.cs",
+      "tests/receipt-payment-canonical-entry.browser.js",
+      "docs/receipt-payment-canonical-entry.md"
+    ],
+    "Meaningful isolated SQL/HTTP and genuine authorized browser workflows prove blank-number model binding, canonical menu routing, round trip, valid lifecycle/allocation and rejected zero-mutation cases; browser absence is recorded rather than replaced by mocked business writes. Preserve existing lifecycle/allocation regressions and pass safe Release/full units.": [
+      "src/ERP.Domain/Entities/Finance1.cs",
+      "src/ERP.Domain/Entities/Finance2.cs",
+      "src/ERP.Api/Controllers/FinanceReceiptComplaintControllers.cs",
+      "src/ERP.Api/Controllers/FinancePaymentController.cs",
+      "src/ERP.Api/wwwroot/js/bill-v2.js",
+      "src/ERP.Api/wwwroot/js/modules-finance.js",
+      "src/ERP.Api/wwwroot/js/crud.js",
+      "src/ERP.UnitTests/CustomerReceiptLifecycleTests.cs",
+      "src/ERP.UnitTests/SupplierPaymentLifecycleTests.cs",
+      "src/ERP.UnitTests/CustomerReceiptAllocationTests.cs",
+      "src/ERP.UnitTests/SupplierPaymentAllocationTests.cs",
+      "src/ERP.UnitTests/ReceiptPaymentCanonicalEntryTests.cs",
+      "src/ERP.IntegrationTests/ReceiptPaymentCanonicalEntrySqlServerTests.cs",
+      "tests/receipt-payment-canonical-entry.browser.js",
+      "docs/receipt-payment-canonical-entry.md"
+    ]
+  },
+  "implementation_evidence": "bill-v2.js:29-30 retains receipt/payment legacy dispatch; modules-finance.js already defines api/finance/receipts and api/finance/payments canonical forms but app.js chooses the legacy map first. Finance2.cs:77-78 and Finance1.cs:107-108 mark server-generated ReceiptNo/PaymentNo Required. FinanceReceiptComplaintControllers.Create:72 and FinancePaymentController.Create:80 allocate server numbers after business authority; ERP-349/350/351/378/379 govern lifecycle/capacity rather than primary HTTP/menu entry.",
+  "depends_on": [
+    "ERP-478",
+    "ERP-378",
+    "ERP-379",
+    "ERP-468"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "id": "ERP-479",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-13T15:01:50.045741Z"
+}

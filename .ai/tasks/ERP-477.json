@@ -1,0 +1,101 @@
+{
+  "title": "Restore canonical procurement stock-in form and server-numbered HTTP entry",
+  "description": "Make the existing stock-in menu choose the existing canonical EF api/stock-ins module instead of the legacy BILL_CODE_MAP branch that calls an intentionally blocked stored-procedure writer. Preserve legacy read history separately, never infer old Oid equals canonical Id or enable legacy writes. StockIn.StockInNo is Required with an empty default although Create generates it; restore genuine blank-number HTTP entry with the number and identity/status owned by the server. Wire the existing explicit procurement source selector and remaining-capacity details into the canonical main/detail form, preserve manual unlinked entry where supported and all existing inventory-cost, approval/reversal, overreceipt and source-invalidation guards. Respect current business-document page presentation and master-data drawers. Integration fixtures must generate an ephemeral process-local JWT signing key and retain real authentication; do not inherit blank signing configuration or persist test credentials. Retain existing live identity/menu/customer-scope authority, transactions, source locks, controlled errors and audit. Reject before numbering or persistence, with zero header/detail/source/status mutations. No new permissions, schema, production access, external service or arbitrary SQL. Genuine SQL only on (localdb)\\NEWERP_AutoAcceptance with Integrated Security and a fresh GUID-owned NEWERP_AUTOTEST database; reject wrong/existing targets and never drop/reset. Require safe Release with analyzers/warnings-as-errors, full units and relevant genuine SQL/browser tests; accurately record blockers and do not claim whole-stage acceptance.",
+  "allowed_paths": [
+    "src/ERP.Domain/Entities/Logistics.cs",
+    "src/ERP.Api/Controllers/StockInController.cs",
+    "src/ERP.Api/wwwroot/js/bill-v2.js",
+    "src/ERP.Api/wwwroot/js/modules-doc2.js",
+    "src/ERP.Api/wwwroot/js/crud.js",
+    "src/ERP.Api/wwwroot/js/stock-in-source-picker.js",
+    "src/ERP.UnitTests/StockInControllerTests.cs",
+    "src/ERP.UnitTests/StockInOrderFulfillmentTests.cs",
+    "src/ERP.UnitTests/StockInSourceSelectionTests.cs",
+    "src/ERP.UnitTests/StockInLegacyTestFixture.cs",
+    "src/ERP.UnitTests/StockInCanonicalEntryTests.cs",
+    "src/ERP.IntegrationTests/StockInCanonicalEntrySqlServerTests.cs",
+    "tests/stock-in-canonical-entry.browser.js",
+    "docs/stock-in-canonical-entry.md"
+  ],
+  "acceptance_criteria": [
+    "The authorized stock-in menu selects api/stock-ins using canonical IDs, and a real HTTP request omitting the number creates a valid server-numbered draft. Save/reload/edit of main/detail rows and explicit procurement-source selection work through existing authorized endpoints; source clear preserves documented unlinked semantics and no legacy identity is remapped.",
+    "The canonical form supplies valid typed nullable references, supported enum/currency/unit fields and detail payloads under existing server checks. Submit/approve posts stock and cost through existing transactions exactly once; capacity, stale/deleted source, missing authority and invalid quantity/cost cases reject without stock, movement, detail, source or number side effects; existing reversal guards remain.",
+    "Real isolated SQL/HTTP verification proves blank-number model binding, main/detail round trip, linked and manual entry, permission denial and valid approval inventory posting/reversal versus zero-mutation rejection. Browser workflow must use real authorized API writes rather than mocked success; record unavailable browser environment explicitly. Keep source-picker/unit and safe Release/full regression tests green."
+  ],
+  "criterion_path_map": {
+    "The authorized stock-in menu selects api/stock-ins using canonical IDs, and a real HTTP request omitting the number creates a valid server-numbered draft. Save/reload/edit of main/detail rows and explicit procurement-source selection work through existing authorized endpoints; source clear preserves documented unlinked semantics and no legacy identity is remapped.": [
+      "src/ERP.Domain/Entities/Logistics.cs",
+      "src/ERP.Api/Controllers/StockInController.cs",
+      "src/ERP.Api/wwwroot/js/bill-v2.js",
+      "src/ERP.Api/wwwroot/js/modules-doc2.js",
+      "src/ERP.Api/wwwroot/js/crud.js",
+      "src/ERP.Api/wwwroot/js/stock-in-source-picker.js",
+      "src/ERP.UnitTests/StockInControllerTests.cs",
+      "src/ERP.UnitTests/StockInOrderFulfillmentTests.cs",
+      "src/ERP.UnitTests/StockInSourceSelectionTests.cs",
+      "src/ERP.UnitTests/StockInLegacyTestFixture.cs",
+      "src/ERP.UnitTests/StockInCanonicalEntryTests.cs",
+      "src/ERP.IntegrationTests/StockInCanonicalEntrySqlServerTests.cs",
+      "tests/stock-in-canonical-entry.browser.js",
+      "docs/stock-in-canonical-entry.md"
+    ],
+    "The canonical form supplies valid typed nullable references, supported enum/currency/unit fields and detail payloads under existing server checks. Submit/approve posts stock and cost through existing transactions exactly once; capacity, stale/deleted source, missing authority and invalid quantity/cost cases reject without stock, movement, detail, source or number side effects; existing reversal guards remain.": [
+      "src/ERP.Domain/Entities/Logistics.cs",
+      "src/ERP.Api/Controllers/StockInController.cs",
+      "src/ERP.Api/wwwroot/js/bill-v2.js",
+      "src/ERP.Api/wwwroot/js/modules-doc2.js",
+      "src/ERP.Api/wwwroot/js/crud.js",
+      "src/ERP.Api/wwwroot/js/stock-in-source-picker.js",
+      "src/ERP.UnitTests/StockInControllerTests.cs",
+      "src/ERP.UnitTests/StockInOrderFulfillmentTests.cs",
+      "src/ERP.UnitTests/StockInSourceSelectionTests.cs",
+      "src/ERP.UnitTests/StockInLegacyTestFixture.cs",
+      "src/ERP.UnitTests/StockInCanonicalEntryTests.cs",
+      "src/ERP.IntegrationTests/StockInCanonicalEntrySqlServerTests.cs",
+      "tests/stock-in-canonical-entry.browser.js",
+      "docs/stock-in-canonical-entry.md"
+    ],
+    "Real isolated SQL/HTTP verification proves blank-number model binding, main/detail round trip, linked and manual entry, permission denial and valid approval inventory posting/reversal versus zero-mutation rejection. Browser workflow must use real authorized API writes rather than mocked success; record unavailable browser environment explicitly. Keep source-picker/unit and safe Release/full regression tests green.": [
+      "src/ERP.Domain/Entities/Logistics.cs",
+      "src/ERP.Api/Controllers/StockInController.cs",
+      "src/ERP.Api/wwwroot/js/bill-v2.js",
+      "src/ERP.Api/wwwroot/js/modules-doc2.js",
+      "src/ERP.Api/wwwroot/js/crud.js",
+      "src/ERP.Api/wwwroot/js/stock-in-source-picker.js",
+      "src/ERP.UnitTests/StockInControllerTests.cs",
+      "src/ERP.UnitTests/StockInOrderFulfillmentTests.cs",
+      "src/ERP.UnitTests/StockInSourceSelectionTests.cs",
+      "src/ERP.UnitTests/StockInLegacyTestFixture.cs",
+      "src/ERP.UnitTests/StockInCanonicalEntryTests.cs",
+      "src/ERP.IntegrationTests/StockInCanonicalEntrySqlServerTests.cs",
+      "tests/stock-in-canonical-entry.browser.js",
+      "docs/stock-in-canonical-entry.md"
+    ]
+  },
+  "implementation_evidence": "bill-v2.js:27 maps stock-in to a legacy family, while modules-doc2.js:71-90 already defines stock-in with api/stock-ins and stock-in-source selector; app.js chooses BILL_CODE_MAP before MODULES. BillProcController.Save invokes the legacy mutation gate before an explicitly unreachable writer. Logistics.cs:13-14 marks StockInNo Required with empty default; StockInController.Create generates StockInNo server-side. ERP-375 implements source selection but does not fix this primary menu/model-binding path.",
+  "depends_on": [
+    "ERP-476",
+    "ERP-375",
+    "ERP-474"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "id": "ERP-477",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-13T15:01:50.035452Z"
+}
