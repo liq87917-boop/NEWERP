@@ -16,6 +16,11 @@ namespace ERP.Api.Controllers;
 /// 只按显式字段读取（全库查询均为 <c>AsNoTracking</c>，无 Add / Update / Remove / SaveChanges），不改写询价单 / 报价单 / 客户主数据。</para>
 /// <para>边界：链接绝不按单号 / 文本 / 金额 / 相似度推断；只取版本链根单（<c>RootQuotationId == null</c>），版本不重复计入；
 /// 软删除行一律排除；缺失链接 / 缺失日期 / 报价日期早于询价日期分别作为独立证据标注，绝不推断为已报价或成交。</para>
+/// <para>ERP-500（阶段 3 访问控制收口）：本工作台与 <c>api/inquiries</c> 是<b>并列</b>路由，因此分页入口在读取任何
+/// <see cref="ERP.Domain.Entities.Inquiry"/> 计数或行<b>之前</b>，先经 <see cref="InquiryAuthorizationRules.EnsureAuthorizedAsync"/>
+/// 复核<b>实时启用未删除身份</b>、<b>账号状态</b>与既有「询价单」（<c>inquiry</c>）功能菜单，并把权威客户数据范围
+/// （<see cref="InquiryAuthorizationRules.ApplyScope"/>）下推到 SQL；该判定与是否绑定 <c>HttpContext</c> / <c>Request.Path</c>
+/// 完全无关（空路径与已赋值路径口径一致），无匿名 / 管理员 / 特权 / 环境 / 测试专用兜底，也不新增任何菜单 / 授权 / 表 / 列 / 索引。</para>
 /// </summary>
 [ApiController]
 [Route("api/inquiries/response-times")]
@@ -29,23 +34,32 @@ public class InquiryResponseWorkspaceController : ControllerBase
         _db = db;
     }
 
-    /// <summary>当前登录用户 Id（缺失或非数字时返回 null，由数据范围解析 fail closed 拒绝，绝不猜测身份）</summary>
+    /// <summary>
+    /// 当前登录用户 Id（只来自已认证请求主体；完全未绑定 <c>HttpContext</c> / 缺失 / 非数字时返回 <c>null</c>，
+    /// 由规则层 fail closed 按未认证拒绝，绝不猜测身份）。
+    /// </summary>
     private long? CurrentUserId()
-        => long.TryParse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value, out var id) ? id : null;
+        => long.TryParse(
+                ControllerContext?.HttpContext?.User?.FindFirst(ClaimTypes.NameIdentifier)?.Value, out var id)
+            ? id : null;
 
     /// <summary>
-    /// 询价报价响应时间工作台（分页，只读）：按询价日期区间（含）/ 可选客户 / 关键字筛选，应用既有业务员数据范围，
-    /// 按稳定询价单 Id 分页；单页内批量装载客户名称与显式链接的根单报价日期，不产生逐行数据库访问。
+    /// 询价报价响应时间工作台（分页，只读）：先实时授权（身份 / 账号状态 / 既有「询价单」菜单）并把权威数据范围下推到 SQL，
+    /// 再按询价日期区间（含）/ 可选客户 / 关键字筛选，按稳定询价单 Id 分页；单页内批量装载客户名称与显式链接的根单报价日期，
+    /// 不产生逐行数据库访问。
     /// </summary>
     [HttpGet]
     public async Task<IActionResult> GetPaged([FromQuery] InquiryResponseQuery query)
     {
         query.Normalize();
-        var scope = await SalespersonDataScopeService.ResolveAsync(_db, CurrentUserId());
 
-        // 业务员数据范围是硬边界：先按客户范围过滤，再做其它显式筛选
-        var source = SalespersonDataScopeService.FilterByCustomer(
-            _db.Inquiries.AsNoTracking().Where(o => !o.IsDeleted), scope, o => o.CustomerId);
+        // ERP-500：读取任何 Inquiries 计数 / 行之前先实时授权（缺失 / 非法 / 已删除按未认证，禁用 / 缺菜单按权限不足），
+        // 与是否绑定 HttpContext / Request.Path 完全无关；授权通过后返回权威非空数据范围。
+        var scope = await InquiryAuthorizationRules.EnsureAuthorizedAsync(_db, CurrentUserId());
+
+        // 权威数据范围是硬边界：先把范围下推到 SQL（Count 与分页之前），再做其它显式筛选。
+        var source = InquiryAuthorizationRules.ApplyScope(
+            _db.Inquiries.AsNoTracking().Where(o => !o.IsDeleted), scope);
 
         if (query.StartDate.HasValue)
             source = source.Where(o => o.InquiryDate.Date >= query.StartDate.Value.Date);
