@@ -198,6 +198,54 @@ public class QuotationToPiTests
         Assert.Equal(ErrorCodes.NotFound, ex.Code);
     }
 
+    [Fact]
+    public async Task ToPi_来源客户定金比例越界_拒绝且零PI且来源状态不变()
+    {
+        using var db = TestDbFactory.Create();
+        var (quotation, _) = SeedQuotation(db, "QT-BAD-DEPOSIT", DocumentStatus.Approved);
+        db.BaseCustomers.Add(new BaseCustomer
+        {
+            CustomerCode = "C-BAD-DEPOSIT", CustomerName = quotation.CustomerName, DepositRatio = 150m
+        });
+        db.SaveChanges();
+        quotation.CustomerId = db.BaseCustomers.Single().Id;
+        db.SaveChanges();
+        var ctl = NewController(db);
+
+        var ex = await Assert.ThrowsAsync<BusinessException>(() => ctl.ToProformaInvoice(quotation.Id));
+
+        Assert.Equal(ErrorCodes.InvalidParameter, ex.Code);
+        Assert.Equal(ProformaInvoiceCommercialValidationRules.DepositRatioText, ex.Message);
+        Assert.Empty(db.ProformaInvoices);
+        Assert.Equal(DocumentStatus.Approved, db.Quotations.AsNoTracking().Single().Status);
+    }
+
+    [Fact]
+    public async Task ToPi_JPY报价单_PI按零位小数派生金额与自动定金()
+    {
+        using var db = TestDbFactory.Create();
+        var (quotation, _) = SeedQuotation(db, "QT-JPY-1", DocumentStatus.Approved);
+        var stored = db.Quotations.Single();
+        stored.Currency = Currency.JPY;
+        stored.ExchangeRate = 0.05m;
+        stored.TotalAmount = 32m;
+        stored.TotalAmountCny = 1.60m;
+        var detail = db.QuotationDetails.Single();
+        detail.Quantity = 3m;
+        detail.UnitPrice = 10.5m;      // 31.5 → JPY 0 位 0.5 进位 = 32
+        detail.Amount = 32m;
+        db.SaveChanges();
+
+        Assert.IsType<OkObjectResult>(await NewController(db).ToProformaInvoice(quotation.Id));
+
+        var pi = db.ProformaInvoices.Single();
+        Assert.Equal(Currency.JPY, pi.Currency);
+        Assert.Equal(32m, pi.TotalAmount);
+        Assert.Equal(1.60m, pi.TotalAmountCny);
+        Assert.Equal(10m, pi.DepositAmount);                 // 32 × 30% = 9.6 → JPY 0 位 = 10
+        Assert.Equal(32m, db.ProformaInvoiceDetails.Single().Amount);
+    }
+
     // ==================== 种子与工厂 ====================
 
     private static QuotationController NewController(ErpDbContext db)

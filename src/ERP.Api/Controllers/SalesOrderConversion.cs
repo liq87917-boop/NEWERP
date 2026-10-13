@@ -223,6 +223,11 @@ public static class SalesOrderConversion
         if (!pi.Details.Any(d => !d.IsDeleted))
             throw BusinessException.RuleConflict("PI 无商品明细，不能转销售订单");
 
+        // ERP-471：构造销售订单之前先按 PI 唯一权威契约复核商业条款（币种 / 汇率 / 逐行数量 · 单价 /
+        // 金额精度与溢出 / 定金比例 · 金额）——非法来源商业值绝不传播成销售订单；失败即受控拒绝
+        // （错误码 InvalidParameter），且发生在单号预约与任何写入之前。
+        ProformaInvoiceCommercialValidationRules.ValidateOperational(pi);
+
         var customer = await LoadCustomerAsync(db, pi.CustomerId, ct);
         var order = NewDraft(customer);
         order.CustomerId = pi.CustomerId ?? 0;

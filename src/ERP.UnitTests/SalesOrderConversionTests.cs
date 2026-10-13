@@ -606,6 +606,40 @@ public class SalesOrderConversionTests
         Assert.Equal(DocumentStatus.Approved, db.ProformaInvoices.Single().Status);
     }
 
+    [Fact]
+    public async Task PI带入_已持久化汇率非法_受控拒绝且不落库()
+    {
+        using var db = TestDbFactory.Create();
+        var customer = SeedCustomer(db);
+        var pi = SeedPi(db, customer.Id, "PI-BAD-RATE");
+        pi.ExchangeRate = 0m;   // 模拟历史非法汇率（旧实现会静默按 1 传播）
+        db.SaveChanges();
+
+        var ex = await Assert.ThrowsAsync<BusinessException>(() =>
+            SalesOrderConversion.FromProformaInvoiceAsync(db, pi));
+
+        Assert.Equal(ErrorCodes.InvalidParameter, ex.Code);
+        Assert.Equal(ProformaInvoiceCommercialValidationRules.ExchangeRateText, ex.Message);
+        Assert.Empty(db.SalesOrders);
+    }
+
+    [Fact]
+    public async Task PI带入_已持久化数量非正_受控拒绝且不落库()
+    {
+        using var db = TestDbFactory.Create();
+        var customer = SeedCustomer(db);
+        var pi = SeedPi(db, customer.Id, "PI-BAD-QUANTITY");
+        pi.Details.Single().Quantity = 0m;
+        db.SaveChanges();
+
+        var ex = await Assert.ThrowsAsync<BusinessException>(() =>
+            SalesOrderConversion.FromProformaInvoiceAsync(db, pi));
+
+        Assert.Equal(ErrorCodes.InvalidParameter, ex.Code);
+        Assert.Contains("数量必须大于 0", ex.Message);
+        Assert.Empty(db.SalesOrders);
+    }
+
     // ==================== 工厂与种子数据 ====================
 
     private static QuotationController NewQuotationController(ErpDbContext db)

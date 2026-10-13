@@ -117,6 +117,78 @@ public class ProformaInvoiceControllerTests
         Assert.Equal(ErrorCodes.InvalidParameter, ex.Code);
     }
 
+    [Fact]
+    public async Task Create_显式负定金_抛InvalidParameter且绝不静默重算()
+    {
+        using var db = TestDbFactory.Create();
+        var ctl = NewController(db);
+
+        var ex = await Assert.ThrowsAsync<BusinessException>(() => ctl.Create(new ProformaInvoice
+        {
+            DepositRatio = 30m,
+            DepositAmount = -1m,                 // 旧实现当作「未填写」→ 静默重算为 300
+            Details = new List<ProformaInvoiceDetail> { new() { Quantity = 10m, UnitPrice = 10m } }
+        }));
+
+        Assert.Equal(ErrorCodes.InvalidParameter, ex.Code);
+        Assert.Equal(ProformaInvoiceCommercialValidationRules.DepositNegativeText, ex.Message);
+        Assert.Empty(db.ProformaInvoices);
+    }
+
+    [Fact]
+    public async Task Create_汇率为零_抛InvalidParameter且不消耗单号()
+    {
+        using var db = TestDbFactory.Create();
+        db.SysDocumentNumberRules.Add(new SysDocumentNumberRule
+        {
+            DocumentType = DocumentType.ProformaInvoice, RuleCode = $"R-PI-{Guid.NewGuid():N}",
+            RuleName = "PI 单号", Prefix = "PI", DateFormat = "yyyyMMdd", SerialLength = 4,
+            Separator = string.Empty, CurrentSequence = 7, IsDeleted = false
+        });
+        db.SaveChanges();
+        var ctl = NewController(db);
+
+        var ex = await Assert.ThrowsAsync<BusinessException>(() => ctl.Create(new ProformaInvoice
+        {
+            ExchangeRate = 0m,                   // 旧实现会静默按 1 处理
+            DepositRatio = 30m,
+            Details = new List<ProformaInvoiceDetail> { new() { Quantity = 10m, UnitPrice = 100m } }
+        }));
+
+        Assert.Equal(ErrorCodes.InvalidParameter, ex.Code);
+        Assert.Equal(ProformaInvoiceCommercialValidationRules.ExchangeRateText, ex.Message);
+        Assert.Empty(db.ProformaInvoices);
+        Assert.Equal(7L, db.SysDocumentNumberRules.AsNoTracking()
+            .Where(r => r.DocumentType == DocumentType.ProformaInvoice)
+            .Select(r => r.CurrentSequence).Single());
+    }
+
+    [Fact]
+    public async Task Create_JPY_行金额合计与定金按零位小数派生()
+    {
+        using var db = TestDbFactory.Create();
+        var ctl = NewController(db);
+
+        await ctl.Create(new ProformaInvoice
+        {
+            Currency = Currency.JPY,
+            ExchangeRate = 0.05m,
+            DepositRatio = 30m,
+            Details = new List<ProformaInvoiceDetail>
+            {
+                new() { Quantity = 3m, UnitPrice = 10.5m },      // 31.5 → 32
+                new() { Quantity = 1m, UnitPrice = 100.4m }      // 100.4 → 100
+            }
+        });
+
+        var saved = db.ProformaInvoices.Single();
+        Assert.Equal(132m, saved.TotalAmount);
+        Assert.Equal(6.60m, saved.TotalAmountCny);           // 132 × 0.05
+        Assert.Equal(40m, saved.DepositAmount);              // 132 × 30% = 39.6 → JPY 0 位 0.5 进位
+        Assert.Equal(new[] { 32m, 100m },
+            db.ProformaInvoiceDetails.OrderBy(d => d.SortNo).Select(d => d.Amount));
+    }
+
     // ==================== GetById / GetPaged ====================
 
     [Fact]

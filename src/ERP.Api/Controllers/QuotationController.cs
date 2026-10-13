@@ -681,6 +681,9 @@ public class QuotationController : DocumentControllerBase<Quotation>
             QuotationCommercialValidationRules.ValidateOperational(quotation);
 
             var pi = await BuildProformaInvoiceDraftAsync(quotation);
+            // ERP-471：PI 商业条款（币种 / 汇率 / 逐行数量 · 单价 / 定金比例 · 金额）在单号预约与任何写入
+            // 之前按 PI 唯一权威契约复核——报价转 PI 绝不把非法来源商业值写成可提交 / 可转换的 PI。
+            ProformaInvoiceCommercialValidationRules.ValidateIncomingDraft(pi);
             QuotationAuthorizationRules.EnsureTargetCustomerInScope(scope, pi.CustomerId);
             SalesOrderConversion.EnsureQuotationConversionScopeAuthorized(scope, quotation.CustomerId, pi.CustomerId);
 

@@ -555,6 +555,32 @@ public class ProformaInvoiceMutationTests
         Assert.Contains("ProformaInvoiceMutationRules.DiscardTrackedChanges(Db)", source);
     }
 
+    /// <summary>
+    /// ERP-471 接线：唯一权威商业条款契约覆盖新增 / 修改 / 提交 / 审核 / 转销售订单，
+    /// 且新增路径的条款校验严格先于 PI 单号预约（被拒绝的调用方绝不消耗单号）。
+    /// </summary>
+    [Fact]
+    public void 控制器接线_商业条款契约覆盖新增修改提交审核与转换()
+    {
+        var controller = ReadSource("src", "ERP.Api", "Controllers", "ProformaInvoiceController.cs");
+        Assert.Contains("ProformaInvoiceCommercialValidationRules.NormalizeIncomingDraft(e)", controller);
+        Assert.Contains("ProformaInvoiceCommercialValidationRules.ValidateIncomingDraft(entity)", controller);
+        Assert.Contains("ProformaInvoiceCommercialValidationRules.ValidateOperational(entity)", controller);
+        Assert.Contains("ProformaInvoiceCommercialValidationRules.ValidateOperational(pi)", controller);
+
+        // 新增：条款校验先于 PI 单号生成。
+        var validate = controller.IndexOf(
+            "ProformaInvoiceCommercialValidationRules.ValidateIncomingDraft(entity)", StringComparison.Ordinal);
+        var generate = controller.IndexOf("GenerateAsync(DocumentType.ProformaInvoice)", StringComparison.Ordinal);
+        Assert.True(validate > 0 && generate > validate, "条款校验必须先于 PI 单号生成");
+
+        var conversion = ReadSource("src", "ERP.Api", "Controllers", "SalesOrderConversion.cs");
+        Assert.Contains("ProformaInvoiceCommercialValidationRules.ValidateOperational(pi)", conversion);
+
+        var quotation = ReadSource("src", "ERP.Api", "Controllers", "QuotationController.cs");
+        Assert.Contains("ProformaInvoiceCommercialValidationRules.ValidateIncomingDraft(pi)", quotation);
+    }
+
     /// <summary>读取仓库内源文件（从测试输出目录向上定位解决方案根，与既有并发护栏测试同源）。</summary>
     private static string ReadSource(params string[] segments)
     {

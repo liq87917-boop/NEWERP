@@ -185,6 +185,9 @@ public class ProformaInvoiceController : DocumentControllerBase<ProformaInvoice>
             }
 
             entity.Id = 0;
+            // ERP-471：商业条款（币种 / 汇率 / 逐行数量 · 单价 / 定金比例 · 金额）在单号预约与任何写入之前校验，
+            // 被拒绝的调用方绝不消耗 PI 单号、绝不落任何行（含客户端软删除明细注入）。
+            ProformaInvoiceCommercialValidationRules.ValidateIncomingDraft(entity);
             if (string.IsNullOrWhiteSpace(entity.PiNo))
                 entity.PiNo = await _noService.GenerateAsync(DocumentType.ProformaInvoice);
             entity.Status = DocumentStatus.Pending;
@@ -246,6 +249,17 @@ public class ProformaInvoiceController : DocumentControllerBase<ProformaInvoice>
     {
         var originalDepositRatio = existing.DepositRatio;   // 用于判断定金比例是否被修改
 
+        entity.PiNo = existing.PiNo;
+        entity.QuotationId = existing.QuotationId;
+        entity.QuotationNo = existing.QuotationNo;
+        entity.Id = id;
+        // 定金口径：比例被修改时按新比例重算定金金额；比例不变则保留（允许手改的）原金额
+        if (originalDepositRatio != entity.DepositRatio) entity.DepositAmount = 0m;
+
+        // ERP-471：商业条款（币种 / 汇率 / 逐行数量 · 单价 / 定金比例 · 金额）在改写锁内权威实体
+        // 的任何字段之前校验；被拒绝的请求表头 / 明细 / 合计 / 定金 / 状态保持零变更。
+        ProformaInvoiceCommercialValidationRules.ValidateIncomingDraft(entity);
+
         existing.PiDate = entity.PiDate;
         existing.CustomerId = entity.CustomerId;
         existing.CustomerName = entity.CustomerName;
@@ -270,12 +284,6 @@ public class ProformaInvoiceController : DocumentControllerBase<ProformaInvoice>
         existing.Remark = entity.Remark;
 
         Db.ProformaInvoiceDetails.RemoveRange(existing.Details);
-        entity.PiNo = existing.PiNo;
-        entity.QuotationId = existing.QuotationId;
-        entity.QuotationNo = existing.QuotationNo;
-        entity.Id = id;
-        // 定金口径：比例被修改时按新比例重算定金金额；比例不变则保留（允许手改的）原金额
-        if (originalDepositRatio != entity.DepositRatio) entity.DepositAmount = 0m;
         Normalize(entity);
         existing.Details = entity.Details;
         existing.TotalAmount = entity.TotalAmount;
@@ -297,6 +305,8 @@ public class ProformaInvoiceController : DocumentControllerBase<ProformaInvoice>
                 SalesDocumentSourceKind.Quotation, entity.QuotationId, entity.CustomerId, id);
             ProformaInvoiceMutationRules.EnsureApproveAllowed(GetStatus(entity),
                 ProformaInvoiceMutationRules.ActiveDetailCount(entity));
+            // ERP-471：审核前按唯一权威契约复核已持久化商业条款（至少一行有效明细；非法历史条款原子拒绝、状态不变）。
+            ProformaInvoiceCommercialValidationRules.ValidateOperational(entity);
             SetStatus(entity, DocumentStatus.Approved);
             await Db.SaveChangesAsync();
             return Ok(ApiResponse<object>.Success(null, "PI 已审核"));
@@ -323,6 +333,8 @@ public class ProformaInvoiceController : DocumentControllerBase<ProformaInvoice>
             await SalesDocumentSourceLineageRules.EnsurePersistedSourceIntactAsync(Db,
                 SalesDocumentSourceKind.Quotation, entity.QuotationId, entity.CustomerId, id);
             ProformaInvoiceMutationRules.EnsureSubmitAllowed(GetStatus(entity));
+            // ERP-471：提交前按唯一权威契约复核已持久化商业条款（非法历史条款原子拒绝、状态不变）。
+            ProformaInvoiceCommercialValidationRules.ValidateOperational(entity);
             SetStatus(entity, DocumentStatus.Submitted);
             await Db.SaveChangesAsync();
             return Ok(ApiResponse<object>.Success(null, "提交成功"));
@@ -491,6 +503,9 @@ public class ProformaInvoiceController : DocumentControllerBase<ProformaInvoice>
             var existing = await ProformaInvoiceMutationRules.FindDownstreamOrderAsync(Db, pi.Id);
             ProformaInvoiceMutationRules.EnsureConversionEligible(pi, existing,
                 ProformaInvoiceMutationRules.ActiveDetailCount(pi));
+            // ERP-471：转换（下游承诺）前按唯一权威契约复核已持久化商业条款——非法历史条款在订单构造、
+            // 单号预约与任何写入之前受控拒绝，绝不把非法来源商业值传播成销售订单。
+            ProformaInvoiceCommercialValidationRules.ValidateOperational(pi);
 
             var order = await SalesOrderConversion.FromProformaInvoiceAsync(Db, pi);
             ProformaInvoiceAuthorizationRules.EnsureTargetCustomerInScope(scope, order.CustomerId);
@@ -537,35 +552,14 @@ public class ProformaInvoiceController : DocumentControllerBase<ProformaInvoice>
 
     /// <summary>
     /// 行号 / 金额 / 合计 / 定金统一整理（后端复核，防止前端篡改合计）。
-    /// 定金口径：比例限制 0~100；金额留 0 时按比例自动计算，允许手工覆盖但不得超过 PI 总额
-    /// （修改时若比例发生变化，调用方会先清零金额，使定金按新比例重算）。
+    /// ERP-471：实现整体下沉到 <see cref="ProformaInvoiceCommercialValidationRules"/>（币种 / 汇率 / 数量 /
+    /// 单价 / 金额 / 定金比例 · 金额的唯一权威契约），本方法保留为 PI 写入路径的稳定入口 ——
+    /// 校验与整理是**同一份**实现，不存在第二套算法；校验失败时**不改写任何字段**（被拒绝的请求零变更）。
+    /// 定金口径：比例限制 0~100；金额留 0 时按比例自动计算（币种精度），显式负数一律拒绝，
+    /// 显式正数允许手工覆盖但不得超过 PI 总额（修改时若比例发生变化，调用方会先清零金额，使定金按新比例重算）。
     /// </summary>
     public static void Normalize(ProformaInvoice e)
-    {
-        decimal total = 0;
-        var line = 0;
-        foreach (var d in e.Details)
-        {
-            d.Id = 0;
-            d.PiId = e.Id;
-            d.PiNo = e.PiNo;
-            d.SortNo = ++line;
-            d.Amount = Math.Round(d.Quantity * d.UnitPrice, 2);
-            d.CreatedAt = DateTime.Now;
-            total += d.Amount;
-        }
-        e.TotalAmount = Math.Round(total, 2);
-        var rate = e.ExchangeRate == 0 ? 1 : e.ExchangeRate;
-        e.TotalAmountCny = Math.Round(e.TotalAmount * rate, 2);
-        if (e.PiDate == default) e.PiDate = DateTime.Today;
-        if (e.DepositRatio < 0 || e.DepositRatio > 100)
-            throw BusinessException.InvalidParameter("定金比例必须在 0~100 之间");
-
-        var depositByRatio = Math.Round(e.TotalAmount * e.DepositRatio / 100m, 2);
-        if (e.DepositAmount <= 0) e.DepositAmount = depositByRatio;
-        else if (e.DepositAmount > e.TotalAmount)
-            throw BusinessException.InvalidParameter("定金金额不能大于 PI 总额");
-    }
+        => ProformaInvoiceCommercialValidationRules.NormalizeIncomingDraft(e);
 }
 
 
