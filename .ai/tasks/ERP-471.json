@@ -1,0 +1,88 @@
+{
+  "title": "Validate PI commercial quantities and deposit amounts before operational commitment",
+  "description": "Close the PI numeric failure path before sales-order conversion. ProformaInvoiceController.Normalize multiplies unchecked quantities/prices, rounds every currency to two places, replaces a zero exchange rate with 1 and treats negative deposit amount as an omitted amount. Add a bounded application commercial contract used by ordinary create/update, quotation-to-PI generation and submit/approval/sales-order conversion commitment; validate before consuming a number and keep the existing PI/quotation locks and history. Preserve zero deposit as documented automatic computation, but reject explicitly negative deposits rather than silently recomputing them. Use existing live identity/menu/customer-scope checks, transaction and row-lock ordering, controlled BusinessException errors and existing audit/status behavior. Rejected requests must leave headers, details, source records, status and number reservations unchanged. No permissions, schema, production access, arbitrary SQL or external service changes. Use safe Release with analyzers/warnings-as-errors and the full unit suite. Genuine SQL tests use only (localdb)\\NEWERP_AutoAcceptance, Integrated Security and a fresh GUID-owned NEWERP_AUTOTEST database; reject wrong/existing targets and never drop/reset a database. Record real environment blockers separately; build completion is not stage acceptance.",
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/ProformaInvoiceController.cs",
+    "src/ERP.Api/Controllers/QuotationController.cs",
+    "src/ERP.Api/Controllers/SalesOrderConversion.cs",
+    "src/ERP.Application/Services/ProformaInvoiceCommercialValidationRules.cs",
+    "src/ERP.UnitTests/ProformaInvoiceCommercialValidationTests.cs",
+    "src/ERP.UnitTests/ProformaInvoiceControllerTests.cs",
+    "src/ERP.UnitTests/ProformaInvoiceMutationTests.cs",
+    "src/ERP.UnitTests/QuotationToPiTests.cs",
+    "src/ERP.UnitTests/SalesOrderConversionTests.cs",
+    "src/ERP.IntegrationTests/ProformaInvoiceCommercialValidationSqlServerTests.cs",
+    "docs/proforma-invoice-commercial-validation.md"
+  ],
+  "acceptance_criteria": [
+    "Reject undefined currency, nonpositive exchange rate, invalid quantity/price/precision and arithmetic or persisted-column overflow before mutation; preserve valid empty drafts where currently supported and require operational lines before commitment.",
+    "Reject negative, overprecision or out-of-range deposit ratio/amount; derive active-line amounts/totals and automatic deposit under the same currency precision contract and require any explicit deposit to be within the authoritative total. Quote-to-PI and PI-to-sales-order conversion must not propagate invalid source commercial values.",
+    "Rules/controller and isolated SQL tests prove valid manual/linked flows, zero automatic deposit, explicit positive deposit, negative deposit rejection, JPY precision, tampered totals, overflow, immutable source evidence and rejected zero writes/number reservations; safe Release/full unit regressions stay green."
+  ],
+  "criterion_path_map": {
+    "Reject undefined currency, nonpositive exchange rate, invalid quantity/price/precision and arithmetic or persisted-column overflow before mutation; preserve valid empty drafts where currently supported and require operational lines before commitment.": [
+      "src/ERP.Api/Controllers/ProformaInvoiceController.cs",
+      "src/ERP.Api/Controllers/QuotationController.cs",
+      "src/ERP.Api/Controllers/SalesOrderConversion.cs",
+      "src/ERP.Application/Services/ProformaInvoiceCommercialValidationRules.cs",
+      "src/ERP.UnitTests/ProformaInvoiceCommercialValidationTests.cs",
+      "src/ERP.UnitTests/ProformaInvoiceControllerTests.cs",
+      "src/ERP.UnitTests/ProformaInvoiceMutationTests.cs",
+      "src/ERP.UnitTests/QuotationToPiTests.cs",
+      "src/ERP.UnitTests/SalesOrderConversionTests.cs",
+      "src/ERP.IntegrationTests/ProformaInvoiceCommercialValidationSqlServerTests.cs",
+      "docs/proforma-invoice-commercial-validation.md"
+    ],
+    "Reject negative, overprecision or out-of-range deposit ratio/amount; derive active-line amounts/totals and automatic deposit under the same currency precision contract and require any explicit deposit to be within the authoritative total. Quote-to-PI and PI-to-sales-order conversion must not propagate invalid source commercial values.": [
+      "src/ERP.Api/Controllers/ProformaInvoiceController.cs",
+      "src/ERP.Api/Controllers/QuotationController.cs",
+      "src/ERP.Api/Controllers/SalesOrderConversion.cs",
+      "src/ERP.Application/Services/ProformaInvoiceCommercialValidationRules.cs",
+      "src/ERP.UnitTests/ProformaInvoiceCommercialValidationTests.cs",
+      "src/ERP.UnitTests/ProformaInvoiceControllerTests.cs",
+      "src/ERP.UnitTests/ProformaInvoiceMutationTests.cs",
+      "src/ERP.UnitTests/QuotationToPiTests.cs",
+      "src/ERP.UnitTests/SalesOrderConversionTests.cs",
+      "src/ERP.IntegrationTests/ProformaInvoiceCommercialValidationSqlServerTests.cs",
+      "docs/proforma-invoice-commercial-validation.md"
+    ],
+    "Rules/controller and isolated SQL tests prove valid manual/linked flows, zero automatic deposit, explicit positive deposit, negative deposit rejection, JPY precision, tampered totals, overflow, immutable source evidence and rejected zero writes/number reservations; safe Release/full unit regressions stay green.": [
+      "src/ERP.Api/Controllers/ProformaInvoiceController.cs",
+      "src/ERP.Api/Controllers/QuotationController.cs",
+      "src/ERP.Api/Controllers/SalesOrderConversion.cs",
+      "src/ERP.Application/Services/ProformaInvoiceCommercialValidationRules.cs",
+      "src/ERP.UnitTests/ProformaInvoiceCommercialValidationTests.cs",
+      "src/ERP.UnitTests/ProformaInvoiceControllerTests.cs",
+      "src/ERP.UnitTests/ProformaInvoiceMutationTests.cs",
+      "src/ERP.UnitTests/QuotationToPiTests.cs",
+      "src/ERP.UnitTests/SalesOrderConversionTests.cs",
+      "src/ERP.IntegrationTests/ProformaInvoiceCommercialValidationSqlServerTests.cs",
+      "docs/proforma-invoice-commercial-validation.md"
+    ]
+  },
+  "implementation_evidence": "ProformaInvoiceController.cs public static Normalize: unchecked d.Quantity*d.UnitPrice; Math.Round(...,2); zero ExchangeRate fallback; if(e.DepositAmount<=0) computes deposit. QuotationController.ToPi calls Normalize and SalesOrderConversion consumes PI financial values. Existing ERP-007/398/399/403 do not provide numeric precision/overflow guards.",
+  "depends_on": [
+    "ERP-470",
+    "ERP-399"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "id": "ERP-471",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-13T13:15:44.109174Z"
+}

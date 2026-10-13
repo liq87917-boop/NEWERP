@@ -1,0 +1,96 @@
+{
+  "title": "Validate live quotation master references before commitment and conversion",
+  "description": "Close quotation operational references: current ordinary creates/updates check menu/customer scope and inquiry lineage but do not resolve every explicitly supplied customer/product/salesman against live enabled nondeleted master records. Add bounded batch reference resolution and validate create/update and operational submit/approval/revision/inquiry conversion before writes. Preserve nullable/manual snapshot semantics, history reads and immutable historical versions. Existing functional quotation authorization remains decisive; do not require or grant unrelated master-maintenance permissions. Use existing live identity/menu/customer-scope checks, transaction and row-lock ordering, controlled BusinessException errors and existing audit/status behavior. Rejected requests must leave headers, details, source records, status and number reservations unchanged. No permissions, schema, production access, arbitrary SQL or external service changes. Use safe Release with analyzers/warnings-as-errors and the full unit suite. Genuine SQL tests use only (localdb)\\NEWERP_AutoAcceptance, Integrated Security and a fresh GUID-owned NEWERP_AUTOTEST database; reject wrong/existing targets and never drop/reset a database. Record real environment blockers separately; build completion is not stage acceptance.",
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/QuotationController.cs",
+    "src/ERP.Api/Controllers/InquiryController.cs",
+    "src/ERP.Api/Controllers/InquiryQuotationConversion.cs",
+    "src/ERP.Application/Services/QuotationRevisionService.cs",
+    "src/ERP.Application/Services/QuotationMasterReferenceRules.cs",
+    "src/ERP.UnitTests/QuotationMasterReferenceTests.cs",
+    "src/ERP.UnitTests/QuotationCrudRegressionTests.cs",
+    "src/ERP.UnitTests/QuotationGovernanceTests.cs",
+    "src/ERP.UnitTests/QuotationRevisionTests.cs",
+    "src/ERP.UnitTests/QuotationMutationTests.cs",
+    "src/ERP.UnitTests/InquiryQuotationConversionTests.cs",
+    "src/ERP.IntegrationTests/QuotationMasterReferenceSqlServerTests.cs",
+    "docs/quotation-master-reference-validation.md"
+  ],
+  "acceptance_criteria": [
+    "Reject zero/negative or missing/deleted/disabled explicitly supplied customer/product/salesman references; validate eligible salesman semantics and existing customer scope. Null optional references and manual product snapshot lines remain supported with existing bounded required text semantics.",
+    "Revalidate operational commitment/conversion against current masters under existing transaction/source locks. Use batch loading for products and no per-line queries; preserve unchanged historical snapshot text and read availability, with no backfill or automatic reassignment.",
+    "Rules/controller and isolated SQL tests cover explicit invalid references, master changes after draft save, preserved null/manual snapshots, authorized positive cases, denied zero mutations and failed conversions leaving sources intact. Adapt affected genuine fixtures and pass safe Release/full unit regressions."
+  ],
+  "criterion_path_map": {
+    "Reject zero/negative or missing/deleted/disabled explicitly supplied customer/product/salesman references; validate eligible salesman semantics and existing customer scope. Null optional references and manual product snapshot lines remain supported with existing bounded required text semantics.": [
+      "src/ERP.Api/Controllers/QuotationController.cs",
+      "src/ERP.Api/Controllers/InquiryController.cs",
+      "src/ERP.Api/Controllers/InquiryQuotationConversion.cs",
+      "src/ERP.Application/Services/QuotationRevisionService.cs",
+      "src/ERP.Application/Services/QuotationMasterReferenceRules.cs",
+      "src/ERP.UnitTests/QuotationMasterReferenceTests.cs",
+      "src/ERP.UnitTests/QuotationCrudRegressionTests.cs",
+      "src/ERP.UnitTests/QuotationGovernanceTests.cs",
+      "src/ERP.UnitTests/QuotationRevisionTests.cs",
+      "src/ERP.UnitTests/QuotationMutationTests.cs",
+      "src/ERP.UnitTests/InquiryQuotationConversionTests.cs",
+      "src/ERP.IntegrationTests/QuotationMasterReferenceSqlServerTests.cs",
+      "docs/quotation-master-reference-validation.md"
+    ],
+    "Revalidate operational commitment/conversion against current masters under existing transaction/source locks. Use batch loading for products and no per-line queries; preserve unchanged historical snapshot text and read availability, with no backfill or automatic reassignment.": [
+      "src/ERP.Api/Controllers/QuotationController.cs",
+      "src/ERP.Api/Controllers/InquiryController.cs",
+      "src/ERP.Api/Controllers/InquiryQuotationConversion.cs",
+      "src/ERP.Application/Services/QuotationRevisionService.cs",
+      "src/ERP.Application/Services/QuotationMasterReferenceRules.cs",
+      "src/ERP.UnitTests/QuotationMasterReferenceTests.cs",
+      "src/ERP.UnitTests/QuotationCrudRegressionTests.cs",
+      "src/ERP.UnitTests/QuotationGovernanceTests.cs",
+      "src/ERP.UnitTests/QuotationRevisionTests.cs",
+      "src/ERP.UnitTests/QuotationMutationTests.cs",
+      "src/ERP.UnitTests/InquiryQuotationConversionTests.cs",
+      "src/ERP.IntegrationTests/QuotationMasterReferenceSqlServerTests.cs",
+      "docs/quotation-master-reference-validation.md"
+    ],
+    "Rules/controller and isolated SQL tests cover explicit invalid references, master changes after draft save, preserved null/manual snapshots, authorized positive cases, denied zero mutations and failed conversions leaving sources intact. Adapt affected genuine fixtures and pass safe Release/full unit regressions.": [
+      "src/ERP.Api/Controllers/QuotationController.cs",
+      "src/ERP.Api/Controllers/InquiryController.cs",
+      "src/ERP.Api/Controllers/InquiryQuotationConversion.cs",
+      "src/ERP.Application/Services/QuotationRevisionService.cs",
+      "src/ERP.Application/Services/QuotationMasterReferenceRules.cs",
+      "src/ERP.UnitTests/QuotationMasterReferenceTests.cs",
+      "src/ERP.UnitTests/QuotationCrudRegressionTests.cs",
+      "src/ERP.UnitTests/QuotationGovernanceTests.cs",
+      "src/ERP.UnitTests/QuotationRevisionTests.cs",
+      "src/ERP.UnitTests/QuotationMutationTests.cs",
+      "src/ERP.UnitTests/InquiryQuotationConversionTests.cs",
+      "src/ERP.IntegrationTests/QuotationMasterReferenceSqlServerTests.cs",
+      "docs/quotation-master-reference-validation.md"
+    ]
+  },
+  "implementation_evidence": "QuotationController.Create/Update validate QuotationAuthorizationRules and SalesDocumentSourceLineageRules, then normalize/save supplied CustomerId/SalesmanId/ProductId; QuotationLineRules has no master query. Quotation and QuotationDetail entities explicitly expose nullable CustomerId/SalesmanId/ProductId. Existing ERP-423/427 validate sales/purchase orders, not quotation master references.",
+  "depends_on": [
+    "ERP-471",
+    "ERP-423"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "id": "ERP-472",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-13T13:15:44.114150Z"
+}

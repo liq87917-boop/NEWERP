@@ -1,0 +1,101 @@
+{
+  "title": "Validate quotation commercial quantities and amounts before operational commitment",
+  "description": "Close the quotation money/quantity failure path in the inquiry-to-quotation-to-PI chain. QuotationLineRules.Normalize currently accepts negative/zero quantities, negative prices, undefined currency and zero exchange rate (silently uses 1), and uses fixed two-place rounding. InquiryQuotationConversion separately recalculates the same amounts and silently substitutes an exchange rate. Implement one bounded application validation/normalization contract consumed by ordinary creation/update, inquiry conversion, revision copying and submit/approval commitment checks before numbering or mutation. Preserve the approved source-lock lifecycle. Avoid resetting identities or historical snapshots merely to validate an existing record. Use existing live identity/menu/customer-scope checks, transaction and row-lock ordering, controlled BusinessException errors and existing audit/status behavior. Rejected requests must leave headers, details, source records, status and number reservations unchanged. No permissions, schema, production access, arbitrary SQL or external service changes. Use safe Release with analyzers/warnings-as-errors and the full unit suite. Genuine SQL tests use only (localdb)\\NEWERP_AutoAcceptance, Integrated Security and a fresh GUID-owned NEWERP_AUTOTEST database; reject wrong/existing targets and never drop/reset a database. Record real environment blockers separately; build completion is not stage acceptance.",
+  "allowed_paths": [
+    "src/ERP.Application/Services/QuotationLineRules.cs",
+    "src/ERP.Api/Controllers/QuotationController.cs",
+    "src/ERP.Api/Controllers/InquiryController.cs",
+    "src/ERP.Api/Controllers/InquiryQuotationConversion.cs",
+    "src/ERP.Application/Services/QuotationRevisionService.cs",
+    "src/ERP.Application/Services/QuotationCommercialValidationRules.cs",
+    "src/ERP.UnitTests/QuotationCommercialValidationTests.cs",
+    "src/ERP.UnitTests/QuotationCrudRegressionTests.cs",
+    "src/ERP.UnitTests/QuotationRevisionTests.cs",
+    "src/ERP.UnitTests/QuotationGovernanceTests.cs",
+    "src/ERP.UnitTests/QuotationMutationTests.cs",
+    "src/ERP.UnitTests/InquiryQuotationConversionTests.cs",
+    "src/ERP.IntegrationTests/QuotationCommercialValidationSqlServerTests.cs",
+    "docs/quotation-commercial-validation.md"
+  ],
+  "acceptance_criteria": [
+    "Reject invalid currency, nonpositive exchange rate, nonpositive operational line quantity, negative price, excess persisted precision, decimal/database overflow and active soft-deleted detail injection before any write or number reservation; keep explicitly supported empty drafts but require valid operational lines before submission/approval.",
+    "Derive line amounts and totals from active lines using the existing approved currency precision and rounding contract, never trusting client totals and never combining currencies; apply the same validation to inquiry conversion/revision and downstream commitment so invalid historical quantities cannot become live fulfillment.",
+    "Meaningful rules/controller and isolated SQL tests cover boundaries, JPY and ordinary currencies, tampered totals, overflow, rejected zero mutation/numbering and valid existing conversions. Adapt only genuine legacy fixtures when their old invalid data conflicts with the new authority; full safe Release and unit regressions must pass."
+  ],
+  "criterion_path_map": {
+    "Reject invalid currency, nonpositive exchange rate, nonpositive operational line quantity, negative price, excess persisted precision, decimal/database overflow and active soft-deleted detail injection before any write or number reservation; keep explicitly supported empty drafts but require valid operational lines before submission/approval.": [
+      "src/ERP.Application/Services/QuotationLineRules.cs",
+      "src/ERP.Api/Controllers/QuotationController.cs",
+      "src/ERP.Api/Controllers/InquiryController.cs",
+      "src/ERP.Api/Controllers/InquiryQuotationConversion.cs",
+      "src/ERP.Application/Services/QuotationRevisionService.cs",
+      "src/ERP.Application/Services/QuotationCommercialValidationRules.cs",
+      "src/ERP.UnitTests/QuotationCommercialValidationTests.cs",
+      "src/ERP.UnitTests/QuotationCrudRegressionTests.cs",
+      "src/ERP.UnitTests/QuotationRevisionTests.cs",
+      "src/ERP.UnitTests/QuotationGovernanceTests.cs",
+      "src/ERP.UnitTests/QuotationMutationTests.cs",
+      "src/ERP.UnitTests/InquiryQuotationConversionTests.cs",
+      "src/ERP.IntegrationTests/QuotationCommercialValidationSqlServerTests.cs",
+      "docs/quotation-commercial-validation.md"
+    ],
+    "Derive line amounts and totals from active lines using the existing approved currency precision and rounding contract, never trusting client totals and never combining currencies; apply the same validation to inquiry conversion/revision and downstream commitment so invalid historical quantities cannot become live fulfillment.": [
+      "src/ERP.Application/Services/QuotationLineRules.cs",
+      "src/ERP.Api/Controllers/QuotationController.cs",
+      "src/ERP.Api/Controllers/InquiryController.cs",
+      "src/ERP.Api/Controllers/InquiryQuotationConversion.cs",
+      "src/ERP.Application/Services/QuotationRevisionService.cs",
+      "src/ERP.Application/Services/QuotationCommercialValidationRules.cs",
+      "src/ERP.UnitTests/QuotationCommercialValidationTests.cs",
+      "src/ERP.UnitTests/QuotationCrudRegressionTests.cs",
+      "src/ERP.UnitTests/QuotationRevisionTests.cs",
+      "src/ERP.UnitTests/QuotationGovernanceTests.cs",
+      "src/ERP.UnitTests/QuotationMutationTests.cs",
+      "src/ERP.UnitTests/InquiryQuotationConversionTests.cs",
+      "src/ERP.IntegrationTests/QuotationCommercialValidationSqlServerTests.cs",
+      "docs/quotation-commercial-validation.md"
+    ],
+    "Meaningful rules/controller and isolated SQL tests cover boundaries, JPY and ordinary currencies, tampered totals, overflow, rejected zero mutation/numbering and valid existing conversions. Adapt only genuine legacy fixtures when their old invalid data conflicts with the new authority; full safe Release and unit regressions must pass.": [
+      "src/ERP.Application/Services/QuotationLineRules.cs",
+      "src/ERP.Api/Controllers/QuotationController.cs",
+      "src/ERP.Api/Controllers/InquiryController.cs",
+      "src/ERP.Api/Controllers/InquiryQuotationConversion.cs",
+      "src/ERP.Application/Services/QuotationRevisionService.cs",
+      "src/ERP.Application/Services/QuotationCommercialValidationRules.cs",
+      "src/ERP.UnitTests/QuotationCommercialValidationTests.cs",
+      "src/ERP.UnitTests/QuotationCrudRegressionTests.cs",
+      "src/ERP.UnitTests/QuotationRevisionTests.cs",
+      "src/ERP.UnitTests/QuotationGovernanceTests.cs",
+      "src/ERP.UnitTests/QuotationMutationTests.cs",
+      "src/ERP.UnitTests/InquiryQuotationConversionTests.cs",
+      "src/ERP.IntegrationTests/QuotationCommercialValidationSqlServerTests.cs",
+      "docs/quotation-commercial-validation.md"
+    ]
+  },
+  "implementation_evidence": "QuotationLineRules.cs Normalize: multiplication and Math.Round(...,2) without quantity/price/currency/rate validation; rate=e.ExchangeRate==0?1:e.ExchangeRate. InquiryQuotationConversion.cs BuildQuotation/Recalculate independently repeats the calculation and replaces nonpositive rates with 1. Existing history ERP-018/024/035/400/402/403 concerns lifecycle/lineage, not commercial numeric validation.",
+  "depends_on": [
+    "ERP-400",
+    "ERP-402",
+    "ERP-403"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "id": "ERP-470",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-13T13:15:44.104063Z"
+}

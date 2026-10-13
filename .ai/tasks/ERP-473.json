@@ -1,0 +1,88 @@
+{
+  "title": "Validate live PI master references before commitment and sales-order conversion",
+  "description": "Close PI operational references: current ordinary creates/updates check PI menu/customer scope and quotation lineage but persist supplied customer/product/salesman references without comprehensive live master validation. Add bounded batch checks to manual and quotation-generated PI writes and operational submit/approval/conversion before number reservation or mutations, while preserving nullable/manual snapshot and immutable history semantics. Reuse existing PI/sales-order authorization without adding master-maintenance permissions. Use existing live identity/menu/customer-scope checks, transaction and row-lock ordering, controlled BusinessException errors and existing audit/status behavior. Rejected requests must leave headers, details, source records, status and number reservations unchanged. No permissions, schema, production access, arbitrary SQL or external service changes. Use safe Release with analyzers/warnings-as-errors and the full unit suite. Genuine SQL tests use only (localdb)\\NEWERP_AutoAcceptance, Integrated Security and a fresh GUID-owned NEWERP_AUTOTEST database; reject wrong/existing targets and never drop/reset a database. Record real environment blockers separately; build completion is not stage acceptance.",
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/ProformaInvoiceController.cs",
+    "src/ERP.Api/Controllers/QuotationController.cs",
+    "src/ERP.Api/Controllers/SalesOrderConversion.cs",
+    "src/ERP.Application/Services/ProformaInvoiceMasterReferenceRules.cs",
+    "src/ERP.UnitTests/ProformaInvoiceMasterReferenceTests.cs",
+    "src/ERP.UnitTests/ProformaInvoiceControllerTests.cs",
+    "src/ERP.UnitTests/ProformaInvoiceMutationTests.cs",
+    "src/ERP.UnitTests/QuotationToPiTests.cs",
+    "src/ERP.UnitTests/SalesOrderConversionTests.cs",
+    "src/ERP.IntegrationTests/ProformaInvoiceMasterReferenceSqlServerTests.cs",
+    "docs/proforma-invoice-master-reference-validation.md"
+  ],
+  "acceptance_criteria": [
+    "Reject zero/negative, missing/deleted/disabled explicitly supplied customer/product/salesman references before persistence; apply eligible salesman and existing customer-scope rules while retaining supported null/manual product snapshot lines.",
+    "Revalidate operational PI commitment and sales-order conversion against live master records inside existing quotation-to-PI lock order and PI mutation transaction. Batch product resolution, preserve historical snapshot text/readability and perform no backfill or silent reassignment.",
+    "Rules/controller and isolated SQL tests cover invalid references, source/master invalidation between draft and commitment, permitted manual/linked flows, nullable/manual snapshots, revoked authority and rejected zero mutation/number reservation; safe Release/full unit regressions stay green."
+  ],
+  "criterion_path_map": {
+    "Reject zero/negative, missing/deleted/disabled explicitly supplied customer/product/salesman references before persistence; apply eligible salesman and existing customer-scope rules while retaining supported null/manual product snapshot lines.": [
+      "src/ERP.Api/Controllers/ProformaInvoiceController.cs",
+      "src/ERP.Api/Controllers/QuotationController.cs",
+      "src/ERP.Api/Controllers/SalesOrderConversion.cs",
+      "src/ERP.Application/Services/ProformaInvoiceMasterReferenceRules.cs",
+      "src/ERP.UnitTests/ProformaInvoiceMasterReferenceTests.cs",
+      "src/ERP.UnitTests/ProformaInvoiceControllerTests.cs",
+      "src/ERP.UnitTests/ProformaInvoiceMutationTests.cs",
+      "src/ERP.UnitTests/QuotationToPiTests.cs",
+      "src/ERP.UnitTests/SalesOrderConversionTests.cs",
+      "src/ERP.IntegrationTests/ProformaInvoiceMasterReferenceSqlServerTests.cs",
+      "docs/proforma-invoice-master-reference-validation.md"
+    ],
+    "Revalidate operational PI commitment and sales-order conversion against live master records inside existing quotation-to-PI lock order and PI mutation transaction. Batch product resolution, preserve historical snapshot text/readability and perform no backfill or silent reassignment.": [
+      "src/ERP.Api/Controllers/ProformaInvoiceController.cs",
+      "src/ERP.Api/Controllers/QuotationController.cs",
+      "src/ERP.Api/Controllers/SalesOrderConversion.cs",
+      "src/ERP.Application/Services/ProformaInvoiceMasterReferenceRules.cs",
+      "src/ERP.UnitTests/ProformaInvoiceMasterReferenceTests.cs",
+      "src/ERP.UnitTests/ProformaInvoiceControllerTests.cs",
+      "src/ERP.UnitTests/ProformaInvoiceMutationTests.cs",
+      "src/ERP.UnitTests/QuotationToPiTests.cs",
+      "src/ERP.UnitTests/SalesOrderConversionTests.cs",
+      "src/ERP.IntegrationTests/ProformaInvoiceMasterReferenceSqlServerTests.cs",
+      "docs/proforma-invoice-master-reference-validation.md"
+    ],
+    "Rules/controller and isolated SQL tests cover invalid references, source/master invalidation between draft and commitment, permitted manual/linked flows, nullable/manual snapshots, revoked authority and rejected zero mutation/number reservation; safe Release/full unit regressions stay green.": [
+      "src/ERP.Api/Controllers/ProformaInvoiceController.cs",
+      "src/ERP.Api/Controllers/QuotationController.cs",
+      "src/ERP.Api/Controllers/SalesOrderConversion.cs",
+      "src/ERP.Application/Services/ProformaInvoiceMasterReferenceRules.cs",
+      "src/ERP.UnitTests/ProformaInvoiceMasterReferenceTests.cs",
+      "src/ERP.UnitTests/ProformaInvoiceControllerTests.cs",
+      "src/ERP.UnitTests/ProformaInvoiceMutationTests.cs",
+      "src/ERP.UnitTests/QuotationToPiTests.cs",
+      "src/ERP.UnitTests/SalesOrderConversionTests.cs",
+      "src/ERP.IntegrationTests/ProformaInvoiceMasterReferenceSqlServerTests.cs",
+      "docs/proforma-invoice-master-reference-validation.md"
+    ]
+  },
+  "implementation_evidence": "ProformaInvoiceController.Create/Update: ProformaInvoiceAuthorizationRules and SalesDocumentSourceLineageRules followed by Normalize/save; no live product/employee resolver. ProformaInvoice/Detail expose nullable customer/salesman/product references. QuotationController.ToPi copies reference snapshots and SalesOrderConversion converts the PI; ERP-423 downstream sales-order guards do not validate earlier PI ordinary entry.",
+  "depends_on": [
+    "ERP-472",
+    "ERP-398"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "id": "ERP-473",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-13T13:15:44.119101Z"
+}

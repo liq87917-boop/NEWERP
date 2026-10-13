@@ -1,0 +1,12 @@
+{
+  "task": "ERP-467",
+  "diagnosis": "Original six failures were legacy fixtures missing enabled identities/menu grants after live authorization was enforced. Current fixture changes preserve the unconditional business authorization and are already in committed source.",
+  "original_failure_log": ".ai/logs/ERP-467-validation-3.log",
+  "repair_unit_log": ".ai/logs/ERP-467-validation-4.log",
+  "current_safe_log": ".ai/logs/ERP-469-validation-1.log",
+  "current_full_units_passed": 7424,
+  "isolated_sql_log": ".ai/logs/heartbeat-20261013-masterdata-sql.log",
+  "isolated_sql_tests_passed": 75,
+  "stage_acceptance": false,
+  "at": "2026-10-13T13:15:44.125846Z"
+}
