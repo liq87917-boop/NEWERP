@@ -216,7 +216,11 @@ public class DocumentNumberRuleController : BaseCrudController<SysDocumentNumber
 }
 
 /// <summary>
-/// 系统日志控制器
+/// 系统日志控制器（ERP-499）：分页查询在读取任何 <c>SysOperationLogs</c> 计数或行<b>之前</b>，先复核
+/// 实时启用身份 + 既有「系统日志」（<c>sys-log</c>）功能菜单（见 <see cref="OperationLogAuthorizationRules"/>）；
+/// 该判定与请求路径 / 请求形状 / 是否绑定 <c>HttpContext</c> 完全无关。缺失 / 非法 / 不存在 / 已删除身份按未认证拒绝，
+/// 禁用 / 缺少或撤销菜单按权限不足拒绝，一律以既有受控非披露错误 fail closed，不新增任何授权，
+/// 也绝不把空身份或特权当作管理员。
 /// </summary>
 [ApiController]
 [Route("api/sys/logs")]
@@ -230,7 +234,18 @@ public class OperationLogController : ControllerBase
         _db = db;
     }
 
-    /// <summary>分页查询操作日志（支持模块、用户、单据号、关键字与时间范围筛选）</summary>
+    /// <summary>当前登录账号 Id（只来自已认证请求主体；缺失 / 非数字 / 非正返回 <c>null</c>，由规则层 fail closed）。</summary>
+    private long? CurrentUserId()
+    {
+        var value = ControllerContext?.HttpContext?.User?.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        return long.TryParse(value, out var id) && id > 0 ? id : null;
+    }
+
+    /// <summary>系统日志入口授权（实时身份 + 账号状态 + 既有 sys-log 菜单）。</summary>
+    private Task EnsureOperationLogAuthorizedAsync()
+        => OperationLogAuthorizationRules.EnsureAuthorizedAsync(_db, CurrentUserId());
+
+    /// <summary>分页查询操作日志（支持模块、用户、单据号、关键字与时间范围筛选）：先授权，再按既有分页 / 响应契约返回。</summary>
     [HttpGet]
     public async Task<IActionResult> GetPaged([FromQuery] PageQuery query,
         [FromQuery] string? module,
@@ -239,6 +254,7 @@ public class OperationLogController : ControllerBase
         [FromQuery] DateTime? start,
         [FromQuery] DateTime? end)
     {
+        await EnsureOperationLogAuthorizedAsync();
         query.Normalize();
         var source = _db.SysOperationLogs.AsNoTracking().Where(l => !l.IsDeleted);
         if (!string.IsNullOrWhiteSpace(module))

@@ -267,7 +267,7 @@ public class ClientLimitAuthorizationTests
         Assert.Contains("public virtual async Task<IActionResult> BatchDelete", baseSource);
         Assert.Contains("await Service.BatchDeleteAsync(ids);", baseSource);
 
-        // 操作日志控制器（同一文件）行为保持不变：无新增授权覆盖。
+        // 操作日志控制器（同一文件）的类声明逐字节保持不变（ERP-499 为其新增实时授权覆盖，声明行不变）。
         var source = File.ReadAllText(RepoFile("src", "ERP.Api", "Controllers", "SysSimpleControllers.cs"));
         Assert.Contains("public class OperationLogController : ControllerBase", source);
     }
