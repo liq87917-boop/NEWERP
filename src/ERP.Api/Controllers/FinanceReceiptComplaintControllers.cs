@@ -18,6 +18,12 @@ namespace ERP.Api.Controllers;
 /// （<see cref="CustomerReceiptLifecycleRules.LockReceiptRowAsync"/>，与两套分摊证据写入 / 作废同一锁序：先收款单行、
 /// 后分摊行），再加载权威状态 / 客户 / 币种 / 金额并在锁内复核身份 / 菜单 / 客户范围与有效证据；任一步失败整体回滚，
 /// 原状态、原始字段与审计保持不变。</para>
+/// <para>ERP-479：既有「收款单」菜单改由本规范控制器（<c>api/finance/receipts</c>，规范 <c>Id</c> 口径）承载，
+/// 不再映射到已由 ERP-404 门禁整体停用（fail closed）的旧存储过程族；旧族 <c>Oid</c> 读侧保持只读可用，
+/// 规范 <c>Id</c> 与旧 <c>Oid</c> 之间<b>不存在</b>任何映射，也绝不启用任何旧写适配器。
+/// 新增入口允许省略 / 空串收款单号（实体不再显式 <c>[Required]</c>，与 ERP-477 / ERP-478 同源口径），
+/// 主键 / 收款单号 / 状态 / 删除态 / 时间戳一律由服务端权威覆盖：全部授权 · 客户 · 币种 · 金额校验都在
+/// <b>单号预约与任何写入之前</b>完成，被拒绝的请求零表头 · 状态变化且零占号。</para>
 /// </summary>
 [Route("api/finance/receipts")]
 public class FinanceReceiptController : DocumentControllerBase<FinanceReceipt>
@@ -68,12 +74,18 @@ public class FinanceReceiptController : DocumentControllerBase<FinanceReceipt>
 
         await CustomerReceiptLifecycleRules.EnsureAuthorizedAsync(Db, CurrentUserId(), entity.CustomerId);
 
+        // ERP-479：主键 / 收款单号 / 状态 / 删除态 / 时间戳一律由服务端权威覆盖（省略 / 空串 / 伪造号码都在此被覆盖），
+        // 且全部校验（币种 / 金额 / 客户可用性 / 实时身份 · 收款单菜单 · 客户数据范围）都已先于单号预约完成，
+        // 被拒绝的请求零写入、零占号。
+        var now = DateTime.Now;
         entity.Id = 0;
         entity.ReceiptNo = await _noService.GenerateAsync(DocumentType.Receipt);
         entity.Status = DocumentStatus.Pending;
+        entity.IsDeleted = false;
         entity.Currency = Enum.Parse<Currency>(currency);
         entity.Amount = amount;
-        entity.CreatedAt = DateTime.Now;
+        entity.CreatedAt = now;
+        entity.UpdatedAt = null;
         Db.FinanceReceipts.Add(entity);
         await Db.SaveChangesAsync();
         return Ok(ApiResponse<object>.Success(new { entity.Id, entity.ReceiptNo }, "收款单创建成功"));

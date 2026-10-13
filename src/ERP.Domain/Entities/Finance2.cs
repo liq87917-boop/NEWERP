@@ -73,8 +73,18 @@ public class FinanceBulkSettlement : BaseEntity
 /// </summary>
 public class FinanceReceipt : BaseEntity
 {
-    /// <summary>收款单号</summary>
-    [Required, MaxLength(50)]
+    /// <summary>
+    /// 收款单号（服务端权威生成：新增入口一律在实时身份 / 收款单（receipt）菜单 / 客户范围、真实可用客户、
+    /// 受支持币种与正金额等全部校验通过之后，由 <c>IDocumentNumberService</c> 预约覆盖，调用方提交值不参与持久化）。
+    /// <para>ERP-479：这里刻意<strong>不加</strong> <c>[Required]</c>（与 ERP-477 入库单号 / ERP-478 出库单号同源口径）。
+    /// 手工录入表单不提交收款单号，MVC 对非空引用类型属性本就会推断一个 <c>AllowEmptyStrings = true</c> 的隐式必填
+    /// （允许空串）；而显式 <c>[Required]</c>（默认 <c>AllowEmptyStrings = false</c>）会把「省略收款单号」在模型绑定 /
+    /// 模型校验阶段直接拒绝为 HTTP 400 <c>{"errors":{"ReceiptNo":[...]}}</c>，服务端权威单号根本没有机会生成。
+    /// 移除显式特性后：省略 / 空串照常绑定并进入已授权的 <c>FinanceReceiptController.Create</c>，服务端仍按唯一权威口径
+    /// 覆盖收款单号、状态、删除态与时间戳；数据库列仍是 NOT NULL（非空 CLR 引用类型），长度仍受
+    /// <see cref="MaxLengthAttribute"/>(50) 约束，非法 / 越权请求的校验顺序不变（授权与来源校验先于单号预约与任何写入）。</para>
+    /// </summary>
+    [MaxLength(50)]
     public string ReceiptNo { get; set; } = string.Empty;
 
     /// <summary>收款日期</summary>

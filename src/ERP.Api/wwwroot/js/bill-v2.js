@@ -35,9 +35,13 @@ const BILL_CODE_MAP = {
      因此这里**不再**把 'stock-out' 映射到旧存储过程族 —— 旧族的写路径已被 ERP-404 门禁整体停用
      （fail closed），若继续映射，菜单会打开一张永远无法保存的旧单据页（api/v2/bills 写入口必然被拒）。
      旧族自身（BILL_CONFIG['stock-out'] 的旧库单体表 Oid 读侧 / 旧导出 / 既有默认值端点）保持只读可用，
-     规范 Id 与旧 Oid 之间**不存在**任何映射，也绝不因此启用任何旧写适配器。 */
-  receipt: 'receipt',
-  payment: 'payment',
+     规范 Id 与旧 Oid 之间**不存在**任何映射，也绝不因此启用任何旧写适配器。
+     ERP-479：收款单（receipt）与付款单（payment）同样改由 EF 规范模块承载
+     （modules-finance.js 的 'receipt' / 'payment' 模块 + /api/finance/receipts、/api/finance/payments，
+     规范 Id 口径 + 既有收款 / 付款引用登记工作台），因此这里**不再**把 'receipt' / 'payment' 映射到旧存储过程族 ——
+     旧族的写路径已被 ERP-404 门禁整体停用（fail closed），若继续映射，菜单会打开一张永远无法保存的旧单据页
+     （api/v2/bills 写入口必然被拒）。旧族自身（BILL_CONFIG['receipt'] / BILL_CONFIG['payment'] 的旧库单体表 Oid
+     读侧 / 旧导出 / 既有默认值端点）保持只读可用，规范 Id 与旧 Oid 之间**不存在**任何映射。 */
   'deposit-apply': 'deposit-apply',
   'payment-apply': 'payment-apply',
   'container-settlement': 'container-settlement',
