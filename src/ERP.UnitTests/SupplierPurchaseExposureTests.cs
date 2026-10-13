@@ -457,7 +457,9 @@ public class SupplierPurchaseExposureTests
         SeedPayment(db, "FK-EXP-7", apply.Id, SupplierA, 25m, Currency.CNY, DocumentStatus.Approved);
         await db.SaveChangesAsync();
 
-        var controller = new PurchaseOrderController(db, new DocumentNumberService(db));
+        // ERP-466：真实启用身份 + 既有「采购订单」菜单授权（空路径请求，证明授权与请求形状无关）。
+        var controller = PurchaseOrderTestIdentities.ForUser(db,
+            PurchaseOrderTestIdentities.SeedAuthorizedUser(db));
         var result = await controller.SupplierExposure(Query());
 
         var ok = Assert.IsType<OkObjectResult>(result);

@@ -9,6 +9,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using System.Data;
+using System.Security.Claims;
 
 namespace ERP.Api.Controllers;
 
@@ -23,15 +24,17 @@ namespace ERP.Api.Controllers;
 /// <see cref="PurchaseOrderMutationRules"/> 的「原子事务 + 确定性行锁 + 锁内权威重读」协议：
 /// 加锁前以无锁只读发现持久化归属来源并与请求拟议来源取并集，按 Id 升序取得来源行锁后再取本采购订单行锁；
 /// 仅待提交可修改、来源指针被并发改写即原子拒绝、请求未给出来源时保留已存血缘（绝不静默清除）。</para>
-/// <para>ERP-427：真实 HTTP 写入请求（新增 / 修改）在单号预约与任何表头 / 明细赋值之前、提交 / 审核在既有采购订单行锁内
-/// 提交之前，一律经 <see cref="PurchaseOrderMasterReferenceRules"/> 复核实时主数据引用（必填供应商、每条有效明细的必填商品、
-/// 可选采购员 / 起运港与既有有效单位口径），失败即受控拒绝且不落库、不占单号；历史读取 / 打印保持完全只读、不被回填。</para>
-/// <para>ERP-466：<see cref="RequiresLiveAuthorization"/> 只依据「控制器是否绑定到 HTTP 请求管线」
-/// （<c>ControllerContext.HttpContext</c> 是否存在），<strong>与 <c>Request.Path</c> 是否赋值、以及是否携带可解析身份完全无关</strong>：
-/// 空路径与已赋值路径的授权口径完全一致，缺少身份的真实请求 fail closed（未认证），不再存在「空路径 / 无身份」的请求形状旁路；
-/// 所有列表 / 详情 / 派生只读 / 创建 / 修改 / 提交 / 审核 / 取消 / 删除入口都在任何字节读写之前无条件复核实时身份 / 账号状态 /
-/// 既有「采购订单」菜单 / ERP-097 权威客户范围。仅 <c>HttpContext</c> 为 null 的纯进程内直调（外部请求无法构造）沿用仓库一致的
-/// 进程内边界，该边界不读取请求路径、环境变量或任何测试专用开关。</para>
+/// <para>ERP-427 / ERP-466：采购订单新增 / 修改在单号预约与任何表头 / 明细赋值之前、提交 / 审核在既有采购订单行锁内
+/// 提交之前，<b>无条件</b>经 <see cref="PurchaseOrderMasterReferenceRules"/> 复核实时主数据引用（必填供应商、每条有效明细的必填商品、
+/// 可选采购员 / 起运港与既有有效单位口径），与请求路径 / 请求形状 / 是否绑定 <c>HttpContext</c> 完全无关；
+/// 失败即受控拒绝且不落库、不占单号；历史读取 / 打印保持完全只读、不被回填。</para>
+/// <para>ERP-466：采购订单实时授权<b>无条件执行</b> —— 身份只来自已认证请求主体，缺少请求上下文 / 缺少身份声明 /
+/// 非数字 / 非正数一律安全解析为 <c>null</c> 并先返回受控未认证，与请求路径是否赋值、请求形状、
+/// 是否绑定 <c>HttpContext</c> 完全无关（空路径 / 已赋值路径 / 纯进程内直调口径完全一致）。
+/// 所有列表 / 详情 / 派生只读 / 创建 / 修改 / 提交 / 审核 / 取消 / 删除入口都在任何单据 / 明细 / 派生证据字节读写<b>之前</b>
+/// 复核实时身份 / 账号状态 / 既有「采购订单」菜单 / ERP-097 权威客户范围，写入侧并无条件复核实时主数据引用（ERP-427）。
+/// 绝不读取请求路径 / 环境变量 / 数据库提供程序，绝无匿名、管理员或测试专用开关兜底，
+/// 也不保留任何「无请求上下文 / 空路径」的免授权兼容边界。</para>
 /// <para>ERP-430：规范运营读取（详情 / 打印 / JSON 运营导出）统一经 <see cref="OperationalReadQuery"/>，
 /// 只返回未删除父单的**未删除**明细行（EF Core filtered include，先于物化下推到数据库），与打印同口径；
 /// 表头历史金额与来源 / 审计快照原样保留，读取侧不重算币种总额、不改写被软删除的行。</para>
@@ -78,11 +81,13 @@ public class PurchaseOrderController : DocumentControllerBase<PurchaseOrder>
     [HttpGet("{id:long}")]
     public async Task<IActionResult> GetById(long id)
     {
+        // ERP-466：身份 / 账号状态 / 既有「采购订单」菜单先于任何单据 / 明细字节读取（缺失身份受控未认证）。
+        var scope = await EnsureMenuAuthorizedAsync();
         var entity = await OperationalReadQuery()
             .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
             ?? throw BusinessException.NotFound("采购订单不存在");
-        // ERP-371：详情与列表同一口径（身份 / 菜单 / 权威归属客户范围）。
-        await EnsureOrderAuthorizedAsync(entity);
+        // ERP-371：详情与列表同一口径（权限不足 / 权威归属客户范围；范围外与不存在同样不披露归属）。
+        await PurchaseOrderAuthorizationRules.EnsureOrderScopeAllowedAsync(Db, scope, entity);
         return Ok(ApiResponse<PurchaseOrder>.Success(entity));
     }
 
@@ -100,8 +105,8 @@ public class PurchaseOrderController : DocumentControllerBase<PurchaseOrder>
         [FromQuery] long? customerId, [FromQuery] string? keyword,
         [FromQuery] int page = 0, [FromQuery] int pageSize = 0)
     {
-        // ERP-393：实时启用身份 + 既有「采购订单」菜单 + 权威客户数据范围（fail closed）。
-        var scope = await PurchaseOrderAuthorizationRules.EnsureMenuAuthorizedAsync(Db, CurrentUserId());
+        // ERP-393 / ERP-466：实时启用身份 + 既有「采购订单」菜单 + 权威客户数据范围（无条件 fail closed）。
+        var scope = await EnsureMenuAuthorizedAsync();
         return Ok(ApiResponse<PurchaseOrderSalesOrderSourceCandidatePageDto>.Success(
             await PurchaseOrderSalesOrderSourceService.QueryCandidatesAsync(
                 Db, scope, customerId, keyword, page, pageSize),
@@ -117,11 +122,12 @@ public class PurchaseOrderController : DocumentControllerBase<PurchaseOrder>
     [HttpGet("{id:long}/sales-order-source")]
     public async Task<IActionResult> GetStoredSalesOrderSource(long id)
     {
+        // ERP-466：实时启用身份 + 既有「采购订单」菜单先于任何单据字节读取（缺失身份受控未认证）。
+        var scope = await EnsureMenuAuthorizedAsync();
         var entity = await Set.AsNoTracking()
             .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
             ?? throw BusinessException.NotFound("采购订单不存在");
-        // ERP-393：实时启用身份 + 既有「采购订单」菜单 + 本单权威归属客户范围（显式归属客户 + 权威来源客户，fail closed）。
-        var scope = await PurchaseOrderAuthorizationRules.EnsureMenuAuthorizedAsync(Db, CurrentUserId());
+        // ERP-393：本单权威归属客户范围（显式归属客户 + 权威来源客户，fail closed）。
         await PurchaseOrderAuthorizationRules.EnsureOrderScopeAllowedAsync(Db, scope, entity);
         return Ok(ApiResponse<PurchaseOrderSalesOrderSourceViewDto>.Success(
             await PurchaseOrderSalesOrderSourceService.DescribeStoredSourceAsync(Db, scope, entity),
@@ -315,6 +321,8 @@ public class PurchaseOrderController : DocumentControllerBase<PurchaseOrder>
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] PurchaseOrder entity)
     {
+        // ERP-466：身份 / 账号状态 / 既有「采购订单」菜单先于事务、任何读取与写入（缺失身份受控未认证，零副作用）。
+        await EnsureMenuAuthorizedAsync();
         IDbContextTransaction? transaction = null;
         try
         {
@@ -376,6 +384,8 @@ public class PurchaseOrderController : DocumentControllerBase<PurchaseOrder>
     [HttpPut("{id:long}")]
     public async Task<IActionResult> Update(long id, [FromBody] PurchaseOrder entity)
     {
+        // ERP-466：身份 / 账号状态 / 既有「采购订单」菜单先于事务、任何读取与写入（缺失身份受控未认证，零副作用）。
+        await EnsureMenuAuthorizedAsync();
         IDbContextTransaction? transaction = null;
         try
         {
@@ -510,11 +520,13 @@ public class PurchaseOrderController : DocumentControllerBase<PurchaseOrder>
     [HttpGet("{id:long}/print")]
     public async Task<IActionResult> GetPrint(long id)
     {
+        // ERP-466：身份 / 菜单先于任何单据 / 明细字节读取（缺失身份受控未认证）。
+        var scope = await EnsureMenuAuthorizedAsync();
         var entity = await OperationalReadQuery()
             .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
             ?? throw BusinessException.NotFound("采购订单不存在");
-        // ERP-371：打印与详情同一授权口径（身份 / 菜单 / 权威归属客户范围）。
-        await EnsureOrderAuthorizedAsync(entity);
+        // ERP-371：打印与详情同一授权口径（权限不足 / 权威归属客户范围）。
+        await PurchaseOrderAuthorizationRules.EnsureOrderScopeAllowedAsync(Db, scope, entity);
         return Ok(ApiResponse<PurchaseOrder>.Success(entity));
     }
 
@@ -607,6 +619,8 @@ public class PurchaseOrderController : DocumentControllerBase<PurchaseOrder>
     [HttpPost("{id:long}/cancel")]
     public override async Task<IActionResult> Cancel(long id)
     {
+        // ERP-466：身份 / 账号状态 / 既有「采购订单」菜单先于事务与任何单据读取（缺失身份受控未认证）。
+        await EnsureMenuAuthorizedAsync();
         await using var transaction = await Db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
         try
         {
@@ -714,6 +728,8 @@ public class PurchaseOrderController : DocumentControllerBase<PurchaseOrder>
     [HttpPost("{id:long}/submit")]
     public override async Task<IActionResult> Submit(long id)
     {
+        // ERP-466：身份 / 账号状态 / 既有「采购订单」菜单先于事务与任何单据读取（缺失身份受控未认证）。
+        await EnsureMenuAuthorizedAsync();
         await using var transaction = await Db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
         try
         {
@@ -749,6 +765,8 @@ public class PurchaseOrderController : DocumentControllerBase<PurchaseOrder>
     [HttpPost("{id:long}/approve")]
     public override async Task<IActionResult> Approve(long id)
     {
+        // ERP-466：身份 / 账号状态 / 既有「采购订单」菜单先于事务与任何单据读取（缺失身份受控未认证）。
+        await EnsureMenuAuthorizedAsync();
         await using var transaction = await Db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
         try
         {
@@ -782,6 +800,8 @@ public class PurchaseOrderController : DocumentControllerBase<PurchaseOrder>
     [HttpDelete("{id:long}")]
     public override async Task<IActionResult> Delete(long id)
     {
+        // ERP-466：身份 / 账号状态 / 既有「采购订单」菜单先于事务与任何单据读取（缺失身份受控未认证）。
+        await EnsureMenuAuthorizedAsync();
         await using var transaction = await Db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
         try
         {
@@ -804,74 +824,60 @@ public class PurchaseOrderController : DocumentControllerBase<PurchaseOrder>
     // ==================== ERP-371：实时授权辅助（身份 / 菜单 / 权威客户范围） ====================
 
     /// <summary>
-    /// ERP-466：是否必须执行实时授权。<strong>只要控制器绑定到 HTTP 请求管线（<c>ControllerContext.HttpContext</c> 存在）
-    /// 就一律执行</strong>，与请求路径是否赋值、以及当前是否携带可解析的登录身份<strong>完全无关</strong>：
-    /// 空路径请求与已赋值路径请求的授权口径完全一致，缺少身份的真实请求同样 fail closed（未认证），
-    /// 既不存在「空路径 / 无身份」的请求形状旁路，也绝不把缺失身份当作管理员，绝无匿名或管理员兜底。
-    /// <para>仅「未被任何请求绑定」（<c>HttpContext</c> 为 null 的纯进程内直接调用，外部请求无法到达，例如既有
-    /// 进程内单元测试夹具）沿用仓库一致的进程内直调边界：该边界不读取请求路径、不读取环境变量，也不使用任何
-    /// 测试专用开关，因此不是请求形状旁路，也不能由任何外部请求到达。</para>
+    /// ERP-466 当前登录用户 Id：<strong>缺少请求上下文（<c>ControllerContext.HttpContext</c> 为 null）、
+    /// 缺少身份声明、非数字或非正数时一律安全解析为 <c>null</c></strong>，由既有授权规则在任何采购订单 /
+    /// 明细 / 派生证据查询与任何写入<strong>之前</strong>返回受控未认证（fail closed）；绝不猜测身份、
+    /// 绝不回退为匿名 / 管理员。
+    /// <para>本方法不读取请求路径属性、不读取环境变量、不判断数据库提供程序，也不使用任何测试专用开关：
+    /// 「空路径 / 已赋值路径 / 未绑定任何请求」三种调用形状的身份解析口径完全一致。</para>
     /// </summary>
-    private bool RequiresLiveAuthorization()
-        => ControllerContext?.HttpContext is not null;
+    private new long? CurrentUserId()
+    {
+        var value = ControllerContext?.HttpContext?.User?.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        return long.TryParse(value, out var id) && id > 0 ? id : null;
+    }
 
     /// <summary>
-    /// ERP-427：是否必须执行实时主数据引用复核。<strong>真实 HTTP 写入请求（MVC 绑定，<c>Request.Path</c> 已赋值）
-    /// 一律执行</strong>；进程内直接调用（历史单元测试 / 内部派生读取，无 HTTP 请求管线）保持既有行为 —— 与
-    /// <see cref="RequiresLiveAuthorization"/> 同一取舍：这类调用不可能由外部请求到达。
-    /// <para>真实请求在到达本复核之前已由 <see cref="EnsureProposedAuthorizedAsync"/> /
-    /// <see cref="EnsureOrderAuthorizedAsync"/> 完成身份 / 菜单 / 权威归属范围 fail closed（非披露），
-    /// 因此本复核只可能在**已授权**的外部请求上生效，绝不把缺失身份当作管理员。</para>
-    /// </summary>
-    private bool RequiresLiveMasterValidation()
-        => ControllerContext?.HttpContext?.Request.Path.HasValue == true;
-
-    /// <summary>
-    /// ERP-427：复核请求侧（新增 / 修改）或已持久化（提交 / 审核）采购订单的实时主数据引用 ——
+    /// ERP-427 / ERP-466：复核请求侧（新增 / 修改）或已持久化（提交 / 审核）采购订单的实时主数据引用 ——
     /// 必填供应商、每条有效明细的必填商品、可选采购员 / 起运港与既有有效单位口径。
+    /// <strong>无条件执行</strong>，与请求路径 / 请求形状 / 是否绑定 <c>HttpContext</c> 完全无关；
     /// 只做纯判定与有界只读查询，绝不写主数据、不消耗单号、不改写任何字段。
     /// </summary>
-    private async Task EnsureMasterReferencesAsync(PurchaseOrder order)
-    {
-        if (!RequiresLiveMasterValidation()) return;
-        await PurchaseOrderMasterReferenceRules.EnsureMasterReferencesAsync(Db, order);
-    }
+    private Task EnsureMasterReferencesAsync(PurchaseOrder order)
+        => PurchaseOrderMasterReferenceRules.EnsureMasterReferencesAsync(Db, order);
 
-    /// <summary>身份 / 账号状态 / 菜单授权（fail closed）：缺失 / 已删除按未认证，禁用 / 无菜单按权限不足。</summary>
-    private async Task EnsureMenuAuthorizedAsync()
-    {
-        if (!RequiresLiveAuthorization()) return;
-        await PurchaseOrderAuthorizationRules.EnsureMenuAuthorizedAsync(Db, CurrentUserId());
-    }
+    /// <summary>
+    /// 身份 / 账号状态 / 菜单授权（fail closed）：缺失 / 已删除按未认证，禁用 / 无菜单按权限不足。
+    /// <strong>无条件执行</strong>，与请求路径 / 请求形状 / 是否绑定 <c>HttpContext</c> 完全无关；
+    /// 返回解析出的权威数据范围供同一请求内复用（绝不缓存）。
+    /// </summary>
+    private Task<SalespersonDataScope> EnsureMenuAuthorizedAsync()
+        => PurchaseOrderAuthorizationRules.EnsureMenuAuthorizedAsync(Db, CurrentUserId());
 
-    /// <summary>单据级授权：身份 / 菜单 + 权威归属客户范围（显式归属客户 + 权威归属销售订单客户）。</summary>
-    private async Task EnsureOrderAuthorizedAsync(PurchaseOrder order)
-    {
-        if (!RequiresLiveAuthorization()) return;
-        await PurchaseOrderAuthorizationRules.EnsureOrderAuthorizedAsync(Db, CurrentUserId(), order);
-    }
+    /// <summary>单据级授权：身份 / 菜单 + 权威归属客户范围（显式归属客户 + 权威归属销售订单客户）。无条件执行。</summary>
+    private Task EnsureOrderAuthorizedAsync(PurchaseOrder order)
+        => PurchaseOrderAuthorizationRules.EnsureOrderAuthorizedAsync(Db, CurrentUserId(), order);
 
-    /// <summary>请求侧（创建 / 修改提交的归属）授权：先校验再分配字段 / 替换明细 / 消耗单据号。</summary>
-    private async Task EnsureProposedAuthorizedAsync(PurchaseOrder proposed)
-    {
-        if (!RequiresLiveAuthorization()) return;
-        await PurchaseOrderAuthorizationRules.EnsureProposedAuthorizedAsync(Db, CurrentUserId(), proposed);
-    }
+    /// <summary>请求侧（创建 / 修改提交的归属）授权：先校验再分配字段 / 替换明细 / 消耗单据号。无条件执行。</summary>
+    private Task EnsureProposedAuthorizedAsync(PurchaseOrder proposed)
+        => PurchaseOrderAuthorizationRules.EnsureProposedAuthorizedAsync(Db, CurrentUserId(), proposed);
 
-    /// <summary>按 Id 复核单张采购订单的权威归属客户范围（详情 / 打印 / 派生只读视图使用）。</summary>
-    private async Task EnsureOrderIdAuthorizedAsync(long id)
-    {
-        if (!RequiresLiveAuthorization()) return;
-        var ownership = await PurchaseOrderAuthorizationRules.LoadOwnershipAsync(Db, new[] { id });
-        await PurchaseOrderAuthorizationRules.EnsureOrdersAuthorizedAsync(Db, CurrentUserId(), ownership);
-    }
+    /// <summary>按 Id 复核单张采购订单的权威归属客户范围（详情 / 打印 / 派生只读视图使用）。无条件执行。</summary>
+    private Task EnsureOrderIdAuthorizedAsync(long id)
+        => EnsureOrderIdsAuthorizedAsync(new[] { id });
 
-    /// <summary>按 Id 批量复核采购订单权威归属客户范围（列表用批量派生汇总使用）。</summary>
+    /// <summary>
+    /// 按 Id 批量复核采购订单权威归属客户范围（列表用批量派生汇总使用）。<strong>无条件执行</strong>：
+    /// 身份 / 账号状态 / 既有「采购订单」菜单先于任何订单读取（空 Id 集合也绝不豁免），
+    /// 随后逐单复核权威归属客户范围（范围外与不存在同样不披露归属）。
+    /// </summary>
     private async Task EnsureOrderIdsAuthorizedAsync(IReadOnlyCollection<long> ids)
     {
-        if (!RequiresLiveAuthorization() || ids.Count == 0) return;
+        var scope = await EnsureMenuAuthorizedAsync();
+        if (ids.Count == 0) return;
         var ownership = await PurchaseOrderAuthorizationRules.LoadOwnershipAsync(Db, ids);
-        await PurchaseOrderAuthorizationRules.EnsureOrdersAuthorizedAsync(Db, CurrentUserId(), ownership);
+        foreach (var order in ownership)
+            await PurchaseOrderAuthorizationRules.EnsureOrderScopeAllowedAsync(Db, scope, order);
     }
 
     /// <summary>
@@ -884,12 +890,13 @@ public class PurchaseOrderController : DocumentControllerBase<PurchaseOrder>
     private IQueryable<PurchaseOrder> OperationalReadQuery()
         => Set.AsNoTracking().Include(o => o.Details.Where(d => !d.IsDeleted));
 
-    /// <summary>列表 / 导出的权威客户范围下推（计数 / 分页之前）；非 HTTP / 无身份的内部调用不改变既有查询。</summary>
-    private async Task<IQueryable<PurchaseOrder>> ApplyProcurementScopeAsync(IQueryable<PurchaseOrder> source)
-    {
-        if (!RequiresLiveAuthorization()) return source;
-        return await PurchaseOrderAuthorizationRules.ApplyScopeAsync(Db, source, CurrentUserId());
-    }
+    /// <summary>
+    /// 列表 / 导出的权威客户范围下推（计数 / 分页之前）：<strong>无条件执行</strong>身份 / 账号状态 /
+    /// 既有「采购订单」菜单与 ERP-097 权威客户范围，与请求路径 / 请求形状 / 是否绑定 <c>HttpContext</c> 完全无关；
+    /// 缺少身份在任何计数 / 分页 / 物化之前受控未认证（fail closed）。
+    /// </summary>
+    private Task<IQueryable<PurchaseOrder>> ApplyProcurementScopeAsync(IQueryable<PurchaseOrder> source)
+        => PurchaseOrderAuthorizationRules.ApplyScopeAsync(Db, source, CurrentUserId());
 
     /// <summary>解析逗号分隔的订单 Id（与既有批量证据接口同一入参口径，非法片段忽略）。</summary>
     private static List<long> ParseOrderIds(string? ids)

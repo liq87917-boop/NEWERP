@@ -222,7 +222,9 @@ public class PurchaseOrderReturnImpactTests
         SeedReturn(db, "TH-CTRL", stockIn.Id, DocumentStatus.Approved, lines: (ProductA, 4m));
         await db.SaveChangesAsync();
 
-        var controller = new PurchaseOrderController(db, new DocumentNumberService(db));
+        // ERP-466：真实启用身份 + 既有「采购订单」菜单授权（空路径请求，证明授权与请求形状无关）。
+        var controller = PurchaseOrderTestIdentities.ForUser(db,
+            PurchaseOrderTestIdentities.SeedAuthorizedUser(db));
         var result = await controller.ReturnImpact(order.Id);
 
         var ok = Assert.IsType<OkObjectResult>(result);

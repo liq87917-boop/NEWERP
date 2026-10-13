@@ -58,6 +58,36 @@ public class OrderTraceabilityTests
         db.SaveChanges();
     }
 
+    /// <summary>
+    /// ERP-427 / ERP-466：只补缺失行的既有合法采购主数据（供应商 Id=1 / 999999、在职采购员 Id=1、
+    /// 未维护单位的商品 Id=1，以及 <see cref="SeedPurchaseLinkSource"/> 的商品）——
+    /// 采购订单写入口 **无条件** 复核实时主数据引用，与请求路径 / 请求形状 / 请求上下文完全无关；
+    /// 只补缺失行，绝不改写生产校验口径，也不与销售订单测试的主数据夹具混用。
+    /// </summary>
+    private static void SeedPurchaseMasterFixtures(ErpDbContext db)
+    {
+        foreach (var supplierId in new[] { 1L, 999999L })
+        {
+            if (!db.BaseSuppliers.Any(s => s.Id == supplierId))
+                db.BaseSuppliers.Add(new BaseSupplier
+                {
+                    Id = supplierId, SupplierCode = $"S-TR-{supplierId}",
+                    SupplierName = $"ERP008 供应商{supplierId}", Status = 1
+                });
+        }
+        if (!db.BaseEmployees.Any(e => e.Id == 1L))
+            db.BaseEmployees.Add(new BaseEmployee
+            {
+                Id = 1L, EmployeeCode = "E-TR-1", EmployeeName = "ERP008 采购员", Status = 1
+            });
+        if (!db.BaseProducts.Any(p => p.Id == 1L))
+            db.BaseProducts.Add(new BaseProduct
+            {
+                Id = 1L, ProductCode = "P-TR-1", ProductName = "ERP008 商品", Status = 1
+            });
+        db.SaveChanges();
+    }
+
     private static long SeedAuthorizedPurchaseUser(ErpDbContext db)
     {
         var user = new SysUser
@@ -349,6 +379,7 @@ public class OrderTraceabilityTests
     public async Task 采购订单_归属客户与采购执行字段_完整持久化并读回()
     {
         using var db = TestDbFactory.Create();
+        SeedPurchaseMasterFixtures(db);
         var ctl = new PurchaseOrderController(db, new DocumentNumberService(db));
         var (customerId, salesOrderId, productId) = SeedPurchaseLinkSource(db, "SO2609230001", "ACME IMPORT");
         TestAuth.SetUser(ctl, SeedAuthorizedPurchaseUser(db));
@@ -394,6 +425,7 @@ public class OrderTraceabilityTests
     public async Task 采购订单_Update_可回填归属销售订单与进度()
     {
         using var db = TestDbFactory.Create();
+        SeedPurchaseMasterFixtures(db);
         var ctl = new PurchaseOrderController(db, new DocumentNumberService(db));
         var (customerId, salesOrderId, productId) = SeedPurchaseLinkSource(db, "SO-LINK-9", "LINK CUSTOMER");
         TestAuth.SetUser(ctl, SeedAuthorizedPurchaseUser(db));
@@ -402,7 +434,7 @@ public class OrderTraceabilityTests
             OrderDate = DateTime.Today, SupplierId = 1,
             Details = new List<PurchaseOrderDetail>
             {
-                new() { ProductId = productId, ProductName = "商品A", Quantity = 1m, UnitPrice = 1m }
+                new() { ProductId = productId, ProductName = "商品A", Spec = "规格A", Unit = "PCS", Quantity = 1m, UnitPrice = 1m }
             }
         });
         var id = db.PurchaseOrders.Single().Id;
@@ -435,7 +467,9 @@ public class OrderTraceabilityTests
     public async Task 采购订单_税率越界_抛InvalidParameter_且未落库()
     {
         using var db = TestDbFactory.Create();
+        SeedPurchaseMasterFixtures(db);
         var ctl = new PurchaseOrderController(db, new DocumentNumberService(db));
+        TestAuth.SetUser(ctl, SeedAuthorizedPurchaseUser(db));
 
         var ex = await Assert.ThrowsAsync<BusinessException>(() => ctl.Create(new PurchaseOrder
         {
@@ -461,6 +495,7 @@ public class OrderTraceabilityTests
         db.SaveChanges();
 
         var ctl = new PurchaseOrderController(db, new DocumentNumberService(db));
+        TestAuth.SetUser(ctl, SeedAuthorizedPurchaseUser(db));
         var po = Assert.IsType<ApiResponse<PurchaseOrder>>(
             Assert.IsType<OkObjectResult>(await ctl.GetById(legacy.Id)).Value).Data!;
 
@@ -479,7 +514,9 @@ public class OrderTraceabilityTests
     public async Task 采购订单_列表关键字_可命中归属销售订单号与合同号()
     {
         using var db = TestDbFactory.Create();
+        SeedPurchaseMasterFixtures(db);
         var ctl = new PurchaseOrderController(db, new DocumentNumberService(db));
+        TestAuth.SetUser(ctl, SeedAuthorizedPurchaseUser(db));
         await ctl.Create(new PurchaseOrder
         {
             OrderDate = DateTime.Today, SupplierId = 1, OwningSalesOrderNo = "SO-KEY-8",
@@ -504,7 +541,9 @@ public class OrderTraceabilityTests
     public async Task 采购订单_打印与Excel导出_均可用()
     {
         using var db = TestDbFactory.Create();
+        SeedPurchaseMasterFixtures(db);
         var ctl = new PurchaseOrderController(db, new DocumentNumberService(db));
+        TestAuth.SetUser(ctl, SeedAuthorizedPurchaseUser(db));
         await ctl.Create(new PurchaseOrder
         {
             OrderDate = DateTime.Today, SupplierId = 1, OwningSalesOrderNo = "SO-PRINT-1",

@@ -27,7 +27,19 @@ public class PurchaseSalesOrderLinkTests
     // ==================== 脚手架 ====================
 
     private static PurchaseOrderController NewController(ErpDbContext db)
-        => new(db, new DocumentNumberService(db));
+    {
+        // ERP-427 / ERP-466：写入口无条件复核实时主数据引用（与请求路径 / 请求形状无关），
+        // 故只补缺失行的既有合法供应商 Id=1；绝不改写生产校验口径。
+        if (!db.BaseSuppliers.Any(s => s.Id == 1L))
+        {
+            db.BaseSuppliers.Add(new BaseSupplier
+            {
+                Id = 1L, SupplierCode = "S-466L-1", SupplierName = "ERP466 供应商", Status = 1
+            });
+            db.SaveChanges();
+        }
+        return new(db, new DocumentNumberService(db));
+    }
 
     private static BaseProduct SeedProduct(ErpDbContext db, long id, string code, string name, string unit)
     {
@@ -215,8 +227,11 @@ public class PurchaseSalesOrderLinkTests
     public async Task Create_未关联采购_不臆造销售链接()
     {
         using var db = TestDbFactory.Create();
+        SeedProduct(db, ProductA, "P-UNLINK-1", "商品A", "PCS");
         var ctl = NewController(db);
-        // 未关联路径不要求身份
+        // ERP-466：未关联备货采购同样要求既有启用身份 / 菜单 / 权威客户范围（不再有「未关联路径不要求身份」的旁路）。
+        var userId = SeedPrivilegedPurchaseUser(db);
+        TestAuth.SetUser(ctl, userId);
         var result = await ctl.Create(NewPurchaseOrder(null, (ProductA, "PCS", 3m, 4m)));
 
         Assert.IsType<OkObjectResult>(result);

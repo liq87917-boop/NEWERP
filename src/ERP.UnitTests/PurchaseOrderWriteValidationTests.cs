@@ -498,9 +498,34 @@ public class PurchaseOrderWriteValidationTests
 
     private static PurchaseOrderController NewController(ErpDbContext db)
     {
+        SeedMasterFixtures(db);
         var controller = new PurchaseOrderController(db, new DocumentNumberService(db));
         TestAuth.SetUser(controller, SeedPrivilegedPurchaseUser(db));
         return controller;
+    }
+
+    /// <summary>
+    /// ERP-427 / ERP-466：只补缺失行的既有合法主数据（供应商 Id=1 与明细商品 Id=1 / 2 / 7）——
+    /// 写入口 **无条件** 复核实时主数据引用，与请求路径 / 请求形状无关；这些商品刻意不维护单位，
+    /// 与既有请求报文未填写单位的口径一致（商品未维护单位时既有口径不做单位判定）。绝不改写生产校验口径。
+    /// </summary>
+    private static void SeedMasterFixtures(ErpDbContext db)
+    {
+        if (!db.BaseSuppliers.Any(s => s.Id == 1L))
+            db.BaseSuppliers.Add(new BaseSupplier
+            {
+                Id = 1L, SupplierCode = "S-426-1", SupplierName = "ERP426 供应商", Status = 1
+            });
+        foreach (var productId in new[] { 1L, 2L, 7L })
+        {
+            if (!db.BaseProducts.Any(p => p.Id == productId))
+                db.BaseProducts.Add(new BaseProduct
+                {
+                    Id = productId, ProductCode = $"P-426-{productId}",
+                    ProductName = $"商品{productId}", Status = 1
+                });
+        }
+        db.SaveChanges();
     }
 
     private static PurchaseOrder SeedOrder(ErpDbContext db, DocumentStatus status,

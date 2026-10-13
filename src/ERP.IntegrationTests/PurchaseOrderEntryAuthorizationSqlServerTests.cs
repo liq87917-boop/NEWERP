@@ -66,13 +66,19 @@ public sealed class PurchaseOrderEntryAuthorizationSqlServerTests
     }
 
     /// <summary>用一条独立连接执行控制器动作，返回受控错误码（成功返回 null）。</summary>
-    private async Task<int?> DeniedCodeAsync(
+    private Task<int?> DeniedCodeAsync(
         long? userId, string? requestPath, Func<PurchaseOrderController, Task<IActionResult>> action)
+        => DeniedCodeAsync(db => NewController(db, userId, requestPath), action);
+
+    /// <summary>用指定控制器工厂（例如「完全不绑定请求上下文」）执行动作，返回受控错误码（成功返回 null）。</summary>
+    private async Task<int?> DeniedCodeAsync(
+        Func<ErpDbContext, PurchaseOrderController> factory,
+        Func<PurchaseOrderController, Task<IActionResult>> action)
     {
         await using var db = _fixture.CreateDbContext();
         try
         {
-            await action(NewController(db, userId, requestPath));
+            await action(factory(db));
             return null;
         }
         catch (BusinessException ex)
@@ -90,30 +96,32 @@ public sealed class PurchaseOrderEntryAuthorizationSqlServerTests
     }
 
     /// <summary>核心入口：先授权、后读写；拒绝时返回同一受控错误码。</summary>
-    private async Task AssertAllCoreEntriesDeniedAsync(long? userId, string? requestPath, long orderId, int code)
+    private async Task AssertAllCoreEntriesDeniedAsync(long? userId, string? requestPath, long orderId, int code,
+        Func<ErpDbContext, PurchaseOrderController>? controllerFactory = null)
     {
+        controllerFactory ??= db => NewController(db, userId, requestPath);
         var ids = orderId.ToString();
-        Assert.Equal(code, await DeniedCodeAsync(userId, requestPath, c => c.GetPaged(new PageQuery { Page = 1, PageSize = 10 }, null)));
-        Assert.Equal(code, await DeniedCodeAsync(userId, requestPath, c => c.GetById(orderId)));
-        Assert.Equal(code, await DeniedCodeAsync(userId, requestPath, c => c.GetPrint(orderId)));
-        Assert.Equal(code, await DeniedCodeAsync(userId, requestPath, c => c.Export(null, null)));
-        Assert.Equal(code, await DeniedCodeAsync(userId, requestPath, c => c.ExportExcel(null, null, null, null)));
-        Assert.Equal(code, await DeniedCodeAsync(userId, requestPath, c => c.Timeline(orderId)));
-        Assert.Equal(code, await DeniedCodeAsync(userId, requestPath, c => c.Progress(orderId)));
-        Assert.Equal(code, await DeniedCodeAsync(userId, requestPath, c => c.FinanceReconciliation(orderId)));
-        Assert.Equal(code, await DeniedCodeAsync(userId, requestPath, c => c.ReturnImpact(orderId)));
-        Assert.Equal(code, await DeniedCodeAsync(userId, requestPath, c => c.InvoiceEvidence(orderId)));
-        Assert.Equal(code, await DeniedCodeAsync(userId, requestPath, c => c.InvoiceEvidenceSummaries(ids)));
-        Assert.Equal(code, await DeniedCodeAsync(userId, requestPath, c => c.PaymentEvidence(orderId)));
-        Assert.Equal(code, await DeniedCodeAsync(userId, requestPath, c => c.PaymentEvidenceSummaries(ids)));
-        Assert.Equal(code, await DeniedCodeAsync(userId, requestPath, c => c.InvoicePaymentEvidence(orderId)));
-        Assert.Equal(code, await DeniedCodeAsync(userId, requestPath, c => c.InvoicePaymentEvidenceSummaries(ids)));
-        Assert.Equal(code, await DeniedCodeAsync(userId, requestPath, c => c.Create(NewOrder(0L, 0L))));
-        Assert.Equal(code, await DeniedCodeAsync(userId, requestPath, c => c.Update(orderId, NewOrder(0L, 0L))));
-        Assert.Equal(code, await DeniedCodeAsync(userId, requestPath, c => c.Submit(orderId)));
-        Assert.Equal(code, await DeniedCodeAsync(userId, requestPath, c => c.Approve(orderId)));
-        Assert.Equal(code, await DeniedCodeAsync(userId, requestPath, c => c.Cancel(orderId)));
-        Assert.Equal(code, await DeniedCodeAsync(userId, requestPath, c => c.Delete(orderId)));
+        Assert.Equal(code, await DeniedCodeAsync(controllerFactory, c => c.GetPaged(new PageQuery { Page = 1, PageSize = 10 }, null)));
+        Assert.Equal(code, await DeniedCodeAsync(controllerFactory, c => c.GetById(orderId)));
+        Assert.Equal(code, await DeniedCodeAsync(controllerFactory, c => c.GetPrint(orderId)));
+        Assert.Equal(code, await DeniedCodeAsync(controllerFactory, c => c.Export(null, null)));
+        Assert.Equal(code, await DeniedCodeAsync(controllerFactory, c => c.ExportExcel(null, null, null, null)));
+        Assert.Equal(code, await DeniedCodeAsync(controllerFactory, c => c.Timeline(orderId)));
+        Assert.Equal(code, await DeniedCodeAsync(controllerFactory, c => c.Progress(orderId)));
+        Assert.Equal(code, await DeniedCodeAsync(controllerFactory, c => c.FinanceReconciliation(orderId)));
+        Assert.Equal(code, await DeniedCodeAsync(controllerFactory, c => c.ReturnImpact(orderId)));
+        Assert.Equal(code, await DeniedCodeAsync(controllerFactory, c => c.InvoiceEvidence(orderId)));
+        Assert.Equal(code, await DeniedCodeAsync(controllerFactory, c => c.InvoiceEvidenceSummaries(ids)));
+        Assert.Equal(code, await DeniedCodeAsync(controllerFactory, c => c.PaymentEvidence(orderId)));
+        Assert.Equal(code, await DeniedCodeAsync(controllerFactory, c => c.PaymentEvidenceSummaries(ids)));
+        Assert.Equal(code, await DeniedCodeAsync(controllerFactory, c => c.InvoicePaymentEvidence(orderId)));
+        Assert.Equal(code, await DeniedCodeAsync(controllerFactory, c => c.InvoicePaymentEvidenceSummaries(ids)));
+        Assert.Equal(code, await DeniedCodeAsync(controllerFactory, c => c.Create(NewOrder(0L, 0L))));
+        Assert.Equal(code, await DeniedCodeAsync(controllerFactory, c => c.Update(orderId, NewOrder(0L, 0L))));
+        Assert.Equal(code, await DeniedCodeAsync(controllerFactory, c => c.Submit(orderId)));
+        Assert.Equal(code, await DeniedCodeAsync(controllerFactory, c => c.Approve(orderId)));
+        Assert.Equal(code, await DeniedCodeAsync(controllerFactory, c => c.Cancel(orderId)));
+        Assert.Equal(code, await DeniedCodeAsync(controllerFactory, c => c.Delete(orderId)));
     }
 
     // ==================== 1. 缺失 / 零 / 未知 / 已删除身份：任何入口、任何请求形状一律未认证 ====================
@@ -249,6 +257,89 @@ public sealed class PurchaseOrderEntryAuthorizationSqlServerTests
         Assert.Equal(rolesBefore, await after.SysRoles.CountAsync());
         Assert.Equal(grantsBefore, await after.SysRoleMenus.CountAsync(g => !g.IsDeleted));
     }
+
+    // ==================== 4. 完全没有请求上下文：与空路径 / 已赋值路径判决完全一致 ====================
+
+    /// <summary>
+    /// ERP-466：<c>ControllerContext.HttpContext</c> 为 null 的纯进程内直调（既无请求路径、也无任何请求上下文）
+    /// 不再享有免授权兼容边界 —— 每一条核心入口一律先返回受控未认证，且零写入、零单号消耗。
+    /// </summary>
+    [Fact]
+    public async Task Absent_request_context_is_unauthorized_on_every_core_route()
+    {
+        Guard();
+        long orderId, sequenceBefore, ordersBefore;
+        await using (var seed = _fixture.CreateDbContext())
+        {
+            var (supplier, product) = await SeedMasterAsync(seed);
+            var order = await SeedOrderAsync(seed, supplier.Id, product.Id);
+            orderId = order.Id;
+            ordersBefore = await seed.PurchaseOrders.CountAsync();
+            sequenceBefore = await PurchaseOrderSequenceAsync(seed);
+        }
+
+        await AssertAllCoreEntriesDeniedAsync(null, null, orderId, ErrorCodes.Unauthorized,
+            db => new PurchaseOrderController(db, new DocumentNumberService(db)));
+
+        await using var after = _fixture.CreateDbContext();
+        Assert.Equal(ordersBefore, await after.PurchaseOrders.CountAsync());
+        var stored = await after.PurchaseOrders.AsNoTracking().SingleAsync(o => o.Id == orderId);
+        Assert.Equal(DocumentStatus.Pending, stored.Status);
+        Assert.False(stored.IsDeleted);
+        Assert.Equal(sequenceBefore, await PurchaseOrderSequenceAsync(after));
+    }
+
+    // ==================== 5. 写入无条件复核实时主数据引用（与请求路径无关） ====================
+
+    /// <summary>
+    /// ERP-466：实时主数据引用复核不再以请求路径是否存在为前提 —— 空路径与已赋值路径对同一
+    /// 不存在供应商 / 已停用供应商 / 已删除商品给出完全相同的受控拒绝，且零写入、零单号消耗。
+    /// </summary>
+    [Theory]
+    [InlineData(null)]
+    [InlineData(RoutePath)]
+    public async Task Writes_revalidate_live_master_references_on_both_request_shapes(string? requestPath)
+    {
+        Guard();
+        const long missingSupplierId = 9_466_999_991L;
+        long userId, enabledSupplierId, disabledSupplierId, deletedProductId, ordersBefore, sequenceBefore;
+        await using (var seed = _fixture.CreateDbContext())
+        {
+            var owner = await SeedOperatorAsync(seed);
+            userId = owner.UserId;
+
+            var (enabledSupplier, _) = await SeedMasterAsync(seed);
+            var (disabledSupplier, _) = await SeedMasterAsync(seed);
+            var (_, deletedProduct) = await SeedMasterAsync(seed);
+            disabledSupplier.Status = 0;
+            deletedProduct.IsDeleted = true;
+            await seed.SaveChangesAsync();
+            enabledSupplierId = enabledSupplier.Id;
+            disabledSupplierId = disabledSupplier.Id;
+            deletedProductId = deletedProduct.Id;
+
+            ordersBefore = await seed.PurchaseOrders.CountAsync();
+            sequenceBefore = await PurchaseOrderSequenceAsync(seed);
+        }
+
+        Assert.Equal(ErrorCodes.NotFound, await DeniedCodeAsync(userId, requestPath,
+            c => c.Create(NewOrder(missingSupplierId, deletedProductId))));
+        Assert.Equal(ErrorCodes.RuleConflict, await DeniedCodeAsync(userId, requestPath,
+            c => c.Create(NewOrder(disabledSupplierId, deletedProductId))));
+        Assert.Equal(ErrorCodes.NotFound, await DeniedCodeAsync(userId, requestPath,
+            c => c.Create(NewOrder(enabledSupplierId, deletedProductId))));
+
+        await using var after = _fixture.CreateDbContext();
+        Assert.Equal(ordersBefore, await after.PurchaseOrders.CountAsync());
+        Assert.Equal(sequenceBefore, await PurchaseOrderSequenceAsync(after));
+    }
+
+    /// <summary>采购订单号规则的当前流水（规则缺失时为 0）。</summary>
+    private static async Task<long> PurchaseOrderSequenceAsync(ErpDbContext db)
+        => await db.SysDocumentNumberRules.AsNoTracking()
+               .Where(r => r.DocumentType == DocumentType.PurchaseOrder)
+               .Select(r => r.CurrentSequence)
+               .FirstOrDefaultAsync();
 
     // ==================== 种子助手（EF 生成身份主键，绝不清理既有行） ====================
 

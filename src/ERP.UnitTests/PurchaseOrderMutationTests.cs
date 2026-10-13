@@ -325,10 +325,38 @@ public class PurchaseOrderMutationTests
 
     private static PurchaseOrderController ControllerFor(ErpDbContext db)
     {
+        SeedMasterFixtures(db);
         var userId = SeedPrivilegedPurchaseUser(db);
         var ctl = new PurchaseOrderController(db, new DocumentNumberService(db));
         TestAuth.SetUser(ctl, userId);
         return ctl;
+    }
+
+    /// <summary>
+    /// ERP-427 / ERP-466：只补缺失行的既有合法主数据（供应商 Id=1 与明细商品 <see cref="ProductA"/> /
+    /// <c>ProductA + 1</c>，单位与请求报文一致）—— 写入口 **无条件** 复核实时主数据引用，
+    /// 与请求路径 / 请求形状无关；绝不改写生产校验口径。
+    /// </summary>
+    private static void SeedMasterFixtures(ErpDbContext db)
+    {
+        if (!db.BaseSuppliers.Any(s => s.Id == 1L))
+            db.BaseSuppliers.Add(new BaseSupplier
+            {
+                Id = 1L, SupplierCode = "S-466M-1", SupplierName = "ERP466 供应商", Status = 1
+            });
+        if (!db.BaseProducts.Any(p => p.Id == ProductA))
+            db.BaseProducts.Add(new BaseProduct
+            {
+                Id = ProductA, ProductCode = "P-466M-1", ProductName = "商品A", Spec = "规格A",
+                Unit = "PCS", Status = 1
+            });
+        if (!db.BaseProducts.Any(p => p.Id == ProductA + 1))
+            db.BaseProducts.Add(new BaseProduct
+            {
+                Id = ProductA + 1, ProductCode = "P-466M-2", ProductName = "商品B", Spec = "规格B",
+                Unit = "BOX", Status = 1
+            });
+        db.SaveChanges();
     }
 
     private static PurchaseOrder SeedOrder(ErpDbContext db, DocumentStatus status, long? owningSalesOrderId,

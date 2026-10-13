@@ -212,9 +212,38 @@ public class PurchaseOrderControllerTests
         return user.Id;
     }
 
+    /// <summary>
+    /// ERP-427 / ERP-466：只补缺失行的既有合法主数据（供应商 Id=1 / 999999 与明细商品 Id=1 / 2 / 99）——
+    /// 写入口 **无条件** 复核实时主数据引用，与请求路径 / 请求形状无关；这些商品刻意不维护单位，
+    /// 与既有请求报文未填写单位的口径一致（商品未维护单位时既有口径不做单位判定）。绝不改写生产校验口径。
+    /// </summary>
+    private static void SeedMasterFixtures(ErpDbContext db)
+    {
+        foreach (var supplierId in new[] { 1L, 999999L })
+        {
+            if (!db.BaseSuppliers.Any(s => s.Id == supplierId))
+                db.BaseSuppliers.Add(new BaseSupplier
+                {
+                    Id = supplierId, SupplierCode = $"S-466C-{supplierId}",
+                    SupplierName = $"采购控制器测试供应商 {supplierId}", Status = 1
+                });
+        }
+        foreach (var productId in new[] { 1L, 2L, 99L })
+        {
+            if (!db.BaseProducts.Any(p => p.Id == productId))
+                db.BaseProducts.Add(new BaseProduct
+                {
+                    Id = productId, ProductCode = $"P-466C-{productId}",
+                    ProductName = $"商品{productId}", Status = 1
+                });
+        }
+        db.SaveChanges();
+    }
+
     /// <summary>绑定既有启用身份（<strong>刻意不设置 Request.Path</strong>，证明授权与请求形状无关）。</summary>
     private static PurchaseOrderController ForUser(ErpDbContext db, long userId)
     {
+        SeedMasterFixtures(db);
         var ctl = new PurchaseOrderController(db, new DocumentNumberService(db));
         TestAuth.SetUser(ctl, userId);
         return ctl;

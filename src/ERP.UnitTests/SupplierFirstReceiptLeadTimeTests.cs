@@ -255,7 +255,9 @@ public class SupplierFirstReceiptLeadTimeTests
         SeedStockIn(db, "RK-CTRL", order.Id, DocumentStatus.Approved, Day.AddDays(3));
         await db.SaveChangesAsync();
 
-        var controller = new PurchaseOrderController(db, new DocumentNumberService(db));
+        // ERP-466：真实启用身份 + 既有「采购订单」菜单授权（空路径请求，证明授权与请求形状无关）。
+        var controller = PurchaseOrderTestIdentities.ForUser(db,
+            PurchaseOrderTestIdentities.SeedAuthorizedUser(db));
         var result = await controller.SupplierFirstReceiptLeadTimes(Query());
 
         var ok = Assert.IsType<OkObjectResult>(result);

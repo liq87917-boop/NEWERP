@@ -1,4 +1,4 @@
-# 采购订单入口实时授权（与请求路径无关）
+# 采购订单入口实时授权（与请求路径 / 请求形状 / 请求上下文无关）
 
 > 任务：`ERP-466`「Enforce canonical purchase order authority independently of request path」（阶段 3 关键授权入口修复）。
 > 关联：`ERP-371`（采购订单实时授权与数据范围，`docs/purchaseorder-authorization.md`）、
@@ -8,39 +8,57 @@
 
 ## 1. 修复前的问题证据
 
-`src/ERP.Api/Controllers/PurchaseOrderController.cs:806-811` 的实时授权门在修复前只依据**请求形状**：
+`src/ERP.Api/Controllers/PurchaseOrderController.cs` 的实时授权门在修复前只依据**请求形状**：
 
 ```csharp
 private bool RequiresLiveAuthorization()
 {
     var http = ControllerContext?.HttpContext;
-    if (http is null) return false;                                  // 无请求上下文：免授权
-    return http.Request.Path.HasValue || CurrentUserId() is not null; // 空路径且无身份：免授权
+    if (http is null) return false;                                   // 无请求上下文：免授权
+    return http.Request.Path.HasValue || CurrentUserId() is not null;  // 空路径且无身份：免授权
 }
+
+private bool RequiresLiveMasterValidation()
+    => ControllerContext?.HttpContext?.Request.Path.HasValue == true;  // 缺路径即跳过主数据复核
 ```
 
 因此 `EnsureMenuAuthorizedAsync`、`EnsureOrderAuthorizedAsync`、`EnsureProposedAuthorizedAsync`、
 `EnsureOrderIdAuthorizedAsync`、`EnsureOrderIdsAuthorizedAsync` 与列表范围下推 `ApplyProcurementScopeAsync`
 在**空路径**（未赋值 `Request.Path`）或**无身份**时完全跳过实时身份 / 账号状态 / 既有「采购订单」菜单 /
-ERP-097 权威客户范围判定。ERP-427 的实时主数据引用复核（`RequiresLiveMasterValidation()`）此前也只依据
-`Request.Path.HasValue`。真实 HTTP 请求始终已赋值 `Request.Path`，因此受影响的只有「绑定到请求管线但未携带
-路径 / 身份」的调用形状（历史进程内夹具、内部派生调用）；但它们足以让 ERP-371 / ERP-427 的护栏被请求形状绕过，
-且**真实匿名请求在空路径下不会 fail closed**。
+ERP-097 权威客户范围判定；ERP-427 的实时主数据引用复核此前也只依据 `Request.Path.HasValue`。
+后续一次修复把授权门改成「绑定到请求管线即授权」（`ControllerContext?.HttpContext is not null`），
+但仍保留了**「`HttpContext` 为 null 的进程内直调免授权」**这一无请求上下文兼容边界，且主数据复核门仍只看
+`Request.Path`；两者都仍属请求形状旁路，必须彻底移除。
 
-## 2. 修复后的授权门（与请求路径 / 身份形状完全无关）
+## 2. 修复后的口径：无条件执行，无任何形状 / 上下文门
 
-`RequiresLiveAuthorization()` 现在只依据「控制器是否绑定到 HTTP 请求管线」：
+`RequiresLiveAuthorization()` 与 `RequiresLiveMasterValidation()` **已完全删除**；控制器改为：
 
 ```csharp
-private bool RequiresLiveAuthorization()
-    => ControllerContext?.HttpContext is not null;
+/// 当前登录用户 Id：缺少请求上下文 / 缺少身份声明 / 非数字 / 非正数一律安全解析为 null
+private new long? CurrentUserId()
+{
+    var value = ControllerContext?.HttpContext?.User?.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+    return long.TryParse(value, out var id) && id > 0 ? id : null;
+}
+
+private Task<SalespersonDataScope> EnsureMenuAuthorizedAsync()
+    => PurchaseOrderAuthorizationRules.EnsureMenuAuthorizedAsync(Db, CurrentUserId());
+
+private Task EnsureMasterReferencesAsync(PurchaseOrder order)
+    => PurchaseOrderMasterReferenceRules.EnsureMasterReferencesAsync(Db, order);
 ```
 
-- **不再读取 `Request.Path`，也不再依据身份是否可解析**：请求路径与身份可用性都不再参与「是否授权」的判定；
-- **空路径与已赋值路径口径完全一致**：绑定到请求管线即一律实时授权，缺少身份的真实请求 fail closed（未认证）；
+- **不存在任何「是否授权」的门**：身份只来自已认证请求主体，缺失 / 零 / 未知 / 已删除身份安全解析为 `null`，
+  由既有授权规则在任何读取 / 写入<strong>之前</strong>返回受控未认证（`Err:Unauthorized` 2000）；
+- **空路径 / 已赋值路径 / 纯进程内直调三种形状判决完全一致**，包括 `ControllerContext.HttpContext` 为 null
+  （外部请求无法构造，但同样 fail closed，绝无免授权边界）；
+- **主数据引用复核无条件执行**：新增 / 修改 / 提交 / 审核一律在单号预约、任何表头 / 明细赋值之前复核
+  实时供应商 / 商品 / 可选采购员 / 起运港 / 既有有效单位口径，失败即受控拒绝、不落库、不占单号；
 - 与 `ERP-462`（供应商采购发票证据）、`ERP-465`（销售订单读侧）同一口径；
-- 不读取环境变量、不判断数据库提供程序、不存在任何测试专用开关；
-- 不存在 `[AllowAnonymous]`、角色白名单或「退化为管理员」的兜底（源码契约测试逐条断言）。
+- 控制器源码**不出现** `Request.Path` / `http.Request` / `RequiresLiveAuthorization` / `RequiresLiveMasterValidation`
+  / `[AllowAnonymous]` / 角色白名单 / 环境变量 / 数据库提供程序 / 测试专用开关（源码契约测试逐条断言），
+  绝无匿名、管理员或「无请求上下文」回退。
 
 `PurchaseOrderAuthorizationRules.PathIndependenceText` 固化同一口径，与既有 `RuleText` / `BoundaryText`
 共同构成「与请求形状无关」的可回归契约文案。
@@ -50,19 +68,20 @@ private bool RequiresLiveAuthorization()
 | 入口 | 授权调用 | 失败语义 |
 | --- | --- | --- |
 | `GET /api/purchase-orders`（列表） | `ApplyProcurementScopeAsync`（先于计数 / 分页，范围下推） | 未认证 / 权限不足 |
-| `GET /{id}`（详情） | `EnsureOrderAuthorizedAsync` | 未认证 / 权限不足 |
-| `GET /sales-order-source-candidates`、`GET /{id}/sales-order-source` | `EnsureMenuAuthorizedAsync` + `EnsureOrderScopeAllowedAsync` | 未认证 / 权限不足 |
-| `GET /{id}/timeline`、`/progress`、`/finance-reconciliation`、`/return-impact` | `EnsureOrderIdAuthorizedAsync` | 未认证 / 权限不足 |
+| `GET /{id}`（详情）、`GET /{id}/print` | 先 `EnsureMenuAuthorizedAsync`（身份 / 菜单），再读单据，再 `EnsureOrderScopeAllowedAsync` | 未认证 / 权限不足 |
+| `GET /sales-order-source-candidates`、`GET /{id}/sales-order-source` | `EnsureMenuAuthorizedAsync`（先于任何单据读取）+ `EnsureOrderScopeAllowedAsync` | 未认证 / 权限不足 |
+| `GET /{id}/timeline`、`/progress`、`/finance-reconciliation`、`/return-impact`、`/invoice-evidence`、`/payment-evidence`、`/invoice-payment-evidence` | `EnsureOrderIdAuthorizedAsync`（身份 / 菜单先于任何读取，再逐单范围判定） | 未认证 / 权限不足 |
+| `GET /invoice-evidence-summaries`、`/payment-evidence-summaries`、`/invoice-payment-evidence-summaries` | `EnsureOrderIdsAuthorizedAsync`（**空 Id 集合也绝不豁免**身份 / 菜单） | 未认证 / 权限不足 |
 | `GET /supplier-exposure`、`/delivery-exceptions`、`/first-receipt-lead-times` | `EnsureMenuAuthorizedAsync` | 未认证 / 权限不足 |
-| `GET /{id}/invoice-evidence`、`/payment-evidence`、`/invoice-payment-evidence`（含批量汇总） | `EnsureOrderIdAuthorizedAsync` / `EnsureOrderIdsAuthorizedAsync` | 未认证 / 权限不足 |
-| `GET /{id}/print`、`/export`、`/export-excel` | `EnsureOrderAuthorizedAsync` / `ApplyProcurementScopeAsync` | 未认证 / 权限不足 |
-| `POST /`（新增）、`PUT /{id}`（修改） | `EnsureProposedAuthorizedAsync` / `EnsureOrderAuthorizedAsync` | 未认证 / 权限不足 |
-| `POST /{id}/submit`、`/{id}/approve`、`/{id}/cancel`、`DELETE /{id}` | 行锁内的 `EnsureOrderAuthorizedAsync` | 未认证 / 权限不足 |
+| `GET /export`、`/export-excel` | `ApplyProcurementScopeAsync`（先于过滤与物化） | 未认证 / 权限不足 |
+| `POST /`（新增）、`PUT /{id}`（修改） | 入口先 `EnsureMenuAuthorizedAsync`；随后 `EnsureProposedAuthorizedAsync` / `EnsureOrderAuthorizedAsync` + **无条件** `EnsureMasterReferencesAsync` | 未认证 / 权限不足 / 主数据受控错误 |
+| `POST /{id}/submit`、`/{id}/approve`、`/{id}/cancel`、`DELETE /{id}` | 入口先 `EnsureMenuAuthorizedAsync`（先于事务与任何单据读取），锁内再 `EnsureOrderAuthorizedAsync` | 未认证 / 权限不足 |
 
-列表在计数 / 分页之前把权威范围下推数据库；派生只读视图与批量汇总在返回任何字节之前完成实时身份 / 菜单 / 归属判定；
-写入（新增 / 修改 / 提交 / 审核 / 取消 / 删除）在单号预约与任何字段 / 明细赋值之前完成。缺失 / 零 / 未知 / 已删除身份 → `Err:Unauthorized`（2000）；
-禁用账号、缺少或撤销既有「采购订单」（`purchase-order`）菜单 → `Err:Forbidden`（2002）。
-**被拒绝的调用零写入、零授权扩张且不消耗单据号**。
+列表在计数 / 分页之前把权威范围下推数据库；详情 / 打印 / 派生只读 / 批量汇总在返回任何字节之前完成实时身份 /
+菜单 / 归属判定（详情与打印在读取单据字节之前先完成身份 / 菜单 fail closed）；写入（新增 / 修改 / 提交 / 审核 /
+取消 / 删除）在事务开启、行锁、单号预约与任何字段 / 明细赋值之前完成身份 / 菜单判定，并在主数据引用复核之前完成
+归属范围判定。缺失 / 零 / 未知 / 已删除身份 → `Err:Unauthorized`（2000）；禁用账号、缺少或撤销既有「采购订单」
+（`purchase-order`）菜单 → `Err:Forbidden`（2002）。**被拒绝的调用零写入、零授权扩张且不消耗单据号**。
 
 ## 4. 保留的既有口径（不改业务语义）
 
@@ -72,7 +91,7 @@ private bool RequiresLiveAuthorization()
   （`OwningCustomerId`）与权威归属销售订单客户（`OwningSalesOrderId` 精确解析）；受限账号对无归属备货采购
   fail closed；范围外 / 已删除 / 不存在订单返回既有受控错误，**不泄露**范围外单据归属。
 - **主数据引用（ERP-427）**：必填供应商、每条有效明细的必填商品、可选采购员 / 起运港与既有有效单位口径的判定
-  逐字未改，只调整「是否执行」的门（不再依据 `Request.Path`），绝不削弱任何校验器。
+  逐字未改，只移除「是否执行」的形状门（不再依据 `Request.Path`、不再依据是否绑定请求上下文），绝不削弱任何校验器。
 - **数值 / 单号 / 事务 / 并发边界不变**：数量 / 单价 / 金额 / 币种 / 汇率 / 单位、单号生成与预约、
   「归属销售订单 → 本采购订单」确定性行锁序、可串行化事务、收货容量口径、取消 / 审核 / 删除护栏与审计留痕完全不变。
 - 未新增任何表 / 列 / 索引 / 权限模型。
@@ -81,44 +100,56 @@ private bool RequiresLiveAuthorization()
 
 ### 5.1 单元测试（内存库 + 真实既有身份 / 菜单 / 数据范围）
 
-- `src/ERP.UnitTests/PurchaseOrderEntryAuthorizationTests.cs`（新增）：空路径与已赋值路径的**逐入口一致判定**
-  （列表 / 详情 / 打印 / 导出 / Excel 导出 / 时间线 / 进度 / 财务核对 / 退货影响 / 发票 / 付款证据 / 新增 / 修改 /
-  提交 / 审核 / 取消 / 删除）；缺失 / 零 / 未知 / 已删除身份 → 未认证；禁用 / 缺少或撤销「采购订单」菜单 → 权限不足；
-  绑定到请求管线但无身份的真实匿名请求在**空路径**下同样未认证（修复前会被放行）；授权身份在空路径请求上完成既有
-  生命周期；受限业务员按 ERP-097 权威范围收口；拒绝调用零写入、不消耗单据号；以及控制器源码契约
-  （授权门只依据是否绑定请求管线、无 `AllowAnonymous` / 角色白名单 / 环境变量 / 内存库开关）。
-- `src/ERP.UnitTests/PurchaseOrderControllerTests.cs`：既有进程内夹具改为**真实启用身份 + 既有「采购订单」菜单授权 +
-  特权数据范围**（隔离内存测试数据），且**刻意不设置 `Request.Path`**，证明既有契约只有在实时授权通过后才成立。
+- `src/ERP.UnitTests/PurchaseOrderEntryAuthorizationTests.cs`：空路径与已赋值路径的**逐入口一致判定**
+  （列表 / 详情 / 打印 / 导出 / Excel 导出 / 时间线 / 进度 / 财务核对 / 退货影响 / 发票 / 付款 / 发票付款证据 /
+  新增 / 修改 / 提交 / 审核 / 取消 / 删除）；缺失 / 零 / 未知 / 已删除身份 → 未认证；禁用 / 缺少或撤销「采购订单」
+  菜单 → 权限不足；授权身份在空路径请求上完成既有生命周期；受限业务员按 ERP-097 权威范围收口；拒绝调用零写入、
+  不消耗单据号。**本次补齐**：
+  - `Absent_request_context_is_unauthorized_on_every_core_route`：**完全没有 `HttpContext`** 的纯进程内直调
+    在每条核心入口一律未认证、零写入、零单号消耗（无请求上下文豁免彻底移除）；
+  - `Empty_path_write_enforces_live_master_references_identically`：**空路径与已赋值路径**对不存在 / 已停用供应商
+    给出完全相同的受控拒绝（`NotFound` / `RuleConflict`），且零写入、零单号消耗（主数据复核不再看 `Request.Path`）；
+  - 控制器源码契约：`Request.Path` / `http.Request` / `RequiresLiveAuthorization` / `RequiresLiveMasterValidation`
+    必须**不存在**；身份解析必须安全返回 `null`；无 `AllowAnonymous` / 角色白名单 / 环境变量 / 内存库开关；
+    主数据复核 `PurchaseOrderMasterReferenceRules.EnsureMasterReferencesAsync(Db, order)` 必须存在。
+- **既有进程内夹具改为真实启用身份 + 既有「采购订单」菜单授权 + 既有合法主数据（隔离测试数据）**，
+  并**刻意不设置 `Request.Path`**（空路径请求）：`PurchaseOrderControllerTests`、`PurchaseOrderMutationTests`、
+  `PurchaseOrderWriteValidationTests`、`PurchaseOrderMasterReferenceTests`、`PurchaseOrderEntryAuthorizationTests`、
+  `PurchaseSalesOrderLinkTests`、`OrderTraceabilityTests`（共享 `PurchaseOrderTestIdentities` 身份脚手架）；
+  只补既有合法主数据（供应商 / 商品 / 在职采购员）缺失行，**不新增任何生产菜单 / 角色 / 用户授权**，
+  也不改写任何校验口径。
+- 只读派生接口夹具补齐既有启用身份：`PurchaseOrderProgressTests`、`PurchaseOrderReturnImpactTests`、
+  `PurchaseOrderInvoiceEvidenceTests`、`PurchaseOrderInvoicePaymentEvidenceTests`、`PurchaseOrderPaymentEvidenceTests`、
+  `PurchaseOrderDeliveryExceptionTests`、`SupplierFirstReceiptLeadTimeTests`、`SupplierPurchaseExposureTests`。
 - 既有 ERP-371 / ERP-425 / ERP-426 / ERP-427 回归（`PurchaseOrderAuthorizationTests`、`PurchaseOrderMutationTests`、
-  `PurchaseOrderMasterReferenceTests`、`PurchaseOrderWriteValidationTests`、`PurchaseOrderHttpFormContractTests`
-  及既有采购只读派生单元测试）全部保持绿色。
+  `PurchaseOrderMasterReferenceTests`、`PurchaseOrderWriteValidationTests`、`PurchaseOrderHttpFormContractTests`、
+  `PurchaseOrderCancellationTests`、`PurchaseOrderOperationalDetailTests`、`PurchaseSalesOrderLinkTests`、
+  `PurchaseInvoiceConcurrencyTests` 及既有采购只读派生单元测试）全部保持绿色。
+- 交付门槛（`validation_profile = safe`）：**Release 构建 + 分析器 + 警告视为错误**，且**全量 `ERP.UnitTests`
+  通过**（全量 7955 个用例，0 失败）；构建通过本身不构成整阶段验收。
 
 ### 5.2 真实隔离 SQL 测试
 
-`src/ERP.IntegrationTests/PurchaseOrderEntryAuthorizationSqlServerTests.cs`（新增）以真实控制器 + 真实既有身份 /
+`src/ERP.IntegrationTests/PurchaseOrderEntryAuthorizationSqlServerTests.cs` 以真实控制器 + 真实既有身份 /
 菜单 / 数据范围驱动：空路径与已赋值路径一致判定、缺失 / 零 / 未知 / 已删除身份未认证、禁用与撤销菜单权限不足、
-授权身份读侧生命周期（含新增 → 修改 → 提交 → 审核）与实时主数据复核、被拒绝调用零写入 / 零授权扩张，
-以及专用目标护栏的 fail-closed 覆盖。
+授权身份读侧生命周期（含新增 → 修改 → 提交 → 审核）与实时主数据复核、被拒绝调用零写入 / 零授权扩张。
+本次补齐：**完全没有请求上下文**（`ControllerContext.HttpContext` 为 null）时每条核心入口未认证且零写入 / 零单号消耗；
+**空路径与已赋值路径的写入**对不存在 / 已停用供应商与已删除商品给出完全相同的受控拒绝且零写入 / 零单号消耗。
 
 安全口径：目标必须是专用实例 `(localdb)\NEWERP_AutoAcceptance`、库名前缀 `NEWERP_AUTOTEST` 且
 `Integrated Security=true`；每次运行只创建**全新 GUID 后缀库**，发现同名库已存在立即拒绝，**绝不 drop / reset /
 复用**任何数据库；连接串只来自进程环境变量或专用 localdb 默认值，绝不读取 appsettings / .env / 生产凭据。
 
-## 6. 授权判定边界（显式声明，不隐藏）
+## 6. 授权判定边界（显式声明）
 
-修复后，**任何绑定到 HTTP 请求管线的调用**都执行实时授权：真实 HTTP 请求由 ASP.NET Core 请求管线提供
-`ControllerContext.HttpContext`，因此生产与集成环境中的**每一条**入口（空路径与已赋值路径、匿名与已认证）
-都强制走身份 / 账号状态 / 既有菜单 / 权威范围判定，**空路径与缺失身份不再构成旁路**。
+修复后**不存在任何授权 / 复核的形状门或上下文门**：
 
-- 唯一不执行实时授权的情形是：控制器**完全未被任何请求绑定**（`HttpContext` 为 null 的纯进程内直接调用）。
-  这类调用不可能由任何外部请求到达，且该边界**不**读取请求路径、环境变量、数据库提供程序或任何测试专用开关。
-  既有进程内夹具属于这一类，并已在 `PurchaseOrderControllerTests` 中改为携带真实启用身份 + 既有菜单授权。
-- **ERP-427 主数据引用复核门**：其「是否复核」此前只依据 `Request.Path.HasValue`。本次任务把**授权门**改为与请求
-  形状 / 身份完全无关；主数据复核门与授权门在真实请求上同源（真实 HTTP 写入请求始终已赋值 `Request.Path`，
-  因此**每一条外部可达的写入都执行实时主数据复核**，且复核之前已由授权门完成身份 / 菜单 / 范围 fail closed）。
-  由于移除该门的 `Request.Path` 维度会改变 `OrderTraceabilityTests`、`PurchaseSalesOrderLinkTests` 等**不在本任务
-  `allowed_paths` 内**的历史进程内夹具的数据前置条件（这些夹具使用未播种的供应商 Id），本任务**未**改动它们，
-  也**未**为保持其绿色而引入任何请求形状 / 身份 / 环境 / 测试专用放行开关。
+- 生产与集成环境中的**每一条**入口（空路径与已赋值路径、匿名与已认证）都强制走身份 / 账号状态 / 既有菜单 /
+  权威范围判定；`ControllerContext.HttpContext` 为 null 的纯进程内直调同样 fail closed（受控未认证），
+  既不读取请求路径，也不读取环境变量 / 数据库提供程序，更不存在测试专用开关或内部兼容边界。
+- ERP-427 主数据引用复核与授权门同源：**无条件执行**，与请求路径 / 请求形状 / 是否绑定请求上下文完全无关。
+- 既有进程内夹具不再依赖任何免授权边界：它们改为携带真实启用身份 + 既有菜单授权 + 既有合法主数据
+  （仅隔离测试数据），因此「空路径请求同样受实时授权与主数据复核约束」在测试中同样成立。
 
 ## 7. 未执行 / 限制
 
@@ -129,11 +160,18 @@ private bool RequiresLiveAuthorization()
 
 ## 8. 相关实现
 
-- `src/ERP.Api/Controllers/PurchaseOrderController.cs`：`RequiresLiveAuthorization()`
-  （`ControllerContext?.HttpContext is not null`）驱动全部授权辅助与列表范围下推；所有入口在读写前无条件调用。
-- `src/ERP.Application/Services/PurchaseOrderAuthorizationRules.cs`：新增 `PathIndependenceText` 路径无关契约文案；
-  既有 `EnsureMenuAuthorizedAsync` / `EnsureOrderAuthorizedAsync` / `EnsureProposedAuthorizedAsync` /
-  `EnsureOrdersAuthorizedAsync` / `ApplyScopeAsync` 判定口径与 `RuleText` / `BoundaryText` 保持不变。
+- `src/ERP.Api/Controllers/PurchaseOrderController.cs`：删除 `RequiresLiveAuthorization()` /
+  `RequiresLiveMasterValidation()`；新增安全身份解析 `CurrentUserId()`；全部授权辅助与列表范围下推无条件执行；
+  详情 / 打印 / 来源解析改为「先身份 / 菜单 → 再读单据 → 再范围判定」；写入入口先做身份 / 菜单判定，
+  主数据复核改为无条件转发 `PurchaseOrderMasterReferenceRules.EnsureMasterReferencesAsync`。
+- `src/ERP.Application/Services/PurchaseOrderAuthorizationRules.cs`：`PathIndependenceText` 更新为
+  「无条件执行、与请求路径 / 请求形状 / 请求上下文无关」契约文案；既有 `EnsureMenuAuthorizedAsync` /
+  `EnsureOrderAuthorizedAsync` / `EnsureProposedAuthorizedAsync` / `EnsureOrdersAuthorizedAsync` /
+  `EnsureOrderScopeAllowedAsync` / `LoadOwnershipAsync` / `ApplyScopeAsync` 判定口径与
+  `RuleText` / `BoundaryText` 保持不变（未削弱任何校验器）。
+- `src/ERP.Application/Services/PurchaseOrderMasterReferenceRules.cs`：判定口径逐字未改（本次未修改该文件内容）。
+- `src/ERP.UnitTests/PurchaseOrderEntryAuthorizationTests.cs`：共享身份脚手架 `PurchaseOrderTestIdentities`
+  （既有启用账号 + 既有「采购订单」菜单 + 空路径控制器）与新增回归用例。
 - 复用既有：`SalespersonDataScopeService`（ERP-097）、`CustomerReceivableReconciliationService.LoadAuthorizedMenuCodesAsync`
   （角色 → 菜单）、既有「采购订单」（`purchase-order`）菜单（`SeedData.Menus`）、
-  `PurchaseOrderMasterReferenceRules`（ERP-427）。
+  `PurchaseOrderCancellationRules` / `PurchaseOrderMutationRules`（行锁与事务）。

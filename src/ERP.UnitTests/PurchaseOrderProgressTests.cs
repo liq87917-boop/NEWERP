@@ -267,7 +267,9 @@ public class PurchaseOrderProgressTests
         using var db = TestDbFactory.Create();
         var order = SeedOrder(db, "PO-PRG-13", (ProductA, 10m));
         SeedStockIn(db, "RK-PRG-13", order.Id, DocumentStatus.Approved, (ProductA, 4m));
-        var controller = new PurchaseOrderController(db, new DocumentNumberService(db));
+        // ERP-466：真实启用身份 + 既有「采购订单」菜单授权（空路径请求，证明授权与请求形状无关）。
+        var controller = PurchaseOrderTestIdentities.ForUser(db,
+            PurchaseOrderTestIdentities.SeedAuthorizedUser(db));
 
         var result = await controller.Progress(order.Id);
 

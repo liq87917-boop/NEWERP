@@ -695,7 +695,11 @@ public class PurchaseOrderMasterReferenceTests
     {
         var controller = ReadSource("src/ERP.Api/Controllers/PurchaseOrderController.cs");
         Assert.Contains("PurchaseOrderMasterReferenceRules.EnsureMasterReferencesAsync", controller);
-        Assert.Contains("RequiresLiveMasterValidation", controller);
+        // ERP-466：主数据复核 **无条件执行**，「请求形状 / 请求路径 / 请求上下文」门必须彻底移除。
+        Assert.DoesNotContain("RequiresLiveMasterValidation", controller);
+        Assert.DoesNotContain("RequiresLiveAuthorization", controller);
+        Assert.DoesNotContain("Request.Path", controller);
+        Assert.Contains("PurchaseOrderMasterReferenceRules.EnsureMasterReferencesAsync(Db, order)", controller);
 
         Assert.Contains("供应商", PurchaseOrderMasterReferenceRules.RuleText);
         Assert.Contains("商品", PurchaseOrderMasterReferenceRules.RuleText);

@@ -213,10 +213,17 @@ public class PurchaseOrderEntryAuthorizationTests
     {
         var controller = ReadSource("src", "ERP.Api", "Controllers", "PurchaseOrderController.cs");
 
-        // 授权门只依据「是否绑定到请求管线」，不再依据 Request.Path 或身份是否可解析。
-        Assert.Contains("ControllerContext?.HttpContext is not null", controller);
-        Assert.DoesNotContain("http.Request.Path.HasValue ||", controller);
-        Assert.DoesNotContain("RequiresLiveAuthorization()\n    {\n        var http", controller);
+        // ERP-466：请求形状 / 请求上下文门彻底移除 —— 不存在「空路径 / 无身份 / 无请求上下文」的任何豁免。
+        Assert.DoesNotContain("RequiresLiveAuthorization", controller);
+        Assert.DoesNotContain("RequiresLiveMasterValidation", controller);
+        Assert.DoesNotContain("Request.Path", controller);
+        Assert.DoesNotContain("ControllerContext?.HttpContext is not", controller);
+        Assert.DoesNotContain("http.Request", controller);
+
+        // 身份只从已认证请求主体安全解析：缺少上下文 / 声明 / 非正数一律 null，交由既有规则 fail closed。
+        Assert.Contains(
+            "ControllerContext?.HttpContext?.User?.FindFirst(ClaimTypes.NameIdentifier)", controller);
+        Assert.Contains("long.TryParse(value, out var id) && id > 0 ? id : null", controller);
 
         // 无匿名 / 角色白名单 / 环境变量 / 内存库开关兜底。
         Assert.DoesNotContain("AllowAnonymous", controller);
@@ -224,13 +231,14 @@ public class PurchaseOrderEntryAuthorizationTests
         Assert.DoesNotContain("Environment.GetEnvironmentVariable", controller);
         Assert.DoesNotContain("UseInMemoryDatabase", controller);
 
-        // 每一条入口仍在读写之前调用实时授权 / 范围下推。
+        // 每一条入口仍在读写之前调用实时授权 / 范围下推，写入侧并无条件复核实时主数据引用。
         Assert.Contains("EnsureMenuAuthorizedAsync", controller);
         Assert.Contains("EnsureOrderAuthorizedAsync", controller);
         Assert.Contains("EnsureProposedAuthorizedAsync", controller);
         Assert.Contains("EnsureOrderIdAuthorizedAsync", controller);
         Assert.Contains("EnsureOrderIdsAuthorizedAsync", controller);
         Assert.Contains("ApplyProcurementScopeAsync", controller);
+        Assert.Contains("PurchaseOrderMasterReferenceRules.EnsureMasterReferencesAsync(Db, order)", controller);
 
         // 口径文案与实现同源。
         Assert.Contains("Request.Path", PurchaseOrderAuthorizationRules.PathIndependenceText);
@@ -239,7 +247,75 @@ public class PurchaseOrderEntryAuthorizationTests
         Assert.Contains("权限不足", PurchaseOrderAuthorizationRules.PathIndependenceText);
     }
 
-    // ==================== 脚手架（隔离内存测试数据，绝不新增生产授权） ====================
+    // ==================== 6. 完全没有请求上下文：与空路径 / 已赋值路径判决完全一致 ====================
+
+    /// <summary>
+    /// ERP-466：<c>ControllerContext.HttpContext</c> 为 null 的纯进程内直调（既无请求路径、也无请求上下文）
+    /// 不再享有任何免授权兼容边界 —— 身份安全解析为 null，每一条核心入口一律先返回受控未认证且零写入。
+    /// </summary>
+    [Fact]
+    public async Task Absent_request_context_is_unauthorized_on_every_core_route()
+    {
+        using var db = TestDbFactory.Create();
+        SeedDocumentNumberRule(db);
+        var order = SeedOrder(db, "ERP466-NOCTX", DocumentStatus.Pending, CustomerA);
+
+        var ctl = new PurchaseOrderController(db, new DocumentNumberService(db));
+
+        await AssertAllCoreRoutesDenied(ctl, order.Id, ErrorCodes.Unauthorized);
+
+        Assert.Single(db.PurchaseOrders);
+        AssertOrderUnchanged(db, order.Id, DocumentStatus.Pending);
+        Assert.Equal(0L, db.SysDocumentNumberRules.Single(r => r.DocumentType == DocumentType.PurchaseOrder).CurrentSequence);
+    }
+
+    // ==================== 7. 空路径写入仍无条件复核实时主数据引用 ====================
+
+    /// <summary>
+    /// ERP-466：主数据引用复核不再以 <c>Request.Path</c> 是否存在为前提 —— 空路径与已赋值路径对同一
+    /// 失效供应商 / 已删除商品给出完全相同的受控拒绝，且拒绝时不落库、不消耗单据号。
+    /// </summary>
+    [Fact]
+    public async Task Empty_path_write_enforces_live_master_references_identically()
+    {
+        foreach (var requestPath in new[] { null, PopulatedPath })
+        {
+            using var db = TestDbFactory.Create();
+            SeedDocumentNumberRule(db);
+            var (userId, _) = SeedOperator(db);
+            var ctl = NewController(db, userId, requestPath);
+
+            // 供应商不存在（SupplierId = 1 未播种）：受控拒绝，零写入、零单号消耗。
+            var missingSupplier = await Assert.ThrowsAsync<BusinessException>(
+                () => ctl.Create(NewOrder(null)));
+            Assert.Equal(ErrorCodes.NotFound, missingSupplier.Code);
+
+            // 已停用供应商：受控拒绝（存在但不可用）。
+            var disabled = db.BaseSuppliers.FirstOrDefault(s => s.Id == 1L);
+            if (disabled is null)
+            {
+                db.BaseSuppliers.Add(new BaseSupplier
+                {
+                    Id = 1L, SupplierCode = "S-466-OFF", SupplierName = "已停用供应商", Status = 0
+                });
+                db.SaveChanges();
+            }
+            else
+            {
+                disabled.Status = 0;
+                db.SaveChanges();
+            }
+            var disabledSupplier = await Assert.ThrowsAsync<BusinessException>(
+                () => ctl.Create(NewOrder(null)));
+            Assert.Equal(ErrorCodes.RuleConflict, disabledSupplier.Code);
+
+            Assert.Empty(db.PurchaseOrders);
+            Assert.Equal(0L,
+                db.SysDocumentNumberRules.Single(r => r.DocumentType == DocumentType.PurchaseOrder).CurrentSequence);
+        }
+    }
+
+    // ==================== 脚手架与共享身份（隔离内存测试数据，绝不新增生产授权） ====================
 
     /// <summary>绑定真实登录身份（<paramref name="requestPath"/> 为 null = 空路径请求）的真实控制器。</summary>
     private static PurchaseOrderController NewController(ErpDbContext db, long? userId, string? requestPath)
@@ -330,24 +406,7 @@ public class PurchaseOrderEntryAuthorizationTests
     }
 
     private static SysMenu EnsureRequiredMenu(ErpDbContext db)
-    {
-        var menu = db.SysMenus.FirstOrDefault(
-            m => m.MenuCode == PurchaseOrderAuthorizationRules.RequiredMenuCode && !m.IsDeleted);
-        if (menu is not null) return menu;
-
-        menu = new SysMenu
-        {
-            ParentId = 0,
-            MenuCode = PurchaseOrderAuthorizationRules.RequiredMenuCode,
-            MenuName = PurchaseOrderAuthorizationRules.RequiredMenuText,
-            Path = "/purchase/purchase-order",
-            MenuType = MenuType.Menu,
-            CreatedAt = DateTime.Now
-        };
-        db.SysMenus.Add(menu);
-        db.SaveChanges();
-        return menu;
-    }
+        => PurchaseOrderTestIdentities.EnsureRequiredMenu(db);
 
     private static PurchaseOrder SeedOrder(ErpDbContext db, string no, DocumentStatus status, long? owningCustomerId)
     {
@@ -466,5 +525,76 @@ public class PurchaseOrderEntryAuthorizationTests
             directory = directory.Parent;
         Assert.NotNull(directory);
         return File.ReadAllText(Path.Combine(new[] { directory!.FullName }.Concat(segments).ToArray()));
+    }
+}
+
+/// <summary>
+/// ERP-466：采购订单入口测试身份脚手架（<strong>隔离测试数据</strong>，绝不新增生产菜单 / 角色 / 用户授权）。
+/// <para>为既有直接实例化控制器的进程内夹具提供「既有启用账号 + 既有「采购订单」（<c>purchase-order</c>）菜单授权」，
+/// 并刻意<strong>不设置 <c>Request.Path</c></strong>（空路径请求）：实时授权与请求路径 / 请求形状 / 请求上下文完全无关。</para>
+/// <para>受限（非特权）账号的客户数据范围口径由 <see cref="PurchaseOrderEntryAuthorizationTests"/> 自身的
+/// 登录账号 == 员工编码映射单独覆盖，本脚手架只提供真正不受客户范围限制的系统内置角色口径。</para>
+/// </summary>
+internal static class PurchaseOrderTestIdentities
+{
+    /// <summary>播种（或复用）既有「采购订单」（<c>purchase-order</c>）菜单。</summary>
+    public static SysMenu EnsureRequiredMenu(ErpDbContext db)
+    {
+        var menu = db.SysMenus.FirstOrDefault(
+            m => m.MenuCode == PurchaseOrderAuthorizationRules.RequiredMenuCode && !m.IsDeleted);
+        if (menu is not null) return menu;
+
+        menu = new SysMenu
+        {
+            ParentId = 0,
+            MenuCode = PurchaseOrderAuthorizationRules.RequiredMenuCode,
+            MenuName = PurchaseOrderAuthorizationRules.RequiredMenuText,
+            Path = "/purchase/purchase-order",
+            MenuType = MenuType.Menu,
+            CreatedAt = DateTime.Now
+        };
+        db.SysMenus.Add(menu);
+        db.SaveChanges();
+        return menu;
+    }
+
+    /// <summary>播种既有启用账号 + 既有「采购订单」菜单授权（系统内置角色 → 不受客户数据范围限制）。</summary>
+    public static long SeedAuthorizedUser(ErpDbContext db)
+    {
+        var role = new SysRole
+        {
+            RoleCode = $"PoAuth-{Guid.NewGuid():N}", RoleName = "采购订单入口测试角色", IsSystem = true
+        };
+        db.SysRoles.Add(role);
+        db.SaveChanges();
+
+        var user = new SysUser
+        {
+            UserName = $"po-auth-{Guid.NewGuid():N}",
+            PasswordHash = "hash",
+            PasswordSalt = "salt",
+            DisplayName = "采购订单入口测试账号",
+            Status = UserStatus.Enabled
+        };
+        db.SysUsers.Add(user);
+        db.SaveChanges();
+
+        db.SysUserRoles.Add(new SysUserRole { UserId = user.Id, RoleId = role.Id });
+        db.SysRoleMenus.Add(new SysRoleMenu { RoleId = role.Id, MenuId = EnsureRequiredMenu(db).Id });
+        db.SaveChanges();
+        return user.Id;
+    }
+
+    /// <summary>绑定真实登录身份的空路径请求控制器（<strong>不设置 <c>Request.Path</c></strong>）。</summary>
+    public static PurchaseOrderController ForUser(ErpDbContext db, long? userId)
+    {
+        var claims = userId is > 0
+            ? new[] { new Claim(ClaimTypes.NameIdentifier, userId.Value.ToString()) }
+            : Array.Empty<Claim>();
+        var http = new DefaultHttpContext { User = new ClaimsPrincipal(new ClaimsIdentity(claims, "Test")) };
+        return new PurchaseOrderController(db, new DocumentNumberService(db))
+        {
+            ControllerContext = new ControllerContext { HttpContext = http }
+        };
     }
 }

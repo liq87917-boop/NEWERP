@@ -210,7 +210,9 @@ public class PurchaseOrderDeliveryExceptionTests
         SeedOrder(db, "PO-CTRL", SupplierA, deliveryDate: AsOf.AddDays(-10), confirmedDate: AsOf.AddDays(-10), lines: (ProductA, 10m));
         await db.SaveChangesAsync();
 
-        var controller = new PurchaseOrderController(db, new DocumentNumberService(db));
+        // ERP-466：真实启用身份 + 既有「采购订单」菜单授权（空路径请求，证明授权与请求形状无关）。
+        var controller = PurchaseOrderTestIdentities.ForUser(db,
+            PurchaseOrderTestIdentities.SeedAuthorizedUser(db));
         var result = await controller.DeliveryExceptions(Query());
 
         var ok = Assert.IsType<OkObjectResult>(result);
