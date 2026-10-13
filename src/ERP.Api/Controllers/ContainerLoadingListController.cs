@@ -64,24 +64,45 @@ public class ContainerLoadingListController : DocumentControllerBase<ContainerLo
         return Ok(ApiResponse<ContainerLoadingList>.Success(entity));
     }
 
+    /// <summary>
+    /// 新增：先实时授权并校验「拟议」权威客户范围（兼容客户字段 + 显式上游共享出运客户），再统一校验
+    /// 预装柜上游链接（ERP-348）与显式出运证据链接（ERP-366）——<b>全部校验严格先于单号预约与任何写入</b>。
+    /// <para>ERP-485：手工录入表单不提交装柜清单号（<see cref="ContainerLoadingList.LoadingListNo"/> 已去掉显式
+    /// <c>[Required]</c>，省略 / 空串不再被模型绑定层拒为 HTTP 400）。全部校验通过之后，主键 / 单号 / 状态 /
+    /// 删除态 / 时间戳一律由服务端权威覆盖，明细身份（主键 / 归属单据 / 删除态 / 时间戳）同口径重置；
+    /// 行上的显式出运证据链接（<c>SourceStockOutDetailId</c>）原样保留。被拒绝的请求零写入、零占号、
+    /// 零状态变化，也绝不创建库存 / 库存流水 / 财务记录。</para>
+    /// </summary>
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] ContainerLoadingList entity)
     {
         // ERP-364：单据号生成之前先实时授权，并校验「拟议」权威客户范围（兼容客户字段 + 显式上游共享出运客户）。
         var scope = await LoadingListAuthorizationRules.EnsureAuthorizedAsync(Db, CurrentUserId());
+        // 归零客户端注入主键：拟议范围判定与来源自排除都以「尚未落库」为准（entity.Id 参与来源自排除）。
         entity.Id = 0;
+        entity.Details ??= new List<ContainerLoadingDetail>();
         await LoadingListAuthorizationRules.EnsureProposedScopeAllowedAsync(
             Db, scope, entity, entity.CustomerId, entity.PreLoadingId);
-        entity.LoadingListNo = await _noService.GenerateAsync(DocumentType.LoadingList);
-        entity.Status = DocumentStatus.Pending;
-        entity.CreatedAt = DateTime.Now;
+        // ERP-348：显式预装柜来源链接（含商品 / 数量 / 单位一致）先校验。
         await ContainerLoadingFulfillmentRules.ValidateLinkAsync(Db, entity, CurrentUserId());
         // ERP-366：在写入任何明细之前校验显式出运证据链接（来源已审核且未删除、商品 / 基础单位一致、客户在范围内）。
         await LoadingStockOutLinkRules.ValidateLinksAsync(Db, entity, CurrentUserId());
+
+        // ERP-485：只有全部校验通过之后才占用单据号流水并落库；主键 / 单号 / 状态 / 删除态 / 时间戳全部由服务端
+        // 权威覆盖（客户端注入值不参与持久化），明细身份同口径重置，行上的显式出运证据链接原样保留。
+        var now = DateTime.Now;
+        ApplyServerOwnedDetailIdentity(entity.Details, 0, now);
+        entity.Id = 0;
+        entity.LoadingListNo = await _noService.GenerateAsync(DocumentType.LoadingList);
+        entity.Status = DocumentStatus.Pending;
+        entity.IsDeleted = false;
+        entity.CreatedAt = now;
+        entity.UpdatedAt = null;
         Calculate(entity);
         Db.ContainerLoadingLists.Add(entity);
         await Db.SaveChangesAsync();
-        return Ok(ApiResponse<object>.Success(new { entity.Id, entity.LoadingListNo }, "装柜清单创建成功"));
+        return Ok(ApiResponse<object>.Success(
+            new { entity.Id, entity.LoadingListNo, entity.Status }, "装柜清单创建成功"));
     }
 
     [HttpPut("{id:long}")]
@@ -121,15 +142,12 @@ public class ContainerLoadingListController : DocumentControllerBase<ContainerLo
             // ERP-373：未携带明细 = 仅更新主表 —— 保留既有明细与其显式出运证据链接
             // （SourceStockOutDetailId），绝不因主表编辑而静默清空出运证据。
             // 携带明细 = 既有「整体替换」语义（替换前已由 ValidateLinksAsync 统一校验）。
+            // ERP-485：替换时明细身份（主键 / 归属单据 / 删除态 / 时间戳）一律由服务端权威覆盖，
+            // 行上的显式出运证据链接原样随行保留，绝不臆造链接、也绝不静默清空。
             if (entity.Details is { Count: > 0 })
             {
                 Db.ContainerLoadingDetails.RemoveRange(existing.Details);
-                foreach (var d in entity.Details)
-                {
-                    d.Id = 0;
-                    d.LoadingListId = id;
-                    d.CreatedAt = DateTime.Now;
-                }
+                ApplyServerOwnedDetailIdentity(entity.Details, id, DateTime.Now);
                 existing.Details = entity.Details;
             }
             Calculate(existing);
@@ -888,5 +906,24 @@ public class ContainerLoadingListController : DocumentControllerBase<ContainerLo
         entity.TotalCartons = entity.Details.Sum(d => d.Cartons);
         entity.TotalWeight = entity.Details.Sum(d => d.Weight);
         entity.TotalVolume = entity.Details.Sum(d => d.Volume);
+    }
+
+    /// <summary>
+    /// ERP-485：明细身份 / 归属单据 / 删除态 / 时间戳一律由服务端权威覆盖：客户端提交的明细主键一律置 0（自增），
+    /// 归属单据取自服务端已知的单据 Id（新建为 0，由 EF 关系在保存时回填），删除态强制为「正常」，
+    /// 时间戳以服务端时钟为准。行上的****显式出运证据链接（<c>SourceStockOutDetailId</c>）原样保留****：
+    /// 普通主 / 明细编辑绝不臆造链接，也绝不静默清空既有链接（清链接只走 ERP-373 显式工作台）。
+    /// </summary>
+    private static void ApplyServerOwnedDetailIdentity(
+        IEnumerable<ContainerLoadingDetail> details, long loadingListId, DateTime now)
+    {
+        foreach (var d in details)
+        {
+            d.Id = 0;
+            d.LoadingListId = loadingListId;
+            d.IsDeleted = false;
+            d.CreatedAt = now;
+            d.UpdatedAt = null;
+        }
     }
 }

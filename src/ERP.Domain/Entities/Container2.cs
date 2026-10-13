@@ -10,8 +10,18 @@ namespace ERP.Domain.Entities;
 /// </summary>
 public class ContainerPreLoading : BaseEntity
 {
-    /// <summary>预装柜单号</summary>
-    [Required, MaxLength(50)]
+    /// <summary>
+    /// 预装柜单号（服务端权威生成：新增入口一律在实时身份 / 账号状态 / 既有「预装柜单」（<c>pre-loading</c>）菜单 /
+    /// 权威客户数据范围、拟议订柜来源与显式需求计划证据链接等全部校验通过之后，由
+    /// <c>IDocumentNumberService</c> 预约覆盖；调用方提交值不参与持久化）。
+    /// <para>ERP-485：这里刻意<strong>不加</strong> <c>[Required]</c>（与 ERP-484 订柜单号 / ERP-482 收货计划单号 /
+    /// ERP-477 入库单号 / ERP-478 出库单号同源口径）。手工录入表单不提交预装柜单号；显式 <c>[Required]</c>
+    /// （默认 <c>AllowEmptyStrings = false</c>）会把「省略单号」在模型绑定 / 模型校验阶段直接拒绝为 HTTP 400，
+    /// 服务端权威单号根本没有机会生成。移除显式特性后：省略 / 空串照常绑定并进入已授权的
+    /// <c>ContainerPreLoadingController.Create</c>；数据库列仍是 NOT NULL（非空 CLR 引用类型），长度仍受
+    /// <see cref="MaxLengthAttribute"/>(50) 约束，非法 / 越权请求的校验顺序不变（授权与来源校验先于单号预约与任何写入）。</para>
+    /// </summary>
+    [MaxLength(50)]
     public string PreLoadingNo { get; set; } = string.Empty;
 
     /// <summary>装柜日期</summary>
@@ -95,8 +105,18 @@ public class ContainerPreLoadingDetail : BaseEntity
 /// </summary>
 public class ContainerLoadingList : BaseEntity
 {
-    /// <summary>装柜清单号</summary>
-    [Required, MaxLength(50)]
+    /// <summary>
+    /// 装柜清单号（服务端权威生成：新增入口一律在实时身份 / 账号状态 / 既有「装柜清单」（<c>loading-list</c>）菜单 /
+    /// 权威客户数据范围、拟议预装柜来源与显式出运证据链接等全部校验通过之后，由
+    /// <c>IDocumentNumberService</c> 预约覆盖；调用方提交值不参与持久化）。
+    /// <para>ERP-485：这里刻意<strong>不加</strong> <c>[Required]</c>（与 ERP-484 订柜单号 / ERP-482 收货计划单号 /
+    /// ERP-477 入库单号 / ERP-478 出库单号同源口径）。手工录入表单不提交装柜清单号；显式 <c>[Required]</c>
+    /// （默认 <c>AllowEmptyStrings = false</c>）会把「省略单号」在模型绑定 / 模型校验阶段直接拒绝为 HTTP 400，
+    /// 服务端权威单号根本没有机会生成。移除显式特性后：省略 / 空串照常绑定并进入已授权的
+    /// <c>ContainerLoadingListController.Create</c>；数据库列仍是 NOT NULL（非空 CLR 引用类型），长度仍受
+    /// <see cref="MaxLengthAttribute"/>(50) 约束，非法 / 越权请求的校验顺序不变（授权与来源 / 出运证据校验先于单号预约与任何写入）。</para>
+    /// </summary>
+    [MaxLength(50)]
     public string LoadingListNo { get; set; } = string.Empty;
 
     /// <summary>预装柜单 Id</summary>

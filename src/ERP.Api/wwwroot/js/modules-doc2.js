@@ -67,6 +67,32 @@ const STOCK_OUT_DETAIL_FIELDS = [
   { key: 'remark', label: '备注', width: '110px' },
 ];
 
+/* ERP-485：预装柜明细列（数量 / 箱数 / 毛重 / 体积按装柜口径原样往返；服务端按明细汇总总箱数 / 总毛重 / 总体积）。
+   行上的显式需求计划证据链接（sourceSalesOrderDetailId）**不在**这里的列里：它只能由「需求来源」工作台
+   （preloading-demand-links.js）显式指派 / 清除；普通主 / 明细编辑随回填行原样携带并回传，绝不静默清空。 */
+const PRE_LOADING_DETAIL_FIELDS = [
+  { key: 'productId', label: '商品ID', type: 'number', width: '90px' },
+  { key: 'productName', label: '商品名称', width: '170px' },
+  { key: 'quantity', label: '数量', type: 'number', width: '80px' },
+  { key: 'cartons', label: '箱数', type: 'number', width: '80px' },
+  { key: 'weight', label: '毛重(kg)', type: 'number', width: '90px' },
+  { key: 'volume', label: '体积(m³)', type: 'number', width: '90px' },
+  { key: 'remark', label: '备注', width: '110px' },
+];
+
+/* ERP-485：装柜清单明细列（数量 / 箱数 / 毛重 / 体积按装柜口径原样往返；服务端按明细汇总总箱数 / 总毛重 / 总体积）。
+   行上的显式出运证据链接（sourceStockOutDetailId）**不在**这里的列里：它只能由「出运证据」工作台
+   （loading-outbound-links.js）显式指派 / 清除；普通主 / 明细编辑随回填行原样携带并回传，绝不静默清空。 */
+const LOADING_LIST_DETAIL_FIELDS = [
+  { key: 'productId', label: '商品ID', type: 'number', width: '90px' },
+  { key: 'productName', label: '商品名称', width: '170px' },
+  { key: 'quantity', label: '数量', type: 'number', width: '80px' },
+  { key: 'cartons', label: '箱数', type: 'number', width: '80px' },
+  { key: 'weight', label: '毛重(kg)', type: 'number', width: '90px' },
+  { key: 'volume', label: '体积(m³)', type: 'number', width: '90px' },
+  { key: 'remark', label: '备注', width: '110px' },
+];
+
 Object.assign(MODULES, {
   /* ERP-477：采购入库菜单（菜单编码 stock-in）直接打开本规范 EF 主子表模块（api/stock-ins，规范 Id 口径）——
      bill-v2.js 的 BILL_CODE_MAP 已移除 stock-in → 旧存储过程族映射（旧族写路径由 ERP-404 门禁 fail closed）。
@@ -219,7 +245,13 @@ Object.assign(MODULES, {
     ],
   },
   /* ERP-040：预装柜单按**持久化订柜引用**（bookingId）只读回显订柜信息上的外贸 / 物流跟踪值；
-     本单不保存第二份跟踪值，也不按柜号等自由文本匹配。 */
+     本单不保存第二份跟踪值，也不按柜号等自由文本匹配。
+     ERP-485：既有「预装柜单」菜单直接打开本规范模块（api/container/pre-loadings，规范 Id 口径），
+     并在**同一表单**内录入主表 + 明细（detailKey/detailFields）。**表单刻意不提交 preLoadingNo**：
+     省略 / 空串由服务端权威生成（Container2.cs 的 ContainerPreLoading.PreLoadingNo 已去掉显式 [Required]，
+     不再被模型绑定层拒为 HTTP 400），保存成功返回 { id, preLoadingNo, status }，重开 / 修改一律按规范 Id。
+     可选订柜引用（bookingId）留空提交 null = 未关联（绝不回落为 0、绝不按柜号等文本推断来源）；
+     明细行上的需求来源证据只能在「需求来源」工作台显式维护，普通主 / 明细编辑原样携带并回传。 */
   'pre-loading': {
     title: '预装柜单', api: '/api/container/pre-loadings', canSubmit: true,
     columns: [
@@ -231,9 +263,14 @@ Object.assign(MODULES, {
       { key: 'loadingDate', label: '装柜日期', type: 'date' }, { key: 'containerNo', label: '柜号' },
       /* ERP-040：订柜引用（留空 = 未关联，物流跟踪一律显示「未知」；跟踪值只按本引用读取） */
       { key: 'bookingId', label: '订柜信息（关联）', type: 'ref', ref: 'booking' },
-      { key: 'sealNo', label: '封条号' }, { key: 'totalCartons', label: '总箱数', type: 'number' },
+      { key: 'sealNo', label: '封条号' },
+      /* 总箱数 / 总毛重 / 总体积按既有口径往返；服务端始终按明细权威汇总覆盖，客户端注入值不参与持久化 */
+      { key: 'totalCartons', label: '总箱数', type: 'number' },
       { key: 'totalWeight', label: '总毛重(kg)', type: 'number' }, { key: 'totalVolume', label: '总体积(m³)', type: 'number' },
     ],
+    detailKey: 'details',
+    detailTitle: '预装柜明细（数量 / 箱数 / 毛重 / 体积；需求来源只能在「需求来源」工作台显式维护）',
+    detailFields: PRE_LOADING_DETAIL_FIELDS,
     /* ERP-040：只读查看权威跟踪值（任何状态都可查看；未关联订柜信息时全部显示「未知」）
        ERP-057：出运引用证据（源记录 = 本条预装柜单；只登记证据，不改写本单）
        ERP-059：出运证据时间线（只读：计划与实际分开标注，缺失事件显示「无（未登记）」） */
@@ -249,6 +286,13 @@ Object.assign(MODULES, {
       { label: '🧭 跟踪工作台', title: '打开只读出运跟踪工作台（按显式柜号 / 单号 / B/L / S/O / 港口 / 计划时间 / 记录事件筛选，分页有界；计划与实际分开标注，不按文本合并记录、不改写任何单据）', onclick: 'openContainerShipmentTimelineWorkspace()' },
     ],
   },
+  /* ERP-485：既有「装柜清单」菜单直接打开本规范模块（api/container/loading-lists，规范 Id 口径），
+     并在**同一表单**内录入主表 + 明细（detailKey/detailFields）。**表单刻意不提交 loadingListNo**：
+     省略 / 空串由服务端权威生成（Container2.cs 的 ContainerLoadingList.LoadingListNo 已去掉显式 [Required]，
+     不再被模型绑定层拒为 HTTP 400），保存成功返回 { id, loadingListNo, status }，重开 / 修改一律按规范 Id。
+     客户是既有主数据引用（必填）；可选预装柜引用（preLoadingId）留空提交 null = 未关联（绝不回落为 0、
+     绝不按柜号等文本推断来源）；明细行上的出运证据只能在「出运证据」工作台显式维护，
+     普通主 / 明细编辑原样携带并回传（绝不静默清空）。 */
   'loading-list': {
     title: '装柜清单', api: '/api/container/loading-lists', canSubmit: true,
     columns: [
@@ -268,6 +312,9 @@ Object.assign(MODULES, {
       { key: 'totalCartons', label: '总箱数', type: 'number' }, { key: 'totalWeight', label: '总毛重(kg)', type: 'number' },
       { key: 'totalVolume', label: '总体积(m³)', type: 'number' },
     ],
+    detailKey: 'details',
+    detailTitle: '装柜明细（数量 / 箱数 / 毛重 / 体积；出运证据只能在「出运证据」工作台显式维护）',
+    detailFields: LOADING_LIST_DETAIL_FIELDS,
     /* ERP-019：由装柜清单生成单证中心记录（柜号写入「关联柜号/订舱号」，一柜一类单证只生成一张）
        ERP-040：物流跟踪只读回显（装柜清单 → 预装柜单 → 订柜信息 的持久化引用链，未关联显示「未知」）
        ERP-041：一柜多客户参与方维护（只维护客户归属与兼容客户字段；不按体积 / 重量 / 金额分摊费用） */

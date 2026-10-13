@@ -267,7 +267,12 @@ async function saveForm(id) {
         ERP-484：规范订柜信息（booking）的可选供应商 / 报关行引用以 nullable: true 声明（type: 'ref' 留空本就提交
         null = 未指定，绝不回落为 0）；可选日期（订柜 / 开船 / ETD·ETA·ATD·ATA / 查验 / 放行）留空提交 null，
         跟踪三态（查验要求）留空提交 null（未知）；订柜单号刻意不在表单里：省略 / 空串一律由服务端权威生成
-        （客户端注入值不参与持久化），保存成功返回 { id, bookingNo, status } 并用规范 Id 重开 / 修改。 */
+        （客户端注入值不参与持久化），保存成功返回 { id, bookingNo, status } 并用规范 Id 重开 / 修改。
+        ERP-485：规范预装柜单（pre-loading）/ 装柜清单（loading-list）的预装柜单号与装柜清单号同样刻意不在表单里：
+        省略 / 空串由服务端权威生成（保存成功返回 { id, preLoadingNo|loadingListNo, status }）；
+        可选订柜 / 预装柜引用（type: 'ref'）留空提交 null = 未关联；主表 + 明细一起提交，
+        明细行上随回填携带的持久化需求来源 / 出运证据（sourceSalesOrderDetailId / sourceStockOutDetailId）
+        **原样回传**，普通编辑绝不静默清空既有证据链接（清链接只走对应显式工作台）。 */
     if (f.type === 'number') v = v === '' ? (f.nullable === true ? null : 0) : Number(v);
     if (f.type === 'ref') v = v === '' ? null : Number(v);
     if (f.type === 'parent') v = v === '' ? null : Number(v);
@@ -713,6 +718,9 @@ function detailRecalc() {
 function detailCollect() {
   const mod = CURRENT_MODULE;
   // 过滤掉整行空白的行（未录入内容）
+  /* ERP-485：保留**整行对象**（而不是只挑 detailFields 里的键）——随回填携带的持久化行证据
+     （预装柜行 sourceSalesOrderDetailId / 装柜明细行 sourceStockOutDetailId）必须原样回传，
+     否则普通主 / 明细保存会静默清空既有证据链接。新增行不含这些键 = 显式「未链接」，绝不臆造。 */
   return DETAIL_ROWS.filter(r => (mod.detailFields || []).some(f => {
     const v = r[f.key];
     return f.type === 'number' ? Number(v || 0) !== 0 : String(v ?? '').trim() !== '';
