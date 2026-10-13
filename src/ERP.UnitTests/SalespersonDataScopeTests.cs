@@ -52,6 +52,25 @@ public class SalespersonDataScopeTests
         db.SaveChanges();
     }
 
+    private static void GrantCustomerMenu(ErpDbContext db, long roleId)
+    {
+        var menu = db.SysMenus.FirstOrDefault(m => m.MenuCode == CustomerAuthorizationRules.RequiredMenuCode && !m.IsDeleted);
+        if (menu is null)
+        {
+            menu = new SysMenu
+            {
+                MenuCode = CustomerAuthorizationRules.RequiredMenuCode,
+                MenuName = CustomerAuthorizationRules.RequiredMenuText,
+                MenuType = MenuType.Menu
+            };
+            db.SysMenus.Add(menu);
+            db.SaveChanges();
+        }
+
+        db.SysRoleMenus.Add(new SysRoleMenu { RoleId = roleId, MenuId = menu.Id });
+        db.SaveChanges();
+    }
+
     private static BaseEmployee SeedEmployee(ErpDbContext db, string code, bool isSalesman = true)
     {
         var employee = new BaseEmployee { EmployeeCode = code, EmployeeName = code, IsSalesman = isSalesman, Status = 1 };
@@ -162,6 +181,7 @@ public class SalespersonDataScopeTests
         var user = SeedUser(db, "alice");
         var role = SeedRole(db, "Sales");
         SeedUserRole(db, user.Id, role.Id);
+        GrantCustomerMenu(db, role.Id);
 
         var alice = SeedEmployee(db, "alice", isSalesman: true);
         var bob = SeedEmployee(db, "bob", isSalesman: true);
@@ -316,6 +336,7 @@ public class SalespersonDataScopeTests
         var user = SeedUser(db, "alice");
         var role = SeedRole(db, "Sales");
         SeedUserRole(db, user.Id, role.Id);
+        GrantCustomerMenu(db, role.Id);
         var alice = SeedEmployee(db, "alice");
         var mine = SeedCustomer(db, "C001", "我的客户", alice.Id);
         SeedCustomer(db, "C002", "别人的客户", alice.Id + 1000);
@@ -338,6 +359,7 @@ public class SalespersonDataScopeTests
         var user = SeedUser(db, "alice");
         var role = SeedRole(db, "Sales");
         SeedUserRole(db, user.Id, role.Id);
+        GrantCustomerMenu(db, role.Id);
         var alice = SeedEmployee(db, "alice");
         SeedCustomer(db, "C001", "我的客户", alice.Id);
         var others = SeedCustomer(db, "C002", "别人的客户", alice.Id + 1000);

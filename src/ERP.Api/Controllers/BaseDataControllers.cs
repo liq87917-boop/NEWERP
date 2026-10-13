@@ -19,6 +19,7 @@ namespace ERP.Api.Controllers;
 /// 客户资料控制器（ERP-036：新增可选的「指定货代」主数据指引字段；
 /// ERP-451：为全部分页 / 全部 / 按主键读取 / 指定货代下拉与新增 / 修改 / 删除 / 批量删除路由补齐实时身份、
 /// 既有「客户资料」（<c>customer</c>）功能菜单授权与有界字段校验）。
+/// ERP-467：该实时授权判定与请求路径 / 请求形状 / 是否绑定 <c>HttpContext</c> 完全无关。
 /// </summary>
 /// <remarks>
 /// 复用既有的「其他资料」数据字典（<c>InfoType = Forwarder</c>），不新增任何单据关联：
@@ -49,24 +50,15 @@ public class CustomerController : BaseCrudController<BaseCustomer>
     }
 
     /// <summary>
-    /// 是否需要执行实时授权（与仓库既有口径同源）：真实 HTTP 请求（MVC 绑定，<c>Request.Path</c> 已赋值）
-    /// 一律执行；仅「未进入 HTTP 请求管线」的<b>进程内直接调用</b>（历史单元测试 / 内部派生读取，
-    /// 无请求路径，不可能由外部请求到达）沿用既有语义，绝不把缺失身份当作管理员。
-    /// <para>这里刻意以请求路径为准（不采纳单纯的进程内身份注入）：ERP-097 业务员读取范围与
-    /// ERP-036 指定货代的历史单元测试都以进程内直调控制器的方式断言既有语义，必须保持不变；
-    /// 真实匿名请求因处于请求管线内（<c>Request.Path</c> 必然已赋值）一律 fail closed。</para>
+    /// 读取 / 写入前的实时身份 / 账号状态 / 既有「客户资料」（<c>customer</c>）菜单授权（ERP-451 / ERP-467，fail closed）。
+    /// <para>与请求路径是否赋值、请求形状、以及控制器是否绑定 <c>HttpContext</c> <b>完全无关</b>：空路径与已赋值路径口径完全一致；
+    /// 即便未绑定任何请求上下文（纯进程内直接调用）也照常执行本护栏，缺失 / 零 / 已删除身份一律按未认证拒绝，
+    /// 禁用账号 / 撤销或缺少既有「客户资料」菜单一律按权限不足拒绝。契约与边界见
+    /// <see cref="CustomerAuthorizationRules.PathIndependenceText"/>。</para>
     /// </summary>
-    private bool RequiresLiveAuthorization()
-    {
-        var http = ControllerContext?.HttpContext;
-        return http?.Request.Path.HasValue == true;
-    }
-
-    /// <summary>读取 / 写入前的实时身份 + 既有「客户资料」菜单授权（ERP-451，fail closed）</summary>
     private async Task EnsureCustomerAuthorizedAsync()
     {
-        if (RequiresLiveAuthorization())
-            await CustomerAuthorizationRules.EnsureAuthorizedAsync(_db, CurrentUserId());
+        await CustomerAuthorizationRules.EnsureAuthorizedAsync(_db, CurrentUserId());
     }
 
     /// <summary>指定货代下拉选项（读取前先经实时授权；只返回未删除、已启用、类型为 Forwarder 的字典项）</summary>
@@ -172,6 +164,7 @@ public class CustomerController : BaseCrudController<BaseCustomer>
 /// 供应商资料控制器（ERP-038：补充「供货商品货源关系」计数标注与供应商侧有界货源列表路由；
 /// ERP-447：为全部分页 / 全部 / 按主键读取与新增 / 修改 / 删除 / 批量删除路由补齐实时身份、
 /// 既有「供应商资料」（<c>supplier</c>）功能菜单授权与有界字段校验）。
+/// ERP-467：该实时授权判定与请求路径 / 请求形状 / 是否绑定 <c>HttpContext</c> 完全无关。
 /// </summary>
 /// <remarks>
 /// 只读取货源关系子表 <c>BaseProductSuppliers</c> 做计数与列表展示：
@@ -201,23 +194,15 @@ public class SupplierController : BaseCrudController<BaseSupplier>
     }
 
     /// <summary>
-    /// 是否需要执行实时授权（与仓库既有口径同源）：真实 HTTP 请求（<c>Request.Path</c> 已赋值）一律执行；
-    /// 仅「既无任何登录身份、又不在 HTTP 请求管线内」的<b>进程内直接调用</b>（历史单元测试 / 内部派生读取）
-    /// 沿用既有语义 —— 这类调用不可能由外部请求到达，真实匿名请求因处于请求管线内一律 fail closed，
-    /// 绝不把缺失身份当作管理员。
+    /// 读取 / 写入前的实时身份 / 账号状态 / 既有「供应商资料」（<c>supplier</c>）菜单授权（ERP-447 / ERP-467，fail closed）。
+    /// <para>与请求路径是否赋值、请求形状、以及控制器是否绑定 <c>HttpContext</c> <b>完全无关</b>：空路径与已赋值路径口径完全一致；
+    /// 即便未绑定任何请求上下文（纯进程内直接调用）也照常执行本护栏，缺失 / 零 / 已删除身份一律按未认证拒绝，
+    /// 禁用账号 / 撤销或缺少既有「供应商资料」菜单一律按权限不足拒绝。契约与边界见
+    /// <see cref="SupplierAuthorizationRules.PathIndependenceText"/>。</para>
     /// </summary>
-    private bool RequiresLiveAuthorization()
-    {
-        var http = ControllerContext?.HttpContext;
-        if (http is null) return false;
-        return http.Request.Path.HasValue || CurrentUserId() is not null;
-    }
-
-    /// <summary>读取 / 写入前的实时身份 + 既有「供应商资料」菜单授权（ERP-447，fail closed）</summary>
     private async Task EnsureAuthorizedAsync()
     {
-        if (RequiresLiveAuthorization())
-            await SupplierAuthorizationRules.EnsureAuthorizedAsync(_db, CurrentUserId());
+        await SupplierAuthorizationRules.EnsureAuthorizedAsync(_db, CurrentUserId());
     }
 
     /// <summary>分页查询（补充货源关系计数标注，不写库；读写前先经实时授权）</summary>
@@ -288,6 +273,7 @@ public class SupplierController : BaseCrudController<BaseSupplier>
 /// <summary>
 /// 员工资料控制器（ERP-449：为全部分页 / 全部 / 按主键读取与新增 / 修改 / 删除 / 批量删除路由，
 /// 以及业务员下拉（<c>salesmen</c>）补齐实时身份、既有「员工资料」（<c>employee</c>）功能菜单授权与有界字段校验）。
+/// ERP-467：该实时授权判定与请求路径 / 请求形状 / 是否绑定 <c>HttpContext</c> 完全无关。
 /// </summary>
 /// <remarks>
 /// 员工主数据提供销售订单 / 客户 / 报价单 / PI / 装柜清单与 ERP-097 业务员数据范围所解析的业务员身份；
@@ -315,23 +301,15 @@ public class EmployeeController : BaseCrudController<BaseEmployee>
     }
 
     /// <summary>
-    /// 是否需要执行实时授权（与仓库 / 供应商既有口径同源）：真实 HTTP 请求（<c>Request.Path</c> 已赋值）一律执行；
-    /// 仅「既无任何登录身份、又不在 HTTP 请求管线内」的<b>进程内直接调用</b>（历史单元测试 / 内部派生读取）
-    /// 沿用既有语义 —— 这类调用不可能由外部请求到达，真实匿名请求因处于请求管线内一律 fail closed，
-    /// 绝不把缺失身份当作管理员。
+    /// 读取 / 写入前的实时身份 / 账号状态 / 既有「员工资料」（<c>employee</c>）菜单授权（ERP-449 / ERP-467，fail closed）。
+    /// <para>与请求路径是否赋值、请求形状、以及控制器是否绑定 <c>HttpContext</c> <b>完全无关</b>：空路径与已赋值路径口径完全一致；
+    /// 即便未绑定任何请求上下文（纯进程内直接调用）也照常执行本护栏，缺失 / 零 / 已删除身份一律按未认证拒绝，
+    /// 禁用账号 / 撤销或缺少既有「员工资料」菜单一律按权限不足拒绝。契约与边界见
+    /// <see cref="EmployeeAuthorizationRules.PathIndependenceText"/>。</para>
     /// </summary>
-    private bool RequiresLiveAuthorization()
-    {
-        var http = ControllerContext?.HttpContext;
-        if (http is null) return false;
-        return http.Request.Path.HasValue || CurrentUserId() is not null;
-    }
-
-    /// <summary>读取 / 写入前的实时身份 + 既有「员工资料」菜单授权（ERP-449，fail closed）</summary>
     private async Task EnsureEmployeeAuthorizedAsync()
     {
-        if (RequiresLiveAuthorization())
-            await EmployeeAuthorizationRules.EnsureAuthorizedAsync(_db, CurrentUserId());
+        await EmployeeAuthorizationRules.EnsureAuthorizedAsync(_db, CurrentUserId());
     }
 
     /// <summary>分页查询（读写前先经实时授权）</summary>
@@ -417,6 +395,7 @@ public class ExpenseAccountController : BaseCrudController<BaseExpenseAccount>
 /// <summary>
 /// 仓库资料控制器（ERP-448：为全部分页 / 全部 / 按主键读取与新增 / 修改 / 删除 / 批量删除路由补齐实时身份、
 /// 既有「仓库资料」（<c>warehouse</c>）功能菜单授权与有界字段校验）。
+/// ERP-467：该实时授权判定与请求路径 / 请求形状 / 是否绑定 <c>HttpContext</c> 完全无关。
 /// </summary>
 /// <remarks>
 /// 库存入 / 出 / 调整 / 调拨与库存位置 / 批次查询都解析到本控制器维护的仓库主数据；这些路由在读取或写入任何
@@ -443,23 +422,15 @@ public class WarehouseController : BaseCrudController<BaseWarehouse>
     }
 
     /// <summary>
-    /// 是否需要执行实时授权（与仓库既有口径同源）：真实 HTTP 请求（<c>Request.Path</c> 已赋值）一律执行；
-    /// 仅「既无任何登录身份、又不在 HTTP 请求管线内」的<b>进程内直接调用</b>（历史单元测试 / 内部派生读取）
-    /// 沿用既有语义 —— 这类调用不可能由外部请求到达，真实匿名请求因处于请求管线内一律 fail closed，
-    /// 绝不把缺失身份当作管理员。
+    /// 读取 / 写入前的实时身份 / 账号状态 / 既有「仓库资料」（<c>warehouse</c>）菜单授权（ERP-448 / ERP-467，fail closed）。
+    /// <para>与请求路径是否赋值、请求形状、以及控制器是否绑定 <c>HttpContext</c> <b>完全无关</b>：空路径与已赋值路径口径完全一致；
+    /// 即便未绑定任何请求上下文（纯进程内直接调用）也照常执行本护栏，缺失 / 零 / 已删除身份一律按未认证拒绝，
+    /// 禁用账号 / 撤销或缺少既有「仓库资料」菜单一律按权限不足拒绝。契约与边界见
+    /// <see cref="WarehouseAuthorizationRules.PathIndependenceText"/>。</para>
     /// </summary>
-    private bool RequiresLiveAuthorization()
-    {
-        var http = ControllerContext?.HttpContext;
-        if (http is null) return false;
-        return http.Request.Path.HasValue || CurrentUserId() is not null;
-    }
-
-    /// <summary>读取 / 写入前的实时身份 + 既有「仓库资料」菜单授权（ERP-448，fail closed）</summary>
     private async Task EnsureWarehouseAuthorizedAsync()
     {
-        if (RequiresLiveAuthorization())
-            await WarehouseAuthorizationRules.EnsureAuthorizedAsync(_db, CurrentUserId());
+        await WarehouseAuthorizationRules.EnsureAuthorizedAsync(_db, CurrentUserId());
     }
 
     /// <summary>分页查询（读写前先经实时授权）</summary>
@@ -526,6 +497,7 @@ public class WarehouseController : BaseCrudController<BaseWarehouse>
 /// 商品资料控制器（ERP-037：商品下可选的颜色 / 尺码 SKU 规格变体，规格维护见 <see cref="ProductVariantController"/>；
 /// ERP-452：为全部分页 / 全部 / 按主键读取 / 新增 / 修改 / 删除 / 批量删除 / 导出 / 单张上传 / 批量上传路由
 /// 补齐实时身份、既有「商品资料」（<c>product</c>）功能菜单授权与有界字段校验）。
+/// ERP-467：该实时授权判定与请求路径 / 请求形状 / 是否绑定 <c>HttpContext</c> 完全无关。
 /// </summary>
 /// <remarks>
 /// 商品主数据是销售订单行 / 采购订单行 / 报价单行 / 库存单据与库存查询共同解析的权威对象，
@@ -562,22 +534,15 @@ public class ProductController : BaseCrudController<BaseProduct>
     }
 
     /// <summary>
-    /// 是否需要执行实时授权（与仓库 / 客户既有口径同源）：真实 HTTP 请求（MVC 绑定，<c>Request.Path</c> 已赋值）
-    /// 一律执行；仅「未进入 HTTP 请求管线」的<b>进程内直接调用</b>（历史单元测试 / 内部派生读取，
-    /// 无请求路径，不可能由外部请求到达）沿用既有语义，绝不把缺失身份当作管理员。
-    /// <para>真实匿名请求因处于请求管线内（<c>Request.Path</c> 必然已赋值）一律 fail closed。</para>
+    /// 读取 / 写入 / 产物生成前的实时身份 / 账号状态 / 既有「商品资料」（<c>product</c>）菜单授权（ERP-452 / ERP-467，fail closed）。
+    /// <para>与请求路径是否赋值、请求形状、以及控制器是否绑定 <c>HttpContext</c> <b>完全无关</b>：空路径与已赋值路径口径完全一致；
+    /// 即便未绑定任何请求上下文（纯进程内直接调用）也照常执行本护栏，缺失 / 零 / 已删除身份一律按未认证拒绝，
+    /// 禁用账号 / 撤销或缺少既有「商品资料」菜单一律按权限不足拒绝。契约与边界见
+    /// <see cref="ProductAuthorizationRules.PathIndependenceText"/>。</para>
     /// </summary>
-    private bool RequiresLiveAuthorization()
-    {
-        var http = ControllerContext?.HttpContext;
-        return http?.Request.Path.HasValue == true;
-    }
-
-    /// <summary>读取 / 写入 / 产物生成前的实时身份 + 既有「商品资料」菜单授权（ERP-452，fail closed）</summary>
     private async Task EnsureProductAuthorizedAsync()
     {
-        if (RequiresLiveAuthorization())
-            await ProductAuthorizationRules.EnsureAuthorizedAsync(_db, CurrentUserId());
+        await ProductAuthorizationRules.EnsureAuthorizedAsync(_db, CurrentUserId());
     }
 
     /// <summary>

@@ -540,11 +540,14 @@ public class CustomerForwarderTests
 
     // ============ 测试辅助 ============
 
-    /// <summary>构造客户资料控制器（内存库 + 通用 CRUD 服务，并注入特权登录身份）</summary>
+    /// <summary>
+    /// ERP-467：构造客户资料控制器（内存库 + 通用 CRUD 服务），注入<b>真实启用身份 + 既有「客户资料」菜单授权</b>
+    /// （隔离测试数据，且刻意不设置 <c>Request.Path</c>）：既有指定货代契约只有在实时授权通过后才成立。
+    /// </summary>
     private static CustomerController BuildController(ErpDbContext db)
     {
         var controller = new CustomerController(new GenericService<BaseCustomer>(db), db);
-        TestAuth.SetUser(controller, TestAuth.SeedPrivilegedUser(db));
+        TestAuth.SetUser(controller, SeedCustomerMenuUser(db));
         return controller;
     }
 
@@ -594,7 +597,8 @@ public class CustomerForwarderTests
     }
 
     /// <summary>
-    /// ERP-451：播种一个具备既有「客户资料」（<c>customer</c>）菜单授权的登录身份，返回用户 Id。
+    /// ERP-451 / ERP-467：播种一个具备既有「客户资料」（<c>customer</c>）菜单授权的登录身份，返回用户 Id。
+    /// 采用系统内置角色（<c>IsSystem == true</c>）以获得既有特权数据范围，避免历史夹具受 ERP-097 业务员范围影响；
     /// （菜单缺失时按既有种子口径补建一条功能菜单，与 SeedData.Menus 同源，不新增任何菜单。）
     /// </summary>
     private static long SeedCustomerMenuUser(ErpDbContext db)
@@ -614,7 +618,7 @@ public class CustomerForwarderTests
         {
             RoleName = "指定货代授权用例角色",
             RoleCode = $"ForwarderAuthCase-{Guid.NewGuid():N}",
-            IsSystem = false
+            IsSystem = true
         };
         db.SysRoles.Add(role);
         db.SaveChanges();

@@ -163,16 +163,25 @@ public class ProductSupplierTests
     }
 
     /// <summary>商品资料控制器（补充规格 / 货源关系计数标注），依赖与生产一致：内存库 + 测试用 OSS 配置 + 假宿主环境</summary>
-    private static ProductController ProductControllerOf(ErpDbContext db) => new(
-        new GenericService<BaseProduct>(db),
-        new OssStorageService(BuildOssConfiguration()),
-        new ProductExcelExporter(db),
-        new FakeWebHostEnvironment(),
-        db);
+    private static ProductController ProductControllerOf(ErpDbContext db)
+    {
+        var controller = new ProductController(
+            new GenericService<BaseProduct>(db),
+            new OssStorageService(BuildOssConfiguration()),
+            new ProductExcelExporter(db),
+            new FakeWebHostEnvironment(),
+            db);
+        controller.ControllerContext = AuthorizedContext(db);
+        return controller;
+    }
 
     /// <summary>供应商资料控制器（补充货源关系计数标注）</summary>
-    private static SupplierController SupplierControllerOf(ErpDbContext db) => new(
-        new GenericService<BaseSupplier>(db), db);
+    private static SupplierController SupplierControllerOf(ErpDbContext db)
+    {
+        var controller = new SupplierController(new GenericService<BaseSupplier>(db), db);
+        controller.ControllerContext = AuthorizedContext(db);
+        return controller;
+    }
 
     private static IConfiguration BuildOssConfiguration() =>
         new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>

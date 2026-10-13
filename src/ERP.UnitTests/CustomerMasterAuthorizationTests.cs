@@ -314,21 +314,33 @@ public class CustomerMasterAuthorizationTests
     }
 
     /// <summary>
-    /// 进程内直调边界（与仓库既有口径同源）：未进入 HTTP 请求管线（<c>Request.Path</c> 为空）的历史单元测试 /
-    /// 内部派生读取沿用既有语义；真实 HTTP 请求（<c>Request.Path</c> 已赋值）一律实时授权并 fail closed。
+    /// ERP-467 路径 / 上下文无关契约：未绑定任何请求上下文（纯进程内直调）同样执行实时授权 ——
+    /// 身份缺失一律未认证，特权身份但没有既有「客户资料」菜单一律权限不足，具备既有菜单的启用身份放行既有读取契约。
     /// </summary>
     [Fact]
-    public async Task Auth_进程内直调无请求路径_沿用既有语义()
+    public async Task Auth_进程内直调_同样实时授权_无身份未认证_无菜单权限不足_有菜单放行()
     {
         using var db = TestDbFactory.Create();
         var mine = SeedCustomer(db, "C-INT-1", "直调客户");
         var privilegedId = TestAuth.SeedPrivilegedUser(db);
-        var ctl = new CustomerController(new GenericService<BaseCustomer>(db), db)
+
+        // 完全未绑定 HttpContext（纯进程内直调）：身份缺失 → 未认证，绝不跳过授权
+        var contextless = new CustomerController(new GenericService<BaseCustomer>(db), db);
+        await AssertCode(ErrorCodes.Unauthorized, () => contextless.GetPaged(new PageQuery { Page = 1, PageSize = 10 }));
+
+        // 空路径 + 特权身份但没有既有「客户资料」菜单 → 权限不足（复用既有菜单授权，不因特权降级放行）
+        var noMenu = new CustomerController(new GenericService<BaseCustomer>(db), db)
         {
             ControllerContext = InternalContextWithUser(privilegedId)
         };
+        await AssertCode(ErrorCodes.Forbidden, () => noMenu.GetPaged(new PageQuery { Page = 1, PageSize = 10 }));
 
-        var page = Data<PagedResult<BaseCustomer>>(await ctl.GetPaged(new PageQuery { Page = 1, PageSize = 10 }));
+        // 空路径 + 具备既有「客户资料」菜单的启用（特权数据范围）身份 → 放行既有读取契约
+        var authorized = new CustomerController(new GenericService<BaseCustomer>(db), db)
+        {
+            ControllerContext = InternalContextWithUser(SeedUser(db, privileged: true))
+        };
+        var page = Data<PagedResult<BaseCustomer>>(await authorized.GetPaged(new PageQuery { Page = 1, PageSize = 10 }));
         Assert.Contains(page.Items, c => c.Id == mine.Id);
     }
 
