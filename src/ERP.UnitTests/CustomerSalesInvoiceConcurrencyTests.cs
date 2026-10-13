@@ -832,7 +832,9 @@ public class CustomerSalesInvoiceConcurrencyTests
         Assert.Contains("CustomerSalesInvoiceAuthorizationRules.EnsureSalesOrderIdsAuthorizedAsync", controller);
         Assert.Contains("CustomerSalesInvoiceAuthorizationRules.EnsureTradeDocumentAuthorizedAsync", controller);
         Assert.Contains("CustomerSalesInvoiceAuthorizationRules.BuildScopePredicateAsync", controller);
-        Assert.Contains("RequiresLiveAuthorization", controller);
+        // ERP-487：授权门 / 请求上下文豁免彻底移除，四条写路由与全部读路由都无条件实时授权。
+        Assert.DoesNotContain("RequiresLiveAuthorization", controller);
+        Assert.DoesNotContain("ControllerContext?.HttpContext is not null", controller);
 
         var collection = ReadSource("src", "ERP.Application", "Services",
             "CustomerSalesInvoiceCollectionAllocationService.cs");

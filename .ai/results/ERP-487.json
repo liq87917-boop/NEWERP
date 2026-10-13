@@ -1,8 +1,11 @@
 {
   "task": "ERP-487",
-  "status": "retry",
-  "execution_outcome": "acceptance_reopened",
-  "attempts": 1,
-  "reason": "CustomerSalesInvoiceEvidenceController.RequiresLiveAuthorization:217 and helper skips at233/243/254/276/297 still return null or waive invoice/candidate/current source customer authority for no HttpContext, contrary to original all-call-shape acceptance. Remove every waiver and make existing customer invoice authority mandatory on all register/candidate/detail/create/edit/record/void entries. Keep already-unconditional collection-allocation controller intact except genuine shared fixture adaptation; preserve receipt funding and invoice amount/currency/concurrency/transaction rules.",
-  "original_result_preserved": "D:\\VSCodeProject\\NEWERP.executor.continue-erp-190-20260930080457\\.ai\\logs\\heartbeat-20261013-190922-recovery\\ERP-487"
+  "status": "completed",
+  "execution_outcome": "completed",
+  "normalized_finish_reason": "build_validated",
+  "cline_exit_code": 0,
+  "cline_finish_reason_raw": "completed",
+  "attempts": 2,
+  "browser_acceptance": null,
+  "finished_at": "2026-10-13T19:47:28.083041Z"
 }

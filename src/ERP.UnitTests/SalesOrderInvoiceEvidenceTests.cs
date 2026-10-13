@@ -521,7 +521,10 @@ public class SalesOrderInvoiceEvidenceTests
         await db.SaveChangesAsync();
 
         // ERP-055 服务端登记：新建草稿 → 分摊到本订单 → 登记（草稿不算有效证据）
+        // ERP-487：授权豁免彻底移除 —— 进程内直调同样需要真实启用身份与既有菜单授权，
+        // 夹具只播种既有系统内置角色（不新增任何生产授权、不使用任何测试专用开关）。
         var register = new CustomerSalesInvoiceEvidenceController(db);
+        TestAuth.SetUser(register, TestAuth.SeedPrivilegedUser(db));
         var created = AssertOk<CustomerSalesInvoiceEvidenceDto>(await register.Create(
             new CustomerSalesInvoiceEvidenceSaveDto
             {

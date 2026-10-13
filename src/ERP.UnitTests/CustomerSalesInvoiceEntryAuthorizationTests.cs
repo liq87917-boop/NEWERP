@@ -20,9 +20,10 @@ namespace ERP.UnitTests;
 /// 绑定到请求管线但缺失 / 为零 / 未知 / 已删除身份一律未认证（2000），禁用 / 无菜单 / 被撤销菜单一律权限不足（2002），
 /// 受限业务员越界客户 / 收款单 / 发票一律受控非披露拒绝，且全部先于任何计数、候选、快照、预览与写入；
 /// 被拒调用零发票 / 分摊行 / 收款单 / 来源 / 状态改动。</para>
-/// <para>收款分摊证据入口（含登记 / 作废）<strong>不再存在</strong>「无 HTTP 请求管线且无身份」的无授权服务直调旁路；
-/// 客户销项发票入口同样不再读取 <c>Request.Path</c>，也不再依据是否携带可解析身份，仅未绑定任何请求的纯进程内直调
-/// 沿用仓库一致的进程内边界（外部请求无法构造）。全部使用隔离内存测试数据（<see cref="TestDbFactory"/>），
+/// <para>收款分摊证据入口（含登记 / 作废）与客户销项发票入口<strong>都不存在任何授权豁免</strong>：既不再读取
+/// <c>Request.Path</c>，也不再依据是否携带可解析身份，更不存在「未绑定任何请求上下文」的纯进程内直调旁路 ——
+/// 空路径、已赋值路径与完全未绑定 <c>HttpContext</c> 的直调对同一身份给出完全相同的判定（缺失身份一律受控未认证）。
+/// 全部使用隔离内存测试数据（<see cref="TestDbFactory"/>），
 /// 只播种既有菜单 / 角色授权与真实启用身份，绝不新增生产授权，也不提供任何测试专用开关。
 /// 真实隔离 SQL 用例见
 /// <c>ERP.IntegrationTests/CustomerSalesInvoiceEntryAuthorizationSqlServerTests.cs</c>。</para>
@@ -323,8 +324,10 @@ public class CustomerSalesInvoiceEntryAuthorizationTests
             Assert.Contains("EnsureMenuAuthorizedAsync", controller);
         }
 
-        // 客户销项发票：授权门只依据「是否绑定到请求管线」，范围谓词 / 单据 / 单证范围复核全部无条件调用。
-        Assert.Contains("ControllerContext?.HttpContext is not null", evidence);
+        // 客户销项发票：授权门 / 请求上下文豁免彻底移除，范围谓词 / 单据 / 单证范围复核全部无条件调用。
+        Assert.DoesNotContain("RequiresLiveAuthorization", evidence);
+        Assert.DoesNotContain("ControllerContext?.HttpContext is not null", evidence);
+        Assert.DoesNotContain("scope is null", evidence);
         Assert.Contains("CustomerSalesInvoiceAuthorizationRules.BuildScopePredicateAsync", evidence);
         Assert.Contains("CustomerSalesInvoiceAuthorizationRules.BuildTradeDocumentScopePredicateAsync", evidence);
         Assert.Contains("CustomerSalesInvoiceAuthorizationRules.EnsureInvoiceAuthorizedWithScopeAsync", evidence);
@@ -393,6 +396,59 @@ public class CustomerSalesInvoiceEntryAuthorizationTests
             Assert.Equal(outcomes[i], outcomes[i + half]);
 
         // 全部为同一条受控未认证文案（不泄露发票 / 客户 / 分摊证据）。
+        Assert.All(outcomes, o =>
+            Assert.Equal(CustomerSalesInvoiceAuthorizationRules.UnauthorizedText, o.Message));
+
+        // 零写入：发票状态 / 金额不变、无新增发票、无分摊行。
+        var reloaded = await db.CustomerSalesInvoiceEvidences.AsNoTracking().SingleAsync(x => x.Id == invoice.Id);
+        Assert.Equal(beforeStatus, reloaded.Status);
+        Assert.Equal(beforeGross, reloaded.GrossAmount);
+        Assert.Equal(beforeCount, await db.CustomerSalesInvoiceEvidences.CountAsync());
+        Assert.Equal(0, await db.CustomerSalesInvoiceAllocations.CountAsync());
+    }
+
+    // ==================== 2b. 纯进程内直调（无 HttpContext）：同样无条件 fail closed 且零写入 ====================
+
+    [Fact]
+    public async Task Evidence_pure_in_process_calls_without_http_context_are_unauthorized_with_zero_mutation()
+    {
+        using var db = TestDbFactory.Create();
+        var customer = SeedCustomer(db, "C487-NOCTX", "无上下文客户");
+        var invoice = SeedInvoice(db, "INV-487-NOCTX", customer.Id);
+        var order = SeedOrder(db, "SO-487-NOCTX", customer.Id);
+        var beforeStatus = invoice.Status;
+        var beforeGross = invoice.GrossAmount;
+        var beforeCount = await db.CustomerSalesInvoiceEvidences.CountAsync();
+
+        // 纯进程内直调：完全未绑定任何 HttpContext（例如既有进程内夹具 / 内部派生读取），
+        // ERP-487 已彻底移除「无请求上下文免授权」豁免 —— 与空路径 / 已赋值路径对同一身份给出完全相同的判定。
+        var ctl = new CustomerSalesInvoiceEvidenceController(db);
+
+        var outcomes = new List<(int Code, string Message)>
+        {
+            Outcome(await AssertDenied(ErrorCodes.Unauthorized,
+                () => ctl.GetPaged(new CustomerSalesInvoiceEvidenceQuery()))),
+            Outcome(await AssertDenied(ErrorCodes.Unauthorized,
+                () => ctl.CollectionTiming(new CustomerInvoiceCollectionTimingQuery()))),
+            Outcome(await AssertDenied(ErrorCodes.Unauthorized,
+                () => ctl.CommercialInvoiceCandidates(null, 50))),
+            Outcome(await AssertDenied(ErrorCodes.Unauthorized, () => ctl.GetById(invoice.Id))),
+            Outcome(await AssertDenied(ErrorCodes.Unauthorized,
+                () => ctl.Create(EvidenceDto(customer.Id, "INV-487-NOCTX-NEW")))),
+            Outcome(await AssertDenied(ErrorCodes.Unauthorized,
+                () => ctl.Update(invoice.Id, EvidenceDto(customer.Id, "INV-487-NOCTX")))),
+            Outcome(await AssertDenied(ErrorCodes.Unauthorized,
+                () => ctl.OrderCandidates(invoice.Id, null, 50))),
+            Outcome(await AssertDenied(ErrorCodes.Unauthorized,
+                () => ctl.PreviewAllocations(invoice.Id, AllocationRequest(order.Id)))),
+            Outcome(await AssertDenied(ErrorCodes.Unauthorized,
+                () => ctl.SaveAllocations(invoice.Id, AllocationRequest(order.Id)))),
+            Outcome(await AssertDenied(ErrorCodes.Unauthorized, () => ctl.Record(invoice.Id))),
+            Outcome(await AssertDenied(ErrorCodes.Unauthorized,
+                () => ctl.Void(invoice.Id, new CustomerSalesInvoiceVoidRequest { Reason = "越权" })))
+        };
+
+        // 全部为同一条受控未认证文案（不泄露发票 / 客户 / 分摊证据），不存在任何豁免。
         Assert.All(outcomes, o =>
             Assert.Equal(CustomerSalesInvoiceAuthorizationRules.UnauthorizedText, o.Message));
 

@@ -25,8 +25,8 @@ namespace ERP.IntegrationTests;
 /// <item><b>与请求形状无关</b>：空请求路径与已赋值请求路径必须给出完全一致的判定；
 /// 绑定到请求管线的缺失 / 零 / 未知 / 已删除身份一律未认证，禁用 / 撤销菜单一律权限不足，
 /// 且都在任何计数、候选、快照、预览与写入之前。</item>
-/// <item><b>收款分摊证据无空上下文旁路</b>：未绑定任何请求（<c>HttpContext</c> 为 null）时登记 / 作废同样 fail closed；
-/// 客户销项发票入口保留仓库一致的纯进程内直调边界（外部请求无法构造，纯单元测试已覆盖）。</item>
+/// <item><b>无空上下文旁路</b>：未绑定任何请求（<c>HttpContext</c> 为 null）时，客户销项发票与收款分摊证据的
+/// 全部入口（含登记 / 作废）同样 fail closed（受控未认证），不存在「纯进程内直调」授权豁免。</item>
 /// <item><b>保留既有业务生命周期与零写入拒绝</b>：既有授权账号照常完成 台账 / 详情 / 候选 / 登记 / 作废 与
 /// 收款分摊 登记 / 作废 全生命周期；被拒绝的请求不新增 / 不改写任何发票、分摊行、收款单或状态，
 /// 也不新增任何用户授权。</item>
@@ -85,17 +85,26 @@ public sealed class CustomerSalesInvoiceEntryAuthorizationSqlServerTests
             ControllerContext = new ControllerContext { HttpContext = NewHttp(userId, requestPath) }
         };
 
-    /// <summary>未绑定任何请求上下文的纯进程内直调（外部请求无法构造）。</summary>
+    /// <summary>未绑定任何请求上下文的纯进程内直调（外部请求无法构造，同样无条件授权）。</summary>
     private static CustomerSalesInvoiceCollectionAllocationController InProcessAllocationController(ErpDbContext db)
+        => new(db);
+
+    /// <summary>未绑定任何请求上下文的纯进程内直调（外部请求无法构造，同样无条件授权）。</summary>
+    private static CustomerSalesInvoiceEvidenceController InProcessEvidenceController(ErpDbContext db)
         => new(db);
 
     private static async Task<(bool Success, int Code, string Error)> TryEvidenceAsync(
         ErpDbContext db, long? userId, string? requestPath,
         Func<CustomerSalesInvoiceEvidenceController, Task<IActionResult>> action)
+        => await TryEvidenceAsync(EvidenceController(db, userId, requestPath), action);
+
+    private static async Task<(bool Success, int Code, string Error)> TryEvidenceAsync(
+        CustomerSalesInvoiceEvidenceController controller,
+        Func<CustomerSalesInvoiceEvidenceController, Task<IActionResult>> action)
     {
         try
         {
-            var result = await action(EvidenceController(db, userId, requestPath));
+            var result = await action(controller);
             return (result is OkObjectResult, ErrorCodes.Success, string.Empty);
         }
         catch (BusinessException ex)
@@ -572,6 +581,24 @@ public sealed class CustomerSalesInvoiceEntryAuthorizationSqlServerTests
             Assert.Equal(ErrorCodes.Unauthorized,
                 (await TryAllocationAsync(inProcess, c => c.Void(1L,
                     new CustomerSalesInvoiceCollectionAllocationVoidRequest { Reason = "越权" }))).Code);
+
+            // 客户销项发票纯进程内直调同样没有任何豁免：读 / 写入口一律受控未认证。
+            var inProcessEvidence = InProcessEvidenceController(db);
+            Assert.Equal(ErrorCodes.Unauthorized,
+                (await TryEvidenceAsync(inProcessEvidence,
+                    c => c.GetPaged(new CustomerSalesInvoiceEvidenceQuery()))).Code);
+            Assert.Equal(ErrorCodes.Unauthorized,
+                (await TryEvidenceAsync(inProcessEvidence, c => c.CommercialInvoiceCandidates(null, 10))).Code);
+            Assert.Equal(ErrorCodes.Unauthorized,
+                (await TryEvidenceAsync(inProcessEvidence, c => c.GetById(myInvoiceId))).Code);
+            Assert.Equal(ErrorCodes.Unauthorized,
+                (await TryEvidenceAsync(inProcessEvidence,
+                    c => c.Create(EvidenceDto(mine, $"NOCTX-{Guid.NewGuid():N}")))).Code);
+            Assert.Equal(ErrorCodes.Unauthorized,
+                (await TryEvidenceAsync(inProcessEvidence, c => c.Record(myInvoiceId))).Code);
+            Assert.Equal(ErrorCodes.Unauthorized,
+                (await TryEvidenceAsync(inProcessEvidence, c => c.Void(myInvoiceId,
+                    new CustomerSalesInvoiceVoidRequest { Reason = "越权" }))).Code);
         }
 
         await using (var db = _fixture.CreateDbContext())

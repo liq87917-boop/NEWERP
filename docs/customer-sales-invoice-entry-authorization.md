@@ -45,17 +45,24 @@ private bool RequiresLiveAuthorization()
 
   **未绑定任何请求（`HttpContext` 为 null）时同样 fail closed**：不再存在「无请求管线且无身份」的服务直调旁路。
 
-- **客户销项发票**：授权门只依据「控制器是否绑定到 HTTP 请求管线」
-  （`ControllerContext?.HttpContext is not null`），**不再读取请求路径字段，也不再依据是否携带可解析身份**：
+- **客户销项发票**：**彻底移除 `RequiresLiveAuthorization()` 授权门与「未绑定请求上下文（`HttpContext` 为 null）免授权」豁免**，
+  台账 / 详情 / 收款时效证据 / 商业发票候选 / 新增 / 修改 / 可分摊订单候选 / 分摊预览 / 分摊整体替换 / 登记 / 作废
+  **每一入口都无条件**先调用 `ResolveAuthorizedScopeAsync`（= `CustomerSalesInvoiceAuthorizationRules.EnsureMenuAuthorizedAsync`）
+  或对应的范围谓词 / 范围复核方法：
 
   ```csharp
-  private bool RequiresLiveAuthorization()
-      => ControllerContext?.HttpContext is not null;
+  private Task<SalespersonDataScope> ResolveAuthorizedScopeAsync()
+      => CustomerSalesInvoiceAuthorizationRules.EnsureMenuAuthorizedAsync(_db, CurrentUserId());
+
+  private async Task<Expression<Func<CustomerSalesInvoiceEvidence, bool>>> BuildScopePredicateAsync()
+      => await CustomerSalesInvoiceAuthorizationRules.BuildScopePredicateAsync(_db, CurrentUserId());
   ```
 
-  空路径与已赋值路径对同一身份给出完全相同的判定；绑定到请求管线但身份缺失 / 为零 / 未知 / 已删除一律未认证
+  授权判定**不再依据是否绑定请求管线、也不读取 `Request.Path`、也不依据是否携带可解析身份**：空路径、已赋值路径与
+  完全未绑定 `HttpContext` 的纯进程内直调对同一身份给出完全相同的判定；身份缺失 / 为零 / 未知 / 已删除一律未认证
   （2000），禁用账号 / 缺少或被撤销既有「销售订单」菜单一律权限不足（2002），受限账号越界客户 / 来源一律受控
-  非披露拒绝，且全部先于任何计数、候选、快照、预览与写入。
+  非披露拒绝，且全部先于任何计数、候选、快照、预览与写入。`CurrentUserId()` 缺失 / 非数字时**安全解析为 `null`**
+  并给出受控未认证，绝不猜测身份、绝不退化为匿名或管理员。
 
 - 两个控制器都**不读取 `Request.Path`**、不读取环境变量、不使用任何测试专用开关、不按数据库提供程序放行，
   也不存在 `[AllowAnonymous]`、角色白名单或「退化为管理员」的兜底（源码契约测试逐条断言）。
@@ -106,43 +113,43 @@ private bool RequiresLiveAuthorization()
 
 ### 5.1 单元测试（内存库 + 真实既有身份 / 菜单 / 数据范围）
 
-- `src/ERP.UnitTests/CustomerSalesInvoiceEntryAuthorizationTests.cs`（新增）：
-  空路径与已赋值路径的**逐入口一致判定**（含未认证文案逐字一致）；缺失 / 零 / 未知 / 已删除身份 → 未认证；
+- `src/ERP.UnitTests/CustomerSalesInvoiceEntryAuthorizationTests.cs`：空路径与已赋值路径的**逐入口一致判定**（含未认证文案逐字一致）；
+  **完全未绑定 `HttpContext` 的纯进程内直调同样逐入口受控未认证且零写入**；缺失 / 零 / 未知 / 已删除身份 → 未认证；
   禁用账号 / 撤销菜单 → 权限不足且撤销后立即收敛；受限业务员越界客户 / 收款单 / 销售订单 → 受控非披露拒绝；
   授权身份完成既有「新建草稿 → 分摊 → 登记 → 作废」与「收款分摊 登记 → 作废」生命周期；
   被拒调用零写入（发票状态 / 金额 / 行数 / 分摊行数不变）；以及控制器源码契约
   （不再读取 `Request.Path`、无 `AllowAnonymous` / 角色白名单 / 环境变量 / 内存库开关；
-  收款分摊控制器不再存在 `RequiresLiveAuthorization` 与无授权服务直调）。
+  **两个控制器都不再存在 `RequiresLiveAuthorization` / `ControllerContext?.HttpContext is not null` 门与无授权服务直调**）。
+- 既有进程内夹具 `src/ERP.UnitTests/SalesOrderInvoiceEvidenceTests.cs` 按真实授权口径改造：直调控制器前播种**既有
+  系统内置角色身份**（`TestAuth.SeedPrivilegedUser`），不新增任何生产授权。
 - 既有夹具 `src/ERP.UnitTests/CustomerSalesInvoiceCollectionAllocationTests.cs` 调整为真实授权口径：
   「无身份时登记人记未知用户」改为**受控未认证拒绝且零写行**（登记人取登录账号的契约仍由带真实身份的
   夹具 `BuildController(db, "张三")` 覆盖），不新增任何测试授权。
 - `CustomerSalesInvoiceEvidenceTests` / `CustomerSalesInvoiceConcurrencyTests` /
-  `CustomerSalesInvoiceReceiptAllocationExposureTests` 继续以既有特权身份与既有菜单授权驱动全部路由。
+  `CustomerSalesInvoiceReceiptAllocationExposureTests` / `CustomerInvoiceCollectionTimingTests` 继续以既有特权身份与
+  既有菜单授权驱动全部路由。
 
 ### 5.2 真实隔离 SQL 测试
 
-`src/ERP.IntegrationTests/CustomerSalesInvoiceEntryAuthorizationSqlServerTests.cs`（新增）以真实控制器 + 真实既有
+`src/ERP.IntegrationTests/CustomerSalesInvoiceEntryAuthorizationSqlServerTests.cs` 以真实控制器 + 真实既有
 身份 / 菜单 / 数据范围驱动：空路径与已赋值路径一致判定、缺失 / 零 / 未知 / 已删除身份在全部路由未认证、
-禁用与撤销菜单在全部路由权限不足、授权身份完成读侧与写入生命周期、**纯进程内 `HttpContext` 为 null 时收款分摊
-登记 / 作废仍 fail closed**、越界收款单与「不存在」同一条不披露错误、被拒调用零写入且绝不新增授权行。
+禁用与撤销菜单在全部路由权限不足、授权身份完成读侧与写入生命周期、**两个控制器在纯进程内 `HttpContext` 为 null 时
+全部入口（含登记 / 作废）仍 fail closed**、越界收款单与「不存在」同一条不披露错误、被拒调用零写入且绝不新增授权行。
 
 安全口径：目标必须是专用实例 `(localdb)\NEWERP_AutoAcceptance`、库名前缀 `NEWERP_AUTOTEST` 且
 `Integrated Security=true`；每次运行只创建**全新 GUID 后缀库**，发现同名库已存在立即拒绝，**绝不 drop / reset /
 复用**任何数据库；连接串只来自进程环境变量或专用 localdb 默认值，绝不读取 appsettings / .env / 生产凭据。
 
-## 6. 授权判定边界（显式声明，不隐藏）
+## 6. 授权判定边界（无任何豁免）
 
-- **收款分摊证据**：修复后**任何调用形状**都执行实时授权，包括未绑定任何请求的纯进程内直调，
+- **收款分摊证据**：**任何调用形状**都执行实时授权，包括未绑定任何请求的纯进程内直调，
   空上下文不再构成旁路。
-- **客户销项发票**：绑定到 HTTP 请求管线的调用（生产与集成环境的每一条外部入口，无论空路径 / 已赋值路径、
-  匿名 / 已认证）都执行实时身份 / 账号状态 / 既有菜单 / 权威来源范围判定；
-  仅**未绑定任何请求上下文**（`ControllerContext.HttpContext` 为 null，外部请求无法构造）的纯进程内直调
-  沿用仓库一致的进程内边界。
-  保留该边界的原因：既有非本任务授权路径之外的进程内夹具
-  `src/ERP.UnitTests/SalesOrderInvoiceEvidenceTests.cs` 直接实例化控制器并调用
-  `Create` / `SaveAllocations` / `Record` / `Void`（无任何请求上下文），而该文件不在本任务的 `allowed_paths` 内，
-  无法按「播种真实身份」的方式改造；因此本次不删除该边界以免发布门（全量 `ERP.UnitTests`）失败。
-  该边界不读取请求路径 / 环境变量 / 测试开关，也不能由任何外部请求到达。
+- **客户销项发票**：**任何调用形状**都执行实时身份 / 账号状态 / 既有菜单 / 权威来源范围判定 ——
+  生产与集成环境的每一条外部入口（无论空路径 / 已赋值路径、匿名 / 已认证）以及完全未绑定请求上下文
+  （`ControllerContext.HttpContext` 为 null）的纯进程内直调同等 fail closed；
+  `RequiresLiveAuthorization()` 与「无请求上下文免授权」边界已**彻底删除**，不存在任何遗留豁免。
+  既有进程内夹具 `src/ERP.UnitTests/SalesOrderInvoiceEvidenceTests.cs` 已按「播种既有系统内置角色身份」的方式改造，
+  未新增任何生产授权、也未使用任何测试专用开关。
 
 ## 7. 未执行 / 限制
 
@@ -150,21 +157,21 @@ private bool RequiresLiveAuthorization()
   全量 `ERP.UnitTests`**；真实 SQL 集成用例为附加证据，构建或单元测试通过不等于整阶段验收。
 - 未运行真实浏览器 UI 验收（`browser_acceptance.required = false`），未启动 API、未部署、未改动生产库或生产设置，
   未新增任何表 / 列 / 实体 / 菜单 / 权限 / 连接字符串或密钥。
-- 客户销项发票入口保留上述「未绑定请求上下文的纯进程内直调边界」，与 `ERP-468` 对收款单 / 付款单分摊证据入口
-  采取的口径一致；若要彻底移除，需要同时改造
-  `src/ERP.UnitTests/SalesOrderInvoiceEvidenceTests.cs`（当前任务范围外）。
+- 客户销项发票与收款分摊证据入口**都不保留任何授权豁免**：`RequiresLiveAuthorization()` 与
+  「未绑定请求上下文的纯进程内直调边界」已彻底删除；既有进程内夹具 `SalesOrderInvoiceEvidenceTests` 已按
+  「播种既有系统内置角色身份」改造，全量 `ERP.UnitTests` 不因移除豁免而失败。
 
 ## 8. 相关实现
 
-- `src/ERP.Api/Controllers/CustomerSalesInvoiceEvidenceController.cs`：授权门改为
-  `ControllerContext?.HttpContext is not null`（不再读取请求路径 / 依据可解析身份）；台账 / 单证候选范围谓词与
-  单据 / 拟提议客户 / 拟提议来源复核在绑定请求管线时**无条件**执行，且请求体缺失时仍先解析实时身份 / 菜单。
-- `src/ERP.Api/Controllers/CustomerSalesInvoiceCollectionAllocationController.cs`：移除 `RequiresLiveAuthorization`
+- `src/ERP.Api/Controllers/CustomerSalesInvoiceEvidenceController.cs`：**删除 `RequiresLiveAuthorization()`**；
+  台账 / 单证候选范围谓词（返回非空 `Expression`）与单据 / 拟提议客户 / 拟提议来源复核**无条件**执行，
+  且请求体缺失时仍先解析实时身份 / 菜单；`EnsureInvoiceIdAuthorizedAsync` 返回非空 `SalespersonDataScope`。
+- `src/ERP.Api/Controllers/CustomerSalesInvoiceCollectionAllocationController.cs`：已移除 `RequiresLiveAuthorization`
   与无授权服务直调；登记 / 作废无条件走 `EnsureMenuAuthorizedAsync` +
   `CreateAuthorizedAsync` / `VoidAuthorizedAsync`。
-- `src/ERP.Application/Services/CustomerSalesInvoiceAuthorizationRules.cs`：新增 `PathIndependenceText` 与
-  `UnauthorizedText` / `DeletedIdentityText` / `DisabledIdentityText` / `MenuDeniedText` / `ScopeDeniedText`
-  公共文案常量（实现与测试 / 文档同源），判定逻辑不变。
+- `src/ERP.Application/Services/CustomerSalesInvoiceAuthorizationRules.cs`：`PathIndependenceText` 更新为
+  「无任何调用形状豁免」口径；`UnauthorizedText` / `DeletedIdentityText` / `DisabledIdentityText` / `MenuDeniedText` /
+  `ScopeDeniedText` 公共文案常量（实现与测试 / 文档同源），判定逻辑不变。
 - `src/ERP.Application/Services/CustomerReceiptLifecycleRules.cs`：新增
   `CollectionAllocationPathIndependenceText` 与 `UnauthorizedText` / `DeletedIdentityText` /
   `DisabledIdentityText` / `MenuDeniedText` 公共文案常量（`EnsureMenuAuthorizedAsync` 逐字沿用既有文案）。
