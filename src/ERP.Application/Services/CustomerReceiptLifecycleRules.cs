@@ -68,6 +68,34 @@ public static class CustomerReceiptLifecycleRules
         "不存在 Request.Path / 环境变量 / 数据库提供程序 / 测试专用开关旁路，绝无匿名或管理员回退。";
 
     /// <summary>
+    /// ERP-487：「收款单 → 客户销项发票证据」收款分摊证据入口（台账 / 元数据 / 收款单候选 / 发票候选 /
+    /// 收款单侧汇总 / 收款单侧清单 / 发票侧清单 / 详情 / 登记 / 作废）的实时授权与调用形状<strong>完全无关</strong>，
+    /// 且<strong>登记 / 作废不再存在无授权的服务直调旁路</strong>：缺失 / 为零 / 未知 / 已删除身份一律未认证（2000），
+    /// 账号禁用 / 缺少或被撤销既有「收款单」（<c>receipt</c>）菜单一律权限不足（2002），
+    /// 受限账号越界收款单 / 发票 / 客户一律受控非披露拒绝，且全部先于任何分摊金额、快照、候选读取与写入；
+    /// 被拒调用零证据行 / 收款单 / 发票 / 状态变更。绝无匿名 / 管理员兜底、测试环境或合成旁路身份。
+    /// </summary>
+    public const string CollectionAllocationPathIndependenceText =
+        "ERP-487：收款分摊证据（「收款单 → 客户销项发票证据」）每一条入口（台账 / 元数据 / 收款单候选 / 发票候选 / "
+        + "收款单侧汇总 / 收款单侧清单 / 发票侧清单 / 详情 / 登记 / 作废）都无条件执行实时身份 + 既有「收款单」（receipt）"
+        + "菜单 + ERP-097 权威客户数据范围；缺失 / 为零 / 未知 / 已删除身份一律未认证（2000），账号禁用 / "
+        + "缺少或被撤销菜单一律权限不足（2002），受限账号越界收款单 / 发票 / 客户一律受控非披露拒绝，"
+        + "且全部先于任何分摊金额、快照、候选读取与写入；登记 / 作废不再退回无授权的服务直调，"
+        + "被拒调用零证据行 / 收款单 / 发票 / 状态变更。绝无匿名 / 管理员兜底、测试环境、请求路径旁路或合成旁路身份。";
+
+    /// <summary>缺失 / 非法登录身份（未认证）的拒绝文案（接口 / 文档 / 测试同源）</summary>
+    public const string UnauthorizedText = "请先登录后再访问收款单";
+
+    /// <summary>登录账号不存在或已删除（未认证）的拒绝文案</summary>
+    public const string DeletedIdentityText = "登录账号不存在或已删除，禁止操作收款单";
+
+    /// <summary>登录账号已禁用（权限不足）的拒绝文案</summary>
+    public const string DisabledIdentityText = "登录账号已禁用，禁止操作收款单（fail closed）";
+
+    /// <summary>缺少既有「收款单」（receipt）菜单授权（权限不足）的拒绝文案</summary>
+    public const string MenuDeniedText = $"当前账号没有「{RequiredMenuText}」（{RequiredMenuCode}）模块授权";
+
+    /// <summary>
     /// ERP-383 唯一全局锁序与收款单侧锁序审计（跨模块统一）：来源销售订单行（Id 升序）→ 客户销项发票行 →
     /// 客户收款单行 → 引用 / 分摊 / 证据行。收款单生命周期动作与既有两套分摊证据写入<strong>只取收款单行锁</strong>
     /// （第 3 段），从不获取上游的销售订单行 / 客户销项发票行锁，因此与客户销项发票模块（ERP-383）、
@@ -146,20 +174,18 @@ public static class CustomerReceiptLifecycleRules
     {
         ArgumentNullException.ThrowIfNull(db);
         if (userId is null or <= 0)
-            throw new BusinessException("请先登录后再访问收款单", ErrorCodes.Unauthorized);
+            throw new BusinessException(UnauthorizedText, ErrorCodes.Unauthorized);
 
         var user = await db.SysUsers.AsNoTracking()
             .FirstOrDefaultAsync(u => u.Id == userId.Value && !u.IsDeleted);
         if (user is null)
-            throw new BusinessException("登录账号不存在或已删除，禁止操作收款单", ErrorCodes.Unauthorized);
+            throw new BusinessException(DeletedIdentityText, ErrorCodes.Unauthorized);
         if (user.Status != UserStatus.Enabled)
-            throw new BusinessException("登录账号已禁用，禁止操作收款单（fail closed）", ErrorCodes.Forbidden);
+            throw new BusinessException(DisabledIdentityText, ErrorCodes.Forbidden);
 
         var menuCodes = await CustomerReceivableReconciliationService.LoadAuthorizedMenuCodesAsync(db, userId.Value);
         if (!menuCodes.Contains(RequiredMenuCode, StringComparer.OrdinalIgnoreCase))
-            throw new BusinessException(
-                $"当前账号没有「{RequiredMenuText}」（{RequiredMenuCode}）模块授权",
-                ErrorCodes.Forbidden);
+            throw new BusinessException(MenuDeniedText, ErrorCodes.Forbidden);
     }
 
     /// <summary>

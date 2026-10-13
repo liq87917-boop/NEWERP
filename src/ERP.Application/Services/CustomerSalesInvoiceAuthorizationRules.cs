@@ -43,6 +43,23 @@ public static class CustomerSalesInvoiceAuthorizationRules
     public const string UnlinkedTradeDocumentText =
         "当前账号未授权访问没有权威客户归属的单证中心商业发票（fail closed，无权威归属即不泄露）";
 
+    /// <summary>缺失 / 非法登录身份（未认证）的拒绝文案（接口 / 文档 / 测试同源）</summary>
+    public const string UnauthorizedText = "请先登录后再访问客户销项发票";
+
+    /// <summary>登录账号不存在或已删除（未认证）的拒绝文案</summary>
+    public const string DeletedIdentityText = "登录账号不存在或已删除，禁止访问客户销项发票";
+
+    /// <summary>登录账号已禁用（权限不足）的拒绝文案</summary>
+    public const string DisabledIdentityText = "登录账号已禁用，禁止访问客户销项发票（fail closed）";
+
+    /// <summary>缺少既有「销售订单」菜单授权（权限不足）的拒绝文案</summary>
+    public const string MenuDeniedText =
+        $"当前账号没有「{RequiredMenuText}」（{RequiredMenuCode}）模块授权：拒绝访问客户销项发票（fail closed，不执行任何写入）";
+
+    /// <summary>客户数据范围外的发票 / 来源（权限不足、不泄露存在性）的拒绝文案</summary>
+    public const string ScopeDeniedText =
+        "当前账号的客户数据范围不包含该客户销项发票的客户或其来源单据归属客户（fail closed，不泄露范围外发票）";
+
     /// <summary>授权与数据范围口径文案（接口 / 文档同源）</summary>
     public const string RuleText =
         "客户销项发票授权与数据范围护栏：台账 / 详情 / 收款时效证据 / 商业发票候选 / 新增 / 修改 / 可分摊订单候选 / "
@@ -60,6 +77,27 @@ public static class CustomerSalesInvoiceAuthorizationRules
         + "收款分摊证据仍由 ERP-073 保护，收款单生命周期护栏仍为 ERP-349 / ERP-378，销售订单取消护栏仍为 ERP-347。";
 
     /// <summary>
+    /// ERP-487：入口授权「与调用形状无关」契约文案（接口 / 文档同源）。台账 / 详情 / 收款时效证据 /
+    /// 商业发票候选 / 新增 / 修改 / 可分摊订单候选 / 分摊预览 / 分摊整体替换 / 登记 / 作废<strong>每一入口</strong>
+    /// 都执行实时身份 + 既有「销售订单」菜单 + 权威客户 / 来源范围判定，且控制器授权门
+    /// <strong>不再读取 <c>Request.Path</c>、也不再依据是否携带可解析身份</strong>：空路径与已赋值路径对同一身份
+    /// 给出完全相同的判定，绑定到请求管线但身份缺失 / 为零 / 未知 / 已删除一律未认证（2000），
+    /// 禁用 / 被撤销菜单一律权限不足（2002），越界客户 / 来源一律受控非披露拒绝，且全部先于任何计数、候选、
+    /// 快照、预览与写入。仅未绑定任何请求的纯进程内直调（外部请求无法构造，例如既有进程内单元测试夹具）
+    /// 沿用仓库一致的进程内边界；该边界不读取请求路径 / 环境变量 / 测试开关。
+    /// <para>绝不使用请求路径存在性、测试环境、合成旁路身份或匿名 / 管理员兜底豁免授权；绑定到 HTTP 请求管线的调用
+    /// 也不因空路径、缺失身份或空请求体而放行。绝不新增任何菜单 / 角色 / 用户授权。</para>
+    /// </summary>
+    public const string PathIndependenceText =
+        "ERP-487：客户销项发票（含收款分摊证据）入口实时授权只依据「控制器是否绑定到 HTTP 请求管线」，"
+        + "不再读取 Request.Path，也不再依据是否携带可解析身份 —— 空路径与已赋值路径对同一身份给出完全相同的判定；"
+        + "绑定到请求管线但身份缺失 / 为零 / 未知 / 已删除一律未认证（2000），账号禁用 / 缺少或被撤销既有「销售订单」"
+        + "（sales-order）菜单一律权限不足（2002），受限账号越界客户 / 来源一律受控非披露拒绝，"
+        + "且全部先于任何计数、候选、快照、预览与写入。绑定到 HTTP 请求管线的调用绝不因空路径、缺失身份或请求体为空而豁免授权；"
+        + "仅未绑定任何请求的纯进程内直调沿用仓库一致的进程内边界（不读取请求路径 / 环境变量 / 测试专用开关）。"
+        + "不存在测试环境、合成旁路身份、匿名 / 管理员兜底，也不新增任何菜单 / 角色 / 用户授权。";
+
+    /// <summary>
     /// 身份 / 账号状态 / 菜单授权三重校验（fail closed）：缺失或非法身份按未认证拒绝，账号不存在 / 已删除按未认证拒绝，
     /// 禁用账号按权限不足拒绝，受限未映射业务员按权限不足拒绝，缺少既有 <c>sales-order</c> 菜单授权（在系统已部署该模块时）
     /// 按权限不足拒绝。返回解析出的权威数据范围，供调用方在同一请求内复用（绝不缓存）。
@@ -72,14 +110,14 @@ public static class CustomerSalesInvoiceAuthorizationRules
     {
         ArgumentNullException.ThrowIfNull(db);
         if (userId is null or <= 0)
-            throw new BusinessException("请先登录后再访问客户销项发票", ErrorCodes.Unauthorized);
+            throw new BusinessException(UnauthorizedText, ErrorCodes.Unauthorized);
 
         var user = await db.SysUsers.AsNoTracking()
             .FirstOrDefaultAsync(u => u.Id == userId.Value && !u.IsDeleted, ct);
         if (user is null)
-            throw new BusinessException("登录账号不存在或已删除，禁止访问客户销项发票", ErrorCodes.Unauthorized);
+            throw new BusinessException(DeletedIdentityText, ErrorCodes.Unauthorized);
         if (user.Status != UserStatus.Enabled)
-            throw new BusinessException("登录账号已禁用，禁止访问客户销项发票（fail closed）", ErrorCodes.Forbidden);
+            throw new BusinessException(DisabledIdentityText, ErrorCodes.Forbidden);
 
         // 每次请求重新解析（绝不缓存）：授权 / 员工 / 客户分配变更后下一次请求立即收敛。
         var scope = await SalespersonDataScopeService.ResolveAsync(db, userId.Value);
@@ -104,14 +142,11 @@ public static class CustomerSalesInvoiceAuthorizationRules
 
     /// <summary>缺少既有「销售订单」菜单授权时的拒绝（fail closed，不执行任何写入）。</summary>
     private static BusinessException MenuDenied()
-        => new($"当前账号没有「{RequiredMenuText}」（{RequiredMenuCode}）模块授权：拒绝访问客户销项发票"
-               + "（fail closed，不执行任何写入）",
-            ErrorCodes.Forbidden);
+        => new(MenuDeniedText, ErrorCodes.Forbidden);
 
     /// <summary>客户数据范围外的发票 / 来源拒绝（fail closed，不泄露范围外发票归属）。</summary>
     private static BusinessException ScopeDenied()
-        => new("当前账号的客户数据范围不包含该客户销项发票的客户或其来源单据归属客户（fail closed，不泄露范围外发票）",
-            ErrorCodes.Forbidden);
+        => new(ScopeDeniedText, ErrorCodes.Forbidden);
 
     // ==================== 1. 单据级授权（发票 / 拟提议来源） ====================
 

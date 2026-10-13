@@ -233,20 +233,25 @@ public class CustomerSalesInvoiceCollectionAllocationTests
     }
 
     [Fact]
-    public async Task 无身份时登记人记未知用户()
+    public async Task 无身份时登记与作废_受控拒绝且零写行()
     {
         using var db = TestDbFactory.Create();
         var customer = SeedCustomer(db, "C001", "义乌进出口");
         var invoice = SeedInvoice(db, "INV-2026-001", customer.Id);
         var receipt = SeedReceipt(db, "SK20260925", customer.Id);
-        // 进程内直调（无 HTTP 请求管线、无登录身份）：沿用既有语义，登记人记「未知用户」。
+        // ERP-487：不再有「无 HTTP 请求管线 / 无登录身份」的无授权服务直调旁路 —— 纯进程内直调同样 fail closed（未认证），
+        // 且先于任何金额 / 快照读取与写入；既有契约（登记人取登录账号）改由带真实身份授权的夹具覆盖。
         var controller = new CustomerSalesInvoiceCollectionAllocationController(db);
 
-        var created = await CreateAllocationAsync(controller, invoice.Id, receipt.Id, 100m);
+        var createDenied = await AssertBusinessAsync(ErrorCodes.Unauthorized,
+            () => controller.Create(SaveDto(invoice.Id, receipt.Id, 100m)));
+        Assert.Equal("请先登录后再访问收款单", createDenied.Message);
+        Assert.Empty(db.CustomerSalesInvoiceCollectionAllocations);
 
-        Assert.Equal("未知用户", created.AllocatedBy);
-        Assert.Equal("C001", created.CustomerCode);
-        Assert.Equal("义乌进出口", created.CustomerName);
+        var voidDenied = await AssertBusinessAsync(ErrorCodes.Unauthorized,
+            () => controller.Void(1, new CustomerSalesInvoiceCollectionAllocationVoidRequest { Reason = "越权作废" }));
+        Assert.Equal("请先登录后再访问收款单", voidDenied.Message);
+        Assert.Empty(db.CustomerSalesInvoiceCollectionAllocations);
     }
 
     [Fact]

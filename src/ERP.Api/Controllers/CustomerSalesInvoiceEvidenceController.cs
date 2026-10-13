@@ -27,6 +27,14 @@ namespace ERP.Api.Controllers;
 /// <see cref="ERP.Application.Services.SalespersonDataScopeService"/>（ERP-097 唯一权威口径）客户数据范围；
 /// 发票归属同时覆盖已存储客户、全部已存储销售订单分摊来源与显式交叉引用单证的归属客户（混源要求全部允许），
 /// 受限账号不得访问来源不可证明的发票，被拒绝的调用方绝不改写任何证据；未新增任何用户 / 角色 / 菜单 / 权限授权。</para>
+/// <para>ERP-487：授权门与请求形状完全无关 —— <see cref="RequiresLiveAuthorization"/> 只依据「控制器是否绑定到
+/// HTTP 请求管线」（<c>ControllerContext.HttpContext</c> 是否存在），<strong>不再读取请求路径字段，也不再依据
+/// 是否携带可解析身份</strong>：空路径与已赋值路径对同一身份给出完全相同的判定，绑定到请求管线但身份缺失 / 为零 /
+/// 未知 / 已删除一律未认证（2000），账号禁用 / 缺少或被撤销既有「销售订单」（<c>sales-order</c>）菜单一律权限不足（2002），
+/// 受限账号越界客户 / 来源一律权限不足，且全部先于任何计数、候选、快照、预览与写入；被拒调用零发票 / 分摊行 /
+/// 来源 / 状态改动，也绝不泄露范围外发票或单证。仅未绑定任何请求的纯进程内直调（外部请求无法构造）沿用仓库一致的
+/// 进程内边界，该边界不读取请求路径 / 环境变量 / 测试开关。口径见
+/// <see cref="ERP.Application.Services.CustomerSalesInvoiceAuthorizationRules.PathIndependenceText"/>。</para>
 /// </summary>
 [ApiController]
 [Route("api/customer-sales-invoices")]
@@ -197,17 +205,17 @@ public class CustomerSalesInvoiceEvidenceController : ControllerBase
     // ==================== ERP-383：实时授权辅助（身份 / 菜单 / 权威来源范围） ====================
 
     /// <summary>
-    /// 是否必须执行实时授权：真实 HTTP 请求（MVC 绑定，<c>Request.Path</c> 已赋值）一律执行；
-    /// 进程内直接调用（历史单元测试 / 内部派生读取，无 HTTP 请求管线）仅在携带当前登录身份时执行。
-    /// 只对「既无任何登录身份、又不在 HTTP 请求管线内」的调用免授权：这类调用不可能由外部请求到达，
-    /// 也绝不把缺失身份当作管理员（真实匿名请求因处于请求管线内一律 fail closed）。
+    /// ERP-487：是否必须执行实时授权。<strong>只要控制器绑定到 HTTP 请求管线（<c>ControllerContext.HttpContext</c> 存在）
+    /// 就一律执行</strong>，与请求路径是否赋值、以及当前是否携带可解析的登录身份<strong>完全无关</strong>：
+    /// 空路径请求与已赋值路径请求的授权口径完全一致，缺少身份的真实请求同样 fail closed（未认证），
+    /// 既不存在「空路径 / 无身份」的请求形状旁路，也绝不把缺失身份当作管理员，绝无匿名或管理员兜底。
+    /// <para>仅「未被任何请求绑定」（<c>HttpContext</c> 为 null 的纯进程内直接调用，外部请求无法到达，例如既有进程内
+    /// 单元测试夹具 <c>SalesOrderInvoiceEvidenceTests</c>）沿用仓库一致的进程内直调边界：该边界不读取请求路径、
+    /// 不读取环境变量、也不使用任何测试专用开关，因此不是请求形状旁路，也不能由任何外部请求到达。
+    /// 契约与边界见 <see cref="CustomerSalesInvoiceAuthorizationRules.PathIndependenceText"/>。</para>
     /// </summary>
     private bool RequiresLiveAuthorization()
-    {
-        var http = ControllerContext?.HttpContext;
-        if (http is null) return false;
-        return http.Request.Path.HasValue || CurrentUserId() is not null;
-    }
+        => ControllerContext?.HttpContext is not null;
 
     /// <summary>
     /// 身份 / 账号状态 / 既有「销售订单」菜单授权 + 权威客户数据范围（fail closed：缺失或已删除按未认证，
@@ -217,7 +225,8 @@ public class CustomerSalesInvoiceEvidenceController : ControllerBase
         => CustomerSalesInvoiceAuthorizationRules.EnsureMenuAuthorizedAsync(_db, CurrentUserId());
 
     /// <summary>
-    /// 台账范围谓词：真实请求在计数 / 分页之前下推身份 / 菜单 / 权威来源范围；进程内无身份调用返回 null（既有语义不变）。
+    /// 台账范围谓词：绑定到请求管线的调用在计数 / 分页之前下推身份 / 菜单 / 权威来源范围
+    /// （空路径与已赋值路径完全一致）；仅未绑定任何请求的进程内直调返回 null（仓库一致的进程内边界）。
     /// </summary>
     private async Task<Expression<Func<CustomerSalesInvoiceEvidence, bool>>?> BuildScopePredicateAsync()
     {
@@ -225,7 +234,10 @@ public class CustomerSalesInvoiceEvidenceController : ControllerBase
         return await CustomerSalesInvoiceAuthorizationRules.BuildScopePredicateAsync(_db, CurrentUserId());
     }
 
-    /// <summary>单证候选范围谓词：真实请求按既有单证的权威归属客户范围下推；进程内无身份调用返回 null。</summary>
+    /// <summary>
+    /// 单证候选范围谓词：绑定到请求管线的调用按既有单证的权威归属客户范围下推（绝不按单号文本猜测来源）；
+    /// 仅未绑定任何请求的进程内直调返回 null（仓库一致的进程内边界）。
+    /// </summary>
     private async Task<Expression<Func<TradeDocument, bool>>?> BuildTradeDocumentScopePredicateAsync()
     {
         if (!RequiresLiveAuthorization()) return null;
@@ -235,7 +247,7 @@ public class CustomerSalesInvoiceEvidenceController : ControllerBase
     /// <summary>
     /// 单张发票的范围授权：身份 / 菜单 fail closed → 发票不存在或已删除按业务「不存在」拒绝 →
     /// 复核发票<strong>全部权威客户来源</strong>（已存储客户 + 每一张来源销售订单客户 + 交叉引用单证归属客户）范围；
-    /// 返回解析出的数据范围（进程内无身份调用返回 null，仅用于保持既有读取语义）。
+    /// 返回解析出的数据范围（仅未绑定任何请求的进程内直调返回 null，用于保持既有读取语义）。
     /// </summary>
     private async Task<SalespersonDataScope?> EnsureInvoiceIdAuthorizedAsync(long invoiceId)
     {
@@ -256,10 +268,18 @@ public class CustomerSalesInvoiceEvidenceController : ControllerBase
     /// <summary>
     /// 拟提议发票头的范围授权：请求客户与显式交叉引用单证都必须落在当前账号的权威客户数据范围内
     /// （受限账号越界一律在写入之前拒绝），绝不新增任何权限、绝不改派来源。
+    /// 绑定到请求管线时无条件执行（空路径 / 缺失身份同样 fail closed，先于任何写入）；
+    /// 仅未绑定任何请求的进程内直调跳过（仓库一致的进程内边界）。
     /// </summary>
     private async Task EnsureProposedEvidenceScopeAuthorizedAsync(CustomerSalesInvoiceEvidenceSaveDto? dto)
     {
-        if (!RequiresLiveAuthorization() || dto is null) return;
+        if (!RequiresLiveAuthorization()) return;
+        if (dto is null)
+        {
+            // 请求体缺失也必须先解析实时身份 / 菜单（绝不因请求体为空而放行授权门）。
+            await CustomerSalesInvoiceAuthorizationRules.EnsureMenuAuthorizedAsync(_db, CurrentUserId());
+            return;
+        }
 
         await CustomerSalesInvoiceAuthorizationRules.EnsureCustomersAuthorizedAsync(
             _db, CurrentUserId(), new[] { (long?)dto.CustomerId });
@@ -270,6 +290,7 @@ public class CustomerSalesInvoiceEvidenceController : ControllerBase
     /// <summary>
     /// 拟提议分摊来源的范围授权：在替换 / 预览分摊行之前复核请求中每一张销售订单的来源归属
     /// （受限账号必须存在、未删除且在本人客户范围内），绝不新增任何权限。
+    /// 绑定到请求管线时无条件执行（空路径 / 缺失身份同样 fail closed）；仅未绑定任何请求的进程内直调跳过。
     /// </summary>
     private async Task EnsureProposedAllocationsAuthorizedAsync(CustomerSalesInvoiceAllocationSaveRequest? request)
     {
@@ -284,7 +305,7 @@ public class CustomerSalesInvoiceEvidenceController : ControllerBase
             _db, CurrentUserId(), orderIds);
     }
 
-    /// <summary>当前登录用户 Id（缺失或非数字时返回 null，由数据范围解析 fail closed 拒绝）</summary>
+    /// <summary>当前登录用户 Id（缺失或非数字时返回 null，由数据范围解析 fail closed 拒绝，绝不猜测身份）</summary>
     private long? CurrentUserId()
-        => long.TryParse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value, out var id) ? id : null;
+        => long.TryParse(User?.FindFirst(ClaimTypes.NameIdentifier)?.Value, out var id) ? id : null;
 }
