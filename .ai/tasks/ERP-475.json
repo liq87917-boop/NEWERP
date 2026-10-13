@@ -1,0 +1,80 @@
+{
+  "title": "Validate live inquiry master references before quotation commitment",
+  "description": "Complete inquiry-to-quotation master reference integrity at the source. InquiryController creates and updates caller supplied required CustomerId, optional SalesmanId and detail ProductId after customer-scope authority, but does not resolve every supplied reference against current enabled nondeleted master rows. Add bounded batched reference validation for draft writes and live submit/approval/quotation conversion. Existing inquiry authorization decides access; do not grant or require unrelated master-maintenance menus. Preserve optional manual product snapshot lines and historical read availability without refreshing text or backfilling. Retain existing live identity/menu/customer-scope authority, transactions, source locks, controlled errors and audit. Reject before numbering or persistence, with zero header/detail/source/status mutations. No new permissions, schema, production access, external service or arbitrary SQL. Genuine SQL only on (localdb)\\NEWERP_AutoAcceptance with Integrated Security and a fresh GUID-owned NEWERP_AUTOTEST database; reject wrong/existing targets and never drop/reset. Require safe Release with analyzers/warnings-as-errors, full units and relevant genuine SQL/browser tests; accurately record blockers and do not claim whole-stage acceptance.",
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/InquiryController.cs",
+    "src/ERP.Api/Controllers/InquiryQuotationConversion.cs",
+    "src/ERP.Application/Services/InquiryMasterReferenceRules.cs",
+    "src/ERP.UnitTests/InquiryControllerTests.cs",
+    "src/ERP.UnitTests/InquiryMutationTests.cs",
+    "src/ERP.UnitTests/InquiryQuotationConversionTests.cs",
+    "src/ERP.UnitTests/InquiryMasterReferenceTests.cs",
+    "src/ERP.IntegrationTests/InquiryMasterReferenceSqlServerTests.cs",
+    "docs/inquiry-master-reference-validation.md"
+  ],
+  "acceptance_criteria": [
+    "Require the existing required customer to resolve within current scope and reject supplied zero/negative, nonexistent/deleted/disabled customer/product/salesman references. Check eligible salesman semantics, permit nullable optional references/manual snapshot product rows only under their existing bounded text rules, and batch product loading.",
+    "Revalidate inquiry submit/approval and inquiry-to-quotation against current master records within existing row locks/transactions. Invalidated sources refuse commitment before quotation numbering or writes; preserve source and historical snapshot text with no automatic reassignment.",
+    "Rules/controller and genuine isolated SQL tests cover create/update, master invalidation between draft and commitment, approved source conversion, valid nullable/manual snapshot behavior, revoked current authority and rejected zero mutations/numbering. Adapt only genuine affected fixtures; pass safe Release/full unit regressions."
+  ],
+  "criterion_path_map": {
+    "Require the existing required customer to resolve within current scope and reject supplied zero/negative, nonexistent/deleted/disabled customer/product/salesman references. Check eligible salesman semantics, permit nullable optional references/manual snapshot product rows only under their existing bounded text rules, and batch product loading.": [
+      "src/ERP.Api/Controllers/InquiryController.cs",
+      "src/ERP.Api/Controllers/InquiryQuotationConversion.cs",
+      "src/ERP.Application/Services/InquiryMasterReferenceRules.cs",
+      "src/ERP.UnitTests/InquiryControllerTests.cs",
+      "src/ERP.UnitTests/InquiryMutationTests.cs",
+      "src/ERP.UnitTests/InquiryQuotationConversionTests.cs",
+      "src/ERP.UnitTests/InquiryMasterReferenceTests.cs",
+      "src/ERP.IntegrationTests/InquiryMasterReferenceSqlServerTests.cs",
+      "docs/inquiry-master-reference-validation.md"
+    ],
+    "Revalidate inquiry submit/approval and inquiry-to-quotation against current master records within existing row locks/transactions. Invalidated sources refuse commitment before quotation numbering or writes; preserve source and historical snapshot text with no automatic reassignment.": [
+      "src/ERP.Api/Controllers/InquiryController.cs",
+      "src/ERP.Api/Controllers/InquiryQuotationConversion.cs",
+      "src/ERP.Application/Services/InquiryMasterReferenceRules.cs",
+      "src/ERP.UnitTests/InquiryControllerTests.cs",
+      "src/ERP.UnitTests/InquiryMutationTests.cs",
+      "src/ERP.UnitTests/InquiryQuotationConversionTests.cs",
+      "src/ERP.UnitTests/InquiryMasterReferenceTests.cs",
+      "src/ERP.IntegrationTests/InquiryMasterReferenceSqlServerTests.cs",
+      "docs/inquiry-master-reference-validation.md"
+    ],
+    "Rules/controller and genuine isolated SQL tests cover create/update, master invalidation between draft and commitment, approved source conversion, valid nullable/manual snapshot behavior, revoked current authority and rejected zero mutations/numbering. Adapt only genuine affected fixtures; pass safe Release/full unit regressions.": [
+      "src/ERP.Api/Controllers/InquiryController.cs",
+      "src/ERP.Api/Controllers/InquiryQuotationConversion.cs",
+      "src/ERP.Application/Services/InquiryMasterReferenceRules.cs",
+      "src/ERP.UnitTests/InquiryControllerTests.cs",
+      "src/ERP.UnitTests/InquiryMutationTests.cs",
+      "src/ERP.UnitTests/InquiryQuotationConversionTests.cs",
+      "src/ERP.UnitTests/InquiryMasterReferenceTests.cs",
+      "src/ERP.IntegrationTests/InquiryMasterReferenceSqlServerTests.cs",
+      "docs/inquiry-master-reference-validation.md"
+    ]
+  },
+  "implementation_evidence": "InquiryController.Create/Update persists entity.CustomerId/SalesmanId and InquiryDetail.ProductId after InquiryAuthorizationRules, with no complete live master resolver. ERP-472 guards quotation masters at the next stage but does not validate the inquiry source draft or approval. Inquiry.cs required long CustomerId and optional references establish the existing storage contract.",
+  "depends_on": [
+    "ERP-474",
+    "ERP-472"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "id": "ERP-475",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-13T14:13:41.045578Z"
+}

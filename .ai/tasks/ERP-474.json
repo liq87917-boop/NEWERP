@@ -1,0 +1,101 @@
+{
+  "title": "Restore canonical inquiry form entry and validate inquiry commercial commitment",
+  "description": "Make the existing inquiry menu usable through its already implemented canonical EF main/detail module. modules-doc.js already registers inquiry-new with api/inquiries, but BILL_CODE_MAP in bill-v2.js still maps inquiry-new to the legacy inquiry family, so routing can choose a legacy stored-procedure writer whose ERP-404 policy deliberately refuses every write. Route the existing menu to the canonical module using canonical Ids only; preserve legacy reads and never map legacy Oid to canonical Id or enable legacy write adapters. Inquiry.InquiryNo has [Required] although InquiryController.Create allocates the number server-side; allow an omitted number to reach the authorized action while refusing client state/identity injection. Create and update currently multiply unchecked quantity and price, persist an unchecked Currency/ExchangeRate/ValidDays and consume the number before validation. Add bounded server validation/amount normalization shared by manual create/update and operational submit/approve/quotation conversion. Keep supported empty drafts, but commitment requires valid lines. Reuse the existing authorized default endpoint and preserve integer-day input/default failure behavior. Retain existing live identity/menu/customer-scope authority, transactions, source locks, controlled errors and audit. Reject before numbering or persistence, with zero header/detail/source/status mutations. No new permissions, schema, production access, external service or arbitrary SQL. Genuine SQL only on (localdb)\\NEWERP_AutoAcceptance with Integrated Security and a fresh GUID-owned NEWERP_AUTOTEST database; reject wrong/existing targets and never drop/reset. Require safe Release with analyzers/warnings-as-errors, full units and relevant genuine SQL/browser tests; accurately record blockers and do not claim whole-stage acceptance.",
+  "allowed_paths": [
+    "src/ERP.Domain/Entities/Inquiry.cs",
+    "src/ERP.Application/Services/InquiryCommercialValidationRules.cs",
+    "src/ERP.Api/Controllers/InquiryController.cs",
+    "src/ERP.Api/Controllers/InquiryQuotationConversion.cs",
+    "src/ERP.Api/wwwroot/js/modules-doc.js",
+    "src/ERP.Api/wwwroot/js/bill-v2.js",
+    "src/ERP.Api/wwwroot/js/crud.js",
+    "src/ERP.UnitTests/InquiryControllerTests.cs",
+    "src/ERP.UnitTests/InquiryMutationTests.cs",
+    "src/ERP.UnitTests/InquiryQuotationConversionTests.cs",
+    "src/ERP.UnitTests/InquiryCommercialValidationTests.cs",
+    "src/ERP.IntegrationTests/InquiryCanonicalEntrySqlServerTests.cs",
+    "tests/inquiry-canonical-entry.browser.js",
+    "docs/inquiry-canonical-entry.md"
+  ],
+  "acceptance_criteria": [
+    "The existing authorized inquiry-new entry opens the canonical api/inquiries main/detail form and list; genuine HTTP new inquiry without a client number persists and returns a server number and canonical Id, edit/submit/approve then quotation conversion are reachable under current authority. Legacy rows remain separate readable history and every legacy write remains fail closed.",
+    "Before number reservation or persistence reject undefined currency, nonpositive/overprecision rate, nonpositive line quantity, negative price, persisted precision/overflow, soft-deleted detail injection and invalid bounded integral validity days. Derive active-line amounts by existing currency precision/rounding; valid empty drafts remain supported but operational commitment requires valid lines and rechecks stored values.",
+    "Genuine isolated SQL/HTTP and browser tests cover blank-number create, main/detail save/reload/edit, authorized state flow and conversion, invalid zero-mutation/zero-numbering cases, list/form canonical routing and separation from legacy identities. Browser uses a real test database and real authorized identity, never mocked successful business writes. Preserve existing defaults, tabs, new-page/drawer behavior and all unit regressions; run safe Release/full units."
+  ],
+  "criterion_path_map": {
+    "The existing authorized inquiry-new entry opens the canonical api/inquiries main/detail form and list; genuine HTTP new inquiry without a client number persists and returns a server number and canonical Id, edit/submit/approve then quotation conversion are reachable under current authority. Legacy rows remain separate readable history and every legacy write remains fail closed.": [
+      "src/ERP.Domain/Entities/Inquiry.cs",
+      "src/ERP.Application/Services/InquiryCommercialValidationRules.cs",
+      "src/ERP.Api/Controllers/InquiryController.cs",
+      "src/ERP.Api/Controllers/InquiryQuotationConversion.cs",
+      "src/ERP.Api/wwwroot/js/modules-doc.js",
+      "src/ERP.Api/wwwroot/js/bill-v2.js",
+      "src/ERP.Api/wwwroot/js/crud.js",
+      "src/ERP.UnitTests/InquiryControllerTests.cs",
+      "src/ERP.UnitTests/InquiryMutationTests.cs",
+      "src/ERP.UnitTests/InquiryQuotationConversionTests.cs",
+      "src/ERP.UnitTests/InquiryCommercialValidationTests.cs",
+      "src/ERP.IntegrationTests/InquiryCanonicalEntrySqlServerTests.cs",
+      "tests/inquiry-canonical-entry.browser.js",
+      "docs/inquiry-canonical-entry.md"
+    ],
+    "Before number reservation or persistence reject undefined currency, nonpositive/overprecision rate, nonpositive line quantity, negative price, persisted precision/overflow, soft-deleted detail injection and invalid bounded integral validity days. Derive active-line amounts by existing currency precision/rounding; valid empty drafts remain supported but operational commitment requires valid lines and rechecks stored values.": [
+      "src/ERP.Domain/Entities/Inquiry.cs",
+      "src/ERP.Application/Services/InquiryCommercialValidationRules.cs",
+      "src/ERP.Api/Controllers/InquiryController.cs",
+      "src/ERP.Api/Controllers/InquiryQuotationConversion.cs",
+      "src/ERP.Api/wwwroot/js/modules-doc.js",
+      "src/ERP.Api/wwwroot/js/bill-v2.js",
+      "src/ERP.Api/wwwroot/js/crud.js",
+      "src/ERP.UnitTests/InquiryControllerTests.cs",
+      "src/ERP.UnitTests/InquiryMutationTests.cs",
+      "src/ERP.UnitTests/InquiryQuotationConversionTests.cs",
+      "src/ERP.UnitTests/InquiryCommercialValidationTests.cs",
+      "src/ERP.IntegrationTests/InquiryCanonicalEntrySqlServerTests.cs",
+      "tests/inquiry-canonical-entry.browser.js",
+      "docs/inquiry-canonical-entry.md"
+    ],
+    "Genuine isolated SQL/HTTP and browser tests cover blank-number create, main/detail save/reload/edit, authorized state flow and conversion, invalid zero-mutation/zero-numbering cases, list/form canonical routing and separation from legacy identities. Browser uses a real test database and real authorized identity, never mocked successful business writes. Preserve existing defaults, tabs, new-page/drawer behavior and all unit regressions; run safe Release/full units.": [
+      "src/ERP.Domain/Entities/Inquiry.cs",
+      "src/ERP.Application/Services/InquiryCommercialValidationRules.cs",
+      "src/ERP.Api/Controllers/InquiryController.cs",
+      "src/ERP.Api/Controllers/InquiryQuotationConversion.cs",
+      "src/ERP.Api/wwwroot/js/modules-doc.js",
+      "src/ERP.Api/wwwroot/js/bill-v2.js",
+      "src/ERP.Api/wwwroot/js/crud.js",
+      "src/ERP.UnitTests/InquiryControllerTests.cs",
+      "src/ERP.UnitTests/InquiryMutationTests.cs",
+      "src/ERP.UnitTests/InquiryQuotationConversionTests.cs",
+      "src/ERP.UnitTests/InquiryCommercialValidationTests.cs",
+      "src/ERP.IntegrationTests/InquiryCanonicalEntrySqlServerTests.cs",
+      "tests/inquiry-canonical-entry.browser.js",
+      "docs/inquiry-canonical-entry.md"
+    ]
+  },
+  "implementation_evidence": "modules-doc.js:84 registers inquiry-new canonical module; bill-v2.js:21 retains inquiry-new legacy mapping. BillProcController.Save:112 invokes GuardLegacyMutationAsync before the explicitly unreachable sp_Biz write path; LegacyBillMutationRules documents HasValidatedAdapter=false. Inquiry.cs InquiryNo uses Required with empty default while InquiryController.Create generates a number; Create/Update multiply detail values without a commercial contract. ERP-469 covers manual-test UI defaults but leaves this canonical/legacy routing and model-binding conflict.",
+  "depends_on": [
+    "ERP-473",
+    "ERP-469",
+    "ERP-470"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "id": "ERP-474",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-13T14:13:41.040686Z"
+}

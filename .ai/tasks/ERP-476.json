@@ -1,0 +1,90 @@
+{
+  "title": "Validate live supplier comparison references before procurement commitment",
+  "description": "Complete the supplier comparison-to-purchase-order master reference path. PurchaseQuoteMutationRules.ValidateDraft validates prices/quantities/currency/status but does not load the explicitly supplied product/supplier/customer; PurchaseQuoteController.Create/Update and approval persist those references, and PurchaseQuoteConversion copies SupplierId/ProductId into generated procurement documents. Add bounded live reference checks to draft writes, approval/selection, authorized single and batch conversion before number reservation or writes, using existing supplier-comparison and procurement authority. Nullable supplier/product comparisons remain valid drafts where currently supported; commitment must meet existing supplier/product requirements, never silently make ProductId=0 a live purchase reference. Historical snapshots stay readable, unchanged. Retain existing live identity/menu/customer-scope authority, transactions, source locks, controlled errors and audit. Reject before numbering or persistence, with zero header/detail/source/status mutations. No new permissions, schema, production access, external service or arbitrary SQL. Genuine SQL only on (localdb)\\NEWERP_AutoAcceptance with Integrated Security and a fresh GUID-owned NEWERP_AUTOTEST database; reject wrong/existing targets and never drop/reset. Require safe Release with analyzers/warnings-as-errors, full units and relevant genuine SQL/browser tests; accurately record blockers and do not claim whole-stage acceptance.",
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/PurchaseQuoteController.cs",
+    "src/ERP.Api/Controllers/PurchaseQuoteConversion.cs",
+    "src/ERP.Application/Services/PurchaseQuoteMasterReferenceRules.cs",
+    "src/ERP.UnitTests/PurchaseQuoteMutationTests.cs",
+    "src/ERP.UnitTests/PurchaseQuoteApprovalTests.cs",
+    "src/ERP.UnitTests/PurchaseQuoteConversionTests.cs",
+    "src/ERP.UnitTests/PurchaseQuoteConversionBatchTests.cs",
+    "src/ERP.UnitTests/PurchaseQuoteConversionMutationTests.cs",
+    "src/ERP.UnitTests/PurchaseQuoteMasterReferenceTests.cs",
+    "src/ERP.IntegrationTests/PurchaseQuoteMasterReferenceSqlServerTests.cs",
+    "docs/purchase-quote-master-reference-validation.md"
+  ],
+  "acceptance_criteria": [
+    "Reject explicitly supplied zero/negative, missing/deleted/disabled product/supplier/customer references, while preserving supported nullable/manual comparison drafts. Enforce existing customer scope and commercial/status checks without new master-maintenance permission requirements or grants.",
+    "Revalidate selected/approved comparisons and single/batch procurement conversion against live masters inside existing deterministic source locks. Load master references in bounded batches; reject an invalid batch atomically before any purchase number/write, never create partial purchase groups or silently reassign source references.",
+    "Rules/controller and genuine isolated SQL tests cover draft create/update, selection/approval, master invalidation, single/batch conversion with one invalid source, manual/null draft semantics, denied zero writes/numbering and authorized valid procurement. Preserve existing price/selection/history and conversion regressions; run safe Release/full units."
+  ],
+  "criterion_path_map": {
+    "Reject explicitly supplied zero/negative, missing/deleted/disabled product/supplier/customer references, while preserving supported nullable/manual comparison drafts. Enforce existing customer scope and commercial/status checks without new master-maintenance permission requirements or grants.": [
+      "src/ERP.Api/Controllers/PurchaseQuoteController.cs",
+      "src/ERP.Api/Controllers/PurchaseQuoteConversion.cs",
+      "src/ERP.Application/Services/PurchaseQuoteMasterReferenceRules.cs",
+      "src/ERP.UnitTests/PurchaseQuoteMutationTests.cs",
+      "src/ERP.UnitTests/PurchaseQuoteApprovalTests.cs",
+      "src/ERP.UnitTests/PurchaseQuoteConversionTests.cs",
+      "src/ERP.UnitTests/PurchaseQuoteConversionBatchTests.cs",
+      "src/ERP.UnitTests/PurchaseQuoteConversionMutationTests.cs",
+      "src/ERP.UnitTests/PurchaseQuoteMasterReferenceTests.cs",
+      "src/ERP.IntegrationTests/PurchaseQuoteMasterReferenceSqlServerTests.cs",
+      "docs/purchase-quote-master-reference-validation.md"
+    ],
+    "Revalidate selected/approved comparisons and single/batch procurement conversion against live masters inside existing deterministic source locks. Load master references in bounded batches; reject an invalid batch atomically before any purchase number/write, never create partial purchase groups or silently reassign source references.": [
+      "src/ERP.Api/Controllers/PurchaseQuoteController.cs",
+      "src/ERP.Api/Controllers/PurchaseQuoteConversion.cs",
+      "src/ERP.Application/Services/PurchaseQuoteMasterReferenceRules.cs",
+      "src/ERP.UnitTests/PurchaseQuoteMutationTests.cs",
+      "src/ERP.UnitTests/PurchaseQuoteApprovalTests.cs",
+      "src/ERP.UnitTests/PurchaseQuoteConversionTests.cs",
+      "src/ERP.UnitTests/PurchaseQuoteConversionBatchTests.cs",
+      "src/ERP.UnitTests/PurchaseQuoteConversionMutationTests.cs",
+      "src/ERP.UnitTests/PurchaseQuoteMasterReferenceTests.cs",
+      "src/ERP.IntegrationTests/PurchaseQuoteMasterReferenceSqlServerTests.cs",
+      "docs/purchase-quote-master-reference-validation.md"
+    ],
+    "Rules/controller and genuine isolated SQL tests cover draft create/update, selection/approval, master invalidation, single/batch conversion with one invalid source, manual/null draft semantics, denied zero writes/numbering and authorized valid procurement. Preserve existing price/selection/history and conversion regressions; run safe Release/full units.": [
+      "src/ERP.Api/Controllers/PurchaseQuoteController.cs",
+      "src/ERP.Api/Controllers/PurchaseQuoteConversion.cs",
+      "src/ERP.Application/Services/PurchaseQuoteMasterReferenceRules.cs",
+      "src/ERP.UnitTests/PurchaseQuoteMutationTests.cs",
+      "src/ERP.UnitTests/PurchaseQuoteApprovalTests.cs",
+      "src/ERP.UnitTests/PurchaseQuoteConversionTests.cs",
+      "src/ERP.UnitTests/PurchaseQuoteConversionBatchTests.cs",
+      "src/ERP.UnitTests/PurchaseQuoteConversionMutationTests.cs",
+      "src/ERP.UnitTests/PurchaseQuoteMasterReferenceTests.cs",
+      "src/ERP.IntegrationTests/PurchaseQuoteMasterReferenceSqlServerTests.cs",
+      "docs/purchase-quote-master-reference-validation.md"
+    ]
+  },
+  "implementation_evidence": "PurchaseQuoteMutationRules.ValidateDraft:288-322 checks QuoteNo/status/Quantity/QuotePrice/Currency/TotalAmount but no database master references. PurchaseQuoteController.Create:119-135 and Update use that validation then persistence. PurchaseQuoteConversion.FromQuote copies SupplierId??0 and ProductId??0 into procurement drafts; existing ERP-417/418 protect terms and atomic conversion and ERP-427 protects ordinary purchase order entry, not every comparison-source master reference.",
+  "depends_on": [
+    "ERP-475",
+    "ERP-417",
+    "ERP-418",
+    "ERP-427"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "id": "ERP-476",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-13T14:13:41.050811Z"
+}
