@@ -1,0 +1,85 @@
+{
+  "title": "Restore server-numbered canonical booking HTTP form entry",
+  "description": "Close the booking model-binding gap in the existing canonical booking screen. ERP-040 already routes booking to api/container/bookings, but ContainerBooking.BookingNo is Required with empty default while ContainerBookingController.Create allocates the number, preventing ordinary form creation when it omits a number. Permit omitted numbers to reach the existing authorized action while preserving server-owned ID/status, current booking customer/master fields, shipment metadata bounds and nullable date/reference semantics. Save/reload/edit and permitted state flow must remain usable without relaxing booking scope or expanding grants. Booking is logistical evidence and must not synthesize inventory movement, loading, trade documents or financial settlement. Test fixtures must generate ephemeral process-local JWT signing keys and authenticate through existing controls on fresh dedicated test databases. Browser evidence must use genuine permitted API writes; offline wiring assertions are not browser acceptance and must be labelled honestly. Keep build/test output and TRX under .ai/logs/<task>/ with explicit --results-directory; preserve original failures and never stage generated artifacts. Respect current business document page/basic-data drawer presentation. Retain existing live identity/menu/customer-scope authority, transactions, source locks, controlled errors and audit. Reject before numbering or persistence, with zero header/detail/source/status mutations. No new permissions, schema, production access, external service or arbitrary SQL. Genuine SQL only on (localdb)\\NEWERP_AutoAcceptance with Integrated Security and a fresh GUID-owned NEWERP_AUTOTEST database; reject wrong/existing targets and never drop/reset. Require safe Release with analyzers/warnings-as-errors, full units and relevant genuine SQL/browser tests; accurately record blockers and do not claim whole-stage acceptance.",
+  "allowed_paths": [
+    "src/ERP.Domain/Entities/Container1.cs",
+    "src/ERP.Api/Controllers/ContainerControllers.cs",
+    "src/ERP.Api/wwwroot/js/modules-doc2.js",
+    "src/ERP.Api/wwwroot/js/crud.js",
+    "src/ERP.UnitTests/BookingAuthorizationTests.cs",
+    "src/ERP.UnitTests/PreLoadingBookingLinkTests.cs",
+    "src/ERP.UnitTests/BookingCanonicalEntryTests.cs",
+    "src/ERP.IntegrationTests/BookingCanonicalEntrySqlServerTests.cs",
+    "tests/booking-canonical-entry.browser.js",
+    "docs/booking-canonical-entry.md"
+  ],
+  "acceptance_criteria": [
+    "Existing canonical booking menu and real blank-number HTTP form create return the server number, canonical ID and documented draft state; header fields including supported optional dates/references and shipment metadata save/reload/edit correctly with no legacy remapping.",
+    "Existing booking live identity/menu/customer scope, field bounds and lifecycle remain authoritative; rejected source/master/field/state/permission cases persist zero booking changes or number reservations, with no automatic downstream records or historical snapshot rewriting.",
+    "Meaningful isolated SQL/HTTP and real authorized browser verification prove omitted-number binding, valid typed form round trip and lifecycle, plus controlled zero-mutation denial. Preserve booking/preloading regression fixtures and safe Release/full units; record precise browser non-execution separately and retain logs/TRX."
+  ],
+  "criterion_path_map": {
+    "Existing canonical booking menu and real blank-number HTTP form create return the server number, canonical ID and documented draft state; header fields including supported optional dates/references and shipment metadata save/reload/edit correctly with no legacy remapping.": [
+      "src/ERP.Domain/Entities/Container1.cs",
+      "src/ERP.Api/Controllers/ContainerControllers.cs",
+      "src/ERP.Api/wwwroot/js/modules-doc2.js",
+      "src/ERP.Api/wwwroot/js/crud.js",
+      "src/ERP.UnitTests/BookingAuthorizationTests.cs",
+      "src/ERP.UnitTests/PreLoadingBookingLinkTests.cs",
+      "src/ERP.UnitTests/BookingCanonicalEntryTests.cs",
+      "src/ERP.IntegrationTests/BookingCanonicalEntrySqlServerTests.cs",
+      "tests/booking-canonical-entry.browser.js",
+      "docs/booking-canonical-entry.md"
+    ],
+    "Existing booking live identity/menu/customer scope, field bounds and lifecycle remain authoritative; rejected source/master/field/state/permission cases persist zero booking changes or number reservations, with no automatic downstream records or historical snapshot rewriting.": [
+      "src/ERP.Domain/Entities/Container1.cs",
+      "src/ERP.Api/Controllers/ContainerControllers.cs",
+      "src/ERP.Api/wwwroot/js/modules-doc2.js",
+      "src/ERP.Api/wwwroot/js/crud.js",
+      "src/ERP.UnitTests/BookingAuthorizationTests.cs",
+      "src/ERP.UnitTests/PreLoadingBookingLinkTests.cs",
+      "src/ERP.UnitTests/BookingCanonicalEntryTests.cs",
+      "src/ERP.IntegrationTests/BookingCanonicalEntrySqlServerTests.cs",
+      "tests/booking-canonical-entry.browser.js",
+      "docs/booking-canonical-entry.md"
+    ],
+    "Meaningful isolated SQL/HTTP and real authorized browser verification prove omitted-number binding, valid typed form round trip and lifecycle, plus controlled zero-mutation denial. Preserve booking/preloading regression fixtures and safe Release/full units; record precise browser non-execution separately and retain logs/TRX.": [
+      "src/ERP.Domain/Entities/Container1.cs",
+      "src/ERP.Api/Controllers/ContainerControllers.cs",
+      "src/ERP.Api/wwwroot/js/modules-doc2.js",
+      "src/ERP.Api/wwwroot/js/crud.js",
+      "src/ERP.UnitTests/BookingAuthorizationTests.cs",
+      "src/ERP.UnitTests/PreLoadingBookingLinkTests.cs",
+      "src/ERP.UnitTests/BookingCanonicalEntryTests.cs",
+      "src/ERP.IntegrationTests/BookingCanonicalEntrySqlServerTests.cs",
+      "tests/booking-canonical-entry.browser.js",
+      "docs/booking-canonical-entry.md"
+    ]
+  },
+  "implementation_evidence": "modules-doc2.js:153 onward already defines api/container/bookings; Container1.cs:61-62 marks BookingNo Required with empty default. ContainerControllers.cs ContainerBookingController.Create:334 generates BookingNo server-side. ERP-040 routes canonical booking and ERP-360 guards live authority, but neither fixes this missing-number MVC binding path.",
+  "depends_on": [
+    "ERP-483",
+    "ERP-360",
+    "ERP-040"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "id": "ERP-484",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-13T16:40:52.514051Z"
+}
