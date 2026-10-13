@@ -19,7 +19,9 @@ namespace ERP.Application.Services;
 /// 已作废行与无效行**保留可见但绝不并入**有效合计；</item>
 /// <item>不同币种**分别成行**，绝不合并 / 换算，模型**没有任何跨币种总额字段**；</item>
 /// <item>读取为**固定次数**数据集访问（不随行数增长、无逐行查库）；</item>
-/// <item>打开明细时重新校验登录身份与既有「角色 → 菜单」模块授权，来源失效一律 fail closed。</item>
+/// <item>入口授权（ERP-494）：工作台列表 / 元数据 / 明细路由在任何计数、行或金额产生之前，先由控制器复用
+/// <see cref="AgencyServiceFeeReconciliationRules.EnsureRegisterAuthorizedAsync"/> 解析实时启用身份、ERP-453 账号状态、
+/// 既有「客户资料」功能菜单与 ERP-097 权威客户范围，再以该范围过滤列表并在明细处收敛对账单身份（fail closed）。</item>
 /// </list>
 /// <para>边界：本服务只读，不开票、不记账、不核销、不收款或付款、不催收或联系客户、不调用任何外部服务，
 /// 也不改写对账单证据、分摊行、收款单、协议、客户、订单、装柜清单、单证、发票、库存、费用与结算记录。</para>
@@ -42,9 +44,12 @@ public static class AgencyServiceFeeReconciliationService
     /// 工作台报表（只读派生，分页有界）：筛选（客户 / 协议 / 对账单身份 / 服务来源 / 对账日期区间 /
     /// 显式到期日区间 / 币种 / 状态 / 分配状态，全部只用持久化字段）→ 分页 → 本页对账单一次性批量装载派生证据。
     /// <para>汇总、账龄桶与币种汇总都只统计**本次返回页**；账龄只按显式到期日与显式 as-of 日期计算。</para>
+    /// <para>ERP-494：<paramref name="scope"/> 为入口 <c>EnsureRegisterAuthorizedAsync</c> 解析出的 ERP-097 权威客户范围；
+    /// 非 null 时在**计数、分页与物化之前**下推到数据库（<c>SalespersonDataScopeService.FilterByCustomer</c>），
+    /// 受限账号绝不返回范围外对账单 / 计数。</para>
     /// </summary>
     public static async Task<AgencyServiceFeeReconciliationReport> ForQueryAsync(
-        IErpDbContext db, AgencyServiceFeeReconciliationQuery query)
+        IErpDbContext db, AgencyServiceFeeReconciliationQuery query, SalespersonDataScope? scope = null)
     {
         ArgumentNullException.ThrowIfNull(db);
         ArgumentNullException.ThrowIfNull(query);
@@ -53,7 +58,7 @@ public static class AgencyServiceFeeReconciliationService
         var asOfDate = query.AsOfDate ?? DateTime.Today;
         var statementStatus = query.StatementStatus ?? AgencyServiceFeeReconciliationRules.StatementStatusRecorded;
 
-        var source = ApplyFilters(db, query);
+        var source = ApplyFilters(db, query, scope);
         var total = await source.CountAsync();
 
         var pageIds = await source
@@ -141,11 +146,19 @@ public static class AgencyServiceFeeReconciliationService
     /// 筛选（全部只用持久化字段）：对账单 Id / 客户 / 协议 Id / 币种 / 状态 / 服务来源（对账单行来源类型）/
     /// 对账日期区间 / 显式到期日区间 / 分配状态（ERP-071 分摊行 DB 侧聚合比较）/ 关键字；
     /// 到期日区间只命中「登记了到期日」的对账单（未知到期日不可筛，也绝不按对账日期补一个到期日）。
+    /// <para>ERP-494：非 null 的 <paramref name="scope"/> 是**最先**下推的权威客户范围
+    /// （<see cref="SalespersonDataScopeService.FilterByCustomer"/>），因此范围外对账单在计数、分页、
+    /// 显式 Id / 客户 Id 旁路与关键字匹配之前就已被排除。</para>
     /// </summary>
     private static IQueryable<AgencyServiceFeeStatement> ApplyFilters(
-        IErpDbContext db, AgencyServiceFeeReconciliationQuery query)
+        IErpDbContext db, AgencyServiceFeeReconciliationQuery query, SalespersonDataScope? scope)
     {
         var source = db.AgencyServiceFeeStatements.AsNoTracking().Where(s => !s.IsDeleted);
+
+        // ERP-494：权威客户范围在**任何计数、分页与其它筛选之前**下推（受限账号绝不返回范围外对账单 / 计数，
+        // 范围外对账单也不会通过显式 Id / 客户 Id / 关键字或计数旁路泄露）。
+        if (scope is not null)
+            source = SalespersonDataScopeService.FilterByCustomer(source, scope, s => s.CustomerId);
 
         if (query.StatementId is { } statementId) source = source.Where(s => s.Id == statementId);
         if (query.CustomerId is { } customerId) source = source.Where(s => s.CustomerId == customerId);
@@ -843,50 +856,28 @@ public static class AgencyServiceFeeReconciliationService
     // ==================== 6. 单张对账单明细（重新校验授权；fail closed） ====================
 
     /// <summary>
-    /// 单张对账单的对账证据明细（只读派生）：打开明细时**重新校验**当前登录身份（<paramref name="userId"/>）
-    /// 与既有「角色 → 菜单」模块授权（<see cref="AgencyServiceFeeReconciliationRules.RequiredMenuCode"/>），
-    /// 并重新读取权威来源；对账单不存在 / 已删除时拒绝。
-    /// <para>fail closed：未认证 → 未认证错误；无该模块授权 → 权限不足；对账单不存在或已删除 → 不存在；
+    /// 单张对账单的对账证据明细（只读派生）：入口（控制器路由）已**重新校验**实时启用身份、ERP-453 账号状态与
+    /// 既有「客户资料」（<see cref="AgencyServiceFeeReconciliationRules.RequiredMenuCode"/>）模块授权，并把
+    /// ERP-097 权威客户范围（<paramref name="scope"/>）下推到这里；本方法再按范围收敛对账单身份并重新读取权威来源。
+    /// <para>fail closed：对账单**不存在 / 已删除 / 不在当前账号数据范围内**一律返回**同一条**不披露存在性的
+    /// 错误（<see cref="AgencyServiceFeeReconciliationRules.EnsureStatementInScopeAsync"/>），
     /// 任何一种都<strong>不返回任何证据</strong>、不返回部分金额，也不做来源修复或改派。</para>
     /// <para>返回行与列表行**完全同源**（同一派生方法），界面在列表与明细之间不会出现两套口径。</para>
     /// </summary>
     public static async Task<AgencyServiceFeeReconciliationStatementDetail> ForStatementDetailAsync(
-        IErpDbContext db, long statementId, long? userId, DateTime? asOfDate = null)
+        IErpDbContext db, long statementId, SalespersonDataScope scope, DateTime? asOfDate = null)
     {
         ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(scope);
         if (statementId <= 0)
             throw BusinessException.InvalidParameter($"对账单 Id 必须为正整数：{statementId}");
 
         var asOf = (asOfDate ?? DateTime.Today).Date;
 
-        // 1) 身份（未认证 → 拒绝；不返回任何证据）
-        if (userId is null or <= 0)
-        {
-            throw new BusinessException(
-                "请先登录后再查看代理服务费对账证据明细", ErrorCodes.Unauthorized);
-        }
-
-        // 2) 既有「角色 → 菜单」模块授权（未授权 → 拒绝；不返回任何证据）
-        var menuCodes = await LoadAuthorizedMenuCodesAsync(db, userId.Value);
-        if (!menuCodes.Contains(
-                AgencyServiceFeeReconciliationRules.RequiredMenuCode, StringComparer.OrdinalIgnoreCase))
-        {
-            throw new BusinessException(
-                $"当前账号没有「{AgencyServiceFeeReconciliationRules.RequiredMenuText}」"
-                + $"（{AgencyServiceFeeReconciliationRules.RequiredMenuCode}）模块授权：拒绝打开对账证据明细"
-                + "（fail closed，不返回任何证据、不做来源修复或改派）",
-                ErrorCodes.Forbidden);
-        }
-
-        // 3) 权威来源：对账单必须存在且未删除（已删除 / 不存在 → 拒绝，绝不修复、绝不改派）
-        var statement = await db.AgencyServiceFeeStatements.AsNoTracking()
-            .FirstOrDefaultAsync(s => s.Id == statementId && !s.IsDeleted);
-        if (statement is null)
-        {
-            throw BusinessException.NotFound(
-                "代理服务费对账单证据不存在或已删除：无法确认对账与账龄证据"
-                + "（fail closed，不返回部分证据，也不做任何修复或改派）");
-        }
+        // 权威来源：按**入口解析出的 ERP-097 客户范围**收敛对账单身份（不存在 / 已删除 / 越范围 → 同一条不披露错误，
+        // 绝不修复、绝不改派，也不泄露范围外对账单的存在性与规模）。
+        var statement = await AgencyServiceFeeReconciliationRules
+            .EnsureStatementInScopeAsync(db, scope, statementId);
 
         var context = await LoadPageContextAsync(db, new[] { statement });
         var row = MapStatement(statement, context, asOf);
@@ -913,9 +904,10 @@ public static class AgencyServiceFeeReconciliationService
             AllocationsTruncated = allocationsTruncated,
             Allocations = displayRows.Select(a => MapAllocationRow(a, statement, receipts)).ToList(),
             AuthorizationNote =
-                $"打开明细时已重新校验登录身份与「{AgencyServiceFeeReconciliationRules.RequiredMenuText}」"
-                + $"（{AgencyServiceFeeReconciliationRules.RequiredMenuCode}）模块授权（复用既有「角色 → 菜单」口径），"
-                + "并重新读取持久化对账单、ERP-071 分摊行与收款单证据（只读，全程不写库）。",
+                $"打开明细时已重新校验实时启用身份（ERP-453 账号状态）与「{AgencyServiceFeeReconciliationRules.RequiredMenuText}」"
+                + $"（{AgencyServiceFeeReconciliationRules.RequiredMenuCode}）模块授权，并按 ERP-097 权威客户范围收敛该对账单"
+                + "（越范围与不存在不区分，fail closed），"
+                + "再重新读取持久化对账单、ERP-071 分摊行与收款单证据（只读，全程不写库）。",
         };
     }
 
@@ -970,37 +962,5 @@ public static class AgencyServiceFeeReconciliationService
             VoidReason = row.VoidReason,
             Remark = row.Remark,
         };
-    }
-
-    /// <summary>
-    /// 当前账号被允许访问的菜单编码（fail closed：无身份 / 无角色 / 无菜单授权 → 空集合）：
-    /// 复用**既有**授权口径 <c>SysUserRoles</c> → <c>SysRoleMenus</c> → <c>SysMenus.MenuCode</c>
-    /// （忽略按钮型菜单与被删除角色 / 菜单）；每次请求都重新查询，因此撤销授权后立即收敛。
-    /// </summary>
-    private static async Task<HashSet<string>> LoadAuthorizedMenuCodesAsync(IErpDbContext db, long userId)
-    {
-        var roleIds = await db.SysUserRoles.AsNoTracking()
-            .Where(ur => ur.UserId == userId && !ur.IsDeleted)
-            .Select(ur => ur.RoleId)
-            .ToListAsync();
-        if (roleIds.Count == 0) return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-        var roleSet = roleIds.ToHashSet();
-        var menuIds = await db.SysRoleMenus.AsNoTracking()
-            .Where(rm => roleSet.Contains(rm.RoleId) && !rm.IsDeleted)
-            .Select(rm => rm.MenuId)
-            .ToListAsync();
-        if (menuIds.Count == 0) return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-        var menuIdSet = menuIds.ToHashSet();
-        var codes = await db.SysMenus.AsNoTracking()
-            .Where(m => menuIdSet.Contains(m.Id) && !m.IsDeleted && m.MenuType != MenuType.Button)
-            .Select(m => m.MenuCode)
-            .ToListAsync();
-
-        return codes
-            .Where(code => !string.IsNullOrWhiteSpace(code))
-            .Select(code => code.Trim())
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
     }
 }

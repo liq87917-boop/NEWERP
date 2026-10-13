@@ -1,13 +1,16 @@
-# 代理服务费对账单 / 收款分摊证据登记册实时授权与客户范围（ERP-437）
+# 代理服务费对账单 / 收款分摊证据登记册与对账账龄工作台实时授权与客户范围（ERP-437 / ERP-494）
 
-本文档说明 ERP-070「代理服务费对账单证据」与 ERP-071「客户收款单 → 代理服务费对账单收款分摊证据」两套登记模块的
-**实时授权与服务端客户数据范围**口径。目标：让台账 / 来源候选 / 两侧候选 / 两侧汇总 / 明细 / 登记 / 作废等**每一条**证据路由，
+本文档说明 ERP-070「代理服务费对账单证据」、ERP-071「客户收款单 → 代理服务费对账单收款分摊证据」
+与 ERP-072「代理服务费对账与账龄工作台」三套登记 / 派生模块的
+**实时授权与服务端客户数据范围**口径。目标：让台账 / 来源候选 / 两侧候选 / 两侧汇总 / 明细 / 登记 / 作废 /
+**对账账龄工作台的报表、元数据与单张对账单明细**等**每一条**证据路由，
 与既有月度汇总（ERP-110）、协议证据（ERP-069）及既有收款单生命周期守卫（ERP-349 / ERP-378）使用**同一条**身份、菜单与数据范围口径，
 绝不新增授权模型。
 
-相关任务：`ERP-437`「Enforce live receipt and statement authority on agency service fee evidence registers」（阶段 3 收据与财务证据闭环）。
+相关任务：`ERP-437`「Enforce live receipt and statement authority on agency service fee evidence registers」（阶段 3 收据与财务证据闭环），
+`ERP-494`「Enforce live agency service fee reconciliation register authority and customer scope at every entry」（阶段 3 对账账龄工作台授权补全）。
 上游 / 同源任务：`ERP-070` / `ERP-071` / `ERP-072` / `ERP-110` / `ERP-180`（对账单 / 分摊 / 对账账龄 / 月度汇总 / 对账报表）、
-`ERP-097`（业务员客户数据范围）、`ERP-349` / `ERP-350` / `ERP-378`（收款单生命周期、唯一同币种分摊额度、收款单行锁）。
+`ERP-097`（业务员客户数据范围）、`ERP-453`（实时账号状态）、`ERP-349` / `ERP-350` / `ERP-378`（收款单生命周期、唯一同币种分摊额度、收款单行锁）。
 
 ## 1. 复用既有护栏（不新增授权）
 
@@ -42,7 +45,25 @@ ERP-437 新增的只是把上面的既有入口组合成一个专用于本登记
 
 客户端请求体中的任何字段都不能指定或扩大身份 / 范围（用户 Id 只来自 `ClaimTypes.NameIdentifier`）。
 控制器**没有** `[AllowAnonymous]`，也**没有**任何角色白名单或「退化为管理员」的回退。
-`metadata` 路由只返回与身份无关的静态口径文案，不含任何证据数据。
+对账单 / 分摊两套登记模块的 `metadata` 路由只返回与身份无关的静态口径文案，不含任何证据数据。
+
+### 2.1 ERP-494：对账与账龄工作台（`/api/agency-service-fee-reconciliation`）
+
+`AgencyServiceFeeReconciliationController` 的**每一条**路由（`Report`、`metadata`、
+`statements/{statementId}/detail`）同样在任何计数、对账单行、分摊行、金额或元数据产生之前先调用
+**同一个** `EnsureRegisterAuthorizedAsync(_db, CurrentUserId())`，因此身份 / 菜单矩阵与上表逐格一致：
+
+| 路由 | 入口授权 | 范围口径 |
+| --- | --- | --- |
+| `Report`（工作台报表） | `EnsureRegisterAuthorizedAsync` | `SalespersonDataScopeService.FilterByCustomer` 在**计数与分页之前**下推（越范围不参与任何计数 / 汇总 / 账龄桶） |
+| `metadata`（模块元数据） | `EnsureRegisterAuthorizedAsync` | 元数据与身份无关，但**仍要求**实时启用身份 + 既有 `customer` 菜单（缺一即 fail closed） |
+| `statements/{statementId}/detail`（单张明细） | `EnsureRegisterAuthorizedAsync` | 入口解析范围后由 `AgencyServiceFeeReconciliationRules.EnsureStatementInScopeAsync` 收敛对账单身份（越范围 / 已删除 / 不存在 → 同一条不披露错误） |
+
+ERP-494 **只**复用上面的既有入口授权与既有范围收敛方法，**不新增**菜单 / 角色 / 用户授权、表 / 列 / 权限模型，
+也**没有**匿名、管理员、环境变量或「测试专用」回退，更不接受请求路径或上下文形状（例如自定义请求头 / Claim 形状）规避授权。
+工作台仍保持既有边界：只读派生、按币种分别成行且**没有任何跨币种总额**、显式到期日与「未知到期日」分组分离、
+无效 / 无法确认证据与有效证据分离、有界分页与有界明细，且**零写入** `AgencyServiceFeeStatements` /
+`AgencyServiceFeeCollectionAllocations` / `FinanceReceipts` 或任何其它表。
 
 ## 3. 资源解析 + 客户范围收敛
 
@@ -57,6 +78,10 @@ ERP-437 新增的只是把上面的既有入口组合成一个专用于本登记
 - 明细（`GetById`）：按分摊行快照客户或对账单持久化客户收敛，越范围 / 已删除 / 不存在一律同一条不披露错误。
 - 写入（`Create` / `Update` / `record` / `void`）：先解析并授权被引用对账单与收款单（以及 `Update` 的拟提交客户），
   越范围 / 已删除 / 不存在一律拒绝，且**拒绝发生在写库之前**——绝不落任何对账单或分摊行。
+- **对账账龄工作台列表（ERP-494 `Report`）**：范围在 `ApplyFilters` 的**最前**下推，早于显式对账单 Id / 客户 Id、
+  状态 / 币种 / 到期日 / 分配状态与关键字过滤，因此范围外对账单既不出现也不参与计数、汇总与账龄桶。
+- **对账账龄工作台明细（ERP-494 `detail`）**：入口解析范围后由 `EnsureStatementInScopeAsync` 按持久化
+  `AgencyServiceFeeStatement.CustomerId` 收敛；越范围 / 已删除 / 不存在与「不存在」返回**同一条**不披露错误。
 
 ## 4. 统一的不披露错误口径
 
@@ -89,13 +114,24 @@ ERP-437 新增的只是把上面的既有入口组合成一个专用于本登记
   - 既有 ERP-070 / ERP-071 / ERP-072 / ERP-110 / ERP-180 回归（`AgencyServiceFeeStatementTests` /
     `AgencyServiceFeeCollectionAllocationTests` / `AgencyServiceFeeReconciliationTests` /
     `AgencyServiceFeeMonthlySummaryTests` / `DynamicAgencyServiceFeeMonthly*`）保持绿。
+  - ERP-494 在 `AgencyServiceFeeReconciliationTests` 中把内存夹具适配为**真实启用身份**（显式 Id + 既有
+    `customer` 菜单），并新增：缺失 / 非法 / 已删除身份 → `Unauthorized`；禁用 / 撤销菜单 / 无菜单 / 其它菜单 → `Forbidden`；
+    真实受限业务员只见自有客户（列表计数与行、显式对账单 Id / 客户 Id 旁路、明细越范围与不存在同一条不披露错误）；
+    报表 / 元数据 / 明细三条路由均在证据产生之前 fail closed，且授权回收后下一次请求立即收敛。
 - SQL Server 集成测试（真实 `(localdb)\NEWERP_AutoAcceptance` + GUID 后缀 `NEWERP_AUTOTEST` 库 + `Integrated Security`）：
-  `AgencyServiceFeeRegisterAuthorizationSqlServerTests` 覆盖同一组身份 / 菜单 / 范围 / 零变更场景，以及被许可的对账单与分摊行走完整生命周期。
+  `AgencyServiceFeeRegisterAuthorizationSqlServerTests` 覆盖同一组身份 / 菜单 / 范围 / 零变更场景，以及被许可的对账单与分摊行走完整生命周期；
+  ERP-494 追加**对账账龄工作台**在真实库上的同一矩阵（缺失 / 非法 / 已删除 → `Unauthorized`；禁用 / 撤销菜单 / 无菜单 → `Forbidden`；
+  受限业务员越范围列表为空页、越范围明细与不存在同一条不披露错误；空请求路径与显式 as-of 的非空请求路径均获准且零写入）。
+  每次运行只创建**全新** GUID 后缀 `NEWERP_AUTOTEST` 库，发现同名库已存在即拒绝，绝不 drop / reset / 复用，
+  连接串只来自进程环境变量或专用 localdb 默认值（绝不读取 `appsettings` / `.env` / 生产凭据）。
 
 ## 7. 明确边界（非目标）
 
 - **不新增授权**：不新增菜单 / 角色 / 用户授权，不修改种子数据与既有权限模型，不提供匿名 / 管理员降级。
+- **ERP-494 同样不新增授权**：对账账龄工作台只复用既有的入口授权与范围收敛，不新增菜单 / 角色 / 权限 / 表 / 列，
+  不引入请求路径或上下文形状豁免，也不新增「环境 / 测试专用」分支（内存夹具只改用**真实启用身份**，测试数据彼此隔离）。
 - **不改变业务语义**：对账单 / 分摊 / 汇总 / 候选 / 金额 / 币种口径与响应 DTO 契约保持不变。
+- **工作台边界不变**：只读派生、按币种分别成行且无跨币种总额、未知到期日与无效证据独立分组、有界分页与有界明细、零写入。
 - **不修改数据库结构**：不修改任何存储过程 / 迁移脚本 / `SchemaUpgrader` / 既有表结构，不新增表 / 列 / 索引。
 - **不清理既有数据**：不删除 / 不清理任何既有业务行、审计留痕或既有失败日志；不执行生产凭据或生产数据操作。
 - 浏览器验收按任务配置为 `browser_acceptance.required = false`：不运行真实 Edge / UI / 截图验收。

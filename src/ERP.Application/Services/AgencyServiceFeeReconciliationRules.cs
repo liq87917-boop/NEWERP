@@ -35,6 +35,12 @@ namespace ERP.Application.Services;
 /// <see cref="CustomerReceivableReconciliationService.LoadAuthorizedMenuCodesAsync"/> + ERP-097
 /// <see cref="SalespersonDataScopeService"/>，与月度汇总路由同一条身份 / 菜单 / 客户范围口径，
 /// <strong>不新增任何授权、菜单、角色或回退</strong>；判定方法只做有界只读查询，绝不落库、绝不改写任何证据。</para>
+/// <para><b>ERP-494 授权口径</b>：ERP-072 对账与账龄工作台（<c>api/agency-service-fee-reconciliation</c>）的
+/// 工作台报表明细路由同样只复用上面的<strong>同一个</strong>入口授权
+/// <see cref="EnsureRegisterAuthorizedAsync"/> 与<strong>同一个</strong>范围收敛
+/// <see cref="EnsureStatementInScopeAsync"/>（先解析实时身份 / ERP-453 账号状态 / 既有「客户资料」菜单 /
+/// ERP-097 客户范围，再把范围下推到列表与明细）——本类<strong>不新增</strong>任何菜单、角色、权限、表、列或
+/// 匿名 / 管理员回退，也不新增第二套范围口径。</para>
 /// </summary>
 public static class AgencyServiceFeeReconciliationRules
 {

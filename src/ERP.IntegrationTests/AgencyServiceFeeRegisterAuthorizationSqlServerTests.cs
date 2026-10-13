@@ -80,6 +80,14 @@ public sealed class AgencyServiceFeeRegisterAuthorizationSqlServerTests
         return ctl;
     }
 
+    private static AgencyServiceFeeReconciliationController NewReconciliationController(
+        ErpDbContext db, long? userId)
+    {
+        var ctl = new AgencyServiceFeeReconciliationController(db);
+        SetUser(ctl, userId);
+        return ctl;
+    }
+
     private static void SetUser(ControllerBase controller, long? userId)
     {
         var claims = userId.HasValue
@@ -485,6 +493,99 @@ public sealed class AgencyServiceFeeRegisterAuthorizationSqlServerTests
         var storedForeignStatement = await db.AgencyServiceFeeStatements.AsNoTracking()
             .SingleAsync(s => s.Id == foreignStatement.Id);
         Assert.Equal(AgencyServiceFeeStatementRules.StatusRecorded, storedForeignStatement.Status);
+    }
+
+    // ==================== 3. ERP-494：对账与账龄工作台的实时授权 + 权威客户范围 ====================
+
+    [Fact]
+    public async Task Reconciliation_workbench_list_metadata_and_detail_enforce_live_authority_and_scope()
+    {
+        Guard();
+        await using var db = _fixture.CreateDbContext();
+
+        // 受限业务员（自有客户）与一套真实身份矩阵
+        var userName = $"asf494-own-{Guid.NewGuid():N}";
+        var employeeId = await SeedEmployeeAsync(db);
+        (await db.BaseEmployees.SingleAsync(e => e.Id == employeeId)).EmployeeCode = userName;
+        await db.SaveChangesAsync();
+        var operatorId = await SeedRestrictedOperatorAsync(db, userName, grantMenu: true);
+
+        var ownCustomer = await SeedCustomerAsync(db, "ERP-494 自有客户", employeeId);
+        var foreignCustomer = await SeedCustomerAsync(db, "ERP-494 他人客户");
+        var ownStatement = await SeedStatementAsync(db, ownCustomer, $"ASFR-OWN-{Tag()}", 1000m);
+        var foreignStatement = await SeedStatementAsync(db, foreignCustomer, $"ASFR-FGN-{Tag()}", 1000m);
+
+        var privilegedId = await SeedPrivilegedOperatorAsync(db);
+        var deletedId = await SeedDeletedUserAsync(db);
+        var disabledId = await SeedPrivilegedOperatorAsync(db);
+        await DisableUserAsync(db, disabledId);
+        var revokedId = await SeedPrivilegedOperatorAsync(db);
+        await RevokeMenusAsync(db, revokedId);
+        var noMenuId = await SeedRestrictedOperatorAsync(db, $"asf494-nomenu-{Guid.NewGuid():N}", grantMenu: false);
+
+        var beforeStatements = await db.AgencyServiceFeeStatements.AsNoTracking().CountAsync();
+        var beforeAllocations = await db.AgencyServiceFeeCollectionAllocations.AsNoTracking().CountAsync();
+
+        // 缺失 / 非法 / 已删除身份 → 未认证：三条路由都在任何计数 / 行 / 金额 / 元数据产生之前拒绝
+        foreach (long? userId in new long?[] { null, 0, deletedId })
+        {
+            var unauthCtl = NewReconciliationController(db, userId);
+            await AssertCode(ErrorCodes.Unauthorized,
+                () => unauthCtl.Report(new AgencyServiceFeeReconciliationQuery()));
+            await AssertCode(ErrorCodes.Unauthorized, () => unauthCtl.Metadata());
+            await AssertCode(ErrorCodes.Unauthorized, () => unauthCtl.StatementDetail(ownStatement.Id));
+        }
+
+        // 禁用 / 撤销菜单 / 无菜单 → 权限不足
+        foreach (var userId in new[] { disabledId, revokedId, noMenuId })
+        {
+            var forbiddenCtl = NewReconciliationController(db, userId);
+            await AssertCode(ErrorCodes.Forbidden,
+                () => forbiddenCtl.Report(new AgencyServiceFeeReconciliationQuery()));
+            await AssertCode(ErrorCodes.Forbidden, () => forbiddenCtl.Metadata());
+            await AssertCode(ErrorCodes.Forbidden, () => forbiddenCtl.StatementDetail(ownStatement.Id));
+        }
+
+        // 特权身份：空请求路径与显式 as-of 的非空请求路径都被允许（只读派生）
+        var privileged = NewReconciliationController(db, privilegedId);
+        var emptyRequest = AssertOk<AgencyServiceFeeReconciliationReport>(
+            await privileged.Report(new AgencyServiceFeeReconciliationQuery()));
+        var populatedRequest = AssertOk<AgencyServiceFeeReconciliationReport>(await privileged.Report(
+            new AgencyServiceFeeReconciliationQuery { AsOfDate = new DateTime(2026, 9, 25) }));
+        Assert.True(emptyRequest.Total >= 2);
+        Assert.True(populatedRequest.Total >= 2);
+        Assert.Equal(AgencyServiceFeeReconciliationRules.RequiredMenuCode,
+            AssertOk<AgencyServiceFeeReconciliationMetadataDto>(await privileged.Metadata()).RequiredMenuCode);
+
+        // 受限业务员：只统计 / 只返回自有客户（范围在计数与分页之前下推）
+        var ctl = NewReconciliationController(db, operatorId);
+        var scopedReport = AssertOk<AgencyServiceFeeReconciliationReport>(
+            await ctl.Report(new AgencyServiceFeeReconciliationQuery()));
+        Assert.NotEmpty(scopedReport.Groups.SelectMany(g => g.Statements));
+        Assert.All(scopedReport.Groups.SelectMany(g => g.Statements),
+            r => Assert.Equal(ownCustomer, r.CustomerId));
+
+        // 显式越范围对账单 Id / 客户 Id → 空页（不泄露范围外存在性与计数）
+        Assert.Equal(0, AssertOk<AgencyServiceFeeReconciliationReport>(await ctl.Report(
+            new AgencyServiceFeeReconciliationQuery { StatementId = foreignStatement.Id })).Total);
+        Assert.Equal(0, AssertOk<AgencyServiceFeeReconciliationReport>(await ctl.Report(
+            new AgencyServiceFeeReconciliationQuery { CustomerId = foreignCustomer })).Total);
+
+        // 明细：范围内正常返回；范围外 / 不存在同一条不披露错误
+        var ownDetail = AssertOk<AgencyServiceFeeReconciliationStatementDetail>(
+            await ctl.StatementDetail(ownStatement.Id));
+        Assert.Equal(ownStatement.Id, ownDetail.StatementId);
+        var foreignDenied = await AssertCode(ErrorCodes.NotFound, () => ctl.StatementDetail(foreignStatement.Id));
+        var missingDenied = await AssertCode(ErrorCodes.NotFound, () => ctl.StatementDetail(987_654_321L));
+        Assert.Equal(AgencyServiceFeeReconciliationRules.RegisterNotFoundText, foreignDenied.Message);
+        Assert.Equal(foreignDenied.Message, missingDenied.Message);
+
+        // 只读零写入：被拒与获准的读取都不落任何对账单 / 分摊行
+        Assert.Equal(beforeStatements, await db.AgencyServiceFeeStatements.AsNoTracking().CountAsync());
+        Assert.Equal(beforeAllocations, await db.AgencyServiceFeeCollectionAllocations.AsNoTracking().CountAsync());
+        var storedOwn = await db.AgencyServiceFeeStatements.AsNoTracking()
+            .SingleAsync(s => s.Id == ownStatement.Id);
+        Assert.Equal(AgencyServiceFeeStatementRules.StatusRecorded, storedOwn.Status);
     }
 }
 

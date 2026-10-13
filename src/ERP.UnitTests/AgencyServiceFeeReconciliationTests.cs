@@ -5,8 +5,11 @@ using ERP.Application.Services;
 using ERP.Domain.Entities;
 using ERP.Domain.Enums;
 using ERP.Infrastructure.Data;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using System.Reflection;
+using System.Security.Claims;
 using Xunit;
 
 namespace ERP.UnitTests;
@@ -250,6 +253,103 @@ public class AgencyServiceFeeReconciliationTests
         var ex = await Assert.ThrowsAsync<BusinessException>(action);
         Assert.Equal(expectedCode, ex.Code);
         return ex;
+    }
+
+    private static T AssertOk<T>(IActionResult result)
+    {
+        var ok = Assert.IsType<OkObjectResult>(result);
+        var resp = Assert.IsType<ApiResponse<T>>(ok.Value);
+        Assert.Equal(ErrorCodes.Success, resp.Code);
+        Assert.NotNull(resp.Data);
+        return resp.Data!;
+    }
+
+    /// <summary>
+    /// 绑定指定身份（缺失 = 匿名请求）的工作台控制器（ERP-494）：每条路由都先由控制器复用
+    /// <c>EnsureRegisterAuthorizedAsync</c> 解析实时身份 / 菜单 / 客户范围，未认证 / 越权一律 fail closed。
+    /// </summary>
+    private static AgencyServiceFeeReconciliationController NewReconciliationController(
+        ErpDbContext db, long? userId)
+    {
+        var claims = userId.HasValue
+            ? new[] { new Claim(ClaimTypes.NameIdentifier, userId.Value.ToString()) }
+            : Array.Empty<Claim>();
+        var controller = new AgencyServiceFeeReconciliationController(db)
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext
+                {
+                    User = new ClaimsPrincipal(new ClaimsIdentity(claims, "Test"))
+                }
+            }
+        };
+        return controller;
+    }
+
+    /// <summary>播种既有「客户资料」（customer）功能菜单（ERP-494 复用既有菜单口径，不新增菜单 / 权限）</summary>
+    private static SysMenu EnsureCustomerMenu(ErpDbContext db)
+    {
+        var menu = db.SysMenus.FirstOrDefault(m => !m.IsDeleted
+            && m.MenuCode == AgencyServiceFeeReconciliationRules.RequiredMenuCode);
+        if (menu is not null) return menu;
+
+        menu = new SysMenu
+        {
+            ParentId = 0,
+            MenuCode = AgencyServiceFeeReconciliationRules.RequiredMenuCode,
+            MenuName = AgencyServiceFeeReconciliationRules.RequiredMenuText,
+            Path = "/master/customer",
+            MenuType = MenuType.Menu
+        };
+        db.SysMenus.Add(menu);
+        db.SaveChanges();
+        return menu;
+    }
+
+    /// <summary>
+    /// 播种**受限业务员**账号（ERP-494 / ERP-097）：真实启用身份 + 非系统角色 + 员工映射 + 可选既有
+    /// 「客户资料」菜单；其可见客户由 <c>BaseCustomer.EmpId</c> 决定（未分配任何客户时 fail closed）。
+    /// </summary>
+    private static long SeedRestrictedSalesman(ErpDbContext db, string userName, bool grantMenu = true)
+    {
+        var user = new SysUser
+        {
+            UserName = userName,
+            PasswordHash = "hash",
+            PasswordSalt = "salt",
+            DisplayName = userName,
+            Status = UserStatus.Enabled
+        };
+        db.SysUsers.Add(user);
+        db.SaveChanges();
+
+        var role = new SysRole
+        {
+            RoleName = $"对账工作台业务员角色 {userName}",
+            RoleCode = $"ASFR-S-{Guid.NewGuid():N}",
+            Description = "ERP-494 范围测试",
+            IsSystem = false
+        };
+        db.SysRoles.Add(role);
+        db.SaveChanges();
+        db.SysUserRoles.Add(new SysUserRole { UserId = user.Id, RoleId = role.Id });
+
+        if (grantMenu)
+        {
+            var menu = EnsureCustomerMenu(db);
+            db.SysRoleMenus.Add(new SysRoleMenu { RoleId = role.Id, MenuId = menu.Id });
+        }
+
+        db.BaseEmployees.Add(new BaseEmployee
+        {
+            EmployeeCode = userName,
+            EmployeeName = userName,
+            IsSalesman = true,
+            Status = 1
+        });
+        db.SaveChanges();
+        return user.Id;
     }
 
     /// <summary>按仓库根目录拼接文件的绝对路径（与其它契约测试口径一致）</summary>
@@ -873,21 +973,24 @@ public class AgencyServiceFeeReconciliationTests
         SeedAllocation(db, disabledStatement, receipt, 30m, customerId: disabledCustomer.Id,
             allocatedAt: new DateTime(2026, 9, 22));
         SeedAuthorization(db, AuthorizedUserId, AgencyServiceFeeReconciliationRules.RequiredMenuCode);
+        var scope = await AgencyServiceFeeReconciliationRules.EnsureRegisterAuthorizedAsync(db, AuthorizedUserId);
 
         var before = Snapshot(db);
 
-        await AgencyServiceFeeReconciliationService.ForQueryAsync(db, Query(statementStatus: "all"));
+        await AgencyServiceFeeReconciliationService.ForQueryAsync(db, Query(statementStatus: "all"), scope);
         await AgencyServiceFeeReconciliationService.ForQueryAsync(db,
-            Query(allocationState: AgencyServiceFeeReconciliationRules.AllocationPartial));
-        await AgencyServiceFeeReconciliationService.ForQueryAsync(db, Query(currency: "USD", keyword: "L00"));
-        await AgencyServiceFeeReconciliationService.ForQueryAsync(db, Query(customerId: disabledCustomer.Id));
-        await AgencyServiceFeeReconciliationService.ForStatementDetailAsync(db, statement.Id, AuthorizedUserId, AsOf);
+            Query(allocationState: AgencyServiceFeeReconciliationRules.AllocationPartial), scope);
+        await AgencyServiceFeeReconciliationService.ForQueryAsync(
+            db, Query(currency: "USD", keyword: "L00"), scope);
+        await AgencyServiceFeeReconciliationService.ForQueryAsync(
+            db, Query(customerId: disabledCustomer.Id), scope);
+        await AgencyServiceFeeReconciliationService.ForStatementDetailAsync(db, statement.Id, scope, AsOf);
 
         Assert.Equal(before, Snapshot(db));
 
         // 停用客户的历史快照照常可读，且系统不「修复」它（不回填名称、不改状态）
         var report = await AgencyServiceFeeReconciliationService.ForQueryAsync(db,
-            Query(customerId: disabledCustomer.Id));
+            Query(customerId: disabledCustomer.Id), scope);
         var row = Assert.Single(report.Groups.SelectMany(g => g.Statements));
         Assert.Equal("已停用客户", row.CustomerName);
         Assert.False(row.CustomerAvailable);
@@ -895,10 +998,10 @@ public class AgencyServiceFeeReconciliationTests
         Assert.Equal(before, Snapshot(db));
     }
 
-    // ==================== 13. 明细：重新校验身份与既有模块授权；来源失效一律 fail closed ====================
+    // ===== 13. 报表 / 元数据 / 明细：实时身份 + 既有模块授权 + 权威客户范围；fail closed =====
 
     [Fact]
-    public async Task Detail_revalidates_authentication_and_module_authorization_and_fails_closed()
+    public async Task Routes_require_live_identity_menu_and_customer_scope_and_fail_closed()
     {
         using var db = TestDbFactory.Create();
         var customer = SeedCustomer(db, "C001", "义乌进出口");
@@ -911,24 +1014,55 @@ public class AgencyServiceFeeReconciliationTests
         SeedAuthorization(db, AuthorizedUserId, AgencyServiceFeeReconciliationRules.RequiredMenuCode);
         SeedAuthorization(db, NoMenuUserId);                          // 有角色但无菜单授权
         SeedAuthorization(db, WrongMenuUserId, "finance-payment");    // 只有其它模块授权
+
+        // 真实启用身份，仅账号状态 / 删除标记不同
+        var disabledId = SeedRestrictedSalesman(db, $"asfr-disabled-{Guid.NewGuid():N}");
+        db.SysUsers.Single(u => u.Id == disabledId).Status = UserStatus.Disabled;
+        var revokedId = SeedRestrictedSalesman(db, $"asfr-revoked-{Guid.NewGuid():N}");
+        RevokeAllMenus(db, revokedId);
+        var deletedId = SeedRestrictedSalesman(db, $"asfr-deleted-{Guid.NewGuid():N}");
+        db.SysUsers.Single(u => u.Id == deletedId).IsDeleted = true;
         await db.SaveChangesAsync();
 
-        // 未认证：拒绝，不返回任何证据
-        var unauthenticated = await AssertBusinessAsync(ErrorCodes.Unauthorized,
-            () => AgencyServiceFeeReconciliationService.ForStatementDetailAsync(db, statement.Id, null, AsOf));
-        Assert.Contains("登录", unauthenticated.Message);
+        // 缺失 / 非法 / 已删除身份 → 未认证：三条路由在任何计数 / 行 / 金额 / 元数据产生之前拒绝
+        foreach (long? userId in new long?[] { null, 0, deletedId })
+        {
+            var ctl = NewReconciliationController(db, userId);
+            var unauthorized = await AssertBusinessAsync(ErrorCodes.Unauthorized, () => ctl.Report(Query()));
+            await AssertBusinessAsync(ErrorCodes.Unauthorized, () => ctl.Metadata());
+            await AssertBusinessAsync(ErrorCodes.Unauthorized, () => ctl.StatementDetail(statement.Id, AsOf));
+            Assert.Contains("登录", unauthorized.Message);
+        }
 
-        // 无该模块授权 / 只有其它模块授权：拒绝（fail closed）
-        await AssertBusinessAsync(ErrorCodes.Forbidden,
-            () => AgencyServiceFeeReconciliationService.ForStatementDetailAsync(db, statement.Id, NoMenuUserId, AsOf));
-        var forbidden = await AssertBusinessAsync(ErrorCodes.Forbidden,
-            () => AgencyServiceFeeReconciliationService.ForStatementDetailAsync(db, statement.Id, WrongMenuUserId, AsOf));
-        Assert.Contains(AgencyServiceFeeReconciliationRules.RequiredMenuCode, forbidden.Message);
-        Assert.Contains("fail closed", forbidden.Message);
+        // 禁用 / 撤销菜单 / 无菜单 / 只有其它模块菜单 → 权限不足
+        foreach (var userId in new[] { disabledId, revokedId, NoMenuUserId, WrongMenuUserId })
+        {
+            var ctl = NewReconciliationController(db, userId);
+            await AssertBusinessAsync(ErrorCodes.Forbidden, () => ctl.Report(Query()));
+            await AssertBusinessAsync(ErrorCodes.Forbidden, () => ctl.Metadata());
+            await AssertBusinessAsync(ErrorCodes.Forbidden, () => ctl.StatementDetail(statement.Id, AsOf));
+        }
 
-        // 已授权：返回与列表同源的行 + 有界分摊明细（含已作废历史）
-        var detail = await AgencyServiceFeeReconciliationService.ForStatementDetailAsync(
-            db, statement.Id, AuthorizedUserId, AsOf);
+        // 禁用身份与菜单缺失 / 撤销 / 其它菜单各自给出既有受控文案（都 fail closed、都不披露证据）
+        var disabledForbidden = await AssertBusinessAsync(ErrorCodes.Forbidden,
+            () => NewReconciliationController(db, disabledId).StatementDetail(statement.Id, AsOf));
+        Assert.Contains("禁用", disabledForbidden.Message);
+        foreach (var userId in new[] { revokedId, NoMenuUserId, WrongMenuUserId })
+        {
+            var menuForbidden = await AssertBusinessAsync(ErrorCodes.Forbidden,
+                () => NewReconciliationController(db, userId).StatementDetail(statement.Id, AsOf));
+            Assert.Contains(AgencyServiceFeeReconciliationRules.RequiredMenuCode, menuForbidden.Message);
+            Assert.Contains("fail closed", menuForbidden.Message);
+        }
+
+        // 已授权：范围收敛后返回与列表同源的行 + 有界分摊明细（含已作废历史）
+        var scope = await AgencyServiceFeeReconciliationRules.EnsureRegisterAuthorizedAsync(db, AuthorizedUserId);
+        var authorized = NewReconciliationController(db, AuthorizedUserId);
+        Assert.Equal(AgencyServiceFeeReconciliationRules.RequiredMenuCode,
+            AssertOk<AgencyServiceFeeReconciliationMetadataDto>(await authorized.Metadata()).RequiredMenuCode);
+        AssertOk<AgencyServiceFeeReconciliationReport>(await authorized.Report(Query()));
+        var detail = AssertOk<AgencyServiceFeeReconciliationStatementDetail>(
+            await authorized.StatementDetail(statement.Id, AsOf));
         var row = detail.Row;
         Assert.Equal(120m, row.ActiveAllocatedAmount);
         Assert.Equal(180m, row.RemainingAmount);
@@ -944,8 +1078,12 @@ public class AgencyServiceFeeReconciliationTests
         Assert.Contains("已作废", voidedRow.EffectivenessText);
         Assert.Contains("历史可见", voidedRow.EffectivenessText);
 
-        // 与列表同源：同一张对账单的列表行数字与明细行完全一致
-        var report = await AgencyServiceFeeReconciliationService.ForQueryAsync(db, Query(statementId: statement.Id));
+        // 与列表同源：同一张对账单的列表行数字与明细行完全一致（服务层同口径，范围为入口解析结果）
+        var serviceDetail = await AgencyServiceFeeReconciliationService.ForStatementDetailAsync(
+            db, statement.Id, scope, AsOf);
+        Assert.Equal(row.ActiveAllocatedAmount, serviceDetail.Row.ActiveAllocatedAmount);
+        var report = await AgencyServiceFeeReconciliationService.ForQueryAsync(
+            db, Query(statementId: statement.Id), scope);
         var listRow = Assert.Single(report.Groups.SelectMany(g => g.Statements));
         Assert.Equal(listRow.ActiveAllocatedAmount, row.ActiveAllocatedAmount);
         Assert.Equal(listRow.RemainingAmount, row.RemainingAmount);
@@ -954,25 +1092,75 @@ public class AgencyServiceFeeReconciliationTests
 
         // 非法 Id 直接拒绝
         await AssertBusinessAsync(ErrorCodes.InvalidParameter,
-            () => AgencyServiceFeeReconciliationService.ForStatementDetailAsync(db, 0, AuthorizedUserId, AsOf));
+            () => AgencyServiceFeeReconciliationService.ForStatementDetailAsync(db, 0, scope, AsOf));
 
-        // 来源已删除：拒绝（fail closed），不返回部分证据
+        // 来源已删除：与「不存在 / 越范围」同一条不披露错误（fail closed），不返回部分证据
         statement.IsDeleted = true;
         await db.SaveChangesAsync();
         var missing = await AssertBusinessAsync(ErrorCodes.NotFound,
-            () => AgencyServiceFeeReconciliationService.ForStatementDetailAsync(db, statement.Id, AuthorizedUserId, AsOf));
-        Assert.Contains("fail closed", missing.Message);
+            () => AgencyServiceFeeReconciliationService.ForStatementDetailAsync(db, statement.Id, scope, AsOf));
+        Assert.Equal(AgencyServiceFeeReconciliationRules.RegisterNotFoundText, missing.Message);
         statement.IsDeleted = false;
         await db.SaveChangesAsync();
 
-        // 授权回收后立即收敛（每次请求都重新查询授权）
+        // 授权回收后立即收敛（每次请求都重新查询身份 / 菜单 / 范围）
         RevokeAllMenus(db, AuthorizedUserId);
-        await AssertBusinessAsync(ErrorCodes.Forbidden,
-            () => AgencyServiceFeeReconciliationService.ForStatementDetailAsync(db, statement.Id, AuthorizedUserId, AsOf));
+        var revokedCtl = NewReconciliationController(db, AuthorizedUserId);
+        await AssertBusinessAsync(ErrorCodes.Forbidden, () => revokedCtl.Report(Query()));
+        await AssertBusinessAsync(ErrorCodes.Forbidden, () => revokedCtl.Metadata());
+        await AssertBusinessAsync(ErrorCodes.Forbidden, () => revokedCtl.StatementDetail(statement.Id, AsOf));
         RestoreAllMenus(db, AuthorizedUserId);
-        var restored = await AgencyServiceFeeReconciliationService.ForStatementDetailAsync(
-            db, statement.Id, AuthorizedUserId, AsOf);
+        var restored = AssertOk<AgencyServiceFeeReconciliationStatementDetail>(
+            await NewReconciliationController(db, AuthorizedUserId).StatementDetail(statement.Id, AsOf));
         Assert.Equal(120m, restored.Row.ActiveAllocatedAmount);
+    }
+
+    // ===== 13b. 权威客户范围：列表 / 明细 / 元数据的范围内收敛（ERP-097） =====
+
+    [Fact]
+    public async Task Scope_limits_workbench_list_and_detail_to_authoritative_customer_range()
+    {
+        using var db = TestDbFactory.Create();
+        var ownName = $"asfr-own-{Guid.NewGuid():N}";
+        var salesmanId = SeedRestrictedSalesman(db, ownName);
+        var employeeId = db.BaseEmployees.Single(e => e.EmployeeCode == ownName).Id;
+
+        var ownCustomer = SeedCustomer(db, "C-OWN", "自有客户");
+        ownCustomer.EmpId = employeeId;
+        var foreignCustomer = SeedCustomer(db, "C-FGN", "他人客户");
+        db.SaveChanges();
+
+        var ownStatement = SeedStatement(db, "S-OWN", ownCustomer.Id, 100m,
+            dueDate: AsOf.AddDays(-3), customerCode: "C-OWN", customerName: "自有客户");
+        var foreignStatement = SeedStatement(db, "S-FGN", foreignCustomer.Id, 200m,
+            dueDate: AsOf.AddDays(-3), customerCode: "C-FGN", customerName: "他人客户");
+        SeedReceipt(db, "R-OWN", ownCustomer.Id, 500m);
+
+        var ctl = NewReconciliationController(db, salesmanId);
+
+        // 列表：只统计 / 只返回范围内客户（范围在计数与分页之前下推）
+        var report = AssertOk<AgencyServiceFeeReconciliationReport>(await ctl.Report(Query()));
+        Assert.Equal(1, report.Total);
+        Assert.Equal("S-OWN", Assert.Single(report.Groups.SelectMany(g => g.Statements)).StatementNo);
+
+        // 显式对账单 Id / 客户 Id 旁路同样只能得到空页（不泄露范围外存在性与计数）
+        Assert.Equal(0, AssertOk<AgencyServiceFeeReconciliationReport>(
+            await ctl.Report(Query(statementId: foreignStatement.Id))).Total);
+        Assert.Equal(0, AssertOk<AgencyServiceFeeReconciliationReport>(
+            await ctl.Report(Query(customerId: foreignCustomer.Id))).Total);
+
+        // 明细：范围外与不存在同一条不披露错误；范围内正常返回
+        var foreignDenied = await AssertBusinessAsync(ErrorCodes.NotFound,
+            () => ctl.StatementDetail(foreignStatement.Id, AsOf));
+        var missingDenied = await AssertBusinessAsync(ErrorCodes.NotFound,
+            () => ctl.StatementDetail(987_654_321L, AsOf));
+        Assert.Equal(AgencyServiceFeeReconciliationRules.RegisterNotFoundText, foreignDenied.Message);
+        Assert.Equal(foreignDenied.Message, missingDenied.Message);
+        Assert.Equal("S-OWN", AssertOk<AgencyServiceFeeReconciliationStatementDetail>(
+            await ctl.StatementDetail(ownStatement.Id, AsOf)).Row.StatementNo);
+
+        // 元数据：范围内身份正常返回（元数据与客户范围无关）
+        AssertOk<AgencyServiceFeeReconciliationMetadataDto>(await ctl.Metadata());
     }
 
     // ==================== 14. 明细清单有界，但聚合合计仍然精确 ====================
@@ -992,8 +1180,9 @@ public class AgencyServiceFeeReconciliationTests
             SeedAllocation(db, statement, receipt, 10m, allocatedAt: new DateTime(2026, 9, 20).AddMinutes(i));
         }
 
+        var scope = await AgencyServiceFeeReconciliationRules.EnsureRegisterAuthorizedAsync(db, AuthorizedUserId);
         var detail = await AgencyServiceFeeReconciliationService.ForStatementDetailAsync(
-            db, statement.Id, AuthorizedUserId, AsOf);
+            db, statement.Id, scope, AsOf);
 
         Assert.True(detail.AllocationsTruncated);
         Assert.Equal(AgencyServiceFeeReconciliationRules.MaxDetailsPerStatement, detail.Allocations.Count);
@@ -1002,7 +1191,8 @@ public class AgencyServiceFeeReconciliationTests
         Assert.Equal(950m, detail.Row.RemainingAmount);
 
         // 列表同样给出精确聚合（不因展示上限而给部分合计）
-        var report = await AgencyServiceFeeReconciliationService.ForQueryAsync(db, Query(statementId: statement.Id));
+        var report = await AgencyServiceFeeReconciliationService.ForQueryAsync(
+            db, Query(statementId: statement.Id), scope);
         var listRow = Assert.Single(report.Groups.SelectMany(g => g.Statements));
         Assert.Equal(1050m, listRow.ActiveAllocatedAmount);
         Assert.Equal(950m, listRow.RemainingAmount);
@@ -1105,7 +1295,7 @@ public class AgencyServiceFeeReconciliationTests
         Assert.DoesNotContain("BeginTransaction", service);
         Assert.Contains("不新增 / 不修改任何表与列", service);
 
-        // 控制器：只有 GET（打开明细重新校验授权），没有任何写入口
+        // 控制器：只有 GET（每条路由重校验实时身份 / 菜单 / 客户范围），没有任何写入口，也没有任何匿名 / 回退
         var controller = File.ReadAllText(RepoFile(
             "src", "ERP.Api", "Controllers", "AgencyServiceFeeReconciliationController.cs"));
         Assert.Contains("[Route(\"api/agency-service-fee-reconciliation\")]", controller);
@@ -1117,6 +1307,13 @@ public class AgencyServiceFeeReconciliationTests
         Assert.DoesNotContain("[HttpPut", controller);
         Assert.DoesNotContain("[HttpDelete", controller);
         Assert.Contains("fail closed", controller);
+
+        // ERP-494：每条路由都复用同一个入口授权 + 同一个权威客户范围（无匿名 / 管理员 / 环境 / 测试回退）
+        Assert.Contains("EnsureRegisterAuthorizedAsync", controller);
+        Assert.DoesNotContain("AllowAnonymous", controller);
+        Assert.Contains("EnsureStatementInScopeAsync", service);
+        Assert.Contains("FilterByCustomer", service);
+        Assert.DoesNotContain("AllowedCustomerIds = null", service);
     }
 
     // ==================== 18. 请求契约与前端 / 路由接线契约 ====================
@@ -1176,15 +1373,29 @@ public class AgencyServiceFeeReconciliationTests
            + "||" + string.Join("|", db.AgencyServiceFeeAgreements.AsNoTracking().OrderBy(a => a.Id)
                .Select(a => $"{a.Id}:{a.Status}:{a.RatePercent}:{a.IsDeleted}"));
 
-    /// <summary>播种「角色 → 菜单」授权（既有口径）：只授予传入的菜单编码；空数组 = 有角色但无菜单</summary>
+    /// <summary>
+    /// 播种**真实启用且未删除**的登录账号（ERP-494 适配既有内存夹具）：显式 Id + 既有「角色 → 菜单」授权。
+    /// 角色为系统内置（<c>IsSystem = true</c> → 数据范围不受限），聚焦身份 / 菜单与只读口径本身；
+    /// 传入空菜单数组 = 有角色但无菜单授权；传入其它菜单码 = 只有其它模块授权。
+    /// </summary>
     private static void SeedAuthorization(ErpDbContext db, long userId, params string[] menuCodes)
     {
+        db.SysUsers.Add(new SysUser
+        {
+            Id = userId,
+            UserName = $"asfr-user-{userId}",
+            PasswordHash = "hash",
+            PasswordSalt = "salt",
+            DisplayName = $"对账工作台测试账号 {userId}",
+            Status = UserStatus.Enabled
+        });
+
         var role = new SysRole
         {
             RoleName = $"对账工作台测试角色 {userId}",
             RoleCode = $"ASFR-{userId}",
-            Description = "ERP-072 授权测试",
-            IsSystem = false
+            Description = "ERP-494 授权测试",
+            IsSystem = true
         };
         db.SysRoles.Add(role);
         db.SaveChanges();
