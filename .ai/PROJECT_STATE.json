@@ -1,11 +1,10 @@
 {
   "schema_version": 2,
   "project": "NEWERP",
-  "updated_at": "2026-10-13T18:14:57.438666Z",
+  "updated_at": "2026-10-13T18:27:46.200613Z",
   "phase": "ready",
   "current_task": null,
   "queue": [
-    "ERP-489",
     "ERP-490",
     "ERP-491"
   ],
@@ -471,16 +470,17 @@
     "ERP-485",
     "ERP-486",
     "ERP-487",
-    "ERP-488"
+    "ERP-488",
+    "ERP-489"
   ],
   "blocked": [],
   "last_build": {
-    "task": "ERP-488",
+    "task": "ERP-489",
     "profile": "safe",
     "status": "passed",
     "exit_code": 0,
-    "log": ".ai\\logs\\ERP-488-validation-1.log",
-    "at": "2026-10-13T18:14:51.716279Z"
+    "log": ".ai\\logs\\ERP-489-validation-1.log",
+    "at": "2026-10-13T18:27:45.470356Z"
   },
   "last_error": null,
   "last_deepseek_fix": {
@@ -492,15 +492,14 @@
   },
   "git_sync": {
     "branch": "main",
-    "local_sha": "eeae1cc",
-    "status": "synced",
+    "local_sha": "e034506",
+    "status": "pending",
     "ahead": 0,
     "behind": 0,
-    "last_attempt_at": "2026-10-13T18:14:57.312160Z",
+    "last_attempt_at": "2026-10-13T18:27:46.074109Z",
     "last_error": null
   },
   "next_recommended_tasks": [
-    "ERP-489",
     "ERP-490",
     "ERP-491"
   ],

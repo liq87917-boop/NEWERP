@@ -21,6 +21,13 @@ namespace ERP.Api.Controllers;
 /// 锁序「来源销售订单行 → 变更申请行」）内完成，锁内重读实时授权与当前状态；失败整体回滚（零部分写入），
 /// 并发输家受控拒绝且绝不覆盖赢家已冻结的拟议快照或原始取消原因 / 时间戳（见
 /// <see cref="SalesOrderChangeRequestMutationRules"/> 与 <c>docs/sales-order-change-request-atomicity.md</c>）。</para>
+/// <para>ERP-489：<strong>每一条入口（台账 / 来源候选 / 指定来源清单 / 详情 / 登记 / 编辑 / 提交 / 取消）都无条件执行</strong>
+/// 实时身份（缺失 / 非法 / 未知 / 已删除一律未认证）、既有「销售订单」（<c>sales-order</c>）菜单授权（禁用 / 缺少或被撤销
+/// 一律权限不足）与 ERP-097 权威客户数据范围（按来源销售订单<strong>当前持久化</strong>归属判定）；已存申请的详情 / 编辑 /
+/// 提交 / 取消在授权之后无条件复核申请与实时来源归属。注册 / 编辑 / 提交 / 取消不再存在「无 HTTP 请求管线且无身份」或
+/// 「空请求路径且无身份」的免授权服务直调旁路：与调用形状完全无关，被拒调用不发号、零申请 / 拟议 / 来源 / 审计变更。
+/// 契约与边界见 <see cref="SalesOrderChangeRequestAuthorizationRules.PathIndependenceText"/> 与
+/// <c>docs/sales-order-change-entry-authorization.md</c>。</para>
 /// </summary>
 [ApiController]
 [Route("api/sales-order-change-requests")]
@@ -47,26 +54,17 @@ public class SalesOrderChangeRequestController : ControllerBase
     }
 
     /// <summary>
-    /// ERP-414：是否必须执行实时授权。真实 HTTP 请求（MVC 绑定，<c>Request.Path</c> 已赋值）一律执行；
-    /// 进程内直接调用（历史单元测试 / 内部派生读取，无 HTTP 请求管线）仅在携带当前登录身份时执行。
-    /// 只对「既无任何登录身份、又不在 HTTP 请求管线内」的调用免授权：这类调用不可能由外部请求到达，
-    /// 也绝不把缺失身份当作管理员（真实匿名请求因处于请求管线内一律 fail closed）。
+    /// ERP-489 数据 / 状态入口授权（实时身份 + 既有「销售订单」菜单 + ERP-097 权威客户范围）：
+    /// <strong>与调用形状完全无关</strong> —— 台账 / 来源候选 / 指定来源清单 / 详情 / 登记 / 编辑 / 提交 / 取消
+    /// 在读取任何计数 / 分页 / 候选 / 快照或写入任何数据之前都<strong>无条件</strong>调用
+    /// <see cref="SalesOrderChangeRequestAuthorizationRules.EnsureAccessAuthorizedAsync"/>。
+    /// <para>空请求路径与已赋值路径口径完全一致；完全未绑定请求上下文
+    /// （<c>ControllerContext.HttpContext</c> 为 null）的纯进程内直调同样 fail closed（未认证）。
+    /// 不存在「无 HTTP 请求管线且无身份」或「空请求路径且无身份」的免授权服务直调旁路，也绝不把缺失身份
+    /// 当作匿名或管理员：缺失 / 非法 / 未知 / 已删除身份一律未认证，禁用 / 缺少或被撤销菜单一律权限不足。</para>
     /// </summary>
-    private bool RequiresLiveAuthorization()
-    {
-        var http = ControllerContext?.HttpContext;
-        if (http is null) return false;
-        return http.Request.Path.HasValue || CurrentUserId() is not null;
-    }
-
-    /// <summary>
-    /// ERP-414 数据 / 状态入口授权（实时身份 + 既有「销售订单」菜单 + ERP-097 权威客户范围）：
-    /// 进程内无身份直调返回 <c>null</c>（免授权，保持既有单元测试口径），其余一律 fail closed。
-    /// </summary>
-    private async Task<SalespersonDataScope?> EnsureAuthorizedAsync()
-        => RequiresLiveAuthorization()
-            ? await SalesOrderChangeRequestAuthorizationRules.EnsureAccessAuthorizedAsync(_db, CurrentUserId())
-            : null;
+    private async Task<SalespersonDataScope> EnsureAuthorizedAsync()
+        => await SalesOrderChangeRequestAuthorizationRules.EnsureAccessAuthorizedAsync(_db, CurrentUserId());
 
     /// <summary>
     /// 变更申请台账（分页，只读）：可按来源销售订单 Id / 状态 / 关键字过滤；
@@ -120,13 +118,16 @@ public class SalesOrderChangeRequestController : ControllerBase
             await SalesOrderChangeRequestService.ListForSalesOrderAsync(_db, salesOrderId, take, scope)));
     }
 
-    /// <summary>变更申请详情（含来源快照、来源可用性与来源变化提示；只读）</summary>
+    /// <summary>
+    /// 变更申请详情（含来源快照、来源可用性与来源变化提示；只读）。
+    /// <para>ERP-489：实时授权之后<strong>无条件</strong>复核申请与实时来源归属（不再有 scope 为 <c>null</c> 的免授权回退）；
+    /// 范围外 / 已删除 / 不存在的申请与来源返回同一非披露错误。</para>
+    /// </summary>
     [HttpGet("{id:long}")]
     public async Task<IActionResult> GetById(long id)
     {
         var scope = await EnsureAuthorizedAsync();
-        if (scope is not null)
-            await SalesOrderChangeRequestAuthorizationRules.EnsureRequestAllowedAsync(_db, scope, id);
+        await SalesOrderChangeRequestAuthorizationRules.EnsureRequestAllowedAsync(_db, scope, id);
         return Ok(ApiResponse<SalesOrderChangeRequestDto>.Success(
             await SalesOrderChangeRequestService.GetAsync(_db, id, scope)));
     }

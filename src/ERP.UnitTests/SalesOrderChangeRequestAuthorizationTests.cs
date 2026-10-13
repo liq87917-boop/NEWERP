@@ -19,7 +19,9 @@ namespace ERP.UnitTests;
 /// 台账 / 详情 / 指定来源清单 / 来源候选 / 登记 / 编辑 / 提交 / 取消授权；范围在计数 / 分页 / 候选之前按来源订单
 /// <b>实时</b>归属下推；拟议客户与来源客户历史快照都不是授权依据；来源改派后历史快照客户不再代表归属；
 /// 无身份 / 已删除 / 已禁用 / 无菜单 / 仅导出菜单 / 已撤销菜单一律 fail closed；特权账号保留既有不受限历史访问；
-/// 拒绝后零写入（来源订单与下游记录不变）；进程内无身份直调保持既有免授权口径。</para>
+/// 拒绝后零写入（来源订单与下游记录不变）。
+/// <para>ERP-489：授权与调用形状完全无关 —— 完全未绑定请求上下文的纯进程内直调不再免授权（一律未认证），
+/// 不再存在无授权的服务直调旁路。</para>
 /// <para>全部使用内存数据库（<see cref="TestDbFactory"/>），不连接 SQL Server、不启动 API、不执行任何 SQL / seed。</para>
 /// </summary>
 public class SalesOrderChangeRequestAuthorizationTests
@@ -577,18 +579,52 @@ public class SalesOrderChangeRequestAuthorizationTests
     // ==================== 6. 进程内直调与授权接线契约 ====================
 
     [Fact]
-    public async Task 进程内无身份直调_保持既有免授权口径()
+    public async Task 进程内无身份直调_一律未认证且零写入()
     {
         using var db = TestDbFactory.Create();
         var order = SeedOrder(db, 7, "SO-414-PROC");
+        // ERP-489：即使存在真实启用身份，完全未绑定 HttpContext 的纯进程内直调也不得退化为任何身份。
+        var privilegedId = SeedPrivilegedUser(db);
         var controller = InProcessController(db);
 
-        var page = AssertOk<PagedResult<SalesOrderChangeRequestDto>>(
-            await controller.GetPaged(new SalesOrderChangeRequestQuery()));
-        Assert.Equal(0, page.Total);
+        await AssertDeniedAsync(controller, ErrorCodes.Unauthorized,
+            SalesOrderChangeRequestAuthorizationRules.UnauthorizedText,
+            c => c.GetPaged(new SalesOrderChangeRequestQuery()));
+        await AssertDeniedAsync(controller, ErrorCodes.Unauthorized,
+            SalesOrderChangeRequestAuthorizationRules.UnauthorizedText,
+            c => c.SourceOptions(null));
+        await AssertDeniedAsync(controller, ErrorCodes.Unauthorized,
+            SalesOrderChangeRequestAuthorizationRules.UnauthorizedText,
+            c => c.GetForSource(order.Id));
+        await AssertDeniedAsync(controller, ErrorCodes.Unauthorized,
+            SalesOrderChangeRequestAuthorizationRules.UnauthorizedText,
+            c => c.GetById(1));
+        await AssertDeniedAsync(controller, ErrorCodes.Unauthorized,
+            SalesOrderChangeRequestAuthorizationRules.UnauthorizedText,
+            c => c.Create(new SalesOrderChangeRequestSaveDto { SalesOrderId = order.Id, Reason = "进程内登记" }));
+        await AssertDeniedAsync(controller, ErrorCodes.Unauthorized,
+            SalesOrderChangeRequestAuthorizationRules.UnauthorizedText,
+            c => c.Update(1, new SalesOrderChangeRequestSaveDto { SalesOrderId = order.Id, Reason = "进程内编辑" }));
+        await AssertDeniedAsync(controller, ErrorCodes.Unauthorized,
+            SalesOrderChangeRequestAuthorizationRules.UnauthorizedText,
+            c => c.Submit(1));
+        await AssertDeniedAsync(controller, ErrorCodes.Unauthorized,
+            SalesOrderChangeRequestAuthorizationRules.UnauthorizedText,
+            c => c.Cancel(1, new SalesOrderChangeRequestCancelRequest { Reason = "进程内取消" }));
 
-        var created = AssertOk<SalesOrderChangeRequestDto>(await controller.Create(
-            new SalesOrderChangeRequestSaveDto { SalesOrderId = order.Id, Reason = "进程内登记" }));
+        // 零写入：被拒的进程内直调不新增 / 不改写任何申请、明细或来源订单。
+        Assert.Equal(0, await db.SalesOrderChangeRequests.CountAsync());
+        Assert.Equal(0, await db.SalesOrderChangeRequestDetails.CountAsync());
+        var storedOrder = await db.SalesOrders.AsNoTracking().Include(o => o.Details)
+            .SingleAsync(o => o.Id == order.Id);
+        Assert.Equal(DocumentStatus.Approved, storedOrder.Status);
+        Assert.Equal(150m, storedOrder.TotalAmount);
+        Assert.Equal(2, storedOrder.Details.Count);
+
+        // 携带真实启用身份的进程内直调（仍然空路径）照常成功：授权只取决于实时身份 / 菜单 / 范围，与请求形状无关。
+        var authorized = NewController(db, privilegedId, path: null);
+        var created = AssertOk<SalesOrderChangeRequestDto>(await authorized.Create(
+            new SalesOrderChangeRequestSaveDto { SalesOrderId = order.Id, Reason = "有身份登记" }));
         Assert.Equal(order.Id, created.SalesOrderId);
     }
 
@@ -599,6 +635,10 @@ public class SalesOrderChangeRequestAuthorizationTests
             RepoFile("src", "ERP.Api", "Controllers", "SalesOrderChangeRequestController.cs"));
         Assert.Contains("SalesOrderChangeRequestAuthorizationRules.EnsureAccessAuthorizedAsync", controller, StringComparison.Ordinal);
         Assert.Contains("SalesOrderChangeRequestAuthorizationRules.EnsureRequestAllowedAsync", controller, StringComparison.Ordinal);
+        /* ERP-489：授权与调用形状无关 —— 不再读取 Request.Path，也不再有 RequiresLiveAuthorization / 空 scope 回退 */
+        Assert.DoesNotContain("Request.Path", controller, StringComparison.Ordinal);
+        Assert.DoesNotContain("RequiresLiveAuthorization", controller, StringComparison.Ordinal);
+        Assert.DoesNotContain("scope is not null", controller, StringComparison.Ordinal);
         /* 8 条数据 / 状态路由（台账 / 来源候选 / 指定来源 / 详情 / 登记 / 编辑 / 提交 / 取消）都解析实时授权 */
         Assert.True(CountOf(controller, "var scope = await EnsureAuthorizedAsync();") >= 8,
             "所有数据 / 状态路由都必须先解析实时授权");

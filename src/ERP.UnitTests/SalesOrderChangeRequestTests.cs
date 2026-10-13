@@ -19,14 +19,74 @@ namespace ERP.UnitTests;
 /// 来源变化检测（显式提示但不覆盖拟议值）、明细新增 / 移除 / 修改对照、分页与过滤有界、
 /// 非变更边界（来源订单与报价单 / 出库 / 装柜 / 收款 / 库存 / 单证 / 财务一律不变）、
 /// 控制器 / 模型 / SchemaUpgrader 幂等结构与前端接线契约。
+/// <para>ERP-489：夹具以**真实的既有启用身份 + 既有「销售订单」（<c>sales-order</c>）菜单授权**驱动控制器，
+/// 且不设置 <c>Request.Path</c>（空路径）—— 证明这些既有业务契约只有在同一套实时授权通过之后才成立，
+/// 授权判定与请求路径 / 请求形状完全无关，不再存在无授权的服务直调旁路。</para>
 /// 全部使用内存库（TestDbFactory），不连接 SQL Server、不执行任何 SQL / 迁移 / 部署脚本。
 /// </summary>
 public class SalesOrderChangeRequestTests
 {
     // ==================== 0. 测试脚手架 ====================
 
+    /// <summary>
+    /// ERP-489：夹具以**真实的既有启用身份 + 既有「销售订单」（<c>sales-order</c>）菜单授权**驱动控制器
+    /// （系统内置角色口径 → 客户数据范围不受限），且刻意不设置 <c>Request.Path</c>（空路径）——
+    /// 既有业务契约只有在这一套实时授权通过之后才成立，授权判定与请求路径 / 请求形状完全无关。
+    /// 授权数据只播种在隔离的内存测试库中，绝不新增任何生产菜单 / 角色 / 用户授权。
+    /// </summary>
     private static SalesOrderChangeRequestController BuildController(ErpDbContext db)
-        => new(db, new DocumentNumberService(db));
+    {
+        var controller = new SalesOrderChangeRequestController(db, new DocumentNumberService(db));
+        TestAuth.SetUser(controller, SeedAuthorizedActor(db));
+        return controller;
+    }
+
+    /// <summary>
+    /// 在隔离的内存测试数据里播种一个**既有启用身份 + 既有「销售订单」菜单授权**（真实角色 → 菜单口径，
+    /// 菜单编码与 <c>SeedData</c> 同源，不新增任何生产权限），返回其用户 Id。账号沿用既有特权口径
+    /// （系统内置角色 → 数据范围不受限），以便聚焦既有业务契约。
+    /// </summary>
+    private static long SeedAuthorizedActor(ErpDbContext db)
+    {
+        var menu = db.SysMenus.FirstOrDefault(m => !m.IsDeleted
+            && m.MenuCode == SalesOrderChangeRequestAuthorizationRules.RequiredMenuCode);
+        if (menu is null)
+        {
+            menu = new SysMenu
+            {
+                MenuCode = SalesOrderChangeRequestAuthorizationRules.RequiredMenuCode,
+                MenuName = SalesOrderChangeRequestAuthorizationRules.RequiredMenuText,
+                MenuType = MenuType.Menu
+            };
+            db.SysMenus.Add(menu);
+            db.SaveChanges();
+        }
+
+        var role = new SysRole
+        {
+            RoleCode = $"socr-entry-{Guid.NewGuid():N}",
+            RoleName = "变更申请入口测试角色",
+            IsSystem = true
+        };
+        db.SysRoles.Add(role);
+        db.SaveChanges();
+        db.SysRoleMenus.Add(new SysRoleMenu { RoleId = role.Id, MenuId = menu.Id });
+        db.SaveChanges();
+
+        var user = new SysUser
+        {
+            UserName = $"socr-entry-{Guid.NewGuid():N}",
+            PasswordHash = "hash",
+            PasswordSalt = "salt",
+            DisplayName = "变更申请入口测试账号",
+            Status = UserStatus.Enabled
+        };
+        db.SysUsers.Add(user);
+        db.SaveChanges();
+        db.SysUserRoles.Add(new SysUserRole { UserId = user.Id, RoleId = role.Id });
+        db.SaveChanges();
+        return user.Id;
+    }
 
     /// <summary>来源销售订单：2 行明细（10 × 5 = 50、4 × 25 = 100；总额 150、定金比例 30% → 45）</summary>
     private static SalesOrder SeedSalesOrder(
