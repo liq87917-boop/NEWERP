@@ -2,7 +2,8 @@
 
 > 任务：`ERP-405`「Enforce live module and row scope on legacy document lists details and navigation」（阶段 3 核心业务流程完整性）。
 > 关联：`ERP-404`（旧写入门禁，`docs/legacy-bill-mutation-boundary.md`）、`ERP-308`（旧单据导出族有限目录，Stage 2）、
-> `ERP-403`（阶段 3 授权边界规划）、`ERP-406`（旧单据操作历史）。
+> `ERP-403`（阶段 3 授权边界规划）、`ERP-406`（旧单据操作历史）、
+> `ERP-495`（把同一读侧门禁补到 Excel 导入模板下载路由，见 §2 补充与 §8）。
 
 ## 1. 背景与问题证据
 
@@ -30,6 +31,16 @@
    `inquiry` 族的导出菜单与读侧授权解耦）。特权账号（超级管理员 / 系统内置角色）沿用既有全部访问口径，
    但仍须通过实时身份校验。
 4. **业务员客户数据范围**：复用唯一权威口径 `SalespersonDataScopeService`（ERP-097），每次请求重新解析（不缓存）。
+
+> **ERP-495 适用范围补充（Excel 导入模板下载路由）**：上表读侧门禁同样适用于
+> `GET {billType}/import-template`（`DownloadImportTemplate`）。该路由在任何列定义、示例行或工作簿字节生成之**前**
+> 先执行 `LegacyBillAuthorizationRules.EnsureReadAuthorizedAsync(_db, CurrentUserId(), billType)`，并复用
+> `LegacyBillReadService.ResolveScopeClause` 的既有范围裁决（行归属 / `MaxScopeCustomers = 1000` 上限），
+> 因此缺失 / 零 / 不存在 / 已删除身份（`2000`）、已禁用 / 撤销菜单 / 仅导出菜单（`2002`）以及越范围身份
+> （受限账号在无权威客户归属的 5 族上 `2002`）一律返回既有受控失败信封（HTTP 200 + 业务错误码），
+> 未知单据类型仍为 `1001`。模板内容（`ImportColumns` 派生自 `ExportColumns` 并剔除系统字段、中文表头、
+> `withSample` 仅日期列的示例行、`.xlsx` 文件名与内容类型）对授权调用方保持**完全不变**；
+> 该路由不落库、不调用 `sp_Biz_*`、不写日志 / 通知，也不改动 `LegacyBillMutationRules` 与受保护的导入路由。
 
 ## 3. 显式行归属（受限账号 fail closed，绝不猜测）
 
@@ -109,6 +120,12 @@ SQL Server `208`（无效对象名）/ `207`（无效列名，旧库 `Oid`-vs-�
 - **控制器**：未授权身份**不调用**读服务（零读取）；受限账号分页 / 详情只含授权客户（`total` 与行都被范围约束）；
   越权锚点导航与越权 `Oid` 详情返回「没有更多单据」/「单据不存在」（不泄露）；默认值同样先授权；
   拒绝路径 `SysOperationLogs` / `SysDingTalkLogs` 为空且无待写入变更。
+- **导入模板下载路由（ERP-495）**：未知单据类型 `1001`；缺失 / 零 / 负数 / 不存在身份与已删除账号 `2000`；
+  已禁用 / 无菜单 / 仅导出菜单 / 撤销菜单（下一次请求立即收敛）与越范围身份（受限账号在无权威归属族）`2002`；
+  全部拒绝路径**不生成任何列定义 / 示例行 / 工作簿字节**且零写入。授权调用方（受限业务员 + 特权账号）拿到的
+  中文表头逐一等于「导出列剔除系统字段」，`withSample=true` 示例行仅日期类字段有值、其余为空，
+  文件名（`销售订单_导入模板_yyyyMMdd.xlsx` / `销售订单_导入示例_yyyyMMdd.xlsx`）与内容类型不变；
+  模板路由**不调用**受控只读服务（分页 / 详情 / 导航 / 权威行读取调用计数全为 0）。
 
 
 ### 8.2 真实隔离 SQL 测试（`src/ERP.IntegrationTests/LegacyBillReadSqlServerTests.cs`）
@@ -135,6 +152,13 @@ SQL Server `208`（无效对象名）/ `207`（无效列名，旧库 `Oid`-vs-�
   ②越权详情与仅导出菜单账号的导航在并发下分别一致 `1002` / `2002`，收尾快照证明零写入。
 - **保留既有库存来源单据审计与原始失败日志**：测试只读取计数与只读快照，不删除 / 不清理任何既有行。
 
+- **导入模板下载路由（ERP-495）**：在真实隔离库上以新播种的既有功能菜单授权驱动真实
+  `BillProcController.DownloadImportTemplate`：未知族 `1001`；缺失 / 已删除身份 `2000`；
+  已禁用 / 无菜单 / 仅导出菜单 `2002`；受限业务员在 `purchase-order` / `stock-in` / `payment` /
+  `receiving-plan` / `pre-loading` 上 `2002`（无权威归属 fail closed，且 `LegacyBillMutationRules`
+  驱动的受保护导入路由仍为 `1004` 不变）；受限与特权账号拿到同一份中文表头与日期示例行；
+  拒绝 / 放行前后只读快照（含旧库 `SalesOrder` / `SalesOrderDetail`）全部不变（零写入）。
+
 ### 8.3 构建与回归
 
 - `.NET 8` Release 构建（`NEWERP.sln`）通过，0 警告 / 0 错误（`ERP.IntegrationTests` 启用了 `TreatWarningsAsErrors`）。
@@ -146,7 +170,9 @@ SQL Server `208`（无效对象名）/ `207`（无效列名，旧库 `Oid`-vs-�
 - 不编辑任何存储过程 / 数据库结构 / 迁移脚本 / 种子数据；不新增表 / 列 / 索引。
 - 不新增权限模型（菜单 / 角色 / 用户授权），不提供匿名或管理员降级，不把导出菜单当模块权限。
 - 不改变旧报表 / 导出路由与 ERP-308 迁移退役门槛（`GET {billType}/export` 完全不变）；
-  不改变导入模板下载路由；旧单据写路径仍由 `ERP-404` 门禁 fail closed；旧单据操作历史（`{oid}/logs`）的数据授权属 `ERP-406`。
+  导入模板下载路由（`GET {billType}/import-template`）已在 `ERP-495` 收敛到**同一份**读侧门禁
+  （见 §2 补充 / §8），模板内容与未知单据类型契约不变，且不触碰 `LegacyBillMutationRules`；
+  旧单据写路径仍由 `ERP-404` 门禁 fail closed；旧单据操作历史（`{oid}/logs`）的数据授权属 `ERP-406`。
 - 不触碰规范业务路由（`api/sales-orders` / `api/purchase-orders` / `api/inquiries` / `api/stock-ins` /
   `api/stock-outs` / `api/finance/*` / `api/container/*`）与规范生命周期守卫。
 - 不清理 / 不删除任何既有业务行、库存来源审计或既有失败日志；不执行生产凭据或生产数据操作。

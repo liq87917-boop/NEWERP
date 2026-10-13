@@ -208,6 +208,26 @@ public sealed class LegacyBillMutationSqlServerTests : IClassFixture<LegacyBillM
         }
     }
 
+    /// <summary>尝试下载导入模板：受控信封返回拒绝码，成功则返回文件内容类型 / 文件名。</summary>
+    private async Task<(bool GotEnvelope, int Code, string Message, bool GotFile)> AttemptTemplateAsync(
+        long? userId, string billType, bool withSample = false)
+    {
+        await using var db = _fixture.CreateDbContext();
+        try
+        {
+            var result = await NewController(db, userId).DownloadImportTemplate(billType, withSample);
+            if (result is OkObjectResult ok && ok.Value is ApiResponse<object> envelope)
+                return (true, envelope.Code, envelope.Message, false);
+            if (result is FileContentResult file)
+                return (false, 0, $"{file.ContentType}|{file.FileDownloadName}", true);
+            return (false, 0, "非预期的控制器响应类型", false);
+        }
+        catch (Exception ex)
+        {
+            return (false, 0, ex.Message, false);
+        }
+    }
+
     /// <summary>两条独立连接以同一起跑线并发执行（门闩对齐）。</summary>
     private static async Task<List<T>> RaceAsync<T>(Func<Task<T>> first, Func<Task<T>> second)
     {
@@ -442,6 +462,70 @@ public sealed class LegacyBillMutationSqlServerTests : IClassFixture<LegacyBillM
             Assert.Equal(ErrorCodes.RuleConflict, result.Code);
             Assert.Contains(policy.CanonicalRoute, result.Message, StringComparison.Ordinal);
         }
+
+        await AssertNoAdditionalWritesAsync(before);
+    }
+
+    // ==================== 4. 导入模板读侧门禁（ERP-495，拒绝 / 放行均零写入） ====================
+
+    [Fact]
+    public async Task Legacy_import_template_read_gate_denies_and_writes_nothing()
+    {
+        Guard();
+        var before = await SnapshotAsync();
+
+        // 无身份 → 未认证；未知单据类型 → 既有参数错误。
+        var anonymous = await AttemptTemplateAsync(null, "sales-order");
+        Assert.True(anonymous.GotEnvelope, anonymous.Message);
+        Assert.Equal(ErrorCodes.Unauthorized, anonymous.Code);
+
+        var unknown = await AttemptTemplateAsync(null, "no-such-bill");
+        Assert.True(unknown.GotEnvelope, unknown.Message);
+        Assert.Equal(ErrorCodes.InvalidParameter, unknown.Code);
+
+        // 无既有功能菜单 → 权限不足。
+        long noMenuUserId;
+        await using (var seed = _fixture.CreateDbContext())
+        {
+            var (user, _) = await SeedOperatorAsync(seed);
+            noMenuUserId = user.Id;
+        }
+
+        var noMenu = await AttemptTemplateAsync(noMenuUserId, "sales-order");
+        Assert.True(noMenu.GotEnvelope, noMenu.Message);
+        Assert.Equal(ErrorCodes.Forbidden, noMenu.Code);
+
+        // 受限操作员在无权威客户归属的族上 fail closed；同一账号的既有导入写入门禁完全不变。
+        long stockInUserId;
+        await using (var seed = _fixture.CreateDbContext())
+        {
+            var (user, _) = await SeedOperatorAsync(seed, "stock-in");
+            stockInUserId = user.Id;
+        }
+
+        var outOfScope = await AttemptTemplateAsync(stockInUserId, "stock-in");
+        Assert.True(outOfScope.GotEnvelope, outOfScope.Message);
+        Assert.Equal(ErrorCodes.Forbidden, outOfScope.Code);
+        Assert.Contains("归属", outOfScope.Message, StringComparison.Ordinal);
+
+        var import = await AttemptImportAsync(stockInUserId, "stock-in");
+        Assert.True(import.GotEnvelope, import.Message);
+        Assert.Equal(ErrorCodes.RuleConflict, import.Code);
+        Assert.Contains("/api/stock-ins", import.Message, StringComparison.Ordinal);
+
+        // 授权身份（客户归属族）：模板照常生成（只含列定义 / 示例行），但仍然零写入。
+        long salesOrderUserId;
+        await using (var seed = _fixture.CreateDbContext())
+        {
+            var (user, _) = await SeedOperatorAsync(seed, "sales-order");
+            salesOrderUserId = user.Id;
+        }
+
+        var allowed = await AttemptTemplateAsync(salesOrderUserId, "sales-order", withSample: true);
+        Assert.True(allowed.GotFile, allowed.Message);
+
+        var allowedPlain = await AttemptTemplateAsync(salesOrderUserId, "sales-order");
+        Assert.True(allowedPlain.GotFile, allowedPlain.Message);
 
         await AssertNoAdditionalWritesAsync(before);
     }

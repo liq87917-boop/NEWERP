@@ -8,12 +8,14 @@ using ERP.Application.Services;
 using ERP.Domain.Entities;
 using ERP.Domain.Enums;
 using ERP.Infrastructure.Data;
+using ERP.Infrastructure.Export;
 using ERP.Infrastructure.Reports;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
+using NPOI.XSSF.UserModel;
 using System.Security.Claims;
 using Xunit;
 
@@ -675,6 +677,180 @@ public class LegacyBillReadTests
         Assert.Contains("SO-VISIBLE", payload, StringComparison.Ordinal);
         Assert.Contains("SO-HIDDEN", payload, StringComparison.Ordinal);
         Assert.True(reads.LastScope!.IsPrivileged);
+    }
+
+    // ==================== 6. 导入模板下载路由读侧门禁（ERP-495） ====================
+
+    private static string RepoFile(params string[] parts)
+        => Path.GetFullPath(Path.Combine(
+            AppContext.BaseDirectory, "..", "..", "..", "..", "..", Path.Combine(parts)));
+
+    /// <summary>导出列受控目录（读取私有静态字段，证明导入列确实派生自导出列）。</summary>
+    private static Dictionary<string, List<(string Key, string Title)>> ExportColumnsCatalog()
+    {
+        var field = typeof(BillProcController).GetField("ExportColumns", BindingFlags.Static | BindingFlags.NonPublic);
+        Assert.NotNull(field);
+        return (Dictionary<string, List<(string Key, string Title)>>)field!.GetValue(null)!;
+    }
+
+    /// <summary>既有导入列契约：派生自导出列并剔除系统字段。</summary>
+    private static List<(string Key, string Title)> ImportColumnsOf(string billType)
+        => ExportColumnsCatalog()[billType].Where(c => !ValueNormalizer.IsSystemField(c.Key)).ToList();
+
+    [Fact]
+    public async Task 导入模板_身份菜单与范围未授权一律受控拒绝且不生成任何模板字节()
+    {
+        await using var db = TestDbFactory.Create();
+
+        // 未知单据类型：与其它旧单据路由一致，先于授权以既有受控错误拒绝（HTTP 200 + 1001）。
+        var unknown = Envelope(await NewController(db, null).DownloadImportTemplate("no-such-bill"));
+        Assert.Equal(ErrorCodes.InvalidParameter, unknown.Code);
+        Assert.Null(unknown.Data);
+
+        // 缺失 / 零 / 负数 / 不存在身份 → 未认证；绝不生成任何字节。
+        Assert.Equal(ErrorCodes.Unauthorized,
+            Envelope(await NewController(db, null).DownloadImportTemplate("sales-order")).Code);
+        Assert.Equal(ErrorCodes.Unauthorized,
+            Envelope(await NewController(db, 0).DownloadImportTemplate("sales-order")).Code);
+        Assert.Equal(ErrorCodes.Unauthorized,
+            Envelope(await NewController(db, -1).DownloadImportTemplate("sales-order")).Code);
+        Assert.Equal(ErrorCodes.Unauthorized,
+            Envelope(await NewController(db, 987_654_321).DownloadImportTemplate("sales-order")).Code);
+
+        // 已删除账号（仍为启用状态位）按未认证拒绝。
+        var deleted = SeedUser(db, UserStatus.Enabled);
+        deleted.IsDeleted = true;
+        db.SaveChanges();
+        var deletedEnvelope = Envelope(await NewController(db, deleted.Id).DownloadImportTemplate("sales-order"));
+        Assert.Equal(ErrorCodes.Unauthorized, deletedEnvelope.Code);
+        Assert.Null(deletedEnvelope.Data);
+
+        // 已禁用 → 权限不足。
+        var disabled = SeedUser(db, UserStatus.Disabled);
+        Assert.Equal(ErrorCodes.Forbidden,
+            Envelope(await NewController(db, disabled.Id).DownloadImportTemplate("sales-order")).Code);
+
+        // 无既有功能菜单 / 仅导出菜单（*-export 绝不顶替功能菜单）。
+        var (noMenu, _) = SeedRestrictedOperator(db);
+        Assert.Equal(ErrorCodes.Forbidden,
+            Envelope(await NewController(db, noMenu.Id).DownloadImportTemplate("sales-order")).Code);
+
+        var (exportOnly, _) = SeedRestrictedOperator(db, "sales-order-export");
+        var exportEnvelope = Envelope(await NewController(db, exportOnly.Id).DownloadImportTemplate("sales-order"));
+        Assert.Equal(ErrorCodes.Forbidden, exportEnvelope.Code);
+        Assert.Contains("sales-order", exportEnvelope.Message, StringComparison.Ordinal);
+        Assert.Null(exportEnvelope.Data);
+
+        // 撤销既有功能菜单后下一次请求立即收敛（每次请求重新解析，不缓存）。
+        var (revoked, revokedRole) = SeedRestrictedOperator(db, "sales-order");
+        Assert.IsType<FileContentResult>(await NewController(db, revoked.Id).DownloadImportTemplate("sales-order"));
+        foreach (var grant in db.SysRoleMenus.Where(rm => rm.RoleId == revokedRole.Id && !rm.IsDeleted).ToList())
+            grant.IsDeleted = true;
+        db.SaveChanges();
+        Assert.Equal(ErrorCodes.Forbidden,
+            Envelope(await NewController(db, revoked.Id).DownloadImportTemplate("sales-order")).Code);
+
+        // 超范围身份：受限账号在无权威客户归属的族上 fail closed（绝不因模板不含行而放开既有范围裁决）。
+        var (outOfScope, _) = SeedRestrictedOperator(db, "purchase-order", "stock-in", "payment");
+        foreach (var familyKey in new[] { "purchase-order", "stock-in", "payment" })
+        {
+            var denied = Envelope(await NewController(db, outOfScope.Id).DownloadImportTemplate(familyKey));
+            Assert.Equal(ErrorCodes.Forbidden, denied.Code);
+            Assert.Contains("归属", denied.Message, StringComparison.Ordinal);
+            Assert.Null(denied.Data);
+        }
+
+        // 全部拒绝路径零写入、零通知、零待提交变更。
+        Assert.Empty(db.SysOperationLogs);
+        Assert.Empty(db.SysDingTalkLogs);
+        Assert.False(db.ChangeTracker.HasChanges());
+    }
+
+    [Fact]
+    public async Task 导入模板_授权身份保持既有中文表头与withSample示例行契约()
+    {
+        await using var db = TestDbFactory.Create();
+        var (user, _) = SeedRestrictedOperator(db, "sales-order");
+        SeedScopedSalesman(db, user.Id);
+        var controller = NewController(db, user.Id);
+
+        var expected = ImportColumnsOf("sales-order");
+        Assert.NotEmpty(expected);
+        Assert.DoesNotContain(expected, c => ValueNormalizer.IsSystemField(c.Key));
+        Assert.DoesNotContain(expected, c => c.Key is "BillNo" or "Status");
+
+        var template = Assert.IsType<FileContentResult>(await controller.DownloadImportTemplate("sales-order"));
+        Assert.Equal("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", template.ContentType);
+        Assert.Equal($"销售订单_导入模板_{DateTime.Now:yyyyMMdd}.xlsx", template.FileDownloadName);
+
+        using (var stream = new MemoryStream(template.FileContents))
+        using (var workbook = new XSSFWorkbook(stream))
+        {
+            var sheet = workbook.GetSheetAt(0);
+            var header = sheet.GetRow(0);
+            Assert.Equal(expected.Count, (int)header.LastCellNum);
+            for (var c = 0; c < expected.Count; c++)
+                Assert.Equal(expected[c].Title, header.GetCell(c).StringCellValue);
+            Assert.Equal(0, sheet.LastRowNum); // 模板只有中文表头，无数据行
+        }
+
+        // withSample=true：仅日期类字段填示例值，其余空白（交由存储过程默认值），文件名切换为「导入示例」。
+        var sample = Assert.IsType<FileContentResult>(await controller.DownloadImportTemplate("sales-order", true));
+        Assert.Equal($"销售订单_导入示例_{DateTime.Now:yyyyMMdd}.xlsx", sample.FileDownloadName);
+
+        var headerMap = expected.ToDictionary(c => c.Title, c => c.Key);
+        using (var stream = new MemoryStream(sample.FileContents))
+        {
+            var rows = ExcelImporter.ReadRows(stream, headerMap);
+            var row = Assert.Single(rows);
+            Assert.Equal(DateTime.Today.ToString("yyyy-MM-dd"), row["OrderDate"]);
+            Assert.Equal(DateTime.Today.ToString("yyyy-MM-dd"), row["DeliveryDate"]);
+            Assert.All(row.Keys, key => Assert.EndsWith("Date", key, StringComparison.OrdinalIgnoreCase));
+        }
+
+        Assert.Empty(db.SysOperationLogs);
+        Assert.Empty(db.SysDingTalkLogs);
+        Assert.False(db.ChangeTracker.HasChanges());
+    }
+
+    [Fact]
+    public async Task 导入模板_特权账号沿用既有全量口径但仍须实时身份()
+    {
+        await using var db = TestDbFactory.Create();
+
+        // 特权账号（系统内置角色）在无权威归属族上照常（既有全部访问口径）。
+        var privilegedId = TestAuth.SeedPrivilegedUser(db);
+        var template = Assert.IsType<FileContentResult>(
+            await NewController(db, privilegedId).DownloadImportTemplate("purchase-order"));
+        Assert.Equal($"采购订单_导入模板_{DateTime.Now:yyyyMMdd}.xlsx", template.FileDownloadName);
+
+        // 特权账号仍须通过实时身份校验：账号不存在时按未认证拒绝。
+        Assert.Equal(ErrorCodes.Unauthorized,
+            Envelope(await NewController(db, 987_654_322).DownloadImportTemplate("purchase-order")).Code);
+
+        Assert.False(db.ChangeTracker.HasChanges());
+    }
+
+    [Fact]
+    public void 源码契约_导入模板在生成任何工作簿字节之前复用既有读侧门禁()
+    {
+        var import = File.ReadAllText(RepoFile("src", "ERP.Api", "Controllers", "BillProcController.Import.cs"));
+        Assert.Contains("[HttpGet(\"{billType}/import-template\")]", import);
+        Assert.Contains("LegacyBillAuthorizationRules", import);
+        Assert.Contains("EnsureReadAuthorizedAsync(_db, CurrentUserId(), billType)", import);
+        Assert.Contains("LegacyBillReadService.ResolveScopeClause", import);
+        Assert.Contains("ExcelImporter.BuildTemplate", import);
+        Assert.Contains("ApiResponse<object>.Fail(ex.Message, ex.Code)", import);
+
+        var guardAt = import.IndexOf(
+            "EnsureReadAuthorizedAsync(_db, CurrentUserId(), billType)", StringComparison.Ordinal);
+        var bytesAt = import.IndexOf("ExcelImporter.BuildTemplate", StringComparison.Ordinal);
+        Assert.True(guardAt >= 0, "导入模板路由必须复用既有读侧门禁。");
+        Assert.True(bytesAt > guardAt, "读侧门禁必须在生成任何工作簿字节之前执行。");
+
+        // 不新增任何菜单 / 权限模型，也不改动变更策略。
+        Assert.DoesNotContain("LegacyBillMutationRules", import);
+        Assert.DoesNotContain("IsInMemory", import);
     }
 
 }

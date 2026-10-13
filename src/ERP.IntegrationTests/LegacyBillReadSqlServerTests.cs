@@ -5,13 +5,16 @@ using ERP.Application.Services;
 using ERP.Domain.Entities;
 using ERP.Domain.Enums;
 using ERP.Infrastructure.Data;
+using ERP.Infrastructure.Export;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
+using NPOI.XSSF.UserModel;
 using System.Data;
+using System.Reflection;
 using System.Security.Claims;
 using System.Text.Json;
 using Xunit;
@@ -423,6 +426,99 @@ public sealed class LegacyBillReadSqlServerTests : IClassFixture<LegacyBillReadS
 
         Assert.Equal(ErrorCodes.NotFound, await detailRun);
         Assert.Equal(ErrorCodes.Forbidden, await navigateRun);
+
+        AssertUnchanged(before, await SnapshotAsync());
+    }
+
+    // ==================== 6. 导入模板下载路由读侧门禁（ERP-495） ====================
+
+    private static Dictionary<string, List<(string Key, string Title)>> ExportColumnsCatalog()
+    {
+        var field = typeof(BillProcController).GetField("ExportColumns", BindingFlags.Static | BindingFlags.NonPublic);
+        Assert.NotNull(field);
+        return (Dictionary<string, List<(string Key, string Title)>>)field!.GetValue(null)!;
+    }
+
+    /// <summary>既有导入列契约：派生自导出列并剔除系统字段（证明模板表头未被改动）。</summary>
+    private static List<(string Key, string Title)> ImportColumnsOf(string billType)
+        => ExportColumnsCatalog()[billType].Where(c => !ValueNormalizer.IsSystemField(c.Key)).ToList();
+
+    private static string[] HeaderTitles(byte[] bytes)
+    {
+        using var stream = new MemoryStream(bytes);
+        using var workbook = new XSSFWorkbook(stream);
+        var header = workbook.GetSheetAt(0).GetRow(0);
+        var titles = new string[header.LastCellNum];
+        for (var c = 0; c < titles.Length; c++) titles[c] = header.GetCell(c).StringCellValue;
+        return titles;
+    }
+
+    private static Dictionary<string, string> SampleRowOf(byte[] bytes, List<(string Key, string Title)> columns)
+    {
+        var headerMap = columns.ToDictionary(c => c.Title, c => c.Key);
+        using var stream = new MemoryStream(bytes);
+        return Assert.Single(ExcelImporter.ReadRows(stream, headerMap));
+    }
+
+    [Fact]
+    public async Task 导入模板_身份菜单与范围拒绝矩阵且零写入()
+    {
+        Guard();
+        var before = await SnapshotAsync();
+        await using var db = _fixture.CreateDbContext();
+
+        // 未知单据类型先于授权拒绝；缺失 / 已删除 → 未认证；已禁用 / 无菜单 / 仅导出菜单 → 权限不足。
+        Assert.Equal(ErrorCodes.InvalidParameter,
+            Envelope(await NewController(db, null).DownloadImportTemplate("no-such-bill")).Code);
+        Assert.Equal(ErrorCodes.Unauthorized,
+            Envelope(await NewController(db, null).DownloadImportTemplate("sales-order")).Code);
+        Assert.Equal(ErrorCodes.Unauthorized,
+            Envelope(await NewController(db, _fixture.DeletedUserId).DownloadImportTemplate("sales-order")).Code);
+        Assert.Equal(ErrorCodes.Forbidden,
+            Envelope(await NewController(db, _fixture.DisabledUserId).DownloadImportTemplate("sales-order")).Code);
+        Assert.Equal(ErrorCodes.Forbidden,
+            Envelope(await NewController(db, _fixture.MenuLessUserId).DownloadImportTemplate("sales-order")).Code);
+        Assert.Equal(ErrorCodes.Forbidden,
+            Envelope(await NewController(db, _fixture.ExportOnlyUserId).DownloadImportTemplate("sales-order")).Code);
+
+        // 受限业务员在无权威客户归属的族上 fail closed（模板不含行也不放开既有范围裁决）。
+        foreach (var familyKey in new[] { "purchase-order", "stock-in", "payment", "receiving-plan", "pre-loading" })
+        {
+            var denied = Envelope(await NewController(db, _fixture.RestrictedUserId).DownloadImportTemplate(familyKey));
+            Assert.Equal(ErrorCodes.Forbidden, denied.Code);
+            Assert.Contains("归属", denied.Message, StringComparison.Ordinal);
+            Assert.Null(denied.Data);
+        }
+
+        AssertUnchanged(before, await SnapshotAsync());
+    }
+
+    [Fact]
+    public async Task 导入模板_授权调用方保持既有中文表头与示例行契约且零写入()
+    {
+        Guard();
+        var before = await SnapshotAsync();
+        await using var db = _fixture.CreateDbContext();
+        var expected = ImportColumnsOf("sales-order");
+        var expectedTitles = expected.Select(c => c.Title).ToArray();
+
+        foreach (var userId in new[] { _fixture.RestrictedUserId, _fixture.PrivilegedUserId })
+        {
+            var template = Assert.IsType<FileContentResult>(
+                await NewController(db, userId).DownloadImportTemplate("sales-order"));
+            Assert.Equal("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", template.ContentType);
+            Assert.Equal($"销售订单_导入模板_{DateTime.Now:yyyyMMdd}.xlsx", template.FileDownloadName);
+            Assert.Equal(expectedTitles, HeaderTitles(template.FileContents));
+
+            var sample = Assert.IsType<FileContentResult>(
+                await NewController(db, userId).DownloadImportTemplate("sales-order", withSample: true));
+            Assert.Equal($"销售订单_导入示例_{DateTime.Now:yyyyMMdd}.xlsx", sample.FileDownloadName);
+
+            var row = SampleRowOf(sample.FileContents, expected);
+            Assert.Equal(DateTime.Today.ToString("yyyy-MM-dd"), row["OrderDate"]);
+            Assert.Equal(DateTime.Today.ToString("yyyy-MM-dd"), row["DeliveryDate"]);
+            Assert.All(row.Keys, key => Assert.EndsWith("Date", key, StringComparison.OrdinalIgnoreCase));
+        }
 
         AssertUnchanged(before, await SnapshotAsync());
     }

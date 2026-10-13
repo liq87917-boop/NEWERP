@@ -577,4 +577,50 @@ public class LegacyBillMutationTests
             Assert.Empty(db.SysDingTalkLogs);
         }
     }
+
+    // ==================== 6. 导入模板读侧门禁不触动既有写入门禁（ERP-495） ====================
+
+    [Fact]
+    public async Task 导入模板读侧门禁与既有导入写入门禁相互独立且拒绝时零副作用()
+    {
+        await using var db = TestDbFactory.Create();
+        var (stockIn, _) = SeedRestrictedOperator(db, "stock-in");
+        var controller = NewController(db, stockIn.Id);
+
+        // 既有受保护的导入路由完全不变：写入门禁仍在解析 / 写入之前 fail closed（与变更策略同源）。
+        var import = Envelope(await controller.Import("stock-in", null));
+        Assert.Equal(ErrorCodes.RuleConflict, import.Code);
+        Assert.Contains("/api/stock-ins", import.Message, StringComparison.Ordinal);
+
+        // 模板下载属读侧：受限账号在无权威客户归属的族上 fail closed（复用既有范围裁决，不落库）。
+        var template = Envelope(await controller.DownloadImportTemplate("stock-in"));
+        Assert.Equal(ErrorCodes.Forbidden, template.Code);
+        Assert.Contains("归属", template.Message, StringComparison.Ordinal);
+        Assert.Null(template.Data);
+
+        // 未认证身份：导入与模板下载都按未认证拒绝。
+        Assert.Equal(ErrorCodes.Unauthorized,
+            Envelope(await NewController(db, null).Import("stock-in", null)).Code);
+        Assert.Equal(ErrorCodes.Unauthorized,
+            Envelope(await NewController(db, null).DownloadImportTemplate("stock-in")).Code);
+
+        // 未知单据类型保持既有受控错误（先于授权与任何写入）。
+        Assert.Equal(ErrorCodes.InvalidParameter,
+            Envelope(await NewController(db, stockIn.Id).DownloadImportTemplate("no-such-bill")).Code);
+
+        // 授权身份（客户归属族）照常拿到模板字节 —— 模板只含列定义 / 示例，仍不改动任何业务数据。
+        var (salesOrderUser, _) = SeedRestrictedOperator(db, "sales-order");
+        Assert.IsType<FileContentResult>(
+            await NewController(db, salesOrderUser.Id).DownloadImportTemplate("sales-order"));
+        Assert.IsType<FileContentResult>(
+            await NewController(db, salesOrderUser.Id).DownloadImportTemplate("sales-order", true));
+
+        // 拒绝与放行都不写库、不占用单号、不写日志、不发通知（变更策略完全未被模板路由改动）。
+        Assert.Empty(db.StockIns);
+        Assert.Empty(db.StockInDetails);
+        Assert.Empty(db.SalesOrders);
+        Assert.Empty(db.SysOperationLogs);
+        Assert.Empty(db.SysDingTalkLogs);
+        Assert.False(db.ChangeTracker.HasChanges());
+    }
 }

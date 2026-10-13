@@ -1,6 +1,7 @@
 using ERP.Application.Common;
 using ERP.Application.Services;
 using ERP.Infrastructure.Export;
+using ERP.Infrastructure.Reports;
 using Microsoft.AspNetCore.Mvc;
 
 namespace ERP.Api.Controllers;
@@ -8,6 +9,8 @@ namespace ERP.Api.Controllers;
 /// <summary>
 /// 通用单据控制器：Excel 导入（下载导入模板 + 上传导入）
 /// 导入规则：首行为系统导出的中文表头，逐行调用对应 sp_Biz_* 的 Save 动作写入
+/// <para>ERP-495：模板下载属旧单据读侧，与查询 / 详情 / 默认值 / 导出同源，必须先通过既有读侧门禁
+/// （实时身份 + 账号状态 + 该族既有功能菜单 + ERP-097 范围裁决）再生成任何列定义 / 示例行 / 工作簿字节。</para>
 /// </summary>
 public partial class BillProcController
 {
@@ -15,11 +18,35 @@ public partial class BillProcController
     private const int MaxImportRows = 1000;
 
     /// <summary>下载导入模板（首行中文表头，可直接另存后填写；withSample=1 时附带一行示例数据）</summary>
+    /// <remarks>
+    /// ERP-495：与查询 / 详情 / 默认值 / 导出使用<b>同一份</b>既有读侧门禁
+    /// （<see cref="LegacyBillAuthorizationRules.EnsureReadAuthorizedAsync"/>：实时身份 + 账号状态 + 该族既有功能菜单 +
+    /// ERP-097 业务员客户范围），并复用既有范围裁决（归属 / 受控上限）——被拒绝时返回既有受控失败信封
+    /// （HTTP 200 + 业务错误码），绝不生成任何列定义、示例行或工作簿字节；未知单据类型仍返回既有 <c>1001</c> 提示。
+    /// 模板内容（<c>ImportColumns</c> 派生自导出列并剔除系统字段、中文表头、withSample 仅日期列的示例行、
+    /// 文件名与内容类型）对授权调用方保持完全不变；绝不新增菜单 / 授权，也绝不让 <c>*-export</c> 菜单顶替功能菜单。
+    /// </remarks>
     [HttpGet("{billType}/import-template")]
-    public IActionResult DownloadImportTemplate(string billType, [FromQuery] bool withSample = false)
+    public async Task<IActionResult> DownloadImportTemplate(string billType, [FromQuery] bool withSample = false)
     {
         if (!Bills.TryGetValue(billType, out var meta))
             return Ok(ApiResponse<object>.Fail("未知单据类型", ErrorCodes.InvalidParameter));
+
+        // ERP-495：模板下载属读侧，必须在生成任何列定义 / 示例行 / 工作簿字节之前 fail closed。
+        try
+        {
+            var scope = await LegacyBillAuthorizationRules
+                .EnsureReadAuthorizedAsync(_db, CurrentUserId(), billType);
+
+            // 复用既有读侧范围裁决（行归属 / 受控上限）：受限账号在无权威客户归属的族或超限范围上 fail closed，
+            // 绝不因为「模板不含行数据」而放开 ERP-405 / ERP-406 已建立的既有读侧边界。
+            LegacyBillReadService.ResolveScopeClause(LegacyBillReadCatalog.Resolve(billType), scope);
+        }
+        catch (BusinessException ex)
+        {
+            LogLegacyReadDenied("导入模板", billType, ex);
+            return Ok(ApiResponse<object>.Fail(ex.Message, ex.Code));
+        }
 
         var columns = ImportColumns(billType);
         var sample = withSample ? BuildSampleRow(columns) : null;

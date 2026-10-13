@@ -525,4 +525,44 @@ public class LegacyBillHistoryTests
         Assert.Equal(ErrorCodes.InvalidParameter, overflow.Code);
         Assert.Contains("偏移", overflow.Message, StringComparison.Ordinal);
     }
+
+    // ==================== 7. 导入模板下载路由先授权且不读取任何历史 / 权威行（ERP-495） ====================
+
+    [Fact]
+    public async Task 导入模板_先授权且绝不读取任何历史或权威行()
+    {
+        await using var db = TestDbFactory.Create();
+        var reads = new StubLegacyReadService().Add("sales-order", VisibleOid, 1, "SO-1");
+
+        // 缺失身份 / 无功能菜单 / 仅导出菜单 / 未知族：一律先授权拒绝，绝不读取任何历史或权威行。
+        Assert.Equal(ErrorCodes.Unauthorized,
+            Envelope(await NewController(db, null, reads).DownloadImportTemplate("sales-order")).Code);
+
+        var (noMenu, _) = SeedRestrictedOperator(db);
+        Assert.Equal(ErrorCodes.Forbidden,
+            Envelope(await NewController(db, noMenu.Id, reads).DownloadImportTemplate("sales-order")).Code);
+
+        var (exportOnly, _) = SeedRestrictedOperator(db, "sales-order-export");
+        Assert.Equal(ErrorCodes.Forbidden,
+            Envelope(await NewController(db, exportOnly.Id, reads).DownloadImportTemplate("sales-order")).Code);
+
+        Assert.Equal(ErrorCodes.InvalidParameter,
+            Envelope(await NewController(db, exportOnly.Id, reads).DownloadImportTemplate("no-such-bill")).Code);
+
+        // 授权身份：模板（含 withSample 示例行）照常生成，但绝不触碰历史 / 权威行读取服务。
+        var (user, _) = SeedRestrictedOperator(db, "sales-order");
+        SeedScopedSalesman(db, user.Id);
+        Assert.IsType<FileContentResult>(
+            await NewController(db, user.Id, reads).DownloadImportTemplate("sales-order"));
+        Assert.IsType<FileContentResult>(
+            await NewController(db, user.Id, reads).DownloadImportTemplate("sales-order", true));
+
+        Assert.Equal(0, reads.HeaderCalls);
+        Assert.Equal(0, reads.PageCalls);
+        Assert.Equal(0, reads.DetailCalls);
+        Assert.Equal(0, reads.NavigateCalls);
+        Assert.Empty(db.SysOperationLogs);
+        Assert.Empty(db.SysDingTalkLogs);
+        Assert.False(db.ChangeTracker.HasChanges());
+    }
 }
