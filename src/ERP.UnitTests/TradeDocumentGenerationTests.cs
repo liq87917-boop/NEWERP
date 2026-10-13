@@ -605,14 +605,32 @@ public class TradeDocumentGenerationTests
 
     // ==================== 工厂与种子数据 ====================
 
+    /// <summary>
+    /// ERP-497：绑定隔离测试数据里的<b>真实启用身份</b>（既有系统内置角色 → 特权数据范围）的销售订单控制器；
+    /// 单证生成入口的实时授权由动作内部无条件执行，不再依赖请求管线过滤器或空范围旁路。
+    /// </summary>
     private static SalesOrderController NewSalesOrderController(ErpDbContext db)
-        => new(db, new DocumentNumberService(db));
+    {
+        var controller = new SalesOrderController(db, new DocumentNumberService(db));
+        TestAuth.SetUser(controller, TestAuth.SeedPrivilegedUser(db));
+        return controller;
+    }
 
+    /// <summary>ERP-497：同上，装柜清单控制器。</summary>
     private static ContainerLoadingListController NewLoadingListController(ErpDbContext db)
-        => new(db, new DocumentNumberService(db));
+    {
+        var controller = new ContainerLoadingListController(db, new DocumentNumberService(db));
+        TestAuth.SetUser(controller, TestAuth.SeedPrivilegedUser(db));
+        return controller;
+    }
 
+    /// <summary>ERP-497：同上，单证中心控制器。</summary>
     private static TradeDocumentController NewTradeDocumentController(ErpDbContext db)
-        => new(new GenericService<TradeDocument>(db), db);
+    {
+        var controller = new TradeDocumentController(new GenericService<TradeDocument>(db), db);
+        TestAuth.SetUser(controller, TestAuth.SeedPrivilegedUser(db));
+        return controller;
+    }
 
     /// <summary>断言控制器方法上存在指定路由模板</summary>
     private static void AssertRouteTemplate(Type controller, string methodName, string expectedTemplate)
@@ -734,7 +752,52 @@ public class TradeDocumentGenerationTests
         return new LoadingListSeed(list, booking);
     }
 
-    /// <summary>ERP-394：受限范围下由销售订单生成单证必须先复核来源客户，越界来源不得消耗单证编号或落库。</summary>
+    /// <summary>播种隔离测试数据里的真实业务员账号（既有「单证中心」菜单授权 + ERP-097 业务员映射）。</summary>
+    private static long SeedDocCenterOperator(ErpDbContext db)
+    {
+        var menu = db.SysMenus.FirstOrDefault(m => m.MenuCode == TradeDocumentAuthorizationRules.RequiredMenuCode);
+        if (menu is null)
+        {
+            menu = new SysMenu
+            {
+                MenuCode = TradeDocumentAuthorizationRules.RequiredMenuCode,
+                MenuName = TradeDocumentAuthorizationRules.RequiredMenuText,
+                MenuType = MenuType.Menu,
+                Path = "/container/doc-center"
+            };
+            db.SysMenus.Add(menu);
+            db.SaveChanges();
+        }
+
+        var role = new SysRole
+        {
+            RoleName = "单证中心测试角色", RoleCode = $"TradeDocAuth-{Guid.NewGuid():N}", IsSystem = false
+        };
+        db.SysRoles.Add(role);
+        db.SaveChanges();
+        db.SysRoleMenus.Add(new SysRoleMenu { RoleId = role.Id, MenuId = menu.Id });
+        db.SaveChanges();
+
+        var code = $"trade-doc-auth-{Guid.NewGuid():N}";
+        db.BaseEmployees.Add(new BaseEmployee
+        {
+            EmployeeCode = code, EmployeeName = code, IsSalesman = true, Status = 1
+        });
+        db.SaveChanges();
+
+        var user = new SysUser
+        {
+            UserName = code, DisplayName = "单证中心测试账号",
+            PasswordHash = "hash", PasswordSalt = "salt", Status = UserStatus.Enabled
+        };
+        db.SysUsers.Add(user);
+        db.SaveChanges();
+        db.SysUserRoles.Add(new SysUserRole { UserId = user.Id, RoleId = role.Id });
+        db.SaveChanges();
+        return user.Id;
+    }
+
+    /// <summary>ERP-394 / ERP-497：受限业务员真实身份下由销售订单生成单证必须先复核来源客户，越界来源不得消耗单证编号或落库。</summary>
     [Fact]
     public async Task 销售订单生成_受限范围_越界来源拒绝且不落库()
     {
@@ -742,13 +805,9 @@ public class TradeDocumentGenerationTests
         var customer = SeedCustomer(db);
         var order = SeedSalesOrder(db, "SO-DOC-SCOPE-FOREIGN", customer.Id);
 
-        var controller = NewSalesOrderController(db);
-        var context = new Microsoft.AspNetCore.Http.DefaultHttpContext();
-        context.Items[TradeDocumentRequestAuthorizationFilter.ScopeItemKey] = new SalespersonDataScope
-        {
-            IsPrivileged = false, SalesmanId = 1, AllowedCustomerIds = new HashSet<long> { customer.Id + 1000 }
-        };
-        controller.ControllerContext = new ControllerContext { HttpContext = context };
+        // 真实业务员身份（既有「单证中心」菜单授权 + ERP-097 业务员映射），未持有该来源客户 → 越界拒绝。
+        var controller = new SalesOrderController(db, new DocumentNumberService(db));
+        TestAuth.SetUser(controller, SeedDocCenterOperator(db));
 
         var ex = await Assert.ThrowsAsync<BusinessException>(
             () => controller.GenerateTradeDocuments(order.Id, null));

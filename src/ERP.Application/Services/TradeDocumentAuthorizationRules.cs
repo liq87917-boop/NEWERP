@@ -25,8 +25,15 @@ namespace ERP.Application.Services;
 /// 之前复核归属；混合允许 / 越界批次<b>整体拒绝</b>、不做部分删除。</item>
 /// </list>
 /// <para><b>身份来源唯一</b>：请求提交体中的任何字段都不能指定或扩大账号身份 —— 身份只来自已认证请求主体
-/// （<c>ClaimTypes.NameIdentifier</c>），由调用方（控制器 / <c>TradeDocumentRequestAuthorizationFilter</c>）解析后以
-/// <see cref="SalespersonDataScope"/> 传入；<c>null</c> 仅表示「未经过 MVC 授权管线的进程内调用」，绝不代表匿名或管理员。</para>
+/// （<c>ClaimTypes.NameIdentifier</c>），由调用方（控制器<b>每一个路由动作</b>）解析后经
+/// <see cref="EnsureMenuAuthorizedAsync"/> 实时解析为 <see cref="SalespersonDataScope"/> 并以非空范围传入。</para>
+/// <para><b>与请求形状无关（ERP-497）</b>：上述判定由<b>每一个路由动作无条件</b>执行 —— 与 <c>Request.Path</c>
+/// 是否赋值、请求形状、以及是否绑定 <c>HttpContext</c> <b>完全无关</b>。原 HTTP 入口过滤器
+/// （<c>TradeDocumentRequestAuthorizationFilter</c>）的<b>应用</b>、它的 <c>ScopeFrom</c> /
+/// <c>HttpContext.Items</c> 范围通道、以及「进程内调用范围只能为 <c>null</c>（= 不受限）」的旁路已<b>彻底移除</b>；
+/// 空路径 / 已赋值路径 / 未绑定任何请求上下文的纯进程内直调对同一身份给出完全相同的判定，缺失 / 为零 / 未知 /
+/// 已删除身份一律按未认证拒绝，禁用账号 / 缺少或被撤销既有菜单一律按权限不足拒绝。契约见
+/// <see cref="PathIndependenceText"/>。</para>
 /// <para>边界：本类只做纯判定与有界只读查询；不新增表 / 列 / 菜单 / 权限模型，不伪造任何授权，也不改写任何
 /// 来源单据、库存来源审计、明细行快照与历史留痕。</para>
 /// </summary>
@@ -80,13 +87,36 @@ public static class TradeDocumentAuthorizationRules
         + "单证只按持久化 CustomerId 判定权威归属（绝不按单号 / 柜号 / 客户名等自由文本推断），"
         + "受限账号不得访问无主单证，特权账号保留历史访问；列表 / 导出在计数与分页之前把范围下推到数据库；"
         + "写入前校验拟议客户落在实时范围内且真实启用；混合允许 / 越界批次整体拒绝、不做部分删除；"
-        + "生成目标必须归属到来源单据的权威客户并在范围内，绝不新增权限模型、绝不把空身份当作管理员，也绝不泄露范围外单证。";
+        + "生成目标必须归属到来源单据的权威客户并在范围内，绝不新增权限模型、绝不把空身份当作管理员，也绝不泄露范围外单证。"
+        + "该判定由每一个路由动作无条件执行，与请求路径 / 请求形状 / 是否绑定 HttpContext 完全无关"
+        + "（ERP-497 已移除请求形状探针与 HttpContext.Items 范围通道，见 PathIndependenceText）。";
 
     /// <summary>边界文案（不改变单证商业口径、不改写来源单据 / 库存来源审计）</summary>
     public const string BoundaryText =
         "本护栏只保护单证中心的授权、范围与写入边界：不改写单证身份 / 单证编号 / 状态 / 明细行快照 / 审计字段，"
         + "不改写销售订单、装柜清单、库存与库存流水、发票、退税、费用或财务数据，不删除历史证据，"
-        + "也不新增任何表 / 列 / 菜单 / 权限；库存来源单据审计与既有明细行计算 / 状态冻结口径保持不变。";
+        + "也不新增任何表 / 列 / 菜单 / 权限；库存来源单据审计与既有明细行计算 / 状态冻结口径保持不变；"
+        + "不存在任何请求路径 / 请求形状 / 空请求上下文或数据库提供程序 / 测试专用开关的免授权回退。";
+
+    /// <summary>
+    /// 与请求形状无关的授权契约（ERP-497）：单证中心台账（分页 / 全部 / 详情 / 新增 / 修改 / 删除 / 批量删除 /
+    /// 打印 / 导出 / 明细行读取 / 新增 / 修改 / 删除）与四个生成入口（销售订单带入预填与直接生成、装柜清单带入预填与
+    /// 直接生成）的身份 / 账号状态 / 既有「单证中心」（<c>doc-center</c>）菜单判定必须在<b>每一个路由动作内无条件</b>
+    /// 执行，与 <c>Request.Path</c> 是否赋值、请求形状、以及控制器是否绑定 <c>HttpContext</c> <b>完全无关</b> ——
+    /// 空路径与已赋值路径口径完全一致，完全未绑定 <c>HttpContext</c> 的纯进程内直调同样执行本护栏；
+    /// 缺失 / 为零 / 未知 / 已删除身份一律按未认证拒绝，禁用账号 / 撤销或缺少既有菜单一律按权限不足拒绝。
+    /// </summary>
+    public const string PathIndependenceText =
+        "单证中心台账（分页 / 全部 / 详情 / 新增 / 修改 / 删除 / 批量删除 / 打印 / 导出 / 明细行读取 / 新增 / 修改 / 删除）与"
+        + "四个生成入口（/api/sales-orders/{id}/trade-documents/prefill、/api/sales-orders/{id}/trade-documents、"
+        + "/api/container/loading-lists/{id}/trade-documents/prefill、/api/container/loading-lists/{id}/trade-documents）的"
+        + "实时身份 / 账号状态 / 既有「单证中心」（doc-center）菜单判定与请求路径 / 请求形状 / 是否绑定 HttpContext 完全无关："
+        + "原 HTTP 入口过滤器 TradeDocumentRequestAuthorizationFilter 的应用与它的 ScopeFrom / HttpContext.Items 范围通道、"
+        + "以及「进程内调用范围只能为 null（= 不受限）」旁路已彻底移除，每个路由动作都先经 EnsureMenuAuthorizedAsync "
+        + "解析出非空权威客户范围再读取任何计数 / 单证行 / 明细快照 / 工作簿字节或写入；"
+        + "空路径与已赋值路径口径完全一致，未绑定任何请求上下文的纯进程内直调同样无条件执行本护栏；"
+        + "缺失 / 为零 / 未知 / 已删除身份按未认证拒绝，禁用账号与撤销 / 缺少既有菜单按权限不足拒绝；"
+        + "绝无匿名 / 管理员回退，不读取环境变量、不区分数据库提供程序，也不存在任何测试专用放行开关。";
 
     // ==================== 1. 身份 / 账号状态 / 菜单授权（fail closed） ====================
 
@@ -131,30 +161,40 @@ public static class TradeDocumentAuthorizationRules
     // ==================== 2. 范围下推（计数 / 分页之前） ====================
 
     /// <summary>
-    /// 单证中心作用域谓词：<c>null</c>（进程内调用）或特权账号返回恒真；受限账号只保留<b>已登记归属客户且该客户在范围内</b>
+    /// 单证中心作用域谓词：特权账号返回恒真；受限账号只保留<b>已登记归属客户且该客户在范围内</b>
     /// 的单证，缺失权威归属或越界一律排除，绝不「先查全量再内存过滤」。
+    /// <para>ERP-497：<b>不接受 <c>null</c> 范围</b> —— 原「未解析身份（进程内调用）即不过滤」的匹配全部谓词旁路
+    /// 已彻底移除；调用方必须传入路由动作内经 <see cref="EnsureMenuAuthorizedAsync"/> 解析出的<b>非空</b>范围。</para>
     /// </summary>
-    public static Expression<Func<TradeDocument, bool>> ScopeFilter(SalespersonDataScope? scope)
+    public static Expression<Func<TradeDocument, bool>> ScopeFilter(SalespersonDataScope scope)
     {
-        if (scope is null || scope.AllowedCustomerIds is null) return _ => true;
+        ArgumentNullException.ThrowIfNull(scope);
+        if (scope.AllowedCustomerIds is null) return _ => true;
         if (scope.AllowedCustomerIds.Count == 0) return _ => false;
 
         var allowed = scope.AllowedCustomerIds.ToList();
         return document => document.CustomerId.HasValue && allowed.Contains(document.CustomerId.Value);
     }
 
-    /// <summary>按权威归属客户把单证范围下推到查询（<see cref="ScopeFilter"/> 的便捷重载）。</summary>
-    public static IQueryable<TradeDocument> ApplyScope(IQueryable<TradeDocument> source, SalespersonDataScope? scope)
+    /// <summary>
+    /// 按权威归属客户把单证范围下推到查询（<see cref="ScopeFilter"/> 的便捷重载）。
+    /// <para>ERP-497：<b>不接受 <c>null</c> 范围</b>，必须在计数 / 分页 / 导出之前传入非空范围。</para>
+    /// </summary>
+    public static IQueryable<TradeDocument> ApplyScope(IQueryable<TradeDocument> source, SalespersonDataScope scope)
     {
         ArgumentNullException.ThrowIfNull(source);
+        ArgumentNullException.ThrowIfNull(scope);
         return source.Where(ScopeFilter(scope));
     }
 
     // ==================== 3. 已存 / 拟议归属校验 ====================
 
     /// <summary>
-    /// 受限账号按持久化客户 Id 的硬范围边界：<c>null</c>（进程内）/ 特权账号放行；
+    /// 受限账号按持久化客户 Id 的硬范围边界：特权账号放行；
     /// 受限账号的缺失权威归属（<c>null</c> / <c>&lt;= 0</c>）与越界一律 fail closed。
+    /// <para>ERP-497：<c>null</c> 仅兼容不经过任何单证路由的既有<b>已授权</b>派生调用
+    /// （这些调用方在自己入口已完成实时授权），<b>不是</b>匿名 / 管理员 / 环境 / 测试专用放行；
+    /// 单证中心与四个生成入口的每一个路由动作都传入非空范围。</para>
     /// </summary>
     public static void EnsureCustomerInScope(SalespersonDataScope? scope, long? customerId)
     {
@@ -166,7 +206,10 @@ public static class TradeDocumentAuthorizationRules
             throw new BusinessException(OutOfScopeText, ErrorCodes.Forbidden);
     }
 
-    /// <summary>已存单证的范围校验（读取 / 详情 / 打印 / 导出 / 修改 / 删除之前调用；特权账号保留历史访问）。</summary>
+    /// <summary>
+    /// 已存单证的范围校验（读取 / 详情 / 打印 / 导出 / 修改 / 删除之前调用；特权账号保留历史访问）。
+    /// <para>ERP-497：单证中心的每一个路由动作都先经 <see cref="EnsureMenuAuthorizedAsync"/> 解析非空范围后调用本方法。</para>
+    /// </summary>
     public static void EnsureStoredScopeAllowed(SalespersonDataScope? scope, TradeDocument document)
     {
         ArgumentNullException.ThrowIfNull(document);
@@ -196,6 +239,8 @@ public static class TradeDocumentAuthorizationRules
     /// <summary>
     /// 来源单据（销售订单 / 装柜清单）的权威客户范围校验（带入预填 / 直接生成之前调用）：
     /// 受限账号的来源缺失权威归属或越界一律 fail closed，绝不通过共享来源泄露范围外客户。
+    /// <para>ERP-497：四个生成入口路由都先经 <see cref="EnsureMenuAuthorizedAsync"/> 解析非空范围后调用本方法；
+    /// <c>null</c> 仅兼容不经过任何路由的既有已授权派生调用，不是匿名 / 管理员 / 测试专用放行。</para>
     /// </summary>
     public static void EnsureSourceScopeAllowed(SalespersonDataScope? scope, long? sourceCustomerId)
     {
@@ -210,7 +255,8 @@ public static class TradeDocumentAuthorizationRules
     /// <summary>
     /// ERP-397：生成入口在取得**来源行锁**、锁内权威重读来源之后再次复核来源客户实时范围 ——
     /// 与生成前的来源范围预检（<see cref="EnsureSourceScopeAllowed"/>）同口径，保证并发「来源客户改写」
-    /// 不会让生成落到范围外客户；<c>null</c> 范围（进程内调用）保持既有内部口径，绝不把空身份当作匿名或管理员。
+    /// 不会让生成落到范围外客户。<para>ERP-497：生成入口路由传入的都是非空实时范围；<c>null</c> 仅兼容不经过
+    /// 任何路由的既有已授权派生调用，绝不代表匿名、管理员或测试专用放行。</para>
     /// </summary>
     public static void EnsureLockedSourceScopeAllowed(SalespersonDataScope? scope, long? sourceCustomerId)
         => EnsureSourceScopeAllowed(scope, sourceCustomerId);
@@ -234,7 +280,9 @@ public static class TradeDocumentAuthorizationRules
 
     /// <summary>
     /// 拟议单证（新增 / 修改）的完整范围校验（改写任何字段之前调用）：受限账号的拟议客户必须在实时范围内；
-    /// 已登记客户必须是真实启用客户。<c>null</c> 范围（进程内调用）保持既有内部口径、不做范围限制。
+    /// 已登记客户必须是真实启用客户。
+    /// <para>ERP-497：新增 / 修改路由都先经 <see cref="EnsureMenuAuthorizedAsync"/> 解析非空范围后调用本方法；
+    /// <c>null</c> 仅兼容不经过任何路由的既有已授权派生调用，不是匿名 / 管理员 / 测试专用放行。</para>
     /// </summary>
     public static async Task EnsureProposedScopeAllowedAsync(
         IErpDbContext db, SalespersonDataScope? scope, TradeDocument proposed, CancellationToken ct = default)

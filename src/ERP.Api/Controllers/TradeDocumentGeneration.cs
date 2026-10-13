@@ -108,7 +108,11 @@ public static class TradeDocumentGeneration
 
     /// <summary>
     /// ERP-394：生成目标（单证草稿）必须归属到范围内客户 —— 受限账号的草稿缺失权威客户归属（<c>CustomerId</c> 为空）
-    /// 或归属越界一律 fail closed。<c>null</c> 范围（进程内直接调用）保持既有内部口径。
+    /// 或归属越界一律 fail closed。
+    /// <para>ERP-497：四个生成入口路由都会在调用前经
+    /// <see cref="TradeDocumentAuthorizationRules.EnsureMenuAuthorizedAsync"/> 解析实时身份 / 账号状态 /
+    /// 既有「单证中心」菜单并传入<b>非空</b>范围；<c>null</c> 仅保留给不经过任何路由的进程内派生调用
+    /// （保持既有内部口径），<b>绝不是</b>匿名 / 管理员 / 测试专用放行。</para>
     /// <para>草稿的 <c>CustomerId</c> 只来自来源单据（销售订单 <c>CustomerId</c> / 装柜清单 <c>CustomerId</c>），
     /// 绝不按单号 / 柜号 / 客户名等自由文本推断，因此本守卫即「生成目标属于授权客户」的权威判定。</para>
     /// </summary>
@@ -216,6 +220,9 @@ public static class TradeDocumentGeneration
     /// 并把选中的草稿带入单证中心新增表单。
     /// 本方法不写库、不占用单证编号流水，重复生成只在落库接口上拦截；
     /// 来源明细非法 / 超过有界行数时**同样拒绝**（与直接生成同一套校验），以免用户在落库时才发现问题。
+    /// <para>ERP-497：两个预填入口路由都会在调用前经
+    /// <see cref="TradeDocumentAuthorizationRules.EnsureMenuAuthorizedAsync"/> 解析实时身份 / 账号状态 /
+    /// 既有「单证中心」菜单并传入<b>非空</b>范围。</para>
     /// </summary>
     public static async Task<TradeDocPrefillResult> PrefillAsync(IErpDbContext db, string sourceType, long sourceId,
         string sourceNo, string? containerNo, string? salesOrderNo, string? loadingListNo,
@@ -324,7 +331,9 @@ public static class TradeDocumentGeneration
     /// <param name="sourceId">来源单据 Id（用于来源行锁；正数）。</param>
     /// <param name="requestedDocTypes">请求的单证类型（空 = 来源默认类型）。</param>
     /// <param name="reloadSource">锁内权威重读委托（返回 <c>null</c> = 来源已被并发删除）。</param>
-    /// <param name="targetScope">当前账号实时客户数据范围（<c>null</c> = 进程内调用，保持既有内部口径）。</param>
+    /// <param name="targetScope">当前账号实时客户数据范围；<b>四个生成入口路由必须传入非空范围</b>
+    /// （由 <see cref="TradeDocumentAuthorizationRules.EnsureMenuAuthorizedAsync"/> 实时解析）；<c>null</c>
+    /// 仅保留给不经过任何路由的进程内派生调用，绝不是匿名 / 管理员 / 测试专用放行。</param>
     /// <param name="ct">取消令牌。</param>
     /// <exception cref="BusinessException">
     /// 来源不存在 / 已删除（<c>NotFound</c>）；来源已作废、重复生成、来源被并发改写、明细行非法 / 超限（<c>RuleConflict</c>）；

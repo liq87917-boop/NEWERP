@@ -28,6 +28,11 @@ namespace ERP.Application.Services;
 /// <para><b>并发（ERP-395）</b>：新增 / 修改 / 删除明细行都在同一原子事务内先取<strong>父单证行锁</strong>，
 /// 再重新加载父单证与明细行做锁内复核（存在 / 未删除 / 权威归属 / 状态 / 类型 / 行序），
 /// 与表头状态 / 商业修改 / 删除 / 批量删除共用同一把锁，并发父删除 / 冻结绝不放行后到的明细行写入。</para>
+/// <para><b>范围参数边界（ERP-497）</b>：单证明细行的四个路由（读取 / 新增 / 修改 / 删除）在控制器动作内
+/// 无条件先经 <see cref="TradeDocumentAuthorizationRules.EnsureMenuAuthorizedAsync"/> 解析实时身份 / 账号状态 /
+/// 既有「单证中心」菜单，并以<b>非空</b>范围调用本服务。<c>scope</c> 仍可省略，仅服务不经过单证路由的既有
+/// <b>已授权</b>只读派生调用（兼容性用；这些调用方在自己的入口已完成实时授权），<b>绝不是</b>匿名 / 管理员 /
+/// 环境 / 测试专用放行，也不可由任何 <c>api/trade/documents</c> 路由到达。</para>
 /// </summary>
 public static class TradeDocumentItemService
 {

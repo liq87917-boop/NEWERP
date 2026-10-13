@@ -25,8 +25,18 @@ public class TradeDocumentItemTests
 {
     // ==================== 0. 测试脚手架 ====================
 
+    /// <summary>
+    /// ERP-497：绑定隔离测试数据里的<b>真实启用身份</b>（既有系统内置角色 → 特权数据范围）的单证中心控制器。
+    /// 单证路由的实时授权由动作内部无条件执行，不再依赖请求管线过滤器、<c>HttpContext.Items</c> 范围通道或
+    /// 「未解析身份即不受限」旁路；受限范围下的越界 / 无主拒绝与身份形状由
+    /// <see cref="TradeDocumentAuthorizationTests"/> 以真实业务员身份单独覆盖。
+    /// </summary>
     private static TradeDocumentController BuildController(ErpDbContext db)
-        => new(new GenericService<TradeDocument>(db), db);
+    {
+        var controller = new TradeDocumentController(new GenericService<TradeDocument>(db), db);
+        TestAuth.SetUser(controller, TestAuth.SeedPrivilegedUser(db));
+        return controller;
+    }
 
     private static TradeDocument SeedDocument(ErpDbContext db, string docNo, string docType,
         string status = "待制作", decimal amount = 0m, string currency = "USD", string remark = "")

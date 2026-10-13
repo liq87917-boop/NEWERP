@@ -49,37 +49,27 @@ public sealed class TradeDocumentAuthorizationSqlServerTests
 
     // ==================== 控制器 / 双连接脚手架 ====================
 
-    /// <summary>绑定真实 HttpContext 与（可空）已解析范围的单证中心控制器。</summary>
-    private static TradeDocumentController NewController(ErpDbContext db, SalespersonDataScope? scope, long? userId = null)
+    /// <summary>绑定真实登录身份（可空 = 无身份）的单证中心控制器；ERP-497：范围由动作内部实时解析，不再注入。</summary>
+    private static TradeDocumentController NewController(ErpDbContext db, long? userId = null)
     {
         var http = new DefaultHttpContext();
         if (userId.HasValue)
             http.User = new ClaimsPrincipal(new ClaimsIdentity(
                 new[] { new Claim(ClaimTypes.NameIdentifier, userId.Value.ToString()) }, "Test"));
-        if (scope is not null)
-            http.Items[TradeDocumentRequestAuthorizationFilter.ScopeItemKey] = scope;
 
         var controller = new TradeDocumentController(new GenericService<TradeDocument>(db), db);
         controller.ControllerContext = new ControllerContext { HttpContext = http };
         return controller;
     }
 
-    private static SalespersonDataScope Restricted(long salesmanId, params long[] allowedCustomerIds) => new()
-    {
-        IsPrivileged = false, SalesmanId = salesmanId, AllowedCustomerIds = allowedCustomerIds.ToHashSet()
-    };
-
-    private static SalespersonDataScope Privileged() =>
-        new() { IsPrivileged = true, SalesmanId = null, AllowedCustomerIds = null };
-
     /// <summary>用一条独立连接执行控制器动作（每次调用各自 DbContext / 连接 / 事务），返回成功标志与错误。</summary>
     private async Task<(bool Success, string Error)> TryAsync(
-        SalespersonDataScope? scope, Func<TradeDocumentController, Task<IActionResult>> action)
+        long userId, Func<TradeDocumentController, Task<IActionResult>> action)
     {
         await using var db = _fixture.CreateDbContext();
         try
         {
-            var result = await action(NewController(db, scope));
+            var result = await action(NewController(db, userId));
             return (result is OkObjectResult, string.Empty);
         }
         catch (Exception ex)
@@ -250,28 +240,27 @@ public sealed class TradeDocumentAuthorizationSqlServerTests
     {
         Guard();
         var tag = Tag();
-        SalespersonDataScope scope;
-        long ownId, foreignId, unlinkedId;
+        long userId, ownId, foreignId, unlinkedId;
         await using (var seed = _fixture.CreateDbContext())
         {
-            var (_, employee, _) = await SeedOperatorAsync(seed);
+            var (user, employee, _) = await SeedOperatorAsync(seed);
+            userId = user.Id;
             var own = await SeedCustomerAsync(seed, $"INT_E394_C_{tag}", employee.Id);
             var foreign = await SeedCustomerAsync(seed, $"INT_E394_F_{tag}");
             ownId = (await SeedDocumentAsync(seed, $"INT_E394_DOC_OWN_{tag}", own.Id)).Id;
             foreignId = (await SeedDocumentAsync(seed, $"INT_E394_DOC_FOREIGN_{tag}", foreign.Id)).Id;
             unlinkedId = (await SeedDocumentAsync(seed, $"INT_E394_DOC_UNLINKED_{tag}", null)).Id;
-            scope = Restricted(employee.Id, own.Id);
         }
 
-        Assert.True((await TryAsync(scope, c => c.GetPaged(new PageQuery { PageSize = 100000 }))).Success);
-        Assert.True((await TryAsync(scope, c => c.GetById(ownId))).Success);
-        Assert.False((await TryAsync(scope, c => c.GetById(foreignId))).Success);
-        Assert.False((await TryAsync(scope, c => c.GetPrint(foreignId))).Success);
-        Assert.False((await TryAsync(scope, c => c.GetItems(foreignId))).Success);
-        Assert.False((await TryAsync(scope, c => c.ExportExcel(foreignId, null, null, null, null, null))).Success);
+        Assert.True((await TryAsync(userId, c => c.GetPaged(new PageQuery { PageSize = 100000 }))).Success);
+        Assert.True((await TryAsync(userId, c => c.GetById(ownId))).Success);
+        Assert.False((await TryAsync(userId, c => c.GetById(foreignId))).Success);
+        Assert.False((await TryAsync(userId, c => c.GetPrint(foreignId))).Success);
+        Assert.False((await TryAsync(userId, c => c.GetItems(foreignId))).Success);
+        Assert.False((await TryAsync(userId, c => c.ExportExcel(foreignId, null, null, null, null, null))).Success);
         // 无主（CustomerId 缺失）单证对受限账号同样 fail closed
-        Assert.False((await TryAsync(scope, c => c.GetById(unlinkedId))).Success);
-        Assert.False((await TryAsync(scope, c => c.GetPrint(unlinkedId))).Success);
+        Assert.False((await TryAsync(userId, c => c.GetById(unlinkedId))).Success);
+        Assert.False((await TryAsync(userId, c => c.GetPrint(unlinkedId))).Success);
     }
 
     [Fact]
@@ -279,30 +268,29 @@ public sealed class TradeDocumentAuthorizationSqlServerTests
     {
         Guard();
         var tag = Tag();
-        SalespersonDataScope scope;
-        long foreignCustomerId, ownId, ownCustomerId;
+        long userId, foreignCustomerId, ownId, ownCustomerId;
         await using (var seed = _fixture.CreateDbContext())
         {
-            var (_, employee, _) = await SeedOperatorAsync(seed);
+            var (user, employee, _) = await SeedOperatorAsync(seed);
+            userId = user.Id;
             var own = await SeedCustomerAsync(seed, $"INT_E394_C_{tag}", employee.Id);
             var foreign = await SeedCustomerAsync(seed, $"INT_E394_F_{tag}");
             foreignCustomerId = foreign.Id;
             ownCustomerId = own.Id;
             ownId = (await SeedDocumentAsync(seed, $"INT_E394_DOC_{tag}", own.Id)).Id;
-            scope = Restricted(employee.Id, own.Id);
         }
 
         var forged = new TradeDocument
         {
             DocNo = $"INT_E394_FORGED_{tag}", DocType = "商业发票", CustomerId = foreignCustomerId
         };
-        Assert.False((await TryAsync(scope, c => c.Create(forged))).Success);
+        Assert.False((await TryAsync(userId, c => c.Create(forged))).Success);
 
         var edit = new TradeDocument
         {
             DocNo = $"INT_E394_DOC_{tag}", DocType = "商业发票", CustomerId = foreignCustomerId
         };
-        Assert.False((await TryAsync(scope, c => c.Update(ownId, edit))).Success);
+        Assert.False((await TryAsync(userId, c => c.Update(ownId, edit))).Success);
 
         await using (var verify = _fixture.CreateDbContext())
         {
@@ -318,19 +306,18 @@ public sealed class TradeDocumentAuthorizationSqlServerTests
     {
         Guard();
         var tag = Tag();
-        SalespersonDataScope scope;
-        long ownId, foreignId;
+        long userId, ownId, foreignId;
         await using (var seed = _fixture.CreateDbContext())
         {
-            var (_, employee, _) = await SeedOperatorAsync(seed);
+            var (user, employee, _) = await SeedOperatorAsync(seed);
+            userId = user.Id;
             var own = await SeedCustomerAsync(seed, $"INT_E394_C_{tag}", employee.Id);
             var foreign = await SeedCustomerAsync(seed, $"INT_E394_F_{tag}");
             ownId = (await SeedDocumentAsync(seed, $"INT_E394_BATCH_OWN_{tag}", own.Id)).Id;
             foreignId = (await SeedDocumentAsync(seed, $"INT_E394_BATCH_FOREIGN_{tag}", foreign.Id)).Id;
-            scope = Restricted(employee.Id, own.Id);
         }
 
-        Assert.False((await TryAsync(scope, c => c.BatchDelete(new List<long> { ownId, foreignId }))).Success);
+        Assert.False((await TryAsync(userId, c => c.BatchDelete(new List<long> { ownId, foreignId }))).Success);
 
         await using (var verify = _fixture.CreateDbContext())
         {
@@ -341,12 +328,15 @@ public sealed class TradeDocumentAuthorizationSqlServerTests
 
     // ==================== 3. 来源生成（目标授权不可绕过） ====================
 
-    /// <summary>用一条独立连接以真实范围执行销售订单生成入口。</summary>
-    private async Task<(bool Success, string Error)> TryOrderGenerateAsync(SalespersonDataScope scope, long orderId)
+    /// <summary>用一条独立连接以真实既有身份执行销售订单生成入口（ERP-497：授权由动作内部无条件解析）。</summary>
+    private async Task<(bool Success, string Error)> TryOrderGenerateAsync(long userId, long orderId)
     {
         await using var db = _fixture.CreateDbContext();
-        var http = new DefaultHttpContext();
-        http.Items[TradeDocumentRequestAuthorizationFilter.ScopeItemKey] = scope;
+        var http = new DefaultHttpContext
+        {
+            User = new ClaimsPrincipal(new ClaimsIdentity(
+                new[] { new Claim(ClaimTypes.NameIdentifier, userId.ToString()) }, "Test"))
+        };
         var controller = new SalesOrderController(db, new DocumentNumberService(db))
         {
             ControllerContext = new ControllerContext { HttpContext = http }
@@ -367,21 +357,20 @@ public sealed class TradeDocumentAuthorizationSqlServerTests
     {
         Guard();
         var tag = Tag();
-        SalespersonDataScope scope;
-        long ownOrderId, foreignOrderId, ownCustomerId;
+        long userId, ownOrderId, foreignOrderId, ownCustomerId;
         await using (var seed = _fixture.CreateDbContext())
         {
-            var (_, employee, _) = await SeedOperatorAsync(seed);
+            var (user, employee, _) = await SeedOperatorAsync(seed);
+            userId = user.Id;
             var own = await SeedCustomerAsync(seed, $"INT_E394_C_{tag}", employee.Id);
             var foreign = await SeedCustomerAsync(seed, $"INT_E394_F_{tag}");
             ownCustomerId = own.Id;
             ownOrderId = (await SeedOrderAsync(seed, $"INT_E394_SO_OWN_{tag}", own.Id)).Id;
             foreignOrderId = (await SeedOrderAsync(seed, $"INT_E394_SO_FOREIGN_{tag}", foreign.Id)).Id;
-            scope = Restricted(employee.Id, own.Id);
         }
 
-        Assert.False((await TryOrderGenerateAsync(scope, foreignOrderId)).Success);
-        Assert.True((await TryOrderGenerateAsync(scope, ownOrderId)).Success);
+        Assert.False((await TryOrderGenerateAsync(userId, foreignOrderId)).Success);
+        Assert.True((await TryOrderGenerateAsync(userId, ownOrderId)).Success);
 
         await using (var verify = _fixture.CreateDbContext())
         {
@@ -400,23 +389,22 @@ public sealed class TradeDocumentAuthorizationSqlServerTests
     {
         Guard();
         var tag = Tag();
-        SalespersonDataScope scope;
-        long foreignCustomerId;
+        long userId, foreignCustomerId;
         await using (var seed = _fixture.CreateDbContext())
         {
-            var (_, employee, _) = await SeedOperatorAsync(seed);
+            var (user, employee, _) = await SeedOperatorAsync(seed);
+            userId = user.Id;
             var own = await SeedCustomerAsync(seed, $"INT_E394_C_{tag}", employee.Id);
             var foreign = await SeedCustomerAsync(seed, $"INT_E394_F_{tag}");
             foreignCustomerId = foreign.Id;
-            scope = Restricted(employee.Id, own.Id);
         }
 
         var results = await RaceAsync(
-            () => TryAsync(scope, c => c.Create(new TradeDocument
+            () => TryAsync(userId, c => c.Create(new TradeDocument
             {
                 DocNo = $"INT_E394_RACE1_A_{tag}", DocType = "商业发票", CustomerId = foreignCustomerId
             })),
-            () => TryAsync(scope, c => c.Create(new TradeDocument
+            () => TryAsync(userId, c => c.Create(new TradeDocument
             {
                 DocNo = $"INT_E394_RACE1_B_{tag}", DocType = "商业发票", CustomerId = foreignCustomerId
             })));
@@ -434,17 +422,16 @@ public sealed class TradeDocumentAuthorizationSqlServerTests
     {
         Guard();
         var tag = Tag();
-        SalespersonDataScope scope;
-        long ownId, ownCustomerId, foreignCustomerId;
+        long userId, ownId, ownCustomerId, foreignCustomerId;
         await using (var seed = _fixture.CreateDbContext())
         {
-            var (_, employee, _) = await SeedOperatorAsync(seed);
+            var (user, employee, _) = await SeedOperatorAsync(seed);
+            userId = user.Id;
             var own = await SeedCustomerAsync(seed, $"INT_E394_C_{tag}", employee.Id);
             var foreign = await SeedCustomerAsync(seed, $"INT_E394_F_{tag}");
             ownCustomerId = own.Id;
             foreignCustomerId = foreign.Id;
             ownId = (await SeedDocumentAsync(seed, $"INT_E394_RACE2_{tag}", own.Id)).Id;
-            scope = Restricted(employee.Id, own.Id);
         }
 
         var edit = new TradeDocument
@@ -452,8 +439,8 @@ public sealed class TradeDocumentAuthorizationSqlServerTests
             DocNo = $"INT_E394_RACE2_{tag}", DocType = "商业发票", CustomerId = foreignCustomerId
         };
         var results = await RaceAsync(
-            () => TryAsync(scope, c => c.Update(ownId, edit)),
-            () => TryAsync(scope, c => c.Delete(ownId)));
+            () => TryAsync(userId, c => c.Update(ownId, edit)),
+            () => TryAsync(userId, c => c.Delete(ownId)));
 
         Assert.False(results[0].Success);   // 改写越界客户始终被拒绝
         Assert.True(results[1].Success);    // 合法删除在范围内单证上生效

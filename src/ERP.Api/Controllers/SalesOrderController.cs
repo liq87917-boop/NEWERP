@@ -893,12 +893,15 @@ public class SalesOrderController : DocumentControllerBase<SalesOrder>
     /// 并回传该订单已生成过的单证类型（前端置灰，避免重复生成）。不写库、不占用单证编号流水。
     /// <para>明细行只取订单明细的权威值（商品 / 规格 / 数量 / 单位 / 单价），箱数与重量留空（订单无此证据）；
     /// 订单明细非法 / 超过有界行数时明确拒绝，不静默丢弃、不臆造数值。</para>
+    /// <para><b>ERP-497</b>：本路由无条件先经 <see cref="TradeDocumentAuthorizationRules.EnsureMenuAuthorizedAsync"/>
+    /// 解析实时启用身份 / 账号状态 / 既有「单证中心」（<c>doc-center</c>）菜单与 ERP-097 权威客户范围，
+    /// 再用返回的<b>非空</b>范围复核来源客户；与请求路径 / 请求形状 / 是否绑定请求上下文无关。</para>
     /// </summary>
     [HttpGet("{id:long}/trade-documents/prefill")]
-    [TradeDocumentRequestAuthorizationFilter]
     public async Task<IActionResult> TradeDocumentPrefill(long id)
     {
-        var scope = TradeDocumentRequestAuthorizationFilter.ScopeFrom(HttpContext);
+        // ERP-497：实时身份 / 账号状态 / 既有「单证中心」菜单先于来源读取与任何预览构造。
+        var scope = await TradeDocumentAuthorizationRules.EnsureMenuAuthorizedAsync(Db, CurrentUserId());
         var order = await Set.AsNoTracking()
             .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted, default)
             ?? throw BusinessException.NotFound("销售订单不存在");
@@ -932,12 +935,16 @@ public class SalesOrderController : DocumentControllerBase<SalesOrder>
     /// 再把「重复生成检测 → 单证编号预约 → 表头与明细行构造 → 写入」放在同一原子事务内；
     /// 已作废订单拒绝、来源明细非法 / 超限拒绝、同一订单 + 同一单证类型只允许一套完整单证
     /// （重复点击不会产生重复单证、失败整体回滚且不占用编号）；单证落库状态统一为「待制作」。</para>
+    /// <para><b>ERP-497</b>：本路由无条件先经 <see cref="TradeDocumentAuthorizationRules.EnsureMenuAuthorizedAsync"/>
+    /// 解析实时启用身份 / 账号状态 / 既有「单证中心」（<c>doc-center</c>）菜单与 ERP-097 权威客户范围，
+    /// 再用返回的<b>非空</b>范围复核来源客户与生成目标；与请求路径 / 请求形状 / 是否绑定请求上下文无关，
+    /// 被拒绝的请求不产生任何单证 / 明细行 / 编号占用。</para>
     /// </summary>
     [HttpPost("{id:long}/trade-documents")]
-    [TradeDocumentRequestAuthorizationFilter]
     public async Task<IActionResult> GenerateTradeDocuments(long id, [FromBody] TradeDocGenerateRequest? request)
     {
-        var scope = TradeDocumentRequestAuthorizationFilter.ScopeFrom(HttpContext);
+        // ERP-497：实时身份 / 账号状态 / 既有「单证中心」菜单先于来源读取、单证编号占用与任何写入。
+        var scope = await TradeDocumentAuthorizationRules.EnsureMenuAuthorizedAsync(Db, CurrentUserId());
 
         // 生成前的有界预读（存在性 / 未作废 / 来源客户实时范围）：权威复核在来源行锁内再次执行（ERP-397）。
         var order = await Set.AsNoTracking()

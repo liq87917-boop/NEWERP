@@ -52,28 +52,22 @@ public sealed class TradeDocumentGenerationMutationSqlServerTests
 
     private static string Tag() => Guid.NewGuid().ToString("N")[..8];
 
-    private static SalespersonDataScope Restricted(long salesmanId, params long[] allowedCustomerIds) => new()
-    {
-        IsPrivileged = false, SalesmanId = salesmanId, AllowedCustomerIds = allowedCustomerIds.ToHashSet()
-    };
-
-    private static DefaultHttpContext HttpFor(SalespersonDataScope? scope, long? userId = null)
+    private static DefaultHttpContext HttpFor(long? userId = null)
     {
         var http = new DefaultHttpContext();
         if (userId.HasValue)
             http.User = new ClaimsPrincipal(new ClaimsIdentity(
                 new[] { new Claim(ClaimTypes.NameIdentifier, userId.Value.ToString()) }, "Test"));
-        if (scope is not null)
-            http.Items[TradeDocumentRequestAuthorizationFilter.ScopeItemKey] = scope;
         return http;
     }
 
     /// <summary>
-    /// 用一条独立连接以**真实既有授权**执行销售订单生成入口：先用既有 <c>doc-center</c> 菜单授权校验实时身份，
-    /// 再以既有业务员数据范围派生的范围调用真实控制器（每次调用各自 DbContext / 连接 / 事务）。
+    /// 用一条独立连接以**真实既有身份**执行销售订单生成入口：控制器动作内部无条件重新解析实时启用身份 /
+    /// 账号状态 / 既有 <c>doc-center</c> 菜单与 ERP-097 权威客户范围（ERP-497：不再经请求上下文注入范围），
+    /// 每次调用各自 DbContext / 连接 / 事务。
     /// </summary>
     private async Task<(bool Success, string Error)> TryOrderGenerateAsync(
-        SalespersonDataScope scope, long userId, long orderId, IReadOnlyList<string>? docTypes = null)
+        long userId, long orderId, IReadOnlyList<string>? docTypes = null)
     {
         await using var db = _fixture.CreateDbContext();
         try
@@ -82,7 +76,7 @@ public sealed class TradeDocumentGenerationMutationSqlServerTests
             await TradeDocumentAuthorizationRules.EnsureMenuAuthorizedAsync(db, userId);
             var controller = new SalesOrderController(db, new DocumentNumberService(db))
             {
-                ControllerContext = new ControllerContext { HttpContext = HttpFor(scope, userId) }
+                ControllerContext = new ControllerContext { HttpContext = HttpFor(userId) }
             };
             var result = await controller.GenerateTradeDocuments(orderId,
                 docTypes is null ? null : new TradeDocGenerateRequest { DocTypes = docTypes.ToList() });
@@ -94,9 +88,9 @@ public sealed class TradeDocumentGenerationMutationSqlServerTests
         }
     }
 
-    /// <summary>用一条独立连接以真实既有授权执行装柜清单生成入口。</summary>
+    /// <summary>用一条独立连接以真实既有身份执行装柜清单生成入口（ERP-497：授权由动作内部无条件解析）。</summary>
     private async Task<(bool Success, string Error)> TryLoadingGenerateAsync(
-        SalespersonDataScope scope, long userId, long loadingListId, IReadOnlyList<string>? docTypes = null)
+        long userId, long loadingListId, IReadOnlyList<string>? docTypes = null)
     {
         await using var db = _fixture.CreateDbContext();
         try
@@ -104,7 +98,7 @@ public sealed class TradeDocumentGenerationMutationSqlServerTests
             await TradeDocumentAuthorizationRules.EnsureMenuAuthorizedAsync(db, userId);
             var controller = new ContainerLoadingListController(db, new DocumentNumberService(db))
             {
-                ControllerContext = new ControllerContext { HttpContext = HttpFor(scope, userId) }
+                ControllerContext = new ControllerContext { HttpContext = HttpFor(userId) }
             };
             var result = await controller.GenerateTradeDocuments(loadingListId,
                 docTypes is null ? null : new TradeDocGenerateRequest { DocTypes = docTypes.ToList() });
@@ -124,7 +118,7 @@ public sealed class TradeDocumentGenerationMutationSqlServerTests
         {
             var controller = new SalesOrderController(db, new DocumentNumberService(db))
             {
-                ControllerContext = new ControllerContext { HttpContext = HttpFor(null, userId) }
+                ControllerContext = new ControllerContext { HttpContext = HttpFor(userId) }
             };
             var result = await controller.Cancel(orderId);
             return (result is OkObjectResult, string.Empty);
@@ -302,7 +296,6 @@ public sealed class TradeDocumentGenerationMutationSqlServerTests
         Guard();
         var tag = Tag();
         long orderId, userId, customerId;
-        SalespersonDataScope scope;
         await using (var seed = _fixture.CreateDbContext())
         {
             var (user, employee, _) = await SeedOperatorAsync(seed);
@@ -311,12 +304,11 @@ public sealed class TradeDocumentGenerationMutationSqlServerTests
             orderId = order.Id;
             userId = user.Id;
             customerId = customer.Id;
-            scope = Restricted(employee.Id, customer.Id);
         }
 
         var results = await RaceAsync(
-            () => TryOrderGenerateAsync(scope, userId, orderId, new[] { "商业发票" }),
-            () => TryOrderGenerateAsync(scope, userId, orderId, new[] { "商业发票" }));
+            () => TryOrderGenerateAsync(userId, orderId, new[] { "商业发票" }),
+            () => TryOrderGenerateAsync(userId, orderId, new[] { "商业发票" }));
 
         // 确定性赢家：恰好一侧成功（另一侧在锁内检测到重复生成 → 合法冲突拒绝）
         Assert.Equal(1, results.Count(r => r.Success));
@@ -345,7 +337,6 @@ public sealed class TradeDocumentGenerationMutationSqlServerTests
         Guard();
         var tag = Tag();
         long loadingListId, userId, customerId;
-        SalespersonDataScope scope;
         await using (var seed = _fixture.CreateDbContext())
         {
             var (user, employee, _) = await SeedOperatorAsync(seed);
@@ -354,12 +345,11 @@ public sealed class TradeDocumentGenerationMutationSqlServerTests
             loadingListId = list.Id;
             userId = user.Id;
             customerId = customer.Id;
-            scope = Restricted(employee.Id, customer.Id);
         }
 
         var results = await RaceAsync(
-            () => TryLoadingGenerateAsync(scope, userId, loadingListId, new[] { "装箱单" }),
-            () => TryLoadingGenerateAsync(scope, userId, loadingListId, new[] { "装箱单" }));
+            () => TryLoadingGenerateAsync(userId, loadingListId, new[] { "装箱单" }),
+            () => TryLoadingGenerateAsync(userId, loadingListId, new[] { "装箱单" }));
 
         Assert.Equal(1, results.Count(r => r.Success));
 
@@ -382,7 +372,6 @@ public sealed class TradeDocumentGenerationMutationSqlServerTests
         Guard();
         var tag = Tag();
         long orderId, userId;
-        SalespersonDataScope scope;
         await using (var seed = _fixture.CreateDbContext())
         {
             var (user, employee, _) = await SeedOperatorAsync(seed);
@@ -390,12 +379,11 @@ public sealed class TradeDocumentGenerationMutationSqlServerTests
             var order = await SeedOrderAsync(seed, $"INT_E397_SOC_{tag}", customer.Id);
             orderId = order.Id;
             userId = user.Id;
-            scope = Restricted(employee.Id, customer.Id);
         }
 
         var results = await RaceAsync(
             () => TryCancelOrderAsync(orderId, userId),
-            () => TryOrderGenerateAsync(scope, userId, orderId, new[] { "商业发票", "装箱单" }));
+            () => TryOrderGenerateAsync(userId, orderId, new[] { "商业发票", "装箱单" }));
 
         var cancel = results[0];
         var generate = results[1];
@@ -434,7 +422,6 @@ public sealed class TradeDocumentGenerationMutationSqlServerTests
         Guard();
         var tag = Tag();
         long loadingListId, userId;
-        SalespersonDataScope scope;
         await using (var seed = _fixture.CreateDbContext())
         {
             var (user, employee, _) = await SeedOperatorAsync(seed);
@@ -442,15 +429,14 @@ public sealed class TradeDocumentGenerationMutationSqlServerTests
             var list = await SeedLoadingListAsync(seed, $"INT_E397_ZQN_{tag}", $"CTNN{tag}", customer.Id);
             loadingListId = list.Id;
             userId = user.Id;
-            scope = Restricted(employee.Id, customer.Id);
 
             // 历史人工单证占用了确定性基础编号（来源字段无关 → 不触发重复生成守卫）
             await SeedManualDocumentAsync(seed, $"PL-INT_E397_ZQN_{tag}", "装箱单", $"OTHER{tag}");
         }
 
         var results = await RaceAsync(
-            () => TryLoadingGenerateAsync(scope, userId, loadingListId, new[] { "装箱单" }),
-            () => TryLoadingGenerateAsync(scope, userId, loadingListId, new[] { "装箱单" }));
+            () => TryLoadingGenerateAsync(userId, loadingListId, new[] { "装箱单" }),
+            () => TryLoadingGenerateAsync(userId, loadingListId, new[] { "装箱单" }));
 
         Assert.Equal(1, results.Count(r => r.Success));
 
@@ -478,7 +464,6 @@ public sealed class TradeDocumentGenerationMutationSqlServerTests
         Guard();
         var tag = Tag();
         long orderId, userId;
-        SalespersonDataScope scope;
         await using (var seed = _fixture.CreateDbContext())
         {
             var (user, employee, _) = await SeedOperatorAsync(seed);
@@ -488,12 +473,11 @@ public sealed class TradeDocumentGenerationMutationSqlServerTests
                 quantity: 10m, unitPrice: 2m, status: DocumentStatus.Pending);
             orderId = order.Id;
             userId = user.Id;
-            scope = Restricted(employee.Id, customer.Id);
         }
 
         var results = await RaceAsync(
             () => TryUpdateOrderAsync(orderId, 30m, 2m),
-            () => TryOrderGenerateAsync(scope, userId, orderId, new[] { "商业发票" }));
+            () => TryOrderGenerateAsync(userId, orderId, new[] { "商业发票" }));
 
         Assert.True(results[0].Success || results[1].Success, "编辑与生成至少一侧应成功。");
 
@@ -518,7 +502,6 @@ public sealed class TradeDocumentGenerationMutationSqlServerTests
         Guard();
         var tag = Tag();
         long orderId, userId;
-        SalespersonDataScope scope;
         await using (var seed = _fixture.CreateDbContext())
         {
             var (user, employee, _) = await SeedOperatorAsync(seed);
@@ -526,14 +509,13 @@ public sealed class TradeDocumentGenerationMutationSqlServerTests
             var order = await SeedOrderAsync(seed, $"INT_E397_SOM_{tag}", customer.Id);
             orderId = order.Id;
             userId = user.Id;
-            scope = Restricted(employee.Id, customer.Id);
         }
 
-        var first = await TryOrderGenerateAsync(scope, userId, orderId, new[] { "商业发票" });
+        var first = await TryOrderGenerateAsync(userId, orderId, new[] { "商业发票" });
         Assert.True(first.Success, first.Error);
 
         // 混合请求（已生成 + 未生成）：整体拒绝，未生成类型一张也不落库
-        var mixed = await TryOrderGenerateAsync(scope, userId, orderId, new[] { "商业发票", "装箱单" });
+        var mixed = await TryOrderGenerateAsync(userId, orderId, new[] { "商业发票", "装箱单" });
         Assert.False(mixed.Success);
         Assert.Contains("不能重复生成", mixed.Error);
 

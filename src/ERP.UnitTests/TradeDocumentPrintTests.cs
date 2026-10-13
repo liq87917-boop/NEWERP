@@ -477,8 +477,68 @@ public class TradeDocumentPrintTests
 
     // ==================== 工厂与断言辅助 ====================
 
+    /// <summary>
+    /// ERP-497：绑定隔离测试数据里的<b>真实启用身份</b>（既有系统内置角色 → 特权数据范围）的单证中心控制器；
+    /// 单证路由的实时授权由动作内部无条件执行，与请求路径 / 请求形状 / 是否绑定请求上下文无关。
+    /// </summary>
     private static TradeDocumentController NewTradeDocumentController(ErpDbContext db)
-        => new(new GenericService<TradeDocument>(db), db);
+    {
+        var controller = new TradeDocumentController(new GenericService<TradeDocument>(db), db);
+        TestAuth.SetUser(controller, TestAuth.SeedPrivilegedUser(db));
+        return controller;
+    }
+
+    /// <summary>播种隔离测试数据里的真实业务员账号（既有「单证中心」菜单授权 + ERP-097 业务员映射）。</summary>
+    private static long SeedDocCenterOperator(ErpDbContext db)
+    {
+        var menu = db.SysMenus.FirstOrDefault(
+            m => m.MenuCode == TradeDocumentAuthorizationRules.RequiredMenuCode && !m.IsDeleted);
+        if (menu is null)
+        {
+            menu = new SysMenu
+            {
+                MenuCode = TradeDocumentAuthorizationRules.RequiredMenuCode,
+                MenuName = TradeDocumentAuthorizationRules.RequiredMenuText,
+                MenuType = MenuType.Menu,
+                Path = "/container/doc-center"
+            };
+            db.SysMenus.Add(menu);
+            db.SaveChanges();
+        }
+
+        var role = new SysRole
+        {
+            RoleName = "单证中心测试角色",
+            RoleCode = $"TradeDocAuth-{Guid.NewGuid():N}",
+            IsSystem = false
+        };
+        db.SysRoles.Add(role);
+        db.SaveChanges();
+        db.SysRoleMenus.Add(new SysRoleMenu { RoleId = role.Id, MenuId = menu.Id });
+        db.SaveChanges();
+
+        var code = $"trade-doc-auth-{Guid.NewGuid():N}";
+        var employee = new BaseEmployee
+        {
+            EmployeeCode = code, EmployeeName = code, IsSalesman = true, Status = 1
+        };
+        db.BaseEmployees.Add(employee);
+        db.SaveChanges();
+
+        var user = new SysUser
+        {
+            UserName = code,
+            DisplayName = "单证中心测试账号",
+            PasswordHash = "hash",
+            PasswordSalt = "salt",
+            Status = UserStatus.Enabled
+        };
+        db.SysUsers.Add(user);
+        db.SaveChanges();
+        db.SysUserRoles.Add(new SysUserRole { UserId = user.Id, RoleId = role.Id });
+        db.SaveChanges();
+        return user.Id;
+    }
 
     /// <summary>
     /// ERP-493：为单证打印的进程内打印模板夹具绑定一个真实启用身份 —— 该身份持有隔离内存测试库中的
@@ -592,20 +652,16 @@ public class TradeDocumentPrintTests
         return document;
     }
 
-    /// <summary>ERP-394：受限范围下打印与列表 / 详情同口径 —— 越界单证的打印件（表头 + 明细快照）一律不返回。</summary>
+    /// <summary>ERP-394 / ERP-497：受限业务员真实身份下打印与列表 / 详情同口径 —— 越界单证的打印件（表头 + 明细快照）一律不返回。</summary>
     [Fact]
     public async Task 打印接口_受限范围_越界单证拒绝且不泄露()
     {
         using var db = TestDbFactory.Create();
         var document = SeedDocument(db, "DOC-PRINT-FOREIGN", "商业发票");
 
-        var controller = NewTradeDocumentController(db);
-        var context = new Microsoft.AspNetCore.Http.DefaultHttpContext();
-        context.Items[TradeDocumentRequestAuthorizationFilter.ScopeItemKey] = new SalespersonDataScope
-        {
-            IsPrivileged = false, SalesmanId = 1, AllowedCustomerIds = new HashSet<long> { 10 }
-        };
-        controller.ControllerContext = new ControllerContext { HttpContext = context };
+        // 真实业务员身份（既有「单证中心」菜单授权 + ERP-097 业务员映射），未持有任何客户 → 该单证越界。
+        var controller = new TradeDocumentController(new GenericService<TradeDocument>(db), db);
+        TestAuth.SetUser(controller, SeedDocCenterOperator(db));
 
         var error = await Assert.ThrowsAsync<BusinessException>(() => controller.GetPrint(document.Id));
         Assert.Equal(ErrorCodes.Forbidden, error.Code);

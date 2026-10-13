@@ -35,11 +35,24 @@ public class TradeDocumentGenerationMutationTests
 
     // ==================== 0. 脚手架 ====================
 
+    /// <summary>
+    /// ERP-497：绑定隔离测试数据里的<b>真实启用身份</b>（既有系统内置角色 → 特权数据范围）的销售订单控制器；
+    /// 单证生成入口的实时授权由动作内部无条件执行，不再依赖请求管线过滤器或空范围旁路。
+    /// </summary>
     private static SalesOrderController NewSalesOrderController(ErpDbContext db)
-        => new(db, new DocumentNumberService(db));
+    {
+        var controller = new SalesOrderController(db, new DocumentNumberService(db));
+        TestAuth.SetUser(controller, TestAuth.SeedPrivilegedUser(db));
+        return controller;
+    }
 
+    /// <summary>ERP-497：同上，装柜清单控制器。</summary>
     private static ContainerLoadingListController NewLoadingListController(ErpDbContext db)
-        => new(db, new DocumentNumberService(db));
+    {
+        var controller = new ContainerLoadingListController(db, new DocumentNumberService(db));
+        TestAuth.SetUser(controller, TestAuth.SeedPrivilegedUser(db));
+        return controller;
+    }
 
     private static BaseCustomer SeedCustomer(ErpDbContext db, string currency = "EUR")
     {

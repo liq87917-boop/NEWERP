@@ -7,6 +7,7 @@ using ERP.Domain.Enums;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using System.Data;
+using System.Security.Claims;
 
 namespace ERP.Api.Controllers;
 
@@ -27,6 +28,19 @@ public class ContainerLoadingListController : DocumentControllerBase<ContainerLo
     public ContainerLoadingListController(IErpDbContext db, IDocumentNumberService noService) : base(db)
     {
         _noService = noService;
+    }
+
+    /// <summary>
+    /// ERP-497 当前登录用户 Id：<strong>缺少请求上下文（<c>ControllerContext.HttpContext</c> 为 null）、
+    /// 缺少身份声明、非数字或非正数时一律安全解析为 <c>null</c></strong>，由既有授权规则在触达任何清单 /
+    /// 明细 / 单证查询<strong>之前</strong>返回受控未认证（fail closed）；绝不猜测身份、绝不回退为匿名 / 管理员。
+    /// <para>本方法不读取请求路径属性、不读取环境变量、不判断数据库提供程序，也不使用任何测试专用开关：
+    /// 「空路径 / 已赋值路径 / 无请求上下文」三种调用形状的身份解析口径完全一致。</para>
+    /// </summary>
+    private new long? CurrentUserId()
+    {
+        var value = ControllerContext?.HttpContext?.User?.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        return long.TryParse(value, out var id) && id > 0 ? id : null;
     }
 
     [HttpGet]
@@ -171,12 +185,15 @@ public class ContainerLoadingListController : DocumentControllerBase<ContainerLo
     /// 不写库、不占用单证编号流水。
     /// <para>明细行只取清单明细确有证据的值（商品 / 数量 / 箱数 / 毛重）：净重来源没有该列一律留空，
     /// 清单以 0 表示未登记 <strong>不</strong>写成 0；清单明细超过有界行数时明确拒绝。</para>
+    /// <para><b>ERP-497</b>：本路由无条件先经 <see cref="TradeDocumentAuthorizationRules.EnsureMenuAuthorizedAsync"/>
+    /// 解析实时启用身份 / 账号状态 / 既有「单证中心」（<c>doc-center</c>）菜单与 ERP-097 权威客户范围，
+    /// 再用返回的<b>非空</b>范围复核来源客户；与请求路径 / 请求形状 / 是否绑定请求上下文无关。</para>
     /// </summary>
     [HttpGet("{id:long}/trade-documents/prefill")]
-    [TradeDocumentRequestAuthorizationFilter]
     public async Task<IActionResult> TradeDocumentPrefill(long id)
     {
-        var scope = TradeDocumentRequestAuthorizationFilter.ScopeFrom(HttpContext);
+        // ERP-497：实时身份 / 账号状态 / 既有「单证中心」菜单先于来源读取与任何预览构造。
+        var scope = await TradeDocumentAuthorizationRules.EnsureMenuAuthorizedAsync(Db, CurrentUserId());
         var list = await GetOrThrowAsync(id, "装柜清单不存在");
         // ERP-394：受限账号的来源客户必须在单证中心权威范围内（fail closed，不通过预填泄露范围外客户）。
         TradeDocumentAuthorizationRules.EnsureSourceScopeAllowed(scope, list.CustomerId);
@@ -208,12 +225,16 @@ public class ContainerLoadingListController : DocumentControllerBase<ContainerLo
     /// 再把「重复生成检测 → 单证编号预约 → 表头与明细行构造 → 写入」放在同一原子事务内；
     /// 同一柜号（或同一装柜清单）+ 同一单证类型只允许一套完整单证（重复点击被守卫拒绝、失败整体回滚），
     /// 已作废清单拒绝；单证落库状态统一为「待制作」，生成后仍可人工修改。</para>
+    /// <para><b>ERP-497</b>：本路由无条件先经 <see cref="TradeDocumentAuthorizationRules.EnsureMenuAuthorizedAsync"/>
+    /// 解析实时启用身份 / 账号状态 / 既有「单证中心」（<c>doc-center</c>）菜单与 ERP-097 权威客户范围，
+    /// 再用返回的<b>非空</b>范围复核来源客户与生成目标；与请求路径 / 请求形状 / 是否绑定请求上下文无关，
+    /// 被拒绝的请求不产生任何单证 / 明细行 / 编号占用。</para>
     /// </summary>
     [HttpPost("{id:long}/trade-documents")]
-    [TradeDocumentRequestAuthorizationFilter]
     public async Task<IActionResult> GenerateTradeDocuments(long id, [FromBody] TradeDocGenerateRequest? request)
     {
-        var scope = TradeDocumentRequestAuthorizationFilter.ScopeFrom(HttpContext);
+        // ERP-497：实时身份 / 账号状态 / 既有「单证中心」菜单先于来源读取、单证编号占用与任何写入。
+        var scope = await TradeDocumentAuthorizationRules.EnsureMenuAuthorizedAsync(Db, CurrentUserId());
 
         // 生成前的有界预读（存在性 / 未作废 / 来源客户实时范围）：权威复核在来源行锁内再次执行（ERP-397）。
         var list = await GetOrThrowAsync(id, "装柜清单不存在");

@@ -34,14 +34,32 @@ public class TradeDocumentLineSnapshotTests
 
     // ==================== 0. 测试脚手架 ====================
 
+    /// <summary>
+    /// ERP-497：绑定隔离测试数据里的<b>真实启用身份</b>（既有系统内置角色 → 特权数据范围）的销售订单控制器；
+    /// 单证生成 / 预填入口的实时授权由动作内部无条件执行，不再依赖请求管线过滤器或空范围旁路。
+    /// </summary>
     private static SalesOrderController SalesOrderCtl(ErpDbContext db)
-        => new(db, new DocumentNumberService(db));
+    {
+        var controller = new SalesOrderController(db, new DocumentNumberService(db));
+        TestAuth.SetUser(controller, TestAuth.SeedPrivilegedUser(db));
+        return controller;
+    }
 
+    /// <summary>ERP-497：同上，装柜清单控制器。</summary>
     private static ContainerLoadingListController LoadingListCtl(ErpDbContext db)
-        => new(db, new DocumentNumberService(db));
+    {
+        var controller = new ContainerLoadingListController(db, new DocumentNumberService(db));
+        TestAuth.SetUser(controller, TestAuth.SeedPrivilegedUser(db));
+        return controller;
+    }
 
+    /// <summary>ERP-497：同上，单证中心控制器。</summary>
     private static TradeDocumentController TradeDocCtl(ErpDbContext db)
-        => new(new GenericService<TradeDocument>(db), db);
+    {
+        var controller = new TradeDocumentController(new GenericService<TradeDocument>(db), db);
+        TestAuth.SetUser(controller, TestAuth.SeedPrivilegedUser(db));
+        return controller;
+    }
 
     /// <summary>断言成功响应并取出数据（业务码必须为 0）</summary>
     private static T DataOf<T>(IActionResult result)
