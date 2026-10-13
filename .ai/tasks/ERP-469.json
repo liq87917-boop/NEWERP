@@ -1,0 +1,71 @@
+{
+  "id": "ERP-469",
+  "title": "Fix all seven recorded manual web-test regressions without weakening ERP controls",
+  "status": "pending",
+  "risk_level": "medium",
+  "description": "Resolve every discrete finding in NEWERP网页测试错误.xlsx: new inquiry must obtain the existing authorized system default currency/exchange-rate rather than require manual rate entry; validity days must use integral day increments; tabs must retain more than three pages and preserve a user's unsaved page state when switching; inquiry creation must work and inquiry/sales-order export views must offer an explicit search/preview action before download; opening a genuinely new document must not silently reuse earlier form values and must provide a clear-all action. Reuse the existing parameter-authorized default endpoint and existing document authorization, validation, transaction and audit paths. Do not add external FX lookup, SQL, schema, permissions, production data access, or privileged fallback. User-entered values remain editable and server-side authority remains decisive.",
+  "acceptance_criteria": [
+    "A menu-authorized user can open a new inquiry and receive only the existing authorized system defaults for currency and positive exchange rate; unavailable or unauthorized defaults fail closed without manufacturing a rate, while save still uses the existing server-side validation, authorization, transaction and audit paths.",
+    "Inquiry validity days is an integer-day input with an integral browser step and client validation; a fractional wheel increment cannot be submitted as a valid day count, while existing server validation remains authoritative.",
+    "The tab bar no longer evicts the fourth and later pages. Switching tabs preserves each page's unsaved, non-sensitive UI state for the browser session without serializing tokens, passwords, authorization decisions, or persisted record mutations; closing a tab discards its saved state.",
+    "Inquiry creation is reachable and succeeds through the existing authorized flow. Both inquiry export and sales-order export expose a visible search/preview action that applies date, status and keyword filters before download, and the downloaded file uses the same authorized filter parameters. No export may bypass its existing permission or data-scope checks.",
+    "A genuinely new document starts from documented defaults only and never carries prior form values. The form exposes a clear-all action that restores defaults in one operation, while edit/copy/source-prefill flows retain only their explicit, labelled behavior.",
+    "Focused browserless JavaScript regression tests cover default loading/failure, integral valid-days control, tab retention/state lifecycle, export search parameters, new-form isolation and clear-all behavior. Relevant API/unit tests cover default authorization and fail-closed behavior. Safe Release build with analyzers/warnings-as-errors and the full unit suite pass; retain any real environment-blocker evidence instead of claiming browser acceptance."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/BillProcController.cs",
+    "src/ERP.Api/Controllers/BillProcController.Export.cs",
+    "src/ERP.Api/Controllers/ParameterController.cs",
+    "src/ERP.Application/Services/SystemParameterAuthorizationRules.cs",
+    "src/ERP.Api/wwwroot/js/app.js",
+    "src/ERP.Api/wwwroot/js/bill-config.js",
+    "src/ERP.Api/wwwroot/js/bill-export.js",
+    "src/ERP.Api/wwwroot/js/bill-v2-form.js",
+    "src/ERP.Api/wwwroot/js/bill-v2.js",
+    "src/ERP.UnitTests/BillProcControllerTests.cs",
+    "src/ERP.UnitTests/SystemParameterAuthorizationTests.cs",
+    "tests/manual-web-test-regressions.test.js",
+    "docs/manual-web-test-regressions.md"
+  ],
+  "criterion_path_map": {
+    "Authorized inquiry defaults and integral valid-days semantics": [
+      "src/ERP.Api/Controllers/BillProcController.cs",
+      "src/ERP.Application/Services/SystemParameterAuthorizationRules.cs",
+      "src/ERP.Api/wwwroot/js/bill-config.js",
+      "src/ERP.Api/wwwroot/js/bill-v2-form.js",
+      "src/ERP.UnitTests/BillProcControllerTests.cs"
+    ],
+    "Tab retention and unsaved non-sensitive browser-session state": [
+      "src/ERP.Api/wwwroot/js/app.js",
+      "tests/manual-web-test-regressions.test.js"
+    ],
+    "Search/preview before authorized inquiry and sales-order export": [
+      "src/ERP.Api/Controllers/BillProcController.Export.cs",
+      "src/ERP.Api/wwwroot/js/bill-export.js",
+      "tests/manual-web-test-regressions.test.js"
+    ],
+    "New-form isolation and clear-all behavior": [
+      "src/ERP.Api/wwwroot/js/bill-v2-form.js",
+      "src/ERP.Api/wwwroot/js/bill-v2.js",
+      "tests/manual-web-test-regressions.test.js"
+    ]
+  },
+  "validation_profile": "safe",
+  "depends_on": [],
+  "auto_start": true,
+  "requires_human_approval": false,
+  "completion_mode": "build",
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "human_gate": {
+    "required": false,
+    "status": "not_required",
+    "level": "L1",
+    "reason": "Repository-only UI and existing authorized-default behavior; no schema, production, deployment, or irreversible action."
+  },
+  "max_attempts": 3,
+  "attempts": 0,
+  "created_at": "2026-10-13T11:30:00Z"
+}
