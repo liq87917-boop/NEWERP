@@ -1,0 +1,84 @@
+{
+  "title": "Enforce live system log register authority and prevent cross-module operation history disclosure",
+  "description": "Stage 3 verified access-control gap in the system settings module, the same defect class repaired for the sibling controllers of src/ERP.Api/Controllers/SysSimpleControllers.cs (DocumentNumberRuleController, ERP-445; ClientLimitController, ERP-457) and for legacy operation-history reads (ERP-406). The same file's OperationLogController (:222-271) declares [ApiController]/[Route(api/sys/logs)]/[Authorize] and GetPaged (:234-271) queries SysOperationLogs directly with only a soft-delete filter, so any authenticated account reads the whole operation register regardless of module authority; the returned SysOperationLog entities (src/ERP.Domain/Entities/SysSystem.cs:114-160) include UserName, Module, Action, Method, Path, BillNo, unbounded RequestBody, IpAddress and StatusCode, so other accounts' request payloads and cross-module business history are disclosed. The existing 系统日志 (sys-log) functional menu already exists (src/ERP.Infrastructure/Data/SeedData.Menus.cs:22; src/ERP.Infrastructure/Data/SchemaUpgrader.cs:255) and the page is registered at src/ERP.Api/wwwroot/js/modules-doc.js:87-88. Add the same override-with-live-authorization pattern with a new OperationLogAuthorizationRules reusing that existing menu, keep the existing paged filtering contract (module, userName, billNo, keyword, date range and page bounds) and keep the response shape ApiResponse<PagedResult<SysOperationLog>>; the class declaration line must stay byte-identical because src/ERP.UnitTests/ClientLimitAuthorizationTests.cs:270-273 asserts it. No new menu, grant, permission, table or column and no anonymous, administrative, environment or test-only fallback. Adapt the legacy in-process log fixture to genuine enabled identities holding the existing sys-log grant in isolated test data only. Safe Release build plus full ERP.UnitTests; genuine SQL only on the isolated localdb NEWERP_AutoAcceptance instance with a fresh GUID-owned NEWERP_AUTOTEST database. Preserve current business permissions and actor/customer scope; no new grants. Adapt all affected original fixtures with real enabled identities and existing menus/master rows, never remove business assertions or retain null-context/provider/test exceptions. Full original failure logs retained. Explicit test output/TRX/results directories must be .ai/logs/<task> only, never repository-root TestResults. SQL must use exactly (localdb)\\NEWERP_AutoAcceptance with Integrated Security and a fresh GUID-owned NEWERP_AUTOTEST database; reject wrong/existing targets before access, never drop/reset. Safe Release restore/build with analyzers and warnings-as-errors, full units and relevant genuine isolated SQL validation; no whole-stage acceptance or production access.",
+  "acceptance_criteria": [
+    "GET /api/sys/logs requires the current live enabled nondeleted identity, the ERP-453 account status and the existing sys-log (系统日志) functional menu through the new OperationLogAuthorizationRules before any SysOperationLogs count or row is read, independently of request path, request shape or whether HttpContext is bound; missing/zero/unknown/deleted identity fails Unauthorized, disabled identity and missing/revoked menu fail Forbidden, no log row, count, UserName, Path, BillNo or RequestBody is returned to a denied caller, and no anonymous, administrative, environment or test-only fallback and no new menu, grant or permission is added.",
+    "Retain the existing read contract unchanged for authorized callers: the same paged filtering (module, userName, billNo, keyword over path/bill no/user/action/module, inclusive start and exclusive next-day end) and the same ApiResponse<PagedResult<SysOperationLog>> shape with soft-deleted rows excluded, the class declaration public class OperationLogController : ControllerBase unchanged, and the sibling ClientLimitController and DocumentNumberRuleController behaviour unchanged, with no new table, column or index.",
+    "Adapt the legacy in-process operation log fixture to genuine enabled identities holding the existing sys-log menu grant in isolated test data only, and add genuine unit plus isolated SQL controller tests covering the permitted privileged and menu-granted flows, missing sys-log menu, disabled, deleted and revoked identities, no-HttpContext calls with empty and populated Request.Path and empty and populated filter paths, asserting zero reads on denial; existing OperationLogTests and ClientLimitAuthorizationTests contracts stay green.",
+    "Keep the safe Release build with analyzers and warnings-as-errors and the full existing ERP.UnitTests suite green, run genuine SQL only on the isolated localdb NEWERP_AutoAcceptance instance with Integrated Security and a fresh GUID-owned NEWERP_AUTOTEST database that is never dropped or reset, and claim no whole-stage acceptance from a build alone."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/SysSimpleControllers.cs",
+    "src/ERP.Application/Services/OperationLogAuthorizationRules.cs",
+    "src/ERP.UnitTests/OperationLogTests.cs",
+    "src/ERP.UnitTests/OperationLogAuthorizationTests.cs",
+    "src/ERP.UnitTests/ClientLimitAuthorizationTests.cs",
+    "src/ERP.IntegrationTests/OperationLogAuthorizationSqlServerTests.cs",
+    "docs/operation-log-authority.md"
+  ],
+  "criterion_path_map": {
+    "GET /api/sys/logs requires the current live enabled nondeleted identity, the ERP-453 account status and the existing sys-log (系统日志) functional menu through the new OperationLogAuthorizationRules before any SysOperationLogs count or row is read, independently of request path, request shape or whether HttpContext is bound; missing/zero/unknown/deleted identity fails Unauthorized, disabled identity and missing/revoked menu fail Forbidden, no log row, count, UserName, Path, BillNo or RequestBody is returned to a denied caller, and no anonymous, administrative, environment or test-only fallback and no new menu, grant or permission is added.": [
+      "src/ERP.Api/Controllers/SysSimpleControllers.cs",
+      "src/ERP.Application/Services/OperationLogAuthorizationRules.cs",
+      "src/ERP.UnitTests/OperationLogTests.cs",
+      "src/ERP.UnitTests/OperationLogAuthorizationTests.cs",
+      "src/ERP.UnitTests/ClientLimitAuthorizationTests.cs",
+      "src/ERP.IntegrationTests/OperationLogAuthorizationSqlServerTests.cs",
+      "docs/operation-log-authority.md"
+    ],
+    "Retain the existing read contract unchanged for authorized callers: the same paged filtering (module, userName, billNo, keyword over path/bill no/user/action/module, inclusive start and exclusive next-day end) and the same ApiResponse<PagedResult<SysOperationLog>> shape with soft-deleted rows excluded, the class declaration public class OperationLogController : ControllerBase unchanged, and the sibling ClientLimitController and DocumentNumberRuleController behaviour unchanged, with no new table, column or index.": [
+      "src/ERP.Api/Controllers/SysSimpleControllers.cs",
+      "src/ERP.Application/Services/OperationLogAuthorizationRules.cs",
+      "src/ERP.UnitTests/OperationLogTests.cs",
+      "src/ERP.UnitTests/OperationLogAuthorizationTests.cs",
+      "src/ERP.UnitTests/ClientLimitAuthorizationTests.cs",
+      "src/ERP.IntegrationTests/OperationLogAuthorizationSqlServerTests.cs",
+      "docs/operation-log-authority.md"
+    ],
+    "Adapt the legacy in-process operation log fixture to genuine enabled identities holding the existing sys-log menu grant in isolated test data only, and add genuine unit plus isolated SQL controller tests covering the permitted privileged and menu-granted flows, missing sys-log menu, disabled, deleted and revoked identities, no-HttpContext calls with empty and populated Request.Path and empty and populated filter paths, asserting zero reads on denial; existing OperationLogTests and ClientLimitAuthorizationTests contracts stay green.": [
+      "src/ERP.Api/Controllers/SysSimpleControllers.cs",
+      "src/ERP.Application/Services/OperationLogAuthorizationRules.cs",
+      "src/ERP.UnitTests/OperationLogTests.cs",
+      "src/ERP.UnitTests/OperationLogAuthorizationTests.cs",
+      "src/ERP.UnitTests/ClientLimitAuthorizationTests.cs",
+      "src/ERP.IntegrationTests/OperationLogAuthorizationSqlServerTests.cs",
+      "docs/operation-log-authority.md"
+    ],
+    "Keep the safe Release build with analyzers and warnings-as-errors and the full existing ERP.UnitTests suite green, run genuine SQL only on the isolated localdb NEWERP_AutoAcceptance instance with Integrated Security and a fresh GUID-owned NEWERP_AUTOTEST database that is never dropped or reset, and claim no whole-stage acceptance from a build alone.": [
+      "src/ERP.Api/Controllers/SysSimpleControllers.cs",
+      "src/ERP.Application/Services/OperationLogAuthorizationRules.cs",
+      "src/ERP.UnitTests/OperationLogTests.cs",
+      "src/ERP.UnitTests/OperationLogAuthorizationTests.cs",
+      "src/ERP.UnitTests/ClientLimitAuthorizationTests.cs",
+      "src/ERP.IntegrationTests/OperationLogAuthorizationSqlServerTests.cs",
+      "docs/operation-log-authority.md"
+    ]
+  },
+  "depends_on": [
+    "ERP-006",
+    "ERP-453",
+    "ERP-457",
+    "ERP-498"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "implementation_evidence": "src/ERP.Api/Controllers/SysSimpleControllers.cs:222-224 declares [ApiController]/[Route(api/sys/logs)]/[Authorize] public class OperationLogController : ControllerBase and :234-271 GetPaged reads _db.SysOperationLogs with only an IsDeleted filter and returns ApiResponse<PagedResult<SysOperationLog>> with no CurrentUserId, no identity, no account status and no menu resolution; src/ERP.Domain/Entities/SysSystem.cs:114-160 shows SysOperationLog carries UserName, Module, Action, Method, Path, BillNo, RequestBody, IpAddress and StatusCode; the reusable existing menu is seeded at src/ERP.Infrastructure/Data/SeedData.Menus.cs:22 and src/ERP.Infrastructure/Data/SchemaUpgrader.cs:255, the page is registered at src/ERP.Api/wwwroot/js/modules-doc.js:87-88, the sibling override pattern is DocumentNumberRuleController / ClientLimitController in the same file (:15-124 and :126-216 with their EnsureAuthorizedAsync calls), src/ERP.UnitTests/ClientLimitAuthorizationTests.cs:270-273 asserts the OperationLogController class line, and src/ERP.UnitTests/OperationLogTests.cs:15-27 constructs the controller in-process with no identity; an exact search of .ai/tasks returns no task adding authority to OperationLogController or SysOperationLogs.",
+  "id": "ERP-499",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-13T21:41:14.423678Z"
+}

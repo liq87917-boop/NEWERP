@@ -1,0 +1,103 @@
+{
+  "title": "Enforce expense bill and allocation authority independently of the MVC request pipeline",
+  "description": "Stage 3 verified authorization-path gap, the same defect class already removed in ERP-462 / ERP-463 / ERP-464 / ERP-465 / ERP-466 / ERP-467 / ERP-468 / ERP-487 / ERP-492 / ERP-493. src/ERP.Api/Controllers/ExpenseBillController.cs:21 applies [ExpenseRequestAuthorizationFilter] as the only authority for every route, but that filter (src/ERP.Api/Controllers/BaseCrudController.cs:103-123, IAsyncActionFilter) runs only inside the MVC pipeline; each action instead reads ExpenseRequestScope (src/ERP.Api/Controllers/BaseCrudController.cs:31-35) which returns null whenever HttpContext.Items has no ExpenseRequestAuthorizationFilter.ScopeItemKey, and src/ERP.Application/Services/ExpenseAuthorizationRules.cs treats a null scope as unrestricted (ExpenseScopeFilter:259-263 and BatchScopeFilter:283-286 return no predicate, ApplyExpenseScope:268-274 returns the unfiltered source, EnsureBatchScopeAllowedAsync:384-390 and EnsureSettlementScopeAllowedAsync:424-430 return immediately), so an in-process call resolves no live identity, no ERP-453 account status, no existing expense-bill (费用单) menu and no ERP-097 customer scope for GetPaged:126, GetAll:136, GetById:146, Create:160, Update:177, Delete:213, BatchDelete:236, AllocatePreview:33, AllocateApply:46, GetAllocationContext:273, AllocationPreview:285, AllocationGenerate:297, GetAllocationBatches:307, GetAllocationBatch:316 and VoidAllocationBatch:328. Resolve the existing live authorization (ExpenseAuthorizationRules.EnsureMenuAuthorizedAsync:147) inside every action and use the returned non-null scope, remove the pipeline-shape waiver (filter application, ExpenseRequestScope property and the null-scope bypasses), and keep every existing boundary: persisted FinanceExpense.CustomerId ownership, shared-container participant / source-expense / per-line customer proof, allocation-basis freeze and void semantics, and zero writes on denial. Adapt the legacy in-process fixtures to genuine enabled identities holding their existing expense-bill grant in isolated test data only. No new menu, grant, permission, table or column, no anonymous, administrative, environment or test-only fallback, and no report or unrelated-module change. Safe Release build plus full ERP.UnitTests; genuine SQL only on the isolated localdb NEWERP_AutoAcceptance instance with a fresh GUID-owned NEWERP_AUTOTEST database. Preserve current business permissions and actor/customer scope; no new grants. Adapt all affected original fixtures with real enabled identities and existing menus/master rows, never remove business assertions or retain null-context/provider/test exceptions. Full original failure logs retained. Explicit test output/TRX/results directories must be .ai/logs/<task> only, never repository-root TestResults. SQL must use exactly (localdb)\\NEWERP_AutoAcceptance with Integrated Security and a fresh GUID-owned NEWERP_AUTOTEST database; reject wrong/existing targets before access, never drop/reset. Safe Release restore/build with analyzers and warnings-as-errors, full units and relevant genuine isolated SQL validation; no whole-stage acceptance or production access.",
+  "acceptance_criteria": [
+    "Every route on /api/finance/expenses (paged, all, by-id, create, update, delete, batch-delete, allocate-preview, allocate-apply, allocation-context, allocation-preview, allocation-generate, allocation-batches, allocation-batches/{batchId} and allocation-batches/{batchId}/void) resolves the current live enabled nondeleted identity, the ERP-453 account status and the existing expense-bill (费用单) menu through ExpenseAuthorizationRules.EnsureMenuAuthorizedAsync before any count, row, amount, allocation basis or write, independently of whether HttpContext is bound, whether Request.Path is set and whether the call passes through the MVC filter pipeline; the ExpenseRequestAuthorizationFilter application and the ExpenseRequestScope property are removed, missing/zero/unknown/deleted identity fails Unauthorized, disabled identity and missing/revoked menu fail Forbidden, and no anonymous, administrative, environment or test-only fallback is added.",
+    "Retain the existing expense and allocation boundaries and response contracts: authority is resolved live before any read, the resolved non-null scope is pushed down to SQL before count and paging, expense ownership stays the persisted FinanceExpense.CustomerId, allocation batches keep the explicit LoadingListId / SourceExpenseId / per-line customer proof, allocation-basis freeze and void semantics are unchanged, every denied route reads or writes zero FinanceExpenses, FinanceExpenseAllocationBatches and FinanceExpenseAllocationLines rows, and no new menu, grant, permission, table or column is added.",
+    "Adapt the legacy in-process expense fixtures to genuine enabled identities holding their existing expense-bill menu grants in isolated test data only, and add genuine unit plus isolated SQL controller tests covering every route for missing/zero/deleted identity, disabled and revoked-menu identity, limited-scope identity reading an out-of-scope expense or batch, no-HttpContext calls with empty and populated Request.Path, and permitted flows; existing ExpenseAuthorizationTests, ExpenseAllocationConcurrencyTests, ContainerExpenseAllocationTests, ContainerExpenseAllocationEvidenceTests and their SQL counterparts stay green.",
+    "Keep the safe Release build with analyzers and warnings-as-errors and the full existing ERP.UnitTests suite green, run genuine SQL only on the isolated localdb NEWERP_AutoAcceptance instance with Integrated Security and a fresh GUID-owned NEWERP_AUTOTEST database that is never dropped or reset, and claim no whole-stage acceptance from a build alone."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/ExpenseBillController.cs",
+    "src/ERP.Api/Controllers/BaseCrudController.cs",
+    "src/ERP.Application/Services/ExpenseAuthorizationRules.cs",
+    "src/ERP.Application/Services/ContainerExpenseAllocationService.cs",
+    "src/ERP.UnitTests/ExpenseAuthorizationTests.cs",
+    "src/ERP.UnitTests/ExpenseAllocationConcurrencyTests.cs",
+    "src/ERP.UnitTests/ContainerExpenseAllocationTests.cs",
+    "src/ERP.UnitTests/ContainerExpenseAllocationEvidenceTests.cs",
+    "src/ERP.IntegrationTests/ExpenseAuthorizationSqlServerTests.cs",
+    "src/ERP.IntegrationTests/ExpenseAllocationConcurrencySqlServerTests.cs",
+    "docs/expense-authorization.md"
+  ],
+  "criterion_path_map": {
+    "Every route on /api/finance/expenses (paged, all, by-id, create, update, delete, batch-delete, allocate-preview, allocate-apply, allocation-context, allocation-preview, allocation-generate, allocation-batches, allocation-batches/{batchId} and allocation-batches/{batchId}/void) resolves the current live enabled nondeleted identity, the ERP-453 account status and the existing expense-bill (费用单) menu through ExpenseAuthorizationRules.EnsureMenuAuthorizedAsync before any count, row, amount, allocation basis or write, independently of whether HttpContext is bound, whether Request.Path is set and whether the call passes through the MVC filter pipeline; the ExpenseRequestAuthorizationFilter application and the ExpenseRequestScope property are removed, missing/zero/unknown/deleted identity fails Unauthorized, disabled identity and missing/revoked menu fail Forbidden, and no anonymous, administrative, environment or test-only fallback is added.": [
+      "src/ERP.Api/Controllers/ExpenseBillController.cs",
+      "src/ERP.Api/Controllers/BaseCrudController.cs",
+      "src/ERP.Application/Services/ExpenseAuthorizationRules.cs",
+      "src/ERP.Application/Services/ContainerExpenseAllocationService.cs",
+      "src/ERP.UnitTests/ExpenseAuthorizationTests.cs",
+      "src/ERP.UnitTests/ExpenseAllocationConcurrencyTests.cs",
+      "src/ERP.UnitTests/ContainerExpenseAllocationTests.cs",
+      "src/ERP.UnitTests/ContainerExpenseAllocationEvidenceTests.cs",
+      "src/ERP.IntegrationTests/ExpenseAuthorizationSqlServerTests.cs",
+      "src/ERP.IntegrationTests/ExpenseAllocationConcurrencySqlServerTests.cs",
+      "docs/expense-authorization.md"
+    ],
+    "Retain the existing expense and allocation boundaries and response contracts: authority is resolved live before any read, the resolved non-null scope is pushed down to SQL before count and paging, expense ownership stays the persisted FinanceExpense.CustomerId, allocation batches keep the explicit LoadingListId / SourceExpenseId / per-line customer proof, allocation-basis freeze and void semantics are unchanged, every denied route reads or writes zero FinanceExpenses, FinanceExpenseAllocationBatches and FinanceExpenseAllocationLines rows, and no new menu, grant, permission, table or column is added.": [
+      "src/ERP.Api/Controllers/ExpenseBillController.cs",
+      "src/ERP.Api/Controllers/BaseCrudController.cs",
+      "src/ERP.Application/Services/ExpenseAuthorizationRules.cs",
+      "src/ERP.Application/Services/ContainerExpenseAllocationService.cs",
+      "src/ERP.UnitTests/ExpenseAuthorizationTests.cs",
+      "src/ERP.UnitTests/ExpenseAllocationConcurrencyTests.cs",
+      "src/ERP.UnitTests/ContainerExpenseAllocationTests.cs",
+      "src/ERP.UnitTests/ContainerExpenseAllocationEvidenceTests.cs",
+      "src/ERP.IntegrationTests/ExpenseAuthorizationSqlServerTests.cs",
+      "src/ERP.IntegrationTests/ExpenseAllocationConcurrencySqlServerTests.cs",
+      "docs/expense-authorization.md"
+    ],
+    "Adapt the legacy in-process expense fixtures to genuine enabled identities holding their existing expense-bill menu grants in isolated test data only, and add genuine unit plus isolated SQL controller tests covering every route for missing/zero/deleted identity, disabled and revoked-menu identity, limited-scope identity reading an out-of-scope expense or batch, no-HttpContext calls with empty and populated Request.Path, and permitted flows; existing ExpenseAuthorizationTests, ExpenseAllocationConcurrencyTests, ContainerExpenseAllocationTests, ContainerExpenseAllocationEvidenceTests and their SQL counterparts stay green.": [
+      "src/ERP.Api/Controllers/ExpenseBillController.cs",
+      "src/ERP.Api/Controllers/BaseCrudController.cs",
+      "src/ERP.Application/Services/ExpenseAuthorizationRules.cs",
+      "src/ERP.Application/Services/ContainerExpenseAllocationService.cs",
+      "src/ERP.UnitTests/ExpenseAuthorizationTests.cs",
+      "src/ERP.UnitTests/ExpenseAllocationConcurrencyTests.cs",
+      "src/ERP.UnitTests/ContainerExpenseAllocationTests.cs",
+      "src/ERP.UnitTests/ContainerExpenseAllocationEvidenceTests.cs",
+      "src/ERP.IntegrationTests/ExpenseAuthorizationSqlServerTests.cs",
+      "src/ERP.IntegrationTests/ExpenseAllocationConcurrencySqlServerTests.cs",
+      "docs/expense-authorization.md"
+    ],
+    "Keep the safe Release build with analyzers and warnings-as-errors and the full existing ERP.UnitTests suite green, run genuine SQL only on the isolated localdb NEWERP_AutoAcceptance instance with Integrated Security and a fresh GUID-owned NEWERP_AUTOTEST database that is never dropped or reset, and claim no whole-stage acceptance from a build alone.": [
+      "src/ERP.Api/Controllers/ExpenseBillController.cs",
+      "src/ERP.Api/Controllers/BaseCrudController.cs",
+      "src/ERP.Application/Services/ExpenseAuthorizationRules.cs",
+      "src/ERP.Application/Services/ContainerExpenseAllocationService.cs",
+      "src/ERP.UnitTests/ExpenseAuthorizationTests.cs",
+      "src/ERP.UnitTests/ExpenseAllocationConcurrencyTests.cs",
+      "src/ERP.UnitTests/ContainerExpenseAllocationTests.cs",
+      "src/ERP.UnitTests/ContainerExpenseAllocationEvidenceTests.cs",
+      "src/ERP.IntegrationTests/ExpenseAuthorizationSqlServerTests.cs",
+      "src/ERP.IntegrationTests/ExpenseAllocationConcurrencySqlServerTests.cs",
+      "docs/expense-authorization.md"
+    ]
+  },
+  "depends_on": [
+    "ERP-385",
+    "ERP-097",
+    "ERP-462"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "implementation_evidence": "src/ERP.Api/Controllers/ExpenseBillController.cs:21 [ExpenseRequestAuthorizationFilter] is the class-level authority and lines 33/46/126/136/146/160/177/213/236/273/285/297/307/316/328 are the actions that instead read ExpenseRequestScope; src/ERP.Api/Controllers/BaseCrudController.cs:31-35 returns null unless HttpContext.Items contains ExpenseRequestAuthorizationFilter.ScopeItemKey and :103-123 show the filter is an IAsyncActionFilter that only executes inside the MVC pipeline; src/ERP.Application/Services/ExpenseAuthorizationRules.cs:259-263 ExpenseScopeFilter returns null for a null scope, :268-274 ApplyExpenseScope then returns the unfiltered source, :283-286 BatchScopeFilter likewise, :384-390 EnsureBatchScopeAllowedAsync and :424-430 EnsureSettlementScopeAllowedAsync return immediately for a null scope, while :147 EnsureMenuAuthorizedAsync is the existing live identity / account-status / expense-bill menu gate that the actions never call. src/ERP.UnitTests/ExpenseAuthorizationTests.cs:35-52 and :78-90 build controllers in-process and inject scope through HttpContext.Items, and src/ERP.IntegrationTests/ExpenseAuthorizationSqlServerTests.cs:60-63 does the same, which is exactly the fixture pattern that must be adapted; an exact search of .ai/tasks returns no task removing this filter waiver.",
+  "id": "ERP-496",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-13T21:41:14.409064Z"
+}

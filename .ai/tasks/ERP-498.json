@@ -1,0 +1,85 @@
+{
+  "title": "Enforce live expense account master data authority at every route",
+  "description": "Stage 3 verified access-control gap in base data, the same defect class repaired for customer (ERP-451), supplier (ERP-447), employee (ERP-449), warehouse (ERP-448), product (ERP-452), other info (ERP-443) and client limits (ERP-457) and made path-independent for master data by ERP-467. src/ERP.Api/Controllers/BaseDataControllers.cs:384-393 declares ExpenseAccountController : BaseCrudController<BaseExpenseAccount> with only [ApiController]/[Route(api/base/expense-accounts)]/[Authorize] and no overrides, so all seven routes (GetPaged, GetAll, GetById, Create, Update, Delete, BatchDelete) are inherited unguarded from src/ERP.Api/Controllers/BaseCrudController.cs:37-92 and delegate to IGenericService with zero identity, account-status or menu resolution, while the sibling controllers in the same file all override with a live guard (CustomerController:59-158, SupplierController:203-268, EmployeeController:310-378, WarehouseController:431-491, ProductController:543-643). Any authenticated account can therefore list, mint, edit or soft-delete 费用科目 rows that the existing expense-account menu governs (src/ERP.Infrastructure/Data/SeedData.Menus.cs:28; src/ERP.Infrastructure/Data/SchemaUpgrader.cs:253-255). Add the same override plus live-authorization pattern with a new ExpenseAccountAuthorizationRules reusing the existing 费用科目 (expense-account) menu, and bounded validation for the persisted BaseExpenseAccount columns (AccountCode, AccountName, AccountType in 1/2, Description, ParentId, Status) per src/ERP.Domain/Entities/BaseWarehouse.cs:9-31. No schema, entity, menu, grant or permission change, no anonymous or administrative fallback, and the generic BaseCrudController soft-delete contract stays unchanged for every other derived controller. Adapt the legacy in-process master-data fixtures to genuine enabled identities in isolated test data only. Safe Release build plus full ERP.UnitTests; genuine SQL only on the isolated localdb NEWERP_AutoAcceptance instance with a fresh GUID-owned NEWERP_AUTOTEST database. Preserve current business permissions and actor/customer scope; no new grants. Adapt all affected original fixtures with real enabled identities and existing menus/master rows, never remove business assertions or retain null-context/provider/test exceptions. Full original failure logs retained. Explicit test output/TRX/results directories must be .ai/logs/<task> only, never repository-root TestResults. SQL must use exactly (localdb)\\NEWERP_AutoAcceptance with Integrated Security and a fresh GUID-owned NEWERP_AUTOTEST database; reject wrong/existing targets before access, never drop/reset. Safe Release restore/build with analyzers and warnings-as-errors, full units and relevant genuine isolated SQL validation; no whole-stage acceptance or production access.",
+  "acceptance_criteria": [
+    "Every route on /api/base/expense-accounts (paged, all, by-id, create, update, delete and batch-delete) requires the current live enabled nondeleted identity, the ERP-453 account status and the existing expense-account (费用科目) functional menu through the new ExpenseAccountAuthorizationRules before any BaseExpenses count, row, uniqueness probe or write, independently of request path, request shape or whether HttpContext is bound; missing/zero/unknown/deleted identity fails Unauthorized, disabled identity and missing/revoked menu fail Forbidden, and no anonymous, administrative, environment or test-only fallback and no new menu, grant or permission is added.",
+    "Validate on create and update that AccountCode is non-empty, within its persisted bound and unique among non-deleted rows, that AccountName is non-empty and within its persisted bound, that AccountType is a supported value, that Description stays within its persisted bound, that Status is a supported value and that ParentId, when provided, resolves to an existing non-deleted account; a rejected write persists zero BaseExpenseAccount change and the generic BaseCrudController soft-delete and batch-delete contracts stay unchanged for every other derived controller.",
+    "Adapt the legacy in-process master-data fixtures to genuine enabled identities holding their existing master-data menu grants in isolated test data only, and add genuine unit plus isolated SQL controller tests covering paged, all, by-id, create, update, delete and batch-delete for missing/zero/deleted identity, disabled and revoked-menu identity, invalid account code, duplicate account code, invalid account type, over-long name or description, invalid parent and permitted flows, asserting zero reads and zero writes on denial; existing MasterDataEntryAuthorizationTests, CustomerMasterAuthorizationTests, SupplierMasterAuthorizationTests, EmployeeMasterAuthorizationTests, WarehouseMasterAuthorizationTests, ProductMasterAuthorizationTests and their SQL counterparts stay green.",
+    "Keep the safe Release build with analyzers and warnings-as-errors and the full existing ERP.UnitTests suite green, run genuine SQL only on the isolated localdb NEWERP_AutoAcceptance instance with Integrated Security and a fresh GUID-owned NEWERP_AUTOTEST database that is never dropped or reset, and claim no whole-stage acceptance from a build alone."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/BaseDataControllers.cs",
+    "src/ERP.Application/Services/ExpenseAccountAuthorizationRules.cs",
+    "src/ERP.UnitTests/ExpenseAccountAuthorizationTests.cs",
+    "src/ERP.UnitTests/MasterDataEntryAuthorizationTests.cs",
+    "src/ERP.IntegrationTests/ExpenseAccountAuthorizationSqlServerTests.cs",
+    "src/ERP.IntegrationTests/MasterDataEntryAuthorizationSqlServerTests.cs",
+    "docs/expense-account-authority.md"
+  ],
+  "criterion_path_map": {
+    "Every route on /api/base/expense-accounts (paged, all, by-id, create, update, delete and batch-delete) requires the current live enabled nondeleted identity, the ERP-453 account status and the existing expense-account (费用科目) functional menu through the new ExpenseAccountAuthorizationRules before any BaseExpenses count, row, uniqueness probe or write, independently of request path, request shape or whether HttpContext is bound; missing/zero/unknown/deleted identity fails Unauthorized, disabled identity and missing/revoked menu fail Forbidden, and no anonymous, administrative, environment or test-only fallback and no new menu, grant or permission is added.": [
+      "src/ERP.Api/Controllers/BaseDataControllers.cs",
+      "src/ERP.Application/Services/ExpenseAccountAuthorizationRules.cs",
+      "src/ERP.UnitTests/ExpenseAccountAuthorizationTests.cs",
+      "src/ERP.UnitTests/MasterDataEntryAuthorizationTests.cs",
+      "src/ERP.IntegrationTests/ExpenseAccountAuthorizationSqlServerTests.cs",
+      "src/ERP.IntegrationTests/MasterDataEntryAuthorizationSqlServerTests.cs",
+      "docs/expense-account-authority.md"
+    ],
+    "Validate on create and update that AccountCode is non-empty, within its persisted bound and unique among non-deleted rows, that AccountName is non-empty and within its persisted bound, that AccountType is a supported value, that Description stays within its persisted bound, that Status is a supported value and that ParentId, when provided, resolves to an existing non-deleted account; a rejected write persists zero BaseExpenseAccount change and the generic BaseCrudController soft-delete and batch-delete contracts stay unchanged for every other derived controller.": [
+      "src/ERP.Api/Controllers/BaseDataControllers.cs",
+      "src/ERP.Application/Services/ExpenseAccountAuthorizationRules.cs",
+      "src/ERP.UnitTests/ExpenseAccountAuthorizationTests.cs",
+      "src/ERP.UnitTests/MasterDataEntryAuthorizationTests.cs",
+      "src/ERP.IntegrationTests/ExpenseAccountAuthorizationSqlServerTests.cs",
+      "src/ERP.IntegrationTests/MasterDataEntryAuthorizationSqlServerTests.cs",
+      "docs/expense-account-authority.md"
+    ],
+    "Adapt the legacy in-process master-data fixtures to genuine enabled identities holding their existing master-data menu grants in isolated test data only, and add genuine unit plus isolated SQL controller tests covering paged, all, by-id, create, update, delete and batch-delete for missing/zero/deleted identity, disabled and revoked-menu identity, invalid account code, duplicate account code, invalid account type, over-long name or description, invalid parent and permitted flows, asserting zero reads and zero writes on denial; existing MasterDataEntryAuthorizationTests, CustomerMasterAuthorizationTests, SupplierMasterAuthorizationTests, EmployeeMasterAuthorizationTests, WarehouseMasterAuthorizationTests, ProductMasterAuthorizationTests and their SQL counterparts stay green.": [
+      "src/ERP.Api/Controllers/BaseDataControllers.cs",
+      "src/ERP.Application/Services/ExpenseAccountAuthorizationRules.cs",
+      "src/ERP.UnitTests/ExpenseAccountAuthorizationTests.cs",
+      "src/ERP.UnitTests/MasterDataEntryAuthorizationTests.cs",
+      "src/ERP.IntegrationTests/ExpenseAccountAuthorizationSqlServerTests.cs",
+      "src/ERP.IntegrationTests/MasterDataEntryAuthorizationSqlServerTests.cs",
+      "docs/expense-account-authority.md"
+    ],
+    "Keep the safe Release build with analyzers and warnings-as-errors and the full existing ERP.UnitTests suite green, run genuine SQL only on the isolated localdb NEWERP_AutoAcceptance instance with Integrated Security and a fresh GUID-owned NEWERP_AUTOTEST database that is never dropped or reset, and claim no whole-stage acceptance from a build alone.": [
+      "src/ERP.Api/Controllers/BaseDataControllers.cs",
+      "src/ERP.Application/Services/ExpenseAccountAuthorizationRules.cs",
+      "src/ERP.UnitTests/ExpenseAccountAuthorizationTests.cs",
+      "src/ERP.UnitTests/MasterDataEntryAuthorizationTests.cs",
+      "src/ERP.IntegrationTests/ExpenseAccountAuthorizationSqlServerTests.cs",
+      "src/ERP.IntegrationTests/MasterDataEntryAuthorizationSqlServerTests.cs",
+      "docs/expense-account-authority.md"
+    ]
+  },
+  "depends_on": [
+    "ERP-006",
+    "ERP-097",
+    "ERP-448",
+    "ERP-452",
+    "ERP-497"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "implementation_evidence": "src/ERP.Api/Controllers/BaseDataControllers.cs:384-393 declares public class ExpenseAccountController : BaseCrudController<BaseExpenseAccount> with no guard method and no route override, so the seven inherited routes in src/ERP.Api/Controllers/BaseCrudController.cs:37-92 call IGenericService (src/ERP.Application/Services/GenericService.cs) with zero authorization, while the same file's CustomerController:59/68-158, SupplierController:203/212-268, EmployeeController:310/319-378, WarehouseController:431/440-491 and ProductController:543/557-643 all override with a live per-route guard; the existing menu is seeded at src/ERP.Infrastructure/Data/SeedData.Menus.cs:28 (system/base/expense-account/费用科目) and sorted at src/ERP.Infrastructure/Data/SchemaUpgrader.cs:253-255, and src/ERP.Domain/Entities/BaseWarehouse.cs:9-31 holds the BaseExpenseAccount columns to validate; src/ERP.UnitTests/MasterDataEntryAuthorizationTests.cs:22-36 lists exactly 客户/供应商/员工/仓库/商品 and has no expense-account coverage, and an exact search of .ai/tasks returns no task listing ExpenseAccountController or BaseExpenseAccount for live authorization.",
+  "id": "ERP-498",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-13T21:41:14.419600Z"
+}
