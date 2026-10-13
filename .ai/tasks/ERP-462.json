@@ -69,7 +69,7 @@
   "implementation_evidence": "src/ERP.Api/Controllers/PurchaseInvoiceController.cs:110-156 still skips menu, scoped query, invoice/source authority for null HttpContext; violates original acceptance requiring identical missing-context authority.",
   "id": "ERP-462",
   "status": "completed",
-  "attempts": 1,
+  "attempts": 2,
   "max_attempts": 3,
   "validation_profile": "safe",
   "completion_mode": "build",
