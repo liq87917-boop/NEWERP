@@ -6,6 +6,7 @@ using ERP.Domain.Entities;
 using ERP.Domain.Enums;
 using ERP.Infrastructure.Data;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using Xunit;
 
 namespace ERP.UnitTests;
@@ -215,6 +216,75 @@ public class InquiryControllerTests
         var ex = await Assert.ThrowsAsync<BusinessException>(() => ctl.Delete(inquiry.Id));
         Assert.Equal(ErrorCodes.RuleConflict, ex.Code);
         Assert.False(db.Inquiries.Single().IsDeleted);
+    }
+
+    // ==================== ERP-474：省略单号 + 商业条款契约 ====================
+
+    [Fact]
+    public void Entity_询价单号不再显式必填_空号可达已授权动作()
+    {
+        var property = typeof(Inquiry).GetProperty(nameof(Inquiry.InquiryNo))!;
+        Assert.Empty(property.GetCustomAttributes(
+            typeof(System.ComponentModel.DataAnnotations.RequiredAttribute), inherit: true));
+        Assert.NotEmpty(property.GetCustomAttributes(
+            typeof(System.ComponentModel.DataAnnotations.MaxLengthAttribute), inherit: true));
+    }
+
+    [Fact]
+    public async Task Create_省略询价单号_服务端生成单号并按币种精度派生行金额()
+    {
+        using var db = TestDbFactory.Create();
+        var ctl = BuildController(db);
+
+        var result = await ctl.Create(new Inquiry
+        {
+            InquiryDate = DateTime.Today,
+            CustomerId = 999999L,
+            Currency = Currency.USD,
+            ExchangeRate = 7.1m,
+            ValidDays = 30,
+            Details = new List<InquiryDetail>
+            {
+                new InquiryDetail { ProductId = 1, ProductName = "P1", Unit = "PCS", Quantity = 2m, UnitPrice = 5m }
+            }
+        });
+
+        Assert.IsType<OkObjectResult>(result);
+        var saved = db.Inquiries.Single();
+        Assert.StartsWith("INQ", saved.InquiryNo);
+        Assert.Equal(DocumentStatus.Pending, saved.Status);
+        Assert.Equal(10m, saved.Details.Single().Amount);
+    }
+
+    [Fact]
+    public async Task Create_非法条款_在单号生成与任何写入之前拒绝()
+    {
+        using var db = TestDbFactory.Create();
+        var rule = new SysDocumentNumberRule
+        {
+            DocumentType = DocumentType.Inquiry, RuleCode = "R-INQ-474", RuleName = "询价单号",
+            Prefix = "INQ", DateFormat = "yyyyMMdd", SerialLength = 4, CurrentSequence = 3, IsDeleted = false
+        };
+        db.SysDocumentNumberRules.Add(rule);
+        db.SaveChanges();
+        var ctl = BuildController(db);
+
+        var invalid = new Inquiry
+        {
+            InquiryDate = DateTime.Today, CustomerId = 999999L,
+            Currency = Currency.USD, ExchangeRate = 7.1m, ValidDays = 30,
+            Details = new List<InquiryDetail>
+            {
+                new InquiryDetail { ProductId = 1, Quantity = 0m, UnitPrice = 5m }
+            }
+        };
+        var ex = await Assert.ThrowsAsync<BusinessException>(() => ctl.Create(invalid));
+
+        Assert.Equal(ErrorCodes.InvalidParameter, ex.Code);
+        Assert.Contains("数量必须大于 0", ex.Message);
+        Assert.Empty(db.Inquiries);
+        Assert.Empty(db.InquiryDetails);
+        Assert.Equal(3, db.SysDocumentNumberRules.AsNoTracking().Single(r => r.Id == rule.Id).CurrentSequence);
     }
 
     // ==================== 种子 ====================

@@ -224,8 +224,9 @@ public class InquiryQuotationConversionTests
 
         var error = await Assert.ThrowsAsync<BusinessException>(() => Controller(db).ToQuotation(inquiry.Id));
 
+        // ERP-474：询价单来源条款由 InquiryCommercialValidationRules 唯一权威契约裁决（同一拒绝语义、同一错误码）。
         Assert.Equal(ErrorCodes.InvalidParameter, error.Code);
-        Assert.Equal(QuotationCommercialValidationRules.ExchangeRateText, error.Message);
+        Assert.Equal(InquiryCommercialValidationRules.ExchangeRateText, error.Message);
         Assert.Empty(db.Quotations);
         Assert.Equal(DocumentStatus.Approved, db.Inquiries.AsNoTracking().Single().Status);
     }

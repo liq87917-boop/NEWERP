@@ -17,8 +17,13 @@ const BILL_CODE_MAP = {
      ERP-040：装柜三单（订柜信息 / 预装柜单 / 装柜清单）同样改由 EF 主子表页面承载
      （modules-doc2.js 的 'booking' / 'pre-loading' / 'loading-list' 模块 + /api/container/**），
      否则新增的外贸与物流跟踪字段无法保存，也无法按持久化订柜引用只读回显跟踪值。
-     SP 版装柜单据页（BILL_CONFIG 中的同名配置）同样保留给历史数据排查/回滚参考，不再从菜单进入。 */
-  'inquiry-new': 'inquiry',
+     SP 版装柜单据页（BILL_CONFIG 中的同名配置）同样保留给历史数据排查/回滚参考，不再从菜单进入。
+     ERP-474：询价单「新增」菜单（inquiry-new）改由 EF 主子表页面承载
+     （modules-doc.js 的 'inquiry-new' 模块 + /api/inquiries，规范 Id 口径），
+     因此这里**不再**把 'inquiry-new' 映射到旧存储过程族 'inquiry' —— 旧族的写路径已被 ERP-404 门禁
+     整体停用（fail closed），若继续映射，菜单会打开一张永远无法保存的旧单据页。
+     旧族自身（BILL_CONFIG.inquiry 的旧库单体表 Oid 读侧 / 旧导出 / 默认值端点）保持只读可用，
+     规范 Id 与旧 Oid 之间**不存在**任何映射，也绝不因此启用任何旧写适配器。 */
   'stock-in': 'stock-in',
   'stock-out': 'stock-out',
   receipt: 'receipt',

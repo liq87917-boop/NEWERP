@@ -580,6 +580,36 @@ public class InquiryMutationTests
         Assert.Contains("反向自动冲销", InquiryMutationRules.BoundaryText);
     }
 
+    [Fact]
+    public void 控制器接线_询价单条款契约先于单号与写入()
+    {
+        var controller = ReadSource("src", "ERP.Api", "Controllers", "InquiryController.cs");
+        Assert.Contains("InquiryCommercialValidationRules.NormalizeIncomingDraft(entity)", controller);
+        Assert.Contains("InquiryCommercialValidationRules.ValidateOperational(entity)", controller);
+
+        var conversion = ReadSource("src", "ERP.Api", "Controllers", "InquiryQuotationConversion.cs");
+        Assert.Contains("InquiryCommercialValidationRules.ValidateOperational(inquiry)", conversion);
+    }
+
+    [Fact]
+    public void 菜单路由_询价单新增走规范主子表模块_不再落到旧存储过程族()
+    {
+        // ERP-474：inquiry-new 菜单必须打开规范 EF 主子表模块（api/inquiries，规范 Id），
+        // 不得再经 BILL_CODE_MAP 落到旧存储过程族（其写路径已被 ERP-404 门禁整体停用）。
+        var billV2 = ReadSource("src", "ERP.Api", "wwwroot", "js", "bill-v2.js");
+        var mapStart = billV2.IndexOf("const BILL_CODE_MAP = {", StringComparison.Ordinal);
+        var mapEnd = billV2.IndexOf("};", mapStart, StringComparison.Ordinal);
+        Assert.True(mapStart >= 0 && mapEnd > mapStart);
+        var billCodeMap = billV2[mapStart..mapEnd];
+        Assert.DoesNotContain("'inquiry-new':", billCodeMap);
+
+        var modules = ReadSource("src", "ERP.Api", "wwwroot", "js", "modules-doc.js");
+        Assert.Contains("'inquiry-new'", modules);
+        Assert.Contains("api: '/api/inquiries'", modules);
+        Assert.Contains("detailKey: 'details'", modules);
+        Assert.Contains("detailFields: INQUIRY_DETAIL_FIELDS", modules);
+    }
+
     // ==================== 脚手架（响应读取 / 源文件读取） ====================
 
     private static T GetData<T>(IActionResult action)

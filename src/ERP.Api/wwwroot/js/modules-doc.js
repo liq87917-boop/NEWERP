@@ -42,6 +42,17 @@ const ORDER_DETAIL_FIELDS = [
   { key: 'remark', label: '备注', width: '130px' },
 ];
 const ORDER_DETAIL_AMOUNT = { qty: 'quantity', price: 'unitPrice', amount: 'amount', totalId: 'detail-total' };
+/* 询价单明细列（与 InquiryDetail 持久化字段同形；金额 = 数量 × 单价 自动计算，服务端仍按币种精度权威复算） */
+const INQUIRY_DETAIL_FIELDS = [
+  { key: 'productId', label: '商品ID', type: 'number', width: '90px' },
+  { key: 'productName', label: '商品名称', width: '180px' },
+  { key: 'spec', label: '规格', width: '120px' },
+  { key: 'unit', label: '单位', width: '70px' },
+  { key: 'quantity', label: '数量', type: 'number', width: '90px' },
+  { key: 'unitPrice', label: '单价', type: 'number', width: '90px' },
+  { key: 'amount', label: '金额', type: 'number', width: '100px', readonly: true },
+  { key: 'remark', label: '备注', width: '130px' },
+];
 
 Object.assign(MODULES, {
   'sys-parameter': {
@@ -104,6 +115,12 @@ Object.assign(MODULES, {
       { label: '预填报价单', icon: '📝', title: '按已审核询价单带入报价单新增表单，可核对修改后保存', onclick: 'inquiryPrefillQuotation', statuses: ['Approved'] },
       { label: '转报价单', icon: '📄', title: '按已审核询价单直接生成报价单，同一询价单仅一张', onclick: 'inquiryToQuotation', statuses: ['Approved'] },
     ],
+    /* ERP-474：询价单是 EF 主子表单据（api/inquiries）：表头 + 明细一起保存 / 回填，规范 Id 口径；
+       金额 = 数量 × 单价（前端即时展示，服务端按币种精度权威复算并覆盖）。 */
+    detailKey: 'details',
+    detailTitle: '询价商品明细（数量 × 单价 = 金额，自动算合计）',
+    detailAmount: ORDER_DETAIL_AMOUNT,
+    detailFields: INQUIRY_DETAIL_FIELDS,
   },
   /* 销售订单（外销合同）：EF 主子表接口（/api/sales-orders），承载 ERP-008 补齐的外贸合同 /
      运输 / 来源追溯字段；页面按主子表编辑，保存后可在账单与打印中直接使用。 */

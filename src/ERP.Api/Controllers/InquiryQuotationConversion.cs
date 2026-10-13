@@ -15,6 +15,9 @@ public static class InquiryQuotationConversion
     /// 与普通报价单表单保存（带入预填后手工保存）共用同一把询价单来源行锁
     /// （<see cref="InquiryMutationRules.LockInquiryRowAsync"/>），因此二者在<b>同一原子事务</b>内串行化，
     /// 同一询价单至多生成一张有效报价单；普通保存绝不另取一把锁，也绝不反向获取上游锁。
+    /// <para>ERP-474：草稿构造前先按 <see cref="InquiryCommercialValidationRules.ValidateOperational"/> 复核
+    /// **来源询价单**的商业条款（至少一行有效明细 + 币种 / 汇率 / 有界整数天有效期 / 数量 · 单价 / 行金额精度），
+    /// 非法来源在映射 / 占号 / 任何写入之前受控拒绝。</para>
     /// </summary>
     public const string SourceLineageLockOrderText = SalesDocumentSourceLineageRules.LockOrderText;
 
@@ -47,6 +50,11 @@ public static class InquiryQuotationConversion
         ArgumentNullException.ThrowIfNull(db);
         ArgumentNullException.ThrowIfNull(inquiry);
 
+        // ERP-474：询价单来源条款按唯一权威契约在**映射 / 单号预约 / 任何写入之前**校验
+        // （至少一行有效明细；币种 / 汇率 / 有效期（有界整数天）/ 数量 · 单价 / 行金额精度）——
+        // 带入预填与直接转换共用同一道复核，非法来源绝不生成草稿、绝不改写来源状态。
+        InquiryCommercialValidationRules.ValidateOperational(inquiry);
+
         var customer = inquiry.CustomerId > 0
             ? await db.BaseCustomers.AsNoTracking()
                 .FirstOrDefaultAsync(c => c.Id == inquiry.CustomerId && !c.IsDeleted)
@@ -65,7 +73,9 @@ public static class InquiryQuotationConversion
         var quotation = new Quotation
         {
             QuotationDate = quotationDate,
-            ValidUntil = quotationDate.AddDays(inquiry.ValidDays > 0 ? inquiry.ValidDays : 30),
+            // ERP-474：有效期（天）已由 InquiryCommercialValidationRules 验证为 1 ~ 3650 的整数天，
+            // 因此这里直接使用来源值，绝不静默回退默认天数。
+            ValidUntil = quotationDate.AddDays(inquiry.ValidDays),
             CustomerId = inquiry.CustomerId,
             CustomerName = customer.CustomerName,
             ContactPerson = string.IsNullOrWhiteSpace(inquiry.ContactPerson) ? customer.ContactPerson : inquiry.ContactPerson,

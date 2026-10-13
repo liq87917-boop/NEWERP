@@ -21,6 +21,11 @@ namespace ERP.Api.Controllers;
 /// 复用 <see cref="InquiryQuotationConversion.BuildDraftAsync(IErpDbContext, Inquiry)"/> —— 映射草稿承载的
 /// 客户 / 业务员 / 明细商品在占用报价单号与任何写入之前按 <see cref="QuotationMasterReferenceRules"/>
 /// 复核**实时主数据引用**；失败即受控拒绝，来源询价单状态与单号预约均不变。</para>
+/// <para>ERP-474：新增 / 修改在授权与拟议客户范围之后、**单号预约与任何写入之前**按唯一权威契约
+/// <see cref="InquiryCommercialValidationRules.NormalizeIncomingDraft"/> 校验商业条款（币种 / 汇率 /
+/// 有界整数天有效期 / 逐行数量 · 单价 / 软删除明细注入）并按币种精度派生行金额；提交 / 审核在锁内权威重读后、
+/// 状态改写之前按 <see cref="InquiryCommercialValidationRules.ValidateOperational"/> 复核**已持久化**条款
+/// （至少一行有效明细）。被拒绝的请求零写入、零占号、状态与明细均不变。</para>
 /// </summary>
 [Route("api/inquiries")]
 public class InquiryController : DocumentControllerBase<Inquiry>
@@ -201,17 +206,29 @@ public class InquiryController : DocumentControllerBase<Inquiry>
         }
     }
 
-    /// <summary>创建（ERP-402：实时授权 + 拟议客户范围先于单号生成与任何写入）</summary>
+    /// <summary>
+    /// 创建（ERP-402：实时授权 + 拟议客户范围先于单号生成与任何写入；
+    /// ERP-474：商业条款按唯一权威契约在**单号预约与任何写入之前**校验并按币种精度派生行金额，
+    /// 允许显式支持的空草稿，但被提交的行必须是合法商业行 —— 非法请求零写入、零占号；
+    /// 单号 / 状态 / 主键一律由服务端权威覆盖，客户端提交值不参与持久化）。
+    /// </summary>
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] Inquiry entity)
     {
         var scope = await InquiryAuthorizationRules.EnsureAuthorizedAsync(Db, CurrentUserId());
         InquiryAuthorizationRules.EnsureProposedCustomerInScope(scope, entity.CustomerId);
+
+        // ERP-474：币种 / 汇率 / 有效期（有界整数天）/ 逐行数量 · 单价 / 软删除明细注入在单号预约之前校验，
+        // 行金额由服务端按既有币种精度派生（绝不采信客户端行金额）。
+        InquiryCommercialValidationRules.NormalizeIncomingDraft(entity);
+
+        // 客户端不得注入身份 / 状态 / 删除态：主键 / 单号 / 状态一律由服务端权威覆盖（与 ERP-428 订单号同源口径）。
         entity.Id = 0;
         entity.InquiryNo = await _noService.GenerateAsync(DocumentType.Inquiry);
         entity.Status = DocumentStatus.Pending;
+        entity.IsDeleted = false;
         entity.CreatedAt = DateTime.Now;
-        foreach (var d in entity.Details) d.Amount = d.Quantity * d.UnitPrice;
+        entity.UpdatedAt = null;
         Db.Inquiries.Add(entity);
         await Db.SaveChangesAsync();
         return Ok(ApiResponse<object>.Success(new { entity.Id, entity.InquiryNo }, "询价单创建成功"));
@@ -219,11 +236,16 @@ public class InquiryController : DocumentControllerBase<Inquiry>
 
     /// <summary>
     /// 更新（ERP-402：询价单来源行锁 + 原子事务内锁内权威重读后改写；已存与拟议客户两侧都复核范围；
-    /// 存在实时报价单下游的询价单一律冻结，不做反向自动冲销）。
+    /// 存在实时报价单下游的询价单一律冻结，不做反向自动冲销。
+    /// ERP-474：拟议商业条款按唯一权威契约在**加锁 / 任何表头 · 明细改写之前**校验并按币种精度派生行金额，
+    /// 失败即拒绝且零写入、零状态变化）。
     /// </summary>
     [HttpPut("{id:long}")]
     public async Task<IActionResult> Update(long id, [FromBody] Inquiry entity)
-        => await RunLockedMutationAsync(id, async (scope, existing) =>
+    {
+        // ERP-474：先校验拟议条款（无数据库访问，失败时在开事务 / 加锁之前整体拒绝）。
+        InquiryCommercialValidationRules.NormalizeIncomingDraft(entity);
+        return await RunLockedMutationAsync(id, async (scope, existing) =>
         {
             InquiryAuthorizationRules.EnsureProposedCustomerInScope(scope, entity.CustomerId);
             InquiryMutationRules.EnsureNoLiveDownstream(await HasLiveQuotationAsync(id));
@@ -245,33 +267,44 @@ public class InquiryController : DocumentControllerBase<Inquiry>
                 d.Id = 0;
                 d.InquiryId = id;
                 d.CreatedAt = DateTime.Now;
-                d.Amount = d.Quantity * d.UnitPrice;
             }
             existing.Details = entity.Details;
             existing.UpdatedAt = DateTime.Now;
             await Db.SaveChangesAsync();
             return Ok(ApiResponse<object>.Success(null, "询价单更新成功"));
         });
+    }
 
-    /// <summary>提交（ERP-402：询价单来源行锁 + 原子事务内锁内权威重读后 待提交 → 已提交）</summary>
+    /// <summary>
+    /// 提交（ERP-402：询价单来源行锁 + 原子事务内锁内权威重读后 待提交 → 已提交；
+    /// ERP-474：运营承诺在状态改写之前按唯一权威契约复核**已持久化**商业条款 —— 至少一行有效明细，
+    /// 非法历史条款原子拒绝且状态不变）。
+    /// </summary>
     [HttpPost("{id:long}/submit")]
     public override async Task<IActionResult> Submit(long id)
         => await RunLockedMutationAsync(id, async (_, entity) =>
         {
             InquiryMutationRules.EnsureNoLiveDownstream(await HasLiveQuotationAsync(id));
             InquiryMutationRules.EnsureSubmitAllowed(GetStatus(entity));
+            // ERP-474：锁内权威重读后复核已持久化条款（有效明细 + 币种 / 汇率 / 有效期 / 数量 · 单价 / 金额精度）。
+            InquiryCommercialValidationRules.ValidateOperational(entity);
             SetStatus(entity, DocumentStatus.Submitted);
             await Db.SaveChangesAsync();
             return Ok(ApiResponse<object>.Success(null, "提交成功"));
         });
 
-    /// <summary>审核（ERP-402：询价单来源行锁 + 原子事务内锁内权威重读后 已提交 → 已审核）</summary>
+    /// <summary>
+    /// 审核（ERP-402：询价单来源行锁 + 原子事务内锁内权威重读后 已提交 → 已审核；
+    /// ERP-474：运营承诺在状态改写之前按唯一权威契约复核**已持久化**商业条款，非法历史条款原子拒绝且状态不变）。
+    /// </summary>
     [HttpPost("{id:long}/approve")]
     public override async Task<IActionResult> Approve(long id)
         => await RunLockedMutationAsync(id, async (_, entity) =>
         {
             InquiryMutationRules.EnsureNoLiveDownstream(await HasLiveQuotationAsync(id));
             InquiryMutationRules.EnsureApproveAllowed(GetStatus(entity));
+            // ERP-474：审核即下游承诺（可转报价单），必须至少一行有效明细并复核全部条款。
+            InquiryCommercialValidationRules.ValidateOperational(entity);
             SetStatus(entity, DocumentStatus.Approved);
             await Db.SaveChangesAsync();
             return Ok(ApiResponse<object>.Success(null, "审核通过"));
