@@ -17,6 +17,9 @@ namespace ERP.Api.Controllers;
 ///    显式链接必须构成权威来源（出库单存在、未删除、已审核、客户一致、出库仓库与退货入库仓库一致、
 ///    来源单号快照一致、商品 / 单位可折算为基础单位），否则在创建 / 修改 / 提交 / 审核时 fail closed 拒绝，
 ///    且不消耗单据号、不做任何写入；未链接（null）的历史退货保持显式「无来源」，绝不按单号文本猜测链接；
+///    ERP-503：<b>无论是否显式链接来源</b>，创建 / 修改在单号预约与任何明细写入之前都会校验草稿形状
+///    （正数量与 DECIMAL(18,4) 可表示、非负且可表示的单价 / 成本、行金额与表头合计可表示）与在用主数据
+///    （存在 / 未删除 / 启用的退货仓库与商品），提交 / 审核要求至少一行有效明细；
 /// 2) 审核后货物退回仓库：库存增加，入库成本优先取明细成本 → 来源出库流水成本 → 当前加权平均成本，
 ///    实际采用的成本会回填到明细并持久化到库存流水（估价可追溯）；
 /// 3) 审核时按商品逐行比较「已审核退货（重复商品行按基础单位合计） + 本次退货 ≤ 已审核出库数量」，
@@ -208,6 +211,9 @@ public class SalesReturnController : DocumentControllerBase<SalesReturn>
         entity.WarehouseName = await ResolveWarehouseNameAsync(entity.WarehouseId, entity.WarehouseName);
         ResetDetailIds(entity);
         await StockUnitConversion.NormalizeAsync(Db, entity.Details);
+        // ERP-503：草稿护栏（形状 + 实际存储精度 + 在用仓库 / 商品）在单位折算之后、单号预约与任何明细写入之前执行，
+        // 与是否显式链接来源无关；被拒绝的请求零单号消耗、零单据 / 明细 / 库存 / 流水变化。
+        await SalesReturnSourceRules.EnsureDraftValidAsync(Db, entity.WarehouseId, entity.Details);
         Normalize(entity);
 
         await using var transaction = await Db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
@@ -270,6 +276,9 @@ public class SalesReturnController : DocumentControllerBase<SalesReturn>
             entity.Id = id;
             ResetDetailIds(entity);
             await StockUnitConversion.NormalizeAsync(Db, entity.Details);
+            // ERP-503：与创建同一草稿护栏，在明细整体替换 / 任何写入之前收敛非法仓库、非法形状与失效商品，
+            // 被拒绝方不消耗新单号、既有单据与明细逐字段不变。
+            await SalesReturnSourceRules.EnsureDraftValidAsync(Db, entity.WarehouseId, entity.Details);
             Normalize(entity);
 
             // 修改后的显式来源可能与原来源不同：在新来源行上补锁（升序单把锁，无死锁）。
@@ -342,8 +351,9 @@ public class SalesReturnController : DocumentControllerBase<SalesReturn>
             await StockUnitConversion.NormalizeAsync(Db, entity.Details);
             Normalize(entity);
             var details = entity.Details.Where(d => !d.IsDeleted).OrderBy(d => d.SortNo).ToList();
-            if (details.Count == 0)
-                throw BusinessException.RuleConflict("销售退货单无明细，不能审核");
+            // ERP-503：审核要求至少一行有效明细，且形状 / 实际存储精度仍然有效（与创建 / 修改同一份护栏）。
+            SalesReturnSourceRules.EnsureHasEffectiveLine(entity.Details, "审核");
+            ReturnDocumentDraftRules.EnsureLineShape(entity.Details);
             if (await _inventory.CountActiveMovementsAsync(InventoryDocumentHelper.SalesReturnType, entity.Id) > 0)
                 throw BusinessException.RuleConflict("该销售退货单已产生库存流水，不能重复审核");
 
@@ -508,6 +518,9 @@ public class SalesReturnController : DocumentControllerBase<SalesReturn>
             // 单据 / 库存 / 流水保持原样；累计可退容量由审核 / 销审在同一把来源行锁内判定（绝不超退）。
             await StockUnitConversion.NormalizeAsync(Db, entity.Details);
             Normalize(entity);
+            // ERP-503：提交要求至少一行有效明细，且形状 / 实际存储精度仍然有效（空草稿头可保存但不可提交）。
+            SalesReturnSourceRules.EnsureHasEffectiveLine(entity.Details, "提交");
+            ReturnDocumentDraftRules.EnsureLineShape(entity.Details);
             var link = await SalesReturnSourceRules.ValidateLinkAsync(Db, entity);
             entity.SourceStockOutNo = link is null ? entity.SourceStockOutNo : link.Shipment.StockOutNo;
 

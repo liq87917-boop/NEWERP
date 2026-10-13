@@ -15,7 +15,7 @@
 
 ## 3. 链接权威性判定（无效链接 fail closed 拒绝）
 
-`PurchaseReturnSourceRules.ResolveLinkAsync` 是创建 / 修改 / 提交 / 审核**共用**的同一份权威判定。显式链接（`SourceStockInId` 非空）必须构成权威来源，否则抛 `BusinessException`，**不落库、不消耗单据号、不改库存 / 流水 / 状态**；未链接（`null`）不做任何校验。以下任一情况视为无效链接：
+`PurchaseReturnSourceRules.ResolveLinkAsync` 是创建 / 修改 / 提交 / 审核**共用**的同一份权威判定。显式链接（`SourceStockInId` 非空）必须构成权威来源，否则抛 `BusinessException`，**不落库、不消耗单据号、不改库存 / 流水 / 状态**；未链接（`null`）不做任何来源校验。以下任一情况视为无效链接：
 
 | 判定项 | 权威要求 |
 |---|---|
@@ -124,7 +124,7 @@
 
 ## 10. 未执行 / 限制
 
-- 本任务 `validation_profile = safe`、`completion_mode = build`：交付门槛为 **Release build + 全量 `ERP.UnitTests`**（本次实际运行：**5355 通过 / 0 失败**）；真实 SQL 集成用例另外在专用 localdb 上运行通过（11 例），**构建通过不等于阶段验收通过**。
+- ERP-503（本次）：`validation_profile = safe`、`completion_mode = build`：交付门槛为 Release build（分析器 + warnings-as-errors）+ 全量 `ERP.UnitTests`（**8267 通过 / 0 失败**）；真实 SQL 另外在专用 localdb 上运行：`ReturnDocumentDraftValidation`（**71 通过 / 0 失败**，销售 / 采购共享）与相关退货 SQL 回归（**72 通过 / 0 失败**）。**构建通过不等于阶段验收通过**。
 - 未运行真实浏览器 UI 验收（`browser_acceptance.required = false`），未启动 API、未部署、未改动生产库或生产设置。
 - 未新增 / 未修改任何数据库 schema、未新增表 / 列 / 菜单 / 权限；`.ai/logs/` 下既有失败日志原样保留。
 
@@ -134,3 +134,53 @@
 - `src/ERP.Api/Controllers/PurchaseReturnController.cs`：全部端点的实时授权 + 「来源入库单行 → 退货单行」确定性锁序 + 可串行化事务 + 原子过账。
 - `src/ERP.Api/Controllers/StockUnitConversion.cs`：新增采购退货明细的装箱 → 基础单位折算重载。
 - 复用既有：`StockInAuthorizationRules.ResolveOwningCustomerIdAsync`（来源入库单 → 采购订单归属客户）、`SalespersonDataScopeService`（ERP-097 数据范围）、`CustomerReceivableReconciliationService.LoadAuthorizedMenuCodesAsync`（角色 → 菜单）、`InventoryService`（ERP-009 记账与冲销）。
+
+## 12. 草稿写入护栏（ERP-503：链接与未链接同口径）
+
+**问题**：创建 / 修改此前只在**显式链接来源**时才有明细校验（`ResolveLinkAsync` 对 `SourceStockInId == null` 直接返回 `null`），因此显式「无来源」的草稿可以带着空有效明细、非正 / 不可表示数量、负数 / 不可表示单价、缺失 / 不存在 / 已删除 / 已停用商品、非正 / 不存在 / 已删除 / 已停用仓库落库，直到**审核**才在已存储且页面上可见的损坏草稿上拒绝。
+
+**护栏**：采购退货与销售退货**共享同一份判定核心** `ReturnDocumentDraftRules`（定义于 `src/ERP.Application/Services/SalesReturnSourceRules.cs`，经 `PurchaseReturnSourceRules.EnsureDraftValidAsync` 暴露），由创建 / 修改在**单位折算之后、单号预约与任何明细写入之前**调用，**与是否显式链接来源无关**：
+
+| 判定 | 规则 | 错误码 |
+|---|---|---|
+| 明细形状 | 每行有效（未删除）明细的商品 Id 必须 > 0 | `1001` |
+| 数量 | 必须 > 0 且在实际存储精度 `DECIMAL(18,4)` 内可表示 | `1001` |
+| 退货单价 | 不得为负且 `DECIMAL(18,4)` 内可表示 | `1001` |
+| 成本单价 | 不得为负且 `DECIMAL(18,6)` 内可表示 | `1001` |
+| 行金额 / 合计 | `RoundAmount(数量 × 单价)`、合计数量与合计金额按与 `Normalize` **同源**公式重算并校验可表示性与溢出 | `1001` |
+| 退货仓库 | Id 必须 > 0，且仓库存在、未删除、已启用 | `1001` / `1004`（已停用） |
+| 商品 | 必须存在、未删除、已启用 | `1001` / `1004`（已停用） |
+
+- 空草稿头（0 行有效明细）仍受支持；**提交 / 审核**要求至少一行有效明细（`EnsureHasEffectiveLine`，`1004`）+ 形状 / 精度仍然有效；
+- 重复商品行按累计数量语义保留，**不引入任何唯一性规则**；
+- 被拒绝的调用**零单号消耗、零单据 / 明细 / 库存 / 流水变化**（显式链接、来源单号快照、上游客户范围、来源行锁序、可串行化事务、成本口径、冲销语义与 StockMovements 台账全部不变）；
+- 不新增表 / 列 / 索引 / 菜单 / 权限或用户授权。
+
+**单元测试**（`src/ERP.UnitTests/ReturnDocumentDraftValidationTests.cs`，98 例，销售 / 采购共用同一套骨架）
+
+| 用例 | 断言 |
+|---|---|
+| 创建：仓库 0 / 负数 / 不存在 / 已删除 / 已停用（链接与未链接） | 对应错误码；零单据 / 零明细 / 零流水 / 零单号 |
+| 创建：商品 Id 缺失 / 不存在 / 已删除 / 已停用，数量 0 / 负数 / 不可表示，单价负数 / 不可表示，成本负数 / 不可表示（链接与未链接） | 同上 |
+| 创建：行金额 / 合计数量 / 合计金额不可表示 | `1001` 且零副作用 |
+| 创建：空草稿头 | 可保存、合计 0、零明细；提交 `1004` 且状态 / 单号不变；历史「已提交但无明细」审核同样 `1004` |
+| 创建：重复商品行 | 两行明细保留、合计累计、审核后库存 / 流水恰好一次 |
+| 创建：合法草稿（链接 / 未链接） | 可提交审核出库，金额与来源链接语义不变 |
+| 修改：仓库 / 商品 / 数量 / 单价非法（链接与未链接） | 拒绝且既有单据 / 明细逐字段不变、不消耗新单号 |
+| 修改：清空明细 | 空草稿头保留但提交拒绝 |
+
+**真实 SQL 集成测试**（`src/ERP.IntegrationTests/ReturnDocumentDraftValidationSqlServerTests.cs`）
+
+| 场景 | 断言 |
+|---|---|
+| 创建：非法仓库 / 非法明细 / 不可表示金额（销售与采购、链接与未链接） | 对应错误码；单据 / 明细 / 流水 / 单号规则与单号流水相对快照逐项不变 |
+| 修改：同样的非法输入 | 既有单据（单号 / 状态 / 仓库 / 合计）与明细逐字段不变、零新单号、零流水 |
+| 空草稿头 | 可保存并占用一次单号；提交 `1004`（状态 / 单号不变）；历史「已提交但无明细」审核 `1004` 且零流水 |
+| 重复商品行 + 合法流程（销售 / 采购、链接 / 未链接） | 库存恰好一次变动（销售 +5 / 采购 −5）、每行一条流水、单号恰好消耗一次 |
+| 目标库护栏 | 非专用目标（实例 / 库名前缀 / 集成安全不符）在访问数据库之前被拒绝 |
+
+**执行记录（本任务实现门槛内实际运行）**
+
+- `dotnet test src/ERP.IntegrationTests/ERP.IntegrationTests.csproj -c Release --filter "FullyQualifiedName~ReturnDocumentDraftValidation"` → **71 通过 / 0 失败**（含采购退货仓库 / 明细 / 合计 / 修改 / 空草稿头 / 重复行与合法流程全部用例）。
+- 相关退货 SQL 回归（销售 / 采购来源、来源选择、来源取消、销售出库草稿）另行运行 → **72 通过 / 0 失败**。
+- 目标为既有专用实例 `(localdb)\NEWERP_AutoAcceptance`，每次运行只新建 GUID 后缀 `NEWERP_AUTOTEST_*` 库；未 drop / reset / 复用任何数据库；未读取 `appsettings` / `.env` / 生产凭据。

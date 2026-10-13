@@ -225,6 +225,21 @@ public static class SalesReturnSourceRules
         => ResolveLinkAsync(db, entity, ct);
 
     /// <summary>
+    /// ERP-503 草稿写入护栏（创建 / 修改在单位折算之后、单号预约与任何明细写入之前调用，<b>与是否显式链接来源无关</b>）：
+    /// <see cref="ReturnDocumentDraftRules.EnsureLineShape(System.Collections.Generic.IEnumerable{SalesReturnDetail})"/>
+    /// （形状 + 实际存储精度 + 表头合计可表示性）→ 在用退货仓库 → 在用商品。
+    /// 任一不满足即按既有受控业务错误（<c>InvalidParameter</c> / <c>RuleConflict</c>）拒绝，
+    /// 绝不消耗单据号、绝不落任何单据 / 明细 / 库存 / 流水。
+    /// </summary>
+    public static Task EnsureDraftValidAsync(IErpDbContext db, long warehouseId,
+        IEnumerable<SalesReturnDetail> details, CancellationToken ct = default)
+        => ReturnDocumentDraftRules.EnsureDraftValidAsync(db, warehouseId, details, ct);
+
+    /// <summary>提交 / 审核前必须至少存在一行有效明细（未删除）：空草稿头可保存但不可提交 / 审核。</summary>
+    public static void EnsureHasEffectiveLine(IEnumerable<SalesReturnDetail> details, string action)
+        => ReturnDocumentDraftRules.EnsureHasEffectiveLine(details, action);
+
+    /// <summary>
     /// 审核时的来源校验 + 累计可退容量校验：先做权威链接判定，再按商品逐行比较
     /// 「已审核退货（同一来源出库单、未删除、已审核、非本单，重复商品行按基础单位合计） + 本次退货 ≤ 已审核出库数量」。
     /// <para>单位不一致、负数量（损坏证据）一律 fail closed 拒绝，绝不静默钳制；未链接（null）不做容量校验。</para>
@@ -641,6 +656,269 @@ public static class SalesReturnSourceRules
         public decimal EffectiveReturnedBaseQuantity { get; set; }
     }
 
+}
+
+/// <summary>
+/// 销售退货 / 采购退货共享的草稿写入护栏（ERP-503）。
+/// <para>背景：两张退货单的明细校验此前只在「显式链接来源」时发生
+/// （<see cref="SalesReturnSourceRules.ResolveLinkAsync"/> / <see cref="PurchaseReturnSourceRules.ResolveLinkAsync"/>
+/// 对 null 来源直接返回 null），因此显式「无来源」的草稿可以带着空有效明细、非正 / 不可表示数量、
+/// 负数 / 不可表示单价、缺失 / 不存在 / 已删除 / 已停用商品、非正 / 不存在 / 已删除 / 已停用仓库写入数据库。</para>
+/// <para>本类把「明细形状 + 实际 EF 存储精度（数量 / 单价 <c>DECIMAL(18,4)</c>、成本 <c>DECIMAL(18,6)</c>）+
+/// 在用主数据」收敛为一条<b>共享</b>护栏，供创建 / 修改在单号预约与任何明细写入<b>之前</b>调用，
+/// 无论是否显式链接来源（显式链接 / 快照 / 客户或上游范围 / 来源行锁序 / 可串行化事务 / 成本口径 /
+/// 冲销语义 / StockMovements 台账全部保持不变）。</para>
+/// <list type="bullet">
+/// <item>空草稿头（0 行有效明细）仍受支持（提交 / 审核才要求至少一行有效明细）；</item>
+/// <item>重复商品行按累计数量语义保留，绝不引入任意唯一性规则；</item>
+/// <item>行金额 / 合计数量 / 合计金额按与控制器 <c>Normalize</c> <b>同源</b>的公式重算，并校验可表示性与溢出；</item>
+/// <item>被拒绝的调用零单号消耗、零单据 / 明细 / 库存 / 流水变化；</item>
+/// <item>只做纯判定与有界只读查询：不新增表 / 列 / 索引 / 菜单 / 权限，也不改任何主数据。</item>
+/// </list>
+/// </summary>
+public static class ReturnDocumentDraftRules
+{
+    /// <summary>
+    /// 退货数量 / 单价 / 行金额 / 合计数量 / 合计金额的实际存储精度：<c>DECIMAL(18,4)</c>
+    /// （与 <c>ErpDbContext.Config</c> 对 <c>SalesReturn</c> / <c>PurchaseReturn</c> 主表与明细的显式精度声明、
+    /// 以及 <c>SchemaUpgrader</c> 的建表脚本同源）。
+    /// </summary>
+    public const int QuantityPrecision = 18;
+
+    /// <summary>退货数量 / 单价 / 金额的实际小数位：4（与 <see cref="QuantityPrecision"/> 同源）。</summary>
+    public const int QuantityScale = 4;
+
+    /// <summary><c>DECIMAL(18,4)</c> 的最大可表示绝对值（14 位整数 + 4 位小数）。</summary>
+    public const decimal MaxDecimal18Scale4 = 99_999_999_999_999.9999m;
+
+    /// <summary>退货成本单价的实际存储精度：<c>DECIMAL(18,6)</c>。</summary>
+    public const int CostPrecision = 18;
+
+    /// <summary>退货成本单价的实际小数位：6（与 <see cref="CostPrecision"/> 同源）。</summary>
+    public const int CostScale = 6;
+
+    /// <summary><c>DECIMAL(18,6)</c> 的最大可表示绝对值（12 位整数 + 6 位小数）。</summary>
+    public const decimal MaxDecimal18Scale6 = 999_999_999_999.999999m;
+
+    /// <summary>草稿护栏口径文案（接口 / 文档同源）</summary>
+    public const string RuleText =
+        "销售退货单与采购退货单的创建 / 修改在单号预约与任何明细写入之前，无论是否显式链接来源，" +
+        "都会校验每一行有效明细的形状与实际存储精度：数量必须为正且在 DECIMAL(18,4) 内可表示，" +
+        "退货单价不得为负且在 DECIMAL(18,4) 内可表示，成本单价不得为负且在 DECIMAL(18,6) 内可表示，" +
+        "商品 Id 必须有效且商品存在、未删除、已启用，退货仓库必须为正且存在、未删除、已启用；" +
+        "行金额与表头合计按与 Normalize 同源的公式重算并校验可表示性与溢出；" +
+        "空草稿头（0 行有效明细）仍受支持，提交 / 审核要求至少一行有效明细；重复商品行按累计数量语义保留，" +
+        "绝不引入任意唯一性规则；被拒绝的请求零单号消耗、零单据 / 明细 / 库存 / 流水变化。";
+
+    /// <summary>边界文案（不改来源链接、快照、范围、成本口径与台账）</summary>
+    public const string BoundaryText =
+        "本护栏只新增草稿写入前的形状 / 精度 / 在用主数据判定：不改写显式来源链接与来源单号快照、" +
+        "不改客户或上游数据范围、不改来源行锁序与可串行化事务、不改库存成本口径（移动加权平均）、" +
+        "不改销审冲销语义与 StockMovements 台账，也不新增任何表 / 列 / 索引 / 菜单 / 权限或用户授权。";
+
+    /// <summary>退货数量 / 单价 / 行金额 / 合计是否在实际存储精度 <c>DECIMAL(18,4)</c> 内可表示。</summary>
+    public static bool IsQuantityRepresentable(decimal value)
+        => decimal.Round(value, QuantityScale) == value
+           && value >= -MaxDecimal18Scale4 && value <= MaxDecimal18Scale4;
+
+    /// <summary>退货成本单价是否在实际存储精度 <c>DECIMAL(18,6)</c> 内可表示。</summary>
+    public static bool IsCostRepresentable(decimal value)
+        => decimal.Round(value, CostScale) == value
+           && value >= -MaxDecimal18Scale6 && value <= MaxDecimal18Scale6;
+
+    /// <summary>
+    /// 销售退货草稿明细形状校验（纯内存，不访问数据库）：只校验<b>未删除</b>的有效明细行。
+    /// 刻意<b>不</b>校验商品唯一性：同一商品允许在一张退货单中重复出现（累计数量语义）。
+    /// 空明细（0 行有效明细）在草稿阶段仍受支持，是否要求非空由调用方（提交 / 审核）决定。
+    /// </summary>
+    public static void EnsureLineShape(IEnumerable<SalesReturnDetail> details)
+    {
+        ArgumentNullException.ThrowIfNull(details);
+        EnsureLineShape(Snapshot(details), "销售退货单");
+    }
+
+    /// <summary>采购退货草稿明细形状校验（与销售退货同源同口径）。</summary>
+    public static void EnsureLineShape(IEnumerable<PurchaseReturnDetail> details)
+    {
+        ArgumentNullException.ThrowIfNull(details);
+        EnsureLineShape(Snapshot(details), "采购退货单");
+    }
+
+    /// <summary>
+    /// 销售退货草稿写入护栏（创建 / 修改在单位折算之后、单号预约与任何写入之前调用）：
+    /// <see cref="EnsureLineShape(IEnumerable{SalesReturnDetail})"/> → 在用退货仓库 → 在用商品。
+    /// </summary>
+    public static async Task EnsureDraftValidAsync(IErpDbContext db, long warehouseId,
+        IEnumerable<SalesReturnDetail> details, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(details);
+
+        var lines = Snapshot(details);
+        EnsureLineShape(lines, "销售退货单");
+        await EnsureWarehouseAvailableAsync(db, warehouseId, "销售退货单", ct);
+        await EnsureProductsAvailableAsync(db, lines, "销售退货单", ct);
+    }
+
+    /// <summary>采购退货草稿写入护栏（与销售退货同源同口径）。</summary>
+    public static async Task EnsureDraftValidAsync(IErpDbContext db, long warehouseId,
+        IEnumerable<PurchaseReturnDetail> details, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(db);
+        ArgumentNullException.ThrowIfNull(details);
+
+        var lines = Snapshot(details);
+        EnsureLineShape(lines, "采购退货单");
+        await EnsureWarehouseAvailableAsync(db, warehouseId, "采购退货单", ct);
+        await EnsureProductsAvailableAsync(db, lines, "采购退货单", ct);
+    }
+
+    /// <summary>销售退货提交 / 审核前必须至少存在一行有效明细（未删除）。</summary>
+    public static void EnsureHasEffectiveLine(IEnumerable<SalesReturnDetail> details, string action)
+    {
+        ArgumentNullException.ThrowIfNull(details);
+        EnsureHasEffectiveLine(Snapshot(details), "销售退货单", action);
+    }
+
+    /// <summary>采购退货提交 / 审核前必须至少存在一行有效明细（未删除）。</summary>
+    public static void EnsureHasEffectiveLine(IEnumerable<PurchaseReturnDetail> details, string action)
+    {
+        ArgumentNullException.ThrowIfNull(details);
+        EnsureHasEffectiveLine(Snapshot(details), "采购退货单", action);
+    }
+
+    // ==================== 内部同源实现（两种退货共用一份判定核心，绝不复制两份规则） ====================
+
+    /// <summary>退货明细快照（只读事实；两种退货明细的公共投影）。</summary>
+    private readonly record struct DraftLine(bool IsDeleted, long? ProductId, string ProductName,
+        decimal Quantity, decimal UnitPrice, decimal UnitCost);
+
+    private static DraftLine[] Snapshot(IEnumerable<SalesReturnDetail> details)
+        => details.Select(d => new DraftLine(d.IsDeleted, d.ProductId, d.ProductName ?? string.Empty,
+            d.Quantity, d.UnitPrice, d.UnitCost)).ToArray();
+
+    private static DraftLine[] Snapshot(IEnumerable<PurchaseReturnDetail> details)
+        => details.Select(d => new DraftLine(d.IsDeleted, d.ProductId, d.ProductName ?? string.Empty,
+            d.Quantity, d.UnitPrice, d.UnitCost)).ToArray();
+
+    private static void EnsureLineShape(IReadOnlyList<DraftLine> lines, string documentLabel)
+    {
+        var effective = lines.Where(l => !l.IsDeleted).ToList();
+        var line = 0;
+        foreach (var d in effective)
+        {
+            line++;
+            var label = string.IsNullOrWhiteSpace(d.ProductName) ? $"第 {line} 行" : d.ProductName;
+
+            if (d.ProductId is not > 0)
+                throw BusinessException.InvalidParameter($"{documentLabel}商品 [{label}] 缺少有效商品 Id，不能退货");
+            if (d.Quantity <= 0m)
+                throw BusinessException.InvalidParameter($"商品 [{label}] 的退货数量必须大于 0");
+            if (!IsQuantityRepresentable(d.Quantity))
+                throw BusinessException.InvalidParameter(
+                    $"商品 [{label}] 的退货数量 {d.Quantity} 超出存储精度（DECIMAL(18,4)）：已拒绝，绝不静默截断或取整");
+            if (d.UnitPrice < 0m)
+                throw BusinessException.InvalidParameter($"商品 [{label}] 的退货单价不能为负数");
+            if (!IsQuantityRepresentable(d.UnitPrice))
+                throw BusinessException.InvalidParameter(
+                    $"商品 [{label}] 的退货单价 {d.UnitPrice} 超出存储精度（DECIMAL(18,4)）：已拒绝，绝不静默截断或取整");
+            if (d.UnitCost < 0m)
+                throw BusinessException.InvalidParameter($"商品 [{label}] 的成本单价不能为负数");
+            if (!IsCostRepresentable(d.UnitCost))
+                throw BusinessException.InvalidParameter(
+                    $"商品 [{label}] 的成本单价 {d.UnitCost} 超出存储精度（DECIMAL(18,6)）：已拒绝，绝不静默截断或取整");
+        }
+
+        EnsureRepresentableTotals(effective, documentLabel);
+    }
+
+    /// <summary>
+    /// 行金额与表头合计的精度校验：与控制器 <c>Normalize</c> <b>同源</b>重算
+    /// （行金额 = <c>RoundAmount(数量 × 单价)</c>、合计数量 = Σ 数量、合计金额 = <c>RoundAmount(Σ 行金额)</c>），
+    /// 任一不可表示 / 溢出都返回受控业务错误。通过本校验后 <c>Normalize</c> 的结果可被 EF <b>原样</b>持久化，
+    /// 明细之和与表头合计逐分一致，也不会把正数量静默舍入为 0。
+    /// </summary>
+    private static void EnsureRepresentableTotals(IReadOnlyList<DraftLine> lines, string documentLabel)
+    {
+        try
+        {
+            decimal totalQuantity = 0m, totalAmount = 0m;
+            for (var i = 0; i < lines.Count; i++)
+            {
+                var amount = InventoryService.RoundAmount(lines[i].Quantity * lines[i].UnitPrice);
+                if (amount < -MaxDecimal18Scale4 || amount > MaxDecimal18Scale4)
+                    throw BusinessException.InvalidParameter(
+                        $"{documentLabel}明细第 {i + 1} 行金额 {amount} 超出存储精度（DECIMAL(18,4)）：已拒绝，绝不静默截断或取整");
+
+                totalQuantity += lines[i].Quantity;
+                totalAmount += amount;
+            }
+
+            if (totalQuantity < -MaxDecimal18Scale4 || totalQuantity > MaxDecimal18Scale4)
+                throw BusinessException.InvalidParameter(
+                    $"{documentLabel}合计数量 {totalQuantity} 超出存储精度（DECIMAL(18,4)）：已拒绝，绝不静默截断或取整");
+
+            var roundedTotal = InventoryService.RoundAmount(totalAmount);
+            if (roundedTotal < -MaxDecimal18Scale4 || roundedTotal > MaxDecimal18Scale4)
+                throw BusinessException.InvalidParameter(
+                    $"{documentLabel}合计金额 {roundedTotal} 超出存储精度（DECIMAL(18,4)）：已拒绝，绝不静默截断或取整");
+        }
+        catch (OverflowException)
+        {
+            // decimal 乘法 / 加法溢出：转换为受控业务错误，绝不落库为截断值。
+            throw BusinessException.InvalidParameter(
+                "退货数量 / 单价 / 金额超出可存储范围（DECIMAL(18,4)）：已拒绝，绝不静默截断或取整改变合计");
+        }
+    }
+
+    /// <summary>退货仓库必须真实可用（存在、未删除、已启用），否则拒绝退货单草稿写入。</summary>
+    private static async Task EnsureWarehouseAvailableAsync(IErpDbContext db, long warehouseId,
+        string documentLabel, CancellationToken ct)
+    {
+        if (warehouseId <= 0)
+            throw BusinessException.InvalidParameter($"{documentLabel}必须选择有效仓库（仓库 Id 必须为正数）");
+
+        var warehouse = await db.BaseWarehouses.AsNoTracking()
+            .FirstOrDefaultAsync(w => w.Id == warehouseId && !w.IsDeleted, ct);
+        if (warehouse is null)
+            throw BusinessException.InvalidParameter($"{documentLabel}仓库（Id={warehouseId}）不存在或已删除，不能使用");
+        if (warehouse.Status != 1)
+            throw BusinessException.RuleConflict(
+                $"{documentLabel}仓库「{warehouse.WarehouseName}」已停用，不能使用（fail closed）");
+    }
+
+    /// <summary>每一行有效明细的商品必须真实可用（存在、未删除、已启用），否则拒绝退货单草稿写入。</summary>
+    private static async Task EnsureProductsAvailableAsync(IErpDbContext db, IReadOnlyList<DraftLine> lines,
+        string documentLabel, CancellationToken ct)
+    {
+        var effective = lines.Where(l => !l.IsDeleted).ToList();
+        var ids = effective.Where(l => l.ProductId is > 0).Select(l => l.ProductId!.Value).Distinct().ToList();
+        var products = ids.Count == 0
+            ? new Dictionary<long, BaseProduct>()
+            : await db.BaseProducts.AsNoTracking()
+                .Where(p => ids.Contains(p.Id) && !p.IsDeleted)
+                .ToDictionaryAsync(p => p.Id, ct);
+
+        var line = 0;
+        foreach (var d in effective)
+        {
+            line++;
+            var label = string.IsNullOrWhiteSpace(d.ProductName) ? $"第 {line} 行" : d.ProductName;
+
+            if (!products.TryGetValue(d.ProductId ?? 0L, out var product))
+                throw BusinessException.InvalidParameter($"{documentLabel}商品 [{label}] 不存在或已删除，不能退货");
+            if (product.Status != 1)
+                throw BusinessException.RuleConflict(
+                    $"{documentLabel}商品「{product.ProductName}」已停用，不能退货（fail closed）");
+        }
+    }
+
+    /// <summary>提交 / 审核前必须至少存在一行有效明细（未删除）：空草稿头可保存但不可提交 / 审核。</summary>
+    private static void EnsureHasEffectiveLine(IReadOnlyList<DraftLine> lines, string documentLabel, string action)
+    {
+        if (!lines.Any(l => !l.IsDeleted))
+            throw BusinessException.RuleConflict($"{documentLabel}无明细，不能{action}");
+    }
 }
 
 /// <summary>

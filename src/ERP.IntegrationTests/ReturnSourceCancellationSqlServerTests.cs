@@ -591,6 +591,11 @@ public sealed class ReturnSourceCancellationSqlServerTests
         var menu = await SeedMenuAsync(db, SalesReturnSourceRules.RequiredMenuCode,
             SalesReturnSourceRules.RequiredMenuText, "/logistics/sales-return");
         db.SysRoleMenus.Add(new SysRoleMenu { RoleId = role.Id, MenuId = menu.Id });
+        // ERP-503：同一身份还要执行来源销售出库单的创建 / 取消（真实业务要求既有「销售出库」菜单授权），
+        // 这里补齐既有菜单（不新增任何权限模型、不放宽任何业务断言）。
+        var stockOutMenu = await SeedMenuAsync(db, StockOutAuthorizationRules.RequiredMenuCode,
+            StockOutAuthorizationRules.RequiredMenuText, "/logistics/stock-out");
+        db.SysRoleMenus.Add(new SysRoleMenu { RoleId = role.Id, MenuId = stockOutMenu.Id });
         await db.SaveChangesAsync();
         return user.Id;
     }

@@ -182,6 +182,20 @@ public static class PurchaseReturnSourceRules
         => ResolveLinkAsync(db, entity, ct);
 
     /// <summary>
+    /// ERP-503 草稿写入护栏（创建 / 修改在单位折算之后、单号预约与任何明细写入之前调用，<b>与是否显式链接来源无关</b>）：
+    /// 复用销售退货共享的 <see cref="ReturnDocumentDraftRules"/>（形状 + 实际存储精度 + 表头合计可表示性
+    /// → 在用退货仓库 → 在用商品）。任一不满足即按既有受控业务错误（<c>InvalidParameter</c> /
+    /// <c>RuleConflict</c>）拒绝，绝不消耗单据号、绝不落任何单据 / 明细 / 库存 / 流水。
+    /// </summary>
+    public static Task EnsureDraftValidAsync(IErpDbContext db, long warehouseId,
+        IEnumerable<PurchaseReturnDetail> details, CancellationToken ct = default)
+        => ReturnDocumentDraftRules.EnsureDraftValidAsync(db, warehouseId, details, ct);
+
+    /// <summary>提交 / 审核前必须至少存在一行有效明细（未删除）：空草稿头可保存但不可提交 / 审核。</summary>
+    public static void EnsureHasEffectiveLine(IEnumerable<PurchaseReturnDetail> details, string action)
+        => ReturnDocumentDraftRules.EnsureHasEffectiveLine(details, action);
+
+    /// <summary>
     /// 审核时的来源校验 + 累计可退容量校验：先做权威链接判定，再按商品逐行比较
     /// 「已审核退货（同一来源入库单、未删除、已审核、非本单，重复商品行按基础单位合计） + 本次退货 ≤ 已审核入库数量」。
     /// <para>单位不一致、负数量（损坏证据）一律 fail closed 拒绝，绝不静默钳制；未链接（null）不做容量校验。</para>
