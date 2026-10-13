@@ -1,0 +1,109 @@
+{
+  "title": "Enforce supplier comparison and decision authority at every business entry",
+  "description": "Close the remaining executable authority bypass in procurement sourcing. PurchaseQuoteController and PurchaseQuoteDecisionController RequiresLiveAuthorization return false when HttpContext is absent, or Request.Path is empty and user ID absent. EnsureAuthorizedAsync consequently returns null, allowing controller entry to proceed without live identity/menu/customer scope and permitting procurement decision/history/conversion entry to ignore current business ownership. Require the same existing PurchaseQuoteAuthorizationRules for every read/write/approval/decision and downstream conversion entry regardless of call shape; return controlled non-disclosing denial before reading any evidence, consuming numbers or mutations. Preserve established functional menus and source/master validators; no grants or permission expansion. Adapt legacy in-process fixtures only by seeding genuine enabled identities, existing menus/role grants and authorized customers in isolated test data. Do not use request-path presence, test environments, synthetic bypass identities, anonymous/admin fallbacks or empty context to waive authority. Preserve all number/quantity/amount/source/transaction/locking rules and audit. Store complete output/TRX under .ai/logs/<task> with explicit results directories; preserve original failures and do not stage generated output. Retain existing live identity/menu/customer-scope authority, transactions, source locks, controlled errors and audit. Reject before numbering or persistence, with zero header/detail/source/status mutations. No new permissions, schema, production access, external service or arbitrary SQL. Genuine SQL only on (localdb)\\NEWERP_AutoAcceptance with Integrated Security and a fresh GUID-owned NEWERP_AUTOTEST database; reject wrong/existing targets and never drop/reset. Require safe Release with analyzers/warnings-as-errors, full units and relevant genuine SQL/browser tests; accurately record blockers and do not claim whole-stage acceptance.",
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/PurchaseQuoteController.cs",
+    "src/ERP.Api/Controllers/PurchaseQuoteDecisionController.cs",
+    "src/ERP.Application/Services/PurchaseQuoteAuthorizationRules.cs",
+    "src/ERP.UnitTests/PurchaseQuoteApprovalTests.cs",
+    "src/ERP.UnitTests/PurchaseQuoteAuthorizationTests.cs",
+    "src/ERP.UnitTests/PurchaseQuoteConversionBatchTests.cs",
+    "src/ERP.UnitTests/PurchaseQuoteConversionFunnelTests.cs",
+    "src/ERP.UnitTests/PurchaseQuoteConversionMutationTests.cs",
+    "src/ERP.UnitTests/PurchaseQuoteConversionTests.cs",
+    "src/ERP.UnitTests/PurchaseQuoteMutationTests.cs",
+    "src/ERP.UnitTests/PurchaseQuoteOrderPriceVarianceTests.cs",
+    "src/ERP.UnitTests/PurchaseQuotePriceHistoryTests.cs",
+    "src/ERP.UnitTests/PurchaseQuoteMasterReferenceTests.cs",
+    "src/ERP.UnitTests/PurchaseQuoteEntryAuthorizationTests.cs",
+    "src/ERP.IntegrationTests/PurchaseQuoteEntryAuthorizationSqlServerTests.cs",
+    "docs/purchase-quote-entry-authorization.md"
+  ],
+  "acceptance_criteria": [
+    "Every sourcing and decision entry resolves current enabled nondeleted identity, existing comparison functional menu and current customer scope independently of empty/populated request path or missing HttpContext. Conversion additionally retains existing procurement authority; missing/zero/deleted/disabled/revoked identities receive controlled non-disclosing denial before any read or write.",
+    "Permitted users retain bounded scoped list/detail/history, live approval/selection and single/batch procurement conversion under existing quantity/money/master/source locks. Denied or partly unauthorized batches mutate no decisions/quotes/orders/numbers and disclose no supplier/product/customer/commercial snapshot.",
+    "Meaningful rules/controller and real isolated SQL tests cover identical populated/empty/no-context outcomes, identity/menu revocation, permitted current-scope flows and rejected zero mutations/disclosure. Adapt affected original fixtures with real test identities/grants; preserve all master-reference/conversion regressions and safe Release/full units."
+  ],
+  "criterion_path_map": {
+    "Every sourcing and decision entry resolves current enabled nondeleted identity, existing comparison functional menu and current customer scope independently of empty/populated request path or missing HttpContext. Conversion additionally retains existing procurement authority; missing/zero/deleted/disabled/revoked identities receive controlled non-disclosing denial before any read or write.": [
+      "src/ERP.Api/Controllers/PurchaseQuoteController.cs",
+      "src/ERP.Api/Controllers/PurchaseQuoteDecisionController.cs",
+      "src/ERP.Application/Services/PurchaseQuoteAuthorizationRules.cs",
+      "src/ERP.UnitTests/PurchaseQuoteApprovalTests.cs",
+      "src/ERP.UnitTests/PurchaseQuoteAuthorizationTests.cs",
+      "src/ERP.UnitTests/PurchaseQuoteConversionBatchTests.cs",
+      "src/ERP.UnitTests/PurchaseQuoteConversionFunnelTests.cs",
+      "src/ERP.UnitTests/PurchaseQuoteConversionMutationTests.cs",
+      "src/ERP.UnitTests/PurchaseQuoteConversionTests.cs",
+      "src/ERP.UnitTests/PurchaseQuoteMutationTests.cs",
+      "src/ERP.UnitTests/PurchaseQuoteOrderPriceVarianceTests.cs",
+      "src/ERP.UnitTests/PurchaseQuotePriceHistoryTests.cs",
+      "src/ERP.UnitTests/PurchaseQuoteMasterReferenceTests.cs",
+      "src/ERP.UnitTests/PurchaseQuoteEntryAuthorizationTests.cs",
+      "src/ERP.IntegrationTests/PurchaseQuoteEntryAuthorizationSqlServerTests.cs",
+      "docs/purchase-quote-entry-authorization.md"
+    ],
+    "Permitted users retain bounded scoped list/detail/history, live approval/selection and single/batch procurement conversion under existing quantity/money/master/source locks. Denied or partly unauthorized batches mutate no decisions/quotes/orders/numbers and disclose no supplier/product/customer/commercial snapshot.": [
+      "src/ERP.Api/Controllers/PurchaseQuoteController.cs",
+      "src/ERP.Api/Controllers/PurchaseQuoteDecisionController.cs",
+      "src/ERP.Application/Services/PurchaseQuoteAuthorizationRules.cs",
+      "src/ERP.UnitTests/PurchaseQuoteApprovalTests.cs",
+      "src/ERP.UnitTests/PurchaseQuoteAuthorizationTests.cs",
+      "src/ERP.UnitTests/PurchaseQuoteConversionBatchTests.cs",
+      "src/ERP.UnitTests/PurchaseQuoteConversionFunnelTests.cs",
+      "src/ERP.UnitTests/PurchaseQuoteConversionMutationTests.cs",
+      "src/ERP.UnitTests/PurchaseQuoteConversionTests.cs",
+      "src/ERP.UnitTests/PurchaseQuoteMutationTests.cs",
+      "src/ERP.UnitTests/PurchaseQuoteOrderPriceVarianceTests.cs",
+      "src/ERP.UnitTests/PurchaseQuotePriceHistoryTests.cs",
+      "src/ERP.UnitTests/PurchaseQuoteMasterReferenceTests.cs",
+      "src/ERP.UnitTests/PurchaseQuoteEntryAuthorizationTests.cs",
+      "src/ERP.IntegrationTests/PurchaseQuoteEntryAuthorizationSqlServerTests.cs",
+      "docs/purchase-quote-entry-authorization.md"
+    ],
+    "Meaningful rules/controller and real isolated SQL tests cover identical populated/empty/no-context outcomes, identity/menu revocation, permitted current-scope flows and rejected zero mutations/disclosure. Adapt affected original fixtures with real test identities/grants; preserve all master-reference/conversion regressions and safe Release/full units.": [
+      "src/ERP.Api/Controllers/PurchaseQuoteController.cs",
+      "src/ERP.Api/Controllers/PurchaseQuoteDecisionController.cs",
+      "src/ERP.Application/Services/PurchaseQuoteAuthorizationRules.cs",
+      "src/ERP.UnitTests/PurchaseQuoteApprovalTests.cs",
+      "src/ERP.UnitTests/PurchaseQuoteAuthorizationTests.cs",
+      "src/ERP.UnitTests/PurchaseQuoteConversionBatchTests.cs",
+      "src/ERP.UnitTests/PurchaseQuoteConversionFunnelTests.cs",
+      "src/ERP.UnitTests/PurchaseQuoteConversionMutationTests.cs",
+      "src/ERP.UnitTests/PurchaseQuoteConversionTests.cs",
+      "src/ERP.UnitTests/PurchaseQuoteMutationTests.cs",
+      "src/ERP.UnitTests/PurchaseQuoteOrderPriceVarianceTests.cs",
+      "src/ERP.UnitTests/PurchaseQuotePriceHistoryTests.cs",
+      "src/ERP.UnitTests/PurchaseQuoteMasterReferenceTests.cs",
+      "src/ERP.UnitTests/PurchaseQuoteEntryAuthorizationTests.cs",
+      "src/ERP.IntegrationTests/PurchaseQuoteEntryAuthorizationSqlServerTests.cs",
+      "docs/purchase-quote-entry-authorization.md"
+    ]
+  },
+  "implementation_evidence": "PurchaseQuoteController.RequiresLiveAuthorization and PurchaseQuoteDecisionController.cs:43-54 return false/null scope for no context or empty path/missing identity. The latter gates additional read access at line 78. Existing ERP-416/417/418/476 governs HTTP authority, terms/conversion and master references but does not eliminate the explicit path-dependent waiver; no published path-independent sourcing-entry task exists.",
+  "depends_on": [
+    "ERP-485",
+    "ERP-476",
+    "ERP-418"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "id": "ERP-486",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-13T17:24:52.336749Z"
+}

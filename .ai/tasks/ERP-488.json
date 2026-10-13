@@ -1,0 +1,73 @@
+{
+  "title": "Enforce supplier payment invoice-allocation authority at every business entry",
+  "description": "Close the payable invoice-reference registration waiver. SupplierPaymentInvoiceAllocationController RequiresLiveAuthorization returns false for missing HttpContext or empty path/missing user; Create and Void then call SupplierPaymentInvoiceAllocationService directly without current payment menu, source customer/ownership or actor checks. Require the established SupplierPaymentLifecycleRules on all register/candidate/detail/create/void paths for every call shape, maintaining the existing invoice/customer/parent linkage and current live supplier payment ownership. Keep shared capacity, currency/amount and atomic evidence history rules; no accounting or financial reassignment and no new grants. Adapt legacy in-process fixtures only by seeding genuine enabled identities, existing menus/role grants and authorized customers in isolated test data. Do not use request-path presence, test environments, synthetic bypass identities, anonymous/admin fallbacks or empty context to waive authority. Preserve all number/quantity/amount/source/transaction/locking rules and audit. Store complete output/TRX under .ai/logs/<task> with explicit results directories; preserve original failures and do not stage generated output. Retain existing live identity/menu/customer-scope authority, transactions, source locks, controlled errors and audit. Reject before numbering or persistence, with zero header/detail/source/status mutations. No new permissions, schema, production access, external service or arbitrary SQL. Genuine SQL only on (localdb)\\NEWERP_AutoAcceptance with Integrated Security and a fresh GUID-owned NEWERP_AUTOTEST database; reject wrong/existing targets and never drop/reset. Require safe Release with analyzers/warnings-as-errors, full units and relevant genuine SQL/browser tests; accurately record blockers and do not claim whole-stage acceptance.",
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/SupplierPaymentInvoiceAllocationController.cs",
+    "src/ERP.Application/Services/SupplierPaymentLifecycleRules.cs",
+    "src/ERP.UnitTests/SupplierPaymentInvoiceAllocationTests.cs",
+    "src/ERP.UnitTests/SupplierPaymentLifecycleTests.cs",
+    "src/ERP.UnitTests/SupplierPaymentInvoiceEntryAuthorizationTests.cs",
+    "src/ERP.IntegrationTests/SupplierPaymentInvoiceEntryAuthorizationSqlServerTests.cs",
+    "docs/supplier-payment-invoice-entry-authorization.md"
+  ],
+  "acceptance_criteria": [
+    "Every supplier payment invoice-allocation entry enforces current enabled nondeleted identity and existing payment/source/customer scope regardless of populated/empty path or absent HttpContext. Missing/zero/deleted/disabled/revoked/foreign-scope callers receive controlled non-disclosing denial before evidence reads or service writes.",
+    "Permitted existing payment/invoice reference flows retain current parent identity, currency precision, shared payment capacity, invoice residual checks, deterministic transactions and immutable void history. Rejected calls read no partial foreign invoice evidence and mutate no allocations/payments/invoices/budgets/status or number records.",
+    "Genuine isolated SQL and meaningful controller tests prove identical authority across call shapes, permitted lifecycle, live revocation and rejected zero mutations/disclosure. Adapt original allocation/lifecycle fixtures by real enabled test identities and existing menu grants; preserve all capacity/rounding tests, safe Release/full units and original logs/TRX."
+  ],
+  "criterion_path_map": {
+    "Every supplier payment invoice-allocation entry enforces current enabled nondeleted identity and existing payment/source/customer scope regardless of populated/empty path or absent HttpContext. Missing/zero/deleted/disabled/revoked/foreign-scope callers receive controlled non-disclosing denial before evidence reads or service writes.": [
+      "src/ERP.Api/Controllers/SupplierPaymentInvoiceAllocationController.cs",
+      "src/ERP.Application/Services/SupplierPaymentLifecycleRules.cs",
+      "src/ERP.UnitTests/SupplierPaymentInvoiceAllocationTests.cs",
+      "src/ERP.UnitTests/SupplierPaymentLifecycleTests.cs",
+      "src/ERP.UnitTests/SupplierPaymentInvoiceEntryAuthorizationTests.cs",
+      "src/ERP.IntegrationTests/SupplierPaymentInvoiceEntryAuthorizationSqlServerTests.cs",
+      "docs/supplier-payment-invoice-entry-authorization.md"
+    ],
+    "Permitted existing payment/invoice reference flows retain current parent identity, currency precision, shared payment capacity, invoice residual checks, deterministic transactions and immutable void history. Rejected calls read no partial foreign invoice evidence and mutate no allocations/payments/invoices/budgets/status or number records.": [
+      "src/ERP.Api/Controllers/SupplierPaymentInvoiceAllocationController.cs",
+      "src/ERP.Application/Services/SupplierPaymentLifecycleRules.cs",
+      "src/ERP.UnitTests/SupplierPaymentInvoiceAllocationTests.cs",
+      "src/ERP.UnitTests/SupplierPaymentLifecycleTests.cs",
+      "src/ERP.UnitTests/SupplierPaymentInvoiceEntryAuthorizationTests.cs",
+      "src/ERP.IntegrationTests/SupplierPaymentInvoiceEntryAuthorizationSqlServerTests.cs",
+      "docs/supplier-payment-invoice-entry-authorization.md"
+    ],
+    "Genuine isolated SQL and meaningful controller tests prove identical authority across call shapes, permitted lifecycle, live revocation and rejected zero mutations/disclosure. Adapt original allocation/lifecycle fixtures by real enabled test identities and existing menu grants; preserve all capacity/rounding tests, safe Release/full units and original logs/TRX.": [
+      "src/ERP.Api/Controllers/SupplierPaymentInvoiceAllocationController.cs",
+      "src/ERP.Application/Services/SupplierPaymentLifecycleRules.cs",
+      "src/ERP.UnitTests/SupplierPaymentInvoiceAllocationTests.cs",
+      "src/ERP.UnitTests/SupplierPaymentLifecycleTests.cs",
+      "src/ERP.UnitTests/SupplierPaymentInvoiceEntryAuthorizationTests.cs",
+      "src/ERP.IntegrationTests/SupplierPaymentInvoiceEntryAuthorizationSqlServerTests.cs",
+      "docs/supplier-payment-invoice-entry-authorization.md"
+    ]
+  },
+  "implementation_evidence": "SupplierPaymentInvoiceAllocationController.cs:155 and 174 directly call CreateAsync/VoidAsync when !RequiresLiveAuthorization; helper:200-204 tests HttpContext/Request.Path/user presence. ERP-433 and ERP-382 retain HTTP authority and atomic invoice capacity; ERP-468 fixes SupplierPaymentAllocationController rather than this invoice-allocation controller, so the business-service bypass still exists.",
+  "depends_on": [
+    "ERP-487",
+    "ERP-433",
+    "ERP-382"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "id": "ERP-488",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-13T17:24:52.346835Z"
+}

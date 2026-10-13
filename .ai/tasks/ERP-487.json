@@ -1,0 +1,89 @@
+{
+  "title": "Enforce customer invoice and receipt invoice-allocation authority at every entry",
+  "description": "Close remaining customer invoice/receipt-invoice allocation waivers in the receivable chain. CustomerSalesInvoiceEvidenceController RequiresLiveAuthorization and its scope/customer/invoice helpers return null or skip all checks without HttpContext or when Request.Path and identity are empty. CustomerSalesInvoiceCollectionAllocationController Create/Void directly calls business services under the same condition. Remove these waivers and always resolve current invoice menu/customer scope and existing receipt funding authority, including all source/target customers and trade-document candidates. Preserve concurrency/amount/currency/shared-budget rules and history; no accounting posting, permission changes or grants. Adapt legacy in-process fixtures only by seeding genuine enabled identities, existing menus/role grants and authorized customers in isolated test data. Do not use request-path presence, test environments, synthetic bypass identities, anonymous/admin fallbacks or empty context to waive authority. Preserve all number/quantity/amount/source/transaction/locking rules and audit. Store complete output/TRX under .ai/logs/<task> with explicit results directories; preserve original failures and do not stage generated output. Retain existing live identity/menu/customer-scope authority, transactions, source locks, controlled errors and audit. Reject before numbering or persistence, with zero header/detail/source/status mutations. No new permissions, schema, production access, external service or arbitrary SQL. Genuine SQL only on (localdb)\\NEWERP_AutoAcceptance with Integrated Security and a fresh GUID-owned NEWERP_AUTOTEST database; reject wrong/existing targets and never drop/reset. Require safe Release with analyzers/warnings-as-errors, full units and relevant genuine SQL/browser tests; accurately record blockers and do not claim whole-stage acceptance.",
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/CustomerSalesInvoiceEvidenceController.cs",
+    "src/ERP.Api/Controllers/CustomerSalesInvoiceCollectionAllocationController.cs",
+    "src/ERP.Application/Services/CustomerSalesInvoiceAuthorizationRules.cs",
+    "src/ERP.Application/Services/CustomerReceiptLifecycleRules.cs",
+    "src/ERP.UnitTests/CustomerSalesInvoiceEvidenceTests.cs",
+    "src/ERP.UnitTests/CustomerSalesInvoiceConcurrencyTests.cs",
+    "src/ERP.UnitTests/CustomerSalesInvoiceCollectionAllocationTests.cs",
+    "src/ERP.UnitTests/CustomerSalesInvoiceReceiptAllocationExposureTests.cs",
+    "src/ERP.UnitTests/CustomerSalesInvoiceEntryAuthorizationTests.cs",
+    "src/ERP.IntegrationTests/CustomerSalesInvoiceEntryAuthorizationSqlServerTests.cs",
+    "docs/customer-sales-invoice-entry-authorization.md"
+  ],
+  "acceptance_criteria": [
+    "All customer invoice reads/writes/candidates/record/void/allocation and receipt-invoice allocation entries require live enabled identity and their existing menu/source/customer authority independently of request shape. Missing, disabled, deleted, revoked or foreign-scope identity receives a controlled non-disclosing error before counts, candidates, snapshots or mutations.",
+    "Retain atomic current invoice/receipt funding validation, shared budgets, currency precision, explicit document/customer lineage and audit. Denied reads return no partial financial/customer/doc evidence; denied create/record/allocate/void produces zero invoice/receipt/source/budget/status writes and never broadens permissions.",
+    "Real isolated SQL plus controller regressions cover populated/empty/no-context entry parity, revoked menus and scopes, genuine permitted invoice/receipt flows and zero-mutation/disclosure denial. Adapt legacy invoice/concurrency/exposure fixtures with existing test grants without weakening controls; pass safe Release/full units and retain full logs/TRX."
+  ],
+  "criterion_path_map": {
+    "All customer invoice reads/writes/candidates/record/void/allocation and receipt-invoice allocation entries require live enabled identity and their existing menu/source/customer authority independently of request shape. Missing, disabled, deleted, revoked or foreign-scope identity receives a controlled non-disclosing error before counts, candidates, snapshots or mutations.": [
+      "src/ERP.Api/Controllers/CustomerSalesInvoiceEvidenceController.cs",
+      "src/ERP.Api/Controllers/CustomerSalesInvoiceCollectionAllocationController.cs",
+      "src/ERP.Application/Services/CustomerSalesInvoiceAuthorizationRules.cs",
+      "src/ERP.Application/Services/CustomerReceiptLifecycleRules.cs",
+      "src/ERP.UnitTests/CustomerSalesInvoiceEvidenceTests.cs",
+      "src/ERP.UnitTests/CustomerSalesInvoiceConcurrencyTests.cs",
+      "src/ERP.UnitTests/CustomerSalesInvoiceCollectionAllocationTests.cs",
+      "src/ERP.UnitTests/CustomerSalesInvoiceReceiptAllocationExposureTests.cs",
+      "src/ERP.UnitTests/CustomerSalesInvoiceEntryAuthorizationTests.cs",
+      "src/ERP.IntegrationTests/CustomerSalesInvoiceEntryAuthorizationSqlServerTests.cs",
+      "docs/customer-sales-invoice-entry-authorization.md"
+    ],
+    "Retain atomic current invoice/receipt funding validation, shared budgets, currency precision, explicit document/customer lineage and audit. Denied reads return no partial financial/customer/doc evidence; denied create/record/allocate/void produces zero invoice/receipt/source/budget/status writes and never broadens permissions.": [
+      "src/ERP.Api/Controllers/CustomerSalesInvoiceEvidenceController.cs",
+      "src/ERP.Api/Controllers/CustomerSalesInvoiceCollectionAllocationController.cs",
+      "src/ERP.Application/Services/CustomerSalesInvoiceAuthorizationRules.cs",
+      "src/ERP.Application/Services/CustomerReceiptLifecycleRules.cs",
+      "src/ERP.UnitTests/CustomerSalesInvoiceEvidenceTests.cs",
+      "src/ERP.UnitTests/CustomerSalesInvoiceConcurrencyTests.cs",
+      "src/ERP.UnitTests/CustomerSalesInvoiceCollectionAllocationTests.cs",
+      "src/ERP.UnitTests/CustomerSalesInvoiceReceiptAllocationExposureTests.cs",
+      "src/ERP.UnitTests/CustomerSalesInvoiceEntryAuthorizationTests.cs",
+      "src/ERP.IntegrationTests/CustomerSalesInvoiceEntryAuthorizationSqlServerTests.cs",
+      "docs/customer-sales-invoice-entry-authorization.md"
+    ],
+    "Real isolated SQL plus controller regressions cover populated/empty/no-context entry parity, revoked menus and scopes, genuine permitted invoice/receipt flows and zero-mutation/disclosure denial. Adapt legacy invoice/concurrency/exposure fixtures with existing test grants without weakening controls; pass safe Release/full units and retain full logs/TRX.": [
+      "src/ERP.Api/Controllers/CustomerSalesInvoiceEvidenceController.cs",
+      "src/ERP.Api/Controllers/CustomerSalesInvoiceCollectionAllocationController.cs",
+      "src/ERP.Application/Services/CustomerSalesInvoiceAuthorizationRules.cs",
+      "src/ERP.Application/Services/CustomerReceiptLifecycleRules.cs",
+      "src/ERP.UnitTests/CustomerSalesInvoiceEvidenceTests.cs",
+      "src/ERP.UnitTests/CustomerSalesInvoiceConcurrencyTests.cs",
+      "src/ERP.UnitTests/CustomerSalesInvoiceCollectionAllocationTests.cs",
+      "src/ERP.UnitTests/CustomerSalesInvoiceReceiptAllocationExposureTests.cs",
+      "src/ERP.UnitTests/CustomerSalesInvoiceEntryAuthorizationTests.cs",
+      "src/ERP.IntegrationTests/CustomerSalesInvoiceEntryAuthorizationSqlServerTests.cs",
+      "docs/customer-sales-invoice-entry-authorization.md"
+    ]
+  },
+  "implementation_evidence": "CustomerSalesInvoiceEvidenceController.cs:205-209 path-dependent RequiresLiveAuthorization; BuildScopePredicateAsync:224 and BuildTradeDocumentScopePredicateAsync:231 return null, additional invoice/customer/DTO helpers:242/262/276 waive checks. CustomerSalesInvoiceCollectionAllocationController.cs:124/139 bypass Create/Void authorization via RequiresLiveAuthorization:164-168. ERP-383/434 guard normal HTTP but ERP-468 affects different receipt-allocation controllers, so this waiver remains.",
+  "depends_on": [
+    "ERP-486",
+    "ERP-383",
+    "ERP-434"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "id": "ERP-487",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-13T17:24:52.342124Z"
+}
