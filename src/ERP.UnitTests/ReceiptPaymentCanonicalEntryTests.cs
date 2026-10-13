@@ -797,6 +797,87 @@ public class ReceiptPaymentCanonicalEntryTests
         Assert.Contains("entity.Status = DocumentStatus.Pending;", payment);
     }
 
+    [Fact]
+    public void Controllers_读取与生命周期闸门先于收款单查询与行锁()
+    {
+        var source = ReadSource("src", "ERP.Api", "Controllers", "FinanceReceiptComplaintControllers.cs");
+        var receiptStart = source.IndexOf("public class FinanceReceiptController", StringComparison.Ordinal);
+        var complaintStart = source.IndexOf("public class FinanceComplaintController", StringComparison.Ordinal);
+        Assert.True(receiptStart >= 0 && complaintStart > receiptStart,
+            "必须同时存在收款单控制器与客诉单控制器（共享文件中的客诉单行为不得被改变）");
+        var receipt = source.Substring(receiptStart, complaintStart - receiptStart);
+
+        // 无请求上下文 / 空路径 / 环境变量 / 内存库测试开关豁免一律不存在：缺失身份安全解析为 null（受控未认证）。
+        var actor = MethodBody(receipt, "private new long? CurrentUserId()");
+        Assert.Contains("ControllerContext?.HttpContext?.User?.FindFirst", actor);
+        Assert.Contains("id > 0 ? id : null", actor);
+        Assert.DoesNotContain("Request.Path", actor);
+        Assert.DoesNotContain("Environment", actor);
+        Assert.DoesNotContain("RequiresLiveAuthorization", receipt);
+        Assert.DoesNotContain("UseInMemoryDatabase", receipt);
+
+        // 详情：菜单闸门必须先于任何收款单读取，读取后再按权威客户范围收口。
+        var getById = MethodBody(receipt, "public async Task<IActionResult> GetById(long id)");
+        var readGate = getById.IndexOf(
+            "CustomerReceiptLifecycleRules.EnsureMenuAuthorizedAsync(Db, CurrentUserId())", StringComparison.Ordinal);
+        var readRow = getById.IndexOf("Set.AsNoTracking()", StringComparison.Ordinal);
+        var readScope = getById.IndexOf(
+            "CustomerReceiptLifecycleRules.EnsureAuthorizedAsync(Db, CurrentUserId(), entity.CustomerId)",
+            StringComparison.Ordinal);
+        Assert.True(readGate >= 0 && readRow > readGate,
+            "GetById 必须先执行收款单菜单闸门再读取收款单行（未知 Id 不得先返回 NotFound）");
+        Assert.True(readScope > readRow, "GetById 读取后仍须按实时身份 / 菜单 / 权威客户范围收口");
+
+        // 创建：菜单闸门先于任何业务查询（客户 / 币种 / 金额）与单号预约。
+        var create = MethodBody(receipt, "public async Task<IActionResult> Create([FromBody] FinanceReceipt entity)");
+        var createGate = create.IndexOf(
+            "CustomerReceiptLifecycleRules.EnsureMenuAuthorizedAsync(Db, CurrentUserId())", StringComparison.Ordinal);
+        var createCustomer = create.IndexOf("Db.BaseCustomers", StringComparison.Ordinal);
+        var createGenerate = create.IndexOf("_noService.GenerateAsync", StringComparison.Ordinal);
+        Assert.True(createGate >= 0 && createCustomer > createGate && createGenerate > createGate,
+            "Create 的收款单菜单闸门必须先于客户查询与单号预约（被拒绝请求零写入、零占号）");
+
+        // 生命周期：菜单闸门先于收款单行锁与任何收款单读取，且锁内仍保留完整实时授权复核。
+        foreach (var signature in new[]
+                 {
+                     "public async Task<IActionResult> Update(long id, [FromBody] FinanceReceipt entity)",
+                     "public override async Task<IActionResult> Submit(long id)",
+                     "public override async Task<IActionResult> Approve(long id)",
+                     "public override async Task<IActionResult> Cancel(long id)",
+                     "public override async Task<IActionResult> Delete(long id)"
+                 })
+        {
+            var body = MethodBody(receipt, signature);
+            var gate = body.IndexOf(
+                "CustomerReceiptLifecycleRules.EnsureMenuAuthorizedAsync(Db, CurrentUserId())", StringComparison.Ordinal);
+            var lockRow = body.IndexOf(
+                "CustomerReceiptLifecycleRules.LockReceiptRowAsync(Db, id)", StringComparison.Ordinal);
+            var loadRow = body.IndexOf("Db.FinanceReceipts", StringComparison.Ordinal);
+            Assert.True(gate >= 0, $"{signature} 必须先执行收款单菜单闸门");
+            Assert.True(lockRow > gate && loadRow > gate,
+                $"{signature} 的菜单闸门必须先于收款单行锁与读取（未知 Id 也不得先加锁 / 先读行）");
+            Assert.Contains("EnsureReceiptAuthorizedAsync(", body);
+        }
+    }
+
+    private static string MethodBody(string source, string signature)
+    {
+        var start = source.IndexOf(signature, StringComparison.Ordinal);
+        Assert.True(start >= 0, $"未找到方法：{signature}");
+        var brace = source.IndexOf('{', start);
+        var depth = 0;
+        for (var i = brace; i < source.Length; i++)
+        {
+            if (source[i] == '{') depth++;
+            else if (source[i] == '}')
+            {
+                depth--;
+                if (depth == 0) return source.Substring(brace, i - brace + 1);
+            }
+        }
+        throw new InvalidOperationException($"方法体括号不匹配：{signature}");
+    }
+
     private static string ReadSource(params string[] segments)
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);

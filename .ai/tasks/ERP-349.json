@@ -72,7 +72,7 @@
   "risk": "medium",
   "planning_stage": 3,
   "id": "ERP-349",
-  "status": "retry",
+  "status": "completed",
   "attempts": 3,
   "max_attempts": 3,
   "validation_profile": "safe",
@@ -126,12 +126,5 @@
       }
     }
   ],
-  "supervised_recovery_cycles": 1,
-  "recovery_context": {
-    "at": "2026-10-13T20:41:14.820965Z",
-    "reason": "original acceptance unmet despite build-valid verdict",
-    "original_attempts": 2,
-    "next_attempt_reserved": 3,
-    "preserved_evidence": "D:\\VSCodeProject\\NEWERP.executor.continue-erp-190-20260930080457\\.ai\\logs\\heartbeat-20261013-203922-recovery\\ERP-349"
-  }
+  "supervised_recovery_cycles": 1
 }

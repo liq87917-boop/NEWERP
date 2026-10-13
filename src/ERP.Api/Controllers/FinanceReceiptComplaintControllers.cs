@@ -6,6 +6,7 @@ using ERP.Domain.Entities;
 using ERP.Domain.Enums;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.Security.Claims;
 
 namespace ERP.Api.Controllers;
 
@@ -35,6 +36,20 @@ public class FinanceReceiptController : DocumentControllerBase<FinanceReceipt>
         _noService = noService;
     }
 
+    /// <summary>
+    /// 当前登录用户 Id（ERP-349）：只来自已认证请求主体（<c>ClaimTypes.NameIdentifier</c>）；
+    /// 缺失 / 非数字 / 非正数 / <strong>未绑定请求上下文（<c>ControllerContext.HttpContext</c> 为 <c>null</c>）</strong>
+    /// 一律安全解析为 <c>null</c>，由既有 <see cref="CustomerReceiptLifecycleRules.EnsureMenuAuthorizedAsync"/>
+    /// 在触及任何收款单读取 / 行锁 / 业务查询<strong>之前</strong>返回受控未认证（fail closed）。
+    /// <para>这里<strong>不是</strong>免授权或测试兼容边界：不存在「无请求上下文 / 空路径 / 匿名进程内直调」豁免，
+    /// 也不读取 <c>Request.Path</c>、环境变量、数据库提供程序或任何测试开关；绝不猜测身份、绝不回退为匿名或管理员。</para>
+    /// </summary>
+    private new long? CurrentUserId()
+    {
+        var value = ControllerContext?.HttpContext?.User?.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        return long.TryParse(value, out var id) && id > 0 ? id : null;
+    }
+
     [HttpGet]
     public async Task<IActionResult> GetPaged([FromQuery] PageQuery query, [FromQuery] DocumentStatus? status)
     {
@@ -55,9 +70,15 @@ public class FinanceReceiptController : DocumentControllerBase<FinanceReceipt>
     [HttpGet("{id:long}")]
     public async Task<IActionResult> GetById(long id)
     {
+        // ERP-349：身份 / 菜单闸门必须先于任何收款单读取 —— 未知 Id 对缺失 / 禁用 / 无菜单账号与存在 Id
+        // 给出完全相同的受控拒绝（未认证 / 权限不足），绝不先读行再判权、也绝不因 Id 是否存在而差异化。
+        await CustomerReceiptLifecycleRules.EnsureMenuAuthorizedAsync(Db, CurrentUserId());
+
         var entity = await Set.AsNoTracking()
             .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
             ?? throw BusinessException.NotFound("收款单不存在");
+
+        // 读取后仍按实时身份 / 收款单菜单 / 权威客户数据范围收口（越界 fail closed，不泄露范围外客户存在性）。
         await CustomerReceiptLifecycleRules.EnsureAuthorizedAsync(Db, CurrentUserId(), entity.CustomerId);
         return Ok(ApiResponse<FinanceReceipt>.Success(entity));
     }
@@ -65,6 +86,9 @@ public class FinanceReceiptController : DocumentControllerBase<FinanceReceipt>
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] FinanceReceipt entity)
     {
+        // ERP-349：身份 / 菜单闸门先于币种 · 金额 · 客户等任何业务查询与单号预约（被拒绝请求零写入、零占号）。
+        await CustomerReceiptLifecycleRules.EnsureMenuAuthorizedAsync(Db, CurrentUserId());
+
         var currency = CustomerReceiptLifecycleRules.NormalizeReceiptCurrency(entity.Currency);
         var amount = CustomerReceiptLifecycleRules.NormalizeReceiptAmount(entity.Amount, currency);
 
@@ -99,6 +123,10 @@ public class FinanceReceiptController : DocumentControllerBase<FinanceReceipt>
     [HttpPut("{id:long}")]
     public async Task<IActionResult> Update(long id, [FromBody] FinanceReceipt entity)
     {
+        // ERP-349：身份 / 菜单闸门必须先于收款单行锁与任何读取 —— 未知 Id 对缺失 / 禁用 / 无菜单账号
+        // 与存在 Id 给出完全相同的受控拒绝，绝不先加锁或读取收款单再判权（被拒绝请求零写入）。
+        await CustomerReceiptLifecycleRules.EnsureMenuAuthorizedAsync(Db, CurrentUserId());
+
         // 与两套分摊证据写入互斥：同一事务内先取收款单行锁，再读权威状态 / 客户 / 币种 / 金额。
         await using var transaction = CustomerReceiptLifecycleRules.IsRelationalProvider(Db)
             ? await Db.Database.BeginTransactionAsync()
@@ -162,6 +190,10 @@ public class FinanceReceiptController : DocumentControllerBase<FinanceReceipt>
     [HttpPost("{id:long}/submit")]
     public override async Task<IActionResult> Submit(long id)
     {
+        // ERP-349：身份 / 菜单闸门先于收款单行锁与任何读取（未知 Id 不泄露存在性，绝不先加锁再拒绝）；
+        // 取得行锁后仍在锁内复核实时身份 / 菜单 / 客户数据范围（EnsureReceiptAuthorizedAsync）。
+        await CustomerReceiptLifecycleRules.EnsureMenuAuthorizedAsync(Db, CurrentUserId());
+
         await using var transaction = CustomerReceiptLifecycleRules.IsRelationalProvider(Db)
             ? await Db.Database.BeginTransactionAsync()
             : null;
@@ -197,6 +229,10 @@ public class FinanceReceiptController : DocumentControllerBase<FinanceReceipt>
     [HttpPost("{id:long}/approve")]
     public override async Task<IActionResult> Approve(long id)
     {
+        // ERP-349：身份 / 菜单闸门先于收款单行锁与任何读取（未知 Id 不泄露存在性，绝不先加锁再拒绝）；
+        // 取得行锁后仍在锁内复核实时身份 / 菜单 / 客户数据范围（EnsureReceiptAuthorizedAsync）。
+        await CustomerReceiptLifecycleRules.EnsureMenuAuthorizedAsync(Db, CurrentUserId());
+
         await using var transaction = CustomerReceiptLifecycleRules.IsRelationalProvider(Db)
             ? await Db.Database.BeginTransactionAsync()
             : null;
@@ -232,6 +268,10 @@ public class FinanceReceiptController : DocumentControllerBase<FinanceReceipt>
     [HttpPost("{id:long}/cancel")]
     public override async Task<IActionResult> Cancel(long id)
     {
+        // ERP-349：身份 / 菜单闸门先于收款单行锁与任何读取（未知 Id 不泄露存在性，绝不先加锁再拒绝）；
+        // 取得行锁后仍在锁内复核实时身份 / 菜单 / 客户数据范围（EnsureReceiptAuthorizedAsync）。
+        await CustomerReceiptLifecycleRules.EnsureMenuAuthorizedAsync(Db, CurrentUserId());
+
         await using var transaction = CustomerReceiptLifecycleRules.IsRelationalProvider(Db)
             ? await Db.Database.BeginTransactionAsync()
             : null;
@@ -268,6 +308,10 @@ public class FinanceReceiptController : DocumentControllerBase<FinanceReceipt>
     [HttpDelete("{id:long}")]
     public override async Task<IActionResult> Delete(long id)
     {
+        // ERP-349：身份 / 菜单闸门先于收款单行锁与任何读取（未知 Id 不泄露存在性，绝不先加锁再拒绝）；
+        // 取得行锁后仍在锁内复核实时身份 / 菜单 / 客户数据范围（EnsureReceiptAuthorizedAsync）。
+        await CustomerReceiptLifecycleRules.EnsureMenuAuthorizedAsync(Db, CurrentUserId());
+
         await using var transaction = CustomerReceiptLifecycleRules.IsRelationalProvider(Db)
             ? await Db.Database.BeginTransactionAsync()
             : null;

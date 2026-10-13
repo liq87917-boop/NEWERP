@@ -685,4 +685,140 @@ public class CustomerReceiptLifecycleTests
 
         await AssertBusinessCodeAsync(ErrorCodes.Forbidden, () => controller.Approve(receipt.Id));
     }
+
+    // ==================== 4b. 读取 / 生命周期闸门先于收款单查询与行锁（ERP-349） ====================
+
+    [Fact]
+    public async Task GetById_无身份_未知Id与存在Id一律未认证()
+    {
+        using var db = TestDbFactory.Create();
+        var customer = SeedCustomer(db, "C001", "客户A");
+        var receipt = SeedReceipt(db, "RC-1", customer.Id);
+
+        var controller = BuildController(db);
+        TestAuth.SetUser(controller, null);
+
+        // 未知 Id 必须先走身份 / 菜单闸门，绝不先返回 NotFound 而差异化泄露存在性。
+        await AssertBusinessCodeAsync(ErrorCodes.Unauthorized, () => controller.GetById(987_654_321L));
+        await AssertBusinessCodeAsync(ErrorCodes.Unauthorized, () => controller.GetById(receipt.Id));
+    }
+
+    [Fact]
+    public async Task GetById_未绑定请求上下文_未认证而非异常()
+    {
+        using var db = TestDbFactory.Create();
+        var customer = SeedCustomer(db, "C001", "客户A");
+        var receipt = SeedReceipt(db, "RC-1", customer.Id);
+
+        // 纯进程内直调、完全不绑定 HttpContext：缺失身份安全解析为 null → 受控未认证（绝不抛 NRE、绝不豁免）。
+        var controller = BuildController(db);
+
+        await AssertBusinessCodeAsync(ErrorCodes.Unauthorized, () => controller.GetById(receipt.Id));
+        await AssertBusinessCodeAsync(ErrorCodes.Unauthorized, () => controller.GetById(987_654_321L));
+    }
+
+    [Fact]
+    public async Task GetById_无收款单菜单_未知Id与存在Id一律权限不足()
+    {
+        using var db = TestDbFactory.Create();
+        var customer = SeedCustomer(db, "C001", "客户A");
+        var receipt = SeedReceipt(db, "RC-1", customer.Id);
+        var userId = TestAuth.SeedPrivilegedUser(db);
+
+        var controller = BuildController(db);
+        TestAuth.SetUser(controller, userId);
+
+        await AssertBusinessCodeAsync(ErrorCodes.Forbidden, () => controller.GetById(987_654_321L));
+        await AssertBusinessCodeAsync(ErrorCodes.Forbidden, () => controller.GetById(receipt.Id));
+    }
+
+    [Fact]
+    public async Task GetById_账号禁用_未知Id与存在Id一律权限不足()
+    {
+        using var db = TestDbFactory.Create();
+        var customer = SeedCustomer(db, "C001", "客户A");
+        var receipt = SeedReceipt(db, "RC-1", customer.Id);
+        var userId = SeedPrivilegedUser(db);
+        db.SysUsers.Single(u => u.Id == userId).Status = UserStatus.Disabled;
+        db.SaveChanges();
+
+        var controller = BuildController(db);
+        TestAuth.SetUser(controller, userId);
+
+        await AssertBusinessCodeAsync(ErrorCodes.Forbidden, () => controller.GetById(987_654_321L));
+        await AssertBusinessCodeAsync(ErrorCodes.Forbidden, () => controller.GetById(receipt.Id));
+    }
+
+    [Fact]
+    public async Task GetById_越界账号_未知Id不存在_范围外Id权限不足()
+    {
+        using var db = TestDbFactory.Create();
+        var (userId, employeeId) = SeedRestrictedSalesman(db, "sales01");
+        var inScope = SeedCustomer(db, "C-IN", "范围内客户", empId: employeeId);
+        var outOfScope = SeedCustomer(db, "C-OUT", "范围外客户", empId: 9999L);
+        var receipt = SeedReceipt(db, "RC-OUT", outOfScope.Id);
+
+        var controller = BuildController(db);
+        TestAuth.SetUser(controller, userId);
+
+        // 越界账号：身份 / 菜单闸门先通过，再按权威读取判定不存在；范围外 Id 一律权限不足，不泄露归属。
+        await AssertBusinessCodeAsync(ErrorCodes.NotFound, () => controller.GetById(987_654_321L));
+        await AssertBusinessCodeAsync(ErrorCodes.Forbidden, () => controller.GetById(receipt.Id));
+        Assert.NotNull(inScope);
+    }
+
+    [Fact]
+    public async Task GetById_有权限_未知Id_不存在()
+    {
+        using var db = TestDbFactory.Create();
+        var userId = SeedPrivilegedUser(db);
+
+        var controller = BuildController(db);
+        TestAuth.SetUser(controller, userId);
+
+        // 授权通过后才按权威读取给出不存在：身份 / 菜单闸门先于不存在判定。
+        await AssertBusinessCodeAsync(ErrorCodes.NotFound, () => controller.GetById(987_654_321L));
+    }
+
+    [Fact]
+    public async Task 生命周期动作_未知Id_缺失禁用无菜单账号_一律受控拒绝且零状态变化()
+    {
+        using var db = TestDbFactory.Create();
+        var customer = SeedCustomer(db, "C001", "客户A");
+        var receipt = SeedReceipt(db, "RC-1", customer.Id, amount: 1000m);
+        var noMenuId = TestAuth.SeedPrivilegedUser(db);
+        var disabledId = SeedPrivilegedUser(db);
+        db.SysUsers.Single(u => u.Id == disabledId).Status = UserStatus.Disabled;
+        db.SaveChanges();
+
+        var before = db.FinanceReceipts.AsNoTracking().Single(r => r.Id == receipt.Id);
+        const long unknownId = 987_654_321L;
+
+        var anonymous = BuildController(db);
+        TestAuth.SetUser(anonymous, null);
+        await AssertBusinessCodeAsync(ErrorCodes.Unauthorized, () => anonymous.Submit(unknownId));
+        await AssertBusinessCodeAsync(ErrorCodes.Unauthorized, () => anonymous.Cancel(receipt.Id));
+
+        var noMenu = BuildController(db);
+        TestAuth.SetUser(noMenu, noMenuId);
+        await AssertBusinessCodeAsync(ErrorCodes.Forbidden, () => noMenu.Delete(unknownId));
+        await AssertBusinessCodeAsync(ErrorCodes.Forbidden, () => noMenu.Update(unknownId, new FinanceReceipt
+        {
+            CustomerId = customer.Id,
+            Amount = 500m,
+            Currency = Currency.USD
+        }));
+
+        var disabled = BuildController(db);
+        TestAuth.SetUser(disabled, disabledId);
+        await AssertBusinessCodeAsync(ErrorCodes.Forbidden, () => disabled.Approve(unknownId));
+        await AssertBusinessCodeAsync(ErrorCodes.Forbidden, () => disabled.Cancel(receipt.Id));
+
+        // 被拒绝的生命周期动作不改变原始收款单（状态、字段与审计时间戳保持不变）。
+        var stored = db.FinanceReceipts.AsNoTracking().Single(r => r.Id == receipt.Id);
+        Assert.Equal(DocumentStatus.Pending, stored.Status);
+        Assert.Equal(1000m, stored.Amount);
+        Assert.False(stored.IsDeleted);
+        Assert.Equal(before.UpdatedAt, stored.UpdatedAt);
+    }
 }

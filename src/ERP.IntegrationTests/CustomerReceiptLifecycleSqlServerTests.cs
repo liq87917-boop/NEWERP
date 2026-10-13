@@ -480,6 +480,10 @@ public sealed class CustomerReceiptLifecycleSqlServerTests
         => BuildAuthController(new CustomerSalesInvoiceCollectionAllocationController(db), userId,
             "/api/customer-sales-invoice-collection-allocations");
 
+    private static FinanceReceiptController ReceiptController(ErpDbContext db, long? userId)
+        => BuildAuthController(new FinanceReceiptController(db, new DocumentNumberService(db)), userId,
+            "/api/finance/receipts");
+
     private static CustomerReceiptAllocationSaveDto OrderDto(long receiptId, long orderId, decimal amount)
         => new() { ReceiptId = receiptId, SalesOrderId = orderId, AllocatedAmount = amount, Remark = string.Empty };
 
@@ -691,6 +695,52 @@ public sealed class CustomerReceiptLifecycleSqlServerTests
             .SingleAsync(a => a.Id == deletionRow.Id);
         Assert.Equal(CustomerSalesInvoiceCollectionAllocationRules.StatusActive, storedDeletion.Status);
         Assert.Null(storedDeletion.VoidedAt);
+    }
+
+    // ==================== 7. 读取 / 生命周期闸门先于收款单查询与行锁（ERP-349） ====================
+
+    [Fact]
+    public async Task 收款单读取与生命周期闸门_先于查询与行锁_未知Id不泄露且失败方零写入()
+    {
+        Guard();
+        await using var db = _fixture.CreateDbContext();
+        var suffix = Guid.NewGuid().ToString("N");
+        var customerId = SeedCustomerWithOwner(db, $"INT_RLC_GATE_{suffix}", "闸门客户", null);
+        var receipt = SeedReceipt(db, $"INT_RLC_GATE_R_{suffix}", customerId, 1000m, Currency.CNY);
+
+        var disabledId = SeedPrivilegedUserWithMenu(db);
+        (await db.SysUsers.SingleAsync(u => u.Id == disabledId)).Status = UserStatus.Disabled;
+        await db.SaveChangesAsync();
+        var noMenuId = SeedSalesmanWithMenu(db, $"int-rlc-gate-{suffix}", grantMenu: false);
+
+        var before = await db.FinanceReceipts.AsNoTracking().SingleAsync(r => r.Id == receipt.Id);
+        const long unknownId = 987_654_321L;
+
+        // 缺失身份：未知 Id 与存在 Id 一律未认证（绝不先按 Id 给 NotFound，也绝不先取收款单行锁）。
+        await AssertCodeAsync(ErrorCodes.Unauthorized, () => ReceiptController(db, null).GetById(unknownId));
+        await AssertCodeAsync(ErrorCodes.Unauthorized, () => ReceiptController(db, null).GetById(receipt.Id));
+        await AssertCodeAsync(ErrorCodes.Unauthorized, () => ReceiptController(db, null).Cancel(receipt.Id));
+
+        // 禁用 / 无菜单：未知 Id 与存在 Id 一律权限不足（同一受控错误，不因存在性差异化）。
+        foreach (var userId in new[] { disabledId, noMenuId })
+        {
+            await AssertCodeAsync(ErrorCodes.Forbidden, () => ReceiptController(db, userId).GetById(unknownId));
+            await AssertCodeAsync(ErrorCodes.Forbidden, () => ReceiptController(db, userId).GetById(receipt.Id));
+            await AssertCodeAsync(ErrorCodes.Forbidden, () => ReceiptController(db, userId).Delete(receipt.Id));
+            await AssertCodeAsync(ErrorCodes.Forbidden, () => ReceiptController(db, userId).Cancel(receipt.Id));
+        }
+
+        // 授权身份：未知 Id → NotFound；存在 Id → Ok（闸门通过后才按权威读取判定不存在）。
+        await AssertCodeAsync(ErrorCodes.NotFound, () => ReceiptController(db, SeedPrivilegedUserWithMenu(db)).GetById(unknownId));
+        Assert.IsType<OkObjectResult>(await ReceiptController(db, SeedPrivilegedUserWithMenu(db)).GetById(receipt.Id));
+
+        // 失败方零写入：未取收款单行锁（审计时间戳与状态 / 金额不变，软删除未生效）。
+        using var check = _fixture.CreateDbContext();
+        var stored = check.FinanceReceipts.AsNoTracking().Single(r => r.Id == receipt.Id);
+        Assert.Equal(before.Status, stored.Status);
+        Assert.Equal(before.Amount, stored.Amount);
+        Assert.Equal(before.UpdatedAt, stored.UpdatedAt);
+        Assert.Equal(before.IsDeleted, stored.IsDeleted);
     }
 }
 
