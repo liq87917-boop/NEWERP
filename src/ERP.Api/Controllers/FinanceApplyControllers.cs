@@ -113,6 +113,9 @@ public class FinanceDepositApplyController : DocumentControllerBase<FinanceDepos
     /// <summary>
     /// 创建：在生成申请单号之前先完成身份 / 菜单授权 / 客户数据范围与商业字段 / 来源链接校验（授权与校验失败绝不消耗单号）；
     /// 关系型后端在同一事务内先取来源销售订单行锁、锁内权威复核来源资格之后才生成单号并落库。
+    /// <para>ERP-480：申请单号<strong>允许省略</strong>（<see cref="FinanceDepositApply.ApplyNo"/> 不再显式必填），
+    /// 省略 / 空串 / 伪造值与伪造主键 · 状态 · 删除态 · 时间戳一律由服务端权威覆盖，被拒绝的请求零表头变化、
+    /// 零来源改写、零状态变化、零占号。</para>
     /// </summary>
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] FinanceDepositApply entity)
@@ -145,6 +148,9 @@ public class FinanceDepositApplyController : DocumentControllerBase<FinanceDepos
             entity.Id = 0;
             entity.ApplyNo = await _noService.GenerateAsync(DocumentType.DepositApply);
             entity.Status = DocumentStatus.Pending;
+            // ERP-480：主键 / 单据号 / 状态 / 删除态 / 时间戳一律服务端权威覆盖，客户端注入值不参与持久化。
+            entity.IsDeleted = false;
+            entity.UpdatedAt = null;
             entity.Currency = Enum.Parse<Currency>(currency);
             entity.Amount = amount;
             entity.ExchangeRate = exchangeRate;
@@ -459,6 +465,9 @@ public class FinancePaymentApplyController : DocumentControllerBase<FinancePayme
 
     /// <summary>
     /// 创建：在生成申请单号之前先完成身份 / 菜单授权 / 客户数据范围与商业字段 / 来源链接校验（授权与校验失败绝不消耗单号）。
+    /// <para>ERP-480：申请单号<strong>允许省略</strong>（<see cref="FinancePaymentApply.ApplyNo"/> 不再显式必填），
+    /// 省略 / 空串 / 伪造值与伪造主键 · 状态 · 删除态 · 时间戳一律由服务端权威覆盖，被拒绝的请求零表头变化、
+    /// 零来源改写、零状态变化、零占号。</para>
     /// </summary>
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] FinancePaymentApply entity)
@@ -481,6 +490,9 @@ public class FinancePaymentApplyController : DocumentControllerBase<FinancePayme
         entity.Id = 0;
         entity.ApplyNo = await _noService.GenerateAsync(DocumentType.PaymentApply);
         entity.Status = DocumentStatus.Pending;
+        // ERP-480：主键 / 单据号 / 状态 / 删除态 / 时间戳一律服务端权威覆盖，客户端注入值不参与持久化。
+        entity.IsDeleted = false;
+        entity.UpdatedAt = null;
         entity.Currency = Enum.Parse<Currency>(currency);
         entity.Amount = amount;
         entity.ExchangeRate = exchangeRate;

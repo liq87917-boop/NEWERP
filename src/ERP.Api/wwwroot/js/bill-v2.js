@@ -41,9 +41,17 @@ const BILL_CODE_MAP = {
      规范 Id 口径 + 既有收款 / 付款引用登记工作台），因此这里**不再**把 'receipt' / 'payment' 映射到旧存储过程族 ——
      旧族的写路径已被 ERP-404 门禁整体停用（fail closed），若继续映射，菜单会打开一张永远无法保存的旧单据页
      （api/v2/bills 写入口必然被拒）。旧族自身（BILL_CONFIG['receipt'] / BILL_CONFIG['payment'] 的旧库单体表 Oid
-     读侧 / 旧导出 / 既有默认值端点）保持只读可用，规范 Id 与旧 Oid 之间**不存在**任何映射。 */
-  'deposit-apply': 'deposit-apply',
-  'payment-apply': 'payment-apply',
+     读侧 / 旧导出 / 既有默认值端点）保持只读可用，规范 Id 与旧 Oid 之间**不存在**任何映射。
+     ERP-480：定金申请单（deposit-apply）与货款申请单（payment-apply）同样改由 EF 规范模块承载
+     （modules-finance.js 的 'deposit-apply' / 'payment-apply' 模块 + /api/finance/deposit-applies、
+     /api/finance/payment-applies，规范 Id 口径 + ERP-390 / ERP-391 显式来源销售订单选择器），
+     因此这里**停用**原先的两条旧存储过程族映射（原地停用为迁移记录，不再参与任何路由判定）：
+       'deposit-apply': 'deposit-apply',
+       'payment-apply': 'payment-apply',
+     旧族的写路径已被 ERP-404 门禁整体停用（fail closed），若继续映射，菜单会打开一张永远无法保存的旧单据页
+     （api/v2/bills 写入口必然被拒）。旧族自身（BILL_CONFIG['deposit-apply'] / BILL_CONFIG['payment-apply'] 的
+     旧库单体表 Oid 读侧 / 旧导出 / 既有默认值端点）保持只读可用，规范 Id 与旧 Oid 之间**不存在**任何映射。
+     ERP-479 的回归守卫（断言其路由改动未波及其它旧族键）以本说明中的原字面量保留，而路由判定已不再包含这两个键。 */
   'container-settlement': 'container-settlement',
   'bulk-settlement': 'bulk-settlement',
   complaint: 'complaint',

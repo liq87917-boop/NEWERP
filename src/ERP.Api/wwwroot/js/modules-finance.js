@@ -12,8 +12,10 @@ Object.assign(MODULES, {
       { key: 'currency', label: '币种', type: 'select', options: CURRENCY_OPTS },
       { key: 'exchangeRate', label: '汇率', type: 'number', default: 1 },
       /* ERP-390：来源销售订单由「选择来源」有界选择器显式回填（也可手工填写 Id / 留空显式断开）；
-         选择器只回填权威来源 Id，绝不臆造订单号、绝不自动改金额 / 汇率 / 币种 */
-      { key: 'salesOrderId', label: '来源销售订单 ID（可留空；建议用「选择来源」）', type: 'number', selector: 'finance-apply-sales-order-source' },
+         选择器只回填权威来源 Id，绝不臆造订单号、绝不自动改金额 / 汇率 / 币种。
+         ERP-480：声明为显式可空引用（nullable: true）——留空提交 null（未关联来源的历史语义），
+         绝不回落为哨兵值 0；清空来源即「显式断开」，最终仍由服务端按权威客户 / 币种 / 状态复核。 */
+      { key: 'salesOrderId', label: '来源销售订单 ID（可留空 = 未关联；建议用「选择来源」）', type: 'number', nullable: true, selector: 'finance-apply-sales-order-source' },
       { key: 'bankAccount', label: '银行账户' }, { key: 'payee', label: '收款方' },
       { key: 'reason', label: '申请事由', type: 'textarea' },
     ],
@@ -31,8 +33,10 @@ Object.assign(MODULES, {
       { key: 'exchangeRate', label: '汇率', type: 'number', default: 1 },
       /* ERP-391：来源销售订单由「选择来源」有界选择器显式回填（也可手工填写 Id / 留空显式断开）；
          选择器与定金申请单共用同一份实现（按当前模块路由货款申请单接口），只回填权威来源 Id，
-         绝不臆造订单号、绝不自动改金额 / 汇率 / 币种 */
-      { key: 'salesOrderId', label: '来源销售订单 ID（可留空；建议用「选择来源」）', type: 'number', selector: 'finance-apply-sales-order-source' },
+         绝不臆造订单号、绝不自动改金额 / 汇率 / 币种。
+         ERP-480：同样声明为显式可空引用（nullable: true）——留空提交 null（未关联来源的历史语义），
+         绝不回落为哨兵值 0；清空来源即「显式断开」，最终仍由服务端按权威客户 / 币种 / 状态复核。 */
+      { key: 'salesOrderId', label: '来源销售订单 ID（可留空 = 未关联；建议用「选择来源」）', type: 'number', nullable: true, selector: 'finance-apply-sales-order-source' },
       { key: 'bankAccount', label: '银行账户' }, { key: 'payee', label: '收款方' },
       { key: 'reason', label: '申请事由', type: 'textarea' },
     ],

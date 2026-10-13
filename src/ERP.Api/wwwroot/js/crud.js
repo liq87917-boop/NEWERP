@@ -249,7 +249,10 @@ async function saveForm(id) {
     let v = el.value;
     /* ERP-428：显式可选（f.nullable === true）的数值字段留空时提交 null（如销售订单目的港 Id 这类可空引用），
        绝不回落为 0 —— 0 会被服务端按「显式非法引用」拒绝。默认（未声明 nullable）仍保持既有口径：留空 = 0，
-       因此必填数值字段（汇率 / 比例 / 明细数量单价等）的零值语义与其它模块完全不变。 */
+       因此必填数值字段（汇率 / 比例 / 明细数量单价等）的零值语义与其它模块完全不变。
+       ERP-480：规范财务申请单（定金申请单 / 货款申请单）的来源销售订单 Id 同样以 nullable: true 声明，
+       因此「清空来源」提交的是 null（保留服务端历史「未关联来源」语义），而不是哨兵值 0；
+       服务端仍会把 0 与 null 一并归一为未关联来源，二者都不会被当作显式非法引用。 */
     if (f.type === 'number') v = v === '' ? (f.nullable === true ? null : 0) : Number(v);
     if (f.type === 'ref') v = v === '' ? null : Number(v);
     if (f.type === 'parent') v = v === '' ? null : Number(v);
