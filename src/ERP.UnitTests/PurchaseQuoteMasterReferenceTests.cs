@@ -25,8 +25,8 @@ namespace ERP.UnitTests;
 /// <item><b>控制器行为</b>：新增 / 修改 / 「选中」选择在单号预约与任何写入之前拒绝失效引用（零写入、零占号）；
 /// 带入预填 / 单行转采购订单 / 批次转采购订单在既有来源行锁内、映射草稿与采购单号预约之前复核，
 /// 一行不合格即整批拒绝且来源状态与单号流水不变；合法实时主数据照常正向生成；</item>
-/// <item><b>授权前置与非披露</b>：既有身份 / 菜单 / 客户范围授权先于主数据复核；进程内无请求管线直调
-/// 保持既有行为（与 ERP-427 / ERP-473 / ERP-475 同源取舍）。</item>
+/// <item><b>授权前置与非披露</b>：既有身份 / 菜单 / 客户范围授权先于主数据复核；进程内直调同样执行实时授权与
+/// 实时主数据复核（ERP-491：与调用形状完全无关，空 <c>Request.Path</c> / 无 <c>HttpContext</c> 不再构成旁路）。</item>
 /// </list>
 /// <para>安全口径：全部使用内存库 <see cref="TestDbFactory"/>，不读取 appsettings / .env / 生产凭据，
 /// 不执行 drop / reset，也不使用生产数据。</para>
@@ -447,19 +447,43 @@ public class PurchaseQuoteMasterReferenceTests
     }
 
     [Fact]
-    public async Task 进程内直调_真实启用身份_空请求路径_授权通过并保持既有主数据门()
+    public async Task 进程内直调_真实启用身份_空请求路径_实时主数据失效_同样受控拒绝且零写入()
     {
         using var db = TestDbFactory.Create();
-        // ERP-486：既有进程内夹具改为真实启用身份（既有菜单 / 不受限范围），刻意不设置 Request.Path；
-        // 授权判定与请求形状无关，而 ERP-476 实时主数据门仍只依据 Request.Path（真实请求一律执行）。
+        // ERP-491：既有进程内夹具改为真实启用身份（既有菜单 / 不受限范围），刻意不设置 Request.Path；
+        // 授权判定与请求形状无关，实时主数据复核同样与调用形状无关 —— 失效显式引用（悬空客户）一律
+        // 受控拒绝、零写入，绝不把「无请求管线」当作主数据引用豁免。
         var ctl = PurchaseQuoteTestAuthority.NewQuoteController(db);
-        var draft = NewQuote("PQ-476-INPROCESS");
+        var draft = NewQuote("PQ-491-INPROCESS");
         draft.SupplierId = 4_760_010L;
         draft.ProductId = 4_760_011L;
         draft.CustomerId = 4_760_012L;
 
+        var ex = await Assert.ThrowsAsync<BusinessException>(() => ctl.Create(draft));
+
+        Assert.Equal(ErrorCodes.NotFound, ex.Code);
+        Assert.Contains("不存在或已删除", ex.Message);
+        Assert.Empty(db.PurchaseQuotes);
+    }
+
+    [Fact]
+    public async Task 进程内直调_真实启用身份_空请求路径_实时主数据齐备_与真实请求一致放行()
+    {
+        using var db = TestDbFactory.Create();
+        // ERP-491：同为「空 Request.Path / 无 MVC 请求绑定」的调用形状，只要引用真实存在 / 未删除 / 启用的
+        // 主数据行，就与真实 HTTP 写入请求给出完全一致的放行结论（绝不按调用形状区别对待）。
+        var supplier = SeedSupplier(db);
+        var product = SeedProduct(db);
+        var customer = SeedCustomer(db);
+        var ctl = PurchaseQuoteTestAuthority.NewQuoteController(db);
+        var draft = NewQuote("PQ-491-INPROCESS-LIVE", customer.Id, supplier.Id, product.Id);
+
         Assert.IsType<OkObjectResult>(await ctl.Create(draft));
-        Assert.Single(db.PurchaseQuotes);
+
+        var stored = db.PurchaseQuotes.AsNoTracking().Single();
+        Assert.Equal(supplier.Id, stored.SupplierId);
+        Assert.Equal(product.Id, stored.ProductId);
+        Assert.Equal(customer.Id, stored.CustomerId);
     }
 
     [Fact]
@@ -628,7 +652,9 @@ public class PurchaseQuoteMasterReferenceTests
     public void 源码契约_唯一复核接入写入与承诺入口()
     {
         var controller = ReadSource("src", "ERP.Api", "Controllers", "PurchaseQuoteController.cs");
-        Assert.Contains("RequiresLiveMasterValidation", controller);
+        // ERP-491：写入 / 选择 / 带入预填 / 单行转单 / 批次转单不再有依据 Request.Path 的方法级豁免。
+        Assert.DoesNotContain("RequiresLiveMasterValidation", controller, StringComparison.Ordinal);
+        Assert.DoesNotContain("Request.Path.HasValue", controller, StringComparison.Ordinal);
         Assert.Contains("PurchaseQuoteMasterReferenceRules.EnsureComparisonReferencesAsync", controller);
         Assert.Contains("PurchaseQuoteConversion.EnsureSourceMasterReferencesAsync", controller);
         Assert.Contains("PurchaseQuoteMasterReferenceRules.IsSelectionCommitment", controller);

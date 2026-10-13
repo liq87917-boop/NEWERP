@@ -32,6 +32,13 @@ namespace ERP.Api.Controllers;
 /// <b>之前</b>复核供应商与商品引用**显式存在且为正整数**（绝不把缺失 / <c>0</c> 静默当作实时采购引用），
 /// 见 <see cref="PurchaseQuoteConversion.EnsureSourceMasterReferencesAsync"/>；任一行不合格即整批受控拒绝：
 /// 零写入、零占号、不改写来源状态。</para>
+/// <para>ERP-491：上述实时主数据引用复核<b>与调用形状完全无关</b> —— 删除 ERP-476 依据 <c>Request.Path</c> 的
+/// 方法级豁免后，每一条既定写入（新增 / 修改）与采购承诺（选中 / 带入预填 / 单行转采购订单 / 批次转采购订单）
+/// 入口都<b>无条件</b>调用同一份 <see cref="PurchaseQuoteMasterReferenceRules"/> 与
+/// <see cref="PurchaseQuoteConversion.EnsureSourceMasterReferencesAsync"/>；缺失 <c>HttpContext</c>、
+/// 空 <c>Request.Path</c>、进程内派生调用都不再构成主数据引用旁路。既有可空草稿（留空供应商 / 商品 /
+/// 未指定客户）与显式来源分组口径原样保留，失效显式引用（零 / 缺失 / 已删除 / 已停用）一律在发号与落库之前
+/// 受控拒绝，绝不静默替换，也绝不新增任何主数据维护权限。</para>
 /// <para>ERP-486：实时授权与调用形状完全无关 —— 每一条读取 / 写入 / 审批 / 决定 / 下游转单入口都<b>无条件</b>调用
 /// <see cref="PurchaseQuoteAuthorizationRules.EnsureAccessAuthorizedAsync"/>（带入预填 / 转单另加目的地授权），
 /// 缺失 <c>HttpContext</c>、空 <c>Request.Path</c>、缺失 / 零 / 未知身份都不再构成旁路；受控非披露拒绝先于
@@ -80,23 +87,18 @@ public class PurchaseQuoteController : BaseCrudController<PurchaseQuote>
     // ==================== ERP-476：实时主数据引用复核（写入 / 选择 / 承诺） ====================
 
     /// <summary>
-    /// ERP-476：是否必须执行实时主数据引用复核。<strong>真实 HTTP 写入 / 选择 / 带入预填 / 转换请求</strong>
-    /// （MVC 绑定，<c>Request.Path</c> 已赋值）一律执行；未被任何请求绑定的进程内直调（历史单元测试 /
-    /// 内部派生读取，<c>Request.Path</c> 无值）保持既有行为（与 ERP-427 / ERP-473 / ERP-475 同源取舍，
-    /// 绝不把「无请求管线」当作匿名或管理员）。该判定只决定**是否额外加载实时主数据**；
-    /// 既有身份 / 菜单 / 客户范围授权仍然最先且决定性（授权不通过时本复核不会到达）。
-    /// </summary>
-    private bool RequiresLiveMasterValidation()
-        => ControllerContext?.HttpContext?.Request.Path.HasValue == true;
-
-    /// <summary>
-    /// ERP-476：写入 / 选择入口的实时引用复核（新增在单号预约与任何赋值之前；修改在比价行锁内改写字段之前）。
+    /// ERP-476 / ERP-491：写入 / 选择入口的实时引用复核（新增在单号预约与任何赋值之前；修改在比价行锁内改写字段之前）。
     /// <paramref name="commitment"/> 为真（「已选中 + 选中该供应商」= 供应商选择承诺）时另按承诺级复核，
     /// 要求供应商与商品引用显式存在且为正整数；失败即受控拒绝，被拒绝的请求零写入、零占号。
+    /// <para><b>与调用形状完全无关</b>：不再读取 <c>Request.Path</c>、不判断是否存在 <c>HttpContext</c>、
+    /// 不依据身份是否可解析 —— 每一条既定写入 / 选择入口都<b>无条件</b>调用同一份
+    /// <see cref="PurchaseQuoteMasterReferenceRules"/>（缺失 <c>entity</c> 时的空引用仍由 Create / Update 的
+    /// 既有参数校验先行拒绝，绝不提供任何测试 / 环境 / 路径旁路）。既有身份 / 菜单 / 客户范围授权仍然最先且
+    /// 决定性（授权不通过时本复核不会到达）。</para>
     /// </summary>
     private async Task EnsureLiveMasterReferencesAsync(PurchaseQuote entity, bool commitment)
     {
-        if (entity is null || !RequiresLiveMasterValidation()) return;
+        if (entity is null) throw BusinessException.InvalidParameter("请求内容不能为空");
 
         await PurchaseQuoteMasterReferenceRules.EnsureComparisonReferencesAsync(_db, entity);
         if (commitment)
@@ -375,7 +377,7 @@ public class PurchaseQuoteController : BaseCrudController<PurchaseQuote>
     /// 与 <see cref="ToPurchaseOrder" /> 共用同一套守卫（见 <see cref="PurchaseQuoteConversion.BuildDraftAsync" />）：
     /// 只允许「已选中且未放弃、未生成过采购订单」的比价行，本接口不占用单据号、不写库。
     /// ERP-476：带入预填同样复核来源实时主数据引用（供应商 / 商品引用必须显式存在且为正整数、归属客户必须实时），
-    /// 失败即受控拒绝且零占号 / 零写入 / 来源状态不变。
+    /// 失败即受控拒绝且零占号 / 零写入 / 来源状态不变。ERP-491：该复核与调用形状完全无关（无条件执行）。
     /// </summary>
     [HttpGet("{id:long}/order-prefill")]
     public async Task<IActionResult> OrderPrefill(long id)
@@ -390,11 +392,11 @@ public class PurchaseQuoteController : BaseCrudController<PurchaseQuote>
 
         await PurchaseQuoteAuthorizationRules.EnsureQuoteAllowedAsync(_db, scope, id);
 
-        // ERP-476：带入预填同样是**采购承诺**的预览 —— 来源的供应商 / 商品引用必须显式存在且为正整数、
+        // ERP-476 / ERP-491：带入预填同样是**采购承诺**的预览 —— 来源的供应商 / 商品引用必须显式存在且为正整数、
         // 归属客户必须解析到实时客户（解析不到档案的历史悬空弱引用保持既有口径，绝不改派）；
         // 失败即受控拒绝，绝不占用单据号、绝不落库、绝不改写来源状态。
-        if (RequiresLiveMasterValidation())
-            await PurchaseQuoteConversion.EnsureSourceMasterReferencesAsync(_db, new[] { quote });
+        // ERP-491：复核与调用形状完全无关（空路径 / 无 HttpContext / 进程内直调同样执行，绝不提供旁路）。
+        await PurchaseQuoteConversion.EnsureSourceMasterReferencesAsync(_db, new[] { quote });
 
         var order = await PurchaseQuoteConversion.BuildDraftAsync(_db, quote);
         if (destination is not null)
@@ -416,6 +418,7 @@ public class PurchaseQuoteController : BaseCrudController<PurchaseQuote>
     /// （不新增 / 不修改任何数据库结构）。
     /// ERP-476：在既有来源行锁内、映射草稿与采购单号预约**之前**复核来源实时主数据引用
     /// （供应商 / 商品引用显式存在且为正整数、归属客户实时；历史悬空弱引用保持既有口径）；失败零发号、零写入。
+    /// ERP-491：该复核与调用形状完全无关（无条件执行，绝不提供路径 / 环境 / 测试旁路）。
     /// </summary>
     [HttpPost("{id:long}/to-order")]
     public async Task<IActionResult> ToPurchaseOrder(long id)
@@ -437,11 +440,10 @@ public class PurchaseQuoteController : BaseCrudController<PurchaseQuote>
             await PurchaseQuoteAuthorizationRules.EnsureQuoteAllowedAsync(_db, liveScope, id);
             await PurchaseQuoteConversionMutationRules.EnsureConversionReadyAsync(_db, source, new[] { id });
 
-            // ERP-476：采购承诺前在**同一事务 / 既有来源行锁内**复核来源实时主数据引用（供应商 / 商品必须显式存在且为正整数，
+            // ERP-476 / ERP-491：采购承诺前在**同一事务 / 既有来源行锁内**复核来源实时主数据引用（供应商 / 商品必须显式存在且为正整数，
             // 归属客户必须解析到实时客户；解析不到档案的历史悬空弱引用保持既有口径）—— 失败在映射草稿与发号之前受控拒绝：
-            // 零采购单号消耗、零表头 / 明细 / 来源状态写入。
-            if (RequiresLiveMasterValidation())
-                await PurchaseQuoteConversion.EnsureSourceMasterReferencesAsync(_db, new[] { quote });
+            // 零采购单号消耗、零表头 / 明细 / 来源状态写入。ERP-491：复核与调用形状完全无关（无条件执行，绝不提供旁路）。
+            await PurchaseQuoteConversion.EnsureSourceMasterReferencesAsync(_db, new[] { quote });
 
             var order = await PurchaseQuoteConversion.BuildDraftAsync(_db, quote);
 
@@ -509,6 +511,7 @@ public class PurchaseQuoteController : BaseCrudController<PurchaseQuote>
     /// 不合格行不静默丢弃，随响应显式返回原因。同一批次重复转换由既有两道重复守卫拦截，不产生重复单据。
     /// ERP-476：本批将写入的每一行来源在发号与写入之前复核采购承诺级实时主数据引用，任一行不合格（哪怕只有一行）
     /// 即**整批**受控拒绝：绝不生成部分采购订单 / 部分批次组，绝不消耗采购单号，绝不改写来源状态。
+    /// ERP-491：该复核与调用形状完全无关（无条件执行，绝不提供路径 / 环境 / 测试旁路）。
     /// </summary>
     [HttpPost("batch-to-order")]
     public async Task<IActionResult> BatchToOrder([FromBody] PurchaseQuoteBatchConversionRequest request)
@@ -542,13 +545,12 @@ public class PurchaseQuoteController : BaseCrudController<PurchaseQuote>
             var convertibleIds = precheck.Groups.SelectMany(g => g.Lines).Select(l => l.Id).ToList();
             await PurchaseQuoteConversionMutationRules.EnsureConversionReadyAsync(_db, source, convertibleIds);
 
-            // ERP-476：与单行转单**共用唯一复核入口**——本批将写入的每一行来源都必须满足采购承诺级实时引用
+            // ERP-476 / ERP-491：与单行转单**共用唯一复核入口**——本批将写入的每一行来源都必须满足采购承诺级实时引用
             // （供应商 / 商品引用显式存在且为正整数，归属客户解析到实时客户；历史悬空弱引用保持既有口径）。
             // 任一行（哪怕只有一行）不合格即**整批**在发号与写入之前受控拒绝：绝不生成部分采购订单 / 部分批次组，
-            // 绝不消耗采购单号，绝不改写任何来源行状态。
-            if (RequiresLiveMasterValidation())
-                await PurchaseQuoteConversion.EnsureSourceMasterReferencesAsync(_db,
-                    precheck.Groups.SelectMany(g => g.Lines).ToList());
+            // 绝不消耗采购单号，绝不改写任何来源行状态。ERP-491：复核与调用形状完全无关（无条件执行，绝不提供旁路）。
+            await PurchaseQuoteConversion.EnsureSourceMasterReferencesAsync(_db,
+                precheck.Groups.SelectMany(g => g.Lines).ToList());
 
             await PurchaseQuoteApproval.EnsureApprovedSuppliersCoherentAsync(_db, source.Lines);
 

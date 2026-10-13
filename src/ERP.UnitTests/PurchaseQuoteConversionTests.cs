@@ -139,19 +139,27 @@ public class PurchaseQuoteConversionTests
     }
 
     [Fact]
-    public async Task 选中比价行转采购订单_商品未引用档案_ProductId按零占位且保留名称()
+    public async Task 比价行未引用档案商品_转采购订单_在发号与写入之前受控拒绝且绝不零占位()
     {
         using var db = TestDbFactory.Create();
+        var rule = SeedPurchaseOrderNumberRule(db, 7);
         var quote = SeedSelectedQuote(db, "PQ-NO-PRODUCT");
-        quote.ProductId = null;
+        quote.ProductId = null;                       // 手工比价草稿：写入合法，但采购承诺必须显式引用商品
         quote.ProductName = "档口现货（无档案）";
         db.SaveChanges();
 
-        await NewController(db).ToPurchaseOrder(quote.Id);
+        // ERP-491：进程内直调同样执行承诺级实时主数据复核 —— 商品引用缺失（ProductId 非正整数）
+        // 绝不静默零占位，一律在采购单号预约与任何写入之前受控拒绝，来源状态一行不改。
+        var ex = await Assert.ThrowsAsync<BusinessException>(() => NewController(db).ToPurchaseOrder(quote.Id));
 
-        var line = db.PurchaseOrderDetails.Single();
-        Assert.Equal(0L, line.ProductId);
-        Assert.Equal("档口现货（无档案）", line.ProductName);
+        Assert.Equal(ErrorCodes.RuleConflict, ex.Code);
+        Assert.Contains(PurchaseQuoteMasterReferenceRules.CommitmentProductText, ex.Message);
+        Assert.Empty(db.PurchaseOrders);
+        Assert.Empty(db.PurchaseOrderDetails);
+        Assert.Equal(7L, PurchaseOrderSequence(db, rule.Id));
+        var source = db.PurchaseQuotes.AsNoTracking().Single();
+        Assert.Equal(PurchaseQuoteConversion.SelectedStatus, source.Status);
+        Assert.Equal(string.Empty, source.RefOrderNo ?? string.Empty);
     }
 
     // ==================== ERP-476：真实 HTTP 承诺请求的实时主数据引用 ====================
@@ -632,6 +640,31 @@ public class PurchaseQuoteConversionTests
         return controller;
     }
 
+    /// <summary>
+    /// ERP-491：为既有转换夹具补齐与占位 Id 对齐的**真实启用**主数据行（供应商 88 / 商品 310 / 客户 7）。
+    /// 幂等：已存在即复用，绝不新增第二行、绝不回填 / 改派既有引用，也绝不新增任何权限。
+    /// </summary>
+    private static void SeedLiveMasterRows(ErpDbContext db)
+    {
+        if (!db.BaseSuppliers.Any(s => s.Id == 88L))
+            db.BaseSuppliers.Add(new BaseSupplier
+            {
+                Id = 88L, SupplierCode = "S-491-88", SupplierName = "义乌档口 A", Status = 1
+            });
+        if (!db.BaseProducts.Any(p => p.Id == 310L))
+            db.BaseProducts.Add(new BaseProduct
+            {
+                Id = 310L, ProductCode = "P-491-310", ProductName = "PU 商品", Unit = "PCS", Status = 1
+            });
+        if (!db.BaseCustomers.Any(c => c.Id == 7L))
+            db.BaseCustomers.Add(new BaseCustomer
+            {
+                Id = 7L, CustomerCode = "C-491-7", CustomerName = "义乌客户（比价测试）", Status = 1,
+                CreditStatus = "正常", DepositRatio = 30m
+            });
+        db.SaveChanges();
+    }
+
     private static BaseSupplier SeedLiveSupplier(ErpDbContext db)
     {
         var supplier = new BaseSupplier
@@ -730,6 +763,10 @@ public class PurchaseQuoteConversionTests
             RefOrderNo = refOrderNo,
             Remark = "QUOTE_CONVERSION_TEST"
         };
+        // ERP-491：采购承诺（转采购订单 / 带入预填）夹具必须引用**真实存在且启用**的主数据行 ——
+        // 复核与调用形状无关后，进程内直调不再跳过实时主数据门；占位 Id（88 / 310 / 7）与真实启用行对齐，
+        // 绝不提供请求路径 / 环境 / 测试专用旁路。
+        SeedLiveMasterRows(db);
         db.PurchaseQuotes.Add(quote);
         db.SaveChanges();
 

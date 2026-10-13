@@ -22,11 +22,13 @@ namespace ERP.Api.Controllers;
 /// 4) 「直接生成」在服务端一次落库，并以来源判据守卫重复生成，绝不更新 / 覆盖既有采购订单；
 /// 5) 明细数量 / 单价 / 金额与订单总额一律由服务端按采购订单口径复核
 ///    （复用 <see cref="PurchaseOrderController.Calculate" /> 与 <see cref="PurchaseOrderController.Validate" />）；
-/// 6) ERP-476：「比价行 → 采购订单」是**采购承诺**，真实 HTTP 请求在既有来源行锁内、映射草稿与采购单号预约之前
+/// 6) ERP-476 / ERP-491：「比价行 → 采购订单」是**采购承诺**，真实 HTTP 请求在既有来源行锁内、映射草稿与采购单号预约之前
 ///    由 <see cref="PurchaseQuoteMasterReferenceRules.EnsureCommitmentReferencesAsync"/> 复核**实时主数据引用** ——
 ///    供应商与商品引用必须显式存在且为正整数（绝不把缺失 / 0 静默当作实时采购引用），解析到既有档案时必须
 ///    未删除 / 启用，归属客户填写时必须解析到实时客户；失败即整批受控拒绝，绝不消耗采购单号、绝不落库、
 ///    绝不改写来源状态（唯一入口见 <see cref="EnsureSourceMasterReferencesAsync"/>）。
+///    ERP-491：该复核**与调用形状完全无关** —— 不再依据 <c>Request.Path</c> / <c>HttpContext</c> 做方法级豁免，
+///    带入预填 / 单行转采购订单 / 批次转采购订单三条入口都无条件执行，进程内派生调用同样受控，绝不提供旁路。
 /// </remarks>
 public static class PurchaseQuoteConversion
 {
@@ -110,6 +112,9 @@ public static class PurchaseQuoteConversion
     /// </list>
     /// 唯一权威判定由 <see cref="PurchaseQuoteMasterReferenceRules"/> 提供；本方法只是控制器与转换入口共用的
     /// **单一接线点**（避免单行 / 批次出现两套复核）。
+    /// <para><b>ERP-491：与调用形状完全无关</b>——不再由控制器依据 <c>Request.Path</c> 决定是否调用本方法；
+    /// 带入预填 / 单行转采购订单 / 批次转采购订单三条入口一律无条件调用（缺失 <c>HttpContext</c>、空路径、
+    /// 进程内派生调用均不豁免）。</para>
     /// </summary>
     public static async Task EnsureSourceMasterReferencesAsync(IErpDbContext db, IReadOnlyList<PurchaseQuote>? lines,
         CancellationToken ct = default)
@@ -163,9 +168,10 @@ public static class PurchaseQuoteConversion
     /// 供应商确认交期 = 交货日期（比价交期本身即供应商承诺）；归属客户 ← CustomerId / CustomerName；
     /// 归属销售订单 ← RefOrderNo 解析出的销售订单（匹配不到留空）；备注 ← 比价备注 + 来源标记；
     /// 明细 = 该比价行一行（商品 / 规格 / 单位 / 数量 / 报价单价）。
-    /// <para>ERP-476：真实 HTTP 承诺请求在映射之前已由 <see cref="EnsureSourceMasterReferencesAsync"/> 复核来源
-    /// 实时主数据引用（商品 / 供应商引用必须显式存在且为正整数），因此 <c>ProductId = 0</c> 占位只保留给
-    /// **未被任何请求绑定**的进程内直调（历史单元测试口径），绝不作为实时采购引用落库。</para>
+    /// <para>ERP-476 / ERP-491：带入预填 / 单行转采购订单 / 批次转采购订单在映射之前已**无条件**由
+    /// <see cref="EnsureSourceMasterReferencesAsync"/> 复核来源
+    /// 实时主数据引用（商品 / 供应商引用必须显式存在且为正整数），因此 <c>ProductId = 0</c> 不会被静默映射为
+    /// 实时采购明细引用；本映射只接受已通过承诺级复核的合法来源行（含既有可空的未引用档案弱引用口径）。</para>
     /// </summary>
     private static PurchaseOrder MapDraft(PurchaseQuote quote, long? owningSalesOrderId, string owningSalesOrderNo,
         string decisionRef)

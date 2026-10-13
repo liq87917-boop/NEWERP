@@ -440,8 +440,9 @@ public class PurchaseQuoteMutationTests
         Assert.Contains("PurchaseQuoteMutationRules.IsDecisionFreezingDeletion", controller);
         Assert.DoesNotContain("IsAttributedDecision", controller, StringComparison.Ordinal);
 
-        // ERP-476：比价写入 / 选择入口接通实时主数据引用复核（唯一规则 + 唯一承诺入口），不新增权限。
-        Assert.Contains("RequiresLiveMasterValidation", controller);
+        // ERP-476 / ERP-491：比价写入 / 选择入口接通实时主数据引用复核（唯一规则 + 唯一承诺入口），不新增权限；
+        // 复核与调用形状完全无关（不再有依据 Request.Path 的方法级豁免）。
+        Assert.DoesNotContain("RequiresLiveMasterValidation", controller, StringComparison.Ordinal);
         Assert.Contains("PurchaseQuoteMasterReferenceRules.EnsureComparisonReferencesAsync", controller);
         Assert.Contains("PurchaseQuoteMasterReferenceRules.IsSelectionCommitment", controller);
         Assert.Contains("PurchaseQuoteConversion.EnsureSourceMasterReferencesAsync", controller);

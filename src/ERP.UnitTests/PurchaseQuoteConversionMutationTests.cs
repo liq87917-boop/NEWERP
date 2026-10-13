@@ -158,6 +158,7 @@ public class PurchaseQuoteConversionMutationTests
     public async Task 归属销售订单已审核_解析为权威归属_归属客户不一致时受控拒绝()
     {
         using var db = TestDbFactory.Create();
+        SeedLiveCustomer7(db);
         db.SalesOrders.Add(new SalesOrder
         {
             OrderNo = "SO-418-OK", OrderDate = DateTime.Today, CustomerId = 7L,
@@ -173,6 +174,7 @@ public class PurchaseQuoteConversionMutationTests
 
         // 归属客户与来源销售订单客户不一致：受控拒绝（绝不静默生成「另一客户」的采购订单）。
         using var db2 = TestDbFactory.Create();
+        SeedLiveCustomer7(db2);
         db2.SalesOrders.Add(new SalesOrder
         {
             OrderNo = "SO-418-OTHER", OrderDate = DateTime.Today, CustomerId = 99L,
@@ -418,6 +420,25 @@ public class PurchaseQuoteConversionMutationTests
     /// <summary>ERP-486：既有进程内夹具改为真实启用身份 + 既有「供应商比价」/「采购订单」菜单授权（刻意不设置 <c>Request.Path</c>）。</summary>
     private static PurchaseQuoteController NewController(ErpDbContext db)
         => PurchaseQuoteTestAuthority.NewQuoteController(db);
+
+    /// <summary>
+    /// ERP-491：与既有转换夹具占位 <c>CustomerId = 7</c> 对齐的**真实启用**客户行（幂等：已存在即复用）。
+    /// 复核与调用形状无关后，进程内直调夹具同样必须引用真实存在 / 未删除 / 启用的客户；
+    /// 绝不新增第二行、绝不回填 / 改派既有引用，也不提供请求路径 / 环境 / 测试旁路。
+    /// </summary>
+    private static BaseCustomer SeedLiveCustomer7(ErpDbContext db)
+    {
+        var existing = db.BaseCustomers.FirstOrDefault(c => c.Id == 7L);
+        if (existing is not null) return existing;
+        var customer = new BaseCustomer
+        {
+            Id = 7L, CustomerCode = "C-491-7", CustomerName = "客户A", Status = 1,
+            CreditStatus = "正常", DepositRatio = 30m, IsDeleted = false
+        };
+        db.BaseCustomers.Add(customer);
+        db.SaveChanges();
+        return customer;
+    }
 
     /// <summary>
     /// 已选中且已批准的比价行（报价总额故意写成 1，验证服务端按数量 × 单价重算）：

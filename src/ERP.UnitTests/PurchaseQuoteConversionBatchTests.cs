@@ -35,6 +35,7 @@ public class PurchaseQuoteConversionBatchTests
     public async Task 同供应商同币种的多行_合并为一张订单_明细逐行铺开且合计重算()
     {
         using var db = TestDbFactory.Create();
+        SeedLiveCustomer7(db);
         var line1 = AddLine(db, BatchNo, 88L, 5000m, 2.6m, customerId: 7L, customerName: "义乌客户", deliveryDays: 25);
         var line2 = AddLine(db, BatchNo, 88L, 1000m, 3.5m, customerId: 7L, customerName: "义乌客户", deliveryDays: 15);
 
@@ -92,6 +93,7 @@ public class PurchaseQuoteConversionBatchTests
     public async Task 不同供应商或币种_保持独立成单_不跨组合并()
     {
         using var db = TestDbFactory.Create();
+        SeedLiveCustomer7(db);
         var a1 = AddLine(db, BatchNo, 88L, 100m, 2m, customerId: 7L);
         var a2 = AddLine(db, BatchNo, 88L, 200m, 2m, customerId: 7L);
         var b1 = AddLine(db, BatchNo, 99L, 300m, 1m, customerId: 7L);
@@ -129,6 +131,7 @@ public class PurchaseQuoteConversionBatchTests
     public async Task 供应商币种相同但付款条件或含税或归属客户不同_保持独立_付款条件去空格比较()
     {
         using var db = TestDbFactory.Create();
+        SeedLiveCustomer7(db);
         var cash = AddLine(db, BatchNo, 88L, 100m, 2m, paymentTerms: "现结");
         var monthly = AddLine(db, BatchNo, 88L, 100m, 2m, paymentTerms: "月结30天");
         var taxed = AddLine(db, BatchNo, 88L, 100m, 2m, paymentTerms: "现结", taxIncluded: true);
@@ -179,6 +182,7 @@ public class PurchaseQuoteConversionBatchTests
     public async Task 组内交期不同_订单取最晚_零交期行明细留空_全零时订单交期留空()
     {
         using var db = TestDbFactory.Create();
+        SeedLiveCustomer7(db);
         AddLine(db, BatchNo, 88L, 100m, 2m, deliveryDays: 0, productName: "现货商品", customerId: 7L);
         AddLine(db, BatchNo, 88L, 200m, 2m, deliveryDays: 20, productName: "定制商品", customerId: 7L);
 
@@ -775,6 +779,25 @@ public class PurchaseQuoteConversionBatchTests
             new[] { new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()) }, "Test"));
         controller.ControllerContext = new ControllerContext { HttpContext = http };
         return controller;
+    }
+
+    /// <summary>
+    /// ERP-491：与既有转换夹具占位 <c>CustomerId = 7</c> 对齐的**真实启用**客户行（幂等：已存在即复用）。
+    /// 复核与调用形状无关后，进程内直调夹具同样必须引用真实存在 / 未删除 / 启用的客户；
+    /// 绝不新增第二行、绝不回填 / 改派既有引用，也不提供请求路径 / 环境 / 测试旁路。
+    /// </summary>
+    private static BaseCustomer SeedLiveCustomer7(ErpDbContext db)
+    {
+        var existing = db.BaseCustomers.FirstOrDefault(c => c.Id == 7L);
+        if (existing is not null) return existing;
+        var customer = new BaseCustomer
+        {
+            Id = 7L, CustomerCode = "C-491-7", CustomerName = "义乌客户", Status = 1,
+            CreditStatus = "正常", DepositRatio = 30m, IsDeleted = false
+        };
+        db.BaseCustomers.Add(customer);
+        db.SaveChanges();
+        return customer;
     }
 
     private static BaseSupplier SeedLiveSupplier(ErpDbContext db)
