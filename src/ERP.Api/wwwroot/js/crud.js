@@ -255,7 +255,12 @@ async function saveForm(id) {
        服务端仍会把 0 与 null 一并归一为未关联来源，二者都不会被当作显式非法引用。
        ERP-481：规范装柜结算单（container-settlement）的来源装柜清单 Id 也以 nullable: true 声明，
        留空提交 null（未关联来源历史语义），服务端 ERP-384 在锁内按权威客户 / 清单参与方资格复核；
-       散货结算单（bulk-settlement）没有来源单据字段，保持手工 / 未关联录入，绝不推断来源。 */
+       散货结算单（bulk-settlement）没有来源单据字段，保持手工 / 未关联录入，绝不推断来源。
+       ERP-482：规范收货计划（receiving-plan）的目的港 Id（BaseOtherInfo InfoType=Port 的字典项）同样以
+       nullable: true 声明（可留空引用），留空提交 null = 未指定；服务端 ERP-361 会把 null 视为「未填写」跳过，
+       而显式数字 0 / 非港口字典项 Id 仍按「非法引用」fail closed 拒绝。供应商 Id 是既有主数据引用
+       （type: 'ref'，留空提交 null 由服务端按必填正整数拒绝），日期字段留空提交 null、总件数按数字往返。
+       计划单号刻意不在表单里：省略 / 空串一律由服务端权威生成（客户端注入值不参与持久化）。 */
     if (f.type === 'number') v = v === '' ? (f.nullable === true ? null : 0) : Number(v);
     if (f.type === 'ref') v = v === '' ? null : Number(v);
     if (f.type === 'parent') v = v === '' ? null : Number(v);

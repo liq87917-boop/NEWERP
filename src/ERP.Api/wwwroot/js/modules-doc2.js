@@ -133,6 +133,15 @@ Object.assign(MODULES, {
     ],
     fields: [],
   },
+  /* ERP-361 / ERP-482：收货计划规范 EF 模块（api/container/receiving-plans，规范 Id 口径）。
+     ERP-482：菜单不再经 bill-v2.js 的 BILL_CODE_MAP 落到旧存储过程族（该族写路径已被 ERP-404 门禁整体停用 /
+     fail closed），而是打开本规范模块。手工录入表单**不提交 planNo**：计划单号由服务端在实时身份 / 既有
+     「收货计划」菜单 / 权威数据范围、真实可用供应商、可选可用目的港等校验通过后权威生成，主键 / 状态 /
+     删除态 / 时间戳也一律由服务端覆盖。
+     供应商是既有主数据引用（既有「供应商资料」接口口径）；目的港是**显式可空引用**（BaseOtherInfo
+     InfoType=Port 的字典项 Id，nullable: true，留空提交 null = 未指定，绝不回落为哨兵值 0，也绝不按柜号等
+     自由文本推断）；计划日期 / 预计到货 / 总件数按既有口径往返；备注用于保存 → 重开 → 修改原样往返。
+     收货计划只是计划证据：绝不创建实际入库 / 库存移动 / 财务记录，也不臆造采购 / 出运来源引用。 */
   'receiving-plan': {
     title: '收货计划', api: '/api/container/receiving-plans', canSubmit: true,
     columns: [
@@ -141,10 +150,16 @@ Object.assign(MODULES, {
       { key: 'totalQuantity', label: '总件数', type: 'money' }, { key: 'status', label: '状态', status: true },
     ],
     fields: [
-      { key: 'planDate', label: '计划日期', type: 'date' }, { key: 'supplierId', label: '供应商Id', type: 'number' },
-      { key: 'bookingNo', label: '订柜单号' }, { key: 'containerType', label: '柜型', type: 'select', options: CONTAINER_OPTS },
+      /* 计划单号刻意不列入表单：省略 / 空串一律由服务端权威生成（ERP-482 同源口径）。 */
+      { key: 'planDate', label: '计划日期', type: 'date' },
+      { key: 'supplierId', label: '供应商', type: 'ref', ref: 'supplier' },
+      { key: 'bookingNo', label: '订柜单号（legacy 文本，不做任何链接推断）' },
+      { key: 'containerType', label: '柜型', type: 'select', options: CONTAINER_OPTS },
       { key: 'containerNo', label: '柜号' }, { key: 'expectedArrivalDate', label: '预计到货', type: 'date' },
+      /* 目的港：显式可空引用（留空 = 未指定；服务端仍把原始数字 0 归一为「非法引用」fail closed）。 */
+      { key: 'portId', label: '目的港 Id（可留空；留空 = 未指定）', type: 'number', nullable: true },
       { key: 'destination', label: '目的地' }, { key: 'totalQuantity', label: '总件数', type: 'number' },
+      { key: 'remark', label: '备注', type: 'textarea' },
     ],
   },
   /* ERP-040：订柜信息 = 外贸 / 物流跟踪字段的**权威记录**（出运方式 / B/L / S-O / 中转港 / ETD·ETA·ATD·ATA /

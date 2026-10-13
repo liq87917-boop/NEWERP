@@ -71,10 +71,15 @@ public class ContainerReceivingPlanController : DocumentControllerBase<Container
         // 先校验「完整拟提交内容」：供应商 / 目的港 / 柜型 / 有界文本；不合格不占单据号、不落库。
         var validated = await ReceivingPlanLifecycleRules.ValidateProposedAsync(Db, entity);
 
+        // ERP-482：全部校验通过之后，主键 / 计划单号 / 状态 / 删除态 / 时间戳一律由服务端权威覆盖，
+        // 客户端注入值（省略 / 空串 / 伪造单号 · 主键 · 状态 · 删除态 · 时间戳）不参与持久化。
+        // 收货计划始终只是「计划证据」：不创建实际入库 / 库存移动 / 财务 / 单证，也不臆造采购 / 出运来源引用。
         entity.Id = 0;
         entity.PlanNo = await _noService.GenerateAsync(DocumentType.ReceivingPlan);
         ReceivingPlanLifecycleRules.ApplyValidated(entity, validated);
         entity.Status = DocumentStatus.Pending;
+        entity.IsDeleted = false;
+        entity.UpdatedAt = null;
         entity.CreatedAt = DateTime.Now;
         Db.ContainerReceivingPlans.Add(entity);
         await Db.SaveChangesAsync();
