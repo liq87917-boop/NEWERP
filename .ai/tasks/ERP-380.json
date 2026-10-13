@@ -1,6 +1,6 @@
 {
   "title": "Protect payment application lifecycle and explicit payment source integrity",
-  "description": "Stage3 core finance closure. Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance.",
+  "description": "Stage3 core finance closure. Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance.\n\n2026-10-13 verified acceptance recovery: FinancePaymentApplyController.GetById in FinanceApplyControllers.cs:405-410 loads application before live FinancePaymentApplyLifecycleRules.EnsureAuthorizedAsync. Unknown id returns NotFound while existing id rejects missing/disabled/deleted/no-menu caller differently, violating original identity/menu before rows. Lifecycle paths likewise lock/read before caller gate. Require existing payment-apply menu and live identity before all business/source/master reads or locks; preserve current scope revalidation under application then payment locks, explicit sales-order/source/customer/currency integrity and payment-reference cancellation guards. Modify only payment application controller in shared file, keep deposit controller unchanged. Remove exemptions completely, including no HttpContext; parse missing actor safely to null for controlled Unauthorized. No internal-call/test-compatibility exceptions or renamed bypass. Adapt fixtures only with genuine enabled identities/existing grants/live masters in isolated databases. Retain original numeric/source/customer/transaction/audit checks. Missing/disabled/no-menu users must be rejected before counts or any business query. Preserve full logs; use explicit .ai/logs/ERP-380 results/TRX directories. Safe Release with analyzers/warnings-as-errors/full units plus real isolated SQL mandatory; no whole-stage claim.",
   "acceptance_criteria": [
     "Secure every payment application list/detail/create/update/submit/approve/cancel/delete route with current enabled identity, existing payment-apply menu and current authoritative customer scope before counts, rows, number generation or writes. Validate real available customer, supported currency, positive rounded amount and exchange rate. Optional SalesOrderId must be exact existing eligible source with matching authoritative customer and compatible currency; preserve historical null source semantics and deny corrupt or foreign links without text guessing. Validate stored and proposed scope before changes. Only change FinancePaymentApplyController in the shared file; preserve deposit application routes.",
     "Serialize application commercial edits and lifecycle with referencing payment creation/update/transitions and allocation eligibility under a documented compatible source-application then payment lock order. Reject cancellation/deletion or changes to customer/source/currency/amount while nondeleted noncancelled payments reference the application; explicitly cancelled payments release the guard while history remains. Recheck source after locking; null historical payment sources retain existing restricted/unrestricted semantics. No new grants, schema, accounting, stock movements or fabricated settlement. Prove actual SQL own/foreign/revoked/disabled, invalid quantity/amount/currency, denied edit unchanged, explicit cancelled-payment release and two independent connection application cancel/edit racing payment create/approve/assignment with no stale ownership, invalid funded evidence or partial writes. Add meaningful unit tests and safe Release validation, real browser evidence or precise blocker.",
@@ -16,7 +16,10 @@
     "src/ERP.Application/Services/SalespersonDataScopeService.cs",
     "src/ERP.UnitTests/FinancePaymentApplyLifecycleTests.cs",
     "src/ERP.IntegrationTests/FinancePaymentApplyLifecycleSqlServerTests.cs",
-    "docs/payment-application-lifecycle.md"
+    "docs/payment-application-lifecycle.md",
+    "src/ERP.UnitTests/DepositApplySalesOrderSourceTests.cs",
+    "src/ERP.UnitTests/FinanceApplyCanonicalEntryTests.cs",
+    "src/ERP.UnitTests/PaymentApplySalesOrderSourceTests.cs"
   ],
   "criterion_path_map": {
     "Secure every payment application list/detail/create/update/submit/approve/cancel/delete route with current enabled identity, existing payment-apply menu and current authoritative customer scope before counts, rows, number generation or writes. Validate real available customer, supported currency, positive rounded amount and exchange rate. Optional SalesOrderId must be exact existing eligible source with matching authoritative customer and compatible currency; preserve historical null source semantics and deny corrupt or foreign links without text guessing. Validate stored and proposed scope before changes. Only change FinancePaymentApplyController in the shared file; preserve deposit application routes.": [
@@ -29,7 +32,10 @@
       "src/ERP.Application/Services/SalespersonDataScopeService.cs",
       "src/ERP.UnitTests/FinancePaymentApplyLifecycleTests.cs",
       "src/ERP.IntegrationTests/FinancePaymentApplyLifecycleSqlServerTests.cs",
-      "docs/payment-application-lifecycle.md"
+      "docs/payment-application-lifecycle.md",
+      "src/ERP.UnitTests/DepositApplySalesOrderSourceTests.cs",
+      "src/ERP.UnitTests/FinanceApplyCanonicalEntryTests.cs",
+      "src/ERP.UnitTests/PaymentApplySalesOrderSourceTests.cs"
     ],
     "Serialize application commercial edits and lifecycle with referencing payment creation/update/transitions and allocation eligibility under a documented compatible source-application then payment lock order. Reject cancellation/deletion or changes to customer/source/currency/amount while nondeleted noncancelled payments reference the application; explicitly cancelled payments release the guard while history remains. Recheck source after locking; null historical payment sources retain existing restricted/unrestricted semantics. No new grants, schema, accounting, stock movements or fabricated settlement. Prove actual SQL own/foreign/revoked/disabled, invalid quantity/amount/currency, denied edit unchanged, explicit cancelled-payment release and two independent connection application cancel/edit racing payment create/approve/assignment with no stale ownership, invalid funded evidence or partial writes. Add meaningful unit tests and safe Release validation, real browser evidence or precise blocker.": [
       "src/ERP.Api/Controllers/FinanceApplyControllers.cs",
@@ -41,7 +47,10 @@
       "src/ERP.Application/Services/SalespersonDataScopeService.cs",
       "src/ERP.UnitTests/FinancePaymentApplyLifecycleTests.cs",
       "src/ERP.IntegrationTests/FinancePaymentApplyLifecycleSqlServerTests.cs",
-      "docs/payment-application-lifecycle.md"
+      "docs/payment-application-lifecycle.md",
+      "src/ERP.UnitTests/DepositApplySalesOrderSourceTests.cs",
+      "src/ERP.UnitTests/FinanceApplyCanonicalEntryTests.cs",
+      "src/ERP.UnitTests/PaymentApplySalesOrderSourceTests.cs"
     ],
     "Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance.": [
       "src/ERP.Api/Controllers/FinanceApplyControllers.cs",
@@ -53,10 +62,13 @@
       "src/ERP.Application/Services/SalespersonDataScopeService.cs",
       "src/ERP.UnitTests/FinancePaymentApplyLifecycleTests.cs",
       "src/ERP.IntegrationTests/FinancePaymentApplyLifecycleSqlServerTests.cs",
-      "docs/payment-application-lifecycle.md"
+      "docs/payment-application-lifecycle.md",
+      "src/ERP.UnitTests/DepositApplySalesOrderSourceTests.cs",
+      "src/ERP.UnitTests/FinanceApplyCanonicalEntryTests.cs",
+      "src/ERP.UnitTests/PaymentApplySalesOrderSourceTests.cs"
     ]
   },
-  "implementation_evidence": "FinancePaymentApplyController list/detail/create/update and inherited state routes have no live payment-apply menu/customer scope or amount guard. SupplierPaymentLifecycleRules derives payment ownership and currency/amount eligibility from this mutable application, but application cancellation/deletion or commercial changes are not protected against referencing payments.",
+  "implementation_evidence": "FinancePaymentApplyController.GetById in FinanceApplyControllers.cs:405-410 loads application before live FinancePaymentApplyLifecycleRules.EnsureAuthorizedAsync. Unknown id returns NotFound while existing id rejects missing/disabled/deleted/no-menu caller differently, violating original identity/menu before rows. Lifecycle paths likewise lock/read before caller gate. Require existing payment-apply menu and live identity before all business/source/master reads or locks; preserve current scope revalidation under application then payment locks, explicit sales-order/source/customer/currency integrity and payment-reference cancellation guards. Modify only payment application controller in shared file, keep deposit controller unchanged.",
   "depends_on": [
     "ERP-351",
     "ERP-378",
@@ -65,8 +77,8 @@
   "risk": "medium",
   "planning_stage": 3,
   "id": "ERP-380",
-  "status": "completed",
-  "attempts": 1,
+  "status": "retry",
+  "attempts": 2,
   "max_attempts": 3,
   "validation_profile": "safe",
   "completion_mode": "build",
@@ -81,5 +93,12 @@
     "required": false,
     "scenarios": []
   },
-  "created_at": "2026-10-08T13:32:14.679762Z"
+  "created_at": "2026-10-08T13:32:14.679762Z",
+  "recovery_context": {
+    "at": "2026-10-13T21:13:40.692094Z",
+    "reason": "original acceptance unmet despite build-valid verdict",
+    "original_attempts": 1,
+    "next_attempt_reserved": 2,
+    "preserved_evidence": "D:\\VSCodeProject\\NEWERP.executor.continue-erp-190-20260930080457\\.ai\\logs\\heartbeat-20261013-210922-recovery\\ERP-380"
+  }
 }

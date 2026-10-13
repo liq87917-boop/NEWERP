@@ -1,11 +1,8 @@
 {
   "task": "ERP-381",
-  "status": "completed",
-  "execution_outcome": "completed",
-  "normalized_finish_reason": "build_validated",
-  "cline_exit_code": 0,
-  "cline_finish_reason_raw": "completed",
+  "status": "retry",
+  "execution_outcome": "acceptance_reopened",
   "attempts": 1,
-  "browser_acceptance": null,
-  "finished_at": "2026-10-08T14:29:42.712770Z"
+  "reason": "FinanceDepositApplyController.GetById in FinanceApplyControllers.cs:53-58 loads application before FinanceDepositApplyLifecycleRules.EnsureAuthorizedAsync. Create checks customer before live identity and lifecycle paths acquire source/apply locks before caller gate. Unknown id versus existing id reveals document existence to denied callers. Require existing deposit-apply menu and live identity before every business/source/master query or lock, retaining current source/customer scope recheck inside transactions. Keep source sales-order constraints, same-currency receipt funding, deposit residual and cancellation/evidence history intact; modify only deposit application controller in shared file.",
+  "original_result_preserved": "D:\\VSCodeProject\\NEWERP.executor.continue-erp-190-20260930080457\\.ai\\logs\\heartbeat-20261013-210922-recovery\\ERP-381"
 }

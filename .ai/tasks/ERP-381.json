@@ -1,6 +1,6 @@
 {
   "title": "Secure deposit application lifecycle and authoritative sales order linkage",
-  "description": "Stage3 core finance closure. Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance.",
+  "description": "Stage3 core finance closure. Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance.\n\n2026-10-13 verified acceptance recovery: FinanceDepositApplyController.GetById in FinanceApplyControllers.cs:53-58 loads application before FinanceDepositApplyLifecycleRules.EnsureAuthorizedAsync. Create checks customer before live identity and lifecycle paths acquire source/apply locks before caller gate. Unknown id versus existing id reveals document existence to denied callers. Require existing deposit-apply menu and live identity before every business/source/master query or lock, retaining current source/customer scope recheck inside transactions. Keep source sales-order constraints, same-currency receipt funding, deposit residual and cancellation/evidence history intact; modify only deposit application controller in shared file. Remove exemptions completely, including no HttpContext; parse missing actor safely to null for controlled Unauthorized. No internal-call/test-compatibility exceptions or renamed bypass. Adapt fixtures only with genuine enabled identities/existing grants/live masters in isolated databases. Retain original numeric/source/customer/transaction/audit checks. Missing/disabled/no-menu users must be rejected before counts or any business query. Preserve full logs; use explicit .ai/logs/ERP-381 results/TRX directories. Safe Release with analyzers/warnings-as-errors/full units plus real isolated SQL mandatory; no whole-stage claim.",
   "acceptance_criteria": [
     "Protect deposit application list/detail/create/update/submit/approve/cancel/delete using current enabled identity, existing deposit-apply menu and authoritative current customer scope before counts, numbers, fields or state writes. Validate real enabled customer, supported currency, positive rounded amount and exchange rate. Optional SalesOrderId must reference exact eligible existing order matching customer and currency; never infer source by text. Keep historical null source semantics, require stored and proposed customer/source scope, and leave FinancePaymentApplyController in the shared file unchanged.",
     "Serialize deposit edit/delete/submit/approve/cancel with compatible sales-order and deposit row locks and atomic transactions; recheck current source/status/permissions after locks and coordinate with sales-order cancellation evidence guard. Preserve allowed state transitions, positive amount precision, audit history and failure rollback. No real receipt, funding allocation, posting, new permission grants or schema. Prove actual controller SQL own/foreign/revoked/disabled/invalid source/amount, denied edits unchanged and two-connection edit vs submit, approve vs cancel and source cancellation races. Run meaningful unit tests and safe Release validation; retain accurate browser evidence or blocker without claiming stage acceptance.",
@@ -13,7 +13,9 @@
     "src/ERP.Api/Controllers/SalesOrderController.cs",
     "src/ERP.UnitTests/FinanceDepositApplyLifecycleTests.cs",
     "src/ERP.IntegrationTests/FinanceDepositApplyLifecycleSqlServerTests.cs",
-    "docs/deposit-application-lifecycle.md"
+    "docs/deposit-application-lifecycle.md",
+    "src/ERP.UnitTests/DepositApplySalesOrderSourceTests.cs",
+    "src/ERP.UnitTests/FinanceApplyCanonicalEntryTests.cs"
   ],
   "criterion_path_map": {
     "Protect deposit application list/detail/create/update/submit/approve/cancel/delete using current enabled identity, existing deposit-apply menu and authoritative current customer scope before counts, numbers, fields or state writes. Validate real enabled customer, supported currency, positive rounded amount and exchange rate. Optional SalesOrderId must reference exact eligible existing order matching customer and currency; never infer source by text. Keep historical null source semantics, require stored and proposed customer/source scope, and leave FinancePaymentApplyController in the shared file unchanged.": [
@@ -23,7 +25,9 @@
       "src/ERP.Api/Controllers/SalesOrderController.cs",
       "src/ERP.UnitTests/FinanceDepositApplyLifecycleTests.cs",
       "src/ERP.IntegrationTests/FinanceDepositApplyLifecycleSqlServerTests.cs",
-      "docs/deposit-application-lifecycle.md"
+      "docs/deposit-application-lifecycle.md",
+      "src/ERP.UnitTests/DepositApplySalesOrderSourceTests.cs",
+      "src/ERP.UnitTests/FinanceApplyCanonicalEntryTests.cs"
     ],
     "Serialize deposit edit/delete/submit/approve/cancel with compatible sales-order and deposit row locks and atomic transactions; recheck current source/status/permissions after locks and coordinate with sales-order cancellation evidence guard. Preserve allowed state transitions, positive amount precision, audit history and failure rollback. No real receipt, funding allocation, posting, new permission grants or schema. Prove actual controller SQL own/foreign/revoked/disabled/invalid source/amount, denied edits unchanged and two-connection edit vs submit, approve vs cancel and source cancellation races. Run meaningful unit tests and safe Release validation; retain accurate browser evidence or blocker without claiming stage acceptance.": [
       "src/ERP.Api/Controllers/FinanceApplyControllers.cs",
@@ -32,7 +36,9 @@
       "src/ERP.Api/Controllers/SalesOrderController.cs",
       "src/ERP.UnitTests/FinanceDepositApplyLifecycleTests.cs",
       "src/ERP.IntegrationTests/FinanceDepositApplyLifecycleSqlServerTests.cs",
-      "docs/deposit-application-lifecycle.md"
+      "docs/deposit-application-lifecycle.md",
+      "src/ERP.UnitTests/DepositApplySalesOrderSourceTests.cs",
+      "src/ERP.UnitTests/FinanceApplyCanonicalEntryTests.cs"
     ],
     "Use genuine authenticated existing ERP permissions; no new user grants or anonymous/admin fallback. Retain inventory source document audit and original failed logs. Run relevant unit tests and safe Release build/full unit suite. Real SQL must target exact (localdb)\\NEWERP_AutoAcceptance with IntegratedSecurity and a new GUID-owned NEWERP_AUTOTEST database; reject existing/wrong target before access, never drop/reset or read production settings. Include two independent connection race tests where applicable. Build completion never implies stage acceptance.": [
       "src/ERP.Api/Controllers/FinanceApplyControllers.cs",
@@ -41,10 +47,12 @@
       "src/ERP.Api/Controllers/SalesOrderController.cs",
       "src/ERP.UnitTests/FinanceDepositApplyLifecycleTests.cs",
       "src/ERP.IntegrationTests/FinanceDepositApplyLifecycleSqlServerTests.cs",
-      "docs/deposit-application-lifecycle.md"
+      "docs/deposit-application-lifecycle.md",
+      "src/ERP.UnitTests/DepositApplySalesOrderSourceTests.cs",
+      "src/ERP.UnitTests/FinanceApplyCanonicalEntryTests.cs"
     ]
   },
-  "implementation_evidence": "FinanceDepositApplyController currently lists and mutates all customers without live deposit-apply menu checks or authoritative source consistency, positive money validation or transaction locks; generic inherited state routes bypass these guards. ERP380 addresses only payment applications.",
+  "implementation_evidence": "FinanceDepositApplyController.GetById in FinanceApplyControllers.cs:53-58 loads application before FinanceDepositApplyLifecycleRules.EnsureAuthorizedAsync. Create checks customer before live identity and lifecycle paths acquire source/apply locks before caller gate. Unknown id versus existing id reveals document existence to denied callers. Require existing deposit-apply menu and live identity before every business/source/master query or lock, retaining current source/customer scope recheck inside transactions. Keep source sales-order constraints, same-currency receipt funding, deposit residual and cancellation/evidence history intact; modify only deposit application controller in shared file.",
   "depends_on": [
     "ERP-380",
     "ERP-347"
@@ -52,8 +60,8 @@
   "risk": "medium",
   "planning_stage": 3,
   "id": "ERP-381",
-  "status": "completed",
-  "attempts": 1,
+  "status": "retry",
+  "attempts": 2,
   "max_attempts": 3,
   "validation_profile": "safe",
   "completion_mode": "build",
@@ -68,5 +76,12 @@
     "required": false,
     "scenarios": []
   },
-  "created_at": "2026-10-08T14:10:43.187727Z"
+  "created_at": "2026-10-08T14:10:43.187727Z",
+  "recovery_context": {
+    "at": "2026-10-13T21:13:40.773154Z",
+    "reason": "original acceptance unmet despite build-valid verdict",
+    "original_attempts": 1,
+    "next_attempt_reserved": 2,
+    "preserved_evidence": "D:\\VSCodeProject\\NEWERP.executor.continue-erp-190-20260930080457\\.ai\\logs\\heartbeat-20261013-210922-recovery\\ERP-381"
+  }
 }
