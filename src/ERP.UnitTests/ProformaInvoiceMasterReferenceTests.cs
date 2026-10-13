@@ -24,8 +24,9 @@ namespace ERP.UnitTests;
 /// 失效引用且零订单 / 零占号 / 来源状态不变；报价单转 PI 在报价单行锁内拒绝失效草稿引用且零 PI / 零占号 /
 /// 来源报价单状态不变；历史读取照原样可读、不被回填；</item>
 /// <item><b>授权前置与非披露</b>：写入授权先于主数据复核，缺菜单的受限账号即便提交失效引用也返回同一受控权限错误；</item>
-/// <item><b>进程内直调边界</b>：未绑定 HTTP 请求路径的进程内调用（历史夹具 / 内部派生读取）保持既有行为，
-/// 与 ERP-427 同一取舍。</item>
+/// <item><b>调用形状无关（ERP-490）</b>：实时主数据引用复核不再依据请求路径 / 请求上下文是否存在 ——
+/// 进程内直调与真实 HTTP 写入请求同一口径，失效引用一律受控拒绝且零写入 / 零占号，
+/// 不存在任何请求形状 / 环境 / 测试旁路。</item>
 /// </list>
 /// <para>安全口径：全部使用内存库 <see cref="TestDbFactory"/>，不读取 appsettings / .env / 生产凭据，
 /// 不执行 drop / reset，也不使用生产数据。</para>
@@ -57,7 +58,7 @@ public class ProformaInvoiceMasterReferenceTests
             ControllerContext = new ControllerContext { HttpContext = HttpContextFor(userId, QuotationRoute) }
         };
 
-    /// <summary>进程内直调控制器（无 HTTP 请求路径）：保持既有行为（与 ERP-427 同一取舍）。</summary>
+    /// <summary>进程内直调控制器（无 HTTP 请求路径）：ERP-490 后与真实写入请求**同一口径**执行实时主数据复核。</summary>
     private static ProformaInvoiceController InProcessController(ErpDbContext db, long userId)
     {
         var controller = new ProformaInvoiceController(db, new DocumentNumberService(db));
@@ -904,13 +905,32 @@ public class ProformaInvoiceMasterReferenceTests
     }
 
     [Fact]
-    public async Task 进程内直调_无请求路径_保持既有行为不执行实时主数据复核()
+    public async Task 进程内直调_无请求路径_失效引用同样受控拒绝且零写入零占号()
     {
         using var db = TestDbFactory.Create();
+        SeedNumberRule(db, DocumentType.ProformaInvoice, 7);
         var ctl = InProcessController(db, TestAuth.SeedPrivilegedUser(db));
 
-        // 历史进程内夹具（无 HTTP 请求管线）保持既有行为；真实 HTTP 写入请求一律复核（见第 5 组用例）。
-        var result = await ctl.Create(NewPiBody(999_473L, null, Line(null, code: "LEGACY-MANUAL")));
+        // ERP-490：不再有「无请求路径免实时主数据复核」旁路 —— 进程内直调与真实写入请求同一口径，
+        // 失效客户在单号预约与任何写入之前受控拒绝（零写入、零占号、零来源 / 状态改动）。
+        var ex = await Assert.ThrowsAsync<BusinessException>(() =>
+            ctl.Create(NewPiBody(999_473L, null, Line(null, code: "LEGACY-MANUAL"))));
+
+        Assert.Equal(ErrorCodes.NotFound, ex.Code);
+        Assert.Empty(db.ProformaInvoices);
+        Assert.Equal(7L, SequenceOf(db, DocumentType.ProformaInvoice));
+    }
+
+    [Fact]
+    public async Task 进程内直调_无请求路径_真实启用身份与实时主数据_照常放行()
+    {
+        using var db = TestDbFactory.Create();
+        SeedNumberRule(db, DocumentType.ProformaInvoice, 7);
+        var customer = SeedCustomer(db);
+        var ctl = InProcessController(db, TestAuth.SeedPrivilegedUser(db));
+
+        // ERP-490：复核与调用形状无关 —— 进程内直调携带**真实启用身份**并引用**实时主数据行**时照常放行。
+        var result = await ctl.Create(NewPiBody(customer.Id, null, Line(null, code: "LEGACY-MANUAL")));
 
         Assert.IsType<OkObjectResult>(result);
         Assert.Single(db.ProformaInvoices);

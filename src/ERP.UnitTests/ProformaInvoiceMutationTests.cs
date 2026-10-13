@@ -24,8 +24,33 @@ public class ProformaInvoiceMutationTests
 {
     // ==================== 脚手架 ====================
 
+    /// <summary>
+    /// ERP-490：播种既有**启用**客户（Id = 1，与既有夹具占位 <c>CustomerId</c> 对齐）——实时主数据引用复核
+    /// 与调用形状无关后，进程内直调夹具同样必须引用真实存在的启用客户行（绝不提供请求形状 / 测试旁路）。
+    /// 幂等：已存在即复用，绝不新增第二行、绝不回填 / 改派既有引用。
+    /// </summary>
+    private static BaseCustomer SeedLiveCustomer(ErpDbContext db, long id = 1L)
+    {
+        var existing = db.BaseCustomers.FirstOrDefault(c => c.Id == id);
+        if (existing is not null) return existing;
+        var customer = new BaseCustomer
+        {
+            Id = id,
+            CustomerCode = $"C-PI-490-{id}",
+            CustomerName = "客户 A",
+            Status = 1,
+            CreditStatus = "正常",
+            DepositRatio = 30m,
+            IsDeleted = false
+        };
+        db.BaseCustomers.Add(customer);
+        db.SaveChanges();
+        return customer;
+    }
+
     private static ProformaInvoiceController NewController(ErpDbContext db)
     {
+        SeedLiveCustomer(db);
         var controller = new ProformaInvoiceController(db, new DocumentNumberService(db));
         TestAuth.SetUser(controller, TestAuth.SeedPrivilegedUser(db));
         return controller;

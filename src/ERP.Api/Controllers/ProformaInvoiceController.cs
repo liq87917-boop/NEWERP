@@ -18,11 +18,13 @@ namespace ERP.Api.Controllers;
 /// <see cref="ProformaInvoiceAuthorizationRules"/> 复核<b>实时启用身份</b>、既有「形式发票 PI」
 /// （<c>proforma-invoice</c>）菜单授权与既有业务员数据范围；转换额外要求既有「销售订单」（<c>sales-order</c>）
 /// 授权并独立复核来源 / 目标客户范围，绝不因来源 PI 可见而授予目标客户权限。</para>
-/// <para>ERP-473：新增 / 修改在单号预约与任何表头 / 明细赋值<b>之前</b>、提交 / 审核在既有 PI 来源行锁内状态改写
+/// <para>ERP-473 / ERP-490：新增 / 修改在单号预约与任何表头 / 明细赋值<b>之前</b>、提交 / 审核在既有 PI 来源行锁内状态改写
 /// <b>之前</b>、转销售订单在 PI 来源行锁内构造订单与预约订单号<b>之前</b>，额外经
 /// <see cref="ProformaInvoiceMasterReferenceRules"/> 复核<b>实时主数据引用</b>（可选客户 / 可选业务员 /
 /// 每条有效明细的商品，商品资料有界批量查询）；失效引用一律受控拒绝且零写入 / 零占号 / 状态与来源不变，
-/// 历史 PI 的读取 / 打印保持完全只读、不被回填或静默改派。</para>
+/// 历史 PI 的读取 / 打印保持完全只读、不被回填或静默改派。ERP-490 进一步使该复核<b>与调用形状完全无关</b>：
+/// 不再读取 <c>Request.Path</c>、不再判断是否存在 <c>HttpContext</c>，每一条既定写入 / 提交 / 审核 / 转换入口
+/// 都无条件执行，缺失请求上下文的进程内直调不再构成主数据引用豁免。</para>
 /// </summary>
 [Route("api/sales/proforma-invoices")]
 public class ProformaInvoiceController : DocumentControllerBase<ProformaInvoice>
@@ -43,30 +45,23 @@ public class ProformaInvoiceController : DocumentControllerBase<ProformaInvoice>
         if (!scope.AllowsCustomer(entity.CustomerId)) throw PiNotFound();
     }
 
-    // ==================== ERP-473 实时主数据引用复核 ====================
+    // ==================== ERP-473 / ERP-490 实时主数据引用复核 ====================
 
     /// <summary>
-    /// ERP-473：是否必须执行实时主数据引用复核。<strong>真实 HTTP 写入请求（MVC 绑定，<c>Request.Path</c> 已赋值）
-    /// 一律执行</strong>；进程内直接调用（历史单元测试 / 内部派生读取，无 HTTP 请求管线）保持既有行为 ——
-    /// 与 ERP-427（采购订单）同一取舍：这类调用不可能由外部请求到达。
+    /// ERP-490：复核请求侧（新增 / 修改）或已持久化（提交 / 审核 / 转销售订单）PI 的实时主数据引用 ——
+    /// 可选客户、可选业务员与每条有效明细的商品（有界批量查询，绝不逐行查库）。
+    /// <para><b>与调用形状完全无关</b>：不读取 <c>Request.Path</c>、不判断是否存在 <c>HttpContext</c>、
+    /// 不依据身份是否可解析 —— 每一条既定写入 / 提交 / 审核 / 转换入口都<b>无条件</b>调用
+    /// <see cref="ProformaInvoiceMasterReferenceRules.EnsureMasterReferencesAsync"/>；缺失请求上下文、空路径、
+    /// 进程内直调都不再构成主数据引用豁免（不提供任何测试 / 环境 / 路径旁路）。</para>
     /// <para>真实请求在到达本复核之前已由 <see cref="ProformaInvoiceAuthorizationRules.EnsureAuthorizedAsync"/> /
     /// <see cref="ProformaInvoiceAuthorizationRules.EnsureSalesOrderConversionAuthorizedAsync"/> 完成身份 / 菜单 /
     /// 权威客户范围 fail closed（非披露），因此本复核只可能在**已授权**的外部请求上生效，绝不把缺失身份当作管理员，
     /// 也不新增或授予任何主数据维护权限。</para>
-    /// </summary>
-    private bool RequiresLiveMasterValidation()
-        => ControllerContext?.HttpContext?.Request.Path.HasValue == true;
-
-    /// <summary>
-    /// ERP-473：复核请求侧（新增 / 修改）或已持久化（提交 / 审核 / 转销售订单）PI 的实时主数据引用 ——
-    /// 可选客户、可选业务员与每条有效明细的商品（有界批量查询，绝不逐行查库）。
     /// 只做纯判定与有界只读查询，绝不写主数据、不消耗单号、不改写任何字段、不做任何回填或静默改派。
     /// </summary>
-    private async Task EnsureMasterReferencesAsync(ProformaInvoice pi)
-    {
-        if (!RequiresLiveMasterValidation()) return;
-        await ProformaInvoiceMasterReferenceRules.EnsureMasterReferencesAsync(Db, pi);
-    }
+    private Task EnsureMasterReferencesAsync(ProformaInvoice pi)
+        => ProformaInvoiceMasterReferenceRules.EnsureMasterReferencesAsync(Db, pi);
 
     // ==================== ERP-399 确定性 PI 来源行锁 + 原子事务 ====================
 
@@ -550,11 +545,10 @@ public class ProformaInvoiceController : DocumentControllerBase<ProformaInvoice>
             // ERP-471：转换（下游承诺）前按唯一权威契约复核已持久化商业条款——非法历史条款在订单构造、
             // 单号预约与任何写入之前受控拒绝，绝不把非法来源商业值传播成销售订单。
             ProformaInvoiceCommercialValidationRules.ValidateOperational(pi);
-            // ERP-473：转换（下游承诺）前在 PI 来源行锁内复核**实时主数据引用**（可选客户 / 可选业务员 /
-            // 每条有效明细的商品，商品资料一次有界批量查询）—— 失效引用在订单构造、订单号预约与任何写入
-            // 之前受控拒绝；来源 PI 与其历史快照文本一行不改（绝不回填、绝不静默改派）。
-            if (RequiresLiveMasterValidation())
-                await SalesOrderConversion.EnsureSourceMasterReferencesAsync(Db, pi);
+            // ERP-473 / ERP-490：转换（下游承诺）前在 PI 来源行锁内**无条件**复核实时主数据引用（可选客户 /
+            // 可选业务员 / 每条有效明细的商品，商品资料一次有界批量查询）—— 失效引用在订单构造、订单号预约
+            // 与任何写入之前受控拒绝，与调用形状无关；来源 PI 与其历史快照文本一行不改（绝不回填、绝不静默改派）。
+            await SalesOrderConversion.EnsureSourceMasterReferencesAsync(Db, pi);
 
             var order = await SalesOrderConversion.FromProformaInvoiceAsync(Db, pi);
             ProformaInvoiceAuthorizationRules.EnsureTargetCustomerInScope(scope, order.CustomerId);

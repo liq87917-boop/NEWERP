@@ -68,23 +68,20 @@ public class QuotationToPiTests
     {
         using var db = TestDbFactory.Create();
         var (quotation, _) = SeedQuotation(db, "QT2609230002", DocumentStatus.Approved);
-        db.BaseCustomers.Add(new BaseCustomer
-        {
-            CustomerCode = "C001",
-            CustomerName = quotation.CustomerName,
-            Consignee = "CONSIGNEE LINE",
-            NotifyParty = "NOTIFY LINE",
-            DefaultShippingMark = "N/M",
-            DepositRatio = 40m
-        });
+        // ERP-490：客户（既有夹具占位 CustomerId = 1）已由 SeedQuotation 播种为**实时启用客户**，
+        // 这里只在同一客户行上补齐带入字段，不再新增第二张客户行（带入语义不变）。
+        var customer = db.BaseCustomers.Single(c => c.Id == quotation.CustomerId);
+        customer.CustomerCode = "C001";
+        customer.Consignee = "CONSIGNEE LINE";
+        customer.NotifyParty = "NOTIFY LINE";
+        customer.DefaultShippingMark = "N/M";
+        customer.DepositRatio = 40m;
         db.SysParameters.Add(new SysParameter
         {
             ParamKey = "PI_BankInfo",
             ParamValue = "Beneficiary: YIWU CO.\r\nSWIFT: BKCHCNBJ",
             ParamName = "PI 银行信息（默认）"
         });
-        db.SaveChanges();
-        quotation.CustomerId = db.BaseCustomers.Single().Id;
         db.SaveChanges();
         var ctl = NewController(db);
 
@@ -203,12 +200,11 @@ public class QuotationToPiTests
     {
         using var db = TestDbFactory.Create();
         var (quotation, _) = SeedQuotation(db, "QT-BAD-DEPOSIT", DocumentStatus.Approved);
-        db.BaseCustomers.Add(new BaseCustomer
-        {
-            CustomerCode = "C-BAD-DEPOSIT", CustomerName = quotation.CustomerName, DepositRatio = 150m
-        });
-        db.SaveChanges();
-        quotation.CustomerId = db.BaseCustomers.Single().Id;
+        // ERP-490：复用 SeedQuotation 播种的**实时启用客户**行，只把定金比例改为越界值
+        // （不再新增第二张客户行；不存在客户行 / 订单号侧的任何回填或改派）。
+        var customer = db.BaseCustomers.Single(c => c.Id == quotation.CustomerId);
+        customer.CustomerCode = "C-BAD-DEPOSIT";
+        customer.DepositRatio = 150m;
         db.SaveChanges();
         var ctl = NewController(db);
 
@@ -256,16 +252,45 @@ public class QuotationToPiTests
         return controller;
     }
 
-    /// <summary>种一张报价单（含一行明细：1000 × 1 = 1000）</summary>
+    /// <summary>
+    /// ERP-490：播种既有**启用**客户（Id = 1，与既有夹具占位 <c>CustomerId</c> 对齐）——实时主数据引用复核
+    /// 与调用形状无关后，进程内直调夹具同样必须引用真实存在的启用客户行（绝不提供请求形状 / 测试旁路）。
+    /// 幂等：已存在即复用，绝不新增第二行、绝不回填 / 改派既有引用。
+    /// </summary>
+    private static BaseCustomer SeedLiveCustomer(ErpDbContext db, long id = 1L)
+    {
+        var existing = db.BaseCustomers.FirstOrDefault(c => c.Id == id);
+        if (existing is not null) return existing;
+        var customer = new BaseCustomer
+        {
+            Id = id,
+            CustomerCode = $"C-QT-490-{id}",
+            CustomerName = "义乌外贸客户 A",
+            Status = 1,
+            CreditStatus = "正常",
+            DepositRatio = 30m,
+            IsDeleted = false
+        };
+        db.BaseCustomers.Add(customer);
+        db.SaveChanges();
+        return customer;
+    }
+
+    /// <summary>
+    /// 种一张报价单（含一行明细：1000 × 1 = 1000）。
+    /// ERP-490：报价单引用的客户同步播种为既有**启用**实时主数据行（Id = 1，与既有夹具占位口径一致），
+    /// 使「报价单 → PI」生成的 PI 草稿引用可解析；幂等，不新增第二行、不回填 / 改派。
+    /// </summary>
     private static (Quotation quotation, QuotationDetail detail) SeedQuotation(
         ErpDbContext db, string no, DocumentStatus status)
     {
+        var customer = SeedLiveCustomer(db);
         var quotation = new Quotation
         {
             QuotationNo = no,
             QuotationDate = DateTime.Today,
             ValidUntil = DateTime.Today.AddDays(30),
-            CustomerId = 1,
+            CustomerId = customer.Id,
             CustomerName = "义乌外贸客户 A",
             ContactPerson = "Mr. Smith",
             ContactEmail = "smith@example.com",

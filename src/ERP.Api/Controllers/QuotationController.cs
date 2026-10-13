@@ -42,25 +42,19 @@ public class QuotationController : DocumentControllerBase<Quotation>
         if (!scope.AllowsCustomer(entity.CustomerId)) throw QuotationNotFound();
     }
 
-    // ==================== ERP-473：报价单 → PI 生成草稿的实时主数据引用复核 ====================
+    // ==================== ERP-473 / ERP-490：报价单 → PI 生成草稿的实时主数据引用复核 ====================
 
     /// <summary>
-    /// ERP-473：是否必须复核「报价单 → PI」生成草稿的实时主数据引用。<strong>真实 HTTP 写入请求（MVC 绑定，
-    /// <c>Request.Path</c> 已赋值）一律执行</strong>；进程内直接调用（历史单元测试 / 内部派生读取，无 HTTP 请求管线）
-    /// 保持既有行为 —— 与 <see cref="ProformaInvoiceController"/> 及 ERP-427 同一取舍：这类调用不可能由外部请求到达。
+    /// ERP-473 / ERP-490：复核「报价单 → PI」生成草稿的实时主数据引用（可选客户 / 可选业务员 /
+    /// 每条有效明细的商品，商品资料有界批量查询）。
+    /// <para><b>与调用形状完全无关</b>：不读取 <c>Request.Path</c>、不判断是否存在 <c>HttpContext</c>、
+    /// 不依据身份是否可解析 —— 报价单转 PI 入口<b>无条件</b>调用
+    /// <see cref="ProformaInvoiceMasterReferenceRules.EnsureMasterReferencesAsync"/>；缺失请求上下文、
+    /// 空路径、进程内直调都不再构成主数据引用豁免（不提供任何测试 / 环境 / 路径旁路）。</para>
+    /// 只做纯判定与有界只读查询，绝不写主数据、不改写来源报价单、不消耗任何单号。
     /// </summary>
-    private bool RequiresLivePiMasterValidation()
-        => ControllerContext?.HttpContext?.Request.Path.HasValue == true;
-
-    /// <summary>
-    /// ERP-473：复核「报价单 → PI」生成草稿的实时主数据引用（可选客户 / 可选业务员 / 每条有效明细的商品，
-    /// 商品资料有界批量查询）；只做纯判定与有界只读查询，绝不写主数据、不改写来源报价单、不消耗任何单号。
-    /// </summary>
-    private async Task EnsurePiMasterReferencesAsync(ProformaInvoice pi)
-    {
-        if (!RequiresLivePiMasterValidation()) return;
-        await ProformaInvoiceMasterReferenceRules.EnsureMasterReferencesAsync(Db, pi);
-    }
+    private Task EnsurePiMasterReferencesAsync(ProformaInvoice pi)
+        => ProformaInvoiceMasterReferenceRules.EnsureMasterReferencesAsync(Db, pi);
 
     // ==================== ERP-400 确定性报价单来源行锁 + 原子事务 ====================
 
