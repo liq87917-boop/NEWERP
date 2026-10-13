@@ -1,0 +1,99 @@
+{
+  "title": "Enforce live inquiry authority on the quotation response-time workspace",
+  "description": "Stage 3 verified access-control gap in the sales/CRM read surface, the same defect class already repaired for sibling read workspaces (ERP-499 operation log register, ERP-461 product read workspaces, ERP-436 inventory location/lot) and for the inquiry module itself by ERP-402. src/ERP.Api/Controllers/InquiryResponseWorkspace.cs:21-23 declares [ApiController]/[Route(api/inquiries/response-times)]/[Authorize] public class InquiryResponseWorkspaceController : ControllerBase, and GetPaged (:40-66) resolves only SalespersonDataScopeService.ResolveAsync(_db, CurrentUserId()) at :44 before counting and reading db_owner.Inquiries, so no live enabled nondeleted identity, no account status and no existing inquiry functional menu is ever resolved. SalespersonDataScopeService.ResolveAsync (src/ERP.Application/Services/SalespersonDataScopeService.cs:59-98) throws only when userId is null or <= 0 (:62-63), never reads SysUser.Status, and returns a privileged unrestricted scope whenever any assigned role has IsSystem == true (:70), so a disabled account holding a still-valid token, or any account with a system role but no inquiry menu, reads every customer's inquiry register including InquiryNo, InquiryDate, CustomerId and SalesmanId. Reuse the existing InquiryAuthorizationRules.EnsureAuthorizedAsync (src/ERP.Application/Services/InquiryAuthorizationRules.cs:106-143) which already enforces the live enabled nondeleted identity, the account status and the existing inquiry (询价单) menu (RequiredMenuCode at :34) and returns the authoritative non-null SalespersonDataScope, pushing its ScopeFilter/ApplyScope down to SQL before any count or paging, exactly like the sibling InquiryController routes. Keep the existing read contract: inclusive date-range filtering, optional customer filter, InquiryNo keyword, stable Inquiry.Id ordering with page bounds, and the same ApiResponse<InquiryResponseWorkspaceDto> shape with the existing read-only and disclaimer text. No new menu, grant, permission, table or column, and no anonymous, administrative, privileged, environment or test-only fallback. Adapt the legacy in-process fixture in src/ERP.UnitTests/InquiryResponseWorkspaceTests.cs to genuine enabled identities holding the existing inquiry grant in isolated test data only. Safe Release build plus full ERP.UnitTests; genuine SQL only on the isolated localdb NEWERP_AutoAcceptance instance with a fresh GUID-owned NEWERP_AUTOTEST database. Preserve supported empty draft headers if established; all explicit effective lines require valid positive bounded quantities and nonnegative representable prices/costs. Submit/approval requires nonempty valid lines. Validate calculated line and header amounts against real EF precision/overflow before numbering or writes, not merely each factor separately. Preserve supported repeated product lines and cumulative quantity semantics, do not introduce an arbitrary uniqueness rule. Preserve current business permissions and actor/customer scope; no new grants. Adapt all affected original fixtures with real enabled identities and existing menus/master rows, never remove business assertions or retain null-context/provider/test exceptions. Full original failure logs retained. Explicit test output/TRX/results directories must be .ai/logs/<task> only, never repository-root TestResults. SQL must use exactly (localdb)\\NEWERP_AutoAcceptance with Integrated Security and a fresh GUID-owned NEWERP_AUTOTEST database; reject wrong/existing targets before access, never drop/reset. Safe Release restore/build with analyzers and warnings-as-errors, full units and relevant genuine isolated SQL validation; no whole-stage acceptance or production access.",
+  "acceptance_criteria": [
+    "GET /api/inquiries/response-times resolves the current live enabled nondeleted identity, the account status and the existing inquiry (询价单) functional menu through InquiryAuthorizationRules.EnsureAuthorizedAsync before any Inquiries count or row is read, independently of whether HttpContext is bound and of Request.Path; missing, zero, unknown or deleted identity fails Unauthorized, disabled identity and missing or revoked menu fail Forbidden, and no anonymous, administrative, privileged, environment or test-only fallback and no new menu, grant or permission is added.",
+    "Retain the existing read contract unchanged for authorized callers: the same inclusive start and end date filtering, the same optional customer filter, the same InquiryNo keyword matching, the same stable Inquiry.Id ordering with the same page bounds, the same resolved non-null scope pushed down to SQL before count and paging, and the same ApiResponse<InquiryResponseWorkspaceDto> shape with the existing read-only and disclaimer text, with no new table, column or index.",
+    "Adapt the legacy in-process response-time fixture to genuine enabled identities holding the existing inquiry menu grant in isolated test data only, and add genuine unit plus isolated SQL controller tests covering the permitted menu-granted flow, the missing inquiry menu, disabled, deleted and revoked identities and no-HttpContext calls with empty and populated Request.Path, asserting zero Inquiries reads on denial; existing InquiryResponseWorkspaceTests, InquiryControllerTests, InquiryMutationTests and InquiryCommercialValidationTests contracts stay green.",
+    "Keep the safe Release build with analyzers and warnings-as-errors and the full existing ERP.UnitTests suite green, run genuine SQL only on the isolated localdb NEWERP_AutoAcceptance instance with Integrated Security and a fresh GUID-owned NEWERP_AUTOTEST database that is never dropped or reset, and claim no whole-stage acceptance from a build alone."
+  ],
+  "allowed_paths": [
+    "src/ERP.Api/Controllers/InquiryResponseWorkspace.cs",
+    "src/ERP.Application/Services/InquiryAuthorizationRules.cs",
+    "src/ERP.Application/Services/InquiryResponseRules.cs",
+    "src/ERP.Domain/Entities/Inquiry.cs",
+    "src/ERP.UnitTests/InquiryResponseWorkspaceTests.cs",
+    "src/ERP.UnitTests/InquiryControllerTests.cs",
+    "src/ERP.UnitTests/InquiryCommercialValidationTests.cs",
+    "src/ERP.IntegrationTests/InquiryResponseWorkspaceSqlServerTests.cs",
+    "src/ERP.IntegrationTests/InquiryCanonicalEntrySqlServerTests.cs",
+    "docs/inquiry-response-workspace.md"
+  ],
+  "criterion_path_map": {
+    "GET /api/inquiries/response-times resolves the current live enabled nondeleted identity, the account status and the existing inquiry (询价单) functional menu through InquiryAuthorizationRules.EnsureAuthorizedAsync before any Inquiries count or row is read, independently of whether HttpContext is bound and of Request.Path; missing, zero, unknown or deleted identity fails Unauthorized, disabled identity and missing or revoked menu fail Forbidden, and no anonymous, administrative, privileged, environment or test-only fallback and no new menu, grant or permission is added.": [
+      "src/ERP.Api/Controllers/InquiryResponseWorkspace.cs",
+      "src/ERP.Application/Services/InquiryAuthorizationRules.cs",
+      "src/ERP.Application/Services/InquiryResponseRules.cs",
+      "src/ERP.Domain/Entities/Inquiry.cs",
+      "src/ERP.UnitTests/InquiryResponseWorkspaceTests.cs",
+      "src/ERP.UnitTests/InquiryControllerTests.cs",
+      "src/ERP.UnitTests/InquiryCommercialValidationTests.cs",
+      "src/ERP.IntegrationTests/InquiryResponseWorkspaceSqlServerTests.cs",
+      "src/ERP.IntegrationTests/InquiryCanonicalEntrySqlServerTests.cs",
+      "docs/inquiry-response-workspace.md"
+    ],
+    "Retain the existing read contract unchanged for authorized callers: the same inclusive start and end date filtering, the same optional customer filter, the same InquiryNo keyword matching, the same stable Inquiry.Id ordering with the same page bounds, the same resolved non-null scope pushed down to SQL before count and paging, and the same ApiResponse<InquiryResponseWorkspaceDto> shape with the existing read-only and disclaimer text, with no new table, column or index.": [
+      "src/ERP.Api/Controllers/InquiryResponseWorkspace.cs",
+      "src/ERP.Application/Services/InquiryAuthorizationRules.cs",
+      "src/ERP.Application/Services/InquiryResponseRules.cs",
+      "src/ERP.Domain/Entities/Inquiry.cs",
+      "src/ERP.UnitTests/InquiryResponseWorkspaceTests.cs",
+      "src/ERP.UnitTests/InquiryControllerTests.cs",
+      "src/ERP.UnitTests/InquiryCommercialValidationTests.cs",
+      "src/ERP.IntegrationTests/InquiryResponseWorkspaceSqlServerTests.cs",
+      "src/ERP.IntegrationTests/InquiryCanonicalEntrySqlServerTests.cs",
+      "docs/inquiry-response-workspace.md"
+    ],
+    "Adapt the legacy in-process response-time fixture to genuine enabled identities holding the existing inquiry menu grant in isolated test data only, and add genuine unit plus isolated SQL controller tests covering the permitted menu-granted flow, the missing inquiry menu, disabled, deleted and revoked identities and no-HttpContext calls with empty and populated Request.Path, asserting zero Inquiries reads on denial; existing InquiryResponseWorkspaceTests, InquiryControllerTests, InquiryMutationTests and InquiryCommercialValidationTests contracts stay green.": [
+      "src/ERP.Api/Controllers/InquiryResponseWorkspace.cs",
+      "src/ERP.Application/Services/InquiryAuthorizationRules.cs",
+      "src/ERP.Application/Services/InquiryResponseRules.cs",
+      "src/ERP.Domain/Entities/Inquiry.cs",
+      "src/ERP.UnitTests/InquiryResponseWorkspaceTests.cs",
+      "src/ERP.UnitTests/InquiryControllerTests.cs",
+      "src/ERP.UnitTests/InquiryCommercialValidationTests.cs",
+      "src/ERP.IntegrationTests/InquiryResponseWorkspaceSqlServerTests.cs",
+      "src/ERP.IntegrationTests/InquiryCanonicalEntrySqlServerTests.cs",
+      "docs/inquiry-response-workspace.md"
+    ],
+    "Keep the safe Release build with analyzers and warnings-as-errors and the full existing ERP.UnitTests suite green, run genuine SQL only on the isolated localdb NEWERP_AutoAcceptance instance with Integrated Security and a fresh GUID-owned NEWERP_AUTOTEST database that is never dropped or reset, and claim no whole-stage acceptance from a build alone.": [
+      "src/ERP.Api/Controllers/InquiryResponseWorkspace.cs",
+      "src/ERP.Application/Services/InquiryAuthorizationRules.cs",
+      "src/ERP.Application/Services/InquiryResponseRules.cs",
+      "src/ERP.Domain/Entities/Inquiry.cs",
+      "src/ERP.UnitTests/InquiryResponseWorkspaceTests.cs",
+      "src/ERP.UnitTests/InquiryControllerTests.cs",
+      "src/ERP.UnitTests/InquiryCommercialValidationTests.cs",
+      "src/ERP.IntegrationTests/InquiryResponseWorkspaceSqlServerTests.cs",
+      "src/ERP.IntegrationTests/InquiryCanonicalEntrySqlServerTests.cs",
+      "docs/inquiry-response-workspace.md"
+    ]
+  },
+  "depends_on": [
+    "ERP-006",
+    "ERP-097",
+    "ERP-104",
+    "ERP-402"
+  ],
+  "risk": "medium",
+  "planning_stage": 3,
+  "implementation_evidence": "src/ERP.Api/Controllers/InquiryResponseWorkspace.cs:21-23 declares [Route(api/inquiries/response-times)]/[Authorize] public class InquiryResponseWorkspaceController : ControllerBase and :40-66 GetPaged resolves only SalespersonDataScopeService.ResolveAsync(_db, CurrentUserId()) at :44 with no live identity, account-status or menu resolution; src/ERP.Application/Services/SalespersonDataScopeService.cs:59-98 throws only for null or non-positive userId (:62-63), reads no SysUser.Status and returns an unrestricted privileged scope for any role with IsSystem == true (:70); src/ERP.Application/Services/InquiryAuthorizationRules.cs:106-143 is the existing live identity / account status / inquiry menu gate (RequiredMenuCode at :34, ScopeFilter/ApplyScope at :149-163) that this workspace never calls; src/ERP.UnitTests/InquiryResponseWorkspaceTests.cs:85-117 builds the in-process fixture without any menu grant; an exact search of .ai/tasks returns only ERP-104 (feature creation) and no task adding live authority to InquiryResponseWorkspaceController or /api/inquiries/response-times.",
+  "id": "ERP-500",
+  "status": "pending",
+  "attempts": 0,
+  "max_attempts": 3,
+  "validation_profile": "safe",
+  "completion_mode": "build",
+  "auto_start": true,
+  "requires_human_approval": false,
+  "human_gate": {
+    "level": "L1",
+    "required": false,
+    "status": "not_required"
+  },
+  "browser_acceptance": {
+    "required": false,
+    "scenarios": []
+  },
+  "created_at": "2026-10-13T22:51:08.846300Z"
+}
