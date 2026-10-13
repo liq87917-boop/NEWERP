@@ -47,6 +47,7 @@ public class MasterDataEntryAuthorizationTests
     private const string EmployeePath = "/api/base/employees";
     private const string WarehousePath = "/api/base/warehouses";
     private const string ProductPath = "/api/base/products";
+    private const string ExpenseAccountPath = "/api/base/expense-accounts";
 
     private static ControllerContext? ContextFor(long? userId, string pathMode, string populatedPath)
     {
@@ -97,6 +98,14 @@ public class MasterDataEntryAuthorizationTests
             new GenericService<BaseProduct>(db), new OssStorageService(BuildOssConfiguration()),
             new ProductExcelExporter(db), new FakeWebHostEnvironment(), db);
         var context = ContextFor(userId, pathMode, ProductPath);
+        if (context is not null) controller.ControllerContext = context;
+        return controller;
+    }
+
+    private static ExpenseAccountController ExpenseAccount(ErpDbContext db, long? userId, string pathMode)
+    {
+        var controller = new ExpenseAccountController(new GenericService<BaseExpenseAccount>(db), db);
+        var context = ContextFor(userId, pathMode, ExpenseAccountPath);
         if (context is not null) controller.ControllerContext = context;
         return controller;
     }
@@ -246,6 +255,15 @@ public class MasterDataEntryAuthorizationTests
         await AssertCode(expectedCode, () => product.Export());
         await AssertCode(expectedCode, () => product.Upload(Image()));
         await AssertCode(expectedCode, () => product.UploadBatch(new List<IFormFile> { Image() }));
+
+        var expenseAccount = ExpenseAccount(db, userId, pathMode);
+        await AssertCode(expectedCode, () => expenseAccount.GetPaged(new PageQuery()));
+        await AssertCode(expectedCode, () => expenseAccount.GetAll());
+        await AssertCode(expectedCode, () => expenseAccount.GetById(1));
+        await AssertCode(expectedCode, () => expenseAccount.Create(NewExpenseAccount()));
+        await AssertCode(expectedCode, () => expenseAccount.Update(1, NewExpenseAccount()));
+        await AssertCode(expectedCode, () => expenseAccount.Delete(1));
+        await AssertCode(expectedCode, () => expenseAccount.BatchDelete(new List<long> { 1 }));
     }
 
 
@@ -264,7 +282,10 @@ public class MasterDataEntryAuthorizationTests
     private static BaseProduct NewProduct() => new()
     { ProductCode = "P-ENTRY", ProductName = "入口测试商品", Status = 1 };
 
-    /// <summary>五类主表逐行快照（拒绝调用后必须逐字节不变）。</summary>
+    private static BaseExpenseAccount NewExpenseAccount() => new()
+    { AccountCode = "EA-ENTRY", AccountName = "入口测试费用科目", AccountType = 2, Status = 1 };
+
+    /// <summary>六类主表逐行快照（拒绝调用后必须逐字节不变）。</summary>
     private static string Snapshot(ErpDbContext db) => string.Join("||",
         db.BaseCustomers.AsNoTracking().OrderBy(x => x.Id)
             .Select(x => $"C{x.Id}:{x.Status}:{x.IsDeleted}:{x.CustomerCode}:{x.CustomerName}").ToList()) + "##" +
@@ -275,9 +296,11 @@ public class MasterDataEntryAuthorizationTests
         string.Join("||", db.BaseWarehouses.AsNoTracking().OrderBy(x => x.Id)
             .Select(x => $"W{x.Id}:{x.Status}:{x.IsDeleted}:{x.WarehouseCode}:{x.WarehouseName}").ToList()) + "##" +
         string.Join("||", db.BaseProducts.AsNoTracking().OrderBy(x => x.Id)
-            .Select(x => $"P{x.Id}:{x.Status}:{x.IsDeleted}:{x.ProductCode}:{x.ProductName}").ToList());
+            .Select(x => $"P{x.Id}:{x.Status}:{x.IsDeleted}:{x.ProductCode}:{x.ProductName}").ToList()) + "##" +
+        string.Join("||", db.BaseExpenseAccounts.AsNoTracking().OrderBy(x => x.Id)
+            .Select(x => $"EA{x.Id}:{x.Status}:{x.IsDeleted}:{x.AccountCode}:{x.AccountName}").ToList());
 
-    /// <summary>播种五类主表各一行历史数据（拒绝调用后快照必须逐字节不变）。</summary>
+    /// <summary>播种六类主表各一行历史数据（拒绝调用后快照必须逐字节不变）。</summary>
     private static void SeedRows(ErpDbContext db)
     {
         db.BaseCustomers.Add(new BaseCustomer { CustomerCode = "C-EXIST", CustomerName = "既有客户", Status = 1 });
@@ -285,6 +308,8 @@ public class MasterDataEntryAuthorizationTests
         db.BaseEmployees.Add(new BaseEmployee { EmployeeCode = "E-EXIST", EmployeeName = "既有员工", Status = 1 });
         db.BaseWarehouses.Add(new BaseWarehouse { WarehouseCode = "W-EXIST", WarehouseName = "既有仓库", Status = 1 });
         db.BaseProducts.Add(new BaseProduct { ProductCode = "P-EXIST", ProductName = "既有商品", Status = 1 });
+        db.BaseExpenseAccounts.Add(new BaseExpenseAccount
+        { AccountCode = "EA-EXIST", AccountName = "既有费用科目", AccountType = 2, Status = 1 });
         db.SaveChanges();
     }
 
@@ -299,6 +324,8 @@ public class MasterDataEntryAuthorizationTests
         => (WarehouseAuthorizationRules.RequiredMenuCode, WarehouseAuthorizationRules.RequiredMenuText);
     private static (string Code, string Text) ProductMenu
         => (ProductAuthorizationRules.RequiredMenuCode, ProductAuthorizationRules.RequiredMenuText);
+    private static (string Code, string Text) ExpenseAccountMenu
+        => (ExpenseAccountAuthorizationRules.RequiredMenuCode, ExpenseAccountAuthorizationRules.RequiredMenuText);
 
     /// <summary>为五类控制器各播种一个具备既有菜单的授权身份，返回（customer, supplier, employee, warehouse, product）用户 Id。</summary>
     private static (long Customer, long Supplier, long Employee, long Warehouse, long Product) SeedAllAuthorized(ErpDbContext db)
@@ -516,23 +543,107 @@ public class MasterDataEntryAuthorizationTests
             await product.Delete(createdProduct.Id);
     }
 }
+    // ==================== 4.5 费用科目入口（ERP-498，与上面五类同口径） ====================
+
+    /// <summary>费用科目入口：缺少身份在三种请求形状下一律未认证。</summary>
+    [Theory]
+    [InlineData(PathModeEmpty)]
+    [InlineData(PathModePopulated)]
+    [InlineData(PathModeNoContext)]
+    public async Task Entry_费用科目_缺少身份一律未认证(string pathMode)
+    {
+        using var db = TestDbFactory.Create();
+        await AssertCode(ErrorCodes.Unauthorized,
+            () => ExpenseAccount(db, null, pathMode).GetPaged(new PageQuery()));
+    }
+
+    /// <summary>费用科目入口：禁用 / 缺少既有菜单一律权限不足，且六类主表零写入。</summary>
+    [Theory]
+    [InlineData("disabled")]
+    [InlineData("no-menu")]
+    public async Task Entry_费用科目_禁用或缺菜单一律权限不足(string identity)
+    {
+        using var db = TestDbFactory.Create();
+        SeedRows(db);
+        var menu = ExpenseAccountMenu;
+        var userId = identity == "disabled"
+            ? SeedActor(db, menu.Code, menu.Text, UserStatus.Disabled, deleted: false)
+            : SeedActor(db, menu.Code, menu.Text, UserStatus.Enabled, deleted: false, withMenu: false);
+        var before = Snapshot(db);
+
+        var ctl = ExpenseAccount(db, userId, PathModePopulated);
+        await AssertCode(ErrorCodes.Forbidden, () => ctl.GetPaged(new PageQuery()));
+        await AssertCode(ErrorCodes.Forbidden, () => ctl.GetAll());
+        await AssertCode(ErrorCodes.Forbidden, () => ctl.GetById(1));
+        await AssertCode(ErrorCodes.Forbidden, () => ctl.Create(NewExpenseAccount()));
+        await AssertCode(ErrorCodes.Forbidden, () => ctl.Update(1, NewExpenseAccount()));
+        await AssertCode(ErrorCodes.Forbidden, () => ctl.Delete(1));
+        await AssertCode(ErrorCodes.Forbidden, () => ctl.BatchDelete(new List<long> { 1 }));
+        Assert.Equal(before, Snapshot(db));
+    }
+
+    /// <summary>费用科目入口：请求之间撤销既有菜单，下一次请求立即权限不足且零写入。</summary>
+    [Fact]
+    public async Task Entry_费用科目_请求之间撤销菜单立即收敛()
+    {
+        using var db = TestDbFactory.Create();
+        SeedRows(db);
+        var menu = ExpenseAccountMenu;
+        var userId = SeedActor(db, menu.Code, menu.Text);
+
+        Data<PagedResult<BaseExpenseAccount>>(
+            await ExpenseAccount(db, userId, PathModePopulated).GetPaged(new PageQuery()));
+
+        RevokeMenu(db, userId, menu.Code);
+        var before = Snapshot(db);
+        await AssertCode(ErrorCodes.Forbidden,
+            () => ExpenseAccount(db, userId, PathModePopulated).GetPaged(new PageQuery()));
+        await AssertCode(ErrorCodes.Forbidden,
+            () => ExpenseAccount(db, userId, PathModePopulated).Delete(1));
+        Assert.Equal(before, Snapshot(db));
+    }
+
+    /// <summary>费用科目入口：具备既有菜单的真实启用身份，空路径与已赋值路径完成既有生命周期。</summary>
+    [Fact]
+    public async Task Entry_费用科目_授权身份完成既有生命周期()
+    {
+        using var db = TestDbFactory.Create();
+        var menu = ExpenseAccountMenu;
+        var userId = SeedActor(db, menu.Code, menu.Text);
+
+        foreach (var pathMode in new[] { PathModeEmpty, PathModePopulated })
+        {
+            var ctl = ExpenseAccount(db, userId, pathMode);
+            var created = Data<BaseExpenseAccount>(await ctl.Create(new BaseExpenseAccount
+            { AccountCode = $"EA-{pathMode}", AccountName = "入口费用科目", AccountType = 2, Status = 1 }));
+            Assert.Contains(Data<PagedResult<BaseExpenseAccount>>(await ctl.GetPaged(new PageQuery())).Items,
+                x => x.Id == created.Id);
+            Assert.Contains(Data<List<BaseExpenseAccount>>(await ctl.GetAll()), x => x.Id == created.Id);
+            Assert.Equal(created.Id, Data<BaseExpenseAccount>(await ctl.GetById(created.Id)).Id);
+            await ctl.Update(created.Id, new BaseExpenseAccount
+            { Id = created.Id, AccountCode = $"EA-{pathMode}", AccountName = "入口费用科目改", AccountType = 1, Status = 0 });
+            await ctl.Delete(created.Id);
+        }
+    }
+
     // ==================== 5. 授权口径与源码契约 ====================
 
-    /// <summary>授权口径只复用既有五类菜单，且契约明确声明与请求路径 / 上下文无关。</summary>
+    /// <summary>授权口径只复用既有六类菜单，且契约明确声明与请求路径 / 上下文无关。</summary>
     [Fact]
-    public void Entry_授权口径复用既有五类菜单且声明路径无关()
+    public void Entry_授权口径复用既有六类菜单且声明路径无关()
     {
         Assert.Equal("customer", CustomerAuthorizationRules.RequiredMenuCode);
         Assert.Equal("supplier", SupplierAuthorizationRules.RequiredMenuCode);
         Assert.Equal("employee", EmployeeAuthorizationRules.RequiredMenuCode);
         Assert.Equal("warehouse", WarehouseAuthorizationRules.RequiredMenuCode);
         Assert.Equal("product", ProductAuthorizationRules.RequiredMenuCode);
+        Assert.Equal("expense-account", ExpenseAccountAuthorizationRules.RequiredMenuCode);
 
         foreach (var text in new[]
                  {
                      CustomerAuthorizationRules.PathIndependenceText, SupplierAuthorizationRules.PathIndependenceText,
                      EmployeeAuthorizationRules.PathIndependenceText, WarehouseAuthorizationRules.PathIndependenceText,
-                     ProductAuthorizationRules.PathIndependenceText
+                     ProductAuthorizationRules.PathIndependenceText, ExpenseAccountAuthorizationRules.PathIndependenceText
                  })
         {
             Assert.Contains("与请求路径", text);
@@ -565,6 +676,8 @@ public class MasterDataEntryAuthorizationTests
             source, @"await EnsureWarehouseAuthorizedAsync\(\);").Count);
         Assert.Equal(10, System.Text.RegularExpressions.Regex.Matches(
             source, @"await EnsureProductAuthorizedAsync\(\);").Count);
+        Assert.Equal(7, System.Text.RegularExpressions.Regex.Matches(
+            source, @"await EnsureExpenseAccountAuthorizedAsync\(\);").Count);
     }
 
     /// <summary>按仓库根目录拼接文件的绝对路径（与其它契约测试口径一致）。</summary>

@@ -128,6 +128,14 @@ public sealed class MasterDataEntryAuthorizationSqlServerTests
         return controller;
     }
 
+    private static ExpenseAccountController ExpenseAccount(ErpDbContext db, long? userId, string pathMode)
+    {
+        var controller = new ExpenseAccountController(new GenericService<BaseExpenseAccount>(db), db);
+        var context = Context(userId, pathMode, "/api/base/expense-accounts");
+        if (context is not null) controller.ControllerContext = context;
+        return controller;
+    }
+
     /// <summary>按控制器名返回其分页入口调用（用于身份矩阵）。</summary>
     private static Func<Task<IActionResult>> Paged(string controller, ErpDbContext db, long? userId, string pathMode)
         => controller switch
@@ -137,6 +145,7 @@ public sealed class MasterDataEntryAuthorizationSqlServerTests
             "employee" => () => Employee(db, userId, pathMode).GetPaged(new PageQuery { Page = 1, PageSize = 20 }),
             "warehouse" => () => Warehouse(db, userId, pathMode).GetPaged(new PageQuery { Page = 1, PageSize = 20 }),
             "product" => () => Product(db, userId, pathMode).GetPaged(new PageQuery { Page = 1, PageSize = 20 }),
+            "expense-account" => () => ExpenseAccount(db, userId, pathMode).GetPaged(new PageQuery { Page = 1, PageSize = 20 }),
             _ => throw new ArgumentOutOfRangeException(nameof(controller), controller, null)
         };
 
@@ -147,6 +156,7 @@ public sealed class MasterDataEntryAuthorizationSqlServerTests
         "employee" => (EmployeeAuthorizationRules.RequiredMenuCode, EmployeeAuthorizationRules.RequiredMenuText),
         "warehouse" => (WarehouseAuthorizationRules.RequiredMenuCode, WarehouseAuthorizationRules.RequiredMenuText),
         "product" => (ProductAuthorizationRules.RequiredMenuCode, ProductAuthorizationRules.RequiredMenuText),
+        "expense-account" => (ExpenseAccountAuthorizationRules.RequiredMenuCode, ExpenseAccountAuthorizationRules.RequiredMenuText),
         _ => throw new ArgumentOutOfRangeException(nameof(controller), controller, null)
     };
 
@@ -210,7 +220,7 @@ public sealed class MasterDataEntryAuthorizationSqlServerTests
         };
     }
 
-    /// <summary>五类主表逐行快照（拒绝调用后必须逐字节不变）。</summary>
+    /// <summary>六类主表逐行快照（拒绝调用后必须逐字节不变）。</summary>
     private static async Task<string> SnapshotAsync(ErpDbContext db)
     {
         var customers = await db.BaseCustomers.AsNoTracking().OrderBy(x => x.Id)
@@ -223,11 +233,14 @@ public sealed class MasterDataEntryAuthorizationSqlServerTests
             .Select(x => $"W{x.Id}:{x.Status}:{x.IsDeleted}:{x.WarehouseCode}:{x.WarehouseName}").ToListAsync();
         var products = await db.BaseProducts.AsNoTracking().OrderBy(x => x.Id)
             .Select(x => $"P{x.Id}:{x.Status}:{x.IsDeleted}:{x.ProductCode}:{x.ProductName}").ToListAsync();
+        var expenseAccounts = await db.BaseExpenseAccounts.AsNoTracking().OrderBy(x => x.Id)
+            .Select(x => $"EA{x.Id}:{x.Status}:{x.IsDeleted}:{x.AccountCode}:{x.AccountName}").ToListAsync();
         return string.Join("||", customers) + "##" + string.Join("||", suppliers) + "##" + string.Join("||", employees)
-            + "##" + string.Join("||", warehouses) + "##" + string.Join("||", products);
+            + "##" + string.Join("||", warehouses) + "##" + string.Join("||", products)
+            + "##" + string.Join("||", expenseAccounts);
     }
 
-    /// <summary>播种五类主表各一行历史数据（拒绝调用后快照必须逐字节不变）。</summary>
+    /// <summary>播种六类主表各一行历史数据（拒绝调用后快照必须逐字节不变）。</summary>
     private static async Task SeedRowsAsync(ErpDbContext db)
     {
         db.BaseCustomers.Add(new BaseCustomer { CustomerCode = $"C-EXIST-{Tag()}", CustomerName = "既有客户", Status = 1 });
@@ -235,6 +248,8 @@ public sealed class MasterDataEntryAuthorizationSqlServerTests
         db.BaseEmployees.Add(new BaseEmployee { EmployeeCode = $"E-EXIST-{Tag()}", EmployeeName = "既有员工", Status = 1 });
         db.BaseWarehouses.Add(new BaseWarehouse { WarehouseCode = $"W-EXIST-{Tag()}", WarehouseName = "既有仓库", Status = 1 });
         db.BaseProducts.Add(new BaseProduct { ProductCode = $"P-EXIST-{Tag()}", ProductName = "既有商品", Status = 1 });
+        db.BaseExpenseAccounts.Add(new BaseExpenseAccount
+        { AccountCode = $"EA-EXIST-{Tag()}", AccountName = "既有费用科目", AccountType = 2, Status = 1 });
         await db.SaveChangesAsync();
     }
 
@@ -242,7 +257,7 @@ public sealed class MasterDataEntryAuthorizationSqlServerTests
 
     public static IEnumerable<object[]> EntryMatrix()
     {
-        foreach (var controller in new[] { "customer", "supplier", "employee", "warehouse", "product" })
+        foreach (var controller in new[] { "customer", "supplier", "employee", "warehouse", "product", "expense-account" })
             foreach (var pathMode in new[] { "empty", "populated" })
             {
                 yield return new object[] { controller, pathMode, "missing", ErrorCodes.Unauthorized };
@@ -283,7 +298,7 @@ public sealed class MasterDataEntryAuthorizationSqlServerTests
         await SeedRowsAsync(db);
         var before = await SnapshotAsync(db);
 
-        foreach (var controller in new[] { "customer", "supplier", "employee", "warehouse", "product" })
+        foreach (var controller in new[] { "customer", "supplier", "employee", "warehouse", "product", "expense-account" })
             await AssertDeniedAsync(controller, db, null, "no-context", ErrorCodes.Unauthorized);
 
         Assert.Equal(before, await SnapshotAsync(db));
@@ -302,7 +317,7 @@ public sealed class MasterDataEntryAuthorizationSqlServerTests
         await SeedRowsAsync(db);
         var before = await SnapshotAsync(db);
 
-        foreach (var controller in new[] { "customer", "supplier", "employee", "warehouse", "product" })
+        foreach (var controller in new[] { "customer", "supplier", "employee", "warehouse", "product", "expense-account" })
         {
             var noMenu = await SeedActorAsync(db, Menu(controller), UserStatus.Enabled, deleted: false, withMenu: false);
             await AssertDeniedAsync(controller, db, noMenu, pathMode, ErrorCodes.Forbidden);
@@ -321,7 +336,7 @@ public sealed class MasterDataEntryAuthorizationSqlServerTests
     {
         Guard();
         await using var db = _fixture.CreateDbContext();
-        foreach (var controller in new[] { "customer", "supplier", "employee", "warehouse", "product" })
+        foreach (var controller in new[] { "customer", "supplier", "employee", "warehouse", "product", "expense-account" })
         {
             var userId = await SeedActorAsync(db, Menu(controller), UserStatus.Enabled, deleted: false);
             await RunLifecycleAsync(controller, db, userId, pathMode);
@@ -402,6 +417,18 @@ public sealed class MasterDataEntryAuthorizationSqlServerTests
                     await AssertCodeAsync(code, () => ctl.UploadBatch(new List<IFormFile> { Image() }));
                     break;
                 }
+            case "expense-account":
+                {
+                    var ctl = ExpenseAccount(db, userId, pathMode);
+                    await AssertCodeAsync(code, () => ctl.GetPaged(new PageQuery()));
+                    await AssertCodeAsync(code, () => ctl.Create(new BaseExpenseAccount
+                    { AccountCode = $"EA-{Tag()}", AccountName = "拒绝费用科目", AccountType = 2, Status = 1 }));
+                    await AssertCodeAsync(code, () => ctl.Update(1, new BaseExpenseAccount
+                    { AccountCode = $"EA-{Tag()}", AccountName = "拒绝费用科目", AccountType = 2, Status = 1 }));
+                    await AssertCodeAsync(code, () => ctl.Delete(1));
+                    await AssertCodeAsync(code, () => ctl.BatchDelete(new List<long> { 1 }));
+                    break;
+                }
         }
     }
 
@@ -464,6 +491,23 @@ public sealed class MasterDataEntryAuthorizationSqlServerTests
                         x => x.Id == created.Id);
                     await Product(db, userId, pathMode).Delete(created.Id);
                     Assert.True((await db.BaseProducts.AsNoTracking().SingleAsync(x => x.Id == created.Id)).IsDeleted);
+                    break;
+                }
+            case "expense-account":
+                {
+                    var created = Data<BaseExpenseAccount>(await ExpenseAccount(db, userId, pathMode).Create(
+                        new BaseExpenseAccount
+                        { AccountCode = $"EA-{Tag()}", AccountName = "集成费用科目", AccountType = 2, Status = 1 }));
+                    Assert.Contains(Data<PagedResult<BaseExpenseAccount>>(
+                            await ExpenseAccount(db, userId, pathMode).GetPaged(new PageQuery { Page = 1, PageSize = 50 })).Items,
+                        x => x.Id == created.Id);
+                    Assert.Contains(Data<List<BaseExpenseAccount>>(await ExpenseAccount(db, userId, pathMode).GetAll()),
+                        x => x.Id == created.Id);
+                    Assert.Equal(created.Id, Data<BaseExpenseAccount>(
+                        await ExpenseAccount(db, userId, pathMode).GetById(created.Id)).Id);
+                    await ExpenseAccount(db, userId, pathMode).Delete(created.Id);
+                    Assert.True((await db.BaseExpenseAccounts.AsNoTracking()
+                        .SingleAsync(x => x.Id == created.Id)).IsDeleted);
                     break;
                 }
         }

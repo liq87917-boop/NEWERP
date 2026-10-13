@@ -382,14 +382,103 @@ public class EmployeeController : BaseCrudController<BaseEmployee>
 }
 
 /// <summary>
-/// 费用科目控制器
+/// 费用科目控制器（ERP-498：为全部分页 / 全部 / 按主键读取与新增 / 修改 / 删除 / 批量删除路由补齐实时身份、
+/// 既有「费用科目」（<c>expense-account</c>）功能菜单授权与有界字段校验）。
+/// ERP-467：该实时授权判定与请求路径 / 请求形状 / 是否绑定 <c>HttpContext</c> 完全无关。
 /// </summary>
+/// <remarks>
+/// 费用单 / 费用分摊与打印快照都解析到本控制器维护的费用科目主数据；这些路由在读取或写入任何
+/// <c>BaseExpenseAccounts</c> 行之前，都先经实时身份 + 既有费用科目菜单授权（见 <see cref="ExpenseAccountAuthorizationRules"/>），
+/// 新增 / 修改另经有界字段校验与「编码未删除行内唯一 / 父级科目必须存在且未删除」判定。
+/// 不新增任何菜单 / 权限 / 用户授权，也不改变分页 / 响应契约、科目编码唯一索引语义与通用软删除契约。
+/// </remarks>
 [ApiController]
 [Route("api/base/expense-accounts")]
 [Authorize]
 public class ExpenseAccountController : BaseCrudController<BaseExpenseAccount>
 {
-    public ExpenseAccountController(IGenericService<BaseExpenseAccount> service) : base(service) { }
+    private readonly IErpDbContext _db;
+
+    public ExpenseAccountController(IGenericService<BaseExpenseAccount> service, IErpDbContext db) : base(service)
+    {
+        _db = db;
+    }
+
+    /// <summary>当前登录用户 Id（只来自已认证请求主体；缺失 / 非数字 / 非正返回 null，由实时授权护栏 fail closed）</summary>
+    private long? CurrentUserId()
+    {
+        var value = ControllerContext?.HttpContext?.User?.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        return long.TryParse(value, out var id) && id > 0 ? id : null;
+    }
+
+    /// <summary>
+    /// 读取 / 写入前的实时身份 / 账号状态 / 既有「费用科目」（<c>expense-account</c>）菜单授权（ERP-498 / ERP-467，fail closed）。
+    /// 与请求路径是否赋值、请求形状、以及控制器是否绑定 <c>HttpContext</c> 完全无关（见
+    /// <see cref="ExpenseAccountAuthorizationRules.PathIndependenceText"/>）。
+    /// </summary>
+    private async Task EnsureExpenseAccountAuthorizedAsync()
+    {
+        await ExpenseAccountAuthorizationRules.EnsureAuthorizedAsync(_db, CurrentUserId());
+    }
+
+    /// <summary>分页查询（读取前先经实时授权；既有分页 / 响应契约不变）</summary>
+    [HttpGet]
+    public override async Task<IActionResult> GetPaged([FromQuery] PageQuery query)
+    {
+        await EnsureExpenseAccountAuthorizedAsync();
+        return await base.GetPaged(query);
+    }
+
+    /// <summary>查询全部（读取前先经实时授权；供下拉框使用）</summary>
+    [HttpGet("all")]
+    public override async Task<IActionResult> GetAll()
+    {
+        await EnsureExpenseAccountAuthorizedAsync();
+        return await base.GetAll();
+    }
+
+    /// <summary>按主键读取（读取前先经实时授权）</summary>
+    [HttpGet("{id:long}")]
+    public override async Task<IActionResult> GetById(long id)
+    {
+        await EnsureExpenseAccountAuthorizedAsync();
+        return await base.GetById(id);
+    }
+
+    /// <summary>新增（落库前先经实时授权与有界字段 / 唯一性 / 父级校验；被拒绝时不落任何行）</summary>
+    [HttpPost]
+    public override async Task<IActionResult> Create([FromBody] BaseExpenseAccount entity)
+    {
+        await EnsureExpenseAccountAuthorizedAsync();
+        await ExpenseAccountAuthorizationRules.EnsureWritableAsync(_db, entity);
+        return await base.Create(entity);
+    }
+
+    /// <summary>更新（落库前先经实时授权与有界字段 / 唯一性 / 父级校验；被拒绝时不改写任何行）</summary>
+    [HttpPut("{id:long}")]
+    public override async Task<IActionResult> Update(long id, [FromBody] BaseExpenseAccount entity)
+    {
+        await EnsureExpenseAccountAuthorizedAsync();
+        entity.Id = id;
+        await ExpenseAccountAuthorizationRules.EnsureWritableAsync(_db, entity, id);
+        return await base.Update(id, entity);
+    }
+
+    /// <summary>删除（软删除；写入前先经实时授权）</summary>
+    [HttpDelete("{id:long}")]
+    public override async Task<IActionResult> Delete(long id)
+    {
+        await EnsureExpenseAccountAuthorizedAsync();
+        return await base.Delete(id);
+    }
+
+    /// <summary>批量删除（软删除；写入前先经实时授权）</summary>
+    [HttpPost("batch-delete")]
+    public override async Task<IActionResult> BatchDelete([FromBody] List<long> ids)
+    {
+        await EnsureExpenseAccountAuthorizedAsync();
+        return await base.BatchDelete(ids);
+    }
 }
 
 /// <summary>
