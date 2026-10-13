@@ -1,8 +1,11 @@
 {
   "task": "ERP-352",
-  "status": "retry",
-  "execution_outcome": "acceptance_reopened",
-  "attempts": 1,
-  "reason": "StockInController.GetById:67-71 and GetMovements:79-80 read receipt existence before live identity/menu verification. Missing/disabled/deleted/no-menu caller gets NotFound for unknown id but Unauthorized/Forbidden for existing id, contrary to original each read must fail closed and avoid foreign identifier disclosure. Require StockInAuthorizationRules.EnsureMenuAuthorizedAsync before any receipt/source/movement query and before locks on every read/lifecycle entry, then retain current customer/source scope under locks. Already-authorized foreign/missing receipts must share the established non-disclosing error; unknown ids must not reveal existence to denied callers.",
-  "original_result_preserved": "D:\\VSCodeProject\\NEWERP.executor.continue-erp-190-20260930080457\\.ai\\logs\\heartbeat-20261013-190922-recovery\\ERP-352"
+  "status": "completed",
+  "execution_outcome": "completed",
+  "normalized_finish_reason": "build_validated",
+  "cline_exit_code": 0,
+  "cline_finish_reason_raw": "completed",
+  "attempts": 2,
+  "browser_acceptance": null,
+  "finished_at": "2026-10-13T19:33:34.129919Z"
 }

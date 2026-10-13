@@ -1,10 +1,14 @@
+using ERP.Api.Controllers;
 using ERP.Application.Common;
 using ERP.Application.Services;
 using ERP.Domain.Entities;
 using ERP.Domain.Enums;
 using ERP.Infrastructure.Data;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
+using System.Security.Claims;
 using Xunit;
 namespace ERP.IntegrationTests;
 // Strict fresh GUID dedicated LocalDB fixture; no production or existing database reset.
@@ -79,20 +83,118 @@ public class StockInAuthorizationSqlServerTests : IClassFixture<SupplierPaymentL
         await StockInAuthorizationRules.EnsureAuthorizedAsync(db,userId,supplierId,warehouseId,purchaseOrderId:null);
         await StockInAuthorizationRules.EnsureAuthorizedAsync(db,userId,new StockIn { PurchaseOrderId=ownOrderId });
 
-        // 范围外客户订单：创建与读取（详情 / 流水）一律 fail closed，且不泄露范围外客户。
+        // 范围外客户订单：创建与读取（详情 / 流水）一律按非披露「不存在」拒绝，不泄露范围外客户。
         var createError=await Assert.ThrowsAsync<BusinessException>(
             ()=>StockInAuthorizationRules.EnsureAuthorizedAsync(db,userId,supplierId,warehouseId,foreignOrderId));
-        Assert.Equal(ErrorCodes.Forbidden,createError.Code);
+        Assert.Equal(ErrorCodes.NotFound,createError.Code);
+        Assert.Equal(StockInAuthorizationRules.SourceScopeDeniedText,createError.Message);
         var readError=await Assert.ThrowsAsync<BusinessException>(
             ()=>StockInAuthorizationRules.EnsureAuthorizedAsync(db,userId,new StockIn { PurchaseOrderId=foreignOrderId }));
-        Assert.Equal(ErrorCodes.Forbidden,readError.Code);
+        Assert.Equal(ErrorCodes.NotFound,readError.Code);
+        Assert.Equal(StockInAuthorizationRules.NotFoundText,readError.Message);
 
         Assert.Equal(beforeStockIns,await db.StockIns.CountAsync());
         Assert.Equal(beforeMovements,await db.StockMovements.CountAsync());
     }
 
-    // ==================== 读取与变更之间撤销授权立即收敛 ====================
+    // ==================== 控制器级：闸门先于读取、存在与不存在同错（真实 SQL） ====================
 
+    private static StockInController BuildController(ErpDbContext db,long? userId)
+    {
+        var claims=userId.HasValue
+            ? new[] { new Claim(ClaimTypes.NameIdentifier,userId.Value.ToString()) }
+            : Array.Empty<Claim>();
+        return new StockInController(db,new DocumentNumberService(db),new InventoryService(db))
+        {
+            ControllerContext = new ControllerContext
+            {
+                HttpContext = new DefaultHttpContext
+                {
+                    User = new ClaimsPrincipal(new ClaimsIdentity(claims,"IntTest"))
+                }
+            }
+        };
+    }
+
+    [Fact]
+    public async Task Denied_callers_share_the_same_controlled_error_for_existing_and_unknown_receipt_ids_on_real_sql()
+    {
+        Guard();
+        await using var db=fixture.CreateDbContext();
+        var supplierId=await SeedSupplierAsync(db);
+        var warehouseId=await SeedWarehouseAsync(db);
+        var (_,_,customerId)=await SeedRestrictedInboundOperatorAsync(db);
+        var orderId=await SeedApprovedOrderAsync(db,supplierId,customerId);
+        var receiptId=await SeedReceiptAsync(db,supplierId,warehouseId,orderId,DocumentStatus.Pending);
+        const long unknownId=999_999_999L;
+
+        // 缺失身份：已存在与不存在的 Id 都得到受控未认证（绝不因 Id 存在与否而差异化）。
+        var anonymous=BuildController(db,null);
+        Assert.Equal(ErrorCodes.Unauthorized,(await Assert.ThrowsAsync<BusinessException>(()=>anonymous.GetById(receiptId))).Code);
+        Assert.Equal(ErrorCodes.Unauthorized,(await Assert.ThrowsAsync<BusinessException>(()=>anonymous.GetById(unknownId))).Code);
+        Assert.Equal(ErrorCodes.Unauthorized,(await Assert.ThrowsAsync<BusinessException>(()=>anonymous.GetMovements(receiptId))).Code);
+        Assert.Equal(ErrorCodes.Unauthorized,(await Assert.ThrowsAsync<BusinessException>(()=>anonymous.GetMovements(unknownId))).Code);
+
+        // 禁用账号 / 无菜单账号：已存在与不存在的 Id 都得到权限不足。
+        foreach(var deniedUserId in new[]
+                {
+                    await SeedDeniedUserAsync(db,UserStatus.Disabled,withStockInMenu:true),
+                    await SeedDeniedUserAsync(db,UserStatus.Enabled,withStockInMenu:false)
+                })
+        {
+            var ctl=BuildController(db,deniedUserId);
+            Assert.Equal(ErrorCodes.Forbidden,(await Assert.ThrowsAsync<BusinessException>(()=>ctl.GetById(receiptId))).Code);
+            Assert.Equal(ErrorCodes.Forbidden,(await Assert.ThrowsAsync<BusinessException>(()=>ctl.GetById(unknownId))).Code);
+            Assert.Equal(ErrorCodes.Forbidden,(await Assert.ThrowsAsync<BusinessException>(()=>ctl.GetMovements(receiptId))).Code);
+            Assert.Equal(ErrorCodes.Forbidden,(await Assert.ThrowsAsync<BusinessException>(()=>ctl.GetMovements(unknownId))).Code);
+        }
+
+        // 拒绝方零副作用：状态 / 库存 / 流水保持原样。
+        Assert.Equal(DocumentStatus.Pending,(await db.StockIns.AsNoTracking().SingleAsync(o=>o.Id==receiptId)).Status);
+        Assert.Equal(0,await db.StockMovements.CountAsync());
+    }
+
+    [Fact]
+    public async Task Restricted_operator_reads_and_lifecycle_are_non_disclosing_for_foreign_and_unknown_receipts_on_real_sql()
+    {
+        Guard();
+        await using var db=fixture.CreateDbContext();
+        var supplierId=await SeedSupplierAsync(db);
+        var warehouseId=await SeedWarehouseAsync(db);
+        var (userId,_,ownCustomerId)=await SeedRestrictedInboundOperatorAsync(db);
+        var foreignCustomerId=await SeedCustomerAsync(db,"范围外客户");
+        var ownOrderId=await SeedApprovedOrderAsync(db,supplierId,ownCustomerId);
+        var foreignOrderId=await SeedApprovedOrderAsync(db,supplierId,foreignCustomerId);
+        var ownId=await SeedReceiptAsync(db,supplierId,warehouseId,ownOrderId,DocumentStatus.Pending);
+        var foreignId=await SeedReceiptAsync(db,supplierId,warehouseId,foreignOrderId,DocumentStatus.Submitted);
+        const long unknownId=999_999_999L;
+        var ctl=BuildController(db,userId);
+
+        // 范围内单据仍可读（授权路径保持可用）。
+        Assert.IsType<OkObjectResult>(await ctl.GetById(ownId));
+
+        var foreignDetail=await Assert.ThrowsAsync<BusinessException>(()=>ctl.GetById(foreignId));
+        var unknownDetail=await Assert.ThrowsAsync<BusinessException>(()=>ctl.GetById(unknownId));
+        Assert.Equal(ErrorCodes.NotFound,foreignDetail.Code);
+        Assert.Equal(foreignDetail.Code,unknownDetail.Code);
+        Assert.Equal(foreignDetail.Message,unknownDetail.Message);
+
+        var foreignMovement=await Assert.ThrowsAsync<BusinessException>(()=>ctl.GetMovements(foreignId));
+        var unknownMovement=await Assert.ThrowsAsync<BusinessException>(()=>ctl.GetMovements(unknownId));
+        Assert.Equal(ErrorCodes.NotFound,foreignMovement.Code);
+        Assert.Equal(foreignMovement.Message,unknownMovement.Message);
+
+        var foreignCancel=await Assert.ThrowsAsync<BusinessException>(()=>ctl.Cancel(foreignId));
+        var unknownCancel=await Assert.ThrowsAsync<BusinessException>(()=>ctl.Cancel(unknownId));
+        Assert.Equal(ErrorCodes.NotFound,foreignCancel.Code);
+        Assert.Equal(foreignCancel.Message,unknownCancel.Message);
+
+        // 拒绝方零副作用：范围外单据状态不变，库存 / 流水不变。
+        Assert.Equal(DocumentStatus.Submitted,(await db.StockIns.AsNoTracking().SingleAsync(o=>o.Id==foreignId)).Status);
+        Assert.Equal(0,await db.StockMovements.CountAsync());
+    }
+
+    // ==================== 读取与变更之间撤销授权立即收敛 ====================
     [Fact]
     public async Task Revocation_between_resolution_and_mutation_is_fail_closed_on_real_sql()
     {
@@ -183,5 +285,58 @@ public class StockInAuthorizationSqlServerTests : IClassFixture<SupplierPaymentL
 
         var customerId=await SeedCustomerAsync(db,"范围内客户",employee.Id);
         return (user.Id, role.Id, customerId);
+    }
+
+    /// <summary>播种一张入库单（SQL 生成主键），用于真实 SQL 的读取 / 生命周期非披露验证。</summary>
+    private static async Task<long> SeedReceiptAsync(ErpDbContext db,long supplierId,long warehouseId,
+        long? purchaseOrderId,DocumentStatus status)
+    {
+        var receipt=new StockIn
+        {
+            StockInNo=$"AUTH-RK-{Guid.NewGuid():N}",
+            StockInDate=DateTime.Today,
+            SupplierId=supplierId,
+            WarehouseId=warehouseId,
+            PurchaseOrderId=purchaseOrderId,
+            TotalQuantity=10m,
+            Status=status
+        };
+        db.StockIns.Add(receipt);
+        await db.SaveChangesAsync();
+        return receipt.Id;
+    }
+
+    /// <summary>播种被拒绝账号（禁用 / 无 stock-in 菜单），用于「存在与不存在同错」验证。</summary>
+    private static async Task<long> SeedDeniedUserAsync(ErpDbContext db,UserStatus status,bool withStockInMenu)
+    {
+        var user=new SysUser
+        {
+            UserName=$"stockin-denied-{Guid.NewGuid():N}",
+            DisplayName="拒绝场景账号",
+            PasswordHash="hash",
+            PasswordSalt="salt",
+            Status=status
+        };
+        db.SysUsers.Add(user);
+        await db.SaveChangesAsync();
+
+        var role=new SysRole { RoleCode=$"Denied-{Guid.NewGuid():N}", RoleName="拒绝场景角色", IsSystem=false };
+        db.SysRoles.Add(role);
+        await db.SaveChangesAsync();
+
+        db.SysUserRoles.Add(new SysUserRole { UserId=user.Id, RoleId=role.Id });
+        await db.SaveChangesAsync();
+
+        if(withStockInMenu)
+        {
+            var menuId=await db.SysMenus.AsNoTracking()
+                .Where(m=>m.MenuCode==StockInAuthorizationRules.RequiredMenuCode && !m.IsDeleted)
+                .Select(m=>m.Id)
+                .FirstAsync();
+            db.SysRoleMenus.Add(new SysRoleMenu { RoleId=role.Id, MenuId=menuId });
+            await db.SaveChangesAsync();
+        }
+
+        return user.Id;
     }
 }

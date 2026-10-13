@@ -358,9 +358,15 @@ public class StockInAuthorizationTests
         var foreignOrder = SeedApprovedOrder(db, "PO-AUTH-FOREIGN", SeedForeignCustomer(db));
         var ctl = StockInTestAuthorization.ForUser(db, userId);
 
-        var error = await Assert.ThrowsAsync<BusinessException>(() => ctl.Create(NewStockIn(foreignOrder.Id)));
+        // 范围外来源与不存在的来源共用同一非披露错误（绝不透露范围外来源归属客户）。
+        var foreignError = await Assert.ThrowsAsync<BusinessException>(() => ctl.Create(NewStockIn(foreignOrder.Id)));
+        var unknownError = await Assert.ThrowsAsync<BusinessException>(() => ctl.Create(NewStockIn(969999L)));
 
-        Assert.Equal(ErrorCodes.Forbidden, error.Code);
+        Assert.Equal(ErrorCodes.NotFound, foreignError.Code);
+        Assert.Equal(ErrorCodes.NotFound, unknownError.Code);
+        Assert.Equal(StockInAuthorizationRules.SourceScopeDeniedText, foreignError.Message);
+        Assert.Equal(StockInAuthorizationRules.SourceScopeDeniedText, unknownError.Message);
+        Assert.DoesNotContain("范围外客户", foreignError.Message);
         Assert.Empty(db.StockIns);
         Assert.Empty(db.StockMovements);
         Assert.Equal(0L, DocumentSequence(db));
@@ -382,7 +388,9 @@ public class StockInAuthorizationTests
         var error = await Assert.ThrowsAsync<BusinessException>(
             () => ctl.Update(existing.Id, NewStockIn(foreignOrder.Id)));
 
-        Assert.Equal(ErrorCodes.Forbidden, error.Code);
+        // 范围外新来源与不存在的新来源共用同一非披露错误，且已存来源 / 状态 / 库存 / 流水全部保持不变。
+        Assert.Equal(ErrorCodes.NotFound, error.Code);
+        Assert.Equal(StockInAuthorizationRules.SourceScopeDeniedText, error.Message);
         var stored = await db.StockIns.AsNoTracking().SingleAsync(o => o.Id == existing.Id);
         Assert.Equal(ownOrder.Id, stored.PurchaseOrderId);
         Assert.Equal(DocumentStatus.Pending, stored.Status);
@@ -467,10 +475,110 @@ public class StockInAuthorizationTests
         Assert.IsType<OkObjectResult>(await ctl.GetById(unlinked.Id));
         Assert.IsType<OkObjectResult>(await ctl.GetMovements(unlinked.Id));
 
+        // 范围外与不存在共用同一非披露错误：详情 / 流水都不能透露范围外单据的存在性。
         var detailError = await Assert.ThrowsAsync<BusinessException>(() => ctl.GetById(foreign.Id));
-        Assert.Equal(ErrorCodes.Forbidden, detailError.Code);
+        var unknownDetailError = await Assert.ThrowsAsync<BusinessException>(() => ctl.GetById(969999L));
         var movementError = await Assert.ThrowsAsync<BusinessException>(() => ctl.GetMovements(foreign.Id));
-        Assert.Equal(ErrorCodes.Forbidden, movementError.Code);
+        var unknownMovementError = await Assert.ThrowsAsync<BusinessException>(() => ctl.GetMovements(969999L));
+
+        Assert.Equal(ErrorCodes.NotFound, detailError.Code);
+        Assert.Equal(ErrorCodes.NotFound, movementError.Code);
+        Assert.Equal(StockInAuthorizationRules.NotFoundText, detailError.Message);
+        Assert.Equal(detailError.Message, unknownDetailError.Message);
+        Assert.Equal(detailError.Code, unknownDetailError.Code);
+        Assert.Equal(StockInAuthorizationRules.NotFoundText, movementError.Message);
+        Assert.Equal(movementError.Message, unknownMovementError.Message);
+        Assert.Equal(movementError.Code, unknownMovementError.Code);
+    }
+
+    // ==================== 非披露：存在与不存在的 Id 共用同一受控错误 ====================
+
+    [Fact]
+    public async Task Denied_callers_get_identical_controlled_error_for_existing_and_unknown_receipt_ids()
+    {
+        using var db = TestDbFactory.Create();
+        SeedMasterData(db);
+        SeedStockInNumberRule(db);
+        var (_, customerId) = StockInTestAuthorization.SeedRestrictedInboundOperator(db);
+        var order = SeedApprovedOrder(db, "PO-AUTH-NONDISCLOSE", customerId);
+        var existing = SeedReceipt(db, "RK-AUTH-NONDISCLOSE", DocumentStatus.Pending, order.Id);
+
+        // 缺失身份：已存在与不存在的 Id 都得到受控未认证（绝不因 Id 是否存在而差异化）。
+        var anonymous = StockInTestAuthorization.ForUser(db, null);
+        Assert.Equal(ErrorCodes.Unauthorized, (await Assert.ThrowsAsync<BusinessException>(() => anonymous.GetById(existing.Id))).Code);
+        Assert.Equal(ErrorCodes.Unauthorized, (await Assert.ThrowsAsync<BusinessException>(() => anonymous.GetById(969999L))).Code);
+        Assert.Equal(ErrorCodes.Unauthorized, (await Assert.ThrowsAsync<BusinessException>(() => anonymous.GetMovements(existing.Id))).Code);
+        Assert.Equal(ErrorCodes.Unauthorized, (await Assert.ThrowsAsync<BusinessException>(() => anonymous.GetMovements(969999L))).Code);
+
+        // 禁用账号 / 无 stock-in 菜单 / 未映射业务员：已存在与不存在的 Id 都得到权限不足。
+        foreach (var userId in new[]
+                 {
+                     SeedOperator(db, withStockInMenu: true, UserStatus.Disabled),
+                     SeedOperator(db, withStockInMenu: false, UserStatus.Enabled),
+                     SeedOperator(db, withStockInMenu: true, UserStatus.Enabled)
+                 })
+        {
+            var ctl = StockInTestAuthorization.ForUser(db, userId);
+            Assert.Equal(ErrorCodes.Forbidden, (await Assert.ThrowsAsync<BusinessException>(() => ctl.GetById(existing.Id))).Code);
+            Assert.Equal(ErrorCodes.Forbidden, (await Assert.ThrowsAsync<BusinessException>(() => ctl.GetById(969999L))).Code);
+            Assert.Equal(ErrorCodes.Forbidden, (await Assert.ThrowsAsync<BusinessException>(() => ctl.GetMovements(existing.Id))).Code);
+            Assert.Equal(ErrorCodes.Forbidden, (await Assert.ThrowsAsync<BusinessException>(() => ctl.GetMovements(969999L))).Code);
+        }
+
+        // 零副作用：无写入 / 无状态变化 / 不消耗单据号。
+        Assert.Empty(db.StockMovements);
+        Assert.Empty(db.Stocks);
+        Assert.Equal(DocumentStatus.Pending, db.StockIns.AsNoTracking().Single().Status);
+        Assert.Equal(0L, DocumentSequence(db));
+    }
+
+    [Fact]
+    public async Task Foreign_and_unknown_receipts_share_the_non_disclosing_error_on_every_lifecycle_route()
+    {
+        using var db = TestDbFactory.Create();
+        SeedMasterData(db);
+        SeedStockInNumberRule(db);
+        var (userId, customerId) = StockInTestAuthorization.SeedRestrictedInboundOperator(db);
+        var ownOrder = SeedApprovedOrder(db, "PO-AUTH-NONDISC-LC-OWN", customerId);
+        var foreignOrder = SeedApprovedOrder(db, "PO-AUTH-NONDISC-LC-FOREIGN", SeedForeignCustomer(db));
+        var own = SeedReceipt(db, "RK-AUTH-NONDISC-OWN", DocumentStatus.Submitted, ownOrder.Id);
+        var foreign = SeedReceipt(db, "RK-AUTH-NONDISC-FOREIGN", DocumentStatus.Submitted, foreignOrder.Id);
+        var ctl = StockInTestAuthorization.ForUser(db, userId);
+
+        // 已授权范围内单据仍可读（保留既有读取能力）。
+        Assert.IsType<OkObjectResult>(await ctl.GetById(own.Id));
+
+        // 范围外（foreign）与不存在（unknown）在每一条生命周期路由共用同一非披露错误。
+        foreach (var action in new Func<long, Task<IActionResult>>[] { ctl.Submit, ctl.Approve, ctl.Cancel })
+        {
+            var foreignError = await Assert.ThrowsAsync<BusinessException>(() => action(foreign.Id));
+            var unknownError = await Assert.ThrowsAsync<BusinessException>(() => action(969999L));
+            Assert.Equal(ErrorCodes.NotFound, foreignError.Code);
+            Assert.Equal(StockInAuthorizationRules.NotFoundText, foreignError.Message);
+            Assert.Equal(foreignError.Code, unknownError.Code);
+            Assert.Equal(foreignError.Message, unknownError.Message);
+        }
+
+        var foreignDelete = await Assert.ThrowsAsync<BusinessException>(() => ctl.Delete(foreign.Id));
+        var unknownDelete = await Assert.ThrowsAsync<BusinessException>(() => ctl.Delete(969999L));
+        Assert.Equal(ErrorCodes.NotFound, foreignDelete.Code);
+        Assert.Equal(foreignDelete.Code, unknownDelete.Code);
+
+        var foreignUpdate = await Assert.ThrowsAsync<BusinessException>(
+            () => ctl.Update(foreign.Id, NewStockIn(ownOrder.Id)));
+        var unknownUpdate = await Assert.ThrowsAsync<BusinessException>(
+            () => ctl.Update(969999L, NewStockIn(ownOrder.Id)));
+        Assert.Equal(ErrorCodes.NotFound, foreignUpdate.Code);
+        Assert.Equal(foreignUpdate.Code, unknownUpdate.Code);
+
+        // 拒绝方零副作用：状态 / 删除态 / 库存 / 流水 / 单据号全部保持原样。
+        var stored = db.StockIns.AsNoTracking().OrderBy(o => o.Id).ToList();
+        Assert.Equal(DocumentStatus.Submitted, stored.Single(o => o.Id == own.Id).Status);
+        Assert.Equal(DocumentStatus.Submitted, stored.Single(o => o.Id == foreign.Id).Status);
+        Assert.All(stored, o => Assert.False(o.IsDeleted));
+        Assert.Empty(db.StockMovements);
+        Assert.Empty(db.Stocks);
+        Assert.Equal(0L, DocumentSequence(db));
     }
 
     // ==================== 授权路径的数量 / 成本 / 冲销口径 ====================

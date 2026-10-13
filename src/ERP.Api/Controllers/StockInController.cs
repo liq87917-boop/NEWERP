@@ -28,11 +28,27 @@ namespace ERP.Api.Controllers;
 /// 新增 / 修改在实时授权、供应商 / 仓库可用性与来源归属校验（含基础单位折算与 ERP-342 累计容量）之后、
 /// <b>单号预约与任何写入之前</b>完成全部校验：主键 / 入库单号 / 状态 / 删除态 / 时间戳与明细身份一律由服务端权威覆盖，
 /// 被拒绝的请求零表头 · 明细 · 来源 · 状态变化且不消耗单据号（ERP-352 口径）。</para>
+/// <para>ERP-352：每一条读取 / 创建 / 修改 / 提交 / 审核 / 取消 / 删除 / 流水入口都<b>先</b>执行统一实时闸门
+/// （<see cref="StockInAuthorizationRules.EnsureMenuAuthorizedAsync"/>：身份 / 账号状态 / 业务员映射 / 既有「采购入库」菜单），
+/// 闸门<b>先于任何入库单 / 来源 / 流水字节读取与任何行锁</b>；已存单据的可见性再按来源采购订单归属客户复核，
+/// 范围外 / 已删除 / 归属未知与「不存在」返回<b>同一</b>非披露错误（<see cref="StockInAuthorizationRules.NotFoundText"/>），
+/// 分页列表 / 详情 / 流水 / 生命周期完全同口径。缺失 / 禁用 / 未映射 / 无菜单调用方对「已存在」与「不存在」的 Id
+/// 得到同一受控错误，无从探测单据存在性；不存在「无请求上下文 / 空路径 / 匿名进程内调用」的免授权回退，
+/// 也不读取 <c>Request.Path</c> / 环境变量 / 测试开关。审核 / 取消仍在可串行化事务与行锁内复核实时授权与来源归属，
+/// 被拒绝方绝不改动单据 / 明细 / 状态 / 库存 / 流水，也绝不消耗单据号。</para>
 /// </summary>
 [Route("api/stock-ins")]
 public class StockInController : DocumentControllerBase<StockIn>
 {
-    private long? CurrentInboundUserId() => ControllerContext.HttpContext is null ? null : CurrentUserId();
+    /// <summary>
+    /// ERP-352：当前入库操作员 Id —— 只来自已认证请求主体（<see cref="System.Security.Claims.ClaimTypes.NameIdentifier"/>）。
+    /// 缺少请求上下文 / 缺少身份声明 / 非数字（含 0 / 负数）一律<b>安全解析为 <c>null</c></b>，
+    /// 由 <see cref="StockInAuthorizationRules.EnsureMenuAuthorizedAsync"/> 先返回受控未认证（2000）。
+    /// <para>这里<b>不是</b>免授权或测试兼容边界：不存在「无请求上下文 / 空路径 / 匿名进程内调用」豁免，
+    /// 也不读取 <c>Request.Path</c>、环境变量、数据库提供程序或任何测试开关。</para>
+    /// </summary>
+    private long? CurrentInboundUserId()
+        => ControllerContext?.HttpContext is null ? null : CurrentUserId();
 
     private readonly IDocumentNumberService _noService;
     private readonly IInventoryService _inventory;
@@ -61,23 +77,35 @@ public class StockInController : DocumentControllerBase<StockIn>
             new PagedResult<StockIn> { Items = items, Total = total, Page = query.Page, PageSize = query.PageSize }));
     }
 
-    /// <summary>详情</summary>
+    /// <summary>
+    /// 详情（ERP-352：统一实时闸门<b>先于</b>任何入库单字节读取，再按来源归属客户复核可见性）。
+    /// <para>缺失 / 禁用 / 未映射 / 无菜单调用方对「已存在」与「不存在」的 Id 得到<b>相同</b>的受控未认证 /
+    /// 权限不足错误；已授权调用方对范围外（或来源已删除 / 归属未知）与不存在的入库单得到<b>相同</b>的非披露错误
+    /// （<see cref="StockInAuthorizationRules.NotFoundText"/>），绝不泄露范围外单据标识。</para>
+    /// </summary>
     [HttpGet("{id:long}")]
     public async Task<IActionResult> GetById(long id)
     {
+        // ERP-352：先实时身份 / 账号状态 / 业务员映射 / 既有「采购入库」菜单，再读取任何单据字节。
+        var scope = await StockInAuthorizationRules.EnsureMenuAuthorizedAsync(Db, CurrentInboundUserId());
         var entity = await Set.AsNoTracking().Include(o => o.Details)
             .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
-            ?? throw BusinessException.NotFound("入库单不存在");
-        await StockInAuthorizationRules.EnsureAuthorizedAsync(Db, CurrentInboundUserId(), entity);
+            ?? throw BusinessException.NotFound(StockInAuthorizationRules.NotFoundText);
+        // 与分页列表同一可见性谓词：范围外与不存在共用同一非披露错误。
+        await StockInAuthorizationRules.EnsureReceiptVisibleAsync(Db, scope, entity);
         return Ok(ApiResponse<StockIn>.Success(entity));
     }
 
-    /// <summary>该单据的库存流水（ERP-025，含红字冲销流水，按发生顺序）</summary>
+    /// <summary>
+    /// 该单据的库存流水（ERP-025，含红字冲销流水，按发生顺序）。
+    /// <para>ERP-352：与详情完全同口径 —— 统一实时闸门先于任何入库单 / 流水读取，可见性复核先于流水查询。</para>
+    /// </summary>
     [HttpGet("{id:long}/movements")]
     public async Task<IActionResult> GetMovements(long id)
     {
-        var entity = await GetOrThrowAsync(id, "入库单不存在");
-        await StockInAuthorizationRules.EnsureAuthorizedAsync(Db, CurrentInboundUserId(), entity);
+        var scope = await StockInAuthorizationRules.EnsureMenuAuthorizedAsync(Db, CurrentInboundUserId());
+        var entity = await GetOrThrowAsync(id, StockInAuthorizationRules.NotFoundText);
+        await StockInAuthorizationRules.EnsureReceiptVisibleAsync(Db, scope, entity);
         var movements = await _inventory.ListMovementsAsync(InventoryDocumentHelper.StockInType, id);
         return Ok(ApiResponse<IReadOnlyList<StockMovement>>.Success(movements));
     }
@@ -127,8 +155,8 @@ public class StockInController : DocumentControllerBase<StockIn>
 
     /// <summary>
     /// 创建（ERP-477：省略 / 空串 / 伪造入库单号照常进入本动作，单号与身份由服务端权威覆盖；
-    /// 全部授权 · 来源 · 单位折算 · 累计容量校验都在<b>单号预约与任何写入之前</b>完成，
-    /// 被拒绝的请求零写入、零占号）。
+    /// ERP-352：统一实时闸门先于任何入库单字节读取，全部授权 · 来源 · 单位折算 · 累计容量校验都在
+    /// <b>单号预约与任何写入之前</b>完成，被拒绝的请求零写入、零占号）。
     /// </summary>
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] StockIn entity)
@@ -139,7 +167,9 @@ public class StockInController : DocumentControllerBase<StockIn>
         NormalizePurchaseOrderLink(entity);
         entity.Details ??= new List<StockInDetail>();
 
-        // 授权与来源 / 累计容量校验先于单号生成与任何写入：被拒绝方绝不消耗单据号、绝不落库（ERP-352）。
+        // ERP-352：统一实时闸门（身份 / 账号状态 / 业务员映射 / 既有「采购入库」菜单）先于任何读取与写入；
+        // 授权与来源 / 累计容量校验先于单号生成与任何写入：被拒绝方绝不消耗单据号、绝不落库。
+        await StockInAuthorizationRules.EnsureMenuAuthorizedAsync(Db, CurrentInboundUserId());
         await StockInAuthorizationRules.EnsureAuthorizedAsync(
             Db, CurrentInboundUserId(), entity.SupplierId, entity.WarehouseId, entity.PurchaseOrderId);
         await StockUnitConversion.NormalizeAsync(Db, entity.Details);
@@ -161,26 +191,35 @@ public class StockInController : DocumentControllerBase<StockIn>
         return Ok(ApiResponse<object>.Success(new { entity.Id, entity.StockInNo }, "入库单创建成功"));
     }
 
-    /// <summary>提交：先校验实时授权与来源归属，再走基类状态流转。</summary>
+    /// <summary>
+    /// 提交：ERP-352 统一实时闸门先于任何入库单字节读取，再复核已存单据可见性，最后走基类状态流转。
+    /// 被拒绝 / 范围外 / 不存在的 Id 得到同一受控错误且零状态变化。
+    /// </summary>
     [HttpPost("{id:long}/submit")]
     public override async Task<IActionResult> Submit(long id)
     {
-        var entity = await GetOrThrowAsync(id, "入库单不存在");
-        await StockInAuthorizationRules.EnsureAuthorizedAsync(Db, CurrentInboundUserId(), entity);
+        var scope = await StockInAuthorizationRules.EnsureMenuAuthorizedAsync(Db, CurrentInboundUserId());
+        var entity = await GetOrThrowAsync(id, StockInAuthorizationRules.NotFoundText);
+        await StockInAuthorizationRules.EnsureReceiptVisibleAsync(Db, scope, entity);
         return await base.Submit(id);
     }
 
-    /// <summary>删除：先校验实时授权与来源归属，再走基类软删除。</summary>
+    /// <summary>
+    /// 删除：ERP-352 统一实时闸门先于任何入库单字节读取，再复核已存单据可见性，最后走基类软删除。
+    /// 被拒绝 / 范围外 / 不存在的 Id 得到同一受控错误且零写入。
+    /// </summary>
     [HttpDelete("{id:long}")]
     public override async Task<IActionResult> Delete(long id)
     {
-        var entity = await GetOrThrowAsync(id, "入库单不存在");
-        await StockInAuthorizationRules.EnsureAuthorizedAsync(Db, CurrentInboundUserId(), entity);
+        var scope = await StockInAuthorizationRules.EnsureMenuAuthorizedAsync(Db, CurrentInboundUserId());
+        var entity = await GetOrThrowAsync(id, StockInAuthorizationRules.NotFoundText);
+        await StockInAuthorizationRules.EnsureReceiptVisibleAsync(Db, scope, entity);
         return await base.Delete(id);
     }
 
     /// <summary>
     /// 更新（ERP-477：来源归属先校验，单据身份 · 单号 · 状态与明细身份全部由服务端保持权威；
+    /// ERP-352：统一实时闸门先于任何入库单字节读取，再校验「已存」与「请求」两侧归属；
     /// 仅「待提交」可修改，被拒绝的请求零写入、零状态变化）。
     /// </summary>
     [HttpPut("{id:long}")]
@@ -190,12 +229,15 @@ public class StockInController : DocumentControllerBase<StockIn>
         NormalizePurchaseOrderLink(entity);
         entity.Details ??= new List<StockInDetail>();
 
+        // ERP-352：统一实时闸门先于任何单据字节读取（缺失 / 禁用 / 未映射 / 无菜单对存在与不存在的 Id 同错）。
+        var scope = await StockInAuthorizationRules.EnsureMenuAuthorizedAsync(Db, CurrentInboundUserId());
         var existing = await Db.StockIns.Include(o => o.Details)
             .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
-            ?? throw BusinessException.NotFound("入库单不存在");
+            ?? throw BusinessException.NotFound(StockInAuthorizationRules.NotFoundText);
 
-        // 校验「已存」与「请求」两侧的归属：既有来源客户不可越界，新来源也必须落在当前账号范围内。
-        await StockInAuthorizationRules.EnsureAuthorizedAsync(Db, CurrentInboundUserId(), existing);
+        // 校验「已存」与「请求」两侧的归属：既有来源客户不可越界（范围外按「不存在」非披露拒绝），
+        // 新来源也必须落在当前账号客户数据范围内；任一不满足都零写入、零状态变化、已存来源保持不变。
+        await StockInAuthorizationRules.EnsureReceiptVisibleAsync(Db, scope, existing);
         await StockInAuthorizationRules.EnsureAuthorizedAsync(
             Db, CurrentInboundUserId(), entity.SupplierId, entity.WarehouseId, entity.PurchaseOrderId);
 
@@ -220,13 +262,19 @@ public class StockInController : DocumentControllerBase<StockIn>
         return Ok(ApiResponse<object>.Success(null, "入库单更新成功"));
     }
 
-    /// <summary>审核（按基础单位增加库存并写入库存流水，恰好一次）</summary>
+    /// <summary>
+    /// 审核（按基础单位增加库存并写入库存流水，恰好一次）。
+    /// <para>ERP-352：统一实时闸门先于任何入库单字节读取；已存单据可见性（范围外按「不存在」非披露拒绝）先于状态判定；
+    /// 库存 / 流水 / 状态写入仍统一放进可串行化事务，锁内再复核实时授权与来源归属。</para>
+    /// </summary>
     [HttpPost("{id:long}/approve")]
     public override async Task<IActionResult> Approve(long id)
     {
+        var scope = await StockInAuthorizationRules.EnsureMenuAuthorizedAsync(Db, CurrentInboundUserId());
         var entity = await Db.StockIns.Include(o => o.Details)
             .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
-            ?? throw BusinessException.NotFound("入库单不存在");
+            ?? throw BusinessException.NotFound(StockInAuthorizationRules.NotFoundText);
+        await StockInAuthorizationRules.EnsureReceiptVisibleAsync(Db, scope, entity);
         if (GetStatus(entity) != DocumentStatus.Submitted)
             throw BusinessException.RuleConflict("当前状态不允许该操作");
 
@@ -308,6 +356,7 @@ public class StockInController : DocumentControllerBase<StockIn>
 
     /// <summary>
     /// 取消：已审核单据按库存流水冲销（无流水的历史单据按基础单位原路冲回）。
+    /// <para>ERP-352：统一实时闸门与已存单据可见性（范围外按「不存在」非披露拒绝）都先于任何入库单字节读取与行锁。</para>
     /// <para>ERP-359：与采购退货审核 / 销审共用<b>同一</b>把来源入库单行锁（<c>UPDLOCK, HOLDLOCK</c>）与可串行化事务，
     /// 锁内先复核实时授权 / 来源归属，再确认没有仍然生效的已审核采购退货单显式引用本入库单（
     /// <see cref="ReturnSourceCancellationRules.EnsureNoEffectiveApprovedPurchaseReturnAsync"/>）；
@@ -316,12 +365,13 @@ public class StockInController : DocumentControllerBase<StockIn>
     [HttpPost("{id:long}/cancel")]
     public override async Task<IActionResult> Cancel(long id)
     {
+        // ERP-352：统一实时闸门 + 可见性硬边界都先于任何入库单字节读取与行锁。
+        var scope = await StockInAuthorizationRules.EnsureMenuAuthorizedAsync(Db, CurrentInboundUserId());
         var probe = await Db.StockIns.AsNoTracking()
             .Where(o => o.Id == id && !o.IsDeleted)
-            .Select(o => new { o.SupplierId, o.WarehouseId, o.PurchaseOrderId })
-            .FirstOrDefaultAsync() ?? throw BusinessException.NotFound("入库单不存在");
-        await StockInAuthorizationRules.EnsureAuthorizedAsync(
-            Db, CurrentInboundUserId(), probe.SupplierId, probe.WarehouseId, probe.PurchaseOrderId);
+            .Select(o => new { o.PurchaseOrderId })
+            .FirstOrDefaultAsync() ?? throw BusinessException.NotFound(StockInAuthorizationRules.NotFoundText);
+        await StockInAuthorizationRules.EnsureReceiptVisibleAsync(Db, scope, probe.PurchaseOrderId);
 
         // 确定性锁序：来源入库单行（与采购退货审核 / 销审同一把锁）→ 退货单行（只读判定）。任一步失败整体回滚。
         await using var transaction = await Db.Database.BeginTransactionAsync(IsolationLevel.Serializable);
@@ -331,7 +381,7 @@ public class StockInController : DocumentControllerBase<StockIn>
 
             var entity = await Db.StockIns.Include(o => o.Details)
                 .FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted)
-                ?? throw BusinessException.NotFound("入库单不存在");
+                ?? throw BusinessException.NotFound(StockInAuthorizationRules.NotFoundText);
             await StockInAuthorizationRules.EnsureAuthorizedAsync(Db, CurrentInboundUserId(), entity);
 
             var status = GetStatus(entity);

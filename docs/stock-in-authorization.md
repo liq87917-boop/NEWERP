@@ -9,33 +9,38 @@
 - **身份**：无身份（或非法身份）按未认证拒绝（`Unauthorized`）；账号不存在 / 已删除同样按未认证拒绝。
 - **账号状态**：非 `Enabled`（禁用）按权限不足拒绝（`Forbidden`）。
 - **模块授权**：必须具备既有「采购入库」（菜单编码 `stock-in`，与 `SeedData.Menus` 同源）菜单授权；未映射该菜单按权限不足拒绝。**不新增任何权限模型**，也不把空身份当作管理员。
+- **业务员映射**：受限（非特权）账号必须已映射为业务员（入库操作员），否则在闸门内按权限不足拒绝（`Forbidden`）。
+- **闸门先行（ERP-352）**：身份 / 账号状态 / 业务员映射 / 菜单四项统一由 `EnsureMenuAuthorizedAsync` 在**任何入库单 / 来源 / 流水字节读取与任何行锁之前**执行；该闸门只读取账号 / 角色 / 菜单与权威数据范围，因此**缺失 / 禁用 / 未映射 / 无菜单**调用方对「已存在」与「不存在」的 Id 得到**完全相同**的受控错误，无从探测单据存在性。缺少请求上下文 / 缺失身份声明 / 非数字 / 非正数一律安全解析为 `null` 并按未认证拒绝；绝无「无请求上下文 / 空路径 / 匿名进程内调用」免授权回退，也不读取 `Request.Path`、环境变量或测试开关。
+- **非披露（存在性）**：闸门通过后，已授权调用方对**范围外 / 来源已删除 / 归属未知**与**不存在**的入库单返回**同一**非披露错误 `NotFound`（`StockInAuthorizationRules.NotFoundText` = 「入库单不存在」）；分页列表 / 详情 / 流水 / 生命周期的可见性**完全同口径**（列表隐藏的单据在详情 / 流水 / 生命周期一律「不存在」），绝不透露范围外单据的 Id / 单号 / 归属客户。
 - **主数据可用性**（创建 / 修改）：供应商与仓库必须真实可用（存在、未删除、已启用），否则拒绝且不落库。
 - **来源归属（数据范围）**：
-  - 链接采购订单的入库单：来源订单归属客户必须落在当前账号客户数据范围（既有 `SalespersonDataScopeService` 口径）之内，否则拒绝且不泄露范围外客户；
-  - 合法的未链接入库单：仅允许**既有已映射入库操作员**访问（未映射到业务员的账号 fail closed）。
+  - 链接采购订单的入库单：来源订单归属客户必须落在当前账号客户数据范围（既有 `SalespersonDataScopeService` 口径）之内；请求侧（创建 / 修改提交的来源）**范围外 / 已删除 / 归属未知与「不存在」返回同一非披露拒绝**（`StockInAuthorizationRules.SourceScopeDeniedText`，与既有来源候选口径同源），绝不泄露范围外来源归属；
+  - 合法的未链接入库单：仅允许**既有已映射入库操作员**访问（未映射到业务员的账号在闸门内 fail closed）。
 - **写入前校验、单号不浪费**：创建时授权与来源校验先于单号生成——被拒绝的调用方绝不消耗单据号（`SysDocumentNumberRules.CurrentSequence` 不前进）。
-- **已存与请求两侧归属**：修改（`PUT`）同时校验「已存单据」与「请求内容」的来源归属；既有来源越界或新来源越界都拒绝，且原单据来源保持不变。
-- **事务内复核**：审核 / 取消把实时授权与来源归属复核放进与库存写入同一个可串行化事务（来源订单 `UPDLOCK/HOLDLOCK` 串行化同单并发），读取之后撤销授权立即收敛。
-- **读取作用域一致**：分页列表只返回「链接订单归属客户在范围内」的入库单与未链接入库单；详情 / 流水与列表同一口径，范围外单据一律拒绝（不泄露 Id / 单号）。
+- **已存与请求两侧归属**：修改（`PUT`）先复核**已存单据可见性**（范围外 / 归属未知按「不存在」非披露拒绝），再校验**请求内容**的来源归属；既有来源越界或新来源越界都拒绝，且原单据来源 / 状态 / 明细保持不变。
+- **事务内复核**：审核 / 取消把实时授权与来源归属复核放进与库存写入同一个可串行化事务（来源订单 `UPDLOCK/HOLDLOCK` 串行化同单并发）；行锁在闸门与可见性判定**之后**取得，读取之后撤销授权 / 禁用账号立即收敛、整体回滚。
+- **读取作用域一致**：分页列表只返回「链接订单归属客户在范围内」的入库单与未链接入库单；详情 / 流水与列表使用**同一可见性谓词**，范围外单据一律按「不存在」拒绝（不泄露 Id / 单号）。
 - **写入复用既有服务**：库存增减与冲销全部复用既有 `IInventoryService`（ERP-009 / ERP-025），成本口径仍为 ERP-033（订单单价）/ ERP-342 / ERP-344 既有规则，本次不改变任何数量或成本算法。
 - **审计保留**：单据状态、`UpdatedAt`、库存流水与成本来源备注均按既有写入路径保留，不删除历史证据。
 
 ## 3. 实现
 
-- `src/ERP.Application/Services/StockInAuthorizationRules.cs`：纯判定 + 有界只读查询（身份 / 状态 / 菜单、供应商与仓库可用性、按 Id 解析来源订单归属客户、列表作用域），不落库、不改单据 / 库存 / 主数据、不新增权限。
+- `src/ERP.Application/Services/StockInAuthorizationRules.cs`：纯判定 + 有界只读查询（统一闸门：身份 / 状态 / 业务员映射 / 菜单；供应商与仓库可用性；按 Id 解析来源订单归属客户；单据可见性与列表作用域），不落库、不改单据 / 库存 / 主数据、不新增权限。
 - `src/ERP.Api/Controllers/StockInController.cs`：
-  - `GetPaged` → `ApplyScopeAsync`（含身份 / 菜单 fail closed）；
-  - `GetById` / `GetMovements` → `EnsureAuthorizedAsync(entity)`；
-  - `Create` → 授权 + 主数据 + 来源范围校验**先于** `IDocumentNumberService.GenerateAsync`；
-  - `Update` / `Submit` / `Delete` → 先校验已存单据归属，`Update` 再校验请求侧归属；
-  - `Approve` / `Cancel` → 事务内再复核授权与来源，失败整体回滚（库存 / 流水 / 状态不变）。
+  - `GetPaged` → `ApplyScopeAsync`（闸门在计数 / 分页之前 fail closed，范围下推数据库）；
+  - `GetById` / `GetMovements` → **先闸门** `EnsureMenuAuthorizedAsync`，再读取单据 / 流水，最后 `EnsureReceiptVisibleAsync`（范围外与不存在同错）；
+  - `Create` → 闸门 + 主数据 + 来源范围校验**先于** `IDocumentNumberService.GenerateAsync`；
+  - `Update` / `Submit` / `Delete` → **先闸门**，再复核已存单据可见性，`Update` 再校验请求侧来源归属；
+  - `Approve` / `Cancel` → **先闸门与可见性**，再取事务与行锁，锁内再复核实时授权与来源，失败整体回滚（库存 / 流水 / 状态不变）；
+  - 身份只来自已认证请求主体（`CurrentInboundUserId()`：缺少请求上下文 / 非数字安全解析为 `null` → 受控未认证，无任何豁免分支）。
 
 ## 4. 测试
 
-- `src/ERP.UnitTests/StockInAuthorizationTests.cs`：内存库 + **真实 HTTP 身份**（`StockInTestAuthorization` 播种 `SuperAdmin` / 受限制入库操作员、`stock-in` 菜单、供应商 / 仓库 / 订单 / 客户）。覆盖缺失 / 未映射菜单 / 禁用账号、全部九条路由对拒绝方零副作用且不消耗单号、授权未链接入库单放行、范围外客户订单在创建与读取两侧拒绝、编辑把来源改到范围外被拒绝且已存来源不变、读取与审核 / 取消之间撤销授权（撤菜单 / 禁用账号）立即收敛、分页 / 详情 / 流水作用域一致，以及授权路径的基础单位数量 / 订单成本 / 冲销一致。
+- `src/ERP.UnitTests/StockInAuthorizationTests.cs`：内存库 + **真实 HTTP 身份**（`StockInTestAuthorization` 播种 `SuperAdmin` / 受限制入库操作员、`stock-in` 菜单、供应商 / 仓库 / 订单 / 客户）。覆盖缺失 / 未映射菜单 / 禁用 / 未映射业务员账号、全部九条路由对拒绝方零副作用且不消耗单号、**缺失 / 禁用 / 无菜单 / 未映射调用方对「已存在」与「不存在」的 Id 得到同一受控错误**、授权未链接入库单放行、范围外客户订单在创建 / 读取 / 全部生命周期路由与「不存在」返回**同一非披露错误**、编辑把来源改到范围外被拒绝且已存来源不变、读取与审核 / 取消之间撤销授权（撤菜单 / 禁用账号）立即收敛、分页 / 详情 / 流水作用域一致，以及授权路径的基础单位数量 / 订单成本 / 冲销一致。
+- `src/ERP.UnitTests/StockInCanonicalEntryTests.cs`：新增源码级接线契约测试，断言每一条读取 / 生命周期入口的实时闸门都先于任何单据读取、先于流水查询与任何行锁，分页在任何计数之前完成范围下推，且身份只来自已认证请求主体（无匿名 / 测试开关旁路）。
 - `src/ERP.UnitTests/PurchaseStockInCostTests.cs` 等旧夹具：改为经 `StockInTestAuthorization` / `StockInLegacyTestFixture` 注入**真实已授权测试身份**并播种真实供应商 / 仓库，保留全部原有数量 / 成本 / 冲销断言（不绕过授权、不放宽来源校验）。
 - `src/ERP.UnitTests/StockInMissingContextTests.cs`：无 HTTP 上下文时必须按未认证拒绝，绝不退化为管理员。
-- `src/ERP.IntegrationTests/StockInAuthorizationSqlServerTests.cs`：真实 SQL Server（专用 localdb）覆盖无身份 / 禁用 / 无菜单拒绝且库存与流水不变、种子管理员的合法放行、受限制操作员的范围内 / 未链接放行与范围外拒绝、读取后撤销菜单授权立即 fail closed。
+- `src/ERP.IntegrationTests/StockInAuthorizationSqlServerTests.cs`：真实 SQL Server（专用 localdb）覆盖无身份 / 禁用 / 无菜单拒绝且库存与流水不变、种子管理员的合法放行、受限制操作员的范围内 / 未链接放行与范围外非披露拒绝、**控制器级「已存在与非存在 Id 同错」与范围外详情 / 流水 / 取消的非披露**、读取后撤销菜单授权立即 fail closed。
 
 ## 5. 安全（真实 SQL 夹具口径）
 

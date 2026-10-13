@@ -244,6 +244,53 @@ public class StockInCanonicalEntryTests
         Assert.Contains("d.IsDeleted = false;", controller);
     }
 
+    /// <summary>
+    /// ERP-352：每一条读取 / 生命周期入口都必须先执行统一实时闸门（身份 / 账号状态 / 业务员映射 / 既有「采购入库」菜单），
+    /// 闸门先于任何入库单字节读取、先于流水查询与任何行锁；分页列表在任何计数之前完成范围下推。
+    /// </summary>
+    [Fact]
+    public void Controller_实时闸门先于任何单据读取与行锁()
+    {
+        var controller = ReadSource("src", "ERP.Api", "Controllers", "StockInController.cs");
+
+        foreach (var signature in new[]
+                 {
+                     "public async Task<IActionResult> GetById(long id)",
+                     "public async Task<IActionResult> GetMovements(long id)",
+                     "public async Task<IActionResult> Create([FromBody] StockIn entity)",
+                     "public async Task<IActionResult> Update(long id, [FromBody] StockIn entity)",
+                     "public override async Task<IActionResult> Submit(long id)",
+                     "public override async Task<IActionResult> Delete(long id)",
+                     "public override async Task<IActionResult> Approve(long id)",
+                     "public override async Task<IActionResult> Cancel(long id)"
+                 })
+        {
+            var body = MethodBody(controller, signature);
+            var gate = body.IndexOf("StockInAuthorizationRules.EnsureMenuAuthorizedAsync", StringComparison.Ordinal);
+            var receiptRead = body.IndexOf("FirstOrDefaultAsync", StringComparison.Ordinal);
+            Assert.True(gate >= 0, $"{signature} 必须先执行实时身份 / 菜单闸门");
+            Assert.True(receiptRead < 0 || gate < receiptRead, $"{signature} 的闸门必须先于任何入库单字节读取");
+        }
+
+        // 行锁 / 流水查询同样在闸门与可见性判定之后。
+        var cancel = MethodBody(controller, "public override async Task<IActionResult> Cancel(long id)");
+        Assert.True(cancel.IndexOf("EnsureMenuAuthorizedAsync", StringComparison.Ordinal)
+                    < cancel.IndexOf("LockSourceReceiptRowAsync(id)", StringComparison.Ordinal));
+        var approve = MethodBody(controller, "public override async Task<IActionResult> Approve(long id)");
+        Assert.True(approve.IndexOf("EnsureMenuAuthorizedAsync", StringComparison.Ordinal)
+                    < approve.IndexOf("AcquireOrderApprovalLockAsync(entity.PurchaseOrderId)", StringComparison.Ordinal));
+
+        // 分页列表在任何计数之前完成范围下推（闸门在 ApplyScopeAsync 内）。
+        var paged = MethodBody(controller, "public async Task<IActionResult> GetPaged(");
+        Assert.True(paged.IndexOf("StockInAuthorizationRules.ApplyScopeAsync", StringComparison.Ordinal)
+                    < paged.IndexOf("CountAsync", StringComparison.Ordinal));
+
+        // 绝无匿名 / 测试开关旁路：身份只来自已认证请求主体，缺失请求上下文安全解析为 null（受控未认证）。
+        Assert.DoesNotContain("[AllowAnonymous]", controller);
+        Assert.Contains("private long? CurrentInboundUserId()", controller);
+        Assert.Contains("=> ControllerContext?.HttpContext is null ? null : CurrentUserId();", controller);
+    }
+
     // ==================== 6. 菜单路由 / 规范模块 / 选择器接线契约 ====================
 
     [Fact]
@@ -403,5 +450,14 @@ public class StockInCanonicalEntryTests
         Assert.NotNull(directory);
         return File.ReadAllText(Path.Combine(directory!.FullName,
             Path.Combine(segments).Replace('/', Path.DirectorySeparatorChar)));
+    }
+
+    /// <summary>截取控制器源码中某个路由方法（签名 → 下一个成员文档注释之前）的正文。</summary>
+    private static string MethodBody(string source, string signature)
+    {
+        var start = source.IndexOf(signature, StringComparison.Ordinal);
+        Assert.True(start >= 0, $"未找到路由方法：{signature}");
+        var end = source.IndexOf("\n    /// <summary>", start, StringComparison.Ordinal);
+        return end < 0 ? source[start..] : source[start..end];
     }
 }
