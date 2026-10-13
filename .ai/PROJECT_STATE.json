@@ -1,10 +1,15 @@
 {
   "schema_version": 2,
   "project": "NEWERP",
-  "updated_at": "2026-10-13T22:43:15.541220Z",
-  "phase": "ready",
-  "current_task": null,
-  "queue": [],
+  "updated_at": "2026-10-13T22:51:38.951501Z",
+  "phase": "blocked",
+  "current_task": "ERP-500",
+  "queue": [
+    "ERP-500",
+    "ERP-501",
+    "ERP-502",
+    "ERP-503"
+  ],
   "completed": [
     "ERP-000",
     "ERP-001",
@@ -499,16 +504,23 @@
   },
   "git_sync": {
     "branch": "main",
-    "local_sha": "3625dd4",
+    "local_sha": "9b81f28",
     "status": "synced",
     "ahead": 0,
     "behind": 0,
     "last_attempt_at": "2026-10-13T22:43:15.415220Z",
     "last_error": null
   },
-  "next_recommended_tasks": [],
+  "next_recommended_tasks": [
+    "ERP-500",
+    "ERP-501",
+    "ERP-502",
+    "ERP-503"
+  ],
   "runner": {
     "status": "stopped",
     "pid": null
-  }
+  },
+  "blocker": "Working tree is not clean",
+  "finish_reason": "dirty_worktree"
 }
