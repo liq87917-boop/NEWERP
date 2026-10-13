@@ -395,6 +395,24 @@ public class PurchaseQuoteConversionMutationTests
         Assert.Equal(2, only.LineCount);
     }
 
+    // ==================== ERP-476：唯一承诺复核入口（源码契约） ====================
+
+    [Fact]
+    public void 源码契约_单行与批次共用唯一承诺复核入口()
+    {
+        var controller = ReadSource("src", "ERP.Api", "Controllers", "PurchaseQuoteController.cs");
+        Assert.Contains("EnsureSourceMasterReferencesAsync(_db, new[] { quote })", controller);
+        Assert.Contains("precheck.Groups.SelectMany(g => g.Lines).ToList())", controller);
+
+        var conversion = ReadSource("src", "ERP.Api", "Controllers", "PurchaseQuoteConversion.cs");
+        Assert.Contains("PurchaseQuoteMasterReferenceRules.EnsureCommitmentReferencesAsync", conversion);
+        Assert.Contains("EnsureSourceMasterReferencesAsync", conversion);
+    }
+
+    private static string ReadSource(params string[] segments)
+        => System.IO.File.ReadAllText(System.IO.Path.GetFullPath(System.IO.Path.Combine(
+            new[] { AppContext.BaseDirectory, "..", "..", "..", "..", ".." }.Concat(segments).ToArray())));
+
     // ==================== 工厂 / 种子数据 ====================
 
     private static PurchaseQuoteController NewController(ErpDbContext db)

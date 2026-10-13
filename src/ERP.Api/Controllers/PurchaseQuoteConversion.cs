@@ -21,7 +21,12 @@ namespace ERP.Api.Controllers;
 ///    （保存走 <c>POST /api/purchase-orders</c>，同一套服务端复核）；
 /// 4) 「直接生成」在服务端一次落库，并以来源判据守卫重复生成，绝不更新 / 覆盖既有采购订单；
 /// 5) 明细数量 / 单价 / 金额与订单总额一律由服务端按采购订单口径复核
-///    （复用 <see cref="PurchaseOrderController.Calculate" /> 与 <see cref="PurchaseOrderController.Validate" />）。
+///    （复用 <see cref="PurchaseOrderController.Calculate" /> 与 <see cref="PurchaseOrderController.Validate" />）；
+/// 6) ERP-476：「比价行 → 采购订单」是**采购承诺**，真实 HTTP 请求在既有来源行锁内、映射草稿与采购单号预约之前
+///    由 <see cref="PurchaseQuoteMasterReferenceRules.EnsureCommitmentReferencesAsync"/> 复核**实时主数据引用** ——
+///    供应商与商品引用必须显式存在且为正整数（绝不把缺失 / 0 静默当作实时采购引用），解析到既有档案时必须
+///    未删除 / 启用，归属客户填写时必须解析到实时客户；失败即整批受控拒绝，绝不消耗采购单号、绝不落库、
+///    绝不改写来源状态（唯一入口见 <see cref="EnsureSourceMasterReferencesAsync"/>）。
 /// </remarks>
 public static class PurchaseQuoteConversion
 {
@@ -89,6 +94,27 @@ public static class PurchaseQuoteConversion
         return MapDraft(quote, salesOrderId, salesOrderNo, decision.DecisionRef);
     }
 
+    // ==================== ERP-476：采购承诺前的来源实时主数据引用复核（单行 / 批次共用唯一入口） ====================
+
+    /// <summary>
+    /// 采购承诺（带入预填 / 单行转采购订单 / 批次转采购订单）前的**来源实时主数据引用**复核（唯一入口，
+    /// 单行与批次逐字共用，绝不出现两套口径）：
+    /// <list type="bullet">
+    /// <item>供应商与商品引用必须**显式存在且为正整数** —— 缺失 / 零 / 负数一律受控拒绝，
+    /// 绝不把 <c>ProductId = 0</c> 静默映射成采购明细的实时商品引用，也绝不生成无供应商的采购订单；</item>
+    /// <item>解析到既有档案时必须**未删除 / 启用**（供应商 / 商品），归属客户填写时必须解析到**未删除 / 启用**
+    /// 的实时客户；</item>
+    /// <item>解析不到档案的历史悬空弱引用保持既有可转换口径（<b>绝不回填、绝不静默改派</b>来源引用）；</item>
+    /// <item>去重集合**各一次**有界批量查询，任一行不合格即整批受控拒绝：必须在既有来源行锁内、
+    /// **映射草稿与采购单号预约之前**调用，失败即零单号消耗、零表头 / 明细 / 来源状态写入。</item>
+    /// </list>
+    /// 唯一权威判定由 <see cref="PurchaseQuoteMasterReferenceRules"/> 提供；本方法只是控制器与转换入口共用的
+    /// **单一接线点**（避免单行 / 批次出现两套复核）。
+    /// </summary>
+    public static async Task EnsureSourceMasterReferencesAsync(IErpDbContext db, IReadOnlyList<PurchaseQuote>? lines,
+        CancellationToken ct = default)
+        => await PurchaseQuoteMasterReferenceRules.EnsureCommitmentReferencesAsync(db, lines, ct);
+
     // ==================== 重复生成守卫（同一比价行仅一张采购订单） ====================
 
     /// <summary>
@@ -136,7 +162,10 @@ public static class PurchaseQuoteConversion
     /// 付款条件 ← PaymentTerms；交货日期 = 今天 + DeliveryDays（≤0 留空）；
     /// 供应商确认交期 = 交货日期（比价交期本身即供应商承诺）；归属客户 ← CustomerId / CustomerName；
     /// 归属销售订单 ← RefOrderNo 解析出的销售订单（匹配不到留空）；备注 ← 比价备注 + 来源标记；
-    /// 明细 = 该比价行一行（商品 / 规格 / 单位 / 数量 / 报价单价，商品未引用档案时 ProductId 按 0 占位）。
+    /// 明细 = 该比价行一行（商品 / 规格 / 单位 / 数量 / 报价单价）。
+    /// <para>ERP-476：真实 HTTP 承诺请求在映射之前已由 <see cref="EnsureSourceMasterReferencesAsync"/> 复核来源
+    /// 实时主数据引用（商品 / 供应商引用必须显式存在且为正整数），因此 <c>ProductId = 0</c> 占位只保留给
+    /// **未被任何请求绑定**的进程内直调（历史单元测试口径），绝不作为实时采购引用落库。</para>
     /// </summary>
     private static PurchaseOrder MapDraft(PurchaseQuote quote, long? owningSalesOrderId, string owningSalesOrderNo,
         string decisionRef)

@@ -439,6 +439,16 @@ public class PurchaseQuoteMutationTests
         Assert.Contains("PurchaseQuoteMutationRules.IsDecisionFreezingDeletion", controller);
         Assert.DoesNotContain("IsAttributedDecision", controller, StringComparison.Ordinal);
 
+        // ERP-476：比价写入 / 选择入口接通实时主数据引用复核（唯一规则 + 唯一承诺入口），不新增权限。
+        Assert.Contains("RequiresLiveMasterValidation", controller);
+        Assert.Contains("PurchaseQuoteMasterReferenceRules.EnsureComparisonReferencesAsync", controller);
+        Assert.Contains("PurchaseQuoteMasterReferenceRules.IsSelectionCommitment", controller);
+        Assert.Contains("PurchaseQuoteConversion.EnsureSourceMasterReferencesAsync", controller);
+        var masterRules = ReadSource("src", "ERP.Application", "Services", "PurchaseQuoteMasterReferenceRules.cs");
+        Assert.Contains("RuleText", masterRules);
+        Assert.Contains("BoundaryText", masterRules);
+        Assert.Contains("ToDictionaryAsync", masterRules);      // 有界批量查询：绝不逐行查库
+
         var approval = ReadSource("src", "ERP.Api", "Controllers", "PurchaseQuoteApproval.cs");
         Assert.Contains("PurchaseQuoteMutationRules.LockQuoteRowAsync", approval);
         Assert.Contains("PurchaseQuoteAuthorizationRules.EnsureLiveActorAsync", approval);

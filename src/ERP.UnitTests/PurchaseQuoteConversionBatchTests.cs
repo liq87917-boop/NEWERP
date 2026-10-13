@@ -4,9 +4,12 @@ using ERP.Application.Services;
 using ERP.Domain.Entities;
 using ERP.Domain.Enums;
 using ERP.Infrastructure.Data;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Routing;
+using Microsoft.EntityFrameworkCore;
 using System.Reflection;
+using System.Security.Claims;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Xunit;
@@ -724,9 +727,166 @@ public class PurchaseQuoteConversionBatchTests
         Assert.Contains(template, templates);
     }
 
+    /// <summary>
+    /// ERP-476：真实 HTTP 承诺请求形状的控制器（<c>Request.Path</c> 已赋值 → 实时主数据引用复核执行；
+    /// 特权账号 + 既有「供应商比价」/「采购订单」菜单 → 既有授权放行；不新增 / 不放宽任何授权）。
+    /// </summary>
+    private static PurchaseQuoteController HttpController(ErpDbContext db)
+    {
+        var role = new SysRole
+        {
+            RoleName = $"erp476-b-{Guid.NewGuid():N}", RoleCode = $"erp476-b-{Guid.NewGuid():N}",
+            IsSystem = true
+        };
+        db.SysRoles.Add(role);
+        db.SaveChanges();
+        var user = new SysUser
+        {
+            UserName = $"erp476-b-{Guid.NewGuid():N}", PasswordHash = "hash", PasswordSalt = "salt",
+            DisplayName = "ERP476 特权账号", Status = UserStatus.Enabled
+        };
+        db.SysUsers.Add(user);
+        db.SaveChanges();
+        db.SysUserRoles.Add(new SysUserRole { UserId = user.Id, RoleId = role.Id });
+        db.SaveChanges();
+        foreach (var menuCode in new[]
+                 {
+                     PurchaseQuoteAuthorizationRules.RequiredMenuCode,
+                     PurchaseQuoteAuthorizationRules.DestinationMenuCode
+                 })
+        {
+            var menu = db.SysMenus.FirstOrDefault(m => m.MenuCode == menuCode && !m.IsDeleted);
+            if (menu is null)
+            {
+                menu = new SysMenu { MenuName = menuCode, MenuCode = menuCode, MenuType = MenuType.Menu };
+                db.SysMenus.Add(menu);
+                db.SaveChanges();
+            }
+            db.SysRoleMenus.Add(new SysRoleMenu { RoleId = role.Id, MenuId = menu.Id });
+            db.SaveChanges();
+        }
+
+        var controller = new PurchaseQuoteController(new GenericService<PurchaseQuote>(db), db,
+            new DocumentNumberService(db));
+        var http = new DefaultHttpContext();
+        http.Request.Path = "/api/purchase/quotes";
+        http.User = new ClaimsPrincipal(new ClaimsIdentity(
+            new[] { new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()) }, "Test"));
+        controller.ControllerContext = new ControllerContext { HttpContext = http };
+        return controller;
+    }
+
+    private static BaseSupplier SeedLiveSupplier(ErpDbContext db)
+    {
+        var supplier = new BaseSupplier
+        {
+            SupplierCode = $"S-476-{Guid.NewGuid():N}", SupplierName = "ERP476 实时供应商", Status = 1
+        };
+        db.BaseSuppliers.Add(supplier);
+        db.SaveChanges();
+        return supplier;
+    }
+
+    private static BaseProduct SeedLiveProduct(ErpDbContext db)
+    {
+        var product = new BaseProduct
+        {
+            ProductCode = $"P-476-{Guid.NewGuid():N}", ProductName = "ERP476 实时商品", Unit = "PCS", Status = 1
+        };
+        db.BaseProducts.Add(product);
+        db.SaveChanges();
+        return product;
+    }
+
+    private static BaseCustomer SeedLiveCustomer(ErpDbContext db)
+    {
+        var customer = new BaseCustomer
+        {
+            CustomerCode = $"C-476-{Guid.NewGuid():N}", CustomerName = "ERP476 实时客户", Status = 1,
+            CreditStatus = "正常", DepositRatio = 30m
+        };
+        db.BaseCustomers.Add(customer);
+        db.SaveChanges();
+        return customer;
+    }
+
+    private static SysDocumentNumberRule SeedPurchaseOrderNumberRule(ErpDbContext db, long current)
+    {
+        var rule = new SysDocumentNumberRule
+        {
+            DocumentType = DocumentType.PurchaseOrder, RuleCode = $"PO-{Guid.NewGuid():N}", RuleName = "采购订单单号",
+            Prefix = "PO", DateFormat = "yyyyMMdd", SerialLength = 4, Separator = string.Empty,
+            CurrentSequence = current, IsDeleted = false
+        };
+        db.SysDocumentNumberRules.Add(rule);
+        db.SaveChanges();
+        return rule;
+    }
+
+    private static long PurchaseOrderSequence(ErpDbContext db, long ruleId)
+        => db.SysDocumentNumberRules.AsNoTracking().Single(r => r.Id == ruleId).CurrentSequence;
+
     /// <summary>前端脚本目录（沿测试程序集输出目录上溯到仓库根，与既有转换测试同一约定）</summary>
     private static string JsDirectory() => Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
         "..", "..", "..", "..", "..", "src", "ERP.Api", "wwwroot", "js"));
+
+    // ==================== ERP-476：真实 HTTP 承诺请求的实时主数据引用 ====================
+
+    [Fact]
+    public async Task HTTP批次承诺_一行商品引用缺失_整批拒绝零发号零写入()
+    {
+        using var db = TestDbFactory.Create();
+        var good = AddLine(db, BatchNo, 88L, 100m, 2m);
+        var bad = AddLine(db, BatchNo, 88L, 200m, 2m);
+        bad.ProductId = null;                        // 手工比价行：绝不静默映射 ProductId = 0
+        db.SaveChanges();
+        var rule = SeedPurchaseOrderNumberRule(db, 7);
+
+        var ex = await Assert.ThrowsAsync<BusinessException>(() => HttpController(db).BatchToOrder(
+            new PurchaseQuoteBatchConversionRequest { QuoteNo = BatchNo }));
+
+        Assert.Equal(ErrorCodes.RuleConflict, ex.Code);
+        Assert.Contains(PurchaseQuoteMasterReferenceRules.CommitmentProductText, ex.Message);
+        Assert.Empty(db.PurchaseOrders);                                   // 绝不生成部分采购订单 / 部分批次组
+        Assert.Equal(7L, PurchaseOrderSequence(db, rule.Id));              // 零发号
+        foreach (var id in new[] { good.Id, bad.Id })
+        {
+            var source = db.PurchaseQuotes.AsNoTracking().Single(q => q.Id == id);
+            Assert.Equal(PurchaseQuoteConversion.SelectedStatus, source.Status);
+            Assert.Equal(string.Empty, source.RefOrderNo ?? string.Empty);
+        }
+    }
+
+    [Fact]
+    public async Task HTTP批次承诺_合法实时主数据_正向生成并留痕来源()
+    {
+        using var db = TestDbFactory.Create();
+        var supplier = SeedLiveSupplier(db);
+        var product = SeedLiveProduct(db);
+        var customer = SeedLiveCustomer(db);
+        var line1 = AddLine(db, BatchNo, supplier.Id, 100m, 2m, customerId: customer.Id);
+        var line2 = AddLine(db, BatchNo, supplier.Id, 200m, 3m, customerId: customer.Id);
+        line1.ProductId = product.Id;
+        line2.ProductId = product.Id;
+        db.SaveChanges();
+        var rule = SeedPurchaseOrderNumberRule(db, 7);
+
+        var ok = Assert.IsType<OkObjectResult>(await HttpController(db).BatchToOrder(
+            new PurchaseQuoteBatchConversionRequest { QuoteNo = BatchNo }));
+
+        var result = Assert.IsType<ApiResponse<PurchaseQuoteBatchConversionResult>>(ok.Value).Data!;
+        Assert.Equal(1, result.OrderCount);
+        var order = db.PurchaseOrders.Single();
+        Assert.Equal(supplier.Id, order.SupplierId);
+        Assert.Equal(2, db.PurchaseOrderDetails.Count(d => d.PurchaseOrderId == order.Id));
+        Assert.Equal(8L, PurchaseOrderSequence(db, rule.Id));
+        foreach (var id in new[] { line1.Id, line2.Id })
+        {
+            var source = db.PurchaseQuotes.AsNoTracking().Single(q => q.Id == id);
+            Assert.Equal(PurchaseQuoteConversion.ConvertedStatus, source.Status);
+            Assert.Equal(order.OrderNo, source.RefOrderNo);
+        }
+    }
 
     /// <summary>
     /// 比价行：报价总额故意写成 1（验证服务端按采购订单口径重算，不采信来源总额）；

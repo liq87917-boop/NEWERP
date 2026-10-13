@@ -7,6 +7,7 @@ using ERP.Infrastructure.Data;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Routing;
+using Microsoft.EntityFrameworkCore;
 using System.Reflection;
 using System.Security.Claims;
 using Xunit;
@@ -437,4 +438,131 @@ public class PurchaseQuoteApprovalTests
         db.SaveChanges();
         return quote;
     }
+
+    // ==================== ERP-476：审批后承诺的实时主数据引用复核 ====================
+
+    [Fact]
+    public async Task 批准后主数据失效_承诺转采购订单受控拒绝且决定与来源不变()
+    {
+        using var db = TestDbFactory.Create();
+        var supplier = SeedLiveSupplier(db);
+        var product = SeedLiveProduct(db);
+        var customer = SeedLiveCustomer(db);
+        var approver = SeedPrivilegedUser(db, "ERP476 审批人");
+        var quote = SeedQuote(db, "PQ-476-APPROVED-INVALIDATED", supplier.Id);
+        quote.ProductId = product.Id;
+        quote.CustomerId = customer.Id;
+        db.SaveChanges();
+        var rule = SeedPurchaseOrderNumberRule(db, 7);
+
+        // 有效审批决定（append-only）先落库：批准选中供应商。
+        var decision = await DecideLiveAsync(db, approver, new PurchaseQuoteDecisionRequest
+        {
+            QuoteId = quote.Id, Decision = PurchaseQuoteApproval.Approved, DecisionBasis = "单价最优"
+        });
+        Assert.Equal(supplier.Id, decision.SelectedSupplierId);
+
+        // 审批之后、承诺之前供应商档案被停用（主数据失效）。
+        supplier.Status = 0;
+        db.SaveChanges();
+
+        var ex = await Assert.ThrowsAsync<BusinessException>(() =>
+            HttpQuoteController(db, approver).ToPurchaseOrder(quote.Id));
+
+        Assert.Equal(ErrorCodes.RuleConflict, ex.Code);
+        Assert.Empty(db.PurchaseOrders);                                   // 零写入
+        Assert.Equal(7L, PurchaseOrderSequence(db, rule.Id));              // 零发号
+        var stored = db.PurchaseQuoteDecisions.AsNoTracking().Single();
+        Assert.Equal(PurchaseQuoteApproval.Approved, stored.Decision);      // 审批决定历史一字不改
+        Assert.Equal(supplier.Id, stored.SelectedSupplierId);
+        Assert.False(stored.IsDeleted);
+        var source = db.PurchaseQuotes.AsNoTracking().Single();
+        Assert.Equal(PurchaseQuoteConversion.SelectedStatus, source.Status);
+        Assert.Equal(string.Empty, source.RefOrderNo ?? string.Empty);
+    }
+
+    /// <summary>
+    /// ERP-476：真实 HTTP 承诺请求形状的比价控制器（<c>Request.Path</c> 已赋值 → 实时主数据引用复核执行；
+    /// 复用既有特权账号并授予既有菜单，不新增 / 不放宽任何授权）。
+    /// </summary>
+    private static PurchaseQuoteController HttpQuoteController(ErpDbContext db, long userId)
+    {
+        var roleId = db.SysUserRoles.Where(ur => ur.UserId == userId && !ur.IsDeleted)
+            .Select(ur => ur.RoleId).First();
+        foreach (var menuCode in new[]
+                 {
+                     PurchaseQuoteAuthorizationRules.RequiredMenuCode,
+                     PurchaseQuoteAuthorizationRules.DestinationMenuCode
+                 })
+        {
+            var menu = db.SysMenus.FirstOrDefault(m => m.MenuCode == menuCode && !m.IsDeleted);
+            if (menu is null)
+            {
+                menu = new SysMenu { MenuName = menuCode, MenuCode = menuCode, MenuType = MenuType.Menu };
+                db.SysMenus.Add(menu);
+                db.SaveChanges();
+            }
+            db.SysRoleMenus.Add(new SysRoleMenu { RoleId = roleId, MenuId = menu.Id });
+            db.SaveChanges();
+        }
+
+        var controller = new PurchaseQuoteController(new GenericService<PurchaseQuote>(db), db,
+            new DocumentNumberService(db));
+        var http = new DefaultHttpContext();
+        http.Request.Path = "/api/purchase/quotes";
+        http.User = new ClaimsPrincipal(new ClaimsIdentity(
+            new[] { new Claim(ClaimTypes.NameIdentifier, userId.ToString()) }, "Test"));
+        controller.ControllerContext = new ControllerContext { HttpContext = http };
+        return controller;
+    }
+
+    private static BaseSupplier SeedLiveSupplier(ErpDbContext db)
+    {
+        var supplier = new BaseSupplier
+        {
+            SupplierCode = $"S-476-{Guid.NewGuid():N}", SupplierName = "ERP476 实时供应商", Status = 1
+        };
+        db.BaseSuppliers.Add(supplier);
+        db.SaveChanges();
+        return supplier;
+    }
+
+    private static BaseProduct SeedLiveProduct(ErpDbContext db)
+    {
+        var product = new BaseProduct
+        {
+            ProductCode = $"P-476-{Guid.NewGuid():N}", ProductName = "ERP476 实时商品", Unit = "PCS", Status = 1
+        };
+        db.BaseProducts.Add(product);
+        db.SaveChanges();
+        return product;
+    }
+
+    private static BaseCustomer SeedLiveCustomer(ErpDbContext db)
+    {
+        var customer = new BaseCustomer
+        {
+            CustomerCode = $"C-476-{Guid.NewGuid():N}", CustomerName = "ERP476 实时客户", Status = 1,
+            CreditStatus = "正常", DepositRatio = 30m
+        };
+        db.BaseCustomers.Add(customer);
+        db.SaveChanges();
+        return customer;
+    }
+
+    private static SysDocumentNumberRule SeedPurchaseOrderNumberRule(ErpDbContext db, long current)
+    {
+        var rule = new SysDocumentNumberRule
+        {
+            DocumentType = DocumentType.PurchaseOrder, RuleCode = $"PO-{Guid.NewGuid():N}", RuleName = "采购订单单号",
+            Prefix = "PO", DateFormat = "yyyyMMdd", SerialLength = 4, Separator = string.Empty,
+            CurrentSequence = current, IsDeleted = false
+        };
+        db.SysDocumentNumberRules.Add(rule);
+        db.SaveChanges();
+        return rule;
+    }
+
+    private static long PurchaseOrderSequence(ErpDbContext db, long ruleId)
+        => db.SysDocumentNumberRules.AsNoTracking().Single(r => r.Id == ruleId).CurrentSequence;
 }
