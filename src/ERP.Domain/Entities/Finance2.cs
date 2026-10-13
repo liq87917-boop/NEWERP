@@ -9,8 +9,21 @@ namespace ERP.Domain.Entities;
 /// </summary>
 public class FinanceContainerSettlement : BaseEntity
 {
-    /// <summary>结算单号</summary>
-    [Required, MaxLength(50)]
+    /// <summary>
+    /// 结算单号（服务端权威生成：新增入口一律在实时身份 / 装柜结算单（<c>container-settlement</c>）菜单 / 客户范围、
+    /// 真实可用客户、正总金额与非负费用、来源装柜清单精确资格等全部校验通过之后，由 <c>IDocumentNumberService</c>
+    /// 预约覆盖，调用方提交值不参与持久化）。
+    /// <para>ERP-481：这里刻意<strong>不加</strong> <c>[Required]</c>（与 ERP-479 收款单号 · 付款单号 /
+    /// ERP-480 定金申请单号 · 货款申请单号同源口径）。手工录入表单不提交结算单号，MVC 对非空引用类型属性本就会
+    /// 推断一个 <c>AllowEmptyStrings = true</c> 的隐式必填（允许空串）；而显式 <c>[Required]</c>（默认
+    /// <c>AllowEmptyStrings = false</c>）会把「省略结算单号」在模型绑定 / 模型校验阶段直接拒绝为 HTTP 400
+    /// <c>{"errors":{"SettlementNo":[...]}}</c>，服务端权威单号根本没有机会生成。移除显式特性后：省略 / 空串
+    /// 照常绑定并进入已授权的 <c>FinanceContainerSettlementController.Create</c>，服务端仍按唯一权威口径覆盖结算单号、
+    /// 主键、状态、删除态与时间戳；数据库列仍是 NOT NULL（非空 CLR 引用类型），长度仍受
+    /// <see cref="MaxLengthAttribute"/>(50) 约束，非法 / 越权请求的校验顺序不变
+    /// （授权与来源校验先于单号预约与任何写入）。</para>
+    /// </summary>
+    [MaxLength(50)]
     public string SettlementNo { get; set; } = string.Empty;
 
     /// <summary>结算日期</summary>
@@ -44,8 +57,20 @@ public class FinanceContainerSettlement : BaseEntity
 /// </summary>
 public class FinanceBulkSettlement : BaseEntity
 {
-    /// <summary>结算单号</summary>
-    [Required, MaxLength(50)]
+    /// <summary>
+    /// 结算单号（服务端权威生成：新增入口一律在实时身份 / 散货结算单（<c>bulk-settlement</c>）菜单 / 客户范围、
+    /// 真实可用客户、正总金额与非负海运费等全部校验通过之后，由 <c>IDocumentNumberService</c> 预约覆盖，
+    /// 调用方提交值不参与持久化）。
+    /// <para>ERP-481：这里刻意<strong>不加</strong> <c>[Required]</c>（与 ERP-479 / ERP-480 同源口径）。手工录入表单
+    /// 不提交结算单号，MVC 对非空引用类型属性本就会推断一个 <c>AllowEmptyStrings = true</c> 的隐式必填（允许空串）；
+    /// 而显式 <c>[Required]</c>（默认 <c>AllowEmptyStrings = false</c>）会把「省略结算单号」在模型绑定 / 模型校验
+    /// 阶段直接拒绝为 HTTP 400 <c>{"errors":{"SettlementNo":[...]}}</c>，服务端权威单号根本没有机会生成。移除显式特性后：
+    /// 省略 / 空串照常绑定并进入已授权的 <c>FinanceBulkSettlementController.Create</c>，服务端仍按唯一权威口径覆盖
+    /// 结算单号、主键、状态、删除态与时间戳；数据库列仍是 NOT NULL（非空 CLR 引用类型），长度仍受
+    /// <see cref="MaxLengthAttribute"/>(50) 约束，非法 / 越权请求的校验顺序不变
+    /// （授权与客户 / 金额校验先于单号预约与任何写入）。</para>
+    /// </summary>
+    [MaxLength(50)]
     public string SettlementNo { get; set; } = string.Empty;
 
     /// <summary>结算日期</summary>

@@ -109,6 +109,9 @@ public class FinanceContainerSettlementController : DocumentControllerBase<Finan
     /// <summary>
     /// 创建：在生成结算单号之前先完成身份 / 菜单授权 / 客户数据范围 + 金额 + 客户可用性 + 来源清单资格校验
     /// （授权与校验失败绝不消耗单号、绝不写入）；关系型后端在同一事务内先取来源装柜清单行锁、锁内权威复核后才生成单号并落库。
+    /// <para>ERP-481：结算单号<strong>允许省略</strong>（<see cref="FinanceContainerSettlement.SettlementNo"/> 不再显式必填），
+    /// 省略 / 空串 / 伪造值与伪造主键 · 状态 · 删除态 · 时间戳一律由服务端权威覆盖，被拒绝的请求零表头变化、
+    /// 零来源改写、零状态变化、零占号。</para>
     /// </summary>
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] FinanceContainerSettlement entity)
@@ -136,6 +139,9 @@ public class FinanceContainerSettlementController : DocumentControllerBase<Finan
             entity.Id = 0;
             entity.SettlementNo = await _noService.GenerateAsync(DocumentType.ContainerSettlement);
             entity.Status = DocumentStatus.Pending;
+            // ERP-481：主键 / 结算单号 / 状态 / 删除态 / 时间戳一律服务端权威覆盖，客户端注入值不参与持久化。
+            entity.IsDeleted = false;
+            entity.UpdatedAt = null;
             entity.TotalAmount = totalAmount;
             entity.FreightCost = freightCost;
             entity.OtherCost = otherCost;
@@ -402,6 +408,10 @@ public class FinanceBulkSettlementController : DocumentControllerBase<FinanceBul
     /// <summary>
     /// 创建：在生成结算单号之前先完成身份 / 菜单授权 / 客户数据范围 + 金额 + 客户可用性校验
     /// （授权与校验失败绝不消耗单号、绝不写入）；关系型后端在同一事务内锁内复核客户仍真实可用后才生成单号并落库。
+    /// <para>ERP-481：结算单号<strong>允许省略</strong>（<see cref="FinanceBulkSettlement.SettlementNo"/> 不再显式必填），
+    /// 省略 / 空串 / 伪造值与伪造主键 · 状态 · 删除态 · 时间戳一律由服务端权威覆盖，被拒绝的请求零表头变化、
+    /// 零客户改写、零状态变化、零占号。散货结算单没有来源单据字段，因此只保留手工 / 未关联客户口径，
+    /// 绝不按备注等自由文本推断装运 / 订单来源。</para>
     /// </summary>
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] FinanceBulkSettlement entity)
@@ -423,6 +433,9 @@ public class FinanceBulkSettlementController : DocumentControllerBase<FinanceBul
             entity.Id = 0;
             entity.SettlementNo = await _noService.GenerateAsync(DocumentType.BulkSettlement);
             entity.Status = DocumentStatus.Pending;
+            // ERP-481：主键 / 结算单号 / 状态 / 删除态 / 时间戳一律服务端权威覆盖，客户端注入值不参与持久化。
+            entity.IsDeleted = false;
+            entity.UpdatedAt = null;
             entity.TotalAmount = totalAmount;
             entity.FreightCost = freightCost;
             entity.CreatedAt = DateTime.Now;

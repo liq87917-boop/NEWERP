@@ -19,6 +19,10 @@
    边界：本选择器只做只读候选展示与来源 Id 回填：不锁库、不写库存 / 流水 / 财务、不改写清单 / 明细 / 参与方 / 客户主数据、
          不执行任何结算计算 / 分摊 / 记账 / 核销，也不新增表 / 菜单 / 用户授权；最终保存仍由服务端按
          FinanceContainerSettlementLifecycleRules 在锁内复核精确来源。
+   接线（ERP-481）：装柜结算单菜单已改由规范 EF 模块（modules-finance.js 的 'container-settlement' +
+   api/finance/container-settlements，规范 Id 口径）承载，模块字段声明
+   selector: 'container-settlement-loading-source' 且 nullable: true，因此本选择器从菜单入口即可用；
+   留空 = 显式断开来源（提交 null），最终仍由服务端复核，绝不臆造来源。
    ================================================================================== */
 
 /* 只有「待提交」可维护来源（与后端 FinanceContainerSettlementController 的状态判定一致） */

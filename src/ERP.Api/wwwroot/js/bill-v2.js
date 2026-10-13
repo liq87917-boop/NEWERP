@@ -51,9 +51,17 @@ const BILL_CODE_MAP = {
      旧族的写路径已被 ERP-404 门禁整体停用（fail closed），若继续映射，菜单会打开一张永远无法保存的旧单据页
      （api/v2/bills 写入口必然被拒）。旧族自身（BILL_CONFIG['deposit-apply'] / BILL_CONFIG['payment-apply'] 的
      旧库单体表 Oid 读侧 / 旧导出 / 既有默认值端点）保持只读可用，规范 Id 与旧 Oid 之间**不存在**任何映射。
-     ERP-479 的回归守卫（断言其路由改动未波及其它旧族键）以本说明中的原字面量保留，而路由判定已不再包含这两个键。 */
-  'container-settlement': 'container-settlement',
-  'bulk-settlement': 'bulk-settlement',
+     ERP-479 的回归守卫（断言其路由改动未波及其它旧族键）以本说明中的原字面量保留，而路由判定已不再包含这两个键。
+     ERP-481：装柜结算单（container-settlement）与散货结算单（bulk-settlement）同样改由 EF 规范模块承载
+     （modules-finance.js 的 'container-settlement' / 'bulk-settlement' 模块 + /api/finance/container-settlements、
+     /api/finance/bulk-settlements，规范 Id 口径 + ERP-384 / ERP-387 生命周期与来源锁 + ERP-392 显式装柜清单来源选择器），
+     因此这里**停用**原先的两条旧存储过程族映射（原地停用为迁移记录，不再参与任何路由判定）：
+       'container-settlement': 'container-settlement',
+       'bulk-settlement': 'bulk-settlement',
+     旧族的写路径已被 ERP-404 门禁整体停用（fail closed），若继续映射，菜单会打开一张永远无法保存的旧单据页
+     （api/v2/bills 写入口必然被拒）。旧族自身（BILL_CONFIG['container-settlement'] / BILL_CONFIG['bulk-settlement'] 的
+     旧库单体表 Oid 读侧 / 旧导出 / 既有默认值端点）保持只读可用，规范 Id 与旧 Oid 之间**不存在**任何映射，
+     也绝不因此启用任何旧写适配器。 */
   complaint: 'complaint',
   'receiving-plan': 'receiving-plan',
 };

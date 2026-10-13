@@ -78,6 +78,9 @@ Object.assign(MODULES, {
     ],
   },
   'container-settlement': {
+    /* ERP-481：既有「装柜结算单」菜单的规范 EF 模块（api/finance/container-settlements，规范 Id 口径）——
+       列表 / 详情 / 保存 / 提交 / 审核 / 取消 / 删除全走规范 Id，绝不把旧存储过程族 Oid 当作规范 Id。
+       单号由服务端权威生成（表单不提交结算单号），来源装柜清单由既有 ERP-392 显式选择器回填。 */
     title: '装柜结算单', api: '/api/finance/container-settlements', canSubmit: true,
     columns: [
       { key: 'settlementNo', label: '结算单号' }, { key: 'settlementDate', label: '日期', type: 'date' },
@@ -86,10 +89,15 @@ Object.assign(MODULES, {
     fields: [
       { key: 'settlementDate', label: '结算日期', type: 'date' }, { key: 'customerId', label: '客户Id', type: 'number' },
       /* ERP-392：来源装柜清单由「选择来源」有界选择器显式回填（也可手工填写 Id / 留空显式断开）；
-         选择器只回填权威来源 Id，绝不臆造柜号 / 清单号、绝不自动改动总金额 / 海运费 / 其他费用 */
-      { key: 'loadingListId', label: '来源装柜清单 ID（可留空；建议用「选择来源」）', type: 'number', selector: 'container-settlement-loading-source' },
+         选择器只回填权威来源 Id，绝不臆造柜号 / 清单号、绝不自动改动总金额 / 海运费 / 其他费用。
+         ERP-481：声明为显式可空引用（nullable: true）——留空提交 null（未关联来源的历史语义），
+         绝不回落为哨兵值 0；清空来源即「显式断开」，最终仍由服务端 ERP-384 在锁内按权威客户 / 供应商
+         参与方范围与清单资格复核。 */
+      { key: 'loadingListId', label: '来源装柜清单 ID（可留空 = 未关联；建议用「选择来源」）', type: 'number', nullable: true, selector: 'container-settlement-loading-source' },
       { key: 'totalAmount', label: '结算总金额', type: 'number' }, { key: 'freightCost', label: '海运费', type: 'number' },
       { key: 'otherCost', label: '其他费用', type: 'number' },
+      /* ERP-481：备注随表单提交，保证「保存 → 重开 → 修改」原样往返（不再因未声明字段而在编辑时被置空）。 */
+      { key: 'remark', label: '备注', type: 'textarea' },
     ],
     /* ERP-060：分摊证据（只读）——本单持久化金额字段只作原值回显，分摊证据不参与结算计算、也不回写本单 */
     rowActions: [
@@ -100,6 +108,9 @@ Object.assign(MODULES, {
     ],
   },
   'bulk-settlement': {
+    /* ERP-481：既有「散货结算单」菜单的规范 EF 模块（api/finance/bulk-settlements，规范 Id 口径）。
+       散货结算单没有来源单据与币种字段，因此保持**手工 / 未关联**语义：只录入客户与金额，
+       绝不臆造来源单据、绝不按备注等自由文本推断装运 / 订单来源，也不做币种换算 / 跨币种聚合 / 合计公式。 */
     title: '散货结算单', api: '/api/finance/bulk-settlements', canSubmit: true,
     columns: [
       { key: 'settlementNo', label: '结算单号' }, { key: 'settlementDate', label: '日期', type: 'date' },
@@ -108,6 +119,8 @@ Object.assign(MODULES, {
     fields: [
       { key: 'settlementDate', label: '结算日期', type: 'date' }, { key: 'customerId', label: '客户Id', type: 'number' },
       { key: 'totalAmount', label: '结算总金额', type: 'number' }, { key: 'freightCost', label: '海运费', type: 'number' },
+      /* ERP-481：备注随表单提交，保证「保存 → 重开 → 修改」原样往返（不再因未声明字段而在编辑时被置空）。 */
+      { key: 'remark', label: '备注', type: 'textarea' },
     ],
   },
   receipt: {
