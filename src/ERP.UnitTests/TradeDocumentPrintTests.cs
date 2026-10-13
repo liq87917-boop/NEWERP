@@ -3,6 +3,7 @@ using ERP.Application.Common;
 using ERP.Application.Interfaces;
 using ERP.Application.Services;
 using ERP.Domain.Entities;
+using ERP.Domain.Enums;
 using ERP.Infrastructure.Data;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Routing;
@@ -21,6 +22,11 @@ namespace ERP.UnitTests;
 /// 金额与份数为 0 视为未填写、单表台账无商品明细行、打印接口与路由、
 /// 打印模板登记与重复登记防护、前端行操作与脚本接线契约。
 /// 口径：只使用单证台账既有字段，不新增数据库结构或明细表。
+/// <para>ERP-493：打印模板授权在每一个入口<b>无条件</b>执行（与 <c>Request.Path</c> / 请求形状 / 是否绑定
+/// <c>HttpContext</c> 完全无关），因此其中 3 条驱动 <see cref="PrintTemplateController"/> 的既有夹具一律绑定
+/// 隔离内存测试库中的<b>真实启用身份</b>（持有既有「样式设计」<c>print-design</c> 菜单授权，与
+/// <see cref="PrintTemplateTests"/> 完全同一授予口径；默认空 <c>Request.Path</c>）；单证打印的既有业务 / 输出
+/// 断言全部保留，菜单 / 角色 / 账号只播种在隔离测试数据里，绝不新增或修改任何生产授权。</para>
 /// </summary>
 public class TradeDocumentPrintTests
 {
@@ -314,7 +320,7 @@ public class TradeDocumentPrintTests
         });
         await db.SaveChangesAsync();
 
-        var template = GetData<SysPrintTemplate>(await new PrintTemplateController(db).GetDefault("doc-center"));
+        var template = GetData<SysPrintTemplate>(await NewPrintTemplateController(db).GetDefault("doc-center"));
 
         Assert.Equal("单证中心", template.Title);        // 已登记中文名称，不会显示成 doc-center
         Assert.Equal("A4", template.PaperSize);
@@ -326,7 +332,7 @@ public class TradeDocumentPrintTests
     public async Task 打印模板_既有可打印类型标题不受单证中心登记影响()
     {
         using var db = TestDbFactory.Create();
-        var controller = new PrintTemplateController(db);
+        var controller = NewPrintTemplateController(db);
 
         Assert.Equal("销售订单", GetData<SysPrintTemplate>(await controller.GetDefault("sales-order")).Title);
         Assert.Equal("报价单", GetData<SysPrintTemplate>(await controller.GetDefault("quotation")).Title);
@@ -338,7 +344,7 @@ public class TradeDocumentPrintTests
     public async Task 打印模板_保存单证中心模板_不影响其他单据模板()
     {
         using var db = TestDbFactory.Create();
-        var controller = new PrintTemplateController(db);
+        var controller = NewPrintTemplateController(db);
 
         await controller.Save(new SysPrintTemplate
         {
@@ -473,6 +479,66 @@ public class TradeDocumentPrintTests
 
     private static TradeDocumentController NewTradeDocumentController(ErpDbContext db)
         => new(new GenericService<TradeDocument>(db), db);
+
+    /// <summary>
+    /// ERP-493：为单证打印的进程内打印模板夹具绑定一个真实启用身份 —— 该身份持有隔离内存测试库中的
+    /// 既有「样式设计」（<c>print-design</c>）菜单授权。夹具<b>不设置 <c>Request.Path</c></b>（默认空路径），
+    /// 以证明授权与请求路径 / 请求形状 / 是否绑定请求上下文完全无关。
+    /// 菜单 / 角色 / 账号只播种在隔离测试数据里，绝不新增或修改任何生产授权，也不使用任何测试专用开关。
+    /// </summary>
+    private static PrintTemplateController NewPrintTemplateController(ErpDbContext db)
+    {
+        var controller = new PrintTemplateController(db);
+        TestAuth.SetUser(controller, SeedPrintDesignOperator(db));
+        return controller;
+    }
+
+    /// <summary>
+    /// 播种启用账号 + 既有「样式设计」（<c>print-design</c>）菜单授权的角色（与生产端「角色 → 菜单」授予口径同源，
+    /// 与 <see cref="PrintTemplateTests"/> 的夹具完全同一口径）；只作用于传入的隔离测试数据库。
+    /// </summary>
+    private static long SeedPrintDesignOperator(ErpDbContext db)
+    {
+        var menu = db.SysMenus.FirstOrDefault(
+            m => m.MenuCode == PrintTemplateAuthorizationRules.RequiredMenuCode && !m.IsDeleted);
+        if (menu is null)
+        {
+            menu = new SysMenu
+            {
+                MenuCode = PrintTemplateAuthorizationRules.RequiredMenuCode,
+                MenuName = PrintTemplateAuthorizationRules.RequiredMenuText,
+                MenuType = MenuType.Menu,
+                Path = "/print-design"
+            };
+            db.SysMenus.Add(menu);
+            db.SaveChanges();
+        }
+
+        var role = new SysRole
+        {
+            RoleName = "单证打印模板测试角色",
+            RoleCode = $"TradeDocPrint-{Guid.NewGuid():N}",
+            IsSystem = false
+        };
+        db.SysRoles.Add(role);
+        db.SaveChanges();
+        db.SysRoleMenus.Add(new SysRoleMenu { RoleId = role.Id, MenuId = menu.Id });
+        db.SaveChanges();
+
+        var user = new SysUser
+        {
+            UserName = $"trade-doc-print-{Guid.NewGuid():N}",
+            DisplayName = "单证打印模板测试账号",
+            PasswordHash = "hash",
+            PasswordSalt = "salt",
+            Status = UserStatus.Enabled
+        };
+        db.SysUsers.Add(user);
+        db.SaveChanges();
+        db.SysUserRoles.Add(new SysUserRole { UserId = user.Id, RoleId = role.Id });
+        db.SaveChanges();
+        return user.Id;
+    }
 
     /// <summary>断言控制器方法上存在指定路由模板</summary>
     private static void AssertRouteTemplate(Type controller, string methodName, string expectedTemplate)

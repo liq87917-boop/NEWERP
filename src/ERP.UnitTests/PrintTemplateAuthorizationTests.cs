@@ -13,19 +13,23 @@ using Xunit;
 namespace ERP.UnitTests;
 
 /// <summary>
-/// ERP-450 打印模板（<c>api/sys/print-templates</c>）实时身份 / 既有 print-design 菜单 / 持久化列有界校验单元测试。
+/// ERP-450 / ERP-493 打印模板（<c>api/sys/print-templates</c>）实时身份 / 既有 print-design 菜单 / 持久化列有界校验单元测试。
 /// <list type="number">
-/// <item>清单 / 默认模板 / 保存 / 删除 / Excel 导出 / Excel 导入在读取任何模板行之前，对缺失 / 已删除 / 禁用身份与
+/// <item>清单 / 默认模板 / 保存 / 删除 / Excel 导出 / Excel 导入在读取任何模板行之前，对缺失 / 为零 / 未知 / 已删除身份与
 /// 无既有功能菜单身份 fail closed；撤销菜单后立即收敛。</item>
+/// <item><b>请求形状无关</b>（ERP-493）：未绑定 <c>HttpContext</c>、空 <c>Request.Path</c> 与已赋值
+/// <c>Request.Path</c> 对同一身份给出<b>完全相同</b>的判定 —— 原请求形状探针与其条件护栏已彻底移除，
+/// 不存在任何进程内直调豁免；</item>
 /// <item>放行路径：具备既有 print-design 菜单的操作员可读可写可删可导出；导入入口在授权后按既有契约处理空文件。</item>
 /// <item>保存校验：非法单据类型 / 超长名称 / 越界字号 / 非法颜色 / 非法字段顺序一律以既有受控错误拒绝，
 /// 且不落任何行、不改写既有模板与默认标记（不再静默改写 FontSize）。</item>
+/// <item><b>源码契约</b>：控制器全部路由先授权再读写，请求形状探针 / <c>Request.Path</c> 已彻底移除。</item>
 /// </list>
 /// <para>全部使用内存数据库（<see cref="TestDbFactory"/>），不连接 SQL Server、不启动 API、不新增任何权限。</para>
 /// </summary>
 public class PrintTemplateAuthorizationTests
 {
-    /// <summary>控制器路由前缀（模拟真实 HTTP 请求管线的 <c>Request.Path</c>，与 <c>EmployeeController</c> / ERP-414 同源口径）。</summary>
+    /// <summary>控制器路由前缀（模拟真实 HTTP 请求管线已赋值的 <c>Request.Path</c>；ERP-493 起与判定完全无关）。</summary>
     private const string BasePath = "/api/sys/print-templates";
 
     // ==================== 1. 身份 / 账号状态 / 菜单 fail closed ====================
@@ -73,6 +77,28 @@ public class PrintTemplateAuthorizationTests
     }
 
     [Fact]
+    public async Task 为零与未知身份_全部路由_未认证拒绝且不读写任何模板()
+    {
+        using var db = TestDbFactory.Create();
+        var seeded = SeedTemplate(db, "sales-order", "既有模板");
+        var before = Snapshot(db);
+
+        foreach (var userId in new long?[] { 0, 9_999_999 })
+        {
+            var ctl = NewController(db, userId);
+
+            await AssertCode(ErrorCodes.Unauthorized, () => ctl.GetList(null));
+            await AssertCode(ErrorCodes.Unauthorized, () => ctl.GetDefault("sales-order"));
+            await AssertCode(ErrorCodes.Unauthorized, () => ctl.Save(ValidTemplate()));
+            await AssertCode(ErrorCodes.Unauthorized, () => ctl.Delete(seeded.Id));
+            await AssertCode(ErrorCodes.Unauthorized, () => ctl.ExportExcel(seeded.Id));
+            await AssertCode(ErrorCodes.Unauthorized, () => ctl.ImportExcel(null));
+        }
+
+        AssertUnchanged(db, before);
+    }
+
+    [Fact]
     public async Task 无print_design菜单_全部路由_权限不足且文案指出模块授权()
     {
         using var db = TestDbFactory.Create();
@@ -111,16 +137,93 @@ public class PrintTemplateAuthorizationTests
         await AssertCode(ErrorCodes.Forbidden, () => ctl.ExportExcel(seeded.Id));
     }
 
+    /// <summary>
+    /// ERP-493：完全未绑定 <c>HttpContext</c> 的纯进程内直调不再存在任何授权豁免 —— 无身份一律受控未认证，
+    /// 且拒绝先于任何模板行读取 / 写入（<c>SysPrintTemplates</c> 快照逐字节不变）。
+    /// </summary>
     [Fact]
-    public async Task 进程内无身份直调_沿用既有免授权语义_绝不由外部请求到达()
+    public async Task 无HttpContext直调_缺失身份一律未认证且零写入()
     {
         using var db = TestDbFactory.Create();
-        // 既无任何登录身份、又不在 HTTP 请求管线内：这类调用不可能由外部请求到达，沿用既有单元测试口径。
-        // 对比：NewController(db, userId: null) 处于请求管线内（Request.Path 已赋值）→ 上面的用例已断言未认证拒绝。
-        var inProcess = InProcessController(db);
+        var seeded = SeedTemplate(db, "sales-order", "既有模板");
+        var before = Snapshot(db);
+        var ctl = ControllerWithoutHttp(db);
 
-        Assert.NotNull(GetData<List<SysPrintTemplate>>(await inProcess.GetList(null)));
-        Assert.Equal("sales-order", GetData<SysPrintTemplate>(await inProcess.GetDefault("sales-order")).BillType);
+        await AssertCode(ErrorCodes.Unauthorized, () => ctl.GetList(null));
+        await AssertCode(ErrorCodes.Unauthorized, () => ctl.GetDefault("sales-order"));
+        await AssertCode(ErrorCodes.Unauthorized, () => ctl.Save(ValidTemplate()));
+        await AssertCode(ErrorCodes.Unauthorized, () => ctl.Delete(seeded.Id));
+        await AssertCode(ErrorCodes.Unauthorized, () => ctl.ExportExcel(seeded.Id));
+        await AssertCode(ErrorCodes.Unauthorized, () => ctl.ImportExcel(null));
+
+        AssertUnchanged(db, before);
+    }
+
+    /// <summary>
+    /// ERP-493：同一身份在「空请求路径」与「已赋值请求路径」下对全部 6 条路由的判定完全一致
+    /// （请求形状探针已彻底移除）；无身份在任一形状（含未绑定 <c>HttpContext</c>）下读清单一律未认证。
+    /// </summary>
+    [Fact]
+    public async Task 空路径与已赋值路径_同身份判定完全一致()
+    {
+        using var db = TestDbFactory.Create();
+        var operatorId = SeedOperator(db, grantMenu: true);
+
+        foreach (var path in new[] { "", BasePath, "/api/sys/print-templates/1/export-excel" })
+        {
+            var ctl = NewController(db, operatorId, path);
+
+            // 保存：放行并落库
+            var saved = GetData<SysPrintTemplate>(await ctl.Save(ValidTemplate()));
+            Assert.True(saved.Id > 0);
+
+            // 清单 / 默认模板：既有非删除模板可见
+            var list = GetData<List<SysPrintTemplate>>(await ctl.GetList("sales-order"));
+            Assert.Contains(list, t => t.Id == saved.Id);
+            Assert.Equal(saved.Id, GetData<SysPrintTemplate>(await ctl.GetDefault("sales-order")).Id);
+
+            // 导出：既有契约返回下载构件
+            Assert.IsType<FileContentResult>(await ctl.ExportExcel(saved.Id));
+
+            // 删除：既有软删除语义
+            await ctl.Delete(saved.Id);
+            Assert.DoesNotContain(GetData<List<SysPrintTemplate>>(await ctl.GetList("sales-order")),
+                t => t.Id == saved.Id);
+        }
+
+        foreach (var path in new[] { "", BasePath })
+        {
+            var anonymous = NewController(db, userId: null, path);
+            await AssertCode(ErrorCodes.Unauthorized, () => anonymous.GetList(null));
+            await AssertCode(ErrorCodes.Unauthorized, () => anonymous.Save(ValidTemplate()));
+        }
+        await AssertCode(ErrorCodes.Unauthorized, () => ControllerWithoutHttp(db).GetList(null));
+    }
+
+    /// <summary>
+    /// 源码契约（ERP-493）：控制器 6 条路由全部先授权再读写，请求形状探针（<c>RequiresLiveAuthorization</c>）
+    /// 与 <c>Request.Path</c> / 环境变量 / 数据库提供程序 / 测试专用开关的放行分支已彻底移除，且无匿名 / 角色回退。
+    /// </summary>
+    [Fact]
+    public void Auth_控制器源码契约_所有路由先授权且无请求形状探针()
+    {
+        var source = File.ReadAllText(RepoFile("src", "ERP.Api", "Controllers", "PrintTemplateController.cs"));
+
+        Assert.Contains("ClaimTypes.NameIdentifier", source);
+        Assert.Equal(6, System.Text.RegularExpressions.Regex.Matches(
+            source, @"await EnsureAuthorizedAsync\(\);").Count);
+        Assert.Contains("PrintTemplateAuthorizationRules.EnsureAuthorizedAsync", source);
+        Assert.Contains("PrintTemplateAuthorizationRules.NormalizeForWrite", source);
+        Assert.Contains("PrintTemplateAuthorizationRules.ValidateForSave", source);
+        Assert.DoesNotContain("AllowAnonymous", source);
+        Assert.DoesNotContain("[Authorize(Roles", source);
+
+        // ERP-493：请求形状探针（RequiresLiveAuthorization / Request.Path）与其条件护栏彻底移除，
+        // 也不存在环境变量 / 测试专用开关的放行分支。
+        Assert.DoesNotContain("RequiresLiveAuthorization", source);
+        Assert.DoesNotContain("Request.Path", source);
+        Assert.DoesNotContain("Environment.GetEnvironmentVariable", source);
+        Assert.Contains("Request.Path", PrintTemplateAuthorizationRules.PathIndependenceText);
     }
 
     // ==================== 2. 放行路径（既有 print-design 菜单） ====================
@@ -314,20 +417,36 @@ public class PrintTemplateAuthorizationTests
 
     // ==================== 脚手架 ====================
 
-    private static PrintTemplateController NewController(ErpDbContext db, long? userId)
+    private static PrintTemplateController NewController(ErpDbContext db, long? userId, string? requestPath = BasePath)
+        => new(db) { ControllerContext = Context(userId, requestPath) };
+
+    /// <summary>
+    /// 完全未绑定 <c>HttpContext</c> 的纯进程内直调控制器（外部请求无法构造）。
+    /// <para>ERP-493：不存在任何授权豁免 —— 无 <c>HttpContext</c> 即无身份，一律受控未认证。</para>
+    /// </summary>
+    private static PrintTemplateController ControllerWithoutHttp(ErpDbContext db)
+        => new(db) { ControllerContext = new ControllerContext() };
+
+    /// <summary>
+    /// 注入请求身份（可空 = 无 <c>NameIdentifier</c>）：<paramref name="requestPath"/> 为 null 或空串时
+    /// 不赋值（等同于空路径），非空时为已赋值路径。
+    /// <para>ERP-493：请求形状探针已彻底移除，三种形状对同一身份给出<b>完全相同</b>的判定。</para>
+    /// </summary>
+    private static ControllerContext Context(long? userId, string? requestPath)
     {
-        var ctl = new PrintTemplateController(db);
         var claims = userId.HasValue
             ? new[] { new Claim(ClaimTypes.NameIdentifier, userId.Value.ToString()) }
             : Array.Empty<Claim>();
         var http = new DefaultHttpContext { User = new ClaimsPrincipal(new ClaimsIdentity(claims, "Test")) };
-        http.Request.Path = BasePath;   // 模拟真实 HTTP 请求管线：缺失身份的真实请求一律 fail closed
-        ctl.ControllerContext = new ControllerContext { HttpContext = http };
-        return ctl;
+        if (!string.IsNullOrEmpty(requestPath))
+            http.Request.Path = requestPath;
+        return new ControllerContext { HttpContext = http };
     }
 
-    /// <summary>进程内直接调用（无 ControllerContext / 无 HTTP 请求管线）的控制器，用于验证既有免授权语义。</summary>
-    private static PrintTemplateController InProcessController(ErpDbContext db) => new(db);
+    /// <summary>按仓库根目录拼接文件的绝对路径（与其它契约测试口径一致）。</summary>
+    private static string RepoFile(params string[] segments)
+        => Path.GetFullPath(Path.Combine(
+            new[] { AppContext.BaseDirectory, "..", "..", "..", "..", ".." }.Concat(segments).ToArray()));
 
     /// <summary>构造一份合法的保存载荷（各字段均在既有持久化边界与受支持范围内）。</summary>
     private static SysPrintTemplate ValidTemplate() => new()

@@ -16,10 +16,12 @@ namespace ERP.Api.Controllers;
 /// （见 <see cref="PrintTemplateAuthorizationRules"/>）；保存另校验既有持久化列边界与受支持字号
 /// （不再静默改写 FontSize）。缺失 / 禁用 / 已删除 / 撤销菜单的身份一律以既有受控非披露错误 fail closed，
 /// 不新增任何授权，也不把空身份当作管理员。</para>
-/// <para><b>进程内直调边界</b>（与 <c>EmployeeController</c> / <c>SalesOrderChangeRequestController</c> 同源）：
-/// 真实 HTTP 请求（MVC 绑定，<c>Request.Path</c> 已赋值）一律执行授权，真实匿名请求因处于请求管线内一律 fail closed；
-/// 仅「既无任何登录身份、又不在 HTTP 请求管线内」的进程内直接调用（历史单元测试 / 内部派生读取）沿用既有语义，
-/// 这类调用不可能由外部请求到达，绝不把缺失身份当作管理员。</para>
+/// <para>ERP-493：上述实时身份 / 账号状态 / 既有「样式设计」菜单判定在<b>每一个入口无条件</b>执行 ——
+/// 与请求路径是否赋值、请求形状、以及控制器是否绑定 <c>HttpContext</c> <b>完全无关</b>：
+/// 原「请求形状探针」（依据请求路径 / 身份判定是否需要授权）与其条件护栏已<b>彻底移除</b>，
+/// 空路径、已赋值路径与未绑定任何请求上下文的纯进程内直调对同一身份给出完全相同的判定；
+/// 缺失 / 为零 / 未知 / 已删除身份一律未认证，禁用账号 / 缺少或被撤销既有菜单一律权限不足；
+/// 无匿名 / 管理员 / 环境 / 测试专用开关回退。契约见 <see cref="PrintTemplateAuthorizationRules.PathIndependenceText"/>。</para>
 /// </summary>
 [ApiController]
 [Route("api/sys/print-templates")]
@@ -54,23 +56,15 @@ public class PrintTemplateController : ControllerBase
     }
 
     /// <summary>
-    /// 是否需要执行实时授权（与仓库 / 供应商 / 员工既有口径同源）：真实 HTTP 请求（MVC 绑定，<c>Request.Path</c> 已赋值）
-    /// 一律执行；仅「既无任何登录身份、又不在 HTTP 请求管线内」的<b>进程内直接调用</b>（历史单元测试 / 内部派生读取）
-    /// 沿用既有语义 —— 这类调用不可能由外部请求到达，真实匿名请求因处于请求管线内一律 fail closed，
-    /// 绝不把缺失身份当作管理员。
+    /// 打印模板入口授权（实时身份 + 账号状态 + 既有 <c>print-design</c> 菜单，ERP-450 / ERP-493，无条件 fail closed）。
+    /// <para>ERP-493：不再存在任何请求形状探针 —— 是否绑定 <c>HttpContext</c>、请求路径是否赋值、
+    /// 当前是否携带可解析身份都不影响判定；缺失 / 为零 / 未知 / 已删除身份一律未认证，
+    /// 禁用账号 / 缺少或被撤销既有菜单一律权限不足。</para>
     /// </summary>
-    private bool RequiresLiveAuthorization()
-    {
-        var http = ControllerContext?.HttpContext;
-        if (http is null) return false;
-        return http.Request.Path.HasValue || CurrentUserId() is not null;
-    }
-
-    /// <summary>打印模板入口授权（实时身份 + 账号状态 + 既有 print-design 菜单）；进程内无身份直调保持既有免授权语义。</summary>
     private async Task EnsureAuthorizedAsync()
     {
-        if (RequiresLiveAuthorization())
-            await PrintTemplateAuthorizationRules.EnsureAuthorizedAsync(_db, CurrentUserId());
+        // ERP-493：无条件执行（请求形状探针与请求路径判定已彻底移除）。
+        await PrintTemplateAuthorizationRules.EnsureAuthorizedAsync(_db, CurrentUserId());
     }
 
     /// <summary>查询打印模板列表（可按单据类型筛选）</summary>

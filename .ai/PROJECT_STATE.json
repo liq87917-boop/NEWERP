@@ -1,11 +1,10 @@
 {
   "schema_version": 2,
   "project": "NEWERP",
-  "updated_at": "2026-10-13T20:13:46.998480Z",
+  "updated_at": "2026-10-13T20:25:34.086881Z",
   "phase": "ready",
   "current_task": null,
   "queue": [
-    "ERP-493",
     "ERP-494",
     "ERP-495"
   ],
@@ -475,46 +474,41 @@
     "ERP-489",
     "ERP-490",
     "ERP-491",
-    "ERP-492"
+    "ERP-492",
+    "ERP-493"
   ],
   "blocked": [],
   "last_build": {
-    "task": "ERP-492",
+    "task": "ERP-493",
     "profile": "safe",
     "status": "passed",
     "exit_code": 0,
-    "log": ".ai\\logs\\ERP-492-validation-1.log",
-    "at": "2026-10-13T20:03:03.515071Z"
+    "log": ".ai\\logs\\ERP-493-validation-3.log",
+    "at": "2026-10-13T20:25:33.487958Z"
   },
-  "last_error": {
-    "task": "ERP-493",
-    "kind": "automatic_repair_pending",
-    "summary": "Path guard failed:\noutside allowed_paths: src/ERP.UnitTests/TradeDocumentPrintTests.cs"
-  },
+  "last_error": null,
   "last_deepseek_fix": {
     "task": "ERP-493",
-    "attempts": 3,
-    "status": "retry_pending",
-    "at": "2026-10-13T20:13:46.641275Z"
+    "attempt": 3,
+    "model": "deepseek-flash",
+    "exit_code": 0,
+    "finished_at": "2026-10-13T20:24:54.905961Z"
   },
   "git_sync": {
     "branch": "main",
-    "local_sha": "3408efb",
-    "status": "synced",
+    "local_sha": "4e2c6ea",
+    "status": "pending",
     "ahead": 0,
     "behind": 0,
-    "last_attempt_at": "2026-10-13T20:03:09.587055Z",
+    "last_attempt_at": "2026-10-13T20:25:33.962203Z",
     "last_error": null
   },
   "next_recommended_tasks": [
-    "ERP-493",
     "ERP-494",
     "ERP-495"
   ],
   "runner": {
     "status": "stopped",
     "pid": null
-  },
-  "blocker": null,
-  "finish_reason": "deepseek_supervisor_recovery"
+  }
 }

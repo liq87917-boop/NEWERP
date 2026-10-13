@@ -26,6 +26,10 @@ namespace ERP.Application.Services;
 /// 三个字号在受支持范围内 —— 一律以既有受控错误 <b>拒绝而不静默截断 / 改写</b>；
 /// 被拒绝的保存不落任何模板行，既有模板 / 默认标记 / 打印输出保持不变。</item>
 /// </list>
+/// <para>ERP-493：上述判定在<b>每一个入口无条件</b>执行 —— 与 <c>Request.Path</c> 是否赋值、请求形状以及
+/// 控制器是否绑定 <c>HttpContext</c> <b>完全无关</b>（原请求形状探针 <c>RequiresLiveAuthorization</c> 与它的
+/// 条件护栏已彻底移除，见 <see cref="PathIndependenceText"/>）；空路径 / 已赋值路径 / 未绑定任何请求上下文的
+/// 纯进程内直调对同一身份给出完全相同的判定，绝无匿名 / 管理员 / 环境 / 测试专用开关回退。</para>
 /// <para><b>身份来源唯一</b>：身份只来自已认证请求主体（<c>ClaimTypes.NameIdentifier</c>），由调用方
 /// （<c>ERP.Api.Controllers.PrintTemplateController</c>）解析并传入；请求提交体中的任何字段都不能指定或扩大账号身份。</para>
 /// <para><b>边界</b>：本类只做纯判定与有界只读查询；不新增表 / 列 / 实体 / 菜单 / 角色 / 用户授权或权限模型，
@@ -198,13 +202,32 @@ public static class PrintTemplateAuthorizationRules
         + "保存前校验 BillType 属于既有可打印单据类型、TemplateName 非空且有界，"
         + "Title / CompanyName / CompanyAddress / CompanyPhone / PaperSize / FieldKeys / FooterText / FontFamily "
         + "与各颜色值有界且为已知格式，且 FontSize / TitleFontSize / CompanyFontSize 在受支持范围内，"
-        + "一律拒绝而不静默截断 / 改写任何模板行；身份只来自已认证请求主体。";
+        + "一律拒绝而不静默截断 / 改写任何模板行；身份只来自已认证请求主体。"
+        + "该判定与请求路径 / 请求形状 / 是否绑定 HttpContext 完全无关（ERP-493 已移除请求形状探针，"
+        + "见 PathIndependenceText）。";
 
     /// <summary>边界文案（不新增权限 / 表列，不改变唯一索引与默认标记语义）</summary>
     public const string BoundaryText =
         "本护栏只保护打印模板的访问与持久化取值校验：不新增菜单 / 角色 / 用户授权或表 / 列 / 实体，"
         + "无匿名 / 管理员兜底，也不改变既有 (BillType, TemplateName) 唯一索引与默认标记语义；"
-        + "被拒绝的读取 / 保存 / 删除 / 导出 / 导入不加载、不写入、不改写任何模板行，也不产生任何下载构件。";
+        + "被拒绝的读取 / 保存 / 删除 / 导出 / 导入不加载、不写入、不改写任何模板行，也不产生任何下载构件；"
+        + "不存在任何请求路径 / 请求形状 / 空请求上下文或数据库提供程序 / 测试专用开关的免授权回退。";
+
+    /// <summary>
+    /// 与请求形状无关的授权契约（ERP-493）：清单 / 默认模板 / 保存 / 删除 / Excel 导出 / Excel 导入前的
+    /// 实时身份 / 账号状态 / 既有「样式设计」（<c>print-design</c>）菜单判定必须在<b>每一个入口无条件</b>执行，
+    /// 与 <c>Request.Path</c> 是否赋值、请求形状、以及控制器是否绑定 <c>HttpContext</c> <b>完全无关</b> ——
+    /// 空路径与已赋值路径口径完全一致，完全未绑定 <c>HttpContext</c> 的纯进程内直调同样执行本护栏；
+    /// 缺失 / 为零 / 未知 / 已删除身份一律按未认证拒绝，禁用账号 / 撤销或缺少既有菜单一律按权限不足拒绝。
+    /// </summary>
+    public const string PathIndependenceText =
+        "打印模板（清单 / 默认模板 / 保存 / 删除 / Excel 导出 / Excel 导入）的实时身份 / 账号状态 / "
+        + "既有「样式设计」（print-design）菜单判定与请求路径 / 请求形状 / 是否绑定 HttpContext 完全无关："
+        + "原「请求形状探针」（RequiresLiveAuthorization 依据 Request.Path.HasValue 与身份判定是否需要授权）"
+        + "与它的条件护栏已彻底移除，空路径与已赋值路径口径完全一致，未绑定任何请求上下文的纯进程内直调"
+        + "同样无条件执行本护栏；缺失 / 为零 / 未知 / 已删除身份按未认证拒绝，禁用账号与撤销 / 缺少既有菜单"
+        + "按权限不足拒绝；绝无匿名 / 管理员回退，不读取环境变量、不区分数据库提供程序，"
+        + "也不存在任何测试专用放行开关。";
 
     // ==================== 1. 身份 / 账号状态 / 菜单授权（fail closed） ====================
 
@@ -214,6 +237,9 @@ public static class PrintTemplateAuthorizationRules
     /// 缺少既有 <c>print-design</c> 菜单授权按权限不足拒绝。
     /// 每次调用都重新查询（无缓存），账号停用 / 删除或菜单撤销后下一次请求立即收敛；
     /// 每个账号都必须显式具备既有功能菜单，<b>无特权 / 管理员兜底</b>。
+    /// <para>与请求形状无关（见 <see cref="PathIndependenceText"/>，ERP-493）：调用方必须在<b>每一个路由入口</b>
+    /// 无条件调用本方法，不得因为空路径、缺少身份、未绑定 <c>HttpContext</c> 或任何请求形状而跳过；
+    /// 空路径 / 无上下文与已认证真实请求的判定口径完全一致。</para>
     /// </summary>
     public static async Task EnsureAuthorizedAsync(IErpDbContext db, long? userId, CancellationToken ct = default)
     {
