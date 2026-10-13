@@ -19,6 +19,8 @@
         未选来源（null / 表单留空）的历史出库保持「无来源（未链接）」，绝不回填；
      7. 非「待提交」单据只读（服务端同样 fail closed），失败时保留表单输入并显式提示；
         应用期间禁用按钮，**防止重复点击**造成重复写入。
+     8. ERP-478：提供显式「清空来源（回到未链接）」——只清空来源引用字段（保存时提交 null = 历史未链接语义），
+        **绝不删除用户已录入的明细行**，也绝不臆造来源；单据号 / 状态 / 身份仍由服务端权威覆盖。
    边界：本选择器只做只读候选展示与表单回填：不锁库、不预留库存、不写流水 / 财务、
          不改写销售订单 / 商品 / 客户主数据，也不新增表 / 菜单 / 用户授权；
          绝不绕过 ERP-343 数量、ERP-359 退货、ERP-367 装柜取消护栏，也不从销售退货恢复发货容量。
@@ -397,6 +399,22 @@ function sosApplyToForm() {
   }
 }
 
+/* ERP-478：显式清空来源（回到「未链接」历史语义）：只清空来源引用字段，
+   **绝不删除用户已录入的明细行**，也绝不臆造来源；保存时提交 null（声明式可空引用），
+   服务端同样把原始数字 0 归一为 null —— 两种表示落到同一「无来源出库单」语义。 */
+function sosClearSource() {
+  if (typeof document === 'undefined') return false;      // Node 单测只验证接线契约，不造浏览器环境
+  if (SOS.readonly) { toast(sosReadonlyReason(SOS.status), 'error'); return false; }
+  sosSetField('salesOrderId', '');
+  SOS.detail = null;
+  SOS.quantities = {};
+  SOS.error = '';
+  SOS.result = '已清空来源（保存后按「未链接销售订单」的出库单保存；明细行未被删除，可继续手工录入）';
+  sosRender();
+  toast(SOS.result);
+  return true;
+}
+
 function sosDetailHtml(detail) {
   if (!detail) return '';
   const lines = (detail.lines || []).map(line => {
@@ -476,6 +494,9 @@ function sosRender() {
       ${sosDetailHtml(SOS.detail)}
       <div class="modal-footer">
         <button type="button" class="btn btn-neutral" onclick="sosCloseModal()">取消</button>
+        <button type="button" class="btn btn-neutral" ${SOS.readonly ? 'disabled ' : ''}
+                title="清空来源引用（保存后按未链接出库单保存）；不删除已录入明细行"
+                onclick="sosClearSource()">清空来源（未链接）</button>
         <button type="button" class="btn btn-primary" ${sosCanApply(SOS) ? '' : 'disabled '}
                 onclick="sosApplyToForm()">应用到表单</button>
       </div>
@@ -581,5 +602,6 @@ if (typeof module !== 'undefined' && module.exports) {
     sosErrorMessage,
     sosSourceButtonHtml,
     sosInstallFormHook,
+    sosClearSource,
   };
 }

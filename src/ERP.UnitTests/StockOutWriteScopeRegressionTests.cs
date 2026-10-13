@@ -88,6 +88,29 @@ public class StockOutWriteScopeRegressionTests
     }
 
     [Fact]
+    public async Task OperatorWithoutStockOutMenu_CreateFailsClosed_AndConsumesNoNumber()
+    {
+        using var db = TestDbFactory.Create();
+        var (userId, customerId) = StockOutTestAuthorization.SeedOperatorWithoutStockOutMenu(db);
+        var ctl = StockOutTestAuthorization.ForUser(db, userId);
+
+        var error = await Assert.ThrowsAsync<BusinessException>(() => ctl.Create(new StockOut
+        {
+            CustomerId = customerId,
+            WarehouseId = 330001,
+            Details = new List<StockOutDetail>
+            {
+                new() { ProductId = 710001, ProductName = "P1", Unit = "PCS", Quantity = 1 }
+            }
+        }));
+
+        Assert.Equal(ErrorCodes.Forbidden, error.Code);   // 缺既有「销售出库」菜单 → 权限不足（fail closed）
+        Assert.Empty(db.StockOuts);                        // 零表头 · 明细写入
+        Assert.Empty(db.StockOutDetails);
+        Assert.Empty(db.StockMovements);
+    }
+
+    [Fact]
     public async Task AssignedCustomer_Allowed_ThenReassignmentAndRevocationRejected()
     {
         using var db = TestDbFactory.Create();

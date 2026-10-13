@@ -103,9 +103,11 @@ Object.assign(MODULES, {
     ],
     fields: [
       { key: 'stockOutDate', label: '出库日期', type: 'date' },
-      /* ERP-376：来源由「选择来源」有界选择器显式回填（也可手工填写 Id）；选择器只回填权威来源 Id 与权威客户 /
-         可发货商品行，绝不臆造价格（出库成本仍由服务端移动加权平均口径兜底）；留空（未选择）= 历史未链接语义 */
-      { key: 'salesOrderId', label: '来源销售订单 ID（可留空；建议用「选择来源」；留空 = 历史未链接）', type: 'number', selector: 'stock-out-source' },
+      /* ERP-376 / ERP-478：来源由「选择来源」有界选择器显式回填（也可手工填写 Id）；选择器只回填权威来源 Id 与权威客户 /
+         可发货商品行，绝不臆造价格（出库成本仍由服务端移动加权平均口径兜底）；留空（未选择）= 历史未链接语义。
+         nullable: true —— 声明式可空引用：清空 / 留空时提交 null（而不是哨兵值 0），服务端仍同时把原始数字 0
+         归一为 null，两种表示都落到同一「未链接」历史语义。 */
+      { key: 'salesOrderId', label: '来源销售订单 ID（可留空；建议用「选择来源」；留空 = 历史未链接）', type: 'number', nullable: true, selector: 'stock-out-source' },
       { key: 'customerId', label: '客户Id（选择来源时按权威客户回填）', type: 'number' },
       { key: 'warehouseId', label: '仓库Id', type: 'number' }, { key: 'totalQuantity', label: '总数量', type: 'number' },
       { key: 'totalWeight', label: '总毛重(kg)', type: 'number' }, { key: 'totalVolume', label: '总体积(m³)', type: 'number' },

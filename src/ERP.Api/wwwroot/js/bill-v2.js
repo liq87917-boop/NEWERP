@@ -29,8 +29,13 @@ const BILL_CODE_MAP = {
      因此这里**不再**把 'stock-in' 映射到旧存储过程族 —— 旧族的写路径已被 ERP-404 门禁整体停用
      （fail closed），若继续映射，菜单会打开一张永远无法保存的旧单据页（api/v2/bills 写入口必然被拒）。
      旧族自身（BILL_CONFIG['stock-in'] 的旧库单体表 Oid 读侧 / 旧导出 / 既有默认值端点）保持只读可用，
+     规范 Id 与旧 Oid 之间**不存在**任何映射，也绝不因此启用任何旧写适配器。
+     ERP-478：销售出库菜单（stock-out）同样改由 EF 主子表页面承载
+     （modules-doc2.js 的 'stock-out' 模块 + /api/stock-outs，规范 Id 口径 + 明细 + ERP-376 来源选择器），
+     因此这里**不再**把 'stock-out' 映射到旧存储过程族 —— 旧族的写路径已被 ERP-404 门禁整体停用
+     （fail closed），若继续映射，菜单会打开一张永远无法保存的旧单据页（api/v2/bills 写入口必然被拒）。
+     旧族自身（BILL_CONFIG['stock-out'] 的旧库单体表 Oid 读侧 / 旧导出 / 既有默认值端点）保持只读可用，
      规范 Id 与旧 Oid 之间**不存在**任何映射，也绝不因此启用任何旧写适配器。 */
-  'stock-out': 'stock-out',
   receipt: 'receipt',
   payment: 'payment',
   'deposit-apply': 'deposit-apply',

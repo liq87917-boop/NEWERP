@@ -304,6 +304,46 @@ public class StockOutOrderFulfillmentTests
 
 
 
+    // ==================== ERP-478：规范主 / 明细表单的履约零副作用 ====================
+
+    [Fact]
+    public async Task Approve_负数出库数量_受控拒绝且零库存零流水且状态保持已提交()
+    {
+        using var db = TestDbFactory.Create();
+        SeedProduct(db, ProductA, "S-FUL-16", "商品A", "PCS", string.Empty, 0);
+        SeedStock(db, WarehouseA, ProductA, 10m);
+        var ctl = NewController(db);
+
+        var id = await CreateAsync(ctl, null, CustomerA, (ProductA, "PCS", -1m));
+        await ctl.Submit(id);
+
+        var ex = await Assert.ThrowsAsync<BusinessException>(() => ctl.Approve(id));
+
+        Assert.Equal(ErrorCodes.InvalidParameter, ex.Code);
+        Assert.Contains("不能为负数", ex.Message);
+        Assert.Equal(10m, db.Stocks.Single().Quantity);            // 未扣减
+        Assert.Empty(db.StockMovements);
+        Assert.Equal(DocumentStatus.Submitted, db.StockOuts.Single(s => s.Id == id).Status);
+    }
+
+    [Fact]
+    public async Task Approve_零数量出库明细_不产生库存变动与流水()
+    {
+        using var db = TestDbFactory.Create();
+        SeedProduct(db, ProductA, "S-FUL-17", "商品A", "PCS", string.Empty, 0);
+        SeedStock(db, WarehouseA, ProductA, 10m);
+        var ctl = NewController(db);
+
+        var id = await CreateAsync(ctl, null, CustomerA, (ProductA, "PCS", 0m));
+        await SubmitAndApproveAsync(ctl, id);
+
+        Assert.Equal(10m, db.Stocks.Single().Quantity);            // 零数量不产生任何库存变动
+        Assert.Empty(db.StockMovements);
+        var saved = db.StockOuts.Single(s => s.Id == id);
+        Assert.Equal(DocumentStatus.Approved, saved.Status);
+        Assert.Equal(0m, saved.TotalQuantity);
+    }
+
     // ==================== 辅助 ====================
 
     private static StockOutController NewController(ErpDbContext db)

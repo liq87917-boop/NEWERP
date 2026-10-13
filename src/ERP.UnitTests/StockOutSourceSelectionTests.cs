@@ -582,6 +582,58 @@ public class StockOutSourceSelectionTests
         Assert.Empty(db.Stocks);
     }
 
+    // ==================== 8b. ERP-478：显式清空来源（回到未链接）保留明细 · 单号 · 状态 ====================
+
+    [Fact]
+    public async Task 显式清空来源_保留明细单号与状态_回到未链接语义()
+    {
+        using var db = TestDbFactory.Create();
+        SeedMaster(db);
+        SeedStockOutNumberRule(db);
+        var ctl = StockOutTestAuthorization.ForUser(db, SeedSourceOperator(db));
+        var order = SeedOrder(db, "SO-SEL-CLEAR", DocumentStatus.Approved, CustomerA,
+            lines: new[] { (ProductA, "商品A", "规格A", "PCS", 10m) });
+
+        var create = new StockOut
+        {
+            StockOutDate = DateTime.Today,
+            SalesOrderId = order.Id,
+            CustomerId = CustomerA,
+            WarehouseId = WarehouseA,
+            Details = new List<StockOutDetail>
+            {
+                new() { ProductId = ProductA, ProductName = "商品A", Spec = "规格A", Unit = "PCS", Quantity = 2m }
+            }
+        };
+        var id = CreatedId(await ctl.Create(create));
+        var created = db.StockOuts.Single(s => s.Id == id);
+        Assert.Equal(order.Id, created.SalesOrderId);
+        var number = created.StockOutNo;
+
+        // 表单「清空来源（未链接）」：来源字段置空（数字 0 与 null 同源），明细行保持不变地再保存。
+        var cleared = new StockOut
+        {
+            StockOutDate = DateTime.Today,
+            SalesOrderId = 0,                 // 历史表单口径（服务端归一为 null）
+            CustomerId = CustomerA,
+            WarehouseId = WarehouseA,
+            Details = new List<StockOutDetail>
+            {
+                new() { ProductId = ProductA, ProductName = "商品A", Spec = "规格A", Unit = "PCS", Quantity = 2m }
+            }
+        };
+        Assert.IsType<OkObjectResult>(await ctl.Update(id, cleared));
+
+        var updated = db.StockOuts.Include(o => o.Details).Single(s => s.Id == id);
+        Assert.Null(updated.SalesOrderId);                       // 回到未链接历史语义
+        Assert.Equal(number, updated.StockOutNo);                // 单据号由服务端保持
+        Assert.Equal(DocumentStatus.Pending, updated.Status);    // 状态不变
+        var detail = Assert.Single(updated.Details);             // 明细未被删除
+        Assert.Equal(2m, detail.Quantity);
+        Assert.Equal(2m, updated.TotalQuantity);
+        Assert.Empty(db.StockMovements);
+    }
+
     // ==================== 9. 未选择来源（0）→ null，保留历史无来源语义 ====================
 
     [Fact]

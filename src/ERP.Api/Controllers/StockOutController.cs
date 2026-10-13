@@ -24,6 +24,12 @@ namespace ERP.Api.Controllers;
 /// 供业务表单显式选择来源并回填权威客户与可发货商品行（ERP-343 剩余可发数量口径）；候选选择绝不臆造价格，
 /// 也绝不改动 ERP-343 发货容量口径、ERP-359 退货护栏与 ERP-367 装柜取消护栏。表单「未选择来源」（数字 0）
 /// 归一为 <c>null</c>，保持历史无来源出库单语义（重开时可见为未链接）。</para>
+/// <para>ERP-478：既有「销售出库」菜单改为打开<b>规范 EF 主子表模块</b>（<c>api/stock-outs</c>，规范 <c>Id</c> 口径），
+/// 不再映射到已由 ERP-404 门禁整体停用（fail closed）的旧存储过程族；旧族 <c>Oid</c> 读侧 / 导出保持只读可用，
+/// 规范 <c>Id</c> 与旧 <c>Oid</c> 之间<b>不存在</b>任何映射，也绝不启用任何旧写适配器。
+/// 新增 / 修改在实时授权与客户范围、来源归属（含基础单位折算与 ERP-343 累计容量）校验之后、<b>单号预约与任何写入之前</b>
+/// 完成全部校验：主键 / 出库单号 / 状态 / 删除态 / 时间戳与明细身份一律由服务端权威覆盖，
+/// 被拒绝的请求零表头 · 明细 · 来源 · 状态变化且不消耗单据号（ERP-370 口径）。</para>
 /// </summary>
 [Route("api/stock-outs")]
 public class StockOutController : DocumentControllerBase<StockOut>
@@ -120,23 +126,36 @@ public class StockOutController : DocumentControllerBase<StockOut>
     private IQueryable<SalesOrder> ApplySalesOrderScope(SalespersonDataScope scope)
         => SalespersonDataScopeService.FilterByCustomer(Db.SalesOrders.AsNoTracking(), scope, o => o.CustomerId);
 
-    /// <summary>创建</summary>
+    /// <summary>
+    /// 创建（ERP-478：省略 / 空串 / 伪造出库单号照常进入本动作，单号与身份由服务端权威覆盖；
+    /// 全部授权 · 来源 · 单位折算 · 累计容量校验都在<b>单号预约与任何写入之前</b>完成，
+    /// 被拒绝的请求零写入、零占号）。
+    /// </summary>
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] StockOut entity)
     {
-        // ERP-376：业务表单「未选择来源」以数字 0 表示（数字字段留空 → 0）；归一为 null，
+        // ERP-376 / ERP-478：业务表单「未选择来源」以数字 0 表示（数字字段留空 → 0），
+        // 或按 ERP-478 的声明式可空引用（nullable）直接提交 null；两者都归一为 null，
         // 保持历史「无来源」出库单语义（null），绝不把 0 当成无效显式链接拒绝。
         NormalizeSalesOrderLink(entity);
+        entity.Details ??= new List<StockOutDetail>();
 
         // ERP-370：授权与客户范围校验先于单号生成——被拒绝方绝不消耗单据号，也绝不落任何明细。
         await StockOutAuthorizationRules.EnsureCustomerAuthorizedAsync(Db, CurrentStockOutUserId(), entity.CustomerId);
-        entity.Id = 0;
-        entity.StockOutNo = await _noService.GenerateAsync(DocumentType.StockOut);
-        entity.Status = DocumentStatus.Pending;
-        entity.CreatedAt = DateTime.Now;
         await StockUnitConversion.NormalizeAsync(Db, entity.Details);
         Calculate(entity);
         await StockOutOrderFulfillmentRules.ValidateLinkAsync(Db, entity);
+
+        // ERP-478：主键 / 单号 / 状态 / 删除态 / 时间戳一律由服务端权威覆盖（客户端提交值不参与持久化），
+        // 明细身份（主键 / 归属单据 / 删除态）同口径重置，绝不采信客户端注入的明细 Id / IsDeleted / 表头身份。
+        var now = DateTime.Now;
+        entity.Id = 0;
+        ApplyServerOwnedDetailIdentity(entity.Details, 0, now);
+        entity.StockOutNo = await _noService.GenerateAsync(DocumentType.StockOut);
+        entity.Status = DocumentStatus.Pending;
+        entity.IsDeleted = false;
+        entity.CreatedAt = now;
+        entity.UpdatedAt = null;
         Db.StockOuts.Add(entity);
         await Db.SaveChangesAsync();
         return Ok(ApiResponse<object>.Success(new { entity.Id, entity.StockOutNo }, "出库单创建成功"));
@@ -152,9 +171,10 @@ public class StockOutController : DocumentControllerBase<StockOut>
     [HttpPut("{id:long}")]
     public async Task<IActionResult> Update(long id, [FromBody] StockOut entity)
     {
-        // ERP-376：与创建同一口径——表单「未选择来源」（0）归一为 null，保持历史无来源语义；
+        // ERP-376 / ERP-478：与创建同一口径——表单「未选择来源」（0 或 null）归一为 null，保持历史无来源语义；
         // 失败的修改在事务内整体回滚（单据 / 明细 / 库存 / 流水保持原样）。
         NormalizeSalesOrderLink(entity);
+        entity.Details ??= new List<StockOutDetail>();
 
         var userId = CurrentStockOutUserId();
 
@@ -176,13 +196,10 @@ public class StockOutController : DocumentControllerBase<StockOut>
                 throw BusinessException.RuleConflict("仅待提交状态的单据可修改");
 
             // 先把「请求内容」规范化并校验来源链接（ERP-343），失败时已存单据 / 明细 / 库存 / 流水保持原样。
+            // ERP-478：明细身份（主键 / 归属单据 / 删除态 / 时间戳）一律由服务端重置；
+            // 单据号 / 状态 / 删除态由服务端保持（客户端提交值不参与持久化）。
             entity.Id = 0;
-            foreach (var d in entity.Details)
-            {
-                d.Id = 0;
-                d.StockOutId = id;
-                d.CreatedAt = DateTime.Now;
-            }
+            ApplyServerOwnedDetailIdentity(entity.Details, id, DateTime.Now);
             await StockUnitConversion.NormalizeAsync(Db, entity.Details);
             await StockOutOrderFulfillmentRules.ValidateLinkAsync(Db, entity);
 
@@ -448,6 +465,23 @@ public class StockOutController : DocumentControllerBase<StockOut>
     private static void NormalizeSalesOrderLink(StockOut entity)
     {
         if (entity.SalesOrderId == 0) entity.SalesOrderId = null;
+    }
+
+    /// <summary>
+    /// ERP-478：明细身份 / 归属单据 / 删除态 / 时间戳一律由服务端权威覆盖：客户端提交的明细主键一律置 0（自增），
+    /// 归属单据取自服务端已知的单据 Id（新建为 0，由 EF 关系在保存时回填），删除态强制为「正常」，
+    /// 时间戳以服务端时钟为准。绝不采信客户端注入的明细身份 / 删除态，也绝不臆造任何明细行。
+    /// </summary>
+    private static void ApplyServerOwnedDetailIdentity(IEnumerable<StockOutDetail> details, long stockOutId, DateTime now)
+    {
+        foreach (var d in details)
+        {
+            d.Id = 0;
+            d.StockOutId = stockOutId;
+            d.IsDeleted = false;
+            d.CreatedAt = now;
+            d.UpdatedAt = null;
+        }
     }
 
     /// <summary>流水备注：带上来源销售订单 Id，便于按流水反查订单执行情况</summary>

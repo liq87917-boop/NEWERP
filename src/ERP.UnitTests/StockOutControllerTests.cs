@@ -6,6 +6,7 @@ using ERP.Domain.Entities;
 using ERP.Domain.Enums;
 using ERP.Infrastructure.Data;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using Xunit;
 
 namespace ERP.UnitTests;
@@ -44,6 +45,77 @@ public class StockOutControllerTests
         Assert.Equal(8m, dbEntity.TotalQuantity);
         Assert.Equal(40m, dbEntity.TotalWeight);
         Assert.Equal(0.8m, dbEntity.TotalVolume);
+    }
+
+    [Fact]
+    public async Task Create_空串单号与伪造身份_一律由服务端权威覆盖()
+    {
+        using var db = TestDbFactory.Create();
+        var ctl = StockOutTestAuthorization.Create(db);
+
+        var so = new StockOut
+        {
+            Id = 999999L,                              // 伪造主键
+            StockOutNo = string.Empty,                 // 手工表单省略 / 空串单号
+            StockOutDate = DateTime.Today,
+            CustomerId = 999999L,
+            WarehouseId = 999999L,
+            Status = DocumentStatus.Approved,          // 伪造状态
+            IsDeleted = true,                          // 伪造删除态
+            CreatedAt = new DateTime(2000, 1, 1),      // 伪造时间戳
+            UpdatedAt = new DateTime(2000, 1, 1),
+            Details = new List<StockOutDetail>
+            {
+                new StockOutDetail
+                {
+                    Id = 888888L, StockOutId = 777777L, IsDeleted = true,
+                    ProductId = 1, ProductName = "P1", Unit = "PCS", Quantity = 3m
+                }
+            }
+        };
+
+        var result = await ctl.Create(so);
+
+        Assert.IsType<OkObjectResult>(result);
+        var saved = db.StockOuts.Include(o => o.Details).Single();
+        Assert.NotEqual(999999L, saved.Id);
+        Assert.StartsWith("CK", saved.StockOutNo);
+        Assert.Equal(DocumentStatus.Pending, saved.Status);
+        Assert.False(saved.IsDeleted);
+        Assert.NotEqual(new DateTime(2000, 1, 1), saved.CreatedAt);
+        Assert.NotEqual(new DateTime(2000, 1, 1), saved.UpdatedAt);   // 客户端注入时间戳不参与持久化
+        Assert.Equal(3m, saved.TotalQuantity);
+
+        var detail = Assert.Single(saved.Details);
+        Assert.NotEqual(888888L, detail.Id);
+        Assert.Equal(saved.Id, detail.StockOutId);
+        Assert.False(detail.IsDeleted);
+        Assert.NotEqual(new DateTime(2000, 1, 1), detail.UpdatedAt);
+        Assert.Empty(db.StockMovements);
+    }
+
+    [Fact]
+    public async Task Create_伪造出库单号_被服务端权威单号覆盖()
+    {
+        using var db = TestDbFactory.Create();
+        var ctl = StockOutTestAuthorization.Create(db);
+
+        var result = await ctl.Create(new StockOut
+        {
+            StockOutNo = "HACK-CK-478",
+            StockOutDate = DateTime.Today,
+            CustomerId = 999999L,
+            WarehouseId = 999999L,
+            Details = new List<StockOutDetail>
+            {
+                new StockOutDetail { ProductId = 1, ProductName = "P1", Unit = "PCS", Quantity = 1m }
+            }
+        });
+
+        Assert.IsType<OkObjectResult>(result);
+        var saved = db.StockOuts.Single();
+        Assert.StartsWith("CK", saved.StockOutNo);
+        Assert.NotEqual("HACK-CK-478", saved.StockOutNo);
     }
 
     [Fact]
