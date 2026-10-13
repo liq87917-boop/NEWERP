@@ -40,13 +40,13 @@ public class QuotationCrudRegressionTests
     }
 
     [Fact]
-    public async Task Create_defaults_dates_and_zero_exchange_rate_without_trusting_client_values()
+    public async Task Create_defaults_dates_and_derives_amounts_without_trusting_client_values()
     {
         using var db = TestDbFactory.Create();
         var entity = Draft("QT-DEFAULTS", DocumentStatus.Pending);
         entity.QuotationDate = default;
         entity.ValidUntil = null;
-        entity.ExchangeRate = 0;
+        entity.ExchangeRate = 6m;
         entity.Details = new() { Line(5, 6, 1, 1) };
 
         await Controller(db).Create(entity);
@@ -55,7 +55,26 @@ public class QuotationCrudRegressionTests
         Assert.Equal(DateTime.Today, saved.QuotationDate.Date);
         Assert.Equal(DateTime.Today.AddDays(30), saved.ValidUntil);
         Assert.Equal(30m, saved.TotalAmount);
-        Assert.Equal(30m, saved.TotalAmountCny);
+        Assert.Equal(180m, saved.TotalAmountCny);          // 30 × 6（服务端按汇率派生，绝不采信客户端）
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-7.2)]
+    public async Task Create_rejects_nonpositive_exchange_rate_before_numbering_and_writes_nothing(decimal rate)
+    {
+        // ERP-470 适配：零 / 负汇率不再被静默替换为 1，而是在单号预约与任何写入之前受控拒绝。
+        using var db = TestDbFactory.Create();
+        var entity = Draft("QT-BAD-RATE", DocumentStatus.Pending);
+        entity.ExchangeRate = rate;
+        entity.Details = new() { Line(5, 6, 1, 1) };
+
+        var ex = await Assert.ThrowsAsync<BusinessException>(() => Controller(db).Create(entity));
+
+        Assert.Equal(ErrorCodes.InvalidParameter, ex.Code);
+        Assert.Equal(QuotationCommercialValidationRules.ExchangeRateText, ex.Message);
+        Assert.Empty(db.Quotations);
+        Assert.Empty(db.QuotationDetails);
     }
 
     [Fact]

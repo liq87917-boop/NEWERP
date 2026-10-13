@@ -8,6 +8,7 @@ using ERP.Domain.Enums;
 using ERP.Infrastructure.Data;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Routing;
+using Microsoft.EntityFrameworkCore;
 using System.Reflection;
 using Xunit;
 
@@ -499,6 +500,43 @@ public class QuotationGovernanceTests
         Assert.Contains("REPORTS['quotation-conversion']", salesPi);
         Assert.Contains("'quotation-conversion': { api: '/api/reports/quotation-conversion'", reports);
     }
+
+    // ==================== 5. ERP-470：非法历史条款不因校验被回填 / 修正 ====================
+
+    [Fact]
+    public async Task 历史报价单_商业条款非法_打印照原样_提交受控拒绝且不回填()
+    {
+        using var db = TestDbFactory.Create();
+        var ctl = NewController(db);
+        var quotation = NewQuotation("QT-LEGACY-BAD", "业务员 A", AsOf.AddDays(5), 1000m,
+            DocumentStatus.Pending);
+        db.Quotations.Add(quotation);
+        await db.SaveChangesAsync();
+        db.QuotationDetails.Add(new QuotationDetail
+        {
+            QuotationId = quotation.Id, QuotationNo = quotation.QuotationNo, SortNo = 1,
+            ProductCode = "P-LEGACY", ProductName = "历史商品", Unit = "PCS",
+            Quantity = -1m, UnitPrice = 2m, Amount = -2m
+        });
+        await db.SaveChangesAsync();
+
+        // 只读路径（打印 / 列表口径）绝不因新契约回填或修正历史快照。
+        var print = GetData<Quotation>(await ctl.GetPrint(quotation.Id));
+        Assert.Equal(1000m, print.TotalAmount);
+        Assert.Equal(-2m, print.Details.Single().Amount);
+
+        // 提交按唯一权威契约受控拒绝；历史行与状态一行未改。
+        var ex = await Assert.ThrowsAsync<BusinessException>(() => ctl.Submit(quotation.Id));
+        Assert.Equal(ErrorCodes.InvalidParameter, ex.Code);
+        Assert.Contains("数量必须大于 0", ex.Message);
+
+        var after = db.Quotations.AsNoTracking().Single();
+        Assert.Equal(DocumentStatus.Pending, after.Status);
+        Assert.Equal(1000m, after.TotalAmount);
+        Assert.Equal(7200m, after.TotalAmountCny);
+        Assert.Equal(-2m, db.QuotationDetails.AsNoTracking().Single().Amount);
+    }
+
 
     // ==================== 工厂与种子数据 ====================
 

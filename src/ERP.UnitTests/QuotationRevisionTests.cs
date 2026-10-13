@@ -475,6 +475,34 @@ public class QuotationRevisionTests
         return id;
     }
 
+
+    // ==================== 3.1 ERP-470：非法历史条款不得通过「创建版本」变成可提交草稿 ====================
+
+    [Fact]
+    public async Task CreateRevision_源版本存在非法历史数量_受控拒绝且零新版本()
+    {
+        using var db = TestDbFactory.Create();
+        var root = SeedSource(db);                       // 默认 Approved，两行有效明细
+        var line = db.QuotationDetails.First(d => d.QuotationId == root.Id && !d.IsDeleted);
+        line.Quantity = -1m;                             // 绕过写入契约直接改库，模拟非法历史数据
+        db.SaveChanges();
+        var before = db.Quotations.AsNoTracking().Single(q => q.Id == root.Id);
+        var beforeLines = SourceLines(db, root.Id);
+
+        var ex = await Assert.ThrowsAsync<BusinessException>(() => Controller(db).CreateRevision(root.Id));
+
+        Assert.Equal(ErrorCodes.InvalidParameter, ex.Code);
+        Assert.Contains("数量必须大于 0", ex.Message);
+
+        // 源版本一行未改，链内不产生任何新版本行（也不消耗任何单号）。
+        var after = db.Quotations.AsNoTracking().Single(q => q.Id == root.Id);
+        Assert.Equal(before.RevisionNumber, after.RevisionNumber);
+        Assert.Equal(before.TotalAmount, after.TotalAmount);
+        Assert.Equal(before.Status, after.Status);
+        Assert.Equal(beforeLines, SourceLines(db, root.Id));
+        Assert.Equal(0, db.Quotations.Count(q => q.RootQuotationId == root.Id));
+    }
+
     /// <summary>读取控制器返回的统一响应数据</summary>
     private static T GetData<T>(IActionResult action)
     {

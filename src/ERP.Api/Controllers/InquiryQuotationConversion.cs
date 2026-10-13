@@ -77,7 +77,7 @@ public static class InquiryQuotationConversion
             PortOfDestination = customer.DestinationPort,
             PaymentTerms = customer.PaymentTerms,
             Currency = inquiry.Currency,
-            ExchangeRate = inquiry.ExchangeRate > 0 ? inquiry.ExchangeRate : 1m,
+            ExchangeRate = inquiry.ExchangeRate,
             SalesmanId = inquiry.SalesmanId,
             SalesmanName = salesmanName,
             Remark = inquiry.Remark,
@@ -92,26 +92,20 @@ public static class InquiryQuotationConversion
                     Unit = d.Unit,
                     Quantity = d.Quantity,
                     UnitPrice = d.UnitPrice,
-                    Amount = Math.Round(d.Quantity * d.UnitPrice, 2),
                     Remark = d.Remark
                 }).ToList()
         };
-        Recalculate(quotation);
+        // ERP-470：币种 / 汇率 / 数量 / 单价与行金额、合计一律由唯一权威契约校验并按币种精度派生
+        // （绝不静默替换汇率、绝不采信来源行金额）：非法来源条款在单号预约与任何写入之前受控拒绝。
+        QuotationCommercialValidationRules.NormalizeDerivedDraft(quotation);
         return quotation;
     }
 
+    /// <summary>
+    /// 报价单草稿金额 / 合计的服务端权威复算（ERP-470：委托
+    /// <see cref="QuotationCommercialValidationRules"/> 的唯一权威契约 —— 先校验币种 / 汇率 / 逐行数量 · 单价，
+    /// 再按币种精度派生行金额 / 合计 / 折人民币）。校验失败即原样抛出，不改写任何字段。
+    /// </summary>
     public static void Recalculate(Quotation quotation)
-    {
-        decimal total = 0;
-        var line = 0;
-        foreach (var detail in quotation.Details)
-        {
-            detail.SortNo = ++line;
-            detail.Amount = Math.Round(detail.Quantity * detail.UnitPrice, 2);
-            total += detail.Amount;
-        }
-        quotation.TotalAmount = Math.Round(total, 2);
-        quotation.TotalAmountCny = Math.Round(quotation.TotalAmount *
-            (quotation.ExchangeRate > 0 ? quotation.ExchangeRate : 1m), 2);
-    }
+        => QuotationCommercialValidationRules.NormalizeDerivedDraft(quotation);
 }

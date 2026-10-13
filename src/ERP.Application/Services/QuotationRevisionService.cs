@@ -41,6 +41,10 @@ public static class QuotationRevisionService
         if (source.Status == DocumentStatus.Cancelled)
             throw BusinessException.RuleConflict("已作废的报价单不能创建新版本");
 
+        // ERP-470：复制前先按唯一权威契约复核源版本的有效明细商业条款（币种 / 汇率 / 数量 / 单价 / 金额精度）——
+        // 非法历史数量绝不通过「创建版本」变成可提交的草稿；校验失败即受控拒绝，源版本与版本号零变更。
+        QuotationCommercialValidationRules.ValidatePersisted(source);
+
         // 链根：源版本本身无根则源即根；否则取源记录的根单 Id / 根单号
         var rootId = source.RootQuotationId ?? source.Id;
         var rootNo = source.RootQuotationId is null
@@ -197,7 +201,7 @@ public static class QuotationRevisionService
                 .OrderBy(d => d.SortNo).ThenBy(d => d.Id)
                 .Select(CopyDetail).ToList()
         };
-        QuotationLineRules.Normalize(revision);     // 服务端权威复算：行号 / 金额 / 合计 / 折人民币
+        QuotationLineRules.Normalize(revision);     // ERP-470：唯一权威契约复算行号 / 金额 / 合计 / 折人民币
         return revision;
     }
 

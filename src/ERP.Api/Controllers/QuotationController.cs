@@ -285,6 +285,8 @@ public class QuotationController : DocumentControllerBase<Quotation>
             await SalesDocumentSourceLineageRules.EnsurePersistedSourceIntactAsync(Db,
                 SalesDocumentSourceKind.Inquiry, entity.InquiryId, entity.CustomerId, id);
             QuotationMutationRules.EnsureSubmitAllowed(GetStatus(entity));
+            // ERP-470：提交前按唯一权威契约复核已持久化商业条款（至少一行有效明细；非法历史数量原子拒绝、状态不变）。
+            QuotationCommercialValidationRules.ValidateOperational(entity);
             SetStatus(entity, DocumentStatus.Submitted);
             await Db.SaveChangesAsync();
             return Ok(ApiResponse<object>.Success(null, "提交成功"));
@@ -303,6 +305,8 @@ public class QuotationController : DocumentControllerBase<Quotation>
                 SalesDocumentSourceKind.Inquiry, entity.InquiryId, entity.CustomerId, id);
             QuotationMutationRules.EnsureApproveAllowed(GetStatus(entity),
                 QuotationMutationRules.ActiveDetailCount(entity));
+            // ERP-470：审核前按唯一权威契约复核已持久化商业条款（非法历史数量绝不成为可转 PI / 订单的实时履约）。
+            QuotationCommercialValidationRules.ValidateOperational(entity);
             SetStatus(entity, DocumentStatus.Approved);
             await Db.SaveChangesAsync();
             return Ok(ApiResponse<object>.Success(null, "报价单已审核"));
@@ -430,6 +434,10 @@ public class QuotationController : DocumentControllerBase<Quotation>
         var scope = await QuotationAuthorizationRules.EnsureAuthorizedAsync(Db, CurrentUserId());
         QuotationAuthorizationRules.EnsureProposedCustomerInScope(scope, entity.CustomerId);
 
+        // ERP-470：商业条款（币种 / 汇率 / 逐行数量 · 单价 / 软删除明细注入）在**单号预约与任何写入之前**校验；
+        // 允许显式支持的空草稿，但被提交的行必须是合法商业行 —— 非法请求零写入、零占号。
+        QuotationCommercialValidationRules.ValidateIncomingDraft(entity);
+
         var requestedInquiryId = SalesDocumentSourceLineageRules.NormalizeId(entity.InquiryId);
         var change = SalesDocumentSourceLineageRules.ResolveChange(
             SalesDocumentSourceKind.Inquiry, null, requestedInquiryId);
@@ -517,6 +525,10 @@ public class QuotationController : DocumentControllerBase<Quotation>
         QuotationAuthorizationRules.EnsureProposedCustomerInScope(scope, entity.CustomerId);
         QuotationMutationRules.EnsureNoDownstreamLink(await HasDownstreamLinkAsync(id));
         QuotationMutationRules.EnsureEditAllowed(snapshot.Status);
+
+        // ERP-470：商业条款在开事务 / 加锁 / 取号与任何字段改写之前校验（被拒绝的请求零写入、零占号；
+        // 表头 / 明细 / 来源单据 / 状态与既有单号预约均不变）。允许显式支持的空草稿。
+        QuotationCommercialValidationRules.ValidateIncomingDraft(entity);
 
         var requestedInquiryId = SalesDocumentSourceLineageRules.NormalizeId(entity.InquiryId);
         var pre = SalesDocumentSourceLineageRules.ResolveChange(
@@ -664,6 +676,10 @@ public class QuotationController : DocumentControllerBase<Quotation>
             QuotationMutationRules.EnsureProformaInvoiceConversionEligible(quotation, existingPi,
                 QuotationMutationRules.ActiveDetailCount(quotation));
 
+            // ERP-470：下游承诺前复核已持久化商业条款（币种 / 汇率 / 逐行数量 · 单价 / 金额精度）——
+            // 非法历史条款在单号预约与任何写入之前受控拒绝，绝不成为 PI 的实时履约。
+            QuotationCommercialValidationRules.ValidateOperational(quotation);
+
             var pi = await BuildProformaInvoiceDraftAsync(quotation);
             QuotationAuthorizationRules.EnsureTargetCustomerInScope(scope, pi.CustomerId);
             SalesOrderConversion.EnsureQuotationConversionScopeAuthorized(scope, quotation.CustomerId, pi.CustomerId);
@@ -802,6 +818,9 @@ public class QuotationController : DocumentControllerBase<Quotation>
             var existingPi = await QuotationMutationRules.FindDownstreamPiAsync(Db, id);
             QuotationMutationRules.EnsureSalesOrderConversionEligible(quotation, existingOrder, existingPi,
                 QuotationMutationRules.ActiveDetailCount(quotation));
+
+            // ERP-470：下游承诺前复核已持久化商业条款 —— 非法历史条款在单号预约与任何写入之前受控拒绝。
+            QuotationCommercialValidationRules.ValidateOperational(quotation);
 
             var order = await SalesOrderConversion.FromQuotationAsync(Db, quotation);
             QuotationAuthorizationRules.EnsureTargetCustomerInScope(scope, order.CustomerId);

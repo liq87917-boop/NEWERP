@@ -543,6 +543,38 @@ public class QuotationMutationTests
         Assert.Contains("QuotationMutationRules.DiscardTrackedChanges(Db)", source);
     }
 
+    /// <summary>
+    /// ERP-470：报价单商业条款只有一份权威契约，且新增 / 修改 / 询价转报价 / 版本复制 / 提交 / 审核 /
+    /// 转 PI / 转销售订单全部把它作为强制入口 —— 任何路径都不允许再出现第二套金额 / 汇率算法。
+    /// </summary>
+    [Fact]
+    public void 控制器接线_商业条款契约覆盖写入与承诺全部路径()
+    {
+        var controller = ReadSource("src", "ERP.Api", "Controllers", "QuotationController.cs");
+        Assert.Contains("QuotationCommercialValidationRules.ValidateIncomingDraft(entity)", controller);
+        Assert.Contains("QuotationCommercialValidationRules.ValidateOperational(entity)", controller);
+        Assert.Contains("QuotationCommercialValidationRules.ValidateOperational(quotation)", controller);
+        Assert.Contains("QuotationLineRules.Normalize(entity)", controller);
+
+        var lineRules = ReadSource("src", "ERP.Application", "Services", "QuotationLineRules.cs");
+        Assert.Contains("QuotationCommercialValidationRules.NormalizeIncomingDraft(e)", lineRules);
+        Assert.DoesNotContain("ExchangeRate == 0 ? 1", lineRules);      // 零汇率不再被静默替换为 1
+
+        var conversion = ReadSource("src", "ERP.Api", "Controllers", "InquiryQuotationConversion.cs");
+        Assert.Contains("QuotationCommercialValidationRules.NormalizeDerivedDraft(quotation)", conversion);
+        Assert.DoesNotContain("inquiry.ExchangeRate : 1m", conversion);
+
+        var revision = ReadSource("src", "ERP.Application", "Services", "QuotationRevisionService.cs");
+        Assert.Contains("QuotationCommercialValidationRules.ValidatePersisted(source)", revision);
+        Assert.Contains("QuotationLineRules.Normalize(revision)", revision);
+
+        var contract = ReadSource("src", "ERP.Application", "Services",
+            "QuotationCommercialValidationRules.cs");
+        Assert.Contains("CurrencyAmountRules.PrecisionOf", contract);   // 复用已批准的币种精度 / 取整契约
+        Assert.Contains("CurrencyAmountRules.RoundAmount", contract);
+    }
+
+
     // ==================== 脚手架（响应读取 / 源文件读取） ====================
 
     private static T GetData<T>(IActionResult action)
