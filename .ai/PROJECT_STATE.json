@@ -1,7 +1,7 @@
 {
   "schema_version": 2,
   "project": "NEWERP",
-  "updated_at": "2026-10-13T15:32:13.490192Z",
+  "updated_at": "2026-10-13T15:46:34.418303Z",
   "phase": "ready",
   "current_task": null,
   "queue": [
@@ -470,16 +470,20 @@
     "log": ".ai\\logs\\ERP-477-validation-1.log",
     "at": "2026-10-13T15:32:05.706750Z"
   },
-  "last_error": null,
+  "last_error": {
+    "task": "ERP-478",
+    "kind": "automatic_repair_pending",
+    "summary": "Path guard failed:\noutside allowed_paths: TestResults/erp478-class.trx\noutside allowed_paths: TestResults/erp478-full.trx\noutside allowed_paths: TestResults/erp478-sql.trx\noutside allowed_paths: TestResults/erp478.trx"
+  },
   "last_deepseek_fix": {
-    "task": "ERP-467",
+    "task": "ERP-478",
     "attempts": 3,
     "status": "retry_pending",
-    "at": "2026-10-13T11:58:58.960788Z"
+    "at": "2026-10-13T15:46:34.083715Z"
   },
   "git_sync": {
     "branch": "main",
-    "local_sha": "aca2e96",
+    "local_sha": "b9ee8ba",
     "status": "synced",
     "ahead": 0,
     "behind": 0,
@@ -493,5 +497,7 @@
   "runner": {
     "status": "stopped",
     "pid": null
-  }
+  },
+  "blocker": null,
+  "finish_reason": "deepseek_supervisor_recovery"
 }
